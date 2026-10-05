@@ -381,7 +381,9 @@ module cft_krnl #(
   localparam bit FEAT_AUGADD       = 1'b0;
   localparam bit FEAT_SCRATCH_STEP = 1'b0;
   localparam bit FEAT_LANE_FLAGS   = 1'b0;
-  localparam bit FEAT_FLAG_CONTROL = 1'b0;
+  // R24 is built (revision 8's round 2): QUIET, ENDQUIET and RAISE decode
+  // in cft_seq, and its mark reaches STATUS[6].
+  localparam bit FEAT_FLAG_CONTROL = 1'b1;
   logic [63:0] cfg_lflags;
   logic        cfg_lflags_en;
 
@@ -499,8 +501,7 @@ module cft_krnl #(
   // sequencer-only bit, exactly as the deposit overflow above is.
   assign run_rng   = mode_seq_q ? seq_err[4]    : 1'b0;
   // ...and the engine has no RAISE, so R24's mark is a sequencer-only
-  // bit too: STATUS[6]. cft_seq ties err[5] to zero until R24 is built,
-  // so at revision 8's seam every tile reads it as zero.
+  // bit too: STATUS[6], cft_seq's err[5] since R24 was built.
   assign run_mark  = mode_seq_q ? seq_err[5]    : 1'b0;
   assign refuse_any = refused_q | seq_refused_q;
 

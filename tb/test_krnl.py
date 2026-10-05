@@ -79,17 +79,17 @@ CSR_ARGS = {
 #
 # Revision 8's round 2 (parcel C) moves them item by item. Since the fetch's
 # hooks (R8S) the U50's store is 4,096 and its capacity 2^24: CAPS[23:20]
-# stays 15, min(15, 24), so CAPS is unchanged, and CAPS2[20:16] reads 24 -
-# 0x001807FB, where the plan's whole revision reads 0x00187FFB with
-# [14:11] set (docs/ROADMAP.md, "What a revision-8 U50 tile reads"). The
-# open-core configurations keep streaming off (SEQ_STREAM_D equal to the
-# store), so their words are the seam's.
+# stays 15, min(15, 24), so CAPS is unchanged, and CAPS2[20:16] reads 24.
+# Since R24, CAPS2[14] (flag control) on every build. So 0x001847FB at the
+# U50's, where the plan's whole revision reads 0x00187FFB with [14:11] set
+# (docs/ROADMAP.md, "What a revision-8 U50 tile reads"). The open-core
+# configurations keep streaming off (SEQ_STREAM_D equal to the store).
 VERSION_SEAM = 0x00000B00
 SEAM_WORDS = {
     # (SEQ_MAXD, SEQ_IMEM_D, SEQ_SCRATCH_D, SEQ_STREAM_D):
     #     (CAPS with [3:0] clear, CAPS2)
-    (1024, 4096, 2048, 1 << 24): (0x19FAFFF0, 0x001807FB),   # the U50's
-    (64, 16384, 256, 16384):     (0x19E6FFF0, 0x000007F8),   # open-core
+    (1024, 4096, 2048, 1 << 24): (0x19FAFFF0, 0x001847FB),   # the U50's
+    (64, 16384, 256, 16384):     (0x19E6FFF0, 0x000047F8),   # open-core
 }
 
 # ---- which rungs THIS build carries ------------------------------------

@@ -126,6 +126,9 @@ CAPS2_LANE_MASK = 1 << 10
 # CAPS2[13] - which no build sets at revision 8's seam, so it is refused.
 MODE_LANE_FLAGS = 1 << 24
 CAPS2_LANE_FLAGS = 1 << 13
+# CAPS2[14]: R24's flag control (QUIET, ENDQUIET, RAISE; STATUS[6]),
+# published since revision 8's round 2 built it.
+CAPS2_FLAG_CONTROL = 1 << 14
 
 ST_REFUSED = 1 << 3
 ST_DEPOSIT_OVF = 1 << 4
@@ -1400,6 +1403,74 @@ async def krnl_sequencer(dut):
     await run_op(dut, axil, ram, FP32, OP_MUL, 24, seed=903, bases=EW_BASES)
     dut._log.info(f"sequencer bench complete "
                   f"(loop run raised flags {flags_loop:#07b})")
+
+
+@cocotb.test()
+async def krnl_flag_control(dut):
+    """Revision 8's R24 through the kernel: CAPS2[14] published, a quiet
+    region silencing an instruction's flags and a raise's, a raise outside
+    it standing, and the mark - [7] of the raised word, every fourth lane -
+    reaching STATUS[6] through cft_krnl's eng_err[6] and the CSR, as the
+    model's status says (run_prog compares FLAGS and STATUS whole). Then a
+    run with no mark reads STATUS 0 (the mark is the run's, cleared at
+    start), and a refusal after a marked run reads exactly STATUS[3]: the
+    kernel masks the mark with the other run reports while a refusal is
+    the last start."""
+    cocotb.start_soon(Clock(dut.ap_clk, 4, units="ns").start())
+    axil = AxiLiteMaster(AxiLiteBus.from_prefix(dut, "s_axi_control"),
+                         dut.ap_clk, dut.ap_rst_n,
+                         reset_active_level=False)
+    ram_a = AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_a"),
+                       dut.ap_clk, dut.ap_rst_n,
+                       reset_active_level=False, size=2 ** 21)
+    AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_b"), dut.ap_clk,
+               dut.ap_rst_n, reset_active_level=False, size=2 ** 21,
+               mem=ram_a.mem)
+    AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_c"), dut.ap_clk,
+               dut.ap_rst_n, reset_active_level=False, size=2 ** 21,
+               mem=ram_a.mem)
+    AxiRamWrite(AxiWriteBus.from_prefix(dut, "m_axi_d"), dut.ap_clk,
+                dut.ap_rst_n, reset_active_level=False, size=2 ** 21,
+                mem=ram_a.mem)
+    ram = ram_a
+    dut.ap_rst_n.value = 0
+    await ClockCycles(dut.ap_clk, 8)
+    dut.ap_rst_n.value = 1
+    await ClockCycles(dut.ap_clk, 4)
+
+    assert (await axil.read_dword(CAPS2)) & CAPS2_FLAG_CONTROL, (
+        "this build's CAPS2[14] is clear, so flag control would be refused "
+        "by the host and decoded as HALT here")
+    n = 40
+    rng = random.Random(0x24)
+    a = gen_stream(FP32, n, rng)
+    b = gen_stream(FP32, n, rng)
+    # The raised words: [4:0] random, [7] every fourth lane, the rest
+    # random too (read by nothing).
+    words = [(rng.getrandbits(32) & ~0x80) | (0x80 if i % 4 == 0 else 0)
+             for i in range(n)]
+    loud = seq.alu(OP_MUL, 5, ra=0, rb=1)
+    prog = seq.Program(FP32, [
+        seq.quiet(), loud, seq.raise_(2), seq.endquiet(),
+        seq.alu(OP_ADD, 6, ra=0, rc=1), seq.raise_(2),
+        seq.deposit(5), seq.deposit(6), seq.halt()], max_deposits=2)
+    res = await run_prog(dut, axil, ram, prog, a, b, words,
+                         "fp32 quiet region, raises in and out, marks")
+    assert res.status & seq.STATUS_MARKED, "the model marked no lane"
+    # ...a run with no mark: the mark is the run's
+    unmarked = [w & ~0x80 for w in words]
+    res = await run_prog(dut, axil, ram, prog, a, b, unmarked,
+                         "fp32 the same with no mark")
+    assert not res.status & seq.STATUS_MARKED
+    # ...a marked run, then a refusal: exactly STATUS[3]
+    await run_prog(dut, axil, ram, prog, a, b, words,
+                   "fp32 marked, before a refusal")
+    flags_now = await axil.read_dword(FLAGS)
+    bad = bytearray(prog.to_bytes())
+    bad[0] ^= 0xFF                       # the magic
+    await run_refused(dut, axil, ram, bytes(bad), prog, a, b, words, n,
+                      PREC_CODE["fp32"], "a refusal after a marked run",
+                      flags_now)
 
 
 @cocotb.test()

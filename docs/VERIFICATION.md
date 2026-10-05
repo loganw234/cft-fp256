@@ -119,7 +119,13 @@ authority:
    streams, and the streaming cases hold a program of exactly the
    capacity, one past revision 7's, a loop pass costing what it costs
    resident, the stream across 4 KB and every 4-byte offset, the
-   quiesce and a fault on a fetch burst; the shared normalise and alignment ladders are held
+   quiesce and a fault on a fetch burst; since R24 (2026-10-05) flag
+   control is held there too - regions four deep with loops, a raise in
+   and out of them, the mark inside one, a skipped body holding one, the
+   tag across a region's edge with beats in flight, the depth reset at a
+   block, and the model's own R24 fuzz arm - and the mark through the
+   kernel to STATUS[6] (`test_krnl_seq.py`'s `krnl_flag_control`); the
+   shared normalise and alignment ladders are held
    against the private shifters they replaced; the reduction
    accumulator, the fault paths, the seed opcodes and the three trims -
    the quarter tile; the full beat with binary256 left out, the shape

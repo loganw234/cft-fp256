@@ -7049,3 +7049,238 @@ async def abort_on_a_fetch_fault(dut):
         await bench.faulted(fmt, prog, a, b, c, n, label, f, expect=expect,
                             fetch=True)
         await _clean_after(bench, fmt, label)
+
+
+# ======================================================================
+# revision 8's R24: flag control - a quiet region and a raise
+# ======================================================================
+#
+# docs/SEQUENCER.md, R24; docs/ROADMAP.md, "Revision 8", R24. QUIET and
+# ENDQUIET decode in S_DECODE and keep a depth; every beat carries the tag
+# it was admitted with, which gates its flags at the retire; RAISE acts at
+# F like SETACT: its active lanes' ra[4:0] into FLAGS unless tagged, ra[7]
+# the run's mark (err[5], STATUS[6]) tagged or not. Each case is held to
+# seq.py, FLAGS and err[5] included (Bench._compare), and asserts that the
+# model's own answer discriminates what the case is for.
+
+R24_INV, R24_DZ, R24_OVF, R24_UNF, R24_INX = 1, 2, 4, 8, 16
+R24_MARK = 0x80
+
+
+def _raise_words(fmt, n, seed, mark_every=0):
+    """A flag word a lane: random bits everywhere (so [6:5] and every bit
+    from 8 up, which nothing reads, are set as often as not), [4:0] random,
+    and [7] - the mark - every `mark_every`th lane only (0: none)."""
+    rng = random.Random(seed)
+    out = []
+    for i in range(n):
+        v = rng.getrandbits(fmt.width) & ~R24_MARK
+        if mark_every and i % mark_every == 0:
+            v |= R24_MARK
+        out.append(v)
+    return out
+
+
+def _inv_words(fmt, n, seed):
+    """Flag words that raise invalid alone, in every other lane: [0] set,
+    [4:1] and [7] clear, and [6:5] and every bit from 8 up random, which
+    nothing reads."""
+    rng = random.Random(seed)
+    return [(rng.getrandbits(fmt.width) & ~0x9F) | (1 if i % 2 == 0 else 0)
+            for i in range(n)]
+
+
+def _r24_edges(fmt, n):
+    """Streams whose three instructions in _r24_edge_prog each raise a flag
+    no other raises: r3 = r0 + r2 invalid (+inf + -inf, every third lane),
+    r4 = r0 * r1 overflow (max * 2), r5 = r1 * r2 underflow (min normal
+    times a third)."""
+    one = sf.one_bits(fmt)
+    two = sf.round_pack(fmt, 0, 2, 0)[0]
+    third = sf.round_pack(fmt, 0, 1, -2)[0] | 0x5          # ~0.25 + ulps
+    a, b, c = [], [], []
+    for i in range(n):
+        k = i % 3
+        if k == 0:
+            a.append(sf.inf_bits(fmt)); b.append(one)
+            c.append(sf.inf_bits(fmt, 1))
+        elif k == 1:
+            a.append(sf.max_normal_bits(fmt)); b.append(two)
+            c.append(sf.zero_bits(fmt))
+        else:
+            a.append(one); b.append(sf.min_normal_bits(fmt)); c.append(third)
+    return a, b, c
+
+
+def _r24_edge_prog(fmt):
+    """The tag across a region's edge, with beats in flight: r3's beats are
+    still in the pipe when QUIET is decoded, and r4's when ENDQUIET is, so
+    a tag taken at retirement - the region the machine is in when the
+    result lands - silences r3 and lets r4 through, where the beat's own
+    tag keeps r3 loud and r4 quiet."""
+    return seq.Program(fmt, [
+        seq.alu(sf.OP_ADD, 3, ra=0, rc=2),
+        seq.quiet(),
+        seq.alu(sf.OP_MUL, 4, ra=0, rb=1),
+        seq.endquiet(),
+        seq.alu(sf.OP_MUL, 5, ra=1, rb=2),
+        seq.deposit(3), seq.deposit(4), seq.deposit(5), seq.halt()],
+        max_deposits=3)
+
+
+@cocotb.test()
+async def flag_control_regions_and_raises(dut):
+    """R24 against the model, at fp32, fp64 and fp256 over two blocks:
+
+      * the tag across a region's edge with beats in flight (_r24_edge_prog)
+        - FLAGS must hold r3's invalid and r5's underflow and not r4's
+        overflow, which the model's answer is asserted to say;
+      * raises and arithmetic four regions deep with loops between them,
+        every flag silenced there, and a raise of invalid alone after the
+        last region closes: FLAGS is that invalid and nothing else, and
+        the mark - [7], every fifth lane, raised inside - stands;
+      * the mark inside a region alone: STATUS[6] with FLAGS clear;
+      * a skipped body holding a region and a raise: nothing of it acts,
+        and the depth after it is the depth before it.
+    """
+    bench = Bench(dut)
+    await bench.start()
+    for fmt in (FP32, FP64, FP256):
+        n = lanes_per_block(fmt) + 7
+        # -- the edge
+        a, b, c = _r24_edges(fmt, n)
+        want = await bench.program(fmt, _r24_edge_prog(fmt), a, b, c, n,
+                                   f"{fmt.name}: the tag across a region's "
+                                   f"edge")
+        assert want.flags & R24_INV and want.flags & R24_UNF, (
+            f"{fmt.name}: the edge case's model raises {want.flags:#07b} - "
+            f"r3's invalid and r5's underflow must both stand")
+        assert not want.flags & R24_OVF, (
+            f"{fmt.name}: the edge case's model raises overflow, which only "
+            f"the quiet r4 makes - the case cannot see a leaking region")
+        # -- raises in and out of four regions with loops between
+        rw = _raise_words(fmt, n, 7100 + fmt.width, mark_every=5)
+        inv = _inv_words(fmt, n, 7150 + fmt.width)
+        loud = seq.alu(sf.OP_MUL, 6, ra=0, rb=0)
+        deep = seq.Program(fmt, [
+            seq.quiet(),
+            seq.repeat(2),
+            seq.quiet(), seq.raise_(2),
+            seq.repeat(2),
+            seq.quiet(), loud, seq.raise_(2),
+            seq.quiet(), loud, seq.raise_(2), seq.endquiet(),
+            seq.endquiet(),
+            seq.endrep(),
+            seq.endquiet(),
+            seq.endrep(),
+            seq.endquiet(),
+            seq.raise_(1),
+            seq.deposit(6), seq.halt()], max_deposits=1)
+        a2 = operands(fmt, n, 7200 + fmt.width)
+        want = await bench.program(fmt, deep, a2, inv, rw, n,
+                                   f"{fmt.name}: raises in and out of four "
+                                   f"regions with loops")
+        assert want.flags == R24_INV and want.status & seq.STATUS_MARKED, (
+            f"{fmt.name}: the deep case's model reads FLAGS "
+            f"{want.flags:#07b}, status {want.status:#x} - invalid alone and "
+            f"the mark are what it holds")
+        # -- the mark inside a region alone
+        only_mark = seq.Program(fmt, [
+            seq.quiet(), seq.raise_(2), seq.endquiet(), seq.halt()],
+            max_deposits=1)
+        want = await bench.program(fmt, only_mark, a2, b, rw, n,
+                                   f"{fmt.name}: the mark inside a region")
+        assert want.status & seq.STATUS_MARKED and want.flags == 0, (
+            f"{fmt.name}: the model's region-only raise reads flags "
+            f"{want.flags:#07b} status {want.status:#x}")
+        # -- a skipped body holding a region: r1 is +0 in every lane, so
+        # SETACT drops them all and the REPEAT finds none active
+        zero = [sf.zero_bits(fmt)] * n
+        skipped = seq.Program(fmt, [
+            seq.setact(1),
+            seq.repeat(3), seq.quiet(), seq.raise_(2), loud, seq.endquiet(),
+            seq.endrep(),
+            seq.actall(),
+            seq.raise_(2), loud,
+            seq.deposit(6), seq.halt()], max_deposits=1)
+        nb = lanes_per_block(fmt) * 2     # ACTALL: block-aligned
+        want = await bench.program(fmt, skipped,
+                                   operands(fmt, nb, 7300), [zero[0]] * nb,
+                                   _raise_words(fmt, nb, 7301, 3), nb,
+                                   f"{fmt.name}: a skipped body holding a "
+                                   f"region")
+        assert want.flags, (f"{fmt.name}: the raise after the skipped body "
+                            f"raised nothing in the model")
+
+
+@cocotb.test()
+async def flag_control_depth_resets_at_each_block(dut):
+    """A stream that bypassed the loader halts inside a region, and the
+    next block must start outside it: the depth is reset at each block's
+    start. Only the second block's lanes raise invalid, before the region,
+    so a depth carried over would silence the run's only invalid. Built
+    unchecked - the loader refuses a HALT inside a region - and held to
+    the model, which has no blocks and keeps the raise."""
+    bench = Bench(dut)
+    await bench.start()
+    fmt = FP32
+    lpb = lanes_per_block(fmt)
+    n = 2 * lpb
+    one = sf.one_bits(fmt)
+    a = [one] * lpb + [sf.inf_bits(fmt)] * lpb
+    c = [one] * lpb + [sf.inf_bits(fmt, 1)] * lpb
+    prog = unchecked(fmt, [
+        seq.alu(sf.OP_ADD, 3, ra=0, rc=2),
+        seq.quiet(),
+        seq.alu(sf.OP_MUL, 4, ra=0, rb=1),
+        seq.deposit(3),
+        seq.halt()], max_deposits=1)
+    want = await bench.program(fmt, prog, a, [one] * n, c, n,
+                               "a halt inside a region, two blocks")
+    assert want.flags & R24_INV, (
+        f"the model's run raises {want.flags:#07b}: the second block's "
+        f"invalid is the case")
+
+
+@cocotb.test()
+async def flag_control_fuzz(dut):
+    """The model's own R24 arm (seq.random_program(flags=True)): quiet,
+    endquiet and raise drawn among the rest, regions nested properly with
+    loops, on every rung - whole state compared, FLAGS and the mark
+    included."""
+    bench = Bench(dut)
+    await bench.start()
+    made = marked = quiet = 0
+    for name, trials, sizes, cap in (("fp32", 10, [9, 33, 128], 600),
+                                     ("fp64", 6, [7, 31, 64], 500),
+                                     ("fp256", 4, [3, 16], 150)):
+        fmt = FORMATS[name]
+        rng = random.Random(20261005 ^ fmt.width)
+        k = attempts = 0
+        while k < trials and attempts < trials * 80:
+            attempts += 1
+            insns, consts = seq.random_program(fmt, rng, flags=True)
+            if worst_case_insns(insns) > cap:
+                continue
+            if has_actall(insns):
+                continue
+            try:
+                prog = seq.Program(fmt, insns, consts, rng.choice([1, 2, 4]))
+            except seq.ProgramError:
+                continue
+            if not any(seq.decode(w)["ctrl"] and seq.decode(w)["op"] in
+                       (seq.QUIET, seq.RAISE) for w in insns):
+                continue
+            n = rng.choice(sizes)
+            a, b, c = (seq.random_inputs(fmt, rng, n) for _ in range(3))
+            want = await bench.program(fmt, prog, a, b, c, n,
+                                       f"R24 fuzz {name} #{k} n={n}")
+            k += 1
+            marked += bool(want.status & seq.STATUS_MARKED)
+            quiet += any(seq.decode(w)["ctrl"] and
+                         seq.decode(w)["op"] == seq.QUIET for w in insns)
+        assert k == trials, f"{name}: {k} of {trials} R24 programs drawn"
+        made += k
+    dut._log.info(f"R24 fuzz: {made} programs, {quiet} with a region, "
+                  f"{marked} marked a lane")
+    assert quiet > made // 3, "hardly any fuzzed program opened a region"

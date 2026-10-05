@@ -3701,7 +3701,8 @@ lines, audited, and through a server. cftc: `python/tests/test_cftc.py`.
 On a card, where no tile publishes CAPS2[13] or [14], each says what it
 refuses by name and what it does not compare.
 
-**What a tile would need** (revision 8's RTL: believed, not built).
+**What a tile would need** (revision 8's RTL: believed, not built - and
+built as below on 2026-10-05; "Revision 8 in the tile", at the end).
 - Decode for codes 12 to 14, which the default arm takes as HALT today.
 - A quiet depth of three bits, counted by QUIET and ENDQUIET as they are
   decoded, in program order, as REPEAT and ENDREP keep the loop stack.
@@ -3800,3 +3801,20 @@ from such a tree.
   every program there streams, at those three latencies; and through the
   kernel, `tb/test_krnl_seq.py`'s image of 32,769 instructions and the
   capacity plus one refused at the header.
+- **R24, flag control** (built 2026-10-05). QUIET and ENDQUIET decode in
+  `S_DECODE`, as REPEAT and ENDREP do, and keep a three-bit depth, reset
+  at each block's start (it saturates both ways, so a stream that bypassed
+  the loader still terminates). Every instruction is tagged at admission
+  with whether a region was open, and the tag rides its beats to F, where
+  it joins `al_fen`, the flag enable that gates FLAGS at the retire - so a
+  region's edge never moves a beat already admitted. RAISE goes through
+  the issue pipe as SETACT does, its `ra` read from the bank under R14's
+  landed rule, and acts at F: its active lanes' `ra[4:0]` into FLAGS
+  unless tagged, in the same write as a landing result's flags, and
+  `ra[7]` into the mark, tagged or not - `err[5]`, STATUS[6] through
+  `cft_krnl` and `cft_csr`. CAPS2[14] is published on every build. A
+  bracket costs a decode and a refetch, as REPEAT does, and a raise a
+  step a live beat, as SETACT does (`make seqcycles`' two R24 rows).
+  Held against `seq.py` in `tb/test_seq_core.py`'s three `flag_control_`
+  cases and through the kernel in `tb/test_krnl_seq.py`'s
+  `krnl_flag_control`.

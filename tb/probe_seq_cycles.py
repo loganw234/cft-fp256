@@ -81,6 +81,18 @@ def control_programs():
         pair += [seq.ldl(3 + k, k), seq.alu(sf.OP_IAND, 13 + k, 3 + k, 3 + k)]
     yield ("ldl, iand of it x 10", pair + [seq.deposit(13), seq.halt()], 1)
     yield ("deposit x 16", [seq.deposit(0)] * 16 + [seq.halt()], 16)
+    # Revision 8's R24: a quiet region's two brackets walk no beats and
+    # cost what REPEAT does, a decode and a refetch each; a raise walks the
+    # block's live beats as SETACT does, reading its word at F. Against
+    # "iand x 20 (the reference)" above: the first row is ten IANDs and
+    # twenty brackets, the second twenty raises.
+    quiet_pair = []
+    for k in range(10):
+        quiet_pair += [seq.quiet(), iand, seq.endquiet()]
+    yield ("quiet, iand, endquiet x 10 (R24)",
+           quiet_pair + [seq.deposit(3), seq.halt()], 1)
+    yield ("raise x 20 (R24)", [seq.raise_(0)] * 20
+           + [seq.deposit(0), seq.halt()], 1)
 
 
 @cocotb.test()
