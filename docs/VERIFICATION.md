@@ -142,7 +142,14 @@ authority:
    the run's lanes at every format, fp256's half beats at both offsets,
    a masked lane's byte left the caller's, a lane SETACT dropped still
    written, nothing written without MODE[24], and every R24 fuzz
-   program asking for it (`test_seq_core.py`'s two `lane_flags_` cases)
+   program asking for it (`test_seq_core.py`'s two `lane_flags_` cases),
+   and, adopted from verifier-VC34, [5], [6] and [7] by position with
+   STX's and LDX's reports apart and inside a region, the strict test's
+   boundaries lane by lane, the bytes of lanes SETACT drops in flight and
+   R24's depth saturating (`lane_flag_sources_by_position`,
+   `lane_flags_strict_index_boundaries`,
+   `lane_flags_of_lanes_dropped_in_flight`,
+   `flag_control_depth_saturates_and_resets`)
    - and through the kernel, with the register at 0xB0 the address the
    block lands at (`test_krnl_seq.py`'s `krnl_lane_flags`); since R21's
    decode (2026-10-05) augadd and augerr are held against `seq.py` at

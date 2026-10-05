@@ -8381,3 +8381,352 @@ async def abort_waits_for_a_late_b(dut):
     mon.stop()
     dut._log.info(f"late B: {runs} runs, {in_air} with a write burst open or "
                   f"committed at the fault")
+
+
+# ======================================================================
+# R23 and R24 by verifier-VC34's cases (follow-up B of the step-6 round)
+# ======================================================================
+#
+# verifier-VC34 checked items 3 and 4 (R24 and R23, at 3eb9c16) and
+# found four places the cases above could not fail, though the RTL is
+# right at each: its plants m5 ([6] silenced inside a region), m6 ([6]
+# from STX only), m10 (the retire's byte under the live row, not the
+# fired row) and m15 (the depth wrapping instead of saturating) were
+# green in every case of item 3's and item 4's. Its cases close all four
+# and are adopted here as it wrote them (its scratch, vc34/), renamed to
+# this bench's names; its helpers keep their own.
+
+VC_INV, VC_DZ, VC_OVF, VC_UNF, VC_INX = 1, 2, 4, 8, 16
+
+
+def _vc_words(fmt, n, seed, mark_every=0, zero_every=0):
+    """A word a lane: random bits everywhere, bit 7 set on about one lane in
+    `mark_every` (0: never), a plain zero on about one in `zero_every`."""
+    rng = random.Random(seed)
+    out = []
+    for i in range(n):
+        v = rng.getrandbits(fmt.width) & ~0x80
+        if mark_every and rng.random() * mark_every < 1.0:
+            v |= 0x80
+        if zero_every and rng.random() * zero_every < 1.0:
+            v = 0
+        out.append(v)
+    return out
+
+
+def _vc_drain_words(fmt, n):
+    """Lane i's word has a low byte no other lane within 64 shares: the byte
+    RAISE hands the lane is a bijection of (i * 13 + 5) mod 64 onto the six
+    bits it reads ([4:0] and [7]), and the bits RAISE ignores ([6:5], and
+    everything from 8 up) are random."""
+    rng = random.Random(0xD2A1 + n)
+    out = []
+    for i in range(n):
+        v6 = (i * 13 + 5) % 64
+        low = (v6 & 0x1F) | ((v6 >> 5) << 7) | (rng.getrandbits(2) << 5)
+        out.append((rng.getrandbits(fmt.width) & ~0xFF) | low)
+    return out
+
+
+def _vc_need(want, label, bits=(0, 1, 2, 3, 4, 5, 6, 7), n=None):
+    """The model's lane bytes must show each of `bits` on some lane, and
+    not on all of them where n is large enough to say."""
+    lf = want.lane_flags
+    for bit in bits:
+        ones = sum(1 for v in lf if v >> bit & 1)
+        assert ones > 0, f"{label}: no lane's byte has bit {bit} in the model"
+        if n is not None and n >= 8:
+            assert ones < len(lf), (f"{label}: every lane's byte has bit "
+                                    f"{bit} in the model")
+
+
+async def _vc_run(bench, fmt, insns, a, b, c, n, label, *, consts=(),
+                  max_deposits=1, flags=0, keep=None, unchecked_prog=False,
+                  image_insns=None):
+    """One run of `insns` over n lanes with the lane-flag block asked for,
+    held to the model. `image_insns`: stage THIS image (built unchecked)
+    while the model runs `insns` - for the programs the loader refuses."""
+    if unchecked_prog:
+        prog = unchecked(fmt, insns, consts, max_deposits)
+        prog.flags = flags
+    else:
+        prog = seq.Program(fmt, insns, consts, max_deposits, flags=flags)
+    image = None
+    if image_insns is not None:
+        im = unchecked(fmt, image_insns, consts, max_deposits)
+        im.flags = flags
+        image = im.to_bytes()
+    if keep is not None:
+        assert image is None
+        return await bench.masked(fmt, prog, a, b, c, n, keep, label,
+                                  lane_flags=True)
+    return await bench.program(fmt, prog, a, b, c, n, label, image=image,
+                               lane_flags=True)
+
+
+
+def _vc_src_streams(fmt, n, seed):
+    """r0 (LDX's index), r1 (STX's index and SETACT's operand) and r2
+    (flag words) by a lane's class, class = (5 i + 3) mod 8:
+
+        class   r1 (STX, SETACT)   r0 (LDX)
+          0       +0 (dropped)       big
+          1       3                  big
+          2       big                5
+          3       big                big
+          4       3                  5
+          5       +0 (dropped)       5
+          6       big                +0
+          7       +0 (dropped)       big
+
+    "big" is an index at or past any depth; +0 and the small ones are in
+    range. A lane SETACT drops reaches neither the second deposit nor the
+    LDX."""
+    big = (1 << (fmt.width - 2)) | 7
+    tab = {0: (0, big), 1: (3, big), 2: (big, 5), 3: (big, big), 4: (3, 5),
+           5: (0, 5), 6: (big, 0), 7: (0, big)}
+    r0, r1 = [], []
+    for i in range(n):
+        v1, v0 = tab[(5 * i + 3 + seed) % 8]
+        r1.append(v1)
+        r0.append(v0)
+    r2 = _vc_words(fmt, n, 600 + seed, mark_every=6)
+    return r0, r1, r2
+
+
+@cocotb.test()
+async def lane_flag_sources_by_position(dut):
+    """[5] from the second deposit (past max_deposits 1) of the lanes
+    SETACT left active, [6] from STX's and from LDX's strict suppression
+    apart (a lane SETACT dropped before the LDX does not report it), [7]
+    and [4:0] from RAISE - at every format over a full block and a ragged
+    one, then the same inside a quiet region (a report is not an IEEE flag:
+    [5] and [6] and STATUS[4], STATUS[5] stand, [4:0] go, [7] stands)."""
+    bench = Bench(dut)
+    await bench.start()
+    strict = seq.FLAG_SCRATCH_STRICT
+    for fmt in (FP32, FP64, FP128, FP256):
+        lpb = lanes_per_block(fmt)
+        for n in (lpb, lpb + 7):
+            for seed in (0, 3):
+                r0, r1, r2 = _vc_src_streams(fmt, n, seed)
+                outside = [seq.stx(0, 1), seq.deposit(2), seq.setact(1),
+                           seq.deposit(2), seq.ldx(5, 0), seq.raise_(2),
+                           seq.halt()]
+                label = f"{fmt.name} n={n} s={seed}: sources outside a region"
+                want = await _vc_run(bench, fmt, outside, r0, r1, r2, n,
+                                     label, flags=strict)
+                _vc_need(want, label, bits=(5, 6, 7), n=n)
+                # the LDX's report is a lane's own: a lane with r1 in range
+                # and r0 big, still active at the LDX
+                assert any((want.lane_flags[i] >> 6) & 1 for i in range(n))
+                inside = [seq.quiet(), seq.stx(0, 1), seq.deposit(2),
+                          seq.setact(1), seq.deposit(2), seq.ldx(5, 0),
+                          seq.raise_(2), seq.endquiet(), seq.halt()]
+                label = f"{fmt.name} n={n} s={seed}: sources inside a region"
+                want = await _vc_run(bench, fmt, inside, r0, r1, r2, n, label,
+                                     flags=strict)
+                assert want.flags == 0, (
+                    f"{label}: the model's FLAGS {want.flags:#07b}")
+                assert want.status & seq.STATUS_DEPOSIT_OVERFLOW
+                assert want.status & seq.STATUS_SCRATCH_RANGE
+                assert want.status & seq.STATUS_MARKED
+                _vc_need(want, label, bits=(5, 6, 7), n=n)
+                # LDX alone, then STX alone: the two reports apart
+                for tag, insns in (
+                        ("ldx alone", [seq.ldx(5, 0), seq.halt()]),
+                        ("stx alone", [seq.stx(2, 1), seq.halt()]),
+                        ("ldx after a setact", [seq.setact(1),
+                                                seq.ldx(5, 0), seq.halt()])):
+                    label = f"{fmt.name} n={n} s={seed}: {tag}"
+                    want = await _vc_run(bench, fmt, insns, r0, r1, r2, n,
+                                         label, flags=strict)
+                    _vc_need(want, label, bits=(6,), n=n)
+        # the same under a mask
+        n = lpb + 7
+        r0, r1, r2 = _vc_src_streams(fmt, n, 1)
+        keep = _keep(n, 2)
+        await _vc_run(bench, fmt, outside, r0, r1, r2, n,
+                      f"{fmt.name} n={n} masked: sources", flags=strict,
+                      keep=keep)
+
+
+@cocotb.test()
+async def flag_control_depth_saturates_and_resets(dut):
+    """The loader refuses a fifth nested region and an ENDQUIET with none
+    open, so these images are built unchecked: the depth is three bits and
+    SATURATES (at 7 and at 0), so QUIET x9 / ENDQUIET x8 leaves it at 0
+    where a counter that did not saturate would leave 1, and ENDQUIET at
+    depth 0 does not wrap to 7. Each RTL image is held to the balanced
+    program the saturating count makes it equal to. Then a block that ends
+    with the depth AT 7 must not carry it into the next block."""
+    bench = Bench(dut)
+    await bench.start()
+    fmt = FP32
+    lpb = lanes_per_block(fmt)
+    n = 2 * lpb
+    one = sf.one_bits(fmt)
+    inf, ninf = sf.inf_bits(fmt), sf.inf_bits(fmt, 1)
+    a, b, c = [inf] * n, [one] * n, [ninf] * n
+    loud = seq.alu(sf.OP_ADD, 3, ra=0, rc=2)         # inf + -inf: invalid
+    dep = seq.deposit(3)
+    Q, E = seq.quiet(), seq.endquiet()
+
+    async def case(rtl, model, label, want_inv):
+        r = await _vc_run(bench, fmt, model, a, b, c, n, label,
+                          unchecked_prog=True, image_insns=rtl)
+        assert bool(r.flags & VC_INV) == want_inv, (
+            f"{label}: the model's own answer says FLAGS {r.flags:#07b}")
+        return r
+
+    # QUIET x9, ENDQUIET x8, loud: the depth is 7 after nine, 0 after
+    # eight more (seven take it down, the eighth saturates): LOUD.
+    await case([Q] * 9 + [E] * 8 + [loud, dep, seq.halt()],
+               [loud, dep, seq.halt()],
+               "QUIET x9, ENDQUIET x8, then a loud op: depth saturated at 7, "
+               "so it is loud", True)
+    # QUIET x8, ENDQUIET x7: 7 after eight (the eighth saturates), 0 after
+    # seven more: LOUD (a counter that did not saturate says 1: quiet).
+    await case([Q] * 8 + [E] * 7 + [loud, dep, seq.halt()],
+               [loud, dep, seq.halt()],
+               "QUIET x8, ENDQUIET x7, then a loud op", True)
+    # QUIET x7, ENDQUIET x6: depth 1: QUIET.
+    await case([Q] * 7 + [E] * 6 + [loud, dep, seq.halt()],
+               [Q, loud, dep, seq.halt()],
+               "QUIET x7, ENDQUIET x6, then a loud op: depth 1, quiet",
+               False)
+    # ENDQUIET at depth 0 saturates at 0 (it does not wrap to 7), then
+    # QUIET makes it 1: QUIET. A wrap would make QUIET take it to 0: loud.
+    await case([E, Q, loud, dep, seq.halt()],
+               [Q, loud, dep, seq.halt()],
+               "ENDQUIET at depth 0, QUIET, then a loud op: depth 1, quiet",
+               False)
+    await case([E, E, E, Q, loud, dep, seq.halt()],
+               [Q, loud, dep, seq.halt()],
+               "ENDQUIET x3 at depth 0, QUIET, then a loud op", False)
+    # a bypassing stream: depth 7, then a raise of invalid IS silenced
+    r2 = _vc_words(fmt, n, 91, mark_every=4)
+    await _vc_run(bench, fmt, [Q] * 9 + [seq.raise_(2), dep, seq.halt()],
+                  a, b, r2, n, "QUIET x9 then a raise (silenced; the mark "
+                  "stands)", unchecked_prog=True)
+
+    # the reset at a block's start, from depth 7 and not only from 1: only
+    # the SECOND block's lanes raise invalid, ahead of the QUIETs, so a
+    # depth carried over silences the run's only invalid
+    a2 = [one] * lpb + [inf] * lpb
+    c2 = [one] * lpb + [ninf] * lpb
+    r = await _vc_run(bench, fmt, [loud, dep] + [Q] * 9 + [seq.halt()],
+                      a2, b, c2, n, "a halt at depth 7, two blocks",
+                      unchecked_prog=True)
+    assert r.flags & VC_INV
+    # ... and the same with a loop's worth of regions open at the HALT
+    r = await _vc_run(bench, fmt, [loud, dep, Q, Q, Q, Q, seq.halt()],
+                      a2, b, c2, n, "a halt at depth 4, two blocks",
+                      unchecked_prog=True)
+    assert r.flags & VC_INV
+    # ... and a RAISE ahead of a depth-7 halt, lanes of block 1 only
+    w2 = [0] * lpb + _vc_words(fmt, lpb, 5, mark_every=2)
+    r = await _vc_run(bench, fmt, [seq.raise_(2), dep] + [Q] * 9 +
+                      [seq.halt()], a, b, w2, n,
+                      "a raise, then depth 7, then a halt, two blocks",
+                      unchecked_prog=True)
+    assert r.flags or r.status
+
+
+@cocotb.test()
+async def lane_flags_strict_index_boundaries(dut):
+    """[6] is the lane's own strict suppression: an index of depth-1 is in,
+    depth and depth+1 out, a low word past the depth with every other word
+    zero, a high word alone (the low word in range), the top bit, a lane
+    whose index is +0 - each by position in a full block and a ragged one,
+    STX and LDX apart and together, at every format."""
+    bench = Bench(dut)
+    await bench.start()
+    strict = seq.FLAG_SCRATCH_STRICT
+    D = SCRATCH_D
+    for fmt in (FP32, FP64, FP128, FP256):
+        lpb = lanes_per_block(fmt)
+        w = fmt.width
+        pool = [0, 1, D - 1, D, D + 1, 2 * D, 1 << 20, 1 << 31,
+                (1 << (w - 1)), (1 << (w - 2)) | 7, (1 << (w // 2)) | 5,
+                (1 << 32) if w > 32 else 1 << 20, ((1 << w) - 1)]
+        for n in (lpb, lpb + 5):
+            idx = [pool[(i * 7 + 3) % len(pool)] & ((1 << w) - 1)
+                   for i in range(n)]
+            idx2 = [pool[(i * 5 + 1) % len(pool)] & ((1 << w) - 1)
+                    for i in range(n)]
+            zero = [0] * n
+            r2 = _vc_words(fmt, n, 31, mark_every=0)
+            for name, insns in (
+                    ("stx alone", [seq.stx(2, 1)]),
+                    ("ldx alone", [seq.ldx(5, 1)]),
+                    ("stx on r1, ldx on r0", [seq.stx(2, 1), seq.ldx(5, 0)]),
+                    ("ldx after a setact on r0",
+                     [seq.setact(0), seq.ldx(5, 1)])):
+                label = f"{fmt.name} n={n}: strict {name}"
+                want = await _vc_run(bench, fmt, insns, idx2, idx, r2, n,
+                                     label, flags=strict)
+                _vc_need(want, label, bits=(6,))
+                # the lane's own report: out of range iff its index is
+                # at or past the depth
+                for i in range(n):
+                    if name == "stx alone":
+                        oor = idx[i] >= D
+                        assert bool(want.lane_flags[i] & 0x40) == oor, (
+                            label, i, hex(idx[i]))
+
+
+@cocotb.test()
+async def lane_flags_of_lanes_dropped_in_flight(dut):
+    """R23's [4:0] are taken at the retire under the row the beat FIRED with
+    (SEQUENCER.md): a lane SETACT drops right behind an arithmetic
+    instruction keeps what that instruction raised while the lane was
+    active. It needs a block of one or two beats - the SETACT then narrows
+    `active` sixteen cycles before the result lands; at sixteen beats the
+    two meet in the same cycle - so n is a beat or two at every format.
+    Arithmetic, then SETACT, then a deposit (so the result is consumed) or
+    nothing; k independent fillers between; and the instruction behind the
+    SETACT a second arithmetic one."""
+    bench = Bench(dut)
+    await bench.start()
+    A = seq.alu
+    for fmt in (FP32, FP64, FP128, FP256):
+        lpb_beat = 256 // fmt.width
+        inf, zero, one = sf.inf_bits(fmt), sf.zero_bits(fmt), sf.one_bits(fmt)
+        two = sf.round_pack(fmt, 0, 2, 0)[0]
+        mx = sf.max_normal_bits(fmt)
+        for n in sorted({1, 2, lpb_beat, lpb_beat + 1, 2 * lpb_beat}):
+            # r0*r1: invalid (inf * 0) in lanes i % 3 == 0, overflow (max * 2)
+            # in i % 3 == 1, exact (1 * 1) in the rest
+            a = [inf if i % 3 == 0 else mx if i % 3 == 1 else one
+                 for i in range(n)]
+            b = [zero if i % 3 == 0 else two if i % 3 == 1 else one
+                 for i in range(n)]
+            # r2: zero (SETACT drops the lane) in even lanes
+            r2 = [zero if i % 2 == 0 else one for i in range(n)]
+            for k in range(4):
+                fill = [A(sf.OP_IAND, 7 + j, ra=2, rb=2) for j in range(k)]
+                for tail_name, tail in (("", []), (" + deposit",
+                                                   [seq.deposit(3)]),
+                                        (" + a second op",
+                                         [A(sf.OP_MUL, 4, ra=0, rb=0)])):
+                    insns = ([A(sf.OP_MUL, 3, ra=0, rb=1)] + fill +
+                             [seq.setact(2)] + tail)
+                    label = (f"{fmt.name} n={n} k={k}: mul, {k} fillers, "
+                             f"setact{tail_name}")
+                    want = await _vc_run(bench, fmt, insns, a, b, r2, n,
+                                         label)
+                    dropped = [i for i in range(n) if i % 2 == 0]
+                    if n >= 3:
+                        assert any(want.lane_flags[i] & 0x1F for i in dropped
+                                   if i % 3 != 2), (
+                            f"{label}: the model gives no dropped lane its "
+                            f"arithmetic flags - the case cannot see them "
+                            f"lost")
+            # the same through a region (the tag, with the narrowing)
+            insns = [seq.quiet(), A(sf.OP_MUL, 3, ra=0, rb=1), seq.endquiet(),
+                     A(sf.OP_MUL, 4, ra=0, rb=1), seq.setact(2)]
+            await _vc_run(bench, fmt, insns, a, b, r2, n,
+                          f"{fmt.name} n={n}: quiet mul, loud mul, setact")
+
+

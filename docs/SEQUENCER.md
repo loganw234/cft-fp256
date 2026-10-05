@@ -3762,7 +3762,8 @@ refuses by name and what it does not compare.
 
 **What a tile would need** (revision 8's RTL: believed, not built - and
 built as below on 2026-10-05; "Revision 8 in the tile", at the end).
-- Decode for codes 12 to 14, which the default arm takes as HALT today.
+- Decode for codes 12 to 14, which the default arm took as HALT before
+  R24 was built.
 - A quiet depth of three bits, counted by QUIET and ENDQUIET as they are
   decoded, in program order, as REPEAT and ENDREP keep the loop stack.
   Neither walks a beat (R18).
@@ -3870,8 +3871,12 @@ from such a tree.
   capacity plus one refused at the header.
 - **R24, flag control** (built 2026-10-05). QUIET and ENDQUIET decode in
   `S_DECODE`, as REPEAT and ENDREP do, and keep a three-bit depth, reset
-  at each block's start (it saturates both ways, so a stream that bypassed
-  the loader still terminates). Every instruction is tagged at admission
+  at each block's start. It saturates both ways: the loader nests regions
+  four deep and balances them, and a stream that bypassed it - a fifth
+  QUIET past seven, an ENDQUIET with none open - keeps a defined depth
+  rather than wrapping a closed region open or an open one closed. The
+  depth gates only flags, so nothing about it bears on whether a run
+  ends. Every instruction is tagged at admission
   with whether a region was open, and the tag rides its beats to F, where
   it joins `al_fen`, the flag enable that gates FLAGS at the retire - so a
   region's edge never moves a beat already admitted. RAISE goes through
@@ -3883,8 +3888,9 @@ from such a tree.
   bracket costs a decode and a refetch, as REPEAT does, and a raise a
   step a live beat, as SETACT does (`make seqcycles`' two R24 rows).
   Held against `seq.py` in `tb/test_seq_core.py`'s three `flag_control_`
-  cases and through the kernel in `tb/test_krnl_seq.py`'s
-  `krnl_flag_control`.
+  cases, with verifier-VC34's `flag_control_depth_saturates_and_resets`
+  (the depth saturating at 7 and at 0, and reset from 7 at a block), and
+  through the kernel in `tb/test_krnl_seq.py`'s `krnl_flag_control`.
 - **R23, per-lane flags** (built 2026-10-05). A byte for each of the
   block's 128 lane slots, 1,024 flops at every format, addressed as
   `active` is. [4:0] are taken at the retire: each position's five flags
@@ -3907,9 +3913,14 @@ from such a tree.
   CAPS2[13] is published on every build, and the CSR lets MODE[24]
   through. Held against `seq.py`'s `Result.lane_flags`, byte for byte
   and with the three identities read off the tile's own bytes, in
-  `tb/test_seq_core.py`'s two `lane_flags_` cases and the R24 fuzz, and
-  through the kernel in `tb/test_krnl_seq.py`'s `krnl_lane_flags`,
-  where the register at 0xB0 is the address the block lands at.
+  `tb/test_seq_core.py`'s two `lane_flags_` cases and the R24 fuzz, with
+  verifier-VC34's three - [5], [6] and [7] by position with STX's and
+  LDX's reports apart and inside a region, the strict test's boundaries
+  lane by lane, and the bytes of lanes SETACT drops while their beats are
+  in flight - and through the kernel in `tb/test_krnl_seq.py`'s
+  `krnl_lane_flags`, where the register at 0xB0 is the address the block
+  lands at, and where a run without MODE[24] has LFLAGS_PTR aimed at the
+  same region, so a tile that ignored MODE[24] would be seen there.
 - **R21's decode** (built 2026-10-05, after round 1's lanes were merged
   in). AUGADD and AUGERR, control codes 10 and 11, go through the issue
   pipe as ALU instructions do: piped writers of `rd`, reading `ra` on

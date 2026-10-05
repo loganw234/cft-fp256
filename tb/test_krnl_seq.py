@@ -314,14 +314,18 @@ async def stage_and_start(axil, ram, image, prog, va, vb, vc, n,
     else:
         await write64(axil, MASKPTR, 0xDEAD_8000)
     # R23's block (revision 8): MODE[24] and LFLAGS_PTR at 0xB0, the region
-    # poisoned so a byte the tile did not write reads as the caller's; and
-    # the pointer POISONED where no block is asked for, as the tables' are.
+    # poisoned so a byte the tile did not write reads as the caller's. Where
+    # no block is asked for, the pointer still aims at LF_BASE, so that a
+    # tile ignoring MODE[24] writes where krnl_lane_flags looks - aimed at
+    # 0xDEAD_9000, as it was, those bursts landed in the AXI RAM unseen and
+    # the "nothing written without MODE[24]" leg could not fail
+    # (verifier-VC34's plant k2, cfg_lflags_en tied high).
     if lane_flags:
         ram.write(LF_BASE, bytes([POISON]) * (n + GUARD))
         await write64(axil, LFLAGSPTR, LF_BASE)
         idx_mode |= MODE_LANE_FLAGS
     else:
-        await write64(axil, LFLAGSPTR, 0xDEAD_9000)
+        await write64(axil, LFLAGSPTR, LF_BASE)
     await axil.write_dword(MODE, op_noise | (prec_code << 8) | MODE_SEQ |
                            idx_mode | mode_extra)
     await write64(axil, NREG, n)

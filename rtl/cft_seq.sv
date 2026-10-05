@@ -76,7 +76,12 @@
 //     is not a lane the caller has); then the instruction stream runs to
 //     HALT under seq.py's semantics - ALU results, deposits, SCRATCH
 //     STORES, SCRATCH LOADS and FLAG contributions all masked
-//     per-lane by active (P3); REPEAT/ENDREP
+//     per-lane by active (P3); since revision 8, QUIET and ENDQUIET
+//     bracket regions whose flags reach neither FLAGS nor a lane's R23
+//     byte, RAISE ORs a register's [4:0] into both (unless in a region)
+//     and marks the lane with its [7], AUGADD and AUGERR (where EN_AUGADD)
+//     compute augmentedAddition's two halves, and a stepped STX or LDX
+//     moves its index after the access (R21 to R24); REPEAT/ENDREP
 //     from a 4-deep loop stack; SETACT narrows on (magnitude != 0, so
 //     -0 deactivates); ACTALL reactivates every lane THE CALLER HAS
 //     (global index < cfg_n) - the padding lanes the model never sees
@@ -109,7 +114,11 @@
 //     across the whole run; err[2:0] carry the engine's three bus
 //     faults; err[3] is DEPOSIT OVERFLOW (a lane pushed past
 //     max_deposits: the excess dropped, what fit is correct) - the
-//     kernel maps it to STATUS[4], STATUS[3] being the refusal.
+//     kernel maps it to STATUS[4], STATUS[3] being the refusal; err[4]
+//     is SCRATCH RANGE (revision 4's R8: a strict indexed access past the
+//     depth, suppressed) - STATUS[5]; and err[5] is the MARK (revision
+//     8's R24: a RAISE whose operand's [7] is set, in a region or not) -
+//     STATUS[6].
 //
 //  5. THE ABORT (revision 8, docs/ROADMAP.md "The abort"). A read burst
 //     of the wrong length - RLAST before the beat ARLEN named (short), or
@@ -1016,8 +1025,10 @@ module cft_seq #(
   // Revision 8's R24: the quiet depth, counted by QUIET and ENDQUIET as
   // they are decoded, in program order, as REPEAT and ENDREP keep the loop
   // stack; three bits (the loader nests regions four deep), saturating,
-  // so a stream that bypassed the loader still terminates. Reset at each
-  // block's start. An instruction is quiet when admitted inside a region.
+  // so a stream that bypassed the loader keeps a defined depth rather than
+  // wrapping a region open or closed (it gates only flags, so it bears on
+  // no termination). Reset at each block's start. An instruction is quiet
+  // when admitted inside a region.
   logic [2:0]     qdepth;
 
   // ---- the ALU array --------------------------------------------------
@@ -4391,7 +4402,9 @@ module cft_seq #(
               // in program order, and walks no beats - REPEAT's cost. The
               // depth saturates both ways: the loader nests regions four
               // deep and balances them, and a stream that bypassed it
-              // still terminates.
+              // keeps a defined depth instead of wrapping (verifier-VC34;
+              // the depth gates only flags, so nothing here decides
+              // whether a run ends).
               C_QUIET: begin
                 if (qdepth != 3'd7) qdepth <= qdepth + 3'd1;
                 pc <= pc + 1;
