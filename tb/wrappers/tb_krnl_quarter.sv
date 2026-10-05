@@ -34,7 +34,15 @@ module tb_krnl_quarter #(
     parameter int SEQ_SCRATCH_D = 256,
     // ...and the capacity, equal to the store: this tile streams nothing
     // (revision 8's R8S; the open-core configurations keep it off).
-    parameter int SEQ_STREAM_D  = 16384
+    parameter int SEQ_STREAM_D  = 16384,
+    // ...and no R21 (revision 8): the open-core configurations build
+    // without augadd and augerr, as the quad does - nothing uses them
+    // until every image carries them, and they cost LUTs a small part
+    // has least of (the lead's decision, 2026-10-05). tb/Makefile's
+    // OPEN_CAPS_GENERICS hands the same 0 to the bench.
+    /* verilator lint_off WIDTHTRUNC */
+    parameter bit EN_AUGADD     = 1'b0
+    /* verilator lint_on WIDTHTRUNC */
 ) (
     input  logic         ap_clk,
     input  logic         ap_rst_n,
@@ -140,6 +148,7 @@ module tb_krnl_quarter #(
              .BEAT_BITS(64), .MUL_PASSES(MUL_PASSES),
              .SEQ_MAXD(SEQ_MAXD), .SEQ_IMEM_D(SEQ_IMEM_D),
              .SEQ_SCRATCH_D(SEQ_SCRATCH_D),
-             .SEQ_STREAM_D(SEQ_STREAM_D)) u_krnl (.*);
+             .SEQ_STREAM_D(SEQ_STREAM_D),
+             .EN_AUGADD(EN_AUGADD)) u_krnl (.*);
 
 endmodule

@@ -87,14 +87,15 @@ CSR_ARGS = {
 # (tb/Makefile's krnlseqnoaug) - where the plan's whole revision reads
 # 0x00187FFB with [14:11] set, and 0x001877FB without R21
 # (docs/ROADMAP.md, "What a revision-8 U50 tile reads"). The open-core
-# configurations keep streaming off (SEQ_STREAM_D equal to the store).
+# configurations keep streaming off (SEQ_STREAM_D equal to the store) and
+# build without R21 (EN_AUGADD=0, OPEN_CAPS_GENERICS), as the quad does.
 VERSION_SEAM = 0x00000B00
 SEAM_WORDS = {
     # (SEQ_MAXD, SEQ_IMEM_D, SEQ_SCRATCH_D, SEQ_STREAM_D, EN_AUGADD):
     #     (CAPS with [3:0] clear, CAPS2)
     (1024, 4096, 2048, 1 << 24, 1): (0x19FAFFF0, 0x00186FFB),  # the single
     (1024, 4096, 2048, 1 << 24, 0): (0x19FAFFF0, 0x001867FB),  # quad tile
-    (64, 16384, 256, 16384, 1):     (0x19E6FFF0, 0x00006FF8),  # open-core
+    (64, 16384, 256, 16384, 0):     (0x19E6FFF0, 0x000067F8),  # open-core
 }
 
 # ---- which rungs THIS build carries ------------------------------------

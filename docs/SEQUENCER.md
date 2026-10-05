@@ -3156,11 +3156,16 @@ LUT apart at fp256 (30,251 against 30,250, registers equal). Until round
 2's decode drove the sideband - and on every tile built so far - CAPS2[11]
 reads zero and code 10 decodes as HALT (`rtl/cft_seq.sv`'s `default`
 arm), so the loader refuses both codes there by name, naming the
-instruction. Since that decode, one parameter decides all of it: a tile
-built with EN_AUGADD = 1 (the default; the single and the deep build)
-decodes both codes and publishes CAPS2[11], and one built at 0 (the quad)
-is that revision-7 tile again on these two codes - CAPS2[11] zero, both
-ending the block as unknown codes, and the loader refusing them first.
+instruction. Since that decode, one parameter decides all of it, a
+build's choice: a tile built with EN_AUGADD = 1 (the default; the single
+and the deep build) decodes both codes and publishes CAPS2[11], and one
+built at 0 is that revision-7 tile again on these two codes - CAPS2[11]
+zero, both ending the block as unknown codes, and the loader refusing them
+first. The quad is built at 0 (question 9, above), and so are the
+open-core configurations - the quarter tile, the board group and the
+openXC7 harness - by Logan's decision of 2026-10-05, to be reconsidered
+with other space-saving measures once the dense design closes timing on
+nextpnr: "Agreed on keeping R21 off for open-core, parallel work is already being undertaken to get the dense design to close timing on NextPnr, once progress is seen there it will be reconsidered along with other space saving measures".
 
 ### R22. A post-step on `STX` and `LDX`
 
@@ -3898,8 +3903,10 @@ from such a tree.
   their `ra` and `rb`. In the kernel the array takes the sequencer's
   sideband in a sequencer run and zero in an elementwise one, for good.
   EN_AUGADD, a build parameter of `cft_krnl` and `cft_seq` (default 1),
-  builds the lanes' R21, the decode and CAPS2[11] together; at 0, the
-  quad's tile, the two codes are unknown ones, as on revision 7. They
+  builds the lanes' R21, the decode and CAPS2[11] together; at 0 the two
+  codes are unknown ones, as on revision 7. A build's choice: 1 on the
+  single and the deep build, 0 on the quad and on the open-core
+  configurations (Logan's decision of 2026-10-05, in R21's section). They
   cost what an ALU instruction does: twenty augadds, or ten
   augerr-augadd pairs, per block what twenty IANDs do, and a chain
   through `ra` or `rb` what an IAND chain does (`make seqcycles`' R21

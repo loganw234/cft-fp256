@@ -31,9 +31,11 @@ BEAT_BITS = 256          # cft_krnl's default; the board configuration keeps it
 # while its parameter list, and so its bytes, gained three entries.
 # SEQ_STREAM_D joined at revision 8 (R8S): equal to the store it builds no
 # stream, which the board keeps - the kernel's default is the U50's 2^24.
+# EN_AUGADD joined with R21's decode (revision 8): the board builds without
+# R21, as the quad does - the kernel's default builds it.
 BOARD = {"MUL_PASSES": "10", "FUSE_NORM": "1'b1", "FUSE_ALIGN": "1'b1",
          "SEQ_MAXD": "64", "SEQ_IMEM_D": "16384", "SEQ_SCRATCH_D": "256",
-         "SEQ_STREAM_D": "16384"}
+         "SEQ_STREAM_D": "16384", "EN_AUGADD": "1'b0"}
 SKIP = {"ap_clk", "ap_rst_n"}
 
 for arg in sys.argv[3:]:

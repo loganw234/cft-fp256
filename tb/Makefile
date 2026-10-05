@@ -508,8 +508,10 @@ krnlplain:
 # SEQ_STREAM_D joined at revision 8 (R8S): equal to SEQ_IMEM_D it builds
 # no stream, and the open-core configurations keep streaming off - the
 # kernel's default is the U50's 2^24, which with a 16,384-word store would
-# stream past it.
-OPEN_CAPS_GENERICS = SEQ_MAXD=64 SEQ_IMEM_D=16384 SEQ_SCRATCH_D=256 SEQ_STREAM_D=16384
+# stream past it. EN_AUGADD=0 joined with R21's decode (revision 8): the
+# open-core configurations build without R21, as the quad does, where the
+# kernel's default (the single's and the deep build's) builds it.
+OPEN_CAPS_GENERICS = SEQ_MAXD=64 SEQ_IMEM_D=16384 SEQ_SCRATCH_D=256 SEQ_STREAM_D=16384 EN_AUGADD=0
 BOARD_PARAMS = -Pcft_krnl.FUSE_NORM=1 -Pcft_krnl.FUSE_ALIGN=1                -Pcft_krnl.MUL_PASSES=$(MC) \
                $(foreach g,$(OPEN_CAPS_GENERICS),-Pcft_krnl.$(g))
 
