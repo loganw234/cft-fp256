@@ -3518,6 +3518,18 @@ the counts have had since 2026-09-15.
   software backend and through a loopback `cft-serve` (2026-10-05); two
   plants in the software executor - a masked lane's byte written, [5]
   dropped - each fail it by name.
+- `host/tests/seq_check.py --device <image>` runs the seven corpora
+  through the device's handle against the model, at the device's scratch
+  depth; its flag-control corpus asks for the block on every run, so on a
+  revision-8 tile it holds the tile's bytes to `seq.run`'s, lane by lane
+  - device-test holds them to the software backend's. A program needing a
+  bit the device does not publish is held refused by name instead: on a
+  revision-7 card, the revision-8 and flag-control corpora; on the quad
+  without R21, the augmented-addition programs. Measured on the software
+  backend, through a loopback `cft-serve`, at `sw:2048` and `sw:4096`,
+  and through a proxy that showed the client a revision-7 tile's word
+  (0x7f1f) and the quad's (0x77f1f) while the server computed (2026-10-05,
+  parcel E's ledger).
 - The XRT backend compiles with `XRT=1` against XRT 2.14 in cft2204 with
   no warning, as at 6fe4a4a. No revision-8 image exists yet, so the path
   has run on no device: probe E (an hw_emu single of the merged tree,

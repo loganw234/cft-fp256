@@ -95,9 +95,32 @@ The bracket rules and every field the three do not read are refused by
 both, directed and corrupted in, and a remote handle to a server
 publishing a revision-7 tile's word refuses each code at load and a run
 asking for the block, by name and before any frame.
+
+    python3 host/tests/seq_check.py --device <xclbin | cft://host:port | sw>
+
+Since revision 8's round 2 (parcel E, 2026-10-05) the corpora can run
+through a DEVICE's handle against the model (docs/ROADMAP.md, "Revision
+8", part 4's host legs). Without --device every corpus runs on the
+software backend, as the gate's `seq` stage always has, and nothing below
+changes. With it, two things are the device's rather than assumed: its
+scratch depth - the model runs, and holds every program, at the device's
+max_scratch, and the corpora's depth-edge cases move with it - and its
+features. A program needing a bit the device does not publish (an image
+bit at load; an index table, a lane mask or the per-lane flags block at
+run, the first two only where the backend does not resolve them on the
+client, as a remote handle does) is not compared: it must be REFUSED,
+CFT_ERR_UNSUPPORTED, by a sentence naming the absent bit's CAPS place, and
+is counted refused by name, corpus by corpus. A device that runs such a
+program, or refuses it otherwise, is a mismatch. So on a revision-7 card
+the revision-8 and flag-control corpora record their programs' refusals
+by name while every other corpus compares; on a revision-8 quad without
+R21 the augmented-addition programs are refused and the rest compare.
+Formats the device does not carry are not compared, by name. The remote
+legs' fake servers are the library's own and run as always.
 """
 
 import argparse
+import collections
 import ctypes
 import os
 import random
@@ -112,11 +135,17 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "python"))
 
 from cft_golden import FORMATS, vectors  # noqa: E402
-from cft_golden import seq  # noqa: E402
+from cft_golden import asm, seq  # noqa: E402
+# cft_caps.seq_features's names, bits and CAPS places: one table, the
+# compiler's, which python/tests/test_cftc.py holds to every name asm.py's
+# features() reports
+from cftc import targets as T  # noqa: E402
 
 CFT_OK = 0
 CFT_ERR_INVALID_ARGUMENT = 1
 CFT_ERR_UNSUPPORTED = 2
+# cft_format's codes, for cft_caps.format_mask
+FORMAT_CODE = {"fp32": 0, "fp64": 1, "fp128": 2, "fp256": 3}
 
 
 def load_library():
@@ -152,6 +181,11 @@ def load_library():
     lib.cft_strerror.restype = ctypes.c_char_p
     lib.cft_last_error.argtypes = []
     lib.cft_last_error.restype = ctypes.c_char_p
+    lib.cft_get_caps.argtypes = [ctypes.c_void_p, ctypes.POINTER(Caps)]
+    lib.cft_get_caps.restype = ctypes.c_int
+    lib.cft_open_ex.argtypes = [ctypes.POINTER(OpenArgs),
+                                ctypes.POINTER(ctypes.c_void_p)]
+    lib.cft_open_ex.restype = ctypes.c_int
     return lib
 
 
@@ -224,6 +258,183 @@ class RunArgs(ctypes.Structure):
                 # ABI 0.17 (docs/SEQUENCER.md R23), appended the same way
                 ("lane_flags", ctypes.c_void_p),
                 ("lane_flags_bytes", ctypes.c_size_t)]
+
+
+# ---- --device (parcel E, 2026-10-05; the module's text) ------------------
+
+class Caps(ctypes.Structure):
+    """cft_caps, field for field (host/include/cft.h, to ABI 0.11's last
+    field): an output struct, so the size handshake fills what this
+    mirror holds and no more."""
+    _fields_ = [("struct_size", ctypes.c_size_t),
+                ("format_mask", ctypes.c_uint32),
+                ("tiles", ctypes.c_uint32),
+                ("abi_version", ctypes.c_uint32),
+                ("device_version", ctypes.c_uint32),
+                ("flags_readable", ctypes.c_int),
+                ("backend", ctypes.c_char * 32),
+                ("max_deposits", ctypes.c_uint32),
+                ("max_insns", ctypes.c_uint32),
+                ("max_consts", ctypes.c_uint32),
+                ("seq_features", ctypes.c_uint32),
+                ("max_scratch", ctypes.c_uint32),
+                ("buffers_resident", ctypes.c_int)]
+
+
+class OpenArgs(ctypes.Structure):
+    """cft_open_args (ABI 0.16): --device sw:N opens the software backend
+    at N scratch slots a lane, which is what a tile of that depth
+    computes (docs/HOSTAPI.md, "A software handle at a tile's depth")."""
+    _fields_ = [("struct_size", ctypes.c_size_t),
+                ("artifact", ctypes.c_char_p),
+                ("index", ctypes.c_int),
+                ("scratch_depth", ctypes.c_uint32)]
+
+
+class _Device:
+    """What --device's handle publishes, and what it refused by name."""
+
+    def __init__(self, handle, caps):
+        self.handle = handle.value
+        self.backend = caps.backend.decode("ascii", "replace")
+        self.features = caps.seq_features
+        self.format_mask = caps.format_mask
+        self.max_scratch = caps.max_scratch
+        self.version = caps.device_version
+        self.tiles = caps.tiles
+        self.refused = collections.Counter()    # (corpus, CAPS place)
+        self.bad = 0
+
+    def absent(self, need):
+        return [f for f in need if not self.features & T.FEATURE_BITS[f]]
+
+    def refused_in(self, corpus):
+        return sum(k for (c, _p), k in self.refused.items() if c == corpus)
+
+
+# The model's scratch depth - the device's under --device, else the
+# model's own default - and the device. Read at each call, so every corpus
+# below takes them as they stand when main() has set them.
+DEPTH = seq.SCRATCH_D
+DEVICE = None
+
+
+def mprog(*args, **kw):
+    """seq.Program written for the model's depth (DEPTH)."""
+    kw.setdefault("scratch_depth", DEPTH)
+    return seq.Program(*args, **kw)
+
+
+def mrun(*args, **kw):
+    """seq.run at the model's depth (DEPTH): the device's under
+    --device, which a non-strict STX/LDX reduces its index modulo."""
+    kw.setdefault("scratch_depth", DEPTH)
+    return seq.run(*args, **kw)
+
+
+def _needs(prog, idx=False, mask=False, lf=False):
+    """The cft_caps.seq_features names a run of `prog` needs: its image's
+    (asm.py's features(), in the compiler's names, and the header's strict
+    flag) and its run's - an index table and a lane mask only where the
+    device's backend does not resolve them on the client, as a remote
+    handle does (device.c), and the per-lane flags block everywhere, since
+    only the device that runs a lane can say what it raised."""
+    img = asm.Image.from_bytes(prog.to_bytes())
+    need = [T.ASM_FEATURE.get(f, f) for f in img.features()]
+    if prog.flags & seq.FLAG_SCRATCH_STRICT:
+        need.append("SCRATCH_STRICT")
+    client_side = DEVICE is not None and DEVICE.backend == "remote"
+    if idx and not client_side:
+        need.append("INDEXED")
+    if mask and not client_side:
+        need.append("LANE_MASK")
+    if lf:
+        need.append("LANE_FLAGS")
+    return need
+
+
+def _run_one_lane(lib, handle, prog, idx, mask, lf):
+    """`prog` run once, on one lane, with the run options a corpus run of
+    it has: -> (status, the library's sentence, or "" on success)."""
+    esz = prog.fmt.width // 8
+    keep = []
+
+    def buf(nbytes, fill=b""):
+        b = ctypes.create_string_buffer(fill.ljust(max(1, nbytes), b"\0"),
+                                        max(1, nbytes))
+        keep.append(b)
+        return ctypes.cast(b, ctypes.c_void_p)
+
+    args = RunArgs()
+    args.struct_size = ctypes.sizeof(RunArgs)
+    args.a = args.b = args.c = buf(esz)
+    args.n = 1
+    if prog.bank_ext:
+        args.bank, args.bank_bytes = buf(prog.n_consts * esz), \
+            prog.n_consts * esz
+    if prog.scratch_io and prog.n_scratch_in:
+        args.scratch_in = buf(prog.n_scratch_in * esz)
+        args.scratch_in_bytes = prog.n_scratch_in * esz
+    if prog.scratch_io and prog.n_scratch_out:
+        args.scratch_out = buf(prog.n_scratch_out * esz)
+        args.scratch_out_bytes = prog.n_scratch_out * esz
+    args.deposits = buf(prog.max_deposits * esz)
+    counts = (ctypes.c_uint32 * 1)()
+    flags, bus = ctypes.c_uint32(0), ctypes.c_uint32(0)
+    args.counts = counts
+    args.flags_out = ctypes.pointer(flags)
+    args.bus_out = ctypes.pointer(bus)
+    if idx:
+        args.idx_a, args.idx_a_src = buf(4), 1          # index 0 of 1
+    if mask:
+        args.lane_mask, args.lane_mask_bytes = buf(1, b"\x01"), 1
+    if lf:
+        args.lane_flags, args.lane_flags_bytes = buf(1), 1
+    rc = lib.cft_program_run_ex(handle, ctypes.byref(args))
+    msg = lib.cft_last_error().decode("utf-8", "replace") if rc else ""
+    return rc, msg
+
+
+def device_refuses(lib, dev, prog, corpus, idx=False, mask=False, lf=False):
+    """Under --device: True when a run of `prog` with these options needs
+    a feature `dev`, the device under test, does not publish. Such a
+    program is held REFUSED BY NAME rather than compared: loaded - an
+    image's bit is refused at load - and, where it loads, run once on one
+    lane with the same options, a run's option being refused at run. The
+    refusal must be CFT_ERR_UNSUPPORTED with a sentence naming an absent
+    bit's CAPS place, and is counted by corpus and place; the device taking
+    the program, or refusing it otherwise, is a mismatch, printed. False,
+    and nothing done, without --device, on any other handle - the remote
+    legs' fake servers - and for a program the device can run."""
+    if DEVICE is None or dev.value != DEVICE.handle:
+        return False
+    absent = DEVICE.absent(_needs(prog, idx, mask, lf))
+    if not absent:
+        return False
+    places = [T.CAPS_PLACE[f] for f in absent]
+    image = prog.to_bytes()
+    handle = ctypes.c_void_p()
+    rc = lib.cft_program_load(dev, image, len(image), ctypes.byref(handle))
+    msg = lib.cft_last_error().decode("utf-8", "replace") if rc else ""
+    where = "at load"
+    if rc == CFT_OK:
+        try:
+            rc, msg = _run_one_lane(lib, handle, prog, idx, mask, lf)
+            where = "at run"
+        finally:
+            lib.cft_program_free(handle)
+    named = [p for p in places if p in msg]
+    if rc == CFT_ERR_UNSUPPORTED and named:
+        DEVICE.refused[(corpus, named[0])] += 1
+        return True
+    DEVICE.bad += 1
+    if DEVICE.bad <= 5:
+        print(f"  MISMATCH {prog.fmt.name} ({corpus}, --device): a program "
+              f"needing {', '.join(f'{f} ({T.CAPS_PLACE[f]})' for f in absent)}"
+              f", which the device does not publish, gave rc {rc} {where}: "
+              f"{msg!r} - wanted CFT_ERR_UNSUPPORTED naming "
+              f"{' or '.join(places)}")
+    return True
 
 
 def run_in_c_idx(lib, dev, prog, a, b, c, n, scratch_in, idx):
@@ -340,15 +551,15 @@ def indexed_corpus(lib, dev, fmt, name, args, S):
     for _trial in range(max(1, args.trials // 2)):
         insns, consts = seq.random_program(fmt, rng, nconst=3,
                                            extended=True, wide_regs=True,
-                                           scratch=True)
+                                           scratch=True, scratch_depth=DEPTH)
         maxdep = rng.choice([1, 2, 4])
         io = rng.random() < 0.5
         nsin = rng.choice([1, 2, 3]) if io else 0
         nsout = rng.choice([0, 1, 2]) if io else 0
         flags = seq.FLAG_SCRATCH_IO if io else 0
         try:
-            prog = seq.Program(fmt, insns, consts, maxdep, flags=flags,
-                               n_scratch_in=nsin, n_scratch_out=nsout)
+            prog = mprog(fmt, insns, consts, maxdep, flags=flags,
+                         n_scratch_in=nsin, n_scratch_out=nsout)
         except seq.ProgramError:
             continue
         # n and the SOURCE lengths are drawn independently: a source
@@ -411,9 +622,9 @@ def indexed_corpus(lib, dev, fmt, name, args, S):
                 tabs[which] = list(tabs[which])
                 tabs[which][rng.randrange(n)] = lens[which]
                 try:
-                    seq.run(prog, a, b, c, scratch_in=sin_arg,
-                            idx_a=tabs[0], idx_b=tabs[1], idx_c=tabs[2],
-                            idx_scratch_in=si_tab)
+                    mrun(prog, a, b, c, scratch_in=sin_arg,
+                         idx_a=tabs[0], idx_b=tabs[1], idx_c=tabs[2],
+                         idx_scratch_in=si_tab)
                     print(f"  MISMATCH {name} (indexed corpus): the model "
                           f"ACCEPTED an index at the source's length")
                     S["bad"] += 1
@@ -431,9 +642,11 @@ def indexed_corpus(lib, dev, fmt, name, args, S):
                     S["oob"] += 1
                 continue
 
-        want = seq.run(prog, a, b, c, scratch_in=sin_arg,
-                       idx_a=tabs[0], idx_b=tabs[1], idx_c=tabs[2],
-                       idx_scratch_in=si_tab)
+        want = mrun(prog, a, b, c, scratch_in=sin_arg,
+                    idx_a=tabs[0], idx_b=tabs[1], idx_c=tabs[2],
+                    idx_scratch_in=si_tab)
+        if device_refuses(lib, dev, prog, "indexed corpus", idx=True):
+            continue
         try:
             got = run_in_c_idx(lib, dev, prog, a, b, c, n, sin_arg,
                                (tabs[0], tabs[1], tabs[2], si_tab))
@@ -471,8 +684,10 @@ def indexed_corpus(lib, dev, fmt, name, args, S):
         # tautology. A random program may never read r0 at all, and
         # then both halves pass and neither proves anything.
         if rng.random() < 0.2:
-            ctl = seq.Program(fmt, [seq.deposit(0), seq.halt()],
-                              max_deposits=1)
+            ctl = mprog(fmt, [seq.deposit(0), seq.halt()],
+                        max_deposits=1)
+            if device_refuses(lib, dev, ctl, "indexed corpus", idx=True):
+                continue
             vals = seq.random_inputs(fmt, rng, n)
             ident = list(range(n))
             dense = run_in_c_idx(lib, dev, ctl, vals, vals, vals, n,
@@ -497,7 +712,7 @@ def indexed_corpus(lib, dev, fmt, name, args, S):
                 else:
                     S["permuted"] += 1
                 # ...and the rotation is what the model says it is.
-                want_rot = seq.run(ctl, vals, vals, vals, idx_a=perm)
+                want_rot = mrun(ctl, vals, vals, vals, idx_a=perm)
                 if other[0] != want_rot.deposits:
                     print(f"  MISMATCH {name} (indexed corpus): the "
                           f"rotated run differs from the model")
@@ -602,15 +817,15 @@ def masked_corpus(lib, dev, fmt, name, args, M):
     for _trial in range(max(1, args.trials // 2)):
         insns, consts = seq.random_program(fmt, rng, nconst=3,
                                            extended=True, wide_regs=True,
-                                           scratch=True)
+                                           scratch=True, scratch_depth=DEPTH)
         maxdep = rng.choice([1, 2, 4])
         io = rng.random() < 0.5
         nsin = rng.choice([1, 2, 3]) if io else 0
         nsout = rng.choice([0, 1, 2]) if io else 0
         flags = seq.FLAG_SCRATCH_IO if io else 0
         try:
-            prog = seq.Program(fmt, insns, consts, maxdep, flags=flags,
-                               n_scratch_in=nsin, n_scratch_out=nsout)
+            prog = mprog(fmt, insns, consts, maxdep, flags=flags,
+                         n_scratch_in=nsin, n_scratch_out=nsout)
         except seq.ProgramError:
             continue
         # The block boundary matters more here than anywhere: libcft
@@ -643,7 +858,9 @@ def masked_corpus(lib, dev, fmt, name, args, M):
         sin_arg = (seq.random_inputs(fmt, rng, n * nsin)
                    if (io and nsin) else None)
 
-        want = seq.run(prog, a, b, c, scratch_in=sin_arg, lane_mask=keep)
+        want = mrun(prog, a, b, c, scratch_in=sin_arg, lane_mask=keep)
+        if device_refuses(lib, dev, prog, "masked corpus", mask=True):
+            continue
         try:
             got = run_in_c_mask(lib, dev, prog, a, b, c, n, sin_arg, keep)
         except RuntimeError as e:
@@ -827,7 +1044,7 @@ def corrupt_scratch(insns, rng):
                        "ldx_stray_kx", "stl_stray_rd", "ldl_stray_rb",
                        "kx9_without_kx", "kx9_on_register_operand",
                        "imm31", "kx9_past_bank"])
-    D = seq.SCRATCH_D
+    D = DEPTH
     if what == "stl_past_depth":
         out.insert(0, seq.encode(seq.STL, ra=0, ctrl=True, imm=D))
     elif what == "ldl_past_depth":
@@ -878,7 +1095,8 @@ def scratch_corpus(lib, dev, fmt, name, args, S):
         nconst = 300 if rng.random() < 0.5 else 3
         insns, consts = seq.random_program(fmt, rng, nconst=nconst,
                                            extended=True,
-                                           wide_regs=True, scratch=True)
+                                           wide_regs=True, scratch=True,
+                                           scratch_depth=DEPTH)
         for w in insns:
             dd = seq.decode(w)
             if dd["ctrl"]:
@@ -914,12 +1132,12 @@ def scratch_corpus(lib, dev, fmt, name, args, S):
             if kind == "io_word_without_flag":
                 flags, nsin, nsout = 0, 1, 0
             elif kind == "in_past_depth":
-                flags, nsin = seq.FLAG_SCRATCH_IO, seq.SCRATCH_D + 1
+                flags, nsin = seq.FLAG_SCRATCH_IO, DEPTH + 1
             else:
-                flags, nsout = seq.FLAG_SCRATCH_IO, seq.SCRATCH_D + 1
+                flags, nsout = seq.FLAG_SCRATCH_IO, DEPTH + 1
         try:
-            prog = seq.Program(fmt, insns, consts, maxdep, flags=flags,
-                               n_scratch_in=nsin, n_scratch_out=nsout)
+            prog = mprog(fmt, insns, consts, maxdep, flags=flags,
+                         n_scratch_in=nsin, n_scratch_out=nsout)
         except seq.ProgramError:
             bogus = seq.Program.__new__(seq.Program)
             bogus.fmt, bogus.insns = fmt, insns
@@ -956,11 +1174,13 @@ def scratch_corpus(lib, dev, fmt, name, args, S):
         b = seq.random_inputs(fmt, rng, n)
         c = seq.random_inputs(fmt, rng, n)
         sin = seq.random_inputs(fmt, rng, n * nsin) if nsin else None
-        want = seq.run(prog, a, b, c, scratch_in=sin)
+        want = mrun(prog, a, b, c, scratch_in=sin)
         # The bit is what R8 adds; a strict corpus that never sets it
         # compared the modulo path twice and proved nothing.
         if want.status & seq.STATUS_SCRATCH_RANGE:
             S["range"] += 1
+        if device_refuses(lib, dev, prog, "scratch corpus"):
+            continue
         try:
             got_dep, got_counts, got_flags, got_status, got_so = \
                 run_in_c_ex(lib, dev, prog, a, b, c, sin)
@@ -1110,8 +1330,11 @@ def corrupt(insns, rng):
 
 # Scratch slots 0 and 1 of every lane carry the two indices the directed
 # walk below starts from: near the depth's edge, so a +1 walk crosses it
-# and a strict program reports, and near zero, so a -1 walk wraps.
-_WALK_STARTS = (0, 1, 2, 250, 253, 255, 256, 300)
+# and a strict program reports, and near zero, so a -1 walk wraps. The
+# edge is the model's depth - 256, (0, 1, 2, 250, 253, 255, 256, 300) as
+# these always were, and the device's under --device.
+def _walk_starts():
+    return (0, 1, 2, DEPTH - 6, DEPTH - 3, DEPTH - 1, DEPTH, DEPTH + 44)
 
 
 def corrupt_rev8(insns, rng):
@@ -1191,7 +1414,7 @@ def rev8_directed_refusals(lib, dev, fmt, name, R):
     for label, word in rev8_refusal_words():
         insns = [word, seq.halt()]
         try:
-            seq.Program(fmt, insns, max_deposits=0)
+            mprog(fmt, insns, max_deposits=0)
             print(f"  MISMATCH {name} (revision-8 refusals, {label}): the "
                   f"model ACCEPTS a word this corpus lists as refused")
             R["bad"] += 1
@@ -1244,25 +1467,28 @@ def rev8_own_index_leg(lib, dev, fmt, name, R):
                             seq.halt()]
                 flags = (seq.FLAG_SCRATCH_IO
                          | (seq.FLAG_SCRATCH_STRICT if strict else 0))
-                prog = seq.Program(fmt, body(step), max_deposits=5,
-                                   flags=flags, n_scratch_in=16,
-                                   n_scratch_out=16)
-                zero = seq.Program(fmt, body(0), max_deposits=5,
-                                   flags=flags, n_scratch_in=16,
-                                   n_scratch_out=16)
+                prog = mprog(fmt, body(step), max_deposits=5,
+                             flags=flags, n_scratch_in=16,
+                             n_scratch_out=16)
+                zero = mprog(fmt, body(0), max_deposits=5,
+                             flags=flags, n_scratch_in=16,
+                             n_scratch_out=16)
                 n = (1, 65, 129)[k % 3]
                 k += 1
                 a = seq.random_inputs(fmt, rng, n)
                 b = seq.random_inputs(fmt, rng, n)
                 c = seq.random_inputs(fmt, rng, n)
                 sin = [rng.choice(pool) for _ in range(16 * n)]
-                want = seq.run(prog, a, b, c, scratch_in=sin)
-                same = seq.run(zero, a, b, c, scratch_in=sin)
+                want = mrun(prog, a, b, c, scratch_in=sin)
+                same = mrun(zero, a, b, c, scratch_in=sin)
                 if want.state() != same.state():
                     print(f"  MISMATCH {name} (own-index leg) r{r} step "
                           f"{step:+d} strict={strict}: the model's stepped "
                           f"load is not its unstepped one")
                     R["bad"] += 1
+                if device_refuses(lib, dev, prog,
+                                  "revision-8 own-index leg"):
+                    continue
                 try:
                     got = run_in_c_ex(lib, dev, prog, a, b, c, sin)
                 except RuntimeError as e:
@@ -1312,7 +1538,7 @@ def rev8_corpus(lib, dev, fmt, name, args, R):
     for trial in range(max(1, args.trials // 2)):
         insns, consts = seq.random_program(fmt, rng, extended=True,
                                            wide_regs=True, scratch=True,
-                                           rev8=True)
+                                           rev8=True, scratch_depth=DEPTH)
         shape = rng.choice(["plain", "pair", "walk"])
         maxdep = rng.choice([0, 1, 2, 4])
         nsin = nsout = 0
@@ -1344,8 +1570,8 @@ def rev8_corpus(lib, dev, fmt, name, args, R):
         if rng.random() < 0.25:
             insns, kind = corrupt_rev8(insns, rng)
         try:
-            prog = seq.Program(fmt, insns, consts, maxdep, flags=flags,
-                               n_scratch_in=nsin, n_scratch_out=nsout)
+            prog = mprog(fmt, insns, consts, maxdep, flags=flags,
+                         n_scratch_in=nsin, n_scratch_out=nsout)
         except seq.ProgramError:
             bogus = seq.Program.__new__(seq.Program)
             bogus.fmt, bogus.insns = fmt, insns
@@ -1397,9 +1623,9 @@ def rev8_corpus(lib, dev, fmt, name, args, R):
             sin = seq.random_inputs(fmt, rng, n * nsin)
             if shape == "walk":
                 for i in range(n):
-                    sin[i * nsin] = rng.choice(_WALK_STARTS)
-                    sin[i * nsin + 1] = rng.choice(_WALK_STARTS)
-        want = seq.run(prog, a, b, c, scratch_in=sin)
+                    sin[i * nsin] = rng.choice(_walk_starts())
+                    sin[i * nsin + 1] = rng.choice(_walk_starts())
+        want = mrun(prog, a, b, c, scratch_in=sin)
         if strict:
             R["strict"] += 1
             if want.status & seq.STATUS_SCRATCH_RANGE:
@@ -1407,6 +1633,8 @@ def rev8_corpus(lib, dev, fmt, name, args, R):
         for bit, key in ((0x01, "inv"), (0x04, "ovf"), (0x08, "unf")):
             if want.flags & bit:
                 R[key] += 1
+        if device_refuses(lib, dev, prog, "revision-8 corpus"):
+            continue
         try:
             got_dep, got_counts, got_flags, got_status, got_so = \
                 run_in_c_ex(lib, dev, prog, a, b, c, sin)
@@ -1859,7 +2087,7 @@ def flags_corpus(lib, dev, fmt, name, args, F):
     """The seventh corpus, for one format. Mutates the counters in F."""
     for label, insns in flags_refusal_programs():
         try:
-            seq.Program(fmt, insns, max_deposits=0)
+            mprog(fmt, insns, max_deposits=0)
             model_refused = False
         except seq.ProgramError:
             model_refused = True
@@ -1875,10 +2103,17 @@ def flags_corpus(lib, dev, fmt, name, args, F):
     rng = random.Random((args.seed * 2654435761 + fmt.width) & 0xFFFFFFFF
                         ^ 0x24F1A6)
     trials = max(1, args.trials // 4)
+    # Under --device, the revision-8 arm only where the device carries both
+    # its bits: on a quad without R21 nearly every program the arm touches
+    # holds an augadd and would be refused for it, and this corpus's own
+    # forms - R24's regions and R23's block, which that quad carries - would
+    # go uncompared. Without --device, and on a device with both, the arm
+    # draws as it always has.
+    rev8_arm = DEVICE is None or not DEVICE.absent(["AUGADD", "SCRATCH_STEP"])
     for _trial in range(trials):
         insns, consts = seq.random_program(fmt, rng, scratch=True,
-                                           wide_regs=True, rev8=True,
-                                           flags=True)
+                                           wide_regs=True, rev8=rev8_arm,
+                                           flags=True, scratch_depth=DEPTH)
         strict = rng.random() < 0.4
         pflags = seq.FLAG_SCRATCH_IO | (seq.FLAG_SCRATCH_STRICT
                                         if strict else 0)
@@ -1896,8 +2131,8 @@ def flags_corpus(lib, dev, fmt, name, args, F):
             insns = list(insns)
             insns.insert(rng.randrange(len(insns)), word)
             try:
-                seq.Program(fmt, insns, consts, maxdep, flags=pflags,
-                            n_scratch_out=2)
+                mprog(fmt, insns, consts, maxdep, flags=pflags,
+                      n_scratch_out=2)
             except seq.ProgramError:
                 bogus = seq.Program.__new__(seq.Program)
                 bogus.fmt, bogus.insns = fmt, insns
@@ -1920,8 +2155,8 @@ def flags_corpus(lib, dev, fmt, name, args, F):
                 continue
             # an inserted word that happened to stay legal runs as any
             # other program below
-        prog = seq.Program(fmt, insns, consts, maxdep, flags=pflags,
-                           n_scratch_out=2)
+        prog = mprog(fmt, insns, consts, maxdep, flags=pflags,
+                     n_scratch_out=2)
         qd = 0
         for w in insns:
             d = seq.decode(w)
@@ -1944,7 +2179,10 @@ def flags_corpus(lib, dev, fmt, name, args, F):
             keep = [rng.random() < 0.7 for _ in range(n)]
         if n > 64:
             F["blocked"] += 1
-        want = seq.run(prog, a, b, c, lane_mask=keep)
+        want = mrun(prog, a, b, c, lane_mask=keep)
+        if device_refuses(lib, dev, prog, "flag-control corpus",
+                          mask=keep is not None, lf=True):
+            continue
         try:
             dep, counts, fl, st, sout, lf = run_in_c_flags(
                 lib, dev, prog, a, b, c, n, None, keep)
@@ -2079,13 +2317,56 @@ def main():
                     choices=list(FORMATS))
     ap.add_argument("--trials", type=int, default=400)
     ap.add_argument("--seed", type=int, default=17)
+    ap.add_argument("--device", metavar="ARTIFACT",
+                    help="run the corpora through this device's handle - "
+                         "an xclbin, cft://host:port, sw, or sw:N (the "
+                         "software backend at N scratch slots a lane, as a "
+                         "tile of that depth) - at its scratch depth, a "
+                         "program needing a bit it does not publish held "
+                         "refused by name (the module's text)")
     args = ap.parse_args()
 
+    global DEPTH, DEVICE
     lib = load_library()
     dev = ctypes.c_void_p()
-    st = lib.cft_open(None, 0, ctypes.byref(dev))
+    if args.device is not None and args.device.startswith("sw:"):
+        depth = args.device[3:]
+        if not depth.isascii() or not depth.isdigit():
+            raise SystemExit(f"--device {args.device}: sw:N takes N, a "
+                             f"power of two of scratch slots a lane")
+        oa = OpenArgs()
+        oa.struct_size = ctypes.sizeof(OpenArgs)
+        oa.artifact, oa.index, oa.scratch_depth = None, 0, int(depth)
+        st = lib.cft_open_ex(ctypes.byref(oa), ctypes.byref(dev))
+    else:
+        artifact = None if args.device in (None, "sw") else args.device
+        st = lib.cft_open(artifact.encode("utf-8") if artifact else None, 0,
+                          ctypes.byref(dev))
     if st != CFT_OK:
-        raise SystemExit(f"cft_open: {lib.cft_strerror(st).decode()}")
+        raise SystemExit(f"cft_open({args.device or 'the software backend'}): "
+                         f"{lib.cft_strerror(st).decode()}: "
+                         f"{lib.cft_last_error().decode('utf-8', 'replace')}")
+    if args.device is not None:
+        caps = Caps()
+        caps.struct_size = ctypes.sizeof(Caps)
+        st = lib.cft_get_caps(dev, ctypes.byref(caps))
+        if st != CFT_OK:
+            raise SystemExit(f"cft_get_caps({args.device}): "
+                             f"{lib.cft_strerror(st).decode()}")
+        DEVICE = _Device(dev, caps)
+        # A device that publishes no depth (0, unknown) is held at the
+        # model's own, which is the library's for such a device too
+        DEPTH = DEVICE.max_scratch or seq.SCRATCH_D
+        print(f"device {args.device}: backend {DEVICE.backend}, "
+              f"{DEVICE.tiles} tile{'s' if DEVICE.tiles != 1 else ''}, "
+              f"contract 0x{DEVICE.version:08x}, seq_features "
+              f"0x{DEVICE.features:x}, max_scratch {DEVICE.max_scratch}; "
+              f"the model runs at {DEPTH} scratch slots a lane")
+        lacks = [f for f in T.FEATURE_BITS
+                 if not DEVICE.features & T.FEATURE_BITS[f]]
+        print(f"  it does not publish: "
+              f"{', '.join(f'{f} ({T.CAPS_PLACE[f]})' for f in lacks)}"
+              if lacks else "  it publishes every bit cft.h defines")
 
     total = bad = refused_both = 0
     blocked = 0
@@ -2115,6 +2396,13 @@ def main():
     try:
         for name in args.formats:
             fmt = FORMATS[name]
+            if DEVICE is not None and \
+                    not DEVICE.format_mask & (1 << FORMAT_CODE[name]):
+                # each corpus draws from its own seed per format, so the
+                # formats compared draw what they always drew
+                print(f"{name}: NOT COMPARED - the device does not carry "
+                      f"it (format_mask 0x{DEVICE.format_mask:x})")
+                continue
             rng = random.Random(args.seed ^ (fmt.width * 7919))
             checked = 0
             for trial in range(args.trials):
@@ -2141,7 +2429,7 @@ def main():
                 if rng.random() < 0.3:
                     insns, _kind = corrupt(insns, rng)
                 try:
-                    prog = seq.Program(fmt, insns, consts, maxdep)
+                    prog = mprog(fmt, insns, consts, maxdep)
                 except seq.ProgramError:
                     # The model refused it; the C loader must too - so
                     # the refused program still has to be serialised,
@@ -2187,7 +2475,9 @@ def main():
                 if n > 64:
                     blocked += 1
 
-                want = seq.run(prog, a, b, c)
+                want = mrun(prog, a, b, c)
+                if device_refuses(lib, dev, prog, "first corpus"):
+                    continue
                 got_dep, got_counts, got_flags, got_status = \
                     run_in_c(lib, dev, prog, a, b, c)
 
@@ -2273,10 +2563,38 @@ def main():
           f"reported, {F['overflow']} with a deposit overflow; "
           f"{F['directed']} directed refusals refused by both")
     bad += S["bad"] + X["bad"] + M["bad"] + R["bad"] + ceiling_bad + F["bad"]
+    if DEVICE is not None:
+        # --device: what the device refused by name, corpus by corpus
+        by = collections.defaultdict(list)
+        for (corpus, place), k in sorted(DEVICE.refused.items()):
+            by[corpus].append(f"{place} {k}")
+        for corpus, parts in by.items():
+            print(f"{corpus}: {DEVICE.refused_in(corpus)} programs NOT "
+                  f"COMPARED - each needs a bit the device does not "
+                  f"publish, and each was refused by name "
+                  f"(CFT_ERR_UNSUPPORTED naming {', '.join(parts)})")
+        if not by:
+            print("the device refused no program for a bit it lacks: every "
+                  "program was compared")
+        bad += DEVICE.bad
+
+    def relaxed(*corpora):
+        """Under --device, a corpus the device refused programs of by name
+        has forms only those programs carry - so a form not reached among
+        the programs it ran is named, not failed."""
+        held = DEVICE.refused_in if DEVICE is not None else (lambda c: 0)
+        n_held = sum(held(c) for c in corpora)
+        if n_held:
+            print(f"NOTE (--device): the {corpora[0]} did not reach every "
+                  f"form among the programs the device ran; {n_held} of its "
+                  f"programs were refused by name instead (above)")
+        return n_held > 0
+
     if F["total"] and not all(F[k] for k in (
             "refused", "blocked", "directed", "quiet", "nested",
             "raise_quiet", "raise_loud", "marked", "masked", "range",
-            "overflow", "remote_refused", "remote_loaded")):
+            "overflow", "remote_refused", "remote_loaded")) and \
+            not relaxed("flag-control corpus"):
         print("THE FLAG-CONTROL CORPUS DID NOT REACH EVERY FORM - a counter "
               "above is zero, so a region, a raise, the mark, a mask, a "
               "report or the remote refusal went uncompared")
@@ -2285,20 +2603,23 @@ def main():
             "refused", "blocked", "augadd", "augerr", "pair", "ldx_step",
             "stx_step", "walks", "strict", "range", "inv", "ovf", "unf",
             "remote_refused", "remote_loaded", "directed",
-            "own_index", "own_index_range")):
+            "own_index", "own_index_range")) and \
+            not relaxed("revision-8 corpus", "revision-8 own-index leg"):
         print("THE REVISION-8 CORPUS DID NOT REACH EVERY FORM - a counter "
               "above is zero, so a form, a flag class, the strict report "
               "or the remote refusal went uncompared")
         return 1
     if M["total"] and not (M["kept"] and M["masked_lanes"] and M["zeros"]
-                           and M["allones"] and M["holed"]):
+                           and M["allones"] and M["holed"]) and \
+            not relaxed("masked corpus"):
         print("THE MASKED CORPUS DID NOT REACH EVERY FORM - no lane was "
               "masked, no lane ran, no all-zero mask was drawn, or no "
               "all-ones/holed control pair, which would mean R17 was not "
               "actually compared")
         return 1
     if X["total"] and not (X["tables"] and X["none"] and X["oob"]
-                           and X["identity"] and X["permuted"]):
+                           and X["identity"] and X["permuted"]) and \
+            not relaxed("indexed corpus"):
         print("THE INDEXED CORPUS DID NOT REACH EVERY FORM - no table, "
               "no CFT_IDX_NONE entry, no index refused at the source's "
               "length, or no identity/permuted control pair, which "
@@ -2307,13 +2628,25 @@ def main():
     if S["total"] and not (S["stl"] and S["ldl"] and S["stx"]
                            and S["ldx"] and S["io"] and S["kx9"]
                            and S["refused"] and S["strict"]
-                           and S["range"]):
+                           and S["range"]) and \
+            not relaxed("scratch corpus"):
         print("THE SCRATCH CORPUS DID NOT REACH EVERY FORM - a code, "
               "the block or the ninth bit went uncompared, no refusal "
               "was exercised, or no SCRATCH_STRICT program reported an "
               "out-of-range index (revision 4 R8), which would mean the "
               "strict path was never actually compared")
         return 1
+    if DEVICE is not None:
+        # every corpus exercised: something compared, or refused by name
+        for corpus, compared in (("scratch corpus", S["total"]),
+                                 ("indexed corpus", X["total"]),
+                                 ("masked corpus", M["total"]),
+                                 ("revision-8 corpus", R["total"]),
+                                 ("flag-control corpus", F["total"])):
+            if total and not compared and not DEVICE.refused_in(corpus):
+                print(f"THE {corpus.upper()} COMPARED NOTHING AND THE DEVICE "
+                      f"REFUSED NOTHING OF IT - it was not exercised")
+                return 1
     if not total:
         print("NO PROGRAM WAS COMPARED - the generator produced nothing "
               "valid, so this proved nothing")
@@ -2333,6 +2666,12 @@ def main():
     if bad:
         print(f"{bad} DISAGREEMENTS")
         return 1
+    if DEVICE is not None:
+        print(f"the device ({args.device}) and the golden model agree on "
+              f"every program it ran: deposits, counts, flags and status, "
+              f"and every lane byte where asked; it refused by name every "
+              f"program needing a bit it does not publish")
+        return 0
     print("libcft and the golden model agree on every program: deposits, "
           "counts, flags and status")
     return 0
