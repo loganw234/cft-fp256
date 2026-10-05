@@ -1,0 +1,32 @@
+# pools_run.py fp128 (all six), 12:05-12:13, the desktop 88-100% busy. The planners' one-bit rule: exp/exp2 D 19, expm1 D 20, log family D 37 (now 20, 20, 38).
+fp128 exp   rne K7 D19 n 350 marked 1 (right 0) wrong 0 insns 187 words 71 live 23 ['0x3f8e0000000000000000000000000000'] []  11s
+fp128 exp   rtz K7 D19 n 350 marked 1 (right 1) wrong 0 insns 185 words 71 live 22 ['0xbf8e0000000000000000000000000000'] []  63s
+fp128 exp   rdn K7 D19 n 350 marked 1 (right 1) wrong 0 insns 185 words 71 live 22 ['0xbf8e0000000000000000000000000000'] []  75s
+fp128 exp   rup K7 D19 n 350 marked 1 (right 1) wrong 0 insns 184 words 70 live 22 ['0xbf8e0000000000000000000000000000'] []  81s
+fp128 exp   rmm K7 D19 n 350 marked 1 (right 1) wrong 0 insns 187 words 71 live 23 ['0x3f8e0000000000000000000000000000'] []  101s
+fp128 exp2  rne K7 D19 n 350 marked 0 (right 0) wrong 0 insns 185 words 72 live 24 [] []  108s
+fp128 exp2  rtz K7 D19 n 350 marked 0 (right 0) wrong 0 insns 183 words 72 live 23 [] []  119s
+fp128 exp2  rdn K7 D19 n 350 marked 0 (right 0) wrong 0 insns 183 words 72 live 23 [] []  170s
+fp128 exp2  rup K7 D19 n 350 marked 0 (right 0) wrong 0 insns 182 words 71 live 23 [] []  188s
+fp128 exp2  rmm K7 D19 n 350 marked 0 (right 0) wrong 0 insns 185 words 72 live 24 [] []  205s
+fp128 expm1 rne K8 D20 n 350 marked 1 (right 1) wrong 0 insns 182 words 72 live 22 ['0xbf8e0000000000000000000000000000'] []  212s
+fp128 expm1 rtz K8 D20 n 350 marked 0 (right 0) wrong 0 insns 185 words 75 live 22 [] []  222s
+fp128 expm1 rdn K8 D20 n 350 marked 0 (right 0) wrong 0 insns 183 words 73 live 22 [] []  240s
+fp128 expm1 rup K8 D20 n 350 marked 0 (right 0) wrong 0 insns 184 words 74 live 22 [] []  247s
+fp128 expm1 rmm K8 D20 n 350 marked 1 (right 1) wrong 0 insns 182 words 72 live 22 ['0xbf8e0000000000000000000000000000'] []  252s
+fp128 log   rne K12 D37 n 350 marked 0 (right 0) wrong 0 insns 207 words 89 live 16 [] []  258s
+fp128 log   rtz K12 D37 n 350 marked 1 (right 1) wrong 0 insns 207 words 89 live 16 ['0x3fff0000000000000000000000000001'] []  262s
+fp128 log   rdn K12 D37 n 350 marked 1 (right 1) wrong 0 insns 207 words 89 live 16 ['0x3fff0000000000000000000000000001'] []  266s
+fp128 log   rup K12 D37 n 350 marked 1 (right 1) wrong 0 insns 207 words 89 live 16 ['0x3fff0000000000000000000000000001'] []  270s
+fp128 log   rmm K12 D37 n 350 marked 0 (right 0) wrong 0 insns 207 words 89 live 16 [] []  273s
+fp128 log2  rne K12 D37 n 350 marked 0 (right 0) wrong 0 insns 201 words 89 live 14 [] []  277s
+fp128 log2  rtz K12 D37 n 350 marked 0 (right 0) wrong 0 insns 201 words 89 live 14 [] []  280s
+fp128 log2  rdn K12 D37 n 350 marked 0 (right 0) wrong 0 insns 201 words 89 live 14 [] []  283s
+fp128 log2  rup K12 D37 n 350 marked 0 (right 0) wrong 0 insns 201 words 89 live 14 [] []  286s
+fp128 log2  rmm K12 D37 n 350 marked 0 (right 0) wrong 0 insns 201 words 89 live 14 [] []  291s
+fp128 log1p rne K12 D37 n 350 marked 1 (right 1) wrong 0 insns 241 words 90 live 18 ['0x3f8e0000000000000000000000000000'] []  309s
+fp128 log1p rtz K12 D37 n 350 marked 0 (right 0) wrong 0 insns 243 words 90 live 18 [] []  316s
+fp128 log1p rdn K12 D37 n 350 marked 0 (right 0) wrong 0 insns 243 words 90 live 18 [] []  330s
+fp128 log1p rup K12 D37 n 350 marked 0 (right 0) wrong 0 insns 241 words 90 live 18 [] []  341s
+fp128 log1p rmm K12 D37 n 350 marked 1 (right 1) wrong 0 insns 241 words 90 live 18 ['0x3f8e0000000000000000000000000000'] []  354s
+354s; skipped (deadline): none

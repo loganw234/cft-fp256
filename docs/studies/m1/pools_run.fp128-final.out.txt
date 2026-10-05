@@ -1,0 +1,22 @@
+# pools_run.py fp128 log,log2,log1p,exp, 12:56-13:01, the desktop about 45% busy. Final parameters (exp D 20, log family D 38).
+fp128 log   rne K12 D38 n 350 marked 0 (right 0) wrong 0 insns 208 words 90 live 16 [] []  17s
+fp128 log   rtz K12 D38 n 350 marked 1 (right 1) wrong 0 insns 208 words 90 live 16 ['0x3fff0000000000000000000000000001'] []  23s
+fp128 log   rdn K12 D38 n 350 marked 1 (right 1) wrong 0 insns 208 words 90 live 16 ['0x3fff0000000000000000000000000001'] []  26s
+fp128 log   rup K12 D38 n 350 marked 1 (right 1) wrong 0 insns 208 words 90 live 16 ['0x3fff0000000000000000000000000001'] []  30s
+fp128 log   rmm K12 D38 n 350 marked 0 (right 0) wrong 0 insns 208 words 90 live 16 [] []  40s
+fp128 log2  rne K12 D38 n 350 marked 0 (right 0) wrong 0 insns 202 words 90 live 14 [] []  49s
+fp128 log2  rtz K12 D38 n 350 marked 0 (right 0) wrong 0 insns 202 words 90 live 14 [] []  55s
+fp128 log2  rdn K12 D38 n 350 marked 0 (right 0) wrong 0 insns 202 words 90 live 14 [] []  68s
+fp128 log2  rup K12 D38 n 350 marked 0 (right 0) wrong 0 insns 202 words 90 live 14 [] []  76s
+fp128 log2  rmm K12 D38 n 350 marked 0 (right 0) wrong 0 insns 202 words 90 live 14 [] []  108s
+fp128 log1p rne K12 D38 n 350 marked 1 (right 1) wrong 0 insns 242 words 91 live 18 ['0x3f8e0000000000000000000000000000'] []  127s
+fp128 log1p rtz K12 D38 n 350 marked 0 (right 0) wrong 0 insns 244 words 91 live 18 [] []  134s
+fp128 log1p rdn K12 D38 n 350 marked 0 (right 0) wrong 0 insns 244 words 91 live 18 [] []  139s
+fp128 log1p rup K12 D38 n 350 marked 0 (right 0) wrong 0 insns 242 words 91 live 18 [] []  151s
+fp128 log1p rmm K12 D38 n 350 marked 1 (right 1) wrong 0 insns 242 words 91 live 18 ['0x3f8e0000000000000000000000000000'] []  168s
+fp128 exp   rne K7 D20 n 350 marked 1 (right 0) wrong 0 insns 188 words 72 live 23 ['0x3f8e0000000000000000000000000000'] []  192s
+fp128 exp   rtz K7 D20 n 350 marked 1 (right 1) wrong 0 insns 186 words 72 live 22 ['0xbf8e0000000000000000000000000000'] []  203s
+fp128 exp   rdn K7 D20 n 350 marked 1 (right 1) wrong 0 insns 186 words 72 live 22 ['0xbf8e0000000000000000000000000000'] []  208s
+fp128 exp   rup K7 D20 n 350 marked 1 (right 1) wrong 0 insns 185 words 71 live 22 ['0xbf8e0000000000000000000000000000'] []  226s
+fp128 exp   rmm K7 D20 n 350 marked 1 (right 1) wrong 0 insns 188 words 72 live 23 ['0x3f8e0000000000000000000000000000'] []  252s
+252s; skipped (deadline): none

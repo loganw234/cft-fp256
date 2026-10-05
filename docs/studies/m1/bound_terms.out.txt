@@ -1,0 +1,5 @@
+# bound_terms.py, final planners.
+exp/exp2 (relative to V), log family (relative to V); each term as log2
+fp64: bound 2^-99 | exp K=7 D=13: tail -103.5 trunc -108.1 rounding -102.7 reduction -109.5 -> total -102.0 | expm1 n=0 (rel. Z) K=8: total -102.0 | log K=12 D=23: tail -104.6 trunc -102.4 rounding -102.4 -> total -101.3
+fp128: bound 2^-159 | exp K=7 D=20: tail -163.5 trunc -169.5 rounding -222.7 reduction -229.5 -> total -163.5 | expm1 n=0 (rel. Z) K=8: total -164.6 | log K=12 D=38: tail -164.6 trunc -164.3 rounding -222.4 -> total -163.5
+fp256: bound 2^-283 | exp K=7 D=33: tail -287.5 trunc -291.4 rounding -470.7 reduction -477.5 -> total -287.4 | expm1 n=0 (rel. Z) K=8: total -286.7 | log K=12 D=68: tail -288.6 trunc -287.4 rounding -470.4 -> total -286.9

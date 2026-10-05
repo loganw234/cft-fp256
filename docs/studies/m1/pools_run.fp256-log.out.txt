@@ -1,0 +1,17 @@
+# pools_run.py fp256 log,log2,log1p, 12:13-12:19, the desktop 88-100% busy. Final parameters.
+fp256 log   rne K12 D68 n 512 marked 0 (right 0) wrong 0 insns 238 words 120 live 16 [] []  71s
+fp256 log   rtz K12 D68 n 512 marked 1 (right 1) wrong 0 insns 238 words 120 live 16 ['0x3ffff00000000000000000000000000000000000000000000000000000000001'] []  89s
+fp256 log   rdn K12 D68 n 512 marked 1 (right 1) wrong 0 insns 238 words 120 live 16 ['0x3ffff00000000000000000000000000000000000000000000000000000000001'] []  100s
+fp256 log   rup K12 D68 n 512 marked 1 (right 1) wrong 0 insns 238 words 120 live 16 ['0x3ffff00000000000000000000000000000000000000000000000000000000001'] []  111s
+fp256 log   rmm K12 D68 n 512 marked 0 (right 0) wrong 0 insns 238 words 120 live 16 [] []  134s
+fp256 log2  rne K12 D68 n 512 marked 0 (right 0) wrong 0 insns 232 words 120 live 14 [] []  163s
+fp256 log2  rtz K12 D68 n 512 marked 0 (right 0) wrong 0 insns 232 words 120 live 14 [] []  174s
+fp256 log2  rdn K12 D68 n 512 marked 0 (right 0) wrong 0 insns 232 words 120 live 14 [] []  182s
+fp256 log2  rup K12 D68 n 512 marked 0 (right 0) wrong 0 insns 232 words 120 live 14 [] []  189s
+fp256 log2  rmm K12 D68 n 512 marked 0 (right 0) wrong 0 insns 232 words 120 live 14 [] []  194s
+fp256 log1p rne K12 D68 n 512 marked 1 (right 1) wrong 0 insns 272 words 121 live 18 ['0x3ff1200000000000000000000000000000000000000000000000000000000000'] []  200s
+fp256 log1p rtz K12 D68 n 512 marked 0 (right 0) wrong 0 insns 274 words 121 live 18 [] []  205s
+fp256 log1p rdn K12 D68 n 512 marked 0 (right 0) wrong 0 insns 274 words 121 live 18 [] []  210s
+fp256 log1p rup K12 D68 n 512 marked 0 (right 0) wrong 0 insns 272 words 121 live 18 [] []  229s
+fp256 log1p rmm K12 D68 n 512 marked 1 (right 1) wrong 0 insns 272 words 121 live 18 ['0x3ff1200000000000000000000000000000000000000000000000000000000000'] []  300s
+300s; skipped (deadline): none

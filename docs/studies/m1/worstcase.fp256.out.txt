@@ -1,0 +1,13 @@
+# worstcase.py fp256, 12:25-12:26, the desktop busy. Final parameters.
+fp256 exp   rne: 66 placed arguments (66 on the main path), wrong 0, marked 0, worst log2(err/bound) -5.94  5s
+fp256 exp   rtz: 66 placed arguments (66 on the main path), wrong 0, marked 0, worst log2(err/bound) -5.94  7s
+fp256 exp2  rne: 88 placed arguments (88 on the main path), wrong 0, marked 0, worst log2(err/bound) -5.79  9s
+fp256 exp2  rtz: 88 placed arguments (88 on the main path), wrong 0, marked 0, worst log2(err/bound) -5.79  16s
+fp256 expm1 rne: 66 placed arguments (66 on the main path), wrong 0, marked 0, worst log2(err/bound) -3.86  20s
+fp256 expm1 rtz: 66 placed arguments (66 on the main path), wrong 0, marked 0, worst log2(err/bound) -3.86  21s
+fp256 log   rne: 100 placed arguments (100 on the main path), wrong 0, marked 0, worst log2(err/bound) -4.90  23s
+fp256 log   rtz: 100 placed arguments (100 on the main path), wrong 0, marked 0, worst log2(err/bound) -4.90  26s
+fp256 log2  rne: 100 placed arguments (100 on the main path), wrong 0, marked 0, worst log2(err/bound) -4.90  30s
+fp256 log2  rtz: 100 placed arguments (100 on the main path), wrong 0, marked 0, worst log2(err/bound) -4.90  32s
+fp256 log1p rne: 60 placed arguments (60 on the main path), wrong 0, marked 0, worst log2(err/bound) -8.29  33s
+fp256 log1p rtz: 60 placed arguments (60 on the main path), wrong 0, marked 0, worst log2(err/bound) -8.29  34s

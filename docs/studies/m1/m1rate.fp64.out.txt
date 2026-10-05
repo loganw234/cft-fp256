@@ -1,0 +1,13 @@
+# m1rate.py, the bound inflated to 2^-(p+6), 2,000 uniform fp64 arguments, rne and rtz, 11:06-11:08, the desktop about 1% busy. The log family then at D 24 (now 23).
+exp   fp64 rne bound 2^-(p+6): marked 42/2000 = 0.0210 (guess right 42), predicted 0.0224, wrong unmarked 0  7s
+exp   fp64 rtz bound 2^-(p+6): marked 52/2000 = 0.0260 (guess right 52), predicted 0.0224, wrong unmarked 0  29s
+exp2  fp64 rne bound 2^-(p+6): marked 36/2000 = 0.0180 (guess right 36), predicted 0.0227, wrong unmarked 0  42s
+exp2  fp64 rtz bound 2^-(p+6): marked 38/2000 = 0.0190 (guess right 38), predicted 0.0227, wrong unmarked 0  50s
+expm1 fp64 rne bound 2^-(p+6): marked 34/2000 = 0.0170 (guess right 34), predicted 0.0230, wrong unmarked 0  57s
+expm1 fp64 rtz bound 2^-(p+6): marked 56/2000 = 0.0280 (guess right 56), predicted 0.0230, wrong unmarked 0  84s
+log   fp64 rne bound 2^-(p+6): marked 46/2000 = 0.0230 (guess right 46), predicted 0.0221, wrong unmarked 0  95s
+log   fp64 rtz bound 2^-(p+6): marked 48/2000 = 0.0240 (guess right 48), predicted 0.0221, wrong unmarked 0  111s
+log2  fp64 rne bound 2^-(p+6): marked 50/2000 = 0.0250 (guess right 50), predicted 0.0234, wrong unmarked 0  126s
+log2  fp64 rtz bound 2^-(p+6): marked 41/2000 = 0.0205 (guess right 41), predicted 0.0234, wrong unmarked 0  132s
+log1p fp64 rne bound 2^-(p+6): marked 46/2000 = 0.0230 (guess right 46), predicted 0.0225, wrong unmarked 0  143s
+log1p fp64 rtz bound 2^-(p+6): marked 49/2000 = 0.0245 (guess right 49), predicted 0.0225, wrong unmarked 0  154s

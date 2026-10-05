@@ -1,0 +1,5 @@
+# consts_report.py, final planners.
+fp32: X_OVF(exp) 88.7228393555  X_UNF(exp) -103.972084045  X_M1(expm1) -18.0218  exp2 screens >= 128, <= -150  |n| < 2^11 |k| < 2^8
+fp64: X_OVF(exp) 709.782712893  X_UNF(exp) -745.133219102  X_M1(expm1) -38.1231  exp2 screens >= 1024, <= -1075  |n| < 2^14 |k| < 2^11  | exp/exp2 K7 D13, expm1 K8 D13, log family K12 D23
+fp128: X_OVF(exp) 11356.5234063  X_UNF(exp) -11433.4627433  X_M1(expm1) -79.7119  exp2 screens >= 16384, <= -16495  |n| < 2^18 |k| < 2^15  | exp/exp2 K7 D20, expm1 K8 D20, log family K12 D38
+fp256: X_OVF(exp) 181704.374501  X_UNF(exp) -181867.264088  X_M1(expm1) -165.662  exp2 screens >= 262144, <= -262379  |n| < 2^22 |k| < 2^19  | exp/exp2 K7 D33, expm1 K8 D33, log family K12 D68

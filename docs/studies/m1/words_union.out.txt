@@ -1,0 +1,7 @@
+# words_union.py, 13:08-13:11, final planners.
+fp64 rne: per function {'exp': 64, 'exp2': 65, 'expm1': 65, 'log': 75, 'log2': 75, 'log1p': 76}; exp family 79, log family 82, all six 139; with C4's div and sqrt 158 (C4's alone 38)
+fp64 rtz: per function {'exp': 64, 'exp2': 65, 'expm1': 68, 'log': 75, 'log2': 75, 'log1p': 76}; exp family 81, log family 82, all six 141; with C4's div and sqrt 159 (C4's alone 38)
+fp128 rne: per function {'exp': 72, 'exp2': 73, 'expm1': 72, 'log': 90, 'log2': 90, 'log1p': 91}; exp family 87, log family 97, all six 162; with C4's div and sqrt 181 (C4's alone 38)
+fp128 rtz: per function {'exp': 72, 'exp2': 73, 'expm1': 75, 'log': 90, 'log2': 90, 'log1p': 91}; exp family 89, log family 97, all six 164; with C4's div and sqrt 182 (C4's alone 38)
+fp256 rne: per function {'exp': 85, 'exp2': 86, 'expm1': 85, 'log': 120, 'log2': 120, 'log1p': 121}; exp family 100, log family 127, all six 205; with C4's div and sqrt 224 (C4's alone 38)
+fp256 rtz: per function {'exp': 85, 'exp2': 86, 'expm1': 88, 'log': 120, 'log2': 120, 'log1p': 121}; exp family 102, log family 127, all six 207; with C4's div and sqrt 225 (C4's alone 38)
