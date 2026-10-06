@@ -6,7 +6,7 @@ of them in a loop instead - one copy of the routine, called once a record.
 The compiler inlines every division and root (inline.py) unless the step
 would then pass CALL_LOOP_ABOVE instructions. Logan's rule (2026-10-02,
 "Build it now, last in C4"): the constant is the compiler's own - 32,768,
-the largest instruction memory a tile has (the U50's revision 7) - and is
+the instruction memory of the U50's revision-7 tile - and is
 never read from a target, so one image still serves every target that
 accepts it; it is part of the output version. Past it, BATCHES are
 looped, the largest first, until the step fits or none is left.

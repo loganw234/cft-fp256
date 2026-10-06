@@ -3019,7 +3019,7 @@ This section is the CONTRACT for R21 to R24, and all four are built
 golden-first: `seq.py` defines them and the software backend computes
 them, R21 and R22 at ABI 0.16 and R23 and R24 at ABI 0.17 (2026-10-02,
 the step-6 round's R8). Revision 8's RTL builds all four (2026-10-05,
-"Revision 8 in the tile", at the end), and a tile on a card carries them
+"Revision 8 in the tile", at the end), and tiles on a card have carried them
 since rev8a, the revision's first hardware image, which passed its card
 legs on 2026-10-06 (docs/VALIDATION.md). What a tile would need - R23's MODE
 bit, its pointer register, kernel argument and VERSION, and each item's

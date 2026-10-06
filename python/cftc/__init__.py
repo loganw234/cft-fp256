@@ -83,8 +83,8 @@ built-in targets that publish the bit. A bank the routines' words would
 take past 512 is `bank-capacity`. Until C4 such a system was refused
 `runtime-routine`, a name that went with it.
 
-A step whose routines, inlined, would pass 32,768 instructions - the
-largest instruction memory a tile has, a constant of the compiler's that
+A step whose routines, inlined, would pass 32,768 instructions - a
+revision-7 tile's instruction memory, a constant of the compiler's that
 no target is read for (callloop.CALL_LOOP_ABOVE; Logan's rule,
 2026-10-02) - runs batches of them in CALL LOOPS instead: one copy of a
 routine in a REPEAT over records in the scratch, the largest batch first,
