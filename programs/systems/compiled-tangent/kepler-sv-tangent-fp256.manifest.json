@@ -2,7 +2,7 @@
  "cftc_manifest": 1,
  "compiler": {
   "name": "cftc",
-  "version": 4
+  "version": 5
  },
  "source": {
   "path": "programs/systems/kepler-sv-tangent-fp256.cftl",
@@ -46,7 +46,10 @@
   "seq_features": "0x7ff1f"
  },
  "accepted_by": [
-  "sw"
+  "sw",
+  "u50-rev8",
+  "u50-rev8-quad",
+  "u50-rev8-deep"
  ],
  "uses": {
   "instructions": 1133,
@@ -903,7 +906,7 @@
  },
  "cost_model": {
   "assumes": "revision 7, a single-pass tile (docs/SEQUENCER.md R12-R19); measured on revision 7's quad on the U50, where ten compiled programs ran 2.2% to 5.8% slower than this model (docs/VALIDATION.md, 2026-10-02)",
-  "routines": "QUIET and ENDQUIET a cycle each, RAISE a beat a cycle once its register has landed: believed, from R18's prices for the control codes it built, since no tile has revision 8's R24",
+  "routines": "QUIET and ENDQUIET a cycle each, RAISE a beat a cycle once its register has landed: believed, from R18's prices for the control codes it built, since no compiled image with a routine has been timed on a card",
   "cycles_per_step_one_beat": 12758,
   "cycles_per_step_sixteen_beats": 18340
  },

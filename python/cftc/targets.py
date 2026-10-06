@@ -19,6 +19,14 @@ The built-in table, and where each number is stated:
                 golden-first). `sw:N` is the same backend opened at N
                 scratch slots a lane through cft_open_ex (cft-segrun's
                 --scratch-depth), N a power of two up to 32,768.
+  u50-rev8      rev8a, the U50's revision-8 single, with R21: 2^24
+                instructions, 4,096 scratch slots and 1,024 deposit slots
+                a lane (below).
+  u50-rev8-quad rev8q, revision 8's streaming quad, without R21: the
+                same capacities a tile; a program's lanes are cut across
+                the four tiles, so one image serves all four.
+  u50-rev8-deep rev8d, revision 8's deep single, with R21: the single's,
+                at 8,192 scratch slots a lane.
   u50-rev7      the U50's revision-7 single: docs/SEQUENCER.md, "Revision
                 7, the program limits per build" - 32,768 instructions,
                 2,048 scratch slots and 1,024 deposit slots a lane.
@@ -32,52 +40,51 @@ The built-in table, and where each number is stated:
                 four unless a build trims them (a trimmed build is a
                 Target of its own, written in code).
 
-PROVISIONAL, and not built in: revision 8's three images (docs/ROADMAP.md,
-"Revision 8: step 6's RTL revision", part 3; parcel E, 2026-10-05). Each
-holds 2^24 instructions a program, streamed (CAPS2[20:16] = 24, the plan's
+Revision 8's three images (docs/ROADMAP.md, "Revision 8: step 6's RTL
+revision", part 3; their targets parcel E's, 2026-10-05) each hold 2^24
+instructions a program, streamed (CAPS2[20:16] = 24, the plan's
 question 2), and the U50's 1,024 deposit slots and 512 constants a lane
-(CAPS 0x19faffff, unchanged from revision 7). Each publishes revision 8's
-flag control, so the run-time division and square root (C4's routines)
-compile for each where revision 7's targets refuse them `target-feature`.
-Their feature words are the plan's, computed from rtl/cft_krnl.sv's
-assembly ("What a revision-8 U50 tile reads"), and python/tests/
-test_cftc.py holds each target to the words it decodes from:
+(CAPS 0x19faffff, unchanged from revision 7). Each publishes revision
+8's flag control, FLAG_CONTROL (CAPS2[14]), so the run-time division and
+square root (C4's routines) compile for each where revision 7's targets
+refuse them `target-feature`. Each target is its image's words as
+host/src/caps_decode.h decodes them at VERSION 0x00000b00, and
+python/tests/test_cftc.py holds each to them:
 
-  u50-rev8       the single (rev8a), with R21: seq_features 0x7ff1f
-                 (CAPS2 0x00187ffc at 4,096 slots, 0x00187ffb at 2,048).
-                 Built "at the slots the quad will have", so its depth is
-                 the quad's.
-  u50-rev8-quad  the streaming quad WITHOUT R21: seq_features 0x77f1f,
-                 CAPS2[11] clear (CAPS2 0x001877fb at 2,048, the plan's;
-                 0x001877fc at 4,096, CAPS2[3:0] moved by the same
-                 assembly). Question 9's branch: probe L measured R21's
+  u50-rev8       rev8a, with R21, built "at the slots the quad will
+                 have": CAPS2 0x00187ffc, seq_features 0x7ff1f, as
+                 device-test -i read them on the card (2026-10-06).
+  u50-rev8-quad  rev8q, WITHOUT R21 (EN_AUGADD=0): CAPS2 0x001877fc,
+                 seq_features 0x77f1f - CAPS2[11] clear, AUGADD alone
+                 apart. Question 9's branch: probe L measured R21's
                  lanes at +10,595 LUTs a tile, far past the 2,000 that
                  would have kept the quad with them.
-  u50-rev8-deep  the deep single, with R21: seq_features 0x7ff1f, the
-                 single's words with CAPS2[3:0] at its depth (0x00187ffd
-                 at 8,192, 0x00187ffe at 16,384).
+  u50-rev8-deep  rev8d, with R21: CAPS2 0x00187ffd, seq_features
+                 0x7ff1f, the single's words with CAPS2[3:0] at its
+                 depth.
 
-Which values are provisional, and what decides each:
-  * the quad's scratch depth, 4,096 slots here, waits on probe K: 4,096 if
-    its projection of the quad fits, else 2,048 (the plan's question 5);
-    the single's follows the quad's;
-  * the deep build's, 8,192 here, waits on its closure in context: 16,384
-    if that closes, else 8,192.
-The instruction capacity, the deposit slots, the constants and the
-feature words are the plan's and not waiting on a probe.
+rev8q's and rev8d's words are the plan's, computed from rtl/cft_krnl.sv's
+assembly ("What a revision-8 U50 tile reads"), and each image's card
+legs read its words (device-test -i). The depths follow probe K
+(2026-10-05): the quad fits at 4,096 slots, so it is built at 4,096 and
+the single at the quad's; 16,384 slots would cross both SLRs, so the
+deep single is built at 8,192. The images and their card legs are
+recorded in docs/VALIDATION.md, step 6's closing entries.
 
-So they are kept out of BUILTIN until those depths are final (the lead's
-decision, 2026-10-05): get(), names() and the command line's --target do
-not see them - naming one is refused as any unknown target is - and no
-manifest's accepted_by lists them, so no manifest or certificate can name
-a target whose parameters will still move ("cftc 4 u50-rev8" would
-otherwise mean two images over time). Python reaches them through
-provisional(name), and compile_text(target=...) takes the Target itself.
-Joining BUILTIN is the lead's, at the image build: all three at once, as
-ONE output version step (python/cftc/outputs.py), with the committed
-manifests regenerated, the output record's block appended and the
-certificate corpus remade (`certificates/corpus.py make
---keep-version-1`), as e45a2f7 did for cftc 4.
+They joined the table together at the images' build, as ONE output
+version step (python/cftc/outputs.py; cftc's VERSION 4 to 5), with the
+committed manifests regenerated, the output record's block appended and
+the certificate corpus remade (`certificates/corpus.py make
+--keep-version-1`, as e45a2f7 remade it at cftc 4). Until then they
+were PROVISIONAL (the lead's decision on parcel E's question,
+2026-10-05): kept out of BUILTIN, get(), names(), the command line and
+accepted_by while their depths waited on probe K and on the images, so
+that no manifest or certificate named a target whose parameters would
+still move ("cftc 4 u50-rev8" would otherwise have meant two images over
+time), and reached by Python alone through provisional(name). That table
+and its function went when they joined (parcel TG, 2026-10-06): nothing
+else is provisional, and a table with no entry would have been a second
+way to look a target up that nothing used.
 """
 
 from dataclasses import dataclass
@@ -121,11 +128,15 @@ ALL_FORMATS = ("fp32", "fp64", "fp128", "fp256")
 SCRATCH_DEPTH_MAX = 1 << 15         # CAPS2[3:0] is a four-bit log2
 
 SW_FEATURES = 0x7ff1f               # ABI 0.17's software handle
-TILE_FEATURES = 0x7f1f              # every tile from revision 6 on
-# revision 8 (the plan's words): every bit cft.h defines, the software
-# handle's word; and the quad's, without R21's AUGADD (CAPS2[11])
+TILE_FEATURES = 0x7f1f              # every tile of revisions 6 and 7
+# revision 8: the single's and the deep single's word, every bit cft.h
+# defines - the software handle's - and the quad's, without R21's AUGADD
+# (CAPS2[11])
 REV8_FEATURES = 0x7ff1f
 REV8_QUAD_FEATURES = 0x77f1f
+REV8_INSNS = 1 << 24                # CAPS2[20:16] = 24, streamed
+REV8_DEPTH = 4096                   # rev8a and rev8q: probe K's 4,096
+REV8_DEEP_DEPTH = 8192              # rev8d: 16,384 would cross both SLRs
 
 
 @dataclass(frozen=True)
@@ -158,8 +169,24 @@ def _sw(depth=256):
                                "cft.h ABI 0.17")
 
 
+# The software backend first, then the U50's images, the newest revision
+# first, then the open core: the order of names(), of --targets and of
+# every manifest's accepted_by.
 BUILTIN = {
     "sw": _sw(),
+    "u50-rev8": Target("u50-rev8", ALL_FORMATS, REV8_INSNS, 512, REV8_DEPTH,
+                       1024, REV8_FEATURES,
+                       "rev8a, revision 8's single, with R21; "
+                       "docs/VALIDATION.md, step 6's closing entries"),
+    "u50-rev8-quad": Target("u50-rev8-quad", ALL_FORMATS, REV8_INSNS, 512,
+                            REV8_DEPTH, 1024, REV8_QUAD_FEATURES,
+                            "rev8q, revision 8's streaming quad, without "
+                            "R21, a tile of four; docs/VALIDATION.md, step "
+                            "6's closing entries"),
+    "u50-rev8-deep": Target("u50-rev8-deep", ALL_FORMATS, REV8_INSNS, 512,
+                            REV8_DEEP_DEPTH, 1024, REV8_FEATURES,
+                            "rev8d, revision 8's deep single, with R21; "
+                            "docs/VALIDATION.md, step 6's closing entries"),
     "u50-rev7": Target("u50-rev7", ALL_FORMATS, 32768, 512, 2048, 1024,
                        TILE_FEATURES,
                        "docs/SEQUENCER.md, revision 7's program limits"),
@@ -178,42 +205,8 @@ BUILTIN = {
 }
 
 
-# Revision 8's images, PROVISIONAL (the module's text): not built in, so
-# not reached by get(), names(), the command line or accepted_by. The
-# scratch depths wait on probe K (the quad's, and with it the single's)
-# and on the deep build's closure; the rest is the plan's.
-REV8_INSNS = 1 << 24                # CAPS2[20:16] = 24, streamed
-REV8_DEPTH = 4096                   # provisional: probe K, else 2,048
-REV8_DEEP_DEPTH = 8192              # provisional: 16,384 if that closes
-
-PROVISIONAL = {
-    "u50-rev8": Target("u50-rev8", ALL_FORMATS, REV8_INSNS, 512, REV8_DEPTH,
-                       1024, REV8_FEATURES,
-                       "docs/ROADMAP.md, revision 8's single (rev8a), with "
-                       "R21; provisional: its depth is the quad's"),
-    "u50-rev8-quad": Target("u50-rev8-quad", ALL_FORMATS, REV8_INSNS, 512,
-                            REV8_DEPTH, 1024, REV8_QUAD_FEATURES,
-                            "docs/ROADMAP.md, revision 8's streaming quad, "
-                            "without R21; provisional: its depth waits on "
-                            "probe K"),
-    "u50-rev8-deep": Target("u50-rev8-deep", ALL_FORMATS, REV8_INSNS, 512,
-                            REV8_DEEP_DEPTH, 1024, REV8_FEATURES,
-                            "docs/ROADMAP.md, revision 8's deep single, with "
-                            "R21; provisional: its depth waits on its "
-                            "closure"),
-}
-
-
-def provisional(name):
-    """A provisional target (PROVISIONAL) by name, or None. The way Python
-    and the tests reach revision 8's targets until they are built in;
-    get() never returns one."""
-    return PROVISIONAL.get(name)
-
-
 def get(name):
-    """A built-in target by name, `sw:N` included, or None. A provisional
-    target's name is not one: it is refused as any unknown name is."""
+    """A built-in target by name, `sw:N` included, or None."""
     if isinstance(name, Target):
         return name
     if name in BUILTIN:

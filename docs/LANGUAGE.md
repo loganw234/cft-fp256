@@ -393,8 +393,9 @@ their operands in those functions' order.
   8's flag control, docs/SEQUENCER.md, R24). The routine's internal
   attributes, such as the division's one truncating fma, are its own,
   and the source never sees them. An image holding one needs that
-  feature, so revision 7's targets refuse it, `target-feature`, and the
-  software targets compile and run it.
+  feature, so revision 7's targets refuse it, `target-feature`; the
+  software targets and revision 8's (`u50-rev8`, `u50-rev8-quad` and
+  `u50-rev8-deep`) compile it, and libcft's software backend runs it.
 - **A call loop.** A step whose routines, inlined, would pass 32,768
   instructions - the largest instruction memory a tile has - runs
   batches of them in loops instead: one copy of the routine in a
@@ -407,12 +408,13 @@ their operands in those functions' order.
   loop's instructions to its one copy - so a step whose routines sit one
   to a batch, a chain of divisions each reading the last, is compiled
   inlined past the constant: the software targets, whose instruction
-  memory is unbounded, take it. Revision 7's targets refuse it
+  memory is unbounded, take it, and so do revision 8's, which hold 2^24
+  instructions (verifier-VC4's 180 chained divisions: 34,201
+  instructions a step, inlined). Revision 7's targets refuse it
   `target-feature` first, as they refuse every image with a routine;
   a target that published flag control and held fewer instructions
   than the image would refuse it `program-capacity`, by name, and no
-  built-in target is that yet (verifier-VC4's 180 chained divisions:
-  34,201 instructions a step, inlined). An operand every call takes from one bank slot - the 1 of a
+  built-in target is that. An operand every call takes from one bank slot - the 1 of a
   reciprocal, the constant of `x / 3` - is read from the bank and kept
   out of the records. The constant is the compiler's own and no
   target's number, so one image still serves every target that takes
@@ -437,7 +439,8 @@ their operands in those functions' order.
   bodies with two loops would take 272). The constant is Logan's rule,
   so that is its consequence, and a writer has two ways through: compile
   for a deeper scratch - `--target sw:1024`, or any deeper `sw:N` up
-  to 32,768 slots, the image the same bytes - or write a step that
+  to 32,768 slots, or one of revision 8's targets at 4,096 and 8,192
+  slots, the image the same bytes - or write a step that
   stays under 32,768 instructions, with fewer routine calls a step.
   The loop's design departs from the step-6 plan's in four ways, each
   recorded in parcel C4's ledger and stated here or in
@@ -448,32 +451,34 @@ their operands in those functions' order.
   every call takes from one bank slot is kept out of the records; a
   batch of one call is never looped; and cftc's output version went to
   4 for the loop (python/cftc's docstring).
-- **Revision 8's targets, provisional** (parcel E, 2026-10-05). Revision
-  8's three images publish flag control: the single (`u50-rev8`, with
-  R21's augmented addition), the streaming quad (`u50-rev8-quad`, without
-  it - probe L measured R21's lanes at +10,595 LUTs a tile, so the quad is
-  built without them) and the deep single (`u50-rev8-deep`).
-  python/cftc/targets.py states each from the plan (docs/ROADMAP.md,
-  "Revision 8"): 2^24 instructions a program, streamed; 512 constants and
-  1,024 deposit slots a lane; and the plan's feature words, 0x7ff1f for
-  the single and the deep build, the software handle's, and 0x77f1f for
-  the quad. So a routine image compiles for each, the same bytes as for
-  the software targets, where revision 7's refuse it `target-feature`;
-  and a step past 32,768 instructions compiles for them too, as for the
-  software targets. Their scratch depths are PROVISIONAL: the quad's
-  4,096 slots if probe K's projection of it fits, else 2,048 (the
-  plan's question 5); the single's the quad's, since it is built "at the
-  slots the quad will have"; and the deep build's 8,192, or 16,384 if
-  that closes in context. One slot past each depth is refused
-  `scratch-capacity`, by name. Until those depths are final the three are
-  not built in (the lead's decision, 2026-10-05): `--target` and
-  `cftc.get_target` refuse their names as any unknown target's, and no
-  manifest's `accepted_by` lists them - otherwise "cftc 4 u50-rev8" in a
-  manifest or a certificate would mean two images over time. Python
-  reaches them as `targets.provisional(name)`. They join the built-in
-  table at the image build, all three at once, as one output version step
-  with the committed manifests, the output record and the certificate
-  corpus remade.
+- **Revision 8's targets** (parcel E, 2026-10-05; built in at cftc's
+  output version 5, parcel TG, 2026-10-06). Revision 8's three images
+  publish flag control: the single (`u50-rev8`, the image rev8a, with
+  R21's augmented addition), the streaming quad (`u50-rev8-quad`, rev8q,
+  without it - probe L measured R21's lanes at +10,595 LUTs a tile, so
+  the quad is built without them) and the deep single (`u50-rev8-deep`,
+  rev8d). python/cftc/targets.py states each as its image's words
+  decode (docs/ROADMAP.md, "Revision 8"): 2^24 instructions a program,
+  streamed; 512 constants and 1,024 deposit slots a lane; the feature
+  words 0x7ff1f for the single and the deep single, the software
+  handle's, and 0x77f1f for the quad; and 4,096 scratch slots a lane for
+  the single and the quad, 8,192 for the deep single. The depths follow
+  probe K (2026-10-05): the quad fits at 4,096 slots, the single is
+  built "at the slots the quad will have", and a deep single at 16,384
+  would cross both SLRs. rev8a's words are the ones device-test -i read
+  on the card (2026-10-06); the quad's and the deep single's are the
+  plan's. So a routine image compiles for each, the same bytes as for
+  the software targets, where revision 7's refuse it `target-feature`; a
+  step past 32,768 instructions compiles for them too, as for the
+  software targets; and one slot past each depth is refused
+  `scratch-capacity`, by name. Each is a `--target`, listed by
+  `--targets`, and named in the `accepted_by` of every manifest whose
+  image it fits. Until their depths were final the three were
+  provisional (the lead's decision, 2026-10-05): no name, list or
+  manifest saw them, so that "cftc 4 u50-rev8" never meant two images
+  over time. They joined the built-in table together, as one output
+  version step, 4 to 5, with the committed manifests, the output record
+  and the certificate corpus remade.
 - **A division by a constant** divides by the constant rounded once:
   `x / 3` is RN(x / RN(3)), the correctly rounded x/3 wherever the
   constant is exact in the format, and never a product by a rounded
@@ -2120,16 +2125,16 @@ The compiler's, reserved for it (L2).
   compiler carried them (D2's rule). C4 carries them as inlined routines
   ("The operations"), and the name went with it: an image holding a
   routine needs revision 8's flag control, so revision 7's targets
-  refuse it `target-feature`, by name, and the software targets compile
-  and run it. Every source the language accepts compiles or is refused
-  by name, and exit 70 stays a defect in the compiler.
+  refuse it `target-feature`, by name, and the software targets and
+  revision 8's compile it. Every source the language accepts compiles
+  or is refused by name, and exit 70 stays a defect in the compiler.
 
 The checker never raises any of the seven. The sentences below are their
 form; the compiler words each one for the case at hand.
 
 | name | what it refuses | its sentence |
 |---|---|---|
-| `scratch-capacity` | registers plus scratch past the target's: 2,048 slots on the U50's revision 7, 256 elsewhere, N on `sw:N`; on revision 8's provisional targets 4,096 and 8,192 for now ("The operations") | "this step keeps more values a lane than the target's registers and scratch slots hold" |
+| `scratch-capacity` | registers plus scratch past the target's: 4,096 slots on the U50's revision-8 single and quad and 8,192 on its deep single ("The operations"), 2,048 on revision 7, 256 elsewhere, N on `sw:N` | "this step keeps more values a lane than the target's registers and scratch slots hold" |
 | `program-capacity` | more instructions than the target's image holds | "this step lowers to more instructions than the target's image holds" |
 | `loader-bound` | more than 2^40 worst-case instructions, the loader's bound on every device | "this segment's worst case is past 2^40 instructions, the loader's bound on every device" |
 | `target-format` | a format the target does not carry | "this format is not one the target carries" |

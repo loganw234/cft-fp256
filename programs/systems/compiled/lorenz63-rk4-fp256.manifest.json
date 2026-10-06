@@ -2,7 +2,7 @@
  "cftc_manifest": 1,
  "compiler": {
   "name": "cftc",
-  "version": 4
+  "version": 5
  },
  "source": {
   "path": "programs/systems/lorenz63-rk4-fp256.cftl",
@@ -38,6 +38,9 @@
  },
  "accepted_by": [
   "sw",
+  "u50-rev8",
+  "u50-rev8-quad",
+  "u50-rev8-deep",
   "u50-rev7",
   "u50-rev7-quad",
   "u50-round2",

@@ -2149,13 +2149,18 @@ def leg_readback(count, rng):
 # (the nodes div and sqrt, softfloat's div and sqrt under the program's
 # attribute, L4), and the compiler carries each as a routine inlined where it
 # stands (C4): an image holding one needs revision 8's flag control, which
-# the software targets publish and revision 7's do not. D2's rule holds: every
-# source the language accepts compiles or is refused by name.
+# the software targets and revision 8's publish and revision 7's do not. D2's
+# rule holds: every source the language accepts compiles or is refused by
+# name.
 
 ROUTINE_TARGETS = ["sw", "sw:4096", "sw:32768", "u50-rev7", "u50-rev7-quad",
                    "u50-round2", "open-core"]
 SW_TARGETS = ("sw", "sw:4096", "sw:32768")
 REV7_TARGETS = ("u50-rev7", "u50-rev7-quad", "u50-round2", "open-core")
+# the built-in targets that publish flag control, in the table's order: an
+# image with a routine that fits their capacities lists these in its
+# manifest's accepted_by (built in at cftc's output version 5)
+FLAG_TARGETS = ["sw", "u50-rev8", "u50-rev8-quad", "u50-rev8-deep"]
 
 
 def compare_routine(c, states, tans, top):
@@ -2362,12 +2367,13 @@ def leg_routines(count, rng):
             failing, first, fok, ref = compare(c, lanes, None, steps)
             rcover(c, ref.flags)
             check(not failing and fok and "FLAG_CONTROL" in c.features and
-                  c.accepted_by == ["sw"],
+                  c.accepted_by == FLAG_TARGETS,
                   f"{base} {fmt}: {len(lanes)} lanes at 1, 2, 5 and {steps} "
                   f"steps equal the interpreter, FLAGS {ref.flags:#x} "
                   f"included; its {c.manifest['routines']['calls']} routines "
-                  f"need FLAG_CONTROL, and sw alone of the built-in targets "
-                  f"takes it",
+                  f"need FLAG_CONTROL, and of the built-in targets "
+                  f"{', '.join(c.accepted_by)} take it - those that "
+                  f"publish the bit",
                   f"{len(failing)} lanes differ from step {first}, FLAGS "
                   f"{'equal' if fok else 'differ'}")
             if fmt == "fp64":
@@ -2607,12 +2613,12 @@ def leg_call_loops(rng, segrun=None, audit=None, work=None):
     p = c.program
     looped = [(b.op, b.depth, len(b.calls)) for b in c.looped]
     check(looped == [("div", 2, 56)] and len(p.body) + 1 <= above and
-          c.accepted_by == ["sw"] and p.slots_used <= 256,
+          c.accepted_by == FLAG_TARGETS and p.slots_used <= 256,
           f"N = 8: the step, its 224 routines inlined, passes {above:,}; "
           f"its largest batch - the first two stages' 56 divisions of 1 - "
           f"looped alone brings it to {len(p.body) + 1:,} written, "
           f"{p.executed():,} run, {p.slots_used} scratch slots, accepted by "
-          f"sw ({time.perf_counter() - t0:.0f} s)",
+          f"{', '.join(c.accepted_by)} ({time.perf_counter() - t0:.0f} s)",
           f"looped {looped}, {len(p.body) + 1:,} written, "
           f"{p.slots_used} slots, accepted by {c.accepted_by}")
     g = c.ir
