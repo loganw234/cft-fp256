@@ -22,7 +22,9 @@ second is the card leg, which hw/card-segrun.sh runs on the box with the
 card, the identity it expects measured apart from the tool (sha256sum of
 the image, device-test -i): each certificate is made on the card, held to
 everything below, and made again on the software backend, its run blocks
-and its accuracy block compared byte for byte.
+and its accuracy block compared byte for byte. Section 14's card leg takes
+its per-lane branch from the same identity, VERSION and CAPS2[13]
+(segrun_check_v2.py, leg h), never from the image's name.
 
 First, git ignores the binary in both its forms, so a build of it leaves
 the next build id clean. Then, for each program below, keyed and then
@@ -2567,7 +2569,9 @@ def main():
                     "SHA-256, measured apart from the library (sha256sum)")
     ap.add_argument("--expect-version", help="with --device: VERSION, 8 hex")
     ap.add_argument("--expect-caps", help="with --device: CAPS [CAPS2], "
-                    "8 hex each")
+                    "8 hex each; with --expect-version, it decides whether "
+                    "section 14 expects the per-lane block written or "
+                    "refused (CAPS2[13] from VERSION 0xB00)")
     ap.add_argument("--expect-tiles", type=int, help="with --device: tiles")
     ap.add_argument("--no-wider", action="store_true",
                     help="no wider runs: for a device without fp128")
