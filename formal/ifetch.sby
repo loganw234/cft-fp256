@@ -176,6 +176,7 @@ connect -nounset -set \probe_ram_q    \dut.g_stream.u_fifo.ram_q
 connect -nounset -set \probe_byp_d    \dut.g_stream.u_fifo.byp_d
 connect -nounset -set \probe_byp_v1   \dut.g_stream.u_fifo.byp_v1
 connect -nounset -set \probe_byp_v2   \dut.g_stream.u_fifo.byp_v2
+connect -nounset -set \probe_pop_q    \dut.pop_q
 cd ..
 prep -top tb_ifetch_formal
 

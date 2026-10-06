@@ -55,7 +55,7 @@ PYTHON ?= python3
 
 .PHONY: sim simmc fp32 fp64 fp128 fp256 mulfrac mulshare simpleops normseg normshare \
         normprobe seedop reduceacc reduce krnl krnlf128 krnlf64f128 krnlseq quarter faults \
-        seq_core seq_coreu50 seq_coreu50mc ifetch seqprobe seqcycles seqtrace seqbp redprog krnlfused krnlplain cycles seqbanks \
+        seq_core seq_coreu50 seq_coreu50mc seq_corestr seq_corestr_full ifetch seqprobe seqcycles seqcyclesstr seqtrace seqbp redprog krnlfused krnlplain cycles seqbanks \
         mulpass mulcycle mulcycle2 fp32mc fp64mc fp128mc fp256mc reducemc \
         krnlmc krnlseqmc quartermc faultsmc seq_coremc seqbanksmc cyclesmc clean
 
@@ -73,7 +73,8 @@ SIM_BENCHES = fp32 fp64 fp128 fp256 mulfrac mulshare simpleops normseg \
               normshare seedop reduceacc reduce reducenowide krnl krnlf128 \
               krnlf64f128 \
               quarter faults redprog \
-              seq_core seq_coreu50 krnlseq seqbanks mulpass mulcycle mulcycle2 \
+              seq_core seq_coreu50 seq_corestr krnlseq krnlseqnoaug \
+              seqbanks mulpass mulcycle mulcycle2 \
               ifetch
 
 # A bench writes sim_build/<target name>/results.xml. One does not: the
@@ -100,10 +101,15 @@ sim: $(SIM_BENCHES)
 # pipe, a lane array or the kernel, run against the same golden model
 # with the multiplier iterated and the array paced - plus the two
 # benches that exist only for this configuration. `sim` is the
-# shipping default; this is the third-tier tile's own census.
+# shipping default; this is the third-tier tile's own census. Since
+# 2026-10-05 it also carries seq_corestr_full, the sequencer's bench whole
+# through the fetch at three read latencies, under Verilator: not a
+# multi-cycle bench, but the long tier's, as the board group is
+# (seq_corestr, below, says why).
 simmc: fp32mc fp64mc fp128mc fp256mc mulpass mulcycle reducemc krnlmc \
        quartermc faultsmc seq_coremc krnlseqmc seqbanksmc \
-       board boardkrnl boardseq boardseqode boardfp256
+       board boardkrnl boardseq boardseqode boardfp256 \
+       seq_corestr_full
 
 # The iterated chunk-column multiplier against exact integer
 # arithmetic, at every column count the three wide rungs can build -
@@ -423,6 +429,29 @@ krnlseq:
 		COCOTB_RESULTS_FILE=sim_build/krnlseq/results.xml \
 		&& $(PYTHON) check_results.py sim_build/krnlseq/results.xml
 
+# The quad's tile (revision 8's R21; docs/ROADMAP.md, question 9): the
+# kernel built WITHOUT R21, EN_AUGADD=0, which is how the quad ships -
+# Logan's answer to question 9 was "Only if probe L finds it cheap", and
+# probe L measured R21's lanes at +10,595 LUTs a tile. Every other target
+# builds R21 (the default, the single's and the deep build's), so without
+# this one `make sim` would never build the tile the quad carries.
+# A named subset of test_krnl_seq, not the whole bench a second time
+# (krnlseq is among the suite's longest):
+#   krnl_augadd, flipped by CAPS2[11] clear: the plan's words for this
+#     tile, an augadd and an augerr image each ending its block where
+#     the code stands (an unknown code's HALT, as on revision 7), and an
+#     R21-free program bit-exact;
+#   krnl_lane_mask, the ordinary sequencer case: ordinary programs,
+#     masked and not, on the array the engine shares;
+#   krnl_lane_flags, so R23 is held on the quad's configuration too.
+# A case added to test_krnl_seq reaches this target only when named here.
+krnlseqnoaug:
+	TESTCASE=krnl_augadd,krnl_lane_mask,krnl_lane_flags CFT_GENERICS="EN_AUGADD=0" $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
+		MODULE=test_krnl_seq SIM_BUILD=sim_build/krnlseqnoaug \
+		KRNL_PARAMS="-Pcft_krnl.EN_AUGADD=0" \
+		COCOTB_RESULTS_FILE=sim_build/krnlseqnoaug/results.xml \
+		&& $(PYTHON) check_results.py sim_build/krnlseqnoaug/results.xml
+
 # The kernel with BOTH fused ladders on - the configuration the size
 # campaign built, measured and equivalence-proved lane by lane, and
 # then never ran through the full-kernel bench, because Alveo had room
@@ -473,14 +502,21 @@ krnlplain:
 # The capacities an open-core configuration keeps (revision 7,
 # 2026-09-29). cft_krnl's SEQ_MAXD, SEQ_IMEM_D and SEQ_SCRATCH_D are
 # parameters since that revision and default to the U50's - 1,024
-# deposit slots, 32,768 instructions, 2,048 scratch slots - while the
+# deposit slots, 32,768 instructions (since revision 8 a 4,096-word store
+# and a 2^24 capacity), 2,048 scratch slots - while the
 # board was measured through openXC7 with 64, 16,384 and 256
 # (hw/openxc7, 2026-09-22) and the quarter tile has always had them. So
 # both name them. ONE list, handed to the simulator as -P and to the
 # bench as CFT_GENERICS, which is what test_krnl.py derives its
 # expected CAPS and CAPS2 from - KRNLF128_GENERICS's rule, so the build
 # and the expectation cannot be told two different stories.
-OPEN_CAPS_GENERICS = SEQ_MAXD=64 SEQ_IMEM_D=16384 SEQ_SCRATCH_D=256
+# SEQ_STREAM_D joined at revision 8 (R8S): equal to SEQ_IMEM_D it builds
+# no stream, and the open-core configurations keep streaming off - the
+# kernel's default is the U50's 2^24, which with a 16,384-word store would
+# stream past it. EN_AUGADD=0 joined with R21's decode (revision 8): the
+# open-core configurations build without R21, as the quad does, where the
+# kernel's default (the single's and the deep build's) builds it.
+OPEN_CAPS_GENERICS = SEQ_MAXD=64 SEQ_IMEM_D=16384 SEQ_SCRATCH_D=256 SEQ_STREAM_D=16384 EN_AUGADD=0
 BOARD_PARAMS = -Pcft_krnl.FUSE_NORM=1 -Pcft_krnl.FUSE_ALIGN=1                -Pcft_krnl.MUL_PASSES=$(MC) \
                $(foreach g,$(OPEN_CAPS_GENERICS),-Pcft_krnl.$(g))
 
@@ -647,7 +683,9 @@ seq_core:
 
 # The same bench with cft_seq built at the U50's capacities (revision 7,
 # 2026-09-29): 1,024 deposit slots, 32,768 instructions, 2,048 scratch
-# slots - rtl/cft_krnl.sv's SEQ_* defaults, which krnl_caps.py reads out
+# slots - and since revision 8 (R8S) a 4,096-word instruction store and a
+# 2^24 capacity, so a program past 4,096 instructions streams here -
+# rtl/cft_krnl.sv's SEQ_* defaults, which krnl_caps.py reads out
 # of that file so the numbers exist once. seq_core runs cft_seq at its
 # own defaults (64, 1,024, 256); this one is where every model run is at
 # 2,048 slots, the top slot is 2,047, a non-strict index wraps at 2,048
@@ -681,6 +719,75 @@ seq_coreu50mc:
 		KRNL_PARAMS="-Pcft_seq.MUL_PASSES=$(MC) $(foreach g,$(SEQ_U50_GENERICS),-Pcft_seq.$(g))" \
 		COCOTB_RESULTS_FILE=sim_build/seq_coreu50mc$(MC)/results.xml \
 		&& $(PYTHON) check_results.py sim_build/seq_coreu50mc$(MC)/results.xml
+
+# The same bench through the instruction fetch (revision 8, R8S; S8's
+# configuration, docs/studies/R8S-streaming.md section 8), as two targets
+# since 2026-10-05: this one in `make sim`, seq_corestr_full below in
+# simmc. Both build cft_seq with a 64-word store, against SeqRam with a
+# read latency of 0, 125 and 256 cycles taken a run at a time
+# (CFT_SEQ_LAT; the card's round trip is bounded by 144 and the design is
+# sized for 256). The cases that hold cycles pin latency 0, and their
+# programs fit the store; the streaming cases hold their own. One list
+# each: every word reaches the simulator as -Pcft_seq.<word> and the
+# bench as CFT_GENERICS.
+#
+# Why two. Until then seq_corestr was S8's configuration whole, every
+# case at a 2^16 capacity, and under Icarus it could not finish: in the
+# runner's sim stage on amd-arc-box at six jobs (2b84449) it was on case
+# 35 of 94 after 3 h 02 min, about five minutes a case, so SEQ_TIMEOUT's
+# four hours would end it, and the whole wanted eight or more. Nor did
+# the whole bench stream. Counted without a simulator
+# (tb/stream_census.py: the bench's own programs, cocotb stubbed), 13 of
+# its 99 cases run a program longer than the 64-word store, 66 runs of
+# the 1,595 counted. Every other program fits the store and runs
+# resident: at latency 0 those cases repeat seq_core's runs, and at 125
+# and 256 they add the main read engine's round trip, not the fetch's.
+#
+# So this target runs, by name, the cases written for the fetch - the
+# streaming cases, the capacity cases and the aborts that land on a
+# fetch - and the_whole_divide_and_root, the one other case whose
+# programs outgrow the store (twelve runs of up to 214 instructions), at
+# a 4,096-word capacity: a program of exactly the capacity is then about
+# 18,000 cycles, where 2^16's took 278,603. Left out by name:
+# a_program_longer_than_the_old_imem, whose 36,864 instructions need a
+# capacity past revision 7's 32,768 (seq_coreu50 runs it at latency 0,
+# seq_corestr_full at all three). A case added to the bench reaches this
+# target only once it is named here, and seq_corestr_full always.
+# TESTCASE= on the command line runs a subset instead, as everywhere.
+SEQ_STR_GENERICS = IMEM_D=64 STREAM_D=4096
+SEQ_STR_LAT ?= 0,125,256
+SEQ_STR_CASES = refusal_matrix a_program_of_exactly_the_capacity \
+                loop_bodies_past_the_store_cost_no_stall_a_pass \
+                nesting_four_deep_streamed block_restarts_after_a_retarget \
+                misaligned_instruction_sections the_stream_across_4k \
+                fetch_quiesces_before_the_next_block abort_on_a_fetch_fault \
+                abort_before_the_first_fetch abort_with_a_write_burst_committed \
+                abort_waits_for_a_late_b the_whole_divide_and_root
+SEQ_STR_EMPTY :=
+SEQ_STR_SPACE := $(SEQ_STR_EMPTY) $(SEQ_STR_EMPTY)
+SEQ_STR_COMMA := ,
+SEQ_STR_TESTCASE = $(or $(TESTCASE),$(subst $(SEQ_STR_SPACE),$(SEQ_STR_COMMA),$(strip $(SEQ_STR_CASES))))
+seq_corestr:
+	TESTCASE=$(SEQ_STR_TESTCASE) CFT_SEQ_LAT=$(SEQ_STR_LAT) CFT_GENERICS="$(SEQ_STR_GENERICS)" timeout $(SEQ_TIMEOUT) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_seq \
+		MODULE=test_seq_core SIM_BUILD=sim_build/seq_corestr \
+		KRNL_PARAMS="$(foreach g,$(SEQ_STR_GENERICS),-Pcft_seq.$(g))" \
+		COCOTB_RESULTS_FILE=sim_build/seq_corestr/results.xml \
+		&& $(PYTHON) check_results.py sim_build/seq_corestr/results.xml
+
+# ...and S8's configuration whole, what seq_corestr was until 2026-10-05:
+# every case of the bench at a 2^16 capacity and the three latencies. In
+# simmc, the long tier, and pinned to Verilator as boardkrnl and
+# boardseqode are, because under Icarus it is eight hours or more
+# (above). SEQ_STR_FULL_SIM=icarus puts it back, with SEQ_TIMEOUT raised
+# for it.
+SEQ_STR_FULL_GENERICS = IMEM_D=64 STREAM_D=65536
+SEQ_STR_FULL_SIM ?= verilator
+seq_corestr_full:
+	CFT_SEQ_LAT=$(SEQ_STR_LAT) CFT_GENERICS="$(SEQ_STR_FULL_GENERICS)" timeout $(SEQ_TIMEOUT) $(MAKE) -f cocotb.mk SIM=$(SEQ_STR_FULL_SIM) TOPLEVEL=cft_seq \
+		MODULE=test_seq_core SIM_BUILD=sim_build/seq_corestr_full \
+		KRNL_PARAMS="$(foreach g,$(SEQ_STR_FULL_GENERICS),-Pcft_seq.$(g))" \
+		COCOTB_RESULTS_FILE=sim_build/seq_corestr_full/results.xml \
+		&& $(PYTHON) check_results.py sim_build/seq_corestr_full/results.xml
 
 # The instruction fetch unit alone (revision 8, R8S; rtl/cft_ifetch.sv),
 # against SeqRam at read latencies 0, 125 and 256, driven by a model of
@@ -723,6 +830,17 @@ seqcycles:
 		MODULE=probe_seq_cycles SIM_BUILD=sim_build/seqcycles \
 		COCOTB_RESULTS_FILE=sim_build/seqcycles/results.xml \
 		&& $(PYTHON) check_results.py sim_build/seqcycles/results.xml
+
+# ...and its streaming rows (revision 8, R8S): the same probe at
+# seq_corestr_full's build, S8's 64-word store and 2^16 capacity, where its
+# streaming_costs prints what a program past the store costs at read
+# latencies 0, 125 and 256; at seqcycles' build (no stream) it says so.
+seqcyclesstr:
+	CFT_GENERICS="$(SEQ_STR_FULL_GENERICS)" timeout $(SEQ_TIMEOUT) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_seq \
+		MODULE=probe_seq_cycles SIM_BUILD=sim_build/seqcyclesstr \
+		KRNL_PARAMS="$(foreach g,$(SEQ_STR_FULL_GENERICS),-Pcft_seq.$(g))" \
+		COCOTB_RESULTS_FILE=sim_build/seqcyclesstr/results.xml \
+		&& $(PYTHON) check_results.py sim_build/seqcyclesstr/results.xml
 
 # The other diagnostic: one program, every cycle of the issue pipe and
 # the retire written to sim_build/trace/trace.txt (tb/probe_trace.py).

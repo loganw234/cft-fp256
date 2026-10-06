@@ -71,6 +71,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
 from cft_golden import FORMATS, PREC_CODE  # noqa: E402
 from cft_golden import softfloat as sf  # noqa: E402
 from cft_golden import seq  # noqa: E402
+import augadd_corners  # noqa: E402  (verifier-VC56's corner pool, R21)
 
 FP32, FP64, FP128, FP256 = (FORMATS[k] for k in
                             ("fp32", "fp64", "fp128", "fp256"))
@@ -102,7 +103,27 @@ def _seq_generic(name, default):
 
 
 MAXD = _seq_generic("MAXD", 64)
+# The instruction STORE since revision 8 (R8S), and the CAPACITY beside it:
+# cft_seq's STREAM_D defaults to IMEM_D, a tile that does not stream, which
+# is seq_core's. seq_coreu50 is the U50's 4,096-word store and 2^24
+# capacity; seq_corestr_full, S8's, a 64-word store and a 2^16 capacity;
+# and seq_corestr, in `make sim`, the same store and a 4,096-word capacity
+# under the cases written for the fetch. Most of this bench's programs fit
+# even a 64-word store: 13 of its 99 cases run one that streams past it
+# (tb/Makefile says which, and why the targets are two).
 IMEM_D = _seq_generic("IMEM_D", 1024)
+STREAM_D = _seq_generic("STREAM_D", IMEM_D)
+STREAMS = STREAM_D > IMEM_D
+# SeqRam's read latency, in cycles from an AR's acceptance to its first
+# beat (revision 8): CFT_SEQ_LAT is a comma list, and the bench takes its
+# values in turn, run by run, so every case that runs three programs or
+# more meets each. seq_corestr and seq_corestr_full run at 0, 125 and 256
+# (the card's round trip is bounded by 144; the design is sized for 256);
+# every other target at 0, the slave this bench always had. A case that
+# HOLDS cycles pins 0 (Bench.hold): its bounds were measured against that
+# slave.
+LATS = tuple(int(x) for x in
+             os.environ.get("CFT_SEQ_LAT", "0").split(",") if x.strip())
 # 256 -> 512 at revision 3 (R7): the ninth kx index bit made the
 # second half of the bank reachable, and cft_seq's DEFAULT moved with
 # it because tb/test_krnl.py holds cft_krnl's SEQ_KIDX_W against it.
@@ -111,6 +132,12 @@ KMEM_D = 512
 # Scratch slots a lane (revision 3, R4), and the reduction the indexed
 # forms apply. A power of two by construction.
 SCRATCH_D = _seq_generic("SCRATCH_D", 256)
+# Revision 8's R21 (the plan's question 9): 1, cft_seq's default, decodes
+# augadd and augerr; 0 is the quad's tile, where the two codes are unknown
+# ones (HALT), and the R21 cases run their other half (seq_core with
+# CFT_GENERICS="EN_AUGADD=0" and -Pcft_seq.EN_AUGADD=0; through the kernel,
+# tb/Makefile's krnlseqnoaug).
+EN_AUGADD = _seq_generic("EN_AUGADD", 1)
 
 # EVERY MODEL CALL IN THIS BENCH IS AT THE DUT'S DEPTH (revision 7). The
 # depth is part of what a non-strict STX/LDX means, so a model left at
@@ -201,6 +228,11 @@ ISI_BASE = 0x0D_0000
 # check here if the regions were adjacent. One bit a lane, so 64 KB is
 # half a million lanes - far more than any case below uses.
 MASK_BASE = 0x0E_0000
+# R23's per-lane flag block (revision 8), a byte a lane at LFLAGS_PTR: its
+# own region, for the reason every other block has one - a drain that wrote
+# the counts' region, or the mask's, would pass a check that shared one.
+# 64 KB is that many lanes.
+LF_BASE = 0x0F_0000
 D_BASE = 0x10_0000
 
 POISON = 0xA5
@@ -267,6 +299,19 @@ class SeqRam:
         self.has_wr = hasattr(dut, "m_wr_awvalid")
         self.rresp_at = None
         self.beats_for = None
+        # Read bursts accepted and not wholly delivered: an AR taken and
+        # waiting, or a burst with beats still to present. The abort's
+        # cases (revision 8) hold it to zero at done - every read in
+        # flight landed, a long burst drained to its RLAST - since a beat
+        # left here is the next run's first read.
+        self.pending = 0
+        # Cycles from a write burst's last W beat to its B response
+        # (verifier-VC12's, committed with its case): at 0 the slave this
+        # class has always been, answering the cycle after. The abort's
+        # wait for every B (S_ABORT's wr_bresp_left) is held only by a slave
+        # that answers late - abort_waits_for_a_late_b.
+        self.b_delay = 0
+        self.cyc = 0            # the cycle serve() is in
         self.reset_log()
 
     # -- test-side access ------------------------------------------------
@@ -286,6 +331,13 @@ class SeqRam:
         # and R16's read count is asserted against it rather than
         # inferred from the answer being right.
         self.arlog = []
+        # ...and, beside each, how many read bursts were still pending -
+        # accepted and not wholly delivered - as it was accepted
+        # (revision 8): a block's setup read issued while a fetch burst
+        # of the block before is still in flight shows here as a
+        # non-zero count, which is the quiesce failing.
+        self.arpend = []
+        self.arcyc = []         # the cycle each was accepted in
 
     def stage(self, addr, data):
         assert addr + len(data) <= self.size, "staging past the model RAM"
@@ -389,13 +441,14 @@ class SeqRam:
         # cyc + 1 + rd_latency, which at latency 0 is the very next
         # cycle - the slave this class has always been.
         pend, cur_r = [], None
-        awq, wq, bq, cur_w = [], [], 0, None
+        awq, wq, bq, cur_w = [], [], [], None
         arready, rvalid, rlast, rdata, rresp = 1, 0, 0, 0, 0
         bvalid = 0
         cyc = 0
 
         while True:
             await ReadOnly()
+            self.cyc = cyc
 
             # ---- read master -------------------------------------------
             if arready and _i(dut.m_rd_arvalid):
@@ -406,6 +459,8 @@ class SeqRam:
                 n = len(self.arlog)
                 beats = (alen + 1 if self.beats_for is None
                          else self.beats_for(n, alen + 1))
+                self.arpend.append(len(pend) + (cur_r is not None))
+                self.arcyc.append(cyc)
                 pend.append([addr, beats, cyc + 1 + self.rd_latency, n, 0])
                 self.ar_count += 1
                 self.arlog.append((addr, alen + 1))
@@ -417,6 +472,7 @@ class SeqRam:
                     cur_r = None
             if cur_r is None and pend and pend[0][2] <= cyc + 1:
                 cur_r = pend.pop(0)
+            self.pending = len(pend) + (cur_r is not None)
 
             was_valid, rvalid = rvalid, int(cur_r is not None)
             if rvalid:
@@ -462,10 +518,10 @@ class SeqRam:
                         f"WLAST at beat {cur_w[2]} of a burst AWLEN said was "
                         f"{cur_w[1]} beats long (AXI4 A3.4.1)")
                     if ends:
-                        bq += 1
+                        bq.append(cyc + self.b_delay)
                         cur_w = None
-                if not bvalid and bq:
-                    bq -= 1
+                if not bvalid and bq and bq[0] <= cyc:
+                    bq.pop(0)
                     bvalid = 1
 
             await RisingEdge(self.clk)
@@ -480,6 +536,76 @@ class SeqRam:
                     dut.m_rd_rdata.value = rdata
                     if self.rresp_at is not None:
                         dut.m_rd_rresp.value = rresp
+
+
+class Fault:
+    """One fault planted on one read burst (revision 8, the abort): the
+    `which`-th burst, in issue order, whose address lies in [lo, hi).
+
+      "short"  the burst returns one beat fewer than ARLEN asked, RLAST on
+               its last - a length fault the tile must END, where until
+               revision 8 it waited for ever;
+      "long"   one beat more, RLAST on the extra one - a length fault whose
+               extra beat must be DRAINED, where until revision 8 it was
+               handed to a later read as data;
+      "rresp"  beat `beat` of the burst answers SLVERR with the right data.
+
+    Installed on SeqRam's two hooks. The burst is found by its address,
+    read off the AR channel as SeqRam accepts it, so a case names a
+    region (the image, the bank, stream b) rather than counting bursts.
+    """
+
+    def __init__(self, dut, ram, lo, hi, kind, which=0, beat=0, k=1):
+        assert kind in ("short", "long", "rresp"), kind
+        self.dut, self.ram = dut, ram
+        self.lo, self.hi, self.kind = lo, hi, kind
+        # short or long by k beats (verifier-VC12's generalisation; 1 is
+        # the fault every case before it planted)
+        self.which, self.beat, self.k = which, beat, k
+        self.seen = 0
+        self.burst = None      # its number in SeqRam's arlog, once issued
+        self.asked = None
+        self.at_cyc = None     # the cycle the fault showed in
+
+    def _beats_for(self, n, asked):
+        addr = _i(self.dut.m_rd_araddr)
+        if self.burst is None and self.lo <= addr < self.hi:
+            if self.seen == self.which:
+                self.burst, self.asked = n, asked
+            self.seen += 1
+        if n == self.burst:
+            if self.kind == "short":
+                assert asked > self.k, "short by more than the burst has"
+                return asked - self.k
+            if self.kind == "long":
+                return asked + self.k
+        return asked
+
+    def _rresp_at(self, burst, beat):
+        # The cycle the beat that shows the fault was last presented in
+        # (it is accepted then): the SLVERR beat, a short burst's early
+        # RLAST, or a long one's beat without it. A fetch fault is held to
+        # no AR after it (Bench.faulted), where the fetch's bursts already
+        # in flight are issued after the faulted one's AR and before it.
+        if burst == self.burst:
+            shows = {"rresp": self.beat, "short": self.asked - self.k - 1,
+                     "long": self.asked - 1}[self.kind]
+            if beat == shows:
+                self.at_cyc = self.ram.cyc
+        return 2 if (self.kind == "rresp" and burst == self.burst
+                     and beat == self.beat) else 0
+
+    def install(self):
+        self.ram.beats_for = self._beats_for
+        self.ram.rresp_at = self._rresp_at
+
+    def remove(self):
+        self.ram.beats_for = None
+        self.ram.rresp_at = None
+        # SeqRam drives RRESP only while a hook is installed, so a
+        # planted SLVERR on the run's last beat would otherwise stand on
+        # the wire for the next run.
+        self.dut.m_rd_rresp.value = 0
 
 
 # ----------------------------------------------------------------------
@@ -582,8 +708,21 @@ def has_actall(insns):
 class Bench:
     def __init__(self, dut):
         self.dut = dut
-        self.ram = SeqRam(dut)
+        # Eight bursts accepted at once: the fetch keeps up to eight in
+        # flight (four live), and the main read engine one.
+        self.ram = SeqRam(dut, rd_depth=8)
         self.cases = Counter()
+        # Revision 8: a case that holds cycles runs at latency 0 (LATS);
+        # every other takes the latencies in turn, a run at a time.
+        self.hold = False
+        self.nrun = 0
+        self.lat = 0
+        # ...or one latency, named, for a case that compares runs at
+        # each latency in turn (None: the rotation).
+        self.pin = None
+        # Where the image is staged: a case that places the instruction
+        # section across a 4 KB page moves it.
+        self.prog_base = PROG_BASE
 
     async def start(self):
         dut = self.dut
@@ -604,6 +743,10 @@ class Bench:
 
     async def _go(self, budget, label):
         dut = self.dut
+        self.lat = (self.pin if self.pin is not None else
+                    0 if self.hold else LATS[self.nrun % len(LATS)])
+        self.nrun += 1
+        self.ram.rd_latency = self.lat
         await RisingEdge(dut.ap_clk)
         dut.start.value = 1
         # Cycles from the start pulse to `done`, kept for the cases that
@@ -619,7 +762,8 @@ class Bench:
             if type(exc).__name__ != "SimTimeoutError":
                 raise
             raise AssertionError(
-                f"{label}: no `done` within {budget} cycles. The module "
+                f"{label}: no `done` within {budget} cycles (read latency "
+                f"{self.lat}). The module "
                 f"issued {self.ram.ar_count} read burst(s) and "
                 f"{self.ram.aw_count} write burst(s); busy="
                 f"{_i(dut.busy)}.") from None
@@ -634,7 +778,7 @@ class Bench:
                bank=None, scratch_in=None):
         ram = self.ram
         ram.poison()
-        ram.stage(PROG_BASE, image)
+        ram.stage(self.prog_base, image)
         ebytes = fmt.width // 8
         if bank is not None:
             # Laid out exactly as an image's constant section is -
@@ -656,7 +800,7 @@ class Bench:
         assert CNT_BASE + cnt_bytes + GUARD <= D_BASE
 
     def _drive_cfg(self, fmt, n, bank_ptr=None, scratch=False,
-                   idx_mask=0, lane_mask=False):
+                   idx_mask=0, lane_mask=False, lane_flags=False):
         dut = self.dut
         dut.cfg_prec.value = PREC_CODE[fmt.name]
         dut.cfg_n.value = n
@@ -664,7 +808,7 @@ class Bench:
         dut.cfg_b.value = B_BASE
         dut.cfg_c.value = C_BASE
         dut.cfg_d.value = D_BASE
-        dut.cfg_prog.value = PROG_BASE
+        dut.cfg_prog.value = self.prog_base
         dut.cfg_cnt.value = CNT_BASE
         # Poisoned unless this run supplies a bank: a program without
         # flags.BANK_EXT must never read the pointer, and aiming it at
@@ -692,12 +836,12 @@ class Bench:
         # says it was not read.
         dut.cfg_mask_en.value = 1 if lane_mask else 0
         dut.cfg_mask.value = MASK_BASE if lane_mask else 0xDEAD_7000
-        # ...and revision 8's R23 flag block (its seam, 2026-10-02): no
-        # run here asks for it, and the CSR refuses MODE[24] on every
-        # build until R23 is built, so the pointer is aimed at nothing -
-        # a write there trips the write logger's window assertion.
-        dut.cfg_lflags_en.value = 0
-        dut.cfg_lflags.value = 0xDEAD_8000
+        # ...and revision 8's R23 flag block on the same terms: a run
+        # that does not ask (MODE[24] clear) must write nothing, so its
+        # pointer is aimed at nothing - a write there trips the write
+        # logger's window assertion; one that asks has it at LF_BASE.
+        dut.cfg_lflags_en.value = 1 if lane_flags else 0
+        dut.cfg_lflags.value = LF_BASE if lane_flags else 0xDEAD_8000
 
     # -- a refused run ---------------------------------------------------
 
@@ -729,7 +873,7 @@ class Bench:
 
     async def program(self, fmt, prog, a, b, c, n, label,
                       *, check_flags=True, image=None, bank=None,
-                      scratch_in=None):
+                      scratch_in=None, lane_flags=False):
         """Run `prog` over `n` lanes and compare the whole machine.
 
         `a`, `b`, `c` are the REAL streams, one value per lane in
@@ -753,7 +897,7 @@ class Bench:
         self._padding_selfcheck(fmt, prog, a, b, c, n, want, label,
                                 bank=bank, scratch_in=scratch_in)
         self._drive_cfg(fmt, n, bank_ptr=bank is not None,
-                        scratch=prog.scratch_io)
+                        scratch=prog.scratch_io, lane_flags=lane_flags)
 
         budget = self._budget(fmt, prog, n, len(image))
         refused, flags, err = await self._go(budget, label)
@@ -771,12 +915,16 @@ class Bench:
             windows.append((CNT_BASE, cnt_bytes, "count"))
         if sout_bytes:
             windows.append((SOUT_BASE, sout_bytes, "scratch-out"))
+        if lane_flags:
+            windows.append((LF_BASE, n, "lane flags"))
         self.ram.assert_writes_inside(windows, label)
         self.ram.assert_guards(windows, label)
 
         self._compare(fmt, prog, n, want, flags, err, a, b, c, label,
                       check_flags)
         self._compare_scratch_out(fmt, prog, n, want, label)
+        if lane_flags:
+            self._compare_lane_flags(n, want, [True] * n, flags, err, label)
         self.cases["program"] += 1
         return want
 
@@ -852,7 +1000,7 @@ class Bench:
         # on each. Derived from the tables, never typed.
         entries = sum(len(t) for t in tables if t is not None)
         entries += len(idx_scratch_in) if idx_scratch_in is not None else 0
-        budget += 64 * (entries + 64)
+        budget += self._rt() * (entries + 64)
 
         refused, flags, err = await self._go(budget, label)
         assert refused == 0, f"{label}: the module refused a valid program"
@@ -938,7 +1086,7 @@ class Bench:
     async def masked(self, fmt, prog, a, b, c, n, keep, label, *,
                      check_flags=True, check_reads=True, scratch_in=None,
                      pre=None, idx_a=None, idx_b=None, idx_c=None,
-                     idx_scratch_in=None):
+                     idx_scratch_in=None, lane_flags=False):
         """Run `prog` over `n` lanes with a lane mask and compare the
         whole machine: the lanes the mask keeps against the model, and
         the lanes it clears against the BYTES THAT WERE THERE BEFORE.
@@ -1005,17 +1153,17 @@ class Bench:
         pad = -len(raw) % BEAT_BYTES
         self.ram.stage(MASK_BASE, bytes(raw) + bytes([POISON]) * pad)
         self._drive_cfg(fmt, n, scratch=prog.scratch_io, lane_mask=True,
-                        idx_mask=idx_mask)
+                        idx_mask=idx_mask, lane_flags=lane_flags)
 
         budget = self._budget(fmt, prog, n, len(image))
         # ...plus the mask fetch, one round trip a block, and the
         # gather's own traffic where there is a table. Derived from the
         # tables and the geometry, never typed.
-        budget += 64 * (1 + -(-n // lanes_per_block(fmt)))
+        budget += self._rt() * (1 + -(-n // lanes_per_block(fmt)))
         entries = sum(len(t) for t in
                       (idx_a, idx_b, idx_c, idx_scratch_in)
                       if t is not None)
-        budget += 64 * (entries + 64) if entries else 0
+        budget += self._rt() * (entries + 64) if entries else 0
         refused, flags, err = await self._go(budget, label)
         assert refused == 0, f"{label}: the module refused a valid program"
 
@@ -1026,6 +1174,8 @@ class Bench:
             windows.append((CNT_BASE, cnt_bytes, "count"))
         if sout_bytes:
             windows.append((SOUT_BASE, sout_bytes, "scratch-out"))
+        if lane_flags:
+            windows.append((LF_BASE, n, "lane flags"))
         self.ram.assert_writes_inside(windows, label)
         self.ram.assert_guards(windows, label)
 
@@ -1033,6 +1183,8 @@ class Bench:
             self._check_mask_reads(fmt, n, label)
         self._compare_masked(fmt, prog, n, keep, want, flags, err, label,
                              check_flags)
+        if lane_flags:
+            self._compare_lane_flags(n, want, keep, flags, err, label)
         self.cases["masked"] += 1
         return want
 
@@ -1122,6 +1274,172 @@ class Bench:
             f"{label}: err[2:0]={err & 0x7} - the model memory answered "
             f"OKAY on every beat")
 
+    # -- a run the memory faults (revision 8, the abort) -----------------
+
+    async def faulted(self, fmt, prog, a, b, c, n, label, fault, *,
+                      expect, lanes_done=0, bank=None, scratch_in=None,
+                      idx_a=None, keep=None, fetch=False):
+        """Run `prog` over `n` lanes with `fault` planted on one read
+        burst, and hold the abort's rule (docs/ROADMAP.md, revision 8,
+        "The abort"; rtl/cft_seq.sv's contract, item 5):
+
+          "length"  a short or long burst: done comes, with err[2], and
+                    the run ended there - no burst issued after the
+                    faulted one, every read in flight landed (a long
+                    burst's extra beat drained), and the outputs exactly
+                    those of the lanes whose blocks finished before it
+                    (`lanes_done`), every other byte untouched;
+          "word"    a read fault on the header or an instruction: the
+                    same, with err[0] in place of err[2];
+          "data"    a read fault on data: the run COMPLETES, computes the
+                    model's answer (SeqRam returns the right bytes with
+                    its SLVERR), and says err[0].
+
+        A masked run takes `keep`, a gathered one `idx_a` (stream a's
+        table). The model is run as the case's own run would be. `fetch`
+        says the faulted burst is the instruction fetch's (revision 8,
+        R8S), whose fault ends the run through the same abort."""
+        assert expect in ("length", "word", "data"), expect
+        ebytes = fmt.width // 8
+        maxdep = prog.max_deposits
+        image = prog.to_bytes()
+        dep_bytes = n * maxdep * ebytes
+        cnt_bytes = 4 * n
+        want = seq.run(prog, list(a), list(b), list(c), bank=bank,
+                       scratch_in=scratch_in, idx_a=idx_a,
+                       lane_mask=None if keep is None else list(keep))
+        if keep is None:
+            keep = [True] * n
+        self._stage(fmt, image, a, b, c, n, dep_bytes, cnt_bytes, bank=bank,
+                    scratch_in=scratch_in)
+        if idx_a is not None:
+            raw = b"".join(int(t).to_bytes(4, "little") for t in idx_a)
+            raw += bytes(POISON for _ in range(-len(raw) % BEAT_BYTES))
+            self.ram.stage(IA_BASE, raw)
+        masked = not all(keep)
+        if masked:
+            raw = bytearray((n + 7) // 8)
+            for i, k in enumerate(keep):
+                if k:
+                    raw[i >> 3] |= 1 << (i & 7)
+            pad = -len(raw) % BEAT_BYTES
+            self.ram.stage(MASK_BASE, bytes(raw) + bytes([POISON]) * pad)
+        self._drive_cfg(fmt, n, bank_ptr=bank is not None,
+                        scratch=prog.scratch_io,
+                        idx_mask=1 if idx_a is not None else 0,
+                        lane_mask=masked)
+        budget = self._budget(fmt, prog, n, len(image))
+        budget += self._rt() * (len(idx_a) + 64) if idx_a is not None else 0
+        budget += self._rt() * (1 + -(-n // lanes_per_block(fmt))) if masked else 0
+        fault.install()
+        try:
+            refused, flags, err = await self._go(budget, label)
+        finally:
+            fault.remove()
+        assert fault.burst is not None, (
+            f"{label}: the fault was never planted - no read burst landed in "
+            f"[{fault.lo:#x}, {fault.hi:#x}) as number {fault.which}")
+        assert refused == 0, f"{label}: a faulted run reported a refusal"
+        assert self.ram.pending == 0, (
+            f"{label}: done with {self.ram.pending} read burst(s) still to "
+            f"land - a beat left on the channel is the next run's first read")
+        if expect == "length":
+            assert err & 0x4, (
+                f"{label}: err={err:#x}, no length fault (err[2]) reported for "
+                f"a {fault.kind} burst")
+            assert not err & 0x1, (
+                f"{label}: err={err:#x} - err[0] without a read fault planted")
+        else:
+            assert err & 0x1, (
+                f"{label}: err={err:#x}, no read fault (err[0]) reported")
+            assert not err & 0x4, (
+                f"{label}: err={err:#x} - a length fault where the burst's "
+                f"length was right")
+        nsout = prog.n_scratch_out if prog.scratch_io else 0
+        if expect == "data":
+            lanes_done = n
+        elif not fetch:
+            assert len(self.ram.arlog) == fault.burst + 1, (
+                f"{label}: {len(self.ram.arlog) - fault.burst - 1} read "
+                f"burst(s) issued after the faulted one (number "
+                f"{fault.burst}): an aborted run issues no new burst. "
+                f"{self.ram.arlog[fault.burst:fault.burst + 4]}")
+        else:
+            # The fetch keeps bursts in flight, so the ones issued after
+            # the faulted burst's AR and before its fault showed are
+            # legitimate; none may begin after it (two cycles to register
+            # the fault, one for the AR).
+            late = [(hex(a), c) for (a, _), c in
+                    zip(self.ram.arlog, self.ram.arcyc)
+                    if c > fault.at_cyc + 3]
+            assert not late, (
+                f"{label}: read burst(s) issued after the fetch's fault "
+                f"showed in cycle {fault.at_cyc}: {late[:4]}")
+        # The outputs: the model's for every lane of a block that finished
+        # (and the caller's), the caller's poison for every other.
+        got_dep = self.ram.fetch(D_BASE, dep_bytes)
+        got_cnt = self.ram.fetch(CNT_BASE, cnt_bytes)
+        got_so = self.ram.fetch(SOUT_BASE, n * nsout * ebytes)
+        poison_el = bytes([POISON]) * ebytes
+        for i in range(n):
+            ran = i < lanes_done and keep[i]
+            for s in range(maxdep):
+                raw = got_dep[(i * maxdep + s) * ebytes:
+                              (i * maxdep + s + 1) * ebytes]
+                if ran:
+                    g = int.from_bytes(raw, "little")
+                    assert g == want.deposits[i * maxdep + s], (
+                        f"{label}: deposit[lane {i} slot {s}] got {g:#x} want "
+                        f"{want.deposits[i * maxdep + s]:#x}")
+                else:
+                    assert raw == poison_el, (
+                        f"{label}: deposit[lane {i} slot {s}] written "
+                        f"({raw.hex()}) by a run that ended before its block")
+            raw = got_cnt[4 * i:4 * i + 4]
+            if ran:
+                assert int.from_bytes(raw, "little") == want.counts[i], (
+                    f"{label}: count[lane {i}] got "
+                    f"{int.from_bytes(raw, 'little')} want {want.counts[i]}")
+            else:
+                assert raw == b"\xa5" * 4, (
+                    f"{label}: count[lane {i}] written ({raw.hex()}) by a run "
+                    f"that ended before its block")
+            for s in range(nsout):
+                raw = got_so[(i * nsout + s) * ebytes:
+                             (i * nsout + s + 1) * ebytes]
+                if ran:
+                    assert (int.from_bytes(raw, "little")
+                            == want.scratch_out[i * nsout + s]), (
+                        f"{label}: scratch_out[lane {i} slot {s}] differs")
+                else:
+                    assert raw == poison_el, (
+                        f"{label}: scratch_out[lane {i} slot {s}] written by a "
+                        f"run that ended before its block")
+        windows = []
+        if dep_bytes:
+            windows.append((D_BASE, dep_bytes, "deposit"))
+        if cnt_bytes:
+            windows.append((CNT_BASE, cnt_bytes, "count"))
+        if nsout:
+            windows.append((SOUT_BASE, n * nsout * ebytes, "scratch-out"))
+        self.ram.assert_writes_inside(windows, label)
+        if lanes_done == 0:
+            self.ram.assert_no_writes(label)
+        if expect == "data":
+            assert flags == want.flags, (
+                f"{label}: FLAGS {flags:#07b}, model {want.flags:#07b}")
+        self.cases["faulted"] += 1
+        self.dut._log.info(
+            f"{label}: err={err:#x}, {len(self.ram.arlog)} read bursts, "
+            f"{self.last_cycles:.0f} cycles to done")
+        return want
+
+    def _rt(self):
+        """A single-beat read's round trip, for the budgets: the state
+        machine's handful of cycles and the memory's latency at its
+        worst for this run (revision 8's LATS)."""
+        return 64 + (0 if self.hold else max(LATS))
+
     def _budget(self, fmt, prog, n, image_bytes):
         blocks = max(1, -(-n // lanes_per_block(fmt)))
         worst = worst_case_insns(prog.insns)
@@ -1181,7 +1499,54 @@ class Bench:
                               + blk * nsout * 4 + 64
                               + blk * prog.max_deposits * 4 + 64
                               + 6 * NBEATS + 400))
+        # Revision 8: a memory with a round trip (LATS) charges every read
+        # burst its latency - the header, the image's bursts, a block's
+        # mask, scratch-in and streams - and a program past the store
+        # streams: a redirect a block at most at its restart, one a loop
+        # pass at most, each a round trip and a few bursts, and the stream
+        # itself. A bound, budgeted at the worst latency the run may meet.
+        lat = (self.pin if self.pin is not None else
+               0 if self.hold else max(LATS))
+        bursts = 4 + image_bytes // (64 * BEAT_BYTES) + 8 * blocks
+        if STREAMS and len(prog.insns) > IMEM_D:
+            bursts += blocks * (2 + worst // 16)
+            cycles += blocks * worst * 2
+        cycles += bursts * (lat + 64)
         return min(cycles, 8_000_000)
+
+    def _compare_lane_flags(self, n, want, keep, flags, err, label):
+        """R23's block (revision 8) against the model's Result.lane_flags:
+        lane i's byte at LF_BASE + i for every lane the caller has, and the
+        caller's poison for a masked one - the counts' rule. Then the three
+        identities, from the bytes the TILE wrote (docs/SEQUENCER.md, R23):
+        over the lanes the run owns, the OR of [4:0] is FLAGS, the OR of
+        [6:5] is STATUS[5:4] (err[4:3]) and the OR of [7] is STATUS[6]
+        (err[5])."""
+        got = self.ram.fetch(LF_BASE, n)
+        bad = []
+        for i in range(n):
+            if keep[i]:
+                if got[i] != want.lane_flags[i]:
+                    bad.append((i, got[i], want.lane_flags[i]))
+            elif got[i] != POISON:
+                bad.append((i, got[i], "untouched"))
+        assert not bad, (
+            f"{label}: {len(bad)}/{n} lane-flag bytes differ from the model "
+            f"(lane, got, want): {bad[:8]}")
+        owned = [got[i] for i in range(n) if keep[i]]
+        acc = 0
+        for v in owned:
+            acc |= v
+        assert (acc & 0x1F) == flags, (
+            f"{label}: the bytes' [4:0] OR to {acc & 0x1F:#07b} and FLAGS is "
+            f"{flags:#07b}")
+        assert ((acc >> 5) & 3) == ((err >> 3) & 3), (
+            f"{label}: the bytes' [6:5] OR to {(acc >> 5) & 3:#04b} and "
+            f"STATUS[5:4] is {(err >> 3) & 3:#04b}")
+        assert ((acc >> 7) & 1) == ((err >> 5) & 1), (
+            f"{label}: the bytes' [7] OR to {(acc >> 7) & 1} and STATUS[6] "
+            f"is {(err >> 5) & 1}")
+        self.cases["lane_flags"] += 1
 
     def _compare_scratch_out(self, fmt, prog, n, want, label):
         """The block the run hands back through SCRATCH_OUT_PTR, against
@@ -1457,9 +1822,18 @@ async def refusal_matrix(dut):
         FP32, raw_image(FP32, body, consts, prec=7),
         "precision code 7 is not on the ladder")
 
+    # The capacity plus one, refused at the header with no instruction
+    # read. Since revision 8 the capacity is STREAM_D, past the store's
+    # IMEM_D on a tile that streams (2^24 on the U50's, whose image would
+    # be 128 MB), so the image is the header alone: the count is what is
+    # refused (R8S-streaming.md, section 8). Until revision 8 this was an
+    # image of IMEM_D + 1 halts.
     await bench.refuse(
-        FP32, raw_image(FP32, [seq.halt()] * (IMEM_D + 1)),
-        f"n_insns {IMEM_D + 1} exceeds IMEM_D")
+        FP32, raw_image(FP32, [], n_insns=STREAM_D + 1),
+        f"n_insns {STREAM_D + 1} exceeds the capacity STREAM_D")
+    assert bench.ram.arlog == [(PROG_BASE, 1)], (
+        f"the capacity plus one: the tile read {bench.ram.arlog[:4]} - a "
+        f"count past the capacity is refused from the header beat alone")
     await bench.refuse(
         FP32, raw_image(FP32, body,
                         [sf.one_bits(FP32)] * (KMEM_D + 1)),
@@ -3160,6 +3534,9 @@ async def scratch_wipe_costs_what_was_written(dut):
     256."""
     bench = Bench(dut)
     await bench.start()
+    # It holds cycles, measured against the slave this bench always
+    # had: every run at read latency 0 (revision 8's LATS).
+    bench.hold = True
     fmt = FP32
     lpb = lanes_per_block(fmt)
     blocks = 4
@@ -3294,6 +3671,9 @@ async def scratch_first_block_after_reset_costs_one_sub_array(dut):
     mean less three of the next run's blocks (f681dee 4,249)."""
     bench = Bench(dut)
     await bench.start()
+    # It holds cycles, measured against the slave this bench always
+    # had: every run at read latency 0 (revision 8's LATS).
+    bench.hold = True
     watch = _BroadcastWatch(dut)
     fmt = FP32
     lpb = lanes_per_block(fmt)
@@ -3400,6 +3780,9 @@ async def scratch_preload_nothing_reads_is_not_loaded(dut):
     cycles logged against R5's 41,300."""
     bench = Bench(dut)
     await bench.start()
+    # It holds cycles, measured against the slave this bench always
+    # had: every run at read latency 0 (revision 8's LATS).
+    bench.hold = True
     fmt = FP32
     lpb = lanes_per_block(fmt)
     n = lpb
@@ -4148,6 +4531,9 @@ async def control_codes_hold_their_overlap(dut):
     """
     bench = Bench(dut)
     await bench.start()
+    # It holds cycles, measured against the slave this bench always
+    # had: every run at read latency 0 (revision 8's LATS).
+    bench.hold = True
     fmt = FP32
     n = 4 * lanes_per_block(fmt)
     # Every program measured before any is judged, so a red run still
@@ -4439,6 +4825,9 @@ async def masked_beats_hold_their_saving(dut):
     dense run) and the after-side, and answers what the model says."""
     bench = Bench(dut)
     await bench.start()
+    # It holds cycles, measured against the slave this bench always
+    # had: every run at read latency 0 (revision 8's LATS).
+    bench.hold = True
     fmt = FP32
     lpb, lpbeat = lanes_per_block(fmt), lanes_per_beat(fmt)
     n = 4 * lpb
@@ -4642,6 +5031,9 @@ async def loads_cost_no_more_than_before(dut):
         return
     bench = Bench(dut)
     await bench.start()
+    # It holds cycles, measured against the slave this bench always
+    # had: every run at read latency 0 (revision 8's LATS).
+    bench.hold = True
     cost = {}
     for name in ("fp32", "fp64", "fp128", "fp256"):
         fmt = FORMATS[name]
@@ -4685,6 +5077,9 @@ async def store_then_load_costs_what_the_sentence_says(dut):
     possible gain), never more."""
     bench = Bench(dut)
     await bench.start()
+    # It holds cycles, measured against the slave this bench always
+    # had: every run at read latency 0 (revision 8's LATS).
+    bench.hold = True
     fmt = FP32
     n = 4 * lanes_per_block(fmt)
     iand = seq.alu(sf.OP_IAND, 4, 0, 0)
@@ -4875,6 +5270,9 @@ async def masked_chains_cost_no_more_than_before(dut):
         return
     bench = Bench(dut)
     await bench.start()
+    # It holds cycles, measured against the slave this bench always
+    # had: every run at read latency 0 (revision 8's LATS).
+    bench.hold = True
     F = sf.OP_FMA
     cost = {}
     for name in ("fp32", "fp64", "fp128", "fp256"):
@@ -5905,6 +6303,9 @@ async def masked_every_lane_completes_with_nothing_written(dut):
     """
     bench = Bench(dut)
     await bench.start()
+    # It holds cycles, measured against the slave this bench always
+    # had: every run at read latency 0 (revision 8's LATS).
+    bench.hold = True
     for name in ("fp32", "fp256"):
         fmt = FORMATS[name]
         n = lanes_per_block(fmt) + 1
@@ -6099,3 +6500,2299 @@ async def masked_scratch_out_drains_a_converged_lane(dut):
                 f"convergence says, so the case is mis-built")
     dut._log.info("the scratch-out drain skips a masked lane and keeps a "
                   "converged one")
+
+
+# ======================================================================
+# revision 8: the abort - a read burst of the wrong length ends the run
+# ======================================================================
+#
+# docs/ROADMAP.md, "Revision 8", "The abort: a read burst of the wrong
+# length ends the run", and rtl/cft_seq.sv's contract, item 5. Each case
+# plants one fault on one read of a run (Fault, on SeqRam's hooks), holds
+# the faulted run to Bench.faulted's rule, and then runs a clean program
+# on the same instance against the model: a beat of the faulted run left
+# on the channel - a long burst not drained - is that run's first read,
+# and a short burst still counted hangs it.
+
+def _abort_prog(fmt):
+    """Three streams read, three deposits, one constant: every read a
+    run can make of the image and the operands has a beat to fault."""
+    A, M = sf.OP_ADD, sf.OP_MUL
+    return seq.Program(fmt, [
+        seq.alu(A, 3, ra=0, rc=2),
+        seq.alu(M, 4, ra=1, rb=3),
+        seq.alu(sf.OP_FMA, 5, ra=4, rb=0, rc=0, kc=True),
+        seq.deposit(3), seq.deposit(4), seq.deposit(5),
+        seq.halt()], consts=[sf.one_bits(fmt)], max_deposits=3)
+
+
+async def _clean_after(bench, fmt, label):
+    """The run after a faulted one, against the model: nothing of the
+    faulted run is left in flight to be read as this one's."""
+    n = lanes_per_block(fmt) + 3
+    await bench.program(fmt, _abort_prog(fmt), operands(fmt, n, 811),
+                        operands(fmt, n, 812), operands(fmt, n, 813), n,
+                        f"{label}, then a clean run")
+
+
+@cocotb.test()
+async def abort_header_and_image(dut):
+    """The header beat and the image: a long header (one beat, so it
+    cannot be short), a SLVERR on it, a short and a long image burst, a
+    SLVERR on a beat holding an instruction - each ends the run before any
+    block, writing nothing - and a SLVERR on a beat holding only constants,
+    which is data: the run completes with err[0] and the model's answer."""
+    bench = Bench(dut)
+    await bench.start()
+    fmt = FP32
+    n = 20
+    a, b, c = (operands(fmt, n, s) for s in (801, 802, 803))
+    prog = _abort_prog(fmt)
+    img = len(prog.to_bytes())
+    assert img > 32 + BEAT_BYTES, "the image must be a multi-beat read"
+    hdr = (PROG_BASE, PROG_BASE + 1)
+    body = (PROG_BASE + 32, PROG_BASE + img)
+    for lohi, kind, expect, what in (
+            (hdr, "long", "length", "a long header beat"),
+            (hdr, "rresp", "word", "a SLVERR on the header beat"),
+            (body, "short", "length", "a short image burst"),
+            (body, "long", "length", "a long image burst")):
+        label = f"abort: {what}"
+        f = Fault(dut, bench.ram, *lohi, kind)
+        await bench.faulted(fmt, prog, a, b, c, n, label, f, expect=expect)
+        await _clean_after(bench, fmt, label)
+    # an instruction's beat: the image's first beat holds the constant and
+    # seven instructions' bytes, and its last beat the last instructions'
+    for beat in (0, -(-(img - 32) // BEAT_BYTES) - 1):
+        label = f"abort: a SLVERR on image beat {beat}, an instruction's"
+        f = Fault(dut, bench.ram, *body, "rresp", beat=beat)
+        await bench.faulted(fmt, prog, a, b, c, n, label, f, expect="word")
+        await _clean_after(bench, fmt, label)
+    # A beat of constants alone is DATA. fp256 with three constants: the
+    # image's first three beats are the constants, the fourth the first
+    # instructions.
+    f256 = FP256
+    one = sf.one_bits(f256)
+    p256 = seq.Program(f256, [
+        seq.alu(sf.OP_ADD, 3, ra=0, rc=0, kc=True),
+        seq.alu(sf.OP_ADD, 3, ra=3, rc=1, kc=True),
+        seq.alu(sf.OP_ADD, 3, ra=3, rc=2, kc=True),
+        seq.deposit(3), seq.halt()],
+        consts=[one, sf.max_normal_bits(f256), sf.min_subnormal_bits(f256)],
+        max_deposits=1)
+    n2 = 5
+    a2, b2, c2 = (operands(f256, n2, s) for s in (821, 822, 823))
+    body2 = (PROG_BASE + 32, PROG_BASE + len(p256.to_bytes()))
+    for k in (0, 2):
+        label = f"a SLVERR on the fp256 image's constant beat {k} (data)"
+        f = Fault(dut, bench.ram, *body2, "rresp", beat=k)
+        await bench.faulted(f256, p256, a2, b2, c2, n2, label, f,
+                            expect="data")
+    label = "abort: a SLVERR on the fp256 image's first instruction beat"
+    f = Fault(dut, bench.ram, *body2, "rresp", beat=3)
+    await bench.faulted(f256, p256, a2, b2, c2, n2, label, f, expect="word")
+    await _clean_after(bench, f256, label)
+    dut._log.info(f"the abort, header and image: {bench.cases['faulted']} "
+                  f"faulted runs")
+
+
+@cocotb.test()
+async def abort_bank_and_scratch_in(dut):
+    """The two other multi-beat reads before the first instruction: a
+    BANK_EXT image's bank and the scratch-in block. A short or a long
+    burst ends the run; a SLVERR on either is data, and the run
+    completes."""
+    bench = Bench(dut)
+    await bench.start()
+    fmt = FP32
+    n = 24
+    a, b, c = (operands(fmt, n, s) for s in (831, 832, 833))
+    bank = [sf.one_bits(fmt)] + operands(fmt, 11, 834)
+    prog = seq.Program(fmt, [
+        seq.alu(sf.OP_ADD, 3, ra=0, rc=1, kc=True),
+        seq.alu(sf.OP_MUL, 4, ra=3, rb=9, kb=True),
+        seq.deposit(3), seq.deposit(4), seq.halt()],
+        flags=seq.FLAG_BANK_EXT, n_consts=12, max_deposits=2)
+    blo = (BANK_BASE, BANK_BASE + 0x8000)
+    for kind, expect in (("short", "length"), ("long", "length"),
+                         ("rresp", "data")):
+        label = f"abort: a {kind} bank burst"
+        f = Fault(dut, bench.ram, *blo, kind, beat=1)
+        await bench.faulted(fmt, prog, a, b, c, n, label, f, expect=expect,
+                            bank=bank)
+        await _clean_after(bench, fmt, label)
+    nsin = 3
+    sprog = seq.Program(fmt, [
+        seq.ldl(3, 0), seq.ldl(4, 2),
+        seq.alu(sf.OP_ADD, 5, ra=3, rc=4),
+        seq.alu(sf.OP_ADD, 5, ra=5, rc=0),
+        seq.stl(5, 1), seq.deposit(5), seq.halt()],
+        flags=seq.FLAG_SCRATCH_IO, n_scratch_in=nsin, n_scratch_out=2,
+        max_deposits=1)
+    sin = operands(fmt, n * nsin, 835)
+    slo = (SIN_BASE, SIN_BASE + 0x30000)
+    for kind, expect in (("short", "length"), ("long", "length"),
+                         ("rresp", "data")):
+        label = f"abort: a {kind} scratch-in burst"
+        f = Fault(dut, bench.ram, *slo, kind, beat=2)
+        await bench.faulted(fmt, sprog, a, b, c, n, label, f, expect=expect,
+                            scratch_in=sin)
+        await _clean_after(bench, fmt, label)
+
+
+@cocotb.test()
+async def abort_streams(dut):
+    """The three operand streams, each a multi-beat read every block: a
+    short and a long burst in the first block end the run with nothing
+    written; a long or a short one in the SECOND block leaves the first
+    block's outputs written in full and the second's untouched; a SLVERR on
+    a stream is data, and the run completes."""
+    bench = Bench(dut)
+    await bench.start()
+    for fmt in (FP32, FP64):
+        lpb = lanes_per_block(fmt)
+        n = 2 * lpb + 5
+        a, b, c = (operands(fmt, n, s) for s in (841, 842, 843))
+        prog = _abort_prog(fmt)
+        for r, base in enumerate((A_BASE, B_BASE, C_BASE)):
+            lohi = (base, base + 0x10000)
+            for kind, expect, which, done in (
+                    ("short", "length", 0, 0), ("long", "length", 0, 0),
+                    ("long", "length", 1, lpb), ("short", "length", 1, lpb),
+                    ("rresp", "data", 0, n)):
+                label = (f"abort: {fmt.name} stream {'abc'[r]}, a {kind} "
+                         f"burst in block {which}")
+                f = Fault(dut, bench.ram, *lohi, kind, which=which, beat=3)
+                await bench.faulted(fmt, prog, a, b, c, n, label, f,
+                                    expect=expect, lanes_done=done)
+            await _clean_after(bench, fmt, label)
+
+
+@cocotb.test()
+async def abort_single_beat_reads(dut):
+    """The single-beat reads: the lane mask's (R17) and a gather's table
+    and element reads (R16). A single beat cannot be short; a long one
+    ends the run, its extra beat drained."""
+    bench = Bench(dut)
+    await bench.start()
+    fmt = FP32
+    lpb = lanes_per_block(fmt)
+    n = lpb + 9
+    a, b, c = (operands(fmt, n, s) for s in (851, 852, 853))
+    prog = _abort_prog(fmt)
+    keep = _keep(n, 1)
+    for which, done in ((0, 0), (1, lpb)):
+        label = f"abort: a long mask read in block {which}"
+        f = Fault(dut, bench.ram, MASK_BASE, MASK_BASE + 0x10000, "long",
+                  which=which)
+        await bench.faulted(fmt, prog, a, b, c, n, label, f, expect="length",
+                            lanes_done=done, keep=keep)
+        await _clean_after(bench, fmt, label)
+    src = operands(fmt, 3 * n, 854)
+    tbl = _perm_table(n, len(src), 855)
+    for lohi, what in (((IA_BASE, IA_BASE + 0x10000), "table"),
+                       ((A_BASE, A_BASE + 0x10000), "element")):
+        label = f"abort: a long gather {what} read"
+        f = Fault(dut, bench.ram, *lohi, "long", which=2)
+        await bench.faulted(fmt, prog, src, b, c, n, label, f,
+                            expect="length", idx_a=tbl)
+        await _clean_after(bench, fmt, label)
+
+
+# ======================================================================
+# revision 8: the instruction fetch, through the whole sequencer (R8S)
+# ======================================================================
+#
+# docs/studies/R8S-streaming.md, sections 8 and 13; rtl/cft_seq.sv's
+# fetch hooks and rtl/cft_ifetch.sv. At seq_core the tile does not stream
+# (STREAM_D == IMEM_D) and these cases hold today's machine; at
+# seq_coreu50 a program past 4,096 instructions streams; at seq_corestr
+# and seq_corestr_full (a 64-word store, capacities of 4,096 and 2^16, read
+# latencies 0, 125 and 256) these cases' programs run past the store, but
+# for the resident twins that set a line. seq_corestr runs these cases,
+# by name, beside the_whole_divide_and_root (tb/Makefile);
+# seq_corestr_full runs every case in this file, most of them resident.
+
+FETCH_OUT_MAX, FETCH_BURST = 8, 8      # rtl/cft_ifetch.sv's defaults
+
+
+def _long_program(fmt, n, ends="halt"):
+    """prog_fills_imem's shape (tb/test_krnl_seq.py), n instructions: every
+    lane dropped by a SETACT of +0, so the REPEAT that follows finds none
+    active and its body is SKIPPED, walked to the matching ENDREP at two
+    cycles a word through REPEAT/ENDREP pairs - a word the fetch got wrong,
+    aliased or misaligned, lands the skip elsewhere and the program
+    diverges. Then ACTALL and the last words execute. `ends` "halt" ends in
+    HALT; "implicit" in a DEPOSIT, so the block ends by the implicit halt
+    with pc at n - which needs pc's extra bit when n is the capacity."""
+    if ends == "halt":
+        tail = [seq.endrep(), seq.actall(),
+                seq.alu(sf.OP_ADD, 20, ra=0, rc=2), seq.deposit(20),
+                seq.halt()]
+    else:
+        tail = [seq.endrep(), seq.actall(),
+                seq.alu(sf.OP_ADD, 20, ra=0, rc=2),
+                seq.alu(sf.OP_MUL, 21, ra=20, rb=1), seq.deposit(21)]
+    body = [seq.setact(5), seq.repeat(2)]
+    fill_end = n - len(tail)
+    i = 2
+    while i < fill_end:
+        if i + 1 < fill_end and (i % 3):
+            body += [seq.repeat(2), seq.endrep()]
+            i += 2
+        else:
+            body.append(seq.alu(sf.OP_ADD, rd=(i % 32), ra=0, rc=1))
+            i += 1
+    body += tail
+    assert len(body) == n
+    return seq.Program(fmt, body, max_deposits=1)
+
+
+async def _long_run(bench, fmt, n_insns, ends, label):
+    prog = _long_program(fmt, n_insns, ends)
+    n = 9
+    await bench.program(fmt, prog, operands(fmt, n, 900 + n_insns % 97),
+                        operands(fmt, n, 901), operands(fmt, n, 902), n,
+                        label)
+
+
+@cocotb.test()
+async def a_program_longer_than_the_old_imem(dut):
+    """36,864 instructions - revision 7's 32,768 and a 4,096-word store's
+    worth more - on a tile that streams: the bulk skipped through the
+    stream, the last words executed at addresses past 2^15, held to the
+    model. Beside it the capacity plus one is refused at the header
+    (refusal_matrix). A tile that does not stream, or holds less, says so
+    and runs nothing here."""
+    bench = Bench(dut)
+    await bench.start()
+    n_insns = 32768 + 4096
+    if not STREAMS or STREAM_D < n_insns:
+        dut._log.info(f"not on this build: capacity {STREAM_D}, store "
+                      f"{IMEM_D} - no program of {n_insns} instructions")
+        return
+    for k in range(len(LATS)):
+        await _long_run(bench, FP32, n_insns, "halt",
+                        f"{n_insns} instructions, streamed")
+    dut._log.info(f"{n_insns} instructions past a {IMEM_D}-word store: "
+                  f"{bench.cases['program']} runs, last {bench.last_cycles:.0f} "
+                  f"cycles at latency {bench.lat}")
+
+
+@cocotb.test()
+async def a_program_of_exactly_the_capacity(dut):
+    """Two images of exactly STREAM_D instructions in prog_fills_imem's
+    shape: one ends in HALT, the other in a DEPOSIT, so the block ends by
+    the implicit halt with pc EQUAL to the capacity. pc one bit short
+    would wrap it to 0 and the block would restart for ever: that one
+    fails by the budget (R8S-streaming.md, section 2, "Widths"). Each
+    image runs at every read latency the build runs (since 2026-10-05;
+    until then the two ran once each, at the first two). At the U50's
+    2^24 the image is 128 MB and is not simulated; seq_core's 1,024 (no
+    stream), seq_corestr's 4,096 and seq_corestr_full's 65,536 run it."""
+    bench = Bench(dut)
+    await bench.start()
+    if STREAM_D > 65536:
+        dut._log.info(f"not on this build: an image of {STREAM_D} "
+                      f"instructions is not simulated")
+        return
+    for lat in LATS:
+        bench.pin = lat
+        for ends in ("halt", "implicit"):
+            how = "HALT" if ends == "halt" else "the implicit halt"
+            await _long_run(bench, FP32, STREAM_D, ends,
+                            f"{STREAM_D} instructions, ending by {how}, "
+                            f"latency {lat}")
+            dut._log.info(f"capacity {STREAM_D} ({ends}): "
+                          f"{bench.last_cycles:.0f} cycles at latency "
+                          f"{bench.lat}")
+    bench.pin = None
+
+
+def _indep(k, seed=0):
+    """k ALU instructions none of which reads another's result: r3..r10
+    from r0..r2 in turn, so an instruction costs its beats."""
+    out = []
+    for i in range(k):
+        rd = 3 + ((i + seed) % 8)
+        if i % 3 == 1:
+            out.append(seq.alu(sf.OP_MUL, rd, ra=0, rb=1))
+        else:
+            out.append(seq.alu((sf.OP_ADD, sf.OP_ADD, sf.OP_SUB)[i % 3], rd,
+                               ra=(i % 3), rc=((i + 1) % 3)))
+    return out
+
+
+def _loop_prog(fmt, start, body, trips):
+    """A loop whose body is `body` independent instructions from pc
+    `start` (its REPEAT at start - 1), then two deposits."""
+    pre = _indep(start - 1, seed=5)
+    return seq.Program(fmt, pre + [seq.repeat(trips)] + _indep(body) +
+                       [seq.endrep(), seq.deposit(3), seq.deposit(4),
+                        seq.halt()], max_deposits=2)
+
+
+@cocotb.test()
+async def loop_bodies_past_the_store_cost_no_stall_a_pass(dut):
+    """The store covers the stream's refill (R8S-streaming.md, sections 3
+    and 4), held as cycles a pass at every latency the build runs, one
+    full fp32 block (sixteen beats an instruction). A pass is the
+    difference of four trips and two over two. Two resident loops (20 and
+    50 instructions from pc 5, inside even a 64-word store) give a pass's
+    cost per instruction and its fixed part; then, against that line:
+
+      * a 200-instruction body from pc 5, which starts in the store and
+        runs past it - every image cftc emits that is larger than the
+        store: within 2% and 16 cycles of the line, no stall a pass;
+      * a 200-instruction body from pc 100, past the store and longer
+        than it, captured to the store's depth: at most one redirect a
+        pass over the line (latency + 300);
+      * a 40-instruction body from pc 100, past the store and inside its
+        depth, captured on its first pass: from the third pass, within 2%
+        and 16 cycles of the line, as its resident twin costs.
+
+    Where the store holds every one of them (seq_core, seq_coreu50) the
+    three are resident and the line holds them trivially."""
+    bench = Bench(dut)
+    await bench.start()
+    fmt = FP32
+    n = lanes_per_block(fmt)
+    a, b, c = (operands(fmt, n, s) for s in (930, 931, 932))
+
+    async def per_pass(start, body, label):
+        cost = []
+        for trips in (2, 4):
+            prog = _loop_prog(fmt, start, body, trips)
+            await bench.program(fmt, prog, a, b, c, n,
+                                f"{label}, {trips} trips, latency {bench.pin}")
+            cost.append(bench.last_cycles)
+        return (cost[1] - cost[0]) / 2
+
+    for lat in LATS:
+        bench.pin = lat
+        p20 = await per_pass(5, 20, "resident 20")
+        p50 = await per_pass(5, 50, "resident 50")
+        per_insn = (p50 - p20) / 30
+        fixed = p20 - 20 * per_insn
+
+        def line(k):
+            return k * per_insn + fixed
+        inside = await per_pass(5, 200, "200 from pc 5")
+        past_long = await per_pass(100, 200, "200 from pc 100")
+        past_fit = await per_pass(100, 40, "40 from pc 100")
+        dut._log.info(
+            f"latency {lat}: a pass costs {per_insn:.2f} cycles an "
+            f"instruction + {fixed:.1f}; 200 from pc 5: {inside:.1f} "
+            f"(line {line(200):.1f}); 200 from pc 100: {past_long:.1f}; "
+            f"40 from pc 100: {past_fit:.1f} (line {line(40):.1f}) - "
+            f"store {IMEM_D}, capacity {STREAM_D}")
+        assert abs(inside - line(200)) <= 0.02 * line(200) + 16, (
+            f"latency {lat}: a body that starts in the store and runs past it "
+            f"costs {inside:.1f} cycles a pass against the resident line's "
+            f"{line(200):.1f}: the store no longer covers the refill")
+        assert past_long <= 1.02 * line(200) + 16 + lat + 300, (
+            f"latency {lat}: a body past the store and longer than it costs "
+            f"{past_long:.1f} cycles a pass, more than one redirect over the "
+            f"line's {line(200):.1f}")
+        assert abs(past_fit - line(40)) <= 0.02 * line(40) + 16, (
+            f"latency {lat}: a captured body costs {past_fit:.1f} cycles a "
+            f"pass from its third, against its resident twin's "
+            f"{line(40):.1f}: the capture did not hold it")
+    bench.pin = None
+
+
+def _nest_program(fmt):
+    """Four nested loops with bodies on both sides of a 64-word store's
+    range, a skipped loop at every depth (REPEAT 0, which the loader
+    refuses and the tile is defined to skip, so the program is built
+    unchecked), and lanes leaving as r2 counts down in the innermost body
+    - so loops exit early at every depth and later REPEATs find no lane
+    and are skipped."""
+    k0 = 0                                     # the constant 1.0
+
+    def alus(k, seed):
+        return _indep(k, seed)
+
+    def skipped(k, seed):
+        return ([seq.encode(seq.REPEAT, ctrl=True, imm=0)] + alus(k, seed) +
+                [seq.repeat(2)] + alus(2, seed + 1) + [seq.endrep(),
+                                                       seq.endrep()])
+    count = [seq.alu(sf.OP_SUB, 2, ra=2, rc=k0, kc=True), seq.setact(2)]
+    l4 = ([seq.repeat(3)] + alus(6, 1) + skipped(2, 2) + count +
+          alus(3, 3) + [seq.deposit(3), seq.endrep()])
+    l3 = ([seq.repeat(2)] + alus(5, 4) + skipped(3, 5) + l4 + alus(4, 6) +
+          [seq.endrep()])
+    l2 = ([seq.repeat(2)] + alus(40, 7) + skipped(1, 8) + l3 +
+          alus(30, 9) + [seq.endrep()])
+    l1 = ([seq.repeat(3)] + alus(6, 10) + skipped(4, 11) + l2 +
+          alus(7, 12) + [seq.endrep()])
+    insns = alus(2, 13) + l1 + alus(5, 14) + [seq.deposit(4), seq.halt()]
+    return unchecked(fmt, insns, consts=[sf.one_bits(fmt)], max_deposits=40)
+
+
+@cocotb.test()
+async def nesting_four_deep_streamed(dut):
+    """_nest_program over two blocks (so the second restarts at pc 0 after
+    the first moved the store), lanes leaving at their own trip, at every
+    latency the build runs: bit for bit with the model."""
+    bench = Bench(dut)
+    await bench.start()
+    fmt = FP32
+    prog = _nest_program(fmt)
+    n = lanes_per_block(fmt) + 17
+    one = sf.one_bits(fmt)
+    # r2 counts down by 1.0 a pass of the innermost body: lane i leaves
+    # after 1 + i % 12 of them, so lanes leave at every depth's pass.
+    cnt = [sf.round_pack(fmt, 0, 1 + i % 12, 0)[0] for i in range(n)]
+    for k in range(max(1, len(LATS))):
+        await bench.program(fmt, prog, operands(fmt, n, 940 + k),
+                            [one] * n, cnt, n,
+                            f"nesting four deep ({len(prog.insns)} words)")
+    dut._log.info(f"nesting four deep: {len(prog.insns)} instructions, store "
+                  f"{IMEM_D}, {bench.cases['program']} runs")
+
+
+@cocotb.test()
+async def block_restarts_after_a_retarget(dut):
+    """A loop past the store that fits it, captured each block, over three
+    blocks: every block's pc 0 is outside the store the block before left,
+    and is fetched again - held to the model at every latency."""
+    bench = Bench(dut)
+    await bench.start()
+    fmt = FP32
+    prog = _loop_prog(fmt, 100, 40, 3)
+    n = 3 * lanes_per_block(fmt) - 5
+    for k in range(max(1, len(LATS))):
+        await bench.program(fmt, prog, operands(fmt, n, 950 + k),
+                            operands(fmt, n, 951), operands(fmt, n, 952), n,
+                            "three blocks, a captured loop past the store")
+        dut._log.info(f"three blocks past the store: {bench.last_cycles:.0f} "
+                      f"cycles at latency {bench.lat}")
+
+
+def _misaligned_prog(fmt, nconsts, bank_ext=False):
+    """About 120 instructions using the constants, a loop past a 64-word
+    store; its instruction section starts at 32 + 4 x nconsts at fp32."""
+    insns = (_indep(70, 1) + [seq.repeat(3)] +
+             [seq.alu(sf.OP_FMA, 3, ra=0, rb=1, rc=k % max(1, nconsts),
+                      kc=nconsts > 0) for k in range(20)] +
+             [seq.endrep()] + _indep(25, 2) +
+             [seq.deposit(3), seq.deposit(4), seq.halt()])
+    consts = [sf.one_bits(fmt)] + list(range(1, nconsts)) if nconsts else []
+    if bank_ext:
+        return seq.Program(fmt, insns, flags=seq.FLAG_BANK_EXT,
+                           n_consts=nconsts, max_deposits=2), consts
+    return seq.Program(fmt, insns, consts=consts, max_deposits=2), None
+
+
+@cocotb.test()
+async def misaligned_instruction_sections(dut):
+    """The instruction section at every 4-byte granule offset modulo 32:
+    fp32 images with 0 to 7 constants put it at 32 + 4k, and a BANK_EXT
+    image's is at 32. Each streams past a 64-word store and loops back,
+    held to the model (the realigner's granule, and cfg_ibase's sum)."""
+    bench = Bench(dut)
+    await bench.start()
+    fmt = FP32
+    n = 20
+    for k in range(8):
+        prog, _ = _misaligned_prog(fmt, k)
+        await bench.program(fmt, prog, operands(fmt, n, 960 + k),
+                            operands(fmt, n, 961), operands(fmt, n, 962), n,
+                            f"section at byte {32 + 4 * k}")
+    prog, bank = _misaligned_prog(fmt, 5, bank_ext=True)
+    await bench.program(fmt, prog, operands(fmt, n, 970),
+                        operands(fmt, n, 971), operands(fmt, n, 972), n,
+                        "BANK_EXT, section at byte 32", bank=bank)
+
+
+@cocotb.test()
+async def the_stream_across_4k(dut):
+    """An image placed so that bursts from the store's end would cross a
+    4 KB page if the fetch did not cut them there: SeqRam refuses a
+    crossing burst, and the run is held to the model. Each placement runs
+    at every read latency the build runs (since 2026-10-05; until then
+    the two ran once each, at the first two)."""
+    bench = Bench(dut)
+    await bench.start()
+    fmt = FP32
+    n = 20
+    prog, _ = _misaligned_prog(fmt, 1)
+    for k in (IMEM_D + 5, IMEM_D + 37):
+        if k >= len(prog.insns):
+            dut._log.info(f"not on this build: instruction {k} is past the "
+                          f"program, which the {IMEM_D}-word store holds")
+            continue
+        # instruction k at a page boundary, at a 4-byte offset
+        base = 0x31_0000 - 32 - 4 - 8 * k + 4
+        base -= base % 32
+        bench.prog_base = base
+        for lat in LATS:
+            bench.pin = lat
+            await bench.program(fmt, prog, operands(fmt, n, 980 + k),
+                                operands(fmt, n, 981), operands(fmt, n, 982),
+                                n, f"instruction {k} at a 4 KB page, image "
+                                f"at {base:#x}, latency {lat}")
+        bench.pin = None
+    bench.prog_base = PROG_BASE
+
+
+@cocotb.test()
+async def fetch_quiesces_before_the_next_block(dut):
+    """A block that halts at pc 10 while the stream prefetches past the
+    store, over four blocks: at every block's end the fetch is quiesced
+    and idle within latency + 2 x OUT_MAX x BURST + 32 cycles - the round
+    trip of what was in flight - and no read of the next block's setup
+    (mask, scratch-in, streams) is issued while a fetch burst is
+    outstanding. Watched on cft_seq's own if_quiesce and if_idle."""
+    bench = Bench(dut)
+    await bench.start()
+    fmt = FP32
+    # Past the store where the tile streams; within the capacity where
+    # it does not, and there nothing is fetched and the hold is trivial.
+    fill = min(IMEM_D + 400, STREAM_D - 12)
+    prog = seq.Program(fmt, _indep(10) + [seq.deposit(3), seq.halt()] +
+                       _indep(fill), max_deposits=1)
+    n = 4 * lanes_per_block(fmt)
+    for k in range(max(1, len(LATS))):
+        lat = LATS[bench.nrun % len(LATS)]
+        stats = {"ends": 0, "longest": 0, "run": None, "q": False}
+
+        async def watch():
+            # From each quiesce's first cycle to the fetch's idle.
+            while True:
+                await RisingEdge(dut.ap_clk)
+                await ReadOnly()
+                q, idle = _i(dut.if_quiesce), _i(dut.if_idle)
+                if q and not stats["q"]:
+                    stats["ends"] += 1
+                    stats["run"] = 0
+                if stats["run"] is not None:
+                    if idle:
+                        stats["longest"] = max(stats["longest"], stats["run"])
+                        stats["run"] = None
+                    else:
+                        stats["run"] += 1
+                stats["q"] = bool(q)
+        task = cocotb.start_soon(watch())
+        await bench.program(fmt, prog, operands(fmt, n, 990 + k),
+                            operands(fmt, n, 991), operands(fmt, n, 992), n,
+                            f"halting at pc 10, four blocks, latency {lat}")
+        task.kill()
+        bound = lat + 2 * FETCH_OUT_MAX * FETCH_BURST + 32
+        dut._log.info(f"quiesce at latency {lat}: {stats['ends']} block ends, "
+                      f"idle within {stats['longest']} cycles (bound {bound})")
+        assert stats["ends"] >= 4, (
+            f"latency {lat}: {stats['ends']} quiesces over four blocks - a "
+            f"block ended without stopping the fetch")
+        assert stats["longest"] <= bound, (
+            f"latency {lat}: the fetch was idle {stats['longest']} cycles "
+            f"after a block's end, past {bound}: it did not stop")
+        img_lo = bench.prog_base
+        img_hi = img_lo + len(prog.to_bytes())
+        for (addr, _), pend in zip(bench.ram.arlog, bench.ram.arpend):
+            if not img_lo <= addr < img_hi:
+                assert pend == 0, (
+                    f"latency {lat}: a setup read at {addr:#x} issued with "
+                    f"{pend} read burst(s) still outstanding")
+
+
+@cocotb.test()
+async def abort_on_a_fetch_fault(dut):
+    """A fault on the instruction fetch's own burst ends the run through
+    the abort (rtl/cft_seq.sv's contract, item 5; the unit holds `ok`
+    low): a SLVERR on a streamed word with STATUS[0], a short and a long
+    fetch burst with STATUS[2]; nothing written, no burst begun after the
+    fault showed, nothing left in flight - and a clean run after each. A
+    tile that does not stream has no fetch burst, and says so."""
+    bench = Bench(dut)
+    await bench.start()
+    if not STREAMS:
+        dut._log.info("not on this build: it does not stream")
+        return
+    fmt = FP32
+    n = 20
+    prog = _long_program(fmt, IMEM_D + 200, "halt")
+    img = prog.to_bytes()
+    # the parse's own bursts come first in the image's region: count them
+    # by the read engine's rule (64 beats, never across 4 KB)
+    addr, left, parse = PROG_BASE + 32, -(-(len(img) - 32) // 32), 0
+    while left:
+        ln = min(64, left, (4096 - (addr & 0xFFF)) // 32)
+        addr, left, parse = addr + 32 * ln, left - ln, parse + 1
+    a, b, c = (operands(fmt, n, s) for s in (1001, 1002, 1003))
+    for kind, expect in (("rresp", "word"), ("short", "length"),
+                         ("long", "length")):
+        label = f"abort: a {kind} fetch burst"
+        f = Fault(dut, bench.ram, PROG_BASE + 32, PROG_BASE + len(img), kind,
+                  which=parse, beat=1)
+        await bench.faulted(fmt, prog, a, b, c, n, label, f, expect=expect,
+                            fetch=True)
+        await _clean_after(bench, fmt, label)
+
+
+# ======================================================================
+# revision 8's R24: flag control - a quiet region and a raise
+# ======================================================================
+#
+# docs/SEQUENCER.md, R24; docs/ROADMAP.md, "Revision 8", R24. QUIET and
+# ENDQUIET decode in S_DECODE and keep a depth; every beat carries the tag
+# it was admitted with, which gates its flags at the retire; RAISE acts at
+# F like SETACT: its active lanes' ra[4:0] into FLAGS unless tagged, ra[7]
+# the run's mark (err[5], STATUS[6]) tagged or not. Each case is held to
+# seq.py, FLAGS and err[5] included (Bench._compare), and asserts that the
+# model's own answer discriminates what the case is for.
+
+R24_INV, R24_DZ, R24_OVF, R24_UNF, R24_INX = 1, 2, 4, 8, 16
+R24_MARK = 0x80
+
+
+def _raise_words(fmt, n, seed, mark_every=0):
+    """A flag word a lane: random bits everywhere (so [6:5] and every bit
+    from 8 up, which nothing reads, are set as often as not), [4:0] random,
+    and [7] - the mark - every `mark_every`th lane only (0: none)."""
+    rng = random.Random(seed)
+    out = []
+    for i in range(n):
+        v = rng.getrandbits(fmt.width) & ~R24_MARK
+        if mark_every and i % mark_every == 0:
+            v |= R24_MARK
+        out.append(v)
+    return out
+
+
+def _inv_words(fmt, n, seed):
+    """Flag words that raise invalid alone, in every other lane: [0] set,
+    [4:1] and [7] clear, and [6:5] and every bit from 8 up random, which
+    nothing reads."""
+    rng = random.Random(seed)
+    return [(rng.getrandbits(fmt.width) & ~0x9F) | (1 if i % 2 == 0 else 0)
+            for i in range(n)]
+
+
+def _r24_edges(fmt, n):
+    """Streams whose three instructions in _r24_edge_prog each raise a flag
+    no other raises: r3 = r0 + r2 invalid (+inf + -inf, every third lane),
+    r4 = r0 * r1 overflow (max * 2), r5 = r1 * r2 underflow (min normal
+    times a third)."""
+    one = sf.one_bits(fmt)
+    two = sf.round_pack(fmt, 0, 2, 0)[0]
+    third = sf.round_pack(fmt, 0, 1, -2)[0] | 0x5          # ~0.25 + ulps
+    a, b, c = [], [], []
+    for i in range(n):
+        k = i % 3
+        if k == 0:
+            a.append(sf.inf_bits(fmt)); b.append(one)
+            c.append(sf.inf_bits(fmt, 1))
+        elif k == 1:
+            a.append(sf.max_normal_bits(fmt)); b.append(two)
+            c.append(sf.zero_bits(fmt))
+        else:
+            a.append(one); b.append(sf.min_normal_bits(fmt)); c.append(third)
+    return a, b, c
+
+
+def _r24_edge_prog(fmt):
+    """The tag across a region's edge, with beats in flight: r3's beats are
+    still in the pipe when QUIET is decoded, and r4's when ENDQUIET is, so
+    a tag taken at retirement - the region the machine is in when the
+    result lands - silences r3 and lets r4 through, where the beat's own
+    tag keeps r3 loud and r4 quiet."""
+    return seq.Program(fmt, [
+        seq.alu(sf.OP_ADD, 3, ra=0, rc=2),
+        seq.quiet(),
+        seq.alu(sf.OP_MUL, 4, ra=0, rb=1),
+        seq.endquiet(),
+        seq.alu(sf.OP_MUL, 5, ra=1, rb=2),
+        seq.deposit(3), seq.deposit(4), seq.deposit(5), seq.halt()],
+        max_deposits=3)
+
+
+@cocotb.test()
+async def flag_control_regions_and_raises(dut):
+    """R24 against the model, at fp32, fp64 and fp256 over two blocks:
+
+      * the tag across a region's edge with beats in flight (_r24_edge_prog)
+        - FLAGS must hold r3's invalid and r5's underflow and not r4's
+        overflow, which the model's answer is asserted to say;
+      * raises and arithmetic four regions deep with loops between them,
+        every flag silenced there, and a raise of invalid alone after the
+        last region closes: FLAGS is that invalid and nothing else, and
+        the mark - [7], every fifth lane, raised inside - stands;
+      * the mark inside a region alone: STATUS[6] with FLAGS clear;
+      * a skipped body holding a region and a raise: nothing of it acts,
+        and the depth after it is the depth before it.
+    """
+    bench = Bench(dut)
+    await bench.start()
+    for fmt in (FP32, FP64, FP256):
+        n = lanes_per_block(fmt) + 7
+        # -- the edge
+        a, b, c = _r24_edges(fmt, n)
+        want = await bench.program(fmt, _r24_edge_prog(fmt), a, b, c, n,
+                                   f"{fmt.name}: the tag across a region's "
+                                   f"edge")
+        assert want.flags & R24_INV and want.flags & R24_UNF, (
+            f"{fmt.name}: the edge case's model raises {want.flags:#07b} - "
+            f"r3's invalid and r5's underflow must both stand")
+        assert not want.flags & R24_OVF, (
+            f"{fmt.name}: the edge case's model raises overflow, which only "
+            f"the quiet r4 makes - the case cannot see a leaking region")
+        # -- raises in and out of four regions with loops between
+        rw = _raise_words(fmt, n, 7100 + fmt.width, mark_every=5)
+        inv = _inv_words(fmt, n, 7150 + fmt.width)
+        loud = seq.alu(sf.OP_MUL, 6, ra=0, rb=0)
+        deep = seq.Program(fmt, [
+            seq.quiet(),
+            seq.repeat(2),
+            seq.quiet(), seq.raise_(2),
+            seq.repeat(2),
+            seq.quiet(), loud, seq.raise_(2),
+            seq.quiet(), loud, seq.raise_(2), seq.endquiet(),
+            seq.endquiet(),
+            seq.endrep(),
+            seq.endquiet(),
+            seq.endrep(),
+            seq.endquiet(),
+            seq.raise_(1),
+            seq.deposit(6), seq.halt()], max_deposits=1)
+        a2 = operands(fmt, n, 7200 + fmt.width)
+        want = await bench.program(fmt, deep, a2, inv, rw, n,
+                                   f"{fmt.name}: raises in and out of four "
+                                   f"regions with loops")
+        assert want.flags == R24_INV and want.status & seq.STATUS_MARKED, (
+            f"{fmt.name}: the deep case's model reads FLAGS "
+            f"{want.flags:#07b}, status {want.status:#x} - invalid alone and "
+            f"the mark are what it holds")
+        # -- the mark inside a region alone
+        only_mark = seq.Program(fmt, [
+            seq.quiet(), seq.raise_(2), seq.endquiet(), seq.halt()],
+            max_deposits=1)
+        want = await bench.program(fmt, only_mark, a2, b, rw, n,
+                                   f"{fmt.name}: the mark inside a region")
+        assert want.status & seq.STATUS_MARKED and want.flags == 0, (
+            f"{fmt.name}: the model's region-only raise reads flags "
+            f"{want.flags:#07b} status {want.status:#x}")
+        # -- a skipped body holding a region: r1 is +0 in every lane, so
+        # SETACT drops them all and the REPEAT finds none active
+        zero = [sf.zero_bits(fmt)] * n
+        skipped = seq.Program(fmt, [
+            seq.setact(1),
+            seq.repeat(3), seq.quiet(), seq.raise_(2), loud, seq.endquiet(),
+            seq.endrep(),
+            seq.actall(),
+            seq.raise_(2), loud,
+            seq.deposit(6), seq.halt()], max_deposits=1)
+        nb = lanes_per_block(fmt) * 2     # ACTALL: block-aligned
+        want = await bench.program(fmt, skipped,
+                                   operands(fmt, nb, 7300), [zero[0]] * nb,
+                                   _raise_words(fmt, nb, 7301, 3), nb,
+                                   f"{fmt.name}: a skipped body holding a "
+                                   f"region")
+        assert want.flags, (f"{fmt.name}: the raise after the skipped body "
+                            f"raised nothing in the model")
+
+
+@cocotb.test()
+async def flag_control_depth_resets_at_each_block(dut):
+    """A stream that bypassed the loader halts inside a region, and the
+    next block must start outside it: the depth is reset at each block's
+    start. Only the second block's lanes raise invalid, before the region,
+    so a depth carried over would silence the run's only invalid. Built
+    unchecked - the loader refuses a HALT inside a region - and held to
+    the model, which has no blocks and keeps the raise."""
+    bench = Bench(dut)
+    await bench.start()
+    fmt = FP32
+    lpb = lanes_per_block(fmt)
+    n = 2 * lpb
+    one = sf.one_bits(fmt)
+    a = [one] * lpb + [sf.inf_bits(fmt)] * lpb
+    c = [one] * lpb + [sf.inf_bits(fmt, 1)] * lpb
+    prog = unchecked(fmt, [
+        seq.alu(sf.OP_ADD, 3, ra=0, rc=2),
+        seq.quiet(),
+        seq.alu(sf.OP_MUL, 4, ra=0, rb=1),
+        seq.deposit(3),
+        seq.halt()], max_deposits=1)
+    want = await bench.program(fmt, prog, a, [one] * n, c, n,
+                               "a halt inside a region, two blocks")
+    assert want.flags & R24_INV, (
+        f"the model's run raises {want.flags:#07b}: the second block's "
+        f"invalid is the case")
+
+
+@cocotb.test()
+async def flag_control_fuzz(dut):
+    """The model's own R24 arm (seq.random_program(flags=True)): quiet,
+    endquiet and raise drawn among the rest, regions nested properly with
+    loops, on every rung - whole state compared, FLAGS and the mark
+    included, and since R23 each run's per-lane flag block with it (every
+    program here asks for MODE[24]), so the byte is held over the same
+    random regions, deposits and scratch accesses as the run's reports."""
+    bench = Bench(dut)
+    await bench.start()
+    made = marked = quiet = 0
+    for name, trials, sizes, cap in (("fp32", 10, [9, 33, 128], 600),
+                                     ("fp64", 6, [7, 31, 64], 500),
+                                     ("fp256", 4, [3, 16], 150)):
+        fmt = FORMATS[name]
+        rng = random.Random(20261005 ^ fmt.width)
+        k = attempts = 0
+        while k < trials and attempts < trials * 80:
+            attempts += 1
+            insns, consts = seq.random_program(fmt, rng, flags=True)
+            if worst_case_insns(insns) > cap:
+                continue
+            if has_actall(insns):
+                continue
+            try:
+                prog = seq.Program(fmt, insns, consts, rng.choice([1, 2, 4]))
+            except seq.ProgramError:
+                continue
+            if not any(seq.decode(w)["ctrl"] and seq.decode(w)["op"] in
+                       (seq.QUIET, seq.RAISE) for w in insns):
+                continue
+            n = rng.choice(sizes)
+            a, b, c = (seq.random_inputs(fmt, rng, n) for _ in range(3))
+            want = await bench.program(fmt, prog, a, b, c, n,
+                                       f"R24 fuzz {name} #{k} n={n}",
+                                       lane_flags=True)
+            k += 1
+            marked += bool(want.status & seq.STATUS_MARKED)
+            quiet += any(seq.decode(w)["ctrl"] and
+                         seq.decode(w)["op"] == seq.QUIET for w in insns)
+        assert k == trials, f"{name}: {k} of {trials} R24 programs drawn"
+        made += k
+    dut._log.info(f"R24 fuzz: {made} programs, {quiet} with a region, "
+                  f"{marked} marked a lane")
+    assert quiet > made // 3, "hardly any fuzzed program opened a region"
+
+
+# ======================================================================
+# revision 8's R23: per-lane sticky flags
+# ======================================================================
+#
+# docs/SEQUENCER.md, R23; docs/ROADMAP.md, "Revision 8", R23. MODE[24]
+# (cfg_lflags_en) asks for a byte a lane at LFLAGS_PTR after the counts:
+# [4:0] the IEEE flags the lane raised outside every quiet region, [5] its
+# deposit overflowed, [6] its strict access fell past the depth, [7] a
+# RAISE marked it. Held to the model's Result.lane_flags byte for byte
+# (Bench._compare_lane_flags), with the three identities read off the
+# tile's own bytes.
+
+def _r23_prog(fmt):
+    """Every source of every bit in one program: an ALU instruction's flags
+    (r0 * r1); a quiet region holding a loud ADD and a raise, whose [4:0]
+    are silenced and whose mark is not; a deposit, then SETACT on r1 -
+    lanes whose r1 is a zero leave here - and a second deposit, which
+    overflows max_deposits 1 in every lane still active; a strict STX at
+    r1's bit pattern, past the depth in most lanes; and a raise outside
+    every region. A lane that left at the SETACT keeps what it raised
+    before it."""
+    return seq.Program(fmt, [
+        seq.alu(sf.OP_MUL, 3, ra=0, rb=1),
+        seq.quiet(),
+        seq.alu(sf.OP_ADD, 4, ra=0, rc=1),
+        seq.raise_(2),
+        seq.endquiet(),
+        seq.deposit(3),
+        seq.setact(1),
+        seq.deposit(3),
+        seq.stx(0, 1),
+        seq.raise_(2),
+        seq.halt()], max_deposits=1, flags=seq.FLAG_SCRATCH_STRICT)
+
+
+def _r23_streams(fmt, n, seed):
+    """r0 and r1 the specials-heavy mix (±0 among them, so SETACT drops
+    lanes), r2 a raise word a lane with the mark in every fourth."""
+    rng = random.Random(seed)
+    a = seq.random_inputs(fmt, rng, n)
+    b = seq.random_inputs(fmt, rng, n)
+    c = [(rng.getrandbits(fmt.width) & ~0x80) | (0x80 if i % 4 == 0 else 0)
+         for i in range(n)]
+    return a, b, c
+
+
+@cocotb.test()
+async def lane_flags_block(dut):
+    """At every format, over two blocks and a ragged third (so fp256's
+    sixteen-lane blocks put a half beat at offset 0 and one at offset 16):
+    the block against the model and the three identities; every bit of the
+    byte asserted to vary across the run's lanes, so that a bit dropped or
+    a row misplaced is a difference and not a coincidence. Then the same
+    run without MODE[24]: nothing written at LFLAGS_PTR."""
+    bench = Bench(dut)
+    await bench.start()
+    for fmt in (FP32, FP64, FP128, FP256):
+        lpb = lanes_per_block(fmt)
+        n = 2 * lpb + 5
+        prog = _r23_prog(fmt)
+        a, b, c = _r23_streams(fmt, n, 2300 + fmt.width)
+        want = await bench.program(fmt, prog, a, b, c, n,
+                                   f"{fmt.name}: the lane-flag block",
+                                   lane_flags=True)
+        for bit in range(8):
+            ones = sum(1 for v in want.lane_flags if v >> bit & 1)
+            assert 0 < ones < n, (
+                f"{fmt.name}: bit {bit} of the byte is {ones} of {n} lanes "
+                f"in the model - the case cannot see it dropped or moved")
+        await bench.program(fmt, prog, a, b, c, n,
+                            f"{fmt.name}: no MODE[24], no block")
+        assert bench.ram.fetch(LF_BASE, n) == bytes([POISON]) * n, (
+            f"{fmt.name}: a run without MODE[24] wrote at LFLAGS_PTR")
+
+
+@cocotb.test()
+async def lane_flags_masked_and_dropped(dut):
+    """A masked run: a masked lane's byte is the caller's (poison here),
+    as its count is; a lane SETACT dropped IS the caller's, and its byte
+    holds what it raised while it was active. fp32 and fp256."""
+    bench = Bench(dut)
+    await bench.start()
+    for fmt in (FP32, FP256):
+        lpb = lanes_per_block(fmt)
+        n = lpb + 9
+        prog = _r23_prog(fmt)
+        a, b, c = _r23_streams(fmt, n, 2400 + fmt.width)
+        keep = _keep(n, 2)
+        want = await bench.masked(fmt, prog, a, b, c, n, keep,
+                                  f"{fmt.name}: lane flags under a mask",
+                                  lane_flags=True)
+        dropped = [i for i in range(n) if keep[i] and not want.active[i]]
+        assert dropped and any(want.lane_flags[i] for i in dropped), (
+            f"{fmt.name}: no kept lane that SETACT dropped raised anything - "
+            f"the case cannot see a dropped lane's byte left unwritten")
+
+
+# ======================================================================
+# revision 8's R21: augadd and augerr, decoded
+# ======================================================================
+#
+# docs/SEQUENCER.md, R21; docs/ROADMAP.md, "Revision 8", R21. Control
+# codes 10 and 11 read ra on port A and rb on port C, write rd, and fire
+# into the array as ADD with the aug_mode sideband and their flag enable
+# on (the lanes are parcel B's, held to cft_golden.augmented in the four
+# fpfma benches). Held here against seq.py, which calls
+# augmented.augmented_add. Every run asks for R23's block, so each lane's
+# flags are compared as well as the run's OR. A build without R21
+# (EN_AUGADD=0, the quad's) runs each case's other half: the two codes
+# are unknown ones there, and a block ends where one stands (HALT), as on
+# revision 7 - the loader refuses them first, by name, from CAPS2[11].
+
+# The plan's families (docs/ROADMAP.md, part 4), named by what the model
+# says a pair does, so that each one is in a case because it was asked
+# for and not by chance.
+R21_FAMILIES = ("special", "signed zero", "overflow", "underflow exact",
+                "tie", "cancel", "far or partial", "near", "close", "swap")
+
+
+def _r21_family(fmt, fam, x, y, r, fl):
+    """Which of R21_FAMILIES the pair (x, y) - from tb/fpfma_common.py's
+    family `fam` - belongs to, given augmentedAddition's r and flags, or
+    None. In priority order: an operand's class first, then what the sum
+    did, then the family it was drawn from."""
+    expm = fmt.exp_mask << fmt.man_w
+    mag = (1 << (fmt.width - 1)) - 1
+    if (x & expm) == expm or (y & expm) == expm:
+        return "special"
+    if (x & mag) == 0 or (y & mag) == 0:
+        return "signed zero"
+    if fl & sf.FLAG_OVERFLOW:
+        return "overflow"
+    if (fl & sf.FLAG_UNDERFLOW) and not (fl & sf.FLAG_INEXACT):
+        return "underflow exact"
+    # A tie where roundTiesTowardZero and roundTiesToEven part: r is not
+    # the ordinary sum's rounding.
+    if r != sf.compute(fmt, sf.OP_ADD, x, 0, y, sf.RND_RNE)[0]:
+        return "tie"
+    if (r & mag) == 0:
+        return "cancel"
+    if fam == "partial":
+        return "far or partial"
+    if fam in ("near", "close", "swap"):
+        return fam
+    return None
+
+
+def r21_pairs(fmt, n, seed):
+    """n operand pairs (x, y) for R21 at `fmt`, every family in
+    R21_FAMILIES among them, about n / 11 of each and the rest drawn as
+    they come. From parcel B's families (tb/fpfma_common.py's aug_pairs,
+    cft_golden's adversarial pool for clause 9.5 and its neighbours),
+    shuffled by `seed`. Returns (pairs, {family: count})."""
+    from fpfma_common import aug_pairs
+    from cft_golden import augmented_add
+    rng = random.Random(seed ^ (fmt.width * 2101))
+    full = aug_pairs(fmt)
+    rng.shuffle(full)
+    quota = max(1, n // (len(R21_FAMILIES) + 1))
+    got = {f: [] for f in R21_FAMILIES}
+    rest = []
+    for fam, x, y in full:
+        if all(len(v) >= quota for v in got.values()) and \
+                len(rest) >= n:
+            break
+        r, _e, fl = augmented_add(fmt, x, y)
+        f = _r21_family(fmt, fam, x, y, r, fl)
+        if f is not None and len(got[f]) < quota:
+            got[f].append((x, y))
+        elif len(rest) < n:
+            rest.append((x, y))
+    pairs = [p for f in R21_FAMILIES for p in got[f]]
+    pairs += rest[:n - len(pairs)]
+    rng.shuffle(pairs)
+    return pairs[:n], {f: len(v) for f, v in got.items()}
+
+
+def _r21_absent(fmt, n, seed):
+    """EN_AUGADD=0: an augadd image and an augerr image, each ending its
+    block where the code stands - the tile runs the image, the model runs
+    it with HALT in the code's place. A MUL and a deposit before it, so
+    the block's first half is a computation the HALT must keep; a deposit
+    after it, which must not happen."""
+    rng = random.Random(seed)
+    a = seq.random_inputs(fmt, rng, n)
+    b = seq.random_inputs(fmt, rng, n)
+    c = seq.random_inputs(fmt, rng, n)
+    for code in (seq.augadd(4, 0, 1), seq.augerr(4, 0, 1)):
+        head = [seq.alu(sf.OP_MUL, 3, ra=0, rb=1), seq.deposit(3)]
+        tail = [seq.deposit(4), seq.halt()]
+        image = seq.Program(fmt, head + [code] + tail, max_deposits=2)
+        model = seq.Program(fmt, head + [seq.halt()] + tail, max_deposits=2)
+        yield code, image, model, a, b, c
+
+
+async def _r21_absent_run(bench, label):
+    for fmt in (FP32, FP64, FP128, FP256):
+        n = 2 * lanes_per_block(fmt) + 3
+        for code, image, model, a, b, c in _r21_absent(fmt, n, 2100):
+            name = seq.CTRL_NAMES[seq.decode(code)["op"]]
+            await bench.program(fmt, model, a, b, c, n,
+                                f"{fmt.name}: {label}, EN_AUGADD=0: {name} "
+                                f"ends its block where it stands",
+                                image=image.to_bytes(), lane_flags=True)
+
+
+def _r21_family_prog(fmt):
+    """Both halves of the pair, in both orders, so either operand anchors
+    in each lane (the pipe anchors the larger exponent): four results a
+    lane, deposited."""
+    return seq.Program(fmt, [
+        seq.augerr(3, 0, 1), seq.augadd(4, 0, 1),
+        seq.augerr(5, 1, 0), seq.augadd(6, 1, 0),
+        seq.deposit(3), seq.deposit(4), seq.deposit(5), seq.deposit(6),
+        seq.halt()], max_deposits=4)
+
+
+@cocotb.test()
+async def augadd_and_augerr_every_family(dut):
+    """Every family of the plan's list at every format, over two blocks
+    and a ragged third: each lane one pair, both halves, both operand
+    orders, against seq.py - deposits, counts, FLAGS, and each lane's
+    R23 byte. Asserts every family was drawn, so that a family missing
+    from a format is a failure here and not a gap."""
+    bench = Bench(dut)
+    await bench.start()
+    if not EN_AUGADD:
+        await _r21_absent_run(bench, "the family program")
+        return
+    for fmt in (FP32, FP64, FP128, FP256):
+        lpb = lanes_per_block(fmt)
+        n = 2 * lpb + 5
+        pairs, fams = r21_pairs(fmt, n, 2101)
+        missing = [f for f, k in fams.items() if k == 0]
+        assert not missing, (
+            f"{fmt.name}: no pair of the families {missing} among "
+            f"tb/fpfma_common.py's aug_pairs - the case cannot hold them")
+        a = [x for x, _ in pairs]
+        b = [y for _, y in pairs]
+        c = [0] * n
+        want = await bench.program(fmt, _r21_family_prog(fmt), a, b, c, n,
+                                   f"{fmt.name}: augadd and augerr, every "
+                                   f"family", lane_flags=True)
+        assert want.flags, f"{fmt.name}: the pairs raised no flag at all"
+        dut._log.info(f"{fmt.name}: {n} lanes, families "
+                      + ", ".join(f"{f} {k}" for f, k in fams.items())
+                      + f"; FLAGS {want.flags:#07b}")
+
+
+@cocotb.test()
+async def augadd_reads_rb_on_port_c(dut):
+    """A dependency through rb on port C, at every format and at one beat,
+    two beats and one lane, and a whole block: rb written by the
+    instruction just before - an ALU result, an augadd's, an augerr's -
+    and both ports reading the register just written. Port C reading rc,
+    or its hazard compare taking rc's field, reads the wrong register or
+    the right one too early, and a lane differs. The lengths are a beat's
+    lanes since verifier-VC56 (2026-10-05): until then they were a
+    block's, so the case ran one block, two and a lane, and sixteen, and
+    never the one-beat block its words named."""
+    bench = Bench(dut)
+    await bench.start()
+    if not EN_AUGADD:
+        await _r21_absent_run(bench, "the port-C chain")
+        return
+    for fmt in (FP32, FP64, FP128, FP256):
+        lpbt = lanes_per_beat(fmt)
+        prog = seq.Program(fmt, [
+            seq.alu(sf.OP_MUL, 3, ra=0, rb=1),   # r3 = a * b
+            seq.augadd(4, 2, 3),                 # rb = r3, just written
+            seq.augerr(5, 4, 3),                 # ra = an augadd's result
+            seq.augadd(6, 0, 5),                 # rb = an augerr's result
+            seq.augerr(7, 6, 6),                 # both ports, just written
+            seq.deposit(4), seq.deposit(5), seq.deposit(6), seq.deposit(7),
+            seq.halt()], max_deposits=4)
+        for n in (lpbt, 2 * lpbt + 1, NBEATS * lpbt):
+            rng = random.Random(2102 + n + fmt.width)
+            a, b, c = (seq.random_inputs(fmt, rng, n) for _ in range(3))
+            await bench.program(fmt, prog, a, b, c, n,
+                                f"{fmt.name}: rb through port C, n={n}",
+                                lane_flags=True)
+
+
+@cocotb.test()
+async def augadd_masked_and_quiet(dut):
+    """Under a mask, with a lane SETACT drops, and with augerr inside a
+    quiet region: a masked or dropped lane writes nothing and raises
+    nothing, and a quiet augerr's flags reach neither FLAGS nor its lane's
+    byte (R24's tag joins R21's flag enable). The quiet augerr reads
+    other operands than the loud augadd, and the case asserts that its
+    flags, leaked, would show."""
+    bench = Bench(dut)
+    await bench.start()
+    if not EN_AUGADD:
+        await _r21_absent_run(bench, "the masked program")
+        return
+    body = [seq.augerr(3, 0, 2), seq.augadd(4, 0, 1), seq.setact(1),
+            seq.augerr(5, 0, 1),
+            seq.deposit(3), seq.deposit(4), seq.deposit(5), seq.halt()]
+    for fmt in (FP32, FP256):
+        lpb = lanes_per_block(fmt)
+        n = lpb + 9
+        rng = random.Random(2103 + fmt.width)
+        a, b, c = (seq.random_inputs(fmt, rng, n) for _ in range(3))
+        # every fifth lane's r1 a zero, so SETACT drops kept lanes too
+        b = [0 if i % 5 == 2 else v for i, v in enumerate(b)]
+        keep = _keep(n, 3)
+        quiet = seq.Program(fmt, [seq.quiet(), body[0], seq.endquiet()]
+                            + body[1:], max_deposits=3)
+        loud = seq.Program(fmt, body, max_deposits=3)
+        w_q = seq.run(quiet, a, b, c, lane_mask=keep)
+        w_l = seq.run(loud, a, b, c, lane_mask=keep)
+        assert w_q.lane_flags != w_l.lane_flags, (
+            f"{fmt.name}: the quiet augerr raises nothing its loud twin "
+            f"does not - the case cannot see the tag ignored")
+        assert any(keep[i] and not w_q.active[i] for i in range(n)), (
+            f"{fmt.name}: SETACT dropped no kept lane")
+        await bench.masked(fmt, quiet, a, b, c, n, keep,
+                           f"{fmt.name}: augerr quiet, under a mask",
+                           lane_flags=True)
+
+
+@cocotb.test()
+async def augadd_fuzz(dut):
+    """The model's revision-8 fuzz arm (seq.random_program(rev8=True)),
+    with R24's forms beside it: augadd, augerr and the recommended pair
+    among the rest, with loops and quiet regions, whole state compared and
+    each lane's byte. Since R22 is built a program may hold stepped STX
+    and LDX too; one with ACTALL is set aside (the model wakes padding
+    lanes there; the tile does not)."""
+    bench = Bench(dut)
+    await bench.start()
+    if not EN_AUGADD:
+        await _r21_absent_run(bench, "the fuzz's stand-in")
+        return
+    made = augs = 0
+    for name, trials, sizes, cap in (("fp32", 8, [9, 33, 128], 600),
+                                     ("fp64", 5, [7, 31, 64], 500),
+                                     ("fp256", 3, [3, 16], 150)):
+        fmt = FORMATS[name]
+        rng = random.Random(20261021 ^ fmt.width)
+        k = attempts = 0
+        while k < trials and attempts < trials * 200:
+            attempts += 1
+            insns, consts = seq.random_program(fmt, rng, rev8=True,
+                                               flags=True)
+            need = seq.features_rev8(insns)
+            if not need & seq.FEAT_AUGADD:
+                continue
+            if worst_case_insns(insns) > cap or has_actall(insns):
+                continue
+            try:
+                prog = seq.Program(fmt, insns, consts, rng.choice([1, 2, 4]))
+            except seq.ProgramError:
+                continue
+            n = rng.choice(sizes)
+            a, b, c = (seq.random_inputs(fmt, rng, n) for _ in range(3))
+            await bench.program(fmt, prog, a, b, c, n,
+                                f"R21 fuzz {name} #{k} n={n}",
+                                lane_flags=True)
+            k += 1
+            augs += sum(1 for w in insns if seq.decode(w)["ctrl"] and
+                        seq.decode(w)["op"] in (seq.AUGADD, seq.AUGERR))
+        assert k == trials, f"{name}: {k} of {trials} R21 programs drawn"
+        made += k
+    dut._log.info(f"R21 fuzz: {made} programs, {augs} augadd/augerr words")
+
+
+@cocotb.test()
+async def augadd_stream_need_by_role(dut):
+    """The image parse's stream need for R21's two codes, one stream a role:
+    a program whose only reader of r0 is an augadd's ra, of r1 its rb (and
+    the reverse, and r2 on each side), so a parse that learned ra but not
+    rb - or the other way - leaves a stream unloaded, which reads +0 (the
+    silent wrong answer cft_seq.sv's own comment names). C's families read
+    every stream in both roles, so a single missing arm hides there.
+
+    verifier-VC56's (2026-10-05; its vc56_r21_stream_need), adopted as it
+    wrote it, the operands its corner pool (tb/augadd_corners.py). Its
+    plants m11a and m11b, the parse's need without ra and without rb for
+    the two codes, are red here, and green in
+    augadd_and_augerr_every_family."""
+    bench = Bench(dut)
+    await bench.start()
+    if not EN_AUGADD:
+        await _r21_absent_run(bench, "the stream need by role")
+        return
+    for fmt in (FP32, FP64, FP128, FP256):
+        lpbt = lanes_per_beat(fmt)
+        n = 2 * lpbt + 1
+        pairs = augadd_corners.pool_pairs(fmt)
+        rng = random.Random(0x560C + fmt.width)
+        rng.shuffle(pairs)
+        a = [x for x, _ in pairs[:n]]
+        b = [y for _, y in pairs[:n]]
+        c = [x for x, _ in pairs[n:2 * n]]
+        for pi, insns in enumerate((
+                [seq.augadd(3, 0, 1), seq.deposit(3), seq.halt()],
+                [seq.augerr(3, 1, 2), seq.deposit(3), seq.halt()],
+                [seq.augadd(3, 2, 0), seq.deposit(3), seq.halt()],
+                [seq.augerr(3, 1, 0), seq.deposit(3), seq.halt()],
+                [seq.augadd(3, 0, 2), seq.deposit(3), seq.halt()])):
+            prog = seq.Program(fmt, insns, [], 1)
+            await bench.program(
+                fmt, prog, a, b, c, n,
+                f"the stream need by role, program {pi}, {fmt.name}",
+                lane_flags=True)
+
+
+# ======================================================================
+# revision 8's R22: a post-step on STX and LDX
+# ======================================================================
+#
+# docs/SEQUENCER.md, R22; docs/ROADMAP.md, "Revision 8", R22. imm[11:0] of
+# STX and LDX is a signed step: after the access, rb := rb + step modulo
+# 2^W - IADD on the encoding - except an LDX whose destination is its
+# index, which keeps what it loaded. A stepped STX fires the IADD at its
+# own F and becomes a writer of rb; a stepped LDX's step is an internal
+# IADD issued after it. Held against seq.py's _post_step, every format.
+
+def _r22_index(fmt, n, rng, base=40):
+    """Index registers as integer bit patterns: most lanes small, one in
+    five two below the top of the encoding (a +1 walk wraps through 0),
+    one in five at 1 (a -1 walk crosses zero to 2^W - 1, which the
+    modulo takes to the depth's last slot)."""
+    top = (1 << fmt.width) - 2
+    out = []
+    for i in range(n):
+        k = i % 5
+        out.append(_int_bits(fmt, top) if k == 1 else
+                   _int_bits(fmt, 1) if k == 2 else
+                   _int_bits(fmt, base + rng.randrange(SCRATCH_D)))
+    return out
+
+
+def _r22_walk(fmt, up, down):
+    """Five stepped stores walking up from r1, five stepped loads walking
+    back down from where they stopped, then r1 itself deposited: the slots
+    each lane wrote and read, and the index after ten steps at the
+    format's full width."""
+    return seq.Program(fmt, [
+        seq.repeat(5), seq.stx(0, 1, up), seq.endrep(),
+        seq.repeat(5), seq.ldx(4, 1, down), seq.deposit(4), seq.endrep(),
+        seq.deposit(1),
+        seq.halt()], max_deposits=6)
+
+
+@cocotb.test()
+async def stepped_index_walks_and_wraps(dut):
+    """A walk up by stores and back by loads at every format and over two
+    blocks and a ragged third, with lanes that wrap through 0 and cross
+    zero downward; then the field's two ends, +2047 and -2048, whose sign
+    extension reaches every word of a wide lane (the plan's plant "a
+    negative step's high word at fp64" is red here); then a walk under
+    SCRATCH_STRICT, where an access past the depth is suppressed and
+    reported and the step goes on regardless."""
+    bench = Bench(dut)
+    await bench.start()
+    for fmt in (FP32, FP64, FP128, FP256):
+        lpb = lanes_per_block(fmt)
+        n = 2 * lpb + 3
+        rng = random.Random(2201 + fmt.width)
+        a = operands(fmt, n, 2202 + fmt.width)
+        idx = _r22_index(fmt, n, rng)
+        c = operands(fmt, n, 2203 + fmt.width)
+        await bench.program(fmt, _r22_walk(fmt, 1, -1), a, idx, c, n,
+                            f"{fmt.name}: a walk by +1 and -1",
+                            lane_flags=True)
+        await bench.program(fmt, _r22_walk(fmt, seq.STEP_MAX, seq.STEP_MIN),
+                            a, idx, c, n,
+                            f"{fmt.name}: a walk by +2047 and -2048",
+                            lane_flags=True)
+        strict = seq.Program(fmt, _r22_walk(fmt, 37, -11).insns,
+                             max_deposits=6, flags=seq.FLAG_SCRATCH_STRICT)
+        want = await bench.program(fmt, strict, a, idx, c, n,
+                                   f"{fmt.name}: a walk under SCRATCH_STRICT",
+                                   lane_flags=True)
+        assert want.status & seq.STATUS_SCRATCH_RANGE, (
+            f"{fmt.name}: no access past the depth, so the case cannot see "
+            f"a step suppressed with its access")
+
+
+@cocotb.test()
+async def ldx_into_its_own_index_keeps_the_load(dut):
+    """`ldx rX, rX, step` keeps what it loaded and drops the step (R22's
+    rung 2), and `stx rX, rX, step` stores the index as it stood and then
+    steps it. A tile that stepped the load's destination, or stored the
+    stepped index, deposits other values."""
+    bench = Bench(dut)
+    await bench.start()
+    for fmt in (FP32, FP64, FP256):
+        n = lanes_per_block(fmt) + 5
+        rng = random.Random(2211 + fmt.width)
+        idx = [_int_bits(fmt, rng.randrange(8)) for _ in range(n)]
+        prog = seq.Program(fmt, [
+            seq.stx(1, 1, 3),        # scratch[r1] := r1; r1 += 3
+            seq.stx(0, 1, 2),        # scratch[r1] := r0; r1 += 2
+            seq.deposit(1),
+            seq.alu(sf.OP_IAND, 2, 1, 1),   # r2 := r1
+            seq.ldx(1, 1, -4),       # r1 := scratch[r1] (the step dropped)
+            seq.deposit(1),
+            seq.ldx(5, 2, -5),       # r5 := scratch[r2]; r2 -= 5
+            seq.ldx(6, 2, 1),        # r6 := scratch[r2]; r2 += 1
+            seq.deposit(5), seq.deposit(6), seq.deposit(2),
+            seq.halt()], max_deposits=5)
+        await bench.program(fmt, prog, operands(fmt, n, 2212), idx,
+                            operands(fmt, n, 2213), n,
+                            f"{fmt.name}: ldx rX, rX and stx rX, rX",
+                            lane_flags=True)
+
+
+@cocotb.test()
+async def stepped_index_masked_and_dropped(dut):
+    """A masked lane and a lane SETACT dropped do not step (a step is a
+    register write, masked by the active bit as every write is, P3):
+    ACTALL revives the dropped lanes and r1 is deposited, so a lane that
+    stepped while inactive deposits a different index."""
+    bench = Bench(dut)
+    await bench.start()
+    for fmt in (FP32, FP64):
+        n = lanes_per_block(fmt) + 9
+        rng = random.Random(2221 + fmt.width)
+        idx = [_int_bits(fmt, rng.randrange(64)) for _ in range(n)]
+        c = [0 if i % 4 == 1 else _int_bits(fmt, 1) for i in range(n)]
+        prog = seq.Program(fmt, [
+            seq.setact(2),           # lanes whose r2 is zero leave
+            seq.stx(0, 1, 7),
+            seq.ldx(4, 1, 1),
+            seq.actall(),
+            seq.deposit(1), seq.deposit(4),
+            seq.halt()], max_deposits=2)
+        keep = _keep(n, 5)
+        want = await bench.masked(fmt, prog, operands(fmt, n, 2222), idx, c,
+                                  n, keep,
+                                  f"{fmt.name}: steps under a mask and SETACT",
+                                  lane_flags=True)
+        dropped = [i for i in range(n) if keep[i] and c[i] == 0]
+        assert dropped, f"{fmt.name}: SETACT dropped no kept lane"
+
+
+@cocotb.test()
+async def stepped_dependent_chain(dut):
+    """Stepped stores on one index back to back, each waiting for the
+    step before it under R14's landed rule; a stepped load's internal
+    IADD followed at once by an ALU read of the index, a store indexed
+    by it and a deposit of it; at one beat, two beats and one lane, and a
+    whole block, so the hazards meet the pipe at every depth. The lengths
+    are a beat's lanes since verifier-VC56 (2026-10-05): until then they
+    were a block's, so the case ran one block, two and a lane, and
+    sixteen, and never the one-beat block its words named."""
+    bench = Bench(dut)
+    await bench.start()
+    for fmt in (FP32, FP128):
+        lpbt = lanes_per_beat(fmt)
+        prog = seq.Program(fmt, [
+            seq.stx(0, 1, 1), seq.stx(0, 1, 1), seq.stx(0, 1, 1),
+            seq.ldx(4, 1, -2),
+            seq.alu(sf.OP_IADD, 5, 1, 1),    # r5 := r1 + r1, just stepped
+            seq.stx(4, 1, 5),
+            seq.ldx(6, 1, 0),
+            seq.deposit(5), seq.deposit(6), seq.deposit(1),
+            seq.halt()], max_deposits=3)
+        for n in (lpbt, 2 * lpbt + 1, NBEATS * lpbt):
+            rng = random.Random(2231 + n + fmt.width)
+            idx = [_int_bits(fmt, rng.randrange(200)) for _ in range(n)]
+            await bench.program(fmt, prog, operands(fmt, n, 2232), idx,
+                                operands(fmt, n, 2233), n,
+                                f"{fmt.name}: a stepped chain, n={n}",
+                                lane_flags=True)
+
+
+@cocotb.test()
+async def stepped_fuzz(dut):
+    """The model's revision-8 fuzz arm (seq.random_program(rev8=True)) with
+    R24's forms beside it: stepped stores and loads among the rest, a
+    quarter of the loads into their own index, augadd and augerr where
+    the build carries them, loops and quiet regions - whole state
+    compared, each lane's byte with it."""
+    bench = Bench(dut)
+    await bench.start()
+    made = steps = 0
+    for name, trials, sizes, cap in (("fp32", 8, [9, 33, 128], 600),
+                                     ("fp64", 5, [7, 31, 64], 500),
+                                     ("fp256", 3, [3, 16], 150)):
+        fmt = FORMATS[name]
+        rng = random.Random(20261022 ^ fmt.width)
+        k = attempts = 0
+        while k < trials and attempts < trials * 200:
+            attempts += 1
+            insns, consts = seq.random_program(fmt, rng, rev8=True,
+                                               flags=True)
+            need = seq.features_rev8(insns)
+            if not need & seq.FEAT_SCRATCH_STEP:
+                continue
+            if need & seq.FEAT_AUGADD and not EN_AUGADD:
+                continue
+            if worst_case_insns(insns) > cap or has_actall(insns):
+                continue
+            try:
+                prog = seq.Program(fmt, insns, consts, rng.choice([1, 2, 4]))
+            except seq.ProgramError:
+                continue
+            n = rng.choice(sizes)
+            a, b, c = (seq.random_inputs(fmt, rng, n) for _ in range(3))
+            await bench.program(fmt, prog, a, b, c, n,
+                                f"R22 fuzz {name} #{k} n={n}",
+                                lane_flags=True)
+            k += 1
+            steps += sum(1 for w in insns if seq.index_step(seq.decode(w)))
+        assert k == trials, f"{name}: {k} of {trials} R22 programs drawn"
+        made += k
+    dut._log.info(f"R22 fuzz: {made} programs, {steps} stepped STX/LDX")
+
+
+# ======================================================================
+# the abort, by verifier-VC12's cases (follow-up B of the step-6 round)
+# ======================================================================
+#
+# verifier-VC12 checked the abort (587c39f) and the fetch's hooks (cbce00a)
+# and found four claims no committed case could fail: each is red on a
+# plant these cases above miss (its ledger, the plants table). Lifted
+# from its appendix, with the monitor they rest on:
+#   a SLVERR on the mask, a table or a gathered element completes the run
+#     with err[0] - every case above planted only a long burst there;
+#   a fault while a write burst is committed: the burst delivers its
+#     beats and no AR or AW follows - no case above faulted then;
+#   the abort waits for every B, held only by a slave that answers late;
+#   VRD1's protections, a long or short last setup burst before a block's
+#     first fetch, at latencies 0, 125 and 256.
+
+class PortMon:
+    """cft_seq's own AXI port, watched from outside a cycle at a time
+    (verifier-VC12's Mon): every AW's beats delivered and every B taken,
+    every AR's RLAST taken, done one cycle wide, the port quiet while idle,
+    no AR or AW LAUNCHED once abort_any showed, and no R beat taken on the
+    wrong side of the port's mux (the fetch's or the main engine's, by
+    the fetch's idle line when the burst was accepted)."""
+
+    def __init__(self, dut):
+        self.dut = dut
+        self.ar = self.rlast = 0
+        self.aw = self.exp_w = self.w = self.b = 0
+        self.done_widths = []
+        self.idle_viol = []
+        self.cyc = 0
+        self.task = None
+        self.prev_arv = self.prev_aw = 0
+        self.run_abort0 = None
+        self.late_ar = []
+        self.late_aw = []
+        self.ar_side = []
+        self.mis_attr = []
+
+    def start(self):
+        self.task = cocotb.start_soon(self.run())
+
+    def stop(self):
+        self.task.kill()
+
+    async def run(self):
+        d = self.dut
+        dw = 0
+        while True:
+            await ReadOnly()
+            self.cyc += 1
+            arv = _i(d.m_rd_arvalid)
+            if _i(d.start):
+                self.run_abort0 = None
+            elif (self.run_abort0 is None and _i(d.busy)
+                  and _i(d.abort_any)):
+                self.run_abort0 = self.cyc
+            if arv and not self.prev_arv and self.run_abort0 is not None \
+                    and self.cyc > self.run_abort0:
+                self.late_ar.append((self.cyc, self.run_abort0))
+            self.prev_arv = arv
+            awv = _i(d.m_wr_awvalid)
+            if (awv and not self.prev_aw and self.run_abort0 is not None
+                    and self.cyc > self.run_abort0):
+                self.late_aw.append((self.cyc, self.run_abort0))
+            self.prev_aw = awv
+            idle_now = _i(d.if_idle)
+            if _i(d.m_rd_arvalid) and _i(d.m_rd_arready):
+                self.ar += 1
+                self.ar_side.append(0 if idle_now else 1)
+            if _i(d.m_rd_rvalid) and _i(d.m_rd_rready):
+                side = 0 if idle_now else 1
+                head = self.ar_side[0] if self.ar_side else None
+                if head is None or head != side:
+                    self.mis_attr.append((self.cyc, head, side))
+                if _i(d.m_rd_rlast):
+                    self.rlast += 1
+                    if self.ar_side:
+                        self.ar_side.pop(0)
+            if _i(d.m_wr_awvalid) and _i(d.m_wr_awready):
+                self.aw += 1
+                self.exp_w += _i(d.m_wr_awlen) + 1
+            if _i(d.m_wr_wvalid) and _i(d.m_wr_wready):
+                self.w += 1
+            if _i(d.m_wr_bvalid) and _i(d.m_wr_bready):
+                self.b += 1
+            if _i(d.done):
+                dw += 1
+            elif dw:
+                self.done_widths.append(dw)
+                dw = 0
+            if not _i(d.busy) and not _i(d.done):
+                for nm in ("m_rd_arvalid", "m_wr_awvalid", "m_wr_wvalid"):
+                    if _i(getattr(d, nm)):
+                        self.idle_viol.append((self.cyc, nm))
+            await RisingEdge(d.ap_clk)
+
+    def settled(self, label):
+        assert self.exp_w == self.w, (
+            f"{label}: {self.exp_w} W beats owed by the AWs accepted, "
+            f"{self.w} delivered - a write burst cut short or beats beyond")
+        assert self.aw == self.b, (
+            f"{label}: {self.aw} AWs accepted, {self.b} B responses taken - "
+            f"a B response left unwaited")
+        assert self.ar == self.rlast, (
+            f"{label}: {self.ar} ARs accepted, {self.rlast} RLASTs taken - a "
+            f"read burst not drained to its RLAST")
+        assert all(w == 1 for w in self.done_widths), (
+            f"{label}: done pulse widths {self.done_widths}")
+        assert not self.late_aw, (
+            f"{label}: an AW launched after abort_any showed: "
+            f"{self.late_aw[:4]} (launch cycle, abort cycle)")
+        assert not self.mis_attr, (
+            f"{label}: R beats taken on the wrong side of the port's mux "
+            f"(cycle, issuer of the burst in flight, side taken): "
+            f"{self.mis_attr[:4]}")
+        assert not self.late_ar, (
+            f"{label}: an AR launched after abort_any showed: "
+            f"{self.late_ar[:4]} (launch cycle, abort cycle)")
+        assert not self.idle_viol, (
+            f"{label}: traffic on the port while idle: {self.idle_viol[:4]}")
+
+
+def _state_names():
+    """cft_seq's state names in the enum's order, read from the RTL."""
+    import re
+    src = (Path(__file__).resolve().parents[1] / "rtl" /
+           "cft_seq.sv").read_text(encoding="utf-8")
+    m = re.search(r"typedef enum logic \[5:0\] \{(.*?)\} state_e;", src, re.S)
+    body = re.sub(r"//[^\n]*", "", m.group(1))
+    return [x.strip() for x in body.split(",") if x.strip()]
+
+
+class AbortProbe:
+    """The first cycle of each run in which abort_any is high: the state
+    the machine is in, and whether a write burst was open or committed
+    then (not wr_quiet)."""
+
+    def __init__(self, dut):
+        self.dut = dut
+        self.rec = []
+        self.task = None
+        self.names = _state_names()
+
+    def start(self):
+        self.task = cocotb.start_soon(self.run())
+
+    def stop(self):
+        self.task.kill()
+
+    async def run(self):
+        d = self.dut
+        cyc = 0
+        seen = False
+        while True:
+            await ReadOnly()
+            cyc += 1
+            if _i(d.start):
+                seen = False
+            if not seen and _i(d.busy) and _i(d.abort_any):
+                seen = True
+                st = _i(d.st)
+                self.rec.append((self.names[st] if st < len(self.names)
+                                 else st, 0 if _i(d.wr_quiet) else 1, cyc))
+            await RisingEdge(d.ap_clk)
+
+
+def _check_partial(bench, fmt, prog, n, want, label):
+    """Whatever an aborted run wrote is the model's: every deposit element
+    and count that is not the caller's poison equals the model's, and every
+    strobed byte is inside the deposit and count windows."""
+    ebytes = fmt.width // 8
+    maxdep = prog.max_deposits
+    dep_bytes, cnt_bytes = n * maxdep * ebytes, 4 * n
+    got_dep = bench.ram.fetch(D_BASE, dep_bytes)
+    got_cnt = bench.ram.fetch(CNT_BASE, cnt_bytes)
+    pel = bytes([POISON]) * ebytes
+    wd = wc = 0
+    for i in range(n):
+        for s in range(maxdep):
+            raw = got_dep[(i * maxdep + s) * ebytes:
+                          (i * maxdep + s + 1) * ebytes]
+            if raw != pel:
+                wd += 1
+                g = int.from_bytes(raw, "little")
+                assert g == want.deposits[i * maxdep + s], (
+                    f"{label}: deposit[lane {i} slot {s}] got {g:#x} want "
+                    f"{want.deposits[i * maxdep + s]:#x}")
+        raw = got_cnt[4 * i:4 * i + 4]
+        if raw != bytes([POISON]) * 4:
+            wc += 1
+            assert int.from_bytes(raw, "little") == want.counts[i], (
+                f"{label}: count[lane {i}] got "
+                f"{int.from_bytes(raw, 'little')} want {want.counts[i]}")
+    bench.ram.assert_writes_inside(
+        [(D_BASE, dep_bytes, "deposit"), (CNT_BASE, cnt_bytes, "count")],
+        label)
+    return wd, wc
+
+
+async def _fault_in_the_drain(bench, mon, fmt, prog, a, b, c, n, label,
+                              fault, *, expect, slack=30000):
+    """One run with a fetch fault planted, wherever it lands: the books
+    (PortMon), the error bit, nothing left on the read channel, and every
+    byte written the model's. A planted burst that was never issued is a
+    clean run, held whole."""
+    ebytes = fmt.width // 8
+    image = prog.to_bytes()
+    dep_bytes, cnt_bytes = n * prog.max_deposits * ebytes, 4 * n
+    want = seq.run(prog, list(a), list(b), list(c))
+    bench._stage(fmt, image, a, b, c, n, dep_bytes, cnt_bytes)
+    bench._drive_cfg(fmt, n)
+    budget = bench._budget(fmt, prog, n, len(image)) + slack
+    fault.install()
+    try:
+        refused, flags, err = await bench._go(budget, label)
+    finally:
+        fault.remove()
+    assert refused == 0, f"{label}: refusal"
+    if fault.burst is None:
+        assert err == 0, f"{label}: err={err:#x} with no fault planted"
+        mon.settled(label)
+        wd, wc = _check_partial(bench, fmt, prog, n, want, label)
+        assert wd == n * prog.max_deposits and wc == n, (
+            f"{label}: a clean run wrote {wd} deposits and {wc} counts")
+        return None
+    assert bench.ram.pending == 0, (
+        f"{label}: done with {bench.ram.pending} read burst(s) still to land")
+    if expect == "length":
+        assert err & 4 and not err & 1, f"{label}: err={err:#x}, want length"
+    else:
+        assert err & 1 and not err & 4, f"{label}: err={err:#x}, want read"
+    mon.settled(label)
+    _check_partial(bench, fmt, prog, n, want, label)
+    return err
+
+
+def _parse_bursts(img_len):
+    """The parse's read bursts of an image of img_len bytes."""
+    addr, left, parse = PROG_BASE + 32, -(-(img_len - 32) // 32), 0
+    while left:
+        ln = min(64, left, (4096 - (addr & 0xFFF)) // 32)
+        addr, left, parse = addr + 32 * ln, left - ln, parse + 1
+    return parse
+
+
+def _drain_fault_prog(fmt):
+    """A program that halts at pc 22 with the stream prefetching past the
+    store, then drains twelve deposits a lane - so a fault on a fetch burst
+    the halt abandoned lands during the deposit drain, between bursts or
+    mid-burst, in the counts or in S_WAIT_B, as its latency puts it."""
+    D = 12
+    return seq.Program(
+        fmt, _indep(10) + [seq.deposit(3 + (i % 8)) for i in range(D)] +
+        [seq.halt()] + _indep(IMEM_D + 400), max_deposits=D)
+
+
+@cocotb.test()
+async def abort_data_faults_on_the_mask_and_tables(dut):
+    """A SLVERR on the mask read, on an index table or on a gathered
+    element is DATA: the run completes with the model's answer and err[0]
+    (cft_seq's contract, item 5). verifier-VC12's plant pf - those reads
+    ending the run as an instruction's do - was green in every case above,
+    which planted only a long burst there."""
+    bench = Bench(dut)
+    await bench.start()
+    mon = PortMon(dut)
+    mon.start()
+    fmt = FP32
+    lpb = lanes_per_block(fmt)
+    n = lpb + 9
+    a, b, c = (operands(fmt, n, s) for s in (7801, 7802, 7803))
+    prog = _abort_prog(fmt)
+    keep = _keep(n, 1)
+    for which in (0, 1):
+        label = f"a SLVERR on the mask read, block {which} (data)"
+        f = Fault(dut, bench.ram, MASK_BASE, MASK_BASE + 0x10000, "rresp",
+                  which=which)
+        await bench.faulted(fmt, prog, a, b, c, n, label, f, expect="data",
+                            keep=keep)
+        mon.settled(label)
+    src = operands(fmt, 3 * n, 7804)
+    tbl = _perm_table(n, len(src), 7805)
+    for lohi, what, which in (((IA_BASE, IA_BASE + 0x10000), "table", 0),
+                              ((IA_BASE, IA_BASE + 0x10000), "table", 1),
+                              ((A_BASE, A_BASE + 0x10000), "element", 3),
+                              ((A_BASE, A_BASE + 0x10000), "element", 40)):
+        label = f"a SLVERR on a gather {what} read {which} (data)"
+        f = Fault(dut, bench.ram, *lohi, "rresp", which=which)
+        await bench.faulted(fmt, prog, src, b, c, n, label, f, expect="data",
+                            idx_a=tbl)
+        mon.settled(label)
+    mon.stop()
+
+
+@cocotb.test()
+async def abort_before_the_first_fetch(dut):
+    """VRD1's note, held: a long (or short) setup burst immediately before a
+    block's first fetch, at read latencies 0, 125 and 256. Stream c is the
+    last setup read of a program that reads all three, and the machine
+    goes to S_FETCH on the edge its last beat is taken. No burst of any
+    kind may follow it, nothing may be left on the channel, and a clean run
+    follows. Two mechanisms hold it, each alone (verifier-VC12's plants ph
+    and pi): `want` low while the main engine is not drained, and the
+    unit's quiesce in S_ABORT; its plant pe, both removed, is red here."""
+    bench = Bench(dut)
+    await bench.start()
+    if not STREAMS or IMEM_D > 1024:
+        # Its programs run past the store, so at the U50's 4,096-word
+        # store each is over 4,000 instructions: held at seq_corestr's
+        # 64-word store, where the same shapes cost a tenth.
+        dut._log.info("not on this build: held at seq_corestr")
+        return
+    mon = PortMon(dut)
+    mon.start()
+    fmt = FP32
+    n = 20
+    a, b, c = (operands(fmt, n, s) for s in (7501, 7502, 7503))
+    prog = seq.Program(fmt, _indep(IMEM_D + 136) +
+                       [seq.deposit(3), seq.deposit(4), seq.halt()],
+                       max_deposits=2)
+    for lat in (0, 125, 256):
+        bench.pin = lat
+        await bench.program(fmt, prog, a, b, c, n, f"control, latency {lat}")
+        mon.settled("control")
+        for kind, k in (("long", 1), ("long", 3), ("long", 30), ("short", 1)):
+            for base, name in ((C_BASE, "stream c (last setup read)"),
+                               (B_BASE, "stream b")):
+                label = f"latency {lat}: {name} {kind} by {k}"
+                f = Fault(dut, bench.ram, base, base + 0x10000, kind, k=k)
+                await bench.faulted(fmt, prog, a, b, c, n, label, f,
+                                    expect="length")
+                mon.settled(label)
+        await bench.program(fmt, prog, a, b, c, n,
+                            f"then clean, latency {lat}")
+    bench.pin = None
+    mon.stop()
+
+
+# The drain-time fetch faults the two cases below plant. Chosen from
+# verifier-VC12's two sweeps, run again on this tree (2026-10-05, 312 runs:
+# read depths 8 and 1, latencies 0 to 300 by 12, four faults; and B delays
+# 3 and 40 by the same latencies, two faults): 42 runs then faulted with a
+# write burst open or committed - 36 and 6, VC12's own counts - all in
+# S_DRAIN_RUN. Each list keeps several of those and a few that land
+# elsewhere, so that the cases reach what they are for at a fraction of
+# the sweep's cost; the first asserts that it still does.
+#   (read depth, latency, burst past the parse's, kind, Fault's args, error)
+DRAIN_FAULTS_C = (
+    (8, 0, 0, "rresp", dict(beat=0), "word"),
+    (8, 0, 0, "long", dict(k=1), "length"),
+    (8, 144, 5, "short", dict(k=2), "length"),     # committed
+    (8, 276, 2, "rresp", dict(beat=5), "word"),    # committed
+    (1, 60, 5, "short", dict(k=2), "length"),      # committed
+    (1, 204, 2, "rresp", dict(beat=5), "word"),    # committed
+    (1, 300, 0, "rresp", dict(beat=0), "word"),
+)
+#   (B delay, latency, burst past the parse's, kind, Fault's args, error):
+# b_delay 3 at latency 276 is the run verifier-VC12's plant pa failed
+DRAIN_FAULTS_B = (
+    (3, 0, 0, "rresp", dict(beat=0), "word"),
+    (3, 276, 2, "rresp", dict(beat=5), "word"),    # committed
+    (40, 288, 2, "rresp", dict(beat=5), "word"),   # committed
+    (40, 132, 0, "rresp", dict(beat=0), "word"),
+)
+
+
+@cocotb.test()
+async def abort_with_a_write_burst_committed(dut):
+    """A fault on a fetch burst the halt abandoned, landing in the deposit
+    drain: the abort's second rule - a write burst already committed
+    delivers its beats, from the drain producing them - and no AR or AW
+    launched after the fault, every B taken, every RLAST taken, whatever
+    was written the model's, and a clean run after. verifier-VC12's plant
+    pc, the abort leaving a drain with a burst committed, hangs here."""
+    bench = Bench(dut)
+    await bench.start()
+    if not STREAMS or IMEM_D > 1024:
+        # Its programs run past the store, so at the U50's 4,096-word
+        # store each is over 4,000 instructions: held at seq_corestr's
+        # 64-word store, where the same shapes cost a tenth.
+        dut._log.info("not on this build: held at seq_corestr")
+        return
+    mon = PortMon(dut)
+    ap = AbortProbe(dut)
+    mon.start()
+    ap.start()
+    fmt = FP32
+    n = lanes_per_block(fmt) + 5
+    a, b, c = (operands(fmt, n, s) for s in (7701, 7702, 7703))
+    prog = _drain_fault_prog(fmt)
+    img_len = len(prog.to_bytes())
+    parse = _parse_bursts(img_len)
+    lo, hi = PROG_BASE + 32, PROG_BASE + img_len
+    depth0 = bench.ram.rd_depth
+    committed = runs = 0
+    for depth, lat, plus, kind, kw, expect in DRAIN_FAULTS_C:
+        bench.ram.rd_depth = depth
+        bench.pin = lat
+        label = f"depth {depth} latency {lat}: fetch burst +{plus} {kind} {kw}"
+        f = Fault(dut, bench.ram, lo, hi, kind, which=parse + plus, **kw)
+        n_before = len(ap.rec)
+        await _fault_in_the_drain(bench, mon, fmt, prog, a, b, c, n, label,
+                                  f, expect=expect)
+        if len(ap.rec) > n_before and ap.rec[-1][1]:
+            committed += 1
+        runs += 1
+        await _clean_after(bench, fmt, label)
+    bench.ram.rd_depth = depth0
+    bench.pin = None
+    ap.stop()
+    mon.stop()
+    dut._log.info(f"faults in the drain: {runs} runs, {committed} with a "
+                  f"write burst open or committed at the fault")
+    assert committed >= 2, (
+        f"only {committed} of {runs} runs faulted with a write burst open or "
+        f"committed: the case no longer reaches what it is for")
+
+
+@cocotb.test()
+async def abort_waits_for_a_late_b(dut):
+    """The same drain-time faults against a slave whose write response comes
+    b_delay cycles after a burst's last W beat: the abort waits for every B
+    (S_ABORT's wr_bresp_left), so done never comes with a response in the
+    air. verifier-VC12's plant pa - S_ABORT's exit without that wait - is
+    green against a slave that answers at once, and red here."""
+    bench = Bench(dut)
+    await bench.start()
+    if not STREAMS or IMEM_D > 1024:
+        # Its programs run past the store, so at the U50's 4,096-word
+        # store each is over 4,000 instructions: held at seq_corestr's
+        # 64-word store, where the same shapes cost a tenth.
+        dut._log.info("not on this build: held at seq_corestr")
+        return
+    mon = PortMon(dut)
+    ap = AbortProbe(dut)
+    mon.start()
+    ap.start()
+    fmt = FP32
+    n = lanes_per_block(fmt) + 5
+    a, b, c = (operands(fmt, n, s) for s in (7701, 7702, 7703))
+    prog = _drain_fault_prog(fmt)
+    img_len = len(prog.to_bytes())
+    parse = _parse_bursts(img_len)
+    lo, hi = PROG_BASE + 32, PROG_BASE + img_len
+    runs = in_air = 0
+    for bd, lat, plus, kind, kw, expect in DRAIN_FAULTS_B:
+        bench.ram.b_delay = bd
+        bench.pin = lat
+        label = f"b_delay {bd} latency {lat}: fetch burst +{plus} {kind}"
+        f = Fault(dut, bench.ram, lo, hi, kind, which=parse + plus, **kw)
+        n_before = len(ap.rec)
+        await _fault_in_the_drain(bench, mon, fmt, prog, a, b, c, n, label,
+                                  f, expect=expect)
+        if len(ap.rec) > n_before and ap.rec[-1][1]:
+            in_air += 1
+        runs += 1
+        bench.ram.b_delay = 0
+        await _clean_after(bench, fmt, label)
+    bench.pin = None
+    ap.stop()
+    mon.stop()
+    dut._log.info(f"late B: {runs} runs, {in_air} with a write burst open or "
+                  f"committed at the fault")
+
+
+# ======================================================================
+# R23 and R24 by verifier-VC34's cases (follow-up B of the step-6 round)
+# ======================================================================
+#
+# verifier-VC34 checked items 3 and 4 (R24 and R23, at 3eb9c16) and
+# found four places the cases above could not fail, though the RTL is
+# right at each: its plants m5 ([6] silenced inside a region), m6 ([6]
+# from STX only), m10 (the retire's byte under the live row, not the
+# fired row) and m15 (the depth wrapping instead of saturating) were
+# green in every case of item 3's and item 4's. Its cases close all four
+# and are adopted here as it wrote them (its scratch, vc34/), renamed to
+# this bench's names; its helpers keep their own.
+
+VC_INV, VC_DZ, VC_OVF, VC_UNF, VC_INX = 1, 2, 4, 8, 16
+
+
+def _vc_words(fmt, n, seed, mark_every=0, zero_every=0):
+    """A word a lane: random bits everywhere, bit 7 set on about one lane in
+    `mark_every` (0: never), a plain zero on about one in `zero_every`."""
+    rng = random.Random(seed)
+    out = []
+    for i in range(n):
+        v = rng.getrandbits(fmt.width) & ~0x80
+        if mark_every and rng.random() * mark_every < 1.0:
+            v |= 0x80
+        if zero_every and rng.random() * zero_every < 1.0:
+            v = 0
+        out.append(v)
+    return out
+
+
+def _vc_drain_words(fmt, n):
+    """Lane i's word has a low byte no other lane within 64 shares: the byte
+    RAISE hands the lane is a bijection of (i * 13 + 5) mod 64 onto the six
+    bits it reads ([4:0] and [7]), and the bits RAISE ignores ([6:5], and
+    everything from 8 up) are random."""
+    rng = random.Random(0xD2A1 + n)
+    out = []
+    for i in range(n):
+        v6 = (i * 13 + 5) % 64
+        low = (v6 & 0x1F) | ((v6 >> 5) << 7) | (rng.getrandbits(2) << 5)
+        out.append((rng.getrandbits(fmt.width) & ~0xFF) | low)
+    return out
+
+
+def _vc_need(want, label, bits=(0, 1, 2, 3, 4, 5, 6, 7), n=None):
+    """The model's lane bytes must show each of `bits` on some lane, and
+    not on all of them where n is large enough to say."""
+    lf = want.lane_flags
+    for bit in bits:
+        ones = sum(1 for v in lf if v >> bit & 1)
+        assert ones > 0, f"{label}: no lane's byte has bit {bit} in the model"
+        if n is not None and n >= 8:
+            assert ones < len(lf), (f"{label}: every lane's byte has bit "
+                                    f"{bit} in the model")
+
+
+async def _vc_run(bench, fmt, insns, a, b, c, n, label, *, consts=(),
+                  max_deposits=1, flags=0, keep=None, unchecked_prog=False,
+                  image_insns=None):
+    """One run of `insns` over n lanes with the lane-flag block asked for,
+    held to the model. `image_insns`: stage THIS image (built unchecked)
+    while the model runs `insns` - for the programs the loader refuses."""
+    if unchecked_prog:
+        prog = unchecked(fmt, insns, consts, max_deposits)
+        prog.flags = flags
+    else:
+        prog = seq.Program(fmt, insns, consts, max_deposits, flags=flags)
+    image = None
+    if image_insns is not None:
+        im = unchecked(fmt, image_insns, consts, max_deposits)
+        im.flags = flags
+        image = im.to_bytes()
+    if keep is not None:
+        assert image is None
+        return await bench.masked(fmt, prog, a, b, c, n, keep, label,
+                                  lane_flags=True)
+    return await bench.program(fmt, prog, a, b, c, n, label, image=image,
+                               lane_flags=True)
+
+
+
+def _vc_src_streams(fmt, n, seed):
+    """r0 (LDX's index), r1 (STX's index and SETACT's operand) and r2
+    (flag words) by a lane's class, class = (5 i + 3) mod 8:
+
+        class   r1 (STX, SETACT)   r0 (LDX)
+          0       +0 (dropped)       big
+          1       3                  big
+          2       big                5
+          3       big                big
+          4       3                  5
+          5       +0 (dropped)       5
+          6       big                +0
+          7       +0 (dropped)       big
+
+    "big" is an index at or past any depth; +0 and the small ones are in
+    range. A lane SETACT drops reaches neither the second deposit nor the
+    LDX."""
+    big = (1 << (fmt.width - 2)) | 7
+    tab = {0: (0, big), 1: (3, big), 2: (big, 5), 3: (big, big), 4: (3, 5),
+           5: (0, 5), 6: (big, 0), 7: (0, big)}
+    r0, r1 = [], []
+    for i in range(n):
+        v1, v0 = tab[(5 * i + 3 + seed) % 8]
+        r1.append(v1)
+        r0.append(v0)
+    r2 = _vc_words(fmt, n, 600 + seed, mark_every=6)
+    return r0, r1, r2
+
+
+@cocotb.test()
+async def lane_flag_sources_by_position(dut):
+    """[5] from the second deposit (past max_deposits 1) of the lanes
+    SETACT left active, [6] from STX's and from LDX's strict suppression
+    apart (a lane SETACT dropped before the LDX does not report it), [7]
+    and [4:0] from RAISE - at every format over a full block and a ragged
+    one, then the same inside a quiet region (a report is not an IEEE flag:
+    [5] and [6] and STATUS[4], STATUS[5] stand, [4:0] go, [7] stands)."""
+    bench = Bench(dut)
+    await bench.start()
+    strict = seq.FLAG_SCRATCH_STRICT
+    for fmt in (FP32, FP64, FP128, FP256):
+        lpb = lanes_per_block(fmt)
+        for n in (lpb, lpb + 7):
+            for seed in (0, 3):
+                r0, r1, r2 = _vc_src_streams(fmt, n, seed)
+                outside = [seq.stx(0, 1), seq.deposit(2), seq.setact(1),
+                           seq.deposit(2), seq.ldx(5, 0), seq.raise_(2),
+                           seq.halt()]
+                label = f"{fmt.name} n={n} s={seed}: sources outside a region"
+                want = await _vc_run(bench, fmt, outside, r0, r1, r2, n,
+                                     label, flags=strict)
+                _vc_need(want, label, bits=(5, 6, 7), n=n)
+                # the LDX's report is a lane's own: a lane with r1 in range
+                # and r0 big, still active at the LDX
+                assert any((want.lane_flags[i] >> 6) & 1 for i in range(n))
+                inside = [seq.quiet(), seq.stx(0, 1), seq.deposit(2),
+                          seq.setact(1), seq.deposit(2), seq.ldx(5, 0),
+                          seq.raise_(2), seq.endquiet(), seq.halt()]
+                label = f"{fmt.name} n={n} s={seed}: sources inside a region"
+                want = await _vc_run(bench, fmt, inside, r0, r1, r2, n, label,
+                                     flags=strict)
+                assert want.flags == 0, (
+                    f"{label}: the model's FLAGS {want.flags:#07b}")
+                assert want.status & seq.STATUS_DEPOSIT_OVERFLOW
+                assert want.status & seq.STATUS_SCRATCH_RANGE
+                assert want.status & seq.STATUS_MARKED
+                _vc_need(want, label, bits=(5, 6, 7), n=n)
+                # LDX alone, then STX alone: the two reports apart
+                for tag, insns in (
+                        ("ldx alone", [seq.ldx(5, 0), seq.halt()]),
+                        ("stx alone", [seq.stx(2, 1), seq.halt()]),
+                        ("ldx after a setact", [seq.setact(1),
+                                                seq.ldx(5, 0), seq.halt()])):
+                    label = f"{fmt.name} n={n} s={seed}: {tag}"
+                    want = await _vc_run(bench, fmt, insns, r0, r1, r2, n,
+                                         label, flags=strict)
+                    _vc_need(want, label, bits=(6,), n=n)
+        # the same under a mask
+        n = lpb + 7
+        r0, r1, r2 = _vc_src_streams(fmt, n, 1)
+        keep = _keep(n, 2)
+        await _vc_run(bench, fmt, outside, r0, r1, r2, n,
+                      f"{fmt.name} n={n} masked: sources", flags=strict,
+                      keep=keep)
+
+
+@cocotb.test()
+async def flag_control_depth_saturates_and_resets(dut):
+    """The loader refuses a fifth nested region and an ENDQUIET with none
+    open, so these images are built unchecked: the depth is three bits and
+    SATURATES (at 7 and at 0), so QUIET x9 / ENDQUIET x8 leaves it at 0
+    where a counter that did not saturate would leave 1, and ENDQUIET at
+    depth 0 does not wrap to 7. Each RTL image is held to the balanced
+    program the saturating count makes it equal to. Then a block that ends
+    with the depth AT 7 must not carry it into the next block."""
+    bench = Bench(dut)
+    await bench.start()
+    fmt = FP32
+    lpb = lanes_per_block(fmt)
+    n = 2 * lpb
+    one = sf.one_bits(fmt)
+    inf, ninf = sf.inf_bits(fmt), sf.inf_bits(fmt, 1)
+    a, b, c = [inf] * n, [one] * n, [ninf] * n
+    loud = seq.alu(sf.OP_ADD, 3, ra=0, rc=2)         # inf + -inf: invalid
+    dep = seq.deposit(3)
+    Q, E = seq.quiet(), seq.endquiet()
+
+    async def case(rtl, model, label, want_inv):
+        r = await _vc_run(bench, fmt, model, a, b, c, n, label,
+                          unchecked_prog=True, image_insns=rtl)
+        assert bool(r.flags & VC_INV) == want_inv, (
+            f"{label}: the model's own answer says FLAGS {r.flags:#07b}")
+        return r
+
+    # QUIET x9, ENDQUIET x8, loud: the depth is 7 after nine, 0 after
+    # eight more (seven take it down, the eighth saturates): LOUD.
+    await case([Q] * 9 + [E] * 8 + [loud, dep, seq.halt()],
+               [loud, dep, seq.halt()],
+               "QUIET x9, ENDQUIET x8, then a loud op: depth saturated at 7, "
+               "so it is loud", True)
+    # QUIET x8, ENDQUIET x7: 7 after eight (the eighth saturates), 0 after
+    # seven more: LOUD (a counter that did not saturate says 1: quiet).
+    await case([Q] * 8 + [E] * 7 + [loud, dep, seq.halt()],
+               [loud, dep, seq.halt()],
+               "QUIET x8, ENDQUIET x7, then a loud op", True)
+    # QUIET x7, ENDQUIET x6: depth 1: QUIET.
+    await case([Q] * 7 + [E] * 6 + [loud, dep, seq.halt()],
+               [Q, loud, dep, seq.halt()],
+               "QUIET x7, ENDQUIET x6, then a loud op: depth 1, quiet",
+               False)
+    # ENDQUIET at depth 0 saturates at 0 (it does not wrap to 7), then
+    # QUIET makes it 1: QUIET. A wrap would make QUIET take it to 0: loud.
+    await case([E, Q, loud, dep, seq.halt()],
+               [Q, loud, dep, seq.halt()],
+               "ENDQUIET at depth 0, QUIET, then a loud op: depth 1, quiet",
+               False)
+    await case([E, E, E, Q, loud, dep, seq.halt()],
+               [Q, loud, dep, seq.halt()],
+               "ENDQUIET x3 at depth 0, QUIET, then a loud op", False)
+    # a bypassing stream: depth 7, then a raise of invalid IS silenced
+    r2 = _vc_words(fmt, n, 91, mark_every=4)
+    await _vc_run(bench, fmt, [Q] * 9 + [seq.raise_(2), dep, seq.halt()],
+                  a, b, r2, n, "QUIET x9 then a raise (silenced; the mark "
+                  "stands)", unchecked_prog=True)
+
+    # the reset at a block's start, from depth 7 and not only from 1: only
+    # the SECOND block's lanes raise invalid, ahead of the QUIETs, so a
+    # depth carried over silences the run's only invalid
+    a2 = [one] * lpb + [inf] * lpb
+    c2 = [one] * lpb + [ninf] * lpb
+    r = await _vc_run(bench, fmt, [loud, dep] + [Q] * 9 + [seq.halt()],
+                      a2, b, c2, n, "a halt at depth 7, two blocks",
+                      unchecked_prog=True)
+    assert r.flags & VC_INV
+    # ... and the same with a loop's worth of regions open at the HALT
+    r = await _vc_run(bench, fmt, [loud, dep, Q, Q, Q, Q, seq.halt()],
+                      a2, b, c2, n, "a halt at depth 4, two blocks",
+                      unchecked_prog=True)
+    assert r.flags & VC_INV
+    # ... and a RAISE ahead of a depth-7 halt, lanes of block 1 only
+    w2 = [0] * lpb + _vc_words(fmt, lpb, 5, mark_every=2)
+    r = await _vc_run(bench, fmt, [seq.raise_(2), dep] + [Q] * 9 +
+                      [seq.halt()], a, b, w2, n,
+                      "a raise, then depth 7, then a halt, two blocks",
+                      unchecked_prog=True)
+    assert r.flags or r.status
+
+
+@cocotb.test()
+async def lane_flags_strict_index_boundaries(dut):
+    """[6] is the lane's own strict suppression: an index of depth-1 is in,
+    depth and depth+1 out, a low word past the depth with every other word
+    zero, a high word alone (the low word in range), the top bit, a lane
+    whose index is +0 - each by position in a full block and a ragged one,
+    STX and LDX apart and together, at every format."""
+    bench = Bench(dut)
+    await bench.start()
+    strict = seq.FLAG_SCRATCH_STRICT
+    D = SCRATCH_D
+    for fmt in (FP32, FP64, FP128, FP256):
+        lpb = lanes_per_block(fmt)
+        w = fmt.width
+        pool = [0, 1, D - 1, D, D + 1, 2 * D, 1 << 20, 1 << 31,
+                (1 << (w - 1)), (1 << (w - 2)) | 7, (1 << (w // 2)) | 5,
+                (1 << 32) if w > 32 else 1 << 20, ((1 << w) - 1)]
+        for n in (lpb, lpb + 5):
+            idx = [pool[(i * 7 + 3) % len(pool)] & ((1 << w) - 1)
+                   for i in range(n)]
+            idx2 = [pool[(i * 5 + 1) % len(pool)] & ((1 << w) - 1)
+                    for i in range(n)]
+            zero = [0] * n
+            r2 = _vc_words(fmt, n, 31, mark_every=0)
+            for name, insns in (
+                    ("stx alone", [seq.stx(2, 1)]),
+                    ("ldx alone", [seq.ldx(5, 1)]),
+                    ("stx on r1, ldx on r0", [seq.stx(2, 1), seq.ldx(5, 0)]),
+                    ("ldx after a setact on r0",
+                     [seq.setact(0), seq.ldx(5, 1)])):
+                label = f"{fmt.name} n={n}: strict {name}"
+                want = await _vc_run(bench, fmt, insns, idx2, idx, r2, n,
+                                     label, flags=strict)
+                _vc_need(want, label, bits=(6,))
+                # the lane's own report: out of range iff its index is
+                # at or past the depth
+                for i in range(n):
+                    if name == "stx alone":
+                        oor = idx[i] >= D
+                        assert bool(want.lane_flags[i] & 0x40) == oor, (
+                            label, i, hex(idx[i]))
+
+
+@cocotb.test()
+async def lane_flags_of_lanes_dropped_in_flight(dut):
+    """R23's [4:0] are taken at the retire under the row the beat FIRED with
+    (SEQUENCER.md): a lane SETACT drops right behind an arithmetic
+    instruction keeps what that instruction raised while the lane was
+    active. It needs a block of one or two beats - the SETACT then narrows
+    `active` sixteen cycles before the result lands; at sixteen beats the
+    two meet in the same cycle - so n is a beat or two at every format.
+    Arithmetic, then SETACT, then a deposit (so the result is consumed) or
+    nothing; k independent fillers between; and the instruction behind the
+    SETACT a second arithmetic one."""
+    bench = Bench(dut)
+    await bench.start()
+    A = seq.alu
+    for fmt in (FP32, FP64, FP128, FP256):
+        lpb_beat = 256 // fmt.width
+        inf, zero, one = sf.inf_bits(fmt), sf.zero_bits(fmt), sf.one_bits(fmt)
+        two = sf.round_pack(fmt, 0, 2, 0)[0]
+        mx = sf.max_normal_bits(fmt)
+        for n in sorted({1, 2, lpb_beat, lpb_beat + 1, 2 * lpb_beat}):
+            # r0*r1: invalid (inf * 0) in lanes i % 3 == 0, overflow (max * 2)
+            # in i % 3 == 1, exact (1 * 1) in the rest
+            a = [inf if i % 3 == 0 else mx if i % 3 == 1 else one
+                 for i in range(n)]
+            b = [zero if i % 3 == 0 else two if i % 3 == 1 else one
+                 for i in range(n)]
+            # r2: zero (SETACT drops the lane) in even lanes
+            r2 = [zero if i % 2 == 0 else one for i in range(n)]
+            for k in range(4):
+                fill = [A(sf.OP_IAND, 7 + j, ra=2, rb=2) for j in range(k)]
+                for tail_name, tail in (("", []), (" + deposit",
+                                                   [seq.deposit(3)]),
+                                        (" + a second op",
+                                         [A(sf.OP_MUL, 4, ra=0, rb=0)])):
+                    insns = ([A(sf.OP_MUL, 3, ra=0, rb=1)] + fill +
+                             [seq.setact(2)] + tail)
+                    label = (f"{fmt.name} n={n} k={k}: mul, {k} fillers, "
+                             f"setact{tail_name}")
+                    want = await _vc_run(bench, fmt, insns, a, b, r2, n,
+                                         label)
+                    dropped = [i for i in range(n) if i % 2 == 0]
+                    if n >= 3:
+                        assert any(want.lane_flags[i] & 0x1F for i in dropped
+                                   if i % 3 != 2), (
+                            f"{label}: the model gives no dropped lane its "
+                            f"arithmetic flags - the case cannot see them "
+                            f"lost")
+            # the same through a region (the tag, with the narrowing)
+            insns = [seq.quiet(), A(sf.OP_MUL, 3, ra=0, rb=1), seq.endquiet(),
+                     A(sf.OP_MUL, 4, ra=0, rb=1), seq.setact(2)]
+            await _vc_run(bench, fmt, insns, a, b, r2, n,
+                          f"{fmt.name} n={n}: quiet mul, loud mul, setact")
+
+

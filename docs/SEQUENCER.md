@@ -3109,13 +3109,14 @@ a padding lane and a lane SETACT dropped run no instruction, so they write
 no `rd` and raise no flag - P3's rule, which
 `python/tests/test_seq_rev8.py` holds with a signaling NaN in each.
 
-**What a tile does: the lanes built, the decode round 2's** (revision 8's
+**What a tile does: the lanes and the decode built** (revision 8's
 RTL, docs/ROADMAP.md's plan of record; golden-first, so `augmented.py`
-stays the definition and the lanes are held to it). Both codes are to go
+stays the definition and the lanes are held to it). Both codes go
 through the issue pipe into the array as an ALU instruction does - one
 array pass and one register write each, under R13 to R15's hazards and
 forwarding - rather than through the control path, with R10's
-stream-need parse naming their `ra` and `rb`: that decode is round 2's.
+stream-need parse naming their `ra` and `rb`: that decode is round 2's,
+built on 2026-10-05 ("Revision 8 in the tile", at the end).
 The lanes are built (round 1, the plan's design (b),
 `rtl/cft_fpfma_pipe.sv`'s R21 section). Every FMA pipe takes a two-bit
 sideband, `aug_mode` (0 an ordinary operation, 1 augadd, 2 augerr),
@@ -3152,10 +3153,19 @@ pipe keeps +1.815 ns into S10 with R21 (+2.770 without), +1.523 into S6
 timing and design (a) is not built (question 8). At EN_AUGADD = 0 the
 pipe synthesises to exactly 5e033f6's at fp32, fp64 and fp128, and one
 LUT apart at fp256 (30,251 against 30,250, registers equal). Until round
-2's decode drives the sideband - and on every tile built so far -
-CAPS2[11] reads zero and code 10 decodes as HALT (`rtl/cft_seq.sv`'s
-`default` arm), so the loader refuses both codes there by name, naming
-the instruction.
+2's decode drove the sideband - and on every tile built so far - CAPS2[11]
+reads zero and code 10 decodes as HALT (`rtl/cft_seq.sv`'s `default`
+arm), so the loader refuses both codes there by name, naming the
+instruction. Since that decode, one parameter decides all of it, a
+build's choice: a tile built with EN_AUGADD = 1 (the default; the single
+and the deep build) decodes both codes and publishes CAPS2[11], and one
+built at 0 is that revision-7 tile again on these two codes - CAPS2[11]
+zero, both ending the block as unknown codes, and the loader refusing them
+first. The quad is built at 0 (question 9, above), and so are the
+open-core configurations - the quarter tile, the board group and the
+openXC7 harness - by Logan's decision of 2026-10-05, to be reconsidered
+with other space-saving measures once the dense design closes timing on
+nextpnr: "Agreed on keeping R21 off for open-core, parallel work is already being undertaken to get the dense design to close timing on NextPnr, once progress is seen there it will be reconsidered along with other space saving measures".
 
 ### R22. A post-step on `STX` and `LDX`
 
@@ -3226,16 +3236,28 @@ bit is about the encoding. STX with `ra` = `rb` has one register write,
 the step's, and keeps it. (Until the send-back of 2026-09-29 this form was
 refused, a rung-3 choice taken while rung 2 had an answer.)
 
-**What a tile would need** (believed, not built). A stepped STX writes one
-register, rb, and a stepped LDX two, rd and then rb - one, when rd is rb;
-the register file has one write port. In today's scratch states the port is idle in the cycle
-the index is on the bus (`S_SCR_AD`), so a step could ride it there. Under
-R18, where a load retires through the array's queue (P1's rule), the step
-is a second producer and needs a write cycle a beat unless revision 8
-gives it another path - which is what decides this item's worth, below.
-Every tile built so far reads CAPS2[12] as zero and never reads imm on the
-indexed pair, so it would access without stepping; the loader refuses a
-non-zero step there by name.
+**What a tile would need** (believed when written; built on 2026-10-05,
+below). A stepped STX writes one register, rb, and a stepped LDX two, rd
+and then rb - one, when rd is rb; the register file has one write port.
+In the scratch states before R18 the port was idle in the cycle the index
+was on the bus (`S_SCR_AD`), so a step could ride it there. Under R18,
+where a load retires through the array's queue (P1's rule), the step is a
+second producer and needs a write cycle a beat unless revision 8 gives it
+another path - which is what decides this item's worth, below. Every tile
+built before revision 8's RTL reads CAPS2[12] as zero and never reads imm
+on the indexed pair, so it would access without stepping; the loader
+refuses a non-zero step there by name.
+
+**What a tile does** (revision 8's RTL, built 2026-10-05; "Revision 8 in
+the tile", at the end). The array computes the step, as IADD on the
+encoding, so P1 holds. A stepped STX fires IADD(rb as the bank read it,
+the step) at its own F - the request slot a store leaves free - and is a
+writer of rb: a queue slot, which every later reader of rb waits for.
+Its step costs no beat (p = 0, measured). A stepped LDX whose
+destination is not its index is followed by an internal IADD rb, rb,
+step, issued as an instruction of its own before the next word: up to
+one more instruction's beats (p up to 1, measured at about one). `ldx rX,
+rX, step` issues none, and keeps what it loaded.
 
 ### What each is worth, counted
 
@@ -3341,7 +3363,8 @@ kernel's forms; and anything a tile adds to build either item.
 
 *Built golden-first on 2026-10-02 (the step-6 round's R8): the model,
 the software backend at ABI 0.17 and the remote protocol. A tile carries
-it from revision 8's RTL, and until then every device but the software
+it from revision 8's RTL (built 2026-10-05; "Revision 8 in the tile", at
+the end), and until a bitstream does every device but the software
 backend - and a remote handle over one - refuses the block by name. It
 changed how a run reports, so it was written down before any code:
 2026-09-29, and its mark on 2026-10-02.*
@@ -3737,8 +3760,10 @@ lines, audited, and through a server. cftc: `python/tests/test_cftc.py`.
 On a card, where no tile publishes CAPS2[13] or [14], each says what it
 refuses by name and what it does not compare.
 
-**What a tile would need** (revision 8's RTL: believed, not built).
-- Decode for codes 12 to 14, which the default arm takes as HALT today.
+**What a tile would need** (revision 8's RTL: believed, not built - and
+built as below on 2026-10-05; "Revision 8 in the tile", at the end).
+- Decode for codes 12 to 14, which the default arm took as HALT before
+  R24 was built.
 - A quiet depth of three bits, counted by QUIET and ENDQUIET as they are
   decoded, in program order, as REPEAT and ENDREP keep the loop stack.
   Neither walks a beat (R18).
@@ -3783,3 +3808,204 @@ refuses by name and what it does not compare.
   CSRRSI's immediate is five.
 - Lowering a flag inside a run, which R23 declines: a region lowers
   nothing.
+
+### Revision 8 in the tile (the step-6 round's round 2, from 2026-10-05)
+
+The RTL plan of record (docs/ROADMAP.md, "Revision 8: step 6's RTL
+revision") builds revision 8 in `rtl/cft_seq.sv` one item at a time, in
+the plan's order. Each line below says what a tile carries once that
+item's commit is in it; a bitstream carries it only once one is built
+from such a tree.
+
+- **The abort** (built 2026-10-05). A sequencer read burst of the wrong
+  length ends the run, the engine's rule since 2026-08-30: from the
+  fault on no new burst is issued, read or write; a write burst already
+  committed delivers its beats; every read in flight lands, a long burst
+  drained to its RLAST; and done comes with STATUS[2]. A read fault on
+  the header beat, or on a beat holding any byte of an instruction, ends
+  the run the same way with STATUS[0], so no word the memory did not
+  vouch for decides what runs. A read fault on data - the constants, the
+  bank, the scratch-in, a stream, the mask, a table - completes the run
+  as it always did, STATUS[0] saying its outputs are not to be trusted.
+  Until then a short burst left the sequencer waiting for ever, and a
+  long one handed its extra beat to a later read. `rtl/cft_seq.sv`'s
+  contract, item 5, and `S_ABORT`; `tb/test_seq_core.py`'s four `abort_`
+  cases (a short and a long burst on every multi-beat read, a long one
+  on every single-beat read, a read fault on the header, on an
+  instruction and on data, most followed by a clean run on the same
+  instance - each stream's faults as a group, the fp256 constant beat's
+  data faults not at all) and `tb/test_krnl_faults.py`'s two sequencer
+  cases through the kernel; and verifier-VC12's four, committed after it
+  found each claim unheld (a data fault on the mask, a table or a
+  gathered element; a fetch fault with a write burst committed; a
+  slave's late B; a long or short last setup burst before a block's first
+  fetch), each under a monitor of the module's own port.
+- **The fetch's hooks** (built 2026-10-05). `rtl/cft_ifetch.sv` (round
+  1's unit, unchanged) replaces the instruction memory: its store holds
+  the program's first `IMEM_D` instructions (4,096 on the U50, where the
+  memory held 32,768), and past it a program streams from the image
+  through the A master, up to `STREAM_D` instructions (2^24 on the U50,
+  CAPS2[20:16] = 24; CAPS[23:20] stays 15). The parse hands the unit every
+  instruction; the fetch states, the skip and the issue's continuation ask
+  it for the word they need next, a cycle ahead as they addressed the
+  memory, and wait while a streamed word is on its way; a REPEAT whose
+  body starts outside the store moves the store to it; the block's end
+  quiesces it, and `S_WAIT_B` waits for it to be idle. Its faults end the
+  run through the abort, STATUS[0] or STATUS[2]. The read port is the
+  fetch's from a block's first request to its idle, and opens only with
+  the main read engine drained. A program of at most `IMEM_D`
+  instructions reads nothing during a block and runs in exactly the
+  cycles it did (`make seqcycles`' 72 rows the same before and after);
+  past the store, a loop pass costs what it costs resident at read
+  latencies 0, 125 and 256 once a pass has run - the first pass after a
+  retarget, while the store captures the body, also waits for the
+  stream's round trip (`make seqcyclesstr`, whose rows are the passes
+  after it). `pc` and the skip's
+  depth are a bit wider than log2 of the capacity, the header refuses
+  past the capacity, and the open-core configurations build no stream
+  (`SEQ_STREAM_D` equal to the store). Held in `tb/test_seq_core.py` at
+  `seq_core` (no stream), `seq_coreu50` (past 4,096), `seq_corestr` in
+  `make sim` - a 64-word store and a 4,096-word capacity at those three
+  latencies, under the cases written for the fetch and the one other case
+  whose programs outgrow the store - and `seq_corestr_full` in `make
+  simmc`, S8's configuration whole: every case at a 2^16 capacity and the
+  three latencies, under Verilator. They are two targets since
+  2026-10-05, when Icarus could not finish the whole one inside its
+  target's four hours; and most of the bench's programs fit even a
+  64-word store, so most of its cases run resident there. Through the
+  kernel, `tb/test_krnl_seq.py`'s image of 32,769 instructions and the
+  capacity plus one refused at the header.
+- **R24, flag control** (built 2026-10-05). QUIET and ENDQUIET decode in
+  `S_DECODE`, as REPEAT and ENDREP do, and keep a three-bit depth, reset
+  at each block's start. It saturates both ways: the loader nests regions
+  four deep and balances them, and a stream that bypassed it - a fifth
+  QUIET past seven, an ENDQUIET with none open - keeps a defined depth
+  rather than wrapping a closed region open or an open one closed. The
+  depth gates only flags, so nothing about it bears on whether a run
+  ends. Every instruction is tagged at admission
+  with whether a region was open, and the tag rides its beats to F, where
+  it joins `al_fen`, the flag enable that gates FLAGS at the retire - so a
+  region's edge never moves a beat already admitted. RAISE goes through
+  the issue pipe as SETACT does, its `ra` read from the bank under R14's
+  landed rule, and acts at F: its active lanes' `ra[4:0]` into FLAGS
+  unless tagged, in the same write as a landing result's flags, and
+  `ra[7]` into the mark, tagged or not - `err[5]`, STATUS[6] through
+  `cft_krnl` and `cft_csr`. CAPS2[14] is published on every build. A
+  bracket costs a decode and a refetch, as REPEAT does, and a raise a
+  step a live beat, as SETACT does (`make seqcycles`' two R24 rows).
+  Held against `seq.py` in `tb/test_seq_core.py`'s three `flag_control_`
+  cases, with verifier-VC34's `flag_control_depth_saturates_and_resets`
+  (the depth saturating at 7 and at 0, and reset from 7 at a block), and
+  through the kernel in `tb/test_krnl_seq.py`'s `krnl_flag_control`.
+- **R23, per-lane flags** (built 2026-10-05). A byte for each of the
+  block's 128 lane slots, 1,024 flops at every format, addressed as
+  `active` is. [4:0] are taken at the retire: each position's five flags
+  under the row its beat fired with and its flag enable, so R24's tag
+  silences them as it silences FLAGS. [5], [6] and [7] are taken at F:
+  DEPOSIT's overflow by position, the strict test's suppression by
+  position, and a RAISE's `ra[7]`, with its `ra[4:0]` unless tagged.
+  Each is captured from a registered copy of the term the run's own
+  report takes, a cycle late, so no R23 logic sits on an existing path.
+  The bytes clear at each block's start. MODE[24] asks for the block:
+  it drains after the counts and before the scratch-out block, 32 lanes
+  a beat at the counts' two cycles a beat. Each byte is strobed where
+  the lane is below `n` and the caller's mask keeps it, so a masked
+  lane's byte is the caller's, and a lane SETACT dropped is written with
+  what it raised while active. A block is 4, 2, 1 or half a beat, and
+  fp256's half beat goes at its block's 16-byte offset in the beat. A
+  run that does not ask never enters the drain and writes nothing
+  (`make seqcycles`' earlier rows the same); one that asks pays 11, 7, 5
+  and 5 cycles a block at fp32, fp64, fp128 and fp256 (the R23 row).
+  CAPS2[13] is published on every build, and the CSR lets MODE[24]
+  through. Held against `seq.py`'s `Result.lane_flags`, byte for byte
+  and with the three identities read off the tile's own bytes, in
+  `tb/test_seq_core.py`'s two `lane_flags_` cases and the R24 fuzz, with
+  verifier-VC34's three - [5], [6] and [7] by position with STX's and
+  LDX's reports apart and inside a region, the strict test's boundaries
+  lane by lane, and the bytes of lanes SETACT drops while their beats are
+  in flight - and through the kernel in `tb/test_krnl_seq.py`'s
+  `krnl_lane_flags`, where the register at 0xB0 is the address the block
+  lands at, and where a run without MODE[24] has LFLAGS_PTR aimed at the
+  same region, so a tile that ignored MODE[24] would be seen there.
+- **R21's decode** (built 2026-10-05, after round 1's lanes were merged
+  in). AUGADD and AUGERR, control codes 10 and 11, go through the issue
+  pipe as ALU instructions do: piped writers of `rd`, reading `ra` on
+  port A and `rb` on port C, where an ALU instruction has `rc` - port C's
+  register address and its hazard compare both take `rb`'s field for
+  these two codes. They fire as ADD (whose operands `cft_opmux` shapes as
+  (a, 1.0, c)) with the `aug_mode` sideband at 1 or 2, registered beside
+  the request and zero on every other one, and with their flag enable on,
+  so their flags reach FLAGS and R23's byte, and R24's quiet tag silences
+  them as it does an ALU instruction's. The parse's stream need names
+  their `ra` and `rb`. In the kernel the array takes the sequencer's
+  sideband in a sequencer run and zero in an elementwise one, for good.
+  EN_AUGADD, a build parameter of `cft_krnl` and `cft_seq` (default 1),
+  builds the lanes' R21, the decode and CAPS2[11] together; at 0 the two
+  codes are unknown ones, as on revision 7. A build's choice: 1 on the
+  single and the deep build, 0 on the quad and on the open-core
+  configurations (Logan's decision of 2026-10-05, in R21's section). They
+  cost what an ALU instruction does (`make seqcycles`' R21 rows, a block
+  each): twenty augadds what twenty IANDs do, 557.2, 477.2 and 437.2
+  cycles at fp32, fp64 and fp128; ten augerr-augadd pairs two cycles
+  less, 555.2, 475.2 and 435.2; and a chain through `ra` or `rb` what an
+  IAND chain does. Held against `seq.py`, both halves and both operand
+  orders, in `tb/test_seq_core.py`'s four `augadd_` cases at `seq_core`,
+  `seq_coreu50`, `seq_coremc` and S8's streaming build
+  (`seq_corestr_full`), and at `seq_coreu50mc` all but `augadd_fuzz` -
+  every family of the plan's list at every format, a dependency through
+  `rb` on port C at one beat, two beats and a lane, and a whole block, a
+  mask, a dropped lane and a quiet augerr, and the model's revision-8
+  fuzz arm - and in verifier-VC56's `augadd_stream_need_by_role`, each
+  stream read in one role alone, so the parse's need for `ra` and for
+  `rb` is held apart. Through the kernel in `tb/test_krnl_seq.py`'s
+  `krnl_augadd`: every family at fp32 and fp256, then an elementwise ADD
+  straight after a run ending on an augerr; and in VC56's
+  `krnl_elementwise_after_augadd_at_ties`: ADD and FMA over ties and
+  near-ties straight after a run ending on an augadd, and on an augerr,
+  where an augadd's sideband left live would move a tie. The
+  quad's tile is held by `make krnlseqnoaug`, a named subset of that
+  bench built at EN_AUGADD = 0: CAPS2[11] clear, each code ending its
+  block where it stands, and an R21-free program bit-exact. The outside
+  attribute codes 5 to 7, which R21's internal codes share the
+  attribute line with, are held to RNE through the kernel in
+  `tb/test_krnl.py`'s `krnl_attribute_codes_5_to_7`.
+- **R22, the post-step on STX and LDX** (built 2026-10-05). imm[11:0] of
+  the indexed pair is read at last, a signed step. The array computes
+  the step: IADD of the index and the step, sign-extended to the format's
+  width - a lane's lowest word the twelve bits extended, its higher words
+  the sign - so the index is a function of the program alone at every
+  width.
+  - A stepped STX is a writer of rb, the destination its queue slot
+    names. At F, beside its store, it fires the IADD into the array's
+    request slot, which a store leaves free. Its operands are rb as the
+    bank read it (an indexed code's rb waits under R14's landed rule) and
+    the step, both registers chosen in parallel with the other sources,
+    so the forwarded operand still enters at the last level.
+  - A stepped LDX whose destination is not its index is followed by an
+    internal instruction, IADD rb, rb, with the step as operand b in
+    place of a constant. The issue admits it at the LDX's last step,
+    before the next word, which stays wanted and is taken at the IADD's
+    own last step. `ldx rX, rX, step` issues none and keeps what it
+    loaded.
+  - A step raises no flag and is masked by the active bit, as every
+    write is. Under SCRATCH_STRICT the access is judged on the index as
+    it stood, and the step goes on.
+  - The cost (`make seqcycles`' R22 rows, a block each): twenty stepped
+    stores 562.2 cycles against twenty unstepped 561.2, so p = 0; twenty
+    stepped loads 897.2 against 538.2, about one more instruction's beats
+    a load, so p = 1; and twenty stepped stores on one index 960.2, each
+    waiting for the step before it.
+  - CAPS2[12] is published on every build. Held against `seq.py` in
+    `tb/test_seq_core.py`'s five R22 cases at `seq_core`, `seq_coreu50`,
+    `seq_coremc` and S8's streaming build (`seq_corestr_full`), and at
+    `seq_coreu50mc` all but `stepped_index_masked_and_dropped` and
+    `stepped_fuzz`: a walk up by stores and down by loads at every
+    format, wrapping through 0 and crossing zero downward; the field's
+    two ends; a walk under SCRATCH_STRICT; `ldx rX, rX` and `stx rX, rX`;
+    a mask and a dropped lane; a dependent chain at one beat, two beats
+    and a lane, and a whole block (since verifier-VC56; until then at a
+    block, two blocks and a lane, and sixteen); and the model's
+    revision-8 fuzz arm. Through the kernel in `tb/test_krnl_seq.py`'s
+    `krnl_scratch_step`. With it the tile reads the plan's words: CAPS2
+    0x00187FFB on the single, 0x001877FB on the quad's tile without R21,
+    and 0x000077F8 on the open-core configurations. VERSION stays 0xB00.

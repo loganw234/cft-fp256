@@ -551,7 +551,8 @@ module cft_csr (
   // Nothing writes through it at the seam: MODE[24], which asks for the
   // block, is refused by the guard below while FEAT_LANE_FLAGS is clear,
   // and CAPS2[13] stays zero until R23 sets it - at this same version,
-  // because a feature bit does not move VERSION. The seam's other
+  // because a feature bit does not move VERSION (R23 set it in round 2,
+  // still 0xB00). The seam's other
   // changes add no register and so do not move it either: STATUS[6]
   // (R24's mark) is a bit of a register that exists, and CAPS2[14:11]
   // and [20:16] are fields of one. A host that wrote LFLAGS_PTR to an
@@ -609,9 +610,10 @@ module cft_csr (
    *
    * MODE[23], the lane mask, has its own feature bit as of P3 and is
    * refused exactly where the tile cannot honour it. MODE[24], R23's
-   * flag block, has its own from revision 8's seam on the same terms -
-   * and the seam builds it nowhere, so every tile refuses it as it
-   * refused it when it was reserved. [31:25] is what is left of the
+   * flag block, has its own from revision 8's seam on the same terms.
+   * The seam built it nowhere, so every tile refused it as it refused it
+   * when it was reserved; R23 (round 2) builds it, and cft_krnl's
+   * FEAT_LANE_FLAGS lets it through. [31:25] is what is left of the
    * reserved range. */
   assign cfg_mode_bad =
       (mode_q[31:25] != 7'b0)                     ||

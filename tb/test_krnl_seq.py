@@ -63,9 +63,13 @@ from cft_golden import (  # noqa: E402
     min_subnormal_bits, max_normal_bits,
 )
 from cft_golden import seq  # noqa: E402
+from cft_golden import compute as _vc_compute  # noqa: E402
+from cft_golden import RND_RNE as _VC_RNE  # noqa: E402
+import augadd_corners  # noqa: E402  (verifier-VC56's pool)
 
 from test_krnl import (  # noqa: E402
-    run_op, check_seq_caps, check_caps2, krnl_param,
+    run_op, check_seq_caps, check_caps2, krnl_param, krnl_param_bit,
+    check_seam_words, PREC_MASK,
 )
 
 # The tile's instruction capacity, PARSED from the RTL rather than
@@ -75,6 +79,11 @@ from test_krnl import (  # noqa: E402
 # that builds another value hands it here as CFT_GENERICS
 # (test_krnl.krnl_param), so this is the number THIS build has.
 SEQ_IMEM_D = krnl_param("SEQ_IMEM_D")
+# ...and since revision 8 (R8S) the CAPACITY beside it: SEQ_IMEM_D is the
+# instruction store, and past it a program streams from card memory up to
+# SEQ_STREAM_D instructions - 2^24 on the U50, equal to the store on the
+# open-core configurations, which do not stream.
+SEQ_STREAM_D = krnl_param("SEQ_STREAM_D")
 # ...and the scratch's depth, on the same terms. It moved into existence
 # at revision 3 and to 2,048 at revision 7 - and unlike the other two it
 # is part of what an instruction MEANS (a non-strict STX/LDX reduces
@@ -118,9 +127,18 @@ MODE_LANE_MASK = 1 << 23
 CAPS2_INDEXED = 1 << 9
 CAPS2_LANE_MASK = 1 << 10
 # MODE[24]: R23's per-lane flag block (revision 8), honoured only under
-# CAPS2[13] - which no build sets at revision 8's seam, so it is refused.
+# CAPS2[13] - which no build set at revision 8's seam, and every build has
+# set since R23 was built (round 2).
 MODE_LANE_FLAGS = 1 << 24
 CAPS2_LANE_FLAGS = 1 << 13
+# CAPS2[11]: R21's augadd and augerr, where the build carries them
+# (EN_AUGADD; the quad's tile does not - tb/Makefile's krnlseqnoaug).
+CAPS2_AUGADD = 1 << 11
+# CAPS2[12]: R22's post-step on STX and LDX, on every build since round 2.
+CAPS2_SCRATCH_STEP = 1 << 12
+# CAPS2[14]: R24's flag control (QUIET, ENDQUIET, RAISE; STATUS[6]),
+# published since revision 8's round 2 built it.
+CAPS2_FLAG_CONTROL = 1 << 14
 
 ST_REFUSED = 1 << 3
 ST_DEPOSIT_OVF = 1 << 4
@@ -161,6 +179,10 @@ IC_BASE, ISI_BASE = 0x160000, 0x168000
 # pass every check here if the regions touched. One bit a lane, so
 # 64 KB is half a million lanes.
 MASK_BASE = 0x170000
+# R23's per-lane flag block (revision 8), a byte a lane at LFLAGS_PTR
+# (0xB0), in its own region for the reason every block above has one:
+# the 64 KB between the elementwise corner and the scratch-in block.
+LF_BASE = 0x100000
 EW_BASES = (0xC0000, 0xD0000, 0xE0000, 0xF0000)
 
 POISON = 0xAA
@@ -228,7 +250,7 @@ def pack_idx(table):
 async def stage_and_start(axil, ram, image, prog, va, vb, vc, n,
                           prec_code, op_noise=0, bank=None,
                           scratch_in=None, idx=(None, None, None, None),
-                          mode_extra=0, mask=None):
+                          mode_extra=0, mask=None, lane_flags=False):
     """Everything a host does between having a program and having an
     answer, in the order XRT does it.
 
@@ -294,6 +316,19 @@ async def stage_and_start(axil, ram, image, prog, va, vb, vc, n,
         idx_mode |= MODE_LANE_MASK
     else:
         await write64(axil, MASKPTR, 0xDEAD_8000)
+    # R23's block (revision 8): MODE[24] and LFLAGS_PTR at 0xB0, the region
+    # poisoned so a byte the tile did not write reads as the caller's. Where
+    # no block is asked for, the pointer still aims at LF_BASE, so that a
+    # tile ignoring MODE[24] writes where krnl_lane_flags looks - aimed at
+    # 0xDEAD_9000, as it was, those bursts landed in the AXI RAM unseen and
+    # the "nothing written without MODE[24]" leg could not fail
+    # (verifier-VC34's plant k2, cfg_lflags_en tied high).
+    if lane_flags:
+        ram.write(LF_BASE, bytes([POISON]) * (n + GUARD))
+        await write64(axil, LFLAGSPTR, LF_BASE)
+        idx_mode |= MODE_LANE_FLAGS
+    else:
+        await write64(axil, LFLAGSPTR, LF_BASE)
     await axil.write_dword(MODE, op_noise | (prec_code << 8) | MODE_SEQ |
                            idx_mode | mode_extra)
     await write64(axil, NREG, n)
@@ -330,7 +365,8 @@ async def stage_and_start(axil, ram, image, prog, va, vb, vc, n,
 
 async def run_prog(dut, axil, ram, prog, va, vb, vc, name, op_noise=0,
                    bank=None, scratch_in=None, tries=3000,
-                   idx=(None, None, None, None), n=None, mask=None):
+                   idx=(None, None, None, None), n=None, mask=None,
+                   lane_flags=False, image=None):
     """One sequencer run, scored against the model on every observable.
 
     With an index table, `va`/`vb`/`vc` are the SOURCES that table
@@ -355,10 +391,34 @@ async def run_prog(dut, axil, ram, prog, va, vb, vc, name, op_noise=0,
     # model would accept a drain that had overwritten the buffer.
     keep = [True] * n if mask is None else list(mask)
 
-    await stage_and_start(axil, ram, prog.to_bytes(), prog, va, vb, vc, n,
+    # `image` is what the tile runs where it is not the model's program:
+    # the quad's tile, built without R21, runs an augadd image the model
+    # scores as the same program with HALT where the code stands.
+    await stage_and_start(axil, ram,
+                          prog.to_bytes() if image is None else image,
+                          prog, va, vb, vc, n,
                           PREC_CODE[fmt.name], op_noise, bank=bank,
-                          scratch_in=scratch_in, idx=idx, mask=mask)
+                          scratch_in=scratch_in, idx=idx, mask=mask,
+                          lane_flags=lane_flags)
     await poll_done(dut, axil, name, tries=tries)
+
+    # R23's block, where the run asked: lane i's byte at LF_BASE + i - the
+    # address LFLAGS_PTR at 0xB0 was written with, so a register at 0xB0
+    # that did not drive the pointer lands it elsewhere - and a masked
+    # lane's byte the caller's poison; GUARD bytes past it untouched.
+    if lane_flags:
+        got_lf = ram.read(LF_BASE, n + GUARD)
+        for i in range(n):
+            if keep[i]:
+                assert got_lf[i] == res.lane_flags[i], (
+                    f"{name}: lane {i}'s flag byte {got_lf[i]:#04x}, model "
+                    f"{res.lane_flags[i]:#04x}")
+            else:
+                assert got_lf[i] == POISON, (
+                    f"{name}: lane {i} is masked and its flag byte was "
+                    f"written")
+        assert got_lf[n:] == bytes([POISON]) * GUARD, (
+            f"{name}: the tile wrote past the lane-flag block")
 
     got_dep = ram.read(D_BASE, dep_bytes + GUARD)
     bad = 0
@@ -940,14 +1000,24 @@ async def krnl_sequencer(dut):
     # bulk is skipped rather than executed - see prog_fills_imem - so
     # the case costs about 8,200 cycles of skip rather than the 160,000
     # that executing every instruction would.
+    #
+    # Since revision 8 (R8S) a tile that streams holds SEQ_IMEM_D in its
+    # store and takes SEQ_STREAM_D: the case is then an image of 32,769
+    # instructions - one past revision 7's capacity, the image device-test
+    # loads on a card - streamed through the kernel's A master past the
+    # store, its last words at addresses past 2^15. A tile that does not
+    # stream runs its store full, as before.
     n_imem = 16
-    pimem = prog_fills_imem(FP32, SEQ_IMEM_D)
-    assert len(pimem.to_bytes()) == 32 + 8 * SEQ_IMEM_D
+    n_full = 32769 if SEQ_STREAM_D > SEQ_IMEM_D else SEQ_IMEM_D
+    pimem = prog_fills_imem(FP32, n_full)
+    assert len(pimem.to_bytes()) == 32 + 8 * n_full
     await run_prog(dut, axil, ram, pimem,
                    gen_stream(FP32, n_imem, rng, tame=True),
                    gen_stream(FP32, n_imem, rng, tame=True),
                    gen_stream(FP32, n_imem, rng, tame=True),
-                   f"fp32 {SEQ_IMEM_D} instructions, IMEM full",
+                   f"fp32 {n_full} instructions, "
+                   + ("streamed past the store" if n_full > SEQ_IMEM_D
+                      else "IMEM full"),
                    # The default budget is 30,000 cycles and this run
                    # needed more than twice that at IMEM_D 16384: about
                    # 20,500 to parse a 131 KB image an instruction a
@@ -958,13 +1028,19 @@ async def krnl_sequencer(dut):
                    # 32,768 (revision 7), inside the 300,000 given.
                    tries=30000)
 
-    # ...and one more than the memory holds is refused at the header,
-    # which is the boundary the capacity actually is. The image is
-    # emitted in full and honestly, so the refusal is unambiguous
-    # about which check fired.
-    too_big = bytearray(pimem.to_bytes())
-    too_big[8:12] = (SEQ_IMEM_D + 1).to_bytes(4, "little")
-    too_big += bytes(8)   # the honest body for one more insn
+    # ...and one more than the capacity is refused at the header, which
+    # is the boundary the capacity actually is. Where the capacity is the
+    # store the image is emitted in full and honestly, so the refusal is
+    # unambiguous about which check fired; where it streams, 2^24 + 1
+    # instructions would be a 128 MB image, so it is the header alone -
+    # the count is what is refused (R8S-streaming.md, section 8).
+    if SEQ_STREAM_D > SEQ_IMEM_D:
+        too_big = bytearray(pimem.to_bytes()[:32])
+        too_big[8:12] = (SEQ_STREAM_D + 1).to_bytes(4, "little")
+    else:
+        too_big = bytearray(pimem.to_bytes())
+        too_big[8:12] = (SEQ_IMEM_D + 1).to_bytes(4, "little")
+        too_big += bytes(8)   # the honest body for one more insn
     # Re-read FLAGS here rather than reusing the word captured before
     # the refusal block: run_refused asserts the refusal did not scrub
     # the PREVIOUS RUN's flags, and the previous run is the IMEM-full
@@ -973,7 +1049,7 @@ async def krnl_sequencer(dut):
     await run_refused(dut, axil, ram, bytes(too_big), pimem,
                       gen_stream(FP32, 8, rng), gen_stream(FP32, 8, rng),
                       gen_stream(FP32, 8, rng), 8, PREC_CODE["fp32"],
-                      f"n_insns {SEQ_IMEM_D + 1} exceeds IMEM_D",
+                      f"n_insns {SEQ_STREAM_D + 1} exceeds the capacity",
                       flags_now)
 
     # ---- revision 7: the deposit budget at the cap, and one past it --
@@ -1328,15 +1404,16 @@ async def krnl_sequencer(dut):
     # REFUSED with STATUS[3] and no memory touched, which is what says
     # that opening [22:19], [23] and [24] did not open the window above
     # them.
-    assert not ((await axil.read_dword(CAPS2)) & CAPS2_LANE_FLAGS), (
-        "CAPS2[13] is set, so MODE[24] is honoured on this build and the "
-        "refusal below no longer holds: the lane-flags block's own case "
-        "belongs here now (docs/ROADMAP.md, revision 8's R23)")
-    flags_before = await axil.read_dword(FLAGS)
-    await run_refused_mode(dut, axil, ram, pg32, a_id, b_id, c_id, n_id,
-                           MODE_LANE_FLAGS, "MODE[24], R23's lane-flags "
-                           "block, on a build whose CAPS2[13] is clear",
-                           flags_before)
+    if (await axil.read_dword(CAPS2)) & CAPS2_LANE_FLAGS:
+        # R23 is built (revision 8's round 2): MODE[24] is honoured, and
+        # the block's own case is krnl_lane_flags.
+        flags_before = await axil.read_dword(FLAGS)
+    else:
+        flags_before = await axil.read_dword(FLAGS)
+        await run_refused_mode(dut, axil, ram, pg32, a_id, b_id, c_id, n_id,
+                               MODE_LANE_FLAGS, "MODE[24], R23's lane-flags "
+                               "block, on a build whose CAPS2[13] is clear",
+                               flags_before)
     await run_refused_mode(dut, axil, ram, pg32, a_id, b_id, c_id, n_id,
                            1 << 25, "MODE[25], reserved on every build",
                            flags_before)
@@ -1379,6 +1456,293 @@ async def krnl_sequencer(dut):
     await run_op(dut, axil, ram, FP32, OP_MUL, 24, seed=903, bases=EW_BASES)
     dut._log.info(f"sequencer bench complete "
                   f"(loop run raised flags {flags_loop:#07b})")
+
+
+@cocotb.test()
+async def krnl_flag_control(dut):
+    """Revision 8's R24 through the kernel: CAPS2[14] published, a quiet
+    region silencing an instruction's flags and a raise's, a raise outside
+    it standing, and the mark - [7] of the raised word, every fourth lane -
+    reaching STATUS[6] through cft_krnl's eng_err[6] and the CSR, as the
+    model's status says (run_prog compares FLAGS and STATUS whole). Then a
+    run with no mark reads STATUS 0 (the mark is the run's, cleared at
+    start), and a refusal after a marked run reads exactly STATUS[3]: the
+    kernel masks the mark with the other run reports while a refusal is
+    the last start."""
+    cocotb.start_soon(Clock(dut.ap_clk, 4, units="ns").start())
+    axil = AxiLiteMaster(AxiLiteBus.from_prefix(dut, "s_axi_control"),
+                         dut.ap_clk, dut.ap_rst_n,
+                         reset_active_level=False)
+    ram_a = AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_a"),
+                       dut.ap_clk, dut.ap_rst_n,
+                       reset_active_level=False, size=2 ** 21)
+    AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_b"), dut.ap_clk,
+               dut.ap_rst_n, reset_active_level=False, size=2 ** 21,
+               mem=ram_a.mem)
+    AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_c"), dut.ap_clk,
+               dut.ap_rst_n, reset_active_level=False, size=2 ** 21,
+               mem=ram_a.mem)
+    AxiRamWrite(AxiWriteBus.from_prefix(dut, "m_axi_d"), dut.ap_clk,
+                dut.ap_rst_n, reset_active_level=False, size=2 ** 21,
+                mem=ram_a.mem)
+    ram = ram_a
+    dut.ap_rst_n.value = 0
+    await ClockCycles(dut.ap_clk, 8)
+    dut.ap_rst_n.value = 1
+    await ClockCycles(dut.ap_clk, 4)
+
+    assert (await axil.read_dword(CAPS2)) & CAPS2_FLAG_CONTROL, (
+        "this build's CAPS2[14] is clear, so flag control would be refused "
+        "by the host and decoded as HALT here")
+    n = 40
+    rng = random.Random(0x24)
+    a = gen_stream(FP32, n, rng)
+    b = gen_stream(FP32, n, rng)
+    # The raised words: [4:0] random, [7] every fourth lane, the rest
+    # random too (read by nothing).
+    words = [(rng.getrandbits(32) & ~0x80) | (0x80 if i % 4 == 0 else 0)
+             for i in range(n)]
+    loud = seq.alu(OP_MUL, 5, ra=0, rb=1)
+    prog = seq.Program(FP32, [
+        seq.quiet(), loud, seq.raise_(2), seq.endquiet(),
+        seq.alu(OP_ADD, 6, ra=0, rc=1), seq.raise_(2),
+        seq.deposit(5), seq.deposit(6), seq.halt()], max_deposits=2)
+    res = await run_prog(dut, axil, ram, prog, a, b, words,
+                         "fp32 quiet region, raises in and out, marks")
+    assert res.status & seq.STATUS_MARKED, "the model marked no lane"
+    # ...a run with no mark: the mark is the run's
+    unmarked = [w & ~0x80 for w in words]
+    res = await run_prog(dut, axil, ram, prog, a, b, unmarked,
+                         "fp32 the same with no mark")
+    assert not res.status & seq.STATUS_MARKED
+    # ...a marked run, then a refusal: exactly STATUS[3]
+    await run_prog(dut, axil, ram, prog, a, b, words,
+                   "fp32 marked, before a refusal")
+    flags_now = await axil.read_dword(FLAGS)
+    bad = bytearray(prog.to_bytes())
+    bad[0] ^= 0xFF                       # the magic
+    await run_refused(dut, axil, ram, bytes(bad), prog, a, b, words, n,
+                      PREC_CODE["fp32"], "a refusal after a marked run",
+                      flags_now)
+
+
+@cocotb.test()
+async def krnl_augadd(dut):
+    """Revision 8's R21 through the kernel, on the array the elementwise
+    engine shares, either way the build has it.
+
+    With R21 (CAPS2[11], EN_AUGADD=1, the single and the deep build):
+    augadd and augerr, both orders, over every family of the plan's list
+    (test_seq_core's r21_pairs) at fp32 and fp256, bit-exact against the
+    model with each lane's byte; then an elementwise ADD straight after a
+    run whose last array request was an augerr - the sequencer's sideband
+    register still holds augerr's code, and the kernel hands the array the
+    sequencer's sideband in a sequencer run only (the plan's plant "the
+    sideband left live in the engine" is red here).
+
+    Without it (CAPS2[11] clear, EN_AUGADD=0 - the quad's tile, built
+    without R21 because probe L measured R21's lanes at +10,595 LUTs a
+    tile and Logan's answer to the plan's question 9 was "Only if probe L
+    finds it cheap"): CAPS and CAPS2 at the plan's words for that tile; an
+    augadd image and an augerr image each ending its block where the code
+    stands, as an unknown code does on revision 7 (HALT, the determinism
+    contract's rule for an unassigned code); and an R21-free program
+    bit-exact."""
+    from test_seq_core import r21_pairs, R21_FAMILIES
+    cocotb.start_soon(Clock(dut.ap_clk, 4, units="ns").start())
+    axil = AxiLiteMaster(AxiLiteBus.from_prefix(dut, "s_axi_control"),
+                         dut.ap_clk, dut.ap_rst_n,
+                         reset_active_level=False)
+    ram_a = AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_a"),
+                       dut.ap_clk, dut.ap_rst_n,
+                       reset_active_level=False, size=2 ** 21)
+    AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_b"), dut.ap_clk,
+               dut.ap_rst_n, reset_active_level=False, size=2 ** 21,
+               mem=ram_a.mem)
+    AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_c"), dut.ap_clk,
+               dut.ap_rst_n, reset_active_level=False, size=2 ** 21,
+               mem=ram_a.mem)
+    AxiRamWrite(AxiWriteBus.from_prefix(dut, "m_axi_d"), dut.ap_clk,
+                dut.ap_rst_n, reset_active_level=False, size=2 ** 21,
+                mem=ram_a.mem)
+    ram = ram_a
+    dut.ap_rst_n.value = 0
+    await ClockCycles(dut.ap_clk, 8)
+    dut.ap_rst_n.value = 1
+    await ClockCycles(dut.ap_clk, 4)
+
+    caps = await axil.read_dword(CAPS)
+    caps2 = await axil.read_dword(CAPS2)
+    check_caps2(caps2)
+    check_seam_words(caps, caps2, PREC_MASK)
+    built = bool(caps2 & CAPS2_AUGADD)
+    assert built == bool(krnl_param_bit("EN_AUGADD")), (
+        f"CAPS2[11] is {int(built)} on a build with EN_AUGADD="
+        f"{krnl_param_bit('EN_AUGADD')}")
+    rng = random.Random(0x21)
+
+    if built:
+        for fmt, n in ((FP32, 72), (FP256, 21)):
+            pairs, fams = r21_pairs(fmt, n, 0x2101)
+            assert all(fams[f] for f in R21_FAMILIES), (fmt.name, fams)
+            a = [x for x, _ in pairs]
+            b = [y for _, y in pairs]
+            prog = seq.Program(fmt, [
+                seq.augerr(3, 0, 1), seq.augadd(4, 0, 1),
+                seq.augerr(5, 1, 0), seq.augadd(6, 1, 0),
+                seq.deposit(3), seq.deposit(4), seq.deposit(5),
+                seq.deposit(6), seq.halt()], max_deposits=4)
+            await run_prog(dut, axil, ram, prog, a, b, [0] * n,
+                           f"{fmt.name} augadd and augerr, every family",
+                           lane_flags=True)
+        # The sideband after the run: the last request this program makes
+        # of the array is an augerr's, so the sequencer's register holds 2
+        # when the elementwise run starts.
+        n = 32
+        a = gen_stream(FP32, n, rng)
+        b = gen_stream(FP32, n, rng)
+        prog = seq.Program(FP32, [
+            seq.augadd(3, 0, 1), seq.augerr(4, 0, 1),
+            seq.deposit(3), seq.deposit(4), seq.halt()], max_deposits=2)
+        await run_prog(dut, axil, ram, prog, a, b, [0] * n,
+                       "fp32 a run ending on an augerr")
+        await run_op(dut, axil, ram, FP32, OP_ADD, n, seed=0x2102,
+                     bases=EW_BASES)
+        return
+
+    # The quad's tile: the two codes are unknown ones.
+    for fmt, n in ((FP32, 40), (FP256, 9)):
+        a = gen_stream(fmt, n, rng)
+        b = gen_stream(fmt, n, rng)
+        c = gen_stream(fmt, n, rng)
+        head = [seq.alu(OP_MUL, 3, ra=0, rb=1), seq.deposit(3)]
+        tail = [seq.deposit(4), seq.halt()]
+        for code in (seq.augadd(4, 0, 1), seq.augerr(4, 0, 1)):
+            name = seq.CTRL_NAMES[seq.decode(code)["op"]]
+            image = seq.Program(fmt, head + [code] + tail, max_deposits=2)
+            model = seq.Program(fmt, head + [seq.halt()] + tail,
+                                max_deposits=2)
+            await run_prog(dut, axil, ram, model, a, b, c,
+                           f"{fmt.name} {name} without R21 ends the block",
+                           image=image.to_bytes(), lane_flags=True)
+        prog = seq.Program(fmt, [
+            seq.alu(OP_FMA, 3, ra=0, rb=1, rc=2),
+            seq.alu(OP_MUL, 4, ra=3, rb=3),
+            seq.deposit(3), seq.deposit(4), seq.halt()], max_deposits=2)
+        await run_prog(dut, axil, ram, prog, a, b, c,
+                       f"{fmt.name} an R21-free program on the quad's tile",
+                       lane_flags=True)
+
+
+@cocotb.test()
+async def krnl_scratch_step(dut):
+    """Revision 8's R22 through the kernel, on the array the elementwise
+    engine shares: a stepped STX fires its IADD into that array at its own
+    F, and a stepped LDX's internal IADD follows it as an instruction of
+    its own. A walk up by stores and down by loads, with lanes that wrap
+    through 0 and cross zero downward, `ldx rX, rX` keeping its load, and
+    the index deposited, at fp32 and fp64 (a negative step's high word),
+    against the model."""
+    cocotb.start_soon(Clock(dut.ap_clk, 4, units="ns").start())
+    axil = AxiLiteMaster(AxiLiteBus.from_prefix(dut, "s_axi_control"),
+                         dut.ap_clk, dut.ap_rst_n,
+                         reset_active_level=False)
+    ram_a = AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_a"),
+                       dut.ap_clk, dut.ap_rst_n,
+                       reset_active_level=False, size=2 ** 21)
+    AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_b"), dut.ap_clk,
+               dut.ap_rst_n, reset_active_level=False, size=2 ** 21,
+               mem=ram_a.mem)
+    AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_c"), dut.ap_clk,
+               dut.ap_rst_n, reset_active_level=False, size=2 ** 21,
+               mem=ram_a.mem)
+    AxiRamWrite(AxiWriteBus.from_prefix(dut, "m_axi_d"), dut.ap_clk,
+                dut.ap_rst_n, reset_active_level=False, size=2 ** 21,
+                mem=ram_a.mem)
+    ram = ram_a
+    dut.ap_rst_n.value = 0
+    await ClockCycles(dut.ap_clk, 8)
+    dut.ap_rst_n.value = 1
+    await ClockCycles(dut.ap_clk, 4)
+
+    assert (await axil.read_dword(CAPS2)) & CAPS2_SCRATCH_STEP, (
+        "this build's CAPS2[12] is clear, so a stepped STX or LDX would be "
+        "refused by the loader")
+    rng = random.Random(0x22)
+    for fmt, n in ((FP32, 40), (FP64, 13)):
+        top = (1 << fmt.width) - 2
+        idx = [top if i % 5 == 1 else 1 if i % 5 == 2 else 40 + rng.randrange(200)
+               for i in range(n)]
+        a = gen_stream(fmt, n, rng)
+        c = gen_stream(fmt, n, rng)
+        prog = seq.Program(fmt, [
+            seq.repeat(3), seq.stx(0, 1, 1), seq.endrep(),
+            seq.repeat(3), seq.ldx(4, 1, -1), seq.deposit(4), seq.endrep(),
+            seq.ldx(1, 1, 5),        # rd is rb: the load wins, no step
+            seq.deposit(1),
+            seq.halt()], max_deposits=4)
+        await run_prog(dut, axil, ram, prog, a, idx, c,
+                       f"{fmt.name} a stepped walk through the kernel",
+                       lane_flags=True)
+
+
+@cocotb.test()
+async def krnl_lane_flags(dut):
+    """Revision 8's R23 through the kernel: CAPS2[13] published, MODE[24]
+    honoured, and the block written at the address the register at 0xB0
+    holds - verifier-VRA's note on the seam, whose bus leg held a distinct
+    register at each argument's offset and not that 0xB0 drives the pointer
+    cft_seq reads. Every lane's byte against the model, masked and not,
+    over two blocks and a ragged third; and a run without MODE[24] leaves
+    the region untouched."""
+    cocotb.start_soon(Clock(dut.ap_clk, 4, units="ns").start())
+    axil = AxiLiteMaster(AxiLiteBus.from_prefix(dut, "s_axi_control"),
+                         dut.ap_clk, dut.ap_rst_n,
+                         reset_active_level=False)
+    ram_a = AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_a"),
+                       dut.ap_clk, dut.ap_rst_n,
+                       reset_active_level=False, size=2 ** 21)
+    AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_b"), dut.ap_clk,
+               dut.ap_rst_n, reset_active_level=False, size=2 ** 21,
+               mem=ram_a.mem)
+    AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_c"), dut.ap_clk,
+               dut.ap_rst_n, reset_active_level=False, size=2 ** 21,
+               mem=ram_a.mem)
+    AxiRamWrite(AxiWriteBus.from_prefix(dut, "m_axi_d"), dut.ap_clk,
+                dut.ap_rst_n, reset_active_level=False, size=2 ** 21,
+                mem=ram_a.mem)
+    ram = ram_a
+    dut.ap_rst_n.value = 0
+    await ClockCycles(dut.ap_clk, 8)
+    dut.ap_rst_n.value = 1
+    await ClockCycles(dut.ap_clk, 4)
+
+    assert (await axil.read_dword(CAPS2)) & CAPS2_LANE_FLAGS, (
+        "this build's CAPS2[13] is clear, so MODE[24] would be refused")
+    rng = random.Random(0x23)
+    for fmt in (FP32, FP256):
+        n = 2 * 16 * (256 // fmt.width) + 5
+        a = gen_stream(fmt, n, rng)
+        b = gen_stream(fmt, n, rng)
+        words = [(rng.getrandbits(fmt.width) & ~0x80) |
+                 (0x80 if i % 4 == 0 else 0) for i in range(n)]
+        prog = seq.Program(fmt, [
+            seq.alu(OP_MUL, 3, ra=0, rb=1),
+            seq.quiet(), seq.raise_(2), seq.endquiet(),
+            seq.deposit(3), seq.setact(1), seq.deposit(3),
+            seq.raise_(2), seq.halt()], max_deposits=1)
+        await run_prog(dut, axil, ram, prog, a, b, words,
+                       f"{fmt.name} the lane-flag block through the kernel",
+                       lane_flags=True)
+        keep = [i % 3 != 1 for i in range(n)]
+        await run_prog(dut, axil, ram, prog, a, b, words,
+                       f"{fmt.name} the lane-flag block under a mask",
+                       lane_flags=True, mask=keep)
+        ram.write(LF_BASE, bytes([POISON]) * (n + GUARD))
+        await run_prog(dut, axil, ram, prog, a, b, words,
+                       f"{fmt.name} no MODE[24]")
+        assert ram.read(LF_BASE, n + GUARD) == bytes([POISON]) * (n + GUARD), (
+            f"{fmt.name}: a run without MODE[24] wrote the lane-flag region")
 
 
 @cocotb.test()
@@ -1583,3 +1947,117 @@ async def krnl_ode_programs(dut):
             assert res.scratch_out != s_in, f"{name}: the state did not move"
             dut._log.info(f"{name} x{steps} steps, n={n}: about {cyc:.0f} "
                           f"cycles start to done (the CSR writes included)")
+
+
+# ----------------------------------------------------------------------
+# verifier-VC56's tie case (2026-10-05; its vc56_krnl_after_augadd_ties),
+# adopted as it wrote it with its two helpers. krnl_augadd's elementwise
+# ADD runs after an augerr on random operands, so an augadd's sideband
+# (aug_mode 1) left live into an elementwise run - which differs from an
+# ordinary ADD only at ties - passes it; VC56's plant k1, the sideband's
+# bit 0 left live, is red here.
+# ----------------------------------------------------------------------
+
+async def _vc_full(dut):
+    """The kernel with its four masters on one memory, as krnl_augadd sets
+    it up."""
+    cocotb.start_soon(Clock(dut.ap_clk, 4, units="ns").start())
+    axil = AxiLiteMaster(AxiLiteBus.from_prefix(dut, "s_axi_control"),
+                         dut.ap_clk, dut.ap_rst_n,
+                         reset_active_level=False)
+    ram_a = AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_a"),
+                       dut.ap_clk, dut.ap_rst_n,
+                       reset_active_level=False, size=2 ** 21)
+    AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_b"), dut.ap_clk,
+               dut.ap_rst_n, reset_active_level=False, size=2 ** 21,
+               mem=ram_a.mem)
+    AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_c"), dut.ap_clk,
+               dut.ap_rst_n, reset_active_level=False, size=2 ** 21,
+               mem=ram_a.mem)
+    AxiRamWrite(AxiWriteBus.from_prefix(dut, "m_axi_d"), dut.ap_clk,
+                dut.ap_rst_n, reset_active_level=False, size=2 ** 21,
+                mem=ram_a.mem)
+    dut.ap_rst_n.value = 0
+    await ClockCycles(dut.ap_clk, 8)
+    dut.ap_rst_n.value = 1
+    await ClockCycles(dut.ap_clk, 4)
+    return axil, ram_a
+
+
+async def _vc_ew(dut, axil, ram, fmt, op, va, vb, vc, label):
+    """One elementwise run over explicit streams, scored against the
+    model at RNE (run_op draws random streams; this one is given them)."""
+    ba, bb, bc, bd = EW_BASES
+    n = len(va)
+    ebytes = fmt.width // 8
+    exp = [_vc_compute(fmt, op, va[i], vb[i], vc[i], _VC_RNE)
+           for i in range(n)]
+    exp_f = 0
+    for e in exp:
+        exp_f |= e[1]
+    ram.write(ba, pack(fmt, va))
+    ram.write(bb, pack(fmt, vb))
+    ram.write(bc, pack(fmt, vc))
+    ram.write(bd, b"\xAA" * (n * ebytes))
+    await axil.write_dword(MODE, op | (PREC_CODE[fmt.name] << 8)
+                           | (_VC_RNE << 12))
+    await write64(axil, NREG, n)
+    await write64(axil, APTR, ba)
+    await write64(axil, BPTR, bb)
+    await write64(axil, CPTR, bc)
+    await write64(axil, DPTR, bd)
+    await axil.write_dword(CTRL, 1)
+    for _ in range(5000):
+        await ClockCycles(dut.ap_clk, 10)
+        if (await axil.read_dword(CTRL)) & 0x2:
+            break
+    else:
+        raise AssertionError(f"{label}: the kernel never finished")
+    got = ram.read(bd, n * ebytes)
+    bad = []
+    for i in range(n):
+        g = int.from_bytes(got[i * ebytes:(i + 1) * ebytes], "little")
+        if g != exp[i][0]:
+            bad.append((i, g, exp[i][0]))
+    assert not bad, (f"{label}: {len(bad)}/{n} elements differ; first "
+                     f"(lane, got, want): {bad[:3]}")
+    got_f = await axil.read_dword(FLAGS)
+    assert got_f == exp_f, f"{label}: FLAGS {got_f:#07b} want {exp_f:#07b}"
+    assert (await axil.read_dword(STATUS)) == 0, f"{label}: STATUS not clean"
+    dut._log.info(f"{label}: {n} lanes bit-exact, flags {got_f:#07b}")
+
+
+@cocotb.test()
+async def krnl_elementwise_after_augadd_at_ties(dut):
+    """The elementwise engine straight after a sequencer run whose LAST
+    array request was an augadd (sideband 1) or an augerr (sideband 2),
+    over operands that are exact ties and near-ties (verifier-VC56's
+    corner pool, tb/augadd_corners.py): ADD and FMA at RNE against the
+    model. An augadd's sideband differs from an ordinary ADD only at ties,
+    so random operands (krnl_augadd's) cannot see it left live; this can."""
+    axil, ram = await _vc_full(dut)
+    caps2 = await axil.read_dword(CAPS2)
+    if not caps2 & CAPS2_AUGADD:
+        dut._log.info("this build has no R21: nothing to leave live")
+        return
+    rng = random.Random(0x5611)
+    for fmt, n in ((FP32, 600), (FP256, 120)):
+        pairs = augadd_corners.pool_pairs(fmt)
+        pairs = pairs[:n]
+        va = [x for x, _ in pairs]
+        vc = [y for _, y in pairs]
+        vb = [one_bits(fmt)] * n
+        for order, insns in (("augadd last", [seq.augerr(3, 0, 1),
+                                              seq.augadd(4, 0, 1)]),
+                             ("augerr last", [seq.augadd(3, 0, 1),
+                                              seq.augerr(4, 0, 1)])):
+            prog = seq.Program(fmt, insns + [seq.deposit(3), seq.deposit(4),
+                                             seq.halt()], max_deposits=2)
+            a = gen_stream(fmt, 32, rng)
+            b = gen_stream(fmt, 32, rng)
+            await run_prog(dut, axil, ram, prog, a, b, [0] * 32,
+                           f"{fmt.name} a run ending with {order}")
+            await _vc_ew(dut, axil, ram, fmt, OP_ADD, va, vb, vc,
+                         f"{fmt.name} ADD on ties after {order}")
+            await _vc_ew(dut, axil, ram, fmt, OP_FMA, va, vb, vc,
+                         f"{fmt.name} FMA on ties after {order}")

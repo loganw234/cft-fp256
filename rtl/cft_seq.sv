@@ -35,8 +35,8 @@
 //         magic   == "CFTP" (0x50544643)
 //         version == 1
 //         format  == cfg_prec (a program is compiled for one format)
-//         n_insns <= IMEM_D, n_consts <= KMEM_D,
-//         max_deposits <= MAXD
+//         n_insns <= STREAM_D (the capacity; IMEM_D until revision 8),
+//         n_consts <= KMEM_D, max_deposits <= MAXD
 //         flags[31:2] == 0; the second header word is zero unless
 //           flags.SCRATCH_IO, and under it neither of its halves is
 //           past SCRATCH_D
@@ -76,7 +76,12 @@
 //     is not a lane the caller has); then the instruction stream runs to
 //     HALT under seq.py's semantics - ALU results, deposits, SCRATCH
 //     STORES, SCRATCH LOADS and FLAG contributions all masked
-//     per-lane by active (P3); REPEAT/ENDREP
+//     per-lane by active (P3); since revision 8, QUIET and ENDQUIET
+//     bracket regions whose flags reach neither FLAGS nor a lane's R23
+//     byte, RAISE ORs a register's [4:0] into both (unless in a region)
+//     and marks the lane with its [7], AUGADD and AUGERR (where EN_AUGADD)
+//     compute augmentedAddition's two halves, and a stepped STX or LDX
+//     moves its index after the access (R21 to R24); REPEAT/ENDREP
 //     from a 4-deep loop stack; SETACT narrows on (magnitude != 0, so
 //     -0 deactivates); ACTALL reactivates every lane THE CALLER HAS
 //     (global index < cfg_n) - the padding lanes the model never sees
@@ -93,27 +98,69 @@
 //     cfg_d is written - a lane's d-th deposit at element index
 //     (i * max_deposits + d), slots the lane never reached as +0
 //     (P2: addressed by index, never arrival) - then the per-lane
-//     deposit counts as uint32 at cfg_cnt + 4*i, then, under
-//     flags.SCRATCH_IO, n_scratch_out slots a lane at cfg_sout in the
-//     same lane-major layout the preload reads. Lanes at or beyond
-//     cfg_n get none of the three: the tail of the caller's buffers
-//     is theirs, untouched. A MASKED lane (R17) gets none of the three
-//     either, and for the same reason - it is not a lane the caller
-//     gave this run - but it sits INSIDE the window rather than past
-//     it, so what "untouched" means on the bus is a beat whose bytes
-//     for that lane's elements carry no write strobe.
+//     deposit counts as uint32 at cfg_cnt + 4*i, then, where the run
+//     asked (MODE[24], revision 8's R23), the per-lane flag byte at
+//     cfg_lflags + i, then, under flags.SCRATCH_IO, n_scratch_out
+//     slots a lane at cfg_sout in the same lane-major layout the
+//     preload reads. Lanes at or beyond cfg_n get none of them: the
+//     tail of the caller's buffers is theirs, untouched. A MASKED lane
+//     (R17) gets none of them either, and for the same reason - it is
+//     not a lane the caller gave this run - but it sits INSIDE the
+//     window rather than past it, so what "untouched" means on the bus
+//     is a beat whose bytes for that lane's elements carry no write
+//     strobe.
 //
 //  4. DONE. `flags` is the sticky OR of active-lane contributions
 //     across the whole run; err[2:0] carry the engine's three bus
 //     faults; err[3] is DEPOSIT OVERFLOW (a lane pushed past
 //     max_deposits: the excess dropped, what fit is correct) - the
-//     kernel maps it to STATUS[4], STATUS[3] being the refusal.
+//     kernel maps it to STATUS[4], STATUS[3] being the refusal; err[4]
+//     is SCRATCH RANGE (revision 4's R8: a strict indexed access past the
+//     depth, suppressed) - STATUS[5]; and err[5] is the MARK (revision
+//     8's R24: a RAISE whose operand's [7] is set, in a region or not) -
+//     STATUS[6].
+//
+//  5. THE ABORT (revision 8, docs/ROADMAP.md "The abort"). A read burst
+//     of the wrong length - RLAST before the beat ARLEN named (short), or
+//     missing on it (long) - ENDS THE RUN, the engine's rule since
+//     2026-08-30 (rtl/cft_engine_stream.sv, "abandoning a run the memory
+//     system broke"). Until revision 8 a short burst left the burst
+//     counter above zero, so the next burst was never issued and a
+//     multi-beat read waited for ever; a long one zeroed the count a beat
+//     early and handed its extra beats to a later read as data. Now, from
+//     the fault on: no new burst is issued, read or write; a write burst
+//     already committed (its AW issued) delivers its beats; every read in
+//     flight lands, a long burst drained to its RLAST and a short one
+//     ended by its own; and done comes with err[2] (STATUS[2]). A read
+//     fault (RRESP not OKAY) on the HEADER BEAT or on a beat holding any
+//     byte of an INSTRUCTION ends the run the same way, with err[0], so
+//     no word the memory did not vouch for decides what runs. A read
+//     fault on DATA - the constants, the bank, the scratch-in, a stream,
+//     the mask, a table - completes the run as it always did, err[0]
+//     saying its outputs are not to be trusted. An aborted run writes
+//     nothing after the fault but the committed burst; S_ABORT is where
+//     it waits for the reads, the write responses and the issue pipe.
 //
 // cfg_prog is 32-byte aligned (the library guarantees it); cfg_cnt is
 // 4-byte aligned. n == 0 completes immediately, touching nothing.
 //
+// THE FETCH (revision 8, R8S; docs/studies/R8S-streaming.md). The image
+// parse hands every instruction to rtl/cft_ifetch.sv, whose store keeps
+// the first IMEM_D; a word past the store is read from the image again,
+// during the block, by the unit's own read engine on this module's read
+// port (the A master), and a REPEAT whose body starts outside the store
+// moves the store to it. So the image is read throughout a run, not only
+// at its start, and must not change between start and done. The fetch
+// owns the read port from a block's first request until it is idle after
+// the block ends (S_WAIT_B waits for it), and it opens only with the main
+// read engine drained - no setup burst still to land, a long one drained
+// to its RLAST by the abort, which then ends the run before any fetch. A
+// program of at most IMEM_D instructions is held whole in the store, reads
+// nothing during a block and runs in exactly the cycles it did before.
+//
 // The read port serves the program image and the three input streams
-// (phases never overlap); the write port serves deposits and counts.
+// (phases never overlap); the write port serves deposits and counts,
+// and the lane-flag and scratch-out blocks after them.
 // cft_krnl steers each read to the A, B or C master by the buffer it
 // belongs to (m_rd_sel), since on HBM a master reaches only its own
 // bank; one read port still keeps the whole machine a straight line.
@@ -188,7 +235,15 @@ module cft_seq #(
     parameter int LATENCY    = 16,
     parameter int NBEATS     = 16,     // lane block; see the guard below
     parameter int MAXD       = 64,     // deposit slots per lane, hw cap
-    parameter int IMEM_D     = 1024,   // instruction capacity
+    // The instruction STORE (revision 8, R8S): the program's first IMEM_D
+    // instructions, or a loop body a REPEAT moved it to, held on chip in
+    // rtl/cft_ifetch.sv. Until revision 8 this was the capacity.
+    parameter int IMEM_D     = 1024,
+    // The instruction CAPACITY (revision 8, R8S): the most instructions a
+    // program may have. Past the store they stream from card memory
+    // through the A master (rtl/cft_ifetch.sv). Equal to IMEM_D, the
+    // default, builds no stream, and the tile is the one it was.
+    parameter int STREAM_D   = IMEM_D,
     // Constant capacity (image-side). 256 -> 512 at revision 3, where
     // imm[30:28] became the ninth bit of each kx index. This DEFAULT
     // matters beyond the unit bench: tb/test_krnl.py resolves
@@ -213,7 +268,17 @@ module cft_seq #(
     // The multi-cycle multiplier's pass budget, for the private array
     // only (cft_lanes has the story); the kernel's array is paced by
     // the kernel and reaches this module as lane_ready.
-    parameter int MUL_PASSES = 1
+    parameter int MUL_PASSES = 1,
+    // Revision 8's R21 (docs/ROADMAP.md, question 9): 1, the default,
+    // decodes control codes 10 and 11 - augadd and augerr - and fires
+    // them into the array with the aug_mode sideband; cft_krnl publishes
+    // CAPS2[11] from the same parameter. At 0 the two codes are unknown
+    // ones, as on revision 7: a stream that reaches one ends its block
+    // there (HALT), and a loader refuses them first, by name, from
+    // CAPS2[11]. The quad is built at 0 (probe L: +10,595 LUTs a tile).
+    /* verilator lint_off WIDTHTRUNC */
+    parameter bit EN_AUGADD  = 1'b1
+    /* verilator lint_on WIDTHTRUNC */
 )(
     input  logic              ap_clk,
     input  logic              ap_rst_n,
@@ -267,15 +332,13 @@ module cft_seq #(
     input  logic              cfg_mask_en,
     input  logic [ADDR_W-1:0] cfg_mask,
     /* Revision 8's R23 (docs/SEQUENCER.md): MODE[24], decoded in the CSR,
-     * asks for the per-lane flag block, written at cfg_lflags
-     * (LFLAGS_PTR, 0xB0) after the counts. INERT at revision 8's seam:
-     * the CSR refuses MODE[24] on a build whose FEAT_LANE_FLAGS is
-     * clear, which is every build until R23 is built, so nothing below
-     * reads either port yet. */
-    /* verilator lint_off UNUSEDSIGNAL */
+     * asks for the per-lane flag block, a byte a lane, written at
+     * cfg_lflags (LFLAGS_PTR, 0xB0) after the counts. The CSR refuses
+     * MODE[24] on a build whose FEAT_LANE_FLAGS is clear, so a bit that
+     * arrives here is one this module implements. cfg_lflags is 32-byte
+     * aligned, as cfg_prog is (the library allocates the block). */
     input  logic              cfg_lflags_en,
     input  logic [ADDR_W-1:0] cfg_lflags,
-    /* verilator lint_on UNUSEDSIGNAL */
     output logic              busy,
     output logic              done,       // one-cycle pulse
     output logic              refuse,     // valid with done
@@ -283,8 +346,7 @@ module cft_seq #(
     output logic [5:0]        err,        // [2:0] bus faults, [3] dep ovf,
                                           // [4] scratch index out of range,
                                           // [5] a RAISE marked a lane
-                                          // (revision 8's R24; zero until
-                                          // R24 is built)
+                                          // (revision 8's R24)
 
     // ---- the ALU array (cft_lanes) ---------------------------------
     // The per-issue request the issue machine builds, and the array's
@@ -379,7 +441,12 @@ module cft_seq #(
   localparam int LB         = $clog2(BLK_LANES);      // 7
   localparam int DB_D       = NBEATS * MAXD;
   localparam int DBA        = $clog2(DB_D);
-  localparam int PCW        = $clog2(IMEM_D);
+  // log2 of the CAPACITY since revision 8 (of IMEM_D until then): pc and
+  // skip_depth are a bit wider, [PCW:0], because pc must be able to equal
+  // n_insns (the implicit halt) and the header admits n_insns equal to the
+  // capacity; lp_body, a body's first instruction, is [PCW-1:0]
+  // (R8S-streaming.md, section 2, "Widths").
+  localparam int PCW        = $clog2(STREAM_D);
 
   localparam logic [1:0] PREC_FP32  = 2'd0;
   localparam logic [1:0] PREC_FP64  = 2'd1;
@@ -390,7 +457,14 @@ module cft_seq #(
   localparam logic [7:0] C_HALT = 8'd0, C_REPEAT = 8'd1, C_ENDREP = 8'd2,
                          C_DEPOSIT = 8'd3, C_SETACT = 8'd4, C_ACTALL = 8'd5,
                          C_STL = 8'd6, C_LDL = 8'd7,
-                         C_STX = 8'd8, C_LDX = 8'd9;
+                         C_STX = 8'd8, C_LDX = 8'd9,
+                         // Revision 8's R21: augmentedAddition's two
+                         // halves (754-2019 9.5), decoded where EN_AUGADD.
+                         C_AUGADD = 8'd10, C_AUGERR = 8'd11,
+                         // Revision 8's R24, flag control
+                         // (docs/SEQUENCER.md): a quiet region and a raise.
+                         C_QUIET = 8'd12, C_ENDQUIET = 8'd13,
+                         C_RAISE = 8'd14;
   // The opcode a scratch LOAD rides the array as (revision 7, R18), when
   // it is not FAST - a fast load's value goes into the file through the
   // retire's port and never enters the array (the send-back of
@@ -404,6 +478,14 @@ module cft_seq #(
   // verified operation, not arithmetic of the sequencer's own (P1);
   // and the retire takes no flag from a load whatever the array says.
   localparam logic [7:0] OP_IOR = 8'd17;
+  // ...and the opcode augadd and augerr ride the array as (revision 8,
+  // R21): ADD, whose operands cft_opmux shapes as (a, 1.0, c), with the
+  // sideband saying which half of the pair the pipe keeps.
+  localparam logic [7:0] OP_ADD = 8'd1;
+  // ...and revision 8's R22 step: IADD, the integer group's add on the
+  // encoding, which is the contract's own arithmetic for rb := rb + step
+  // modulo 2^W (docs/ROADMAP.md, R22) - the array computes it, so P1 holds.
+  localparam logic [7:0] OP_IADD = 8'd19;
 
   // ---- the scratch's geometry (revision 3, R4) -----------------------
   // SCRSW is the slot field's width and the reduction the indexed
@@ -432,6 +514,9 @@ module cft_seq #(
   // R17's mask pointer and its enable, latched for the same reason.
   logic [ADDR_W-1:0] mask_q;
   logic              mask_en_q;
+  // R23's pointer and its enable, latched for the same reason.
+  logic [ADDR_W-1:0] lf_q;
+  logic              lf_en_q;
 
   // element bytes / lanes per beat / log2(lanes per beat)
   logic [5:0] esz;
@@ -490,7 +575,8 @@ module cft_seq #(
   // a table (R16) it cost the whole table plus a round trip per entry
   // for a stream nothing read. Found by round 2's V1, 2026-09-15.
   logic [2:0]     rd_need;
-  logic [63:0] imem [0:IMEM_D-1];
+  // (The instruction memory, `imem`, was here until revision 8; the store
+  // is rtl/cft_ifetch.sv's, below with the fetch's hooks.)
   logic [BEAT_BITS-1:0] kmem [0:KREG-1];   // broadcast across the beat
 
   // broadcast a constant across the beat's lanes. Applied ONCE, as
@@ -883,8 +969,21 @@ module cft_seq #(
     if ((1 << $clog2(MAXD)) != MAXD || MAXD > 32768) begin : g_maxd_caps
       $error("cft_seq: MAXD must be a power of two no larger than 2^15 - CAPS[19:16] publishes its log2 in four bits");
     end
-    if ((1 << PCW) != IMEM_D || IMEM_D > 32768) begin : g_imem_caps
-      $error("cft_seq: IMEM_D must be a power of two no larger than 2^15 - CAPS[23:20] publishes its log2 in four bits");
+    // Revision 8 (R8S): IMEM_D is the store and STREAM_D the capacity. The
+    // store is indexed by an address's low bits, so it is a power of two
+    // of at least two words and no deeper than the capacity; the capacity
+    // is a power of two to 2^30 (an int parameter stops there; CAPS2[20:16]
+    // publishes its log2 in five bits). A tile that does not stream
+    // (STREAM_D == IMEM_D) publishes its capacity in CAPS[23:20] alone, in
+    // four bits, as every tile did: 2^15 at most.
+    if ((1 << $clog2(IMEM_D)) != IMEM_D || IMEM_D < 2 || IMEM_D > STREAM_D) begin : g_imem_store
+      $error("cft_seq: IMEM_D, the instruction store, must be a power of two from 2 to STREAM_D");
+    end
+    if ((1 << PCW) != STREAM_D || STREAM_D > (1 << 30)) begin : g_stream_caps
+      $error("cft_seq: STREAM_D, the instruction capacity, must be a power of two no larger than 2^30 - CAPS2[20:16] publishes its log2");
+    end
+    if (STREAM_D == IMEM_D && IMEM_D > 32768) begin : g_imem_caps
+      $error("cft_seq: a tile that does not stream publishes its capacity in CAPS[23:20], four bits of log2 - IMEM_D at most 2^15");
     end
     if (SCRATCH_D > 32768) begin : g_scratch_caps
       $error("cft_seq: SCRATCH_D must be no larger than 2^15 - CAPS2[3:0] publishes its log2 in four bits");
@@ -900,10 +999,16 @@ module cft_seq #(
       $display("FATAL: cft_seq SCRATCH_D=%0d must be a power of two", SCRATCH_D);
       $fatal(1);
     end
-    if ((1 << $clog2(MAXD)) != MAXD || MAXD > 32768 ||
-        (1 << PCW) != IMEM_D || IMEM_D > 32768 || SCRATCH_D > 32768) begin
-      $display("FATAL: cft_seq MAXD=%0d IMEM_D=%0d SCRATCH_D=%0d: each must be a power of two no larger than 2^15, the most a four-bit log2 in CAPS publishes",
-               MAXD, IMEM_D, SCRATCH_D);
+    if ((1 << $clog2(MAXD)) != MAXD || MAXD > 32768 || SCRATCH_D > 32768) begin
+      $display("FATAL: cft_seq MAXD=%0d SCRATCH_D=%0d: each must be a power of two no larger than 2^15, the most a four-bit log2 in CAPS publishes",
+               MAXD, SCRATCH_D);
+      $fatal(1);
+    end
+    if ((1 << $clog2(IMEM_D)) != IMEM_D || IMEM_D < 2 || IMEM_D > STREAM_D ||
+        (1 << PCW) != STREAM_D || STREAM_D > (1 << 30) ||
+        (STREAM_D == IMEM_D && IMEM_D > 32768)) begin
+      $display("FATAL: cft_seq IMEM_D=%0d STREAM_D=%0d: the store a power of two from 2 to the capacity, the capacity a power of two to 2^30, and a tile that does not stream at most 2^15",
+               IMEM_D, STREAM_D);
       $fatal(1);
     end
   end
@@ -917,16 +1022,26 @@ module cft_seq #(
   logic [PCW-1:0] lp_body [0:3];
   logic [31:0]    lp_left [0:3];
   logic [2:0]     lp_sp;
+  // Revision 8's R24: the quiet depth, counted by QUIET and ENDQUIET as
+  // they are decoded, in program order, as REPEAT and ENDREP keep the loop
+  // stack; three bits (the loader nests regions four deep), saturating,
+  // so a stream that bypassed the loader keeps a defined depth rather than
+  // wrapping a region open or closed (it gates only flags, so it bears on
+  // no termination). Reset at each block's start. An instruction is quiet
+  // when admitted inside a region.
+  logic [2:0]     qdepth;
 
   // ---- the ALU array --------------------------------------------------
   logic                 al_valid;
   logic [7:0]           al_op;
   logic [2:0]           al_rnd;
-  // R21's sideband (revision 8's seam): a constant zero until R21's
-  // decode drives it, and the same signal reaches the shared array (as
-  // lane_aug_mode) and the private one below.
+  // R21's sideband (revision 8): 0 an ordinary operation, 1 augadd, 2
+  // augerr, registered with the request it travels beside (al_op, al_rnd)
+  // and set at every fire, so it is 0 for every beat but an augadd's or
+  // an augerr's. The same signal reaches the shared array (as
+  // lane_aug_mode, which cft_krnl hands the array only in a sequencer
+  // run) and the private one below.
   logic [1:0]           al_aug;
-  assign al_aug = 2'b00;
   logic [BEAT_BITS-1:0] al_a, al_b, al_c;
   logic                 al_rdy;
   logic                 al_ov;
@@ -955,7 +1070,7 @@ module cft_seq #(
           .BEAT_BITS(BEAT_BITS), .LATENCY(LATENCY),
           .EN_FP32(EN_FP32), .EN_FP64(EN_FP64),
           .EN_FP128(EN_FP128), .EN_FP256(EN_FP256),
-          .MUL_PASSES(MUL_PASSES)
+          .MUL_PASSES(MUL_PASSES), .EN_AUGADD(EN_AUGADD)
       ) u_lanes (
           .clk(ap_clk), .rst_n(ap_rst_n),
           .in_valid(al_valid), .op(al_op), .rnd(al_rnd),
@@ -1140,6 +1255,34 @@ module cft_seq #(
   logic [31:0]       rd_beats_left;   // beats not yet requested
   logic [8:0]        rd_burst_left;   // beats left in the open burst
   logic              rd_stream_on;    // a state wants read traffic
+  // The abort (revision 8; the contract's item 5). rd_long_q: the open
+  // burst ran past the beat ARLEN named, and its beats are being drained
+  // to its RLAST - they belong to no reader. abort_q: the run is ending on
+  // a fault; no new burst is issued from the cycle after the fault, and
+  // the state machine goes to S_ABORT at its next safe point (abort_go).
+  logic              rd_long_q;
+  logic              abort_q;
+  // The main read engine's AR and RREADY, registers since revision 8: the
+  // read port is muxed between this engine and the instruction fetch's
+  // (rtl/cft_ifetch.sv; the fetch's hooks, below), so the m_rd_* outputs
+  // are driven there. rd_acc is a beat this engine took.
+  logic [ADDR_W-1:0] rd_araddr_q;
+  logic [7:0]        rd_arlen_q;
+  logic              rd_arvalid_q;
+  logic              rd_rready_q;
+  logic [1:0]        rd_sel_q;
+  logic              rd_acc;
+  // The fetch's port side and its two status lines, declared here because
+  // the read channel and the abort read them.
+  logic              if_idle, if_fault_rd, if_fault_len;
+  logic [ADDR_W-1:0] if_araddr;
+  logic [7:0]        if_arlen;
+  logic              if_arvalid, if_rready;
+  // ...and its consumer side's answer, read by the admission, and the
+  // abort's whole condition, read by the fetch's request.
+  logic [63:0]       if_word;
+  logic              if_ok;
+  logic              abort_any;
 
   // ---- AXI write side (single outstanding burst) ----------------------
   logic [ADDR_W-1:0] wr_addr;
@@ -1285,6 +1428,20 @@ module cft_seq #(
   assign c_ctrl = cur[31];
   assign c_imm  = cur[63:32];
 
+  // Revision 8's R22. The internal IADD a stepped LDX owes, admitted after
+  // its last step as if it were the next instruction: IADD rb, rb, with
+  // kb and kc set so that neither port B nor C is read, and the step in
+  // imm[11:0] - which the F stage takes as operand b in place of a
+  // constant (c_istep), sign-extended to the format's width. c_sld says
+  // cur is a stepped LDX still owing it; both are registers, set where
+  // cur is, so that neither adds logic to the admission's or the take's
+  // paths beyond an AND.
+  logic        c_istep, c_sld;
+  logic [63:0] stp_word;
+  assign stp_word = {4'b0, 1'b0, 1'b0, cur[58], cur[58], 12'b0, cur[43:32],
+                     1'b0, 1'b0, 1'b1, 1'b1, 1'b0, 3'b0, 4'b0, 4'b0,
+                     cur[19:16], cur[19:16], OP_IADD};
+
   // The constant index each operand names. Without `kx` it is the
   // operand's own 4-bit field, zero-extended; with `kx` it is a byte
   // of `imm`, which is what makes the whole bank reachable. The
@@ -1363,7 +1520,12 @@ module cft_seq #(
     S_DRAIN_SETUP, S_DRAIN_RUN,
     S_CNT_SETUP, S_CNT_PACK, S_CNT_SEND,
     S_SO_SETUP, S_SO_RD, S_SO_W8, S_SO_PACK, S_SO_SEND,
-    S_WAIT_B, S_NEXT_BLK, S_FIN
+    S_WAIT_B, S_NEXT_BLK, S_FIN,
+    // Revision 8's R23: the per-lane flag block, after the counts.
+    S_LF_SETUP, S_LF_PACK, S_LF_SEND,
+    // Revision 8: the abort's wait - every read in flight landed, every
+    // write response in, the issue pipe empty - then S_FIN.
+    S_ABORT
   } state_e;
   state_e st;
   // R16's placement strobe. The sentinel arm of S_GTH_ELEM and the
@@ -1373,7 +1535,7 @@ module cft_seq #(
   // beat is short.
   assign gt_take = ((st == S_GTH_ELEM) && (gt_left != 0) &&
                     (gt_have != 0) && gt_none) ||
-                   ((st == S_GTH_WAIT) && m_rd_rvalid && m_rd_rready);
+                   ((st == S_GTH_WAIT) && rd_acc);
   assign gt_val  = (st == S_GTH_WAIT)
                  ? scr_elem_fn(gt_sel, m_rd_rdata, wpe_sh) : 256'b0;
   assign gt_flush = (32'({29'b0, gt_pos}) == 32'(lpb) - 32'd1) ||
@@ -1410,25 +1572,65 @@ module cft_seq #(
   // states of its own at three cycles a beat (five for a load).
   //
   //   DEPOSIT ra, SETACT ra, STL ra   read port A; write no register
+  //   RAISE ra (revision 8, R24)      read port A; write no register
   //   STX ra, rb                      read ports A and B; write none
   //   LDL rd                          read nothing from the file; write rd
   //   LDX rd, rb                      read port B; write rd
+  //   AUGADD, AUGERR rd, ra, rb       read ra on port A and rb on port C;
+  //     (revision 8, R21)             write rd - an ALU instruction's
+  //                                   shape, with rb where ADD has rc
+  //   STX ra, rb, step (R22, step     as STX, and WRITES rb: its F fires
+  //     not zero)                     IADD(rb as the bank read it, the
+  //                                   step) into the array, a slot a store
+  //                                   leaves free, so it is a writer of rb
+  //   LDX rd, rb, step (R22, step     as LDX (a writer of rd), then an
+  //     not zero, rd not rb)          internal IADD rb, rb, step issued
+  //                                   after it: up to one more
+  //                                   instruction's beats (stp_word)
   //
-  // REPEAT, ENDREP, ACTALL and HALT walk no beats and stay in S_DECODE.
+  // R21's two exist only where EN_AUGADD is set; at 0 they are unknown
+  // codes, as on revision 7, and end the block in S_DECODE.
+  //
+  // REPEAT, ENDREP, ACTALL and HALT walk no beats and stay in S_DECODE,
+  // and so, since revision 8's R24, do QUIET and ENDQUIET.
   // A control code's read set is its row above, NOT ka/kb/kc: the loader
   // refuses those bits on a control code, and a stream that bypassed the
   // loader still reads the register the scratch states always read.
+  function automatic logic aug_fn(input [63:0] w);
+    begin
+      aug_fn = EN_AUGADD && w[31] &&
+               (w[7:0] == C_AUGADD || w[7:0] == C_AUGERR);
+    end
+  endfunction
   function automatic logic piped_fn(input [63:0] w);
     begin
       piped_fn = !w[31] ||
                  w[7:0] == C_DEPOSIT || w[7:0] == C_SETACT ||
                  w[7:0] == C_STL || w[7:0] == C_LDL ||
-                 w[7:0] == C_STX || w[7:0] == C_LDX;
+                 w[7:0] == C_STX || w[7:0] == C_LDX ||
+                 w[7:0] == C_RAISE || aug_fn(w);
+    end
+  endfunction
+  // Revision 8's R22: a stepped STX or LDX - imm[11:0], w[43:32], a signed
+  // step not zero. Zero is the instruction exactly as it always was.
+  function automatic logic stepped_fn(input [63:0] w);
+    begin
+      stepped_fn = w[31] && (w[7:0] == C_STX || w[7:0] == C_LDX) &&
+                   (w[43:32] != 12'd0);
+    end
+  endfunction
+  // ...and a stepped LDX whose destination is not its index, which owes
+  // the internal IADD (`ldx rX, rX, step` keeps what it loaded, R22)
+  function automatic logic sld_fn(input [63:0] w);
+    begin
+      sld_fn = stepped_fn(w) && (w[7:0] == C_LDX) &&
+               ({w[56], w[11:8]} != {w[58], w[19:16]});
     end
   endfunction
   function automatic logic writer_fn(input [63:0] w);
     begin
-      writer_fn = !w[31] || w[7:0] == C_LDL || w[7:0] == C_LDX;
+      writer_fn = !w[31] || w[7:0] == C_LDL || w[7:0] == C_LDX ||
+                  aug_fn(w) || (stepped_fn(w) && w[7:0] == C_STX);
     end
   endfunction
   // {c, b, a}
@@ -1437,20 +1639,25 @@ module cft_seq #(
       if (!w[31])
         reads_fn = {!w[29], !w[28], !w[27]};
       else if (w[7:0] == C_DEPOSIT || w[7:0] == C_SETACT ||
-               w[7:0] == C_STL)
+               w[7:0] == C_STL || w[7:0] == C_RAISE)
         reads_fn = 3'b001;
       else if (w[7:0] == C_STX)
         reads_fn = 3'b011;
       else if (w[7:0] == C_LDX)
         reads_fn = 3'b010;
+      else if (aug_fn(w))
+        reads_fn = 3'b101;
       else
         reads_fn = 3'b000;
     end
   endfunction
+  // R21's two, which read rb on port C (the decode table above)
+  logic       c_aug;
+  assign c_aug     = aug_fn(cur);
   logic       c_piped, imq_piped, adm_wr;
   logic [2:0] adm_reads;
   assign c_piped   = piped_fn(cur);
-  assign imq_piped = piped_fn(imem_q);
+  assign imq_piped = piped_fn(if_word);
   // Admission: from S_DECODE, the decoded instruction if it goes through
   // the pipe; from the last address cycle of an issue, the word read
   // under it if that is here, goes through the pipe and is not past the
@@ -1494,18 +1701,25 @@ module cft_seq #(
   assign adm_ld    = adm_w[31] && (adm_w[7:0] == C_LDL || adm_w[7:0] == C_LDX);
   assign adm_fast  = adm_ld && all_fast;
   assign adm_ld_ok = FWD || !adm_ld || all_fast;
+  // R22: a stepped LDX's last step admits its internal IADD (stp_word)
+  // instead of the next word, which is neither taken nor waited for.
   assign adm_go  = (st == S_DECODE) ? (c_piped && adm_ld_ok) :
-                   (st == S_ISSUE) && !rd_hold && last_step && nxt_ok &&
-                   (32'(pc) + 32'd1 < h_ninsns) && imq_piped && adm_ld_ok;
+                   (st == S_ISSUE) && !rd_hold && last_step &&
+                   (c_sld || (if_ok && imq_piped)) && adm_ld_ok;
   assign adm_take = adm_go && q_room;
-  assign adm_w   = (st == S_ISSUE) ? imem_q : cur;
+  assign adm_w   = (st == S_ISSUE) ? (c_sld ? stp_word : if_word) : cur;
   assign adm_wr  = writer_fn(adm_w);
   assign q_push  = adm_take && adm_wr;
   assign adm_reads = reads_fn(adm_w);
-  assign adm_rd  = {adm_w[56], adm_w[11:8]};
+  // ...and a stepped STX's destination is rb (R22), every other writer's rd
+  assign adm_rd  = (stepped_fn(adm_w) && adm_w[7:0] == C_STX)
+                 ? {adm_w[58], adm_w[19:16]} : {adm_w[56], adm_w[11:8]};
   assign adm_ra  = {adm_w[57], adm_w[15:12]};
   assign adm_rb  = {adm_w[58], adm_w[19:16]};
-  assign adm_rc  = {adm_w[59], adm_w[23:20]};
+  // ...port C's field is rb's for augadd and augerr (R21), which read rb
+  // there; every other instruction's is rc.
+  assign adm_rc  = aug_fn(adm_w) ? {adm_w[58], adm_w[19:16]}
+                                 : {adm_w[59], adm_w[23:20]};
   // the youngest queued writer of each register operand, if any
   assign dep_n_a = adm_reads[0] && ((q_after >= 2'd2 && q_e1 == adm_ra) ||
                                     (q_after >= 2'd1 && q_e0 == adm_ra));
@@ -1544,7 +1758,9 @@ module cft_seq #(
   // in front of either path; a dependent SETACT or indexed access pays
   // the three cycles forwarding saves an ALU instruction.
   logic       a_fwd, b_fwd;
-  assign a_fwd = !(c_ctrl && c_op == C_SETACT);
+  // RAISE's ra likewise (revision 8, R24): its flag word and mark are read
+  // from the bank at F, as SETACT's operand is.
+  assign a_fwd = !(c_ctrl && (c_op == C_SETACT || c_op == C_RAISE));
   assign b_fwd = !c_ctrl;
   logic [5:0] wb_soon;
   assign wb_soon = FWD ? ((win_q > wb_bt) ? win_q : wb_bt) : wb_bt;
@@ -1672,7 +1888,7 @@ module cft_seq #(
   // bus and the constants (kq_*). Each stage carries the context of the
   // instruction its beat belongs to, because A can be addressing one
   // instruction's first beat while F fires the previous one's last:
-  // the next instruction is read under this one's issue (imem_q) and
+  // the next instruction is read under this one's issue (if_word) and
   // admitted the cycle after this one's last address, and the beats
   // never stop. Up to three instructions that WRITE a register are then
   // in flight - retiring, in the array, being addressed - and their
@@ -1739,6 +1955,13 @@ module cft_seq #(
   logic          e0_fast, e1_fast, all_fast;
   logic          adm_ld, adm_fast, adm_ld_ok;
   logic          c_fast;            // the instruction in A is a fast load
+  // R24's tag (revision 8): the instruction in A was admitted inside a
+  // quiet region. Taken at admission and carried with every beat to F,
+  // where it joins al_fen - the flag enable that rides beside every fired
+  // beat (fq) and gates FLAGS at the retire - and gates a RAISE's flags.
+  // A region's edge, decoded in S_DECODE, never moves a beat already
+  // admitted.
+  logic          c_quiet, pb_quiet, pf_quiet;
   logic          fw, fw_x, fw_pop;  // a fast load's write this step
   logic [5:0]    fw_bt;
   logic [WORDS-1:0] fw_wwe;
@@ -1758,6 +1981,10 @@ module cft_seq #(
   logic [2:0]    pb_rnd, pf_rnd;
   logic          pb_ka, pb_kb, pb_kc, pf_ka, pf_kb, pf_kc;
   logic          pb_ctrl, pf_ctrl;
+  // R22: a beat's step (imm[11:0]), whether it is a stepped STX's, and
+  // whether it is the internal IADD's (operand b the step)
+  logic [11:0]   pb_step, pf_step;
+  logic          pb_sstep, pf_sstep, pb_istep, pf_istep;
   logic [SCRSW-1:0] pb_slot, pf_slot;
   // ...and an LDX's two more (R18): G reads the scratch at the address
   // F formed, H fires what came back. pX_oor carries R8's suppressed
@@ -1844,16 +2071,87 @@ module cft_seq #(
       $error("cft_seq: forwarding looks two cycles ahead along the array's validity line, formed a cycle before - LATENCY must be at least 4");
     end
   endgenerate
-  // The instruction memory's one read register: its address is pc + 1
-  // while an instruction issues (the next one, read under the issue)
-  // and pc otherwise (S_FETCH and the skip take their word from it a
-  // cycle after presenting the address). nxt_ok says the register
-  // holds imem[pc + 1] - it drops for the cycle after pc moves.
-  logic [63:0]    imem_q;
-  logic [PCW-1:0] imem_a;
-  logic           nxt_ok;
-  assign imem_a = (st == S_ISSUE) ? pc[PCW-1:0] + PCW'(1) : pc[PCW-1:0];
-  always_ff @(posedge ap_clk) imem_q <= imem[imem_a];
+  // ---- the instruction fetch (revision 8, R8S) -----------------------
+  //
+  // rtl/cft_ifetch.sv, wired per its header ("The interface, for round
+  // 2") and docs/studies/R8S-streaming.md, section 13. Its store is the
+  // instruction memory this module held until revision 8, IMEM_D words
+  // deep; past the store the unit streams the image through the read
+  // port. Until revision 8 the memory's one read register stood here,
+  // addressed pc + 1 in S_ISSUE and pc otherwise, with nxt_ok saying it
+  // held imem[pc + 1]. The unit is addressed the same way and answers
+  // the same cycle, so a program the store holds runs in today's cycles:
+  //
+  //   want/addr  the address the consumer needs next: pc + 1 in S_ISSUE
+  //              (the next word, read under the issue), pc in S_FETCH,
+  //              S_FETCH2 and the skip. LOW in a cycle that takes a word,
+  //              because each consuming state presents the consumed word's
+  //              own address, and a stream word asked for again after its
+  //              pop is a jump to it. Low as well while a fault is ending
+  //              the run, and while the main read engine has anything in
+  //              flight: the fetch's span on the port opens only with that
+  //              engine drained (verifier-VRD1's note on RD1). A setup
+  //              burst still landing at a block's first want is a long
+  //              one, which the abort has already ended the run for, so no
+  //              fetch follows it - the abort drains it to its RLAST first.
+  //   word/ok    the word at the address wanted last cycle. `ok` stands
+  //              for what nxt_ok and `pc + 1 < n_insns` stood for: it is
+  //              never high for an address at or past n_insns, and is low
+  //              the cycle after a take, since a take wants nothing.
+  //   take       S_FETCH2 and S_SKIP_D when ok; S_ISSUE's last unheld step
+  //              when it continues with the word.
+  //   cap        a REPEAT entering its body (S_DECODE), with pc + 1.
+  //   quiesce    the block's end (S_DRAIN_SETUP), and the abort.
+  //   init       the run's start.
+  logic                if_init, if_ld_q, if_want, if_take, if_cap;
+  logic                if_quiesce, if_fst;
+  logic [63:0]         if_ldw_q;
+  logic [PCW:0]        if_addr, if_cap_pc;
+  logic [ADDR_W-1:0]   if_ibase_q;
+  assign if_init    = (st == S_IDLE) && start;
+  assign if_fst     = (st == S_FETCH) || (st == S_FETCH2) ||
+                      (st == S_SKIP_F) || (st == S_SKIP_D) || (st == S_ISSUE);
+  assign if_take    = (((st == S_FETCH2) || (st == S_SKIP_D)) && if_ok) ||
+                      ((st == S_ISSUE) && !rd_hold && last_step && if_ok &&
+                       !c_sld);
+  assign if_want    = if_fst && !if_take && !abort_any &&
+                      (rd_burst_left == 9'd0) && !rd_long_q && !rd_arvalid_q;
+  assign if_addr    = (st == S_ISSUE) ? pc + (PCW+1)'(1) : pc;
+  assign if_cap     = (st == S_DECODE) && !c_piped && (c_op == C_REPEAT) &&
+                      (c_imm != 32'd0) && any_active;
+  assign if_cap_pc  = pc + (PCW+1)'(1);
+  assign if_quiesce = (st == S_DRAIN_SETUP) || (st == S_ABORT);
+
+  cft_ifetch #(.BEAT_BITS(BEAT_BITS), .GW(32), .ADDR_W(ADDR_W),
+               .STORE_D(IMEM_D), .STREAM_D(STREAM_D)) u_fetch (
+      .clk(ap_clk), .rst_n(ap_rst_n),
+      .init(if_init), .cfg_ibase(if_ibase_q), .cfg_n(h_ninsns[PCW:0]),
+      .ld(if_ld_q), .ld_word(if_ldw_q),
+      .want(if_want), .addr(if_addr), .word(if_word), .ok(if_ok),
+      .take(if_take), .cap(if_cap), .cap_pc(if_cap_pc),
+      .quiesce(if_quiesce), .idle(if_idle),
+      .fault_rd(if_fault_rd), .fault_len(if_fault_len),
+      .m_rd_araddr(if_araddr), .m_rd_arlen(if_arlen),
+      .m_rd_arvalid(if_arvalid), .m_rd_arready(m_rd_arready),
+      .m_rd_rdata(m_rd_rdata), .m_rd_rlast(m_rd_rlast),
+      .m_rd_rresp(m_rd_rresp), .m_rd_rvalid(m_rd_rvalid),
+      .m_rd_rready(if_rready));
+
+  // The read port: the fetch's while it is not idle, the main read
+  // engine's otherwise. The two never want it at once - the main engine
+  // issues only in the setup states, where the fetch is idle (S_WAIT_B
+  // and the abort wait for it, and its issue tests if_idle besides), and
+  // the fetch issues only between a want and the next quiesce, init or
+  // fault, and wants only with the main engine drained - so the select is
+  // the fetch's own idle line. m_rd_sel is 0, the A master the image sits
+  // behind, for every fetch burst: the main engine's last setup read may
+  // have been stream b's or c's. A tile that does not stream has a fetch
+  // that is always idle, and this is the read port it always had.
+  assign m_rd_araddr  = if_idle ? rd_araddr_q  : if_araddr;
+  assign m_rd_arlen   = if_idle ? rd_arlen_q   : if_arlen;
+  assign m_rd_arvalid = if_idle ? rd_arvalid_q : if_arvalid;
+  assign m_rd_rready  = if_idle ? rd_rready_q  : if_rready;
+  assign m_rd_sel     = if_idle ? rd_sel_q     : 2'd0;
   logic [1:0]    ld_reg;
   logic [LB:0]   lane_cursor;
   logic [31:0]   slot_cursor;
@@ -2042,14 +2340,76 @@ module cft_seq #(
   // run computed is correct and reproducible, and this says a lane
   // asked for a slot that is not there.
   logic        scr_rng_q;
+  // Revision 8's R24: a RAISE marked a lane - err[5], STATUS[6] through
+  // cft_krnl. Sticky for the run, and never silenced by a quiet region: a
+  // mark lost would keep an undecided last bit as though decided.
+  logic        mark_q;
   logic        refuse_q;
   logic        rd_fault_q, wr_fault_q, len_fault_q;
 
+  // ---- the abort's three decisions (revision 8; the contract's item 5) --
+  //
+  // A beat of the open burst that shows its length wrong: RLAST before the
+  // beat ARLEN named, or none on it - the engine's rule, beat by beat. A
+  // beat of a burst already known long (rd_long_q) is being drained and is
+  // no reader's, and shows nothing more.
+  logic rd_len_bad, rd_word_bad, img_beat_insn;
+  // A beat THIS engine took: the fetch's own R beats are its, while it is
+  // not idle (the port's RREADY is then the fetch's, below).
+  assign rd_acc     = m_rd_rvalid && rd_rready_q && if_idle;
+  assign rd_len_bad = rd_acc && !rd_long_q && (rd_burst_left != 9'd0) &&
+                      (m_rd_rlast ? (rd_burst_left != 9'd1)
+                                  : (rd_burst_left == 9'd1));
+  // A beat the image parse absorbs holds an instruction's byte unless every
+  // one of its 32 bytes is a constant still to come: the window holds
+  // pw_have bytes of what follows, so the constants not yet in it are
+  // kons_left * esz - pw_have bytes, and the beat is all constants only
+  // when that is a whole beat or more. A beat is absorbed only when the
+  // window is too empty to peel (S_IMG_PARSE's rule), so its bytes start
+  // where the window's end. The bank pass and an image with no
+  // instruction left hold none.
+  assign img_beat_insn = (insn_left != 32'd0) &&
+                         ((kons_left << esz_sh) < 32'(pw_have) + 32'd32);
+  // A read fault on the header beat or an instruction's beat ends the run;
+  // on any other beat it is data, and the run completes with err[0].
+  assign rd_word_bad = rd_acc && (m_rd_rresp != 2'b00) &&
+                       ((st == S_HDR_R) ||
+                        ((st == S_IMG_PARSE) && !bank_phase && img_beat_insn));
+  // Where the state machine may leave for S_ABORT: anywhere a run's reads
+  // happen (the setup states - no write is open there and the issue pipe
+  // is empty), between instructions (S_FETCH, S_FETCH2 and the skip, never
+  // in the middle of an instruction's beats: S_DECODE and S_ISSUE finish
+  // the instruction in hand, every word of which the memory vouched for),
+  // at the block's end, and in the drains once no write burst is open or
+  // committed - a committed burst delivers its beats first, from the drain
+  // that was producing them.
+  logic wr_quiet, drain_st, abort_safe, abort_go;
+  assign wr_quiet   = (wr_burst_left == 9'd0) && !m_wr_awvalid &&
+                      !wr_aw_open && !m_wr_wvalid;
+  assign drain_st   = (st == S_DRAIN_RUN) || (st == S_CNT_SETUP) ||
+                      (st == S_CNT_PACK) || (st == S_CNT_SEND) ||
+                      (st == S_SO_SETUP) || (st == S_SO_RD) ||
+                      (st == S_SO_W8) || (st == S_SO_PACK) ||
+                      (st == S_SO_SEND) || (st == S_WAIT_B) ||
+                      (st == S_LF_SETUP) || (st == S_LF_PACK) ||
+                      (st == S_LF_SEND);
+  assign abort_safe = !((st == S_IDLE) || (st == S_FIN) || (st == S_ABORT) ||
+                        (st == S_DECODE) || (st == S_ISSUE)) &&
+                      (!drain_st || wr_quiet);
+  // The fetch's faults end the run through this same abort, and no
+  // mechanism of their own (docs/ROADMAP.md, R8S): a fetch fault holds
+  // the unit's `ok` low for ever, so the consumer stops at its next word
+  // and the abort takes the machine from there. Sticky to the next init.
+  assign abort_any  = abort_q || if_fault_rd || if_fault_len;
+  assign abort_go   = abort_any && abort_safe;
+
   assign flags  = flags_q;
-  // err[5], R24's mark (STATUS[6] through cft_krnl), is a constant
-  // zero at revision 8's seam: no RAISE decodes until R24 is built.
-  assign err    = {1'b0, scr_rng_q, dep_ovf_q, len_fault_q, wr_fault_q,
-                   rd_fault_q};
+  // err[5] is R24's mark (STATUS[6] through cft_krnl), since revision 8.
+  // err[0] and err[2] are the fetch's as well (revision 8): a read fault
+  // or a wrong length on a fetch burst is STATUS[0] or STATUS[2], as on
+  // any other read, and needs no bit of its own.
+  assign err    = {mark_q, scr_rng_q, dep_ovf_q, len_fault_q | if_fault_len,
+                   wr_fault_q, rd_fault_q | if_fault_rd};
   assign refuse = refuse_q;
   assign busy   = (st != S_IDLE);
 
@@ -2219,6 +2579,60 @@ module cft_seq #(
   logic [4:0] wb_flags_or;
   assign wb_flags_or = wb_flags_fn(wb_act, al_lf, lpb);
 
+  // ---- R24's RAISE, at F (revision 8) --------------------------------
+  //
+  // The F stage's beat is a RAISE: each active lane position's ra, as the
+  // BANK read it - its ra waits under R14's landed rule, as SETACT's does,
+  // so no forwarding mux stands in front of it - gives the low byte of the
+  // lane's element: [4:0] the five flags in FLAGS's order, ORed into FLAGS
+  // unless the beat was admitted quiet, and [7] the mark, set whatever the
+  // region. [6:5] and every bit from 8 up are read by nothing: deposit
+  // overflow and a strict fault are the machine's reports about itself,
+  // and no program may claim one. A lane's low byte is the first byte of
+  // the first word of its run (little end first), lane_slot_fn's geometry.
+  // An inactive lane - masked, padding, dropped - raises and marks nothing.
+  function automatic [7:0] lane_low8_fn(input [WORDS*32-1:0] rdata,
+                                        input [2:0] posn,
+                                        input [1:0] wsh);
+    logic [7:0] r;
+    begin
+      r = '0;
+      for (int w = 0; w < WORDS; w = w + 1)
+        if (32'(w) == (32'({29'b0, posn}) << wsh))
+          r = rdata[w*32 +: 8];
+      lane_low8_fn = r;
+    end
+  endfunction
+  // {mark, flags} over the row's active lane positions
+  function automatic [5:0] raise_or_fn(input [WORDS*8-1:0] b,
+                                       input [WORDS-1:0] act,
+                                       input [3:0] lanes);
+    logic [5:0] acc;
+    begin
+      acc = '0;
+      for (int p = 0; p < WORDS; p = p + 1)
+        if (p < 32'(lanes) && act[p])
+          acc = acc | {b[p*8 + 7], b[p*8 +: 5]};
+      raise_or_fn = acc;
+    end
+  endfunction
+  logic [WORDS*8-1:0] ra_low8;
+  generate
+    for (genvar gr = 0; gr < WORDS; gr = gr + 1) begin : g_raise
+      assign ra_low8[gr*8 +: 8] = lane_low8_fn(rf_rdata_a, 3'(gr), wpe_sh);
+    end
+  endgenerate
+  logic [5:0] raise_or;
+  logic       raise_go, raise_mk;
+  logic [4:0] raise_fl, ret_fl;
+  assign raise_or = raise_or_fn(ra_low8, bt_act, lpb);
+  // Gated like every F-stage action (!issue_hold): the beat acts once.
+  assign raise_go = !issue_hold && pf_v && pf_ctrl && (pf_op == C_RAISE);
+  assign raise_fl = (raise_go && !pf_quiet) ? raise_or[4:0] : 5'b0;
+  assign raise_mk = raise_go && raise_or[5];
+  // ...and a landing result's flags, under its row and its tag (fq).
+  assign ret_fl   = (al_ov && seq_live && fq[LATENCY-1]) ? wb_flags_or : 5'b0;
+
   // Per-word register-file write enables for the beat retiring now:
   // word w carries lane position w >> wpe_sh, and a word enable IS a
   // lane enable because every format's element is a whole number of
@@ -2281,12 +2695,43 @@ module cft_seq #(
   // from registered selects, and the forwarding path, the longest into
   // the request, is not made longer.
   logic                 fire_alu, fire_ldl, fire_ldx, fire_go;
+  // R21: an augadd or augerr beat at F fires as an ALU beat does - ADD's
+  // request with both operands from the file (ra on A, rb on C) and its
+  // flag enable on - and the sideband says which half the pipe keeps.
+  logic                 pf_aug, fire_aug;
+  // R22: a stepped STX beat at F also fires its step into the array:
+  // IADD(rb as the bank read it - an indexed code's rb waits for its
+  // producer under R14's landed rule, so the bank has it - and the step at
+  // the format's width), under the beat's row, with its flag enable off.
+  // The internal IADD of a stepped LDX fires as an ALU beat with the step
+  // as operand b. Both new sources are registers, chosen in parallel with
+  // the others, so the forwarded operand still enters at the last level.
+  logic                 fire_sstep;
+  logic [BEAT_BITS-1:0] stp_vec;
   logic [BEAT_BITS-1:0] ld_val, alt_a, alt_b, alt_c;
   logic                 use_op_a, use_op_b, use_op_c;
   assign fire_alu = pf_v && !pf_ctrl;
   assign fire_ldl = pf_v && pf_ctrl && pf_op == C_LDL && !pf_fast;
   assign fire_ldx = ph_v && !ph_fast;
-  assign fire_go  = fire_alu || fire_ldl || fire_ldx;
+  assign pf_aug   = EN_AUGADD && pf_ctrl &&
+                    (pf_op == C_AUGADD || pf_op == C_AUGERR);
+  assign fire_aug = pf_v && pf_aug;
+  assign fire_sstep = pf_v && pf_sstep;
+  assign fire_go  = fire_alu || fire_ldl || fire_ldx || fire_aug ||
+                    fire_sstep;
+  // The step sign-extended to each lane's width: a lane's lowest word holds
+  // the twelve bits sign-extended to 32, and its higher words the sign.
+  function automatic [BEAT_BITS-1:0] stepv_fn(input [11:0] s,
+                                              input [1:0] wsh);
+    logic [BEAT_BITS-1:0] r;
+    begin
+      for (int w = 0; w < WORDS; w = w + 1)
+        r[w*32 +: 32] = ((32'(w) & ((32'd1 << wsh) - 32'd1)) == 32'd0)
+                      ? {{20{s[11]}}, s} : {32{s[11]}};
+      stepv_fn = r;
+    end
+  endfunction
+  assign stp_vec  = stepv_fn(pf_step, wpe_sh);
   assign ld_val   = zero_oor_fn(scr_rdata, ph_v ? ph_oor : '0);
   // A FAST load's beat (the send-back; the rule is with the admission):
   // its value, the same ld_val the array path would fire, goes into the
@@ -2303,12 +2748,19 @@ module cft_seq #(
   assign fw_bt  = fw_x ? ph_bt : pf_bt;
   assign fw_wwe = fw_x ? wb_wwe_fn(h_act, wpe_sh) : bt_wwe;
   assign fw_pop = fw && (fw_bt == 6'({1'b0, nb_blk} - 6'd1));
-  assign alt_a    = fire_alu ? kq_a : ld_val;
-  assign alt_b    = fire_alu ? kq_b : ld_val;
+  assign alt_a    = fire_alu ? kq_a : fire_sstep ? rf_rdata_b : ld_val;
+  // pf_istep is F's context, which an LDX firing at H does not have (F is
+  // a bubble then, and its context whatever the bubble carried): it is
+  // read only under fire_alu, F's own fire.
+  assign alt_b    = (fire_sstep || (fire_alu && pf_istep)) ? stp_vec :
+                    fire_alu ? kq_b : ld_val;
   assign alt_c    = fire_alu ? kq_c : '0;
-  assign use_op_a = fire_alu && !pf_ka;
+  // augadd and augerr read no constant (a control code's read set is its
+  // row in the decode table), so A and C are the file's, forwarded as an
+  // ALU operand is; B is ADD's 1.0, which cft_opmux supplies.
+  assign use_op_a = (fire_alu && !pf_ka) || fire_aug;
   assign use_op_b = fire_alu && !pf_kb;
-  assign use_op_c = fire_alu && !pf_kc;
+  assign use_op_c = (fire_alu && !pf_kc) || fire_aug;
   // The same mask for the beat the SCRATCH states are working on. A
   // store is a register write for P3's purposes and a load writes rd,
   // so both are masked by exactly this - an all-inactive loop body
@@ -2329,7 +2781,9 @@ module cft_seq #(
   //    stays inside the memory instead of indexing past it, exactly
   //    as k_idx_* slices a constant index. For STX and LDX it is the
   //    low SCRSW bits of the lane's own `rb`, which arrives on the
-  //    register file's B read port.
+  //    register file's B read port - the index as it stands, before
+  //    any post-step (revision 8's R22: imm[11:0] of the pair is a
+  //    step, applied after the access by an IADD in the array).
   //
   //    A lane's low 32 bits sit in the FIRST word of its run of
   //    words (position p occupies banks p << wpe_sh upward, little
@@ -2440,6 +2894,142 @@ module cft_seq #(
     end
   endgenerate
   assign scr_oor_bk = oor_banks_fn(scr_oor, wpe_sh);
+
+  // ---- revision 8's R23: per-lane sticky flags -----------------------
+  //
+  // A byte a lane slot, BLK_LANES of them, addressed as `active` is ({beat,
+  // position}, 1,024 flops at sixteen beats of eight positions, at every
+  // format): [4:0] the five IEEE flags the lane raised outside every quiet
+  // region (R24), in FLAGS's order; [5] its deposit overflowed; [6] its
+  // indexed access fell past the depth under SCRATCH_STRICT; [7] a RAISE
+  // marked it - STATUS[6:4]'s three reports one place up, lane by lane
+  // (docs/SEQUENCER.md, R23). Sticky, cleared at each block's start with
+  // the register file's valid bits, and read only by the drain after the
+  // counts (S_LF_*), when the run asked (MODE[24], lf_en_q).
+  //
+  // Every term is the one the run's own reports take today, captured from
+  // a REGISTERED copy a cycle late, so no R23 logic sits on today's paths
+  // - the retire, the F stage's deposit path among them (docs/ROADMAP.md,
+  // revision 8, R23: the margins). Two sources a cycle, each one beat's
+  // row of positions:
+  //   the retire: a landing beat's lane flags, under the row it fired with
+  //     and its flag enable (fq: arithmetic, and not admitted quiet) -
+  //     wb_flags_or's terms before it ORs them;
+  //   F: a RAISE's ra[4:0] unless the beat is quiet and its ra[7], a
+  //     DEPOSIT's overflow by position (bt_dep_ovf), and STX's and LDX's
+  //     strict suppression by position (scr_oor), each under the beat's
+  //     active row.
+  // A lane the caller does not have - masked, or past n - is never active,
+  // so its byte stays 0, and the drain does not write it.
+  logic [BLK_LANES*8-1:0] lflags;
+  logic                   lf_rv, lf_fv;
+  logic [NBSH-1:0]        lf_rbeat, lf_fbeat;
+  logic [WORDS*8-1:0]     lf_rbits, lf_fbits, lf_rbits_c, lf_fbits_c;
+  logic                   lf_f_c;
+  generate
+    for (genvar gf = 0; gf < WORDS; gf = gf + 1) begin : g_lf
+      logic here;          // the position exists at this format
+      assign here = (32'(gf) < 32'(lpb));
+      assign lf_rbits_c[gf*8 +: 8] =
+          {3'b0, (here && wb_act[gf]) ? al_lf[gf*5 +: 5] : 5'b0};
+      assign lf_fbits_c[gf*8 +: 8] = {
+          raise_go && here && bt_act[gf] && ra_low8[gf*8 + 7],     // [7]
+          lf_f_c && c_scr_idx && here && bt_act[gf] && scr_oor[gf],  // [6]
+          lf_f_c && (pf_op == C_DEPOSIT) && bt_dep_ovf[gf],          // [5]
+          (raise_go && !pf_quiet && here && bt_act[gf])
+              ? ra_low8[gf*8 +: 5] : 5'b0};                          // [4:0]
+    end
+  endgenerate
+  // an F-stage control beat acting this cycle (every F action's gate)
+  assign lf_f_c = !issue_hold && pf_v && pf_ctrl;
+  always_ff @(posedge ap_clk) begin
+    lf_rv    <= al_ov && seq_live && fq[LATENCY-1];
+    lf_rbeat <= wb_tag[NBSH-1:0];
+    lf_rbits <= lf_rbits_c;
+    lf_fv    <= lf_f_c;
+    lf_fbeat <= pf_bt[NBSH-1:0];
+    lf_fbits <= lf_fbits_c;
+    if (!ap_rst_n || rf_clear)
+      lflags <= '0;
+    else
+      for (int b = 0; b < NBEATS; b = b + 1)
+        for (int q = 0; q < WORDS; q = q + 1)
+          lflags[(b*WORDS + q)*8 +: 8] <= lflags[(b*WORDS + q)*8 +: 8] |
+              ((lf_rv && 32'(lf_rbeat) == b) ? lf_rbits[q*8 +: 8]
+                                                       : 8'b0) |
+              ((lf_fv && 32'(lf_fbeat) == b) ? lf_fbits[q*8 +: 8]
+                                                       : 8'b0);
+  end
+
+  // The drain's beat: BEAT_BYTES lanes' bytes, lane L at byte L - the block's
+  // first byte in the beat. A block's lanes sit in slots (L >> lpb_sh) x
+  // WORDS + (L mod lpb) - the dense index to {beat, position} - so the
+  // select is written over CONSTANT candidates (the format, which beat of
+  // the block, the block's offset in the beat), never a computed index into
+  // the 1,024 flops: at 256 bits a byte has about eight candidates, where a
+  // computed index would be a 128:1 multiplexer a byte. A block narrower
+  // than a beat (fp256's sixteen lanes) starts at a multiple of its own
+  // width within the beat, which is the only offset `off` takes.
+  localparam int LFB = BEAT_BYTES;                          // lanes a beat
+  localparam int LFK = (BLK_LANES + LFB - 1) / LFB;         // beats a block
+  localparam int LFKW = (LFK > 1) ? $clog2(LFK) : 1;
+  function automatic [BEAT_BITS-1:0] lf_beat_fn(input [BLK_LANES*8-1:0] lf,
+                                                input [1:0] lsh,
+                                                input [LFKW-1:0] k,
+                                                input [5:0] off);
+    logic [BEAT_BITS-1:0] r;
+    int L, slot;
+    begin
+      r = '0;
+      for (int f = 0; f < 4; f = f + 1)
+        if (32'(lsh) == f)
+          for (int kk = 0; kk < LFK; kk = kk + 1)
+            if (32'(k) == kk)
+              for (int o = 0; o < LFB; o = o + (NBEATS << f))
+                if (32'(off) == o)
+                  for (int j = 0; j < LFB; j = j + 1) begin
+                    L = kk*LFB + j - o;
+                    if (L >= 0 && L < (NBEATS << f)) begin
+                      slot = (L >> f) * WORDS + (L & ((1 << f) - 1));
+                      if (slot < BLK_LANES)
+                        r[j*8 +: 8] = lf[slot*8 +: 8];
+                    end
+                  end
+      lf_beat_fn = r;
+    end
+  endfunction
+  // ...and its strobes: a byte for a lane below blk_n that the caller has
+  // (mask_lane, dense by lane) - the counts' rule.
+  function automatic [LFB-1:0] lf_strb_fn(input [BLK_LANES-1:0] ml,
+                                          input [1:0] lsh,
+                                          input [LFKW-1:0] k,
+                                          input [5:0] off,
+                                          input [LB:0] bn);
+    logic [LFB-1:0] r;
+    int L;
+    begin
+      r = '0;
+      for (int f = 0; f < 4; f = f + 1)
+        if (32'(lsh) == f)
+          for (int kk = 0; kk < LFK; kk = kk + 1)
+            if (32'(k) == kk)
+              for (int o = 0; o < LFB; o = o + (NBEATS << f))
+                if (32'(off) == o)
+                  for (int j = 0; j < LFB; j = j + 1) begin
+                    L = kk*LFB + j - o;
+                    if (L >= 0 && L < (NBEATS << f) && L < BLK_LANES)
+                      r[j] = (32'(L) < 32'(bn)) && ml[L];
+                  end
+      lf_strb_fn = r;
+    end
+  endfunction
+  // The drain's cursor - the beat of the block being packed - and the
+  // block's first byte in its first beat: the block starts at byte
+  // blk_base of the 32-byte-aligned block, so its offset in a beat is
+  // blk_base's low bits, nonzero only where a block is narrower than a beat.
+  logic [LFKW-1:0] lf_k;
+  logic [5:0]      lf_off;
+  assign lf_off = 6'(blk_base[$clog2(LFB)-1:0]);
 
   // 2. The per-bank ADDRESS those slots imply, for the beat named.
   //    Bank w serves lane position w >> wsh, so it takes that lane's
@@ -2808,6 +3398,14 @@ module cft_seq #(
   assign scr_out_elem = scr_elem_fn(dc_posn, scr_rdata, wpe_sh);
 
 
+  // R23's drain beat and its strobes (above), as continuous assigns for
+  // the reason rd_bl's is one (an Icarus livelock under always_comb), and
+  // here because they read mask_lane; S_LF_PACK registers them.
+  logic [BEAT_BITS-1:0] lf_beat;
+  logic [LFB-1:0]       lf_strb;
+  assign lf_beat = lf_beat_fn(lflags, lpb_sh, lf_k, lf_off);
+  assign lf_strb = lf_strb_fn(mask_lane, lpb_sh, lf_k, lf_off, blk_n);
+
   // ==== the machine ====================================================
   always_ff @(posedge ap_clk) begin
     if (!ap_rst_n) begin
@@ -2815,21 +3413,29 @@ module cft_seq #(
       done <= 1'b0; refuse_q <= 1'b0;
       flags_q <= '0; dep_ovf_q <= 1'b0; scr_rng_q <= 1'b0;
       rd_fault_q <= 1'b0; wr_fault_q <= 1'b0; len_fault_q <= 1'b0;
-      m_rd_arvalid <= 1'b0; m_rd_rready <= 1'b0; m_rd_sel <= 2'd0;
+      rd_arvalid_q <= 1'b0; rd_rready_q <= 1'b0; rd_sel_q <= 2'd0;
+      rd_araddr_q <= '0; rd_arlen_q <= '0;
       m_wr_awvalid <= 1'b0; m_wr_wvalid <= 1'b0; m_wr_bready <= 1'b0;
       al_valid <= 1'b0; rf_we <= 1'b0;
       db_we <= '0;
       rd_stream_on <= 1'b0; wr_stream_on <= 1'b0;
       rd_beats_left <= '0; rd_burst_left <= '0;
+      rd_long_q <= 1'b0; abort_q <= 1'b0;
       wr_beats_left <= '0; wr_burst_left <= '0;
       wr_aw_open <= 1'b0; wr_bresp_left <= '0;
       lane_cursor <= '0; slot_cursor <= '0;
       pc <= '0; bt <= '0; wb_bt <= '0; lp_sp <= '0; q_n <= '0;
-      pb_v <= 1'b0; pf_v <= 1'b0; nxt_ok <= 1'b0;
+      pb_v <= 1'b0; pf_v <= 1'b0;
+      if_ld_q <= 1'b0; if_ldw_q <= '0; if_ibase_q <= '0;
       pg_v <= 1'b0; ph_v <= 1'b0;
       pb_fast <= 1'b0; pf_fast <= 1'b0; pg_fast <= 1'b0; ph_fast <= 1'b0;
       c_fast <= 1'b0; q_f0 <= 1'b0; q_f1 <= 1'b0; q_f2 <= 1'b0;
-      al_row <= '0; al_fen <= 1'b0; al_tag <= '0;
+      c_quiet <= 1'b0; pb_quiet <= 1'b0; pf_quiet <= 1'b0;
+      c_istep <= 1'b0; c_sld <= 1'b0;
+      pb_step <= '0; pf_step <= '0;
+      pb_sstep <= 1'b0; pf_sstep <= 1'b0; pb_istep <= 1'b0; pf_istep <= 1'b0;
+      qdepth <= '0; mark_q <= 1'b0;
+      al_row <= '0; al_fen <= 1'b0; al_tag <= '0; al_aug <= 2'd0;
       pf_aa <= '0; pf_ab <= '0; pf_ac <= '0;
       dep_v_a <= 1'b0; dep_v_b <= 1'b0; dep_v_c <= 1'b0;
       // The constant bank is read unconditionally on every cycle, so
@@ -2847,6 +3453,7 @@ module cft_seq #(
       // caller has, so its idle value has to be the one that says
       // "every lane", and a run without a mask never writes it.
       mask_q <= '0; mask_en_q <= 1'b0; mask_lane <= {BLK_LANES{1'b1}};
+      lf_q <= '0; lf_en_q <= 1'b0; lf_k <= '0;
       gt_tbl <= '0; gt_have <= '0; gt_left <= '0; gt_taddr <= '0;
       gt_base <= '0; gt_idx <= '0; gt_scr <= 1'b0; gt_beat <= '0;
       gt_pos <= '0; gt_lane <= '0; gt_slot <= '0;
@@ -2861,6 +3468,7 @@ module cft_seq #(
 
     end else begin
       done <= 1'b0;
+      if_ld_q <= 1'b0;
       // A request stands until the array takes it; the issue state
       // re-asserts it for the next beat in the same cycle it is taken.
       if (!issue_hold) al_valid <= 1'b0;
@@ -2871,22 +3479,37 @@ module cft_seq #(
       scr_clean_go <= 1'b0;
 
       // ---- read channel: one burst in flight --------------------------
-      if (m_rd_arvalid && m_rd_arready)
-        m_rd_arvalid <= 1'b0;
-      if (m_rd_rvalid && m_rd_rready) begin
+      //
+      // The open burst ends at its RLAST, whatever its length (revision 8,
+      // the abort). A SHORT burst - RLAST before the beat ARLEN named - is
+      // over at that RLAST, so its count is zeroed there; until revision 8
+      // it stayed above zero, no next burst was ever issued and the read
+      // waited for ever. A LONG one - no RLAST on that beat - is flagged on
+      // it, and rd_long_q drains the rest to its RLAST; until revision 8
+      // those beats were taken as a later read's data. Either ends the run
+      // (abort_q, below), as a read fault on the header or an instruction
+      // does: from the next cycle no burst is issued, and S_ABORT drains
+      // what is in flight.
+      if (rd_arvalid_q && m_rd_arready && if_idle)
+        rd_arvalid_q <= 1'b0;
+      if (rd_acc) begin
         if (m_rd_rresp != 2'b00) rd_fault_q <= 1'b1;
-        if (rd_burst_left != 0) begin
-          rd_burst_left <= rd_burst_left - 1;
-          if (m_rd_rlast && rd_burst_left != 1) len_fault_q <= 1'b1;
-          if (!m_rd_rlast && rd_burst_left == 1) len_fault_q <= 1'b1;
+        if (rd_long_q) begin
+          if (m_rd_rlast) rd_long_q <= 1'b0;
+        end else if (rd_burst_left != 0) begin
+          rd_burst_left <= m_rd_rlast ? 9'd0 : rd_burst_left - 9'd1;
+          if (rd_len_bad) len_fault_q <= 1'b1;
+          if (!m_rd_rlast && rd_burst_left == 1) rd_long_q <= 1'b1;
         end
       end
-      if (rd_stream_on && !m_rd_arvalid && rd_burst_left == 0 &&
-          rd_beats_left != 0) begin
-        m_rd_araddr   <= rd_addr;
-        m_rd_sel      <= rd_sel;
-        m_rd_arlen    <= rd_bl;
-        m_rd_arvalid  <= 1'b1;
+      if (rd_len_bad || rd_word_bad)
+        abort_q <= 1'b1;
+      if (rd_stream_on && !rd_arvalid_q && rd_burst_left == 0 && if_idle &&
+          !rd_long_q && !abort_any && rd_beats_left != 0) begin
+        rd_araddr_q   <= rd_addr;
+        rd_sel_q      <= rd_sel;
+        rd_arlen_q    <= rd_bl;
+        rd_arvalid_q  <= 1'b1;
         rd_burst_left <= {1'b0, rd_bl} + 9'd1;
         rd_addr       <= rd_addr + (({56'b0, rd_bl} + 64'd1) << 5);
         rd_beats_left <= rd_beats_left - ({24'b0, rd_bl} + 32'd1);
@@ -2909,8 +3532,11 @@ module cft_seq #(
       else if (!(m_wr_awvalid && m_wr_awready) &&
                (m_wr_bvalid && m_wr_bready))
         wr_bresp_left <= wr_bresp_left - 1;
+      // No new write burst once the run is ending on a fault (the abort): a
+      // burst already committed still delivers its beats, from the drain
+      // producing them, and the drain stops at the next burst's AW.
       if (wr_stream_on && !m_wr_awvalid && !wr_aw_open &&
-          wr_burst_left == 0 && wr_beats_left != 0) begin
+          wr_burst_left == 0 && wr_beats_left != 0 && !abort_any) begin
         m_wr_awaddr   <= wr_addr;
         m_wr_awlen    <= wr_bl;
         m_wr_awvalid  <= 1'b1;
@@ -2976,10 +3602,26 @@ module cft_seq #(
         end
       end
 
+      // ---- the abort takes over at its next safe point -----------------
+      //
+      // Exclusive of every state's own arm: in the cycle the machine leaves
+      // for S_ABORT nothing a state would have done is done - no refusal
+      // decided from a header beat the memory faulted, no burst set up, no
+      // drain begun. The fault's own beat was consumed by its state's arm
+      // the cycle before, as any beat is; abort_q is registered at that
+      // edge. No new read is issued from then on (the read channel's issue
+      // tests abort_q), and S_ABORT raises RREADY for the burst in flight.
+      if (abort_go) begin
+        st <= S_ABORT;
+        rd_stream_on <= 1'b0;
+        rd_beats_left <= '0;
+        rd_rready_q <= 1'b0;
+      end else
       case (st)
         // --------------------------------------------------------------
         S_IDLE: begin
           if (start) begin
+            abort_q <= 1'b0;
             prec_q <= cfg_prec[1:0];
             n_q <= cfg_n; a_q <= cfg_a; b_q <= cfg_b; c_q <= cfg_c;
             d_q <= cfg_d; prog_q <= cfg_prog; cnt_q <= cfg_cnt;
@@ -2994,8 +3636,10 @@ module cft_seq #(
             // the scratch wipe make the same promise about state that
             // outlives a run, and for the same reason.
             mask_q <= cfg_mask; mask_en_q <= cfg_mask_en;
+            lf_q <= cfg_lflags; lf_en_q <= cfg_lflags_en;
             mask_lane <= {BLK_LANES{1'b1}};
             flags_q <= '0; dep_ovf_q <= 1'b0; scr_rng_q <= 1'b0;
+            mark_q <= 1'b0;
             refuse_q <= 1'b0;
             rd_fault_q <= 1'b0; wr_fault_q <= 1'b0; len_fault_q <= 1'b0;
             if (cfg_n == 0)
@@ -3011,15 +3655,15 @@ module cft_seq #(
           rd_sel  <= 2'd0;    // the image sits with the A operand
           rd_beats_left <= 32'd1;
           rd_stream_on <= 1'b1;
-          m_rd_rready <= 1'b1;
+          rd_rready_q <= 1'b1;
           st <= S_HDR_R;
         end
         S_HDR_R: begin
-          if (m_rd_rvalid && m_rd_rready) begin
+          if (rd_acc) begin
             // 256'() rather than [255:0]: the beat is BEAT_BITS wide, and a
             // select past its top does not elaborate on a narrow tile.
             hdr_q <= 256'(m_rd_rdata);
-            m_rd_rready <= 1'b0;
+            rd_rready_q <= 1'b0;
             rd_stream_on <= 1'b0;
             st <= S_CHECK;
           end
@@ -3067,7 +3711,7 @@ module cft_seq #(
           // rather than half-understood.
           if (hdr_q[31:0] != 32'h5054_4643 || hdr_q[63:32] != 32'd1 ||
               hdr_q[191:160] != {30'b0, prec_q} ||
-              hdr_q[95:64] > IMEM_D || hdr_q[127:96] > KMEM_D ||
+              hdr_q[95:64] > STREAM_D || hdr_q[127:96] > KMEM_D ||
               hdr_q[159:128] > MAXD ||
               hdr_q[223:195] != 29'b0 ||
               (!hdr_q[193] && hdr_q[255:224] != 32'b0) ||
@@ -3124,19 +3768,29 @@ module cft_seq #(
           kons_i <= '0; insn_i <= '0;
           pw <= '0; pw_have <= '0;
           bank_phase <= 1'b1;
-          m_rd_rready <= 1'b1;
+          rd_rready_q <= 1'b1;
           st <= S_IMG_PARSE;
         end
 
         // ---- constants + instructions: dense byte stream -------------
         S_IMG_GO: begin
           rd_addr <= prog_q + 32;
+          // Where instruction 0 is, for the fetch's stream (revision 8):
+          // the section starts at byte 32, or past the constants an
+          // image without BANK_EXT carries. 4-byte aligned, not always
+          // 8 (the unit's realigner takes the granule). Stable from
+          // here to the run's end.
+          if_ibase_q <= prog_q + 64'd32 +
+                        (bank_ext_q ? 64'd0 : (64'(h_nconsts) << esz_sh));
           rd_sel  <= 2'd0;
           // Under BANK_EXT the constants have already been read from
-          // the bank, so the image is instructions alone.
-          rd_beats_left <=
-            ((bank_ext_q ? 32'd0 : (h_nconsts << esz_sh))
-             + (h_ninsns << 3) + 32'd31) >> 5;
+          // the bank, so the image is instructions alone. The bytes are
+          // summed in 64 bits: n_insns x 8 passes 32 bits from 2^29
+          // instructions, and the capacity guard allows 2^30 (verifier-
+          // VC12, 2026-10-05); the beats, at most 2^28 + 512, fit 32.
+          rd_beats_left <= 32'(
+            ((bank_ext_q ? 64'd0 : (64'(h_nconsts) << esz_sh))
+             + (64'(h_ninsns) << 3) + 64'd31) >> 5);
           rd_stream_on <= 1'b1;
           kons_left <= bank_ext_q ? 32'd0 : h_nconsts;
           insn_left <= h_ninsns;
@@ -3150,7 +3804,7 @@ module cft_seq #(
           // What the stream about to arrive can reach in the scratch,
           // reset before it is scanned.
           scr_hi <= '0; scr_all <= 1'b0; rd_need <= '0;
-          m_rd_rready <= 1'b1;
+          rd_rready_q <= 1'b1;
           st <= S_IMG_PARSE;
         end
 
@@ -3171,11 +3825,17 @@ module cft_seq #(
             pw_have <= pw_have - {1'b0, esz};
             kons_i <= kons_i + 1;
             kons_left <= kons_left - 1;
-            m_rd_rready <= ((pw_have - {1'b0, esz}) < kons_room) &&
+            rd_rready_q <= ((pw_have - {1'b0, esz}) < kons_room) &&
                            !(kons_left == 1 && insn_left == 0);
           end else if (kons_left == 0 && insn_left != 0 &&
                        pw_have >= 7'd8) begin
-            imem[insn_i[PCW-1:0]] <= pw[63:0];
+            // Into the fetch's store (revision 8): the unit keeps the
+            // first IMEM_D of them, in order, and this scan still reads
+            // every one. Registered, so the store's write is a cycle
+            // behind the parse; nothing reads the store before the
+            // block's first request, many cycles on.
+            if_ld_q  <= 1'b1;
+            if_ldw_q <= pw[63:0];
             // ...and, on the way past, how far into the scratch this
             // instruction can reach. The per-block wipe is sized from
             // the answer, so a program that never touches the scratch
@@ -3193,8 +3853,10 @@ module cft_seq #(
               scr_all <= 1'b1;
             // ...and which operand streams it reads. The register
             // fields are {imm[25..27], the 4-bit field} since revision
-            // 2; a control code reads ra (DEPOSIT, SETACT, STL, STX) or
-            // rb (STX, LDX) and never rc.
+            // 2; a control code reads ra (DEPOSIT, SETACT, STL, STX,
+            // RAISE, and R21's AUGADD and AUGERR) or rb (STX, LDX, and
+            // R21's two) and never rc. A stream read only through one of
+            // them would otherwise not be loaded, and read +0.
             //
             // `op_reads` gates each field by what the OPCODE consumes,
             // for the reason its own comment gives at length: through a
@@ -3212,10 +3874,12 @@ module cft_seq #(
                 rd_need[pw[21:20]] <= 1'b1;
             end else begin
               if ((pw[7:0] == C_DEPOSIT || pw[7:0] == C_SETACT ||
-                   pw[7:0] == C_STL || pw[7:0] == C_STX) &&
+                   pw[7:0] == C_STL || pw[7:0] == C_STX ||
+                   pw[7:0] == C_RAISE || aug_fn(pw[63:0])) &&
                   {pw[57], pw[15:12]} < 5'd3)
                 rd_need[pw[13:12]] <= 1'b1;
-              if ((pw[7:0] == C_STX || pw[7:0] == C_LDX) &&
+              if ((pw[7:0] == C_STX || pw[7:0] == C_LDX ||
+                   aug_fn(pw[63:0])) &&
                   {pw[58], pw[19:16]} < 5'd3)
                 rd_need[pw[17:16]] <= 1'b1;
             end
@@ -3223,9 +3887,9 @@ module cft_seq #(
             pw_have <= pw_have - 7'd8;
             insn_left <= insn_left - 1;
             insn_i <= insn_i + 1;
-            m_rd_rready <= ((pw_have - 7'd8) < 7'd8) &&
+            rd_rready_q <= ((pw_have - 7'd8) < 7'd8) &&
                            (insn_left != 1);
-          end else if (m_rd_rvalid && m_rd_rready) begin
+          end else if (rd_acc) begin
             // Only the low three bits of pw_have: every assignment to
             // rready above sets it from a window that will hold FEWER
             // THAN 8 bytes, so a beat is never accepted at any other
@@ -3233,9 +3897,9 @@ module cft_seq #(
             // landing places instead of 8.
             pw <= pw | (PWW'(m_rd_rdata) << ({4'b0, pw_have[2:0]} << 3));
             pw_have <= pw_have + 7'(BEAT_BYTES);
-            m_rd_rready <= 1'b0;         // window now needs draining
+            rd_rready_q <= 1'b0;         // window now needs draining
           end else if (kons_left == 0 && insn_left == 0) begin
-            m_rd_rready <= 1'b0;
+            rd_rready_q <= 1'b0;
             rd_stream_on <= 1'b0;
             // The bank pass ends by starting the instruction pass;
             // only the second one has a whole program in hand.
@@ -3250,7 +3914,7 @@ module cft_seq #(
               st <= S_BLK_SETUP;
             end
           end else
-            m_rd_rready <= (pw_have < 7'd8);
+            rd_rready_q <= (pw_have < 7'd8);
         end
 
         // ---- per-block setup -----------------------------------------
@@ -3313,14 +3977,14 @@ module cft_seq #(
           rd_sel  <= 2'd0;          // the mask rides the A master
           rd_beats_left <= 32'd1;
           rd_stream_on <= 1'b1;
-          m_rd_rready <= 1'b1;
+          rd_rready_q <= 1'b1;
           st <= S_MSK_W;
         end
 
         S_MSK_W: begin
-          if (m_rd_rvalid && m_rd_rready) begin
+          if (rd_acc) begin
             mask_lane <= mask_blk_fn(m_rd_rdata, blk_base[7:0]);
-            m_rd_rready <= 1'b0;
+            rd_rready_q <= 1'b0;
             rd_stream_on <= 1'b0;
             st <= S_ZERO;
           end
@@ -3419,6 +4083,7 @@ module cft_seq #(
             ld_reg <= 2'd0;
             pc <= '0;
             lp_sp <= '0;
+            qdepth <= '0;
             wb_bt <= '0;
             q_n <= '0;
             // The scratch-in block goes in BEFORE the operand streams
@@ -3458,7 +4123,7 @@ module cft_seq #(
           sin_lane <= '0;
           sin_slot <= '0;
           pw <= '0; pw_have <= '0;
-          m_rd_rready <= 1'b1;
+          rd_rready_q <= 1'b1;
           st <= S_SIN_PARSE;
         end
 
@@ -3486,18 +4151,18 @@ module cft_seq #(
               sin_lane <= sin_lane + 1;
             end else
               sin_slot <= sin_slot + (SCRSW+1)'(1);
-            m_rd_rready <= ((pw_have - {1'b0, esz}) < sin_room) &&
+            rd_rready_q <= ((pw_have - {1'b0, esz}) < sin_room) &&
                            (sin_left != 1);
-          end else if (m_rd_rvalid && m_rd_rready) begin
+          end else if (rd_acc) begin
             pw <= pw | (PWW'(m_rd_rdata) << ({4'b0, pw_have[2:0]} << 3));
             pw_have <= pw_have + 7'(BEAT_BYTES);
-            m_rd_rready <= 1'b0;
+            rd_rready_q <= 1'b0;
           end else if (sin_left == 0) begin
-            m_rd_rready <= 1'b0;
+            rd_rready_q <= 1'b0;
             rd_stream_on <= 1'b0;
             st <= S_LD_GO;
           end else
-            m_rd_rready <= (pw_have < 7'd8);
+            rd_rready_q <= (pw_have < 7'd8);
         end
 
         S_LD_GO: begin
@@ -3530,21 +4195,21 @@ module cft_seq #(
             rd_sel  <= ld_reg;   // ld_reg IS the stream index
             rd_beats_left <= 32'(ld_hi) - 32'(ld_lo) + 32'd1;
             rd_stream_on <= 1'b1;
-            m_rd_rready <= 1'b1;
+            rd_rready_q <= 1'b1;
             bt <= ld_lo;
             st <= S_LD_STREAM;
           end
         end
 
         S_LD_STREAM: begin
-          if (m_rd_rvalid && m_rd_rready) begin
+          if (rd_acc) begin
             rf_we <= 1'b1;
             rf_waddr <= {3'b0, ld_reg, bt[NBSH-1:0]};
             rf_wdata <= m_rd_rdata;
             rf_wwe <= {WORDS{1'b1}};
             bt <= bt + 1;
             if (bt == ld_hi) begin
-              m_rd_rready <= 1'b0;
+              rd_rready_q <= 1'b0;
               rd_stream_on <= 1'b0;
               if (ld_reg == 2'd2)
                 st <= S_FETCH;
@@ -3594,7 +4259,7 @@ module cft_seq #(
           rd_sel   <= 2'd0;          // the table rides the A master
           rd_beats_left <= 32'd1;
           rd_stream_on <= 1'b1;
-          m_rd_rready <= 1'b1;
+          rd_rready_q <= 1'b1;
           gt_have <= '0;
           gt_beat <= '0;
           gt_pos  <= '0;
@@ -3609,7 +4274,7 @@ module cft_seq #(
         // may own fewer than eight in its last beat, and gt_left, not
         // gt_have, is what says so.
         S_GTH_TBL: begin
-          if (m_rd_rvalid && m_rd_rready) begin
+          if (rd_acc) begin
             gt_tbl   <= m_rd_rdata;
             gt_have  <= 4'(WORDS);
             // gt_taddr is advanced where a table read is ISSUED (here
@@ -3626,7 +4291,7 @@ module cft_seq #(
           if (gt_left == 0) begin
             // The block is complete; a short last beat has already
             // been written by gt_flush.
-            m_rd_rready <= 1'b0;
+            rd_rready_q <= 1'b0;
             rd_stream_on <= 1'b0;
             if (gt_scr)
               st <= S_LD_GO;
@@ -3663,7 +4328,7 @@ module cft_seq #(
         // position the index's low bits give, by the same scr_elem_fn
         // the scratch-out drain uses; the placement path writes it.
         S_GTH_WAIT: begin
-          if (m_rd_rvalid && m_rd_rready)
+          if (rd_acc)
             st <= S_GTH_ELEM;
         end
 
@@ -3675,11 +4340,18 @@ module cft_seq #(
           if (32'(pc) >= h_ninsns)             // implicit halt
             st <= S_DRAIN_SETUP;
           else
-            st <= S_FETCH2;                    // imem_q <= imem[pc] this cycle
+            st <= S_FETCH2;                    // pc is wanted this cycle
         end
         S_FETCH2: begin
-          cur <= imem_q;
-          st <= S_DECODE;
+          // The word, when the fetch has it: at once from the store, a
+          // cycle on as the memory's read register gave it; from the
+          // stream once it has arrived. Waiting presents pc again.
+          if (if_ok) begin
+            cur <= if_word;
+            c_istep <= 1'b0;
+            c_sld <= sld_fn(if_word);
+            st <= S_DECODE;
+          end
         end
 
         S_DECODE: begin
@@ -3726,6 +4398,23 @@ module cft_seq #(
                   st <= S_FETCH;
                 end
               end
+              // Revision 8's R24: a quiet region opens and closes here,
+              // in program order, and walks no beats - REPEAT's cost. The
+              // depth saturates both ways: the loader nests regions four
+              // deep and balances them, and a stream that bypassed it
+              // keeps a defined depth instead of wrapping (verifier-VC34;
+              // the depth gates only flags, so nothing here decides
+              // whether a run ends).
+              C_QUIET: begin
+                if (qdepth != 3'd7) qdepth <= qdepth + 3'd1;
+                pc <= pc + 1;
+                st <= S_FETCH;
+              end
+              C_ENDQUIET: begin
+                if (qdepth != 3'd0) qdepth <= qdepth - 3'd1;
+                pc <= pc + 1;
+                st <= S_FETCH;
+              end
               C_ACTALL: begin
                 // Widens the mask, so every beat before it must have
                 // taken its row first: the pipe empty (R18). Not the
@@ -3747,18 +4436,21 @@ module cft_seq #(
           if (32'(pc) >= h_ninsns)
             st <= S_DRAIN_SETUP;               // unbalanced: halt
           else
-            st <= S_SKIP_D;                    // imem_q <= imem[pc] this cycle
+            st <= S_SKIP_D;                    // pc is wanted this cycle
         end
         S_SKIP_D: begin
-          pc <= pc + 1;
-          st <= S_SKIP_F;
-          if (imem_q[31] && imem_q[7:0] == C_REPEAT)
-            skip_depth <= skip_depth + 1;
-          else if (imem_q[31] && imem_q[7:0] == C_ENDREP) begin
-            if (skip_depth == 1)
-              st <= S_FETCH;
-            else
-              skip_depth <= skip_depth - 1;
+          // ...and the scan waits for the word as S_FETCH2 does.
+          if (if_ok) begin
+            pc <= pc + 1;
+            st <= S_SKIP_F;
+            if (if_word[31] && if_word[7:0] == C_REPEAT)
+              skip_depth <= skip_depth + 1;
+            else if (if_word[31] && if_word[7:0] == C_ENDREP) begin
+              if (skip_depth == 1)
+                st <= S_FETCH;
+              else
+                skip_depth <= skip_depth - 1;
+            end
           end
         end
 
@@ -3798,7 +4490,8 @@ module cft_seq #(
           if (!rd_hold) begin
             rf_raddr_a <= {c_ra, bt[NBSH-1:0]};
             rf_raddr_b <= {c_rb, bt[NBSH-1:0]};
-            rf_raddr_c <= {c_rc, bt[NBSH-1:0]};
+            // port C reads rb for augadd and augerr (R21)
+            rf_raddr_c <= {c_aug ? c_rb : c_rc, bt[NBSH-1:0]};
             if (c_is_ldl && issue_this)
               scr_raddr <= scr_flat_fn(c_imm[SCRSW-1:0], bt);
             // R19: on to the next beat this instruction issues, jumping
@@ -3812,18 +4505,37 @@ module cft_seq #(
               // adm_take, with the queue); a code that does not - REPEAT,
               // ENDREP, ACTALL, HALT - goes to decode with its word
               // already in hand; past the end, or with the word not read
-              // yet (a one-beat block), the fetch state takes over and
-              // the implicit halt with it. The pipe acts on or fires this
-              // instruction's last two beats meanwhile.
-              pc <= pc + 1;
-              if (nxt_ok && (32'(pc) + 32'd1 < h_ninsns)) begin
-                cur <= imem_q;
-                if (imq_piped && q_room && adm_ld_ok)
-                  bt <= adm_first;       // R19: its first live beat
+              // yet (a one-beat block, or a streamed word still on its
+              // way), the fetch state takes over and the implicit halt
+              // with it. The pipe acts on or fires this instruction's
+              // last two beats meanwhile. if_ok is the word's being
+              // here, and is never high past the program's end.
+              // R22: a stepped LDX's step, as the internal IADD that
+              // follows it, before the next word - which stays wanted
+              // (pc does not move), and is taken at the IADD's own last
+              // step. With room it is admitted now (adm_take), as the
+              // next word would be; without, S_DECODE admits it.
+              if (c_sld) begin
+                cur <= stp_word;
+                c_istep <= 1'b1;
+                c_sld <= 1'b0;
+                if (q_room)
+                  bt <= adm_first;
                 else
                   st <= S_DECODE;
-              end else
-                st <= S_FETCH;
+              end else begin
+                pc <= pc + 1;
+                if (if_ok) begin
+                  cur <= if_word;
+                  c_istep <= 1'b0;
+                  c_sld <= sld_fn(if_word);
+                  if (imq_piped && q_room && adm_ld_ok)
+                    bt <= adm_first;       // R19: its first live beat
+                  else
+                    st <= S_DECODE;
+                end else
+                  st <= S_FETCH;
+              end
             end
           end
         end
@@ -3956,9 +4668,59 @@ module cft_seq #(
               // of the block, which is where the contract puts it; a
               // program that declares none touches neither the
               // pointer nor the bus.
-              st <= (h_nsout != 0) ? S_SO_SETUP : S_WAIT_B;
+              // ...and before it, R23's block where the run asked for it.
+              st <= lf_en_q ? S_LF_SETUP
+                  : (h_nsout != 0) ? S_SO_SETUP : S_WAIT_B;
             else
               st <= S_CNT_PACK;
+          end
+        end
+
+        // ---- the per-lane flag block (revision 8, R23) ----------------
+        //
+        // A byte a lane at lf_q + the lane's global index, after the
+        // counts and before the scratch-out block, in the counts' shape: a
+        // beat packed in one cycle (lf_beat_fn, BEAT_BYTES lanes) and sent
+        // in the next, strobed where the lane is below blk_n and the
+        // caller's (mask_lane) - a masked lane's byte is the caller's, as
+        // its count is. A block of 128, 64, 32 or 16 lanes is 4, 2, 1 or
+        // half a beat; the half beat sits at its block's offset in the
+        // 32-byte beat (lf_off), its other half unstrobed. A run that did
+        // not ask (MODE[24] clear) never comes here and writes nothing.
+        S_LF_SETUP: begin
+          as_fill <= '0; as_strb <= '0; as_data <= '0;
+          drain_last <= 1'b0;
+          // the counts' stream quiet first, as S_SO_SETUP waits
+          if (wr_burst_left == 0 && !m_wr_awvalid && !wr_aw_open &&
+              !m_wr_wvalid && wr_beats_left == 0) begin
+            wr_addr <= lf_q + (blk_base & ~(64'(LFB) - 64'd1));
+            wr_beats_left <= (32'(lf_off) + 32'(blk_n) + 32'(LFB - 1))
+                             >> $clog2(LFB);
+            lf_k <= '0;
+            st <= S_LF_PACK;
+          end
+        end
+
+        S_LF_PACK: begin
+          as_data <= lf_beat;
+          as_strb <= lf_strb;
+          if ((32'(lf_k) + 32'd1) * 32'(LFB) >= 32'(lf_off) + 32'(blk_n))
+            drain_last <= 1'b1;
+          lf_k <= lf_k + LFKW'(1);
+          st <= S_LF_SEND;
+        end
+
+        S_LF_SEND: begin
+          if ((!m_wr_wvalid || m_wr_wready) && wr_after != 0) begin
+            m_wr_wvalid <= 1'b1;
+            m_wr_wdata <= as_data;
+            m_wr_wstrb <= as_strb;
+            m_wr_wlast <= (wr_after == 1);
+            as_fill <= '0; as_strb <= '0; as_data <= '0;
+            if (drain_last)
+              st <= (h_nsout != 0) ? S_SO_SETUP : S_WAIT_B;
+            else
+              st <= S_LF_PACK;
           end
         end
 
@@ -4048,8 +4810,11 @@ module cft_seq #(
         end
 
         S_WAIT_B: begin
+          // ...and the fetch idle (revision 8): its quiesce, raised in
+          // S_DRAIN_SETUP, overlaps the drains, and the next block's
+          // setup reads find the port free.
           if (wr_bresp_left == 0 && !m_wr_wvalid && !m_wr_awvalid &&
-              !wr_aw_open && wr_burst_left == 0) begin
+              !wr_aw_open && wr_burst_left == 0 && if_idle) begin
             m_wr_bready <= 1'b0;
             wr_stream_on <= 1'b0;
             st <= S_NEXT_BLK;
@@ -4068,6 +4833,32 @@ module cft_seq #(
         S_FIN: begin
           done <= 1'b1;
           st <= S_IDLE;
+        end
+
+        // ---- the abort (revision 8; the contract's item 5) ---------------
+        //
+        // Entered at a safe point (abort_go) once a fault has ended the
+        // run. Nothing new is issued here; this waits for what is already
+        // committed: the read burst in flight to land - RREADY high for it,
+        // a long one drained to its RLAST, a short one already ended by
+        // its own - so that no beat of this run reaches the next one's
+        // first read; every write response (a committed write burst has
+        // delivered its beats before abort_go let the machine leave the
+        // drain that was producing them); and the issue pipe, so that no
+        // result of this run lands in the next one's register file - the
+        // array is shared, and a run's results retire whatever state the
+        // machine is in. Then done, with err[2] or err[0] saying why.
+        S_ABORT: begin
+          rd_rready_q  <= (rd_burst_left != 0) || rd_long_q;
+          m_wr_bready  <= 1'b1;
+          if (rd_burst_left == 0 && !rd_long_q && !rd_arvalid_q &&
+              wr_bresp_left == 0 && wr_quiet && if_idle &&
+              q_n == 2'd0 && pipe_idle) begin
+            rd_rready_q  <= 1'b0;
+            m_wr_bready  <= 1'b0;
+            wr_stream_on <= 1'b0;
+            st <= S_FIN;
+          end
         end
 
         default: st <= S_IDLE;
@@ -4098,8 +4889,12 @@ module cft_seq #(
         pb_ka   <= c_ka; pb_kb <= c_kb; pb_kc <= c_kc;
         pb_ctrl <= c_ctrl;
         pb_fast <= c_fast;
+        pb_quiet <= c_quiet;
         pb_bt   <= bt;
         pb_slot <= c_imm[SCRSW-1:0];
+        pb_step <= c_imm[11:0];
+        pb_sstep <= c_ctrl && (c_op == C_STX) && (c_imm[11:0] != 12'd0);
+        pb_istep <= c_istep;
         pb_kidx_a <= k_idx_a; pb_kidx_b <= k_idx_b; pb_kidx_c <= k_idx_c;
         pf_v    <= pb_v;
         pf_op   <= pb_op;
@@ -4107,8 +4902,12 @@ module cft_seq #(
         pf_ka   <= pb_ka; pf_kb <= pb_kb; pf_kc <= pb_kc;
         pf_ctrl <= pb_ctrl;
         pf_fast <= pb_fast;
+        pf_quiet <= pb_quiet;
         pf_bt   <= pb_bt;
         pf_slot <= pb_slot;
+        pf_step <= pb_step;
+        pf_sstep <= pb_sstep;
+        pf_istep <= pb_istep;
         pf_aa   <= rf_raddr_a; pf_ab <= rf_raddr_b; pf_ac <= rf_raddr_c;
         // an LDX's G and H: the address F put on the scratch's read
         // port is read at G, and what came back fires at H
@@ -4127,13 +4926,21 @@ module cft_seq #(
         // request: its write is the retire block's (fw).
         if (fire_go) begin
           al_valid <= 1'b1;
-          al_op    <= fire_alu ? pf_op : OP_IOR;
+          al_op    <= fire_alu ? pf_op : fire_aug ? OP_ADD :
+                      fire_sstep ? OP_IADD : OP_IOR;
           al_rnd   <= fire_alu ? pf_rnd : 3'd0;
+          // R21: 1 augadd, 2 augerr, 0 every other request. 9.5 fixes the
+          // pair's rounding, so the attribute is not read under it.
+          al_aug   <= !fire_aug ? 2'd0 : (pf_op == C_AUGERR) ? 2'd2 : 2'd1;
           al_a     <= use_op_a ? op_a : alt_a;
           al_b     <= use_op_b ? op_b : alt_b;
           al_c     <= use_op_c ? op_c : alt_c;
           al_row   <= fire_ldx ? h_act : bt_act;
-          al_fen   <= fire_alu;
+          // ...and quiet beats raise nothing (R24): the tag the beat
+          // was admitted with, not the region the machine is in now.
+          // R21's two raise their flags as an ALU instruction does.
+          // ...and a step raises none (R22: IADD's arithmetic, no flag).
+          al_fen   <= ((fire_alu && !pf_istep) || fire_aug) && !pf_quiet;
           al_tag   <= fire_ldx ? ph_bt : pf_bt;
         end
         if (pf_v && pf_ctrl) begin
@@ -4198,9 +5005,6 @@ module cft_seq #(
           endcase
         end
       end
-      // the read register holds imem[pc + 1] from the cycle after an
-      // issue begins until the cycle pc moves
-      nxt_ok <= (st == S_ISSUE) && !(!rd_hold && last_step);
 
       // ---- retire: the array's results, whatever state the machine is
       // in - while a program runs; the engine's pulses are not ours -
@@ -4211,9 +5015,8 @@ module cft_seq #(
         rf_wdata <= al_d;
         rf_wwe <= wb_wwe;
         // the lanes that were active when this beat FIRED (fr), and its
-        // flags only if it is arithmetic (fq): a load raises none
-        if (fq[LATENCY-1])
-          flags_q <= flags_q | wb_flags_or;
+        // flags only if it is arithmetic and was not admitted quiet (fq):
+        // a load raises none. Written below, with a RAISE's, as one OR.
         // the head's next beat not yet landed or skipped: every beat
         // below the one that just landed has landed or was skipped
         wb_bt <= wb_pop ? 6'd0 : wb_tag + 6'd1;
@@ -4229,6 +5032,14 @@ module cft_seq #(
         rf_wwe   <= fw_wwe;
         wb_bt    <= fw_pop ? 6'd0 : fw_bt + 6'd1;
       end
+      // FLAGS, the run's sticky OR, from its two sources in one write - a
+      // result landing (its beat's flags, under the row and the tag it fired
+      // with) and a RAISE acting at F (R24) - so neither overwrites the
+      // other in a cycle they share. And the mark, which no region hides.
+      if (ret_fl != 5'b0 || raise_fl != 5'b0)
+        flags_q <= flags_q | ret_fl | raise_fl;
+      if (raise_mk)
+        mark_q <= 1'b1;
       // the queue: a pop moves everything down, and an admission lands
       // behind whatever is left
       if (wb_pop) begin
@@ -4253,8 +5064,10 @@ module cft_seq #(
       // a pop moves them down, and the head popping releases the operand.
       // Every admission sets them (R18: a control code has producers too,
       // and most control codes take no queue slot of their own).
-      if (adm_take)
-        c_fast <= adm_fast;
+      if (adm_take) begin
+        c_fast  <= adm_fast;
+        c_quiet <= (qdepth != 3'd0);
+      end
       if (adm_take) begin
         dep_v_a <= dep_n_a; dep_pos_a <= dep_p_a;
         dep_v_b <= dep_n_b; dep_pos_b <= dep_p_b;

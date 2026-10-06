@@ -81,6 +81,41 @@ def control_programs():
         pair += [seq.ldl(3 + k, k), seq.alu(sf.OP_IAND, 13 + k, 3 + k, 3 + k)]
     yield ("ldl, iand of it x 10", pair + [seq.deposit(13), seq.halt()], 1)
     yield ("deposit x 16", [seq.deposit(0)] * 16 + [seq.halt()], 16)
+    # Revision 8's R24: a quiet region's two brackets walk no beats and
+    # cost what REPEAT does, a decode and a refetch each; a raise walks the
+    # block's live beats as SETACT does, reading its word at F. Against
+    # "iand x 20 (the reference)" above: the first row is ten IANDs and
+    # twenty brackets, the second twenty raises.
+    quiet_pair = []
+    for k in range(10):
+        quiet_pair += [seq.quiet(), iand, seq.endquiet()]
+    yield ("quiet, iand, endquiet x 10 (R24)",
+           quiet_pair + [seq.deposit(3), seq.halt()], 1)
+    yield ("raise x 20 (R24)", [seq.raise_(0)] * 20
+           + [seq.deposit(0), seq.halt()], 1)
+    # Revision 8's R21: augadd and augerr fire into the array as an ALU
+    # instruction does, so twenty independent ones should cost what the
+    # twenty IANDs of the reference row do. Every R21 row reads the one
+    # stream the reference reads (r0, on port C as well as A), because a
+    # second stream is a second load at every block's setup and would be
+    # counted against the instruction. The recommended pair is two
+    # instructions. The chains wait for each result, through ra on port A
+    # and through rb on port C, which forwards as A does; their reference
+    # is the IAND chain beside them.
+    yield ("augadd x 20 (R21)", [seq.augadd(3, 0, 0)] * 20
+           + [seq.deposit(3), seq.halt()], 1)
+    pair = []
+    for k in range(10):
+        pair += [seq.augerr(3, 0, 0), seq.augadd(4, 0, 0)]
+    yield ("augerr, augadd x 10 (R21)", pair + [seq.deposit(3), seq.halt()],
+           1)
+    yield ("iand x 20, dependent (R21's reference)",
+           [seq.alu(sf.OP_IAND, 3, 3, 0)] * 20
+           + [seq.deposit(3), seq.halt()], 1)
+    yield ("augadd x 20, dependent through ra (R21)",
+           [seq.augadd(3, 3, 0)] * 20 + [seq.deposit(3), seq.halt()], 1)
+    yield ("augadd x 20, dependent through rb (R21)",
+           [seq.augadd(3, 0, 3)] * 20 + [seq.deposit(3), seq.halt()], 1)
 
 
 @cocotb.test()
@@ -374,3 +409,177 @@ async def masked_beats_against_dense(dut):
                 f"  {fmt.name:<6} {plabel:<22} " + "  ".join(
                     f"{p}: {c:6.0f} cyc {r:3d} rd"
                     for p, (c, r) in zip(pats, row)))
+
+
+# ---- revision 8, R8S: what streaming costs -----------------------------
+#
+# Rows for a tile whose store is smaller than its programs (`make
+# seqcyclesstr`: a 64-word store and a 2^16 capacity), at SeqRam read
+# latencies 0, 125 and 256 - the round trip the design is sized for -
+# against the cycles the same programs cost resident. A straight program
+# past the store over four full blocks (the stream prefetches from the
+# store's end at each block's start, hidden behind the store's words); a
+# loop body past the store and longer than it, a pass at one beat and at
+# sixteen (a redirect a pass, to the captured part's end, hidden or not by
+# the captured words); and a captured loop over four one-beat blocks,
+# whose every block restart at pc 0 is a redirect the store cannot hide -
+# S8's one-beat column and "a redirect at the 64-word store". A tile that
+# does not stream says so and prints nothing.
+@cocotb.test()
+async def streaming_costs(dut):
+    from test_seq_core import (STREAMS, IMEM_D, STREAM_D, _indep,
+                               _loop_prog)
+    b = Bench(dut)
+    await b.start()
+    if not STREAMS:
+        dut._log.info(f"== R8S: this build does not stream (store {IMEM_D}, "
+                      f"capacity {STREAM_D}); `make seqcyclesstr` has the rows")
+        return
+    fmt = FP32
+    one = sf.one_bits(fmt)
+    dut._log.info(f"== R8S: a {IMEM_D}-word store, a {STREAM_D} capacity; "
+                  f"cycles at read latencies 0, 125, 256")
+
+    async def run(prog, n, label):
+        pool = [one] * n
+        esz = fmt.width // 8
+        b._stage(fmt, prog.to_bytes(), pool, pool, pool, n,
+                 n * prog.max_deposits * esz, 4 * n)
+        b._drive_cfg(fmt, n)
+        t0 = get_sim_time("ns")
+        refused, flags, err = await b._go(8_000_000, label)
+        assert refused == 0 and err == 0, (label, refused, err)
+        return (get_sim_time("ns") - t0) / CLK_NS
+
+    lats = (0, 125, 256)
+    straight = seq.Program(fmt, _indep(200) + [seq.deposit(3), seq.halt()],
+                           max_deposits=1)
+    row = []
+    for lat in lats:
+        b.pin = lat
+        row.append(await run(straight, 4 * lanes_per_block(fmt),
+                             f"straight 200, latency {lat}") / 4)
+    dut._log.info("  straight 200 insns, 16 beats   " +
+                  "  ".join(f"{c:8.1f}" for c in row) + "   /block")
+    for beats, n in ((1, 8), (16, lanes_per_block(fmt))):
+        for start, body, what in ((5, 50, "resident 50 from pc 5"),
+                                  (100, 200, "200 from pc 100")):
+            row = []
+            for lat in lats:
+                b.pin = lat
+                c2 = await run(_loop_prog(fmt, start, body, 2), n, what)
+                c4 = await run(_loop_prog(fmt, start, body, 4), n, what)
+                row.append((c4 - c2) / 2)
+            dut._log.info(f"  loop {what:<22} {beats:2d} beat  " +
+                          "  ".join(f"{c:8.1f}" for c in row) + "   /pass")
+    row = []
+    for lat in lats:
+        b.pin = lat
+        row.append(await run(_loop_prog(fmt, 100, 40, 2), 4 * 8,
+                             "captured 40, four one-beat blocks") / 4)
+    dut._log.info("  captured 40 from pc 100, 1 beat " +
+                  "  ".join(f"{c:8.1f}" for c in row) + "   /block "
+                  "(a block restart at pc 0 is a redirect)")
+    b.pin = None
+
+
+# ---- revision 8's R23: what the per-lane flag block costs -------------
+#
+# The same program run twice at each format, without MODE[24] and with
+# it, four blocks each: identical answers, so the only difference is the
+# block's drain after the counts - 32 lanes a beat at the counts' rate,
+# so four beats a block at fp32, two at fp64, one at fp128 and a half
+# beat at fp256 - and its setup. A run that does not ask is the dense
+# row above, unchanged ("a run that does not ask pays no cycle").
+@cocotb.test()
+async def lane_flags_drain(dut):
+    b = Bench(dut)
+    await b.start()
+    iand = seq.alu(sf.OP_IAND, 3, 0, 0)
+    insns = [iand, seq.deposit(3), seq.halt()]
+    dut._log.info("== R23: one stream and a deposit, without MODE[24] "
+                  "and with it")
+    for fmt in (FP32, FP64, FP128, FP256):
+        lpb = lanes_per_block(fmt)
+        blocks = 4
+        n = lpb * blocks
+        pool = [sf.one_bits(fmt)] * n
+        prog = seq.Program(fmt, insns, consts=(), max_deposits=1)
+        esz = fmt.width // 8
+        out = {}
+        for lf in (False, True):
+            b._stage(fmt, prog.to_bytes(), pool, pool, pool, n,
+                     n * esz, 4 * n)
+            b._drive_cfg(fmt, n, lane_flags=lf)
+            t0 = get_sim_time("ns")
+            refused, _flags, err = await b._go(8_000_000, f"MODE[24] {lf}")
+            assert refused == 0 and err == 0, (lf, refused, err)
+            out[lf] = (get_sim_time("ns") - t0) / CLK_NS
+        dut._log.info(
+            f"  {fmt.name:<6} {n:4d} lanes  without {out[False]:8.0f} cyc "
+            f"({out[False] / blocks:7.1f}/block)   with {out[True]:8.0f} "
+            f"cyc ({out[True] / blocks:7.1f}/block)   "
+            f"{(out[True] - out[False]) / blocks:+6.1f} cycles a block")
+
+
+# ---- revision 8's R22: what a step costs (the plan's p) ---------------
+#
+# Its own test, last, because every row before it is read against the
+# rows of earlier revisions: the scratch's marks outlive a run, so a run
+# that dirties more of the scratch moves the wipe of the next run that
+# uses it - measured, when these rows ran at the end of control_programs'
+# fp32 list and fp64's "stl x 20" row read 785.2 a block for 707.5.
+def step_programs():
+    # Revision 8's R22: what a step costs (the plan's p). Twenty indexed
+    # stores and twenty indexed loads, each on its own index register, as
+    # they are and stepped: a store's step fires at its own F and costs no
+    # beat, but makes the store a writer of its index and so takes a queue
+    # slot; a load's step is an internal IADD after it, up to one more
+    # instruction's beats. Then stores on ONE index, stepped, each waiting
+    # for the step before it under R14's landed rule.
+    yield ("stx x 20, independent (R22's reference)",
+           [seq.stx(0, 3 + k) for k in range(20)]
+           + [seq.deposit(0), seq.halt()], 1)
+    yield ("stx x 20, independent, stepped (R22)",
+           [seq.stx(0, 3 + k, 1) for k in range(20)]
+           + [seq.deposit(0), seq.halt()], 1)
+    yield ("ldx x 20, independent (R22's reference)",
+           [seq.ldx(23 + k % 8, 3 + k) for k in range(20)]
+           + [seq.deposit(23), seq.halt()], 1)
+    yield ("ldx x 20, independent, stepped (R22)",
+           [seq.ldx(23 + k % 8, 3 + k, 1) for k in range(20)]
+           + [seq.deposit(23), seq.halt()], 1)
+    yield ("stx x 20 on one index, stepped (R22)",
+           [seq.stx(0, 1, 1)] * 20 + [seq.deposit(0), seq.halt()], 1)
+
+
+@cocotb.test()
+async def scratch_step_per_block(dut):
+    """R22's rows, four blocks at each of fp32, fp64 and fp128, beside
+    their unstepped references. Not compared here (test_seq_core.py does
+    that), only the cost."""
+    b = Bench(dut)
+    await b.start()
+    for fmt in (FP32, FP64, FP128):
+        lpb = lanes_per_block(fmt)
+        blocks = 4
+        n = lpb * blocks
+        one = sf.one_bits(fmt)
+        pool = [one] * n
+        dut._log.info(f"== R22 {fmt.name}: {n} lanes = {blocks} blocks of {lpb}")
+        for label, insns, maxdep in step_programs():
+            prog = seq.Program(fmt, insns, consts=(), max_deposits=maxdep)
+            esz = fmt.width // 8
+            # Each row twice, the second timed: the scratch's marks then
+            # hold what this program writes and no row before it, so each
+            # row is read without its neighbour's wipe in it.
+            for timed in (False, True):
+                b._stage(fmt, prog.to_bytes(), pool, pool, pool, n,
+                         n * maxdep * esz, 4 * n)
+                b._drive_cfg(fmt, n)
+                t0 = get_sim_time("ns")
+                refused, flags, err = await b._go(4_000_000, label)
+                cyc = (get_sim_time("ns") - t0) / CLK_NS
+                assert refused == 0 and err == 0, (label, refused, err)
+            dut._log.info(f"  {label:<44} {cyc:9.0f} cycles  "
+                          f"{cyc / blocks:8.1f} /block  {cyc / n:6.2f} /lane")

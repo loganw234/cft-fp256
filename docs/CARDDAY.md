@@ -900,7 +900,11 @@ spirit - enough to replay, not enough to be a chore.
   stops issuing new bursts, finishes any write burst it had already
   committed, lets outstanding reads land, and asserts `ap_done` with
   STATUS non-zero. So a length fault now arrives as a prompt
-  `CFT_ERR_BUS_FAULT` rather than a twenty-minute wait.
+  `CFT_ERR_BUS_FAULT` rather than a twenty-minute wait. That was the
+  elementwise engine's; a sequencer run kept the hang until revision 8's
+  abort (docs/SEQUENCER.md, "Revision 8 in the tile"), and a tile
+  without it - every image built before revision 8 - still hangs on a
+  short read burst in a program run.
 
   A genuine `CFT_ERR_TIMEOUT` therefore means something the engine
   cannot see: a slave that stopped answering entirely, sending neither

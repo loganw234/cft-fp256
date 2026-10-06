@@ -54,7 +54,7 @@ command in the `cft2204` distro.
 | golden | the model's own invariants and oracles | python with pytest |
 | vectors | the conformance sets regenerate from the model, and the generation's own `SHA256SUMS` names every set the profile does, each whole (below, "When vectors/out is whole") | python |
 | sim | RTL == model across all cocotb targets | docker (usable, not merely present) |
-| simmc | the same suite at the multi-cycle pass budget MC, plus the open-core board configuration - in `full` only, never in `quick` or `gate` | docker |
+| simmc | the same suite at the multi-cycle pass budget MC, plus the open-core board configuration and the sequencer's bench whole through the fetch under Verilator (`seq_corestr_full`) - in `full` only, never in `quick` or `gate` | docker |
 | lint | every RTL file elaborates in Yosys, no latches | docker |
 | formal | the FIFO, seedop and simpleops theorems, the leading-zero cone's equivalence at every window width, the multi-cycle multiplier's exactness at the real chunk for every pass geometry, and the negative control - 31 tasks, about 7 minutes (420 s of solver time on the merged tree, docs/VALIDATION.md 2026-09-07; formal/README.md) | docker |
 | libcft | C library contract + the conformance replay: 168 sets, 1.2M cases at the runner's generator counts - opcodes, transcendentals, character sequences, augmented pairs, reductions, magnitude forms, formatOf | cc, python |

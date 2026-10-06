@@ -7,7 +7,7 @@
 # with SYNTH_OPTS empty. The file list is `make yosys-lint`'s (Makefile:214).
 # Run from the repository root with /out writable.
 read_verilog -sv -I rtl rtl/cft_fpfma.sv rtl/cft_fpfma_pipe.sv rtl/cft_opmux.sv rtl/cft_simpleops.sv rtl/cft_seedop.sv rtl/cft_csr.sv rtl/cft_fifo.sv rtl/cft_mulfrac.sv rtl/cft_mulpass.sv rtl/cft_reduce_acc.sv rtl/cft_normseg.sv rtl/cft_engine.sv rtl/cft_engine_stream.sv rtl/cft_lanes.sv rtl/cft_seq.sv rtl/cft_krnl.sv
-chparam -set MUL_PASSES 10 -set FUSE_NORM 1 -set FUSE_ALIGN 1 -set SEQ_MAXD 64 -set SEQ_IMEM_D 16384 -set SEQ_SCRATCH_D 256 cft_krnl
+chparam -set MUL_PASSES 10 -set FUSE_NORM 1 -set FUSE_ALIGN 1 -set SEQ_MAXD 64 -set SEQ_IMEM_D 16384 -set SEQ_SCRATCH_D 256 -set SEQ_STREAM_D 16384 -set EN_AUGADD 0 cft_krnl
 synth_xilinx -flatten -abc9 -arch xc7 -top cft_krnl
 tee -o /out/stat.txt stat
 tee -o /out/stat_tech.txt stat -tech xilinx

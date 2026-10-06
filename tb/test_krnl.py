@@ -76,11 +76,25 @@ CSR_ARGS = {
 # (host/src/caps_decode.h, held to the same numbers in api-test) and
 # cftc's targets were given. When an item sets its bit, its parcel
 # changes these words, deliberately. CAPS[3:0] is the build's rungs.
+#
+# Revision 8's round 2 (parcel C) moves them item by item. Since the fetch's
+# hooks (R8S) the U50's store is 4,096 and its capacity 2^24: CAPS[23:20]
+# stays 15, min(15, 24), so CAPS is unchanged, and CAPS2[20:16] reads 24.
+# Since R24, CAPS2[14] (flag control) on every build, since R23 CAPS2[13]
+# (the lane-flag block), and since R22 CAPS2[12] (the post-step). Since
+# R21's decode CAPS2[11] where the build carries R21 (EN_AUGADD, the
+# plan's question 9). So the U50's single reads 0x00187FFB and the quad's
+# tile, built without R21 (tb/Makefile's krnlseqnoaug), 0x001877FB - the
+# plan's two words (docs/ROADMAP.md, "What a revision-8 U50 tile reads"). The open-core
+# configurations keep streaming off (SEQ_STREAM_D equal to the store) and
+# build without R21 (EN_AUGADD=0, OPEN_CAPS_GENERICS), as the quad does.
 VERSION_SEAM = 0x00000B00
 SEAM_WORDS = {
-    # (SEQ_MAXD, SEQ_IMEM_D, SEQ_SCRATCH_D): (CAPS with [3:0] clear, CAPS2)
-    (1024, 32768, 2048): (0x19FAFFF0, 0x000007FB),    # the U50's
-    (64, 16384, 256):    (0x19E6FFF0, 0x000007F8),    # the open-core ones
+    # (SEQ_MAXD, SEQ_IMEM_D, SEQ_SCRATCH_D, SEQ_STREAM_D, EN_AUGADD):
+    #     (CAPS with [3:0] clear, CAPS2)
+    (1024, 4096, 2048, 1 << 24, 1): (0x19FAFFF0, 0x00187FFB),  # the single
+    (1024, 4096, 2048, 1 << 24, 0): (0x19FAFFF0, 0x001877FB),  # quad tile
+    (64, 16384, 256, 16384, 0):     (0x19E6FFF0, 0x000077F8),  # open-core
 }
 
 # ---- which rungs THIS build carries ------------------------------------
@@ -210,6 +224,39 @@ def krnl_param(name):
     return int(m.group(1))
 
 
+def krnl_param_bit(name):
+    """A cft_krnl `parameter bit` as THIS build has it - krnl_param's rule
+    for the one-bit build choices: the CFT_GENERICS override (0 or 1) the
+    target built with, or else the declared default. Revision 8's
+    EN_AUGADD is the first a bench keys on: the quad's tile is built
+    without R21 (tb/Makefile's krnlseqnoaug)."""
+    import re
+    for g in os.environ.get("CFT_GENERICS", "").split():
+        gname, _, value = g.partition("=")
+        if gname == name:
+            assert value in ("0", "1"), (
+                f"CFT_GENERICS {g!r}: {name} is a bit parameter")
+            return int(value)
+    src = (RTL / "cft_krnl.sv").read_text(encoding="utf-8")
+    m = re.search(r"^\s*parameter\s+bit\s+%s\s*=\s*1'b([01])" % name,
+                  src, re.MULTILINE)
+    assert m, f"cft_krnl.sv has no `parameter bit {name}`"
+    return int(m.group(1))
+
+
+def _feat_augadd():
+    """CAPS2[11] as this build has it. FEAT_AUGADD has been EN_AUGADD, a
+    build parameter, since R21's decode (revision 8's round 2): asserted
+    here, so a localparam set back to a constant is a failure and not a
+    bit read from the wrong place."""
+    import re
+    src = (RTL / "cft_krnl.sv").read_text(encoding="utf-8")
+    assert re.search(r"^\s*localparam\s+bit\s+FEAT_AUGADD\s*=\s*"
+                     r"EN_AUGADD\s*;", src, re.MULTILINE), (
+        "cft_krnl.sv's FEAT_AUGADD is no longer EN_AUGADD")
+    return krnl_param_bit("EN_AUGADD")
+
+
 def _port_literal(path, port):
     """The value of a constant 4-bit port wired as `.<port>(4'bxxxx)`."""
     import re
@@ -258,15 +305,21 @@ def caps2_expected():
     # [14:11], revision 8's seam (2026-10-02): R21's augadd and augerr,
     # R22's stepped index, R23's lane-flags block and R24's flag control.
     # Read from the RTL like every bit above them, so each item's parcel
-    # sets its own bit and this follows.
-    aug = _localparam_bit(RTL / "cft_krnl.sv", "FEAT_AUGADD")
+    # sets its own bit and this follows - R21's from the build parameter
+    # EN_AUGADD it has been since its decode.
+    aug = _feat_augadd()
     step = _localparam_bit(RTL / "cft_krnl.sv", "FEAT_SCRATCH_STEP")
     lflags = _localparam_bit(RTL / "cft_krnl.sv", "FEAT_LANE_FLAGS")
     fctl = _localparam_bit(RTL / "cft_krnl.sv", "FEAT_FLAG_CONTROL")
-    # [20:16], the streamed instruction capacity's log2 (R8S): zero on
-    # every tile until round 2's SEQ_STREAM_D exists to publish it, and
-    # pinned at zero here until then. [15] and [31:21] are reserved.
-    stream_log2 = 0
+    # [20:16], the streamed instruction capacity's log2 (R8S, revision 8's
+    # round 2): log2 SEQ_STREAM_D on a tile that streams, past its store,
+    # and zero on one that does not, where CAPS[23:20] is the capacity.
+    # [15] and [31:21] are reserved.
+    cap, store = krnl_param("SEQ_STREAM_D"), krnl_param("SEQ_IMEM_D")
+    assert cap == 1 << (cap.bit_length() - 1) and store <= cap <= 1 << 30, (
+        f"SEQ_STREAM_D={cap}: a power of two from the store ({store}) to "
+        f"2^30")
+    stream_log2 = cap.bit_length() - 1 if cap > store else 0
     return ((stream_log2 << 16) | (fctl << 14) | (lflags << 13) |
             (step << 12) | (aug << 11) |
             (lmask << 10) | (indexed << 9) | (seg << 8) | (scalar << 7) |
@@ -306,10 +359,12 @@ def check_seam_words(caps, caps2, prec_mask):
     table does not have is a failure, not a skip: add its words from the
     plan's arithmetic rather than letting the check pass by absence."""
     key = (krnl_param("SEQ_MAXD"), krnl_param("SEQ_IMEM_D"),
-           krnl_param("SEQ_SCRATCH_D"))
+           krnl_param("SEQ_SCRATCH_D"), krnl_param("SEQ_STREAM_D"),
+           krnl_param_bit("EN_AUGADD"))
     assert key in SEAM_WORDS, (
-        f"no computed seam words for (SEQ_MAXD, SEQ_IMEM_D, SEQ_SCRATCH_D) "
-        f"= {key}: add them to SEAM_WORDS from the plan's arithmetic")
+        f"no computed words for (SEQ_MAXD, SEQ_IMEM_D, SEQ_SCRATCH_D, "
+        f"SEQ_STREAM_D, EN_AUGADD) = {key}: add them to SEAM_WORDS from "
+        f"the plan's arithmetic")
     want_caps, want_caps2 = SEAM_WORDS[key]
     want_caps |= prec_mask
     assert caps == want_caps, (
@@ -328,7 +383,10 @@ def seq_caps_expected():
     # constant bank stays a localparam (a deeper one is an instruction-
     # format change, not a capacity).
     maxd = krnl_param("SEQ_MAXD")
-    imem = krnl_param("SEQ_IMEM_D")
+    # CAPS[23:20] is the instruction CAPACITY's log2, at most 15, since
+    # revision 8 (R8S): SEQ_STREAM_D's, which is SEQ_IMEM_D's - the store's
+    # - on a tile that does not stream.
+    imem = krnl_param("SEQ_STREAM_D")
     kmem = _localparam(RTL / "cft_krnl.sv", "SEQ_KMEM_D")
     kidx = _localparam(RTL / "cft_krnl.sv", "SEQ_KIDX_W")
     # cft_seq owns the constant bank's depth as its own localparam, and
@@ -344,13 +402,13 @@ def seq_caps_expected():
     # ceiling; this said DOWN until revision 7) - a cap a host would size
     # a program against and be refused by - and one past 2^15 would wrap
     # its field.
-    for name, v in (("SEQ_MAXD", maxd), ("SEQ_IMEM_D", imem),
-                    ("SEQ_KMEM_D", kmem)):
+    for name, v in (("SEQ_MAXD", maxd), ("SEQ_KMEM_D", kmem)):
         assert v == 1 << (v.bit_length() - 1) and v <= 1 << 15, (
             f"{name}={v} is not a power of two in 1..2^15; CAPS publishes "
             f"its log2 in four bits")
     feat = _port_literal(RTL / "cft_krnl.sv", "seq_feat")
-    return feat, maxd.bit_length() - 1, imem.bit_length() - 1, kidx
+    return (feat, maxd.bit_length() - 1, min(15, imem.bit_length() - 1),
+            kidx)
 
 
 def check_seq_caps(caps):
@@ -361,7 +419,7 @@ def check_seq_caps(caps):
     assert got == (feat, l_maxd, l_imem, l_kreg), (
         "CAPS does not publish the sequencer capacities cft_krnl "
         f"elaborates: feature nibble {got[0]:#x} (want {feat:#x}), "
-        f"log2 MAXD {got[1]} (want {l_maxd}), log2 IMEM_D {got[2]} "
+        f"log2 MAXD {got[1]} (want {l_maxd}), the capacity's log2 {got[2]} "
         f"(want {l_imem}), log2 addressable consts {got[3]} "
         f"(want {l_kreg}) - CAPS is {caps:#010x}")
     ext = _port_literal(RTL / "cft_krnl.sv", "alu_ext")
@@ -402,7 +460,11 @@ def gen_stream(fmt, n, rng):
     return out
 
 
-async def run_op(dut, axil, ram, fmt, op, n, seed, bases=None, rnd=RND_RNE):
+async def run_op(dut, axil, ram, fmt, op, n, seed, bases=None, rnd=RND_RNE,
+                 want_rnd=None):
+    """One elementwise run at MODE[14:12] = `rnd`, scored against the
+    model at `want_rnd` (`rnd` unless given): the attribute codes 5 to 7
+    are RNE by MODE's contract, so a case driving them names RNE here."""
     ba, bb, bc, bd = bases if bases else (A_BASE, B_BASE, C_BASE, D_BASE)
     ebytes = fmt.width // 8
     rng = random.Random(seed)
@@ -410,7 +472,8 @@ async def run_op(dut, axil, ram, fmt, op, n, seed, bases=None, rnd=RND_RNE):
     vb = gen_stream(fmt, n, rng)
     vc = gen_stream(fmt, n, rng)
 
-    exp = [compute(fmt, op, va[i], vb[i], vc[i], rnd) for i in range(n)]
+    m_rnd = rnd if want_rnd is None else want_rnd
+    exp = [compute(fmt, op, va[i], vb[i], vc[i], m_rnd) for i in range(n)]
     exp_d = [e[0] for e in exp]
     exp_f = 0
     for e in exp:
@@ -457,7 +520,8 @@ async def run_op(dut, axil, ram, fmt, op, n, seed, bases=None, rnd=RND_RNE):
     got_err = await axil.read_dword(STATUS)
     assert got_err == 0, \
         f"{fmt.name} {OP_NAMES[op]}: STATUS {got_err:#05b}, bus faults during the run"
-    dut._log.info(f"{fmt.name} {OP_NAMES[op]} {RND_NAMES[rnd]} n={n}: "
+    dut._log.info(f"{fmt.name} {OP_NAMES[op]} "
+                  f"{RND_NAMES.get(rnd, f'attribute code {rnd}')} n={n}: "
                   f"bit-exact, flags {got_f:#07b}")
 
 
@@ -938,6 +1002,48 @@ async def krnl_end_to_end(dut):
 
 # ---- raw AXI4-Lite corner cases --------------------------------------
 #
+@cocotb.test()
+async def krnl_attribute_codes_5_to_7(dut):
+    """MODE[14:12] = 5, 6 and 7 through an elementwise run are RNE, as
+    MODE's contract says (rtl/cft_csr.sv, docs/ARCHITECTURE.md) - at every
+    rung this build carries, on ADD, the shape R21's augadd and augerr
+    ride the array in, and on FMA. Since R21 the pipe's attribute line
+    carries two internal codes, 5 and 6, written only from the sequencer's
+    aug_mode sideband, and an outside 5 to 7 must still reach RNE and
+    never R21's mode (docs/ROADMAP.md, part 4; verifier-VRB's note that no
+    kernel case held it). No bench drove these codes through the kernel
+    before; tb/fpfma_common.py holds them on the bare pipes."""
+    cocotb.start_soon(Clock(dut.ap_clk, 4, units="ns").start())
+    axil = AxiLiteMaster(AxiLiteBus.from_prefix(dut, "s_axi_control"),
+                         dut.ap_clk, dut.ap_rst_n, reset_active_level=False)
+    ram_a = AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_a"),
+                       dut.ap_clk, dut.ap_rst_n, reset_active_level=False,
+                       size=2 ** 20)
+    AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_b"), dut.ap_clk,
+               dut.ap_rst_n, reset_active_level=False, size=2 ** 20,
+               mem=ram_a.mem)
+    AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_c"), dut.ap_clk,
+               dut.ap_rst_n, reset_active_level=False, size=2 ** 20,
+               mem=ram_a.mem)
+    AxiRamWrite(AxiWriteBus.from_prefix(dut, "m_axi_d"), dut.ap_clk,
+                dut.ap_rst_n, reset_active_level=False, size=2 ** 20,
+                mem=ram_a.mem)
+    dut.ap_rst_n.value = 0
+    await ClockCycles(dut.ap_clk, 8)
+    dut.ap_rst_n.value = 1
+    await ClockCycles(dut.ap_clk, 4)
+    seed = 570
+    for fmt in (FP32, FP64, FP128, FP256):
+        if not carried(fmt):
+            continue
+        n = 4 * (256 // fmt.width)      # four beats at every rung
+        for op in (OP_ADD, OP_FMA):
+            for code in (5, 6, 7):
+                seed += 1
+                await run_op(dut, axil, ram_a, fmt, op, n, seed=seed,
+                             rnd=code, want_rnd=RND_RNE)
+
+
 # cocotbext-axi's AxiLiteMaster issues one write at a time and waits for
 # BVALID before starting the next, which is also what XRT's MMIO path
 # does. That politeness hides a whole class of CSR bugs: anything the
