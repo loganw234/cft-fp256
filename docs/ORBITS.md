@@ -356,9 +356,10 @@ flags. Since step 6's parcel C4 the language's compiler has one
 relocated and specialised at the program's attribute, run in a quiet
 region, then raising exactly their operation's flags (revision 8's
 flag control, docs/SEQUENCER.md, R24). cft-orbits' engines do not use
-it: their programs come from the tool's own builder, and no tile has
-revision 8's flag control yet. `--rsqrt exact` is therefore a
-loop-engine route, and
+it: their programs come from the tool's own builder, and no revision-7
+tile has revision 8's flag control (rev8a, revision 8's first hardware
+image, has since 2026-10-06). `--rsqrt exact` is therefore a loop-engine
+route, and
 `--rsqrt newton` exists so that all three engines have a step they can
 run - which they then have to run bit for bit.
 
@@ -1433,8 +1434,11 @@ orbit integrator in the golden model, which is not planned. It proves
 nothing about the records' invariants or the 300-digit oracle's
 comparisons; those are this page's other gates. A certificate made on
 the software backend was made by libcft, so there only the golden
-auditor is independent of it. No card has certified a run: that is the
-lead's leg, later.
+auditor is independent of it. The first runs certified on a card were
+made on revision 7's quad on 2026-09-30, Kepler fp64 open and the outer
+planets at fp256 keyed: each run's states the software run's bit for
+bit, and cft-audit and the golden audit each accepting both
+(docs/VALIDATION.md, that date).
 
 **Its gate** is `orbits_check.py`'s section [8], in the `workloads`
 stage; `make -C host orbitstest` builds `cft-audit` for it. It certifies

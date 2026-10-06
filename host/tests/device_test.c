@@ -1697,12 +1697,12 @@ static void check_caps_enforced(cft_device *dev, const char *who)
      * 2026-10-02), on exactly those terms: published means the image
      * loads, absent means it is refused with CFT_ERR_UNSUPPORTED AND the
      * refusal names the instruction and the bit. The software backend
-     * publishes all three; every tile built so far reads CAPS2[11], [12]
-     * and [14] as zero, so a card leg is where the absent branch fires -
-     * a tile that would decode AUGERR as HALT, one that would access
-     * without stepping, and one that would end the run at a RAISE. The
-     * stepped leg needs a scratch to step through, and says so where
-     * there is none. */
+     * publishes all three, as a revision-8 tile does (its [11] where built
+     * with R21); a revision-7 tile reads CAPS2[11], [12] and [14] as zero,
+     * so a card leg on one is where the absent branch fires - a tile that
+     * would decode AUGERR as HALT, one that would access without stepping,
+     * and one that would end the run at a RAISE. The stepped leg needs a
+     * scratch to step through, and says so where there is none. */
     {
         static const struct {
             int which; uint32_t bit; const char *macro, *instr, *what;
@@ -6180,7 +6180,7 @@ out:
 
 /* ==== revision 7: a program that walks past 256 slots ==================
  *
- * The U50's tiles have 2,048 scratch slots a lane from revision 7 and
+ * The U50's tiles have 2,048 scratch slots a lane at revision 7 and
  * the open-core ones 256, and the depth is part of what a non-strict
  * STX/LDX MEANS: it reduces the index modulo the depth. So the software
  * reference this file compares against is opened at the DEVICE's depth

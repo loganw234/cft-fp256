@@ -188,7 +188,7 @@ export const FEAT_REDUCE_SEG     = 0x1000;
 export const SEQ_FEAT_INDEXED    = 0x2000; // CAPS2[9]: an input block through a table
 export const SEQ_FEAT_LANE_MASK  = 0x4000; // CAPS2[10]: a per-run lane mask
 // Revision 8 of the program model (proposed 2026-09-29, docs/SEQUENCER.md):
-// the software backend publishes all four; no tile built so far carries any.
+// the software backend publishes all four; a revision-7 tile none, a revision-8 tile its build's.
 export const SEQ_FEAT_AUGADD       = 0x8000;  // CAPS2[11]: augadd/augerr, 754-2019 9.5's augmentedAddition
 export const SEQ_FEAT_SCRATCH_STEP = 0x10000; // CAPS2[12]: STX/LDX with a signed post-step
 // ABI 0.17 (2026-10-02): R23's per-lane flags, a run's option the module's

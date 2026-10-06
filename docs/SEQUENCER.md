@@ -2703,12 +2703,14 @@ values: a program of exactly `IMEM_D` instructions, one of one more,
 
 `SCRATCH_D` is not purely one. A NON-strict `STX`/`LDX` reduces its
 index modulo the depth (R4), so an image that indexes past 256 wraps at
-2,048 on the U50 and at 256 everywhere else, and computes other
-answers; a STRICT one (R8) reports the index past the depth and is
-portable - a strict run that reports nothing computes the same at every
-depth deep enough for it. Every other program - one that indexes below
-256, or names only static slots below 256 - computes exactly what it
-did. So the depth is a parameter of everything that stands for a tile:
+2,048 on the U50's revision-7 images, at the build's own depth on its
+revision-8 ones (4,096 on rev8a), and at 256 everywhere else, and
+computes other answers; a STRICT one (R8) reports the index past the
+depth and is portable - a strict run that reports nothing computes the
+same at every depth deep enough for it. Every other program - one that
+indexes below 256, or names only static slots below 256 - computes
+exactly what it did. So the depth is a parameter of everything that
+stands for a tile:
 - the golden model: `seq.run(..., scratch_depth=)`, 256 by default, and
   `Program`, `from_bytes`, `stl` and `ldl` validate against a declared
   depth, 256 by default; `run()` refuses by name a program whose static
@@ -2987,8 +2989,8 @@ project asks of step 4's revision", asks 3, 4 and 5), defined
 golden-first beside revision 7 and counted for what they are worth.
 Revision 7's tile has none of them in its RTL, and nothing here changes
 what a program that runs today computes: each new form takes an
-encoding every loader refuses today, and each sits behind a capability
-bit of its own, refused BY NAME wherever it is not built.
+encoding every loader refused before revision 8, and each sits behind a
+capability bit of its own, refused BY NAME wherever it is not built.
 `python/cft_golden/seq.py` is the definition, `host/src/program.c`
 computes it on the software backend and `host/tests/seq_check.py` holds
 the two together; a tile carries it only once an RTL revision builds it.
@@ -3016,9 +3018,12 @@ which rung it was.
 This section is the CONTRACT for R21 to R24, and all four are built
 golden-first: `seq.py` defines them and the software backend computes
 them, R21 and R22 at ABI 0.16 and R23 and R24 at ABI 0.17 (2026-10-02,
-the step-6 round's R8). No tile carries any of them. What a tile would
-need - R23's MODE bit, its pointer register, kernel argument and VERSION,
-and each item's decode - is a proposal below, the RTL plan's to confirm.
+the step-6 round's R8). Revision 8's RTL builds all four (2026-10-05,
+"Revision 8 in the tile", at the end), and a tile on a card carries them
+since rev8a, the revision's first hardware image, which passed its card
+legs on 2026-10-06 (docs/VALIDATION.md). What a tile would need - R23's MODE
+bit, its pointer register, kernel argument and VERSION, and each item's
+decode - is a proposal below, the RTL plan's to confirm.
 R20 is left to revision 7's third item, the program limits, should it
 take a number. All five text forms are in `asm.py` and, since
 2026-10-02, in `host/tools/cft-asm.c`.
@@ -3153,7 +3158,8 @@ pipe keeps +1.815 ns into S10 with R21 (+2.770 without), +1.523 into S6
 timing and design (a) is not built (question 8). At EN_AUGADD = 0 the
 pipe synthesises to exactly 5e033f6's at fp32, fp64 and fp128, and one
 LUT apart at fp256 (30,251 against 30,250, registers equal). Until round
-2's decode drove the sideband - and on every tile built so far - CAPS2[11]
+2's decode drove the sideband - and on every tile built before revision
+8's RTL - CAPS2[11]
 reads zero and code 10 decodes as HALT (`rtl/cft_seq.sv`'s `default`
 arm), so the loader refuses both codes there by name, naming the
 instruction. Since that decode, one parameter decides all of it, a
@@ -3182,13 +3188,13 @@ CAPS2[12] = `cft_caps.seq_features` bit 16 =
 `scratch[rb]` is R4's and R8's: rb's bit pattern reduced modulo the depth,
 or reported under SCRATCH_STRICT.
 
-**The encoding: bits no program may set today.** imm[23:0] of the indexed
-pair has been read by nothing since revision 3 and must be zero, so every
-STX and LDX a loader accepts has imm[11:0] = 0 - and a zero step is the
-instruction exactly as it was, the same bytes and the same meaning.
-imm[23:12] stays read by nothing. The assembler writes a step back only
-when it is not zero, so an image from before this revision disassembles
-as it did.
+**The encoding: bits no program could set before R22.** imm[23:0] of the
+indexed pair was read by nothing from revision 3 and had to be zero, so
+every STX and LDX a loader accepted before R22 has imm[11:0] = 0 - and a
+zero step is the instruction exactly as it was, the same bytes and the
+same meaning. imm[23:12] stays read by nothing. The assembler writes a
+step back only when it is not zero, so an image from before this
+revision disassembles as it did.
 
 **Post, by a sign-extended twelve-bit immediate: rung 2.** 754 has nothing
 to say about addresses, and ratified RISC-V has no auto-stepping address
@@ -3269,14 +3275,16 @@ in the census's terms (docs/VALIDATION.md, 2026-09-25): an arithmetic
 instruction 1, a scratch access s - 5.21 at fp64 and 5.08 at fp256 on the
 card today, which R18 changes and P1 measures - a loop iteration's
 ENDREP e, 1.78 at fp64 and 0.41 at fp256, and a post-step p. The census
-cannot price p, because no tile has one: 0 if the step's write rides an
-idle port cycle, 1 if it needs its own.
+cannot price p, because no tile had one when it was taken: 0 if the
+step's write rides an idle port cycle, 1 if it needs its own. Revision
+8's RTL prices it in simulation: 0 for a stepped STX and 1 for a stepped
+LDX (`make seqcycles`' R22 rows, "Revision 8 in the tile", at the end).
 
 **A Taylor coefficient as a Cauchy product.** Every c_n = sum over j of
 a_j b_(n-j), n = 0..N, the two series in the scratch, one lane, three
-forms: looped with today's LDX and an IADD and an ISUB a term; looped
-with the post-step; and unrolled with static LDL slots, which is today's
-ISA too. REPEAT takes an immediate trip count, so both loops unroll the
+forms: looped with revision 7's LDX and an IADD and an ISUB a term;
+looped with the post-step; and unrolled with static LDL slots, which is
+revision 7's ISA too. REPEAT takes an immediate trip count, so both loops unroll the
 outer n and loop over j. All three compute the same bits. Prices to the
 unit:
 
@@ -3310,7 +3318,7 @@ What that says, and no more:
   It pays in words - O(N^2): 1,551 at N = 30 and 6,566 at N = 64 for one
   product, where the stepped loop takes 280 and 586.
 - So what the step buys is a looped product at 2 ALU a term less than
-  today's loop, in O(N) words. That is worth having where a program's
+  revision 7's loop, in O(N) words. That is worth having where a program's
   unrolled products do not fit the instruction memory (16,384 words, or
   32,768 after revision 7's limits): three order-64 products take 19,698
   words unrolled.
@@ -3364,10 +3372,11 @@ kernel's forms; and anything a tile adds to build either item.
 *Built golden-first on 2026-10-02 (the step-6 round's R8): the model,
 the software backend at ABI 0.17 and the remote protocol. A tile carries
 it from revision 8's RTL (built 2026-10-05; "Revision 8 in the tile", at
-the end), and until a bitstream does every device but the software
-backend - and a remote handle over one - refuses the block by name. It
-changed how a run reports, so it was written down before any code:
-2026-09-29, and its mark on 2026-10-02.*
+the end), and a tile on a card since rev8a, revision 8's first hardware
+image (2026-10-06); every device without CAPS2[13] - a revision-7 tile,
+or a remote handle over one - refuses the block by name. It changed how
+a run reports, so it was written down before any code: 2026-09-29, and
+its mark on 2026-10-02.*
 
 **The ask** (docs/ROADMAP.md, ask 5): invalid and overflow delivered with
 each lane's outputs, so that a design sweep can drop the one variant that
@@ -3444,10 +3453,11 @@ at byte i, asked for per run:
   frame can carry the bit; a run that does not travels as it does today,
   so a server's per-opcode counts of every existing call are unchanged;
 - a tile: MODE[24] asks for the block. It is the lowest bit of the range
-  every tile since the scalar guard refuses at start with STATUS[3], so a
-  revision-7 tile asked for one refuses the run rather than ignoring the
-  ask, and libcft refuses first, by name. A pointer register and kernel
-  argument beside `cnt`'s, on the D master because they are written:
+  a tile since the scalar guard refuses at start with STATUS[3] unless it
+  builds the feature, so a revision-7 tile asked for one refuses the run
+  rather than ignoring the ask, and libcft refuses first, by name. A
+  pointer register and kernel argument beside `cnt`'s, on the D master
+  because they are written:
   LFLAGS_PTR at 0xB0 as argument 17, which moves VERSION to 0xB00 as
   every appended register has. And CAPS2[13], under the rule every bit
   above MODE[15] has kept since R17. A run that does not ask writes
@@ -3485,8 +3495,8 @@ stay the OR over tiles.
 - flops: eight a lane of a block, 8 x 128 = 1,024 at fp32's 128 lanes -
   this design's seven and the mark. The retire path already holds each
   lane's flags (`lane_flags`) before `wb_flags_or` reduces them under the
-  active row (R17), so the change is a register a lane where there is one
-  OR today;
+  active row (R17), so the change is a register a lane where there was
+  one OR before R23;
 - the drain: one more stream after the counts, 32 lanes a beat, so at
   most four beats a block where the counts take sixteen; a write strobe a
   byte, since a block at fp256 is 16 lanes, half a beat;
@@ -3658,10 +3668,12 @@ an indexed slot is never refused.
 
 **The mark: rung 3.** Neither 754 nor RISC-V has one. Where a raise's
 `ra[7]` is set, the lane is marked: R23's bit [7] for the lane, and
-STATUS[6], `CFT_STATUS_MARKED`, for the run. STATUS[6] is the first bit no
-tile and no backend claims: `rtl/cft_csr.sv` read STATUS as six bits
+STATUS[6], `CFT_STATUS_MARKED`, for the run. STATUS[6] was the first bit
+no tile and no backend claimed: `rtl/cft_csr.sv` read STATUS as six bits
 padded with zeros until revision 8's seam (2026-10-02), which widened it
-to seven with [6] wired to cft_seq's err[5], zero until R24 is built. A
+to seven with [6] wired to cft_seq's err[5], zero until R24 was built
+(2026-10-05); rev8a, revision 8's first hardware image, sets it on the
+card (markstep's certificates, 2026-10-06). A
 marked lane's outputs are still written - its
 deposits, its count and its scratch-out are what the program computed, the
 same on every machine - and the mark says that the routine's own test found
@@ -3714,9 +3726,10 @@ and a tile disagree about it.
 were unknown control codes to `seq.py`, `host/src/program.c`, `asm.py`
 and `host/tools/cft-asm.c`, so no image any of them accepted before then
 contains one, and taking them changed nothing that runs: R21's argument
-for codes 10 and 11. Code 15 is the first unknown code now. A tile
-decodes an unknown code as HALT (`rtl/cft_seq.sv`'s `default` arm), so
-every tile built so far would end the run where a region opens. So
+for codes 10 and 11. Code 15 is the first unknown code now. Revision 8's
+tiles decode the three, and a tile decodes an unknown code as HALT
+(`rtl/cft_seq.sv`'s `default` arm), so every tile built before revision
+8's RTL would end the run where a region opens. So
 libcft refuses an image holding any of the three, on a device without
 CAPS2[14], at `cft_program_load`, by name, naming the instruction, as it
 refuses R21's codes; a remote handle publishes its server's bit. cftc's
@@ -3757,8 +3770,12 @@ bit is published and is refused naming RAISE where it is not, and the
 lane-flags leg on any device. `host/tests/segrun_check.py`'s `markstep`:
 STATUS[6] from the software backend into every certificate's segment
 lines, audited, and through a server. cftc: `python/tests/test_cftc.py`.
-On a card, where no tile publishes CAPS2[13] or [14], each says what it
-refuses by name and what it does not compare.
+On a card whose tile publishes neither CAPS2[13] nor [14] - every
+revision-7 image - each says what it refuses by name and what it does
+not compare. On rev8a, revision 8's first hardware image, which publishes
+both, device-test holds the block to the software backend's and card-segrun
+carries markstep's STATUS[6] into its certificates (2026-10-06,
+docs/VALIDATION.md).
 
 **What a tile would need** (revision 8's RTL: believed, not built - and
 built as below on 2026-10-05; "Revision 8 in the tile", at the end).
@@ -3786,8 +3803,10 @@ built as below on 2026-10-05; "Revision 8 in the tile", at the end).
   0x30 until 2026-10-02, when CV2's reading of the certificate path made
   it 0x70, so a tile that sets STATUS[6] does not lose the mark - and a
   card certificate with it - on the way out, as a tile's STATUS[5] was
-  dropped until 2026-09-18 (R8, "What revision 4 does not do"). No tile
-  sets the bit today, so on revision 7 the change changes nothing.
+  dropped until 2026-09-18 (R8, "What revision 4 does not do"). No
+  revision-7 tile sets the bit, so there the change changes nothing;
+  rev8a, revision 8's first hardware image, sets it, and the mark reaches
+  its card certificates (2026-10-06).
 
 **Not proposed.**
 - Two codes, with the raise closing the region. It saves one word a
@@ -4009,3 +4028,9 @@ from such a tree.
     `krnl_scratch_step`. With it the tile reads the plan's words: CAPS2
     0x00187FFB on the single, 0x001877FB on the quad's tile without R21,
     and 0x000077F8 on the open-core configurations. VERSION stays 0xB00.
+- **The first hardware image** (2026-10-06). rev8a, the single with R21
+  at 4,096 scratch slots, built at 135 MHz from this RTL (the rtl tree
+  44b963dd), reads VERSION 0x00000B00 and CAPS2 0x00187FFC on the card:
+  CAPS2[3:0] is log2 of the depth, 0xC at 4,096 where the default
+  build's 2,048 reads 0xB. It passed its card legs. docs/VALIDATION.md
+  records it, as it records every image.

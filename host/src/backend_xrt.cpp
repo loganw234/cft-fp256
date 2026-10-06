@@ -351,10 +351,10 @@ constexpr int ARG_LFLAGS = 17;
 constexpr uint32_t MODE_SEQ = 1u << 15;
 /* MODE[24] (revision 8's R23, docs/SEQUENCER.md): write the per-lane
  * flags block at LFLAGS_PTR after the counts. Set only on a run that
- * asked for the block. It is the lowest bit of the range every tile
- * since the scalar guard refuses at start with STATUS[3], so a tile
- * without CAPS2[13] asked for a block refuses the run rather than
- * ignoring the ask - and device.c refuses first, by name. */
+ * asked for the block. It is the lowest bit of the range a tile since
+ * the scalar guard refuses at start with STATUS[3] unless it builds the
+ * feature, so a tile without CAPS2[13] asked for a block refuses the run
+ * rather than ignoring the ask - and device.c refuses first, by name. */
 constexpr uint32_t MODE_LFLAGS = 1u << 24;
 
 /* STATUS, as rtl/cft_csr.sv lays it out. Bits 4 and 5 are also
@@ -379,8 +379,8 @@ constexpr uint32_t ST_DEPOSIT_OVERFLOW = 0x10u;
 constexpr uint32_t ST_SCRATCH_RANGE    = 0x20u;
 /* Revision 8's R24 (ABI 0.17): STATUS[6], CFT_STATUS_MARKED - a raise
  * marked a lane whose last bit a routine could not decide. In the mask
- * BEFORE any tile can set it (every tile built so far reads STATUS as six
- * bits padded with zeros, so on revision 7 it changes nothing), because a
+ * since BEFORE any tile could set it (a revision-7 tile reads STATUS as six
+ * bits padded with zeros, so there it changes nothing), because a
  * mask that stopped at bit 5 would hand back an undecided bit as though
  * it were decided - and the run's certificates with it - which is the
  * trap bit 5 fell into until 2026-09-18. */

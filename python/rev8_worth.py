@@ -20,10 +20,10 @@ census's own terms (docs/VALIDATION.md, controlled divergence steps 0 and
         not count as an instruction: 3.07 ns at fp64 against a = 1.72 ns
         (1.78 ALU), 2.93 ns at fp256 against a = 7.18 ns (0.41 ALU).
   p     what one POST-STEP costs beside its access. The census has no
-        price for it, because no tile has one: a stepped LDX writes two
-        registers and the register file has one write port. p = 0 is a
-        step whose write rides a cycle the port is idle; p = 1 is a step
-        that needs a write cycle of its own - an IADD's. Both are shown.
+        price for it, no tile having one when it was taken: a stepped
+        LDX writes two registers and the register file has one write port.
+        p = 0 is a step whose write rides a cycle the port is idle; p = 1
+        one that needs a write cycle of its own - an IADD's. Both are shown.
 
 Every variant of a kernel is held BIT FOR BIT to a direct computation of
 the same arithmetic in the same order, and the Cauchy variants to each
@@ -117,9 +117,9 @@ def price(c, s, e, p):
 # takes an immediate trip count, so the looped forms unroll the outer n
 # (N + 1 copies of a small block) and loop over j.
 #
-#   looped, today's ISA   per term: LDX, LDX, FMA, IADD, ISUB
-#   looped, revision 8    per term: LDX +1, LDX -1, FMA
-#   unrolled, today's ISA per term: LDL, LDL, FMA (static slots)
+#   looped, revision 7's ISA   per term: LDX, LDX, FMA, IADD, ISUB
+#   looped, revision 8         per term: LDX +1, LDX -1, FMA
+#   unrolled, revision 7's ISA per term: LDL, LDL, FMA (static slots)
 
 A, B, C = 0, 72, 144
 

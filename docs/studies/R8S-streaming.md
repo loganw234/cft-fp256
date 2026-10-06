@@ -6,9 +6,10 @@ reads the program from card memory instead of holding it on chip
 study designs the fetch, prices it, and outlines the RTL plan, which goes
 to Logan before any RTL work. Nothing in it is built. Every file and line
 number is the tree at 1acc73a. (Since 2026-10-03 the fetch unit is
-built, alone, and no tile carries it yet: section 13 records it as
-built, with the interface round 2 wires and every departure from
-sections 2 and 3.)
+built - section 13 records it as built, with the interface round 2
+wires and every departure from sections 2 and 3 - and since 2026-10-06
+a tile on a card carries it: rev8a, revision 8's first hardware image,
+docs/VALIDATION.md.)
 
 How each number is marked:
 - **measured**: read from a Vivado report or a card run, or run for this

@@ -1759,7 +1759,7 @@ class _FakeServer:
 def rev8_remote_refusals(lib, R):
     """A device without the revision-8 bits refuses both forms BY NAME.
 
-    The tile today publishes neither (CAPS2[11] and [12] read zero), and
+    A revision-7 tile publishes neither (CAPS2[11] and [12] read zero), and
     this desktop has no tile - so the device here is a remote handle to a
     fake server whose HELLO says what a round-2 tile's word says,
     0x7f1f: the refusal is made on the client, from the word, by the
@@ -2240,9 +2240,9 @@ def flags_corpus(lib, dev, fmt, name, args, F):
 def flags_remote_refusals(lib, F):
     """A device without R24's or R23's bit refuses each BY NAME.
 
-    No tile publishes either (CAPS2[13] and [14] read zero), so the device
-    is a remote handle to the fake server of rev8_remote_refusals, whose
-    HELLO publishes a revision-7 tile's word, 0x7f1f. Each of the three
+    A revision-7 tile publishes neither (CAPS2[13] and [14] read zero), and
+    the device is a remote handle to the fake server of rev8_remote_refusals,
+    whose HELLO publishes that tile's word, 0x7f1f. Each of the three
     codes is refused at load naming the instruction and
     CFT_SEQ_FEAT_FLAG_CONTROL, and loads where the word publishes the bit;
     a program that needs neither loads, and a RUN of it that asks for the

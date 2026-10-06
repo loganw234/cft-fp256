@@ -4074,7 +4074,10 @@ Logan cleared it on 2026-09-29 and took the lead's defaults.
 - As built, the single came first, as the timing read, and the quad
   follows it at the full capacities.
 - Revision 8 is defined golden-first, and refused by name on every tile.
-  Its RTL is a later revision's.
+  Its RTL is a later revision's. (A note of 2026-10-06: that revision is
+  step 6's, its RTL built on 2026-10-05, and its first hardware image,
+  rev8a, has run on the card since 2026-10-06; "Revision 8: step 6's RTL
+  revision", below.)
 - The single at 175 MHz was not attempted. At 135 MHz it has +0.423 ns,
   and 175 MHz asks for 1.69 ns more of every path.
 - The rest of this section is the plan as written that morning, with
@@ -4724,7 +4727,9 @@ and the testing rule, as the last rounds ran.
      R23, and docs/HOSTAPI.md, ABI 0.17), with STATUS[6] for a marked
      lane and the module rebuilt. MODE[24], the tile's request for the
      block, is defined, and no tile carries it yet. cft-segrun asks for
-     the block only from certificate version 2.
+     the block only from certificate version 2. **On a card** since
+     2026-10-06: rev8a, revision 8's first hardware image
+     (docs/VALIDATION.md).
    - **Certificate format version 2,** designed once, with R8L, for
      everything this step needs of it:
      - the per-lane flags;
@@ -4767,7 +4772,8 @@ and the testing rule, as the last rounds ran.
      STX/LDX: already in the model, the software backend and `asm.py`
      (`test_seq_rev8.py`); no tile carries either. They come to cft-asm
      with R8F's assembler work, and to the RTL. cft-asm reads both since
-     parcel R8.
+     parcel R8. **On a card** since 2026-10-06: rev8a, revision 8's
+     first hardware image, carries both (docs/VALIDATION.md).
    - **R8S, instruction streaming.** The program is read from card
      memory through a prefetch, not held on-chip, so the instruction
      ceiling goes. The image format and the certificate are unchanged,
@@ -4962,6 +4968,16 @@ version 2 (above). The first wave started when A1 merged, on
 RTL work, as the revision-7 round's did.
 
 ### Revision 8: step 6's RTL revision (plan of record, 2026-10-02)
+
+**Built** (a note of 2026-10-06; docs/VALIDATION.md, 2026-10-05 and
+2026-10-06). The plan after this note is as approved on 2026-10-02, so
+its every "today" is that date's, "Nothing in this section is built" and
+"refused by name on every tile today" among them.
+- Round 1 built the seam, R21 in the lanes and the fetch alone
+  (2026-10-02 to 03), and round 2 the sequencer's items and the host's
+  side (2026-10-05). Probe L kept R21 off the quad (question 9).
+- rev8a, the first hardware image - the single with R21 at 4,096 slots -
+  closed 135 MHz with +0.330 ns and passed its card legs on 2026-10-06.
 
 For Logan's approval. Nothing in this section is built, and no RTL
 changes until he approves it. Step 6's plan (above) puts revision 8's
