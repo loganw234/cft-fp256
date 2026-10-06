@@ -16,9 +16,12 @@ defect: log1p's r = x path ran its polynomial past the bound's rho, and
 four fp256 lanes came out wrong and unmarked. The model is repaired
 (section 2.3), the defect is listed as number 8 (section 3.6), and every
 figure that moved is restated. The repair's own measurements found one
-thing more: at fp64 the log family keeps less than the planners' two
-bits where its terms cancel (3.2, 3.3), which changes question 1's
-recommendation for fp64.
+thing more: at fp64, log1p keeps less than the planners' two bits near
+its reduction path's lower end, where its low word and a cancelling sum
+weigh most (3.2, 3.3). That changes question 1's recommendation for
+fp64. A second check, verifier-VM1b's of b252824, found the repair
+sound and corrected how question 1's grounds were stated. Its
+measurements on amd-arc-box are quoted as the box's.
 
 Every statement is one of five kinds, and says which:
 - **READ**: from this tree at d4cf250, with the file named;
@@ -76,7 +79,7 @@ Every statement is one of five kinds, and says which:
   G = 46. That law is MEASURED with the bound inflated to G = 6: 1.7% to
   2.8% marked against 2.2% to 2.3% predicted, over 12 runs of 2,000.
   Question 1 now recommends G = 44 at fp64, where 46 leaves less than
-  two bits of slack in places (below).
+  two bits of slack in log1p (below).
 - **Held, in the model, against transcend.py** (MEASURED):
   - fp64, fp128 and fp256, six functions, five attributes, over the
     transcend pools (367, 350 and 512 arguments): 0 wrong unmarked lanes;
@@ -110,17 +113,25 @@ Every statement is one of five kinds, and says which:
   triple-word exp is MEASURED at 413 instructions at G = 46 and 382 at
   G = 40. Section 2.5 and question 2.
 - **fp64 is the thin format at G = 46.** The bound holds wherever it was
-  measured, at every format. But at fp64 two regions of the log family
-  keep less than the planners' two bits (MEASURED, 20,000 arguments
-  each):
-  - log1p for x from -1/8 to -15/256: 2^-1.8 under the bound;
-  - log2 for x from 0.875 to 0.94: 2^-2.2 under.
-  Both are cancellation. The double word's floor is set by the terms
-  being summed, and there they are up to 22 times the result. A coarse
-  count, letting every rounding take that factor, does not show the
-  bound at G = 46 there, and shows it at G = 44, just. G = 44 at fp64
-  keeps at least 2.6 bits in every region measured, for 0 to 7
-  instructions fewer (3.2, 3.3, question 1).
+  measured, at every format. At fp64 one region keeps less than the
+  planners' two bits: log1p's reduction path near its lower end, on
+  both sides. MEASURED at volume on amd-arc-box, by verifier-VM1b's
+  scripts:
+  - x from -1/8 to -15/256: 2^-1.72 under the bound (100,000
+    arguments);
+  - x from 15/256 to 1/8: 2^-1.69 (100,000), and 2^-1.60 in its lowest
+    part, [15/256, 0.0587] (40,000).
+  - For x > 0 the cause is the low word of 1 + x, weighed against a
+    result near 0.06. For x < 0 it is the low word and a cancelling sum
+    together, whose terms are up to 22 times the result.
+  - log2's cancelling cell comes next, just over two bits: 2^-2.08
+    (100,000).
+  - Counted instruction by instruction (verifier-VM1b's first-order
+    budget), the worst case at G = 46 is about half the bound: the
+    bound holds with one bit to spare. The coarse count of 3.2, which
+    lets every rounding take the full factor of 22, cannot show that.
+  - G = 44 at fp64 keeps at least 2.6 bits in every region measured,
+    for 0 to 7 instructions fewer (3.2, 3.3, question 1).
 - **Two findings for the lead:**
   - transcend.py's exp2 of the exact tie emin - p returns +0 under rmm,
     where 754's roundTiesToAway gives the smallest subnormal (question 5);
@@ -435,15 +446,15 @@ G can reach 47 at fp64 before triple words are needed, and well past 60
 at fp128 and fp256 (MEASURED, `alts.py`).
 
 That floor is relative to the terms being summed, and it reaches V
-amplified where the terms cancel:
-- in the log family at k = -1 with C = 9 (x from about 0.875 to 0.94,
-  and log1p's x from -1/8 to -15/256), where k ln2 and L_j nearly
-  cancel;
+amplified where they are large beside the result:
+- in the log family at k = -1 with C = 9, x from 0.842 to 0.941 (and
+  log1p's x from -0.158 to -15/256), where k ln2 and L_j nearly cancel;
+- in expm1 at n = +-1, where T (1 + Z) and 2^-k nearly cancel;
 - in log1p near its reduction path's lower end, where u_l is relative
   to 1 + x, not to the result.
-At fp64 that costs G = 46 its two bits of slack there (3.2, 3.3,
-question 1). At fp128 and fp256 the amplified floor is still more than
-50 bits under the bound.
+At fp64 that leaves G = 46 under two bits of slack in log1p, and just
+over two in log2 (3.2, 3.3, question 1). At fp128 and fp256 the
+amplified floor is still more than 50 bits under the bound.
 
 ### 2.5 fp32
 
@@ -606,16 +617,33 @@ bound's 2^-283 (defect 8). So the bound test of section 8 must find each
 path's own largest |r|, not only the seed cells'.
 
 **A, the cancellation factor,** is (|k ln2| + |L_j| + |r Y|)/|V|. The
-12u^2 is counted against the terms, so it reaches V multiplied by A.
+12u^2 is counted against the terms, so it reaches V multiplied by up to
+A.
 - A is about 1 almost everywhere.
-- It reaches about 22 where k = -1 and C = 9: x from about 0.875 to 0.94
-  for log and log2, and log1p's x from -1/8 to -15/256. There k ln2 and
-  L_j nearly cancel.
+- Where k = -1 and C = 9 it runs from 7.7 to 22: x from 0.842 to 0.941
+  for log and log2, and log1p's x from -0.158 to -15/256. There k ln2
+  and L_j nearly cancel. (verifier-VM1b computed A along the cell.)
 - A coarse count lets every one of those roundings take the full
-  factor. At fp64 it gives about 2^-97.9 in all, which does not show
-  the bound at G = 46 (2^-99). With G = 44's shorter head it gives
-  2^-97.7, and 2^-97.5 with log1p's low word added: under the bound at
-  G = 44 (2^-97).
+  factor of 22. At fp64 it gives about 2^-97.9 in all, which does not
+  show the bound at G = 46 (2^-99). With G = 44's shorter head it gives
+  2^-97.7, and 2^-97.4 with log1p's low word added: under the bound at
+  G = 44 (2^-97), by 0.4 bit.
+- The coarse count is pessimistic. Verifier-VM1b counted instruction by
+  instruction, with a first-order budget that attributes V's error to
+  each rounding and adds up each one's largest share seen in a sample.
+  - Only the last few sums scale with the terms: the effective factor
+    in the worst cell is about 4.
+  - Its worst case at G = 46 is about half the bound: 0.48 to 0.51 Bv
+    in log1p's band and log2's cell, over 12,000 arguments a cell, half
+    of them at the cell's end. The bound holds with one bit.
+  - At G = 45 it is 0.24 to 0.26 Bv, on the two-bit line; at G = 44,
+    0.12 to 0.18 Bv.
+  - Being sampled, these figures creep up with the sample; they stay
+    below 1 either way.
+- The exp family has one such cell: expm1 at n = +-1, where
+  T (1 + Z) - 2^-k cancels (A 12 to 24). The box measured 2^-3.2 and
+  2^-3.5 under the bound there (40,000 arguments each, G = 46), and the
+  budget's worst case is 2^-2.6.
 
 **log1p's low word,** on the reduction path, adds terms of about u^2
 absolute each:
@@ -625,8 +653,9 @@ absolute each:
 - the two single-word sums that carry it.
 - In all they come to about 3.5u^2, over |V| >= log1p(15/256) = 0.0569:
   2^-(2p - 5.95), which is 2^-100.05 at fp64.
-- For x > 0 (k = 0, C = 15, A about 1.3) the worst-case sum is then
-  2^-0.8 of the bound. For x < 0, A dominates.
+- For x > 0 (k = 0, C = 15, A about 1.3) the coarse worst-case sum is
+  then 2^-0.7 of the bound; verifier-VM1b's budget puts it at 0.48 Bv,
+  2^-1.05. For x < 0, A and the low word act together.
 - The first version wrote only y's term, |r_l| (2^-64 + u)/|V|.
 
 **The totals where A = 1.** At fp64: tail 2^-104.6 with K = 12,
@@ -643,14 +672,21 @@ said. One FMA more there gives about nine bits, since each degree
 divides the truncation by about rho/(D+3).
 
 The planners count neither A nor the low word. At fp128 and fp256 that
-changes nothing. At fp64 it is why G = 46 keeps under two bits in the
-cancellation cells: MEASURED, 2^-1.8 (log1p) and 2^-2.2 (log2) (3.3).
+changes nothing. At fp64 it is why G = 46 keeps under two bits in
+log1p's band, and just over two in log2's cell. MEASURED at volume:
+2^-1.72 for x < 0 and 2^-1.69 for x > 0, against log2's 2^-2.08 (3.3).
+Counting them coarsely would not mend the planners. With 12u^2 times 22
+and the low word in their floor, they refuse every G from 43 to 47 at
+fp64, and allow G up to about 100 at fp128 and past 104 at fp256
+(verifier-VM1b ran the planners' own code so). They would pick neither
+44 nor 46.
 
 Phase 2 owes this a proof term by term, and section 8 says what holds
 it. The constants 10, 12 and 3.5 are counted from the model's
-instruction sequence, not proved. At fp64 and G = 46, that proof must
-count, rounding by rounding, which terms each rounding scales with. At
-G = 44 the coarse count already suffices.
+instruction sequence, not proved. At fp64 and G = 46 that proof must
+count rounding by rounding, as verifier-VM1b's budget does. At G = 44
+the coarse count shows the bound, by 0.4 bit, and the count rounding by
+rounding leaves about 2.5 bits.
 
 ### 3.3 Measured against it
 
@@ -664,7 +700,7 @@ model's four lanes of defect 8.
 | fp64 exp, exp2, expm1 | 2^-6.2, 2^-6.1, 2^-4.9 (2,000 each, x 5 attributes) | 2^-5.7, 2^-5.6, 2^-4.6 | 2^-5.4, 2^-5.2, 2^-3.0 (100,000 each) |
 | fp64 log, log2, log1p | 2^-3.3, 2^-3.1, 2^-3.1 | 2^-3.6, 2^-3.8, 2^-2.8 | 2^-3.2, 2^-2.5, see (*) |
 | fp128 exp, exp2, expm1 | 2^-6.6, 2^-6.8, 2^-10.9 (400) | 2^-6.3, 2^-6.5, 2^-6.0 | 2^-6.1, 2^-6.1, 2^-3.0 (60,000 each) |
-| fp128 log, log2, log1p | 2^-19.0, 2^-19.0, 2^-7.2 (400, at D = 39) | 2^-5.3, 2^-5.3, 2^-5.3 | 2^-5.0, 2^-5.0, see (*) |
+| fp128 log, log2, log1p | 2^-19.0, 2^-19.0, 2^-7.3 (400) | 2^-5.3, 2^-5.3, 2^-5.3 | 2^-5.0, 2^-5.0, see (*) |
 | fp256 exp, exp2, expm1 | 2^-6.1, 2^-6.8, 2^-8.5 (300) | 2^-5.9, 2^-5.8, 2^-3.9 | 2^-5.8, 2^-5.8, 2^-3.8 (60,000 each) |
 | fp256 log, log2, log1p | 2^-26.3, 2^-26.3, 2^-26.2 (200) | 2^-4.9, 2^-4.9, 2^-4.9 | 2^-4.6, 2^-4.7, see (*) |
 | fp32 exp, triple-word | G = 46: 2^-0.04; G = 40: 2^-6.0; G = 32: 2^-8.3 (600) | | G = 46: 2^+0.89, which fails; G = 43: 2^-2.1; G = 40: 2^-4.7 (30,000 to 150,000) |
@@ -676,7 +712,11 @@ at fp256.
 The fp64 random rows are the 60,000-lane run again, at the final
 parameters, with `in_main` taking the model's own screens. The first
 version cited a run with the log family still at D = 24, and its filter
-skipped the last unit at each end of the exp family's range.
+skipped the last unit at each end of the exp family's range. The fp128
+and fp256 random log rows are re-runs on the revised model at the final
+D. The first version's were the first model's, fp128's at D = 39. At
+fp256 they come out the same, since none of the 200 arguments falls in
+the band.
 
 **Placed** (`worstcase.py`, revised) means each path's own largest |r|:
 - the exp family: x next to (n +- 1/2) ln2/8 and (2n +- 1)/16;
@@ -688,8 +728,9 @@ skipped the last unit at each end of the exp family's range.
 
 The first version placed no log1p point on the r = x path, which is how
 defect 8 went unseen there, and built each exp-family point twice.
-log1p's placed column fell from 2^-6.1, 2^-8.7 and 2^-8.3 to 2^-2.8,
-2^-5.3 and 2^-4.9: the new points are the worse ones, as they should be.
+log1p's placed ratios rose from 2^-6.1, 2^-8.7 and 2^-8.3 to 2^-2.8,
+2^-5.3 and 2^-4.9, so its margins fell: the new points are the worse
+ones, as they should be.
 Random arguments at fp256 show a margin of 2^-26 only because the
 truncation goes as (r/rho)^69 and random arguments rarely sit at rho.
 Placed, the margin is 2^-2.8 to 2^-6.5. The bound binds where it should.
@@ -730,7 +771,7 @@ family K 11 D 23):
 | log1p on [2^-4, 2^-3), x > 0 and x < 0 | 2^-2.4, 2^-2.3 | 2^-4.4, 2^-4.3 |
 | instructions, rne: exp, exp2, expm1, log, log2, log1p | 181, 179, 175, 193, 187, 227 | 180, 178, 175, 186, 180, 220 |
 
-At G = 46, larger samples of the two thin regions (`cancel.py`, 20,000
+At G = 46, larger samples of the two cancelling cells (`cancel.py`, 20,000
 each): log1p on [-1/8, -15/256) 2^-1.81, log2 on [0.875, 0.9414) 2^-2.20.
 `log1p_floor.py` (3,000 a region) splits log1p's error there by part.
 For x > 0 on the band:
@@ -738,13 +779,38 @@ For x > 0 on the band:
 - the correction's rounding, 2^-3.9;
 - its missing square term, 2^-4.0;
 - the rest, 2^-2.6.
-For x < 0 the rest, the cancelling sum, leads (2^-2.2).
+For x < 0 the rest, the sums that carry the low word and cancel, leads
+(2^-2.2).
+
+**At volume, on amd-arc-box:** verifier-VM1b's scripts, run by the lead
+on b252824. fp64, every bit of the argument random; the worst ratio, and
+for G = 46 how many lanes passed 2^-2.
+
+| fp64 region | arguments | G = 46 | G = 44 |
+|---|---|---|---|
+| log1p, x in [-1/8, -15/256) | 100,000 | 2^-1.724 (14) | 2^-3.231 |
+| log1p, x in [15/256, 1/8) | 100,000 | 2^-1.690 (24) | 2^-3.753 |
+| log1p, x in [15/256, 0.0587] | 40,000 | 2^-1.598 (143) | 2^-3.627 |
+| log1p, x in [-0.05865, -15/256) | 40,000 | 2^-1.843 (6) | 2^-3.603 |
+| log2, x in [0.875, 0.9414) | 100,000 | 2^-2.084 (0) | 2^-3.455 |
+| log, x in [0.875, 0.9414) | 50,000 | 2^-3.138 (0) | 2^-4.306 |
+| expm1 at n = +1, at n = -1 | 40,000 each | 2^-3.225, 2^-3.509 | 2^-5.199, 2^-5.583 |
+| exp, exp2 at the edge of n = 0 | 30,000 each | | 2^-2.760, 2^-2.762 |
+| expm1 at the clamp, x in [68, 70] | 30,000 | | 2^-2.927 |
+| VM1's weighted sampler: exp, exp2, expm1, log, log2, log1p | 40,000 each | | 2^-2.64, 2^-2.63, 2^-2.95, 2^-4.07, 2^-4.05, 2^-3.53 |
+
+- No lane passed 2^-1 anywhere.
+- The same batch ran VM1b's budget over 3,000 uniform arguments a cell.
+  At G = 46 its worst cases are 0.42 to 0.47 of the bound in log1p's
+  band and log2's cell, 0.20 in log's and 0.16 in expm1's n = +1. At
+  G = 44 they are 0.12 to 0.14, and 0.16 for exp and exp2 (their
+  truncation). Every worst observed lies under its count.
 
 Verifier-VM1's weighted sampler could not see the low word's terms: its
 reduction-path log1p arguments were x = u - 1, exact, so u_l = 0. At
-G = 44 every fp64 region measured keeps at least 2.6 bits. There the
-exp family's planners take one degree off D, so the exp rows sit at the
-two-bit target instead of above it.
+G = 44 every fp64 region measured keeps at least 2.6 bits; the smallest
+is exp2's 2^-2.63. There the exp family's planners take one degree off
+D, so the exp rows sit at the two-bit target instead of above it.
 
 ### 3.4 How often a lane is marked
 
@@ -802,9 +868,11 @@ fp128 and fp256 are verifier-VM1's run of the same script.
 - **Which arguments mark.** Near 0, exp(x) = 1 + x + x^2/2 + .... Where
   1 + x is a rounding boundary, the true value sits x^2/2 from it, and
   the lane marks while that is inside the bound, about 2^-(p+G).
-  - For x = c 2^-e that means 2e + 1 - 2 log2 c > p + G. So the
-    exponents that mark run from about (p + G)/2 up to p: 3 of them at
-    fp64, 33 at fp128 and 95 at fp256.
+  - For x = c 2^-e that means 2e + 1 - 2 log2 c of about p + G or
+    more. So the exponents that mark run from about (p + G)/2 up to p:
+    about 4 of them at fp64, 34 at fp128 and 96 at fp256. At fp64
+    verifier-VM1b measured c = 1 marking for e = 49 to 52 under rtz,
+    and for e = 53 under rne.
   - The census's 14 exponents cut that off. At fp256 the whole census
     window marks under the directed three.
 - **Each is the centre of a window.** A neighbour x + j ulp(x) moves the
@@ -1035,8 +1103,9 @@ Each 6 bits of G cost about 8 instructions for exp and 15 for log. At
 fp64 the double word's floor (10u^2 = 2^-102.7), with the planners' two
 bits of slack, stops the exp family's G at 47. In the log family's
 cancellation cells the floor reaches the result amplified (3.2). At
-fp64, G = 46 already keeps less than two bits there, and G = 44 costs
-180 instructions for exp and 186 for log (`g44.py`, 3.3). Question 1.
+fp64, G = 46 already keeps less than two bits in log1p's band and just
+over two in log2's cell, and G = 44 costs 180 instructions for exp and
+186 for log (`g44.py`, 3.3). Question 1.
 
 **augadd, once every image carries R21** (COMPUTED from the fragments'
 error-free additions). augerr and augadd split a sum exactly in 2
@@ -1055,9 +1124,9 @@ revision 8's question 9 writes TwoSum until every image carries R21.
 
 **An exact path for the structured families near 1** (ESTIMATE). Keep
 1 + Z as three words where n = 0, and round once through round-to-odd:
-about 12 more instructions on every call of exp and exp2. expm1's,
-log1p's and log's families (section 3.5) are inherent to a double word
-and would need triple words near 0 or 1. Question 4.
+about 12 more instructions on every call of exp (exp2 has no family,
+3.5). expm1's, log1p's and log's families (section 3.5) are inherent to
+a double word and would need triple words near 0 or 1. Question 4.
 
 ### 5.4 What it does to a step
 
@@ -1333,26 +1402,42 @@ lead's (Logan's rule, verbatim in the brief).
    exp and 15 for log (5.3). There are two choices for fp64, both
    MEASURED (3.3):
    - **G = 46 everywhere,** the first version's choice. The bound holds
-     wherever it was measured. At fp64 the thinnest margins are in the
-     cancellation cells:
-     - log1p, x from -1/8 to -15/256: 2^-1.8 (20,000 arguments);
-     - log2, x from 0.875 to 0.94: 2^-2.2; verifier-VM1's 100,000
-       weighted arguments gave log2 2^-2.5.
-     There the planners' two-bit rule fails, and the coarse count of
-     3.2 does not show the bound.
-   - **G = 44 at fp64,** verifier-VM1's preference:
-     - every fp64 region measured keeps at least 2.6 bits, and the
-       coarse count shows the bound;
-     - the mark rate is 2^-43.5 a call, four times 46's;
-     - the planners take K = 11 for the log family and D = 12 for exp
-       and exp2. That saves 7 instructions in each log routine and 1
-       in exp and exp2.
-   At fp128 and fp256 the cancellation moves nothing. The thinnest
-   margin there is expm1's at its clamp, 2^-2.9 at every format (3.2),
-   and the rest keep 2^-3.8 or more.
-   Recommended: G = 44 at fp64, and 46 at fp128 and fp256. The rule
-   that picks them is the planners' two bits, counted with A and with
-   log1p's low word. A second G costs nothing: 2^-(p+G) is a bank word
+     wherever it was measured.
+     - At fp64 only log1p keeps less than the planners' two bits, near
+       its reduction path's lower end on both sides: 2^-1.72 (x < 0)
+       and 2^-1.69 (x > 0) over 100,000 arguments on the box, and
+       2^-1.60 in the band's lowest part.
+     - log2's cell comes next: 2^-2.08 on the box, and 2.1 to 2.5 bits
+       in every measurement.
+     - Counted instruction by instruction, the worst case is about half
+       the bound. That is one bit of worst-case margin, not a failing
+       bound. The coarse count of 3.2 cannot show even that.
+   - **G = 44 at fp64,** the preference of verifier-VM1 and of
+     verifier-VM1b:
+     - it holds at volume: at least 2.6 bits in every region measured.
+       The smallest is exp2's 2^-2.63 (VM1's weighted sampler on the
+       box, 40,000 arguments); the log family's cells keep 2^-3.2 or
+       better (100,000);
+     - counted instruction by instruction, its worst case is about
+       2^-2.5 in the log family and 2^-2.6 in exp and exp2 (their
+       truncation, at the planners' target). This is where the two-bit
+       line first holds with room: G = 45 sits on it (0.255 Bv for
+       log2), and G = 46 is at one bit;
+     - it is the largest G at which the planners' shorter fragments
+       apply: K = 11 for the log family and D = 12 for exp and exp2.
+       That saves 7 instructions in each log routine and 1 in exp and
+       exp2. G = 45 gives the fragments of 46, at 46's cost;
+     - its costs are a mark rate of 2^-43.5 a call, four times 46's, and
+       wider structured windows (verifier-VM1b, 0 wrong unmarked). Of
+       the census's 240 arguments, exp marks 39 under the directed
+       three instead of 23, expm1 13 instead of 9, and log1p 11 instead
+       of 7; log marks 9 of 32 instead of 7.
+   At fp128 and fp256 the cancellation moves nothing: the roundings
+   there come to about 2^-7 of the bound (verifier-VM1b's count). The
+   thinnest margin there is expm1's at its clamp, 2^-2.9 at every
+   format (3.2), and the rest keep 2^-3.8 or more.
+   Recommended: G = 44 at fp64, and 46 at fp128 and fp256, on the
+   grounds above. A second G costs nothing: 2^-(p+G) is a bank word
    that differs by format anyway.
 2. **fp32.** A double word caps G near 18, a rate of 2^-17.5, which is
    not rare. Triple words cost about twice fp64: exp takes 382
@@ -1472,7 +1557,9 @@ PROPOSED, after the lead's review and Logan's answers:
    - Every fragment is held to its invariants: flag words, attributes,
      words, live values. Four of C4's invariants fail the model's
      fragments today, and section 6 says what each needs (question 12).
-   - The planners count the cancellation factor A and log1p's low word
+   - The planners' floor is counted rounding by rounding, as
+     verifier-VM1b's budget counts it. Counted coarsely, with 12u^2
+     times 22 and log1p's low word, it would refuse G = 44 at fp64
      (3.2).
    - The tests: section 8's items 1 to 5 and the plants, quick ones in
      the golden stage.
@@ -1518,7 +1605,7 @@ this directory with the repository's `python/` on the path, which
 | `census.py` | the structured families |
 | `alts.py`, `bound_terms.py`, `consts_report.py`, `rmax.py`, `words_union.py`, `final_counts.py` | the alternatives, the bound's terms, the screens, the reduction's max |r|, the bank's union, the final fragments' counts |
 | `onseq.py` | the fragments as programs on seq.py through routines.run |
-| `*.out.txt` | each run's output as captured, named for its script; the outputs from before a design change say which version they measured. `-first` marks a run of the first version, kept beside its revised run |
+| `*.out.txt` | each run's output as captured, named for its script; the outputs from before a design change say which version they measured. `-first` marks a run of the first version, kept beside its revised run; `-revised` a revised run beside a first-version file that keeps its name |
 
 The runs and their loads are in the round's ledger,
 `Data/runs/2026-10-02-step6-round/ledger/M1.md`.
