@@ -97,11 +97,12 @@ take it, and so do revision 8's, which hold 2^24 instructions
 (verifier-VC4's 180 chained divisions: 34,201 instructions a step,
 inlined); revision 7's targets refuse it
 `target-feature` first, as they refuse every image with a routine; and
-a target that published flag control and held fewer instructions than
-the image would refuse it `program-capacity`, by name - no built-in
-target is that, so python/tests/test_cftc.py holds the refusal at
-revision 8's targets' fields with the instruction capacity one under
-an image's size. A loop keeps every call's operands and
+a target that publishes flag control and holds fewer instructions than
+the image refuses it `program-capacity`, by name - revision 8's three
+do, for an image past their 2^24 instructions. python/tests/
+test_cftc.py holds that refusal at revision 8's targets' fields with
+the instruction capacity one under an image's size, rather than by
+compiling an image past 2^24 instructions. A loop keeps every call's operands and
 results in the scratch across it, where inlining consumes each as it
 goes, so it can need far more slots than the inlined step: verifier-
 VC4's source of 32,769 instructions loops one batch of 170 calls into

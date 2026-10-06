@@ -1346,6 +1346,18 @@ PROPOSED, in C4's and L4's pattern.
   existing instructions. Question 5's transcend.py fix, if taken, is a
   major profile step of its own.
 
+**A note of 2026-10-06** (parcel TG; the study's text is as of
+2026-10-05 and stays so). Revision 8's three targets joined cftc's
+built-in table at cftc's output version 5 (docs/VALIDATION.md,
+2026-10-06), and `cftc.targets.provisional`, cited under "Targets"
+above, went with the provisional table. So where this study names the
+math library's cftc step as version 5 - "from 4 to 5" and "gains
+version 5" under "Versions" above, question 9's "cftc VERSION 5"
+(section 9) and phase 2's "VERSION 5, the outputs record, and the
+certificate corpus remade" (section 10, item 4) - the step would now be
+from 5 to 6, and the corpus's sourced cases carry `compiler cftc 5 sw`;
+the rest of each stands.
+
 **The interpreter now needs mpmath** for these nodes, because
 transcend.py's enclosures do. So:
 - the `lang` stage and the golden auditor, handed a source that uses

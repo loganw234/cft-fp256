@@ -412,9 +412,9 @@ their operands in those functions' order.
   instructions (verifier-VC4's 180 chained divisions: 34,201
   instructions a step, inlined). Revision 7's targets refuse it
   `target-feature` first, as they refuse every image with a routine;
-  a target that published flag control and held fewer instructions
-  than the image would refuse it `program-capacity`, by name, and no
-  built-in target is that. An operand every call takes from one bank slot - the 1 of a
+  a target that publishes flag control and holds fewer instructions
+  than the image refuses it `program-capacity`, by name, as revision
+  8's targets refuse an image past their 2^24 instructions. An operand every call takes from one bank slot - the 1 of a
   reciprocal, the constant of `x / 3` - is read from the bank and kept
   out of the records. The constant is the compiler's own and no
   target's number, so one image still serves every target that takes
