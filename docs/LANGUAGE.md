@@ -397,7 +397,7 @@ their operands in those functions' order.
   software targets and revision 8's (`u50-rev8`, `u50-rev8-quad` and
   `u50-rev8-deep`) compile it, and libcft's software backend runs it.
 - **A call loop.** A step whose routines, inlined, would pass 32,768
-  instructions - the largest instruction memory a tile has - runs
+  instructions - a revision-7 tile's instruction memory - runs
   batches of them in loops instead: one copy of the routine in a
   `repeat`, called once a record in the scratch, the record's operands
   stored before the loop and its result read back after

@@ -1921,7 +1921,7 @@ int main(void)
         /* The plan's other claim: a revision-8 U50 tile's seq_features is
          * the software handle's word at ABI 0.17. One word, two sources -
          * cft_sw_seq_caps and device.c's publishing, against the decode of
-         * the words rtl/cft_krnl.sv will assemble. */
+         * the words rtl/cft_krnl.sv assembles. */
         {
             cft_caps swc;
             cft_seq_caps sc;

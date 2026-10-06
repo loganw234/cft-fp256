@@ -3023,7 +3023,8 @@ the step-6 round's R8). Revision 8's RTL builds all four (2026-10-05,
 since rev8a, the revision's first hardware image, which passed its card
 legs on 2026-10-06 (docs/VALIDATION.md). What a tile would need - R23's MODE
 bit, its pointer register, kernel argument and VERSION, and each item's
-decode - is a proposal below, the RTL plan's to confirm.
+decode - was a proposal below, written before the RTL plan; what
+revision 8's RTL built is in "Revision 8 in the tile", at the end.
 R20 is left to revision 7's third item, the program limits, should it
 take a number. All five text forms are in `asm.py` and, since
 2026-10-02, in `host/tools/cft-asm.c`.
@@ -3372,11 +3373,11 @@ kernel's forms; and anything a tile adds to build either item.
 *Built golden-first on 2026-10-02 (the step-6 round's R8): the model,
 the software backend at ABI 0.17 and the remote protocol. A tile carries
 it from revision 8's RTL (built 2026-10-05; "Revision 8 in the tile", at
-the end), and a tile on a card since rev8a, revision 8's first hardware
-image (2026-10-06); every device without CAPS2[13] - a revision-7 tile,
-or a remote handle over one - refuses the block by name. It changed how
-a run reports, so it was written down before any code: 2026-09-29, and
-its mark on 2026-10-02.*
+the end), and tiles on a card have carried it since rev8a, revision 8's
+first hardware image (2026-10-06); every device without CAPS2[13] - a
+revision-7 tile, or a remote handle over one - refuses the block by
+name. It changed how a run reports, so it was written down before any
+code: 2026-09-29, and its mark on 2026-10-02.*
 
 **The ask** (docs/ROADMAP.md, ask 5): invalid and overflow delivered with
 each lane's outputs, so that a design sweep can drop the one variant that
