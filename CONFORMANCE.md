@@ -290,9 +290,32 @@ Conformance is scored, not read.
 - **The record.** Its record, the golden corpus plus load cases at each
   loader rule's edge and at each header field's encoding extremes, is a
   backstop, not the rule.
-  - The vector sets and the golden corpus (`certificates/MANIFEST`:
-    every case's images, initial states and boundary states) are held by
-    gates today, so a change that moves one of their bits fails by name.
+  - The golden corpus (`certificates/MANIFEST`: every case's images,
+    initial states and boundary states) is held by a gate today, by
+    digest. The `programs` stage's corpus check holds every file to its
+    SHA-256, has the golden writer make every certificate again and has
+    cft-segrun make each one marked for both writers, so a change that
+    moves one of its bits fails by name.
+  - The vector sets are held by name. The runner's `vectors` stage
+    holds a generation's set names to `vectors/SHA256SUMS`'s, all 168,
+    and each set to the digest the generation recorded itself. The
+    replays hold libcft to the model's sets case by case, so a change to
+    one of the two fails by set and line. The digests are held by
+    `vectors/SHA256SUMS` alone, and by a regeneration by hand at the
+    profile's parameters, compared with it line for line: `make
+    vectors`, then
+    `sed 's#  #  out/#' vectors/out/SHA256SUMS | diff vectors/SHA256SUMS -`.
+    Profile 3 was checked so (2026-10-05).
+  - **A known limit: no gate compares a set's digest with
+    `vectors/SHA256SUMS`.** The runner generates at the generator's
+    default counts (`--directed 4000 --random 6000 --simple 400`, where
+    the profile's are 3000, 4000 and 200), so its twenty opcode sets are
+    not the profile's bytes, and it reads the record for names only. A
+    change to the model and libcft together that moves a recorded bit
+    therefore passes every gate at the vector sets; only the comparison
+    above shows it. It is not closed now: closing it changes
+    `verify/run.sh`, which would need a gate run of its own
+    (2026-10-05).
   - The load cases are not built yet. For each of the loader's rules
     they would hold an image at its edge, accepted, and one past it,
     refused by name; for each header field, acceptance at its encoding's
