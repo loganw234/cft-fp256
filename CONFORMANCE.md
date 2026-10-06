@@ -297,10 +297,13 @@ Conformance is scored, not read.
     cft-segrun make each one marked for both writers, so a change that
     moves one of its bits fails by name.
   - The vector sets are held by name. The runner's `vectors` stage
-    holds a generation's set names to `vectors/SHA256SUMS`'s, all 168,
-    and each set to the digest the generation recorded itself. The
-    replays hold libcft to the model's sets case by case, so a change to
-    one of the two fails by set and line. The digests are held by
+    holds each of the 168 sets `vectors/SHA256SUMS` names to a set of
+    that name in the generation, and each set to the digest the
+    generation recorded itself; a set the generation adds beyond the 168
+    is not refused. The replays hold libcft to the model's sets case by
+    case, so in the gate budget and the full census a change to one of
+    the two fails by set and line (a `verify-quick` or `--only` run may
+    replay an older generation, as `verify/README.md` says). The digests are held by
     `vectors/SHA256SUMS` alone, and by a regeneration by hand at the
     profile's parameters, compared with it line for line: `make
     vectors`, then
@@ -311,9 +314,13 @@ Conformance is scored, not read.
     default counts (`--directed 4000 --random 6000 --simple 400`, where
     the profile's are 3000, 4000 and 200), so its twenty opcode sets are
     not the profile's bytes, and it reads the record for names only. A
-    change to the model and libcft together that moves a recorded bit
-    therefore passes every gate at the vector sets; only the comparison
-    above shows it. It is not closed now: closing it changes
+    change that moves a recorded bit or case - to the model and libcft
+    together, or to the generator alone - therefore passes the gate
+    budget at the vector sets. The full census's `node` and `wasm` stages
+    replay the sets through the committed WebAssembly module too, so a
+    change to the model and libcft fails there until the module is
+    rebuilt with it, and then passes. From then on, and for a change to
+    the generator alone throughout, only the comparison above shows it. It is not closed now: closing it changes
     `verify/run.sh`, which would need a gate run of its own
     (2026-10-05).
   - The load cases are not built yet. For each of the loader's rules
