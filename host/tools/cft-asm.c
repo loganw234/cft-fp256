@@ -52,8 +52,8 @@
  * ninth constant-index bit per operand in imm[30:28] under kx, which
  * leaves imm[31] as the only reserved-must-be-zero bit of the word.
  *
- * And its "Revision 8" section, which no tile builds yet and which the
- * model, asm.py and libcft's software backend define golden-first:
+ * And its "Revision 8" section, which the model, asm.py and libcft's
+ * software backend define golden-first and revision 8's RTL builds:
  * R21's `augadd` and `augerr` (codes 10 and 11), R22's signed post-step
  * on `stx` and `ldx` (imm[11:0]), and R24's flag control - `quiet` and
  * `endquiet` (12 and 13), a region whose instructions' flags reach

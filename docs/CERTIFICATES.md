@@ -2375,18 +2375,30 @@ With leg h following the tile's CAPS2[13], and leg j's controls of it
 (parcel SC8, 2026-10-06): 1,077 checks on the Windows desktop and one
 SKIP, 88 s - sections 1 to 13 716, as before, and section 14 361, which
 alone (`--v2-only`) takes 8 s; section 14 alone in WSL (cft2204, gcc
-11.4, Python 3.10), 359 checks, 0 failed, 5 s. Not yet run on a card.
+11.4, Python 3.10), 359 checks, 0 failed, 5 s. Not yet run on a card
+(true when written; at 6e250ce it ran on rev8a, revision 8's first
+image, that night - card-segrun 6 checks of 6, the gate's 695 of 695,
+nothing skipped).
 With the writer's list removed from the tool's environment, not set
 empty (the card leg on q135b, 2026-10-03): 1,057 checks on the Windows
 desktop and one SKIP, 102 s, the desktop about 8 % busy before it -
-sections 1 to 13 716, section 14 341. Not yet run on a card.
+sections 1 to 13 716, section 14 341. Not yet run on a card (true when
+written; this gate ran at c039998 on q135b on 2026-10-05, card-segrun
+6 checks of 6 and the gate's 652 of 652, and at 688b653 on rev8a on
+2026-10-06, card-segrun 6 with 1 failed and the gate's 678 with 2
+failed, both leg (h)'s refusal of the block, a check that held a
+revision-7 card - which the paragraph above replaced).
 With the Unicode split deciding (verifier-VCV2CW's second check,
 2026-10-03): 1,055 checks on the Windows desktop and one SKIP, the trial's
 cost NOT TESTED there, 88 s, the desktop about 2 % busy before it -
 sections 1 to 13 716, as before, and section 14 339, which alone
 (`--v2-only`) takes 8 s; section 14 alone in WSL (cft2204, gcc 11.4,
 Python 3.10), 337 checks, 0 failed, 6 s, without Windows' argument case
-and its two checks. The whole gate not yet run in WSL, nor on a card.
+and its two checks. The whole gate not yet run in WSL, nor on a card
+(true when written; on a card this gate ran at 4449c49 on q135b that
+night, card-segrun 6 with 1 failed and the gate's 642 with 3 failed,
+all section 14's card leg - the writer's list set empty, the cause the
+paragraph above removed).
 With the process's own text (verifier-VCV2CW's finding, 2026-10-03):
 1,044 checks on the Windows desktop and one SKIP, 91 s - section 14 328;
 section 14 alone in WSL 326 checks, 0 failed, 6 s.
@@ -2423,8 +2435,7 @@ card certificate's run blocks to the software backend's. Since step 5
 each card certificate carries its program's accuracy entries, from the
 states the card's runs wrote. Its accuracy block is held to the
 software backend's too, and the script hands the gate cft-audit, so
-both auditors must accept each card certificate. It has not run with
-entries on a card yet: the card legs are the lead's. It ran at
+both auditors must accept each card certificate. It ran at
 99f1b43 on 2026-09-28, on the U50 (XRT 2.19) with both round-2 images:
 8 checks of 8, the gate's 295 of 295 on the quad's four tiles and 295
 of 295 on the single, 48 to 50 s each, and its negative control, a
@@ -2434,7 +2445,10 @@ d4abe2a, P3b's three answers (not at ff7ff7b alone),
 8 of 8 each time, the gate on each image 373 of 373 at 4eed552, 382 of
 382 at eb2d1ae, and 384 of 384 at d4abe2a in 66 to 68 s, nothing
 skipped (2026-09-28 and 29; the round's ledger, card-p3b, card-p3b2
-and card-p3b3).
+and card-p3b3). With entries it first ran at 2054660 on 2026-09-30,
+the gate's 633 of 633 on revision 7's quad and on its single
+(docs/VALIDATION.md, that date); each later card run is beside its
+gate's count above.
 
 ## The audit tool
 
@@ -2931,9 +2945,9 @@ segments a run. Each holds something no other does:
   (20, 0, 1, 0, 20 and 48, 48, 0, 48, 48), which no ODE segment's do.
 - `augsum-fp64`: revision 8. augadd and augerr keep a compensated sum,
   and a stepped STX and LDX store and read back its partial sums. Only
-  the software backend makes it: no tile built so far publishes either
-  revision-8 bit, and a tile without one refuses the program at load,
-  by name.
+  the software backend has made it: no card has run it, though rev8a,
+  revision 8's first image, publishes both revision-8 bits (2026-10-06),
+  and a tile without one refuses the program at load, by name.
   - Its lanes 2 and 3 start at s = +-(2^53 + 2) with t = +-1, so their
     first augadd is a tie: +-(2^53 + 3), between +-(2^53 + 2), whose
     significand is odd, and +-(2^53 + 4). roundTiesTowardZero, 754's

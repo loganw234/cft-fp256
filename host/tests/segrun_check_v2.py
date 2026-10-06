@@ -1484,11 +1484,11 @@ def hold_card_lane_flags(device, l63, flag, version, caps, where="the card",
 
 
 def hold_lane_flags_decode():
-    """j. h's decode held to host/src/caps_decode.h: its two map
-    thresholds, and the shift that carries CAPS2[14:11] to
-    seq_features[18:15] from 0xB00 - so that CAPS2[13] is bit 17, the
-    golden model's seq.FEAT_LANE_FLAGS. A change to the header fails this
-    until h follows it."""
+    """j. h's decode held to host/src/caps_decode.h by its text: the two
+    map thresholds, and the shift that carries CAPS2[14:11] to
+    seq_features[18:15] from 0xB00, so that CAPS2[13] is bit 17, the
+    golden model's seq.FEAT_LANE_FLAGS. An edit to that text fails this
+    until h follows it; one around it does not, even one to the decode."""
     src = (ROOT / "host" / "src" / "caps_decode.h").read_text(
         encoding="utf-8")
 

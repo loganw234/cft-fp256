@@ -818,14 +818,14 @@ it always was.
   `CFT_SEQ_FEAT_SCRATCH_STEP` (CAPS2[12]; STX and LDX with a signed
   twelve-bit post-step, as CORE-V XCVmem defines it). The software backend
   computes and publishes both, so a software handle's `seq_features` is
-  **0x1ff1f** (0x7f1f at 0.15). No tile built so far carries either, and
-  every device without a bit refuses a program that needs it at load, by
-  name.
+  **0x1ff1f** (0x7f1f at 0.15). No tile built before rev8a, revision 8's
+  first image (2026-10-06), carries either, and rev8a carries both; every
+  device without a bit refuses a program that needs it at load, by name.
 
 | surface | status at ABI 0.16 |
 |---|---|
 | C (`cft.h`) | complete. `api-test` holds `cft_open_ex`'s depth in the caps (2,048 asked, 2,048 published; 0 is 256) and each refusal but two by status and a word of its sentence, every one made before a handle exists - no test holds the `-DCFT_NO_PROGRAM` refusal (verifier-R6 measured it in such a build by hand) or either bound of the range, 1 and 32,768; two plants, the depth kept out of the caps and the artifact refusal removed, each fail it by name. `device-test` opens its reference at the device's `max_scratch` and runs the whole software matrix at `--scratch-depth 2048` (`sw -s`: 918 checks, 0 failed, among them a scratch block as deep as the device, held to its own bytes, which verifier-R5's finding on the loader added). `seq_check.py` holds the revision-8 corpus and every refusal to the model |
-| hardware | revision 7's RTL (R18, R19 and the limits per build) moves no call. CAPS2[11] and [12] read zero on every tile, so a tile refuses both revision-8 forms by name |
+| hardware | revision 7's RTL (R18, R19 and the limits per build) moves no call. CAPS2[11] and [12] read zero on every revision-7 tile, so such a tile refuses both revision-8 forms by name; rev8a, revision 8's first image, publishes both (2026-10-06) |
 | XRT | no change: a non-zero depth with an xclbin is refused; a tile's depth is its CAPS2[3:0] |
 | remote | no frame change: a remote handle's depth and bits are its server's, and a depth with a `cft://` artifact is refused before any connection. `cft-serve` has no flag to serve a deeper software device |
 | Node / Browser | the module rebuilt at 0.16 as every step requires: `b3c023af...`, 259,935 bytes, still 141 `cftw_*` exports (149 in all). No export reaches `cft_open_ex`, so its software handle is 256 slots; it publishes **0x1ff1f**, which `test.mjs` holds. `verify.mjs` now holds the loader's `malloc` export to the adopted instance's as well as its heap - one export, by identity, so a loader that wraps any other still passes it (verifier-R6); `conformance.html` and `demos.html` were rebuilt on it, and the demos chains re-recorded with every chain unchanged (bindings/wasm/README.md) |
@@ -856,7 +856,8 @@ the contract's precision moved, byte for byte.
 ### ABI 0.17 (2026-10-02): revision 8's flag control and per-lane flags
 
 The library's side of revision 8's R24 and R23 (docs/SEQUENCER.md),
-defined golden-first; no tile carries either. It is ADDITIVE for every
+defined golden-first; a tile carries both since rev8a, revision 8's
+first image (2026-10-06, docs/VALIDATION.md). It is ADDITIVE for every
 program a 0.16 library loads. Every 0.16 loader refused control codes 12
 to 14, so no program they load can raise or set STATUS[6]. Such a
 program computes and reports exactly what it did at 0.16, unless its run
@@ -911,13 +912,15 @@ argument 17). ABI 0.17 already has every field and bit; docs/HOSTAPI.md,
 The host's side of R23 on a tile (docs/HOSTAPI.md, "The lane-flags block
 on XRT"): a run asking for the block on a tile that publishes CAPS2[13]
 gets it, MODE[24] set and each tile's bytes copied to its slice's first
-lane, as the counts are. No tile publishes the bit yet, so on every
-device that exists every call behaves as it did.
+lane, as the counts are. A tile publishes the bit since rev8a, revision
+8's first image (2026-10-06), whose blocks on the card are the software
+backend's byte for byte; on every device without it every call behaves
+as it did.
 
 | surface | status |
 |---|---|
-| hardware | no image: the RTL is round 2's (parcel C); a revision-8 image is the first that can take the block |
-| XRT | the block on a 0xB00 tile publishing CAPS2[13]: argument 17 the slice's buffer, MODE[24] set, the caller's bytes staged under a mask, each tile's block copied to its lanes' offset. A run that does not ask passes the one-beat stand-in with MODE[24] clear, eighteen arguments as before. Refused by name, as before, on a device without the bit; a block on a map below 0xB00 refused by name in the backend too. Compiled with XRT=1 in cft2204 with no warning; run on no device yet (probe E and the card legs are the lead's) |
+| hardware | the RTL is round 2's (parcel C); rev8a, revision 8's first image, takes the block on the card (2026-10-06, docs/VALIDATION.md) |
+| XRT | the block on a 0xB00 tile publishing CAPS2[13]: argument 17 the slice's buffer, MODE[24] set, the caller's bytes staged under a mask, each tile's block copied to its lanes' offset. A run that does not ask passes the one-beat stand-in with MODE[24] clear, eighteen arguments as before. Refused by name, as before, on a device without the bit; a block on a map below 0xB00 refused by name in the backend too. Compiled with XRT=1 in cft2204 with no warning, and on amd-arc-box against XRT 2.19.194, where the build's only warnings are the two known ones in `cft_resident.cpp`. Run under hw_emu by probe E (2026-10-05: two segments' blocks equal to the software backend's) and on the card on rev8a (2026-10-06: device-test's lane-flags legs at every format and card-segrun's leg (h), each equal to the software backend's) |
 | C (`cft.h`) | unchanged. `api-test` holds the block's window over every cut, with a negative control; device-test's lane-flags leg gains a run with no mask, the per-lane deposit overflow and strict range, and a page of the block a tile in its capacity legs (software and loopback, 2026-10-05) |
 | remote | no frame change: a server fronting such a tile serves the block through `PROG_RUN_EX`'s bit 1, as it serves the software backend's |
 | Arduino | the vendored copy re-synced (`src/lane_cut.h`, `src/device.c`, `src/backend.h`; still 35 files) |
@@ -946,7 +949,7 @@ output struct grew, under the size handshake it already had.
 |---|---|
 | C (`cft.h`) | complete. `api-test` holds the layout, a 0.17-sized call refused unchanged on the software backend, and the clock reader (`host/src/xclbin_clock.h`) on fifteen synthetic images and two malformed ones; device-test prints the four fields on an xclbin, the serial withheld unless `--show-serial` |
 | hardware | no RTL: the image's bytes and XRT's answers, nothing a tile publishes |
-| XRT | the four fields recorded at `cft_open`. Compiled against XRT 2.14's headers in cft2204 with no warning; the clock reader run by verifier-VCV2CW on all fifteen of that distro's images: its four hw images 10, 10, 135 and 135 MHz on their own units (the 135 MHz pair in `/root/cft-quad-tip/`), its eleven hw_emu images not known. Not yet compiled with XRT=1 on amd-arc-box, and not yet run on a card |
+| XRT | the four fields recorded at `cft_open`. Compiled against XRT 2.14's headers in cft2204 with no warning; the clock reader run by verifier-VCV2CW on all fifteen of that distro's images: its four hw images 10, 10, 135 and 135 MHz on their own units (the 135 MHz pair in `/root/cft-quad-tip/`), its eleven hw_emu images not known. Compiled with XRT=1 on amd-arc-box against XRT 2.19.194 since 2026-10-03, the build's only warnings the two known ones in `cft_resident.cpp`, and run on the card: device-test read platform `xilinx_u50_gen3x16_xdma_base_5`, XRT 2.19.194 and a kernel clock of 135,000,000 Hz from the image, the serial none reported, on q135b (2026-10-03) and on rev8a (2026-10-06) |
 | remote | no frame change: `cft_get_image_id` refused on the client as before, so the four lines are `unknown`. A 0.17 peer is refused at HELLO |
 | Node / Browser | the module's sources need nothing new - no export reaches `cft_get_image_id` - and the integrator rebuilds it at 0.18, as every step's is; `verify.mjs` and `test.mjs` read the version from `cft.h`, so they fail against the 0.17 module until then |
 | C++ (`cft.hpp`) | no wrapper for the four fields; a C++ caller reaches them through `cft.h`, and `header_abi_version` reads the macros |

@@ -705,9 +705,9 @@ def hold_identity(what, idn, backend):
 def certify_and_hold(prog, chains, mode, work, device="sw", tag="",
                      may_refuse_load=False):
     """Steps 1 to 6 for one program in one mode. -> (bytes, states dir),
-    or None. With may_refuse_load, a device that refuses to load the
-    image (program-image) is a NOTE, not a failure: the card leg's
-    `flagstep`, which needs features the brief's six programs do not."""
+    or None. With may_refuse_load, a device that refuses to load the image
+    (program-image) is a NOTE, not a failure: the card leg's `flagstep` and
+    `markstep`, on every card, even one whose tile publishes what they need."""
     salt = SALT if mode == "keyed" else None
     what = f"{prog.name} {mode}{tag}"
     stem = work / "out" / f"{prog.name}-{mode}{tag.replace(' ', '-')}"

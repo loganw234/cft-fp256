@@ -265,9 +265,9 @@ RAISE_MARK = 1 << 7
 # CAPS2[13] and CAPS2[14] (the step-6 round's R23 and R24) land on bits 17
 # and 18: CFT_SEQ_FEAT_LANE_FLAGS, a feature of a RUN - the per-lane block
 # a caller asks for, which no image needs - and CFT_SEQ_FEAT_FLAG_CONTROL,
-# an image's, for any QUIET, ENDQUIET or RAISE. Every tile built so far
-# reads both as zero: it decodes codes 12 to 14 as HALT, and refuses
-# MODE[24] at start with STATUS[3].
+# an image's, for any QUIET, ENDQUIET or RAISE. A revision-7 tile reads
+# both as zero: it decodes codes 12 to 14 as HALT, and refuses MODE[24] at
+# start with STATUS[3]. Every revision-8 build publishes both.
 FEAT_AUGADD = 1 << 15
 FEAT_SCRATCH_STEP = 1 << 16
 FEAT_LANE_FLAGS = 1 << 17
@@ -345,8 +345,8 @@ STATUS_SCRATCH_RANGE = 1 << 5
 # a lane whose last bit a routine's own test could not decide, to be
 # replayed before its answer is used - and the run says so here whether or
 # not it asked for R23's per-lane block. The first STATUS bit no tile and
-# no backend claims (rtl/cft_csr.sv read STATUS as six bits padded with
-# zeros until revision 8's seam, and reads [6] as zero until R24 is
+# no backend had claimed (rtl/cft_csr.sv read STATUS as six bits padded
+# with zeros until revision 8's seam, and [6] as zero until R24 was
 # built). Not an IEEE flag, so no quiet region silences it.
 STATUS_MARKED = 1 << 6
 

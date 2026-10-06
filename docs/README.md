@@ -1,14 +1,14 @@
 # The documents, by what you open them for
 
-Forty-three files, 73,794 lines. Flat in one directory they look like one
+Forty-three files, 74,045 lines. Flat in one directory they look like one
 undifferentiated pile; they are not, and the split is close to even:
 
-- **27,340 lines you consult while working** — the three under *Start here*,
+- **27,392 lines you consult while working** — the three under *Start here*,
   the contract, and the reference you call into;
-- **6,675 lines of tool manual**, one per shipped program;
+- **6,679 lines of tool manual**, one per shipped program;
 - **2,015 lines of operations**, read when you are about to do something to
   hardware;
-- **37,764 lines of record and argument** — the ledger, the roadmap and the
+- **37,959 lines of record and argument** — the ledger, the roadmap and the
   design studies. The history of how a decision was reached, worth keeping,
   and not what you open to get something done.
 
@@ -45,17 +45,17 @@ product, not the implementation.
 |---|---|---|
 | [DETERMINISM.md](DETERMINISM.md) | 1,442 | The determinism contract itself — the argument the whole project rests on, including the unassigned-opcode hazard and every time it has fired. |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | 1,176 | The tile: register map, MODE and CAPS words, the rule for when VERSION moves. |
-| [SEQUENCER.md](SEQUENCER.md) | 4,011 | The orbit sequencer and the program model. |
-| [LANGUAGE.md](LANGUAGE.md) | 2,375 | The language for dynamical systems: the grammar, the semantics (literal evaluation, exact constants rounded once, one attribute a program), the integrators written in it, time (t in the state, a step counter, forcing by a rotation, each measured), the step graph, the reference interpreter that is the definition of correct for every compiled image, the intention-out, the variational equations (tangent vectors and the rule that differentiates each operation), and every refusal by name. |
-| [COMPATIBILITY.md](COMPATIBILITY.md) | 1,044 | One section per ABI step, with a per-surface table. Read before assuming a call exists on a given surface. |
+| [SEQUENCER.md](SEQUENCER.md) | 4,031 | The orbit sequencer and the program model. |
+| [LANGUAGE.md](LANGUAGE.md) | 2,376 | The language for dynamical systems: the grammar, the semantics (literal evaluation, exact constants rounded once, one attribute a program), the integrators written in it, time (t in the state, a step counter, forcing by a rotation, each measured), the step graph, the reference interpreter that is the definition of correct for every compiled image, the intention-out, the variational equations (tangent vectors and the rule that differentiates each operation), and every refusal by name. |
+| [COMPATIBILITY.md](COMPATIBILITY.md) | 1,047 | One section per ABI step, with a per-surface table. Read before assuming a call exists on a given surface. |
 | [LAYOUTS.md](LAYOUTS.md) | 191 | Every xclbin layout the U50 could carry - tile mixes and their clocks - derived by `hw/gen_layouts.py`, never typed. |
-| [CERTIFICATES.md](CERTIFICATES.md) | 4,549 | The certificate, versions 1 and 2. Version 1: what a run was and how accurate it is, keyed or open, and the audit that re-runs its segments. Version 2: what the run means - each segment's per-lane flags, every lane a routine marked replayed by the program's definition, the source it was compiled from or is defined by and a wider-source run of it, the profile and language its bits are claimed under, provenance with its privacy defaults, and a detached Ed25519 signature for either version. Complete enough to write a reader and an auditor of either from the page. And the segment runner, `cft-segrun`, that writes either version from the library, version 2 by default, its accuracy entries included; the audit tool, `cft-audit`, that audits both versions in C - version 1 with the same exact arithmetic, and version 2 with Ed25519 and SHA-512 of its own, every step that needs no source; and the golden certificates in `certificates/` that hold the writers to committed bytes, version 2's cases and thirty controls among them. |
+| [CERTIFICATES.md](CERTIFICATES.md) | 4,563 | The certificate, versions 1 and 2. Version 1: what a run was and how accurate it is, keyed or open, and the audit that re-runs its segments. Version 2: what the run means - each segment's per-lane flags, every lane a routine marked replayed by the program's definition, the source it was compiled from or is defined by and a wider-source run of it, the profile and language its bits are claimed under, provenance with its privacy defaults, and a detached Ed25519 signature for either version. Complete enough to write a reader and an auditor of either from the page. And the segment runner, `cft-segrun`, that writes either version from the library, version 2 by default, its accuracy entries included; the audit tool, `cft-audit`, that audits both versions in C - version 1 with the same exact arithmetic, and version 2 with Ed25519 and SHA-512 of its own, every step that needs no source; and the golden certificates in `certificates/` that hold the writers to committed bytes, version 2's cases and thirty controls among them. |
 
 ## Reference you call into
 
 | document | lines | what it is for |
 |---|---|---|
-| [HOSTAPI.md](HOSTAPI.md) | 3,679 | The host API, function by function. The largest reference here and the one most often wanted. |
+| [HOSTAPI.md](HOSTAPI.md) | 3,693 | The host API, function by function. The largest reference here and the one most often wanted. |
 | [TRANSCENDENTALS.md](TRANSCENDENTALS.md) | 1,737 | The thirty-nine correctly-rounded transcendentals, by ABI phase, with the evidence for each. |
 | [REMOTE.md](REMOTE.md) | 1,433 | The remote backend: a tile behind a socket, the frame protocol and the WebSocket path. |
 | [PROGRAMS.md](PROGRAMS.md) | 640 | Programs as files: the assembler, the program library, the runner. |
@@ -72,7 +72,7 @@ running.
 | document | lines | tool |
 |---|---|---|
 | [ZOOM.md](ZOOM.md) | 856 | `cft-zoom` — deep-zoom Mandelbrot reference orbits |
-| [ORBITS.md](ORBITS.md) | 2,050 | `cft-orbits` — symplectic few-body integration, and its certified runs |
+| [ORBITS.md](ORBITS.md) | 2,054 | `cft-orbits` — symplectic few-body integration, and its certified runs |
 | [MERSENNE.md](MERSENNE.md) | 882 | `cft-mersenne` — Lucas-Lehmer |
 | [ENCLOSE.md](ENCLOSE.md) | 845 | `cft-enclose` — directed-rounding interval enclosure |
 | [COLLATZ.md](COLLATZ.md) | 648 | `cft-collatz` — Collatz trajectories |
@@ -94,8 +94,8 @@ reading material for a working session.
 
 | document | lines | what it is for |
 |---|---|---|
-| [VALIDATION.md](VALIDATION.md) | 18,243 | The validation ledger, append-only. Every run, including the ones that failed and the mistakes that produced them. A figure here is a fact about the run on its date and is never edited to match a later one. |
-| [ROADMAP.md](ROADMAP.md) | 5,778 | What is built, what is next, and what was decided against. |
+| [VALIDATION.md](VALIDATION.md) | 18,423 | The validation ledger, append-only. Every run, including the ones that failed and the mistakes that produced them. A figure here is a fact about the run on its date and is never edited to match a later one. |
+| [ROADMAP.md](ROADMAP.md) | 5,793 | What is built, what is next, and what was decided against. |
 | [ROUND2.md](ROUND2.md) | 1,082 | The plan for the gather, the scatter, the lane mask and the broadcast as one parcel round, with its outcome at the top: the seam the lead lands first, a brief per parcel, the verifiers, the ledger, the merge order. |
 | [NOVEL.md](NOVEL.md) | 561 | Results for which no prior description was found, with the standard of evidence stated first. |
 | [ATLAS.md](ATLAS.md) | 367 | The atlas-engine integration, assessed before any of it was done. |

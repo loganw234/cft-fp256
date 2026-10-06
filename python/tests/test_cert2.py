@@ -634,7 +634,7 @@ def test_the_environment_lines(full):
     for bad in ("env cft_timeout_ms 60000", "env CFT-X 1", "env 1X 2",
                 "env CFT_TIMEOUT_MS 60%3000", "env CFT_TIMEOUT_MS none",
                 # verifier-VCV2B: a name off the writer's list, a home path
-                "env HOME /home/logan", "env CFT_HOME x"):
+                "env HOME /home", "env CFT_HOME x"):
         refused("malformed", cert.parse, rebuilt(L[:i] + [bad]
                                                  + L[i + 1:]))
 
