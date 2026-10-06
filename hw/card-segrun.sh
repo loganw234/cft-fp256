@@ -46,7 +46,14 @@
 #      and a STATUS the ODE programs never do, is certified too; a card
 #      that refuses to load it (it needs strict scratch, and a deposit past
 #      max_deposits 0) is a NOTE, NOT TESTED, not a failure. The gate's
-#      hash vectors and refusals run on this build as well.
+#      hash vectors and refusals run on this build as well. Its section 14
+#      (version 2) holds a version-2 certificate's identity lines to the
+#      same expectations, and takes the per-lane block's branch from them
+#      (host/tests/segrun_check_v2.py, leg h): written on the card, and
+#      equal to the software backend's, where VERSION is 0xB00 or later
+#      and CAPS2[13] is set; refused `device` by name, naming
+#      CFT_SEQ_FEAT_LANE_FLAGS, otherwise; and FAILED by name where the
+#      words cannot say (a CAPS2 that did not parse from 0x800 on).
 #   3. the negative control, required to FAIL by name: the gate handed an
 #      image digest that is not this image's (device-test's own SHA-256)
 #      must fail the device lines of the certificate it makes.

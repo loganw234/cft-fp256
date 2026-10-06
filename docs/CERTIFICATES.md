@@ -2362,10 +2362,20 @@ cross-check compared the runtime's best-fit split, the two of best fit's
 spaces and quotes (planted by running them, 2026-10-03); the remote rule
 through a
 loopback cft-serve; and,
-on a card (`hw/card-segrun.sh`), the device lines from the tile, the serial
-published as a text but never printed, and the per-lane block refused by
-name on revision 7.
+on a card (`hw/card-segrun.sh`), the device lines from the tile and its
+identity lines the words `device-test -i` read, the serial published as a
+text but never printed, and the per-lane block as those words say, by
+libcft's decode: written on the card and byte for byte the software
+backend's where VERSION is 0xB00 or later and CAPS2[13] is set (revision
+8's rev8a), refused by name otherwise (revision 7), and a failure by name
+where the words cannot say - each branch seen to fail in the software
+gate first, the leg's own code run on stand-in devices (leg j).
 
+With leg h following the tile's CAPS2[13], and leg j's controls of it
+(parcel SC8, 2026-10-06): 1,077 checks on the Windows desktop and one
+SKIP, 88 s - sections 1 to 13 716, as before, and section 14 361, which
+alone (`--v2-only`) takes 8 s; section 14 alone in WSL (cft2204, gcc
+11.4, Python 3.10), 359 checks, 0 failed, 5 s. Not yet run on a card.
 With the writer's list removed from the tool's environment, not set
 empty (the card leg on q135b, 2026-10-03): 1,057 checks on the Windows
 desktop and one SKIP, 102 s, the desktop about 8 % busy before it -

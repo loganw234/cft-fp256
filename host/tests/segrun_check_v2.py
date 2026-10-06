@@ -64,10 +64,22 @@ one gives none, or `--format-version 2`, and holds:
      replays through a loopback cft-serve - the device lines `unknown`,
      every run block the software backend's;
   h. on a card (--device): a version-2 certificate made on the tile, its
-     device lines filled from the card (not `none`), its serial withheld
-     until published (and published, a text, never printed here), its run
-     blocks the software backend's; and the per-lane block refused by
-     name, which no revision-7 tile publishes;
+     device lines filled from the card (not `none`), its identity lines
+     the card leg's expectation - the image's SHA-256 (sha256sum) and the
+     VERSION, CAPS, CAPS2 and tiles device-test -i read apart from the
+     tool - its serial withheld until published (and published, a text,
+     never printed here), its run blocks the software backend's; and the
+     per-lane block as those words say, by libcft's decode
+     (host/src/caps_decode.h): where VERSION is 0xB00 or later and
+     CAPS2[13] is set, Lorenz-63 and flagstep (whose lanes' bytes differ)
+     asked for it on the card are each written, its run 0 stating the
+     block, and every run block - the per-lane blocks' hashes among them -
+     and every boundary and block file the software backend's for the
+     same command line; elsewhere the block refused `device` by name at
+     run 0's first segment, its sentence naming CFT_SEQ_FEAT_LANE_FLAGS,
+     the files written before it left and said so; and where the words
+     cannot say (CAPS2 missing from VERSION 0x800, a word too many, or one
+     not device-test's spelling), a failure by name, neither branch run;
   i. the process's own text, past the ANSI code page Windows hands main
      and getenv (verifier-VCV2CW, 2026-10-03): CFT_XRT_BIND set to U+0141,
      U+00E9 and a, U+20AC, b, each `env` line the golden writer's; a value
@@ -84,7 +96,20 @@ one gives none, or `--format-version 2`, and holds:
      characters best fit spells as a space, a quote and a backslash
      (U+3000, U+2002, U+2003, U+2009, U+FF02, U+2033, U+02BA, U+FF3C),
      each byte for byte the golden writer's with `source-name` its
-     spelling of the file's own name.
+     spelling of the file's own name;
+  j. h's controls, on the software backend, since no card is here: h's
+     decode held to caps_decode.h and to the words of revision 7's quad,
+     rev8a, revision 8's quad without R21 and its seam, a 0xA00 map with
+     CAPS2[13] set (not believed), a map without CAPS2, and seven
+     expectations that cannot say; then h's own code run on stand-in
+     devices whose answers are known - rev8a's words on the software
+     backend pass the written branch, and revision 7's words there fail
+     the refused one by name; revision 7's words on a fake cft:// server
+     whose word lacks LANE_FLAGS (0x7f1f) pass the refused branch, and
+     rev8a's words there fail the written one; a `device` refusal at the
+     first segment for another reason (CFT_SEGRUN_PLANT=flags-unwritten)
+     fails the refused branch by its reason alone; and words that cannot
+     say fail by name, nothing run. So each branch is seen to fail.
 """
 
 import dataclasses
@@ -92,8 +117,12 @@ import hashlib
 import os
 import re
 import shutil
+import socket
+import struct
 import subprocess
+import threading
 import time
+import zlib
 from fractions import Fraction
 from pathlib import Path
 
@@ -736,7 +765,8 @@ TOOL_LIMITS = {"build-width": 78, "build-format": 78}
 def refused(label, name, args, env=None, after=False, twin=None, leg="f"):
     """f. one refusal: its name and code; nothing left behind before the
     run, or the files written so far left and said so after it; the golden
-    writer's twin by the same name where it has one."""
+    writer's twin by the same name where it has one. -> (exit code, the
+    tool's stderr), for a caller that holds the refusal's reason too (h)."""
     out = Path(args[args.index("--out") + 1]) if "--out" in args else None
     sdir = Path(args[args.index("--states") + 1]) if "--states" in args \
         else None
@@ -768,6 +798,7 @@ def refused(label, name, args, env=None, after=False, twin=None, leg="f"):
         except cert.Refusal as e:
             SC.check(e.name == name, f"   the golden writer refuses {label} "
                      f"by the same name", f"it says {e.name}: {e.message}")
+    return rc, se
 
 
 def hold_refusals(work, flag, rs, rs_c, lz):
@@ -1252,10 +1283,11 @@ def hold_remote(serve, flag, rs, sw):
         print(f"  cft-serve pid {p.pid} stopped", flush=True)
 
 
-def hold_card(device, l63_sw):
-    """h. on a card: the device lines from the tile, the serial withheld
-    until published, the run blocks the software backend's; the per-lane
-    block refused by name."""
+def hold_card(device, l63_sw, flag):
+    """h. on a card: the device lines from the tile, the identity lines
+    the card leg's expectation (measured apart from the tool), the serial
+    withheld until published, the run blocks the software backend's; and
+    the per-lane block as the tile's words say (hold_card_lane_flags)."""
     prog = dataclasses.replace(l63_sw, name="lorenz63-plain")
     res = certify(prog, "keyed", " card", device=device, hold_golden=False)
     if res:
@@ -1270,6 +1302,19 @@ def hold_card(device, l63_sw):
         SC.check(line(data, "device-serial") in ("withheld", "unknown"),
                  f"h. on the card: the serial {line(data, 'device-serial')}, "
                  f"withheld by default (unknown where XRT gives none)")
+        # the words the per-lane leg decides by are the expectation's,
+        # which card-segrun measured apart from the tool; held here to the
+        # ones the library read from the tile, as version 1's legs hold
+        # every certificate's (segrun_check.hold_identity)
+        idn = res[2].identity
+        got = (idn.backend, idn.device_xclbin, idn.device_version,
+               idn.device_caps, idn.device_tiles)
+        SC.check(got == SC.EXPECT_XRT,
+                 f"h. on the card: backend and device lines are the "
+                 f"expectation's, measured apart from the tool - the image's "
+                 f"SHA-256 (sha256sum), VERSION {SC.EXPECT_XRT[2]}, CAPS "
+                 f"{' '.join(SC.EXPECT_XRT[3])} and {SC.EXPECT_XRT[4]} "
+                 f"tile(s) (device-test -i)", f"the certificate says {got}")
     pub = certify(prog, "keyed", " card published", device=device,
                   extra=("--publish", "device-serial"), hold_golden=False)
     if pub:
@@ -1288,13 +1333,406 @@ def hold_card(device, l63_sw):
     if res and sw:
         SC.check(SC.runs_part(res[0]) == SC.runs_part(sw[0]),
                  "h. on the card: every run block the software backend's")
-    asks = dataclasses.replace(prog, runs=[dataclasses.replace(
-        prog.runs[0], lane_flags=True)])
-    refused("the per-lane block asked of a revision-7 tile (CAPS2[13] "
-            "clear)", "device", [str(x) for x in tool_args(
-                asks, WORK / "v2" / "card-lf.in",
-                WORK / "v2" / "card-lf.cert", WORK / "v2" / "card-lf.states",
-                None, device)], after=True)
+    hold_card_lane_flags(device, prog, flag, SC.EXPECT_XRT[2],
+                         SC.EXPECT_XRT[3])
+
+
+# h's decode of one bit, libcft's (host/src/caps_decode.h, cft_caps_decode):
+# a map has CAPS2 from VERSION 0x800 (CFT_MAP_CAPS2), and CAPS2[14:11] reach
+# cft_caps.seq_features[18:15] only from 0xB00 (CFT_MAP_LFLAGS), the first
+# map with the block's pointer. So a tile publishes the per-lane flags
+# block - CFT_SEQ_FEAT_LANE_FLAGS, bit 17, seq.FEAT_LANE_FLAGS - where its
+# VERSION is 0xB00 or later and CAPS2[13] is set, and libcft refuses the
+# block on every other (device.c). hold_lane_flags_decode holds these
+# numbers to the header.
+MAP_CAPS2, MAP_LFLAGS, CAPS2_LANE_FLAGS = 0x800, 0xB00, 13
+HEX8 = re.compile(r"[0-9a-f]{8}")
+
+
+def lane_flags_published(version, caps):
+    """Whether a tile publishes the per-lane block, from its words as
+    device-test -i prints them and card-segrun hands them on - VERSION,
+    and CAPS alone or CAPS then CAPS2, each 8 lowercase hex digits (the
+    card leg's --expect-version and --expect-caps): (True or False, why),
+    or (None, why) where the words cannot say - a word not in that
+    spelling, or not as many words as the VERSION's map has (two from
+    0x800, one below)."""
+    words = tuple(caps) if isinstance(caps, (tuple, list)) else (caps,)
+    if not (isinstance(version, str) and HEX8.fullmatch(version)):
+        return None, f"VERSION {version!r} is not 8 lowercase hex digits"
+    if not words or not all(isinstance(w, str) and HEX8.fullmatch(w)
+                            for w in words):
+        return None, (f"the CAPS words {words!r} are not each 8 lowercase "
+                      f"hex digits")
+    ver = int(version, 16)
+    if len(words) != (2 if ver >= MAP_CAPS2 else 1):
+        has = "CAPS and CAPS2" if ver >= MAP_CAPS2 else "CAPS alone"
+        return None, (f"VERSION 0x{version} has {has} (CAPS2 from "
+                      f"0x{MAP_CAPS2:03X}), and the words are "
+                      f"{' '.join(words)}")
+    if ver < MAP_CAPS2:
+        return False, f"VERSION 0x{version}, a map without CAPS2"
+    bit = (int(words[1], 16) >> CAPS2_LANE_FLAGS) & 1
+    where = f"VERSION 0x{version}, CAPS2 0x{words[1]}"
+    if ver < MAP_LFLAGS:
+        return False, (f"{where}: CAPS2[13] "
+                       f"{'set, and not believed' if bit else 'clear'} below "
+                       f"0x{MAP_LFLAGS:03X}, the first map with the block")
+    return bool(bit), f"{where}: CAPS2[13] {'set' if bit else 'clear'}"
+
+
+def note(what):
+    """A NOTE line - quoted, as its checks are, where a control runs the
+    leg (_Recorder)."""
+    say = getattr(SC, "note", None)
+    if say is not None:
+        say(what)
+    else:
+        print(f"  NOTE  {what}", flush=True)
+
+
+def hold_card_lane_flags(device, l63, flag, version, caps, where="the card",
+                         key="card", env=None):
+    """h. the per-lane block on `device`, as the tile's words (`version`,
+    `caps`) say - on a card, the expectation device-test -i measured apart
+    from the tool:
+      written where the tile publishes it: Lorenz-63's run and flagstep's
+        (three lanes whose counters differ, so that each lane's byte is
+        its own), each with --lane-flags on the device, its run 0 stating
+        the block with a hash a segment and DIR holding the blocks, and
+        every run block (the blocks' hashes among them) and every file in
+        DIR byte for byte the software backend's for the same command
+        line;
+      refused `device` by name where it does not, at run 0's first segment
+        with the library's sentence naming CFT_SEQ_FEAT_LANE_FLAGS - not
+        a device that did not open, or a run that failed otherwise, both
+        of which are `device` 69 too (q135b on 2026-10-03 passed the name
+        and the code with the card unopened) - the files written before
+        it left and said so;
+      neither where the words cannot say, and that fails by name.
+    -> True (the written branch), False (refused) or None. `where`, `key`
+    and `env` are for the controls (hold_card_controls): a stand-in
+    device's name in the checks, its files' stems, and an instrument."""
+    published, why = lane_flags_published(version, caps)
+    if published is None:
+        SC.bad(f"h. the per-lane block on {where}: whether the tile publishes "
+               f"it cannot be read from its words - {why}; neither branch "
+               f"run")
+        return None
+    note(f"h. the per-lane block on {where}: {why}, so --lane-flags must be "
+         + ("written, byte for byte the software backend's" if published
+            else "refused device by name"))
+    asks = dataclasses.replace(l63, runs=[dataclasses.replace(
+        l63.runs[0], lane_flags=True)])
+    if not published:
+        d = WORK / "v2" / f"lf-{key}"
+        rc, se = refused(f"the per-lane block asked of a tile that does not "
+                         f"publish it ({why})", "device",
+                         [str(x) for x in tool_args(
+                             asks, Path(str(d) + ".in"),
+                             Path(str(d) + ".cert"), Path(str(d) + ".states"),
+                             None, device)], env=env, after=True, leg="h")
+        said = next((ln for ln in se.splitlines()
+                     if ln.startswith("cft-segrun: refused ")), "")
+        SC.check(rc == SC.TOOL_OWN["device"] and
+                 "run 0 segment 0: cft_program_run_ex" in said and
+                 "CFT_SEQ_FEAT_LANE_FLAGS" in said,
+                 "   and the refusal is the block's: at run 0's first "
+                 "segment, the library's sentence naming "
+                 "CFT_SEQ_FEAT_LANE_FLAGS - not a device that did not open, "
+                 "or a run that failed otherwise",
+                 f"exit {rc}: {said[:300] or 'no refusal named'}")
+        return False
+    for prog in (asks, flag):
+        card = certify(prog, "keyed", f" {key}, --lane-flags", device=device,
+                       env=env, hold_golden=False)
+        sw = certify(prog, "keyed", f" sw, --lane-flags beside {key}",
+                     hold_golden=False)
+        on = f"h. on {where}, --lane-flags: {prog.name}'s"
+        if card:
+            data, sdir, parsed = card
+            r0 = parsed.runs[0]
+            blocks = [f"run-0-segment-{k}.flags"
+                      for k in range(len(r0.chain))]
+            sizes = [(sdir / b).stat().st_size if (sdir / b).is_file()
+                     else None for b in blocks]
+            SC.check(r0.lane_flags and all(s.lanes for s in r0.chain) and
+                     sizes == [r0.lanes] * len(blocks),
+                     f"{on} run 0 states lane-flags yes, a block's hash for "
+                     f"each of its {len(blocks)} segments, and DIR holds the "
+                     f"{len(blocks)} blocks of {r0.lanes} bytes",
+                     f"lane-flags {r0.lane_flags}, hashes "
+                     f"{[bool(s.lanes) for s in r0.chain]}, block sizes "
+                     f"{sizes}")
+        if card and sw:
+            a, b = SC.runs_part(card[0]), SC.runs_part(sw[0])
+            SC.check(a == b, f"{on} every run block the software backend's, "
+                     f"byte for byte - the per-lane blocks' hashes among them",
+                     next((f"line {i + 1}: {x[:90]!r} against {y[:90]!r}"
+                           for i, (x, y) in enumerate(zip(a, b)) if x != y),
+                          f"{len(a)} lines against {len(b)}"))
+            names = sorted(os.listdir(card[1]))
+            differ = [n for n in names if (sw[1] / n).is_file() and
+                      (card[1] / n).read_bytes() != (sw[1] / n).read_bytes()]
+            SC.check(names == sorted(os.listdir(sw[1])) and not differ,
+                     f"{on} DIR the software backend's, file for file and "
+                     f"byte for byte ({len(names)} files, its boundaries and "
+                     f"blocks)",
+                     f"{names[:6]} against {sorted(os.listdir(sw[1]))[:6]}; "
+                     f"differing {differ[:6]}")
+    return True
+
+
+def hold_lane_flags_decode():
+    """j. h's decode held to host/src/caps_decode.h: its two map
+    thresholds, and the shift that carries CAPS2[14:11] to
+    seq_features[18:15] from 0xB00 - so that CAPS2[13] is bit 17, the
+    golden model's seq.FEAT_LANE_FLAGS. A change to the header fails this
+    until h follows it."""
+    src = (ROOT / "host" / "src" / "caps_decode.h").read_text(
+        encoding="utf-8")
+
+    def define(name):
+        m = re.search(rf"#define {name}\s+0x([0-9A-Fa-f]+)u\b", src)
+        return int(m.group(1), 16) if m else None
+    have = (define("CFT_MAP_CAPS2"), define("CFT_MAP_LFLAGS"))
+    shift = re.search(r"if \(ver >= CFT_MAP_LFLAGS\)\s+seq->features \|= "
+                      r"\(\(caps2 >> 11\) & 0xFu\) << 15;", src)
+    SC.check(have == (MAP_CAPS2, MAP_LFLAGS) and shift is not None and
+             seq.FEAT_LANE_FLAGS == 1 << (CAPS2_LANE_FLAGS - 11 + 15),
+             f"j. h's decode is host/src/caps_decode.h's: CAPS2 from VERSION "
+             f"0x{MAP_CAPS2:03X}, CAPS2[14:11] on seq_features[18:15] from "
+             f"0x{MAP_LFLAGS:03X}, so CAPS2[13] is bit 17, "
+             f"seq.FEAT_LANE_FLAGS",
+             f"the header's CFT_MAP_CAPS2 and CFT_MAP_LFLAGS are {have}, the "
+             f"shift {'found' if shift else 'not found'}")
+
+
+# j. tiles' words as device-test -i prints them, and what h's decode must
+# make of each: (what, VERSION, CAPS words, True where the block is
+# published, False where it is not, None where the words cannot say).
+# q135b's are the card's (docs/VALIDATION.md) and rev8a's the card's too
+# (2026-10-06), the plan's words (python/cftc/targets.py); the quad's and
+# the seam's are the plan's (python/tests/test_cftc.py, docs/VALIDATION.md);
+# the rest are made up, each to reach one of the decode's rules.
+LANE_FLAG_WORDS = (
+    ("revision 7's quad, q135b", "00000a00", ("19faffff", "000007fb"),
+     False),
+    ("rev8a, revision 8's single at 4,096 slots", "00000b00",
+     ("19faffff", "00187ffc"), True),
+    ("revision 8's quad without R21 (CAPS2[11] clear)", "00000b00",
+     ("19faffff", "001877fc"), True),
+    ("revision 8's seam, its CAPS2 revision 7's", "00000b00",
+     ("19faffff", "000007fb"), False),
+    ("a 0xA00 map with CAPS2[13] set", "00000a00", ("19faffff", "00187ffc"),
+     False),
+    ("a 0x410 map, without CAPS2", "00000410", ("0000ffff",), False),
+    ("0xB00 with CAPS alone", "00000b00", ("19faffff",), None),
+    ("0x410 with a second word", "00000410", ("0000ffff", "00000000"), None),
+    ("three words", "00000b00", ("19faffff", "00187ffc", "00000000"), None),
+    ("no words", "00000b00", (), None),
+    ("VERSION in capitals", "00000B00", ("19faffff", "00187ffc"), None),
+    ("VERSION of three digits", "b00", ("19faffff", "00187ffc"), None),
+    ("CAPS2 of seven digits", "00000b00", ("19faffff", "0187ffc"), None),
+)
+# the stand-in tile's feature word: the one every tile from revision 6 to 7
+# publishes (cftc/targets.py's), without LANE_FLAGS
+TILE_WORD = cftc.targets.TILE_FEATURES
+
+
+class _Recorder:
+    """segrun_check's ok, bad, check and skip, recorded and quoted rather
+    than counted, so that a control can run a leg's own code and then say
+    how it came out; every other name is segrun_check's."""
+
+    def __init__(self, sc):
+        self._sc = sc
+        self.results = []           # (True, False or None for a skip, what)
+
+    def __getattr__(self, name):
+        return getattr(self._sc, name)
+
+    def ok(self, what):
+        self.results.append((True, what))
+        print(f"      : ok    {what}", flush=True)
+
+    def bad(self, what):
+        self.results.append((False, what))
+        print(f"      : FAIL  {what}", flush=True)
+
+    def check(self, cond, what, why=""):
+        if cond:
+            self.ok(what)
+        else:
+            self.bad(what + (f" - {why}" if why else ""))
+        return cond
+
+    def skip(self, what, why):
+        self.results.append((None, what))
+        print(f"      : SKIP  {what}: {why}", flush=True)
+
+    def note(self, what):
+        print(f"      : NOTE  {what}", flush=True)
+
+
+class _FakeServer:
+    """A cft:// server whose HELLO publishes the feature word it is given,
+    which answers BYE and hangs up on anything else - seq_check.py's
+    stand-in for a remote tile, the same caps block. libcft's client
+    refuses a run's per-lane block from the word alone (device.c), before
+    any frame of the run, so a word without LANE_FLAGS stands in for a
+    tile that does not publish it."""
+
+    def __init__(self, features):
+        self.features = features
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.sock.bind(("127.0.0.1", 0))
+        self.sock.listen(8)
+        self.port = self.sock.getsockname()[1]
+        threading.Thread(target=self._serve, daemon=True).start()
+
+    @staticmethod
+    def _recv(conn, k):
+        buf = b""
+        while len(buf) < k:
+            part = conn.recv(k - len(buf))
+            if not part:
+                return None
+            buf += part
+        return buf
+
+    @staticmethod
+    def _frame(abi, fid, op, payload):
+        hdr = bytearray(struct.pack("<IHHIIHHIII", 0x52544643, 1, 1, abi,
+                                    fid, op, 0, len(payload), 0, 0))
+        struct.pack_into("<I", hdr, 24,
+                         zlib.crc32(bytes(hdr) + payload) & 0xFFFFFFFF)
+        return bytes(hdr) + payload
+
+    def _serve(self):
+        while True:
+            try:
+                conn, _ = self.sock.accept()
+            except OSError:
+                return
+            # a client that exits on a refusal without its BYE resets the
+            # connection (Windows): that client is gone, and the next one
+            # must still be answered
+            try:
+                with conn:
+                    self._answer(conn)
+            except OSError:
+                pass
+
+    def _answer(self, conn):
+        while True:
+            hdr = self._recv(conn, 32)
+            if hdr is None:
+                return
+            (_m, _p, _k, abi, fid, op, _s, length, _c,
+             _r) = struct.unpack("<IHHIIHHIII", hdr)
+            if length and self._recv(conn, length) is None:
+                return
+            if op == 0x0001:                            # HELLO
+                caps = (struct.pack("<6I", 0xF, 0xFF, 1, 0xA00, 1, abi) +
+                        b"xrt".ljust(32, b"\0") +
+                        struct.pack("<5I", 64, 16384, 512, self.features,
+                                    256))
+                conn.sendall(self._frame(abi, fid, op, caps))
+            elif op == 0x00FF:                          # BYE
+                conn.sendall(self._frame(abi, fid, op, b""))
+                return
+            else:
+                return
+
+    def close(self):
+        self.sock.close()
+
+
+def hold_card_controls(l63, flag):
+    """j. h's controls, on the software backend: its decode held to the
+    header and to tiles' words, and its own code - hold_card_lane_flags -
+    run on stand-in devices whose answers are known, each run with
+    segrun_check's counting recorded (_Recorder) and then held to the
+    outcome it must have, so that each branch is seen to pass where it
+    must and to fail, by name, where it must."""
+    print("== v2 j. h's controls: its decode, and its code on stand-in "
+          "devices", flush=True)
+    hold_lane_flags_decode()
+    for what, version, caps, want in LANE_FLAG_WORDS:
+        got, why = lane_flags_published(version, caps)
+        SC.check(got is want, f"j. h's decode of {what} (VERSION {version}, "
+                 f"CAPS {' '.join(caps) or 'none'}): "
+                 + ("cannot say" if want is None else
+                    "published" if want else "not published"),
+                 f"it says {got}: {why}")
+    rev8a = ("00000b00", ("19faffff", "00187ffc"))
+    rev7 = ("00000a00", ("19faffff", "000007fb"))
+    blind = ("00000b00", ("19faffff",))
+    srv = _FakeServer(TILE_WORD)
+    url = f"cft://127.0.0.1:{srv.port}"
+    lanes_of = f"a fake server whose word, 0x{TILE_WORD:x}, lacks LANE_FLAGS"
+    plant = {"CFT_SEGRUN_PLANT": "flags-unwritten"}
+    # (what, device, words, env, the branch, and the outcome: "pass", or
+    # what each failure must say)
+    cases = (
+        ("rev8a's words on the software backend, which writes the block",
+         "sw", rev8a, None, True, "pass"),
+        ("revision 7's words on the software backend, which writes the "
+         "block", "sw", rev7, None, False,
+         ("h. refused device (exit 69)", "   and no certificate",
+          "   and the refusal is the block's")),
+        (f"revision 7's words on {lanes_of}", url, rev7, None, False, "pass"),
+        (f"rev8a's words on {lanes_of}", url, rev8a, None, True,
+         (", --lane-flags: cft-segrun writes it",) * 2),
+        ("revision 7's words on the software backend refusing `device` at "
+         "run 0's first segment for another reason "
+         "(CFT_SEGRUN_PLANT=flags-unwritten)", "sw", rev7, plant, False,
+         ("   and the refusal is the block's",)),
+        ("words that cannot say (VERSION 0xB00, CAPS alone)", "sw", blind,
+         None, None,
+         ("h. the per-lane block on control 6's device: whether",)),
+    )
+    names = {True: "the written branch", False: "the refused branch",
+             None: "neither branch"}
+    try:
+        for n, (what, dev, words, env, branch, outcome) in enumerate(
+                cases, 1):
+            print(f"== v2 j. control {n}: {what}", flush=True)
+            took, rec = _recorded(lambda: hold_card_lane_flags(
+                dev, l63, flag, words[0], words[1],
+                where=f"control {n}'s device", key=f"control{n}", env=env))
+            fails = [w for r, w in rec.results if r is False]
+            if outcome == "pass":
+                good = took is branch and bool(rec.results) and not fails
+                say = (f"takes {names[branch]} and passes, all "
+                       f"{len(rec.results)} of its checks")
+            else:
+                # each failure the one named, in order; and where the words
+                # cannot say, that failure alone - nothing run
+                good = took is branch and len(fails) == len(outcome) and \
+                    all(o in f for f, o in zip(fails, outcome)) and \
+                    (branch is not None or len(rec.results) == 1)
+                say = (f"takes {names[branch]} and FAILS, by name: "
+                       f"{len(fails)} of its {len(rec.results)} checks, the "
+                       f"first `{outcome[0].strip()}`")
+            SC.check(good, f"j. control {n}, {what}: h {say}",
+                     f"it took {names.get(took, took)}, "
+                     f"{len(rec.results)} checks, failed {fails[:3]}")
+    finally:
+        srv.close()
+
+
+def _recorded(fn):
+    """fn() with SC a _Recorder: -> (its answer, the recorder)."""
+    global SC
+    real, rec = SC, _Recorder(SC)
+    SC = rec
+    try:
+        out = fn()
+    finally:
+        SC = real
+    return out, rec
 
 
 def hold_v2(sc, work, card=False, device="sw", serve=None):
@@ -1309,11 +1747,11 @@ def hold_v2(sc, work, card=False, device="sw", serve=None):
     flag = flagstep2()
     rs, rs_c = replaystep(work / "v2")
     lz = lorenz2()
+    lz_plain = Prog2("lorenz63-plain", [dataclasses.replace(
+        r, source=None, manifest=None, compiled=None, sparams={})
+        for r in lz.runs[:2]])
     if card:
-        lz_plain = Prog2("lorenz63-plain", [dataclasses.replace(
-            r, source=None, manifest=None, compiled=None, sparams={})
-            for r in lz.runs[:2]])
-        hold_card(device, lz_plain)
+        hold_card(device, lz_plain, flag)
         return
     sw = {}
     for prog in (flag, rs, lz):
@@ -1373,5 +1811,6 @@ def hold_v2(sc, work, card=False, device="sw", serve=None):
     hold_keys(work, flag)
     hold_refusals(work, flag, rs, rs_c, lz)
     hold_process_text(work, flag, rs)
+    hold_card_controls(lz_plain, flag)
     if serve is not None:
         hold_remote(serve, flag, rs, sw)
