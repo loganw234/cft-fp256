@@ -894,8 +894,8 @@ def hold_refusals(work, flag, rs, rs_c, lz):
         this issuer-key: its read-back names the key's problem"""
         p = flag
         runs, chains, shapes = golden_runs(p, None)
-        prov = cert2.Provenance(profile="2", language="none",
-                                issuer_key=k)
+        prov = cert2.Provenance(profile=cert2.version_text(PROFILE),
+                                language="none", issuer_key=k)
         return cert2.encode(cert2.Certificate(
             "open", None, cert.Identity(), prov, tuple(runs),
             golden_entries(p, runs, chains, shapes)))

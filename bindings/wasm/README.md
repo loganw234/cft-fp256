@@ -1303,6 +1303,61 @@ is the same length as at 0.17, with other bytes:
     bindings/wasm/conformance.html 1,409,956 bytes  sha256 85d815c1c25a21c5...
     bindings/wasm/demos.html         596,046 bytes  sha256 057535abe51c74f6...
 
+### Rebuilt at ABI 0.18, 2026-10-05 (profile 3) - exp2's tie at emin - p
+
+No ABI change. Parcel XT fixed `transcend.c`, which this module is
+built from. `cft_exp2` of the integer emin - p (-150, -1075, -16495 and
+-262379) is the tie between +0 and the smallest subnormal. Under
+roundTiesToAway it returned +0, rounding the tie as a quarter of the
+subnormal; it returns the subnormal now, as IEEE 754 does. The golden
+model moved with it, to profile 3 (CONFORMANCE.md, "Versioning"), and
+`cft.h`'s `CFT_PROFILE_MAJOR` with it, which no export reaches. So the
+module was rebuilt, as every change to its sources requires.
+
+The order was the 0.18 rebuild's:
+1. the native tools built from the same tree (`make -C host all`, 0
+   warnings, 12 s);
+2. `build.sh` (54 s);
+3. `verify_demos.mjs --record` (94 s). It failed as the order
+   predicts, on the stale page alone: that page embedded the module of
+   2026-10-03, `db4dc5ff...`;
+4. `build_demos.sh` (13 s);
+5. a second clean build of both (50 s and 14 s), with
+   `bindings/wasm/build/` removed between. Every output came out byte for
+   byte, and both negative-control pages too.
+
+The container was the pinned emsdk 6.0.9 image that both scripts run,
+`--inside`, with `--cpus 4 --memory 12g`. All 15 chains of the 13
+configurations came back unchanged. Only the module stamp, the date (the
+record's, 2026-10-06 in UTC), the rates, the seconds and the tools'
+report lines moved.
+
+The module now gives the subnormal for exp2 at the four ties under
+roundTiesToAway, flags 0x18, and the module before it +0, every other
+attribute alike in both (a probe through `Context`, 20 cells each).
+With `vectors/out` regenerated at the profile's parameters, the four
+moved cases among its sets:
+- `bindings/node/conformance.mjs` passed 1,068,915 cases over 168 sets
+  through `cft_conformance` (584 s) and 832,915 over 148 through the
+  package's own methods (701 s);
+- `bindings/node/test.mjs` passed 137 and failed 0;
+- `program_test.mjs` passed 38;
+- `verify_demos.mjs` passed its 48 checks against the rebuilt page;
+- `verify.mjs` gave **VERIFY OK** (1,188 s): abi 18 on both sides and
+  141 `cftw_*` entry points, 4,015 embedded cases over 20 sets,
+  1,068,915 cases over 168 sets through the page's bytes and 832,915
+  over 148 through the wrappers themselves. Handed
+  `build/negative_control.html` with `--page`, it fails the embedded
+  sample by name at fp64.jsonl.
+
+Still **141 `cftw_*` exports**, the same names. The module is three
+bytes longer:
+
+    bindings/node/cft_node.wasm      276,303 bytes  sha256 8e4e8298923a484a...
+    bindings/node/cft_node.js         74,146 bytes  sha256 dc845833acf075cb...  (unchanged)
+    bindings/wasm/conformance.html 1,409,959 bytes  sha256 0b58aa6593c10f12...
+    bindings/wasm/demos.html         596,007 bytes  sha256 0ddf39d93ff72a69...
+
 ## A second page: the five workloads, measured (2026-09-04)
 
 `demos.html` is the other deliverable of this directory. Same

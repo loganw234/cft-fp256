@@ -1,7 +1,8 @@
 # The cft-fp256 conformance profile
 
-**Profile 2, 2026-10-02** (profile 1 was 2026-09-16; "Versioning" says
-why it stepped). This document is the contract as a specification: what
+**Profile 3, 2026-10-05** (profile 2 was 2026-10-02 and profile 1
+2026-09-16; "Versioning" says why each stepped). This document is the
+contract as a specification: what
 an implementation must produce to be called cft-fp256 conforming, what
 it may choose freely, and the files and hashes that "conforming" is
 scored against. It is written so that an implementation can be built
@@ -219,7 +220,7 @@ Conformance is scored, not read.
    the transcendental sets, the character-conversion sets, the formatOf
    sets to every format (its own included), the reduction sets, the
    augmented set and the magnitude set - **1,068,915 cases at profiles
-   1 and 2**, each line one case with its inputs, its expected result
+   1, 2 and 3**, each line one case with its inputs, its expected result
    and its expected flags. `vectors/SHA256SUMS` lists the SHA-256 of each set,
    and the generator writes LF line endings on every platform so those
    hashes mean one thing everywhere. A generation that finishes also
@@ -280,8 +281,8 @@ Conformance is scored, not read.
     loaded and is refused, or one whose run moves by a bit.
   - **A minor step** is an addition that changes no recorded case and no
     accepted image: a new operation or a new set, or an encoding every
-    loader refused only because it was unclaimed, now taken (2.1, 2.2,
-    ...). An implementation of profile 2 remains conforming to profile 2.
+    loader refused only because it was unclaimed, now taken (3.1, 3.2,
+    ...). An implementation of profile 3 remains conforming to profile 3.
   - Each step has a note here and an entry in `docs/VALIDATION.md`
     saying what changed and why. Never a quiet refresh: a document
     recording a run against an earlier profile is right about that run,
@@ -289,9 +290,32 @@ Conformance is scored, not read.
 - **The record.** Its record, the golden corpus plus load cases at each
   loader rule's edge and at each header field's encoding extremes, is a
   backstop, not the rule.
-  - The vector sets and the golden corpus (`certificates/MANIFEST`:
-    every case's images, initial states and boundary states) are held by
-    gates today, so a change that moves one of their bits fails by name.
+  - The golden corpus (`certificates/MANIFEST`: every case's images,
+    initial states and boundary states) is held by a gate today, by
+    digest. The `programs` stage's corpus check holds every file to its
+    SHA-256, has the golden writer make every certificate again and has
+    cft-segrun make each one marked for both writers, so a change that
+    moves one of its bits fails by name.
+  - The vector sets are held by name. The runner's `vectors` stage
+    holds a generation's set names to `vectors/SHA256SUMS`'s, all 168,
+    and each set to the digest the generation recorded itself. The
+    replays hold libcft to the model's sets case by case, so a change to
+    one of the two fails by set and line. The digests are held by
+    `vectors/SHA256SUMS` alone, and by a regeneration by hand at the
+    profile's parameters, compared with it line for line: `make
+    vectors`, then
+    `sed 's#  #  out/#' vectors/out/SHA256SUMS | diff vectors/SHA256SUMS -`.
+    Profile 3 was checked so (2026-10-05).
+  - **A known limit: no gate compares a set's digest with
+    `vectors/SHA256SUMS`.** The runner generates at the generator's
+    default counts (`--directed 4000 --random 6000 --simple 400`, where
+    the profile's are 3000, 4000 and 200), so its twenty opcode sets are
+    not the profile's bytes, and it reads the record for names only. A
+    change to the model and libcft together that moves a recorded bit
+    therefore passes every gate at the vector sets; only the comparison
+    above shows it. It is not closed now: closing it changes
+    `verify/run.sh`, which would need a gate run of its own
+    (2026-10-05).
   - The load cases are not built yet. For each of the loader's rules
     they would hold an image at its edge, accepted, and one past it,
     refused by name; for each header field, acceptance at its encoding's
@@ -300,7 +324,46 @@ Conformance is scored, not read.
     2026-10-02).
   - A change the record does not reach steps the profile by the rule
     alone, at its committer's word, as every step did before 2026-10-02.
-- **The tree is at profile 2** (2026-10-02). Profile 1 was 2026-09-16's
+- **The tree is at profile 3** (2026-10-05), a major step: recorded
+  bits moved.
+  - **exp2 at x = emin - p.** Its exact value 2^(emin - p) is half the
+    smallest subnormal, the tie between +0 and it, which IEEE 754's
+    roundTiesToAway (rmm) rounds to the subnormal. The model rounded it
+    as a quarter of the subnormal and gave +0: `transcend.py`'s integer
+    branch sent every power below the subnormal's, the tie among them,
+    to its underflow witness. It now sends the tie to `round_pack`, as
+    the exact branches of pow, pown, powr and compound always did, and
+    libcft's `transcend.c` does the same. Under rne, rtz, rdn and rup
+    the answer was already 754's. Step 6's design study M1 found it (its
+    question 5), verifier-VM1 confirmed it, and Logan decided the fix on
+    2026-10-05.
+  - **Four recorded cases moved, one a format:** exp2 under rmm at
+    x = -150, -1075, -16495 and -262379, one line of each
+    `fpN-transcend-rmm.jsonl`. The result +0 became the smallest
+    subnormal; the flags are 0x18 (underflow, inexact) before and
+    after. The other 1,068,911 cases are profile 2's: 164 of the 168
+    sets keep their bytes, and `vectors/SHA256SUMS` moved by four
+    lines.
+  - **A certificate made at profile 2: the rule above, unchanged.**
+    Logan (2026-10-05): no certificate exists outside this tree, so
+    deprecating profile 2 outright was open, if simpler than carrying
+    the bug. Keeping the rule is simpler: it needs no new refusal name,
+    no rule and no code. An auditor at profile 3 does not cover
+    profile 2, so it re-derives under profile 3:
+    - where every re-derivation passes, it accepts, and its verdict
+      says its definition does not cover the certificate's;
+    - where one fails, it refuses `definition-differs`, never blaming
+      the certificate.
+
+    Nothing keeps profile 2's exp2: no auditor, writer or library
+    computes it. No profile-2 certificate's bits can depend on the
+    change either. A certificate's runs are the program model's, which
+    has no transcendental, and its sources are the language's, which
+    refuses exp2 by name. The golden corpus's 37 version-2
+    certificates were made again at profile 3. Only their `profile`
+    and `hash` lines moved, and the seven `supersedes` lines that name
+    one of them.
+- **Profile 2** (2026-10-02). Profile 1 was 2026-09-16's
   vector sets and model. The rule above took effect with certificate
   format version 2, the first thing that names a profile (Logan's
   decision on `docs/studies/CERT-V2.md`'s question 6, 2026-10-02). Under
@@ -323,10 +386,12 @@ Conformance is scored, not read.
     2. The vector sets did not move: profile 2's 1,068,915 cases are
     profile 1's, and `vectors/SHA256SUMS` is unchanged.
 - **The C ABI is a different number.** `CFT_ABI_VERSION` (0.14 when
-  profile 1 was set, 0.17 at profile 2) versions the calling surface of
-  one implementation, not the bits; a device's `VERSION` register
-  versions one register map. Neither changes the profile, and the
-  profile does not change with them.
+  profile 1 was set, 0.17 at profile 2, 0.18 at profile 3) versions the
+  calling surface of one implementation, not the bits; a device's
+  `VERSION` register versions one register map. Neither changes the
+  profile, and the profile does not change with them: profile 3 left the
+  ABI at 0.18, since no call gained or lost a meaning its definition in
+  `cft.h` did not already give it (docs/COMPATIBILITY.md).
 
 ### The language's version
 

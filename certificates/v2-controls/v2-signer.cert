@@ -7,7 +7,7 @@ device-xclbin none
 device-version none
 device-caps none
 device-tiles 1
-profile 2
+profile 3
 language none
 device-platform xilinx_u50_gen3x16_xdma_5_202210_1
 device-xrt 2.19.194
@@ -25,7 +25,7 @@ host-arch x86_64
 started 2026-10-02T12:00:00Z
 finished 2026-10-02T12:00:05Z
 issued 2026-10-02T12:00:06Z
-supersedes e4d611584a3ce53fa9d52dd268dbc7fcfc3821bb78ed8374053a69abb0bba530
+supersedes 0e7a01a94203860a29ccf871ce0159a6597cdd302883dbdf0195ee8ce1a79bbf
 environment 2
 env CFT_TIMEOUT_MS 60000
 env XCL_EMULATION_MODE hw_emu
@@ -51,4 +51,4 @@ replays 0
 output db7cffaff0db8b28dd7e67909601ed05188955cfc327620f6ddb4173569b80e6
 accuracy 0
 end
-hash 261ae00bae7657f86b3cf9b6144b5c7fb4373147477f4370fcd05e36182d6160
+hash d98ed91f58b9816d21fc0fd2553b3abb4a91ea3080a885ce61bbb0adb8310949

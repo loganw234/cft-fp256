@@ -21,7 +21,7 @@
     {
       "source": "host/include/cft.h",
       "dest": "src/cft/include/cft.h",
-      "sha256": "f9b1c580ea1219c80a925701ae689e8b4d54bc2c8b02b48eca66f9119653be0e"
+      "sha256": "bcc4d2a157377787b556fd249e84cb9c7c7cbb179786940ef8e2986c7e017725"
     },
     {
       "source": "host/include/cft_config.h",
@@ -181,7 +181,7 @@
     {
       "source": "host/src/transcend.c",
       "dest": "src/cft/src/transcend.c",
-      "sha256": "b2049ac6d079ed061703b4a738f70195ed37d1f40e0704c098a8527d7d564f3c"
+      "sha256": "fcc41c06cd224ebded246e46026614673a71d8b7eea0a58889c7da659b4e93de"
     },
     {
       "source": "host/src/transcend.h",

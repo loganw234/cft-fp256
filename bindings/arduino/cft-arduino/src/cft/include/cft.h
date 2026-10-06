@@ -145,8 +145,10 @@ CFT_API uint32_t cft_abi_version(void);
  * version the golden model of this tree states, which the C tools are
  * held to. host/tests/audit_check.py holds all four equal to the two
  * Python files. Neither is the ABI version above, which versions the
- * calls, not the bits. */
-#define CFT_PROFILE_MAJOR  2
+ * calls, not the bits: profile 3 (2026-10-05, exp2's tie at emin - p
+ * rounded as IEEE 754 rounds it, roundTiesToAway's answer moving) left
+ * the ABI at 0.18, since no call gained or lost a meaning. */
+#define CFT_PROFILE_MAJOR  3
 #define CFT_PROFILE_MINOR  0
 #define CFT_LANGUAGE_MAJOR 1
 #define CFT_LANGUAGE_MINOR 0

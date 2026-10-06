@@ -324,7 +324,11 @@ static int round_overflowing(const cft_fmt_desc *f, int sign, int rnd,
     return cft_sf_round_pack(f, sign, &m, f->emax, 0, rnd, out, flags);
 }
 
-/* Provably nonzero and below half the smallest subnormal. */
+/* Provably nonzero and below half the smallest subnormal - STRICTLY
+ * below: exactly half is the tie, which roundTiesToAway sends to the
+ * subnormal, so no caller hands it here (each tests an exact dyadic's
+ * floor(log2) below emin - man_w - 1, or a screen below emin - man_w - 2;
+ * exp2's integer branch did not until 2026-10-05, profile 3). */
 static int round_underflowing(const cft_fmt_desc *f, int sign, int rnd,
                               cft_bn *out, uint32_t *flags)
 {
@@ -2470,7 +2474,16 @@ static cft_status do_exp_family(const cft_fmt_desc *f, int fn, const lane *a,
             if (n > f->emax)
                 return round_overflowing(f, 0, rnd, out, flags)
                     ? CFT_ERR_INTERNAL : CFT_OK;
-            if (n < f->emin - f->man_w)
+            /* Below emin - p the power is under half the smallest
+             * subnormal and a quarter of it stands in. AT emin - p
+             * (emin - man_w - 1) it is exactly half, the tie between +0
+             * and that subnormal, so round_exact decides it: the
+             * subnormal under roundTiesToAway, +0 under roundTiesToEven,
+             * as pow's and pown's exact branches always did. This tested
+             * n < emin - man_w until 2026-10-05 and rounded the tie as a
+             * quarter, +0 under rmm, with the golden model (step 6's M1,
+             * question 5; profile 3). */
+            if (n < f->emin - f->man_w - 1)
                 return round_underflowing(f, 0, rnd, out, flags)
                     ? CFT_ERR_INTERNAL : CFT_OK;
             cft_bn_zero(&t);

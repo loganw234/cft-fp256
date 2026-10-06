@@ -976,8 +976,13 @@ class CaseRecipe2:
     backends: str = "software"
 
 
+# The profile the corpus's version-2 cases state: profile.py's VERSION, as
+# the compiler lines state cftc's. It was the literal "2" until profile 3
+# (2026-10-05), when the corpus was made again at 3.
+PROFILE_TEXT = cert2.version_text(cert2.PROFILE)
 # every measured header line unknown, as version 1's example's build-id
-UNKNOWN = cert2.Provenance(profile="2", language="1", device_platform="none",
+UNKNOWN = cert2.Provenance(profile=PROFILE_TEXT, language="1",
+                           device_platform="none",
                            device_xrt="none", device_clock="none",
                            device_serial="none", writer=("golden", "unknown"),
                            writer_runtime="unknown", compiler_build="none",
@@ -1079,7 +1084,7 @@ def recipes2():
         "regenerated",
         [RunRecipe2("main", fl, b"", signed_init, 3, 1, lane_flags=True)],
         cert2.Provenance(
-            profile="2", language="none",
+            profile=PROFILE_TEXT, language="none",
             device_platform="xilinx_u50_gen3x16_xdma_5_202210_1",
             device_xrt="2.19.194", device_clock=135000000,
             device_serial="SN 0001 (a test)",

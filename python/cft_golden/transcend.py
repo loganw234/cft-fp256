@@ -277,7 +277,13 @@ def _round_underflowing(fmt, sign, rnd):
     """A value provably nonzero and below half the smallest subnormal:
     a quarter of that subnormal is one, and it rounds to zero in four
     attributes and to the subnormal in the fifth, with underflow and
-    inexact."""
+    inexact.
+
+    STRICTLY below half: a value of exactly half is the tie, which
+    roundTiesToAway sends to the subnormal, so it is never handed here.
+    Every caller's test keeps it out - an exact dyadic whose floor(log2)
+    is below emin - man_w - 1, or a screen below emin - man_w - 2 - and
+    exp2's integer branch did not until 2026-10-05 (profile 3)."""
     return round_pack(fmt, sign, 1, fmt.emin - fmt.man_w - 2, rnd)
 
 
@@ -612,7 +618,16 @@ def _exp_family(fmt, xa, rnd, base_two, minus_one):
             STATS["exact"] += 1
             if n > fmt.emax:
                 return _round_overflowing(fmt, 0, rnd)
-            if n < fmt.emin - fmt.man_w:
+            # Below emin - p the power is under half the smallest
+            # subnormal and a quarter of it stands in. AT emin - p
+            # (= emin - man_w - 1) it is exactly half - the tie between
+            # +0 and the smallest subnormal - so it goes to round_pack,
+            # which gives the subnormal under roundTiesToAway and +0
+            # under roundTiesToEven, as pow's and pown's exact branches
+            # always did. This tested n < emin - man_w until 2026-10-05,
+            # which rounded the tie as a quarter: +0 under rmm (step 6's
+            # M1, question 5; profile 3).
+            if n < fmt.emin - fmt.man_w - 1:
                 return _round_underflowing(fmt, 0, rnd)
             return _round_exact(fmt, 0, 1, n, rnd)
 

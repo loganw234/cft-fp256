@@ -19,12 +19,12 @@ Live beside the conformance page at
 
 | | |
 |---|---|
-| page | `bindings/wasm/demos.html`, 596,046 bytes |
-| sha256 | `057535abe51c74f6856663390086bd40d73406ef28500d5b0a28b2b7b51c3136` |
-| module | `bindings/node/cft_node.wasm`, 276,300 bytes, sha256 `db4dc5ff8bab8bcefb1ec2842629ece5c528536c3f907c26c8f5fa64c764b76e` |
+| page | `bindings/wasm/demos.html`, 596,007 bytes |
+| sha256 | `0ddf39d93ff72a69812a22160c34c43b6093370619bb05d18f33894542af446d` |
+| module | `bindings/node/cft_node.wasm`, 276,303 bytes, sha256 `8e4e8298923a484ae1b960bd2f029cddb29a21b89e5237698db3bed9acd050f9` |
 | toolchain | emcc 6.0.9 (4e4223852a0835923411059a3929907d7df1232e), `emscripten/emsdk:6.0.9@sha256:96617f27fe16421588241def73908fd348a7f9d260440ed0d00b36dcf7a063cc` |
 | configurations | 13, over 15 chains |
-| recorded | 2026-10-03, per `bindings/wasm/demos_chains.json`'s own `recorded` field - the recorder writes the UTC date, the same day on the recording desktop's clock (about 04:08 there, 11:08 UTC); re-recorded for the step-6 round's rebuild of the ABI 0.18 module, every chain unchanged |
+| recorded | 2026-10-06, per `bindings/wasm/demos_chains.json`'s own `recorded` field - the recorder writes the UTC date, the evening before on the recording desktop's clock (about 19:56 on 2026-10-05 there, 02:56 UTC); re-recorded for the module's rebuild at profile 3 (exp2's tie at emin - p, ABI still 0.18), every chain unchanged |
 
 ---
 
@@ -517,10 +517,10 @@ one fact is not paranoia when the fact is the whole argument.
 with `bindings/wasm/build/` removed between them (2026-09-07; the
 2026-09-04 page was 486,822 bytes, sha256 `e3711319627e6828...`, built
 the same way). Those are that day's bytes. The page has been rebuilt
-with the module since - the committed one is 596,046 bytes, sha256
-`057535abe51c74f6...`, at ABI 0.18 - so read the pair above as the
-2026-09-07 measurement and the table at the top of this file as what
-is in the tree.
+with the module since - the committed one is 596,007 bytes, sha256
+`0ddf39d93ff72a69...`, at ABI 0.18 and profile 3 - so read the pair
+above as the 2026-09-07 measurement and the table at the top of this
+file as what is in the tree.
 
 ### Where the compute runs
 
