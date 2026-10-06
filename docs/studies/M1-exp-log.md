@@ -10,12 +10,24 @@ Logan, before phase 2 builds it. This file, the model under
 `docs/studies/m1/` and this file's row in docs/README.md are the only
 changes the study made.
 
+**Revised the same day,** after verifier-VM1 checked the first version
+(5b6de0d; the round's ledger, `verifier-VM1.md`). That check found one
+defect: log1p's r = x path ran its polynomial past the bound's rho, and
+four fp256 lanes came out wrong and unmarked. The model is repaired
+(section 2.3), the defect is listed as number 8 (section 3.6), and every
+figure that moved is restated. The repair's own measurements found one
+thing more: at fp64 the log family keeps less than the planners' two
+bits where its terms cancel (3.2, 3.3), which changes question 1's
+recommendation for fp64.
+
 Every statement is one of five kinds, and says which:
 - **READ**: from this tree at d4cf250, with the file named;
 - **MEASURED**: from a run of the study's model (section 11), on the
   desktop, niced, one process at a time, with its load stated. From
   11:05 the desktop was 88% to 100% busy with Logan's own use, and every
-  run after the lead's note on it stopped itself before ten minutes;
+  run after the lead's note on it stopped itself before ten minutes. The
+  revision's runs, 16:33 to 17:22, started at loads from 2% to 96%, each
+  stated in the ledger;
 - **COMPUTED**: arithmetic on read or measured numbers, shown;
 - **ESTIMATE**: mine, and said so;
 - **PROPOSED**: this design. Every name, constant and order below is a
@@ -63,18 +75,30 @@ Every statement is one of five kinds, and says which:
   argument is marked with probability 2^(0.53-G) a call, 2^-45.5 at
   G = 46. That law is MEASURED with the bound inflated to G = 6: 1.7% to
   2.8% marked against 2.2% to 2.3% predicted, over 12 runs of 2,000.
+  Question 1 now recommends G = 44 at fp64, where 46 leaves less than
+  two bits of slack in places (below).
 - **Held, in the model, against transcend.py** (MEASURED):
   - fp64, fp128 and fp256, six functions, five attributes, over the
     transcend pools (367, 350 and 512 arguments): 0 wrong unmarked lanes;
   - 60,000 random fp64 lane-calls: 0 wrong;
   - on seq.py itself, as stand-alone programs through C4's own harness:
-    35 configurations of 36, each with 0 mismatches.
-  Marks fall on a small structured family of arguments: x = c 2^-e and
-  1 + c ulp, with few bits, next to an exact case. Section 3.5 counts it.
+    all 90 configurations (six functions, three formats, five
+    attributes, run by verifier-VM1), 0 mismatches; log1p's 15 again
+    after the repair, 0.
+  - **The pools are not the whole test.** The first model's log1p ran its
+    r = x path out to |x| = 2^-4, past the bound's rho. Verifier-VM1
+    built four fp256 arguments there that it answered wrong and
+    unmarked, in 10 lane-attribute pairs, and the pools hold none of
+    them. The repair ends that path at 15/256, under rho, for no extra
+    instruction (section 2.3). The four lanes now mark wherever they
+    were wrong.
+  Marks fall on structured windows of arguments next to an exact case,
+  around x = c 2^-e and 1 + c ulp. The windows grow with p - G. Section
+  3.5 counts them.
 - **The cost** (MEASURED; fragment bodies, plus 3 for QUIET, ENDQUIET and
   RAISE when inlined): exp 178-181 instructions at fp64 and 198-201 at
   fp256; log 193 and 238; log1p, the dearest, 227-229 and 272-274.
-  - Bank words: 63 to 121 a function, 139 to 207 for all six together.
+  - Bank words: 63 to 122 a function, 140 to 208 for all six together.
   - Scratch slots: none. Live values: at most 24 (34 in the fp32
     triple-word exp).
   - The surveyor's guesses (READ, ROADMAP part 5) were 150 at fp64 and
@@ -85,6 +109,18 @@ Every statement is one of five kinds, and says which:
   2^-44.7, which caps G near 18, so the plan's triple word is needed. A
   triple-word exp is MEASURED at 413 instructions at G = 46 and 382 at
   G = 40. Section 2.5 and question 2.
+- **fp64 is the thin format at G = 46.** The bound holds wherever it was
+  measured, at every format. But at fp64 two regions of the log family
+  keep less than the planners' two bits (MEASURED, 20,000 arguments
+  each):
+  - log1p for x from -1/8 to -15/256: 2^-1.8 under the bound;
+  - log2 for x from 0.875 to 0.94: 2^-2.2 under.
+  Both are cancellation. The double word's floor is set by the terms
+  being summed, and there they are up to 22 times the result. A coarse
+  count, letting every rounding take that factor, does not show the
+  bound at G = 46 there, and shows it at G = 44, just. G = 44 at fp64
+  keeps at least 2.6 bits in every region measured, for 0 to 7
+  instructions fewer (3.2, 3.3, question 1).
 - **Two findings for the lead:**
   - transcend.py's exp2 of the exact tie emin - p returns +0 under rmm,
     where 754's roundTiesToAway gives the smallest subnormal (question 5);
@@ -92,10 +128,12 @@ Every statement is one of five kinds, and says which:
     design writes it as the exact rational value of ln 2 rounded once, so
     a constant stays an exact rational (question 6).
 - **The model found seven of its own defects** before this design
-  settled; section 3.6 lists them. Three were invisible to the pools,
-  which passed with an error of 2^-64 present. They decide how phase 2 must be
-  held (section 8): the pools are not the test of a bound; the error
-  measured against an independent reference is.
+  settled, and verifier-VM1 found an eighth; section 3.6 lists them.
+  Four were invisible to the pools: they passed defect 1 with an error
+  of 2^-64 present, and hold no argument of defect 8. That decides how
+  phase 2 must be held (section 8). The pools are not the test of a
+  bound. The test is the error measured against an independent
+  reference, at each path's own worst points.
 
 ## 1. What M1 works with
 
@@ -286,7 +324,13 @@ table's values).
   - Add C = 2^(emin - k) (2^-4 when k = emin), so the binade of C + V
     has ulp u.
   - Split by Fast2Sum, and add V_l's share after rounding it to odd at
-    precision p.
+    precision p. At k = emin, C = 2^-4 is smaller than V_h, so this
+    Fast2Sum's ordering fails by design. The split is exact all the
+    same, because C is a power of two and a multiple of ulp(V_h): for
+    V_h in [1, 2), C + V_h stays under 2 and is representable; for V_h
+    in [0.5, 1) it is a multiple of 2^-p, and its rounding leaves
+    Z0 - C and V_h - (Z0 - C) exact. COMPUTED; verifier-VM1 checked the
+    identity on every lane it ran.
   - Round once under the program's attribute, and subtract C.
   Round-to-odd is innocuous here because its ulp is finer than u/4. The
   result, a multiple of u, scales to the subnormal grid exactly. This
@@ -343,15 +387,28 @@ the natural logarithm's, so log, log2 and log1p share their words.
 **log1p.** u = 1 + x by TwoSum; the core then runs on u_h.
 - u_l enters as r_l = u_l 2^-k c, corrected by r_l/(1 + r).
 - 1/(1 + r) takes three Newton steps from 1 - r: 2^-8, 2^-16, 2^-32,
-  2^-64.
+  2^-64, and then the last step's rounding, u.
 - 2^-k is taken as 0 past k = p + G + 2, where u_l moves the result by
   less than the bound. The first model built 2^-k there and returned a
   NaN at max_normal (section 3.6, defect 5).
-- |x| < 2^-4 skips the reduction: r = x, with k = 0 and C = 16.
-  Otherwise the correction, relative to a result near 2^-50, would need
-  more than its 2^-64.
+- **|x| < 15/256 skips the reduction:** r = x, with k = 0 and C = 16.
+  - Some threshold is needed: for small x the reduction's sum cancels
+    down to x, and the correction, relative to a result near 2^-50,
+    would need more than its 2^-64.
+  - The threshold must not pass rho, since the polynomial's K and D are
+    planned for |r| <= rho. 15/256 = 2^-4.093 is under rho = 2^-4.08,
+    so one rho, K and D serve both paths.
+  - The first model's threshold was 2^-4, past rho. At fp256 its
+    truncation there reached 2^0.93 times the bound (section 3.6,
+    defect 8).
+  - The band [15/256, 2^-4) now takes the reduction: C = 15 for x > 0;
+    for x < 0, k = -1 with C = 9, or the wrap. |r| stays inside
+    rmax.py's 0.0590820.
+  - Verifier-VM1's other repair holds too, for one FMA more: keep 2^-4
+    and plan log1p's D from rho = 2^-4 (MEASURED, 3.3).
 The low word costs 25 instructions, and log1p's total is 34 to 36 more
-than log's.
+than log's. The threshold is a bank word of its own; 2^-4 had shared
+the reduction's word 1/16.
 
 **The final rounding.** A log-family result is always normal and never
 overflows, so R = rnd(V_h + V_l) is the answer, and inexact is its only
@@ -376,6 +433,17 @@ nothing past the head pays for double words. The double word's own floor
 is about 10u^2 (COMPUTED from the roundings counted in section 3.2), so
 G can reach 47 at fp64 before triple words are needed, and well past 60
 at fp128 and fp256 (MEASURED, `alts.py`).
+
+That floor is relative to the terms being summed, and it reaches V
+amplified where the terms cancel:
+- in the log family at k = -1 with C = 9 (x from about 0.875 to 0.94,
+  and log1p's x from -1/8 to -15/256), where k ln2 and L_j nearly
+  cancel;
+- in log1p near its reduction path's lower end, where u_l is relative
+  to 1 + x, not to the result.
+At fp64 that costs G = 46 its two bits of slack there (3.2, 3.3,
+question 1). At fp128 and fp256 the amplified floor is still more than
+50 bits under the bound.
 
 ### 2.5 fp32
 
@@ -509,19 +577,64 @@ expm1's n = 0 lanes are bounded relative to Z, which drops one factor
 rho from the tail. That is why K = 8 there (total 2^-102.0, 2^-164.6 and
 2^-286.7).
 
+expm1 has one term more, which the formula above and the planner both
+leave out: the clamp. 2^-k is dropped for k > p + G + 2, which moves V'
+by at most 2^-(p+G+3) against |V'| >= 0.95: 2^-2.9 of the bound.
+- Where the truncation's worst r meets the first clamped k, the sum
+  could reach 2^-1.4 of the bound. It is MEASURED at 2^-2.9 (3.3).
+- Moving the clamp to k > p + G + 4 costs nothing, since only a
+  compare's constant changes, and takes the term to 2^-4.9. Phase 2's
+  choice.
+
+Every error-free step is exact, the fixed grid's Fast2Sum included,
+whose ordering fails at k = emin (2.2).
+
 **The log family,** relative to V:
 
     B_V <= 2u rho^K/(K+1)                    single-word tail
          + rho^(D+1)/((D+2)(1 - rho))        truncation
-         + 12 u^2                            head, product, the sum's five
+         + 12 u^2 A                          head, product, the sum's five
                                              roundings, the table
-         [log1p: + |r_l| (2^-64 + u) / |V|, with |V| >= 0.06 off the
-          r = x path]
+         [log1p, reduction path: + about 3.5 u^2 / |V|, the low word]
 
-At fp64: tail 2^-104.6 with K = 12, truncation 2^-102.4 at D = 23, and
-12u^2 = 2^-102.4: about 2^-101.3, against 2^-99. At fp128 2^-164.6,
-2^-164.3 and 2^-222.4, about 2^-163.5 against 2^-159. At fp256 2^-288.6,
-2^-287.4 and 2^-470.4, about 2^-286.9 against 2^-283.
+**rho, path by path.** The reduction path's |r| is at most 0.0590820
+(rmax.py, exact over the 512 seed cells). log1p's r = x path has
+|r| = |x| < 15/256 = 0.0586. Both are under rho = 0.0592, so one K and D
+serve the family. The first model's r = x path reached 2^-4, where the
+truncation is (1/16)^69/(70 (15/16)) = 2^-282.0 at fp256, past the
+bound's 2^-283 (defect 8). So the bound test of section 8 must find each
+path's own largest |r|, not only the seed cells'.
+
+**A, the cancellation factor,** is (|k ln2| + |L_j| + |r Y|)/|V|. The
+12u^2 is counted against the terms, so it reaches V multiplied by A.
+- A is about 1 almost everywhere.
+- It reaches about 22 where k = -1 and C = 9: x from about 0.875 to 0.94
+  for log and log2, and log1p's x from -1/8 to -15/256. There k ln2 and
+  L_j nearly cancel.
+- A coarse count lets every one of those roundings take the full
+  factor. At fp64 it gives about 2^-97.9 in all, which does not show
+  the bound at G = 46 (2^-99). With G = 44's shorter head it gives
+  2^-97.7, and 2^-97.5 with log1p's low word added: under the bound at
+  G = 44 (2^-97).
+
+**log1p's low word,** on the reduction path, adds terms of about u^2
+absolute each:
+- y's rounding, |r_l| u;
+- the correction's own rounding;
+- the square term it leaves out, (r_l/(1 + r))^2/2;
+- the two single-word sums that carry it.
+- In all they come to about 3.5u^2, over |V| >= log1p(15/256) = 0.0569:
+  2^-(2p - 5.95), which is 2^-100.05 at fp64.
+- For x > 0 (k = 0, C = 15, A about 1.3) the worst-case sum is then
+  2^-0.8 of the bound. For x < 0, A dominates.
+- The first version wrote only y's term, |r_l| (2^-64 + u)/|V|.
+
+**The totals where A = 1.** At fp64: tail 2^-104.6 with K = 12,
+truncation 2^-102.4 at D = 23, and 12u^2 = 2^-102.4: about 2^-101.3,
+against 2^-99. At fp128 2^-164.6, 2^-164.3 and 2^-222.4, about 2^-163.5
+against 2^-159. At fp256 2^-288.6, 2^-287.4 and 2^-470.4, about
+2^-286.9 against 2^-283. At fp128 and fp256, A and the low word move
+nothing: 12u^2 times 22 is 2^-218 and 2^-466.
 
 The planners choose the smallest K and D whose estimated total is two
 bits under 2^-(p+G). At one bit, fp128 took D = 19 and 37, and the
@@ -529,32 +642,109 @@ placed points of 3.3 came to 2^-1.5 under the bound, as the estimate
 said. One FMA more there gives about nine bits, since each degree
 divides the truncation by about rho/(D+3).
 
+The planners count neither A nor the low word. At fp128 and fp256 that
+changes nothing. At fp64 it is why G = 46 keeps under two bits in the
+cancellation cells: MEASURED, 2^-1.8 (log1p) and 2^-2.2 (log2) (3.3).
+
 Phase 2 owes this a proof term by term, and section 8 says what holds
-it. The constants 10 and 12 are counted from the model's instruction
-sequence, not proved.
+it. The constants 10, 12 and 3.5 are counted from the model's
+instruction sequence, not proved. At fp64 and G = 46, that proof must
+count, rounding by rounding, which terms each rounding scales with. At
+G = 44 the coarse count already suffices.
 
 ### 3.3 Measured against it
 
 MEASURED. Each figure is the worst |V - true| / Bv over the lanes whose
-answer is the main path's; "true" is mpmath at 4p + 200 bits. 0 wrong
-everywhere.
+answer is the main path's; "true" is mpmath at 4p + 200 bits. Every lane
+also compared with transcend.py agreed or was marked, except the first
+model's four lanes of defect 8.
 
-| | random arguments | placed at the worst rho |
+| | random arguments | placed at each path's largest \|r\| | weighted (verifier-VM1, amd-arc-box) |
+|---|---|---|---|
+| fp64 exp, exp2, expm1 | 2^-6.2, 2^-6.1, 2^-4.9 (2,000 each, x 5 attributes) | 2^-5.7, 2^-5.6, 2^-4.6 | 2^-5.4, 2^-5.2, 2^-3.0 (100,000 each) |
+| fp64 log, log2, log1p | 2^-3.3, 2^-3.1, 2^-3.1 | 2^-3.6, 2^-3.8, 2^-2.8 | 2^-3.2, 2^-2.5, see (*) |
+| fp128 exp, exp2, expm1 | 2^-6.6, 2^-6.8, 2^-10.9 (400) | 2^-6.3, 2^-6.5, 2^-6.0 | 2^-6.1, 2^-6.1, 2^-3.0 (60,000 each) |
+| fp128 log, log2, log1p | 2^-19.0, 2^-19.0, 2^-7.2 (400, at D = 39) | 2^-5.3, 2^-5.3, 2^-5.3 | 2^-5.0, 2^-5.0, see (*) |
+| fp256 exp, exp2, expm1 | 2^-6.1, 2^-6.8, 2^-8.5 (300) | 2^-5.9, 2^-5.8, 2^-3.9 | 2^-5.8, 2^-5.8, 2^-3.8 (60,000 each) |
+| fp256 log, log2, log1p | 2^-26.3, 2^-26.3, 2^-26.2 (200) | 2^-4.9, 2^-4.9, 2^-4.9 | 2^-4.6, 2^-4.7, see (*) |
+| fp32 exp, triple-word | G = 46: 2^-0.04; G = 40: 2^-6.0; G = 32: 2^-8.3 (600) | | G = 46: 2^+0.89, which fails; G = 43: 2^-2.1; G = 40: 2^-4.7 (30,000 to 150,000) |
+
+(*) VM1's log1p figures measured the first model, at its r = x path's
+end, which is defect 8: 2^-1.55 at fp64, 2^-2.18 at fp128 and 2^+0.93
+at fp256.
+
+The fp64 random rows are the 60,000-lane run again, at the final
+parameters, with `in_main` taking the model's own screens. The first
+version cited a run with the log family still at D = 24, and its filter
+skipped the last unit at each end of the exp family's range.
+
+**Placed** (`worstcase.py`, revised) means each path's own largest |r|:
+- the exp family: x next to (n +- 1/2) ln2/8 and (2n +- 1)/16;
+- log and log2: m at the ends of the first and last C = 9 seed cells,
+  times 2^k;
+- log1p: those cells as x = m 2^k - 1, also with the low word of 1 + x
+  at its largest, together with the r = x path's end (|x| just under
+  15/256) and the reduction path's lower end.
+
+The first version placed no log1p point on the r = x path, which is how
+defect 8 went unseen there, and built each exp-family point twice.
+log1p's placed column fell from 2^-6.1, 2^-8.7 and 2^-8.3 to 2^-2.8,
+2^-5.3 and 2^-4.9: the new points are the worse ones, as they should be.
+Random arguments at fp256 show a margin of 2^-26 only because the
+truncation goes as (r/rho)^69 and random arguments rarely sit at rho.
+Placed, the margin is 2^-2.8 to 2^-6.5. The bound binds where it should.
+
+**log1p's two paths at their ends** (`repair.py`): the worst over both
+signs, for the first model, verifier-VM1's repair (2^-4 with D + 1) and
+this model's (15/256 with D). Random arguments with every bit random,
+3,000, 2,000 and 800 a region and sign at fp64, fp128 and fp256, plus
+fixed points at each end.
+
+| | the r = x path's end, \|x\| in [0.054, 15/256) | the band [15/256, 2^-4) | [2^-4, 2^-3), the reduction path |
+|---|---|---|---|
+| fp64: first, VM1's, this | 2^-3.7, 2^-5.6, 2^-3.7 | 2^-1.6, 2^-4.5, 2^-1.9 | 2^-2.0, 2^-2.0, 2^-2.0 |
+| fp128 | 2^-5.2, 2^-6.5, 2^-5.2 | 2^-2.2, 2^-5.8, 2^-5.0 | 2^-7.7, 2^-8.1, 2^-7.7 |
+| fp256 | 2^-5.1, 2^-6.7, 2^-5.1 | 2^+0.93, 2^-2.9, 2^-4.8 | 2^-8.5, 2^-8.5, 2^-8.5 |
+
+- Verifier-VM1's four fp256 lanes, all five attributes, against
+  transcend.py: the first model is wrong and unmarked in 10
+  lane-attribute pairs. Under either repair those 10 are marked, with
+  the guess right, and the other 10 are equal.
+- Where truncation binds, at fp256, this repair keeps 2^-4.8 against
+  2^-2.9, for no instruction. At fp128 VM1's keeps 0.8 bit more.
+- At fp64 both are set by the reduction path, which neither changes:
+  2^-1.9 and 2^-2.0.
+
+**fp64's thin regions, and G = 44** (`g44.py`: 1,500 random arguments a
+region, every lane against transcend.py under rne, 0 wrong, 0 marked;
+the planners at G = 44 give exp K 7 D 12, expm1 K 8 D 13 and the log
+family K 11 D 23):
+
+| fp64 | G = 46 | G = 44 |
 |---|---|---|
-| fp64 exp, exp2, expm1 | 2^-6.2, 2^-6.1, 2^-4.9 (2,000 each, x 5 attributes) | 2^-5.7, 2^-5.6, 2^-4.7 |
-| fp64 log, log2, log1p | 2^-4.3, 2^-3.1, 2^-3.0 | 2^-3.6, 2^-3.8, 2^-6.1 |
-| fp128 exp, exp2, expm1 | 2^-6.6, 2^-6.8, 2^-10.9 (400) | 2^-6.4, 2^-6.5, 2^-6.0 |
-| fp128 log, log2, log1p | 2^-19.0, 2^-19.0, 2^-7.2 (at D = 39) | 2^-5.3, 2^-5.3, 2^-8.7 |
-| fp256 exp, exp2, expm1 | 2^-6.1, 2^-6.8, 2^-8.5 (300) | 2^-5.9, 2^-5.8, 2^-3.9 |
-| fp256 log, log2, log1p | 2^-26.3, 2^-26.3, 2^-26.2 (200) | 2^-4.9, 2^-4.9, 2^-8.3 |
-| fp32 exp, triple-word | G = 46: 2^-0.04; G = 40: 2^-6.0; G = 32: 2^-8.3 (600) | |
+| exp, exp2, x next to (n +- 1/2) ln2/8 or /8 | 2^-5.4, 2^-5.5 | 2^-2.6, 2^-2.6 |
+| expm1 near the 2^-k clamp; near n = 0 | 2^-2.94; 2^-4.6 | 2^-2.95; 2^-6.6 |
+| log, log2 on x in [0.93, 0.945] (k = -1, C = 9) | 2^-3.1, 2^-2.1 | 2^-4.0, 2^-3.7 |
+| log, log2 on x in [1.75, 1.9] | 2^-5.9, 2^-5.4 | 2^-7.1, 2^-7.2 |
+| log1p on [15/256, 2^-4), x > 0 and x < 0 | 2^-1.9, 2^-2.3 | 2^-3.9, 2^-3.8 |
+| log1p on [2^-4, 2^-3), x > 0 and x < 0 | 2^-2.4, 2^-2.3 | 2^-4.4, 2^-4.3 |
+| instructions, rne: exp, exp2, expm1, log, log2, log1p | 181, 179, 175, 193, 187, 227 | 180, 178, 175, 186, 180, 220 |
 
-"Placed" means x next to (n + 1/2) ln2/8 and (2n + 1)/16, and m at the
-ends of the seed cells where C = 9: the points where |r| is largest
-(`worstcase.py`). Random arguments at fp256 show a margin of 2^-26 only
-because the truncation goes as (r/rho)^69 and random arguments rarely
-sit at rho. Placed, the margin is 2^-4 to 2^-8. The bound binds where it
-should.
+At G = 46, larger samples of the two thin regions (`cancel.py`, 20,000
+each): log1p on [-1/8, -15/256) 2^-1.81, log2 on [0.875, 0.9414) 2^-2.20.
+`log1p_floor.py` (3,000 a region) splits log1p's error there by part.
+For x > 0 on the band:
+- y's rounding, 2^-3.0;
+- the correction's rounding, 2^-3.9;
+- its missing square term, 2^-4.0;
+- the rest, 2^-2.6.
+For x < 0 the rest, the cancelling sum, leads (2^-2.2).
+
+Verifier-VM1's weighted sampler could not see the low word's terms: its
+reduction-path log1p arguments were x = u - 1, exact, so u_l = 0. At
+G = 44 every fp64 region measured keeps at least 2.6 bits. There the
+exp family's planners take one degree off D, so the exp rows sit at the
+two-bit target instead of above it.
 
 ### 3.4 How often a lane is marked
 
@@ -576,9 +766,11 @@ COMPUTED, then MEASURED.
 
   With a count near 45, sigma is about 0.3%; every cell sits within two
   sigma. Every marked guess was right, and no unmarked lane was wrong.
+  Verifier-VM1 ran the same at fp128 and fp256: 1.65% to 2.8% marked
+  against 2.2% to 2.35% predicted, the worst cell 1.9 sigma.
 - **At G = 46:** 2^-45.5, about 2.0 x 10^-14 a call. For example, 64
   lanes, 10 calls a step and 10^6 steps make 6.4 x 10^8 calls, and an
-  expected 1.3 x 10^-5 marks a run.
+  expected 1.3 x 10^-5 marks a run. At G = 44, four times that.
 - **Over the transcend pools** (MEASURED, 90 runs at fp64, fp128 and
   fp256): no random lane marked. The marks were the structured lanes of
   section 3.5, at most one a function, format and attribute: exp(+-2^-p)
@@ -589,36 +781,57 @@ COMPUTED, then MEASURED.
 
 ### 3.5 The structured families
 
-Some arguments sit next to an exact case with few significant bits:
-x = c 2^-e for exp, expm1 and log1p near 0, or x = 1 + c ulp for log.
-Their true value then lies within about 2^-2p of a boundary, which no
-double word around the result resolves. An example is
-exp(2^-53) = 1 + 2^-53 + 2^-107 + ..., which is 2^-107 above a midpoint.
-The routine marks them; a replay decides them.
+Some arguments sit next to an exact case: x near c 2^-e for exp, expm1
+and log1p near 0, or x near 1 + c ulp for log. Their true value then
+lies closer to a rounding boundary than the bound can resolve. An
+example is exp(2^-53) = 1 + 2^-53 + 2^-107 + ..., which is 2^-107 above
+a midpoint. The routine marks them; a replay decides them.
 
-MEASURED at fp64 (`census.py`): 240 arguments +-c 2^-e, with c <= 16 and
-e from p - 10 to p + 3, and 32 arguments 1 +- c ulp.
+MEASURED (`census.py`): 240 arguments +-c 2^-e, with c <= 16 and e from
+p - 10 to p + 3, and 32 arguments 1 +- c ulp. fp64 is this study's run;
+fp128 and fp256 are verifier-VM1's run of the same script.
 
-| | rne, rmm | rtz, rdn, rup | guesses wrong |
-|---|---|---|---|
-| exp | 16 of 240 | 23 of 240 | 1 (rne) |
-| expm1 | 4 | 9 | 1 (rne) |
-| log1p | 4 | 7 | 0 |
-| log | 3 of 32 | 7 of 32 | 0 |
-| exp2, log2 | 0 | 0 | 0 |
+| | fp64: rne, rmm | fp64: rtz, rdn, rup | fp128, fp256: rne, rmm | fp128, fp256: rtz, rdn, rup | guesses wrong |
+|---|---|---|---|---|---|
+| exp | 16 of 240 | 23 of 240 | 16 of 240 | 184 of 240 | 1 (rne) |
+| expm1 | 4 | 9 | 16 | 127 | 1 at fp64 (rne) |
+| log1p | 4 | 7 | 16 | 127 | 0 |
+| log | 3 of 32 | 7 of 32 | 3 of 32 | 9 of 32 | 0 |
+| exp2, log2 | 0 | 0 | 0 | 0 | 0 |
 
+- **Which arguments mark.** Near 0, exp(x) = 1 + x + x^2/2 + .... Where
+  1 + x is a rounding boundary, the true value sits x^2/2 from it, and
+  the lane marks while that is inside the bound, about 2^-(p+G).
+  - For x = c 2^-e that means 2e + 1 - 2 log2 c > p + G. So the
+    exponents that mark run from about (p + G)/2 up to p: 3 of them at
+    fp64, 33 at fp128 and 95 at fp256.
+  - The census's 14 exponents cut that off. At fp256 the whole census
+    window marks under the directed three.
+- **Each is the centre of a window.** A neighbour x + j ulp(x) moves the
+  true value by about j ulp(x), and it marks too while the sum stays
+  inside the bound. The window is 2Bv wide.
+  - MEASURED by verifier-VM1 at fp64: around x = 2^-53, 192 of 601
+    neighbours mark under rne (j from -127 to 64); around 3 2^-53, 64;
+    expm1 around -2^-53, 128; log1p around 2^-53, 128; log under rtz
+    around 1, 7.
+  - At fp256 a window holds about 2^190 arguments.
+  - The replay is right either way: 0 wrong unmarked.
 - exp2 and log2 have no such family: their ln2 factor breaks the
   structure.
-- The family is finite. The distance to the boundary grows as x^2, or
-  as (x - 1)^2, so past these few dozen arguments a format nothing
-  marks.
-- Section 9, question 4, asks whether to keep these marks or pay for an
-  exact path near 1.
+- So the family is not a few dozen arguments a format: it grows with
+  p - G.
+  - Phase 2 can list the windows' centres (section 8).
+  - LANGUAGE.md should state the rule: a lane is replayed where its true
+    value lies within the bound of a rounding boundary, which next to an
+    exact case holds for whole windows of arguments.
+- Section 9, question 4, asks whether to keep these marks, or to pay for
+  an exact path near 1 (exp's alone).
 
 ### 3.6 What the model found wrong in itself
 
-MEASURED, all in scratch, before this design settled. Each is a plant
-for phase 2 (section 8).
+MEASURED. Defects 1 to 7 were found in scratch before the first
+version settled. Verifier-VM1's check of that version found defect 8.
+Each is a plant for phase 2 (section 8).
 
 1. **exp's Z** carried r_l through Y(r_h): an error of r_l r_h/2, about
    2^-64 at fp64. The pools passed it; the error against the bound found
@@ -638,6 +851,16 @@ for phase 2 (section 8).
    needs j = 0 too. The pools found it.
 7. **fp32's three missing terms** (section 2.5): 2^12.7 times the bound,
    with the pools passing every version.
+8. **log1p's r = x path past rho**, found by verifier-VM1. The path ran
+   to |x| = 2^-4, while the polynomial was planned for
+   |r| <= rho = 2^-4.08. At fp256 the truncation there is 2^0.93 times
+   the bound.
+   - VM1 built four fp256 lanes from it that came out wrong and
+     unmarked, in 10 lane-attribute pairs. It held them three ways: the
+     model, seq.py and mpmath, and again on amd-arc-box.
+   - The pools hold no such argument, and the first placed set had no
+     point on that path.
+   - The threshold is now 15/256, under rho (2.3).
 
 ## 4. The specials and the flags
 
@@ -708,6 +931,13 @@ edges at +-2^emin are tininess after rounding under the attribute, as
 transcend.py's witness rounding gives it. The pools hold
 both signs of min_normal, max_subnormal and min_subnormal.
 
+Verifier-VM1 MEASURED the words the fragments raise over 317 specials,
+the pools and 6,000 random arguments, for all six functions under all
+five attributes at fp64 and fp256. It saw only 0x0, 0x1, 0x2, 0x10,
+0x14, 0x18 and 0x90, and never bits [6:5]. C4's `routines.flag_words`
+cannot prove the set yet: its walk has no rule for the IOR that adds the
+mark (section 6).
+
 ## 5. The cost
 
 ### 5.1 Measured
@@ -723,11 +953,14 @@ inlined, each call adds QUIET, ENDQUIET and RAISE, 3 more):
 | log | about 1.8x (ESTIMATE) | 193 | 208 | 238 |
 | log2 | about 1.8x (ESTIMATE) | 187 | 202 | 232 |
 | log1p | about 1.8x (ESTIMATE) | 227-229 | 242-244 | 272-274 |
-| bank words, a function | 72-73 (exp) | 63-76 | 71-91 | 84-121 |
-| bank words, all six | | 139-141 | 162-164 | 205-207 |
-| ... with C4's div and sqrt | | 158-159 | 181-182 | 224-225 |
+| bank words, a function | 72-73 (exp) | 63-77 | 71-92 | 84-122 |
+| bank words, all six | | 140-142 | 163-165 | 206-208 |
+| ... with C4's div and sqrt | | 158-160 | 181-183 | 224-226 |
 | most values live | 34 (exp) | 22-24 (exp family), 14-18 (log) | same | same |
 | scratch slots | 0 | 0 | 0 | 0 |
+
+The repair of defect 8 added one bank word to log1p, its threshold
+15/256, and no instruction.
 
 By part, MEASURED, rne:
 - exp at fp64 (181): classify 10, reduce 14, lookup 17, scale factors
@@ -748,7 +981,7 @@ READ (ROADMAP part 5; the round's survey, part M) against MEASURED:
 | | surveyor | this design |
 |---|---|---|
 | table | 32 entries | 8 entries, read by a SELECT tree |
-| bank constants, fp64 | about 100 | 63-76 a function; 139-141 for all six |
+| bank constants, fp64 | about 100 | 63-77 a function; 140-142 for all six |
 | instructions a call, fp64 | about 150 | 175-229 |
 | instructions a call, fp256 | about 750 | 195-274 |
 | fp32 | triple-word | triple-word: about twice fp64 |
@@ -800,7 +1033,10 @@ The SELECT tree at N = 8 needs none of that. Question 3.
 
 Each 6 bits of G cost about 8 instructions for exp and 15 for log. At
 fp64 the double word's floor (10u^2 = 2^-102.7), with the planners' two
-bits of slack, stops G at 47. Question 1.
+bits of slack, stops the exp family's G at 47. In the log family's
+cancellation cells the floor reaches the result amplified (3.2). At
+fp64, G = 46 already keeps less than two bits there, and G = 44 costs
+180 instructions for exp and 186 for log (`g44.py`, 3.3). Question 1.
 
 **augadd, once every image carries R21** (COMPUTED from the fragments'
 error-free additions). augerr and augadd split a sum exactly in 2
@@ -834,10 +1070,11 @@ COMPUTED:
   and 7.4 ns at fp256 (part M, 2.7, READ), an exp call is about 0.33 us a
   lane at fp64 and 1.5 us at fp256. The card ran 2.2% to 5.8% slower than
   the compiler's model (VALIDATION.md, READ).
-- **Registers:** 22-24 values live in the exp family. C4's fragments keep
-  16 or fewer, and `routines.LIVE_MAX` asserts 16. cftc's allocator
-  spills around a routine as around any value, so this costs spills, not
-  correctness. Phase 2 can reorder the fragment (question 12).
+- **Registers:** 22-24 values live in the exp family, and 18 in log1p.
+  C4's fragments keep 16 or fewer, and `routines.LIVE_MAX` asserts 16.
+  cftc's allocator spills around a routine as around any value, so this
+  costs spills, not correctness. Phase 2 can reorder the fragment
+  (question 12).
 
 ## 6. The language and the compiler
 
@@ -872,27 +1109,49 @@ PROPOSED, in C4's and L4's pattern.
   only at a power of two. The log of a negative constant has no real
   value, as `sqrt(-4)` has none.
 - **log(0), log2(0) and log1p(-1) of constants** are 754's divideByZero
-  cases. PROPOSED: `constant-division-by-zero`, its sentence naming the
-  pole (question 8).
+  cases. Two readings exist, and question 8 asks which:
+  - `constant-division-by-zero`, its sentence naming the pole. This
+    widens the name: LANGUAGE.md defines it as a constant divided by a
+    constant zero.
+  - `constant-infinity`, the value being an infinity. This widens that
+    name too: LANGUAGE.md defines it as inf or infinity written as a
+    constant.
 - **A folded value** is rounded once like any constant: exp2(2000) at
   fp64 is `constant-overflow`, exp2(-2000) `constant-rounds-to-zero`.
+  Until question 5's fix lands, the folded exp2(emin - p) and the
+  run-time operation differ under rmm. The fold goes through round_pack
+  and gives the smallest subnormal; the operation gives +0.
 - **h:** a function of a constant that changes with h's size is
   `h-nonlinear`, as `sqrt(h)` is.
 
 **cftc** (`python/cftc`):
-- `ir.ROUTINES` grows from {div, sqrt} to the eight. Each new node is
-  carried by its fragment from the golden generator (section 10), bound
-  to the node's operand, QUIET to ENDQUIET, then RAISE.
+- `ir.ROUTINES` grows from {div, sqrt} to the eight, and so does
+  `routines.ROUTINES`, the arity map. Each new node is carried by its
+  fragment from the golden generator (section 10), bound to the node's
+  operand, QUIET to ENDQUIET, then RAISE.
 - The words are bank slots of the routine kind, deduplicated by bit
   pattern: section 5.1's union counts.
 - `bank-capacity` already names the case where routine words take the
   bank past 512.
 - The internal check holds each instance to its fragment, as for C4's.
-  Two invariants widen:
-  - the flag word's values gain the three marked combinations
-    (section 4);
-  - the internal attributes gain RDN, RUP and the program's attribute
-    (section 2.1).
+  But C4's `routines.invariants` fails these fragments four ways today
+  (MEASURED by verifier-VM1, all 90). The first version named two.
+  - **The flag word's values.** `flag_words` answers None, unknown, on
+    all 90: its walk knows SELECT, a word and IAND with 0, and the mark
+    is an IOR. An IOR rule, the set of pairwise ORs, proves section 4's
+    set on every fragment VM1 tried. Then the set gains the three
+    marked combinations.
+  - **The internal attributes** gain RDN, RUP and the program's
+    attribute (section 2.1).
+  - **Live values:** the exp family's 22 to 24, and log1p's 18
+    (question 12).
+  - **Two instructions read only the routine's input:** expm1's tiny
+    path `fma(x, x, x)` and log1p's `neg(x)`. inline.py's argument for
+    keeping a routine's instructions apart from the program's own nodes
+    relies on every instruction reading a word or another of its values
+    (`python/cftc/inline.py`, line 30). One instruction each restores
+    that: x IXOR the sign word for the negation, and x IOR the zero word
+    for one operand of the fma. Question 12.
 
 **Targets** (READ: `python/cftc/targets.py`; the brief, for
 `cftc.targets.provisional`):
@@ -917,9 +1176,10 @@ PROPOSED, in C4's and L4's pattern.
   and no accepted source changed. The six names are already reserved.
   Reserving a new name such as `ln2` would be a major step instead
   (question 6).
-- **CONFORMANCE.md's profile does not move:** no image's computation or
-  acceptance changes, since the routines are programs of existing
-  instructions.
+- **CONFORMANCE.md's profile does not move** for M1: no image's
+  computation or acceptance changes, since the routines are programs of
+  existing instructions. Question 5's transcend.py fix, if taken, is a
+  major profile step of its own.
 
 **The interpreter now needs mpmath** for these nodes, because
 transcend.py's enclosures do. So:
@@ -1001,24 +1261,38 @@ lead's (Logan's rule, verbatim in the brief).
    - every unmarked lane must equal transcend.py in bits AND flag word;
    - every marked lane is replayed by transcend.py, and its guess
      counted.
-   MEASURED in this study, as a probe: 35 configurations of 36, 0
-   mismatches (section 11; the log family then at D = 24 and 71, one and
-   three FMAs longer than now).
+   MEASURED as a probe. This study ran 35 configurations of 36, with
+   the log family then at D = 24 and 71, one and three FMAs longer than
+   now. Verifier-VM1 then ran all 90 on the first version's final
+   fragments. log1p's 15 ran again after the repair. 0 mismatches in
+   every one.
 2. **The bound, against an independent reference.** For each format and
    function:
-   - random arguments in the main path;
-   - the placed worst-rho points of 3.3;
+   - random arguments in the main path, with every bit of the argument
+     random, so that log1p's u_l is not 0. Verifier-VM1's weighted
+     sampler built log1p's arguments as x = u - 1, exact, and so never
+     exercised the low word (3.3);
+   - **each path's own worst points**, not the seed cells' alone:
+     - every path's largest |r|, including log1p's r = x path at its
+       end, |x| just under 15/256;
+     - the places where the floor reaches the result amplified: the
+       k = -1, C = 9 cells, and log1p's reduction path at its lower end
+       with u_l at its largest;
+     - expm1's first clamped k;
    - |V - mpmath| / Bv must stay under 1.
-   This is the test that caught defects 1, 2 and 7. The pools passed all
-   three, so it is not optional. mpmath at 4p + 200 bits is independent
-   of transcend.py's decision procedure; MPFR, where the `mpfr` stage
-   has it, is more so.
+   This is the test that caught defects 1, 2 and 7. It caught 8 once
+   its points were placed on the r = x path, and it is how the fp64
+   margins of 3.3 were found. The pools passed all four defects, so it
+   is not optional. mpmath at 4p + 200 bits is independent of
+   transcend.py's decision procedure; MPFR, where the `mpfr` stage has
+   it, is more so.
 3. **The mark-rate law,** with the bound inflated by a fixed factor: the
    marked fraction within its sigma of 2^(0.53-G'). Every unmarked lane
    right, and the marked guesses right.
-4. **The structured families** as a committed list: section 3.5's census
-   at every format, as the exact arguments that mark, by attribute.
-   These are the lanes the mark exists for, and they test it.
+4. **The structured families** as a committed list: section 3.5's
+   window centres at every format, by attribute, each with a few
+   neighbours inside and outside its window. These are the lanes the
+   mark exists for, and they test it.
 5. **The constants** re-derived by the generator with a --check, as
    gen_divfull's are: tables, ln2's words, the coefficients and the
    screens, each against mpmath at 3,000 bits, and RECIP_SEED's cells
@@ -1047,6 +1321,7 @@ lead's (Logan's rule, verbatim in the brief).
 | the mark silenced (0x80 never ORed) | the structured list; the inflated law |
 | defect 1, r_l through Y | the bound (2), and only it |
 | defect 2, ln2 in two words | the bound (2) |
+| defect 8, log1p's r = x path back out to 2^-4 | the bound (2) at fp256's r = x end; verifier-VM1's four lanes |
 | exp2's exact test without j = 0 | the pools (x = 1/8 and the like) |
 | the tiny gate removed | the pools under the directed attributes (subnormal x marked) |
 | fp32's square term dropped | the bound at fp32 |
@@ -1055,38 +1330,87 @@ lead's (Logan's rule, verbatim in the brief).
 
 1. **G, the guard, at fp64, fp128 and fp256.** G = 46 gives a mark rate
    of 2^-45.5 a call; each 6 bits more costs about 8 instructions for
-   exp and 15 for log (5.3). fp64's double word stops at 47.
-   Recommended: 46 at all three.
+   exp and 15 for log (5.3). There are two choices for fp64, both
+   MEASURED (3.3):
+   - **G = 46 everywhere,** the first version's choice. The bound holds
+     wherever it was measured. At fp64 the thinnest margins are in the
+     cancellation cells:
+     - log1p, x from -1/8 to -15/256: 2^-1.8 (20,000 arguments);
+     - log2, x from 0.875 to 0.94: 2^-2.2; verifier-VM1's 100,000
+       weighted arguments gave log2 2^-2.5.
+     There the planners' two-bit rule fails, and the coarse count of
+     3.2 does not show the bound.
+   - **G = 44 at fp64,** verifier-VM1's preference:
+     - every fp64 region measured keeps at least 2.6 bits, and the
+       coarse count shows the bound;
+     - the mark rate is 2^-43.5 a call, four times 46's;
+     - the planners take K = 11 for the log family and D = 12 for exp
+       and exp2. That saves 7 instructions in each log routine and 1
+       in exp and exp2.
+   At fp128 and fp256 the cancellation moves nothing. The thinnest
+   margin there is expm1's at its clamp, 2^-2.9 at every format (3.2),
+   and the rest keep 2^-3.8 or more.
+   Recommended: G = 44 at fp64, and 46 at fp128 and fp256. The rule
+   that picks them is the planners' two bits, counted with A and with
+   log1p's low word. A second G costs nothing: 2^-(p+G) is a bank word
+   that differs by format anyway.
 2. **fp32.** A double word caps G near 18, a rate of 2^-17.5, which is
-   not rare. Triple words cost about twice fp64: exp 382 at G = 40, and
-   about 420 at G = 46 once the reduction's low sum is a double word
-   (2.5). Recommended: triple-word at G = 40, a rate of 2^-39.5, and an
-   exhaustive sweep of fp32's 2^32 inputs on amd-arc-box in phase 2 to
-   count the marks exactly. Or G = 46, if one G everywhere matters more
-   than about 40 instructions a call.
+   not rare. Triple words cost about twice fp64: exp takes 382
+   instructions at G = 40 (2.5).
+   - Verifier-VM1 MEASURED weighted arguments on amd-arc-box:
+     - G = 40 holds with 2^-4.7 to spare, over 150,000;
+     - G = 43 holds with 2^-2.1, over 60,000;
+     - G = 46 FAILS: 2^+0.89 over 30,000, with 3,768 lanes above
+       2^-1.5.
+   - So G = 46 at fp32 needs the reduction's low sum as a double word
+     (about 8 instructions, ESTIMATE, not built) and a new measurement.
+   Recommended: triple-word at G = 40, a rate of 2^-39.5.
+   - An exhaustive sweep of fp32's inputs would count the marks exactly.
+     It cannot be this Python model: about 3 x 10^9 lane-calls on exp's
+     main path, at about 3 ms each. It needs program.c or the card, in
+     phase 2.
+   - fp32's other five routines are not built, and their costs are
+     estimates.
 3. **The tables.** An eight-entry table read by a SELECT tree, in bank
    words, costs 12 to 25 instructions a call more than a copy in each
    lane's scratch read by LDX. The copy costs 2N slots a lane, a fill a
    segment and new compiler layout (5.3). Recommended: the SELECT tree,
    N = 8.
-4. **The structured families** (3.5): at most two dozen arguments a
-   function and attribute at fp64, next to 0 or 1, mark and are
-   replayed. Recommended: keep
-   them. List them in phase 2's tests, and say in LANGUAGE.md that
-   exp(c 2^-e) and log(1 + c ulp) with few bits are replayed. The exact
-   path for exp and exp2 near 1 (about 12 instructions every call) is
-   the lever if a workload proves to hit them.
+4. **The structured families** (3.5) mark and are replayed. They are
+   windows, not points, and they grow with p - G: at fp128 and fp256,
+   184 of the census's 240 exp arguments mark under the directed three,
+   against 23 at fp64. Recommended: keep them.
+   - List the windows' centres in phase 2's tests.
+   - Have LANGUAGE.md state the rule, not "few bits": a lane is
+     replayed where its true value lies within the bound of a rounding
+     boundary, which next to an exact case holds for whole windows of
+     arguments.
+   - The exact path near 1 (about 12 instructions every call) is exp's
+     alone, since exp2 has no family. It is the lever if a workload
+     proves to hit the windows.
 5. **transcend.py's exp2 at x = emin - p under rmm.** The exact value is
    the tie sigma/2 between 0 and the smallest subnormal sigma. 754's
    roundTiesToAway gives sigma; transcend.py gives +0, because every
    n < emin - man_w goes through `_round_underflowing`, a quarter of
-   sigma (MEASURED at fp32 and fp64; test_exp2_past_the_ends asserts the
-   +0 under every attribute). The routine reproduces whichever the
-   golden model says, and the difference is one constant. Recommended:
-   fix transcend.py, and transcend.c with it, to round the exact power
-   at n = emin - p, as a parcel of its own before phase 2. Under
-   CONFORMANCE.md's rule it is a profile step, since the vector set
-   records the bit.
+   sigma. MEASURED at every format, one argument each: x = -150, -1075,
+   -16495 and -262379, flags 0x18. test_exp2_past_the_ends asserts the
+   +0 under every attribute.
+   - It is the only such branch. pow, pown, powr, compound and rootn
+     test `vexp < emin - man_w - 1`, which keeps the tie out
+     (verifier-VM1, READ).
+   - The routine reproduces whichever the golden model says, and the
+     difference is one constant.
+   Recommended: fix transcend.py, and transcend.c with it, to round the
+   exact power at n = emin - p, as a parcel of its own before phase 2.
+   - Under CONFORMANCE.md's rule it is a MAJOR profile step, since the
+     vector pool holds the argument at every format.
+   - What moves: the four rmm transcend vector sets and their lines in
+     vectors/SHA256SUMS; profile.py's VERSION; CONFORMANCE.md's and
+     VALIDATION.md's entries; the vendored copies sync.py holds;
+     test_exp2_past_the_ends; and the certificate corpus's `profile`
+     lines.
+   - Until it lands, the language's folded exp2(-1075) and the run-time
+     operation differ under rmm (section 6).
 6. **ln 2 in exp2's and log2's tangent rules.** A constant is an exact
    rational, and ln 2 is not. Recommended: the rule's constant is the
    exact rational value of ln 2 correctly rounded once at the program's
@@ -1104,8 +1428,13 @@ lead's (Logan's rule, verbatim in the brief).
 8. **Constants.** Recommended:
    - fold the six exact rational cases (section 6);
    - `irrational-constant` for every other function of a constant;
-   - `constant-division-by-zero` for log(0), log2(0) and log1p(-1) of
-     constants, its sentence naming the pole.
+   - for log(0), log2(0) and log1p(-1) of constants, one of two
+     readings, each widening a name LANGUAGE.md defines more narrowly:
+     - `constant-division-by-zero` ("a constant divided by a constant
+       zero"), its sentence naming the pole;
+     - `constant-infinity` ("inf or infinity written as a constant").
+     The first is recommended, since 754 calls these cases
+     divideByZero and the operation raises that flag.
 9. **cftc VERSION 5, the corpus remade as e45a2f7 did, and the language
    at 1.1.** Recommended, as C4 did.
 10. **mpmath in the language's checks.** The interpreter needs it for
@@ -1116,11 +1445,21 @@ lead's (Logan's rule, verbatim in the brief).
 11. **Where the generator lives.** Recommended: a new golden module,
     `python/cft_golden/mathlib.py`, beside routines.py. Its fragments
     are built, not read from a program as C4's are, and `routines.py`
-    learns to hand them to cftc by name.
-12. **Live values.** The exp family keeps 22 to 24 live, against C4's
-    16. Recommended: reorder in phase 2 and measure spills on a
-    reference step; raise `routines.LIVE_MAX` only if reordering cannot
-    reach 16.
+    learns to hand them to cftc by name. Both `routines.ROUTINES`, the
+    arity map, and `ir.ROUTINES` learn the six names.
+12. **Live values, and C4's other invariants** (section 6). The exp
+    family keeps 22 to 24 live and log1p 18, against C4's 16.
+    Recommended: reorder in phase 2 and measure spills on a reference
+    step. The exp family's count is structural, so expect to raise
+    `routines.LIVE_MAX`; NREG is 32. For the other invariants that fail
+    today:
+    - give `flag_words` an IOR rule;
+    - admit RDN, RUP and the program's attribute inside a routine;
+    - spend one instruction each in expm1 and log1p, so that no
+      instruction reads only the input.
+    Relaxing inline.py's invariant instead is the alternative. It is not
+    recommended: inline.py's argument for keeping a routine's
+    instructions apart from the program's nodes rests on it.
 
 ## 10. What phase 2 builds, in order
 
@@ -1128,9 +1467,13 @@ PROPOSED, after the lead's review and Logan's answers:
 
 1. **The golden generator** (`mathlib.py`): the six fragments at fp64,
    fp128 and fp256, and the triple-word fp32 variants, at every
-   attribute.
-   - Every constant is derived and checked (--check), and every fragment
-     held to its invariants: flag words, attributes, words, live values.
+   attribute, each at the G that question 1 decides for its format.
+   - Every constant is derived and checked (--check).
+   - Every fragment is held to its invariants: flag words, attributes,
+     words, live values. Four of C4's invariants fail the model's
+     fragments today, and section 6 says what each needs (question 12).
+   - The planners count the cancellation factor A and log1p's low word
+     (3.2).
    - The tests: section 8's items 1 to 5 and the plants, quick ones in
      the golden stage.
    - The exhaustive fp32 sweep, and the larger bound and rate samples,
@@ -1169,12 +1512,13 @@ this directory with the repository's `python/` on the path, which
 | `m1exp.py`, `m1log.py`, `m1exp32.py` | the routines (sections 2.2, 2.3, 2.5) |
 | `m1harness.py` | the pools (transcend_check's, the vector sets', test_transcend's brute pool) and the comparison with transcend.py |
 | `pools_run.py`, `pools_all.py`, `pools32.py` | the pools against transcend.py: one format (with a deadline), all three double-word formats, and the triple-word fp32 exp |
-| `m1measure.py`, `worstcase.py`, `meas32.py` | the error against the bound: random and placed, and fp32's at several G |
+| `m1measure.py`, `worstcase.py`, `meas32.py` | the error against the bound: random and placed at each path's largest \|r\|, and fp32's at several G |
+| `repair.py`, `log1p_floor.py`, `cancel.py`, `g44.py` | the revision's runs: log1p's two paths at their ends under the first model, VM1's repair and this one, with VM1's four lanes; log1p's reduction-path error by part; the cancellation cells at fp64; fp64 at G = 46 against G = 44 |
 | `m1rate.py` | the mark-rate law with an inflated bound |
 | `census.py` | the structured families |
 | `alts.py`, `bound_terms.py`, `consts_report.py`, `rmax.py`, `words_union.py`, `final_counts.py` | the alternatives, the bound's terms, the screens, the reduction's max |r|, the bank's union, the final fragments' counts |
 | `onseq.py` | the fragments as programs on seq.py through routines.run |
-| `*.out.txt` | each run's output as captured, named for its script; the outputs from before a design change say which version they measured |
+| `*.out.txt` | each run's output as captured, named for its script; the outputs from before a design change say which version they measured. `-first` marks a run of the first version, kept beside its revised run |
 
 The runs and their loads are in the round's ledger,
 `Data/runs/2026-10-02-step6-round/ledger/M1.md`.

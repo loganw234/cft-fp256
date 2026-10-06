@@ -1,4 +1,4 @@
-# onseq.py, 11:20-11:50, the desktop 88-100% busy; stopped by the harness's 30-minute limit before the 36th configuration. The log family then at K 12, D 24/71 (now 23/68).
+# onseq.py, 11:20-11:50, the desktop 88-100% busy; stopped by the harness's 30-minute limit before the 36th configuration. The log family then at K 12, D 24/71 (now 23/68). The first version: log1p's r = x path out to 2^-4 (defect 8).
 fp64 exp   rne: seq.py program 184 insns (incl. 2 deposits + halt), bank 64, lanes 367, mismatches 0
 fp64 exp   rtz: seq.py program 182 insns (incl. 2 deposits + halt), bank 64, lanes 367, mismatches 0
 fp64 exp   rup: seq.py program 181 insns (incl. 2 deposits + halt), bank 63, lanes 367, mismatches 0

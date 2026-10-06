@@ -10,7 +10,10 @@
 #   log2 x = k + (log(16/C) + log1p(r)) / ln2 (a double-word product)
 #   log1p x: u = 1 + x by TwoSum; the core on u_h, the low word folded in
 #   as r_l = u_l 2^-k c, corrected by r_l / (1 + r) (three Newton steps);
-#   |x| < 2^-4 skips the reduction (r = x, k = 0, C = 16).
+#   |x| < 15/256 skips the reduction (r = x, k = 0, C = 16). 15/256 =
+#   2^-4.093 is under RHO, so one (rho, K, D) serves every path of the
+#   family. (The first threshold, 2^-4, was past RHO: at fp256 the
+#   truncation reached 2^0.93 of the bound there - verifier-VM1's (b)-1.)
 
 import math
 from fractions import Fraction
@@ -23,6 +26,7 @@ from m1const import words_of, truncated, mpf_to_frac
 
 LN2 = mpmath.log(2)
 RHO = 0.0592    # |r| < 0.0590820 = 2^-4.081 over all 512 seed cells (rmax.py, computed exactly)
+SMALL = Fraction(15, 256)   # log1p's r = x path: |x| < SMALL <= RHO (one rho for every path)
 
 
 def log_plan(fmt, G=46, rho=RHO):
@@ -46,7 +50,7 @@ def log_plan(fmt, G=46, rho=RHO):
     return K, D
 
 
-def build_log(fmt, rnd, fn, G=46, K=None, D=None, brel=None, small=Fraction(1, 16)):
+def build_log(fmt, rnd, fn, G=46, K=None, D=None, brel=None, small=SMALL):
     assert fn in ("log", "log2", "log1p")
     p, W, mw = fmt.prec, fmt.width, fmt.man_w
     full = (1 << W) - 1
@@ -143,6 +147,7 @@ def build_log(fmt, rnd, fn, G=46, K=None, D=None, brel=None, small=Fraction(1, 1
             e = f.fma(nr0, y, f.sub(ONE, y))          # 1 - (1 + r) y
             y = f.fma(y, e, y)
         corr = f.mul(rl, y)
+        f.probes.update(uh=uh, ul=ul, rl=rl, yinv=y, corr=corr)
         sm = f.icmplt(ax, w(enc_exact(fmt, small), "SMALL"))
         r = f.sel(x, r, sm)
         kf = f.sel(ZERO, kf, sm)

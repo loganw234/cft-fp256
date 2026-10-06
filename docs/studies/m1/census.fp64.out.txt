@@ -1,4 +1,4 @@
-# census.py fp64 16, 12:27, the desktop busy. Final parameters.
+# census.py fp64 16, 12:27, the desktop busy. Final parameters. Every log1p argument of the census is on the r = x path either way (|x| <= 2^-39), so the revision moves none of it.
 fp64 exp   rne: 240 structured arguments, marked 16 (guess wrong 1), wrong unmarked 0; e.g. ['1.11e-16', '3.33e-16', '5.55e-16', '7.77e-16']
 fp64 exp   rtz: 240 structured arguments, marked 23 (guess wrong 0), wrong unmarked 0; e.g. ['2.22e-16', '4.44e-16', '6.66e-16', '8.88e-16']
 fp64 exp   rdn: 240 structured arguments, marked 23 (guess wrong 0), wrong unmarked 0; e.g. ['2.22e-16', '4.44e-16', '6.66e-16', '8.88e-16']

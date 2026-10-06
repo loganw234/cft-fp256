@@ -1,4 +1,4 @@
-# m1rate.py, the bound inflated to 2^-(p+6), 2,000 uniform fp64 arguments, rne and rtz, 11:06-11:08, the desktop about 1% busy. The log family then at D 24 (now 23).
+# m1rate.py, the bound inflated to 2^-(p+6), 2,000 uniform fp64 arguments, rne and rtz, 11:06-11:08, the desktop about 1% busy. The log family then at D 24 (now 23). The first version: log1p's r = x path out to 2^-4 (defect 8).
 exp   fp64 rne bound 2^-(p+6): marked 42/2000 = 0.0210 (guess right 42), predicted 0.0224, wrong unmarked 0  7s
 exp   fp64 rtz bound 2^-(p+6): marked 52/2000 = 0.0260 (guess right 52), predicted 0.0224, wrong unmarked 0  29s
 exp2  fp64 rne bound 2^-(p+6): marked 36/2000 = 0.0180 (guess right 36), predicted 0.0227, wrong unmarked 0  42s

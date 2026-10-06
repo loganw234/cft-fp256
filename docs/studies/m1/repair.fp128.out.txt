@@ -1,0 +1,21 @@
+# repair.py fp128 2000 128, 16:39-16:41, the desktop 96% busy (Logan's game).
+fp128 log1p: K 12, D 38; RHO 0.0592; SMALL 15/256 = 0.05859375; insns before (2^-4, D) 242, (a) (2^-4, D+1) 243, (b) (15/256, D) 242
+  +small end: |x| in [0.054, 15/256) before (2^-4, D)  n 2009: worst log2(err/Bv) -5.22 at x = +0.058573245219; above -1.5: 0, above 0: 0  [9s]
+  +small end: |x| in [0.054, 15/256) (a) (2^-4, D+1)   n 2009: worst log2(err/Bv) -6.50 at x = +0.058519813163; above -1.5: 0, above 0: 0  [21s]
+  +small end: |x| in [0.054, 15/256) (b) (15/256, D)   n 2009: worst log2(err/Bv) -5.22 at x = +0.058573245219; above -1.5: 0, above 0: 0  [36s]
+  +band: |x| in [15/256, 2^-4)       before (2^-4, D)  n 2012: worst log2(err/Bv) -2.19 at x = +0.062500000000; above -1.5: 0, above 0: 0  [47s]
+  +band: |x| in [15/256, 2^-4)       (a) (2^-4, D+1)   n 2012: worst log2(err/Bv) -5.83 at x = +0.062495291865; above -1.5: 0, above 0: 0  [58s]
+  +band: |x| in [15/256, 2^-4)       (b) (15/256, D)   n 2012: worst log2(err/Bv) -44.80 at x = +0.058593750000; above -1.5: 0, above 0: 0  [70s]
+  +past 2^-4: |x| in [2^-4, 2^-3)    before (2^-4, D)  n 2006: worst log2(err/Bv) -17.10 at x = +0.103466423550; above -1.5: 0, above 0: 0  [83s]
+  +past 2^-4: |x| in [2^-4, 2^-3)    (a) (2^-4, D+1)   n 2006: worst log2(err/Bv) -17.10 at x = +0.103466423550; above -1.5: 0, above 0: 0  [89s]
+  +past 2^-4: |x| in [2^-4, 2^-3)    (b) (15/256, D)   n 2006: worst log2(err/Bv) -17.10 at x = +0.103466423550; above -1.5: 0, above 0: 0  [95s]
+  -small end: |x| in [0.054, 15/256) before (2^-4, D)  n 2009: worst log2(err/Bv) -5.72 at x = -0.058593750000; above -1.5: 0, above 0: 0  [101s]
+  -small end: |x| in [0.054, 15/256) (a) (2^-4, D+1)   n 2009: worst log2(err/Bv) -6.61 at x = -0.058563451372; above -1.5: 0, above 0: 0  [107s]
+  -small end: |x| in [0.054, 15/256) (b) (15/256, D)   n 2009: worst log2(err/Bv) -5.72 at x = -0.058593750000; above -1.5: 0, above 0: 0  [112s]
+  -band: |x| in [15/256, 2^-4)       before (2^-4, D)  n 2012: worst log2(err/Bv) -2.28 at x = -0.062453528500; above -1.5: 0, above 0: 0  [117s]
+  -band: |x| in [15/256, 2^-4)       (a) (2^-4, D+1)   n 2012: worst log2(err/Bv) -5.82 at x = -0.062500000000; above -1.5: 0, above 0: 0  [123s]
+  -band: |x| in [15/256, 2^-4)       (b) (15/256, D)   n 2012: worst log2(err/Bv) -4.99 at x = -0.058626726059; above -1.5: 0, above 0: 0  [129s]
+  -past 2^-4: |x| in [2^-4, 2^-3)    before (2^-4, D)  n 2006: worst log2(err/Bv) -7.66 at x = -0.062500000000; above -1.5: 0, above 0: 0  [134s]
+  -past 2^-4: |x| in [2^-4, 2^-3)    (a) (2^-4, D+1)   n 2006: worst log2(err/Bv) -8.14 at x = -0.062856668652; above -1.5: 0, above 0: 0  [140s]
+  -past 2^-4: |x| in [2^-4, 2^-3)    (b) (15/256, D)   n 2006: worst log2(err/Bv) -7.66 at x = -0.062500000000; above -1.5: 0, above 0: 0  [147s]
+done 147s

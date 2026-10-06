@@ -1,0 +1,7 @@
+# pools_run.py fp64 log1p 500, 17:01, the desktop 2% busy. After the revision: log1p's r = x path ends at 15/256.
+fp64 log1p rne K12 D23 n 367 marked 1 (right 1) wrong 0 insns 227 words 77 live 18 ['0x3ca0000000000000'] []  1s
+fp64 log1p rtz K12 D23 n 367 marked 0 (right 0) wrong 0 insns 229 words 77 live 18 [] []  2s
+fp64 log1p rdn K12 D23 n 367 marked 0 (right 0) wrong 0 insns 229 words 77 live 18 [] []  3s
+fp64 log1p rup K12 D23 n 367 marked 0 (right 0) wrong 0 insns 227 words 77 live 18 [] []  4s
+fp64 log1p rmm K12 D23 n 367 marked 1 (right 1) wrong 0 insns 227 words 77 live 18 ['0x3ca0000000000000'] []  5s
+5s; skipped (deadline): none

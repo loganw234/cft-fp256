@@ -1,4 +1,4 @@
-# alts.py, 13:01-13:08, the desktop 100% busy. Final planners (two bits of slack).
+# alts.py, 13:01-13:08, the desktop 100% busy. Final planners (two bits of slack). exp and log only: the revision moves none of it.
 exp, rne: N (SELECT tree) -> K, D, instructions [lookup phase], words
   fp64 N= 4: K 8 D 15  insns 181 [lookup 8]  words 57  | LDX copy: 178 insns, 8 slots a lane
   fp64 N= 8: K 7 D 13  insns 181 [lookup 17]  words 64  | LDX copy: 169 insns, 16 slots a lane

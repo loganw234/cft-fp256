@@ -1,13 +1,13 @@
-# worstcase.py fp64, 12:23-12:25, the desktop busy. Final parameters.
-fp64 exp   rne: 66 placed arguments (66 on the main path), wrong 0, marked 0, worst log2(err/bound) -5.70  5s
-fp64 exp   rtz: 66 placed arguments (66 on the main path), wrong 0, marked 0, worst log2(err/bound) -5.70  7s
-fp64 exp2  rne: 88 placed arguments (88 on the main path), wrong 0, marked 0, worst log2(err/bound) -5.57  10s
-fp64 exp2  rtz: 88 placed arguments (88 on the main path), wrong 0, marked 0, worst log2(err/bound) -5.57  12s
-fp64 expm1 rne: 66 placed arguments (66 on the main path), wrong 0, marked 0, worst log2(err/bound) -4.67  13s
-fp64 expm1 rtz: 66 placed arguments (66 on the main path), wrong 0, marked 0, worst log2(err/bound) -4.67  15s
-fp64 log   rne: 100 placed arguments (100 on the main path), wrong 0, marked 0, worst log2(err/bound) -3.59  17s
-fp64 log   rtz: 100 placed arguments (100 on the main path), wrong 0, marked 0, worst log2(err/bound) -3.59  20s
-fp64 log2  rne: 100 placed arguments (100 on the main path), wrong 0, marked 0, worst log2(err/bound) -3.82  23s
-fp64 log2  rtz: 100 placed arguments (100 on the main path), wrong 0, marked 0, worst log2(err/bound) -3.82  29s
-fp64 log1p rne: 60 placed arguments (60 on the main path), wrong 0, marked 0, worst log2(err/bound) -6.12  30s
-fp64 log1p rtz: 60 placed arguments (60 on the main path), wrong 0, marked 0, worst log2(err/bound) -6.12  32s
+# worstcase.py fp64, 16:55, the desktop 72% busy. The revised placed set: each path's own largest |r|. After the revision: log1p's r = x path ends at 15/256.
+fp64 exp   rne: 60 placed arguments (60 on the main path), wrong 0, marked 0, worst log2(err/bound) -5.70 at x = +6.71486331167  0s
+fp64 exp   rtz: 60 placed arguments (60 on the main path), wrong 0, marked 0, worst log2(err/bound) -5.70 at x = +6.71486331167  1s
+fp64 exp2  rne: 80 placed arguments (80 on the main path), wrong 0, marked 0, worst log2(err/bound) -5.57 at x = +0.1875  1s
+fp64 exp2  rtz: 80 placed arguments (80 on the main path), wrong 0, marked 0, worst log2(err/bound) -5.57 at x = +0.1875  2s
+fp64 expm1 rne: 60 placed arguments (60 on the main path), wrong 0, marked 0, worst log2(err/bound) -4.59 at x = -0.129965096355  2s
+fp64 expm1 rtz: 60 placed arguments (60 on the main path), wrong 0, marked 0, worst log2(err/bound) -4.59 at x = -0.129965096355  3s
+fp64 log   rne: 100 placed arguments (100 on the main path), wrong 0, marked 0, worst log2(err/bound) -3.59 at x = +0.94140625  3s
+fp64 log   rtz: 100 placed arguments (100 on the main path), wrong 0, marked 0, worst log2(err/bound) -3.59 at x = +0.94140625  6s
+fp64 log2  rne: 100 placed arguments (100 on the main path), wrong 0, marked 0, worst log2(err/bound) -3.82 at x = +0.94140625  8s
+fp64 log2  rtz: 100 placed arguments (100 on the main path), wrong 0, marked 0, worst log2(err/bound) -3.82 at x = +0.94140625  9s
+fp64 log1p rne: 191 placed arguments (191 on the main path), wrong 0, marked 0, worst log2(err/bound) -2.77 at x = -0.0595703125  15s
+fp64 log1p rtz: 191 placed arguments (191 on the main path), wrong 0, marked 0, worst log2(err/bound) -2.77 at x = -0.0595703125  17s

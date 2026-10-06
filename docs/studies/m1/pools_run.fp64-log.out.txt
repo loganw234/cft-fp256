@@ -1,4 +1,4 @@
-# pools_run.py fp64 log,log2,log1p, 12:03-12:05, the desktop 88-100% busy. Final parameters.
+# pools_run.py fp64 log,log2,log1p, 12:03-12:05, the desktop 88-100% busy. Final parameters. The first version: log1p's r = x path out to 2^-4 (defect 8).
 fp64 log   rne K12 D23 n 367 marked 0 (right 0) wrong 0 insns 193 words 75 live 16 [] []  2s
 fp64 log   rtz K12 D23 n 367 marked 1 (right 1) wrong 0 insns 193 words 75 live 16 ['0x3ff0000000000001'] []  7s
 fp64 log   rdn K12 D23 n 367 marked 1 (right 1) wrong 0 insns 193 words 75 live 16 ['0x3ff0000000000001'] []  10s

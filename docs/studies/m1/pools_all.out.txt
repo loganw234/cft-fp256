@@ -1,4 +1,4 @@
-# pools_all.py, 2026-10-05 11:09-11:12, the desktop about 1% busy. After the fixes of Z's low term and the three-word ln2, before the planners' final rule: the log family at K 12, D 24/39/71 (fp64/fp128/fp256; now D 23/38/68); the exp family as final.
+# pools_all.py, 2026-10-05 11:09-11:12, the desktop about 1% busy. After the fixes of Z's low term and the three-word ln2, before the planners' final rule: the log family at K 12, D 24/39/71 (fp64/fp128/fp256; now D 23/38/68); the exp family as final. The first version: log1p's r = x path out to 2^-4 (defect 8).
 fp64 exp   rne n 367 marked 1 (right 0) wrong 0 insns 181 words 64 live 23 ['0x3ca0000000000000'] []
 fp64 exp   rtz n 367 marked 1 (right 1) wrong 0 insns 179 words 64 live 22 ['0xbca0000000000000'] []
 fp64 exp   rdn n 367 marked 1 (right 1) wrong 0 insns 179 words 64 live 22 ['0xbca0000000000000'] []

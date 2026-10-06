@@ -2,10 +2,10 @@
 # against the in-lane bound, with mpmath at 4p + 200 bits the reference.
 import math, sys, time, random
 from fractions import Fraction
-from fractions import Fraction
 import mpmath
-from m1core import sf, evaluate, dec
-from m1exp import build_exp
+from m1core import sf, evaluate, dec, enc, RDN, RUP
+from m1const import mpf_to_frac
+from m1exp import build_exp, LN2 as LN2_MP
 from m1log import build_log
 from m1harness import domain_sample, FORMATS, tr
 
@@ -25,29 +25,41 @@ def true_scaled(fmt, fn, xa, k):
         v = mpmath.log1p(x)
     return v * mpmath.mpf(2) ** (-k)
 
-LN2F = 0.6931471805599453
+_SCREENS = {}
+
+
+def screens(fmt):
+    """The model's own screen constants (m1exp.build_exp's XOVF, XUNF and
+    XM1, the same expressions), as values: the main path's exact ends."""
+    if fmt.name not in _SCREENS:
+        p, l2 = fmt.prec, mpf_to_frac(LN2_MP)
+        _SCREENS[fmt.name] = (
+            dec(fmt, enc(fmt, (fmt.emax + 1) * l2 + Fraction(1, 2 ** 3000), RUP)),
+            dec(fmt, enc(fmt, (fmt.emin - p) * l2, RDN)),
+            dec(fmt, enc(fmt, -(p + 2) * l2, RDN)))
+    return _SCREENS[fmt.name]
+
 
 def in_main(fmt, fn, xa):
     """Whether the main path answers x (no special, screen, tiny or exact
-    path does)."""
+    path does), by the model's own thresholds. (Until the send-back of
+    2026-10-05 this kept a margin of 1 inside each end of the exp
+    family's range, so the last unit at each end went unmeasured:
+    verifier-VM1's note.)"""
     u = sf.unpack(fmt, xa)
     if u.kind in (sf.NAN, sf.INF, sf.ZERO):
         return False
     x = dec(fmt, xa)
     p = fmt.prec
     ax = abs(x)
-    if fn in ("exp", "exp2"):
-        lo = (fmt.emin - p) * (LN2F if fn == "exp" else 1)
-        hi = (fmt.emax + 1) * (LN2F if fn == "exp" else 1)
-        if not (lo + 1 < x < hi - 1):
-            return False
-        if ax < Fraction(1, 2 ** (p + 3)):
-            return False
-        if fn == "exp2" and x.denominator == 1:
-            return False
-        return True
+    xovf, xunf, xm1 = screens(fmt)
+    if fn == "exp":
+        return xunf < x < xovf and ax >= Fraction(1, 2 ** (p + 3))
+    if fn == "exp2":
+        return (fmt.emin - p < x < fmt.emax + 1 and ax >= Fraction(1, 2 ** (p + 3))
+                and x.denominator != 1)
     if fn == "expm1":
-        return -(p + 2) * LN2F + 1 < x < (fmt.emax + 1) * LN2F - 1 and ax >= Fraction(1, 2 ** (p + 2))
+        return xm1 < x < xovf and ax >= Fraction(1, 2 ** (p + 2))
     if fn in ("log", "log2"):
         if x <= 0 or x == 1:
             return False
@@ -55,6 +67,7 @@ def in_main(fmt, fn, xa):
             return False
         return True
     return x > -1 and ax >= Fraction(1, 2 ** (p + 2))
+
 
 def run(fn, fmtname, rnd, n, seed=1, inflate=0):
     fmt = FORMATS[fmtname]

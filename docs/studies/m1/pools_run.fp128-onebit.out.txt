@@ -1,4 +1,4 @@
-# pools_run.py fp128 (all six), 12:05-12:13, the desktop 88-100% busy. The planners' one-bit rule: exp/exp2 D 19, expm1 D 20, log family D 37 (now 20, 20, 38).
+# pools_run.py fp128 (all six), 12:05-12:13, the desktop 88-100% busy. The planners' one-bit rule: exp/exp2 D 19, expm1 D 20, log family D 37 (now 20, 20, 38). The first version: log1p's r = x path out to 2^-4 (defect 8).
 fp128 exp   rne K7 D19 n 350 marked 1 (right 0) wrong 0 insns 187 words 71 live 23 ['0x3f8e0000000000000000000000000000'] []  11s
 fp128 exp   rtz K7 D19 n 350 marked 1 (right 1) wrong 0 insns 185 words 71 live 22 ['0xbf8e0000000000000000000000000000'] []  63s
 fp128 exp   rdn K7 D19 n 350 marked 1 (right 1) wrong 0 insns 185 words 71 live 22 ['0xbf8e0000000000000000000000000000'] []  75s

@@ -1,0 +1,9 @@
+# log1p_floor.py fp64 3000 641, 16:44-16:47, the desktop 66% busy. After the revision: log1p's r = x path ends at 15/256.
+fp64 log1p G 46: K 12 D 23 insns 227
+  +[15/256, 2^-4)  n 3000: total -1.93; corr (all) -2.03; y's error -3.00; corr's rounding -3.87; square term -4.03; the rest -2.61  (worst total at x = +0.0598249340; r_l inexact 0)  [32s]
+  -[15/256, 2^-4)  n 3000: total -1.81; corr (all) -3.32; y's error -4.83; corr's rounding -3.96; square term -5.78; the rest -2.23  (worst total at x = -0.0621466498; r_l inexact 0)  [52s]
+  +[2^-4, 2^-3)    n 3000: total -1.89; corr (all) -2.33; y's error -3.09; corr's rounding -4.01; square term -4.15; the rest -2.86  (worst total at x = +0.0651160189; r_l inexact 0)  [79s]
+  -[2^-4, 2^-3)    n 3000: total -2.19; corr (all) -3.34; y's error -4.79; corr's rounding -4.06; square term -5.86; the rest -2.51  (worst total at x = -0.0719830600; r_l inexact 0)  [102s]
+  +[2^-3, 1)       n 3000: total -3.21; corr (all) -3.60; y's error -4.38; corr's rounding -4.98; square term -5.27; the rest -4.35  (worst total at x = +0.1357309599; r_l inexact 0)  [122s]
+  -[2^-3, 1/2)     n 3000: total -2.82; corr (all) -4.36; y's error -5.16; corr's rounding -5.28; square term -6.72; the rest -3.20  (worst total at x = -0.1284524796; r_l inexact 0)  [139s]
+done 139s

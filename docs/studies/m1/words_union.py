@@ -1,3 +1,5 @@
+# The bank words: per function, per family, all six, and with C4's div
+# and sqrt, under each attribute (the first run took rne and rtz only).
 from m1core import sf
 from m1exp import build_exp
 from m1log import build_log
@@ -5,7 +7,7 @@ from m1harness import FORMATS
 from cft_golden import routines as R
 for name in ("fp64", "fp128", "fp256"):
     fmt = FORMATS[name]
-    for rnd in (sf.RND_RNE, sf.RND_RTZ):
+    for rnd in sf.RND_MODES:
         allw, per = set(), {}
         for fn in ("exp", "exp2", "expm1", "log", "log2", "log1p"):
             f = build_exp(fmt, rnd, fn) if fn.startswith("exp") else build_log(fmt, rnd, fn)

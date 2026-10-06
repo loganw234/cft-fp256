@@ -1,4 +1,4 @@
-# pools_run.py fp128 log,log2,log1p,exp, 12:56-13:01, the desktop about 45% busy. Final parameters (exp D 20, log family D 38).
+# pools_run.py fp128 log,log2,log1p,exp, 12:56-13:01, the desktop about 45% busy. Final parameters (exp D 20, log family D 38). The first version: log1p's r = x path out to 2^-4 (defect 8).
 fp128 log   rne K12 D38 n 350 marked 0 (right 0) wrong 0 insns 208 words 90 live 16 [] []  17s
 fp128 log   rtz K12 D38 n 350 marked 1 (right 1) wrong 0 insns 208 words 90 live 16 ['0x3fff0000000000000000000000000001'] []  23s
 fp128 log   rdn K12 D38 n 350 marked 1 (right 1) wrong 0 insns 208 words 90 live 16 ['0x3fff0000000000000000000000000001'] []  26s

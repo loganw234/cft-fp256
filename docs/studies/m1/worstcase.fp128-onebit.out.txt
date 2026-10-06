@@ -1,4 +1,4 @@
-# worstcase.py fp128, 12:50-12:51, under the planners' one-bit rule (exp D 19, log family D 37): 2^-1.5 under the bound, which led to the two-bit rule.
+# worstcase.py fp128, 12:50-12:51, under the planners' one-bit rule (exp D 19, log family D 37): 2^-1.5 under the bound, which led to the two-bit rule. The first version of worstcase.py. The first version: log1p's r = x path out to 2^-4 (defect 8).
 fp128 exp   rne: 66 placed arguments (66 on the main path), wrong 0, marked 0, worst log2(err/bound) -1.46  2s
 fp128 exp   rtz: 66 placed arguments (66 on the main path), wrong 0, marked 0, worst log2(err/bound) -1.46  3s
 fp128 exp2  rne: 88 placed arguments (88 on the main path), wrong 0, marked 0, worst log2(err/bound) -1.46  8s

@@ -1,0 +1,21 @@
+# repair.py fp64 3000 64, 16:33-16:36, the desktop 40% busy at the start.
+fp64 log1p: K 12, D 23; RHO 0.0592; SMALL 15/256 = 0.05859375; insns before (2^-4, D) 227, (a) (2^-4, D+1) 228, (b) (15/256, D) 227
+  +small end: |x| in [0.054, 15/256) before (2^-4, D)  n 3009: worst log2(err/Bv) -3.82 at x = +0.058568745917; above -1.5: 0, above 0: 0  [6s]
+  +small end: |x| in [0.054, 15/256) (a) (2^-4, D+1)   n 3009: worst log2(err/Bv) -5.62 at x = +0.058433708204; above -1.5: 0, above 0: 0  [11s]
+  +small end: |x| in [0.054, 15/256) (b) (15/256, D)   n 3009: worst log2(err/Bv) -3.82 at x = +0.058568745917; above -1.5: 0, above 0: 0  [17s]
+  +band: |x| in [15/256, 2^-4)       before (2^-4, D)  n 3012: worst log2(err/Bv) -1.66 at x = +0.062480281821; above -1.5: 0, above 0: 0  [22s]
+  +band: |x| in [15/256, 2^-4)       (a) (2^-4, D+1)   n 3012: worst log2(err/Bv) -4.46 at x = +0.062459127869; above -1.5: 0, above 0: 0  [28s]
+  +band: |x| in [15/256, 2^-4)       (b) (15/256, D)   n 3012: worst log2(err/Bv) -1.86 at x = +0.059435834108; above -1.5: 0, above 0: 0  [36s]
+  +past 2^-4: |x| in [2^-4, 2^-3)    before (2^-4, D)  n 3006: worst log2(err/Bv) -1.98 at x = +0.065445283922; above -1.5: 0, above 0: 0  [45s]
+  +past 2^-4: |x| in [2^-4, 2^-3)    (a) (2^-4, D+1)   n 3006: worst log2(err/Bv) -1.98 at x = +0.065445283922; above -1.5: 0, above 0: 0  [52s]
+  +past 2^-4: |x| in [2^-4, 2^-3)    (b) (15/256, D)   n 3006: worst log2(err/Bv) -1.98 at x = +0.065445283922; above -1.5: 0, above 0: 0  [60s]
+  -small end: |x| in [0.054, 15/256) before (2^-4, D)  n 3009: worst log2(err/Bv) -3.68 at x = -0.058582722854; above -1.5: 0, above 0: 0  [74s]
+  -small end: |x| in [0.054, 15/256) (a) (2^-4, D+1)   n 3009: worst log2(err/Bv) -5.91 at x = -0.057300991479; above -1.5: 0, above 0: 0  [82s]
+  -small end: |x| in [0.054, 15/256) (b) (15/256, D)   n 3009: worst log2(err/Bv) -3.68 at x = -0.058582722854; above -1.5: 0, above 0: 0  [89s]
+  -band: |x| in [15/256, 2^-4)       before (2^-4, D)  n 3012: worst log2(err/Bv) -1.56 at x = -0.062482989941; above -1.5: 0, above 0: 0  [96s]
+  -band: |x| in [15/256, 2^-4)       (a) (2^-4, D+1)   n 3012: worst log2(err/Bv) -4.77 at x = -0.062454045278; above -1.5: 0, above 0: 0  [103s]
+  -band: |x| in [15/256, 2^-4)       (b) (15/256, D)   n 3012: worst log2(err/Bv) -1.86 at x = -0.061566343056; above -1.5: 0, above 0: 0  [111s]
+  -past 2^-4: |x| in [2^-4, 2^-3)    before (2^-4, D)  n 3006: worst log2(err/Bv) -2.02 at x = -0.078834365410; above -1.5: 0, above 0: 0  [119s]
+  -past 2^-4: |x| in [2^-4, 2^-3)    (a) (2^-4, D+1)   n 3006: worst log2(err/Bv) -2.02 at x = -0.078834365410; above -1.5: 0, above 0: 0  [131s]
+  -past 2^-4: |x| in [2^-4, 2^-3)    (b) (15/256, D)   n 3006: worst log2(err/Bv) -2.02 at x = -0.078834365410; above -1.5: 0, above 0: 0  [140s]
+done 140s
