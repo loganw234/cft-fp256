@@ -78,8 +78,8 @@ one gives none, or `--format-version 2`, and holds:
      same command line; elsewhere the block refused `device` by name at
      run 0's first segment, its sentence naming CFT_SEQ_FEAT_LANE_FLAGS,
      the files written before it left and said so; and where the words
-     cannot say (no CAPS2 from VERSION 0x800, or a word not device-test's
-     spelling), a failure by name, neither branch run;
+     cannot say (CAPS2 missing from VERSION 0x800, a word too many, or one
+     not device-test's spelling), a failure by name, neither branch run;
   i. the process's own text, past the ANSI code page Windows hands main
      and getenv (verifier-VCV2CW, 2026-10-03): CFT_XRT_BIND set to U+0141,
      U+00E9 and a, U+20AC, b, each `env` line the golden writer's; a value
@@ -1514,7 +1514,7 @@ def hold_lane_flags_decode():
 # q135b's are the card's (docs/VALIDATION.md) and rev8a's the card's too
 # (2026-10-06), the plan's words (python/cftc/targets.py); the quad's and
 # the seam's are the plan's (python/tests/test_cftc.py, docs/VALIDATION.md);
-# the rest are made up, each to break one rule.
+# the rest are made up, each to reach one of the decode's rules.
 LANE_FLAG_WORDS = (
     ("revision 7's quad, q135b", "00000a00", ("19faffff", "000007fb"),
      False),

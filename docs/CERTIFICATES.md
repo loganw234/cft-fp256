@@ -2368,8 +2368,8 @@ text but never printed, and the per-lane block as those words say, by
 libcft's decode: written on the card and byte for byte the software
 backend's where VERSION is 0xB00 or later and CAPS2[13] is set (revision
 8's rev8a), refused by name otherwise (revision 7), and a failure by name
-where the words cannot say - each branch seen to fail on the software
-backend first, the leg's own code run on stand-in devices (leg j).
+where the words cannot say - each branch seen to fail in the software
+gate first, the leg's own code run on stand-in devices (leg j).
 
 With leg h following the tile's CAPS2[13], and leg j's controls of it
 (parcel SC8, 2026-10-06): 1,077 checks on the Windows desktop and one
