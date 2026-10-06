@@ -6,7 +6,7 @@ device-xclbin none
 device-version none
 device-caps none
 device-tiles 1
-profile 2
+profile 3
 language 1
 device-platform none
 device-xrt none
@@ -110,4 +110,4 @@ uses 1
 scope max-lanes
 value exact 81e790cdd/1000000000000
 end
-hash b95fa0f0f4d6e4407104744969d49a61df5853eaa714a2236b9cfd58ff54ccb4
+hash a6c9815ee3d236bb4e248d89c06d88e5a852633ca55c8028c42e92ea8a258835

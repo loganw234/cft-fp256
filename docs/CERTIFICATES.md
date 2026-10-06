@@ -2681,17 +2681,20 @@ refusal's name, code and location, or both ACCEPTED with the same lines.
      misspelt block file beside a version-1 certificate not read, and
      cft.h's profile and language macros, the tool's writer's list of
      variables and its generators against the golden model's;
-   - thirteen version-2 controls no test_cert2.py call hands the tool as
+   - fifteen version-2 controls no test_cert2.py call hands the tool as
      it is handed them: `definition-differs` inside each re-derivation a
      source-free audit reaches past step 4 (a segment line's flags and
      block, a replay line's raw values and its absence, the wider-source
-     relation), audits accepted under a definition that does not cover
-     the certificate's (by the profile's minor, and by the language where
-     a run names a source), a signature file whose key encodes no point
-     and one naming another certificate over this one's signature (each
-     `signature`), the wider-source relation's lanes and steps, and
-     blocks past segment 9, which the golden auditor reads, and its
-     verdict lists, in their decimal spelling's order (10 before 9).
+     relation), and a segment line's flags under the previous major too
+     (a certificate made before the step: profile 2 under profile 3,
+     since 2026-10-05); audits accepted under a definition that does not
+     cover the certificate's (by the profile's minor, by the previous
+     major, and by the language where a run names a source); a signature
+     file whose key encodes no point and one naming another certificate
+     over this one's signature (each `signature`); the wider-source
+     relation's lanes and steps; and blocks past segment 9, which the
+     golden auditor reads, and its verdict lists, in their decimal
+     spelling's order (10 before 9).
 2. **test_cert.py and test_cert2.py**, each run in the gate's process
    with `cert.parse` and `cert.audit` shadowed. Every top-level call their
    tests make is handed to the tool too, translated into files and
@@ -3863,7 +3866,9 @@ header lines:
 - **`profile`**: the conformance profile (CONFORMANCE.md, "Versioning").
   Since 2026-10-02 it versions the program model too: any change to what
   an accepted image computes, or to whether an image loads, steps it. The
-  golden model states it, and the tree is at profile 2;
+  golden model states it, and the tree is at profile 3 (since 2026-10-05,
+  when exp2's tie at emin - p moved four recorded cases; a profile-2
+  certificate meets the rule below as any other definition's does);
 - **`language`**: the language's version (CONFORMANCE.md, "The
   language's version"), kept in the golden model and stepped by the same
   rule for sources: a major step whenever an accepted source is refused
@@ -4270,7 +4275,7 @@ device-xclbin none
 device-version none
 device-caps none
 device-tiles 1
-profile 2
+profile 3
 language 1
 device-platform none
 device-xrt none
@@ -4325,7 +4330,7 @@ quantity counter terms 1
 term 1/1 s0
 value exact c/1
 end
-hash 797c51ef95e1e10eade458cd0897ca786a7d70ceee46424f0492eb19c7b2fb34
+hash fd953ffb0a629e0ad758a9d31862900f7216f355093ee7c08c75bd3a33abdef3
 ```
 
 Reading it: the image marks lanes 0 and 1 in segment 1, where k is 7 and
@@ -4391,7 +4396,8 @@ rebuilds from its source and its generator alone. The controls cover:
   certificate's, another key's, a keyring's other holder and its form,
   and a version-1 certificate signed;
 - step 3a, step 4's loader under profile 1 (513 constants, loaded before
-  ee78152 and refused after) and profile 2, and every check of step 4a,
+  ee78152 and refused after), the previous major and the auditor's own,
+  and every check of step 4a,
   `compiler-differs` and an equal recompile under another output version;
 - `source-missing` at a replay, a wider-source relation and a definition
   re-run;
@@ -4409,7 +4415,8 @@ rebuilds from its source and its generator alone. The controls cover:
   block, flag word and another STATUS certified as the corrected segment;
 - the definition re-run (an image whose b is not the source's, and one
   that raises invalid in every lane), its choices, and `definition-differs`
-  under six certificates' definitions, against `replay-changed` under the
+  under seven certificates' definitions (the previous major among them,
+  profile 2 under an auditor at 3), against `replay-changed` under the
   auditor's own;
 - `definition-unavailable` and `replay-undecided`, with mpmath taken away
   from a node planted as transcendental, and with an enclosure forced to

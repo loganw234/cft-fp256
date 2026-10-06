@@ -243,16 +243,45 @@ def test_exp2_exact_on_integers(fmt, rnd):
 @pytest.mark.parametrize("rnd", RND_MODES)
 def test_exp2_past_the_ends(fmt, rnd):
     """An integer whose power is NOT representable is not exact: it
-    overflows or underflows, with the flags clause 7 requires."""
+    overflows or underflows, with the flags clause 7 requires.
+
+    At the bottom there are two cases, not one. 2^(emin - p) is EXACTLY
+    half the smallest subnormal - the tie between +0 and it - so 754's
+    roundTiesToAway gives the subnormal, as roundTowardPositive does,
+    and the other three give +0. Every power below it is under the tie
+    and gives +0 but under roundTowardPositive. Until 2026-10-05 the
+    model rounded the tie as a quarter of the subnormal, +0 under rmm,
+    and this test asserted that (step 6's M1, question 5; profile 3)."""
     big = V(fmt, 0, fmt.emax + 1, 0)
     bits, flags = tr.exp2(fmt, big, rnd)
     assert flags == (FLAG_OVERFLOW | FLAG_INEXACT)
     assert bits == sf.round_pack(fmt, 0, 3, fmt.emax, rnd)[0]
-    small = V(fmt, 1, fmt.man_w - fmt.emin + 1, 0)      # emin - man_w - 1
-    bits, flags = tr.exp2(fmt, small, rnd)
+    tie = V(fmt, 1, fmt.man_w - fmt.emin + 1, 0)        # emin - man_w - 1
+    bits, flags = tr.exp2(fmt, tie, rnd)
     assert flags == (FLAG_UNDERFLOW | FLAG_INEXACT)
-    assert bits == (min_subnormal_bits(fmt) if rnd == RND_RUP
-                    else zero_bits(fmt))
+    assert bits == (min_subnormal_bits(fmt) if rnd in (RND_RUP, RND_RMM)
+                    else zero_bits(fmt)), (fmt.name, RND_NAMES[rnd])
+    for small in (V(fmt, 1, fmt.man_w - fmt.emin + 2, 0),    # emin - p - 1
+                  max_normal_bits(fmt, 1)):                  # the farthest
+        bits, flags = tr.exp2(fmt, small, rnd)
+        assert flags == (FLAG_UNDERFLOW | FLAG_INEXACT)
+        assert bits == (min_subnormal_bits(fmt) if rnd == RND_RUP
+                        else zero_bits(fmt)), (fmt.name, RND_NAMES[rnd])
+
+
+@pytest.mark.parametrize("fmt", ALL)
+@pytest.mark.parametrize("rnd", RND_MODES)
+def test_exp2_bottom_is_round_pack(fmt, rnd):
+    """Every integer from four below the tie to two above the smallest
+    subnormal's exponent: exp2 is the exact power rounded ONCE by
+    round_pack, the single rounding authority - bits and flags. The old
+    branch failed this at emin - p under rmm alone, the one attribute
+    whose answer at a tie differs from its answer just below one."""
+    lo = fmt.emin - fmt.man_w
+    for n in range(lo - 5, lo + 3):
+        x = V(fmt, 1 if n < 0 else 0, abs(n), 0)
+        assert tr.exp2(fmt, x, rnd) == sf.round_pack(fmt, 0, 1, n, rnd), \
+            (fmt.name, RND_NAMES[rnd], n)
 
 
 @pytest.mark.parametrize("fmt", ALL)

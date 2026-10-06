@@ -953,6 +953,31 @@ output struct grew, under the size handshake it already had.
 | Arduino | the vendored copy re-synced, `src/xclbin_clock.h` among its 35 files, beside the seam's `src/caps_decode.h` |
 | certificates | `cft-segrun` writes certificate version 2 by default since this step, its four device lines from `cft_image_id`: `none` on the software backend, `unknown` through a remote handle, the card's on an xclbin, the serial `withheld` until published; version 1 with `--format-version 1`, byte for byte as before |
 
+### Profile 3 (2026-10-05, no ABI step): exp2's tie at emin - p
+
+`cft_exp2` of the integer emin - p (-150, -1075, -16495 and -262379
+at the four formats) is 2^(emin - p): exactly half the smallest
+subnormal, the tie between +0 and it. Under roundTiesToAway it returned
++0, rounding the tie as a quarter of the subnormal; it returns the
+subnormal now, as IEEE 754 does. The flags are underflow and inexact
+either way, and the other four attributes give what they gave. The
+golden model had the same branch and moved with it (CONFORMANCE.md,
+"Versioning").
+
+No call gained or lost a meaning its definition in `cft.h` did not
+already give it: `cft.h` defines the transcendentals as correctly
+rounded in the caller's attribute. So the ABI stays at 0.18, by the
+rule the sections of 2026-09-24 and 2026-09-30 above state. The bits
+are the profile's business, and the profile steps from 2 to 3, with
+`CFT_PROFILE_MAJOR`.
+
+| surface | status at profile 3 |
+|---|---|
+| C (`cft.h`) | `CFT_PROFILE_MAJOR` 3. `host/src/transcend.c`'s exp2 branch sends the tie to `round_pack`, as pow's and pown's exact branches did. `transcend_check.py`'s pool already held the argument, both signs, and C equals the model there before and after |
+| vectors | four cases moved, one in each `fpN-transcend-rmm.jsonl`: the result +0 became the smallest subnormal; the other 164 sets are byte for byte profile 2's |
+| Arduino | the vendored copy re-synced (`src/cft/src/transcend.c`, `src/cft/include/cft.h`; still 35 files) |
+| certificates | `cft-segrun` writes `profile 3` and `cft-audit` audits at 3. The golden corpus was made again at profile 3; only each version-2 certificate's `profile` and `hash` lines moved, and the `supersedes` lines that name one. A profile-2 certificate meets the definition rule as any other definition's does (docs/CERTIFICATES.md, "The definition") |
+
 ## Hosts and boards
 
 Where the library has been built and run, as opposed to where it is

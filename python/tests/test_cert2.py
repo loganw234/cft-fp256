@@ -79,10 +79,14 @@ IDN = cert.Identity(backend="software", device_xclbin="none",
 CFTC = ("cftc", cftc.VERSION)
 # a text of three UTF-8 lengths: L with a stroke, o acute, d, z acute
 LODZ = chr(0x141) + chr(0xF3) + "d" + chr(0x17A)
+# The profile a certificate made under this tree's definition states:
+# profile.py's VERSION as cert2 spells it. The fixtures wrote "2" until
+# profile 3 (2026-10-05), when an auditor at 3 no longer covered them.
+OWN_PROFILE = cert2.version_text(cert2.PROFILE)
 
 
 def prov(**kw):
-    base = dict(profile="2", language="1", device_platform="none",
+    base = dict(profile=OWN_PROFILE, language="1", device_platform="none",
                 device_xrt="none", device_clock="none", device_serial="none",
                 writer=("golden", "unknown"), writer_runtime="python-3.12.9",
                 compiler_build="unknown", host_os="windows",
@@ -331,7 +335,7 @@ def full(fl):
     ch = cert2.run_chain(img, b"", init, 3, lane_flags=True)
     run = cert2.certify_run("main", img, b"", SALT, ch, steps=1)
     p = cert2.Provenance(
-        profile="2", language="none",
+        profile=OWN_PROFILE, language="none",
         device_platform="xilinx_u50_gen3x16_xdma_5_202210_1",
         device_xrt="2.19.194", device_clock=135000000,
         device_serial="SN 0001 (a test)",
@@ -1081,8 +1085,14 @@ def test_the_definition_at_load(mk):
     run = dataclasses.replace(mk.run, image=cert.sha256(img),
                               digest=cert.sha256(img + mk.bank))
     c = dataclasses.replace(mk.cert, runs=(run,))
+    # profile 1 loaded the image (ee78152 came after it); the previous
+    # major is any certificate made before the auditor's step - profile 2
+    # under profile 3, whose loader also refused it, but which an auditor
+    # at 3 does not cover - and only under its own does the refusal name
+    # the image
     for profile, name in (("1", "definition-differs"),
-                          ("2", "program-image")):
+                          (f"{cert2.PROFILE[0] - 1}", "definition-differs"),
+                          (OWN_PROFILE, "program-image")):
         data = cert2.encode(dataclasses.replace(
             c, provenance=dataclasses.replace(c.provenance,
                                               profile=profile)))
@@ -1627,8 +1637,15 @@ def test_a_failure_under_another_definition(mk, fl):
     tt[5] = "2"
     wrong = rebuilt(L[:r] + [" ".join(tt)] + L[r + 1:])
     refused("replay-changed", audit_mk, mk, wrong)
+    # the profiles an auditor at the tree's does not cover: the next major,
+    # a minor above its own, and the previous major - a certificate made
+    # before the step, as every profile-2 one is under profile 3
+    major, minor = cert2.PROFILE
+    assert major > 1, "profile 1 has no previous major to probe"
     for field, value in (("language", "2"), ("language", "1.1"),
-                         ("profile", "3"), ("profile", "2.1"),
+                         ("profile", f"{major + 1}"),
+                         ("profile", f"{major}.{minor + 1}"),
+                         ("profile", f"{major - 1}"),
                          ("profile", "unknown"), ("language", "unknown")):
         line = f"{field} {value}"
         got = refused("definition-differs", audit_mk, mk,
@@ -1812,7 +1829,8 @@ def _fenced_after(marker):
 
 
 EXAMPLE_PROVENANCE = cert2.Provenance(
-    profile="2", language="1", device_platform="none", device_xrt="none",
+    profile=OWN_PROFILE, language="1", device_platform="none",
+    device_xrt="none",
     device_clock="none", device_serial="none", writer=("golden", "unknown"),
     writer_runtime="unknown", compiler_build="none",
     replay_methods=((0, "golden"),), issuer="withheld", issuer_key="none")

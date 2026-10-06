@@ -984,16 +984,30 @@ def v2_census_controls(work):
         t[field] = value
         return T2.rebuilt(L[:i] + [" ".join(t)] + L[i + 1:])
 
-    def prof(data, value="profile 3"):
+    # The profiles this tree's auditors do not cover, written from
+    # profile.py's VERSION: the next major (the census's own case; it was
+    # the literal "profile 3" until profile 3, 2026-10-05), a minor above,
+    # and the previous major - a certificate made before the step.
+    major, minor = T2.cert2.PROFILE
+    beyond = f"profile {major + 1}"
+    above = f"profile {major}.{minor + 1}"
+    before = f"profile {major - 1}"
+
+    def prof(data, value=beyond):
         return T2.edit(data, value.split(" ")[0] + " ", value)
     fl_states = {0: {0: fl.init}}
-    one("flagstep, profile 3, segment 1's flags wrong",
+    one(f"flagstep, {beyond}, segment 1's flags wrong",
         prof(seg(fl.data, 1, 7, "21")), None, {0: (fl.img, None)},
+        ("refused", "definition-differs", ("-", "0", "1", "-")),
+        states=fl_states)
+    one(f"flagstep, {before} (made before the step), segment 1's flags "
+        f"wrong", prof(seg(fl.data, 1, 7, "21"), before), None,
+        {0: (fl.img, None)},
         ("refused", "definition-differs", ("-", "0", "1", "-")),
         states=fl_states)
     blk = fl.chain.blocks[0]
     other = bytes([blk[0] & ~0x10]) + blk[1:]
-    one("flagstep, profile 3, segment 0's block another",
+    one(f"flagstep, {beyond}, segment 0's block another",
         prof(T2._block_line(fl, 0, other)), None, {0: (fl.img, None)},
         ("refused", "definition-differs", ("-", "0", "0", "-")),
         states=fl_states)
@@ -1003,27 +1017,30 @@ def v2_census_controls(work):
     t[7] = cert.parse(mk.data).runs[0].chain[1].end
     raw = T2.rebuilt(L[:r] + [" ".join(t)] + L[r + 1:])
     mk_args = dict(states={0: {0: mk.init}}, sources={0: mk.src})
-    one("markstep, profile 3, its replay line's raw end the segment's",
+    one(f"markstep, {beyond}, its replay line's raw end the segment's",
         prof(raw), None, {0: (mk.img, mk.bank)},
         ("refused", "definition-differs", ("-", "0", "1", "-")), **mk_args)
     i = T2.find(L, "replay-methods ")
     m = T2.find(L, "replays ")
     gone = L[:i] + ["replay-methods 0"] + L[i + 2:m] + ["replays 0"] + \
         L[r + 1:]
-    one("markstep, profile 3, its replay lines gone",
+    one(f"markstep, {beyond}, its replay lines gone",
         prof(T2.rebuilt(gone)), None, {0: (mk.img, mk.bank)},
         ("refused", "definition-differs", ("-", "0", "1", "-")), **mk_args)
     r0, r1, _r2, r3 = lz.runs
     same = dataclasses.replace(r0, kind="wider-source")
-    one("lorenz-63, profile 3, its wider-source run the main run's format",
+    one(f"lorenz-63, {beyond}, its wider-source run the main run's format",
         prof(T2.with_runs(lz, (r0, r1, same, r3))), None,
         {**lz.progs, 2: lz.progs[0]},
         ("refused", "definition-differs", ("-", "2", "-", "-")),
         states={**lz.states, 2: {0: lz.init}},
         sources={0: lz.src, 1: lz.src, 2: lz.src})
-    one("flagstep, profile 2.1: accepted, under a definition that does not "
-        "cover it", prof(fl.data, "profile 2.1"), None, {0: (fl.img, None)},
+    one(f"flagstep, {above}: accepted, under a definition that does not "
+        f"cover it", prof(fl.data, above), None, {0: (fl.img, None)},
         ("accepted",), states=fl_states)
+    one(f"flagstep, {before} (made before the step): accepted, under a "
+        f"definition that does not cover it", prof(fl.data, before), None,
+        {0: (fl.img, None)}, ("accepted",), states=fl_states)
     every = {0: dict(enumerate(mk.chain.states))}
     one("markstep, language 2, its unreplayed segments: accepted, under a "
         "definition that does not cover it", prof(mk.data, "language 2"),
