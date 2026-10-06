@@ -2377,8 +2377,8 @@ SKIP, 88 s - sections 1 to 13 716, as before, and section 14 361, which
 alone (`--v2-only`) takes 8 s; section 14 alone in WSL (cft2204, gcc
 11.4, Python 3.10), 359 checks, 0 failed, 5 s. Not yet run on a card
 (true when written; at 6e250ce it ran on rev8a, revision 8's first
-image, that night - card-segrun 6 checks of 6, the gate's 695 of 695,
-nothing skipped).
+hardware image, that night - card-segrun 6 checks of 6, the gate's 695
+of 695, nothing skipped).
 With the writer's list removed from the tool's environment, not set
 empty (the card leg on q135b, 2026-10-03): 1,057 checks on the Windows
 desktop and one SKIP, 102 s, the desktop about 8 % busy before it -

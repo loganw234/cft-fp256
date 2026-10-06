@@ -1759,7 +1759,7 @@ class _FakeServer:
 def rev8_remote_refusals(lib, R):
     """A device without the revision-8 bits refuses both forms BY NAME.
 
-    The tile today publishes neither (CAPS2[11] and [12] read zero), and
+    A revision-7 tile publishes neither (CAPS2[11] and [12] read zero), and
     this desktop has no tile - so the device here is a remote handle to a
     fake server whose HELLO says what a round-2 tile's word says,
     0x7f1f: the refusal is made on the client, from the word, by the

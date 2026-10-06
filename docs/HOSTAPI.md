@@ -3317,9 +3317,8 @@ Revision 8 (docs/SEQUENCER.md) adds two things a program run reports,
 built golden-first: the model defines them, the software backend
 computes them, and a tile on a card carries both since rev8a, revision
 8's first hardware image (2026-10-06, docs/VALIDATION.md). The step-6
-round's R8
-built them, at Logan's choices "Flag control in rev 8 (Recommended)"
-and "Per-lane flags (R23)".
+round's R8 built them, at Logan's choices "Flag control in rev 8
+(Recommended)" and "Per-lane flags (R23)".
 
     cft_run_args   lane_flags, lane_flags_bytes   n bytes, byte i lane i, or NULL and 0
     CFT_SEQ_FEAT_LANE_FLAGS   (1u << 17)   CAPS2[13]: the block

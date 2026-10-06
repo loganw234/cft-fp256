@@ -117,9 +117,9 @@ def price(c, s, e, p):
 # takes an immediate trip count, so the looped forms unroll the outer n
 # (N + 1 copies of a small block) and loop over j.
 #
-#   looped, today's ISA   per term: LDX, LDX, FMA, IADD, ISUB
-#   looped, revision 8    per term: LDX +1, LDX -1, FMA
-#   unrolled, today's ISA per term: LDL, LDL, FMA (static slots)
+#   looped, revision 7's ISA   per term: LDX, LDX, FMA, IADD, ISUB
+#   looped, revision 8         per term: LDX +1, LDX -1, FMA
+#   unrolled, revision 7's ISA per term: LDL, LDL, FMA (static slots)
 
 A, B, C = 0, 72, 144
 

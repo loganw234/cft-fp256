@@ -4971,8 +4971,8 @@ RTL work, as the revision-7 round's did.
 
 **Built** (a note of 2026-10-06; docs/VALIDATION.md, 2026-10-05 and
 2026-10-06). The plan after this note is as approved on 2026-10-02, so
-its "Nothing in this section is built" and "refused by name on every
-tile today" are that date's.
+its every "today" is that date's, "Nothing in this section is built" and
+"refused by name on every tile today" among them.
 - Round 1 built the seam, R21 in the lanes and the fetch alone
   (2026-10-02 to 03), and round 2 the sequencer's items and the host's
   side (2026-10-05). Probe L kept R21 off the quad (question 9).

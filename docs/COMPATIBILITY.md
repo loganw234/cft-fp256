@@ -859,9 +859,9 @@ the contract's precision moved, byte for byte.
 The library's side of revision 8's R24 and R23 (docs/SEQUENCER.md),
 defined golden-first; a tile on a card carries both since rev8a,
 revision 8's first hardware image (2026-10-06, docs/VALIDATION.md). It
-is ADDITIVE for every
-program a 0.16 library loads. Every 0.16 loader refused control codes 12
-to 14, so no program they load can raise or set STATUS[6]. Such a
+is ADDITIVE for every program a 0.16 library loads. Every 0.16 loader
+refused control codes 12 to 14, so no program they load can raise or
+set STATUS[6]. Such a
 program computes and reports exactly what it did at 0.16, unless its run
 asks for the per-lane block.
 - **`CFT_SEQ_FEAT_FLAG_CONTROL`** (CAPS2[14]; `seq_features` bit 18):
