@@ -661,19 +661,28 @@ faults:
 # until someone notices; with it, it is a failure. Raise
 # SEQ_TIMEOUT for a deliberately long run.
 #
-# It catches a hang; it is not a budget. 14,400 s since 2026-09-29, when
-# revision 7's final tree (9fc9c0d, 63 cases) ran past the 4,800 this
-# line then said. Under Icarus on amd-arc-box, in the runner's sim stage
-# at SIM_JOBS=6 beside a bitstream build, seq_core was terminated at
-# 4,800 s with no wrong answer (run 20260929-114401-9fc9c0d), while the
-# same 63 cases at the U50's capacities took about 5,350 s (seq_coreu50
-# in that stage, seq_coreu50mc at MC=10 beside it). seq_coremc, the same
-# bench at MC=10, runs under this line too. 4,800 had been twice the
-# 2,400 before it, set when seq_core took 1,923 s on the desktop at 48
-# cases (run 20260929-080541-9ff114e). Measure it again when the suite
-# grows, on the slower host and loaded as the runner loads it, and keep
-# this at about twice the measurement.
-SEQ_TIMEOUT ?= 14400
+# It catches a hang; it is not a budget. 20,000 s since 2026-10-05, about
+# twice the measurement at 99 cases: under Icarus on amd-arc-box, in the
+# runner's sim stage at SIM_JOBS=6 beside a gate run, cocotb counted
+# 9,856 s of test time for seq_core and 9,574 s for seq_coreu50 (run
+# 20261005-172414-3a2b2d0), where the 14,400 s this line then said was
+# 1.46 and 1.50 times that; earlier the same day, at 94 cases on the same
+# host, 10,326 s and 10,143 s (run 20261005-112701-2b84449). Moved after
+# that measurement, with no bench changed.
+#
+# 14,400 s from 2026-09-29, when revision 7's final tree (9fc9c0d, 63
+# cases) ran past the 4,800 this line then said. Under Icarus on
+# amd-arc-box, in the runner's sim stage at SIM_JOBS=6 beside a bitstream
+# build, seq_core was terminated at 4,800 s with no wrong answer (run
+# 20260929-114401-9fc9c0d), while the same 63 cases at the U50's
+# capacities took about 5,350 s (seq_coreu50 in that stage, seq_coreu50mc
+# at MC=10 beside it). seq_coremc, the same bench at MC=10, runs under
+# this line too. 4,800 had been twice the 2,400 before it, set when
+# seq_core took 1,923 s on the desktop at 48 cases (run
+# 20260929-080541-9ff114e). Measure it again when the suite grows, on the
+# slower host and loaded as the runner loads it, and keep this at about
+# twice the measurement.
+SEQ_TIMEOUT ?= 20000
 
 seq_core:
 	timeout $(SEQ_TIMEOUT) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_seq \
@@ -734,8 +743,8 @@ seq_coreu50mc:
 # Why two. Until then seq_corestr was S8's configuration whole, every
 # case at a 2^16 capacity, and under Icarus it could not finish: in the
 # runner's sim stage on amd-arc-box at six jobs (2b84449) it was on case
-# 35 of 94 after 3 h 02 min, about five minutes a case, so SEQ_TIMEOUT's
-# four hours would end it, and the whole wanted eight or more. Nor did
+# 35 of 94 after 3 h 02 min, about five minutes a case, so SEQ_TIMEOUT,
+# then four hours, would end it, and the whole wanted eight or more. Nor did
 # the whole bench stream. Counted without a simulator
 # (tb/stream_census.py: the bench's own programs, cocotb stubbed), 13 of
 # its 99 cases run a program longer than the 64-word store, 66 runs of
@@ -797,9 +806,9 @@ seq_corestr_full:
 # program of exactly the capacity is eight thousand cycles; the rest are
 # the U50's. Each word reaches the simulator as -Pcft_ifetch.<word> and
 # the line reaches the bench as CFT_GENERICS, as seq_coreu50's does.
-# Not in SIM_BENCHES yet: joining it moves the bench count that CLAUDE.md,
-# README.md, docs/VERIFICATION.md and verify/run.sh state, which is the
-# lead's to restate (parcel RD1 handed it back, 2026-10-03).
+# In SIM_BENCHES since 2026-10-05 (ab3a724), when the lead restated the
+# bench count that CLAUDE.md, README.md, docs/VERIFICATION.md and
+# verify/run.sh state; parcel RD1 had handed that back on 2026-10-03.
 IFETCH_GENERICS ?= STORE_D=64 STREAM_D=4096
 ifetch:
 	CFT_GENERICS="$(IFETCH_GENERICS)" timeout $(SEQ_TIMEOUT) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_ifetch \

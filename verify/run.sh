@@ -155,9 +155,12 @@ BUDGET=""
 # Measured on the
 # Windows desktop (docs/VERIFICATION.md has the table, quiet against
 # loaded): quick ~20 min, gate ~2 h with the box quiet and ~4 h loaded
-# now that the formal gate holds thirty proofs and a negative control
-# (thirty-one tasks), full longer by the simulation suite and the two
-# browser replays; on the WSL distro the replay stages take seconds.
+# when the formal gate held thirty proofs and a negative control
+# (thirty-one tasks; thirty-eight and the control, thirty-nine tasks,
+# since the instruction fetch's eight joined on 2026-10-03, which add
+# about six minutes on the desktop), full longer by the simulation suite
+# and the two browser replays; on the WSL distro the replay stages take
+# seconds.
 BUDGET_QUICK=docs,generated,buildargs,sweepjudge,innerskips,ensurevectors,selfcheck,divsqrt,clause5,character,augmented,status96,formatof,diff,seq,programs,lang,reduce,photograph,bindings,lang-cpp,lang-rust,lang-julia,lang-go,lang-csharp,lang-r,lang-fortran,workloads,demos,soak-quick,remote
 BUDGET_GATE=golden,vectors,lint,formal,libcft,$BUDGET_QUICK,transcend,mpfr,cpp,audit,estimates,lang-routines,tangent,acceptance
 RESUME=""
@@ -722,7 +725,7 @@ stage sim "cocotb RTL suite, all 29 targets, SIM_JOBS at a time (docker cft-sim)
 # where sim took 1 h 40 min at six (docs/VERIFICATION.md). Since
 # 2026-10-05 it also runs seq_corestr_full, the sequencer's bench whole
 # through the fetch at three read latencies, under Verilator: Icarus
-# cannot finish it inside the target's four hours (tb/Makefile).
+# cannot finish it inside the target's timeout (tb/Makefile).
 need docker
 stage simmc "cocotb suite at the multi-cycle pass budget MC, and the sequencer's bench whole through the fetch under Verilator (docker cft-sim)" -- do_simmc
 
