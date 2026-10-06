@@ -65,11 +65,12 @@ python/tests/test_cftc.py holds each to them:
 
 rev8q's and rev8d's words are the plan's, computed from rtl/cft_krnl.sv's
 assembly ("What a revision-8 U50 tile reads"), and each image's card
-legs read its words (device-test -i). The depths follow probe K
-(2026-10-05): the quad fits at 4,096 slots, so it is built at 4,096 and
-the single at the quad's; 16,384 slots would cross both SLRs, so the
-deep single is built at 8,192. The images and their card legs are
-recorded in docs/VALIDATION.md, step 6's closing entries.
+legs read its words (device-test -i, 2026-10-06), the plan's exactly.
+The depths follow probe K (2026-10-05): the quad fits at 4,096 slots, so
+it is built at 4,096 and the single at the quad's; 16,384 slots would
+cross both SLRs, so the deep single is built at 8,192. The images and
+their card legs are recorded in docs/VALIDATION.md, step 6's closing
+entries.
 
 They joined the table together at the images' build, as ONE output
 version step (python/cftc/outputs.py; cftc's VERSION 4 to 5), with the

@@ -465,10 +465,11 @@ their operands in those functions' order.
   the single and the quad, 8,192 for the deep single. The depths follow
   probe K (2026-10-05): the quad fits at 4,096 slots, the single is
   built "at the slots the quad will have", and a deep single at 16,384
-  would cross both SLRs. rev8a's words are the ones device-test -i read
-  on the card (2026-10-06); the quad's and the deep single's are the
-  plan's. So a routine image compiles for each, the same bytes as for
-  the software targets, where revision 7's refuse it `target-feature`; a
+  would cross both SLRs. Each target's words are the ones device-test
+  -i read from its image on the card (2026-10-06): rev8a's, and the
+  quad's and the deep single's, which are the plan's as computed. So
+  a routine image compiles for each, the same bytes as for the
+  software targets, where revision 7's refuse it `target-feature`; a
   step past 32,768 instructions compiles for them too, as for the
   software targets; and one slot past each depth is refused
   `scratch-capacity`, by name. Each is a `--target`, listed by

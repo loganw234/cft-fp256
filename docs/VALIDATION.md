@@ -18540,3 +18540,132 @@ What sampled points cannot see is stated in LANGUAGE.md.
 - **The acceptance set compiles for revision 7's quad by name.** Whether the hard workloads past it (Gray-Scott, Lorenz-tangent and the extended programs) fit u50-rev8-quad or u50-rev8-deep is not measured here; ROADMAP's plan lists which each image would hold.
 - **A corpus source's comment of the same class, left as it is** (parcel CR found it): certificates/programs/augsum-fp64.cfta:11 says "No tile built so far carries either" of AUGADD and SCRATCH_STEP, which rev8a carries. The file's SHA-256 is the corpus MANIFEST's `source` line, so restating it moves the corpus for a reason this step is not; the lead's to place, with the case's `backends software`, which a revision-8 tile could now make.
 - **Verifier-VTG** (on 4d96cbb; its ledger, verifier-VTG.md): no (a); one (b), this entry's count of test_cftc.py's renamed tests, three where four were, restated above with the four named. Its notes, taken in the same restatement: R8's card run (box/r8-031cafd/), on revision 7's quad, among the cost-note clause's grounds, where the list had left it out; the leg-L plant's time as the ledger's, 28 s; "no built-in target is that" in cftc's docstring and LANGUAGE.md's call-loop bullet, true of the base, where sw holds 2^32 - 1 instructions (an image's header counts them in 32 bits), and false in principle once revision 8's targets at 2^24 publish flag control - restated as the refusal they give an image past 2^24; the dated note in M1's study; and which stages hold the cost note's text. Its other notes stay as the lead decided: targets.py's `where` strings and docstring cite step 6's closing entries, which the push will carry, and say in the present tense that each image's card legs read its words, as they will before the merge.
+
+## 2026-10-06 - step 6's closing records, part two: revision 8's streaming quad, rev8q (four tiles without R21 at 4,096 scratch slots), closes 135 MHz with +0.048 ns and passes its card legs; the deep single, rev8d (one tile with R21 at 8,192 slots), closes 135 MHz with +0.036 ns and passes its card legs; the gate at the close's integration passes (e3fe2ca, 36 stages, 0 failed); step 6 closed
+
+**Why.**
+- Part one, the entry above (parcel CR's), recorded what was true when it was written: rev8a, the single, built and card-proven, and SC8's leg on it. Parcel TG's entry above it moved revision 8's three targets into cftc's built-in table, as output version 5, its merge waiting on the quad's and the deep single's words read from their tiles. This entry is the lead's: the quad's and the deep single's builds and card legs, the gate at the close's integration, and the round's close.
+- Marks, as above: MEASURED by the lead on amd-arc-box and the card; READ in a named record; COMPUTED from read figures; BELIEVED where a word was not checked. Each box figure names its file in the round's box/ (`Data/runs/2026-10-02-step6-round/box/`, not in git).
+
+**rev8q's build** (the lead's box_rev8q.sh on amd-arc-box, 2026-10-06 01:13:31 to 07:53:29; box/rev8q-688b653/: rev8q.log, rev8q-summary.txt, rev8q.verify.log, rev8q-worst10.txt, the manifest cft_hw.manifest.txt, impl_1_full_util_routed.rpt, impl_1_slr_util_routed.rpt and hw_bb_locked_timing_summary_routed.rpt.gz).
+- **The tree and the recipe** (rev8q-summary.txt, the manifest): 688b653, as rev8a (rtl 44b963dd, hw 7f9c3185; "bitstream_sources: rtl/ and hw/ identical to 688b653..."); hw/link_quad.cfg; KERNEL_FREQ 135000000; CFT_GENERICS EN_AUGADD=0 SEQ_SCRATCH_D=4096; RETIMING=1, place ExtraTimingOpt, route AggressiveExplore, PHYS_OPT=1 - q135b's recipe (its manifest on the box: retiming 1, ExtraTimingOpt, AggressiveExplore, phys_opt 1). rebuild-2022 rc 0 in 399 min.
+- **The clock applied** to the four kernels: "Clock constraint argument: 135000000:cft_krnl_1.ap_clk,cft_krnl_2.ap_clk,cft_krnl_3.ap_clk,cft_krnl_4.ap_clk" (the summary; the manifest's clock_arg the same); "every requested generic is in the wrapper".
+- **Retiming on all four tiles** (MEASURED, the synth runs' logs, copied to box/rev8q-688b653/runs/ulp_cft_krnl_1_0_synth_1/ to ulp_cft_krnl_4_0_synth_1/): krnl_4's synthesis ran `synth_design -top ulp_cft_krnl_4_0 ... -retiming`; krnl_1 to krnl_3 each took that netlist from Vivado's IP cache (cache entry ebc05e65b15fbbd4, "Using cached IP synthesis design"). The summary's "krnl_N synth retiming in runme.log: 0" for those three is the cache's short log, not a missing option.
+- **Timing.** Kernel WNS **+0.048 ns** (the manifest's kernel_wns_ns); the whole design's routed WNS +0.018 ns, shell included (routed_wns_ns), and hold +0.009 ns (runme.log's post-routing summary). q135b, revision 7's quad, closed at +0.003.
+  - **The route** (MEASURED, impl_1's runme.log, copied as box/rev8q-688b653/runs/impl_1/runme.log.gz; its intermediate timing summaries): WNS +0.055 before rip-up; after global iterations 0 to 3, -0.504 (TNS -46.870), -0.242 (-15.294), -0.049 (-0.136), **+0.018** (0). q135b's runme.log (box/q135b-route/runme.log.gz, its manifest beside it), the same recipe: -0.561 (TNS -162.788), -0.456, -0.295, -0.144, -0.046, -0.029, +0.001 after iterations 0 to 6, then +0.003 after the post-route phys_opt.
+- **The ten worst setup paths** (rev8q-worst10.txt: worst10.py on the routed report; its paths 11 to 20 are hold paths, +0.009 and +0.010 ns). 0 failing:
+
+  | paths | slack | from | to | levels |
+  |---|---|---|---|---|
+  | 1, 3, 6 | +0.048, +0.073, +0.080 | krnl_3's u_engine/u_fifo_a/mem_reg_0 | u_lanes g_lane128[1].u_fma's s0_byp_d_reg[85], [78], [0] | 13 |
+  | 2 | +0.072 | krnl_2's u_engine/prec_r_reg[0]_rep | u_engine/u_fifo_a/byp_d_reg[114], CE | 15 |
+  | 4, 9 | +0.077, +0.084 | krnl_3's u_seq/prec_q_reg[0]_rep__7 | u_seq/db_wdata_reg[196] and [210], CE | 6 |
+  | 5, 10 | +0.077, +0.084 | krnl_4's u_fifo_a/mem_reg_0 | g_lane32[3] and [0]'s s0_byp_d_reg[9] and [6] | 11, 7 |
+  | 7 | +0.081 | krnl_4's u_fifo_a/mem_reg_1 | g_lane128[0]'s s0_byp_d_reg[110] | 11 |
+  | 8 | +0.082 | krnl_4's u_engine/op_r_reg[3] | g_lane64[3]'s s0_byp_d_reg[49] | 13 |
+
+- **The lead's reading** (the round's lead.md, "rev8q BUILT at 135 MHz"): every one of the ten predates revision 8 - `git log -S` gives s0_byp_d at 2ff3720 (2026-08-29), the operand FIFO in block RAM at 386055b (2026-08-31), db_wdata at e61aa59 (2026-09-01). No revision-8 register (the fetch, R22, R23, R24) is among them. They are the operand's way from the engine's FIFO to a lane's bypass, and the sequencer's deposit-bank write enable, in a design at 84 percent of the LUTs (82 and 87 by SLR).
+- **verify-image: 8 of 8 PASS** (rev8q.verify.log): sha256; platform xilinx_u50_gen3x16_xdma_5_202210_1; content, a bitstream; 4 compute units, cft_krnl_1 to cft_krnl_4; link config hw/link_quad.cfg; kernel clock 135,000,000 Hz on 4 CUs; the shell's clock topology; memory intent, 16 masters on HBM[0] to [15], none shared.
+- **The staged image:** cft_hw_quad.xclbin, 51,714,554 bytes, SHA-256 4f9921a25af65444abc5c267fff1117a8e14abbc16a75de643e43c9dbf6ef53b, staged in the box's card-day directory for rev8q and re-hashed byte-identical (the summary).
+- **Utilization** (impl_1_full_util_routed.rpt, Routed, the whole design with the shell), beside q135b's (the round's box/README.md, revision 7's quad of record):
+
+  | resource | rev8q | q135b | change (COMPUTED) |
+  |---|---:|---:|---:|
+  | CLB LUTs | 735,203 (84.44%) | 719,697 (82.66%) | +15,506 |
+  | CLB registers | 471,724 (27.06%) | 463,045 (26.56%) | +8,679 |
+  | block-RAM tiles | 857.5 (63.80%) | 1,051.5 (78.24%) | -194 |
+  | URAM | 516 (80.63%) | 260 (40.63%) | +256 |
+  | DSPs | 1,148 (19.29%) | 1,148 (19.29%) | 0 |
+
+  - By SLR (impl_1_slr_util_routed.rpt): SLR0 382,298 LUTs (86.95%), 440.5 block-RAM tiles (65.55%), 260 URAM (81.25%), 574 DSPs; SLR1 352,905 LUTs (81.69%), 417 block-RAM tiles (62.05%), 256 URAM (80.00%), 574 DSPs; 8,141 SLLs of 23,040 (35.33%).
+  - COMPUTED: in the memories, four times rev8a's tile delta (part one): block RAM -48.5 a tile (-194), URAM +64 a tile (+256) - the 4,096-word store where the 32,768-word instruction memory was, and the scratch's UltraRAMs doubled for twice the slots. In the LUTs, +15,506 for four tiles against q135b, where rev8a grew +15,703 for one against rev7b; the quad carries no R21, which probe L priced at +10,595 a tile. The rest of the LUTs is not apportioned here.
+
+**rev8q's card legs** (the lead's box_rev8q_card.sh on amd-arc-box and the U50, 2026-10-06 07:54:33 to 08:04:19; box/card-rev8q-2234d30/: summary.txt and the logs).
+- **The host:** step6-r2 at 2234d30 (main's 619a45c with SC8's leg merged; HEAD, status 0, rtl 44b963dd, hw 37af4a7a, hold_card_lane_flags x5, all asserted), built with XRT=1, rc 0 in 11 s, exactly the two known warnings (build.log:68 and :75, cft_resident.cpp:264 and :265); device-test, api-test, remote-test, cft-segrun, cft-audit and libcft.so each XRT-linked.
+- **api-test:** "all contract checks passed".
+- **device-test -i, the identity** (dt-i.log): **25 checks, 0 failed**, "the device image's identity holds".
+  - backend xrt, **4 tiles**, contract 0x00000b00, fp32 to fp256. The image: SHA-256 4f9921a2... over 51,714,554 bytes, VERSION **0x00000b00**, CAPS **0x19faffff**, CAPS2 **0x001877fc**; "the raw CAPS words decode to this handle's caps and opcode groups".
+  - The planted handles: CFT_XRT_CAPS's five malformed values refused by name at open; plant-differ ("the tiles of this image publish different CAPS words") and plant-unreadable each refused by name - tested here for the first time on revision 8, since a quad has a tile 1 to plant in. They decode as the unplanted one: formats 0xf, seq_features **0x77f1f**, capacities **1024/16777216/512**, max_scratch **4096**.
+  - The device lines (ABI 0.18): platform xilinx_u50_gen3x16_xdma_base_5, XRT 2.19.194, kernel clock **135,000,000 Hz** read from the image, serial none reported.
+  - COMPUTED from the words: CAPS2[3:0] = 0xC, log2 of 4,096; CAPS2[11] clear (no R21) and [14:12] set (R22, R23, R24); CAPS2[20:16] = 24. **Parcel TG's merge condition for the quad holds**: 0x001877fc, 0x77f1f, 4096.
+- **device-test against the software backend**, each ending "the device and the software backend agree on every case that RAN, bits and flags", NOT TESTED 5, each by name (dt-q8.log, dt-full.log, dt-r.log): `-q -n 8` **2,734 / 0**; `-n 4096` **10,374 / 0** in 12 s; `-r` **2,417 / 0**. rev8a gave 2,733, 10,373 and 2,416.
+- **The lane-flags legs on the quad** (dt-full.log:132-134, 232-234, 332-334, 432-434): at each format, 200 lanes, 67 masked, and 62, 69, 77 and 60 marked from fp32 to fp256, "device == software, identities hold (FLAGS 0x1e, STATUS 0x00000040), masked bytes untouched, the region silent and its control loud"; unmasked, every byte written; and the reports image, under the mask and without it, device == software with the counts.
+- **hw/card-segrun.sh:** rc 0 in 174 s, "card-segrun: 6 checks, 0 failed"; segrun_check **695 checks, 0 failed, 0 skipped**, 107 s; its NOTE h: "the per-lane block on the card: VERSION 0x00000b00, CAPS2 0x001877fc: CAPS2[13] set, so --lane-flags must be written, byte for byte the software backend's" - SC8's leg took its written branch on the quad, as on rev8a. The negative control (device-test's SHA-256 handed as the image's) failed the device lines by name, rc 1, as it must (card-segrun.log:13-25).
+- **The acceptance set, the card's admission test:** **20 of 20 PASS**, 174 checks, 373 s (acceptance.log), as on rev8a and on q135b.
+- **rev8q is card-proven.** card-segrun keeps its gate logs only on a failure, so none is copied.
+
+**rev8d's build** (the lead's box_rev8d.sh on amd-arc-box, 2026-10-06 08:05:09 to 11:12:17; box/rev8d-688b653/: rev8d.log, rev8d-summary.txt, rev8d.verify.log, rev8d-worst10.txt, the manifest cft_hw.manifest.txt, impl_1_full_util_routed.rpt, impl_1_slr_util_routed.rpt and hw_bb_locked_timing_summary_routed.rpt.gz).
+- **The tree and the recipe** (rev8d-summary.txt, the manifest): 688b653, as rev8a and rev8q (rtl 44b963dd, hw 7f9c3185; "bitstream_sources: rtl/ and hw/ identical to 688b653..."); hw/link.cfg, one compute unit (`nk=cft_krnl:1:cft_krnl_1`); KERNEL_FREQ 135000000; CFT_GENERICS SEQ_SCRATCH_D=8192, with R21 (EN_AUGADD's default, 1, asserted in the tree by the script); and the quad's recipe rather than the single's - RETIMING=1, place ExtraTimingOpt, route AggressiveExplore, PHYS_OPT=1 - the lead's choice, since a deeper scratch lengthens the UltraRAM cascades and the round's time held one build. rebuild-2022 rc 0 in 187 min, against the plan's price of about 468.
+- **The clock applied:** "Clock constraint argument: 135000000:cft_krnl_1.ap_clk" (the summary; the manifest's clock_arg the same); "every requested generic is in the wrapper"; retiming in krnl_1's synth runme.log (`-retiming`, one match; copied as box/rev8d-688b653/runs/ulp_cft_krnl_1_0_synth_1/runme.log.gz).
+- **Timing.** Kernel WNS **+0.036 ns** (the manifest's kernel_wns_ns); the whole design's routed WNS the same, +0.036 ns, and hold +0.009 ns (runme.log's post-routing summary).
+  - **The route** (impl_1's runme.log, copied as box/rev8d-688b653/runs/impl_1/runme.log.gz): after placement +0.035 (as rev8a's and rev8q's); before rip-up +0.055 (the shell's own path, rev8a's routed WNS); after global iterations 0 to 3, -0.397 (TNS -45.040), -0.158 (-7.376), -0.022 (-0.085), **+0.024** (0); the post-routing summary +0.036. rev8a, the single at 4,096, never went negative in its route; the deep at 8,192 did, and recovered in four iterations, as the quad did.
+- **The ten worst setup paths** (rev8d-worst10.txt; paths 11 to 20 are hold paths). 0 failing:
+
+  | paths | slack | from | to | levels |
+  |---|---|---|---|---|
+  | 1, 3, 4 | +0.036, +0.053, +0.062 | u_engine/seg_r_reg[4] | u_engine/wq_a_reg[107], [108], [110] | 9 |
+  | 2 | +0.039 | u_seq/ft_reg[93] | u_seq/scr_wdata_reg[46] | 4 |
+  | 5, 10 | +0.070, +0.086 | g_bank256.u_fma's s13_kept_r_reg[8] | its d_reg[56] and [50] | 19 |
+  | 6 to 9 | +0.071 to +0.081 | u_engine/u_fifo_a/mem_reg_0 | g_bank256.u_fma's s0_byp_d_reg[175], [81], [174], [145] | 11 to 17 |
+
+- **The lead's reading:** every one predates revision 8 - `git log -S` gives s13_kept_r at 626dec3 (2026-08-29), s0_byp_d at 2ff3720 (2026-08-29), scr_wdata at 7a1fd89 (2026-09-08), seg_r at 78b4a3b (2026-09-14), wq_a at 8b99dd7 (2026-09-15), and ft, R19's fired-tag pipeline, at f349ca6 (2026-09-29, revision 7). No revision-8 register is among them.
+- **verify-image: 8 of 8 PASS** (rev8d.verify.log): sha256; platform xilinx_u50_gen3x16_xdma_5_202210_1; content, a bitstream; 1 compute unit, cft_krnl_1; link config hw/link.cfg; kernel clock 135,000,000 Hz on 1 CU; the shell's clock topology; memory intent, 4 masters on HBM, none shared.
+- **The staged image:** cft_hw_deep.xclbin, 47,197,081 bytes, SHA-256 bbf08fb3feb60940bcbdfcf0eebef12de8fd55c7d302b2f896534c49447316fa, staged in the box's card-day directory for rev8d and re-hashed byte-identical (the summary).
+- **Utilization** (impl_1_full_util_routed.rpt), beside rev8a's (part one):
+
+  | resource | rev8d | rev8a | change (COMPUTED) |
+  |---|---:|---:|---:|
+  | CLB LUTs | 288,618 (33.15%) | 288,339 (33.12%) | +279 |
+  | CLB registers | 237,799 (13.64%) | 237,553 (13.63%) | +246 |
+  | block-RAM tiles | 350 (26.04%) | 350 (26.04%) | 0 |
+  | URAM | 260 (40.63%) | 132 (20.63%) | +128 |
+  | DSPs | 290 (4.87%) | 290 (4.87%) | 0 |
+
+  - By SLR (impl_1_slr_util_routed.rpt): SLR0 76,208 LUTs (17.33%), 105.5 block-RAM tiles, 36 URAM (11.25%), 6 DSPs; SLR1 212,410 LUTs (49.17%), 244.5 block-RAM tiles, 224 URAM (70.00%), 284 DSPs; 6,091 SLLs of 23,040 (26.44%). rev8a's tile sat in SLR0 (part one, its 132 URAM all there); the deep's is placed mostly in SLR1.
+  - COMPUTED: the scratch doubled again, +128 URAM, for 256 a tile at 8,192 slots, 260 with the shell's 4, as box_rev8d.sh's header and probe K projected; nothing else moved by more than 0.1 percent. SLR0 holds 36 URAM - the tile's 32 and the shell's 4, if the shell's sit where rev8a's report puts them - so the deep tile's scratch spans both SLRs, where one SLR's 320 could have held its 256. It closed timing as placed.
+
+**rev8d's card legs** (the lead's box_rev8d_card_beside_gate.sh on amd-arc-box and the U50, 2026-10-06 11:17:03 to 11:27:06; box/card-rev8d-2234d30/: summary.txt and the logs).
+- **Beside the close's gate, a deliberate exception** to the card scripts' guard, which refuses beside `run.sh --budget`. The script is box_rev8d_card.sh with that pattern and `cft-segrun` dropped from its guard, its header saying why. The gate's 44 stages (`run.sh --list`) use the software backend, loopback and static image checks, never the card, so the card had nothing else on it; the two shared the box's CPU.
+- **The host:** step6-r2 at 2234d30 (HEAD, status 0, rtl 44b963dd, hw 37af4a7a, hold_card_lane_flags x5, asserted), built with XRT=1, rc 0 in 11 s, exactly the two known warnings (build.log:68 and :75); every tool XRT-linked.
+- **api-test:** "all contract checks passed".
+- **device-test -i, the identity** (dt-i.log): **23 checks, 0 failed**, "the device image's identity holds".
+  - Contract 0x00000b00, 1 tile, fp32 to fp256. The image: SHA-256 bbf08fb3... over 47,197,081 bytes, VERSION **0x00000b00**, CAPS **0x19faffff**, CAPS2 **0x00187ffd**; formats 0xf, seq_features **0x7ff1f**, capacities **1024/16777216/512**, max_scratch **8192**.
+  - The device lines: platform xilinx_u50_gen3x16_xdma_base_5, XRT 2.19.194, kernel clock **135,000,000 Hz** read from the image, serial none reported.
+  - The planted CFT_XRT_CAPS handles NOT TESTED by name, one tile, as on rev8a.
+  - COMPUTED from the words: CAPS2[3:0] = 0xD, log2 of 8,192, the single's word otherwise. **Parcel TG's merge condition for the deep holds**: 0x00187ffd, 0x7ff1f, 8192.
+- **device-test against the software backend**, each ending "the device and the software backend agree on every case that RAN, bits and flags", NOT TESTED 5: `-q -n 8` **2,733 / 0**; `-n 4096` **10,373 / 0** in 14 s; `-r` **2,416 / 0** - rev8a's three counts exactly.
+- **The lane-flags legs** (dt-full.log:132, 232, 332, 432 and the lines after each): at each format, 200 lanes, 67 masked, 62, 69, 77 and 60 marked, "device == software, identities hold (FLAGS 0x1e, STATUS 0x00000040)"; unmasked, every byte written; and the reports image the same.
+- **hw/card-segrun.sh:** rc 0 in 182 s, "card-segrun: 6 checks, 0 failed"; segrun_check **695 checks, 0 failed, 0 skipped**, 111 s; its NOTE h: "VERSION 0x00000b00, CAPS2 0x00187ffd: CAPS2[13] set, so --lane-flags must be written, byte for byte the software backend's" (card-segrun.log:20). The negative control failed the device lines by name, rc 1, as it must.
+- **The acceptance set:** **20 of 20 PASS**, 174 checks, 384 s (acceptance.log).
+- **rev8d is card-proven.**
+
+**The gate at the close's integration** (the lead's box_close_gate.sh on amd-arc-box, niced, 2026-10-06 10:05:29 to 12:32:00, beside rev8d's link until 11:12 and its card legs from 11:17; box/closegate-e3fe2ca/: closegate-summary.txt, closegate-run.log, the script, the run's state as state-20261006-100529-e3fe2ca.tgz and stage-tails.txt).
+- **The tree:** s6-close at e3fe2ca0e2a3464d96970f581dbf7c0c047b80cf - step6-r2's 2234d30 with CR and TG merged and the lead's first follow-up - asserted by the script with its markers (status 0; rtl 44b963dd; VERSION = 5; u50-rev8-deep; the record's version 5; "first hardware image"; the api_test comment; hold_card_lane_flags x5; no provisional()); the pinned MPFR 4.2.2 copied in.
+- **The verdict:** `verify/run.sh --budget gate` exit 0 in 146 min: "VERDICT: PASS with 8 skip(s) and 4 inner skip(s) in golden (3), remote (1)"; 36 stages executed, 0 failed, 8 skipped - buildargs (a real Vitis on the box), lang-rust, lang-julia, lang-go, lang-csharp, lang-r and lang-fortran (no toolchain), demos (no node) - the same eight, and the same four inner skips, as gate7 and gate8 on the box (their run logs there).
+- **The stages the close reaches** (each stage's log in the state archive; MEASURED): golden 3,367 passed and 3 skipped (769.68 s by pytest); programs - the assemblers 346 passed, segrun_check 1,078 checks, 0 failed, 0 skipped (the desktop's one Windows skip runs here), the corpus check 311; lang 220 ok; lang-routines 37 ok; tangent 141 ok; acceptance 41 of 41 on sw, 249 checks; audit 17,872 checks; bindings 834 passed; formal 39 of 39 with the negative control refuted; docs, generated, seq, mpfr and workloads ok.
+- **VERIFICATION.md's rows hold:** no count moved from what they state (golden's 3,370 collected and 3,367 passed, audit's 17,872, the programs, lang, lang-routines, tangent and acceptance figures), so their timings are left at the commits they name.
+- **What the gate did not see:** the lead's second follow-up (20b59fe: a README row, two in-place restatements in TG's entry, two docstrings, a SEQUENCER tense) and this entry's commit (VALIDATION, LANGUAGE.md's sentence, targets.py's docstring, docs/README.md). Both are documents and docstrings only - the AST of each changed Python file without docstrings is identical to e3fe2ca's - and each ran the docs check, rc 0, and test_cftc.py, 91 passed.
+
+**Step 6, closed.**
+- **Revision 8 is on the card in all three of the plan's images**, each from rtl 44b963dd at 135 MHz and each card-proven on 2026-10-06 by the same legs (api-test, device-test's four runs, hw/card-segrun.sh with SC8's leg, the acceptance set):
+
+  | image | tiles | R21 | scratch slots | CAPS2 | seq_features | kernel WNS | acceptance |
+  |---|---:|---|---:|---|---|---:|---|
+  | rev8a, the single | 1 | yes | 4,096 | 0x00187ffc | 0x7ff1f | +0.330 ns | 20 of 20 |
+  | rev8q, the streaming quad | 4 | no | 4,096 | 0x001877fc | 0x77f1f | +0.048 ns | 20 of 20 |
+  | rev8d, the deep single | 1 | yes | 8,192 | 0x00187ffd | 0x7ff1f | +0.036 ns | 20 of 20 |
+
+  Each reads VERSION 0x00000b00, CAPS 0x19faffff, capacities 1024/16777216/512, and the clock 135,000,000 Hz from its image; each passed card-segrun 695 of 695 with --lane-flags written on the card, byte for byte the software backend's.
+- **cftc's built-in targets match the tiles:** u50-rev8, u50-rev8-quad and u50-rev8-deep (parcel TG's entry, above, output version 5) hold exactly the words the three tiles read, so TG's merge condition holds and the targets join main with this entry.
+- **Step 6, from its plan of record** (2026-10-02, above) **to this entry:** the acceptance set and a card's admission test (A1); run-time division and square root in the language (L4) and time (T1); revision 8's flag control and per-lane flags, golden-first at ABI 0.17 (R8); certificate format version 2, golden-first (CV2B, profile 2) and in C at ABI 0.18 (CV2CA, CV2CW); routines in the compiler (C4); revision 8's RTL - the seam (RA), R21 in the lanes (RB), the instruction fetch (RD1), the sequencer's round 2 (C) and its host side (E) - with probes L, S, K and E; the golden model's exp2 tie and the conformance profile's major step to 3 (XT); M1's design study, as a design record; the closing records (CR); cftc 5 with revision 8's targets (TG); and the three images above. The library stands at ABI 0.18 (cft.h's CFT_ABI_VERSION_MINOR), profile 3 (CFT_PROFILE_MAJOR), cftc output version 5; the tile at VERSION 0xB00.
+- **Not in step 6, by Logan's word** (2026-10-05, quoted in the round-2 entry and the XT entry above): M1's phase 2 - the exp and log family built as tile routines - and M2 to M4, the rest of the math library, are a later round's, with M1's other eleven questions answered at that round's plan (the XT entry). R21 stays off the quad and the open-core builds until the dense design's timing work on nextpnr has progressed, when it is reconsidered with other space-saving measures (Logan, quoted in the round-2 entry).
+
+**Known limits, recorded rather than fixed** (Logan's rule).
+- **rev8d's tile spans both SLRs** as placed (36 URAM in SLR0, 224 in SLR1), where one SLR's 320 could hold its 256; it closed at +0.036 ns all the same. A later deep build could constrain the tile to one SLR; nothing here measures whether that helps.
+- **rev8d's card legs ran beside the close's gate**, an exception to the card scripts' guard recorded above; the two shared the box's CPU and nothing else.
+- **Corrections to three commit messages of the close's integration**, which this entry carries rather than rewriting commits the gate ran on (verifier-VI9):
+  - 7c8e1d2's "comments in host/ and python/ only": python/tests/test_cert2.py:637's HOME string moved too (a personal path made `/home`), and bindings/arduino's copies of cft.h and program.c were re-vendored; part one's entry and CR's own message say both rightly.
+  - e3fe2ca's "its C half built at ABI 0.18 on 2026-10-05": certificate version 2's C half was built 2026-10-02 to 03 (9346331 at ABI 0.18; the merges bb6aca5 and 4449c49; the module 7bfc65f). 20b59fe corrected the README row.
+  - e3fe2ca's "the seven more software-backend gates": five are gate runs and two (c4-early, cv2b-early) early runs, all on the software backend; TG's entry says "software-backend gate and early runs".
+- **Notes taken as known limits, not restated** (verifier-VCRc's, verifier-VTGb's and verifier-VI9's): COMPATIBILITY.md:886's "| hardware | no RTL ..." row under "status at ABI 0.17", read as a dated table; SEQUENCER.md:3275-3276 and python/rev8_worth.py:17-19, revision 7's census figure, outside the class; SEQUENCER.md:3286 at 84 columns and COMPATIBILITY.md:864's short line; python/cftc/__init__.py:105 at 81 columns.
+- **The stale comments in rtl/ and tb/** that part one lists stay until the next change to those trees, the images being tied to rtl 44b963dd.
