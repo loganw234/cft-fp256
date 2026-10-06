@@ -135,9 +135,12 @@ Every statement is one of five kinds, and says which:
   - The largest errors found there pass the line too: log1p 2^-1.60
     (0.33 Bv; the box, 40,000 arguments at the band's lowest end) and
     log2 2^-1.85 (0.28 Bv; verifier-VM1c, 682,201 arguments drawn
-    toward the cell's end). Both are inside the bound, so the in-lane
-    test stays sound: VM1c's log2 lane is unmarked and equal to
-    transcend.py under all five attributes.
+    toward the cell's end). Both lanes are inside the bound, and no
+    lane of any sample passed a stated bound: verifier-VM1d drew 6.3
+    million lanes aimed where the bounds are largest. The in-lane
+    test's soundness rests on the bound, not on the samples. The six
+    worst lanes VM1d checked, VM1c's two among them, are unmarked and
+    equal to transcend.py under all five attributes.
   - Every other region budgeted keeps two bits or more by its bound:
     log's cell 0.22 Bv, expm1's n = +-1 cells and its clamp 0.15 to
     0.16.
@@ -608,7 +611,14 @@ expm1 has one term more, which the formula above and the planner both
 leave out: the clamp. 2^-k is dropped for k > p + G + 2, which moves V'
 by at most 2^-(p+G+3) against |V'| >= 0.95: 2^-2.9 of the bound.
 - Where the truncation's worst r meets the first clamped k, the sum
-  could reach 2^-1.4 of the bound. It is MEASURED at 2^-2.9 (3.3).
+  could reach 2^-1.4 of the bound. The largest errors found there are
+  lower bounds on the worst:
+  - 2^-2.93 (0.13 Bv), in this study's budget run over 3,000 uniform
+    arguments on [70, 72];
+  - 0.1364 Bv (2^-2.87), in verifier-VM1d's 600,293 lanes on the box,
+    placed at the edges of the cells of k = 101 to 104, around the
+    first clamped k.
+  The budget's bound there is in 3.3.
 - Moving the clamp to k > p + G + 4 costs nothing, since only a
   compare's constant changes, and takes the term to 2^-4.9. Phase 2's
   choice.
@@ -655,6 +665,13 @@ A.
     whatever the roundings' alignment. It is the region's bound as far
     as the sample reaches the region's extremes. This study calls it
     the budget's bound.
+  - Verifier-VM1d measured what first order leaves out, the residual
+    E - (M + the roundings' terms), over 300 lanes each:
+    - at most 3e-17 Bv in the log family;
+    - 6e-5 for exp, at G = 44;
+    - 2e-4 at expm1's clamp;
+    - 2.8e-3 to 4.6e-3 for expm1 at n = +-1, under 3% of that cell's
+      bound.
 - What the budget finds:
   - Only the last few sums scale with the terms: the effective factor
     in the worst cell is about 5, not 22.
@@ -820,8 +837,8 @@ worst, good only for the sampling that found it.
 |---|---|---|---|
 | log1p, x in [-1/8, -15/256) | 0.494 Bv (2^-1.02) | 0.176 (2^-2.50) | 0.30 Bv, 2^-1.72 (the box, 100,000 uniform) |
 | log1p, x in [15/256, 1/8) | 0.480 (2^-1.06) | 0.120 (2^-3.06) | 0.33, 2^-1.60 (the box, 40,000 in [15/256, 0.0587]) |
-| log2, x in [7/8, 241/256) | 0.510 (2^-0.97) | 0.180 (2^-2.47) | 0.28, 2^-1.85 (verifier-VM1c, 682,201 toward the cell's end) |
-| log, x in [7/8, 241/256) | 0.217 (2^-2.20) | | 0.15, 2^-2.76 (the budget's own 12,000) |
+| log2, x in [7/8, 241/256) | 0.510 (2^-0.97); 0.496 strictly inside | 0.180 (2^-2.47); 0.156 inside | 0.28, 2^-1.85 (verifier-VM1c, 682,201 toward the cell's end) |
+| log, x in [7/8, 241/256) | 0.217 (2^-2.20); 0.201 inside | | 0.15, 2^-2.76 (the budget's own 12,000) |
 | expm1, n = +1 and n = -1 | 0.164 and 0.159 (2^-2.61, 2^-2.65) | | 0.11, 2^-3.21 (the budget's own 12,000) |
 | expm1 at its clamp, x in [70, 72] | 0.151 (2^-2.72) | | 0.13, 2^-2.93 (the budget's own 3,000) |
 | exp, exp2, x in [-1, 1] | | 0.164 and 0.164 (2^-2.61) | |
@@ -832,11 +849,24 @@ worst, good only for the sampling that found it.
   uniform and half within 2^-8 to 2^-56 of the end where A is largest.
   The clamp's used `p5_budget.py` on 3,000 uniform arguments. exp's and
   exp2's are the box's, 3,000 uniform (`vm1b/VM1b-1.summary.out.txt`).
-- VM1b's and VM1c's own runs agree. At G = 46 they found log1p 0.494
-  and 0.480 to 0.482, and log2 0.496 to 0.510. At G = 44 they found
-  log1p 0.176 and 0.120, and log2 0.156 to 0.180. Re-run from the
-  tree, the box's job for log2 (3,000 uniform, seed 173) gave 0.4744
-  again, to the digit.
+- The log2 and log figures 0.510, 0.180 and 0.217 include lanes at
+  x = 241/256 itself. p5c's end sampler rounds its smallest offsets
+  (2^-55 and 2^-56) to that point. That lane takes the wrap path,
+  outside [7/8, 241/256), and its method error is larger: for log2, M
+  is 0.065 there against 0.052 inside.
+  - Strictly inside the region, verifier-VM1d measured 0.4962 and
+    0.1557 for log2 and 0.2008 for log, given beside them in the table.
+  - log1p's lanes next to -15/256 are inside its region, so its
+    0.494 is the region's own.
+- VM1b's and VM1c's own runs agree with these, and the wrap lane is the
+  whole of their spread:
+  - at G = 46, log1p 0.494 and 0.480 to 0.482, and log2 0.496 (VM1c's,
+    equal to the inside figure) to 0.510 (VM1b's, equal to the figure
+    with the wrap lane);
+  - at G = 44, log1p 0.176 and 0.120, and log2 0.156 to 0.180, divided
+    the same way.
+- Re-run from the tree, the box's job for log2 (3,000 uniform, seed 173)
+  gave 0.4744 again, to the digit.
 - VM1b's smaller samples, 300 to 800 uniform arguments a region (its
   ledger), give the exp family's other cells and log's other binades
   0.16 Bv or less at G = 46.
@@ -1504,11 +1534,14 @@ lead's (Logan's rule, verbatim in the brief).
        three instead of 23, expm1 13 instead of 9, and log1p 11 instead
        of 7; log marks 9 of 32 instead of 7.
    At fp128 and fp256 the cancellation moves nothing: the roundings
-   there come to about 2^-7 of the bound (verifier-VM1b's and
-   verifier-VM1c's budgets, 300 to 400 arguments a cell). By those
-   budgets, the log family's cells keep about 5 bits there. expm1's
-   clamp term is 2^-2.9 of the bound at every format (3.2). Elsewhere
-   the largest errors found are 2^-3.8 or less (3.3).
+   there come to about 2^-7 of the bound. That is the budget of
+   verifier-VM1b, whose ledger gives no count of arguments for it, and
+   of verifier-VM1c, 300 to 400 arguments a cell. By those budgets the
+   log family's cells keep about 5 bits there. Verifier-VM1d's
+   end-weighted runs, 400 to 500 arguments, give 4.6 to 4.9 bits
+   (bounds 0.034 at fp128 and 0.042 at fp256). expm1's clamp term is
+   2^-2.9 of the bound at every format (3.2). Elsewhere the largest
+   errors found are 2^-3.8 or less (3.3).
    Recommended: G = 44 at fp64, and 46 at fp128 and fp256, on the
    grounds above. A second G costs nothing: 2^-(p+G) is a bank word
    that differs by format anyway. One alternative is not measured:
@@ -1683,7 +1716,7 @@ this directory with the repository's `python/` on the path, which
 | `census.py` | the structured families |
 | `alts.py`, `bound_terms.py`, `consts_report.py`, `rmax.py`, `words_union.py`, `final_counts.py` | the alternatives, the bound's terms, the screens, the reduction's max |r|, the bank's union, the final fragments' counts |
 | `onseq.py` | the fragments as programs on seq.py through routines.run |
-| `vm1b/` | verifier-VM1b's first-order error budget (`adlib.py`, `p5_budget.py`, `p5c_budget_end.py`) and its box batch's sampling scripts (`p10_cells.py`, `p8_bound_g.py`), with `vm1blib.py` importing the model from the directory above. Written by verifier-VM1b and committed here unchanged but for that import, a usage line and LF line ends. `VM1b-1.summary.out.txt` is the box batch's summary; `budget.*.out.txt` are this study's runs of the budget from the tree |
+| `vm1b/` | verifier-VM1b's first-order error budget (`adlib.py`, `p5_budget.py`, `p5c_budget_end.py`) and its box batch's sampling scripts (`p10_cells.py`, `p8_bound_g.py`), with `vm1blib.py` importing the model from the directory above. Written by verifier-VM1b and committed here unchanged but for that import, vm1blib.py's header, a usage line and LF line ends. `VM1b-1.summary.out.txt` is the box batch's summary; `budget.*.out.txt` are this study's runs of the budget from the tree |
 | `*.out.txt` | each run's output as captured, named for its script; the outputs from before a design change say which version they measured. `-first` marks a run of the first version, kept beside its revised run; `-revised` a revised run beside a first-version file that keeps its name |
 
 The runs and their loads are in the round's ledger,
