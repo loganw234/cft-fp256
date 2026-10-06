@@ -111,8 +111,10 @@ results file - so `SIM_JOBS=n` hands make `-j n` (and `-k`, so one
 failing target does not hide the others): the whole suite cold at -j12
 on that box is 3 min, warm under a minute (docs/VALIDATION.md
 2026-09-02). Budget 1-2 GB a job under Verilator. The formal gate was 29
-s when it held four proofs and is about 7 minutes (420 s of solver time)
-now that it holds thirty and a negative control; `transcend` is 13
+s when it held four proofs and about 7 minutes (420 s of solver time)
+when it held thirty and a negative control, and is about 10 to 11
+minutes on amd-arc-box now that it holds thirty-eight and a negative
+control (629 s and 645 s at 3a2b2d0, 2026-10-05); `transcend` is 13
 minutes quiet and 52 loaded. docs/VERIFICATION.md carries every number
 with its provenance.
 

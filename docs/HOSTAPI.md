@@ -3539,10 +3539,10 @@ the counts have had since 2026-09-15.
   (0x7f1f) and the quad's (0x77f1f) while the server computed (2026-10-05,
   parcel E's ledger).
 - The XRT backend compiles with `XRT=1` against XRT 2.14 in cft2204 with
-  no warning, as at 6fe4a4a. No revision-8 image exists yet, so the path
-  has run on no device: probe E (an hw_emu single of the merged tree,
-  device-test's revision-8 legs on it) and the card legs are where it
-  is first run.
+  no warning, as at 6fe4a4a. Under hw_emu (probe E, 2026-10-05) it read
+  the single's words and carried a run's block for two segments, equal
+  byte for byte to the software backend's; device-test's revision-8 legs
+  did not finish there, and are the card legs', on the first image.
 
 ## The definition the library implements (certificate version 2, 2026-10-02)
 
