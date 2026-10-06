@@ -239,13 +239,13 @@ run_proof mulpass_real.sby p237c1  1 "fp256 x10: whole claim, one property"
 # proof is k-induction over its claims and the helper invariants that
 # make them inductive, all proven; ifetch.sby says why not pdr. The
 # minimums are each task's measured count of checks in its solved model.
-run_proof ifetch.sby   prove           30 "fetch: control, faults, AR, FIFO"
-run_proof ifetch.sby   data_prove      57 "fetch: words, 2+ cycles after landing"
-run_proof ifetch.sby   deliver_prove   54 "fetch: answered within 18 cycles"
-run_proof ifetch.sby   ends_prove      31 "fetch: idle within 14 of a stop"
+run_proof ifetch.sby   prove           31 "fetch: control, faults, AR, FIFO"
+run_proof ifetch.sby   data_prove      58 "fetch: words, 2+ cycles after landing"
+run_proof ifetch.sby   deliver_prove   55 "fetch: answered within 18 cycles"
+run_proof ifetch.sby   ends_prove      32 "fetch: idle within 14 of a stop"
 run_proof ifetch.sby   cover           14 "fetch: control shapes reachable"
-run_proof ifetch.sby   wide_prove      27 "fetch, 4-burst FIFO: control"
-run_proof ifetch.sby   wide_data_prove 54 "fetch, 4-burst FIFO: words"
+run_proof ifetch.sby   wide_prove      28 "fetch, 4-burst FIFO: control"
+run_proof ifetch.sby   wide_data_prove 55 "fetch, 4-burst FIFO: words"
 run_proof ifetch.sby   wide_cover       4 "fetch, 4-burst FIFO: 3 shapes, full"
 
 # --- the negative control ------------------------------------------------

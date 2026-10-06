@@ -3432,7 +3432,7 @@ to 0xB00 for the register. This is libcft's side. No ABI step: ABI
   asking for the lane-flags block at `cft_program_run_ex`, naming
   `CFT_SEQ_FEAT_LANE_FLAGS`.
 - **A tile with revision 8's fetch** (rtl/cft_ifetch.sv, wired 2026-10-05)
-  reports CAPS2 0x001807fb at the U50's capacities - CAPS2[20:16] 24 - so
+  reports CAPS2[20:16] 24 at the U50's capacities - its whole word below - so
   `max_insns` 2^24, and CAPS unchanged at 0x19faffff (CAPS[23:20] 15, the
   most it says). A program past its 4,096-word store streams from the
   image buffer during the run: **the image buffer is read throughout the
