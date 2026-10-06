@@ -42,11 +42,27 @@ foreach f [get_files -all -of_objects [get_ips cft_krnl_v]] {
     set fh [open $f r]
     set txt [read $fh]
     close $fh
+    # Every override in cft_krnl's parameter block - from `cft_krnl #(` to
+    # the `) inst (` that closes it - not a list of names: a list written
+    # before revision 8 left out SEQ_*, EN_WIDE and EN_AUGADD, so the first
+    # image that set SEQ_SCRATCH_D (rev8a, 2026-10-05) was refused here
+    # while its wrapper carried .SEQ_SCRATCH_D(4096). A name cft_krnl does
+    # not declare is refused at packaging (hw/package_kernel.tcl).
+    set inpar 0
+    set nparams 0
     foreach line [split $txt "\n"] {
-      if {[regexp {\.(EN_FP32|EN_FP64|EN_FP128|EN_FP256|BEAT_BITS|MUL_PASSES|FUSE_[A-Z]+|AR_DEPTH|AW_DEPTH|FIFO_LOG2|BURST_LOG2)\s*\(} $line]} {
+      if {!$inpar} {
+        if {[regexp {^\s*cft_krnl\s+#\(\s*$} $line]} { set inpar 1 }
+        continue
+      }
+      if {[regexp {^\s*\)} $line]} { set inpar 0; continue }
+      if {[regexp {^\s*\.([A-Za-z_][A-Za-z0-9_]*)\s*\(} $line]} {
         puts "WRAPPER_PARAM: [string trim $line]"
+        incr nparams
       }
     }
+    if {$nparams == 0} { error "no parameter overrides found in $f: its cft_krnl #( block was not read" }
+    puts "WRAPPER_PARAMS: $nparams"
   }
 }
 if {!$found} { error "no synthesis wrapper generated for cft_krnl_v" }
