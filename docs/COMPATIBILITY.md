@@ -975,6 +975,7 @@ are the profile's business, and the profile steps from 2 to 3, with
 |---|---|
 | C (`cft.h`) | `CFT_PROFILE_MAJOR` 3. `host/src/transcend.c`'s exp2 branch sends the tie to `round_pack`, as pow's and pown's exact branches did. `transcend_check.py`'s pool already held the argument, both signs, and C equals the model there before and after |
 | vectors | four cases moved, one in each `fpN-transcend-rmm.jsonl`: the result +0 became the smallest subnormal; the other 164 sets are byte for byte profile 2's |
+| Node / Browser | the module rebuilt, since `transcend.c` is one of its sources: `8e4e8298...`, 276,303 bytes, still 141 `cftw_*` exports. `conformance.html` and `demos.html` were rebuilt on it, byte-identical over two clean builds, and the demos chains were re-recorded with every chain unchanged (bindings/wasm/README.md) |
 | Arduino | the vendored copy re-synced (`src/cft/src/transcend.c`, `src/cft/include/cft.h`; still 35 files) |
 | certificates | `cft-segrun` writes `profile 3` and `cft-audit` audits at 3. The golden corpus was made again at profile 3; only each version-2 certificate's `profile` and `hash` lines moved, and the `supersedes` lines that name one. A profile-2 certificate meets the definition rule as any other definition's does (docs/CERTIFICATES.md, "The definition") |
 

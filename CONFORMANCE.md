@@ -328,7 +328,7 @@ Conformance is scored, not read.
     no rule and no code. An auditor at profile 3 does not cover
     profile 2, so it re-derives under profile 3:
     - where every re-derivation passes, it accepts, and its verdict
-      says the definitions differ;
+      says its definition does not cover the certificate's;
     - where one fails, it refuses `definition-differs`, never blaming
       the certificate.
 
