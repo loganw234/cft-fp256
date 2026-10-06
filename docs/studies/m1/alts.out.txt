@@ -1,0 +1,36 @@
+# alts.py, 13:01-13:08, the desktop 100% busy. Final planners (two bits of slack). exp and log only: the revision moves none of it.
+exp, rne: N (SELECT tree) -> K, D, instructions [lookup phase], words
+  fp64 N= 4: K 8 D 15  insns 181 [lookup 8]  words 57  | LDX copy: 178 insns, 8 slots a lane
+  fp64 N= 8: K 7 D 13  insns 181 [lookup 17]  words 64  | LDX copy: 169 insns, 16 slots a lane
+  fp64 N=16: K 6 D 11  insns 189 [lookup 34]  words 77  | LDX copy: 160 insns, 32 slots a lane
+  fp64 N=32: K 6 D 10  insns 221 [lookup 67]  words 109  | LDX copy: 159 insns, 64 slots a lane
+  fp128 N= 4: K 8 D 22  insns 188 [lookup 8]  words 65  | LDX copy: 185 insns, 8 slots a lane
+  fp128 N= 8: K 7 D 20  insns 188 [lookup 17]  words 72  | LDX copy: 176 insns, 16 slots a lane
+  fp128 N=16: K 6 D 17  insns 195 [lookup 34]  words 84  | LDX copy: 166 insns, 32 slots a lane
+  fp128 N=32: K 6 D 16  insns 227 [lookup 67]  words 116  | LDX copy: 165 insns, 64 slots a lane
+  fp256 N= 4: K 8 D 37  insns 203 [lookup 8]  words 80  | LDX copy: 200 insns, 8 slots a lane
+  fp256 N= 8: K 7 D 33  insns 201 [lookup 17]  words 85  | LDX copy: 189 insns, 16 slots a lane
+  fp256 N=16: K 6 D 30  insns 208 [lookup 34]  words 97  | LDX copy: 179 insns, 32 slots a lane
+  fp256 N=32: K 6 D 27  insns 238 [lookup 67]  words 127  | LDX copy: 176 insns, 64 slots a lane
+exp and log, rne: G -> instructions; the mark rate 2^(0.53-G) a call
+  fp64 G=36: exp K 6 D 11 172 insns; log K 9 D 21 170 insns; rate 2^-35.5
+  fp64 G=40: exp K 6 D 12 173 insns; log K 10 D 22 178 insns; rate 2^-39.5
+  fp64 G=46: exp K 7 D 13 181 insns; log K 12 D 23 193 insns; rate 2^-45.5
+  fp64 G=47: exp K 7 D 13 181 insns; log K 12 D 24 194 insns; rate 2^-46.5
+  fp64 G=48: G = 48 is past the double word's floor at fp64: 10u^2 = 2^-102.7
+  fp64 G=52: G = 52 is past the double word's floor at fp64: 10u^2 = 2^-102.7
+  fp64 G=60: G = 60 is past the double word's floor at fp64: 10u^2 = 2^-102.7
+  fp128 G=36: exp K 6 D 18 179 insns; log K 9 D 36 185 insns; rate 2^-35.5
+  fp128 G=40: exp K 6 D 19 180 insns; log K 10 D 36 192 insns; rate 2^-39.5
+  fp128 G=46: exp K 7 D 20 188 insns; log K 12 D 38 208 insns; rate 2^-45.5
+  fp128 G=47: exp K 7 D 20 188 insns; log K 12 D 38 208 insns; rate 2^-46.5
+  fp128 G=48: exp K 8 D 20 195 insns; log K 12 D 38 208 insns; rate 2^-47.5
+  fp128 G=52: exp K 8 D 20 195 insns; log K 13 D 39 216 insns; rate 2^-51.5
+  fp128 G=60: exp K 9 D 21 203 insns; log K 15 D 41 232 insns; rate 2^-59.5
+  fp256 G=36: exp K 6 D 32 193 insns; log K 9 D 66 215 insns; rate 2^-35.5
+  fp256 G=40: exp K 6 D 32 193 insns; log K 10 D 67 223 insns; rate 2^-39.5
+  fp256 G=46: exp K 7 D 33 201 insns; log K 12 D 68 238 insns; rate 2^-45.5
+  fp256 G=47: exp K 7 D 33 201 insns; log K 12 D 68 238 insns; rate 2^-46.5
+  fp256 G=48: exp K 8 D 33 208 insns; log K 12 D 69 239 insns; rate 2^-47.5
+  fp256 G=52: exp K 8 D 33 208 insns; log K 13 D 69 246 insns; rate 2^-51.5
+  fp256 G=60: exp K 9 D 34 216 insns; log K 15 D 71 262 insns; rate 2^-59.5

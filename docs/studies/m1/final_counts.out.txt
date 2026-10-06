@@ -1,0 +1,19 @@
+# final_counts.py, 17:02, final planners. After the revision: log1p's r = x path ends at 15/256.
+fp64 exp   K7 D13: instructions 178-181 [181, 179, 179, 178, 181], words 63-64, live 22-23
+fp64 exp2  K7 D13: instructions 176-179 [179, 177, 177, 176, 179], words 64-65, live 23-24
+fp64 expm1 K8 D13: instructions 175-178 [175, 178, 176, 177, 175], words 65-68, live 22-22
+fp64 log   K12 D23: instructions 193-193 [193, 193, 193, 193, 193], words 75-75, live 16-16
+fp64 log2  K12 D23: instructions 187-187 [187, 187, 187, 187, 187], words 75-75, live 14-14
+fp64 log1p K12 D23: instructions 227-229 [227, 229, 229, 227, 227], words 77-77, live 18-18
+fp128 exp   K7 D20: instructions 185-188 [188, 186, 186, 185, 188], words 71-72, live 22-23
+fp128 exp2  K7 D20: instructions 183-186 [186, 184, 184, 183, 186], words 72-73, live 23-24
+fp128 expm1 K8 D20: instructions 182-185 [182, 185, 183, 184, 182], words 72-75, live 22-22
+fp128 log   K12 D38: instructions 208-208 [208, 208, 208, 208, 208], words 90-90, live 16-16
+fp128 log2  K12 D38: instructions 202-202 [202, 202, 202, 202, 202], words 90-90, live 14-14
+fp128 log1p K12 D38: instructions 242-244 [242, 244, 244, 242, 242], words 92-92, live 18-18
+fp256 exp   K7 D33: instructions 198-201 [201, 199, 199, 198, 201], words 84-85, live 22-23
+fp256 exp2  K7 D33: instructions 196-199 [199, 197, 197, 196, 199], words 85-86, live 23-24
+fp256 expm1 K8 D33: instructions 195-198 [195, 198, 196, 197, 195], words 85-88, live 22-22
+fp256 log   K12 D68: instructions 238-238 [238, 238, 238, 238, 238], words 120-120, live 16-16
+fp256 log2  K12 D68: instructions 232-232 [232, 232, 232, 232, 232], words 120-120, live 14-14
+fp256 log1p K12 D68: instructions 272-274 [272, 274, 274, 272, 272], words 122-122, live 18-18

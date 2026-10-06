@@ -1,0 +1,39 @@
+# repair.py fp256 800 256 lanes, 16:42-16:43, the desktop about 82% busy (Logan's game).
+fp256 log1p: K 12, D 68; RHO 0.0592; SMALL 15/256 = 0.05859375; insns before (2^-4, D) 272, (a) (2^-4, D+1) 273, (b) (15/256, D) 272
+  +small end: |x| in [0.054, 15/256) before (2^-4, D)  n 809: worst log2(err/Bv) -5.22 at x = +0.058588295391; above -1.5: 0, above 0: 0  [9s]
+  +small end: |x| in [0.054, 15/256) (a) (2^-4, D+1)   n 809: worst log2(err/Bv) -6.67 at x = +0.058567078837; above -1.5: 0, above 0: 0  [15s]
+  +small end: |x| in [0.054, 15/256) (b) (15/256, D)   n 809: worst log2(err/Bv) -5.22 at x = +0.058588295391; above -1.5: 0, above 0: 0  [20s]
+  +band: |x| in [15/256, 2^-4)       before (2^-4, D)  n 812: worst log2(err/Bv) +0.83 at x = +0.062500000000; above -1.5: 290, above 0: 113  [27s]
+  +band: |x| in [15/256, 2^-4)       (a) (2^-4, D+1)   n 812: worst log2(err/Bv) -2.98 at x = +0.062500000000; above -1.5: 0, above 0: 0  [35s]
+  +band: |x| in [15/256, 2^-4)       (b) (15/256, D)   n 812: worst log2(err/Bv) -45.37 at x = +0.058593750000; above -1.5: 0, above 0: 0  [42s]
+  +past 2^-4: |x| in [2^-4, 2^-3)    before (2^-4, D)  n 806: worst log2(err/Bv) -17.72 at x = +0.103269581726; above -1.5: 0, above 0: 0  [47s]
+  +past 2^-4: |x| in [2^-4, 2^-3)    (a) (2^-4, D+1)   n 806: worst log2(err/Bv) -17.72 at x = +0.103269581726; above -1.5: 0, above 0: 0  [51s]
+  +past 2^-4: |x| in [2^-4, 2^-3)    (b) (15/256, D)   n 806: worst log2(err/Bv) -17.72 at x = +0.103269581726; above -1.5: 0, above 0: 0  [54s]
+  -small end: |x| in [0.054, 15/256) before (2^-4, D)  n 809: worst log2(err/Bv) -5.13 at x = -0.058593750000; above -1.5: 0, above 0: 0  [57s]
+  -small end: |x| in [0.054, 15/256) (a) (2^-4, D+1)   n 809: worst log2(err/Bv) -6.88 at x = -0.058593750000; above -1.5: 0, above 0: 0  [60s]
+  -small end: |x| in [0.054, 15/256) (b) (15/256, D)   n 809: worst log2(err/Bv) -5.13 at x = -0.058593750000; above -1.5: 0, above 0: 0  [63s]
+  -band: |x| in [15/256, 2^-4)       before (2^-4, D)  n 812: worst log2(err/Bv) +0.93 at x = -0.062500000000; above -1.5: 335, above 0: 140  [66s]
+  -band: |x| in [15/256, 2^-4)       (a) (2^-4, D+1)   n 812: worst log2(err/Bv) -2.92 at x = -0.062498875410; above -1.5: 0, above 0: 0  [69s]
+  -band: |x| in [15/256, 2^-4)       (b) (15/256, D)   n 812: worst log2(err/Bv) -4.75 at x = -0.058652573029; above -1.5: 0, above 0: 0  [73s]
+  -past 2^-4: |x| in [2^-4, 2^-3)    before (2^-4, D)  n 806: worst log2(err/Bv) -8.51 at x = -0.062807372349; above -1.5: 0, above 0: 0  [76s]
+  -past 2^-4: |x| in [2^-4, 2^-3)    (a) (2^-4, D+1)   n 806: worst log2(err/Bv) -8.51 at x = -0.062807372349; above -1.5: 0, above 0: 0  [79s]
+  -past 2^-4: |x| in [2^-4, 2^-3)    (b) (15/256, D)   n 806: worst log2(err/Bv) -8.51 at x = -0.062807372349; above -1.5: 0, above 0: 0  [82s]
+  lanes before (2^-4, D)  rne: lane 1 WRONG UNMARKED; lane 2 equal; lane 3 WRONG UNMARKED; lane 4 equal
+  lanes before (2^-4, D)  rtz: lane 1 equal; lane 2 WRONG UNMARKED; lane 3 equal; lane 4 WRONG UNMARKED
+  lanes before (2^-4, D)  rdn: lane 1 equal; lane 2 WRONG UNMARKED; lane 3 equal; lane 4 WRONG UNMARKED
+  lanes before (2^-4, D)  rup: lane 1 equal; lane 2 WRONG UNMARKED; lane 3 equal; lane 4 WRONG UNMARKED
+  lanes before (2^-4, D)  rmm: lane 1 WRONG UNMARKED; lane 2 equal; lane 3 WRONG UNMARKED; lane 4 equal
+  lanes before (2^-4, D)  20 lane-attribute pairs: {'equal': 10, 'MARKED': 0, 'WRONG UNMARKED': 10}
+  lanes (a) (2^-4, D+1)   rne: lane 1 MARKED; lane 2 equal; lane 3 MARKED; lane 4 equal
+  lanes (a) (2^-4, D+1)   rtz: lane 1 equal; lane 2 MARKED; lane 3 equal; lane 4 MARKED
+  lanes (a) (2^-4, D+1)   rdn: lane 1 equal; lane 2 MARKED; lane 3 equal; lane 4 MARKED
+  lanes (a) (2^-4, D+1)   rup: lane 1 equal; lane 2 MARKED; lane 3 equal; lane 4 MARKED
+  lanes (a) (2^-4, D+1)   rmm: lane 1 MARKED; lane 2 equal; lane 3 MARKED; lane 4 equal
+  lanes (a) (2^-4, D+1)   20 lane-attribute pairs: {'equal': 10, 'MARKED': 10, 'WRONG UNMARKED': 0}
+  lanes (b) (15/256, D)   rne: lane 1 MARKED; lane 2 equal; lane 3 MARKED; lane 4 equal
+  lanes (b) (15/256, D)   rtz: lane 1 equal; lane 2 MARKED; lane 3 equal; lane 4 MARKED
+  lanes (b) (15/256, D)   rdn: lane 1 equal; lane 2 MARKED; lane 3 equal; lane 4 MARKED
+  lanes (b) (15/256, D)   rup: lane 1 equal; lane 2 MARKED; lane 3 equal; lane 4 MARKED
+  lanes (b) (15/256, D)   rmm: lane 1 MARKED; lane 2 equal; lane 3 MARKED; lane 4 equal
+  lanes (b) (15/256, D)   20 lane-attribute pairs: {'equal': 10, 'MARKED': 10, 'WRONG UNMARKED': 0}
+done 82s

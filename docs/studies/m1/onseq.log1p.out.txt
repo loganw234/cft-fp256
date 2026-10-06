@@ -1,0 +1,17 @@
+# onseq.py fp64,fp128,fp256 log1p 0,1,2,3,4, 17:03-17:04, the desktop about 20% busy. After the revision: log1p's r = x path ends at 15/256.
+fp64 log1p rne: seq.py program 230 insns (incl. 2 deposits + halt), bank 77, lanes 367, mismatches 0
+fp64 log1p rtz: seq.py program 232 insns (incl. 2 deposits + halt), bank 77, lanes 367, mismatches 0
+fp64 log1p rdn: seq.py program 232 insns (incl. 2 deposits + halt), bank 77, lanes 367, mismatches 0
+fp64 log1p rup: seq.py program 230 insns (incl. 2 deposits + halt), bank 77, lanes 367, mismatches 0
+fp64 log1p rmm: seq.py program 230 insns (incl. 2 deposits + halt), bank 77, lanes 367, mismatches 0
+fp128 log1p rne: seq.py program 245 insns (incl. 2 deposits + halt), bank 92, lanes 350, mismatches 0
+fp128 log1p rtz: seq.py program 247 insns (incl. 2 deposits + halt), bank 92, lanes 350, mismatches 0
+fp128 log1p rdn: seq.py program 247 insns (incl. 2 deposits + halt), bank 92, lanes 350, mismatches 0
+fp128 log1p rup: seq.py program 245 insns (incl. 2 deposits + halt), bank 92, lanes 350, mismatches 0
+fp128 log1p rmm: seq.py program 245 insns (incl. 2 deposits + halt), bank 92, lanes 350, mismatches 0
+fp256 log1p rne: seq.py program 275 insns (incl. 2 deposits + halt), bank 122, lanes 512, mismatches 0
+fp256 log1p rtz: seq.py program 277 insns (incl. 2 deposits + halt), bank 122, lanes 512, mismatches 0
+fp256 log1p rdn: seq.py program 277 insns (incl. 2 deposits + halt), bank 122, lanes 512, mismatches 0
+fp256 log1p rup: seq.py program 275 insns (incl. 2 deposits + halt), bank 122, lanes 512, mismatches 0
+fp256 log1p rmm: seq.py program 275 insns (incl. 2 deposits + halt), bank 122, lanes 512, mismatches 0
+6145 lanes, 57s

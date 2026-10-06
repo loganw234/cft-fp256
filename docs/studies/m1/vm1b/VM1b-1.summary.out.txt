@@ -1,0 +1,120 @@
+# The box batch VM1b-1 (verifier-VM1b's jobs, its jobs.txt beside run.sh in the lead's batch directory), run by the lead on amd-arc-box
+# on b252824's whole-tree extract: cft-sim, python 3.12.3, mpmath 1.4.1 (backend python), JOBS 4; the box's clock reads
+# 2026-10-06 01:29:44 to 01:43:27, seven hours ahead of the desktop's 18:29:44 to 18:43:27. Copied whole from the batch's out/summary.txt.
+2026-10-06 01:29:44 VM1b-1 start; tree /w/vm1b/extract; out /w/vm1b/out; jobs 4; load 6.00 6.12 6.46
+2026-10-06 01:29:44 tree checks passed: study 1524 lines, m1log.py has SMALL = Fraction(15, 256) and RHO = 0.0592
+2026-10-06 01:29:44 python: 3.12.3 mpmath 1.4.1 backend python
+model imports: ['fp128', 'fp256', 'fp32', 'fp64'] SMALL 15/256
+2026-10-06 01:29:44 START cell-G46-log1p-neg: $PY $HERE/p10_cells.py fp64 log1p 46 -1/8 -15/256 100000 101 1500
+2026-10-06 01:29:44 START cell-G46-log2: $PY $HERE/p10_cells.py fp64 log2 46 7/8 241/256 100000 103 1500
+2026-10-06 01:29:44 START cell-G46-log1p-pos: $PY $HERE/p10_cells.py fp64 log1p 46 15/256 1/8 100000 102 1500
+2026-10-06 01:29:44 START cell-G44-log1p-neg: $PY $HERE/p10_cells.py fp64 log1p 44 -1/8 -15/256 100000 111 1500
+2026-10-06 01:32:54 DONE  cell-G46-log2 rc=0
+2026-10-06 01:32:54 START cell-G44-log1p-pos: $PY $HERE/p10_cells.py fp64 log1p 44 15/256 1/8 100000 112 1500
+2026-10-06 01:33:23 DONE  cell-G44-log1p-neg rc=0
+2026-10-06 01:33:23 START cell-G44-log2: $PY $HERE/p10_cells.py fp64 log2 44 7/8 241/256 100000 113 1500
+2026-10-06 01:33:25 DONE  cell-G46-log1p-pos rc=0
+2026-10-06 01:33:25 START cell-G46-log: $PY $HERE/p10_cells.py fp64 log 46 7/8 241/256 50000 104 1200
+2026-10-06 01:33:30 DONE  cell-G46-log1p-neg rc=0
+2026-10-06 01:33:30 START cell-G44-log: $PY $HERE/p10_cells.py fp64 log 44 7/8 241/256 50000 114 1200
+2026-10-06 01:35:03 DONE  cell-G44-log rc=0
+2026-10-06 01:35:03 START end-G46-log1p-neg: $PY $HERE/p10_cells.py fp64 log1p 46 -0.05865 -15/256 40000 121 900
+2026-10-06 01:35:04 DONE  cell-G46-log rc=0
+2026-10-06 01:35:04 START end-G46-log1p-pos: $PY $HERE/p10_cells.py fp64 log1p 46 15/256 0.0587 40000 122 900
+2026-10-06 01:36:27 DONE  cell-G44-log1p-pos rc=0
+2026-10-06 01:36:27 START end-G44-log1p-neg: $PY $HERE/p10_cells.py fp64 log1p 44 -0.05865 -15/256 40000 131 900
+2026-10-06 01:36:29 DONE  cell-G44-log2 rc=0
+2026-10-06 01:36:29 START end-G44-log1p-pos: $PY $HERE/p10_cells.py fp64 log1p 44 15/256 0.0587 40000 132 900
+2026-10-06 01:36:34 DONE  end-G46-log1p-pos rc=0
+2026-10-06 01:36:34 START cell-G46-expm1-n1pos: $PY $HERE/p10_cells.py fp64 expm1 46 0.0434 0.1299 40000 141 900
+2026-10-06 01:36:34 DONE  end-G46-log1p-neg rc=0
+2026-10-06 01:36:34 START cell-G46-expm1-n1neg: $PY $HERE/p10_cells.py fp64 expm1 46 -0.1299 -0.0434 40000 142 900
+2026-10-06 01:37:42 DONE  cell-G46-expm1-n1neg rc=0
+2026-10-06 01:37:42 START cell-G44-expm1-n1pos: $PY $HERE/p10_cells.py fp64 expm1 44 0.0434 0.1299 40000 143 900
+2026-10-06 01:37:42 DONE  cell-G46-expm1-n1pos rc=0
+2026-10-06 01:37:42 START cell-G44-expm1-n1neg: $PY $HERE/p10_cells.py fp64 expm1 44 -0.1299 -0.0434 40000 144 900
+2026-10-06 01:37:53 DONE  end-G44-log1p-neg rc=0
+2026-10-06 01:37:53 START edge-G44-exp: $PY $HERE/p10_cells.py fp64 exp 44 0.0432 0.043321 30000 151 700
+2026-10-06 01:37:53 DONE  end-G44-log1p-pos rc=0
+2026-10-06 01:37:53 START edge-G44-exp-n3: $PY $HERE/p10_cells.py fp64 exp 44 0.3030 0.30325 30000 152 700
+2026-10-06 01:38:41 DONE  edge-G44-exp rc=0
+2026-10-06 01:38:41 START edge-G44-exp2: $PY $HERE/p10_cells.py fp64 exp2 44 0.0624 0.06249 30000 153 700
+2026-10-06 01:38:43 DONE  edge-G44-exp-n3 rc=0
+2026-10-06 01:38:43 START clamp-G44-expm1: $PY $HERE/p10_cells.py fp64 expm1 44 68 70 30000 154 700
+2026-10-06 01:38:51 DONE  cell-G44-expm1-n1neg rc=0
+2026-10-06 01:38:51 START bound64-G44-log1p: $PY $HERE/p8_bound_g.py log1p fp64 40000 161 1200 44
+2026-10-06 01:38:52 DONE  cell-G44-expm1-n1pos rc=0
+2026-10-06 01:38:52 START bound64-G44-log: $PY $HERE/p8_bound_g.py log fp64 40000 162 1200 44
+2026-10-06 01:39:29 DONE  edge-G44-exp2 rc=0
+2026-10-06 01:39:29 START bound64-G44-log2: $PY $HERE/p8_bound_g.py log2 fp64 40000 163 1200 44
+2026-10-06 01:39:36 DONE  clamp-G44-expm1 rc=0
+2026-10-06 01:39:36 START bound64-G44-exp: $PY $HERE/p8_bound_g.py exp fp64 40000 164 1200 44
+2026-10-06 01:40:07 DONE  bound64-G44-log rc=0
+2026-10-06 01:40:07 START bound64-G44-exp2: $PY $HERE/p8_bound_g.py exp2 fp64 40000 165 1200 44
+2026-10-06 01:40:19 DONE  bound64-G44-log1p rc=0
+2026-10-06 01:40:19 START bound64-G44-expm1: $PY $HERE/p8_bound_g.py expm1 fp64 40000 166 1200 44
+2026-10-06 01:40:43 DONE  bound64-G44-log2 rc=0
+2026-10-06 01:40:43 START budget-G46-log1p-neg: $PY $HERE/p5_budget.py fp64 log1p 46 -1/8 -15/256 3000 171 12
+2026-10-06 01:40:45 DONE  bound64-G44-exp rc=0
+2026-10-06 01:40:45 START budget-G46-log1p-pos: $PY $HERE/p5_budget.py fp64 log1p 46 15/256 1/8 3000 172 12
+2026-10-06 01:41:13 DONE  bound64-G44-exp2 rc=0
+2026-10-06 01:41:13 START budget-G46-log2: $PY $HERE/p5_budget.py fp64 log2 46 7/8 241/256 3000 173 12
+2026-10-06 01:41:31 DONE  bound64-G44-expm1 rc=0
+2026-10-06 01:41:31 START budget-G46-log: $PY $HERE/p5_budget.py fp64 log 46 7/8 241/256 3000 174 12
+2026-10-06 01:41:45 DONE  budget-G46-log1p-neg rc=0
+2026-10-06 01:41:45 START budget-G44-log1p-neg: $PY $HERE/p5_budget.py fp64 log1p 44 -1/8 -15/256 3000 181 12
+2026-10-06 01:41:45 DONE  budget-G46-log1p-pos rc=0
+2026-10-06 01:41:45 START budget-G44-log1p-pos: $PY $HERE/p5_budget.py fp64 log1p 44 15/256 1/8 3000 182 12
+2026-10-06 01:42:06 DONE  budget-G46-log2 rc=0
+2026-10-06 01:42:06 START budget-G44-log2: $PY $HERE/p5_budget.py fp64 log2 44 7/8 241/256 3000 183 12
+2026-10-06 01:42:24 DONE  budget-G46-log rc=0
+2026-10-06 01:42:24 START budget-G44-exp: $PY $HERE/p5_budget.py fp64 exp 44 -1 1 3000 184 12
+2026-10-06 01:42:43 DONE  budget-G44-log1p-pos rc=0
+2026-10-06 01:42:43 START budget-G44-exp2: $PY $HERE/p5_budget.py fp64 exp2 44 -1 1 3000 185 12
+2026-10-06 01:42:44 DONE  budget-G44-log1p-neg rc=0
+2026-10-06 01:42:44 START budget-G46-expm1-n1pos: $PY $HERE/p5_budget.py fp64 expm1 46 0.0434 0.1299 3000 186 12
+2026-10-06 01:42:57 DONE  budget-G44-log2 rc=0
+2026-10-06 01:43:06 DONE  budget-G44-exp rc=0
+2026-10-06 01:43:21 DONE  budget-G44-exp2 rc=0
+2026-10-06 01:43:27 DONE  budget-G46-expm1-n1pos rc=0
+2026-10-06 01:43:27 === results (each job's decisive lines) ===
+2026-10-06 01:43:27 cell-G44-expm1-n1neg: samples 40000: worst log2(err/Bv) -5.583 at x = -0.043440607639190; above -2: 0, above -1: 0, above 0: 0; top bins {-9: 12253, -8: 5781, -7: 737, -6: 21}  [69s]
+2026-10-06 01:43:27 cell-G44-expm1-n1pos: samples 40000: worst log2(err/Bv) -5.199 at x = +0.051227222467920; above -2: 0, above -1: 0, above 0: 0; top bins {-9: 9180, -8: 12729, -7: 7350, -6: 711}  [69s]
+2026-10-06 01:43:27 cell-G44-log: samples 50000: worst log2(err/Bv) -4.306 at x = +0.938754234870495; above -2: 0, above -1: 0, above 0: 0; top bins {-8: 9605, -7: 13483, -6: 7317, -5: 521}  [93s]
+2026-10-06 01:43:27 cell-G44-log1p-neg: samples 100000: worst log2(err/Bv) -3.231 at x = -0.060781834781915; above -2: 0, above -1: 0, above 0: 0; top bins {-7: 31943, -6: 18456, -5: 2547, -4: 46}  [219s]
+2026-10-06 01:43:27 cell-G44-log1p-pos: samples 100000: worst log2(err/Bv) -3.753 at x = +0.062768920834448; above -2: 0, above -1: 0, above 0: 0; top bins {-7: 21282, -6: 12494, -5: 2051, -4: 20}  [214s]
+2026-10-06 01:43:27 cell-G44-log2: samples 100000: worst log2(err/Bv) -3.455 at x = +0.941302314600584; above -2: 0, above -1: 0, above 0: 0; top bins {-7: 23609, -6: 17783, -5: 3623, -4: 70}  [185s]
+2026-10-06 01:43:27 cell-G46-expm1-n1neg: samples 40000: worst log2(err/Bv) -3.509 at x = -0.044283122742110; above -2: 0, above -1: 0, above 0: 0; top bins {-7: 12316, -6: 5705, -5: 754, -4: 24}  [68s]
+2026-10-06 01:43:27 cell-G46-expm1-n1pos: samples 40000: worst log2(err/Bv) -3.225 at x = +0.049796384480799; above -2: 0, above -1: 0, above 0: 0; top bins {-7: 9188, -6: 12845, -5: 7312, -4: 699}  [68s]
+2026-10-06 01:43:27 cell-G46-log: samples 50000: worst log2(err/Bv) -3.138 at x = +0.936286908318630; above -2: 0, above -1: 0, above 0: 0; top bins {-7: 9209, -6: 10137, -5: 13798, -4: 6503}  [98s]
+2026-10-06 01:43:27 cell-G46-log1p-neg: samples 100000: worst log2(err/Bv) -1.724 at x = -0.066002142860734; above -2: 14, above -1: 0, above 0: 0; top bins {-5: 33250, -4: 17075, -3: 1252, -2: 14}  [225s]
+2026-10-06 01:43:27 cell-G46-log1p-pos: samples 100000: worst log2(err/Bv) -1.690 at x = +0.059178997135267; above -2: 24, above -1: 0, above 0: 0; top bins {-5: 21063, -4: 12701, -3: 1990, -2: 24}  [221s]
+2026-10-06 01:43:27 cell-G46-log2: samples 100000: worst log2(err/Bv) -2.084 at x = +0.934118828916008; above -2: 0, above -1: 0, above 0: 0; top bins {-6: 26082, -5: 23628, -4: 16393, -3: 2164}  [189s]
+2026-10-06 01:43:27 end-G44-log1p-neg: samples 40000: worst log2(err/Bv) -3.603 at x = -0.058644702768149; above -2: 0, above -1: 0, above 0: 0; top bins {-7: 9105, -6: 15033, -5: 6355, -4: 59}  [85s]
+2026-10-06 01:43:27 end-G44-log1p-pos: samples 40000: worst log2(err/Bv) -3.627 at x = +0.058630151111370; above -2: 0, above -1: 0, above 0: 0; top bins {-7: 8674, -6: 8508, -5: 4002, -4: 121}  [84s]
+2026-10-06 01:43:27 end-G46-log1p-neg: samples 40000: worst log2(err/Bv) -1.843 at x = -0.058631240254314; above -2: 6, above -1: 0, above 0: 0; top bins {-5: 10967, -4: 19933, -3: 3196, -2: 6}  [90s]
+2026-10-06 01:43:27 end-G46-log1p-pos: samples 40000: worst log2(err/Bv) -1.598 at x = +0.058692049060922; above -2: 143, above -1: 0, above 0: 0; top bins {-5: 8724, -4: 8283, -3: 4089, -2: 143}  [90s]
+2026-10-06 01:43:27 edge-G44-exp-n3: samples 30000: worst log2(err/Bv) -2.761 at x = +0.303249660064308; above -2: 0, above -1: 0, above 0: 0; top bins {-3: 30000}  [50s]
+2026-10-06 01:43:27 edge-G44-exp: samples 30000: worst log2(err/Bv) -2.760 at x = +0.043316158569782; above -2: 0, above -1: 0, above 0: 0; top bins {-3: 30000}  [48s]
+2026-10-06 01:43:27 edge-G44-exp2: samples 30000: worst log2(err/Bv) -2.762 at x = +0.062477381944152; above -2: 0, above -1: 0, above 0: 0; top bins {-3: 30000}  [48s]
+2026-10-06 01:43:27 clamp-G44-expm1: samples 30000: worst log2(err/Bv) -2.927 at x = +69.272656186766611; above -2: 0, above -1: 0, above 0: 0; top bins {-10: 2632, -9: 310, -4: 10379, -3: 635}  [52s]
+2026-10-06 01:43:27 bound64-G44-exp:   samples 40000, worst log2(err/Bv) = -2.64 at x bits 0x407eacaa1960c060  [69s]   lanes within 2^3.5 of the bound: 16548 [(-2.64, '0xc0801f5844369619', -515.9180988564068), (-2.64, '0xbff1541cf1fca638', -1.0830354168523524), (-2.64, '0xbfed1c94720547d8', -0.9097387530293828), (-2 
+2026-10-06 01:43:27 bound64-G44-exp2:   samples 40000, worst log2(err/Bv) = -2.63 at x bits 0x40008000218def41  [66s]   lanes within 2^3.5 of the bound: 16873 [(-2.63, '0x40008000218def41', 2.06250025), (-2.64, '0xc09047bffdb9d4a3', -1041.937491325), (-2.64, '0xc085af7ff26f1dc5', -693.937474125), (-2.64, '0xc07d24fff 
+2026-10-06 01:43:27 bound64-G44-expm1:   samples 40000, worst log2(err/Bv) = -2.95 at x bits 0x40515202765d3c12  [72s]   lanes within 2^3.5 of the bound: 11 [(-2.95, '0x40515202765d3c12', 69.28140029053637), (-3.0, '0x405154328949e302', 69.31558448997023), (-3.0, '0x405153f9c0f04c06', 69.31211875406743), (-3.12, '0x40 
+2026-10-06 01:43:27 bound64-G44-log:   samples 40000, worst log2(err/Bv) = -4.07 at x bits 0x3fee200000000012  [75s]   lanes within 2^3.5 of the bound: 0 [] 
+2026-10-06 01:43:27 bound64-G44-log1p:   samples 40000, worst log2(err/Bv) = -3.53 at x bits 0xbfaffdc3a56daff8  [87s]   lanes within 2^3.5 of the bound: 0 [] 
+2026-10-06 01:43:27 bound64-G44-log2:   samples 40000, worst log2(err/Bv) = -4.05 at x bits 0x3fee200000000002  [73s]   lanes within 2^3.5 of the bound: 0 [] 
+2026-10-06 01:43:27 budget-G44-exp:   max |E|/Bv 0.1582 (2^-2.66); max |M|/Bv 0.1552 (2^-2.69)   support bound: M_max + sum(capacities) = 0.1639 (2^-2.61) of Bv; with the observed maxima: 0.1629 (2^-2.62) 
+2026-10-06 01:43:27 budget-G44-exp2:   max |E|/Bv 0.1575 (2^-2.67); max |M|/Bv 0.1554 (2^-2.69)   support bound: M_max + sum(capacities) = 0.1641 (2^-2.61) of Bv; with the observed maxima: 0.1635 (2^-2.61) 
+2026-10-06 01:43:27 budget-G44-log1p-neg:   max |E|/Bv 0.0701 (2^-3.83); max |M|/Bv 0.0167 (2^-5.90)   support bound: M_max + sum(capacities) = 0.1436 (2^-2.80) of Bv; with the observed maxima: 0.1351 (2^-2.89) 
+2026-10-06 01:43:27 budget-G44-log1p-pos:   max |E|/Bv 0.0669 (2^-3.90); max |M|/Bv 0.0156 (2^-6.00)   support bound: M_max + sum(capacities) = 0.1177 (2^-3.09) of Bv; with the observed maxima: 0.1076 (2^-3.22) 
+2026-10-06 01:43:27 budget-G44-log2:   max |E|/Bv 0.0701 (2^-3.83); max |M|/Bv 0.0117 (2^-6.41)   support bound: M_max + sum(capacities) = 0.1291 (2^-2.95) of Bv; with the observed maxima: 0.1103 (2^-3.18) 
+2026-10-06 01:43:27 budget-G46-expm1-n1pos:   max |E|/Bv 0.0942 (2^-3.41); max |M|/Bv 0.0224 (2^-5.48)   support bound: M_max + sum(capacities) = 0.1628 (2^-2.62) of Bv; with the observed maxima: 0.1503 (2^-2.73) 
+2026-10-06 01:43:27 budget-G46-log:   max |E|/Bv 0.1153 (2^-3.12); max |M|/Bv 0.0492 (2^-4.34)   support bound: M_max + sum(capacities) = 0.1992 (2^-2.33) of Bv; with the observed maxima: 0.1702 (2^-2.55) 
+2026-10-06 01:43:27 budget-G46-log1p-neg:   max |E|/Bv 0.2606 (2^-1.94); max |M|/Bv 0.0490 (2^-4.35)   support bound: M_max + sum(capacities) = 0.4241 (2^-1.24) of Bv; with the observed maxima: 0.3831 (2^-1.38) 
+2026-10-06 01:43:27 budget-G46-log1p-pos:   max |E|/Bv 0.2657 (2^-1.91); max |M|/Bv 0.0621 (2^-4.01)   support bound: M_max + sum(capacities) = 0.4669 (2^-1.10) of Bv; with the observed maxima: 0.4239 (2^-1.24) 
+2026-10-06 01:43:27 budget-G46-log2:   max |E|/Bv 0.1891 (2^-2.40); max |M|/Bv 0.0513 (2^-4.28)   support bound: M_max + sum(capacities) = 0.4744 (2^-1.08) of Bv; with the observed maxima: 0.4099 (2^-1.29) 
+2026-10-06 01:43:27 EXPECTED (the desktop, mpmath 1.3.0 with gmpy; verifier-VM1b's ledger): the budget lines' 'support bound' at G = 46 about 0.43 (log1p, x < 0), 0.41 (x > 0), 0.33 (log2), 0.19 (log), 0.16 (expm1 n = +1); at G = 44 about 0.14, 0.10, 0.12, 0.08, 0.04; exp and exp2 at G = 44 about 0.15 (the truncation, 2^-2.7).
+2026-10-06 01:43:27          A cell's worst log2(err/Bv) must stay below its support bound's log2: G = 46 log1p x < 0 under -1.1, log1p x > 0 under -1.2, log2 under -1.5, log under -2.3; G = 44 log1p x < 0 under -2.7, x > 0 under -3.2, log2 under -3.0, log under -3.5;
+2026-10-06 01:43:27          exp, exp2 at G = 44 under -2.6; the bound64-G44-* lines under -2.6 except expm1 (the clamp, -2.9) and log1p's reduction path. A value above its support bound is news: it means the budget tool has a hole.
+2026-10-06 01:43:27 === done, 0 job(s) failed ===

@@ -1,0 +1,7 @@
+# pools32.py (then smoke32.py) 46, 12:28-12:29, the desktop busy. The FIRST fp32 exp, before its three fixes (section 3.6, defect 7): 0 wrong on the pools while its error was 2^12.7 times the bound.
+fp32 exp rne G46 K3 4 K2 3 D 10: insns 408 words 73 live 32  pool 330 marked 0 (right 0) wrong 0 [] []  3s
+fp32 exp rtz G46 K3 4 K2 3 D 10: insns 406 words 73 live 31  pool 330 marked 0 (right 0) wrong 0 [] []  8s
+fp32 exp rdn G46 K3 4 K2 3 D 10: insns 406 words 73 live 31  pool 330 marked 0 (right 0) wrong 0 [] []  11s
+fp32 exp rup G46 K3 4 K2 3 D 10: insns 405 words 72 live 31  pool 330 marked 0 (right 0) wrong 0 [] []  13s
+fp32 exp rmm G46 K3 4 K2 3 D 10: insns 408 words 73 live 32  pool 330 marked 0 (right 0) wrong 0 [] []  16s
+{'classify': 10, 'reduce': 42, 'lookup': 24, 'scale': 15, 'tail': 3, 'head2': 23, 'head3': 134, 'Z': 36, 'recon': 54, 'final': 33, 'fixed-grid': 22, 'special': 12}

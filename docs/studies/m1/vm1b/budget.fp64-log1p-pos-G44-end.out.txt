@@ -1,0 +1,23 @@
+# p5c_budget_end.py fp64 log1p 44 15/256 1/8 12000 4609 lo, 20:48-20:50, the desktop 5% busy. p5c_budget_end.py: 12,000 arguments, half uniform, half within 2^-8 .. 2^-56 of the end named.
+fp64 log1p G 44: 12000 arguments in [0.05859, 0.12500], 221 instructions, 85 ever round; 121s
+  max |E|/Bv 0.0797 (2^-3.65); max |M|/Bv 0.0157 (2^-5.99)
+  sum over the rounding instructions: observed maxima 0.0988 (2^-3.34); capacities (all at their worst) 0.1043 (2^-3.26)
+  support bound: M_max + sum(capacities) = 0.1200 (2^-3.06) of Bv; with the observed maxima: 0.1145 (2^-3.13)
+  by phase (observed maxima summed, capacities summed), in Bv:
+     log1p-low  0.0493  0.0493
+     sum        0.0313  0.0364
+     lp         0.0177  0.0178
+     head       0.0005  0.0007
+     tail       0.0000  0.0000
+     reduce     0.0000  0.0000
+     final      0.0000  0.0000
+     special    0.0000  0.0000
+  the 8 largest capacities:
+     #187 sub  sum        capacity 0.0343  observed max 0.0300
+     # 61 fma  log1p-low  capacity 0.0322  observed max 0.0321
+     # 62 mul  log1p-low  capacity 0.0172  observed max 0.0172
+     #168 sub  lp         capacity 0.0172  observed max 0.0172
+     #186 add  sum        capacity 0.0021  observed max 0.0012
+     #164 sub  head       capacity 0.0007  observed max 0.0005
+     #167 fma  lp         capacity 0.0006  observed max 0.0006
+     # 81 fma  tail       capacity 0.0000  observed max 0.0000

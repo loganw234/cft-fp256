@@ -1,0 +1,17 @@
+# pools_run.py fp64 log,log2,log1p, 12:03-12:05, the desktop 88-100% busy. Final parameters. The first version: log1p's r = x path out to 2^-4 (defect 8).
+fp64 log   rne K12 D23 n 367 marked 0 (right 0) wrong 0 insns 193 words 75 live 16 [] []  2s
+fp64 log   rtz K12 D23 n 367 marked 1 (right 1) wrong 0 insns 193 words 75 live 16 ['0x3ff0000000000001'] []  7s
+fp64 log   rdn K12 D23 n 367 marked 1 (right 1) wrong 0 insns 193 words 75 live 16 ['0x3ff0000000000001'] []  10s
+fp64 log   rup K12 D23 n 367 marked 1 (right 1) wrong 0 insns 193 words 75 live 16 ['0x3ff0000000000001'] []  22s
+fp64 log   rmm K12 D23 n 367 marked 0 (right 0) wrong 0 insns 193 words 75 live 16 [] []  32s
+fp64 log2  rne K12 D23 n 367 marked 0 (right 0) wrong 0 insns 187 words 75 live 14 [] []  34s
+fp64 log2  rtz K12 D23 n 367 marked 0 (right 0) wrong 0 insns 187 words 75 live 14 [] []  36s
+fp64 log2  rdn K12 D23 n 367 marked 0 (right 0) wrong 0 insns 187 words 75 live 14 [] []  42s
+fp64 log2  rup K12 D23 n 367 marked 0 (right 0) wrong 0 insns 187 words 75 live 14 [] []  46s
+fp64 log2  rmm K12 D23 n 367 marked 0 (right 0) wrong 0 insns 187 words 75 live 14 [] []  53s
+fp64 log1p rne K12 D23 n 367 marked 1 (right 1) wrong 0 insns 227 words 76 live 18 ['0x3ca0000000000000'] []  57s
+fp64 log1p rtz K12 D23 n 367 marked 0 (right 0) wrong 0 insns 229 words 76 live 18 [] []  61s
+fp64 log1p rdn K12 D23 n 367 marked 0 (right 0) wrong 0 insns 229 words 76 live 18 [] []  65s
+fp64 log1p rup K12 D23 n 367 marked 0 (right 0) wrong 0 insns 227 words 76 live 18 [] []  68s
+fp64 log1p rmm K12 D23 n 367 marked 1 (right 1) wrong 0 insns 227 words 76 live 18 ['0x3ca0000000000000'] []  72s
+72s; skipped (deadline): none

@@ -1,0 +1,4 @@
+# meas32.py 46,40,32 600, 12:37-12:38, the desktop busy. The fp32 exp after its three fixes (final).
+fp32 exp G46 K3 4 K2 3 D 10: 413 insns, live 34, words 73; 600 random (596 main path): wrong 0, marked 0, worst log2(err/bound) -0.04  20s
+fp32 exp G40 K3 3 K2 4 D 9: 382 insns, live 34, words 71; 600 random (596 main path): wrong 0, marked 0, worst log2(err/bound) -5.99  39s
+fp32 exp G32 K3 2 K2 4 D 8: 344 insns, live 34, words 68; 600 random (596 main path): wrong 0, marked 0, worst log2(err/bound) -8.33  48s

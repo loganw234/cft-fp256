@@ -1,0 +1,14 @@
+# g44.py fp64 1500 4446, 16:49-16:53, the desktop 12% busy. After the revision: log1p's r = x path ends at 15/256.
+fp64 exp   G 46: K 7 D 13 insns 181 words 64; 1500 a region, rne: wrong 0, marked 0; worst log2(err/Bv): n + 1/2, |n| <= 24 -5.43; n + 1/2, any n -5.42  [16s]
+fp64 exp   G 44: K 7 D 12 insns 180 words 63; 1500 a region, rne: wrong 0, marked 0; worst log2(err/Bv): n + 1/2, |n| <= 24 -2.63; n + 1/2, any n -2.65  [30s]
+fp64 exp2  G 46: K 7 D 13 insns 179 words 65; 1500 a region, rne: wrong 0, marked 0; worst log2(err/Bv): n + 1/2, |n| <= 24 -5.53; n + 1/2, any n -5.50  [42s]
+fp64 exp2  G 44: K 7 D 12 insns 178 words 64; 1500 a region, rne: wrong 0, marked 0; worst log2(err/Bv): n + 1/2, |n| <= 24 -2.64; n + 1/2, any n -2.63  [48s]
+fp64 expm1 G 46: K 8 D 13 insns 175 words 65; 1500 a region, rne: wrong 0, marked 0; worst log2(err/Bv): k near the 2^-k clamp -2.94; n = 0 -4.57  [58s]
+fp64 expm1 G 44: K 8 D 13 insns 175 words 65; 1500 a region, rne: wrong 0, marked 0; worst log2(err/Bv): k near the 2^-k clamp -2.95; n = 0 -6.57  [72s]
+fp64 log   G 46: K 12 D 23 insns 193 words 75; 1500 a region, rne: wrong 0, marked 0; worst log2(err/Bv): x in [0.93, 0.945] (k = -1, C = 9) -3.12; x in [1.75, 1.9] (C = 9 cells) -5.87  [81s]
+fp64 log   G 44: K 11 D 23 insns 186 words 74; 1500 a region, rne: wrong 0, marked 0; worst log2(err/Bv): x in [0.93, 0.945] (k = -1, C = 9) -4.01; x in [1.75, 1.9] (C = 9 cells) -7.13  [92s]
+fp64 log2  G 46: K 12 D 23 insns 187 words 75; 1500 a region, rne: wrong 0, marked 0; worst log2(err/Bv): x in [0.93, 0.945] (k = -1, C = 9) -2.11; x in [1.75, 1.9] (C = 9 cells) -5.40  [104s]
+fp64 log2  G 44: K 11 D 23 insns 180 words 74; 1500 a region, rne: wrong 0, marked 0; worst log2(err/Bv): x in [0.93, 0.945] (k = -1, C = 9) -3.69; x in [1.75, 1.9] (C = 9 cells) -7.15  [116s]
+fp64 log1p G 46: K 12 D 23 insns 227 words 77; 1500 a region, rne: wrong 0, marked 0; worst log2(err/Bv): +[15/256, 2^-4) -1.89; -[15/256, 2^-4) -2.27; +[2^-4, 2^-3) -2.41; -[2^-4, 2^-3) -2.32  [145s]
+fp64 log1p G 44: K 11 D 23 insns 220 words 76; 1500 a region, rne: wrong 0, marked 0; worst log2(err/Bv): +[15/256, 2^-4) -3.89; -[15/256, 2^-4) -3.79; +[2^-4, 2^-3) -4.41; -[2^-4, 2^-3) -4.32  [183s]
+done 183s

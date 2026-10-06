@@ -1,0 +1,7 @@
+# pools_run.py fp256 log1p 500, 17:01-17:02, the desktop about 2% busy. After the revision: log1p's r = x path ends at 15/256.
+fp256 log1p rne K12 D68 n 512 marked 1 (right 1) wrong 0 insns 272 words 122 live 18 ['0x3ff1200000000000000000000000000000000000000000000000000000000000'] []  2s
+fp256 log1p rtz K12 D68 n 512 marked 0 (right 0) wrong 0 insns 274 words 122 live 18 [] []  4s
+fp256 log1p rdn K12 D68 n 512 marked 0 (right 0) wrong 0 insns 274 words 122 live 18 [] []  6s
+fp256 log1p rup K12 D68 n 512 marked 0 (right 0) wrong 0 insns 272 words 122 live 18 [] []  9s
+fp256 log1p rmm K12 D68 n 512 marked 1 (right 1) wrong 0 insns 272 words 122 live 18 ['0x3ff1200000000000000000000000000000000000000000000000000000000000'] []  11s
+11s; skipped (deadline): none

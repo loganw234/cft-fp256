@@ -1,0 +1,13 @@
+# worstcase.py fp128, 16:56, the desktop 72% busy at 16:55 and 34% at 16:56. The revised placed set. After the revision: log1p's r = x path ends at 15/256.
+fp128 exp   rne: 60 placed arguments (60 on the main path), wrong 0, marked 0, worst log2(err/bound) -6.26 at x = +2.81591042102  0s
+fp128 exp   rtz: 60 placed arguments (60 on the main path), wrong 0, marked 0, worst log2(err/bound) -6.26 at x = +2.81591042102  1s
+fp128 exp2  rne: 80 placed arguments (80 on the main path), wrong 0, marked 0, worst log2(err/bound) -6.45 at x = +1.0625  1s
+fp128 exp2  rtz: 80 placed arguments (80 on the main path), wrong 0, marked 0, worst log2(err/bound) -6.45 at x = +1.0625  1s
+fp128 expm1 rne: 60 placed arguments (60 on the main path), wrong 0, marked 0, worst log2(err/bound) -5.95 at x = +0.043321698785  1s
+fp128 expm1 rtz: 60 placed arguments (60 on the main path), wrong 0, marked 0, worst log2(err/bound) -5.95 at x = +0.043321698785  1s
+fp128 log   rne: 100 placed arguments (100 on the main path), wrong 0, marked 0, worst log2(err/bound) -5.31 at x = +0.94140625  2s
+fp128 log   rtz: 100 placed arguments (100 on the main path), wrong 0, marked 0, worst log2(err/bound) -5.31 at x = +0.94140625  2s
+fp128 log2  rne: 100 placed arguments (100 on the main path), wrong 0, marked 0, worst log2(err/bound) -5.31 at x = +0.94140625  3s
+fp128 log2  rtz: 100 placed arguments (100 on the main path), wrong 0, marked 0, worst log2(err/bound) -5.31 at x = +0.94140625  3s
+fp128 log1p rne: 191 placed arguments (191 on the main path), wrong 0, marked 0, worst log2(err/bound) -5.31 at x = -0.05859375  4s
+fp128 log1p rtz: 191 placed arguments (191 on the main path), wrong 0, marked 0, worst log2(err/bound) -5.31 at x = -0.05859375  6s

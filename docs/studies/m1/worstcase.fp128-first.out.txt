@@ -1,0 +1,13 @@
+# worstcase.py fp128, 12:54, final parameters (exp D 20, log family D 38). The first version of worstcase.py. The first version: log1p's r = x path out to 2^-4 (defect 8).
+fp128 exp   rne: 66 placed arguments (66 on the main path), wrong 0, marked 0, worst log2(err/bound) -6.39  1s
+fp128 exp   rtz: 66 placed arguments (66 on the main path), wrong 0, marked 0, worst log2(err/bound) -6.39  1s
+fp128 exp2  rne: 88 placed arguments (88 on the main path), wrong 0, marked 0, worst log2(err/bound) -6.45  2s
+fp128 exp2  rtz: 88 placed arguments (88 on the main path), wrong 0, marked 0, worst log2(err/bound) -6.45  3s
+fp128 expm1 rne: 66 placed arguments (66 on the main path), wrong 0, marked 0, worst log2(err/bound) -5.95  3s
+fp128 expm1 rtz: 66 placed arguments (66 on the main path), wrong 0, marked 0, worst log2(err/bound) -5.95  4s
+fp128 log   rne: 100 placed arguments (100 on the main path), wrong 0, marked 0, worst log2(err/bound) -5.31  4s
+fp128 log   rtz: 100 placed arguments (100 on the main path), wrong 0, marked 0, worst log2(err/bound) -5.31  5s
+fp128 log2  rne: 100 placed arguments (100 on the main path), wrong 0, marked 0, worst log2(err/bound) -5.31  6s
+fp128 log2  rtz: 100 placed arguments (100 on the main path), wrong 0, marked 0, worst log2(err/bound) -5.31  6s
+fp128 log1p rne: 60 placed arguments (60 on the main path), wrong 0, marked 0, worst log2(err/bound) -8.70  7s
+fp128 log1p rtz: 60 placed arguments (60 on the main path), wrong 0, marked 0, worst log2(err/bound) -8.70  8s

@@ -1,0 +1,13 @@
+# worstcase.py fp128, 12:50-12:51, under the planners' one-bit rule (exp D 19, log family D 37): 2^-1.5 under the bound, which led to the two-bit rule. The first version of worstcase.py. The first version: log1p's r = x path out to 2^-4 (defect 8).
+fp128 exp   rne: 66 placed arguments (66 on the main path), wrong 0, marked 0, worst log2(err/bound) -1.46  2s
+fp128 exp   rtz: 66 placed arguments (66 on the main path), wrong 0, marked 0, worst log2(err/bound) -1.46  3s
+fp128 exp2  rne: 88 placed arguments (88 on the main path), wrong 0, marked 0, worst log2(err/bound) -1.46  8s
+fp128 exp2  rtz: 88 placed arguments (88 on the main path), wrong 0, marked 0, worst log2(err/bound) -1.46  10s
+fp128 expm1 rne: 66 placed arguments (66 on the main path), wrong 0, marked 0, worst log2(err/bound) -5.95  13s
+fp128 expm1 rtz: 66 placed arguments (66 on the main path), wrong 0, marked 0, worst log2(err/bound) -5.95  17s
+fp128 log   rne: 100 placed arguments (100 on the main path), wrong 0, marked 0, worst log2(err/bound) -1.49  26s
+fp128 log   rtz: 100 placed arguments (100 on the main path), wrong 0, marked 0, worst log2(err/bound) -1.49  29s
+fp128 log2  rne: 100 placed arguments (100 on the main path), wrong 0, marked 0, worst log2(err/bound) -1.49  34s
+fp128 log2  rtz: 100 placed arguments (100 on the main path), wrong 0, marked 0, worst log2(err/bound) -1.49  35s
+fp128 log1p rne: 60 placed arguments (60 on the main path), wrong 0, marked 0, worst log2(err/bound) -4.88  38s
+fp128 log1p rtz: 60 placed arguments (60 on the main path), wrong 0, marked 0, worst log2(err/bound) -4.88  41s
