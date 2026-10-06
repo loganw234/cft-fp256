@@ -351,10 +351,10 @@ constexpr int ARG_LFLAGS = 17;
 constexpr uint32_t MODE_SEQ = 1u << 15;
 /* MODE[24] (revision 8's R23, docs/SEQUENCER.md): write the per-lane
  * flags block at LFLAGS_PTR after the counts. Set only on a run that
- * asked for the block. It is the lowest bit of the range every tile
- * since the scalar guard refuses at start with STATUS[3], so a tile
- * without CAPS2[13] asked for a block refuses the run rather than
- * ignoring the ask - and device.c refuses first, by name. */
+ * asked for the block. It is the lowest bit of the range a tile since
+ * the scalar guard refuses at start with STATUS[3] unless it builds the
+ * feature, so a tile without CAPS2[13] asked for a block refuses the run
+ * rather than ignoring the ask - and device.c refuses first, by name. */
 constexpr uint32_t MODE_LFLAGS = 1u << 24;
 
 /* STATUS, as rtl/cft_csr.sv lays it out. Bits 4 and 5 are also

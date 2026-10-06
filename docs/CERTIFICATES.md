@@ -2946,8 +2946,9 @@ segments a run. Each holds something no other does:
 - `augsum-fp64`: revision 8. augadd and augerr keep a compensated sum,
   and a stepped STX and LDX store and read back its partial sums. Only
   the software backend has made it: no card has run it, though rev8a,
-  revision 8's first image, publishes both revision-8 bits (2026-10-06),
-  and a tile without one refuses the program at load, by name.
+  revision 8's first hardware image, publishes both revision-8 bits
+  (2026-10-06), and a tile without one refuses the program at load, by
+  name.
   - Its lanes 2 and 3 start at s = +-(2^53 + 2) with t = +-1, so their
     first augadd is a tie: +-(2^53 + 3), between +-(2^53 + 2), whose
     significand is odd, and +-(2^53 + 4). roundTiesTowardZero, 754's

@@ -2662,10 +2662,10 @@ the output:
 Bits 0 to 2 are the engine's bus faults and arrive only with
 `CFT_ERR_BUS_FAULT`; bit 3 is the trimmed-build precision refusal.
 Every backend hands back all three reports - the software backend, a
-tile and the remote route. A tile sets bit 6 since rev8a, revision 8's
-first image (markstep's certificates on the card, 2026-10-06), and the
-XRT backend passes it since 2026-10-02, the day it was defined. On a
-tile that was true of bit 4 only until
+tile and the remote route. A tile on a card sets bit 6 since rev8a,
+revision 8's first hardware image (markstep's certificates,
+2026-10-06), and the XRT backend passes it since 2026-10-02, the day it
+was defined. On a tile that was true of bit 4 only until
 2026-09-18: the XRT backend dropped bit 5 on the way out, so a strict
 image was computed correctly on a card and its caller was told
 nothing, which is the one thing strict exists to prevent
@@ -3315,8 +3315,9 @@ module's rebuild, as every step's is (docs/COMPATIBILITY.md, "ABI
 
 Revision 8 (docs/SEQUENCER.md) adds two things a program run reports,
 built golden-first: the model defines them, the software backend
-computes them, and a tile carries both since rev8a, revision 8's first
-image (2026-10-06, docs/VALIDATION.md). The step-6 round's R8
+computes them, and a tile on a card carries both since rev8a, revision
+8's first hardware image (2026-10-06, docs/VALIDATION.md). The step-6
+round's R8
 built them, at Logan's choices "Flag control in rev 8 (Recommended)"
 and "Per-lane flags (R23)".
 
@@ -3352,7 +3353,7 @@ no `lane_flags`, and a buffer whose count is not `n` - a mask's
 pass - are `CFT_ERR_INVALID_ARGUMENT`. A device that does not publish
 `CFT_SEQ_FEAT_LANE_FLAGS` is `CFT_ERR_UNSUPPORTED`, with a sentence
 naming the bit. The software backend publishes it, and so does rev8a,
-revision 8's first image (2026-10-06); no revision-7 tile does. A
+revision 8's first hardware image (2026-10-06); no revision-7 tile does. A
 remote handle publishes its server's bit and refuses the block where its
 server lacks it: unlike the mask, which a client compacts away, the
 block can only be made where the run is. `cft_run_args` grows, so a
@@ -3446,9 +3447,9 @@ to 0xB00 for the register. This is libcft's side. No ABI step: ABI
   slots, so `seq_features` 0x7ff1f - the software handle's word at 0.17,
   which `api-test` holds equal to it - and `max_insns` 2^24; 0x77f1f
   without R21. CAPS2[3:0] is log2 of the build's depth, so rev8a, the
-  first image, a single at 4,096 slots, read CAPS2 0x00187ffc on the card
-  (device-test -i, 2026-10-06), with `seq_features` 0x7ff1f, `max_insns`
-  16,777,216 and `max_scratch` 4,096.
+  first hardware image, a single at 4,096 slots, read CAPS2 0x00187ffc
+  on the card (device-test -i, 2026-10-06), with `seq_features`
+  0x7ff1f, `max_insns` 16,777,216 and `max_scratch` 4,096.
 - **Argument 17.** Every program launch on a 0xB00 tile passes all
   eighteen arguments. At the seam the eighteenth was a one-beat buffer
   bound and never asked for; since the lane-flags item (below, 2026-10-05)
@@ -3548,12 +3549,12 @@ the counts have had since 2026-09-15.
   no warning, as at 6fe4a4a. Under hw_emu (probe E, 2026-10-05) it read
   the single's words and carried a run's block for two segments, equal
   byte for byte to the software backend's; device-test's revision-8 legs
-  did not finish there. On the card, on rev8a, revision 8's first image
-  (2026-10-06), they ran and passed - the lane-flags legs at every
-  format, device == software - and card-segrun's leg (h) wrote the
-  block, byte for byte the software backend's (docs/VALIDATION.md). The
-  backend compiles there against XRT 2.19.194, the build's only warnings
-  the two known ones in `cft_resident.cpp`.
+  did not finish there. On the card, on rev8a, revision 8's first
+  hardware image (2026-10-06), they ran and passed - the lane-flags legs
+  at every format, device == software - and card-segrun's leg (h) wrote
+  the block, byte for byte the software backend's (docs/VALIDATION.md).
+  The backend compiles there against XRT 2.19.194, the build's only
+  warnings the two known ones in `cft_resident.cpp`.
 
 ## The definition the library implements (certificate version 2, 2026-10-02)
 

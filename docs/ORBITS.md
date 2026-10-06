@@ -357,8 +357,8 @@ relocated and specialised at the program's attribute, run in a quiet
 region, then raising exactly their operation's flags (revision 8's
 flag control, docs/SEQUENCER.md, R24). cft-orbits' engines do not use
 it: their programs come from the tool's own builder, and no revision-7
-tile has revision 8's flag control (rev8a, revision 8's first image,
-has since 2026-10-06). `--rsqrt exact` is therefore a loop-engine
+tile has revision 8's flag control (rev8a, revision 8's first hardware
+image, has since 2026-10-06). `--rsqrt exact` is therefore a loop-engine
 route, and
 `--rsqrt newton` exists so that all three engines have a step they can
 run - which they then have to run bit for bit.

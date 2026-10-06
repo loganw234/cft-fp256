@@ -2343,8 +2343,8 @@ stage's leg K2, and their inlining and their loops by
     inexact), and no instruction raises divideByZero. Revision 8's flag
     control (R24) runs a routine quiet and raises exactly its
     operation's flags; no revision-7 tile has it (rev8a, revision 8's
-    first image, has since 2026-10-06), so revision 7's targets refuse
-    such an image, `target-feature`;
+    first hardware image, has since 2026-10-06), so revision 7's targets
+    refuse such an image, `target-feature`;
   - **the compiler's one instruction a node**: a routine's raw words (an
     infinity, NaNs, -0, integers) are a bank slot kind of their own, its
     internal attributes ride in its instructions, and the compiler's

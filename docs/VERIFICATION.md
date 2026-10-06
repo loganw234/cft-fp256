@@ -214,7 +214,7 @@ authority:
    every pass geometry the tile builds, as two lemmas per geometry plus
    the whole claim as one property where a solver will take it; and,
    since 2026-10-03, revision 8's instruction fetch (rtl/cft_ifetch.sv,
-   not yet in any tile) against every consumer and every in-order
+   in the tile since 2026-10-05) against every consumer and every in-order
    memory - its words the image's, each handed over two or more cycles
    after its beat lands, its reads inside the program and the 4 KB
    page, its faults raised and final, nothing issued after a quiesce -
