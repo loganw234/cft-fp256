@@ -1,0 +1,20 @@
+# p5c_budget_end.py fp64 log2 46 7/8 241/256 12000 4604 hi, 20:37-20:39, the desktop 7% busy. p5c_budget_end.py: 12,000 arguments, half uniform, half within 2^-8 .. 2^-56 of the end named.
+fp64 log2 G 46: 12000 arguments in [0.87500, 0.94141], 187 instructions, 80 ever round; 111s
+  max |E|/Bv 0.2751 (2^-1.86); max |M|/Bv 0.0654 (2^-3.93)
+  sum over the rounding instructions: observed maxima 0.4413 (2^-1.18); capacities (all at their worst) 0.4444 (2^-1.17)
+  support bound: M_max + sum(capacities) = 0.5098 (2^-0.97) of Bv; with the observed maxima: 0.5067 (2^-0.98)
+  by phase (observed maxima summed, capacities summed), in Bv:
+     sum        0.4236  0.4265
+     tail       0.0083  0.0083
+     head       0.0048  0.0051
+     lp         0.0046  0.0046
+     final      0.0000  0.0000
+  the 8 largest capacities:
+     #157 fma  sum        capacity 0.1794  observed max 0.1792
+     #153 sub  sum        capacity 0.1294  observed max 0.1269
+     #152 add  sum        capacity 0.0647  observed max 0.0647
+     #156 fma  sum        capacity 0.0448  observed max 0.0447
+     #149 add  sum        capacity 0.0082  observed max 0.0082
+     # 54 fma  tail       capacity 0.0078  observed max 0.0078
+     #148 fma  lp         capacity 0.0040  observed max 0.0040
+     #145 sub  head       capacity 0.0038  observed max 0.0038

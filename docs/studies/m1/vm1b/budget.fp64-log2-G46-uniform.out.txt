@@ -1,0 +1,24 @@
+# p5_budget.py fp64 log2 46 7/8 241/256 3000 173 12, run from the tree, 2026-10-05 20:31-20:32, the desktop 3% busy: the box's job budget-G46-log2 with its seed, again.
+fp64 log2 G 46: 3000 arguments in [0.87500, 0.94141], 187 instructions, 80 ever round; 28s
+  max |E|/Bv 0.1891 (2^-2.40); max |M|/Bv 0.0513 (2^-4.28)
+  sum over the rounding instructions: observed maxima 0.3585 (2^-1.48); capacities (all at their worst) 0.4230 (2^-1.24)
+  support bound: M_max + sum(capacities) = 0.4744 (2^-1.08) of Bv; with the observed maxima: 0.4099 (2^-1.29)
+  by phase (observed maxima summed, capacities summed), in Bv:
+     sum        0.3421  0.4058
+     tail       0.0078  0.0082
+     lp         0.0043  0.0045
+     head       0.0042  0.0045
+     final      0.0000  0.0000
+  the 12 largest capacities:
+     #157 fma  sum        capacity 0.1689  observed max 0.1166
+     #153 sub  sum        capacity 0.1193  observed max 0.1118
+     #152 add  sum        capacity 0.0646  observed max 0.0646
+     #156 fma  sum        capacity 0.0448  observed max 0.0409
+     #149 add  sum        capacity 0.0082  observed max 0.0082
+     # 54 fma  tail       capacity 0.0077  observed max 0.0074
+     #148 fma  lp         capacity 0.0040  observed max 0.0038
+     #145 sub  head       capacity 0.0037  observed max 0.0035
+     #146 mul  lp         capacity 0.0005  observed max 0.0005
+     #142 add  head       capacity 0.0005  observed max 0.0005
+     # 53 fma  tail       capacity 0.0005  observed max 0.0004
+     #141 fma  head       capacity 0.0001  observed max 0.0001
