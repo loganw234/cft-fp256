@@ -1281,8 +1281,10 @@ formal/README.md has the runs).
   Section 8's "nearly every program then streams" was not so. Counted
   without a simulator (`tb/stream_census.py`: the bench's own programs,
   cocotb stubbed, each counted where the Bench budgets it; measured at
-  S8's build on the split's tree), 13 of the bench's 98 cases run a
-  program longer than the 64-word store, 66 runs of the 1,575 counted.
+  S8's build; 98 cases and 1,575 runs on the split's tree, 99 and 1,595
+  once verifier-VC56's stream-need case joined, which streams nothing),
+  13 of the bench's cases run a program longer than the 64-word store,
+  66 runs.
   Twenty cases stop early there, at their first check of a cycle count
   or a planted fault, so only their first runs are counted; none is
   longer than 11 instructions, but for the fetch's own, which stream.

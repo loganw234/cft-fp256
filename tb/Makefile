@@ -738,8 +738,8 @@ seq_coreu50mc:
 # four hours would end it, and the whole wanted eight or more. Nor did
 # the whole bench stream. Counted without a simulator
 # (tb/stream_census.py: the bench's own programs, cocotb stubbed), 13 of
-# its 98 cases run a program longer than the 64-word store, 66 runs of
-# the 1,575 counted. Every other program fits the store and runs
+# its 99 cases run a program longer than the 64-word store, 66 runs of
+# the 1,595 counted. Every other program fits the store and runs
 # resident: at latency 0 those cases repeat seq_core's runs, and at 125
 # and 256 they add the main read engine's round trip, not the fetch's.
 #

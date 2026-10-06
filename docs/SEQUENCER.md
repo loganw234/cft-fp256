@@ -3944,16 +3944,25 @@ from such a tree.
   codes are unknown ones, as on revision 7. A build's choice: 1 on the
   single and the deep build, 0 on the quad and on the open-core
   configurations (Logan's decision of 2026-10-05, in R21's section). They
-  cost what an ALU instruction does: twenty augadds, or ten
-  augerr-augadd pairs, per block what twenty IANDs do, and a chain
-  through `ra` or `rb` what an IAND chain does (`make seqcycles`' R21
-  rows). Held against `seq.py`, both halves and both operand orders, in
-  `tb/test_seq_core.py`'s four `augadd_` cases at every configuration -
+  cost what an ALU instruction does (`make seqcycles`' R21 rows, a block
+  each): twenty augadds what twenty IANDs do, 557.2, 477.2 and 437.2
+  cycles at fp32, fp64 and fp128; ten augerr-augadd pairs two cycles
+  less, 555.2, 475.2 and 435.2; and a chain through `ra` or `rb` what an
+  IAND chain does. Held against `seq.py`, both halves and both operand
+  orders, in `tb/test_seq_core.py`'s four `augadd_` cases at `seq_core`,
+  `seq_coreu50`, `seq_coremc` and S8's streaming build
+  (`seq_corestr_full`), and at `seq_coreu50mc` all but `augadd_fuzz` -
   every family of the plan's list at every format, a dependency through
-  `rb` on port C, a mask, a dropped lane and a quiet augerr, and the
-  model's revision-8 fuzz arm. Through the kernel in
-  `tb/test_krnl_seq.py`'s `krnl_augadd`: every family at fp32 and fp256,
-  then an elementwise ADD straight after a run ending on an augerr. The
+  `rb` on port C at one beat, two beats and a lane, and a whole block, a
+  mask, a dropped lane and a quiet augerr, and the model's revision-8
+  fuzz arm - and in verifier-VC56's `augadd_stream_need_by_role`, each
+  stream read in one role alone, so the parse's need for `ra` and for
+  `rb` is held apart. Through the kernel in `tb/test_krnl_seq.py`'s
+  `krnl_augadd`: every family at fp32 and fp256, then an elementwise ADD
+  straight after a run ending on an augerr; and in VC56's
+  `krnl_elementwise_after_augadd_at_ties`: ADD and FMA over ties and
+  near-ties straight after a run ending on an augadd, and on an augerr,
+  where an augadd's sideband left live would move a tie. The
   quad's tile is held by `make krnlseqnoaug`, a named subset of that
   bench built at EN_AUGADD = 0: CAPS2[11] clear, each code ending its
   block where it stands, and an R21-free program bit-exact. The outside
@@ -3987,11 +3996,15 @@ from such a tree.
     a load, so p = 1; and twenty stepped stores on one index 960.2, each
     waiting for the step before it.
   - CAPS2[12] is published on every build. Held against `seq.py` in
-    `tb/test_seq_core.py`'s five R22 cases at every configuration: a walk
-    up by stores and down by loads at every format, wrapping through 0
-    and crossing zero downward; the field's two ends; a walk under
-    SCRATCH_STRICT; `ldx rX, rX` and `stx rX, rX`; a mask and a dropped
-    lane; a dependent chain at one beat, two and a block; and the model's
+    `tb/test_seq_core.py`'s five R22 cases at `seq_core`, `seq_coreu50`,
+    `seq_coremc` and S8's streaming build (`seq_corestr_full`), and at
+    `seq_coreu50mc` all but `stepped_index_masked_and_dropped` and
+    `stepped_fuzz`: a walk up by stores and down by loads at every
+    format, wrapping through 0 and crossing zero downward; the field's
+    two ends; a walk under SCRATCH_STRICT; `ldx rX, rX` and `stx rX, rX`;
+    a mask and a dropped lane; a dependent chain at one beat, two beats
+    and a lane, and a whole block (since verifier-VC56; until then at a
+    block, two blocks and a lane, and sixteen); and the model's
     revision-8 fuzz arm. Through the kernel in `tb/test_krnl_seq.py`'s
     `krnl_scratch_step`. With it the tile reads the plan's words: CAPS2
     0x00187FFB on the single, 0x001877FB on the quad's tile without R21,

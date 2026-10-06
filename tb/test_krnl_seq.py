@@ -63,6 +63,9 @@ from cft_golden import (  # noqa: E402
     min_subnormal_bits, max_normal_bits,
 )
 from cft_golden import seq  # noqa: E402
+from cft_golden import compute as _vc_compute  # noqa: E402
+from cft_golden import RND_RNE as _VC_RNE  # noqa: E402
+import augadd_corners  # noqa: E402  (verifier-VC56's pool)
 
 from test_krnl import (  # noqa: E402
     run_op, check_seq_caps, check_caps2, krnl_param, krnl_param_bit,
@@ -1944,3 +1947,117 @@ async def krnl_ode_programs(dut):
             assert res.scratch_out != s_in, f"{name}: the state did not move"
             dut._log.info(f"{name} x{steps} steps, n={n}: about {cyc:.0f} "
                           f"cycles start to done (the CSR writes included)")
+
+
+# ----------------------------------------------------------------------
+# verifier-VC56's tie case (2026-10-05; its vc56_krnl_after_augadd_ties),
+# adopted as it wrote it with its two helpers. krnl_augadd's elementwise
+# ADD runs after an augerr on random operands, so an augadd's sideband
+# (aug_mode 1) left live into an elementwise run - which differs from an
+# ordinary ADD only at ties - passes it; VC56's plant k1, the sideband's
+# bit 0 left live, is red here.
+# ----------------------------------------------------------------------
+
+async def _vc_full(dut):
+    """The kernel with its four masters on one memory, as krnl_augadd sets
+    it up."""
+    cocotb.start_soon(Clock(dut.ap_clk, 4, units="ns").start())
+    axil = AxiLiteMaster(AxiLiteBus.from_prefix(dut, "s_axi_control"),
+                         dut.ap_clk, dut.ap_rst_n,
+                         reset_active_level=False)
+    ram_a = AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_a"),
+                       dut.ap_clk, dut.ap_rst_n,
+                       reset_active_level=False, size=2 ** 21)
+    AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_b"), dut.ap_clk,
+               dut.ap_rst_n, reset_active_level=False, size=2 ** 21,
+               mem=ram_a.mem)
+    AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_c"), dut.ap_clk,
+               dut.ap_rst_n, reset_active_level=False, size=2 ** 21,
+               mem=ram_a.mem)
+    AxiRamWrite(AxiWriteBus.from_prefix(dut, "m_axi_d"), dut.ap_clk,
+                dut.ap_rst_n, reset_active_level=False, size=2 ** 21,
+                mem=ram_a.mem)
+    dut.ap_rst_n.value = 0
+    await ClockCycles(dut.ap_clk, 8)
+    dut.ap_rst_n.value = 1
+    await ClockCycles(dut.ap_clk, 4)
+    return axil, ram_a
+
+
+async def _vc_ew(dut, axil, ram, fmt, op, va, vb, vc, label):
+    """One elementwise run over explicit streams, scored against the
+    model at RNE (run_op draws random streams; this one is given them)."""
+    ba, bb, bc, bd = EW_BASES
+    n = len(va)
+    ebytes = fmt.width // 8
+    exp = [_vc_compute(fmt, op, va[i], vb[i], vc[i], _VC_RNE)
+           for i in range(n)]
+    exp_f = 0
+    for e in exp:
+        exp_f |= e[1]
+    ram.write(ba, pack(fmt, va))
+    ram.write(bb, pack(fmt, vb))
+    ram.write(bc, pack(fmt, vc))
+    ram.write(bd, b"\xAA" * (n * ebytes))
+    await axil.write_dword(MODE, op | (PREC_CODE[fmt.name] << 8)
+                           | (_VC_RNE << 12))
+    await write64(axil, NREG, n)
+    await write64(axil, APTR, ba)
+    await write64(axil, BPTR, bb)
+    await write64(axil, CPTR, bc)
+    await write64(axil, DPTR, bd)
+    await axil.write_dword(CTRL, 1)
+    for _ in range(5000):
+        await ClockCycles(dut.ap_clk, 10)
+        if (await axil.read_dword(CTRL)) & 0x2:
+            break
+    else:
+        raise AssertionError(f"{label}: the kernel never finished")
+    got = ram.read(bd, n * ebytes)
+    bad = []
+    for i in range(n):
+        g = int.from_bytes(got[i * ebytes:(i + 1) * ebytes], "little")
+        if g != exp[i][0]:
+            bad.append((i, g, exp[i][0]))
+    assert not bad, (f"{label}: {len(bad)}/{n} elements differ; first "
+                     f"(lane, got, want): {bad[:3]}")
+    got_f = await axil.read_dword(FLAGS)
+    assert got_f == exp_f, f"{label}: FLAGS {got_f:#07b} want {exp_f:#07b}"
+    assert (await axil.read_dword(STATUS)) == 0, f"{label}: STATUS not clean"
+    dut._log.info(f"{label}: {n} lanes bit-exact, flags {got_f:#07b}")
+
+
+@cocotb.test()
+async def krnl_elementwise_after_augadd_at_ties(dut):
+    """The elementwise engine straight after a sequencer run whose LAST
+    array request was an augadd (sideband 1) or an augerr (sideband 2),
+    over operands that are exact ties and near-ties (verifier-VC56's
+    corner pool, tb/augadd_corners.py): ADD and FMA at RNE against the
+    model. An augadd's sideband differs from an ordinary ADD only at ties,
+    so random operands (krnl_augadd's) cannot see it left live; this can."""
+    axil, ram = await _vc_full(dut)
+    caps2 = await axil.read_dword(CAPS2)
+    if not caps2 & CAPS2_AUGADD:
+        dut._log.info("this build has no R21: nothing to leave live")
+        return
+    rng = random.Random(0x5611)
+    for fmt, n in ((FP32, 600), (FP256, 120)):
+        pairs = augadd_corners.pool_pairs(fmt)
+        pairs = pairs[:n]
+        va = [x for x, _ in pairs]
+        vc = [y for _, y in pairs]
+        vb = [one_bits(fmt)] * n
+        for order, insns in (("augadd last", [seq.augerr(3, 0, 1),
+                                              seq.augadd(4, 0, 1)]),
+                             ("augerr last", [seq.augadd(3, 0, 1),
+                                              seq.augerr(4, 0, 1)])):
+            prog = seq.Program(fmt, insns + [seq.deposit(3), seq.deposit(4),
+                                             seq.halt()], max_deposits=2)
+            a = gen_stream(fmt, 32, rng)
+            b = gen_stream(fmt, 32, rng)
+            await run_prog(dut, axil, ram, prog, a, b, [0] * 32,
+                           f"{fmt.name} a run ending with {order}")
+            await _vc_ew(dut, axil, ram, fmt, OP_ADD, va, vb, vc,
+                         f"{fmt.name} ADD on ties after {order}")
+            await _vc_ew(dut, axil, ram, fmt, OP_FMA, va, vb, vc,
+                         f"{fmt.name} FMA on ties after {order}")

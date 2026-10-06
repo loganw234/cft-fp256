@@ -159,23 +159,31 @@ authority:
    - and through the kernel, with the register at 0xB0 the address the
    block lands at (`test_krnl_seq.py`'s `krnl_lane_flags`); since R21's
    decode (2026-10-05) augadd and augerr are held against `seq.py` at
-   every configuration - every family of the plan's list at every
-   format, both halves and both operand orders, a dependency through
-   `rb` on port C, a mask, a dropped lane, a quiet augerr and the
+   `seq_core`, `seq_coreu50`, `seq_coremc` and `seq_corestr_full` (and
+   at `seq_coreu50mc` all but the fuzz) - every family of the plan's
+   list at every format, both halves and both operand orders, a
+   dependency through `rb` on port C at one beat, two beats and a lane,
+   and a whole block, a mask, a dropped lane, a quiet augerr and the
    model's revision-8 fuzz arm (`test_seq_core.py`'s four `augadd_`
-   cases) - and through the kernel (`test_krnl_seq.py`'s `krnl_augadd`,
-   with an elementwise run straight after one ending on an augerr), the
+   cases), and, adopted from verifier-VC56, each stream read in one
+   role alone (`augadd_stream_need_by_role`) - and through the kernel
+   (`test_krnl_seq.py`'s `krnl_augadd`, with an elementwise run
+   straight after one ending on an augerr, and VC56's
+   `krnl_elementwise_after_augadd_at_ties`, ADD and FMA at ties straight
+   after a run ending on an augadd and on an augerr), the
    outside attribute codes 5 to 7 held to RNE through an elementwise
    run (`test_krnl.py`'s `krnl_attribute_codes_5_to_7`), and the quad's
    tile, built without R21, by its own target, `krnlseqnoaug`: a named
    subset of `test_krnl_seq.py` at EN_AUGADD = 0, CAPS2[11] clear, each
    code ending its block where it stands, an R21-free program, a masked
    one and the lane-flag block; since R22 (2026-10-05) the post-step on
-   STX and LDX is held against the model at every configuration - a walk
-   that wraps through 0 and crosses zero downward at every format, the
-   step field's two ends, a walk under SCRATCH_STRICT, `ldx rX, rX` and
-   `stx rX, rX`, a mask and a dropped lane, a dependent chain at three
-   block lengths and the model's revision-8 fuzz arm
+   STX and LDX is held against the model at `seq_core`, `seq_coreu50`,
+   `seq_coremc` and `seq_corestr_full` (and at `seq_coreu50mc` three of
+   the five cases) - a walk that wraps through 0 and crosses zero
+   downward at every format, the step field's two ends, a walk under
+   SCRATCH_STRICT, `ldx rX, rX` and `stx rX, rX`, a mask and a dropped
+   lane, a dependent chain at one beat, two beats and a lane, and a
+   whole block, and the model's revision-8 fuzz arm
    (`test_seq_core.py`'s five R22 cases) - and through the kernel
    (`test_krnl_seq.py`'s `krnl_scratch_step`); the
    shared normalise and alignment ladders are held

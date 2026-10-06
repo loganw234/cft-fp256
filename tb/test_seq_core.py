@@ -71,6 +71,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
 from cft_golden import FORMATS, PREC_CODE  # noqa: E402
 from cft_golden import softfloat as sf  # noqa: E402
 from cft_golden import seq  # noqa: E402
+import augadd_corners  # noqa: E402  (verifier-VC56's corner pool, R21)
 
 FP32, FP64, FP128, FP256 = (FORMATS[k] for k in
                             ("fp32", "fp64", "fp128", "fp256"))
@@ -108,7 +109,7 @@ MAXD = _seq_generic("MAXD", 64)
 # capacity; seq_corestr_full, S8's, a 64-word store and a 2^16 capacity;
 # and seq_corestr, in `make sim`, the same store and a 4,096-word capacity
 # under the cases written for the fetch. Most of this bench's programs fit
-# even a 64-word store: 13 of its 98 cases run one that streams past it
+# even a 64-word store: 13 of its 99 cases run one that streams past it
 # (tb/Makefile says which, and why the targets are two).
 IMEM_D = _seq_generic("IMEM_D", 1024)
 STREAM_D = _seq_generic("STREAM_D", IMEM_D)
@@ -7624,14 +7625,17 @@ async def augadd_reads_rb_on_port_c(dut):
     instruction just before - an ALU result, an augadd's, an augerr's -
     and both ports reading the register just written. Port C reading rc,
     or its hazard compare taking rc's field, reads the wrong register or
-    the right one too early, and a lane differs."""
+    the right one too early, and a lane differs. The lengths are a beat's
+    lanes since verifier-VC56 (2026-10-05): until then they were a
+    block's, so the case ran one block, two and a lane, and sixteen, and
+    never the one-beat block its words named."""
     bench = Bench(dut)
     await bench.start()
     if not EN_AUGADD:
         await _r21_absent_run(bench, "the port-C chain")
         return
     for fmt in (FP32, FP64, FP128, FP256):
-        lpb = lanes_per_block(fmt)
+        lpbt = lanes_per_beat(fmt)
         prog = seq.Program(fmt, [
             seq.alu(sf.OP_MUL, 3, ra=0, rb=1),   # r3 = a * b
             seq.augadd(4, 2, 3),                 # rb = r3, just written
@@ -7640,7 +7644,7 @@ async def augadd_reads_rb_on_port_c(dut):
             seq.augerr(7, 6, 6),                 # both ports, just written
             seq.deposit(4), seq.deposit(5), seq.deposit(6), seq.deposit(7),
             seq.halt()], max_deposits=4)
-        for n in (lpb, 2 * lpb + 1, NBEATS * lpb):
+        for n in (lpbt, 2 * lpbt + 1, NBEATS * lpbt):
             rng = random.Random(2102 + n + fmt.width)
             a, b, c = (seq.random_inputs(fmt, rng, n) for _ in range(3))
             await bench.program(fmt, prog, a, b, c, n,
@@ -7731,6 +7735,47 @@ async def augadd_fuzz(dut):
         assert k == trials, f"{name}: {k} of {trials} R21 programs drawn"
         made += k
     dut._log.info(f"R21 fuzz: {made} programs, {augs} augadd/augerr words")
+
+
+@cocotb.test()
+async def augadd_stream_need_by_role(dut):
+    """The image parse's stream need for R21's two codes, one stream a role:
+    a program whose only reader of r0 is an augadd's ra, of r1 its rb (and
+    the reverse, and r2 on each side), so a parse that learned ra but not
+    rb - or the other way - leaves a stream unloaded, which reads +0 (the
+    silent wrong answer cft_seq.sv's own comment names). C's families read
+    every stream in both roles, so a single missing arm hides there.
+
+    verifier-VC56's (2026-10-05; its vc56_r21_stream_need), adopted as it
+    wrote it, the operands its corner pool (tb/augadd_corners.py). Its
+    plants m11a and m11b, the parse's need without ra and without rb for
+    the two codes, are red here, and green in
+    augadd_and_augerr_every_family."""
+    bench = Bench(dut)
+    await bench.start()
+    if not EN_AUGADD:
+        await _r21_absent_run(bench, "the stream need by role")
+        return
+    for fmt in (FP32, FP64, FP128, FP256):
+        lpbt = lanes_per_beat(fmt)
+        n = 2 * lpbt + 1
+        pairs = augadd_corners.pool_pairs(fmt)
+        rng = random.Random(0x560C + fmt.width)
+        rng.shuffle(pairs)
+        a = [x for x, _ in pairs[:n]]
+        b = [y for _, y in pairs[:n]]
+        c = [x for x, _ in pairs[n:2 * n]]
+        for pi, insns in enumerate((
+                [seq.augadd(3, 0, 1), seq.deposit(3), seq.halt()],
+                [seq.augerr(3, 1, 2), seq.deposit(3), seq.halt()],
+                [seq.augadd(3, 2, 0), seq.deposit(3), seq.halt()],
+                [seq.augerr(3, 1, 0), seq.deposit(3), seq.halt()],
+                [seq.augadd(3, 0, 2), seq.deposit(3), seq.halt()])):
+            prog = seq.Program(fmt, insns, [], 1)
+            await bench.program(
+                fmt, prog, a, b, c, n,
+                f"the stream need by role, program {pi}, {fmt.name}",
+                lane_flags=True)
 
 
 # ======================================================================
@@ -7869,12 +7914,15 @@ async def stepped_dependent_chain(dut):
     """Stepped stores on one index back to back, each waiting for the
     step before it under R14's landed rule; a stepped load's internal
     IADD followed at once by an ALU read of the index, a store indexed
-    by it and a deposit of it; at one beat, two beats and a whole block,
-    so the hazards meet the pipe at every depth."""
+    by it and a deposit of it; at one beat, two beats and one lane, and a
+    whole block, so the hazards meet the pipe at every depth. The lengths
+    are a beat's lanes since verifier-VC56 (2026-10-05): until then they
+    were a block's, so the case ran one block, two and a lane, and
+    sixteen, and never the one-beat block its words named."""
     bench = Bench(dut)
     await bench.start()
     for fmt in (FP32, FP128):
-        lpb = lanes_per_block(fmt)
+        lpbt = lanes_per_beat(fmt)
         prog = seq.Program(fmt, [
             seq.stx(0, 1, 1), seq.stx(0, 1, 1), seq.stx(0, 1, 1),
             seq.ldx(4, 1, -2),
@@ -7883,7 +7931,7 @@ async def stepped_dependent_chain(dut):
             seq.ldx(6, 1, 0),
             seq.deposit(5), seq.deposit(6), seq.deposit(1),
             seq.halt()], max_deposits=3)
-        for n in (lpb, 2 * lpb + 1, NBEATS * lpb):
+        for n in (lpbt, 2 * lpbt + 1, NBEATS * lpbt):
             rng = random.Random(2231 + n + fmt.width)
             idx = [_int_bits(fmt, rng.randrange(200)) for _ in range(n)]
             await bench.program(fmt, prog, operands(fmt, n, 2232), idx,
