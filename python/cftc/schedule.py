@@ -21,8 +21,10 @@ slower than it (docs/VALIDATION.md, 2026-10-02):
   do; its QUIET and ENDQUIET cost a cycle each and wait for nothing, and
   its RAISE waits for its register to have LANDED - R18's rule for
   SETACT, three cycles past a forwarded link - then walks the beats one
-  a cycle. Those three are revision 8's R24, which no tile has, so their
-  prices are believed, from R18's for the control codes it built.
+  a cycle. Those three are revision 8's R24, and no compiled image with a
+  routine has been timed on a card, so their prices are believed, from
+  R18's for the control codes it built (the manifest's cost note says
+  the same).
 
 So at a full block (sixteen beats) every order costs the same, to within
 a cycle a dependent pair, and only below one block does the order

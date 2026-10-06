@@ -17,10 +17,11 @@ that argument rests on, cheap enough for the golden stage:
   manifest's shape, asm.py's round trip, the internal check refusing a
   damaged image, and the command line's exits - a source whose
   canonical form would not read back refused by name, exit 3, never 70;
-* revision 8's three targets, PROVISIONAL (parcel E): each held to the
-  plan's computed words, kept out of the built-in table, the command line
-  and accepted_by, compiling C4's routines, and refusing one slot past its
-  provisional depth by name;
+* revision 8's three targets (parcel E; built in at cftc's output version
+  5, parcel TG): each held to its image's words - rev8a's as the card read
+  them, the quad's and the deep single's the plan's - seen by get(),
+  names(), the command line and accepted_by, compiling C4's routines, and
+  refusing one slot past its depth by name;
 * the variational equations: an image with tangent vectors run as
   lang.run runs it, its lane block and manifest, the interleaved
   candidate offered only with tangents, scratch-capacity naming the
@@ -49,6 +50,8 @@ from cft_golden import softfloat as sf           # noqa: E402
 from cft_golden.lang import constants as K       # noqa: E402
 
 SYSTEMS = ROOT / "programs" / "systems"
+# revision 8's three targets, built in at cftc's output version 5
+REV8 = ("u50-rev8", "u50-rev8-quad", "u50-rev8-deep")
 
 
 def specials(fmt):
@@ -134,7 +137,8 @@ def test_sharing_commutes_what_the_plan_allows(name):
 
 
 def test_targets_are_stated():
-    assert T.names() == ["sw", "u50-rev7", "u50-rev7-quad", "u50-round2",
+    assert T.names() == ["sw", "u50-rev8", "u50-rev8-quad", "u50-rev8-deep",
+                         "u50-rev7", "u50-rev7-quad", "u50-round2",
                          "open-core"]
     assert T.get("u50-rev7").scratch_depth == 2048
     assert T.get("u50-rev7").max_insns == 32768
@@ -161,24 +165,36 @@ def _every_feature_image():
         "halt\n", "every-feature")
 
 
-def test_revision_8s_bits_are_published_by_sw_alone():
+def test_revision_8s_bits_are_published_by_sw_and_revision_8s_targets():
     """Revision 8's four bits (ABI 0.17, cft.h): the software targets
-    publish them, as libcft's software handle does (0x7ff1f), and no
-    revision-7 target does - so an image needing FLAG_CONTROL (R24), like
-    one needing AUGADD or SCRATCH_STEP, is accepted by `sw` alone, and
-    refused as target-feature, naming the CAPS2 bit, on the others."""
+    publish them, as libcft's software handle does (0x7ff1f), and so do
+    revision 8's single and deep single; the quad publishes all but
+    AUGADD, being built without R21; no revision-7 or older target
+    publishes any. So an image needing FLAG_CONTROL (R24), like one
+    needing SCRATCH_STEP, is accepted by `sw` and revision 8's three, and
+    one needing AUGADD by `sw`, the single and the deep single alone."""
     r8 = {"AUGADD": "CAPS2[11]", "SCRATCH_STEP": "CAPS2[12]",
           "LANE_FLAGS": "CAPS2[13]", "FLAG_CONTROL": "CAPS2[14]"}
     for name, place in r8.items():
         assert T.CAPS_PLACE[name] == place
         assert T.get("sw").seq_features & T.FEATURE_BITS[name]
         assert T.get("sw:2048").seq_features & T.FEATURE_BITS[name]
+        for t in ("u50-rev8", "u50-rev8-deep"):
+            assert name in T.get(t).features(), (t, name)
+        assert (name in T.get("u50-rev8-quad").features()) == \
+            (name != "AUGADD"), name
         for t in ("u50-rev7", "u50-rev7-quad", "u50-round2", "open-core"):
             assert name not in T.get(t).features(), (t, name)
     assert T.FEATURE_BITS["LANE_FLAGS"] == 1 << 17
     assert T.FEATURE_BITS["FLAG_CONTROL"] == 1 << 18
     from cftc import manifest as M
-    assert M.accepted_by("fp64", ["FLAG_CONTROL"], 10, 0) == ["sw"]
+    for feats in (["FLAG_CONTROL"], ["SCRATCH_STEP"],
+                  ["FLAG_CONTROL", "LANE_FLAGS"]):
+        assert M.accepted_by("fp64", feats, 10, 0) == ["sw", *REV8], feats
+    assert M.accepted_by("fp64", ["AUGADD"], 10, 0) == \
+        ["sw", "u50-rev8", "u50-rev8-deep"]
+    assert M.accepted_by("fp64", ["AUGADD", "FLAG_CONTROL"], 10, 0) == \
+        ["sw", "u50-rev8", "u50-rev8-deep"]
     assert M.accepted_by("fp64", ["SCRATCH_STRICT"], 10, 0) == T.names()
 
 
@@ -613,9 +629,10 @@ def test_a_step_count_past_the_digit_limit_is_refused_by_name():
 # The language has them (div, sqrt, L4); a tile has no such instruction, and
 # cftc inlines each as its routine (cft_golden/routines.py), quiet, then a
 # raise of exactly its flags. Such an image needs revision 8's flag control:
-# the software targets compile and run it, revision 7's refuse it
-# `target-feature`, by name - never an internal error. These sources were
-# L4's interim refusal's; each now compiles.
+# the software targets and revision 8's three compile it, seq.py runs it
+# here, and revision 7's targets refuse it `target-feature`, by name - never
+# an internal error. These sources were L4's interim refusal's; each now
+# compiles.
 
 ROUTINE = {   # name: (source, the first line holding a division or a root)
     "a quotient": ("system d\nformat fp64\nstate x, y\nnext x = x\n"
@@ -693,9 +710,10 @@ def test_each_routine_compiles_on_the_software_targets(case):
     """Each source - a quotient, a root, both under rk4 with two vectors, a
     quotient by a constant, by h and by zero, a written tangent, a tangent
     let or an expansion block first - compiles for sw and sw:4096, its image
-    holding QUIET, ENDQUIET and RAISE, accepted by the software targets
-    alone; and runs on seq.py as lang.run does, states, tangents and
-    FLAGS, on lanes that divide 0 by 0, hold a signalling NaN and hold
+    holding QUIET, ENDQUIET and RAISE, accepted by `sw` and revision 8's
+    three, which publish flag control, and by no other built-in target;
+    and runs on seq.py as lang.run does, states, tangents and FLAGS, on
+    lanes that divide 0 by 0, hold a signalling NaN and hold
     subnormals."""
     text, _line = ROUTINE[case]
     g = lang.compile_text(text, "src.cftl").graph
@@ -707,7 +725,7 @@ def test_each_routine_compiles_on_the_software_targets(case):
             c = cftc.compile_text(text, steps, target=target,
                                   source="src.cftl")
             assert "FLAG_CONTROL" in c.features
-            assert c.accepted_by == ["sw"]
+            assert c.accepted_by == ["sw", *REV8]
             names = {asm.CTRL_NAMES.get(asm.decode(w)["op"])
                      for w in c.image_obj.insns if asm.decode(w)["ctrl"]}
             assert {"quiet", "endquiet", "raise"} <= names
@@ -724,11 +742,12 @@ def test_each_routine_compiles_on_the_software_targets(case):
 
 @pytest.mark.parametrize("case", list(ROUTINE))
 def test_revision_7s_targets_refuse_a_routine_by_name(case):
-    """No tile has revision 8's flag control: on each of revision 7's
+    """Revision 7's tiles have no flag control: on each of revision 7's
     targets, and a trimmed one, a routine image is refused
-    `target-feature`, the sentence naming FLAG_CONTROL, CAPS2[14] and the
-    routines - by name, never an internal error; a step count of 0 is
-    still `segment-steps`, first."""
+    `target-feature`, the sentence naming FLAG_CONTROL, CAPS2[14], the
+    routines and the built-in targets that publish the bit, `sw` and
+    revision 8's three - by name, never an internal error; a step count
+    of 0 is still `segment-steps`, first."""
     text, _line = ROUTINE[case]
     g = lang.compile_text(text, "src.cftl").graph
     ops = [op for op in ("div", "sqrt") if op in g.op_counts("step")]
@@ -742,14 +761,18 @@ def test_revision_7s_targets_refuse_a_routine_by_name(case):
         s = e.value.sentence
         assert "FLAG_CONTROL (CAPS2[14])" in s and "revision 8" in s, s
         assert all(op in s for op in ops), s
+        assert s.endswith("which the built-in targets sw, u50-rev8, "
+                          "u50-rev8-quad and u50-rev8-deep publish"), s
         with pytest.raises(lang.Refusal) as e:
             cftc.compile_text(text, 0, target=target)
         assert e.value.name == "segment-steps"
 
 
 def test_a_routine_through_the_command_line(tmp_path):
-    """sw: exit 0, the files, the text's regions; a revision-7 target: exit
-    3, `target-feature`, nothing written; never 70."""
+    """sw: exit 0, the files, the text's regions; revision 8's quad, by
+    name: exit 0, the image and bank sw's bytes, the manifest naming the
+    quad; a revision-7 target: exit 3, `target-feature`, nothing written;
+    never 70."""
     py = [sys.executable, str(ROOT / "python" / "cftc")]
     text, _line = ROUTINE["both, a let, rk4, two vectors"]
     src = tmp_path / "b.cftl"
@@ -763,6 +786,16 @@ def test_a_routine_through_the_command_line(tmp_path):
     assert "\n  raise    r" in cfta and "\n    fma.rtz  r" in cfta
     assert "; routines " in cfta
     r = subprocess.run(py + [str(src), "--steps", "2", "--target",
+                             "u50-rev8-quad", "--out", str(tmp_path / "q")],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    for ext in ("cftp", "bank"):
+        assert (tmp_path / "q" / f"b.{ext}").read_bytes() == \
+            (tmp_path / "a" / f"b.{ext}").read_bytes(), ext
+    m = json.loads((tmp_path / "q" / "b.manifest.json").read_bytes())
+    assert m["target"]["name"] == "u50-rev8-quad"
+    assert m["accepted_by"] == ["sw", *REV8]
+    r = subprocess.run(py + [str(src), "--steps", "2", "--target",
                              "u50-rev7-quad", "--out", str(tmp_path / "b")],
                        capture_output=True, text=True)
     assert r.returncode == 3, r.stderr
@@ -775,12 +808,14 @@ def test_divisions_and_roots_that_fold_compile_without_a_routine():
     """A constant over a constant and the root of a rational's square fold
     (L4): a system holding only those has no routine and no flag control,
     and every target accepts it; x / (1 + 1) is a division at run time, a
-    routine, and the software targets alone."""
+    routine, which `sw` and revision 8's three accept, and no other
+    built-in target."""
     text = ("system f\nformat fp64\nstate x, y\nnext x = x * (8/3)\n"
             "next y = fma(y, sqrt(9/4), x / (1 + 1) * 0 + x * (1/3))\n"
             "step map\n")
     c = cftc.compile_text(text, 3)
     assert c.manifest["routines"]["calls"] == {"div": 1}
+    assert c.accepted_by == ["sw", *REV8]
     states, _t = _routine_lanes(c.graph, "fold")
     _held(c, states, None, 3)
     text = text.replace("x / (1 + 1) * 0 + ", "")
@@ -788,7 +823,7 @@ def test_divisions_and_roots_that_fold_compile_without_a_routine():
     assert "div" not in c.graph.op_counts() and \
         "sqrt" not in c.graph.op_counts()
     assert "FLAG_CONTROL" not in c.features and "routines" not in c.manifest
-    assert "u50-rev7" in c.accepted_by
+    assert c.accepted_by == T.names()
     lanes = [[K.round_once(c.ir.fmt, sf.RND_RNE, Fraction(v, 9))[0]] * 2
              for v in (2, -5, 13)]
     r = c.run(lanes)
@@ -961,11 +996,16 @@ def test_a_batch_of_one_call_is_never_looped(monkeypatch):
 
 def test_one_looped_image_serves_every_target_that_takes_it(monkeypatch):
     """The constant is the compiler's, never a target's: the same source
-    loops the same way for sw and sw:4096 - one image, the same bytes - and
-    revision 7's targets still refuse it `target-feature`, by name."""
+    loops the same way for sw, sw:4096 and revision 8's three - one image,
+    the same bytes, which each of them accepts - and revision 7's targets
+    still refuse it `target-feature`, by name."""
     a = _looped(monkeypatch, KEPLER_RK4, 1000)
     b = _looped(monkeypatch, KEPLER_RK4, 1000, target="sw:4096")
     assert a.looped and a.image == b.image and a.bank == b.bank
+    assert a.accepted_by == ["sw", *REV8]
+    for t in REV8:
+        r = _looped(monkeypatch, KEPLER_RK4, 1000, target=t)
+        assert r.image == a.image and r.bank == a.bank, t
     with pytest.raises(lang.Refusal) as e:
         _looped(monkeypatch, KEPLER_RK4, 1000, target="u50-rev7")
     assert e.value.name == "target-feature"
@@ -1286,17 +1326,25 @@ def test_version_is_the_records_last_and_the_record_holds():
         O.parse(text.replace("version 1\n", "version 3\n", 1))
 
 
-# ---- revision 8's targets, PROVISIONAL (parcel E, 2026-10-05) ----------------
-# cftc/targets.py's PROVISIONAL: the plan's three revision-8 images, held to
-# the plan's computed words. Not built in until their depths are final (the
-# lead's decision): get(), names(), the command line and accepted_by do not
-# see them, and cftc's output version does not move for them.
+# ---- revision 8's targets (parcel E, 2026-10-05; built in, parcel TG) --------
+# cftc/targets.py's three revision-8 targets (REV8, above), in the built-in
+# table since cftc's output version 5 (2026-10-06): each held to its image's
+# words - rev8a's as the card read them, rev8q's and rev8d's the plan's,
+# computed - and seen by get(), names(), get_target, the command line and
+# accepted_by. Until then they were provisional, kept out of all five.
 
-REV8 = ("u50-rev8", "u50-rev8-quad", "u50-rev8-deep")
 # "What a revision-8 U50 tile reads" (docs/ROADMAP.md, "Revision 8"): CAPS
 # unchanged from revision 7; CAPS2 0x00187ffb at 2,048 slots, 0x00187ffc at
 # 4,096 and 0x001877fb without R21; seq_features 0x7ff1f, 0x77f1f without.
 PLAN_CAPS = 0x19faffff
+# rev8a, the image u50-rev8 stands for, on the card (2026-10-06; the step-6
+# records in docs/VALIDATION.md): device-test -i read VERSION 0x00000b00,
+# CAPS 0x19faffff and CAPS2 0x00187ffc, and libcft decoded them as
+# seq_features 0x7ff1f, capacities 1024/16777216/512 (deposits,
+# instructions, constants) and max_scratch 4096 - here in _decode_b00's
+# order.
+REV8A_CARD = (0x19faffff, 0x00187ffc)
+REV8A_DECODED = (0x7ff1f, 1 << 24, 512, 4096, 1024)
 
 
 def _decode_b00(caps, caps2):
@@ -1325,9 +1373,10 @@ def _caps2(depth, r21):
     return word if r21 else word & ~0x800
 
 
-def test_the_plans_words_decode_as_the_plan_says():
-    """The transcription above, anchored to the plan's three stated words
-    and to revision 7's, through which a seam tile reads as revision 7."""
+def test_the_words_decode_as_the_plan_and_the_card_say():
+    """The transcription above, anchored to the plan's three stated words,
+    to revision 7's, through which a seam tile reads as revision 7, and to
+    rev8a's words as libcft decoded them on the card."""
     assert _decode_b00(PLAN_CAPS, 0x00187ffb) == \
         (0x7ff1f, 1 << 24, 512, 2048, 1024)
     assert _decode_b00(PLAN_CAPS, 0x00187ffc) == \
@@ -1336,25 +1385,30 @@ def test_the_plans_words_decode_as_the_plan_says():
         (0x77f1f, 1 << 24, 512, 2048, 1024)
     assert _decode_b00(PLAN_CAPS, 0x000007fb) == \
         (0x7f1f, 32768, 512, 2048, 1024)
+    assert _decode_b00(*REV8A_CARD) == REV8A_DECODED
     assert _caps2(2048, True) == 0x00187ffb
-    assert _caps2(4096, True) == 0x00187ffc
+    assert _caps2(4096, True) == 0x00187ffc == REV8A_CARD[1]
     assert _caps2(2048, False) == 0x001877fb
 
 
-def test_revision_8s_targets_are_the_plans_words():
-    """Each provisional target is its image's words decoded: the single and
-    the deep build with R21, 0x7ff1f, the software handle's word; the quad
-    without it, 0x77f1f, AUGADD alone apart; 2^24 instructions, 512
-    constants and 1,024 deposit slots each. Their depths are the
-    provisional values the module states: 4,096 for the quad, and the
-    single at the quad's (probe K: else 2,048 for both); 8,192 for the deep
-    build (16,384 if that closes)."""
-    single, quad, deep = (T.provisional(n) for n in REV8)
+def test_revision_8s_targets_are_their_images_words():
+    """Each target is its image's words decoded: the single and the deep
+    single with R21, 0x7ff1f, the software handle's word; the quad without
+    it, 0x77f1f, AUGADD alone apart; 2^24 instructions, 512 constants and
+    1,024 deposit slots each. Their depths are the images', which probe K
+    decided (2026-10-05): 4,096 for the quad and the single built at the
+    quad's slots, and 8,192 for the deep single, since 16,384 would cross
+    both SLRs. u50-rev8 is rev8a's words as the card read them; the quad's
+    and the deep single's are the plan's."""
+    single, quad, deep = (T.get(n) for n in REV8)
     for t, r21 in ((single, True), (quad, False), (deep, True)):
         assert t.formats == T.ALL_FORMATS
         assert (t.seq_features, t.max_insns, t.max_consts, t.scratch_depth,
                 t.max_deposits) == \
             _decode_b00(PLAN_CAPS, _caps2(t.scratch_depth, r21)), t.name
+    assert (single.seq_features, single.max_insns, single.max_consts,
+            single.scratch_depth, single.max_deposits) == REV8A_DECODED
+    assert (PLAN_CAPS, _caps2(single.scratch_depth, True)) == REV8A_CARD
     assert single.seq_features == deep.seq_features == 0x7ff1f == \
         T.SW_FEATURES
     assert quad.seq_features == 0x77f1f
@@ -1362,6 +1416,8 @@ def test_revision_8s_targets_are_the_plans_words():
         T.FEATURE_BITS["AUGADD"]
     assert single.scratch_depth == quad.scratch_depth == 4096
     assert deep.scratch_depth == 8192
+    assert _caps2(quad.scratch_depth, False) == 0x001877fc
+    assert _caps2(deep.scratch_depth, True) == 0x00187ffd
     for t in (single, quad, deep):
         assert {"FLAG_CONTROL", "LANE_FLAGS", "SCRATCH_STEP"} <= \
             set(t.features())
@@ -1369,41 +1425,62 @@ def test_revision_8s_targets_are_the_plans_words():
     assert "AUGADD" not in quad.features()
 
 
-def test_revision_8s_targets_are_not_built_in(tmp_path):
-    """Until their depths are final: not in BUILTIN, get() or names(), and
-    named on the command line or to get_target each is refused as any
-    unknown target is - exit 64 there, nothing written - and no
-    accepted_by lists one, so no manifest or certificate can name it."""
-    assert T.names() == ["sw", "u50-rev7", "u50-rev7-quad", "u50-round2",
-                         "open-core"]
+def test_revision_8s_targets_are_built_in(tmp_path):
+    """In BUILTIN, get() and names(), after `sw` and before revision 7's;
+    get_target gives each; accepted_by lists each that an image fits, at
+    their capacities' edges; and named on the command line each compiles
+    - exit 0, the image and bank sw's bytes, the manifest naming the
+    target and listing the three - while `--targets` prints each with its
+    capacities and feature word."""
+    assert T.names()[:4] == ["sw", *REV8]
     for name in REV8:
-        assert name not in T.BUILTIN and T.get(name) is None
-        assert T.provisional(name) is T.PROVISIONAL[name]
-        with pytest.raises(ValueError, match="is not a target here"):
-            cftc.get_target(name)
-    for name in ("sw", "u50-rev7", "sw:2048", "u50-rev9"):
-        assert T.provisional(name) is None
+        assert name in T.BUILTIN and T.get(name) is T.BUILTIN[name]
+        assert cftc.get_target(name) is T.BUILTIN[name]
     from cftc import manifest as M
-    for feats in ([], ["FLAG_CONTROL"], ["AUGADD", "LANE_FLAGS"]):
-        assert not set(M.accepted_by("fp64", feats, 10, 0)) & set(REV8)
-    assert M.accepted_by("fp64", ["FLAG_CONTROL"], 10, 0) == ["sw"]
+    fc = ["FLAG_CONTROL"]
+    assert M.accepted_by("fp64", [], 10, 0) == T.names()
+    assert M.accepted_by("fp64", fc, 1 << 24, 256) == ["sw", *REV8]
+    assert M.accepted_by("fp64", fc, (1 << 24) + 1, 256) == ["sw"]
+    assert M.accepted_by("fp64", fc, 10, 4096) == list(REV8)
+    assert M.accepted_by("fp64", fc, 10, 4097) == ["u50-rev8-deep"]
+    assert M.accepted_by("fp64", fc, 10, 8192) == ["u50-rev8-deep"]
+    assert M.accepted_by("fp64", fc, 10, 8193) == []
     py = [sys.executable, str(ROOT / "python" / "cftc")]
-    r = subprocess.run(py + [str(SYSTEMS / "lorenz63-rk4-fp64.cftl"),
-                             "--steps", "2", "--target", "u50-rev8",
-                             "--out", str(tmp_path / "out")],
-                       capture_output=True, text=True)
-    assert r.returncode == 64 and "is not a target" in r.stderr, r.stderr
-    assert not (tmp_path / "out").exists()
+    src = SYSTEMS / "lorenz63-rk4-fp64.cftl"
+    r = subprocess.run(py + [str(src), "--steps", "2", "--out",
+                             str(tmp_path / "sw")], capture_output=True,
+                       text=True)
+    assert r.returncode == 0, r.stderr
+    for name in REV8:
+        out = tmp_path / name
+        r = subprocess.run(py + [str(src), "--steps", "2", "--target", name,
+                                 "--out", str(out)],
+                           capture_output=True, text=True)
+        assert r.returncode == 0, (name, r.stderr)
+        for ext in ("cftp", "bank"):
+            assert (out / f"lorenz63-rk4-fp64.{ext}").read_bytes() == \
+                (tmp_path / "sw" / f"lorenz63-rk4-fp64.{ext}").read_bytes()
+        m = json.loads((out / "lorenz63-rk4-fp64.manifest.json").read_bytes())
+        assert m["target"]["name"] == name
+        assert m["target"]["scratch_depth"] == T.get(name).scratch_depth
+        assert m["accepted_by"] == T.names()
+    r = subprocess.run(py + ["--targets"], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    lines = {ln.split()[0]: ln for ln in r.stdout.splitlines() if ln}
+    for name in REV8:
+        t = T.get(name)
+        assert f"insns {1 << 24:>10,}" in lines[name], lines[name]
+        assert f"scratch {t.scratch_depth:>5,}" in lines[name], lines[name]
+        assert f"features 0x{t.seq_features:x}" in lines[name], lines[name]
 
 
 def _routine_for(text, name):
-    """A routine source compiled for a provisional target: FLAG_CONTROL
-    among its needs, the manifest naming the target, and accepted_by still
-    the built-in table's alone."""
-    c = cftc.compile_text(text, 2, target=T.provisional(name),
-                          source="src.cftl")
+    """A routine source compiled for a revision-8 target, by name:
+    FLAG_CONTROL among its needs, the manifest naming the target, and
+    accepted_by `sw` and the three."""
+    c = cftc.compile_text(text, 2, target=name, source="src.cftl")
     assert "FLAG_CONTROL" in c.features
-    assert c.accepted_by == ["sw"]
+    assert c.accepted_by == ["sw", *REV8]
     assert c.manifest["target"]["name"] == name
     assert c.manifest["target"]["max_insns"] == 1 << 24
     return c
@@ -1422,7 +1499,7 @@ def test_routines_compile_for_the_revision_8_quad(case):
 
 
 def test_routines_compile_for_every_revision_8_target():
-    """...and for the single and the deep build, which publish it too: the
+    """...and for the single and the deep single, which publish it too: the
     target is read only for its refusals, so one source shows it."""
     text, _line = ROUTINE["a quotient"]
     images = {_routine_for(text, name).image for name in REV8}
@@ -1440,7 +1517,7 @@ def test_program_capacity_on_revision_8s_targets():
     text, _line = ROUTINE["a quotient"]
     n = len(cftc.compile_text(text, 2).image_obj.insns)
     for name in REV8:
-        t = T.provisional(name)
+        t = T.get(name)
         with pytest.raises(lang.Refusal) as e:
             cftc.compile_text(text, 2,
                               target=dataclasses.replace(t, max_insns=n - 1))
@@ -1463,17 +1540,17 @@ def _lane_chain(k):
 
 @pytest.mark.parametrize("name", REV8)
 def test_scratch_capacity_one_past_each_revision_8_depth(name):
-    """One slot past each target's provisional depth is refused
-    `scratch-capacity`, by name, the sentence giving the slots needed, the
-    target and its depth; the deep build takes the quad's depth plus one."""
-    t = T.provisional(name)
-    d = t.scratch_depth
+    """One slot past each target's depth is refused `scratch-capacity`, by
+    name, the target named as the command line names it, the sentence
+    giving the slots needed, the target and its depth; the deep single
+    takes the quad's depth plus one."""
+    d = T.get(name).scratch_depth
     with pytest.raises(lang.Refusal) as e:
-        cftc.compile_text(_lane_chain(d), 1, target=t)
+        cftc.compile_text(_lane_chain(d), 1, target=name)
     assert e.value.name == "scratch-capacity", str(e.value)
     assert f"needs {d + 1:,} scratch slots" in e.value.sentence
     assert f"{name} has {d:,}" in e.value.sentence
     if name == "u50-rev8-deep":
-        quad = T.provisional("u50-rev8-quad").scratch_depth
-        c = cftc.compile_text(_lane_chain(quad), 1, target=t)
+        quad = T.get("u50-rev8-quad").scratch_depth
+        c = cftc.compile_text(_lane_chain(quad), 1, target=name)
         assert c.program.slots_used == quad + 1

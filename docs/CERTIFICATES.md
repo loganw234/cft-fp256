@@ -3278,9 +3278,18 @@ for value. So `make` kept both certificates byte for byte (2026-09-30).
 `build-id`.
 
 Version 2's cases are the golden writer's, written by `make
---keep-version-1` at the commit that added them (2026-10-02). Every
-measured header line is `unknown`, as the example's `build-id` is, but
-in `signed-fp64`, which spells each out.
+--keep-version-1` at the commit that added them (2026-10-02), and
+written again the same way, version 1's cases kept, by each step that
+moved them since: cftc's output version 4 (e45a2f7, 2026-10-02), profile
+3 (ca43695, 2026-10-05) and cftc's output version 5 (2026-10-06, when
+revision 8's three targets joined cftc's built-in table). Each of
+cftc's two steps moved the same eight certificates - the sourced and
+rebuilt Lorenz-63 cases and six controls, the ones that name a compile -
+by their `compiler` lines and hash lines alone, and the manifest by
+their eight digests; profile 3 moved all 37 by their profile and hash
+lines, with seven supersedes lines and four signatures. Every measured
+header line is `unknown`, as the example's `build-id` is, but in
+`signed-fp64`, which spells each out.
 
 **As a conformance test.** Another implementation (another library, a
 GPU library, a tile) takes each case's images, banks and initial states

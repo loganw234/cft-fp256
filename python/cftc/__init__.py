@@ -44,7 +44,12 @@ bumped; 2 is the manifest's cost note restated as measured (C4); 3 is
 the routines: a source that divides or takes a root at run time, which
 2 refused, compiles (C4); 4 is the call loop: a step whose routines,
 inlined, would pass 32,768 instructions, which 3 inlined whole, runs
-batches of them in loops (C4).
+batches of them in loops (C4); 5 is revision 8's three targets built in
+(TG, 2026-10-06): a manifest's accepted_by names those of u50-rev8,
+u50-rev8-quad and u50-rev8-deep its image fits, and the cost note of an
+image holding a routine no longer says that no tile has revision 8's
+R24, which stopped being true when rev8a was built (2026-10-06). 5
+writes the same images, banks and text files as 4; only manifests moved.
 
 A format override: compile_text and compile_file take `fmt`, a format's
 name, which replaces the value of the source's `format` statement
@@ -70,14 +75,13 @@ docs/SEQUENCER.md R24). inline.py expands them for the allocator, which
 gives their registers and spills around them; their raw words are bank
 slots of their own (lower.py); the internal check holds each to its
 fragment, taken from the golden model (check.py). Such an image needs
-FLAG_CONTROL, CAPS2[14], so revision 7's targets refuse it
-`target-feature` and the software targets compile and run it; a bank the
-routines' words would take past 512 is `bank-capacity`. Until C4 such a
-system was refused `runtime-routine`, a name that went with it. Revision
-8's images publish FLAG_CONTROL, and their targets compile it too: they
-are PROVISIONAL until those images' depths are final, reached as
-targets.provisional(name) and by no name, list or manifest (targets.py's
-text says which values wait on what).
+FLAG_CONTROL, CAPS2[14], which the software targets and revision 8's
+three (u50-rev8, u50-rev8-quad and u50-rev8-deep, built in at version
+5) publish: each compiles it, and libcft's software backend runs it.
+Revision 7's targets refuse it `target-feature`, the sentence naming the
+built-in targets that publish the bit. A bank the routines' words would
+take past 512 is `bank-capacity`. Until C4 such a system was refused
+`runtime-routine`, a name that went with it.
 
 A step whose routines, inlined, would pass 32,768 instructions - the
 largest instruction memory a tile has, a constant of the compiler's that
@@ -89,18 +93,24 @@ is never looped, since its loop would only add the loop's instructions to
 its one copy; so a step whose routines sit one to a batch - a chain of
 divisions, each reading the last - is compiled inlined past the
 constant: the software targets, whose instruction memory is unbounded,
-take it; revision 7's targets refuse it `target-feature` first, as
-they refuse every image with a routine, and a target that published
-flag control and held fewer instructions than the image would refuse
-it `program-capacity`, by name - no built-in target is that yet
-(verifier-VC4's 180 chained divisions: 34,201 instructions, inlined). A loop keeps every call's operands and
+take it, and so do revision 8's, which hold 2^24 instructions
+(verifier-VC4's 180 chained divisions: 34,201 instructions a step,
+inlined); revision 7's targets refuse it
+`target-feature` first, as they refuse every image with a routine; and
+a target that publishes flag control and holds fewer instructions than
+the image refuses it `program-capacity`, by name - revision 8's three
+do, for an image past their 2^24 instructions. python/tests/
+test_cftc.py holds that refusal at revision 8's targets' fields with
+the instruction capacity one under an image's size, rather than by
+compiling an image past 2^24 instructions. A loop keeps every call's operands and
 results in the scratch across it, where inlining consumes each as it
 goes, so it can need far more slots than the inlined step: verifier-
 VC4's source of 32,769 instructions loops one batch of 170 calls into
 653 slots and is refused `scratch-capacity` on sw's 256, where one
 instruction shorter it compiles inlined in 171. That is the rule's
 consequence, not a defect of it: such a source compiles for a deeper
-scratch (sw:1024 or any deeper sw:N, the image the same bytes), or under the
+scratch (sw:1024 or any deeper sw:N, or revision 8's targets at 4,096
+and 8,192 slots, the image the same bytes), or under the
 constant with fewer routine calls a step. Measured on planar N bodies
 under rk4 at fp64 (C4's ledger, 2026-10-02): at N = 8 the step, 40,477
 instructions inlined, loops the first two stages' 56 divisions and is
@@ -167,7 +177,7 @@ from .regalloc import best_program
 from .schedule import cycles
 from .targets import BUILTIN, Target
 
-VERSION = 4               # the output version: the module docstring, outputs.py
+VERSION = 5               # the output version: the module docstring, outputs.py
 MAX_STEPS = (1 << 32) - 1
 MAX_WORST = 1 << 40
 
@@ -465,10 +475,16 @@ def compile_graph(graph, steps, target="sw", stem="system", source=None,
     if missing:
         why = ""
         if "FLAG_CONTROL" in missing:
+            # the built-in targets that publish the bit, read from the
+            # table, so that the sentence names where the image can go
+            have = [n for n, b in T.BUILTIN.items()
+                    if "FLAG_CONTROL" in b.features()]
+            takers = have[0] if len(have) == 1 else \
+                f"{', '.join(have[:-1])} and {have[-1]}"
             why = (f": it raises its routines' flags ("
                    f"{' and '.join(low.routines)}) through revision 8's "
-                   f"flag control, QUIET, ENDQUIET and RAISE, which no "
-                   f"tile has yet; the software targets run it")
+                   f"flag control, QUIET, ENDQUIET and RAISE, which the "
+                   f"built-in targets {takers} publish")
         refuse("target-feature", f"the image needs "
                f"{', '.join(f'{f} ({T.CAPS_PLACE[f]})' for f in missing)}, "
                f"which {t.name} does not publish{why}", source=src)

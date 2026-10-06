@@ -282,7 +282,8 @@ def build(c):
         cost["routines"] = ("QUIET and ENDQUIET a cycle each, RAISE a beat "
                             "a cycle once its register has landed: believed, "
                             "from R18's prices for the control codes it "
-                            "built, since no tile has revision 8's R24")
+                            "built, since no compiled image with a routine "
+                            "has been timed on a card")
     if loops:
         cost["call_loops"] = ("a call loop runs as unrolled, its REPEAT and "
                               "each ENDREP a cycle; an LDX waits for its "
