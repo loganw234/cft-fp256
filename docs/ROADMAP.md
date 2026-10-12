@@ -5845,7 +5845,7 @@ checks. Logan, verbatim: on question 9, "Only if probe L finds it cheap
 lanes at about 2,000 LUTs a tile or fewer, and every other question
 is decided as recommended. The RTL starts with round 1 (part 5).
 
-### The math library: M1's build, then M2 to M4, with a first experiment on who authors a parcel (plan of record, 2026-10-12)
+### The math library: experiment E1, then M1's build and M2 to M4 (plan of record, 2026-10-12)
 
 Logan, verbatim:
 - On 2026-10-05, closing step 6 at revision 8: "Close and have the rest
@@ -5862,8 +5862,8 @@ Logan, verbatim:
   successful, the other parcels for the round may follow similar
   patterns."
 
-This plan goes to him before any code. Nothing in it exists yet unless it
-says so.
+Logan answered its questions on 2026-10-12 (below). Nothing in it
+exists yet unless it says so.
 
 **Where it starts** (READ at main 0893b2c).
 - **M1's design study is done:** docs/studies/M1-exp-log.md (step 6).
@@ -5882,14 +5882,14 @@ says so.
   R23's lane byte, 2^24 instructions streamed, and 4,096 or 8,192
   scratch slots. The quad carries no R21, so M1 writes TwoSum on every
   target, as revision 8's question 9 set out.
-- **cftc's output version is 5** (step 6's leftovers), so M1's step is
-  to 6.
+- **cftc's output version is 5** (parcel TG, step 6, 2026-10-06), so
+  M1's step is to 6.
 
 **E1, the experiment, first: can a Sonnet-class model author a parcel at
 this level?** Logan's instruction, above.
 - **The parcel is exp's routine, golden-first,** in a new
-  module, python/cft_golden/mathlib.py (Logan chose exp over the
-  plan's first proposal, exp2, as the harder test):
+  module, python/cft_golden/mathlib.py (Logan's choice; the plan had
+  proposed exp2):
   - the fragment at fp64, fp128 and fp256, and at fp32 as question 2
     decides, at every attribute and at the G question 1 decides;
   - its constants derived and checked by a `--check`;
@@ -5902,63 +5902,126 @@ this level?** Logan's instruction, above.
   - a planted fault for every check;
   - a VALIDATION entry.
 - **Not in E1:** routines.py's and cftc's names (item 4 below),
-  program.c (item 2), the card.
-- **Why exp.** It carries everything the generator needs - the double
-  word, the table read, the polynomial, the scale by 2^k, the in-lane
-  test and its mark, the specials - and two things exp2 lacks: the
-  reduction by ln 2, a magic-number FMA and Cody-Waite in three words
-  (the study, 2.2), and a structured family near 0 whose windows mark
-  and replay (3.5). The study measured its fragment at 178 to 201
+  program.c (item 2), the card. E1 edits no existing code.
+- **Its scope, settled before dispatch** (verifier-P7's notes):
+  - **fp32 is built and measured, not run on seq.py.** The model's
+    triple-word exp keeps 33 to 34 values live (the study, 2.5;
+    verifier-P7), past seq.py's 32 registers, so `routines.program`
+    cannot place it (P7 measured its "no register for the harness").
+    E1 runs fp32's fragment op by op on a lane evaluator, softfloat
+    as seq.py's ALU computes, over the fp32 pool, and reports its live
+    count. Its fit to the register file - a reorder, or spills inside
+    a routine - is M1's build (item 1 below). fp32 has no budget, so
+    its bound is measured, as the study's 2.5 says.
+  - **The invariants:** mathlib.py holds its fragments to C4's
+    invariants as question 12 widens them - the mark bit among the
+    flag word's values, an IOR rule in its walk, RDN, RUP and the
+    program's attribute admitted, the live count raised to a stated
+    figure - in mathlib.py itself. routines.py's stay as they are for
+    division and root, so both authors face one regression surface.
+    Moving them into routines.py and cftc's check is item 4.
+  - **The bound's budget** is verifier-VM1b's, ported to tree code: it
+    reads the unpruned body, its phases and the probes Vh, Vl, Bv and
+    Ek (`docs/studies/m1/vm1b/adlib.py`), so mathlib.py keeps an
+    instrumented form of the fragment for it. No tree file imports
+    docs/studies/.
+  - **One interface,** so that one battery runs on both branches:
+    `mathlib.fragment("exp", fmt, rnd)` returns the specialised
+    routines.Fragment, as `routines.fragment` does, and
+    `mathlib.evaluate(f, x)` one lane's result and flag word.
+- **Why exp.** It carries the parts the six share - the double word,
+  the table read, the polynomial, the scale by 2^k, the in-lane test and
+  its mark, the specials - and two that exp2 lacks: the Cody-Waite
+  reduction, x - n ln2/8 with ln2/8 in three words, where exp2's
+  x - n/8 is exact and is then multiplied by a two-word ln 2 (the
+  study, 2.2); and a structured family near 0 whose windows mark and
+  replay (3.5). The study measured its fragment at 178 to 201
   instructions from fp64 to fp256, and 382 at fp32 triple-word at
   G = 40 (5.1); its model (`m1exp.py`) is the reference design both
   authors start from.
 - **Two authors, one brief.**
-  - The same text, two worktrees from one commit, two branches
-    (m1-exp-opus and m1-exp-sonnet), dispatched at the same time.
-  - Opus 5.5 and Sonnet 5.5 are set by the Agent tool's model field.
-  - A question from either author is answered to both, word for word.
-  - Neither sees the other's branch.
+  - The same text, its two copies differing only in their tree, branch
+    and ledger names, each copy's sha256 recorded at dispatch.
+  - Two arms, a and b, each a clone of one commit with no remote, on
+    branches m1-exp-a and m1-exp-b, dispatched at the same time. A
+    coin gives Opus 5.5 one arm and Sonnet 5.5 the other; the lead
+    records it sealed (a salted sha256) until the comparison has
+    reported.
+  - The models are set by the Agent tool's model field, and each
+    response's model in an agent's transcript shows it (verifier-P7's
+    111 responses were all claude-sonnet-5-5). Each author also gives
+    its model in its report's first line, and names it in nothing it
+    writes to its tree or its ledger.
+  - A question from either author is answered to both, word for word,
+    as a rule rather than as the asker's question.
+  - Neither may look at the other's clone, branch or ledger: the
+    brief says so, and separate clones keep the other's commits out
+    of each one's git.
 - **Two verifiers, one brief.** Both run on Sonnet, the round's
-  standing rule, from the same text.
-- **A blind comparison.** When both parcels are clean, or each has gone
-  back at most once, a third agent on Opus reads both branches. They
-  are labelled X and Y by a coin the lead records and does not tell
-  it. It scores them against this rubric, written now:
+  standing rule, from the same text, and each re-runs every plant of
+  its arm. An arm goes back at most twice: one not clean after its
+  second re-check has not ended clean.
+- **A blind comparison.** When both arms have ended, clean or at the
+  cap, a third agent on Opus reads both. It gets each arm's tree
+  exported without its git, and its commit messages with their
+  trailers stripped, labelled a and b; it reads nothing else of the
+  round. It scores them against this rubric, written now:
   1. correctness: every lane right or marked against transcend.py; the
-     bound held by the budget at the decided G;
+     bound held by the budget at the decided G at fp64, fp128 and
+     fp256, fp32 measured;
   2. tests that can fail, shown by plants;
   3. completeness against the brief's list;
   4. the code's and the entry's clarity;
   5. honest marks (measured, read, believed).
+  When it has reported, it guesses which arm is which model, and why;
+  then the lead opens the coin.
+- **A common battery,** the lead's: each arm's tests and `--check`, and
+  one set of arguments with the same seeds - the pools and random
+  lanes - through each arm's fragment against transcend.exp.
 - **Sonnet's parcel succeeds when** (fixed now, before either runs):
-  - its verifier ends with no (a) and no (b), within one more send-back
-    round than Opus's took;
-  - it misses no item of the brief's must-have list (every lane right
-    or marked; the bound held; every check able to fail);
-  - the blind comparison does not find it materially worse on items 1
-    or 2.
-  Time and tokens are recorded for both, and do not decide.
+  - its arm ends clean - no (a) and no (b) - within the cap, after at
+    most one more send-back than Opus's arm needed; if Opus's arm does
+    not end clean, Sonnet's need only end clean;
+  - by its last verifier's account it misses no item of the brief's
+    must-have list (every lane right or marked; the bound held; every
+    check able to fail);
+  - it is not materially worse on rubric items 1 or 2: no concrete
+    case the other arm does not share - a wrong unmarked lane, a bound
+    that fails or is stated by a sample where the brief asks for the
+    budget, a check that no plant makes fail - named by the comparison
+    or found by the battery, and confirmed by the lead.
+  Time and tokens, summed from each agent's transcript (a
+  notification's figure is its context size, step 6's ledger found),
+  are recorded for both and do not decide. One run an arm is n = 1: E1
+  shows what one Sonnet run did, not a rate.
 - **What follows.**
-  - The branch the comparison prefers is merged, if both are clean. The
-    other stays as a branch, for the record.
+  - If both arms are clean, the branch the comparison prefers merges;
+    if one is, that one; if neither, none, and the result goes to
+    Logan at the hold. A branch not merged stays, for the record.
   - The round then holds, and Logan decides from E1's result how M1's
-    build and M2's study use models (his answer, below). If Sonnet
-    succeeds, his instruction allows the round's later parcels to be
-    authored on Sonnet from the lead's briefs; if it fails, they stay
-    on Opus.
+    build and M2's study use models (his answer, below). His
+    instruction lets the later parcels follow E1's pattern if Sonnet
+    succeeds; his word of 2026-10-12 already allows Sonnet authors and
+    Haiku verifiers on simpler tasks.
   - Either way, a VALIDATION entry records E1.
-  - Its cost: two authors and two verifiers for one parcel.
+  - Its cost: two authors, two verifiers and their re-checks, and the
+    comparison, for one parcel.
 
 **M1's build after E1** (the study's section 10, in its order).
 1. **exp2 and expm1, then log, log2 and log1p,** in mathlib.py as exp
-   was, each with its section 8 tests.
+   was, each with its section 8 tests, and fp32's fit to the register
+   file (E1's scope, above). The model's exp2 still returns +0 at
+   x = emin - p under rmm, the tie XT fixed in the golden model
+   (VALIDATION's XT entry; verifier-P7 measured it again at fp64,
+   fp128 and fp256), so exp2's parcel does not port it as it stands.
 2. **program.c parity:** the fragments' programs in seq_check's
    corpora. No new C, since the routines are programs of existing
    instructions.
 3. **The language, golden-first:**
    - the six nodes and their interpreter;
-   - folds and refusals (question 8);
-   - the L3 rules (questions 6 and 7);
+   - folds and refusals (question 8), and the renderers;
+   - the L3 rules (questions 6 and 7), with the central-difference
+     check (question 10);
    - LANGUAGE.md;
    - the language at 1.1.
 4. **cftc:**
@@ -5987,7 +6050,7 @@ function gains an L3 rule.
 - **M3, the pow family:** its structured cases need 2p to 3p bits.
 - **M4, atan, atan2, asin and acos.**
 - **Their order:** M2's study can run beside M1's build. M3 and M4
-  follow M2.
+  follow M2, M3 last, as step 6's plan has it.
 
 **Logan's answers** (2026-10-12, to the lead's questions on this plan).
 M1's eleven open questions (the study's section 9; its question 5 is
@@ -6006,13 +6069,18 @@ as the study recommends:
    - fold the six exact rational cases;
    - `irrational-constant` for every other function of a constant;
    - `constant-division-by-zero` for log(0), log2(0) and log1p(-1).
-9. **cftc's VERSION** 5 to 6 (the study wrote 4 to 5 before step 6's
-   leftovers took 5), the corpus remade, and the language at 1.1.
+9. **cftc's VERSION** 5 to 6 (the study wrote 4 to 5 before parcel TG
+   took 5 in step 6), the corpus remade, and the language at 1.1.
 10. **mpmath in the language's checks:** accept it.
 11. **The generator's home:** a new module, python/cft_golden/mathlib.py.
-12. **Live values:** widen C4's invariants as the study's section 6
-    says (the exp family keeps 22 to 24 live, log1p 18, against C4's
-    16).
+12. **Live values, and C4's other invariants** (the study's section
+    6): the exp family keeps 22 to 24 live and log1p 18, against C4's
+    16. Reorder in phase 2 and measure spills on a reference step;
+    raise `routines.LIVE_MAX` (NREG is 32); give `flag_words` an IOR
+    rule; admit RDN, RUP and the program's attribute inside a routine;
+    spend one instruction each in expm1 and log1p so that no
+    instruction reads only the input. The question does not count
+    fp32's triple-word exp, which keeps 33 to 34 (E1's scope, above).
 - **E1's function:** "exp" (the plan had proposed exp2).
 - **The blind comparison's judge:** "Opus (Recommended)".
 - **The round's extent,** in his words: "Hold once E1 finishes to
@@ -6030,8 +6098,10 @@ as the study recommends:
 
 **What it is not.**
 - New RTL. The routines are programs of existing instructions, R24's and
-  R23's in revision 8. R21 stays off the quad by Logan's word, until the
-  dense design's work on nextpnr has progressed.
+  R23's in revision 8. R21 stays off the quad by Logan's answer to
+  revision 8's question 9 (probe L: +10,595 LUTs a tile), and off the
+  open-core builds until the dense design's work on nextpnr has
+  progressed.
 - SYNTH_CLOCK's adoption: off for now (Logan, 2026-10-12).
 - Compile time, which is later performance work.
 
@@ -6039,9 +6109,15 @@ as the study recommends:
 5" (its section 10, item 4, and its Versions note) is now 6. Its parcel
 restates it.
 
-**Answered.** Logan answered this plan's questions on 2026-10-12 (above).
-E1 starts after verifier-P7's check of the plan, and the round holds
-when E1 finishes.
+**Checked.** Verifier-P7 checked this plan on 2026-10-12: no
+regression, and two wrong statements (cftc's version 5 credited to
+step 6's leftovers; the nextpnr condition put on the quad), restated
+above. Its notes on E1's design are adopted as E1's scope and rules,
+above, but one: the comparison runs once, not twice with its labels
+swapped, since success rests on concrete cases the lead confirms,
+not on the comparison's preference. E1 starts on this revision while
+a narrow re-check of it runs; a correction it finds reaches both
+authors alike. The round holds when E1 finishes.
 
 ## The adoption story these serve
 
