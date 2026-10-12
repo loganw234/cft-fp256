@@ -5903,7 +5903,8 @@ this level?** Logan's instruction, above.
   - a VALIDATION entry.
 - **Not in E1:** routines.py's and cftc's names (item 4 below),
   program.c (item 2), the card. E1 edits no existing code.
-- **Its scope, settled before dispatch** (verifier-P7's notes):
+- **Its scope,** settled before dispatch on verifier-P7's notes
+  (4ad5cea), its file names made exact since:
   - **fp32 is built and measured, not run on seq.py.** The model's
     triple-word exp keeps 33 to 34 values live (the study, 2.5;
     verifier-P7), past seq.py's 32 registers, so `routines.program`
@@ -5922,20 +5923,26 @@ this level?** Logan's instruction, above.
     Moving them into routines.py and cftc's check is item 4.
   - **The bound's budget** is verifier-VM1b's, ported to tree code. It
     reads the unpruned body and its phases, with the probes Vh, Vl and
-    Bv (`docs/studies/m1/vm1b/adlib.py`) and Ek
-    (`docs/studies/m1/vm1b/p5_budget.py`), so mathlib.py keeps an
-    instrumented form of the fragment for it. No tree file imports
-    docs/studies/.
+    Bv (`docs/studies/m1/vm1b/adlib.py`), and Ek with the fragment's
+    meta['OFF'] (`docs/studies/m1/vm1b/p5_budget.py`), and it imports
+    `docs/studies/m1/m1measure.py`, so mathlib.py keeps an instrumented
+    form of the fragment for it. No tree file imports docs/studies/.
   - **One interface,** so that one battery runs on both branches:
     `mathlib.fragment("exp", fmt, rnd)` returns the specialised
     routines.Fragment, as `routines.fragment` does, and
     `mathlib.evaluate(f, x)` one lane's result and flag word.
-  - **Brief correction 1,** sent to both authors word for word after
-    verifier-P7b's check: the structured windows at fp64, fp128 and
-    fp256 only, fp32 recording its empty census; the budget's files;
-    fp32's reduction; Fast2Sum where ordered; the rate law's G' = 6,
-    15 cells and three sigma; routines' constants left alone; and a
-    mark in the pools off the structured list failing test 1.
+- **Brief correction 1, after dispatch** (15:44 on 2026-10-12, before
+  either arm reported), sent to both authors word for word on
+  verifier-P7b's check:
+  - the structured windows at fp64, fp128 and fp256 only, since fp32
+    has none at G = 40 (its marks would need an exponent from
+    (p + G)/2 = 32 down to p = 24), fp32 recording its empty census;
+  - the budget's files; fp32's reduction; Fast2Sum where ordered;
+  - the rate law's G' = 6, 15 cells and three sigma;
+  - routines' constants left alone;
+  - a mark in the pools off the structured list failing test 1.
+  So the must-have list's M2 now fails a mark at an argument off the
+  structured list, and its M3 adds the mark-rate law in its 15 cells.
 - **Why exp.** It carries the parts the six share - the double word,
   the table read, the polynomial, the in-lane test and its mark, the
   specials - with the exp family's scale by 2^k, and two parts that
@@ -5990,13 +5997,17 @@ this level?** Logan's instruction, above.
   lead takes the arm with fewer confirmed cases (below), then fewer
   send-backs, then arm a. When it has reported, it guesses which arm
   is which model, and why; then the lead opens the coin.
-- **A common battery,** the lead's, run as each arm's verifier starts:
-  each arm's tests and `--check`, and one set of arguments with the
-  same seeds - the pools and random lanes - through each arm's
-  fragment against transcend.exp, with each arm's marks listed. A wrong
-  unmarked lane it finds is a (b) for that arm. It cannot see a bound
-  or a plant: those are the verifiers' and the comparison's.
-- **Sonnet's parcel succeeds when** (fixed now, before either runs):
+- **A common battery,** the lead's, run as each arm's verifier starts,
+  on the desktop niced (seconds a format at a few hundred lanes) or on
+  amd-arc-box: each arm's tests and `--check`, and one set of arguments
+  with the same seeds - the pools and random lanes - through each
+  arm's fragment against transcend.exp, with each arm's marks listed.
+  A failing test or `--check`, or a wrong unmarked lane, is a (b) for
+  that arm. It cannot see a bound or a plant: those are the
+  verifiers' and the comparison's.
+- **Sonnet's parcel succeeds when** (fixed before either ran, at
+  4ad5cea; the third criterion revised at 15:48, after dispatch and
+  before either arm reported, on verifier-P7b's note):
   - its arm ends clean - no (a) and no (b) - within the cap, after at
     most one more send-back than Opus's arm needed; if Opus's arm does
     not end clean, Sonnet's need only end clean;
@@ -6004,11 +6015,11 @@ this level?** Logan's instruction, above.
     must-have list, as corrected (every lane right or marked; the
     bound held; every check able to fail);
   - it is not materially worse on rubric item 1 or item 2. A case is a
-    concrete defect that one arm has and the other does not - on item
-    1 a wrong unmarked lane or a bound that fails; on item 2 a bound
-    stated by a sample where the brief asks for the budget, or a check
-    that no plant makes fail - named by the comparison or found by the
-    battery, and confirmed by the lead. Sonnet's arm is materially
+    concrete defect in an arm's ended state that the other arm's does
+    not share - on item 1 a wrong unmarked lane, a bound that fails,
+    or a bound stated by a sample where the brief asks for the budget;
+    on item 2 a check that no plant makes fail - named by the
+    comparison and confirmed by the lead. Sonnet's arm is materially
     worse on an item when it has more such cases there than Opus's.
     Both lists go to Logan.
   Time and tokens, summed from each agent's transcript (the last line
@@ -6017,9 +6028,17 @@ this level?** Logan's instruction, above.
   model runs at its own default effort. One run an arm is n = 1: E1
   shows what one Sonnet run did, not a rate.
 - **What follows.**
-  - If both arms are clean, the branch the comparison prefers merges;
-    if one is, that one; if neither, none, and the result goes to
-    Logan at the hold. A branch not merged stays, for the record.
+  - If both arms are clean, the branch the comparison names merges (by
+    its tie rule, above, if it calls them equal); if one is, that one;
+    if neither, none, and the result goes to Logan at the hold. A
+    branch not merged stays, for the record.
+  - A case the lead confirms is a (b) for its arm, whoever finds it.
+    The battery's join the check they start, as send-backs. The
+    comparison's come after both arms have ended: they count in the
+    third criterion, and an arm carrying one merges only once its
+    author has fixed it and a narrow re-check is clean. That fix does
+    not count against the cap or the first criterion, which judge the
+    verifiers' chain.
   - The round then holds, and Logan decides from E1's result how M1's
     build and M2's study use models (his answer, below). His
     instruction lets the later parcels follow E1's pattern if Sonnet
@@ -6071,8 +6090,9 @@ function gains an L3 rule.
   - the cost of 2^1024's range measured (step 6's plan).
 - **M3, the pow family:** its structured cases need 2p to 3p bits.
 - **M4, atan, atan2, asin and acos.**
-- **Their order:** M2's study can run beside M1's build, and M3 comes
-  last, as step 6's plan has it.
+- **Their order:** M2's study can run beside M1's build; M4 follows
+  M2 (step 6's plan asked only that it follow L4, which step 6
+  built); M3 comes last, as step 6's plan has it.
 
 **Logan's answers** (2026-10-12, to the lead's questions on this plan).
 M1's eleven open questions (the study's section 9; its question 5 is
@@ -6103,8 +6123,10 @@ as the study recommends:
     admit RDN, RUP and the program's attribute inside a routine; spend
     one instruction each in expm1 and log1p so that no instruction
     reads only the input. Relaxing inline.py's invariant instead is the
-    alternative, not recommended. The question does not count fp32's
-    triple-word exp, which keeps 33 to 34 (E1's scope, above).
+    alternative, not recommended, since inline.py's argument for keeping
+    a routine's instructions apart from the program's nodes rests on
+    it. The question does not count fp32's triple-word exp, which keeps
+    33 to 34 (E1's scope, above).
 - **E1's function:** "exp" (the plan had proposed exp2).
 - **The blind comparison's judge:** "Opus (Recommended)".
 - **The round's extent,** in his words: "Hold once E1 finishes to
@@ -6129,9 +6151,13 @@ as the study recommends:
 - SYNTH_CLOCK's adoption: off for now (Logan, 2026-10-12).
 - Compile time, which is later performance work.
 
-**Sentences elsewhere that this plan supersedes:** M1's study's "VERSION
-5" (its section 10, item 4, and its Versions note) is now 6. Its parcel
-restates it.
+**Sentences elsewhere that this plan supersedes:**
+- M1's study's "VERSION 5" (its section 10, item 4, and its Versions
+  note) is now 6;
+- its section 8, item 4's structured windows "at every format": fp32
+  has none at G = 40 (E1's brief correction 1).
+Each is restated by the parcel that changes its subject, or by the
+lead at E1's merge.
 
 **Checked.** Verifier-P7 checked this plan on 2026-10-12: no
 regression, and two wrong statements (cftc's version 5 credited to
@@ -6146,10 +6172,16 @@ statements fixed truly, and one wrong answer in E1's brief (a
 structured window asked for at fp32, which has none), corrected to
 both authors alike with six other brief corrections. On P7b's notes,
 before either arm reported, the success criteria's "materially
-worse" became a count on each item against the other arm's, where it
-had failed Sonnet's arm on any case of its own; the battery runs with
-each arm's verifier and its wrong lanes are findings; the comparison
-names the branch to merge. The round holds when E1 finishes.
+worse" became a count on rubric items 1 and 2 against the other
+arm's, where it had failed Sonnet's arm on any case of its own - a
+looser test for Sonnet's arm, recorded for Logan; the battery runs
+with each arm's verifier and its wrong lanes are findings; the
+comparison names the branch to merge. Verifier-P7c re-checked that
+(339d832): two wrong answers, both in the lead's rules - this
+section's "settled before dispatch" and "fixed now" headers, made
+false by changes after dispatch, and no decision for a case
+confirmed after an arm had ended clean - restated above. The round
+holds when E1 finishes.
 
 ## The adoption story these serve
 
