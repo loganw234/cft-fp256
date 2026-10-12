@@ -5880,8 +5880,9 @@ exists yet unless it says so.
   with the call loop and the internal check's invariants.
 - **Revision 8 is on the cards in three images:** R24's raise and mark,
   R23's lane byte, 2^24 instructions streamed, and 4,096 or 8,192
-  scratch slots. The quad carries no R21, so M1 writes TwoSum on every
-  target, as revision 8's question 9 set out.
+  scratch slots. The quad carries no R21, so M1 writes TwoSum and
+  Fast2Sum, never augmented addition, on every target, as revision 8's
+  question 9 set out.
 - **cftc's output version is 5** (parcel TG, step 6, 2026-10-06), so
   M1's step is to 6.
 
@@ -5924,7 +5925,8 @@ this level?** Logan's instruction, above.
   - **The bound's budget** is verifier-VM1b's, ported to tree code. It
     reads the unpruned body and its phases, with the probes Vh, Vl and
     Bv (`docs/studies/m1/vm1b/adlib.py`), and Ek with the fragment's
-    meta['OFF'] (`docs/studies/m1/vm1b/p5_budget.py`), and it imports
+    meta['OFF'] (`docs/studies/m1/vm1b/p5_budget.py`, and
+    p5c_budget_end.py beside it), and it imports
     `docs/studies/m1/m1measure.py`, so mathlib.py keeps an instrumented
     form of the fragment for it. No tree file imports docs/studies/.
   - **One interface,** so that one battery runs on both branches:
@@ -5932,11 +5934,12 @@ this level?** Logan's instruction, above.
     routines.Fragment, as `routines.fragment` does, and
     `mathlib.evaluate(f, x)` one lane's result and flag word.
 - **Brief correction 1, after dispatch** (15:44 on 2026-10-12, before
-  either arm reported), sent to both authors word for word on
-  verifier-P7b's check:
+  either arm reported), its file's text sent to both authors word for
+  word, on verifier-P7b's check:
   - the structured windows at fp64, fp128 and fp256 only, since fp32
     has none at G = 40 (its marks would need an exponent from
-    (p + G)/2 = 32 down to p = 24), fp32 recording its empty census;
+    (p + G)/2 = 32 up to p = 24, an empty range), fp32 recording its
+    empty census;
   - the budget's files; fp32's reduction; Fast2Sum where ordered;
   - the rate law's G' = 6, 15 cells and three sigma;
   - routines' constants left alone;
@@ -5977,15 +5980,41 @@ this level?** Logan's instruction, above.
     ledger names each arm's agent, whose transcript shows its model,
     and each verifier sees its author's trailer.
 - **Two verifiers, one brief.** Both run on Sonnet, the round's
-  standing rule, from the same text, and each re-runs every plant of
-  its arm. An arm goes back at most twice: one not clean after its
-  second re-check has not ended clean.
-- **A blind comparison.** When both arms have ended, clean or at the
-  cap, a third agent on Opus reads both. It gets each arm's tracked
-  tree exported without its git (git archive), its commit messages
-  with their trailers stripped, labelled a and b, and the brief's
-  template with its corrections; it reads nothing else of the round.
-  It scores them against this rubric, written now:
+  standing rule, from the same text. Each re-runs every plant of its
+  arm and runs its tests and its `--check`. The lead runs each arm's
+  long runs on amd-arc-box, with the golden stage beside them.
+- **A common battery,** the lead's, run as each arm's verifier starts,
+  on the desktop niced (under a minute a format at 2,000 random lanes)
+  or on amd-arc-box: one set of arguments with the same seeds - the
+  pools and random lanes - through each arm's `mathlib.fragment` and
+  `mathlib.evaluate` against transcend.exp, each arm's marks listed.
+  It sees no test, bound or plant: those are the verifiers', the box's
+  and the comparison's.
+- **The rules for E1's verdict.** They were fixed before dispatch
+  (4ad5cea, 15:00) and revised after it: at 15:48 and 16:14, before
+  either arm reported, on verifier-P7b's and verifier-P7c's notes; and
+  at 16:38, on verifier-P7d's, when one arm had reported and no
+  verifier had. Logan answered the 15:48 revision: "Keep the more fair
+  rule you went with".
+  - **An arm ends** when its last verifier finds no (a) and no (b) - it
+    has then ended clean - or when it has gone back twice, the cap, and
+    its second re-check still finds one.
+  - **A failure is a (b) for its arm, whoever finds it:** a test, a
+    `--check` or a long run that fails, or a case. A **case** is a
+    defect the lead confirms: on rubric item 1, a wrong unmarked lane, a
+    bound that fails, or a bound stated by a sample where the brief asks
+    for the budget; on item 2, a check that no plant makes fail.
+  - **Before an arm ends,** a (b) goes back in its chain as a
+    send-back. **After,** the arm merges only once its author has fixed
+    it and a narrow re-check - a verifier on the fix alone - is clean,
+    and a case among them is counted for the third criterion. That fix
+    counts neither against the cap nor in the first criterion, which
+    judge the verifiers' chain.
+- **A blind comparison.** When both arms have ended, a third agent on
+  Opus reads both. It gets each arm's tracked tree exported without its
+  git (git archive), its commit messages with their trailers stripped,
+  labelled a and b, and the brief's template with its correction; it
+  reads nothing else of the round. It scores them against this rubric:
   1. correctness: every lane right or marked against transcend.py; the
      bound held by the budget at the decided G at fp64, fp128 and
      fp256, fp32 measured;
@@ -5993,52 +6022,32 @@ this level?** Logan's instruction, above.
   3. completeness against the brief's list;
   4. the code's and the entry's clarity;
   5. honest marks (measured, read, believed).
-  It names the branch to merge, and why. If it calls them equal, the
-  lead takes the arm with fewer confirmed cases (below), then fewer
-  send-backs, then arm a. When it has reported, it guesses which arm
-  is which model, and why; then the lead opens the coin.
-- **A common battery,** the lead's, run as each arm's verifier starts,
-  on the desktop niced (seconds a format at a few hundred lanes) or on
-  amd-arc-box: each arm's tests and `--check`, and one set of arguments
-  with the same seeds - the pools and random lanes - through each
-  arm's fragment against transcend.exp, with each arm's marks listed.
-  A failing test or `--check`, or a wrong unmarked lane, is a (b) for
-  that arm. It cannot see a bound or a plant: those are the
-  verifiers' and the comparison's.
-- **Sonnet's parcel succeeds when** (fixed before either ran, at
-  4ad5cea; the third criterion revised at 15:48, after dispatch and
-  before either arm reported, on verifier-P7b's note):
-  - its arm ends clean - no (a) and no (b) - within the cap, after at
-    most one more send-back than Opus's arm needed; if Opus's arm does
-    not end clean, Sonnet's need only end clean;
-  - by its last verifier's account it misses no item of the brief's
-    must-have list, as corrected (every lane right or marked; the
-    bound held; every check able to fail);
-  - it is not materially worse on rubric item 1 or item 2. A case is a
-    concrete defect in an arm's ended state that the other arm's does
-    not share - on item 1 a wrong unmarked lane, a bound that fails,
-    or a bound stated by a sample where the brief asks for the budget;
-    on item 2 a check that no plant makes fail - named by the
-    comparison and confirmed by the lead. Sonnet's arm is materially
-    worse on an item when it has more such cases there than Opus's.
-    Both lists go to Logan.
+  It names its cases, and the branch to merge, and why. When it has
+  reported, it guesses which arm is which model, and why; then the
+  lead opens the coin.
+- **Sonnet's parcel succeeds when:**
+  1. its arm ends clean, after at most one more send-back than Opus's
+     arm needed; if Opus's arm does not end clean, Sonnet's need only
+     end clean;
+  2. by its last verifier's account it misses no item of the must-have
+     list as brief correction 1 restated it (every lane right or
+     marked; the bound held; every check able to fail);
+  3. it is not materially worse on rubric item 1 or on item 2. On each
+     item, count each arm's cases from after its end that the other
+     arm does not share; Sonnet's arm is materially worse on an item
+     when its count there is the larger. Both lists go to Logan.
   Time and tokens, summed from each agent's transcript (the last line
   of each response; a notification's figure is its context size, step
   6's ledger found), are recorded for both and do not decide. Each
   model runs at its own default effort. One run an arm is n = 1: E1
   shows what one Sonnet run did, not a rate.
 - **What follows.**
-  - If both arms are clean, the branch the comparison names merges (by
-    its tie rule, above, if it calls them equal); if one is, that one;
-    if neither, none, and the result goes to Logan at the hold. A
-    branch not merged stays, for the record.
-  - A case the lead confirms is a (b) for its arm, whoever finds it.
-    The battery's join the check they start, as send-backs. The
-    comparison's come after both arms have ended: they count in the
-    third criterion, and an arm carrying one merges only once its
-    author has fixed it and a narrow re-check is clean. That fix does
-    not count against the cap or the first criterion, which judge the
-    verifiers' chain.
+  - An arm is clean for the merge when it ended clean and carries no
+    unfixed failure. If both are, the branch the comparison names merges;
+    if it calls them equal, the arm with fewer of the third criterion's
+    cases, then fewer send-backs, then arm a. If one is, that one. If
+    neither, none, and the result goes to Logan at the hold. A branch
+    not merged stays, for the record.
   - The round then holds, and Logan decides from E1's result how M1's
     build and M2's study use models (his answer, below). His
     instruction lets the later parcels follow E1's pattern if Sonnet
@@ -6152,8 +6161,8 @@ as the study recommends:
 - Compile time, which is later performance work.
 
 **Sentences elsewhere that this plan supersedes:**
-- M1's study's "VERSION 5" (its section 10, item 4, and its Versions
-  note) is now 6;
+- M1's study's "VERSION 5" (its section 10, item 4, its question 9
+  and its Versions note) is now 6;
 - its section 8, item 4's structured windows "at every format": fp32
   has none at G = 40 (E1's brief correction 1).
 Each is restated by the parcel that changes its subject, or by the
@@ -6180,8 +6189,12 @@ comparison names the branch to merge. Verifier-P7c re-checked that
 (339d832): two wrong answers, both in the lead's rules - this
 section's "settled before dispatch" and "fixed now" headers, made
 false by changes after dispatch, and no decision for a case
-confirmed after an arm had ended clean - restated above. The round
-holds when E1 finishes.
+confirmed after an arm had ended clean - restated above. Verifier-P7d
+re-checked that (d65eb22): four wrong answers in the lead's text - an
+empty range written "down to", the 16:14 revision left undated, a
+battery said to run tests it does not, and no rule for a case found
+after an arm's end by another finder - and E1's verdict rules were
+rewritten above as one block. The round holds when E1 finishes.
 
 ## The adoption story these serve
 
