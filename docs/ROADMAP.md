@@ -5887,31 +5887,34 @@ says so.
 
 **E1, the experiment, first: can a Sonnet-class model author a parcel at
 this level?** Logan's instruction, above.
-- **The parcel is exp2's routine, golden-first,** in a new
-  module, python/cft_golden/mathlib.py:
+- **The parcel is exp's routine, golden-first,** in a new
+  module, python/cft_golden/mathlib.py (Logan chose exp over the
+  plan's first proposal, exp2, as the harder test):
   - the fragment at fp64, fp128 and fp256, and at fp32 as question 2
     decides, at every attribute and at the G question 1 decides;
   - its constants derived and checked by a `--check`;
   - the fragment held to its invariants;
-  - the study's section 8, items 1 to 5, for exp2: on seq.py against
-    transcend.exp2 over the pools and the vector sets; the bound
+  - the study's section 8, items 1 to 5, for exp: on seq.py against
+    transcend.exp over the pools and the vector sets; the bound
     against mpmath at each path's worst points; the mark-rate law; the
-    exact cases; the constants;
+    structured family's windows as a committed list, their centres
+    and neighbours (question 4); the constants;
   - a planted fault for every check;
   - a VALIDATION entry.
 - **Not in E1:** routines.py's and cftc's names (item 4 below),
   program.c (item 2), the card.
-- **Why exp2 first.** It is the simplest of the six to reduce: x splits
-  exactly into n/8 and a remainder, with no ln 2 in the reduction, and
-  it has no structured family (the study, 5.3). It still needs
-  everything the generator needs: the double word, the table read, the
-  polynomial, the scale by 2^k, the in-lane test and its mark, and the
-  specials. The study measured its fragment at 176 to 199 instructions
-  from fp64 to fp256, and its model (`m1exp.py`) is the reference
-  design both authors start from.
+- **Why exp.** It carries everything the generator needs - the double
+  word, the table read, the polynomial, the scale by 2^k, the in-lane
+  test and its mark, the specials - and two things exp2 lacks: the
+  reduction by ln 2, a magic-number FMA and Cody-Waite in three words
+  (the study, 2.2), and a structured family near 0 whose windows mark
+  and replay (3.5). The study measured its fragment at 178 to 201
+  instructions from fp64 to fp256, and 382 at fp32 triple-word at
+  G = 40 (5.1); its model (`m1exp.py`) is the reference design both
+  authors start from.
 - **Two authors, one brief.**
   - The same text, two worktrees from one commit, two branches
-    (m1-exp2-opus and m1-exp2-sonnet), dispatched at the same time.
+    (m1-exp-opus and m1-exp-sonnet), dispatched at the same time.
   - Opus 5.5 and Sonnet 5.5 are set by the Agent tool's model field.
   - A question from either author is answered to both, word for word.
   - Neither sees the other's branch.
@@ -5938,17 +5941,16 @@ this level?** Logan's instruction, above.
 - **What follows.**
   - The branch the comparison prefers is merged, if both are clean. The
     other stays as a branch, for the record.
-  - If Sonnet succeeds, the round's later parcels may be authored on
-    Sonnet from the lead's briefs, as Logan allows. The lead records
-    each choice and keeps Opus for the parts it judges hardest: a
-    bound's budget, M2's reduction.
-  - If Sonnet fails, the round's parcels stay on Opus.
-  - Either way, a VALIDATION entry records E1, and the rest is Logan's
-    call.
+  - The round then holds, and Logan decides from E1's result how M1's
+    build and M2's study use models (his answer, below). If Sonnet
+    succeeds, his instruction allows the round's later parcels to be
+    authored on Sonnet from the lead's briefs; if it fails, they stay
+    on Opus.
+  - Either way, a VALIDATION entry records E1.
   - Its cost: two authors and two verifiers for one parcel.
 
 **M1's build after E1** (the study's section 10, in its order).
-1. **exp and expm1, then log, log2 and log1p,** in mathlib.py as exp2
+1. **exp2 and expm1, then log, log2 and log1p,** in mathlib.py as exp
    was, each with its section 8 tests.
 2. **program.c parity:** the fragments' programs in seq_check's
    corpora. No new C, since the routines are programs of existing
@@ -5987,9 +5989,10 @@ function gains an L3 rule.
 - **Their order:** M2's study can run beside M1's build. M3 and M4
   follow M2.
 
-**Questions for Logan, before any code.** M1's eleven open ones (the
-study's section 9; its question 5 is done), and the round's own two.
-Each has a recommendation:
+**Logan's answers** (2026-10-12, to the lead's questions on this plan).
+M1's eleven open questions (the study's section 9; its question 5 is
+done): "Approve all as recommended (Recommended)", so each is settled
+as the study recommends:
 1. **G:** 44 at fp64, 46 at fp128 and fp256.
 2. **fp32:** triple-word, at G = 40.
 3. **The tables:** the SELECT tree, N = 8.
@@ -6010,20 +6013,20 @@ Each has a recommendation:
 12. **Live values:** widen C4's invariants as the study's section 6
     says (the exp family keeps 22 to 24 live, log1p 18, against C4's
     16).
-- **E1's function:** exp2.
-- **The round's extent:**
-  - all of it: M1's build, then M2 to M4's studies and builds;
-  - or a shorter round: M1's build and M2's study, with M2 to M4's
-    builds in a round of their own.
+- **E1's function:** "exp" (the plan had proposed exp2).
+- **The blind comparison's judge:** "Opus (Recommended)".
+- **The round's extent,** in his words: "Hold once E1 finishes to
+  determine how M1 + M2 will utilize models, M2-M4 builds becoming
+  their own round."
 
 **The order.**
 1. Logan's answers.
-2. E1: the two exp2 parcels, their verifiers, the blind comparison, and
+2. E1: the two exp parcels, their verifiers, the blind comparison, and
    the result to Logan.
-3. M1's build, items 1 to 6, each parcel verified.
-4. M2's study, beside M1's build if Logan chooses.
-5. M2's build, then M3's and M4's studies and builds, by the extent
-   Logan chooses.
+3. **Hold:** Logan decides how M1's build and M2's study use models.
+4. M1's build, items 1 to 6, each parcel verified; M2's study.
+5. M2 to M4's builds, and M3's and M4's studies, in a round of their
+   own.
 
 **What it is not.**
 - New RTL. The routines are programs of existing instructions, R24's and
@@ -6035,6 +6038,10 @@ Each has a recommendation:
 **Sentences elsewhere that this plan supersedes:** M1's study's "VERSION
 5" (its section 10, item 4, and its Versions note) is now 6. Its parcel
 restates it.
+
+**Answered.** Logan answered this plan's questions on 2026-10-12 (above).
+E1 starts after verifier-P7's check of the plan, and the round holds
+when E1 finishes.
 
 ## The adoption story these serve
 
