@@ -5920,25 +5920,32 @@ this level?** Logan's instruction, above.
     figure - in mathlib.py itself. routines.py's stay as they are for
     division and root, so both authors face one regression surface.
     Moving them into routines.py and cftc's check is item 4.
-  - **The bound's budget** is verifier-VM1b's, ported to tree code: it
-    reads the unpruned body, its phases and the probes Vh, Vl, Bv and
-    Ek (`docs/studies/m1/vm1b/adlib.py`), so mathlib.py keeps an
+  - **The bound's budget** is verifier-VM1b's, ported to tree code. It
+    reads the unpruned body and its phases, with the probes Vh, Vl and
+    Bv (`docs/studies/m1/vm1b/adlib.py`) and Ek
+    (`docs/studies/m1/vm1b/p5_budget.py`), so mathlib.py keeps an
     instrumented form of the fragment for it. No tree file imports
     docs/studies/.
   - **One interface,** so that one battery runs on both branches:
     `mathlib.fragment("exp", fmt, rnd)` returns the specialised
     routines.Fragment, as `routines.fragment` does, and
     `mathlib.evaluate(f, x)` one lane's result and flag word.
+  - **Brief correction 1,** sent to both authors word for word after
+    verifier-P7b's check: the structured windows at fp64, fp128 and
+    fp256 only, fp32 recording its empty census; the budget's files;
+    fp32's reduction; Fast2Sum where ordered; the rate law's G' = 6,
+    15 cells and three sigma; routines' constants left alone; and a
+    mark in the pools off the structured list failing test 1.
 - **Why exp.** It carries the parts the six share - the double word,
-  the table read, the polynomial, the scale by 2^k, the in-lane test and
-  its mark, the specials - and two that exp2 lacks: the Cody-Waite
-  reduction, x - n ln2/8 with ln2/8 in three words, where exp2's
-  x - n/8 is exact and is then multiplied by a two-word ln 2 (the
-  study, 2.2); and a structured family near 0 whose windows mark and
-  replay (3.5). The study measured its fragment at 178 to 201
-  instructions from fp64 to fp256, and 382 at fp32 triple-word at
-  G = 40 (5.1); its model (`m1exp.py`) is the reference design both
-  authors start from.
+  the table read, the polynomial, the in-lane test and its mark, the
+  specials - with the exp family's scale by 2^k, and two parts that
+  exp2 lacks: the Cody-Waite reduction, x - n ln2/8 with ln2/8 in
+  three words, where exp2's x - n/8 is exact and is then multiplied by
+  a two-word ln 2 (the study, 2.2); and a structured family near 0
+  whose windows mark and replay (3.5). The study measured its fragment
+  at 178 to 201 instructions from fp64 to fp256, and 382 at fp32
+  triple-word at G = 40 (5.1); its model (`m1exp.py`) is the reference
+  design both authors start from.
 - **Two authors, one brief.**
   - The same text, its two copies differing only in their tree, branch
     and ledger names, each copy's sha256 recorded at dispatch.
@@ -5957,15 +5964,21 @@ this level?** Logan's instruction, above.
   - Neither may look at the other's clone, branch or ledger: the
     brief says so, and separate clones keep the other's commits out
     of each one's git.
+  - The lead runs every long run an author hands back, in the order
+    they come, and offers neither arm the other's.
+  - The seal holds against the comparison by instruction: the lead's
+    ledger names each arm's agent, whose transcript shows its model,
+    and each verifier sees its author's trailer.
 - **Two verifiers, one brief.** Both run on Sonnet, the round's
   standing rule, from the same text, and each re-runs every plant of
   its arm. An arm goes back at most twice: one not clean after its
   second re-check has not ended clean.
 - **A blind comparison.** When both arms have ended, clean or at the
-  cap, a third agent on Opus reads both. It gets each arm's tree
-  exported without its git, and its commit messages with their
-  trailers stripped, labelled a and b; it reads nothing else of the
-  round. It scores them against this rubric, written now:
+  cap, a third agent on Opus reads both. It gets each arm's tracked
+  tree exported without its git (git archive), its commit messages
+  with their trailers stripped, labelled a and b, and the brief's
+  template with its corrections; it reads nothing else of the round.
+  It scores them against this rubric, written now:
   1. correctness: every lane right or marked against transcend.py; the
      bound held by the budget at the decided G at fp64, fp128 and
      fp256, fp32 measured;
@@ -5973,26 +5986,35 @@ this level?** Logan's instruction, above.
   3. completeness against the brief's list;
   4. the code's and the entry's clarity;
   5. honest marks (measured, read, believed).
-  When it has reported, it guesses which arm is which model, and why;
-  then the lead opens the coin.
-- **A common battery,** the lead's: each arm's tests and `--check`, and
-  one set of arguments with the same seeds - the pools and random
-  lanes - through each arm's fragment against transcend.exp.
+  It names the branch to merge, and why. If it calls them equal, the
+  lead takes the arm with fewer confirmed cases (below), then fewer
+  send-backs, then arm a. When it has reported, it guesses which arm
+  is which model, and why; then the lead opens the coin.
+- **A common battery,** the lead's, run as each arm's verifier starts:
+  each arm's tests and `--check`, and one set of arguments with the
+  same seeds - the pools and random lanes - through each arm's
+  fragment against transcend.exp, with each arm's marks listed. A wrong
+  unmarked lane it finds is a (b) for that arm. It cannot see a bound
+  or a plant: those are the verifiers' and the comparison's.
 - **Sonnet's parcel succeeds when** (fixed now, before either runs):
   - its arm ends clean - no (a) and no (b) - within the cap, after at
     most one more send-back than Opus's arm needed; if Opus's arm does
     not end clean, Sonnet's need only end clean;
   - by its last verifier's account it misses no item of the brief's
-    must-have list (every lane right or marked; the bound held; every
-    check able to fail);
-  - it is not materially worse on rubric items 1 or 2: no concrete
-    case the other arm does not share - a wrong unmarked lane, a bound
-    that fails or is stated by a sample where the brief asks for the
-    budget, a check that no plant makes fail - named by the comparison
-    or found by the battery, and confirmed by the lead.
-  Time and tokens, summed from each agent's transcript (a
-  notification's figure is its context size, step 6's ledger found),
-  are recorded for both and do not decide. One run an arm is n = 1: E1
+    must-have list, as corrected (every lane right or marked; the
+    bound held; every check able to fail);
+  - it is not materially worse on rubric item 1 or item 2. A case is a
+    concrete defect that one arm has and the other does not - on item
+    1 a wrong unmarked lane or a bound that fails; on item 2 a bound
+    stated by a sample where the brief asks for the budget, or a check
+    that no plant makes fail - named by the comparison or found by the
+    battery, and confirmed by the lead. Sonnet's arm is materially
+    worse on an item when it has more such cases there than Opus's.
+    Both lists go to Logan.
+  Time and tokens, summed from each agent's transcript (the last line
+  of each response; a notification's figure is its context size, step
+  6's ledger found), are recorded for both and do not decide. Each
+  model runs at its own default effort. One run an arm is n = 1: E1
   shows what one Sonnet run did, not a rate.
 - **What follows.**
   - If both arms are clean, the branch the comparison prefers merges;
@@ -6049,8 +6071,8 @@ function gains an L3 rule.
   - the cost of 2^1024's range measured (step 6's plan).
 - **M3, the pow family:** its structured cases need 2p to 3p bits.
 - **M4, atan, atan2, asin and acos.**
-- **Their order:** M2's study can run beside M1's build. M3 and M4
-  follow M2, M3 last, as step 6's plan has it.
+- **Their order:** M2's study can run beside M1's build, and M3 comes
+  last, as step 6's plan has it.
 
 **Logan's answers** (2026-10-12, to the lead's questions on this plan).
 M1's eleven open questions (the study's section 9; its question 5 is
@@ -6062,8 +6084,8 @@ as the study recommends:
 4. **The structured families:** keep their marks, list the windows'
    centres in the tests, and have LANGUAGE.md state the rule.
 6. **ln 2 in exp2's and log2's tangent rules:** the exact rational ln 2,
-   rounded once at the program's format (transcend.log of 2); no new
-   name.
+   rounded once at the program's format under its attribute
+   (transcend.log of 2); no new name.
 7. **log's tangent where log is a NaN:** the select form.
 8. **Constants:**
    - fold the six exact rational cases;
@@ -6075,12 +6097,14 @@ as the study recommends:
 11. **The generator's home:** a new module, python/cft_golden/mathlib.py.
 12. **Live values, and C4's other invariants** (the study's section
     6): the exp family keeps 22 to 24 live and log1p 18, against C4's
-    16. Reorder in phase 2 and measure spills on a reference step;
-    raise `routines.LIVE_MAX` (NREG is 32); give `flag_words` an IOR
-    rule; admit RDN, RUP and the program's attribute inside a routine;
-    spend one instruction each in expm1 and log1p so that no
-    instruction reads only the input. The question does not count
-    fp32's triple-word exp, which keeps 33 to 34 (E1's scope, above).
+    16. Reorder in phase 2 and measure spills on a reference step; the
+    exp family's count is structural, so expect to raise
+    `routines.LIVE_MAX` (NREG is 32). Give `flag_words` an IOR rule;
+    admit RDN, RUP and the program's attribute inside a routine; spend
+    one instruction each in expm1 and log1p so that no instruction
+    reads only the input. Relaxing inline.py's invariant instead is the
+    alternative, not recommended. The question does not count fp32's
+    triple-word exp, which keeps 33 to 34 (E1's scope, above).
 - **E1's function:** "exp" (the plan had proposed exp2).
 - **The blind comparison's judge:** "Opus (Recommended)".
 - **The round's extent,** in his words: "Hold once E1 finishes to
@@ -6115,9 +6139,17 @@ step 6's leftovers; the nextpnr condition put on the quad), restated
 above. Its notes on E1's design are adopted as E1's scope and rules,
 above, but one: the comparison runs once, not twice with its labels
 swapped, since success rests on concrete cases the lead confirms,
-not on the comparison's preference. E1 starts on this revision while
-a narrow re-check of it runs; a correction it finds reaches both
-authors alike. The round holds when E1 finishes.
+not on the comparison's preference; the merge choice may carry a
+position bias, which is recorded. E1 started on that revision
+(4ad5cea) while verifier-P7b re-checked it: no regression, P7's two
+statements fixed truly, and one wrong answer in E1's brief (a
+structured window asked for at fp32, which has none), corrected to
+both authors alike with six other brief corrections. On P7b's notes,
+before either arm reported, the success criteria's "materially
+worse" became a count on each item against the other arm's, where it
+had failed Sonnet's arm on any case of its own; the battery runs with
+each arm's verifier and its wrong lanes are findings; the comparison
+names the branch to merge. The round holds when E1 finishes.
 
 ## The adoption story these serve
 
