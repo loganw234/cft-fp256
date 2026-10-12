@@ -18936,3 +18936,46 @@ The card results will be the lead's entry.
 - The hook in the vpl's dynamic-region flow is BELIEVED from toy2; the first image built with SYNTH_CLOCK=1 shows it or not. What keeps the hook's clock out of an implementation, `-mode out_of_context` or the run being a project of its own, is BELIEVED (the fix, above); both guards stay.
 - With SYNTH_CLOCK=1 and RETIMING=1, the verification gap hw/rebuild-2022.sh's comment names becomes real: the cocotb benches and hw_emu simulate the RTL source, so only the card's vectors would see a retimed netlist.
 - The images other than revision 8's three and q135 are unretimed by their flow (BELIEVED); their logs were not read.
+
+## 2026-10-12 - step 6's leftovers, closed: ten of the eleven hard workloads that missed revision 7 run on revision 8's cards (rev8q nine of nine, rev8d one of one), and RETIMING=1 is shown never to have retimed (SYNTH_CLOCK off by Logan's word)
+
+**Why.**
+- Step 6's close (the entries above, parts one and two) left two things for Logan's choice: the plan's "the workloads that missed run on whichever build holds them", not done in step 6, and whether RETIMING retimes, raised by part two's known limits. On 2026-10-12 Logan chose them as this round ("Step 6's leftovers"), before the math library's round.
+- Parcel W8's entry (above) measured the eleven against revision 8's targets and built the revision-8 set; parcel RT's entry (above) answered the retiming question. This entry is the lead's: W8's card runs, the round's decisions, and its close.
+- Marks: MEASURED by the lead on amd-arc-box and the card; READ in a named record; COMPUTED; BELIEVED. Box records are in the round's box/ (`Data/runs/2026-10-12-step6-leftovers/box/`, not in git).
+
+**The revision-8 set on the cards** (the lead's box_w8_card.sh on amd-arc-box and the U50, 2026-10-12 07:28:38 to 08:17:12; box/w8-card-c77a6a0/: w8-card-summary.txt and the logs).
+- **The tree:** s6x-w8 at c77a6a0 (HEAD, status 0, python/cftc af63e9f - main's, cftc unchanged - `def rule_target` x1, acceptance-rev8.json's sha256 ea869b6e..., each asserted); cft-segrun and cft-audit built with XRT=1, XRT-linked, no warning (w8-build.log).
+- **A slip of the lead's:** the first launch (07:27:36) refused itself - its guard against a card process matched the lead's own launching command, which held a pgrep of the same words - before it had made anything (w8-card-summary-try1.txt). Relaunched at 07:28:38 with a plain command.
+- **The images:** seeded with the box's own compiles of Gray-Scott extended (from its u50-rev8-deep compile) and Riccati extended (from its u50-rev8-quad compile), box/w8-compile/.
+- **The software check of the record on the box** (`--set rev8 --legs set,oracle --images`; the box compiling the other eight itself): "acceptance rev8: 20 of 20 PASS on sw (oracle, set); 158 checks ok, 0 failed, 2474 s" (w8-sw.log). The box's twenty image and bank files are W8's desktop ones byte for byte (w8-images.sha256 against W8's w8/images/; COMPUTED by the lead, the MSYS `*` marker stripped): cftc writes one set of bytes on Linux (Python 3.12.3) and on Windows.
+- **rev8q, the streaming quad** (`--set rev8 --target u50-rev8-quad --device ~/cardday-rev8q/cft_hw_quad.xclbin --images ...`): "acceptance rev8: 9 of 9 PASS on ~/cardday-rev8q/cft_hw_quad.xclbin as u50-rev8-quad (set); 115 checks ok, 0 failed, 353 s" (w8-card-rev8q.log; the box's home written ~ here). Every entry's certificate read "backend xrt, device-xclbin 4f9921a25af65444, device-tiles 4, scratch depth 4096", and "the device is u50-rev8-quad's tiles and depth"; 256 lanes for the seven fp64 entries and 64 for Gray-Scott and Lorenz-tangent wide; four segments of two steps, flags [16, 16, 16, 16]; every digest the set's, cft-audit accepting in full, the golden spot check holding (Riccati extended's 157.4 s the longest).
+- **rev8d, the deep single:** "acceptance rev8: 1 of 1 PASS on ~/cardday-rev8d/cft_hw_deep.xclbin as u50-rev8-deep (set); 27 checks ok, 0 failed, 77 s" (w8-card-rev8d.log, the home written ~): Gray-Scott extended, 64 lanes, "device-xclbin bbf08fb3feb60940, device-tiles 1, scratch depth 8192".
+- **Every line W8's lead-commands.txt predicted appeared** (READ against the logs).
+- **So:** the plan item step 6 left undone is done. Of the eleven that missed revision 7, nine run on the quad - Gray-Scott and Lorenz-tangent hard and wide, and FPUT, phi4, Kuramoto-Sivashinsky, the reservoir map and Riccati extended - and Gray-Scott extended on the deep single, each certified on the card, audited in full and held to the pack's own one-step oracle. Lorenz-tangent extended, at 15,347 scratch slots a lane by cftc's allocation, fits none: Logan, verbatim, "The Lorenz-tangent may simply be the 'upper bound' on what the U50 can host, potentially a larger Alveo board could host programs of that size in the future. With the open core boards likely having much smaller ones themselves. Not a problem, good to know its limitations so far."
+
+**Retiming** (parcel RT's entry above, with its two later commits restated in place; the lead's part).
+- **The lead's check in a real link** (MEASURED on amd-arc-box, 2026-10-12, /data/rev7-quad/q135 - revision 7's quad as linked before the fixes round, when RETIMING reached krnl_1 alone): krnl_1's synthesis ran `synth_design ... -retiming` and logged Synth 8-11322 21 times; krnl_4's ran without the flag and logged it 0 times; krnl_2 and krnl_3 took the IP cache. Their funcsim netlists (the link's prj.gen/my_rm/bd/ulp/ip/ulp_cft_krnl_1_0/ and ulp_cft_krnl_4_0/ *_sim_netlist.v) are each 77,773,978 bytes and 2,306,115 lines; with `//` comment lines removed and the IP name normalized they hash the same (088e69225ded7d03...) and differ by 0 lines. One tree, one link, the flag on one CU and not the other: one netlist.
+- **The whole-kernel probe** (the lead's run of hw/probe_rt.sh at 949e56c, 05:14 to 07:07, box/probe-rt-949e56c/; RT's entry gives its four ways): the flag without a clock gives the unflagged netlist; with a clock at synthesis it retimes.
+- **Logan's decisions, verbatim (his answers to the lead's questions, 2026-10-12):** on SYNTH_CLOCK, "Keep it off for now (Recommended)"; on replaying the 2026-09-02 experiment, "Skip it (Recommended)".
+- **CLAUDE.md** now carries the finding (RT's proposed wording, shortened by the lead) and a note that hw_emu runs in cft2204 and never on amd-arc-box (step 6's probe E, 2026-10-05).
+
+
+**The round, closed.**
+- Both of step 6's leftovers are done: the hard workloads that missed revision 7 run on revision 8's cards where one holds them - ten of eleven, Lorenz-tangent extended the U50's bound - and the retiming question is answered: RETIMING=1 never retimed, and the fix that would let it, SYNTH_CLOCK, exists and is off.
+- Verified by Sonnet verifiers, by Logan's word: W8 by VW8; RT by VRT and VRTb, its third commit 2ae524d read with the integration.
+- Next, by Logan's choice of 2026-10-12: the math library's round - first its plan, for Logan, answering M1's other eleven questions; then M1's phase 2 and M2 to M4.
+
+**Known limits, recorded rather than fixed** (Logan's rule).
+- **The new census stage covers eight of the ten:** Gray-Scott and Riccati extended take about 40 minutes and 2.2 hours to compile, so they are a card day's, through --images (W8's design). Committing their images (about 4 MB) would let the census cover all ten; that is Logan's call on repository size.
+- **acceptance-rev8's oracle covers the four images acceptance-far holds,** up to the REPEAT count, so acceptance-far may now be redundant (W8's note). It is kept.
+- **The set's oracle has the pack's three lanes:** one Gray-Scott-wide mutant of eleven survives it, differing only in lanes the pack's three cannot reach (verifier-VW8's survey). The set leg's 64 or 256 lanes are the card's check.
+- **In --images mode REV8_STEPS is not compared** (VW8); the compile path, the census stage, catches it. **The identity check is tautological on the software backend** and bites on a card (VW8).
+- **Lorenz-tangent extended needs 15,347 slots by cftc's allocation;** whether another allocation would fit the deep single is not shown.
+- **SYNTH_CLOCK inside Vitis's own link flow is believed, not shown** (RT): the first image built with it must show its kernel clock as clk_out1_ulp_clk_wiz_0 and no cft_synth_ooc_clk in its routed timing summary.
+- **The 2026-09-02 record's gain is not retiming's,** its cause believed to be 8f5f149's register; the replay was skipped by Logan's word, and its DSP 292 -> 277 change stays unexplained.
+- **Two slips of agents this round, recorded:**
+  - Parcel RT deleted a pre-existing /tmp/x (in Git Bash /tmp is the Windows Temp directory). Logan: "Not a problem, decent directory for the mistake to happen in, likely nothing was there".
+  - Verifier VW8 stopped about 63 grep.exe filters of other sessions' monitors on the desktop, by a command-line pattern. Logan, after the lead told the affected session at his word: "Nothing harmed on the other session, all good".
+  - Every brief now carries both rules: delete only what the run created, and stop only processes the run started, by PID.
+- **The lead's slip:** the first launch of the W8 card script refused itself, its guard matching the launching command, as at rev8a's card day.

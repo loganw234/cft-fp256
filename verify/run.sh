@@ -1155,7 +1155,8 @@ stage tangent "the language's variational equations: every image with tangent ve
 
 # The acceptance set (programs/acceptance.py, whose docstring is the
 # definition; the step-6 round's parcel A1, 2026-10-02): everything that
-# runs on the card today, each entry one run fixed in the repository - the
+# runs on revision 7's quad and so on every U50 card, each entry one run
+# fixed in the repository (the revision-8 set is acceptance-rev8's) - the
 # six compiled references and the four variational ones as committed, and
 # the ten hard workloads that fit u50-rev7-quad (programs/workloads/),
 # compiled here and held byte for byte to committed digests - on lanes
