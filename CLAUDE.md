@@ -87,9 +87,10 @@ Full procedure in **`docs/BITSTREAM-BUILDS.md`**. The short version:
 `-retiming` on each kernel CU's out-of-context synthesis inside the link,
 and that synthesis has no clock, so Vivado declines it (`INFO: [Synth
 8-11322] No global retiming is needed without any clock constraint`) and
-the netlist is the one `RETIMING=0` gives - shown for revision 8's three
-images, on the whole kernel (`hw/probe_rt.sh` on amd-arc-box) and in
-revision 7's q135 link, and believed of every earlier image. Read
+the netlist is the one `RETIMING=0` gives - shown byte for byte on the
+whole kernel at rev8a's generics (`hw/probe_rt.sh` on amd-arc-box) and
+in revision 7's q135 link; for rev8q and rev8d their logs show the
+decline; believed of every earlier image. Read
 "retimed" in any record before then as "built with the flag"; the
 manifest's `retiming_effect:` says what each CU's synthesis did.
 `SYNTH_CLOCK=1` gives that synthesis its clock (out of context it then
