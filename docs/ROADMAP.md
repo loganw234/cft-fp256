@@ -5845,6 +5845,197 @@ checks. Logan, verbatim: on question 9, "Only if probe L finds it cheap
 lanes at about 2,000 LUTs a tile or fewer, and every other question
 is decided as recommended. The RTL starts with round 1 (part 5).
 
+### The math library: M1's build, then M2 to M4, with a first experiment on who authors a parcel (plan of record, 2026-10-12)
+
+Logan, verbatim:
+- On 2026-10-05, closing step 6 at revision 8: "Close and have the rest
+  of the math library in its own round later. Fixing the golden model
+  during this round as well."
+- On 2026-10-12, after step 6's leftovers: "What's remaining before work
+  begins again on the next round, and that covers the remaining math
+  library?"
+- Then: "Start the math library round's plan, though include an
+  experiment to run first, the first function worked on will have a
+  matching parcel dispatched to an Opus 5.5 and Sonnet 5.5 model to
+  perform the parcel work, to see if Sonnet class is capable at this
+  level of work with proper guidance from the lead briefs. If it proves
+  successful, the other parcels for the round may follow similar
+  patterns."
+
+This plan goes to him before any code. Nothing in it exists yet unless it
+says so.
+
+**Where it starts** (READ at main 0893b2c).
+- **M1's design study is done:** docs/studies/M1-exp-log.md (step 6).
+  - The six routines exp, expm1, exp2, log, log1p and log2 are designed
+    and measured in a Python model (docs/studies/m1/), never built.
+  - Its section 8 says how phase 2 is held, section 9 asks twelve
+    questions, and section 10 orders phase 2.
+  - Question 5, the golden model's exp2 tie, is done: parcel XT moved
+    the conformance profile to 3 (docs/VALIDATION.md, 2026-10-05).
+- **The definition** is `cft_golden/transcend.py`, which has every
+  function M1 to M4 name.
+- **C4's routine machinery** is built for division and square root:
+  `routines.ROUTINES` is {div, sqrt}, cftc's `ir.ROUTINES` the same,
+  with the call loop and the internal check's invariants.
+- **Revision 8 is on the cards in three images:** R24's raise and mark,
+  R23's lane byte, 2^24 instructions streamed, and 4,096 or 8,192
+  scratch slots. The quad carries no R21, so M1 writes TwoSum on every
+  target, as revision 8's question 9 set out.
+- **cftc's output version is 5** (step 6's leftovers), so M1's step is
+  to 6.
+
+**E1, the experiment, first: can a Sonnet-class model author a parcel at
+this level?** Logan's instruction, above.
+- **The parcel is exp2's routine, golden-first,** in a new
+  module, python/cft_golden/mathlib.py:
+  - the fragment at fp64, fp128 and fp256, and at fp32 as question 2
+    decides, at every attribute and at the G question 1 decides;
+  - its constants derived and checked by a `--check`;
+  - the fragment held to its invariants;
+  - the study's section 8, items 1 to 5, for exp2: on seq.py against
+    transcend.exp2 over the pools and the vector sets; the bound
+    against mpmath at each path's worst points; the mark-rate law; the
+    exact cases; the constants;
+  - a planted fault for every check;
+  - a VALIDATION entry.
+- **Not in E1:** routines.py's and cftc's names (item 4 below),
+  program.c (item 2), the card.
+- **Why exp2 first.** It is the simplest of the six to reduce: x splits
+  exactly into n/8 and a remainder, with no ln 2 in the reduction, and
+  it has no structured family (the study, 5.3). It still needs
+  everything the generator needs: the double word, the table read, the
+  polynomial, the scale by 2^k, the in-lane test and its mark, and the
+  specials. The study measured its fragment at 176 to 199 instructions
+  from fp64 to fp256, and its model (`m1exp.py`) is the reference
+  design both authors start from.
+- **Two authors, one brief.**
+  - The same text, two worktrees from one commit, two branches
+    (m1-exp2-opus and m1-exp2-sonnet), dispatched at the same time.
+  - Opus 5.5 and Sonnet 5.5 are set by the Agent tool's model field.
+  - A question from either author is answered to both, word for word.
+  - Neither sees the other's branch.
+- **Two verifiers, one brief.** Both run on Sonnet, the round's
+  standing rule, from the same text.
+- **A blind comparison.** When both parcels are clean, or each has gone
+  back at most once, a third agent on Opus reads both branches. They
+  are labelled X and Y by a coin the lead records and does not tell
+  it. It scores them against this rubric, written now:
+  1. correctness: every lane right or marked against transcend.py; the
+     bound held by the budget at the decided G;
+  2. tests that can fail, shown by plants;
+  3. completeness against the brief's list;
+  4. the code's and the entry's clarity;
+  5. honest marks (measured, read, believed).
+- **Sonnet's parcel succeeds when** (fixed now, before either runs):
+  - its verifier ends with no (a) and no (b), within one more send-back
+    round than Opus's took;
+  - it misses no item of the brief's must-have list (every lane right
+    or marked; the bound held; every check able to fail);
+  - the blind comparison does not find it materially worse on items 1
+    or 2.
+  Time and tokens are recorded for both, and do not decide.
+- **What follows.**
+  - The branch the comparison prefers is merged, if both are clean. The
+    other stays as a branch, for the record.
+  - If Sonnet succeeds, the round's later parcels may be authored on
+    Sonnet from the lead's briefs, as Logan allows. The lead records
+    each choice and keeps Opus for the parts it judges hardest: a
+    bound's budget, M2's reduction.
+  - If Sonnet fails, the round's parcels stay on Opus.
+  - Either way, a VALIDATION entry records E1, and the rest is Logan's
+    call.
+  - Its cost: two authors and two verifiers for one parcel.
+
+**M1's build after E1** (the study's section 10, in its order).
+1. **exp and expm1, then log, log2 and log1p,** in mathlib.py as exp2
+   was, each with its section 8 tests.
+2. **program.c parity:** the fragments' programs in seq_check's
+   corpora. No new C, since the routines are programs of existing
+   instructions.
+3. **The language, golden-first:**
+   - the six nodes and their interpreter;
+   - folds and refusals (question 8);
+   - the L3 rules (questions 6 and 7);
+   - LANGUAGE.md;
+   - the language at 1.1.
+4. **cftc:**
+   - ROUTINES and the internal check's widened invariants (question 12);
+   - the targets' refusals, and the call loop over unary routines;
+   - VERSION 6, with the outputs record's block and the certificate
+     corpus remade (question 9);
+   - the Lotka-Volterra reference.
+5. **The stages' legs:** lang-routines and tangent, marked lanes
+   replayed (question 10), and VERIFICATION's rows.
+6. **The card, the lead's:** STATUS[6] and the lane byte on a structured
+   argument, and a routine case in the acceptance sets.
+
+The exhaustive fp32 sweep, and the larger bound and rate samples, go to
+amd-arc-box, the lead's. At each merge, the gate budget runs there.
+
+**M2, M3 and M4.** Each starts as a design study like M1's: golden-first,
+measured in a model, its questions to Logan before its build. Each
+function gains an L3 rule.
+- **M2, sin, cos and tan:**
+  - full range at fp64, with 2/pi's bits in the bank and the window
+    chosen by the exponent from a scratch copy read by LDX;
+  - a stated range at fp256, beyond which a lane is marked and
+    replayed;
+  - the cost of 2^1024's range measured (step 6's plan).
+- **M3, the pow family:** its structured cases need 2p to 3p bits.
+- **M4, atan, atan2, asin and acos.**
+- **Their order:** M2's study can run beside M1's build. M3 and M4
+  follow M2.
+
+**Questions for Logan, before any code.** M1's eleven open ones (the
+study's section 9; its question 5 is done), and the round's own two.
+Each has a recommendation:
+1. **G:** 44 at fp64, 46 at fp128 and fp256.
+2. **fp32:** triple-word, at G = 40.
+3. **The tables:** the SELECT tree, N = 8.
+4. **The structured families:** keep their marks, list the windows'
+   centres in the tests, and have LANGUAGE.md state the rule.
+6. **ln 2 in exp2's and log2's tangent rules:** the exact rational ln 2,
+   rounded once at the program's format (transcend.log of 2); no new
+   name.
+7. **log's tangent where log is a NaN:** the select form.
+8. **Constants:**
+   - fold the six exact rational cases;
+   - `irrational-constant` for every other function of a constant;
+   - `constant-division-by-zero` for log(0), log2(0) and log1p(-1).
+9. **cftc's VERSION** 5 to 6 (the study wrote 4 to 5 before step 6's
+   leftovers took 5), the corpus remade, and the language at 1.1.
+10. **mpmath in the language's checks:** accept it.
+11. **The generator's home:** a new module, python/cft_golden/mathlib.py.
+12. **Live values:** widen C4's invariants as the study's section 6
+    says (the exp family keeps 22 to 24 live, log1p 18, against C4's
+    16).
+- **E1's function:** exp2.
+- **The round's extent:**
+  - all of it: M1's build, then M2 to M4's studies and builds;
+  - or a shorter round: M1's build and M2's study, with M2 to M4's
+    builds in a round of their own.
+
+**The order.**
+1. Logan's answers.
+2. E1: the two exp2 parcels, their verifiers, the blind comparison, and
+   the result to Logan.
+3. M1's build, items 1 to 6, each parcel verified.
+4. M2's study, beside M1's build if Logan chooses.
+5. M2's build, then M3's and M4's studies and builds, by the extent
+   Logan chooses.
+
+**What it is not.**
+- New RTL. The routines are programs of existing instructions, R24's and
+  R23's in revision 8. R21 stays off the quad by Logan's word, until the
+  dense design's work on nextpnr has progressed.
+- SYNTH_CLOCK's adoption: off for now (Logan, 2026-10-12).
+- Compile time, which is later performance work.
+
+**Sentences elsewhere that this plan supersedes:** M1's study's "VERSION
+5" (its section 10, item 4, and its Versions note) is now 6. Its parcel
+restates it.
+
 ## The adoption story these serve
 
 Two tiers, one contract: a software library anyone can run on
