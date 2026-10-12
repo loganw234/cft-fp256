@@ -45,6 +45,8 @@ FIFOs, reduction accumulator and CSR are `BEAT_BITS`-wide and stay.
 | `cft_krnl_f32` | fp32 | `EN_FP64=0 EN_FP128=0 EN_FP256=0` | 190* | target, unmeasured |
 | `cft_krnl_f64f128` | fp64 fp128 | `EN_FP32=0 EN_FP256=0` | 135 | measured: single closes +0.253 ns kernel WNS at 135 MHz (c56b368, 2026-09-14, retimed + phys_opt, 0 of 89,576 endpoints failing), about 72.2k LUT in-shell against the 69,461 modelled; the tile cft-rebound asked for (its docs/BITSTREAM.md, ask 5), and the first narrow variant on silicon: CAPS 0x6, fp32 refused by name, 543 device-test checks agreeing with the software backend (docs/VALIDATION.md, that day) |
 
+"Retimed" in this table names a build made with `RETIMING=1`, which retimed nothing: a kernel's synthesis in the link has no clock, and `-retiming` moves registers only against one (docs/VALIDATION.md, 2026-10-12; docs/BITSTREAM-BUILDS.md).
+
 `*` targets, not results, and two of them (150*, 170*) are now at or below the full single's own clock, 175 MHz (closed and proven on the card, 2026-09-24): the OOC ceilings in docs/ARCHITECTURE.md
 (232 MHz at fp32, 148 at fp256, the middle rungs between) less the
 ~0.9 ns the shell has cost in practice. The widest rung a tile carries

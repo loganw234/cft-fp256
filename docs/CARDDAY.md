@@ -197,7 +197,8 @@ the element count is an operand rather than a loop bound.
       before it is called a pair, exactly as above.
 
       The single half is staged (2026-09-02, evening): built at
-      0e7264e, 135 MHz, retimed, kernel WNS **+0.433** (where the
+      0e7264e, 135 MHz, `RETIMING=1` (which retimed nothing:
+      docs/VALIDATION.md, 2026-10-12), kernel WNS **+0.433** (where the
       same clock had +0.045 before the case-table ROM), verify-image
       8/8, copied and re-hashed against the manifest's build-time
       sha256, byte-identical:

@@ -778,3 +778,9 @@ is the runbook it followed.
   no parameter-level shortcut - v1's speed comes from real stage
   boundaries in the RTL (unpack | multiply | align | add | normalize |
   round), behind the same cft_fpfma_pipe ports and testbenches.
+
+  *Corrected 2026-10-12:* that run could not have retimed. hw/synth_ooc.tcl
+  creates its clock after `synth_design`, and `-retiming` moves
+  registers only against a clock (docs/VALIDATION.md, 2026-10-12, "does
+  RETIMING=1 retime?"), so it showed nothing about retiming. The real
+  stage boundaries were built anyway.

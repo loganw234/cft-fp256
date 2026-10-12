@@ -198,7 +198,8 @@ element.
 
 The full-tile figure moved after this table was written: 129,708 with
 the seed ROM as case tables and **123,420** with the round stage
-precomputed (9f73107, retimed) - the Timing section below has the ladder.
+precomputed (9f73107, `-retiming` given and nothing retimed:
+docs/VALIDATION.md, 2026-10-12) - the Timing section below has the ladder.
 
 Both full-tile numbers are measured out of context, Vivado 2022.2,
 xcu50-fsvh2104-2-e, 135 MHz, on the tile as it now stands: one
@@ -611,6 +612,14 @@ at +0.055 and lose the margin in routing, which is wire. The ROM is a
 case table now and the round stage's arithmetic sits in S12; what is
 left at the head of the list is S10->S11, the LZC-fed coarse
 normalise. The quad from that tree is the open question.
+
+*Corrected 2026-10-12:* "retimed" in this Timing section, the shared
+array's table below included, names runs and builds given `-retiming`.
+None was retimed: a kernel's synthesis, in the link and in the
+out-of-context scripts alike, had no clock, and `-retiming` moves
+registers only against one (docs/VALIDATION.md, 2026-10-12, "does
+RETIMING=1 retime?"). That fits the single closing at +0.045 both ways.
+Revision 7's quad was given the flag on all four tiles.
 
 | commit | ask | routed WNS | implied path delay |
 |---|---|---|---|

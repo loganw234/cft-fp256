@@ -1144,6 +1144,23 @@ not internally pipelined; what retiming found was the OUTPUT register,
 which it could move because a register existed downstream to move.
 Implied ceiling at that slack is around 175 MHz out of context.
 
+*Corrected 2026-10-12 (docs/VALIDATION.md, "does RETIMING=1
+retime?"):* experiment A retimed nothing. hw/ooc_retime.tcl creates its
+clock after `synth_design`, so its synthesis had none, and `-retiming`
+is Vivado's global retiming, which moves registers only against a
+clock: on a toy and on one fp32 pipe in Vivado 2022.2 the flag without
+a clock left the netlist byte for byte the unflagged one. The two rows
+were not one flag apart. The baseline's figures are 2026-09-01's
+"shared array, seq diet, ladders off" row above, measured before
+8f5f149 put a register on the reduce operands - the path whose message
+says it "read +0.307 and hid" out of context - and its PREG cell is
+empty where ooc_retime.tcl prints a count. The gain and the +354 FF are
+believed to be that register's (2 x 256 + 1 bits). The 188 is
+ooc_retime.tcl's own count, which takes each DSP with PREG twice, the
+DSP48E2 and its DSP_OUTPUT part (measured on the fp32 pipe); 94 of the
+lanes' DSPs carry PREG in unretimed syntheses. `REPLAY=1 bash
+hw/probe_rt.sh` measures the pair on 2b57cf0's and a445268's trees.
+
 **Two caveats, both load-bearing.** Out-of-context slack has already
 mispredicted the shell by 0.88 ns once this week, so +1.681 is a
 direction, not a delivery. And more seriously: **retiming is a synthesis
@@ -1196,6 +1213,11 @@ synthesis run by name, and a quad has four. Revision 7's quad,
 retimed on all four tiles with ExtraTimingOpt, AggressiveExplore and
 phys_opt, closed 135 MHz at +0.003 (q135b; docs/VALIDATION.md, 2026-09-30, "the fixes round" and "the steps 5 and 6 round").
 So what follows measured one retimed tile in four, not retiming.
+*And 2026-10-12:* no tile of either quad, nor of revision 7's, was
+retimed. The flag reached synthesis runs that had no clock, and
+`-retiming` moves registers only against one (docs/VALIDATION.md,
+2026-10-12, "does RETIMING=1 retime?"). The two rows differ by their
+trees, 8f5f149 and 40149b1, not by retiming.
 
 Slightly worse, and the reason is visible in the router's own
 trajectory: both builds left placement at exactly +0.055 - the placer
@@ -1298,6 +1320,14 @@ fit in eight bits: 17 CARRY8, 71% route. Both have latency-neutral fixes
 narrow `burst_len` to the widths its operands can hold) and neither has
 been made yet.
 
+*Corrected 2026-10-12:* retiming absorbed no PREG and moved no path off
+the list. The single was not retimed (its kernel's synthesis had no
+clock). The 188 fits hw/ooc_retime.tcl's count taking each DSP with PREG
+twice, and unretimed syntheses set PREG on 94 of the lanes' DSPs
+(docs/VALIDATION.md, 2026-10-12). "With retiming" in the two tables
+below names runs given the flag, which retimed nothing, so both A/Bs
+stand as unretimed ones.
+
 **The fix is the ROM idiom, not a pipeline stage.** The flat vector was
 chosen because Icarus rejects unpacked-array assignment patterns for
 localparams. A `case` inside the function has no such problem and IS a
@@ -1333,7 +1363,8 @@ to answer.
 *Corrected 2026-09-30:* that quad had tile 1 alone retimed (the
 correction under "In the shell, retiming does not close the quad",
 above), so its number measures one retimed tile in four, not
-retiming.
+retiming. *And 2026-10-12:* none of its tiles was retimed (the
+correction there), so it measures its tree.
 
 *Established the same evening.* A single tile from the case-ROM
 commit's RTL (0e7264e), 135 MHz, retimed, in the shell: routed, image
@@ -5425,7 +5456,8 @@ as their parameters allow.
 - No quad on record has closed with more LUTs than q135b. Round 2's
   closed at 80% (+0.040 ns) and the earlier ones sat near 69%
   (docs/VALIDATION.md). q135, the same tiles built with default
-  directives and one tile retimed, missed by 0.457 ns on route-bound
+  directives and one tile given `-retiming` (which retimed nothing:
+  docs/VALIDATION.md, 2026-10-12), missed by 0.457 ns on route-bound
   paths, with v++ warning "The available LUTs may not be sufficient". A
   quad past 85% of the part is untried; past about 86% of the part, or
   89% of SLR0, I do not expect one to close at 135 MHz (estimate).

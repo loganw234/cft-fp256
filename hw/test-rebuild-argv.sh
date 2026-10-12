@@ -122,11 +122,37 @@ if [ -n "$tmpd" ]; then
     d="$runs/ulp_${cu}_0_synth_1"; mkdir -p "$d"
     if printf '%s\n' "$@" | grep -qx "run.ulp_${cu}_0_synth_1.{STEPS.SYNTH_DESIGN.ARGS.RETIMING}=true"; then
       id=21c6eb981cfcf745; me=$last_r; flag=" -retiming"; else id=1a011ef8b8b87f6a; me=$last_n; flag=""; fi
+    # A TCL.PRE hook (SYNTH_CLOCK=1). Vivado's script for such a run has
+    # no IP-cache logic, so the CU synthesizes itself; the hook is sourced
+    # before synth_design, and is run here as far as a stub can: its
+    # read_xdc must name a file that exists and holds a create_clock, and
+    # its puts reaches the log. With that clock, -retiming leaves Vivado's
+    # Retiming Report; without one, Synth 8-11322 - as the measured runs
+    # did (docs/VALIDATION.md, 2026-10-12).
+    pre=$(printf '%s\n' "$@" | sed -n "s/^run\.ulp_${cu}_0_synth_1\.{STEPS\.SYNTH_DESIGN\.TCL\.PRE}=//p" | head -1)
+    if [ -n "$pre" ]; then
+      xdc=$(sed -n 's/^read_xdc -mode out_of_context {\(.*\)}$/\1/p' "$pre" 2>/dev/null | head -1)
+      clk=""
+      [ -n "$xdc" ] && [ -f "$xdc" ] && grep -q '^create_clock -period ' "$xdc" && clk=1
+      {
+        sed -n 's/^puts "\(CFT_SYNTH_CLOCK:.*\)"$/\1/p' "$pre" 2>/dev/null
+        [ -n "$clk" ] && printf 'Parsing XDC File [%s]\n' "$xdc"
+        printf 'Command: synth_design -top ulp_%s_0 -part xcu50%s\n' "$cu" "$flag"
+        if [ -n "$flag" ] && [ -n "$clk" ]; then
+          printf 'Retiming Report:\n|Forward Retiming    | 3   | \n|Backward Retiming   | 5   | \n'
+        elif [ -n "$flag" ]; then
+          echo "INFO: [Synth 8-11322] No global retiming is needed without any clock constraint"
+        fi
+      } > "$d/runme.log"
+      continue
+    fi
     # STUB_FOREIGN_CACHE=1: every entry was added by an EARLIER build (a
     # reused BUILD or a shared cache), so every CU is a hit whose
     # producer is not in this build.
     if [ "$cu" = "$me" ] && [ "${STUB_FOREIGN_CACHE:-0}" != 1 ]; then
       printf 'Command: synth_design -top ulp_%s_0 -part xcu50%s\nINFO: [Coretcl 2-1648] Added synthesis output to IP cache for IP ulp_%s_0, cache-ID = %s\n' "$cu" "$flag" "$cu" "$id" > "$d/runme.log"
+      # No clock in the run: Vivado declines -retiming, in these words.
+      [ -n "$flag" ] && echo "INFO: [Synth 8-11322] No global retiming is needed without any clock constraint" >> "$d/runme.log"
     else
       printf 'INFO: [IP_Flow 19-4838] Using cached IP synthesis design for IP ulp_%s_0, cache-ID = %s.\n' "$cu" "$id" > "$d/runme.log"
     fi
@@ -147,7 +173,7 @@ run_it() {                       # run_it <script> <link-cfg> <tag>
     PLATFORM_REPO_PATHS="$TMP/plat" \
     BUILD="$TMP/build-$tag" \
     TARGETS="${TARGETS_FOR_RUN-hw}" \
-    KERNEL_FREQ=135000000 \
+    KERNEL_FREQ="${KERNEL_FREQ_FOR_RUN-135000000}" \
     RETIMING="${RETIMING_FOR_RUN-1}" \
     VPP_PROPS="run.impl_1.STEPS.OPT_DESIGN.IS_ENABLED=true" \
     LINK_CFG="$cfg" \
@@ -169,6 +195,26 @@ clock_arg_of() {                 # clock_arg_of <argv-log> -> the value, or ""
 
 fails=0
 say_fail() { echo "  FAIL $*"; fails=$((fails + 1)); }
+
+# The default flow carries no synthesis clock hook (SYNTH_CLOCK is off
+# until Logan adopts it), and the manifest says what each run did with
+# -retiming: declined, for want of a clock, cache hits followed. Prints
+# its findings and returns how many failed, so a control can require one.
+default_check() {               # default_check <argv-log> <tag> <cus>
+  local log=$1 tag=$2 cus=$3 man me want_eff bad=0
+  man="$TMP/build-$tag/cft_hw.manifest.txt"
+  if grep -q 'STEPS\.SYNTH_DESIGN\.TCL\.PRE' "$log"; then
+    echo "  FAIL $tag: a TCL.PRE hook is in the default argv; SYNTH_CLOCK must default off"; bad=$((bad + 1))
+  fi
+  grep -qx 'synth_clock:   0' "$man" 2>/dev/null \
+    || { echo "  FAIL $tag: the manifest does not say 'synth_clock:   0' by default"; bad=$((bad + 1)); }
+  want_eff=$(for c in $cus; do printf '%s:declined-no-clock ' "$c"; done | sed 's/ $//')
+  me=$(sed -n 's/^retiming_effect: //p' "$man" 2>/dev/null)
+  [ "$me" = "$want_eff" ] \
+    || { echo "  FAIL $tag: the manifest's retiming_effect is '$me', not '$want_eff'"; bad=$((bad + 1)); }
+  [ "$bad" = 0 ] && echo "  ok   $tag: no synthesis clock hook by default (synth_clock: 0), retiming_effect: $me"
+  return "$bad"
+}
 
 echo "== the real script, single and quad link configs =="
 for pair in "hw/link.cfg:single:1" "hw/link_quad.cfg:quad:4"; do
@@ -228,7 +274,70 @@ for pair in "hw/link.cfg:single:1" "hw/link_quad.cfg:quad:4"; do
   else
     echo "  ok   $tag: the manifest's retimed_runs: $mr"
   fi
+  default_check "$log" "$tag" "$want" || fails=$((fails + 1))
 done
+
+# ------------------------------------------------------------ SYNTH_CLOCK
+# SYNTH_CLOCK=1 gives the synthesis run of EVERY CU the nk= line names a
+# TCL.PRE hook, whose read_xdc names a clock at 1e9/KERNEL_FREQ ns and
+# marks it used_in_implementation false; each run then synthesizes itself
+# (no IP cache with a hook), and the manifest names the runs that ran the
+# hook and what -retiming did. sc_check prints its findings and returns
+# how many checks failed, so the controls below can require a failure.
+sc_check() {                    # sc_check <script> <cfg> <tag>
+  local script=$1 cfg=$2 tag=$3 log want got pre xdc man me sr bad=0
+  log=$(SYNTH_CLOCK=1 run_it "$script" "$cfg" "$tag")
+  man="$TMP/build-$tag/cft_hw.manifest.txt"
+  pre="$TMP/build-$tag/synth_clock_pre.tcl"
+  xdc="$TMP/build-$tag/synth_clock.xdc"
+  want=$(sed -n 's/^[[:space:]]*nk=[^:]*:[0-9]*:\(.*\)$/\1/p' "$ROOT/$cfg" | tr '.' ' ')
+  got=$(sed -n 's/^run\.ulp_\(.*\)_0_synth_1\.{STEPS\.SYNTH_DESIGN\.TCL\.PRE}=.*$/\1/p' "$log" | tr '\n' ' ' | sed 's/ $//')
+  [ "$got" = "$want" ] || { echo "  FAIL $tag: the hook reaches '$got', not every CU '$want'"; bad=$((bad + 1)); }
+  # One file for all, absolute, existing - Vivado sources it from the run's directory.
+  if [ "$(sed -n 's/^run\.ulp_.*_0_synth_1\.{STEPS\.SYNTH_DESIGN\.TCL\.PRE}=//p' "$log" | sort -u)" != "$(cd "$TMP/build-$tag" 2>/dev/null && pwd)/synth_clock_pre.tcl" ] || [ ! -f "$pre" ]; then
+    echo "  FAIL $tag: the hook is not one absolute, existing \$BUILD/synth_clock_pre.tcl"; bad=$((bad + 1))
+  fi
+  grep -qx 'create_clock -period 7.407 -name cft_synth_ooc_clk \[get_ports ap_clk\]' "$xdc" 2>/dev/null \
+    || { echo "  FAIL $tag: synth_clock.xdc is not a 7.407 ns create_clock on ap_clk"; bad=$((bad + 1)); }
+  grep -qxF "read_xdc -mode out_of_context {$(dirname "$pre")/synth_clock.xdc}" "$pre" 2>/dev/null \
+    && grep -qxF "set_property used_in_implementation false [get_files -all {$(dirname "$pre")/synth_clock.xdc}]" "$pre" \
+    || { echo "  FAIL $tag: the hook does not read the XDC out of context and keep it out of implementation"; bad=$((bad + 1)); }
+  case "$(clock_arg_of "$log")" in
+    135000000:*) ;;
+    *) echo "  FAIL $tag: --clock.freqHz went missing with SYNTH_CLOCK=1"; bad=$((bad + 1));;
+  esac
+  [ "$(retimed_cus_of "$log")" = "$want" ] \
+    || { echo "  FAIL $tag: RETIMING no longer reaches every CU with SYNTH_CLOCK=1"; bad=$((bad + 1)); }
+  if grep -l 'Using cached IP synthesis design' "$TMP/build-$tag"/_x_hw/link/vivado/vpl/prj/prj.runs/ulp_*_synth_1/runme.log > /dev/null 2>&1; then
+    echo "  FAIL $tag: a hooked run is a cache hit; Vivado gives a run with a TCL.PRE no cache"; bad=$((bad + 1))
+  fi
+  grep -q '^synth_clock:   1 ' "$man" 2>/dev/null || { echo "  FAIL $tag: the manifest does not say synth_clock: 1"; bad=$((bad + 1)); }
+  sr=$(sed -n 's/^synth_clock_runs: //p' "$man" 2>/dev/null)
+  [ "$sr" = "$want" ] || { echo "  FAIL $tag: the manifest's synth_clock_runs is '$sr', not '$want'"; bad=$((bad + 1)); }
+  me=$(sed -n 's/^retiming_effect: //p' "$man" 2>/dev/null)
+  [ "$me" = "$(for c in $want; do printf '%s:retimed(forward=3,backward=5,reports=1) ' "$c"; done | sed 's/ $//')" ] \
+    || { echo "  FAIL $tag: the manifest's retiming_effect is '$me'"; bad=$((bad + 1)); }
+  [ "$bad" = 0 ] && echo "  ok   $tag: the hook on every CU ($got), a 7.407 ns clock kept out of implementation, no cache, retiming_effect retimed"
+  return "$bad"
+}
+echo "== SYNTH_CLOCK=1: every CU's synthesis run reads the kernel clock =="
+for pair in "hw/link.cfg:sc-single" "hw/link_quad.cfg:sc-quad"; do
+  cfg=${pair%%:*}; tag=${pair#*:}
+  sc_check "$SCRIPT" "$cfg" "$tag" || fails=$((fails + 1))
+done
+
+# A KERNEL_FREQ the period cannot be taken from is refused before v++.
+echo "== SYNTH_CLOCK=1 with a KERNEL_FREQ that is not Hz: refused =="
+log=$(SYNTH_CLOCK=1 KERNEL_FREQ_FOR_RUN=135MHz run_it "$SCRIPT" "hw/link.cfg" "scbadfreq")
+if [ "$(cat "$TMP/rc-scbadfreq")" = 0 ]; then
+  say_fail "SYNTH_CLOCK=1 built with KERNEL_FREQ=135MHz"
+elif [ -s "$log" ]; then
+  say_fail "SYNTH_CLOCK=1 with KERNEL_FREQ=135MHz failed only after v++ ran"
+elif ! grep -q "SYNTH_CLOCK=1 needs KERNEL_FREQ in Hz" "$TMP/out-scbadfreq.txt"; then
+  say_fail "SYNTH_CLOCK=1 with KERNEL_FREQ=135MHz stopped, but not for the frequency"
+else
+  echo "  ok   refused before v++ (rc=$(cat "$TMP/rc-scbadfreq"))"
+fi
 
 # ------------------------------------------------------------- generics
 # CFT_GENERICS must reach vivado's environment unchanged and be written
@@ -369,13 +478,52 @@ else
   fi
 fi
 
+# The SYNTH_CLOCK defects put back, each through the same check that
+# passed above, which must now fail. sab <name> <sed-expression> writes
+# the sabotaged copy to $TMP/<name>.sh and fails when the pattern no
+# longer matches, which would make the control prove nothing.
+sab() {
+  sed "$2" "$SCRIPT" > "$TMP/$1.sh"
+  ! cmp -s "$SCRIPT" "$TMP/$1.sh"
+}
+echo "== negative controls: SYNTH_CLOCK =="
+# On by default: the default leg's check must refuse it.
+if ! sab sab-sc-default 's/^SYNTH_CLOCK=\${SYNTH_CLOCK:-0}$/SYNTH_CLOCK=${SYNTH_CLOCK:-1}/'; then
+  say_fail "control sab-sc-default: its pattern no longer matches hw/rebuild-2022.sh; re-aim it"
+else
+  log=$(run_it "$TMP/sab-sc-default.sh" "hw/link.cfg" "sab-sc-default")
+  if default_check "$log" "sab-sc-default" "cft_krnl_1" > "$TMP/ctl-default.txt"; then
+    say_fail "control: SYNTH_CLOCK on by default passed the default check"
+  else
+    echo "  ok   control: SYNTH_CLOCK on by default fails the default check ($(grep -c FAIL "$TMP/ctl-default.txt") findings)"
+  fi
+fi
+# The hook on cft_krnl_1's run alone, the shape of the 2026-09-30 retiming defect.
+if ! sab sab-sc-one 's/^    for scu in \${CLOCK_CUS\/\/.\/ }; do$/    for scu in cft_krnl_1; do/'; then
+  say_fail "control sab-sc-one: its pattern no longer matches hw/rebuild-2022.sh; re-aim it"
+elif sc_check "$TMP/sab-sc-one.sh" "hw/link_quad.cfg" "sab-sc-one" > "$TMP/ctl-one.txt"; then
+  say_fail "control: a quad hooked on cft_krnl_1 alone passed the SYNTH_CLOCK check"
+else
+  echo "  ok   control: a quad hooked on cft_krnl_1 alone fails the SYNTH_CLOCK check ($(grep -c FAIL "$TMP/ctl-one.txt") findings)"
+fi
+# The hook without used_in_implementation false: its clock could then
+# ride the checkpoint into the platform's implementation.
+if ! sab sab-sc-impl '/used_in_implementation false/d'; then
+  say_fail "control sab-sc-impl: its pattern no longer matches hw/rebuild-2022.sh; re-aim it"
+elif sc_check "$TMP/sab-sc-impl.sh" "hw/link.cfg" "sab-sc-impl" > "$TMP/ctl-impl.txt"; then
+  say_fail "control: a hook that does not keep its clock out of implementation passed the SYNTH_CLOCK check"
+else
+  echo "  ok   control: a hook without used_in_implementation false fails the SYNTH_CLOCK check ($(grep -c FAIL "$TMP/ctl-impl.txt") findings)"
+fi
+
 echo
 if [ "$fails" -eq 0 ]; then
   echo "rebuild-2022.sh: the clock constraint survives VPP_PROPS, RETIMING=1"
   echo "reaches the synthesis run of every CU, CFT_GENERICS"
   echo "reaches vivado and the manifest, a lying wrapper read-back stops the"
-  echo "build before v++, TARGETS=\"\" packages without linking, and each check"
-  echo "still fails when its defect is put back."
+  echo "build before v++, TARGETS=\"\" packages without linking, SYNTH_CLOCK"
+  echo "is off by default and with it every CU's synthesis reads the kernel"
+  echo "clock, and each check still fails when its defect is put back."
   exit 0
 fi
 echo "$fails failure(s); stub output under $TMP (kept only until exit)"
