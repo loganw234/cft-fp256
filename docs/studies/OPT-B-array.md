@@ -95,11 +95,14 @@ Ranking is `(resource moved) x (confidence) / (cost to prove)`.
 
 *Note, 2026-10-12 (this study kept as written):* "retimed", "with
 retiming" and `RETIMING=1` in this study name runs and builds given the
-flag, and none of them was retimed: no synthesis given it had a clock to
-retime against (docs/VALIDATION.md, 2026-10-12, "does RETIMING=1
-retime?"). So retiming is not one of the three changes that idea 1's
-stale-verdict argument counts, the "retimed" rows are unretimed figures,
-and its proposed builds would need SYNTH_CLOCK=1 to be retimed at all.
+flag. The builds were not retimed, since a link gives a kernel's
+synthesis no clock, and the out-of-context runs are believed not to have
+been, since every committed out-of-context script applies its clock
+after synthesis (docs/VALIDATION.md, 2026-10-12, "does RETIMING=1
+retime?"). So retiming should not be among the three changes that idea
+1's stale-verdict argument lists, the "retimed" rows are believed to be
+unretimed figures, and its proposed builds would need SYNTH_CLOCK=1 to
+be retimed at all.
 
 ### 1. Re-measure the fused ladders on the current tree, retimed
 

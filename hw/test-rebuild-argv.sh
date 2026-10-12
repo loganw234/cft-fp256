@@ -32,6 +32,10 @@
 # cannot be made to fail has stopped being a gate, which is the rule
 # formal/ keeps with its own negative control.
 #
+# It needs a writable repository root: the relative-BUILD legs make
+# build/buildargs-<pid>-<n>/ there (and build/ if it is absent), and
+# remove only those.
+#
 #     bash hw/test-rebuild-argv.sh          # exit 0 pass, 1 fail, 77 skip
 set -uo pipefail
 
@@ -218,10 +222,11 @@ clock_arg_of() {                 # clock_arg_of <argv-log> -> the value, or ""
 fails=0
 say_fail() { echo "  FAIL $*"; fails=$((fails + 1)); }
 
-# The default flow carries no synthesis clock hook (SYNTH_CLOCK is off
-# until Logan adopts it), and the manifest says what each run did with
-# -retiming: declined, for want of a clock, cache hits followed. Prints
-# its findings and returns how many failed, so a control can require one.
+# The default flow carries no synthesis clock hook (SYNTH_CLOCK is off;
+# Logan keeps it off for now, 2026-10-12), and the manifest says what
+# each run did with -retiming: declined, for want of a clock, cache hits
+# followed. Prints its findings and returns how many failed, so a
+# control can require one.
 default_check() {               # default_check <argv-log> <tag> <cus>
   local log=$1 tag=$2 cus=$3 man me want_eff bad=0
   man="$TMP/build-$tag/cft_hw.manifest.txt"
@@ -395,27 +400,37 @@ emu_check() {                   # emu_check <script> <tag>
 echo "== SYNTH_CLOCK=1 with TARGETS=\"hw hw_emu\": the hook on hw's link alone =="
 emu_check "$SCRIPT" "sc-emu" || fails=$((fails + 1))
 
-# Any SYNTH_CLOCK but 0 or 1 is refused by name before v++, so that
-# "true" or "yes" cannot quietly build without the clock.
-refuse_check() {                # refuse_check <script> <tag> <value>
-  local script=$1 tag=$2 v=$3 log
-  log=$(SYNTH_CLOCK="$v" run_it "$script" "hw/link.cfg" "$tag")
-  if [ "$(cat "$TMP/rc-$tag")" = 0 ]; then
-    echo "  FAIL $tag: SYNTH_CLOCK=$v built"; return 1
-  elif [ -s "$log" ]; then
-    echo "  FAIL $tag: SYNTH_CLOCK=$v failed only after v++ ran"; return 1
-  elif ! grep -q "SYNTH_CLOCK is 0 or 1; got '$v'" "$TMP/out-$tag.txt"; then
-    echo "  FAIL $tag: SYNTH_CLOCK=$v stopped, but not by name"; return 1
+# RETIMING, PHYS_OPT and SYNTH_CLOCK refuse anything but 0 or 1, by name
+# and before any work - no BUILD directory made - so that "true" or
+# "yes" cannot quietly build with the flag off.
+refuse_check() {                # refuse_check <script> <tag> <variable> <value>
+  local script=$1 tag=$2 var=$3 v=$4 log
+  if [ "$var" = RETIMING ]; then
+    log=$(RETIMING_FOR_RUN="$v" run_it "$script" "hw/link.cfg" "$tag")
+  else
+    log=$(export "$var=$v"; run_it "$script" "hw/link.cfg" "$tag")
   fi
-  echo "  ok   $tag: SYNTH_CLOCK=$v refused by name before v++ (rc=$(cat "$TMP/rc-$tag"))"
+  if [ "$(cat "$TMP/rc-$tag")" = 0 ]; then
+    echo "  FAIL $tag: $var=$v built"; return 1
+  elif [ -s "$log" ]; then
+    echo "  FAIL $tag: $var=$v failed only after v++ ran"; return 1
+  elif [ -e "$TMP/build-$tag" ]; then
+    echo "  FAIL $tag: $var=$v was refused only after work began (BUILD was made)"; return 1
+  elif ! grep -q "$var is 0 or 1; got '$v'" "$TMP/out-$tag.txt"; then
+    echo "  FAIL $tag: $var=$v stopped, but not by name"; return 1
+  fi
+  echo "  ok   $tag: $var=$v refused by name before any work (rc=$(cat "$TMP/rc-$tag"), no BUILD made)"
 }
-echo "== SYNTH_CLOCK other than 0 or 1: refused by name =="
-for v in yes true 2; do refuse_check "$SCRIPT" "scval-$v" "$v" || fails=$((fails + 1)); done
+echo "== RETIMING, PHYS_OPT and SYNTH_CLOCK other than 0 or 1: refused by name, before any work =="
+for pair in SYNTH_CLOCK:yes SYNTH_CLOCK:true SYNTH_CLOCK:2 RETIMING:yes PHYS_OPT:true; do
+  refuse_check "$SCRIPT" "val-${pair%%:*}-${pair#*:}" "${pair%%:*}" "${pair#*:}" || fails=$((fails + 1))
+done
 
 # retiming_effect:, the real function cut from rebuild-2022.sh, on a log
 # of each kind. What each prints, and why, is the script's own comment;
-# the stub's logs above reach only two of the eight (verifier-VRT's F11,
-# F16 and the edges it named).
+# the stub's logs above reach only two of the thirteen (verifier-VRT's
+# F11, F16 and the edges it named; verifier-VRTb's tag, report-without-
+# flag and path cases; a CRLF log whose command ends in the flag).
 effect_check() {                # effect_check <script> <tag>
   local script=$1 tag=$2 d="$TMP/eff-$2" fn got want name pair bad=0
   local cmd_rt='Command: synth_design -top ulp_cft_krnl_1_0 -part xcu50 -retiming -mode out_of_context'
@@ -437,6 +452,12 @@ effect_check() {                # effect_check <script> <tag>
   echo "$cmd_rt" > "$d/asked"
   { echo "$cmd"; echo "$decl"; } > "$d/unflagged"
   : > "$d/empty"
+  # The message's words echoed untagged, as a probe's log echoes its Tcl.
+  { echo "$cmd_rt"; echo "#   foreach id {{Synth 8-11322} {Synth 8-5816}} {"; } > "$d/echoed"
+  { echo "$cmd_rt"; echo "#   foreach id {{Synth 8-11322} {Synth 8-5816}} {"; eff_report 3 5; } > "$d/echoedrep"
+  { echo "$cmd"; eff_report 3 5; } > "$d/unflaggedrep"
+  echo 'Command: synth_design -top ulp_cft_krnl_1_0 -part xcu50 -include_dirs /data/x-retiming/rtl -mode out_of_context' > "$d/pathflag"
+  printf '%s\r\n%s\r\n' 'Command: synth_design -top ulp_cft_krnl_1_0 -part xcu50 -mode out_of_context -retiming' "$decl" > "$d/crlf"
   for pair in "moves:retimed(forward=3,backward=5,reports=1)" \
               "nomoves:ran-no-moves(reports=1)" \
               "two:retimed(forward=4,backward=6,reports=2)" \
@@ -444,12 +465,17 @@ effect_check() {                # effect_check <script> <tag>
               "declined:declined-no-clock" \
               "asked:asked-no-report" \
               "unflagged:not-asked" \
-              "empty:not-asked"; do
+              "empty:not-asked" \
+              "echoed:asked-no-report" \
+              "echoedrep:retimed(forward=3,backward=5,reports=1)" \
+              "unflaggedrep:not-asked" \
+              "pathflag:not-asked" \
+              "crlf:declined-no-clock"; do
     name=${pair%%:*}; want=${pair#*:}
     got=$( . "$fn" && retime_effect "$d/$name" )
     [ "$got" = "$want" ] || { echo "  FAIL $tag: a '$name' log gives '$got', not '$want'"; bad=$((bad + 1)); }
   done
-  [ "$bad" = 0 ] && echo "  ok   $tag: eight kinds of log, each named as the script's comment says"
+  [ "$bad" = 0 ] && echo "  ok   $tag: thirteen kinds of log, each named as the script's comment says"
   return "$bad"
 }
 echo "== retiming_effect: the real function on a log of each kind =="
@@ -636,9 +662,10 @@ else
   echo "  ok   control: a quad hooked on cft_krnl_1 alone fails the SYNTH_CLOCK check ($(grep -c FAIL "$TMP/ctl-one.txt") findings)"
 fi
 # The hook without used_in_implementation false. In the toys the clock
-# stayed out of the in-context design without it too (read_xdc -mode
-# out_of_context is what did that), so this control holds Vivado's own
-# idiom for an IP's out-of-context XDC, not a measured leak.
+# stayed out of the in-context design without it too (that read_xdc
+# -mode out_of_context is what did that is believed, not shown), so this
+# control holds Vivado's own idiom for an IP's out-of-context XDC, not a
+# measured leak.
 if ! sab sab-sc-impl '/used_in_implementation false/d'; then
   say_fail "control sab-sc-impl: its pattern no longer matches hw/rebuild-2022.sh; re-aim it"
 elif sc_check "$TMP/sab-sc-impl.sh" "hw/link.cfg" "sab-sc-impl" > "$TMP/ctl-impl.txt"; then
@@ -690,13 +717,76 @@ elif effect_check "$TMP/sab-eff-asked.sh" "sab-eff-asked" > "$TMP/ctl-eff-asked.
 else
   echo "  ok   control: retime_effect without its asked-no-report branch fails the log check ($(grep -c FAIL "$TMP/ctl-eff-asked.txt") findings)"
 fi
-# SYNTH_CLOCK's value check gone: "yes" would build without the clock.
-if ! sab sab-sc-val 's/^  0 | 1) ;;$/  *) ;;/'; then
+# The value check gone: "yes" would build with the flag off.
+if ! sab sab-sc-val 's/^    0 | 1) ;;$/    *) ;;/'; then
   say_fail "control sab-sc-val: its pattern no longer matches hw/rebuild-2022.sh; re-aim it"
-elif refuse_check "$TMP/sab-sc-val.sh" "sab-sc-val" "yes" > "$TMP/ctl-val.txt"; then
+elif refuse_check "$TMP/sab-sc-val.sh" "sab-sc-val" "SYNTH_CLOCK" "yes" > "$TMP/ctl-val.txt"; then
   say_fail "control: a script without the value check refused SYNTH_CLOCK=yes anyway"
 else
   echo "  ok   control: without the value check SYNTH_CLOCK=yes builds, and the refusal check sees it"
+fi
+
+# The rest, as sed scripts (quoted here-documents, so nothing in them is
+# the shell's): sab_f <name> <sed-script> writes $TMP/<name>.sh and fails
+# when the script changes nothing.
+sab_f() {
+  sed -f "$2" "$SCRIPT" > "$TMP/$1.sh"
+  ! cmp -s "$SCRIPT" "$TMP/$1.sh"
+}
+ctl_effect() {                  # ctl_effect <name> <what it plants>
+  if ! sab_f "$1" "$TMP/$1.sed"; then
+    say_fail "control $1: its sed script no longer changes hw/rebuild-2022.sh; re-aim it"
+  elif effect_check "$TMP/$1.sh" "$1" > "$TMP/ctl-$1.txt"; then
+    say_fail "control: $2 passed the log check"
+  else
+    echo "  ok   control: $2 fails the log check ($(grep -c FAIL "$TMP/ctl-$1.txt") findings)"
+  fi
+}
+# The decline matched untagged again, in the branch and in the count
+# (verifier-VRTb's P4 and P4b): echoed script text would read as one.
+cat > "$TMP/sab-eff-untag.sed" <<'SED'
+/then echo "declined-no-clock"$/c\
+      elif grep -q 'Synth 8-11322' "$f"; then echo "declined-no-clock"
+SED
+ctl_effect sab-eff-untag "retime_effect matching the decline untagged"
+cat > "$TMP/sab-eff-untagcount.sed" <<'SED'
+/{ d++ }$/c\
+                   /Synth 8-11322/ { d++ }
+SED
+ctl_effect sab-eff-untagcount "retime_effect counting the decline untagged"
+# The flag tested only where no report is (P1): a report without the
+# flag would read as retimed.
+cat > "$TMP/sab-eff-reportfirst.sed" <<'SED'
+/then echo "not-asked"$/c\
+      if ! grep -qE 'Command: synth_design.* -retiming([[:space:]]|$)' "$f" && ! grep -q '^Retiming Report:' "$f"; then echo "not-asked"
+SED
+ctl_effect sab-eff-reportfirst "retime_effect testing the flag only without a report"
+# The flag as a substring again: a path holding "-retiming" would read
+# as the flag.
+cat > "$TMP/sab-eff-substring.sed" <<'SED'
+/then echo "not-asked"$/c\
+      if ! grep -q 'Command: synth_design.*-retiming' "$f"; then echo "not-asked"
+SED
+ctl_effect sab-eff-substring "retime_effect testing the flag as a substring"
+# The value check moved after the build directory is made (the gap
+# verifier-VRTb's N6d found): still before v++, no longer before any work.
+cat > "$TMP/sab-val-late.sed" <<'SED'
+/^for v in RETIMING PHYS_OPT SYNTH_CLOCK; do$/,/^done$/{
+H
+d
+}
+/^mkdir -p "\$BUILD"$/{
+p
+x
+s/^\n//
+}
+SED
+if ! sab_f sab-val-late "$TMP/sab-val-late.sed"; then
+  say_fail "control sab-val-late: its sed script no longer changes hw/rebuild-2022.sh; re-aim it"
+elif refuse_check "$TMP/sab-val-late.sh" "sab-val-late" "SYNTH_CLOCK" "yes" > "$TMP/ctl-val-late.txt"; then
+  say_fail "control: a value check after the build directory is made passed the refusal check"
+else
+  echo "  ok   control: a value check after the build directory is made fails the refusal check"
 fi
 
 echo
@@ -705,10 +795,11 @@ if [ "$fails" -eq 0 ]; then
   echo "reaches the synthesis run of every CU, CFT_GENERICS"
   echo "reaches vivado and the manifest, a lying wrapper read-back stops the"
   echo "build before v++, TARGETS=\"\" packages without linking, SYNTH_CLOCK"
-  echo "is off by default, refuses anything but 0 or 1, and with 1 every CU's"
-  echo "hw synthesis reads the kernel clock through an absolute hook, also"
-  echo "under a relative BUILD; retiming_effect names eight kinds of log; and"
-  echo "each check still fails when its defect is put back."
+  echo "is off by default; it, RETIMING and PHYS_OPT refuse anything but 0 or"
+  echo "1 before any work; with SYNTH_CLOCK=1 every CU's hw synthesis reads"
+  echo "the kernel clock through an absolute hook, also under a relative"
+  echo "BUILD; retiming_effect names thirteen kinds of log; and each check"
+  echo "still fails when its defect is put back."
   exit 0
 fi
 echo "$fails failure(s); stub output under $TMP (kept only until exit)"

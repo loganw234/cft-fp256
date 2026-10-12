@@ -1149,8 +1149,9 @@ retime?"):* experiment A retimed nothing. hw/ooc_retime.tcl creates its
 clock after `synth_design`, so its synthesis had none, and `-retiming`
 is Vivado's global retiming, which moves registers only against a
 clock: the flag without a clock left the netlist byte for byte the
-unflagged one on a toy, on one fp32 pipe and on revision 8's whole
-kernel. The two rows were not one flag apart. The baseline's LUT and
+unflagged one (comment lines removed) on a toy, on one fp32 pipe and
+on revision 8's whole kernel. The two rows were not one flag apart.
+The baseline's LUT and
 WNS are those of 2026-09-01's "shared array, seq diet, ladders off" row
 above (its 292 DSP is ARCHITECTURE's figure for that tile, and its
 55,362 FF are in no earlier record), measured before 8f5f149 put a
@@ -1337,8 +1338,9 @@ the list. The single was not retimed (its kernel's synthesis had no
 clock). The 188 fits hw/ooc_retime.tcl's count taking each DSP with PREG
 twice, and unretimed syntheses set PREG on 94 of the lanes' DSPs
 (docs/VALIDATION.md, 2026-10-12). The two A/Bs below were run with the
-flag and the clock applied after synthesis, so both stand as unretimed
-ones.
+flag, and believed with the clock applied after synthesis, as every
+committed out-of-context script applies it (which script ran them is
+not recorded), so both are believed to stand as unretimed ones.
 
 **The fix is the ROM idiom, not a pipeline stage.** The flat vector was
 chosen because Icarus rejects unpacked-array assignment patterns for
@@ -1354,8 +1356,8 @@ kernel; the exhaustive seedop bench passes under Icarus (85,264
 comparisons, 2/2) and under Verilator (the same, with the width gate
 fatal on warning); the kernel bench under Verilator. Then the A/B, same
 commit, out of context at 135 MHz with `-retiming` - the flag the
-shipping builds carry, which here, with the clock applied after
-synthesis, retimed nothing, so the A/B is the ROM's alone:
+shipping builds carry, believed to retime nothing here (the note
+above), so the A/B is the ROM's alone:
 
 | | LUT | FF | DSP | WNS | worst path |
 |---|---|---|---|---|---|
@@ -1416,8 +1418,8 @@ way, zero above K, so an 8-level shifter over P+2 bits replaces a
 10-level one over NW, with the sticky's variable share named by a
 mask that is also a register. The K <= 0 branch is untouched.
 
-Out of context at 135 MHz with `-retiming` and no clock at synthesis,
-so nothing retimed, against the tip:
+Out of context at 135 MHz with `-retiming`, believed to retime nothing
+(as above), against the tip:
 
 | | LUT | FF | WNS | worst path |
 |---|---|---|---|---|

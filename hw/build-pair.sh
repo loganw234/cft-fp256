@@ -122,6 +122,14 @@ fi
 export KERNEL_FREQ="$FREQ"
 export RETIMING=1
 export PHYS_OPT=1
+# SYNTH_CLOCK passes through from the caller's environment, as the
+# directives below do. hw/rebuild-2022.sh refuses anything but 0 or 1,
+# and so does this, so that --dry-run cannot pass a value the build
+# would then refuse.
+case "${SYNTH_CLOCK:-0}" in
+  0 | 1) ;;
+  *) die "SYNTH_CLOCK is 0 or 1; got '$SYNTH_CLOCK' (hw/rebuild-2022.sh would refuse it)" ;;
+esac
 # The directives are NOT set here: PLACE_DIRECTIVE and ROUTE_DIRECTIVE
 # pass through from the caller's environment to hw/rebuild-2022.sh. The
 # recipe line reports what will apply; it printed "default directives" as
@@ -174,9 +182,12 @@ build_half () {
   [ "$rc" -eq 0 ] || return 1
 
   # The clock and recipe that ACTUALLY applied, read back from the log and
-  # the manifest rather than from the intent above.
+  # the manifest rather than from the intent above. retiming: and
+  # phys_opt: are the requests as the manifest recorded them;
+  # retiming_effect: and synth_clock: are what the synthesis runs did
+  # with RETIMING (docs/BITSTREAM-BUILDS.md).
   grep -m1 "Clock constraint argument" "$log" | sed 's/^/    /' | tee -a "$S"
-  grep -hE "^(retiming|phys_opt|kernel_freq):" "$builddir"/*.manifest.txt \
+  grep -hE "^(retiming|retiming_effect|synth_clock|phys_opt|kernel_freq):" "$builddir"/*.manifest.txt \
       2>/dev/null | sed 's/^/    /' | tee -a "$S"
   WNS_K=$(grep -m1 "kernel_wns_ns:" "$builddir"/*.manifest.txt | awk '{print $2}')
   WNS_R=$(grep -m1 "routed_wns_ns:" "$builddir"/*.manifest.txt | awk '{print $2}')

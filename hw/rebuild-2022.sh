@@ -47,7 +47,8 @@ LINK_CFG=${LINK_CFG:-hw/link.cfg}
 # any clock constraint"), and none carries the "Retiming Report" Vivado
 # prints when it moves a register. On a toy and on one fp32 pipe, the
 # flag without a clock left the netlist byte for byte the one no flag
-# gives; on the box hw/probe_rt.sh found the same for the whole
+# gives (comment lines removed: they hold the date and the command); on
+# the box hw/probe_rt.sh found the same for the whole
 # revision-8 kernel; and in revision 7's q135 link, krnl_1 synthesized
 # with -retiming and krnl_4 without have one netlist (docs/VALIDATION.md,
 # 2026-10-12, "does RETIMING=1 retime?"). The out-of-context A/B this
@@ -87,12 +88,14 @@ RETIMING=${RETIMING:-0}
 # How. $BUILD/synth_clock.xdc holds a create_clock on ap_clk at
 # 1e9/KERNEL_FREQ ns, named cft_synth_ooc_clk so that a leak would show
 # by name in any timing report. $BUILD/synth_clock_pre.tcl reads it with
-# read_xdc -mode out_of_context, which is what kept the clock out of the
-# in-context design in the toys - with and without the next line - and
-# marks it used_in_implementation false, Vivado's own idiom for an IP's
-# out-of-context XDC, which also stops the run reading it again after
-# synthesis. The platform's implementation times the kernel by the
-# clock wizard's generated clock and must see no other. The hook is
+# read_xdc -mode out_of_context and marks it used_in_implementation
+# false, Vivado's own idiom for an IP's out-of-context XDC, which also
+# stops the run reading it again after synthesis. The platform's
+# implementation times the kernel by the clock wizard's generated clock
+# and must see no other, so both guards stay. In the toys the clock
+# stayed out of the in-context design with the property and without it;
+# that -mode out_of_context keeps it out is believed, from Vivado's
+# documentation of the option (no toy ran a plain read_xdc). The hook is
 # every CU's run's STEPS.SYNTH_DESIGN.TCL.PRE, which Vivado sources
 # after the run's create_project and before its read_ip and
 # synth_design, on hw links alone (hw_emu synthesizes no kernel). Measured in
@@ -110,12 +113,6 @@ RETIMING=${RETIMING:-0}
 # kernel_clock: clk_out1_ulp_clk_wiz_0 in its manifest and no
 # cft_synth_ooc_clk in its routed timing summary.
 SYNTH_CLOCK=${SYNTH_CLOCK:-0}
-case "$SYNTH_CLOCK" in
-  0 | 1) ;;
-  *)
-    echo "ERROR: SYNTH_CLOCK is 0 or 1; got '$SYNTH_CLOCK' (true, yes and the like are not read as 1)" >&2
-    exit 1 ;;
-esac
 
 # ---- implementation exploration -------------------------------------
 #
@@ -160,6 +157,19 @@ PLACE_DIRECTIVE=${PLACE_DIRECTIVE:-}
 ROUTE_DIRECTIVE=${ROUTE_DIRECTIVE:-}
 PHYS_OPT=${PHYS_OPT:-0}
 VPP_PROPS=${VPP_PROPS:-}
+
+# RETIMING, PHYS_OPT and SYNTH_CLOCK are each read as `= 1`, so anything
+# but 0 or 1 is refused here, by name and before any work: "true" or
+# "yes" would otherwise build quietly with the flag off, as RETIMING and
+# PHYS_OPT did until 2026-10-12.
+for v in RETIMING PHYS_OPT SYNTH_CLOCK; do
+  case "${!v}" in
+    0 | 1) ;;
+    *)
+      echo "ERROR: $v is 0 or 1; got '${!v}' (true, yes and the like are not read as 1)" >&2
+      exit 1 ;;
+  esac
+done
 
 # The CUs the kernel clock constraint names. DERIVED from the link
 # configuration rather than defaulted, because the failure mode of
@@ -530,7 +540,7 @@ for t in $TARGETS; do
     # a log of each kind.
     retime_effect() {
       local f=$1
-      if ! grep -q 'Command: synth_design.*-retiming' "$f"; then echo "not-asked"
+      if ! grep -qE 'Command: synth_design.* -retiming([[:space:]]|$)' "$f"; then echo "not-asked"
       elif grep -q '^Retiming Report:' "$f"; then
         awk -F'|' '/^Retiming Report:/ { n++ }
                    /^\|Forward Retiming/ { fw += $3 }
@@ -561,8 +571,12 @@ for t in $TARGETS; do
                 "$runs"/ulp_*_synth_1/runme.log 2>/dev/null | head -1 || true)
         [ -n "$src" ] || { ru="$ru $mcu:$id"; continue; }
       fi
-      if grep -q 'Command: synth_design.*-retiming' "$src"; then rr="$rr $mcu"; fi
-      re="$re $mcu:$(retime_effect "$src")"
+      # Given -retiming is the function's own first test (the flag as a
+      # token, so a path holding "-retiming" is not it), so the two lists
+      # cannot disagree.
+      eff=$(retime_effect "$src")
+      [ "$eff" = not-asked ] || rr="$rr $mcu"
+      re="$re $mcu:$eff"
       if grep -q '^CFT_SYNTH_CLOCK:' "$src"; then sc="$sc $mcu"; fi
     done
     rr=${rr# }; ru=${ru# }; re=${re# }; sc=${sc# }

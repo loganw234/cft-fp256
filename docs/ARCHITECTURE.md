@@ -198,7 +198,7 @@ element.
 
 The full-tile figure moved after this table was written: 129,708 with
 the seed ROM as case tables and **123,420** with the round stage
-precomputed (9f73107, `-retiming` given and nothing retimed:
+precomputed (9f73107, `-retiming` given, believed to retime nothing:
 docs/VALIDATION.md, 2026-10-12) - the Timing section below has the ladder.
 
 Both full-tile numbers are measured out of context, Vivado 2022.2,
@@ -613,12 +613,14 @@ case table now and the round stage's arithmetic sits in S12; what is
 left at the head of the list is S10->S11, the LZC-fed coarse
 normalise. The quad from that tree is the open question.
 
-*Corrected 2026-10-12:* the runs and builds of this Timing section that
-were given `-retiming`, the shared array's table below included,
-retimed nothing: a kernel's synthesis, in the link and in the
-out-of-context scripts alike, had no clock, and `-retiming` moves
-registers only against one (docs/VALIDATION.md, 2026-10-12, "does
-RETIMING=1 retime?"). That fits the single closing at +0.045 both ways.
+*Corrected 2026-10-12:* the builds of this Timing section that were
+given `-retiming` retimed nothing: a kernel's synthesis in the link has
+no clock, and `-retiming` moves registers only against one
+(docs/VALIDATION.md, 2026-10-12, "does RETIMING=1 retime?"). That fits
+the single closing at +0.045 both ways. The out-of-context runs given
+it, the shared array's table below included, are believed to have
+retimed nothing too: every committed out-of-context script applies its
+clock after synthesis, though which script ran each is not recorded.
 
 | commit | ask | routed WNS | implied path delay |
 |---|---|---|---|
@@ -676,8 +678,8 @@ Vivado 2022.2, xcu50-fsvh2104-2-e:
 | one shared array, ladders off | 162,482 | -0.065 ns |
 | + the sequencer's control diet | 139,404 | **+0.307 ns** |
 | + fused ladders on | 123,599 | +0.097 ns |
-| + seed ROM as case tables (eb8ef2a), `-retiming` (a no-op) | 129,708 | +2.126 ns |
-| + round stage precomputed in S12, window narrowed (9f73107), `-retiming` (a no-op) | **123,420** | +2.222 ns |
+| + seed ROM as case tables (eb8ef2a), `-retiming` (believed a no-op) | 129,708 | +2.126 ns |
+| + round stage precomputed in S12, window narrowed (9f73107), `-retiming` (believed a no-op) | **123,420** | +2.222 ns |
 
 Then a single tile was linked at 135 MHz with the ladders on, and it
 **missed: WNS -0.577 ns, 776 failing endpoints.** The worst path was

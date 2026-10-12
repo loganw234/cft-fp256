@@ -110,16 +110,18 @@ so 21 to 24 times - `INFO: [Synth 8-11322] No global retiming is needed
 without any clock constraint` - and none prints the `Retiming Report:`
 Vivado prints when it moves a register. On a toy and on one fp32 pipe in
 Vivado 2022.2 the flag without a clock left the netlist byte for byte
-the unflagged one (docs/VALIDATION.md, 2026-10-12, "does RETIMING=1
+the unflagged one once the comment lines, which hold the date and the
+command, are removed (docs/VALIDATION.md, 2026-10-12, "does RETIMING=1
 retime?", which also says what the 2026-09-02 out-of-context gain was).
 No commit of `hw/rebuild-2022.sh` or `hw/package_kernel.tcl` has given
 that synthesis a clock, so no image built with the flag was retimed -
 revision 8's three by their logs, the earlier ones by the same flow.
 And the flag changed no netlist: `hw/probe_rt.sh` on amd-arc-box
 synthesized the whole revision-8 kernel with it and without it, no
-clock either way, into one netlist byte for byte; and in revision 7's
-q135 link, whose krnl_1 was synthesized with `-retiming` and krnl_4
-without, the two netlists are one (the lead's check, the same entry).
+clock either way, into one netlist byte for byte (comment lines
+removed); and in revision 7's q135 link, whose krnl_1 was synthesized
+with `-retiming` and krnl_4 without, the two netlists are one (the
+lead's check, the same entry).
 
 The manifest says both halves. `retiming:` is the request, and
 `retimed_runs:` lists the CUs whose netlist came from a `synth_design`
@@ -162,19 +164,27 @@ Out of context on revision 8's kernel (`hw/probe_rt.sh` on the box), the
 clock alone gave a different netlist (1,487 more LUTs) at the same
 post-synthesis WNS, +1.576 ns; the clock with `RETIMING=1` made 561
 forward and 689 backward retiming moves for +2.245 ns, 0.669 better,
-before any placement. Anything but 0 or 1 is refused by name. With it,
-`hw/rebuild-2022.sh` writes two files into `BUILD` - `synth_clock.xdc`,
-a `create_clock` on `ap_clk` at 1e9/`KERNEL_FREQ` ns named
-`cft_synth_ooc_clk`, and `synth_clock_pre.tcl`, which reads it with
-`read_xdc -mode out_of_context` (what kept the clock out of the
-in-context design in the toys) and then marks it `used_in_implementation
-false` (Vivado's own idiom for an IP's out-of-context XDC) - and hands
-every CU's synthesis run the second as its `STEPS.SYNTH_DESIGN.TCL.PRE`:
+before any placement. `SYNTH_CLOCK`, `RETIMING` and `PHYS_OPT` each
+refuse anything but 0 or 1, by name and before any work (until
+2026-10-12 `RETIMING=true` built quietly with the flag off), and
+`hw/build-pair.sh` refuses the same `SYNTH_CLOCK` values in its
+assertions. With `SYNTH_CLOCK=1`, `hw/rebuild-2022.sh` writes two files
+into `BUILD` - `synth_clock.xdc`, a `create_clock` on `ap_clk` at
+1e9/`KERNEL_FREQ` ns named `cft_synth_ooc_clk`, and
+`synth_clock_pre.tcl`, which reads it with `read_xdc -mode
+out_of_context` and then marks it `used_in_implementation false`
+(Vivado's own idiom for an IP's out-of-context XDC) - and hands every
+CU's synthesis run the second as its `STEPS.SYNTH_DESIGN.TCL.PRE`:
 
 ```bash
 SYNTH_CLOCK=1 KERNEL_FREQ=135000000 RETIMING=1 PHYS_OPT=1 BUILD=build-<name> \
     TARGETS=hw LINK_CFG=hw/link.cfg bash hw/rebuild-2022.sh
 ```
+
+Both guards stay: in the toys the clock stayed out of the in-context
+design with the property and without it, and that the mode is what
+keeps it out is believed, from Vivado's documentation, since no toy ran
+a plain `read_xdc`.
 
 The manifest then says `synth_clock: 1` and names the CUs whose
 synthesis ran the hook on `synth_clock_runs:`. Measured in Vivado 2022.2
