@@ -47,11 +47,14 @@ LINK_CFG=${LINK_CFG:-hw/link.cfg}
 # any clock constraint"), and none carries the "Retiming Report" Vivado
 # prints when it moves a register. On a toy and on one fp32 pipe, the
 # flag without a clock left the netlist byte for byte the one no flag
-# gives (docs/VALIDATION.md, 2026-10-12, "does RETIMING=1 retime?").
-# hw/probe_rt.sh is that measurement on the whole kernel, for a build
-# host. The out-of-context gain this comment used to quote (+0.307 ->
-# +1.681 ns on 2026-09-02) came from hw/ooc_retime.tcl, which clocks
-# only after synthesis as well; that entry says what its rows were.
+# gives; on the box hw/probe_rt.sh found the same for the whole
+# revision-8 kernel; and in revision 7's q135 link, krnl_1 synthesized
+# with -retiming and krnl_4 without have one netlist (docs/VALIDATION.md,
+# 2026-10-12, "does RETIMING=1 retime?"). The out-of-context A/B this
+# comment used to quote (+0.307 -> +1.681 ns, 2026-09-02) was not
+# retiming's: its +1.681 row came from hw/ooc_retime.tcl, which clocks
+# only after synthesis as well, and its +0.307 baseline from an earlier
+# run; that entry says what each row was.
 #
 # So the manifest's retiming: line is the request, and retiming_effect:
 # says what each CU's synthesis did with it. SYNTH_CLOCK=1 (below) gives
@@ -70,20 +73,29 @@ RETIMING=${RETIMING:-0}
 
 # SYNTH_CLOCK=1 gives every kernel CU's out-of-context synthesis the
 # kernel clock, so synthesis is timing-driven against KERNEL_FREQ and
-# RETIMING=1 has a target. OFF by default, and adopting it is Logan's
-# call: it changes every future image's netlist, with RETIMING or
-# without it, since synthesis is timing-driven whenever it has a clock
-# (hw/probe_rt.sh's way d measures how much on the kernel).
+# RETIMING=1 has a target. OFF by default, and kept off by Logan
+# (2026-10-12, "Keep it off for now"): it changes every future image's
+# netlist, with RETIMING or without it, since synthesis is timing-driven
+# whenever it has a clock, and it is to be revisited when a build needs
+# margin, with a routed A/B. Out of context on the revision-8 kernel
+# (hw/probe_rt.sh on the box): the clock alone changed the netlist with
+# the WNS unchanged; the clock with RETIMING=1 made 561 forward and 689
+# backward retiming moves for +0.669 ns (docs/VALIDATION.md,
+# 2026-10-12). Any value but 0 or 1 is refused, so that "true" or "yes"
+# cannot quietly mean off.
 #
 # How. $BUILD/synth_clock.xdc holds a create_clock on ap_clk at
 # 1e9/KERNEL_FREQ ns, named cft_synth_ooc_clk so that a leak would show
-# by name in any timing report. $BUILD/synth_clock_pre.tcl reads it out
-# of context and marks it used_in_implementation false - Vivado's own
-# idiom for an IP's out-of-context XDC, which keeps it to the synthesis:
-# the platform's implementation times the kernel by the clock wizard's
-# generated clock, and must see no other. The hook is every CU's run's
-# STEPS.SYNTH_DESIGN.TCL.PRE, which Vivado sources after the run's
-# create_project and before its read_ip and synth_design. Measured in
+# by name in any timing report. $BUILD/synth_clock_pre.tcl reads it with
+# read_xdc -mode out_of_context, which is what kept the clock out of the
+# in-context design in the toys - with and without the next line - and
+# marks it used_in_implementation false, Vivado's own idiom for an IP's
+# out-of-context XDC, which also stops the run reading it again after
+# synthesis. The platform's implementation times the kernel by the
+# clock wizard's generated clock and must see no other. The hook is
+# every CU's run's STEPS.SYNTH_DESIGN.TCL.PRE, which Vivado sources
+# after the run's create_project and before its read_ip and
+# synth_design, on hw links alone (hw_emu synthesizes no kernel). Measured in
 # Vivado 2022.2 on a toy user IP packaged as package_kernel.tcl packages
 # cft_krnl and synthesized per IP in a block design, as Vitis does
 # (docs/VALIDATION.md, 2026-10-12): without the hook, Synth 8-11322 and
@@ -98,6 +110,12 @@ RETIMING=${RETIMING:-0}
 # kernel_clock: clk_out1_ulp_clk_wiz_0 in its manifest and no
 # cft_synth_ooc_clk in its routed timing summary.
 SYNTH_CLOCK=${SYNTH_CLOCK:-0}
+case "$SYNTH_CLOCK" in
+  0 | 1) ;;
+  *)
+    echo "ERROR: SYNTH_CLOCK is 0 or 1; got '$SYNTH_CLOCK' (true, yes and the like are not read as 1)" >&2
+    exit 1 ;;
+esac
 
 # ---- implementation exploration -------------------------------------
 #
@@ -386,8 +404,8 @@ for t in $TARGETS; do
     # EVERY CU, from the nk= line, as the clock constraint is. Until
     # 2026-09-30 this named ulp_cft_krnl_1_0_synth_1 alone, which is
     # the whole kernel in a single but one of four synthesis runs in a
-    # quad: a quad built with RETIMING=1 alone had at most tile 1
-    # retimed and tiles 2 to 4 not, while its manifest said
+    # quad: a quad built with RETIMING=1 alone gave -retiming to at most
+    # tile 1 and not to tiles 2 to 4, while its manifest said
     # "retiming: 1" (revision 7's q135 and q130; q135's ten worst
     # paths were all in tile 4; docs/VALIDATION.md, 2026-09-30, "the
     # fixes round"). hw/test-rebuild-argv.sh
@@ -466,20 +484,33 @@ for t in $TARGETS; do
     # request once reached one run of four without anything saying so.
     # retimed_runs: names the CUs whose netlist came from a synth_design
     # GIVEN -retiming; retiming_effect: says what that synthesis did with
-    # it, from the same log - retimed(forward=F,backward=B,reports=N)
-    # from Vivado's "Retiming Report", declined-no-clock where it printed
-    # Synth 8-11322 (every link before SYNTH_CLOCK), not-asked without the
-    # flag, and asked-no-report where it printed neither. synth_clock: is
-    # 1 only for an hw target built with SYNTH_CLOCK=1 (hw_emu synthesizes
-    # no kernel), and synth_clock_runs: then names the CUs whose synthesis
+    # it, from the same log, one of:
+    #   not-asked          its synth_design had no -retiming, whatever else
+    #                      the log says;
+    #   retimed(forward=F,backward=B,reports=N)
+    #                      Vivado's "Retiming Report", summed over a report
+    #                      per synthesis partition, with at least one move;
+    #   ran-no-moves(reports=N)
+    #                      reports of no moves: retiming ran, with a clock,
+    #                      and moved nothing. Not "retimed", because this
+    #                      line exists so the manifest never claims a
+    #                      retiming that did not happen;
+    #   declined-no-clock  Synth 8-11322 and no report (every link before
+    #                      SYNTH_CLOCK);
+    #   asked-no-report    the flag, and neither.
+    # A report and a decline in one log (some partitions with a clock and
+    # some without; not seen) add ",declined=K" to the first two forms,
+    # rather than let either fact hide the other. synth_clock: is 1 only
+    # for an hw target built with SYNTH_CLOCK=1 (hw_emu synthesizes no
+    # kernel), and synth_clock_runs: then names the CUs whose synthesis
     # ran the clock hook.
     #
     # Identical CUs share ONE synthesis through Vivado's IP cache: the
     # first run synthesizes and logs "Added synthesis output to IP
     # cache ... cache-ID = <id>", the others log "Using cached IP
     # synthesis design ... cache-ID = <id>" and run no synth_design of
-    # their own. The ID covers the run's properties, so a retimed and
-    # an unretimed CU never share one (measured 2026-09-30: revision
+    # their own. The ID covers the run's properties, so a CU given
+    # -retiming and one not never share one (measured 2026-09-30: revision
     # 7's q135 had krnl_1 synthesized with -retiming, krnl_4 without,
     # and krnl_2 and krnl_3 cache hits of krnl_4's; q135b, every CU
     # retimed, had krnl_4 synthesized with -retiming and the other
@@ -494,19 +525,23 @@ for t in $TARGETS; do
     # different tile. A run with a TCL.PRE hook (SYNTH_CLOCK=1) uses no
     # cache at all, so each CU's own log is its producer.
     rr="" ru="" re="" sc=""
-    # The effect named above, from one producing run's log. A run may
-    # print a report per synthesis partition, so the moves are summed and
-    # the reports counted.
+    # The effect named above, from one producing run's log.
+    # hw/test-rebuild-argv.sh runs this function, cut from this file, on
+    # a log of each kind.
     retime_effect() {
       local f=$1
-      if grep -q '^Retiming Report:' "$f"; then
+      if ! grep -q 'Command: synth_design.*-retiming' "$f"; then echo "not-asked"
+      elif grep -q '^Retiming Report:' "$f"; then
         awk -F'|' '/^Retiming Report:/ { n++ }
                    /^\|Forward Retiming/ { fw += $3 }
                    /^\|Backward Retiming/ { bw += $3 }
-                   END { printf "retimed(forward=%d,backward=%d,reports=%d)\n", fw, bw, n }' "$f"
-      elif grep -q 'Synth 8-11322' "$f"; then echo "declined-no-clock"
-      elif grep -q 'Command: synth_design.*-retiming' "$f"; then echo "asked-no-report"
-      else echo "not-asked"
+                   /\[Synth 8-11322\]/ { d++ }
+                   END {
+                     s = (fw + bw > 0) ? sprintf("retimed(forward=%d,backward=%d,", fw, bw) : "ran-no-moves("
+                     printf "%sreports=%d%s)\n", s, n, (d > 0 ? sprintf(",declined=%d", d) : "")
+                   }' "$f"
+      elif grep -q '\[Synth 8-11322\]' "$f"; then echo "declined-no-clock"
+      else echo "asked-no-report"
       fi
     }
     runs="$BUILD/_x_$t/link/vivado/vpl/prj/prj.runs"

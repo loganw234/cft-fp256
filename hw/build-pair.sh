@@ -137,7 +137,7 @@ LOGDIR="$HOME/r8-logs-$TAG"
 if [ "$DRY_RUN" -eq 1 ]; then
   echo "cft-fp256 $TAG pair from $HAVE"
   echo "host $(hostname), $(nproc) threads"
-  echo "recipe: ${KERNEL_FREQ} Hz, retiming=$RETIMING, phys_opt=$PHYS_OPT, $DIRECTIVES"
+  echo "recipe: ${KERNEL_FREQ} Hz, retiming=$RETIMING (synth_clock=${SYNTH_CLOCK:-0}), phys_opt=$PHYS_OPT, $DIRECTIVES"
   echo "--dry-run: every assertion passed; would now build, creating nothing"
   echo "  single -> build-$TAG-hw   (hw/link.cfg)"
   [ "$SINGLE_ONLY" -eq 1 ] || echo "  quad   -> build-$TAG-quad (hw/link_quad.cfg)"
@@ -150,7 +150,7 @@ mkdir -p "$LOGDIR"
 S="$LOGDIR/00-summary.txt"
 { echo "cft-fp256 $TAG pair from $HAVE"
   echo "host $(hostname), $(nproc) threads"
-  echo "recipe: ${KERNEL_FREQ} Hz, retiming=$RETIMING, phys_opt=$PHYS_OPT, $DIRECTIVES"
+  echo "recipe: ${KERNEL_FREQ} Hz, retiming=$RETIMING (synth_clock=${SYNTH_CLOCK:-0}), phys_opt=$PHYS_OPT, $DIRECTIVES"
   date -Is; } | tee "$S"
 
 WNS_K=""; WNS_R=""
@@ -240,8 +240,11 @@ if [ "$SINGLE_OK" -eq 1 ] && [ "$QUAD_OK" -eq 1 ]; then
   ( cd "$STAGE" && sha256sum cft_hw_single.xclbin cft_hw_quad.xclbin \
       cft_hw_single.manifest.txt cft_hw_quad.manifest.txt > SHA256SUMS )
   { echo "cft-fp256 $TAG pair, both from $HAVE, built on $(hostname):"
-    echo "  cft_hw_single.xclbin  one tile , ${FREQ} Hz, retiming+phys_opt, kernel WNS ${K_S:-?}, routed ${R_S:-?}"
-    echo "  cft_hw_quad  .xclbin  four tiles, ${FREQ} Hz, retiming+phys_opt, kernel WNS ${K_Q:-?}, routed ${R_Q:-?}"
+    # The flags as set. RETIMING=1 retimes nothing without SYNTH_CLOCK=1
+    # (docs/BITSTREAM-BUILDS.md); until 2026-10-12 this said
+    # "retiming+phys_opt".
+    echo "  cft_hw_single.xclbin  one tile , ${FREQ} Hz, RETIMING=$RETIMING SYNTH_CLOCK=${SYNTH_CLOCK:-0} PHYS_OPT=$PHYS_OPT, kernel WNS ${K_S:-?}, routed ${R_S:-?}"
+    echo "  cft_hw_quad  .xclbin  four tiles, ${FREQ} Hz, RETIMING=$RETIMING SYNTH_CLOCK=${SYNTH_CLOCK:-0} PHYS_OPT=$PHYS_OPT, kernel WNS ${K_Q:-?}, routed ${R_Q:-?}"
     echo "  SHA256SUMS            sha256sum -c SHA256SUMS before loading; the manifests carry commit, flags and hashes"
     [ -n "$NOTES" ] && [ -f "$NOTES" ] && { echo; cat "$NOTES"; }
   } > "$STAGE/README"

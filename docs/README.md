@@ -1,14 +1,14 @@
 # The documents, by what you open them for
 
-Forty-three files, 74,530 lines. Flat in one directory they look like one
+Forty-three files, 74,593 lines. Flat in one directory they look like one
 undifferentiated pile; they are not, and the split is close to even:
 
 - **27,428 lines you consult while working** — the three under *Start here*,
   the contract, and the reference you call into;
 - **6,679 lines of tool manual**, one per shipped program;
-- **2,092 lines of operations**, read when you are about to do something to
+- **2,107 lines of operations**, read when you are about to do something to
   hardware;
-- **38,331 lines of record and argument** — the ledger, the roadmap and the
+- **38,379 lines of record and argument** — the ledger, the roadmap and the
   design studies. The history of how a decision was reached, worth keeping,
   and not what you open to get something done.
 
@@ -83,9 +83,9 @@ running.
 
 | document | lines | what it is for |
 |---|---|---|
-| [BITSTREAM-BUILDS.md](BITSTREAM-BUILDS.md) | 333 | Building a bitstream, and the five traps — three of which exit 0, and two that look like a design failure. `hw/build-pair.sh` is this document as an executable. |
+| [BITSTREAM-BUILDS.md](BITSTREAM-BUILDS.md) | 347 | Building a bitstream, and the five traps — three of which exit 0, and two that look like a design failure. `hw/build-pair.sh` is this document as an executable. |
 | [CARDDAY.md](CARDDAY.md) | 973 | Card day: the runbook as it was actually run, the staged pairs, and the forensics kept when build trees are reclaimed. |
-| [BRINGUP.md](BRINGUP.md) | 786 | Hardware bring-up, and the gates CI's green tick does not cover. |
+| [BRINGUP.md](BRINGUP.md) | 787 | Hardware bring-up, and the gates CI's green tick does not cover. |
 
 ## The record
 
@@ -94,8 +94,8 @@ reading material for a working session.
 
 | document | lines | what it is for |
 |---|---|---|
-| [VALIDATION.md](VALIDATION.md) | 18,749 | The validation ledger, append-only. Every run, including the ones that failed and the mistakes that produced them. A figure here is a fact about the run on its date and is never edited to match a later one. |
-| [ROADMAP.md](ROADMAP.md) | 5,826 | What is built, what is next, and what was decided against. |
+| [VALIDATION.md](VALIDATION.md) | 18,765 | The validation ledger, append-only. Every run, including the ones that failed and the mistakes that produced them. A figure here is a fact about the run on its date and is never edited to match a later one. |
+| [ROADMAP.md](ROADMAP.md) | 5,840 | What is built, what is next, and what was decided against. |
 | [ROUND2.md](ROUND2.md) | 1,082 | The plan for the gather, the scatter, the lane mask and the broadcast as one parcel round, with its outcome at the top: the seam the lead lands first, a brief per parcel, the verifiers, the ledger, the merge order. |
 | [NOVEL.md](NOVEL.md) | 561 | Results for which no prior description was found, with the standard of evidence stated first. |
 | [ATLAS.md](ATLAS.md) | 367 | The atlas-engine integration, assessed before any of it was done. |
@@ -115,9 +115,9 @@ questions.
 
 | document | lines | question it settled |
 |---|---|---|
-| [studies/OPT-A-datapath.md](studies/OPT-A-datapath.md) | 919 | the arithmetic datapath |
-| [studies/OPT-B-array.md](studies/OPT-B-array.md) | 1,018 | the array, the beat, and how many tiles a part holds |
-| [studies/OPT-C-timing.md](studies/OPT-C-timing.md) | 1,151 | timing, and what the physical tools will and will not give |
+| [studies/OPT-A-datapath.md](studies/OPT-A-datapath.md) | 926 | the arithmetic datapath |
+| [studies/OPT-B-array.md](studies/OPT-B-array.md) | 1,026 | the array, the beat, and how many tiles a part holds |
+| [studies/OPT-C-timing.md](studies/OPT-C-timing.md) | 1,154 | timing, and what the physical tools will and will not give |
 | [studies/OPT-D-contract.md](studies/OPT-D-contract.md) | 1,061 | the contract and the system above the RTL |
 | [studies/EXT-A-wide-ladder.md](studies/EXT-A-wide-ladder.md) | 1,146 | how far the ladder extends above binary256, what an MPFR-shaped tile is worth on an FPGA and on an ASIC, and what counting in MPFR cores leaves out; its instruments and their captured runs are in `studies/ext-a/` |
 | [studies/TOOL-A-dense-router.md](studies/TOOL-A-dense-router.md) | 253 | why openXC7's router does not converge on the tile, what to change in it and in what order, and why a fork of it (loganw234/nextpnr-xilinx, `dense`) starts at the pinned 0.9.6 |

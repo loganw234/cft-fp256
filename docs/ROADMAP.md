@@ -1148,18 +1148,22 @@ Implied ceiling at that slack is around 175 MHz out of context.
 retime?"):* experiment A retimed nothing. hw/ooc_retime.tcl creates its
 clock after `synth_design`, so its synthesis had none, and `-retiming`
 is Vivado's global retiming, which moves registers only against a
-clock: on a toy and on one fp32 pipe in Vivado 2022.2 the flag without
-a clock left the netlist byte for byte the unflagged one. The two rows
-were not one flag apart. The baseline's figures are 2026-09-01's
-"shared array, seq diet, ladders off" row above, measured before
-8f5f149 put a register on the reduce operands - the path whose message
-says it "read +0.307 and hid" out of context - and its PREG cell is
-empty where ooc_retime.tcl prints a count. The gain and the +354 FF are
-believed to be that register's (2 x 256 + 1 bits). The 188 is
-ooc_retime.tcl's own count, which takes each DSP with PREG twice, the
-DSP48E2 and its DSP_OUTPUT part (measured on the fp32 pipe); 94 of the
-lanes' DSPs carry PREG in unretimed syntheses. `REPLAY=1 bash
-hw/probe_rt.sh` measures the pair on 2b57cf0's and a445268's trees.
+clock: the flag without a clock left the netlist byte for byte the
+unflagged one on a toy, on one fp32 pipe and on revision 8's whole
+kernel. The two rows were not one flag apart. The baseline's LUT and
+WNS are those of 2026-09-01's "shared array, seq diet, ladders off" row
+above (its 292 DSP is ARCHITECTURE's figure for that tile, and its
+55,362 FF are in no earlier record), measured before 8f5f149 put a
+register on the reduce operands - the path whose message says it "read
++0.307 and hid" out of context - and its PREG cell is empty where
+ooc_retime.tcl prints a count. The gain and the +354 FF are believed to
+be that register's (2 x 256 + 1 bits); the DSP column's 292 against 277
+is not explained. The 188 is ooc_retime.tcl's own count, which takes
+each DSP with PREG twice, the DSP48E2 and its DSP_OUTPUT part: on
+revision 8's kernel it reads 220 for the 110 DSPs with PREG, and 94 of
+the lanes' DSPs carry PREG in unretimed syntheses. No replay was run
+(Logan, 2026-10-12): the figures stand as not retiming's, their cause
+believed.
 
 **Two caveats, both load-bearing.** Out-of-context slack has already
 mispredicted the shell by 0.88 ns once this week, so +1.681 is a
@@ -1216,14 +1220,19 @@ So what follows measured one retimed tile in four, not retiming.
 *And 2026-10-12:* no tile of either quad, nor of revision 7's, was
 retimed. The flag reached synthesis runs that had no clock, and
 `-retiming` moves registers only against one (docs/VALIDATION.md,
-2026-10-12, "does RETIMING=1 retime?"). The two rows differ by their
-trees, 8f5f149 and 40149b1, not by retiming.
+2026-10-12, "does RETIMING=1 retime?"). The records disagree on
+whether the two rows are one tree: the table below labels them 8f5f149
+and 40149b1, whose rtl differs, while VALIDATION's entry of the day
+calls the first "the same design without retiming". On one tree a flag
+that does nothing gives one netlist, so -0.113 against -0.141 points to
+two; either way retiming did not separate them.
 
 Slightly worse, and the reason is visible in the router's own
 trajectory: both builds left placement at exactly +0.055 - the placer
 met its target and stopped, the met-target lesson again - and both
-lost a nanosecond in routing. Retiming shortens logic; at 98% CLB
-occupancy across both SLRs the loss is wire, and the two trajectories
+lost a nanosecond in routing. Retiming would shorten logic, but it moved
+nothing here (the correction above); at 98% CLB occupancy across both
+SLRs the loss is wire, and the two trajectories
 track each other within 0.03 ns from iteration 0 to the end. The ten
 worst routed paths are the three families named in the next entry:
 six through the seed ROM's index-multiply DSP into `s0_byp_d`, three
@@ -1234,13 +1243,13 @@ quad's question, with 130 behind it.
 
 **Answered the same evening: the quad from the tip closes at 135 MHz.**
 9f73107 - case-table ROM, the sequencer's bank fix, the round stage's
-precompute - four tiles, retiming and phys_opt, built on the desktop's
-WSL in 5h27m:
+precompute - four tiles, `RETIMING=1` (which retimed nothing) and
+phys_opt, built on the desktop's WSL in 5h27m:
 
 | | routed WNS | failing endpoints | kernel WNS |
 |---|---|---|---|
-| quad @135, no retiming (8f5f149) | -0.113 | 463 | - |
-| quad @135, retimed (40149b1) | -0.141 | 836 | - |
+| quad @135, RETIMING=0 (8f5f149) | -0.113 | 463 | - |
+| quad @135, RETIMING=1, nothing retimed (40149b1) | -0.141 | 836 | - |
 | **quad @135, tip (9f73107)** | **+0.018** | **0 of 1,028,763** | **+0.143** |
 
 The router's own trajectory tells the story: post-place +0.055 like
@@ -1276,9 +1285,12 @@ shorten is S10->S11 as recorded above. And silicon has still not been
 touched.
 
 **Order of attack, if this is ever picked up:** retiming first, because
-it is a flag and a verification question rather than a redesign; the
-pipe re-balance second, if the ceiling still binds after the card has
-said what the shell really does.
+it is a flag and a verification question rather than a redesign - two
+flags, it turned out (2026-10-12): RETIMING=1 does nothing without
+SYNTH_CLOCK=1, which gives the kernel's synthesis its clock and which
+Logan keeps off until a build needs the margin; the pipe re-balance
+second, if the ceiling still binds after the card has said what the
+shell really does.
 
 #### The DSP on the critical path was never the multiplier (2026-09-02)
 
@@ -1304,8 +1316,8 @@ Where it stood in the two builds that matter:
 
 | build | worst kernel paths | of which this family |
 |---|---|---|
-| quad @135, no retiming (WNS -0.113, 463 failing endpoints) | ten violators listed | **5**; the other five are S12->S13 rounding (3, at -0.112) and the reader's 64-bit `burst_len` arithmetic (2, at -0.106) |
-| single @135, retimed (WNS +0.045) | ten worst, unique endpoints | **10 of 10** |
+| quad @135, RETIMING=0 (WNS -0.113, 463 failing endpoints) | ten violators listed | **5**; the other five are S12->S13 rounding (3, at -0.112) and the reader's 64-bit `burst_len` arithmetic (2, at -0.106) |
+| single @135, RETIMING=1, nothing retimed (WNS +0.045) | ten worst, unique endpoints | **10 of 10** |
 
 Retiming absorbed a PREG into 188 multiplier DSPs and took those paths
 off the list; it could not touch this one, because moving `s0_byp_d`
@@ -1324,9 +1336,9 @@ been made yet.
 the list. The single was not retimed (its kernel's synthesis had no
 clock). The 188 fits hw/ooc_retime.tcl's count taking each DSP with PREG
 twice, and unretimed syntheses set PREG on 94 of the lanes' DSPs
-(docs/VALIDATION.md, 2026-10-12). "With retiming" in the two tables
-below names runs given the flag, which retimed nothing, so both A/Bs
-stand as unretimed ones.
+(docs/VALIDATION.md, 2026-10-12). The two A/Bs below were run with the
+flag and the clock applied after synthesis, so both stand as unretimed
+ones.
 
 **The fix is the ROM idiom, not a pipeline stage.** The flat vector was
 chosen because Icarus rejects unpacked-array assignment patterns for
@@ -1341,8 +1353,9 @@ Portability, measured rather than argued: Yosys elaborates the full
 kernel; the exhaustive seedop bench passes under Icarus (85,264
 comparisons, 2/2) and under Verilator (the same, with the width gate
 fatal on warning); the kernel bench under Verilator. Then the A/B, same
-commit, out of context at 135 MHz with retiming - the flow the shipping
-builds now use:
+commit, out of context at 135 MHz with `-retiming` - the flag the
+shipping builds carry, which here, with the clock applied after
+synthesis, retimed nothing, so the A/B is the ROM's alone:
 
 | | LUT | FF | DSP | WNS | worst path |
 |---|---|---|---|---|---|
@@ -1357,7 +1370,7 @@ file, and the slack goes the other way.
 
 **What this does not establish.** Shell slack: out-of-context has
 mispredicted the shell by 0.88 ns this week, and the quad routing as
-this is written (40149b1, retimed, 135 MHz) does NOT carry the change -
+this is written (40149b1, RETIMING=1, 135 MHz) does NOT carry the change -
 its number measures retiming alone, which is the question it was built
 to answer.
 *Corrected 2026-09-30:* that quad had tile 1 alone retimed (the
@@ -1367,7 +1380,7 @@ retiming. *And 2026-10-12:* none of its tiles was retimed (the
 correction there), so it measures its tree.
 
 *Established the same evening.* A single tile from the case-ROM
-commit's RTL (0e7264e), 135 MHz, retimed, in the shell: routed, image
+commit's RTL (0e7264e), 135 MHz, RETIMING=1, in the shell: routed, image
 written, **kernel WNS +0.433 ns** where the same clock closed at
 +0.045 before the change - +0.39 ns delivered of +0.445 promised,
 which is the closest OOC and shell have agreed all week. The seed
@@ -1403,7 +1416,8 @@ way, zero above K, so an 8-level shifter over P+2 bits replaces a
 10-level one over NW, with the sticky's variable share named by a
 mask that is also a register. The K <= 0 branch is untouched.
 
-Out of context at 135 MHz with retiming, against the tip:
+Out of context at 135 MHz with `-retiming` and no clock at synthesis,
+so nothing retimed, against the tip:
 
 | | LUT | FF | WNS | worst path |
 |---|---|---|---|---|

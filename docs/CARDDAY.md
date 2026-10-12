@@ -126,7 +126,7 @@ the element count is an operand rather than a loop bound.
       both features (so cft-zoom and cft-orbits size themselves and the
       imul cases replay instead of being skipped), the leading-zero
       cone as its own stage (LATENCY 16), ABI 0.8 - the hardware the
-      library expects. The 9f73107 recipe: retiming + phys_opt, default
+      library expects. The 9f73107 recipe: RETIMING=1 + phys_opt, default
       directives. hw/verify-image.sh 8/8 on each; each staged copy
       re-hashed against its manifest's build-time sha256, byte-identical;
       the runner's `images` stage over both: PASS (run
@@ -212,7 +212,7 @@ the element count is an operand rather than a loop bound.
       the open half: the tip quads at 135 on both hosts, 130 behind.
 
       The quad half closed the same evening (2026-09-02, 19:13): 9f73107,
-      135 MHz, retiming + phys_opt, routed WNS +0.018 with 0 failing
+      135 MHz, RETIMING=1 + phys_opt, routed WNS +0.018 with 0 failing
       endpoints, kernel WNS **+0.143**, verify-image 8/8, re-hashed
       against its manifest after the copy, byte-identical:
 
@@ -228,7 +228,7 @@ the element count is an operand rather than a loop bound.
       REPRODUCED.txt records both hashes and the section hash.
 
       The single half followed from the same tree (2026-09-02, 20:48,
-      the desktop's WSL, 1h32m): 9f73107, 135 MHz, retiming + phys_opt,
+      the desktop's WSL, 1h32m): 9f73107, 135 MHz, RETIMING=1 + phys_opt,
       routed WNS +0.055 with 0 failing endpoints of 572,783, kernel WNS
       **+0.618** (worst path the seedop bypass into s0_byp_d, 15 logic
       levels), verify-image 8/8, re-hashed after the copy:

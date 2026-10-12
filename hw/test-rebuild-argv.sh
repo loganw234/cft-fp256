@@ -56,8 +56,29 @@ for r in /data/Xilinx /opt/Xilinx /tools/Xilinx; do
 done
 
 TMP=$(mktemp -d) || exit 1
-trap 'rm -rf "$TMP"' EXIT
+# The relative-BUILD legs need a BUILD path relative to the repository
+# root, as BITSTREAM-BUILDS writes it (BUILD=build-<name>). They use
+# REL_BASE, under the repository's own gitignored build/, named for this
+# run and made by it: with $TMP, the only things this test removes.
+# build/ itself goes only if this run made it and left it empty.
+REL_BASE="build/buildargs-$$-${RANDOM:-0}"
+REL_MADE=0
+MADE_BUILD=0; [ -d "$ROOT/build" ] || MADE_BUILD=1
+cleanup() {
+  rm -rf "$TMP"
+  [ "$REL_MADE" = 1 ] && rm -rf "${ROOT:?}/$REL_BASE"
+  [ "$MADE_BUILD" = 1 ] && rmdir "$ROOT/build" 2>/dev/null
+  return 0
+}
+trap cleanup EXIT
 mkdir -p "$TMP/bin" "$TMP/plat/xilinx_u50_gen3x16_xdma_5_202210_1"
+
+# hw_emu's last step in rebuild-2022.sh, so that a run with hw_emu in
+# TARGETS ends as one without it does.
+cat > "$TMP/bin/emconfigutil" <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
 
 cat > "$TMP/bin/vivado" <<'STUB'
 #!/usr/bin/env bash
@@ -107,7 +128,8 @@ done
 # The synthesis runs, the way Vivado's IP cache leaves them (measured in
 # revision 7's q135, q130 and q135b): CUs with the same properties share
 # one cache-ID; the LAST CU of each ID synthesizes and adds the entry,
-# the others are hits. A retimed CU's synth_design carries -retiming.
+# the others are hits. A CU given RETIMING's property runs synth_design
+# with -retiming.
 if [ -n "$tmpd" ]; then
   cus=$(sed -n 's/^\([a-z0-9_]*\)\.ap_clk.*/\1/p' <(printf '%s\n' "$@" | tr ',' '\n' | sed 's/^[0-9]*://'))
   runs="$tmpd/link/vivado/vpl/prj/prj.runs"
@@ -160,7 +182,7 @@ if [ -n "$tmpd" ]; then
 fi
 exit 0
 STUB
-chmod +x "$TMP/bin/vivado" "$TMP/bin/v++"
+chmod +x "$TMP/bin/vivado" "$TMP/bin/v++" "$TMP/bin/emconfigutil"
 
 # Run the script under the stubs and echo where the argv landed.
 run_it() {                       # run_it <script> <link-cfg> <tag>
@@ -171,7 +193,7 @@ run_it() {                       # run_it <script> <link-cfg> <tag>
     PATH="$TMP/bin:$PATH" \
     VPP_ARGV_LOG="$log" \
     PLATFORM_REPO_PATHS="$TMP/plat" \
-    BUILD="$TMP/build-$tag" \
+    BUILD="${BUILD_FOR_RUN-$TMP/build-$tag}" \
     TARGETS="${TARGETS_FOR_RUN-hw}" \
     KERNEL_FREQ="${KERNEL_FREQ_FOR_RUN-135000000}" \
     RETIMING="${RETIMING_FOR_RUN-1}" \
@@ -182,7 +204,7 @@ run_it() {                       # run_it <script> <link-cfg> <tag>
   echo "$log"
 }
 
-# The CUs whose synthesis run the argv retimes, in argv order.
+# The CUs whose synthesis run the argv gives -retiming, in argv order.
 retimed_cus_of() {              # retimed_cus_of <argv-log> -> "cu cu ..."
   sed -n 's/^run\.ulp_\(.*\)_0_synth_1\.{STEPS\.SYNTH_DESIGN\.ARGS\.RETIMING}=true$/\1/p' "$1" \
     | tr '\n' ' ' | sed 's/ $//'
@@ -246,13 +268,13 @@ for pair in "hw/link.cfg:single:1" "hw/link_quad.cfg:quad:4"; do
     || say_fail "$tag: --vivado.prop missing, so VPP_PROPS never reached v++"
   # RETIMING=1 reaches the synthesis run of EVERY CU the nk= line
   # names. Until 2026-09-30 it reached cft_krnl_1's alone, and three
-  # tiles of every quad went unretimed.
+  # tiles of every quad went without it.
   want=$(sed -n 's/^[[:space:]]*nk=[^:]*:[0-9]*:\(.*\)$/\1/p' "$ROOT/$cfg" | tr '.' ' ')
   rt=$(retimed_cus_of "$log")
   if [ "$rt" != "$want" ]; then
-    say_fail "$tag: RETIMING=1 retimes '$rt', not every CU '$want'"
+    say_fail "$tag: RETIMING=1 reaches '$rt', not every CU '$want'"
   else
-    echo "  ok   $tag: RETIMING=1 retimes every CU: $rt"
+    echo "  ok   $tag: RETIMING=1 reaches the synthesis run of every CU: $rt"
   fi
   # And the manifest says what the runs did: cache hits followed to the
   # run that synthesized their entry.
@@ -284,31 +306,47 @@ done
 # (no IP cache with a hook), and the manifest names the runs that ran the
 # hook and what -retiming did. sc_check prints its findings and returns
 # how many checks failed, so the controls below can require a failure.
-sc_check() {                    # sc_check <script> <cfg> <tag>
-  local script=$1 cfg=$2 tag=$3 log want got pre xdc man me sr bad=0
+sc_check() {                    # sc_check <script> <cfg> <tag> [build dir, to read]
+  # BUILD_FOR_RUN in the caller's environment reaches run_it, for a
+  # relative BUILD; the fourth argument is where that BUILD lands.
+  local script=$1 cfg=$2 tag=$3 bdir=${4:-$TMP/build-$3} log want got hook pre xdc man me sr rl sl bad=0
   log=$(SYNTH_CLOCK=1 run_it "$script" "$cfg" "$tag")
-  man="$TMP/build-$tag/cft_hw.manifest.txt"
-  pre="$TMP/build-$tag/synth_clock_pre.tcl"
-  xdc="$TMP/build-$tag/synth_clock.xdc"
+  man="$bdir/cft_hw.manifest.txt"
+  pre="$bdir/synth_clock_pre.tcl"
+  xdc="$bdir/synth_clock.xdc"
   want=$(sed -n 's/^[[:space:]]*nk=[^:]*:[0-9]*:\(.*\)$/\1/p' "$ROOT/$cfg" | tr '.' ' ')
   got=$(sed -n 's/^run\.ulp_\(.*\)_0_synth_1\.{STEPS\.SYNTH_DESIGN\.TCL\.PRE}=.*$/\1/p' "$log" | tr '\n' ' ' | sed 's/ $//')
   [ "$got" = "$want" ] || { echo "  FAIL $tag: the hook reaches '$got', not every CU '$want'"; bad=$((bad + 1)); }
-  # One file for all, absolute, existing - Vivado sources it from the run's directory.
-  if [ "$(sed -n 's/^run\.ulp_.*_0_synth_1\.{STEPS\.SYNTH_DESIGN\.TCL\.PRE}=//p' "$log" | sort -u)" != "$(cd "$TMP/build-$tag" 2>/dev/null && pwd)/synth_clock_pre.tcl" ] || [ ! -f "$pre" ]; then
-    echo "  FAIL $tag: the hook is not one absolute, existing \$BUILD/synth_clock_pre.tcl"; bad=$((bad + 1))
+  # One file for all, absolute, existing - Vivado sources it from the
+  # run's directory, so a path relative to the repository root would not
+  # be found there (the relative-BUILD leg is what makes this checkable).
+  hook=$(sed -n 's/^run\.ulp_.*_0_synth_1\.{STEPS\.SYNTH_DESIGN\.TCL\.PRE}=//p' "$log" | sort -u)
+  case "$hook" in
+    /*) ;;
+    *) echo "  FAIL $tag: the hook path '$hook' is not absolute"; bad=$((bad + 1));;
+  esac
+  if [ "$hook" != "$(cd "$bdir" 2>/dev/null && pwd)/synth_clock_pre.tcl" ] || [ ! -f "$pre" ]; then
+    echo "  FAIL $tag: the hook is not one existing \$BUILD/synth_clock_pre.tcl"; bad=$((bad + 1))
   fi
   grep -qx 'create_clock -period 7.407 -name cft_synth_ooc_clk \[get_ports ap_clk\]' "$xdc" 2>/dev/null \
     || { echo "  FAIL $tag: synth_clock.xdc is not a 7.407 ns create_clock on ap_clk"; bad=$((bad + 1)); }
-  grep -qxF "read_xdc -mode out_of_context {$(dirname "$pre")/synth_clock.xdc}" "$pre" 2>/dev/null \
-    && grep -qxF "set_property used_in_implementation false [get_files -all {$(dirname "$pre")/synth_clock.xdc}]" "$pre" \
-    || { echo "  FAIL $tag: the hook does not read the XDC out of context and keep it out of implementation"; bad=$((bad + 1)); }
+  grep -qxF "read_xdc -mode out_of_context {$(cd "$bdir" 2>/dev/null && pwd)/synth_clock.xdc}" "$pre" 2>/dev/null \
+    && grep -qxF "set_property used_in_implementation false [get_files -all {$(cd "$bdir" 2>/dev/null && pwd)/synth_clock.xdc}]" "$pre" \
+    || { echo "  FAIL $tag: the hook does not read the XDC out of context and mark it used_in_implementation false"; bad=$((bad + 1)); }
+  # In that order: set_property on a file not yet read finds nothing and
+  # fails the run (Vivado's run script sources the hook inside a catch).
+  rl=$(grep -n '^read_xdc ' "$pre" 2>/dev/null | head -1 | cut -d: -f1)
+  sl=$(grep -n '^set_property used_in_implementation false' "$pre" 2>/dev/null | head -1 | cut -d: -f1)
+  if [ -z "$rl" ] || [ -z "$sl" ] || [ "$rl" -ge "$sl" ]; then
+    echo "  FAIL $tag: the hook does not read the XDC before it marks it (lines ${rl:-none} and ${sl:-none})"; bad=$((bad + 1))
+  fi
   case "$(clock_arg_of "$log")" in
     135000000:*) ;;
     *) echo "  FAIL $tag: --clock.freqHz went missing with SYNTH_CLOCK=1"; bad=$((bad + 1));;
   esac
   [ "$(retimed_cus_of "$log")" = "$want" ] \
     || { echo "  FAIL $tag: RETIMING no longer reaches every CU with SYNTH_CLOCK=1"; bad=$((bad + 1)); }
-  if grep -l 'Using cached IP synthesis design' "$TMP/build-$tag"/_x_hw/link/vivado/vpl/prj/prj.runs/ulp_*_synth_1/runme.log > /dev/null 2>&1; then
+  if grep -l 'Using cached IP synthesis design' "$bdir"/_x_hw/link/vivado/vpl/prj/prj.runs/ulp_*_synth_1/runme.log > /dev/null 2>&1; then
     echo "  FAIL $tag: a hooked run is a cache hit; Vivado gives a run with a TCL.PRE no cache"; bad=$((bad + 1))
   fi
   grep -q '^synth_clock:   1 ' "$man" 2>/dev/null || { echo "  FAIL $tag: the manifest does not say synth_clock: 1"; bad=$((bad + 1)); }
@@ -317,7 +355,7 @@ sc_check() {                    # sc_check <script> <cfg> <tag>
   me=$(sed -n 's/^retiming_effect: //p' "$man" 2>/dev/null)
   [ "$me" = "$(for c in $want; do printf '%s:retimed(forward=3,backward=5,reports=1) ' "$c"; done | sed 's/ $//')" ] \
     || { echo "  FAIL $tag: the manifest's retiming_effect is '$me'"; bad=$((bad + 1)); }
-  [ "$bad" = 0 ] && echo "  ok   $tag: the hook on every CU ($got), a 7.407 ns clock kept out of implementation, no cache, retiming_effect retimed"
+  [ "$bad" = 0 ] && echo "  ok   $tag: the hook on every CU ($got) at an absolute path, a 7.407 ns clock read out of context and then marked, no cache, retiming_effect retimed"
   return "$bad"
 }
 echo "== SYNTH_CLOCK=1: every CU's synthesis run reads the kernel clock =="
@@ -325,6 +363,97 @@ for pair in "hw/link.cfg:sc-single" "hw/link_quad.cfg:sc-quad"; do
   cfg=${pair%%:*}; tag=${pair#*:}
   sc_check "$SCRIPT" "$cfg" "$tag" || fails=$((fails + 1))
 done
+
+# A relative BUILD, as BITSTREAM-BUILDS writes it: the hook's path must
+# still be absolute. Every leg above passes an absolute BUILD, where a
+# hook path left as given would pass unseen (verifier-VRT's F15).
+echo "== SYNTH_CLOCK=1 with a relative BUILD: the hook's path is still absolute =="
+if [ -e "$ROOT/$REL_BASE" ]; then
+  say_fail "relative BUILD: $REL_BASE exists and is not this run's, so the leg is not run"
+else
+  REL_MADE=1
+  BUILD_FOR_RUN="$REL_BASE/rel" sc_check "$SCRIPT" "hw/link.cfg" "sc-rel" "$ROOT/$REL_BASE/rel" \
+    || fails=$((fails + 1))
+fi
+
+# hw_emu synthesizes no kernel: the hook goes on hw's link alone, and
+# hw_emu's manifest says synth_clock: 0 (verifier-VRT's F7).
+emu_check() {                   # emu_check <script> <tag>
+  local script=$1 tag=$2 log per bad=0
+  log=$(SYNTH_CLOCK=1 TARGETS_FOR_RUN="hw hw_emu" run_it "$script" "hw/link.cfg" "$tag")
+  per=$(awk '$0 == "-l" { inv++ }
+             prev == "-t" { t[inv] = $0 }
+             { if ($0 ~ /STEPS\.SYNTH_DESIGN\.TCL\.PRE/) h[inv]++; prev = $0 }
+             END { for (i = 1; i <= inv; i++) printf "%s%s:%d", (i > 1 ? " " : ""), t[i], h[i] + 0 }' "$log")
+  [ "$per" = "hw:1 hw_emu:0" ] || { echo "  FAIL $tag: the hooks per link are '$per', not 'hw:1 hw_emu:0'"; bad=$((bad + 1)); }
+  [ "$(cat "$TMP/rc-$tag")" = 0 ] || { echo "  FAIL $tag: the build exited $(cat "$TMP/rc-$tag")"; bad=$((bad + 1)); }
+  grep -qx 'synth_clock:   0' "$TMP/build-$tag/cft_hw_emu.manifest.txt" 2>/dev/null \
+    || { echo "  FAIL $tag: hw_emu's manifest does not say synth_clock: 0"; bad=$((bad + 1)); }
+  [ "$bad" = 0 ] && echo "  ok   $tag: the hook on hw's link alone ($per), and hw_emu's manifest says synth_clock: 0"
+  return "$bad"
+}
+echo "== SYNTH_CLOCK=1 with TARGETS=\"hw hw_emu\": the hook on hw's link alone =="
+emu_check "$SCRIPT" "sc-emu" || fails=$((fails + 1))
+
+# Any SYNTH_CLOCK but 0 or 1 is refused by name before v++, so that
+# "true" or "yes" cannot quietly build without the clock.
+refuse_check() {                # refuse_check <script> <tag> <value>
+  local script=$1 tag=$2 v=$3 log
+  log=$(SYNTH_CLOCK="$v" run_it "$script" "hw/link.cfg" "$tag")
+  if [ "$(cat "$TMP/rc-$tag")" = 0 ]; then
+    echo "  FAIL $tag: SYNTH_CLOCK=$v built"; return 1
+  elif [ -s "$log" ]; then
+    echo "  FAIL $tag: SYNTH_CLOCK=$v failed only after v++ ran"; return 1
+  elif ! grep -q "SYNTH_CLOCK is 0 or 1; got '$v'" "$TMP/out-$tag.txt"; then
+    echo "  FAIL $tag: SYNTH_CLOCK=$v stopped, but not by name"; return 1
+  fi
+  echo "  ok   $tag: SYNTH_CLOCK=$v refused by name before v++ (rc=$(cat "$TMP/rc-$tag"))"
+}
+echo "== SYNTH_CLOCK other than 0 or 1: refused by name =="
+for v in yes true 2; do refuse_check "$SCRIPT" "scval-$v" "$v" || fails=$((fails + 1)); done
+
+# retiming_effect:, the real function cut from rebuild-2022.sh, on a log
+# of each kind. What each prints, and why, is the script's own comment;
+# the stub's logs above reach only two of the eight (verifier-VRT's F11,
+# F16 and the edges it named).
+effect_check() {                # effect_check <script> <tag>
+  local script=$1 tag=$2 d="$TMP/eff-$2" fn got want name pair bad=0
+  local cmd_rt='Command: synth_design -top ulp_cft_krnl_1_0 -part xcu50 -retiming -mode out_of_context'
+  local cmd='Command: synth_design -top ulp_cft_krnl_1_0 -part xcu50 -mode out_of_context'
+  local decl='INFO: [Synth 8-11322] No global retiming is needed without any clock constraint'
+  mkdir -p "$d"
+  fn="$d/retime_effect.sh"
+  awk '/^    retime_effect\(\) \{$/ { f = 1 } f { print } f && /^    \}$/ { exit }' "$script" > "$fn"
+  if ! ( . "$fn" && type retime_effect > /dev/null 2>&1 ); then
+    echo "  FAIL $tag: retime_effect() could not be cut from $(basename "$script"); re-aim the cut"
+    return 1
+  fi
+  eff_report() { printf 'Retiming Report:\n|Forward Retiming    | %s   | \n|Backward Retiming   | %s   | \n' "$1" "$2"; }
+  { echo "$cmd_rt"; eff_report 3 5; } > "$d/moves"
+  { echo "$cmd_rt"; eff_report 0 0; } > "$d/nomoves"
+  { echo "$cmd_rt"; eff_report 3 5; eff_report 1 1; } > "$d/two"
+  { echo "$cmd_rt"; echo "$decl"; eff_report 3 5; } > "$d/both"
+  { echo "$cmd_rt"; echo "$decl"; } > "$d/declined"
+  echo "$cmd_rt" > "$d/asked"
+  { echo "$cmd"; echo "$decl"; } > "$d/unflagged"
+  : > "$d/empty"
+  for pair in "moves:retimed(forward=3,backward=5,reports=1)" \
+              "nomoves:ran-no-moves(reports=1)" \
+              "two:retimed(forward=4,backward=6,reports=2)" \
+              "both:retimed(forward=3,backward=5,reports=1,declined=1)" \
+              "declined:declined-no-clock" \
+              "asked:asked-no-report" \
+              "unflagged:not-asked" \
+              "empty:not-asked"; do
+    name=${pair%%:*}; want=${pair#*:}
+    got=$( . "$fn" && retime_effect "$d/$name" )
+    [ "$got" = "$want" ] || { echo "  FAIL $tag: a '$name' log gives '$got', not '$want'"; bad=$((bad + 1)); }
+  done
+  [ "$bad" = 0 ] && echo "  ok   $tag: eight kinds of log, each named as the script's comment says"
+  return "$bad"
+}
+echo "== retiming_effect: the real function on a log of each kind =="
+effect_check "$SCRIPT" "effect" || fails=$((fails + 1))
 
 # A KERNEL_FREQ the period cannot be taken from is refused before v++.
 echo "== SYNTH_CLOCK=1 with a KERNEL_FREQ that is not Hz: refused =="
@@ -448,7 +577,7 @@ elif [ "$un" != "cft_krnl_2:no-runme.log" ]; then
 elif [ "$mr" != "cft_krnl_1 cft_krnl_3 cft_krnl_4" ]; then
   say_fail "no log: retimed_runs is '$mr'"
 else
-  echo "  ok   no log: cft_krnl_2 named unresolved, the other three retimed"
+  echo "  ok   no log: cft_krnl_2 named unresolved, the other three given -retiming"
 fi
 
 # The retiming defect put back: cft_krnl_1's run alone, as the script
@@ -470,11 +599,11 @@ else
   rt=$(retimed_cus_of "$log")
   mr=$(sed -n 's/^retimed_runs:  //p' "$TMP/build-sabotage-retiming/cft_hw.manifest.txt" 2>/dev/null)
   if [ "$rt" = "cft_krnl_1" ] && [ "$mr" = "cft_krnl_1" ]; then
-    echo "  ok   control: the sabotaged quad retimes '$rt' alone, its manifest says '$mr', and this test sees it"
+    echo "  ok   control: the sabotaged quad gives -retiming to '$rt' alone, its manifest says '$mr', and this test sees it"
   elif [ "$rt" = "cft_krnl_1" ]; then
-    say_fail "control: the argv retimes cft_krnl_1 alone, but the manifest says '$mr'"
+    say_fail "control: the argv gives -retiming to cft_krnl_1 alone, but the manifest says '$mr'"
   else
-    say_fail "control: the sabotaged quad retimed '$rt', not the defect's cft_krnl_1"
+    say_fail "control: the sabotaged quad gave -retiming to '$rt', not the defect's cft_krnl_1"
   fi
 fi
 
@@ -506,14 +635,68 @@ elif sc_check "$TMP/sab-sc-one.sh" "hw/link_quad.cfg" "sab-sc-one" > "$TMP/ctl-o
 else
   echo "  ok   control: a quad hooked on cft_krnl_1 alone fails the SYNTH_CLOCK check ($(grep -c FAIL "$TMP/ctl-one.txt") findings)"
 fi
-# The hook without used_in_implementation false: its clock could then
-# ride the checkpoint into the platform's implementation.
+# The hook without used_in_implementation false. In the toys the clock
+# stayed out of the in-context design without it too (read_xdc -mode
+# out_of_context is what did that), so this control holds Vivado's own
+# idiom for an IP's out-of-context XDC, not a measured leak.
 if ! sab sab-sc-impl '/used_in_implementation false/d'; then
   say_fail "control sab-sc-impl: its pattern no longer matches hw/rebuild-2022.sh; re-aim it"
 elif sc_check "$TMP/sab-sc-impl.sh" "hw/link.cfg" "sab-sc-impl" > "$TMP/ctl-impl.txt"; then
-  say_fail "control: a hook that does not keep its clock out of implementation passed the SYNTH_CLOCK check"
+  say_fail "control: a hook without used_in_implementation false passed the SYNTH_CLOCK check"
 else
   echo "  ok   control: a hook without used_in_implementation false fails the SYNTH_CLOCK check ($(grep -c FAIL "$TMP/ctl-impl.txt") findings)"
+fi
+# The hook's directory left as BUILD gave it (F15): only the relative
+# leg can see it.
+if ! sab sab-sc-rel 's/^    scdir=\$(cd "\$BUILD" && pwd)$/    scdir=$BUILD/'; then
+  say_fail "control sab-sc-rel: its pattern no longer matches hw/rebuild-2022.sh; re-aim it"
+elif [ "$REL_MADE" != 1 ]; then
+  say_fail "control sab-sc-rel: the relative-BUILD leg did not run, so neither can this"
+elif BUILD_FOR_RUN="$REL_BASE/sab" sc_check "$TMP/sab-sc-rel.sh" "hw/link.cfg" "sab-sc-rel" "$ROOT/$REL_BASE/sab" > "$TMP/ctl-rel.txt"; then
+  say_fail "control: a hook path left relative passed the SYNTH_CLOCK check"
+else
+  echo "  ok   control: a hook path left relative fails the SYNTH_CLOCK check ($(grep -c FAIL "$TMP/ctl-rel.txt") findings)"
+fi
+# The hook on hw_emu's link too (F7).
+if ! sab sab-sc-emu 's/^  if \[ "\$SYNTH_CLOCK" = 1 \] && \[ "\$t" = "hw" \]; then$/  if [ "$SYNTH_CLOCK" = 1 ]; then/'; then
+  say_fail "control sab-sc-emu: its pattern no longer matches hw/rebuild-2022.sh; re-aim it"
+elif emu_check "$TMP/sab-sc-emu.sh" "sab-sc-emu" > "$TMP/ctl-emu.txt"; then
+  say_fail "control: a hook on hw_emu's link passed the hw_emu check"
+else
+  echo "  ok   control: a hook on hw_emu's link too fails the hw_emu check ($(grep -c FAIL "$TMP/ctl-emu.txt") findings)"
+fi
+# The hook marking the XDC before it reads it (F8): Vivado would fail
+# the run at the hook.
+if ! sab sab-sc-order '/echo "read_xdc -mode out_of_context/{h;d;};/echo "set_property used_in_implementation false/G'; then
+  say_fail "control sab-sc-order: its pattern no longer matches hw/rebuild-2022.sh; re-aim it"
+elif sc_check "$TMP/sab-sc-order.sh" "hw/link.cfg" "sab-sc-order" > "$TMP/ctl-order.txt"; then
+  say_fail "control: a hook that marks the XDC before reading it passed the SYNTH_CLOCK check"
+else
+  echo "  ok   control: a hook that marks the XDC before reading it fails the SYNTH_CLOCK check ($(grep -c FAIL "$TMP/ctl-order.txt") findings)"
+fi
+# The decline tested before the report (F11).
+if ! sab sab-eff-order 's/^      local f=\$1$/      local f=$1; if grep -q "Synth 8-11322" "$f"; then echo declined-no-clock; return; fi/'; then
+  say_fail "control sab-eff-order: its pattern no longer matches hw/rebuild-2022.sh; re-aim it"
+elif effect_check "$TMP/sab-eff-order.sh" "sab-eff-order" > "$TMP/ctl-eff-order.txt"; then
+  say_fail "control: retime_effect testing the decline first passed the log check"
+else
+  echo "  ok   control: retime_effect testing the decline first fails the log check ($(grep -c FAIL "$TMP/ctl-eff-order.txt") findings)"
+fi
+# The asked-no-report branch gone (F16).
+if ! sab sab-eff-asked 's/else echo "asked-no-report"/else echo "not-asked"/'; then
+  say_fail "control sab-eff-asked: its pattern no longer matches hw/rebuild-2022.sh; re-aim it"
+elif effect_check "$TMP/sab-eff-asked.sh" "sab-eff-asked" > "$TMP/ctl-eff-asked.txt"; then
+  say_fail "control: retime_effect without its asked-no-report branch passed the log check"
+else
+  echo "  ok   control: retime_effect without its asked-no-report branch fails the log check ($(grep -c FAIL "$TMP/ctl-eff-asked.txt") findings)"
+fi
+# SYNTH_CLOCK's value check gone: "yes" would build without the clock.
+if ! sab sab-sc-val 's/^  0 | 1) ;;$/  *) ;;/'; then
+  say_fail "control sab-sc-val: its pattern no longer matches hw/rebuild-2022.sh; re-aim it"
+elif refuse_check "$TMP/sab-sc-val.sh" "sab-sc-val" "yes" > "$TMP/ctl-val.txt"; then
+  say_fail "control: a script without the value check refused SYNTH_CLOCK=yes anyway"
+else
+  echo "  ok   control: without the value check SYNTH_CLOCK=yes builds, and the refusal check sees it"
 fi
 
 echo
@@ -522,8 +705,10 @@ if [ "$fails" -eq 0 ]; then
   echo "reaches the synthesis run of every CU, CFT_GENERICS"
   echo "reaches vivado and the manifest, a lying wrapper read-back stops the"
   echo "build before v++, TARGETS=\"\" packages without linking, SYNTH_CLOCK"
-  echo "is off by default and with it every CU's synthesis reads the kernel"
-  echo "clock, and each check still fails when its defect is put back."
+  echo "is off by default, refuses anything but 0 or 1, and with 1 every CU's"
+  echo "hw synthesis reads the kernel clock through an absolute hook, also"
+  echo "under a relative BUILD; retiming_effect names eight kinds of log; and"
+  echo "each check still fails when its defect is put back."
   exit 0
 fi
 echo "$fails failure(s); stub output under $TMP (kept only until exit)"

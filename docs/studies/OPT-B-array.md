@@ -93,6 +93,14 @@ Ranking is `(resource moved) x (confidence) / (cost to prove)`.
 | 9 | 512-bit beat (two fp256 lanes) | LUT/throughput, HBM PC | ~7.2% LUT and half the PCs per unit compute | RTL + bench + converter risk | guard exists, refuses it |
 | 10 | Ring node vs a second AXI master | analysis | ring node ~= **half an AXI master** | analysis only | doctrine asserts the ring, never prices a node |
 
+*Note, 2026-10-12 (this study kept as written):* "retimed", "with
+retiming" and `RETIMING=1` in this study name runs and builds given the
+flag, and none of them was retimed: no synthesis given it had a clock to
+retime against (docs/VALIDATION.md, 2026-10-12, "does RETIMING=1
+retime?"). So retiming is not one of the three changes that idea 1's
+stale-verdict argument counts, the "retimed" rows are unretimed figures,
+and its proposed builds would need SYNTH_CLOCK=1 to be retimed at all.
+
 ### 1. Re-measure the fused ladders on the current tree, retimed
 
 **Mechanism.** `FUSE_NORM` and `FUSE_ALIGN` replace the thirty per-lane

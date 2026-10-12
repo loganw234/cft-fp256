@@ -55,7 +55,8 @@ def render() -> str:
     # (the fifteen DPIP-2 items), its 14-bit product fanning out to
     # ~460 loads, all combinational between the operand bus and S0.
     # That was the critical path of every routed build since the seeds
-    # landed, including the ones retiming could not close. A case in a
+    # landed, including the ones built with RETIMING=1 that missed (which
+    # retimed nothing: docs/VALIDATION.md, 2026-10-12). A case in a
     # function is a ROM - each output bit a 9- or 10-input function of
     # the index, no multiply, no shifter - and it elaborates in Icarus,
     # Yosys 0.33, Verilator and Vivado alike (measured 2026-09-02:

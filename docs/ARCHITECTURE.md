@@ -603,23 +603,22 @@ paths are the lanes' stage-0 bypass and the write master's state enable
 routed critical path was never the significand multiplier: it was the
 seed ROM's index multiply, `SEED_P[i*18 +: 18]` built as a DSP48 and
 a 9216-bit shifter (docs/ROADMAP.md, "The DSP on the critical path
-was never the multiplier"). Retiming closes a single at 135 MHz at
-+0.045 - exactly what the same tree closes without it - and does not
-close a quad (-0.141 against -0.113 unretimed; that quad had tile 1
-alone retimed, it turned out, and revision 7's quad, retimed on all
-four, closed 135 MHz, docs/VALIDATION.md, 2026-09-30, "the fixes round" and "the steps 5 and 6 round"): both leave placement
+was never the multiplier"). A single built with RETIMING=1 closes at
+135 MHz at +0.045 - exactly what the same tree closes without it - and
+a quad does not (-0.141 against -0.113 without the flag; that quad gave
+the flag to tile 1 alone, it turned out, and revision 7's quad, given
+it on all four, closed 135 MHz, docs/VALIDATION.md, 2026-09-30, "the fixes round" and "the steps 5 and 6 round"): both leave placement
 at +0.055 and lose the margin in routing, which is wire. The ROM is a
 case table now and the round stage's arithmetic sits in S12; what is
 left at the head of the list is S10->S11, the LZC-fed coarse
 normalise. The quad from that tree is the open question.
 
-*Corrected 2026-10-12:* "retimed" in this Timing section, the shared
-array's table below included, names runs and builds given `-retiming`.
-None was retimed: a kernel's synthesis, in the link and in the
+*Corrected 2026-10-12:* the runs and builds of this Timing section that
+were given `-retiming`, the shared array's table below included,
+retimed nothing: a kernel's synthesis, in the link and in the
 out-of-context scripts alike, had no clock, and `-retiming` moves
 registers only against one (docs/VALIDATION.md, 2026-10-12, "does
 RETIMING=1 retime?"). That fits the single closing at +0.045 both ways.
-Revision 7's quad was given the flag on all four tiles.
 
 | commit | ask | routed WNS | implied path delay |
 |---|---|---|---|
@@ -677,8 +676,8 @@ Vivado 2022.2, xcu50-fsvh2104-2-e:
 | one shared array, ladders off | 162,482 | -0.065 ns |
 | + the sequencer's control diet | 139,404 | **+0.307 ns** |
 | + fused ladders on | 123,599 | +0.097 ns |
-| + seed ROM as case tables (eb8ef2a), retimed | 129,708 | +2.126 ns |
-| + round stage precomputed in S12, window narrowed (9f73107), retimed | **123,420** | +2.222 ns |
+| + seed ROM as case tables (eb8ef2a), `-retiming` (a no-op) | 129,708 | +2.126 ns |
+| + round stage precomputed in S12, window narrowed (9f73107), `-retiming` (a no-op) | **123,420** | +2.222 ns |
 
 Then a single tile was linked at 135 MHz with the ladders on, and it
 **missed: WNS -0.577 ns, 776 failing endpoints.** The worst path was
@@ -720,9 +719,10 @@ evidence that a thin OOC margin does not survive the shell. Five points
 of device area is not worth a bitstream that does not close.
 
 **Status (2026-09-02, morning).** Ladders off, 135 MHz, in the shell:
-the single closes at +0.045 with retiming and at +0.045 without it,
-and at +0.050 at 130; the quad has not closed at 135 - -0.113 without
-retiming, -0.141 with it - and its worst paths are named in
+the single closes at +0.045 with RETIMING=1 and at +0.045 without it
+(the flag did nothing: the note above), and at +0.050 at 130; the quad
+has not closed at 135 - -0.113 without the flag, -0.141 with it - and
+its worst paths are named in
 docs/ROADMAP.md. The tree with the case-table ROM and the S12
 precompute is building as a quad on two hosts at 135 with 130 queued
 behind.

@@ -23,10 +23,13 @@
 # lines removed (they hold the date and the command) and then gzipped.
 #
 # WHAT EACH OUTCOME MEANS (the summary prints the one that happened):
-#   a == b (the hashes equal)  -retiming without a clock changed nothing:
-#       every image linked with RETIMING=1 carries the netlist RETIMING=0
-#       would have given it, and "retimed" in the records means "built
-#       with the flag".
+#   a == b (the hashes equal)  -retiming without a clock changed nothing
+#       in this synthesis. Carrying that to a link's kernel needs b to be
+#       the link's synthesis: LINK_LOG sets b's cell usage beside it. On
+#       2026-10-12 a == b on the whole revision-8 kernel, but 11 of the
+#       26 rows differed from rev8a's link, so the in-link proof was the
+#       lead's comparison of revision 7's q135 netlists, krnl_1 with the
+#       flag and krnl_4 without (docs/VALIDATION.md, 2026-10-12).
 #   a != b  the flag acts without a clock. Then a is run again (a2): a2 ==
 #       a says the difference is the flag's, a2 != a that synthesis is not
 #       reproducible here and the fingerprint cannot decide.
@@ -46,6 +49,8 @@
 # off" tree, the baseline row's figures) in way a. Both trees come from
 # git archive and are asserted by content: 2b57cf0's carries 8f5f149's
 # register on the reduce operands (red_add_a_q), a445268's does not.
+# Not run: Logan chose to skip it (2026-10-12), the old figures standing
+# as not retiming's with their cause believed.
 #
 # Env: VIVADO_SETTINGS (default /data/Xilinx/Vivado/2022.2/settings64.sh),
 #      FREQ (135), PART (xcu50-fsvh2104-2-e), TOP (cft_krnl), CLOCK_PORT
@@ -275,9 +280,9 @@ print("== what it says")
 if known("a", "b"):
     if same("a", "b"):
         n = kv(runs["b"]["PROBE_RT_MSG"]).get("Synth_8-11322", "?")
-        print(f"a == b: -retiming without a clock changed NOTHING - the two netlists are byte for byte the same,")
-        print(f"   and b's synthesis declined it {n} times (Synth 8-11322). Every image linked with RETIMING=1 and")
-        print(f"   no clock in its kernel's synthesis carries the netlist RETIMING=0 would have given it.")
+        print(f"a == b: -retiming without a clock changed NOTHING in this synthesis - the two netlists are byte")
+        print(f"   for byte the same, and b's synthesis declined it {n} times (Synth 8-11322). It speaks for a")
+        print(f"   link's kernel as far as b is the link's synthesis: see the LINK_LOG table, when given.")
     else:
         print("a != b: the flag changed the netlist without a clock.")
         if known("a", "a2"):
