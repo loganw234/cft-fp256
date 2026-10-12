@@ -38,7 +38,7 @@ setsid nohup bash hw/build-pair.sh --tag rev4 \
 ```
 
 `hw/build-pair.sh` is this document as an executable. It sets the clock,
-retiming and phys_opt rather than inheriting the defaults; **refuses a
+`RETIMING` and `PHYS_OPT` rather than inheriting the defaults; **refuses a
 clock below 100 MHz** instead of quietly building the one that meets
 timing trivially; asserts the commit *and* greps the sources for content
 only the intended commit has; builds single before quad and skips the quad
@@ -74,7 +74,8 @@ git checkout --quiet --detach <sha>
 # 2. the host library and tools, WITH XRT
 make -C host XRT=1 XRT_ROOT=/opt/xilinx/xrt all
 
-# 3. the bitstream, AT THE CLOCK YOU MEAN
+# 3. the bitstream, AT THE CLOCK YOU MEAN (RETIMING=1 is every image's
+#    recipe, and without SYNTH_CLOCK=1 it changes nothing - below)
 KERNEL_FREQ=135000000 RETIMING=1 PHYS_OPT=1 BUILD=build-<name> TARGETS=hw \
     LINK_CFG=hw/link.cfg bash hw/rebuild-2022.sh        # one tile
 KERNEL_FREQ=135000000 RETIMING=1 PHYS_OPT=1 BUILD=build-<name>q TARGETS=hw \
@@ -99,23 +100,115 @@ CFT_GENERICS="EN_FP32=0 EN_FP256=0" BUILD=build-<name>-pkg TARGETS="" \
 exactly that reason: two links sharing a directory overwrite each
 other's `.xo`, temp dir and xclbin.
 
-`RETIMING=1` retimes the synthesis run of every CU the link config's
-`nk=` line names, as the clock constraint does. The manifest's
-`retimed_runs:` line lists the CUs whose netlist came from a
-`synth_design -retiming`, read from the runs' own `runme.log`s after
-the build. Identical CUs share one synthesis through Vivado's IP
-cache, so a cache hit is followed to the run that added its entry. A
-hit whose entry an earlier build added (a reused `BUILD`, a shared
-cache) has no run to follow, and is named on a separate
-`retiming_unresolved:` line with its cache-ID, not counted either way,
-and so is a CU whose run left no `runme.log`.
-Until 2026-09-30 the flag reached `cft_krnl_1`'s run alone. A single was
-retimed whole, but a quad built with the flag alone had at most one
-tile of four retimed while its manifest said `retiming: 1`
-(docs/VALIDATION.md, 2026-09-30, "the fixes round", which names the
-images). `hw/test-rebuild-argv.sh` (the `buildargs` stage) holds one
-property per CU for both link configs, and its control puts the old
-one-run line back.
+`RETIMING=1` puts `-retiming` on the synthesis run of every CU the link
+config's `nk=` line names, as the clock constraint does. **It has never
+retimed a register.** `-retiming` is Vivado's global retiming, which is
+timing-driven, and the link gives a kernel's out-of-context synthesis no
+clock: the packaged IP carries no constraints and Vitis adds none to a
+user IP's run. Each kernel synthesis of revision 8's three images says
+so 21 to 24 times - `INFO: [Synth 8-11322] No global retiming is needed
+without any clock constraint` - and none prints the `Retiming Report:`
+Vivado prints when it moves a register. On a toy and on one fp32 pipe in
+Vivado 2022.2 the flag without a clock left the netlist byte for byte
+the unflagged one once the comment lines, which hold the date and the
+command, are removed (docs/VALIDATION.md, 2026-10-12, "does RETIMING=1
+retime?", which also says what the 2026-09-02 out-of-context gain was).
+No commit of `hw/rebuild-2022.sh` or `hw/package_kernel.tcl` has given
+that synthesis a clock, so no image built with the flag was retimed -
+revision 8's three by their logs, the earlier ones by the same flow.
+And the flag changed no netlist: `hw/probe_rt.sh` on amd-arc-box
+synthesized the whole revision-8 kernel with it and without it, no
+clock either way, into one netlist byte for byte (comment lines
+removed); and in revision 7's q135 link, whose krnl_1 was synthesized
+with `-retiming` and krnl_4 without, the two netlists are one (the
+lead's check, the same entry).
+
+The manifest says both halves. `retiming:` is the request, and
+`retimed_runs:` lists the CUs whose netlist came from a `synth_design`
+given `-retiming`, read from the runs' own `runme.log`s after the build.
+`retiming_effect:` (since 2026-10-12) says what each of those syntheses
+did with it, from the same log: `retimed(forward=F,backward=B,reports=N)`
+from Vivado's report when it moved a register, `ran-no-moves(reports=N)`
+when its report moved none (not called retimed, since the line exists so
+that the manifest never claims a retiming that did not happen),
+`declined-no-clock` where it printed Synth 8-11322 and no report (every
+link before `SYNTH_CLOCK`), `asked-no-report` where it printed neither,
+and `not-asked` where its `synth_design` had no `-retiming`, whatever
+else the log says. A report and a decline in one log add `,declined=K`
+rather than let one hide the other. Identical CUs share one
+synthesis through Vivado's IP cache, so a cache hit is followed to the
+run that added its entry. A hit whose entry an earlier build added (a
+reused `BUILD`, a shared cache) has no run to follow, and is named on a
+separate `retiming_unresolved:` line with its cache-ID, not counted
+either way, and so is a CU whose run left no `runme.log`. Such a hit can
+be a different tile, not only one given a different `-retiming`: the cache-ID
+does not cover the packaged generics (rev8a, rev8d and rev8q each added
+`ebc05e65b15fbbd4`, for three different netlists), and the cache is the
+checkout's own, shared by every `BUILD` run from it. Build different
+`CFT_GENERICS` from separate clones, as revision 8's three were built.
+Until 2026-09-30 the flag reached `cft_krnl_1`'s run alone, so a quad
+built with it had at most one tile of four given `-retiming` while its
+manifest said `retiming: 1` (docs/VALIDATION.md, 2026-09-30, "the fixes
+round", which names the images); none of them retimed either.
+`hw/test-rebuild-argv.sh` (the `buildargs` stage) holds one property per
+CU for both link configs, and its control puts the old one-run line
+back.
+
+### SYNTH_CLOCK=1: the clock the kernel's synthesis never had
+
+**Off by default, and kept off by Logan (2026-10-12, "Keep it off for
+now"): it changes every future image's netlist,** with `RETIMING=1` or
+without it, since synthesis is timing-driven whenever it has a clock.
+It is to be revisited when a build needs margin, with a routed A/B.
+Out of context on revision 8's kernel (`hw/probe_rt.sh` on the box), the
+clock alone gave a different netlist (1,487 more LUTs) at the same
+post-synthesis WNS, +1.576 ns; the clock with `RETIMING=1` made 561
+forward and 689 backward retiming moves for +2.245 ns, 0.669 better,
+before any placement. `SYNTH_CLOCK`, `RETIMING` and `PHYS_OPT` each
+refuse anything but 0 or 1, by name and before any work (until
+2026-10-12 `RETIMING=true` built quietly with the flag off), and
+`hw/build-pair.sh` refuses the same `SYNTH_CLOCK` values in its
+assertions. With `SYNTH_CLOCK=1`, `hw/rebuild-2022.sh` writes two files
+into `BUILD` - `synth_clock.xdc`, a `create_clock` on `ap_clk` at
+1e9/`KERNEL_FREQ` ns named `cft_synth_ooc_clk`, and
+`synth_clock_pre.tcl`, which reads it with `read_xdc -mode
+out_of_context` and then marks it `used_in_implementation false`
+(Vivado's own idiom for an IP's out-of-context XDC) - and hands every
+CU's synthesis run the second as its `STEPS.SYNTH_DESIGN.TCL.PRE`:
+
+```bash
+SYNTH_CLOCK=1 KERNEL_FREQ=135000000 RETIMING=1 PHYS_OPT=1 BUILD=build-<name> \
+    TARGETS=hw LINK_CFG=hw/link.cfg bash hw/rebuild-2022.sh
+```
+
+Both guards stay: in the toys the clock stayed out of the in-context
+design with the property and without it, and that the mode is what
+keeps it out is believed, from Vivado's documentation, since no toy ran
+a plain `read_xdc`.
+
+The manifest then says `synth_clock: 1` and names the CUs whose
+synthesis ran the hook on `synth_clock_runs:`. Measured in Vivado 2022.2
+on a toy user IP, packaged as `hw/package_kernel.tcl` packages the
+kernel and synthesized per IP in a block design as Vitis does it
+(docs/VALIDATION.md, 2026-10-12): the hook is sourced after the run's
+`create_project` and before its `synth_design`, the XDC is parsed,
+Vivado retimes, and the top's design opened in context carries only the
+top's own clock. Before using it:
+
+- A run with a hook gets no IP cache - Vivado leaves `config_ip_cache`
+  out of its script - so a quad synthesizes each of its four CUs, where
+  today it synthesizes one and takes three cache hits: four times the
+  synthesis CPU, and their memory at once if the link runs its synthesis
+  jobs side by side.
+- The vpl's dynamic-region flow is the toy's believed, not shown. The
+  first image built with it must show `kernel_clock:
+  clk_out1_ulp_clk_wiz_0` in its manifest and no `cft_synth_ooc_clk` in
+  its routed timing summary (`grep -c cft_synth_ooc_clk` wants 0).
+- Retiming then runs, and the verification gap `hw/rebuild-2022.sh`'s
+  comment names stops being theoretical: the cocotb suite and hw_emu
+  both simulate the RTL source, so only the card's vectors - or a
+  simulation of the synthesized netlist, which nothing here runs yet -
+  see a retimed netlist.
 
 ## The five traps
 
@@ -238,6 +331,7 @@ rebuilding when the clock changes.
 | the feature is in the RTL | `grep scr_strict_q rtl/cft_seq.sv` | present |
 | the clock applied | `grep "Clock constraint argument" <log>` | `135000000:` |
 | the margin is real | `grep kernel_wns_ns <log>` | small and positive |
+| what retiming did | `grep -e ^retiming_effect: -e ^synth_clock: <manifest>` | `retimed(...)` or `ran-no-moves(...)` for every CU only with `synth_clock: 1`; `declined-no-clock` is the flag doing nothing |
 | errors | `grep -cE "^ERROR" <log>` | 0 |
 | the image exists | `ls -l <build>/*.xclbin` | tens of MB |
 

@@ -14,7 +14,10 @@
 # LATENCY is no longer a knob: the pipe is structurally staged and its
 # elaboration guard refuses any value but its own depth, so the
 # default here must track that depth. It is 16. The retime argument
-# survives for experiments but has nothing left to retime.
+# survives for experiments but has nothing left to retime - and never
+# could: the clock below is created after synth_design, and -retiming
+# moves registers only against a clock in force during synthesis
+# (docs/VALIDATION.md, 2026-10-12; hw/probe_rt.tcl reads one first).
 #
 # Read the PATH DELAY, not the slack: implementation is
 # constraint-driven and stops once the ask is met, so slack tells you

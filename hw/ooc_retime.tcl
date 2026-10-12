@@ -12,6 +12,15 @@
 # If it does not help, the conclusion is that the register does not
 # exist to be moved - the pipeline is too shallow through the multiply -
 # and only adding a stage will do, which is experiment B.
+#
+# 2026-10-12: this script cannot answer its question. It creates its
+# clock AFTER synth_design, so the synthesis it asks to retime has no
+# clock, and -retiming (Vivado's global retiming) moves registers only
+# against one - Vivado 2022.2 says so in such a run, "Synth 8-11322 No
+# global retiming is needed without any clock constraint". Its PREG
+# count below also takes each DSP twice, the DSP48E2 and its DSP_OUTPUT
+# part. Kept as the 2026-09-02 record's script; hw/probe_rt.sh is the
+# measurement (docs/VALIDATION.md, 2026-10-12, "does RETIMING=1 retime?").
 
 set freq 135
 set part "xcu50-fsvh2104-2-e"

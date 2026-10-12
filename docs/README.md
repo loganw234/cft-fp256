@@ -1,14 +1,14 @@
 # The documents, by what you open them for
 
-Forty-three files, 74,523 lines. Flat in one directory they look like one
+Forty-three files, 74,802 lines. Flat in one directory they look like one
 undifferentiated pile; they are not, and the split is close to even:
 
-- **27,423 lines you consult while working** — the three under *Start here*,
+- **27,437 lines you consult while working** — the three under *Start here*,
   the contract, and the reference you call into;
 - **6,679 lines of tool manual**, one per shipped program;
-- **2,015 lines of operations**, read when you are about to do something to
+- **2,117 lines of operations**, read when you are about to do something to
   hardware;
-- **38,406 lines of record and argument** — the ledger, the roadmap and the
+- **38,569 lines of record and argument** — the ledger, the roadmap and the
   design studies. The history of how a decision was reached, worth keeping,
   and not what you open to get something done.
 
@@ -44,11 +44,11 @@ product, not the implementation.
 | document | lines | what it is for |
 |---|---|---|
 | [DETERMINISM.md](DETERMINISM.md) | 1,442 | The determinism contract itself — the argument the whole project rests on, including the unassigned-opcode hazard and every time it has fired. |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | 1,176 | The tile: register map, MODE and CAPS words, the rule for when VERSION moves. |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | 1,187 | The tile: register map, MODE and CAPS words, the rule for when VERSION moves. |
 | [SEQUENCER.md](SEQUENCER.md) | 4,037 | The orbit sequencer and the program model. |
 | [LANGUAGE.md](LANGUAGE.md) | 2,382 | The language for dynamical systems: the grammar, the semantics (literal evaluation, exact constants rounded once, one attribute a program), the integrators written in it, time (t in the state, a step counter, forcing by a rotation, each measured), the step graph, the reference interpreter that is the definition of correct for every compiled image, the intention-out, the variational equations (tangent vectors and the rule that differentiates each operation), and every refusal by name. |
 | [COMPATIBILITY.md](COMPATIBILITY.md) | 1,049 | One section per ABI step, with a per-surface table. Read before assuming a call exists on a given surface. |
-| [LAYOUTS.md](LAYOUTS.md) | 191 | Every xclbin layout the U50 could carry - tile mixes and their clocks - derived by `hw/gen_layouts.py`, never typed. |
+| [LAYOUTS.md](LAYOUTS.md) | 193 | Every xclbin layout the U50 could carry - tile mixes and their clocks - derived by `hw/gen_layouts.py`, never typed. |
 | [CERTIFICATES.md](CERTIFICATES.md) | 4,573 | The certificate, versions 1 and 2. Version 1: what a run was and how accurate it is, keyed or open, and the audit that re-runs its segments. Version 2: what the run means - each segment's per-lane flags, every lane a routine marked replayed by the program's definition, the source it was compiled from or is defined by and a wider-source run of it, the profile and language its bits are claimed under, provenance with its privacy defaults, and a detached Ed25519 signature for either version. Complete enough to write a reader and an auditor of either from the page. And the segment runner, `cft-segrun`, that writes either version from the library, version 2 by default, its accuracy entries included; the audit tool, `cft-audit`, that audits both versions in C - version 1 with the same exact arithmetic, and version 2 with Ed25519 and SHA-512 of its own, every step that needs no source; and the golden certificates in `certificates/` that hold the writers to committed bytes, version 2's cases and thirty controls among them. |
 
 ## Reference you call into
@@ -61,7 +61,7 @@ product, not the implementation.
 | [PROGRAMS.md](PROGRAMS.md) | 643 | Programs as files: the assembler, the program library, the runner. |
 | [EMBEDDED.md](EMBEDDED.md) | 709 | libcft on microcontrollers, and the profiles the embedded gate runs. |
 | [PLATFORMS.md](PLATFORMS.md) | 2,928 | Which FPGA to buy, borrow or rent next, measured against the tile this project builds; every figure carries a source and every price the date it was seen. |
-| [SCALING.md](SCALING.md) | 423 | What more tiles buy, and what they do not. |
+| [SCALING.md](SCALING.md) | 424 | What more tiles buy, and what they do not. |
 
 ## The tools, one document each
 
@@ -83,9 +83,9 @@ running.
 
 | document | lines | what it is for |
 |---|---|---|
-| [BITSTREAM-BUILDS.md](BITSTREAM-BUILDS.md) | 263 | Building a bitstream, and the five traps — three of which exit 0, and two that look like a design failure. `hw/build-pair.sh` is this document as an executable. |
-| [CARDDAY.md](CARDDAY.md) | 972 | Card day: the runbook as it was actually run, the staged pairs, and the forensics kept when build trees are reclaimed. |
-| [BRINGUP.md](BRINGUP.md) | 780 | Hardware bring-up, and the gates CI's green tick does not cover. |
+| [BITSTREAM-BUILDS.md](BITSTREAM-BUILDS.md) | 357 | Building a bitstream, and the five traps — three of which exit 0, and two that look like a design failure. `hw/build-pair.sh` is this document as an executable. |
+| [CARDDAY.md](CARDDAY.md) | 973 | Card day: the runbook as it was actually run, the staged pairs, and the forensics kept when build trees are reclaimed. |
+| [BRINGUP.md](BRINGUP.md) | 787 | Hardware bring-up, and the gates CI's green tick does not cover. |
 
 ## The record
 
@@ -94,8 +94,8 @@ reading material for a working session.
 
 | document | lines | what it is for |
 |---|---|---|
-| [VALIDATION.md](VALIDATION.md) | 18,845 | The validation ledger, append-only. Every run, including the ones that failed and the mistakes that produced them. A figure here is a fact about the run on its date and is never edited to match a later one. |
-| [ROADMAP.md](ROADMAP.md) | 5,805 | What is built, what is next, and what was decided against. |
+| [VALIDATION.md](VALIDATION.md) | 18,938 | The validation ledger, append-only. Every run, including the ones that failed and the mistakes that produced them. A figure here is a fact about the run on its date and is never edited to match a later one. |
+| [ROADMAP.md](ROADMAP.md) | 5,853 | What is built, what is next, and what was decided against. |
 | [ROUND2.md](ROUND2.md) | 1,082 | The plan for the gather, the scatter, the lane mask and the broadcast as one parcel round, with its outcome at the top: the seam the lead lands first, a brief per parcel, the verifiers, the ledger, the merge order. |
 | [NOVEL.md](NOVEL.md) | 561 | Results for which no prior description was found, with the standard of evidence stated first. |
 | [ATLAS.md](ATLAS.md) | 367 | The atlas-engine integration, assessed before any of it was done. |
@@ -115,9 +115,9 @@ questions.
 
 | document | lines | question it settled |
 |---|---|---|
-| [studies/OPT-A-datapath.md](studies/OPT-A-datapath.md) | 919 | the arithmetic datapath |
-| [studies/OPT-B-array.md](studies/OPT-B-array.md) | 1,018 | the array, the beat, and how many tiles a part holds |
-| [studies/OPT-C-timing.md](studies/OPT-C-timing.md) | 1,151 | timing, and what the physical tools will and will not give |
+| [studies/OPT-A-datapath.md](studies/OPT-A-datapath.md) | 926 | the arithmetic datapath |
+| [studies/OPT-B-array.md](studies/OPT-B-array.md) | 1,029 | the array, the beat, and how many tiles a part holds |
+| [studies/OPT-C-timing.md](studies/OPT-C-timing.md) | 1,155 | timing, and what the physical tools will and will not give |
 | [studies/OPT-D-contract.md](studies/OPT-D-contract.md) | 1,061 | the contract and the system above the RTL |
 | [studies/EXT-A-wide-ladder.md](studies/EXT-A-wide-ladder.md) | 1,146 | how far the ladder extends above binary256, what an MPFR-shaped tile is worth on an FPGA and on an ASIC, and what counting in MPFR cores leaves out; its instruments and their captured runs are in `studies/ext-a/` |
 | [studies/TOOL-A-dense-router.md](studies/TOOL-A-dense-router.md) | 253 | why openXC7's router does not converge on the tile, what to change in it and in what order, and why a fork of it (loganw234/nextpnr-xilinx, `dense`) starts at the pinned 0.9.6 |

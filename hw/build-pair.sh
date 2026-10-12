@@ -122,6 +122,14 @@ fi
 export KERNEL_FREQ="$FREQ"
 export RETIMING=1
 export PHYS_OPT=1
+# SYNTH_CLOCK passes through from the caller's environment, as the
+# directives below do. hw/rebuild-2022.sh refuses anything but 0 or 1,
+# and so does this, so that --dry-run cannot pass a value the build
+# would then refuse.
+case "${SYNTH_CLOCK:-0}" in
+  0 | 1) ;;
+  *) die "SYNTH_CLOCK is 0 or 1; got '$SYNTH_CLOCK' (hw/rebuild-2022.sh would refuse it)" ;;
+esac
 # The directives are NOT set here: PLACE_DIRECTIVE and ROUTE_DIRECTIVE
 # pass through from the caller's environment to hw/rebuild-2022.sh. The
 # recipe line reports what will apply; it printed "default directives" as
@@ -137,7 +145,7 @@ LOGDIR="$HOME/r8-logs-$TAG"
 if [ "$DRY_RUN" -eq 1 ]; then
   echo "cft-fp256 $TAG pair from $HAVE"
   echo "host $(hostname), $(nproc) threads"
-  echo "recipe: ${KERNEL_FREQ} Hz, retiming=$RETIMING, phys_opt=$PHYS_OPT, $DIRECTIVES"
+  echo "recipe: ${KERNEL_FREQ} Hz, retiming=$RETIMING (synth_clock=${SYNTH_CLOCK:-0}), phys_opt=$PHYS_OPT, $DIRECTIVES"
   echo "--dry-run: every assertion passed; would now build, creating nothing"
   echo "  single -> build-$TAG-hw   (hw/link.cfg)"
   [ "$SINGLE_ONLY" -eq 1 ] || echo "  quad   -> build-$TAG-quad (hw/link_quad.cfg)"
@@ -150,7 +158,7 @@ mkdir -p "$LOGDIR"
 S="$LOGDIR/00-summary.txt"
 { echo "cft-fp256 $TAG pair from $HAVE"
   echo "host $(hostname), $(nproc) threads"
-  echo "recipe: ${KERNEL_FREQ} Hz, retiming=$RETIMING, phys_opt=$PHYS_OPT, $DIRECTIVES"
+  echo "recipe: ${KERNEL_FREQ} Hz, retiming=$RETIMING (synth_clock=${SYNTH_CLOCK:-0}), phys_opt=$PHYS_OPT, $DIRECTIVES"
   date -Is; } | tee "$S"
 
 WNS_K=""; WNS_R=""
@@ -174,9 +182,12 @@ build_half () {
   [ "$rc" -eq 0 ] || return 1
 
   # The clock and recipe that ACTUALLY applied, read back from the log and
-  # the manifest rather than from the intent above.
+  # the manifest rather than from the intent above. retiming: and
+  # phys_opt: are the requests as the manifest recorded them;
+  # retiming_effect: and synth_clock: are what the synthesis runs did
+  # with RETIMING (docs/BITSTREAM-BUILDS.md).
   grep -m1 "Clock constraint argument" "$log" | sed 's/^/    /' | tee -a "$S"
-  grep -hE "^(retiming|phys_opt|kernel_freq):" "$builddir"/*.manifest.txt \
+  grep -hE "^(retiming|retiming_effect|synth_clock|phys_opt|kernel_freq):" "$builddir"/*.manifest.txt \
       2>/dev/null | sed 's/^/    /' | tee -a "$S"
   WNS_K=$(grep -m1 "kernel_wns_ns:" "$builddir"/*.manifest.txt | awk '{print $2}')
   WNS_R=$(grep -m1 "routed_wns_ns:" "$builddir"/*.manifest.txt | awk '{print $2}')
@@ -240,8 +251,11 @@ if [ "$SINGLE_OK" -eq 1 ] && [ "$QUAD_OK" -eq 1 ]; then
   ( cd "$STAGE" && sha256sum cft_hw_single.xclbin cft_hw_quad.xclbin \
       cft_hw_single.manifest.txt cft_hw_quad.manifest.txt > SHA256SUMS )
   { echo "cft-fp256 $TAG pair, both from $HAVE, built on $(hostname):"
-    echo "  cft_hw_single.xclbin  one tile , ${FREQ} Hz, retiming+phys_opt, kernel WNS ${K_S:-?}, routed ${R_S:-?}"
-    echo "  cft_hw_quad  .xclbin  four tiles, ${FREQ} Hz, retiming+phys_opt, kernel WNS ${K_Q:-?}, routed ${R_Q:-?}"
+    # The flags as set. RETIMING=1 retimes nothing without SYNTH_CLOCK=1
+    # (docs/BITSTREAM-BUILDS.md); until 2026-10-12 this said
+    # "retiming+phys_opt".
+    echo "  cft_hw_single.xclbin  one tile , ${FREQ} Hz, RETIMING=$RETIMING SYNTH_CLOCK=${SYNTH_CLOCK:-0} PHYS_OPT=$PHYS_OPT, kernel WNS ${K_S:-?}, routed ${R_S:-?}"
+    echo "  cft_hw_quad  .xclbin  four tiles, ${FREQ} Hz, RETIMING=$RETIMING SYNTH_CLOCK=${SYNTH_CLOCK:-0} PHYS_OPT=$PHYS_OPT, kernel WNS ${K_Q:-?}, routed ${R_Q:-?}"
     echo "  SHA256SUMS            sha256sum -c SHA256SUMS before loading; the manifests carry commit, flags and hashes"
     [ -n "$NOTES" ] && [ -f "$NOTES" ] && { echo; cat "$NOTES"; }
   } > "$STAGE/README"

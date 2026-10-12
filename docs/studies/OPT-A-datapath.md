@@ -786,6 +786,13 @@ holds.
 | **`MUL_PASSES`** | Done 2026-09-06. DSP -79%, LUT -6.4%. The reading: the tile's LUTs are the aligner and the normaliser; its multiplier is DSPs. | Done. Idea 1 is the same argument applied one level up: if the tile's LUTs are the aligner and the normaliser, and their aggregate is 3.77x their widest instance, then *building only the widest instance* is the biggest LUT lever available. |
 | **Heterogeneous tiles at their own clocks** | Recorded; no core RTL, all host and link work. | Not a datapath idea; hand-off. |
 
+*Note, 2026-10-12 (this study kept as written):* the "DSP MREG/PREG,
+retiming" row's measurement was not retiming's. Its out-of-context run
+had no clock during synthesis, where `-retiming` moves registers only
+against one; the two quads were given the flag on one tile at most and
+retimed nothing; and the DSPs' PREG are set by unretimed synthesis too.
+See docs/VALIDATION.md, 2026-10-12, "does RETIMING=1 retime?".
+
 ---
 
 ## 5. The two (and a half) that are genuinely new

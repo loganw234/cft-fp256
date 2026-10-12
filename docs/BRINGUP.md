@@ -468,8 +468,9 @@ cocotb's. Small N; hw_emu is slow.
 ## 3. Gate: link for hardware - **MET 2026-08-29 on the pre-sequencer design; MET again on the sequencer tile 2026-09-02, single (+0.618) and quad (+0.143) both closing at 135 MHz from 9f73107**
 
 **2026-09-02.** The shared-array sequencer tile links as a single at
-135 MHz with +0.045 of slack (with retiming and without; +0.050 at
-130) and as a quad it has missed 135 twice, -0.113 and -0.141, with
+135 MHz with +0.045 of slack (with RETIMING=1 and without, the flag
+retiming nothing: docs/VALIDATION.md, 2026-10-12; +0.050 at 130) and as
+a quad it has missed 135 twice, -0.113 and -0.141, with
 no image either time. The quad's worst paths are three named
 families (docs/ROADMAP.md); the tree that removes the largest and
 shortens the next is building as a quad at 135 on two hosts with 130
@@ -778,3 +779,9 @@ is the runbook it followed.
   no parameter-level shortcut - v1's speed comes from real stage
   boundaries in the RTL (unpack | multiply | align | add | normalize |
   round), behind the same cft_fpfma_pipe ports and testbenches.
+
+  *Corrected 2026-10-12:* that run could not have retimed. hw/synth_ooc.tcl
+  creates its clock after `synth_design`, and `-retiming` moves
+  registers only against a clock (docs/VALIDATION.md, 2026-10-12, "does
+  RETIMING=1 retime?"), so it showed nothing about retiming. The real
+  stage boundaries were built anyway.

@@ -677,7 +677,11 @@ Three consequences for the RTL, none of which apply to Vivado:
   context and **-0.141 in the shell on a quad** (`docs/ROADMAP.md`) -
   worse than without. It shortens logic, and this design's problem is
   wire. Keep it on where it is already on; do not expect it to move
-  anything.
+  anything. *Note, 2026-10-12 (this study kept as written):* it moved
+  nothing in either: neither figure is retiming's. The +1.681 came from
+  hw/ooc_retime.tcl, which applies its clock after synthesis, and the
+  -0.141 from a link, whose kernel synthesis has no clock
+  (docs/VALIDATION.md, 2026-10-12, "does RETIMING=1 retime?").
 - **Carry-save / redundant forms on the wide adds.** `docs/NOVEL.md`
   entry 6's lesson, and the traces agree: the CARRY4 chains in the
   critical path cost 0.053-0.076 ns per level with **zero** net delay
