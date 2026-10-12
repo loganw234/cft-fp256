@@ -1,0 +1,474 @@
+{
+ "acceptance": 1,
+ "entries": [
+  {
+   "bank": null,
+   "bank_sha256": "c9b50b4ea82bcd387abbfd5e1d2838de0e559a04cdaa6e713704971d5f40a89f",
+   "boundaries": [
+    "6194625e0982a31fb6e9c74aac785d469712b495abf44e3debcd5cc7e0e424aa",
+    "e5d12258dccde54820eee24e1a5ee1c8765a2a66b89f3decd1d3a1aba30e429a",
+    "48a8eb44996d66b2fdb127e0873aabcde5f91ba9178377ac9ec8864ad15bfc60",
+    "b0782e4f06cba364fb98e241b9b7a4606720327118f3021b17af0ad812491f60",
+    "a219b6997a35788f970fccbd0f6eb7141fa9123cc6d7a690b2501c58b2bdc6fc"
+   ],
+   "depth": 4096,
+   "flags": [
+    16,
+    16,
+    16,
+    16
+   ],
+   "format": "fp64",
+   "golden": [],
+   "image": null,
+   "image_sha256": "8ecbbdfb677dfce3349ac4394ee249a3fe109a0a807d6f9e6e204beb947ad821",
+   "init_sha256": "97a5a5b934665213fe6d05074fef76864cc3688bc3cc814f981175b0d219b5c0",
+   "kind": "workload",
+   "lanes": 256,
+   "name": "gray_scott_hard_fp64",
+   "segments": 4,
+   "slots": 514,
+   "source": "programs/workloads/cft-hard-workloads/programs/gray_scott_hard_fp64.cftl",
+   "special": [],
+   "spot": [
+    0,
+    1,
+    2,
+    64,
+    128,
+    192
+   ],
+   "status": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "steps": 2,
+   "target": "u50-rev8-quad",
+   "tiles": 4
+  },
+  {
+   "bank": null,
+   "bank_sha256": "07a9af0627142b7b38e4868ee3bb83ad0ac2107d464809dbd37997a8ae82933e",
+   "boundaries": [
+    "cfd25c4a46307bff79cd1aeb74dac24d3b2be00d856f6d4777c93cde12a129c3",
+    "e17fcf96a456a0b10c35261093593a6aabae6cb9a18e5797717395dc8732eed5",
+    "39c78b72dc75e6b5da4062448b0b7a5a05ec7f976bd9fe0042b9d0e641292079",
+    "5de6e40d3279b01393d65b1ffa482655424f748c71d0a2e7f933ef25ffcc9e30",
+    "17bea7988fde72619ddfde070c12a456a31f7987b917b55b027696164ee96cf4"
+   ],
+   "depth": 4096,
+   "flags": [
+    16,
+    16,
+    16,
+    16
+   ],
+   "format": "fp256",
+   "golden": [],
+   "image": null,
+   "image_sha256": "01201f7f4dea6f60aa55809a3ba68a9196fb4ae90cc4dd23a6a9d77a2976a4d8",
+   "init_sha256": "2c36d0b93d08b6b862ffaa923d35f4e46f48a24df70ae742bd615d9db01e1ed5",
+   "kind": "workload",
+   "lanes": 64,
+   "name": "gray_scott_wide_fp256",
+   "segments": 4,
+   "slots": 514,
+   "source": "programs/workloads/cft-hard-workloads/programs/gray_scott_wide_fp256.cftl",
+   "special": [],
+   "spot": [
+    0,
+    1,
+    2,
+    16,
+    32,
+    48
+   ],
+   "status": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "steps": 2,
+   "target": "u50-rev8-quad",
+   "tiles": 4
+  },
+  {
+   "bank": null,
+   "bank_sha256": "63d4867bdbf9f6dc61654362b437d8bc9471edc125a83ed9526bb82968b58d1b",
+   "boundaries": [
+    "a385c7d07213220421583c6984ba827965bbab6929bb09c98b49e3e27ac53203",
+    "fcba863e0e10ae55c657147745173651ac897059c17ebb5158307f8ca687fcb9",
+    "51cf5cabcf3437b7b019239ecfc2ee8fc7c6dade50cdb5cfeb601ce8a0ea16f8",
+    "e9a9e3b1b5ca48a94b8fe4e86e471f7eb89effc081096db364da44db99538656",
+    "859c2d5d9ddbb4e9e24579f159f55dd43cb574482aeaa0b268c3d19b0ea2b334"
+   ],
+   "depth": 4096,
+   "flags": [
+    16,
+    16,
+    16,
+    16
+   ],
+   "format": "fp64",
+   "golden": [],
+   "image": null,
+   "image_sha256": "52689c6360f6a5d18caa2b92d5a93b84012addd82296cc5b6d150caef3251cbe",
+   "init_sha256": "1a91c65bbe8b44901efe157d0d1e13f5ad715e8a45f0af007d5ec2768ee7c0ae",
+   "kind": "workload",
+   "lanes": 256,
+   "name": "lorenz_tangent_hard_fp64",
+   "segments": 4,
+   "slots": 1081,
+   "source": "programs/workloads/cft-hard-workloads/programs/lorenz_tangent_hard_fp64.cftl",
+   "special": [],
+   "spot": [
+    0,
+    1,
+    2,
+    64,
+    128,
+    192
+   ],
+   "status": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "steps": 2,
+   "target": "u50-rev8-quad",
+   "tiles": 4
+  },
+  {
+   "bank": null,
+   "bank_sha256": "fd8089c9109658a687b129ffc261cec093e1dede17a346193a2f5244f0885ac2",
+   "boundaries": [
+    "59a3aaed30d4d5704df78a7a72b6a22c43c8c07d8eccbc9e7f7010c2dabf9ae9",
+    "2ef2aa9e305c085a42c42d5d6f7ef1c35cc319a301683c0131de953821a7cf1d",
+    "1274a8a7a15b92eeed576c779129d9291938fe8cc6167af91a77e0f4cb2f50be",
+    "caaca3d82b4c876bae14ab6028b2785e1d4e423ea4e7eabe3e46313dc301d16b",
+    "1d077ad1a21a620edcd64aacdcc47775471ccae58d0032df261a445daaed7632"
+   ],
+   "depth": 4096,
+   "flags": [
+    16,
+    16,
+    16,
+    16
+   ],
+   "format": "fp256",
+   "golden": [],
+   "image": null,
+   "image_sha256": "b3ce6ceae7544cc88fab2650608e580adf26b51a2ffcf7ae10b094c524ab2ae3",
+   "init_sha256": "917426ec85b8dd78b49628ba53986ee6e9f331ee9896615a140503f339285a4a",
+   "kind": "workload",
+   "lanes": 64,
+   "name": "lorenz_tangent_wide_fp256",
+   "segments": 4,
+   "slots": 1081,
+   "source": "programs/workloads/cft-hard-workloads/programs/lorenz_tangent_wide_fp256.cftl",
+   "special": [],
+   "spot": [
+    0,
+    1,
+    2,
+    16,
+    32,
+    48
+   ],
+   "status": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "steps": 2,
+   "target": "u50-rev8-quad",
+   "tiles": 4
+  },
+  {
+   "bank": null,
+   "bank_sha256": "c9b50b4ea82bcd387abbfd5e1d2838de0e559a04cdaa6e713704971d5f40a89f",
+   "boundaries": [
+    "b23e971cce650924153303094d01b05b7e7a11d3dd183012f2db380f3bdd44e1",
+    "e86882944a464182ae59ebe378551e704d5619002de99dd7c606c2a656e2ce4c",
+    "e4933bd4a8e8a732a4c8e296bb271f0c9f1f294e82a75f7dae020e7a67451db6",
+    "53495769eac27874514d012dd937edb1f2870bd1db815113b4c7e7968227b247",
+    "f8202395b4cc3726244071c5140de58a9c8f9c1ffee7a62ba8c992413f7af5f5"
+   ],
+   "depth": 8192,
+   "flags": [
+    16,
+    16,
+    16,
+    16
+   ],
+   "format": "fp64",
+   "golden": [],
+   "image": null,
+   "image_sha256": "57803dd015f76c42b678b0983d0331860f9dbdf88ac3318fbdf5275ff05820ea",
+   "init_sha256": "5f544db00c2bd9ed258d0bf2310c358bad554d2c778802447a75890196184dcf",
+   "kind": "workload",
+   "lanes": 64,
+   "name": "gray_scott_extended_fp64",
+   "segments": 4,
+   "slots": 2050,
+   "source": "programs/workloads/cft-hard-workloads/programs/gray_scott_extended_fp64.cftl",
+   "special": [],
+   "spot": [
+    0,
+    1,
+    2
+   ],
+   "status": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "steps": 2,
+   "target": "u50-rev8-deep",
+   "tiles": 1
+  },
+  {
+   "bank": null,
+   "bank_sha256": "a368e612116582ad5f2a9abd5ce5e4d8b17cd18519656440a6ea79823b88c666",
+   "boundaries": [
+    "35fc3860a81761c5659169b450ae6e203f0f8c33fb84ab8e216072c9ab40ee4a",
+    "ac850e10d786ddecd1f10cc8d57830593ae6b45875fd603d5d1e806ef2bfc31d",
+    "c53eff56e2edd3e97093bf430cf94d55efbf54bd0c78a2e3e10ea6a9853546b7",
+    "a0f164d786997ef30fbd41ce8118294f5133d94108d4dd0fc03310a401234a6e",
+    "f643363647257a29e34d4c6aee268f190a1676ae6ef8b61502f00ac4b9f6fb25"
+   ],
+   "depth": 4096,
+   "flags": [
+    16,
+    16,
+    16,
+    16
+   ],
+   "format": "fp64",
+   "golden": [],
+   "image": null,
+   "image_sha256": "7d2ad9ced178ec668f073b13773282ab88d421d42994a6f7b32e388a8a5ff0b6",
+   "init_sha256": "e63ff2a849a22beda834dc427b896063dd0e4309dacbeccb9d3f097cba1634f4",
+   "kind": "workload",
+   "lanes": 256,
+   "name": "fput_extended_fp64",
+   "segments": 4,
+   "slots": 4096,
+   "source": "programs/workloads/cft-hard-workloads/programs/fput_extended_fp64.cftl",
+   "special": [],
+   "spot": [
+    0,
+    1,
+    2,
+    64,
+    128,
+    192
+   ],
+   "status": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "steps": 2,
+   "target": "u50-rev8-quad",
+   "tiles": 4
+  },
+  {
+   "bank": null,
+   "bank_sha256": "e72d84bfd5683593f57b31abbffc5aced7324f93ca29ddb22fe7ff1ca7cff9cc",
+   "boundaries": [
+    "409d7b3b69f8c8730771c67c761fc94db37d328f6a08c4126d1afbf0669974d9",
+    "0a6ed573814a8dec077efb5ffdd2678d51980c7fa766e4e1927e564f943060bd",
+    "c353524941fed68b6a3c6f6a9f21324865d2d0b9b96b22d998916cfa7fd0a131",
+    "13744b931c3c0cbf291c4200a6ff92ca942088eb90b5542df5e15c63cf3ebc44",
+    "4996a6214604b23aac6416b0175e7308180879454471f6dea934b36ad8399a61"
+   ],
+   "depth": 4096,
+   "flags": [
+    16,
+    16,
+    16,
+    16
+   ],
+   "format": "fp64",
+   "golden": [],
+   "image": null,
+   "image_sha256": "1398c56dda63b23eaf86e2b1fe8a02c622e683647f4980dfeac4c4466e98e6c4",
+   "init_sha256": "62759b0c88ee587b91ac7f6b0c0c2137dc011104974c246d59ab710b0e3a3450",
+   "kind": "workload",
+   "lanes": 256,
+   "name": "phi4_extended_fp64",
+   "segments": 4,
+   "slots": 2048,
+   "source": "programs/workloads/cft-hard-workloads/programs/phi4_extended_fp64.cftl",
+   "special": [],
+   "spot": [
+    0,
+    1,
+    2,
+    64,
+    128,
+    192
+   ],
+   "status": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "steps": 2,
+   "target": "u50-rev8-quad",
+   "tiles": 4
+  },
+  {
+   "bank": null,
+   "bank_sha256": "b3a48e9e57d908a7648cd1d4d1cc8bae3a89a9a9929834a8b1f9ed71696f3aa9",
+   "boundaries": [
+    "a08a9f4159d6563b9f4062458edfb8b798057b3ccd21559d653a69eaba95f959",
+    "60db013be8e74f70fb90811a30777c7251e27ba0a3baca6591a6494824348df3",
+    "d2531cd0804a169b1f7727ba60dacccd4e729e2a6bd6248c9092f446ab2e40d4",
+    "991db9e6d22f3e3c0e68359a0796b2804ac1e3a0faaea2394e7a897d0ce549d1",
+    "6e5fb7e623cf4b17df9dee8f4ce23396494b183f4f537899a9bcdafc563a1ccb"
+   ],
+   "depth": 4096,
+   "flags": [
+    16,
+    16,
+    16,
+    16
+   ],
+   "format": "fp64",
+   "golden": [],
+   "image": null,
+   "image_sha256": "fc6bd95702d7c6e75e15af348d1567b4b5cc20941c3621702dc3891b6b95a13a",
+   "init_sha256": "b7acc97656b9b918d597ebd5046883124dbcc7ccadd2204f6b5dbb1a24b9d9d2",
+   "kind": "workload",
+   "lanes": 256,
+   "name": "kuramoto_sivashinsky_extended_fp64",
+   "segments": 4,
+   "slots": 1024,
+   "source": "programs/workloads/cft-hard-workloads/programs/kuramoto_sivashinsky_extended_fp64.cftl",
+   "special": [],
+   "spot": [
+    0,
+    1,
+    2,
+    64,
+    128,
+    192
+   ],
+   "status": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "steps": 2,
+   "target": "u50-rev8-quad",
+   "tiles": 4
+  },
+  {
+   "bank": null,
+   "bank_sha256": "8128248c6593221eeb27516ee5bd7c553facc29efcd797a44257fe308c055409",
+   "boundaries": [
+    "9599f9771425eedeb460270ee434cc4506712774f893cd7c49c356ea95693a88",
+    "76d8a79e9418a9ee014432262f86484836a2849b65d57d1e81b03184813c23f5",
+    "7bdc4b03fb5ff424808aa71a05d9d975c6c44fa925691afca7a4fa32137f87bd",
+    "e0283bafa2c62413633bdcf4f2ccc23a350e91a506358192d50baf6fce0994e0",
+    "a3c4929fca803230b6f729c95764498f5a41843faf3761e7af1f798d89c5faa1"
+   ],
+   "depth": 4096,
+   "flags": [
+    16,
+    16,
+    16,
+    16
+   ],
+   "format": "fp64",
+   "golden": [],
+   "image": null,
+   "image_sha256": "39772a89db4f482ecf8cee5158c58b57671ffdafa99c5e77f9344e9cb2dfda9c",
+   "init_sha256": "1c178532b4b3980b0811166da41563c386aef8a4a3f915e316be639b0a95d4ce",
+   "kind": "workload",
+   "lanes": 256,
+   "name": "reservoir_extended_fp64",
+   "segments": 4,
+   "slots": 203,
+   "source": "programs/workloads/cft-hard-workloads/programs/reservoir_extended_fp64.cftl",
+   "special": [],
+   "spot": [
+    0,
+    1,
+    2,
+    64,
+    128,
+    192
+   ],
+   "status": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "steps": 2,
+   "target": "u50-rev8-quad",
+   "tiles": 4
+  },
+  {
+   "bank": null,
+   "bank_sha256": "e424f60b52d7f5c535d22dbfc768bbc994de7b9f6250487c96aa526873ccf213",
+   "boundaries": [
+    "53e978a658b044eb1cae4eb0ad8c3c136f839c5e449010d55a1f42e32fa8b96c",
+    "0ad7b861b6fd1e24445bf15a557c82881182df9f097514f4d46d9f03f057b64b",
+    "7db02bc6a7614712d041e4a06e82b24c7e5719ff167139ba69d6f298b23510b2",
+    "f06392c9b47094bf3aac9ec222831b9f00ab813493a424018b5ab1bdf2bfa5d5",
+    "867bada2755da96284fcb08a3b9cbf0692f5e22e079ccf4b6408a1cb283d0b67"
+   ],
+   "depth": 4096,
+   "flags": [
+    16,
+    16,
+    16,
+    16
+   ],
+   "format": "fp64",
+   "golden": [],
+   "image": null,
+   "image_sha256": "e44e6368ff390a918f8787de463aaaea4cbc88411e2d12dfbcfb79384251f242",
+   "init_sha256": "137b508ee4f3e4a3ea84158f4db0cde670aa684d9ed0b5cdfd87f0f3885c96ff",
+   "kind": "workload",
+   "lanes": 256,
+   "name": "riccati_extended_fp64",
+   "segments": 4,
+   "slots": 1024,
+   "source": "programs/workloads/cft-hard-workloads/programs/riccati_extended_fp64.cftl",
+   "special": [],
+   "spot": [
+    0,
+    1,
+    2,
+    64,
+    128,
+    192
+   ],
+   "status": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "steps": 2,
+   "target": "u50-rev8-quad",
+   "tiles": 4
+  }
+ ],
+ "made": "programs/acceptance.py --set rev8 --write: libcft's software backend, cft-segrun --scratch-depth at each entry's target's depth, open certificates, each accepted by cft-audit in full and by the golden spot check",
+ "set": "rev8"
+}

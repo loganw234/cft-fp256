@@ -4668,6 +4668,14 @@ above (2026-09-30) number the certificate plan's steps, not these.
     - only three are within the compiler's reach, Gray-Scott hard and
       wide (34,719 instructions) and phi4 extended (2,156 slots), and
       none is shown achievable.
+    - On revision 8's images (measured 2026-10-12, parcel W8;
+      docs/VALIDATION.md): ten of the eleven compile for one, nine
+      for the quad and Gray-Scott extended (5,690 slots) for the deep
+      single alone. Lorenz-tangent hard and wide fit the quad (59,385
+      instructions in 3,587 slots), so the claim above is revision
+      7's. Lorenz-tangent extended is refused by all three: cftc's
+      image of it needs 15,347 slots a lane. The ten are the
+      revision-8 set (`programs/acceptance.py --set rev8`).
 - **Time-dependent systems** already work with t as a state variable
   (`state t`, `d/dt t = 1`). With a dyadic step (h = 1/64), t stayed
   exactly k h through 10^4 steps at fp64 and fp256, under rk4, euler
@@ -4808,6 +4816,9 @@ and the testing rule, as the last rounds ran.
        `KERNEL_FREQ=135000000`: the quad, and the deep build;
      - the card legs, with the acceptance set as the admission test,
        and the workloads that missed run on whichever build holds them.
+       Not done in step 6; measured and made a set of their own on
+       2026-10-12 (parcel W8: the revision-8 set,
+       `programs/acceptance.py --set rev8`), its card runs the lead's.
 2. **L4, run-time division and square root in the language,
    golden-first: built, verified by VL4 over four checks and merged**
    (2026-10-02; LANGUAGE.md). cftc's interim refusal was named

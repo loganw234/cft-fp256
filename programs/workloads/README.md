@@ -92,6 +92,22 @@ every lane is distinct. That set's `acceptance` stage holds the
 interpreter to all 21 vectors and the ten card images to theirs, and
 `acceptance-far` the other four hard and wide images.
 
+### On revision 8's images
+
+Revision 8 (2026-10-06) streams up to 2^24 instructions and gives a lane
+4,096 scratch slots on the quad and the single, 8,192 on the deep single.
+Of the eleven that missed revision 7, parcel W8 measured on 2026-10-12
+(docs/VALIDATION.md) that ten run on one: Gray-Scott and Lorenz-tangent
+hard and wide and five of the extended (FPUT, phi⁴, Kuramoto-Sivashinsky,
+the reservoir and Riccati) on the quad, and Gray-Scott extended, at
+5,690 scratch slots a lane, on the deep single. Lorenz-tangent extended
+runs on none: cftc's image of it needs 15,347 slots a lane, 5,713 of
+them its state and lane param. Those ten are the revision-8 set
+(`programs/acceptance.py --set rev8`, its record
+`programs/acceptance-rev8.json`), the same recipe of lanes on one block a
+tile of the image each runs on, and each image is held to its one-step
+vector there too.
+
 ### The one change
 
 `tools/run_workloads.py` asked for python/cftc to be a file,

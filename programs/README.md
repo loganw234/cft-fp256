@@ -19,8 +19,9 @@ evening)" sections.
       workloads/           programs written elsewhere, kept as
                            delivered: the hard-workload pack
                            (workloads/README.md, below)
-      acceptance.py        the acceptance set, a device's admission
-      acceptance.json      test, and what each entry must give
+      acceptance.py        the acceptance sets, a device's admission
+      acceptance.json      test, and what each entry must give: the
+      acceptance-rev8.json acceptance set's and the revision-8 set's
                            (below)
 
     make programs         assemble every source with cft-asm, write
@@ -330,7 +331,8 @@ index above: their check is their own runner's.
 
 ## The acceptance set, `programs/acceptance.py`
 
-Everything that runs on the card today, each entry one run fixed here:
+Everything that runs on revision 7's card, and so on every card since,
+each entry one run fixed here:
 the six compiled references and the four variational ones
 (`programs/systems/compiled/` and `programs/systems/compiled-tangent/`)
 as committed, and the ten hard workloads that fit u50-rev7-quad, compiled
@@ -352,6 +354,35 @@ hard workloads' own one-step vectors held against the interpreter and the
 ten card images; `acceptance-far`, in the full census only, holds the
 four images past the card to theirs. `--write` remakes the record, on the
 software backend only.
+
+### The revision-8 set, `--set rev8`
+
+The hard workloads that missed revision 7 and a revision-8 image holds,
+measured by parcel W8 (2026-10-12; docs/VALIDATION.md): ten of the
+eleven - Gray-Scott and Lorenz-tangent hard and wide, and FPUT, phi4,
+Kuramoto-Sivashinsky, the reservoir and Riccati extended, on the quad;
+Gray-Scott extended, at 5,690 scratch slots a lane, on the deep single.
+Lorenz-tangent extended runs on none: cftc's image of it needs 15,347.
+Each runs on the image the rule picks - the quad, u50-rev8-quad, where
+4,096 scratch slots a lane hold it; the deep single, u50-rev8-deep, where
+it needs 8,192; the single, u50-rev8, only for R21, which no compiled
+workload needs - its lanes one block a tile of that image, two steps a
+segment, so that every segment's loop runs a second pass over a step
+whose tail streams from the image.
+`programs/acceptance-rev8.json` holds what each must give, made on
+libcft's software backend at the image's own depth. A card passes it as it
+passes the acceptance set, its certificates naming the target's tiles and
+depth:
+
+    python programs/acceptance.py --set rev8 --target u50-rev8-quad \
+        --device <rev8q's image.xclbin> --images DIR
+
+`--images DIR` reads each image and bank from a compile made once, and
+writes there what it compiles here, each held to the record's digests:
+Gray-Scott extended's and Riccati extended's compiles took 40 minutes and
+2.2 hours on amd-arc-box. `--legs oracle` holds each image to the pack's
+one-step vector. On the software backend the other eight are the
+`acceptance-rev8` runner stage, in the full census only.
 
 ## What waited on another half of the round, and no longer does
 
