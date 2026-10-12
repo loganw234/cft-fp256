@@ -87,13 +87,16 @@ Full procedure in **`docs/BITSTREAM-BUILDS.md`**. The short version:
 `-retiming` on each kernel CU's out-of-context synthesis inside the link,
 and that synthesis has no clock, so Vivado declines it (`INFO: [Synth
 8-11322] No global retiming is needed without any clock constraint`) and
-the netlist is the one `RETIMING=0` gives - shown on the whole kernel
-(`hw/probe_rt.sh` on amd-arc-box) and in revision 7's q135 link. Read
+the netlist is the one `RETIMING=0` gives - shown for revision 8's three
+images, on the whole kernel (`hw/probe_rt.sh` on amd-arc-box) and in
+revision 7's q135 link, and believed of every earlier image. Read
 "retimed" in any record before then as "built with the flag"; the
 manifest's `retiming_effect:` says what each CU's synthesis did.
 `SYNTH_CLOCK=1` gives that synthesis its clock (out of context it then
-retimes, +0.67 ns before place and route); it stays off by Logan's word
-until a build needs the margin, to be tried with a routed A/B.
+retimes, +0.67 ns before place and route, and the clock alone already
+changes the netlist; inside the link this is believed, not yet shown);
+it stays off by Logan's word until a build needs the margin, to be tried
+with a routed A/B.
 `RETIMING`, `PHYS_OPT` and `SYNTH_CLOCK` refuse anything but 0 or 1.
 Separately: Vivado's IP cache-ID does not cover the packaged generics,
 and the cache is the checkout's `.ipcache`, so build different

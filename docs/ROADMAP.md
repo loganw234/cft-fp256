@@ -4865,7 +4865,9 @@ and the testing rule, as the last rounds ran.
        and the workloads that missed run on whichever build holds them.
        Not done in step 6; measured and made a set of their own on
        2026-10-12 (parcel W8: the revision-8 set,
-       `programs/acceptance.py --set rev8`), its card runs the lead's.
+       `programs/acceptance.py --set rev8`), and run on the cards the
+       same day: rev8q nine of nine, rev8d one of one
+       (docs/VALIDATION.md, the leftovers' closing entry).
 2. **L4, run-time division and square root in the language,
    golden-first: built, verified by VL4 over four checks and merged**
    (2026-10-02; LANGUAGE.md). cftc's interim refusal was named
