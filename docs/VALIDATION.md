@@ -18671,3 +18671,175 @@ What sampled points cannot see is stated in LANGUAGE.md.
 - **Notes taken as known limits, not restated** (verifier-VCRc's and verifier-VTGb's): COMPATIBILITY.md:886's "| hardware | no RTL ..." row under "status at ABI 0.17", read as a dated table; SEQUENCER.md:3276-3277 and python/rev8_worth.py:16-18, revision 7's census figure, outside the class; SEQUENCER.md:3288 at 84 columns and COMPATIBILITY.md:864's short line; python/cftc/__init__.py:105 at 81 columns (every line as at this commit; verifier-VI9c).
 - **The stale comments in rtl/ and tb/** that part one lists stay until the next change to those trees, the images being tied to rtl 44b963dd.
 - **Whether `-retiming` retimes in these out-of-context synthesis runs is not shown** (verifier-VI9b): the flag is on each kernel's synth_design command line, as above, and each log also says "No global retiming is needed without any clock constraint" - rev8a's 22 times, rev8q's krnl_4's 21, rev8d's 24 (MEASURED by the lead, the logs copied under box/). The three images closed; whether the flag moved a register in any of them, and so what RETIMING=1 has bought since revision 7, is a question for the next build round.
+
+## 2026-10-12 - the hard workloads that missed revision 7, on revision 8's images: ten of the eleven run on one (nine on the quad, Gray-Scott extended on the deep single) and Lorenz-tangent extended on none, measured; the revision-8 set, their admission test on rev8q and rev8d, its record made on the software backend (parcel W8)
+
+**Why.**
+- The step-6 plan ran the card legs "with the acceptance set as the admission test, and the workloads that missed run on whichever build holds them" (docs/ROADMAP.md, the RTL revision). Part two, above, records that this was not done in step 6. On 2026-10-12 Logan chose it for the next round (the round's ledger). The lead gave it to parcel W8: brief briefs/W8.md, worktree s6x-w8 from main at ab51655.
+- The eleven that missed revision 7's quad are Gray-Scott and Lorenz-tangent, hard and wide, and the seven extended programs (programs/workloads/README.md).
+  - ROADMAP's account of them is of revision 7: 32,768 instructions and 2,048 scratch slots a lane.
+  - Revision 8's images stream up to 2^24 instructions. A lane gets 4,096 slots on rev8a (the single, with R21) and rev8q (the quad, without R21), and 8,192 on rev8d (the deep single, with R21). python/cftc/targets.py holds all three.
+- Marks: MEASURED on the desktop (niced, one heavy process at a time) unless amd-arc-box is named; READ; COMPUTED; BELIEVED.
+- The records are in the round's `Data/runs/2026-10-12-step6-leftovers/`, not in git:
+  - w8/: the measurement script and its logs, the desktop's images, the plants;
+  - box/w8-compile/: the box's compiles;
+  - ledger/W8.md: the parcel's ledger.
+
+**What each revision-8 target holds** (MEASURED. Each program was compiled by cftc 5 at two steps a segment, the set's, for each of u50-rev8-quad, u50-rev8 and u50-rev8-deep.
+- The eight on the desktop, one compile at a time (w8/desktop/measure.jsonl): the quad from 03:55 to 04:22, then the single and the deep from 04:36 to 05:32.
+- The three largest on amd-arc-box, by the lead, with W8's script (w8/box_rev8_compile.sh; box/w8-compile/summary.txt):
+  - all twelve compiles at once from 03:58:04, sw:32768 beside the three targets;
+  - in a clean clone of main at ab51655, whose cftc, cft_golden and pack trees the script asserted (af63e9f, 5f52804, 52e041d);
+  - with the lead's one-thread Vivado probe for parcel RT beside them from 05:14, so the box's times are loaded ones.
+
+"Instructions" is the image's: the step and its ENDREP, the REPEAT and the HALT. "Slots" is the slots used: the lane's block (its state and lane params) plus the spills. "Bank" is the bank's slots, the constants a lane addresses.)
+
+| program | instructions | slots: block + spills | bank | u50-rev8-quad | u50-rev8 | u50-rev8-deep | compile, s: quad, single, deep |
+|---|---:|---:|---:|---|---|---|---|
+| gray_scott_hard_fp64 | 34,721 | 514 + 1,048 = 1,562 | 8 | accepted | accepted | accepted | 85.2, 94.7, 94.5 |
+| gray_scott_wide_fp256 | 34,721 | 514 + 1,048 = 1,562 | 8 | accepted | accepted | accepted | 92.0, 94.5, 102.8 |
+| lorenz_tangent_hard_fp64 | 59,385 | 1,081 + 2,506 = 3,587 | 7 | accepted | accepted | accepted | 223.8, 266.4, 284.4 |
+| lorenz_tangent_wide_fp256 | 59,385 | 1,081 + 2,506 = 3,587 | 7 | accepted | accepted | accepted | 243.7, 231.6, 250.6 |
+| gray_scott_extended_fp64 | 139,697 | 2,050 + 3,640 = 5,690 | 8 | refused scratch-capacity | refused scratch-capacity | accepted | box: 2,395, 2,428, 2,389 |
+| lorenz_tangent_extended_fp64 | 319,027 (sw:32768's) | 5,713 + 9,634 = 15,347 | 7 | refused scratch-capacity | refused scratch-capacity | refused scratch-capacity | box: 10,086, 10,027, 10,094 |
+| fput_extended_fp64 | 26,627 | 4,096 + 0 = 4,096 | 4 | accepted | accepted | accepted | 112.3, 100.1, 100.6 |
+| phi4_extended_fp64 | 19,534 | 2,048 + 108 = 2,156 | 4 | accepted | accepted | accepted | 50.7, 54.1, 51.5 |
+| kuramoto_sivashinsky_extended_fp64 | 76,224 | 1,024 + 42 = 1,066 | 8 | accepted | accepted | accepted | 509.8, 578.6, 607.6 |
+| reservoir_extended_fp64 | 71,480 | 203 + 1,087 = 1,290 | 18 | accepted | accepted | accepted | 213.9, 237.0, 227.5 |
+| riccati_extended_fp64 | 364,881 | 1,024 + 2,957 = 3,981 | 43 | accepted | accepted | accepted | box: 8,045, 8,225, 8,110 |
+
+- **The refusals, by name, as cftc printed them on the box:**
+  - Gray-Scott extended: "this program needs 5,690 scratch slots a lane (2048 state, 2 lane params, 3640 spills) and u50-rev8-quad has 4,096", and the same for u50-rev8.
+  - Lorenz-tangent extended: "this program needs 15,347 scratch slots a lane (5712 state, 1 lane params, 9634 spills) and u50-rev8-deep has 8,192", and the same for the quad and the single at 4,096.
+  - sw:32768 accepted both:
+    - Gray-Scott extended in 2,488 s, its image and bank the deep's;
+    - Lorenz-tangent extended in 10,142 s, its manifest's accepted_by empty - no U50 target takes it.
+- **No refusal was program-capacity or target-feature.** The largest image, Riccati extended's 364,881 instructions, is 2.2% of 2^24. Every image needs the same bits:
+  - REGS32, BANK_PTR, SCRATCH, SCRATCH_IO and SCRATCH_STRICT;
+  - WIDE_CONST as well for the reservoir and Riccati extended.
+  All of these are published by all three targets.
+
+**What it shows.**
+- **Ten of the eleven run on a revision-8 image.**
+  - Nine run on the quad: Gray-Scott and Lorenz-tangent hard and wide, and FPUT, phi4, Kuramoto-Sivashinsky, the reservoir and Riccati extended. Each one's accepted_by is u50-rev8, u50-rev8-quad and u50-rev8-deep, and nothing older.
+  - Gray-Scott extended runs on the deep single alone, at 5,690 slots.
+  - Lorenz-tangent extended runs on none.
+- **One image for every target.**
+  - On the desktop, each single's and deep's compile of the eight gave the quad's image and bank byte for byte: 16 of 16 (measure.jsonl's `same_as_first`).
+  - On the box, Riccati extended's four compiles gave one image and bank (e44e6368..., e424f60b...), and Gray-Scott extended's deep and sw:32768 compiles gave one (57803dd0..., c9b50b4e...): box/w8-compile/SHA256SUMS.
+  - This is targets.py's design: the lowering never reads a target. So the per-target compile times measure one compile three times, and differ only by the machine's spread. Kuramoto-Sivashinsky extended's one compile took 509.8, 578.6, 607.6 and 663.9 s here (the last in the stage's run, below).
+- **Lorenz-tangent hard and wide.** ROADMAP's "cannot fit under any allocation" is revision 7's, and holds there. COMPUTED from the manifest:
+  - the step's 35,980 operations are 32,617 ALU instructions after the compiler's sharing;
+  - its 1,080 state components live in the scratch, and every one the step changes and no register keeps across steps is stored at least once a step;
+  - even with every one of the 29 registers a step has keeping a component, that is at least 32,617 + 1,051 = 33,668 instructions before the REPEAT and the HALT, past 32,768.
+  On revision 8 it does not hold: 59,385 instructions in 3,587 slots fit the quad, and the deep single is not needed.
+- **Lorenz-tangent extended** is past every revision-8 image, as cftc allocates it.
+  - COMPUTED: its block alone (5,713 slots, its state and one lane param) is past 4,096, so no allocation fits the quad or the single.
+  - On the deep, the block fits 8,192 and cftc's 9,634 spills do not. Whether some other allocation would fit is not shown.
+  - What cftc writes, sw:16384 holds and no U50 image does.
+- **FPUT extended fills the quad's 4,096 slots exactly**: 4,096 state values and no spill.
+- **ROADMAP's account of revision 7 holds** with these figures:
+  - nine past 32,768 instructions: Gray-Scott and Lorenz-tangent hard and wide, and Kuramoto-Sivashinsky, the reservoir, Gray-Scott, Riccati and Lorenz-tangent extended. Five of them are past 2,048 slots as well: Lorenz-tangent hard and wide, and Gray-Scott, Riccati and Lorenz-tangent extended;
+  - two past the scratch alone: FPUT extended (4,096) and phi4 extended (2,156).
+- **No workload needs R21.** READ: no file of python/cftc names AUGADD or AUGERR except targets.py's tables, and the fragments C4 inlines (python/cft_golden/routines.py, divfull.py) name neither. So the single takes exactly what the quad takes, and rev8a gets no entry.
+- **Every image streams on revision 8.** The smallest, phi4 extended's, is 19,534 instructions, past the 4,096 a tile keeps in its store (docs/SEQUENCER.md, "The fetch's hooks").
+
+**The revision-8 set** (programs/acceptance.py `--set rev8`; its docstring is the definition; the record is `programs/acceptance-rev8.json`).
+- **The entries.** There are ten: the nine on u50-rev8-quad and Gray-Scott extended on u50-rev8-deep.
+- **The rule.** The brief's rule is written as rule_target:
+  - the quad where it holds the image;
+  - the single only where R21 alone keeps an image off the quad;
+  - the deep single where the image needs 8,192.
+  rule_target reads the image's own words: its format, its instruction count, the features its words need, and asm's inferred depth (the smallest power of two covering every slot the words name). It hands them to cftc's own accepted_by, so the acceptance is cftc's and not a second copy of it. Each entry's target must be its answer.
+- **The lanes** use the acceptance set's workload recipe (the lead's hard_card.py): the pack's three initial conditions, then copies with (k // 3) x 2^-30 added to lane k's first value. That fills one block a tile of the entry's image: 256 lanes at fp64 and 64 at fp256 on the quad, and 64 at fp64 on the deep.
+- **Two steps a segment, four segments.** Every image streams the tail of its step past the store. Two is the fewest at which each segment's ENDREP jumps back into the store and the tail streams a second time; at one step a segment, no loop runs a second pass. The acceptance set's 2 to 8 steps a segment were chosen for its software backend's time, not for this.
+- **The record.** `--set rev8 --write` makes it on libcft's software backend. Each entry runs at its target's depth (cft-segrun --scratch-depth 4096 or 8192), with open version-1 certificates. Its parameters are the acceptance set's plus `depth` and `tiles`.
+- **Pass criteria.** These are the acceptance set's for its workloads:
+  - the certificate's lines and boundary files are the run it was handed;
+  - every boundary hash, flag word and STATUS is the record's;
+  - cft-audit accepts it in full;
+  - the golden spot check: the last segment re-run on seq.py for lanes 0 to 2 and the first of each other tile, each equal to its certified end.
+
+  There is no golden audit (seq.py's cost), as for the acceptance set's workloads. One check is added, **the device's identity**: the certificate's device-tiles and the depth it is audited at must be the target's. That is 4 tiles and 4,096 on the quad, and 1 and 8,192 on the deep; on the software backend, 1 tile at the target's depth.
+- **On a card**, `--target` names the image the device is, and only the entries the rule put on that image run. A device other than sw without `--target` is refused by name, and so is a target with no entry: u50-rev8, by "the revision-8 set has no entry on u50-rev8". On the software backend every entry runs, each at its own depth.
+- **Its own oracle**, `--set rev8 --legs oracle`: each entry's image, its REPEAT set to 1, run on seq.py, equal to the pack's one-step vector. That covers states, FLAGS and each lane's FLAGS alone, with the pack's digests and the format layout. For the four hard and wide programs it is the acceptance set's `far` comparison, made from the set's own compilations. For the six extended programs, no stage held their images to their vectors before; the pack's own runner did on the box at 80abee5.
+- **`--images DIR`** reads a workload's image and bank from DIR where both are there. They are held to the record's digests by the same committed_problems a compilation here goes through. One half of a pair alone is refused by name. Where neither file is there, the workload is compiled and its pair written to DIR. A card day compiles once and reads the images back.
+- **Its controls run on every leg run:**
+  - the acceptance set's eight, on the set's first entry;
+  - eight of its own: a bank with one bit flipped, read from a copy of --images; an image there without its bank; the identity checked against another target's depth; a device of another tile count; the entry put on another target; and three planted images the rule must place - a store to slot 4,096 on the deep, a store to 8,192 on no revision-8 target, and an augadd on the single;
+  - the oracle's two, on its first program.
+- **The acceptance set is unchanged:** its default (`--set rev7`), its record, its legs, its checks and its printed text. `--legs far` belongs to it alone.
+
+**Where it runs: `acceptance-rev8`, a census stage** (W8's proposal, the lead's to place).
+- The stage runs `--set rev8 --legs set,oracle` on the software backend, with `--only` set to the eight entries whose compile takes minutes (verify/run.sh's REV8_CENSUS). Its time is nearly all compiling: half an hour, three times `acceptance-far`'s ten minutes, so the census and not the gate. The code it exercises - cftc, the software backend, seq.py and both auditors - is what the gate's `acceptance` stage already exercises.
+- Gray-Scott extended and Riccati extended are left to a card day, which reads the box's compile back through `--images`. Their compiles took 40 minutes and 2.2 hours on the box.
+- The runner has 52 stages, with 31 in quick and 44 in gate as before. `--list`'s name column is one character wider, so the stage's fifteen-character name keeps a space before its description.
+
+**W8's commit** (s6x-w8; the commit records its hash), file by file:
+- **programs/acceptance.py** - the revision-8 set:
+  - `--set`, `--target` and `--images`;
+  - REV8, REV8_STEPS, REV8_ORDER and REV8_TILES;
+  - Loaded, workload_image, rule_target, rule_problems, identity_problems, planted_image, rev8_controls and leg_oracle_rev8.
+  prepare, segrun, workload_lanes, committed_problems, set_controls, leg_set and main now take the set's depth, tiles and parameters, with the acceptance set's values as defaults. In the docstring: the two sets, "everything that runs on the U50's cards today", the revision-8 set's definition, and the `far` leg's four "past revision 7's quad".
+- **programs/acceptance-rev8.json:** the record, ten entries.
+- **verify/run.sh:** the `acceptance-rev8` stage and REV8_CENSUS; the header's census list; `--list`'s name column.
+- **docs/VERIFICATION.md:** the stage's row; the sets' paragraph; the census sentence; fifty-two stages.
+- **CLAUDE.md, README.md and docs/README.md:** the stage counts. README.md also gets its census line, and docs/README.md is recounted.
+- **programs/README.md, docs/PROGRAMS.md and programs/workloads/README.md:** the revision-8 set, where the acceptance set and the pack are described.
+- **docs/ROADMAP.md:** two bullets - the answer beside revision 7's account of the eleven, and the step-6 plan item's state.
+- **docs/VALIDATION.md:** this entry, appended.
+
+**What ran** (MEASURED, the desktop, niced, one heavy process at a time; every script is in w8/ and every log in w8/logs/).
+- **Tools:** `make -C host cft-segrun.exe cft-audit.exe` (mingw64 gcc, TMP outside the tree): rc 0 in 17 s, no warning.
+- **Probes:**
+  - phi4_hard_fp64 at 8 steps for five targets (u50-rev7-quad, the three revision-8 ones, sw:32768) gave one image and bank, the acceptance set's committed digests.
+  - acceptance.py's REPEAT patch of a 1-step compile equals the 2- and 8-step compiles, and back.
+  - The bank's values read from its bytes equal the compilation's.
+  - cftc's command line, given a relative source, writes the same image.
+  - lang.load and the IR of each missed program take 0.5 to 7.6 s, against minutes to hours to compile.
+- **The measurement:** pass 1, the eight for the quad, 1,531 s in all; pass 2, the eight for the single and the deep; the box's twelve compiles. All as tabled above.
+- **The record:**
+  - 04:22, the eight then measured: `--set rev8 --write --images w8/desktop/images`, 174 s, 8 of 8 made, 89 checks.
+  - 06:50, with the box's two images added: `--set rev8 --write --images w8/images`, 362 s, 10 of 10 made, 107 checks, "wrote programs/acceptance-rev8.json: 10 entries". The eight earlier entries were the same in both records.
+  - Every entry's flags are [16, 16, 16, 16] (inexact alone) and its STATUS 0.
+- **The check:** `--set rev8 --legs set,oracle --images w8/images`, 501 s.
+  - "acceptance rev8: 20 of 20 PASS on sw (oracle, set); 158 checks ok, 0 failed".
+  - Gray-Scott extended's identity read "device-tiles 1, scratch depth 8192".
+  - Each of the ten images equals its one-step vector on seq.py, in 1.0 s (phi4 extended) to 115.4 s (Riccati extended).
+- **The stage through the runner** (`bash verify/run.sh --only acceptance-rev8`, run 20261012-053503 on W8's uncommitted tree, against the eight-entry record):
+  - "acceptance-rev8 ok 2251s", "VERDICT: PASS, nothing skipped", 0 inner skips; 16 of 16 and 130 checks.
+  - Every image was compiled in the driver's own process, each to the record's digest.
+  - Its compiles took 2,014 s of the 2,251, with the desktop in use (Task Manager, Discord and Steam open); pass 1's same eight took 1,531 s.
+  - The stage's selection then ran against the ten-entry record from the images: 196 s, 16 of 16, 130 checks.
+- **The selections:**
+  - `--target u50-rev8-deep` on the software backend ran Gray-Scott extended alone: 1 of 1, 27 checks, the deep entry's controls among them.
+  - `--target u50-rev8` failed by name, as above (rc 1).
+  - Seven argument errors were each refused by name (rc 2): `--legs far` with `--set rev8`; `--target` or `--images` without it; a device without `--target`; `--write` with `--target`; an acceptance-set entry under `--only`; and `--set rev9`.
+- **The acceptance set, unchanged** - the gate's stage command on the changed driver, `programs/acceptance.py --legs set,oracle`:
+  - rc 0 in 414 s, "acceptance: 41 of 41 PASS on sw (oracle, set); 249 checks ok, 0 failed", the counts of every recorded run since 2026-10-02.
+  - With the times stripped, its log is line for line the close gate's acceptance.log (e3fe2ca; the round's box/closegate-e3fe2ca state tarball), but for that run's three make lines. Run again on the final tree at 07:17, 386 s: the same 249 checks, and its log, times stripped, the first's line for line.
+- **The plants** (w8/plants.sh, its output w8/plants.out). Each plant was made in a copy of the worktree's programs/ and python/, run on gray_scott_wide_fp256 with the images. Unplanted, the run passed: rc 0, 32 checks. Each plant gave rc 1 and its FAIL line by name:
+  - a boundary hash in the record: "boundary 2's hash is ... where the set has ...";
+  - the entry's depth in the record: "acceptance-rev8.json was made for other parameters (depth)";
+  - REV8's entry put on the deep: "the rule puts its image on u50-rev8-quad, and the set on u50-rev8-deep";
+  - the image at one step a segment in --images: "other parameters (steps)";
+  - a bank value changed in --images: "the bank is ... where the set has ...";
+  - cft-segrun handed twice the depth, a code plant in the copy: "scratch depth 8192 where u50-rev8-quad has 4096";
+  - one bit of the pack's vector, under `--legs oracle`: "lane 1's component 0 is ... where the vector has ...".
+  The seven ran at 05:33 against the eight-entry record (w8/plants.out), and again at 07:13 on the final tree (w8/plants2.out): each caught both times, the unplanted run passing.
+- **The docs check:** `python python/check_docs_index.py`, after docs/README.md was recounted (VERIFICATION 582, PROGRAMS 643, ROADMAP 5,805, VALIDATION 18,845; 27,423 + 6,679 + 2,015 + 38,406 = 74,523): rc 0 in 25 s. "43 documents, 46 links, every count true"; the stage counts 52, 31 and 44; 65 tracked documents with 86 relative links and 1,129 quoted paths; its 43 negative controls each caught by name.
+
+**What the lead runs** (the card is the lead's). The commands, and what each must print, are in W8's report and the round's ledger:
+- the box's software check of the record: `--set rev8 --legs set,oracle --images DIR`, with DIR seeded with the box's two pairs, so that the box compiles the other eight itself;
+- rev8q: `--set rev8 --target u50-rev8-quad --device <rev8q's xclbin> --images DIR`, its nine entries;
+- rev8d: `--target u50-rev8-deep --device <rev8d's xclbin>`, Gray-Scott extended.
+The card results will be the lead's entry.
+
+**Known limits.**
+- **No golden audit on any entry**, because of seq.py's cost. The golden ties are the spot check and the oracle's one step on the pack's three lanes.
+- **Eight steps of each workload's dynamics.** The record holds bit-exactness over four segments of two steps, a short trajectory, as the acceptance set's 8 to 32 steps do.
+- **One image per workload.** The quad's nine are not run on the deep, by the rule. rev8a gets no entry, since no workload needs R21.
+- **The identity check reads the certificate's device-tiles and audited depth**, which tell the three images apart, and not the CAPS words. The card legs' device-test -i reads those.
+- **Gray-Scott and Riccati extended were compiled only on the box,** by cftc's command line at ab51655. The record holds those images' digests, and the desktop never compiled them. A fresh compile of them in the driver is a card day's software check (about 40 minutes and 2.2 hours there), and the census stage leaves them out.
+- **Lorenz-tangent extended** is refused by cftc's allocation on the deep. Whether any allocation fits 8,192 is not shown.
+- **The compile times** are from a desktop in and out of use and a loaded box. One compile varied by up to 30% between runs (Kuramoto-Sivashinsky extended, 509.8 to 663.9 s).

@@ -27,7 +27,7 @@
 #                                      # equations (tangent) and the acceptance set
 #   bash verify/run.sh --budget full    # everything: the census (adds sim, simmc,
 #                                      # node, wasm, images, estimates-full,
-#                                      # acceptance-far)
+#                                      # acceptance-far, acceptance-rev8)
 #   Measured durations for every stage, quiet and loaded, are in
 #   docs/VERIFICATION.md - the simulation suites and the formal gate
 #   run for more than an hour each on a busy box.
@@ -217,7 +217,7 @@ if [ "$LIST" = 1 ]; then
   # budget covered all of it.
   while IFS=$'\t' read -r _nm _ds; do
     if [ -z "$ONLY" ] || in_list "$_nm" "$ONLY"; then _mk="*"; else _mk=" "; fi
-    printf '%s %-15s%s\n' "$_mk" "$_nm" "$_ds"
+    printf '%s %-16s%s\n' "$_mk" "$_nm" "$_ds"
   done < <(grep -E '^stage [a-z0-9-]+ "' "$SELF" \
     | sed -E 's/^stage ([a-z0-9-]+) +"([^"]*)".*/\1\t\2/')
   echo
@@ -1195,6 +1195,33 @@ stage acceptance "the acceptance set, a device's admission test, on libcft's sof
 need python
 stage acceptance-far "the hard workloads' own oracle on the four images past the card, Gray-Scott and Lorenz-tangent hard and wide: compiled for sw:32768, each on seq.py equal to the pack's one-step vector, states, FLAGS and each lane's FLAGS" -- \
   PY "$ROOT/programs/acceptance.py" --legs far
+
+# `acceptance-rev8`, in no budget, so only the full census runs it (parcel
+# W8's proposal, 2026-10-12, the lead's to place): the revision-8 set
+# (programs/acceptance.py --set rev8, whose docstring is the definition) -
+# the hard workloads that missed revision 7's quad and a revision-8 image
+# holds, each compiled here for the image the rule picks and held byte for
+# byte to programs/acceptance-rev8.json's digests, run through cft-segrun
+# on libcft's software backend at that image's scratch depth, and held to
+# the record's boundary hashes, flags and STATUS, cft-audit in full, the
+# golden spot check, the device's identity and the rule, its controls
+# caught; then its own oracle, each image on seq.py against the pack's
+# one-step vector. The eight entries whose compile takes minutes: 2,251 s
+# through the runner on the desktop in use, 2,014 of them compiling, and
+# the same compiles 1,531 s with it quieter (parcel W8, 2026-10-12) -
+# about half an hour, so the census and not the gate. The set's other
+# two, Gray-Scott extended (on the deep single) and Riccati extended,
+# compiled for 40 minutes and 2.2 hours on amd-arc-box, so they are left
+# to a card day, which reads the box's compile back through --images.
+REV8_CENSUS=gray_scott_hard_fp64,gray_scott_wide_fp256,lorenz_tangent_hard_fp64,lorenz_tangent_wide_fp256,fput_extended_fp64,phi4_extended_fp64,kuramoto_sivashinsky_extended_fp64,reservoir_extended_fp64
+do_acceptance_rev8() {
+  HOSTMAKE "cft-segrun$EXE" "cft-audit$EXE" || return 1
+  PY "$ROOT/programs/acceptance.py" --set rev8 --legs set,oracle \
+     --only "$REV8_CENSUS" \
+     --segrun "$ROOT/host/cft-segrun$EXE" --audit "$ROOT/host/cft-audit$EXE"
+}
+need host-cc python
+stage acceptance-rev8 "the revision-8 set on libcft's software backend, its eight entries that compile in minutes: hard workloads that missed revision 7 and a revision-8 image holds, each compiled for the image the rule picks and one fixed run at that image's depth, held to committed boundary hashes, flags and STATUS, cft-audit in full, the golden spot check, the device's identity and the rule, its controls caught; each image on seq.py equal to the pack's one-step vector" -- do_acceptance_rev8
 
 # The C auditor held to the golden one (host/Makefile's audittest,
 # host/tests/audit_check.py; docs/CERTIFICATES.md, "The audit tool"):
