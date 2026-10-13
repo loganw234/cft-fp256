@@ -5996,8 +5996,8 @@ this level?** Logan's instruction, above.
   either arm reported, on verifier-P7b's and verifier-P7c's notes; at
   16:38 and 17:30, on verifier-P7d's and verifier-P7e's notes: at
   16:38, after one arm had committed (16:27) and before the other
-  (17:25); at 17:30, after both; and before any verifier of an arm
-  reported. Logan answered the 15:48 revision, the count on items 1
+  (17:25); at 17:30, after both; at neither time had a verifier of an
+  arm reported. Logan answered the 15:48 revision, the count on items 1
   and 2: "Keep the more fair rule you went with". The later ones
   settle how it is counted, and go to him with E1's result.
   - **A failure** is an (a) or a (b) by Logan's rule, found by anyone
@@ -6009,9 +6009,11 @@ this level?** Logan's instruction, above.
     the budget - or on item 2, a check that no plant makes fail.
   - **An arm's chain** is its first check and at most two re-checks,
     each after a send-back (the cap). A failure found before the arm
-    ends belongs to the check running then, or to the next if none is.
-    A check with no failure ends the arm clean. A check with one sends
-    the arm back, but at the second re-check it ends the arm not clean.
+    ends belongs to the check running then, or to the next if none is,
+    and a check does not end while a candidate found during it is
+    unruled. A check with no failure ends the arm clean. A check with
+    one sends the arm back, but at the second re-check it ends the arm
+    not clean.
   - **After an arm ends,** a failure found is counted for the third
     criterion if it is a case. An arm that ended clean then merges only
     once its author has fixed it and a narrow re-check - a verifier on
@@ -6038,8 +6040,9 @@ this level?** Logan's instruction, above.
      arm needed; if Opus's arm does not end clean, Sonnet's need only
      end clean;
   2. by its chain's last verifier's account it misses no item of the
-     must-have list, M1 to M7 as the brief states them, with M2 and M3
-     as brief correction 1 restated them;
+     must-have list, M1 to M7 as the brief states them, with M2, M3
+     and M4 as brief correction 1 restated them (M4 with its fp32
+     census and plant);
   3. it is not materially worse on rubric item 1 or on item 2. On each
      item, count the cases of each arm's ended state - unfixed when it
      ended, or found after - that the other arm's does not share;
@@ -6052,7 +6055,8 @@ this level?** Logan's instruction, above.
   shows what one Sonnet run did, not a rate.
 - **What follows.**
   - An arm is clean for the merge when it ended clean and carries no
-    unfixed failure. If both are, the branch the comparison names merges;
+    failure that has not passed a clean narrow re-check. If both are,
+    the branch the comparison names merges;
     if it calls them equal, the arm with fewer of the third criterion's
     cases in all, then fewer send-backs, then arm a. If one is, that one. If
     neither, none, and the result goes to Logan at the hold. A branch
@@ -6208,9 +6212,11 @@ rewritten above as one block. Verifier-P7e re-checked that
 re-check with no rule to place it, now placed above. Verifier-P7f
 re-checked that (3c0cd40): two wrong statements in the lead's new
 text - criterion 2's must-haves said all restated by brief correction
-1, which restates M2 and M3, and the 16:38 revision said to follow
-both arms' commits - restated above in its own words. The round holds
-when E1 finishes.
+1, which restates M2, M3 and M4, and the 16:38 revision said to
+follow both arms' commits - restated above. Verifier-P7g re-checked
+that (c7ea3cf): one wrong answer, M4 left out of criterion 2's
+restated items, restated above in its words. The round holds when E1
+finishes.
 
 ## The adoption story these serve
 
