@@ -5863,7 +5863,8 @@ Logan, verbatim:
   patterns."
 
 Logan answered its questions on 2026-10-12 (below). Nothing in it
-exists yet unless it says so.
+exists yet unless it says so; E1's exp routine is built, merged at
+b9d96be (E1's result, below).
 
 **Where it starts** (READ at main 0893b2c).
 - **M1's design study is done:** docs/studies/M1-exp-log.md (step 6).
@@ -5937,10 +5938,14 @@ this level?** Logan's instruction, above.
   either arm reported), its file's text sent to both authors word for
   word, on verifier-P7b's check; in short (the file's first item says
   "down to" where it means "up to", verifier-P7d found):
-  - the structured windows at fp64, fp128 and fp256 only, since fp32
-    has none at G = 40 (its marks would need an exponent from
-    (p + G)/2 = 32 up to p = 24, an empty range), fp32 recording its
-    empty census;
+  - the structured windows at fp64, fp128 and fp256 only, since fp32's
+    census marks none at G = 40 (its arguments would need an exponent
+    from (p + G)/2 = 32 up to p = 24, an empty range), fp32 recording
+    its empty census. The premise "fp32 has no window" was the
+    lead's, and wrong: both arms' verifiers found a few fp32
+    arguments that mark, the floats nearest ln(1 + t) for t = 2^-23,
+    2^-22, 2^-21, -2^-22 and -2^-21, each mark justified and its guess
+    right;
   - the budget's files; fp32's reduction; Fast2Sum where ordered;
   - the rate law's G' = 6, 15 cells and three sigma;
   - routines' constants left alone;
@@ -6163,6 +6168,7 @@ as the study recommends:
 2. E1: the two exp parcels, their verifiers, the blind comparison, and
    the result to Logan.
 3. **Hold:** Logan decides how M1's build and M2's study use models.
+   Answered on 2026-10-13 (E1's result, below).
 4. M1's build, items 1 to 6, each parcel verified; M2's study.
 5. M2 to M4's builds, and M3's and M4's studies, in a round of their
    own.
@@ -6179,10 +6185,60 @@ as the study recommends:
 **Sentences elsewhere that this plan supersedes:**
 - M1's study's "VERSION 5" (its section 10, item 4, its question 9
   and its Versions note) is now 6;
-- its section 8, item 4's structured windows "at every format": fp32
-  has none at G = 40 (E1's brief correction 1).
+- its section 8, item 4's structured windows "at every format":
+  fp32's census has none at G = 40, though a few fp32 arguments mark
+  (E1's brief correction 1, and E1's verifiers).
 Each is restated by the parcel that changes its subject, or by the
 lead at E1's merge.
+
+**E1's result** (2026-10-12 and 13; VALIDATION's E1 entry has the
+record).
+- **The coin,** opened after the comparison had reported, its sealed
+  sha256 matching: arm a was Sonnet 5.5, arm b Opus 5.5.
+- **The arms built the same fragment:** identical at fp64 to fp256, and
+  at fp32 the same values with four instructions in another order, so
+  every lane, flag word and mark is the same in both.
+  - Arm a ended clean at its first check (verifier-VE1-a), with no
+    send-back.
+  - Arm b ended clean at its first re-check (VE1-b2), after one
+    send-back: a plant test cached a planted fragment and went red
+    under pytest-xdist (VE1-b's (a)).
+- **The comparison** (Opus) scored arm a 13 and arm b 14 of 15. It named
+  arm a to merge: arm b's tests miss a planted fault that gives wrong
+  answers (the fixed grid's offset at k = emin), and arm a's catch it.
+  It guessed arm a the larger model.
+- **The criteria, applied as fixed:** the first and second are met. The
+  third is not, by the letter: on rubric item 2, Sonnet's arm has four
+  cases the other does not share and Opus's three, every one a check
+  with no plant, none a wrong answer.
+- **The lead's reading of the rules' undefined terms,** recorded before
+  the comparison reported:
+  - a case is shared when the other arm's ended state has the same
+    defect: the same lane, the same bound region, or a check of the same
+    property with no plant;
+  - the tie rule's "in all" sums items 1 and 2;
+  - "found" after an arm's end means confirmed by the lead.
+- **The rules' known limits:**
+  - the third criterion's count favours the arm with fewer checks;
+  - the comparison's list of cases is its enumeration, not a census;
+  - no rule covers a failure found after the merge.
+- **Logan's decisions:**
+  - on 2026-10-13, "Use Sonnet for M1's build parcels as you
+    recommended, it performed well": Sonnet authors for exp2, expm1, the
+    log family and program.c parity; Sonnet verifiers; Opus for M2's
+    study and the language and cftc work;
+  - on the merge: arm a's two after-end fix cycles were spent with two
+    clauses of one sentence of its entry still false, and his answer was
+    "Lead fixes sentence at merge". Arm a merged at b9d96be, the lead
+    restating those clauses, a waiver of the rules' cap. Arm b stays as
+    branch m1-exp-b.
+- **Carried to M1's build:**
+  - fp32's fit to the register file: each arm found a reorder that fits,
+    at 22 to 25 values live;
+  - the pools' lost negative n ln2 thresholds, a task of its own. Arm
+    a's tests pin them as they stand: its
+    test_the_pools_lose_their_negative_thresholds fails when the pools
+    are fixed, and that task must change it.
 
 **Checked.** Verifier-P7 checked this plan on 2026-10-12: no
 regression, and two wrong statements (cftc's version 5 credited to

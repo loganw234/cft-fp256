@@ -19062,3 +19062,131 @@ The card results will be the lead's entry.
 - The quick tests (252): `python -m pytest python/tests/test_mathlib.py python/tests/test_routines.py -q` passed 311 (252 and test_routines.py's 59, in one session, so that nothing here disturbs it) in 232 s niced, and in 82 s at `-n 4` (pytest-xdist 3.8.0). The same 311 passed with the tests collected in reverse order (234 s) and in a seeded shuffle (233 s), and both again at `-n 4` (87 s and 79 s), by a scratch plugin that is not committed; and each of the 67 tests this change added or changed passed alone, in a process of its own (4 minutes in all). The whole golden suite, `python -m pytest python/tests -q -rs --color=no -n 4` niced on the desktop, passed 3,619 with the stage's three known skips (two for the Arduino loopback binary, one `math.fma` on Python 3.13+) in 290 s: 3,622 collected with these 252, against 3,370 before. At this parcel's first commit, c760d7d, the pair was 291 (232 and the 59) in 233 s, and 298 s and 202 s at two earlier states, on a desktop others were using; the largest parts are the 15 rate cells (about 3 s each), the 15 family cells (to 5 s), the plants (29 rows in 65 s) and the constants check (about 5 s). Peak working set of the larger commands, by psutil: 41 MiB for `family`, 33 MiB for the fp256 budget and for the bound and rate commands.
 - Thresholds in the tests (`BOUND_ROOM`, `BUDGET_ROOM`) are this parcel's, a bit under what was measured: the fp64 bound keeps at least two bits and the budget under 0.25 Bv there.
 - `docs/VERIFICATION.md`'s golden row states its test count; the 252 here join it at the merge (3,370 and 252 make the 3,622 collected above), for the lead's restatement.
+
+## 2026-10-13 - the math library round's experiment E1: exp's routine authored from one brief by Sonnet 5.5 and Opus 5.5, verified apart and compared blind; the Sonnet arm merged
+
+**What E1 was.** Logan, on 2026-10-12, verbatim: "Start the math library round's plan, though include an experiment to run first, the first function worked on will have a matching parcel dispatched to an Opus 5.5 and Sonnet 5.5 model to perform the parcel work, to see if Sonnet class is capable at this level of work with proper guidance from the lead briefs. If it proves successful, the other parcels for the round may follow similar patterns."
+- **The plan of record** is docs/ROADMAP.md's section "The math library: experiment E1, then M1's build and M2 to M4 (plan of record, 2026-10-12)". It sets E1's design, its rubric and its rules for the verdict, and records E1's result.
+- **The function was exp** (Logan's choice). The parcel built its routine golden-first in a new module, python/cft_golden/mathlib.py, with the study's section 8, items 1 to 5, as its tests.
+
+**The design** (READ, the plan):
+- **One brief, two arms.** Each arm got the same brief, its copies differing only in the clone, branch and ledger names. Each worked in a clone of 4ad5cea with no remote. The two were dispatched at once (15:03, 2026-10-12).
+- **A coin** gave one arm to each model, sealed as a salted sha256 until the comparison had reported.
+- **Verification:** each arm was checked by its own verifier on Sonnet, from one verifier brief.
+- **The lead's common battery:** the same arguments and seeds through each arm's `mathlib.fragment` and `mathlib.evaluate`, against transcend.exp.
+- **The comparison:** a third agent on Opus read both arms, exported without git and with commit trailers stripped. It scored them on a five-item rubric, named its cases and the branch to merge, and only then guessed which arm was which model.
+- **Sonnet's parcel succeeds when** all three criteria hold:
+  1. its arm ends clean within a cap of two send-backs, with at most one more than Opus's arm;
+  2. its last verifier finds every must-have met;
+  3. it is not materially worse on rubric item 1 (correctness) or item 2 (tests that can fail). That means not more of the cases that the other arm does not share, item by item.
+
+**The plan's own checks** (MEASURED, the round's ledger):
+- Nine verifiers checked the plan before and while E1 ran: P7 and P7b on Sonnet, P7c to P7i on Haiku.
+- Their (b)s numbered 2, 1, 2, 4, 1, 2, 1, 2 and 0. P7's two were in the plan's first draft and P7b's one was in E1's brief. Every later one was in the lead's own text written to answer the pass before: dates, rules that could not be decided, and lists left incomplete.
+- The criteria were revised after dispatch: at 15:48 and 16:14 before either arm had reported, then five more times as the passes found gaps, each before any verifier of an arm had reported. Each revision is dated in the plan.
+- **Logan's answer to the first revision:** "Keep the more fair rule you went with". It made "materially worse" a count, item by item, against the other arm's count, where the old rule had failed Sonnet's arm on any case of its own.
+
+**What the authors were told after dispatch** (READ, the briefs):
+- **Brief correction 1,** to both arms word for word at 15:44, before either reported. It came from verifier-P7b's check of the brief, and has seven items.
+  - Its first item rested on a premise of the lead's, "at fp32 there is no window", which is wrong. Both arms' verifiers found a few fp32 arguments that mark: the floats nearest ln(1 + t) for t = 2^-23, 2^-22, 2^-21, -2^-22 and -2^-21. Each mark is justified and its guess right.
+  - The census, which the item asked about, does find none.
+- **A clarification of M4** went to both verifiers at 18:12, word for word.
+
+**Arm a (Sonnet 5.5):**
+- **Commits:** c760d7d, then 6c4666e, then two after-end fix commits (below). 162 min.
+- **First check:** verifier-VE1-a found no (a) and no (b), with M1 to M7 met. Its own instruments:
+  - the fragments are equal to the study's model at all 20 configurations;
+  - the budget port is equal to verifier-VM1b's tool on 18,160 contributions;
+  - a signed-threshold pool and the true window centres: 0 wrong unmarked lanes;
+  - 26 planted constant faults, each red in `--check`.
+- **So arm a ended clean at its first check, with 0 send-backs.**
+- **It found a pre-existing defect.** The transcend pools lose every negative n ln2 threshold, because `mpmath.libmp.to_man_exp` returns an unsigned mantissa (vectors.py:278 and transcend_check.py:259). So exp's underflow edge was never in the pools or the vector sets.
+  - CONFIRMED by the lead: for t = -1022 ln 2 the mantissa is non-negative and `_mpf_[0]` is 1.
+  - It is a task of its own (the round's ledger).
+
+**Arm b (Opus 5.5):**
+- **Commits:** 4b87b9f, 85 min.
+- **First check:** verifier-VE1-b found one (a). The golden stage under pytest-xdist, which the desktop's `make golden` runs, was red at 4b87b9f and green at 4ad5cea. A plant test patched a builder function, then filled the module's fragment cache under the patch.
+  - CONFIRMED by the lead: the test alone fails in 1.25 s.
+  - The box's serial golden runs could not show it.
+- **One send-back.** The fix 5a701ab took 14 min. verifier-VE1-b2 found it clean:
+  - 40 of 40 mutations caught;
+  - the file green in eight orders, with its plugin seeing the old poisoning as a positive control.
+- **So arm b ended clean at its first re-check, after 1 send-back.**
+
+**The lead's instruments, the same on both arms** (MEASURED):
+- **The battery** at each arm's code commits (arm a 6c4666e and 076a108, arm b 4b87b9f and 5a701ab, each from a clean export): equal between the arms configuration by configuration, with the same argument hashes, instruction counts, live counts and marks. 0 wrong unmarked lanes, and `evaluate` equal to seq.py on every lane. A first run on arm a's working tree, while its author was still at work, is set aside.
+- **Each arm's long runs on amd-arc-box,** as its author handed them, with the serial golden stage beside them, re-run wherever a commit changed what the runs import:
+  - arm a at c760d7d, 6c4666e and 076a108;
+  - arm b at 4b87b9f, its golden stage again at 5a701ab.
+  - Every job exited 0. The budget's bounds were the same in both arms: 0.1645 or 0.1646, 0.0148 and 0.0193 Bv.
+- **The golden stage under `-n 4`,** which the box's python cannot run, at each arm's tips, by the lead or the verifiers; and **an isolation sweep** that runs every test of test_mathlib.py alone in a fresh process.
+  - The sweep's first run was void, an instrument error of the lead's: every id lacked its python/ prefix, and "no tests ran" was counted as a failure. The fixed sweep found arm b's one test at 4b87b9f, and nothing else at any tip.
+
+**The comparison** (Opus, 49 min; its ledger is in the round's scratch records):
+- **The two arms built the same fragment.** It is identical at fp64 to fp256. At fp32 it computes the same values with four instructions in another order. So every lane, flag word and mark is the same in both.
+- **Rubric** (a / b): correctness 3 / 3; tests that can fail 3 / 2; completeness 3 / 3; clarity 2 / 3; honest marks 2 / 3. Totals 13 / 14.
+- **Its cases:**
+  - on item 1, none;
+  - on item 2, checks with no plant: two shared (the shape-count and census-count pins), four in arm a only and three in arm b only.
+  - Each was confirmed by the lead in the exported trees: no plant test of its arm names it.
+- **Outside the rubric's case wording,** CONFIRMED by the lead from its reproduction: arm b's tests miss arm a's planted fixed-grid offset at k = emin, which gives wrong unmarked results at fp32, fp64 and fp128. Arm a's tests catch it.
+- **The branch it named to merge was arm a's.** It guessed arm a the larger model.
+- **The coin, opened after its report:** the line hashes to the sealed value. **Arm a was Sonnet 5.5 and arm b Opus 5.5.** Every response's model in the agents' transcripts agrees. The guess was wrong.
+
+**E1's verdict, the criteria applied as fixed** (COMPUTED from the above):
+1. **Met.** Sonnet's arm needed 0 send-backs, Opus's 1.
+2. **Met.** VE1-a found M1 to M7 met.
+3. **Not met, by the letter.**
+   - Item 1: 0 cases each.
+   - Item 2: Sonnet's arm has 4 unshared cases and Opus's 3, so Sonnet's count is the larger. All seven are checks with no plant, and none is a wrong answer.
+   - On the substance of item 2 the comparison scored Sonnet's arm higher, 3 to 2.
+   - The lead's reading of the rules' undefined terms ("shares", "in all", "found") was recorded before the comparison reported.
+- **So by the rules as written, Sonnet's parcel did not succeed,** by one minor case on item 2. Both lists went to Logan, as the rules say.
+
+**Time and tokens,** summed from each agent's transcript (the last line of each response; MEASURED), recorded and not deciding:
+
+| | Sonnet's arm | Opus's arm |
+|---|---|---|
+| first run: minutes | 162 | 85 |
+| first run: responses, tool uses | 379, 406 | 189, 248 |
+| first run: output tokens | 576,844 | 398,610 |
+| first run: cache reads | 204.7 M | 100.8 M |
+| later runs | 60 and 5 min, after-end fixes 1 and 2 | 14 min, send-back 1 |
+| all runs: responses, output tokens | 532, 829,548 | 208, 424,957 |
+
+**Logan's decisions** (verbatim, 2026-10-13):
+- **On models:** "Use Sonnet for M1's build parcels as you recommended, it performed well". The lead's recommendation was:
+  - Sonnet authors for exp2, expm1, the log family and program.c parity;
+  - Sonnet verifiers;
+  - Opus for M2's study and for the language and cftc work.
+- **On the merge:** "Lead fixes sentence at merge".
+  - After the comparison, arm a's after-end fixes had to pass before it merged:
+    - plants for its six checks with no plant (076a108, with a check that every check has one);
+    - two false claims in its entry, a round-to-odd paragraph and a count line.
+  - The first re-check, VE1-a2, found one false sentence, fixed in e854615. The second, VE1-a3 on Haiku, found two clauses of that sentence still false.
+  - The rules allow two such cycles, so the merge went to Logan. Arm a merged at b9d96be, the lead restating the two clauses in the merge commit by Logan's waiver of the cap.
+  - Arm b stays as branch m1-exp-b at 5a701ab.
+
+**What the merge brings** (b9d96be):
+- the new files: mathlib.py, its tests, and its harness, budget, family and runs modules;
+- arm a's VALIDATION entry above this one;
+- a dated note in M1's study;
+- 3,622 golden tests: 3,370 plus test_mathlib.py's 252. VERIFICATION's golden row is restated in this commit.
+
+**Known limits:**
+- **n = 1.** One run an arm shows what one Sonnet run did, not a rate.
+- **The third criterion's count favours the arm with fewer checks** (233 tests against 111, at the tips each arm ended at). The comparison's list of cases is its own enumeration, not a census of every check in both arms.
+- **The seal held against the comparison by instruction only:** the lead's ledger names each arm's agent, whose transcript names its model. The comparison's merge choice may carry a position bias, since it ran once.
+- **Each model ran at its own default effort.**
+- **The lead's slips, each recorded in the round's ledger:**
+  - the void first isolation sweep;
+  - a token method that undercounted output, corrected;
+  - a message to a verifier that gave the other arm's sweep count;
+  - a message that counted three timing-only lines where there were seven;
+  - correction 1's wrong premise on fp32;
+  - and the (b)s in the lead's own plan text, above.
+- **Carried to M1's build:**
+  - fp32's fit to the register file: arm a found a reorder to 25 values live, arm b one to 22 to 23, neither built;
+  - the fixed grid's own mark has no behavioural check (VE1-a2);
+  - the pools' lost negative thresholds, which arm a's test_the_pools_lose_their_negative_thresholds pins as they stand. That test must change when the pools are fixed.
