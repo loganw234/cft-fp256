@@ -48,8 +48,9 @@ jobs:
       # gmpy2 brings GNU MPFR, test_mpfr_parity's oracle. Until 2026-10-13
       # this job did not install it, and test_transcend.py then skipped
       # itself whole, so none of its 884 tests ran here. 2.2.1 is the
-      # desktop's. The import step fails the job if gmpy2 does not load,
-      # where test_mpfr_parity would only skip.
+      # desktop's. The import step fails the job if gmpy2 is absent, where
+      # test_mpfr_parity would only skip; a gmpy2 that is there and will
+      # not load fails collection too.
       - run: pip install pytest mpmath gmpy2==2.2.1
       - run: python -c "import gmpy2; print('gmpy2', gmpy2.version(), gmpy2.mpfr_version(), gmpy2.mp_version())"
       - run: python -m pytest python/tests -q

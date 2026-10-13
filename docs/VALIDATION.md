@@ -19284,3 +19284,81 @@ The card results will be the lead's entry.
 - **E1's `edge_pool` holds both signs of all eight n; the pools hold the signed image of the five negative n only.** Whether the signed images of the three positive n (-emax ln2, -(emax + 1) ln2, -(p + 1) ln2) belong in the sets is a design question, not this defect.
 - **The simulation of another mpmath** (above) stands for mpmath 1.4.1 here; CI's golden job, which has 1.4.1, is the measurement, and its 64 warnings should be gone (BELIEVED).
 - **docs/ROADMAP.md** (the lead's) names the old test (`test_the_pools_lose_their_negative_thresholds_and_the_edge_pool_has_them`, around line 6248) as one the pools' fix must change; it is renamed. The remaining `to_man_exp` calls are listed above.
+
+## 2026-10-13 - E1's two task chips, closed: CI's golden job runs test_transcend.py (the lead's fix CG) and the pools hold their signed thresholds at profile 3.1 (parcel PS, Sonnet), merged and gated
+
+**What Logan asked,** verbatim (2026-10-13): "Go ahead and handle the two task chips first before we move on, with a Sonnet parcel and verifier for each. Unless they are very small fixes, in which case you can handle them and utilize a verifier to check".
+
+**How each was sized** (READ, the round's lead ledger):
+- **CI's gap was small:** one install line and one import. The lead fixed it (CG, two entries above), and Sonnet verifiers checked it.
+- **The pools' fix was not:** the transcendental sets it moves are part of the conformance profile's identity. The lead put the choice to Logan, whose answer was "Add signed cases, 3.1 (Recommended)". A Sonnet parcel (PS, the entry above) did it, with Sonnet verifiers.
+
+**The chains** (MEASURED, each verifier's ledger):
+
+| work | author | verifiers: (a), (b) | sent back |
+|---|---|---|---|
+| CG (ad7c409, 0e941dc, df0a18d) | the lead | VCG 0, 1; VCG2 0, 0 | the lead fixed its own (b) |
+| PS (18da8ce, bd98f89, 3c7d834) | Sonnet 5.5 | VPS 0, 1; VPS2 0, 0 | once |
+| the merge (e7ab517) | the lead | VIC 0, 1 | restated here |
+
+- **CG's (b):** a gmpy2 package without its compiled module was caught as absent and skipped, where the commit said a broken gmpy2 fails at collection. Fixed in df0a18d.
+- **PS's (b):** VERIFICATION's wasm row kept profile 3's 832,915 for the 148 sets through the wrappers, which include the twenty transcendental sets; 836,415 at 3.1. Fixed in 3c7d834, with one sentence restated in VPS's words.
+- **The merge's (b),** in its message: "verified by verifier-VPS ... and verifier-VPS2 ... on 3c7d834". VPS verified bd98f89 (no (a), one (b)); VPS2 verified 3c7d834 (no (a), no (b)). The message stands as written.
+- **What VIC measured:**
+  - Outside the three conflicted records, the merge's diff from main equals PS's own diff byte for byte.
+  - python/tests collects 3,672 with gmpy2 and without it.
+  - test_transcend.py, test_mathlib.py and test_pool_signs.py pass both ways: with gmpy2, 1,186 passed; without, 1,170 passed and test_mpfr_parity's 16 skipped. Without gmpy2, the same outcomes held under mpmath 1.4.1, in WSL cft2204 (Python 3.10).
+
+**Time and tokens** (MEASURED, the agents' transcripts: span, tool uses, output tokens; usage summed from the last line of each response):
+- PS's author, claude-sonnet-5-5: 83 min to its report, then 7 min for the send-back; 398 tool uses; 380,086 output tokens.
+- VCG, claude-sonnet-5-5: 34 min, 146 tool uses, 189,539.
+- VCG2, claude-sonnet-5-5: 34 min, 128 tool uses, 201,459.
+- VPS, claude-sonnet-5-5: 91 min, 264 tool uses, 341,740.
+- VPS2, claude-sonnet-5-5: 28 min, 132 tool uses, 159,822.
+- VIC, claude-sonnet-5-5: 32 min, 142 tool uses, 190,204.
+
+**The merge** (e7ab517, parents df0a18d and 3c7d834). Three files conflicted, all records:
+- this file is df0a18d's with PS's entry appended, a pure append;
+- VERIFICATION's golden row is PS's with CG's clause applied, each side held to the base row by script;
+- docs/README.md is recounted.
+
+**The gate** (MEASURED, amd-arc-box at e7ab517, run 20261013-093630-e7ab517, niced, the pinned MPFR 4.2.2 copied in; the box's python3, which the runner uses, is 3.12.3 with mpmath 1.4.1 and gmpy2 2.3.1): "VERDICT: PASS with 8 skip(s) and 4 inner skip(s) in golden (3), remote (1)", in 155 min.
+- **The 8 skips are the box's usual:** buildargs (a real Vitis), lang-rust, lang-julia, lang-go, lang-csharp, lang-r, lang-fortran and demos (no toolchain or node).
+- **The inner skips:** golden's 3 known, and remote's WebSocket leg (no node).
+- **The figures PS predicted, each now measured:**
+  - golden: "3669 passed, 3 skipped in 1053.45s (0:17:33)";
+  - vectors: "names all 168 sets vectors/SHA256SUMS names, and all 168 it names hold";
+  - libcft: "168 sets, 1228415 cases, all matching";
+  - transcend: "610717 comparisons over 39 functions, C == model on every one", then 584,477 through the escalation path, each 3,500 more than E1's gate at ff33abd gave (607,217 and 580,977): 25 signed images, 7 functions, 5 attributes, 4 formats (COMPUTED);
+  - audit: "17883 checks, 0 failed, 0 skipped";
+  - the corpus check: "311 checks, 0 failed, 0 skipped".
+
+**CI** (READ, the golden job's log of each run):
+- on branch ci-golden at ad7c409, run 38403047778: "3620 passed, 2 skipped, 64 warnings in 802.56s (0:13:22)";
+- on main at df0a18d, run 38415791987: "3620 passed, 2 skipped, 64 warnings in 1007.53s (0:16:47)".
+- The 64 are mpmath 1.4.1's deprecation of `to_man_exp`'s unsigned default, from the old pool generators. PS takes the generators off it, and verifier-VPS measured the warnings gone under mpmath 1.4.1 (WSL cft2204).
+
+**Known limits carried** (each a verifier's "other" note, merged under Logan's rule):
+- **The WebAssembly page's text states profile 3's counts** until the page is rebuilt: bindings/wasm/page_template.html, the built conformance.html, build.sh's comment, and bindings/wasm/README.md (two places). Its module is unchanged. That it replays the 3.1 sets is BELIEVED, since libcft, built from the same sources, does; the wasm and node stages, which the gate budget leaves out, run in CI's host job after the push.
+- **CG's entry, pushed, keeps four wordings** (VCG2):
+  - "a later mpmath reaches CI unannounced", where 1.4.1 already announces the change (VCG2's words: "with no pin to hold it");
+  - :700 beside :705, and 15.17 s beside 15.97 s, for runs on ad7c409's content and on df0a18d's;
+  - "about 100 s" for a spread of three runs (consecutive runs differ by 36.8 s and 67.0 s);
+  - the signed-default prediction unmarked, since measured by VCG2's simulation and by VPS under mpmath 1.4.1.
+- **gates.yml's comment** now says what the import step catches and what collection catches (VCG2's N1). Two ways past the test file's comment remain (N6):
+  - an extension built for another interpreter's ABI reads as absent;
+  - a hand-raised ModuleNotFoundError without a name errors.
+- **PS's records** (VPS and VPS2):
+  - CONFORMANCE.md infers that mpmath means to return the mantissa signed, where mpmath 1.4.1 only deprecates the unsigned default;
+  - edge_pool's docstring keeps E1's "exp's overflow" for exp(+708.39...), which is finite;
+  - its entry says mpmath 1.4.1 is not installed here, and WSL cft2204 has it;
+  - the pool generators still leave mpmath's global precision set, as before;
+  - gen_2opi.py and gen_mp_consts.py will print the deprecation under mpmath 1.4;
+  - VERIFICATION's "none lost" is loose by one renamed test;
+  - its 3c7d834 message names three of the six hyperbolic functions;
+  - E1's pushed entry still says exp's underflow edge "was never in the pools or the vector sets", unrestricted.
+- **CONFORMANCE.md's rule** gained "more cases in a set it already has" among a minor step's examples, a clarification of the rule's text (VPS).
+- **Without gmpy2,** test_mathlib.py's fp256 budget test takes 136 s, against 2.7 s with it (VIC). CI's golden job has gmpy2.
+- **The remote branch ci-golden** (ad7c409), pushed for CI's own run, is left for Logan to keep or delete.
+
+**Records:** ROADMAP's plan marks the pools' task done; gates.yml's comment; VERIFICATION's golden row; docs/README.md recounted; the docs check rc 0.

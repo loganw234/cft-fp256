@@ -6244,9 +6244,15 @@ record).
   - fp32's fit to the register file: each arm found a reorder that fits,
     at 22 to 25 values live;
   - the pools' lost negative n ln2 thresholds, a task of its own. Arm
-    a's tests pin them as they stand: its
+    a's tests pinned them as they stood: its
     test_the_pools_lose_their_negative_thresholds_and_the_edge_pool_has_them
-    fails when the pools are fixed, and that task must change it.
+    failed when the pools were fixed, and that task changed it. Done on
+    2026-10-13 by parcel PS, merged at e7ab517: the pools hold the
+    signed thresholds beside their old images, the twenty published
+    transcendental sets gained 3,500 cases, and the profile stepped to
+    3.1 (Logan: "Add signed cases, 3.1 (Recommended)"). Arm a's test is
+    now
+    test_the_pools_and_edge_pool_hold_both_signs_of_each_negative_threshold.
 
 **Checked.** Verifier-P7 checked this plan on 2026-10-12: no
 regression, and two wrong statements (cftc's version 5 credited to
