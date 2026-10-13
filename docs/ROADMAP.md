@@ -5992,14 +5992,15 @@ this level?** Logan's instruction, above.
   It sees no test, bound or plant: those are the verifiers', the box's
   and the comparison's.
 - **The rules for E1's verdict.** They were fixed before dispatch
-  (4ad5cea, 15:00) and revised after it: at 15:48 and 16:14, before
-  either arm reported, on verifier-P7b's and verifier-P7c's notes; at
-  16:38 and 17:30, on verifier-P7d's and verifier-P7e's notes: at
-  16:38, after one arm had committed (16:27) and before the other
-  (17:25); at 17:30, after both; at neither time had a verifier of an
-  arm reported. Logan answered the 15:48 revision, the count on items 1
-  and 2: "Keep the more fair rule you went with". The later ones
-  settle how it is counted, and go to him with E1's result.
+  (4ad5cea, 15:00) and revised after it on the plan's re-checks,
+  verifier-P7b's to verifier-P7h's notes, each revision dated by its
+  commit: at 15:48 and 16:14, before either arm had committed; at
+  16:40, after one arm's commit (16:27); at 17:31, 17:50 and 18:14, and
+  at the commit that follows P7h, after both arms' first commits (16:27
+  and 17:25). No verifier of an arm had reported at any of them. Logan
+  answered the 15:48 revision, the count on items 1 and 2: "Keep the
+  more fair rule you went with". The later ones settle how it is
+  counted, and go to him with E1's result.
   - **A failure** is an (a) or a (b) by Logan's rule, found by anyone
     and confirmed by the lead, and it counts from that confirmation: a
     regression, a false claim, a test that cannot fail, or a test,
@@ -6008,12 +6009,13 @@ this level?** Logan's instruction, above.
     bound that fails or is stated by a sample where the brief asks for
     the budget - or on item 2, a check that no plant makes fail.
   - **An arm's chain** is its first check and at most two re-checks,
-    each after a send-back (the cap). A failure found before the arm
-    ends belongs to the check running then, or to the next if none is,
-    and a check does not end while a candidate found during it is
-    unruled. A check with no failure ends the arm clean. A check with
-    one sends the arm back, but at the second re-check it ends the arm
-    not clean.
+    each after a send-back (the cap). A failure confirmed before the
+    arm ends belongs to the check running at its confirmation, or to
+    the next if none is; and a check does not end while any candidate
+    found since the arm began is unruled, that is, not yet confirmed or
+    rejected by the lead. A check with no failure ends the arm clean. A
+    check with one sends the arm back, but at the second re-check it
+    ends the arm not clean.
   - **After an arm ends,** a failure found is counted for the third
     criterion if it is a case. An arm that ended clean then merges only
     once its author has fixed it and a narrow re-check - a verifier on
@@ -6055,7 +6057,8 @@ this level?** Logan's instruction, above.
   shows what one Sonnet run did, not a rate.
 - **What follows.**
   - An arm is clean for the merge when it ended clean and carries no
-    failure that has not passed a clean narrow re-check. If both are,
+    failure found after its end that has not passed a clean narrow
+    re-check. If both are,
     the branch the comparison names merges;
     if it calls them equal, the arm with fewer of the third criterion's
     cases in all, then fewer send-backs, then arm a. If one is, that one. If
@@ -6214,8 +6217,12 @@ re-checked that (3c0cd40): two wrong statements in the lead's new
 text - criterion 2's must-haves said all restated by brief correction
 1, which restates M2, M3 and M4, and the 16:38 revision said to
 follow both arms' commits - restated above. Verifier-P7g re-checked
-that (c7ea3cf): one wrong answer, M4 left out of criterion 2's
-restated items, restated above in its words. The round holds when E1
+that (c7ea3cf): one finding, labelled (a) and (b), M4 left out of
+criterion 2's restated items, restated above in its words.
+Verifier-P7h re-checked that (a7ad7c2): two, both in clauses the lead
+had added - a merge sentence that held every arm sent back once
+unclean, and a candidate rule that let one found between checks slip
+past the chain - restated above in its words. The round holds when E1
 finishes.
 
 ## The adoption story these serve
