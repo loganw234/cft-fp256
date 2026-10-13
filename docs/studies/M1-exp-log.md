@@ -10,6 +10,16 @@ Logan, before phase 2 builds it. This file, the model under
 `docs/studies/m1/` and this file's row in docs/README.md are the only
 changes the study made.
 
+**A note of 2026-10-12** (parcel E1, the math library's round; the study's
+text is as of 2026-10-05 and stays so). exp's fragment is now built:
+`python/cft_golden/mathlib.py` builds it at fp32 (triple word, G = 40),
+fp64 (G = 44), fp128 and fp256 (G = 46) under every attribute, and
+`python/tests/test_mathlib.py` holds it to section 8's items 1 to 5
+(docs/VALIDATION.md, the entry of that date). So "nothing here is built" and
+"no routine is in the golden model" hold of the other five routines only,
+and of cftc, the language and program.c, which are as the study describes
+them.
+
 **Revised the same day,** after verifier-VM1 checked the first version
 (5b6de0d; the round's ledger, `verifier-VM1.md`). That check found one
 defect: log1p's r = x path ran its polynomial past the bound's rho, and
