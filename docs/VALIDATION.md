@@ -19197,16 +19197,18 @@ The card results will be the lead's entry.
 **What was wrong** (READ and MEASURED):
 - **CI's golden job** (.github/workflows/gates.yml) installed pytest and mpmath, then ran `python -m pytest python/tests -q`. It installed nothing else in any version of the workflow before this fix: verifier-VIE1d read the job's two lines unchanged in all thirteen, 644ee2d (2026-08-28) to 5246ad0 (2026-09-25), the last before bcf36ac.
 - **test_transcend.py** opened its section 4 with `gmpy2 = pytest.importorskip("gmpy2", reason="gmpy2/MPFR not installed")` at line 608, there since the file was created (788708b, 2026-09-02; VIE1d). A module-level importorskip skips the module whole at collection. So on a host without gmpy2 none of the file's 884 tests ran, though only one test calls MPFR: test_mpfr_parity, 16 cases (four formats, four attributes).
-- **test_mathlib.py** imports `_brute_pool` from it. Since E1's merge (b9d96be), 77 of its 252 tests skipped by name on such a host (verifier-VIE1, MEASURED).
+- **test_mathlib.py's tests reach it too:** mathlib_harness.py's `pools()` imports `_brute_pool` from it. Since E1's merge (b9d96be), 77 of test_mathlib.py's 252 tests skipped by name on such a host (verifier-VIE1, MEASURED).
 - **CI's logs show both** (READ, the golden job's log of each run, through `gh api repos/loganw234/cft-fp256/actions/jobs/<id>/logs`):
   - run 38305163767 at 0893b2c: "2484 passed, 3 skipped in 681.08s (0:11:21)";
   - run 38399252055 at bcf36ac: "2659 passed, 80 skipped in 614.05s (0:10:14)".
   - COMPUTED, the 80: test_mathlib.py's 77, the two tests that need the Arduino loopback binary, and test_transcend.py's module, counted once. 2,659 + 80 = 2,739, the 2,738 tests collected without gmpy2 plus the module. The desktop's third skip, test_softfloat.py's math.fma test, needs Python 3.13+, which CI runs.
 - **Found** by the math library round's verifiers: VIE1 the 77, VIE1c the module's skip and the 2,738. VIE1d confirmed "never" from the histories of the workflow and of the line, and from CI's logs.
 
-**The fix** (ad7c409, branch ci-golden):
-- **test_transcend.py:** gmpy2 is imported in a try block that catches ModuleNotFoundError only. Without it, test_mpfr_parity skips by name, with the old reason, and nothing else does.
-  - ModuleNotFoundError is what a missing package raises. pytest 9.1.1's importorskip skipped on it and failed on a plain ImportError (MEASURED: the lead's first probe raised ImportError, and bcf36ac's collection ended with an error, not a skip). So a gmpy2 that is installed but does not load still fails at collection, as it did.
+**The fix** (ad7c409, branch ci-golden; its import made strict after verifier-VCG, in the commit that restates this entry):
+- **test_transcend.py:** gmpy2 is imported in a try block. Without it, test_mpfr_parity skips by name, with the old reason, and nothing else does.
+  - The except clause catches ModuleNotFoundError, which is what a missing package raises. pytest 9.1.1's importorskip skipped on it and failed on a plain ImportError (MEASURED: the lead's first probe raised ImportError, and bcf36ac's collection ended with an error, not a skip).
+  - **verifier-VCG's (b):** at ad7c409 the clause caught every ModuleNotFoundError. So a gmpy2 package whose compiled module is missing, which raises `No module named 'gmpy2.gmpy2'`, skipped test_mpfr_parity, where ad7c409's message and its comment said a broken gmpy2 still fails at collection. VCG reproduced it with a fake package, and with the desktop's Python 3.13.5 importing Miniconda's 3.12 gmpy2. bcf36ac skipped the whole module in that case.
+  - **Since the restating commit,** the clause re-raises unless the module missing is gmpy2 itself. MEASURED, collecting test_transcend.py with gmpy2 present, absent, raising a plain ImportError, and as a package without its compiled module: 884, 884, an error and an error (rc 0, 0, 2 and 2). Run: present "884 passed in 15.97s"; absent "868 passed, 16 skipped in 29.26s", the 16 "SKIPPED [16] python\tests\test_transcend.py:705: gmpy2/MPFR not installed".
 - **gates.yml's golden job:** installs `gmpy2==2.2.1` beside pytest and mpmath, then imports it in a step of its own that prints gmpy2's, MPFR's and GMP's versions. A gmpy2 that does not load fails the job there, where test_mpfr_parity would only skip.
   - 2.2.1 is the desktop's, with MPFR 4.2.1 and GMP 6.3.0 (MEASURED).
   - PyPI lists gmpy2-2.2.1-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (READ, PyPI's JSON for the release), so the job builds nothing.
@@ -19223,12 +19225,21 @@ The card results will be the lead's entry.
   - with gmpy2: "3619 passed, 3 skipped in 360.15s", the usual three (two need the Arduino loopback binary, one math.fma);
   - blocked: "3603 passed, 19 skipped in 514.70s", the three and "SKIPPED [16] python\tests\test_transcend.py:700: gmpy2/MPFR not installed".
   - Both ran while parcel PS worked on the desktop, so their times are of a loaded machine.
-- **test_transcend.py alone, serially,** with gmpy2: "884 passed in 15.17s". CI's golden job is serial, and this adds little to its time.
+- **test_transcend.py alone, serially,** with gmpy2: "884 passed in 15.17s". That file adds little to CI's golden job, which is serial. The job grew by 188.5 s, from 614.05 s at bcf36ac to 802.56 s at ad7c409, about 31%, mostly from test_mathlib.py's 77, which no longer skip. By verifier-VCG's estimates they are about 151 s of the desktop's test time, and CI's runs vary by about 100 s from one to the next.
 - **CI on the branch** (READ, run 38403047778 at ad7c409, its golden job 115315347940's log): CPython 3.13.16; pip took gmpy2 from gmpy2-2.2.1-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl, with mpmath 1.4.1 and pytest 9.1.1; the import step printed "gmpy2 2.2.1 MPFR 4.2.1 GMP 6.3.0"; and the suite "3620 passed, 2 skipped, 64 warnings in 802.56s (0:13:22)", all 3,622, the two skips being the Arduino loopback pair. The lead then cancelled the run's host and rtl jobs, whose steps run nothing the commit changed.
 
 **Known limits:**
 - **CI's versions are not the desktop's.** mpmath is not pinned on CI (1.4.1 there, 1.3.0 on the desktop), and CI runs Python 3.13 where the desktop runs 3.12.9. The tests now enabled first met those versions in the branch's CI run, and passed; a later mpmath reaches CI unannounced.
 - **test_mpfr_parity runs only where gmpy2 is installed:** the desktop, amd-arc-box and now CI. Elsewhere it skips by name, and verify/run.sh's golden stage names it as an inner skip.
 - **The host job's gmpy2 stays unpinned,** as it was.
+- **CI's 64 warnings** (READ, the branch run's warnings summary): "tests/test_mathlib.py: 64 warnings", mpmath 1.4.1's "DeprecationWarning: Returning unsigned mantissa value per default is deprecated.  Please adapt your code to use signed=True (return a signed mantissa)."
+  - They come from the pools' generators' calls of `to_man_exp`, which test_mathlib.py reaches: 8 n, 4 formats, 2 sites (verifier-VCG, COMPUTED).
+  - Under an mpmath whose default is signed, the old generators' sign test would start giving the signed images, and the published sets would move with mpmath's version. test_mathlib.py's pin of the pools' bug would fail too.
+  - Parcel PS, which fixes the pools, takes the generators off `to_man_exp` (its brief correction 1).
+- **CI's pytest step has no `-rs`,** so a skip there shows only as a count (verifier-VCG). The import step leaves test_mpfr_parity no way to skip there.
+- **The commit messages stand as written:**
+  - ad7c409's says a broken gmpy2 still fails at collection, which was not true of one missing its compiled module (above);
+  - it says "pytest 9's importorskip", where the default changed in 9.1 (VCG, from pytest's source);
+  - it and 0e941dc's say test_mathlib.py's 77 import `_brute_pool`, where mathlib_harness.py does.
 
-**Records:** VERIFICATION's golden row; docs/README.md recounted; the docs check rc 0.
+**Records:** VERIFICATION's golden row; gates.yml's header rewrapped at the comments' width (VCG's note); docs/README.md recounted; the docs check rc 0.

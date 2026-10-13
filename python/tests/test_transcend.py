@@ -609,10 +609,15 @@ def test_brute_force_enclosure_agrees(fmt, rnd):
 # 2026-10-13 this was a module-level importorskip, which skips a module
 # whole at collection: on a host without gmpy2, CI's golden job among
 # them, none of this file's 884 tests ran, nor the 77 of test_mathlib.py
-# that import _brute_pool from it.
+# that reach _brute_pool through mathlib_harness.py. Only gmpy2's own
+# absence skips: a gmpy2 that is installed but will not load still fails
+# here, whether as an ImportError or as a ModuleNotFoundError naming a
+# part of it (its compiled module, gmpy2.gmpy2).
 try:
     import gmpy2
-except ModuleNotFoundError:     # not installed; a broken one still fails
+except ModuleNotFoundError as _e:
+    if _e.name != "gmpy2":
+        raise
     gmpy2 = None
 
 
