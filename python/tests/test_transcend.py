@@ -605,7 +605,15 @@ def test_brute_force_enclosure_agrees(fmt, rnd):
 # 4. GNU MPFR, when it is here
 # =====================================================================
 
-gmpy2 = pytest.importorskip("gmpy2", reason="gmpy2/MPFR not installed")
+# Only test_mpfr_parity calls MPFR, so only it skips without gmpy2. Until
+# 2026-10-13 this was a module-level importorskip, which skips a module
+# whole at collection: on a host without gmpy2, CI's golden job among
+# them, none of this file's 884 tests ran, nor the 77 of test_mathlib.py
+# that import _brute_pool from it.
+try:
+    import gmpy2
+except ModuleNotFoundError:     # not installed; a broken one still fails
+    gmpy2 = None
 
 
 def _mpfr_round(fmt, fn, rnd, xa, xb):
@@ -689,6 +697,7 @@ MPFR_BOUND = ("exp", "expm1", "exp2", "log", "log1p", "log2", "log10",
               "asinh", "acosh", "atanh", "exp10", "rsqrt")
 
 
+@pytest.mark.skipif(gmpy2 is None, reason="gmpy2/MPFR not installed")
 @pytest.mark.parametrize("fmt", ALL)
 @pytest.mark.parametrize("rnd", (RND_RNE, RND_RTZ, RND_RDN, RND_RUP))
 def test_mpfr_parity(fmt, rnd):

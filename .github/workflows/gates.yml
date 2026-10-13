@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # The gates. Job one proves the golden model against arbiters that
-# share no code with it (native binary64, math.fma, mpmath, and the
-# hand-written IEEE 754 anchors). Job two proves the RTL against the
+# share no code with it (native binary64, math.fma, mpmath, GNU MPFR
+# through gmpy2, and the hand-written IEEE 754 anchors). Job two proves the RTL against the
 # golden model, streamed, plus the full kernel through AXI. Job three
 # elaborates every RTL file in Yosys, which is what keeps the open-core
 # port a wrapper rather than a fork. Job four
@@ -44,7 +44,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - run: pip install pytest mpmath
+      # gmpy2 brings GNU MPFR, test_mpfr_parity's oracle. Until 2026-10-13
+      # this job did not install it, and test_transcend.py then skipped
+      # itself whole, so none of its 884 tests ran here. 2.2.1 is the
+      # desktop's. The import step fails the job if gmpy2 does not load,
+      # where test_mpfr_parity would only skip.
+      - run: pip install pytest mpmath gmpy2==2.2.1
+      - run: python -c "import gmpy2; print('gmpy2', gmpy2.version(), gmpy2.mpfr_version(), gmpy2.mp_version())"
       - run: python -m pytest python/tests -q
 
   rtl:
