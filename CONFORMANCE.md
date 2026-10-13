@@ -347,9 +347,10 @@ Conformance is scored, not read.
     default, and tested its sign, so it held +|n| ln2 where -|n| ln2 was
     meant. exp's underflow edges, emin ln2 (where the result passes below
     the smallest normal) and (emin - p) ln2 (where it passes below half
-    the smallest subnormal), were in no pool and in no published set, at
-    any profile through 3. The math library's first routine (parcel E1)
-    found it on 2026-10-12.
+    the smallest subnormal), were in no exp-family pool (exp, expm1,
+    exp2, log, log1p, log2, log10) and in none of those functions'
+    published sets, at any profile through 3. The math library's first
+    routine (parcel E1) found it on 2026-10-12.
   - **The sets no longer depend on mpmath's version.** mpmath 1.4
     deprecates that unsigned default (it means to return the mantissa
     signed), and under such an mpmath the old tests of its sign would have

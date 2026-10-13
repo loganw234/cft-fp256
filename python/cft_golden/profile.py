@@ -41,15 +41,17 @@ changes no recorded case and no accepted image. The transcendental test
 pools lost the sign of every negative threshold n ln2 (vectors.py and
 host/tests/transcend_check.py took the mantissa from mpmath's to_man_exp,
 which is unsigned by default, and tested its sign), so exp's underflow
-edges were in no pool and no published set. Each of the 20 transcendental
-sets gains the 25 signed images of the five negative n for each of the
-seven functions that read the pool (exp, expm1, exp2, log, log1p, log2,
-log10): 175 cases a set, 3,500 in all, and 1,068,915 cases become
-1,072,415. Every recorded case, every other set and the model keep their
-bits (parcel PS; Logan's decision of 2026-10-13). A profile-3 certificate
-stays covered. The pool generators read the mpf's raw tuple now and call
-to_man_exp nowhere: mpmath 1.4 deprecates its unsigned default, and the
-sets must not change with the version of mpmath that makes them.
+edges were in no exp-family pool (exp, expm1, exp2, log, log1p, log2,
+log10) and in none of those functions' published sets. Each of the 20
+transcendental sets gains the 25 signed images of the five negative n
+for each of the seven functions that read the pool (exp, expm1, exp2,
+log, log1p, log2, log10): 175 cases a set, 3,500 in all, and 1,068,915
+cases become 1,072,415. Every recorded case, every other set and the
+model keep their bits (parcel PS; Logan's decision of 2026-10-13). A
+profile-3 certificate stays covered. The pool generators read the mpf's
+raw tuple now and call to_man_exp nowhere: mpmath 1.4 deprecates its
+unsigned default, and the sets must not change with the version of
+mpmath that makes them.
 """
 
 # (major, minor): spelt "3", or "3.1" once a minor step is taken

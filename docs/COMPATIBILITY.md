@@ -990,15 +990,17 @@ are the profile's business, and the profile steps from 2 to 3, with
 The pools the published transcendental sets are made from held the
 exponential's negative thresholds n ln2 as their positive images only,
 because they took the mantissa from mpmath's `to_man_exp`, which is
-unsigned by default: exp's underflow edges were in no set. 3,500 cases
-joined the sets, the signed images, and none moved (CONFORMANCE.md,
-"Versioning"). The generators read the mpf's raw tuple now, whose
-mantissa is unsigned in every mpmath, and call `to_man_exp` nowhere
-(mpmath 1.4 deprecates its unsigned default), so the sets do not change
-with the version of mpmath that makes them. No library code changed, so
-no call gained or lost a meaning and the ABI stays at 0.18, by the rule
-the sections above state. The profile steps from 3 to 3.1, a minor step,
-with `CFT_PROFILE_MINOR`.
+unsigned by default: exp's underflow edges were in no exp-family pool
+(exp, expm1, exp2, log, log1p, log2, log10) and in none of those
+functions' published sets. 3,500 cases joined the sets, the signed
+images, and none moved (CONFORMANCE.md, "Versioning"). The generators
+read the mpf's raw tuple now, whose mantissa is unsigned in every
+mpmath, and call `to_man_exp` nowhere (mpmath 1.4 deprecates its
+unsigned default), so the sets do not change with the version of mpmath
+that makes them. No library code changed, so no call gained or lost a
+meaning and the ABI stays at 0.18, by the rule the sections above
+state. The profile steps from 3 to 3.1, a minor step, with
+`CFT_PROFILE_MINOR`.
 
 | surface | status at profile 3.1 |
 |---|---|

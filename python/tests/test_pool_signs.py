@@ -12,7 +12,8 @@ sign of each of the five: they took the mantissa from mpmath.libmp.to_man_exp,
 which returns it UNSIGNED by default (mpmath 1.3; 1.4 deprecates that
 default), and tested its sign, which is never negative. They held +|n| ln2
 where -|n| ln2 was meant, so exp's underflow edges (emin ln2 and (emin - p)
-ln2 among them) were in no pool and in no published set.
+ln2 among them) were in no exp-family pool (exp, expm1, exp2, log, log1p,
+log2, log10) and in none of those functions' published sets.
 
 Profile 3.1 adds the 25 signed images to each pool and keeps every image the
 pools held, so no recorded case moves; and the four generators (the two unary
