@@ -19191,3 +19191,44 @@ The card results will be the lead's entry.
   - the fixed grid's own mark has no behavioural check (VE1-a2);
   - the pools' lost negative thresholds, which arm a's test_the_pools_lose_their_negative_thresholds_and_the_edge_pool_has_them pins as they stand. That test must change when the pools are fixed.
 - **On a host without gmpy2,** as CI's golden job is, 77 of test_mathlib.py's 252 tests skip by name, through `from test_transcend import _brute_pool` (verifier-VIE1, MEASURED with gmpy2 blocked: 175 passed, 77 skipped). On such a host test_transcend.py is skipped whole at collection, by its module-level importorskip of gmpy2 (line 608), so python/tests collects 2,738 of the 3,622 (verifier-VIE1c, MEASURED): CI's golden job has never run test_transcend.py's 884 tests, a gap older than E1 and a task of its own. d3434df's message says the collected 3,622 is the same on any host, which is false. The golden passed counts above (311 and 3,619) were measured on hosts with gmpy2, the desktop and amd-arc-box.
+
+## 2026-10-13 - CI's golden job runs test_transcend.py: its gmpy2 skip narrowed to the one test that calls MPFR, and the job installs gmpy2 2.2.1 (the lead's fix CG)
+
+**What was wrong** (READ and MEASURED):
+- **CI's golden job** (.github/workflows/gates.yml) installed pytest and mpmath, then ran `python -m pytest python/tests -q`. It installed nothing else in any version of the workflow before this fix: verifier-VIE1d read the job's two lines unchanged in all thirteen, 644ee2d (2026-08-28) to 5246ad0 (2026-09-25), the last before bcf36ac.
+- **test_transcend.py** opened its section 4 with `gmpy2 = pytest.importorskip("gmpy2", reason="gmpy2/MPFR not installed")` at line 608, there since the file was created (788708b, 2026-09-02; VIE1d). A module-level importorskip skips the module whole at collection. So on a host without gmpy2 none of the file's 884 tests ran, though only one test calls MPFR: test_mpfr_parity, 16 cases (four formats, four attributes).
+- **test_mathlib.py** imports `_brute_pool` from it. Since E1's merge (b9d96be), 77 of its 252 tests skipped by name on such a host (verifier-VIE1, MEASURED).
+- **CI's logs show both** (READ, the golden job's log of each run, through `gh api repos/loganw234/cft-fp256/actions/jobs/<id>/logs`):
+  - run 38305163767 at 0893b2c: "2484 passed, 3 skipped in 681.08s (0:11:21)";
+  - run 38399252055 at bcf36ac: "2659 passed, 80 skipped in 614.05s (0:10:14)".
+  - COMPUTED, the 80: test_mathlib.py's 77, the two tests that need the Arduino loopback binary, and test_transcend.py's module, counted once. 2,659 + 80 = 2,739, the 2,738 tests collected without gmpy2 plus the module. The desktop's third skip, test_softfloat.py's math.fma test, needs Python 3.13+, which CI runs.
+- **Found** by the math library round's verifiers: VIE1 the 77, VIE1c the module's skip and the 2,738. VIE1d confirmed "never" from the histories of the workflow and of the line, and from CI's logs.
+
+**The fix** (ad7c409, branch ci-golden):
+- **test_transcend.py:** gmpy2 is imported in a try block that catches ModuleNotFoundError only. Without it, test_mpfr_parity skips by name, with the old reason, and nothing else does.
+  - ModuleNotFoundError is what a missing package raises. pytest 9.1.1's importorskip skipped on it and failed on a plain ImportError (MEASURED: the lead's first probe raised ImportError, and bcf36ac's collection ended with an error, not a skip). So a gmpy2 that is installed but does not load still fails at collection, as it did.
+- **gates.yml's golden job:** installs `gmpy2==2.2.1` beside pytest and mpmath, then imports it in a step of its own that prints gmpy2's, MPFR's and GMP's versions. A gmpy2 that does not load fails the job there, where test_mpfr_parity would only skip.
+  - 2.2.1 is the desktop's, with MPFR 4.2.1 and GMP 6.3.0 (MEASURED).
+  - PyPI lists gmpy2-2.2.1-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (READ, PyPI's JSON for the release), so the job builds nothing.
+  - The latest gmpy2 is 2.3.2 (READ). With the pin, CI's MPFR is the desktop's; moving it is a change of its own.
+- **Why both halves:**
+  - Installing gmpy2 alone would have left every other host without it skipping 868 tests that need no MPFR, and test_mathlib.py's 77.
+  - Narrowing the skip alone would have left test_mpfr_parity unrun on CI.
+
+**What was run** (MEASURED):
+- **Collection of python/tests on the desktop** (Python 3.12.9, pytest 9.1.1, mpmath 1.3.0, gmpy2 2.2.1), with gmpy2 blocked by a scratch sitecustomize.py that raises ModuleNotFoundError for it, first on PYTHONPATH:
+  - at bcf36ac: 3,622 with gmpy2; 2,738 blocked, with "SKIPPED [1] python\tests\test_transcend.py:608: gmpy2/MPFR not installed";
+  - at the fix: 3,622 both ways.
+- **The suite at `-n 4`,** niced, on the fix's content:
+  - with gmpy2: "3619 passed, 3 skipped in 360.15s", the usual three (two need the Arduino loopback binary, one math.fma);
+  - blocked: "3603 passed, 19 skipped in 514.70s", the three and "SKIPPED [16] python\tests\test_transcend.py:700: gmpy2/MPFR not installed".
+  - Both ran while parcel PS worked on the desktop, so their times are of a loaded machine.
+- **test_transcend.py alone, serially,** with gmpy2: "884 passed in 15.17s". CI's golden job is serial, and this adds little to its time.
+- **CI on the branch** (READ, run 38403047778 at ad7c409, its golden job 115315347940's log): CPython 3.13.16; pip took gmpy2 from gmpy2-2.2.1-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl, with mpmath 1.4.1 and pytest 9.1.1; the import step printed "gmpy2 2.2.1 MPFR 4.2.1 GMP 6.3.0"; and the suite "3620 passed, 2 skipped, 64 warnings in 802.56s (0:13:22)", all 3,622, the two skips being the Arduino loopback pair. The lead then cancelled the run's host and rtl jobs, whose steps run nothing the commit changed.
+
+**Known limits:**
+- **CI's versions are not the desktop's.** mpmath is not pinned on CI (1.4.1 there, 1.3.0 on the desktop), and CI runs Python 3.13 where the desktop runs 3.12.9. The tests now enabled first met those versions in the branch's CI run, and passed; a later mpmath reaches CI unannounced.
+- **test_mpfr_parity runs only where gmpy2 is installed:** the desktop, amd-arc-box and now CI. Elsewhere it skips by name, and verify/run.sh's golden stage names it as an inner skip.
+- **The host job's gmpy2 stays unpinned,** as it was.
+
+**Records:** VERIFICATION's golden row; docs/README.md recounted; the docs check rc 0.
