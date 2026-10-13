@@ -19325,13 +19325,13 @@ The card results will be the lead's entry.
 **The gate** (MEASURED, amd-arc-box at e7ab517, run 20261013-093630-e7ab517, niced, the pinned MPFR 4.2.2 copied in; the box's python3, which the runner uses, is 3.12.3 with mpmath 1.4.1 and gmpy2 2.3.1): "VERDICT: PASS with 8 skip(s) and 4 inner skip(s) in golden (3), remote (1)", in 155 min.
 - **The 8 skips are the box's usual:** buildargs (a real Vitis), lang-rust, lang-julia, lang-go, lang-csharp, lang-r, lang-fortran and demos (no toolchain or node).
 - **The inner skips:** golden's 3 known, and remote's WebSocket leg (no node).
-- **The figures PS predicted, each now measured:**
-  - golden: "3669 passed, 3 skipped in 1053.45s (0:17:33)";
-  - vectors: "names all 168 sets vectors/SHA256SUMS names, and all 168 it names hold";
-  - libcft: "168 sets, 1228415 cases, all matching";
-  - transcend: "610717 comparisons over 39 functions, C == model on every one", then 584,477 through the escalation path, each 3,500 more than E1's gate at ff33abd gave (607,217 and 580,977): 25 signed images, 7 functions, 5 attributes, 4 formats (COMPUTED);
-  - audit: "17883 checks, 0 failed, 0 skipped";
-  - the corpus check: "311 checks, 0 failed, 0 skipped".
+- **The figures handed to the gate budget, each now measured** (verifier-VIC2's words, with the logs' lines):
+  - golden 3,669 with the 3 skips (PS): "3669 passed, 3 skipped in 1053.45s (0:17:33)";
+  - the vectors census 1,228,415 (PS), which the gate shows only in libcft's line; the vectors stage's own line is "names all 168 sets vectors/SHA256SUMS names, and all 168 it names hold";
+  - libcft `168 sets, 1228415 cases` at the runner's counts (verifier-VPS; PS's own COMPUTED line, 1072415, was `make vectors`' count): "168 sets, 1228415 cases, all matching";
+  - transcend 610,717 and 584,477 (the lead's COMPUTED: each 3,500 more than E1's gate at ff33abd gave, 607,217 and 580,977, for 25 signed images, 7 functions, 5 attributes, 4 formats): "610717 comparisons over 39 functions, C == model on every one", then 584477;
+  - audit 17,883 and the corpus 311 (desktop runs): "17883 checks, 0 failed, 0 skipped" and "311 checks, 0 failed, 0 skipped";
+  - not run: wasm and node (CI's host job after the push) and `make embedded`.
 
 **CI** (READ, the golden job's log of each run):
 - on branch ci-golden at ad7c409, run 38403047778: "3620 passed, 2 skipped, 64 warnings in 802.56s (0:13:22)";
@@ -19343,7 +19343,7 @@ The card results will be the lead's entry.
 - **CG's entry, pushed, keeps four wordings** (VCG2):
   - "a later mpmath reaches CI unannounced", where 1.4.1 already announces the change (VCG2's words: "with no pin to hold it");
   - :700 beside :705, and 15.17 s beside 15.97 s, for runs on ad7c409's content and on df0a18d's;
-  - "about 100 s" for a spread of three runs (consecutive runs differ by 36.8 s and 67.0 s);
+  - "about 100 s" for a spread of three runs (consecutive runs differ by 36.8 s and 67.0 s; the two golden runs quoted under CI above differ by 205 s);
   - the signed-default prediction unmarked, since measured by VCG2's simulation and by VPS under mpmath 1.4.1.
 - **gates.yml's comment** now says what the import step catches and what collection catches (VCG2's N1). Two ways past the test file's comment remain (N6):
   - an extension built for another interpreter's ABI reads as absent;
