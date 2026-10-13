@@ -1,0 +1,15 @@
+fp128 rne sin + cos: 411 instructions together, against 760 apart; 29 beyond sin's 382
+fp128 rne sin + cos + tan: 455 instructions together, against 1157 apart; 73 beyond sin's 382
+fp128 rne sin + tan: 428 instructions together, against 779 apart; 46 beyond sin's 382
+fp128 rtz sin + cos: 411 instructions together, against 760 apart; 29 beyond sin's 382
+fp128 rtz sin + cos + tan: 455 instructions together, against 1157 apart; 73 beyond sin's 382
+fp128 rtz sin + tan: 428 instructions together, against 779 apart; 46 beyond sin's 382
+fp128 rdn sin + cos: 411 instructions together, against 760 apart; 29 beyond sin's 382
+fp128 rdn sin + cos + tan: 455 instructions together, against 1157 apart; 73 beyond sin's 382
+fp128 rdn sin + tan: 428 instructions together, against 779 apart; 46 beyond sin's 382
+fp128 rup sin + cos: 411 instructions together, against 760 apart; 29 beyond sin's 382
+fp128 rup sin + cos + tan: 455 instructions together, against 1157 apart; 73 beyond sin's 382
+fp128 rup sin + tan: 428 instructions together, against 779 apart; 46 beyond sin's 382
+fp128 rmm sin + cos: 411 instructions together, against 760 apart; 29 beyond sin's 382
+fp128 rmm sin + cos + tan: 455 instructions together, against 1157 apart; 73 beyond sin's 382
+fp128 rmm sin + tan: 428 instructions together, against 779 apart; 46 beyond sin's 382

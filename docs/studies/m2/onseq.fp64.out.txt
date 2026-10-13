@@ -1,0 +1,15 @@
+fp64 sin rne: 4408 lanes on seq.py, 406 instructions, live 26: differ from the model 0, from transcend.py (unmarked) 0, marked 0; 23s
+fp64 sin rtz: 4408 lanes on seq.py, 406 instructions, live 26: differ from the model 0, from transcend.py (unmarked) 0, marked 0; 46s
+fp64 sin rdn: 4408 lanes on seq.py, 406 instructions, live 26: differ from the model 0, from transcend.py (unmarked) 0, marked 0; 70s
+fp64 sin rup: 4408 lanes on seq.py, 406 instructions, live 26: differ from the model 0, from transcend.py (unmarked) 0, marked 0; 96s
+fp64 sin rmm: 4408 lanes on seq.py, 406 instructions, live 26: differ from the model 0, from transcend.py (unmarked) 0, marked 0; 128s
+fp64 cos rne: 4408 lanes on seq.py, 402 instructions, live 26: differ from the model 0, from transcend.py (unmarked) 0, marked 0; 153s
+fp64 cos rtz: 4408 lanes on seq.py, 402 instructions, live 26: differ from the model 0, from transcend.py (unmarked) 0, marked 8; 177s
+fp64 cos rdn: 4408 lanes on seq.py, 402 instructions, live 26: differ from the model 0, from transcend.py (unmarked) 0, marked 8; 199s
+fp64 cos rup: 4408 lanes on seq.py, 402 instructions, live 26: differ from the model 0, from transcend.py (unmarked) 0, marked 8; 221s
+fp64 cos rmm: 4408 lanes on seq.py, 402 instructions, live 26: differ from the model 0, from transcend.py (unmarked) 0, marked 0; 242s
+fp64 tan rne: 4408 lanes on seq.py, 419 instructions, live 26: differ from the model 0, from transcend.py (unmarked) 0, marked 2; 265s
+fp64 tan rtz: 4408 lanes on seq.py, 419 instructions, live 26: differ from the model 0, from transcend.py (unmarked) 0, marked 0; 288s
+fp64 tan rdn: 4408 lanes on seq.py, 419 instructions, live 26: differ from the model 0, from transcend.py (unmarked) 0, marked 0; 310s
+fp64 tan rup: 4408 lanes on seq.py, 419 instructions, live 26: differ from the model 0, from transcend.py (unmarked) 0, marked 0; 333s
+fp64 tan rmm: 4408 lanes on seq.py, 419 instructions, live 26: differ from the model 0, from transcend.py (unmarked) 0, marked 2; 356s

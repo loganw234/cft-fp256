@@ -1,0 +1,21 @@
+fp32: 760 pool arguments, variant A, G default
+  sin rne: 348 instructions, 77 words, live 22: 760 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 1s
+  sin rtz: 348 instructions, 78 words, live 22: 760 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 3s
+  sin rdn: 348 instructions, 78 words, live 22: 760 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 4s
+  sin rup: 348 instructions, 77 words, live 22: 760 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 6s
+  sin rmm: 348 instructions, 77 words, live 22: 760 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 8s
+  cos rne: 344 instructions, 74 words, live 22: 760 lanes, marked 4 (guess right 4), wrong 0, flag words ['0x0', '0x1', '0x10', '0x90']; 9s
+     marks: 0x39800000 0x3a400000 0xb9800000 0xba400000 
+  cos rtz: 344 instructions, 75 words, live 22: 760 lanes, marked 4 (guess right 4), wrong 0, flag words ['0x0', '0x1', '0x10', '0x90']; 11s
+     marks: 0x3a000000 0x3a800000 0xba000000 0xba800000 
+  cos rdn: 344 instructions, 75 words, live 22: 760 lanes, marked 4 (guess right 4), wrong 0, flag words ['0x0', '0x1', '0x10', '0x90']; 12s
+     marks: 0x3a000000 0x3a800000 0xba000000 0xba800000 
+  cos rup: 344 instructions, 74 words, live 22: 760 lanes, marked 4 (guess right 4), wrong 0, flag words ['0x0', '0x1', '0x10', '0x90']; 14s
+     marks: 0x3a000000 0x3a800000 0xba000000 0xba800000 
+  cos rmm: 344 instructions, 74 words, live 22: 760 lanes, marked 4 (guess right 4), wrong 0, flag words ['0x0', '0x1', '0x10', '0x90']; 15s
+     marks: 0x39800000 0x3a400000 0xb9800000 0xba400000 
+  tan rne: 359 instructions, 76 words, live 22: 760 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 17s
+  tan rtz: 359 instructions, 76 words, live 22: 760 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 18s
+  tan rdn: 359 instructions, 76 words, live 22: 760 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 20s
+  tan rup: 359 instructions, 76 words, live 22: 760 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 22s
+  tan rmm: 359 instructions, 76 words, live 22: 760 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 23s

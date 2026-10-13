@@ -1,0 +1,42 @@
+sin chunk 406 differs
+sin window 406 differs
+sin mid-inexact 411 differs
+sin exact-add 406 differs
+sin quadrant-sign 406 same as the control
+sin clamp-tight 406 differs
+sin bound-loose 406 differs
+sin mark-silenced 396 differs
+sin coef 405 differs
+sin newton-short 406 same as the control
+sin tiny-gate-off 399 differs
+sin rl-dropped 400 differs
+sin zl-dropped 389 differs
+sin clamp-off 402 differs
+cos chunk 402 differs
+cos window 402 differs
+cos mid-inexact 407 differs
+cos exact-add 402 differs
+cos quadrant-sign 399 differs
+cos clamp-tight 402 differs
+cos bound-loose 402 differs
+cos mark-silenced 391 differs
+cos coef 401 differs
+cos newton-short 402 same as the control
+cos tiny-gate-off 399 differs
+cos rl-dropped 396 differs
+cos zl-dropped 385 differs
+cos clamp-off 398 differs
+tan chunk 419 differs
+tan window 419 differs
+tan mid-inexact 424 differs
+tan exact-add 419 differs
+tan quadrant-sign 419 same as the control
+tan clamp-tight 419 same as the control
+tan bound-loose 419 differs
+tan mark-silenced 411 differs
+tan coef 418 differs
+tan newton-short 417 differs
+tan tiny-gate-off 413 differs
+tan rl-dropped 413 differs
+tan zl-dropped 402 differs
+tan clamp-off 419 same as the control

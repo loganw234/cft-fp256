@@ -1,0 +1,25 @@
+fp64 cos small seed 23 G default: 1500 main lanes of 1500; 403 instructions (unpruned), 125 ever round; 24s
+  max |E|/Bv 0.0309 (2^-5.02); max |M|/Bv 0.02943 (2^-5.09); second-order residual at most 0.0014 Bv
+  observed maxima summed 0.02514 (2^-5.31); capacities summed 0.03297 (2^-4.92)
+  THE BUDGET'S BOUND: M_max + capacities = 0.0624 Bv (2^-4.00)
+  by phase (observed, capacity), in Bv:
+     C-tail         1.255e-02  1.403e-02
+     sincos         4.406e-03  6.658e-03
+     red-scale      2.762e-03  4.075e-03
+     C-head         2.028e-03  2.915e-03
+     red-lower      1.343e-03  2.557e-03
+     S-head         1.524e-03  1.926e-03
+     S-tail         4.375e-04  7.237e-04
+     z              8.964e-05  9.066e-05
+     final          0.000e+00  0.000e+00
+  the 10 largest capacities:
+     # 288 fma   C-tail         capacity 1.399e-02  observed 1.252e-02
+     # 362 fma   sincos         capacity 3.402e-03  observed 1.795e-03
+     # 194 fma   red-scale      capacity 2.146e-03  observed 1.475e-03
+     # 360 fma   sincos         capacity 1.884e-03  observed 1.387e-03
+     # 193 fma   red-scale      capacity 1.875e-03  observed 1.267e-03
+     # 357 sub   C-head         capacity 1.371e-03  observed 1.066e-03
+     # 364 fma   sincos         capacity 1.371e-03  observed 1.225e-03
+     # 283 sub   S-head         capacity 1.085e-03  observed 8.134e-04
+     # 182 add   red-lower      capacity 9.462e-04  observed 1.683e-06
+     # 183 add   red-lower      capacity 9.462e-04  observed 7.555e-04

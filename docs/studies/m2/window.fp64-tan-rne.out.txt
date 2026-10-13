@@ -1,0 +1,1 @@
+fp64 tan rne around 3/2^26 (0x3e68000000000000), j = -40..40: marked 43 (j from -23 to 19; guess right 43), wrong unmarked 0; 0s

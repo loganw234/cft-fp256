@@ -1,0 +1,16 @@
+fp256 near: 676 arguments
+  sin rne: marked 0 (guess right 0), wrong 0; 2s
+  sin rtz: marked 0 (guess right 0), wrong 0; 5s
+  sin rdn: marked 0 (guess right 0), wrong 0; 7s
+  sin rup: marked 0 (guess right 0), wrong 0; 10s
+  sin rmm: marked 0 (guess right 0), wrong 0; 12s
+  cos rne: marked 0 (guess right 0), wrong 0; 14s
+  cos rtz: marked 0 (guess right 0), wrong 0; 17s
+  cos rdn: marked 0 (guess right 0), wrong 0; 19s
+  cos rup: marked 0 (guess right 0), wrong 0; 22s
+  cos rmm: marked 0 (guess right 0), wrong 0; 24s
+  tan rne: marked 0 (guess right 0), wrong 0; 27s
+  tan rtz: marked 0 (guess right 0), wrong 0; 29s
+  tan rdn: marked 0 (guess right 0), wrong 0; 32s
+  tan rup: marked 0 (guess right 0), wrong 0; 34s
+  tan rmm: marked 0 (guess right 0), wrong 0; 37s

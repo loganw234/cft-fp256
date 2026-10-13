@@ -1,0 +1,5 @@
+fp64 plant zl-dropped: pools 387 x 6 lanes: wrong unmarked 20 ('sin', 'rne', '0xc96f96a1cd67f437'); marked 0, of them off the list 0 ; 180s
+   structured: unmarked 0 
+   bound: largest |V - f|/Bv 2^42.23 at ('cos', 'edge', '0x5f46aecaf73ca58d')
+   audit: lanes with a failed exact claim 0  (with the 1844 binade-edge arguments)
+fp64 plant zl-dropped: RED in ['pools', 'bound']; 235s

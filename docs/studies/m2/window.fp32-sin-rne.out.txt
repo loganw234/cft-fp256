@@ -1,0 +1,1 @@
+fp32 sin rne around 3/2^11 (0x3ac00000), j = -40..40: marked 6 (j from -2 to 3; guess right 6), wrong unmarked 0; 0s

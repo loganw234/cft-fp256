@@ -19362,3 +19362,49 @@ The card results will be the lead's entry.
 - **The remote branch ci-golden** (ad7c409), pushed for CI's own run, is left for Logan to keep or delete.
 
 **Records:** ROADMAP's plan marks the pools' task done; gates.yml's comment; VERIFICATION's golden row; docs/README.md recounted; the docs check rc 0.
+
+## 2026-10-13 - M2's design study, sin, cos and tan as tile routines: one Payne-Hanek reduction for every lane, carried exactly through the cancellation, 2/pi in bank words picked by a SELECT shifter, fp64's whole range and fp128's and fp256's to 2^1024, measured in a model; twelve questions for Logan (parcel M2S)
+
+**Why.**
+- The math library round's plan of record (docs/ROADMAP.md, "M2, M3 and M4"): M2 starts as a design study like M1's, golden-first, measured in a model, its questions to Logan before its build: fp64's full range, a stated range at fp256 with 2^1024's cost measured, an L3 rule for each function.
+- Logan, verbatim, on the round's extent (2026-10-12): "Hold once E1 finishes to determine how M1 + M2 will utilize models, M2-M4 builds becoming their own round"; on the models (2026-10-13): "Use Sonnet for M1's build parcels as you recommended, it performed well." The recommendation he accepted put M2's study on Opus, with Sonnet verifiers. So the study runs now, beside M1's build, and M2's build is a round of its own.
+
+**M2S** (branch m2-study from 1337a13; authored by parcel M2S, Opus 5.5): docs/studies/M2-trig.md, and its Python model with every run's output as captured in docs/studies/m2/. Nothing is built: no file under python/, host/, rtl/ or tb/ changed, and nothing in the tree imports the model.
+
+**What it designs (PROPOSED).**
+- One fragment shape for sin, cos and tan in C4's form, inlined, quiet, raising transcend.py's flags, with bit 7 where M1's in-lane test cannot decide (Bv = 2^-(p+G) |V_h|, since V may be negative).
+- **The reduction:** Payne-Hanek for every lane down to the tiny gate, and no Cody-Waite path, since with no branch a second reduction only adds its instructions (|x| < pi/4 takes r = |x| for 5). 2/pi in bank words of b bits (44, 108 and 233 at fp64, fp128 and fp256), the window picked from the exponent by a SELECT log-shifter, no scratch slot. The sum runs in units where every product has a fixed grid, so the generator proves each exact sum before any lane runs, the cancellation happens in an exact part, and an audit checks every claimed-exact instruction lane by lane.
+- **Ranges:** fp64's whole (1,232 bits of 2/pi in 28 words, 30 with two zero words); fp128 and fp256 to 2^1024, a lane past it marked and replayed (certificate version 2's question 3).
+- Taylor S(z) = sin r / r and C(z) = cos r with double-word heads of 8 steps and no table; tan by its own double-word quotient (19 to 23 instructions), not C4's division; the clamp |sin x|, |cos x| < 1 (Hermite-Lindemann, 4 instructions); G = 44 at fp64 and 46 at fp128 and fp256, M1's.
+- fp32: the double word reaches G = 18 only; the triple word at G = 40, Logan's for M1's library, is not built (an ESTIMATE, about 930 instructions for sin).
+- The language's three nodes (sin(0), cos(0) and tan(0) fold; every other constant argument `irrational-constant`), cftc's targets and versions, and the L3 rules `cos(a) * da`, `(-sin(a)) * da` and `fma(r, r, 1) * da`, with the pendulum as the committed reference.
+
+**MEASURED in the model** (the desktop, niced, one process at a time; the runs and their times in the round's ledger, ledger/M2S.md, and the batch logs beside the model, `docs/studies/m2/queue*.log`; every cited run on the final model, whose 45 default fragments hash the same before and after the last batch of re-runs):
+- **The pools against transcend.py,** on the model and as programs on seq.py through `routines.program` and `routines.run`: fp32 (the double word) 760 arguments, fp64 4,408, fp128 620, fp256 614, all 60 configurations: 0 wrong unmarked lanes, 0 lanes where seq.py and the model differ. The marks: the structured lanes, and at fp128 and fp256 the 282 to 293 lanes past 2^1024.
+- **The specials,** nine rows of arguments a function at all four formats and five attributes: equal in bits and flag word. The flag word's values, by C4's walk on all 60 fragments: at most {0x0, 0x1, 0x10, 0x18, 0x90} (cos without 0x18).
+- **The reduction against exact rationals,** with the audit: fp64 3,853 arguments and 1,844 binade edges, r's error at most 2^-7.90 of the bound; fp128 676 and 632, 2^-50.90 and 2^-56.43; fp256 434 and 302, 2^-189.59 and 2^-181.91; the quadrant never off, 0 audit failures.
+- **The bound,** verifier-VM1b's first-order budget, ported, with three extensions (a negation by the sign word is continuous; the reduction's error-free phases frozen whole; a RECIP_SEED's source not frozen), over five regions: at most 0.096 Bv at fp64 (tan at the edge, its second-order residual at most 0.0125 beside it), 0.073 at fp128, 0.166 at fp256; at G = 46 fp64 would keep 0.26 for sin and cos and 0.36 for tan; fp32's double word at G = 18 0.33 to 0.39 for sin and cos and 0.53 to 0.61 for tan (residual up to 0.12).
+- **Errors against mpmath at 4p + 200 bits** (6,000 arguments a function and format in five regions, and the pools' main lanes): largest 2^-4.35 Bv at fp64, 2^-3.91 at fp128, 2^-2.80 at fp256 and 2^-2.08 at fp32's double word, each under its region's bound; 0 wrong.
+- **The mark-rate law,** bound inflated to G' = 6, rne and rtz: 30 cells, each within 2.5 sigma of each lane's own 2^-G' sig(V), every marked guess right, no unmarked lane wrong; pooled, sin 787 marks against 844 predicted (-2.0 sigma), cos 910 against 852 (+2.0), tan 356 against 362.
+- **The structured families:** the tiny census (144, 144, 384 and 880 arguments at fp32, fp64, fp128 and fp256) marks as the study's 3.5 tabulates, every guess right, 0 wrong; the arguments nearest multiples of pi/2 (676 to 688) mark none; five windows measured, each the width the first-order count gives (fp64 cos at 2^-26 under rtz: 384 lanes, j from -255 to 128).
+- **The cost:** sin 406, 382 and 389 instructions at fp64, fp128 and fp256, cos 4 fewer, tan 13 to 17 more; sin and cos of one argument 434, 411 and 418 in a step (cftc's inliner shares the prefix), all three 475, 455 and 464; 111, 108 and 122 bank words for all three under all five attributes; 26, 17 and 16 values live; no scratch slot; mathlib.py's widened invariants hold. fp32's double word: 348, 344 and 359, 82 words, 22 live.
+- **The range:** from 2^128 to 2^1024 fp128 pays 22 instructions and fp256 32; past 2^1024 the shifter outgrows the registers (fp128's whole range 640 instructions, 257 words, 137 live; fp256's needs 1,181 words of 2/pi). The cancellation over [1, 2^1024), every binade: fp128 123 bits, past the docs' 121 for the whole range (every 16th binade sampled); fp256 244, within the docs' 245.
+- **The plants** (fp64): fourteen, each red in a named case; the control red in nothing (the study's section 8 tabulates them).
+- **The model found nine defects in itself,** each fixed before the runs it affects (the study's 3.6): four in its own measuring tools, among them the budget's frozen RECIP_SEED source (a bound of 2^+46.7 Bv against a measured 0.048 Bv) and an audit whose arguments missed a planted fault until the products' binade edges joined them.
+- **No defect in transcend.py was found.**
+
+**Handed to the lead** (Logan was using the desktop, so the larger samples go to amd-arc-box): `docs/studies/m2/box_m2s.sh` at this entry's commit - the rate law at 50,000 and 20,000 lanes, the budgets at 12,000 and 3,000 lanes in every region, fp128's whole-range cancellation; 49 single-threaded jobs, about 2 to 2.5 core-hours and 150 MB each (ESTIMATE), about 15 to 20 minutes at 24 jobs. Its results are not in this entry.
+
+**Known limits, recorded rather than fixed** (Logan's rule).
+- **fp32's triple word is not built.** Its cost is an ESTIMATE; the double word measured at G = 18 keeps under half a bit for tan by its budget.
+- **The bound is first order and sampled:** the second-order residual is measured on the budget's own lanes, not bounded, and each region's sample is 400 to 1,500 lanes (the box batch enlarges them).
+- **The mark-rate law's pooled departures** for sin and cos are not settled at the study's size.
+- **The census holds c <= 16:** a sample of the structured family at fp128 and fp256, whose centres run to c of about 2^12 and 2^17 at fp128 and 2^33 and 2^48 at fp256 (COMPUTED).
+- **The whole-range cancellation** at fp128 and fp256 was not searched; `ranges.py` costs ranges past 2^1024 with the [1, 2^1024) figure (an ESTIMATE there).
+- **The plan searches b, not the bottom,** so fp32's double word fails its proofs at G = 16 where 18 holds.
+- **The LDX window and design B are counted, not budgeted;** the table alternative is an ESTIMATE.
+- **The plants run at fp64 only.**
+- **The round's ledger corrects three of its own statements:** guessed clock times in its fourth entry and in its entry headed 16:29:52, and its fourth entry's description of `redcheck-first.out.txt`, which holds fp64's run, fp128's assertion (the coarse sum at b = 109) and a later fp256 run, not the runs the entry described.
+- **Two captured files had a personal path,** `redcheck-first.out.txt` in a traceback and `queue6.log` in two lines naming a scratch script; the prefix was replaced by the repository-relative path or "(scratch)/" before the commit, and nothing else in them changed.
+
+docs/README.md indexes the study under "The design studies" and is recounted (VALIDATION 19,410 lines; the record 41,001; the total 77,276 in forty-four files), and docs/VERIFICATION.md's count of the documents the index holds becomes forty-four; `python python/check_docs_index.py` rc 0: 44 documents, every count true, its 43 controls each caught by name.

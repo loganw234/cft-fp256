@@ -1,0 +1,26 @@
+fp64 sin edge seed 21 G 46: 1000 main lanes of 1000; 414 instructions (unpruned), 126 ever round; 14s
+  max |E|/Bv 0.1266 (2^-2.98); max |M|/Bv 0.1192 (2^-3.07); second-order residual at most 0.00465 Bv
+  observed maxima summed 0.1259 (2^-2.99); capacities summed 0.145 (2^-2.79)
+  THE BUDGET'S BOUND: M_max + capacities = 0.2642 Bv (2^-1.92)
+  by phase (observed, capacity), in Bv:
+     C-tail         5.553e-02  5.943e-02
+     sincos         2.425e-02  2.774e-02
+     red-scale      1.695e-02  2.006e-02
+     C-head         1.208e-02  1.605e-02
+     red-lower      6.580e-03  1.053e-02
+     S-head         7.405e-03  7.871e-03
+     S-tail         2.798e-03  2.917e-03
+     z              3.531e-04  3.627e-04
+     final          0.000e+00  0.000e+00
+     special        0.000e+00  0.000e+00
+  the 10 largest capacities:
+     # 296 fma   C-tail         capacity 5.929e-02  observed 5.540e-02
+     # 370 fma   sincos         capacity 1.453e-02  observed 1.222e-02
+     # 201 fma   red-scale      capacity 9.920e-03  observed 7.895e-03
+     # 202 fma   red-scale      capacity 9.920e-03  observed 8.845e-03
+     # 368 fma   sincos         capacity 7.695e-03  observed 6.673e-03
+     # 372 fma   sincos         capacity 5.524e-03  observed 5.365e-03
+     # 365 sub   C-head         capacity 5.524e-03  observed 5.436e-03
+     # 361 fma   C-head         capacity 5.429e-03  observed 2.606e-03
+     # 291 sub   S-head         capacity 4.339e-03  observed 4.238e-03
+     # 190 add   red-lower      capacity 3.895e-03  observed 5.820e-04

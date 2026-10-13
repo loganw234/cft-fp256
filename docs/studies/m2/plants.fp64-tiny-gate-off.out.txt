@@ -1,0 +1,5 @@
+fp64 plant tiny-gate-off: pools 387 x 6 lanes: wrong unmarked 14 ('sin', 'rne', '0x1'); marked 238, of them off the list 238 ('sin', 'rtz', '0x300000000000000'); 128s
+   structured: unmarked 0 
+   bound: largest |V - f|/Bv 2^-4.52 at ('tan', 'edge', '0x40e7858caeea5a4f')
+   audit: lanes with a failed exact claim 0  (with the 1844 binade-edge arguments)
+fp64 plant tiny-gate-off: RED in ['pools']; 177s

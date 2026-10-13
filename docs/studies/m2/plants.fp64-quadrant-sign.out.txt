@@ -1,0 +1,5 @@
+fp64 plant quadrant-sign: pools 387 x 6 lanes: wrong unmarked 240 ('cos', 'rne', '0x4008000000000000'); marked 0, of them off the list 0 ; 10s
+   structured: unmarked 0 
+   bound: largest |V - f|/Bv 2^98.00 at ('cos', 'edge', '0xe1443094fb519e05')
+   audit: lanes with a failed exact claim 0  (with the 1844 binade-edge arguments)
+fp64 plant quadrant-sign: RED in ['pools', 'bound']; 39s

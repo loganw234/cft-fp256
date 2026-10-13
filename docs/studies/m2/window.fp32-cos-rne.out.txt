@@ -1,0 +1,1 @@
+fp32 cos rne around 1/2^12 (0x39800000), j = -100..100: marked 96 (j from -63 to 32; guess right 96), wrong unmarked 0; 0s

@@ -1,0 +1,3 @@
+fp256: 1024 binades (every one, value exponents 0 to 1023): deepest cancellation 244 bits at value exponent 239 (m = 0x1dd71d552efac6c6246fb9a1e5680e751b9e3f84e2a77bbc0298a0f4b498); 118s
+  the eight deepest: [(239, 244), (606, 244), (964, 244), (240, 243), (564, 243), (607, 243), (965, 243), (70, 242)]
+  lost bits, histogram: {229: 2, 230: 1, 231: 1, 232: 5, 233: 11, 234: 31, 235: 58, 236: 180, 237: 296, 238: 206, 239: 106, 240: 66, 241: 36, 242: 18, 243: 4, 244: 3}

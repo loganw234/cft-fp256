@@ -1,0 +1,5 @@
+fp64 plant coef: pools 387 x 6 lanes: wrong unmarked 11 ('sin', 'rne', '0x541e146a1edcbc95'); marked 0, of them off the list 0 ; 13s
+   structured: unmarked 0 
+   bound: largest |V - f|/Bv 2^39.87 at ('tan', 'edge', '0x4040e2d4dc9dce4e')
+   audit: lanes with a failed exact claim 0  (with the 1844 binade-edge arguments)
+fp64 plant coef: RED in ['pools', 'bound']; 66s

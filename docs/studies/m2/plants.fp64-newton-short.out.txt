@@ -1,0 +1,5 @@
+fp64 plant newton-short: pools 387 x 6 lanes: wrong unmarked 0 ; marked 0, of them off the list 0 ; 30s
+   structured: unmarked 4 ('tan', 'rne', '0x3e68000000000000')
+   bound: largest |V - f|/Bv 2^17.00 at ('tan', 'zero', '0x403f6a7a29553860')
+   audit: lanes with a failed exact claim 0  (with the 1844 binade-edge arguments)
+fp64 plant newton-short: RED in ['structured', 'bound']; 77s

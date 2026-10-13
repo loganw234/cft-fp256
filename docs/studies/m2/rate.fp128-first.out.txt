@@ -1,0 +1,6 @@
+fp128 sin rne G'=6: 2000 lanes, marked 44 = 2.20% against 2.26% predicted (-0.2 sigma); guesses right 44 of 44; wrong unmarked 0; 7s
+fp128 sin rtz G'=6: 2000 lanes, marked 38 = 1.90% against 2.26% predicted (-1.1 sigma); guesses right 38 of 38; wrong unmarked 0; 13s
+fp128 cos rne G'=6: 2000 lanes, marked 45 = 2.25% against 2.26% predicted (-0.0 sigma); guesses right 45 of 45; wrong unmarked 0; 19s
+fp128 cos rtz G'=6: 2000 lanes, marked 64 = 3.20% against 2.26% predicted (+2.8 sigma); guesses right 64 of 64; wrong unmarked 0; 24s
+fp128 tan rne G'=6: 2000 lanes, marked 45 = 2.25% against 2.26% predicted (-0.0 sigma); guesses right 45 of 45; wrong unmarked 0; 29s
+fp128 tan rtz G'=6: 2000 lanes, marked 40 = 2.00% against 2.26% predicted (-0.8 sigma); guesses right 40 of 40; wrong unmarked 0; 34s
