@@ -5994,28 +5994,29 @@ this level?** Logan's instruction, above.
 - **The rules for E1's verdict.** They were fixed before dispatch
   (4ad5cea, 15:00) and revised after it: at 15:48 and 16:14, before
   either arm reported, on verifier-P7b's and verifier-P7c's notes; at
-  16:38 and 17:30, on verifier-P7d's and verifier-P7e's, after one arm
-  had committed (16:27) and then the other (17:25), and before any
-  verifier of an arm reported. Logan answered the 15:48
-  revision, the count on items 1 and 2: "Keep the more fair rule you
-  went with". The later ones settle how it is counted, and go to him
-  with E1's result.
+  16:38 and 17:30, on verifier-P7d's and verifier-P7e's notes: at
+  16:38, after one arm had committed (16:27) and before the other
+  (17:25); at 17:30, after both; and before any verifier of an arm
+  reported. Logan answered the 15:48 revision, the count on items 1
+  and 2: "Keep the more fair rule you went with". The later ones
+  settle how it is counted, and go to him with E1's result.
   - **A failure** is an (a) or a (b) by Logan's rule, found by anyone
-    and confirmed by the lead: a regression, a false claim, a test that
-    cannot fail, or a test, `--check` or long run that fails. A
-    **case** is a failure on rubric item 1 - a wrong unmarked lane, in
-    its bits or its flag word, or a bound that fails or is stated by a
-    sample where the brief asks for the budget - or on item 2, a check
-    that no plant makes fail.
+    and confirmed by the lead, and it counts from that confirmation: a
+    regression, a false claim, a test that cannot fail, or a test,
+    `--check` or long run that fails. A **case** is a failure on rubric
+    item 1 - a wrong unmarked lane, in its bits or its flag word, or a
+    bound that fails or is stated by a sample where the brief asks for
+    the budget - or on item 2, a check that no plant makes fail.
   - **An arm's chain** is its first check and at most two re-checks,
     each after a send-back (the cap). A failure found before the arm
     ends belongs to the check running then, or to the next if none is.
     A check with no failure ends the arm clean. A check with one sends
     the arm back, but at the second re-check it ends the arm not clean.
-  - **After an arm ends,** a failure keeps it from merging until its
-    author has fixed it and a narrow re-check - a verifier on the fix
-    alone - is clean, at most twice; past that the arm is not merged.
-    These fixes count neither against the cap nor in the first
+  - **After an arm ends,** a failure found is counted for the third
+    criterion if it is a case. An arm that ended clean then merges only
+    once its author has fixed it and a narrow re-check - a verifier on
+    the fix alone - is clean, at most twice; past that it is not
+    merged. These fixes count neither against the cap nor in the first
     criterion.
 - **A blind comparison.** When both arms have ended, a third agent on
   Opus reads both. It gets each arm's tracked tree exported without its
@@ -6037,7 +6038,8 @@ this level?** Logan's instruction, above.
      arm needed; if Opus's arm does not end clean, Sonnet's need only
      end clean;
   2. by its chain's last verifier's account it misses no item of the
-     must-have list, M1 to M7 as brief correction 1 restated them;
+     must-have list, M1 to M7 as the brief states them, with M2 and M3
+     as brief correction 1 restated them;
   3. it is not materially worse on rubric item 1 or on item 2. On each
      item, count the cases of each arm's ended state - unfixed when it
      ended, or found after - that the other arm's does not share;
@@ -6203,7 +6205,11 @@ battery said to run tests it does not, and no rule for a case found
 after an arm's end by another finder - and E1's verdict rules were
 rewritten above as one block. Verifier-P7e re-checked that
 (a076ac3): one wrong answer, a failure found during an arm's second
-re-check with no rule to place it, now placed above. The round holds
+re-check with no rule to place it, now placed above. Verifier-P7f
+re-checked that (3c0cd40): two wrong statements in the lead's new
+text - criterion 2's must-haves said all restated by brief correction
+1, which restates M2 and M3, and the 16:38 revision said to follow
+both arms' commits - restated above in its own words. The round holds
 when E1 finishes.
 
 ## The adoption story these serve
