@@ -5881,8 +5881,8 @@ exists yet unless it says so.
 - **Revision 8 is on the cards in three images:** R24's raise and mark,
   R23's lane byte, 2^24 instructions streamed, and 4,096 or 8,192
   scratch slots. The quad carries no R21, so M1 writes TwoSum and
-  Fast2Sum, never augmented addition, on every target, as revision 8's
-  question 9 set out.
+  Fast2Sum, not augmented addition, on every target: revision 8's
+  question 9 set out TwoSum until every image carries R21.
 - **cftc's output version is 5** (parcel TG, step 6, 2026-10-06), so
   M1's step is to 6.
 
@@ -5935,7 +5935,8 @@ this level?** Logan's instruction, above.
     `mathlib.evaluate(f, x)` one lane's result and flag word.
 - **Brief correction 1, after dispatch** (15:44 on 2026-10-12, before
   either arm reported), its file's text sent to both authors word for
-  word, on verifier-P7b's check:
+  word, on verifier-P7b's check; in short (the file's first item says
+  "down to" where it means "up to", verifier-P7d found):
   - the structured windows at fp64, fp128 and fp256 only, since fp32
     has none at G = 40 (its marks would need an exponent from
     (p + G)/2 = 32 up to p = 24, an empty range), fp32 recording its
@@ -5992,24 +5993,30 @@ this level?** Logan's instruction, above.
   and the comparison's.
 - **The rules for E1's verdict.** They were fixed before dispatch
   (4ad5cea, 15:00) and revised after it: at 15:48 and 16:14, before
-  either arm reported, on verifier-P7b's and verifier-P7c's notes; and
-  at 16:38, on verifier-P7d's, when one arm had reported and no
-  verifier had. Logan answered the 15:48 revision: "Keep the more fair
-  rule you went with".
-  - **An arm ends** when its last verifier finds no (a) and no (b) - it
-    has then ended clean - or when it has gone back twice, the cap, and
-    its second re-check still finds one.
-  - **A failure is a (b) for its arm, whoever finds it:** a test, a
-    `--check` or a long run that fails, or a case. A **case** is a
-    defect the lead confirms: on rubric item 1, a wrong unmarked lane, a
-    bound that fails, or a bound stated by a sample where the brief asks
-    for the budget; on item 2, a check that no plant makes fail.
-  - **Before an arm ends,** a (b) goes back in its chain as a
-    send-back. **After,** the arm merges only once its author has fixed
-    it and a narrow re-check - a verifier on the fix alone - is clean,
-    and a case among them is counted for the third criterion. That fix
-    counts neither against the cap nor in the first criterion, which
-    judge the verifiers' chain.
+  either arm reported, on verifier-P7b's and verifier-P7c's notes; at
+  16:38 and 17:30, on verifier-P7d's and verifier-P7e's, after one arm
+  had committed (16:27) and then the other (17:25), and before any
+  verifier of an arm reported. Logan answered the 15:48
+  revision, the count on items 1 and 2: "Keep the more fair rule you
+  went with". The later ones settle how it is counted, and go to him
+  with E1's result.
+  - **A failure** is an (a) or a (b) by Logan's rule, found by anyone
+    and confirmed by the lead: a regression, a false claim, a test that
+    cannot fail, or a test, `--check` or long run that fails. A
+    **case** is a failure on rubric item 1 - a wrong unmarked lane, in
+    its bits or its flag word, or a bound that fails or is stated by a
+    sample where the brief asks for the budget - or on item 2, a check
+    that no plant makes fail.
+  - **An arm's chain** is its first check and at most two re-checks,
+    each after a send-back (the cap). A failure found before the arm
+    ends belongs to the check running then, or to the next if none is.
+    A check with no failure ends the arm clean. A check with one sends
+    the arm back, but at the second re-check it ends the arm not clean.
+  - **After an arm ends,** a failure keeps it from merging until its
+    author has fixed it and a narrow re-check - a verifier on the fix
+    alone - is clean, at most twice; past that the arm is not merged.
+    These fixes count neither against the cap nor in the first
+    criterion.
 - **A blind comparison.** When both arms have ended, a third agent on
   Opus reads both. It gets each arm's tracked tree exported without its
   git (git archive), its commit messages with their trailers stripped,
@@ -6029,13 +6036,13 @@ this level?** Logan's instruction, above.
   1. its arm ends clean, after at most one more send-back than Opus's
      arm needed; if Opus's arm does not end clean, Sonnet's need only
      end clean;
-  2. by its last verifier's account it misses no item of the must-have
-     list as brief correction 1 restated it (every lane right or
-     marked; the bound held; every check able to fail);
+  2. by its chain's last verifier's account it misses no item of the
+     must-have list, M1 to M7 as brief correction 1 restated them;
   3. it is not materially worse on rubric item 1 or on item 2. On each
-     item, count each arm's cases from after its end that the other
-     arm does not share; Sonnet's arm is materially worse on an item
-     when its count there is the larger. Both lists go to Logan.
+     item, count the cases of each arm's ended state - unfixed when it
+     ended, or found after - that the other arm's does not share;
+     Sonnet's arm is materially worse on an item when its count there
+     is the larger. Both lists go to Logan.
   Time and tokens, summed from each agent's transcript (the last line
   of each response; a notification's figure is its context size, step
   6's ledger found), are recorded for both and do not decide. Each
@@ -6045,7 +6052,7 @@ this level?** Logan's instruction, above.
   - An arm is clean for the merge when it ended clean and carries no
     unfixed failure. If both are, the branch the comparison names merges;
     if it calls them equal, the arm with fewer of the third criterion's
-    cases, then fewer send-backs, then arm a. If one is, that one. If
+    cases in all, then fewer send-backs, then arm a. If one is, that one. If
     neither, none, and the result goes to Logan at the hold. A branch
     not merged stays, for the record.
   - The round then holds, and Logan decides from E1's result how M1's
@@ -6194,7 +6201,10 @@ re-checked that (d65eb22): four wrong answers in the lead's text - an
 empty range written "down to", the 16:14 revision left undated, a
 battery said to run tests it does not, and no rule for a case found
 after an arm's end by another finder - and E1's verdict rules were
-rewritten above as one block. The round holds when E1 finishes.
+rewritten above as one block. Verifier-P7e re-checked that
+(a076ac3): one wrong answer, a failure found during an arm's second
+re-check with no rule to place it, now placed above. The round holds
+when E1 finishes.
 
 ## The adoption story these serve
 
