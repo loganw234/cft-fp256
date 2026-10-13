@@ -5942,10 +5942,10 @@ this level?** Logan's instruction, above.
     census marks none at G = 40 (its arguments would need an exponent
     from (p + G)/2 = 32 up to p = 24, an empty range), fp32 recording
     its empty census. The premise "fp32 has no window" was the
-    lead's, and wrong: both arms' verifiers found a few fp32
-    arguments that mark, the floats nearest ln(1 + t) for t = 2^-23,
-    2^-22, 2^-21, -2^-22 and -2^-21, each mark justified and its guess
-    right;
+    lead's, and wrong: E1's verifiers found a few fp32 arguments
+    that mark, the floats nearest ln(1 + t) for t = 2^-23, 2^-22,
+    2^-21, -2^-22 and -2^-21 (VE1-a all five, VE1-b two), each mark
+    justified and its guess right;
   - the budget's files; fp32's reduction; Fast2Sum where ordered;
   - the rate law's G' = 6, 15 cells and three sigma;
   - routines' constants left alone;
@@ -6196,8 +6196,9 @@ record).
 - **The coin,** opened after the comparison had reported, its sealed
   sha256 matching: arm a was Sonnet 5.5, arm b Opus 5.5.
 - **The arms built the same fragment:** identical at fp64 to fp256, and
-  at fp32 the same values with four instructions in another order, so
-  every lane, flag word and mark is the same in both.
+  at fp32 the same values, with one adjacent pair of SELECTs emitted in
+  the other order (four body entries differ), so every lane, flag word
+  and mark is the same in both.
   - Arm a ended clean at its first check (verifier-VE1-a), with no
     send-back.
   - Arm b ended clean at its first re-check (VE1-b2), after one
@@ -6206,7 +6207,9 @@ record).
 - **The comparison** (Opus) scored arm a 13 and arm b 14 of 15. It named
   arm a to merge: arm b's tests miss a planted fault that gives wrong
   answers (the fixed grid's offset at k = emin), and arm a's catch it.
-  It guessed arm a the larger model.
+  Its mirror finding: arm a's tests miss arm b's planted removal of the
+  fixed grid's own test, believed to reach no wrong lane at the decided
+  G. It guessed arm a the larger model.
 - **The criteria, applied as fixed:** the first and second are met. The
   third is not, by the letter: on rubric item 2, Sonnet's arm has four
   cases the other does not share and Opus's three, every one a check
@@ -6221,7 +6224,12 @@ record).
 - **The rules' known limits:**
   - the third criterion's count favours the arm with fewer checks;
   - the comparison's list of cases is its enumeration, not a census;
-  - no rule covers a failure found after the merge.
+  - no rule covers a failure found after the merge;
+  - no time is set at which the third criterion's count closes;
+  - the comparison names the branch to merge while its own cases are
+    still to be confirmed;
+  - an unruled candidate found after an arm's end does not hold its
+    merge open.
 - **Logan's decisions:**
   - on 2026-10-13, "Use Sonnet for M1's build parcels as you
     recommended, it performed well": Sonnet authors for exp2, expm1, the
@@ -6237,8 +6245,8 @@ record).
     at 22 to 25 values live;
   - the pools' lost negative n ln2 thresholds, a task of its own. Arm
     a's tests pin them as they stand: its
-    test_the_pools_lose_their_negative_thresholds fails when the pools
-    are fixed, and that task must change it.
+    test_the_pools_lose_their_negative_thresholds_and_the_edge_pool_has_them
+    fails when the pools are fixed, and that task must change it.
 
 **Checked.** Verifier-P7 checked this plan on 2026-10-12: no
 regression, and two wrong statements (cftc's version 5 credited to
@@ -6278,8 +6286,8 @@ criterion 2's restated items, restated above in its words.
 Verifier-P7h re-checked that (a7ad7c2): two, both in clauses the lead
 had added - a merge sentence that held every arm sent back once
 unclean, and a candidate rule that let one found between checks slip
-past the chain - restated above in its words. The round holds when E1
-finishes.
+past the chain - restated above in its words. The round held when E1
+finished, and Logan's answers are in E1's result, above.
 
 ## The adoption story these serve
 

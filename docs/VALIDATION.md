@@ -19082,13 +19082,13 @@ The card results will be the lead's entry.
 
 **The plan's own checks** (MEASURED, the round's ledger):
 - Nine verifiers checked the plan before and while E1 ran: P7 and P7b on Sonnet, P7c to P7i on Haiku.
-- Their (b)s numbered 2, 1, 2, 4, 1, 2, 1, 2 and 0. P7's two were in the plan's first draft and P7b's one was in E1's brief. Every later one was in the lead's own text written to answer the pass before: dates, rules that could not be decided, and lists left incomplete.
-- The criteria were revised after dispatch: at 15:48 and 16:14 before either arm had reported, then five more times as the passes found gaps, each before any verifier of an arm had reported. Each revision is dated in the plan.
+- Their (b)s numbered 2, 1, 2, 4, 1, 2, 1, 2 and 0. P7's two were in the plan's first draft and P7b's one was in E1's brief. Every later one was in the lead's own text written to answer the pass before: dates, statements of fact, rules that could not be decided, and lists left incomplete.
+- The criteria were revised after dispatch: at 15:48 and 16:14 before either arm had reported, then five more times as the passes found gaps, each before any verifier of an arm had reported. Each is dated in the plan by its commit, the last as the commit that followed P7h (18:34:12 by git).
 - **Logan's answer to the first revision:** "Keep the more fair rule you went with". It made "materially worse" a count, item by item, against the other arm's count, where the old rule had failed Sonnet's arm on any case of its own.
 
-**What the authors were told after dispatch** (READ, the briefs):
+**What the authors and the verifiers were told after dispatch** (READ, the briefs):
 - **Brief correction 1,** to both arms word for word at 15:44, before either reported. It came from verifier-P7b's check of the brief, and has seven items.
-  - Its first item rested on a premise of the lead's, "at fp32 there is no window", which is wrong. Both arms' verifiers found a few fp32 arguments that mark: the floats nearest ln(1 + t) for t = 2^-23, 2^-22, 2^-21, -2^-22 and -2^-21. Each mark is justified and its guess right.
+  - Its first item rested on a premise of the lead's, "at fp32 there is no window", which is wrong. The arms' verifiers found a few fp32 arguments that mark, the floats nearest ln(1 + t) for t = 2^-23, 2^-22, 2^-21, -2^-22 and -2^-21: VE1-a all five, VE1-b two of them. Each mark is justified and its guess right.
   - The census, which the item asked about, does find none.
 - **A clarification of M4** went to both verifiers at 18:12, word for word.
 
@@ -19115,7 +19115,7 @@ The card results will be the lead's entry.
 - **So arm b ended clean at its first re-check, after 1 send-back.**
 
 **The lead's instruments, the same on both arms** (MEASURED):
-- **The battery** at each arm's code commits (arm a 6c4666e and 076a108, arm b 4b87b9f and 5a701ab, each from a clean export): equal between the arms configuration by configuration, with the same argument hashes, instruction counts, live counts and marks. 0 wrong unmarked lanes, and `evaluate` equal to seq.py on every lane. A first run on arm a's working tree, while its author was still at work, is set aside.
+- **The battery** at each arm's code commits (arm a 6c4666e and 076a108, arm b 4b87b9f and 5a701ab, each from a clean tree of its commit: exports for 076a108 and 5a701ab, a clean clone for 6c4666e, and arm b's own clone, clean, for 4b87b9f): equal between the arms configuration by configuration, with the same argument hashes, instruction counts, live counts and marks. 0 wrong unmarked lanes, and `evaluate` equal to seq.py on every lane. A first run on arm a's working tree, while its author was still at work, is set aside.
 - **Each arm's long runs on amd-arc-box,** as its author handed them, with the serial golden stage beside them, re-run wherever a commit changed what the runs import:
   - arm a at c760d7d, 6c4666e and 076a108;
   - arm b at 4b87b9f, its golden stage again at 5a701ab.
@@ -19124,13 +19124,13 @@ The card results will be the lead's entry.
   - The sweep's first run was void, an instrument error of the lead's: every id lacked its python/ prefix, and "no tests ran" was counted as a failure. The fixed sweep found arm b's one test at 4b87b9f, and nothing else at any tip.
 
 **The comparison** (Opus, 49 min; its ledger is in the round's scratch records):
-- **The two arms built the same fragment.** It is identical at fp64 to fp256. At fp32 it computes the same values with four instructions in another order. So every lane, flag word and mark is the same in both.
+- **The two arms built the same fragment.** It is identical at fp64 to fp256. At fp32 it computes the same values, with one adjacent pair of instructions (two SELECTs of the specials) emitted in the other order, so four body entries differ. So every lane, flag word and mark is the same in both.
 - **Rubric** (a / b): correctness 3 / 3; tests that can fail 3 / 2; completeness 3 / 3; clarity 2 / 3; honest marks 2 / 3. Totals 13 / 14.
 - **Its cases:**
   - on item 1, none;
   - on item 2, checks with no plant: two shared (the shape-count and census-count pins), four in arm a only and three in arm b only.
   - Each was confirmed by the lead in the exported trees: no plant test of its arm names it.
-- **Outside the rubric's case wording,** CONFIRMED by the lead from its reproduction: arm b's tests miss arm a's planted fixed-grid offset at k = emin, which gives wrong unmarked results at fp32, fp64 and fp128. Arm a's tests catch it.
+- **Outside the rubric's case wording,** CONFIRMED by the lead from its reproduction: arm b's tests miss arm a's planted fixed-grid offset at k = emin, which gives wrong unmarked results at fp32, fp64 and fp128. Arm a's tests catch it. Its mirror finding: arm a's tests miss arm b's planted removal of the fixed grid's own test, which it believes reaches no wrong lane at the decided G.
 - **The branch it named to merge was arm a's.** It guessed arm a the larger model.
 - **The coin, opened after its report:** the line hashes to the sealed value. **Arm a was Sonnet 5.5 and arm b Opus 5.5.** Every response's model in the agents' transcripts agrees. The guess was wrong.
 
@@ -19142,7 +19142,7 @@ The card results will be the lead's entry.
    - Item 2: Sonnet's arm has 4 unshared cases and Opus's 3, so Sonnet's count is the larger. All seven are checks with no plant, and none is a wrong answer.
    - On the substance of item 2 the comparison scored Sonnet's arm higher, 3 to 2.
    - The lead's reading of the rules' undefined terms ("shares", "in all", "found") was recorded before the comparison reported.
-- **So by the rules as written, Sonnet's parcel did not succeed,** by one minor case on item 2. Both lists went to Logan, as the rules say.
+- **So by the rules as written, Sonnet's parcel did not succeed,** by one minor case on item 2. Both lists go to Logan, as the rules say: their counts went with E1's result (2026-10-13), and the seven cases are named to him with this entry's check (verifier-VIE1 found they had not been).
 
 **Time and tokens,** summed from each agent's transcript (the last line of each response; MEASURED), recorded and not deciding:
 
@@ -19189,4 +19189,5 @@ The card results will be the lead's entry.
 - **Carried to M1's build:**
   - fp32's fit to the register file: arm a found a reorder to 25 values live, arm b one to 22 to 23, neither built;
   - the fixed grid's own mark has no behavioural check (VE1-a2);
-  - the pools' lost negative thresholds, which arm a's test_the_pools_lose_their_negative_thresholds pins as they stand. That test must change when the pools are fixed.
+  - the pools' lost negative thresholds, which arm a's test_the_pools_lose_their_negative_thresholds_and_the_edge_pool_has_them pins as they stand. That test must change when the pools are fixed.
+- **On a host without gmpy2,** as CI's golden job is, 77 of test_mathlib.py's 252 tests skip by name, through `from test_transcend import _brute_pool` (verifier-VIE1, MEASURED with gmpy2 blocked: 175 passed, 77 skipped). The golden counts above are those of hosts that have it, the desktop and amd-arc-box.
