@@ -31,10 +31,13 @@ runs are python/tests/mathlib_runs.py.
               fp256; at fp32 the census (240 arguments) finds no window
   item 5      the constants' --check, in process and as a program
 
-and, for every check, a planted fault (mathlib.PLANTS, or a mutated
-fragment, or a faulted comparison) shown red in the check it is meant for,
-by name: the last section. Each plant also says which checks stay green, so
-that "caught by name" is not "everything is red".
+and, for every check, a planted fault shown red in the check it is meant
+for, by name: the last section. A plant is a fault of the builder
+(mathlib.PLANTS), of the budget tool (mathlib_budget.PLANTS), of an
+independent derivation (TOOLS), or a mutation of a fresh build or of its
+fragment (MUTATIONS); none touches a module-level cache, so every test passes
+alone, in any order and under pytest-xdist. Each plant also says which checks
+stay green, so that "caught by name" is not "everything is red".
 """
 
 import pathlib
@@ -74,9 +77,12 @@ def rid(v):
     return sf.RND_NAMES[v]
 
 
-# MEASURED (parcel E1's entry; the study's section 5.1 has the same): the
-# instructions, bank words and values live of each fragment, by format, in
-# the order rne, rtz, rdn, rup, rmm. A change here is a change of design.
+# MEASURED (parcel E1's entry): the instructions, bank words and values live
+# of each fragment, by format, in the order rne, rtz, rdn, rup, rmm. A change
+# here is a change of design. The study's section 5.1 gives the same at fp128
+# and fp256 and for fp32's 382 instructions (G = 40), but its fp64 counts are
+# at G = 46 (178 to 181 instructions, one more than G = 44's) and its fp32
+# bank words (72 to 73) are at G = 46 (G = 40's are 70 to 71).
 SHAPE = {
     "fp32": ((382, 71, 34), (380, 71, 33), (380, 71, 33), (379, 70, 33),
              (382, 71, 34)),
@@ -112,8 +118,7 @@ def test_a_fragment_is_a_specialised_c4_fragment_and_is_built_once(fmt, rnd):
         "exp", fmt, rnd, ("a",), "specialised")
     assert f.result[0] == f.flags[0] == "v"
     assert ml.fragment("exp", fmt, rnd) is f
-    assert (len(f), len(f.words), f.live_max()) == \
-        SHAPE[fmt.name][RND.index(rnd)]
+    assert H.check_shape(f, SHAPE[fmt.name][RND.index(rnd)]) == []
 
 
 def test_a_name_that_is_not_built_is_refused_by_name():
@@ -174,19 +179,13 @@ def test_the_flag_word_takes_exactly_the_studys_eight_values(fmt, rnd):
 
 def test_no_augmented_addition_and_the_error_free_sums_are_counted():
     """No augadd (revision 8's question 9): an ALU fragment cannot hold one,
-    and its error-free sums are Fast2Sum where the exponents are ordered and
-    TwoSum elsewhere: nine and one in the double word's exp, 20 and 18 in
-    fp32's triple word."""
-    allowed = {"fma", "add", "sub", "mul", "neg", "abs", "select", "cmplt",
-               "cmple", "cmpeq", "iand", "ior", "ixor", "iadd", "isub",
-               "ishl", "ishr", "icmplt"}
+    and its opcodes are the design's eighteen; its error-free sums are
+    Fast2Sum where the exponents are ordered and TwoSum elsewhere: nine and
+    one in the double word's exp, 20 and 18 in fp32's triple word."""
     for fmt in FORMATS:
         for rnd in RND:
-            f = ml.fragment("exp", fmt, rnd)
-            assert {sf.OP_NAMES[o] for o, _r, _s in f.body} == allowed
-            b = ml.build_exp(fmt, rnd)
-            want = (20, 18) if fmt is FP32 else (9, 1)
-            assert (b.meta["fast_two_sum"], b.meta["two_sum"]) == want
+            assert H.check_sums(ml.build_exp(fmt, rnd)) == []
+    assert len(H.ALU_OPS) == 18 and H.EFT_COUNTS["fp32"] == (20, 18)
 
 
 @pytest.mark.parametrize("fmt", FORMATS, ids=fid)
@@ -194,18 +193,11 @@ def test_the_fragment_is_specialised_and_the_unpruned_form_agrees(fmt):
     """The fragment is in C4's specialised normal form, so cftc's internal
     check will instantiate the same body; and the instrumented form (the
     unpruned body the budget reads) computes the same result and flag
-    word."""
+    word. A fresh build is the cached fragment."""
     for rnd in (RNE, RDN):
         b = ml.build_exp(fmt, rnd)
-        f = b.fragment()
-        g = routines.specialise(f)
-        assert (g.body, g.result, g.flags, g.words) == \
-            (f.body, f.result, f.flags, f.words)
-        assert f.body == ml.fragment("exp", fmt, rnd).body
-        assert len(b.body) >= len(f.body) and len(b.phase_of) == len(b.body)
-        for x in list(H.pools(fmt))[::9]:
-            assert b.run(x)[:2] == ml.evaluate(f, x)
-        assert {"Vh", "Vl", "Bv", "Ek"} <= set(b.probes) or fmt is FP32
+        assert H.check_specialised(b) == []
+        assert b.fragment().body == ml.fragment("exp", fmt, rnd).body
 
 
 def _mutated(f, **kw):
@@ -387,6 +379,56 @@ def test_the_compiled_shape_raises_exactly_the_operations_flags_and_marks(
 
 
 # =====================================================================
+# the fixed grid's rounding, on states no argument is known to reach
+# =====================================================================
+
+def test_a_probe_can_be_replaced_and_what_follows_runs_on_the_new_state():
+    b = ml.build_exp(FP64, RNE)
+    x = sf.one_bits(FP64)
+    res, fw, pr = b.run(x, want=("Vh", "Vl", "Ek"))
+    assert b.run(x, over={})[:2] == (res, fw)
+    assert b.run(x, over=pr)[:2] == (res, fw)         # its own values back
+    # V_h and V_l both replaced (V_l is computed from V_h, so one alone is
+    # rebuilt around): V = 1, and 2^k is 2 for this argument (k = 1)
+    other = b.run(x, over={"Vh": sf.one_bits(FP64), "Vl": 0})
+    assert other[0] == ml._enc(FP64, 2) != res
+    b.probes["a_word"] = ("w", "ZERO")
+    with pytest.raises(ValueError, match="not a value of the body"):
+        b.run(x, over={"a_word": 0})
+
+
+@pytest.mark.parametrize("fmt", FORMATS, ids=fid)
+def test_the_fixed_grids_rounding_is_right_where_round_to_odd_decides(fmt):
+    """V_h exactly on a half-grid point, |V_l| = 8 Bv: the correct rounding
+    of V 2^k under every attribute, unmarked, at two grids."""
+    for rnd in RND:
+        assert H.check_fixed_grid(ml.build_exp(fmt, rnd)) == []
+
+
+def test_round_to_nearest_is_wrong_on_those_states_under_rne_and_rmm_only():
+    """The plant odd_dropped builds the fixed grid's sum of V_l's share
+    round-to-nearest: V_l is lost, the tie goes to even (rne) or away from
+    zero (rmm), wrong for V_l > 0 under rne and for V_l < 0 under rmm, at
+    both grids of each format (16 of 80 states), and right under the
+    directed three. No other check sees it (the plants table)."""
+    wrong = 0
+    for fmt in FORMATS:
+        for rnd in RND:
+            found = H.check_fixed_grid(
+                ml.build_exp(fmt, rnd, plant="odd_dropped"))
+            if rnd == RNE:
+                assert len(found) == 2 and all("V_l > 0" in s for s in found)
+            elif rnd == RMM:
+                assert len(found) == 2 and all("V_l < 0" in s for s in found)
+            else:
+                assert found == []
+            assert all(s.startswith("fixed_grid:") and "marked" not in s
+                       for s in found)
+            wrong += len(found)
+    assert wrong == 16
+
+
+# =====================================================================
 # item 2: the bound against mpmath, and the budget
 # =====================================================================
 
@@ -502,13 +544,10 @@ def test_the_census_counts_at_the_decided_g(fmt):
     """The study's 3.5 counts are at G = 46; at fp64's decided G = 44 the
     directed attributes mark 39 of 240 (the plan's verifier: 39). Every
     committed centre is among the marks."""
-    rn, directed = CENSUS_MARKS[fmt.name]
     for rnd in RND:
-        t = H.census_run(ml.fragment("exp", fmt, rnd))
-        assert len(t.marked) == (rn if rnd in (RNE, RMM) else directed)
-        assert not t.wrong
-        assert {F.argument(fmt, c) for c in F.FAMILY[fmt.name][
-            sf.RND_NAMES[rnd]]} <= set(t.marked)
+        f = ml.fragment("exp", fmt, rnd)
+        assert H.check_census_counts(f, CENSUS_MARKS[fmt.name]) == []
+        assert H.census_run(f).n == 240
 
 
 # =====================================================================
@@ -538,26 +577,112 @@ def test_the_constants_check_as_a_module_passes_and_can_exit_nonzero(
 
 def test_the_derived_constants_are_what_the_independent_derivation_says():
     """Spot values read from outside the generator: ln 2 to 3,200 bits by
-    its atanh series, 2^(1/8) by an integer root, against the words held."""
-    lo, hi = ml._check_ln2()
-    assert hi - lo < Fraction(1, 2 ** 3180)
-    assert abs(ml._ln2() - lo) < Fraction(1, 2 ** 2990)
-    for fmt in FORMATS:
-        b = ml.build_exp(fmt, RNE)
-        th1 = ml._dec(fmt, b.words[b.roles["TH1" if fmt is not FP32
-                                           else "T1_0"][1]])
-        vlo, vhi = ml._check_two_to_eighth(1)
-        assert abs(th1 - vlo) <= Fraction(1, 2 ** fmt.prec)
+    its atanh series, 2^(j/8) by an integer root, against the words held:
+    ln 2 as derived, the table's eight high words, the Cody-Waite sum."""
+    assert H.check_spot() == []
 
 
 # =====================================================================
 # the plants: a fault for every check, shown caught by name
 # =====================================================================
 
+# The mutations of a fresh build or of its fragment, for the checks whose
+# faults the builder cannot make because the specialised fragment and the
+# instrumented form both come from one body: name -> (what it is, a function
+# (build, fragment) -> (build, fragment)). Each works on the fresh build that
+# run_check makes, never on the cache.
+
+def _select_unsimplified(b, f):
+    res = f.result
+    body = f.body + ((sf.OP_SELECT, None, (res, res, res)),)
+    return b, _mutated(f, body=body, result=("v", len(f.body)))
+
+
+def _operand_swapped(b, f):
+    i = [k for k, (op, _r, _s) in enumerate(f.body) if op == sf.OP_SUB][0]
+    op, r, (s0, s1) = f.body[i]
+    return b, _mutated(f, body=_bodies(f, **{f"i{i}": (op, r, (s1, s0))}))
+
+
+def _phase_short(b, f):
+    b.phase_of.pop()
+    return b, f
+
+
+def _probe_dropped(b, f):
+    del b.probes["Bv"]
+    return b, f
+
+
+MUTATIONS = {
+    "select_unsimplified": (
+        "a SELECT of one value three times appended as the result: the "
+        "same value, but the fragment is not in the specialised form",
+        _select_unsimplified),
+    "operand_swapped": (
+        "the first SUB of the fragment with its operands swapped: the "
+        "instrumented form no longer computes what the fragment does",
+        _operand_swapped),
+    "phase_short": (
+        "an instruction without its phase in the instrumented form",
+        _phase_short),
+    "probe_dropped": (
+        "the probe Bv, which the budget reads, missing", _probe_dropped),
+}
+
+
+# Faults of an independent derivation, for the spot check: name -> (what it
+# is, the keyword arguments of H.check_spot that plant it).
+
+def _ln2_wrong():
+    return {"ln2": ml._ln2() + Fraction(1, 2 ** 200)}
+
+
+def _enclosure_loose():
+    lo, hi = ml._check_ln2()
+    return {"enclosure": (lo - Fraction(1, 2 ** 100), hi)}
+
+
+TOOLS = {
+    "ln2_wrong": ("the generator's ln 2 off by 2^-200", _ln2_wrong),
+    "enclosure_loose": ("the independent enclosure of ln 2 no tighter than "
+                        "2^-100", _enclosure_loose),
+}
+
+# the checks of the table, and the harness function each is
+CHECK_FUNCTIONS = {
+    "pools": "check_pools", "edges": "check_edges",
+    "lanes": "check_random_lanes", "bound": "check_bound",
+    "budget": "check_budget", "rate": "check_rate",
+    "family": "check_family", "constants": "check_constants",
+    "census": "check_census_empty", "census_counts": "check_census_counts",
+    "shape": "check_shape", "sums": "check_sums",
+    "specialised": "check_specialised", "fixed_grid": "check_fixed_grid",
+    "spot": "check_spot",
+}
+# the checks whose plants are tests of their own below
+ELSEWHERE = {
+    "check_seq": "test_the_seq_check_sees_a_faulted_evaluator",
+    "check_r24": "test_the_r24_check_sees_a_flag_left_loud",
+    "check_invariants": "test_each_clause_of_the_invariants_can_fail",
+    "check_family_list": "test_the_census_and_family_list_checks_can_fail",
+}
+# the common comparison of pools, edges, lanes and seq, which has no name of
+# its own in a finding: their plants are its
+HELPERS = {"check_lanes"}
+
+
 def run_check(check, plant, fmt, rnd):
-    """The findings of the check `check` on exp built with `plant`."""
-    b = ml.build_exp(fmt, rnd, plant=plant)
+    """The findings of the check `check` on exp built under `plant`: a fault
+    of the builder (mathlib.PLANTS), of the budget tool
+    (mathlib_budget.PLANTS), of an independent derivation (TOOLS) or a
+    mutation of the fresh build or its fragment (MUTATIONS); None builds
+    clean."""
+    builder_plant = plant if plant in ml.PLANTS else None
+    b = ml.build_exp(fmt, rnd, plant=builder_plant)
     f = b.fragment()
+    if plant in MUTATIONS:
+        b, f = MUTATIONS[plant][1](b, f)
     if check == "pools":
         return H.check_pools(f)[0]
     if check == "edges":
@@ -568,89 +693,180 @@ def run_check(check, plant, fmt, rnd):
         return H.check_bound(b, H.random_main(fmt, 100, 1)
                              + H.placed_exp(fmt))[0]
     if check == "budget":
-        return H.check_budget(b, H.weighted_exp(fmt, 20, 3)
-                              + H.placed_exp(fmt)[:30])[0]
+        return H.check_budget(
+            b, H.weighted_exp(fmt, 20, 3) + H.placed_exp(fmt)[:30],
+            plant=plant if plant in B.PLANTS else None)[0]
     if check == "family":
         cen = F.FAMILY[fmt.name][sf.RND_NAMES[rnd]]
         return H.check_family(f, [cen[0], cen[len(cen) // 2], cen[-1]],
                               deep=True)[0]
     if check == "rate":
-        return H.check_rate(fmt, rnd, 1000, 7, plant=plant)[0]
+        return H.check_rate(fmt, rnd, 1000, 7, plant=builder_plant)[0]
     if check == "constants":
         return H.check_constants(
-            builder=lambda ff, rr: ml.build_exp(ff, rr, plant=plant),
+            builder=lambda ff, rr: ml.build_exp(ff, rr, plant=builder_plant),
             formats=(fmt,), attrs=(rnd,))[0]
     if check == "census":
         return H.check_census_empty(f)[0]
+    if check == "census_counts":
+        return H.check_census_counts(f, CENSUS_MARKS[fmt.name])
+    if check == "shape":
+        return H.check_shape(f, SHAPE[fmt.name][RND.index(rnd)])
+    if check == "sums":
+        return H.check_sums(b, f)
+    if check == "specialised":
+        return H.check_specialised(b, f)
+    if check == "fixed_grid":
+        return H.check_fixed_grid(b)
+    if check == "spot":
+        kw = TOOLS[plant][1]() if plant in TOOLS else {}
+        return H.check_spot(
+            builder=lambda ff, rr: ml.build_exp(ff, rr, plant=builder_plant),
+            formats=(fmt,), rnd=rnd, **kw)
     raise ValueError(check)
 
 
 # (plant, format, attribute, the checks it must turn red, the checks that
-# must stay green). Each red check must return a finding that begins with
-# its own name. The green ones are the study's "and only it": a fault in
-# the reduction's low word or the polynomial is invisible to the pools and
-# to the structured lanes and is the bound's alone.
+# must stay green[, {check: text every one of its findings must hold}]).
+# Each red check must return a finding that begins with its own name. The
+# green ones are the study's "and only it": a fault in the reduction's low
+# word or the polynomial is invisible to the pools and to the structured
+# lanes and is the bound's alone. The last rows are the plants of the checks
+# that look at the fragment and not at its values: its shape, its sums, its
+# specialised form beside the instrumented one, the fixed grid's rounding on
+# states no argument reaches, the independent constants, the budget tool.
+_CLEAN = ("pools", "edges", "lanes", "bound", "constants")
 PLANTED = [
     ("table_entry", FP64, RNE,
-     ("pools", "edges", "lanes", "bound", "budget", "rate", "constants"),
-     ("family",)),
+     ("pools", "edges", "lanes", "bound", "budget", "rate", "constants",
+      "spot"),
+     ("family", "shape", "sums", "specialised", "fixed_grid",
+      "census_counts")),
     ("c1_ulp", FP64, RNE,
-     ("pools", "edges", "lanes", "bound", "budget", "rate", "constants"),
-     ("family",)),
+     ("pools", "edges", "lanes", "bound", "budget", "rate", "constants",
+      "spot"),
+     ("family", "shape", "sums", "specialised", "fixed_grid",
+      "census_counts")),
     ("bound_loose", FP64, RNE,
-     ("bound", "budget", "rate", "family", "constants"), ("pools", "edges")),
-    ("bound_wide", FP64, RNE, ("rate", "family", "constants"), ("bound",)),
+     ("bound", "budget", "rate", "family", "constants", "census_counts"),
+     ("pools", "edges", "shape", "sums", "specialised", "fixed_grid",
+      "spot")),
+    ("bound_wide", FP64, RNE, ("rate", "family", "constants", "fixed_grid"),
+     ("bound", "shape", "sums", "specialised", "spot", "census_counts")),
     ("bound_half", FP128, RNE, ("family", "constants"),
-     ("bound", "pools", "edges")),
+     ("bound", "pools", "edges", "shape", "sums", "specialised",
+      "fixed_grid", "spot", "census_counts")),
     ("bound_double", FP128, RNE, ("family", "rate", "constants"),
-     ("bound", "pools", "edges")),
-    ("mark_silenced", FP64, RNE, ("pools", "rate", "family"),
-     ("bound", "constants")),
-    ("mark_silenced", FP64, RDN, ("pools", "rate", "family"),
-     ("bound", "lanes", "constants")),
-    ("rl_through_y", FP64, RNE, ("bound", "budget"),
-     ("pools", "edges", "lanes", "rate", "family", "constants")),
-    ("c3_dropped", FP64, RNE, ("bound", "budget", "constants"),
-     ("pools", "edges", "lanes", "rate", "family")),
-    ("tiny_gate_off", FP64, RDN, ("pools",), ("bound", "family", "constants")),
+     ("bound", "pools", "edges", "shape", "sums", "specialised",
+      "fixed_grid", "spot", "census_counts")),
+    ("mark_silenced", FP64, RNE,
+     ("pools", "rate", "family", "shape", "sums", "census_counts"),
+     ("bound", "constants", "specialised", "fixed_grid", "spot")),
+    ("mark_silenced", FP64, RDN,
+     ("pools", "rate", "family", "shape", "sums", "census_counts"),
+     ("bound", "lanes", "constants", "specialised", "fixed_grid", "spot")),
+    ("rl_through_y", FP64, RNE, ("bound", "budget", "shape"),
+     ("pools", "edges", "lanes", "rate", "family", "constants", "sums",
+      "specialised", "fixed_grid", "spot", "census_counts")),
+    ("c3_dropped", FP64, RNE,
+     ("bound", "budget", "constants", "shape", "spot"),
+     ("pools", "edges", "lanes", "rate", "family", "sums", "specialised",
+      "fixed_grid", "census_counts")),
+    ("tiny_gate_off", FP64, RDN, ("pools", "shape"),
+     ("bound", "family", "constants", "sums", "specialised", "fixed_grid",
+      "spot", "census_counts")),
     ("screen_ulp", FP64, RNE, ("pools", "edges", "constants"),
-     ("bound", "family")),
-    ("head_short", FP64, RNE, ("bound", "budget", "constants"),
-     ("pools", "edges", "rate", "family")),
-    ("tininess_klt_only", FP64, RNE, ("edges",),
-     ("pools", "bound", "family", "constants")),
+     ("bound", "family", "shape", "sums", "specialised", "fixed_grid",
+      "spot", "census_counts")),
+    ("head_short", FP64, RNE,
+     ("bound", "budget", "constants", "shape", "sums"),
+     ("pools", "edges", "rate", "family", "specialised", "fixed_grid",
+      "spot", "census_counts")),
+    ("tininess_klt_only", FP64, RNE, ("edges", "shape", "sums"),
+     ("pools", "bound", "family", "constants", "specialised", "fixed_grid",
+      "spot", "census_counts")),
     ("c0_wrong", FP64, RNE, ("edges", "constants"),
-     ("pools", "bound", "family")),
-    ("square_term_dropped", FP32, RNE, ("bound", "constants"),
-     ("pools", "edges", "census")),
-    ("bound_wide", FP32, RNE, ("census", "pools", "rate", "constants"),
-     ("bound", "edges")),
+     ("pools", "bound", "family", "shape", "sums", "specialised",
+      "fixed_grid", "spot", "census_counts")),
+    ("square_term_dropped", FP32, RNE, ("bound", "constants", "shape"),
+     ("pools", "edges", "census", "sums", "specialised", "fixed_grid",
+      "spot")),
+    ("bound_wide", FP32, RNE,
+     ("census", "pools", "rate", "constants", "fixed_grid"),
+     ("bound", "edges", "shape", "sums", "specialised", "spot")),
+    ("two_sum_all", FP64, RNE, ("shape", "sums"),
+     _CLEAN + ("budget", "specialised", "fixed_grid", "spot",
+               "census_counts")),
+    ("two_sum_all", FP32, RNE, ("shape", "sums"),
+     _CLEAN + ("specialised", "fixed_grid", "spot")),
+    ("abs_by_copysign", FP64, RNE, ("sums",),
+     _CLEAN + ("budget", "shape", "specialised", "fixed_grid", "spot",
+               "census_counts")),
+    ("odd_dropped", FP64, RNE, ("fixed_grid", "shape"),
+     _CLEAN + ("budget", "rate", "family", "sums", "specialised", "spot",
+               "census_counts")),
+    ("odd_dropped", FP32, RNE, ("fixed_grid", "shape"),
+     _CLEAN + ("sums", "specialised", "spot", "census")),
+    ("capacities_dropped", FP128, RNE, ("budget",), ("bound", "pools"),
+     {"budget": "is past the budget's bound"}),
+    ("ln2_wrong", FP64, RNE, ("spot",), ("constants", "pools")),
+    ("enclosure_loose", FP64, RNE, ("spot",), ("constants", "pools")),
+    ("select_unsimplified", FP64, RNE, ("specialised", "shape"),
+     ("pools", "sums")),
+    ("operand_swapped", FP64, RNE, ("specialised", "pools"), ("sums",)),
+    ("phase_short", FP64, RNE, ("specialised",), ("pools", "sums", "shape")),
+    ("probe_dropped", FP64, RNE, ("specialised",),
+     ("pools", "sums", "shape")),
 ]
 
 
 def test_every_plant_is_in_the_table_and_every_row_names_a_plant():
-    assert {row[0] for row in PLANTED} == set(ml.PLANTS)
+    named = {row[0] for row in PLANTED}
+    kinds = (set(ml.PLANTS), set(B.PLANTS), set(TOOLS), set(MUTATIONS))
+    assert named == set().union(*kinds)
+    assert sum(len(k) for k in kinds) == len(named)     # one name, one kind
     for plant, (families, text) in ml.PLANTS.items():
         assert families and text
+    for row in PLANTED:
+        assert set(row[3]) | set(row[4]) <= set(CHECK_FUNCTIONS), row[:3]
+        assert not set(row[3]) & set(row[4]), row[:3]
+
+
+def test_every_check_of_the_harness_has_a_plant_that_turns_it_red():
+    """No check without a fault shown caught by name: every check function
+    of the harness is a column of the table with a plant red in it, or has
+    a test of its own among those below."""
+    assert {n for n in dir(H) if n.startswith("check_")} == \
+        set(CHECK_FUNCTIONS.values()) | set(ELSEWHERE) | HELPERS
+    red = {c for row in PLANTED for c in row[3]}
+    assert set(CHECK_FUNCTIONS) <= red
+    for name in ELSEWHERE.values():
+        assert callable(globals()[name]), name
 
 
 @pytest.mark.parametrize(
     "row", PLANTED, ids=lambda r: f"{r[0]}-{r[1].name}-{sf.RND_NAMES[r[2]]}")
 def test_each_planted_fault_is_caught_by_name_and_the_others_stay_green(row):
-    plant, fmt, rnd, red, green = row
+    plant, fmt, rnd, red, green, *rest = row
+    says = rest[0] if rest else {}
     for check in red:
         found = run_check(check, plant, fmt, rnd)
         assert found and all(s.startswith(check + ":") for s in found), \
             (plant, check, found)
+        if check in says:
+            assert all(says[check] in s for s in found), (plant, check, found)
     for check in green:
         assert run_check(check, plant, fmt, rnd) == [], (plant, check)
 
 
 def test_a_clean_build_is_green_in_every_check_the_plants_use():
     for check in ("pools", "edges", "lanes", "bound", "budget", "rate",
-                  "constants", "family"):
+                  "constants", "family", "census_counts", "shape", "sums",
+                  "specialised", "fixed_grid", "spot"):
         assert run_check(check, None, FP64, RNE) == [], check
     assert run_check("census", None, FP32, RNE) == []
+    for check in ("shape", "sums", "specialised", "fixed_grid", "spot"):
+        assert run_check(check, None, FP32, RNE) == [], check
 
 
 def test_a_mark_off_the_structured_list_fails_the_pools():

@@ -32,7 +32,21 @@ plants it says which.
                 against the theory's generation; the centres and their
                 neighbours, inside and outside the windows
   census:       at fp32 the study's census finds no window
+  census_counts at fp64, fp128 and fp256 the study's census marks the
+                counted lanes, among them every committed centre
   edges:        pools: the thresholds with their signs and the cells' ends
+  lanes:        pools: random and weighted lanes
+  shape:        the fragment's instruction, word and live counts are the
+                pinned ones
+  sums:         the fragment's opcodes are the design's ALU set (no
+                augmented addition), and its error-free sums are counted
+  specialised:  the fragment is in C4's specialised form, and the
+                instrumented form (the unpruned body the budget reads, its
+                phases and probes) agrees with it
+  fixed_grid:   the fixed grid's one rounding, on states of V_h and V_l
+                that no argument is known to reach
+  spot:         constants read against an enclosure independent of the
+                generator: ln 2, the table's high words, the Cody-Waite sum
   invariants:   mathlib.invariants()
   constants:    mathlib.check_constants()
 """
@@ -526,13 +540,14 @@ def check_bound(b, xs, label="random"):
     return out, (worst, n)
 
 
-def check_budget(b, xs, label="budget"):
+def check_budget(b, xs, label="budget", plant=None):
     """[finding], summary: budget: the first-order budget's bound
     (mathlib_budget: the method's largest error plus the rounding
     instructions' largest capacities, in Bv) under 1, and no sampled lane's
-    error past it."""
+    error past it. `plant` names a fault of the tool itself
+    (mathlib_budget.PLANTS), for the test that shows the second branch."""
     import mathlib_budget as MB
-    s = MB.Budget(b).add(xs).summary()
+    s = MB.Budget(b, plant=plant).add(xs).summary()
     out = []
     where = f"budget: {b.fmt.name} {sf.RND_NAMES[b.rnd]} {label}"
     if s["bound"] >= 1:
@@ -643,6 +658,34 @@ def check_census_empty(f):
     return out, t
 
 
+def check_census_counts(f, want):
+    """census_counts: the study's census (240 arguments) through the
+    fragment marks `want` = (under rne and rmm, under the directed three)
+    lanes at this format and the decided G, every committed centre is among
+    them, and no unmarked lane is wrong. The count is a measure of the
+    bound's calibration: the study's 3.5 counts are at G = 46, and at fp64's
+    G = 44 the directed attributes mark 39."""
+    import mathlib_family as F
+    t = census_run(f)
+    fmt, rnd = f.fmt, f.rnd
+    expect = want[0] if rnd in (sf.RND_RNE, sf.RND_RMM) else want[1]
+    where = f"census_counts: {fmt.name} {sf.RND_NAMES[rnd]}"
+    out = []
+    if len(t.marked) != expect:
+        out.append(f"{where}: {len(t.marked)} of the census's {t.n} "
+                   f"arguments are marked, {expect} expected")
+    if t.wrong:
+        out.append(f"{where}: {len(t.wrong)} census lanes are wrong "
+                   f"unmarked, first {hex(t.wrong[0][0])}")
+    centres = {F.argument(fmt, c)
+               for c in F.FAMILY[fmt.name][sf.RND_NAMES[rnd]]}
+    missing = sorted(centres - set(t.marked))
+    if missing:
+        out.append(f"{where}: {len(missing)} committed centres are not "
+                   f"marked, first {_hexes(missing)}")
+    return out
+
+
 def check_family(f, centres, G=None, extra=(), deep=False):
     """[finding], stats: family: on the centres and their neighbours, on
     `extra` (the census arguments that are not centres) and, with `deep`, on
@@ -698,3 +741,202 @@ def check_invariants(f, **kw):
 def check_constants(**kw):
     lines, findings = ml.check_constants(**kw)
     return [f"constants: {s}" for s in findings], lines
+
+
+# ---- the fragment's shape, its sums and its instrumented form ---------------
+
+# The design's ALU opcodes, by name. No augmented addition: R21's AUGADD and
+# AUGERR are control instructions, not ALU opcodes, so a fragment's body
+# cannot hold one (revision 8's question 9); and none of min, max, copysign,
+# the seeds or IMUL, which the design does not use.
+ALU_OPS = frozenset({
+    "fma", "add", "sub", "mul", "neg", "abs", "select", "cmplt", "cmple",
+    "cmpeq", "iand", "ior", "ixor", "iadd", "isub", "ishl", "ishr",
+    "icmplt"})
+
+# The error-free sums the builders make, (Fast2Sums, where the exponents are
+# ordered, and TwoSums elsewhere): nine and one in the double-word exp (the
+# study's table of augadd, 5.3), 20 and 18 in fp32's triple word.
+EFT_COUNTS = {"fp32": (20, 18), "fp64": (9, 1), "fp128": (9, 1),
+              "fp256": (9, 1)}
+
+
+def check_shape(f, want):
+    """shape: the fragment's (instructions, bank words, values live) are the
+    pinned `want`: a change of any of them is a change of design."""
+    got = (len(f), len(f.words), f.live_max())
+    if got == tuple(want):
+        return []
+    return [f"shape: {f.fmt.name} {sf.RND_NAMES[f.rnd]}: {got[0]} "
+            f"instructions, {got[1]} words, {got[2]} values live; the pinned "
+            f"shape is {want[0]}, {want[1]}, {want[2]}"]
+
+
+def check_sums(b, f=None):
+    """sums: the fragment's opcodes are exactly the design's ALU set
+    (ALU_OPS), so there is no augmented addition in it and no opcode the
+    design does not use, and the builder made the design's number of
+    Fast2Sums and TwoSums (EFT_COUNTS)."""
+    f = b.fragment() if f is None else f
+    where = f"sums: {b.fmt.name} {sf.RND_NAMES[b.rnd]}"
+    names = {sf.OP_NAMES.get(op, f"opcode {op}") for op, _r, _s in f.body}
+    out = []
+    if names != ALU_OPS:
+        out.append(f"{where}: the opcodes are not the design's ALU set: "
+                   f"outside it {sorted(names - ALU_OPS)}, missing "
+                   f"{sorted(ALU_OPS - names)}")
+    got = (b.meta["fast_two_sum"], b.meta["two_sum"])
+    want = EFT_COUNTS[b.fmt.name]
+    if got != want:
+        out.append(f"{where}: {got[0]} Fast2Sums and {got[1]} TwoSums, the "
+                   f"design has {want[0]} and {want[1]}")
+    return out
+
+
+def check_specialised(b, f=None, xs=None):
+    """specialised: the fragment (b.fragment(), or `f`) is in C4's
+    specialised form, which cftc's internal check will instantiate - C4's
+    specialise() leaves it as it is - and the instrumented form beside it,
+    the unpruned body the budget reads, agrees with it: no shorter than the
+    fragment, a phase for every instruction, the probes the budget reads,
+    and the same (result, flag word) on every lane of `xs` (a ninth of the
+    pools, by default)."""
+    fmt = b.fmt
+    f = b.fragment() if f is None else f
+    where = f"specialised: {fmt.name} {sf.RND_NAMES[b.rnd]}"
+    out = []
+    g = routines.specialise(f)
+    if (g.body, g.result, g.flags, g.words) != \
+            (f.body, f.result, f.flags, f.words):
+        out.append(f"{where}: specialise() changes the fragment, "
+                   f"{len(f.body)} instructions to {len(g.body)}: it is not "
+                   f"in the specialised form")
+    if len(b.body) < len(f.body):
+        out.append(f"{where}: the unpruned body has {len(b.body)} "
+                   f"instructions, fewer than the fragment's {len(f.body)}")
+    if len(b.phase_of) != len(b.body):
+        out.append(f"{where}: phase_of has {len(b.phase_of)} entries for "
+                   f"{len(b.body)} instructions")
+    need = ("V0", "V1", "V2", "Vh", "Bv", "Ek") \
+        if b.meta["family"] == "triple word" else ("Vh", "Vl", "Bv", "Ek")
+    lost = [k for k in need if k not in b.probes]
+    if lost:
+        out.append(f"{where}: the instrumented form lacks the probes {lost}")
+    xs = list(pools(fmt))[::9] if xs is None else xs
+    bad = [x for x in xs if b.run(x)[:2] != ml.evaluate(f, x)]
+    if bad:
+        out.append(f"{where}: the instrumented form and the fragment differ "
+                   f"on {len(bad)} of {len(xs)} lanes, first {hex(bad[0])}")
+    return out
+
+
+# ---- the fixed grid's rounding, on states no argument is known to reach -----
+
+def check_fixed_grid(b, grid_bits=(16, 8)):
+    """fixed_grid: the fixed grid's one rounding of a result that may be
+    subnormal, on states of (V_h, V_l) that no argument is known to reach.
+
+    At k = emin - p + 1 + g the result's grid, in the scaled domain V lives
+    in, is u = 2^-g, and V_h = 1 + u/2 sits exactly on a half-grid point.
+    V_l = +-8 Bv: |V_l| > Bv, so the fixed grid's own test (it marks only
+    where |V_l| <= Bv) does not mark, and V_l is under half an ulp of the
+    remainder u/2, so a sum rounded to nearest keeps nothing of it. The grid
+    point is then decided by the sign of V_l alone, which round-to-odd of
+    the remainder plus V_l keeps and round-to-nearest loses: the tie goes to
+    even (rne) or away from zero (rmm), wrong for one sign of V_l each, and
+    right for the directed attributes. The routine is run through its own
+    instructions with V_h, V_l and the exponent handed to it (Build.run's
+    `over`) and must give the correct rounding of V 2^k under its attribute,
+    exact arithmetic (mathlib._enc), unmarked."""
+    fmt, rnd, p = b.fmt, b.rnd, b.fmt.prec
+    tw = b.meta["family"] == "triple word"
+    x = sf.one_bits(fmt)
+    vl_mag = Fraction(1, 2 ** (p + b.meta["G"] - 3))
+    out = []
+    for g in grid_bits:
+        k = fmt.emin - p + 1 + g
+        vh = 1 + Fraction(1, 2 ** (g + 1))
+        for sign in (1, -1):
+            vl = sign * vl_mag
+            over = {"Ek": k + fmt.bias + b.meta["OFF"]}
+            if tw:
+                over.update(V0=ml._enc_exact(fmt, vh),
+                            V1=ml._enc_exact(fmt, vl), V2=0)
+            else:
+                over.update(Vh=ml._enc_exact(fmt, vh),
+                            Vl=ml._enc_exact(fmt, vl))
+            bits, fw, _pr = b.run(x, over=over)
+            want = ml._enc(fmt, (vh + vl) * Fraction(2) ** k, rnd)
+            tag = (f"fixed_grid: {fmt.name} {sf.RND_NAMES[rnd]} k = emin - "
+                   f"{fmt.emin - k}, V_l {'>' if sign > 0 else '<'} 0")
+            if bits != want:
+                out.append(f"{tag}: the result is {bits:#x}, the rounding of "
+                           f"V 2^k is {want:#x}")
+            if fw & ml.MARK:
+                out.append(f"{tag}: marked, though |V_l| is 8 Bv")
+    return out
+
+
+# ---- constants read from outside the generator ------------------------------
+
+def _role_value(fmt, b, role):
+    """The exact value of the word the build holds for `role`, None if it
+    holds none (a plant can leave a constant out)."""
+    ref = b.roles.get(role)
+    return None if ref is None else ml._dec(fmt, b.words[ref[1]])
+
+
+def check_spot(builder=None, formats=FORMATS, rnd=sf.RND_RNE, ln2=None,
+               enclosure=None):
+    """spot: constants read against values the generator did not make. ln 2
+    as the generator derives it (`ln2`, mathlib._ln2() by default) against
+    an enclosure from the atanh series in integers (`enclosure` = (lo, hi),
+    3,200 bits by default); and, in each format's build (`builder(fmt, rnd)`,
+    mathlib.build_exp by default), the table's high words TH_j (T_j's first
+    word at fp32) within half an ulp of 2^(j/8), enclosed by an integer 8th
+    root, and the Cody-Waite words' sum within 2^-2p of ln 2/8. `--check`
+    (mathlib.check_constants) asks every word its rounding rule; this is the
+    short look that shares nothing with the generator."""
+    lo, hi = ml._check_ln2() if enclosure is None else enclosure
+    derived = ml._ln2() if ln2 is None else ln2
+    out = []
+    if hi - lo >= Fraction(1, 2 ** 3180):
+        out.append("spot: the independent enclosure of ln 2 is wider than "
+                   "2^-3180")
+    if abs(derived - lo) >= Fraction(1, 2 ** 2990):
+        out.append("spot: the derived ln 2 is not the independent "
+                   "enclosure's, within 2^-2990")
+    build = builder or ml.build_exp
+    for fmt in formats:
+        b = build(fmt, rnd)
+        p = fmt.prec
+        half = Fraction(1, 2 ** p)
+        for j in range(N):
+            tlo, thi = ml._check_two_to_eighth(j)
+            role = f"T{j}_0" if fmt is FP32 else f"TH{j}"
+            w = _role_value(fmt, b, role)
+            if w is None:
+                out.append(f"spot: {fmt.name}: the build holds no word "
+                           f"{role}")
+            elif not tlo - half <= w <= thi + half:
+                out.append(f"spot: {fmt.name}: the table's high word of "
+                           f"2^({j}/8) is {float(w)!r}, over half an ulp "
+                           f"from it")
+        # ln 2/8 as the build holds it: C1 (stored negated), C2, C3 at the
+        # double word's formats; five words at fp32
+        if fmt is FP32:
+            signed = (("NL1", -1), ("NL2", -1), ("NL3", -1), ("L4", 1),
+                      ("NL5", -1))
+        else:
+            signed = (("NC1", -1), ("C2", 1), ("C3", 1))
+        words = [(r, sg, _role_value(fmt, b, r)) for r, sg in signed]
+        gone = [r for r, _sg, v in words if v is None]
+        if gone:
+            out.append(f"spot: {fmt.name}: the build holds no Cody-Waite "
+                       f"word {', '.join(gone)}")
+            continue
+        off = sum(sg * v for _r, sg, v in words) - (lo + hi) / (2 * N)
+        if abs(off) > Fraction(1, 2 ** (2 * p)):
+            out.append(f"spot: {fmt.name}: the Cody-Waite words sum to "
+                       f"ln 2/8 {float(off):+.3g} off, past 2^-{2 * p}")
+    return out

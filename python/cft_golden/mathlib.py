@@ -343,6 +343,15 @@ PLANTS = {
                  "2^-4: C + V reaches 2 and the grid doubles"),
     "square_term_dropped": ("tw", "fp32: the square term of e^(r1+r2) - 1 "
                             "dropped (the study's defect 7)"),
+    "two_sum_all": ("dw tw", "every Fast2Sum built as a TwoSum: the same "
+                    "values, 3 more instructions each, counted otherwise"),
+    "abs_by_copysign": ("dw tw", "|x| built as copysign(x, +0): the same "
+                        "values, an opcode outside the design's set"),
+    "odd_dropped": ("dw tw", "the fixed grid's round-to-odd of V_l's share "
+                    "built as round-to-nearest: V_l is lost where V_h is "
+                    "exactly on a half-grid point and |V_l| is under half an "
+                    "ulp of the remainder, and no argument is known to reach "
+                    "such a state (check_fixed_grid hands it one)"),
 }
 
 
@@ -447,6 +456,8 @@ class Build:
         return self.ins(sf.OP_NEG, (a,))
 
     def fabs(self, a):
+        if self.meta.get("plant") == "abs_by_copysign":
+            return self.ins(sf.OP_COPYSIGN, (a, self.word(0, "ZERO")))
         return self.ins(sf.OP_ABS, (a,))
 
     def sel(self, a, b, c):
@@ -497,6 +508,8 @@ class Build:
 
     def fast_two_sum(self, a, c):
         """(s, e) for |a| >= |c| or a = 0 (Dekker's three)."""
+        if self.meta.get("plant") == "two_sum_all":
+            return self.two_sum(a, c)
         self._eft["fast_two_sum"] += 1
         s = self.add(a, c)
         return s, self.sub(c, self.sub(s, a))
@@ -515,11 +528,25 @@ class Build:
             self.meta.get("fn", "exp"), self.fmt, self.rnd, self.inputs,
             self.body, self.result, self.flags, self.words, "read"))
 
-    def run(self, x, want=()):
+    def run(self, x, want=(), over=None):
         """One lane through the UNPRUNED body: (result bits, flag word,
         {probe: bits}) for the probes named in `want`. The result and the
-        flag word are the specialised fragment's, value for value."""
-        vals = _values(self.fmt, self.body, self.words, x)
+        flag word are the specialised fragment's, value for value.
+
+        `over`, {probe name: bits}, replaces those probes' values as the
+        body reaches them, so that what follows them runs on a state no
+        argument is known to reach: python/tests/mathlib_harness's
+        check_fixed_grid hands the fixed grid a V_h exactly on a half-grid
+        point. A probe must be a value of the body, not a word, and what the
+        body computes from a replaced probe is computed again: V_l is built
+        from V_h, so replace both."""
+        pos = {}
+        for name, bits in (over or {}).items():
+            ref = self.probes[name]
+            if ref[0] != "v":
+                raise ValueError(f"probe {name!r} is not a value of the body")
+            pos[ref[1]] = bits & ((1 << self.fmt.width) - 1)
+        vals = _values(self.fmt, self.body, self.words, x, pos)
         get = _getter(vals, self.words, x)
         return (get(self.result), get(self.flags),
                 {k: get(self.probes[k]) for k in want if k in self.probes})
@@ -535,13 +562,17 @@ def _getter(vals, words, x):
     return get
 
 
-def _values(fmt, body, words, x):
+def _values(fmt, body, words, x, over=None):
     """Every instruction's value on one lane, through softfloat.compute as
     seq.py's ALU calls it: a, b and c are the operand fields the opcode
-    reads, the attribute is the instruction's (RNE where it has none)."""
+    reads, the attribute is the instruction's (RNE where it has none).
+    `over` {instruction index: bits} takes the place of those values."""
     vals = []
     get = _getter(vals, words, x)
-    for op, r, srcs in body:
+    for i, (op, r, srcs) in enumerate(body):
+        if over and i in over:
+            vals.append(over[i])
+            continue
         ops = {"ra": 0, "rb": 0, "rc": 0}
         for s, field in zip(srcs, asm.OP_FIELDS[op]):
             ops[field] = get(s)
@@ -805,9 +836,12 @@ def _build_exp_dw(fmt: FpFormat, rnd: int, G, shift, plant):
     Z0 = b.add(Cu, Vh)
     W0 = b.sub(Z0, Cu)
     zr = b.sub(Vh, W0)
-    s_ = b.add(zr, Vl, RTZ)
-    eq = b.cmpeq(b.sub(s_, zr), Vl)
-    ro = b.sel(s_, b.ior(s_, INT1), eq)               # round-to-odd of zr + Vl
+    if plant == "odd_dropped":
+        ro = b.add(zr, Vl)                  # round-to-nearest: V_l can be lost
+    else:
+        s_ = b.add(zr, Vl, RTZ)
+        eq = b.cmpeq(b.sub(s_, zr), Vl)
+        ro = b.sel(s_, b.ior(s_, INT1), eq)           # round-to-odd of zr + Vl
     Ws = b.sub(b.add(Z0, ro, rnd), Cu)
     # the fixed grid's own test: V can straddle a boundary only where zr IS
     # one (+-u/2 for rne and rmm, 0 for the directed three) and |Vl| <= Bv
@@ -1154,7 +1188,8 @@ def _build_exp_tw(fmt: FpFormat, rnd: int, G, shift, plant):
     Zc = b.add(Cu, V0)
     W0 = b.sub(Zc, Cu)
     zr = b.sub(V0, W0)
-    t_ = _round_to_odd_add(b, zr, lo, INT1)
+    t_ = b.add(zr, lo) if plant == "odd_dropped" else \
+        _round_to_odd_add(b, zr, lo, INT1)
     Ws = b.sub(b.add(Zc, t_, rnd), Cu)
     c1_ = b.cmpeq(b.fabs(zr), hu) if hu is not None else b.cmpeq(zr, ZERO)
     smallo = b.cmple(b.fabs(lo), Bv)

@@ -214,12 +214,30 @@ class Analyzer:
         return out
 
 
+# Faults of the tool itself, for the tests. mathlib_harness.check_budget's
+# last branch, "a lane's error is past the budget's bound", is the tool's own
+# soundness check: a fault of the fragment moves the method's error M and the
+# capacities with it (the twin shares the fragment's method and every
+# rounding is counted). MEASURED on the plants table's lanes at fp64 and
+# fp128: no plant of mathlib.PLANTS fires that branch, only the first (a
+# bound not under 1) or none; a fault in the tool does.
+PLANTS = {
+    "capacities_dropped": "the capacities left out of the bound, which is "
+                          "M alone, so the lanes' rounding errors pass it",
+}
+
+
 class Budget:
     """p5_budget.py's sums, kept across regions: for each instruction the
     largest |delta_i s_i| seen (`obs`) and the largest capacity (`cap`),
-    in Bv; the largest method error M and total error E."""
+    in Bv; the largest method error M and total error E. `plant` names a
+    fault of the tool (PLANTS), for the tests."""
 
-    def __init__(self, build):
+    def __init__(self, build, plant=None):
+        if plant is not None and plant not in PLANTS:
+            raise ValueError(f"unknown budget plant {plant!r}: "
+                             f"{', '.join(PLANTS)}")
+        self.plant = plant
         self.an = Analyzer(build)
         n = len(self.an.body)
         self.obs, self.cap = [0.0] * n, [0.0] * n
@@ -244,7 +262,8 @@ class Budget:
                     if d != 0:
                         self.active[i] = True
                     self.obs[i] = max(self.obs[i], abs(float(contrib / L.Bv)))
-                    self.cap[i] = max(self.cap[i], float(capi / L.Bv))
+                    if self.plant != "capacities_dropped":
+                        self.cap[i] = max(self.cap[i], float(capi / L.Bv))
             self.lanes += 1
         return self
 
