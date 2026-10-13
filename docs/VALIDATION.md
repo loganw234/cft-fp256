@@ -19142,7 +19142,7 @@ The card results will be the lead's entry.
    - Item 2: Sonnet's arm has 4 unshared cases and Opus's 3, so Sonnet's count is the larger. All seven are checks with no plant, and none is a wrong answer.
    - On the substance of item 2 the comparison scored Sonnet's arm higher, 3 to 2.
    - The lead's reading of the rules' undefined terms ("shares", "in all", "found") was recorded before the comparison reported.
-- **So by the rules as written, Sonnet's parcel did not succeed,** by one minor case on item 2. Both lists go to Logan, as the rules say: their counts went with E1's result (2026-10-13), and the seven cases are named to him with this entry's check (verifier-VIE1 found they had not been).
+- **So by the rules as written, Sonnet's parcel did not succeed,** by one minor case on item 2. Both lists go to Logan, as the rules say: their counts went with E1's result (2026-10-12), and the seven cases were named to him after verifier-VIE1's check of this entry, which found they had not been.
 
 **Time and tokens,** summed from each agent's transcript (the last line of each response; MEASURED), recorded and not deciding:
 
@@ -19190,4 +19190,4 @@ The card results will be the lead's entry.
   - fp32's fit to the register file: arm a found a reorder to 25 values live, arm b one to 22 to 23, neither built;
   - the fixed grid's own mark has no behavioural check (VE1-a2);
   - the pools' lost negative thresholds, which arm a's test_the_pools_lose_their_negative_thresholds_and_the_edge_pool_has_them pins as they stand. That test must change when the pools are fixed.
-- **On a host without gmpy2,** as CI's golden job is, 77 of test_mathlib.py's 252 tests skip by name, through `from test_transcend import _brute_pool` (verifier-VIE1, MEASURED with gmpy2 blocked: 175 passed, 77 skipped). The golden counts above are those of hosts that have it, the desktop and amd-arc-box.
+- **On a host without gmpy2,** as CI's golden job is, 77 of test_mathlib.py's 252 tests skip by name, through `from test_transcend import _brute_pool` (verifier-VIE1, MEASURED with gmpy2 blocked: 175 passed, 77 skipped). The passed counts above were measured on hosts with gmpy2, the desktop and amd-arc-box.
