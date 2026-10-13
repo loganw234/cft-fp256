@@ -173,8 +173,10 @@ def structured_arguments(fmt, rnd):
 def check_lanes(name, fmt, rnd, xs, results, allowed_marks=None):
     """[finding], Tally: results[i] = (bits, flag word) of xs[i], against
     transcend.exp: every unmarked lane equal in bits and flags; no flag bit
-    but [4:0] and the mark; and, where `allowed_marks` is given, a marked
-    lane only at one of those arguments."""
+    but [4:0] and the mark; and, where `allowed_marks` is given (the
+    committed structured list), a marked lane only at one of those
+    arguments, and every lane at one of them marked: each is a centre the
+    theory puts inside its window."""
     t = tally(fmt, rnd, xs, results)
     where = f"{name}: {fmt.name} {sf.RND_NAMES[rnd]}"
     out = []
@@ -192,6 +194,11 @@ def check_lanes(name, fmt, rnd, xs, results, allowed_marks=None):
         if off:
             out.append(f"{where}: {len(off)} lanes are marked off the "
                        f"structured list, first {_hexes(off)}")
+        marked = set(t.marked)
+        unmarked = [x for x in xs if x in allowed_marks and x not in marked]
+        if unmarked:
+            out.append(f"{where}: {len(unmarked)} lanes on the structured "
+                       f"list are not marked, first {_hexes(unmarked)}")
     return out, t
 
 

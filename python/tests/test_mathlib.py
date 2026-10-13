@@ -562,6 +562,8 @@ def run_check(check, plant, fmt, rnd):
         return H.check_pools(f)[0]
     if check == "edges":
         return H.check_edges(f)[0]
+    if check == "lanes":
+        return H.check_random_lanes(f, 60, 3)[0]
     if check == "bound":
         return H.check_bound(b, H.random_main(fmt, 100, 1)
                              + H.placed_exp(fmt))[0]
@@ -590,9 +592,11 @@ def run_check(check, plant, fmt, rnd):
 # to the structured lanes and is the bound's alone.
 PLANTED = [
     ("table_entry", FP64, RNE,
-     ("pools", "edges", "bound", "budget", "rate", "constants"), ("family",)),
+     ("pools", "edges", "lanes", "bound", "budget", "rate", "constants"),
+     ("family",)),
     ("c1_ulp", FP64, RNE,
-     ("pools", "edges", "bound", "budget", "rate", "constants"), ("family",)),
+     ("pools", "edges", "lanes", "bound", "budget", "rate", "constants"),
+     ("family",)),
     ("bound_loose", FP64, RNE,
      ("bound", "budget", "rate", "family", "constants"), ("pools", "edges")),
     ("bound_wide", FP64, RNE, ("rate", "family", "constants"), ("bound",)),
@@ -602,10 +606,12 @@ PLANTED = [
      ("bound", "pools", "edges")),
     ("mark_silenced", FP64, RNE, ("pools", "rate", "family"),
      ("bound", "constants")),
+    ("mark_silenced", FP64, RDN, ("pools", "rate", "family"),
+     ("bound", "lanes", "constants")),
     ("rl_through_y", FP64, RNE, ("bound", "budget"),
-     ("pools", "edges", "rate", "family", "constants")),
+     ("pools", "edges", "lanes", "rate", "family", "constants")),
     ("c3_dropped", FP64, RNE, ("bound", "budget", "constants"),
-     ("pools", "edges", "rate", "family")),
+     ("pools", "edges", "lanes", "rate", "family")),
     ("tiny_gate_off", FP64, RDN, ("pools",), ("bound", "family", "constants")),
     ("screen_ulp", FP64, RNE, ("pools", "edges", "constants"),
      ("bound", "family")),
@@ -628,7 +634,8 @@ def test_every_plant_is_in_the_table_and_every_row_names_a_plant():
         assert families and text
 
 
-@pytest.mark.parametrize("row", PLANTED, ids=lambda r: f"{r[0]}-{r[1].name}")
+@pytest.mark.parametrize(
+    "row", PLANTED, ids=lambda r: f"{r[0]}-{r[1].name}-{sf.RND_NAMES[r[2]]}")
 def test_each_planted_fault_is_caught_by_name_and_the_others_stay_green(row):
     plant, fmt, rnd, red, green = row
     for check in red:
@@ -640,8 +647,8 @@ def test_each_planted_fault_is_caught_by_name_and_the_others_stay_green(row):
 
 
 def test_a_clean_build_is_green_in_every_check_the_plants_use():
-    for check in ("pools", "edges", "bound", "budget", "rate", "constants",
-                  "family"):
+    for check in ("pools", "edges", "lanes", "bound", "budget", "rate",
+                  "constants", "family"):
         assert run_check(check, None, FP64, RNE) == [], check
     assert run_check("census", None, FP32, RNE) == []
 
