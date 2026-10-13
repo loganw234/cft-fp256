@@ -6258,8 +6258,9 @@ not on the comparison's preference; the merge choice may carry a
 position bias, which is recorded. E1 started on that revision
 (4ad5cea) while verifier-P7b re-checked it: no regression, P7's two
 statements fixed truly, and one wrong answer in E1's brief (a
-structured window asked for at fp32, which the census has none of), corrected to
-both authors alike with six other brief corrections. On P7b's notes,
+structured window asked for at fp32, which the census has none
+of), corrected to both authors alike with six other brief
+corrections. On P7b's notes,
 before either arm reported, the success criteria's "materially
 worse" became a count on rubric items 1 and 2 against the other
 arm's, where it had failed Sonnet's arm on any case of its own - a
