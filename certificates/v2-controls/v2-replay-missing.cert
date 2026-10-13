@@ -6,7 +6,7 @@ device-xclbin none
 device-version none
 device-caps none
 device-tiles 1
-profile 3
+profile 3.1
 language 1
 device-platform none
 device-xrt none
@@ -59,4 +59,4 @@ quantity counter terms 1
 term 1/1 s0
 value exact c/1
 end
-hash 20671c282ea60a96dfb7d894871c1ec537c0d4f5b4ee6d264da91bee802ebdaf
+hash 641d1af7093b20753bb12b67b2c0f41e74902b075c424a5d9d1520c6468e9280

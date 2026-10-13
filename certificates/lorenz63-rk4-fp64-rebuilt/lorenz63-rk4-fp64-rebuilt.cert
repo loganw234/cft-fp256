@@ -6,7 +6,7 @@ device-xclbin none
 device-version none
 device-caps none
 device-tiles 1
-profile 3
+profile 3.1
 language 1
 device-platform none
 device-xrt none
@@ -51,4 +51,4 @@ replays 0
 output c8b04c863e4900ff20c39c199ad14b8cbdd705486e66db8244b68bc3b1b1ba8b
 accuracy 0
 end
-hash 19211812d82e774d8c1a314e62886b3c8df36e12f3e9085df3cb282ea6d220af
+hash 1ec830448a5afa66b5ff31dbe9380b9d0d8e66254282ac961ccf53b6fecc9223

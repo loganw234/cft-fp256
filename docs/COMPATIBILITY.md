@@ -985,6 +985,30 @@ are the profile's business, and the profile steps from 2 to 3, with
 | Arduino | the vendored copy re-synced (`src/cft/src/transcend.c`, `src/cft/include/cft.h`; still 35 files) |
 | certificates | `cft-segrun` writes `profile 3` and `cft-audit` audits at 3. The golden corpus was made again at profile 3; only each version-2 certificate's `profile` and `hash` lines moved, and the `supersedes` lines that name one. A profile-2 certificate meets the definition rule as any other definition's does (docs/CERTIFICATES.md, "The definition") |
 
+### Profile 3.1 (2026-10-13, no ABI step): the transcendental pools' signed thresholds
+
+The pools the published transcendental sets are made from held the
+exponential's negative thresholds n ln2 as their positive images only,
+because they took the mantissa from mpmath's `to_man_exp`, which is
+unsigned by default: exp's underflow edges were in no set. 3,500 cases
+joined the sets, the signed images, and none moved (CONFORMANCE.md,
+"Versioning"). The generators read the mpf's raw tuple now, whose
+mantissa is unsigned in every mpmath, and call `to_man_exp` nowhere
+(mpmath 1.4 deprecates its unsigned default), so the sets do not change
+with the version of mpmath that makes them. No library code changed, so
+no call gained or lost a meaning and the ABI stays at 0.18, by the rule
+the sections above state. The profile steps from 3 to 3.1, a minor step,
+with `CFT_PROFILE_MINOR`.
+
+| surface | status at profile 3.1 |
+|---|---|
+| C (`cft.h`) | `CFT_PROFILE_MINOR` 1, and nothing else: no `host/src` file changed. `transcend_check.py`'s pool holds the signed images too, and C equals the model on every one |
+| vectors | 3,500 cases added, 175 to each of the 20 `fpN-transcend*.jsonl` sets: 1,072,415 cases in all, where profile 3 had 1,068,915. No case changed or left, and the other 148 sets are byte for byte profile 3's |
+| remote | no frame change. A frame carries its sender's ABI word and no profile, and no transcendental crosses the wire, so a profile-3 peer and a profile-3.1 peer at 0.18 accept each other |
+| Node / Browser | nothing rebuilt: no source of the module changed (no export reaches `CFT_PROFILE_*`, and the module's build id is `unknown` whatever the commit), so `cft_node.wasm`, `conformance.html` and `demos.html` are profile 3's builds, the page's own text of the published counts included (bindings/wasm/README.md) |
+| Arduino | the vendored copy re-synced (`src/cft/include/cft.h`; still 35 files) |
+| certificates | `cft-segrun` writes `profile 3.1` and `cft-audit` audits at 3.1, which covers a certificate that states profile 3 (docs/CERTIFICATES.md, "The definition"). The golden corpus was made again at 3.1; only each version-2 certificate's `profile` and `hash` lines moved, and the `supersedes` lines that name one |
+
 ## Hosts and boards
 
 Where the library has been built and run, as opposed to where it is

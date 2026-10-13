@@ -1,7 +1,8 @@
 # The cft-fp256 conformance profile
 
-**Profile 3, 2026-10-05** (profile 2 was 2026-10-02 and profile 1
-2026-09-16; "Versioning" says why each stepped). This document is the
+**Profile 3.1, 2026-10-13** (profile 3 was 2026-10-05, profile 2
+2026-10-02 and profile 1 2026-09-16; "Versioning" says why each
+stepped). This document is the
 contract as a specification: what
 an implementation must produce to be called cft-fp256 conforming, what
 it may choose freely, and the files and hashes that "conforming" is
@@ -219,9 +220,10 @@ Conformance is scored, not read.
    `vectors/out/`: for each format, the opcode sets at each attribute,
    the transcendental sets, the character-conversion sets, the formatOf
    sets to every format (its own included), the reduction sets, the
-   augmented set and the magnitude set - **1,068,915 cases at profiles
-   1, 2 and 3**, each line one case with its inputs, its expected result
-   and its expected flags. `vectors/SHA256SUMS` lists the SHA-256 of each set,
+   augmented set and the magnitude set - **1,072,415 cases at profile
+   3.1** (1,068,915 at profiles 1, 2 and 3), each line one case with its
+   inputs, its expected result and its expected flags.
+   `vectors/SHA256SUMS` lists the SHA-256 of each set,
    and the generator writes LF line endings on every platform so those
    hashes mean one thing everywhere. A generation that finishes also
    writes its own `SHA256SUMS` beside the sets, last, in the same form
@@ -280,9 +282,11 @@ Conformance is scored, not read.
     accepted image's result, flags, STATUS or acceptance: an image that
     loaded and is refused, or one whose run moves by a bit.
   - **A minor step** is an addition that changes no recorded case and no
-    accepted image: a new operation or a new set, or an encoding every
-    loader refused only because it was unclaimed, now taken (3.1, 3.2,
-    ...). An implementation of profile 3 remains conforming to profile 3.
+    accepted image: a new operation or a new set, more cases in a set it
+    already has, or an encoding every loader refused only because it was
+    unclaimed, now taken (3.1, 3.2, ...; 3.1, below, added cases to
+    twenty sets). An implementation of profile 3 remains conforming to
+    profile 3.
   - Each step has a note here and an entry in `docs/VALIDATION.md`
     saying what changed and why. Never a quiet refresh: a document
     recording a run against an earlier profile is right about that run,
@@ -308,7 +312,7 @@ Conformance is scored, not read.
     profile's parameters, compared with it line for line: `make
     vectors`, then
     `sed 's#  #  out/#' vectors/out/SHA256SUMS | diff vectors/SHA256SUMS -`.
-    Profile 3 was checked so (2026-10-05).
+    Profile 3 was checked so (2026-10-05), and profile 3.1 (2026-10-13).
   - **A known limit: no gate compares a set's digest with
     `vectors/SHA256SUMS`.** The runner generates at the generator's
     default counts (`--directed 4000 --random 6000 --simple 400`, where
@@ -331,8 +335,61 @@ Conformance is scored, not read.
     2026-10-02).
   - A change the record does not reach steps the profile by the rule
     alone, at its committer's word, as every step did before 2026-10-02.
-- **The tree is at profile 3** (2026-10-05), a major step: recorded
-  bits moved.
+- **The tree is at profile 3.1** (2026-10-13), a minor step: cases
+  added, none moved.
+  - **The transcendental pools lost the sign of every negative
+    threshold.** The pool the published transcendental sets are made
+    from (`vectors.transcend_unary_pool`; `host/tests/transcend_check.py`'s
+    `unary_pool` is its twin) holds the exponential's overflow and
+    underflow edges: n ln2 for eight n, rounded and walked two ulps
+    either way. Five of the eight n are negative. The code took the
+    mantissa from mpmath's `to_man_exp`, which returns it unsigned by
+    default, and tested its sign, so it held +|n| ln2 where -|n| ln2 was
+    meant. exp's underflow edges, emin ln2 (where the result passes below
+    the smallest normal) and (emin - p) ln2 (where it passes below half
+    the smallest subnormal), were in no pool and in no published set, at
+    any profile through 3. The math library's first routine (parcel E1)
+    found it on 2026-10-12.
+  - **The sets no longer depend on mpmath's version.** mpmath 1.4
+    deprecates that unsigned default (it means to return the mantissa
+    signed), and under such an mpmath the old tests of its sign would have
+    given the signed images in place of the positive ones: the recorded
+    cases would have moved with the version of mpmath that generated the
+    sets, CI's golden job (which installs mpmath unpinned) among the hosts
+    that do. The four pool generators, the unary and the hyperbolic, read
+    the mpf's raw tuple instead (sign, mantissa, exponent, bit count),
+    whose mantissa is unsigned in every version, and nothing under
+    `python/` or `host/tests/` calls `to_man_exp`;
+    `python/tests/test_pool_signs.py` holds both. A profile is identified
+    by its sets' digests, so the sets must be a function of the model and
+    the generator and of no library's version.
+  - **175 cases added to each of the 20 transcendental sets,** 3,500 in
+    all: the 25 signed images (the five negative n, each with its
+    neighbours at +-1 and +-2 ulps) for each of the seven functions that
+    read the pool (exp, expm1, exp2, log, log1p, log2, log10). The
+    published cases are 1,072,415, where profiles 1 to 3 had 1,068,915,
+    and `vectors/SHA256SUMS` moves by 20 lines. Every recorded case
+    stays: each moved set is the old set with lines added, none changed
+    and none gone, the positive images among them, and the other 148
+    sets keep their bytes. The hyperbolic pools carried the same dead
+    sign test but add both signs of every image, so their sets were
+    right and did not move.
+  - **Logan's decision** (2026-10-13), asked which way the fix should
+    step the profile: add the signed cases (a minor step, as here),
+    replace the positive images with them (a major step) or leave the
+    sets as they were. His answer: "Add signed cases, 3.1
+    (Recommended)".
+  - **Nothing computes differently.** No library code moved (the C ABI
+    stays 0.18 and the WebAssembly module needs no rebuild), and the
+    golden model's functions are the same: libcft, the model and GNU
+    MPFR agree on all 3,500 new cases. A profile-3 certificate stays
+    covered: an auditor at 3.1 covers a certificate that states
+    profile 3 (the majors equal, its minor at least the certificate's),
+    so a re-derivation that fails is the certificate's, as it was. The
+    golden corpus's 37 version-2 certificates were made again at 3.1.
+    Only their `profile` and `hash` lines moved, with the seven
+    `supersedes` lines that name one of them and four signatures.
+- **Profile 3** (2026-10-05), a major step: recorded bits moved.
   - **exp2 at x = emin - p.** Its exact value 2^(emin - p) is half the
     smallest subnormal, the tie between +0 and it, which IEEE 754's
     roundTiesToAway (rmm) rounds to the subnormal. The model rounded it
@@ -393,12 +450,13 @@ Conformance is scored, not read.
     2. The vector sets did not move: profile 2's 1,068,915 cases are
     profile 1's, and `vectors/SHA256SUMS` is unchanged.
 - **The C ABI is a different number.** `CFT_ABI_VERSION` (0.14 when
-  profile 1 was set, 0.17 at profile 2, 0.18 at profile 3) versions the
-  calling surface of one implementation, not the bits; a device's
-  `VERSION` register versions one register map. Neither changes the
-  profile, and the profile does not change with them: profile 3 left the
-  ABI at 0.18, since no call gained or lost a meaning its definition in
-  `cft.h` did not already give it (docs/COMPATIBILITY.md).
+  profile 1 was set, 0.17 at profile 2, 0.18 at profile 3 and at 3.1)
+  versions the calling surface of one implementation, not the bits; a
+  device's `VERSION` register versions one register map. Neither changes
+  the profile, and the profile does not change with them: profile 3 left
+  the ABI at 0.18, since no call gained or lost a meaning its definition
+  in `cft.h` did not already give it, and so did profile 3.1, which
+  changed no library code (docs/COMPATIBILITY.md).
 
 ### The language's version
 

@@ -249,20 +249,25 @@ def check_random_lanes(f, n, seed):
 
 
 def edge_pool(fmt):
-    """The arguments the transcend pools mean to hold and, for the negative
-    ones, do not: x = n ln2 rounded, with neighbours at +-1 and +-2 ulps,
-    for the n of transcend_check.unary_pool's exp edges (emax, emax + 1,
-    emin, emin - man_w, emin - man_w - 1, -(p+2), -(p+3), p+1), BOTH signs;
-    and placed_exp(), the ends of every cell of n at the ends of the range
-    and across k = emin, where the fixed grid takes over.
+    """The arguments of exp's edges: x = n ln2 rounded, with neighbours at
+    +-1 and +-2 ulps, for the n of transcend_check.unary_pool's exp edges
+    (emax, emax + 1, emin, emin - man_w, emin - man_w - 1, -(p+2), -(p+3),
+    p+1), BOTH signs of each; and placed_exp(), the ends of every cell of n
+    at the ends of the range and across k = emin, where the fixed grid takes
+    over.
 
     The pools' generators (vectors.transcend_unary_pool and
-    host/tests/transcend_check.unary_pool) take x = n ln2 from
-    mpmath.libmp.to_man_exp, which returns the mantissa unsigned, so every
-    negative n comes out positive: the pools hold exp(+708.39...), exp's
-    overflow, where the underflow thresholds - the argument of emin ln2 and
-    the screen of (emin - p) ln2 - should be. This pool holds both, so that
-    the tininess decision at k = emin and the fixed grid are met."""
+    host/tests/transcend_check.unary_pool) took x = n ln2 from
+    mpmath.libmp.to_man_exp, which returns the mantissa unsigned by default
+    (mpmath 1.3), so through profile 3 every negative n came out positive:
+    the pools held exp(+708.39...), exp's overflow, where the underflow
+    thresholds - the argument of emin ln2 and the screen of (emin - p) ln2
+    - should have been. This pool was made to hold both, so that the
+    tininess decision at k = emin and the fixed grid were met. Since
+    profile 3.1 (parcel PS) the pools read the mpf's raw tuple instead,
+    call to_man_exp nowhere, and hold the signed image of each negative n
+    beside the positive one; this pool holds more than they, both signs of
+    the three positive n as well, and the cell ends."""
     l2 = ml._ln2()
     ns = (fmt.emax, fmt.emax + 1, fmt.emin, fmt.emin - fmt.man_w,
           fmt.emin - fmt.man_w - 1, -(fmt.prec + 2), -(fmt.prec + 3),

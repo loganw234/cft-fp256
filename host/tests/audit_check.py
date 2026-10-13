@@ -1005,6 +1005,21 @@ def v2_census_controls(work):
         {0: (fl.img, None)},
         ("refused", "definition-differs", ("-", "0", "1", "-")),
         states=fl_states)
+    if minor > 0:
+        # made before a MINOR step: the major alone (`profile 3` at 3.1) is
+        # covered, the auditor's minor being at least the certificate's, so
+        # the same wrong flags are the certificate's own refusal and an
+        # honest one is accepted, the verdict saying the auditor's profile
+        # "covers them" where the controls above say "do not"
+        earlier = f"profile {major}"
+        one(f"flagstep, {earlier} (made before the minor step), segment 1's "
+            f"flags wrong", prof(seg(fl.data, 1, 7, "21"), earlier), None,
+            {0: (fl.img, None)},
+            ("refused", "segment-flags", ("-", "0", "1", "-")),
+            states=fl_states)
+        one(f"flagstep, {earlier} (made before the minor step): accepted, "
+            f"under a definition that covers it", prof(fl.data, earlier),
+            None, {0: (fl.img, None)}, ("accepted",), states=fl_states)
     blk = fl.chain.blocks[0]
     other = bytes([blk[0] & ~0x10]) + blk[1:]
     one(f"flagstep, {beyond}, segment 0's block another",

@@ -139,10 +139,14 @@ LN2_BITS = 3000
 def _frac(v):
     """An mpmath value as the exact Fraction it is (an mpf is a dyadic
     rational, so no rounding happens here). The sign is read from the mpf
-    itself: mpmath.libmp.to_man_exp returns the mantissa UNSIGNED, which
-    turns every negative value positive (the pool generators of
-    vectors.py and host/tests/transcend_check.py use it so on the negative
-    thresholds n ln2, and lose their signs: parcel E1's entry)."""
+    itself, the first field of its raw tuple: mpmath.libmp.to_man_exp
+    returns the mantissa UNSIGNED by default (mpmath 1.3; 1.4 deprecates
+    that default), which turns every negative value positive (through
+    profile 3 the pool generators of vectors.py and
+    host/tests/transcend_check.py took it so on the negative thresholds
+    n ln2 and lost their signs: parcel E1's entry; since profile 3.1 they
+    read the raw tuple as this does and call to_man_exp nowhere: parcel
+    PS's)."""
     sign, man, ex, _bc = v._mpf_
     if not man and ex:
         raise ValueError(f"{v} is not a finite number")
