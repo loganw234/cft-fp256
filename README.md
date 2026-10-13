@@ -18,7 +18,7 @@ Apache-2.0.
 
 | What it computes | How you call it | How it is checked | On the card | When it pays |
 |---|---|---|---|---|
-| binary32 / 64 / 128 / 256 | C, C++, Python, Rust, Julia, Go, C#, R, Fortran | **1,068,915** conformance cases | Alveo U50: 1,071,635, 1,224,915, then the published 1,068,915 cases replayed on silicon | **binary128 4.5x**, **binary256 5.5x** |
+| binary32 / 64 / 128 / 256 | C, C++, Python, Rust, Julia, Go, C#, R, Fortran | **1,072,415** conformance cases | Alveo U50: 1,071,635, 1,224,915, then the published 1,068,915 cases replayed on silicon | **binary128 4.5x**, **binary256 5.5x** |
 | 31 opcodes, 5 rounding modes, 39 transcendentals | one ABI; software, FPGA or remote; no dependencies | **52** gate stages, 29 RTL sims, 38 proofs | 427 M elem/s, 4 tiles, ~35 W | **binary32 / 64: a CPU wins** |
 
 <sub>Speed-ups are **multiply**, one tile against the fastest software on the same machine - the CPU's own FPU, `__float128` or MPFR, never our own softfloat. Four tiles reach 17.5x and 21.1x. Fused multiply-add is a different picture, and better: 14.0x at binary128 on one tile. [Where those lines fall, measured](#when-this-matters-and-when-it-does-not).</sub>
@@ -174,7 +174,7 @@ the tables and the method; the charts regenerate with
 | `host/` | **libcft**: about 24,000 lines of C99 in `host/src`, no dependencies, no build step for callers. One ABI reachable from C, C++, Python, Rust, Julia, Go, C#, R and Fortran, with software, FPGA and remote backends behind identical calls. On a multi-tile card an elementwise call is split across every tile and a segmented reduction by whole segments; a whole-array reduction takes the largest power of two of the tiles, because only that cuts the tree at a node; and, since 2026-09-25, a sequencer program's lanes are cut across every tile the same way an elementwise call's elements are. |
 | `bindings/` | The WebAssembly build behind the pages above, a Node package, and a Python drop-in for the MPFR pattern. |
 | `hw/` | Vitis packaging, HBM layout and the build pipeline. Bitstreams built and run on silicon. |
-| `vectors/` | The conformance sets: 1,068,915 cases, deterministic and seeded, at the counts `make vectors` passes the generator. The verification runner's `vectors` stage regenerates at the generator's own defaults instead, which is a larger census - 1,224,915 cases over the same 168 sets. |
+| `vectors/` | The conformance sets: 1,072,415 cases, deterministic and seeded, at the counts `make vectors` passes the generator. The verification runner's `vectors` stage regenerates at the generator's own defaults instead, which is a larger census - 1,228,415 cases over the same 168 sets. |
 | `certificates/` | The golden certificates: twelve programs and their certificates, committed with every input and every boundary state. Both certificate writers must make each one again byte for byte, and the golden audit must give each its expected verdict. So a change to the model, a hash or an encoding that moves both writers at once cannot pass unseen. Another implementation can take the same cases as a conformance test (`docs/CERTIFICATES.md`, "Golden certificates"). |
 
 Each of these has a document in `docs/` carrying the detail, the dates
@@ -224,12 +224,13 @@ runs that failed stay in the record. The load-bearing ones:
 - **The card replayed the conformance sets on silicon**, through one tile
   and through four: 1,071,635 cases on 2026-09-08 and 2026-09-09, the
   published set as it then stood, and the runner's larger 1,224,915-case
-  generation on 2026-09-15, 09-16 and 09-18. The published set is
-  **1,068,915** cases since opcode 31 was assigned on 2026-09-12, and that
-  exact set was replayed on the card, one tile, at each point of the
-  2026-09-23/24 clock sweep from 145 to 170 MHz. `docs/CARDDAY.md` is the
-  runbook as it was actually run; `docs/VALIDATION.md` is the running
-  record.
+  generation on 2026-09-15, 09-16 and 09-18. The published set was
+  1,068,915 cases from the assignment of opcode 31 on 2026-09-12 until
+  profile 3.1 (2026-10-13) added 3,500 to the transcendental sets, and is
+  **1,072,415** now. That 1,068,915-case set was replayed on the card,
+  one tile, at each point of the 2026-09-23/24 clock sweep from 145 to
+  170 MHz. `docs/CARDDAY.md` is the runbook as it was actually run;
+  `docs/VALIDATION.md` is the running record.
 - **Division and square root** are held against 23.875 billion cases of
   the host CPU's own IEEE hardware - binary32 and binary64 only, that
   being where a CPU can arbitrate, and exhaustive binary32 square root

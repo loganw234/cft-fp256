@@ -226,7 +226,7 @@ rather than something to believe:
 **P1. The ALU is the existing pipeline.** The sequencer introduces no
 arithmetic. Its opcodes are the same 8-bit space `MODE[7:0]` already
 carries, executed by the same `cft_fpfma_pipe` and `cft_simpleops` that
-the 1,068,915-case conformance set and the differential already cover. A
+the 1,072,415-case conformance set and the differential already cover. A
 sequencer program is a schedule over verified operations, so the
 numerics need no new verification surface - only the scheduling does.
 Since the array was extracted this is structural rather than

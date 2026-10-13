@@ -189,8 +189,8 @@ What the check does and does not compare:
 - A `vectors/out` written by the generator before it kept a record
   (2026-09-29) has none, so the first replaying stage to meet it
   regenerates it, once, with the runner's arguments. A record-less
-  `make vectors` set (1,068,915 cases) so becomes the runner's
-  (1,224,915): a replay by hand in that tree counts differently
+  `make vectors` set (1,072,415 cases) so becomes the runner's
+  (1,228,415): a replay by hand in that tree counts differently
   afterwards, and `cd vectors && sha256sum -c SHA256SUMS` then fails
   on the twenty opcode sets, whose cases the profile's counts fix.
   Where the generator cannot run (no mpmath), a stage that meets such

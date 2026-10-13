@@ -270,15 +270,25 @@ def transcend_unary_pool(fmt: FpFormat, extra: int, seed: int = 9):
         k += 1
 
     # the exponential's overflow and underflow edges: n*ln2 for the n
-    # that matter, rounded and then walked a couple of ulps either way
+    # that matter, rounded and then walked a couple of ulps either way.
+    # A negative n is a negative threshold - exp's underflow edges are
+    # among them - and the pool holds both images of it: the positive one
+    # |n| ln2 (the only one profiles 1 to 3 held, kept because it is a
+    # recorded case) and, since profile 3.1, the signed n ln2 itself.
+    # The sign is the mpf's own, the first field of its raw tuple (sign,
+    # mantissa, exponent, bit count), whose mantissa is unsigned in every
+    # mpmath. Profiles 1 to 3 called mpmath.libmp.to_man_exp instead, which
+    # returns the mantissa unsigned by default (1.3; 1.4 deprecates that
+    # default), tested its sign, which was never negative, and so lost the
+    # signed images; and a pool that calls it would change with the
+    # version of mpmath that made it, so none does.
     mpmath.mp.prec = 4 * p + 64
     for n in (fmt.emax, fmt.emax + 1, fmt.emin, fmt.emin - fmt.man_w,
               fmt.emin - fmt.man_w - 1, -(p + 2), -(p + 3), p + 1):
-        t = mpmath.mpf(n) * mpmath.log(2)
-        man, ex = mpmath.libmp.to_man_exp(t._mpf_)
-        b = sf.round_pack(fmt, 1 if man < 0 else 0, abs(int(man)), int(ex),
-                          sf.RND_RNE)[0]
-        _extend(out, b, b + 1, b - 1, b + 2, b - 2)
+        neg, man, ex, _bc = (mpmath.mpf(n) * mpmath.log(2))._mpf_
+        for sgn in ((0, 1) if neg else (0,)):
+            b = sf.round_pack(fmt, sgn, int(man), int(ex), sf.RND_RNE)[0]
+            _extend(out, b, b + 1, b - 1, b + 2, b - 2)
 
     # below the neighbour thresholds, and just above them
     for k in (p + 2, p + 3, p + 4, p + 5, p + 10, 2 * p):
@@ -592,13 +602,20 @@ def hyperbolic_unary_pool(fmt: FpFormat, extra: int, seed: int = 15):
             if b is not None:
                 _extend(out, b, b + 1, b - 1)
 
+    # The MAGNITUDE |n| ln2, rounded, and then BOTH signs of it and of
+    # each neighbour (three of the six are odd and one is even, so a
+    # threshold is wanted at either sign): the sign of n plays no part, and
+    # the two signs come from the sign mask below. The mantissa is read
+    # from the mpf's raw tuple, (sign, mantissa, exponent, bit count),
+    # whose mantissa is unsigned in every mpmath: mpmath.libmp.to_man_exp
+    # returns it unsigned by default in 1.3 and deprecates that default in
+    # 1.4, so a pool that called it would change with the version of
+    # mpmath that generated it.
     mpmath.mp.prec = 4 * p + 64
     for n in (fmt.emax, fmt.emax + 1, fmt.emax + 2, fmt.emin,
               fmt.emin - fmt.man_w):
-        t = mpmath.mpf(n) * mpmath.log(2)
-        man, ex = mpmath.libmp.to_man_exp(t._mpf_)
-        b = sf.round_pack(fmt, 1 if man < 0 else 0, abs(int(man)),
-                          int(ex), sf.RND_RNE)[0]
+        _sign, man, ex, _bc = (mpmath.mpf(n) * mpmath.log(2))._mpf_
+        b = sf.round_pack(fmt, 0, int(man), int(ex), sf.RND_RNE)[0]
         for d in (-2, -1, 0, 1, 2):
             _extend(out, b + d, (b + d) | fmt.sign_mask)
 

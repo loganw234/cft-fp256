@@ -12,12 +12,14 @@ runs are python/tests/mathlib_runs.py.
               to fail; the instruction, word and live counts; the error-free
               sums; fp32's live count, which seq.py's registers cannot hold
   item 1      every lane of the transcend pools, and of the signed
-              thresholds the pools lose, through each fragment at every
-              format and attribute: unmarked lanes equal transcend.exp in
-              bits AND flag word, a mark only on the committed structured
-              list, the marked guesses counted; and on seq.py through C4's
-              routines.program and routines.run; and the compiled shape
-              (QUIET, body, ENDQUIET, RAISE) on seq.py
+              thresholds and cell ends of edge_pool (the pools hold the
+              thresholds' signed images since profile 3.1; edge_pool holds
+              both signs of every n beside the cell ends), through each
+              fragment at every format and attribute: unmarked lanes equal
+              transcend.exp in bits AND flag word, a mark only on the
+              committed structured list, the marked guesses counted; and on
+              seq.py through C4's routines.program and routines.run; and the
+              compiled shape (QUIET, body, ENDQUIET, RAISE) on seq.py
   item 2      |V - mpmath| / Bv under 1 at 4p + 200 bits, over random
               arguments with every bit random, over each path's largest |r|
               and over the weighted sampler; and VM1b's first-order budget
@@ -93,8 +95,10 @@ SHAPE = {
     "fp256": ((201, 85, 23), (199, 85, 22), (199, 85, 22), (198, 84, 22),
               (201, 85, 23)),
 }
-# the transcend pools' sizes at the stage's default counts (MEASURED)
-POOL_SIZES = {"fp32": 330, "fp64": 367, "fp128": 350, "fp256": 512}
+# the transcend pools' sizes at the stage's default counts (MEASURED): 25 more
+# than at profile 3 (330, 367, 350 and 512), the 25 signed thresholds that the
+# stage's pool and the vector sets' hold since profile 3.1
+POOL_SIZES = {"fp32": 355, "fp64": 392, "fp128": 375, "fp256": 537}
 # the study's census, through the fragments: (marked of 240 under rne and
 # rmm, under the directed three); fp64 at the decided G = 44 (the lead's
 # verifier's 39; the study's 23 is at G = 46), MEASURED
@@ -302,23 +306,30 @@ def test_the_pools_are_the_stages_pools():
         assert len(H.pools(fmt)) == POOL_SIZES[fmt.name]
 
 
-def test_the_pools_lose_their_negative_thresholds_and_the_edge_pool_has_them():
+def test_the_pools_and_edge_pool_hold_both_signs_of_each_negative_threshold():
     """transcend.py's exp reaches 2^emin at the argument emin ln2 and
-    underflows below its screen (emin - p) ln2, both negative. The pools
-    hold their positive images (mpmath.libmp.to_man_exp returns an unsigned
-    mantissa, vectors.py and transcend_check.py use it so), so the tininess
-    decision at k = emin was never met; edge_pool holds both signs."""
-    for fmt in DOUBLE:
+    underflows below its screen (emin - p) ln2, both negative; the pools'
+    other negative thresholds are n ln2 for n = emin - man_w, -(p + 2) and
+    -(p + 3). Through profile 3 the pools held only the positive image of
+    each (mpmath.libmp.to_man_exp returns an unsigned mantissa by default
+    and the pool generators took the sign from it), so no pool met the
+    tininess decision at k = emin; since profile 3.1 (parcel PS) each holds
+    the signed image of all five, with its neighbours at +-1 and +-2 ulps,
+    and the positive image as well, and edge_pool holds both signs of every
+    n."""
+    near = range(-2, 3)
+    for fmt in FORMATS:
         pool, edges = set(H.pools(fmt)), set(H.edge_pool(fmt))
-        b = ml._enc(fmt, fmt.emin * ml._ln2())
-        mirror = b & ~fmt.sign_mask
-        near = range(-2, 3)
-        assert b & fmt.sign_mask
-        assert not {b + d for d in near} & pool
-        assert {mirror + d for d in near} <= pool
-        assert {b + d for d in near} <= edges
+        for n in (fmt.emin, fmt.emin - fmt.man_w, fmt.emin - fmt.man_w - 1,
+                  -(fmt.prec + 2), -(fmt.prec + 3)):
+            b = ml._enc(fmt, n * ml._ln2())
+            mirror = b & ~fmt.sign_mask
+            assert b & fmt.sign_mask
+            assert {b + d for d in near} <= pool, (fmt.name, n)
+            assert {mirror + d for d in near} <= pool, (fmt.name, n)
+            assert {b + d for d in near} <= edges, (fmt.name, n)
         unf = ml._screens(fmt)[1]
-        assert unf & fmt.sign_mask and unf not in pool and unf in edges
+        assert unf & fmt.sign_mask and unf in pool and unf in edges
 
 
 @pytest.mark.parametrize("rnd", RND, ids=rid)
@@ -782,8 +793,11 @@ PLANTED = [
      ("bound", "budget", "constants", "shape", "sums"),
      ("pools", "edges", "rate", "family", "specialised", "fixed_grid",
       "spot", "census_counts")),
-    ("tininess_klt_only", FP64, RNE, ("edges", "shape", "sums"),
-     ("pools", "bound", "family", "constants", "specialised", "fixed_grid",
+    # the pools turn red here since profile 3.1: they hold the signed image of
+    # emin ln2, the argument whose tininess this plant decides on k alone
+    # (through profile 3 only edges met it, and pools stayed green)
+    ("tininess_klt_only", FP64, RNE, ("pools", "edges", "shape", "sums"),
+     ("bound", "family", "constants", "specialised", "fixed_grid",
       "spot", "census_counts")),
     ("c0_wrong", FP64, RNE, ("edges", "constants"),
      ("pools", "bound", "family", "shape", "sums", "specialised",

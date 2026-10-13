@@ -2705,15 +2705,20 @@ refusal's name, code and location, or both ACCEPTED with the same lines.
      misspelt block file beside a version-1 certificate not read, and
      cft.h's profile and language macros, the tool's writer's list of
      variables and its generators against the golden model's;
-   - fifteen version-2 controls no test_cert2.py call hands the tool as
+   - seventeen version-2 controls no test_cert2.py call hands the tool as
      it is handed them: `definition-differs` inside each re-derivation a
      source-free audit reaches past step 4 (a segment line's flags and
      block, a replay line's raw values and its absence, the wider-source
      relation), and a segment line's flags under the previous major too
      (a certificate made before the step: profile 2 under profile 3,
-     since 2026-10-05); audits accepted under a definition that does not
-     cover the certificate's (by the profile's minor, by the previous
-     major, and by the language where a run names a source); a signature
+     since 2026-10-05); the same wrong flags under a certificate made
+     before a MINOR step, which the auditor covers (the major alone,
+     `profile 3` under 3.1, since 2026-10-13), refused `segment-flags`,
+     the certificate's own, and an honest one accepted with the verdict
+     saying the auditor's profile covers it; audits accepted under a
+     definition that does not cover the certificate's (by the profile's
+     minor, by the previous major, and by the language where a run names
+     a source); a signature
      file whose key encodes no point and one naming another certificate
      over this one's signature (each `signature`); the wider-source
      relation's lanes and steps; and blocks past segment 9, which the
@@ -3281,13 +3286,14 @@ Version 2's cases are the golden writer's, written by `make
 --keep-version-1` at the commit that added them (2026-10-02), and
 written again the same way, version 1's cases kept, by each step that
 moved them since: cftc's output version 4 (e45a2f7, 2026-10-02), profile
-3 (ca43695, 2026-10-05) and cftc's output version 5 (2026-10-06, when
-revision 8's three targets joined cftc's built-in table). Each of
-cftc's two steps moved the same eight certificates - the sourced and
-rebuilt Lorenz-63 cases and six controls, the ones that name a compile -
-by their `compiler` lines and hash lines alone, and the manifest by
-their eight digests; profile 3 moved all 37 by their profile and hash
-lines, with seven supersedes lines and four signatures. Every measured
+3 (ca43695, 2026-10-05), cftc's output version 5 (2026-10-06, when
+revision 8's three targets joined cftc's built-in table) and profile 3.1
+(2026-10-13). Each of cftc's two steps moved the same eight certificates
+- the sourced and rebuilt Lorenz-63 cases and six controls, the ones that
+name a compile - by their `compiler` lines and hash lines alone, and the
+manifest by their eight digests; profiles 3 and 3.1 each moved all 37 by
+their profile and hash lines, with seven supersedes lines and four
+signatures. Every measured
 header line is `unknown`, as the example's `build-id` is, but in
 `signed-fp64`, which spells each out.
 
@@ -3900,9 +3906,12 @@ header lines:
 - **`profile`**: the conformance profile (CONFORMANCE.md, "Versioning").
   Since 2026-10-02 it versions the program model too: any change to what
   an accepted image computes, or to whether an image loads, steps it. The
-  golden model states it, and the tree is at profile 3 (since 2026-10-05,
-  when exp2's tie at emin - p moved four recorded cases; a profile-2
-  certificate meets the rule below as any other definition's does);
+  golden model states it, and the tree is at profile 3.1 (3 since
+  2026-10-05, when exp2's tie at emin - p moved four recorded cases; 3.1
+  since 2026-10-13, when 3,500 cases joined the transcendental vector
+  sets and none moved). A profile-2 certificate meets the rule below as
+  any other definition's does, and a profile-3 one is covered by an
+  auditor at 3.1;
 - **`language`**: the language's version (CONFORMANCE.md, "The
   language's version"), kept in the golden model and stepped by the same
   rule for sources: a major step whenever an accepted source is refused
@@ -4309,7 +4318,7 @@ device-xclbin none
 device-version none
 device-caps none
 device-tiles 1
-profile 3
+profile 3.1
 language 1
 device-platform none
 device-xrt none
@@ -4364,7 +4373,7 @@ quantity counter terms 1
 term 1/1 s0
 value exact c/1
 end
-hash fd953ffb0a629e0ad758a9d31862900f7216f355093ee7c08c75bd3a33abdef3
+hash 6dddd56d2ab0b0c4e697924069ecb993f79ed23b5c6c5af25c450ebb87d9ce89
 ```
 
 Reading it: the image marks lanes 0 and 1 in segment 1, where k is 7 and
@@ -4451,7 +4460,8 @@ rebuilds from its source and its generator alone. The controls cover:
   that raises invalid in every lane), its choices, and `definition-differs`
   under seven certificates' definitions (the previous major among them,
   profile 2 under an auditor at 3), against `replay-changed` under the
-  auditor's own;
+  auditor's own and under a certificate made before a minor step, which
+  the auditor covers (the major alone, profile 3 under an auditor at 3.1);
 - `definition-unavailable` and `replay-undecided`, with mpmath taken away
   from a node planted as transcendental, and with an enclosure forced to
   its cap: no node of the language reaches mpmath yet, so these plants

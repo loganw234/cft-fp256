@@ -236,7 +236,10 @@ cases a set simply began reading `imul` where they had read
 it to become, so its cases left the elementwise sets altogether and
 1,280 reduction cases arrived in their place - 1,071,635 to 1,068,915
 over all 168 sets. A document recording a run before that date still
-says 1,071,635 and is right to; that run replayed that many.
+says 1,071,635 and is right to; that run replayed that many. (The
+count moved once more, on 2026-10-13, to 1,072,415: profile 3.1 added
+3,500 cases to the twenty transcendental sets and changed none;
+CONFORMANCE.md, "Versioning".)
 
 `cft_conformance` detects that
 specifically and says so, rather than reporting a mismatch; on the

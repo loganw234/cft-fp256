@@ -1652,6 +1652,14 @@ def test_a_failure_under_another_definition(mk, fl):
                       edit(wrong, f"{field} ", line))
         assert (got.run, got.segment) == (0, 1)
         assert "replay-changed" in got.message
+    # a certificate made before a MINOR step of the tree's profile - the
+    # major alone, `profile 3` where the tree is at 3.1 - is covered (the
+    # auditor's minor is at least the certificate's): its failed
+    # re-derivation is the certificate's, under its own name
+    if minor > 0:
+        got = refused("replay-changed", audit_mk, mk,
+                      edit(wrong, "profile ", f"profile {major}"))
+        assert (got.run, got.segment) == (0, 1)
     # a re-derivation that passes under a definition that does not cover
     # the certificate's: accepted, and the verdict says so
     v = audit_mk(mk, edit(mk.data, "language ", "language 2"))

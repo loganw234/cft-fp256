@@ -3563,7 +3563,7 @@ definition"), and an auditor compares them with its own. `cft.h` states
 the library's, in one block below `cft_abi_version`:
 
     CFT_PROFILE_MAJOR   3    the conformance profile (CONFORMANCE.md,
-    CFT_PROFILE_MINOR   0    "Versioning"): python/cft_golden/profile.py
+    CFT_PROFILE_MINOR   1    "Versioning"): python/cft_golden/profile.py
     CFT_LANGUAGE_MAJOR  1    the language's version: python/cft_golden/
     CFT_LANGUAGE_MINOR  0    lang/version.py
 
@@ -3589,7 +3589,10 @@ the library's, in one block below `cft_abi_version`:
   ABI did not move for them. Nor did it for profile 3 (2026-10-05, the
   macro from 2 to 3): `cft_exp2` at its tie under roundTiesToAway now
   returns what its definition, correctly rounded, always said, and no
-  call gained or lost a meaning (docs/COMPATIBILITY.md).
+  call gained or lost a meaning (docs/COMPATIBILITY.md). Nor for profile
+  3.1 (2026-10-13, the minor from 0 to 1): 3,500 cases joined the
+  transcendental vector sets, no library code changed, and no call
+  changed at all.
 
 ## Certificate version 2's device lines at ABI 0.18 (2026-10-02)
 
