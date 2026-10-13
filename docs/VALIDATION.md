@@ -19325,13 +19325,13 @@ The card results will be the lead's entry.
 **The gate** (MEASURED, amd-arc-box at e7ab517, run 20261013-093630-e7ab517, niced, the pinned MPFR 4.2.2 copied in; the box's python3, which the runner uses, is 3.12.3 with mpmath 1.4.1 and gmpy2 2.3.1): "VERDICT: PASS with 8 skip(s) and 4 inner skip(s) in golden (3), remote (1)", in 155 min.
 - **The 8 skips are the box's usual:** buildargs (a real Vitis), lang-rust, lang-julia, lang-go, lang-csharp, lang-r, lang-fortran and demos (no toolchain or node).
 - **The inner skips:** golden's 3 known, and remote's WebSocket leg (no node).
-- **The figures handed to the gate budget, each now measured** (verifier-VIC2's words, with the logs' lines):
+- **The figures handed to the gate budget, each now measured,** in verifier-VIC2's phrase, each with its log's line:
   - golden 3,669 with the 3 skips (PS): "3669 passed, 3 skipped in 1053.45s (0:17:33)";
-  - the vectors census 1,228,415 (PS), which the gate shows only in libcft's line; the vectors stage's own line is "names all 168 sets vectors/SHA256SUMS names, and all 168 it names hold";
+  - the vectors census 1,228,415 (PS), which the gate prints in the replay lines of libcft (`libcft.log:129-130`) and cpp (`cpp.log:9-10`, `:14-15`), not in the vectors stage's own line, "names all 168 sets vectors/SHA256SUMS names, and all 168 it names hold" (its 168 per-set counts sum to the census);
   - libcft `168 sets, 1228415 cases` at the runner's counts (verifier-VPS; PS's own COMPUTED line, 1072415, was `make vectors`' count): "168 sets, 1228415 cases, all matching";
-  - transcend 610,717 and 584,477 (the lead's COMPUTED: each 3,500 more than E1's gate at ff33abd gave, 607,217 and 580,977, for 25 signed images, 7 functions, 5 attributes, 4 formats): "610717 comparisons over 39 functions, C == model on every one", then 584477;
-  - audit 17,883 and the corpus 311 (desktop runs): "17883 checks, 0 failed, 0 skipped" and "311 checks, 0 failed, 0 skipped";
-  - not run: wasm and node (CI's host job after the push) and `make embedded`.
+  - transcend 610,717 and 584,477, no one's prediction, the gate's own; the lead COMPUTED afterwards that each is 3,500 above E1's gate at ff33abd (607,217 and 580,977), for 25 signed images, 7 functions, 5 attributes, 4 formats: "610717 comparisons over 39 functions, C == model on every one", then 584477;
+  - audit 17,883 and the corpus 311 (PS's and VPS's desktop runs; the quoted lines are the gate's): "17883 checks, 0 failed, 0 skipped" and "311 checks, 0 failed, 0 skipped";
+  - not run: wasm and node, which CI's host job runs on a push, and `make embedded`.
 
 **CI** (READ, the golden job's log of each run):
 - on branch ci-golden at ad7c409, run 38403047778: "3620 passed, 2 skipped, 64 warnings in 802.56s (0:13:22)";
@@ -19339,11 +19339,11 @@ The card results will be the lead's entry.
 - The 64 are mpmath 1.4.1's deprecation of `to_man_exp`'s unsigned default, from the old pool generators. PS takes the generators off it, and verifier-VPS measured the warnings gone under mpmath 1.4.1 (WSL cft2204).
 
 **Known limits carried** (each a verifier's "other" note, merged under Logan's rule):
-- **The WebAssembly page's text states profile 3's counts** until the page is rebuilt: bindings/wasm/page_template.html, the built conformance.html, build.sh's comment, and bindings/wasm/README.md (two places). Its module is unchanged. That it replays the 3.1 sets is BELIEVED, since libcft, built from the same sources, does; the wasm and node stages, which the gate budget leaves out, run in CI's host job after the push.
+- **The WebAssembly page's text states profile 3's counts** until the page is rebuilt: bindings/wasm/page_template.html, the built conformance.html, build.sh's comment, and bindings/wasm/README.md (two places). Its module is unchanged. That it replays the 3.1 sets is BELIEVED, since libcft, built from the same sources, does; the wasm and node stages, which the gate budget leaves out, run in CI's host job on a push.
 - **CG's entry, pushed, keeps four wordings** (VCG2):
   - "a later mpmath reaches CI unannounced", where 1.4.1 already announces the change (VCG2's words: "with no pin to hold it");
   - :700 beside :705, and 15.17 s beside 15.97 s, for runs on ad7c409's content and on df0a18d's;
-  - "about 100 s" for a spread of three runs (consecutive runs differ by 36.8 s and 67.0 s; the two golden runs quoted under CI above differ by 205 s);
+  - "about 100 s" for a spread of three runs (consecutive runs differ by 36.8 s and 67.0 s; the two golden runs quoted under CI above differ by 205 s, verifier-VIC2's note);
   - the signed-default prediction unmarked, since measured by VCG2's simulation and by VPS under mpmath 1.4.1.
 - **gates.yml's comment** now says what the import step catches and what collection catches (VCG2's N1). Two ways past the test file's comment remain (N6):
   - an extension built for another interpreter's ABI reads as absent;
