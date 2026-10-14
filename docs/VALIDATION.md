@@ -19563,7 +19563,7 @@ E1's 18 faults on the new routines (the same checks, by the same names; what dif
 - **The merges' (b),** in their messages, as at e7ab517: each says both its verifiers verified the branch's tip. In VIW1's words: "VM2S verified dc6e0bd and VM2S2 8d17b30; VMB1 verified 2799b99 and VMB1-2 db277b1". The messages stand as written.
 - **What VIW1 measured:**
   - each merge brings exactly its branch;
-  - the two resolutions lose nothing of either side, byte for byte;
+  - the two resolutions lose nothing of either side: VALIDATION's byte for byte, and README's but for the four counts it recounted;
   - at the merge, test_mathlib.py passes (835), test_pool_signs.py and test_transcend.py pass (934), the constants' check holds, and python/tests collects 4,255;
   - the study's costs.py, which calls mathlib's invariants, gives its committed outputs.
 
@@ -19571,7 +19571,7 @@ E1's 18 faults on the new routines (the same checks, by the same names; what dif
 - MB1's author, claude-sonnet-5-5: 196 min to its report and 5 min for the send-back; 492 tool uses; 788,957 output tokens.
 - M2S's author, claude-opus-5-5: 168 min and 12 min; 586 tool uses; 884,058 output tokens.
 - The verifiers, all claude-sonnet-5-5:
-  - VMB1: 153 min, 231 tool uses, 358,389 output tokens;
+  - VMB1: 154 min, 231 tool uses, 358,389 output tokens;
   - VMB1-2: 18 min, 68, 110,420;
   - VM2S: 119 min, 191, 281,255;
   - VM2S2: 36 min, 130, 195,882;
@@ -19587,7 +19587,7 @@ E1's 18 faults on the new routines (the same checks, by the same names; what dif
   - exp2: 0.1646, 0.0148 and 0.0193 Bv at fp64, fp128 and fp256;
   - expm1: 0.1790, 0.1316 and 0.1353.
   - The larger samples raise the entry's fp64 figures (0.1643, 0.1773) a little. Every error found lies under its budget.
-- **The rate law, the random lanes, the families and the pools on seq.py:** 0 wrong unmarked and 0 wrong guesses in every line.
+- **The rate law, the random lanes, the families and the pools on seq.py,** in verifier-VIW1-2's words: "0 wrong unmarked in every line (210). Wrong guesses among the marked: none in the rate and lanes lines, one each under rne at fp64, fp128 and fp256 in the pools for exp (3 of 60 lines) and in the families for exp and expm1 (6 of 60), the ones MB1's entry records."
 - **fp32's sweeps:**
   - the main path [-18, 89], every 64th float: exp 2^-4.21, exp2 2^-4.48, expm1 2^-2.39;
   - expm1's cancelling cells, every float, 15,435,038 a side: [-0.14, -0.04] 2^-2.99, and **[0.04, 0.14] 2^-2.03,** at 0x3d7e5307.
@@ -19595,7 +19595,7 @@ E1's 18 faults on the new routines (the same checks, by the same names; what dif
   - fp32 has no budget, so 2.03 bits is fp32 expm1's measured margin.
 - **The golden stage at 2799b99:** "4252 passed, 3 skipped in 3413.54s", on a box at load 37.
 
-**M2S's box batch** (MEASURED; docs/studies/m2/box_m2s.sh at dc6e0bd, run by the lead, 16:43 to 17:50): all 49 jobs exited 0. Its results are in the study, which its send-back restated with them.
+**M2S's box batch** (MEASURED; docs/studies/m2/box_m2s.sh at dc6e0bd, run by the lead, 16:44 to 17:50): all 49 jobs exited 0. Its results are in the study, which its send-back restated with them.
 
 **The gate** (MEASURED, amd-arc-box at 26ced32, run 20261013-201235-26ced32, niced, the pinned MPFR 4.2.2 copied in; python3 3.12.3, mpmath 1.4.1, gmpy2 2.3.1): "VERDICT: PASS with 8 skip(s) and 4 inner skip(s) in golden (3), remote (1)", in 164 min.
 - **The 8 skips are the box's usual:** buildargs (a real Vitis), lang-rust, lang-julia, lang-go, lang-csharp, lang-r and lang-fortran (no toolchain), and demos (no node).
@@ -19613,12 +19613,12 @@ E1's 18 faults on the new routines (the same checks, by the same names; what dif
   - the first family's committed lists are the census's (c <= 16), not every centre, though the routine marks the rest correctly;
   - the distance helper prices a subnormal result on the normal grid;
   - the test's budget sample is thin at fp256's cancelling cells;
-  - the golden stage gains 583 tests and about 13 minutes serially;
+  - the golden stage gains 583 tests and about 9 minutes serially (1,588 s at 26ced32 against 1,053 s at e7ab517);
   - `sweep` walks every encoding of its range;
   - db277b1's message says 2.2 "says nothing of emin - p", where 2.2 holds the string once, as the fixed grid's unit;
   - the study note's list of superseded places is not complete (VMB1-2).
 - **M2S** (VM2S and VM2S2):
-  - trailing spaces in 23 captured outputs;
+  - trailing spaces in captured outputs: 23 files at dc6e0bd, 24 files and 151 lines at the merge;
   - fp32's mark rate as 2^-17.5, where the study's own law gives 2^-17.3;
   - "pass" a bound for "exceed" it;
   - fp64 tan under rtz at -1.011 sigma, where the study says within 1.0;
@@ -19628,7 +19628,7 @@ E1's 18 faults on the new routines (the same checks, by the same names; what dif
   - the new family measured to |j| = 4 only. VM2S2's own oracle predicts it wider: every |j| <= 128 marks at fp128 binades 56 to 58 and fp256 binades 118 to 135.
 - **The merge's own:**
   - MB1's cap (21 at fp32, 13 elsewhere) makes two of the study's statements, true at 1337a13, false of the merged tree: section 5.1's cap of 23, and question 9's premise that only fp64 is past the cap. The study's fragments exceed the merged cap at every format (VIW1, MEASURED). A dated note at the study's head now says so.
-  - CI's golden job is serial and gains MB1's 835 tests, about 13 minutes by MB1's count.
+  - CI's golden job is serial, and gains 583 tests (the 835 replace E1's 252), about 9 minutes.
   - Nobody has run those tests under Python 3.13, which CI uses. CI's run after the push is the first.
 - **M2's twelve questions for Logan** are not yet answered. M2's build waits on them, and is a round of its own.
 

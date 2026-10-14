@@ -6122,8 +6122,8 @@ function gains an L3 rule.
     replayed;
   - the cost of 2^1024's range measured (step 6's plan).
   - **Its study is done** (2026-10-13): docs/studies/M2-trig.md,
-    merged at 81735d4, ending in twelve questions for Logan, not yet
-    answered.
+    merged at 81735d4, with twelve questions for Logan (its section
+    9), not yet answered.
 - **M3, the pow family:** its structured cases need 2p to 3p bits.
 - **M4, atan, atan2, asin and acos.**
 - **Their order:** M2's study can run beside M1's build; M4 follows
