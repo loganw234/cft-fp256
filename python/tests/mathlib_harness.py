@@ -32,7 +32,11 @@ routine in it (f.op, b.meta["fn"]); one that takes only a format has a
                 random arguments with every bit random and over the places
                 each path's reduced argument is largest
   budget:       the first-order budget's bound under 1 (mathlib_budget)
-  rate:         the mark-rate law with the bound inflated by a fixed factor
+  rate:         the mark-rate law with the bound inflated by a fixed factor:
+                the count of marks against the sample's own expectation, by
+                its exact two-sided tail, a run of cells judged together
+  rategeom:     the same build marks exactly the lanes whose true value lies
+                within the inflated bound of a boundary, lane for lane
   family:       the structured family (mathlib_family): the committed list
                 against the theory's generation; the centres and their
                 neighbours, inside and outside the windows
@@ -593,7 +597,8 @@ def uniform_m1rate(fmt, n, seed=7, fn="exp"):
     expm1 the same but above -(p + 2) 0.693 + 1; exp2 on (emin - p + 1,
     emax). They lie between the screens, so all are on the main path; the few
     of exp and exp2 under emin have subnormal results, which the fixed grid
-    rounds and rarely marks. The log family's (the same file): log and log2,
+    rounds and the in-lane test marks as it marks the others (check_rate's
+    docstring). The log family's (the same file): log and log2,
     n random positive normal encodings (the exponent field uniform), log1p n
     random normal encodings of either sign, kept where x > -1 and |x| >=
     2^-(p+2); the exact cases (x = 1, powers of two) are dropped."""
@@ -1080,37 +1085,303 @@ def check_budget(b, xs, label="budget", plant=None):
 
 
 # ---- the mark-rate law ------------------------------------------------------
+#
+# The law (the study's 3.4), derived from the code (parcel RC). With the bound
+# inflated to 2^-(p + G'), a fragment's Bv is |V_h| BREL, BREL = 2^-(p + G')
+# exactly (mathlib's bound_shift is G - G'; the planted bounds shift it, and
+# the law is of the unplanted one). R1 = rnd(V_h + RD(V_l - Bv)) and
+# R2 = rnd(V_h + RU(V_l + Bv)) differ - the lane is marked - exactly when
+# V - Bv .. V + Bv holds a boundary of the attribute: a float under rtz, rdn
+# and rup, a midpoint under rne and rmm. (The rounding of the low word widens
+# the interval by 2^-(p-6) of its width at most at each end; fp32's V_l is
+# V1 + V2 and its ends are the round-to-odd sums of V1 with RD(V2 - Bv) and
+# RU(V2 + Bv), the same size.) Boundaries of either kind are one ulp of V
+# apart and the window is 2^-5 of an ulp wide at the most, so the lane is
+# marked when V is within Bv of one. With V's place u in its rounding cell
+# uniform that has probability 2 Bv / ulp(V) = 2^-G' m_V, where |V| = m_V 2^E,
+# m_V in [1, 2), ulp(V) = 2^(E - p + 1). (A lane at a binade's edge has an ulp
+# on one side twice the other's, but its window holds one boundary all the
+# same, its m_V is its own and the sum below is the same; a lane whose window
+# holds the edge itself is about one in 2^(p+4) of all.) The count of marks is
+# then a sum of independent Bernoulli(2^-G' m_V) lanes, whose mean is 2^-G'
+# times the sum of the lanes' m_V and whose variance is the sum of p (1 - p):
+# the SAMPLE'S OWN centre and sigma, from the significand of each lane's true
+# value.
 
-def check_rate(fmt, rnd, n=2000, seed=7, sigmas=3.0, g_inflated=6,
-               plant=None, fn="exp"):
-    """[finding], stats: rate: the mark-rate law (the study's 3.4). The bound
-    is inflated to 2^-(p+6), so that G' = g_inflated = 6 is the guard left,
-    and a random lane's true value, uniform within a rounding cell, is within
-    the bound of a boundary - and so marked - with probability
-    2^(0.53 - G') (2^-G' / ln 2, the average of 2 Bv / ulp over the binade).
-    On n uniform main-path arguments (uniform_m1rate: the study used 2,000 a
-    cell) the marked fraction must be within `sigmas` sigma of that, every
-    unmarked lane right, and every marked guess counted (the study found
-    them all right; a wrong one is a finding here)."""
+# A run's false-alarm rate (check_rate's rule).
+RATE_ALPHA = 0.001
+RATE_NEAREST = (sf.RND_RNE, sf.RND_RMM)
+
+
+def rate_class(rnd):
+    """The lane set an attribute marks: "nearest" for rne and rmm (a midpoint
+    within the bound), "directed" for rtz, rdn and rup (a float within it)."""
+    return "nearest" if rnd in RATE_NEAREST else "directed"
+
+
+def rate_statistics(fns, formats, rnds=None):
+    """How many independent statistics a run of rate checks judges: one a
+    routine, format and class of attribute (rate_class). rtz, rdn and rup mark
+    the same lanes, as do rne and rmm, so the five cells of a routine and
+    format are two statistics, not five: 18 for the 45 cells of the log family
+    at three formats, 36 for the committed test's 90."""
+    rnds = sf.RND_MODES if rnds is None else rnds
+    return len(fns) * len(formats) * len({rate_class(r) for r in rnds})
+
+
+def rate_level(statistics=1, alpha=RATE_ALPHA):
+    """The two-sided tail under which one statistic of a run is flagged,
+    alpha / statistics (Bonferroni): a run in which nothing is wrong is
+    flagged with probability at most alpha."""
+    if statistics < 1:
+        raise ValueError(f"a run has at least one statistic, not {statistics}")
+    return alpha / statistics
+
+
+def lane_cell(fmt, fn, x):
+    """(E, m, u) of the true value V = f(x) of the main-path lane x: |V| =
+    m 2^E with m in [1, 2), and u in [0, 1) the place of |V| in its p-bit
+    rounding cell, 2^(E - p + 1) wide (0 at the float below |V|, 1 at the float
+    above): the cell the in-lane test works in. mpmath at p + 96 bits with x
+    exact, read from the `_mpf_` tuple: |V| = man 2^ex, E = ex + bc - 1 and
+    m = man / 2^(bc - 1) for the bc bits of man, u the bits of man below its
+    top p. (The exp family's lanes with a subnormal result are rounded on the
+    fixed grid, a coarser cell; the in-lane test runs before it, in the scaled
+    domain, in this one.)"""
+    p = fmt.prec
+    u_ = sf.unpack(fmt, x)
+    with mpmath.workprec(p + 96):
+        xv = mpmath.ldexp(mpmath.mpf(u_.m), u_.e)
+        if u_.sign:
+            xv = -xv
+        _sign, man, ex, bc = true_value(fn, xv)._mpf_
+    if not man:
+        raise ValueError(f"{fn}({hex(x)}) is zero: not a main-path lane")
+    man = int(man)
+    m = man / (1 << (bc - 1))
+    u = (man & ((1 << (bc - p)) - 1)) / (1 << (bc - p)) if bc > p else 0.0
+    return ex + bc - 1, m, u
+
+
+def poisson_binomial_pmf(ps, kmax):
+    """[P(X = k) for k = 0 .. kmax], X the number of successes among
+    independent trials of probabilities `ps`: the dynamic programme over the
+    trials, f[k] <- f[k] (1 - p) + f[k - 1] p, with the entries above kmax
+    dropped (which leaves those below exact). O(len(ps) kmax): about 0.75 s
+    for 20,000 trials and kmax 669."""
+    f = [1.0] + [0.0] * kmax
+    for p in ps:
+        q = 1.0 - p
+        f = [a * q + b * p for a, b in zip(f, [0.0] + f)]
+    return f
+
+
+def pmf_top(mean, n, eps=1e-20):
+    """The top of a table of P(count = k) that leaves under `eps` above it:
+    the least k above `mean` at which exp(-mean) (e mean / k)^k is under `eps`,
+    or n when the table can hold every count (then nothing is above it). That
+    product is the multiplicative Chernoff bound on P(count >= k) for ANY sum
+    of independent trials of that mean (E exp(t count) <= exp(mean (e^t - 1)),
+    and Markov's inequality at t = ln(k / mean)), so P(count > top) < eps
+    whatever the trials' probabilities are, at every mean."""
+    if n < 1 or mean <= 0.0:
+        return 0
+    k = int(mean) + 1
+    bound = math.log(eps)
+    while k < n and k * (1.0 + math.log(mean / k)) - mean >= bound:
+        k += 1
+    return min(k, n)
+
+
+class RateSample:
+    """The lanes of uniform_m1rate(fmt, n, seed, fn) with the law of the count
+    of marks that the build with the bound 2^-(p + g_inflated) |V_h| gives
+    them: lane i is marked with probability p_i = 2^-g m_i (m_i the significand
+    of its true value, lane_cell), independently of the others. `mean` and
+    `sigma` are that law's; `tails` and `p_value` its exact tails; `rejection`
+    its exact probability of a flag; `geometric_marks` the lanes it says are
+    marked."""
+
+    def __init__(self, fmt, fn, n, seed, g_inflated=6):
+        self.fmt, self.fn, self.n, self.seed = fmt, fn, n, seed
+        self.g = g_inflated
+        self.xs = uniform_m1rate(fmt, n, seed, fn)
+        self.cells = [lane_cell(fmt, fn, x) for x in self.xs]
+        self.p = [m * 2.0 ** -g_inflated for _e, m, _u in self.cells]
+        self.mean = math.fsum(self.p)
+        self.var = math.fsum(q * (1.0 - q) for q in self.p)
+        self.sigma = math.sqrt(self.var)
+        self._pmf = None
+
+    def pmf(self):
+        """P(count = k) for k = 0 .. pmf_top(mean, n): what is past the table
+        is under 1e-20 at every mean (Chernoff, pmf_top), or nothing when the
+        table holds every count."""
+        if self._pmf is None:
+            self._pmf = poisson_binomial_pmf(self.p,
+                                             pmf_top(self.mean, self.n))
+        return self._pmf
+
+    def tails(self, c):
+        """(P(count <= c), P(count >= c)), exactly to about 1e-12; a count
+        past pmf()'s table has the second as 0.0."""
+        f = self.pmf()
+        if c >= len(f):
+            return 1.0, 0.0
+        return math.fsum(f[:c + 1]), math.fsum(f[c:])
+
+    def p_value(self, c):
+        """The two-sided tail of the count c: twice the smaller tail, at most
+        1."""
+        lo, hi = self.tails(c)
+        return min(1.0, 2.0 * min(lo, hi))
+
+    def rejection(self, level):
+        """The law's own probability that a count's two-sided tail is under
+        `level`: the sum of the law over the counts flagged (the table's top
+        and everything above it included). At most `level`, since the tails of
+        a discrete law are conservative."""
+        f = self.pmf()
+        mass = math.fsum(f)
+        lo = 0.0
+        hi = mass
+        flagged = 1.0 - mass if mass < 1.0 else 0.0
+        for c, pc in enumerate(f):
+            lo += pc
+            if min(1.0, 2.0 * min(lo, hi)) < level:
+                flagged += pc
+            hi -= pc
+        return flagged
+
+    def geometric_marks(self, rnd):
+        """[bool] a lane: the true-value geometry marks it. The window is
+        w = m 2^-(g + 1) cells either side of |V| (Bv / ulp); directed
+        attributes mark a float inside it (u < w or u > 1 - w), rne and rmm a
+        midpoint (|u - 1/2| < w)."""
+        out = []
+        for _e, m, u in self.cells:
+            w = m * 2.0 ** -(self.g + 1)
+            out.append(abs(u - 0.5) < w if rnd in RATE_NEAREST
+                       else (u < w or u > 1.0 - w))
+        return out
+
+
+@functools.lru_cache(maxsize=None)
+def rate_sample(fmt, fn, n, seed, g_inflated=6):
+    """The RateSample of these arguments, cached: it holds the clean sample,
+    which a planted fault does not touch, and the five attributes of a cell
+    share it."""
+    return RateSample(fmt, fn, n, seed, g_inflated)
+
+
+def check_rate(fmt, rnd, n=2000, seed=7, sigmas=None, g_inflated=6,
+               plant=None, fn="exp", statistics=1, alpha=RATE_ALPHA):
+    """[finding], stats: rate: the mark-rate law (the study's 3.4), held to
+    the sample's own count. The bound is inflated to 2^-(p + G'), G' =
+    g_inflated = 6, so that marks are common enough to count; n arguments of
+    uniform_m1rate (the study used 2,000 a cell) run through the fragment.
+
+    THE CENTRE (derived in the comment above RATE_ALPHA; check_rate_geometry
+    holds it to the fragment lane for lane). A lane is marked with probability
+    2^-G' m_V, m_V in [1, 2) the significand of its true value, provided the
+    place of that value in its rounding cell is uniform and independent of the
+    other lanes': the one premise that is measured and not derived (the entry,
+    and `mathlib_runs.py rategeom`). The count then has mean 2^-G' sum(m_V) and
+    variance sum(p (1 - p)), from the sample's own true values (RateSample),
+    not from a law of the significand. For a log-uniform significand the mean
+    of m_V is 1/ln 2 and the sum is n 2^-G' / ln 2 = n 2^(0.5288 - G'), the
+    study's n 2^(0.53 - G') to 0.09%: exp's and exp2's samplers (x uniform
+    makes ln V uniform) give it (20,000 lanes: 0.09% under the study's figure).
+    The log family's sampler draws the exponent field uniformly, so |V| is
+    about the exponent: log2's significand is uniform and its sum 3.9% over
+    the study's figure, log's 2.0% and log1p's 1.5% to 2.0% under it; expm1's
+    at fp64 is 1.7% over (the 5% of its lanes at x < 0 have |V| just under 1).
+    The exp family's lanes with a subnormal result mark as the others do (the
+    in-lane test runs in the scaled domain), and under rne and rmm a few more,
+    by the fixed grid's own test: 4.3% to 4.8% more of them at fp32 and 0.9% to
+    2.4% at fp64, under 0.4% of the sample's count (measured in the entry).
+
+    THE RULE. The cell is judged by the EXACT two-sided tail of its count
+    under that law (twice the smaller of P(count <= c) and P(count >= c), by
+    the dynamic programme RateSample.pmf). A normal z misjudges the small
+    counts the committed test runs at: it calls 0 marks of 16 expected a 4
+    sigma event (6e-5) when the exact two-sided tail is 2e-7. A run of cells is
+    judged together: the five attributes of a routine and format mark two lane
+    sets (rtz, rdn and rup the same lanes, rne and rmm the same), so a run
+    holds `statistics` independent statistics (rate_statistics: 18 for the log
+    family's 45 cells, 36 for the committed test's 90), and a cell is flagged
+    when its tail is under alpha / statistics (Bonferroni): a run with nothing
+    wrong is flagged with probability at most `alpha`, RATE_ALPHA, 0.1% (the
+    entry measures it over seeds). With `sigmas` given, the plain line
+    instead: the cell is flagged beyond that many sigma of the sample's own
+    mean, no multiplicity. Either way every unmarked lane must be right, and
+    every marked guess is counted (the study found them all right; a wrong one
+    is a finding here)."""
     G = ml.GUARD[fmt.name]
     build = ml.build(fn, fmt, rnd, bound_shift=G - g_inflated, plant=plant)
     f = build.fragment()
-    xs = uniform_m1rate(fmt, n, seed, fn)
-    t = tally(fmt, rnd, xs, evaluate_all(f, xs), fn)
-    p_mark = 2.0 ** (0.53 - g_inflated)
-    mean, sd = n * p_mark, math.sqrt(n * p_mark * (1 - p_mark))
-    st = {"n": n, "marked": len(t.marked), "expected": mean, "sigma": sd,
-          "wrong": len(t.wrong), "guess_wrong": len(t.guess_wrong)}
+    smp = rate_sample(fmt, fn, n, seed, g_inflated)
+    t = tally(fmt, rnd, smp.xs, evaluate_all(f, smp.xs), fn)
+    c, mean, sd = len(t.marked), smp.mean, smp.sigma
+    lo, hi = smp.tails(c)
+    p = min(1.0, 2.0 * min(lo, hi))
+    level = rate_level(statistics, alpha)
+    z = (c - mean) / sd
+    st = {"n": n, "marked": c, "expected": mean, "sigma": sd, "z": z,
+          "p": p, "level": level, "statistics": statistics,
+          "class": rate_class(rnd), "wrong": len(t.wrong),
+          "guess_wrong": len(t.guess_wrong)}
     where = f"rate: {fn} {fmt.name} {sf.RND_NAMES[rnd]} (G' = {g_inflated})"
     out = []
-    if abs(len(t.marked) - mean) > sigmas * sd:
-        out.append(f"{where}: {len(t.marked)} of {n} lanes marked, "
-                   f"{mean:.1f} expected (sigma {sd:.1f}): "
-                   f"{(len(t.marked) - mean) / sd:+.1f} sigma")
+    if sigmas is not None:
+        if abs(z) > sigmas:
+            out.append(f"{where}: {c} of {n} lanes marked, {mean:.1f} "
+                       f"expected (sigma {sd:.1f}): {z:+.1f} sigma")
+    elif p < level:
+        out.append(f"{where}: {c} of {n} lanes marked, {mean:.1f} expected "
+                   f"(sigma {sd:.1f}): {z:+.1f} sigma, an exact two-sided "
+                   f"tail of {p:.2g}, under the {level:.2g} of this run "
+                   f"(alpha {alpha:g} over {statistics} statistics)")
     if t.wrong:
         out.append(f"{where}: {len(t.wrong)} unmarked lanes are wrong")
     if t.guess_wrong:
         out.append(f"{where}: {len(t.guess_wrong)} marked guesses are wrong")
+    return out, st
+
+
+def check_rate_geometry(fmt, rnd, n=600, seed=5, g_inflated=6, plant=None,
+                        fn="exp"):
+    """[finding], stats: rategeom: the inflated build marks exactly the lanes
+    whose true value the geometry puts within the bound of a boundary: for each
+    lane of rate_sample(n, seed) with a normal result, the fragment's mark
+    (bound 2^-(p + G') |V_h|, planted if `plant`) against RateSample.
+    geometric_marks. This is the premise of check_rate's centre, lane for
+    lane. The exp family's lanes with a subnormal result are left out: under
+    rne and rmm the fixed grid's own test marks a few more of them."""
+    G = ml.GUARD[fmt.name]
+    f = ml.build(fn, fmt, rnd, bound_shift=G - g_inflated,
+                 plant=plant).fragment()
+    smp = rate_sample(fmt, fn, n, seed, g_inflated)
+    want = smp.geometric_marks(rnd)
+    extra, missing, lanes, marks = [], [], 0, 0
+    for x, (e, _m, _u), w in zip(smp.xs, smp.cells, want):
+        if e < fmt.emin:
+            continue
+        lanes += 1
+        got = bool(ml.evaluate(f, x)[1] & ml.MARK)
+        marks += got
+        if got and not w:
+            extra.append(x)
+        elif w and not got:
+            missing.append(x)
+    st = {"lanes": lanes, "marked": marks, "extra": len(extra),
+          "missing": len(missing)}
+    out = []
+    if extra or missing:
+        out.append(f"rategeom: {fn} {fmt.name} {sf.RND_NAMES[rnd]}: "
+                   f"{len(extra)} lanes of {lanes} are marked that the "
+                   f"geometry does not mark and {len(missing)} are not marked "
+                   f"that it does, first {_hexes(extra + missing)}")
     return out, st
 
 
