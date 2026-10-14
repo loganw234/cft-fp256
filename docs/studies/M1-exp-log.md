@@ -25,7 +25,7 @@ stays as of 2026-10-05). exp2 and expm1 are built too, in the same module, at
 the four formats and five attributes (docs/VALIDATION.md, the entry of that
 date), so "nothing here is built" holds of log, log2 and log1p only. What
 the build changed in this text's statements:
-- Section 4's exp2 row, and 2.2's "the screen at emin - p reproduces
+- Section 4's exp2 paragraph, "The screen at emin - p reproduces
   transcend.py's +0 under rmm": since profile 3 (parcel XT) transcend.exp2
   gives the smallest subnormal at that tie, and the routine does, by a
   one-lane override of the screen's quarter (two instructions, rmm only).

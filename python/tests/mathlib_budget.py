@@ -39,8 +39,9 @@ extremes. It must be under 1.
 Verifier-VM1d measured what first order leaves out (6e-5 Bv for exp at
 G = 44: the study's 3.2), so a bound under 1 with the room the study
 recorded (0.164 Bv at fp64, G = 44) is a bound with margin. exp2's is exp's
-(the same polynomial and reconstruction: 0.1642, 0.0148 and 0.0193 Bv at
-fp64, fp128 and fp256, parcel MB1's entry); expm1's is mostly the method's
+(the same polynomial and reconstruction: 0.1643, 0.0148 and 0.0193 Bv at
+fp64, fp128 and fp256 over all regions, parcel MB1's entry; the placed
+region alone gives 0.1642 at fp64); expm1's is mostly the method's
 error at its first clamped k, where 2^-k is taken as 0 (about 1/8 Bv, M in
 the summary), with the double word's floor amplified at n = +-1 on top at
 fp64.
