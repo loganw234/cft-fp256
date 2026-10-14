@@ -791,16 +791,12 @@ def test_the_windows_the_centres_and_their_neighbours_inside_and_outside(
     are not centres and, at fp128 and fp256, the deep arguments below the
     census (the windows' lower edge, where the bound's calibration shows):
     every lane the theory puts inside is marked, none outside, every
-    unmarked lane equals transcend's. expm1's directed cells hold 191 and 314
-    centres at fp128 and fp256; every sixth is run here (the first, the
-    last and the ends of each family among them) and all of them by
-    mathlib_runs.py family."""
+    unmarked lane equals transcend's. Every centre of the committed list is
+    run (expm1's directed cells hold 191 and 314 at fp128 and fp256: 6 and
+    10 s)."""
     f = ml.fragment(fn, fmt, rnd)
     cen = F.FAMILY[fn][fmt.name][sf.RND_NAMES[rnd]]
-    if len(cen) > 60:
-        cen = sorted(set(cen[::6]) | {cen[0], cen[-1]}, key=cen.index)
-    have = {F.argument(fmt, c) for c in F.FAMILY[fn][fmt.name][
-        sf.RND_NAMES[rnd]]}
+    have = {F.argument(fmt, c) for c in cen}
     extra = [x for x in F.census(fmt) if x not in have]
     out, st = H.check_family(f, cen, extra=extra, deep=True)
     assert out == [], st

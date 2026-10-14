@@ -1352,9 +1352,11 @@ def _build_dw(fn, fmt: FpFormat, rnd: int, G, shift, plant):
     P = b.mul(Th, zp)
     nPe = b.fma(Th, b.neg(zp), P)                     # P - Th Zh = -(error)
     if fn == "expm1":
-        # (T_h - 2^-k) = base + ea exactly. |base| >= |P| in every case (the
-        # study's 2.2: base is T_h - 2^-k or, at n = 0, 0), so the Fast2Sum
-        # below holds
+        # (T_h - 2^-k) = base + ea exactly. |base| >= |P| for every n but 0
+        # (the study's 2.2, COMPUTED from the table: base is 0.0905 at n = 1
+        # and -0.166 at n = -1 against |P| under 0.049 and 0.082, and larger
+        # beyond); at n = 0, base is 0 and the Fast2Sum below is exact in any
+        # order (S = P, e2 = 0)
         base, ea = b.two_diff(Th, sc.npk)
     else:
         base = Th
@@ -1662,9 +1664,9 @@ def _build_tw(fn, fmt: FpFormat, rnd: int, G, shift, plant):
     Q1 = b.mul(T1, Z0)
     nQ1 = b.fma(T1, b.neg(Z0), Q1)
     if fn == "expm1":
-        # (T0 - 2^-k) = base + ea exactly; |base| >= |P0| as at the double
-        # word, so the Fast2Sum holds. ea is of the table's second word's
-        # size or less, and joins its level
+        # (T0 - 2^-k) = base + ea exactly; |base| >= |P0| for every n but 0
+        # and exact at n = 0, as at the double word, so the Fast2Sum holds.
+        # ea is of the table's second word's size or less, and joins its level
         base, ea = b.two_diff(T0, sc.npk)
     else:
         base = T0
