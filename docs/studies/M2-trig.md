@@ -12,6 +12,20 @@ file, the model under `docs/studies/m2/`, this file's row in
 docs/README.md and its VALIDATION entry are the only changes the study
 made.
 
+**A note of 2026-10-13, at the merge with M1's build** (the lead; the
+study's text stays as written at 1337a13). Parcel MB1, merged beside this
+study at 26ced32, set mathlib.py's `LIVE_CAP` to 21 at fp32 and 13 at
+fp64, fp128 and fp256, the measured maxima of exp, exp2 and expm1 in
+their scheduled order. Where this study reads the cap, section 5.1's
+"mathlib.py's LIVE_CAP for exp is 23" and question 9's "fp128's 17 and
+fp256's 16 are within it", it reads 1337a13's 23. Against the merged cap
+the study's fragments exceed it at every format: 22 against 21 at fp32,
+26, 17 and 16 against 13 at fp64, fp128 and fp256 (verifier-VIW1,
+MEASURED, the fragments through the merged `invariants()` at its default
+cap; with `live_cap=None`, as costs.py passes it, they hold). Question
+9's recommendation, a cap by function and format, stands; its premise
+that only fp64 is past the cap does not.
+
 M1's study (docs/studies/M1-exp-log.md) is its model of form, section for
 section, and M1's design is its starting point: the in-lane test, the
 double word with TwoSum and no augmented addition, the fragment in C4's

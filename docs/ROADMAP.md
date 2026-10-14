@@ -6085,6 +6085,9 @@ this level?** Logan's instruction, above.
    x = emin - p under rmm, the tie XT fixed in the golden model
    (VALIDATION's XT entry; verifier-P7 measured it again at fp64,
    fp128 and fp256), so exp2's parcel does not port it as it stands.
+   - **exp2 and expm1 are built** (2026-10-13): parcel MB1, merged at
+     26ced32, with fp32's fit to the register file for all three of
+     exp, exp2 and expm1. The log family is next.
 2. **program.c parity:** the fragments' programs in seq_check's
    corpora. No new C, since the routines are programs of existing
    instructions.
@@ -6118,6 +6121,9 @@ function gains an L3 rule.
   - a stated range at fp256, beyond which a lane is marked and
     replayed;
   - the cost of 2^1024's range measured (step 6's plan).
+  - **Its study is done** (2026-10-13): docs/studies/M2-trig.md,
+    merged at 81735d4, ending in twelve questions for Logan, not yet
+    answered.
 - **M3, the pow family:** its structured cases need 2p to 3p bits.
 - **M4, atan, atan2, asin and acos.**
 - **Their order:** M2's study can run beside M1's build; M4 follows
@@ -6242,7 +6248,8 @@ record).
     branch m1-exp-b.
 - **Carried to M1's build:**
   - fp32's fit to the register file: each arm found a reorder that fits,
-    at 22 to 25 values live;
+    at 22 to 25 values live. Done by parcel MB1 (merged at 26ced32):
+    every fragment is scheduled, 19 to 21 values live at fp32;
   - the pools' lost negative n ln2 thresholds, a task of its own. Arm
     a's tests pinned them as they stood: its
     test_the_pools_lose_their_negative_thresholds_and_the_edge_pool_has_them

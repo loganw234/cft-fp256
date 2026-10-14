@@ -19541,3 +19541,99 @@ E1's 18 faults on the new routines (the same checks, by the same names; what dif
 7. The golden stage as a whole, serially, in a clone of its own, for the timing: `python -m pytest python/tests -q -rs`; and, by the lead's later message, `test_mathlib.py` and the whole stage again at this parcel's last commit, on the box beside the batch.
 8. The lead's own: `pools --seq --edges`, `live`, and `python3 -m cft_golden.mathlib --check`.
 - The desktop runs of the same commands at the study's scale, above, are this parcel's own MEASURED figures. The lead's golden stage ran at 3f24cc9, which precedes this change to the windows test in test_mathlib.py (every centre, where it ran three a list).
+
+## 2026-10-13 - M1's build, first wave, closed: exp2 and expm1 (parcel MB1, Sonnet) and M2's design study (parcel M2S, Opus), merged and gated
+
+**What Logan asked,** verbatim (2026-10-13): "Delete the ci-golden branch and start M1's build". The models are his decision of the same day: "Use Sonnet for M1's build parcels as you recommended, it performed well", the recommendation he accepted putting M2's study on Opus, with Sonnet verifiers for both.
+
+**The chains** (MEASURED, each verifier's ledger):
+
+| work | author | verifiers: (a), (b) | sent back |
+|---|---|---|---|
+| MB1 (3f24cc9, 2799b99, db277b1) | Sonnet 5.5 | VMB1 0, 3; VMB1-2 0, 0 | once |
+| M2S (dc6e0bd, 8d17b30) | Opus 5.5 | VM2S 0, 3; VM2S2 0, 0 | once |
+| the merges (81735d4, 26ced32) | the lead | VIW1 0, 1 | restated here |
+
+- **MB1's three (b)s,** each a false statement in a record or a comment: a quote attributed to the study's 2.2 that is in its section 4; mathlib.py's line count (2,347, where the commit holding the entry has 2,349); and a comment giving 0.1642 as the entry's exp2 fp64 bound (0.1643; 0.1642 is the placed region's alone).
+- **M2S's three (b)s:**
+  - the neighbours of the arguments nearest multiples of pi/2 do mark, at fp128 and fp256 under the directed attributes, where the study said they mark none;
+  - three of its 45 budget cells exceeded their sampled bounds, where it said none did;
+  - logs it cited were not committed.
+- **Both authors' send-backs fixed every (b),** and each narrow re-check was clean.
+- **The merges' (b),** in their messages, as at e7ab517: each says both its verifiers verified the branch's tip. In VIW1's words: "VM2S verified dc6e0bd and VM2S2 8d17b30; VMB1 verified 2799b99 and VMB1-2 db277b1". The messages stand as written.
+- **What VIW1 measured:**
+  - each merge brings exactly its branch;
+  - the two resolutions lose nothing of either side, byte for byte;
+  - at the merge, test_mathlib.py passes (835), test_pool_signs.py and test_transcend.py pass (934), the constants' check holds, and python/tests collects 4,255;
+  - the study's costs.py, which calls mathlib's invariants, gives its committed outputs.
+
+**Time and tokens** (MEASURED, the agents' transcripts; usage summed from the last line of each response):
+- MB1's author, claude-sonnet-5-5: 196 min to its report and 5 min for the send-back; 492 tool uses; 788,957 output tokens.
+- M2S's author, claude-opus-5-5: 168 min and 12 min; 586 tool uses; 884,058 output tokens.
+- The verifiers, all claude-sonnet-5-5:
+  - VMB1: 153 min, 231 tool uses, 358,389 output tokens;
+  - VMB1-2: 18 min, 68, 110,420;
+  - VM2S: 119 min, 191, 281,255;
+  - VM2S2: 36 min, 130, 195,882;
+  - VIW1: 36 min, 155, 202,928.
+
+**MB1's long runs on amd-arc-box** (MEASURED; the author's list, run by the lead at 3f24cc9, python3 3.12.3 with mpmath 1.4.1 and gmpy2 2.3.1, 15:28 to 20:05). All 214 jobs exited 0, and their logs end "RESULT: ok" but for the constants' check and the golden stage, each passing in its own words:
+- **The constants' check:** "mathlib --check: 3 routines, 4 formats, 0 differences".
+- **The golden stage at 3f24cc9:** "4252 passed, 3 skipped".
+- **The bound,** the largest error found over 300,000-plus lanes a job:
+  - exp2: 2^-4.98, 2^-2.63, 2^-6.08 and 2^-5.79 of Bv at fp32, fp64, fp128 and fp256;
+  - expm1: 2^-2.99, 2^-2.93, 2^-2.94 and 2^-2.90.
+- **The budget's bound over all its regions:**
+  - exp2: 0.1646, 0.0148 and 0.0193 Bv at fp64, fp128 and fp256;
+  - expm1: 0.1790, 0.1316 and 0.1353.
+  - The larger samples raise the entry's fp64 figures (0.1643, 0.1773) a little. Every error found lies under its budget.
+- **The rate law, the random lanes, the families and the pools on seq.py:** 0 wrong unmarked and 0 wrong guesses in every line.
+- **fp32's sweeps:**
+  - the main path [-18, 89], every 64th float: exp 2^-4.21, exp2 2^-4.48, expm1 2^-2.39;
+  - expm1's cancelling cells, every float, 15,435,038 a side: [-0.14, -0.04] 2^-2.99, and **[0.04, 0.14] 2^-2.03,** at 0x3d7e5307.
+  - In that cell the entry's stride-211 sweep found 2^-2.67, and so did VMB1's sweep of every float in a 26,844-float window of it.
+  - fp32 has no budget, so 2.03 bits is fp32 expm1's measured margin.
+- **The golden stage at 2799b99:** "4252 passed, 3 skipped in 3413.54s", on a box at load 37.
+
+**M2S's box batch** (MEASURED; docs/studies/m2/box_m2s.sh at dc6e0bd, run by the lead, 16:43 to 17:50): all 49 jobs exited 0. Its results are in the study, which its send-back restated with them.
+
+**The gate** (MEASURED, amd-arc-box at 26ced32, run 20261013-201235-26ced32, niced, the pinned MPFR 4.2.2 copied in; python3 3.12.3, mpmath 1.4.1, gmpy2 2.3.1): "VERDICT: PASS with 8 skip(s) and 4 inner skip(s) in golden (3), remote (1)", in 164 min.
+- **The 8 skips are the box's usual:** buildargs (a real Vitis), lang-rust, lang-julia, lang-go, lang-csharp, lang-r and lang-fortran (no toolchain), and demos (no node).
+- **The inner skips:** golden's 3 known, and remote's WebSocket leg (no node).
+- **golden:** "4252 passed, 3 skipped in 1587.84s (0:26:27)", on a quiet box. The chips' gate at e7ab517 took 1,053 s for 3,669.
+- **The other stages,** each as at the chips' gate:
+  - libcft "168 sets, 1228415 cases, all matching";
+  - transcend 610,717 and 584,477 comparisons;
+  - audit "17883 checks, 0 failed, 0 skipped";
+  - the corpus check "311 checks, 0 failed, 0 skipped".
+
+**Known limits carried** (the verifiers' "other" notes, merged under Logan's rule):
+- **MB1:**
+  - 137 "stays green" assertions trimmed from E1's plant rows: disclosed, none of them red at the merge, and no red check lost (VMB1);
+  - the first family's committed lists are the census's (c <= 16), not every centre, though the routine marks the rest correctly;
+  - the distance helper prices a subnormal result on the normal grid;
+  - the test's budget sample is thin at fp256's cancelling cells;
+  - the golden stage gains 583 tests and about 13 minutes serially;
+  - `sweep` walks every encoding of its range;
+  - db277b1's message says 2.2 "says nothing of emin - p", where 2.2 holds the string once, as the fixed grid's unit;
+  - the study note's list of superseded places is not complete (VMB1-2).
+- **M2S** (VM2S and VM2S2):
+  - trailing spaces in 23 captured outputs;
+  - fp32's mark rate as 2^-17.5, where the study's own law gives 2^-17.3;
+  - "pass" a bound for "exceed" it;
+  - fp64 tan under rtz at -1.011 sigma, where the study says within 1.0;
+  - no fp32 budget in the box batch;
+  - the study's MEASURED does not name the box;
+  - stale sentences in its build plan;
+  - the new family measured to |j| = 4 only. VM2S2's own oracle predicts it wider: every |j| <= 128 marks at fp128 binades 56 to 58 and fp256 binades 118 to 135.
+- **The merge's own:**
+  - MB1's cap (21 at fp32, 13 elsewhere) makes two of the study's statements, true at 1337a13, false of the merged tree: section 5.1's cap of 23, and question 9's premise that only fp64 is past the cap. The study's fragments exceed the merged cap at every format (VIW1, MEASURED). A dated note at the study's head now says so.
+  - CI's golden job is serial and gains MB1's 835 tests, about 13 minutes by MB1's count.
+  - Nobody has run those tests under Python 3.13, which CI uses. CI's run after the push is the first.
+- **M2's twelve questions for Logan** are not yet answered. M2's build waits on them, and is a round of its own.
+
+**Records:**
+- ROADMAP's plan: item 1 built for exp2 and expm1, M2's study done, fp32's fit done;
+- a dated note at the head of docs/studies/M2-trig.md on the merged cap;
+- VERIFICATION's golden row;
+- docs/README.md recounted, and the docs check rc 0.
