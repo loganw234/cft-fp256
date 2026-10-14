@@ -2425,7 +2425,6 @@ ROUTINE_SHARES = (("special", 0.15), ("edge", 0.25), ("pool", 0.15),
 ROUTINE_MINIMA = (3, 3, 1, 1, 1)        # at 8 lanes or more, each category
 ROUTINE_IDENT = 12                      # lanes a stand-alone run evaluates
 ROUTINE_SHAPES = ("stand-alone", "compiled")
-ROUTINE_CATS = ("special", "edge", "pool", "centre", "struct", "random")
 # the remote leg: seven servers, two of them with a capacity lowered to these
 ROUTINE_LEGS = 7
 ROUTINE_LEG_INSNS = 300
