@@ -1,7 +1,8 @@
 # Copyright 2026 Logan W.
 # SPDX-License-Identifier: Apache-2.0
-"""The larger runs of parcels E1 and MB1: the checks of test_mathlib.py at
-sizes the golden stage does not run, as a script, for exp, exp2 and expm1.
+"""The larger runs of parcels E1, MB1 and MB2: the checks of test_mathlib.py at
+sizes the golden stage does not run, as a script, for exp, exp2, expm1, log,
+log2 and log1p.
 
     python python/tests/mathlib_runs.py pools   [--fn exp2] [--formats fp64]
         [--seq] [--edges]
@@ -21,7 +22,8 @@ sizes the golden stage does not run, as a script, for exp, exp2 and expm1.
     python python/tests/mathlib_runs.py live
     python python/tests/mathlib_runs.py all     [--scale 1]
 
---fn is a list of exp, exp2 and expm1 (all three by default). Each command
+--fn is a list of exp, exp2, expm1, log, log2 and log1p (all six by default).
+Each command
 prints what it ran and what it measured, then a line "RESULT: ok" or
 "RESULT: N findings" and exits 0 or 1. Pure Python, one process, one core:
 the lanes are softfloat.compute one instruction at a time (about 1 ms a lane
@@ -47,7 +49,12 @@ sample is a function of --seed, so a run can be repeated.
            numbers, exact), every --stride-th of them, shard i of n of
            those (--shard i/n, so n processes cover the range): the largest
            ratio found and where, for the lead's box. A range of 2^23 floats
-           (one binade) costs about 2 ms a lane at fp32 and fp64
+           (one binade) costs about 2 ms a lane at fp32 and fp64. The walk
+           is of the lanes the stride and shard take (the arithmetic
+           progression H.sweep_keys), not of every float of the range as it
+           was before parcel MB2: one fp64 binade (2^52 floats) at stride
+           2^30 is 2^22 lanes and begins at once, where the walk of every
+           float would not have ended in years
   family   the committed windows (mathlib_family): every centre, its
            neighbours inside and outside, the census arguments that are
            not centres and, at fp128 and fp256, the deep arguments below
@@ -171,10 +178,9 @@ def cmd_sweep(a):
         for fmt in formats_of(a.format, ["fp32"]):
             b = ml.build(fn, fmt, sf.RND_RNE, guard=a.guard)
             worst, where, lanes, main = -1e9, None, 0, 0
-            for idx, x in enumerate(H.range_encodings(fmt, Fraction(a.lo),
-                                                      Fraction(a.hi))):
-                if idx % a.stride or (idx // a.stride) % n != i:
-                    continue
+            for key in H.sweep_keys(fmt, Fraction(a.lo), Fraction(a.hi),
+                                    a.stride, (i, n)):
+                x = H.key_encoding(fmt, key)
                 lanes += 1
                 if not H.in_main(fmt, x, fn):
                     continue
@@ -200,7 +206,9 @@ def cmd_budget(a):
             b = ml.build(fn, fmt, sf.RND_RNE, guard=G)
             bud = B.Budget(b)
             regions = (
-                ("x in [-1, 1]", H.uniform_unit(fmt, a.unit, a.seed, fn)),
+                ("x in [-1, 1]" if fn in H.EXP_FUNCS else
+                 "the cancelling cells",
+                 H.uniform_unit(fmt, a.unit, a.seed, fn)),
                 ("weighted to the reduction's ends",
                  H.weighted(fmt, a.weighted, a.seed, fn)),
                 ("placed at each path's largest |r|", H.placed(fmt, fn)))
@@ -265,15 +273,16 @@ def cmd_family(a):
         return
     for fn in fns_of(a.fn):
         for fmt in formats_of(a.format, [f.name for f in H.FORMATS]):
-            census = F.census(fmt)
+            census = F.census_log(fmt) if fn in ("log", "log2") \
+                else F.census(fmt)
             for rnd in attrs_of(a.attrs):
                 f = ml.fragment(fn, fmt, rnd)
-                if fn == "exp2":
+                if fn in H.NOFAMILY:
                     out, t = H.check_nofamily(f)
                     note(out)
                     say(f"family {fn} {fmt.name} {sf.RND_NAMES[rnd]}: no "
                         f"family; {t.n} lanes (the census, the deep "
-                        f"arguments, the floats next to integers), "
+                        f"arguments, the floats next to the exact cases), "
                         f"{len(t.marked)} marked, {len(t.wrong)} wrong "
                         f"unmarked")
                     continue

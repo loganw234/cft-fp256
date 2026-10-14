@@ -1,7 +1,7 @@
 # Copyright 2026 Logan W.
 # SPDX-License-Identifier: Apache-2.0
-"""The lanes, the measurements and the checks parcels E1 and MB1 hold the
-fragments of exp, exp2 and expm1 to (cft_golden/mathlib.py;
+"""The lanes, the measurements and the checks parcels E1, MB1 and MB2 hold the
+fragments of exp, exp2, expm1, log, log2 and log1p to (cft_golden/mathlib.py;
 docs/studies/M1-exp-log.md, section 8, items 1 to 5), gathered in one place so
 that python/tests/test_mathlib.py (quick, for the golden stage) and
 python/tests/mathlib_runs.py (the larger runs, for the lead's box) run the
@@ -36,11 +36,15 @@ routine in it (f.op, b.meta["fn"]); one that takes only a format has a
   family:       the structured family (mathlib_family): the committed list
                 against the theory's generation; the centres and their
                 neighbours, inside and outside the windows
-  nofamily:     exp2 has no family: the census, the deep arguments and the
-                neighbours of integers are all unmarked and right
+  nofamily:     exp2 and log2 have no family: the census, the deep arguments
+                and the neighbours of the exact cases are all unmarked and
+                right
   census:       at fp32 the study's census finds no window
   census_counts at fp64, fp128 and fp256 the study's census marks the
                 counted lanes, among them every committed centre
+  recip:        RECIP_SEED's 512 cells (log, log2, log1p): the instruction
+                gives the table's value at both ends of each, C is 8 to 16,
+                and max |r| is under the plan's rho
   edges:        pools: the thresholds with their signs and the cells' ends
   lanes:        pools: random and weighted lanes
   shape:        the fragment's instruction, word and live counts are the
@@ -82,9 +86,13 @@ from cft_golden import transcend, vectors  # noqa: E402
 FORMATS = (FP32, FP64, FP128, FP256)
 RND_MODES = sf.RND_MODES
 N = ml.N
-FUNCS = ml.NAMES                        # exp, exp2, expm1
+FUNCS = ml.NAMES                        # exp, exp2, expm1, log, log2, log1p
+EXP_FUNCS = ml.EXP_NAMES
+LOG_FUNCS = ml.LOG_NAMES
+NOFAMILY = ("exp2", "log2")             # the routines with no structured family
 TRANSCEND = {"exp": transcend.exp, "exp2": transcend.exp2,
-             "expm1": transcend.expm1}
+             "expm1": transcend.expm1, "log": transcend.log,
+             "log2": transcend.log2, "log1p": transcend.log1p}
 
 
 # ---- the definition, memoised -----------------------------------------------
@@ -149,9 +157,21 @@ def expected_pool_marks(fmt, rnd, fn="exp"):
     2^-(2p+1) from the grid point 1 - 2^-p (the study's 3.4, MEASURED again
     in parcel E1's entry); expm1's are expm1(-2^-p) under rne and rmm, whose
     true value -2^-p + 2^-(2p+1) - 2^-(3p)/6 is that far under the midpoint
-    -2^-p + 2^-(2p+1) (the study's 3.4), and none under the directed three."""
-    if fmt.name == "fp32" or fn == "exp2":
+    -2^-p + 2^-(2p+1) (the study's 3.4), and none under the directed three.
+    The log family's (parcel MB2, MEASURED, and equal to the theory's "must
+    mark" lanes of the pools): log marks x = 1 + ulp under the directed three,
+    where log(1 + eps) = eps - eps^2/2 + eps^3/3 - ... sits eps^3/3 above the
+    grid point pred(eps) = eps - eps^2/2, and none under rne and rmm; log1p
+    marks x = 2^-p under rne and rmm, where log1p(x) = x - x^2/2 + x^3/3 - ...
+    sits x^3/3 above the midpoint x - x^2/2 between pred(x) and x, and none
+    under the directed three; log2 marks none."""
+    if fmt.name == "fp32" or fn in NOFAMILY:
         return set()
+    if fn == "log":
+        return set() if rnd in (sf.RND_RNE, sf.RND_RMM) \
+            else {sf.one_bits(fmt) + 1}
+    if fn == "log1p":
+        return {tiny_two(fmt, 0)} if rnd in (sf.RND_RNE, sf.RND_RMM) else set()
     if fn == "expm1":
         return {tiny_two(fmt, 1)} if rnd in (sf.RND_RNE, sf.RND_RMM) else set()
     return {tiny_two(fmt, 0 if rnd in (sf.RND_RNE, sf.RND_RMM) else 1)}
@@ -342,7 +362,9 @@ def edge_pool(fmt, fn="exp"):
     RN(-n ln 2) for n from G/2 to p + 3; the tiny path's edges 2^-(p+2),
     2^-(p+3) and the smallest normal's, subnormals' and their negatives,
     each with neighbours; and the ends of every cell of n, the first clamped
-    k's among them."""
+    k's among them.
+
+    log, log2, log1p (parcel MB2): see _log_edges."""
     p, man_w = fmt.prec, fmt.man_w
     l2 = ml._ln2()
     out = set(placed(fmt, fn))
@@ -370,6 +392,8 @@ def edge_pool(fmt, fn="exp"):
         # + V reaches 2 there, and a fixed grid whose offset is wrong doubles
         for i in range(14):
             out.add(ml._enc(fmt, fmt.emin + Fraction(907 + 7 * i, 1000)))
+    elif fn in LOG_FUNCS:
+        out.update(_log_edges(fmt, fn))
     else:
         G = ml.GUARD[fmt.name]
         for n in (p, p + 1, p + 2, p + 3, fmt.emax, fmt.emax + 1):
@@ -503,11 +527,23 @@ def screens(fmt, fn="exp"):
 
 def in_main(fmt, x, fn="exp"):
     """Whether the main path answers x: no NaN, infinity, zero, screen,
-    tiny-argument gate or (exp2) exact integer does."""
+    tiny-argument gate or (exp2) exact integer does. The log family's main
+    path: log, x > 0 and not 1; log2, x > 0 and not a power of two (an exact
+    case); log1p, x > -1, not 0 and not under the tiny path's gate
+    2^-(p+2)."""
     u = sf.unpack(fmt, x)
     if u.kind in (sf.NAN, sf.INF, sf.ZERO):
         return False
     xv = value(fmt, x)
+    if fn in LOG_FUNCS:
+        if fn == "log1p":
+            return xv > -1 and abs(xv) >= Fraction(1, 2 ** (fmt.prec + 2))
+        if xv <= 0:
+            return False
+        if fn == "log":
+            return xv != 1
+        n, d = xv.numerator, xv.denominator
+        return not (n & (n - 1) == 0 and d & (d - 1) == 0)
     hi, lo = screens(fmt, fn)
     if not lo < xv < hi:
         return False
@@ -530,6 +566,8 @@ def random_main(fmt, n, seed, fn="exp"):
     bits, rounded), 40% a random mantissa at a random exponent from
     -(p + 2) to 4 and a random sign (the study's domain_sample, with the
     low bits random, not 53 of them)."""
+    if fn in LOG_FUNCS:
+        return _log_random(fmt, n, seed, fn)
     rng = _rng(fmt, seed, 1000003, fn)
     p = fmt.prec
     hi, lo = screens(fmt, fn)
@@ -555,10 +593,22 @@ def uniform_m1rate(fmt, n, seed=7, fn="exp"):
     expm1 the same but above -(p + 2) 0.693 + 1; exp2 on (emin - p + 1,
     emax). They lie between the screens, so all are on the main path; the few
     of exp and exp2 under emin have subnormal results, which the fixed grid
-    rounds and rarely marks."""
+    rounds and rarely marks. The log family's (the same file): log and log2,
+    n random positive normal encodings (the exponent field uniform), log1p n
+    random normal encodings of either sign, kept where x > -1 and |x| >=
+    2^-(p+2); the exact cases (x = 1, powers of two) are dropped."""
     rng = random.Random(seed + fmt.width)
     p = fmt.prec
     out = []
+    if fn in LOG_FUNCS:
+        while len(out) < n:
+            b = rng.getrandbits(fmt.width - 1)
+            if fn == "log1p":
+                b |= rng.getrandbits(1) << (fmt.width - 1)
+            if sf.unpack(fmt, b).kind != sf.NORM or not in_main(fmt, b, fn):
+                continue
+            out.append(b)
+        return out
     while len(out) < n:
         if fn == "exp2":
             v = rng.uniform(fmt.emin - p + 1, fmt.emax)
@@ -583,7 +633,10 @@ def placed(fmt, fn="exp"):
     emin - 1, emin, emin + 1, -1, 0, 1 and at the ends of the main path (the
     study's worstcase.py, extended to the ends of n's range and to every j);
     expm1's also at the first clamped k, p + G + 3, and its neighbours; each
-    with its two neighbours in the encoding."""
+    with its two neighbours in the encoding. The log family's: see
+    _log_placed."""
+    if fn in LOG_FUNCS:
+        return _log_placed(fmt, fn)
     p = fmt.prec
     unit = Fraction(1) if fn == "exp2" else ml._ln2()
     hi, lo = screens(fmt, fn)
@@ -611,15 +664,24 @@ def placed(fmt, fn="exp"):
     return sorted(x for x in out if in_main(fmt, x, fn))
 
 
-def range_encodings(fmt, lo, hi):
-    """Every finite encoding whose value lies in [lo, hi] (Fractions), once,
-    in increasing order of value (zero once, for +0 and -0): the lanes of an
-    exhaustive sweep. The keys are the encodings' magnitudes, negated for
-    the negative ones, which is monotone in value."""
+def key_encoding(fmt, k):
+    """The encoding of the key k: the magnitude k for k >= 0, the negative
+    encoding of magnitude -k otherwise (the keys of a sweep, monotone in
+    value)."""
+    return k if k >= 0 else fmt.sign_mask | -k
+
+
+def range_keys(fmt, lo, hi):
+    """(first, stop): the keys of the finite encodings whose value lies in
+    [lo, hi] (Fractions), once each and in increasing order of value, are
+    range(first, stop) (zero once, for +0 and -0; key_encoding gives the
+    encoding). The keys are the encodings' magnitudes, negated for the
+    negative ones, which is monotone in value; the ends are found by
+    bisection, so no encoding of the range is walked."""
     top = sf.max_normal_bits(fmt)
 
     def val(k):
-        return ml._dec(fmt, k if k >= 0 else fmt.sign_mask | -k)
+        return ml._dec(fmt, key_encoding(fmt, k))
 
     def first_where(pred):
         """The smallest key in [-top, top] with pred(value), else top + 1
@@ -633,17 +695,55 @@ def range_encodings(fmt, lo, hi):
                 a = mid + 1
         return a
     lo, hi = Fraction(lo), Fraction(hi)
-    for k in range(first_where(lambda v: v >= lo),
-                   first_where(lambda v: v > hi)):
-        yield k if k >= 0 else fmt.sign_mask | -k
+    return (first_where(lambda v: v >= lo), first_where(lambda v: v > hi))
+
+
+def range_encodings(fmt, lo, hi):
+    """Every finite encoding whose value lies in [lo, hi] (Fractions), once,
+    in increasing order of value (zero once, for +0 and -0): the lanes of an
+    exhaustive sweep."""
+    first, stop = range_keys(fmt, lo, hi)
+    for k in range(first, stop):
+        yield key_encoding(fmt, k)
+
+
+def sweep_keys(fmt, lo, hi, stride=1, shard=(0, 1)):
+    """The keys of one shard of a strided sweep of [lo, hi]: every stride-th
+    encoding of the range, shard i of n of those (shard = (i, n), so that n
+    processes cover it), in O(its lanes), not O(the range): the lanes are the
+    arithmetic progression first + stride i, + stride n, ... The slow form,
+    which walks every encoding and keeps those with idx % stride == 0 and
+    (idx // stride) % n == i, is the test's oracle."""
+    first, stop = range_keys(fmt, lo, hi)
+    i, n = shard
+    return range(first + stride * i, stop, stride * n)
 
 
 def uniform_unit(fmt, n, seed, fn="exp"):
     """n arguments uniform on [-1, 1] with every bit random (p + 20 random
     bits, rounded): the region of VM1b's budget for exp, 0.164 Bv at fp64
-    and G = 44 (the study's 3.3), and for expm1 near n = +-1."""
+    and G = 44 (the study's 3.3), and for expm1 near n = +-1. The log family's
+    cancelling cells (the study's 3.2, A up to 22): log and log2 x uniform on
+    [0.84, 0.9415) (k = -1, C = 9), log1p x uniform on [-0.1597, -15/256) and
+    [15/256, 1/8), half each."""
     rng = _rng(fmt, seed, 15485863, fn)
     p = fmt.prec
+    if fn in LOG_FUNCS:
+        def frac():
+            return Fraction(rng.getrandbits(p + 20), 2 ** (p + 20))
+        out = []
+        for i in range(n):
+            if fn != "log1p":
+                v = Fraction(84, 100) + (Fraction(9415, 10000) -
+                                         Fraction(84, 100)) * frac()
+            elif i % 2:
+                v = Fraction(15, 256) + (Fraction(1, 8) - Fraction(15, 256)) \
+                    * frac()
+            else:
+                v = -(Fraction(15, 256) + (Fraction(1597, 10000) -
+                                           Fraction(15, 256)) * frac())
+            out.append(ml._enc(fmt, v))
+        return out
     return [ml._enc(fmt, 2 * Fraction(rng.getrandbits(p + 20), 2 ** (p + 20))
                     - 1) for _ in range(n)]
 
@@ -653,7 +753,9 @@ def weighted(fmt, n, seed, fn="exp"):
     the terms are largest: x = (m + d) ln2/8 ((m + d)/8 for exp2), m half the
     time near 0 and half over the whole range, d 40% uniform in (-1/2, 1/2),
     40% within 0.0003 of an end and 20% small (verifier-VM1's p8_bound.py,
-    vm1b)."""
+    vm1b). The log family's: see _log_weighted."""
+    if fn in LOG_FUNCS:
+        return _log_weighted(fmt, n, seed, fn)
     rng = _rng(fmt, seed, 104729, fn)
     unit = Fraction(1) if fn == "exp2" else ml._ln2()
     hi, lo = screens(fmt, fn)
@@ -676,6 +778,217 @@ def weighted(fmt, n, seed, fn="exp"):
     return out
 
 
+# ---- the log family's lanes (parcel MB2) ------------------------------------
+
+@functools.lru_cache(maxsize=None)
+def seed_runs(fmt):
+    """((C, first m, last m), ...): the runs of consecutive RECIP_SEED cells
+    that share one C, in order of m, from the table (mathlib._seed_C), each by
+    its first and last float in [1, 2) at the format: C = 16, 15, ..., 9, 8
+    (the wrap). The reduction's |r| is largest at the ends of a run, and the
+    study's cancelling cell, k = -1 and C = 9, is the run of 9."""
+    ulp = Fraction(1, 2 ** (fmt.prec - 1))
+    runs = []
+    for i in range(512):
+        C = ml._seed_C(i)
+        hi = 1 + Fraction(i + 1, 512) - ulp
+        if runs and runs[-1][0] == C:
+            runs[-1][2] = hi
+        else:
+            runs.append([C, 1 + Fraction(i, 512), hi])
+    return tuple(tuple(r) for r in runs)
+
+
+def _log_random(fmt, n, seed, fn):
+    """n main-path arguments of the log family with every bit random. log and
+    log2: 55% a random mantissa at a random exponent over the whole range, the
+    subnormals included; 25% 1 + d with d = +-f 2^-j, j from 1 to p + 1; 20% a
+    random mantissa (p + 20 random bits, rounded) at k = -1, 0 or 1, the
+    cancelling cell among them. log1p: 35% a random mantissa at an exponent
+    from -(p + 2) to -1, either sign; 15% uniform on the band [0.8 15/256,
+    1/8], either sign; 20% positive with exponent 0 to 30; 15% positive with
+    exponent 31 to emax (past the 2^-k clamp); 15% -1 + f 2^-j, j from 1 to p
+    (u = 1 + x small, k down to -p)."""
+    rng = _rng(fmt, seed, 1000003, fn)
+    p, mw = fmt.prec, fmt.man_w
+    big = 2 ** 20
+
+    def mant():
+        return 1 + Fraction(rng.getrandbits(p + 20), 2 ** (p + 20))
+
+    def sample(e, sign=0):
+        return sf.round_pack(fmt, sign, rng.getrandbits(p) | (1 << (p - 1)),
+                             e - p + 1, sf.RND_RNE)[0]
+    out = []
+    while len(out) < n:
+        r = rng.random()
+        if fn != "log1p":
+            if r < 0.55:
+                x = sample(rng.randint(fmt.emin - mw, fmt.emax))
+            elif r < 0.8:
+                d = Fraction(rng.randint(1, big), big) * rng.choice((1, -1)) \
+                    / 2 ** rng.randint(1, p + 1)
+                x = ml._enc(fmt, 1 + d)
+            else:
+                x = ml._enc(fmt, mant() * Fraction(2) ** rng.randint(-1, 1))
+        elif r < 0.35:
+            x = sample(rng.randint(-(p + 2), -1), rng.getrandbits(1))
+        elif r < 0.5:
+            v = Fraction(4, 5) * SMALL + (Fraction(1, 8) - Fraction(4, 5) *
+                                          SMALL) * Fraction(rng.getrandbits(
+                                              p + 20), 2 ** (p + 20))
+            x = ml._enc(fmt, v * rng.choice((1, -1)))
+        elif r < 0.7:
+            x = sample(rng.randint(0, 30))
+        elif r < 0.85:
+            x = sample(rng.randint(31, fmt.emax))
+        else:
+            x = ml._enc(fmt, -1 + Fraction(rng.randint(1, big), big)
+                        / 2 ** rng.randint(1, p))
+        if in_main(fmt, x, fn):
+            out.append(x)
+    return out
+
+
+SMALL = ml.SMALL_LOG                        # 15/256: log1p's r = x path ends
+
+
+def _log_placed(fmt, fn):
+    """The log family's arguments where the reduction leaves |r| largest
+    (the study's worstcase.py, extended): the first and last float of each
+    run of RECIP_SEED cells that share a C (seed_runs), as m 2^k for log and
+    log2 at k = -1, 0 and 1 with their two neighbours, and at the ends of the
+    exponent range (a subnormal binade, emin, emax); for log1p as x = m 2^k - 1
+    at k = -1 to 2 with neighbours (u = 1 + x is then m 2^k, the cancelling
+    cell k = -1, C = 9 among them, and the reduction path's lower end), the r = x
+    path's end 15/256 and 1/16, both signs, with neighbours, and the first
+    k past 2^-k's clamp, p + G + 2, and its neighbours."""
+    p, mw = fmt.prec, fmt.man_w
+    ms = [m for _C, lo, hi in seed_runs(fmt) for m in (lo, hi)]
+    out = set()
+    if fn != "log1p":
+        for k in (-1, 0, 1):
+            for m in ms:
+                b = ml._enc(fmt, m * Fraction(2) ** k)
+                out.update((b - 1, b, b + 1))
+        for k in (fmt.emin - mw // 2, fmt.emin, fmt.emax):
+            for m in ms:
+                out.add(ml._enc(fmt, m * Fraction(2) ** k))
+    else:
+        for k in (-1, 0, 1, 2):
+            for m in ms:
+                b = ml._enc(fmt, m * Fraction(2) ** k - 1)
+                out.update((b - 1, b, b + 1))
+        for edge in (SMALL, Fraction(1, 16)):
+            for s in (1, -1):
+                b = ml._enc(fmt, s * edge)
+                out.update(b + d for d in range(-3, 4))
+        clamp = p + ml.GUARD[fmt.name] + 2
+        for k in (clamp - 1, clamp, clamp + 1, clamp + 2):
+            for m in ms:
+                out.add(ml._enc(fmt, m * Fraction(2) ** k))
+    return sorted(x for x in out if in_main(fmt, x, fn))
+
+
+def _log_weighted(fmt, n, seed, fn):
+    """n arguments of the log family weighted to where its terms are
+    largest, as VM1's sampler: the mantissa m within f 2^-j of an end of a
+    run of seed cells (j from 3 to p - 1, 40%; from 8 to 56, 40%; exactly the
+    end, 20%), at k = -1, 0 or 1 half the time and anywhere in the exponent
+    range otherwise (log, log2); log1p x = m 2^k - 1 at k = -1 to 2 or beyond
+    (up to p + 3), 15% at +-(15/256 + a few hundred ulps either way)."""
+    rng = _rng(fmt, seed, 104729, fn)
+    p, mw = fmt.prec, fmt.man_w
+    ulp = Fraction(1, 2 ** (p - 1))
+    ends = sorted({m for _C, lo, hi in seed_runs(fmt) for m in (lo, hi)}
+                  | {Fraction(1), 2 - ulp})
+    out = []
+    while len(out) < n:
+        b = rng.choice(ends)
+        r = rng.random()
+        if r < 0.4:
+            d = Fraction(rng.randint(1, 10 ** 6), 10 ** 6) \
+                / 2 ** rng.randint(3, p - 1)
+        elif r < 0.8:
+            d = Fraction(1, 2 ** rng.randint(8, max(8, min(56, p - 1))))
+        else:
+            d = Fraction(0)
+        m = min(max(b + d * rng.choice((1, -1)), Fraction(1)), 2 - ulp)
+        if fn == "log1p":
+            if rng.random() < 0.15:
+                x = ml._enc(fmt, rng.choice((1, -1)) * (
+                    SMALL + Fraction(rng.randint(-300, 300), 2 ** (p + 3))))
+            else:
+                k = rng.choice((-1, 0, 0, 1, 1, 2, 3, rng.randint(4, p + 3)))
+                x = ml._enc(fmt, m * Fraction(2) ** k - 1)
+        else:
+            k = rng.choice((-1, 0, 1, rng.randint(fmt.emin - mw, fmt.emax)))
+            x = ml._enc(fmt, m * Fraction(2) ** k)
+        if in_main(fmt, x, fn):
+            out.append(x)
+    return out
+
+
+def _log_edges(fmt, fn):
+    """The log family's edge lanes: log and log2 - 1 +- c ulp for c up to 16
+    (the census), every power of two the exact cases sit at (the ends of the
+    exponent range, the subnormals', small k, p) with two neighbours either
+    side, the smallest and largest subnormal and normal with neighbours, and
+    the first and last float of each run of seed cells at k = -1, 0, 1 and the
+    ends; log1p - x = -1 with neighbours (the pole and the NaN below it),
+    the tiny path's gate 2^-(p+2) and 2^-(p+3) and the smallest normal's,
+    subnormals', their negatives, 15/256 and 1/16 (the r = x path's end and
+    the reduction's), each with neighbours, u - 1 for u = 2^k at every s-th k
+    from -p to p (s = max(3, p // 8): 3, 6, 14 and 29 at fp32 to fp256; the
+    pool is thinned to keep the tests quick, and `mathlib_runs.py pools
+    --edges` runs this same pool), the seed runs' ends for k = -1 to 2, 2^-k's
+    clamp (p + G + 2) with neighbours, and the largest normal."""
+    p, mw = fmt.prec, fmt.man_w
+    out = set()
+
+    def near(v, ds=(-2, -1, 0, 1, 2)):
+        b = ml._enc(fmt, v)
+        out.update(b + d for d in ds)
+    runs = seed_runs(fmt)
+    if fn != "log1p":
+        out.update(sf.one_bits(fmt) + c for c in range(-16, 17))
+        for k in (fmt.emin - mw, fmt.emin - mw + 1, fmt.emin - 1, fmt.emin,
+                  fmt.emin + 1, -p, -3, -2, -1, 1, 2, 3, 4, 7, 8, 9, 16, p,
+                  fmt.emax - 1, fmt.emax):
+            near(Fraction(2) ** k)
+        for b in (sf.min_normal_bits(fmt), sf.max_subnormal_bits(fmt),
+                  sf.min_subnormal_bits(fmt), sf.max_normal_bits(fmt)):
+            out.update(b + d for d in (-2, -1, 0, 1, 2))
+        for _C, lo, hi in runs:
+            for k in (-1, 0, 1, fmt.emax):
+                for m in (lo, hi):
+                    near(m * Fraction(2) ** k, (-1, 0, 1))
+    else:
+        near(Fraction(-1))
+        for k in (p + 2, p + 3):
+            for s in (1, -1):
+                near(s * Fraction(1, 2 ** k))
+        for b in (sf.min_normal_bits(fmt), sf.max_subnormal_bits(fmt),
+                  sf.min_subnormal_bits(fmt)):
+            for sg in (0, 1):
+                bb = b | (fmt.sign_mask if sg else 0)
+                out.update(bb + d for d in (-2, -1, 0, 1, 2))
+        for edge in (SMALL, Fraction(1, 16)):
+            for s in (1, -1):
+                near(s * edge, tuple(range(-4, 5)))
+        for k in range(-p, p + 1, max(3, p // 8)):
+            near(Fraction(2) ** k - 1)
+        for _C, lo, hi in runs:
+            for k in (-1, 0, 1, 2):
+                for m in (lo, hi):
+                    near(m * Fraction(2) ** k - 1, (-1, 0, 1))
+        clamp = p + ml.GUARD[fmt.name] + 2
+        for k in (clamp - 1, clamp, clamp + 1, clamp + 2):
+            near(Fraction(2) ** k)
+        out.add(sf.max_normal_bits(fmt))
+    return out
+
+
 # ---- the bound against mpmath -----------------------------------------------
 
 def _v_names(b):
@@ -689,17 +1002,25 @@ def true_value(fn, xv):
         return mpmath.power(2, xv)
     if fn == "expm1":
         return mpmath.expm1(xv)
+    if fn == "log":
+        return mpmath.log(xv)
+    if fn == "log2":
+        return mpmath.log(xv) / mpmath.log(2)
+    if fn == "log1p":
+        return mpmath.log1p(xv)
     return mpmath.exp(xv)
 
 
 def bound_log2(b, x):
     """log2(|V - f(x) 2^-k| / Bv) for one main-path lane of the build b:
-    V from its probes (V_h + V_l, or the three words at fp32), k from Ek,
-    the true value from mpmath at 4p + 200 bits. None where V is exact."""
+    V from its probes (V_h + V_l, or the three words at fp32), k from Ek (the
+    log family is not scaled: k = 0), the true value from mpmath at 4p + 200
+    bits. None where V is exact."""
     fmt = b.fmt
     names = _v_names(b)
-    _res, _fl, pr = b.run(x, names + ("Bv", "Ek"))
-    k = pr["Ek"] - fmt.bias - b.meta["OFF"]
+    scaled = b.meta.get("scaled", True)
+    _res, _fl, pr = b.run(x, names + ("Bv",) + (("Ek",) if scaled else ()))
+    k = pr["Ek"] - fmt.bias - b.meta["OFF"] if scaled else 0
     with mpmath.workprec(4 * fmt.prec + 200):
         T = true_value(b.meta["fn"], _mp(value(fmt, x))) * mpmath.mpf(2) ** (-k)
         V = sum(_mp(value(fmt, pr[nm])) for nm in names)
@@ -802,13 +1123,16 @@ def family_lanes(fmt, rnd, centres, G=None, fn="exp"):
     seen, out = set(), []
     for cen in centres:
         x0 = F.argument(fmt, cen)
+        if cen[0] == "n":
+            name = f"-{cen[1]} ln 2"
+        elif cen[0] in ("u", "d"):
+            name = f"1 {'+' if cen[0] == 'u' else '-'} {cen[1]} ulp"
+        else:
+            name = f"{cen[0]} 2^-{cen[1]}"
         for x, lab in [(x0, "centre")] + F.neighbours(fmt, cen, G):
             if x not in seen:
                 seen.add(x)
-                out.append((x, f"{cen[0]} 2^-{cen[1]} {lab}"
-                            if not isinstance(cen[0], str)
-                            else f"-{cen[1]} ln 2 {lab}",
-                            F.classify(fmt, rnd, x, G, fn)))
+                out.append((x, f"{name} {lab}", F.classify(fmt, rnd, x, G, fn)))
     return out
 
 
@@ -836,10 +1160,12 @@ def check_family_list(committed, generated=None):
 
 def census_run(f):
     """Tally: the study's census (mathlib_family.census, 240 arguments
-    x = c 2^-e at the fragment's format) through the fragment, against
-    transcend's. The study's census.py counted the marks of these."""
+    x = c 2^-e at the fragment's format; for log the 32 arguments 1 +- c ulp,
+    census_log) through the fragment, against transcend's. The study's
+    census.py counted the marks of these."""
     import mathlib_family as F
-    xs = sorted(F.census(f.fmt))
+    xs = sorted(F.census_log(f.fmt) if f.op in ("log", "log2")
+                else F.census(f.fmt))
     return tally(f.fmt, f.rnd, xs, evaluate_all(f, xs), f.op)
 
 
@@ -881,7 +1207,10 @@ def check_census_counts(f, want):
                    f"unmarked, first {hex(t.wrong[0][0])}")
     centres = {F.argument(fmt, c)
                for c in F.FAMILY[f.op][fmt.name][sf.RND_NAMES[rnd]]
-               if not isinstance(c[0], str)}
+               if c[0] != "n"}
+    # an anchor of log1p's one-sided windows is clear itself: not a mark
+    centres = {x for x in centres
+               if F.classify(fmt, rnd, x, None, f.op) == "mark"}
     missing = sorted(centres - set(t.marked))
     if missing:
         out.append(f"{where}: {len(missing)} committed centres are not "
@@ -902,7 +1231,8 @@ def check_family(f, centres, G=None, extra=(), deep=False):
     seen = {x for x, _l, _c in lanes}
     more = [(x, f"census {hex(x)}") for x in extra]
     if deep:
-        more += [(x, f"deep {lab}") for x, lab in F.deep_arguments(fmt, G)]
+        more += [(x, f"deep {lab}")
+                 for x, lab in F.deep_arguments(fmt, G, fn)]
     for x, lab in more:
         if x not in seen:
             seen.add(x)
@@ -936,13 +1266,27 @@ def check_family(f, centres, G=None, extra=(), deep=False):
     return out[:8], st
 
 
-def nofamily_lanes(fmt, deep=True):
-    """exp2's lanes that would be a family if it had one: the study's census
-    (c 2^-e), the deep arguments below it (with `deep`), and the floats next
-    to the integers 1, 2, 3, 4, 7, 8, 16, 100, p and -emin, both signs, at 1,
-    2, 4 and 8 ulps either side - the exact cases 2^N, where a window would
-    sit."""
+def nofamily_lanes(fmt, deep=True, fn="exp2"):
+    """The lanes of exp2 or log2 that would be a family if it had one. exp2:
+    the study's census (c 2^-e), the deep arguments below it (with `deep`),
+    and the floats next to the integers 1, 2, 3, 4, 7, 8, 16, 100, p and
+    -emin, both signs, at 1, 2, 4 and 8 ulps either side - the exact cases
+    2^N, where a window would sit. log2: the 32 arguments 1 +- c ulp
+    (census_log), the deep ones 1 +- 2^a ulp and 3, 5 times it (with `deep`),
+    and the floats next to the powers of two 2^k and 2^-k for k = 1, 2, 3, 4,
+    7, 8, 16, p and -emin, at 1 to 16 ulps either side - the exact cases
+    2^k, where log2 is k and a window would sit."""
     import mathlib_family as F
+    if fn == "log2":
+        out = set(F.census_log(fmt)) | (
+            {x for x, _l in F.deep_arguments(fmt, None, "log2")} if deep
+            else set())
+        for k in (1, 2, 3, 4, 7, 8, 16, fmt.prec, -fmt.emin):
+            for sg in (1, -1):
+                b = ml._enc(fmt, Fraction(2) ** (sg * k))
+                out.update(b + d for d in (-16, -8, -4, -2, -1, 1, 2, 4, 8,
+                                           16))
+        return sorted(x for x in out if in_main(fmt, x, "log2"))
     out = set(F.census(fmt)) | ({x for x, _l in F.deep_arguments(fmt)}
                                 if deep else set())
     for n in (1, 2, 3, 4, 7, 8, 16, 100, fmt.prec, -fmt.emin):
@@ -953,21 +1297,21 @@ def nofamily_lanes(fmt, deep=True):
 
 
 def check_nofamily(f):
-    """nofamily: exp2 has no structured family (the study's 3.5; the
-    committed list is empty at every format and attribute, mathlib_family):
-    the census, the deep arguments and the floats next to integers are all
-    unmarked and equal to transcend.exp2, and the theory agrees - none is
-    within the bound of a boundary. The deep arguments, which pin the
-    windows' lower edge, are run under rne and rtz."""
+    """nofamily: exp2 and log2 have no structured family (the study's 3.5;
+    the committed list is empty at every format and attribute,
+    mathlib_family): the census, the deep arguments and the floats next to
+    the exact cases are all unmarked and equal to transcend's, and the theory
+    agrees - none is within the bound of a boundary. The deep arguments,
+    which pin the windows' lower edge, are run under rne and rtz."""
     import mathlib_family as F
     fmt, rnd = f.fmt, f.rnd
-    xs = nofamily_lanes(fmt, deep=rnd in (sf.RND_RNE, sf.RND_RTZ))
+    xs = nofamily_lanes(fmt, deep=rnd in (sf.RND_RNE, sf.RND_RTZ), fn=f.op)
     t = tally(fmt, rnd, xs, evaluate_all(f, xs), f.op)
     where = f"nofamily: {f.op} {fmt.name} {sf.RND_NAMES[rnd]}"
     out = []
     if t.marked:
         out.append(f"{where}: {len(t.marked)} of {t.n} lanes are marked, "
-                   f"first {_hexes(t.marked)}; exp2 has no family")
+                   f"first {_hexes(t.marked)}; {f.op} has no family")
     if t.wrong:
         out.append(f"{where}: {len(t.wrong)} lanes are wrong unmarked, first "
                    f"{hex(t.wrong[0][0])}")
@@ -996,27 +1340,49 @@ def check_constants(**kw):
 # The design's ALU opcodes, by name. No augmented addition: R21's AUGADD and
 # AUGERR are control instructions, not ALU opcodes, so a fragment's body
 # cannot hold one (revision 8's question 9); and none of min, max, copysign,
-# the seeds or IMUL, which the design does not use. expm1 has no fixed grid
-# and so no tininess compare: it holds every opcode but CMPLT.
+# RSQRT_SEED or IMUL, which the design does not use (the exp family uses no
+# seed; the log family's reduction reads RECIP_SEED). expm1 has no fixed grid
+# and so no tininess compare: it holds every opcode but CMPLT. The log family
+# (MEASURED, the same at every format and attribute): log and log2 hold 15
+# opcodes - no compare but CMPEQ and ICMPLT, no shift but ISHR - and log1p 18,
+# with CMPLT (x < -1), ISHL and ISUB (2^-k).
 ALU_OPS = frozenset({
     "fma", "add", "sub", "mul", "neg", "abs", "select", "cmplt", "cmple",
     "cmpeq", "iand", "ior", "ixor", "iadd", "isub", "ishl", "ishr",
     "icmplt"})
+LOG_OPS = frozenset({
+    "fma", "add", "sub", "mul", "neg", "abs", "select", "cmpeq", "iand",
+    "ior", "ixor", "iadd", "ishr", "icmplt", "recip_seed"})
 ALU_OPS_BY_FN = {"exp": ALU_OPS, "exp2": ALU_OPS,
-                 "expm1": ALU_OPS - {"cmplt"}}
+                 "expm1": ALU_OPS - {"cmplt"},
+                 "log": LOG_OPS, "log2": LOG_OPS,
+                 "log1p": LOG_OPS | {"cmplt", "ishl", "isub"}}
 
 # The error-free sums the builders make, (Fast2Sums, where the exponents are
 # ordered, and TwoSums elsewhere), by routine and format: nine and one in the
 # double-word exp (the study's table of augadd, 5.3), 20 and 18 in fp32's
 # triple word; exp2 has no TwoSum in its double-word reduction, and expm1 two
 # (the reduction's and T_h - 2^-k); at fp32 exp2 holds 21 and 15 and expm1 22
-# and 23 (MEASURED, Build.meta).
+# and 23 (MEASURED, Build.meta). The log family's (MEASURED, Build.meta): at
+# the double word K + 3 Fast2Sums - the K head steps and the sum's three - and
+# one TwoSum (log: A + r Y), none (log2) or two (log1p: and 1 + x); K is 11 at
+# fp64 and 12 at fp128 and fp256. At fp32 log holds 25 and 19, log2 29 and 18,
+# log1p 25 and 21.
 EFT_COUNTS = {("exp", "fp32"): (20, 18), ("exp", "dw"): (9, 1),
               ("exp2", "fp32"): (21, 15), ("exp2", "dw"): (9, 0),
-              ("expm1", "fp32"): (22, 23), ("expm1", "dw"): (10, 2)}
+              ("expm1", "fp32"): (22, 23), ("expm1", "dw"): (10, 2),
+              ("log", "fp32"): (25, 19), ("log2", "fp32"): (29, 18),
+              ("log1p", "fp32"): (25, 21),
+              ("log", "fp64"): (14, 1), ("log", "fp128"): (15, 1),
+              ("log", "fp256"): (15, 1), ("log2", "fp64"): (14, 0),
+              ("log2", "fp128"): (15, 0), ("log2", "fp256"): (15, 0),
+              ("log1p", "fp64"): (14, 2), ("log1p", "fp128"): (15, 2),
+              ("log1p", "fp256"): (15, 2)}
 
 
 def eft_key(fn, fmt):
+    if fn in LOG_FUNCS:
+        return (fn, fmt.name)
     return (fn, "fp32" if fmt.name == "fp32" else "dw")
 
 
@@ -1077,8 +1443,10 @@ def check_specialised(b, f=None, xs=None):
     if len(b.phase_of) != len(b.body):
         out.append(f"{where}: phase_of has {len(b.phase_of)} entries for "
                    f"{len(b.body)} instructions")
-    need = ("V0", "V1", "V2", "Vh", "Bv", "Ek") \
-        if b.meta["family"] == "triple word" else ("Vh", "Vl", "Bv", "Ek")
+    need = ("V0", "V1", "V2", "Vh", "Bv") \
+        if b.meta["family"] == "triple word" else ("Vh", "Vl", "Bv")
+    if b.meta.get("scaled", True):          # the log family is not scaled
+        need += ("Ek",)
     lost = [k for k in need if k not in b.probes]
     if lost:
         out.append(f"{where}: the instrumented form lacks the probes {lost}")
@@ -1188,9 +1556,12 @@ def check_spot(builder=None, formats=FORMATS, rnd=sf.RND_RNE, ln2=None,
     mathlib.build_exp by default), the table's high words TH_j (T_j's first
     word at fp32) within half an ulp of 2^(j/8), enclosed by an integer 8th
     root, and, for exp and expm1, the Cody-Waite words' sum within 2^-2p of
-    ln 2/8, for exp2 ln 2's words' sum within 2^-2p of ln 2. `--check`
-    (mathlib.check_constants) asks every word its rounding rule; this is the
-    short look that shares nothing with the generator."""
+    ln 2/8, for exp2 ln 2's words' sum within 2^-2p of ln 2. The log family:
+    the table's high words within half an ulp of log(16/C), enclosed by the
+    atanh series in integers, and the words of ln 2 (log, log1p) or 1/ln 2
+    (log2) summing to it within 2^-2p. `--check` (mathlib.check_constants)
+    asks every word its rounding rule; this is the short look that shares
+    nothing with the generator."""
     lo, hi = ml._check_ln2() if enclosure is None else enclosure
     derived = ml._ln2() if ln2 is None else ln2
     out = []
@@ -1205,17 +1576,48 @@ def check_spot(builder=None, formats=FORMATS, rnd=sf.RND_RNE, ln2=None,
         b = build(fmt, rnd)
         p = fmt.prec
         half = Fraction(1, 2 ** p)
+        logs = fn in LOG_FUNCS
         for j in range(N):
-            tlo, thi = ml._check_two_to_eighth(j)
-            role = f"T{j}_0" if fmt is FP32 else f"TH{j}"
+            if logs:
+                tlo, thi = ml._check_log16(16 if j == 0 else 8 + j)
+                role = f"L{j}_0" if fmt is FP32 else f"LH{j}"
+                what = f"log(16/{16 if j == 0 else 8 + j})"
+            else:
+                tlo, thi = ml._check_two_to_eighth(j)
+                role = f"T{j}_0" if fmt is FP32 else f"TH{j}"
+                what = f"2^({j}/8)"
             w = _role_value(fmt, b, role)
             if w is None:
                 out.append(f"spot: {fmt.name}: the build holds no word "
                            f"{role}")
             elif not tlo - half <= w <= thi + half:
                 out.append(f"spot: {fmt.name}: the table's high word of "
-                           f"2^({j}/8) is {float(w)!r}, over half an ulp "
+                           f"{what} is {float(w)!r}, over half an ulp "
                            f"from it")
+        # the log family's constant: ln 2 in three words (log, log1p), 1/ln 2
+        # in two or three (log2), the words signed as the build holds them
+        if logs:
+            if fn == "log2":
+                tlo, thi = ml._check_inv_ln2()
+                signed = ((("IL2_0", 1), ("NIL2_1", -1), ("IL2_2", 1))
+                          if fmt is FP32 else (("IL2H", 1), ("NIL2L", -1)))
+            else:
+                tlo, thi = lo, hi
+                signed = ((("LN2_0", 1), ("LN2_1", 1), ("LN2_2", 1))
+                          if fmt is FP32 else
+                          (("LN2H", 1), ("LN2M", 1), ("LN2L", 1)))
+            words = [(r, sg, _role_value(fmt, b, r)) for r, sg in signed]
+            gone = [r for r, _sg, v in words if v is None]
+            if gone:
+                out.append(f"spot: {fmt.name}: the build holds no word "
+                           f"{', '.join(gone)}")
+                continue
+            off = sum(sg * v for _r, sg, v in words) - (tlo + thi) / 2
+            if abs(off) > Fraction(1, 2 ** (2 * p)):
+                out.append(f"spot: {fmt.name}: the words of "
+                           f"{'1/ln 2' if fn == 'log2' else 'ln 2'} sum to "
+                           f"{float(off):+.3g} off, past 2^-{2 * p}")
+            continue
         # ln 2/8 as the build holds it: C1 (stored negated), C2, C3 at the
         # double word's formats; five words at fp32. exp2 holds ln 2 itself:
         # the high word, the negated low words
@@ -1242,4 +1644,24 @@ def check_spot(builder=None, formats=FORMATS, rnd=sf.RND_RNE, ln2=None,
         if abs(off) > Fraction(1, 2 ** (2 * p)):
             out.append(f"spot: {fmt.name}: the Cody-Waite words sum to "
                        f"ln 2/{scale} {float(off):+.3g} off, past 2^-{2 * p}")
+    return out
+
+
+# ---- RECIP_SEED's cells (the log family's reduction) ------------------------
+
+def check_recip(fmt=None, entry=None):
+    """recip: RECIP_SEED's 512 cells, at one format or all four
+    (mathlib._check_recip_cells): the instruction gives the table's value at
+    both ends of every cell, C = round(16 seed) takes every value from 8 to 16
+    and none outside, and max |r| of r = m' c - 1 (c = C/16; m' = m/2, c = 1
+    where C = 8 wraps) is under the plan's RHO_LOG, with log1p's 15/256 under it
+    too. `entry` replaces the table's definition (mathlib._seed_entry), for
+    the test that plants a fault in it."""
+    out = []
+    for fm in (FORMATS if fmt is None else (fmt,)):
+        found, _rmax, cs = ml._check_recip_cells(fm, entry or ml._seed_entry)
+        out += [f"recip: {s}" for s in found]
+        if cs != set(range(8, 17)):
+            out.append(f"recip: RECIP_SEED at {fm.name}: C takes "
+                       f"{sorted(cs)}, not every value from 8 to 16")
     return out

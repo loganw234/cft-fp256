@@ -1,9 +1,10 @@
 # Copyright 2026 Logan W.
 # SPDX-License-Identifier: Apache-2.0
-"""The structured families of exp and expm1, and exp2's lack of one: the
-windows of arguments next to an exact case, which the in-lane test marks and
-a replay decides (docs/studies/M1-exp-log.md, section 3.5; Logan's decision on
-question 4: keep the marks, list the windows' centres in the tests).
+"""The structured families of exp, expm1, log and log1p, and the lack of one in
+exp2 and log2: the windows of arguments next to an exact case, which the
+in-lane test marks and a replay decides (docs/studies/M1-exp-log.md, section
+3.5; Logan's decision on question 4: keep the marks, list the windows' centres
+in the tests).
 
 WHY THERE IS A FAMILY. Near 0, exp(x) = 1 + x + x^2/2 + .... Where 1 + x is
 a rounding boundary of the result - a midpoint under rne and rmm, a grid
@@ -37,6 +38,51 @@ exp2 has no family: 2^x = 2^N (1 + x' ln 2 + ...) for x = N + x', and ln 2 is
 irrational, so a float x' puts the value at a position inside the cell that is
 not the exact one the structure needs (the study's 3.5; the census marks none,
 and the theory below agrees at every format and attribute).
+
+log1p has the first of expm1's families, x = +-c 2^-e, for the same reason with
+the sign of the square term reversed: log1p(x) = x - x^2/2 + x^3/3 - ..., x a
+float and so a grid point of the result, the true value x^2/2 below it, and
+where x^2/2 is a (half) multiple of the result's ulp the value sits x^3/3 from
+a boundary (rne and rmm: the midpoint, the directed three: the grid point).
+Its window is continuous, as expm1's: a neighbour x + j ulp(x) moves x^2/2 by
+j x ulp(x), a small part of an ulp. At a power of two it is ONE-SIDED and
+twice as wide on the finer side: the float below 2^-s in magnitude has half
+the spacing of the one above, so x^2/2 is twice as many of its ulps, and the
+window there may be marked while the power of two itself is clear (parcel MB2,
+MEASURED at fp64 under rne: log1p(-2^-53) is clear and the 358 floats between
+-2^-53 and the next float toward zero from it are all demanded marked; expm1
+has the mirror image, and neither routine's census lists it). The list holds
+such a power of two as an ANCHOR, a census argument that is clear itself and
+has a demanded-marked float within 2 ulps; the tests run it and its
+neighbours as they run any centre, the theory classifying each lane.
+
+log has the same structure around 1, and its centres are ISOLATED. Every float
+near 1 is 1 + c eps (eps = 2^-(p-1), above 1) or 1 - c eps/2 (below), c an
+integer, and log(1 + c eps) = c eps - (c eps)^2/2 + (c eps)^3/3 - ...: c eps is
+a float, the grid point of the result's binade 2^m <= c < 2^(m+1), whose ulp
+is 2^m eps^2, so the square term is c^2/2^(m+1) ulps - an integer or a half
+integer exactly when c^2 is a multiple of 2^m (c = 1, 2, 4, 6, 8, 12, 16 ...),
+the value then sitting the cubic term, c^3 eps/(3 2^m) ulps, from a boundary:
+inside the bound while c^2 is under about 3 2^(p-1-G). Below 1, with
+eps/2 the unit, the square term is c^2/2^(m+2) ulps, a multiple of a half
+when c^2 is a multiple of 2^(m+1): a different set of c. The next float is
+c + 1, a different integer with a different square term, and is outside
+unless c + 1 is a centre itself: a centre has no window, only itself. The list
+holds the centres of the census (c <= 16, both sides); the tests run beside
+them the deep arguments (deep_arguments), c = 2^a, 3 2^a, 5 2^a and 7 2^a
+from a = 2 up to three over where the cubic term leaves the bound, each
+classified by the theory and not listed, as exp's deep arguments are not.
+Beyond the census's c the theory demands a mark (parcel MB2, COMPUTED over
+those arguments) at 2 of them at fp64 under the directed three, at 4 under
+rne and rmm and 85 under the directed three at fp128, and at 4 and 211 at
+fp256, and at none past the cubic term's range; the family they belong to,
+the c whose square is a multiple of 2^m (m = floor(log2 c)) above 1 and of
+2^(m+1) below it, is too large to list at fp256 (COMPUTED, roughly: more
+than 2^40 values of c under the cubic term's range).
+
+log2 has none: its factor 1/ln 2 breaks the structure, as exp2's ln 2 does,
+and so does its exact case, 2^k, whose neighbours 2^k (1 + c eps) give
+k + c eps/ln 2 - ..., an irrational multiple of the grid.
 
 EACH IS A CENTRE. A neighbour x + j ulp(x) moves the true value, or the boundary
 it is next to, by about j ulp(x) (exp, and expm1's second family) or by
@@ -93,7 +139,8 @@ from cft_golden import softfloat as sf  # noqa: E402
 MUST_MARK = 0.7
 MUST_NOT = 1.3
 RND_NAMES = sf.RND_NAMES
-FUNCTIONS = ml.NAMES                    # exp, exp2, expm1
+FUNCTIONS = ml.NAMES                    # exp, exp2, expm1, log, log2, log1p
+LOGS = ml.LOG_NAMES
 # (label, multiple of W in ulps; None for exactly one ulp): the first
 # N_INSIDE inside a window, the rest outside it. 0.65 W and 1.35 W sit just
 # inside the theory's two thresholds (d < 0.7 must mark, d > 1.3 must not):
@@ -127,6 +174,18 @@ def census_n(fmt):
     return {argument(fmt, ("n", n)): ("n", n) for n in range(1, fmt.prec + 3)}
 
 
+def census_log(fmt):
+    """log's census, the study's 32 arguments 1 +- c ulp (census.py): {bits:
+    ("u", c)} for x = 1 + c eps, eps = 2^-(p-1) the ulp above 1, and {bits:
+    ("d", c)} for x = 1 - c eps/2, eps/2 the ulp below, c from 1 to 16."""
+    one = sf.one_bits(fmt)
+    out = {}
+    for c in range(1, 17):
+        out[one + c] = ("u", c)
+        out[one - c] = ("d", c)
+    return out
+
+
 def _mp(q):
     return mpmath.mpf(q.numerator) / q.denominator
 
@@ -136,6 +195,12 @@ def _value(fn, xv):
         return mpmath.exp(xv)
     if fn == "expm1":
         return mpmath.expm1(xv)
+    if fn == "log":
+        return mpmath.log(xv)
+    if fn == "log2":
+        return mpmath.log(xv) / mpmath.log(2)
+    if fn == "log1p":
+        return mpmath.log1p(xv)
     return mpmath.power(2, xv)
 
 
@@ -174,6 +239,19 @@ def is_gated(fmt, x, fn="exp"):
     argument as large as the format holds."""
     xv = ml._dec(fmt, x)
     p = fmt.prec
+    if fn in LOGS:
+        # the log family's gates: log(1) = 0 and log2(2^k) = k are exact
+        # (decided exactly, no flag); log1p's tiny path |x| < 2^-(p+2) is
+        # decided by the side of x; no operand outside the domain is asked
+        # (x <= 0, x <= -1)
+        if fn == "log1p":
+            return xv <= -1 or abs(xv) < Fraction(1, 2 ** (p + 2))
+        if xv <= 0:
+            return True
+        if fn == "log":
+            return xv == 1
+        n, d = xv.numerator, xv.denominator
+        return n & (n - 1) == 0 and d & (d - 1) == 0      # a power of two
     if fn == "exp2":
         hi, lo = Fraction(fmt.emax + 1), Fraction(fmt.emin - p)
     else:
@@ -198,15 +276,30 @@ def classify(fmt, rnd, x, G=None, fn="exp"):
 @functools.lru_cache(maxsize=None)
 def centres(fmt, rnd, fn="exp"):
     """[centre]: the census arguments the theory demands marked, by
-    exponent, then |c|, then sign, as (c, e) for c 2^-e; and for expm1 the
-    second family's, as ("n", n) for RN(-n ln 2), by n. exp2's is empty
-    wherever the theory says so (it does at every format and attribute)."""
+    exponent, then |c|, then sign, as (c, e) for c 2^-e - for log1p also the
+    anchors of its one-sided windows (the module docstring), clear themselves
+    - and for expm1 the second family's, as ("n", n) for RN(-n ln 2), by n.
+    log's are ("u", c)
+    for 1 + c eps, then ("d", c) for 1 - c eps/2 (census_log); log2's census
+    is that of log. exp2's and log2's are empty wherever the theory says so
+    (it does at every format and attribute)."""
     out = []
+    if fn in ("log", "log2"):
+        for bits, (kind, c) in sorted(census_log(fmt).items(),
+                                      key=lambda kv: (kv[1][0] != "u",
+                                                      kv[1][1])):
+            if classify(fmt, rnd, bits, None, fn) == "mark":
+                out.append((kind, c))
+        return out
     for bits, (c, e) in sorted(census(fmt).items(),
                                key=lambda kv: (kv[1][1], abs(kv[1][0]),
                                                kv[1][0] < 0)):
         if classify(fmt, rnd, bits, None, fn) == "mark":
             out.append((c, e))
+        elif fn == "log1p" and any(
+                classify(fmt, rnd, bits + d, None, fn) == "mark"
+                for d in (-2, -1, 1, 2)):
+            out.append((c, e))          # an anchor: a one-sided window beside it
     if fn == "expm1":
         for bits, (_n, n) in sorted(census_n(fmt).items(),
                                     key=lambda kv: kv[1][1]):
@@ -217,10 +310,14 @@ def centres(fmt, rnd, fn="exp"):
 
 def argument(fmt, centre):
     """The encoding of a centre: c 2^-e for (c, e); RN(-n ln 2) for
-    ("n", n)."""
+    ("n", n); 1 + c eps for ("u", c) and 1 - c eps/2 for ("d", c)."""
     a, b = centre
     if a == "n":
         return ml._enc(fmt, -b * ml._ln2())
+    if a == "u":
+        return sf.one_bits(fmt) + b
+    if a == "d":
+        return sf.one_bits(fmt) - b
     return sf.round_pack(fmt, 1 if a < 0 else 0, abs(a), -b, sf.RND_RNE)[0]
 
 
@@ -234,6 +331,8 @@ def half_width(fmt, x, G=None, centre=None):
     stays, against Bv = 2^-(p+G): 2^(n - p - G) / ulp(x)."""
     p = fmt.prec
     G = ml.GUARD[fmt.name] if G is None else G
+    if centre is not None and centre[0] in ("u", "d"):
+        return Fraction(0)                          # an isolated centre
     u = sf.unpack(fmt, x)
     lead = u.m.bit_length() - 1 + u.e              # floor(log2 |x|)
     if centre is not None and centre[0] == "n":
@@ -241,13 +340,27 @@ def half_width(fmt, x, G=None, centre=None):
     return Fraction(2) ** (-(p + G)) / Fraction(2) ** (lead - p + 1)
 
 
+# log's centres are isolated (the module docstring): their neighbours are the
+# floats j ulps away, which are other integers c, outside unless they are
+# centres themselves, and the theory says which.
+LOG_NEIGHBOURS = (1, 2, 3, 4, 8, 16, 64, 1024)
+
+
 def neighbours(fmt, centre, G=None):
     """[(bits, label)]: the centre's neighbours in the encoding, either side,
-    at OFFSETS: the first N_INSIDE inside its window, the rest outside."""
+    at OFFSETS: the first N_INSIDE inside its window, the rest outside; for
+    log's isolated centres at LOG_NEIGHBOURS ulps."""
     x0 = argument(fmt, centre)
-    W = half_width(fmt, x0, G, centre)
     sign, mag0 = x0 & fmt.sign_mask, x0 & ~fmt.sign_mask
     out = []
+    if centre[0] in ("u", "d"):
+        for j in LOG_NEIGHBOURS:
+            for sgn in (1, -1):
+                mag = mag0 + sgn * j
+                if 0 < mag < fmt.exp_mask << fmt.man_w:
+                    out.append((sign | mag, f"{'+' if sgn > 0 else '-'}{j}"))
+        return out
+    W = half_width(fmt, x0, G, centre)
     for lab, mult in OFFSETS:
         j = 1 if mult is None else max(1, math.ceil(W * mult))
         for sgn in (1, -1):
@@ -257,7 +370,7 @@ def neighbours(fmt, centre, G=None):
     return out
 
 
-def deep_arguments(fmt, G=None):
+def deep_arguments(fmt, G=None, fn="exp"):
     """[(bits, label)]: x = c 2^-e for c = 1, 3, 5, both signs, and e from
     three under the first exponent a window can start at, (p + G)/2, up to
     p - 11: the exponents between there and the census's lowest, p - 10. At
@@ -265,10 +378,24 @@ def deep_arguments(fmt, G=None):
     has 26 exponents of them and fp256 88. The theory puts the windows'
     lower edge at the first of them, so these lanes pin the bound to it:
     a bound half as wide leaves the window's inner half unmarked, one twice
-    as wide marks lanes the theory puts outside."""
+    as wide marks lanes the theory puts outside. For log and log2 the deep
+    arguments are 1 + c eps and 1 - c eps/2 for c = 2^a, 3 2^a, 5 2^a and
+    7 2^a, a from 2 to three over where the cubic term leaves the bound,
+    (p - 1 - G)/2 (every a up to 8, then every fourth): the census's c up to
+    16 is extended by the same rule (c = 20, 24, 28, 40, 48, 56, 80, ...)."""
     p = fmt.prec
     G = ml.GUARD[fmt.name] if G is None else G
     out = []
+    if fn in ("log", "log2"):
+        top = (p - 1 - G) // 2 + 3
+        for a in sorted(({a for a in range(2, top + 1) if a <= 8 or a % 4 == 0}
+                         | {top}) & set(range(2, top + 1))):
+            for c in (1, 3, 5, 7):
+                for kind in ("u", "d"):
+                    out.append((argument(fmt, (kind, c << a)),
+                                f"1 {'+' if kind == 'u' else '-'} "
+                                f"{c << a} ulp"))
+        return out
     for e in range(-(-(p + G) // 2) - 3, p - 10):
         for c in (1, 3, 5):
             for s in (1, -1):
@@ -307,11 +434,13 @@ def render(data):
     out = [_MARKER + ": centres",
            "#",
            "# {routine: {format: {attribute: [centre]}}}: a centre is (c, e),",
-           "# the census argument c 2^-e (a signed integer c, |c| <= 16), or",
-           "# (\"n\", n), expm1's RN(-n ln 2), whose f lies within 0.7 of the",
-           "# nominal bound of a rounding boundary under that attribute. The",
-           "# directed three share their boundaries, and so do rne and rmm.",
-           "# fp32 has none: at G = 40 its windows are empty. exp2 has none.",
+           "# the census argument c 2^-e (a signed integer c, |c| <= 16),",
+           "# (\"n\", n), expm1's RN(-n ln 2), or (\"u\", c) and (\"d\", c), log's",
+           "# 1 + c eps and 1 - c eps/2 (c <= 16), whose f lies within 0.7 of",
+           "# the nominal bound of a rounding boundary under that attribute.",
+           "# The directed three share their boundaries, and so do rne and",
+           "# rmm. fp32 has none: at G = 40 its windows are empty. exp2 has",
+           "# none, nor has log2.",
            ""]
     names = {}
     for fn, per_fmt in data.items():
@@ -359,11 +488,13 @@ def write(path=None):
 # ---- GENERATED by python/tests/mathlib_runs.py family --write: centres
 #
 # {routine: {format: {attribute: [centre]}}}: a centre is (c, e),
-# the census argument c 2^-e (a signed integer c, |c| <= 16), or
-# ("n", n), expm1's RN(-n ln 2), whose f lies within 0.7 of the
-# nominal bound of a rounding boundary under that attribute. The
-# directed three share their boundaries, and so do rne and rmm.
-# fp32 has none: at G = 40 its windows are empty. exp2 has none.
+# the census argument c 2^-e (a signed integer c, |c| <= 16),
+# ("n", n), expm1's RN(-n ln 2), or ("u", c) and ("d", c), log's
+# 1 + c eps and 1 - c eps/2 (c <= 16), whose f lies within 0.7 of
+# the nominal bound of a rounding boundary under that attribute.
+# The directed three share their boundaries, and so do rne and
+# rmm. fp32 has none: at G = 40 its windows are empty. exp2 has
+# none, nor has log2.
 
 _EXP_FP32_1 = []
 _EXP_FP64_2 = [
@@ -559,6 +690,99 @@ _EXPM1_FP256_18 = [
     ('n', 226), ('n', 227), ('n', 228), ('n', 229), ('n', 230), ('n', 231),
     ('n', 232), ('n', 233), ('n', 234), ('n', 235), ('n', 236), ('n', 237),
 ]
+_LOG_FP32_19 = []
+_LOG_FP64_20 = [
+    ('u', 6), ('d', 2), ('d', 12),
+]
+_LOG_FP64_21 = [
+    ('u', 1), ('u', 2), ('u', 4), ('u', 8), ('u', 12), ('u', 16), ('d', 4),
+    ('d', 8), ('d', 16),
+]
+_LOG_FP128_22 = [
+    ('u', 6), ('d', 2), ('d', 12),
+]
+_LOG_FP128_23 = [
+    ('u', 1), ('u', 2), ('u', 4), ('u', 8), ('u', 12), ('u', 16), ('d', 4),
+    ('d', 8), ('d', 16),
+]
+_LOG_FP256_24 = [
+    ('u', 6), ('d', 2), ('d', 12),
+]
+_LOG_FP256_25 = [
+    ('u', 1), ('u', 2), ('u', 4), ('u', 8), ('u', 12), ('u', 16), ('d', 4),
+    ('d', 8), ('d', 16),
+]
+_LOG2_FP32_26 = []
+_LOG2_FP64_27 = []
+_LOG2_FP128_28 = []
+_LOG2_FP256_29 = []
+_LOG1P_FP32_30 = []
+_LOG1P_FP64_31 = [
+    (-1, 48), (-1, 49), (-1, 50), (-1, 51), (3, 51), (-3, 51), (1, 52),
+    (-1, 52), (1, 53), (-1, 53),
+]
+_LOG1P_FP64_32 = [
+    (1, 48), (-1, 48), (1, 49), (-1, 49), (1, 50), (-1, 50), (3, 50),
+    (-3, 50), (1, 51), (-1, 51), (1, 52), (-1, 52),
+]
+_LOG1P_FP128_33 = [
+    (-1, 103), (-2, 103), (-4, 103), (-8, 103), (-16, 103), (-1, 104),
+    (-1, 105), (-1, 106), (-1, 107), (-1, 108), (-1, 109), (9, 109),
+    (-9, 109), (11, 109), (-11, 109), (13, 109), (-13, 109), (15, 109),
+    (-15, 109), (-1, 110), (5, 110), (-5, 110), (7, 110), (-7, 110),
+    (-1, 111), (3, 111), (-3, 111), (1, 112), (-1, 112), (1, 113), (-1, 113),
+]
+_LOG1P_FP128_34 = [
+    (1, 103), (-1, 103), (2, 103), (-2, 103), (3, 103), (-3, 103), (4, 103),
+    (-4, 103), (5, 103), (-5, 103), (6, 103), (-6, 103), (7, 103), (-7, 103),
+    (8, 103), (-8, 103), (9, 103), (-9, 103), (10, 103), (-10, 103),
+    (11, 103), (-11, 103), (12, 103), (-12, 103), (13, 103), (-13, 103),
+    (14, 103), (-14, 103), (15, 103), (-15, 103), (16, 103), (-16, 103),
+    (1, 104), (-1, 104), (3, 104), (-3, 104), (5, 104), (-5, 104), (7, 104),
+    (-7, 104), (9, 104), (-9, 104), (11, 104), (-11, 104), (13, 104),
+    (-13, 104), (15, 104), (-15, 104), (1, 105), (-1, 105), (3, 105),
+    (-3, 105), (5, 105), (-5, 105), (7, 105), (-7, 105), (9, 105), (-9, 105),
+    (11, 105), (-11, 105), (13, 105), (-13, 105), (15, 105), (-15, 105),
+    (1, 106), (-1, 106), (3, 106), (-3, 106), (5, 106), (-5, 106), (7, 106),
+    (-7, 106), (9, 106), (-9, 106), (11, 106), (-11, 106), (13, 106),
+    (-13, 106), (15, 106), (-15, 106), (1, 107), (-1, 107), (3, 107),
+    (-3, 107), (5, 107), (-5, 107), (7, 107), (-7, 107), (9, 107), (-9, 107),
+    (11, 107), (-11, 107), (13, 107), (-13, 107), (15, 107), (-15, 107),
+    (1, 108), (-1, 108), (3, 108), (-3, 108), (5, 108), (-5, 108), (7, 108),
+    (-7, 108), (9, 108), (-9, 108), (11, 108), (-11, 108), (13, 108),
+    (-13, 108), (15, 108), (-15, 108), (1, 109), (-1, 109), (3, 109),
+    (-3, 109), (5, 109), (-5, 109), (7, 109), (-7, 109), (1, 110), (-1, 110),
+    (3, 110), (-3, 110), (1, 111), (-1, 111), (1, 112), (-1, 112),
+]
+_LOG1P_FP256_35 = [
+    (-1, 227), (-2, 227), (-4, 227), (-8, 227), (-16, 227), (-1, 228),
+    (-1, 229), (-1, 230), (-1, 231), (-1, 232), (-1, 233), (9, 233),
+    (-9, 233), (11, 233), (-11, 233), (13, 233), (-13, 233), (15, 233),
+    (-15, 233), (-1, 234), (5, 234), (-5, 234), (7, 234), (-7, 234),
+    (-1, 235), (3, 235), (-3, 235), (1, 236), (-1, 236), (1, 237), (-1, 237),
+]
+_LOG1P_FP256_36 = [
+    (1, 227), (-1, 227), (2, 227), (-2, 227), (3, 227), (-3, 227), (4, 227),
+    (-4, 227), (5, 227), (-5, 227), (6, 227), (-6, 227), (7, 227), (-7, 227),
+    (8, 227), (-8, 227), (9, 227), (-9, 227), (10, 227), (-10, 227),
+    (11, 227), (-11, 227), (12, 227), (-12, 227), (13, 227), (-13, 227),
+    (14, 227), (-14, 227), (15, 227), (-15, 227), (16, 227), (-16, 227),
+    (1, 228), (-1, 228), (3, 228), (-3, 228), (5, 228), (-5, 228), (7, 228),
+    (-7, 228), (9, 228), (-9, 228), (11, 228), (-11, 228), (13, 228),
+    (-13, 228), (15, 228), (-15, 228), (1, 229), (-1, 229), (3, 229),
+    (-3, 229), (5, 229), (-5, 229), (7, 229), (-7, 229), (9, 229), (-9, 229),
+    (11, 229), (-11, 229), (13, 229), (-13, 229), (15, 229), (-15, 229),
+    (1, 230), (-1, 230), (3, 230), (-3, 230), (5, 230), (-5, 230), (7, 230),
+    (-7, 230), (9, 230), (-9, 230), (11, 230), (-11, 230), (13, 230),
+    (-13, 230), (15, 230), (-15, 230), (1, 231), (-1, 231), (3, 231),
+    (-3, 231), (5, 231), (-5, 231), (7, 231), (-7, 231), (9, 231), (-9, 231),
+    (11, 231), (-11, 231), (13, 231), (-13, 231), (15, 231), (-15, 231),
+    (1, 232), (-1, 232), (3, 232), (-3, 232), (5, 232), (-5, 232), (7, 232),
+    (-7, 232), (9, 232), (-9, 232), (11, 232), (-11, 232), (13, 232),
+    (-13, 232), (15, 232), (-15, 232), (1, 233), (-1, 233), (3, 233),
+    (-3, 233), (5, 233), (-5, 233), (7, 233), (-7, 233), (1, 234), (-1, 234),
+    (3, 234), (-3, 234), (1, 235), (-1, 235), (1, 236), (-1, 236),
+]
 
 FAMILY = {
     "exp": {
@@ -649,6 +873,96 @@ FAMILY = {
             "rdn": _EXPM1_FP256_18,
             "rup": _EXPM1_FP256_18,
             "rmm": _EXPM1_FP256_17,
+        },
+    },
+    "log": {
+        "fp32": {
+            "rne": _LOG_FP32_19,
+            "rtz": _LOG_FP32_19,
+            "rdn": _LOG_FP32_19,
+            "rup": _LOG_FP32_19,
+            "rmm": _LOG_FP32_19,
+        },
+        "fp64": {
+            "rne": _LOG_FP64_20,
+            "rtz": _LOG_FP64_21,
+            "rdn": _LOG_FP64_21,
+            "rup": _LOG_FP64_21,
+            "rmm": _LOG_FP64_20,
+        },
+        "fp128": {
+            "rne": _LOG_FP128_22,
+            "rtz": _LOG_FP128_23,
+            "rdn": _LOG_FP128_23,
+            "rup": _LOG_FP128_23,
+            "rmm": _LOG_FP128_22,
+        },
+        "fp256": {
+            "rne": _LOG_FP256_24,
+            "rtz": _LOG_FP256_25,
+            "rdn": _LOG_FP256_25,
+            "rup": _LOG_FP256_25,
+            "rmm": _LOG_FP256_24,
+        },
+    },
+    "log2": {
+        "fp32": {
+            "rne": _LOG2_FP32_26,
+            "rtz": _LOG2_FP32_26,
+            "rdn": _LOG2_FP32_26,
+            "rup": _LOG2_FP32_26,
+            "rmm": _LOG2_FP32_26,
+        },
+        "fp64": {
+            "rne": _LOG2_FP64_27,
+            "rtz": _LOG2_FP64_27,
+            "rdn": _LOG2_FP64_27,
+            "rup": _LOG2_FP64_27,
+            "rmm": _LOG2_FP64_27,
+        },
+        "fp128": {
+            "rne": _LOG2_FP128_28,
+            "rtz": _LOG2_FP128_28,
+            "rdn": _LOG2_FP128_28,
+            "rup": _LOG2_FP128_28,
+            "rmm": _LOG2_FP128_28,
+        },
+        "fp256": {
+            "rne": _LOG2_FP256_29,
+            "rtz": _LOG2_FP256_29,
+            "rdn": _LOG2_FP256_29,
+            "rup": _LOG2_FP256_29,
+            "rmm": _LOG2_FP256_29,
+        },
+    },
+    "log1p": {
+        "fp32": {
+            "rne": _LOG1P_FP32_30,
+            "rtz": _LOG1P_FP32_30,
+            "rdn": _LOG1P_FP32_30,
+            "rup": _LOG1P_FP32_30,
+            "rmm": _LOG1P_FP32_30,
+        },
+        "fp64": {
+            "rne": _LOG1P_FP64_31,
+            "rtz": _LOG1P_FP64_32,
+            "rdn": _LOG1P_FP64_32,
+            "rup": _LOG1P_FP64_32,
+            "rmm": _LOG1P_FP64_31,
+        },
+        "fp128": {
+            "rne": _LOG1P_FP128_33,
+            "rtz": _LOG1P_FP128_34,
+            "rdn": _LOG1P_FP128_34,
+            "rup": _LOG1P_FP128_34,
+            "rmm": _LOG1P_FP128_33,
+        },
+        "fp256": {
+            "rne": _LOG1P_FP256_35,
+            "rtz": _LOG1P_FP256_36,
+            "rdn": _LOG1P_FP256_36,
+            "rup": _LOG1P_FP256_36,
+            "rmm": _LOG1P_FP256_35,
         },
     },
 }

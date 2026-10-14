@@ -42,6 +42,41 @@ the build changed in this text's statements:
   fp32 fragment fits seq.py's 32 registers; in the design's order they keep
   22 to 25 and 33 to 36.
 
+**A note of 2026-10-14** (parcel MB2, M1's build, item 1's second half; the
+study's text stays as of 2026-10-05). log, log2 and log1p are built too, in
+the same module, at the four formats and five attributes (docs/VALIDATION.md,
+the entry of that date), so "nothing here is built" now holds of cftc, the
+language and program.c only, which are as the study describes them. What the
+build changed in this text's statements:
+- Section 5.1's fp32 estimate for the log family ("about 1.8x"): 379, 391 and
+  431 instructions (rne, G = 40) against 186, 180 and 220 at fp64 (G = 44),
+  that is 2.0, 2.2 and 2.0 times. At fp64 the decided G = 44 gives K = 11, 7
+  instructions fewer in each than the table's G = 46 figures (193, 187,
+  227 to 229); fp128 and fp256 are the table's.
+- Sections 5.1 and 6 and question 12 on live values (14 to 18 at the double
+  word, "log1p keeps 18"): in the design's order the log family keeps 16, 14
+  and 18 at the double word and 22, 21 and 24 at fp32, so every fragment fits
+  seq.py's 32 registers unscheduled; emitted scheduled, as the exp family's,
+  they keep 13, 13 and 12 and 19, 17 and 20.
+- Section 2.3's sum adds r Y to k ln2_h + L by TwoSum, "the exponents can
+  tie". The first is at least 1.9 times the second wherever it is not 0, so a
+  Fast2Sum would do, 3 instructions fewer a call; the build keeps the TwoSum.
+- Section 3.5's log family. log's centres are isolated, and the census's
+  c <= 16 is not all of them: beyond it the theory demands a mark at 2 more
+  of the deep arguments tried at fp64 under the directed three, at 4 more
+  under rne and rmm and 85 under the directed three at fp128, and at 4 and
+  211 at fp256 (c = j 2^a, up to where the cubic term leaves the bound). log1p's
+  windows are one-sided at a power of two, on the finer side of it, where the
+  power of two itself can be clear; the committed lists hold such a power of
+  two as an anchor. exp's and expm1's have the same, and their lists do not.
+- Section 3.6's defects 2 and 8 are held by plants (`ln2_two_words`,
+  `small_2m4`). Defect 8's is seen by the bound at fp256 only, at 2^0.93 times
+  the bound as the study says; at fp64 and fp32 no sampled lane's error passes
+  the bound, and the constants' check and the instruction count see it.
+- fp32 is not as comfortable as the others in log1p's band above 15/256: the
+  largest error found by a strided sweep is 2^-1.23 of the bound, and the
+  first-order bound of the three-word V there is 2^-1.03.
+
 **Revised the same day,** after verifier-VM1 checked the first version
 (5b6de0d; the round's ledger, `verifier-VM1.md`). That check found one
 defect: log1p's r = x path ran its polynomial past the bound's rho, and
