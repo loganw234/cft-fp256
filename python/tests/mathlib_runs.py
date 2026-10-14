@@ -13,7 +13,9 @@ log2 and log1p.
     python python/tests/mathlib_runs.py budget  --fn expm1 --format fp64
         --unit 300 --weighted 300
     python python/tests/mathlib_runs.py rate    --fn exp2 --format fp64
-        --n 20000 --attrs rne,rtz
+        --n 20000 --attrs rne,rtz [--statistics 18] [--alpha 0.001]
+    python python/tests/mathlib_runs.py rategeom --fn log --format fp64
+        --n 20000 --seeds 101-160
     python python/tests/mathlib_runs.py family  [--fn expm1] [--format fp64]
         [--centres 0]
     python python/tests/mathlib_runs.py sweep   --fn expm1 --format fp32
@@ -44,7 +46,25 @@ sample is a function of --seed, so a run can be repeated.
   budget   verifier-VM1b's first-order budget over the same regions: the
            bound it states, which the true worst cannot pass
            (mathlib_budget); fp64, fp128 and fp256 only
-  rate     the mark-rate law with the bound inflated to G' = 6
+  rate     the mark-rate law with the bound inflated to G' = 6: each cell's
+           count of marks against the SAMPLE'S OWN expectation (the sum of
+           2^-G' m_V over its lanes, m_V the significand of the lane's true
+           value), judged by its exact two-sided tail, and the cells of the
+           run judged together: a cell is flagged when its tail is under
+           alpha / K, K the independent statistics of the run (two a routine
+           and format: rtz, rdn and rup mark the same lanes, rne and rmm the
+           same), so that a run with nothing wrong is flagged with probability
+           at most alpha (--alpha, 0.1%). --statistics K names the run's K
+           when the run is several processes (the default is this process's
+           own); --sigmas N is the plain N-sigma line, no multiplicity. A
+           last line gives the run's smallest tail
+  rategeom the same law without the fragment: for each seed of --seeds
+           (a-b, inclusive) and each routine and format, the counts of marks
+           the true-value geometry gives each class (directed, nearest), their
+           z and exact tails, and how many of the seeds' runs the rule would
+           have flagged against how many the law says it flags: the rule's
+           false-alarm rate, measured; and per statistic the mean and
+           variance of z over the seeds, which the law says are 0 and 1
   sweep    the bound over EVERY float of a range (--lo, --hi, decimal
            numbers, exact), every --stride-th of them, shard i of n of
            those (--shard i/n, so n processes cover the range): the largest
@@ -245,18 +265,90 @@ def cmd_budget(a):
 
 
 def cmd_rate(a):
-    for fn in fns_of(a.fn):
-        for fmt in formats_of(a.format, [f.name for f in H.FORMATS]):
-            for rnd in attrs_of(a.attrs):
-                out, st = H.check_rate(fmt, rnd, a.n, a.seed,
-                                       sigmas=a.sigmas, fn=fn)
+    fns = fns_of(a.fn)
+    fmts = formats_of(a.format, [f.name for f in H.FORMATS])
+    rnds = attrs_of(a.attrs)
+    k = a.statistics or H.rate_statistics(fns, fmts, rnds)
+    say(f"rate: {len(fns) * len(fmts) * len(rnds)} cells, {k} statistics, "
+        f"alpha {a.alpha:g}: a cell is flagged when its exact two-sided tail "
+        f"is under {H.rate_level(k, a.alpha):.3g}"
+        + (f" (or past {a.sigmas:g} sigma, the plain line)"
+           if a.sigmas is not None else ""))
+    smallest = None
+    for fn in fns:
+        for fmt in fmts:
+            for rnd in rnds:
+                out, st = H.check_rate(fmt, rnd, a.n, a.seed, sigmas=a.sigmas,
+                                       fn=fn, statistics=k, alpha=a.alpha)
                 note(out)
-                dev = (st['marked'] - st['expected']) / st['sigma']
-                say(f"rate {fn} {fmt.name} {sf.RND_NAMES[rnd]}: "
-                    f"{st['marked']} of {st['n']} marked, "
+                cell = f"{fn} {fmt.name} {sf.RND_NAMES[rnd]}"
+                say(f"rate {cell}: {st['marked']} of {st['n']} marked, "
                     f"{st['expected']:.1f} expected (sigma "
-                    f"{st['sigma']:.1f}, {dev:+.2f}), {st['wrong']} wrong "
-                    f"unmarked, {st['guess_wrong']} wrong guesses")
+                    f"{st['sigma']:.1f}, {st['z']:+.2f}), two-sided tail "
+                    f"{st['p']:.3g}, {st['wrong']} wrong unmarked, "
+                    f"{st['guess_wrong']} wrong guesses")
+                if smallest is None or st["p"] < smallest[0]:
+                    smallest = (st["p"], cell)
+    say(f"rate: the run's smallest two-sided tail is {smallest[0]:.3g} "
+        f"({smallest[1]}); a tail that small somewhere among {k} statistics "
+        f"has probability at most {min(1.0, k * smallest[0]):.3g}")
+
+
+def parse_seeds(arg):
+    """'101-160' or '7': the seeds, inclusive."""
+    lo, _, hi = arg.partition("-")
+    return range(int(lo), int(hi or lo) + 1)
+
+
+def cmd_rategeom(a):
+    fns = fns_of(a.fn)
+    fmts = formats_of(a.format, ["fp64", "fp128", "fp256"])
+    seeds = parse_seeds(a.seeds)
+    k = a.statistics or 2 * len(fns) * len(fmts)
+    level = H.rate_level(k, a.alpha)
+    say(f"rategeom: {len(seeds)} runs of {len(fns) * len(fmts)} routines and "
+        f"formats, {k} statistics, alpha {a.alpha:g}: flagged when a "
+        f"two-sided tail is under {level:.3g}; n = {a.n}")
+    zs = {}
+    flagged, expected = 0, 0.0
+    for seed in seeds:
+        smallest, clean = (2.0, ""), 1.0
+        for fn in fns:
+            for fmt in fmts:
+                smp = H.RateSample(fmt, fn, a.n, seed)     # not cached: memory
+                counts = (("directed",
+                           sum(smp.geometric_marks(sf.RND_RTZ))),
+                          ("nearest", sum(smp.geometric_marks(sf.RND_RNE))))
+                for cls, c in counts:
+                    zs.setdefault((fn, fmt.name, cls), []).append(
+                        (c - smp.mean) / smp.sigma)
+                    p = smp.p_value(c)
+                    if p < smallest[0]:
+                        smallest = (p, f"{fn} {fmt.name} {cls}: {c} marked, "
+                                    f"{smp.mean:.1f} expected")
+                clean *= (1.0 - smp.rejection(level)) ** 2
+        expected += 1.0 - clean
+        hit = smallest[0] < level
+        flagged += hit
+        say(f"rategeom seed {seed}: smallest two-sided tail {smallest[0]:.3g}"
+            f" ({smallest[1]})" + ("  FLAGGED" if hit else ""))
+    say(f"rategeom: {flagged} of {len(seeds)} runs flagged at alpha "
+        f"{a.alpha:g}; the law says {expected:.2f} (at most "
+        f"{a.alpha * len(seeds):.2f})")
+    for (fn, fmt_name, cls), z in sorted(zs.items()):
+        m = sum(z) / len(z)
+        v = sum((x - m) ** 2 for x in z) / max(1, len(z) - 1)
+        bad = len(z) >= 30 and (abs(m) > 4.5 / len(z) ** 0.5 or
+                                abs(v - 1) > 4.5 * (2 / (len(z) - 1)) ** 0.5)
+        sd_v = (2 / max(1, len(z) - 1)) ** 0.5
+        say(f"   {fn} {fmt_name} {cls}: mean z {m:+.3f} (sd "
+            f"{len(z) ** -0.5:.3f}), variance of z {v:.3f} (sd {sd_v:.3f})"
+            + ("  OFF THE LAW" if bad else ""))
+        if bad:
+            note([f"rategeom: {fn} {fmt_name} {cls}: over {len(z)} seeds the "
+                  f"z of the count has mean {m:+.3f} and variance {v:.3f}, "
+                  f"which is not the law's 0 and 1 (4.5 standard errors "
+                  f"allowed)"])
 
 
 def cmd_family(a):
@@ -360,7 +452,7 @@ def cmd_all(a):
     cmd_budget(ns(fn=None, format=None, unit=int(60 * s),
                   weighted=int(60 * s), seed=1, guard=None))
     cmd_rate(ns(fn=None, format=None, attrs="rne,rtz", n=int(1500 * s),
-                seed=11, sigmas=3.0))
+                seed=11, sigmas=None, statistics=None, alpha=H.RATE_ALPHA))
     cmd_family(ns(write=False, check=True, fn=None, format=None, attrs=None,
                   centres=0))
     cmd_family(ns(write=False, check=False, fn=None,
@@ -418,8 +510,24 @@ def main(argv=None):
     p.add_argument("--attrs")
     p.add_argument("--n", type=int, default=2000)
     p.add_argument("--seed", type=int, default=11)
-    p.add_argument("--sigmas", type=float, default=3.0)
+    p.add_argument("--sigmas", type=float, default=None,
+                   help="the plain line at this many sigma, no multiplicity "
+                        "(default: the exact-tail rule)")
+    p.add_argument("--statistics", type=int, default=None,
+                   help="the independent statistics of the whole run, when "
+                        "the run is several processes (default: this "
+                        "process's own, two a routine and format)")
+    p.add_argument("--alpha", type=float, default=H.RATE_ALPHA,
+                   help="the run's false-alarm rate")
     p.set_defaults(fn_=cmd_rate)
+    p = sub.add_parser("rategeom")
+    p.add_argument("--fn")
+    p.add_argument("--format")
+    p.add_argument("--n", type=int, default=2000)
+    p.add_argument("--seeds", default="1-20", help="a-b, inclusive")
+    p.add_argument("--statistics", type=int, default=None)
+    p.add_argument("--alpha", type=float, default=H.RATE_ALPHA)
+    p.set_defaults(fn_=cmd_rategeom)
     p = sub.add_parser("family")
     p.add_argument("--fn")
     p.add_argument("--format")

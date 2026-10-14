@@ -32,8 +32,13 @@ the golden stage; the larger runs are python/tests/mathlib_runs.py.
               and VM1b's first-order budget under 1 at fp64, fp128 and fp256
               (fp32 has none)
   item 3      the mark-rate law with the bound inflated to 2^-(p+6): the 15
-              cells of fp64, fp128 and fp256 under every attribute, three
-              sigma, every unmarked lane right, the marked guesses counted
+              cells of fp64, fp128 and fp256 under every attribute, each
+              count against the SAMPLE'S OWN expectation (the sum of 2^-6 m_V
+              over its lanes) by its exact two-sided tail, the 90 cells of
+              the test judged as the 36 statistics they are (alpha 0.1%),
+              every unmarked lane right, the marked guesses counted; and the
+              true-value geometry the expectation rests on held to the
+              fragment lane for lane (parcel RC)
   item 4      the structured families as committed lists (mathlib_family):
               equal to the theory's generation; the centres and their
               neighbours of exp, expm1, log and log1p at fp64, fp128 and
@@ -52,6 +57,7 @@ alone, in any order and under pytest-xdist. Each plant also says which checks
 stay green, so that "caught by name" is not "everything is red".
 """
 
+import math
 import pathlib
 import subprocess
 import sys
@@ -1033,10 +1039,16 @@ def test_fp32_has_no_budget_and_says_so(fn):
 # =====================================================================
 
 # lanes a cell: exp's are E1's, exp2's and expm1's MB1's trim, and the log
-# family's a further one (parcel MB2), 700 where the expected count is 15.8 and
-# sigma 3.9: a mark silenced or a bound made too small is 4 sigma under it
+# family's a further one (parcel MB2), 700 where the expected count is 15.8: a
+# mark silenced or a bound made too small has an exact two-sided tail of about
+# 2e-7 there (the normal z called it "4 sigma under")
 RATE_N = {"exp": 2000, "exp2": 1000, "expm1": 1000, "log": 700,
           "log2": 700, "log1p": 700}
+# the test's independent statistics: its 90 cells are 6 routines, 3 formats and
+# 2 classes of attribute (rtz, rdn and rup mark the same lanes, rne and rmm the
+# same), each flagged when its exact two-sided tail is under H.RATE_ALPHA / 36
+RATE_STATISTICS = H.rate_statistics(FUNCS, DOUBLE)
+
 
 @pytest.mark.parametrize("rnd", RND, ids=rid)
 @pytest.mark.parametrize("fmt", DOUBLE, ids=fid)
@@ -1046,13 +1058,218 @@ def test_the_mark_rate_law_in_its_fifteen_cells(fn, fmt, rnd):
     arguments (as the study's m1rate.py draws them: 2,000 a cell for exp, as
     E1 ran it; 1,000 for exp2 and expm1 and 700 for the log family to keep
     the golden stage quick, the 2,000 being mathlib_runs.py rate's default)
-    the marked fraction is
-    within three sigma of 2^(0.53 - 6), every unmarked lane right, every
-    marked guess counted - all right, as the study found."""
-    out, st = H.check_rate(fmt, rnd, RATE_N[fn], 7, fn=fn)
+    the count of marks has an exact two-sided tail, under the sample's own
+    law, of at least alpha / 36 (the 90 cells of this test are 36
+    statistics), every unmarked lane is right and every marked guess counted
+    - all right, as the study found."""
+    out, st = H.check_rate(fmt, rnd, RATE_N[fn], 7, fn=fn,
+                           statistics=RATE_STATISTICS)
     assert out == [], st
     assert st["wrong"] == 0 and st["guess_wrong"] == 0
-    assert abs(st["marked"] - st["expected"]) <= 3 * st["sigma"]
+    assert st["statistics"] == 36 and st["level"] == H.RATE_ALPHA / 36
+    assert st["p"] >= H.rate_level(RATE_STATISTICS)
+
+
+# ---- the rate check's own parts (parcel RC) ---------------------------------
+
+def _pmf_by_enumeration(ps):
+    """P(X = k) by summing over every subset of the lanes: independent of the
+    dynamic programme, exact in Fractions."""
+    n = len(ps)
+    out = [Fraction(0)] * (n + 1)
+    for mask in range(1 << n):
+        pr, k = Fraction(1), 0
+        for i, p in enumerate(ps):
+            if mask >> i & 1:
+                pr, k = pr * p, k + 1
+            else:
+                pr *= 1 - p
+        out[k] += pr
+    return out
+
+
+class _Law(H.RateSample):
+    """A RateSample by hand: the law of the probabilities `ps`, no lanes."""
+
+    def __init__(self, ps):
+        self.n, self.p = len(ps), list(ps)
+        self.mean = sum(self.p)
+        self.var = sum(q * (1 - q) for q in self.p)
+        self.sigma = self.var ** 0.5
+        self._pmf = None
+
+
+def test_the_poisson_binomial_pmf_is_exact():
+    """The dynamic programme against two exact references that share none of
+    its recurrence: every subset of 12 lanes of distinct probabilities, and
+    the binomial's closed form for 700 lanes of one probability."""
+    ps = [Fraction(i + 1, 40) for i in range(12)]
+    want = _pmf_by_enumeration(ps)
+    got = H.poisson_binomial_pmf([float(p) for p in ps], 12)
+    assert sum(want) == 1
+    assert all(abs(g - float(w)) < 1e-15 for g, w in zip(got, want))
+    n, p = 700, Fraction(1, 64)
+    got = H.poisson_binomial_pmf([float(p)] * n, 60)
+    for k in range(61):
+        closed = math.comb(n, k) * p ** k * (1 - p) ** (n - k)
+        assert abs(got[k] - float(closed)) <= 1e-13 * float(closed), k
+    # the table is truncated, not wrapped: the entries it keeps are the same
+    assert H.poisson_binomial_pmf([float(p)] * n, 10) == got[:11]
+
+
+def test_the_tails_the_p_value_and_the_rejection_of_a_law():
+    """Binomial(10, 1/2), by hand: P(X <= 0) = 1/1024, P(X <= 1) = 11/1024; so
+    the two-sided tail of 0 is 2/1024, of 1 is 22/1024, and of the median 1;
+    at level 0.01 the counts 0 and 10 are flagged (probability 2/1024), at
+    0.03 also 1 and 9 (22/1024)."""
+    law = _Law([0.5] * 10)
+    lo, hi = law.tails(0)
+    assert lo == pytest.approx(1 / 1024, rel=1e-12) and hi == pytest.approx(1)
+    lo, hi = law.tails(10)
+    assert lo == pytest.approx(1) and hi == pytest.approx(1 / 1024, rel=1e-12)
+    assert law.p_value(0) == pytest.approx(2 / 1024, rel=1e-12)
+    assert law.p_value(1) == pytest.approx(22 / 1024, rel=1e-12)
+    assert law.p_value(5) == 1.0
+    assert law.rejection(0.01) == pytest.approx(2 / 1024, rel=1e-12)
+    assert law.rejection(0.03) == pytest.approx(22 / 1024, rel=1e-12)
+    assert law.rejection(0.0001) == pytest.approx(0.0, abs=1e-15)
+    # a count past the table (mean + 14 sigma, or n) has no upper tail left
+    big = _Law([0.01] * 3000)
+    assert big.tails(len(big.pmf()) + 5) == (1.0, 0.0)
+
+
+def test_the_committed_run_is_flagged_with_probability_at_most_alpha():
+    """The law's own probability that any of the committed run's 36
+    statistics is flagged, from the 18 samples' lanes at seed 7 (each sample
+    is two statistics: the five attributes mark two lane sets): the sum of
+    the exact probabilities that a count's two-sided tail is under alpha / 36.
+    At most alpha, and not far under it (the discreteness of the counts costs
+    less than a factor of 3)."""
+    level = H.rate_level(RATE_STATISTICS)
+    total = 0.0
+    for fn in FUNCS:
+        for fmt in DOUBLE:
+            smp = H.rate_sample(fmt, fn, RATE_N[fn], 7)
+            r = smp.rejection(level)
+            assert 0 < r <= level * (1 + 1e-9), (fn, fmt.name, r)
+            total += 2 * r
+    assert H.RATE_ALPHA / 3 < total <= H.RATE_ALPHA, total
+
+
+def test_the_rate_check_centres_on_the_samples_own_expectation():
+    """check_rate's expectation is 2^-6 times the sum of the lanes' m_V, the
+    significand of each true value, which this test takes from mpmath at 4p +
+    200 bits and frexp (the harness: p + 96 bits and the _mpf_ tuple). It is
+    not the study's n 2^(0.53 - 6): log2's sample has a uniform significand
+    (mean 1.4995) and expects 3.9% more, log's 2.0% and log1p's 1.5% fewer
+    (20,000 lanes at fp64, sd of the mean 0.14%). For a log-uniform
+    significand it is the law's figure: the exp family's samplers, x uniform,
+    give it to 0.5% at 20,000 lanes, and quantiles of the log-uniform law
+    give it to 1e-8."""
+    import mpmath
+    law = lambda n: n * 2 ** (0.53 - 6)       # noqa: E731
+    fmt = FP64
+    # independent m_V, lane by lane, for a log2 and a log sample; and the
+    # check reports (and judges by) that expectation and its sigma
+    for fn in ("log2", "log"):
+        smp = H.rate_sample(fmt, fn, 600, 5)
+        ps = []
+        for x in smp.xs:
+            with mpmath.workprec(4 * fmt.prec + 200):
+                v = abs(H.true_value(fn, H._mp(H.value(fmt, x))))
+                mant, _ex = mpmath.frexp(v)
+                ps.append(float(2 * mant) * 2 ** -6)
+        total = sum(ps)
+        assert abs(smp.mean - total) <= 1e-9 * total, fn
+        _out, st = H.check_rate(fmt, RNE, 600, 5, fn=fn)
+        assert abs(st["expected"] - total) <= 1e-9 * total, fn
+        assert st["sigma"] == pytest.approx(
+            math.sqrt(sum(q * (1 - q) for q in ps)), rel=1e-9), fn
+        assert st["p"] == smp.p_value(st["marked"]), fn
+    # the premise matters: the law's figure is wrong for the log family
+    ratio = {fn: H.rate_sample(fmt, fn, 20000, 7).mean / law(20000)
+             for fn in ("log2", "log", "log1p", "exp2", "exp")}
+    assert ratio["log2"] > 1.03
+    assert 0.97 < ratio["log"] < 0.995 and 0.97 < ratio["log1p"] < 0.995
+    assert all(abs(ratio[fn] - 1) < 0.005 for fn in ("exp2", "exp"))
+    # and for a log-uniform significand, by quantiles, it reduces to the law's
+    n = 5000
+    quantile = _Law([2 ** -6 * 2 ** ((j + 0.5) / n) for j in range(n)])
+    assert quantile.mean == pytest.approx(n / (64 * math.log(2)), rel=1e-7)
+    assert quantile.mean == pytest.approx(law(n), rel=1e-3)
+
+
+def test_the_rate_expectation_does_not_follow_the_planted_build():
+    """The law is of the unplanted bound: a planted bound, or a silenced mark,
+    changes the count and not the expectation."""
+    _out, clean = H.check_rate(FP64, RNE, 300, 5, fn="exp2")
+    for plant in ("bound_loose", "bound_wide", "mark_silenced"):
+        _out, st = H.check_rate(FP64, RNE, 300, 5, plant=plant, fn="exp2")
+        assert st["expected"] == clean["expected"] and st["sigma"] == \
+            clean["sigma"], plant
+        assert st["marked"] != clean["marked"], plant
+
+
+def test_the_runs_script_judges_a_run_and_measures_the_rule(capsys):
+    """mathlib_runs.py rate and rategeom at a size the golden stage can
+    afford: `rate` prints each cell's tail and the run's smallest, takes K from
+    its own cells or from --statistics, keeps the plain line under --sigmas,
+    and exits 0 on a clean build; `rategeom` runs its seeds with no fragment
+    and exits 0 (the script and check_rate's statistics agree on their
+    keys)."""
+    import mathlib_runs as R
+    base = ["rate", "--fn", "exp2", "--format", "fp64", "--attrs", "rne,rtz",
+            "--n", "200", "--seed", "3"]
+    for extra, want in (([], ["2 statistics", "alpha 0.001"]),
+                        (["--statistics", "18"],
+                         ["18 statistics", "under 5.56e-05"]),
+                        (["--sigmas", "3"], ["the plain line"])):
+        R.FINDINGS.clear()
+        assert R.main(base + extra) == 0
+        out = capsys.readouterr().out
+        assert "RESULT: ok" in out and "two-sided tail" in out, out
+        assert "the run's smallest two-sided tail" in out, out
+        assert all(w in out for w in want), (extra, out)
+    R.FINDINGS.clear()
+    assert R.main(["rategeom", "--fn", "exp2,log", "--format", "fp64",
+                   "--n", "200", "--seeds", "1-3"]) == 0
+    out = capsys.readouterr().out
+    assert "3 runs" in out and "4 statistics" in out, out
+    assert "variance of z" in out and "RESULT: ok" in out, out
+
+
+@pytest.mark.parametrize("rnd", (RNE, RTZ), ids=rid)
+@pytest.mark.parametrize("fmt", FORMATS, ids=fid)
+@pytest.mark.parametrize("fn", FUNCS)
+def test_the_inflated_build_marks_the_lanes_the_true_value_geometry_marks(
+        fn, fmt, rnd):
+    """The premise of the expectation, lane for lane: with the bound inflated
+    to 2^-(p+6) the fragment marks exactly the lanes whose true value lies
+    within the bound of a boundary (a float under the directed attributes, a
+    midpoint under rne and rmm), by RateSample.geometric_marks, on 600 lanes
+    of a normal result at every routine and format. rtz stands for rdn and
+    rup, which mark the same lanes, and rne for rmm."""
+    out, st = H.check_rate_geometry(fmt, rnd, 600, 5, fn=fn)
+    assert out == [], st
+    assert st["lanes"] > 500 and st["marked"] > 0
+    assert st["extra"] == 0 and st["missing"] == 0
+
+
+def test_the_rate_geometry_check_sees_a_faulted_bound():
+    """Its plants: a bound 2^40 smaller, 2^16 wider, half or twice as wide,
+    a silenced mark and a forced one each make the marks differ from the
+    geometry's; a fault that moves no mark (a polynomial two steps short,
+    whose error is 2^-38 of the inflated bound) leaves it green, so that it is
+    not red for everything."""
+    for plant in ("bound_loose", "bound_wide", "bound_half", "bound_double",
+                  "mark_silenced", "mark_forced"):
+        out, st = H.check_rate_geometry(FP64, RNE, 600, 5, plant=plant,
+                                        fn="exp2")
+        assert out and all(s.startswith("rategeom:") for s in out), plant
+        assert st["extra"] + st["missing"] > 0, plant
+    out, _st = H.check_rate_geometry(FP64, RNE, 600, 5, plant="head_short",
+                                     fn="exp2")
+    assert out == []
 
 
 # =====================================================================
@@ -1427,6 +1644,7 @@ ELSEWHERE = {
     "check_r24": "test_the_r24_check_sees_a_flag_left_loud",
     "check_invariants": "test_each_clause_of_the_invariants_can_fail",
     "check_family_list": "test_the_census_and_family_list_checks_can_fail",
+    "check_rate_geometry": "test_the_rate_geometry_check_sees_a_faulted_bound",
 }
 # the common comparison of pools, edges, lanes and seq, which has no name of
 # its own in a finding: their plants are its
@@ -1462,7 +1680,8 @@ def run_check(check, plant, fn, fmt, rnd):
         return H.check_family(f, [cen[0], cen[len(cen) // 2], cen[-1]],
                               deep=True)[0]
     if check == "rate":
-        return H.check_rate(fmt, rnd, 1000, 7, plant=builder_plant, fn=fn)[0]
+        return H.check_rate(fmt, rnd, 1000, 7, plant=builder_plant, fn=fn,
+                            statistics=RATE_STATISTICS)[0]
     if check == "constants":
         return H.check_constants(
             builder=lambda name, ff, rr: ml.build(name, ff, rr,
