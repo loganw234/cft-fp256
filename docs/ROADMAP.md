@@ -6088,6 +6088,9 @@ this level?** Logan's instruction, above.
    - **exp2 and expm1 are built** (2026-10-13): parcel MB1, merged at
      26ced32, with fp32's fit to the register file for all three of
      exp, exp2 and expm1. The log family is next.
+   - **log, log2 and log1p are built** (2026-10-14): parcel MB2, merged
+     at 29f68fc. Item 1 is done: all six routines, at the four formats
+     and the five attributes. program.c parity is next.
 2. **program.c parity:** the fragments' programs in seq_check's
    corpora. No new C, since the routines are programs of existing
    instructions.
@@ -6123,7 +6126,9 @@ function gains an L3 rule.
   - the cost of 2^1024's range measured (step 6's plan).
   - **Its study is done** (2026-10-13): docs/studies/M2-trig.md,
     merged at 81735d4, with twelve questions for Logan (its section
-    9), not yet answered.
+    9), answered on 2026-10-14 (below). Its design picks 2/pi's window
+    by a SELECT shifter over bank words, not from the scratch copy read
+    by LDX above (its question 1).
 - **M3, the pow family:** its structured cases need 2p to 3p bits.
 - **M4, atan, atan2, asin and acos.**
 - **Their order:** M2's study can run beside M1's build; M4 follows
@@ -6168,6 +6173,41 @@ as the study recommends:
 - **The round's extent,** in his words: "Hold once E1 finishes to
   determine how M1 + M2 will utilize models, M2-M4 builds becoming
   their own round."
+
+**Logan's answers on M2's study** (2026-10-14, by AskUserQuestion).
+- **The question:** "How do you want to answer M2's twelve design
+  questions (recommendations as listed above)?"
+- **His answer:** "Approve all as recommended (Recommended)". That
+  option read: "Settle all twelve as the study recommends, question 9
+  as restated (a cap per function and format). M2's build round then
+  starts from these whenever it comes."
+
+So each of the study's twelve (docs/studies/M2-trig.md, section 9) is
+settled as recommended. As they were put to him:
+1. **2/pi's storage:** in bank words, read by a SELECT shifter. LDX
+   scratch later, only if a workload needs it.
+2. **The stated range:** 2^1024 for fp128 and fp256.
+3. **fp32:** a triple word at G = 40, built and measured first in M2's
+   build. The measured fallback is a double word at G = 18.
+4. **G:** M1's values, 44 at fp64 and 46 at fp128 and fp256.
+5. **tan:** its own double-word quotient, not C4's division.
+6. **The clamp:** keep |sin x| and |cos x| < 1 in the routine (4
+   instructions).
+7. **The structured families:** keep their marks, the pi/2 neighbours
+   included, and list the windows' centres in the build's tests.
+8. **Constant arguments:** fold sin(0), cos(0) and tan(0), and refuse
+   every other constant by name.
+9. **Live values, restated:** M2's fragments keep 22, 26, 17 and 16
+   values live at fp32, fp64, fp128 and fp256. That is past the caps
+   that mathlib.py has had since MB1, 21 and 13, at every format. So
+   the cap is set per function and format.
+10. **The derivative rules:** `cos(a)*da`, `(-sin(a))*da` and
+    `fma(r,r,1)*da`, with the pendulum as the reference.
+11. **The generator:** in mathlib.py.
+12. **Versions:** cftc's output version steps to 7 and the language to
+    1.2, after M1's build.
+
+M2's build is a round of its own (his word of 2026-10-12, above).
 
 **The order.**
 1. Logan's answers.

@@ -19746,3 +19746,135 @@ The faults MB1's table already had, now on the log family (`PLANTS` says which a
 8. The golden stage as a whole, serially, in a clone of its own, for the timing: `python -m pytest python/tests -q -rs`, and `test_mathlib.py` alone at the final commit.
 9. The lead's own: `pools --seq --edges`, `live`, and `python3 -m cft_golden.mathlib --check`.
 - The desktop runs of the same commands at the study's scale, above, are this parcel's own MEASURED figures.
+
+## 2026-10-14 - M1's build, second wave, closed: log, log2 and log1p (parcel MB2, Sonnet), merged and gated; M2's twelve questions answered
+
+**What Logan asked.** The wave is his "Delete the ci-golden branch and start M1's build" (2026-10-13), with his models of the same day: "Use Sonnet for M1's build parcels as you recommended, it performed well".
+
+**M2's twelve questions,** put to him on 2026-10-14 with the study's recommendations listed (question 9 restated for MB1's cap), by AskUserQuestion.
+- The question: "How do you want to answer M2's twelve design questions (recommendations as listed above)?"
+- His answer, verbatim: "Approve all as recommended (Recommended)".
+- That option read: "Settle all twelve as the study recommends, question 9 as restated (a cap per function and format). M2's build round then starts from these whenever it comes."
+- Question 9 as put to him: "M2's fragments keep 22, 26, 17 and 16 values live (fp32, fp64, fp128, fp256). That's past mathlib.py's new caps of 21 and 13 at every format. Recommendation: a cap per function and format."
+- ROADMAP's plan now lists the twelve as settled.
+
+**The chain** (MEASURED, each verifier's ledger):
+
+| work | author | verifiers: (a), (b) | sent back |
+|---|---|---|---|
+| MB2 (85fe5e0, d24271c, 7005fb6) | Sonnet 5.5 | VMB2 0, 5; VMB2-2 0, 0 | once |
+| the merge (29f68fc) | the lead | VIW2 0, 1 | restated here |
+
+- **MB2's five (b)s,** each a false statement in the record or a comment:
+  - the exp family's constant counts given as "300 to 357", where `--check` prints 245 to 357;
+  - the study's budget figures credited to its 3.2, where they are in 3.3;
+  - the C = 16 run "m up to 1.0316", where it runs to 1.0332031249999998;
+  - CENSUS_MARKS's comment crediting the study with "4 and 11 at fp64's G = 44", where the study's table has 4 and 7 at G = 46 and the 11 is the parcel's;
+  - log2's `nofamily` "1 to 8 ulps either side", where its offsets are 1 to 16.
+- **The send-back fixed all five.** It also fixed the same misattribution in the comment's log clause, the wrap run's start (1 + 452/512, where it said 1.882) and the entry's count of the test file. VMB2-2 found every changed line true.
+- **What VMB2 measured,** each by an instrument of its own:
+  - the exp family byte-identical at f22e8d2 and d24271c in 60 fragments, over 111,375 lanes;
+  - 0 unmarked lanes wrong over 228,320 lane-attribute pairs, on seq.py and through `evaluate`, against transcend.compute;
+  - the tree's budget reproducing verifier-VM1b's published bounds exactly;
+  - all 59 new plant rows re-run, each check red or green as its row says;
+  - the new `sweep` equal to the walk of every encoding over 3.3 million lanes;
+  - the four test files, 2,612 passed.
+- **The merge's (b),** in its message: "with the table log(16/C) in two words, ln 2 in three, log2's 1/ln 2 in two" is true of the three double-word formats and not of fp32. In VIW2's words: "at fp32 the table and log2's 1/ln 2 are three words each". The module's docstring says it right ("two words (three at fp32)"). The sentence should read: "with the table log(16/C) in two words (three at fp32), ln 2 in three, log2's 1/ln 2 in two (three at fp32)". The message stands as written.
+- **What VIW2 measured:**
+  - the merge's tree is 7005fb6's, and `git diff f22e8d2 29f68fc` equals `git diff f22e8d2 7005fb6` byte for byte;
+  - every other claim of the message, each with an instrument of its own:
+    - |r| at most 0.05908203125 = 2^-4.081 at C = 9, exact in one FMA on 53,248 lanes;
+    - its own liveness sweep of the 120 fragments;
+    - 1,619 tests collected against 835 at the base, and 52 plants in 143 rows against 38 in 84;
+    - `_why_not`'s hole shown at the base;
+    - the box's 407 logs, read whole;
+  - at the merge, the constants' check rc 0, and python/tests collects 5,039, 784 more than the base's 4,255;
+  - 13,715 lane evaluations of the log family against transcend: 0 unmarked lanes differ, and 0 of the 114 marked lanes guess wrong;
+  - rtl/'s tree unchanged.
+
+**Time and tokens** (MEASURED, the agents' transcripts; usage summed from the last line of each response):
+- **MB2's author,** claude-sonnet-5-5: 151 min to its report and 7 min for the send-back; 544 tool uses; 794,162 output tokens.
+- **The verifiers,** all claude-sonnet-5-5:
+  - VMB2: 120 min to its report, then 33 and 9 min on the box's results; 497 tool uses; 653,817 output tokens;
+  - VMB2-2: 22 min, 93, 125,570;
+  - VIW2: 38 min, 158, 165,822.
+
+**MB2's long runs on amd-arc-box** (MEASURED). The author's list, run by the lead at 85fe5e0, the golden stage and test_mathlib.py alone at d24271c; python3 3.12.3 with mpmath 1.4.1 and gmpy2 2.3.1; 02:48 to 05:44, 30 jobs at once.
+- **407 jobs; 406 exited 0.** Their logs end "RESULT: ok", but for the constants' check, the golden stage, test_mathlib.py alone and the one below, each in its own words. The lead's summaries match each line to its exact wording; no count defaults.
+- **The constants' check:** "mathlib --check: 6 routines, 4 formats, 0 differences".
+- **The golden stage at d24271c:** "5036 passed, 3 skipped in 4580.60s". test_mathlib.py alone: "1619 passed in 3059.89s". Both ran beside 29 other jobs.
+- **The bound,** the largest error found by four samplers, 300,000-plus lanes a job:
+  - log: 2^-3.69, 2^-3.89, 2^-4.89 and 2^-4.60 of Bv at fp32, fp64, fp128 and fp256;
+  - log2: 2^-2.93, 2^-3.47, 2^-4.89 and 2^-4.60;
+  - log1p: 2^-1.74, 2^-3.65, 2^-4.89 and 2^-4.60.
+- **The budget's bound over all its regions,** about 6,200 lanes a cell:
+  - log: 0.1136, 0.0340 and 0.0416 Bv at fp64, fp128 and fp256;
+  - log2: 0.1767, 0.0340 and 0.0416;
+  - log1p: 0.2039, 0.0340 and 0.0416.
+  - The larger sample raises the entry's fp64 figures for log and log1p (0.1086, 0.1898). Every error found lies under its budget.
+- **The random lanes,** 60 lines (`lanes --n 20000 --seed 5`, random and weighted): 645,910 lane-attribute pairs for log, 647,450 for log2 and 630,155 for log1p.
+  - Marked: 4,234, 0 and 9.
+  - 0 wrong unmarked and 0 wrong guesses in every line.
+- **The pools on seq.py with the edge pools** (60 cells of the log family): 24,885 pool lanes, 15 marked, every guess right, 0 wrong; 19,810 edge-pool lanes, 105 marked, every guess right, 0 wrong; 42,965 lanes on seq.py, 0 wrong.
+- **Live values,** all six routines (120 cells): every reorder the same dataflow graph, its lanes equal to the design's order, and equal to `evaluate` on seq.py. Scheduled, log keeps 19 and 13 values live at fp32 and elsewhere, log2 17 and 13, log1p 20 and 12, each within LIVE_CAP.
+- **The rate law** (n = 20,000, seed 11, 45 cells): 0 wrong unmarked and 0 wrong guesses in every cell. 42 cells lie within -0.73 to +2.32 sigma of the law's 451.2.
+  - **log2 at fp256 under rtz, rdn and rup** marked 548, +4.61 sigma: "RESULT: 3 findings", exit 1.
+  - **verifier-VMB2 classifies it as other:** "a known limit of the rate check at large n. The routine is right in every lane I tested." By its measurement:
+    - the law's centre assumes a log-uniform significand of V, which the log family's sampler (the exponent field uniform) does not give, so log2's sample expects 468.6;
+    - the rest, in its reading, is chance: +3.71 sigma against the sample's own expectation. It marks that reading "NOT SETTLED by measurement" (below);
+    - 30 further seeds give +0.3 sigma.
+    - Its true-value geometry runs no fragment. It reproduced all 36 counts of the box's seed-11 runs and the entry's seed-7 runs, and, at log2 fp256, seed 11, the routine's marked sets lane for lane.
+  - **Its two predictions,** run on the box at 85fe5e0 (n = 20,000), matched exactly:
+    - seed 12, 479 under the directed attributes and 462 under rne and rmm, "RESULT: ok";
+    - seed 13, 517 and 458, "RESULT: 3 findings" at +3.13 sigma.
+- **fp32's sweeps:**
+  - **every float of the cancelling cells:**
+    - **log1p [15/256, 1/4]:** 17,825,793 floats, **2^-1.23** at 0x3d717ed0. That is the lane the entry's stride-200 sweep found, so 2^-1.23 is the cell's true worst. fp32 has no budget, and 1.23 bits is fp32 log1p's measured margin in that cell;
+    - log1p [-0.1597, -15/256]: 11,765,862 floats, 2^-2.13;
+    - log and log2 on [0.84, 0.9415]: 1,702,887 floats each, 2^-3.46 and 2^-2.71;
+  - **the main paths, every 521st float:** log 2^-4.97, log2 2^-3.64, log1p 2^-1.71 (in the band above 15/256) and log1p below 0 2^-3.12.
+
+**Python 3.13** (MEASURED). At the merge, the lead ran test_mathlib.py under the desktop's Python 3.13.14 (mpmath 1.3.0, pytest 9.1.1, xdist 3.8.0), niced at `-n 4`: "1619 passed in 577.64s (0:09:37)". CI's run on f22e8d2 was the first run of test_mathlib.py's 835 tests under Python 3.13, which the first wave's record left open. Run 38524437955 succeeded in all four jobs, and its golden job, on CPython 3.13.16 with gmpy2 2.2.1, gave "4253 passed, 2 skipped in 899.87s (0:14:59)".
+
+**The gate** (MEASURED, amd-arc-box at 29f68fc, run 20261014-060240-29f68fc, niced, the pinned MPFR 4.2.2 copied in; python3 3.12.3, mpmath 1.4.1, gmpy2 2.3.1): "VERDICT: PASS with 8 skip(s) and 4 inner skip(s) in golden (3), remote (1)", in 172 min. 36 stages executed, 0 failed.
+- **The 8 skips are the box's usual:** buildargs (a real Vitis), lang-rust, lang-julia, lang-go, lang-csharp, lang-r and lang-fortran (no toolchain), and demos (no node).
+- **The inner skips:** golden's 3 known, and remote's WebSocket leg (no node).
+- **golden:** "5036 passed, 3 skipped in 2088.24s (0:34:48)", on a quiet box. The first wave's gate at 26ced32 took 1,588 s for 4,252, so the log family adds about 8 minutes serially.
+- **The other stages,** each as at the first wave's gate:
+  - libcft "168 sets, 1228415 cases, all matching";
+  - transcend 610,717 and 584,477 comparisons;
+  - audit "17883 checks, 0 failed, 0 skipped";
+  - the corpus check "311 checks, 0 failed, 0 skipped".
+- **seq:** "libcft and the golden model agree on every program: deposits, counts, flags and status". No routine's program is in its corpora yet; that is M1's build, item 2.
+
+**Known limits carried** (the verifiers' "other" notes, merged under Logan's rule):
+- **The rate check's calibration** (VMB2): "its centre is the log-uniform mean, so use n at most 2000 for the log family, or the sample's own sum of 2w". At log2 fp256 the rate sample's lanes have |V| near 2^17, so the check there exercises the mark and the bound word, not the polynomial. `bound` and `budget` cover the polynomial.
+- **fp32's scratch first-order budgets** for the three-word V: from 40 lanes a region, not committed. Two of them are below the exhaustive worst errors: log 0.068 Bv against 0.091 at x = 0.93847, and log1p's negative cell 0.18 against 0.228 at x = -0.06134. In VMB2's words, "the log and log1p-negative figures are sample estimates, not bounds". The entry claims a true worst under the bound only for the positive band, which holds.
+- **Figures that grow with their sample:**
+  - the fp32 first-order bound: 0.489 at 60 lanes, 0.519 at 400, 0.537 for [1/16, 1/8];
+  - the bound's and the budget's figures (above). At fp64 the larger sample still leaves more than 2 bits.
+- **`--check` shares definitions with the generator:** _k_width, RHO_LOG, SMALL_LOG, GUARD and the seed table. So its docstring's "shares nothing with the generator", MB1's text, is overstated. The behavioural checks catch a fault in these: _k_width four too small is red in pools, edges, lanes, bound, budget and rate at fp64.
+- **A blanket relaxation:** test_random_lanes_equal_transcend_and_none_is_marked now asserts `not t.marked or fn == "log"`, blanket over log's cells.
+  - The theory allows log's marks in the six cells the test's sample marks.
+  - `check_lanes(theory=True)` still fails a mark the theory does not allow.
+  - The entry's list of tests whose premises moved omits this one, and check_census_counts' changed centre filter.
+- **The quick seq.py test** takes every third pool lane for the log family, which the entry's wording does not say.
+- **Checks some routines have no plant for:**
+  - check_seq, check_r24, check_invariants and check_family_list have exp-only plants;
+  - the budget tool's own plant is not seen on log2;
+  - bound_half and bound_double have no row for log.
+- **Small things:**
+  - a stray run of spaces inside an assert at test_mathlib.py:460;
+  - the docstrings of test_the_census_counts_at_the_decided_g and of check_census_counts say "11 of expm1's" at fp64's G = 44, where CENSUS_MARKS pins 13 ("11 centres and two lanes"), from f22e8d2 (VMB2-2).
+- **The golden stage's cost** is about MB1's again, about 180 s a routine against MB1's 290 (the author's measure). The gate's figure is above.
+- **The merge's own** (VIW2):
+  - check_rate's docstring premise is a log-uniform significand, which the log family's sampler does not give. In VIW2's words: "The merged records say nothing of it, and VALIDATION's entry predates the finding."
+  - By VMB2's count, the three-sigma rule flags log2 fp256's directed cells in 2 of the 31 seeds it ran, 11 and 13.
+  - The merge's message says "the rest is chance" without VMB2's hedge, which is: "NOT SETTLED by measurement (said plainly): that seed 11 is a chance draw rests on the theory above ..., on 30 further seeds of log2 fp256 and 20 of log1p fp128 showing no surplus (+0.3 and +0.4 sigma in total), and on the sample having no class that carries it".
+  - mathlib.py's comment "leaves |r| < 0.0590820 = 2^-4.081" fails at the seventh digit: the maximum is 121/2048 = 0.05908203125. The study and the test file display the same figure; 2^-4.081 is right.
+  - CI's golden job is serial with no timeout, and it gains the 784 tests. The box's 4,580 s for the golden stage at d24271c was taken beside 29 other jobs, so it is not a quiet figure; the gate's is above.
+
+**Records:**
+- ROADMAP's plan: item 1 built, all six routines; M2's study answered, its twelve answers listed;
+- VERIFICATION's golden row;
+- docs/README.md recounted, and the docs check rc 0.
