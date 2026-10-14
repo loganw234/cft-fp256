@@ -1,0 +1,15 @@
+fp32 sin rne: 760 lanes on seq.py, 348 instructions, live 22: differ from the model 0, from transcend.py (unmarked) 0, marked 0; 3s
+fp32 sin rtz: 760 lanes on seq.py, 348 instructions, live 22: differ from the model 0, from transcend.py (unmarked) 0, marked 0; 6s
+fp32 sin rdn: 760 lanes on seq.py, 348 instructions, live 22: differ from the model 0, from transcend.py (unmarked) 0, marked 0; 9s
+fp32 sin rup: 760 lanes on seq.py, 348 instructions, live 22: differ from the model 0, from transcend.py (unmarked) 0, marked 0; 12s
+fp32 sin rmm: 760 lanes on seq.py, 348 instructions, live 22: differ from the model 0, from transcend.py (unmarked) 0, marked 0; 15s
+fp32 cos rne: 760 lanes on seq.py, 344 instructions, live 22: differ from the model 0, from transcend.py (unmarked) 0, marked 4; 17s
+fp32 cos rtz: 760 lanes on seq.py, 344 instructions, live 22: differ from the model 0, from transcend.py (unmarked) 0, marked 4; 20s
+fp32 cos rdn: 760 lanes on seq.py, 344 instructions, live 22: differ from the model 0, from transcend.py (unmarked) 0, marked 4; 23s
+fp32 cos rup: 760 lanes on seq.py, 344 instructions, live 22: differ from the model 0, from transcend.py (unmarked) 0, marked 4; 26s
+fp32 cos rmm: 760 lanes on seq.py, 344 instructions, live 22: differ from the model 0, from transcend.py (unmarked) 0, marked 4; 29s
+fp32 tan rne: 760 lanes on seq.py, 359 instructions, live 22: differ from the model 0, from transcend.py (unmarked) 0, marked 0; 32s
+fp32 tan rtz: 760 lanes on seq.py, 359 instructions, live 22: differ from the model 0, from transcend.py (unmarked) 0, marked 0; 35s
+fp32 tan rdn: 760 lanes on seq.py, 359 instructions, live 22: differ from the model 0, from transcend.py (unmarked) 0, marked 0; 38s
+fp32 tan rup: 760 lanes on seq.py, 359 instructions, live 22: differ from the model 0, from transcend.py (unmarked) 0, marked 0; 41s
+fp32 tan rmm: 760 lanes on seq.py, 359 instructions, live 22: differ from the model 0, from transcend.py (unmarked) 0, marked 0; 44s

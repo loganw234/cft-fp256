@@ -1,0 +1,5 @@
+fp64 plant window: pools 387 x 6 lanes: wrong unmarked 1500 ('sin', 'rne', '0x3fefffffffffffff'); marked 0, of them off the list 0 ; 8s
+   structured: unmarked 0 
+   bound: largest |V - f|/Bv 2^144.87 at ('tan', 'near', '0x40407e4cef4cbd9a')
+   audit: lanes with a failed exact claim 0  (with the 1844 binade-edge arguments)
+fp64 plant window: RED in ['pools', 'bound']; 19s

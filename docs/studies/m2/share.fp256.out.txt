@@ -1,0 +1,15 @@
+fp256 rne sin + cos: 418 instructions together, against 774 apart; 29 beyond sin's 389
+fp256 rne sin + cos + tan: 464 instructions together, against 1180 apart; 75 beyond sin's 389
+fp256 rne sin + tan: 437 instructions together, against 795 apart; 48 beyond sin's 389
+fp256 rtz sin + cos: 418 instructions together, against 774 apart; 29 beyond sin's 389
+fp256 rtz sin + cos + tan: 464 instructions together, against 1180 apart; 75 beyond sin's 389
+fp256 rtz sin + tan: 437 instructions together, against 795 apart; 48 beyond sin's 389
+fp256 rdn sin + cos: 418 instructions together, against 774 apart; 29 beyond sin's 389
+fp256 rdn sin + cos + tan: 464 instructions together, against 1180 apart; 75 beyond sin's 389
+fp256 rdn sin + tan: 437 instructions together, against 795 apart; 48 beyond sin's 389
+fp256 rup sin + cos: 418 instructions together, against 774 apart; 29 beyond sin's 389
+fp256 rup sin + cos + tan: 464 instructions together, against 1180 apart; 75 beyond sin's 389
+fp256 rup sin + tan: 437 instructions together, against 795 apart; 48 beyond sin's 389
+fp256 rmm sin + cos: 418 instructions together, against 774 apart; 29 beyond sin's 389
+fp256 rmm sin + cos + tan: 464 instructions together, against 1180 apart; 75 beyond sin's 389
+fp256 rmm sin + tan: 437 instructions together, against 795 apart; 48 beyond sin's 389

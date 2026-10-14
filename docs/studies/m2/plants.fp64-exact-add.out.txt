@@ -1,0 +1,5 @@
+fp64 plant exact-add: pools 387 x 6 lanes: wrong unmarked 0 ; marked 0, of them off the list 0 ; 9s
+   structured: unmarked 0 
+   bound: largest |V - f|/Bv 2^-4.52 at ('tan', 'edge', '0x40e7858caeea5a4f')
+   audit: lanes with a failed exact claim 27 0x46167c4c45c1b200 (with the 1844 binade-edge arguments)
+fp64 plant exact-add: RED in ['audit']; 22s

@@ -1,0 +1,33 @@
+== 2026-10-13 15:09:44 start: worst_range.py fp128 0 1023
+== 2026-10-13 15:10:18 end (0): worst_range.py fp128 0 1023
+== 2026-10-13 15:10:18 start: worst_range.py fp256 0 1023
+== 2026-10-13 15:12:16 end (0): worst_range.py fp256 0 1023
+== 2026-10-13 15:12:16 start: specials.py fp64
+== 2026-10-13 15:12:19 end (0): specials.py fp64
+== 2026-10-13 15:12:19 start: specials.py fp128
+== 2026-10-13 15:12:21 end (0): specials.py fp128
+== 2026-10-13 15:12:21 start: specials.py fp256
+== 2026-10-13 15:12:26 end (0): specials.py fp256
+== 2026-10-13 15:12:26 start: costs.py fp64
+== 2026-10-13 15:12:27 end (0): costs.py fp64
+== 2026-10-13 15:12:27 start: costs.py fp128
+== 2026-10-13 15:12:28 end (0): costs.py fp128
+== 2026-10-13 15:12:28 start: costs.py fp256
+== 2026-10-13 15:12:32 end (0): costs.py fp256
+== 2026-10-13 15:12:32 start: ranges.py fp128 128 256 512 1024 2048 4096 16384
+== 2026-10-13 15:12:33 end (0): ranges.py fp128 128 256 512 1024 2048 4096 16384
+== 2026-10-13 15:12:33 start: ranges.py fp256 128 256 512 1024 2048 4096 16384 65536 262144
+== 2026-10-13 15:12:33 end (0): ranges.py fp256 128 256 512 1024 2048 4096 16384 65536 262144
+== 2026-10-13 15:12:33 start: census.py fp64 tiny
+== 2026-10-13 15:12:39 end (0): census.py fp64 tiny
+== 2026-10-13 15:12:39 start: census.py fp64 near
+== 2026-10-13 15:13:05 end (0): census.py fp64 near
+== 2026-10-13 15:13:05 start: census.py fp128 tiny
+== 2026-10-13 15:13:24 end (0): census.py fp128 tiny
+== 2026-10-13 15:13:24 start: census.py fp128 near
+== 2026-10-13 15:13:59 end (0): census.py fp128 near
+== 2026-10-13 15:13:59 start: census.py fp256 tiny
+== 2026-10-13 15:14:47 end (0): census.py fp256 tiny
+== 2026-10-13 15:14:47 start: census.py fp256 near
+== 2026-10-13 15:15:35 end (0): census.py fp256 near
+== 2026-10-13 15:15:35 queue1 done

@@ -1,0 +1,1 @@
+fp64 cos rtz around 1/2^26 (0x3e50000000000000), j = -400..400: marked 384 (j from -255 to 128; guess right 384), wrong unmarked 0; 2s

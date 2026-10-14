@@ -1,0 +1,5 @@
+fp64 plant clamp-tight: pools 387 x 6 lanes: wrong unmarked 0 ; marked 48, of them off the list 48 ('sin', 'rne', '0x597e3ca9b6c655cb'); 13s
+   structured: unmarked 6 ('cos', 'rtz', '0x3e50000000000000')
+   bound: largest |V - f|/Bv 2^-4.52 at ('tan', 'edge', '0x40e7858caeea5a4f')
+   audit: lanes with a failed exact claim 0  (with the 1844 binade-edge arguments)
+fp64 plant clamp-tight: RED in ['pools', 'structured']; 42s

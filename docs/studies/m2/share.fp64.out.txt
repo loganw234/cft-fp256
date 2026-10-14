@@ -1,0 +1,15 @@
+fp64 rne sin + cos: 434 instructions together, against 808 apart; 28 beyond sin's 406
+fp64 rne sin + cos + tan: 475 instructions together, against 1227 apart; 69 beyond sin's 406
+fp64 rne sin + tan: 449 instructions together, against 825 apart; 43 beyond sin's 406
+fp64 rtz sin + cos: 434 instructions together, against 808 apart; 28 beyond sin's 406
+fp64 rtz sin + cos + tan: 475 instructions together, against 1227 apart; 69 beyond sin's 406
+fp64 rtz sin + tan: 449 instructions together, against 825 apart; 43 beyond sin's 406
+fp64 rdn sin + cos: 434 instructions together, against 808 apart; 28 beyond sin's 406
+fp64 rdn sin + cos + tan: 475 instructions together, against 1227 apart; 69 beyond sin's 406
+fp64 rdn sin + tan: 449 instructions together, against 825 apart; 43 beyond sin's 406
+fp64 rup sin + cos: 434 instructions together, against 808 apart; 28 beyond sin's 406
+fp64 rup sin + cos + tan: 475 instructions together, against 1227 apart; 69 beyond sin's 406
+fp64 rup sin + tan: 449 instructions together, against 825 apart; 43 beyond sin's 406
+fp64 rmm sin + cos: 434 instructions together, against 808 apart; 28 beyond sin's 406
+fp64 rmm sin + cos + tan: 475 instructions together, against 1227 apart; 69 beyond sin's 406
+fp64 rmm sin + tan: 449 instructions together, against 825 apart; 43 beyond sin's 406

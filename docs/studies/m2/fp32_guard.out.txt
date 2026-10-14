@@ -1,0 +1,6 @@
+fp32 G 16: plan b 16 L 8 bottom -32 budget -73 words of 2/pi 17; sin: a static proof fails: AssertionError("the split's magic is out of range"); cos: a static proof fails: AssertionError("the split's magic is out of range"); tan: a static proof fails: AssertionError("the split's magic is out of range")
+fp32 G 18: plan b 15 L 8 bottom -34 budget -75 words of 2/pi 17; sin 348 instructions, 77 words, live 22; cos 344 instructions, 74 words, live 22; tan 359 instructions, 76 words, live 22
+fp32 G 20: plan b 13 L 9 bottom -36 budget -77 words of 2/pi 19; sin: a static proof fails: AssertionError(); cos: a static proof fails: AssertionError(); tan: a static proof fails: AssertionError()
+fp32 G 22: plan b 11 L 11 bottom -38 budget -79 words of 2/pi 24; sin: a static proof fails: AssertionError(); cos: a static proof fails: AssertionError(); tan: a static proof fails: AssertionError()
+fp32 G 30: plan b 3 L 39 bottom -46 budget -87 words of 2/pi 86; sin: a static proof fails: AssertionError("the split's magic is out of range"); cos: a static proof fails: AssertionError("the split's magic is out of range"); tan: a static proof fails: AssertionError("the split's magic is out of range")
+fp32 G 40: no plan: the exact combination needs b <= 2p + 1 + bottom = -7 (budget -97, bottom -56)

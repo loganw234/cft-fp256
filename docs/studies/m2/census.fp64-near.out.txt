@@ -1,0 +1,16 @@
+fp64 near: 688 arguments
+  sin rne: marked 0 (guess right 0), wrong 0; 2s
+  sin rtz: marked 0 (guess right 0), wrong 0; 4s
+  sin rdn: marked 0 (guess right 0), wrong 0; 6s
+  sin rup: marked 0 (guess right 0), wrong 0; 8s
+  sin rmm: marked 0 (guess right 0), wrong 0; 9s
+  cos rne: marked 0 (guess right 0), wrong 0; 11s
+  cos rtz: marked 0 (guess right 0), wrong 0; 13s
+  cos rdn: marked 0 (guess right 0), wrong 0; 15s
+  cos rup: marked 0 (guess right 0), wrong 0; 17s
+  cos rmm: marked 0 (guess right 0), wrong 0; 19s
+  tan rne: marked 0 (guess right 0), wrong 0; 21s
+  tan rtz: marked 0 (guess right 0), wrong 0; 23s
+  tan rdn: marked 0 (guess right 0), wrong 0; 25s
+  tan rup: marked 0 (guess right 0), wrong 0; 27s
+  tan rmm: marked 0 (guess right 0), wrong 0; 29s

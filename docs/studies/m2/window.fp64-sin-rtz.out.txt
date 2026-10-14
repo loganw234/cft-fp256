@@ -1,0 +1,1 @@
+fp64 sin rtz around 3/2^25 (0x3e78000000000000), j = -40..40: marked 21 (j from -9 to 11; guess right 21), wrong unmarked 0; 0s

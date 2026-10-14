@@ -1,0 +1,15 @@
+fp256 sin rne: 614 lanes on seq.py, 389 instructions, live 16: differ from the model 0, from transcend.py (unmarked) 0, marked 291; 8s
+fp256 sin rtz: 614 lanes on seq.py, 389 instructions, live 16: differ from the model 0, from transcend.py (unmarked) 0, marked 291; 15s
+fp256 sin rdn: 614 lanes on seq.py, 389 instructions, live 16: differ from the model 0, from transcend.py (unmarked) 0, marked 291; 23s
+fp256 sin rup: 614 lanes on seq.py, 389 instructions, live 16: differ from the model 0, from transcend.py (unmarked) 0, marked 291; 31s
+fp256 sin rmm: 614 lanes on seq.py, 389 instructions, live 16: differ from the model 0, from transcend.py (unmarked) 0, marked 291; 39s
+fp256 cos rne: 614 lanes on seq.py, 385 instructions, live 16: differ from the model 0, from transcend.py (unmarked) 0, marked 291; 48s
+fp256 cos rtz: 614 lanes on seq.py, 385 instructions, live 16: differ from the model 0, from transcend.py (unmarked) 0, marked 297; 58s
+fp256 cos rdn: 614 lanes on seq.py, 385 instructions, live 16: differ from the model 0, from transcend.py (unmarked) 0, marked 297; 66s
+fp256 cos rup: 614 lanes on seq.py, 385 instructions, live 16: differ from the model 0, from transcend.py (unmarked) 0, marked 297; 74s
+fp256 cos rmm: 614 lanes on seq.py, 385 instructions, live 16: differ from the model 0, from transcend.py (unmarked) 0, marked 291; 83s
+fp256 tan rne: 614 lanes on seq.py, 406 instructions, live 16: differ from the model 0, from transcend.py (unmarked) 0, marked 293; 92s
+fp256 tan rtz: 614 lanes on seq.py, 406 instructions, live 16: differ from the model 0, from transcend.py (unmarked) 0, marked 291; 100s
+fp256 tan rdn: 614 lanes on seq.py, 406 instructions, live 16: differ from the model 0, from transcend.py (unmarked) 0, marked 291; 109s
+fp256 tan rup: 614 lanes on seq.py, 406 instructions, live 16: differ from the model 0, from transcend.py (unmarked) 0, marked 291; 117s
+fp256 tan rmm: 614 lanes on seq.py, 406 instructions, live 16: differ from the model 0, from transcend.py (unmarked) 0, marked 293; 126s

@@ -1,0 +1,3 @@
+fp32 sin rne edge seed 2: 1000 main of 1000, wrong 0, marked 0; largest |V - f|/Bv 2^-2.43 at 0xc1c2c75e; histogram {-17: 1, -16: 3, -15: 8, -14: 10, -13: 21, -12: 40, -11: 72, -10: 106, -9: 135, -8: 184, -7: 220, -6: 116, -5: 30, -4: 31, -3: 23}; 2s
+fp32 cos rne edge seed 2: 1000 main of 1000, wrong 0, marked 0; largest |V - f|/Bv 2^-2.39 at 0x4423f3ad; histogram {-19: 2, -18: 3, -17: 2, -16: 3, -15: 7, -14: 8, -13: 15, -12: 39, -11: 69, -10: 97, -9: 160, -8: 194, -7: 183, -6: 102, -5: 45, -4: 48, -3: 23}; 5s
+fp32 tan rne edge seed 2: 1000 main of 1000, wrong 0, marked 0; largest |V - f|/Bv 2^-2.08 at 0xc2782f91; histogram {-14: 2, -13: 2, -12: 9, -11: 19, -10: 31, -9: 80, -8: 126, -7: 203, -6: 211, -5: 151, -4: 96, -3: 70}; 7s

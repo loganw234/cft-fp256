@@ -1,0 +1,21 @@
+fp64: 4408 pool arguments, variant A, G default
+  sin rne: 406 instructions, 107 words, live 26: 4408 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 12s
+  sin rtz: 406 instructions, 108 words, live 26: 4408 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 24s
+  sin rdn: 406 instructions, 108 words, live 26: 4408 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 35s
+  sin rup: 406 instructions, 107 words, live 26: 4408 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 47s
+  sin rmm: 406 instructions, 107 words, live 26: 4408 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 58s
+  cos rne: 402 instructions, 104 words, live 26: 4408 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10']; 70s
+  cos rtz: 402 instructions, 105 words, live 26: 4408 lanes, marked 8 (guess right 8), wrong 0, flag words ['0x0', '0x1', '0x10', '0x90']; 82s
+     marks: 0x3e50000000000000 0x3e60000000000000 0x3e68000000000000 0x3e70000000000000 0xbe50000000000000 0xbe60000000000000 0xbe68000000000000 0xbe70000000000000 
+  cos rdn: 402 instructions, 105 words, live 26: 4408 lanes, marked 8 (guess right 8), wrong 0, flag words ['0x0', '0x1', '0x10', '0x90']; 93s
+     marks: 0x3e50000000000000 0x3e60000000000000 0x3e68000000000000 0x3e70000000000000 0xbe50000000000000 0xbe60000000000000 0xbe68000000000000 0xbe70000000000000 
+  cos rup: 402 instructions, 104 words, live 26: 4408 lanes, marked 8 (guess right 8), wrong 0, flag words ['0x0', '0x1', '0x10', '0x90']; 105s
+     marks: 0x3e50000000000000 0x3e60000000000000 0x3e68000000000000 0x3e70000000000000 0xbe50000000000000 0xbe60000000000000 0xbe68000000000000 0xbe70000000000000 
+  cos rmm: 402 instructions, 104 words, live 26: 4408 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10']; 117s
+  tan rne: 419 instructions, 106 words, live 26: 4408 lanes, marked 2 (guess right 2), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18', '0x90']; 129s
+     marks: 0x3e68000000000000 0xbe68000000000000 
+  tan rtz: 419 instructions, 106 words, live 26: 4408 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 141s
+  tan rdn: 419 instructions, 106 words, live 26: 4408 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 154s
+  tan rup: 419 instructions, 106 words, live 26: 4408 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 166s
+  tan rmm: 419 instructions, 106 words, live 26: 4408 lanes, marked 2 (guess right 2), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18', '0x90']; 178s
+     marks: 0x3e68000000000000 0xbe68000000000000 

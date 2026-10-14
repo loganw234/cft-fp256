@@ -1,0 +1,16 @@
+fp32 minnbr: 369 arguments
+  sin rne: marked 0 (guess right 0), wrong 0; 1s
+  sin rtz: marked 0 (guess right 0), wrong 0; 2s
+  sin rdn: marked 0 (guess right 0), wrong 0; 3s
+  sin rup: marked 0 (guess right 0), wrong 0; 4s
+  sin rmm: marked 0 (guess right 0), wrong 0; 4s
+  cos rne: marked 0 (guess right 0), wrong 0; 5s
+  cos rtz: marked 0 (guess right 0), wrong 0; 6s
+  cos rdn: marked 0 (guess right 0), wrong 0; 7s
+  cos rup: marked 0 (guess right 0), wrong 0; 8s
+  cos rmm: marked 0 (guess right 0), wrong 0; 10s
+  tan rne: marked 0 (guess right 0), wrong 0; 11s
+  tan rtz: marked 0 (guess right 0), wrong 0; 12s
+  tan rdn: marked 0 (guess right 0), wrong 0; 14s
+  tan rup: marked 0 (guess right 0), wrong 0; 15s
+  tan rmm: marked 0 (guess right 0), wrong 0; 16s

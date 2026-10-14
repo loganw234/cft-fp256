@@ -1,0 +1,27 @@
+fp64 sin | NaN (quiet, both signs) | rne results ['0x7ff8000000000000'] | flag words ['0x0'] | equal 
+fp64 sin | NaN (signalling, both signs) | rne results ['0x7ff8000000000000'] | flag words ['0x1'] | equal 
+fp64 sin | +inf, -inf | rne results ['0x7ff8000000000000'] | flag words ['0x1'] | equal 
+fp64 sin | +0, -0 | rne results ['0x0', '0x8000000000000000'] | flag words ['0x0'] | equal 
+fp64 sin | subnormals: min, max, both signs | rne results ['0x1', '0x8000000000000001', '0x800fffffffffffff', '0xfffffffffffff'] | flag words ['0x18'] | equal 
+fp64 sin | min normal, both signs | rne results ['0x10000000000000', '0x8010000000000000'] | flag words ['0x10', '0x18'] | equal 
+fp64 sin | sin's gate 2^-27: the largest tiny and the smallest not, both signs | rne results ['0x3e3fffffffffffff', '0x3e40000000000000', '0xbe3fffffffffffff', '0xbe40000000000000'] | flag words ['0x10'] | equal 
+fp64 sin | cos's and tan's gate 2^-27: the largest tiny and the smallest not, both signs | rne results ['0x3e3fffffffffffff', '0x3e40000000000000', '0xbe3fffffffffffff', '0xbe40000000000000'] | flag words ['0x10'] | equal 
+fp64 sin | max normal, both signs | rne results ['0x3f7452fc98b34e97', '0xbf7452fc98b34e97'] | flag words ['0x10'] | equal 
+fp64 cos | NaN (quiet, both signs) | rne results ['0x7ff8000000000000'] | flag words ['0x0'] | equal 
+fp64 cos | NaN (signalling, both signs) | rne results ['0x7ff8000000000000'] | flag words ['0x1'] | equal 
+fp64 cos | +inf, -inf | rne results ['0x7ff8000000000000'] | flag words ['0x1'] | equal 
+fp64 cos | +0, -0 | rne results ['0x3ff0000000000000'] | flag words ['0x0'] | equal 
+fp64 cos | subnormals: min, max, both signs | rne results ['0x3ff0000000000000'] | flag words ['0x10'] | equal 
+fp64 cos | min normal, both signs | rne results ['0x3ff0000000000000'] | flag words ['0x10'] | equal 
+fp64 cos | sin's gate 2^-27: the largest tiny and the smallest not, both signs | rne results ['0x3ff0000000000000'] | flag words ['0x10'] | equal 
+fp64 cos | cos's and tan's gate 2^-27: the largest tiny and the smallest not, both signs | rne results ['0x3ff0000000000000'] | flag words ['0x10'] | equal 
+fp64 cos | max normal, both signs | rne results ['0xbfefffe62ecfab75'] | flag words ['0x10'] | equal 
+fp64 tan | NaN (quiet, both signs) | rne results ['0x7ff8000000000000'] | flag words ['0x0'] | equal 
+fp64 tan | NaN (signalling, both signs) | rne results ['0x7ff8000000000000'] | flag words ['0x1'] | equal 
+fp64 tan | +inf, -inf | rne results ['0x7ff8000000000000'] | flag words ['0x1'] | equal 
+fp64 tan | +0, -0 | rne results ['0x0', '0x8000000000000000'] | flag words ['0x0'] | equal 
+fp64 tan | subnormals: min, max, both signs | rne results ['0x1', '0x8000000000000001', '0x800fffffffffffff', '0xfffffffffffff'] | flag words ['0x18'] | equal 
+fp64 tan | min normal, both signs | rne results ['0x10000000000000', '0x8010000000000000'] | flag words ['0x10'] | equal 
+fp64 tan | sin's gate 2^-27: the largest tiny and the smallest not, both signs | rne results ['0x3e3fffffffffffff', '0x3e40000000000000', '0xbe3fffffffffffff', '0xbe40000000000000'] | flag words ['0x10'] | equal 
+fp64 tan | cos's and tan's gate 2^-27: the largest tiny and the smallest not, both signs | rne results ['0x3e3fffffffffffff', '0x3e40000000000000', '0xbe3fffffffffffff', '0xbe40000000000000'] | flag words ['0x10'] | equal 
+fp64 tan | max normal, both signs | rne results ['0x3f74530cfe729484', '0xbf74530cfe729484'] | flag words ['0x10'] | equal 

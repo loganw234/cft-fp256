@@ -1,0 +1,15 @@
+fp128 sin rne: 620 lanes on seq.py, 382 instructions, live 17: differ from the model 0, from transcend.py (unmarked) 0, marked 282; 3s
+fp128 sin rtz: 620 lanes on seq.py, 382 instructions, live 17: differ from the model 0, from transcend.py (unmarked) 0, marked 282; 6s
+fp128 sin rdn: 620 lanes on seq.py, 382 instructions, live 17: differ from the model 0, from transcend.py (unmarked) 0, marked 282; 9s
+fp128 sin rup: 620 lanes on seq.py, 382 instructions, live 17: differ from the model 0, from transcend.py (unmarked) 0, marked 282; 13s
+fp128 sin rmm: 620 lanes on seq.py, 382 instructions, live 17: differ from the model 0, from transcend.py (unmarked) 0, marked 282; 16s
+fp128 cos rne: 620 lanes on seq.py, 378 instructions, live 17: differ from the model 0, from transcend.py (unmarked) 0, marked 282; 19s
+fp128 cos rtz: 620 lanes on seq.py, 378 instructions, live 17: differ from the model 0, from transcend.py (unmarked) 0, marked 288; 22s
+fp128 cos rdn: 620 lanes on seq.py, 378 instructions, live 17: differ from the model 0, from transcend.py (unmarked) 0, marked 288; 25s
+fp128 cos rup: 620 lanes on seq.py, 378 instructions, live 17: differ from the model 0, from transcend.py (unmarked) 0, marked 288; 28s
+fp128 cos rmm: 620 lanes on seq.py, 378 instructions, live 17: differ from the model 0, from transcend.py (unmarked) 0, marked 282; 31s
+fp128 tan rne: 620 lanes on seq.py, 397 instructions, live 17: differ from the model 0, from transcend.py (unmarked) 0, marked 284; 34s
+fp128 tan rtz: 620 lanes on seq.py, 397 instructions, live 17: differ from the model 0, from transcend.py (unmarked) 0, marked 282; 37s
+fp128 tan rdn: 620 lanes on seq.py, 397 instructions, live 17: differ from the model 0, from transcend.py (unmarked) 0, marked 282; 40s
+fp128 tan rup: 620 lanes on seq.py, 397 instructions, live 17: differ from the model 0, from transcend.py (unmarked) 0, marked 282; 43s
+fp128 tan rmm: 620 lanes on seq.py, 397 instructions, live 17: differ from the model 0, from transcend.py (unmarked) 0, marked 284; 47s

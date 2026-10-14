@@ -1,0 +1,23 @@
+fp32 tiny: 144 arguments
+  sin rne: marked 2 (guess right 2), wrong 0; 0s
+     marks: 0x3ac00000 0xbac00000 
+  sin rtz: marked 0 (guess right 0), wrong 0; 1s
+  sin rdn: marked 0 (guess right 0), wrong 0; 1s
+  sin rup: marked 0 (guess right 0), wrong 0; 1s
+  sin rmm: marked 2 (guess right 2), wrong 0; 1s
+     marks: 0x3ac00000 0xbac00000 
+  cos rne: marked 6 (guess right 6), wrong 0; 2s
+     marks: 0x39800000 0x3a400000 0x3aa00000 0xb9800000 0xba400000 0xbaa00000 
+  cos rtz: marked 6 (guess right 6), wrong 0; 2s
+     marks: 0x3a000000 0x3a800000 0x3ac00000 0xba000000 0xba800000 0xbac00000 
+  cos rdn: marked 6 (guess right 6), wrong 0; 2s
+     marks: 0x3a000000 0x3a800000 0x3ac00000 0xba000000 0xba800000 0xbac00000 
+  cos rup: marked 6 (guess right 6), wrong 0; 3s
+     marks: 0x3a000000 0x3a800000 0x3ac00000 0xba000000 0xba800000 0xbac00000 
+  cos rmm: marked 6 (guess right 6), wrong 0; 3s
+     marks: 0x39800000 0x3a400000 0x3aa00000 0xb9800000 0xba400000 0xbaa00000 
+  tan rne: marked 0 (guess right 0), wrong 0; 3s
+  tan rtz: marked 0 (guess right 0), wrong 0; 4s
+  tan rdn: marked 0 (guess right 0), wrong 0; 4s
+  tan rup: marked 0 (guess right 0), wrong 0; 4s
+  tan rmm: marked 0 (guess right 0), wrong 0; 5s

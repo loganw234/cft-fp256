@@ -1,0 +1,4 @@
+fp64 sin rne G'=6 seed 5: 6000 lanes, marked 137 = 2.28%; M1's law 2.26% (+0.1 sigma); each lane's own 2^-G' sig(V) sums to 149.5 = 2.49% (-1.0 sigma); guesses right 137 of 137; wrong unmarked 0; 16s
+fp64 sin rtz G'=6 seed 5: 6000 lanes, marked 164 = 2.73%; M1's law 2.26% (+2.5 sigma); each lane's own 2^-G' sig(V) sums to 149.5 = 2.49% (+1.2 sigma); guesses right 164 of 164; wrong unmarked 0; 32s
+fp64 cos rne G'=6 seed 5: 6000 lanes, marked 135 = 2.25%; M1's law 2.26% (-0.0 sigma); each lane's own 2^-G' sig(V) sums to 151.8 = 2.53% (-1.4 sigma); guesses right 135 of 135; wrong unmarked 0; 49s
+fp64 cos rtz G'=6 seed 5: 6000 lanes, marked 165 = 2.75%; M1's law 2.26% (+2.6 sigma); each lane's own 2^-G' sig(V) sums to 151.8 = 2.53% (+1.1 sigma); guesses right 165 of 165; wrong unmarked 0; 65s

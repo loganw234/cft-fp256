@@ -1,0 +1,26 @@
+fp32 sin small seed 23 G default: 1389 main lanes of 1500; 348 instructions (unpruned), 81 ever round; 15s
+  max |E|/Bv 0.1165 (2^-3.10); max |M|/Bv 0.09466 (2^-3.40); second-order residual at most 0.00934 Bv
+  observed maxima summed 0.1678 (2^-2.58); capacities summed 0.2347 (2^-2.09)
+  THE BUDGET'S BOUND: M_max + capacities = 0.3294 Bv (2^-1.60)
+  by phase (observed, capacity), in Bv:
+     S-tail         4.805e-02  7.668e-02
+     sincos         3.370e-02  4.215e-02
+     red-scale      2.918e-02  3.859e-02
+     C-head         2.299e-02  3.183e-02
+     red-lower      1.201e-02  2.182e-02
+     S-head         1.405e-02  1.548e-02
+     C-tail         7.419e-03  7.721e-03
+     z              4.077e-04  4.213e-04
+     final          0.000e+00  0.000e+00
+     special        0.000e+00  0.000e+00
+  the 10 largest capacities:
+     # 221 fma   S-tail         capacity 7.632e-02  observed 4.774e-02
+     # 204 fma   red-scale      capacity 2.351e-02  observed 1.534e-02
+     # 302 fma   sincos         capacity 1.556e-02  observed 1.439e-02
+     # 304 fma   sincos         capacity 1.556e-02  observed 1.075e-02
+     # 203 fma   red-scale      capacity 1.467e-02  observed 1.359e-02
+     # 299 sub   C-head         capacity 1.103e-02  observed 1.103e-02
+     # 306 fma   sincos         capacity 1.103e-02  observed 8.553e-03
+     # 295 fma   C-head         capacity 1.087e-02  observed 5.655e-03
+     # 255 sub   S-head         capacity 8.510e-03  observed 8.293e-03
+     # 257 fma   C-tail         capacity 7.684e-03  observed 7.390e-03

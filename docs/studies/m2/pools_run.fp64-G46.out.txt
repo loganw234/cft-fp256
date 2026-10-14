@@ -1,0 +1,9 @@
+fp64: 4408 pool arguments, variant A, G 46
+  sin rne: 414 instructions, 110 words, live 27: 4408 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 13s
+  sin rtz: 414 instructions, 111 words, live 27: 4408 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 26s
+  cos rne: 410 instructions, 107 words, live 27: 4408 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10']; 39s
+  cos rtz: 410 instructions, 108 words, live 27: 4408 lanes, marked 8 (guess right 8), wrong 0, flag words ['0x0', '0x1', '0x10', '0x90']; 52s
+     marks: 0x3e50000000000000 0x3e60000000000000 0x3e68000000000000 0x3e70000000000000 0xbe50000000000000 0xbe60000000000000 0xbe68000000000000 0xbe70000000000000 
+  tan rne: 427 instructions, 109 words, live 27: 4408 lanes, marked 2 (guess right 2), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18', '0x90']; 65s
+     marks: 0x3e68000000000000 0xbe68000000000000 
+  tan rtz: 427 instructions, 109 words, live 27: 4408 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 79s

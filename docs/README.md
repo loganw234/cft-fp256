@@ -1,6 +1,6 @@
 # The documents, by what you open them for
 
-Forty-three files, 75,733 lines. Flat in one directory they look like one
+Forty-four files, 77,332 lines. Flat in one directory they look like one
 undifferentiated pile; they are not, and the split is close to even:
 
 - **27,479 lines you consult while working** — the three under *Start here*,
@@ -8,12 +8,12 @@ undifferentiated pile; they are not, and the split is close to even:
 - **6,679 lines of tool manual**, one per shipped program;
 - **2,117 lines of operations**, read when you are about to do something to
   hardware;
-- **39,458 lines of record and argument** — the ledger, the roadmap and the
+- **41,057 lines of record and argument** — the ledger, the roadmap and the
   design studies. The history of how a decision was reached, worth keeping,
   and not what you open to get something done.
 
 Half is therefore history. That is deliberate, and it is also why a
-flat listing of forty-three names feels heavier than the work actually is.
+flat listing of forty-four names feels heavier than the work actually is.
 
 This index exists because the README linked eight of the thirty-four there
 were and nothing linked the other twenty-six. Nothing has moved: a file's
@@ -94,7 +94,7 @@ reading material for a working session.
 
 | document | lines | what it is for |
 |---|---|---|
-| [VALIDATION.md](VALIDATION.md) | 19,364 | The validation ledger, append-only. Every run, including the ones that failed and the mistakes that produced them. A figure here is a fact about the run on its date and is never edited to match a later one. |
+| [VALIDATION.md](VALIDATION.md) | 19,417 | The validation ledger, append-only. Every run, including the ones that failed and the mistakes that produced them. A figure here is a fact about the run on its date and is never edited to match a later one. |
 | [ROADMAP.md](ROADMAP.md) | 6,306 | What is built, what is next, and what was decided against. |
 | [ROUND2.md](ROUND2.md) | 1,082 | The plan for the gather, the scatter, the lane mask and the broadcast as one parcel round, with its outcome at the top: the seam the lead lands first, a brief per parcel, the verifiers, the ledger, the merge order. |
 | [NOVEL.md](NOVEL.md) | 561 | Results for which no prior description was found, with the standard of evidence stated first. |
@@ -108,8 +108,8 @@ settled each, one of "how far would it stretch", one
 reading of the open toolchain's router, one measurement of how well
 a certificate's estimates indicate, one design written before its RTL,
 for Logan to approve, one design of the certificate's version 2,
-and one design of the correctly rounded exp and log routines,
-written before any of them is built. History of reasoning,
+and two designs of correctly rounded routines, exp and log, and sin,
+cos and tan, each written before any of it is built. History of reasoning,
 not current reference — but the place to look before reopening one of these
 questions.
 
@@ -125,6 +125,7 @@ questions.
 | [studies/R8S-streaming.md](studies/R8S-streaming.md) | 1,369 | the design of revision 8's instruction streaming, approved with revision 8's RTL plan on 2026-10-02: the fetch through the A master during a block, a 4,096-word store with a prefetched stream past it, loops replayed from the store, what a late fetch costs a step on the hard workloads, the block RAM it frees and the timing path it shortens, the CAPS2 field for the capacity, the deep build beside it, the verification, and the RTL plan's outline; and, since 2026-10-03, the fetch unit as built (rtl/cft_ifetch.sv, alone): the interface round 2 wires, where it departs from the design, its proof at two sizes, its bench, S8's nine plants and verifier-VRD1's tenth |
 | [studies/CERT-V2.md](studies/CERT-V2.md) | 2,363 | a design for certificate format version 2, approved by Logan on 2026-10-02 and built golden-first the same day (CERTIFICATES.md, "Version 2"; its C half built at ABI 0.18 on 2026-10-02 to 03): the per-lane flags, a marked lane replayed by the golden model and checked against it under the definition the certificate names, a wider run compiled from the named source (measured to see the constants' rounding that version 1's wider run cannot), and the scientific provenance surveyed from ISO/IEC 17025, W3C PROV, SLSA, RO-Crate and reproducibility certificates, field by field: carried or not, checked or reported, and its cost in privacy |
 | [studies/M1-exp-log.md](studies/M1-exp-log.md) | 1,747 | a design for the correctly rounded exp, expm1, exp2, log, log1p and log2 as tile routines, step 6's M1 before any of it is built: the reductions, an eight-entry table read by a SELECT tree, a polynomial with a double-word head and a single-word tail and no augadd, one rounding under the program's attribute, the in-lane test that marks an undecided lane, the bound written out and measured against mpmath, the mark rate's law, the specials and flags as transcend.py gives them, the cost against the surveyor's estimates and fp32's triple words, the language's nodes, refusals and derivative rules, and how phase 2 is to be held; revised the same day after verifier-VM1 found log1p's r = x path past the bound's rho, with fp64's margins stated by an error budget (thin in log1p's band and log2's cell at G = 46) and G = 44 proposed for fp64; verifier-VM1b's budget tool is committed in `studies/m1/vm1b/`; its model and captured runs are in `studies/m1/` |
+| [studies/M2-trig.md](studies/M2-trig.md) | 1,546 | a design for the correctly rounded sin, cos and tan as tile routines, the math library round's M2 before any of it is built: one Payne-Hanek reduction for every lane, against 2/pi in bank words picked from the exponent by a SELECT shifter and carried exactly through the cancellation, with an audit of every instruction it calls exact; fp64's whole range and fp128's and fp256's to 2^1024, the range's cost measured; Taylor heads in double words, tan by its own quotient, and the clamp |sin x|, |cos x| < 1; the bound by verifier-VM1b's budget ported, the mark rate's law lane by lane, the structured families and their windows, the specials and flags as transcend.py gives them; the cost (sin 406, 382 and 389 instructions at fp64, fp128 and fp256, sin and cos of one argument 434, 411 and 418), fp32's double word at G = 18 and the triple word's estimate; the language's nodes, refusals and derivative rules, fourteen plants, and twelve questions for Logan; its model and captured runs are in `studies/m2/`, and its larger samples are handed to the lead (`studies/m2/box_m2s.sh`) |
 
 ---
 

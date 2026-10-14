@@ -1,0 +1,5 @@
+fp64 plant mid-inexact: pools 387 x 6 lanes: wrong unmarked 8 ('cos', 'rne', '0x79ffce36f3ebfe43'); marked 0, of them off the list 0 ; 7s
+   structured: unmarked 0 
+   bound: largest |V - f|/Bv 2^35.69 at ('tan', 'near', '0x40407e4cef4cbd9a')
+   audit: lanes with a failed exact claim 0  (with the 1844 binade-edge arguments)
+fp64 plant mid-inexact: RED in ['pools', 'bound']; 19s

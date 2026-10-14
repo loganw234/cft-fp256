@@ -1,0 +1,25 @@
+fp128 cos zero seed 125 G default: 3000 main lanes of 3000; 379 instructions (unpruned), 137 ever round; 181s
+  max |E|/Bv 0.05095 (2^-4.29); max |M|/Bv 0.01023 (2^-6.61); second-order residual at most 4.93e-21 Bv
+  observed maxima summed 0.05952 (2^-4.07); capacities summed 0.0615 (2^-4.02)
+  THE BUDGET'S BOUND: M_max + capacities = 0.07173 Bv (2^-3.80)
+  by phase (observed, capacity), in Bv:
+     C-tail         5.667e-02  5.843e-02
+     S-tail         2.721e-03  2.909e-03
+     z              1.315e-04  1.597e-04
+     sincos         2.389e-20  2.926e-20
+     red-scale      1.814e-20  2.021e-20
+     red-lower      7.134e-21  1.478e-20
+     C-head         1.070e-20  1.376e-20
+     S-head         6.580e-21  6.818e-21
+     final          0.000e+00  0.000e+00
+  the 10 largest capacities:
+     # 262 fma   C-tail         capacity 5.829e-02  observed 5.655e-02
+     # 181 fma   S-tail         capacity 2.902e-03  observed 2.714e-03
+     # 168 mul   z              capacity 1.597e-04  observed 1.315e-04
+     # 261 fma   C-tail         capacity 1.402e-04  observed 1.145e-04
+     # 180 fma   S-tail         capacity 6.990e-06  observed 6.516e-06
+     # 260 fma   C-tail         capacity 1.685e-07  observed 1.479e-07
+     # 179 fma   S-tail         capacity 8.419e-09  observed 7.701e-09
+     # 259 fma   C-tail         capacity 4.053e-10  observed 3.709e-10
+     # 178 fma   S-tail         capacity 1.014e-11  observed 9.484e-12
+     # 258 fma   C-tail         capacity 2.437e-13  observed 2.100e-13
