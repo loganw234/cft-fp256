@@ -1280,8 +1280,8 @@ def check_rate(fmt, rnd, n=2000, seed=7, sigmas=None, g_inflated=6,
     at fp64 is 1.7% over (the 5% of its lanes at x < 0 have |V| just under 1).
     The exp family's lanes with a subnormal result mark as the others do (the
     in-lane test runs in the scaled domain), and under rne and rmm a few more,
-    by the fixed grid's own test: 4% to 5% more of them at fp32 and 1% to 2%
-    at fp64, under 0.4% of the sample's count (measured in the entry).
+    by the fixed grid's own test: 4.3% to 4.8% more of them at fp32 and 0.9% to
+    2.4% at fp64, under 0.4% of the sample's count (measured in the entry).
 
     THE RULE. The cell is judged by the EXACT two-sided tail of its count
     under that law (twice the smaller of P(count <= c) and P(count >= c), by
