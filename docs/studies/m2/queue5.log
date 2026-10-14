@@ -1,0 +1,7 @@
+== 2026-10-13 15:41:20 start: rate.py fp64 sin,cos,tan 2000 0,1 6 3
+== 2026-10-13 15:41:55 end (0): rate.py fp64 sin,cos,tan 2000 0,1 6 3
+== 2026-10-13 15:41:55 start: rate.py fp128 sin,cos,tan 2000 0,1 6 3
+== 2026-10-13 15:42:32 end (0): rate.py fp128 sin,cos,tan 2000 0,1 6 3
+== 2026-10-13 15:42:32 start: rate.py fp256 sin,cos,tan 2000 0,1 6 3
+== 2026-10-13 15:43:11 end (0): rate.py fp256 sin,cos,tan 2000 0,1 6 3
+== 2026-10-13 15:43:11 queue5 done

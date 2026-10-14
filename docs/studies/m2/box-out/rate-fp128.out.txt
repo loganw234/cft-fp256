@@ -1,0 +1,6 @@
+fp128 sin rne G'=6 seed 7: 20000 lanes, marked 485 = 2.42%; M1's law 2.26% (+1.6 sigma); each lane's own 2^-G' sig(V) sums to 500.6 = 2.50% (-0.7 sigma); guesses right 485 of 485; wrong unmarked 0; 145s
+fp128 sin rtz G'=6 seed 7: 20000 lanes, marked 501 = 2.50%; M1's law 2.26% (+2.4 sigma); each lane's own 2^-G' sig(V) sums to 500.6 = 2.50% (+0.0 sigma); guesses right 501 of 501; wrong unmarked 0; 289s
+fp128 cos rne G'=6 seed 7: 20000 lanes, marked 513 = 2.56%; M1's law 2.26% (+2.9 sigma); each lane's own 2^-G' sig(V) sums to 499.0 = 2.49% (+0.6 sigma); guesses right 513 of 513; wrong unmarked 0; 433s
+fp128 cos rtz G'=6 seed 7: 20000 lanes, marked 509 = 2.54%; M1's law 2.26% (+2.8 sigma); each lane's own 2^-G' sig(V) sums to 499.0 = 2.49% (+0.5 sigma); guesses right 509 of 509; wrong unmarked 0; 576s
+fp128 tan rne G'=6 seed 7: 20000 lanes, marked 469 = 2.35%; M1's law 2.26% (+0.8 sigma); each lane's own 2^-G' sig(V) sums to 451.9 = 2.26% (+0.8 sigma); guesses right 469 of 469; wrong unmarked 0; 728s
+fp128 tan rtz G'=6 seed 7: 20000 lanes, marked 460 = 2.30%; M1's law 2.26% (+0.4 sigma); each lane's own 2^-G' sig(V) sums to 451.9 = 2.26% (+0.4 sigma); guesses right 460 of 460; wrong unmarked 0; 879s

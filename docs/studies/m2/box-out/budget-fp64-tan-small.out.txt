@@ -1,0 +1,27 @@
+fp64 tan small seed 123 G default: 12000 main lanes of 12000; 420 instructions (unpruned), 138 ever round; 680s
+  max |E|/Bv 0.05469 (2^-4.19); max |M|/Bv 0.03276 (2^-4.93); second-order residual at most 0.0134 Bv
+  observed maxima summed 0.05303 (2^-4.24); capacities summed 0.05895 (2^-4.08)
+  THE BUDGET'S BOUND: M_max + capacities = 0.09171 Bv (2^-3.45)
+  by phase (observed, capacity), in Bv:
+     quotient       1.819e-02  1.928e-02
+     C-tail         1.387e-02  1.484e-02
+     sincos         7.424e-03  8.573e-03
+     red-scale      5.432e-03  6.756e-03
+     C-head         3.364e-03  3.544e-03
+     red-lower      1.831e-03  2.931e-03
+     S-head         2.103e-03  2.155e-03
+     S-tail         6.790e-04  7.285e-04
+     z              1.414e-04  1.434e-04
+     final          0.000e+00  0.000e+00
+     special        0.000e+00  0.000e+00
+  the 10 largest capacities:
+     # 288 fma   C-tail         capacity 1.480e-02  observed 1.384e-02
+     # 387 mul   quotient       capacity 5.448e-03  observed 5.114e-03
+     # 386 fma   quotient       capacity 5.371e-03  observed 4.862e-03
+     # 385 add   quotient       capacity 4.397e-03  observed 4.285e-03
+     # 194 fma   red-scale      capacity 3.947e-03  observed 3.007e-03
+     # 384 fma   quotient       capacity 3.781e-03  observed 3.655e-03
+     # 362 fma   sincos         capacity 3.714e-03  observed 2.766e-03
+     # 364 fma   sincos         capacity 2.734e-03  observed 2.618e-03
+     # 193 fma   red-scale      capacity 2.676e-03  observed 2.306e-03
+     # 360 fma   sincos         capacity 1.953e-03  observed 1.876e-03

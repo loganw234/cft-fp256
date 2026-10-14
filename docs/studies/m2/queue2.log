@@ -1,0 +1,37 @@
+== 2026-10-13 15:15:35 start: rate.py fp64 sin,cos,tan 2000 0,1 6 3
+== 2026-10-13 15:16:16 end (0): rate.py fp64 sin,cos,tan 2000 0,1 6 3
+== 2026-10-13 15:16:16 start: rate.py fp128 sin,cos,tan 2000 0,1 6 3
+== 2026-10-13 15:16:50 end (0): rate.py fp128 sin,cos,tan 2000 0,1 6 3
+== 2026-10-13 15:16:50 start: rate.py fp256 sin,cos,tan 2000 0,1 6 3
+== 2026-10-13 15:17:26 end (0): rate.py fp256 sin,cos,tan 2000 0,1 6 3
+== 2026-10-13 15:17:26 start: m2measure.py fp64 sin,cos,tan 2000 random 0 1
+== 2026-10-13 15:17:44 end (0): m2measure.py fp64 sin,cos,tan 2000 random 0 1
+== 2026-10-13 15:17:44 start: m2measure.py fp64 sin,cos,tan 1000 edge 0 2
+== 2026-10-13 15:17:53 end (0): m2measure.py fp64 sin,cos,tan 1000 edge 0 2
+== 2026-10-13 15:17:53 start: m2measure.py fp64 sin,cos,tan 1000 near 0 3
+== 2026-10-13 15:18:02 end (0): m2measure.py fp64 sin,cos,tan 1000 near 0 3
+== 2026-10-13 15:18:02 start: m2measure.py fp64 sin,cos,tan 1000 small 0 4
+== 2026-10-13 15:18:11 end (0): m2measure.py fp64 sin,cos,tan 1000 small 0 4
+== 2026-10-13 15:18:11 start: m2measure.py fp64 sin,cos,tan 0 worst 0 5
+== 2026-10-13 15:18:45 end (0): m2measure.py fp64 sin,cos,tan 0 worst 0 5
+== 2026-10-13 15:18:45 start: m2measure.py fp128 sin,cos,tan 2000 random 0 1
+== 2026-10-13 15:19:03 end (0): m2measure.py fp128 sin,cos,tan 2000 random 0 1
+== 2026-10-13 15:19:03 start: m2measure.py fp128 sin,cos,tan 1000 edge 0 2
+== 2026-10-13 15:19:12 end (0): m2measure.py fp128 sin,cos,tan 1000 edge 0 2
+== 2026-10-13 15:19:12 start: m2measure.py fp128 sin,cos,tan 1000 near 0 3
+== 2026-10-13 15:19:21 end (0): m2measure.py fp128 sin,cos,tan 1000 near 0 3
+== 2026-10-13 15:19:21 start: m2measure.py fp128 sin,cos,tan 1000 small 0 4
+== 2026-10-13 15:19:29 end (0): m2measure.py fp128 sin,cos,tan 1000 small 0 4
+== 2026-10-13 15:19:29 start: m2measure.py fp128 sin,cos,tan 0 worst 0 5
+== 2026-10-13 15:19:36 end (0): m2measure.py fp128 sin,cos,tan 0 worst 0 5
+== 2026-10-13 15:19:36 start: m2measure.py fp256 sin,cos,tan 2000 random 0 1
+== 2026-10-13 15:19:55 end (0): m2measure.py fp256 sin,cos,tan 2000 random 0 1
+== 2026-10-13 15:19:55 start: m2measure.py fp256 sin,cos,tan 1000 edge 0 2
+== 2026-10-13 15:20:04 end (0): m2measure.py fp256 sin,cos,tan 1000 edge 0 2
+== 2026-10-13 15:20:04 start: m2measure.py fp256 sin,cos,tan 1000 near 0 3
+== 2026-10-13 15:20:14 end (0): m2measure.py fp256 sin,cos,tan 1000 near 0 3
+== 2026-10-13 15:20:14 start: m2measure.py fp256 sin,cos,tan 1000 small 0 4
+== 2026-10-13 15:20:24 end (0): m2measure.py fp256 sin,cos,tan 1000 small 0 4
+== 2026-10-13 15:20:24 start: m2measure.py fp256 sin,cos,tan 0 worst 0 5
+== 2026-10-13 15:20:49 end (0): m2measure.py fp256 sin,cos,tan 0 worst 0 5
+== 2026-10-13 15:20:49 queue2 done

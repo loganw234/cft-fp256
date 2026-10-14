@@ -1,0 +1,26 @@
+fp64 sin random seed 124 G default: 12000 main lanes of 12000; 406 instructions (unpruned), 126 ever round; 660s
+  max |E|/Bv 0.0319 (2^-4.97); max |M|/Bv 0.02965 (2^-5.08); second-order residual at most 0.00152 Bv
+  observed maxima summed 0.03783 (2^-4.72); capacities summed 0.04245 (2^-4.56)
+  THE BUDGET'S BOUND: M_max + capacities = 0.0721 Bv (2^-3.79)
+  by phase (observed, capacity), in Bv:
+     C-tail         1.410e-02  1.482e-02
+     sincos         8.246e-03  8.678e-03
+     red-scale      5.684e-03  6.283e-03
+     C-head         5.046e-03  5.387e-03
+     red-lower      2.046e-03  4.470e-03
+     S-head         1.935e-03  1.991e-03
+     S-tail         6.806e-04  7.271e-04
+     z              9.029e-05  9.067e-05
+     final          0.000e+00  0.000e+00
+     special        0.000e+00  0.000e+00
+  the 10 largest capacities:
+     # 288 fma   C-tail         capacity 1.478e-02  observed 1.407e-02
+     # 362 fma   sincos         capacity 3.880e-03  observed 3.711e-03
+     # 194 fma   red-scale      capacity 3.757e-03  observed 3.318e-03
+     # 364 fma   sincos         capacity 2.744e-03  observed 2.621e-03
+     # 357 sub   C-head         capacity 2.734e-03  observed 2.645e-03
+     # 193 fma   red-scale      capacity 2.471e-03  observed 2.311e-03
+     # 360 fma   sincos         capacity 2.054e-03  observed 1.914e-03
+     # 182 add   red-lower      capacity 1.893e-03  observed 9.130e-05
+     # 183 add   red-lower      capacity 1.893e-03  observed 1.301e-03
+     # 353 fma   C-head         capacity 1.367e-03  observed 1.199e-03

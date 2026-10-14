@@ -1,0 +1,71 @@
+== 2026-10-13 15:31:21 start: m2budget.py fp64 tan edge 1500 21 10
+== 2026-10-13 15:31:47 end (0): m2budget.py fp64 tan edge 1500 21 10
+== 2026-10-13 15:31:47 start: m2budget.py fp64 tan near 1500 22 10
+== 2026-10-13 15:32:11 end (0): m2budget.py fp64 tan near 1500 22 10
+== 2026-10-13 15:32:11 start: m2budget.py fp64 tan small 1500 23 10
+== 2026-10-13 15:32:36 end (0): m2budget.py fp64 tan small 1500 23 10
+== 2026-10-13 15:32:36 start: m2budget.py fp64 tan random 1500 24 10
+== 2026-10-13 15:33:00 end (0): m2budget.py fp64 tan random 1500 24 10
+== 2026-10-13 15:33:00 start: rate.py fp64 sin,cos 6000 0,1 6 5
+== 2026-10-13 15:34:06 end (0): rate.py fp64 sin,cos 6000 0,1 6 5
+== 2026-10-13 15:34:06 start: rate.py fp256 sin,cos 3000 0,1 6 5
+== 2026-10-13 15:34:42 end (0): rate.py fp256 sin,cos 3000 0,1 6 5
+== 2026-10-13 15:34:42 start: ranges.py fp256 128 256 512 1024 2048 4096 16384 65536 262144
+== 2026-10-13 15:34:44 end (0): ranges.py fp256 128 256 512 1024 2048 4096 16384 65536 262144
+== 2026-10-13 15:34:44 start: redcheck.py fp64 400 A
+== 2026-10-13 15:34:57 end (0): redcheck.py fp64 400 A
+== 2026-10-13 15:34:57 start: redcheck.py fp128 400 A
+== 2026-10-13 15:35:00 end (0): redcheck.py fp128 400 A
+== 2026-10-13 15:35:00 start: redcheck.py fp256 200 A
+== 2026-10-13 15:35:07 end (0): redcheck.py fp256 200 A
+== 2026-10-13 15:35:07 start: pools_run.py fp128 sin,cos,tan 0,1,2,3,4 A
+== 2026-10-13 15:35:34 end (0): pools_run.py fp128 sin,cos,tan 0,1,2,3,4 A
+== 2026-10-13 15:35:34 start: onseq.py fp128 sin,cos,tan 0,1,2,3,4
+== 2026-10-13 15:36:22 end (0): onseq.py fp128 sin,cos,tan 0,1,2,3,4
+== 2026-10-13 15:36:22 start: share.py fp128
+== 2026-10-13 15:36:23 end (0): share.py fp128
+== 2026-10-13 15:36:23 start: pools_run.py fp32 sin,cos,tan 0,1,2,3,4 A
+== 2026-10-13 15:36:47 end (0): pools_run.py fp32 sin,cos,tan 0,1,2,3,4 A
+== 2026-10-13 15:36:47 start: onseq.py fp32 sin,cos,tan 0,1,2,3,4
+== 2026-10-13 15:37:31 end (0): onseq.py fp32 sin,cos,tan 0,1,2,3,4
+== 2026-10-13 15:37:31 start: costs.py fp32
+== 2026-10-13 15:37:32 end (0): costs.py fp32
+== 2026-10-13 15:37:32 start: specials.py fp32
+== 2026-10-13 15:37:34 end (0): specials.py fp32
+== 2026-10-13 15:37:34 start: census.py fp32 tiny
+== 2026-10-13 15:37:39 end (0): census.py fp32 tiny
+== 2026-10-13 15:37:39 start: census.py fp32 near
+== 2026-10-13 15:38:02 end (0): census.py fp32 near
+== 2026-10-13 15:38:02 start: rate.py fp32 sin,cos,tan 2000 0,1 6 3
+== 2026-10-13 15:38:28 end (0): rate.py fp32 sin,cos,tan 2000 0,1 6 3
+== 2026-10-13 15:38:28 start: plants.py fp64 none 64
+== 2026-10-13 15:38:39 end (0): plants.py fp64 none 64
+== 2026-10-13 15:38:39 start: plants.py fp64 chunk 64
+== 2026-10-13 15:38:51 end (0): plants.py fp64 chunk 64
+== 2026-10-13 15:38:51 start: plants.py fp64 window 64
+== 2026-10-13 15:39:03 end (0): plants.py fp64 window 64
+== 2026-10-13 15:39:03 start: plants.py fp64 mid-inexact 64
+== 2026-10-13 15:39:14 end (0): plants.py fp64 mid-inexact 64
+== 2026-10-13 15:39:14 start: plants.py fp64 exact-add 64
+== 2026-10-13 15:39:25 end (0): plants.py fp64 exact-add 64
+== 2026-10-13 15:39:25 start: plants.py fp64 quadrant-sign 64
+== 2026-10-13 15:39:36 end (0): plants.py fp64 quadrant-sign 64
+== 2026-10-13 15:39:36 start: plants.py fp64 clamp-tight 64
+== 2026-10-13 15:39:48 end (0): plants.py fp64 clamp-tight 64
+== 2026-10-13 15:39:48 start: plants.py fp64 bound-loose 64
+== 2026-10-13 15:39:59 end (0): plants.py fp64 bound-loose 64
+== 2026-10-13 15:39:59 start: plants.py fp64 mark-silenced 64
+== 2026-10-13 15:40:10 end (0): plants.py fp64 mark-silenced 64
+== 2026-10-13 15:40:10 start: plants.py fp64 coef 64
+== 2026-10-13 15:40:21 end (0): plants.py fp64 coef 64
+== 2026-10-13 15:40:21 start: plants.py fp64 newton-short 64
+== 2026-10-13 15:40:32 end (0): plants.py fp64 newton-short 64
+== 2026-10-13 15:40:33 start: plants.py fp64 tiny-gate-off 64
+== 2026-10-13 15:40:44 end (0): plants.py fp64 tiny-gate-off 64
+== 2026-10-13 15:40:44 start: plants.py fp64 rl-dropped 64
+== 2026-10-13 15:40:55 end (0): plants.py fp64 rl-dropped 64
+== 2026-10-13 15:40:55 start: plants.py fp64 zl-dropped 64
+== 2026-10-13 15:41:05 end (0): plants.py fp64 zl-dropped 64
+== 2026-10-13 15:41:05 start: plants.py fp64 clamp-off 64
+== 2026-10-13 15:41:17 end (0): plants.py fp64 clamp-off 64
+== 2026-10-13 15:41:17 queue4 done

@@ -9,6 +9,14 @@
 # k = 1..K (default 64) and j ulps either side (j = -2..2), and the
 # deepest cancellations pi_worstcase.py finds (the stage's own sweep,
 # transcend_check.WORST_SWEEP): the arguments nearest multiples of pi/2.
+# FAMILY minnbr V0 V1 [J]: the minimiser of every binade V0..V1 (value
+# exponents; pi_worstcase.worst_in_binade) and its neighbours m0 + j,
+# j = -J..J (default 4), positive (sin is odd and cos even, and the three
+# directed attributes cover the mirror): verifier-VM2S's family, the
+# NEIGHBOURS of the arguments nearest multiples of pi/2. With
+# r = j ulp + delta, (j ulp)^2/2 lands on the result's grid below 1 once
+# the exponent is about p/2 or more, and the true value then sits
+# j ulp delta from a grid point (added after the study's first commit).
 # Every lane against transcend.py: marked (its guess checked) or equal;
 # the marks listed.
 
@@ -56,6 +64,18 @@ def near_family(fmt, K=64, J=2):
     return sorted(set(out))
 
 
+def minnbr_family(fmt, v0, v1, J=4):
+    p = fmt.prec
+    lo, hi = 1 << (p - 1), (1 << p) - 1
+    out = []
+    for v in range(v0, v1 + 1):
+        m, e, _lost, _mag, _N = pi_worstcase.worst_in_binade(fmt, v)
+        for j in range(-J, J + 1):
+            if lo <= m + j <= hi:
+                out.append(pi_worstcase._enc(fmt, 0, m + j, e))
+    return sorted(set(out))
+
+
 def main():
     name, fam = sys.argv[1], sys.argv[2]
     fns = sys.argv[3].split(",") if len(sys.argv) > 3 else ["sin", "cos", "tan"]
@@ -65,6 +85,8 @@ def main():
     fmt = FORMATS[name]
     if fam == "tiny":
         xs = tiny_family(fmt, *extra)
+    elif fam == "minnbr":
+        xs = minnbr_family(fmt, *extra)
     else:
         xs = near_family(fmt, *extra)
     t0 = time.perf_counter()
@@ -82,6 +104,11 @@ def main():
             if st["marks"]:
                 print("     marks:", " ".join(st["marks"][:40]),
                       "..." if len(st["marks"]) > 40 else "", flush=True)
+                if fam == "minnbr":
+                    vs = sorted({((int(h, 16) >> fmt.man_w) & fmt.exp_mask)
+                                 - fmt.bias for h in st["marks"]})
+                    print("     the binades (value exponents) of the marks:",
+                          vs, flush=True)
 
 
 if __name__ == "__main__":

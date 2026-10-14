@@ -1,0 +1,13 @@
+== 2026-10-13 18:48:51 start: census.py fp32 minnbr sin,cos,tan 0,1,2,3,4 0 40 4
+== 2026-10-13 18:49:08 end (0): census.py fp32 minnbr sin,cos,tan 0,1,2,3,4 0 40 4
+== 2026-10-13 18:49:08 start: census.py fp64 minnbr sin,cos,tan 0,1,2,3,4 0 80 4
+== 2026-10-13 18:49:51 end (0): census.py fp64 minnbr sin,cos,tan 0,1,2,3,4 0 80 4
+== 2026-10-13 18:49:51 start: census.py fp128 minnbr sin,cos,tan 0,1,2,3,4 40 90 4
+== 2026-10-13 18:50:18 end (0): census.py fp128 minnbr sin,cos,tan 0,1,2,3,4 40 90 4
+== 2026-10-13 18:50:18 start: census.py fp256 minnbr sin,cos,tan 0,1,2,3,4 100 210 4
+== 2026-10-13 18:51:14 end (0): census.py fp256 minnbr sin,cos,tan 0,1,2,3,4 100 210 4
+== 2026-10-13 18:51:14 queue9 done
+== 2026-10-13 18:52:59 start: census.py fp128 minnbr sin,cos,tan 0,1,2,3,4 40 90 0
+== 2026-10-13 18:53:03 end (0): census.py fp128 minnbr sin,cos,tan 0,1,2,3,4 40 90 0
+== 2026-10-13 18:53:03 start: census.py fp256 minnbr sin,cos,tan 0,1,2,3,4 100 210 0
+== 2026-10-13 18:53:19 end (0): census.py fp256 minnbr sin,cos,tan 0,1,2,3,4 100 210 0

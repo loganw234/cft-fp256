@@ -1,0 +1,43 @@
+== 2026-10-13 15:43:16 start: (scratch)/same_check.py
+== 2026-10-13 15:43:20 end (0): (scratch)/same_check.py
+== 2026-10-13 15:43:20 start: specials.py fp64
+== 2026-10-13 15:43:22 end (0): specials.py fp64
+== 2026-10-13 15:43:23 start: specials.py fp128
+== 2026-10-13 15:43:26 end (0): specials.py fp128
+== 2026-10-13 15:43:26 start: specials.py fp256
+== 2026-10-13 15:43:31 end (0): specials.py fp256
+== 2026-10-13 15:43:31 start: costs.py fp64
+== 2026-10-13 15:43:32 end (0): costs.py fp64
+== 2026-10-13 15:43:32 start: costs.py fp128
+== 2026-10-13 15:43:34 end (0): costs.py fp128
+== 2026-10-13 15:43:34 start: costs.py fp256
+== 2026-10-13 15:43:38 end (0): costs.py fp256
+== 2026-10-13 15:43:38 start: ranges.py fp128 128 256 512 1024 2048 4096 16384
+== 2026-10-13 15:43:39 end (0): ranges.py fp128 128 256 512 1024 2048 4096 16384
+== 2026-10-13 15:43:39 start: census.py fp64 tiny
+== 2026-10-13 15:43:45 end (0): census.py fp64 tiny
+== 2026-10-13 15:43:45 start: census.py fp64 near
+== 2026-10-13 15:44:15 end (0): census.py fp64 near
+== 2026-10-13 15:44:15 start: census.py fp128 tiny
+== 2026-10-13 15:44:32 end (0): census.py fp128 tiny
+== 2026-10-13 15:44:32 start: census.py fp128 near
+== 2026-10-13 15:45:04 end (0): census.py fp128 near
+== 2026-10-13 15:45:04 start: census.py fp256 tiny
+== 2026-10-13 15:45:46 end (0): census.py fp256 tiny
+== 2026-10-13 15:45:46 start: census.py fp256 near
+== 2026-10-13 15:46:32 end (0): census.py fp256 near
+== 2026-10-13 15:46:32 start: pools_run.py fp64 sin,cos,tan 0,1,2,3,4 A
+== 2026-10-13 15:49:32 end (0): pools_run.py fp64 sin,cos,tan 0,1,2,3,4 A
+== 2026-10-13 15:49:32 start: pools_run.py fp256 sin,cos,tan 0,1,2,3,4 A
+== 2026-10-13 15:51:05 end (0): pools_run.py fp256 sin,cos,tan 0,1,2,3,4 A
+== 2026-10-13 15:51:05 start: onseq.py fp64 sin,cos,tan 0,1,2,3,4
+== 2026-10-13 15:57:02 end (0): onseq.py fp64 sin,cos,tan 0,1,2,3,4
+== 2026-10-13 15:57:02 start: onseq.py fp256 sin,cos,tan 0,1,2,3,4
+== 2026-10-13 15:59:14 end (0): onseq.py fp256 sin,cos,tan 0,1,2,3,4
+== 2026-10-13 15:59:14 start: share.py fp64
+== 2026-10-13 15:59:15 end (0): share.py fp64
+== 2026-10-13 15:59:15 start: share.py fp256
+== 2026-10-13 15:59:17 end (0): share.py fp256
+== 2026-10-13 15:59:17 start: (scratch)/same_check.py
+== 2026-10-13 15:59:20 end (0): (scratch)/same_check.py
+== 2026-10-13 15:59:21 queue6 done

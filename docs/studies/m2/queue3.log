@@ -1,0 +1,85 @@
+== 2026-10-13 15:20:53 start: m2budget.py fp64 sin edge 1500 21 10
+== 2026-10-13 15:21:20 end (0): m2budget.py fp64 sin edge 1500 21 10
+== 2026-10-13 15:21:20 start: m2budget.py fp64 sin near 1500 22 10
+== 2026-10-13 15:21:49 end (0): m2budget.py fp64 sin near 1500 22 10
+== 2026-10-13 15:21:49 start: m2budget.py fp64 sin small 1500 23 10
+== 2026-10-13 15:22:15 end (0): m2budget.py fp64 sin small 1500 23 10
+== 2026-10-13 15:22:15 start: m2budget.py fp64 sin random 1500 24 10
+== 2026-10-13 15:22:41 end (0): m2budget.py fp64 sin random 1500 24 10
+== 2026-10-13 15:22:41 start: m2budget.py fp64 cos edge 1500 21 10
+== 2026-10-13 15:23:09 end (0): m2budget.py fp64 cos edge 1500 21 10
+== 2026-10-13 15:23:09 start: m2budget.py fp64 cos near 1500 22 10
+== 2026-10-13 15:23:36 end (0): m2budget.py fp64 cos near 1500 22 10
+== 2026-10-13 15:23:36 start: m2budget.py fp64 cos small 1500 23 10
+== 2026-10-13 15:24:01 end (0): m2budget.py fp64 cos small 1500 23 10
+== 2026-10-13 15:24:01 start: m2budget.py fp64 cos random 1500 24 10
+== 2026-10-13 15:24:21 end (0): m2budget.py fp64 cos random 1500 24 10
+== 2026-10-13 15:24:21 start: m2budget.py fp64 tan edge 1500 21 10
+== 2026-10-13 15:24:44 end (0): m2budget.py fp64 tan edge 1500 21 10
+== 2026-10-13 15:24:44 start: m2budget.py fp64 tan near 1500 22 10
+== 2026-10-13 15:25:08 end (0): m2budget.py fp64 tan near 1500 22 10
+== 2026-10-13 15:25:08 start: m2budget.py fp64 tan small 1500 23 10
+== 2026-10-13 15:25:32 end (0): m2budget.py fp64 tan small 1500 23 10
+== 2026-10-13 15:25:32 start: m2budget.py fp64 tan random 1500 24 10
+== 2026-10-13 15:26:01 end (0): m2budget.py fp64 tan random 1500 24 10
+== 2026-10-13 15:26:01 start: m2budget.py fp64 sin edge 1000 21 10 46
+== 2026-10-13 15:26:15 end (0): m2budget.py fp64 sin edge 1000 21 10 46
+== 2026-10-13 15:26:15 start: m2budget.py fp64 sin near 1000 22 10 46
+== 2026-10-13 15:26:30 end (0): m2budget.py fp64 sin near 1000 22 10 46
+== 2026-10-13 15:26:30 start: m2budget.py fp64 cos edge 1000 21 10 46
+== 2026-10-13 15:26:45 end (0): m2budget.py fp64 cos edge 1000 21 10 46
+== 2026-10-13 15:26:45 start: m2budget.py fp64 cos near 1000 22 10 46
+== 2026-10-13 15:27:00 end (0): m2budget.py fp64 cos near 1000 22 10 46
+== 2026-10-13 15:27:00 start: m2budget.py fp64 tan edge 1000 21 10 46
+== 2026-10-13 15:27:18 end (0): m2budget.py fp64 tan edge 1000 21 10 46
+== 2026-10-13 15:27:18 start: m2budget.py fp64 tan near 1000 22 10 46
+== 2026-10-13 15:27:35 end (0): m2budget.py fp64 tan near 1000 22 10 46
+== 2026-10-13 15:27:35 start: m2budget.py fp128 sin edge 400 21 10
+== 2026-10-13 15:27:42 end (0): m2budget.py fp128 sin edge 400 21 10
+== 2026-10-13 15:27:42 start: m2budget.py fp128 sin near 400 22 10
+== 2026-10-13 15:27:48 end (0): m2budget.py fp128 sin near 400 22 10
+== 2026-10-13 15:27:49 start: m2budget.py fp128 sin small 400 23 10
+== 2026-10-13 15:27:55 end (0): m2budget.py fp128 sin small 400 23 10
+== 2026-10-13 15:27:55 start: m2budget.py fp128 sin random 400 24 10
+== 2026-10-13 15:28:03 end (0): m2budget.py fp128 sin random 400 24 10
+== 2026-10-13 15:28:03 start: m2budget.py fp128 cos edge 400 21 10
+== 2026-10-13 15:28:10 end (0): m2budget.py fp128 cos edge 400 21 10
+== 2026-10-13 15:28:10 start: m2budget.py fp128 cos near 400 22 10
+== 2026-10-13 15:28:18 end (0): m2budget.py fp128 cos near 400 22 10
+== 2026-10-13 15:28:18 start: m2budget.py fp128 cos small 400 23 10
+== 2026-10-13 15:28:25 end (0): m2budget.py fp128 cos small 400 23 10
+== 2026-10-13 15:28:25 start: m2budget.py fp128 cos random 400 24 10
+== 2026-10-13 15:28:32 end (0): m2budget.py fp128 cos random 400 24 10
+== 2026-10-13 15:28:32 start: m2budget.py fp128 tan edge 400 21 10
+== 2026-10-13 15:28:40 end (0): m2budget.py fp128 tan edge 400 21 10
+== 2026-10-13 15:28:40 start: m2budget.py fp128 tan near 400 22 10
+== 2026-10-13 15:28:48 end (0): m2budget.py fp128 tan near 400 22 10
+== 2026-10-13 15:28:48 start: m2budget.py fp128 tan small 400 23 10
+== 2026-10-13 15:28:56 end (0): m2budget.py fp128 tan small 400 23 10
+== 2026-10-13 15:28:56 start: m2budget.py fp128 tan random 400 24 10
+== 2026-10-13 15:29:04 end (0): m2budget.py fp128 tan random 400 24 10
+== 2026-10-13 15:29:04 start: m2budget.py fp256 sin edge 400 21 10
+== 2026-10-13 15:29:16 end (0): m2budget.py fp256 sin edge 400 21 10
+== 2026-10-13 15:29:16 start: m2budget.py fp256 sin near 400 22 10
+== 2026-10-13 15:29:27 end (0): m2budget.py fp256 sin near 400 22 10
+== 2026-10-13 15:29:27 start: m2budget.py fp256 sin small 400 23 10
+== 2026-10-13 15:29:37 end (0): m2budget.py fp256 sin small 400 23 10
+== 2026-10-13 15:29:37 start: m2budget.py fp256 sin random 400 24 10
+== 2026-10-13 15:29:49 end (0): m2budget.py fp256 sin random 400 24 10
+== 2026-10-13 15:29:49 start: m2budget.py fp256 cos edge 400 21 10
+== 2026-10-13 15:29:59 end (0): m2budget.py fp256 cos edge 400 21 10
+== 2026-10-13 15:29:59 start: m2budget.py fp256 cos near 400 22 10
+== 2026-10-13 15:30:10 end (0): m2budget.py fp256 cos near 400 22 10
+== 2026-10-13 15:30:10 start: m2budget.py fp256 cos small 400 23 10
+== 2026-10-13 15:30:19 end (0): m2budget.py fp256 cos small 400 23 10
+== 2026-10-13 15:30:19 start: m2budget.py fp256 cos random 400 24 10
+== 2026-10-13 15:30:30 end (0): m2budget.py fp256 cos random 400 24 10
+== 2026-10-13 15:30:30 start: m2budget.py fp256 tan edge 400 21 10
+== 2026-10-13 15:30:42 end (0): m2budget.py fp256 tan edge 400 21 10
+== 2026-10-13 15:30:42 start: m2budget.py fp256 tan near 400 22 10
+== 2026-10-13 15:30:56 end (0): m2budget.py fp256 tan near 400 22 10
+== 2026-10-13 15:30:56 start: m2budget.py fp256 tan small 400 23 10
+== 2026-10-13 15:31:07 end (0): m2budget.py fp256 tan small 400 23 10
+== 2026-10-13 15:31:07 start: m2budget.py fp256 tan random 400 24 10
+== 2026-10-13 15:31:19 end (0): m2budget.py fp256 tan random 400 24 10
+== 2026-10-13 15:31:19 queue3 done

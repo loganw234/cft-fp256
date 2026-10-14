@@ -89,21 +89,25 @@ Every statement is one of five kinds, and says which:
   costs about what fp64 does, for M1's reason.
 - **The bound** (MEASURED, verifier-VM1b's first-order budget, ported,
   3.2): every region budgeted keeps more than two bits, at most 0.096 Bv
-  at fp64, 0.073 at fp128 and 0.166 at fp256; at G = 46 fp64 would keep
-  less than two (0.26 to 0.36 Bv), as M1 found.
+  at fp64, 0.073 at fp128 and 0.166 at fp256 (the box's larger budgets:
+  0.100, 0.0729 and 0.1663); at G = 46 fp64 would keep less than two
+  (0.26 to 0.36 Bv), as M1 found.
 - **Held in the model against transcend.py** (MEASURED): the radian pools
   at four formats, all 60 configurations, 0 wrong unmarked lanes, on the
   model and as programs on seq.py; the specials row by row; at each
   format six regions of arguments (6,000 or more a function) against
-  mpmath at 4p + 200 bits and transcend.py, 0 wrong and every error
-  under its region's bound; the reduction against exact rationals with
+  mpmath at 4p + 200 bits and transcend.py, 0 wrong; every error under
+  its region's bound by the box's larger budgets, though three cells
+  pass the study's own (3.3); the reduction against exact rationals with
   the audit, 0 failures (3.3, 2.2).
 - **The marks** (3.4, 3.5): random lanes at about 2^(0.67 - G) a call
   for sin and cos (their values crowd toward 1); the structured families
   next to 0, sin's and tan's where x^3/6 or x^3/3 lands on a rounding
   boundary and cos's where x^2/2 does, each a window of neighbours, a few
-  centres at fp64 and many at fp256; none at the arguments nearest
-  multiples of pi/2. Every marked guess was right.
+  centres at fp64 and many at fp256. The arguments nearest multiples of
+  pi/2 mark none, but at fp128 and fp256 their neighbours do under the
+  directed attributes, where (j ulp)^2/2 lands on the grid below 1.
+  Every marked guess was right.
 - **fp32** (2.7, question 3): the double word reaches G = 18 only, MEASURED
   at 344 to 359 instructions; the triple word at G = 40, Logan's for M1's
   library, is an ESTIMATE of about 930.
@@ -231,7 +235,9 @@ and from pi/4 to 1 |r| stays above 0.57):
 - The whole of fp128's range (16,384 binades) and of fp256's (262,144)
   were not searched here. At the rates above, about 0.03 s and 0.12 s a
   binade, they would take about 9 minutes and 8 hours (COMPUTED): a box's
-  runs, and the stated range does not need them (2.3).
+  runs, and the stated range does not need them (2.3). The lead's box
+  run searched fp128's (MEASURED, `box-out/worst-fp128.out.txt`): 123
+  bits at value exponent 909, tied by 1964, 2434, 3811, 13962 and 16052.
 
 ## 2. The algorithms
 
@@ -474,9 +480,9 @@ fragment at each R; the cancellation used past 2^1024 is the
   73 live, 2^65536 265 live in 407 words, and the whole range needs 1,181
   words of 2/pi, past the bank. A wider range wants the LDX window (5.3),
   whose cost does not grow with the table: L stepped loads, and the
-  table's words in scratch slots (166 at fp128's whole range, 1,181 at
-  fp256's, within revision 8's 4,096 and 8,192 slots but not the
-  software target's 256).
+  table's words in scratch slots (166 at fp128's whole range, within
+  even the software target's 256; 1,181 at fp256's, within revision 8's
+  4,096 and 8,192 slots but not 256).
 - **2^1024 covers every magnitude an fp64 value has,** and an argument
   past it is not one a program reaches by stepping time or an angle:
   marks past it stay rare, which is what the question's "wide" asks.
@@ -590,7 +596,7 @@ value T satisfies -1 < T < 1, so its rounding lies within
 attribute (1 under rne, rmm and rup, 1 - 2^-p under rtz and rdn, and
 their mirrors). The routine takes R1 = MAX(R1, L1), R2 = MIN(R2, U1) and
 the guess clamped the same way: 4 instructions. The pools' arguments near
-multiples of pi/2 and the census of 3.5 measure it: no such argument
+multiples of pi/2 and 3.5's near family measure it: no such argument
 marks. Without the clamp, 16 lanes of the plants' pool slice (which runs
 rne and rtz) mark that the routine does not, sin's and cos's under rtz,
 the first sin at 0x597e3ca9b6c655cb (the clamp-off plant, section 8).
@@ -754,8 +760,14 @@ budgeted in no region until then (the pools and the census held them;
   on the same lanes, not bounded: 0.0125 Bv at most at fp64 G = 44 (tan,
   whose quotient's Newton step is quadratic), and negligible at fp128
   and fp256.
-- Each bound comes from a sample; a larger one, end-weighted as M1's
-  were, is the lead's to run on amd-arc-box (section 8, item 3).
+- Each bound comes from a sample. **The box's larger budgets**
+  (MEASURED: the lead's run of `box_m2s.sh` at dc6e0bd on amd-arc-box,
+  16:44 to 17:50 on 2026-10-13, the same five regions at 12,000 lanes
+  at fp64 and 3,000 at fp128 and fp256, seeds 121 to 125;
+  `box-out/budget-*.out.txt`): at most 0.100 Bv at fp64 (tan at the
+  edge, its residual at most 0.0147), 0.0729 at fp128 and 0.1663 at
+  fp256 (sin and cos at the edge). They bound every error 3.3 measured;
+  the study's own bounds miss three cells (3.3).
 
 ### 3.3 Measured against it
 
@@ -774,11 +786,18 @@ unmarked in every run.
 - The pools' arguments are mostly marked or special at fp128 and fp256
   (past the stated range, 282 to 293 of about 615), so their main lanes
   are few there.
-- **Every largest error found lies under its region's budget bound**
-  (3.2): fp256's tan at the edge comes closest, 2^-2.80 = 0.144 Bv
-  against a bound of 0.145 Bv (the budget's own lanes: 0.143). There
-  the bound is nearly attained: the method error and the roundings'
-  worst cases meet on one lane, as the budget assumes they may.
+- **Three of the 45 cells with a budget of their own** (five regions,
+  three functions, three formats) **pass the study's own bound** (3.2):
+  fp128 cos random, 2^-4.03 = 0.0612 Bv against 0.0541; fp128 sin small,
+  2^-6.14 = 0.0142 against 0.0036; fp256 tan near, 2^-3.39 = 0.0954
+  against 0.0941. The 400-lane budgets and the sparse "small" region
+  missed lanes near |r| = pi/4. **The box's larger budgets (3.2) bound
+  every cell** (COMPUTED from the outputs): those three at 0.0724,
+  0.0679 and 0.1391 Bv. fp256's tan at the edge comes closest, 2^-2.80
+  = 0.144 Bv against 0.1453 (the budgets' own lanes: 0.143 at 400 and
+  0.144 at 3,000). There the bound is nearly attained: the method error
+  and the roundings' worst cases meet on one lane, as the budget
+  assumes they may.
 - **The reduction's cancellation does not show** in the near and zero
   regions, whose largest errors are no larger than the random ones: the
   reduction is exact through it (2.2), and r's relative error stays at
@@ -825,11 +844,17 @@ COMPUTED, then MEASURED.
     together 2,053 against 2,058 (COMPUTED from the table). The same
     arguments serve sin and cos, whose values have the same distribution,
     so the law predicts the same rate for both. Whether their opposite
-    departures are real is not settled at this size: the box's larger
-    sample is section 8's item 4. The first version of `rate.py`, which
-    printed M1's constant only, gave the same counts at seed 3
-    (`rate.*-first.out.txt`; the model is deterministic), which is how
-    the departure was first seen.
+    departures are real is not settled at this size. The first version
+    of `rate.py`, which printed M1's constant only, gave the same counts
+    at seed 3 (`rate.*-first.out.txt`; the model is deterministic),
+    which is how the departure was first seen.
+  - **At the box's size they do not persist** (MEASURED, the lead's
+    box run, `box-out/rate-*.out.txt`: seed 7, 50,000 arguments at
+    fp64 and 20,000 at fp128 and fp256, rne and rtz): each of its 18
+    cells within 1.0 sigma of its own prediction, every guess right,
+    0 wrong; pooled, sin 4,508 against 4,500.0 (+0.12 sigma), cos 4,517
+    against 4,496.4 (+0.31), tan 4,064 against 4,069.2 (-0.08)
+    (COMPUTED from the outputs).
 - **At the proposed G** (COMPUTED): sin and cos about
   2^-G x 1.59 = 2^(0.67 - G) a call, 9.0 x 10^-14 at G = 44 and
   2.3 x 10^-14 at G = 46; tan about 2^(0.53 - G). The structured
@@ -844,7 +869,9 @@ Some arguments sit next to an exact case, x near 0, where sin x and tan x
 are about x and cos x about 1: their true value then lies closer to a
 rounding boundary than the bound resolves. The routine marks them; a
 replay decides them. The other family the brief names, the arguments
-nearest multiples of pi/2, has no exact case near it, and does not mark.
+nearest multiples of pi/2, has no exact case near it, and the nearest
+arguments themselves mark none; but at fp128 and fp256 their neighbours
+do (below).
 
 MEASURED (`census.py`): the tiny family, +-c 2^-e for c = 1 to 16 and e
 from (p + G)/4 - 4 up to the tiny gate; the near family, the
@@ -864,6 +891,22 @@ transcend.py, all five attributes:
 - **The near family: 0 marked** at every format, function and attribute
   (688 arguments at fp32 and fp64, 676 at fp128 and fp256), 0 wrong. The
   cancellation is the reduction's to carry (2.2), and it does.
+- **The neighbours of the nearest arguments mark** at fp128 and fp256
+  (verifier-VM2S's family, found in its check; MEASURED here,
+  `census.py` FAMILY minnbr: the minimiser m0 of every binade and m0 + j
+  for j = -4..4, positive, all five attributes, every lane against
+  transcend.py). fp128, binades 40 to 90 (459 arguments): sin marks 48
+  under each directed attribute (binades 56, 57, 59, 60, 61 and 64), cos
+  36 (54, 55, 58, 62, 63 and 65). fp256, binades 100 to 210 (999): sin
+  156 (26 binades from 116 to 188), cos 254 (36 from 117 to 186). None
+  under rne and rmm, none for tan, none at fp32 (binades 0 to 40) or
+  fp64 (0 to 80); the minimisers alone (j = 0) mark none; every guess
+  right, 0 wrong. The cause, in VM2S's words: with r = j ulp(x) + delta
+  and |delta| tiny, (j ulp)^2/2 lies on the result's grid below 1 once
+  E is at least about p/2. That is the tiny family with (j ulp)^2/2 in
+  the place of x^2/2: sin marks next to odd multiples and cos next to
+  even ones, where each is about +-cos r (COMPUTED). The window beyond
+  |j| = 4 is not measured.
 - **Which arguments mark** (COMPUTED). sin x = x - x^3/6 + x^5/120 ...:
   where x^3/6 is a whole number of x's ulps, x - x^3/6 is a grid point
   (the directed attributes' boundary); where it is an odd number of half
@@ -922,7 +965,7 @@ held). Each is a check for M2's build (section 8):
    assertion, before any lane ran: `redcheck-first.out.txt`, between its
    fp64 and fp256 lines), and the plan now searches b downward: 108 at
    fp128. The generator's own proofs are part of what M2's build ports
-   (8, item 6).
+   (8, item 2).
 3. **fp128's cancellation was the docs' sampled figure.** The plan first
    sized fp128's reduction with 121 bits (docs/TRANSCENDENTALS.md, every
    16th binade of fp128's whole range); pi_worstcase's own search over
@@ -1288,8 +1331,9 @@ quick tests and the long runs are the lead's.
 5. **The structured families as a committed list:** 3.5's marked
    arguments at every format, by function and attribute, each with
    neighbours inside and outside its window; and the arguments nearest
-   multiples of pi/2, which must not mark. A mark in the pools off the
-   list fails the test, as E1's brief correction 1 made it for exp.
+   multiples of pi/2 with their neighbours, whose marks at fp128 and
+   fp256 (3.5) join the list. A mark in the pools off the list fails
+   the test, as E1's brief correction 1 made it for exp.
 6. **The constants** re-derived with a `--check`, as mathlib.py's are:
    2/pi's chunks against host/src/mp_2opi.h AND an independent derivation
    (test_mp_consts.py's Chudnovsky series is one), pi/2's two words, the
@@ -1386,8 +1430,10 @@ instruction inexact on a lane, over random arguments, the slice and the
    LANGUAGE.md's rule and the mark-rate law are one statement. By the
    budget the bound keeps at most 0.096 Bv at fp64 (tan's edge; 0.106
    with its residual, about 3.2 bits) and 0.073 and 0.166 Bv at fp128 and
-   fp256 (about 3.8 and 2.6 bits) (3.2). At G = 46, fp64 would keep 0.26
-   to 0.36 Bv, under two bits (5.3).
+   fp256 (about 3.8 and 2.6 bits) (3.2); the box's larger budgets give
+   0.100 at fp64 (0.115 with its residual, about 3.1 bits), 0.0729 and
+   0.1663 (3.2). At G = 46, fp64 would keep 0.26 to 0.36 Bv, under two
+   bits (5.3).
 5. **tan.** *Recommended: its own double-word quotient* (2.5), 19 to 23
    instructions after the shared prefix. C4's division takes single words
    and would lose the precision G needs; dividing two routines' rounded
@@ -1398,7 +1444,9 @@ instruction inexact on a lane, over random arguments, the slice and the
    rtz, rdn and rup (16 lanes of the plants' slice under rtz; 2.6).
 7. **The structured families** (3.5) mark and are replayed: whole windows
    of arguments next to an exact case, larger at fp128 and fp256 than at
-   fp64. *Recommended: keep them, as M1's question 4 did;* list the
+   fp64, and at fp128 and fp256 under the directed attributes the
+   neighbours of the arguments nearest multiples of pi/2.
+   *Recommended: keep them, as M1's question 4 did;* list the
    windows' centres in the build's tests; LANGUAGE.md's rule (M1's) covers
    them.
 8. **Constants.** *Recommended: as M1's question 8 settled for M1's six:*
@@ -1476,6 +1524,7 @@ the path (and `m2const.py` its `host/tools/`).
 | `*.out.txt` | each run's output as captured, named for its script, its format and its region or seed; `-first` marks a run of the first version (classification first, fp128's cancellation at the docs' 121; for `rate`, the script before the per-lane prediction) |
 | `queue*.log` | each batch's start and end times, run by run |
 | `box_m2s.sh` | the larger samples handed to the lead for amd-arc-box (not run by the study) |
+| `box-out/` | that script's outputs as the lead's run captured them: amd-arc-box, dc6e0bd, 16:44 to 17:50 on 2026-10-13, six jobs at a time, all 49 ended 0 |
 
 **Which model the runs measured.** The routines' modules (`m2core`,
 `m2const`, `m2plan`, `m2red`, `m2trig`) last changed before the runs this

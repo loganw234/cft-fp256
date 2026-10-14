@@ -1,0 +1,16 @@
+fp128 minnbr: 51 arguments
+  sin rne: marked 0 (guess right 0), wrong 0; 0s
+  sin rtz: marked 0 (guess right 0), wrong 0; 0s
+  sin rdn: marked 0 (guess right 0), wrong 0; 1s
+  sin rup: marked 0 (guess right 0), wrong 0; 1s
+  sin rmm: marked 0 (guess right 0), wrong 0; 1s
+  cos rne: marked 0 (guess right 0), wrong 0; 1s
+  cos rtz: marked 0 (guess right 0), wrong 0; 1s
+  cos rdn: marked 0 (guess right 0), wrong 0; 2s
+  cos rup: marked 0 (guess right 0), wrong 0; 2s
+  cos rmm: marked 0 (guess right 0), wrong 0; 2s
+  tan rne: marked 0 (guess right 0), wrong 0; 2s
+  tan rtz: marked 0 (guess right 0), wrong 0; 2s
+  tan rdn: marked 0 (guess right 0), wrong 0; 3s
+  tan rup: marked 0 (guess right 0), wrong 0; 3s
+  tan rmm: marked 0 (guess right 0), wrong 0; 3s
