@@ -3,10 +3,11 @@
 """The first-order error budget of a math-library fragment: verifier-VM1b's
 tool (docs/studies/m1/vm1b/: adlib.py, p5_budget.py, p5c_budget_end.py),
 ported into the tree for parcel E1 and held, since parcel MB1, to the
-instrumented forms of exp, exp2 and expm1 (cft_golden/mathlib.py's Build),
-which keep what it reads: the unpruned body, each instruction's phase and
-the probes Vh, Vl, Bv and Ek. The true value it compares with is f(x) 2^-k
-for the build's own f (true_scaled).
+instrumented forms of exp, exp2 and expm1 and, since parcel MB2, of log, log2
+and log1p (cft_golden/mathlib.py's Build), which keep what it reads: the
+unpruned body, each instruction's phase and the probes Vh, Vl, Bv and, for the
+scaled exp family, Ek. The true value it compares with is f(x) 2^-k for the
+build's own f (true_scaled); the log family is not scaled (k = 0).
 
 What it is. The in-lane test (the study's 3.1) is sound only if the true
 value lies within Bv = 2^-(p+G) |V_h| of V = V_h + V_l, so that bound must
@@ -73,13 +74,20 @@ def to_mp(q):
 def true_scaled(fmt, x, k, fn="exp"):
     """f(x) 2^-k at 4p + 200 bits, f exp, exp2 or expm1: the true value in
     the scaled domain V lives in (independent of transcend.py's decision
-    procedure)."""
+    procedure). The log family's V is not scaled (k = 0): f is log, log2 or
+    log1p."""
     with mpmath.workprec(4 * fmt.prec + 200):
         xv = to_mp(ml._dec(fmt, x))
         if fn == "exp2":
             v = mpmath.power(2, xv)
         elif fn == "expm1":
             v = mpmath.expm1(xv)
+        elif fn == "log":
+            v = mpmath.log(xv)
+        elif fn == "log2":
+            v = mpmath.log(xv) / mpmath.log(2)
+        elif fn == "log1p":
+            v = mpmath.log1p(xv)
         else:
             v = mpmath.exp(xv)
         return v * mpmath.mpf(2) ** (-k)
@@ -157,7 +165,11 @@ class Analyzer:
                         ex[i], exact = -a[0], -o[0]
                     else:
                         ex[i], exact = abs(a[0]), abs(o[0])
-                    delta[i] = num(vals[i]) - exact
+                    # an instruction whose value is not finite sits on an arm
+                    # the lane's SELECT discards (the log family's x 2^p for a
+                    # large x): it has no rounding error to count
+                    nv = num(vals[i])
+                    delta[i] = None if nv is None else nv - exact
                 elif op == sf.OP_SELECT:
                     take_a = (self._bits(srcs[2], vals, xa)
                               & ~fmt.sign_mask) != 0
@@ -201,8 +213,9 @@ class Analyzer:
             L.V = num(vals[ih]) + num(vals[il])
             L.Vex = ex[ih] + ex[il]
             L.Bv = num(vals[self.probes["Bv"][1]])
-            L.k = vals[self.probes["Ek"][1]] - self.fmt.bias \
-                - self.b.meta["OFF"]
+            L.k = (vals[self.probes["Ek"][1]] - self.fmt.bias
+                   - self.b.meta["OFF"]) if self.b.meta.get("scaled", True) \
+                else 0
             return L
 
     @staticmethod

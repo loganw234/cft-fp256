@@ -1,13 +1,13 @@
 # Copyright 2026 Logan W.
 # SPDX-License-Identifier: Apache-2.0
-"""exp, exp2 and expm1 as routines, golden-first (step 6, M1's build, parcels
-E1 and MB1): python/cft_golden/mathlib.py held to the study's section 8,
-items 1 to 5 (docs/studies/M1-exp-log.md), quick enough for the golden stage;
-the larger runs are python/tests/mathlib_runs.py.
+"""exp, exp2, expm1, log, log2 and log1p as routines, golden-first (step 6,
+M1's build, parcels E1, MB1 and MB2): python/cft_golden/mathlib.py held to the
+study's section 8, items 1 to 5 (docs/studies/M1-exp-log.md), quick enough for
+the golden stage; the larger runs are python/tests/mathlib_runs.py.
 
   interface   fragment() returns C4's Fragment shape, specialised, cached,
-              refused by name for anything but exp, exp2 and expm1;
-              evaluate() one lane
+              refused by name for anything but those six; evaluate() one
+              lane
   proved      the widened invariants of every fragment (the flag word's
               values, the live cap, the attributes), each shown able to
               fail; the instruction, word and live counts; the error-free
@@ -16,7 +16,8 @@ the larger runs are python/tests/mathlib_runs.py.
               does not
   reorder     the scheduled fragments are the design's, reordered: the
               order-free digest of the dataflow graph is the design's, and
-              exp's is the one it had at 1337a13
+              exp's, exp2's and expm1's are the ones they had before the log
+              family (exp's at 1337a13, the other two at f22e8d2)
   item 1      every lane of the transcend pools, and of each routine's edge
               pool (thresholds with their signs and neighbours, cell ends),
               through each fragment at every format and attribute: unmarked
@@ -34,12 +35,13 @@ the larger runs are python/tests/mathlib_runs.py.
               cells of fp64, fp128 and fp256 under every attribute, three
               sigma, every unmarked lane right, the marked guesses counted
   item 4      the structured families as committed lists (mathlib_family):
-              equal to the theory's generation; exp's and expm1's centres
-              and their neighbours inside and outside the windows at fp64,
-              fp128 and fp256, expm1's second family (x near -n ln 2)
-              included; at fp32 the census (240 arguments) finds no window;
-              exp2 has no family and is held to that
-  item 5      the constants' --check, in process and as a program
+              equal to the theory's generation; the centres and their
+              neighbours of exp, expm1, log and log1p at fp64, fp128 and
+              fp256, expm1's second family (x near -n ln 2) included, log's
+              centres isolated (1 +- c ulp); at fp32 the census finds no
+              window; exp2 and log2 have no family and are held to that
+  item 5      the constants' --check, in process and as a program, with
+              RECIP_SEED's 512 cells
 
 and, for every check, a planted fault shown red in the check it is meant
 for, by name: the last section. A plant is a fault of the builder
@@ -77,6 +79,8 @@ RNE, RTZ, RDN, RUP, RMM = (sf.RND_RNE, sf.RND_RTZ, sf.RND_RDN, sf.RND_RUP,
 FORMATS = (FP32, FP64, FP128, FP256)
 DOUBLE = (FP64, FP128, FP256)
 FUNCS = ml.NAMES
+EXP_FUNCS = ml.EXP_NAMES
+LOG_FUNCS = ml.LOG_NAMES
 PYTHON_DIR = pathlib.Path(__file__).resolve().parents[1]
 
 
@@ -126,6 +130,40 @@ SHAPE = {
         "fp256": ((196, 85, 13), (199, 88, 13), (197, 86, 13), (198, 87, 13),
                   (196, 85, 13)),
     },
+    # the log family (parcel MB2, MEASURED): the attribute moves only log1p's
+    # tiny path, whose underflow at x = +2^emin holds a compare and a select
+    # under rtz and rdn; the live counts are the scheduled order's (the design's
+    # order keeps 22, 21 and 24 at fp32 and 16, 14 and 18 at the double word)
+    "log": {
+        "fp32": ((379, 77, 19), (379, 77, 19), (379, 77, 19), (379, 77, 19),
+                 (379, 77, 19)),
+        "fp64": ((186, 74, 13), (186, 74, 13), (186, 74, 13), (186, 74, 13),
+                 (186, 74, 13)),
+        "fp128": ((208, 90, 13), (208, 90, 13), (208, 90, 13), (208, 90, 13),
+                  (208, 90, 13)),
+        "fp256": ((238, 120, 13), (238, 120, 13), (238, 120, 13),
+                  (238, 120, 13), (238, 120, 13)),
+    },
+    "log2": {
+        "fp32": ((391, 77, 17), (391, 77, 17), (391, 77, 17), (391, 77, 17),
+                 (391, 77, 17)),
+        "fp64": ((180, 74, 13), (180, 74, 13), (180, 74, 13), (180, 74, 13),
+                 (180, 74, 13)),
+        "fp128": ((202, 90, 13), (202, 90, 13), (202, 90, 13), (202, 90, 13),
+                  (202, 90, 13)),
+        "fp256": ((232, 120, 13), (232, 120, 13), (232, 120, 13),
+                  (232, 120, 13), (232, 120, 13)),
+    },
+    "log1p": {
+        "fp32": ((431, 80, 20), (433, 80, 20), (433, 80, 20), (431, 80, 20),
+                 (431, 80, 20)),
+        "fp64": ((220, 77, 12), (222, 77, 12), (222, 77, 12), (220, 77, 12),
+                 (220, 77, 12)),
+        "fp128": ((242, 93, 12), (244, 93, 12), (244, 93, 12), (242, 93, 12),
+                  (242, 93, 12)),
+        "fp256": ((272, 123, 12), (274, 123, 12), (274, 123, 12),
+                  (272, 123, 12), (272, 123, 12)),
+    },
 }
 # exp's dataflow graph at 1337a13, before the reorder: dag_digest of each
 # fragment, rne, rtz, rdn, rup, rmm. MEASURED by the same function on the
@@ -162,6 +200,77 @@ EXP_DIGESTS = {
         "769722dda87ffd5a3790521f565011f04fb664746044adf234b8ddf83f75b91c",
     ),
 }
+# exp2's and expm1's dataflow graphs at f22e8d2, before the log family: the
+# same function on the same fragments (MEASURED by dag_digest on the exported
+# tree of that commit, scratch base_dump.py, with the instruction counts,
+# word counts and live counts, and an order-SENSITIVE hash of each body, all
+# equal at the commit that carries this table: 60 of 60 fragments), so that
+# exp2 and expm1 are, operand for operand and attribute for attribute, what
+# parcel MB1 merged. What the log family changed in code they share is three
+# things that move no instruction: the classification's first six instructions
+# split into a helper, in the same order; a phase name ("lowword") added to
+# the scheduler's order, which none of their instructions carries; and a
+# builder method for RECIP_SEED, which they do not call.
+EXP2_DIGESTS = {
+    "fp32": (
+        "544aec2a58e0f954e557e364b514007571abe0ad661e1bdf6fa5f79092be6b5c",
+        "bb07c87c222380fa20fcdd098e88618378b4c044ed68ea15400d1a2cacd124b6",
+        "4f81803956d2d22e27675cb7bc47787245e76ad1b96720516d73f61ffd2a8190",
+        "d6ca7a2cf7018beeb4fa366ec0db1a651cc5524440f40bfd2d5706546d93230b",
+        "30780a03ef178f095df4ed876d97ef94801c82cf56a3c4887eaf4ac3dadfaa09",
+    ),
+    "fp64": (
+        "d9a19cc6a63c5d06fe449868981674d781a1fb2d289db4e5fa79fb9eee0efa01",
+        "23d9a6bc43cdb59672362470f712ed2350eec32cb4e0d7bf1f7e269e37bd80ac",
+        "2e942637099c645257fb3979913aca6b6b89ecbed43ccea8faa96c172c4fb602",
+        "224eebc78fcf10ce06835dbf9069626f42027974b77d521e8f6d11af83e54913",
+        "effdb39df1aadf1a508b291867fa6d5ede367d20b2809cc6da9dea04267175bf",
+    ),
+    "fp128": (
+        "ed37d31d2de77064d45ebd880f3c0260f7dbbfea83c4c20ddbd8e73e8ee1b336",
+        "4d4eabc31ef5aca5ba895e93a510e5983f4dc2d96219a07a60abce3466c58e3a",
+        "d99b705fe13bfed6eef4c8b9ead65db37a9e97613e8f1f02d79f1b67b3bda470",
+        "524456ebf8dec5eddf7bc9b91cd3f69cfbec709dbf9c63cd75815970b38fa1cd",
+        "f1b8d1edeefea416db865e36153a0625794988a323dd8f4cb7e8e6b50f31d7e3",
+    ),
+    "fp256": (
+        "f6ad08ba47aa22425a4d1c97abaff58d70a66787ccc0170aa43c6be91eda0ced",
+        "d29594313cb1375f0b6b9a8344a5f976b8d1efd8291f3dc8a89d102407b66c22",
+        "89810282f20c0adb84b027c565e189b7d5ba96153c5b34a1eac64f2f0feb77bb",
+        "9b399bd2b008eb212bf5b1e36132ce6fd395ef6b3dd0325767f5051375fd6e47",
+        "f891887c0e3dc47fd70d8bfe459cd55a1ca1f558445eef07b47ad92a4765f4ce",
+    ),
+}
+EXPM1_DIGESTS = {
+    "fp32": (
+        "86ec518a09fb00c5afd703a328e65d03b9ab99fb52d1ff862c7ea873a6bdb8f6",
+        "73f0463520c120b2232a058e8d50ec0d2530740758d52c268763629236dc1c47",
+        "5fefe6b0179f43b20170542928896382cddd342163c7c72974dc9b5ba5b3d85a",
+        "c0895aa716c02f441934773cee8ec0158a6c5173dd4415c93c1f9abc88494014",
+        "80e01517965eb3904ed1a2e3db9a1106f4a9152f1133eaec60cb5a38dcb70b3c",
+    ),
+    "fp64": (
+        "ae48854f17e13e0e6a9fc85d300fd813d3ad1a805e730cc5ba81b8162dde31d1",
+        "d4cb52d64b98131adfad3e819a142f7dc5ae1aaca03d14347b924b3c3a89ee8e",
+        "f519c09af2e767ea8b242d9dcbfcddd5d1aceca9683931784d17cf09e446befb",
+        "89c4b09ed37457c3f56de6713b064484950fde8cca6d50fe70a8a67b7089043e",
+        "818d5d280878413c0ebc90e23aa7663114f8f2c089a4170212eac2a88041c907",
+    ),
+    "fp128": (
+        "ee12accb485f7300021cf51c00900d80603258b2a92bfa113953efc311b413de",
+        "789157e7ea2ed63b0bfbd95761317da66234c70fd741ae80b3811333726c5df7",
+        "a9d23fd5f68a95455de7f8106a5392ae3fa7ab120b23290f319dcd0a9c116058",
+        "a1ef807dc23edb9337a111b17f1d3e95b3307f22295e9e5955f969722b54d205",
+        "41e88ca7544a6b29e32b02b3d1b018a703eb76743d80584abfe79b7624680717",
+    ),
+    "fp256": (
+        "4da362e706e8a4f6f77cd6dba9d9afc54ade2f17fc6b5b67c054d15dd0776bc2",
+        "79937081062f1b54a173a10bb0089f705fc1e18f1ea379fcfa9edc7f6dbf0754",
+        "9fc60427cd6d2557ff48994e3bfdb0650a7b64e6ff54051bd16376f6f5568049",
+        "12c6d916d839c4cacf5f46c739ba721ee7866b451c2dd129eef9f08a83f2baff",
+        "e3214b0072fe975ca3643fe6b997e26867717520494aa388f12e8e88d2979fa3",
+    ),
+}
 # the transcend pools' sizes at the stage's default counts (MEASURED): 25 more
 # than at profile 3 (330, 367, 350 and 512), the 25 signed thresholds that the
 # stage's pool and the vector sets' hold since profile 3.1
@@ -178,6 +287,16 @@ CENSUS_MARKS = {
              "fp256": (0, 0)},
     "expm1": {"fp32": (0, 0), "fp64": (6, 13), "fp128": (16, 127),
               "fp256": (16, 127)},
+    # the log family (parcel MB2, MEASURED): log's census is its 32 arguments
+    # 1 +- c ulp (the study's 3 and 9 at fp128 and fp256 for G = 46; the same
+    # at fp64's G = 44), log1p's the 240 arguments c 2^-e (the study's 4 and
+    # 11 at fp64's G = 44, 16 and 127 at fp128 and fp256); log2's marks none
+    "log": {"fp32": (0, 0), "fp64": (3, 9), "fp128": (3, 9),
+            "fp256": (3, 9)},
+    "log2": {"fp32": (0, 0), "fp64": (0, 0), "fp128": (0, 0),
+             "fp256": (0, 0)},
+    "log1p": {"fp32": (0, 0), "fp64": (4, 11), "fp128": (16, 127),
+              "fp256": (16, 127)},
 }
 # the committed centres, by routine and format: (rne and rmm, the directed
 # three), both families together
@@ -188,6 +307,17 @@ CENTRES = {
              "fp256": (0, 0)},
     "expm1": {"fp32": (0, 0), "fp64": (7, 16), "fp128": (17, 191),
               "fp256": (17, 314)},
+    # log's equal its census's marks (3 and 9). log1p's are its census's
+    # marks (4, 11, 16 and 127) and the anchors of its one-sided windows - a
+    # power of two that is clear itself with a demanded-marked float beside
+    # it: 6 under rne and rmm and 1 under the directed three at fp64, 15 and 1
+    # at fp128 and fp256 (MEASURED, the module docstring of mathlib_family)
+    "log": {"fp32": (0, 0), "fp64": (3, 9), "fp128": (3, 9),
+            "fp256": (3, 9)},
+    "log2": {"fp32": (0, 0), "fp64": (0, 0), "fp128": (0, 0),
+             "fp256": (0, 0)},
+    "log1p": {"fp32": (0, 0), "fp64": (10, 12), "fp128": (31, 128),
+              "fp256": (31, 128)},
 }
 
 
@@ -209,7 +339,7 @@ def test_a_fragment_is_a_specialised_c4_fragment_and_is_built_once(fn, fmt, rnd)
 
 
 def test_a_name_that_is_not_built_is_refused_by_name():
-    for name in ("log", "log2", "log1p", "sqrt", "", "EXP", "exp10"):
+    for name in ("sqrt", "", "EXP", "LOG", "exp10", "log10", "sin", "atan"):
         with pytest.raises(ValueError, match=repr(name)):
             ml.fragment(name, FP64, RNE)
         with pytest.raises(ValueError, match=repr(name)):
@@ -230,11 +360,20 @@ def test_a_name_that_is_not_built_is_refused_by_name():
         ml.build("exp", FP64, RNE, plant="exact_no_j")
     with pytest.raises(ValueError, match="tiny_gate_off.*does not apply to"):
         ml.build("expm1", FP64, RNE, plant="tiny_gate_off")
+    with pytest.raises(ValueError, match="exact_x_one.*does not apply to log"):
+        ml.build("log", FP64, RNE, plant="exact_x_one")
+    with pytest.raises(ValueError, match="newton_short.*triple-word"):
+        ml.build("log1p", FP32, RNE, plant="newton_short")
+    with pytest.raises(ValueError, match="rho2_dropped.*double-word"):
+        ml.build("log1p", FP64, RNE, plant="rho2_dropped")
+    with pytest.raises(ValueError, match="tiny_path_off.*does not apply to"):
+        ml.build("log2", FP64, RNE, plant="tiny_path_off")
 
 
-def test_build_exp_build_exp2_and_build_expm1_are_build_by_name():
+def test_the_build_functions_are_build_by_name():
     for fn, build in (("exp", ml.build_exp), ("exp2", ml.build_exp2),
-                      ("expm1", ml.build_expm1)):
+                      ("expm1", ml.build_expm1), ("log", ml.build_log),
+                      ("log2", ml.build_log2), ("log1p", ml.build_log1p)):
         b = build(FP64, RDN)
         assert b.meta["fn"] == fn and b.fragment().op == fn
         assert b.fragment().body == ml.build(fn, FP64, RDN).fragment().body
@@ -244,12 +383,20 @@ def test_build_exp_build_exp2_and_build_expm1_are_build_by_name():
 def test_evaluate_is_one_lane_through_the_body_and_refuses_what_is_not_one(fn):
     f = ml.fragment(fn, FP64, RNE)
     one, zero = sf.one_bits(FP64), sf.zero_bits(FP64)
-    # f(+0): 1, 1, +0; f(1): the definition's, exact for exp2 (2), inexact
-    # for the others
-    assert ml.evaluate(f, zero) == ((0 if fn == "expm1" else one), 0)
+    # f(+0) is the definition's: 1, 1, +0 for exp, exp2, expm1; -inf with
+    # divideByZero for log and log2, +0 for log1p. f(1): the definition's,
+    # exact for exp2 (2), log (+0) and log2 (+0), inexact for the others
+    assert ml.evaluate(f, zero) == H.golden(FP64, RNE, zero, fn)
+    if fn in EXP_FUNCS:
+        assert ml.evaluate(f, zero) == ((0 if fn == "expm1" else one), 0)
+    elif fn == "log1p":
+        assert ml.evaluate(f, zero) == (0, 0)
+    else:
+        assert ml.evaluate(f, zero) == (sf.inf_bits(FP64, 1),
+                                        sf.FLAG_DIVZERO)
     bits, fw = ml.evaluate(f, one)
     assert (bits, fw) == H.golden(FP64, RNE, one, fn)
-    assert fw == (0 if fn == "exp2" else sf.FLAG_INEXACT)
+    assert fw == (0 if fn in ("exp2", "log", "log2") else sf.FLAG_INEXACT)
     for bad in (-1, 1 << 64):
         with pytest.raises(ValueError):
             ml.evaluate(f, bad)
@@ -278,9 +425,18 @@ def test_the_flag_word_takes_exactly_the_studys_values(fn, fmt, rnd):
     f = ml.fragment(fn, fmt, rnd)
     inx, unf, ovf = (sf.FLAG_INEXACT, sf.FLAG_INEXACT | sf.FLAG_UNDERFLOW,
                      sf.FLAG_OVERFLOW | sf.FLAG_INEXACT)
-    want = {0, sf.FLAG_INVALID, inx, unf, ovf, inx | 0x80, ovf | 0x80}
-    if fn != "expm1":            # only exp and exp2 mark an underflow
-        want |= {unf | 0x80}
+    if fn in LOG_FUNCS:
+        # a log family result never overflows and is never marked tiny: the
+        # flag words are the main path's inexact, with the mark, the zero
+        # and the exact cases' 0, invalid and divideByZero, and, for log1p
+        # alone, the tiny path's underflow with inexact (without the mark)
+        want = {0, sf.FLAG_INVALID, sf.FLAG_DIVZERO, inx, inx | 0x80}
+        if fn == "log1p":
+            want |= {unf}
+    else:
+        want = {0, sf.FLAG_INVALID, inx, unf, ovf, inx | 0x80, ovf | 0x80}
+        if fn != "expm1":            # only exp and exp2 mark an underflow
+            want |= {unf | 0x80}
     assert ml.flag_words(f) == want <= ml.FLAG_WORDS
 
 
@@ -288,17 +444,26 @@ def test_the_flag_word_takes_exactly_the_studys_values(fn, fmt, rnd):
 def test_no_augmented_addition_and_the_error_free_sums_are_counted(fn):
     """No augadd (revision 8's question 9): an ALU fragment cannot hold one,
     and its opcodes are the design's eighteen (expm1's seventeen: it has no
-    tininess compare); its error-free sums are Fast2Sum where the exponents
-    are ordered and TwoSum elsewhere: nine and one in the double word's exp,
-    nine and none in exp2's, ten and two in expm1's; 20 and 18, 21 and 15, 22
-    and 23 in fp32's triple word."""
+    tininess compare; the log family's fifteen, log1p's eighteen, with
+    RECIP_SEED); its error-free sums are Fast2Sum where the exponents are
+    ordered and TwoSum elsewhere: nine and one in the double word's exp, nine
+    and none in exp2's, ten and two in expm1's; 20 and 18, 21 and 15, 22 and
+    23 in fp32's triple word; the log family's K + 3 Fast2Sums (K = 11 at
+    fp64, 12 at fp128 and fp256) and one, none and two TwoSums, 25 and 19, 29
+    and 18, 25 and 21 at fp32."""
     for fmt in FORMATS:
         for rnd in RND:
             assert H.check_sums(ml.build(fn, fmt, rnd)) == []
     assert len(H.ALU_OPS) == 18 and len(H.ALU_OPS_BY_FN["expm1"]) == 17
+    assert len(H.ALU_OPS_BY_FN["log"]) == len(H.ALU_OPS_BY_FN["log2"]) == 15
+    assert len(H.ALU_OPS_BY_FN["log1p"]) == 18
+    assert "recip_seed" in H.ALU_OPS_BY_FN["log"] and         "recip_seed" not in H.ALU_OPS
     assert H.EFT_COUNTS[("exp", "fp32")] == (20, 18)
     assert H.EFT_COUNTS[("exp2", "dw")] == (9, 0)
     assert H.EFT_COUNTS[("expm1", "dw")] == (10, 2)
+    assert H.EFT_COUNTS[("log", "fp64")] == (14, 1)
+    assert H.EFT_COUNTS[("log2", "fp256")] == (15, 0)
+    assert H.EFT_COUNTS[("log1p", "fp32")] == (25, 21)
 
 
 @pytest.mark.parametrize("fmt", FORMATS, ids=fid)
@@ -406,16 +571,24 @@ def test_the_live_caps_are_the_measured_maxima_and_can_fail(fmt):
 @pytest.mark.parametrize("fn", FUNCS)
 def test_every_fp32_fragment_fits_seq_pys_registers_the_designs_order_not(
         fn, rnd):
-    """The triple word keeps 33 to 36 values live in the design's order,
-    past seq.py's 32 registers: routines.program refuses it by name (parcel
-    E1 and the plan's verifier measured the same for exp). Scheduled, every
-    fp32 fragment keeps 19 to 21 and routines.program places it."""
+    """The exp family's triple word keeps 33 to 36 values live in the
+    design's order, past seq.py's 32 registers: routines.program refuses it
+    by name (parcel E1 and the plan's verifier measured the same for exp). The
+    log family's keeps 21 to 24 and routines.program places it in either
+    order. Scheduled, every fp32 fragment keeps 17 to 21 and
+    routines.program places it."""
     b = ml.build(fn, FP32, rnd)
     designed = b.fragment(schedule=False)
-    assert designed.live_max() > seq.NREG
-    with pytest.raises(AssertionError, match="no register for the harness"):
-        routines.program(designed)
+    if fn in EXP_FUNCS:
+        assert designed.live_max() > seq.NREG
+        with pytest.raises(AssertionError,
+                           match="no register for the harness"):
+            routines.program(designed)
+    else:
+        assert 21 <= designed.live_max() <= 24
+        assert routines.program(designed)[0].insns
     f = ml.fragment(fn, FP32, rnd)
+    assert f.live_max() < designed.live_max()
     assert f.live_max() < seq.NREG
     prog, _bank = routines.program(f)
     assert prog.insns
@@ -450,6 +623,21 @@ def test_exps_dataflow_graph_is_the_one_it_had_at_1337a13(fmt, rnd):
     assert ml.dag_digest(f) == EXP_DIGESTS[fmt.name][RND.index(rnd)]
 
 
+@pytest.mark.parametrize("rnd", RND, ids=rid)
+@pytest.mark.parametrize("fmt", FORMATS, ids=fid)
+@pytest.mark.parametrize("fn,digests", [("exp2", EXP2_DIGESTS),
+                                        ("expm1", EXPM1_DIGESTS)])
+def test_exp2s_and_expm1s_dataflow_graphs_are_the_ones_they_had_at_f22e8d2(
+        fn, digests, fmt, rnd):
+    """The log family changed no instruction of exp2 or expm1: every operand,
+    every attribute and every word of every instruction is what parcel MB1
+    merged (the digests of the 40 fragments at f22e8d2), whatever the format
+    and the attribute. A value does not change when the graph does not, so
+    every lane's bits and flag word are what they were."""
+    f = ml.fragment(fn, fmt, rnd)
+    assert ml.dag_digest(f) == digests[fmt.name][RND.index(rnd)]
+
+
 @pytest.mark.parametrize("fmt", FORMATS, ids=fid)
 @pytest.mark.parametrize("fn", FUNCS)
 def test_the_scheduler_takes_the_lower_peak_of_its_two_orders(fn, fmt):
@@ -459,9 +647,17 @@ def test_the_scheduler_takes_the_lower_peak_of_its_two_orders(fn, fmt):
     ranked = ml.permuted(g, ml._ranked_order(g, ph)).live_max()
     depth = ml.permuted(g, ml._dfs_order(g)).live_max()
     assert ml.fragment(fn, fmt, RNE).live_max() == min(ranked, depth)
-    # they are complementary, which is why there are two: the phase order is
-    # the better at fp32, the depth-first at the double word's formats
-    assert (ranked < depth) == (fmt is FP32)
+    if fn in EXP_FUNCS:
+        # they are complementary, which is why there are two: the phase order
+        # is the better at fp32, the depth-first at the double word's formats
+        assert (ranked < depth) == (fmt is FP32)
+    else:
+        # the log family's phase order is the better everywhere (MEASURED,
+        # 13 against 14, 13 against 14, 12 against 15 at the double word; 19
+        # against 20, 17 against 20, 20 against 22 at fp32): the depth-first
+        # order is the lower peak nowhere, and is kept as the second candidate
+        # because the exp family needs it
+        assert ranked < depth
 
 
 def test_the_phase_order_names_every_phase_a_builder_uses():
@@ -530,6 +726,58 @@ def test_the_edge_pools_hold_the_thresholds_of_exp2_and_expm1():
         assert sf.min_normal_bits(fmt) in em and sf.max_subnormal_bits(fmt) in em
 
 
+def test_the_seed_runs_are_the_runs_of_c_from_16_down_to_8():
+    """RECIP_SEED's 512 cells share their C in runs: 16 (m up to 1.0316), 15,
+    14, ..., 9, 8 (the wrap, m from 1.882): nine runs in order of m, from 1 to
+    the largest float under 2, each run's ends being the lanes where |r| is
+    largest (the study's rmax.py: 2^-4.081 at C = 9)."""
+    for fmt in FORMATS:
+        runs = H.seed_runs(fmt)
+        assert [c for c, _lo, _hi in runs] == list(range(16, 7, -1))
+        assert runs[0][1] == 1
+        assert runs[-1][2] == 2 - Fraction(1, 2 ** (fmt.prec - 1))
+        for (_c, _lo, hi), (_c2, lo2, _hi2) in zip(runs, runs[1:]):
+            # adjacent cells: the next run's first float is the next float
+            assert lo2 - hi == Fraction(1, 2 ** (fmt.prec - 1))
+        assert runs[-1][1] > Fraction(188, 100)  # the wrap's first cell
+
+
+def test_the_edge_pools_hold_the_log_familys_thresholds():
+    """log and log2: 1 +- c ulp for c up to 16 (the census), the powers of
+    two at the ends of the exponent range, of the subnormals and near 1, each
+    with two neighbours either side (log2's exact cases and the neighbours of
+    log(1)); log1p: -1 and its neighbours (the pole, and the NaN below it),
+    the tiny path's gate 2^-(p+2) and 2^-(p+3) of both signs, 15/256 (the
+    r = x path's end) and 1/16 of both signs, and 2^-k's clamp, p + G + 2."""
+    for fmt in FORMATS:
+        p, near = fmt.prec, range(-2, 3)
+        one = sf.one_bits(fmt)
+        e_log, e_log2, e_log1p = (set(H.edge_pool(fmt, fn))
+                                  for fn in ("log", "log2", "log1p"))
+        for e in (e_log, e_log2):
+            assert {one + c for c in range(-16, 17)} <= e
+            for k in (fmt.emax, fmt.emin, fmt.emin - fmt.man_w, 1, -1, p):
+                b = ml._enc(fmt, Fraction(2) ** k)
+                assert {b + d for d in near if b + d >= 0} <= e, (fmt.name, k)
+            assert sf.max_normal_bits(fmt) in e
+            assert sf.min_subnormal_bits(fmt) in e
+        minus1 = ml._enc(fmt, Fraction(-1))
+        assert {minus1 + d for d in near} <= e_log1p        # -1 and its sides
+        for k in (p + 2, p + 3):
+            for sg in (1, -1):
+                b = ml._enc(fmt, sg * Fraction(1, 2 ** k))
+                assert {b + d for d in near} <= e_log1p, (fmt.name, k)
+        for edge in (Fraction(15, 256), Fraction(1, 16)):
+            for sg in (1, -1):
+                b = ml._enc(fmt, sg * edge)
+                assert {b + d for d in range(-4, 5)} <= e_log1p, (fmt.name,
+                                                                  edge)
+        clamp = p + ml.GUARD[fmt.name] + 2
+        for k in (clamp - 1, clamp, clamp + 1, clamp + 2):
+            b = ml._enc(fmt, Fraction(2) ** k)
+            assert {b + d for d in near} <= e_log1p, (fmt.name, k)
+
+
 @pytest.mark.parametrize("rnd", RND, ids=rid)
 @pytest.mark.parametrize("fmt", FORMATS, ids=fid)
 @pytest.mark.parametrize("fn", FUNCS)
@@ -542,7 +790,9 @@ def test_the_pools_every_lane_equals_transcend_or_is_marked_on_the_list(
     # expm1(-2^-p) under rne and rmm, structured lanes; exp2 marks none. The
     # guess of exp(+2^-p) is wrong under rne (the true value is above the
     # midpoint 1 + 2^-p, the tie goes to even) and right under the others;
-    # expm1(-2^-p)'s is right: counted
+    # expm1(-2^-p)'s is right: counted. The log family's (parcel MB2): log
+    # marks 1 + ulp under the directed three, log1p 2^-p under rne and rmm,
+    # log2 none, with their guesses right
     assert set(t.marked) == H.expected_pool_marks(fmt, rnd, fn)
     assert len(t.guess_wrong) == (
         1 if fn == "exp" and fmt is not FP32 and rnd == RNE else 0)
@@ -558,7 +808,11 @@ def test_random_lanes_equal_transcend_and_none_is_marked(fn, fmt, rnd):
     f = ml.fragment(fn, fmt, rnd)
     n = 120 if fn == "exp" else 60
     out, t = H.check_random_lanes(f, n, 3)
-    assert out == [] and t.n >= 1.6 * n and not t.marked
+    assert out == [] and t.n >= 1.6 * n
+    # log's weighted sampler draws mantissas within a few ulps of 1, the start
+    # of the first seed run, where its isolated centres are (1 + c ulp): a mark
+    # there is the theory's (check_lanes asked it); no other lane is marked
+    assert not t.marked or fn == "log"
 
 
 @pytest.mark.parametrize("rnd", RND, ids=rid)
@@ -568,11 +822,19 @@ def test_the_signed_thresholds_and_cell_ends_equal_transcend(fn, fmt, rnd):
     f = ml.fragment(fn, fmt, rnd)
     out, t = H.check_edges(f)
     assert out == [] and t.n == len(H.edge_pool(fmt, fn)) and not t.wrong
-    # the marks are the second family's windows, expm1's, and nothing else
-    if fn != "expm1":
+    # the marks are the second family's windows, expm1's, and nothing else;
+    # the log family's are exactly the lanes the theory demands marked (MEASURED:
+    # the pool holds no lane between 0.7 and 1.3 of the bound from a boundary,
+    # so the sets are equal): log's census centres, 1 +- c ulp for c up to 16,
+    # all in the pool; log1p's one lane, -(2^-p)(1 - 2^-p) under rne and rmm;
+    # log2's none - with their guesses right
+    if fn in ("exp", "exp2"):
         assert not t.marked
     else:
         assert len(t.guess_wrong) == 0
+    if fn in LOG_FUNCS:
+        may, must = H.theory_marks(fmt, rnd, H.edge_pool(fmt, fn), fn)
+        assert may == must and set(t.marked) == must
 
 
 @pytest.mark.parametrize("rnd", RND, ids=rid)
@@ -589,6 +851,10 @@ def test_on_seq_py_through_routines_program_and_run(fn, fmt, rnd):
     xs = sorted(set(H.pools(fmt)) | (set(H.edge_pool(fmt, fn))
                                      if fn == "exp" and fmt is not FP32
                                      else set()))
+    if fn in LOG_FUNCS:
+        # to keep the golden stage short, every third pool lane and the pools'
+        # marked ones; mathlib_runs.py pools --seq --edges runs them all
+        xs = sorted(set(xs[::3]) | H.expected_pool_marks(fmt, rnd, fn))
     out, t = H.check_seq(f, xs)
     assert out == []
     assert not t.wrong and set(t.marked) <= (
@@ -602,7 +868,10 @@ def test_on_seq_py_through_routines_program_and_run(fn, fmt, rnd):
     ("exp2", FP32, (RNE, RUP)), ("exp2", FP64, (RNE, RDN, RMM)),
     ("exp2", FP128, (RTZ,)), ("exp2", FP256, (RUP,)),
     ("expm1", FP32, (RDN,)), ("expm1", FP64, (RNE, RTZ, RMM)),
-    ("expm1", FP128, (RUP,)), ("expm1", FP256, (RNE,))],
+    ("expm1", FP128, (RUP,)), ("expm1", FP256, (RNE,)),
+    ("log", FP64, (RNE, RDN)), ("log", FP32, (RUP,)),
+    ("log2", FP128, (RTZ,)), ("log2", FP256, (RMM,)),
+    ("log1p", FP64, (RNE, RTZ)), ("log1p", FP256, (RDN,))],
     ids=lambda v: v if isinstance(v, str) else getattr(v, "name", "rnds"))
 def test_the_compiled_shape_raises_exactly_the_operations_flags_and_marks(
         fn, fmt, rnds):
@@ -699,6 +968,12 @@ BOUND_ROOM = {
     "exp": {"fp32": -4.0, "fp64": -2.0, "fp128": -5.0, "fp256": -5.0},
     "exp2": {"fp32": -5.0, "fp64": -2.0, "fp128": -5.0, "fp256": -5.0},
     "expm1": {"fp32": -2.0, "fp64": -2.0, "fp128": -2.0, "fp256": -2.0},
+    # the log family (parcel MB2, MEASURED over these samples: log -5.3, -4.5,
+    # -5.3, -4.6 at fp32 to fp256; log2 -5.3, -3.95, -5.2, -4.9; log1p -3.7,
+    # -4.4, -4.9, -4.6)
+    "log": {"fp32": -3.0, "fp64": -3.0, "fp128": -4.0, "fp256": -4.0},
+    "log2": {"fp32": -3.0, "fp64": -3.0, "fp128": -4.0, "fp256": -4.0},
+    "log1p": {"fp32": -3.0, "fp64": -3.0, "fp128": -4.0, "fp256": -4.0},
 }
 
 
@@ -722,6 +997,12 @@ BUDGET_ROOM = {
     "exp": {"fp64": 0.25, "fp128": 0.1, "fp256": 0.1},
     "exp2": {"fp64": 0.25, "fp128": 0.1, "fp256": 0.1},
     "expm1": {"fp64": 0.25, "fp128": 0.2, "fp256": 0.2},
+    # the log family's, MEASURED over these samples: log 0.083, 0.034, 0.042,
+    # log2 0.136, 0.004, 0.030, log1p 0.165, 0.029, 0.031 Bv at fp64, fp128,
+    # fp256 (the study's 3.3 at G = 44: log2 0.18, log1p 0.12 to 0.18)
+    "log": {"fp64": 0.25, "fp128": 0.1, "fp256": 0.1},
+    "log2": {"fp64": 0.25, "fp128": 0.1, "fp256": 0.1},
+    "log1p": {"fp64": 0.25, "fp128": 0.1, "fp256": 0.1},
 }
 
 
@@ -748,7 +1029,11 @@ def test_fp32_has_no_budget_and_says_so(fn):
 # item 3: the mark-rate law
 # =====================================================================
 
-RATE_N = {"exp": 2000, "exp2": 1000, "expm1": 1000}
+# lanes a cell: exp's are E1's, exp2's and expm1's MB1's trim, and the log
+# family's a further one (parcel MB2), 700 where the expected count is 15.8 and
+# sigma 3.9: a mark silenced or a bound made too small is 4 sigma under it
+RATE_N = {"exp": 2000, "exp2": 1000, "expm1": 1000, "log": 700,
+          "log2": 700, "log1p": 700}
 
 @pytest.mark.parametrize("rnd", RND, ids=rid)
 @pytest.mark.parametrize("fmt", DOUBLE, ids=fid)
@@ -756,8 +1041,9 @@ RATE_N = {"exp": 2000, "exp2": 1000, "expm1": 1000}
 def test_the_mark_rate_law_in_its_fifteen_cells(fn, fmt, rnd):
     """The bound inflated to 2^-(p+6), G' = 6: on uniform main-path
     arguments (as the study's m1rate.py draws them: 2,000 a cell for exp, as
-    E1 ran it; 1,000 for exp2 and expm1 to keep the golden stage quick, the
-    2,000 being mathlib_runs.py rate's default) the marked fraction is
+    E1 ran it; 1,000 for exp2 and expm1 and 700 for the log family to keep
+    the golden stage quick, the 2,000 being mathlib_runs.py rate's default)
+    the marked fraction is
     within three sigma of 2^(0.53 - 6), every unmarked lane right, every
     marked guess counted - all right, as the study found."""
     out, st = H.check_rate(fmt, rnd, RATE_N[fn], 7, fn=fn)
@@ -780,9 +1066,15 @@ def test_the_committed_family_is_what_the_theory_generates():
                     CENTRES[fn][fmt.name][0 if rn else 1]
 
 
+def census_of(fn, fmt):
+    """The study's census of the routine's family: the 240 arguments c 2^-e
+    (exp, expm1, log1p), or log's 32 arguments 1 +- c ulp (log, log2)."""
+    return F.census_log(fmt) if fn in ("log", "log2") else F.census(fmt)
+
+
 @pytest.mark.parametrize("rnd", RND, ids=rid)
 @pytest.mark.parametrize("fmt", DOUBLE, ids=fid)
-@pytest.mark.parametrize("fn", ("exp", "expm1"))
+@pytest.mark.parametrize("fn", ("exp", "expm1", "log", "log1p"))
 def test_the_windows_the_centres_and_their_neighbours_inside_and_outside(
         fn, fmt, rnd):
     """Every committed centre of the cell, each with its neighbours at 1,
@@ -793,11 +1085,15 @@ def test_the_windows_the_centres_and_their_neighbours_inside_and_outside(
     every lane the theory puts inside is marked, none outside, every
     unmarked lane equals transcend's. Every centre of the committed list is
     run (expm1's directed cells hold 191 and 314 at fp128 and fp256: 6 and
-    10 s)."""
+    10 s). log's centres are isolated - its neighbours at 1 to 1024 ulps are
+    other integers c, outside unless they are centres - and its deep
+    arguments are 1 +- c ulp for c = 2^a, 3 2^a, 5 2^a and 7 2^a, from a = 2
+    (mathlib_family.deep_arguments: the census's c, extended by the same
+    rule)."""
     f = ml.fragment(fn, fmt, rnd)
     cen = F.FAMILY[fn][fmt.name][sf.RND_NAMES[rnd]]
     have = {F.argument(fmt, c) for c in cen}
-    extra = [x for x in F.census(fmt) if x not in have]
+    extra = [x for x in census_of(fn, fmt) if x not in have]
     out, st = H.check_family(f, cen, extra=extra, deep=True)
     assert out == [], st
     assert st["mark"] >= len(cen) and st["lanes"] > 10 * len(cen)
@@ -810,21 +1106,23 @@ def test_the_windows_the_centres_and_their_neighbours_inside_and_outside(
 
 
 @pytest.mark.parametrize("rnd", RND, ids=rid)
-@pytest.mark.parametrize("fn", ("exp", "expm1"))
+@pytest.mark.parametrize("fn", ("exp", "expm1", "log", "log1p"))
 def test_at_fp32_the_census_finds_no_window_and_the_theory_agrees(fn, rnd):
     """Marks need an exponent from (p + G)/2 = 32 down to p = 24: none at
-    G = 40. The study's 240 census arguments, through the fragment: none
+    G = 40 (for log, c^2 under about 3 2^(p-1-G), which is under 1). The
+    study's census, 240 arguments (log: 32), through the fragment: none
     marked, every one right; the theory puts every one outside (d > 1.3) -
     and is not vacuous: at a guard of 16 it finds windows at fp32."""
     f = ml.fragment(fn, FP32, rnd)
     out, t = H.check_census_empty(f)
-    assert out == [] and t.n == 240 and not t.marked and not t.wrong
+    assert out == [] and not t.marked and not t.wrong
+    assert t.n == len(census_of(fn, FP32)) == (32 if fn == "log" else 240)
     assert F.centres(FP32, rnd, fn) == [] and F.FAMILY[fn]["fp32"][
         sf.RND_NAMES[rnd]] == []
-    assert {F.classify(FP32, rnd, x, None, fn) for x in F.census(FP32)} <= {
-        "clear", "gated"}
+    assert {F.classify(FP32, rnd, x, None, fn)
+            for x in census_of(fn, FP32)} <= {"clear", "gated"}
     assert any(F.classify(FP32, rnd, x, 16, fn) == "mark"
-               for x in F.census(FP32))
+               for x in census_of(fn, FP32))
 
 
 @pytest.mark.parametrize("fmt", DOUBLE, ids=fid)
@@ -837,22 +1135,50 @@ def test_the_census_counts_at_the_decided_g(fn, fmt):
     for rnd in RND:
         f = ml.fragment(fn, fmt, rnd)
         assert H.check_census_counts(f, CENSUS_MARKS[fn][fmt.name]) == []
-        assert H.census_run(f).n == 240
+        assert H.census_run(f).n == (32 if fn in ("log", "log2") else 240)
 
 
 @pytest.mark.parametrize("rnd", RND, ids=rid)
 @pytest.mark.parametrize("fmt", FORMATS, ids=fid)
-def test_exp2_has_no_family_and_is_held_to_that(fmt, rnd):
-    """The study measured 0 of the census marked at fp64, fp128 and fp256;
-    the theory agrees at every format and attribute (the committed list is
-    empty and generated), and the routine marks none of the census, the deep
-    arguments, or the floats next to integers - the exact cases 2^N where a
-    window would sit - and is right on all of them."""
-    f = ml.fragment("exp2", fmt, rnd)
+@pytest.mark.parametrize("fn", H.NOFAMILY)
+def test_exp2_and_log2_have_no_family_and_are_held_to_that(fn, fmt, rnd):
+    """The study measured 0 of the census marked at fp64, fp128 and fp256 for
+    both; the theory agrees at every format and attribute (the committed list
+    is empty and generated), and the routine marks none of the census, the
+    deep arguments, or the floats next to the exact cases - exp2's integers
+    2^N, log2's powers of two 2^k, where a window would sit - and is right on
+    all of them."""
+    f = ml.fragment(fn, fmt, rnd)
     out, t = H.check_nofamily(f)
-    assert out == [] and t.n > 300 and not t.marked and not t.wrong
-    assert F.FAMILY["exp2"][fmt.name][sf.RND_NAMES[rnd]] == []
-    assert CENSUS_MARKS["exp2"][fmt.name] == (0, 0)
+    assert out == [] and t.n > (300 if fn == "exp2" else 200) \
+        and not t.marked and not t.wrong
+    assert F.FAMILY[fn][fmt.name][sf.RND_NAMES[rnd]] == []
+    assert CENSUS_MARKS[fn][fmt.name] == (0, 0)
+
+
+@pytest.mark.parametrize("fmt", DOUBLE, ids=fid)
+def test_logs_centres_are_isolated_and_the_deep_ones_grow_with_p_minus_g(fmt):
+    """log(1 + c eps) = c eps - (c eps)^2/2 + (c eps)^3/3 - ...: the square
+    term is a (half) multiple of the result's ulp when c is a power of two or
+    c^2 is a multiple of 2^m, and the value then sits the cubic term, about
+    c^2 eps/3 ulps, from a boundary, inside the bound while c^2 is under about
+    3 2^(p-1-G). So under the directed three the deep centres c = 2^a mark for
+    a up to (p - 1 - G)/2, rounded down (a = 4 at fp64, 33 at fp128, 95 at
+    fp256) and not above it; THEORY, mpmath at 4p + 200 bits, whose distance
+    d to the boundary in units of the bound is 0.67 at that a and four times
+    more at each a above it. The next float of a centre, c + 1, is another
+    integer: 2^a + 1 is clear."""
+    G = ml.GUARD[fmt.name]
+    top = (fmt.prec - 1 - G) // 2
+    for a in sorted({0, 1, 2, top - 1, top, top + 1, top + 2, top + 4}):
+        x = F.argument(fmt, ("u", 1 << a))
+        want = "mark" if a <= top else "clear"
+        assert F.classify(fmt, RTZ, x, None, "log") == want, (fmt.name, a)
+    assert 0.6 < F.distance(fmt, RTZ, F.argument(fmt, ("u", 1 << top)), None,
+                            "log") < 0.7
+    for a in (top + 1, top + 3):
+        assert F.classify(fmt, RTZ, F.argument(fmt, ("u", (1 << a) + 1)),
+                          None, "log") == "clear", (fmt.name, a)
 
 
 @pytest.mark.parametrize("fmt", DOUBLE, ids=fid)
@@ -889,27 +1215,42 @@ def test_expm1_has_a_second_family_that_the_studys_census_did_not_hold(fmt):
 
 def test_the_constants_check_as_a_module_passes_and_can_exit_nonzero(
         monkeypatch, capsys):
-    """`python -m cft_golden.mathlib --check` over the three routines and four
+    """`python -m cft_golden.mathlib --check` over the six routines and four
     formats: exit 0 and what it checked; then, with a routine built with a
     wrong word at fp64 - exp's table word, exp2's ln 2 high word, expm1's
-    first Cody-Waite word - exit 1 and the difference by name."""
+    first Cody-Waite word, log's middle word of ln 2 (defect 2), log2's low
+    word of 1/ln 2, log1p's r = x threshold (defect 8's) - exit 1 and the
+    difference by name. `--only` limits the routines the check or the listing
+    runs, and refuses a name that is not one."""
     done = subprocess.run([sys.executable, "-m", "cft_golden.mathlib",
                            "--check"], cwd=PYTHON_DIR, capture_output=True,
                           text=True)
     assert done.returncode == 0, done.stdout + done.stderr
-    assert "3 routines, 4 formats, 0 differences" in done.stdout
+    assert "6 routines, 4 formats, 0 differences" in done.stdout
     for fn in FUNCS:
         for fmt in FORMATS:
             assert f"{fn} {fmt.name}: G = {ml.GUARD[fmt.name]}" in done.stdout
+    for fn in LOG_FUNCS:                  # RECIP_SEED's cells are in the lines
+        assert done.stdout.count("RECIP_SEED's 512 cells") >= 12
+    assert ml.main(["--check", "--only", "log2"]) == 0
+    shown = capsys.readouterr().out
+    assert "1 routines, 4 formats, 0 differences" in shown
+    assert "log fp64" not in shown and "log2 fp64" in shown
+    with pytest.raises(SystemExit):
+        ml.main(["--check", "--only", "sqrt"])
+    capsys.readouterr()
     real = ml.build
     monkeypatch.setattr(ml, "FORMATS", (FP64,))
     for plant, fn, role in (("table_entry", "exp", "TH3"),
                             ("ln2_ulp", "exp2", "LN2H"),
-                            ("c1_ulp", "expm1", "NC1")):
+                            ("c1_ulp", "expm1", "NC1"),
+                            ("ln2_two_words", "log", "LN2M"),
+                            ("il2_short", "log2", "NIL2L"),
+                            ("small_2m4", "log1p", "SMALL")):
         monkeypatch.setattr(ml, "build", lambda name, fmt, rnd, _p=plant,
                             _f=fn, **kw: real(name, fmt, rnd, plant=_p
                                               if name == _f else None, **kw))
-        assert ml.main(["--check"]) == 1
+        assert ml.main(["--check", "--only", fn]) == 1
         shown = capsys.readouterr().out
         assert "DIFFERENCE" in shown and f"{fn} fp64" in shown \
             and role in shown, (plant, shown[-400:])
@@ -920,8 +1261,32 @@ def test_the_derived_constants_are_what_the_independent_derivation_says(fn):
     """Spot values read from outside the generator: ln 2 to 3,200 bits by
     its atanh series, 2^(j/8) by an integer root, against the words held:
     ln 2 as derived, the table's eight high words, the Cody-Waite sum (exp2:
-    ln 2's own words)."""
+    ln 2's own words). The log family's: log(16/C) by the atanh series in
+    integers, 1/ln 2 from ln 2's enclosure, and the words of ln 2 (log, log1p)
+    or 1/ln 2 (log2) summing to them."""
     assert H.check_spot(fn=fn) == []
+
+
+def test_recip_seeds_cells_are_what_the_log_reduction_assumes():
+    """The 512 cells of RECIP_SEED at each format (the study's 8, item 5): the
+    instruction gives the table's value, from its definition in integers,
+    at both ends of every cell; C = round(16 seed) takes every value from 8 to
+    16; max |r| = 0.0590820 = 2^-4.081 exactly (121/2048 less the last float,
+    at C = 9), the same at fp64, fp128 and fp256 to the last float, under
+    RHO_LOG = 0.0592 and over log1p's 15/256."""
+    assert H.check_recip() == []
+    for fmt in FORMATS:
+        found, rmax, cs = ml._check_recip_cells(fmt)
+        assert found == [] and cs == set(range(8, 17))
+        assert ml.SMALL_LOG < rmax < ml.RHO_LOG
+        assert float(rmax) == pytest.approx(0.05908203125, rel=1e-5)
+        assert Fraction(121, 2048) - rmax <= Fraction(
+            1, 2 ** (fmt.prec - 1)) * 2
+    # the table's definition is the instruction's: a cell the check does not
+    # believe is found by name
+    wrong = H.check_recip(FP64, entry=lambda i: ml._seed_entry(i)
+                          + (1 << 14 if i == 100 else 0))
+    assert wrong and all(s.startswith("recip:") for s in wrong)
 
 
 # =====================================================================
@@ -985,10 +1350,20 @@ def _enclosure_loose():
     return {"enclosure": (lo - Fraction(1, 2 ** 100), hi)}
 
 
+def _seed_entry_wrong():
+    """RECIP_SEED's table with cell 100's entry one C higher (16 seed is 1
+    more): the table the check derives no longer matches the instruction's."""
+    return {"entry": lambda i: ml._seed_entry(i) + ((1 << 14) if i == 100
+                                                    else 0)}
+
+
 TOOLS = {
     "ln2_wrong": ("the generator's ln 2 off by 2^-200", _ln2_wrong),
     "enclosure_loose": ("the independent enclosure of ln 2 no tighter than "
                         "2^-100", _enclosure_loose),
+    "seed_entry_wrong": ("RECIP_SEED's table, as the check derives it, with "
+                         "cell 100's entry one C higher than the "
+                         "instruction's", _seed_entry_wrong),
 }
 
 # the checks of the table, and the harness function each is
@@ -1001,7 +1376,7 @@ CHECK_FUNCTIONS = {
     "nofamily": "check_nofamily", "reorder": "check_reorder",
     "shape": "check_shape", "sums": "check_sums",
     "specialised": "check_specialised", "fixed_grid": "check_fixed_grid",
-    "spot": "check_spot",
+    "spot": "check_spot", "recip": "check_recip",
 }
 # the checks that apply to each routine, and so the columns of its rows: exp2
 # has no family (nofamily instead of family, census and census_counts), expm1
@@ -1016,6 +1391,17 @@ CHECKS_OF = {
     "expm1": ("pools", "edges", "lanes", "bound", "budget", "rate", "family",
               "constants", "census", "census_counts", "reorder", "shape",
               "sums", "specialised", "spot"),
+    # the log family (parcel MB2): log and log1p have windows, log2 none; all
+    # three read RECIP_SEED's cells; none has a fixed grid
+    "log": ("pools", "edges", "lanes", "bound", "budget", "rate", "family",
+            "constants", "census", "census_counts", "reorder", "shape",
+            "sums", "specialised", "spot", "recip"),
+    "log2": ("pools", "edges", "lanes", "bound", "budget", "rate", "nofamily",
+             "constants", "reorder", "shape", "sums", "specialised", "spot",
+             "recip"),
+    "log1p": ("pools", "edges", "lanes", "bound", "budget", "rate", "family",
+              "constants", "census", "census_counts", "reorder", "shape",
+              "sums", "specialised", "spot", "recip"),
 }
 
 
@@ -1100,6 +1486,9 @@ def run_check(check, plant, fn, fmt, rnd):
         return H.check_spot(
             builder=lambda ff, rr: ml.build(fn, ff, rr, plant=builder_plant),
             formats=(fmt,), rnd=rnd, fn=fn, **kw)
+    if check == "recip":
+        return H.check_recip(fmt, **(TOOLS[plant][1]() if plant in TOOLS
+                                     else {}))
     raise ValueError(check)
 
 
@@ -1370,6 +1759,191 @@ PLANTED = [
     ("reorder_forward", "expm1", FP32, RNE,
      ('reorder',),
      ('bound', 'constants', 'spot')),
+    # ---- the log family (parcel MB2). The rows list the reds that show the
+    # fault by name and enough greens to show it is not everything; the map of
+    # every (plant, check) pair they come from is in docs/VALIDATION.md's entry.
+    # Each routine has every check of CHECKS_OF red in a row of its own.
+    # ---- log: its own faults, and the shared ones at its builders
+    ("table_entry", "log", FP64, RNE,
+     ('pools', 'edges', 'lanes', 'bound', 'budget', 'constants'),
+     ('reorder', 'specialised', 'family')),
+    ("table_entry", "log", FP32, RNE,
+     ('pools', 'bound', 'constants'),
+     ('reorder', 'specialised', 'census')),
+    ("r_ulp", "log", FP64, RNE,
+     ('pools', 'lanes', 'bound', 'family', 'census_counts', 'shape'),
+     ('reorder', 'sums', 'specialised')),
+    ("r_ulp", "log", FP32, RNE,
+     ('bound', 'census', 'shape'),
+     ('reorder', 'sums', 'specialised')),
+    ("wrap_off", "log", FP64, RNE,
+     ('pools', 'edges', 'lanes', 'bound', 'shape'),
+     ('reorder', 'sums', 'specialised')),
+    ("ln2_two_words", "log", FP64, RNE,
+     ('bound', 'budget', 'constants', 'shape', 'spot'),
+     ('pools', 'edges', 'lanes')),
+    ("ln2_two_words", "log", FP32, RNE,
+     ('bound', 'constants', 'shape'),
+     ('pools', 'reorder', 'specialised')),
+    ("ln2h_ulp", "log", FP64, RNE,
+     ('pools', 'lanes', 'bound', 'budget', 'spot'),
+     ('family', 'census_counts', 'reorder')),
+    ("head_short", "log", FP64, RNE,
+     ('bound', 'budget', 'constants', 'shape', 'sums'),
+     ('pools', 'edges', 'lanes')),
+    ("bound_loose", "log", FP64, RNE,
+     ('bound', 'rate', 'family', 'census_counts'),
+     ('pools', 'lanes', 'reorder')),
+    ("mark_silenced", "log", FP64, RDN,
+     ('pools', 'edges', 'lanes', 'family', 'census_counts', 'shape', 'sums'),
+     ('bound', 'constants', 'reorder')),
+    ("mark_forced", "log", FP64, RNE,
+     ('pools', 'lanes', 'census_counts', 'shape', 'sums'),
+     ('bound', 'constants', 'reorder')),
+    ("two_sum_all", "log", FP64, RNE,
+     ('shape', 'sums'),
+     ('bound', 'pools', 'edges')),
+    ("abs_by_copysign", "log", FP64, RNE,
+     ('sums',),
+     ('bound', 'pools', 'edges')),
+    ("reorder_misnumbered", "log", FP64, RNE,
+     ('pools', 'reorder', 'specialised'),
+     ('bound', 'spot', 'shape')),
+    ("reorder_forward", "log", FP64, RNE,
+     ('reorder',),
+     ('bound', 'constants', 'spot')),
+    ("capacities_dropped", "log", FP64, RNE,
+     ('budget',),
+     ('bound', 'pools', 'edges'),
+     {"budget": "is past the budget's bound"}),
+    ("seed_entry_wrong", "log", FP64, RNE,
+     ('recip',),
+     ('reorder', 'specialised', 'shape')),
+    # ---- log2: its own faults (1/ln 2, the exact test), and the shared ones
+    ("table_entry", "log2", FP64, RNE,
+     ('pools', 'edges', 'lanes', 'bound', 'budget', 'constants'),
+     ('reorder', 'specialised', 'nofamily')),
+    ("r_ulp", "log2", FP64, RNE,
+     ('pools', 'bound', 'nofamily', 'shape'),
+     ('reorder', 'sums', 'specialised')),
+    ("il2_short", "log2", FP64, RNE,
+     ('lanes', 'bound', 'constants', 'spot'),
+     ('pools', 'reorder', 'specialised')),
+    ("il2_short", "log2", FP32, RNE,
+     ('bound', 'constants', 'shape'),
+     ('pools', 'reorder', 'specialised')),
+    ("il2h_ulp", "log2", FP64, RNE,
+     ('pools', 'bound', 'spot'),
+     ('reorder', 'shape', 'sums')),
+    ("exact_x_one", "log2", FP64, RNE,
+     ('pools', 'edges'),
+     ('lanes', 'bound', 'shape')),
+    ("head_short", "log2", FP64, RNE,
+     ('bound', 'budget', 'constants', 'shape', 'sums'),
+     ('pools', 'edges', 'lanes')),
+    ("bound_loose", "log2", FP64, RNE,
+     ('bound', 'budget', 'rate', 'constants'),
+     ('pools', 'edges', 'lanes')),
+    ("bound_wide", "log2", FP64, RNE,
+     ('rate', 'constants'),
+     ('bound', 'pools', 'edges')),
+    ("mark_silenced", "log2", FP64, RNE,
+     ('rate', 'shape', 'sums'),
+     ('bound', 'pools', 'edges')),
+    ("mark_forced", "log2", FP64, RNE,
+     ('pools', 'nofamily', 'shape'),
+     ('bound', 'constants', 'reorder')),
+    ("two_sum_all", "log2", FP64, RNE,
+     ('shape', 'sums'),
+     ('bound', 'pools', 'edges')),
+    ("reorder_misnumbered", "log2", FP32, RNE,
+     ('reorder', 'specialised'),
+     ('bound', 'spot', 'shape')),
+    ("reorder_forward", "log2", FP64, RNE,
+     ('reorder',),
+     ('bound', 'constants', 'spot')),
+    ("seed_entry_wrong", "log2", FP64, RNE,
+     ('recip',),
+     ('reorder', 'specialised', 'shape')),
+    # ---- log1p: its own faults (the low word, the paths, the tiny path)
+    ("table_entry", "log1p", FP64, RNE,
+     ('pools', 'edges', 'lanes', 'bound', 'budget', 'constants'),
+     ('reorder', 'specialised', 'family')),
+    ("r_ulp", "log1p", FP64, RNE,
+     ('pools', 'lanes', 'bound', 'shape'),
+     ('reorder', 'family', 'specialised')),
+    ("wrap_off", "log1p", FP64, RNE,
+     ('pools', 'bound', 'shape'),
+     ('family', 'census_counts', 'reorder')),
+    ("ln2_two_words", "log1p", FP64, RNE,
+     ('bound', 'budget', 'constants', 'shape', 'spot'),
+     ('pools', 'edges', 'lanes')),
+    ("ln2h_ulp", "log1p", FP64, RNE,
+     ('pools', 'bound', 'spot'),
+     ('family', 'census_counts', 'reorder')),
+    ("small_2m4", "log1p", FP64, RNE,
+     ('constants', 'shape'),
+     ('pools', 'edges', 'lanes')),
+    ("small_2m4", "log1p", FP256, RNE,
+     ('bound', 'constants', 'shape'),
+     ('pools', 'edges', 'lanes')),
+    ("ul_dropped", "log1p", FP64, RNE,
+     ('pools', 'lanes', 'bound', 'shape'),
+     ('family', 'constants', 'census_counts')),
+    ("ul_dropped", "log1p", FP32, RNE,
+     ('bound', 'shape'),
+     ('constants', 'reorder', 'specialised')),
+    ("newton_short", "log1p", FP64, RNE,
+     ('bound', 'budget', 'shape'),
+     ('pools', 'edges', 'lanes')),
+    ("rho2_dropped", "log1p", FP32, RNE,
+     ('bound', 'shape'),
+     ('pools', 'reorder', 'specialised')),
+    ("p2mk_unclamped", "log1p", FP64, RNE,
+     ('pools', 'constants', 'shape'),
+     ('lanes', 'bound', 'budget')),
+    ("p2mk_unclamped", "log1p", FP32, RNE,
+     ('edges', 'shape'),
+     ('lanes', 'bound', 'reorder')),
+    ("tiny_path_off", "log1p", FP64, RNE,
+     ('pools', 'edges', 'shape'),
+     ('lanes', 'bound', 'reorder')),
+    ("pminn_dropped", "log1p", FP64, RTZ,
+     ('pools', 'edges', 'shape'),
+     ('lanes', 'bound', 'reorder')),
+    ("head_short", "log1p", FP64, RNE,
+     ('bound', 'shape', 'sums'),
+     ('pools', 'edges', 'lanes')),
+    ("bound_loose", "log1p", FP64, RNE,
+     ('bound', 'rate', 'family', 'census_counts'),
+     ('edges', 'lanes', 'reorder')),
+    ("bound_wide", "log1p", FP32, RNE,
+     ('census',),
+     ('lanes', 'bound', 'reorder')),
+    ("bound_half", "log1p", FP128, RNE,
+     ('family',),
+     ('bound', 'lanes', 'reorder')),
+    ("bound_double", "log1p", FP128, RNE,
+     ('family',),
+     ('bound', 'lanes', 'reorder')),
+    ("mark_silenced", "log1p", FP64, RNE,
+     ('pools', 'family', 'census_counts', 'shape', 'sums'),
+     ('lanes', 'bound', 'constants')),
+    ("mark_forced", "log1p", FP64, RNE,
+     ('pools', 'lanes', 'census_counts', 'shape', 'sums'),
+     ('bound', 'constants', 'reorder')),
+    ("two_sum_all", "log1p", FP32, RNE,
+     ('shape', 'sums'),
+     ('reorder', 'specialised', 'bound')),
+    ("reorder_misnumbered", "log1p", FP64, RNE,
+     ('pools', 'reorder', 'specialised'),
+     ('bound', 'spot', 'shape')),
+    ("reorder_forward", "log1p", FP32, RNE,
+     ('reorder',),
+     ('bound', 'spot', 'sums')),
+    ("seed_entry_wrong", "log1p", FP64, RNE,
+     ('recip',),
+     ('reorder', 'specialised', 'shape')),
 ]
 
 
@@ -1439,9 +2013,10 @@ def test_a_clean_build_is_green_in_every_check_the_plants_use(fn):
             continue
         assert run_check(check, None, fn, FP64, RNE) == [], (fn, check)
     for check in ("shape", "sums", "specialised", "reorder", "spot",
-                  "census", "pools") + (("fixed_grid",) if fn != "expm1"
-                                        else ()):
-        if fn == "exp2" and check == "census":
+                  "census", "pools") + (("fixed_grid",) if fn in ("exp", "exp2")
+                                        else ()) \
+            + (("recip",) if fn in LOG_FUNCS else ()):
+        if fn in H.NOFAMILY and check == "census":
             continue
         assert run_check(check, None, fn, FP32, RNE) == [], (fn, check)
 
@@ -1520,3 +2095,35 @@ def test_the_sweeps_range_is_every_float_once_in_order_with_exact_bounds(fmt):
         -2 * tiny, -tiny, 0, tiny, 2 * tiny]
     shards = [xs[i::4] for i in range(4)]
     assert sorted(sum(shards, [])) == xs and len({len(s) for s in shards}) <= 2
+
+
+@pytest.mark.parametrize("fmt", FORMATS, ids=fid)
+def test_the_sweeps_strided_shards_are_the_walk_of_every_encoding(fmt):
+    """sweep_keys takes the lanes of a strided, sharded sweep as an arithmetic
+    progression, in the time of the lanes; the form that walked every
+    encoding of the range and kept those with idx % stride == 0 and
+    (idx // stride) % n == i - the sweep's form until parcel MB2, which cost
+    the whole range's walk however few lanes it took - is its oracle here:
+    equal over ranges that cross zero, that begin and end between two floats
+    and that hold none, for strides and shard counts that divide them
+    unevenly, a shard left with no lane and the shards a partition."""
+    one = sf.one_bits(fmt)
+    ulp = ml._dec(fmt, sf.next_up(fmt, one)[0]) - 1
+    tiny = ml._dec(fmt, sf.min_subnormal_bits(fmt))
+    ranges = ((Fraction(1), 1 + 40 * ulp),
+              (1 + ulp / 2, 1 + 33 * ulp + ulp / 2),
+              (1 + ulp / 2, 1 + ulp / 2),
+              (-3 * tiny, 4 * tiny))
+    for lo, hi in ranges:
+        every = list(H.range_encodings(fmt, lo, hi))
+        for stride, n in ((1, 3), (7, 3), (50, 5)):
+            taken = []
+            for i in range(n):
+                slow = [x for idx, x in enumerate(every)
+                        if idx % stride == 0 and (idx // stride) % n == i]
+                fast = [H.key_encoding(fmt, k)
+                        for k in H.sweep_keys(fmt, lo, hi, stride, (i, n))]
+                assert fast == slow, (lo, hi, stride, i, n)
+                taken += fast
+            assert sorted(taken) == sorted(every[::stride]), (lo, hi, stride,
+                                                              n)

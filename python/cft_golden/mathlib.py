@@ -1,7 +1,8 @@
 # Copyright 2026 Logan W.
 # SPDX-License-Identifier: Apache-2.0
-"""The math library's golden generator (step 6, M1's build, parcels E1 and
-MB1): exp, exp2 and expm1, as fragments of a tile program.
+"""The math library's golden generator (step 6, M1's build, parcels E1, MB1
+and MB2): exp, exp2, expm1, log, log2 and log1p, as fragments of a tile
+program.
 
 transcend.py DEFINES exp, expm1, exp2, log, log1p and log2: bits and flags,
 correctly rounded, for every argument. A tile has none of them as an
@@ -11,24 +12,24 @@ where a node stands, as it inlines division and square root. This module
 builds the fragments. They are built, not read from a program as C4's are:
 the construction below IS the design of docs/studies/M1-exp-log.md, whose
 model (docs/studies/m1/) this file ports into the tree; nothing here
-imports it. So far it builds exp (parcel E1), exp2 and expm1 (parcel MB1).
-The log family comes in M1's later parcels, each as these were.
+imports it. It builds exp (parcel E1), exp2 and expm1 (parcel MB1), and log,
+log2 and log1p (parcel MB2): all six.
 
 The interface, and only this, is what a battery may rely on:
 
   fragment(name, fmt, rnd)  the specialised routines.Fragment of `name`
-                            ("exp", "exp2" or "expm1") at fmt (FP32, FP64,
-                            FP128 or FP256) under the program's attribute
-                            rnd, held to invariants() - the widened form of
-                            C4's - as routines.fragment() holds a division
+                            (one of NAMES) at fmt (FP32, FP64, FP128 or
+                            FP256) under the program's attribute rnd, held to
+                            invariants() - the widened form of C4's - as
+                            routines.fragment() holds a division
   evaluate(f, x)            one lane: the argument's bits x run through
                             f's body, instruction by instruction, with
                             softfloat.compute as seq.py's ALU computes -
                             the pair (result bits, flag word)
 
-What a fragment is (the study's sections 2.1, 2.2, 3.1 and 4). The three
-share one shape and differ in the reduction, the reconstruction and the
-specials:
+What a fragment is (the study's sections 2.1, 2.2, 3.1 and 4). The exp
+family's three share one shape and differ in the reduction, the
+reconstruction and the specials:
 
   classify   NaN, signalling, infinity, zero, sign, the screens, the tiny
              gate: conditions the specials select on
@@ -68,6 +69,37 @@ specials:
              for |x| < 2^-(p+2) with its underflow cases, and -1, or
              -(1 - 2^-p) under rtz and rup, for x <= -(p+2) ln2
 
+The log family (the study's 2.3 and 4; parcel MB2) has the same parts and is
+not scaled, a result being always normal and never an overflow:
+
+  reduce     x = 2^E m, m in [1, 2), a subnormal x scaled by 2^p, exactly
+             (log1p: m is that of u = 1 + x = u_h + u_l by TwoSum);
+             C = round(16 RECIP_SEED(m)) by the magic-number FMA, 8 to 16;
+             C = 8 wraps (m' = m/2, C = 16, k = E + 1); c = C/16, exact;
+             r = m' c - 1 is ONE FMA and EXACT, |r| < 0.0591 = 2^-4.081
+  lookup     L_j = log(16/C), j = C mod 8, two words (three at fp32), the
+             same SELECT tree over t's low bits; L_0 = 0
+  lowword    log1p, reduction path: r_l = u_l 2^-k c, corrected by
+             r_l/(1 + r), 1/(1 + r) by Newton steps from 1 - r, 2^-k taken
+             as 0 past k = p + G + 2; at fp32 as a double word with
+             rho - rho^2/2. |x| < 15/256 skips the reduction (r = x, k = 0,
+             L = 0), the end of the path the study's defect 8 had at 2^-4
+  tail,head  Y(r) = log1p(r)/r = sum (-1)^i r^i/(i+1): a single-word tail
+             down to K, K double-word steps; at fp32 single, double (K2) and
+             triple (K3) word steps
+  Z, recon   r Y as a double word; the sum k ln2 + L_j + r Y, with ln 2 in
+             three words, the first two TRUNCATED to p - nk bits so that
+             k times either is exact (log, log1p); log2: F = L + r Y times
+             1/ln2 in two words, then k + it; fp32 sums the terms of three
+             words by levels - exactly (a TwoSum chain) down to 2^-48 of the
+             scale, by rounded adds below
+  final      as the exp family's: R = rnd(V_h + V_l) and the in-lane test
+  specials   NaN, +-0 (log, log2: -inf with divideByZero; log1p: the operand),
+             the negatives (NaN, invalid), +inf, log1p's -1 (-inf, divideByZero),
+             log(1) = +0 and log2(2^k) = k exact with no flag and no mark, and
+             log1p's tiny path fma(-x, x, x) for |x| < 2^-(p+2) with its
+             underflow cases
+
 The routine runs QUIET, its body, ENDQUIET, then RAISE of its flag word,
 as C4's do (cftc/inline.py): the flag word's bits [4:0] are exactly the
 operation's IEEE flags, in FLAGS's order, and bit 7 marks a lane the test
@@ -82,20 +114,22 @@ word floors near 2^-44.7, short of 2^-(24+40), so fp32's reduction, table,
 head and reconstruction carry THREE words (the study's 2.5).
 
 The order of a fragment's instructions. The builders emit in the design's
-order, in which the triple word's routines keep 33 to 36 values live at once
-and the double word's 22 to 25: past seq.py's 32 registers at fp32, so that
-routines.program refused them ("no register for the harness"). A fragment is
-therefore SCHEDULED (Build.fragment, schedule_order): the same instructions
-in another topological order, which keeps 19 to 21 live at fp32 and 11 to 13
-at the double word's formats (LIVE_CAP). The order changes no value; the
-order-free digest of the dataflow graph, dag_digest(), shows it. The
-instrumented form (Build) keeps the design's order.
+order, in which the exp family's triple-word routines keep 33 to 36 values
+live at once and its double word's 22 to 25: past seq.py's 32 registers at
+fp32, so that routines.program refused them ("no register for the harness");
+the log family's keep 21 to 24 and 14 to 18. A fragment is therefore
+SCHEDULED (Build.fragment, schedule_order): the same instructions in another
+topological order, which keeps 17 to 21 live at fp32 and 11 to 13 at the
+double word's formats (LIVE_CAP). The order changes no value; the order-free
+digest of the dataflow graph, dag_digest(), shows it. The instrumented form
+(Build) keeps the design's order.
 
 No augmented addition: the quad is built without R21 (revision 8's question
 9), so every error-free sum is a Fast2Sum (3 instructions) where the
 exponents of its two terms are provably ordered and a TwoSum (6) where they
 are not, as the study's design has it: the double-word exp holds nine
-Fast2Sums and one TwoSum, exp2 nine and none, expm1 ten and two, counted in
+Fast2Sums and one TwoSum, exp2 nine and none, expm1 ten and two, log, log2 and
+log1p K + 3 Fast2Sums and one, none and two TwoSums, counted in
 Build.meta["fast_two_sum"] and ["two_sum"]. That is the sense of "TwoSum, not
 augadd".
 
@@ -107,8 +141,9 @@ exits non-zero on a difference.
 
 The instrumented form. build() returns a Build, which keeps what the
 specialised fragment drops: the unpruned body, each instruction's phase,
-and the probes (V_h, V_l, Bv, the biased exponent Ek, and the values
-between). Build.fragment() is the fragment; the error budget of
+and the probes (V_h, V_l, Bv, for the scaled exp family the biased exponent
+Ek, and the values between). Build.fragment() is the fragment; the error
+budget of
 python/tests/mathlib_budget.py reads the rest. build(..., plant=name)
 builds the fragment with one named fault, for the tests: each plant is a
 defect the study's model found in itself or one a check of this file's
@@ -116,7 +151,7 @@ tests must see (PLANTS).
 
 Marks, as the study's: every figure in a comment is READ, COMPUTED or
 stated as a design; what was MEASURED is in docs/VALIDATION.md's entries for
-parcels E1 and MB1, with their commands.
+parcels E1, MB1 and MB2, with their commands.
 """
 
 import argparse
@@ -135,12 +170,15 @@ from . import softfloat as sf
 from .formats import FP32, FP64, FP128, FP256, FpFormat
 
 __all__ = ["fragment", "evaluate", "invariants", "flag_words", "build",
-           "build_exp", "build_exp2", "build_expm1", "Build", "plan_exp",
-           "plan_exp32", "GUARD", "LIVE_CAP", "PLANTS", "FORMATS", "NAMES",
-           "PHASE_ORDER", "dag_digest", "schedule_order", "check_constants",
-           "main"]
+           "build_exp", "build_exp2", "build_expm1", "build_log",
+           "build_log2", "build_log1p", "Build", "plan_exp", "plan_exp32",
+           "plan_log", "plan_log32", "GUARD", "LIVE_CAP", "PLANTS", "FORMATS",
+           "NAMES", "EXP_NAMES", "LOG_NAMES", "PHASE_ORDER", "dag_digest",
+           "schedule_order", "check_constants", "main"]
 
-NAMES = ("exp", "exp2", "expm1")       # the routines built so far
+EXP_NAMES = ("exp", "exp2", "expm1")   # the exp family (parcels E1 and MB1)
+LOG_NAMES = ("log", "log2", "log1p")   # the log family (parcel MB2)
+NAMES = EXP_NAMES + LOG_NAMES          # the routines built: all six
 FORMATS = (FP32, FP64, FP128, FP256)
 RNE, RTZ, RDN, RUP, RMM = (sf.RND_RNE, sf.RND_RTZ, sf.RND_RDN, sf.RND_RUP,
                            sf.RND_RMM)
@@ -312,6 +350,53 @@ def _screen_expm1(fmt: FpFormat):
     return _enc(fmt, -(fmt.prec + 2) * _ln2(), RDN)
 
 
+# ---- the log family's constants (parcel MB2) ---------------------------------
+
+# The log family's reduction (the study's 2.3) leaves |r| < 0.0590820 = 2^-4.081
+# over all 512 cells of RECIP_SEED, at C = 9 (the study's rmax.py; COMPUTED
+# again, exactly, by --check from the seed table). RHO_LOG is that bound
+# rounded up, the model's RHO = 0.0592, and the one rho of the family's plan.
+# log1p's r = x path ends at SMALL_LOG = 15/256 = 0.0586, under it, so one
+# (K, D) serves every path of the family; the first model's end at 2^-4 was
+# past it (defect 8, the study's 3.6).
+RHO_LOG = Fraction(592, 10000)
+SMALL_LOG = Fraction(15, 256)
+
+
+@functools.lru_cache(maxsize=None)
+def _log16(C):
+    """log(16/C) to 3,000 bits, as the exact rational it is, for C = 9 to 16
+    (0 at C = 16): the table's values."""
+    if C == 16:
+        return Fraction(0)
+    with mpmath.workprec(LN2_BITS):
+        return _frac(mpmath.log(mpmath.mpf(16) / C))
+
+
+@functools.lru_cache(maxsize=None)
+def _inv_ln2():
+    """1/ln 2 to 3,000 bits, as the exact rational it is."""
+    with mpmath.workprec(LN2_BITS):
+        return _frac(1 / mpmath.log(2))
+
+
+def _log_coefficient(i):
+    """The Taylor coefficient of r^i in Y(r) = log1p(r)/r, (-1)^i/(i+1):
+    exact."""
+    return Fraction((-1) ** i, i + 1)
+
+
+def _k_width(fmt: FpFormat):
+    """nk: the bit width of the largest |k| the log family's sum sees, with
+    two to spare: the first two words of ln 2 hold p - nk bits each, so that
+    k times either is exact (the study's 2.3). k is the exponent of x (of
+    1 + x for log1p), at most emax + 1 and, for a subnormal x scaled by 2^p,
+    at least emin - man_w; the bound used is the larger of emax + 1 and p - emin,
+    plus 2."""
+    kmax = max(fmt.emax + 1, -(fmt.emin - fmt.prec)) + 2
+    return kmax.bit_length()
+
+
 # ---- the plan: K and D ------------------------------------------------------
 
 def _rho(fmt: FpFormat, cushion_bits):
@@ -363,6 +448,70 @@ def plan_exp(fmt: FpFormat, G, rel_z=False):
     return K, D
 
 
+def plan_log(fmt: FpFormat, G):
+    """(K, D) for the double-word log family: K double-word head steps and a
+    single-word tail to degree D of Y(r) = log1p(r)/r, the smallest whose
+    estimated bound is two bits under 2^-(p+G): the tail, 2u rho^K/(K+1)
+    (u = 2^-p; the log family's V is about r Y, so a partial sum enters
+    scaled by rho^K, not exp's rho^(K+1)), within half the target, and with
+    the truncation rho^(D+1)/((D+2)(1 - rho)) and the double word's own
+    floor 12 u^2 under the target (the study's 3.2). Exact rational
+    arithmetic, so the plan is the same on every platform: (11, 23) at fp64
+    and G = 44, (12, 38) and (12, 68) at fp128 and fp256 and G = 46, the
+    study's figures."""
+    p = fmt.prec
+    u = Fraction(1, 2 ** p)
+    rho = RHO_LOG
+    target = Fraction(1, 2 ** (p + G + 2))
+    floor = 12 * u * u
+    if floor >= target:
+        raise ValueError(f"G = {G} is past the double word's floor at "
+                         f"{fmt.name}: 12 u^2 = 2^{math.log2(floor):.1f}")
+
+    def tail(K):
+        return 2 * u * rho ** K / (K + 1)
+
+    def trunc(D):
+        return rho ** (D + 1) / ((D + 2) * (1 - rho))
+    K = 1
+    while tail(K) > target / 2 and K < 60:
+        K += 1
+    D = K
+    while tail(K) + trunc(D) + floor > target and D < 200:
+        D += 1
+    return K, D
+
+
+def plan_log32(fmt: FpFormat, G):
+    """(K3, K2, D) for the triple-word log family at fp32 (new design: the
+    study models only exp there): K3 triple-word head steps, then K2
+    double-word steps, then a single-word tail to degree D of Y(r) =
+    log1p(r)/r, as plan_exp32 plans exp's, with the log family's weights. A
+    partial sum y_i enters V = r Y scaled by r^i relative to V (not exp's
+    rho^(i+1)), its coefficient is 1/(i+1) and a w-word step keeps about
+    24 w - 2 bits of relative accuracy, so y_i needs
+    need(i) = (p + G + 2) + log2(rho^i 2/(i+1)) bits: K3 is the first i
+    whose need fits two words less two bits, K3 + K2 the first that fits one
+    word less two; D the first degree whose truncation
+    rho^(D+1)/((D+2)(1 - rho)) is under 2^-(p+G+3). Exact rational
+    arithmetic."""
+    p = fmt.prec
+    rho = RHO_LOG
+
+    def fits(i, bits):
+        return rho ** i * 2 / (i + 1) <= Fraction(2) ** (bits - (p + G + 2))
+    D = 1
+    while rho ** (D + 1) / ((D + 2) * (1 - rho)) > Fraction(1, 2 ** (p + G + 3)):
+        D += 1
+    K3 = 0
+    while not fits(K3, 2 * p - 2):
+        K3 += 1
+    K23 = K3
+    while not fits(K23, p - 2):
+        K23 += 1
+    return K3, K23 - K3, D
+
+
 # ---- the builder ------------------------------------------------------------
 
 # Faults, for the tests: build(name, ..., plant=name) builds the fragment with
@@ -371,10 +520,13 @@ def plan_exp(fmt: FpFormat, G, rel_z=False):
 # python/tests/test_mathlib.py needs to see fail. The value is (the families
 # it applies to: "dw" the double word's, "tw" fp32's triple word; the
 # routines it applies to; what it is).
-_ALL = "exp exp2 expm1"
+_EXPS = "exp exp2 expm1"
+_LOGS = "log log2 log1p"
+_ALL = _EXPS + " " + _LOGS
 PLANTS = {
-    "table_entry": ("dw tw", _ALL, "T_3's high word one ulp off (the study's "
-                    "first plant)"),
+    "table_entry": ("dw tw", _ALL, "the table's entry j = 3, high word one "
+                    "ulp off (T_3 = 2^(3/8); log's L_3 = log(16/11)): the "
+                    "study's first plant"),
     "c1_ulp": ("dw tw", "exp expm1", "the reduction's first word C1 one ulp "
                "off (the second)"),
     "bound_loose": ("dw tw", _ALL, "the in-lane bound 2^-40 smaller: Bv = "
@@ -389,19 +541,19 @@ PLANTS = {
                       "(the fifth)"),
     "mark_forced": ("dw tw", _ALL, "the in-lane test's verdict forced to "
                     "'not decided': every lane of the main path marked"),
-    "rl_through_y": ("dw", _ALL, "defect 1: r_l carried through Y(r_h), not "
+    "rl_through_y": ("dw", _EXPS, "defect 1: r_l carried through Y(r_h), not "
                      "e^(r_h)"),
     "c3_dropped": ("dw", "exp expm1", "Cody-Waite in two words: n C3 dropped "
                    "from r's low word (defect 2's kind, in exp's reduction)"),
     "tiny_gate_off": ("dw tw", "exp exp2", "the tiny-argument gate removed "
                       "(the study's tenth)"),
-    "screen_ulp": ("dw tw", _ALL, "the overflow screen one ulp low"),
+    "screen_ulp": ("dw tw", _EXPS, "the overflow screen one ulp low"),
     "head_short": ("dw", _ALL, "two fewer double-word head steps (K - 2)"),
     "tininess_klt_only": ("dw tw", "exp exp2", "tininess decided on k alone, "
                           "not after rounding"),
     "c0_wrong": ("dw tw", "exp exp2", "the fixed grid's offset at k = emin "
                  "2^-3, not 2^-4: C + V reaches 2 and the grid doubles"),
-    "square_term_dropped": ("tw", _ALL, "fp32: the square term of "
+    "square_term_dropped": ("tw", _EXPS, "fp32: the square term of "
                             "e^(r1+r2) - 1 dropped (the study's defect 7)"),
     "two_sum_all": ("dw tw", _ALL, "every Fast2Sum built as a TwoSum: the "
                     "same values, 3 more instructions each, counted "
@@ -427,8 +579,9 @@ PLANTS = {
     "ln2_short": ("dw tw", "exp2", "ln 2 one word short in r = r' ln 2 "
                   "(the double word's low word, the triple word's third)"),
     # expm1's own (parcel MB1)
-    "tiny_path_off": ("dw tw", "expm1", "the tiny path fma(x, x, x) removed: "
-                      "the main path answers |x| < 2^-(p+2)"),
+    "tiny_path_off": ("dw tw", "expm1 log1p", "the tiny path removed (expm1's "
+                      "fma(x, x, x), log1p's fma(-x, x, x)): the main path "
+                      "answers |x| < 2^-(p+2)"),
     "m1_screen_off": ("dw tw", "expm1", "the clamp to -1 removed: the main "
                       "path answers x <= -(p+2) ln 2"),
     "m1_answer_rne": ("dw tw", "expm1", "the clamp's answer -1 under every "
@@ -439,6 +592,39 @@ PLANTS = {
                    "out of V"),
     "nminn_dropped": ("dw tw", "expm1", "the tiny path's underflow at "
                       "x = -2^emin under rtz and rup left out"),
+    # the log family's own (parcel MB2)
+    "ln2_two_words": ("dw tw", "log log1p", "defect 2: ln 2 one word short in "
+                      "the sum - at the double word the first of p - nk bits "
+                      "and the second of p, as the first model had it (k ln 2 "
+                      "short by up to 2^3 times the bound), at fp32 the third "
+                      "word dropped"),
+    "ln2h_ulp": ("dw tw", "log log1p", "the sum's k ln 2 off by one ulp: the "
+                 "first word of ln 2 one ulp off, so that k times it is not "
+                 "exact"),
+    "il2_short": ("dw tw", "log2", "log2's 1/ln 2 one word short: the low "
+                  "word left out (fp32: the third)"),
+    "il2h_ulp": ("dw tw", "log2", "log2's 1/ln 2 off by one ulp: the first "
+                 "word one ulp off"),
+    "r_ulp": ("dw tw", _LOGS, "the reduction off by one ulp: r = m' c - 1 "
+              "times (1 + 2^-(p-1)), no longer exact"),
+    "wrap_off": ("dw tw", _LOGS, "the wrap of C = 8 removed: m' = m, c = 1/2 "
+                 "and k not incremented"),
+    "small_2m4": ("dw tw", "log1p", "defect 8: log1p's r = x path out to "
+                  "|x| < 2^-4, past rho"),
+    "ul_dropped": ("dw tw", "log1p", "the low word u_l of 1 + x left out of "
+                   "the reduction path"),
+    "newton_short": ("dw", "log1p", "one Newton step fewer in 1/(1 + r): the "
+                     "low word's correction accurate to 2^-33 only"),
+    "rho2_dropped": ("tw", "log1p", "fp32: the square term of log1p(rho) = "
+                     "rho - rho^2/2 dropped from the low word's correction "
+                     "(2^-49 at fp32, far over the bound)"),
+    "p2mk_unclamped": ("dw tw", "log1p", "2^-k built for every k, not taken "
+                       "as 0 beyond p + G + 2 (defect 5: a NaN at "
+                       "max_normal)"),
+    "pminn_dropped": ("dw tw", "log1p", "the tiny path's underflow at "
+                      "x = +2^emin under rtz and rdn left out"),
+    "exact_x_one": ("dw tw", "log2", "log2's exact test as log's: x = 1 "
+                    "alone, not every power of two"),
     # the scheduler's (parcel MB1): the reorder of the specialised body
     "reorder_misnumbered": ("dw tw", _ALL, "a reorder that renumbers one "
                             "operand wrong: still a topological order, but "
@@ -588,6 +774,11 @@ class Build:
 
     def icmplt(self, a, b):
         return self.ins(sf.OP_ICMPLT, (a, b))
+
+    def recip_seed(self, a):
+        """About 1/a to 2^-8.5 from the 512-entry table (the log family's
+        reduction reads it, as divfull does)."""
+        return self.ins(sf.OP_RECIP_SEED, (a,))
 
     # ---- the error-free transformations (no augadd: question 9) ----
     def two_sum(self, a, c):
@@ -751,9 +942,9 @@ def _values(fmt, body, words, x, over=None):
 # Neither is optimal and none is claimed to be: the live count is measured and
 # pinned per fragment (test_mathlib.py's SHAPE), and LIVE_CAP is its maximum.
 
-PHASE_ORDER = ("setup", "reduce", "tail", "head", "head2", "head3", "Z",
-               "lookup", "recon", "scale", "fixed-grid", "final", "classify",
-               "special")
+PHASE_ORDER = ("setup", "reduce", "lowword", "tail", "head", "head2", "head3",
+               "Z", "lookup", "recon", "scale", "fixed-grid", "final",
+               "classify", "special")
 
 
 def permuted(f, order):
@@ -1034,11 +1225,10 @@ def _scale_offset(fmt: FpFormat):
     return off
 
 
-def _classify(b: Build, fn, c, k_):
-    """The conditions the specials select on, from x and words alone: NaN,
-    signalling NaN, infinity, zero, the sign, and the screens. Returns a
-    namespace; `uns` and `tinyx` are exp's and exp2's, `m1s` and `tiny`
-    expm1's."""
+def _classify_common(b: Build, k_):
+    """The conditions every routine's specials select on, from x and words
+    alone: |x| as an integer, NaN, signalling NaN, infinity, zero and the
+    sign. Returns a namespace."""
     fmt = b.fmt
     x = ("in", "a")
     ib, ZERO, INF = k_["ib"], k_["ZERO"], k_["INF"]
@@ -1051,6 +1241,16 @@ def _classify(b: Build, fn, c, k_):
     cl.isinf = b.cmpeq(cl.ax, INF)
     cl.iszero = b.icmplt(cl.ax, k_["INT1"])
     cl.neg = b.ishr(x, ib(fmt.width - 1, "SIGN_SHIFT"))
+    return cl
+
+
+def _classify(b: Build, fn, c, k_):
+    """The conditions the specials select on, from x and words alone: NaN,
+    signalling NaN, infinity, zero, the sign, and the screens. Returns a
+    namespace; `uns` and `tinyx` are exp's and exp2's, `m1s` and `tiny`
+    expm1's."""
+    x = ("in", "a")
+    cl = _classify_common(b, k_)
     if fn == "expm1":
         cl.m1s = b.cmple(x, b.const("XM1", c["XM1"]))     # x <= XM1: -1
         cl.tiny = b.icmplt(cl.ax, b.const("TINYM1", c["TINYM1"]))  # < 2^-(p+2)
@@ -1707,14 +1907,663 @@ def _build_tw(fn, fmt: FpFormat, rnd: int, G, shift, plant):
     return _finalize(b, fn, rnd, plant, c, cl, sc, k_, Wsel, mk, tinyu, exact)
 
 
+# ---- log, log2 and log1p (parcel MB2) -----------------------------------------
+#
+# The study's 2.3 and 4. x = 2^E m with m in [1, 2) (a subnormal x scaled by
+# 2^p, exactly; log1p's m is that of u = 1 + x). C = round(16 RECIP_SEED(m)) by
+# the magic-number FMA, which takes the values 8 to 16 over the 512 seed cells;
+# C = 8 wraps (m' = m/2, C = 16, k = E + 1); c = C/16; r = m' c - 1 is ONE FMA
+# and EXACT, |r| < 0.0591. Then
+#
+#   log x    = k ln 2 + L_j + log1p(r),     L_j = log(16/C), j = C mod 8
+#   log2 x   = k + (L_j + log1p(r))/ln 2
+#   log1p(x) = log(u_h + u_l), u = 1 + x by TwoSum: the same core on u_h, the
+#              low word folded in as r_l = u_l 2^-k c, corrected by r_l/(1 + r),
+#              except that |x| < 15/256 skips the reduction (r = x, k = 0,
+#              C = 16).
+#
+# log1p(r) = r Y(r), Y = sum (-1)^i r^i/(i+1): a single-word Horner tail from
+# degree D down to K, then K double-word steps, as the exp family's.
+
+def _log_constants(fn, fmt: FpFormat, G, K, D, shift, plant):
+    """{role: bits}: every derived constant of the double-word log, log2 or
+    log1p, each rounded once from an exact value:
+
+      MAGIC, SIXTEEN,  1.5 2^(p-1), 16, 1/16 and -MAGIC/16, exact: the
+      SIXTEENTH,       reduction's t = fma(seed, 16, MAGIC) is MAGIC + C, and
+      NMAGIC16         c = C/16 is fma(t, 1/16, -MAGIC/16)
+      HALF, NEGONE     1/2 (m' = m/2 where C = 8 wraps) and -1 (r = m' c - 1)
+      MINN, P2P        the smallest normal and 2^p: a subnormal x is scaled
+                       by 2^p, exactly (log1p: MINN decides its tiny path's
+                       underflow, and 2^p is not used)
+      LH_j, LL_j       L_j = log(16/C) as two words, RN and then RN of the
+                       rest, C = 8 + j for j = 1..7; entry 0 is 0
+      Y_i              the tail's coefficient (-1)^i/(i+1), RN, i = K..D
+      CH_i, CL_i       the head's, as two words, i = 0..K-1
+      log, log1p:
+      LN2H, LN2M,      ln 2 in three words: the first two TRUNCATED to p - nk
+      LN2L             bits (nk, _k_width), so that k times either is exact,
+                       the third the nearest to what is left (the study's
+                       2.3; two words, the first model's choice, were short
+                       by up to 2^3 times the bound: its defect 2)
+      log2:
+      IL2H, NIL2H,     1/ln 2 as two words, RN and then RN of the rest, and
+      NIL2L            the negations of both, which the product by FMA reads
+      log1p:
+      SMALL, TINY      15/256, below which the reduction is skipped (r = x),
+                       and 2^-(p+2), below which the tiny path answers
+      BREL             2^-(p+G): the bound; `shift` inflates it for the
+                       mark-rate law (2^shift times as wide)
+    """
+    p = fmt.prec
+    magic = Fraction(3, 2) * 2 ** (p - 1)
+    c = {}
+    c["MAGIC"] = _enc_exact(fmt, magic)
+    c["SIXTEEN"] = _enc_exact(fmt, 16)
+    c["SIXTEENTH"] = _enc_exact(fmt, Fraction(1, 16))
+    c["NMAGIC16"] = _enc_exact(fmt, -magic / 16)
+    c["HALF"] = _pow2(fmt, -1)
+    c["NEGONE"] = _enc_exact(fmt, -1)
+    c["MINN"] = sf.min_normal_bits(fmt)
+    if fn != "log1p":
+        c["P2P"] = _pow2(fmt, p)
+    for j in range(N):
+        hi, lo = _words(fmt, _log16(16 if j == 0 else 8 + j), 2)
+        if plant == "table_entry" and j == 3:
+            hi += 1
+        c[f"LH{j}"], c[f"LL{j}"] = hi, lo
+    for i in range(K, D + 1):
+        c[f"Y{i}"] = _enc(fmt, _log_coefficient(i))
+    for i in range(K):
+        c[f"CH{i}"], c[f"CL{i}"] = _words(fmt, _log_coefficient(i), 2)
+    if fn == "log2":
+        hi, lo = _words(fmt, _inv_ln2(), 2)
+        if plant == "il2_short":
+            lo = 0
+        if plant == "il2h_ulp":
+            hi += 1
+        c["IL2H"] = hi
+        c["NIL2H"], c["NIL2L"] = sf.negate(fmt, hi), sf.negate(fmt, lo)
+    else:
+        l2, nk = _ln2(), _k_width(fmt)
+        h = _truncated(fmt, l2, p - nk)
+        rest = l2 - _dec(fmt, h)
+        mid = _truncated(fmt, rest, p - nk)
+        low = _enc(fmt, rest - _dec(fmt, mid))
+        if plant == "ln2_two_words":
+            mid, low = 0, _enc(fmt, rest)
+        if plant == "ln2h_ulp":
+            h += 1
+        c["LN2H"], c["LN2M"], c["LN2L"] = h, mid, low
+    if fn == "log1p":
+        c["SMALL"] = _enc_exact(fmt, Fraction(1, 16) if plant == "small_2m4"
+                                else SMALL_LOG)
+        c["TINY"] = _pow2(fmt, -(p + 2))
+    c["BREL"] = _pow2(fmt, -(p + G) + shift - _bound_plant(plant))
+    return c
+
+
+def _log_reduce(b: Build, fn, c, k_, cl, plant):
+    """The reduction, the same at every format (the study's 2.3): the
+    namespace of m' (mp), c (cc), t (tc), r (r), k as a float (kf), and,
+    for log1p, u_l (ul). Returns it with the instructions of the "reduce"
+    phase made."""
+    fmt = b.fmt
+    p, mw = fmt.prec, fmt.man_w
+    ib, ZERO, ONE, INT1 = k_["ib"], k_["ZERO"], k_["ONE"], k_["INT1"]
+    x = cl.x
+    MAGIC = b.const("MAGIC", c["MAGIC"])
+    MANW = ib(mw, "MANTISSA_WIDTH")
+    red = types.SimpleNamespace(ul=None)
+    b.phase = "reduce"
+    koff = c["MAGIC"] - fmt.bias         # MAGIC's encoding less the bias
+    if fn == "log1p":
+        uh, red.ul = b.two_sum(ONE, x)               # u = 1 + x = uh + ul
+        xn, eoff = uh, ib(koff, "K_OFFSET")
+        b.probes.update(uh=uh, ul=red.ul)
+    else:
+        issub = b.icmplt(cl.ax, b.const("MINN", c["MINN"]))
+        xn = b.sel(b.mul(x, b.const("P2P", c["P2P"])), x, issub)
+        eoff = b.sel(ib(koff - p, "K_OFFSET_SUB"), ib(koff, "K_OFFSET"), issub)
+    m = b.ior(b.iand(xn, ib(fmt.man_mask, "MANTISSA_MASK")), ONE)
+    eb = b.ishr(xn, MANW)                            # the biased exponent
+    seed = b.recip_seed(m)
+    red.tc = b.fma(seed, b.const("SIXTEEN", c["SIXTEEN"]), MAGIC)
+    wrap = b.icmplt(red.tc, ib(c["MAGIC"] + 9, "C_WRAP"))     # C <= 8
+    red.mp = b.sel(b.mul(m, b.const("HALF", c["HALF"])), m, wrap)
+    red.cc = b.sel(ONE, b.fma(red.tc, b.const("SIXTEENTH", c["SIXTEENTH"]),
+                              b.const("NMAGIC16", c["NMAGIC16"])), wrap)
+    if plant == "wrap_off":
+        wrap = ZERO
+        red.mp, red.cc = m, b.fma(red.tc, b.const("SIXTEENTH", c["SIXTEENTH"]),
+                                  b.const("NMAGIC16", c["NMAGIC16"]))
+    red.r = b.fma(red.mp, red.cc, b.const("NEGONE", c["NEGONE"]))   # exact
+    if plant == "r_ulp":
+        red.r = b.fma(red.r, b.word(_pow2(fmt, -(p - 1)), "ULP"), red.r)
+    kb = b.iadd(b.iadd(eb, eoff), b.sel(INT1, ZERO, wrap))
+    red.kb = kb
+    red.kf = b.sub(kb, MAGIC)                        # k, as a float: exact
+    b.probes.update(m=m, tc=red.tc, cc=red.cc, r=red.r, kf=red.kf)
+    return red
+
+
+def _log_finalize(b: Build, fn, rnd, plant, c, cl, k_, R, mk, r):
+    """The flag word and the specials of log, log2 and log1p, in the study's
+    order of priority (section 4), lowest first: the main path's inexact (+ the
+    mark), the exact cases, log1p's tiny path, the infinity, the negatives,
+    zero and -1, NaN."""
+    fmt = b.fmt
+    x = cl.x
+    ib, ZERO, ONE = k_["ib"], k_["ZERO"], k_["ONE"]
+    INF, QNAN = k_["INF"], k_["QNAN"]
+    INX, INXUNF = k_["INX"], k_["INXUNF"]
+    INVALID = k_["INVALID"]
+    DIVZ = ib(sf.FLAG_DIVZERO, "FL_DIVZERO")
+    NINF = b.word(sf.inf_bits(fmt, 1), "NINF")
+    NEGONE = b.const("NEGONE", c["NEGONE"])
+    b.phase = "final"
+    fl = INX
+    if plant == "mark_forced":
+        mk = ONE
+    if plant != "mark_silenced":
+        fl = b.ior(fl, b.sel(k_["MARKW"], ZERO, mk))
+    # the exact cases carry no flag, and no mark: log(1) = +0, log2(2^k) = k
+    if fn == "log":
+        fl = b.sel(ZERO, fl, b.cmpeq(x, ONE))
+    elif fn == "log2":
+        if plant == "exact_x_one":
+            fl = b.sel(ZERO, fl, b.cmpeq(x, ONE))
+        else:
+            fl = b.sel(ZERO, fl, b.cmpeq(r, ZERO))
+    b.probes.update(mk=mk)
+
+    b.phase = "special"
+    bits = R
+    if fn == "log1p":
+        # |x| < 2^-(p+2): fma(-x, x, x) = x - x^2 under the attribute, and
+        # the underflow where it is tiny after rounding, |x| < 2^emin or x =
+        # +2^emin under rtz and rdn. -x is x IXOR the sign bit: one
+        # instruction, so that none reads only the input (question 12)
+        nx = b.ixor(x, ib(fmt.sign_mask, "SIGN_BIT"))
+        tb = b.fma(nx, x, x, rnd)
+        ut = b.icmplt(cl.ax, b.const("MINN", c["MINN"]))
+        if rnd in (RTZ, RDN) and plant != "pminn_dropped":
+            ut = b.sel(ONE, ut, b.cmpeq(x, b.const("MINN", c["MINN"])))
+        tiny = b.icmplt(cl.ax, b.const("TINY", c["TINY"]))
+        if plant != "tiny_path_off":
+            bits = b.sel(tb, bits, tiny)
+            fl = b.sel(b.sel(INXUNF, INX, ut), fl, tiny)
+        bits = b.sel(INF, bits, cl.isinf)
+        fl = b.sel(ZERO, fl, cl.isinf)
+        lt = b.cmplt(x, NEGONE)                    # x < -1, -inf included
+        bits = b.sel(QNAN, bits, lt)
+        fl = b.sel(INVALID, fl, lt)
+        m1 = b.cmpeq(x, NEGONE)
+        bits = b.sel(NINF, bits, m1)
+        fl = b.sel(DIVZ, fl, m1)
+        bits = b.sel(x, bits, cl.iszero)           # log1p(+-0) = +-0
+        fl = b.sel(ZERO, fl, cl.iszero)
+    else:
+        bits = b.sel(INF, bits, cl.isinf)
+        fl = b.sel(ZERO, fl, cl.isinf)
+        negnz = b.sel(ZERO, cl.neg, cl.iszero)     # negative and not zero
+        bits = b.sel(QNAN, bits, negnz)
+        fl = b.sel(INVALID, fl, negnz)
+        bits = b.sel(NINF, bits, cl.iszero)        # log(+-0) = -inf
+        fl = b.sel(DIVZ, fl, cl.iszero)
+    bits = b.sel(QNAN, bits, cl.isnan)
+    fl = b.sel(b.sel(INVALID, ZERO, cl.issnan), fl, cl.isnan)
+    return b.finish(bits, fl)
+
+
+def _build_log_dw(fn, fmt: FpFormat, rnd: int, G, shift, plant):
+    """log, log2 or log1p at fp64, fp128 and fp256: V as a double word (the
+    study's 2.3). The sum's ordering claims, each COMPUTED from the table's
+    values and the seed cells' runs (docs/VALIDATION.md, parcel MB2's entry
+    gives the figures): |k ln 2_h| >= |L_j|
+    wherever k != 0 (0.693 against at most 0.575) and the sum is exact at
+    k = 0 (k ln 2_h = 0), so Fast2Sum adds them; |L_j| >= |r Y| at every C
+    but 16 (0.0645 against at most 0.0340 at C = 15, the least ratio, 1.9),
+    where L is 0 and the Fast2Sum is exact, so Fast2Sum adds r Y's high word
+    to L in log2; log2's |k| >= |log2 m'| (m' from 0.941 to 1.883: log2 m'
+    from -0.087 to 0.913) for k + G; |S| >= |lo| for the last. The study
+    adds r Y to A = k ln 2_h + L_j by TwoSum, "the exponents can tie", and so
+    does this; |A| >= |r Y| holds in every case but those where A is 0 (k = 0
+    with C = 16, or the wrap), by a factor of 1.9 or more (k = 0 and C = 15:
+    0.0645 against 0.0340; k = -1 and C = 9: 0.118 against 0.057, a factor
+    of 2.1), so a Fast2Sum would do, 3 instructions fewer a call: not taken,
+    to keep the study's counts."""
+    p = fmt.prec
+    K, D = plan_log(fmt, G)
+    if plant == "head_short":
+        K -= 2
+    c = _log_constants(fn, fmt, G, K, D, shift, plant)
+    b = Build(fmt, rnd, f"{fn}-{fmt.name}-{sf.RND_NAMES[rnd]}")
+    b.meta.update(fn=fn, G=G, K=K, D=D, N=N, shift=shift, plant=plant,
+                  family="double word", scaled=False)
+    k_ = _words_common(b)
+    ib, ZERO, ONE = k_["ib"], k_["ZERO"], k_["ONE"]
+    MANW = ib(fmt.man_w, "MANTISSA_WIDTH")
+    cl = _classify_common(b, k_)
+    x = cl.x
+
+    # ---- reduce: C, c, r = m' c - 1 exact, k -------------------------------
+    red = _log_reduce(b, fn, c, k_, cl, plant)
+    r = red.r
+
+    # ---- lookup: L_j = log(16/C), j = C mod 8, a SELECT tree ----------------
+    b.phase = "lookup"
+    Lh, Ll = _table(b, c, red.tc, k_, (lambda j: f"LH{j}", lambda j: f"LL{j}"))
+    b.probes.update(Lh=Lh, Ll=Ll)
+
+    # ---- log1p: the low word of 1 + x, and the r = x path -------------------
+    corr = None
+    kf = red.kf
+    if fn == "log1p":
+        b.phase = "lowword"
+        # r_l = u_l 2^-k c, and r_l/(1 + r) by y ~ 1/(1 + r) from 1 - r by
+        # Newton steps: error r^2, then 2^-16, 2^-32, 2^-64 and the last step's
+        # rounding. 2^-k is taken as 0 past k = p + G + 2, where u_l moves
+        # log1p by less than the bound: the first model built it for every k
+        # and answered a NaN at max_normal (the study's defect 5)
+        p2mk = b.ishl(b.isub(ib(fmt.bias + c["MAGIC"], "K_BIAS_MAGIC"),
+                             red.kb), MANW)
+        if plant != "p2mk_unclamped":
+            p2mk = b.sel(ZERO, p2mk, b.icmplt(
+                ib(c["MAGIC"] + p + G + 2, "K_CLAMP"), red.kb))
+        rl = b.mul(b.mul(red.ul, p2mk), red.cc)
+        if plant == "ul_dropped":
+            rl = b.mul(b.mul(ZERO, p2mk), red.cc)
+        nr0 = b.neg(r)
+        y = b.sub(ONE, r)
+        for _ in range(2 if plant == "newton_short" else 3):
+            e = b.fma(nr0, y, b.sub(ONE, y))             # 1 - (1 + r) y
+            y = b.fma(y, e, y)
+        corr = b.mul(rl, y)
+        b.probes.update(rl=rl, yinv=y, corr=corr, p2mk=p2mk)
+        # |x| < 15/256: r = x, k = 0, C = 16 (L = 0), no low word
+        sm = b.icmplt(cl.ax, b.const("SMALL", c["SMALL"]))
+        r = b.sel(x, r, sm)
+        kf = b.sel(ZERO, kf, sm)
+        Lh, Ll = b.sel(ZERO, Lh, sm), b.sel(ZERO, Ll, sm)
+        corr = b.sel(ZERO, corr, sm)
+        b.probes.update(r_used=r, kf_used=kf, small=sm)
+
+    # ---- Y(r) = log1p(r)/r: a single-word tail, K double-word steps ---------
+    b.phase = "tail"
+    nr = b.neg(r)
+    y = b.const(f"Y{D}", c[f"Y{D}"])
+    for i in range(D - 1, K - 1, -1):
+        y = b.fma(y, r, b.const(f"Y{i}", c[f"Y{i}"]))
+    b.phase = "head"
+    yh, yl = y, None
+    for i in range(K - 1, -1, -1):
+        CH = b.const(f"CH{i}", c[f"CH{i}"])
+        CL = b.const(f"CL{i}", c[f"CL{i}"])
+        pp = b.mul(yh, r)
+        ne = b.fma(yh, nr, pp)                        # pp - yh r = -(error)
+        nl = b.fma(yl, nr, ne) if yl is not None else ne
+        s, e = b.fast_two_sum(CH, pp)                 # |c| >= |pp|: ordered
+        tt = b.sub(e, nl)
+        yl = b.add(tt, CL) if c[f"CL{i}"] else tt
+        yh = s
+
+    # ---- r Y as a double word: lp = lph - nlpl ------------------------------
+    b.phase = "Z"
+    lph = b.mul(yh, r)
+    nlpe = b.fma(yh, nr, lph)
+    nlpl = b.fma(yl, nr, nlpe)
+    if corr is not None:
+        nlpl = b.sub(nlpl, corr)
+    b.probes.update(lph=lph, nlpl=nlpl)
+
+    # ---- the sum ------------------------------------------------------------
+    b.phase = "recon"
+    if fn == "log2":
+        # F = L + r Y as a double word, times 1/ln 2 (two words), then k + it
+        F, fe = b.fast_two_sum(Lh, lph)               # |L| >= |r Y| or L = 0
+        Fl = b.sub(b.add(fe, Ll), nlpl)
+        gh = b.mul(F, b.const("IL2H", c["IL2H"]))
+        nge = b.fma(F, b.const("NIL2H", c["NIL2H"]), gh)
+        ngl = b.fma(F, b.const("NIL2L", c["NIL2L"]), nge)
+        ngl = b.fma(Fl, b.const("NIL2H", c["NIL2H"]), ngl)    # G = gh - ngl
+        S, e = b.fast_two_sum(kf, gh)                 # |k| >= |gh| or k = 0
+        lo = b.sub(e, ngl)
+    else:
+        kl = b.mul(kf, b.const("LN2H", c["LN2H"]))    # exact
+        km = b.mul(kf, b.const("LN2M", c["LN2M"]))    # exact
+        A, a = b.fast_two_sum(kl, Lh)                 # |k ln2h| >= |L| or k = 0
+        S0, s = b.two_sum(A, lph)                     # the exponents can tie
+        S, sm_ = b.fast_two_sum(S0, km)
+        t1 = b.add(b.add(s, a), sm_)
+        t2 = b.fma(kf, b.const("LN2L", c["LN2L"]), t1)
+        t3 = b.add(t2, Ll)
+        lo = b.sub(t3, nlpl)
+    Vh, Vl = b.fast_two_sum(S, lo)                    # |S| >= |lo|: ordered
+    b.probes.update(Vh=Vh, Vl=Vl)
+
+    # ---- the final rounding and the in-lane test ----------------------------
+    b.phase = "final"
+    R = b.add(Vh, Vl, rnd)                            # the guess: rnd(Vh + Vl)
+    # Bv = 2^-(p+G) |V_h|: exact; V_h is negative for x < 1
+    Bv = b.mul(b.fabs(Vh), b.const("BREL", c["BREL"]))
+    lo_dn = b.sub(Vl, Bv, RDN)
+    lo_up = b.add(Vl, Bv, RUP)
+    R1 = b.add(Vh, lo_dn, rnd)
+    R2 = b.add(Vh, lo_up, rnd)
+    mk = b.ixor(R1, R2)                               # nonzero: not decided
+    b.probes.update(R=R, R1=R1, R2=R2, Bv=Bv)
+    return _log_finalize(b, fn, rnd, plant, c, cl, k_, R, mk, r)
+
+
+def _log32_constants(fn, fmt: FpFormat, G, K3, K2, D, shift, plant):
+    """{role: bits} for the triple-word log, log2 and log1p (fp32): the
+    double word's small constants (MAGIC, SIXTEEN, SIXTEENTH, NMAGIC16, HALF,
+    NEGONE, MINN, P2P, SMALL, TINY, BREL), the table in three words (L_j_i),
+    the coefficients (-1)^i/(i+1) as single words for the tail (Y_i), double
+    words for the K2 middle steps (A_i_k) and triple words for the K3 first
+    (B_i_k), and, for log and log1p, ln 2 in three words (LN2_0 to LN2_2, each
+    the nearest to what the ones before leave, and the negations of the first
+    two, which the product's error by FMA reads), for log2 1/ln 2 the same
+    way (IL2_k, NIL2_0, NIL2_1)."""
+    p = fmt.prec
+    magic = Fraction(3, 2) * 2 ** (p - 1)
+    c = {}
+    c["MAGIC"] = _enc_exact(fmt, magic)
+    c["SIXTEEN"] = _enc_exact(fmt, 16)
+    c["SIXTEENTH"] = _enc_exact(fmt, Fraction(1, 16))
+    c["NMAGIC16"] = _enc_exact(fmt, -magic / 16)
+    c["HALF"] = _pow2(fmt, -1)
+    c["NEGONE"] = _enc_exact(fmt, -1)
+    c["MINN"] = sf.min_normal_bits(fmt)
+    if fn != "log1p":
+        c["P2P"] = _pow2(fmt, p)
+    for j in range(N):
+        for i, wd in enumerate(_words(fmt, _log16(16 if j == 0 else 8 + j), 3)):
+            if plant == "table_entry" and (j, i) == (3, 0):
+                wd += 1
+            c[f"L{j}_{i}"] = wd
+    lo_i = K3 + K2
+    for i in range(lo_i, D + 1):
+        c[f"Y{i}"] = _enc(fmt, _log_coefficient(i))
+    for i in range(K3, lo_i):
+        for k, wd in enumerate(_words(fmt, _log_coefficient(i), 2)):
+            c[f"A{i}_{k}"] = wd
+    for i in range(K3):
+        for k, wd in enumerate(_words(fmt, _log_coefficient(i), 3)):
+            c[f"B{i}_{k}"] = wd
+    if fn == "log2":
+        w0, w1, w2 = _words(fmt, _inv_ln2(), 3)
+        if plant == "il2_short":
+            w2 = 0
+        if plant == "il2h_ulp":
+            w0 += 1
+        c["IL2_0"], c["IL2_1"], c["IL2_2"] = w0, w1, w2
+        c["NIL2_0"], c["NIL2_1"] = sf.negate(fmt, w0), sf.negate(fmt, w1)
+    else:
+        w0, w1, w2 = _words(fmt, _ln2(), 3)
+        if plant == "ln2_two_words":
+            w2 = 0
+        if plant == "ln2h_ulp":
+            w0 += 1
+        c["LN2_0"], c["LN2_1"], c["LN2_2"] = w0, w1, w2
+        c["NLN2_0"], c["NLN2_1"] = sf.negate(fmt, w0), sf.negate(fmt, w1)
+    if fn == "log1p":
+        c["SMALL"] = _enc_exact(fmt, Fraction(1, 16) if plant == "small_2m4"
+                                else SMALL_LOG)
+        c["TINY"] = _pow2(fmt, -(p + 2))
+    c["BREL"] = _pow2(fmt, -(p + G) + shift - _bound_plant(plant))
+    return c
+
+
+def _cascade(b: Build, terms):
+    """The exact sum of `terms`, [(ref, negated)], a term's ref holding its
+    NEGATION where `negated` (the error of a product by FMA is held so): a
+    TwoSum chain from the first term, which must not be negated. Returns
+    (the chain's sum, the list of its errors, which are exact: sum + errors
+    is the terms' sum)."""
+    (acc, neg0), rest = terms[0], terms[1:]
+    assert not neg0
+    errs = []
+    for ref, neg in rest:
+        acc, e = b.two_diff(acc, ref) if neg else b.two_sum(acc, ref)
+        errs.append(e)
+    return acc, errs
+
+
+def _plain_sum(b: Build, terms):
+    """The sum of `terms`, [(ref, negated)], by rounded adds in the given
+    order (the smallest first): the lowest level of a sum, whose terms are
+    under 2^-47 of the result's scale, so that each add's error is under
+    2^-72 of it."""
+    (acc, neg0), rest = terms[0], terms[1:]
+    if neg0:
+        acc = b.neg(acc)
+    for ref, neg in rest:
+        acc = b.sub(acc, ref) if neg else b.add(acc, ref)
+    return acc
+
+
+def _build_log_tw(fn, fmt: FpFormat, rnd: int, G, shift, plant):
+    """log, log2 or log1p at fp32: V as three words (new design: the study
+    models only exp there; this is exp's and exp2's structure, MB1's, applied
+    to the log family). r = m' c - 1 is exact in ONE word, so there is no
+    reduction to carry; Y(r) is evaluated in triple-word, double-word and
+    single-word Horner steps (plan_log32); the table and ln 2 (or 1/ln 2) are
+    three words each, k ln 2 by TwoProd against ln 2's words; and V is the sum
+    of the three words' terms by levels - exactly (a TwoSum chain) down to
+    2^-48 of the scale, by rounded adds below - normalised by Fast2Sums, then
+    the final rounding through round-to-odd of the low words as exp's."""
+    p = fmt.prec
+    K3, K2, D = plan_log32(fmt, G)
+    c = _log32_constants(fn, fmt, G, K3, K2, D, shift, plant)
+    b = Build(fmt, rnd, f"{fn}-{fmt.name}-{sf.RND_NAMES[rnd]}-tw")
+    b.meta.update(fn=fn, G=G, K3=K3, K2=K2, D=D, N=N, shift=shift,
+                  plant=plant, family="triple word", scaled=False)
+    k_ = _words_common(b)
+    ib, ZERO, ONE, INT1 = k_["ib"], k_["ZERO"], k_["ONE"], k_["INT1"]
+    MANW = ib(fmt.man_w, "MANTISSA_WIDTH")
+    two_sum, fast_two_sum = b.two_sum, b.fast_two_sum
+    cl = _classify_common(b, k_)
+    x = cl.x
+
+    # ---- reduce: C, c, r = m' c - 1 exact, k --------------------------------
+    red = _log_reduce(b, fn, c, k_, cl, plant)
+    r = red.r
+
+    # ---- lookup: L_j = log(16/C) in three words ------------------------------
+    b.phase = "lookup"
+    L0, L1, L2 = _table(b, c, red.tc, k_,
+                        tuple(lambda j, i=i: f"L{j}_{i}" for i in range(3)))
+    b.probes.update(L0=L0, L1=L1, L2=L2)
+
+    # ---- log1p: the low word of 1 + x, and the r = x path --------------------
+    kf, corr_h, corr_l = red.kf, None, None
+    if fn == "log1p":
+        b.phase = "lowword"
+        # rho = r_l/(1 + r) with r_l = u_l 2^-k c, as a double word, and log1p
+        # of it, rho - rho^2/2: at fp32 r_l is up to 2^-24, so rho^2/2 (2^-49)
+        # is far over the bound and rho^3/3 (2^-73) is not. 2^-k is taken as 0
+        # past k = p + G + 2, where u_l moves log1p by less than the bound
+        # (defect 5). u_l 2^-k is exact; r_l = rlh + rll by TwoProd with c;
+        # y = 1/(1 + r) from 1 - r by two single-word Newton steps and a
+        # double-word one (y_h, y_l = y_h e: 2^-48); rho = rl y by TwoProd of
+        # the high words and the two cross products
+        p2mk = b.ishl(b.isub(ib(fmt.bias + c["MAGIC"], "K_BIAS_MAGIC"),
+                             red.kb), MANW)
+        if plant != "p2mk_unclamped":
+            p2mk = b.sel(ZERO, p2mk, b.icmplt(
+                ib(c["MAGIC"] + p + G + 2, "K_CLAMP"), red.kb))
+        ul2 = b.mul(red.ul, p2mk)
+        if plant == "ul_dropped":
+            ul2 = b.mul(ZERO, p2mk)
+        rlh = b.mul(ul2, red.cc)
+        nrle = b.fma(ul2, b.neg(red.cc), rlh)             # rlh - ul2 c = -rll
+        nr0 = b.neg(r)
+        y = b.sub(ONE, r)
+        for _ in range(2):
+            e = b.fma(nr0, y, b.sub(ONE, y))              # 1 - (1 + r) y
+            y = b.fma(y, e, y)
+        e = b.fma(nr0, y, b.sub(ONE, y))
+        yl = b.mul(y, e)
+        rh = b.mul(rlh, y)
+        nre = b.fma(rlh, b.neg(y), rh)                    # rh - rlh y = -erh
+        # rho_l = erh + rlh y_l + rll y = rlh y_l - w1 with w1 = nre + nrle y;
+        # held negated, with rho_h^2/2 taken off: nrho_l = -rho_l, ncorr_l =
+        # -(rho_l - rho_h^2/2)
+        w1 = b.fma(nrle, y, nre)
+        nrho_l = b.fma(b.neg(rlh), yl, w1)
+        hrh = b.mul(rh, b.const("HALF", c["HALF"]))
+        corr_h = rh
+        corr_l = nrho_l if plant == "rho2_dropped" else \
+            b.fma(hrh, rh, nrho_l)
+        b.probes.update(rl=rlh, yinv=y, corr=corr_h, p2mk=p2mk)
+        # |x| < 15/256: r = x, k = 0, C = 16 (L = 0), no low word
+        sm = b.icmplt(cl.ax, b.const("SMALL", c["SMALL"]))
+        r = b.sel(x, r, sm)
+        kf = b.sel(ZERO, kf, sm)
+        L0, L1, L2 = (b.sel(ZERO, w, sm) for w in (L0, L1, L2))
+        corr_h, corr_l = b.sel(ZERO, corr_h, sm), b.sel(ZERO, corr_l, sm)
+        b.probes.update(r_used=r, kf_used=kf, small=sm)
+
+    # ---- Y(r): a single tail, double-word steps, triple-word steps ----------
+    b.phase = "tail"
+    nr = b.neg(r)
+    y = b.const(f"Y{D}", c[f"Y{D}"])
+    lo_i = K3 + K2
+    for i in range(D - 1, lo_i - 1, -1):
+        y = b.fma(y, r, b.const(f"Y{i}", c[f"Y{i}"]))
+    b.phase = "head2"
+    yh, yl = y, None
+    for i in range(lo_i - 1, K3 - 1, -1):
+        CH = b.const(f"A{i}_0", c[f"A{i}_0"])
+        CL = b.const(f"A{i}_1", c[f"A{i}_1"])
+        pp = b.mul(yh, r)
+        ne = b.fma(yh, nr, pp)
+        nl = b.fma(yl, nr, ne) if yl is not None else ne
+        s, e = fast_two_sum(CH, pp)
+        tt = b.sub(e, nl)
+        yl = b.add(tt, CL) if c[f"A{i}_1"] else tt
+        yh = s
+    b.phase = "head3"
+    y0, y1, y2 = yh, yl, None
+    for i in range(K3 - 1, -1, -1):
+        C0w = b.const(f"B{i}_0", c[f"B{i}_0"])
+        C1w = b.const(f"B{i}_1", c[f"B{i}_1"])
+        C2w = b.const(f"B{i}_2", c[f"B{i}_2"])
+        c1, c2 = c[f"B{i}_1"], c[f"B{i}_2"]
+        p0 = b.mul(y0, r)
+        ne0 = b.fma(y0, nr, p0)                       # = -e0
+        p1 = b.mul(y1, r) if y1 is not None else None
+        ne1 = b.fma(y1, nr, p1) if y1 is not None else None
+        p2 = b.mul(y2, r) if y2 is not None else None
+        s0_, t0 = fast_two_sum(C0w, p0)               # level 0
+        lv1 = [t0] + ([C1w] if c1 else []) + ([p1] if p1 is not None else [])
+        acc, errs = lv1[0], []
+        for term in lv1[1:]:
+            acc, er = two_sum(acc, term)
+            errs.append(er)
+        acc, er = two_sum(acc, b.neg(ne0))
+        errs.append(er)
+        lv2 = errs + ([C2w] if c2 else [])
+        s2_ = lv2[0]
+        for term in lv2[1:]:
+            s2_ = b.add(s2_, term)
+        if ne1 is not None:
+            s2_ = b.sub(s2_, ne1)
+        if p2 is not None:
+            s2_ = b.add(s2_, p2)
+        a0, a1 = fast_two_sum(s0_, acc)
+        a1, a2 = fast_two_sum(a1, s2_)
+        y0, y1, y2 = a0, a1, a2
+    b.probes.update(y0=y0, y1=y1, y2=y2)
+
+    # ---- r Y as terms: P0 + e0 + P1 + e1 + P2 --------------------------------
+    b.phase = "Z"
+    P0 = b.mul(y0, r)
+    nE0 = b.fma(y0, nr, P0)                           # P0 - y0 r = -e0
+    P1 = b.mul(y1, r)
+    nE1 = b.fma(y1, nr, P1)
+    P2 = b.mul(y2, r)
+
+    # ---- the sum -------------------------------------------------------------
+    b.phase = "recon"
+    if fn == "log2":
+        # F = L + r Y as three words
+        F0s, Ea = fast_two_sum(L0, P0)                # |L0| >= |P0| or L0 = 0
+        S1, errs = _cascade(b, [(Ea, False), (L1, False), (nE0, True),
+                                (P1, False)])
+        S2 = _plain_sum(b, [(P2, False), (nE1, True), (L2, False)]
+                        + [(e, False) for e in errs])
+        F0, F1 = fast_two_sum(F0s, S1)
+        F1, F2 = fast_two_sum(F1, S2)
+        F0, F1 = fast_two_sum(F0, F1)
+        # G = F / ln 2: F times 1/ln 2 in three words, TwoProd for the
+        # products of the first levels and rounded products below
+        I0, I1, I2 = (b.const(f"IL2_{i}", c[f"IL2_{i}"]) for i in range(3))
+        NI0, NI1 = (b.const(f"NIL2_{i}", c[f"NIL2_{i}"]) for i in range(2))
+        g0 = b.mul(F0, I0)
+        ng0 = b.fma(F0, NI0, g0)
+        g1 = b.mul(F0, I1)
+        ng1 = b.fma(F0, NI1, g1)
+        g2 = b.mul(F1, I0)
+        ng2 = b.fma(F1, NI0, g2)
+        q0, q1, q2 = b.mul(F0, I2), b.mul(F1, I1), b.mul(F2, I0)
+        # V = k + G
+        S0, Ea = fast_two_sum(kf, g0)                 # |k| >= |g0| or k = 0
+        S1, errs = _cascade(b, [(Ea, False), (ng0, True), (g1, False),
+                                (g2, False)])
+        S2 = _plain_sum(b, [(q2, False), (q1, False), (q0, False),
+                            (ng2, True), (ng1, True)]
+                        + [(e, False) for e in errs])
+    else:
+        # k ln 2: TwoProd against ln 2's first two words, a rounded product
+        # with the third
+        LN0, LN1, LN2 = (b.const(f"LN2_{i}", c[f"LN2_{i}"]) for i in range(3))
+        NLN0, NLN1 = (b.const(f"NLN2_{i}", c[f"NLN2_{i}"]) for i in range(2))
+        kP0 = b.mul(kf, LN0)
+        knE0 = b.fma(kf, NLN0, kP0)                   # kP0 - k L0 = -e
+        kP1 = b.mul(kf, LN1)
+        knE1 = b.fma(kf, NLN1, kP1)
+        kP2 = b.mul(kf, LN2)
+        s1, Ea = fast_two_sum(kP0, L0)                # |kP0| >= |L0| or k = 0
+        S0, Eb = two_sum(s1, P0)                      # the exponents can tie
+        lv1 = [(Ea, False), (Eb, False), (knE0, True), (kP1, False),
+               (L1, False), (nE0, True), (P1, False)]
+        if corr_h is not None:
+            lv1.append((corr_h, False))
+        S1, errs = _cascade(b, lv1)
+        lv2 = [(P2, False), (nE1, True), (L2, False), (kP2, False),
+               (knE1, True)]
+        if corr_l is not None:
+            lv2.append((corr_l, True))                # held negated
+        S2 = _plain_sum(b, lv2 + [(e, False) for e in errs])
+    V0, V1 = fast_two_sum(S0, S1)
+    V1, V2 = fast_two_sum(V1, S2)
+    V0, V1 = fast_two_sum(V0, V1)
+    b.probes.update(V0=V0, V1=V1, V2=V2, Vh=V0)
+
+    # ---- final: R = rnd(V0 + RO(V1 + V2)); the test on V1 + V2 -+ Bv ---------
+    b.phase = "final"
+    lo = _round_to_odd_add(b, V1, V2, INT1)
+    R = b.add(V0, lo, rnd)
+    Bv = b.mul(b.fabs(V0), b.const("BREL", c["BREL"]))
+    lo_dn = _round_to_odd_add(b, V1, b.sub(V2, Bv, RDN), INT1)
+    lo_up = _round_to_odd_add(b, V1, b.add(V2, Bv, RUP), INT1)
+    R1 = b.add(V0, lo_dn, rnd)
+    R2 = b.add(V0, lo_up, rnd)
+    mk = b.ixor(R1, R2)
+    b.probes.update(R=R, R1=R1, R2=R2, Bv=Bv)
+    return _log_finalize(b, fn, rnd, plant, c, cl, k_, R, mk, red.r)
+
+
 def build(name, fmt: FpFormat, rnd: int, *, guard=None, bound_shift=0,
           plant=None) -> Build:
-    """`name` ("exp", "exp2" or "expm1") at `fmt` under the program's
-    attribute `rnd`, instrumented (Build.fragment() is the routine). `guard`
-    overrides the guard G (GUARD's, by default); `bound_shift` makes the
-    in-lane bound 2^shift times as wide, so that marks are common enough to
-    count (the mark-rate law, the study's 3.4); `plant` builds one fault of
-    PLANTS."""
+    """`name` (one of NAMES) at `fmt` under the program's attribute `rnd`,
+    instrumented (Build.fragment() is the routine). `guard` overrides the
+    guard G (GUARD's, by default); `bound_shift` makes the in-lane bound
+    2^shift times as wide, so that marks are common enough to count (the
+    mark-rate law, the study's 3.4); `plant` builds one fault of PLANTS."""
     if name not in NAMES:
         raise ValueError(f"{name!r} is not a math-library routine built so "
                          f"far: {', '.join(NAMES)}")
@@ -1735,9 +2584,28 @@ def build(name, fmt: FpFormat, rnd: int, *, guard=None, bound_shift=0,
             raise ValueError(f"plant {plant!r} does not apply to {name}: "
                              f"{names}")
     G = GUARD[fmt.name] if guard is None else guard
+    if name in LOG_NAMES:
+        if family == "tw":
+            return _build_log_tw(name, fmt, rnd, G, bound_shift, plant)
+        return _build_log_dw(name, fmt, rnd, G, bound_shift, plant)
     if family == "tw":
         return _build_tw(name, fmt, rnd, G, bound_shift, plant)
     return _build_dw(name, fmt, rnd, G, bound_shift, plant)
+
+
+def build_log(fmt: FpFormat, rnd: int, **kw) -> Build:
+    """build("log", fmt, rnd, ...)."""
+    return build("log", fmt, rnd, **kw)
+
+
+def build_log2(fmt: FpFormat, rnd: int, **kw) -> Build:
+    """build("log2", fmt, rnd, ...)."""
+    return build("log2", fmt, rnd, **kw)
+
+
+def build_log1p(fmt: FpFormat, rnd: int, **kw) -> Build:
+    """build("log1p", fmt, rnd, ...)."""
+    return build("log1p", fmt, rnd, **kw)
 
 
 def build_exp(fmt: FpFormat, rnd: int, **kw) -> Build:
@@ -1772,26 +2640,34 @@ FLAG_WORDS = routines.FLAG_WORDS | frozenset(
                        sf.FLAG_UNDERFLOW | sf.FLAG_INEXACT))
 
 # The most values a fragment may keep live at once, by format: the most any
-# of the three routines keeps under any of the five attributes, in the order
-# the scheduler gives (MEASURED, parcel MB1; SHAPE in test_mathlib.py pins
-# each routine's exact count). In the design's own order the double word's
-# routines keep 22 to 25 live and fp32's triple word 33 to 36 - past seq.py's
-# 32 registers, so that routines.program refused fp32's exp ("no register for
-# the harness"); scheduled they keep
+# of the six routines keeps under any of the five attributes, in the order
+# the scheduler gives (MEASURED, parcels MB1 and MB2; SHAPE in
+# test_mathlib.py pins each routine's exact count). In the design's own order
+# the exp family at the double word keeps 22 to 25 live and at fp32's triple
+# word 33 to 36 - past seq.py's 32 registers, so that routines.program refused
+# fp32's exp ("no register for the harness"); the log family keeps 14 to 18
+# at the double word and 21 to 24 at fp32, which fit. Scheduled they keep
 #
 #           fp32      fp64, fp128, fp256
 #   exp      19            11
 #   exp2     20            13
 #   expm1    21            13
+#   log      19            13
+#   log2     17            13
+#   log1p    20            12
 #
 # and the cap is the largest of each column, because that is what the design
-# measures, so a growth is a change to look at. It leaves NREG - cap of
+# measures, so a growth is a change to look at. The log family needed no more
+# than the exp family's: its maxima, 19, 17 and 20 at fp32 and 13, 13 and 12
+# at the double word, are under the cap, so the cap is by format as MB1 set
+# it, not by function and format. It leaves NREG - cap of
 # seq.py's 32 registers for the program's own values across a call - 11 at
 # fp32, 19 at the double word's formats - which the compiler's allocator
 # spills when it must (C4's allocator does so around any routine). The caps
 # are not a minimum: the scheduler is two cheap heuristics, and the triple
-# word's state (the three words of y, Z and T, with the reconstruction's
-# running sums) is itself most of fp32's 19 to 21.
+# word's state (the three words of y and of the running sums, with the
+# table's, the reduction's and the sum's terms) is itself most of fp32's 17
+# to 21.
 LIVE_CAP = {"fp32": 21, "fp64": 13, "fp128": 13, "fp256": 13}
 _BY_FORMAT = object()            # invariants()'s default cap: LIVE_CAP's
 
@@ -2016,8 +2892,13 @@ def _why_not(fmt, rule, bits, lo, hi, nbits=None):
         u = sf.unpack(fmt, bits)
         sig = u.m.bit_length() - ((u.m & -u.m).bit_length() - 1)
         e = u.m.bit_length() - 1 + u.e
-        ok = (sig <= nbits and w <= lo
-              and hi < w + Fraction(2) ** (e - nbits + 1))
+        if w == 0:
+            # zero has no leading bit: it is the truncation of 0 alone (a
+            # word dropped, as the log family's defect 2, is not one)
+            ok = lo == hi == 0
+        else:
+            ok = (sig <= nbits and w <= lo
+                  and hi < w + Fraction(2) ** (e - nbits + 1))
     else:
         raise ValueError(rule)
     if ok:
@@ -2142,21 +3023,19 @@ def _check_plan(fmt, family, G, l2hi, rel_z=False):
     return (K, D)
 
 
-def _check_build(b: Build, findings):
-    """Every derived constant of one built routine, against its independent
-    derivation, and the scale words where they act. -> (constants checked,
-    lanes run)."""
-    fmt, p = b.fmt, b.fmt.prec
-    fn = b.meta["fn"]
-    tag = f"{fn} {fmt.name} {sf.RND_NAMES[b.rnd]}"
-    tw = b.meta["family"] == "triple word"
-    G = b.meta["G"]
+def _verifier(b: Build, findings):
+    """(tag, verify, point, seen, count) for one built routine: verify(role,
+    rule, lo, hi, nbits, negated) checks the constant `role` as the built
+    fragment holds it (negated: the held word is the constant's negation)
+    against the rounding `rule` of the enclosure [lo, hi] and returns its
+    value, for the next word; point(role, value) is the exact rule. `seen`
+    collects the roles asked, `count[0]` counts them."""
+    fmt = b.fmt
+    tag = f"{b.meta['fn']} {fmt.name} {sf.RND_NAMES[b.rnd]}"
     seen = set()
     count = [0]
 
     def verify(role, rule, lo, hi, nbits=None, negated=False):
-        """Check the constant `role`, as held (negated: the held word is
-        the constant's negation). -> its value, for the next word."""
         seen.add(role)
         if role not in b.roles:
             findings.append(f"{tag}: the fragment has no constant {role}")
@@ -2174,6 +3053,18 @@ def _check_build(b: Build, findings):
     def point(role, value, negated=False):
         return verify(role, "exact", Fraction(value), Fraction(value),
                       negated=negated)
+    return tag, verify, point, seen, count
+
+
+def _check_build(b: Build, findings):
+    """Every derived constant of one built routine, against its independent
+    derivation, and the scale words where they act. -> (constants checked,
+    lanes run)."""
+    fmt, p = b.fmt, b.fmt.prec
+    fn = b.meta["fn"]
+    tw = b.meta["family"] == "triple word"
+    G = b.meta["G"]
+    tag, verify, point, seen, count = _verifier(b, findings)
 
     l2lo, l2hi = _check_ln2()
     nb = _n_width(fmt)
@@ -2284,6 +3175,378 @@ def _check_build(b: Build, findings):
     return count[0], _check_scale(b, findings)
 
 
+# ---- the log family's constants, checked ------------------------------------
+#
+# The same way as the exp family's, with these enclosures (integer arithmetic,
+# nothing shared with the generator or with mpmath):
+#
+#   log(16/C)   2 atanh((16 - C)/(16 + C)) = 2 sum t^(2k+1)/(2k+1), floors of
+#               2^3200 over each term, the loss counted: width 2^-3190
+#   1/ln 2      the reciprocal of ln 2's enclosure
+#   RECIP_SEED  each of the 512 cells' table entry from its definition (the
+#               nearest integer to 2^18/(1 + (i + 1/2)/2^9)), read again from
+#               the instruction itself at the cell's two ends, then C, c, the
+#               wrap and max |r| over the cells, exactly
+#   the plan    (K, D) or (K3, K2, D) again, from RHO_LOG, itself held to the
+#               cells' max |r|
+
+@functools.lru_cache(maxsize=None)
+def _check_log16(C):
+    """(lo, hi): log(16/C) enclosed, C = 9 to 16, from the atanh series in
+    integers; (0, 0) at C = 16."""
+    if C == 16:
+        return Fraction(0), Fraction(0)
+    bits = 3200
+    one = 1 << bits
+    n, d = 16 - C, 16 + C
+    total, k, pn, pd = 0, 0, n, d
+    while True:
+        t = (one * pn) // (pd * (2 * k + 1))
+        if t == 0:
+            break
+        total += t
+        k += 1
+        pn *= n * n
+        pd *= d * d
+    return Fraction(2 * total, one), Fraction(2 * (total + k + 2), one)
+
+
+@functools.lru_cache(maxsize=None)
+def _check_inv_ln2():
+    """(lo, hi): 1/ln 2 enclosed, from ln 2's."""
+    lo, hi = _check_ln2()
+    return 1 / hi, 1 / lo
+
+
+def _seed_entry(i):
+    """RECIP_SEED's table entry for the mantissa cell i, again from its
+    definition (softfloat.py): the nearest integer to 2^18/(1 + (i + 1/2)/2^9),
+    a tie to even, in integers. The seed of m in cell i is entry / 2^18."""
+    den = (1 << 10) + 2 * i + 1
+    q, r = divmod(1 << 28, den)
+    if 2 * r > den or (2 * r == den and q & 1):
+        q += 1
+    return q
+
+
+def _seed_C(i, entry=_seed_entry):
+    """C = round(16 seed) for the cell i, by the magic-number FMA's rounding
+    (nearest, a tie to even): entry/2^14 rounded."""
+    q, r = divmod(entry(i), 1 << 14)
+    if 2 * r > (1 << 14) or (2 * r == (1 << 14) and q & 1):
+        q += 1
+    return q
+
+
+_CELLS = {}                      # the default table's cells, by format
+
+
+def _check_recip_cells(fmt: FpFormat, entry=_seed_entry):
+    """(findings, max |r|, the set of C): over all 512 cells of RECIP_SEED at
+    `fmt`, from the definition of the table (`entry`, which a test can fault):
+    the instruction gives the table's value at both ends of the cell
+    (softfloat.recip_seed on the cell's lowest and highest mantissa), C is 8
+    to 16, and r = m' c - 1 (c = C/16, or m' = m/2 and c = 1 where C = 8
+    wraps) has |r| at most RHO_LOG at both ends of every cell, with
+    SMALL_LOG under it too; max |r| is returned exactly. r is a multiple of
+    2^-(p+3) under 2^-4.08, so it holds p - 1 bits and the FMA is exact."""
+    if entry is _seed_entry:
+        if fmt.name not in _CELLS:
+            _CELLS[fmt.name] = _check_recip_cells(fmt, lambda i: _seed_entry(i))
+        return _CELLS[fmt.name]
+    p = fmt.prec
+    out, cs, rmax = [], set(), Fraction(0)
+    ulp = Fraction(1, 2 ** (p - 1))
+    for i in range(512):
+        C = _seed_C(i, entry)
+        cs.add(C)
+        lo_m = 1 + Fraction(i, 512)
+        hi_m = 1 + Fraction(i + 1, 512) - ulp
+        for m in (lo_m, hi_m):
+            got = sf.recip_seed(fmt, _enc(fmt, m))[0]
+            want = Fraction(entry(i), 1 << 18)
+            if _dec(fmt, got) != want:
+                out.append(f"RECIP_SEED at {fmt.name}: the cell {i} gives "
+                           f"{float(_dec(fmt, got))!r}, the table "
+                           f"{float(want)!r}")
+                break
+        if not 8 <= C <= 16:
+            out.append(f"RECIP_SEED at {fmt.name}: the cell {i} gives C = {C}, "
+                       f"outside 8 to 16")
+            continue
+        for m in (lo_m, hi_m):
+            r = abs((m / 2) * 1 - 1) if C == 8 else abs(m * Fraction(C, 16) - 1)
+            rmax = max(rmax, r)
+    if rmax > RHO_LOG:
+        out.append(f"RECIP_SEED at {fmt.name}: max |r| = {float(rmax)!r} is "
+                   f"past RHO_LOG = {float(RHO_LOG)!r}")
+    if SMALL_LOG > RHO_LOG:
+        out.append(f"SMALL_LOG = {float(SMALL_LOG)!r} is past RHO_LOG")
+    return out, rmax, cs
+
+
+def _check_plan_log(fmt: FpFormat, family, G):
+    """The plan again: (K, D) or (K3, K2, D), the smallest satisfying the
+    conditions of plan_log and plan_log32, from RHO_LOG."""
+    p = fmt.prec
+    rho = RHO_LOG
+    if family == "triple word":
+        def fits(i, bits):
+            return rho ** i * 2 / (i + 1) <= Fraction(2) ** (bits - (p + G + 2))
+        D = next(d for d in range(1, 150)
+                 if rho ** (d + 1) / ((d + 2) * (1 - rho)) <=
+                 Fraction(1, 2 ** (p + G + 3)))
+        K3 = next(i for i in range(60) if fits(i, 2 * p - 2))
+        K23 = next(i for i in range(K3, 80) if fits(i, p - 2))
+        return (K3, K23 - K3, D)
+    u = Fraction(1, 2 ** p)
+    target = Fraction(1, 2 ** (p + G + 2))
+
+    def tail(K):
+        return 2 * u * rho ** K / (K + 1)
+
+    def trunc(D):
+        return rho ** (D + 1) / ((D + 2) * (1 - rho))
+    K = next(k for k in range(1, 60) if tail(k) <= target / 2)
+    D = next(d for d in range(K, 200)
+             if tail(K) + trunc(d) + 12 * u * u <= target)
+    return (K, D)
+
+
+def _floor_log2(v):
+    """floor(log2 v) for a positive Fraction, exactly."""
+    e = v.numerator.bit_length() - v.denominator.bit_length()
+    while Fraction(2) ** e > v:
+        e -= 1
+    while Fraction(2) ** (e + 1) <= v:
+        e += 1
+    return e
+
+
+def _log_scale_lanes(fmt: FpFormat, fn, G):
+    """The arguments the reduction's integer words are checked on: x = m 2^E
+    for the mantissas at which C changes (the first and last float of each
+    run of cells, from the table), 1, 1 + ulp and 2 - ulp, at exponents from
+    the smallest subnormal's to the largest normal's (log, log2: the
+    subnormal ones are scaled by 2^p); log1p: x = +-m 2^E and u - 1 for
+    u = m 2^E, with the exponents at the r = x path's end, the tiny path's
+    and 2^-k's clamp."""
+    p, mw = fmt.prec, fmt.man_w
+    ulp = Fraction(1, 2 ** (p - 1))
+    ms = {Fraction(1), 1 + ulp, Fraction(3, 2), 2 - ulp}
+    prev = None
+    for i in range(512):
+        C = _seed_C(i)
+        if C != prev:
+            ms.add(1 + Fraction(i, 512))
+            if i:
+                ms.add(1 + Fraction(i, 512) - ulp)
+        prev = C
+    ms = sorted(ms)
+    xs = set()
+    if fn != "log1p":
+        es = [fmt.emin - mw, fmt.emin - mw + 3, fmt.emin - mw // 2,
+              fmt.emin - 1, fmt.emin, fmt.emin + 1, -1, 0, 1, p, fmt.emax - 1,
+              fmt.emax]
+        for e in es:
+            for m in ms:
+                xs.add(_enc(fmt, m * Fraction(2) ** e))
+    else:
+        clamp = p + G + 2
+        es = [-(p + 3), -(p + 2), -(p + 1), -5, -4, -3, -2, -1, 0, 1, 2, p,
+              clamp - 1, clamp, clamp + 1, clamp + 2, fmt.emax - 1, fmt.emax]
+        for e in es:
+            for m in ms:
+                v = m * Fraction(2) ** e
+                for s in (1, -1):
+                    xs.add(_enc(fmt, s * v))
+                if -2 <= e <= p:
+                    xs.add(_enc(fmt, v - 1))
+        for s in (1, -1):
+            edge = _enc(fmt, s * SMALL_LOG)
+            xs.update(edge + d for d in (-1, 0, 1))
+    return sorted(x for x in xs
+                  if sf.unpack(fmt, x).kind in (sf.NORM, sf.SUB)
+                  and x != fmt.sign_mask)
+
+
+def _check_log_scale(b: Build, findings):
+    """The log family's reduction where it acts: the integer words (the
+    exponent offsets, the wrap compare, the 2^-k word and its clamp) cannot be
+    rounded reals, so lanes are run through the UNPRUNED body and its probes
+    compared with exact values: C and t = MAGIC + C, c, r = m' c - 1 and k as
+    floats, the table words read for j = C mod 8, and, for log1p, 1 + x = u_h +
+    u_l, 2^-k (0 past the clamp) and the r = x path's selection. C comes from
+    the table of _seed_entry, not from the instruction under test. -> lanes
+    run."""
+    fmt, p = b.fmt, b.fmt.prec
+    fn, G = b.meta["fn"], b.meta["G"]
+    tw = b.meta["family"] == "triple word"
+    where = f"{fn} {fmt.name} {sf.RND_NAMES[b.rnd]}"
+    magic = Fraction(3, 2) * 2 ** (p - 1)
+    clamp = p + G + 2
+    want = ["tc", "cc", "r", "kf"] + (["L0", "L1", "L2"] if tw
+                                      else ["Lh", "Ll"])
+    if fn == "log1p":
+        want += ["uh", "ul", "p2mk", "r_used", "kf_used", "small"]
+    ran = 0
+    for x in _log_scale_lanes(fmt, fn, G):
+        xv = _dec(fmt, x)
+        if fn == "log1p":
+            u = 1 + xv
+            if u <= 0:
+                continue
+            uh_bits = _enc(fmt, u)
+            m_src = _dec(fmt, uh_bits)
+        else:
+            if xv <= 0:
+                continue
+            m_src = xv
+        e = _floor_log2(m_src)
+        m = m_src / Fraction(2) ** e
+        cell = int((m - 1) * 512)
+        C = _seed_C(cell)
+        wrap = C == 8
+        mp_, c_eff = (m / 2, Fraction(1)) if wrap else (m, Fraction(C, 16))
+        r_exp = mp_ * c_eff - 1
+        k_exp = e + (1 if wrap else 0)
+        j = C % 8
+        _res, _fl, pr = b.run(x, want)
+        ran += 1
+        at = f"{where} x = {x:#x}"
+
+        def val(name):
+            """The probe's exact value, or its bits as a string where it is
+            not a finite number (a faulted build can make one)."""
+            try:
+                return _dec(fmt, pr[name])
+            except ValueError:
+                return f"{pr[name]:#x} (not finite)"
+
+        def show(v):
+            return f"{float(v)!r}" if isinstance(v, Fraction) else v
+
+        def differs(what, name, exp):
+            got = val(name)
+            if got != exp:
+                findings.append(f"{at}: {what} is "
+                                f"{show(got if name != 'tc' else got - magic)}"
+                                f", want {show(exp - magic if name == 'tc' else exp)}")
+        differs("t - MAGIC (C)", "tc", magic + C)
+        differs("c", "cc", c_eff)
+        differs("r", "r", r_exp)
+        differs("k", "kf", k_exp)
+        names = (("L0", f"L{j}_0"), ("L1", f"L{j}_1"), ("L2", f"L{j}_2")) if tw \
+            else (("Lh", f"LH{j}"), ("Ll", f"LL{j}"))
+        for probe, role in names:
+            if pr[probe] != b.words[b.roles[role][1]]:
+                findings.append(f"{at}: the table's word {probe} for j = {j} "
+                                f"is {pr[probe]:#x}, not {role}")
+        if fn == "log1p":
+            differs("u_h of 1 + x", "uh", m_src)
+            differs("u_l of 1 + x", "ul", u - m_src)
+            differs("2^-k", "p2mk",
+                    Fraction(0) if k_exp > clamp else Fraction(2) ** -k_exp)
+            small = abs(xv) < SMALL_LOG
+            if (pr["small"] != 0) != small:
+                findings.append(f"{at}: the r = x path's flag is "
+                                f"{pr['small'] != 0}, want {small}")
+            differs("the r used", "r_used", xv if small else r_exp)
+            differs("the k used", "kf_used", 0 if small else k_exp)
+    return ran
+
+
+def _check_build_log(b: Build, findings, lanes=True):
+    """Every derived constant of one built log, log2 or log1p, against its
+    independent derivation, the plan, the seed table's cells, and, with
+    `lanes`, the reduction's words where they act (they do not depend on the
+    attribute, so check_constants runs the lanes for the first only).
+    -> (constants checked, lanes run)."""
+    fmt, p = b.fmt, b.fmt.prec
+    fn = b.meta["fn"]
+    tw = b.meta["family"] == "triple word"
+    G = b.meta["G"]
+    tag, verify, point, seen, count = _verifier(b, findings)
+
+    plan = _check_plan_log(fmt, b.meta["family"], G)
+    held_plan = ((b.meta["K3"], b.meta["K2"], b.meta["D"]) if tw
+                 else (b.meta["K"], b.meta["D"]))
+    if plan != held_plan:
+        findings.append(f"{tag}: the plan {held_plan} is not the re-derived "
+                        f"{plan}")
+    magic = Fraction(3, 2) * 2 ** (p - 1)
+    point("MAGIC", magic)
+    point("SIXTEEN", 16)
+    point("SIXTEENTH", Fraction(1, 16))
+    point("NMAGIC16", -magic / 16)
+    point("HALF", Fraction(1, 2))
+    point("NEGONE", -1)
+    point("MINN", Fraction(2) ** fmt.emin)
+    if fn != "log1p":
+        point("P2P", Fraction(2) ** p)
+    # the table: log(16/C_j), each word the nearest to what the ones before
+    # leave
+    nwords = 3 if tw else 2
+    for j in range(N):
+        lo, hi = _check_log16(16 if j == 0 else 8 + j)
+        for i in range(nwords):
+            role = f"L{j}_{i}" if tw else ("LH" if i == 0 else "LL") + str(j)
+            w = verify(role, "rn", lo, hi)
+            lo, hi = lo - w, hi - w
+    # the coefficients (-1)^i/(i+1): exact, then rounded word by word
+    if tw:
+        K3, K2, D = held_plan
+        names = {i: [f"Y{i}"] for i in range(K3 + K2, D + 1)}
+        names.update({i: [f"A{i}_{k}" for k in range(2)]
+                      for i in range(K3, K3 + K2)})
+        names.update({i: [f"B{i}_{k}" for k in range(3)] for i in range(K3)})
+    else:
+        K, D = held_plan
+        names = {i: [f"Y{i}"] for i in range(K, D + 1)}
+        names.update({i: [f"CH{i}", f"CL{i}"] for i in range(K)})
+    for i, roles in names.items():
+        left = Fraction((-1) ** i, i + 1)
+        for role in roles:
+            left -= verify(role, "rn", left, left)
+    # ln 2 (log, log1p) or 1/ln 2 (log2)
+    if fn == "log2":
+        lo, hi = _check_inv_ln2()
+        if tw:
+            w0 = verify("IL2_0", "rn", lo, hi)
+            w1 = verify("IL2_1", "rn", lo - w0, hi - w0)
+            verify("IL2_2", "rn", lo - w0 - w1, hi - w0 - w1)
+            point("NIL2_0", w0, negated=True)
+            point("NIL2_1", w1, negated=True)
+        else:
+            w0 = verify("IL2H", "rn", lo, hi)
+            point("NIL2H", w0, negated=True)
+            verify("NIL2L", "rn", lo - w0, hi - w0, negated=True)
+    else:
+        lo, hi = _check_ln2()
+        if tw:
+            w0 = verify("LN2_0", "rn", lo, hi)
+            w1 = verify("LN2_1", "rn", lo - w0, hi - w0)
+            verify("LN2_2", "rn", lo - w0 - w1, hi - w0 - w1)
+            point("NLN2_0", w0, negated=True)
+            point("NLN2_1", w1, negated=True)
+        else:
+            nk = _k_width(fmt)
+            w0 = verify("LN2H", "trunc", lo, hi, nbits=p - nk)
+            lo, hi = lo - w0, hi - w0
+            w1 = verify("LN2M", "trunc", lo, hi, nbits=p - nk)
+            verify("LN2L", "rn", lo - w1, hi - w1)
+    if fn == "log1p":
+        point("SMALL", SMALL_LOG)
+        point("TINY", Fraction(2) ** -(p + 2))
+    point("BREL", Fraction(2) ** -(p + G) * 2 ** b.meta["shift"])
+    unchecked = sorted(set(b.roles) - seen)
+    if unchecked:
+        findings.append(f"{tag}: derived but not checked: {unchecked}")
+    cells, _rmax, _cs = _check_recip_cells(fmt)
+    findings.extend(f"{tag}: {s}" for s in cells)
+    return count[0], _check_log_scale(b, findings) if lanes else 0
+
+
 def check_constants(builder=None, formats=FORMATS, attrs=sf.RND_MODES,
                     names=NAMES):
     """(lines, findings): re-derive every derived constant of every built
@@ -2297,18 +3560,27 @@ def check_constants(builder=None, formats=FORMATS, attrs=sf.RND_MODES,
             n_const = n_lanes = 0
             for rnd in attrs:
                 b = builder(name, fmt, rnd)
-                c, ln = _check_build(b, findings)
+                if name in LOG_NAMES:
+                    c, ln = _check_build_log(b, findings, rnd == attrs[0])
+                else:
+                    c, ln = _check_build(b, findings)
                 n_const += c
                 n_lanes += ln
             meta = b.meta
             plan = ((meta["K3"], meta["K2"], meta["D"]) if "K3" in meta
                     else (meta["K"], meta["D"]))
+            what = ("reduction, table and 2^-k words" if name in LOG_NAMES
+                    else "scale, fixed-grid, 2^-k and table words")
             lines.append(
                 f"{name} {fmt.name}: G = {meta['G']}, plan {plan}: "
                 f"{n_const} derived constants in {len(attrs)} fragments, "
                 f"each the rounding its rule gives for every value of an "
                 f"enclosure of the true number; {n_lanes} lanes of the "
-                f"scale, fixed-grid, 2^-k and table words")
+                f"{what}")
+            if name in LOG_NAMES:
+                lines[-1] += (f"; RECIP_SEED's 512 cells: C from 8 to 16, max "
+                              f"|r| = {float(_check_recip_cells(fmt)[1])!r}, "
+                              f"under RHO_LOG")
     return lines, findings
 
 
@@ -2323,19 +3595,26 @@ def main(argv=None):
                     help="re-derive every constant the built fragments "
                          "hold, in integer arithmetic of its own, and exit "
                          "1 on a difference")
+    ap.add_argument("--only", default="",
+                    help="a comma-separated list of routines to check or "
+                         "list (default: all)")
     args = ap.parse_args(argv)
+    names = tuple(n for n in args.only.split(",") if n) or NAMES
+    for n in names:
+        if n not in NAMES:
+            ap.error(f"--only {n!r}: one of {', '.join(NAMES)}")
     if args.check:
-        lines, findings = check_constants(formats=FORMATS)
+        lines, findings = check_constants(formats=FORMATS, names=names)
         for ln in lines:
             print(ln)
         for fd in findings:
             print("DIFFERENCE:", fd)
-        print(f"mathlib --check: {len(NAMES)} routines, {len(FORMATS)} "
+        print(f"mathlib --check: {len(names)} routines, {len(FORMATS)} "
               f"formats, {len(findings)} differences")
         return 1 if findings else 0
     print(f"{'routine':8s} {'format':6s} {'rnd':4s} {'insns':>6s} "
           f"{'words':>6s} {'live':>5s}  cap")
-    for name in NAMES:
+    for name in names:
         for fmt in FORMATS:
             for rnd in sf.RND_MODES:
                 f = fragment(name, fmt, rnd)
