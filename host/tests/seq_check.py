@@ -96,6 +96,42 @@ both, directed and corrupted in, and a remote handle to a server
 publishing a revision-7 tile's word refuses each code at load and a run
 asking for the block, by name and before any frame.
 
+Since parcel MP (M1's build, item 2, 2026-10-14) an EIGHTH corpus runs after
+the seven, from its own seed per format: M1's routines - exp, exp2, expm1,
+log, log2 and log1p, the 120 fragments of python/cft_golden/mathlib.py at fp32,
+fp64, fp128 and fp256 under each attribute - which until then had run on seq.py
+alone. Each is run in two shapes through libcft and the golden model.
+STAND-ALONE is routines.program's: the input in r0, the words in a BANK_EXT
+bank, the result and the flag word deposited, no quiet region and no raise, so
+the body's own flags reach FLAGS. COMPILED is what the compiler inlines
+(python/tests/mathlib_harness.py's r24_program): QUIET, the body, ENDQUIET,
+RAISE of the flag word and the result deposited - the shape that carries R24's
+mark to STATUS[6] and R23's byte. It is also the first corpus here to hand
+cft_program_run_ex a bank. A program's lanes are drawn from the special
+encodings (+-0, +-inf, NaNs with payloads, subnormals), the routine's edge
+pool, the transcend pools, its structured family (the windows' centres, which
+it marks; fp32 exp's marked lanes) and random encodings - the pools and
+samplers python/tests holds the fragments to, so the tests' lanes and these
+are one set.
+There are 1, 2, 63, 64, 65, 100 or 129 lanes, half the programs past libcft's
+64-lane block, a third run under a mask whose masked lanes' bytes must stay the
+caller's, the per-lane block asked for on every compiled run and half the
+stand-alone ones. FLAGS, STATUS - the mark among it -, every deposit, count and
+lane byte are compared, and how many lanes were, which must be every lane the
+run owns. Beside them is the model's own identity: on a dozen lanes of each
+stand-alone program, and on every marked one, the deposits seq.py makes are
+mathlib.evaluate's - routines.run's outputs. A fragment the model runs and
+libcft refuses is a mismatch, named. One ROUND draws every fragment in both
+shapes from fresh lanes: the default is one round for each 250 --trials, at
+least one, and --math-rounds N sets it. The lanes come from python/tests, which
+needs mpmath and pytest; a host without them prints one SKIP line, which
+verify/run.sh counts as an inner skip, and runs the seven corpora as before.
+The run then states the programs' sizes against libcft's limits (cft_get_caps),
+and a remote leg loads every program on fake servers whose HELLO publishes a
+revision-7 tile's word, that word with BANK_PTR, WIDE_CONST or REGS32 cleared,
+a revision-8 tile's, and that at max_insns or max_consts lowered, each load
+refused by name where the program needs what the word lacks.
+
     python3 host/tests/seq_check.py --device <xclbin | cft://host:port | sw>
 
 Since revision 8's round 2 (parcel E, 2026-10-05) the corpora can run
@@ -113,8 +149,14 @@ CFT_ERR_UNSUPPORTED, by a sentence naming the absent bit's CAPS place, and
 is counted refused by name, corpus by corpus. A device that runs such a
 program, or refuses it otherwise, is a mismatch. So on a revision-7 card
 the revision-8 and flag-control corpora record their programs' refusals
-by name while every other corpus compares; on a revision-8 quad without
-R21 the augmented-addition programs are refused and the rest compare.
+by name while every other corpus compares - the routine corpus, whose
+compiled programs are refused for QUIET and RAISE, and any run of its that
+asks for the lane block, while its stand-alone programs compare; on a
+revision-8 quad without R21 the augmented-addition programs are refused and
+the rest compare. A routine program past a capacity the device publishes -
+its instruction count against max_insns, its highest constant index against
+max_consts, its deposits against max_deposits - is refused the same way,
+naming cft_caps.<field>, and counted on a line of its own.
 On a device that lacks AUGADD or SCRATCH_STEP the flag-control corpus is
 drawn WITHOUT its revision-8 arm, because nearly every program that arm
 touches holds an augadd, and on such a quad R24's regions and R23's block,
@@ -137,6 +179,7 @@ import struct
 import sys
 import threading
 import zlib
+from fractions import Fraction
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -144,6 +187,7 @@ sys.path.insert(0, str(ROOT / "python"))
 
 from cft_golden import FORMATS, vectors  # noqa: E402
 from cft_golden import asm, seq  # noqa: E402
+from cft_golden import softfloat as sf  # noqa: E402
 # cft_caps.seq_features's names, bits and CAPS places: one table, the
 # compiler's, which python/tests/test_cftc.py holds to every name asm.py's
 # features() reports
@@ -308,6 +352,11 @@ class _Device:
         self.features = caps.seq_features
         self.format_mask = caps.format_mask
         self.max_scratch = caps.max_scratch
+        # the three other capacities cft_get_caps publishes, 0 for unknown:
+        # the eighth corpus holds a program past one of them refused by name
+        self.max_insns = caps.max_insns
+        self.max_consts = caps.max_consts
+        self.max_deposits = caps.max_deposits
         self.version = caps.device_version
         self.tiles = caps.tiles
         self.refused = collections.Counter()    # (corpus, CAPS place)
@@ -1688,13 +1737,18 @@ class _FakeServer:
 
     CAPS_V3 = 76
 
-    def __init__(self, features, backend=b"xrt", max_deposits=64):
+    def __init__(self, features, backend=b"xrt", max_deposits=64,
+                 max_insns=16384, max_consts=512):
         self.features = features
         self.backend = backend
         # 0 is what cft_caps calls unknown - what a server older than the
         # field publishes - and the one way a handle reaches
         # cft_program_load's own deposit ceiling (deposit_ceiling_remote).
         self.max_deposits = max_deposits
+        # the two other capacities, which the eighth corpus's remote leg
+        # lowers to hold a program past one refused by name
+        self.max_insns = max_insns
+        self.max_consts = max_consts
         self.other_ops = []
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.bind(("127.0.0.1", 0))
@@ -1741,7 +1795,8 @@ class _FakeServer:
                                             abi)
                                 + self.backend.ljust(32, b"\0")
                                 + struct.pack("<5I", self.max_deposits,
-                                              16384, 512, self.features,
+                                              self.max_insns,
+                                              self.max_consts, self.features,
                                               256))
                         assert len(caps) == self.CAPS_V3
                         conn.sendall(self._frame(abi, fid, op, caps))
@@ -2319,12 +2374,710 @@ def flags_remote_refusals(lib, F):
           f"published")
 
 
+# ---- the eighth corpus: M1's routines (parcel MP) --------------------------
+#
+# exp, exp2, expm1, log, log2 and log1p are tile routines: fragments of
+# existing instructions (python/cft_golden/mathlib.py), at fp32, fp64, fp128
+# and fp256 under each of the five attributes - 120 of them, which until this
+# corpus had run on seq.py alone. Each is run through libcft's sequencer and
+# through the golden model in two shapes. STAND-ALONE is the harness's own
+# (routines.program): the input in r0, the words in a BANK_EXT bank, two
+# deposits a lane - the result and the flag word, whose bit 7 is the mark -
+# and no quiet region and no raise, so the body's own flags reach FLAGS. The
+# COMPILED shape is what the compiler inlines (mathlib_harness.r24_program):
+# QUIET, the body, ENDQUIET, RAISE of the flag word and the result deposited,
+# the only one that reaches R24's mark and R23's byte, and so STATUS[6] and
+# the lane block. This is also the first corpus here to give a program a
+# bank through cft_program_run_ex.
+#
+# The lanes of a program are drawn from five categories, shuffled, from a
+# seed of the corpus's own per format and a stream of its own per fragment:
+# the special encodings (+-0, +-inf, NaNs with payloads of both signs and
+# both kinds, subnormals, the extremes), the edge pool of the routine (its
+# thresholds, screens and the ends of its cells: mathlib_harness.edge_pool),
+# the transcend pools the tests use (mathlib_harness.pools), the structured
+# family (the committed windows' centres, which the routine marks, and their
+# neighbours and the census beside them; fp32's exp marks) and random
+# encodings (the main path's samplers and raw bit patterns). A program has 1,
+# 2, 63, 64, 65, 100 or 129 lanes, half of them past libcft's 64-lane block,
+# a third run under a mask, whose masked lanes' bytes must stay the caller's
+# pattern, and the per-lane block is asked for on every compiled run and half
+# the stand-alone ones.
+#
+# Compared on every run: FLAGS, STATUS - with its mark -, every deposit,
+# every count, and every lane byte where asked; and how many lanes were
+# compared, which must be every lane the run owns. Beside them the model's
+# own identity: on a dozen lanes of each stand-alone program, and on every
+# marked one, the result and flag word seq.py deposits are mathlib.evaluate's
+# - routines.run's outputs. A fragment the model runs and libcft refuses is a
+# mismatch, named. Under --device a program needing a bit the device does not
+# publish, or past a capacity it does, is refused by name and counted; the
+# remote leg shows the refusals, on fake servers whose HELLO publishes a
+# revision-7 tile's word and the same word with a bit cleared, and past a
+# capacity lowered.
+
+ROUTINE_NS = (1, 2, 63, 64, 65, 65, 100, 129)       # lanes a program
+ROUTINE_SHARES = (("special", 0.15), ("edge", 0.25), ("pool", 0.15),
+                  ("struct", 0.15), ("random", 0.30))
+ROUTINE_MINIMA = (3, 3, 1, 1, 1)        # at 8 lanes or more, each category
+ROUTINE_IDENT = 12                      # lanes a stand-alone run evaluates
+ROUTINE_SHAPES = ("stand-alone", "compiled")
+ROUTINE_FLAGS = (("invalid", sf.FLAG_INVALID),
+                 ("divideByZero", sf.FLAG_DIVZERO),
+                 ("overflow", sf.FLAG_OVERFLOW),
+                 ("underflow", sf.FLAG_UNDERFLOW),
+                 ("inexact", sf.FLAG_INEXACT))
+ROUTINE_FILL = (0xA5, 0xA5A5A5A5, 0xEE)     # a deposit byte, a count, a lane
+                                            # byte: the caller's own pattern
+_ROUTINE = {"progs": {}, "cache": {}, "needs": {}, "sizes": set()}
+
+
+def routine_modules():
+    """(mathlib, mathlib_harness, mathlib_family), imported on first use, or
+    None - after one SKIP line, which verify/run.sh counts as an inner skip -
+    on a host without mpmath or pytest: the lanes come from python/tests,
+    which the golden stage runs and which need both. A host that has them
+    runs the corpus; one that has not runs the seven corpora as before."""
+    if "mods" not in _ROUTINE:
+        mods = None
+        try:
+            import mpmath  # noqa: F401
+            import pytest  # noqa: F401
+        except ModuleNotFoundError as exc:
+            print(f"SKIP  the routine corpus (the eighth): {exc.name} is not "
+                  f"installed here, and its lanes come from python/tests/"
+                  f"mathlib_harness.py, which needs mpmath and pytest")
+        else:
+            tests = str(ROOT / "python" / "tests")
+            if tests not in sys.path:
+                sys.path.append(tests)
+            from cft_golden import mathlib as ml  # noqa: E402
+            import mathlib_family as fam  # noqa: E402
+            import mathlib_harness as har  # noqa: E402
+            mods = (ml, har, fam)
+        _ROUTINE["mods"] = mods
+    return _ROUTINE["mods"]
+
+
+def routine_programs(fmt, fn, rnd):
+    """(fragment, (stand-alone program, bank), (compiled program, bank)):
+    the programs of one fragment, built once."""
+    key = (fmt.name, fn, rnd)
+    if key not in _ROUTINE["progs"]:
+        from cft_golden import routines
+        ml, har, _fam = routine_modules()
+        f = ml.fragment(fn, fmt, rnd)
+        built = (f, routines.program(f), har.r24_program(f))
+        _ROUTINE["progs"][key] = built
+        for shape, (prog, _bank) in zip(ROUTINE_SHAPES, built[1:]):
+            # what the limits line reports: instructions, bank words, the
+            # highest register written, deposits a lane
+            top_reg = max((d["rd"] for d in map(seq.decode, prog.insns)
+                           if not d["ctrl"]), default=0)
+            _ROUTINE["sizes"].add((fmt.name, fn, sf.RND_NAMES[rnd], shape,
+                                   len(prog.insns), prog.n_consts, top_reg,
+                                   prog.max_deposits))
+    return _ROUTINE["progs"][key]
+
+
+def _routine_cached(key, make):
+    if key not in _ROUTINE["cache"]:
+        _ROUTINE["cache"][key] = make()
+    return _ROUTINE["cache"][key]
+
+
+def routine_specials(fmt):
+    """The special encodings, each a lane a routine must answer by its
+    specification: +-0, +-inf, the canonical quiet NaN, quiet NaNs with
+    payloads and of both signs, signalling NaNs with the smallest, a middle
+    and the largest payload and of both signs, the smallest and largest
+    subnormals and normals of both signs, +-1 and the floats beside 1."""
+    mw, sign = fmt.man_w, fmt.sign_mask
+    qn = sf.qnan_bits(fmt)
+    one = sf.one_bits(fmt)
+    out = [sf.zero_bits(fmt), sf.zero_bits(fmt, 1), sf.inf_bits(fmt),
+           sf.inf_bits(fmt, 1), qn, qn | 0x5, qn | ((1 << (mw - 1)) - 1),
+           sign | qn, sign | qn | 0x5, sf.snan_bits(fmt),
+           sf.snan_bits(fmt, 0x5), sf.snan_bits(fmt, 1 << (mw - 2)),
+           sf.snan_bits(fmt, (1 << (mw - 1)) - 1), sign | sf.snan_bits(fmt),
+           one, one + 1, one - 1, sf.one_bits(fmt, 1),
+           sf.one_bits(fmt, 1) + 1, sf.one_bits(fmt, 1) - 1]
+    for s in (0, 1):
+        out += [sf.min_subnormal_bits(fmt, s), sf.max_subnormal_bits(fmt, s),
+                sf.min_normal_bits(fmt, s), sf.max_normal_bits(fmt, s)]
+    return out
+
+
+def routine_ln1p_marks(ml, fmt):
+    """The floats nearest ln(1 + t) for t = 2^-23, 2^-22, 2^-21, -2^-22 and
+    -2^-21: at fp32 exp marks all five under rtz, rdn and rup (E1's brief
+    correction 1: its verifiers found them; the statement is READ, and the
+    marks are MEASURED each run), the only lanes of fp32 that mark - the
+    committed windows are empty at its guard of 40."""
+    import mpmath
+    out = []
+    with mpmath.workprec(4 * fmt.prec + 100):
+        for t in (Fraction(1, 2 ** 23), Fraction(1, 2 ** 22),
+                  Fraction(1, 2 ** 21), Fraction(-1, 2 ** 22),
+                  Fraction(-1, 2 ** 21)):
+            v = mpmath.log(1 + mpmath.mpf(t.numerator) / t.denominator)
+            out.append(ml._enc(fmt, ml._frac(v)))
+    return out
+
+
+def routine_struct_pool(ml, har, fam, fn, fmt, rnd):
+    """(centres, marked, rest): the committed centres of the routine's
+    structured family at this format and attribute, their arguments - the
+    lanes the routine marks (and, at fp32, exp's) - and the lanes beside
+    them: the census, which a window would start at, or for exp2 and log2,
+    which have no family, the lanes next to their exact cases."""
+    def make():
+        if fn in ("exp2", "log2"):
+            return [], [], list(har.nofamily_lanes(fmt, deep=False, fn=fn))
+        cens = list(fam.FAMILY[fn][fmt.name][sf.RND_NAMES[rnd]])
+        marked = [fam.argument(fmt, c) for c in cens]
+        if fn == "exp" and fmt.name == "fp32":
+            marked += routine_ln1p_marks(ml, fmt)
+        census = fam.census_log(fmt) if fn == "log" else fam.census(fmt)
+        return cens, marked, list(census)
+    return _routine_cached(("struct", fmt.name, fn, rnd), make)
+
+
+def routine_quotas(n):
+    """The lanes of each category for an n-lane program, in ROUTINE_SHARES'
+    order: the shares, the remainder to the largest fractions, and, from as
+    many lanes as ROUTINE_MINIMA add up to, at least that many of each - a
+    category short of its minimum taking from the one with the most beyond
+    its own."""
+    shares = [s for _c, s in ROUTINE_SHARES]
+    q = [int(n * s) for s in shares]
+    order = sorted(range(len(q)), key=lambda i: (-(n * shares[i] - q[i]), i))
+    for i in order[:n - sum(q)]:
+        q[i] += 1
+    if n >= sum(ROUTINE_MINIMA):
+        for i, lo in enumerate(ROUTINE_MINIMA):
+            while q[i] < lo:
+                j = max((k for k in range(len(q)) if k != i),
+                        key=lambda k: q[k] - ROUTINE_MINIMA[k])
+                q[j] -= 1
+                q[i] += 1
+    return q
+
+
+def routine_lanes(ml, har, fam, fmt, fn, rnd, n, sub):
+    """n argument encodings for a program of fragment (fn, fmt, rnd), from
+    the stream `sub`: the quotas of each category, a category short of
+    lanes handing its remainder to the random one, the whole shuffled."""
+    q = dict(zip((c for c, _s in ROUTINE_SHARES), routine_quotas(n)))
+    xs, short = [], 0
+    for cat, pool in (
+            ("special", routine_specials(fmt)),
+            ("edge", _routine_cached(("edge", fmt.name, fn),
+                                     lambda: list(har.edge_pool(fmt, fn)))),
+            ("pool", list(har.pools(fmt)))):
+        take = min(q[cat], len(pool))
+        xs += sub.sample(pool, take)
+        short += q[cat] - take
+    cens, marked, rest = routine_struct_pool(ml, har, fam, fn, fmt, rnd)
+    picked = []
+    if q["struct"]:
+        m = min(len(marked), max(1, q["struct"] // 2)) if marked else 0
+        picked = sub.sample(marked, m) if m else []
+        near = []
+        for c in sub.sample(cens, min(4, len(cens))):
+            near += [x for x, _lab in fam.neighbours(fmt, c)]
+        beside = rest + near
+        picked += sub.sample(beside, min(q["struct"] - m, len(beside)))
+        short += q["struct"] - len(picked)
+    xs += picked
+    k = q["random"] + short
+    k_main, k_weighted = k // 2, k // 4
+    if k_main:
+        xs += har.random_main(fmt, k_main, sub.getrandbits(30), fn)
+    if k_weighted:
+        xs += har.weighted(fmt, k_weighted, sub.getrandbits(30), fn)
+    xs += [sub.getrandbits(fmt.width) for _ in range(k - k_main - k_weighted)]
+    sub.shuffle(xs)
+    return xs
+
+
+def run_in_c_routine(lib, dev, prog, bank, xs, keep=None, lf=False):
+    """-> (deposit bytes, counts, flags, status, lane bytes or None), each
+    read back RAW, through cft_program_run_ex with a BANK_EXT program's
+    bank - the input stream xs, zero streams b and c as routines.run gives
+    them - ABI 0.14's mask where `keep` is given and ABI 0.17's lane block
+    where `lf` asks. The deposits, the counts and the block are filled with
+    the caller's pattern (ROUTINE_FILL) first, so that a masked lane's bytes,
+    which the library must leave alone, are told from ones written 0; the
+    library's refusal is a RuntimeError."""
+    fmt = prog.fmt
+    esz = fmt.width // 8
+    n = len(xs)
+    image = prog.to_bytes()
+
+    handle = ctypes.c_void_p()
+    st = lib.cft_program_load(dev, image, len(image), ctypes.byref(handle))
+    if st != CFT_OK:
+        why = lib.cft_last_error().decode("utf-8", "replace")
+        raise RuntimeError(f"cft_program_load: {why}")
+    try:
+        def pack(vals):
+            return ctypes.create_string_buffer(
+                b"".join(v.to_bytes(esz, "little") for v in vals),
+                max(1, len(vals) * esz))
+
+        buf_a, buf_b, buf_c = pack(xs), pack([0] * n), pack([0] * n)
+        buf_k = pack(bank)
+        ndep = n * prog.max_deposits
+        buf_d = ctypes.create_string_buffer(
+            bytes([ROUTINE_FILL[0]]) * max(1, ndep * esz), max(1, ndep * esz))
+        counts = (ctypes.c_uint32 * max(1, n))()
+        for i in range(n):
+            counts[i] = ROUTINE_FILL[1]
+        flags = ctypes.c_uint32(0)
+        bus = ctypes.c_uint32(0)
+        args = RunArgs()
+        args.struct_size = ctypes.sizeof(RunArgs)
+        args.a = ctypes.cast(buf_a, ctypes.c_void_p)
+        args.b = ctypes.cast(buf_b, ctypes.c_void_p)
+        args.c = ctypes.cast(buf_c, ctypes.c_void_p)
+        args.n = n
+        args.bank = ctypes.cast(buf_k, ctypes.c_void_p)
+        args.bank_bytes = len(bank) * esz
+        args.deposits = ctypes.cast(buf_d, ctypes.c_void_p)
+        args.counts = counts
+        args.flags_out = ctypes.pointer(flags)
+        args.bus_out = ctypes.pointer(bus)
+        if keep is not None:
+            mbytes = (n + 7) // 8
+            raw = bytearray(mbytes)
+            for i, k in enumerate(keep):
+                if k:
+                    raw[i >> 3] |= 1 << (i & 7)
+            buf_m = ctypes.create_string_buffer(bytes(raw), max(1, mbytes))
+            args.lane_mask = ctypes.cast(buf_m, ctypes.c_void_p)
+            args.lane_mask_bytes = mbytes
+        buf_lf = None
+        if lf:
+            buf_lf = ctypes.create_string_buffer(
+                bytes([ROUTINE_FILL[2]]) * max(1, n), max(1, n))
+            args.lane_flags = ctypes.cast(buf_lf, ctypes.c_void_p)
+            args.lane_flags_bytes = n
+        st = lib.cft_program_run_ex(handle, ctypes.byref(args))
+        if st != CFT_OK:
+            why = lib.cft_last_error().decode("utf-8", "replace")
+            raise RuntimeError(f"cft_program_run_ex: {why}")
+        return (buf_d.raw[:ndep * esz], list(counts)[:n], flags.value,
+                bus.value, list(buf_lf.raw[:n]) if lf else None)
+    finally:
+        lib.cft_program_free(handle)
+
+
+def routine_top_const(prog):
+    """The highest constant index an instruction of `prog` names, -1 for
+    none."""
+    top = -1
+    for w in prog.insns:
+        d = seq.decode(w)
+        if d["ctrl"]:
+            continue
+        for idx, is_k in seq.sources(d):
+            if is_k:
+                top = max(top, idx)
+    return top
+
+
+def routine_needs(prog):
+    """The cft_caps.seq_features names a load of `prog` needs, once."""
+    key = id(prog)
+    if key not in _ROUTINE["needs"]:
+        _ROUTINE["needs"][key] = (prog, _needs(prog))
+    return _ROUTINE["needs"][key][1]
+
+
+def routine_refuses(lib, dev, prog, mask, lf, MR):
+    """Under --device: True when a run of `prog` needs a bit the device does
+    not publish (device_refuses holds that, by name, and counts it) or is past
+    a capacity it does - the instruction count against max_insns, the highest
+    constant index against max_consts, the deposits against max_deposits.
+    Past a capacity the load must be CFT_ERR_UNSUPPORTED naming
+    cft_caps.<field> (device.c's cft_seq_cap_refusal), counted in MR; a
+    device that takes such a program, or refuses it otherwise, is a mismatch,
+    printed. False, and nothing done, without --device, on any other handle,
+    and for a program the device can run."""
+    if DEVICE is None or dev.value != DEVICE.handle:
+        return False
+    over = []
+    if DEVICE.max_insns and len(prog.insns) > DEVICE.max_insns:
+        over.append(("max_insns", len(prog.insns), DEVICE.max_insns))
+    top = routine_top_const(prog)
+    if DEVICE.max_consts and top >= DEVICE.max_consts:
+        over.append(("max_consts", top, DEVICE.max_consts - 1))
+    if DEVICE.max_deposits and prog.max_deposits > DEVICE.max_deposits:
+        over.append(("max_deposits", prog.max_deposits, DEVICE.max_deposits))
+    if not over:
+        return device_refuses(lib, dev, prog, "routine corpus", mask=mask,
+                              lf=lf)
+    absent = DEVICE.absent(_needs(prog, False, mask, lf))
+    names = ([f"cft_caps.{f}" for f, _a, _c in over]
+             + [T.CAPS_PLACE[f] for f in absent])
+    image = prog.to_bytes()
+    handle = ctypes.c_void_p()
+    rc = lib.cft_program_load(dev, image, len(image), ctypes.byref(handle))
+    msg = lib.cft_last_error().decode("utf-8", "replace") if rc else ""
+    if rc == CFT_OK:
+        lib.cft_program_free(handle)
+    named = [nm for nm in names if nm in msg]
+    if rc == CFT_ERR_UNSUPPORTED and named:
+        MR["capref"][named[0]] += 1
+        return True
+    DEVICE.bad += 1
+    if DEVICE.bad <= 5:
+        print(f"  MISMATCH {prog.fmt.name} (routine corpus, --device): a "
+              f"program past "
+              f"{', '.join(f'{f} ({a} against {c})' for f, a, c in over)} "
+              f"gave rc {rc} at load: {msg!r} - wanted CFT_ERR_UNSUPPORTED "
+              f"naming {' or '.join(names)}")
+    return True
+
+
+def routine_rounds(args):
+    """Rounds of the eighth corpus: --math-rounds, else one for each 250
+    --trials, and at least one, so that every fragment runs."""
+    return (args.math_rounds if args.math_rounds is not None
+            else max(1, args.trials // 250))
+
+
+def routine_corpus(lib, dev, fmt, name, args, MR):
+    """The eighth corpus, for one format. Mutates the counters in MR."""
+    mods = routine_modules()
+    if mods is None:
+        return
+    ml, har, fam = mods
+    MR["formats"].append(name)
+    rounds = routine_rounds(args)
+    rng = random.Random((args.seed * 2654435761 + fmt.width * 40503)
+                        & 0xFFFFFFFF ^ 0x4D4C4942)
+    esz = fmt.width // 8
+    pat = bytes([ROUTINE_FILL[0]]) * esz
+    checked = lanes_done = 0
+    for _round in range(rounds):
+        for fn in ml.NAMES:
+            for rnd in sf.RND_MODES:
+                # a stream of its own per fragment, so that the lanes of one
+                # never depend on how many another drew
+                sub = random.Random(rng.getrandbits(64))
+                f, standalone, compiled = routine_programs(fmt, fn, rnd)
+                MR["fragments"].add((name, fn, rnd))
+                for shape, (prog, bank) in zip(ROUTINE_SHAPES,
+                                               (standalone, compiled)):
+                    MR["drawn"] += 1
+                    tag = f"{fn} {sf.RND_NAMES[rnd]} {shape}"
+                    n = sub.choice(ROUTINE_NS)
+                    xs = routine_lanes(ml, har, fam, fmt, fn, rnd, n, sub)
+                    keep = None
+                    if sub.random() < 1 / 3:
+                        keep = [sub.random() < 0.7 for _ in range(n)]
+                        if not any(keep):
+                            keep[sub.randrange(n)] = True
+                    lf = shape == "compiled" or sub.random() < 0.5
+                    if routine_refuses(lib, dev, prog, keep is not None, lf,
+                                       MR):
+                        continue
+                    zeros = [0] * n
+                    want = mrun(prog, xs, zeros, zeros, bank=bank,
+                                lane_mask=keep)
+                    try:
+                        dep, counts, fl, st, lb = run_in_c_routine(
+                            lib, dev, prog, bank, xs, keep, lf)
+                    except RuntimeError as exc:
+                        print(f"  MISMATCH {name} (routine corpus) {tag} "
+                              f"n={n}: the model runs this fragment and "
+                              f"libcft refuses it: {exc}")
+                        MR["bad"] += 1
+                        continue
+                    owned = [i for i in range(n)
+                             if keep is None or keep[i]]
+                    md = prog.max_deposits
+                    diffs = []
+                    if fl != want.flags:
+                        diffs.append(f"FLAGS model 0x{want.flags:02x} "
+                                     f"libcft 0x{fl:02x}")
+                    if st != want.status:
+                        diffs.append(f"STATUS model 0x{want.status:02x} "
+                                     f"libcft 0x{st:02x}")
+                    if lf and lb is None:
+                        diffs.append("the lane block was asked for and none "
+                                     "came back")
+                    compared = lane_bytes = 0
+                    for i in range(n):
+                        if keep is not None and not keep[i]:
+                            # a masked lane: the caller's bytes, untouched
+                            if counts[i] != ROUTINE_FILL[1]:
+                                diffs.append(f"count[lane {i}] was WRITTEN "
+                                             f"({counts[i]:#x}) for a lane "
+                                             f"the mask cleared")
+                            if dep[i * md * esz:(i + 1) * md * esz] \
+                                    != pat * md:
+                                diffs.append(f"deposits[lane {i}] were "
+                                             f"WRITTEN for a lane the mask "
+                                             f"cleared")
+                            if lb is not None and lb[i] != ROUTINE_FILL[2]:
+                                diffs.append(f"lane byte[{i}] was WRITTEN "
+                                             f"(0x{lb[i]:02x}) for a lane "
+                                             f"the mask cleared")
+                            continue
+                        compared += 1
+                        if counts[i] != want.counts[i]:
+                            diffs.append(f"count[lane {i}] model "
+                                         f"{want.counts[i]} libcft "
+                                         f"{counts[i]}")
+                        for s in range(md):
+                            j = i * md + s
+                            g = int.from_bytes(dep[j * esz:(j + 1) * esz],
+                                               "little")
+                            if g != want.deposits[j]:
+                                diffs.append(f"deposit[lane {i} slot {s}] "
+                                             f"(x = 0x{xs[i]:x}) model "
+                                             f"0x{want.deposits[j]:x} libcft "
+                                             f"0x{g:x}")
+                                break
+                        if lb is not None:
+                            lane_bytes += 1
+                            if lb[i] != want.lane_flags[i]:
+                                diffs.append(
+                                    f"lane byte[{i}] (x = 0x{xs[i]:x}) "
+                                    f"model 0x{want.lane_flags[i]:02x} "
+                                    f"libcft 0x{lb[i]:02x}")
+                    if compared != len(owned):
+                        diffs.append(f"compared {compared} of the "
+                                     f"{len(owned)} lanes the run owns")
+                    if shape == "stand-alone":
+                        # the model's own identity: routines.run's outputs
+                        # (the deposits seq.py made) are mathlib.evaluate's,
+                        # on the first dozen lanes and on every marked one
+                        words = [i for i in owned
+                                 if want.deposits[2 * i + 1] & ml.MARK]
+                        MR["marked_words"] += len(words)
+                        head = owned[:ROUTINE_IDENT]
+                        for i in head + [i for i in words if i not in head]:
+                            ev = ml.evaluate(f, xs[i])
+                            if ev == (want.deposits[2 * i],
+                                      want.deposits[2 * i + 1]):
+                                MR["ident"] += 1
+                            else:
+                                diffs.append(
+                                    f"model identity: lane {i} (x = "
+                                    f"0x{xs[i]:x}) seq.py deposited "
+                                    f"(0x{want.deposits[2 * i]:x}, "
+                                    f"0x{want.deposits[2 * i + 1]:x}), "
+                                    f"mathlib.evaluate gives "
+                                    f"(0x{ev[0]:x}, 0x{ev[1]:x})")
+                    else:
+                        MR["marked_lanes"] += sum(
+                            1 for i in owned
+                            if want.lane_flags[i] & seq.LANE_MARKED)
+                        MR["marked_runs"] += bool(want.status
+                                                  & seq.STATUS_MARKED)
+                        for label, bit in ROUTINE_FLAGS:
+                            MR["raised_" + label] += bool(want.flags & bit)
+                    if diffs:
+                        MR["bad"] += 1
+                        if MR["bad"] <= 3:
+                            print(f"  MISMATCH {name} (routine corpus) {tag} "
+                                  f"n={n} mask="
+                                  f"{'no' if keep is None else 'yes'} "
+                                  f"lane block={'yes' if lf else 'no'}: "
+                                  f"{len(diffs)} difference"
+                                  f"{'s' if len(diffs) != 1 else ''}")
+                            for line in diffs[:6]:
+                                print(f"    {line}")
+                    for i in owned:
+                        MR["kind_" + sf.unpack(fmt, xs[i]).kind] += 1
+                    checked += 1
+                    lanes_done += compared
+                    MR["total"] += 1
+                    MR["lanes"] += compared
+                    MR["lane_bytes"] += lane_bytes
+                    MR[shape] += 1
+                    MR["blocked"] += n > 64
+                    MR["masked"] += keep is not None and compared < n
+                    MR["masked_lanes"] += n - compared
+                    MR["lane_block"] += lf
+                    per = MR["by_format"].setdefault(name, [0, 0])
+                    per[0] += 1
+                    per[1] += compared
+    print(f"{name}: {checked} routine-corpus programs compared, "
+          f"{lanes_done} lanes")
+
+
+def routine_caps(lib, dev):
+    """(max_insns, max_consts, max_deposits, whose) of the handle in use, as
+    cft_get_caps publishes them, or None."""
+    if DEVICE is not None:
+        return (DEVICE.max_insns, DEVICE.max_consts, DEVICE.max_deposits,
+                f"the device ({DEVICE.backend})'s")
+    c = Caps()
+    c.struct_size = ctypes.sizeof(Caps)
+    if lib.cft_get_caps(dev, ctypes.byref(c)) != CFT_OK:
+        return None
+    return (c.max_insns, c.max_consts, c.max_deposits,
+            "the software backend's")
+
+
+def routine_limits(caps):
+    """One line: the routines' programs against libcft's own limits - the
+    sizes read off the programs this run built, the limits off the library
+    through cft_get_caps."""
+    rows = sorted(_ROUTINE["sizes"])
+    if not rows or caps is None:
+        return
+
+    def span(col):
+        lo = min(r[col] for r in rows)
+        hi = max(rows, key=lambda r: r[col])
+        return lo, hi[col], f"{hi[1]} {hi[0]} {hi[2]} {hi[3]}"
+    ilo, ihi, iat = span(4)
+    wlo, whi, wat = span(5)
+    rlo, rhi, rat = span(6)
+    dlo, dhi, _dat = span(7)
+    print(f"the routines' programs against {caps[3]} limits (cft_get_caps; "
+          f"{len(rows)} programs): {ilo} to {ihi} instructions against "
+          f"max_insns {caps[0]} (the most: {iat}), {wlo} to {whi} bank words "
+          f"against max_consts {caps[1]} (the most: {wat}), registers r{rlo} "
+          f"to r{rhi} of {seq.NREG} (the most: {rat}), {dlo} to {dhi} "
+          f"deposits a lane against max_deposits {caps[2]}, one quiet region "
+          f"of the {seq.MAX_QUIET_DEPTH} that nest")
+
+
+def routine_remote_refusals(lib, MR):
+    """Every program of the corpus, loaded on a remote handle to a fake server
+    whose HELLO publishes a revision-7 tile's word (0x7f1f: no R23, no R24),
+    and the same word with one bit cleared, and a revision-8 tile's word at a
+    capacity lowered - each load refused BY NAME where the program needs what
+    the word lacks, and loaded where it does not. The client makes the check
+    from the word alone and no load reaches the wire, which the server's record
+    holds. A stand-alone program needs BANK_PTR (its bank) and WIDE_CONST (kx),
+    and REGS32 at fp32 alone, the other formats staying in r15; a compiled
+    program needs FLAG_CONTROL besides, and a run asking for the lane block
+    needs LANE_FLAGS: refused on the client, naming it, before any frame."""
+    if "mods" not in _ROUTINE or _ROUTINE["mods"] is None:
+        return
+    bits = T.FEATURE_BITS
+    tile = 0x7F1F
+    rev8 = tile | bits["LANE_FLAGS"] | bits["FLAG_CONTROL"]
+    legs = [("a revision-7 tile's word", tile, {}),
+            ("that word without BANK_PTR", tile & ~bits["BANK_PTR"], {}),
+            ("that word without WIDE_CONST", tile & ~bits["WIDE_CONST"], {}),
+            ("that word without REGS32", tile & ~bits["REGS32"], {}),
+            ("a revision-8 tile's word", rev8, {}),
+            ("a revision-8 tile's word at max_insns 300", rev8,
+             {"max_insns": 300}),
+            ("a revision-8 tile's word at max_consts 64", rev8,
+             {"max_consts": 64})]
+    first = None
+    for what, word, caps in legs:
+        srv = _FakeServer(word, **caps)
+        dev = ctypes.c_void_p()
+        url = f"cft://127.0.0.1:{srv.port}".encode()
+        if lib.cft_open(url, 0, ctypes.byref(dev)) != CFT_OK:
+            print(f"  MISMATCH (routine remote leg): cft_open of the fake "
+                  f"server failed: {lib.cft_last_error().decode()}")
+            MR["bad"] += 1
+            srv.close()
+            continue
+        try:
+            for key, (_f, stand, comp) in _ROUTINE["progs"].items():
+                for shape, (prog, pbank) in zip(ROUTINE_SHAPES,
+                                                (stand, comp)):
+                    if first is None and shape == "stand-alone":
+                        first = (prog, pbank)
+                    absent = [x for x in routine_needs(prog)
+                              if not word & bits[x]]
+                    over = []
+                    if len(prog.insns) > srv.max_insns:
+                        over.append("cft_caps.max_insns")
+                    if routine_top_const(prog) >= srv.max_consts:
+                        over.append("cft_caps.max_consts")
+                    names = over + [T.CAPS_PLACE[x] for x in absent]
+                    image = prog.to_bytes()
+                    handle = ctypes.c_void_p()
+                    rc = lib.cft_program_load(dev, image, len(image),
+                                              ctypes.byref(handle))
+                    msg = (lib.cft_last_error().decode("utf-8", "replace")
+                           if rc != CFT_OK else "(loaded; no error)")
+                    if rc == CFT_OK:
+                        lib.cft_program_free(handle)
+                    where = f"{key[0]} {key[1]} {sf.RND_NAMES[key[2]]} {shape}"
+                    if names:
+                        named = [x for x in names if x in msg]
+                        # the instruction and the macro too, where the bit is
+                        # R24's alone, as the flag-control leg holds it
+                        if absent == ["FLAG_CONTROL"] and not over:
+                            named = [x for x in named
+                                     if "QUIET" in msg
+                                     and "CFT_SEQ_FEAT_FLAG_CONTROL" in msg]
+                        if rc == CFT_ERR_UNSUPPORTED and named:
+                            MR["remote_refused"] += 1
+                        else:
+                            print(f"  MISMATCH (routine remote leg): "
+                                  f"{where} on {what} (0x{word:x}) gave rc "
+                                  f"{rc} and {msg!r} - wanted "
+                                  f"CFT_ERR_UNSUPPORTED naming "
+                                  f"{' or '.join(names)}")
+                            MR["bad"] += 1
+                    elif rc != CFT_OK:
+                        print(f"  MISMATCH (routine remote leg): {where} on "
+                              f"{what} (0x{word:x}) was refused: rc {rc}, "
+                              f"{msg!r}")
+                        MR["bad"] += 1
+                    else:
+                        MR["remote_loaded"] += 1
+            # the block, asked of a run on a server whose word lacks it - and
+            # only where the program loads there: a word without BANK_PTR,
+            # WIDE_CONST or REGS32 refuses it at load, which the loop above
+            # holds, before a run could ask for anything
+            if (not word & bits["LANE_FLAGS"] and first is not None
+                    and all(word & bits[x] for x in routine_needs(first[0]))):
+                prog, pbank = first
+                try:
+                    run_in_c_routine(lib, dev, prog, pbank, [0, 0], None, True)
+                    print(f"  MISMATCH (routine remote leg): a run asking "
+                          f"for the per-lane flags ran on {what}")
+                    MR["bad"] += 1
+                except RuntimeError as exc:
+                    if "CFT_SEQ_FEAT_LANE_FLAGS" in str(exc):
+                        MR["remote_refused"] += 1
+                    else:
+                        print(f"  MISMATCH (routine remote leg): the block "
+                              f"was refused without its name on {what}: "
+                              f"{exc}")
+                        MR["bad"] += 1
+        finally:
+            lib.cft_close(dev)
+            srv.close()
+        if srv.other_ops:
+            print(f"  MISMATCH (routine remote leg): a load or run reached "
+                  f"the wire on {what}, ops "
+                  f"{[hex(o) for o in srv.other_ops]}")
+            MR["bad"] += 1
+    print(f"routine-corpus remote leg: {MR['remote_refused']} refused by "
+          f"name on servers without a bit or a capacity the program needs, "
+          f"{MR['remote_loaded']} loaded where published")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--formats", nargs="+", default=["fp32", "fp64"],
                     choices=list(FORMATS))
     ap.add_argument("--trials", type=int, default=400)
     ap.add_argument("--seed", type=int, default=17)
+    ap.add_argument("--math-rounds", type=int, default=None, metavar="N",
+                    help="rounds of the eighth corpus - M1's routines, every "
+                         "fragment of the formats in both shapes a round, "
+                         "from fresh lanes - where the default is one for "
+                         "each 250 --trials and at least one (the module's "
+                         "text)")
     ap.add_argument("--device", metavar="ARTIFACT",
                     help="run the corpora through this device's handle - "
                          "an xclbin, cft://host:port, sw, or sw:N (the "
@@ -2401,6 +3154,15 @@ def main():
              nested=0, raise_quiet=0, raise_loud=0, marked=0, masked=0,
              lanes=0, strict=0, range=0, overflow=0, remote_refused=0,
              remote_loaded=0)
+    # ...and the eighth's (M1's routines, parcel MP): a defaultdict, since it
+    # counts lanes by their class and runs by the flags they raised
+    MR = collections.defaultdict(int)
+    MR["by_format"] = {}
+    MR["capref"] = collections.Counter()
+    MR["formats"] = []          # the formats the corpus ran at
+    MR["fragments"] = set()     # (format, routine, attribute) it drew
+    if args.math_rounds is not None and args.math_rounds < 1:
+        ap.error("--math-rounds takes at least 1")
     try:
         for name in args.formats:
             fmt = FORMATS[name]
@@ -2517,10 +3279,13 @@ def main():
             masked_corpus(lib, dev, fmt, name, args, M)
             rev8_corpus(lib, dev, fmt, name, args, R)
             flags_corpus(lib, dev, fmt, name, args, F)
+            routine_corpus(lib, dev, fmt, name, args, MR)
+        MR["caps"] = routine_caps(lib, dev)     # before the handle closes
     finally:
         lib.cft_close(dev)
     rev8_remote_refusals(lib, R)
     flags_remote_refusals(lib, F)
+    routine_remote_refusals(lib, MR)
     ceiling_bad = deposit_ceiling_remote(lib)
 
     print(f"\n{total} programs run through both implementations, "
@@ -2570,7 +3335,29 @@ def main():
           f"compared, {F['strict']} strict runs of which {F['range']} "
           f"reported, {F['overflow']} with a deposit overflow; "
           f"{F['directed']} directed refusals refused by both")
-    bad += S["bad"] + X["bad"] + M["bad"] + R["bad"] + ceiling_bad + F["bad"]
+    if MR["total"]:
+        by = ", ".join(f"{k} {v[0]} programs and {v[1]} lanes"
+                       for k, v in MR["by_format"].items())
+        print(f"{MR['total']} programs from the routine corpus run through "
+              f"both, {MR['stand-alone']} stand-alone and {MR['compiled']} "
+              f"compiled ({by}), {MR['blocked']} across the block boundary: "
+              f"{MR['lanes']} lanes compared, {MR['masked']} masked runs "
+              f"({MR['masked_lanes']} lanes masked), {MR['lane_block']} runs "
+              f"with the per-lane block asked for ({MR['lane_bytes']} lane "
+              f"bytes compared), {MR['marked_lanes']} marked lanes in "
+              f"{MR['marked_runs']} compiled runs with STATUS[6] set and "
+              f"{MR['marked_words']} marked flag words in the stand-alone "
+              f"ones; lanes compared by class: {MR['kind_nan']} NaN, "
+              f"{MR['kind_inf']} infinite, {MR['kind_zero']} zero, "
+              f"{MR['kind_sub']} subnormal, {MR['kind_norm']} normal; "
+              f"compiled runs raising "
+              + ", ".join(f"{label} {MR['raised_' + label]}"
+                          for label, _b in ROUTINE_FLAGS)
+              + f"; {MR['ident']} lanes where seq.py's deposits are "
+              f"mathlib.evaluate's")
+        routine_limits(MR["caps"])
+    bad += (S["bad"] + X["bad"] + M["bad"] + R["bad"] + ceiling_bad
+            + F["bad"] + MR["bad"])
     if DEVICE is not None:
         # --device: what the device refused by name, corpus by corpus
         by = collections.defaultdict(list)
@@ -2581,7 +3368,14 @@ def main():
                   f"COMPARED - each needs a bit the device does not "
                   f"publish, and each was refused by name "
                   f"(CFT_ERR_UNSUPPORTED naming {', '.join(parts)})")
-        if not by:
+        if MR["capref"]:
+            refs = ", ".join(f"{k} {v}"
+                             for k, v in sorted(MR["capref"].items()))
+            print(f"routine corpus: {sum(MR['capref'].values())} programs "
+                  f"NOT COMPARED - each is past a capacity the device "
+                  f"publishes, and each was refused by name "
+                  f"(CFT_ERR_UNSUPPORTED naming {refs})")
+        if not by and not MR["capref"]:
             print("the device refused no program for a bit it lacks: every "
                   "program was compared")
         bad += DEVICE.bad
@@ -2597,6 +3391,50 @@ def main():
                   f"form among the programs the device ran; {n_held} of its "
                   f"programs were refused by name instead (above)")
         return n_held > 0
+
+    routine_held = sum(MR["capref"].values())
+    routine_ran = routine_modules() is not None
+    if routine_ran:
+        # the drawn programs against the corpus's own arithmetic: every
+        # routine at every attribute in both shapes, a round at a time, at
+        # every format that was run - so a loop that drops a fragment, a
+        # shape or a round is counted short here, whatever else it compares
+        frags = len(routine_modules()[0].NAMES) * len(sf.RND_MODES)
+        per_format = frags * len(ROUTINE_SHAPES)
+        rounds = routine_rounds(args)
+        want_drawn = rounds * per_format * len(MR["formats"])
+        short = [] if MR["drawn"] == want_drawn else [
+            f"{MR['drawn']} programs were drawn where {rounds} round"
+            f"{'s' if rounds != 1 else ''} of {per_format} programs at each "
+            f"of {len(MR['formats'])} formats is {want_drawn}"]
+        for k in MR["formats"]:
+            have = len({f for f in MR["fragments"] if f[0] == k})
+            if have != frags:
+                short.append(f"{k} ran {have} of {frags} fragments")
+        if short:
+            print("THE ROUTINE CORPUS DID NOT RUN EVERY FRAGMENT - "
+                  + "; ".join(short))
+            return 1
+    if routine_ran and (MR["total"] or routine_held):
+        zero = [k for k in (
+            "blocked", "masked", "lane_bytes", "marked_lanes", "marked_runs",
+            "marked_words", "kind_nan", "kind_inf", "kind_zero", "kind_sub",
+            "kind_norm", "raised_invalid", "raised_divideByZero",
+            "raised_overflow", "raised_underflow", "raised_inexact", "ident",
+            "remote_refused", "remote_loaded") if not MR[k]]
+        held = (DEVICE.refused_in("routine corpus") if DEVICE is not None
+                else 0) + routine_held
+        if zero and held:
+            print(f"NOTE (--device): the routine corpus did not reach every "
+                  f"form among the programs the device ran ({', '.join(zero)}"
+                  f" counted nothing); {held} of its programs were refused "
+                  f"by name instead (above)")
+        elif zero:
+            print(f"THE ROUTINE CORPUS DID NOT REACH EVERY FORM - "
+                  f"{', '.join(zero)} counted nothing, so a block boundary, "
+                  f"a mask, the lane block, a mark, a class of lane, a flag, "
+                  f"the model's identity or a remote refusal went uncompared")
+            return 1
 
     if F["total"] and not all(F[k] for k in (
             "refused", "blocked", "directed", "quiet", "nested",
@@ -2646,11 +3484,14 @@ def main():
         return 1
     if DEVICE is not None:
         # every corpus exercised: something compared, or refused by name
-        for corpus, compared in (("scratch corpus", S["total"]),
-                                 ("indexed corpus", X["total"]),
-                                 ("masked corpus", M["total"]),
-                                 ("revision-8 corpus", R["total"]),
-                                 ("flag-control corpus", F["total"])):
+        corpora = [("scratch corpus", S["total"]),
+                   ("indexed corpus", X["total"]),
+                   ("masked corpus", M["total"]),
+                   ("revision-8 corpus", R["total"]),
+                   ("flag-control corpus", F["total"])]
+        if routine_ran:
+            corpora.append(("routine corpus", MR["total"] + routine_held))
+        for corpus, compared in corpora:
             if total and not compared and not DEVICE.refused_in(corpus):
                 print(f"THE {corpus.upper()} COMPARED NOTHING AND THE DEVICE "
                       f"REFUSED NOTHING OF IT - it was not exercised")
