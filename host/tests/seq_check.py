@@ -109,23 +109,26 @@ RAISE of the flag word and the result deposited - the shape that carries R24's
 mark to STATUS[6] and R23's byte. It is also the first corpus here to hand
 cft_program_run_ex a bank. A program's lanes are drawn from the special
 encodings (+-0, +-inf, NaNs with payloads, subnormals), the routine's edge
-pool, the transcend pools, its structured family (the windows' centres, which
-it marks; fp32 exp's marked lanes) and random encodings - the pools and
-samplers python/tests holds the fragments to, so the tests' lanes and these
-are one set.
+pool, the transcend pools, its structured family (the committed windows'
+centres, which it marks, and the lanes beside them; fp32 exp's marked lanes)
+and random encodings; the edge pools, the pools, the centres and the samplers
+are python/tests', the ones the fragments are held to there.
 There are 1, 2, 63, 64, 65, 100 or 129 lanes, half the programs past libcft's
 64-lane block, each with a one in three chance of a mask, whose masked lanes'
 bytes must stay the caller's, the per-lane block asked for on every compiled
-run and half the stand-alone ones. FLAGS, STATUS - the mark among it -, every deposit, count and
-lane byte are compared, and how many lanes were, which must be every lane the
-run owns. Beside them is the model's own identity: on a dozen lanes of each
-stand-alone program, and on every marked one, the deposits seq.py makes are
-mathlib.evaluate's - routines.run's outputs. A fragment the model runs and
-libcft refuses is a mismatch, named. One ROUND draws every fragment in both
-shapes from fresh lanes: the default is one round for each 250 --trials, at
-least one, and --math-rounds N sets it. The lanes come from python/tests, which
-needs mpmath and pytest; a host without them prints one SKIP line, which
-verify/run.sh counts as an inner skip, and runs the seven corpora as before.
+run and half the stand-alone ones. FLAGS, STATUS - the mark among it -, every
+deposit, count and lane byte are compared, and how many lanes were, which must
+be every lane the run owns. Beside them is the model's own identity: on a dozen
+lanes of each stand-alone program, and on every marked one, the deposits seq.py
+makes are mathlib.evaluate's - routines.run's outputs. A fragment the model
+runs and libcft refuses is a mismatch, named. A reach check fails the run,
+naming them, if a source or a class of lane, a form of run, a flag, the
+identity or a refusal of the remote leg was never reached, or a fragment never
+drawn. One ROUND draws every fragment in both shapes from fresh lanes: the
+default is one round for each 250 --trials, at least one, and --math-rounds N
+sets it. The lanes come from python/tests, which needs mpmath and pytest; a
+host without them prints one SKIP line, which verify/run.sh counts as an
+inner skip, and runs the seven corpora as before.
 The run then states the programs' sizes against libcft's limits (cft_get_caps),
 and a remote leg loads every program on fake servers whose HELLO publishes a
 revision-7 tile's word, that word with BANK_PTR, WIDE_CONST or REGS32 cleared,
@@ -2422,6 +2425,11 @@ ROUTINE_SHARES = (("special", 0.15), ("edge", 0.25), ("pool", 0.15),
 ROUTINE_MINIMA = (3, 3, 1, 1, 1)        # at 8 lanes or more, each category
 ROUTINE_IDENT = 12                      # lanes a stand-alone run evaluates
 ROUTINE_SHAPES = ("stand-alone", "compiled")
+ROUTINE_CATS = ("special", "edge", "pool", "centre", "struct", "random")
+# the remote leg: seven servers, two of them with a capacity lowered to these
+ROUTINE_LEGS = 7
+ROUTINE_LEG_INSNS = 300
+ROUTINE_LEG_CONSTS = 64
 ROUTINE_FLAGS = (("invalid", sf.FLAG_INVALID),
                  ("divideByZero", sf.FLAG_DIVZERO),
                  ("overflow", sf.FLAG_OVERFLOW),
@@ -2566,40 +2574,46 @@ def routine_quotas(n):
 
 
 def routine_lanes(ml, har, fam, fmt, fn, rnd, n, sub):
-    """n argument encodings for a program of fragment (fn, fmt, rnd), from
-    the stream `sub`: the quotas of each category, a category short of
-    lanes handing its remainder to the random one, the whole shuffled."""
+    """(xs, tags): n argument encodings for a program of fragment (fn, fmt,
+    rnd), from the stream `sub`, and the category each came from - special,
+    edge, pool, centre (a committed window's centre, or fp32 exp's mark),
+    struct (the lanes beside the windows and the exact cases) or random: the
+    quotas of each category, a category short of lanes handing its remainder
+    to the random one, the whole shuffled."""
     q = dict(zip((c for c, _s in ROUTINE_SHARES), routine_quotas(n)))
-    xs, short = [], 0
+    pairs, short = [], 0
     for cat, pool in (
             ("special", routine_specials(fmt)),
             ("edge", _routine_cached(("edge", fmt.name, fn),
                                      lambda: list(har.edge_pool(fmt, fn)))),
             ("pool", list(har.pools(fmt)))):
         take = min(q[cat], len(pool))
-        xs += sub.sample(pool, take)
+        pairs += [(x, cat) for x in sub.sample(pool, take)]
         short += q[cat] - take
     cens, marked, rest = routine_struct_pool(ml, har, fam, fn, fmt, rnd)
-    picked = []
     if q["struct"]:
         m = min(len(marked), max(1, q["struct"] // 2)) if marked else 0
-        picked = sub.sample(marked, m) if m else []
+        centres = sub.sample(marked, m) if m else []
         near = []
         for c in sub.sample(cens, min(4, len(cens))):
             near += [x for x, _lab in fam.neighbours(fmt, c)]
         beside = rest + near
-        picked += sub.sample(beside, min(q["struct"] - m, len(beside)))
-        short += q["struct"] - len(picked)
-    xs += picked
+        others = sub.sample(beside, min(q["struct"] - m, len(beside)))
+        pairs += [(x, "centre") for x in centres]
+        pairs += [(x, "struct") for x in others]
+        short += q["struct"] - len(centres) - len(others)
     k = q["random"] + short
     k_main, k_weighted = k // 2, k // 4
+    rand = []
     if k_main:
-        xs += har.random_main(fmt, k_main, sub.getrandbits(30), fn)
+        rand += har.random_main(fmt, k_main, sub.getrandbits(30), fn)
     if k_weighted:
-        xs += har.weighted(fmt, k_weighted, sub.getrandbits(30), fn)
-    xs += [sub.getrandbits(fmt.width) for _ in range(k - k_main - k_weighted)]
-    sub.shuffle(xs)
-    return xs
+        rand += har.weighted(fmt, k_weighted, sub.getrandbits(30), fn)
+    rand += [sub.getrandbits(fmt.width)
+             for _ in range(k - k_main - k_weighted)]
+    pairs += [(x, "random") for x in rand]
+    sub.shuffle(pairs)
+    return [x for x, _t in pairs], [t for _x, t in pairs]
 
 
 def run_in_c_routine(lib, dev, prog, bank, xs, keep=None, lf=False):
@@ -2775,7 +2789,8 @@ def routine_corpus(lib, dev, fmt, name, args, MR):
                     MR["drawn"] += 1
                     tag = f"{fn} {sf.RND_NAMES[rnd]} {shape}"
                     n = sub.choice(ROUTINE_NS)
-                    xs = routine_lanes(ml, har, fam, fmt, fn, rnd, n, sub)
+                    xs, tags = routine_lanes(ml, har, fam, fmt, fn, rnd, n,
+                                             sub)
                     keep = None
                     if sub.random() < 1 / 3:
                         keep = [sub.random() < 0.7 for _ in range(n)]
@@ -2895,6 +2910,7 @@ def routine_corpus(lib, dev, fmt, name, args, MR):
                                 print(f"    {line}")
                     for i in owned:
                         MR["kind_" + sf.unpack(fmt, xs[i]).kind] += 1
+                        MR["cat_" + tags[i]] += 1
                     checked += 1
                     lanes_done += compared
                     MR["total"] += 1
@@ -2952,6 +2968,24 @@ def routine_limits(caps):
           f"of the {seq.MAX_QUIET_DEPTH} that nest")
 
 
+def routine_expected_refusals():
+    """The names the remote leg's refusals must have given, by the programs
+    this run built: every program needs BANK_PTR and WIDE_CONST (CAPS[6] and
+    CAPS[4]), a compiled one FLAG_CONTROL (CAPS2[14]), and a run asking for
+    the block LANE_FLAGS (CAPS2[13]); REGS32 (CAPS[5]) only where a program
+    writes past r15 (fp32's), and a capacity only where a program is past
+    the one the leg lowers."""
+    rows = _ROUTINE["sizes"]
+    want = {"CAPS[4]", "CAPS[6]", "CAPS2[13]", "CAPS2[14]"}
+    if any(r[6] > 15 for r in rows):
+        want.add("CAPS[5]")
+    if any(r[4] > ROUTINE_LEG_INSNS for r in rows):
+        want.add("cft_caps.max_insns")
+    if any(r[5] > ROUTINE_LEG_CONSTS for r in rows):
+        want.add("cft_caps.max_consts")
+    return sorted(want)
+
+
 def routine_remote_refusals(lib, MR):
     """Every program of the corpus, loaded on a remote handle to a fake server
     whose HELLO publishes a revision-7 tile's word (0x7f1f: no R23, no R24),
@@ -2973,10 +3007,10 @@ def routine_remote_refusals(lib, MR):
             ("that word without WIDE_CONST", tile & ~bits["WIDE_CONST"], {}),
             ("that word without REGS32", tile & ~bits["REGS32"], {}),
             ("a revision-8 tile's word", rev8, {}),
-            ("a revision-8 tile's word at max_insns 300", rev8,
-             {"max_insns": 300}),
-            ("a revision-8 tile's word at max_consts 64", rev8,
-             {"max_consts": 64})]
+            (f"a revision-8 tile's word at max_insns {ROUTINE_LEG_INSNS}",
+             rev8, {"max_insns": ROUTINE_LEG_INSNS}),
+            (f"a revision-8 tile's word at max_consts {ROUTINE_LEG_CONSTS}",
+             rev8, {"max_consts": ROUTINE_LEG_CONSTS})]
     first = None
     for what, word, caps in legs:
         srv = _FakeServer(word, **caps)
@@ -3021,6 +3055,7 @@ def routine_remote_refusals(lib, MR):
                                      and "CFT_SEQ_FEAT_FLAG_CONTROL" in msg]
                         if rc == CFT_ERR_UNSUPPORTED and named:
                             MR["remote_refused"] += 1
+                            MR["remote_names"][named[0]] += 1
                         else:
                             print(f"  MISMATCH (routine remote leg): "
                                   f"{where} on {what} (0x{word:x}) gave rc "
@@ -3050,6 +3085,7 @@ def routine_remote_refusals(lib, MR):
                 except RuntimeError as exc:
                     if "CFT_SEQ_FEAT_LANE_FLAGS" in str(exc):
                         MR["remote_refused"] += 1
+                        MR["remote_names"][T.CAPS_PLACE["LANE_FLAGS"]] += 1
                     else:
                         print(f"  MISMATCH (routine remote leg): the block "
                               f"was refused without its name on {what}: "
@@ -3063,9 +3099,11 @@ def routine_remote_refusals(lib, MR):
                   f"the wire on {what}, ops "
                   f"{[hex(o) for o in srv.other_ops]}")
             MR["bad"] += 1
+        MR["legs_run"] += 1
+    by = ", ".join(f"{k} {v}" for k, v in sorted(MR["remote_names"].items()))
     print(f"routine-corpus remote leg: {MR['remote_refused']} refused by "
-          f"name on servers without a bit or a capacity the program needs, "
-          f"{MR['remote_loaded']} loaded where published")
+          f"name on servers without a bit or a capacity the program needs "
+          f"({by}), {MR['remote_loaded']} loaded where published")
 
 
 def main():
@@ -3161,6 +3199,7 @@ def main():
     MR = collections.defaultdict(int)
     MR["by_format"] = {}
     MR["capref"] = collections.Counter()
+    MR["remote_names"] = collections.Counter()  # what the remote leg named
     MR["formats"] = []          # the formats the corpus ran at
     MR["fragments"] = set()     # (format, routine, attribute) it drew
     if args.math_rounds is not None and args.math_rounds < 1:
@@ -3352,7 +3391,11 @@ def main():
               f"{MR['marked_words']} marked flag words in the stand-alone "
               f"ones; lanes compared by class: {MR['kind_nan']} NaN, "
               f"{MR['kind_inf']} infinite, {MR['kind_zero']} zero, "
-              f"{MR['kind_sub']} subnormal, {MR['kind_norm']} normal; "
+              f"{MR['kind_sub']} subnormal, {MR['kind_norm']} normal; and "
+              f"by source: {MR['cat_special']} special, {MR['cat_edge']} "
+              f"edge pool, {MR['cat_pool']} transcend pools, "
+              f"{MR['cat_centre']} committed centres or fp32 marks, "
+              f"{MR['cat_struct']} beside them, {MR['cat_random']} random; "
               f"compiled runs raising "
               + ", ".join(f"{label} {MR['raised_' + label]}"
                           for label, _b in ROUTINE_FLAGS)
@@ -3418,13 +3461,30 @@ def main():
             print("THE ROUTINE CORPUS DID NOT RUN EVERY FRAGMENT - "
                   + "; ".join(short))
             return 1
+        # the remote leg: every one of its servers, and every name the
+        # programs here can be refused by, given at least once
+        gaps = []
+        if MR["legs_run"] != ROUTINE_LEGS:
+            gaps.append(f"the remote leg ran {MR['legs_run']} of its "
+                        f"{ROUTINE_LEGS} servers")
+        unnamed = [nm for nm in routine_expected_refusals()
+                   if not MR["remote_names"][nm]]
+        if unnamed:
+            gaps.append(f"the remote leg never refused by name: "
+                        f"{', '.join(unnamed)}")
+        if gaps:
+            print("THE ROUTINE CORPUS DID NOT REACH EVERY FORM - "
+                  + "; ".join(gaps))
+            return 1
     if routine_ran and (MR["total"] or routine_held):
         zero = [k for k in (
             "blocked", "masked", "lane_bytes", "marked_lanes", "marked_runs",
             "marked_words", "kind_nan", "kind_inf", "kind_zero", "kind_sub",
             "kind_norm", "raised_invalid", "raised_divideByZero",
             "raised_overflow", "raised_underflow", "raised_inexact", "ident",
-            "remote_refused", "remote_loaded") if not MR[k]]
+            "remote_refused", "remote_loaded",
+            "cat_special", "cat_edge", "cat_pool", "cat_centre", "cat_struct",
+            "cat_random") if not MR[k]]
         held = (DEVICE.refused_in("routine corpus") if DEVICE is not None
                 else 0) + routine_held
         if zero and held:
@@ -3435,8 +3495,9 @@ def main():
         elif zero:
             print(f"THE ROUTINE CORPUS DID NOT REACH EVERY FORM - "
                   f"{', '.join(zero)} counted nothing, so a block boundary, "
-                  f"a mask, the lane block, a mark, a class of lane, a flag, "
-                  f"the model's identity or a remote refusal went uncompared")
+                  f"a mask, the lane block, a mark, a class or a source of "
+                  f"lane, a flag, the model's identity or a remote refusal "
+                  f"went uncompared")
             return 1
 
     if F["total"] and not all(F[k] for k in (
