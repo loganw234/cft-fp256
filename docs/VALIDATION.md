@@ -19751,7 +19751,7 @@ The faults MB1's table already had, now on the log family (`PLANTS` says which a
 
 **What Logan asked.** The wave is his "Delete the ci-golden branch and start M1's build" (2026-10-13), with his models of the same day: "Use Sonnet for M1's build parcels as you recommended, it performed well".
 
-**M2's twelve questions,** put to him on 2026-10-14 with the study's recommendations listed (question 9 restated for MB1's cap), by AskUserQuestion.
+**M2's twelve questions,** put to him with the study's recommendations listed (question 9 restated for MB1's cap), by AskUserQuestion, and answered on 2026-10-14.
 - The question: "How do you want to answer M2's twelve design questions (recommendations as listed above)?"
 - His answer, verbatim: "Approve all as recommended (Recommended)".
 - That option read: "Settle all twelve as the study recommends, question 9 as restated (a cap per function and format). M2's build round then starts from these whenever it comes."
@@ -19853,7 +19853,7 @@ The faults MB1's table already had, now on the log family (`PLANTS` says which a
 - **Figures that grow with their sample:**
   - the fp32 first-order bound: 0.489 at 60 lanes, 0.519 at 400, 0.537 for [1/16, 1/8];
   - the bound's and the budget's figures (above). At fp64 the larger sample still leaves more than 2 bits.
-- **`--check` shares definitions with the generator:** _k_width, RHO_LOG, SMALL_LOG, GUARD and the seed table. So its docstring's "shares nothing with the generator", MB1's text, is overstated. The behavioural checks catch a fault in these: _k_width four too small is red in pools, edges, lanes, bound, budget and rate at fp64.
+- **`--check` shares definitions with the generator:** _k_width, RHO_LOG, SMALL_LOG, GUARD and the seed table. So its docstring's "shares nothing with the generator", E1's text, is overstated. The behavioural checks catch a fault in these: _k_width four too small is red in pools, edges, lanes, bound, budget and rate at fp64.
 - **A blanket relaxation:** test_random_lanes_equal_transcend_and_none_is_marked now asserts `not t.marked or fn == "log"`, blanket over log's cells.
   - The theory allows log's marks in the six cells the test's sample marks.
   - `check_lanes(theory=True)` still fails a mark the theory does not allow.
@@ -19864,13 +19864,13 @@ The faults MB1's table already had, now on the log family (`PLANTS` says which a
   - the budget tool's own plant is not seen on log2;
   - bound_half and bound_double have no row for log.
 - **Small things:**
-  - a stray run of spaces inside an assert at test_mathlib.py:460;
-  - the docstrings of test_the_census_counts_at_the_decided_g and of check_census_counts say "11 of expm1's" at fp64's G = 44, where CENSUS_MARKS pins 13 ("11 centres and two lanes"), from f22e8d2 (VMB2-2).
+  - a stray run of spaces inside an assert at test_mathlib.py:462 (460 at d24271c);
+  - the docstring of test_the_census_counts_at_the_decided_g says "11 of expm1's" at fp64's G = 44, where CENSUS_MARKS pins 13 ("11 centres and two lanes"), from f22e8d2 (VMB2-2).
 - **The golden stage's cost** is about MB1's again, about 180 s a routine against MB1's 290 (the author's measure). The gate's figure is above.
 - **The merge's own** (VIW2):
   - check_rate's docstring premise is a log-uniform significand, which the log family's sampler does not give. In VIW2's words: "The merged records say nothing of it, and VALIDATION's entry predates the finding."
   - By VMB2's count, the three-sigma rule flags log2 fp256's directed cells in 2 of the 31 seeds it ran, 11 and 13.
-  - The merge's message says "the rest is chance" without VMB2's hedge, which is: "NOT SETTLED by measurement (said plainly): that seed 11 is a chance draw rests on the theory above ..., on 30 further seeds of log2 fp256 and 20 of log1p fp128 showing no surplus (+0.3 and +0.4 sigma in total), and on the sample having no class that carries it".
+  - The merge's message says "the rest is chance" without VMB2's hedge, which is: "NOT SETTLED by measurement (said plainly): that seed 11 is a chance draw rests on the theory above ..., on 30 further seeds of log2 fp256 and 20 of log1p fp128 showing no surplus (+0.3 and +0.4 sigma in total), and on the sample having no class that carries it (apart from C = 12, which the other seeds do not repeat)".
   - mathlib.py's comment "leaves |r| < 0.0590820 = 2^-4.081" fails at the seventh digit: the maximum is 121/2048 = 0.05908203125. The study and the test file display the same figure; 2^-4.081 is right.
   - CI's golden job is serial with no timeout, and it gains the 784 tests. The box's 4,580 s for the golden stage at d24271c was taken beside 29 other jobs, so it is not a quiet figure; the gate's is above.
 

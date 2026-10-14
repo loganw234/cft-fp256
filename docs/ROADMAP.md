@@ -6183,7 +6183,7 @@ as the study recommends:
   starts from these whenever it comes."
 
 So each of the study's twelve (docs/studies/M2-trig.md, section 9) is
-settled as recommended. As they were put to him:
+settled as recommended. In substance as put to him:
 1. **2/pi's storage:** in bank words, read by a SELECT shifter. LDX
    scratch later, only if a workload needs it.
 2. **The stated range:** 2^1024 for fp128 and fp256.
@@ -6200,7 +6200,7 @@ settled as recommended. As they were put to him:
 9. **Live values, restated:** M2's fragments keep 22, 26, 17 and 16
    values live at fp32, fp64, fp128 and fp256. That is past the caps
    that mathlib.py has had since MB1, 21 and 13, at every format. So
-   the cap is set per function and format.
+   the cap is to be per function and format.
 10. **The derivative rules:** `cos(a)*da`, `(-sin(a))*da` and
     `fma(r,r,1)*da`, with the pendulum as the reference.
 11. **The generator:** in mathlib.py.
