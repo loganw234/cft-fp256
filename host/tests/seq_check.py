@@ -114,9 +114,9 @@ it marks; fp32 exp's marked lanes) and random encodings - the pools and
 samplers python/tests holds the fragments to, so the tests' lanes and these
 are one set.
 There are 1, 2, 63, 64, 65, 100 or 129 lanes, half the programs past libcft's
-64-lane block, a third run under a mask whose masked lanes' bytes must stay the
-caller's, the per-lane block asked for on every compiled run and half the
-stand-alone ones. FLAGS, STATUS - the mark among it -, every deposit, count and
+64-lane block, each with a one in three chance of a mask, whose masked lanes'
+bytes must stay the caller's, the per-lane block asked for on every compiled
+run and half the stand-alone ones. FLAGS, STATUS - the mark among it -, every deposit, count and
 lane byte are compared, and how many lanes were, which must be every lane the
 run owns. Beside them is the model's own identity: on a dozen lanes of each
 stand-alone program, and on every marked one, the deposits seq.py makes are
@@ -2400,9 +2400,9 @@ def flags_remote_refusals(lib, F):
 # neighbours and the census beside them; fp32's exp marks) and random
 # encodings (the main path's samplers and raw bit patterns). A program has 1,
 # 2, 63, 64, 65, 100 or 129 lanes, half of them past libcft's 64-lane block,
-# a third run under a mask, whose masked lanes' bytes must stay the caller's
-# pattern, and the per-lane block is asked for on every compiled run and half
-# the stand-alone ones.
+# each with a one in three chance of a mask, whose masked lanes' bytes must
+# stay the caller's pattern, and the per-lane block is asked for on every
+# compiled run and half the stand-alone ones.
 #
 # Compared on every run: FLAGS, STATUS - with its mark -, every deposit,
 # every count, and every lane byte where asked; and how many lanes were
@@ -2510,10 +2510,11 @@ def routine_specials(fmt):
 
 def routine_ln1p_marks(ml, fmt):
     """The floats nearest ln(1 + t) for t = 2^-23, 2^-22, 2^-21, -2^-22 and
-    -2^-21: at fp32 exp marks all five under rtz, rdn and rup (E1's brief
-    correction 1: its verifiers found them; the statement is READ, and the
-    marks are MEASURED each run), the only lanes of fp32 that mark - the
-    committed windows are empty at its guard of 40."""
+    -2^-21: at fp32 exp marks all five under rtz, rdn and rup, and under
+    neither rne nor rmm (docs/ROADMAP.md's account of E1's brief correction 1:
+    its verifiers found them). They are the only lanes of fp32 the corpus
+    draws that mark - the committed windows are empty at its guard of 40 - and
+    it counts the marks the model gives them, as it counts every other."""
     import mpmath
     out = []
     with mpmath.workprec(4 * fmt.prec + 100):
@@ -2901,6 +2902,7 @@ def routine_corpus(lib, dev, fmt, name, args, MR):
                     MR["lane_bytes"] += lane_bytes
                     MR[shape] += 1
                     MR["blocked"] += n > 64
+                    MR["mask_runs"] += keep is not None
                     MR["masked"] += keep is not None and compared < n
                     MR["masked_lanes"] += n - compared
                     MR["lane_block"] += lf
@@ -3341,7 +3343,8 @@ def main():
         print(f"{MR['total']} programs from the routine corpus run through "
               f"both, {MR['stand-alone']} stand-alone and {MR['compiled']} "
               f"compiled ({by}), {MR['blocked']} across the block boundary: "
-              f"{MR['lanes']} lanes compared, {MR['masked']} masked runs "
+              f"{MR['lanes']} lanes compared, {MR['mask_runs']} runs under a "
+              f"mask of which {MR['masked']} masked a lane "
               f"({MR['masked_lanes']} lanes masked), {MR['lane_block']} runs "
               f"with the per-lane block asked for ({MR['lane_bytes']} lane "
               f"bytes compared), {MR['marked_lanes']} marked lanes in "
