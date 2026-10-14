@@ -20,6 +20,28 @@ fp64 (G = 44), fp128 and fp256 (G = 46) under every attribute, and
 and of cftc, the language and program.c, which are as the study describes
 them.
 
+**A note of 2026-10-13** (parcel MB1, M1's build, item 1; the study's text
+stays as of 2026-10-05). exp2 and expm1 are built too, in the same module, at
+the four formats and five attributes (docs/VALIDATION.md, the entry of that
+date), so "nothing here is built" holds of log, log2 and log1p only. What
+the build changed in this text's statements:
+- Section 4's exp2 paragraph, "The screen at emin - p reproduces
+  transcend.py's +0 under rmm": since profile 3 (parcel XT) transcend.exp2
+  gives the smallest subnormal at that tie, and the routine does, by a
+  one-lane override of the screen's quarter (two instructions, rmm only).
+- Section 3.5's expm1 family is c 2^-e only. expm1 has a second, x near
+  -n ln 2 for n from about G to p + 1, where expm1(x) is within the bound of
+  the grid point -1 + 2^-n (the directed three) or of the midpoint
+  -1 + 2^-(p+1) (rne and rmm). exp2 has none, as 3.5 says; the theory and the
+  tests agree.
+- Section 5.1's fp32 estimates for exp2 and expm1 ("about 2x"): 371 and 405
+  instructions (rne, G = 40) against exp's 382.
+- Sections 5.1 and 6 and question 12 on live values (22 to 24 at the double
+  word, 34 at fp32 for exp): the fragments are emitted in a scheduled order
+  and keep 11 to 13 live at fp64 to fp256 and 19 to 21 at fp32, so every
+  fp32 fragment fits seq.py's 32 registers; in the design's order they keep
+  22 to 25 and 33 to 36.
+
 **Revised the same day,** after verifier-VM1 checked the first version
 (5b6de0d; the round's ledger, `verifier-VM1.md`). That check found one
 defect: log1p's r = x path ran its polynomial past the bound's rho, and

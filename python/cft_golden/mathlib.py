@@ -1,7 +1,7 @@
 # Copyright 2026 Logan W.
 # SPDX-License-Identifier: Apache-2.0
-"""The math library's golden generator (step 6, M1's build, parcel E1):
-exp, as a fragment of a tile program.
+"""The math library's golden generator (step 6, M1's build, parcels E1 and
+MB1): exp, exp2 and expm1, as fragments of a tile program.
 
 transcend.py DEFINES exp, expm1, exp2, log, log1p and log2: bits and flags,
 correctly rounded, for every argument. A tile has none of them as an
@@ -11,29 +11,35 @@ where a node stands, as it inlines division and square root. This module
 builds the fragments. They are built, not read from a program as C4's are:
 the construction below IS the design of docs/studies/M1-exp-log.md, whose
 model (docs/studies/m1/) this file ports into the tree; nothing here
-imports it. So far it builds exp. The other five come in M1's later
-parcels, each as this one was.
+imports it. So far it builds exp (parcel E1), exp2 and expm1 (parcel MB1).
+The log family comes in M1's later parcels, each as these were.
 
 The interface, and only this, is what a battery may rely on:
 
   fragment(name, fmt, rnd)  the specialised routines.Fragment of `name`
-                            ("exp") at fmt (FP32, FP64, FP128 or FP256)
-                            under the program's attribute rnd, held to
-                            invariants() - the widened form of C4's - as
-                            routines.fragment() holds a division
+                            ("exp", "exp2" or "expm1") at fmt (FP32, FP64,
+                            FP128 or FP256) under the program's attribute
+                            rnd, held to invariants() - the widened form of
+                            C4's - as routines.fragment() holds a division
   evaluate(f, x)            one lane: the argument's bits x run through
                             f's body, instruction by instruction, with
                             softfloat.compute as seq.py's ALU computes -
                             the pair (result bits, flag word)
 
-What the fragment is (the study's sections 2.1, 2.2, 3.1 and 4):
+What a fragment is (the study's sections 2.1, 2.2, 3.1 and 4). The three
+share one shape and differ in the reduction, the reconstruction and the
+specials:
 
-  classify   NaN, signalling, infinity, zero, sign, the two screens, the
-             tiny gate: conditions the specials select on
-  reduce     n = round(x 8/ln2) by the magic-number FMA, one rounding;
+  classify   NaN, signalling, infinity, zero, sign, the screens, the tiny
+             gate: conditions the specials select on
+  reduce     exp, expm1: n = round(x 8/ln2) by the magic-number FMA;
              r = x - n ln2/8 by Cody-Waite, |r| <= rho: at fp64, fp128 and
-             fp256 ln2/8 in three words (the study's 2.2) and r a double
-             word; at fp32 ln2/8 in five words and r in three (2.5)
+             fp256 ln2/8 in three words and r a double word; at fp32 ln2/8
+             in five words and r in three (2.5)
+             exp2: n = round(8x), exact by the same FMA; r' = x - n/8,
+             exact; r = r' ln2 by TwoProd of r' against ln2's words - two,
+             and r a double word, at fp64 to fp256; three, and r in three,
+             at fp32 (this parcel's design: the study models only exp there)
   lookup     T_j = 2^(j/8), j = n mod 8, two words (three at fp32), a
              SELECT tree over j's three bits - bank words only, no scratch
              slot
@@ -41,16 +47,26 @@ What the fragment is (the study's sections 2.1, 2.2, 3.1 and 4):
              arithmetic on the encoding of the magic-number sum
   tail,head  Y(r) = (e^r - 1)/r by Taylor: a single-word Horner tail
              (FMA) down to degree K, then K double-word steps (TwoProd by
-             FMA, Fast2Sum where the exponents are ordered)
-  Z, recon   Z = e^r - 1 as a double word; V = T (1 + Z) = V_h + V_l
+             FMA, Fast2Sum where the exponents are ordered); expm1 plans one
+             factor rho fewer, its n = 0 lanes being bounded relative to Z
+  Z, recon   Z = e^r - 1 as a double word; V = T (1 + Z) = V_h + V_l; expm1's
+             V' = T (1 + Z) - 2^-k, T_h - 2^-k by TwoSum and 2^-k taken as 0
+             beyond k = p + G + 2
   final      R = rnd(V_h + V_l); the IN-LANE TEST: both ends of V's error
              interval, V_l - Bv rounded down and V_l + Bv rounded up with
              Bv = 2^-(p+G) |V_h|, are added to V_h under rnd; a lane where
              the two roundings differ is not decided and is MARKED
-  fixed grid a result that may be subnormal is rounded once on its own
-             grid (k <= emin), its own test beside the main one
+  fixed grid exp, exp2: a result that may be subnormal is rounded once on its
+             own grid (k <= emin), its own test beside the main one; expm1's
+             result is never subnormal off its tiny path
   specials   NaN, +-inf, +-0, the screens, in the order of the study's
-             section 4, selected over the main path, lowest priority first
+             section 4, selected over the main path, lowest priority first:
+             exp2's integer x exact with no flag, down to 2^(emin - man_w),
+             and its tie at emin - p (half the smallest subnormal) answered
+             by roundTiesToAway under rmm as transcend.exp2 has since profile
+             3 (the study's model gave +0); expm1's tiny path fma(x, x, x)
+             for |x| < 2^-(p+2) with its underflow cases, and -1, or
+             -(1 - 2^-p) under rtz and rup, for x <= -(p+2) ln2
 
 The routine runs QUIET, its body, ENDQUIET, then RAISE of its flag word,
 as C4's do (cftc/inline.py): the flag word's bits [4:0] are exactly the
@@ -63,18 +79,25 @@ study's questions 1 and 2).
 
 Two builders. fp64, fp128 and fp256 hold V as a DOUBLE word. fp32's double
 word floors near 2^-44.7, short of 2^-(24+40), so fp32's reduction, table,
-head and reconstruction carry THREE words (the study's 2.5); that fragment
-keeps 33 to 34 values live at once and does not fit seq.py's 32 registers,
-so it is built, held to the invariants and run by evaluate(), not by
-routines.program (the live cap, LIVE_CAP, is not applied to it; its count
-is reported).
+head and reconstruction carry THREE words (the study's 2.5).
+
+The order of a fragment's instructions. The builders emit in the design's
+order, in which the triple word's routines keep 33 to 36 values live at once
+and the double word's 22 to 25: past seq.py's 32 registers at fp32, so that
+routines.program refused them ("no register for the harness"). A fragment is
+therefore SCHEDULED (Build.fragment, schedule_order): the same instructions
+in another topological order, which keeps 19 to 21 live at fp32 and 11 to 13
+at the double word's formats (LIVE_CAP). The order changes no value; the
+order-free digest of the dataflow graph, dag_digest(), shows it. The
+instrumented form (Build) keeps the design's order.
 
 No augmented addition: the quad is built without R21 (revision 8's question
 9), so every error-free sum is a Fast2Sum (3 instructions) where the
 exponents of its two terms are provably ordered and a TwoSum (6) where they
 are not, as the study's design has it: the double-word exp holds nine
-Fast2Sums and one TwoSum, counted in Build.meta["fast_two_sum"] and
-["two_sum"]. That is the sense of "TwoSum, not augadd".
+Fast2Sums and one TwoSum, exp2 nine and none, expm1 ten and two, counted in
+Build.meta["fast_two_sum"] and ["two_sum"]. That is the sense of "TwoSum, not
+augadd".
 
 Every constant is DERIVED - from mpmath at 3,000 bits or from an exact
 rational - and rounded once. `python -m cft_golden.mathlib --check`
@@ -82,24 +105,27 @@ re-derives each constant that the built fragments hold, in integer
 arithmetic that shares nothing with the generator or with mpmath, and
 exits non-zero on a difference.
 
-The instrumented form. build_exp() returns a Build, which keeps what the
+The instrumented form. build() returns a Build, which keeps what the
 specialised fragment drops: the unpruned body, each instruction's phase,
 and the probes (V_h, V_l, Bv, the biased exponent Ek, and the values
 between). Build.fragment() is the fragment; the error budget of
-python/tests/mathlib_budget.py reads the rest. build_exp(...,
-plant=name) builds the fragment with one named fault, for the tests: each
-plant is a defect the study's model found in itself or one a check of this
-file's tests must see (PLANTS).
+python/tests/mathlib_budget.py reads the rest. build(..., plant=name)
+builds the fragment with one named fault, for the tests: each plant is a
+defect the study's model found in itself or one a check of this file's
+tests must see (PLANTS).
 
 Marks, as the study's: every figure in a comment is READ, COMPUTED or
-stated as a design; what was MEASURED is in docs/VALIDATION.md's entry for
-parcel E1, with its commands.
+stated as a design; what was MEASURED is in docs/VALIDATION.md's entries for
+parcels E1 and MB1, with their commands.
 """
 
 import argparse
 import functools
+import hashlib
+import heapq
 import math
 import sys
+import types
 from fractions import Fraction
 
 import mpmath
@@ -108,11 +134,13 @@ from . import asm, routines, seq
 from . import softfloat as sf
 from .formats import FP32, FP64, FP128, FP256, FpFormat
 
-__all__ = ["fragment", "evaluate", "invariants", "flag_words", "build_exp",
-           "Build", "plan_exp", "GUARD", "LIVE_CAP", "PLANTS", "FORMATS",
-           "NAMES", "check_constants", "main"]
+__all__ = ["fragment", "evaluate", "invariants", "flag_words", "build",
+           "build_exp", "build_exp2", "build_expm1", "Build", "plan_exp",
+           "plan_exp32", "GUARD", "LIVE_CAP", "PLANTS", "FORMATS", "NAMES",
+           "PHASE_ORDER", "dag_digest", "schedule_order", "check_constants",
+           "main"]
 
-NAMES = ("exp",)                       # the routines built so far
+NAMES = ("exp", "exp2", "expm1")       # the routines built so far
 FORMATS = (FP32, FP64, FP128, FP256)
 RNE, RTZ, RDN, RUP, RMM = (sf.RND_RNE, sf.RND_RTZ, sf.RND_RDN, sf.RND_RUP,
                            sf.RND_RMM)
@@ -264,6 +292,26 @@ def _screens(fmt: FpFormat):
             _enc(fmt, (fmt.emin - fmt.prec) * l2, RDN))
 
 
+def _screens_exp2(fmt: FpFormat):
+    """(XOVF, XUNF) of exp2 as encodings: emax + 1 and emin - p, both exact
+    (an integer of under 20 bits). x >= XOVF gives 2^x >= 2^(emax+1), an
+    overflow under every attribute; x <= XUNF gives 2^x <= 2^(emin-p), at
+    most half the smallest subnormal. At x = XUNF itself 2^x IS half of it,
+    the tie between +0 and the smallest subnormal, which rmm (roundTiesToAway)
+    rounds to the subnormal: the builder answers that one lane apart (the
+    screen's quarter rounds to +0), as transcend.exp2 has since profile 3."""
+    return (_enc_exact(fmt, fmt.emax + 1), _enc_exact(fmt, fmt.emin - fmt.prec))
+
+
+def _screen_expm1(fmt: FpFormat):
+    """XM1 as an encoding: RD(-(p+2) ln 2). x <= XM1 gives e^x under
+    2^-(p+2), so expm1(x) lies within 2^-(p+2) of -1, nearer than half of the
+    spacing 2^-p below 1: the answer is -1, or -(1 - 2^-p) under rtz and rup,
+    never anything else. ln 2 is irrational, so the screen is never an
+    equality."""
+    return _enc(fmt, -(fmt.prec + 2) * _ln2(), RDN)
+
+
 # ---- the plan: K and D ------------------------------------------------------
 
 def _rho(fmt: FpFormat, cushion_bits):
@@ -281,14 +329,16 @@ def _cushion(fmt: FpFormat):
     return 12 if fmt.prec <= 24 else 30
 
 
-def plan_exp(fmt: FpFormat, G):
-    """(K, D) for the double-word exp: K double-word head steps and a
+def plan_exp(fmt: FpFormat, G, rel_z=False):
+    """(K, D) for the double-word exp family: K double-word head steps and a
     single-word tail to degree D of Y, the smallest whose estimated bound
     is two bits under 2^-(p+G): the tail through r^(K+1),
     2u rho^(K+1)/(K+1)! (u = 2^-p), within half the target, and with the
     truncation rho^(D+2)/(D+2)! (1 + rho) and the double word's own floor
     10 u^2 under the target (the study's 3.2). Exact rational arithmetic,
-    so the plan is the same on every platform."""
+    so the plan is the same on every platform. `rel_z` plans expm1, whose
+    n = 0 lanes are bounded relative to Z = r Y, not to V = 1 + Z: one factor
+    rho fewer in the tail and in the truncation (the study's 3.2, K = 8)."""
     p = fmt.prec
     u = Fraction(1, 2 ** p)
     rho = _rho(fmt, _cushion(fmt))
@@ -297,12 +347,13 @@ def plan_exp(fmt: FpFormat, G):
     if floor >= target:
         raise ValueError(f"G = {G} is past the double word's floor at "
                          f"{fmt.name}: 10 u^2 = 2^{math.log2(floor):.1f}")
+    extra = 0 if rel_z else 1
 
     def tail(K):
-        return 2 * u * rho ** (K + 1) / math.factorial(K + 1)
+        return 2 * u * rho ** (K + extra) / math.factorial(K + 1)
 
     def trunc(D):
-        return rho ** (D + 2) / math.factorial(D + 2) * (1 + rho)
+        return rho ** (D + 1 + extra) / math.factorial(D + 2) * (1 + rho)
     K = 1
     while tail(K) > target / 2 and K < 60:
         K += 1
@@ -314,48 +365,86 @@ def plan_exp(fmt: FpFormat, G):
 
 # ---- the builder ------------------------------------------------------------
 
-# Faults, for the tests: build_exp(..., plant=name) builds the fragment with
+# Faults, for the tests: build(name, ..., plant=name) builds the fragment with
 # one of them. Each is a defect the study's model found in itself (section
 # 3.6) or the study's table of plants (section 8), or one a check of
-# python/tests/test_mathlib.py needs to see fail; the value says which.
+# python/tests/test_mathlib.py needs to see fail. The value is (the families
+# it applies to: "dw" the double word's, "tw" fp32's triple word; the
+# routines it applies to; what it is).
+_ALL = "exp exp2 expm1"
 PLANTS = {
-    "table_entry": ("dw tw", "T_3's high word one ulp off (the study's "
+    "table_entry": ("dw tw", _ALL, "T_3's high word one ulp off (the study's "
                     "first plant)"),
-    "c1_ulp": ("dw tw", "the reduction's first word C1 one ulp off (the "
-               "second)"),
-    "bound_loose": ("dw tw", "the in-lane bound 2^-40 smaller: Bv = "
+    "c1_ulp": ("dw tw", "exp expm1", "the reduction's first word C1 one ulp "
+               "off (the second)"),
+    "bound_loose": ("dw tw", _ALL, "the in-lane bound 2^-40 smaller: Bv = "
                     "2^-(p+G+40) |V_h| (the third)"),
-    "bound_wide": ("dw tw", "the in-lane bound 2^16 times wider: marks far "
-                   "more lanes than the law allows"),
-    "bound_half": ("dw tw", "the in-lane bound half as wide: Bv = "
+    "bound_wide": ("dw tw", _ALL, "the in-lane bound 2^16 times wider: marks "
+                   "far more lanes than the law allows"),
+    "bound_half": ("dw tw", _ALL, "the in-lane bound half as wide: Bv = "
                    "2^-(p+G+1) |V_h|"),
-    "bound_double": ("dw tw", "the in-lane bound twice as wide: Bv = "
+    "bound_double": ("dw tw", _ALL, "the in-lane bound twice as wide: Bv = "
                      "2^-(p+G-1) |V_h|"),
-    "mark_silenced": ("dw tw", "the mark never ORed into the flag word (the "
-                      "fifth)"),
-    "rl_through_y": ("dw", "defect 1: r_l carried through Y(r_h), not "
+    "mark_silenced": ("dw tw", _ALL, "the mark never ORed into the flag word "
+                      "(the fifth)"),
+    "mark_forced": ("dw tw", _ALL, "the in-lane test's verdict forced to "
+                    "'not decided': every lane of the main path marked"),
+    "rl_through_y": ("dw", _ALL, "defect 1: r_l carried through Y(r_h), not "
                      "e^(r_h)"),
-    "c3_dropped": ("dw", "Cody-Waite in two words: n C3 dropped from r's low "
-                   "word (defect 2's kind, in exp's reduction)"),
-    "tiny_gate_off": ("dw tw", "the tiny-argument gate removed (the study's "
-                      "tenth)"),
-    "screen_ulp": ("dw tw", "the overflow screen one ulp low"),
-    "head_short": ("dw", "two fewer double-word head steps (K - 2)"),
-    "tininess_klt_only": ("dw tw", "tininess decided on k alone, not after "
-                          "rounding"),
-    "c0_wrong": ("dw tw", "the fixed grid's offset at k = emin 2^-3, not "
-                 "2^-4: C + V reaches 2 and the grid doubles"),
-    "square_term_dropped": ("tw", "fp32: the square term of e^(r1+r2) - 1 "
-                            "dropped (the study's defect 7)"),
-    "two_sum_all": ("dw tw", "every Fast2Sum built as a TwoSum: the same "
-                    "values, 3 more instructions each, counted otherwise"),
-    "abs_by_copysign": ("dw tw", "|x| built as copysign(x, +0): the same "
-                        "values, an opcode outside the design's set"),
-    "odd_dropped": ("dw tw", "the fixed grid's round-to-odd of V_l's share "
-                    "built as round-to-nearest: V_l is lost where V_h is "
-                    "exactly on a half-grid point and |V_l| is under half an "
-                    "ulp of the remainder, and no argument is known to reach "
-                    "such a state (check_fixed_grid hands it one)"),
+    "c3_dropped": ("dw", "exp expm1", "Cody-Waite in two words: n C3 dropped "
+                   "from r's low word (defect 2's kind, in exp's reduction)"),
+    "tiny_gate_off": ("dw tw", "exp exp2", "the tiny-argument gate removed "
+                      "(the study's tenth)"),
+    "screen_ulp": ("dw tw", _ALL, "the overflow screen one ulp low"),
+    "head_short": ("dw", _ALL, "two fewer double-word head steps (K - 2)"),
+    "tininess_klt_only": ("dw tw", "exp exp2", "tininess decided on k alone, "
+                          "not after rounding"),
+    "c0_wrong": ("dw tw", "exp exp2", "the fixed grid's offset at k = emin "
+                 "2^-3, not 2^-4: C + V reaches 2 and the grid doubles"),
+    "square_term_dropped": ("tw", _ALL, "fp32: the square term of "
+                            "e^(r1+r2) - 1 dropped (the study's defect 7)"),
+    "two_sum_all": ("dw tw", _ALL, "every Fast2Sum built as a TwoSum: the "
+                    "same values, 3 more instructions each, counted "
+                    "otherwise"),
+    "abs_by_copysign": ("dw tw", _ALL, "|x| built as copysign(x, +0): the "
+                        "same values, an opcode outside the design's set"),
+    "odd_dropped": ("dw tw", "exp exp2", "the fixed grid's round-to-odd of "
+                    "V_l's share built as round-to-nearest: V_l is lost "
+                    "where V_h is exactly on a half-grid point and |V_l| is "
+                    "under half an ulp of the remainder, and no argument is "
+                    "known to reach such a state (check_fixed_grid hands it "
+                    "one)"),
+    # exp2's own (parcel MB1)
+    "exact_no_j": ("dw tw", "exp2", "exp2's exact test without j = 0: "
+                   "r' = 0 alone takes x = j/8 for an integer (the study's "
+                   "defect 6)"),
+    "tie_screen": ("dw tw", "exp2", "the study's screen at x = emin - p "
+                   "under rmm: the tie between +0 and the smallest "
+                   "subnormal answered +0, as transcend.exp2 did before "
+                   "profile 3"),
+    "ln2_ulp": ("dw tw", "exp2", "exp2's reduction off by one ulp: the "
+                "first word of ln 2 one ulp off"),
+    "ln2_short": ("dw tw", "exp2", "ln 2 one word short in r = r' ln 2 "
+                  "(the double word's low word, the triple word's third)"),
+    # expm1's own (parcel MB1)
+    "tiny_path_off": ("dw tw", "expm1", "the tiny path fma(x, x, x) removed: "
+                      "the main path answers |x| < 2^-(p+2)"),
+    "m1_screen_off": ("dw tw", "expm1", "the clamp to -1 removed: the main "
+                      "path answers x <= -(p+2) ln 2"),
+    "m1_answer_rne": ("dw tw", "expm1", "the clamp's answer -1 under every "
+                      "attribute, not -(1 - 2^-p) under rtz and rup"),
+    "clamp_low": ("dw tw", "expm1", "2^-k taken as 0 four k early, beyond "
+                  "p + G - 2, where it is over the bound"),
+    "ea_dropped": ("dw tw", "expm1", "the TwoSum error of T_h - 2^-k left "
+                   "out of V"),
+    "nminn_dropped": ("dw tw", "expm1", "the tiny path's underflow at "
+                      "x = -2^emin under rtz and rup left out"),
+    # the scheduler's (parcel MB1): the reorder of the specialised body
+    "reorder_misnumbered": ("dw tw", _ALL, "a reorder that renumbers one "
+                            "operand wrong: still a topological order, but "
+                            "one value changes"),
+    "reorder_forward": ("dw tw", _ALL, "a reorder that puts one instruction "
+                        "before an operand it reads"),
 }
 
 
@@ -510,6 +599,19 @@ class Build:
         b1 = self.sub(s, a1)
         return s, self.add(self.sub(a, a1), self.sub(c, b1))
 
+    def two_diff(self, a, nc):
+        """(s, e): s = RN(a - nc) and e the exact error, a - nc = s + e,
+        for any exponents: Knuth's six with the second operand given
+        negated, as the products and errors of the double word are (nc = -c,
+        so TwoSum(a, c) without a NEG)."""
+        self._eft["two_sum"] += 1
+        s = self.sub(a, nc)
+        a1 = self.add(s, nc)
+        b1 = self.sub(s, a1)
+        da = self.sub(a, a1)
+        dcn = self.add(nc, b1)
+        return s, self.sub(da, dcn)
+
     def fast_two_sum(self, a, c):
         """(s, e) for |a| >= |c| or a = 0 (Dekker's three)."""
         if self.meta.get("plant") == "two_sum_all":
@@ -524,13 +626,45 @@ class Build:
         self.meta.update(self._eft)
         return self
 
-    def fragment(self):
+    def live_indices(self):
+        """The indices of the body the specialised fragment keeps, in
+        order: the values the result or the flag word reaches."""
+        need, stack = set(), [s for s in (self.result, self.flags)
+                              if s[0] == "v"]
+        while stack:
+            v = stack.pop()
+            if v not in need:
+                need.add(v)
+                stack.extend(s for s in self.body[v[1]][2] if s[0] == "v")
+        return [i for i in range(len(self.body)) if ("v", i) in need]
+
+    def fragment(self, schedule=True):
         """The specialised routines.Fragment: C4's own specialise() over
         the body - which drops the values neither the result nor the flag
-        word reaches and the words they alone read - named "exp"."""
-        return routines.specialise(routines.Fragment(
+        word reaches and the words they alone read - named for the routine,
+        and then SCHEDULED: the same instructions in the order
+        schedule_order() gives, so that the fragment keeps few values live at
+        once (a pure permutation, shown by dag_digest()). `schedule=False`
+        is the design's own order, the one the instrumented form keeps and
+        the study's model emitted."""
+        f = routines.specialise(routines.Fragment(
             self.meta.get("fn", "exp"), self.fmt, self.rnd, self.inputs,
             self.body, self.result, self.flags, self.words, "read"))
+        if not schedule:
+            return f
+        keep = self.live_indices()
+        if len(keep) != len(f.body):
+            raise AssertionError(
+                f"{self.name}: specialise() changed the body, {len(keep)} "
+                f"live values of the build, {len(f.body)} instructions")
+        order = schedule_order(f, [self.phase_of[i] for i in keep])
+        g = permuted(f, order)
+        plant = self.meta.get("plant")
+        if plant == "reorder_misnumbered":
+            g = _misnumbered(g)
+        elif plant == "reorder_forward":
+            g = _forward(g)
+        return g
 
     def run(self, x, want=(), over=None):
         """One lane through the UNPRUNED body: (result bits, flag word,
@@ -585,44 +719,246 @@ def _values(fmt, body, words, x, over=None):
     return vals
 
 
-# ---- exp's constants, derived -----------------------------------------------
+# ---- the order of the body: the scheduler -----------------------------------
+#
+# The builders emit in the design's order, the study's: the classification
+# first, the scale words and the table before the polynomial, the specials'
+# conditions all computed at the start and read at the end. That order keeps
+# many values live at once - 22 or 23 at the double word's formats and 33 or
+# 34 at fp32 for exp (MEASURED, parcel E1) - and seq.py has 32 registers: the
+# triple word's exp did not fit routines.program's allocation, "no register
+# for the harness". The values a fragment computes do not depend on the order
+# of its instructions, only on the dataflow, so the fragment is emitted in
+# another: a topological order that keeps fewer values live. Nothing else
+# changes - not an operand, an attribute or a word - and dag_digest() shows
+# it: the order-free digest of the dataflow graph is the design's.
+#
+# Two orders are tried and the one that keeps fewer values live is taken (the
+# first on a tie):
+#   by phase   Kahn's algorithm taking, of the instructions ready, the one of
+#              the earliest phase in PHASE_ORDER (then the earliest in the
+#              design's order). The reduction runs first, whole, since it
+#              collapses many partial sums into a few words; the polynomial
+#              next; the table, the reconstruction and the scale words just
+#              before they are read; the classification last, since the
+#              specials that read it come last and it reads only x.
+#   by depth   a depth-first walk from the flag word and then the result,
+#              each instruction emitted just before its first reader, the
+#              operand with the larger set of ancestors first (parcel E1's
+#              finding: it keeps 11 live at the double word's formats and 25
+#              at fp32, where the reduction's partial sums wait for r_1 and
+#              r_2 across the polynomial).
+# Neither is optimal and none is claimed to be: the live count is measured and
+# pinned per fragment (test_mathlib.py's SHAPE), and LIVE_CAP is its maximum.
 
-def _exp_constants(fmt: FpFormat, G, K, D, shift, plant):
-    """{role: bits}: every derived constant of the double-word exp, each
-    rounded once from an exact value:
+PHASE_ORDER = ("setup", "reduce", "tail", "head", "head2", "head3", "Z",
+               "lookup", "recon", "scale", "fixed-grid", "final", "classify",
+               "special")
+
+
+def permuted(f, order):
+    """The fragment f with its body in `order`, a permutation of the body's
+    indices: value references renumbered, nothing else changed. It does not
+    check that the order is topological; invariants() does."""
+    n = len(f.body)
+    if sorted(order) != list(range(n)):
+        raise ValueError("the order is not a permutation of the body")
+    new = {old: k for k, old in enumerate(order)}
+    body = []
+    for old in order:
+        op, r, srcs = f.body[old]
+        body.append((op, r, tuple(("v", new[s[1]]) if s[0] == "v" else s
+                                  for s in srcs)))
+    return routines.Fragment(f.op, f.fmt, f.rnd, f.inputs, body,
+                             ("v", new[f.result[1]]), ("v", new[f.flags[1]]),
+                             f.words, f.stage)
+
+
+def _ranked_order(f, phases):
+    rank = {p: k for k, p in enumerate(PHASE_ORDER)}
+    n = len(f.body)
+    indeg, users = [0] * n, [[] for _ in range(n)]
+    for i, (_op, _r, srcs) in enumerate(f.body):
+        for j in {s[1] for s in srcs if s[0] == "v"}:
+            indeg[i] += 1
+            users[j].append(i)
+    ready = [(rank[phases[i]], i) for i in range(n) if indeg[i] == 0]
+    heapq.heapify(ready)
+    order = []
+    while ready:
+        _rk, i = heapq.heappop(ready)
+        order.append(i)
+        for u in users[i]:
+            indeg[u] -= 1
+            if indeg[u] == 0:
+                heapq.heappush(ready, (rank[phases[u]], u))
+    if len(order) != n:
+        raise AssertionError("the body has a cycle")
+    return order
+
+
+def _dfs_order(f):
+    n = len(f.body)
+    anc = [0] * n
+    for i, (_op, _r, srcs) in enumerate(f.body):
+        m = 1 << i
+        for s in srcs:
+            if s[0] == "v":
+                m |= anc[s[1]]
+        anc[i] = m
+    size = [bin(m).count("1") for m in anc]
+
+    def deps(i):
+        return sorted({s[1] for s in f.body[i][2] if s[0] == "v"},
+                      key=lambda j: (-size[j], j))
+    order, seen = [], set()
+    for root in (f.flags[1], f.result[1]):
+        if root in seen:
+            continue
+        seen.add(root)
+        stack = [(root, iter(deps(root)))]
+        while stack:
+            node, it = stack[-1]
+            for j in it:
+                if j not in seen:
+                    seen.add(j)
+                    stack.append((j, iter(deps(j))))
+                    break
+            else:
+                stack.pop()
+                order.append(node)
+    if len(order) != n:
+        raise AssertionError("an instruction reaches neither the result nor "
+                             "the flag word")
+    return order
+
+
+def schedule_order(f, phases):
+    """The order of f's body that the fragment is emitted in: of the two
+    candidates above the one keeping fewer values live (by phase on a tie).
+    `phases[i]` is the phase instruction i was built in."""
+    best = None
+    for order in (_ranked_order(f, phases), _dfs_order(f)):
+        live = permuted(f, order).live_max()
+        if best is None or live < best[0]:
+            best = (live, order)
+    return best[1]
+
+
+def dag_digest(f):
+    """The sha256 of the fragment's dataflow graph, independent of the order
+    of its instructions and of its words' names: each instruction is hashed
+    from its opcode, its attribute and what its operands hash to (a word by
+    its bits, the input by its name); the digest is that of the sorted
+    instruction hashes and the hashes of the result and of the flag word.
+    Two fragments with one digest compute one function on every argument."""
+    h = [None] * len(f.body)
+
+    def ref(s):
+        if s[0] == "v":
+            return "v:" + h[s[1]]
+        if s[0] == "w":
+            return "w:%x" % f.words[s[1]]
+        return "in:" + s[1]
+    for i, (op, r, srcs) in enumerate(f.body):
+        text = "%s|%s|%s" % (sf.OP_NAMES[op], r,
+                             ",".join(ref(s) for s in srcs))
+        h[i] = hashlib.sha256(text.encode()).hexdigest()
+    text = "\n".join(sorted(h)) + "\nresult:%s\nflags:%s" % (ref(f.result),
+                                                             ref(f.flags))
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+def _misnumbered(g):
+    """The plant reorder_misnumbered: the first SUB after the middle of the
+    body whose first operand is a value has it renumbered to the value before
+    it. The order is still topological; one value is wrong."""
+    body = list(g.body)
+    for i in range(len(body) // 2, len(body)):
+        op, r, srcs = body[i]
+        if op == sf.OP_SUB and srcs[0][0] == "v" and srcs[0][1] > 0:
+            body[i] = (op, r, (("v", srcs[0][1] - 1),) + srcs[1:])
+            break
+    else:
+        raise AssertionError("no SUB to misnumber")
+    return routines.Fragment(g.op, g.fmt, g.rnd, g.inputs, body, g.result,
+                             g.flags, g.words, g.stage)
+
+
+def _forward(g):
+    """The plant reorder_forward: the first instruction after the middle of
+    the body that reads the one before it is exchanged with it, so that it
+    reads a value not yet defined."""
+    n = len(g.body)
+    for i in range(n // 2, n):
+        if ("v", i - 1) in g.body[i][2]:
+            order = list(range(n))
+            order[i - 1], order[i] = order[i], order[i - 1]
+            return permuted(g, order)
+    raise AssertionError("no adjacent pair to exchange")
+
+
+# ---- the double word's constants, derived ------------------------------------
+
+def _dw_constants(fn, fmt: FpFormat, G, K, D, shift, plant):
+    """{role: bits}: every derived constant of the double-word exp, exp2 or
+    expm1, each rounded once from an exact value:
 
       MAGIC            1.5 2^(p-1): n lands in t's low bits
+      exp, expm1:
       INVLN2N          RN(8/ln2)
       NC1, NC2, C2, C3 the Cody-Waite words of ln2/8: C1 TRUNCATED to
                        p - nb bits, so n C1 is exact (nb: _n_width), C2 the
                        nearest to what is left and C3 to what is left
                        after that; NC1 and NC2 are the negations
+      exp2:
+      EIGHT, NINV8     8 and -1/8, exact: n = round(8 x), r' = x - n/8
+      LN2H, NLN2H,     ln 2 as two words, RN and then RN of the rest: LN2H
+      NLN2L            and the negations of both, which r = r' ln 2 by
+                       TwoProd reads
       TH_j, TL_j       2^(j/8) as two words, RN and then RN of the rest
       Y_i              the tail's coefficient 1/(i+1)!, RN, i = K..D
       CH_i, CL_i       the head's, as two words, i = 0..K-1
-      XOVF, XUNF       the screens (_screens)
-      TINYX            2^-(p+3): below it exp is decided by the side of 1
-      C0               2^-4: the fixed grid's offset at k = emin
+      XOVF, XUNF       the screens: exp's (_screens), exp2's emax + 1 and
+                       emin - p (_screens_exp2); expm1's XOVF is exp's
+      XM1              expm1: RD(-(p+2) ln 2), the clamp to -1 (_screen_expm1)
+      TINYM1, MINN,    expm1: 2^-(p+2), below which the tiny path answers,
+      NMINN            and the smallest normal and its negative, where the
+                       tiny path's underflow is decided
+      TINYX            exp, exp2: 2^-(p+3): below it the result is decided by
+                       the side of 1
+      C0               exp, exp2: 2^-4, the fixed grid's offset at k = emin
       BREL             2^-(p+G): the bound; `shift` inflates it for the
                        mark-rate law (2^shift times as wide)
-      UNFB, OVFB       the answers of the two screens under rnd, which the
+      UNFB, OVFB       the answers of the screens under rnd, which the
                        caller's attribute decides - added by the builder
     """
     p = fmt.prec
     l2 = _ln2()
-    L = l2 / N
     c = {}
     c["MAGIC"] = _enc_exact(fmt, Fraction(3, 2) * 2 ** (p - 1))
-    c["INVLN2N"] = _enc(fmt, N / l2)
-    C1 = _truncated(fmt, L, p - _n_width(fmt))
-    rest = L - _dec(fmt, C1)
-    C2 = _enc(fmt, rest)
-    C3 = _enc(fmt, rest - _dec(fmt, C2))
-    if plant == "c1_ulp":
-        C1 += 1
-    c["NC1"] = sf.negate(fmt, C1)
-    c["NC2"] = sf.negate(fmt, C2)
-    c["C2"], c["C3"] = C2, C3
+    if fn == "exp2":
+        c["EIGHT"] = _enc_exact(fmt, N)
+        c["NINV8"] = _enc_exact(fmt, Fraction(-1, N))
+        hi, lo = _words(fmt, l2, 2)
+        if plant == "ln2_ulp":
+            hi += 1
+        if plant == "ln2_short":
+            lo = 0
+        c["LN2H"] = hi
+        c["NLN2H"], c["NLN2L"] = sf.negate(fmt, hi), sf.negate(fmt, lo)
+    else:
+        L = l2 / N
+        c["INVLN2N"] = _enc(fmt, N / l2)
+        C1 = _truncated(fmt, L, p - _n_width(fmt))
+        rest = L - _dec(fmt, C1)
+        C2 = _enc(fmt, rest)
+        C3 = _enc(fmt, rest - _dec(fmt, C2))
+        if plant == "c1_ulp":
+            C1 += 1
+        c["NC1"] = sf.negate(fmt, C1)
+        c["NC2"] = sf.negate(fmt, C2)
+        c["C2"], c["C3"] = C2, C3
     for j in range(N):
         hi, lo = _words(fmt, _two_to_eighth(j), 2)
         if plant == "table_entry" and j == 3:
@@ -632,11 +968,21 @@ def _exp_constants(fmt: FpFormat, G, K, D, shift, plant):
         c[f"Y{i}"] = _enc(fmt, _coefficient(i))
     for i in range(K):
         c[f"CH{i}"], c[f"CL{i}"] = _words(fmt, _coefficient(i), 2)
-    c["XOVF"], c["XUNF"] = _screens(fmt)
+    if fn == "exp2":
+        c["XOVF"], c["XUNF"] = _screens_exp2(fmt)
+    else:
+        c["XOVF"], c["XUNF"] = _screens(fmt)
     if plant == "screen_ulp":
         c["XOVF"] -= 1
-    c["TINYX"] = _pow2(fmt, -(p + 3))
-    c["C0"] = _pow2(fmt, -3 if plant == "c0_wrong" else -4)
+    if fn == "expm1":
+        del c["XUNF"]
+        c["XM1"] = _screen_expm1(fmt)
+        c["TINYM1"] = _pow2(fmt, -(p + 2))
+        c["MINN"] = sf.min_normal_bits(fmt)
+        c["NMINN"] = sf.min_normal_bits(fmt, 1)
+    else:
+        c["TINYX"] = _pow2(fmt, -(p + 3))
+        c["C0"] = _pow2(fmt, -3 if plant == "c0_wrong" else -4)
     c["BREL"] = _pow2(fmt, -(p + G) + shift - _bound_plant(plant))
     return c
 
@@ -688,61 +1034,208 @@ def _scale_offset(fmt: FpFormat):
     return off
 
 
-def _build_exp_dw(fmt: FpFormat, rnd: int, G, shift, plant):
-    """exp at fp64, fp128 and fp256: V as a double word (the module
-    docstring; the study's 2.2 and 3.1)."""
-    p, W, mw = fmt.prec, fmt.width, fmt.man_w
-    K, D = plan_exp(fmt, G)
-    if plant == "head_short":
-        K -= 2
-    c = _exp_constants(fmt, G, K, D, shift, plant)
-    b = Build(fmt, rnd, f"exp-{fmt.name}-{sf.RND_NAMES[rnd]}")
-    b.meta.update(fn="exp", G=G, K=K, D=D, N=N, shift=shift, plant=plant,
-                  family="double word")
+def _classify(b: Build, fn, c, k_):
+    """The conditions the specials select on, from x and words alone: NaN,
+    signalling NaN, infinity, zero, the sign, and the screens. Returns a
+    namespace; `uns` and `tinyx` are exp's and exp2's, `m1s` and `tiny`
+    expm1's."""
+    fmt = b.fmt
     x = ("in", "a")
-    w = b.word
-    k_ = _words_common(b)
-    ib, ZERO, ONE, INT1 = k_["ib"], k_["ZERO"], k_["ONE"], k_["INT1"]
-    INF, QNAN, ABSM, QBIT = k_["INF"], k_["QNAN"], k_["ABSM"], k_["QBIT"]
-    INX, INXUNF, OVFINX = k_["INX"], k_["INXUNF"], k_["OVFINX"]
-    INVALID, MARKW = k_["INVALID"], k_["MARKW"]
-    MAGIC = b.const("MAGIC", c["MAGIC"])
-    MANW = ib(mw, "MANTISSA_WIDTH")
-
-    # ---- classify: the conditions the specials select on -------------------
+    ib, ZERO, INF = k_["ib"], k_["ZERO"], k_["INF"]
     b.phase = "classify"
-    ax = b.iand(x, ABSM)                              # |x|, as an integer
-    isnan = b.icmplt(INF, ax)
-    issnan = b.sel(ZERO, isnan, b.iand(x, QBIT))      # NaN, quiet bit clear
-    isinf = b.cmpeq(ax, INF)
-    iszero = b.icmplt(ax, INT1)
-    neg = b.ishr(x, ib(W - 1, "SIGN_SHIFT"))
-    uns = b.cmple(x, b.const("XUNF", c["XUNF"]))      # x <= XUNF
-    ovs = b.cmple(b.const("XOVF", c["XOVF"]), x)      # x >= XOVF
-    # transcend.py decides |x| < 2^-(p+3) by the side of 1 alone: the
-    # routine's R is that side (V = 1 + Z, Z with x's sign), so the in-lane
-    # test, whose bound is relative to V, must not be consulted there
-    tinyx = b.icmplt(ax, b.const("TINYX", c["TINYX"]))
+    cl = types.SimpleNamespace(x=x, XUNF=None, uns=None, m1s=None, tiny=None,
+                               tinyx=None)
+    cl.ax = b.iand(x, k_["ABSM"])                     # |x|, as an integer
+    cl.isnan = b.icmplt(INF, cl.ax)
+    cl.issnan = b.sel(ZERO, cl.isnan, b.iand(x, k_["QBIT"]))  # quiet bit clear
+    cl.isinf = b.cmpeq(cl.ax, INF)
+    cl.iszero = b.icmplt(cl.ax, k_["INT1"])
+    cl.neg = b.ishr(x, ib(fmt.width - 1, "SIGN_SHIFT"))
+    if fn == "expm1":
+        cl.m1s = b.cmple(x, b.const("XM1", c["XM1"]))     # x <= XM1: -1
+        cl.tiny = b.icmplt(cl.ax, b.const("TINYM1", c["TINYM1"]))  # < 2^-(p+2)
+    else:
+        cl.XUNF = b.const("XUNF", c["XUNF"])
+        cl.uns = b.cmple(x, cl.XUNF)                  # x <= XUNF
+    cl.ovs = b.cmple(b.const("XOVF", c["XOVF"]), x)   # x >= XOVF
+    if fn != "expm1":
+        # transcend.py decides |x| < 2^-(p+3) by the side of 1 alone: the
+        # routine's R is that side (V = 1 + Z, Z with x's sign), so the
+        # in-lane test, whose bound is relative to V, must not be consulted
+        # there
+        cl.tinyx = b.icmplt(cl.ax, b.const("TINYX", c["TINYX"]))
+    return cl
 
-    # ---- reduce: n = round(x 8/ln2), r = x - n ln2/8 in two words ----------
-    b.phase = "reduce"
-    t = b.fma(x, b.const("INVLN2N", c["INVLN2N"]), MAGIC)
-    nf = b.sub(t, MAGIC)                              # n, as a float
-    r1 = b.fma(nf, b.const("NC1", c["NC1"]), x)       # x - n C1: exact
-    Q = b.mul(nf, b.const("NC2", c["NC2"]))           # -n C2, rounded
-    Qe = b.fma(nf, b.const("C2", c["C2"]), Q)         # -(its error): exact
-    s, e = b.two_sum(r1, Q)                           # r1 + Q = s + e, exact
-    rh = s
-    # r = rh + rl with rl = e - Qe - n C3; nrl = -rl, as the products below
-    # want it
-    low = b.sub(Qe, e)
-    nrl = low if plant == "c3_dropped" else b.fma(
-        nf, b.const("C3", c["C3"]), low)
-    nr = b.neg(rh)
-    b.probes.update(t=t, nf=nf, rh=rh, nrl=nrl)
 
-    # ---- lookup: T_j = 2^(j/8), j = n mod 8, a SELECT tree -----------------
-    b.phase = "lookup"
+def _scale(b: Build, fn, rnd, t, c, G, plant, k_):
+    """2^k1 and 2^k2 from n, integers on the encoding of t (k = floor(n/8),
+    k1 = floor(k/2), k2 = k - k1); and, for exp and exp2, the fixed grid's
+    words (u = 2^(emin - p + 1 - k) in the scaled domain; Cu the offset
+    C = 2^(emin - k), 2^-4 at k = emin; hu the half-grid u/2), for expm1
+    2^-k, taken as 0 where k is past p + G + 2 (under the bound: the study's
+    2.2 and 3.2)."""
+    fmt = b.fmt
+    p, mw = fmt.prec, fmt.man_w
+    ib, ZERO = k_["ib"], k_["ZERO"]
+    MANW = ib(mw, "MANTISSA_WIDTH")
+    b.phase = "scale"
+    sc = types.SimpleNamespace(sub_p=None, klt=None, Cu=None, hu=None,
+                               npk=None)
+    OFF = _scale_offset(fmt)
+    half = (fmt.bias + OFF) // 2
+    b.meta["OFF"] = OFF
+    sc.Ek = b.ishr(b.isub(t, ib(c["MAGIC"] - N * (fmt.bias + OFF), "KOFFSET")),
+                   ib(T_BITS))                        # k + bias + OFF
+    E1 = b.ishr(sc.Ek, k_["INT1"])
+    KB1 = ib(fmt.bias - half, "KBIAS1")
+    sc.S1 = b.ishl(b.iadd(E1, KB1), MANW)             # 2^k1
+    sc.S2 = b.ishl(b.iadd(b.isub(sc.Ek, E1), KB1), MANW)      # 2^k2
+    b.probes.update(Ek=sc.Ek, S1=sc.S1, S2=sc.S2)
+    if fn == "expm1":
+        clamp = p + G + 2 - (4 if plant == "clamp_low" else 0)
+        npk = b.ishl(b.isub(ib(2 * fmt.bias + OFF, "K_2BIAS_OFF"), sc.Ek),
+                     MANW)
+        kbig = b.icmplt(ib(clamp + fmt.bias + OFF, "K_CLAMP"), sc.Ek)
+        sc.npk = b.sel(ZERO, npk, kbig)
+        b.probes["NPK"] = sc.npk
+    else:
+        KD = fmt.emin + 2 * fmt.bias + OFF
+        # sub_p: k <= emin; klt: k < emin
+        sc.sub_p = b.icmplt(sc.Ek, ib(fmt.emin + fmt.bias + OFF + 1,
+                                      "K_EMIN_P1"))
+        sc.klt = b.icmplt(sc.Ek, ib(fmt.emin + fmt.bias + OFF, "K_EMIN"))
+        sc.Cu = b.sel(b.ishl(b.isub(ib(KD, "K_KD"), sc.Ek), MANW),
+                      b.const("C0", c["C0"]), sc.klt)
+        if rnd in (RNE, RMM):
+            sc.hu = b.ishl(b.isub(ib(KD - p, "K_KD_P"), sc.Ek), MANW)
+            b.probes["hu"] = sc.hu
+        b.probes.update(Cu=sc.Cu, sub_p=sc.sub_p, klt=sc.klt)
+    return sc
+
+
+def _fixed_grid(b: Build, plant, rnd, cl, sc, k_, R, Bv, mk, Vh, rest, tw):
+    """A result that may be subnormal (k <= emin) is rounded once on its own
+    grid: V_h split at C, the rest (V_l; at fp32 V_1 + V_2 rounded to odd)
+    added after rounding to odd (its ulp is finer than u/4), rounded under
+    rnd, C taken off again. `rest` is that rest as one word. Returns (Wsel,
+    mk, tinyu). The double word's round-to-odd tests the sum's exactness
+    against `rest` itself, the triple word's by the Fast2Sum error
+    (_round_to_odd_add): the forms parcel E1 built, kept so that exp's
+    instructions are the same."""
+    ZERO, ONE, INT1 = k_["ZERO"], k_["ONE"], k_["INT1"]
+    b.phase = "fixed-grid"
+    Z0 = b.add(sc.Cu, Vh)
+    W0 = b.sub(Z0, sc.Cu)
+    zr = b.sub(Vh, W0)
+    if plant == "odd_dropped":
+        ro = b.add(zr, rest)                # round-to-nearest: rest can be lost
+    elif tw:
+        ro = _round_to_odd_add(b, zr, rest, INT1)
+    else:
+        s_ = b.add(zr, rest, RTZ)
+        eq = b.cmpeq(b.sub(s_, zr), rest)
+        ro = b.sel(s_, b.ior(s_, INT1), eq)       # round-to-odd of zr + rest
+    Ws = b.sub(b.add(Z0, ro, rnd), sc.Cu)
+    # the fixed grid's own test: V can straddle a boundary only where zr IS
+    # one (+-u/2 for rne and rmm, 0 for the directed three) and |rest| <= Bv
+    c1 = b.cmpeq(b.fabs(zr), sc.hu) if sc.hu is not None \
+        else b.cmpeq(zr, ZERO)
+    smallo = b.cmple(b.fabs(rest), Bv)
+    msub = b.sel(smallo, ZERO, c1)
+    Wsel = b.sel(Ws, R, sc.sub_p)
+    mk = b.sel(ONE, mk, b.sel(msub, ZERO, sc.sub_p))
+    # tininess after rounding: k < emin, or k = emin and the precision-p
+    # rounding R of the scaled value is below 1
+    tn = sc.klt if plant == "tininess_klt_only" else \
+        b.sel(ONE, b.cmplt(R, ONE), sc.klt)
+    tinyu = b.sel(tn, ZERO, sc.sub_p)
+    b.probes.update(Ws=Ws)
+    return Wsel, mk, tinyu
+
+
+def _finalize(b: Build, fn, rnd, plant, c, cl, sc, k_, Wsel, mk, tinyu,
+              exact):
+    """The scaling by 2^k1 and 2^k2 (the one rounding), the flag word, and
+    the specials in the study's order of priority, lowest first."""
+    fmt = b.fmt
+    p, mw = fmt.prec, fmt.man_w
+    ZERO, ONE, INT1 = k_["ZERO"], k_["ONE"], k_["INT1"]
+    INF, QNAN = k_["INF"], k_["QNAN"]
+    INX, INXUNF, OVFINX = k_["INX"], k_["INXUNF"], k_["OVFINX"]
+    x = cl.x
+    b.phase = "final"
+    Y1 = b.mul(Wsel, sc.S1)                           # exact
+    FIN = b.mul(Y1, sc.S2, rnd)                       # the one rounding
+    if rnd in (RNE, RMM, RUP):
+        ovf = b.cmpeq(FIN, INF)
+    else:       # the directed-down attributes answer max_normal, not +inf
+        ovf = b.cmpeq(b.mul(Y1, sc.S2, RUP), INF)
+    fl = INX if fn == "expm1" else b.sel(INXUNF, INX, tinyu)
+    fl = b.sel(OVFINX, fl, ovf)
+    if fn != "expm1" and plant != "tiny_gate_off":
+        mk = b.sel(ZERO, mk, cl.tinyx)
+    if plant == "mark_forced":
+        mk = ONE
+    if plant != "mark_silenced":
+        fl = b.ior(fl, b.sel(k_["MARKW"], ZERO, mk))
+    if fn == "exp2":
+        fl = b.sel(ZERO, fl, exact)                   # an integer x is exact
+    b.probes.update(FIN=FIN, mk=mk)
+
+    b.phase = "special"
+    bits = FIN
+    if fn == "expm1":
+        # |x| < 2^-(p+2): fma(x, x, x) under the attribute, x + x^2, on the
+        # side of x that expm1 is on, and the underflow where it is tiny. The
+        # IOR is question 12's one instruction, so that none reads only x
+        tb = b.fma(b.ior(x, ZERO), x, x, rnd)
+        ut = b.icmplt(cl.ax, b.const("MINN", c["MINN"]))  # |x| < 2^emin
+        if rnd in (RTZ, RUP) and plant != "nminn_dropped":
+            # x = -2^emin: expm1(x) is above it, toward zero, and rtz and rup
+            # round that to the largest subnormal: tiny after rounding
+            ut = b.sel(ONE, ut, b.cmpeq(x, b.const("NMINN", c["NMINN"])))
+        if plant != "tiny_path_off":
+            bits = b.sel(tb, bits, cl.tiny)
+            fl = b.sel(b.sel(INXUNF, INX, ut), fl, cl.tiny)
+        # x <= -(p+2) ln 2: -1, or -(1 - 2^-p) under rtz and rup
+        m1b = sf.round_pack(fmt, 1, (1 << (p + 3)) - 1, -(p + 3),
+                            RNE if plant == "m1_answer_rne" else rnd)[0]
+        if plant != "m1_screen_off":
+            bits = b.sel(b.const("M1B", m1b), bits, cl.m1s)
+            fl = b.sel(INX, fl, cl.m1s)
+    else:
+        unfb = sf.round_pack(fmt, 0, 1, fmt.emin - mw - 2, rnd)[0]
+        bits = b.sel(b.const("UNFB", unfb), bits, cl.uns)
+        fl = b.sel(INXUNF, fl, cl.uns)
+        if fn == "exp2" and rnd == RMM and plant != "tie_screen":
+            # x = emin - p: 2^x is half the smallest subnormal, the tie
+            # between +0 and it, and roundTiesToAway gives the subnormal; the
+            # screen's quarter rounds to +0 (the smallest subnormal's
+            # encoding is the integer 1)
+            bits = b.sel(INT1, bits, b.cmpeq(x, cl.XUNF))
+    ovfb = sf.round_pack(fmt, 0, 3, fmt.emax, rnd)[0]
+    bits = b.sel(b.const("OVFB", ovfb), bits, cl.ovs)
+    fl = b.sel(OVFINX, fl, cl.ovs)
+    if fn == "expm1":
+        bits = b.sel(x, bits, cl.iszero)              # expm1(+-0) = +-0
+        infb = b.sel(b.word(sf.one_bits(fmt, 1), "NEGONE"), INF, cl.neg)
+    else:
+        bits = b.sel(ONE, bits, cl.iszero)
+        infb = b.sel(ZERO, INF, cl.neg)               # exp(-inf) = +0
+    fl = b.sel(ZERO, fl, cl.iszero)
+    bits = b.sel(infb, bits, cl.isinf)
+    fl = b.sel(ZERO, fl, cl.isinf)
+    bits = b.sel(QNAN, bits, cl.isnan)
+    fl = b.sel(b.sel(k_["INVALID"], ZERO, cl.issnan), fl, cl.isnan)
+    return b.finish(bits, fl)
+
+
+def _table(b: Build, c, t, k_, words):
+    """The table's words T_j = 2^(j/8) by a SELECT tree over the three low
+    bits of t - the integer j = n mod 8 - read from bank words only: for each
+    function in `words` (j -> the role of that word of T_j) the tree over
+    the eight entries."""
+    ib = k_["ib"]
     bitsel = [b.iand(t, ib(1 << i)) for i in range(T_BITS)]
 
     def tree(vals):
@@ -751,35 +1244,78 @@ def _build_exp_dw(fmt: FpFormat, rnd: int, G, shift, plant):
             level = [b.sel(level[2 * m + 1], level[2 * m], bit)
                      for m in range(len(level) // 2)]
         return level[0]
-    Th = tree([b.const(f"TH{j}", c[f"TH{j}"]) for j in range(N)])
-    Tl = tree([b.const(f"TL{j}", c[f"TL{j}"]) for j in range(N)])
-    b.probes.update(Th=Th, Tl=Tl)
+    return [tree([b.const(nm(j), c[nm(j)]) for j in range(N)])
+            for nm in words]
 
-    # ---- scale: 2^k1 and 2^k2 from n, integers on t's encoding -------------
-    b.phase = "scale"
-    OFF = _scale_offset(fmt)
-    half = (fmt.bias + OFF) // 2
-    b.meta["OFF"] = OFF
-    Ek = b.ishr(b.isub(t, ib(c["MAGIC"] - N * (fmt.bias + OFF), "KOFFSET")),
-                ib(T_BITS))                           # k + bias + OFF
-    E1 = b.ishr(Ek, INT1)
-    KB1 = ib(fmt.bias - half, "KBIAS1")
-    S1 = b.ishl(b.iadd(E1, KB1), MANW)                # 2^k1
-    S2 = b.ishl(b.iadd(b.isub(Ek, E1), KB1), MANW)    # 2^k2
-    b.probes.update(Ek=Ek, S1=S1, S2=S2)
-    # the fixed grid: u = 2^(emin - p + 1 - k) in the scaled domain; Cu is
-    # the offset C = 2^(emin - k) (2^-4 at k = emin), hu the half-grid u/2
-    KD = fmt.emin + 2 * fmt.bias + OFF
-    # sub_p: k <= emin; klt: k < emin
-    sub_p = b.icmplt(Ek, ib(fmt.emin + fmt.bias + OFF + 1, "K_EMIN_P1"))
-    klt = b.icmplt(Ek, ib(fmt.emin + fmt.bias + OFF, "K_EMIN"))
-    Cu = b.sel(b.ishl(b.isub(ib(KD, "K_KD"), Ek), MANW),
-               b.const("C0", c["C0"]), klt)
-    hu = None
-    if rnd in (RNE, RMM):
-        hu = b.ishl(b.isub(ib(KD - p, "K_KD_P"), Ek), MANW)
-        b.probes["hu"] = hu
-    b.probes.update(Cu=Cu, sub_p=sub_p, klt=klt)
+
+def _exact_flag(b: Build, plant, t, rp, k_):
+    """exp2: 2^x is exact exactly when x is an integer: r' = 0 together with
+    j = 0 (r' = 0 alone is every x = j/8)."""
+    if plant == "exact_no_j":
+        return b.cmpeq(rp, k_["ZERO"])
+    jz = b.icmplt(b.iand(t, k_["ib"](N - 1)), k_["INT1"])
+    return b.sel(b.cmpeq(rp, k_["ZERO"]), k_["ZERO"], jz)
+
+
+def _build_dw(fn, fmt: FpFormat, rnd: int, G, shift, plant):
+    """exp, exp2 or expm1 at fp64, fp128 and fp256: V as a double word (the
+    module docstring; the study's 2.2 and 3.1). exp2 reduces by n = round(8x)
+    exactly and multiplies the exact remainder by a two-word ln 2; expm1
+    reduces as exp does, subtracts 2^-k from the table's high word by TwoSum
+    and rounds without the fixed grid, since its result is never subnormal
+    off its tiny path."""
+    p = fmt.prec
+    K, D = plan_exp(fmt, G, rel_z=(fn == "expm1"))
+    if plant == "head_short":
+        K -= 2
+    c = _dw_constants(fn, fmt, G, K, D, shift, plant)
+    b = Build(fmt, rnd, f"{fn}-{fmt.name}-{sf.RND_NAMES[rnd]}")
+    b.meta.update(fn=fn, G=G, K=K, D=D, N=N, shift=shift, plant=plant,
+                  family="double word")
+    k_ = _words_common(b)
+    ZERO, ONE = k_["ZERO"], k_["ONE"]
+    MAGIC = b.const("MAGIC", c["MAGIC"])
+    cl = _classify(b, fn, c, k_)
+    x = cl.x
+
+    # ---- reduce: n = round(x 8/ln2), r = x - n ln2/8 in two words ----------
+    b.phase = "reduce"
+    rp = None
+    if fn == "exp2":
+        # n = round(8x) is exact (8x is a power of two times x), r' = x - n/8
+        # is exact (|r'| <= 1/16 and a multiple of x's ulp), and r = r' ln2 is
+        # TwoProd of r' against ln 2's high word, its low word added by one
+        # FMA: r = rh + rl with nrl = -rl
+        t = b.fma(x, b.const("EIGHT", c["EIGHT"]), MAGIC)
+        nf = b.sub(t, MAGIC)                          # n, as a float
+        rp = b.fma(nf, b.const("NINV8", c["NINV8"]), x)   # r' = x - n/8
+        rh = b.mul(rp, b.const("LN2H", c["LN2H"]))
+        nre = b.fma(rp, b.const("NLN2H", c["NLN2H"]), rh)     # -(its error)
+        nrl = b.fma(rp, b.const("NLN2L", c["NLN2L"]), nre)
+        b.probes["rp"] = rp
+    else:
+        t = b.fma(x, b.const("INVLN2N", c["INVLN2N"]), MAGIC)
+        nf = b.sub(t, MAGIC)                          # n, as a float
+        r1 = b.fma(nf, b.const("NC1", c["NC1"]), x)   # x - n C1: exact
+        Q = b.mul(nf, b.const("NC2", c["NC2"]))       # -n C2, rounded
+        Qe = b.fma(nf, b.const("C2", c["C2"]), Q)     # -(its error): exact
+        s, e = b.two_sum(r1, Q)                       # r1 + Q = s + e, exact
+        rh = s
+        # r = rh + rl with rl = e - Qe - n C3; nrl = -rl, as the products
+        # below want it
+        low = b.sub(Qe, e)
+        nrl = low if plant == "c3_dropped" else b.fma(
+            nf, b.const("C3", c["C3"]), low)
+    nr = b.neg(rh)
+    b.probes.update(t=t, nf=nf, rh=rh, nrl=nrl)
+
+    # ---- lookup: T_j = 2^(j/8), j = n mod 8, a SELECT tree -----------------
+    b.phase = "lookup"
+    Th, Tl = _table(b, c, t, k_, (lambda j: f"TH{j}", lambda j: f"TL{j}"))
+    b.probes.update(Th=Th, Tl=Tl)
+    exact = _exact_flag(b, plant, t, rp, k_) if fn == "exp2" else None
+
+    sc = _scale(b, fn, rnd, t, c, G, plant, k_)
 
     # ---- the polynomial Y(r) = sum r^i/(i+1)!: tail by FMA, head by pairs
     b.phase = "tail"
@@ -811,94 +1347,50 @@ def _build_exp_dw(fmt: FpFormat, rnd: int, G, shift, plant):
     nZl = b.fma(eh, nrl, nzl)
     b.probes.update(Yh=yh, Yl=yl, Zh=zp, nZl=nZl)
 
-    # ---- reconstruct V = T (1 + Z) as V_h + V_l -----------------------------
+    # ---- reconstruct V = T (1 + Z) [ - 2^-k for expm1 ] as V_h + V_l --------
     b.phase = "recon"
     P = b.mul(Th, zp)
     nPe = b.fma(Th, b.neg(zp), P)                     # P - Th Zh = -(error)
-    S, e2 = b.fast_two_sum(Th, P)                     # |Th| >= |P|: ordered
+    if fn == "expm1":
+        # (T_h - 2^-k) = base + ea exactly. |base| >= |P| for every n but 0
+        # (the study's 2.2, COMPUTED from the table: base is 0.0905 at n = 1
+        # and -0.166 at n = -1 against |P| under 0.049 and 0.082, and larger
+        # beyond); at n = 0, base is 0 and the Fast2Sum below is exact in any
+        # order (S = P, e2 = 0)
+        base, ea = b.two_diff(Th, sc.npk)
+    else:
+        base = Th
+    S, e2 = b.fast_two_sum(base, P)                   # |base| >= |P|: ordered
     a1 = b.fma(Th, nZl, nPe)                          # -(Th Zl + Pe)
     a2 = b.fma(Tl, zp, Tl)                            # Tl (1 + Zh)
     lo = b.add(b.sub(e2, a1), a2)
+    if fn == "expm1" and plant != "ea_dropped":
+        lo = b.add(lo, ea)
     Vh, Vl = b.fast_two_sum(S, lo)                    # |S| >= |lo|: ordered
     b.probes.update(Vh=Vh, Vl=Vl)
 
     # ---- the final rounding and the in-lane test ----------------------------
     b.phase = "final"
     R = b.add(Vh, Vl, rnd)                            # the guess: rnd(Vh + Vl)
-    Bv = b.mul(Vh, b.const("BREL", c["BREL"]))        # 2^-(p+G) |V|: exact
+    # Bv = 2^-(p+G) |V_h|: exact; expm1's V_h is negative for x < 0
+    Bv = b.mul(b.fabs(Vh) if fn == "expm1" else Vh, b.const("BREL", c["BREL"]))
     lo_dn = b.sub(Vl, Bv, RDN)
     lo_up = b.add(Vl, Bv, RUP)
     R1 = b.add(Vh, lo_dn, rnd)
     R2 = b.add(Vh, lo_up, rnd)
     mk = b.ixor(R1, R2)                               # nonzero: not decided
     b.probes.update(R=R, R1=R1, R2=R2, Bv=Bv)
-
-    # a result that may be subnormal (k <= emin) is rounded once on its own
-    # grid: V_h split at C, V_l's share added after rounding to odd (its ulp
-    # is finer than u/4), rounded under rnd, C taken off again
-    b.phase = "fixed-grid"
-    Z0 = b.add(Cu, Vh)
-    W0 = b.sub(Z0, Cu)
-    zr = b.sub(Vh, W0)
-    if plant == "odd_dropped":
-        ro = b.add(zr, Vl)                  # round-to-nearest: V_l can be lost
-    else:
-        s_ = b.add(zr, Vl, RTZ)
-        eq = b.cmpeq(b.sub(s_, zr), Vl)
-        ro = b.sel(s_, b.ior(s_, INT1), eq)           # round-to-odd of zr + Vl
-    Ws = b.sub(b.add(Z0, ro, rnd), Cu)
-    # the fixed grid's own test: V can straddle a boundary only where zr IS
-    # one (+-u/2 for rne and rmm, 0 for the directed three) and |Vl| <= Bv
-    c1 = b.cmpeq(b.fabs(zr), hu) if hu is not None else b.cmpeq(zr, ZERO)
-    smallo = b.cmple(b.fabs(Vl), Bv)
-    msub = b.sel(smallo, ZERO, c1)
-    Wsel = b.sel(Ws, R, sub_p)
-    mk = b.sel(ONE, mk, b.sel(msub, ZERO, sub_p))
-    # tininess after rounding: k < emin, or k = emin and the precision-p
-    # rounding R of the scaled value is below 1
-    tn = klt if plant == "tininess_klt_only" else \
-        b.sel(ONE, b.cmplt(R, ONE), klt)
-    tinyu = b.sel(tn, ZERO, sub_p)
-    b.probes.update(Ws=Ws)
-
-    b.phase = "final"
-    Y1 = b.mul(Wsel, S1)                              # exact
-    FIN = b.mul(Y1, S2, rnd)                          # the one rounding
-    if rnd in (RNE, RMM, RUP):
-        ovf = b.cmpeq(FIN, INF)
-    else:       # the directed-down attributes answer max_normal, not +inf
-        ovf = b.cmpeq(b.mul(Y1, S2, RUP), INF)
-    fl = b.sel(INXUNF, INX, tinyu)
-    fl = b.sel(OVFINX, fl, ovf)
-    if plant != "tiny_gate_off":
-        mk = b.sel(ZERO, mk, tinyx)
-    if plant != "mark_silenced":
-        fl = b.ior(fl, b.sel(MARKW, ZERO, mk))
-    b.probes.update(FIN=FIN, mk=mk)
-
-    # ---- the specials, lowest priority first (the study's section 4) --------
-    b.phase = "special"
-    bits = FIN
-    unfb = sf.round_pack(fmt, 0, 1, fmt.emin - mw - 2, rnd)[0]
-    bits = b.sel(b.const("UNFB", unfb), bits, uns)
-    fl = b.sel(INXUNF, fl, uns)
-    ovfb = sf.round_pack(fmt, 0, 3, fmt.emax, rnd)[0]
-    bits = b.sel(b.const("OVFB", ovfb), bits, ovs)
-    fl = b.sel(OVFINX, fl, ovs)
-    bits = b.sel(ONE, bits, iszero)
-    infb = b.sel(ZERO, INF, neg)                      # exp(-inf) = +0
-    fl = b.sel(ZERO, fl, iszero)
-    bits = b.sel(infb, bits, isinf)
-    fl = b.sel(ZERO, fl, isinf)
-    bits = b.sel(QNAN, bits, isnan)
-    fl = b.sel(b.sel(INVALID, ZERO, issnan), fl, isnan)
-    return b.finish(bits, fl)
+    Wsel, tinyu = R, None
+    if fn != "expm1":
+        Wsel, mk, tinyu = _fixed_grid(b, plant, rnd, cl, sc, k_, R, Bv, mk,
+                                      Vh, Vl, False)
+    return _finalize(b, fn, rnd, plant, c, cl, sc, k_, Wsel, mk, tinyu, exact)
 
 
-# ---- exp at fp32: three words where the bound needs them --------------------
+# ---- exp, exp2 and expm1 at fp32: three words where the bound needs them -----
 
-def plan_exp32(fmt: FpFormat, G):
-    """(K3, K2, D) for the triple-word exp (the study's 2.5): K3
+def plan_exp32(fmt: FpFormat, G, rel_z=False):
+    """(K3, K2, D) for the triple-word routines (the study's 2.5): K3
     triple-word head steps, then K2 double-word steps, then a single-word
     tail to degree D of Y. Y's partial sum y_i enters V scaled by
     rho^(i+1), and a w-word step keeps about 24 w - 2 bits of relative
@@ -906,12 +1398,15 @@ def plan_exp32(fmt: FpFormat, G):
     bits: K3 is the first i whose need fits two words less two bits, K3 + K2
     the first that fits one word less two; D the first degree whose
     truncation rho^(D+1)/(D+2)! is under 2^-(p+G+3). Exact rational
-    arithmetic."""
+    arithmetic. `rel_z` plans expm1, whose n = 0 lanes are bounded relative
+    to Z = r Y, not to V = 1 + Z: y_i enters scaled by rho^i, one factor rho
+    fewer."""
     p = fmt.prec
     rho = _rho(fmt, _cushion(fmt))
+    extra = 0 if rel_z else 1
 
     def need_within(i, bits):
-        return rho ** (i + 1) * 2 / math.factorial(i + 1) <= \
+        return rho ** (i + extra) * 2 / math.factorial(i + 1) <= \
             Fraction(2) ** (bits - (p + G + 2))
     D = 1
     while rho ** (D + 1) / math.factorial(D + 2) > \
@@ -926,31 +1421,43 @@ def plan_exp32(fmt: FpFormat, G):
     return K3, K23 - K3, D
 
 
-def _exp32_constants(fmt: FpFormat, G, K3, K2, D, shift, plant):
-    """{role: bits} for the triple-word exp: the double word's, with ln2/8
-    in five words (three of p - nb bits, so n times each is exact, then the
-    nearest two to what is left), the table and the three-word head in
-    three words, and the double-word steps' in two."""
+def _tw_constants(fn, fmt: FpFormat, G, K3, K2, D, shift, plant):
+    """{role: bits} for the triple-word routines: the double word's, with
+    ln2/8 in five words at exp and expm1 (three of p - nb bits, so n times
+    each is exact, then the nearest two to what is left) and ln 2 in three
+    words at exp2 (RN, then RN of what is left, twice); the table and the
+    three-word head in three words, and the double-word steps' in two."""
     p = fmt.prec
     l2 = _ln2()
-    L = l2 / N
-    nb = _n_width(fmt)
     c = {}
     c["MAGIC"] = _enc_exact(fmt, Fraction(3, 2) * 2 ** (p - 1))
-    c["INVLN2N"] = _enc(fmt, N / l2)
-    rest = L
-    cw = []
-    for _ in range(3):
-        wd = _truncated(fmt, rest, p - nb)
-        cw.append(wd)
-        rest -= _dec(fmt, wd)
-    l4 = _enc(fmt, rest)
-    l5 = _enc(fmt, rest - _dec(fmt, l4))
-    if plant == "c1_ulp":
-        cw[0] += 1
-    for i, wd in enumerate(cw):
-        c[f"NL{i + 1}"] = sf.negate(fmt, wd)
-    c["NL4"], c["L4"], c["NL5"] = sf.negate(fmt, l4), l4, sf.negate(fmt, l5)
+    if fn == "exp2":
+        c["EIGHT"] = _enc_exact(fmt, N)
+        c["NINV8"] = _enc_exact(fmt, Fraction(-1, N))
+        w0, w1, w2 = _words(fmt, l2, 3)
+        if plant == "ln2_ulp":
+            w0 += 1
+        if plant == "ln2_short":
+            w2 = 0
+        c["LN2_0"], c["LN2_1"], c["LN2_2"] = w0, w1, w2
+        c["NLN2_0"], c["NLN2_1"] = sf.negate(fmt, w0), sf.negate(fmt, w1)
+    else:
+        L = l2 / N
+        nb = _n_width(fmt)
+        c["INVLN2N"] = _enc(fmt, N / l2)
+        rest = L
+        cw = []
+        for _ in range(3):
+            wd = _truncated(fmt, rest, p - nb)
+            cw.append(wd)
+            rest -= _dec(fmt, wd)
+        l4 = _enc(fmt, rest)
+        l5 = _enc(fmt, rest - _dec(fmt, l4))
+        if plant == "c1_ulp":
+            cw[0] += 1
+        for i, wd in enumerate(cw):
+            c[f"NL{i + 1}"] = sf.negate(fmt, wd)
+        c["NL4"], c["L4"], c["NL5"] = sf.negate(fmt, l4), l4, sf.negate(fmt, l5)
     for j in range(N):
         for i, wd in enumerate(_words(fmt, _two_to_eighth(j), 3)):
             if plant == "table_entry" and (j, i) == (3, 0):
@@ -965,11 +1472,21 @@ def _exp32_constants(fmt: FpFormat, G, K3, K2, D, shift, plant):
     for i in range(K3):
         for k, wd in enumerate(_words(fmt, _coefficient(i), 3)):
             c[f"B{i}_{k}"] = wd
-    c["XOVF"], c["XUNF"] = _screens(fmt)
+    if fn == "exp2":
+        c["XOVF"], c["XUNF"] = _screens_exp2(fmt)
+    else:
+        c["XOVF"], c["XUNF"] = _screens(fmt)
     if plant == "screen_ulp":
         c["XOVF"] -= 1
-    c["TINYX"] = _pow2(fmt, -(p + 3))
-    c["C0"] = _pow2(fmt, -3 if plant == "c0_wrong" else -4)
+    if fn == "expm1":
+        del c["XUNF"]
+        c["XM1"] = _screen_expm1(fmt)
+        c["TINYM1"] = _pow2(fmt, -(p + 2))
+        c["MINN"] = sf.min_normal_bits(fmt)
+        c["NMINN"] = sf.min_normal_bits(fmt, 1)
+    else:
+        c["TINYX"] = _pow2(fmt, -(p + 3))
+        c["C0"] = _pow2(fmt, -3 if plant == "c0_wrong" else -4)
     c["BREL"] = _pow2(fmt, -(p + G) + shift - _bound_plant(plant))
     c["HALF"] = _pow2(fmt, -1)
     return c
@@ -984,94 +1501,79 @@ def _round_to_odd_add(b: Build, a, c, one):
     return b.sel(s, b.ior(s, one), exact)
 
 
-def _build_exp_tw(fmt: FpFormat, rnd: int, G, shift, plant):
-    """exp at fp32, V as three words (the study's 2.5): the reduction's
-    r = r0 + r1 + r2, the table's T = T0 + T1 + T2, the first Taylor terms
-    and V itself in three words, the final rounding through round-to-odd of
-    the low words."""
-    p, W, mw = fmt.prec, fmt.width, fmt.man_w
-    K3, K2, D = plan_exp32(fmt, G)
-    c = _exp32_constants(fmt, G, K3, K2, D, shift, plant)
-    b = Build(fmt, rnd, f"exp-{fmt.name}-{sf.RND_NAMES[rnd]}-tw")
-    b.meta.update(fn="exp", G=G, K3=K3, K2=K2, D=D, N=N, shift=shift,
+def _build_tw(fn, fmt: FpFormat, rnd: int, G, shift, plant):
+    """exp, exp2 or expm1 at fp32, V as three words (the study's 2.5): the
+    reduction's r = r0 + r1 + r2, the table's T = T0 + T1 + T2, the first
+    Taylor terms and V itself in three words, the final rounding through
+    round-to-odd of the low words. exp2 and expm1 are this parcel's design,
+    by the structure of exp's: exp2's r = r' ln 2 is TwoProd of the exact
+    remainder against ln 2's first two words and a rounded product with its
+    third; expm1's V' subtracts 2^-k from the table's first word by TwoSum
+    and puts the error in the level of the table's second word."""
+    p = fmt.prec
+    K3, K2, D = plan_exp32(fmt, G, rel_z=(fn == "expm1"))
+    c = _tw_constants(fn, fmt, G, K3, K2, D, shift, plant)
+    b = Build(fmt, rnd, f"{fn}-{fmt.name}-{sf.RND_NAMES[rnd]}-tw")
+    b.meta.update(fn=fn, G=G, K3=K3, K2=K2, D=D, N=N, shift=shift,
                   plant=plant, family="triple word")
-    x = ("in", "a")
-    w = b.word
     k_ = _words_common(b)
-    ib, ZERO, ONE, INT1 = k_["ib"], k_["ZERO"], k_["ONE"], k_["INT1"]
-    INF, QNAN, ABSM, QBIT = k_["INF"], k_["QNAN"], k_["ABSM"], k_["QBIT"]
-    INX, INXUNF, OVFINX = k_["INX"], k_["INXUNF"], k_["OVFINX"]
-    INVALID, MARKW = k_["INVALID"], k_["MARKW"]
+    ZERO, ONE, INT1 = k_["ZERO"], k_["ONE"], k_["INT1"]
     MAGIC = b.const("MAGIC", c["MAGIC"])
-    MANW = ib(mw, "MANTISSA_WIDTH")
     two_sum, fast_two_sum = b.two_sum, b.fast_two_sum
+    cl = _classify(b, fn, c, k_)
+    x = cl.x
 
-    b.phase = "classify"
-    ax = b.iand(x, ABSM)
-    isnan = b.icmplt(INF, ax)
-    issnan = b.sel(ZERO, isnan, b.iand(x, QBIT))
-    isinf = b.cmpeq(ax, INF)
-    iszero = b.icmplt(ax, INT1)
-    neg = b.ishr(x, ib(W - 1, "SIGN_SHIFT"))
-    uns = b.cmple(x, b.const("XUNF", c["XUNF"]))
-    ovs = b.cmple(b.const("XOVF", c["XOVF"]), x)
-    tinyx = b.icmplt(ax, b.const("TINYX", c["TINYX"]))
-
-    # ---- reduce: r = x - n ln2/8 as three words, from five of ln2/8 --------
+    # ---- reduce: r as three words -------------------------------------------
     b.phase = "reduce"
-    t = b.fma(x, b.const("INVLN2N", c["INVLN2N"]), MAGIC)
-    nf = b.sub(t, MAGIC)
-    a = b.fma(nf, b.const("NL1", c["NL1"]), x)        # exact
-    q2 = b.mul(nf, b.const("NL2", c["NL2"]))          # exact
-    q3 = b.mul(nf, b.const("NL3", c["NL3"]))          # exact
-    q4 = b.mul(nf, b.const("NL4", c["NL4"]))
-    e4n = b.fma(nf, b.const("L4", c["L4"]), q4)       # -(the error of q4)
-    q5 = b.mul(nf, b.const("NL5", c["NL5"]))
-    s0, s1 = two_sum(a, q2)
-    u0, u1 = two_sum(s1, q3)
-    v0, v1 = two_sum(u0, q4)
-    rest_ = b.add(b.sub(b.add(u1, v1), e4n), q5)
-    r0, t1 = two_sum(s0, v0)
-    r1, r2 = two_sum(t1, rest_)
+    rp = None
+    if fn == "exp2":
+        # n = round(8x) and r' = x - n/8 exact as at the double word; r' ln 2
+        # = r' (L0 + L1 + L2 + ...) by TwoProd against L0 and L1 (P0 + e0,
+        # P1 + e1) and a rounded product with L2 (P2): the level-1 terms e0
+        # and P1 summed by TwoSum, the level-2 terms (its error, e1, P2) by
+        # two rounded adds - about 2^-77 - and the three words by a Fast2Sum
+        # and a TwoSum. The terms dropped, r' (ln 2 - L0 - L1 - L2) and the
+        # error of P2, are under 2^-77
+        t = b.fma(x, b.const("EIGHT", c["EIGHT"]), MAGIC)
+        nf = b.sub(t, MAGIC)
+        rp = b.fma(nf, b.const("NINV8", c["NINV8"]), x)
+        P0 = b.mul(rp, b.const("LN2_0", c["LN2_0"]))
+        nE0 = b.fma(rp, b.const("NLN2_0", c["NLN2_0"]), P0)   # -e0
+        P1 = b.mul(rp, b.const("LN2_1", c["LN2_1"]))
+        nE1 = b.fma(rp, b.const("NLN2_1", c["NLN2_1"]), P1)   # -e1
+        P2 = b.mul(rp, b.const("LN2_2", c["LN2_2"]))
+        u0, u1 = b.two_diff(P1, nE0)                  # e0 + P1 = u0 + u1
+        lvl2 = b.sub(b.add(P2, u1), nE1)              # P2 + u1 + e1
+        r0, t1 = fast_two_sum(P0, u0)                 # |P0| >= |u0|: ordered
+        r1, r2 = two_sum(t1, lvl2)
+        b.probes["rp"] = rp
+    else:
+        # r = x - n ln2/8 from five words of ln2/8
+        t = b.fma(x, b.const("INVLN2N", c["INVLN2N"]), MAGIC)
+        nf = b.sub(t, MAGIC)
+        a = b.fma(nf, b.const("NL1", c["NL1"]), x)        # exact
+        q2 = b.mul(nf, b.const("NL2", c["NL2"]))          # exact
+        q3 = b.mul(nf, b.const("NL3", c["NL3"]))          # exact
+        q4 = b.mul(nf, b.const("NL4", c["NL4"]))
+        e4n = b.fma(nf, b.const("L4", c["L4"]), q4)       # -(the error of q4)
+        q5 = b.mul(nf, b.const("NL5", c["NL5"]))
+        s0, s1 = two_sum(a, q2)
+        u0, u1 = two_sum(s1, q3)
+        v0, v1 = two_sum(u0, q4)
+        rest_ = b.add(b.sub(b.add(u1, v1), e4n), q5)
+        r0, t1 = two_sum(s0, v0)
+        r1, r2 = two_sum(t1, rest_)
     nr0 = b.neg(r0)
     b.probes.update(t=t, nf=nf, r0=r0, r1=r1, r2=r2)
 
     # ---- the table, three words ---------------------------------------------
     b.phase = "lookup"
-    bitsel = [b.iand(t, ib(1 << i)) for i in range(T_BITS)]
-
-    def tree(vals):
-        level = list(vals)
-        for bit in bitsel:
-            level = [b.sel(level[2 * m + 1], level[2 * m], bit)
-                     for m in range(len(level) // 2)]
-        return level[0]
-    T0, T1, T2 = (
-        tree([b.const(f"T{j}_{i}", c[f"T{j}_{i}"]) for j in range(N)])
-        for i in range(3))
+    T0, T1, T2 = _table(b, c, t, k_,
+                        tuple(lambda j, i=i: f"T{j}_{i}" for i in range(3)))
+    exact = _exact_flag(b, plant, t, rp, k_) if fn == "exp2" else None
 
     # ---- scale factors and the fixed grid (as the double word's) ------------
-    b.phase = "scale"
-    OFF = _scale_offset(fmt)
-    half = (fmt.bias + OFF) // 2
-    b.meta["OFF"] = OFF
-    Ek = b.ishr(b.isub(t, ib(c["MAGIC"] - N * (fmt.bias + OFF), "KOFFSET")),
-                ib(T_BITS))
-    E1 = b.ishr(Ek, INT1)
-    KB1 = ib(fmt.bias - half, "KBIAS1")
-    S1 = b.ishl(b.iadd(E1, KB1), MANW)
-    S2 = b.ishl(b.iadd(b.isub(Ek, E1), KB1), MANW)
-    b.probes.update(Ek=Ek, S1=S1, S2=S2)
-    KD = fmt.emin + 2 * fmt.bias + OFF
-    sub_p = b.icmplt(Ek, ib(fmt.emin + fmt.bias + OFF + 1, "K_EMIN_P1"))
-    klt = b.icmplt(Ek, ib(fmt.emin + fmt.bias + OFF, "K_EMIN"))
-    Cu = b.sel(b.ishl(b.isub(ib(KD, "K_KD"), Ek), MANW),
-               b.const("C0", c["C0"]), klt)
-    hu = None
-    if rnd in (RNE, RMM):
-        hu = b.ishl(b.isub(ib(KD - p, "K_KD_P"), Ek), MANW)
-        b.probes["hu"] = hu
-    b.probes.update(Cu=Cu, sub_p=sub_p, klt=klt)
+    sc = _scale(b, fn, rnd, t, c, G, plant, k_)
 
     # ---- Y(r0): a single tail, double-word steps, triple-word steps ---------
     b.phase = "tail"
@@ -1153,7 +1655,7 @@ def _build_exp_tw(fmt: FpFormat, rnd: int, G, shift, plant):
     b.probes.update(Z0=Z0, Z1=Z1, Z2=Z2, ep0=ep0, ep1=ep1, lvl2=lvl2,
                     zz=zz, z0=z0)
 
-    # ---- V = T (1 + Z), three words -----------------------------------------
+    # ---- V = T (1 + Z) [ - 2^-k for expm1 ], three words --------------------
     b.phase = "recon"
     P0 = b.mul(T0, Z0)
     nP0 = b.fma(T0, b.neg(Z0), P0)                    # -(err)
@@ -1161,12 +1663,23 @@ def _build_exp_tw(fmt: FpFormat, rnd: int, G, shift, plant):
     nP1 = b.fma(T0, b.neg(Z1), P1)
     Q1 = b.mul(T1, Z0)
     nQ1 = b.fma(T1, b.neg(Z0), Q1)
-    S0, s1 = fast_two_sum(T0, P0)
+    if fn == "expm1":
+        # (T0 - 2^-k) = base + ea exactly; |base| >= |P0| for every n but 0
+        # and exact at n = 0, as at the double word, so the Fast2Sum holds.
+        # ea is of the table's second word's size or less, and joins its level
+        base, ea = b.two_diff(T0, sc.npk)
+    else:
+        base = T0
+    S0, s1 = fast_two_sum(base, P0)
     m, m1 = two_sum(s1, T1)
+    if fn == "expm1" and plant != "ea_dropped":
+        m, m_ea = two_sum(m, ea)
     m, m2 = two_sum(m, b.neg(nP0))
     m, m3 = two_sum(m, P1)
     m, m4 = two_sum(m, Q1)
     l2_ = b.add(b.add(b.add(m1, m2), b.add(m3, m4)), T2)
+    if fn == "expm1" and plant != "ea_dropped":
+        l2_ = b.add(l2_, m_ea)
     l2_ = b.sub(b.sub(l2_, nP1), nQ1)
     l2_ = b.fma(T0, Z2, l2_)
     l2_ = b.fma(T1, Z1, l2_)
@@ -1180,68 +1693,31 @@ def _build_exp_tw(fmt: FpFormat, rnd: int, G, shift, plant):
     b.phase = "final"
     lo = _round_to_odd_add(b, V1, V2, INT1)
     R = b.add(V0, lo, rnd)
-    Bv = b.mul(V0, b.const("BREL", c["BREL"]))
+    Bv = b.mul(b.fabs(V0) if fn == "expm1" else V0, b.const("BREL", c["BREL"]))
     lo_dn = _round_to_odd_add(b, V1, b.sub(V2, Bv, RDN), INT1)
     lo_up = _round_to_odd_add(b, V1, b.add(V2, Bv, RUP), INT1)
     R1 = b.add(V0, lo_dn, rnd)
     R2 = b.add(V0, lo_up, rnd)
     mk = b.ixor(R1, R2)
     b.probes.update(R=R, R1=R1, R2=R2, Bv=Bv, Vh=V0)
-    # the fixed grid: Z0' = RN(Cu + V0); the rest V0 - (Z0' - Cu) + V1 + V2
-    b.phase = "fixed-grid"
-    Zc = b.add(Cu, V0)
-    W0 = b.sub(Zc, Cu)
-    zr = b.sub(V0, W0)
-    t_ = b.add(zr, lo) if plant == "odd_dropped" else \
-        _round_to_odd_add(b, zr, lo, INT1)
-    Ws = b.sub(b.add(Zc, t_, rnd), Cu)
-    c1_ = b.cmpeq(b.fabs(zr), hu) if hu is not None else b.cmpeq(zr, ZERO)
-    smallo = b.cmple(b.fabs(lo), Bv)
-    msub = b.sel(smallo, ZERO, c1_)
-    Wsel = b.sel(Ws, R, sub_p)
-    mk = b.sel(ONE, mk, b.sel(msub, ZERO, sub_p))
-    tn = klt if plant == "tininess_klt_only" else \
-        b.sel(ONE, b.cmplt(R, ONE), klt)
-    tinyu = b.sel(tn, ZERO, sub_p)
-    b.phase = "final"
-    Y1 = b.mul(Wsel, S1)
-    FIN = b.mul(Y1, S2, rnd)
-    if rnd in (RNE, RMM, RUP):
-        ovf = b.cmpeq(FIN, INF)
-    else:
-        ovf = b.cmpeq(b.mul(Y1, S2, RUP), INF)
-    fl = b.sel(INXUNF, INX, tinyu)
-    fl = b.sel(OVFINX, fl, ovf)
-    if plant != "tiny_gate_off":
-        mk = b.sel(ZERO, mk, tinyx)
-    if plant != "mark_silenced":
-        fl = b.ior(fl, b.sel(MARKW, ZERO, mk))
-    b.probes.update(FIN=FIN, mk=mk)
-
-    b.phase = "special"
-    bits = FIN
-    unfb = sf.round_pack(fmt, 0, 1, fmt.emin - mw - 2, rnd)[0]
-    bits = b.sel(b.const("UNFB", unfb), bits, uns)
-    fl = b.sel(INXUNF, fl, uns)
-    ovfb = sf.round_pack(fmt, 0, 3, fmt.emax, rnd)[0]
-    bits = b.sel(b.const("OVFB", ovfb), bits, ovs)
-    fl = b.sel(OVFINX, fl, ovs)
-    bits = b.sel(ONE, bits, iszero)
-    fl = b.sel(ZERO, fl, iszero)
-    bits = b.sel(b.sel(ZERO, INF, neg), bits, isinf)
-    fl = b.sel(ZERO, fl, isinf)
-    bits = b.sel(QNAN, bits, isnan)
-    fl = b.sel(b.sel(INVALID, ZERO, issnan), fl, isnan)
-    return b.finish(bits, fl)
+    Wsel, tinyu = R, None
+    if fn != "expm1":
+        Wsel, mk, tinyu = _fixed_grid(b, plant, rnd, cl, sc, k_, R, Bv, mk,
+                                      V0, lo, True)
+    return _finalize(b, fn, rnd, plant, c, cl, sc, k_, Wsel, mk, tinyu, exact)
 
 
-def build_exp(fmt: FpFormat, rnd: int, *, guard=None, bound_shift=0,
-              plant=None) -> Build:
-    """exp at `fmt` under the program's attribute `rnd`, instrumented
-    (Build.fragment() is the routine). `guard` overrides the guard G
-    (GUARD's, by default); `bound_shift` makes the in-lane bound 2^shift
-    times as wide, so that marks are common enough to count (the mark-rate
-    law, the study's 3.4); `plant` builds one fault of PLANTS."""
+def build(name, fmt: FpFormat, rnd: int, *, guard=None, bound_shift=0,
+          plant=None) -> Build:
+    """`name` ("exp", "exp2" or "expm1") at `fmt` under the program's
+    attribute `rnd`, instrumented (Build.fragment() is the routine). `guard`
+    overrides the guard G (GUARD's, by default); `bound_shift` makes the
+    in-lane bound 2^shift times as wide, so that marks are common enough to
+    count (the mark-rate law, the study's 3.4); `plant` builds one fault of
+    PLANTS."""
+    if name not in NAMES:
+        raise ValueError(f"{name!r} is not a math-library routine built so "
+                         f"far: {', '.join(NAMES)}")
     if fmt not in FORMATS:
         raise ValueError(f"{fmt!r} is not one of the four formats")
     if rnd not in sf.RND_NAMES:
@@ -1249,14 +1725,34 @@ def build_exp(fmt: FpFormat, rnd: int, *, guard=None, bound_shift=0,
     if plant is not None and plant not in PLANTS:
         raise ValueError(f"unknown plant {plant!r}: {', '.join(PLANTS)}")
     family = "tw" if fmt.name == "fp32" else "dw"
-    if plant is not None and family not in PLANTS[plant][0].split():
-        raise ValueError(f"plant {plant!r} does not apply to the "
-                         f"{'triple' if family == 'tw' else 'double'}-word "
-                         f"fragments ({fmt.name})")
+    if plant is not None:
+        families, names, _text = PLANTS[plant]
+        if family not in families.split():
+            raise ValueError(f"plant {plant!r} does not apply to the "
+                             f"{'triple' if family == 'tw' else 'double'}-"
+                             f"word fragments ({fmt.name})")
+        if name not in names.split():
+            raise ValueError(f"plant {plant!r} does not apply to {name}: "
+                             f"{names}")
     G = GUARD[fmt.name] if guard is None else guard
     if family == "tw":
-        return _build_exp_tw(fmt, rnd, G, bound_shift, plant)
-    return _build_exp_dw(fmt, rnd, G, bound_shift, plant)
+        return _build_tw(name, fmt, rnd, G, bound_shift, plant)
+    return _build_dw(name, fmt, rnd, G, bound_shift, plant)
+
+
+def build_exp(fmt: FpFormat, rnd: int, **kw) -> Build:
+    """build("exp", fmt, rnd, ...)."""
+    return build("exp", fmt, rnd, **kw)
+
+
+def build_exp2(fmt: FpFormat, rnd: int, **kw) -> Build:
+    """build("exp2", fmt, rnd, ...)."""
+    return build("exp2", fmt, rnd, **kw)
+
+
+def build_expm1(fmt: FpFormat, rnd: int, **kw) -> Build:
+    """build("expm1", fmt, rnd, ...)."""
+    return build("expm1", fmt, rnd, **kw)
 
 
 # ---- what is proved of every fragment ---------------------------------------
@@ -1275,18 +1771,28 @@ FLAG_WORDS = routines.FLAG_WORDS | frozenset(
                        sf.FLAG_OVERFLOW | sf.FLAG_INEXACT,
                        sf.FLAG_UNDERFLOW | sf.FLAG_INEXACT))
 
-# The most values a fragment may keep live at once, by format. The double
-# word's exp keeps 22 (rtz, rdn, rup) or 23 (rne, rmm) live, at every one
-# of fp64, fp128 and fp256: its classification, its scale words and its
-# reduction's words are all computed early and read late, and 23 is the
-# cap because that is what the design measures, so a growth is a change to
-# look at. It leaves NREG - 23 = 9 of seq.py's 32 registers for the
-# program's own values across a call, which the compiler's allocator spills
-# when it must (C4's allocator does so around any routine). fp32's
-# triple-word exp keeps 33 or 34 live (MEASURED), which no allocation of 32
-# registers holds in this order: it is built, held to everything else and
-# REPORTED, not capped (None), and run by evaluate(), not by seq.py.
-LIVE_CAP = {"fp32": None, "fp64": 23, "fp128": 23, "fp256": 23}
+# The most values a fragment may keep live at once, by format: the most any
+# of the three routines keeps under any of the five attributes, in the order
+# the scheduler gives (MEASURED, parcel MB1; SHAPE in test_mathlib.py pins
+# each routine's exact count). In the design's own order the double word's
+# routines keep 22 to 25 live and fp32's triple word 33 to 36 - past seq.py's
+# 32 registers, so that routines.program refused fp32's exp ("no register for
+# the harness"); scheduled they keep
+#
+#           fp32      fp64, fp128, fp256
+#   exp      19            11
+#   exp2     20            13
+#   expm1    21            13
+#
+# and the cap is the largest of each column, because that is what the design
+# measures, so a growth is a change to look at. It leaves NREG - cap of
+# seq.py's 32 registers for the program's own values across a call - 11 at
+# fp32, 19 at the double word's formats - which the compiler's allocator
+# spills when it must (C4's allocator does so around any routine). The caps
+# are not a minimum: the scheduler is two cheap heuristics, and the triple
+# word's state (the three words of y, Z and T, with the reconstruction's
+# running sums) is itself most of fp32's 19 to 21.
+LIVE_CAP = {"fp32": 21, "fp64": 13, "fp128": 13, "fp256": 13}
 _BY_FORMAT = object()            # invariants()'s default cap: LIVE_CAP's
 
 
@@ -1325,7 +1831,7 @@ def invariants(f, live_cap=_BY_FORMAT):
       * the flag word's values, by flag_words(), within FLAG_WORDS: never
         bits [6:5], the mark only with inexact (an IOR rule in the walk);
       * at most `live_cap` values live at once (LIVE_CAP's, by default;
-        None for no cap: fp32's count is reported, not capped);
+        None for no cap);
       * every instruction reading a word or an internal value, so none can
         be a language node's (cftc/inline.py's argument);
       * nothing left to simplify (routines.simplify), once specialised;
@@ -1400,7 +1906,7 @@ def fragment(name, fmt: FpFormat, rnd: int):
                          f"so far: {', '.join(NAMES)}")
     key = (name, fmt, rnd)
     if key not in _CACHE:
-        f = build_exp(fmt, rnd).fragment()
+        f = build(name, fmt, rnd).fragment()
         bad = invariants(f)
         if bad:
             raise AssertionError(f"{name} at {fmt.name}, rnd {rnd}: "
@@ -1521,33 +2027,43 @@ def _why_not(fmt, rule, bits, lo, hi, nbits=None):
 
 
 def _check_scale(b: Build, findings):
-    """The scale offsets, the fixed grid's words and the table's wiring,
-    where they act: lanes x = n ln2/8 over the range of k, each run through
-    the unpruned body, its probes against exact values. -> lanes run."""
+    """The scale offsets, the fixed grid's words (exp, exp2), 2^-k and its
+    clamp (expm1), the exactness of exp2's reduction and the table's wiring,
+    where they act: lanes x = n ln2/8 (x = n/8 at exp2) over the range of k,
+    each run through the unpruned body, its probes against exact values.
+    -> lanes run."""
     fmt, p, mw = b.fmt, b.fmt.prec, b.fmt.man_w
+    fn = b.meta["fn"]
     OFF = b.meta["OFF"]
     ks = [fmt.emin - p - 2, fmt.emin - 2, fmt.emin - 1, fmt.emin,
           fmt.emin + 1, fmt.emin + p, -2, -1, 0, 1, 2, fmt.emax - 1,
           fmt.emax, fmt.emax + 1]
+    if fn == "expm1":
+        # 2^-k and where it is taken as 0: the design's last k is p + G + 2
+        clamp = p + b.meta["G"] + 2
+        ks += [-(p + 3), -(p + 2), -(p + 1), p, p + 1, clamp - 2, clamp - 1,
+               clamp, clamp + 1, clamp + 2, clamp + 4]
     ns = [8 * k + j for k in ks for j in (0, 3, 5, 7)]
     ns += [8 * k + 1 for k in range(-9, 10, 3)]
     l2 = _check_ln2()[0]
     tw = fmt.name == "fp32"
     ran = 0
     for n in ns:
-        x = _enc(fmt, Fraction(n) * l2 / N)
-        want = ("nf", "Ek", "S1", "S2", "sub_p", "klt", "Cu", "hu",
-                "T0", "T1", "T2", "Th", "Tl")
+        x = _enc_exact(fmt, Fraction(n, N)) if fn == "exp2" \
+            else _enc(fmt, Fraction(n) * l2 / N)
+        want = ["nf", "Ek", "S1", "S2", "rp"]
+        want += ["NPK"] if fn == "expm1" else ["sub_p", "klt", "Cu", "hu"]
+        want += ["T0", "T1", "T2"] if tw else ["Th", "Tl"]
         _res, _fl, pr = b.run(x, want)
         got_n = _dec(fmt, pr["nf"])
         if got_n.denominator != 1 or abs(got_n - n) > 1:
-            findings.append(f"{fmt.name} {sf.RND_NAMES[b.rnd]}: n = {n} was "
-                            f"reduced to {got_n}")
+            findings.append(f"{fn} {fmt.name} {sf.RND_NAMES[b.rnd]}: n = {n} "
+                            f"was reduced to {got_n}")
             continue
         n_ = int(got_n)
         k, j = n_ // N, n_ % N
         ran += 1
-        where = f"{fmt.name} {sf.RND_NAMES[b.rnd]} n = {n_} (k = {k})"
+        where = f"{fn} {fmt.name} {sf.RND_NAMES[b.rnd]} n = {n_} (k = {k})"
         if pr["Ek"] != k + fmt.bias + OFF:
             findings.append(f"{where}: Ek = {pr['Ek']}, want "
                             f"{k + fmt.bias + OFF}")
@@ -1556,18 +2072,31 @@ def _check_scale(b: Build, findings):
             if (u.kind != sf.NORM or u.sign or u.m != 1 << mw
                     or u.e + mw != kk):
                 findings.append(f"{where}: {nm} = {pr[nm]:#x} is not 2^{kk}")
-        for nm, truth in (("sub_p", k <= fmt.emin), ("klt", k < fmt.emin)):
-            if (pr[nm] == sf.one_bits(fmt)) != truth or pr[nm] not in (
-                    0, sf.one_bits(fmt)):
-                findings.append(f"{where}: {nm} = {pr[nm]:#x}, want {truth}")
-        if k <= fmt.emin:
-            cu = Fraction(2) ** (fmt.emin - k) if k < fmt.emin \
-                else Fraction(1, 16)
-            if _dec(fmt, pr["Cu"]) != cu:
-                findings.append(f"{where}: Cu is not {cu}")
-            if "hu" in pr and _dec(fmt, pr["hu"]) != \
-                    Fraction(2) ** (fmt.emin - p - k):
-                findings.append(f"{where}: u/2 is not 2^{fmt.emin - p - k}")
+        if fn == "exp2" and pr["rp"] != 0:
+            findings.append(f"{where}: x = n/8, and the remainder is "
+                            f"{pr['rp']:#x}, not 0")
+        if fn == "expm1":
+            if k >= -(p + 4):
+                two = Fraction(0) if k > clamp else Fraction(2) ** (-k)
+                if _dec(fmt, pr["NPK"]) != two:
+                    what = "0 (past the clamp)" if two == 0 else two
+                    findings.append(f"{where}: 2^-k is {pr['NPK']:#x}, want "
+                                    f"{what}")
+        else:
+            for nm, truth in (("sub_p", k <= fmt.emin), ("klt", k < fmt.emin)):
+                if (pr[nm] == sf.one_bits(fmt)) != truth or pr[nm] not in (
+                        0, sf.one_bits(fmt)):
+                    findings.append(f"{where}: {nm} = {pr[nm]:#x}, want "
+                                    f"{truth}")
+            if k <= fmt.emin:
+                cu = Fraction(2) ** (fmt.emin - k) if k < fmt.emin \
+                    else Fraction(1, 16)
+                if _dec(fmt, pr["Cu"]) != cu:
+                    findings.append(f"{where}: Cu is not {cu}")
+                if "hu" in pr and _dec(fmt, pr["hu"]) != \
+                        Fraction(2) ** (fmt.emin - p - k):
+                    findings.append(f"{where}: u/2 is not "
+                                    f"2^{fmt.emin - p - k}")
         if tw:
             for i in range(3):
                 if pr[f"T{i}"] != b.words[b.roles[f"T{j}_{i}"][1]]:
@@ -1581,15 +2110,17 @@ def _check_scale(b: Build, findings):
     return ran
 
 
-def _check_plan(fmt, family, G, l2hi):
+def _check_plan(fmt, family, G, l2hi, rel_z=False):
     """The plan again, from the independent ln 2: (K, D) or (K3, K2, D),
-    the smallest satisfying the study's conditions (plan_exp, plan_exp32)."""
+    the smallest satisfying the study's conditions (plan_exp, plan_exp32);
+    `rel_z` for expm1's, bounded relative to Z."""
     p = fmt.prec
     rho = (Fraction(1, 2) + Fraction(1, 2 ** _cushion(fmt))) * l2hi / N
     fact = math.factorial
+    extra = 0 if rel_z else 1
     if family == "triple word":
         def fits(i, bits):
-            return rho ** (i + 1) * 2 / fact(i + 1) <= \
+            return rho ** (i + extra) * 2 / fact(i + 1) <= \
                 Fraction(2) ** (bits - (p + G + 2))
         D = next(d for d in range(1, 150)
                  if rho ** (d + 1) / fact(d + 2) <=
@@ -1601,10 +2132,10 @@ def _check_plan(fmt, family, G, l2hi):
     target = Fraction(1, 2 ** (p + G + 2))
 
     def tail(K):
-        return 2 * u * rho ** (K + 1) / fact(K + 1)
+        return 2 * u * rho ** (K + extra) / fact(K + 1)
 
     def trunc(D):
-        return rho ** (D + 2) / fact(D + 2) * (1 + rho)
+        return rho ** (D + 1 + extra) / fact(D + 2) * (1 + rho)
     K = next(k for k in range(1, 60) if tail(k) <= target / 2)
     D = next(d for d in range(K, 150)
              if tail(K) + trunc(d) + 10 * u * u <= target)
@@ -1612,11 +2143,12 @@ def _check_plan(fmt, family, G, l2hi):
 
 
 def _check_build(b: Build, findings):
-    """Every derived constant of one built exp, against its independent
+    """Every derived constant of one built routine, against its independent
     derivation, and the scale words where they act. -> (constants checked,
     lanes run)."""
     fmt, p = b.fmt, b.fmt.prec
-    tag = f"{fmt.name} {sf.RND_NAMES[b.rnd]}"
+    fn = b.meta["fn"]
+    tag = f"{fn} {fmt.name} {sf.RND_NAMES[b.rnd]}"
     tw = b.meta["family"] == "triple word"
     G = b.meta["G"]
     seen = set()
@@ -1645,29 +2177,45 @@ def _check_build(b: Build, findings):
 
     l2lo, l2hi = _check_ln2()
     nb = _n_width(fmt)
-    plan = _check_plan(fmt, b.meta["family"], G, l2hi)
+    plan = _check_plan(fmt, b.meta["family"], G, l2hi, fn == "expm1")
     held_plan = ((b.meta["K3"], b.meta["K2"], b.meta["D"]) if tw
                  else (b.meta["K"], b.meta["D"]))
     if plan != held_plan:
         findings.append(f"{tag}: the plan {held_plan} is not the re-derived "
                         f"{plan}")
     point("MAGIC", Fraction(3, 2) * 2 ** (p - 1))
-    verify("INVLN2N", "rn", Fraction(N) / l2hi, Fraction(N) / l2lo)
-    # Cody-Waite: each word against what the ones before leave of ln2/8
-    lo, hi = l2lo / N, l2hi / N
-    if tw:
-        for role in ("NL1", "NL2", "NL3"):
-            w = verify(role, "trunc", lo, hi, nbits=p - nb, negated=True)
-            lo, hi = lo - w, hi - w
-        l4 = verify("L4", "rn", lo, hi)
-        point("NL4", l4, negated=True)
-        verify("NL5", "rn", lo - l4, hi - l4, negated=True)
+    if fn == "exp2":
+        # n = round(8x), r' = x - n/8: 8 and -1/8 exact; r = r' ln 2 from
+        # ln 2's nearest words, each the nearest to what the ones before leave
+        point("EIGHT", N)
+        point("NINV8", Fraction(-1, N))
+        if tw:
+            w0 = verify("LN2_0", "rn", l2lo, l2hi)
+            w1 = verify("LN2_1", "rn", l2lo - w0, l2hi - w0)
+            verify("LN2_2", "rn", l2lo - w0 - w1, l2hi - w0 - w1)
+            point("NLN2_0", w0, negated=True)
+            point("NLN2_1", w1, negated=True)
+        else:
+            w0 = verify("LN2H", "rn", l2lo, l2hi)
+            point("NLN2H", w0, negated=True)
+            verify("NLN2L", "rn", l2lo - w0, l2hi - w0, negated=True)
     else:
-        c1 = verify("NC1", "trunc", lo, hi, nbits=p - nb, negated=True)
-        lo, hi = lo - c1, hi - c1
-        c2 = verify("C2", "rn", lo, hi)
-        point("NC2", c2, negated=True)
-        verify("C3", "rn", lo - c2, hi - c2)
+        verify("INVLN2N", "rn", Fraction(N) / l2hi, Fraction(N) / l2lo)
+        # Cody-Waite: each word against what the ones before leave of ln2/8
+        lo, hi = l2lo / N, l2hi / N
+        if tw:
+            for role in ("NL1", "NL2", "NL3"):
+                w = verify(role, "trunc", lo, hi, nbits=p - nb, negated=True)
+                lo, hi = lo - w, hi - w
+            l4 = verify("L4", "rn", lo, hi)
+            point("NL4", l4, negated=True)
+            verify("NL5", "rn", lo - l4, hi - l4, negated=True)
+        else:
+            c1 = verify("NC1", "trunc", lo, hi, nbits=p - nb, negated=True)
+            lo, hi = lo - c1, hi - c1
+            c2 = verify("C2", "rn", lo, hi)
+            point("NC2", c2, negated=True)
+            verify("C3", "rn", lo - c2, hi - c2)
     # the table: 2^(j/8), each word the nearest to what the ones before leave
     nwords = 3 if tw else 2
     for j in range(N):
@@ -1691,18 +2239,37 @@ def _check_build(b: Build, findings):
         left = Fraction(1, math.factorial(i + 1))
         for role in roles:
             left -= verify(role, "rn", left, left)
-    # the screens, by the rounding direction that makes each one safe
-    verify("XOVF", "ru", (fmt.emax + 1) * l2lo, (fmt.emax + 1) * l2hi)
-    verify("XUNF", "rd", (fmt.emin - p) * l2hi, (fmt.emin - p) * l2lo)
-    point("TINYX", Fraction(2) ** -(p + 3))
-    point("C0", Fraction(1, 16))
+    # the screens, by the rounding direction that makes each one safe; exp2's
+    # are integers
+    if fn == "exp2":
+        point("XOVF", fmt.emax + 1)
+        point("XUNF", fmt.emin - p)
+    else:
+        verify("XOVF", "ru", (fmt.emax + 1) * l2lo, (fmt.emax + 1) * l2hi)
+    if fn == "exp":
+        verify("XUNF", "rd", (fmt.emin - p) * l2hi, (fmt.emin - p) * l2lo)
+    if fn == "expm1":
+        # -(p+2) ln 2 is negative: the enclosure's ends swap
+        verify("XM1", "rd", -(p + 2) * l2hi, -(p + 2) * l2lo)
+        point("TINYM1", Fraction(2) ** -(p + 2))
+        point("MINN", Fraction(2) ** fmt.emin)
+        if b.rnd in (RTZ, RUP):
+            point("NMINN", -(Fraction(2) ** fmt.emin))
+    else:
+        point("TINYX", Fraction(2) ** -(p + 3))
+        point("C0", Fraction(1, 16))
     point("BREL", Fraction(2) ** -(p + G) * 2 ** b.meta["shift"])
     if tw:
         point("HALF", Fraction(1, 2))
-    # the answers of the two screens under the program's attribute (754 7.4):
-    # a quarter of the smallest subnormal, rounded; a number past the largest
-    point("UNFB", _dec(fmt, sf.min_subnormal_bits(fmt)) if b.rnd == RUP
-          else 0)
+    # the answers of the screens under the program's attribute (754 7.4): a
+    # quarter of the smallest subnormal, rounded; a number past the largest;
+    # for expm1 -1 less 2^-(p+3), rounded
+    if fn == "expm1":
+        point("M1B", Fraction(-1) if b.rnd in (RNE, RMM, RDN)
+              else -(1 - Fraction(1, 2 ** p)))
+    else:
+        point("UNFB", _dec(fmt, sf.min_subnormal_bits(fmt)) if b.rnd == RUP
+              else 0)
     seen.add("OVFB")
     want_ovf = (sf.inf_bits(fmt) if b.rnd in (RNE, RMM, RUP)
                 else sf.max_normal_bits(fmt))
@@ -1717,29 +2284,31 @@ def _check_build(b: Build, findings):
     return count[0], _check_scale(b, findings)
 
 
-def check_constants(builder=None, formats=FORMATS, attrs=sf.RND_MODES):
+def check_constants(builder=None, formats=FORMATS, attrs=sf.RND_MODES,
+                    names=NAMES):
     """(lines, findings): re-derive every derived constant of every built
     fragment (the section's comment above) and run the scale words. `lines`
     say what was checked; `findings` are the differences, empty when none.
-    `builder(fmt, rnd)` is build_exp, or a faulted one for a test."""
-    builder = builder or build_exp
+    `builder(name, fmt, rnd)` is build, or a faulted one for a test."""
+    builder = builder or build
     lines, findings = [], []
-    for fmt in formats:
-        n_const = n_lanes = 0
-        for rnd in attrs:
-            b = builder(fmt, rnd)
-            c, ln = _check_build(b, findings)
-            n_const += c
-            n_lanes += ln
-        meta = b.meta
-        plan = ((meta["K3"], meta["K2"], meta["D"]) if "K3" in meta
-                else (meta["K"], meta["D"]))
-        lines.append(
-            f"{fmt.name}: G = {meta['G']}, plan {plan}: {n_const} derived "
-            f"constants in {len(attrs)} fragments, each the rounding its "
-            f"rule gives for every value of an enclosure of the true "
-            f"number; {n_lanes} lanes of the scale, fixed-grid and table "
-            f"words")
+    for name in names:
+        for fmt in formats:
+            n_const = n_lanes = 0
+            for rnd in attrs:
+                b = builder(name, fmt, rnd)
+                c, ln = _check_build(b, findings)
+                n_const += c
+                n_lanes += ln
+            meta = b.meta
+            plan = ((meta["K3"], meta["K2"], meta["D"]) if "K3" in meta
+                    else (meta["K"], meta["D"]))
+            lines.append(
+                f"{name} {fmt.name}: G = {meta['G']}, plan {plan}: "
+                f"{n_const} derived constants in {len(attrs)} fragments, "
+                f"each the rounding its rule gives for every value of an "
+                f"enclosure of the true number; {n_lanes} lanes of the "
+                f"scale, fixed-grid, 2^-k and table words")
     return lines, findings
 
 
@@ -1748,7 +2317,8 @@ def check_constants(builder=None, formats=FORMATS, attrs=sf.RND_MODES):
 def main(argv=None):
     ap = argparse.ArgumentParser(
         prog="python -m cft_golden.mathlib",
-        description="The math library's golden generator: exp's fragments.")
+        description="The math library's golden generator: the fragments of "
+                    + ", ".join(NAMES) + ".")
     ap.add_argument("--check", action="store_true",
                     help="re-derive every constant the built fragments "
                          "hold, in integer arithmetic of its own, and exit "
@@ -1760,17 +2330,18 @@ def main(argv=None):
             print(ln)
         for fd in findings:
             print("DIFFERENCE:", fd)
-        print(f"mathlib --check: {len(lines)} formats, "
-              f"{len(findings)} differences")
+        print(f"mathlib --check: {len(NAMES)} routines, {len(FORMATS)} "
+              f"formats, {len(findings)} differences")
         return 1 if findings else 0
     print(f"{'routine':8s} {'format':6s} {'rnd':4s} {'insns':>6s} "
           f"{'words':>6s} {'live':>5s}  cap")
-    for fmt in FORMATS:
-        for rnd in sf.RND_MODES:
-            f = fragment("exp", fmt, rnd)
-            print(f"{'exp':8s} {fmt.name:6s} {sf.RND_NAMES[rnd]:4s} "
-                  f"{len(f):6d} {len(f.words):6d} {f.live_max():5d}  "
-                  f"{LIVE_CAP[fmt.name]}")
+    for name in NAMES:
+        for fmt in FORMATS:
+            for rnd in sf.RND_MODES:
+                f = fragment(name, fmt, rnd)
+                print(f"{name:8s} {fmt.name:6s} {sf.RND_NAMES[rnd]:4s} "
+                      f"{len(f):6d} {len(f.words):6d} {f.live_max():5d}  "
+                      f"{LIVE_CAP[fmt.name]}")
     return 0
 
 

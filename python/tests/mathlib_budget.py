@@ -2,9 +2,11 @@
 # SPDX-License-Identifier: Apache-2.0
 """The first-order error budget of a math-library fragment: verifier-VM1b's
 tool (docs/studies/m1/vm1b/: adlib.py, p5_budget.py, p5c_budget_end.py),
-ported into the tree for parcel E1 and held to exp's instrumented form
-(cft_golden/mathlib.py's Build), which keeps what it reads: the unpruned
-body, each instruction's phase and the probes Vh, Vl, Bv and Ek.
+ported into the tree for parcel E1 and held, since parcel MB1, to the
+instrumented forms of exp, exp2 and expm1 (cft_golden/mathlib.py's Build),
+which keep what it reads: the unpruned body, each instruction's phase and
+the probes Vh, Vl, Bv and Ek. The true value it compares with is f(x) 2^-k
+for the build's own f (true_scaled).
 
 What it is. The in-lane test (the study's 3.1) is sound only if the true
 value lies within Bv = 2^-(p+G) |V_h| of V = V_h + V_l, so that bound must
@@ -36,7 +38,13 @@ extremes. It must be under 1.
 
 Verifier-VM1d measured what first order leaves out (6e-5 Bv for exp at
 G = 44: the study's 3.2), so a bound under 1 with the room the study
-recorded (0.164 Bv at fp64, G = 44) is a bound with margin.
+recorded (0.164 Bv at fp64, G = 44) is a bound with margin. exp2's is exp's
+(the same polynomial and reconstruction: 0.1643, 0.0148 and 0.0193 Bv at
+fp64, fp128 and fp256 over all regions, parcel MB1's entry; the placed
+region alone gives 0.1642 at fp64); expm1's is mostly the method's
+error at its first clamped k, where 2^-k is taken as 0 (about 1/8 Bv, M in
+the summary), with the double word's floor amplified at n = +-1 on top at
+fp64.
 
 fp32 has no budget: its V is three words and the probes are V0, V1, V2; its
 bound is measured (mathlib_harness.check_bound).
@@ -62,11 +70,19 @@ def to_mp(q):
     return mpmath.mpf(q.numerator) / q.denominator
 
 
-def true_scaled(fmt, x, k):
-    """exp(x) 2^-k at 4p + 200 bits: the true value in the scaled domain V
-    lives in (independent of transcend.py's decision procedure)."""
+def true_scaled(fmt, x, k, fn="exp"):
+    """f(x) 2^-k at 4p + 200 bits, f exp, exp2 or expm1: the true value in
+    the scaled domain V lives in (independent of transcend.py's decision
+    procedure)."""
     with mpmath.workprec(4 * fmt.prec + 200):
-        return mpmath.exp(to_mp(ml._dec(fmt, x))) * mpmath.mpf(2) ** (-k)
+        xv = to_mp(ml._dec(fmt, x))
+        if fn == "exp2":
+            v = mpmath.power(2, xv)
+        elif fn == "expm1":
+            v = mpmath.expm1(xv)
+        else:
+            v = mpmath.exp(xv)
+        return v * mpmath.mpf(2) ** (-k)
 
 
 class Lane:
@@ -248,9 +264,10 @@ class Budget:
 
     def add(self, xs):
         an, fmt = self.an, self.an.fmt
+        fn = an.b.meta["fn"]
         for xa in xs:
             L = an.analyze(xa)
-            T = true_scaled(fmt, xa, L.k)
+            T = true_scaled(fmt, xa, L.k, fn)
             with mpmath.workprec(an.prec):
                 E = (L.V - T) / L.Bv
                 Mx = (L.Vex - T) / L.Bv
