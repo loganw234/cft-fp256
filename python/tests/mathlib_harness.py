@@ -1167,13 +1167,30 @@ def poisson_binomial_pmf(ps, kmax):
     """[P(X = k) for k = 0 .. kmax], X the number of successes among
     independent trials of probabilities `ps`: the dynamic programme over the
     trials, f[k] <- f[k] (1 - p) + f[k - 1] p, with the entries above kmax
-    dropped (which leaves those below exact). O(len(ps) kmax): about a second
-    for 20,000 trials and kmax 750."""
+    dropped (which leaves those below exact). O(len(ps) kmax): about 0.75 s
+    for 20,000 trials and kmax 669."""
     f = [1.0] + [0.0] * kmax
     for p in ps:
         q = 1.0 - p
         f = [a * q + b * p for a, b in zip(f, [0.0] + f)]
     return f
+
+
+def pmf_top(mean, n, eps=1e-20):
+    """The top of a table of P(count = k) that leaves under `eps` above it:
+    the least k above `mean` at which exp(-mean) (e mean / k)^k is under `eps`,
+    or n when the table can hold every count (then nothing is above it). That
+    product is the multiplicative Chernoff bound on P(count >= k) for ANY sum
+    of independent trials of that mean (E exp(t count) <= exp(mean (e^t - 1)),
+    and Markov's inequality at t = ln(k / mean)), so P(count > top) < eps
+    whatever the trials' probabilities are, at every mean."""
+    if n < 1 or mean <= 0.0:
+        return 0
+    k = int(mean) + 1
+    bound = math.log(eps)
+    while k < n and k * (1.0 + math.log(mean / k)) - mean >= bound:
+        k += 1
+    return min(k, n)
 
 
 class RateSample:
@@ -1197,11 +1214,12 @@ class RateSample:
         self._pmf = None
 
     def pmf(self):
-        """P(count = k) for k up to mean + 14 sigma (or n): past that the
-        upper tail is under 1e-20, the smallest it is at a mean of 1."""
+        """P(count = k) for k = 0 .. pmf_top(mean, n): what is past the table
+        is under 1e-20 at every mean (Chernoff, pmf_top), or nothing when the
+        table holds every count."""
         if self._pmf is None:
-            kmax = min(self.n, int(self.mean + 14 * self.sigma) + 6)
-            self._pmf = poisson_binomial_pmf(self.p, kmax)
+            self._pmf = poisson_binomial_pmf(self.p,
+                                             pmf_top(self.mean, self.n))
         return self._pmf
 
     def tails(self, c):

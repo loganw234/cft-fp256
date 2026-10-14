@@ -1048,6 +1048,17 @@ RATE_N = {"exp": 2000, "exp2": 1000, "expm1": 1000, "log": 700,
 # 2 classes of attribute (rtz, rdn and rup mark the same lanes, rne and rmm the
 # same), each flagged when its exact two-sided tail is under H.RATE_ALPHA / 36
 RATE_STATISTICS = H.rate_statistics(FUNCS, DOUBLE)
+# the lanes of the plant rows' `rate` runs (run_check), judged by the same
+# rule: a bound twice as wide marks about twice the 22 of a thousand lanes,
+# which is too close to flag at alpha / 36 in every cell. 3,000 lanes flag
+# the ten cells of the plant map that the plain line flagged at 1,000 and
+# still miss an eleventh (bound_double at exp fp32 under the directed
+# attributes: 103 marked of 67.2, a tail of 4.9e-5 against 2.8e-5); at every
+# n from 3,178 to 6,000 every cell of bound_double and bound_half that the
+# plain line flagged is flagged (3,177 is the last n that loses one), and
+# 3,500, the lead's choice, has that eleventh cell's tail at 8.5e-8 (parcel
+# RC, send-back 1)
+PLANT_RATE_N = 3500
 
 
 @pytest.mark.parametrize("rnd", RND, ids=rid)
@@ -1115,6 +1126,28 @@ def test_the_poisson_binomial_pmf_is_exact():
         assert abs(got[k] - float(closed)) <= 1e-13 * float(closed), k
     # the table is truncated, not wrapped: the entries it keeps are the same
     assert H.poisson_binomial_pmf([float(p)] * n, 10) == got[:11]
+
+
+def test_the_pmf_table_leaves_under_1e_20_above_it_at_every_mean():
+    """pmf_top's table, by the Chernoff bound, leaves under 1e-20 of the law
+    above it whatever the trials' probabilities are: held here against the
+    exact tail above it, for means from 0.05 to 450 in the Poisson limit
+    (10,000 trials of one small probability, the heaviest tail a mean allows),
+    and a table that can hold every count holds it. The first table, at mean
+    + 14 sigma + 6, left 1.3e-20 above it at a mean of 0.5 and 3.6e-20 at 0.65
+    (verifier-VRC), and 2.3e-18 at the worst, a mean of 0.078."""
+    for mean in (0.05, 0.1, 0.3, 0.5, 0.65, 0.75, 0.88, 1.0, 1.5, 3.0, 10.0,
+                 16.4, 45.0, 450.0):
+        ps = [mean / 10000] * 10000
+        top = H.pmf_top(math.fsum(ps), len(ps))
+        above = H.poisson_binomial_pmf(ps, top + 60)[top + 1:]
+        assert len(above) == 60 and math.fsum(above) < 1e-20, (mean, top)
+    # the tops, and the tables that hold every count
+    assert H.pmf_top(0.5, 10 ** 6) == 18 and H.pmf_top(450.0, 10 ** 6) == 669
+    assert H.pmf_top(20.0, 40) == 40 and H.pmf_top(0.0, 5) == 0
+    assert H.pmf_top(1.0, 0) == 0
+    assert math.fsum(H.poisson_binomial_pmf([0.5] * 40, 40)) == \
+        pytest.approx(1.0, abs=1e-15)
 
 
 def test_the_tails_the_p_value_and_the_rejection_of_a_law():
@@ -1270,6 +1303,35 @@ def test_the_rate_geometry_check_sees_a_faulted_bound():
     out, _st = H.check_rate_geometry(FP64, RNE, 600, 5, plant="head_short",
                                      fn="exp2")
     assert out == []
+
+
+def test_the_plant_rows_lanes_flag_what_a_thousand_lanes_do_not():
+    """Why PLANT_RATE_N is 3,500: three cells that the plain three-sigma line
+    flagged at 1,000 lanes and the rule does not. expm1's fp64 build with a
+    bound twice as wide marks 37 of 1,000 lanes against 22.9 expected, an exact
+    two-sided tail of 7.5e-3 against the 2.8e-5 of alpha / 36; exp2's fp64
+    build with a bound half as wide marks 7 against 22.7 (2.1e-4); exp's fp32
+    build with a bound twice as wide marks 45 against 22.6 under the directed
+    attributes (3.3e-5), and still 103 of 3,000 against 67.2 (4.9e-5: 3,000
+    lanes are not enough there). At PLANT_RATE_N lanes they mark 149 against
+    80.7 (6.3e-12), 36 against 78.8 (8.1e-8) and 130 against 78.4 (8.5e-8),
+    each with the one `rate:` finding and a tail under a hundredth of the
+    level. The count of a cell is pinned, so a changed PLANT_RATE_N is a
+    decision made here too."""
+    level = H.rate_level(RATE_STATISTICS)
+    for plant, fn, fmt, rnd, small, big in (
+            ("bound_double", "expm1", FP64, RNE, 37, 149),
+            ("bound_half", "exp2", FP64, RNE, 7, 36),
+            ("bound_double", "exp", FP32, RTZ, 45, 130)):
+        out, st = H.check_rate(fmt, rnd, 1000, 7, plant=plant, fn=fn,
+                               statistics=RATE_STATISTICS)
+        assert st["marked"] == small and st["p"] > level and out == [], \
+            (plant, fn, st["marked"], st["p"])
+        out, st = H.check_rate(fmt, rnd, PLANT_RATE_N, 7, plant=plant, fn=fn,
+                               statistics=RATE_STATISTICS)
+        assert st["marked"] == big and st["p"] < level / 100, \
+            (plant, fn, st["marked"], st["p"])
+        assert len(out) == 1 and out[0].startswith("rate:"), (plant, fn, out)
 
 
 # =====================================================================
@@ -1680,8 +1742,8 @@ def run_check(check, plant, fn, fmt, rnd):
         return H.check_family(f, [cen[0], cen[len(cen) // 2], cen[-1]],
                               deep=True)[0]
     if check == "rate":
-        return H.check_rate(fmt, rnd, 1000, 7, plant=builder_plant, fn=fn,
-                            statistics=RATE_STATISTICS)[0]
+        return H.check_rate(fmt, rnd, PLANT_RATE_N, 7, plant=builder_plant,
+                            fn=fn, statistics=RATE_STATISTICS)[0]
     if check == "constants":
         return H.check_constants(
             builder=lambda name, ff, rr: ml.build(name, ff, rr,
