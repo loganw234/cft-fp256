@@ -288,9 +288,11 @@ CENSUS_MARKS = {
     "expm1": {"fp32": (0, 0), "fp64": (6, 13), "fp128": (16, 127),
               "fp256": (16, 127)},
     # the log family (parcel MB2, MEASURED): log's census is its 32 arguments
-    # 1 +- c ulp (the study's 3 and 9 at fp128 and fp256 for G = 46; the same
-    # at fp64's G = 44), log1p's the 240 arguments c 2^-e (the study's 4 and
-    # 11 at fp64's G = 44, 16 and 127 at fp128 and fp256); log2's marks none
+    # 1 +- c ulp (the study's 3.5 table has 3 and 9 at fp128 and fp256 and, at
+    # fp64's G = 46, 3 and 7; the 9 at fp64's G = 44 is measured here),
+    # log1p's the 240 arguments c 2^-e (the study's table has 16 and 127 at
+    # fp128 and fp256 and, at fp64's G = 46, 4 and 7; the 11 at fp64's G = 44
+    # is measured here); log2's marks none
     "log": {"fp32": (0, 0), "fp64": (3, 9), "fp128": (3, 9),
             "fp256": (3, 9)},
     "log2": {"fp32": (0, 0), "fp64": (0, 0), "fp128": (0, 0),
@@ -727,10 +729,11 @@ def test_the_edge_pools_hold_the_thresholds_of_exp2_and_expm1():
 
 
 def test_the_seed_runs_are_the_runs_of_c_from_16_down_to_8():
-    """RECIP_SEED's 512 cells share their C in runs: 16 (m up to 1.0316), 15,
-    14, ..., 9, 8 (the wrap, m from 1.882): nine runs in order of m, from 1 to
-    the largest float under 2, each run's ends being the lanes where |r| is
-    largest (the study's rmax.py: 2^-4.081 at C = 9)."""
+    """RECIP_SEED's 512 cells share their C in runs: 16 (cells 0 to 16: m up
+    to the float below 1 + 17/512 = 1.033203125), 15, 14, ..., 9, 8 (the
+    wrap, cells 452 to 511: m from 1 + 452/512 = 1.8828125): nine runs in
+    order of m, from 1 to the largest float under 2, each run's ends being
+    the lanes where |r| is largest (the study's rmax.py: 2^-4.081 at C = 9)."""
     for fmt in FORMATS:
         runs = H.seed_runs(fmt)
         assert [c for c, _lo, _hi in runs] == list(range(16, 7, -1))
