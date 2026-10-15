@@ -131,8 +131,10 @@ def ln2_bits(fmt, rnd):
 
 def ln2_value(fmt, rnd):
     """L's exact value: ln 2 rounded once, as the rational its encoding is
-    - a constant like any other, which the canonical form writes as a
-    hexadecimal significand and reads back, rounded again to itself."""
+    - a constant like any other, which the canonical form writes as it
+    writes any constant (a hexadecimal significand at fp64, fp128 and
+    fp256, a decimal at fp32, where it terminates within 24 significant
+    digits) and reads back, rounded again to itself."""
     return value_of(fmt, ln2_bits(fmt, rnd))
 
 

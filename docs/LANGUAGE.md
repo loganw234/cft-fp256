@@ -1828,10 +1828,10 @@ answer to question 6: "the exact ln 2, rounded once at the program's
 format under its attribute"; no new name, so the step stays minor). The
 checker computes L by an integer series, so that checking a source never
 needs mpmath, and the gate holds it equal to transcend.log of 2 at every
-format and attribute; the canonical form writes it as its hexadecimal
-significand (`0x1.62e42fefa39efp-1` at fp64 under rne), which reads back
-to itself, and it joins the const table only where exp2's or log2's rule
-reads it.
+format and attribute; the canonical form writes it like any constant - a
+hexadecimal significand at fp64, fp128 and fp256 (`0x1.62e42fefa39efp-1`
+at fp64 under rne), a decimal at fp32 - which reads back to itself, and
+it joins the const table only where exp2's or log2's rule reads it.
 - **exp:** `r * da`, the textbook's e^a·da with r = e^a: one rounding,
   the product.
 - **expm1:** `(1 + r) * da`, two roundings: 1 + r, the textbook's e^a =
