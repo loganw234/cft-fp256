@@ -20088,3 +20088,119 @@ The faults MB1's table already had, now on the log family (`PLANTS` says which a
 - **mpmath 1.3.0 on the desktop:** `lane_cell` reads the `_mpf_` tuple (sign, man, exp, bc); the box's 1.4.1 is not tried here (BELIEVED the same tuple; the committed tests run on the box in the lead's stage).
 
 **Records:** docs/README.md recounted (VALIDATION.md's line count) and the docs check passing; VERIFICATION's golden row restated (1,676 tests in test_mathlib.py, 5,096 in the stage); ROADMAP and CLAUDE.md untouched.
+
+## 2026-10-14 - M1's build, third wave, closed: program.c parity (parcel MP, Sonnet) and the rate check's calibration (parcel RC, Sonnet with Haiku verifiers), merged and gated
+
+**What Logan asked.**
+- **MP is item 2 of M1's build.** It runs under his "Delete the ci-golden branch and start M1's build" (2026-10-13) and his models of the same day: "Use Sonnet for M1's build parcels as you recommended, it performed well".
+- **RC is the follow-up to the second wave's rate finding.** The lead offered: "A small follow-up could make the check compute its expected count from the sample itself, which would remove those false alarms. Want me to queue it?" Logan answered, verbatim: "Go ahead and queue the follow up".
+  - **The lead's own correction of that offer:** the sample's own centre removes the bias, not every chance excursion over a three-sigma line on many cells. The brief therefore also asked for a rule for many-cell runs.
+  - **RC's verifiers are Haiku,** under his word of 2026-10-12: "For 'simpler' level tasks, you may also utilize Sonnet for the Parcels and Haiku for the verifier. But only when its not a 'challenging' task".
+
+**The chains** (MEASURED, each verifier's ledger):
+
+| work | author | verifiers: (a), (b) | sent back |
+|---|---|---|---|
+| MP (b81fe11 to 77a3c71, fd373f4) | Sonnet 5.5 | VMP 0, 1; VMP-2 0, 0 | once |
+| RC (7dffacd to 2d2fd99, d0514f4) | Sonnet 5.5 | VRC 1, 2; VRC-2 0, 1 (other) | once |
+| the merges (a11e03f, cff6e5f) | the lead | VIW3 0, 1 | restated here |
+
+- **MP's (b):**
+  - The claim: the entry said "The 30 fp32 programs, and only they, ... need CFT_SEQ_FEAT_REGS32".
+  - The fact: 60 do, the 30 fp32 fragments in both shapes. VMP-2 confirmed the 60 five ways, libcft itself among them.
+- **RC's (a), by the letter:**
+  - The cells: plant-map cells that the old three-sigma line flagged at 1,000 lanes and the new rule did not. VRC found ten, and the author 13 under rne.
+  - The fix: the lead applied the author's own proposal, the plant rows' `rate` at more lanes.
+    - At 3,000 lanes one more cell was lost: bound_double at exp fp32, the directed class.
+    - The lead then took 3,500. The exact safe range is every n from 3,178 to 6,000.
+- **RC's two (b)s:**
+  - the entry's per-statistic z range, which is -0.069 to +0.083;
+  - the pmf docstring's tail claim, made true at every mean by sizing the table with a Chernoff top.
+- **VRC-2's (b), which the lead classes as other:** "Thirteen cells" is the rne count. In its words: "of the 96 bound cells, 26 are flagged by the line and missed by the rule at 1,000 lanes (13 rne, 13 directed); all 26 are red at 3,500 lanes". The entry scopes its 13 to rne, and its claim that none of the 96 the line flagged is lost is true.
+- **The merges' (b),** in cff6e5f's message: "On amd-arc-box at b9ee195 (the tip's code)" is false of the merged tip d0514f4.
+  - d0514f4 changed mathlib_harness.py (pmf_top, the table's size) and test_mathlib.py (PLANT_RATE_N and two tests) after b9ee195. mathlib_runs.py is identical.
+  - In VIW3's words, "Effect: none". At cff6e5f's own code the same cell gives 548 against 468.6, tail 0.000315, "RESULT: ok".
+  - The phrase was true of 2d2fd99, whose code is b9ee195's, when the lead wrote it, and it was carried forward. The message stands as written.
+- **What VIW3 measured:**
+  - **The merges:**
+    - a11e03f's tree is fd373f4's;
+    - outside the two records, cff6e5f's diff equals RC's branch but for VERIFICATION.md's index line;
+    - git's own re-merge (merge-tree) conflicts in exactly README and VALIDATION.
+  - **The records:**
+    - VALIDATION is c918cb3's file, then MP's 95 lines and RC's 115, byte for byte, 20,090 lines;
+    - VERIFICATION carries both rows;
+    - README's counts are true by its own recount.
+  - **At cff6e5f:**
+    - seq_check at the gate's arguments: 0 mismatches, the routine corpus 240 programs and 13,483 lanes, byte-identical across two runs;
+    - `verify/run.sh --only seq`: "seq ok 41s";
+    - the rate and plant-row selection: 237 passed, and RC's 57 new tests passed;
+    - `--check` rc 0, and 5,096 collected.
+  - **Also:** every agent's model, from its transcript; and rtl/'s tree, unchanged.
+
+**Time and tokens** (MEASURED, the agents' transcripts; usage summed from the last line of each response):
+- **MP's author,** claude-sonnet-5-5: 166 min to its report and 6 min for the send-back; 503 tool uses; 581,894 output tokens.
+- **RC's author,** claude-sonnet-5-5: 134 min to its report and 102 min for the send-back; 576 tool uses; 816,201 output tokens.
+- **The verifiers:**
+  - VMP (claude-sonnet-5-5): 109 min, 180 tool uses, 275,225 output tokens;
+  - VMP-2 (claude-sonnet-5-5): 22 min, 91, 125,924;
+  - VRC (claude-haiku-5-5): 54 min, 137, 369,426;
+  - VRC-2 (claude-haiku-5-5): 82 min, 229, 429,702;
+  - VIW3 (claude-sonnet-5-5): 84 min, 208, 242,190.
+
+**MP's long runs on amd-arc-box** (MEASURED, at 77a3c71; python3 3.12.3, mpmath 1.4.1, pytest 9.1.1):
+- `make -C host`: exit 0.
+- **The seq stage alone:** "seq ok 44s", "VERDICT: PASS, nothing skipped".
+- **12 processes,** `seq_check.py --trials 250 --formats f --seed s --math-rounds 40` (s 101 to 103, each format):
+  - each "2400 programs from the routine corpus run through both, 1200 stand-alone and 1200 compiled". That is 28,800 programs and 1,579,179 lanes, with 0 MISMATCH lines in any log.
+  - 11 end "libcft and the golden model agree on every program: deposits, counts, flags and status".
+  - **seq-fp32-101 exits 1** on "THE REVISION-8 CORPUS DID NOT REACH EVERY FORM".
+    - The unmodified script exits 1 there too, line for line, so it is pre-existing.
+    - VMP: R's overflow counter is 0 for that one-format slice at seed 101, where the gate's four-format run at seed 17 draws 33.
+
+**RC's long runs on amd-arc-box** (MEASURED, at b9ee195; python3 3.12.3, mpmath 1.4.1, gmpy2 2.3.1): all 51 jobs exit 0.
+- **The rate law** at n = 20,000, seed 11, `--statistics 18`, 18 processes, all "RESULT: ok", with 0 wrong.
+  - log2 fp256: "548 of 20000 marked, 468.6 expected (sigma 21.4, +3.71), two-sided tail 0.000315". Its run: "a tail that small somewhere among 18 statistics has probability at most 0.00567".
+- **rategeom:** 0 of 300 log-family runs and 0 of 20 exp-family runs flagged at alpha 0.001, where the law's expectation sums to 0.32.
+- **test_mathlib.py alone,** serially: "1674 passed in 1561.55s (0:26:01)".
+- **The docs check:** rc 0.
+
+**The gate** (MEASURED, amd-arc-box at cff6e5f, run 20261014-163657-cff6e5f, niced, the pinned MPFR 4.2.2 copied in; python3 3.12.3, mpmath 1.4.1, gmpy2 2.3.1): "VERDICT: PASS with 8 skip(s) and 4 inner skip(s) in golden (3), remote (1)", in 176 min. 36 stages executed, 0 failed.
+- **The 8 skips are the box's usual:** buildargs (a real Vitis), lang-rust, lang-julia, lang-go, lang-csharp, lang-r and lang-fortran (no toolchain), and demos (no node).
+- **The inner skips:** golden's 3 known, and remote's WebSocket leg (no node).
+- **golden:** "5093 passed, 3 skipped in 2310.26s (0:38:30)". The second wave's gate at 29f68fc took 2,088 s for 5,036, so this wave adds about 3.7 minutes serially.
+- **seq,** in 42 s, against the second wave's 8 s:
+  - "240 programs from the routine corpus run through both, 120 stand-alone and 120 compiled", over 13,483 lanes (fp32 3,210, fp64 3,374, fp128 3,584, fp256 3,315), which are MP's figures at the gate's arguments;
+  - "libcft and the golden model agree on every program: deposits, counts, flags and status".
+- **The other stages,** each as at the second wave's gate:
+  - libcft "168 sets, 1228415 cases, all matching";
+  - transcend 610,717 and 584,477 comparisons;
+  - audit "17883 checks, 0 failed, 0 skipped";
+  - the corpus check "311 checks, 0 failed, 0 skipped".
+
+**Known limits carried** (the verifiers' "other" notes, merged under Logan's rule):
+- **MP:**
+  - **The reach checks' pre-existing failures:** the unmodified seq_check.py exits 1 at `--formats fp32 --trials 100` (the flag-control corpus), and at `--formats fp32 --seed 101` (the revision-8 corpus, its overflow counter 0). Both are one-format slices.
+  - **The seq stage's new needs:** it now needs mpmath and pytest, and shows an inner skip without them. verify/README.md's seq row ("cc, python") does not say so. CI's host job does not run the seq stage.
+  - **Mark coverage is a sample.** At the gate's draw, 61 of the 120 fragments have no mark in either shape; exp2 and log2 never mark, and fp32 marks only in exp (VMP).
+  - **The refusal arms:** "the cap and feature arms ... shown by the proxied runs" holds except for max_deposits, which VMP showed by a plant of its own.
+  - **The hand-over:** its "each log must end with the agree line" is false of seq-fp32-101, for the pre-existing reason. Its BELIEVED box times were optimistic: fp256 310 to 318 s, at 58 to 61 MiB.
+  - **The fixed line,** in VMP-2's notes: its "that server" and "that word" have their antecedent in the line before; and its MEASURED gives no time.
+  - **Cosmetics:** "at each of 1 formats"; and a docstring lists "65" once where the tuple has it twice.
+  - **The old corpora:** the seven older corpora have no capacity arm (BELIEVED, the author's).
+- **RC:**
+  - **Five bound_half cells stay green at 3,500 lanes,** as under the old line at 1,000: exp2, expm1 and log at fp256 under rtz, log1p fp256 under rne, and log2 fp64 under rne. Nothing is lost. The rule's power against a bound half as wide is 0.79 a cell at 3,500, and all 48 cells are first flagged at 4,501. The geometry check flags all 96 cells at 600 lanes.
+  - **Untraced timings:** three of the entry's timings could not be traced to any log by VRC-2. They are "93.9 s" of serial time for the 57 new tests (VERIFICATION's "94 s"), "48.4 s" for the 90-cell test, and "53 s" a plant for the geometry sweep.
+  - **The premise:** that u is uniform and independent is measured, not proved (the author). The exp family's subnormal lanes mark 0.9% to 4.8% more under rne and rmm, and are not modelled.
+  - **A run of processes must pass `--statistics`,** or it is flagged about nine times as often. The lead's own box batch passed `--statistics 18` to two families' processes, a bound of 0.2% for the batch, not 0.1% (VRC). Nothing was flagged.
+  - **Pooled over the box's 300 seeds,** log fp64 and fp128 directed sit at +-2.5 sd. That is chance-level across 18 statistics; a replication would settle it (VRC).
+  - **Docstrings and names:** two pmf test docstring nits (VRC-2); "about 0.75 s" measured 0.79 to 0.81 s. The test name `test_the_mark_rate_law_in_its_fifteen_cells`, with 90 instances, predates RC.
+  - **Coverage:** the plant-row test pins rate only on its 36 listed rows. The other 107 rows' verdicts are unchanged by VRC's run, but not pinned.
+- **The merges' own** (VIW3):
+  - cff6e5f's heading "What changed in python/tests/mathlib_harness.py" holds the PLANT_RATE_N bullet, a name that lives in test_mathlib.py;
+  - a11e03f's "about 38 s" is the author's desktop figure, not labelled as such. On the free desktop VIW3 measured +28 s (13 s to 41 s);
+  - VRC-2's three untraced figures are carried by the merge as they stand.
+
+**Records:**
+- ROADMAP's plan: item 2 built, and the rate law's "three sigma" restated;
+- VERIFICATION's golden row;
+- docs/README.md recounted, and the docs check rc 0.

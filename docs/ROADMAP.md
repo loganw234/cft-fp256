@@ -5947,7 +5947,9 @@ this level?** Logan's instruction, above.
     2^-21, -2^-22 and -2^-21 (VE1-a all five, VE1-b two), each mark
     justified and its guess right;
   - the budget's files; fp32's reduction; Fast2Sum where ordered;
-  - the rate law's G' = 6, 15 cells and three sigma;
+  - the rate law's G' = 6, 15 cells and three sigma (since parcel RC,
+    2026-10-14, the sample's own centre and the exact tail against
+    alpha / K);
   - routines' constants left alone;
   - a mark in the pools off the structured list failing test 1.
   So the must-have list's M2 now fails a mark at an argument off the
@@ -6091,9 +6093,17 @@ this level?** Logan's instruction, above.
    - **log, log2 and log1p are built** (2026-10-14): parcel MB2, merged
      at 29f68fc. Item 1 is done: all six routines, at the four formats
      and the five attributes. program.c parity is next.
+   - **The rate check's calibration** (2026-10-14), a follow-up Logan
+     queued after MB2's rate finding: parcel RC, merged at cff6e5f.
+     check_rate now centres on the sample's own expected count and
+     judges by the exact tail against alpha / K.
 2. **program.c parity:** the fragments' programs in seq_check's
    corpora. No new C, since the routines are programs of existing
    instructions.
+   - **Built** (2026-10-14): parcel MP, merged at a11e03f.
+     seq_check.py's eighth corpus runs the 120 fragments, in two
+     shapes, through libcft against seq.py, with 0 mismatches. The
+     language is next.
 3. **The language, golden-first:**
    - the six nodes and their interpreter;
    - folds and refusals (question 8), and the renderers;
