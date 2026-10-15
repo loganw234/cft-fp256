@@ -20348,9 +20348,9 @@ The lead also accepted L computed by an integer series (below) rather than throu
 | the merge (9f931fc) | the lead | VIW4 0, 0 | - |
 
 - **VML's (b):** the entry said L prints "7 digits over 7 at fp32" in the mathematical form. It prints the 21-digit decimal 0.693147182464599609375: a constant whose decimal ends within 24 significant digits prints as that decimal.
-- **VML-2's (b):** "the canonical form writes it as a hexadecimal significand" was false at fp32. There the canonical form writes the same decimal. The claim stood in four places: two lines of the entry, LANGUAGE.md, and constants.py's ln2_value docstring. The second send-back fixed all four, the line's figures scoped "(under rne)".
+- **VML-2's (b):** "the canonical form writes it as a hexadecimal significand" was false at fp32. There the canonical form writes the same decimal in the program text; its comment table keeps a hexadecimal-significand column (VML-3). The claim stood in four places: two lines of the entry, LANGUAGE.md, and constants.py's ln2_value docstring. The second send-back fixed all four, the line's figures scoped "(under rne)".
 - **What VML measured,** each by an instrument of its own:
-  - 48,096 comparisons at two seeds against transcend, bits and flags;
+  - 48,096 comparisons at each of two seeds against transcend, bits and flags;
   - 807 sources compiled at 74574f5 and c19e98c, the 684 that compile identical in graph and both rendered forms, and the 123 refusals identical;
   - 2,752 fold and refusal checks, the exp2(emin - p) tie among them;
   - its own rule table in softfloat, bit for bit, and a central difference at 1,600 bits;
@@ -20358,14 +20358,14 @@ The lead also accepted L computed by an integer series (below) rather than throu
   - 4,488 cftc compiles of 204 sources, each `math-library` at the right line;
   - VERSION 5 and programs/systems/cftc-outputs.txt unchanged;
   - the corpus's 24 certificates, each moved by exactly its language and hash lines;
-  - all 27 plants, and 14 of its own.
+  - all 27 plants, re-run with the author's driver on its own copy, and 14 plants of its own.
 - **What VIW4 measured at the merge,** each by an instrument of its own:
   - the tree is 536c977's;
   - 9,840 lane comparisons;
   - 2,492 fold and refusal compiles;
   - 78,000 tangent pairs against hand-built rules;
   - 690 cftc output files byte-identical at 74574f5 and 9f931fc;
-  - 26 of the 27 plants;
+  - 26 of the 27 plants, with the author's driver on its own export;
   - 5,187 tests collected.
 
 **Time and tokens** (MEASURED, the agents' transcripts; usage summed from the last line of each response):
@@ -20401,7 +20401,7 @@ After c19e98c only two documents and one docstring changed (constants.py's AST i
   - libcft "168 sets, 1228415 cases, all matching";
   - transcend 610,717 and 584,477 comparisons.
 
-**Known limits carried** (the author's and the verifiers' "other" notes, merged under Logan's rule):
+**Known limits carried** (a selection of the author's and the verifiers' "other" notes, merged under Logan's rule; the rest stand in their ledgers and the parcel's entry):
 - **The parcel's own:**
   - The rounding order is held golden-only. Compiled images of the six arrive with item 4, and the compiled legs, a marked lane's replay among them, are item 5's.
   - The exact evaluation is a 1,024-bit mpmath convention, on both sides of the intention-out check.
@@ -20410,7 +20410,7 @@ After c19e98c only two documents and one docstring changed (constants.py's AST i
   - Leg M's corpus is 20 systems.
   - Item 4 remakes the certificate corpus again.
 - **cftc's interim refusal sees only source lines** (VML's other 1). `cftc p.cftl --param p=exp(0)` compiles at the merge, byte for byte as `--param p=1`, where 74574f5 refused it `irrational-constant`. The claims all say "source", and a certificate records the run value as `p 1`. log(2) and exp(1) as params are still refused.
-- **The entry's "refused before, refused still by another name" list is by example** (VML). Six more classes, none accepted before:
+- **The entry's "Refused before and refused still, by another name" list is by example** (VML). Six more classes, none accepted before:
   - `exp()` and `log2()` with no argument;
   - `exp(zz, 1)`;
   - `h = log2(1)`;
@@ -20426,12 +20426,12 @@ After c19e98c only two documents and one docstring changed (constants.py's AST i
   - "758 sources" is itemized as 52 + 630 only;
   - `test_the_math_library_moves_no_compiled_byte` is weaker than its name;
   - the entry's L figures are rne's, as now stated;
-  - the study's question 6 sentence ("an exact hex literal") stands as its dated record (VML, VML-2, VML-3).
+  - the study's question 6 sentence ("an exact hex literal") stands as its dated record (VML-3).
 - **Not run:**
   - VML's full 807-source cftc comparison. It was stopped by its PID: a niced process on the desktop gets about a quarter of a core. A reduced comparison was run instead.
   - The 76 chain and letmap sources through cftc.
   - 16 of the 21 hard-workload sources at both trees (VIW4).
-  - The gate's compiling stages cover the committed and generated sources at the merged tree.
+  - The gate's acceptance stage compiles ten of the pack's 21 programs at the merged tree, held byte for byte to committed digests, and its lang, tangent, programs and audit stages compile the committed references, the certificate sources and their own generated corpora. The pack's four far and seven extended sources are compiled by no stage in the gate (acceptance-far and acceptance-rev8 run only in the full census). This sentence is the lead's reading, not a verifier's note.
 
 **Records:**
 - ROADMAP's plan: item 3 built;
