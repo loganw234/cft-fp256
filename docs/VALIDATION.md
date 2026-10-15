@@ -20180,11 +20180,11 @@ The faults MB1's table already had, now on the log family (`PLANTS` says which a
 **Known limits carried** (the verifiers' "other" notes, merged under Logan's rule):
 - **MP:**
   - **The reach checks' pre-existing failures:** the unmodified seq_check.py exits 1 at `--formats fp32 --trials 100` (the flag-control corpus), and at `--formats fp32 --seed 101` (the revision-8 corpus, its overflow counter 0). Both are one-format slices.
-  - **The seq stage's new needs:** it now needs mpmath and pytest, and shows an inner skip without them. verify/README.md's seq row ("cc, python") does not say so. CI's host job does not run the seq stage.
+  - **The seq stage's new needs:** it now needs mpmath and pytest, and shows an inner skip without them. verify/README.md's seq row ("cc, python") does not say so. CI's host job does not run the seq stage (the lead's own reading of gates.yml, not a verifier's note).
   - **Mark coverage is a sample.** At the gate's draw, 61 of the 120 fragments have no mark in either shape; exp2 and log2 never mark, and fp32 marks only in exp (VMP).
   - **The refusal arms:** "the cap and feature arms ... shown by the proxied runs" holds except for max_deposits, which VMP showed by a plant of its own.
   - **The hand-over:** its "each log must end with the agree line" is false of seq-fp32-101, for the pre-existing reason. Its BELIEVED box times were optimistic: fp256 310 to 318 s, at 58 to 61 MiB.
-  - **The fixed line,** in VMP-2's notes: its "that server" and "that word" have their antecedent in the line before; and its MEASURED gives no time.
+  - **The fixed line,** in VMP-2's notes: its "that server" and "that word" have their antecedent nine lines earlier, in the remote-leg bullet (line 19909); and its MEASURED gives no time.
   - **Cosmetics:** "at each of 1 formats"; and a docstring lists "65" once where the tuple has it twice.
   - **The old corpora:** the seven older corpora have no capacity arm (BELIEVED, the author's).
 - **RC:**
