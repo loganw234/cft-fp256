@@ -6111,6 +6111,15 @@ this level?** Logan's instruction, above.
      check (question 10);
    - LANGUAGE.md;
    - the language at 1.1.
+   - **Built** (2026-10-15): parcel ML, merged at 9f931fc, with the
+     language at 1.1 in cft.h and the certificate corpus too. Four of
+     the lead's decisions on the way, in VALIDATION's entry for the
+     fourth wave:
+     - expm1's tangent rule is `(1 + r) * da`;
+     - all three logarithms take the select form;
+     - cftc refuses the six as `math-library` until item 4;
+     - the version stepped now, not with item 4.
+     cftc is next.
 4. **cftc:**
    - ROUTINES and the internal check's widened invariants (question 12);
    - the targets' refusals, and the call loop over unary routines;

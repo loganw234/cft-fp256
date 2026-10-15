@@ -20320,3 +20320,120 @@ The lead also accepted L computed by an integer series (below) rather than throu
 - docs/ROADMAP.md and CLAUDE.md are the lead's and were not edited: ROADMAP's M1 build item 3 is built by this parcel once merged (branch m1-lang, two commits, not pushed).
 - Not changed, and said so: mathlib.py, transcend.py, cftc's VERSION and outputs, programs/systems (cftc-outputs.txt among it), the hard-workload pack, the card.
 - The scratch tools (the plant driver, the graph comparison, the no-mpmath runners, the chain measurements, the stage drivers) are not committed; the plants are described above by file, text and result so that each can be redone.
+
+## 2026-10-15 - M1's build, fourth wave, closed: the language, golden-first (parcel ML, Opus), merged and gated
+
+**What Logan asked.**
+- **The mandate:** item 3 of M1's build runs under his "Delete the ci-golden branch and start M1's build" (2026-10-13). His models of the same day ("Use Sonnet for M1's build parcels as you recommended, it performed well") accepted the lead's recommendation, which put the language and cftc work on Opus.
+- **The brief:** on 2026-10-15 he answered the lead's word that the language's brief was next, verbatim: "Clear to start on its brief".
+
+**The lead's decisions during the parcel,** each an implementation consequence of the plan, reported to Logan with this wave.
+1. **expm1's tangent rule is `(1 + r) * da`,** a departure from the study's section 7.
+   - The study's `fma(r, da, da)` reads da twice, and the step graph allows an unlabelled node one use. Writing da again grows as 2^k at k nested levels.
+   - The variant that would use the fma where da is named was refused, since a let must never change the bits.
+   - Two roundings: 1 + r is primal-only, as log1p's 1 + a is.
+2. **log, log2 and log1p all take the select form** below their domains, so each tangent there is the NaN r. Question 7's own text covers "a < 0; log1p below -1".
+3. **cftc refuses every source naming one of the six,** at run time or folded, under the interim name `math-library`.
+   - The folds would otherwise let `x * exp(0)` compile, and python/cftc/outputs.py's rule would then step the output version.
+   - VERSION stays 5. Item 4 lifts the refusal and steps VERSION to 6 (question 9).
+4. **The language steps to 1.1 now,** in version.py, cft.h (CFT_LANGUAGE_MINOR 1, with its vendored copy and HOSTAPI's table) and the certificate corpus, remade.
+   - The version changes when the language does, and every pushed commit's record is true.
+   - Item 4 remakes the corpus again for VERSION 6.
+
+**The chain** (MEASURED, each verifier's ledger):
+
+| work | author | verifiers: (a), (b) | sent back |
+|---|---|---|---|
+| ML (740e6ac, c19e98c; 7ca262c, 536c977) | Opus 5.5 | VML 0, 1; VML-2 0, 1; VML-3 0, 0 | twice |
+| the merge (9f931fc) | the lead | VIW4 0, 0 | - |
+
+- **VML's (b):** the entry said L prints "7 digits over 7 at fp32" in the mathematical form. It prints the 21-digit decimal 0.693147182464599609375: a constant whose decimal ends within 24 significant digits prints as that decimal.
+- **VML-2's (b):** "the canonical form writes it as a hexadecimal significand" was false at fp32. There the canonical form writes the same decimal. The claim stood in four places: two lines of the entry, LANGUAGE.md, and constants.py's ln2_value docstring. The second send-back fixed all four, the line's figures scoped "(under rne)".
+- **What VML measured,** each by an instrument of its own:
+  - 48,096 comparisons at two seeds against transcend, bits and flags;
+  - 807 sources compiled at 74574f5 and c19e98c, the 684 that compile identical in graph and both rendered forms, and the 123 refusals identical;
+  - 2,752 fold and refusal checks, the exp2(emin - p) tie among them;
+  - its own rule table in softfloat, bit for bit, and a central difference at 1,600 bits;
+  - a real python without mpmath (-I -S);
+  - 4,488 cftc compiles of 204 sources, each `math-library` at the right line;
+  - VERSION 5 and programs/systems/cftc-outputs.txt unchanged;
+  - the corpus's 24 certificates, each moved by exactly its language and hash lines;
+  - all 27 plants, and 14 of its own.
+- **What VIW4 measured at the merge,** each by an instrument of its own:
+  - the tree is 536c977's;
+  - 9,840 lane comparisons;
+  - 2,492 fold and refusal compiles;
+  - 78,000 tangent pairs against hand-built rules;
+  - 690 cftc output files byte-identical at 74574f5 and 9f931fc;
+  - 26 of the 27 plants;
+  - 5,187 tests collected.
+
+**Time and tokens** (MEASURED, the agents' transcripts; usage summed from the last line of each response):
+- **ML's author,** claude-opus-5-5: 138 min to its report, then 3 and 5 min for the send-backs; 623 tool uses; 593,909 output tokens.
+- **The verifiers,** all claude-sonnet-5-5:
+  - VML: 91 min, 291 tool uses, 337,032 output tokens;
+  - VML-2: 20 min, 72, 125,050;
+  - VML-3: 24 min, 83, 147,738;
+  - VIW4: 91 min, 212, 238,147.
+
+**ML's stages on amd-arc-box** (MEASURED, at c19e98c, run 20261015-071610-c19e98c; python3 3.12.3, mpmath 1.4.1, gmpy2 2.3.1): docs, generated, golden, programs, lang, lang-routines, tangent and audit. The verdict: "VERDICT: PASS with 3 inner skip(s) in golden (3)", in 55 min.
+- golden: "5184 passed, 3 skipped in 2326.24s";
+- lang: "226 ok, 0 FAIL, 0 SKIP";
+- lang-routines: "37 ok";
+- tangent: "150 ok, 0 FAIL, 0 SKIP";
+- audit: "17884 checks, 0 failed, 0 skipped";
+- programs: the corpus check "311 checks, 0 failed, 0 skipped" and segrun "1078 checks".
+
+After c19e98c only two documents and one docstring changed (constants.py's AST is equal), so these stages hold at the merged tree (VIW4).
+
+**The gate** (MEASURED, amd-arc-box at 9f931fc, run 20261015-094317-9f931fc, niced, the pinned MPFR 4.2.2 copied in; python3 3.12.3, mpmath 1.4.1, gmpy2 2.3.1): "VERDICT: PASS with 8 skip(s) and 4 inner skip(s) in golden (3), remote (1)", in 176 min. 36 stages executed, 0 failed.
+- **The 8 skips are the box's usual:** buildargs (a real Vitis), lang-rust, lang-julia, lang-go, lang-csharp, lang-r and lang-fortran (no toolchain), and demos (no node).
+- **The inner skips:** golden's 3 known, and remote's WebSocket leg (no node).
+- **golden:** "5184 passed, 3 skipped in 2302.60s (0:38:22)". The third wave's gate at cff6e5f took 2,310 s for 5,093, so the 91 new tests add no measurable time serially.
+- **The language's stages:**
+  - lang: "226 ok, 0 FAIL, 0 SKIP";
+  - lang-routines: "37 ok";
+  - tangent: "150 ok, 0 FAIL, 0 SKIP", leg M among them.
+- **The other stages:**
+  - audit: "17884 checks, 0 failed, 0 skipped", one more than at cff6e5f;
+  - the corpus check, remade at 1.1: "311 checks, 0 failed, 0 skipped";
+  - seq: "libcft and the golden model agree on every program: deposits, counts, flags and status";
+  - libcft "168 sets, 1228415 cases, all matching";
+  - transcend 610,717 and 584,477 comparisons.
+
+**Known limits carried** (the author's and the verifiers' "other" notes, merged under Logan's rule):
+- **The parcel's own:**
+  - The rounding order is held golden-only. Compiled images of the six arrive with item 4, and the compiled legs, a marked lane's replay among them, are item 5's.
+  - The exact evaluation is a 1,024-bit mpmath convention, on both sides of the intention-out check.
+  - lang.run needs mpmath for any graph that holds one of the six, even where every lane is exact.
+  - Where r has no name, an unnamed log is evaluated again for each tangent vector: 99 nested logs make 19,998 tangent nodes. A let avoids both.
+  - Leg M's corpus is 20 systems.
+  - Item 4 remakes the certificate corpus again.
+- **cftc's interim refusal sees only source lines** (VML's other 1). `cftc p.cftl --param p=exp(0)` compiles at the merge, byte for byte as `--param p=1`, where 74574f5 refused it `irrational-constant`. The claims all say "source", and a certificate records the run value as `p 1`. log(2) and exp(1) as params are still refused.
+- **The entry's "refused before, refused still by another name" list is by example** (VML). Six more classes, none accepted before:
+  - `exp()` and `log2()` with no argument;
+  - `exp(zz, 1)`;
+  - `h = log2(1)`;
+  - `lane param q = exp2(2000)`;
+  - a written tangent beside an exp;
+  - the six as names, whose `reserved-name` sentence changes.
+- **"An integer n past 2^20" is `constant-range`** (LANGUAGE.md line 629; the entry's lines 20226 and 20242), but the code also refuses n = +-2^20 itself. "At or past" would be exact (VIW4).
+- **The merge's message files `h-nonlinear` under "as Logan's question 8 decided"**; its source is the study's section 6 (VIW4).
+- **Smaller notes:**
+  - `exact_transcendental("expm1", -10^6)` raises Undefined;
+  - corpus.py's language literal is held only by the next make and the C half;
+  - VERIFICATION's golden count is prose (true: 5,187);
+  - "758 sources" is itemized as 52 + 630 only;
+  - `test_the_math_library_moves_no_compiled_byte` is weaker than its name;
+  - the entry's L figures are rne's, as now stated;
+  - the study's question 6 sentence ("an exact hex literal") stands as its dated record (VML, VML-2, VML-3).
+- **Not run:**
+  - VML's full 807-source cftc comparison. It was stopped by its PID: a niced process on the desktop gets about a quarter of a core. A reduced comparison was run instead.
+  - The 76 chain and letmap sources through cftc.
+  - 16 of the 21 hard-workload sources at both trees (VIW4).
+  - The gate's compiling stages cover the committed and generated sources at the merged tree.
+
+**Records:**
+- ROADMAP's plan: item 3 built;
+- VERIFICATION's golden row;
+- docs/README.md recounted, and the docs check rc 0.
