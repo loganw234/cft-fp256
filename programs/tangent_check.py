@@ -52,19 +52,28 @@ lang_check.py, whose helpers this reuses), with tangents:
      sampled, line for line
   G  cft-segrun certifies each compiled variational reference (a main
      run, a half-step run on the halved bank, a step-halving estimate) -
-     Kepler's, whose image holds routines, among them (C4); the golden
-     reader and audit and cft-audit accept each
+     Kepler's, whose image holds routines, among them (C4), and since M1's
+     build, item 4, the three holding the math library's six
+     (Lotka-Volterra, the diodes, the culture); the golden reader and
+     audit and cft-audit accept each. A segment that marks a lane
+     (STATUS[6]) fails here by name: version 1 certifies the machine's
+     guess, and this leg replays nothing (item 5's). The six's references
+     are skipped by name on a host without mpmath, which builds them
   H  determinism: two processes under two PYTHONHASHSEEDs; the committed
      programs/systems/compiled-tangent/ is what the compiler writes, and
-     the `lang` stage's 64 committed files still are
+     the `lang` stage's 64 committed files still are (the six's
+     references held only where mpmath imports, skipped by name elsewhere)
   I  refusals by name, the language's and the compiler's, with tangents;
      a quotient and a root with two tangent vectors compiled for the
      software targets and run as the interpreter runs them, and refused
      `target-feature` on revision 7's (C4)
   J  plants: three wrong derivations, red on D and on the exponent; the
      same rule rounded otherwise, green on D and red on the committed
-     bytes; three in a copy of the compiler, each stopped by its internal
-     check and, with that off, red on seq.py
+     bytes - every committed graph holding a product of two tangent-
+     carrying operands, and only those (Lotka-Volterra's and the diodes'
+     multiply a state value only by a param); three in a copy of the
+     compiler, each stopped by its internal check and, with that off, red
+     on seq.py
   K  coverage: every operation the rules write, every activity pattern
      of fma, every format, attribute and integrator, one and two vectors
   L  the quotient's and the root's rules (L4): written shapes and
@@ -92,10 +101,13 @@ lang_check.py, whose helpers this reuses), with tangents:
      exact checks, red on the rounding), L rounded the wrong way (red on
      all three), log's select form dropped (red below the domain), a
      golden function swapped for a sibling's (red on the rounding's
-     derivative). Compiled images of the six are item 5's legs, after
-     item 4's compiler; cftc refuses them `math-library` until then.
-     The six's golden functions need mpmath, so on a host without it
-     this leg is skipped by name; legs A to L never need it
+     derivative). The compiler carries the six since M1's build, item 4,
+     and its committed references holding them are legs G, H and J's;
+     compiled images of generated sources holding them, a marked lane
+     replayed, are item 5's legs. The six's golden functions need
+     mpmath, so on a host without it this leg is skipped by name, as are
+     legs G and H's references holding the six; legs A to L never need it
+     otherwise
 
 A check skipped prints a line that starts with SKIP, which the runner
 counts and names on its VERDICT line.
@@ -132,7 +144,21 @@ import lang_check as LC                                   # noqa: E402
 SYSTEMS = ROOT / "programs" / "systems"
 COMPILED = SYSTEMS / "compiled-tangent"
 TREFS = {"lorenz63-rk4-tangent": 100, "lorenz96-rk4-tangent": 20,
-         "kepler-sv-tangent": 10}       # Kepler's: routines (C4)
+         "kepler-sv-tangent": 10,       # Kepler's: routines (C4)
+         # the math library's six and their rules (M1's build, item 4):
+         # Lotka-Volterra in logarithmic variables (exp), two diodes
+         # (expm1, log1p) and a self-heating culture (exp2, log, log2)
+         "lotkavolterra-rk4-tangent": 10, "diode-rk4-tangent": 10,
+         "culture-rk4-tangent": 10}
+# The references holding the six: compiled only where mpmath imports, since
+# the routines' generator derives their constants through it (a leg that
+# compiles them skips them by name elsewhere), and run on lanes whose boxes
+# keep the logarithms in their domains, away from their structured windows
+MATH_TREFS = ("lotkavolterra-rk4-tangent", "diode-rk4-tangent",
+              "culture-rk4-tangent")
+MATH_BOX = {"lotkavolterra-rk4": [(-1, 1), (-2, Fraction(1, 2))],
+            "diode-rk4": [(0, 4), (0, 4)],
+            "culture-rk4": [(Fraction(1, 20), Fraction(19, 20)), (0, 2)]}
 # Lorenz-63's largest Lyapunov exponent at sigma 10, rho 28, beta 8/3, as
 # the round's brief gives it (the figure commonly quoted, to four places)
 LITERATURE = Fraction(9056, 10000)
@@ -1060,6 +1086,11 @@ def leg_libcft(segrun_path, audit_path, rng, work):
         skip("G: cft-audit on each certificate", f"no cft-audit at "
              f"{audit_path!r}")
     for base, steps in TREFS.items():
+        if base in MATH_TREFS and not LC.have_mpmath():
+            skip(f"G: {base} at fp64 and fp256", "python has no mpmath "
+                 "module, through which the math library's routines are "
+                 "built (python/cft_golden/mathlib.py)")
+            continue
         for fmt in ("fp64", "fp256"):
             src = SYSTEMS / f"{base}-{fmt}.cftl"
             c = cftc.compile_file(src, steps,
@@ -1069,11 +1100,16 @@ def leg_libcft(segrun_path, audit_path, rng, work):
 
 
 def certify(c, name, segrun_path, audit_path, rng, work):
-    """lang_check's certify, its lanes given tangents."""
+    """lang_check's certify, its lanes given tangents. A certificate of
+    version 1 holds what the machine ran, a marked lane's guess included
+    (STATUS[6] on its segment), and this leg replays nothing - the replay
+    in the stages is M1's build, item 5's - so a segment that marks a lane
+    fails here, by name, rather than pass on a guess."""
     g = c.ir
     d = work / "certs" / name
     d.mkdir(parents=True, exist_ok=True)
-    box = LC.BOX.get(name.split("-tangent")[0])
+    key = name.split("-tangent")[0]
+    box = MATH_BOX.get(key) or LC.BOX.get(key)
     states = LC.lanes_for(g.fmt, g.n_primal, rng, 4, box)
     tans = [tangent_values(g.fmt, g.n_primal, g.T, rng) for _ in states]
     block = c.scratch_block(states, None, tans)
@@ -1111,10 +1147,19 @@ def certify(c, name, segrun_path, audit_path, rng, work):
         return
     data = out.read_bytes()
     try:
-        cert.parse(data)
+        parsed = cert.parse(data)
         ok(f"{name}: the golden reader accepts it ({len(data):,} bytes)")
     except cert.Refusal as e:
         bad(f"{name}: the golden reader refuses it: {e}")
+        return
+    marked = [(ri, k) for ri, run in enumerate(parsed.runs)
+              for k, s in enumerate(run.chain)
+              if s.status & seq.STATUS_MARKED]
+    if not check(not marked, f"{name}: no segment marks a lane (STATUS[6] "
+                 f"clear in every segment of both runs)",
+                 f"a lane marked in run and segment {marked[:4]}: a "
+                 f"routine's undecided guess, which this leg does not "
+                 f"replay (M1's build, item 5)"):
         return
     sb = {ri: {b: (states_dir / f"run-{ri}-boundary-{b}.bin").read_bytes()
                for b in range(segs + 1)} for ri, segs in ((0, 2), (1, 4))}
@@ -1154,9 +1199,14 @@ def certify(c, name, segrun_path, audit_path, rng, work):
 
 # ---- H: determinism and the committed files -------------------------------
 
-def compiled_references():
+def compiled_references(math=True):
+    """{name: bytes} of every committed variational reference's outputs;
+    with `math` false, of those not holding the six (MATH_TREFS), which a
+    host without mpmath cannot compile."""
     out = {}
     for base, steps in TREFS.items():
+        if base in MATH_TREFS and not math:
+            continue
         for fmt in ("fp64", "fp256"):
             c = cftc.compile_file(SYSTEMS / f"{base}-{fmt}.cftl", steps,
                                   source=f"programs/systems/{base}-{fmt}"
@@ -1169,7 +1219,7 @@ def digests_main(path):
     """The child of leg H: compile what the file lists, print digests."""
     jobs = json.loads(Path(path).read_text(encoding="utf-8"))
     out = {n: hashlib.sha256(d).hexdigest()
-           for n, d in compiled_references().items()}
+           for n, d in compiled_references(LC.have_mpmath()).items()}
     for k, text in enumerate(jobs):
         try:
             c = cftc.compile_text(text, 4, source=f"corpus {k}", stem=f"g{k}")
@@ -1198,16 +1248,27 @@ def leg_determinism(work):
                      f"{seed} ran", r.stderr.strip()[-300:]):
             return
         seen.append(json.loads(r.stdout))
+    math = LC.have_mpmath()
+    if not math:
+        skip("H: the references holding the math library's six "
+             f"({', '.join(MATH_TREFS)})", "python has no mpmath module, "
+             "through which their routines are built (python/cft_golden/"
+             "mathlib.py); the others are held below")
+    nrefs = 2 * len([b for b in TREFS if math or b not in MATH_TREFS])
     check(seen[0] == seen[1] and len(seen[0]) > 40,
           f"PYTHONHASHSEED 0 and 4242 write the same bytes: {len(seen[0])} "
-          f"files (the six variational references and five generated "
+          f"files (the {nrefs} variational references and five generated "
           f"systems with tangents, every output)")
-    files = compiled_references()
-    have = sorted(p.name for p in COMPILED.iterdir()) if COMPILED.is_dir() \
-        else []
+    files = compiled_references(math)
+    held = {f"{b}-{f}" for b in MATH_TREFS for f in ("fp64", "fp256")}
+    have = sorted(p.name for p in COMPILED.iterdir()
+                  if math or not any(p.name.startswith(h + ".")
+                                     for h in held)) \
+        if COMPILED.is_dir() else []
     check(have == sorted(files), f"programs/systems/compiled-tangent/ holds "
-          f"exactly the {2 * len(TREFS)} variational references' "
-          f"{len(files)} files, Kepler's with routines among them",
+          f"exactly the {nrefs} variational references' "
+          f"{len(files)} files, Kepler's and the six's references' with "
+          f"routines among them",
           f"it holds {len(have)}: run programs/tangent_check.py --write")
     wrong = [n for n, d in files.items()
              if (COMPILED / n).is_file() and (COMPILED / n).read_bytes() != d]
@@ -1400,6 +1461,25 @@ COMPILER_PLANTS = {
 }
 
 
+def products_of_two_tangents(graph):
+    """How many products of the section the derivation reads - the field
+    for a flow, the step for a map - multiply two operands that both carry
+    a tangent (each reading the state): the product rule's branch that
+    leg J's "the same rule rounded otherwise" plants. A constant, a param
+    or a lane param carries none."""
+    sec = graph.field if graph.field is not None else graph.step
+    active = []
+    count = 0
+
+    def carries(ref):
+        return ref[0] in "st" or (ref[0] == "n" and active[int(ref[1:])])
+    for op, args, _label in sec.nodes:
+        active.append(any(carries(a) for a in args))
+        if op in ("mul", "fma") and carries(args[0]) and carries(args[1]):
+            count += 1
+    return count
+
+
 def plant_lyapunov(segrun_path, work):
     """The smoke test's figure on 4 lanes at t = 200, for a plant."""
     try:
@@ -1417,6 +1497,11 @@ def leg_plants(rng, segrun_path, work):
     texts += [t for t, _w in corpus(24, "tangent plants")]
     committed = {n: (COMPILED / f"{n}.graph.json") for n in
                  (f"{b}-{f}" for b in TREFS for f in ("fp64", "fp256"))}
+    # each committed source's graph without a plant (checking a source needs
+    # no mpmath, the six's included)
+    original_graphs = {n: lang.compile_text(tref_text(
+        n.rsplit("-tangent-", 1)[0], n.rsplit("-", 1)[1])).graph
+        for n in committed}
     have_segrun = bool(segrun_path) and Path(segrun_path).is_file()
     if have_segrun:
         lam = plant_lyapunov(segrun_path, work / "plant-clean")
@@ -1453,9 +1538,19 @@ def leg_plants(rng, segrun_path, work):
                     + ("" if lam is None else
                        f"; the exponent under it {lam:.4f}"))
             if kind == "the same rule rounded otherwise":
-                check(bad_n == 0 and len(moved) == len(committed),
+                # it changes the product rule where both operands carry a
+                # tangent, so it moves exactly the committed graphs holding
+                # such a product: every one until M1's build, item 4, whose
+                # Lotka-Volterra and diode multiply a state value only by a
+                # param
+                reach = sorted(n for n in committed if products_of_two_tangents(
+                    original_graphs[n]))
+                check(bad_n == 0 and reach and sorted(moved) == reach,
                       said + " - green on D, as the document says, and red "
-                      "on the committed bytes")
+                      f"on the committed bytes: it moves each of the "
+                      f"{len(reach)} that holds a product of two tangent-"
+                      f"carrying operands, and no other",
+                      f"moved {sorted(moved)}, holding one {reach}")
             else:
                 far = lam is None or not abs(lam - float(LITERATURE)) \
                     <= 10 * float(TOL_FP64)
@@ -1772,8 +1867,9 @@ def leg_routines(count, rng):
 # program's format under its attribute (docs/LANGUAGE.md, "The rules"). Dual
 # numbers in exact rationals have no exp, so beside them - each value as the
 # exact evaluations take it - a central difference in high precision holds
-# the derivative itself (M1's question 10, mpmath accepted). The compiled
-# images are item 5's legs, after item 4's compiler.
+# the derivative itself (M1's question 10, mpmath accepted). The compiler
+# carries the six since item 4; compiled images of generated sources holding
+# them are item 5's legs (the committed references are legs G, H and J's).
 
 M1_SHAPES = {
     "one of each, a map": (

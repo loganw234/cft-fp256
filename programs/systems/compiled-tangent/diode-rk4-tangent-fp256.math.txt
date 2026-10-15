@@ -1,0 +1,36 @@
+diode - the mathematical form, regenerated from the step graph
+binary256 (fp256), roundTiesToEven
+
+Each operation here is exact. The program performs the same
+operations, each rounded once, in the order the canonical form
+writes them.
+
+parameters, the run's (defaults)
+  s = 6
+  k = 0.125
+  g = 0.25
+
+the equations
+  dj/dt = s − log1p(j) − v
+  dv/dt = j − k·expm1(v) − g·v
+
+the variational equations of the tangent vector w
+  d(w.j)/dt = −(w.j/(1 + j) if [log1p(j) = log1p(j)] ≠ 0 else log1p(j)) − w.v
+  d(w.v)/dt = w.j − k·(1 + expm1(v))·w.v − g·w.v
+
+one step: the classical Runge-Kutta method (rk4), with f the right-hand sides above
+  h = 0.015625
+  Y = (j, v)
+  k1 = f(Y)
+  k2 = f(Y + (h/2)·k1)
+  k3 = f(Y + (h/2)·k2)
+  k4 = f(Y + h·k3)
+  Y ↦ Y + (h/6)·(k1 + 2·k2 + 2·k3 + k4)
+
+the tangent w's step: the same method on δY, with Df·δY the right-hand sides of w above
+  δY = (w.j, w.v)
+  δk1 = Df(Y)·δY
+  δk2 = Df(Y + (h/2)·k1)·(δY + (h/2)·δk1)
+  δk3 = Df(Y + (h/2)·k2)·(δY + (h/2)·δk2)
+  δk4 = Df(Y + h·k3)·(δY + h·δk3)
+  δY ↦ δY + (h/6)·(δk1 + 2·δk2 + 2·δk3 + δk4)

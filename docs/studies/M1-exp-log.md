@@ -111,6 +111,52 @@ in this text's statements:
   interpreter's bits against a central difference in high precision
   (python/tests/test_lang_tangent.py; the tangent stage's leg M).
 
+**A note of 2026-10-15, later** (parcel MC, M1's build, item 4; the
+study's text stays as of 2026-10-05). cftc carries the six now, at its
+output version 6, and the STATUS line's "nothing here is built" no longer
+holds of anything (docs/VALIDATION.md, the entry of that date). What the
+build changed in this text's statements:
+- Section 6's cftc part. `routines.ROUTINES` and `ir.ROUTINES` are the
+  eight, in the language's order (div, sqrt, then the six), which is the
+  one order of their words in the bank and of the call loop's ties; the
+  six's fragments are mathlib.py's own, handed out by
+  `routines.fragment`. The internal check's four failures are answered
+  by one statement of the invariants in routines.py, per routine: the
+  six's flag words take the mark (seen by an IOR rule in the walk), their
+  instructions RDN, RUP and the program's attribute, and their live cap
+  is 21 at fp32 and 13 at the double word's formats, by routine and
+  format, where division's and root's stay C4's (no mark, RNE and RTZ,
+  16); no instruction reads only the input, as MB1 and MB2 built them.
+  The interim refusal `math-library` went; a source with the six on a
+  host without mpmath is refused `routine-unavailable`, the one compiler
+  refusal that depends on the host.
+- Section 6's "Versions": cftc's VERSION went from 5 to 6 (the note of
+  2026-10-06 above), and the corpus was made again exactly as there, only
+  its compiler lines, hash lines and manifest digests moving.
+  "No committed compiled file moves" holds of every file but the
+  manifests, which carry the version (`"version": 5` to `6`, in each of
+  the 14).
+- Section 7's reference. Lotka-Volterra in logarithmic variables, as
+  proposed, under rk4 with a tangent vector, is committed at fp64 and
+  fp256 - and holds exp alone, so it cannot carry the other five rules. Two
+  more references are committed beside it: two diodes and a source
+  (Shockley's law: log1p and expm1) and a culture that heats itself
+  (Gompertz's growth, van 't Hoff's Q10 of 2 and senescence by population
+  doublings: exp2, log and log2). Each rule changed - rounded otherwise
+  where it rounds twice, `da * (1/a)` among them, or made wrong where it
+  rounds once - moves the committed graphs of the reference holding it.
+- Question 12's "measure spills on a reference step": the references'
+  spills are measured (none in Lotka-Volterra's and the diodes' steps; 38
+  slots in the culture's, most stored inside the routines' quiet
+  regions), and so is one exp a step with values live across it - at
+  fp32, whose exp keeps 19 to 21 live against r3 to r31, spills begin
+  with 12 values live beside it, at the double word's formats with 20.
+- Section 6's "A marked lane in the language's own checks": a compiled
+  image marks a structured centre's lane on seq.py and on libcft's
+  software backend alike; the stages' replay of such a lane is item 5's,
+  and until it the tangent stage's leg that certifies the references
+  fails a marked segment by name.
+
 **Revised the same day,** after verifier-VM1 checked the first version
 (5b6de0d; the round's ledger, `verifier-VM1.md`). That check found one
 defect: log1p's r = x path ran its polynomial past the bound's rho, and

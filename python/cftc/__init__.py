@@ -50,6 +50,12 @@ u50-rev8-quad and u50-rev8-deep its image fits, and the cost note of an
 image holding a routine no longer says that no tile has revision 8's
 R24, which stopped being true when rev8a was built (2026-10-06). 5
 writes the same images, banks and text files as 4; only manifests moved.
+6 is the math library's six (M1's build, item 4, 2026-10-15): a source
+that names exp, expm1, exp2, log, log1p or log2 - at run time, or folded
+where its operand is a constant - which 5 refused `math-library`,
+compiles, each run-time call an inlined routine, mathlib.py's fragment.
+6 writes the same images, banks and text files as 5 for every source 5
+compiled; its manifests say version 6, and nothing else in them moved.
 
 A format override: compile_text and compile_file take `fmt`, a format's
 name, which replaces the value of the source's `format` statement
@@ -83,15 +89,32 @@ built-in targets that publish the bit. A bank the routines' words would
 take past 512 is `bank-capacity`. Until C4 such a system was refused
 `runtime-routine`, a name that went with it.
 
-The math library's exp, expm1, exp2, log, log1p and log2 are operations
-of the language since M1's build, item 3 (2026-10-15), and its
-interpreter runs them; this compiler carries them from item 4, at its
-output version 6. Until then a source that names one - at run time, or
-folded where its operand is a constant - is refused `math-library`,
-first and on every target, at the first source line holding one
-(refuse_math, below), so that every source the language accepts
-compiles or is refused by name, and version 5 compiles no source it
-refused before. The name is interim, as `runtime-routine` was.
+The math library's exp, expm1, exp2, log, log1p and log2 (M1's build,
+items 3 and 4, 2026-10-15) are routines too: each run-time node is
+inlined as its fragment, which the golden model's generator builds
+(cft_golden/mathlib.py; routines.fragment hands it out by name), quiet,
+then a RAISE of its flag word - its operation's IEEE flags in [4:0] and,
+where its in-lane test cannot decide the last bit, the MARK in [7], which
+marks the lane (R23's [7], STATUS[6]): the lane's value is then the
+routine's best guess, which the definition replays (docs/LANGUAGE.md,
+"A marked lane"). The six's words are bank slots of the routine kind as
+division's are, after them in the eight's one order; the internal check
+holds each instance to its fragment and each fragment to its routine's
+statement (routines.invariants), division's and root's C4's and the
+six's widened. A function of a constant folds in the language, exactly,
+or is refused there by name, and so compiles as the constant it is.
+The generator derives its constants through mpmath, so on a host without
+it a source whose graph holds a run-time node of the six is refused
+`routine-unavailable` - by name, never an ImportError or an internal
+error - after the refusals that depend on the arguments alone
+(segment-steps, target-format, a run value's) and before anything builds
+a fragment, so before `target-feature`, which reads the built image: on
+a revision-7 target without mpmath that source is `routine-unavailable`,
+and with mpmath `target-feature`. That is the one refusal that depends on
+the host (refuse_unavailable, below). From M1's build, item 3, until
+item 4 this compiler refused every source naming one of the six, at run
+time or folded, by an interim name, `math-library`; it went with item 4,
+as `runtime-routine` went with C4.
 
 A step whose routines, inlined, would pass 32,768 instructions - a
 revision-7 tile's instruction memory, a constant of the compiler's that
@@ -181,13 +204,13 @@ from . import targets as T
 from .check import verify
 from .emit import assemble, cfta, scratch_declared
 from .ir import Graph
-from .lower import halve, lower
+from .lower import halve, lower, names_and
 from .refusals import NAMES, InternalError, refuse
 from .regalloc import best_program
 from .schedule import cycles
 from .targets import BUILTIN, Target
 
-VERSION = 5               # the output version: the module docstring, outputs.py
+VERSION = 6               # the output version: the module docstring, outputs.py
 MAX_STEPS = (1 << 32) - 1
 MAX_WORST = 1 << 40
 
@@ -422,54 +445,50 @@ def _call_loops(g, pb, src, low0, prog0):
     return low, prog, looped
 
 
-# The math library's six (M1's build, item 3, 2026-10-15): the language has
-# exp, expm1, exp2, log, log1p and log2, and its interpreter runs them; the
-# compiler carries them from item 4, a run-time call as an inlined routine
-# (python/cft_golden/mathlib.py's fragments) and a fold with it, at its
-# output version 6 (Logan's answer to M1's question 9). Until then a source
-# that names one is refused by name - at run time, a node of the graph, or
-# folded where its operand is a constant, since a fold-only source that
-# compiled here would be a source that compiles where it was refused, an
-# output-version step (outputs.py) - first, before anything here reads the
-# graph (ir.py's op table would stop at `exp` with an internal error, exit
-# 70), at the first source line holding one, whatever the statement. The
-# lines are the checker's (lang's StepGraph.math_lines); a graph read from
-# bytes carries none, so its run-time nodes are refused with no line, and
-# its folds - constants like any other, the bytes of a source that writes
-# the value - are not seen and compile as that source does.
+# The math library's six (M1's build, item 4, 2026-10-15), in the language's
+# order: each run-time node a routine whose fragment mathlib.py builds,
+# through mpmath (the module docstring).
 MATH = ("exp", "expm1", "exp2", "log", "log1p", "log2")
 
 
-def refuse_math(graph, source=None):
-    """`math-library` if the source names one of the six, at run time or
-    folded, at the first source line holding one; otherwise nothing."""
+def math_nodes(graph):
+    """The six a step graph holds as run-time nodes, in MATH's order - what
+    a compilation of it needs mpmath for. A fold is a constant, and needs
+    none."""
     found = set()
     for name in ("field", "step", "tangent_field", "tangent_step"):
         sec = graph.section(name)
         if sec is not None:
             found |= {op for op, _a, _l in sec.nodes if op in MATH}
-    lines = getattr(graph, "math_lines", None)
-    if not found and not lines:
+    return [op for op in MATH if op in found]
+
+
+def refuse_unavailable(graph, source=None):
+    """`routine-unavailable` where the graph holds a run-time node of the
+    six and mpmath does not import here: the routine's fragment cannot be
+    built on this host (the module docstring). Otherwise nothing. Line
+    None: the cause is the host, not a line of the source."""
+    ops = math_nodes(graph)
+    if not ops:
         return
-    ops = [op for op in MATH if op in found]
-    what = (f"computes {', '.join(ops)} at run time" if ops else
-            "names one of exp, expm1, exp2, log, log1p and log2, folded "
-            "where its operand is a constant")
-    refuse("math-library",
-           f"this system {what}: the language has the math library's six "
-           f"(M1's build, item 3) and its interpreter, lang.run, runs them; "
-           f"the compiler carries them from item 4, a run-time call as an "
-           f"inlined routine and a fold with it, at its output version 6, "
-           f"and until then refuses a source that names one, so that "
-           f"version {VERSION} compiles no source it refused before",
-           source=source or "<graph>", line=lines[0] if lines else None)
+    try:
+        import mpmath  # noqa: F401
+    except ImportError:
+        refuse("routine-unavailable",
+               f"this system computes {', '.join(ops)} at run time, and the "
+               f"compiler inlines each as its routine, whose fragment the "
+               f"math library's generator builds (python/cft_golden/"
+               f"mathlib.py), deriving every constant through mpmath - which "
+               f"is not installed here; lang.run needs it for these nodes "
+               f"too. On a host with mpmath the same source compiles, or is "
+               f"refused by another name, such as target-feature",
+               source=source or "<graph>")
 
 
 def compile_graph(graph, steps, target="sw", stem="system", source=None,
                   source_bytes=None, params=None):
     """Compile a checked step graph (lang.StepGraph) into its outputs."""
     src = source or "<graph>"
-    refuse_math(graph, src)
     t = get_target(target)
     if isinstance(steps, bool) or not isinstance(steps, int) \
             or not 1 <= steps <= MAX_STEPS:
@@ -495,6 +514,9 @@ def compile_graph(graph, steps, target="sw", stem="system", source=None,
     g = Graph(c.graph_bytes)
     c.ir = g
     pb = _param_bits(graph, params, src)
+    # the one refusal that depends on the host, before anything builds a
+    # fragment (the module docstring)
+    refuse_unavailable(graph, src)
     low = lower(g, pb, source=src)
     half = halve(low, src) if low.h_slots else None
     prog = best_program(low)
@@ -536,7 +558,7 @@ def compile_graph(graph, steps, target="sw", stem="system", source=None,
             takers = have[0] if len(have) == 1 else \
                 f"{', '.join(have[:-1])} and {have[-1]}"
             why = (f": it raises its routines' flags ("
-                   f"{' and '.join(low.routines)}) through revision 8's "
+                   f"{names_and(low.routines)}) through revision 8's "
                    f"flag control, QUIET, ENDQUIET and RAISE, which the "
                    f"built-in targets {takers} publish")
         refuse("target-feature", f"the image needs "

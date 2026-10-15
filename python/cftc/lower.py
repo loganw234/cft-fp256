@@ -42,10 +42,16 @@ nothing else (docs/ROADMAP.md, step 3: literal evaluation):
    order. That is gen_odes.py's classic order for the three references.
    Only slots an instruction addresses are in it. The halved bank halves
    every h-scaled slot exactly and leaves every other one alone.
-   Then, where the step divides or takes a root (C4), the WORDS its
-   routines read (cft_golden/routines.py): one slot for each distinct
-   bit pattern, the division's words first in divfull's own order, then
-   the root's that are new - raw encodings at the format, an infinity,
+   Then, where the step divides, takes a root (C4) or computes one of
+   the math library's six (M1's build, item 4), the WORDS its routines
+   read (cft_golden/routines.py): one slot for each distinct bit
+   pattern, routine by routine in the eight's one order - routines.
+   ROUTINES', the language's: div, sqrt, exp, expm1, exp2, log, log1p,
+   log2 - each routine's words in its fragment's own order (divfull's
+   for the division) and only those not already in a slot: so the
+   division's words come first, then the root's that are new, as before
+   the six, and a step without the six has the bank it had. They are
+   raw encodings at the format, an infinity,
    -0, NaNs and integers among them, which no constant of the language
    can be. A word is never h-scaled, never halved, never a param and
    never shared with a const slot (a const slot may be h-scaled or a run
@@ -61,10 +67,10 @@ nothing else (docs/ROADMAP.md, step 3: literal evaluation):
 
 Nothing here reads an encoding to decide anything - only exact values
 and structure - so a system's instruction words are the same at every
-format, unless it divides or takes a root: a routine's words are its
-format's (its Newton passes, its masks and biases), so are its bank
-words, and the image with them. Encodings decide only the bank's bytes
-and halving-underflow.
+format, unless it holds a routine: a routine's words are its format's
+(its Newton passes, its masks and biases, its tables and coefficients),
+so are its bank words, and the image with them. Encodings decide only
+the bank's bytes and halving-underflow.
 """
 
 from fractions import Fraction
@@ -308,12 +314,29 @@ def layout(graph, nodes, outs, param_bits=None, words=()):
     return slots
 
 
+def routines_of(nodes):
+    """The routines a step holds, in the eight's one order
+    (cft_golden/routines.py's ROUTINES: div, sqrt, then the six)."""
+    from cft_golden import routines as R
+    held = {nd.op for nd in nodes}
+    return [op for op in R.ROUTINES if op in held]
+
+
+def names_and(names):
+    """'a', 'a and b', 'a, b and c': the routines a sentence names."""
+    names = list(names)
+    if len(names) <= 2:
+        return " and ".join(names)
+    return f"{', '.join(names[:-1])} and {names[-1]}"
+
+
 def routine_words(graph, nodes, loop_words=()):
     """[Slot]: the words the step's routines read, one slot a bit pattern
-    - the division's words in divfull's order, then the root's that are
-    new, then the call loop's that are new (module docstring) - each
-    naming every (routine, word) it is; a call loop's as ("loop", name)."""
-    from cft_golden import routines as R
+    - routine by routine in the eight's order, each one's in its
+    fragment's order (the division's in divfull's), then the call loop's
+    that are new (module docstring) - each naming every (routine, word) it
+    is; a call loop's as ("loop", name)."""
+    from .check import held_fragment
     slots, at = [], {}
 
     def add(op, name, bits):
@@ -321,10 +344,8 @@ def routine_words(graph, nodes, loop_words=()):
             at[bits] = len(slots)
             slots.append(Slot("word", None, None, None, bits, 0, names=[]))
         slots[at[bits]].names.append((op, name))
-    for op in ("div", "sqrt"):
-        if not any(nd.op == op for nd in nodes):
-            continue
-        f = R.fragment(op, graph.fmt, graph.rnd)
+    for op in routines_of(nodes):
+        f = held_fragment(op, graph.fmt, graph.rnd)
         for name, bits in f.words.items():
             add(op, name, bits)
     for name, bits in loop_words:
@@ -374,21 +395,19 @@ def lower(graph, param_bits=None, source=None, loop_words=()):
             {r[1] for r in outs if r[0] == "c"}
         need = len(graph.param) + len(used) + len(words)
         if need > BANK_MAX:
-            ops = [op for op in ("div", "sqrt")
-                   if any(nd.op == op for nd in nodes)]
+            ops = routines_of(nodes)
             loop = " and the call loop it runs some of them in" \
                 if loop_words else ""
             refuse("bank-capacity",
                    f"{len(graph.param)} params, {len(used)} constants and "
                    f"{len(words)} words of the routine"
                    f"{'s' if len(ops) > 1 else ''} the compiler inlines for "
-                   f"{' and '.join(ops)}{loop} come to {need}: the bank "
+                   f"{names_and(ops)}{loop} come to {need}: the bank "
                    f"holds {BANK_MAX} on every device", source=source)
     nodes, outs, folds = fold(graph, nodes, outs, len(words))
     slots = layout(graph, nodes, outs, param_bits, words)
     low = Lowered(graph, nodes, outs, slots, merged, folds)
-    low.routines = [op for op in ("div", "sqrt")
-                    if any(nd.op == op for nd in nodes)]
+    low.routines = routines_of(nodes)
     for f in folds:
         f["slots"] = [low.slot_of[("f", i)] for i in f["consts"]]
     return low

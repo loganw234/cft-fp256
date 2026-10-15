@@ -1,0 +1,82 @@
+; diode - the canonical form, regenerated from the step graph
+; sha256 dda0473fc501f67c3b48da13e2cdfae6482e4de596f45071400382e91e1fcb3b
+;
+; Read back, this text gives the same step graph, byte for byte. Every
+; operation is written once, in the order it is performed; each one
+; that rounds rounds once, under rne (roundTiesToEven), in binary64.
+;
+; operations: the equations 8 (4 sub, 2 mul, 1 expm1, 1 log1p);
+;             a step 46 (12 fma, 2 add, 16 sub, 8 mul, 4 expm1, 4 log1p);
+;             each tangent vector's equations 16 (2 add, 3 sub, 3 mul, 1 div, 1 expm1, 3 log1p, 1 neg, 1 cmpeq, 1 select)
+;             and its step 78 (12 fma, 10 add, 12 sub, 12 mul, 4 div, 4 expm1, 12 log1p, 4 neg, 4 cmpeq, 4 select)
+;
+; constants, exact value -> binary64 under rne:
+;   h    0.015625   0x3f90000000000000  0x1p-6                exact
+;   h/2  0.0078125  0x3f80000000000000  0x1p-7                exact
+;   h/6  1/384      0x3f65555555555555  0x1.5555555555555p-9  inexact, relative error -5.5511e-17
+;   1    1          0x3ff0000000000000  0x1p+0                exact
+;   2    2          0x4000000000000000  0x1p+1                exact
+; h-scaled, halved by a step-halving bank: h, h/2, h/6
+
+system diode
+format fp64
+round  rne
+state  j, v
+tangent w
+param  s = 6       ; 0x4018000000000000  0x1.8p+2  exact
+param  k = 0.125   ; 0x3fc0000000000000  0x1p-3  exact
+param  g = 0.25    ; 0x3fd0000000000000  0x1p-2  exact
+
+d/dt j = s - log1p(j) - v
+d/dt v = j - (k * expm1(v)) - (g * v)
+
+d/dt w.j = (-select(log1p(j) == log1p(j), w.j / (1 + j), log1p(j))) - w.v
+d/dt w.v = w.j - (k * ((1 + expm1(v)) * w.v)) - (g * w.v)
+
+step rk4, h = 0.015625
+expansion
+  let k1.j = s - log1p(j) - v
+  let k1.v = j - (k * expm1(v)) - (g * v)
+  let Y2.j = fma(h/2, k1.j, j)
+  let Y2.v = fma(h/2, k1.v, v)
+  let k2.j = s - log1p(Y2.j) - Y2.v
+  let k2.v = Y2.j - (k * expm1(Y2.v)) - (g * Y2.v)
+  let Y3.j = fma(h/2, k2.j, j)
+  let Y3.v = fma(h/2, k2.v, v)
+  let k3.j = s - log1p(Y3.j) - Y3.v
+  let k3.v = Y3.j - (k * expm1(Y3.v)) - (g * Y3.v)
+  let Y4.j = fma(h, k3.j, j)
+  let Y4.v = fma(h, k3.v, v)
+  let k4.j = s - log1p(Y4.j) - Y4.v
+  let k4.v = Y4.j - (k * expm1(Y4.v)) - (g * Y4.v)
+  let S2.j = fma(2, k2.j, k1.j)
+  let S2.v = fma(2, k2.v, k1.v)
+  let S3.j = fma(2, k3.j, S2.j)
+  let S3.v = fma(2, k3.v, S2.v)
+  let S4.j = S3.j + k4.j
+  let S4.v = S3.v + k4.v
+  next j = fma(h/6, S4.j, j)
+  next v = fma(h/6, S4.v, v)
+  let w.k1.j = (-select(log1p(j) == log1p(j), w.j / (1 + j), log1p(j))) - w.v
+  let w.k1.v = w.j - (k * ((1 + expm1(v)) * w.v)) - (g * w.v)
+  let w.Y2.j = fma(h/2, w.k1.j, w.j)
+  let w.Y2.v = fma(h/2, w.k1.v, w.v)
+  let w.k2.j = (-select(log1p(Y2.j) == log1p(Y2.j), w.Y2.j / (1 + Y2.j), log1p(Y2.j))) - w.Y2.v
+  let w.k2.v = w.Y2.j - (k * ((1 + expm1(Y2.v)) * w.Y2.v)) - (g * w.Y2.v)
+  let w.Y3.j = fma(h/2, w.k2.j, w.j)
+  let w.Y3.v = fma(h/2, w.k2.v, w.v)
+  let w.k3.j = (-select(log1p(Y3.j) == log1p(Y3.j), w.Y3.j / (1 + Y3.j), log1p(Y3.j))) - w.Y3.v
+  let w.k3.v = w.Y3.j - (k * ((1 + expm1(Y3.v)) * w.Y3.v)) - (g * w.Y3.v)
+  let w.Y4.j = fma(h, w.k3.j, w.j)
+  let w.Y4.v = fma(h, w.k3.v, w.v)
+  let w.k4.j = (-select(log1p(Y4.j) == log1p(Y4.j), w.Y4.j / (1 + Y4.j), log1p(Y4.j))) - w.Y4.v
+  let w.k4.v = w.Y4.j - (k * ((1 + expm1(Y4.v)) * w.Y4.v)) - (g * w.Y4.v)
+  let w.S2.j = fma(2, w.k2.j, w.k1.j)
+  let w.S2.v = fma(2, w.k2.v, w.k1.v)
+  let w.S3.j = fma(2, w.k3.j, w.S2.j)
+  let w.S3.v = fma(2, w.k3.v, w.S2.v)
+  let w.S4.j = w.S3.j + w.k4.j
+  let w.S4.v = w.S3.v + w.k4.v
+  next w.j = fma(h/6, w.S4.j, w.j)
+  next w.v = fma(h/6, w.S4.v, w.v)
+end

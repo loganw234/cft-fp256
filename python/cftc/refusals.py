@@ -4,10 +4,9 @@
 
 The language has one exception and one list of names
 (cft_golden.lang.refusals: CATALOGUE for the checker and the
-interpreter, COMPILER_REFUSALS for these). The compiler raises its seven,
-and an interim eighth (below),
-through that class - never a subclass, never a class of its own - so a
-writer meets one form of refusal from the parser to the image:
+interpreter, COMPILER_REFUSALS for these). The compiler raises its
+eight through that class - never a subclass, never a class of its own -
+so a writer meets one form of refusal from the parser to the image:
 `<source>:<line>: <name>: <sentence>`.
 
   target-format      the graph's format is not one the target carries
@@ -23,30 +22,36 @@ writer meets one form of refusal from the parser to the image:
                      immediate a segment's steps are
   halving-underflow  an h-scaled constant whose exact halving
                      underflows, so no step-halving bank holds it
+  routine-unavailable  a run-time node of the math library's six (exp,
+                     expm1, exp2, log, log1p, log2) on a host without
+                     mpmath, through which the golden generator
+                     (cft_golden/mathlib.py) derives the routine's
+                     constants (M1's build, item 4): the one name that
+                     depends on the HOST - with mpmath the same source and
+                     target compile, or are refused by another name such
+                     as target-feature. Raised after the refusals of the
+                     arguments alone (segment-steps, target-format, a run
+                     value's) and before anything builds a fragment, so
+                     before target-feature, which reads the built image;
+                     no line, the cause being the host
 
 and one of the language's own: `bank-capacity`, the bank's 512 on every
 device, which the checker raises for params and constants and the
-compiler for the words of the routines it inlines (C4) - one limit, one
-name, the cause in the sentence.
+compiler for the words of the routines it inlines (C4, and the six's
+since M1's build, item 4) - one limit, one name, the cause in the
+sentence.
 
 Until parcel C4 an eighth, `runtime-routine`, refused a run-time division
-or square root (L4); C4 compiles them, and the name went with it.
-
-An interim eighth now (M1's build, item 3, 2026-10-15):
-
-  math-library       a source naming exp, expm1, exp2, log, log1p or
-                     log2 - at run time, or folded where the operand is
-                     a constant - which the compiler carries from M1's
-                     build, item 4, at its output version 6: raised first,
-                     on every target, at the first source line holding
-                     one, so that no source the language accepts reaches
-                     an internal error (exit 70), and version 5 compiles
-                     no source it refused before
+or square root (L4); C4 compiles them, and the name went with it. From
+M1's build, item 3, until item 4 (2026-10-15) an interim eighth,
+`math-library`, refused a source naming one of the six, at run time or
+folded; item 4 compiles them, at cftc's output version 6, and that name
+went too.
 """
 
 NAMES = ("target-format", "target-feature", "program-capacity",
          "scratch-capacity", "loader-bound", "segment-steps",
-         "halving-underflow", "math-library")
+         "halving-underflow", "routine-unavailable")
 # the language's names the compiler raises too, for a cause the checker
 # cannot see (the module docstring)
 SHARED = ("bank-capacity",)

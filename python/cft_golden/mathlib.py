@@ -2625,19 +2625,21 @@ def build_expm1(fmt: FpFormat, rnd: int, **kw) -> Build:
 
 # ---- what is proved of every fragment ---------------------------------------
 #
-# C4's routines.invariants() holds a division's and a root's fragments; the
+# C4's routines.invariants() held a division's and a root's fragments; the
 # study (section 6, question 12) found four ways it fails these, and Logan's
-# answer widens them. routines.py is not edited: its invariants stay as they
-# are for division and root, and this module holds ITS fragments to the
-# widened form. The later cftc parcel moves the widened form into routines.py
-# and into cftc's internal check.
+# answer widens them. From parcel E1 this module held ITS fragments to the
+# widened form, here, while routines.py kept C4's for division and root. M1's
+# build, item 4, moved the widened form into routines.py: one statement for
+# the eight routines, per routine (routines.CONTRACT, routines.LIVE_CAP), the
+# six's this module's form and division's and root's C4's, not loosened -
+# and cftc's internal check holds every routine of an image to it. What
+# follows are VIEWS of it, under the names this module's tests and callers
+# have always read: FLAG_WORDS, LIVE_CAP (by format), flag_words() and
+# invariants().
 
 # The values a flag word can take: C4's six, and inexact, overflow with
 # inexact and underflow with inexact each with the mark. Never bits [6:5].
-FLAG_WORDS = routines.FLAG_WORDS | frozenset(
-    w | MARK for w in (sf.FLAG_INEXACT,
-                       sf.FLAG_OVERFLOW | sf.FLAG_INEXACT,
-                       sf.FLAG_UNDERFLOW | sf.FLAG_INEXACT))
+FLAG_WORDS = routines.MARKED_FLAG_WORDS
 
 # The most values a fragment may keep live at once, by format: the most any
 # of the six routines keeps under any of the five attributes, in the order
@@ -2667,43 +2669,27 @@ FLAG_WORDS = routines.FLAG_WORDS | frozenset(
 # are not a minimum: the scheduler is two cheap heuristics, and the triple
 # word's state (the three words of y and of the running sums, with the
 # table's, the reduction's and the sum's terms) is itself most of fp32's 17
-# to 21.
-LIVE_CAP = {"fp32": 21, "fp64": 13, "fp128": 13, "fp256": 13}
+# to 21. Since M1's build, item 4, the caps are stated in routines.LIVE_CAP,
+# by routine and format, each of the six at these values; this is its view
+# by format, the largest of the six's at each.
+LIVE_CAP = {fmt.name: max(routines.LIVE_CAP[name][fmt.name] for name in NAMES)
+            for fmt in FORMATS}
 _BY_FORMAT = object()            # invariants()'s default cap: LIVE_CAP's
 
-
-def flag_words(f):
-    """The values the flag word can take, by a walk of its definition: a
-    word is its bits, a SELECT the union of its arms, an IAND with the word
-    0 is 0, an IOR the set of the pairwise ORs of its operands'; anything
-    else is unknown (None). C4's walk (routines.flag_words) has no IOR
-    rule, so it cannot see through the instruction that ORs the mark in."""
-    sets = {}
-
-    def val(s):
-        if s[0] == "w":
-            return {f.words[s[1]]}
-        if s[0] == "v":
-            return sets.get(s[1])
-        return None
-    for i, (op, _r, srcs) in enumerate(f.body):
-        if op == sf.OP_SELECT:
-            a, b = val(srcs[0]), val(srcs[1])
-            sets[i] = a | b if a is not None and b is not None else None
-        elif op == sf.OP_IAND and any(val(s) == {0} for s in srcs):
-            sets[i] = {0}
-        elif op == sf.OP_IOR:
-            a, b = val(srcs[0]), val(srcs[1])
-            sets[i] = ({u | v for u in a for v in b}
-                       if a is not None and b is not None else None)
-        else:
-            sets[i] = None
-    return sets.get(f.flags[1]) if f.flags[0] == "v" else val(f.flags)
+# The walk of the flag word's values, with its IOR rule: routines.py's, the
+# one walk for every routine since M1's build, item 4 (C4's walk had no IOR
+# rule, so it could not see through the instruction that ORs the mark in).
+flag_words = routines.flag_words
 
 
 def invariants(f, live_cap=_BY_FORMAT):
-    """[str]: what does not hold of the fragment, empty when all does:
+    """[str]: what does not hold of the fragment, empty when all does - the
+    six's statement, routines.invariants() under routines.MATH_CONTRACT,
+    each clause by name:
 
+      * well formed: values read only after they are defined, the words
+        named exist and are encodings at the format, each opcode takes its
+        operands, the result and the flag word are values;
       * the flag word's values, by flag_words(), within FLAG_WORDS: never
         bits [6:5], the mark only with inexact (an IOR rule in the walk);
       * at most `live_cap` values live at once (LIVE_CAP's, by default;
@@ -2712,59 +2698,20 @@ def invariants(f, live_cap=_BY_FORMAT):
         be a language node's (cftc/inline.py's argument);
       * nothing left to simplify (routines.simplify), once specialised;
       * the attributes the routine's own: RNE, RTZ, RDN, RUP and the
-        PROGRAM's (f.rnd), and none where an opcode does not round;
-      * well formed: values read only after they are defined, the words
-        named exist and are encodings at the format, each opcode takes its
-        operands, the result and the flag word are values.
-    C4's invariants admit RNE and RTZ only, cap the live count at 16, and
-    cannot see an IOR, which is how the study measured them failing."""
-    out = []
-    fmt = f.fmt
+        PROGRAM's (f.rnd), and none where an opcode does not round.
+
+    It holds the fragment to the six's statement whatever routine it names,
+    so that a study's fragment is held to it too (docs/studies/m2/
+    costs.py's sin, cos and tan); for one of the six that is exactly
+    routines.invariants(f), its routine's own, since routines.CONTRACT
+    names MATH_CONTRACT for each and their caps are LIVE_CAP's at every
+    format. C4's invariants, division's and root's still, admit RNE and RTZ
+    only, cap the live count at 16 and allow no mark, which is how the
+    study measured them failing these."""
     if live_cap is _BY_FORMAT:
-        live_cap = LIVE_CAP.get(fmt.name)
-    for name, bits in f.words.items():
-        if not 0 <= bits < 1 << fmt.width:
-            out.append(f"word {name} is not an encoding at {fmt.name}")
-    n = len(f.body)
-    for i, (op, r, srcs) in enumerate(f.body):
-        fields = asm.OP_FIELDS.get(op)
-        if fields is None or len(srcs) != len(fields):
-            out.append(f"instruction {i}: opcode {op} with {len(srcs)} "
-                       f"operands is not an ALU instruction")
-        for s in srcs:
-            if s[0] == "v" and not 0 <= s[1] < i:
-                out.append(f"instruction {i} reads value {s[1]} before it "
-                           f"is defined")
-            elif s[0] == "w" and s[1] not in f.words:
-                out.append(f"instruction {i} reads the word {s[1]!r}, "
-                           f"which the fragment does not hold")
-            elif s[0] == "in" and s[1] not in f.inputs:
-                out.append(f"instruction {i} reads the input {s[1]!r}")
-    for what, ref in (("result", f.result), ("flag word", f.flags)):
-        if ref[0] != "v" or not 0 <= ref[1] < n:
-            out.append(f"the {what} {ref} is not a value of the body")
-    if out:
-        return out              # the checks below walk a well-formed body
-    fw = flag_words(f)
-    if fw is None or not fw <= FLAG_WORDS:
-        out.append(f"the flag word's values {fw} are not within "
-                   f"{sorted(FLAG_WORDS)}")
-    live = f.live_max()
-    if live_cap is not None and live > live_cap:
-        out.append(f"{live} values live at once, past {live_cap}")
-    own = (RNE, RTZ, RDN, RUP, f.rnd)
-    for i, (op, r, srcs) in enumerate(f.body):
-        if not any(s[0] in ("w", "v") for s in srcs):
-            out.append(f"instruction {i} reads only the routine's inputs")
-        if f.stage == "specialised" and routines.simplify(
-                op, srcs, lambda s: f.words[s[1]] if s[0] == "w" else None,
-                fmt.sign_mask) is not None:
-            out.append(f"instruction {i} simplifies further")
-        if (op in ROUNDED) != (r is not None) or \
-                (r is not None and r not in own):
-            out.append(f"instruction {i}'s attribute {r} is not the "
-                       f"routine's own")
-    return out
+        live_cap = LIVE_CAP.get(f.fmt.name)
+    return routines.invariants(f, live_cap=live_cap,
+                               contract=routines.MATH_CONTRACT)
 
 
 # ---- the interface ----------------------------------------------------------

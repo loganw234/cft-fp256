@@ -3,8 +3,9 @@
 """The call loop (C4): a step too large to inline every routine runs some
 of them in a loop instead - one copy of the routine, called once a record.
 
-The compiler inlines every division and root (inline.py) unless the step
-would then pass CALL_LOOP_ABOVE instructions. Logan's rule (2026-10-02,
+The compiler inlines every routine - division and root, and since M1's
+build, item 4, the math library's six (inline.py) - unless the step would
+then pass CALL_LOOP_ABOVE instructions. Logan's rule (2026-10-02,
 "Build it now, last in C4"): the constant is the compiler's own - 32,768,
 the instruction memory of the U50's revision-7 tile - and is
 never read from a target, so one image still serves every target that
@@ -19,12 +20,19 @@ rk4 give four: the first two stages' roots (their positions need no
 acceleration), their divisions, the last two stages' roots, their
 divisions. The largest is the one whose calls, inlined, are the most
 instructions (calls times the fragment's size); ties go to the shallower,
-then to div before sqrt. A batch of one call is never looped: its loop
-would be its inlined copy and the loop's own instructions besides.
+then by the routines' one order, cft_golden/routines.py's ROUTINES - div,
+sqrt, exp, expm1, exp2, log, log1p, log2, the language's own (M1's
+build, item 4) - so div before sqrt, as C4 had them, and a step without
+the six orders its batches as it did. batches() lists them in the same
+order, by depth and then by it. A batch is one operation at one depth, so
+the order is total and no tie is left to the order of a list. A batch of
+one call is never looped: its loop would be its inlined copy and the
+loop's own instructions besides.
 
 A looped batch of K calls has its own RECORDS, K of them, contiguous in
-the scratch: a division's record is two slots, a and b, and a root's
-one, a. The allocator places them where the loop stands, in the lowest
+the scratch: a division's record is two slots, a and b, and a root's -
+or any of the six's - one, a. The allocator places them where the loop
+stands, in the lowest
 run of slots free there - the spill pool's, which may be slots dead
 values used before - so a loop costs the scratch only what is live
 across it; a record's slots join the pool again once the loop has run
@@ -41,8 +49,8 @@ then a word of the bank, LOOP_BASE, added once the allocation is chosen
         quiet
           <the fragment>            ; the routine, its registers its own
         endquiet
-        raise rF                    ; this call's flags
-        stx  rR, rI                 ; its result, over b (a root's over a)
+        raise rF                    ; this call's flags (and a mark)
+        stx  rR, rI                 ; its result, over b (a unary one's over a)
         iadd rI, rI, bSTEP          ; the next record
       endrep
 
@@ -61,6 +69,7 @@ inlined one (check.py).
 
 from cft_golden import routines as R
 
+from .check import held_fragment
 from .ir import ROUTINES
 from .refusals import InternalError, refuse
 
@@ -102,25 +111,35 @@ def depths(low):
     return out
 
 
+ORDER = {op: k for k, op in enumerate(R.ROUTINES)}   # the eight's one order
+
+
 def batches(low):
     """[Batch]: every routine node in its batch, the batches by depth,
-    then div before sqrt."""
+    then in the routines' one order (ORDER: div before sqrt, then the
+    six)."""
     groups = {}
     for j, d in depths(low).items():
         groups.setdefault((d, low.nodes[j].op), []).append(j)
     return [Batch(op, d, sorted(calls))
-            for (d, op), calls in sorted(groups.items())]
+            for (d, op), calls in sorted(groups.items(),
+                                         key=lambda kv: (kv[0][0],
+                                                         ORDER[kv[0][1]]))]
 
 
 def by_size(low):
     """The batches a loop can shorten, largest first (the module
     docstring): a batch of one call is never looped, since its loop would
-    be its one inlined copy and the loop's own instructions besides."""
+    be its one inlined copy and the loop's own instructions besides. The
+    fragments are those of the routines the step holds - a step without
+    the six never builds one, and so never needs mpmath."""
     g = low.graph
-    size = {op: len(R.fragment(op, g.fmt, g.rnd)) for op in R.ROUTINES}
-    return sorted((b for b in batches(low) if len(b.calls) > 1),
+    found = batches(low)
+    size = {op: len(held_fragment(op, g.fmt, g.rnd))
+            for op in {b.op for b in found}}
+    return sorted((b for b in found if len(b.calls) > 1),
                   key=lambda b: (-len(b.calls) * size[b.op], b.depth,
-                                 b.op != "div"))
+                                 ORDER[b.op]))
 
 
 def select(low, keys, sizes):
@@ -243,7 +262,7 @@ def plan(op, fmt, rnd, fixed=()):
     key = (op, fmt.name, rnd, fixed)
     if key in _PLANS:
         return _PLANS[key]
-    f = R.fragment(op, fmt, rnd)
+    f = held_fragment(op, fmt, rnd)
     if all(name in fixed for name in f.inputs):
         raise InternalError(f"a {op} loop with every input fixed")
     end = len(f.body)

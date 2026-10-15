@@ -464,10 +464,6 @@ class Checker:
         self.tan_lets = {}
         self.field_ctx = None
         self.map_ctx = None
-        # the source lines at which a call of one of the six (MATH) is met,
-        # a node or folded, whatever the statement - the graph's math_lines,
-        # which the compiler's interim refusal names (M1's build, item 3)
-        self.math_lines = set()
 
     # ==== declarations ================================================
 
@@ -1079,13 +1075,6 @@ class Checker:
                 v = self.apply("select", [a, b, c], e.line)
             else:
                 v = self.apply(name, vals, e.line)
-            if name in MATH and e.line is not None:
-                # every statement a source writes is evaluated here - a
-                # const, a default, h, a written tangent and an expansion
-                # block too - so this meets each call of the six at the line
-                # that holds it, a node or a fold (the compiler's interim
-                # refusal, `math-library`, names the first)
-                self.math_lines.add(e.line)
             if isinstance(v, K) and _hread(*vals):
                 v = v.read_h(e, ctx.env)
             return v
@@ -2145,7 +2134,6 @@ class Checker:
             self.block_compare(field_outs, step_outs, built, tangent)
         self.canonical_nesting(graph)
         graph.source_format = self.source_format
-        graph.math_lines = tuple(sorted(self.math_lines))
         return graph
 
     # ==== the canonical form's nesting (D2) ============================

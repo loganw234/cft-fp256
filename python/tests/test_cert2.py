@@ -1696,9 +1696,10 @@ def test_a_definition_holding_the_math_library_needs_mpmath(monkeypatch):
     step, and written again in its tangent - needs mpmath, and one without
     them does not. Without mpmath `_evaluate` refuses it `_Undecided`,
     which the audit names `definition-unavailable` (the next test, through
-    a planted node, since no committed case can hold one until the
-    compiler carries the six); with it, the lane is lang.run's - a part
-    skipped by name on a host without mpmath."""
+    a planted node; and, since the compiler carries the six - M1's build,
+    item 4 - the one after it, through a real certificate of a compiled
+    source); with it, the lane is lang.run's - a part skipped by name on
+    a host without mpmath."""
     from cft_golden import lang
     from cft_golden.lang import constants as K
     F = Fraction
@@ -1757,6 +1758,97 @@ def test_an_auditor_that_cannot_evaluate_the_definition(mk, lz,
         assert (got.run, got.segment) == (0, 1)
         refused("replay-undecided", make_markstep)
     assert not cert2.Definition(mk.graph).needs_mpmath()
+
+
+# M1's build, item 4: the compiler carries the six, so a certificate can name
+# a compiled source holding one. The golden writer certifies an image of
+# `next x = exp(x)` on a lane at a structured centre its routine marks, and
+# replays the lane by the definition; an auditor without mpmath - taken away
+# in a second process, sys.modules: simulated, not a host without it -
+# refuses `definition-unavailable` wherever it first needs mpmath: at the
+# recompile for a run compiled from the source (cftc, its own compile,
+# refuses `routine-unavailable` there, which the audit judged `source-image`
+# until this was found), at the marked lane's replay for one defined by it.
+SIX_SRC = (b"system e\nformat fp64\nround rne\nstate x\nnext x = exp(x)\n"
+           b"step map\n")
+_AUDIT_WITHOUT_MPMATH = r"""
+import json, sys
+sys.modules["mpmath"] = None            # import mpmath raises ImportError
+sys.path.insert(0, sys.argv[1])
+from pathlib import Path
+from cft_golden import cert
+work = Path(sys.argv[2])
+progs = {0: ((work / "image").read_bytes(), (work / "bank").read_bytes())}
+init = cert.state_values("fp64", (work / "init").read_bytes())
+try:
+    cert.audit((work / "c.cert").read_bytes(), None, progs,
+               states={0: {0: init}}, sources={0: (work / "src").read_bytes()})
+    print(json.dumps(["ACCEPTED"]))
+except cert.Refusal as e:
+    print(json.dumps([e.name, e.exit_code, e.run, e.segment, e.message]))
+"""
+
+
+def make_six(compiled):
+    """A version-2 certificate of the compiled `next x = exp(x)` at fp64,
+    two segments of one step on two lanes, 1/3 and the structured centre
+    2^-53 (mathlib_family.FAMILY's first at fp64 under rne), which the
+    routine marks: compiled from the source (cftc, sw), or defined by it."""
+    import mathlib_family as fam
+    from cft_golden.lang import constants as K
+    c = cert2.compile_source(SIX_SRC, "fp64", 1, "sw")
+    g = cert2.source_graph(SIX_SRC)
+    init = [K.round_once(F64, sf.RND_RNE, Fraction(1, 3))[0],
+            fam.argument(F64, fam.FAMILY["exp"]["fp64"]["rne"][0])]
+    ch = cert2.run_chain(c.image, c.bank, init, 2, steps=1,
+                         definition=cert2.Definition(g))
+    lines = cert2.source_lines(SIX_SRC, "fp64", name="e.cftl",
+                               compiler=CFTC + ("sw",) if compiled else None)
+    run = cert2.certify_run("main", c.image, c.bank, None, ch, steps=1,
+                            source=lines)
+    cc = cert2.Certificate("open", None, IDN,
+                           prov(language=OWN_LANGUAGE,
+                                replay_methods=((0, "golden"),)), (run,), ())
+    return types.SimpleNamespace(c=c, init=init, chain=ch,
+                                 data=cert2.encode(cc))
+
+
+@pytest.mark.parametrize("compiled", [True, False],
+                         ids=["compiled from", "defined by"])
+def test_definition_unavailable_through_a_certificate_of_the_six(compiled,
+                                                                 tmp_path):
+    """A real certificate of a compiled source holding exp, no planted node:
+    its marked lane replayed by the golden writer (segment 0), accepted by
+    the audit; without mpmath, `definition-unavailable` (78) - at the
+    recompile, run 0 and no segment, for a run compiled from the source;
+    at segment 0's replay for one defined by it."""
+    if cert2._mpmath_version() is None:
+        pytest.skip("making a certificate of the six needs mpmath, which "
+                    "their routines and golden functions are built through, "
+                    "and python has no mpmath module")
+    x = make_six(compiled)
+    assert sorted(x.chain.raws) == [0]
+    v = cert.audit(x.data, None, {0: (x.c.image, x.c.bank)},
+                   states={0: {0: x.init}}, sources={0: SIX_SRC})
+    assert list(v.lines())[0].startswith("cft-certificate 2: ACCEPTED")
+    for name, data in (("c.cert", x.data), ("image", x.c.image),
+                       ("bank", x.c.bank), ("src", SIX_SRC),
+                       ("init", cert.state_bytes("fp64", x.init))):
+        (tmp_path / name).write_bytes(data)
+    script = tmp_path / "audit.py"
+    script.write_text(_AUDIT_WITHOUT_MPMATH, encoding="utf-8")
+    r = subprocess.run([sys.executable, str(script), str(ROOT / "python"),
+                        str(tmp_path)], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    got = __import__("json").loads(r.stdout)
+    assert got[:2] == ["definition-unavailable", 78], got
+    if compiled:
+        assert got[2:4] == [0, None], got
+        assert "computes exp at run time" in got[4] and "mpmath" in got[4]
+        assert "recompile" in got[4] and "routine-unavailable" in got[4]
+    else:
+        assert got[2:4] == [0, 0], got
+        assert "mpmath is not installed" in got[4]
 
 
 # ---- the golden writer's own refusals --------------------------------------------

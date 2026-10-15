@@ -1,0 +1,18 @@
+; Lotka and Volterra's predator and prey in logarithmic variables, with its
+; variational equations: u = ln x, the prey, and v = ln y, the predators,
+; for dx/dt = x (alpha - beta y) and dy/dt = y (delta x - gamma), with one
+; tangent vector stepped beside the state by the same program. Its
+; invariant, H = delta e^u - gamma u + beta e^v - alpha v, is constant along
+; the flow, a quantity a run can watch. The math library's exp in the step
+; and its rule in the tangent, r * da (M1's build, item 4; the study's
+; section 7, docs/studies/M1-exp-log.md): each exp a routine inlined (two a
+; stage), its result read again by its tangent, a product a vector.
+system lotkavolterra
+format fp64
+round  rne
+state  u, v
+tangent w
+param  alpha = 2/3, beta = 4/3, delta = 1, gamma = 1
+d/dt u = alpha - beta * exp(v)
+d/dt v = delta * exp(u) - gamma
+step   rk4, h = 1/64

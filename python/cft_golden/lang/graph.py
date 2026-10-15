@@ -357,16 +357,9 @@ class StepGraph:
         self.tangent_step = tangent_step    # Section, when tangent
         # (routine_lines, the source lines holding a run-time division or
         # root, went with the compiler's interim refusal at C4: nothing
-        # else read them)
-        # Where the source names one of the six (TRANSCEND) - at run time,
-        # a node, or folded where its operand is a constant: the lines,
-        # ascending, at which the checker met such a call, whatever the
-        # statement (an equation, a let, a const, a default, h, a written
-        # tangent, a line of an expansion block). The checker sets it; a
-        # graph read from bytes, or made otherwise, has None. Never part of
-        # the bytes: the compiler's interim refusal, `math-library`, names
-        # the first of them until M1's build, item 4 (python/cftc).
-        self.math_lines = None
+        # else read them; and math_lines, those holding one of the six at
+        # run time or folded, went with `math-library` at M1's build, item
+        # 4, for the same reason - neither was ever part of the bytes)
         # The format the SOURCE declares, where the checker built the graph:
         # its `format` line's value, which a format override (check's `fmt`,
         # cftc's --format) replaces - so the graph is at `fmt`, and this
@@ -420,7 +413,6 @@ class StepGraph:
                       self.field, self.step, self.tangent,
                       self.tangent_field, self.tangent_step)
         g.source_format = self.source_format
-        g.math_lines = self.math_lines
         for k, v in changes.items():
             setattr(g, k, v)
         return g

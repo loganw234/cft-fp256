@@ -1811,6 +1811,101 @@ def test_m1_the_plants(kind, monkeypatch):
         assert exact > 0 and hp > 0 and bits > 0 and table != right
 
 
+# ---- M1's build, item 4: the committed references hold the six's rules ------------
+# Three systems are committed with their compiled variational bytes at fp64
+# and fp256 (programs/systems/compiled-tangent/): Lotka-Volterra in
+# logarithmic variables (exp, the study's section 7), two diodes and a source
+# (expm1 and log1p) and a culture that heats itself (exp2, log and log2), so
+# that between them the committed bytes hold all six rules. The study's
+# section 7: a rule rounded otherwise "must then move that reference's
+# bytes". Each rule changed - rounded otherwise where it rounds twice (and
+# log's da * (1/a), the study's own example), made wrong where it rounds
+# once - moves the committed graphs of the reference holding it, and no
+# other. Checking a source needs no mpmath, so neither does this.
+
+M1_SIX = ("exp", "expm1", "exp2", "log", "log1p", "log2")
+M1_REFS = {"lotkavolterra-rk4": ("exp",), "diode-rk4": ("expm1", "log1p"),
+           "culture-rk4": ("exp2", "log", "log2")}
+M1_RULE_PLANTS = [("exp", "a for r, made wrong"),
+                  ("expm1", "fma(r, da, da), one rounding"),
+                  ("exp2", "L * (r * da), the other order"),
+                  ("log", "da * a, made wrong"),
+                  ("log", "da * (1 / a), the study's example"),
+                  ("log2", "(da / L) / a, the other order"),
+                  ("log1p", "da * (1 / (1 + a)), three roundings")]
+
+
+class _M1RulePlant(lang_tangent.Derivation):
+    """The derivation with one of the six's rules changed (kind)."""
+    kind = None
+
+    def rule(self, node):
+        op, a, line = node.op, node.args, node.line
+        if op != self.kind[0]:
+            return super().rule(node)
+        da = self.of(a[0])
+        if da is None:
+            return None
+        R = self.read
+
+        def N(o, *args):
+            return Node(o, args, line)
+
+        def logged(q):
+            return N("select", q, R(node), N("cmpeq", R(node), R(node)))
+        how = self.kind[1]
+        if how.startswith("a for r"):
+            return N("mul", R(a[0]), da)
+        if how.startswith("fma(r"):
+            return N("fma", R(node), da, da)
+        if how.startswith("L * (r"):
+            return N("mul", self.ln2(), N("mul", R(node), da))
+        if how.startswith("da * a"):
+            return logged(N("mul", da, R(a[0])))
+        if how.startswith("da * (1 / a)"):
+            return logged(N("mul", da, N("div", self.one, R(a[0]))))
+        if how.startswith("(da / L)"):
+            return logged(N("div", N("div", da, self.ln2()), R(a[0])))
+        return logged(N("mul", da, N("div", self.one,
+                                     N("add", self.one, R(a[0])))))
+
+
+def test_m1_the_committed_references_hold_the_six():
+    """Between them the three references hold each of the six in their
+    fields, at a value carrying a tangent, and their committed graphs are
+    what their sources check to, at fp64 and fp256."""
+    held = set()
+    for base, ops in M1_REFS.items():
+        for fmt in ("fp64", "fp256"):
+            g = tref(f"{base}-tangent-{fmt}")
+            assert [op for op in lang.OPS if op in M1_SIX and
+                    g.op_counts("field").get(op)] == list(ops), (base, fmt)
+            assert g.to_bytes() == (SYSTEMS / "compiled-tangent" /
+                                    f"{base}-tangent-{fmt}.graph.json"
+                                    ).read_bytes()
+        held |= set(ops)
+    assert held == set(M1_SIX)
+
+
+@pytest.mark.parametrize("kind", M1_RULE_PLANTS, ids=lambda k: k[1])
+def test_m1_each_rule_changed_moves_a_committed_reference(kind, monkeypatch):
+    """Each of the six's rules changed moves the committed graphs of the
+    reference that holds it, at fp64 and at fp256, and no other committed
+    graph (the study's section 7)."""
+    names = [f"{b}-tangent-{f}" for b in M1_REFS for f in ("fp64", "fp256")]
+    committed = {n: (SYSTEMS / "compiled-tangent" / f"{n}.graph.json")
+                 .read_bytes() for n in names}
+
+    class P(_M1RulePlant):
+        pass
+    P.kind = kind
+    monkeypatch.setattr(lang_check, "Derivation", P)
+    moved = sorted(n for n in names if tref(n).to_bytes() != committed[n])
+    want = sorted(f"{b}-tangent-{f}" for b, ops in M1_REFS.items()
+                  if kind[0] in ops for f in ("fp64", "fp256"))
+    assert want and moved == want, (kind, moved)
+
+
 # ---- the known limit, measured -----------------------------------------------------
 
 def test_an_unnamed_product_chain_grows_with_its_square():
