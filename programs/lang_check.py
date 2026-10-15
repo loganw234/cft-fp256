@@ -61,7 +61,9 @@ many lanes and at several step counts: the image's REPEAT patched to 1,
      a committed byte fails here until VERSION is bumped (python/cftc/
      outputs.py); the record's check caught on five plants in memory
   G  every refusal of the compiler's, by name, and the language's
-     bank-capacity, which it raises for its routines' words (C4)
+     bank-capacity, which it raises for its routines' words (C4); and the
+     interim `math-library` (M1's build, item 3), a run-time call of the
+     six and a fold alone, each at its first line, each run by lang.run
   H  plants in a copy of the package: each stopped by the internal check,
      and with the check off each red on seq.py, its failing lanes counted;
      with the routines' (C4): a raise dropped, a raise inside its quiet
@@ -1620,6 +1622,24 @@ def leg_refusals():
            f"{k} params and the {words} words of a division's and a root's "
            f"routines, past the bank's 512 - the language's name, raised by "
            f"the compiler for the words the checker cannot see (C4)")
+    # the interim eighth (M1's build, item 3): the math library's six, at run
+    # time and folded, refused at the first source line holding one until
+    # item 4 carries them; the interpreter runs both
+    for text, line, what in (
+            ("system m\nformat fp64\nstate x, y\nnext x = x * y\n"
+             "next y = log1p(abs(x))\nstep map\n", 5,
+             "log1p at run time, at its line"),
+            ("system m\nformat fp64\nstate x\nconst k = exp2(-3)\n"
+             "next x = x * k\nstep map\n", 4,
+             "a fold of exp2 alone, in a const, at its line")):
+        expect("math-library", lambda: cftc.compile_text(text, 2,
+                                                         source="m.cftl"),
+               what)
+        g = lang.compile_text(text, "m.cftl").graph
+        check(g.math_lines[0] == line and
+              len(lang.run(g, [[1] * g.n_state], 2).states) == 1,
+              f"math-library: the checker's first line is {line}, and "
+              f"lang.run runs the source")
     want = set(cftc.NAMES) | set(cftc.refusals.SHARED)
     check(made == want, f"every one of the compiler's {len(cftc.NAMES)} "
           f"names was made, and the language's bank-capacity it raises "

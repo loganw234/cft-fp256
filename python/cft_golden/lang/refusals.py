@@ -102,12 +102,19 @@ CATALOGUE = {
     # (runtime-division and runtime-sqrt went with L4, 2026-10-02: a
     # run-time division and square root are operations, div and sqrt;
     # the compiler refused them `runtime-routine` until parcel C4 carried
-    # them as inlined routines, and that name went too)
-    "transcendental": "a transcendental function at run time",
+    # them as inlined routines, and that name went too. exp, expm1, exp2,
+    # log, log1p and log2 are operations since M1's build, item 3,
+    # 2026-10-15: `transcendental` refuses the rest of the reserved list)
+    "transcendental": "a transcendental function the language does not "
+                      "have (sin, cos, pow and the rest of the reserved "
+                      "list), at run time",
     "irrational-constant": "a square root of a constant that is no "
-                           "rational's square (2, or a negative one), or a "
-                           "transcendental of a constant: values no "
-                           "rational carries",
+                           "rational's square (2, or a negative one); exp, "
+                           "expm1, exp2, log, log1p or log2 of a constant "
+                           "whose value is irrational or not real (exp(1), "
+                           "log(2), log(-1)); or any other transcendental "
+                           "of a constant, which the language does not "
+                           "have yet",
     "power": "^ or **",
     "not-equal": "!=",
     "chained-comparison": "a comparison of a comparison, unparenthesised",
@@ -119,7 +126,8 @@ CATALOGUE = {
     "constant-infinity": "inf or infinity written as a constant",
     "constant-nan": "nan or snan written as a constant",
     "constant-division-by-zero": "a constant divided by a constant "
-                                 "zero",
+                                 "zero, or a logarithm of a constant at "
+                                 "its pole: log(0), log2(0), log1p(-1)",
     "constant-overflow": "a constant whose one rounding overflows",
     "constant-rounds-to-zero": "a nonzero constant whose one rounding "
                                "is zero",
@@ -148,7 +156,9 @@ CATALOGUE = {
 # gives each its sentence. The compiler also raises one of the
 # catalogue's, bank-capacity, where the words of the routines it inlines
 # take the bank past 512 (C4): one limit, one name. Until C4 an eighth,
-# runtime-routine, refused a run-time division or root (L4).
+# runtime-routine, refused a run-time division or root (L4). An interim
+# eighth now, math-library, refuses a source naming one of the math
+# library's six until M1's build, item 4, carries them (2026-10-15).
 COMPILER_REFUSALS = {
     "scratch-capacity": "registers plus scratch past the target's: "
                         "2,048 slots on the U50's revision 7, 256 "
@@ -165,6 +175,12 @@ COMPILER_REFUSALS = {
     "halving-underflow": "an h-scaled constant whose exact halving "
                          "underflows, so the step-halving bank cannot "
                          "hold it exactly",
+    # interim, until M1's build, item 4 (cftc's output version 6)
+    "math-library": "a source naming exp, expm1, exp2, log, log1p or log2 "
+                    "- at run time, or folded where the operand is a "
+                    "constant - which the compiler carries from M1's "
+                    "build, item 4: interim, as runtime-routine was until "
+                    "C4",
 }
 
 # Every name a Refusal may carry: the checker's and the interpreter's,

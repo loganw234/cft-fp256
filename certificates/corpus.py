@@ -980,8 +980,13 @@ class CaseRecipe2:
 # the compiler lines state cftc's. It was the literal "2" until profile 3
 # (2026-10-05), when the corpus was made again at 3.
 PROFILE_TEXT = cert2.version_text(cert2.PROFILE)
+# And the language they state where a run names a source: lang/version.py's,
+# which cft-segrun writes from cft.h's CFT_LANGUAGE_* and the corpus holds it
+# to. It was the literal "1" until the language's 1.1 (M1's build, item 3,
+# 2026-10-15), when the corpus was made again at 1.1.
+LANGUAGE_TEXT = cert2.version_text(cert2._language_version())
 # every measured header line unknown, as version 1's example's build-id
-UNKNOWN = cert2.Provenance(profile=PROFILE_TEXT, language="1",
+UNKNOWN = cert2.Provenance(profile=PROFILE_TEXT, language=LANGUAGE_TEXT,
                            device_platform="none",
                            device_xrt="none", device_clock="none",
                            device_serial="none", writer=("golden", "unknown"),

@@ -4,7 +4,8 @@
 
 The language has one exception and one list of names
 (cft_golden.lang.refusals: CATALOGUE for the checker and the
-interpreter, COMPILER_REFUSALS for these). The compiler raises its seven
+interpreter, COMPILER_REFUSALS for these). The compiler raises its seven,
+and an interim eighth (below),
 through that class - never a subclass, never a class of its own - so a
 writer meets one form of refusal from the parser to the image:
 `<source>:<line>: <name>: <sentence>`.
@@ -30,11 +31,22 @@ name, the cause in the sentence.
 
 Until parcel C4 an eighth, `runtime-routine`, refused a run-time division
 or square root (L4); C4 compiles them, and the name went with it.
+
+An interim eighth now (M1's build, item 3, 2026-10-15):
+
+  math-library       a source naming exp, expm1, exp2, log, log1p or
+                     log2 - at run time, or folded where the operand is
+                     a constant - which the compiler carries from M1's
+                     build, item 4, at its output version 6: raised first,
+                     on every target, at the first source line holding
+                     one, so that no source the language accepts reaches
+                     an internal error (exit 70), and version 5 compiles
+                     no source it refused before
 """
 
 NAMES = ("target-format", "target-feature", "program-capacity",
          "scratch-capacity", "loader-bound", "segment-steps",
-         "halving-underflow")
+         "halving-underflow", "math-library")
 # the language's names the compiler raises too, for a cause the checker
 # cannot see (the module docstring)
 SHARED = ("bank-capacity",)

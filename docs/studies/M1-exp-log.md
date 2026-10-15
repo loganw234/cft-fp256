@@ -77,6 +77,40 @@ build changed in this text's statements:
   largest error found by a strided sweep is 2^-1.23 of the bound, and the
   first-order bound of the three-word V there is 2^-1.03.
 
+**A note of 2026-10-15** (parcel ML, M1's build, item 3; the study's text
+stays as of 2026-10-05). The language has the six now: each a node with
+transcend.py's golden function, folded of a constant where the value is
+rational and refused by name elsewhere, with its tangent rule
+(docs/LANGUAGE.md; docs/VALIDATION.md, the entry of that date). So the
+STATUS line's "the language still refuses `exp(x)` as `transcendental`"
+no longer holds, and "nothing here is built" holds of cftc alone, which
+refuses a source naming one of the six - at run time or folded -
+`math-library`, by name, until item 4 carries them. What the build changed
+in this text's statements:
+- Section 6's "until question 5's fix lands, the folded exp2(emin - p) and
+  the run-time operation differ under rmm": since profile 3 they agree,
+  the smallest subnormal under rmm and under rup at every format (held by
+  python/tests/test_lang.py); under rne, rtz and rdn the fold rounds to
+  zero and is refused `constant-rounds-to-zero`, where the operation gives
+  +0.
+- Section 7's expm1 rule, `fma(r, da, da)`: built as `(1 + r) * da`, two
+  roundings, 1 + r primal-only and shared. The fma reads da twice; the
+  step graph gives an unlabelled node one use, and writing da again would
+  double the tangent at each nested expm1 (the lead's decision).
+- Section 7's log2 and log1p rules: built in the select form, as log's
+  (question 7's own text names log1p below -1), so that each is a NaN
+  below its domain "as log", as the table's last column says.
+- Section 6's versions: the language's 1.1 stepped cft.h's
+  `CFT_LANGUAGE_MINOR` with it, and the golden certificate corpus was made
+  again for it - its 24 sourced cases' `language` lines, their hash lines
+  and their manifest digests alone. Item 4 makes it again for cftc's
+  version 6.
+- Section 7's "a committed compiled variational reference holds the
+  bytes": item 4's; until it, the rounding order of the six's rules is
+  held by LANGUAGE.md's rule table, rendered, and by a check of the
+  interpreter's bits against a central difference in high precision
+  (python/tests/test_lang_tangent.py; the tangent stage's leg M).
+
 **Revised the same day,** after verifier-VM1 checked the first version
 (5b6de0d; the round's ledger, `verifier-VM1.md`). That check found one
 defect: log1p's r = x path ran its polynomial past the bound's rho, and

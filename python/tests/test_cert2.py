@@ -83,6 +83,10 @@ LODZ = chr(0x141) + chr(0xF3) + "d" + chr(0x17A)
 # profile.py's VERSION as cert2 spells it. The fixtures wrote "2" until
 # profile 3 (2026-10-05), when an auditor at 3 no longer covered them.
 OWN_PROFILE = cert2.version_text(cert2.PROFILE)
+# And the language's, lang/version.py's: the page's version-2 example is the
+# golden corpus's markstep-fp64 case, made again at the language's 1.1 (M1's
+# build, item 3, 2026-10-15), where it had said `language 1`.
+OWN_LANGUAGE = cert2.version_text(cert2._language_version())
 
 
 def prov(**kw):
@@ -1639,10 +1643,15 @@ def test_a_failure_under_another_definition(mk, fl):
     refused("replay-changed", audit_mk, mk, wrong)
     # the profiles an auditor at the tree's does not cover: the next major,
     # a minor above its own, and the previous major - a certificate made
-    # before the step, as every profile-2 one is under profile 3
+    # before the step, as every profile-2 one is under profile 3; and the
+    # languages, the next major and a minor above the tree's (the tree's
+    # language read, since M1's build, item 3, took it to 1.1, which this
+    # probe had written as the minor above 1)
     major, minor = cert2.PROFILE
+    lmajor, lminor = cert2._language_version()
     assert major > 1, "profile 1 has no previous major to probe"
-    for field, value in (("language", "2"), ("language", "1.1"),
+    for field, value in (("language", f"{lmajor + 1}"),
+                         ("language", f"{lmajor}.{lminor + 1}"),
                          ("profile", f"{major + 1}"),
                          ("profile", f"{major}.{minor + 1}"),
                          ("profile", f"{major - 1}"),
@@ -1660,6 +1669,12 @@ def test_a_failure_under_another_definition(mk, fl):
         got = refused("replay-changed", audit_mk, mk,
                       edit(wrong, "profile ", f"profile {major}"))
         assert (got.run, got.segment) == (0, 1)
+    # and the language's, alike: a certificate at `language 1`, made before
+    # the minor step to 1.1 (M1's build, item 3), is covered
+    if lminor > 0:
+        got = refused("replay-changed", audit_mk, mk,
+                      edit(wrong, "language ", f"language {lmajor}"))
+        assert (got.run, got.segment) == (0, 1)
     # a re-derivation that passes under a definition that does not cover
     # the certificate's: accepted, and the verdict says so
     v = audit_mk(mk, edit(mk.data, "language ", "language 2"))
@@ -1675,12 +1690,46 @@ def test_a_failure_under_another_definition(mk, fl):
     assert got.segment == 1
 
 
+def test_a_definition_holding_the_math_library_needs_mpmath(monkeypatch):
+    """The language's math library's six reach transcend.py (M1's build,
+    item 3), and they are TRANSCEND_OPS: a definition holding exp - in its
+    step, and written again in its tangent - needs mpmath, and one without
+    them does not. Without mpmath `_evaluate` refuses it `_Undecided`,
+    which the audit names `definition-unavailable` (the next test, through
+    a planted node, since no committed case can hold one until the
+    compiler carries the six); with it, the lane is lang.run's."""
+    from cft_golden import lang
+    from cft_golden.lang import constants as K
+    F = Fraction
+    assert cert2.TRANSCEND_OPS == {"exp", "expm1", "exp2", "log", "log1p",
+                                   "log2"}
+    text = ("system s\nformat fp64\nstate x, y\ntangent v\nnext x = x\n"
+            "next y = y + exp(x)\nstep map\n")
+    g = lang.compile_text(text, "s").graph
+    assert {"exp"} <= {op for op, _a, _l in g.tangent_step.nodes}
+    d = cert2.Definition(g)
+    assert d.needs_mpmath()
+    assert not cert2.Definition(lang.compile_text(
+        text.replace("exp(x)", "x * x"), "s").graph).needs_mpmath()
+    third = K.round_once(g.fmt, sf.RND_RNE, F(1, 3))[0]
+    one = K.round_once(g.fmt, sf.RND_RNE, F(1))[0]
+    vals, flags = cert2._evaluate(d, [third, 0, one, 0], 1)
+    run = lang.run(g, [[third, 0]], 1, tangents=[[[one, 0]]])
+    assert vals == run.states[0] + run.tangents[0][0]
+    assert flags == run.flags & cert2.LANE_IEEE
+    monkeypatch.setattr(cert2, "_mpmath_version", lambda: None)
+    with pytest.raises(cert2._Undecided) as e:
+        cert2._evaluate(d, [third, 0, one, 0], 1)
+    assert "mpmath is not installed" in str(e.value)
+
+
 def test_an_auditor_that_cannot_evaluate_the_definition(mk, lz,
                                                         monkeypatch):
     """A replay reaches transcend.py exactly where a node's golden function
-    is one of its, which no node of the language is yet: these plants
-    stand for M1's. Without mpmath, or where an enclosure reaches its cap,
-    the audit refuses `definition-unavailable` and the writer
+    is one of its - the math library's six since M1's build, item 3, which
+    no committed case can hold until the compiler carries them: these
+    plants stand for them. Without mpmath, or where an enclosure reaches
+    its cap, the audit refuses `definition-unavailable` and the writer
     `replay-undecided` - each the producer's or the auditor's own limit."""
     with monkeypatch.context() as m:
         m.setattr(cert2, "TRANSCEND_OPS", frozenset({"add"}))
@@ -1837,7 +1886,7 @@ def _fenced_after(marker):
 
 
 EXAMPLE_PROVENANCE = cert2.Provenance(
-    profile=OWN_PROFILE, language="1", device_platform="none",
+    profile=OWN_PROFILE, language=OWN_LANGUAGE, device_platform="none",
     device_xrt="none",
     device_clock="none", device_serial="none", writer=("golden", "unknown"),
     writer_runtime="unknown", compiler_build="none",

@@ -353,8 +353,10 @@ REFUSALS = {
                                   step="step stormer-verlet, h = 1/8, "
                                        "q = (x), p = (p)"), 4),
     # runtime-division and runtime-sqrt went with L4 (2026-10-02): x / 3 and
-    # sqrt(x) are the operations div and sqrt now (test_l4_* below)
-    "transcendental": (_src("state x", "next x = exp(x)"), 4),
+    # sqrt(x) are the operations div and sqrt now (test_l4_* below). The
+    # example here was exp(x) until M1's build, item 3 (2026-10-15), which
+    # made exp an operation; sin waits for M2 (M1_REFUSALS, below)
+    "transcendental": (_src("state x", "next x = sin(x)"), 4),
     "irrational-constant": (_src("state x", "next x = x * sqrt(2)"), 4),
     "power": (_src("state x", "next x = x^2"), 4),
     "not-equal": (_src("state x", "next x = select(x != 1, 1, 2)"), 4),
@@ -442,18 +444,20 @@ def test_a_long_chain_costs_no_depth():
 
 
 def test_the_class_carries_the_compilers_names():
-    """The compiler raises its seven through this one class: each is
-    accepted, and a name in neither list is an internal error. An eighth,
-    runtime-routine, refused a run-time division or root until parcel C4
-    inlined them (L4); it is no name now, nor are the language's two
-    before it. The compiler raises one catalogue name besides,
-    bank-capacity, where its routines' words take the bank past 512."""
+    """The compiler raises its seven through this one class, and an interim
+    eighth, math-library, until M1's build, item 4, carries the math
+    library's six (2026-10-15): each is accepted, and a name in neither
+    list is an internal error. An earlier eighth, runtime-routine, refused
+    a run-time division or root until parcel C4 inlined them (L4); it is
+    no name now, nor are the language's two before it. The compiler
+    raises one catalogue name besides, bank-capacity, where its routines'
+    words take the bank past 512."""
     for name in lang.COMPILER_REFUSALS:
         r = lang.Refusal(name, "a sentence", 3, "x.cftl")
         assert str(r) == f"x.cftl:3: {name}: a sentence"
     assert {"segment-steps", "halving-underflow", "target-format",
             "target-feature", "program-capacity", "scratch-capacity",
-            "loader-bound"} == set(lang.COMPILER_REFUSALS)
+            "loader-bound", "math-library"} == set(lang.COMPILER_REFUSALS)
     for gone in ("runtime-division", "runtime-sqrt", "runtime-routine"):
         assert gone not in lang.NAMES
         with pytest.raises(AssertionError):
@@ -1115,15 +1119,19 @@ _LITS = ["1", "2", "3", "0.5", "0.25", "1.5", "(1/3)", "(2/7)", "(5/3)",
 _CMPS = ["<", "<=", ">", ">=", "=="]
 
 
-def _expr(rng, operands, depth):
+def _expr(rng, operands, depth, sub=None):
+    """A random expression. `sub` makes its operands (this function by
+    default; test_m1_intention_out_of_random_systems' adds the six), so the
+    default draws are what they always were."""
     if depth <= 0 or rng.random() < 0.25:
         return rng.choice(operands + _LITS[:3])
     k = rng.choice(["+", "-", "*", "neg", "fma", "abs", "copysign", "min",
                     "max", "minnum", "maxnum", "cmp", "select", "const",
                     "/", "sqrt"])
+    make = sub or _expr
 
     def sub():
-        return _expr(rng, operands, depth - 1)
+        return make(rng, operands, depth - 1)
     if k in ("+", "-", "*", "/"):
         return f"({sub()} {k} {sub()})"
     if k == "sqrt":
@@ -1146,9 +1154,11 @@ def _expr(rng, operands, depth):
             f"{rng.choice(_LITS)})")
 
 
-def random_system(rng, k):
+def random_system(rng, k, expr=None):
     """A random system the language takes: every operation, constants
-    folded, lets, params and lane params, an array, each integrator."""
+    folded, lets, params and lane params, an array, each integrator.
+    `expr` makes its expressions (_expr by default)."""
+    _expr = expr or globals()["_expr"]
     integ = rng.choice(["rk4", "euler", "stormer-verlet", "map", "maph"])
     fmt = rng.choice(["fp32", "fp64", "fp128", "fp256"])
     rnd = rng.choice(["rne", "rtz", "rdn", "rup", "rmm"])
@@ -1254,9 +1264,12 @@ def test_intention_out_of_random_systems():
     # most systems decide at both their points: an undefined point (a zero
     # divisor, a negative root's argument) is redrawn up to four times
     assert decided >= 100, decided
-    # the coverage docs/LANGUAGE.md claims of these systems, held
+    # the coverage docs/LANGUAGE.md claims of these systems, held: every
+    # operation but the math library's six, which have random systems of
+    # their own (test_m1_intention_out_of_random_systems), so that these
+    # draws are what they were before M1's build, item 3
     assert kinds == {"rk4", "euler", "stormer-verlet", "map"}
-    assert ops == set(lang.OPS)
+    assert ops == set(lang.OPS) - set(SIX)
     assert fmts == set(FORMATS) and rnds == set(C.RND_BY_NAME)
     assert arrays and lanes and lets
 
@@ -2148,6 +2161,512 @@ def test_l4_the_exact_root_is_one_function():
     with pytest.raises(ArithmeticError):
         g.exact_eval("step", [F(1), F(-1)])
     assert g.exact_eval("step", [F(1), F(9, 4)]) == [F(4, 9), F(3, 2)]
+
+
+# ---- M1's build, item 3: the math library's six (2026-10-15) --------------------
+# exp(a), expm1(a), exp2(a), log(a), log1p(a) and log2(a) with an operand
+# that is not a constant are the nodes transcend.py names, each rounding once
+# under the program's attribute through transcend.compute, with its exact
+# flags (docs/LANGUAGE.md, "The operations"). Of a constant each folds where
+# the value is rational and is refused by name elsewhere (Logan's answer to
+# M1's question 8). They were `transcendental`, and of a constant
+# `irrational-constant`, until M1's build, item 3.
+
+SIX = ("exp", "expm1", "exp2", "log", "log1p", "log2")
+# the reserved transcendental names before M1's build, item 3: the six and
+# M2 to M4's, which `transcendental` still refuses
+RESERVED_BEFORE = {
+    "exp", "expm1", "exp2", "exp10", "log", "log1p", "log2", "log10",
+    "pow", "pown", "powr", "rootn", "hypot", "sin", "cos", "tan", "sinpi",
+    "cospi", "tanpi", "asin", "acos", "atan", "atan2", "asinpi", "acospi",
+    "atanpi", "atan2pi", "sinh", "cosh", "tanh", "asinh", "acosh", "atanh",
+    "cbrt", "rsqrt"}
+
+
+def test_m1_the_six_are_nodes():
+    """Each with an operand that is not a constant is one node of one
+    operand, named as transcend.py names the function, listed after sqrt;
+    each is a built-in - reserved, and held to one argument - and every
+    other name of the reserved list is still `transcendental` at run time
+    and `irrational-constant` of a constant, for M2 to M4."""
+    from cft_golden import transcend
+    assert list(lang.OPS)[:12] == ["fma", "add", "sub", "mul", "div", "sqrt",
+                                   *SIX]
+    for fn in SIX:
+        assert fn in transcend.TRANSCEND_FNS and lang.OPS[fn] == 1
+        g = compile_(_sys1(f"next x = {fn}(x)\nnext y = {fn}(x * y)"))
+        assert g.step.nodes == [(fn, ("s0",), None),
+                                ("mul", ("s0", "s1"), None),
+                                (fn, ("n1",), None)]
+        assert g.math_lines == (5, 6)
+        with pytest.raises(lang.Refusal) as info:
+            compile_(_sys1(f"next x = {fn}(x, y)\nnext y = y"))
+        assert (info.value.name, info.value.line) == ("arity", 5)
+        with pytest.raises(lang.Refusal) as info:
+            compile_(_sys1(f"next {fn} = 1", state=fn))
+        assert info.value.name == "reserved-name"
+        assert "a built-in" in info.value.sentence
+    rest = set(lang_check.TRANSCENDENTAL)
+    assert rest | set(SIX) == RESERVED_BEFORE and not rest & set(SIX)
+    for name in sorted(rest):
+        with pytest.raises(lang.Refusal) as info:
+            compile_(_sys1(f"next x = {name}(x)", state="x"))
+        assert (info.value.name, info.value.line) == ("transcendental", 5)
+        assert info.value.sentence == \
+            f"{name} is not computed by a program in v1"
+        with pytest.raises(lang.Refusal) as info:
+            compile_(_sys1(f"next x = x * {name}(1)", state="x"))
+        assert (info.value.name, info.value.line) == ("irrational-constant",
+                                                      5)
+
+
+def _m1_lanes(fmt, rng, count):
+    """Encodings for the six: the specials, the edges of each domain, and
+    random ones near 1 and across a few binades."""
+    named = [0, fmt.sign_mask, sf.inf_bits(fmt), sf.inf_bits(fmt, 1),
+             sf.qnan_bits(fmt), sf.snan_bits(fmt, 1), 1, fmt.sign_mask | 1,
+             sf.max_normal_bits(fmt), sf.max_normal_bits(fmt) ^ fmt.sign_mask]
+    named += [C.round_once(fmt, sf.RND_RNE, F(v))[0]
+              for v in (1, -1, 2, F(1, 2), -2, F(-1, 2), 100, -100, 10000)]
+    out = list(named)
+    while len(out) < len(named) + count:
+        out.append(C.round_once(fmt, sf.RND_RNE,
+                                F(rng.randint(-1 << 40, 1 << 40), 1 << 38))[0])
+    return out
+
+
+@pytest.mark.parametrize("fmtname", list(FORMATS))
+def test_m1_the_golden_functions_are_transcends(fmtname):
+    """Through the interpreter, under every attribute: each lane's result
+    is transcend.compute's for the node's own name under the program's
+    attribute, its flags each lane's own, and the run's FLAGS their OR -
+    the specials, the poles, below each domain, overflow and underflow
+    among the lanes."""
+    from cft_golden import transcend
+    fmt = FORMATS[fmtname]
+    rng = random.Random(f"m1 golden {fmtname}")
+    lanes = _m1_lanes(fmt, rng, 6)
+    for fn in SIX:
+        for rnd in ("rne", "rtz", "rdn", "rup", "rmm"):
+            code = C.RND_BY_NAME[rnd]
+            g = compile_(_sys1(f"next x = {fn}(x)", state="x", fmt=fmtname,
+                               rnd=rnd))
+            run = lang.run(g, [[x] for x in lanes], 1)
+            union = 0
+            for x, out in zip(lanes, run.states):
+                bits, flags = transcend.compute(fmt, fn, x, 0, code)
+                assert out == [bits], (fn, rnd, hex(x))
+                union |= flags
+            assert run.flags == union, (fn, rnd)
+            x = lanes[-1]
+            assert lang.run(g, [[x]], 1).flags == \
+                transcend.compute(fmt, fn, x, 0, code)[1]
+
+
+# A fold is the exact rational value, rounded once where it meets the run.
+_M1_FOLDS = [("exp(0)", F(1)), ("expm1(0)", F(0)), ("exp2(5)", F(32)),
+             ("exp2(-3)", F(1, 8)), ("exp2(0)", F(1)), ("exp2(1 - 1)", F(1)),
+             ("log(1)", F(0)), ("log1p(0)", F(0)), ("log1p(1 - 1)", F(0)),
+             ("log2(8)", F(3)), ("log2(1/8)", F(-3)), ("log2(1)", F(0)),
+             ("log2(2)", F(1)), ("log2(0x1p-100)", F(-100)),
+             ("exp2(log2(16))", F(16)), ("log2(exp2(7))", F(7))]
+
+
+@pytest.mark.parametrize("expr,value", _M1_FOLDS)
+def test_m1_the_six_fold_exactly_where_the_value_is_rational(expr, value):
+    """exp(0) = 1, expm1(0) = 0, exp2(n) = 2^n, log(1) = 0, log1p(0) = 0,
+    log2(2^k) = k: each a constant, exactly, rounded once at every format
+    under every attribute, in a const and in a default too; the source line
+    recorded for the compiler's interim refusal."""
+    for fmtname in FORMATS:
+        fmt = FORMATS[fmtname]
+        for rnd in ("rne", "rtz", "rdn", "rup", "rmm"):
+            g = compile_(_sys1(f"next x = x + {expr}", state="x",
+                               fmt=fmtname, rnd=rnd))
+            assert g.step.nodes == [("add", ("s0", "c0"), None)]
+            assert g.const == [(value, None)
+                               + C.round_once(fmt, C.RND_BY_NAME[rnd], value)]
+            assert g.math_lines == (5,)
+    g = compile_(_sys1(f"const k = {expr}\nparam p = {expr} + 1\n"
+                       f"next x = x + k * p", state="x"))
+    assert g.param[0][1] == value + 1
+    assert g.math_lines == (5, 6)
+
+
+@pytest.mark.parametrize("fmtname", list(FORMATS))
+def test_m1_a_folded_power_is_rounded_once(fmtname):
+    """exp2(n) at the format's edges: 2^emax a constant, 2^(emax + 1)
+    `constant-overflow`, 2^(emin - p + 1) the smallest subnormal exactly,
+    and the tie 2^(emin - p) and 2^(emin - p - 1) rounded once under the
+    attribute - the smallest subnormal with underflow and inexact where it
+    rounds up, `constant-rounds-to-zero` where it rounds to zero. At fp64,
+    exp2(2000) is `constant-overflow` and exp2(-2000)
+    `constant-rounds-to-zero` (the study, section 6)."""
+    fmt = FORMATS[fmtname]
+    tie = fmt.emin - fmt.man_w - 1
+    sub = sf.min_subnormal_bits(fmt)
+    uf = sf.FLAG_UNDERFLOW | sf.FLAG_INEXACT
+    for rnd in ("rne", "rtz", "rdn", "rup", "rmm"):
+        code = C.RND_BY_NAME[rnd]
+
+        def folded(n):
+            g = compile_(_sys1(f"next x = x * exp2({n})", state="x",
+                               fmt=fmtname, rnd=rnd))
+            return g.const[0][2:]
+        assert folded(fmt.emax) == C.round_once(fmt, code, F(2) ** fmt.emax)
+        assert folded(tie + 1) == (sub, 0)
+        for n, up in ((tie, rnd in ("rup", "rmm")), (tie - 1, rnd == "rup")):
+            if up:
+                assert folded(n) == (sub, uf), (rnd, n)
+                continue
+            with pytest.raises(lang.Refusal) as info:
+                folded(n)
+            assert info.value.name == "constant-rounds-to-zero", (rnd, n)
+        with pytest.raises(lang.Refusal) as info:
+            folded(fmt.emax + 1)
+        assert (info.value.name, info.value.line) == ("constant-overflow", 5)
+    if fmtname == "fp64":
+        for n, name in ((2000, "constant-overflow"),
+                        (-2000, "constant-rounds-to-zero")):
+            with pytest.raises(lang.Refusal) as info:
+                compile_(_sys1(f"next x = x * exp2({n})", state="x"))
+            assert info.value.name == name
+
+
+@pytest.mark.parametrize("fmtname", list(FORMATS))
+def test_m1_the_folded_and_the_run_time_tie_agree(fmtname):
+    """The study's tie, exp2(emin - p), half the smallest subnormal, since
+    question 5 was done (parcel XT, profile 3): under rmm the fold rounded
+    once and the run-time operation give the smallest subnormal, both with
+    underflow and inexact, and so they do under rup; under rne, rtz and rdn
+    the operation gives +0, with underflow and inexact, and the fold, a
+    nonzero constant rounding to zero, is refused by name."""
+    from cft_golden import transcend
+    fmt = FORMATS[fmtname]
+    tie = fmt.emin - fmt.man_w - 1
+    x = C.round_once(fmt, sf.RND_RNE, F(tie))[0]
+    for rnd in ("rne", "rtz", "rdn", "rup", "rmm"):
+        code = C.RND_BY_NAME[rnd]
+        run = compile_(_sys1("next x = exp2(x)", state="x", fmt=fmtname,
+                             rnd=rnd))
+        r = lang.run(run, [[x]], 1)
+        assert (r.states[0][0], r.flags) == \
+            transcend.compute(fmt, "exp2", x, 0, code)
+        assert r.flags == sf.FLAG_UNDERFLOW | sf.FLAG_INEXACT
+        text = _sys1(f"next x = x * exp2({tie})", state="x", fmt=fmtname,
+                     rnd=rnd)
+        if rnd in ("rup", "rmm"):
+            folded = compile_(text).const[0][2:]
+            assert folded == (r.states[0][0], r.flags) == \
+                (sf.min_subnormal_bits(fmt), r.flags)
+        else:
+            assert r.states[0][0] == 0
+            with pytest.raises(lang.Refusal) as info:
+                compile_(text)
+            assert info.value.name == "constant-rounds-to-zero"
+
+
+# Every refusal of a function of a constant, by name, with the name the same
+# source met at 74574f5, before M1's build, item 3 (each measured there, in
+# parcel ML's ledger): (body, step, name, line, the name before).
+M1_REFUSALS = [
+    ("next x = x * exp(1)", "step map", "irrational-constant", 5,
+     "irrational-constant"),
+    ("next x = x * expm1(1/2)", "step map", "irrational-constant", 5,
+     "irrational-constant"),
+    ("next x = x * exp2(1/2)", "step map", "irrational-constant", 5,
+     "irrational-constant"),
+    ("next x = x * log(2)", "step map", "irrational-constant", 5,
+     "irrational-constant"),
+    ("next x = x * log1p(1)", "step map", "irrational-constant", 5,
+     "irrational-constant"),
+    ("next x = x * log2(3)", "step map", "irrational-constant", 5,
+     "irrational-constant"),
+    # no real value, as sqrt(-4) has none
+    ("next x = x * log(-4)", "step map", "irrational-constant", 5,
+     "irrational-constant"),
+    ("next x = x * log2(-1/2)", "step map", "irrational-constant", 5,
+     "irrational-constant"),
+    ("next x = x * log1p(-2)", "step map", "irrational-constant", 5,
+     "irrational-constant"),
+    # the poles: refused before, and refused still, by another name
+    ("next x = x * log(0)", "step map", "constant-division-by-zero", 5,
+     "irrational-constant"),
+    ("next x = x * log2(0)", "step map", "constant-division-by-zero", 5,
+     "irrational-constant"),
+    ("next x = x * log1p(-1)", "step map", "constant-division-by-zero", 5,
+     "irrational-constant"),
+    ("next x = x * log(1 - 1)", "step map", "constant-division-by-zero", 5,
+     "irrational-constant"),
+    # a folded value rounded once, as any constant
+    ("next x = x * exp2(2000)", "step map", "constant-overflow", 5,
+     "irrational-constant"),
+    ("next x = x * exp2(-2000)", "step map", "constant-rounds-to-zero", 5,
+     "irrational-constant"),
+    ("next x = x * exp2(10000000)", "step map", "constant-range", 5,
+     "irrational-constant"),
+    # h: a function of a constant that changes with h's size
+    ("next x = x * exp(h)", "step map, h = 1/8", "h-nonlinear", 5,
+     "irrational-constant"),
+    ("next x = x * log2(2 * h)", "step map, h = 1/8", "h-nonlinear", 5,
+     "irrational-constant"),
+    ("d/dt x = x * exp(h)", "step euler, h = 1/8", "h-scope", 5, "h-scope"),
+    # the rest, unchanged in name
+    ("next x = exp(x, x)", "step map", "arity", 5, "transcendental"),
+    ("next x = x * exp", "step map", "syntax", 5, "syntax"),
+    ("next x = sin(x)", "step map", "transcendental", 5, "transcendental"),
+    ("next x = x * sin(0)", "step map", "irrational-constant", 5,
+     "irrational-constant"),
+]
+
+
+@pytest.mark.parametrize("body,step,name,line,before", M1_REFUSALS,
+                         ids=[r[0][9:] for r in M1_REFUSALS])
+def test_m1_each_refusal_by_name(body, step, name, line, before):
+    """Each by its name and line; where it was refused another way before
+    M1's build, item 3, the table says which, and the sentence is the new
+    name's."""
+    with pytest.raises(lang.Refusal) as info:
+        compile_(_sys1(body, state="x", step=step), "m1.cftl")
+    r = info.value
+    assert (r.name, r.line, r.source) == (name, line, "m1.cftl"), str(r)
+    assert r.sentence and name in lang.CATALOGUE
+    if name == "constant-division-by-zero":
+        assert "is a pole" in r.sentence, r.sentence
+    if name == "irrational-constant" and "(-" in body:
+        assert "is not a real number" in r.sentence, r.sentence
+    assert before in lang.CATALOGUE
+
+
+def test_m1_the_renderers_write_the_six_and_read_back():
+    """The canonical form writes each as the language does; the
+    mathematical form as exp(a), expm1(a), 2^(a), ln(a), log1p(a) and
+    log₂(a), one operation each; each reads back - the canonical form to the
+    same graph, the mathematical form exactly at random rational points
+    (the second check, each of the six a fixed function of its exact
+    argument on both sides), every line held (the third)."""
+    g = compile_(_sys1("next x = exp(x) + expm1(y)\n"
+                       "next y = exp2(x) * log(y) - log1p(x) / log2(y)"))
+    canon = lang.render_canonical(g)
+    assert "\nnext x = exp(x) + expm1(y)\n" in canon
+    assert "\nnext y = (exp2(x) * log(y)) - (log1p(x) / log2(y))\n" in canon
+    math = lang.render_math(g)
+    assert "\n  x ↦ exp(x) + expm1(y)\n" in math
+    assert "\n  y ↦ 2^(x)·ln(y) − log1p(x)/log₂(y)\n" in math
+    assert compile_(canon).to_bytes() == g.to_bytes()
+    assert check_intention_out(g, random.Random("m1 renderers"), 4) == 4
+    form = MathForm(math)
+    point = [F(3, 2), F(5, 7)]
+    assert form.step(point) == g.exact_eval("step", point)
+    # a quotient's operand prints in parentheses, a power's never needs to
+    g = compile_(_sys1("next x = 2 * exp2(x + y)\nnext y = log2(x / y)"))
+    math = lang.render_math(g)
+    assert "\n  x ↦ 2·2^(x + y)\n" in math and "\n  y ↦ log₂(x/y)\n" in math
+    check_intention_out(g, random.Random("m1 renderers 2"))
+
+
+@pytest.mark.parametrize("name", ["exp-rk4", "log-sv", "mixed-map",
+                                  "folds-euler"])
+def test_m1_intention_out_of_written_systems(name):
+    """The six under each integrator, in lets and equations, with Greek
+    names, and beside folds: the three checks."""
+    text = {
+        "exp-rk4": ("system decay\nformat fp128\nround rdn\nstate y, mu\n"
+                    "param kappa = 1/3\nlet eta = expm1(-(kappa * y))\n"
+                    "d/dt y = eta * exp(mu)\nd/dt mu = -(exp2(y) * mu)\n"
+                    "step rk4, h = 1/64\n"),
+        "log-sv": ("system pot\nformat fp32\nround rup\nstate q, p\n"
+                   "lane param lambda = 3/2\n"
+                   "d/dt q = p / log1p(p * p)\n"
+                   "d/dt p = -(lambda * log(q * q + 1))\n"
+                   "step stormer-verlet, h = 1/32, q = (q), p = (p)\n"),
+        "mixed-map": ("system mix\nformat fp256\nround rmm\nstate x, y\n"
+                      "next x = log2(abs(x) + 1) * exp(y)\n"
+                      "next y = fma(x, exp2(y - x), log1p(abs(y)))\n"
+                      "step map\n"),
+        "folds-euler": ("system folds\nformat fp64\nstate x\n"
+                        "param sigma = log2(1/16) + exp(0)\n"
+                        "d/dt x = sigma * exp(x) + exp2(3)\n"
+                        "step euler, h = 1/8\n"),
+    }[name]
+    g = compile_(text, name)
+    assert check_intention_out(g, random.Random(f"m1 io {name}"), 3) > 0
+
+
+def _m1_expr(rng, operands, depth):
+    """_expr's operations and the six, each of an operand that reads a
+    value of the run - the state, a param, a lane param or a let - so that
+    few fold (a constant's, refused where irrational, is
+    test_m1_each_refusal_by_name's); a logarithm's operand a magnitude plus
+    one half the time, so that most points take it."""
+    if depth > 0 and rng.random() < 0.35:
+        fn = rng.choice(SIX)
+        run = [o for o in operands if o[0] in "splraqm"]
+        inner = f"{_m1_expr(rng, operands, depth - 1)} * {rng.choice(run)}"
+        if fn.startswith("log") and rng.random() < 0.5:
+            inner = f"abs({inner}) + 1"
+        return f"{fn}({inner})"
+    return _expr(rng, operands, depth, sub=_m1_expr)
+
+
+# A random source with the six may fold to a constant the language refuses
+# besides _ARTIFACTS': a power of two past every format (exp2 of exp2 of a
+# literal), a fold that overflows or rounds to zero.
+_M1_ARTIFACTS = _ARTIFACTS | {"constant-range", "constant-overflow",
+                              "constant-rounds-to-zero"}
+
+
+def test_m1_intention_out_of_random_systems():
+    """Random systems with the six beside every other operation - lets,
+    params, lane params, arrays, every integrator, format and attribute,
+    a third with a tangent vector - each through the three checks."""
+    rng = random.Random("lang random m1 systems")
+    done = skipped = decided = 0
+    ops, kinds, tangents = set(), set(), 0
+    while done < 30:
+        text = random_system(rng, done + skipped, expr=_m1_expr)
+        if done % 3 == 2:
+            lines = text.split("\n")
+            k = next(i for i, ln in enumerate(lines) if ln.startswith("state"))
+            text = "\n".join(lines[:k + 1] + ["tangent v"] + lines[k + 1:])
+        try:
+            g = compile_(text, f"random-m1-{done + skipped}")
+        except lang.Refusal as r:
+            assert r.name in _M1_ARTIFACTS, f"{r}\n{text}"
+            skipped += 1
+            continue
+        try:
+            decided += check_intention_out(g, rng, points=2)
+        except AssertionError:
+            raise AssertionError(f"the intention-out fails on:\n{text}")
+        ops.update(g.op_counts("step"))
+        kinds.add(g.integrator[0])
+        tangents += bool(g.tangent)
+        done += 1
+    assert skipped < done and decided >= 30, (skipped, decided)
+    assert set(SIX) <= ops and tangents >= 9
+    assert kinds == {"rk4", "euler", "stormer-verlet", "map"}
+
+
+def test_m1_the_exact_transcendentals_are_one_function():
+    """The step graph's exact evaluation and the test's own reader take the
+    same value of each of the six at the same argument: exact where it is
+    rational, otherwise mpmath's at 1,024 bits; expm1 is exp - 1 and log1p
+    is log(1 + a) of the same exp and log; undefined at a logarithm's pole,
+    below its domain and past 2^+-1048576. Each is within 2^-1000 of the
+    function, relatively (mpmath at 1,200 bits)."""
+    import mpmath
+    from cft_golden.lang import graph as lang_graph
+    from lang_mathform import transcendental as form_t
+    form = {"exp": "exp", "expm1": "expm1", "exp2": "2^", "log": "ln",
+            "log1p": "log1p", "log2": "log₂"}
+    ctx = mpmath.MPContext()
+    ctx.prec = 1200
+    true = {"exp": ctx.exp, "expm1": ctx.expm1,
+            "exp2": lambda v: ctx.power(2, v), "log": ctx.log,
+            "log1p": ctx.log1p, "log2": lambda v: ctx.log(v) / ctx.ln2}
+    rng = random.Random("m1 transcendentals")
+    for _ in range(40):
+        q = F(rng.randint(-10 ** 6, 10 ** 6), rng.randint(1, 10 ** 4))
+        for op in SIX:
+            try:
+                a = lang_graph.exact_transcendental(op, q)
+            except ArithmeticError:
+                with pytest.raises(ArithmeticError):
+                    form_t(form[op], q)
+                continue
+            assert form_t(form[op], q) == a, (op, q)
+            want = true[op](ctx.mpf(q.numerator) / q.denominator)
+            if a != 0:
+                assert abs((ctx.mpf(a.numerator) / a.denominator - want)
+                           / want) < ctx.mpf(2) ** -1000, (op, q)
+    exact = lang_graph.exact_transcendental
+    assert (exact("exp", F(0)), exact("expm1", F(0)), exact("exp2", F(-3)),
+            exact("log", F(1)), exact("log1p", F(0)), exact("log2", F(1, 8))
+            ) == (1, 0, F(1, 8), 0, 0, -3)
+    for op, q in (("log", F(0)), ("log", F(-1)), ("log2", F(0)),
+                  ("log1p", F(-1)), ("log1p", F(-3)), ("exp", F(1 << 22)),
+                  ("exp2", F((1 << 20) + 1))):
+        with pytest.raises(ArithmeticError):
+            exact(op, q)
+        with pytest.raises(ArithmeticError):
+            form_t(form[op], q)
+
+
+_NO_MPMATH = r"""
+import sys
+sys.modules["mpmath"] = None            # import mpmath raises ImportError
+sys.path.insert(0, sys.argv[1])
+sys.path.insert(0, sys.argv[2])
+import cftc
+from cft_golden import lang, transcend
+from cft_golden.lang import constants as C
+out = []
+ref = lang.load(sys.argv[3])
+r = lang.run(ref.graph, [[1, 2, 3]], 2)
+out.append(f"reference ran {len(r.states)}")
+text = ("system s\nformat fp64\nstate x, y\ntangent v\n"
+        "next x = exp2(x) + log2(y)\nnext y = log(y) * exp(0)\nstep map\n")
+g = lang.compile_text(text, "s").graph
+back = lang.compile_text(lang.render_canonical(g), "c").graph
+out.append(f"checked and read back {back.to_bytes() == g.to_bytes()}")
+lang.render_math(g)
+try:
+    lang.run(g, [[0, 0]], 1, tangents=[[[0, 0]]])
+    out.append("ran")
+except transcend.ZivEscalation as e:
+    out.append(f"ZivEscalation: {e}")
+try:
+    cftc.compile_text(text, 2)
+except lang.Refusal as e:
+    out.append(f"cftc refused {e.name} at {e.line}")
+from fractions import Fraction
+try:
+    g.exact_eval("step", [Fraction(1, 3), Fraction(1, 3)])
+except ImportError:
+    out.append("exact_eval ImportError")
+print("\n".join(out))
+"""
+
+
+def test_m1_mpmath_is_needed_only_by_a_run_of_the_six(tmp_path):
+    """With mpmath taken away (sys.modules), a reference compiles and runs;
+    a source holding the six - exp2's and log2's L among its tangent rules -
+    is checked, rendered and read back, and cftc refuses it by name, none of
+    which needs mpmath; lang.run of it raises transcend.ZivEscalation naming
+    mpmath and the functions, before any lane runs; and its exact
+    evaluation, the tests' tool, raises ImportError, never an
+    ArithmeticError that would make a point decide nothing."""
+    script = tmp_path / "nompmath.py"
+    script.write_text(_NO_MPMATH, encoding="utf-8")
+    r = subprocess.run([sys.executable, str(script), str(HERE.parent),
+                        str(HERE.parent), str(SYSTEMS / "lorenz63-rk4-fp64.cftl")],
+                       capture_output=True, text=True, cwd=str(tmp_path))
+    assert r.returncode == 0, r.stderr
+    lines = r.stdout.splitlines()
+    assert lines[0] == "reference ran 1"
+    assert lines[1] == "checked and read back True"
+    assert lines[2] == ("ZivEscalation: s computes exp2, log, log2, whose "
+                        "golden functions (python/cft_golden/transcend.py) "
+                        "decide each rounding through mpmath's enclosures, "
+                        "and mpmath is not installed: lang.run cannot run it "
+                        "here"), lines[2]
+    assert lines[3] == "cftc refused math-library at 5"
+    assert lines[4] == "exact_eval ImportError"
+
+
+def test_m1_the_language_is_at_1_1():
+    """The six are a minor step (CONFORMANCE.md, "The language's version"):
+    lang/version.py is 1.1, and cft.h's macros, which cft-segrun and
+    cft-audit compile in, are the same."""
+    from cft_golden import cert2
+    from cft_golden.lang import version
+    assert version.VERSION == (1, 1)
+    assert cert2.version_text(version.VERSION) == "1.1"
+    text = (REPO / "host" / "include" / "cft.h").read_text(encoding="utf-8")
+    got = dict(re.findall(r"^#define (CFT_LANGUAGE_(?:MAJOR|MINOR))\s+(\d+)",
+                          text, re.M))
+    assert got == {"CFT_LANGUAGE_MAJOR": "1", "CFT_LANGUAGE_MINOR": "1"}
 
 
 # ---- the documents -------------------------------------------------------------

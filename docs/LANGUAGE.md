@@ -20,6 +20,16 @@ by the runner's `lang` stage (docs/VERIFICATION.md); ROADMAP.md's
 "Step 3: the language and its compiler (plan of record, 2026-10-01)" is
 the plan, and this document is its parcel L1.
 
+**This is the language at 1.1** (`python/cft_golden/lang/version.py`;
+CONFORMANCE.md, "The language's version"). It was 1 from 2026-10-02,
+when certificate format version 2 first named it, and became 1.1 on
+2026-10-15, when M1's build, item 3, added the math library's exp, expm1,
+exp2, log, log1p and log2 ("The operations"): functions it had refused
+only for not having them, so a minor step - every source accepted at 1
+is accepted at 1.1 and computes the same. `cft.h`'s `CFT_LANGUAGE_MAJOR`
+and `_MINOR` carry the version to the C tools that write and audit
+certificates.
+
 Files are `*.cftl` (a working name). The three references are written in
 it, at fp64 and fp256, in `programs/systems/`, each beside the image
 `programs/gen_odes.py` wrote by hand for the same system; the reference
@@ -165,9 +175,12 @@ the gate holds that.
 - Reserved: no value may be named after one of these, and the check is
   `reserved-name`.
   - the keywords;
-  - the built-ins `fma abs min max minnum maxnum copysign select sqrt`;
-  - the transcendental names (`exp`, `log`, `sin`, `pow`, `hypot` and the
-    rest of the list in `python/cft_golden/lang/check.py`);
+  - the built-ins `fma abs min max minnum maxnum copysign select sqrt`,
+    and the math library's `exp expm1 exp2 log log1p log2` (M1's build,
+    item 3);
+  - the transcendental names the language does not have yet (`sin`,
+    `pow`, `hypot`, `log10` and the rest of the list in
+    `python/cft_golden/lang/check.py`), which M2 to M4 will take;
   - `h`, the step's own name;
   - `inf infinity nan snan`.
 - `tangent` became a keyword with the variational equations (part
@@ -352,7 +365,8 @@ Every node of a step graph is one of these. Its name is softfloat.py's
 OP_NAMES spelling, and its operands are in the golden function's order,
 which is asm.py's OP_FIELDS order - but for `div` and `sqrt`, which no
 tile instruction is: their names are the golden functions' own, and
-their operands in those functions' order.
+their operands in those functions' order; and for the math library's
+six, named as `python/cft_golden/transcend.py` names the functions.
 
 | written | node | golden function | 754-2019 | rounds | flags it can raise |
 |---|---|---|---|---|---|
@@ -362,6 +376,12 @@ their operands in those functions' order.
 | `fma(a, b, c)` | `fma(a, b, c)`, a*b + c | `sf.fma` | 5.4.1 fusedMultiplyAdd | once | the same |
 | `a / b` | `div(a, b)`, with an operand not a constant | `sf.div` | 5.4.1 division | once | all five: invalid (0/0, an infinity over an infinity, a signaling NaN), divideByZero (a finite nonzero over a zero), overflow, underflow, inexact |
 | `sqrt(a)` | `sqrt(a)`, of an operand not a constant | `sf.sqrt` | 5.4.1 squareRoot | once | invalid (a negative nonzero, -infinity included, or a signaling NaN) and inexact |
+| `exp(a)` | `exp(a)`, of an operand not a constant | `transcend.compute(fmt, "exp", a)` | 9.2 exp | once | invalid (a signaling NaN), overflow, underflow, inexact |
+| `expm1(a)` | `expm1(a)`, the same | `transcend.compute(fmt, "expm1", a)` | 9.2 expm1 | once | the same |
+| `exp2(a)` | `exp2(a)`, the same | `transcend.compute(fmt, "exp2", a)` | 9.2 exp2 | once | the same |
+| `log(a)` | `log(a)`, the same | `transcend.compute(fmt, "log", a)` | 9.2 log | once | invalid (a negative nonzero, -infinity included, or a signaling NaN), divideByZero (a zero), inexact |
+| `log2(a)` | `log2(a)`, the same | `transcend.compute(fmt, "log2", a)` | 9.2 log2 | once | the same |
+| `log1p(a)` | `log1p(a)`, the same | `transcend.compute(fmt, "log1p", a)` | 9.2 logp1 | once | invalid (below -1, -infinity included, or a signaling NaN), divideByZero (-1), underflow, inexact |
 | `-a` | `neg(a)` | `sf.neg` | 5.5.1 negate | no: exact | none, not even on a signaling NaN |
 | `abs(a)` | `abs(a)` | `sf.fabs` | 5.5.1 abs | no | none |
 | `copysign(a, b)` | `copysign(a, b)` | `sf.copysign` | 5.5.1 copySign | no | none |
@@ -376,8 +396,50 @@ their operands in those functions' order.
 | `a == b` | `cmpeq(a, b)` | `sf.cmpeq` | 5.6.1 compareQuietEqual | no | the same |
 | `select(c, a, b)` | `select(a, b, c)` | `sf.select`: a if c's magnitude is not zero, else b | none: the tile's SELECT; quiet like 5.5.1 | no | none |
 
-- The six that round take the program's one attribute; the rest ignore
-  it, as `softfloat.compute` does.
+- The twelve that round take the program's one attribute; the rest
+  ignore it, as `softfloat.compute` does.
+- **The math library's six** (M1's build, item 3, 2026-10-15) are each
+  one correctly rounded operation, under the program's attribute, with
+  exactly the flags its golden function raises: transcend.py's, called
+  through the interpreter's operation table by the node's own name
+  (`transcend.compute(fmt, name, a, 0, rnd)`), the same functions the
+  conformance profile's transcendental vector sets are generated from
+  (CONFORMANCE.md). Their special values are 754-2019's 9.2: a quiet NaN
+  in gives the canonical NaN and no flag; exp(+-0) and exp2(+-0) are 1 and
+  expm1(+-0) and log1p(+-0) keep the zero's sign; log, log2 and log1p are
+  -infinity with divideByZero at their pole (a zero; log1p's -1) and a NaN
+  with invalid below it. IEEE 754-2019 calls log1p `logp1`; the language
+  writes transcend.py's name.
+  - **mpmath.** transcend.py decides each rounding through mpmath's
+    rigorous enclosures, so `lang.run` of a graph holding one of the six
+    needs mpmath. Without it the run raises transcend.ZivEscalation,
+    naming mpmath and the functions, before any lane runs (the
+    interpreter's need_mpmath), so whether a run needs it is a property
+    of its graph, never of its lanes; a graph without the six never
+    imports it, and checking, rendering and reading back a source that
+    uses them never need it (Logan's answer to M1's question 10: accept
+    mpmath in the language's checks). The certificate auditor maps the
+    same failure to `definition-unavailable` (docs/CERTIFICATES.md).
+  - **The compiler** carries them from M1's build, item 4, as inlined
+    routines (`python/cft_golden/mathlib.py`'s fragments, R24's raise and
+    mark). Until then it refuses a source that names one - at run time,
+    or folded where its operand is a constant - `math-library`, first, on
+    every target, at the first source line holding one ("Every refusal,
+    by name"). The interpreter runs both.
+  - **A marked lane** (the structured families; M1's question 4). Once
+    the compiler carries the six, a routine's last bit is decided in the
+    lane, and where its in-lane test cannot decide it - where the true
+    value lies within the routine's error bound of a rounding boundary -
+    the routine marks the lane (bit 7 of its raised word; R24 and R23's
+    lane byte). The language's definition is unchanged by a mark: a
+    marked lane is replayed by the definition, `lang.run`, and the
+    image's guess is compared only as a guess. Next to an exact case -
+    exp near 0, log near 1, the arguments x = c 2^-e and 1 + c ulp the
+    study counts (docs/studies/M1-exp-log.md, 3.5) - that holds for
+    whole windows of arguments, not for a few rare bits: a workload that
+    lives in such a window marks there on purpose, and the stages that
+    compare images with `lang.run` replay those lanes by the definition
+    (item 5's legs).
 - **Division and the square root** (L4, 2026-10-02) are each one
   correctly rounded operation, with exactly the flags the golden function
   raises: a quiet NaN in gives the canonical NaN and no flag, as every
@@ -501,7 +563,8 @@ their operands in those functions' order.
 | written | refusal | why |
 |---|---|---|
 | `sqrt(c)` of a constant that is no rational's square, `sqrt(2)` or `sqrt(-4)` | `irrational-constant` | a constant is an exact rational; `sqrt(9/4)` is folded to 3/2 ("Constants"), and the root of a param is taken at run time |
-| a transcendental | `transcendental` at run time, `irrational-constant` on a constant | the correctly rounded math library is a later step |
+| one of the six of a constant whose value is irrational or not real, `exp(1)`, `log(2)`, `log(-4)` | `irrational-constant`; at a logarithm's pole, `log(0)`, `log2(0)`, `log1p(-1)`, `constant-division-by-zero` | a constant is an exact rational; `exp(0)`, `exp2(3)` and `log2(1/8)` are folded ("Constants"), and the function of a param is taken at run time |
+| `sin`, `cos`, `pow` and the rest of the reserved transcendentals | `transcendental` at run time, `irrational-constant` on a constant | the rest of the correctly rounded math library is M2 to M4's |
 | `^` or `**` | `power` | write `x * x`, and a longer product in the order meant |
 | `t`, declared nowhere | `time-dependence` | carry time in the state, `state t` and `d/dt t = 1`, or count steps ("Time") |
 | `h` in a flow's equations | `h-scope` | a step-halving run halves h; the right-hand side must not move with it |
@@ -513,6 +576,18 @@ Both are operations now ("The operations"; parcel L4), and both names
 are gone. The compiler refused them by a name of its own,
 `runtime-routine`, until parcel C4 carried them as inlined routines;
 that name went with it.
+
+Until 2026-10-15 exp, expm1, exp2, log, log1p and log2 were refused here
+too, `transcendental` at run time and `irrational-constant` of any
+constant, `exp(0)` and `log(0)` included. They are operations now ("The
+operations"; M1's build, item 3), folded of a constant where the value is
+rational, and of a constant refused by name elsewhere ("Constants").
+Three kinds of source are refused still, by another name: `log(0)`,
+`log2(0)` and `log1p(-1)` are `constant-division-by-zero`, a function of
+h is `h-nonlinear`, and a folded power past a format is the constant
+refusals' (`exp2(2000)` at fp64 is `constant-overflow`). The compiler
+refuses the six by an interim name, `math-library`, until M1's build,
+item 4, carries them.
 
 ## Constants
 
@@ -530,6 +605,29 @@ that name went with it.
   where it meets the run, then the root - and spend a run-time routine on
   a value fixed when compiled. The root of a fixed value taken at run
   time is the root of a param: `param two = 2`, `sqrt(two)`.
+- **The math library's six of a constant** fold by the same rule, exactly
+  where the value is rational and nowhere else (Logan's answer to M1's
+  question 8, 2026-10-12): `exp(0)` is 1, `expm1(0)` is 0, `exp2(n)` is
+  2^n for an integer n, `log(1)` is 0, `log1p(0)` is 0, and `log2(2^k)` is
+  k. Every other value is irrational or not real, and is refused
+  `irrational-constant`, the sentence saying why: e to a nonzero rational
+  power is transcendental, and so is the logarithm of a positive
+  rational other than 1 (Lindemann-Weierstrass); 2 to a power that is no
+  integer is irrational, and log2 of a rational is rational only at a
+  power of two; the logarithm of a negative constant, log1p's below -1,
+  has no real value, as `sqrt(-4)` has none. The poles, `log(0)`,
+  `log2(0)` and `log1p(-1)`, are `constant-division-by-zero`, which IEEE
+  754 calls divideByZero and the operation raises. A folded value is a
+  constant like any other, rounded once where it meets the run:
+  `exp2(2000)` at fp64 is `constant-overflow`, `exp2(-2000)`
+  `constant-rounds-to-zero`, and `exp2(-1075)` there, the tie half the
+  smallest subnormal (2^(emin - p) at every format), rounds to that
+  subnormal under rmm and rup, as the run-time operation does since the
+  conformance profile's step to 3 (parcel XT; M1's question 5), and to
+  zero, refused, under rne, rtz and rdn, where the operation gives +0 with
+  underflow and inexact - the gate holds both at the four formats. An
+  integer n past 2^20, whose power lies beyond every format by far, is
+  `constant-range`. The function of a param is taken at run time.
 - The same holds inside the integrators' templates.
 
 **Rounded once.** A constant is rounded ONCE, under the program's
@@ -558,10 +656,13 @@ any of these:
   keep, `constant-negative-zero`;
 - `inf` or `infinity`: `constant-infinity`;
 - `nan` or `snan`: `constant-nan`;
-- a constant divided by a constant zero: `constant-division-by-zero`;
+- a constant divided by a constant zero, or a logarithm of a constant at
+  its pole, `log(0)`, `log2(0)`, `log1p(-1)`: `constant-division-by-zero`;
 - the square root of a constant that is no rational's square - an
-  irrational one, `sqrt(2)`, or none at all, `sqrt(-4)`:
-  `irrational-constant`, its sentence saying which.
+  irrational one, `sqrt(2)`, or none at all, `sqrt(-4)` - or one of the
+  math library's six of a constant whose value is irrational, `exp(1)`,
+  or not real, `log(-4)`: `irrational-constant`, its sentence saying
+  which.
 
 All of them can still arise at run time. A lane may start at -0, an
 infinity or a NaN, and the operations make them.
@@ -609,12 +710,13 @@ param is a run-time neg of its rounded value. For an exact constant
     exactly, so `(h*h)/h` is h, and `(h*h)/(h*h)` is 1 - in a map, a
     use of h that folds away (below).
   - Folding constants, a sum of different powers of h, and a min, max,
-    minnum, maxnum, comparison, select or square root whose operands are
-    all constants, one of them changing with h's size, are refused where
-    they are folded, whatever surrounds them: `(h + 1) - 1` at its sum
-    although its value is h, `min(h, 2*h)` although at h's sign it is
-    a multiple of h, and `sqrt(h)` and `sqrt(h*h)` (L4) although the
-    second is |h|. h's sign enters a constant only through copysign and
+    minnum, maxnum, comparison, select, square root or one of the math
+    library's six whose operands are all constants, one of them changing
+    with h's size, are refused where they are folded, whatever surrounds
+    them: `(h + 1) - 1` at its sum although its value is h, `min(h, 2*h)`
+    although at h's sign it is a multiple of h, `sqrt(h)` and `sqrt(h*h)`
+    (L4) although the second is |h|, and `exp(h)` and `log2(2*h)` (M1's
+    build, item 3). h's sign enters a constant only through copysign and
     abs. A run-time operation on an h-scaled constant is an operation like
     any other: `min(x, h)` in a map is a min of the state and the
     constant h, and `x / h` (L4) a division of the state by it, which a
@@ -1169,7 +1271,10 @@ tangent nodes, which only read them.
 
 **What a run does.** Each step, for each lane, every node of the step
 section, in order, is evaluated by its golden function under the
-program's attribute.
+program's attribute. A graph holding one of the math library's six needs
+mpmath for theirs; without it the run raises transcend.ZivEscalation,
+naming mpmath and the functions, before any lane runs ("The
+operations").
 - **FLAGS** ORs every node's flags over every lane and step, exactly as
   seq.py ORs every ALU instruction's over its active lanes.
 - **Constants' flags** are not FLAGS.
@@ -1251,6 +1356,14 @@ in UTF-8 plain text.
   quotient, a negation) and its denominator unless it is a name, a
   number or a call: x·y/z, (x/y)/z, x/(y·z). A root reads √(a). So
   `x * 8 / 3` reads x·8/3 and `x * (8/3)` x·(8/3).
+- **The math library's six** (M1's build, item 3), each one operation, as
+  a call: exp(a), expm1(a), 2^(a), ln(a), log1p(a) and log₂(a) - the
+  conventional notation where there is one, and for expm1 and log1p the
+  names numerical libraries give them, since e^a − 1 and ln(1 + a) would
+  print two operations where the program performs one, rounded once. L,
+  the rounded ln 2 in exp2's and log2's tangent rules, prints as the
+  exact rational it is (6243314768165359/9007199254740992 at fp64 under
+  rne), as every constant does.
 - **Parentheses** appear only where exact arithmetic needs them.
 - **Constants.** Each constant is its exact value, and h-multiples print
   as `h/2` with h's value stated.
@@ -1272,7 +1385,11 @@ without defaults, lets and an indexed let, state components, q and p,
 each integrator, an h-scaled constant in a map, a quotient and a root),
 and on sixty seeded random systems that cover every operation, division
 and the square root among them, constants folded, lets, arrays, lane
-params, every format and attribute, and each integrator and maps:
+params, every format and attribute, and each integrator and maps - every
+operation but the math library's six, which have four written systems
+and thirty seeded random systems of their own, a third of them with a
+tangent vector, so that the sixty draws are what they were before M1's
+build, item 3:
 1. **The canonical form is itself a valid source.** Parsed again it gives
    the same step graph, byte for byte, and written out again it gives
    the same text, byte for byte, comments included. A canonical form
@@ -1296,6 +1413,18 @@ params, every format and attribute, and each integrator and maps:
      negative number - in a select's discarded arm too, which the reader
      never evaluates - decides nothing and is drawn again; the gate holds
      that most points decide.
+   - The math library's six are exact in rationals only where their value
+     is rational. Both evaluations take the same convention for them, as
+     for the root (M1's build, item 3; `graph.exact_transcendental`, the
+     reader computing its own): exact there - exp(0) = 1, exp2(n) = 2^n,
+     log(1) = 0, log2(2^k) = k - and otherwise mpmath's value at 1,024
+     bits, the argument rounded to nearest at 1,024 bits first; expm1(a)
+     is exp(a) - 1 and log1p(a) is log(1 + a) of the same fixed exp and
+     log, so that expm1's tangent rule, (1 + r)·da, evaluates to exp's own
+     derivative. A logarithm at its pole or below its domain is undefined
+     there, as a division by zero is, and so is a value past 2^±1048576.
+     The gate holds the two evaluations one function, and each within
+     2^-1000 of the function, relatively.
 3. **What the intention-out says besides its code is read back and held
    to the graph and to the test's own arithmetic and tables.** Every
    line of both forms is read, in order, and a line the reader does not
@@ -1591,6 +1720,12 @@ not differentiable is given its fixed value in the last column.
 | `min(a, b)`, `max`, `minnum`, `maxnum` | `select(r == a, da, db)` | `0` for the zero side | at a tie, ±0 included, r == a: the first operand's tangent; where the result is a NaN, r == a is false: the second's |
 | `a < b`, `<=`, `>`, `>=`, `==` | zero | | the jump at a = b is not differentiated |
 | `select(c, a, b)` | `select(c, da, db)` | `0` for the zero side | the jump at c = 0 is not differentiated: c's tangent is never read |
+| `exp(a)` | `r * da` | zero | - |
+| `expm1(a)` | `(1 + r) * da` | zero | - |
+| `exp2(a)` | `(L * r) * da` | zero | - |
+| `log(a)` | `select(r == r, da / a, r)` | zero | at a = ±0, da / ±0: an infinity with divideByZero, or a NaN with invalid where da is ±0 too, the quotient's convention; below zero r is a NaN, and so is the tangent |
+| `log2(a)` | `select(r == r, da / (L * a), r)` | zero | as log |
+| `log1p(a)` | `select(r == r, da / (1 + a), r)` | zero | at a = -1 as log at 0; below -1 as log below 0 |
 | a constant, h, a param, a lane param | zero | | |
 | a state component x | the tangent input `v.x` | | |
 
@@ -1619,7 +1754,9 @@ not differentiable is given its fixed value in the last column.
 - At the quotient's and the root's singular points the tangent is what
   IEEE 754-2019's own operations give: a division by zero is an infinity
   with divideByZero, or a NaN with invalid (7.2, 7.3), and the root of a
-  negative number a NaN with invalid.
+  negative number a NaN with invalid. A logarithm's pole is the same
+  division by zero; below its domain the logarithm is a NaN, and so is
+  its tangent, as the root's is.
 - No standard fixes a derivative's rounding; the rest are the
   language's.
 
@@ -1680,6 +1817,60 @@ has one, written again where it has none.
   `x / fma(x, x, 1)` takes 768 instructions a step, and 1,489 with one
   vector (measured, C4).
 
+**The math library's six** (M1's build, item 3, 2026-10-15; the design is
+docs/studies/M1-exp-log.md, section 7, with Logan's answers to its
+questions 6 and 7 and two decisions of the lead's). Each rule reads r,
+the function's own result, as the quotient's does, by name where it has
+one and written again where it has none, and L, ln 2 rounded once at the
+program's format under its attribute: transcend.log of 2, a constant like
+any other, its exact value the rational the rounded encoding is (Logan's
+answer to question 6: "the exact ln 2, rounded once at the program's
+format under its attribute"; no new name, so the step stays minor). The
+checker computes L by an integer series, so that checking a source never
+needs mpmath, and the gate holds it equal to transcend.log of 2 at every
+format and attribute; the canonical form writes it as its hexadecimal
+significand (`0x1.62e42fefa39efp-1` at fp64 under rne), which reads back
+to itself, and it joins the const table only where exp2's or log2's rule
+reads it.
+- **exp:** `r * da`, the textbook's e^a·da with r = e^a: one rounding,
+  the product.
+- **expm1:** `(1 + r) * da`, two roundings: 1 + r, the textbook's e^a =
+  1 + expm1(a), is primal-only, shared across vectors, and then one
+  product a vector. The study proposed `fma(r, da, da)`, (1 + r)·da in
+  one rounding, which reads da twice; the step graph gives an unlabelled
+  node one use (`graph.canonical`; the canonical form writes such a node
+  where it is used, so a second use would read back as a second node),
+  and writing da again where it has no name would double the tangent at
+  each nested expm1, 2^k nodes at k levels. So the lead decided `(1 + r) *
+  da` (2026-10-15), not the fma where da has a name: a let must never
+  change the bits. Its error is dominated by r's own rounding where a is
+  very negative and r near -1, as the fma's would be.
+- **exp2:** `(L * r) * da`, two roundings: L·r is primal-only, shared,
+  then one product a vector.
+- **log:** `select(r == r, da / a, r)`: one rounding, the division, the
+  same correctly rounded division as the operation `/` - and where log is
+  a NaN, below zero, `r == r` is false and the tangent is r, the NaN, as
+  the root's is (Logan's answer to question 7, the select form; `da / a`
+  alone would give a finite tangent there, the derivative of log|a|). The
+  compare is primal-only and shared; the select is one a vector beside the
+  division.
+- **log2:** `select(r == r, da / (L * a), r)`, two roundings: L·a is
+  primal-only, shared, then the division.
+- **log1p:** `select(r == r, da / (1 + a), r)`, two roundings: 1 + a is
+  primal-only, shared, and rounded - the textbook's form, so the rule is
+  the derivative of what the program computes, as L3 asks. log2 and log1p
+  take the select form too, so that each is a NaN below its domain "as
+  log" (question 7's own text names log1p below -1; the lead's decision,
+  2026-10-15).
+- **What a tangent costs.** Each call of the six whose tangent the step's
+  tangent reads costs each vector one product (exp, expm1, exp2) or one
+  division and its select (the logarithms); its primal-only values, the
+  copies of r and the compare are shared (the gate holds each rule's
+  count after sharing, and leaves the sharing itself to the compiler,
+  item 4). With the compiler's routines (item 4), a logarithm's division
+  is a division routine a vector a call, as the study counted (section
+  7: about 190 instructions).
+
 **Reading a primal value.** A rule reads a primal value by name where it
 has one - a state component, a param, a lane param, a constant, a let, a
 label of the expanded step - and otherwise **writes it again**:
@@ -1696,7 +1887,8 @@ brackets): `+` and `-` 1 [1]; unary minus none [none]; `*` 2 [1]; fma 2
 [1]; `/` 2 [1], the fused numerator and the division; sqrt 1 [1], the
 division, its doubling exact; abs one exact product by ±1 [none];
 copysign two [none]; the min family and select none, a quiet compare and
-a select [none].
+a select [none]; exp 1 [1]; expm1, exp2, log2 and log1p 2 [1], a
+primal-only value and the product or division; log 1 [1], the division.
 
 **Nothing is refused for not being differentiable.** Every operation is
 differentiable almost everywhere, and each point where one is not has
@@ -1739,11 +1931,12 @@ k1.x), and an unlabelled one has one use, since a primal value is read
 across sections only where it has a name.
 - **The primal is unchanged.** `field`, `step` and the const table are
   the primal graph's, byte for byte, unless a rule adds a constant the
-  table lacks - only 0, 1, -1 and 2 can be added (1 by abs and copysign; 0
-  by a min or a select with one side zero, and by an output whose
-  tangent is zero; -1 where copysign's b is a negative constant, so that
-  `copysign(1, b)` folds, as any constant expression does; 2 by the
-  square root's rule, L4) - and then
+  table lacks - only 0, 1, -1, 2 and L can be added (1 by abs and
+  copysign, and by expm1's and log1p's rules; 0 by a min or a select
+  with one side zero, and by an output whose tangent is zero; -1 where
+  copysign's b is a negative constant, so that `copysign(1, b)` folds, as
+  any constant expression does; 2 by the square root's rule, L4; L, ln 2
+  rounded once, by exp2's and log2's, M1's build, item 3) - and then
   only the const refs are renumbered by the table's value order. No
   reference adds one, and the gate holds both cases.
 - **A graph without tangents is version 1, byte for byte**, so nothing
@@ -1883,20 +2076,33 @@ is a defect in the sentence that says everything is checked):
    equations, and not merely what the graph says. A quotient's derivative
    there is the textbook's (da·b - a·db)/b², not the rule's form, so the
    two meet only where the rule is right; a root's is da/(2·r), r the
-   root as the second check takes it (L4). A point at which the test's
-   own evaluation is undefined - a zero divisor, a negative root's
-   argument, the root's derivative at zero - decides nothing.
+   root as the second check takes it (L4); and each of the math
+   library's six takes its value as the second check takes it, its
+   derivative the textbook's with ln 2 as L, the test's own - transcend.log
+   of 2, not the checker's - so that the check holds L as well as the
+   rules (M1's build, item 3). A point at which the test's own evaluation
+   is undefined - a zero divisor, a negative root's argument, the root's
+   derivative at zero, a logarithm at or below its pole - decides nothing.
 
 **Why exact dual numbers, not mpmath.** Every operation but the square
-root is piecewise rational, so the exact derivative exists, and equality
-needs no tolerance to argue about; a central difference in mpmath would
-carry one, and a dependency besides. The plan of record said "an exact
-derivative in mpmath"; exact rationals are stronger, and the stage stays
-stdlib-only. The square root (L4) is the exception, and is held twice:
-exactly, with each root the fixed function of its argument that both
-sides take, which holds the rule's form; and by a central difference in
-exact rationals, which holds the derivative itself whatever the
-convention ("What the fourth check cannot see").
+root and the math library's six is piecewise rational, so the exact
+derivative exists, and equality needs no tolerance to argue about; a
+central difference in mpmath would carry one, and a dependency besides.
+The plan of record said "an exact derivative in mpmath"; exact rationals
+are stronger, and the stage stayed stdlib-only until the six. The square
+root (L4) is the first exception, and is held twice: exactly, with each
+root the fixed function of its argument that both sides take, which holds
+the rule's form; and by a central difference in exact rationals, which
+holds the derivative itself whatever the convention ("What the fourth
+check cannot see"). The six (M1's build, item 3) are held so too: exactly,
+each the fixed function of its argument that both sides take; and by a
+central difference in high precision, eps = 2^-256 of the 1,024-bit
+values, each tangent component within 2^-300·max(1, |t|), with ln 2 to
+1,100 bits in the place of the const that is the test's own L - so the
+difference sees the rules as derivatives and sees an L rounded another
+way, by its 2^-p and more. That needs mpmath, which the golden stage
+already requires, and Logan accepted it in the language's checks (M1's
+question 10).
 
 **What the fourth check cannot see**, and what holds it instead:
 - **rounding order**: a rule replaced by one equal in exact arithmetic
@@ -1915,7 +2121,17 @@ convention ("What the fourth check cannot see").
   divide and take a root: the quotient's rule rounded otherwise (its
   numerator a product and then a sum) and the root's halved first each
   move both of Kepler's committed graphs and no other (measured
-  2026-10-05);
+  2026-10-05). No committed graph holds the math library's six until
+  item 4's Lotka-Volterra reference, so their rounding order is held by
+  the rule table and by a check of the interpreter's bits: on y = f(a)
+  at every format and attribute, each tangent is the table's last
+  operation rounded once on the primal's own values and the primal-only
+  value the table rounds first, and that operation's exact value is the
+  derivative within its operands' roundings, by the central difference
+  in high precision (`python/tests/test_lang_tangent.py`, the `tangent`
+  stage's leg M). The study's own example, log's rule rounded otherwise
+  as `da * (1 / a)`, is green on the fourth check and on the difference's
+  value, and red there, and on the rule table;
 - **special values**: NaNs, infinities and the sign of zero do not exist
   in exact arithmetic. They are held by the interpreter against seq.py
   bit for bit, with tangents holding signalling NaNs, infinities, -0 and
@@ -1943,7 +2159,12 @@ convention ("What the fourth check cannot see").
   are measured with plants: a root without its 2 and a quotient's wrong
   sign red on both, the root through r·r = a green on the difference and
   red on the exact check (`python/tests/test_lang_tangent.py`, the
-  `tangent` stage's leg L).
+  `tangent` stage's leg L);
+- **the logarithms below their domain** (M1's build, item 3): exact
+  arithmetic has no NaN, so the select form - the tangent the NaN r where
+  log, log2 or log1p is one - is held by unit tests below each domain, at
+  each pole and at a NaN, bit for bit; the select dropped, `da / a`
+  alone, is green on every exact check and red there.
 
 **The Lyapunov smoke test** (the `tangent` stage): Lorenz-63's largest
 exponent, from `lorenz63-rk4-tangent-fp64.cftl` compiled, run on
@@ -2013,7 +2234,7 @@ Nothing else escapes the parser or the checker, and the gate fuzzes the
 references to hold that. `python/cft_golden/lang/refusals.py` is the one
 list: the checker's and the interpreter's names, each made by a test in
 this definition's gate, and the compiler's seven at the end, reserved
-for it. The compiler raises them through the same class, and its own
+for it, with an interim eighth (M1's build, item 3). The compiler raises them through the same class, and its own
 gate makes each one; it raises one of the checker's besides,
 `bank-capacity`, for the cause the checker cannot see (below).
 
@@ -2076,8 +2297,8 @@ Operations v1 does not have:
 
 | name | what it refuses |
 |---|---|
-| `transcendental` | a transcendental function at run time |
-| `irrational-constant` | a square root of a constant that is no rational's square (`sqrt(2)`, `sqrt(-4)`), or a transcendental of a constant |
+| `transcendental` | a transcendental function the language does not have (`sin`, `cos`, `pow` and the rest of the reserved list, M2 to M4's), at run time |
+| `irrational-constant` | a square root of a constant that is no rational's square (`sqrt(2)`, `sqrt(-4)`); exp, expm1, exp2, log, log1p or log2 of a constant whose value is irrational or not real (`exp(1)`, `log(2)`, `log(-4)`); or any other transcendental of a constant, which the language does not have yet |
 | `power` | `^` or `**` |
 | `not-equal` | `!=` |
 | `chained-comparison` | a comparison of a comparison, unparenthesised |
@@ -2092,7 +2313,7 @@ The values a rational cannot carry, and the one rounding:
 | `constant-negative-zero` | a minus written on a zero literal (`-0`, `-0.0`, `-(0)`) |
 | `constant-infinity` | `inf` or `infinity` |
 | `constant-nan` | `nan` or `snan` |
-| `constant-division-by-zero` | a constant divided by a constant zero |
+| `constant-division-by-zero` | a constant divided by a constant zero, or a logarithm of a constant at its pole: `log(0)`, `log2(0)`, `log1p(-1)` (M1's build, item 3; they were `irrational-constant` before) |
 | `constant-overflow` | a constant whose one rounding overflows |
 | `constant-rounds-to-zero` | a nonzero constant whose one rounding is zero |
 
@@ -2129,8 +2350,25 @@ The compiler's, reserved for it (L2).
   refuse it `target-feature`, by name, and the software targets and
   revision 8's compile it. Every source the language accepts compiles
   or is refused by name, and exit 70 stays a defect in the compiler.
+- **An interim eighth, `math-library`** (M1's build, item 3,
+  2026-10-15), as `runtime-routine` was until C4. The language has the
+  math library's six and its interpreter runs them; the compiler carries
+  them from item 4, at its output version 6 (Logan's answer to M1's
+  question 9). Until then it refuses a source that names one - at run
+  time, or folded where its operand is a constant, since a fold-only
+  source that compiled would be a source that compiles where it was
+  refused, which steps the output version (python/cftc/outputs.py) -
+  first, on every target, before anything reads the graph, at the first
+  source line holding a call of one, whatever the statement: an equation,
+  a let, a const, a default, h, a written tangent or a line of an
+  expansion block (the checker's lines, `StepGraph.math_lines`, never in
+  the bytes). A graph read from bytes carries no lines: its run-time
+  nodes are refused with no line, and its folds, constants like any
+  other, compile as the source that writes their values does. No source
+  the language accepts reaches exit 70, no committed compiled byte moves,
+  and cftc's version stays 5. Item 4 lifts it.
 
-The checker never raises any of the seven. The sentences below are their
+The checker never raises any of the eight. The sentences below are their
 form; the compiler words each one for the case at hand.
 
 | name | what it refuses | its sentence |
@@ -2142,6 +2380,7 @@ form; the compiler words each one for the case at hand.
 | `target-feature` | a feature whose CAPS bit the target does not publish | "this image needs a feature the target's CAPS bits do not publish" |
 | `segment-steps` | a step count outside 1 to 2^32-1, the range of the REPEAT immediate a segment's steps are | "a segment is one REPEAT of 1 to 4,294,967,295 steps; this count is not one" |
 | `halving-underflow` | an h-scaled constant whose exact halving underflows, so the step-halving bank cannot hold it exactly | "this h-scaled constant underflows when halved, so the step-halving bank would not be this bank halved exactly" |
+| `math-library` | interim, until M1's build, item 4: a source naming exp, expm1, exp2, log, log1p or log2, at run time or folded | "this system computes log at run time: ... the compiler carries them from item 4 ... and until then refuses a source that names one" |
 
 ## The gate
 
@@ -2205,6 +2444,22 @@ under `make golden`, with no change to either.
   compiled there; a division by a constant zero run; a chain of 3,000
   products and quotients flat and read back; the exact root one
   function in the graph's evaluation and the test's reader;
+- the math library's six (M1's build, item 3): each a node of one
+  operand, named as transcend.py names it, listed after sqrt, a
+  built-in held to one argument, and `transcendental` still M2 to M4's
+  for every other reserved name; each lane's result and flags
+  transcend.compute's for the node's own name, at every format under
+  every attribute, the specials, poles, overflow and underflow among the
+  lanes; the six folds exact and rounded once at every format and
+  attribute, in an equation, a const and a default; a folded power at
+  each format's edges, and exp2(2000) and exp2(-2000) at fp64; the tie
+  exp2(emin - p) folded and at run time, under every attribute; every
+  refusal of a function of a constant by name and line, each with the
+  name it had before; the renderers' notation and the three checks on
+  written systems and thirty random ones; the exact transcendental one
+  function in the graph's evaluation and the test's reader, and within
+  2^-1000 of the function; mpmath needed by a run of the six alone, its
+  absence named; the language at 1.1, with cft.h's macros;
 - this document's refusal tables, template text and Lorenz-63 blocks
   against the code.
 
@@ -2250,6 +2505,19 @@ under `make golden`, with no change to either.
   on written systems under every integrator and on generated ones; and
   three plants - the root without its 2 and the quotient's wrong sign
   red on both, the root through r·r = a red on the exact check alone;
+- the math library's six rules (M1's build, item 3): each rendered on a
+  one-operation system against the table's text; the fourth check and a
+  central difference in high precision on written systems under every
+  integrator and on generated ones; each rule's rounding on y = f(a), bit
+  for bit at every format and attribute, its exact value before its
+  last rounding the derivative within its operands' roundings; the
+  specials below each domain, at each pole and at a NaN; one product or
+  one division a vector a call, its primal-only values none; the primal
+  unchanged, L the only new constant beside 1; L transcend.log of 2 at
+  every format and attribute; and three plants - log's rule rounded
+  otherwise red on the rounding and the rule table alone, log's select
+  form dropped red below the domain alone, L rounded the wrong way red
+  on the fourth check, the difference and the rounding;
 - determinism across hash seeds; this document's variational blocks and
   sources against the renderers and the committed files.
 
@@ -2320,7 +2588,10 @@ refused `target-feature` on revision 7's targets and through the
 command line (exit 3, never 70); its leg L holds the call loop - eight
 bodies under rk4, which the constant itself loops, and Kepler under rk4
 with the constant lowered; the `tangent` stage's leg L compiles the
-quotient's and the root's rules the same way; and the `lang` stage
+quotient's and the root's rules the same way, and its leg M holds the
+math library's six rules in the golden model, with plants (their
+compiled legs are M1's build, item 5's, after item 4's compiler); and
+the `lang` stage
 certifies Kepler's routine images and holds the routines' four plants
 and the loop's three in its leg H. The routines themselves are held to
 softfloat by python/tests/test_routines.py and the `lang-routines`
@@ -2368,8 +2639,11 @@ stage's leg K2, and their inlining and their loops by
     its cycles - and a wide batch, looped, can need more scratch than
     the inlined step did; a step whose routines sit one to a batch
     stays inlined past the constant.
-- **Run-time transcendentals.** The correctly rounded math library is a
-  later step.
+- **The rest of the math library.** The language has exp, expm1, exp2,
+  log, log1p and log2 (M1's build, item 3); sin, cos, tan, pow, the
+  inverse trigonometric functions and the rest of the reserved list are
+  M2 to M4's, refused `transcendental` until then. The compiler carries
+  the six from item 4, and refuses them `math-library` until it does.
 - **A built-in time, adaptive steps and events.** There is no reserved
   `t`: a system carries time in its state or counts its steps, and sin
   and cos of t wait for the math library ("Time").

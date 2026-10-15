@@ -3354,9 +3354,11 @@ Logan's permission.
   committed ones, and cft-audit audits every version-2 case and control,
   handed what the manifest hands but the source and the regeneration,
   giving the golden auditor's verdict for the same ("The audit tool").
-- A replay decided through mpmath: no node of the language reaches it
-  yet, so `definition-unavailable` and `replay-undecided` have no
-  committed case.
+- A replay decided through mpmath: the language's math library's six
+  reach it since M1's build, item 3 (2026-10-15), but no compiled image
+  holds one until the compiler carries them (item 4), so no certificate
+  names a source that does, and `definition-unavailable` and
+  `replay-undecided` have no committed case.
 
 ## What version 1 does not do
 
@@ -3952,10 +3954,15 @@ re-derivation passed under the auditor's.
 `definition-unavailable` (exit 78) where it first needs to: no mpmath for
 a node whose golden function is decided through mpmath's enclosures, or
 an enclosure that reached its precision cap (`transcend.py`'s
-`ZivEscalation`). No node of the language reaches `transcend.py` yet: the
-language refuses `exp` (`transcendental`), and its division and root are
-softfloat's. M1's routines will be the first. A writer that meets the same
-refuses `replay-undecided` (exit 78).
+`ZivEscalation`). The math library's six - exp, expm1, exp2, log, log1p
+and log2, the language's since M1's build, item 3 (2026-10-15) - are the
+nodes that reach `transcend.py` (`cert2.TRANSCEND_OPS`); its division and
+root are softfloat's. No certificate can name a source holding one until
+the compiler carries them (item 4): until then the audit's mapping of the
+failure - `cert2._evaluate`'s `_Undecided`, refused here - is held by
+python/tests/test_cert2.py on a definition holding exp, and by plants on
+the committed cases. A writer that meets the same refuses
+`replay-undecided` (exit 78).
 
 ### Provenance
 
@@ -4319,7 +4326,7 @@ device-version none
 device-caps none
 device-tiles 1
 profile 3.1
-language 1
+language 1.1
 device-platform none
 device-xrt none
 device-clock none
@@ -4373,7 +4380,7 @@ quantity counter terms 1
 term 1/1 s0
 value exact c/1
 end
-hash 6dddd56d2ab0b0c4e697924069ecb993f79ed23b5c6c5af25c450ebb87d9ce89
+hash e04b6be1ddeb3a59d7988721d4bafb4b5f65bdeb11bd3fe92900b14a16530c25
 ```
 
 Reading it: the image marks lanes 0 and 1 in segment 1, where k is 7 and
@@ -4464,8 +4471,10 @@ rebuilds from its source and its generator alone. The controls cover:
   the auditor covers (the major alone, profile 3 under an auditor at 3.1);
 - `definition-unavailable` and `replay-undecided`, with mpmath taken away
   from a node planted as transcendental, and with an enclosure forced to
-  its cap: no node of the language reaches mpmath yet, so these plants
-  stand for M1's;
+  its cap: the six reach mpmath since M1's build, item 3, but no
+  committed case holds one until item 4, so these plants stand for
+  them; and a definition holding exp needs mpmath, and without it
+  `_evaluate` refuses it undecided, the failure the audit names;
 - the golden writer's own refusals, and every field it cannot spell;
 - the key tool: a key made, never overwritten, signing and verifying both
   ways, a bad key file, a key file others may read (POSIX's check, forced

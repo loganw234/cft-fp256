@@ -149,11 +149,13 @@ CFT_API uint32_t cft_abi_version(void);
  * rounded as IEEE 754 rounds it, roundTiesToAway's answer moving) left
  * the ABI at 0.18, since no call gained or lost a meaning, and so did
  * profile 3.1 (2026-10-13, 3,500 cases added to the transcendental
- * vector sets and no library code changed). */
+ * vector sets and no library code changed), and so did the language's
+ * 1.1 (2026-10-15, M1's build, item 3: exp, expm1, exp2, log, log1p and
+ * log2 in the language, which this library does not evaluate). */
 #define CFT_PROFILE_MAJOR  3
 #define CFT_PROFILE_MINOR  1
 #define CFT_LANGUAGE_MAJOR 1
-#define CFT_LANGUAGE_MINOR 0
+#define CFT_LANGUAGE_MINOR 1
 
 /* Which source tree this library was built from   (ABI 0.15, 2026-09-28)
  *

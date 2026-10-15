@@ -39,8 +39,9 @@ they were before tangents existed):
                  interpreter runs once a vector, after the step
 
 A node is [op, [ref], label or null]; an op is one of OPS below - div
-and sqrt, the run-time division and square root (L4, 2026-10-02), among
-them; a ref is sN (a state input), lN (a lane param), pN (a param), cN
+and sqrt, the run-time division and square root (L4, 2026-10-02), and
+the math library's exp, expm1, exp2, log, log1p and log2 (M1's build,
+item 3, 2026-10-15), among them; a ref is sN (a state input), lN (a lane param), pN (a param), cN
 (a const) or nN (a node of the same section, always an earlier one). In
 a tangent section nN is a LABELLED node of the section it differentiates
 (a tangent reads an unlabelled primal value by writing it again), dN a
@@ -69,28 +70,49 @@ from .refusals import Refusal
 
 VERSION = 1
 
+# The math library's six (M1's build, item 3): each a node of one operand,
+# named as transcend.py names the function, its golden function
+# transcend.compute(fmt, name, a, 0, rnd) under the program's attribute.
+TRANSCEND = ("exp", "expm1", "exp2", "log", "log1p", "log2")
+
 # The operations a node may be, in the order counts are written, with
 # each one's operand count. The names are softfloat.OP_NAMES' spellings
 # and the operand order is the golden function's (asm.py's OP_FIELDS) -
 # but for div and sqrt, which no tile instruction is: their names are the
-# golden functions' own, sf.div and sf.sqrt (L4). Count lines write only
-# the operations a section has, so a graph without these two writes what
-# it wrote before them.
+# golden functions' own, sf.div and sf.sqrt (L4); and the six, whose names
+# are transcend.py's. Count lines write only the operations a section
+# has, so a graph without these writes what it wrote before them.
 OPS = {"fma": 3, "add": 2, "sub": 2, "mul": 2, "div": 2, "sqrt": 1,
+       **{fn: 1 for fn in TRANSCEND},
        "neg": 1, "abs": 1,
        "copysign": 2, "min": 2, "max": 2, "minnum": 2, "maxnum": 2,
        "cmplt": 2, "cmple": 2, "cmpeq": 2, "select": 3}
-ROUNDED = frozenset({"fma", "add", "sub", "mul", "div", "sqrt"})
+ROUNDED = frozenset({"fma", "add", "sub", "mul", "div", "sqrt", *TRANSCEND})
 
 # exact_eval's square root of a rational that is no rational's square: its
 # value rounded down to a multiple of 2^-ROOT_BITS - a fixed function of
 # its exact argument, which the tests' own readers compute alike (L4).
 ROOT_BITS = 256
 
+# exact_eval's transcendental, where its value is irrational: mpmath's at
+# TRANS_BITS bits, the argument rounded to nearest at TRANS_BITS first - a
+# fixed function of its exact argument, as the root is, which the tests'
+# own readers compute alike (M1's build, item 3). Exact where the value is
+# rational, which is where the language folds a constant: exp(0) = 1,
+# exp2(n) = 2^n, log(1) = 0, log2(2^k) = k. expm1(a) is exp(a) - 1 and
+# log1p(a) is log(1 + a), each of the same fixed exp and log, so that the
+# exact evaluation of expm1's tangent rule, (1 + r) * da, is exp's own
+# derivative. TRANS_BITS is wide enough that a central difference at
+# 2^-256 of these values keeps 2^-700 and more (programs/tangent_check.py).
+TRANS_BITS = 1024
+_TRANS = []
+
 
 class Undefined(ArithmeticError):
-    """An exact evaluation that has no value: a division by zero, or the
-    square root of a negative number."""
+    """An exact evaluation that has no value: a division by zero, the
+    square root of a negative number, a logarithm at or below zero (log1p
+    at or below -1), or a transcendental whose value lies beyond
+    2^+-1048576, outside every format by far."""
 
 
 def exact_root(value):
@@ -107,6 +129,72 @@ def exact_root(value):
         return root
     n, d = value.numerator, value.denominator
     return Fraction(isqrt((n << (2 * ROOT_BITS)) // d), 1 << ROOT_BITS)
+
+
+def _mp(fn, value):
+    """exp, exp2, log or log2 of a rational, by mpmath at TRANS_BITS, as
+    the exact rational the result is (its _mpf_ tuple, read)."""
+    if not _TRANS:
+        import mpmath            # only a graph holding one of the six needs it
+        ctx = mpmath.MPContext()
+        ctx.prec = TRANS_BITS
+        _TRANS.append((mpmath.libmp, ctx))
+    lib, ctx = _TRANS[0]
+    x = ctx.make_mpf(lib.from_rational(value.numerator, value.denominator,
+                                       TRANS_BITS, lib.round_nearest))
+    if fn == "exp":
+        y = ctx.exp(x)
+    elif fn == "exp2":
+        y = ctx.power(2, x)
+    elif fn == "log":
+        y = ctx.log(x)
+    else:
+        y = ctx.log(x) / ctx.ln2
+    sign, man, exp, bc = y._mpf_
+    man = int(man)
+    if man == 0 or not -K_.LIMIT_LOG2 <= exp + bc <= K_.LIMIT_LOG2:
+        raise Undefined(f"{fn}({K_.brief(value)}) lies beyond 2^+-"
+                        f"{K_.LIMIT_LOG2}")
+    v = Fraction(man << exp) if exp >= 0 else Fraction(man, 1 << -exp)
+    return -v if sign else v
+
+
+def exact_transcendental(op, value):
+    """The transcendental exact_eval takes (TRANS_BITS, above): exact where
+    the value is rational, otherwise mpmath's at TRANS_BITS - a fixed
+    function of its exact argument. Undefined at a logarithm's pole or
+    below its domain, and for a value beyond 2^+-1048576."""
+    v = K_.exact(value)
+    if op == "exp":
+        if v == 0:
+            return Fraction(1)
+        if abs(v) > 1 << 21:     # e^v beyond 2^+-1048576 for |v| > 726,817
+            raise Undefined(f"exp({K_.brief(v)}) lies beyond 2^+-"
+                            f"{K_.LIMIT_LOG2}")
+        return _mp("exp", v)
+    if op == "expm1":
+        return exact_transcendental("exp", v) - 1
+    if op == "exp2":
+        if abs(v) > K_.LIMIT_LOG2:
+            raise Undefined(f"exp2({K_.brief(v)}) lies beyond 2^+-"
+                            f"{K_.LIMIT_LOG2}")
+        if v.denominator == 1:
+            return Fraction(2) ** v.numerator
+        return _mp("exp2", v)
+    if op == "log1p":
+        if v <= -1:
+            raise Undefined(f"log1p({K_.brief(v)}), at or below -1")
+        return exact_transcendental("log", 1 + v)
+    if op in ("log", "log2"):
+        if v <= 0:
+            raise Undefined(f"{op}({K_.brief(v)}), at or below zero")
+        n, d = v.numerator, v.denominator
+        if op == "log" and v == 1:
+            return Fraction(0)
+        if op == "log2" and n & (n - 1) == 0 and d & (d - 1) == 0:
+            return Fraction(n.bit_length() - d.bit_length())
+        return _mp(op, v)
+    raise ValueError(op)
 
 
 class Node:
@@ -270,6 +358,15 @@ class StepGraph:
         # (routine_lines, the source lines holding a run-time division or
         # root, went with the compiler's interim refusal at C4: nothing
         # else read them)
+        # Where the source names one of the six (TRANSCEND) - at run time,
+        # a node, or folded where its operand is a constant: the lines,
+        # ascending, at which the checker met such a call, whatever the
+        # statement (an equation, a let, a const, a default, h, a written
+        # tangent, a line of an expansion block). The checker sets it; a
+        # graph read from bytes, or made otherwise, has None. Never part of
+        # the bytes: the compiler's interim refusal, `math-library`, names
+        # the first of them until M1's build, item 4 (python/cftc).
+        self.math_lines = None
         # The format the SOURCE declares, where the checker built the graph:
         # its `format` line's value, which a format override (check's `fmt`,
         # cftc's --format) replaces - so the graph is at `fmt`, and this
@@ -323,6 +420,7 @@ class StepGraph:
                       self.field, self.step, self.tangent,
                       self.tangent_field, self.tangent_step)
         g.source_format = self.source_format
+        g.math_lines = self.math_lines
         for k, v in changes.items():
             setattr(g, k, v)
         return g
@@ -609,8 +707,13 @@ class StepGraph:
         root is exact_root's: the exact root where its argument is a
         rational's square, and otherwise a fixed function of its exact
         argument - the root rounded down to 2^-ROOT_BITS - so that two
-        evaluations of the same root agree exactly (L4). A division by
-        zero or a negative root's argument raises Undefined. `params` and
+        evaluations of the same root agree exactly (L4). The six
+        transcendentals are exact_transcendental's, alike: exact where the
+        value is rational, otherwise mpmath's at TRANS_BITS, a fixed
+        function of the exact argument (M1's build, item 3), so a graph
+        holding one needs mpmath here. A division by zero, a negative
+        root's argument, a logarithm at or below its pole and a value
+        beyond 2^+-1048576 raise Undefined. `params` and
         `lanes` default to the declared defaults. A tangent section
         (tangent_field, tangent_step) takes `tangent`, one tangent
         vector's values, and evaluates the section it differentiates
@@ -701,6 +804,8 @@ def _exact(op, a):
         return a[0] / a[1]
     if op == "sqrt":
         return exact_root(a[0])
+    if op in TRANSCEND:
+        return exact_transcendental(op, a[0])
     if op == "neg":
         return -a[0]
     if op == "abs":

@@ -13,13 +13,16 @@
 
   render_math       the equations in conventional notation (UTF-8 plain
                     text): each fma as the a*b + c it computes, a
-                    division as a/b and a square root as √(a), each
-                    constant as its exact value, the step as the
-                    template's own scheme. Evaluated exactly at random
-                    rational points it gives what the step graph gives
-                    evaluated exactly (python/tests/lang_mathform.py) -
-                    each square root a fixed function of its exact
-                    argument on both sides (graph.exact_root).
+                    division as a/b and a square root as √(a), the math
+                    library's six as exp(a), expm1(a), 2^(a), ln(a),
+                    log1p(a) and log₂(a), each constant as its exact
+                    value, the step as the template's own scheme.
+                    Evaluated exactly at random rational points it gives
+                    what the step graph gives evaluated exactly
+                    (python/tests/lang_mathform.py) - each square root
+                    and each of the six a fixed function of its exact
+                    argument on both sides (graph.exact_root,
+                    graph.exact_transcendental).
 
 Both read the step graph - and, for a flow's step, the template the
 graph names - and never the source text.
@@ -525,6 +528,20 @@ def m_sqrt(a):
     return M(f"{ROOT}({a.text})", 3)
 
 
+# The math library's six (M1's build, item 3), each one exact operation in
+# conventional notation where one exists - exp(x), 2^(x), ln(x), log₂(x) -
+# and otherwise by the name numerical libraries give it, expm1(x) and
+# log1p(x) (C99's, transcend.py's; IEEE 754-2019 calls the second logp1):
+# e^x − 1 and ln(1 + x) would print two operations where the program
+# performs one, rounded once.
+_MATH_CALL = {"exp": "exp({})", "expm1": "expm1({})", "exp2": "2^({})",
+              "log": "ln({})", "log1p": "log1p({})", "log2": "log₂({})"}
+
+
+def m_math(op, a):
+    return M(_MATH_CALL[op].format(a.text), 3)
+
+
 def m_neg(a):
     inner = a.text if a.prec >= 1 and not a.text.startswith(MINUS) \
         else f"({a.text})"
@@ -640,6 +657,8 @@ class _Math:
             return M(f"|{a[0].text}|", 3)
         if op == "sqrt":
             return m_sqrt(a[0])
+        if op in _MATH_CALL:
+            return m_math(op, a[0])
         if op in ("copysign", "min", "max", "minnum", "maxnum"):
             name = {"minnum": "minNum", "maxnum": "maxNum"}.get(op, op)
             return M(f"{name}({a[0].text}, {a[1].text})", 3)

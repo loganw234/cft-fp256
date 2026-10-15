@@ -78,6 +78,22 @@ lang_check.py, whose helpers this reuses), with tangents:
      and plants - a root without its 2 and a quotient's wrong sign red on
      both, a right root derivative written through r * r = a green on the
      difference and red on the exact check
+  M  the math library's six rules (M1's build, item 3), golden: written
+     shapes and generated systems holding exp, expm1, exp2, log, log1p
+     and log2, with tangent vectors - the tangent exactly against this
+     stage's own dual numbers (each value as the exact evaluation takes
+     it, L the stage's own: transcend.log of 2) and against a central
+     difference in high precision (eps = 2^-256 of 1,024-bit values,
+     within 2^-300, ln 2 exact in L's place); the primal unchanged; each
+     rule's rounding on y = f(a), every format and attribute, bit for
+     bit, its exact value before its last rounding the derivative within
+     its operands' roundings; the specials below each domain and at the
+     poles; and plants - log's rule rounded otherwise (green on both
+     exact checks, red on the rounding), L rounded the wrong way (red on
+     all three), log's select form dropped (red below the domain), a
+     golden function swapped for a sibling's (red on the rounding's
+     derivative). Compiled images of the six are item 5's legs, after
+     item 4's compiler; cftc refuses them `math-library` until then
 
 A check skipped prints a line that starts with SKIP, which the runner
 counts and names on its VERDICT line.
@@ -265,9 +281,12 @@ def primal_unchanged(g, primal_text, states, top, lane_params=None):
                 and b1[1:len(b0) - 2] == b0[1:-2]
                 and b1[len(b0) - 2] == b0[-2][:-1] + b",")
     added = {v for v, *_r in g.const} - {v for v, *_r in g0.const}
-    # 0, 1 and -1 by L3's rules, 2 by the square root's (L4)
-    return added <= {Fraction(0), Fraction(1), Fraction(-1), Fraction(2)} \
-        and by_value(g) == by_value(g0)
+    # 0, 1 and -1 by L3's rules, 2 by the square root's (L4), and L by
+    # exp2's and log2's (M1's build, item 3), only where one is held
+    allowed = {Fraction(0), Fraction(1), Fraction(-1), Fraction(2)}
+    if {"exp2", "log2"} & set(g.op_counts("step")):
+        allowed.add(_ln2(g.fmt, g.rnd))
+    return added <= allowed and by_value(g) == by_value(g0)
 
 
 # ---- D: the derivative, this stage's own dual numbers ---------------------
@@ -294,15 +313,99 @@ def _root(q):
     return Fraction(math.isqrt((n << (2 * ROOT_BITS)) // d), 1 << ROOT_BITS)
 
 
-def _dual(op, a, tie=0, zero=1):
+TRANS_BITS = 1024
+_MP = []
+
+
+def _trans(op, q):
+    """One of the math library's six as the exact evaluations take it
+    (cft_golden/lang/graph.py's exact_transcendental, computed again here):
+    exact where the value is rational - exp(0), exp2(n), log(1),
+    log2(2^k) - otherwise mpmath's value at 1,024 bits of the argument
+    rounded to nearest at 1,024 bits; expm1 is exp - 1 and log1p log(1 +
+    a); an ArithmeticError at a logarithm's pole or below its domain, or
+    past 2^+-1048576."""
+    q = Fraction(q)
+    if op == "expm1":
+        return _trans("exp", q) - 1
+    if op == "log1p":
+        return _trans("log", 1 + q)
+    if op in ("log", "log2") and q <= 0:
+        raise ArithmeticError(f"{op}({q}), at or below zero")
+    if op == "exp":
+        if q == 0:
+            return Fraction(1)
+        if abs(q) > 1 << 21:
+            raise ArithmeticError(f"exp({q}) is past 2^+-1048576")
+    if op == "exp2":
+        if abs(q) > 1 << 20:
+            raise ArithmeticError(f"exp2({q}) is past 2^+-1048576")
+        if q.denominator == 1:
+            return Fraction(2) ** q.numerator
+    n, d = q.numerator, q.denominator
+    if op == "log" and q == 1:
+        return Fraction(0)
+    if op == "log2" and n & (n - 1) == 0 and d & (d - 1) == 0:
+        return Fraction(n.bit_length() - d.bit_length())
+    if not _MP:
+        import mpmath
+        ctx = mpmath.MPContext()
+        ctx.prec = TRANS_BITS
+        _MP.append((mpmath.libmp, ctx))
+    lib, ctx = _MP[0]
+    x = ctx.make_mpf(lib.from_rational(n, d, TRANS_BITS, lib.round_nearest))
+    y = {"exp": ctx.exp, "exp2": lambda v: ctx.power(2, v), "log": ctx.log,
+         "log2": lambda v: ctx.log(v) / ctx.ln2}[op](x)
+    sign, man, exp, bc = y._mpf_
+    man = int(man)
+    if man == 0 or abs(exp + bc) > 1 << 20:
+        raise ArithmeticError(f"{op}({q}) is past 2^+-1048576")
+    v = Fraction(man << exp) if exp >= 0 else Fraction(man, 1 << -exp)
+    return -v if sign else v
+
+
+_LN2 = {}
+
+
+def _ln2(fmt, rnd):
+    """The stage's own L, as an exact rational: transcend.log of 2 at the
+    format under the attribute (M1's question 6) - the decided definition,
+    which the language computes otherwise (constants.ln2_bits)."""
+    from cft_golden import transcend
+    key = (fmt.name, rnd)
+    if key not in _LN2:
+        two = K.round_once(fmt, sf.RND_RNE, Fraction(2))[0]
+        _LN2[key] = K.value_of(fmt, transcend.compute(fmt, "log", two, 0,
+                                                      rnd)[0])
+    return _LN2[key]
+
+
+SIX = ("exp", "expm1", "exp2", "log", "log1p", "log2")
+
+
+def _dual(op, a, tie=0, zero=1, L=None):
     """One operation on (value, derivative) pairs, exactly, by calculus -
     with the rule table's choices at its measure-zero points (a tie gives
     the first operand's, a zero's sign is +) - written again here, not
     read from the derivation. tie=1 and zero=-1 are the other choices,
     which a placed point must tell apart from the table's; a value is
-    the same under any of them."""
+    the same under any of them. The six (M1) take each value as the exact
+    evaluations take it (_trans), and ln 2 as `L`, the stage's own."""
     v = [p[0] for p in a]
     d = [p[1] for p in a]
+    if op in SIX:
+        x, dx = v[0], d[0]
+        if op in ("exp", "expm1"):
+            e = _trans("exp", x)
+            return (e if op == "exp" else e - 1), e * dx
+        if op == "exp2":
+            r = _trans("exp2", x)
+            return r, L * r * dx
+        if op == "log":
+            return _trans("log", x), dx / x
+        if op == "log2":
+            return _trans("log2", x), dx / (L * x)
+        return _trans("log1p", x), dx / (1 + x)
     if op == "add":
         return v[0] + v[1], d[0] + d[1]
     if op == "sub":
@@ -345,11 +448,13 @@ def dual_derivative(g, section, st, tv, pa, la, tie=0, zero=1):
             "p": [(x, nil) for x in pa],
             "c": [(v, nil) for v, *_r in g.const]}
     nodes = []
+    L = _ln2(g.fmt, g.rnd) if {"exp2", "log2"} & \
+        {op for op, _a, _l in sec.nodes} else None
 
     def get(r):
         return nodes[int(r[1:])] if r[0] == "n" else vals[r[0]][int(r[1:])]
     for op, args, _l in sec.nodes:
-        nodes.append(_dual(op, [get(a) for a in args], tie, zero))
+        nodes.append(_dual(op, [get(a) for a in args], tie, zero, L))
     return [get(o)[1] for o in sec.out]
 
 
@@ -1657,6 +1762,369 @@ def leg_routines(count, rng):
     print(f"  ({time.perf_counter() - t0:.1f} s)")
 
 
+# ---- M: the math library's six rules (M1's build, item 3), golden ----------
+#
+# exp: r * da; expm1: (1 + r) * da; exp2: (L * r) * da; log: select(r == r,
+# da / a, r); log2: select(r == r, da / (L * a), r); log1p: select(r == r,
+# da / (1 + a), r) - r the function's own result, L ln 2 rounded once at the
+# program's format under its attribute (docs/LANGUAGE.md, "The rules"). Dual
+# numbers in exact rationals have no exp, so beside them - each value as the
+# exact evaluations take it - a central difference in high precision holds
+# the derivative itself (M1's question 10, mpmath accepted). The compiled
+# images are item 5's legs, after item 4's compiler.
+
+M1_SHAPES = {
+    "one of each, a map": (
+        "system six\nformat fp64\nstate x, y, z\ntangent v\n"
+        "next x = exp(y) - expm1(z * x)\n"
+        "next y = exp2(x * y) + log(abs(z) + 1)\n"
+        "next z = log2(x * x + 1) * log1p(abs(y))\nstep map\n"),
+    "rk4, a let": (
+        "system decay\nformat fp128\nround rdn\nstate y, mu\ntangent v\n"
+        "param kappa = 1/3\nlet eta = expm1(-(kappa * y))\n"
+        "d/dt y = eta * exp(mu)\nd/dt mu = -(exp2(y) * mu)\n"
+        "step rk4, h = 1/64\n"),
+    "stormer-verlet": (
+        "system pot\nformat fp32\nround rup\nstate q, p\ntangent v\n"
+        "d/dt q = p / log1p(p * p + 1)\n"
+        "d/dt p = -(log(q * q + 1) * log2(q * q + 2))\n"
+        "step stormer-verlet, h = 1/32, q = (q), p = (p)\n"),
+    "euler, two vectors": (
+        "system e\nformat fp256\nround rmm\nstate x\ntangent v, w\n"
+        "d/dt x = exp2(-x) + log(x * x + 1)\nstep euler, h = 1/8\n"),
+}
+HP_EPS = Fraction(1, 1 << 256)
+HP_TOL = Fraction(1, 1 << 300)
+
+
+def _m1_expr(rng, names, depth):
+    """A random expression with the six, each of an operand that reads one
+    of `names`, a logarithm's a magnitude plus one half the time."""
+    if depth <= 0 or rng.random() < 0.3:
+        return rng.choice(names + ["2", "(1/3)", "0.5"])
+    k = rng.choice(["+", "-", "*", "/", "fma", "six", "six", "six"])
+
+    def sub():
+        return _m1_expr(rng, names, depth - 1)
+    if k == "six":
+        fn = rng.choice(SIX)
+        inner = f"{sub()} * {rng.choice(names)}"
+        if fn.startswith("log") and rng.random() < 0.5:
+            inner = f"abs({inner}) + 1"
+        return f"{fn}({inner})"
+    if k == "fma":
+        return f"fma({sub()}, {sub()}, {sub()})"
+    return f"({sub()} {k} {sub()})"
+
+
+def m1_texts(count, seed):
+    """The written shapes, then generated systems with the six, one or two
+    tangent vectors, every integrator, format and attribute: (text,
+    what)."""
+    out = [(t, f"shape {s}") for s, t in M1_SHAPES.items()]
+    rng = random.Random(seed)
+    for k in range(count):
+        fmt = ("fp32", "fp64", "fp128", "fp256")[k % 4]
+        rnd = rng.choice(("rne", "rtz", "rdn", "rup", "rmm"))
+        integ = ("map", "rk4", "euler", "stormer-verlet")[(k // 4) % 4]
+        vecs = "v, w" if k % 5 == 4 else "v"
+        head = f"system m{k}\nformat {fmt}\nround {rnd}\n"
+        if integ == "stormer-verlet":
+            text = (head + f"state q, p\ntangent {vecs}\nparam c = 3/4\n"
+                    f"d/dt q = {_m1_expr(rng, ['p', 'c'], 2)} + c * p\n"
+                    f"d/dt p = {_m1_expr(rng, ['q', 'c'], 2)} - q\n"
+                    f"step stormer-verlet, h = 1/16, q = (q), p = (p)\n")
+        else:
+            word = "next" if integ == "map" else "d/dt"
+            names = ["x", "y", "c"]
+            step = "step map" if integ == "map" else f"step {integ}, h = 1/32"
+            text = (head + f"state x, y\ntangent {vecs}\nparam c = 2/3\n"
+                    f"{word} x = {_m1_expr(rng, names, 2)} + c\n"
+                    f"{word} y = {_m1_expr(rng, names, 2)} - y\n{step}\n")
+        out.append((text, f"generated {k}"))
+    return out
+
+
+def m1_graphs(texts):
+    graphs = []
+    for text, what in texts:
+        try:
+            graphs.append((lang.compile_text(text, what).graph, text, what))
+        except lang.Refusal as e:
+            # a fold of a constant the language refuses: a power past every
+            # format, or one that overflows; anything else is a defect
+            if e.name not in LC.ARTIFACTS | {"constant-range",
+                                              "constant-overflow",
+                                              "constant-rounds-to-zero"}:
+                bad(f"{what}: the language refused {e}")
+    return graphs
+
+
+def hp_misses(g, rng, points=2):
+    """(points, points where a tangent component is not the central
+    difference in high precision): (S(x + eps v) - S(x - eps v)) / (2 eps)
+    of the primal section S at eps = 2^-256, each of the six the exact
+    evaluation's 1,024-bit value, against the tangent section, within
+    2^-300 max(1, |t|). L is ln 2 rounded once: the const equal to the
+    stage's own L is evaluated as ln 2 to 1,100 bits, so the rules are the
+    derivative itself - and a graph whose L is another keeps it and
+    misses by its rounding, 2^-p and more. Unplaced random points; an
+    undefined one decides nothing."""
+    import mpmath
+    ctx = mpmath.MPContext()
+    ctx.prec = 1100
+    _s, man, exp, _b = ctx.mpf(ctx.ln2)._mpf_
+    ln2 = Fraction(int(man), 1 << -exp)
+    L = _ln2(g.fmt, g.rnd)
+    g2 = g.copy(const=[(ln2 if v == L and fa is None else v, fa, b, f)
+                       for v, fa, b, f in g.const])
+    tot = bad_n = 0
+    for primal, tangent in (("field", "tangent_field"),
+                            ("step", "tangent_step")):
+        if g.section(primal) is None:
+            continue
+        for _ in range(points):
+            st = [_q(rng) for _ in range(g.n_state)]
+            tv = [_q(rng) for _ in range(g.n_state)]
+            pa = [_q(rng) for _ in g.param]
+            la = [_q(rng) for _ in g.lane]
+            try:
+                up = g2.exact_eval(primal, [s + HP_EPS * t for s, t in
+                                            zip(st, tv)], pa, la)
+                dn = g2.exact_eval(primal, [s - HP_EPS * t for s, t in
+                                            zip(st, tv)], pa, la)
+                got = g2.exact_eval(tangent, st, pa, la, tangent=tv)
+            except ArithmeticError:
+                continue
+            tot += 1
+            bad_n += any(abs((u - d) / (2 * HP_EPS) - t) >
+                         HP_TOL * max(1, abs(t)) for u, d, t in zip(up, dn, got))
+    return tot, bad_n
+
+
+def _one(fn, fmt="fp64", rnd="rne"):
+    return lang.compile_text(f"system r\nformat {fmt}\nround {rnd}\n"
+                             f"state a, y\ntangent v\nnext a = a\n"
+                             f"next y = {fn}(a)\nstep map\n").graph
+
+
+def _domain(fn, rng):
+    if fn.startswith("exp"):
+        return Fraction(rng.randint(-8000, 8000), 1000)
+    return Fraction(rng.randint(-999 if fn == "log1p" else 1, 64000), 1000)
+
+
+def rounding_misses(fn, fmtname, rnd, rng, lanes=6):
+    """(lanes, lanes whose tangent is not the table's last operation rounded
+    once, lanes whose last operation's exact value is not the derivative
+    within its operands' roundings) on y = f(a): the operands the primal's
+    own r or a, and the primal-only value the table rounds once first,
+    1 + r, L * r, L * a or 1 + a, L the stage's own; the derivative by a
+    central difference at 2^-256 of the 1,024-bit values."""
+    g = _one(fn, fmtname, rnd)
+    fmt, code = g.fmt, K.RND_BY_NAME[rnd]
+    u = Fraction(1, 1 << (fmt.prec - 1))
+    Lb = K.round_once(fmt, sf.RND_RNE, _ln2(fmt, code))[0]
+    one = K.round_once(fmt, sf.RND_RNE, Fraction(1))[0]
+    pairs = [(K.round_once(fmt, sf.RND_RNE, _domain(fn, rng))[0],
+              K.round_once(fmt, sf.RND_RNE,
+                           Fraction(rng.randint(-4000, 4000) or 1, 1000))[0])
+             for _ in range(lanes)]
+    run = lang.run(g, [[a, 0] for a, _d in pairs], 1,
+                   tangents=[[[da, 0]] for _a, da in pairs])
+    bits_bad = value_bad = 0
+    for (a, da), st, tv in zip(pairs, run.states, run.tangents):
+        r, t = st[1], tv[0][1]
+        val = lambda b: K.value_of(fmt, b)          # noqa: E731
+        if fn == "exp":
+            want, exact = sf.mul(fmt, r, da, code)[0], val(r) * val(da)
+        elif fn in ("expm1", "exp2"):
+            q = sf.add(fmt, one, r, code)[0] if fn == "expm1" else \
+                sf.mul(fmt, Lb, r, code)[0]
+            want, exact = sf.mul(fmt, q, da, code)[0], val(q) * val(da)
+        else:
+            q = a if fn == "log" else sf.mul(fmt, Lb, a, code)[0] \
+                if fn == "log2" else sf.add(fmt, one, a, code)[0]
+            want, exact = sf.div(fmt, da, q, code)[0], val(da) / val(q)
+        bits_bad += t != want
+        x, dx = val(a), val(da)
+        d = (_trans(fn, x + HP_EPS * dx) - _trans(fn, x - HP_EPS * dx)) \
+            / (2 * HP_EPS)
+        k = {"exp": 1, "expm1": 0, "exp2": 3, "log": 0, "log2": 2,
+             "log1p": 1}[fn]
+        bound = k * u * Fraction(101, 100)
+        if fn == "expm1":
+            vr = val(r)
+            bound = u * (abs(vr) + abs(1 + vr)) / abs(1 + vr) \
+                * Fraction(101, 100)
+        value_bad += abs(exact - d) > (bound + Fraction(1, 1 << 400)) * abs(d)
+    return len(pairs), bits_bad, value_bad
+
+
+def specials_misses():
+    """At fp64, bit for bit: below each logarithm's domain its tangent is
+    the NaN r; at its pole da / +-0, an infinity with divideByZero; at a
+    NaN the NaN. -> a list of what missed."""
+    fmt = FORMATS["fp64"]
+
+    def b(v):
+        return K.round_once(fmt, sf.RND_RNE, Fraction(v))[0]
+    sign, inf, qnan = fmt.sign_mask, sf.inf_bits(fmt), sf.qnan_bits(fmt)
+    miss = []
+
+    def one(fn, a, da):
+        r = lang.run(_one(fn), [[a, 0]], 1, tangents=[[[da, 0]]])
+        return r.states[0][1], r.tangents[0][0][1], r.flags
+    for fn, below in (("log", b(-3)), ("log2", b(Fraction(-1, 2))),
+                      ("log1p", b(-2))):
+        if one(fn, below, b(3))[:2] != (qnan, qnan):
+            miss.append(f"{fn} below its domain")
+    for fn, pole in (("log", 0), ("log2", 0), ("log1p", b(-1))):
+        if one(fn, pole, b(3)) != (inf ^ sign, inf, sf.FLAG_DIVZERO):
+            miss.append(f"{fn} at its pole")
+    for fn in SIX:
+        if one(fn, qnan, b(3))[:2] != (qnan, qnan):
+            miss.append(f"{fn} at a NaN")
+    return miss
+
+
+class _M1Plant(lang_tangent.Derivation):
+    """The derivation with log's rule wrong (kind)."""
+    kind = None
+
+    def rule(self, node):
+        a, R = node.args, self.read
+
+        def N(o, *args):
+            return Node(o, args, node.line)
+        if node.op == "log" and self.of(a[0]) is not None:
+            da = self.of(a[0])
+            if self.kind == "log's rule rounded otherwise":
+                return N("select", N("mul", da, N("div", self.one, R(a[0]))),
+                         R(node), N("cmpeq", R(node), R(node)))
+            if self.kind == "log's select form dropped":
+                return N("div", da, R(a[0]))
+        return super().rule(node)
+
+
+def _wrong_ln2(fmt, rnd):
+    right = K.ln2_bits(fmt, rnd)
+    lo, hi = K.ln2_bits(fmt, sf.RND_RDN), K.ln2_bits(fmt, sf.RND_RUP)
+    return K.value_of(fmt, hi if right == lo else lo)
+
+
+def leg_math(count, rng):
+    section(f"M. the math library's six rules (M1's build, item 3), golden: "
+            f"{len(M1_SHAPES)} written shapes and {count} generated systems "
+            f"with tangent vectors - the derivative exactly and by a central "
+            f"difference in high precision, the primal unchanged, each rule's "
+            f"rounding bit for bit at every format and attribute, the "
+            f"specials, plants")
+    t0 = time.perf_counter()
+    graphs = m1_graphs(m1_texts(count, "tangent math"))
+    tot = bad_n = htot = hbad = 0
+    changed, ops = [], set()
+    for g, text, what in graphs:
+        a, b, _t, _z = derivative_misses(g, rng, 3)
+        tot, bad_n = tot + a, bad_n + b
+        a, b = hp_misses(g, rng, 2)
+        htot, hbad = htot + a, hbad + b
+        ops |= set(g.op_counts("step"))
+        states = LC.lanes_for(g.fmt, g.n_state, rng, 3)
+        states += LC.special_lanes(g.fmt, g.n_state, states[0], rng)
+        if not primal_unchanged(g, without_tangent(text), states, 2):
+            changed.append(what)
+    check(bad_n == 0 and tot >= 3 * len(graphs) and set(SIX) <= ops,
+          f"{len(graphs)} systems holding all six, {tot} points: the tangent "
+          f"sections evaluated exactly equal this stage's own derivative, each "
+          f"of the six as the exact evaluation takes it and ln 2 as L, "
+          f"transcend.log of 2", f"{bad_n} differ")
+    check(hbad == 0 and htot >= 2 * len(graphs), f"{htot} points: every "
+          f"tangent component within 2^-300 of the central difference at "
+          f"eps = 2^-256 of 1,024-bit values, ln 2 exact in L's place",
+          f"{hbad} differ")
+    check(not changed, "the primal unchanged in each: its states and flags "
+          "without the tangent, on lanes that overflow, hold a signalling "
+          "NaN and hold subnormals, its graph's lines (L and 1 the only "
+          "constants the six's rules add)", f"changed: {changed[:4]}")
+    lanes = bits = value = 0
+    for fn in SIX:
+        for fmtname in ("fp32", "fp64", "fp128", "fp256"):
+            for rnd in ("rne", "rtz", "rdn", "rup", "rmm"):
+                n, b, v = rounding_misses(fn, fmtname, rnd, rng)
+                lanes, bits, value = lanes + n, bits + b, value + v
+    check(bits == 0 and value == 0 and lanes == 6 * 4 * 5 * 6,
+          f"{lanes} lanes of y = f(a), the six at every format and attribute: "
+          f"each tangent the table's last operation rounded once, on the "
+          f"primal's own values and the primal-only value rounded once "
+          f"first, and that operation's exact value the derivative within "
+          f"its operands' roundings", f"{bits} in bits, {value} in value")
+    miss = specials_misses()
+    check(not miss, "the specials, bit for bit: each logarithm's tangent the "
+          "NaN r below its domain, da / +-0 at its pole with divideByZero, a "
+          "NaN at a NaN, for all six", "; ".join(miss))
+    # the plants, each in the golden model's own classes, restored after
+    plant_texts = [t for t in m1_texts(6, "tangent math plants")]
+    original = lang_check_mod.Derivation
+    orig_ln2 = lang_check_mod.C.ln2_value
+    from cft_golden.lang import interp as lang_interp
+    orig_t = lang_interp._transcend
+    plants = ("log's rule rounded otherwise", "log's select form dropped",
+              "L rounded the wrong way", "exp's golden function swapped for "
+              "exp2's")
+    try:
+        for kind in plants:
+            # each plant alone: the last one's classes restored first
+            lang_check_mod.Derivation = original
+            lang_check_mod.C.ln2_value = orig_ln2
+            lang_interp._transcend = orig_t
+            if kind.startswith("log's"):
+                class P(_M1Plant):
+                    pass
+                P.kind = kind
+                lang_check_mod.Derivation = P
+            elif kind.startswith("L "):
+                lang_check_mod.C.ln2_value = _wrong_ln2
+            else:
+                lang_interp._transcend = (
+                    lambda fmt, fn, rnd: orig_t(fmt, "exp2" if fn == "exp"
+                                                else fn, rnd))
+            ex = hp = 0
+            for g, _text, _w in m1_graphs(plant_texts):
+                ex += derivative_misses(g, rng, 2)[1]
+                hp += hp_misses(g, rng, 2)[1]
+            fns = ("log",) if kind.startswith("log's") else \
+                ("exp2", "log2") if kind.startswith("L ") else ("exp",)
+            rb = rv = 0
+            for fn in fns:
+                for fmtname in ("fp32", "fp64", "fp256"):
+                    for rnd in ("rne", "rup", "rdn"):
+                        _n, b, v = rounding_misses(fn, fmtname, rnd, rng, 8)
+                        rb, rv = rb + b, rv + v
+            sp = len(specials_misses())
+            said = (f"plant {kind!r}: the exact check {ex}, the central "
+                    f"difference {hp}, the rounding {rb} in bits and {rv} in "
+                    f"value, the specials {sp}")
+            if kind == "log's rule rounded otherwise":
+                check(ex == 0 and hp == 0 and rb > 0, said + " - exact in "
+                      "rationals: green on both exact checks, red on the "
+                      "rounding")
+            elif kind == "log's select form dropped":
+                check(ex == 0 and hp == 0 and rb == 0 and sp > 0, said +
+                      " - red below the domain alone")
+            elif kind.startswith("L "):
+                check(ex > 0 and hp > 0 and rb > 0, said + " - red on all "
+                      "three")
+            else:
+                check(rv > 0, said + " - red on the rounding's derivative "
+                      "(r is exp2's, so r * da is no derivative of exp)")
+    finally:
+        lang_check_mod.Derivation = original
+        lang_check_mod.C.ln2_value = orig_ln2
+        lang_interp._transcend = orig_t
+    print(f"  ({time.perf_counter() - t0:.1f} s)")
+
+
 # ---- the committed references ---------------------------------------------
 
 def write_references():
@@ -1681,10 +2149,13 @@ def main(argv=None):
     ap.add_argument("--routines", type=int, default=24,
                     help="generated systems that divide or take a root in "
                          "leg L (default 24)")
+    ap.add_argument("--math", type=int, default=16,
+                    help="generated systems holding the math library's six "
+                         "in leg M (default 16)")
     ap.add_argument("--only", default="",
                     help="a comma list of legs: refs,corpus,derivative,"
                          "lyapunov,certified,libcft,determinism,refusals,"
-                         "plants,routines")
+                         "plants,routines,math")
     ap.add_argument("--write", action="store_true",
                     help="write programs/systems/compiled-tangent/ and exit")
     ap.add_argument("--digests", help=argparse.SUPPRESS)
@@ -1715,7 +2186,8 @@ def main(argv=None):
             ("refusals", leg_refusals),
             ("plants", lambda: leg_plants(rng("plants"), segrun_path, work)),
             ("routines", lambda: leg_routines(a.routines,
-                                              rng("routines")))]
+                                              rng("routines"))),
+            ("math", lambda: leg_math(a.math, rng("math")))]
     try:
         for name, fn in legs:
             if only and name not in only:

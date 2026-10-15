@@ -23,6 +23,7 @@ Evaluation modes, and what each may read:
            not depend on h.
 """
 
+from fractions import Fraction
 from sys import _getframe
 
 from .. import softfloat as sf
@@ -40,13 +41,22 @@ from .templates import (FLOW_INTEGRATORS, INTEGRATORS, LABEL_PREFIXES,
 # The built-ins and the number of arguments each takes. sqrt joined them
 # with the run-time square root (L4, 2026-10-02): of a constant it folds
 # where the root is exact and is `irrational-constant` where it is not.
+# The math library's six joined them in M1's build, item 3 (2026-10-15),
+# each the node transcend.py names it: of a constant each folds where its
+# value is rational - exp(0), expm1(0), exp2 of an integer, log(1),
+# log1p(0), log2 of a power of two - is `constant-division-by-zero` at a
+# logarithm's pole and `irrational-constant` elsewhere (Logan's answer to
+# M1's question 8).
+MATH = ("exp", "expm1", "exp2", "log", "log1p", "log2")
 BUILTINS = {"fma": 3, "abs": 1, "copysign": 2, "min": 2, "max": 2,
-            "minnum": 2, "maxnum": 2, "select": 3, "sqrt": 1}
+            "minnum": 2, "maxnum": 2, "select": 3, "sqrt": 1,
+            **{fn: 1 for fn in MATH}}
 
 # Refused by name in v1 (`transcendental`, `irrational-constant`), and so
-# reserved: a value cannot be named after one.
+# reserved: a value cannot be named after one. The six built-ins above
+# left this list in M1's build, item 3; M2 to M4 take the rest.
 TRANSCENDENTAL = frozenset({
-    "exp", "expm1", "exp2", "exp10", "log", "log1p", "log2", "log10",
+    "exp10", "log10",
     "pow", "pown", "powr", "rootn", "hypot", "sin", "cos", "tan", "sinpi",
     "cospi", "tanpi", "asin", "acos", "atan", "atan2", "asinpi", "acospi",
     "atanpi", "atan2pi", "sinh", "cosh", "tanh", "asinh", "acosh",
@@ -150,6 +160,70 @@ def _no_root(value):
             f"exactly, is no rational's square, and a constant is an exact "
             f"rational: write the root's value as a decimal or a/b, or take "
             f"the root at run time, as the square root of a param")
+
+
+_REWRITE = ("and a constant is an exact rational: write its value as a "
+            "decimal or a/b, or take it at run time, of a param")
+
+
+def _fold_math(op, c, line):
+    """One of the six of the constant c, folded exactly where its value is
+    rational - exp(0) = 1, expm1(0) = 0, exp2(n) = 2^n for an integer n,
+    log(1) = 0, log1p(0) = 0, log2(2^k) = k - and refused by name
+    elsewhere, the sentence saying why (Logan's answer to M1's question 8,
+    2026-10-12): `constant-division-by-zero` at a logarithm's pole, as 754
+    calls log(0) divideByZero, and `irrational-constant` for a value no
+    rational carries, irrational or not real."""
+    shown = C.brief(c)
+    if op in ("exp", "expm1"):
+        if c == 0:
+            return Fraction(1) if op == "exp" else Fraction(0)
+        it = "" if op == "exp" else f"it is e^{shown} - 1, and "
+        raise Refusal("irrational-constant", f"{op}({shown}) is irrational: "
+                      f"{it}e to a nonzero rational power is transcendental "
+                      f"(Lindemann-Weierstrass), {_REWRITE}", line)
+    if op == "exp2":
+        if c.denominator == 1:
+            n = c.numerator
+            if abs(n) > C.LIMIT_LOG2:
+                raise Refusal("constant-range", f"exp2({shown}) is 2^"
+                              f"{shown}, beyond 2^+-{C.LIMIT_LOG2}, outside "
+                              f"every format by far", line)
+            return Fraction(2) ** n
+        raise Refusal("irrational-constant", f"exp2({shown}) is irrational: "
+                      f"2 to a power that is not an integer is no rational "
+                      f"(were 2^(p/q) rational, q > 1 in lowest terms, 2^p "
+                      f"would be a rational's q-th power), {_REWRITE}", line)
+    # the logarithms: log(a), log2(a), and log1p(a) = log(1 + a)
+    arg = 1 + c if op == "log1p" else c
+    pole = "-1" if op == "log1p" else "0"
+    if arg == 0:
+        raise Refusal("constant-division-by-zero", f"{op}({pole}) is a pole: "
+                      f"the logarithm of zero is -infinity, which IEEE 754 "
+                      f"calls a division by zero (at run time {op}({pole}) is "
+                      f"-infinity with divideByZero), and a constant is an "
+                      f"exact rational", line)
+    if arg < 0:
+        below = "below -1" if op == "log1p" else "of a negative constant"
+        raise Refusal("irrational-constant", f"{op}({shown}) is not a real "
+                      f"number: the logarithm {below} has no value, as "
+                      f"sqrt(-4) has none, and a constant is an exact "
+                      f"rational (at run time it is a NaN, with invalid)",
+                      line)
+    if arg == 1:
+        return Fraction(0)
+    n, d = arg.numerator, arg.denominator
+    if op == "log2":
+        if n & (n - 1) == 0 and d & (d - 1) == 0:
+            return Fraction(n.bit_length() - d.bit_length())
+        raise Refusal("irrational-constant", f"log2({shown}) is irrational: "
+                      f"the base-2 logarithm of a positive rational is "
+                      f"rational only at a power of two (were log2(c) = m/n, "
+                      f"c^n = 2^m would make c one), {_REWRITE}", line)
+    it = f"it is log(1 + {shown}), and " if op == "log1p" else ""
+    raise Refusal("irrational-constant", f"{op}({shown}) is irrational: "
+                  f"{it}the logarithm of a positive rational other than 1 is "
+                  f"transcendental (Lindemann-Weierstrass), {_REWRITE}", line)
 
 
 def _reserved_why(name):
@@ -390,6 +464,10 @@ class Checker:
         self.tan_lets = {}
         self.field_ctx = None
         self.map_ctx = None
+        # the source lines at which a call of one of the six (MATH) is met,
+        # a node or folded, whatever the statement - the graph's math_lines,
+        # which the compiler's interim refusal names (M1's build, item 3)
+        self.math_lines = set()
 
     # ==== declarations ================================================
 
@@ -1001,10 +1079,18 @@ class Checker:
                 v = self.apply("select", [a, b, c], e.line)
             else:
                 v = self.apply(name, vals, e.line)
+            if name in MATH and e.line is not None:
+                # every statement a source writes is evaluated here - a
+                # const, a default, h, a written tangent and an expansion
+                # block too - so this meets each call of the six at the line
+                # that holds it, a node or a fold (the compiler's interim
+                # refusal, `math-library`, names the first)
+                self.math_lines.add(e.line)
             if isinstance(v, K) and _hread(*vals):
                 v = v.read_h(e, ctx.env)
             return v
         if name in TRANSCENDENTAL:
+            # M2 to M4's names; the six left this list in M1's build, item 3
             vals = [self.eval(a, ctx) for a in e.args]
             if vals and all(isinstance(v, K) for v in vals):
                 raise Refusal(
@@ -1019,8 +1105,9 @@ class Checker:
             raise Refusal("unknown-function", f"{name} is a {d.kind}, not a "
                           f"function", e.line)
         raise Refusal("unknown-function", f"{name} is not a built-in: fma, "
-                      f"abs, copysign, min, max, minnum, maxnum, select and "
-                      f"sqrt are", e.line)
+                      f"abs, copysign, min, max, minnum, maxnum, select, "
+                      f"sqrt, exp, expm1, exp2, log, log1p and log2 are",
+                      e.line)
 
     def name_value(self, name, index, ctx, line):
         if index is None and name in ctx.env:
@@ -1466,6 +1553,11 @@ class Checker:
                 if root is None:
                     raise Refusal("irrational-constant", _no_root(v[0]), line)
                 r = K(root)
+            elif op in MATH:
+                # folded exactly where the value is rational, and nowhere
+                # else (M1's question 8): a node would round twice, and
+                # spend a routine on a value fixed when compiled
+                r = K(_fold_math(op, v[0], line))
             else:
                 raise AssertionError(op)
         if not C.in_range(r.coef):
@@ -1780,8 +1872,14 @@ class Checker:
                   for _c, key in leaves]
             return self.leaf(self.fold(op, ks, line), line)
 
+        def ln2():
+            # exp2's and log2's L: ln 2 rounded once at the program's format
+            # under its attribute (M1's question 6), whose exact value is a
+            # constant like any other - made only where a rule reads it
+            return self.leaf(K(C.ln2_value(self.fmt, self.rnd)), line)
+
         def derived(outs):
-            ts = Derivation(zero, one, fold, two).derive(outs)
+            ts = Derivation(zero, one, fold, two, ln2).derive(outs)
             return [K(0) if t is None else t for t in ts]
         tf = derived(field_outs) if self.is_flow else None
         ts = derived(step_outs)
@@ -2047,6 +2145,7 @@ class Checker:
             self.block_compare(field_outs, step_outs, built, tangent)
         self.canonical_nesting(graph)
         graph.source_format = self.source_format
+        graph.math_lines = tuple(sorted(self.math_lines))
         return graph
 
     # ==== the canonical form's nesting (D2) ============================
