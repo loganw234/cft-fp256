@@ -93,7 +93,9 @@ lang_check.py, whose helpers this reuses), with tangents:
      all three), log's select form dropped (red below the domain), a
      golden function swapped for a sibling's (red on the rounding's
      derivative). Compiled images of the six are item 5's legs, after
-     item 4's compiler; cftc refuses them `math-library` until then
+     item 4's compiler; cftc refuses them `math-library` until then.
+     The six's golden functions need mpmath, so on a host without it
+     this leg is skipped by name; legs A to L never need it
 
 A check skipped prints a line that starts with SKIP, which the runner
 counts and names on its VERDICT line.
@@ -2020,6 +2022,12 @@ def leg_math(count, rng):
             f"difference in high precision, the primal unchanged, each rule's "
             f"rounding bit for bit at every format and attribute, the "
             f"specials, plants")
+    if not LC.have_mpmath():
+        skip("M: the math library's six rules", "python has no mpmath "
+             "module, which their golden functions (python/cft_golden/"
+             "transcend.py) and this leg's values in high precision need "
+             "(pip install mpmath)")
+        return
     t0 = time.perf_counter()
     graphs = m1_graphs(m1_texts(count, "tangent math"))
     tot = bad_n = htot = hbad = 0

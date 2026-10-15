@@ -64,6 +64,8 @@ many lanes and at several step counts: the image's REPEAT patched to 1,
      bank-capacity, which it raises for its routines' words (C4); and the
      interim `math-library` (M1's build, item 3), a run-time call of the
      six and a fold alone, each at its first line, each run by lang.run
+     (the run-time one skipped by name on a host without mpmath, which
+     the six's golden functions need and the refusal never does)
   H  plants in a copy of the package: each stopped by the internal check,
      and with the check off each red on seq.py, its failing lanes counted;
      with the routines' (C4): a raise dropped, a raise inside its quiet
@@ -135,6 +137,7 @@ counts and names on its VERDICT line.
 import argparse
 import hashlib
 import importlib
+import importlib.util
 import json
 import os
 import random
@@ -221,6 +224,14 @@ def check(cond, what, why=""):
 def skip(what, why):
     TALLY.skip += 1
     print(f"SKIP  {what}: {why}", flush=True)
+
+
+def have_mpmath():
+    """Whether mpmath can be imported here, without importing it: only the
+    math library's six need it (their golden functions, python/cft_golden/
+    transcend.py), so only a check that runs them skips by name without it.
+    A host where sys.modules holds None for it has none."""
+    return importlib.util.find_spec("mpmath") is not None
 
 
 def section(title):
@@ -1624,22 +1635,28 @@ def leg_refusals():
            f"the compiler for the words the checker cannot see (C4)")
     # the interim eighth (M1's build, item 3): the math library's six, at run
     # time and folded, refused at the first source line holding one until
-    # item 4 carries them; the interpreter runs both
-    for text, line, what in (
+    # item 4 carries them; the interpreter runs both (the run-time one only
+    # with mpmath, which the refusal never needs)
+    for text, line, what, runtime in (
             ("system m\nformat fp64\nstate x, y\nnext x = x * y\n"
              "next y = log1p(abs(x))\nstep map\n", 5,
-             "log1p at run time, at its line"),
+             "log1p at run time, at its line", True),
             ("system m\nformat fp64\nstate x\nconst k = exp2(-3)\n"
              "next x = x * k\nstep map\n", 4,
-             "a fold of exp2 alone, in a const, at its line")):
+             "a fold of exp2 alone, in a const, at its line", False)):
         expect("math-library", lambda: cftc.compile_text(text, 2,
                                                          source="m.cftl"),
                what)
         g = lang.compile_text(text, "m.cftl").graph
-        check(g.math_lines[0] == line and
-              len(lang.run(g, [[1] * g.n_state], 2).states) == 1,
-              f"math-library: the checker's first line is {line}, and "
-              f"lang.run runs the source")
+        check(g.math_lines[0] == line, f"math-library: the checker's first "
+              f"line is {line}")
+        if runtime and not have_mpmath():
+            skip("math-library: lang.run of log1p", "python has no mpmath "
+                 "module, which the six's golden functions need")
+            continue
+        short = what[:what.index(",")]
+        check(len(lang.run(g, [[1] * g.n_state], 2).states) == 1,
+              f"math-library: lang.run runs the source ({short})")
     want = set(cftc.NAMES) | set(cftc.refusals.SHARED)
     check(made == want, f"every one of the compiler's {len(cftc.NAMES)} "
           f"names was made, and the language's bank-capacity it raises "

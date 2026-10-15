@@ -60,6 +60,7 @@ from cft_golden.lang import constants as C  # noqa: E402
 from cft_golden.lang import syntax as lang_syntax  # noqa: E402
 from cft_golden.lang.graph import Section  # noqa: E402
 from lang_mathform import MathForm  # noqa: E402
+from lang_mathform import NO_MPMATH, have_mpmath  # noqa: E402
 from lang_mathform import constant as mathform_constant  # noqa: E402
 
 PROGRAMS = REPO / "programs"
@@ -2171,8 +2172,14 @@ def test_l4_the_exact_root_is_one_function():
 # the value is rational and is refused by name elsewhere (Logan's answer to
 # M1's question 8). They were `transcendental`, and of a constant
 # `irrational-constant`, until M1's build, item 3.
+#
+# A test that runs or evaluates the six needs mpmath, as the language does,
+# and skips by name on a host without it (needs_mpmath); the rest - the
+# checker, the folds, the refusals, the renderers' text, cftc's refusal and
+# the no-mpmath test below, which takes mpmath away itself - run there too.
 
 SIX = ("exp", "expm1", "exp2", "log", "log1p", "log2")
+needs_mpmath = pytest.mark.skipif(not have_mpmath(), reason=NO_MPMATH)
 # the reserved transcendental names before M1's build, item 3: the six and
 # M2 to M4's, which `transcendental` still refuses
 RESERVED_BEFORE = {
@@ -2235,6 +2242,7 @@ def _m1_lanes(fmt, rng, count):
     return out
 
 
+@needs_mpmath
 @pytest.mark.parametrize("fmtname", list(FORMATS))
 def test_m1_the_golden_functions_are_transcends(fmtname):
     """Through the interpreter, under every attribute: each lane's result
@@ -2333,6 +2341,7 @@ def test_m1_a_folded_power_is_rounded_once(fmtname):
             assert info.value.name == name
 
 
+@needs_mpmath
 @pytest.mark.parametrize("fmtname", list(FORMATS))
 def test_m1_the_folded_and_the_run_time_tie_agree(fmtname):
     """The study's tie, exp2(emin - p), half the smallest subnormal, since
@@ -2438,6 +2447,7 @@ def test_m1_each_refusal_by_name(body, step, name, line, before):
     assert before in lang.CATALOGUE
 
 
+@needs_mpmath
 def test_m1_the_renderers_write_the_six_and_read_back():
     """The canonical form writes each as the language does; the
     mathematical form as exp(a), expm1(a), 2^(a), ln(a), log1p(a) and
@@ -2465,6 +2475,7 @@ def test_m1_the_renderers_write_the_six_and_read_back():
     check_intention_out(g, random.Random("m1 renderers 2"))
 
 
+@needs_mpmath
 @pytest.mark.parametrize("name", ["exp-rk4", "log-sv", "mixed-map",
                                   "folds-euler"])
 def test_m1_intention_out_of_written_systems(name):
@@ -2516,6 +2527,7 @@ _M1_ARTIFACTS = _ARTIFACTS | {"constant-range", "constant-overflow",
                               "constant-rounds-to-zero"}
 
 
+@needs_mpmath
 def test_m1_intention_out_of_random_systems():
     """Random systems with the six beside every other operation - lets,
     params, lane params, arrays, every integrator, format and attribute,
@@ -2548,6 +2560,7 @@ def test_m1_intention_out_of_random_systems():
     assert kinds == {"rk4", "euler", "stormer-verlet", "map"}
 
 
+@needs_mpmath
 def test_m1_the_exact_transcendentals_are_one_function():
     """The step graph's exact evaluation and the test's own reader take the
     same value of each of the six at the same argument: exact where it is

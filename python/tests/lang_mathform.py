@@ -50,8 +50,14 @@ root's: exact there - exp(0), 2^n, ln(1), log₂(2^k) - and otherwise
 mpmath's value at 1,024 bits of the argument rounded to nearest at 1,024
 bits; expm1(a) is exp(a) - 1 and log1p(a) is ln(1 + a). A logarithm at or
 below its pole, or a value past 2^+-1048576, raises an ArithmeticError.
+
+Only the six need mpmath, here as in the language: have_mpmath() says,
+without importing it, whether this host has it, so that the tests that
+run or evaluate the six skip by name on a host without it while the rest -
+the checker, the renderers and cftc's refusal of the six among them - run.
 """
 
+import importlib.util
 import re
 import sys
 from fractions import Fraction
@@ -62,6 +68,17 @@ ROOT_BITS = 256
 TRANS_BITS = 1024
 LIMIT = 1 << 20                 # a constant's bound, 2^+-1048576
 _MP = []
+NO_MPMATH = ("mpmath is not installed: the math library's six - their golden "
+             "functions, python/cft_golden/transcend.py, and their exact "
+             "values - need it")
+
+
+def have_mpmath():
+    """Whether mpmath can be imported here, without importing it. A host
+    where sys.modules holds None for it, as the tests' own no-mpmath runs
+    arrange, has none. Only mpmath's absence answers False: one installed
+    but broken fails where it is used."""
+    return importlib.util.find_spec("mpmath") is not None
 
 
 def root(q):

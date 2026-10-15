@@ -70,11 +70,13 @@ with the primal's own. That keeps the language's promise for the
 tangent's text - every operation written is performed, once, in the order
 the canonical form writes it - at a known price: a long chain of unnamed
 operations whose rules read an operand or their own result (products,
-fma, quotients, roots, abs, copysign, the min family) makes each one's
-tangent write its unnamed operands again, so the tangent grows with the
-square of the chain (measured: 5,049 nodes for a 100-term product chain,
-198 without copies; 5,247 for a chain of 99 quotients, 297 named by
-lets; 5,148 for 99 nested roots; 8,099 for a min chain of 90 terms). A
+fma, quotients, roots, abs, copysign, the min family, the math library's
+six) makes each one's tangent write its unnamed operands again, so the
+tangent grows with the square of the chain (measured: 5,049 nodes for a
+100-term product chain, 198 without copies; 5,247 for a chain of 99
+quotients, 297 named by lets; 5,148 for 99 nested roots; 8,099 for a min
+chain of 90 terms; 5,049 for 99 nested exps and 19,998 for 99 nested
+logs, whose rule reads r three times, 99 and 297 named by lets). A
 select's condition takes no tangent, so a chain through it stays linear.
 Naming parts with lets keeps it linear.
 

@@ -48,6 +48,7 @@ from cft_golden import FORMATS, asm, lang        # noqa: E402
 from cft_golden import routines as R             # noqa: E402
 from cft_golden import softfloat as sf           # noqa: E402
 from cft_golden.lang import constants as K       # noqa: E402
+from lang_mathform import NO_MPMATH, have_mpmath  # noqa: E402
 
 SYSTEMS = ROOT / "programs" / "systems"
 # revision 8's three targets, built in at cftc's output version 5
@@ -1647,6 +1648,10 @@ def test_the_math_library_is_refused_by_name_until_item_4(case):
              * g.n_state for v in (3, 11)]
     kw = {"tangents": [[lane] * len(g.tangent) for lane in lanes]} \
         if g.tangent else {}
+    if ops and not have_mpmath():
+        # the refusal above needs no mpmath; the interpreter's run of the
+        # six does (python/tests/test_lang.py, the no-mpmath test)
+        pytest.skip(f"the interpreter's run of {', '.join(ops)}: {NO_MPMATH}")
     assert len(lang.run(g, lanes, 2, **kw).states) == 2
 
 

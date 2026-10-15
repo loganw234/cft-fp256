@@ -1368,6 +1368,8 @@ def test_l4_the_plants(kind, monkeypatch):
 # again would double the tangent at each nested expm1, so the lead decided
 # (1 + r) * da (2026-10-15). The three logarithms take the select form, so
 # that below the domain the tangent is the NaN r (question 7, decided).
+# A test that runs or evaluates the six skips by name without mpmath
+# (test_lang.needs_mpmath); the rule table and the structure tests run.
 
 RNDS = ("rne", "rtz", "rdn", "rup", "rmm")
 M1_SYSTEMS = {   # the six under each integrator, in lets and equations
@@ -1467,6 +1469,7 @@ def hp_misses(g, rng, points=3):
     return tot, bad
 
 
+@TL.needs_mpmath
 def test_m1_the_rules_are_the_derivative():
     """The fourth check - the tangent evaluated exactly against the test's
     own dual numbers, each of the six as the exact evaluation takes it and
@@ -1526,6 +1529,7 @@ def _rule_bits(fn, fmt, code, a, da, r, Lb):
     return sf.div(fmt, da, q, code)[0], val(da) / val(q)
 
 
+@TL.needs_mpmath
 @pytest.mark.parametrize("fmtname", list(FORMATS))
 def test_m1_each_rule_rounds_as_the_table_says(fmtname):
     """y = f(a) under every attribute, at random a in each domain and random
@@ -1575,6 +1579,7 @@ def _run_one(g, a, da):
     return r.states[0][1], r.tangents[0][0][1], r.flags, r.primal_flags
 
 
+@TL.needs_mpmath
 def test_m1_the_rules_at_their_specials_and_below_the_domain():
     """Bit for bit at fp64: each logarithm below its domain - a < 0, log1p's
     a < -1 - gives the NaN r for its tangent, the select form's (question 7,
@@ -1650,6 +1655,40 @@ def test_m1_each_vector_pays_one_operation_a_call():
         assert all(i in primal for op, i in tangent if op == fn), fn
 
 
+def test_m1_unnamed_chains_of_the_six_grow_with_the_square():
+    """The known limit's figures for the six (docs/LANGUAGE.md, "Known
+    limits"): each rule reads r, and a logarithm's reads it three times and
+    a once, so 99 calls nested unnamed write what is below them again at
+    every level, as 99 nested roots do (5,148), and a logarithm's chain
+    about four times as much; named by lets, each level reads the one below
+    by name. At 100 nested logarithms the tangent would print 101 deep, and
+    the source is refused `too-deep`, as a root's is; 100 nested exps
+    print 100 deep and are not."""
+    def nested(fn, k=99):
+        e = "x"
+        for _ in range(k):
+            e = f"{fn}({e})"
+        return (f"system r\nformat fp64\nstate x\ntangent v\nnext x = {e}\n"
+                "step map\n")
+
+    def named(fn):
+        lets = "".join(f"let e{i} = {fn}({'x' if i == 1 else f'e{i - 1}'})\n"
+                       for i in range(1, 100))
+        return (f"system r\nformat fp64\nstate x\ntangent v\n{lets}"
+                "next x = e99\nstep map\n")
+
+    want = {"exp": (5049, 99), "expm1": (5148, 198), "exp2": (5148, 198),
+            "log": (19998, 297), "log1p": (20097, 396), "log2": (20097, 396)}
+    for fn, (unnamed, lets) in want.items():
+        assert len(compile_(nested(fn)).tangent_step.nodes) == unnamed, fn
+        assert len(compile_(named(fn)).tangent_step.nodes) == lets, fn
+    assert len(compile_(nested("exp", 100)).tangent_step.nodes) == 5150
+    with pytest.raises(lang.Refusal) as info:
+        compile_(nested("log", 100))
+    assert (info.value.name, info.value.line) == ("too-deep", 5)
+
+
+@TL.needs_mpmath
 def test_m1_the_primal_is_unchanged_by_tangents():
     """With tangents, the primal sections are the system's without them,
     by value, and a run's states and primal flags too; the rules add only
@@ -1677,6 +1716,7 @@ def test_m1_the_primal_is_unchanged_by_tangents():
         assert r0.states == r1.states and r0.flags == r1.primal_flags
 
 
+@TL.needs_mpmath
 def test_m1_l_is_ln_2_rounded_once():
     """The checker's L (constants.ln2_bits, an integer series) is
     transcend.log of 2 at every format under every attribute, and the
@@ -1724,6 +1764,7 @@ def _wrong_ln2(fmt, rnd):
     return C.value_of(fmt, hi if right == lo else lo)
 
 
+@TL.needs_mpmath
 @pytest.mark.parametrize("kind", ["log's rule rounded otherwise",
                                   "log's select form dropped",
                                   "L rounded the wrong way"])

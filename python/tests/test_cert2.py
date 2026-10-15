@@ -1697,7 +1697,8 @@ def test_a_definition_holding_the_math_library_needs_mpmath(monkeypatch):
     them does not. Without mpmath `_evaluate` refuses it `_Undecided`,
     which the audit names `definition-unavailable` (the next test, through
     a planted node, since no committed case can hold one until the
-    compiler carries the six); with it, the lane is lang.run's."""
+    compiler carries the six); with it, the lane is lang.run's - a part
+    skipped by name on a host without mpmath."""
     from cft_golden import lang
     from cft_golden.lang import constants as K
     F = Fraction
@@ -1713,14 +1714,20 @@ def test_a_definition_holding_the_math_library_needs_mpmath(monkeypatch):
         text.replace("exp(x)", "x * x"), "s").graph).needs_mpmath()
     third = K.round_once(g.fmt, sf.RND_RNE, F(1, 3))[0]
     one = K.round_once(g.fmt, sf.RND_RNE, F(1))[0]
+    here = cert2._mpmath_version()
+    with monkeypatch.context() as m:
+        m.setattr(cert2, "_mpmath_version", lambda: None)
+        with pytest.raises(cert2._Undecided) as e:
+            cert2._evaluate(d, [third, 0, one, 0], 1)
+        assert "mpmath is not installed" in str(e.value)
+    if here is None:
+        pytest.skip("the replay of a definition holding exp, beside "
+                    "lang.run's lane: mpmath is not installed, and the "
+                    "math library's six need it")
     vals, flags = cert2._evaluate(d, [third, 0, one, 0], 1)
     run = lang.run(g, [[third, 0]], 1, tangents=[[[one, 0]]])
     assert vals == run.states[0] + run.tangents[0][0]
     assert flags == run.flags & cert2.LANE_IEEE
-    monkeypatch.setattr(cert2, "_mpmath_version", lambda: None)
-    with pytest.raises(cert2._Undecided) as e:
-        cert2._evaluate(d, [third, 0, one, 0], 1)
-    assert "mpmath is not installed" in str(e.value)
 
 
 def test_an_auditor_that_cannot_evaluate_the_definition(mk, lz,

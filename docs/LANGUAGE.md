@@ -2186,19 +2186,27 @@ stage certifies one, both auditors accepting.
 - **A long chain of unnamed operations** makes each one's tangent
   write its unnamed operands again wherever its rule reads an operand
   or its own result (a product, fma, a quotient, a root, abs, copysign,
-  the min family), so the tangent grows with the square of the chain's
-  length: 5,049 tangent nodes for an unnamed 100-term product, against
-  198 if read across; 5,247 for an unnamed chain of 99 quotients,
-  against 297 with each named by a let, and 5,148 for 99 roots nested
-  unnamed (measured by L4 and verifier-VL4); and 8,099 for an unnamed
-  min chain of 90 terms (measured by verifier-VL3). A sum chain stays
+  the min family, the math library's six), so the tangent grows with
+  the square of the chain's length: 5,049 tangent nodes for an unnamed
+  100-term product, against 198 if read across; 5,247 for an unnamed
+  chain of 99 quotients, against 297 with each named by a let, and
+  5,148 for 99 roots nested unnamed (measured by L4 and verifier-VL4);
+  8,099 for an unnamed min chain of 90 terms (measured by verifier-VL3);
+  and for 99 calls of one of the six nested unnamed, 5,049 (exp) or
+  5,148 (expm1, exp2), against 99 or 198 with each named by a let, and
+  about four times as many for a logarithm, whose rule reads r three
+  times and a once: 19,998 (log) or 20,097 (log1p, log2), against 297
+  or 396 (parcel ML, held by
+  `test_m1_unnamed_chains_of_the_six_grow_with_the_square`). A sum chain stays
   linear, and so does a chain through a select's condition, which takes
   no tangent (198 nodes at 100 terms, verifier-VI2). Naming parts of
   the chain with lets keeps it linear, since a let is read by name.
   From 102 terms an unnamed product's tangent would print past the
   parser's 100 levels - from 101 under euler and stormer-verlet, whose
   step writes the field one level deeper - and the source is refused
-  `too-deep` (D2); lets keep it within reach as well.
+  `too-deep` (D2); lets keep it within reach as well. So it is with 100
+  nested logarithms, whose tangent would print 101 deep, as 100 nested
+  roots' would; 100 nested exps print 100 deep and compile.
 - **The compiler's choice between its orders reads no capacity.** It
   takes the fewest instructions a step, then the fewest one-beat cycles;
   the interleaved walk, offered only for a graph with tangents, wins for
