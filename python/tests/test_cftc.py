@@ -48,6 +48,7 @@ from cft_golden import FORMATS, asm, lang        # noqa: E402
 from cft_golden import routines as R             # noqa: E402
 from cft_golden import softfloat as sf           # noqa: E402
 from cft_golden.lang import constants as K       # noqa: E402
+from lang_mathform import NO_MPMATH, have_mpmath  # noqa: E402
 
 SYSTEMS = ROOT / "programs" / "systems"
 # revision 8's three targets, built in at cftc's output version 5
@@ -1554,3 +1555,133 @@ def test_scratch_capacity_one_past_each_revision_8_depth(name):
         quad = T.get("u50-rev8-quad").scratch_depth
         c = cftc.compile_text(_lane_chain(quad), 1, target=name)
         assert c.program.slots_used == quad + 1
+
+
+# ---- M1's build, item 3: the math library's six, refused until item 4 -------
+# The language has exp, expm1, exp2, log, log1p and log2 (golden-first), and
+# its interpreter runs them; cftc carries them from item 4, at its output
+# version 6. Until then it refuses a source that names one - at run time, or
+# folded where the operand is a constant, since a fold-only source that
+# compiled would be a source that compiles where it was refused, an output
+# version step (outputs.py) - `math-library`, first, on every target, at the
+# first source line holding one, whatever the statement; never exit 70.
+
+MATHLIB = {   # name: (source, the first line holding one, its run-time ops)
+    "exp at run time": ("system e\nformat fp64\nstate x\nnext x = exp(x)\n"
+                        "step map\n", 4, ["exp"]),
+    "the six, rk4, two vectors": (
+        "system six\nformat fp256\nround rdn\nstate x, y\ntangent v, w\n"
+        "let u = log1p(x * x) + log2(abs(y) + 1)\n"
+        "d/dt x = expm1(-x) + exp2(y) * u\nd/dt y = log(abs(x) + 2) - exp(y)\n"
+        "step rk4, h = 1/16\n", 6,
+        ["exp", "expm1", "exp2", "log", "log1p", "log2"]),
+    "a fold alone": ("system f\nformat fp32\nstate x\n"
+                     "next x = x * exp(0) + log2(1/8)\nstep map\n", 4, []),
+    "a fold in a const": ("system c\nformat fp64\nstate x\n"
+                          "const k = exp2(-3) + log(1)\nnext x = x * k\n"
+                          "step map\n", 4, []),
+    "a fold in a default": ("system d\nformat fp128\nstate x\n"
+                            "param p = log1p(0) + expm1(0) + 1\n"
+                            "next x = x * p\nstep map\n", 4, []),
+    "a fold in h": ("system h\nformat fp64\nstate x\nd/dt x = -x\n"
+                    "step euler, h = exp2(-4)\n", 5, []),
+    # statements come in any order: a written tangent or an expansion block
+    # above the equations holds the first call (verifier-VL4's lesson)
+    "a written tangent first": (
+        "system t\nformat fp64\nstate x, y\ntangent v\n"
+        "next v.x = v.x\nnext v.y = exp(x) * v.x\nnext x = x\n"
+        "next y = exp(x)\nstep map\n", 6, ["exp"]),
+    "an expansion block first": (
+        "system b\nformat fp64\nstate x\nstep euler, h = 0.125\n"
+        "expansion\n  next x = fma(h, log(x), x)\nend\nd/dt x = log(x)\n", 6,
+        ["log"]),
+}
+
+
+@pytest.mark.parametrize("case", list(MATHLIB))
+def test_the_math_library_is_refused_by_name_until_item_4(case):
+    """compile_text on every built-in target and sw:N, at 3 steps and at 0
+    (before segment-steps), and compile_graph of the language's graph:
+    `math-library`, at the first line in source order holding a call of one
+    of the six, run time or folded, whatever the statement; its sentence
+    names the run-time ops, or the fold, item 4 and lang.run. A graph read
+    from its bytes is refused with no line where it holds a run-time node,
+    and where it holds only folds - constants like any other, the bytes of
+    a source that writes the values - it compiles as that source does. The
+    interpreter runs every one."""
+    text, line, ops = MATHLIB[case]
+    g = lang.compile_text(text, "src.cftl").graph
+    assert g.math_lines[0] == line
+    assert [op for op in cftc.MATH if op in set().union(
+        *(set(g.op_counts(s)) for s in ("step", "tangent_step")
+          if g.section(s) is not None))] == ops
+    trim = T.Target("trim", ("fp32", "fp64", "fp128", "fp256"), 32768, 512,
+                    2048, 1024, T.TILE_FEATURES)
+    for target in T.names() + ["sw:4096", "sw:32768", trim]:
+        for steps in (3, 0):
+            with pytest.raises(lang.Refusal) as e:
+                cftc.compile_text(text, steps, target=target,
+                                  source="src.cftl")
+            assert (e.value.name, e.value.line, e.value.source) == \
+                ("math-library", line, "src.cftl"), (target, str(e.value))
+    s = e.value.sentence
+    if ops:
+        assert s.startswith(f"this system computes {', '.join(ops)} at run "
+                            f"time: "), s
+    else:
+        assert s.startswith("this system names one of exp, expm1, exp2, log, "
+                            "log1p and log2, folded where its operand is a "
+                            "constant: "), s
+    assert "item 4" in s and "lang.run" in s and "version 5" in s, s
+    with pytest.raises(lang.Refusal) as e:
+        cftc.compile_graph(g, 3, source="src.cftl")
+    assert (e.value.name, e.value.line) == ("math-library", line)
+    back = lang.StepGraph.from_bytes(g.to_bytes())
+    assert back.math_lines is None
+    if ops:
+        with pytest.raises(lang.Refusal) as e:
+            cftc.compile_graph(back, 3)
+        assert (e.value.name, e.value.line) == ("math-library", None)
+    else:
+        assert cftc.compile_graph(back, 3).graph_bytes == g.to_bytes()
+    lanes = [[K.round_once(g.fmt, sf.RND_RNE, Fraction(v, 7))[0]]
+             * g.n_state for v in (3, 11)]
+    kw = {"tangents": [[lane] * len(g.tangent) for lane in lanes]} \
+        if g.tangent else {}
+    if ops and not have_mpmath():
+        # the refusal above needs no mpmath; the interpreter's run of the
+        # six does (python/tests/test_lang.py, the no-mpmath test)
+        pytest.skip(f"the interpreter's run of {', '.join(ops)}: {NO_MPMATH}")
+    assert len(lang.run(g, lanes, 2, **kw).states) == 2
+
+
+def test_the_math_library_refusal_through_the_command_line(tmp_path):
+    """Exit 3 with the name and the line, nothing written, never 70."""
+    py = [sys.executable, str(ROOT / "python" / "cftc")]
+    for k, (case, (text, line, _ops)) in enumerate(MATHLIB.items()):
+        src = tmp_path / f"math{k}.cftl"
+        src.write_bytes(text.encode("ascii"))
+        out = tmp_path / f"out{k}"
+        r = subprocess.run(py + [str(src), "--steps", "2", "--target",
+                                 "u50-rev8", "--out", str(out)],
+                           capture_output=True, text=True)
+        assert r.returncode == 3, (case, r.returncode, r.stderr)
+        assert r.stderr.startswith("cftc: refused math-library: "), r.stderr
+        assert f"math{k}.cftl:{line}: this system " in r.stderr, r.stderr
+        assert "internal error" not in r.stderr
+        assert not out.exists()
+
+
+def test_the_math_library_moves_no_compiled_byte():
+    """No committed source names one of the six, so the interim refusal
+    moves no compiled byte: the output version is still 5, and every
+    committed reference compiles to its committed files (the record's
+    check: test_version_is_the_records_last_and_the_record_holds, above,
+    and the lang stage's leg F)."""
+    assert cftc.VERSION == 5
+    named = []
+    for p in sorted(SYSTEMS.glob("*.cftl")):
+        g = lang.load(p).graph
+        if g.math_lines:
+            named.append(p.name)
+    assert named == []

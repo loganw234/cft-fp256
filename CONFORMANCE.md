@@ -424,7 +424,9 @@ Conformance is scored, not read.
     computes it. No profile-2 certificate's bits can depend on the
     change either. A certificate's runs are the program model's, which
     has no transcendental, and its sources are the language's, which
-    refuses exp2 by name. The golden corpus's 37 version-2
+    refused exp2 by name at language 1 (exp2 is an operation from
+    1.1, 2026-10-15, which no profile-2 certificate can name). The
+    golden corpus's 37 version-2
     certificates were made again at profile 3. Only their `profile`
     and `hash` lines moved, and the seven `supersedes` lines that name
     one of them.
@@ -473,6 +475,15 @@ a source states it on its `language` line.
   about four from L1 by verifier-VCV2's count (the step-size-sign
   refusal, D2's `unused` and `too-deep`, and `tangent` reserved), are
   before its count.
+- **It is 1.1 since 2026-10-15** (M1's build, item 3): the math library's
+  exp, expm1, exp2, log, log1p and log2, each an operation with
+  transcend.py's golden function, their folds where a constant's value
+  is rational, and their tangent rules - functions the language refused
+  before only for not having them, so a minor step (Logan's answer to
+  M1's question 9). `cft.h`'s `CFT_LANGUAGE_MINOR` stepped with it, and
+  the golden certificates' 24 sourced cases were made again at `language
+  1.1`, only their `language` and `hash` lines and their manifest digests
+  moving.
 - **Its rule is the profile's.** A major step whenever an accepted source
   is refused, or computes another thing: a new keyword an old source used
   as a name, a refusal added, a node's golden function changed. A minor

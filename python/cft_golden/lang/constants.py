@@ -96,6 +96,48 @@ def round_once(fmt, rnd, value):
     return chars._round_rational(fmt, sign, v.numerator, v.denominator, rnd)
 
 
+# ---- ln 2, rounded once: the tangent rules' L --------------------------------
+
+_LN2 = {}
+
+
+def ln2_bits(fmt, rnd):
+    """The encoding of ln 2 correctly rounded once into `fmt` under `rnd`:
+    the L of exp2's and log2's tangent rules (docs/LANGUAGE.md, "The
+    rules"; M1's study, question 6, decided by Logan on 2026-10-12: "the
+    exact ln 2, rounded once at the program's format under its attribute
+    (transcend.log of 2)", no new name). It IS transcend.log of 2 - the
+    gate holds the two equal at every format and attribute - and is
+    computed here by integers alone, so that checking a source never needs
+    mpmath (only lang.run of a graph holding one of the six does):
+    ln 2 = sum over k >= 1 of 1/(k 2^k), each of the first K terms
+    truncated to a multiple of 2^-N, so that 2^N ln 2 lies in
+    [S, S + K + 1] (each term loses less than 1, the tail past K = N less
+    than 1). Both ends rounded alike decide the rounding; ln 2 is
+    irrational, so a wider N always comes to decide it."""
+    key = (fmt.name, rnd)
+    if key not in _LN2:
+        n = fmt.prec + 64
+        while True:
+            s = sum((1 << n) // (k << k) for k in range(1, n + 1))
+            lo = sf.round_pack(fmt, 0, s, -n, rnd)[0]
+            hi = sf.round_pack(fmt, 0, s + n + 1, -n, rnd)[0]
+            if lo == hi:
+                break
+            n *= 2
+        _LN2[key] = lo
+    return _LN2[key]
+
+
+def ln2_value(fmt, rnd):
+    """L's exact value: ln 2 rounded once, as the rational its encoding is
+    - a constant like any other, which the canonical form writes as it
+    writes any constant (a hexadecimal significand at fp64, fp128 and
+    fp256, a decimal at fp32, where it terminates within 24 significant
+    digits) and reads back, rounded again to itself."""
+    return value_of(fmt, ln2_bits(fmt, rnd))
+
+
 def overflowed(flags):
     return bool(flags & sf.FLAG_OVERFLOW)
 

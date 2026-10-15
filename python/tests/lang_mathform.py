@@ -41,8 +41,23 @@ rounded down to a multiple of 2^-256 - a fixed function of the exact
 argument, so that the same root of the same value agrees, while a root
 taken of another value, or a missing one, does not. A division by zero or
 a negative root's argument raises an ArithmeticError.
+
+The math library's six (M1's build, item 3) print as exp(a), expm1(a),
+2^(a), ln(a), log1p(a) and log₂(a). Each is exact in Fractions only where
+its value is rational, so this reader takes the step graph's convention
+(graph.exact_transcendental) and computes it itself, as it does the
+root's: exact there - exp(0), 2^n, ln(1), log₂(2^k) - and otherwise
+mpmath's value at 1,024 bits of the argument rounded to nearest at 1,024
+bits; expm1(a) is exp(a) - 1 and log1p(a) is ln(1 + a). A logarithm at or
+below its pole, or a value past 2^+-1048576, raises an ArithmeticError.
+
+Only the six need mpmath, here as in the language: have_mpmath() says,
+without importing it, whether this host has it, so that the tests that
+run or evaluate the six skip by name on a host without it while the rest -
+the checker, the renderers and cftc's refusal of the six among them - run.
 """
 
+import importlib.util
 import re
 import sys
 from fractions import Fraction
@@ -50,6 +65,20 @@ from math import isqrt
 
 MINUS, DOT, MAPSTO, LE, NE, ROOT = "−", "·", "↦", "≤", "≠", "√"
 ROOT_BITS = 256
+TRANS_BITS = 1024
+LIMIT = 1 << 20                 # a constant's bound, 2^+-1048576
+_MP = []
+NO_MPMATH = ("mpmath is not installed: the math library's six - their golden "
+             "functions, python/cft_golden/transcend.py, and their exact "
+             "values - need it")
+
+
+def have_mpmath():
+    """Whether mpmath can be imported here, without importing it. A host
+    where sys.modules holds None for it, as the tests' own no-mpmath runs
+    arrange, has none. Only mpmath's absence answers False: one installed
+    but broken fails where it is used."""
+    return importlib.util.find_spec("mpmath") is not None
 
 
 def root(q):
@@ -62,6 +91,63 @@ def root(q):
     if rn * rn == n and rd * rd == d:
         return Fraction(rn, rd)
     return Fraction(isqrt((n << (2 * ROOT_BITS)) // d), 1 << ROOT_BITS)
+
+
+def _mpvalue(fn, q):
+    """mpmath's exp, 2^x, ln or log2 of a rational at TRANS_BITS, the
+    argument rounded to nearest at TRANS_BITS first, as an exact rational."""
+    if not _MP:
+        import mpmath
+        ctx = mpmath.MPContext()
+        ctx.prec = TRANS_BITS
+        _MP.append((mpmath.libmp, ctx))
+    lib, ctx = _MP[0]
+    x = ctx.make_mpf(lib.from_rational(q.numerator, q.denominator,
+                                       TRANS_BITS, lib.round_nearest))
+    y = {"exp": ctx.exp, "exp2": lambda v: ctx.power(2, v), "ln": ctx.log,
+         "log2": lambda v: ctx.log(v) / ctx.ln2}[fn](x)
+    sign, man, exp, bc = y._mpf_
+    man = int(man)
+    if man == 0 or abs(exp + bc) > LIMIT:
+        raise ArithmeticError(f"{fn}({q}) is past 2^+-{LIMIT}")
+    v = Fraction(man << exp) if exp >= 0 else Fraction(man, 1 << -exp)
+    return -v if sign else v
+
+
+def transcendental(name, q):
+    """One of the six as the exact checks take it (the module docstring),
+    by the mathematical form's name for it: exp, expm1, 2^ (exp2), ln,
+    log1p or log₂ - or the language's, log and log2."""
+    q = Fraction(q)
+    if name == "exp":
+        if q == 0:
+            return Fraction(1)
+        if abs(q) > 1 << 21:
+            raise ArithmeticError(f"exp({q}) is past 2^+-{LIMIT}")
+        return _mpvalue("exp", q)
+    if name == "expm1":
+        return transcendental("exp", q) - 1
+    if name in ("exp2", "2^"):
+        if abs(q) > LIMIT:
+            raise ArithmeticError(f"2^{q} is past 2^+-{LIMIT}")
+        if q.denominator == 1:
+            return Fraction(2) ** q.numerator
+        return _mpvalue("exp2", q)
+    if name == "log1p":
+        return transcendental("ln", 1 + q)
+    if name in ("ln", "log", "log₂", "log2"):
+        if q <= 0:
+            raise ArithmeticError(f"{name}({q}): at or below zero")
+        if name in ("ln", "log"):
+            return Fraction(0) if q == 1 else _mpvalue("ln", q)
+        n, d = q.numerator, q.denominator
+        if n & (n - 1) == 0 and d & (d - 1) == 0:
+            return Fraction(n.bit_length() - d.bit_length())
+        return _mpvalue("log2", q)
+    raise MathFormError(f"unknown function {name}")
+
+
+_TRANSCENDENTAL = ("exp", "expm1", "ln", "log1p", "log₂")
 
 
 class MathFormError(ValueError):
@@ -186,6 +272,15 @@ class _Expr:
     def atom(self):
         t = self.take()
         if t[0] == "num":
+            if self.peek() == ("op", "^"):
+                # 2^(a): exp2, the only power the form prints (M1)
+                self.take()
+                if t[1] != 2:
+                    raise MathFormError(f"a power of {t[1]}, not 2")
+                self.expect("(")
+                inner = self.sum()
+                self.expect(")")
+                return ("exp2", inner)
             return ("num", t[1])
         if t[0] == "name":
             if self.peek() == ("op", "("):
@@ -435,6 +530,8 @@ class MathForm:
             return abs(self._eval(t[1], env))
         if kind == "sqrt":
             return root(self._eval(t[1], env))
+        if kind == "exp2":
+            return transcendental("2^", self._eval(t[1], env))
         if kind == "cmp":
             a, b = self._eval(t[2], env), self._eval(t[3], env)
             truth = {"<": a < b, LE: a <= b, "=": a == b}[t[1]]
@@ -449,6 +546,10 @@ class MathForm:
             if name in ("Df", "Dv", "Da"):
                 return Op(self, name[1:], self._eval(args[0], env), env)
             vals = [self._eval(a, env) for a in args]
+            if name in _TRANSCENDENTAL:
+                if len(vals) != 1:
+                    raise MathFormError(f"{name} of {len(vals)} values")
+                return transcendental(name, vals[0])
             if name in ("min", "minNum"):
                 return min(vals)
             if name in ("max", "maxNum"):

@@ -20,8 +20,10 @@ state is Result.scratch_out[k*m : k*m + n_state].
 from fractions import Fraction
 
 from .. import softfloat as sf
+from .. import transcend
 from . import constants as C
 from .check import constant_of
+from .graph import SECTIONS, TRANSCEND
 from .refusals import Refusal
 
 
@@ -41,12 +43,20 @@ class Run:
         self.at_tangents = at_tangents or {}    # {s: tangents}
 
 
+def _transcend(fmt, fn, rnd):
+    """The golden function of one of the six: transcend.py's, by the name
+    the node carries, under the program's attribute - the correctly
+    rounded result and its exact flags (M1's build, item 3)."""
+    return lambda a: transcend.compute(fmt, fn, a, 0, rnd)
+
+
 def _ops(fmt, rnd):
-    """The golden function for each node operation. The six that round
+    """The golden function for each node operation. The twelve that round
     take the program's attribute - division and the square root among
     them, sf.div and sf.sqrt, correctly rounded with their exact flags
-    (L4) - and the rest are called as softfloat.compute calls them, and
-    ignore it."""
+    (L4), and the math library's six, transcend.py's (M1's build, item 3)
+    - and the rest are called as softfloat.compute calls them, and ignore
+    it."""
     return {
         "fma": lambda a, b, c: sf.fma(fmt, a, b, c, rnd),
         "add": lambda a, b: sf.add(fmt, a, b, rnd),
@@ -54,6 +64,7 @@ def _ops(fmt, rnd):
         "mul": lambda a, b: sf.mul(fmt, a, b, rnd),
         "div": lambda a, b: sf.div(fmt, a, b, rnd),
         "sqrt": lambda a: sf.sqrt(fmt, a, rnd),
+        **{fn: _transcend(fmt, fn, rnd) for fn in TRANSCEND},
         "neg": lambda a: sf.neg(fmt, a),
         "abs": lambda a: sf.fabs(fmt, a),
         "copysign": lambda a, b: sf.copysign(fmt, a, b),
@@ -66,6 +77,38 @@ def _ops(fmt, rnd):
         "cmpeq": lambda a, b: sf.cmpeq(fmt, a, b),
         "select": lambda a, b, c: sf.select(fmt, a, b, c),
     }
+
+
+def transcendentals(graph):
+    """The six (graph.TRANSCEND) a graph's sections hold, in their order:
+    what makes a run of it need mpmath."""
+    held = set()
+    for name in SECTIONS:
+        sec = graph.section(name)
+        if sec is not None:
+            held |= {op for op, _a, _l in sec.nodes if op in TRANSCEND}
+    return [fn for fn in TRANSCEND if fn in held]
+
+
+def need_mpmath(graph):
+    """Nothing for a graph without the six; for one with them, nothing where
+    mpmath imports, and otherwise transcend.ZivEscalation naming it - the
+    golden model's own failure for a transcendental it cannot decide here,
+    which the certificate auditor maps to `definition-unavailable`. Raised
+    before any lane runs, so that whether a run needs mpmath is a property
+    of its graph, never of its lanes (a lane at exp(0) needs no
+    enclosure)."""
+    used = transcendentals(graph)
+    if not used:
+        return
+    try:
+        import mpmath  # noqa: F401
+    except ImportError:
+        raise transcend.ZivEscalation(
+            f"{graph.system} computes {', '.join(used)}, whose golden "
+            f"functions (python/cft_golden/transcend.py) decide each rounding "
+            f"through mpmath's enclosures, and mpmath is not installed: "
+            f"lang.run cannot run it here") from None
 
 
 def _whole(n):
@@ -141,6 +184,11 @@ def run(graph, states, steps, lane_params=None, params=None,
     evaluates the primal nodes first, then each vector's tangent nodes,
     which only read them: the states and the primal flags are the run of
     the same system without its tangents, bit for bit.
+
+    A graph holding exp, expm1, exp2, log, log1p or log2 needs mpmath, as
+    transcend.py's enclosures do; without it the run raises
+    transcend.ZivEscalation, naming mpmath, before any lane runs
+    (need_mpmath). A graph without them never imports it.
     """
     fmt, rnd = graph.fmt, graph.rnd
     top = 1 << fmt.width
@@ -262,6 +310,10 @@ def run(graph, states, steps, lane_params=None, params=None,
             if factor is not None:
                 cbits[k] = _round_run(graph, f"{C.h_form(factor)}",
                                       factor * hv)
+
+    # a graph holding one of the six needs mpmath for its golden functions,
+    # named here, after the inputs' refusals and before any lane runs
+    need_mpmath(graph)
 
     # the program: every node's function and the slots it reads. The
     # tangent's, after the primal's nodes: its inputs, then its nodes;

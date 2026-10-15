@@ -21,6 +21,12 @@ Each operation's tangent is a rule written in the language
   fma(a, b, c)    fma(da, b, fma(a, db, dc))
   a / b           fma(-r, db, da) / b, r the quotient (L4)
   sqrt(a)         da / (2 * r), r the root (L4)
+  exp(a)          r * da                        r the operation's own
+  expm1(a)        (1 + r) * da                  result, L ln 2 rounded
+  exp2(a)         (L * r) * da                  once at the program's
+  log(a)          select(r == r, da / a, r)     format under its
+  log2(a)         select(r == r, da / (L * a), r)   attribute (M1's
+  log1p(a)        select(r == r, da / (1 + a), r)   build, item 3)
   abs(a)          copysign(1, a) * da
   copysign(a, b)  copysign(1, b) * (copysign(1, a) * da)
   min, max, minnum, maxnum (a, b) with result r
@@ -64,13 +70,31 @@ with the primal's own. That keeps the language's promise for the
 tangent's text - every operation written is performed, once, in the order
 the canonical form writes it - at a known price: a long chain of unnamed
 operations whose rules read an operand or their own result (products,
-fma, quotients, roots, abs, copysign, the min family) makes each one's
-tangent write its unnamed operands again, so the tangent grows with the
-square of the chain (measured: 5,049 nodes for a 100-term product chain,
-198 without copies; 5,247 for a chain of 99 quotients, 297 named by
-lets; 5,148 for 99 nested roots; 8,099 for a min chain of 90 terms). A
+fma, quotients, roots, abs, copysign, the min family, the math library's
+six) makes each one's tangent write its unnamed operands again, so the
+tangent grows with the square of the chain (measured: 5,049 nodes for a
+100-term product chain, 198 without copies; 5,247 for a chain of 99
+quotients, 297 named by lets; 5,148 for 99 nested roots; 8,099 for a min
+chain of 90 terms; 5,049 for 99 nested exps and 19,998 for 99 nested
+logs, whose rule reads r three times, 99 and 297 named by lets). A
 select's condition takes no tangent, so a chain through it stays linear.
 Naming parts with lets keeps it linear.
+
+The math library's six (M1's build, item 3, 2026-10-15; docs/studies/
+M1-exp-log.md, section 7, with Logan's answers to questions 6 and 7 and
+the lead's decisions of 2026-10-15) read r as the quotient's rule does.
+Each spends one operation a vector on da - a product for the exp family,
+a division for the logarithms - after primal-only values the compiler
+shares across vectors: L * r, 1 + r, L * a, 1 + a, and r == r. L is
+ln 2 rounded once at the program's format under its attribute, a
+constant like any other (constants.ln2_value), made only where exp2's or
+log2's rule reads it. The logarithms take the select form, so that below
+the domain - a < 0, log1p's a < -1 - the tangent is r, the NaN, as the
+root's is; at the pole it is the division's convention, da / +-0.
+expm1's is (1 + r) * da, two roundings: the study's fma(r, da, da) reads
+da twice, and an unlabelled node has one use (graph.canonical), so where
+da is an unnamed expression it would be written again, doubling the
+tangent at each nested expm1 (the lead's decision, 2026-10-15).
 
 The walk is iterative, from the outputs, and makes the tangent of a node
 only when some output's tangent reads it, so a comparison's operands, a
@@ -108,13 +132,16 @@ class Derivation:
     whose operands are all constants - copysign(1, b) for a constant b -
     is a constant expression, folded as the language folds any, so the
     rule written out reads back as what was derived (`copysign(1, 2)` is
-    the constant 1, and `copysign(1, -2)` the constant -1)."""
+    the constant 1, and `copysign(1, -2)` the constant -1). `ln2()` makes
+    the leaf of L, ln 2 rounded once (exp2's and log2's rules), where a
+    rule reads it."""
 
-    def __init__(self, zero, one, fold, two):
+    def __init__(self, zero, one, fold, two, ln2=None):
         self.zero = zero
         self.one = one
         self.two = two
         self.fold = fold
+        self.ln2 = ln2
         self.memo = {}
 
     def of(self, v):
@@ -257,6 +284,31 @@ class Derivation:
             if t[0] is None:
                 return None
             return N("div", t[0], N("mul", self.two, R(node)))
+        if op in ("exp", "expm1", "exp2"):
+            # r = exp(a): r * da, one rounding; expm1: (1 + r) * da and exp2:
+            # (L * r) * da, two, the first primal-only (the module docstring)
+            if t[0] is None:
+                return None
+            if op == "exp":
+                return N("mul", R(node), t[0])
+            k = self.one if op == "expm1" else self.ln2()
+            return N("mul", N("add" if op == "expm1" else "mul", k, R(node)),
+                     t[0])
+        if op in ("log", "log2", "log1p"):
+            # select(r == r, da / b, r), b the derivative's denominator: a,
+            # L * a or 1 + a - so the tangent is r, the NaN, below the
+            # domain; r is read three times, written again each time it has
+            # no name, as an unlabelled node has one use
+            if t[0] is None:
+                return None
+            if op == "log":
+                den = R(a[0])
+            elif op == "log2":
+                den = N("mul", self.ln2(), R(a[0]))
+            else:
+                den = N("add", self.one, R(a[0]))
+            return N("select", N("div", t[0], den), R(node),
+                     N("cmpeq", R(node), R(node)))
         if op == "abs":
             if t[0] is None:
                 return None

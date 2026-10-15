@@ -1275,10 +1275,10 @@ class Definition:
 
     def needs_mpmath(self):
         """Does evaluating the graph reach a golden function decided
-        through mpmath's enclosures? Only a node in TRANSCEND_OPS does, and
-        the language has none today: it refuses `exp` (`transcendental`),
-        and its division and root are softfloat's (L4). M1's routines will
-        be the first."""
+        through mpmath's enclosures? Only a node in TRANSCEND_OPS does: the
+        math library's six, which the language has since M1's build, item
+        3 (2026-10-15); its division and root are softfloat's (L4). A tangent
+        section reaches them too, where a rule writes r again."""
         for name in ("step", "tangent_step"):
             sec = self.graph.section(name)
             if sec is not None and any(op in TRANSCEND_OPS
@@ -1306,8 +1306,10 @@ class Definition:
 
 
 # The language's node operations whose golden function is decided through
-# mpmath (transcend.py): none yet. M1's exp and log will join it.
-TRANSCEND_OPS = frozenset()
+# mpmath (transcend.py): the math library's six since M1's build, item 3
+# (2026-10-15). No certificate can name a source holding one until the
+# compiler carries them (item 4), so no committed case reaches them yet.
+TRANSCEND_OPS = frozenset({"exp", "expm1", "exp2", "log", "log1p", "log2"})
 
 
 def _mpmath_version():
