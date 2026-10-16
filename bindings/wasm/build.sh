@@ -51,7 +51,7 @@
 #   5  the same module a third time for node (-sENVIRONMENT=node),
 #      into build/ and, when bindings/node exists, into the package.
 #      The .wasm is byte-identical to the page's - only the loader
-#      differs - which is what lets a node harness replay all 1,068,915
+#      differs - which is what lets a node harness replay all 1,072,415
 #      published cases against THE PAGE'S module instead of a lookalike.
 #      bindings/wasm/verify.mjs checks that identity rather than
 #      assuming it.

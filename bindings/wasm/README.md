@@ -47,7 +47,7 @@ four formats, all five rounding attributes and every opcode class, the
 divide/sqrt seeds 26/27 and the unassigned `reserved15/255` included -
 that list lost 28 when ABI 0.6 assigned it to `sumsq`, 30 when `imul`
 took it on 2026-09-07 and 31 when `maxall` did on 2026-09-12. For the
-full 1,068,915-case claim, generate the sets in a checkout (`make
+full 1,072,415-case claim, generate the sets in a checkout (`make
 vectors`) and drag the `vectors/out/*.jsonl` files onto the page - same
 code path, whole files. Verified at build time: the full 20-set drop
 replays with zero mismatches, from both LF (Linux) and CRLF (Windows)
@@ -64,9 +64,10 @@ exactly what the drop zone does with a dropped file, and the drop
 itself was watched working in Chromium (see the 2026-09-03 block
 below) - four transcendental sets and one opcode set, 32,465 cases,
 with a misnamed file still refused by name. Those same twenty files
-carry **533,265 cases** since ABI 0.6 completed table 9.1 in them
-(242,915 at 0.5, 129,845 at 0.4, 64,325 at 0.3); the file names did
-not change, so the drop zone needed nothing for those. It did need
+carry **536,765 cases** since profile 3.1 added 175 to each (533,265
+from ABI 0.6, which completed table 9.1 in them, to profile 3; 242,915
+at 0.5, 129,845 at 0.4, 64,325 at 0.3); the file names did not change,
+so the drop zone needed nothing for those. It did need
 three more families at 0.6, and got them: `<fmt>-augmented.jsonl`
 (one per format - 9.5 fixes the rounding, so there is no attribute to
 sweep), `<fmt>-reduce[-<rnd>].jsonl` and
