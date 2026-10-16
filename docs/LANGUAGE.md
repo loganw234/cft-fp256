@@ -479,9 +479,9 @@ six, named as `python/cft_golden/transcend.py` names the functions.
   one routine depth, so none reads another's result; the largest is
   looped first, then the next, until the step fits or none is left. Its
   size is its calls times its routine's fragment; ties go to the
-  shallower, then by the routines' one order - div, sqrt, exp, expm1,
-  exp2, log, log1p, log2, the order of "The operations", which is also
-  the order of the routines' words in the bank - so a step of division
+  shallower, then by the routines' one order, that of the step graph's
+  `OPS` (lang/graph.py) - div, sqrt, exp, expm1, exp2, log, log1p, log2,
+  also that of the routines' words in the bank - so a step of division
   and root alone loops as it did before the six (M1's build, item 4). A
   batch of the six loops as a root's does, one slot a record (with the
   constant at 32,768, 72 components each calling expm1, exp, exp2 and

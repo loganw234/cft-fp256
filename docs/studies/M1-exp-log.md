@@ -150,7 +150,7 @@ build changed in this text's statements:
   slots in the culture's, most stored inside the routines' quiet
   regions), and so is one exp a step with values live across it - at
   fp32, whose exp keeps 19 to 21 live against r3 to r31, spills begin
-  with 12 values live beside it, at the double word's formats with 20.
+  with 11 values live beside it, at the double word's formats with 19.
 - Section 6's "A marked lane in the language's own checks": a compiled
   image marks a structured centre's lane on seq.py and on libcft's
   software backend alike; the stages' replay of such a lane is item 5's,

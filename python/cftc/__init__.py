@@ -54,8 +54,13 @@ writes the same images, banks and text files as 4; only manifests moved.
 that names exp, expm1, exp2, log, log1p or log2 - at run time, or folded
 where its operand is a constant - which 5 refused `math-library`,
 compiles, each run-time call an inlined routine, mathlib.py's fragment.
-6 writes the same images, banks and text files as 5 for every source 5
-compiled; its manifests say version 6, and nothing else in them moved.
+6 writes the same images and banks as 5 for every source 5 compiled,
+and the same text files but for the .cfta's note on a bank word with
+three or more owners: 5 joined them with "and" throughout, and 6 writes
+a list ("a word of div, sqrt and the call loop"), which only a looped
+image holding both division and root meets - no committed file is one.
+Its manifests say version 6 and, for such an image, the .cfta's new
+hash; nothing else in them moved.
 
 A format override: compile_text and compile_file take `fmt`, a format's
 name, which replaces the value of the source's `format` statement
