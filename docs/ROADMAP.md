@@ -6126,6 +6126,18 @@ this level?** Logan's instruction, above.
    - VERSION 6, with the outputs record's block and the certificate
      corpus remade (question 9);
    - the Lotka-Volterra reference.
+   - **Built** (2026-10-15): parcel MC, merged at a3bb7b5, with
+     `math-library` lifted. The lead's decisions on the way, in
+     VALIDATION's entry for the fifth wave:
+     - the committed references hold the six's rules between them:
+       Lotka-Volterra (exp), diodes (expm1, log1p) and a culture
+       (exp2, log, log2), since Lotka-Volterra alone holds exp's;
+     - `routine-unavailable` for the six on a host without mpmath;
+     - one order for the eight, and the invariants per routine,
+       division's and root's unchanged;
+     - the golden auditor names its own missing mpmath
+       `definition-unavailable` at the recompile.
+     The stages' legs are next.
 5. **The stages' legs:** lang-routines and tangent, marked lanes
    replayed (question 10), and VERIFICATION's rows.
 6. **The card, the lead's:** STATUS[6] and the lane byte on a structured

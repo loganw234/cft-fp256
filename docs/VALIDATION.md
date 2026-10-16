@@ -20480,7 +20480,7 @@ After c19e98c only two documents and one docstring changed (constants.py's AST i
 - **MC6, VERSION 6.** cftc's docstring gains 6's line; `programs/lang_check.py --record`: "version 6: a new block of 160 files" (the 64 of compiled/ and the 96 of compiled-tangent/, the three new references' 48 among them), the record gaining 162 lines and losing none. **What moved**: `git diff -U0` of programs/systems/compiled and compiled-tangent after `--write`: 14 files, exactly 14 lines, `"version": 5` to `"version": 6`, in the 8 and 6 committed manifests - the one field VERSION writes - and nothing else. **For a source version 5 compiled**, version 6 writes the same images and banks, and the same text files but for that `.cfta` note on a bank word of three or more owners, which only a looped image holding both division and root meets - and so such an image's manifest carries the `.cfta`'s new hash besides the version: none is committed, and none of the pack's 21 is one, none of them taking a root (READ, verifier-VMC's ledger: its differential over 110 random sources without the six, 88 accepted, 272 compiles under 97076f3 and c7cb354, 63 of them looped, found the `.cfta` and the manifest's hash of it different in 36, exactly the looped ones holding both, the image and bank equal in all; cftc's own docstring said "the same images, banks and text files" until the send-back's commit). **The 52 committed sources**: the 31 outside the hard-workload pack (certificates' 3, programs/systems' 14, compiled/'s 8 and compiled-tangent/'s 6), compiled for sw at 2 steps and the 14 references also at their own steps - 45 compilations - under base97 and here (MEASURED, scratch compile52.py and cmp52.py, 15:24:02 to 15:24:40, 18 s and 19 s): 44 compiled at both, 1 refused alike (the v2-source-refused control's `unknown-integrator`); every file but the manifest byte for byte the same; in the manifests one path moved, /compiler/version 5 to 6, in 44 of 44. The pack's 21 at sw:32768 under both trees: handed to the lead and still compiling on the box when this entry was committed (READ, the lead's message of about 18:00: tree A one source at a time - fput extended 130 s, gray_scott extended 1,767 s, kuramoto_sivashinsky extended 624 s, lorenz_tangent extended past an hour - and tree B eight at a time since 18:00:23); the lead sends the comparison, and the record takes it after this entry. **The corpus** (`certificates/corpus.py make --keep-version-1`, 15:30:16 to 15:30:20): "49 cases (12 of version 1, 12 kept; 37 of version 2)"; `git diff -U0 certificates/`, hashes masked: 9 files - 8 certificates (lorenz63-rk4-fp64-rebuilt and -sourced, and the controls v2-aux-source, v2-compiler-differs, v2-source-format, v2-source-graph, v2-source-image and v2-source-param) and MANIFEST - and the lines that moved are 18 `compiler cftc 5 sw` to `6 sw`, 1 `compiler cftc 5 sw:2048` to `6 sw:2048`, 1 `compiler cftc 102 sw` to `103 sw` (v2-compiler-differs' other version, which follows VERSION), 8 hash lines and 8 MANIFEST `certificate <path> <digest>` lines: only compiler lines, hashes and digests. `corpus.py check`: the golden half "239 checks, 0 failed, 19 skipped, 33 s" (15:30:34); with cft-segrun built here (`make -C host` with OS=Windows_NT and mingw64's gcc first, 17 s with cft-audit, 0 warning lines) "311 checks, 0 failed, 0 skipped, 34 s" (15:31:56).
 - **MC7, the references** (above, "What was built"). **Each rule changed moves a committed byte**: test_lang_tangent.py's `test_m1_each_rule_changed_moves_a_committed_reference`, seven plants each moving both committed graphs (fp64 and fp256) of the reference holding the function and no other - exp made wrong (a * da for r * da), expm1 as fma(r, da, da), exp2 as L * (r * da), log made wrong (da * a) and as da * (1 / a) (the study's example), log2 as (da / L) / a, log1p as da * (1 / (1 + a)) - and `test_m1_the_committed_references_hold_the_six` the six held between them, each in its field at a value carrying a tangent, and the committed graphs what the sources check to. **The spills** (MEASURED, scratch spills.py, 15:42:10 to 15:42:31): Lotka-Volterra 4 slots and no spill, at fp64 and fp256; the diodes 4 and none; the culture 42 slots, 38 of them spills, 54 loads and 49 stores a step at both formats - 47 of the stores and 13 of the loads inside the routines' quiet regions, the values the allocator evicts to give a routine its registers; one exp a step with k other values live across it (pinned state): at fp32, where exp keeps 19 live at rne against r3 to r31, the first spill comes at k = 11 (1 slot; 2 at k = 12, 6 at k = 16, 10 at k = 20), at fp64, fp128 and fp256 (11 live) at k = 19 (1 slot; 2 at k = 20), each store inside the region and its reload after where I looked (fp32 at k = 12, 16 and 20, the others at k = 20) (the thresholds MEASURED at every k from 9 to 13 and from 17 to 21, scratch spills_k.py, 20:17, 5 s, the desktop free: k = 10 and 18 give none; the first figures here were k = 12 and 20, the first of my samples at 0, 4, 8, 12, 16 and 20 that spilled, which verifier-VMC found). **The legs that read them**: the tangent stage's G (cft-segrun's certificates: 84 ok with the tools built here, 15:32:37 to 15:34:04, 86 s - the twelve references, the new three accepted by the golden reader, the golden audit and cft-audit in full and sampled), H (determinism and the committed bytes: with J, "15 ok, 0 FAIL" in 60 s, 15:28:53) and J (its rounding-order plant: "moves each of the 8 that holds a product of two tangent-carrying operands, and no other"), and the lang stage's F through the record (7 ok, 15:30:00); on the box at d738f48 all of them inside the tangent stage's 198 checks and the lang stage's 223 (READ). **A lane the image could mark**: leg G checks every certified segment's STATUS and fails STATUS[6] by name ("a lane marked in run and segment ...: a routine's undecided guess, which this leg does not replay"), since version 1 certifies the machine's guess; H and J compile and compare bytes and run no lane; the lang stage reads only digests. No lane of the references marked in any run here (their boxes against the six's structured windows: Known limits). **Without mpmath** (MEASURED with mpmath taken out of sys.modules, the stages' child processes keeping it): tangent legs G, H, J and M "57 ok, 0 FAIL, 5 SKIP in 210 s" (15:47:17, at 100 per cent), G's three and H's references of the six and leg M skipped by name; lang legs G and F "21 ok, 0 FAIL, 2 SKIP in 31 s" (15:50:57), the run-time log1p's compile and run skipped by name.
 - **MC8, the records**: LANGUAGE.md (the compiler bullet, the marked lane, the call loop's order and its 72-component case, Refused in v1's paragraph, the rule cost, the rounding-order bullet, the compiler's refusals with routine-unavailable and its host dependence, the table, the gate, what v1 does not do); CERTIFICATES.md (step 4a's check 7, "An auditor that cannot evaluate the definition", the table's row, the known limit restated - below - the corpus's history, the test list); `definition-unavailable` through a real certificate (test_cert2.py's `test_definition_unavailable_through_a_certificate_of_the_six`: the compiled `next x = exp(x)` on 1/3 and 2^-53, segment 0's marked lane replayed by the golden writer, accepted by the audit with mpmath; in a second process without it, `definition-unavailable` (78) at the recompile, run 0, for the run compiled from the source, and at segment 0's replay for the same image defined by it); the study's note; VERIFICATION.md's golden, lang, tangent and audit rows; docs/README.md recounted; this entry.
-- **MC9**: the planted faults below, and nothing that held at 97076f3 regressing: the box's run at d738f48 (READ, "Handed to the lead"), the golden suite whole - 5,217 passed with its three known skips - and the docs, generated, programs, lang, lang-routines, tangent and audit stages, each passed with nothing skipped; the committed sources' bytes (MC6); and on the desktop the eight test files this parcel's code touches, 835 passed at 97076f3 (MEASURED, 14:45) and at the tree 864 passed with 2 failed (15:28), both failures my own - the document table before LANGUAGE.md was restated and my reference test's lookup - fixed and passing since. After d738f48 only documents, a docstring and a comment changed.
+- **MC9**: the planted faults below, and nothing that held at 97076f3 regressing: the box's run at d738f48 (READ, "Handed to the lead"), the golden suite whole - 5,217 passed with its three known skips - and the docs, generated, programs, lang, lang-routines, tangent and audit stages, each passed with nothing skipped; the committed sources' bytes (MC6); and on the desktop the eight test files this parcel's code touches, 835 passed at 97076f3 (MEASURED, 14:45) and at the tree 864 passed with 2 failed (15:28), both failures my own - the document table before LANGUAGE.md was restated and my reference test's lookup - fixed and passing since. After d738f48 only documents, a comment and two docstrings changed (test_cert2.py's at 678e909, cftc/__init__.py's module docstring at b6718a3; restated by the lead at the fifth wave's close, after verifier-VIW5).
 
 **The planted faults** (MEASURED; a scratch driver, plants.py, not committed: each plant edits files of a copy outside the tree - `git archive d738f48 python programs certificates docs host/include`, unpacked, its 1,145 files hashed first - after checking that each replaced text occurs there exactly once, runs its targets, and restores every edited file from the bytes it saved; a RED target must fail - for pytest exit 1, a test failed, never an error of collection or usage - and a GREEN control must pass; each target is given 420 s, a timeout recorded as itself. The copy was checked against its hashes after each run (`sha256sum -c`, silent). The first run of the rule plants (8 to 14, leg H among their targets) gave the test's verdicts on plants 8 and 9, both red, and was stopped by its PIDs ten minutes into plant 9's leg H in the copy, and a second, of plants 9 to 14, was killed by its own 580-second timeout before any target ended; each time the copy's edited file was restored from `git archive d738f48` and the copy checked against its hashes. Plants 1 to 7: 16:10:54 to 16:14:49, and plant 8 at 16:15, as the desktop's load rose from Logan's use; plants 9 to 14: 16:49 to 17:14:35, 1,476 s, at 95 to 100 per cent (a game in the foreground), 94 to 326 s a target where the same target took 17 s at 16:15; plants 15 to 26: 17:15:02 to 17:43:40, 1,676 s, at 100 per cent, pytest's entry-point plugins off (`PYTEST_DISABLE_PLUGIN_AUTOLOAD`: anyio's, xdist's and zarr's, which no test uses) to spare their import under the load.) **26 of 26 caught as expected: 40 targets, 31 red as wanted and the 9 green controls green** (COMPUTED from the runs' results: 8 targets with 5 red and 3 green, 9 with 6 and 3, plant 8's 1 red, 6 red, and 16 with 13 and 3).
 - **The brief's seven.**
@@ -20547,3 +20547,125 @@ After c19e98c only two documents and one docstring changed (constants.py's AST i
 - The scratch tools (the plant driver, the fragment digests, held_six.py, the comparison of the committed sources, the call loop at its constant, the spills, the certificate probes, the no-mpmath runners) are not committed; each plant is described above by file and change so that it can be redone.
 
 **A correction, found after this entry was committed (678e909)** (MEASURED, the process list at 18:05): a compile of all 52 committed sources under this tree, niced - the second half of my first try at the 52-source comparison, whose pack half went to the lead - ran from 15:23:55 until I stopped it by its PID at 18:05. At 15:23 I stopped that chained command's first half, base97's, and its shell went on to the second, which I did not see; it wrote nothing after 15:26:46, at the pack's third source, and had used 860 CPU-seconds. So from 15:24 every desktop run of mine had it beside it: "one process at a time" above is not true of that span, and the times from then carry its load besides Logan's. No result depends on it; it wrote only its own log, in my scratch. docs/README.md recounted for these two lines (VALIDATION 20,549, the record subtotal 42,406, the total 79,077), and the docs check run again.
+
+## 2026-10-15 - M1's build, fifth wave, closed: cftc compiles the six (parcel MC, Opus), merged and gated
+
+**What Logan asked.**
+- **The mandate:** item 4 of M1's build runs under his "Delete the ci-golden branch and start M1's build" (2026-10-13). His models of the same day ("Use Sonnet for M1's build parcels as you recommended, it performed well") accepted the lead's recommendation, which put the language and cftc work on Opus.
+- **The brief:** on 2026-10-15, after the fourth wave's report asked "Shall I start its brief?", he answered, verbatim: "Clear to proceed".
+- **The desktop:** during the parcel he wrote "*PC will be in use for a bit so heavier runs may see contention" and later "PC is clear again". Between the two, new heavy runs went to amd-arc-box by his rule of 2026-09-29, and the agents' desktop runs were held to two workers.
+
+**The lead's decisions during the parcel,** each an implementation consequence of the plan, reported to Logan with this wave.
+1. **The committed variational references hold all six rules between them** (the brief).
+   - The study's section 7 proposes Lotka-Volterra in logarithmic variables, and says a rule rounded otherwise, `da * (1/a)` for log's `da / a`, must move that reference's bytes. Lotka-Volterra uses exp alone, so it cannot.
+   - The lead read the intent as committed bytes holding the six's rules. The author chose the systems: Lotka-Volterra (exp), diodes with a source (expm1, log1p) and a self-heating culture (exp2, log, log2).
+2. **Four of the author's proposals, agreed:**
+   - `routine-unavailable`, a new compiler refusal for a source holding one of the six at run time on a host without mpmath, which builds their fragments. It depends on the host, and on a revision-7 target it comes before `target-feature`. `math-library` goes, and `definition-unavailable` is the auditor's name, another contract.
+   - StepGraph.math_lines goes with `math-library`, as routine_lines went with C4.
+   - One order for the eight, the step graph's OPS: div, sqrt, exp, expm1, exp2, log, log1p, log2. Division and root keep their places, so no image of theirs moves.
+   - The invariants per routine, their values unchanged: division's and root's C4's, the six's mathlib's.
+3. **The golden auditor's recompile names its own missing mpmath `definition-unavailable`** (78).
+   - The author found that cert2._recompile mapped the auditor's own `routine-unavailable` to `source-image` (exit 4), a false claim against an honest certificate. It proposed `compiler-differs`.
+   - The lead took `definition-unavailable`, the name the study's question 10, approved by Logan as recommended, gives an auditor without mpmath.
+4. **Send-back 1's (b)-1 fixed by restating the claim, the code kept:** version 6 writes a `.cfta`'s note on a bank word of three or more owners as a list. That is right for eight routines, and VERSION 6 steps anyway.
+
+**The chain** (MEASURED, each verifier's ledger):
+
+| work | author | verifiers: (a), (b) | sent back |
+|---|---|---|---|
+| MC (d738f48, 678e909, c7cb354; b6718a3) | Opus 5.5 | VMC 0, 2 and 3 of its other notes classed (b) by the lead; VMC-2 0, 0 | once |
+| the merge (a3bb7b5) | the lead | VIW5 0, 1 | - |
+
+- **VMC's two (b)s:**
+  - `python/cftc/__init__.py` said version 6 writes "the same images, banks and text files as 5 for every source 5 compiled". A looped image holding both division and root writes its `.cfta` note `a word of div, sqrt and the call loop` where 5 wrote `a word of div and sqrt and the call loop`. Over 110 random sources without the six, the 36 of 272 compiles that differ are exactly those.
+  - The spill thresholds were the samples k = 12 and 20. The first spill comes at k = 11 at fp32 and k = 19 at the double word's formats.
+- **The three the lead classed (b),** each a false sentence:
+  - LANGUAGE.md credited the eight's order to "The operations" table, which lists log2 before log1p;
+  - the references' "instructions a step" were the whole image's, 10 more than the manifests' per_step;
+  - VERIFICATION's tangent row said "all four until M1's build, item 4", where Kepler's pair had made six since C4.
+- **What VMC measured,** each by an instrument of its own:
+  - the 120 fragments of the six and the 40 of division and root, digest-equal to 97076f3's;
+  - `routine-unavailable` and exit 3 on a real python without mpmath (`-I -S`), and 28 sources without a run-time six byte-equal with and without it;
+  - 120 configurations of the six, 11,049 lanes: 0 unmarked lanes wrong; 1,159 marked, their guesses 1,153 equal and 6 one ulp off; libcft equal to seq.py on 72 images, marks included;
+  - the call loop at the real constant, the 72-component case reproduced;
+  - the 31 committed sources at both trees, only `/compiler/version` moving;
+  - the corpus diff, its check 311 with cft-segrun;
+  - seven rule plants of its own, each moving only its reference's files, and 14 of the author's plants.
+- **What VMC-2 measured:** each restated sentence by its own instrument: 232 compiles, the spills at k = 8 to 22 at all four formats, OPS against the table, per_step against the images, and leg J at 8716add, 97076f3 and b6718a3 (4 of 4, 6 of 6, 8 of 12).
+- **What VIW5 measured at the merge,** each by an instrument of its own:
+  - the tree is b6718a3's, and the two diffs from 97076f3 are byte-identical;
+  - 520 mutations of division and root refused at base and merge;
+  - marked lanes through compiled images, 1,242 in 60 cells on seq.py and 1,246 in 68 through libcft, the lane byte's [7] and STATUS[6] matching each lane's flag word;
+  - 182 compiles a tree, the `.cfta` note differing in exactly the 9 looped images holding both division and root;
+  - the 11 sources `math-library` refused, by a shim on the base's own suites;
+  - the author's 26 plants re-run on a pristine copy in 90 s;
+  - 5,220 tests collected.
+
+**Time and tokens** (MEASURED, the agents' transcripts; usage summed from the last line of each response):
+- **MC's author,** claude-opus-5-5: 214 min to its report, then 8 min for the send-back; 787 and 47 tool uses; 602,102 and 34,673 output tokens.
+- **The verifiers,** all claude-sonnet-5-5:
+  - VMC: 123 min, 235 tool uses, 319,671 output tokens;
+  - VMC-2: 47 min, 151, 186,867;
+  - VIW5: 63 min, 219, 281,276.
+
+**MC's runs on amd-arc-box,** the lead's (MEASURED; python3 3.12.3, mpmath 1.4.1, gmpy2 2.3.1):
+- **The eight stages at d738f48** (run 20261015-161224-d738f48): docs, generated, golden, programs, lang, lang-routines, tangent and audit. The verdict: "VERDICT: PASS with 3 inner skip(s) in golden (3)", in 59 min, beside the run below.
+  - golden: "5217 passed, 3 skipped in 2444.76s";
+  - lang: "223 ok, 0 FAIL, 0 SKIP";
+  - lang-routines: "37 ok";
+  - tangent: "198 ok, 0 FAIL, 0 SKIP";
+  - audit: "17888 checks, 0 failed, 0 skipped". The 4 more than 9f931fc's are the cft-audit shadow over the parcel's two new test_cert2.py tests;
+  - programs: the corpus check "311 checks, 0 failed, 0 skipped" and segrun "1078 checks".
+- **The exit-70 sweep,** the author's scratch script run against that tree: 120 random accepted sources from a generator of the six, 110 of them holding one and 37 a tangent vector; "'internal': 0, 'other': 0", in 127 s.
+- **The hard-workload pack's 21 sources,** compiled under 97076f3 and d738f48 for sw:32768 at 2 steps. Every rc 0, every file the same but each manifest's version line: "stems 21: same-compiled 21, same-no-files 0, different 0".
+  - Tree A ran one at a time, in 281 min. Tree B ran eight at a time, in 121 min, its output path read as A's in stdout, which names it.
+  - The slowest compiles, under A and B: lorenz_tangent_extended_fp64 7,077 s and 7,275 s, riccati_extended_fp64 5,917 s and 6,323 s, gray_scott_extended_fp64 1,767 s and 1,885 s.
+
+After d738f48 only documents, a comment and two docstrings changed (test_cert2.py's at 678e909, cftc/__init__.py's module docstring at b6718a3). Both .py files are AST-equal with docstrings blanked (VMC-2, VIW5), so these runs hold at the merged tree.
+
+**The gate** (MEASURED, amd-arc-box at a3bb7b5, run 20261015-211301-a3bb7b5, niced, the pinned MPFR 4.2.2 copied in; python3 3.12.3, mpmath 1.4.1, gmpy2 2.3.1): "VERDICT: PASS with 8 skip(s) and 4 inner skip(s) in golden (3), remote (1)", in 178 min. 36 stages executed, 0 failed.
+- **The 8 skips are the box's usual:** buildargs (a real Vitis), lang-rust, lang-julia, lang-go, lang-csharp, lang-r and lang-fortran (no toolchain), and demos (no node).
+- **The inner skips:** golden's 3 known, and remote's WebSocket leg (no node).
+- **golden:** "5217 passed, 3 skipped in 2338.41s (0:38:58)". The fourth wave's gate at 9f931fc took 2,302.60 s for 5,184, so the 33 new tests add about 36 s serially.
+- **The language's stages:**
+  - lang: "223 ok, 0 FAIL, 0 SKIP";
+  - lang-routines: "37 ok";
+  - tangent: "198 ok, 0 FAIL, 0 SKIP", the three new references in its legs G, H and J.
+- **The other stages:**
+  - audit: "17888 checks, 0 failed, 0 skipped";
+  - the corpus check, remade for cftc 6: "311 checks, 0 failed, 0 skipped"; segrun "1078 checks";
+  - seq: "libcft and the golden model agree on every program: deposits, counts, flags and status";
+  - libcft "168 sets, 1228415 cases, all matching";
+  - transcend 610,717 and 584,477 comparisons;
+  - acceptance: "41 of 41 PASS on sw (oracle, set); 249 checks ok, 0 failed". It does not compile the pack's extended sources' images, "minutes to hours" by its own lines, which the 21 sources' comparison above measured.
+
+**The merge's message, restated** (it stands as written):
+- **VIW5's (b):** "the later three change only documents, a comment and a docstring". They change documents, a comment and two docstrings, as above.
+- **The lead's own count:** "26 plants, each caught". 25 of the plants have red targets and the 26th is a control that stays green, each as expected.
+- **MC's entry,** unpushed, said the same in MC9 ("only documents, a docstring and a comment changed"). It was true when written at 678e909, and is restated in place in this commit.
+
+**Known limits carried** (a selection of the author's and the verifiers' "other" notes, merged under Logan's rule; the rest stand in their ledgers and the parcel's entry):
+- **The parcel's own:**
+  - `routine-unavailable` depends on the host. The author's no-mpmath runs were simulated through sys.modules; VMC's ran on a real python without mpmath.
+  - cft-segrun writes no version-2 certificate of an image that marks a lane (`replay-missing`, or `replay-undecided` when a replay image of the same source marks it too), and cft-audit refuses such a certificate `source-missing`. Only the golden writer replays the lane.
+  - The stages replay no marked lane yet (item 5). The tangent stage's leg G fails one by name. The references' seeded lanes mark none, though Lotka-Volterra's box holds exp's structured windows.
+  - A call loop's records take a scratch slot a call, so a large looped step can need more than sw's 256 slots: the 72-component case needs 398.
+  - The IOR rule over-approximates: sound, and possibly loose.
+- **The eight's order is held by no test or committed byte** (VMC). Its two plants stay green: the call loop's ties by name, and the bank alphabetical. VIW5's scratch probe, w4_ties.py, holds it and could become a test.
+- **VMC-2's notes:**
+  - emit.py's cut at 200 characters shows three more of a long note's tail;
+  - the docstring's "only a looped image holding both division and root" is scoped by its first clause to the sources 5 compiled;
+  - the study's note calls `ir.ROUTINES` ordered, though it is a frozenset;
+  - the docstring's version-5 sentence ("5 writes the same images, banks and text files as 4") has the same shape, and was not examined;
+  - verifier briefs should say `python -B -I`, since `-I` ignores PYTHONDONTWRITEBYTECODE.
+- **The study's note says "whose exp keeps 19 to 21 live"** (VIW5): exp keeps 19, and the family 19 to 21.
+- **Smaller notes:**
+  - `math-library` stays in 12 files as history, where C4's `runtime-routine` stays in 10 (VMC);
+  - the study's earlier dated note stands as of its date;
+  - a compile of the author's ran niced beside its desktop runs from 15:24 to 18:05, recorded by its entry's appended correction (c7cb354).
+
+**Records:**
+- ROADMAP's plan: item 4 built, with the decisions;
+- VERIFICATION's golden row;
+- MC's entry's MC9 sentence restated in place;
+- docs/README.md recounted, and the docs check rc 0.
