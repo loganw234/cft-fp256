@@ -20548,7 +20548,7 @@ After c19e98c only two documents and one docstring changed (constants.py's AST i
 
 **A correction, found after this entry was committed (678e909)** (MEASURED, the process list at 18:05): a compile of all 52 committed sources under this tree, niced - the second half of my first try at the 52-source comparison, whose pack half went to the lead - ran from 15:23:55 until I stopped it by its PID at 18:05. At 15:23 I stopped that chained command's first half, base97's, and its shell went on to the second, which I did not see; it wrote nothing after 15:26:46, at the pack's third source, and had used 860 CPU-seconds. So from 15:24 every desktop run of mine had it beside it: "one process at a time" above is not true of that span, and the times from then carry its load besides Logan's. No result depends on it; it wrote only its own log, in my scratch. docs/README.md recounted for these two lines (VALIDATION 20,549, the record subtotal 42,406, the total 79,077), and the docs check run again.
 
-## 2026-10-15 - M1's build, fifth wave, closed: cftc compiles the six (parcel MC, Opus), merged and gated
+## 2026-10-16 - M1's build, fifth wave, closed: cftc compiles the six (parcel MC, Opus), merged and gated
 
 **What Logan asked.**
 - **The mandate:** item 4 of M1's build runs under his "Delete the ci-golden branch and start M1's build" (2026-10-13). His models of the same day ("Use Sonnet for M1's build parcels as you recommended, it performed well") accepted the lead's recommendation, which put the language and cftc work on Opus.
@@ -20585,24 +20585,24 @@ After c19e98c only two documents and one docstring changed (constants.py's AST i
   - VERIFICATION's tangent row said "all four until M1's build, item 4", where Kepler's pair had made six since C4.
 - **What VMC measured,** each by an instrument of its own:
   - the 120 fragments of the six and the 40 of division and root, digest-equal to 97076f3's;
-  - `routine-unavailable` and exit 3 on a real python without mpmath (`-I -S`), and 28 sources without a run-time six byte-equal with and without it;
+  - `routine-unavailable` and exit 3 on a real python without mpmath (`-I -S`), and 28 compiles of sources without a run-time six (eight sources) byte-equal with and without it;
   - 120 configurations of the six, 11,049 lanes: 0 unmarked lanes wrong; 1,159 marked, their guesses 1,153 equal and 6 one ulp off; libcft equal to seq.py on 72 images, marks included;
   - the call loop at the real constant, the 72-component case reproduced;
   - the 31 committed sources at both trees, only `/compiler/version` moving;
   - the corpus diff, its check 311 with cft-segrun;
-  - seven rule plants of its own, each moving only its reference's files, and 14 of the author's plants.
+  - 14 of the author's plants re-run, among them the seven rule plants, each of which moved only its reference's files.
 - **What VMC-2 measured:** each restated sentence by its own instrument: 232 compiles, the spills at k = 8 to 22 at all four formats, OPS against the table, per_step against the images, and leg J at 8716add, 97076f3 and b6718a3 (4 of 4, 6 of 6, 8 of 12).
 - **What VIW5 measured at the merge,** each by an instrument of its own:
   - the tree is b6718a3's, and the two diffs from 97076f3 are byte-identical;
   - 520 mutations of division and root refused at base and merge;
-  - marked lanes through compiled images, 1,242 in 60 cells on seq.py and 1,246 in 68 through libcft, the lane byte's [7] and STATUS[6] matching each lane's flag word;
-  - 182 compiles a tree, the `.cfta` note differing in exactly the 9 looped images holding both division and root;
+  - marked lanes through compiled images, 1,242 in 60 cells on seq.py and 1,246 in 68 through libcft, the lane byte's [7] matching each lane's flag word and STATUS[6] each cell's marks on seq.py, and libcft equal to seq.py;
+  - 182 cases a tree (159 compiled and 23 refused alike), the `.cfta` note differing in exactly the 9 looped images holding both division and root;
   - the 11 sources `math-library` refused, by a shim on the base's own suites;
   - the author's 26 plants re-run on a pristine copy in 90 s;
   - 5,220 tests collected.
 
 **Time and tokens** (MEASURED, the agents' transcripts; usage summed from the last line of each response):
-- **MC's author,** claude-opus-5-5: 214 min to its report, then 8 min for the send-back; 787 and 47 tool uses; 602,102 and 34,673 output tokens.
+- **MC's author,** claude-opus-5-5: 215 min to its report, then 9 min for the send-back; 787 and 47 tool uses; 602,102 and 34,673 output tokens.
 - **The verifiers,** all claude-sonnet-5-5:
   - VMC: 123 min, 235 tool uses, 319,671 output tokens;
   - VMC-2: 47 min, 151, 186,867;
@@ -20621,12 +20621,12 @@ After c19e98c only two documents and one docstring changed (constants.py's AST i
   - Tree A ran one at a time, in 281 min. Tree B ran eight at a time, in 121 min, its output path read as A's in stdout, which names it.
   - The slowest compiles, under A and B: lorenz_tangent_extended_fp64 7,077 s and 7,275 s, riccati_extended_fp64 5,917 s and 6,323 s, gray_scott_extended_fp64 1,767 s and 1,885 s.
 
-After d738f48 only documents, a comment and two docstrings changed (test_cert2.py's at 678e909, cftc/__init__.py's module docstring at b6718a3). Both .py files are AST-equal with docstrings blanked (VMC-2, VIW5), so these runs hold at the merged tree.
+After d738f48 only documents, a comment and two docstrings changed (test_cert2.py's at 678e909, cftc/__init__.py's module docstring at b6718a3). The two files whose docstrings changed are AST-equal with docstrings blanked, and the third .py file differs in a comment (VMC-2, VIW5), so these runs hold at the merged tree.
 
 **The gate** (MEASURED, amd-arc-box at a3bb7b5, run 20261015-211301-a3bb7b5, niced, the pinned MPFR 4.2.2 copied in; python3 3.12.3, mpmath 1.4.1, gmpy2 2.3.1): "VERDICT: PASS with 8 skip(s) and 4 inner skip(s) in golden (3), remote (1)", in 178 min. 36 stages executed, 0 failed.
 - **The 8 skips are the box's usual:** buildargs (a real Vitis), lang-rust, lang-julia, lang-go, lang-csharp, lang-r and lang-fortran (no toolchain), and demos (no node).
 - **The inner skips:** golden's 3 known, and remote's WebSocket leg (no node).
-- **golden:** "5217 passed, 3 skipped in 2338.41s (0:38:58)". The fourth wave's gate at 9f931fc took 2,302.60 s for 5,184, so the 33 new tests add about 36 s serially.
+- **golden:** "5217 passed, 3 skipped in 2338.41s (0:38:58)". The fourth wave's gate at 9f931fc took 2,302.60 s for 5,184, so this gate's golden stage, serially, took 36 s more.
 - **The language's stages:**
   - lang: "223 ok, 0 FAIL, 0 SKIP";
   - lang-routines: "37 ok";
@@ -20660,7 +20660,7 @@ After d738f48 only documents, a comment and two docstrings changed (test_cert2.p
   - verifier briefs should say `python -B -I`, since `-I` ignores PYTHONDONTWRITEBYTECODE.
 - **The study's note says "whose exp keeps 19 to 21 live"** (VIW5): exp keeps 19, and the family 19 to 21.
 - **Smaller notes:**
-  - `math-library` stays in 12 files as history, where C4's `runtime-routine` stays in 10 (VMC);
+  - `math-library` stays in 12 files besides VALIDATION and ROADMAP as history, where C4's `runtime-routine` stays in 8 besides them (VMC);
   - the study's earlier dated note stands as of its date;
   - a compile of the author's ran niced beside its desktop runs from 15:24 to 18:05, recorded by its entry's appended correction (c7cb354).
 
