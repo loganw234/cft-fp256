@@ -1192,9 +1192,12 @@ stage acceptance "the acceptance set, a device's admission test, on libcft's sof
 # one-step vectors, which the pack's own runner already verified on
 # amd-arc-box. Python alone: about ten minutes on the desktop, nearly all
 # compiling - two of the four, Gray-Scott and Lorenz-tangent wide, took
-# 289 s together, niced (2026-10-02).
+# 289 s together, niced (2026-10-02). Since 2026-10-16 (Logan's word, the
+# small tasks after M1's build, item 4) it compiles Lorenz-tangent
+# extended too, which no revision-8 image holds and no stage compiled:
+# its compile alone took 7,077 s on amd-arc-box (2026-10-15).
 need python
-stage acceptance-far "the hard workloads' own oracle on the four images past the card, Gray-Scott and Lorenz-tangent hard and wide: compiled for sw:32768, each on seq.py equal to the pack's one-step vector, states, FLAGS and each lane's FLAGS" -- \
+stage acceptance-far "the hard workloads' own oracle on the four images past the card, Gray-Scott and Lorenz-tangent hard and wide, and on Lorenz-tangent extended: compiled for sw:32768, each on seq.py equal to the pack's one-step vector, states, FLAGS and each lane's FLAGS" -- \
   PY "$ROOT/programs/acceptance.py" --legs far
 
 # `acceptance-rev8`, in no budget, so only the full census runs it (parcel
@@ -1212,9 +1215,12 @@ stage acceptance-far "the hard workloads' own oracle on the four images past the
 # the same compiles 1,531 s with it quieter (parcel W8, 2026-10-12) -
 # about half an hour, so the census and not the gate. The set's other
 # two, Gray-Scott extended (on the deep single) and Riccati extended,
-# compiled for 40 minutes and 2.2 hours on amd-arc-box, so they are left
-# to a card day, which reads the box's compile back through --images.
-REV8_CENSUS=gray_scott_hard_fp64,gray_scott_wide_fp256,lorenz_tangent_hard_fp64,lorenz_tangent_wide_fp256,fput_extended_fp64,phi4_extended_fp64,kuramoto_sivashinsky_extended_fp64,reservoir_extended_fp64
+# compiled for 40 minutes and 2.2 hours on amd-arc-box, and were left to
+# a card day, which reads the box's compile back through --images; since
+# 2026-10-16 (Logan's word, the small tasks after M1's build, item 4) the
+# census runs all ten, so that every extended workload is compiled by
+# some stage of it.
+REV8_CENSUS=gray_scott_hard_fp64,gray_scott_wide_fp256,lorenz_tangent_hard_fp64,lorenz_tangent_wide_fp256,gray_scott_extended_fp64,fput_extended_fp64,phi4_extended_fp64,kuramoto_sivashinsky_extended_fp64,reservoir_extended_fp64,riccati_extended_fp64
 do_acceptance_rev8() {
   HOSTMAKE "cft-segrun$EXE" "cft-audit$EXE" || return 1
   PY "$ROOT/programs/acceptance.py" --set rev8 --legs set,oracle \
@@ -1222,7 +1228,7 @@ do_acceptance_rev8() {
      --segrun "$ROOT/host/cft-segrun$EXE" --audit "$ROOT/host/cft-audit$EXE"
 }
 need host-cc python
-stage acceptance-rev8 "the revision-8 set on libcft's software backend, its eight entries that compile in minutes: hard workloads that missed revision 7 and a revision-8 image holds, each compiled for the image the rule picks and one fixed run at that image's depth, held to committed boundary hashes, flags and STATUS, cft-audit in full, the golden spot check, the device's identity and the rule, its controls caught; each image on seq.py equal to the pack's one-step vector" -- do_acceptance_rev8
+stage acceptance-rev8 "the revision-8 set on libcft's software backend, all ten of its entries: hard workloads that missed revision 7 and a revision-8 image holds, each compiled for the image the rule picks and one fixed run at that image's depth, held to committed boundary hashes, flags and STATUS, cft-audit in full, the golden spot check, the device's identity and the rule, its controls caught; each image on seq.py equal to the pack's one-step vector" -- do_acceptance_rev8
 
 # The C auditor held to the golden one (host/Makefile's audittest,
 # host/tests/audit_check.py; docs/CERTIFICATES.md, "The audit tool"):

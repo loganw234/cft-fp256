@@ -1970,6 +1970,53 @@ def test_a_call_loop_of_the_six(monkeypatch):
 
 
 @needs_mpmath
+def test_a_tie_between_batches_goes_by_the_eights_order(monkeypatch):
+    """At fp128 under rdn, expm1's and exp2's fragments are one length (184
+    instructions; 197 at fp256), so a step calling each three times
+    has two batches of one size at one depth. The batch looped first is
+    expm1's, the earlier in the eight's order (callloop.ORDER, from
+    routines.ROUTINES), whichever the source writes first - where an
+    order by name would loop exp2's. The constant is set one under the
+    inlined step, so that one loop suffices."""
+    fmt, rnd = "fp128", sf.RND_RDN
+    sizes = {op: len(R.fragment(op, FORMATS[fmt], rnd))
+             for op in ("expm1", "exp2")}
+    assert sizes["expm1"] == sizes["exp2"], sizes   # the test's premise
+    assert list(R.ROUTINES).index("expm1") < list(R.ROUTINES).index("exp2")
+    real = callloop.CALL_LOOP_ABOVE
+    for a, b in (("expm1", "exp2"), ("exp2", "expm1")):
+        text = (f"system tie\nformat {fmt}\nround rdn\nstate x[3]\n"
+                f"next x[i] = {a}(x[i]) + {b}(x[i])\nstep map\n")
+        monkeypatch.setattr(callloop, "CALL_LOOP_ABOVE", real)
+        inl = cftc.compile_text(text, 2, source="tie.cftl")
+        assert inl.looped == []
+        c = _looped(monkeypatch, text, len(inl.program.body))
+        assert _batches(c) == [("expm1", 1, 3)], (a, b, _batches(c))
+
+
+@needs_mpmath
+def test_the_routines_words_go_in_the_eights_order():
+    """The bank holds the routines' words routine by routine in the
+    eight's order (lower.routine_words, through lower.routines_of), one
+    slot a bit pattern, a word shared by two routines in the earlier one's
+    place. So on a step holding all eight, each word slot's first owner
+    never comes before the last slot's in that order: div's words first,
+    then sqrt's, then the six's - where an order by name would put sqrt's
+    after the six's and exp2's before expm1's."""
+    text = ("system all8\nformat fp64\nstate x\n"
+            "next x = x / (abs(x) + 1) + sqrt(abs(x)) + exp(x) + expm1(x)"
+            " + exp2(x) + log(abs(x) + 1) + log1p(abs(x))"
+            " + log2(abs(x) + 1)\nstep map\n")
+    c = cftc.compile_text(text, 2, source="all8.cftl")
+    eight = list(R.ROUTINES)
+    owners = [s.names[0][0] for s in c.lowered.slots if s.kind == "word"]
+    assert set(owners) <= set(eight), owners
+    at = [eight.index(op) for op in owners]
+    assert at == sorted(at), owners
+    assert owners[0] == "div" and {"sqrt", "expm1", "exp2"} <= set(owners)
+
+
+@needs_mpmath
 def test_the_internal_check_holds_a_routine_of_the_six():
     """Controls for check.py on an image holding exp: an instruction of its
     routine made to round under another attribute (its rdn made rne); the
