@@ -1,15 +1,20 @@
 # Copyright 2026 Logan W.
 # SPDX-License-Identifier: Apache-2.0
-"""Routines inlined (C4): a division's and a square root's nodes replaced
-by their fragments (cft_golden/routines.py).
+"""Routines inlined (C4): a division's, a square root's and - since M1's
+build, item 4 - each of the math library's six's nodes replaced by their
+fragments (cft_golden/routines.py, which hands out the six's from
+mathlib.py).
 
-A tile has no divide or square-root instruction. The compiler carries
-the language's `div` and `sqrt` nodes as ROUTINES: the schedulers order
-the lowered step with each routine node one node, and then, for each
-candidate order, expand() replaces each routine node at its place by its
-fragment - divfull's or sqrtfull's instructions, specialised at the
-program's attribute - bound to the node's operands, followed by a RAISE
-of the fragment's flag word. The allocator takes the result as the
+A tile has no divide, square-root, exponential or logarithm instruction.
+The compiler carries the language's `div` and `sqrt` nodes, and `exp`,
+`expm1`, `exp2`, `log`, `log1p` and `log2`, as ROUTINES: the schedulers
+order the lowered step with each routine node one node, and then, for
+each candidate order, expand() replaces each routine node at its place by
+its fragment - divfull's or sqrtfull's instructions, specialised at the
+program's attribute, or the math library's fragment, built at it - bound
+to the node's operands, followed by a RAISE of the fragment's flag word
+(which, for one of the six, may carry the mark in bit 7, and so mark the
+lane). The allocator takes the result as the
 straight-line step it always takes, so a routine's registers come from
 it like any value's, and Belady's rule spills around a routine what the
 step keeps live across it.
@@ -24,10 +29,13 @@ step keeps live across it.
 * SHARING: a routine's instructions are hash-consed across instances by
   opcode, attribute and operands - two divisions by one divisor share
   its classification, seed and Newton steps, every division of 1 its
-  dividend's - after routines.simplify, which binding a fragment's inputs
-  can make apply where they coincide (x / x). The value kept is the
-  first instance's, so a later block reads an earlier block's value: a
-  value like any, live or spilled between them. Every routine's
+  dividend's, and two of the math library's six of one operand what
+  their fragments compute alike of it (exp(x) and expm1(x) a
+  classification, say) - after routines.simplify, which binding a
+  fragment's inputs can make apply where they coincide (x / x). The
+  value kept is the first instance's, so a later block reads an earlier
+  block's value: a value like any, live or spilled between them. Every
+  routine's
   instruction reads one of its words or another of its values, so none
   can be a language node's, and the language's nodes are not keyed here.
 * A word is the bank slot holding its bits: ("w", bits) in slot_of.
@@ -51,6 +59,7 @@ from cft_golden import routines as R
 from cft_golden import softfloat as sf
 
 from . import callloop
+from .check import held_fragment
 from .ir import ROUTINES
 from .lower import LNode
 from .refusals import InternalError
@@ -152,7 +161,7 @@ def expand(low, order, looped=()):
             nodes.append(XNode(nd.op, args, nd.labels, nd.origin))
             map_low[j] = ("n", len(nodes) - 1)
             continue
-        f = R.fragment(nd.op, fmt, rnd)
+        f = held_fragment(nd.op, fmt, rnd)
         inputs = dict(zip(f.inputs, args))
         vals = {}
         first = len(nodes)

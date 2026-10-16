@@ -445,21 +445,25 @@ def test_a_long_chain_costs_no_depth():
 
 
 def test_the_class_carries_the_compilers_names():
-    """The compiler raises its seven through this one class, and an interim
-    eighth, math-library, until M1's build, item 4, carries the math
-    library's six (2026-10-15): each is accepted, and a name in neither
-    list is an internal error. An earlier eighth, runtime-routine, refused
-    a run-time division or root until parcel C4 inlined them (L4); it is
-    no name now, nor are the language's two before it. The compiler
-    raises one catalogue name besides, bank-capacity, where its routines'
-    words take the bank past 512."""
+    """The compiler raises its eight through this one class - the eighth,
+    routine-unavailable, since M1's build, item 4 (2026-10-15), for a
+    run-time call of the math library's six on a host without mpmath:
+    each is accepted, and a name in neither list is an internal error.
+    Two earlier eighths are no names now: runtime-routine, which refused a
+    run-time division or root until parcel C4 inlined them (L4), and the
+    interim math-library, which refused the six from M1's build, item 3,
+    until item 4 compiled them; nor are the language's two before them.
+    The compiler raises one catalogue name besides, bank-capacity, where
+    its routines' words take the bank past 512."""
     for name in lang.COMPILER_REFUSALS:
         r = lang.Refusal(name, "a sentence", 3, "x.cftl")
         assert str(r) == f"x.cftl:3: {name}: a sentence"
     assert {"segment-steps", "halving-underflow", "target-format",
             "target-feature", "program-capacity", "scratch-capacity",
-            "loader-bound", "math-library"} == set(lang.COMPILER_REFUSALS)
-    for gone in ("runtime-division", "runtime-sqrt", "runtime-routine"):
+            "loader-bound", "routine-unavailable"} == \
+        set(lang.COMPILER_REFUSALS)
+    for gone in ("runtime-division", "runtime-sqrt", "runtime-routine",
+                 "math-library"):
         assert gone not in lang.NAMES
         with pytest.raises(AssertionError):
             lang.Refusal(gone, "x")
@@ -2205,7 +2209,6 @@ def test_m1_the_six_are_nodes():
         assert g.step.nodes == [(fn, ("s0",), None),
                                 ("mul", ("s0", "s1"), None),
                                 (fn, ("n1",), None)]
-        assert g.math_lines == (5, 6)
         with pytest.raises(lang.Refusal) as info:
             compile_(_sys1(f"next x = {fn}(x, y)\nnext y = y"))
         assert (info.value.name, info.value.line) == ("arity", 5)
@@ -2284,8 +2287,7 @@ _M1_FOLDS = [("exp(0)", F(1)), ("expm1(0)", F(0)), ("exp2(5)", F(32)),
 def test_m1_the_six_fold_exactly_where_the_value_is_rational(expr, value):
     """exp(0) = 1, expm1(0) = 0, exp2(n) = 2^n, log(1) = 0, log1p(0) = 0,
     log2(2^k) = k: each a constant, exactly, rounded once at every format
-    under every attribute, in a const and in a default too; the source line
-    recorded for the compiler's interim refusal."""
+    under every attribute, in a const and in a default too."""
     for fmtname in FORMATS:
         fmt = FORMATS[fmtname]
         for rnd in ("rne", "rtz", "rdn", "rup", "rmm"):
@@ -2294,11 +2296,9 @@ def test_m1_the_six_fold_exactly_where_the_value_is_rational(expr, value):
             assert g.step.nodes == [("add", ("s0", "c0"), None)]
             assert g.const == [(value, None)
                                + C.round_once(fmt, C.RND_BY_NAME[rnd], value)]
-            assert g.math_lines == (5,)
     g = compile_(_sys1(f"const k = {expr}\nparam p = {expr} + 1\n"
                        f"next x = x + k * p", state="x"))
     assert g.param[0][1] == value + 1
-    assert g.math_lines == (5, 6)
 
 
 @pytest.mark.parametrize("fmtname", list(FORMATS))
@@ -2664,7 +2664,7 @@ def test_m1_mpmath_is_needed_only_by_a_run_of_the_six(tmp_path):
                         "decide each rounding through mpmath's enclosures, "
                         "and mpmath is not installed: lang.run cannot run it "
                         "here"), lines[2]
-    assert lines[3] == "cftc refused math-library at 5"
+    assert lines[3] == "cftc refused routine-unavailable at None"
     assert lines[4] == "exact_eval ImportError"
 
 

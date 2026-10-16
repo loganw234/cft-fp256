@@ -1,0 +1,21 @@
+; A culture that heats itself, with its variational equations: n, the cells
+; as a fraction of the carrying capacity, grow by Gompertz's law, n ln(1/n)
+; at a rate that doubles for every ten kelvin (van 't Hoff's rule, Q10 = 2)
+; of t, the temperature above the ambient in units of ten kelvin; they die
+; at a rate growing with the population doublings since the inoculum,
+; log2(n / n0) = log2(n) + d0 (replicative senescence, Hayflick's); and
+; their growth heats the culture, which the ambient cools. The math
+; library's exp2, log and log2, each a routine inlined, with its rule in the
+; tangent: (L * r) * da, select(r == r, da / a, r) and
+; select(r == r, da / (L * a), r), L being ln 2 rounded once (M1's build,
+; item 4).
+system culture
+format fp64
+round  rne
+state  n, t
+tangent w
+param  r = 1/2, m = 1/16, d0 = 10, a = 2, b = 1/2
+let    grow = r * exp2(t) * (n * -log(n))
+d/dt n = grow - m * (log2(n) + d0) * n
+d/dt t = a * grow - b * t
+step   rk4, h = 1/64

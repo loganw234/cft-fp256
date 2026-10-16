@@ -62,10 +62,13 @@ many lanes and at several step counts: the image's REPEAT patched to 1,
      outputs.py); the record's check caught on five plants in memory
   G  every refusal of the compiler's, by name, and the language's
      bank-capacity, which it raises for its routines' words (C4); and the
-     interim `math-library` (M1's build, item 3), a run-time call of the
-     six and a fold alone, each at its first line, each run by lang.run
-     (the run-time one skipped by name on a host without mpmath, which
-     the six's golden functions need and the refusal never does)
+     eighth since M1's build, item 4, `routine-unavailable`, a run-time
+     call of the six with mpmath taken out of sys.modules (simulated), on
+     revision 7's single before target-feature; the two sources the
+     interim `math-library` refused here until item 4 - log1p at run time
+     and a fold of exp2 alone - each compiled (the run-time one, and its
+     run by lang.run, skipped by name on a host without mpmath, which the
+     six's golden functions and routines need; the fold compiles there)
   H  plants in a copy of the package: each stopped by the internal check,
      and with the check off each red on seq.py, its failing lanes counted;
      with the routines' (C4): a raise dropped, a raise inside its quiet
@@ -229,9 +232,13 @@ def skip(what, why):
 def have_mpmath():
     """Whether mpmath can be imported here, without importing it: only the
     math library's six need it (their golden functions, python/cft_golden/
-    transcend.py), so only a check that runs them skips by name without it.
-    A host where sys.modules holds None for it has none."""
+    transcend.py, and their routines' generator, mathlib.py), so only a
+    check that runs or compiles them skips by name without it. A host
+    where sys.modules holds None for it has none."""
     return importlib.util.find_spec("mpmath") is not None
+
+
+_ABSENT = object()      # a module sys.modules did not hold (leg G)
 
 
 def section(title):
@@ -1633,30 +1640,53 @@ def leg_refusals():
            f"{k} params and the {words} words of a division's and a root's "
            f"routines, past the bank's 512 - the language's name, raised by "
            f"the compiler for the words the checker cannot see (C4)")
-    # the interim eighth (M1's build, item 3): the math library's six, at run
-    # time and folded, refused at the first source line holding one until
-    # item 4 carries them; the interpreter runs both (the run-time one only
-    # with mpmath, which the refusal never needs)
-    for text, line, what, runtime in (
-            ("system m\nformat fp64\nstate x, y\nnext x = x * y\n"
-             "next y = log1p(abs(x))\nstep map\n", 5,
-             "log1p at run time, at its line", True),
-            ("system m\nformat fp64\nstate x\nconst k = exp2(-3)\n"
-             "next x = x * k\nstep map\n", 4,
-             "a fold of exp2 alone, in a const, at its line", False)):
-        expect("math-library", lambda: cftc.compile_text(text, 2,
-                                                         source="m.cftl"),
-               what)
-        g = lang.compile_text(text, "m.cftl").graph
-        check(g.math_lines[0] == line, f"math-library: the checker's first "
-              f"line is {line}")
-        if runtime and not have_mpmath():
-            skip("math-library: lang.run of log1p", "python has no mpmath "
-                 "module, which the six's golden functions need")
-            continue
-        short = what[:what.index(",")]
-        check(len(lang.run(g, [[1] * g.n_state], 2).states) == 1,
-              f"math-library: lang.run runs the source ({short})")
+    # the eighth since M1's build, item 4: a run-time call of the math
+    # library's six on a host without mpmath, through which their routines'
+    # generator derives every constant - the one refusal that depends on the
+    # host. It is made here on every host as the tests make it, mpmath taken
+    # out of sys.modules for these compiles alone (simulated, not a host
+    # without it): first, on a revision-7 target, where with mpmath the same
+    # source is target-feature. The two sources the interim math-library
+    # refused here until item 4 - log1p at run time, and a fold of exp2
+    # alone - compile with mpmath, and the fold without it too.
+    runtime = ("system m\nformat fp64\nstate x, y\nnext x = x * y\n"
+               "next y = log1p(abs(x))\nstep map\n")
+    fold = ("system m\nformat fp64\nstate x\nconst k = exp2(-3)\n"
+            "next x = x * k\nstep map\n")
+    held = sys.modules.get("mpmath", _ABSENT)
+    sys.modules["mpmath"] = None
+    try:
+        expect("routine-unavailable",
+               lambda: cftc.compile_text(runtime, 2, target="u50-rev7",
+                                         source="m.cftl"),
+               "log1p at run time with mpmath taken away (sys.modules), on "
+               "revision 7's single, before target-feature")
+        try:
+            image = cftc.compile_text(fold, 2, source="m.cftl").image
+        except lang.Refusal as e:
+            image = None
+            bad(f"a fold of exp2 alone, in a const, with mpmath taken away: "
+                f"refused {e.name}")
+    finally:
+        if held is _ABSENT:
+            del sys.modules["mpmath"]
+        else:
+            sys.modules["mpmath"] = held
+    if image is not None:
+        check(image == cftc.compile_text(fold, 2, source="m.cftl").image,
+              "a fold of exp2 alone, in a const - math-library's until M1's "
+              "build, item 4 - compiles with mpmath taken away, the same "
+              "image as with it")
+    if not have_mpmath():
+        skip("the six at run time: log1p compiled and run by lang.run",
+             "python has no mpmath module, which the six's golden functions "
+             "and routines need")
+    else:
+        c = cftc.compile_text(runtime, 2, source="m.cftl")
+        check("log1p" in c.manifest["routines"]["calls"] and
+              len(lang.run(c.graph, [[1] * c.ir.n_state], 2).states) == 1,
+              "log1p at run time - math-library's until M1's build, item 4 - "
+              "compiles for sw, its routine inlined, and lang.run runs it")
     want = set(cftc.NAMES) | set(cftc.refusals.SHARED)
     check(made == want, f"every one of the compiler's {len(cftc.NAMES)} "
           f"names was made, and the language's bank-capacity it raises "

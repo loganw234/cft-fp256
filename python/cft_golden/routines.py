@@ -1,7 +1,24 @@
 # Copyright 2026 Logan W.
 # SPDX-License-Identifier: Apache-2.0
-"""Run-time division and square root as relocatable fragments (step 6,
-parcel C4).
+"""The routines the compiler inlines, as relocatable fragments: run-time
+division and square root (step 6, parcel C4), and the math library's
+exp, expm1, exp2, log, log1p and log2 (M1's build, item 4).
+
+THE EIGHT. ROUTINES, the arity map, names them in the language's own
+order (lang.graph.OPS: div, sqrt, then the six), and that order is the
+one order of the eight wherever cftc needs one - the bank's words, the
+call loop's batches (python/cftc/lower.py, callloop.py) - so division's
+and root's places, and every image without the six, are what they were.
+Division's and root's fragments are READ from divfull's programs here,
+below. The six's are BUILT by the math library's golden generator,
+mathlib.py, and fragment() hands them out by name (Logan's answer to M1's
+question 11): mathlib.fragment's own object, unchanged. mathlib.py
+derives its constants through mpmath and imports it at its top, so this
+module imports mathlib only inside fragment(), for one of the six: a
+program without them - and the compiler compiling one - never imports
+mpmath. What a fragment of each must be is ONE statement, per routine,
+below ("what is proved of every fragment"): division's and root's as C4
+measured them, the six's widened as M1's question 12 answers.
 
 The language has `a / b` and `sqrt(a)` as operations, correctly rounded
 with exactly the flags softfloat's div and sqrt raise (docs/LANGUAGE.md,
@@ -16,8 +33,8 @@ programs/MANIFEST, host/src/divfull_images.h and programs/check.py hold.
 
 A Fragment, for an operation, a format and the program's attribute:
 
-  inputs    ("a", "b") for div, ("a",) for sqrt: the golden function's
-            operands in its order
+  inputs    ("a", "b") for div, ("a",) for sqrt and for each of the six:
+            the golden function's operands in its order
   body      straight-line SSA - instruction i defines value i - each
             (opcode, rnd, srcs): rnd is the instruction's OWN attribute
             where it rounds (the division's core truncates once, its q2
@@ -30,11 +47,13 @@ A Fragment, for an operation, a format and the program's attribute:
             which no language constant can be
   result    the value holding the correctly rounded result
   flags     the value holding the flag word: bits [4:0] exactly the
-            operation's IEEE flags in FLAGS's order, [7:5] zero. It is
-            the word divfull deposits second today, computed by the same
-            instructions (the special lane's word selected over
-            round_pack's), which libcft ORs into its status word
-            (host/src/divsqrt.c); a compiled program RAISEs it (R24)
+            operation's IEEE flags in FLAGS's order, [6:5] zero, and [7]
+            zero for division and root and the mark for the six. A
+            division's or a root's is the word divfull deposits second
+            today, computed by the same instructions (the special lane's
+            word selected over round_pack's), which libcft ORs into its
+            status word (host/src/divsqrt.c); a compiled program RAISEs
+            it (R24)
 
 How one is made (fragment()), in three steps, each exact by construction:
 
@@ -71,10 +90,12 @@ In a compiled image a fragment is always
     raise rF          ; rF holds `flags`
 
 so the only flags it raises are the flag word's [4:0]: sf.div's or
-sf.sqrt's, divideByZero included (docs/SEQUENCER.md, R24). Its bit 7 is
-never set - division and root decide their last bit in-lane, by the
-exact residual - so a routine never marks a lane (flag_words() proves
-the word's possible values, below).
+sf.sqrt's, divideByZero included (docs/SEQUENCER.md, R24). A division's
+or a root's bit 7 is never set - division and root decide their last bit
+in-lane, by the exact residual - so they never mark a lane; one of the
+six's is set where its in-lane test cannot decide the last bit (below).
+flag_words() proves each word's possible values against its routine's
+own statement, below.
 
 How it is held (python/tests/test_routines.py, and the lang stage's leg
 that runs the full pools): the fragment as a stand-alone program on
@@ -88,23 +109,48 @@ Measured (C4's ledger, 2026-10-02): the read form is 207/209/211/213
 instructions (division, fp32 to fp256) and 183 to 192 (root), at most 15
 values live at once; specialised, 177 to 191 and 155 to 171, at most 16
 live, 36 to 41 words (31 to 34 distinct bit patterns).
+
+The six (mathlib.py's module docstring is their design): one input, `a`;
+the same Fragment, built rather than read, specialised by the same
+simplify(), and SCHEDULED, a topological order that keeps few values
+live; 175 to 433 instructions, 62 to 123 distinct words and 11 to 21
+values live, by routine, format and attribute (MEASURED over all 120, M1's
+build, item 4; mathlib.py, LIVE_CAP's table). Their flag word's bit 7 is
+set where the routine's in-lane test cannot decide the last bit: RAISE
+then MARKS the lane (R23's [7], STATUS[6]; seq.RAISE_MARK), and the
+lane's value is the routine's best guess, which the definition replays
+(docs/LANGUAGE.md, "A marked lane"). The six's golden functions are
+transcend.py's, which decide each rounding through mpmath's enclosures.
 """
 
 from . import asm, divfull, seq
 from . import softfloat as sf
 from .formats import FpFormat
 
-ROUTINES = {"div": 2, "sqrt": 1}
-GOLDEN = {"div": sf.div, "sqrt": sf.sqrt}
-INPUTS = {"div": ("a", "b"), "sqrt": ("a",)}
+# The eight, in the language's order (the module docstring): the one order
+# of the routines wherever an order is needed
+ROUTINES = {"div": 2, "sqrt": 1, "exp": 1, "expm1": 1, "exp2": 1, "log": 1,
+            "log1p": 1, "log2": 1}
+READ = ("div", "sqrt")                  # read from divfull's programs (C4)
+BUILT = ("exp", "expm1", "exp2", "log", "log1p", "log2")   # mathlib.py's
+
+
+def _transcend(name):
+    """The golden function of one of the six, in GOLDEN's shape: transcend
+    computes it, correctly rounded with its exact flags, through mpmath -
+    which transcend.py imports only when it evaluates, so naming it here
+    imports nothing."""
+    def golden(fmt, a, rnd):
+        from . import transcend
+        return transcend.compute(fmt, name, a, 0, rnd)
+    golden.__name__ = f"transcend_{name}"
+    return golden
+
+
+GOLDEN = {"div": sf.div, "sqrt": sf.sqrt,
+          **{name: _transcend(name) for name in BUILT}}
+INPUTS = {"div": ("a", "b"), **{op: ("a",) for op in ROUTINES if op != "div"}}
 ROUNDED = frozenset((sf.OP_FMA, sf.OP_ADD, sf.OP_SUB, sf.OP_MUL))
-# The values a flag word can take, by its select chain (flag_words): no
-# flag, invalid, divideByZero, inexact, overflow with inexact, underflow
-# with inexact. Never bit 7: a routine here never marks a lane.
-FLAG_WORDS = frozenset((0, sf.FLAG_INVALID, sf.FLAG_DIVZERO, sf.FLAG_INEXACT,
-                        sf.FLAG_OVERFLOW | sf.FLAG_INEXACT,
-                        sf.FLAG_UNDERFLOW | sf.FLAG_INEXACT))
-LIVE_MAX = 16           # the most values a fragment keeps live at once
 
 
 class Fragment:
@@ -170,6 +216,9 @@ def _program_and_bank(op, fmt, rnd):
     if op == "sqrt":
         return (divfull.sqrt_full_program_for(fmt), divfull._NAMES_SQRT,
                 divfull.bank_sqrt(fmt, rnd))
+    if op in BUILT:
+        raise ValueError(f"{op!r} is not read from a program: mathlib.py "
+                         f"builds its fragment (fragment() hands it out)")
     raise ValueError(f"{op!r} is not a routine: {', '.join(ROUTINES)}")
 
 
@@ -272,11 +321,111 @@ def specialise(f: Fragment):
 
 
 # ---- what is proved of every fragment -----------------------------------
+#
+# ONE statement for the eight (M1's build, item 4; Logan's answer to M1's
+# question 12, "as recommended"): what a routine's fragment may be, stated
+# PER ROUTINE - CONTRACT, the values its flag word may take and the
+# attributes its instructions may carry, and LIVE_CAP, the most values it
+# may keep live, by routine AND format - and one set of checks, the same for
+# every routine (flag_words, invariants), that hold a fragment to its own.
+# cftc's internal check holds every routine of an image to it
+# (python/cftc/check.py).
+#
+# Why per routine. The six's are C4's widened four ways, the study found
+# (docs/studies/M1-exp-log.md, section 6): the mark among the flag word's
+# values, which takes an IOR rule in the walk to see; RDN, RUP and the
+# program's own attribute inside a routine; more values live; and no
+# instruction reading only the input (which the six keep, by an
+# instruction spent in expm1 and in log1p - parcels MB1 and MB2). One
+# statement shared by all eight would loosen division's and root's to the
+# six's; so each routine names its own, and division's and root's are C4's
+# exactly - a flag word without the mark, RNE and RTZ, 16 live - so a
+# division that could mark a lane, round under RDN or keep 17 values live
+# still fails. The live cap is by routine and format because that is the
+# finest any routine needs: M2's fragments (sin, cos, tan), whose caps
+# Logan approved per function and format on 2026-10-14 (22, 26, 17 and 16),
+# extend this table. The values are where C4 and parcels MB1 and MB2
+# measured and stated them; mathlib.py keeps views of the six's.
+
+MARK = seq.RAISE_MARK
+# The values a flag word can take. Division's and root's, by its select
+# chain: no flag, invalid, divideByZero, inexact, overflow with inexact,
+# underflow with inexact - never bit 7, since division and root decide
+# their last bit in-lane by the exact residual and never mark a lane.
+FLAG_WORDS = frozenset((0, sf.FLAG_INVALID, sf.FLAG_DIVZERO, sf.FLAG_INEXACT,
+                        sf.FLAG_OVERFLOW | sf.FLAG_INEXACT,
+                        sf.FLAG_UNDERFLOW | sf.FLAG_INEXACT))
+# The six's: those, and inexact, overflow with inexact and underflow with
+# inexact each with the mark (bit 7) - never bits [6:5], the mark only
+# with inexact (mathlib.py's design, the study's section 4).
+MARKED_FLAG_WORDS = FLAG_WORDS | frozenset(
+    w | MARK for w in (sf.FLAG_INEXACT, sf.FLAG_OVERFLOW | sf.FLAG_INEXACT,
+                       sf.FLAG_UNDERFLOW | sf.FLAG_INEXACT))
+
+
+class Contract(tuple):
+    """What a routine's instructions and flag word may be: `flag_words`,
+    the values its flag word may take; `attributes`, the attributes its
+    rounded instructions may carry; `program`, whether the program's own
+    attribute is admitted besides (a fragment is made at one, f.rnd)."""
+    __slots__ = ()
+
+    def __new__(cls, flag_words, attributes, program):
+        return tuple.__new__(cls, (frozenset(flag_words),
+                                   frozenset(attributes), bool(program)))
+
+    flag_words = property(lambda self: self[0])
+    attributes = property(lambda self: self[1])
+    program = property(lambda self: self[2])
+
+    def __repr__(self):
+        return (f"Contract(flag_words={sorted(self[0])}, attributes="
+                f"{sorted(self[1])}, program={self[2]})")
+
+
+# C4's, division's and root's: their own two attributes, the division's one
+# truncating fma among them; the program's attribute is a word (the five
+# mode words, step 2), never an instruction's
+C4_CONTRACT = Contract(FLAG_WORDS, (sf.RND_RNE, sf.RND_RTZ), False)
+# the six's (Logan's answer to M1's question 12): RNE, RTZ, RDN and RUP -
+# the in-lane test rounds the two ends of its interval down and up - and
+# the program's attribute, the final rounding of V_h + V_l
+MATH_CONTRACT = Contract(MARKED_FLAG_WORDS, (sf.RND_RNE, sf.RND_RTZ,
+                                             sf.RND_RDN, sf.RND_RUP), True)
+CONTRACT = {"div": C4_CONTRACT, "sqrt": C4_CONTRACT,
+            **{name: MATH_CONTRACT for name in BUILT}}
+
+# The most values a fragment may keep live at once, by routine and format.
+# Division and root: C4's 16 at every format (MEASURED by C4: at most 16
+# specialised; division keeps 15 or 16 and root 12 to 15, by format and
+# attribute). The six: the most any of them keeps under any attribute,
+# scheduled, at that format (MEASURED, parcels MB1 and MB2; mathlib.py's
+# LIVE_CAP table gives each routine's), so a growth past it is a change of
+# design to look at - stated for each routine, so that one of them can be
+# given its own (as M2's will be) without moving the others'.
+LIVE_CAP = {
+    "div": {"fp32": 16, "fp64": 16, "fp128": 16, "fp256": 16},
+    "sqrt": {"fp32": 16, "fp64": 16, "fp128": 16, "fp256": 16},
+    "exp": {"fp32": 21, "fp64": 13, "fp128": 13, "fp256": 13},
+    "expm1": {"fp32": 21, "fp64": 13, "fp128": 13, "fp256": 13},
+    "exp2": {"fp32": 21, "fp64": 13, "fp128": 13, "fp256": 13},
+    "log": {"fp32": 21, "fp64": 13, "fp128": 13, "fp256": 13},
+    "log1p": {"fp32": 21, "fp64": 13, "fp128": 13, "fp256": 13},
+    "log2": {"fp32": 21, "fp64": 13, "fp128": 13, "fp256": 13},
+}
+LIVE_MAX = 16           # C4's name for division's and root's cap: theirs above
+_OWN = object()         # invariants()'s default cap: the routine's own
+
 
 def flag_words(f: Fragment):
     """The values the flag word can take, by a walk of its definition: a
-    word is its bits, a SELECT the union of its arms, an IAND with the
-    word 0 is 0; anything else is unknown (None)."""
+    word is its bits, a SELECT the union of its arms, an IAND with the word
+    0 is 0, an IOR the set of the pairwise ORs of its operands' (the rule
+    the six's mark takes: M1's question 12); anything else is unknown
+    (None). Each rule's set holds every value the instruction can give, so
+    the walk can only fail to prove a word, never prove a wrong one; on
+    division's and root's flag words, which no IOR reaches, it gives what
+    C4's walk without the IOR rule gave (MEASURED at all 40)."""
     sets = {}
 
     def val(s):
@@ -291,46 +440,116 @@ def flag_words(f: Fragment):
             sets[i] = a | b if a is not None and b is not None else None
         elif op == sf.OP_IAND and any(val(s) == {0} for s in srcs):
             sets[i] = {0}
+        elif op == sf.OP_IOR:
+            a, b = val(srcs[0]), val(srcs[1])
+            sets[i] = ({u | v for u in a for v in b}
+                       if a is not None and b is not None else None)
         else:
             sets[i] = None
     return sets.get(f.flags[1]) if f.flags[0] == "v" else val(f.flags)
 
 
-def invariants(f: Fragment):
-    """[str]: what does not hold of the fragment, empty when all does:
-    the flag word's values within FLAG_WORDS; at most LIVE_MAX live;
-    every instruction reading a word or an internal value (so no
-    instruction of a routine can be a language node's, whose operands
-    are never a routine's words or values); no SELECT with equal arms or
-    a word condition, no IOR of a value with itself, left after
-    specialising; the attributes the routine's own."""
+def invariants(f: Fragment, live_cap=_OWN, contract=None):
+    """[str]: what does not hold of the fragment, empty when all does - the
+    one statement (the section's head), each clause by name:
+
+      * well formed: values read only after they are defined, the words
+        named held and encodings at the format, each opcode with its
+        operands, the result and the flag word values of the body;
+      * the flag word's values, by flag_words(), within its routine's
+        CONTRACT: division's and root's never bit 7, the six's the mark
+        only with inexact;
+      * at most `live_cap` values live at once: its routine's LIVE_CAP at
+        its format by default, None for no cap;
+      * every instruction reading a word or an internal value, so that no
+        instruction of a routine can be a language node's, whose operands
+        are never a routine's words or values (cftc/inline.py's argument);
+      * nothing left to simplify (simplify()), once specialised;
+      * the attributes its routine's own: CONTRACT's, and the program's
+        (f.rnd) where the contract admits it; none where an opcode does not
+        round.
+
+    `contract` holds the fragment to another statement than its routine's
+    - mathlib.invariants() holds any fragment it is handed to the six's -
+    and a fragment of no routine, without one, is refused by name."""
+    if contract is None:
+        contract = CONTRACT.get(f.op)
+        if contract is None:
+            return [f"{f.op!r} is not a routine, so no statement holds it: "
+                    f"{', '.join(ROUTINES)}"]
+    if live_cap is _OWN:
+        live_cap = LIVE_CAP.get(f.op, {}).get(f.fmt.name)
     out = []
+    fmt = f.fmt
+    for name, bits in f.words.items():
+        if not 0 <= bits < 1 << fmt.width:
+            out.append(f"word {name} is not an encoding at {fmt.name}")
+    n = len(f.body)
+    for i, (op, r, srcs) in enumerate(f.body):
+        fields = asm.OP_FIELDS.get(op)
+        if fields is None or len(srcs) != len(fields):
+            out.append(f"instruction {i}: opcode {op} with {len(srcs)} "
+                       f"operands is not an ALU instruction")
+        for s in srcs:
+            if s[0] == "v" and not 0 <= s[1] < i:
+                out.append(f"instruction {i} reads value {s[1]} before it "
+                           f"is defined")
+            elif s[0] == "w" and s[1] not in f.words:
+                out.append(f"instruction {i} reads the word {s[1]!r}, "
+                           f"which the fragment does not hold")
+            elif s[0] == "in" and s[1] not in f.inputs:
+                out.append(f"instruction {i} reads the input {s[1]!r}")
+    for what, ref in (("result", f.result), ("flag word", f.flags)):
+        if ref[0] != "v" or not 0 <= ref[1] < n:
+            out.append(f"the {what} {ref} is not a value of the body")
+    if out:
+        return out              # the checks below walk a well-formed body
     fw = flag_words(f)
-    if fw is None or not fw <= FLAG_WORDS:
+    if fw is None or not fw <= contract.flag_words:
         out.append(f"the flag word's values {fw} are not within "
-                   f"{sorted(FLAG_WORDS)}")
-    if f.live_max() > LIVE_MAX:
-        out.append(f"{f.live_max()} values live at once, past {LIVE_MAX}")
+                   f"{sorted(contract.flag_words)}")
+    live = f.live_max()
+    if live_cap is not None and live > live_cap:
+        out.append(f"{live} values live at once, past {live_cap}")
+    own = contract.attributes | ({f.rnd} if contract.program else set())
     for i, (op, r, srcs) in enumerate(f.body):
         if not any(s[0] in ("w", "v") for s in srcs):
             out.append(f"instruction {i} reads only the routine's inputs")
         if f.stage == "specialised" and simplify(
                 op, srcs, lambda s: f.words[s[1]] if s[0] == "w" else None,
-                f.fmt.sign_mask) is not None:
+                fmt.sign_mask) is not None:
             out.append(f"instruction {i} simplifies further")
         if (op in ROUNDED) != (r is not None) or \
-                (r is not None and r not in (sf.RND_RNE, sf.RND_RTZ)):
+                (r is not None and r not in own):
             out.append(f"instruction {i}'s attribute {r} is not the "
                        f"routine's own")
     return out
 
 
 _CACHE = {}
+_HELD = set()           # the six's fragments held here once each
 
 
 def fragment(op, fmt: FpFormat, rnd: int):
-    """The specialised fragment of `op` ("div" or "sqrt") at `fmt` under
-    the program's attribute `rnd`, held to its invariants."""
+    """The specialised fragment of `op`, one of ROUTINES, at `fmt` under
+    the program's attribute `rnd`, held to its routine's invariants:
+    division's and root's read and specialised here; the six's
+    mathlib.fragment's own object, built (and cached) there, unchanged.
+    Only a request for one of the six imports mathlib.py, and with it
+    mpmath, which it derives its constants through: without mpmath that is
+    an ImportError, which the compiler never reaches - it refuses such a
+    source `routine-unavailable` first (python/cftc/__init__.py)."""
+    if op in BUILT:
+        from . import mathlib
+        f = mathlib.fragment(op, fmt, rnd)
+        key = (op, fmt.name, rnd)
+        if key not in _HELD:
+            bad = invariants(f)
+            if bad:
+                raise AssertionError(f"{op} at {fmt.name}, rnd {rnd}: "
+                                     f"{'; '.join(bad)}")
+            _HELD.add(key)
+        return f
     key = (op, fmt.width, rnd)
     if key not in _CACHE:
         f = specialise(read(op, fmt, rnd))

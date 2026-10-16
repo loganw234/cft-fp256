@@ -1,0 +1,94 @@
+; culture - the canonical form, regenerated from the step graph
+; sha256 92252c888b2bc7849af1f524c7ba5f1bf2bff2e53e3b5321429ef266eb7e9ccd
+;
+; Read back, this text gives the same step graph, byte for byte. Every
+; operation is written once, in the order it is performed; each one
+; that rounds rounds once, under rne (roundTiesToEven), in binary256.
+;
+; operations: the equations 14 (1 add, 2 sub, 7 mul, 1 exp2, 1 log, 1 log2, 1 neg);
+;             a step 70 (12 fma, 6 add, 8 sub, 28 mul, 4 exp2, 4 log, 4 log2, 4 neg);
+;             each tangent vector's equations 39 (3 fma, 1 add, 2 sub, 13 mul, 2 div, 2 exp2, 5 log, 4 log2, 3 neg, 2 cmpeq, 2 select)
+;             and its step 170 (24 fma, 6 add, 8 sub, 52 mul, 8 div, 8 exp2, 20 log, 16 log2, 12 neg, 8 cmpeq, 8 select)
+;
+; constants, exact value -> binary256 under rne:
+;   h                                                                   0.015625                                                            0x3fff900000000000000000000000000000000000000000000000000000000000  0x1p-6                                                              exact
+;   h/2                                                                 0.0078125                                                           0x3fff800000000000000000000000000000000000000000000000000000000000  0x1p-7                                                              exact
+;   h/6                                                                 1/384                                                               0x3fff655555555555555555555555555555555555555555555555555555555555  0x1.55555555555555555555555555555555555555555555555555555555555p-9  inexact, relative error -2.2639e-72
+;   0x1.62e42fefa39ef35793c7673007e5ed5e81e6864ce5316c5b141a2eb7175p-1  0x1.62e42fefa39ef35793c7673007e5ed5e81e6864ce5316c5b141a2eb7175p-1  0x3fffe62e42fefa39ef35793c7673007e5ed5e81e6864ce5316c5b141a2eb7175  0x1.62e42fefa39ef35793c7673007e5ed5e81e6864ce5316c5b141a2eb7175p-1  exact
+;   2                                                                   2                                                                   0x4000000000000000000000000000000000000000000000000000000000000000  0x1p+1                                                              exact
+; h-scaled, halved by a step-halving bank: h, h/2, h/6
+
+system culture
+format fp256
+round  rne
+state  n, t
+tangent w
+param  r = 0.5      ; 0x3fffe00000000000000000000000000000000000000000000000000000000000  0x1p-1  exact
+param  m = 0.0625   ; 0x3fffb00000000000000000000000000000000000000000000000000000000000  0x1p-4  exact
+param  d0 = 10      ; 0x4000240000000000000000000000000000000000000000000000000000000000  0x1.4p+3  exact
+param  a = 2        ; 0x4000000000000000000000000000000000000000000000000000000000000000  0x1p+1  exact
+param  b = 0.5      ; 0x3fffe00000000000000000000000000000000000000000000000000000000000  0x1p-1  exact
+
+let grow = r * exp2(t) * (n * (-log(n)))
+d/dt n = grow - (m * (log2(n) + d0) * n)
+d/dt t = (a * grow) - (b * t)
+
+let w.grow = fma(r * (0x1.62e42fefa39ef35793c7673007e5ed5e81e6864ce5316c5b141a2eb7175p-1 * exp2(t) * w.t), n * (-log(n)), r * exp2(t) * fma(w.n, -log(n), n * (-select(log(n) == log(n), w.n / n, log(n)))))
+d/dt w.n = w.grow - fma(m * select(log2(n) == log2(n), w.n / (0x1.62e42fefa39ef35793c7673007e5ed5e81e6864ce5316c5b141a2eb7175p-1 * n), log2(n)), n, m * (log2(n) + d0) * w.n)
+d/dt w.t = (a * w.grow) - (b * w.t)
+
+step rk4, h = 0.015625
+expansion
+  let k1.grow = r * exp2(t) * (n * (-log(n)))
+  let k1.n = k1.grow - (m * (log2(n) + d0) * n)
+  let k1.t = (a * k1.grow) - (b * t)
+  let Y2.n = fma(h/2, k1.n, n)
+  let Y2.t = fma(h/2, k1.t, t)
+  let k2.grow = r * exp2(Y2.t) * (Y2.n * (-log(Y2.n)))
+  let k2.n = k2.grow - (m * (log2(Y2.n) + d0) * Y2.n)
+  let k2.t = (a * k2.grow) - (b * Y2.t)
+  let Y3.n = fma(h/2, k2.n, n)
+  let Y3.t = fma(h/2, k2.t, t)
+  let k3.grow = r * exp2(Y3.t) * (Y3.n * (-log(Y3.n)))
+  let k3.n = k3.grow - (m * (log2(Y3.n) + d0) * Y3.n)
+  let k3.t = (a * k3.grow) - (b * Y3.t)
+  let Y4.n = fma(h, k3.n, n)
+  let Y4.t = fma(h, k3.t, t)
+  let k4.grow = r * exp2(Y4.t) * (Y4.n * (-log(Y4.n)))
+  let k4.n = k4.grow - (m * (log2(Y4.n) + d0) * Y4.n)
+  let k4.t = (a * k4.grow) - (b * Y4.t)
+  let S2.n = fma(2, k2.n, k1.n)
+  let S2.t = fma(2, k2.t, k1.t)
+  let S3.n = fma(2, k3.n, S2.n)
+  let S3.t = fma(2, k3.t, S2.t)
+  let S4.n = S3.n + k4.n
+  let S4.t = S3.t + k4.t
+  next n = fma(h/6, S4.n, n)
+  next t = fma(h/6, S4.t, t)
+  let w.k1.grow = fma(r * (0x1.62e42fefa39ef35793c7673007e5ed5e81e6864ce5316c5b141a2eb7175p-1 * exp2(t) * w.t), n * (-log(n)), r * exp2(t) * fma(w.n, -log(n), n * (-select(log(n) == log(n), w.n / n, log(n)))))
+  let w.k1.n = w.k1.grow - fma(m * select(log2(n) == log2(n), w.n / (0x1.62e42fefa39ef35793c7673007e5ed5e81e6864ce5316c5b141a2eb7175p-1 * n), log2(n)), n, m * (log2(n) + d0) * w.n)
+  let w.k1.t = (a * w.k1.grow) - (b * w.t)
+  let w.Y2.n = fma(h/2, w.k1.n, w.n)
+  let w.Y2.t = fma(h/2, w.k1.t, w.t)
+  let w.k2.grow = fma(r * (0x1.62e42fefa39ef35793c7673007e5ed5e81e6864ce5316c5b141a2eb7175p-1 * exp2(Y2.t) * w.Y2.t), Y2.n * (-log(Y2.n)), r * exp2(Y2.t) * fma(w.Y2.n, -log(Y2.n), Y2.n * (-select(log(Y2.n) == log(Y2.n), w.Y2.n / Y2.n, log(Y2.n)))))
+  let w.k2.n = w.k2.grow - fma(m * select(log2(Y2.n) == log2(Y2.n), w.Y2.n / (0x1.62e42fefa39ef35793c7673007e5ed5e81e6864ce5316c5b141a2eb7175p-1 * Y2.n), log2(Y2.n)), Y2.n, m * (log2(Y2.n) + d0) * w.Y2.n)
+  let w.k2.t = (a * w.k2.grow) - (b * w.Y2.t)
+  let w.Y3.n = fma(h/2, w.k2.n, w.n)
+  let w.Y3.t = fma(h/2, w.k2.t, w.t)
+  let w.k3.grow = fma(r * (0x1.62e42fefa39ef35793c7673007e5ed5e81e6864ce5316c5b141a2eb7175p-1 * exp2(Y3.t) * w.Y3.t), Y3.n * (-log(Y3.n)), r * exp2(Y3.t) * fma(w.Y3.n, -log(Y3.n), Y3.n * (-select(log(Y3.n) == log(Y3.n), w.Y3.n / Y3.n, log(Y3.n)))))
+  let w.k3.n = w.k3.grow - fma(m * select(log2(Y3.n) == log2(Y3.n), w.Y3.n / (0x1.62e42fefa39ef35793c7673007e5ed5e81e6864ce5316c5b141a2eb7175p-1 * Y3.n), log2(Y3.n)), Y3.n, m * (log2(Y3.n) + d0) * w.Y3.n)
+  let w.k3.t = (a * w.k3.grow) - (b * w.Y3.t)
+  let w.Y4.n = fma(h, w.k3.n, w.n)
+  let w.Y4.t = fma(h, w.k3.t, w.t)
+  let w.k4.grow = fma(r * (0x1.62e42fefa39ef35793c7673007e5ed5e81e6864ce5316c5b141a2eb7175p-1 * exp2(Y4.t) * w.Y4.t), Y4.n * (-log(Y4.n)), r * exp2(Y4.t) * fma(w.Y4.n, -log(Y4.n), Y4.n * (-select(log(Y4.n) == log(Y4.n), w.Y4.n / Y4.n, log(Y4.n)))))
+  let w.k4.n = w.k4.grow - fma(m * select(log2(Y4.n) == log2(Y4.n), w.Y4.n / (0x1.62e42fefa39ef35793c7673007e5ed5e81e6864ce5316c5b141a2eb7175p-1 * Y4.n), log2(Y4.n)), Y4.n, m * (log2(Y4.n) + d0) * w.Y4.n)
+  let w.k4.t = (a * w.k4.grow) - (b * w.Y4.t)
+  let w.S2.n = fma(2, w.k2.n, w.k1.n)
+  let w.S2.t = fma(2, w.k2.t, w.k1.t)
+  let w.S3.n = fma(2, w.k3.n, w.S2.n)
+  let w.S3.t = fma(2, w.k3.t, w.S2.t)
+  let w.S4.n = w.S3.n + w.k4.n
+  let w.S4.t = w.S3.t + w.k4.t
+  next w.n = fma(h/6, w.S4.n, w.n)
+  next w.t = fma(h/6, w.S4.t, w.t)
+end

@@ -3287,13 +3287,17 @@ Version 2's cases are the golden writer's, written by `make
 written again the same way, version 1's cases kept, by each step that
 moved them since: cftc's output version 4 (e45a2f7, 2026-10-02), profile
 3 (ca43695, 2026-10-05), cftc's output version 5 (2026-10-06, when
-revision 8's three targets joined cftc's built-in table) and profile 3.1
-(2026-10-13). Each of cftc's two steps moved the same eight certificates
-- the sourced and rebuilt Lorenz-63 cases and six controls, the ones that
-name a compile - by their `compiler` lines and hash lines alone, and the
-manifest by their eight digests; profiles 3 and 3.1 each moved all 37 by
-their profile and hash lines, with seven supersedes lines and four
-signatures. Every measured
+revision 8's three targets joined cftc's built-in table), profile 3.1
+(2026-10-13), the language at 1.1 (2026-10-15, M1's build, item 3) and
+cftc's output version 6 (2026-10-15, item 4, when the compiler took the
+math library's six). Each of cftc's three steps moved the same eight
+certificates - the sourced and rebuilt Lorenz-63 cases and six controls,
+the ones that name a compile - by their `compiler` lines and hash lines
+alone, and the manifest by their eight digests; profiles 3 and 3.1 each
+moved all 37 by their profile and hash lines, with seven supersedes
+lines and four signatures; the language's step moved the 24 that name a
+source by their `language` and hash lines, and the manifest by their
+digests. Every measured
 header line is `unknown`, as the example's `build-id` is, but in
 `signed-fp64`, which spells each out.
 
@@ -3354,11 +3358,34 @@ Logan's permission.
   committed ones, and cft-audit audits every version-2 case and control,
   handed what the manifest hands but the source and the regeneration,
   giving the golden auditor's verdict for the same ("The audit tool").
-- A replay decided through mpmath: the language's math library's six
-  reach it since M1's build, item 3 (2026-10-15), but no compiled image
-  holds one until the compiler carries them (item 4), so no certificate
-  names a source that does, and `definition-unavailable` and
-  `replay-undecided` have no committed case.
+- A replay decided through mpmath, in a committed case. The language's
+  math library's six reach mpmath since M1's build, item 3, and since
+  item 4 (2026-10-15) the compiler carries them, so an image of a source
+  holding one exists, and it can mark a lane (R23's [7], STATUS[6])
+  where its routine cannot decide the last bit - the structured
+  families near an exact case. What a writer does with such a run:
+  - **the golden writer** (cert2.py) replays each marked lane by the
+    definition, `lang.run` through transcend.py's enclosures, and writes
+    version 2's replay line; it needs mpmath for it, and without it
+    refuses `replay-undecided`. python/tests/test_cert2.py makes such
+    certificates of the compiled `next x = exp(x)`, compiled from the
+    source and defined by it, and the audit accepts both;
+  - **cft-segrun** has no interpreter of the language and replays only by
+    `--replay-image`, an image of the same source that decides the lane.
+    cftc writes one image a source and no other, so no image it writes
+    decides a lane its own routine marks: handed none, the run is
+    `replay-missing` (exit 6), and handed the image itself, which marks
+    the lane too, `replay-undecided` (exit 78) - so cft-segrun writes no
+    version-2 certificate of a run that marks a lane, measured on that
+    image (M1's build, item 4). With `--format-version 1` it certifies
+    the machine's run as its STATUS says, STATUS[6] on the marked
+    segment, the guess and not the definition. A limit, recorded: a
+    replay image would take a more accurate build of the six's routines
+    (a wider guard), which nothing makes yet.
+  No committed case holds the six, so `definition-unavailable` and
+  `replay-undecided` have none in the corpus; test_cert2.py reaches the
+  first through a real certificate (above, "An auditor that cannot
+  evaluate the definition").
 
 ## What version 1 does not do
 
@@ -3848,7 +3875,13 @@ audit was handed, in this order:
    `source-image` when the auditor's compiler is the named name and output
    version, since the claim is then false; `compiler-differs` otherwise,
    the auditor's own limit. A target the auditor's compiler does not have,
-   and a source it refuses for that target, are judged the same way.
+   and a source it refuses for that target, are judged the same way - but
+   one refusal: a source the auditor's compiler refuses
+   `routine-unavailable` (a run-time call of the math library's six on an
+   auditor's host without mpmath, through which its compiler builds their
+   routines; M1's build, item 4) is the auditor's own limit and the cause
+   a replay would meet there too, `definition-unavailable`, raised at this
+   check - never `source-image`.
 
 A source handed for a run that names none, or in another shape than
 {run: bytes}, is `source-digest`. A source named and not handed is
@@ -3957,12 +3990,23 @@ an enclosure that reached its precision cap (`transcend.py`'s
 `ZivEscalation`). The math library's six - exp, expm1, exp2, log, log1p
 and log2, the language's since M1's build, item 3 (2026-10-15) - are the
 nodes that reach `transcend.py` (`cert2.TRANSCEND_OPS`); its division and
-root are softfloat's. No certificate can name a source holding one until
-the compiler carries them (item 4): until then the audit's mapping of the
-failure - `cert2._evaluate`'s `_Undecided`, refused here - is held by
-python/tests/test_cert2.py on a definition holding exp, and by plants on
-the committed cases. A writer that meets the same refuses
-`replay-undecided` (exit 78).
+root are softfloat's. Since item 4 the compiler carries the six, building
+their routines through mpmath too, so where a run is compiled from a
+source holding one the auditor first needs mpmath at step 4a's recompile:
+its compiler refuses the source `routine-unavailable` there, and the audit
+refuses `definition-unavailable` at that check - the same cause, one name,
+whichever step meets it first. Where the run is defined by the source
+(`compiler none`), there is no recompile, and the audit first needs mpmath
+where it replays a marked lane, `definition-unavailable` at that segment.
+python/tests/test_cert2.py shows both through a real certificate of the
+compiled `next x = exp(x)` with a lane its routine marks (no committed
+case holds the six), beside the audit's mapping on a definition holding
+exp and the plants on the committed cases. A writer that meets the same
+refuses `replay-undecided` (exit 78). cft-audit takes no source, so it
+neither recompiles nor replays: handed either of those certificates it
+refuses `source-missing` (exit 4) at the first segment whose marked lane
+must be replayed - run 0, segment 0, measured on both (M1's build, item
+4) - as for any replay; such a certificate is the golden auditor's.
 
 ### Provenance
 
@@ -4293,7 +4337,7 @@ for the new lines. The new names:
 | `definition-end` | 6 | (the auditor's choice) the definition's run of a segment does not end on its certified state |
 | `definition-flags` | 6 | (the auditor's choice) it does not raise the certified flags or block |
 | `definition-differs` | 78 | a re-derivation failed, and the auditor's definition does not cover the certificate's `profile` and `language` |
-| `definition-unavailable` | 78 | the auditor cannot evaluate the definition: no mpmath for a node that needs it, or an enclosure at its precision cap |
+| `definition-unavailable` | 78 | the auditor cannot evaluate the definition: no mpmath for a node that needs it - met at step 4a's recompile where the auditor's compiler refuses the source `routine-unavailable` (M1's build, item 4), or at a replay - or an enclosure at its precision cap |
 | `compiler-differs` | 78 | a recompile differs, and the auditor's compiler is another name or output version, or failed |
 | `replay-undecided` | 78 | a writer cannot replay a marked lane: the definition cannot be evaluated there, or a replay image marks it too |
 
@@ -4471,10 +4515,15 @@ rebuilds from its source and its generator alone. The controls cover:
   the auditor covers (the major alone, profile 3 under an auditor at 3.1);
 - `definition-unavailable` and `replay-undecided`, with mpmath taken away
   from a node planted as transcendental, and with an enclosure forced to
-  its cap: the six reach mpmath since M1's build, item 3, but no
-  committed case holds one until item 4, so these plants stand for
-  them; and a definition holding exp needs mpmath, and without it
-  `_evaluate` refuses it undecided, the failure the audit names;
+  its cap, on the committed cases, which hold none of the six; a
+  definition holding exp needs mpmath, and without it `_evaluate`
+  refuses it undecided, the failure the audit names; and, since the
+  compiler carries the six (M1's build, item 4), a real certificate of
+  the compiled `next x = exp(x)` whose lane at a structured centre is
+  marked and replayed: accepted, and with mpmath taken away (a second
+  process) `definition-unavailable` at step 4a's recompile where the run
+  is compiled from the source, at the replay's segment where it is
+  defined by it;
 - the golden writer's own refusals, and every field it cannot spell;
 - the key tool: a key made, never overwritten, signing and verifying both
   ways, a bad key file, a key file others may read (POSIX's check, forced

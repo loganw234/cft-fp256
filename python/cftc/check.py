@@ -25,10 +25,16 @@ attribute, for the four that round). The segment must:
   routines; and a halved bank whose h-scaled slots are exactly half and
   whose others are the same.
 
-A step that divides or takes a root (C4) holds each routine to its
-FRAGMENT, which the check takes from the golden model itself
-(cft_golden/routines.py) - not from the compiler's inlining - and
-instantiates over the node's operand symbols: each instruction a symbol
+A step that divides or takes a root (C4), or computes one of the math
+library's six (M1's build, item 4), holds each routine to its FRAGMENT,
+which the check takes from the golden model itself
+(cft_golden/routines.py, which hands out the six's from mathlib.py) - not
+from the compiler's inlining - and holds first to its routine's
+statement of what a fragment may be (routines.invariants: its flag
+word's values, its attributes, its live values, every instruction
+reading a word or one of its values; division's and root's C4's, the
+six's widened), as made for this graph's format and attribute. It then
+instantiates the fragment over the node's operand symbols: each instruction a symbol
 (its opcode, its own attribute where it rounds, its operands; a word the
 slot holding its bits), simplified by the fragment's own rules
 (routines.simplify) and interned, so that instances which share an
@@ -41,7 +47,9 @@ instruction share its symbol, as the image computes it once. Then:
   routines.invariants proves of every fragment) - so a scaffolding flag
   cannot reach FLAGS and a language node's flags cannot be lost;
 * each routine node's flag word is RAISEd exactly once, outside every
-  region, and nothing else is raised;
+  region, and nothing else is raised - so a mark, which only a flag word
+  of the six's can carry (routines.CONTRACT), reaches the lane exactly
+  where its routine's word sets it;
 * regions are balanced within the step, and none stands outside it.
 
 A step with CALL LOOPS (callloop.py) is executed as the tile runs it: an
@@ -99,6 +107,42 @@ def _fail(why):
     raise InternalError(f"the internal check: {why}")
 
 
+_HELD = {}
+
+
+def held_fragment(op, fmt, rnd):
+    """The golden model's fragment of routine `op` at `fmt` under the
+    program's attribute `rnd` (routines.fragment), held to what a fragment
+    of it may be - routines.invariants, its routine's own statement - and
+    to having been made for that routine, format and attribute. Every
+    fragment the compiler reads comes through here (the lowering's words,
+    the inlining, the call loop, the text, the manifest) and so does every
+    one this check instantiates, so each routine an image holds is held
+    so before it is used (the module docstring). A failure is the internal
+    check's, an InternalError: the golden model's own assertion at a
+    fragment's making is turned into one too."""
+    try:
+        f = R.fragment(op, fmt, rnd)
+    except AssertionError as e:
+        _fail(f"the golden model's fragment of {op} at {fmt.name} under "
+              f"rounding attribute {rnd} breaks its routine's invariants "
+              f"(cft_golden/routines.py): {e}")
+    key = (op, fmt.name, rnd)
+    if _HELD.get(key) is f:
+        return f
+    if (f.op, f.fmt.name, f.rnd) != key:
+        _fail(f"the golden model's fragment of {op} at {fmt.name} under "
+              f"rounding attribute {rnd} is {f.op}'s at {f.fmt.name} under "
+              f"{f.rnd}")
+    bad = R.invariants(f)
+    if bad:
+        _fail(f"{op}'s fragment at {fmt.name} under rounding attribute "
+              f"{rnd} breaks its routine's invariants "
+              f"(cft_golden/routines.py): {'; '.join(bad[:3])}")
+    _HELD[key] = f
+    return f
+
+
 def verify(low, prog, image_bytes, steps, half_values=None):
     g = low.graph
     n, nl, m = g.n_state, len(g.lane), g.m
@@ -149,7 +193,7 @@ def verify(low, prog, image_bytes, steps, half_values=None):
             expected.append(sym)
             lang_syms.append(sym)
             continue
-        f = R.fragment(nd.op, g.fmt, g.rnd)
+        f = held_fragment(nd.op, g.fmt, g.rnd)
         inputs = dict(zip(f.inputs, args))
         vals = {}
         for i, (opc, r, srcs) in enumerate(f.body):
@@ -444,7 +488,7 @@ def _verify_bank(low, half_values, loop_words=frozenset()):
     # call loop's index arithmetic read - each once
     want = set(loop_words)
     for op in sorted({nd.op for nd in low.nodes if nd.op in ROUTINES}):
-        want |= set(R.fragment(op, fmt, g.rnd).words.values())
+        want |= set(held_fragment(op, fmt, g.rnd).words.values())
     have = [s.bits for s in low.slots if s.kind == "word"]
     if len(set(have)) != len(have) or set(have) != want:
         _fail(f"the bank's {len(have)} word slots are not the "

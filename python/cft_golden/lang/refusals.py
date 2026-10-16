@@ -63,8 +63,9 @@ CATALOGUE = {
                     "reads the state, a param, a lane param or a let",
     "bank-capacity": "more than 512 params and constants - and, the "
                      "compiler's count, with the words of the routines it "
-                     "inlines for a division or a root (C4): the bank "
-                     "holds 512 on every device",
+                     "inlines for a division, a root (C4) or one of the "
+                     "math library's six (M1): the bank holds 512 on "
+                     "every device",
     # -- equations, indices, the step ---------------------------------
     "missing-equation": "a state component with no equation",
     "duplicate-equation": "a state component with two equations",
@@ -156,9 +157,11 @@ CATALOGUE = {
 # gives each its sentence. The compiler also raises one of the
 # catalogue's, bank-capacity, where the words of the routines it inlines
 # take the bank past 512 (C4): one limit, one name. Until C4 an eighth,
-# runtime-routine, refused a run-time division or root (L4). An interim
-# eighth now, math-library, refuses a source naming one of the math
-# library's six until M1's build, item 4, carries them (2026-10-15).
+# runtime-routine, refused a run-time division or root (L4). From M1's
+# build, item 3, until item 4 an interim eighth, math-library, refused a
+# source naming one of the math library's six; item 4 compiles them, and
+# the eighth is now routine-unavailable, the one that depends on the host
+# (2026-10-15).
 COMPILER_REFUSALS = {
     "scratch-capacity": "registers plus scratch past the target's: "
                         "2,048 slots on the U50's revision 7, 256 "
@@ -175,12 +178,13 @@ COMPILER_REFUSALS = {
     "halving-underflow": "an h-scaled constant whose exact halving "
                          "underflows, so the step-halving bank cannot "
                          "hold it exactly",
-    # interim, until M1's build, item 4 (cftc's output version 6)
-    "math-library": "a source naming exp, expm1, exp2, log, log1p or log2 "
-                    "- at run time, or folded where the operand is a "
-                    "constant - which the compiler carries from M1's "
-                    "build, item 4: interim, as runtime-routine was until "
-                    "C4",
+    # M1's build, item 4 (cftc's output version 6): the one that depends on
+    # the host
+    "routine-unavailable": "a run-time exp, expm1, exp2, log, log1p or "
+                           "log2 on a host without mpmath, through which "
+                           "the routine's fragment is built: it depends on "
+                           "the host, and with mpmath the same source and "
+                           "target compile or are refused by another name",
 }
 
 # Every name a Refusal may carry: the checker's and the interpreter's,

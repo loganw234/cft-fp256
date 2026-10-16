@@ -420,18 +420,29 @@ six, named as `python/cft_golden/transcend.py` names the functions.
     uses them never need it (Logan's answer to M1's question 10: accept
     mpmath in the language's checks). The certificate auditor maps the
     same failure to `definition-unavailable` (docs/CERTIFICATES.md).
-  - **The compiler** carries them from M1's build, item 4, as inlined
-    routines (`python/cft_golden/mathlib.py`'s fragments, R24's raise and
-    mark). Until then it refuses a source that names one - at run time,
-    or folded where its operand is a constant - `math-library`, first, on
-    every target, at the first source line holding one ("Every refusal,
-    by name"). The interpreter runs both.
-  - **A marked lane** (the structured families; M1's question 4). Once
-    the compiler carries the six, a routine's last bit is decided in the
-    lane, and where its in-lane test cannot decide it - where the true
-    value lies within the routine's error bound of a rounding boundary -
-    the routine marks the lane (bit 7 of its raised word; R24 and R23's
-    lane byte). The language's definition is unchanged by a mark: a
+  - **The compiler** carries them since M1's build, item 4 (2026-10-15,
+    cftc's output version 6), as division and the root are carried: each
+    run-time call a ROUTINE inlined where its node stands - the math
+    library's generator's fragment (`python/cft_golden/mathlib.py`,
+    handed out by name by `routines.py`), built at the program's format
+    and attribute - run in a quiet region, then a raise of its flag word
+    (R24). Such an image needs flag control, so revision 7's targets
+    refuse it `target-feature`, and the software targets and revision
+    8's compile it. A function of a constant is folded here, by the
+    language, and compiles as the constant it is. The generator derives
+    its constants through mpmath, so on a host without mpmath a source
+    holding one of the six at run time is refused `routine-unavailable`
+    - the one refusal that depends on the host ("Every refusal, by
+    name"). From item 3 until item 4 the compiler refused every source
+    naming one, at run time or folded, by an interim name,
+    `math-library`; that name went with item 4. The interpreter runs
+    both.
+  - **A marked lane** (the structured families; M1's question 4). A
+    compiled routine of the six decides its last bit in the lane, and
+    where its in-lane test cannot decide it - where the true value lies
+    within the routine's error bound of a rounding boundary - it marks
+    the lane (bit 7 of its raised word; R24 and R23's lane byte, and
+    STATUS[6]). The language's definition is unchanged by a mark: a
     marked lane is replayed by the definition, `lang.run`, and the
     image's guess is compared only as a guess. Next to an exact case -
     exp near 0, log near 1, the arguments x = c 2^-e and 1 + c ulp the
@@ -439,7 +450,8 @@ six, named as `python/cft_golden/transcend.py` names the functions.
     whole windows of arguments, not for a few rare bits: a workload that
     lives in such a window marks there on purpose, and the stages that
     compare images with `lang.run` replay those lanes by the definition
-    (item 5's legs).
+    (M1's build, item 5's legs; until then a stage leg that meets a
+    marked lane fails it by name).
 - **Division and the square root** (L4, 2026-10-02) are each one
   correctly rounded operation, with exactly the flags the golden function
   raises: a quiet NaN in gives the canonical NaN and no flag, as every
@@ -465,8 +477,17 @@ six, named as `python/cft_golden/transcend.py` names the functions.
   stored before the loop and its result read back after
   (python/cftc/callloop.py). A batch is the calls of one operation at
   one routine depth, so none reads another's result; the largest is
-  looped first, then the next, until the step fits or none is left. A
-  batch of one call is never looped - its loop would only add the
+  looped first, then the next, until the step fits or none is left. Its
+  size is its calls times its routine's fragment; ties go to the
+  shallower, then by the routines' one order, that of the step graph's
+  `OPS` (lang/graph.py) - div, sqrt, exp, expm1, exp2, log, log1p, log2,
+  also that of the routines' words in the bank - so a step of division
+  and root alone loops as it did before the six (M1's build, item 4). A
+  batch of the six loops as a root's does, one slot a record (with the
+  constant at 32,768, 72 components each calling expm1, exp, exp2 and
+  log1p loop the log1p and the exp batches, the records taking 398
+  scratch slots, past sw's 256; measured for sw:1024, M1's build, item
+  4). A batch of one call is never looped - its loop would only add the
   loop's instructions to its one copy - so a step whose routines sit one
   to a batch, a chain of divisions each reading the last, is compiled
   inlined past the constant: the software targets, whose instruction
@@ -586,8 +607,11 @@ Three kinds of source are refused still, by another name: `log(0)`,
 `log2(0)` and `log1p(-1)` are `constant-division-by-zero`, a function of
 h is `h-nonlinear`, and a folded power past a format is the constant
 refusals' (`exp2(2000)` at fp64 is `constant-overflow`). The compiler
-refuses the six by an interim name, `math-library`, until M1's build,
-item 4, carries them.
+refused the six by an interim name, `math-library`, until M1's build,
+item 4, carried them (the same day, at cftc's output version 6); every
+source it refused that way compiles now, its run-time six refused
+`target-feature` on revision 7's targets and `routine-unavailable` on a
+host without mpmath.
 
 ## Constants
 
@@ -1866,10 +1890,14 @@ it joins the const table only where exp2's or log2's rule reads it.
   tangent reads costs each vector one product (exp, expm1, exp2) or one
   division and its select (the logarithms); its primal-only values, the
   copies of r and the compare are shared (the gate holds each rule's
-  count after sharing, and leaves the sharing itself to the compiler,
-  item 4). With the compiler's routines (item 4), a logarithm's division
-  is a division routine a vector a call, as the study counted (section
-  7: about 190 instructions).
+  count after sharing, and leaves the sharing itself to the compiler).
+  The compiler shares them (M1's build, item 4): with two vectors each
+  primal-only value - 1 + r, L·r, r == r, L·a, 1 + a - is one node of
+  the lowered step and one instruction of the image a call, and the
+  routine itself runs once a call, its result read by the primal and
+  every vector (python/tests/test_cftc.py). A logarithm's division is a
+  division routine a vector a call, as the study counted (section 7:
+  about 190 instructions).
 
 **Reading a primal value.** A rule reads a primal value by name where it
 has one - a state component, a param, a lane param, a constant, a let, a
@@ -2121,17 +2149,24 @@ question 10).
   divide and take a root: the quotient's rule rounded otherwise (its
   numerator a product and then a sum) and the root's halved first each
   move both of Kepler's committed graphs and no other (measured
-  2026-10-05). No committed graph holds the math library's six until
-  item 4's Lotka-Volterra reference, so their rounding order is held by
-  the rule table and by a check of the interpreter's bits: on y = f(a)
-  at every format and attribute, each tangent is the table's last
-  operation rounded once on the primal's own values and the primal-only
-  value the table rounds first, and that operation's exact value is the
-  derivative within its operands' roundings, by the central difference
-  in high precision (`python/tests/test_lang_tangent.py`, the `tangent`
-  stage's leg M). The study's own example, log's rule rounded otherwise
-  as `da * (1 / a)`, is green on the fourth check and on the difference's
-  value, and red there, and on the rule table;
+  2026-10-05). The math library's six are held the same two ways. By the
+  rule table and a check of the interpreter's bits: on y = f(a) at every
+  format and attribute, each tangent is the table's last operation
+  rounded once on the primal's own values and the primal-only value the
+  table rounds first, and that operation's exact value is the derivative
+  within its operands' roundings, by the central difference in high
+  precision (`python/tests/test_lang_tangent.py`, the `tangent` stage's
+  leg M); the study's own example, log's rule rounded otherwise as
+  `da * (1 / a)`, is green on the fourth check and on the difference's
+  value, and red there, and on the rule table. And, since M1's build,
+  item 4, by committed bytes: three variational references hold the six
+  between them at fp64 and fp256 - Lotka-Volterra in logarithmic
+  variables (exp, the study's section 7), two diodes and a source (expm1
+  and log1p) and a culture that heats itself (exp2, log and log2;
+  `programs/systems/*-rk4-tangent-*.cftl`) - and each rule changed,
+  rounded otherwise where it rounds twice (and log's `da * (1 / a)`) or
+  made wrong where it rounds once, moves both committed graphs of the
+  reference that holds it and no other (test_lang_tangent.py);
 - **special values**: NaNs, infinities and the sign of zero do not exist
   in exact arithmetic. They are held by the interpreter against seq.py
   bit for bit, with tangents holding signalling NaNs, infinities, -0 and
@@ -2241,8 +2276,9 @@ One exception, `lang.Refusal`, carries:
 Nothing else escapes the parser or the checker, and the gate fuzzes the
 references to hold that. `python/cft_golden/lang/refusals.py` is the one
 list: the checker's and the interpreter's names, each made by a test in
-this definition's gate, and the compiler's seven at the end, reserved
-for it, with an interim eighth (M1's build, item 3). The compiler raises them through the same class, and its own
+this definition's gate, and the compiler's eight at the end, reserved
+for it (the eighth, `routine-unavailable`, since M1's build, item 4).
+The compiler raises them through the same class, and its own
 gate makes each one; it raises one of the checker's besides,
 `bank-capacity`, for the cause the checker cannot see (below).
 
@@ -2343,11 +2379,29 @@ The compiler's, reserved for it (L2).
   them. The bank's 512 is the same on every device, and the checker
   raises that one itself as `bank-capacity` - for params and constants.
   The words of the routines the compiler inlines for a division or a
-  root (C4) live in the bank too, which the checker cannot see, so the
-  compiler raises the same name where they take the bank past 512, its
-  sentence counting the params, the constants and the words: one limit,
-  one name.
-- The other two are the compiled image's own.
+  root (C4), and for the math library's six (M1's build, item 4), live
+  in the bank too, which the checker cannot see, so the compiler raises
+  the same name where they take the bank past 512, its sentence counting
+  the params, the constants and the words and naming the routines in
+  their one order: one limit, one name.
+- The next two are the compiled image's own.
+- **The eighth, `routine-unavailable`** (M1's build, item 4,
+  2026-10-15), is the one that depends on the HOST. The math library's
+  routines are built by the golden model's generator
+  (`python/cft_golden/mathlib.py`), which derives every constant through
+  mpmath, so on a host where mpmath does not import, a source whose
+  graph holds one of the six at run time is refused by this name -
+  never an ImportError, never an internal error - with no line, the
+  cause being the host. A fold of the six is a constant, built by
+  nothing, and compiles there. The same source and target on a host
+  with mpmath compile, or are refused by another name, such as
+  `target-feature` on revision 7's targets. It is raised after the
+  refusals that depend on the arguments alone (`segment-steps`,
+  `target-format`, a run value's) and before anything builds a fragment,
+  so before `target-feature`, which reads the built image: on a
+  revision-7 target without mpmath such a source is
+  `routine-unavailable`, with it `target-feature`. lang.run needs mpmath
+  for the same nodes (the interpreter's need_mpmath).
 - Until parcel C4 an eighth, `runtime-routine` (L4, 2026-10-02), refused
   a run-time division or square root on every target, first, at the
   first source line holding one, whatever the statement, so that no
@@ -2358,23 +2412,19 @@ The compiler's, reserved for it (L2).
   refuse it `target-feature`, by name, and the software targets and
   revision 8's compile it. Every source the language accepts compiles
   or is refused by name, and exit 70 stays a defect in the compiler.
-- **An interim eighth, `math-library`** (M1's build, item 3,
-  2026-10-15), as `runtime-routine` was until C4. The language has the
-  math library's six and its interpreter runs them; the compiler carries
-  them from item 4, at its output version 6 (Logan's answer to M1's
-  question 9). Until then it refuses a source that names one - at run
-  time, or folded where its operand is a constant, since a fold-only
-  source that compiled would be a source that compiles where it was
-  refused, which steps the output version (python/cftc/outputs.py) -
-  first, on every target, before anything reads the graph, at the first
-  source line holding a call of one, whatever the statement: an equation,
-  a let, a const, a default, h, a written tangent or a line of an
-  expansion block (the checker's lines, `StepGraph.math_lines`, never in
-  the bytes). A graph read from bytes carries no lines: its run-time
-  nodes are refused with no line, and its folds, constants like any
-  other, compile as the source that writes their values does. No source
-  the language accepts reaches exit 70, no committed compiled byte moves,
-  and cftc's version stays 5. Item 4 lifts it.
+- From M1's build, item 3, to item 4 (both 2026-10-15) an interim
+  eighth, `math-library`, refused every source naming one of the math
+  library's six - at run time, or folded where its operand is a
+  constant, since a fold-only source that compiled would have been a
+  source that compiles where it was refused, which steps the output
+  version (python/cftc/outputs.py) - first, at the first source line
+  holding one (the checker's lines, `StepGraph.math_lines`, never in the
+  bytes; they went with it). Item 4 carries the six as routines at
+  cftc's output version 6 (Logan's answer to M1's question 9), and the
+  name went: every source it refused compiles - its run-time six refused
+  `target-feature` on revision 7's targets, and `routine-unavailable` on
+  a host without mpmath - and a fold, in the source or in a run value
+  (`--param p=exp(0)`), compiles as the constant it is.
 
 The checker never raises any of the eight. The sentences below are their
 form; the compiler words each one for the case at hand.
@@ -2388,7 +2438,7 @@ form; the compiler words each one for the case at hand.
 | `target-feature` | a feature whose CAPS bit the target does not publish | "this image needs a feature the target's CAPS bits do not publish" |
 | `segment-steps` | a step count outside 1 to 2^32-1, the range of the REPEAT immediate a segment's steps are | "a segment is one REPEAT of 1 to 4,294,967,295 steps; this count is not one" |
 | `halving-underflow` | an h-scaled constant whose exact halving underflows, so the step-halving bank cannot hold it exactly | "this h-scaled constant underflows when halved, so the step-halving bank would not be this bank halved exactly" |
-| `math-library` | interim, until M1's build, item 4: a source naming exp, expm1, exp2, log, log1p or log2, at run time or folded | "this system computes log at run time: ... the compiler carries them from item 4 ... and until then refuses a source that names one" |
+| `routine-unavailable` | a run-time exp, expm1, exp2, log, log1p or log2 on a host without mpmath, through which its routine's fragment is built: it depends on the host (M1's build, item 4) | "this system computes log at run time, and the compiler inlines each as its routine, whose fragment the math library's generator builds ..., deriving every constant through mpmath - which is not installed here" |
 
 ## The gate
 
@@ -2598,8 +2648,10 @@ bodies under rk4, which the constant itself loops, and Kepler under rk4
 with the constant lowered; the `tangent` stage's leg L compiles the
 quotient's and the root's rules the same way, and its leg M holds the
 math library's six rules in the golden model, with plants (their
-compiled legs are M1's build, item 5's, after item 4's compiler); and
-the `lang` stage
+compiled legs with generated sources, a marked lane replayed, are M1's
+build, item 5's; since item 4 its legs G, H and J read the three
+committed references that hold the six, and leg G fails by name a
+certified segment that marks a lane); and the `lang` stage
 certifies Kepler's routine images and holds the routines' four plants
 and the loop's three in its leg H. The routines themselves are held to
 softfloat by python/tests/test_routines.py and the `lang-routines`
@@ -2641,7 +2693,9 @@ stage's leg K2, and their inlining and their loops by
     is refused by name for an image holding a routine; certificate
     version 2's wider-source run compiles the source one format up
     instead;
-  - **size**: a routine is 155 to 191 instructions, so a step with many
+  - **size**: a routine is 155 to 191 instructions (division and root)
+    or 175 to 433 (the math library's six, fp32's triple words the
+    longest), so a step with many
     is long; past 32,768 instructions a step runs batches of them in
     call loops, Logan's rule ("The operations"), at a few percent of
     its cycles - and a wide batch, looped, can need more scratch than
@@ -2651,7 +2705,7 @@ stage's leg K2, and their inlining and their loops by
   log, log1p and log2 (M1's build, item 3); sin, cos, tan, pow, the
   inverse trigonometric functions and the rest of the reserved list are
   M2 to M4's, refused `transcendental` until then. The compiler carries
-  the six from item 4, and refuses them `math-library` until it does.
+  the six since item 4, as routines.
 - **A built-in time, adaptive steps and events.** There is no reserved
   `t`: a system carries time in its state or counts its steps, and sin
   and cos of t wait for the math library ("Time").

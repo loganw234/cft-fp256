@@ -25,9 +25,20 @@ that argument rests on, cheap enough for the golden stage:
 * the variational equations: an image with tangent vectors run as
   lang.run runs it, its lane block and manifest, the interleaved
   candidate offered only with tangents, scratch-capacity naming the
-  tangent's slots.
+  tangent's slots;
+* the math library's six as routines (M1's build, item 4; cftc's output
+  version 6): every source the interim `math-library` refused compiles,
+  for sw and revision 8's targets, refused `target-feature` without flag
+  control and `routine-unavailable` without mpmath, and runs on seq.py as
+  lang.run runs it, an unmarked lane bit for bit and a marked lane a
+  guess; a structured centre marked through the image's RAISE; the
+  primal-only values of the six's rules once a call; a call loop of the
+  six; the internal check holding their routines and every fragment to
+  its routine's statement; the bank counting their words; and a fold, in
+  the source or in a run value, compiling as its constant.
 """
 
+import hashlib
 import json
 import random
 import subprocess
@@ -44,7 +55,7 @@ import cftc                                      # noqa: E402
 from cftc import callloop                        # noqa: E402
 from cftc import check as cftc_check             # noqa: E402
 from cftc import targets as T                    # noqa: E402
-from cft_golden import FORMATS, asm, lang        # noqa: E402
+from cft_golden import FORMATS, asm, lang, seq   # noqa: E402
 from cft_golden import routines as R             # noqa: E402
 from cft_golden import softfloat as sf           # noqa: E402
 from cft_golden.lang import constants as K       # noqa: E402
@@ -1557,131 +1568,543 @@ def test_scratch_capacity_one_past_each_revision_8_depth(name):
         assert c.program.slots_used == quad + 1
 
 
-# ---- M1's build, item 3: the math library's six, refused until item 4 -------
-# The language has exp, expm1, exp2, log, log1p and log2 (golden-first), and
-# its interpreter runs them; cftc carries them from item 4, at its output
-# version 6. Until then it refuses a source that names one - at run time, or
-# folded where the operand is a constant, since a fold-only source that
-# compiled would be a source that compiles where it was refused, an output
-# version step (outputs.py) - `math-library`, first, on every target, at the
-# first source line holding one, whatever the statement; never exit 70.
+# ---- M1's build, item 4: the math library's six as routines -------------------
+# cftc carries exp, expm1, exp2, log, log1p and log2 since M1's build, item 4,
+# at its output version 6: a run-time call is inlined as its routine -
+# mathlib.py's fragment, handed out by routines.fragment - quiet, then a RAISE
+# of its flag word, whose bit 7 MARKS the lane where the routine's in-lane test
+# cannot decide the last bit; a function of a constant folds in the language
+# and compiles as the constant it is. From item 3 until item 4 the interim
+# `math-library` refused every source naming one (MATHLIB, below: the sources
+# it refused here at 97076f3): each now compiles, its run-time six refused
+# `target-feature` on the targets without flag control, and on a host without
+# mpmath `routine-unavailable` (a child process, below). Never exit 70.
 
-MATHLIB = {   # name: (source, the first line holding one, its run-time ops)
+MATHLIB = {   # name: (source, its run-time ops) - math-library's at 97076f3
     "exp at run time": ("system e\nformat fp64\nstate x\nnext x = exp(x)\n"
-                        "step map\n", 4, ["exp"]),
+                        "step map\n", ["exp"]),
     "the six, rk4, two vectors": (
         "system six\nformat fp256\nround rdn\nstate x, y\ntangent v, w\n"
         "let u = log1p(x * x) + log2(abs(y) + 1)\n"
         "d/dt x = expm1(-x) + exp2(y) * u\nd/dt y = log(abs(x) + 2) - exp(y)\n"
-        "step rk4, h = 1/16\n", 6,
+        "step rk4, h = 1/16\n",
         ["exp", "expm1", "exp2", "log", "log1p", "log2"]),
     "a fold alone": ("system f\nformat fp32\nstate x\n"
-                     "next x = x * exp(0) + log2(1/8)\nstep map\n", 4, []),
+                     "next x = x * exp(0) + log2(1/8)\nstep map\n", []),
     "a fold in a const": ("system c\nformat fp64\nstate x\n"
                           "const k = exp2(-3) + log(1)\nnext x = x * k\n"
-                          "step map\n", 4, []),
+                          "step map\n", []),
     "a fold in a default": ("system d\nformat fp128\nstate x\n"
                             "param p = log1p(0) + expm1(0) + 1\n"
-                            "next x = x * p\nstep map\n", 4, []),
+                            "next x = x * p\nstep map\n", []),
     "a fold in h": ("system h\nformat fp64\nstate x\nd/dt x = -x\n"
-                    "step euler, h = exp2(-4)\n", 5, []),
+                    "step euler, h = exp2(-4)\n", []),
     # statements come in any order: a written tangent or an expansion block
     # above the equations holds the first call (verifier-VL4's lesson)
     "a written tangent first": (
         "system t\nformat fp64\nstate x, y\ntangent v\n"
         "next v.x = v.x\nnext v.y = exp(x) * v.x\nnext x = x\n"
-        "next y = exp(x)\nstep map\n", 6, ["exp"]),
+        "next y = exp(x)\nstep map\n", ["exp"]),
     "an expansion block first": (
         "system b\nformat fp64\nstate x\nstep euler, h = 0.125\n"
-        "expansion\n  next x = fma(h, log(x), x)\nend\nd/dt x = log(x)\n", 6,
+        "expansion\n  next x = fma(h, log(x), x)\nend\nd/dt x = log(x)\n",
         ["log"]),
 }
+# the targets without flag control (CAPS2[14]): revision 7's and the
+# round-2 and open-core builds
+NO_FLAG_CONTROL = ("u50-rev7", "u50-rev7-quad", "u50-round2", "open-core")
+needs_mpmath = pytest.mark.skipif(not have_mpmath(), reason=NO_MPMATH)
+
+
+def _math_lanes(g, seed):
+    """Lanes for an image of the six: rationals of either sign near 1 and
+    near 0 (logarithms below their domain among them), a zero state, a
+    signalling NaN, the smallest subnormal; with tangent vectors, a tangent
+    for each. None of these is a structured family's argument at its
+    attribute, so a lane is marked only at the rate the routines' bound
+    gives (2^-43.5 a call at fp64)."""
+    fmt = g.fmt
+    rng = random.Random(seed)
+
+    def val():
+        return K.round_once(fmt, sf.RND_RNE,
+                            Fraction(rng.randint(-900, 900), 397))[0]
+    n = g.n_primal
+    states = [[val() for _ in range(n)] for _ in range(4)]
+    states += [[0] * n, [sf.snan_bits(fmt)] * n, [1] * n]
+    tans = None
+    if g.tangent:
+        tans = [[[val() for _ in range(n)] for _ in g.tangent]
+                for _ in states]
+    return states, tans
+
+
+def _held_lanes(c, states, tans, steps):
+    """The image on seq.py against lang.run, lane by lane, each lane alone
+    through the interpreter: an unmarked lane's states, tangents and lane
+    byte's five flags equal the interpreter's, bit for bit; a marked lane's
+    values are a guess, compared only as one (docs/LANGUAGE.md, "A marked
+    lane") and counted. -> (the seq.py Result, the marked lanes)."""
+    r = c.run(states, tangents=tans)
+    m, n, N = c.ir.m, c.ir.n_primal, c.ir.n_state
+    marked = []
+    for k, st in enumerate(states):
+        byte = r.lane_flags[k]
+        if byte & seq.LANE_MARKED:
+            marked.append(k)
+            continue
+        kw = {"tangents": [tans[k]]} if tans is not None else {}
+        ref = lang.run(c.graph, [st], steps, **kw)
+        out = r.scratch_out[k * m:(k + 1) * m]
+        assert out[:n] == ref.states[0], (k, "states")
+        if tans is not None:
+            assert out[n:N] == [v for vec in ref.tangents[0] for v in vec]
+        assert byte & seq.LANE_FLAGS_IEEE == ref.flags, (k, "flags")
+        assert not byte & (seq.LANE_DEPOSIT_OVERFLOW | seq.LANE_SCRATCH_RANGE)
+    assert bool(r.status & seq.STATUS_MARKED) == bool(marked)
+    if not marked:
+        ref = lang.run(c.graph, states, steps,
+                       **({"tangents": tans} if tans is not None else {}))
+        assert r.flags == ref.flags
+    return r, marked
 
 
 @pytest.mark.parametrize("case", list(MATHLIB))
-def test_the_math_library_is_refused_by_name_until_item_4(case):
-    """compile_text on every built-in target and sw:N, at 3 steps and at 0
-    (before segment-steps), and compile_graph of the language's graph:
-    `math-library`, at the first line in source order holding a call of one
-    of the six, run time or folded, whatever the statement; its sentence
-    names the run-time ops, or the fold, item 4 and lang.run. A graph read
-    from its bytes is refused with no line where it holds a run-time node,
-    and where it holds only folds - constants like any other, the bytes of
-    a source that writes the values - it compiles as that source does. The
-    interpreter runs every one."""
-    text, line, ops = MATHLIB[case]
+def test_what_math_library_refused_now_compiles(case):
+    """Each source the interim `math-library` refused at 97076f3 compiles
+    (cftc's output version 6): its run-time six inlined as routines - the
+    image holding QUIET, ENDQUIET and RAISE, needing FLAG_CONTROL, the same
+    bytes for sw and revision 8's targets, accepted by those and refused
+    `target-feature` by name, naming the bit and its routines, on the
+    targets without it - and a source of folds alone a plain image every
+    target takes. A graph read from its bytes compiles to the same image.
+    With mpmath it runs on seq.py as lang.run runs it, lane by lane."""
+    text, ops = MATHLIB[case]
     g = lang.compile_text(text, "src.cftl").graph
-    assert g.math_lines[0] == line
-    assert [op for op in cftc.MATH if op in set().union(
-        *(set(g.op_counts(s)) for s in ("step", "tangent_step")
-          if g.section(s) is not None))] == ops
-    trim = T.Target("trim", ("fp32", "fp64", "fp128", "fp256"), 32768, 512,
-                    2048, 1024, T.TILE_FEATURES)
-    for target in T.names() + ["sw:4096", "sw:32768", trim]:
-        for steps in (3, 0):
+    assert cftc.math_nodes(g) == ops
+    # the source holding all six (4 s a compile at fp256) is compiled for
+    # sw and refused on one target; the others show every target
+    heavy = len(ops) > 1
+    c = cftc.compile_text(text, 3, source="src.cftl")
+    assert c.version == 6
+    for t in () if heavy else REV8 + ("sw:4096",):
+        ct = cftc.compile_text(text, 3, target=t, source="src.cftl")
+        assert (ct.image, ct.bank) == (c.image, c.bank), t
+    no_fc = NO_FLAG_CONTROL[:1] if heavy else NO_FLAG_CONTROL
+    if ops:
+        assert "FLAG_CONTROL" in c.features
+        assert c.accepted_by == ["sw", *REV8]
+        assert set(c.manifest["routines"]["calls"]) - {"div", "sqrt"} == \
+            set(ops)
+        names = {asm.CTRL_NAMES.get(asm.decode(w)["op"])
+                 for w in c.image_obj.insns if asm.decode(w)["ctrl"]}
+        assert {"quiet", "endquiet", "raise"} <= names
+        for t in no_fc:
             with pytest.raises(lang.Refusal) as e:
-                cftc.compile_text(text, steps, target=target,
-                                  source="src.cftl")
-            assert (e.value.name, e.value.line, e.value.source) == \
-                ("math-library", line, "src.cftl"), (target, str(e.value))
-    s = e.value.sentence
-    if ops:
-        assert s.startswith(f"this system computes {', '.join(ops)} at run "
-                            f"time: "), s
+                cftc.compile_text(text, 3, target=t, source="src.cftl")
+            assert e.value.name == "target-feature", (t, str(e.value))
+            assert "FLAG_CONTROL (CAPS2[14])" in e.value.sentence
+            assert all(op in e.value.sentence for op in ops)
     else:
-        assert s.startswith("this system names one of exp, expm1, exp2, log, "
-                            "log1p and log2, folded where its operand is a "
-                            "constant: "), s
-    assert "item 4" in s and "lang.run" in s and "version 5" in s, s
-    with pytest.raises(lang.Refusal) as e:
-        cftc.compile_graph(g, 3, source="src.cftl")
-    assert (e.value.name, e.value.line) == ("math-library", line)
-    back = lang.StepGraph.from_bytes(g.to_bytes())
-    assert back.math_lines is None
-    if ops:
-        with pytest.raises(lang.Refusal) as e:
-            cftc.compile_graph(back, 3)
-        assert (e.value.name, e.value.line) == ("math-library", None)
-    else:
-        assert cftc.compile_graph(back, 3).graph_bytes == g.to_bytes()
-    lanes = [[K.round_once(g.fmt, sf.RND_RNE, Fraction(v, 7))[0]]
-             * g.n_state for v in (3, 11)]
-    kw = {"tangents": [[lane] * len(g.tangent) for lane in lanes]} \
-        if g.tangent else {}
+        assert "routines" not in c.manifest and \
+            "FLAG_CONTROL" not in c.features
+        assert c.accepted_by == T.names()
+        for t in no_fc:
+            assert cftc.compile_text(text, 3, target=t,
+                                     source="src.cftl").image == c.image
+    if not heavy:
+        back = lang.StepGraph.from_bytes(g.to_bytes())
+        assert cftc.compile_graph(back, 3, source="src.cftl").image == c.image
     if ops and not have_mpmath():
-        # the refusal above needs no mpmath; the interpreter's run of the
-        # six does (python/tests/test_lang.py, the no-mpmath test)
         pytest.skip(f"the interpreter's run of {', '.join(ops)}: {NO_MPMATH}")
-    assert len(lang.run(g, lanes, 2, **kw).states) == 2
+    states, tans = _math_lanes(c.ir, case)
+    _held_lanes(c, states, tans, 3)
 
 
-def test_the_math_library_refusal_through_the_command_line(tmp_path):
-    """Exit 3 with the name and the line, nothing written, never 70."""
+def test_the_six_through_the_command_line(tmp_path):
+    """sw: exit 0, the files, the six's regions in the text; revision 8's
+    quad: exit 0, the same image and bank; a revision-7 target: exit 3,
+    `target-feature`, nothing written; never 70."""
     py = [sys.executable, str(ROOT / "python" / "cftc")]
-    for k, (case, (text, line, _ops)) in enumerate(MATHLIB.items()):
-        src = tmp_path / f"math{k}.cftl"
-        src.write_bytes(text.encode("ascii"))
-        out = tmp_path / f"out{k}"
-        r = subprocess.run(py + [str(src), "--steps", "2", "--target",
-                                 "u50-rev8", "--out", str(out)],
-                           capture_output=True, text=True)
-        assert r.returncode == 3, (case, r.returncode, r.stderr)
-        assert r.stderr.startswith("cftc: refused math-library: "), r.stderr
-        assert f"math{k}.cftl:{line}: this system " in r.stderr, r.stderr
-        assert "internal error" not in r.stderr
-        assert not out.exists()
+    src = tmp_path / "e.cftl"
+    src.write_bytes(MATHLIB["exp at run time"][0].encode("ascii"))
+    r = subprocess.run(py + [str(src), "--steps", "2", "--out",
+                             str(tmp_path / "a")], capture_output=True,
+                       text=True)
+    assert r.returncode == 0, r.stderr
+    cfta = (tmp_path / "a" / "e.cfta").read_text(encoding="ascii")
+    assert "; exp(x): mathlib's exp routine, run quiet\n" in cfta
+    assert "\n  raise    r" in cfta and "\n    add.rup  r" in cfta
+    r = subprocess.run(py + [str(src), "--steps", "2", "--target",
+                             "u50-rev8-quad", "--out", str(tmp_path / "q")],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    for ext in ("cftp", "bank"):
+        assert (tmp_path / "q" / f"e.{ext}").read_bytes() == \
+            (tmp_path / "a" / f"e.{ext}").read_bytes(), ext
+    r = subprocess.run(py + [str(src), "--steps", "2", "--target",
+                             "u50-rev7", "--out", str(tmp_path / "b")],
+                       capture_output=True, text=True)
+    assert r.returncode == 3, r.stderr
+    assert r.stderr.startswith("cftc: refused target-feature: ")
+    assert "internal error" not in r.stderr and not (tmp_path / "b").exists()
 
 
-def test_the_math_library_moves_no_compiled_byte():
-    """No committed source names one of the six, so the interim refusal
-    moves no compiled byte: the output version is still 5, and every
-    committed reference compiles to its committed files (the record's
-    check: test_version_is_the_records_last_and_the_record_holds, above,
-    and the lang stage's leg F)."""
-    assert cftc.VERSION == 5
-    named = []
-    for p in sorted(SYSTEMS.glob("*.cftl")):
-        g = lang.load(p).graph
-        if g.math_lines:
-            named.append(p.name)
-    assert named == []
+_NO_MPMATH_CFTC = r"""
+import hashlib, json, subprocess, sys
+sys.modules["mpmath"] = None            # import mpmath raises ImportError
+sys.path.insert(0, sys.argv[1])
+import cftc
+from cftc import callloop
+from cft_golden import lang
+cases = json.loads(sys.argv[2])
+out = {}
+for name, (text, ops) in cases.items():
+    # a step that loops its routines (the constant lowered) builds the
+    # fragments of the routines it holds, and only those
+    callloop.CALL_LOOP_ABOVE = 0 if name.endswith("looped") else 32768
+    for target in ("sw", "u50-rev8", "u50-rev7"):
+        for steps in (3, 0):
+            try:
+                c = cftc.compile_text(text, steps, target=target,
+                                      source="src.cftl")
+                out[f"{name} {target} {steps}"] = {
+                    k: hashlib.sha256(v).hexdigest()
+                    for k, v in c.files().items()}
+            except lang.Refusal as e:
+                out[f"{name} {target} {steps}"] = [e.name, e.line,
+                                                   e.sentence]
+print(json.dumps(out, sort_keys=True))
+"""
+
+
+def test_routine_unavailable_without_mpmath(tmp_path):
+    """With mpmath taken away in a child process (sys.modules: simulated,
+    not a host without it): a source with a run-time call of the six is
+    refused `routine-unavailable` on every target - on a revision-7 target
+    too, where with mpmath it is `target-feature`, which reads the built
+    image - with no line, its sentence naming the functions, mathlib.py and
+    mpmath; at 0 steps `segment-steps` first, the arguments' refusal. A
+    source of folds alone, and one that divides, compile there to the very
+    bytes they compile to here - a step whose divisions and roots run in a
+    call loop among them. The command line: exit 3, the name, nothing
+    written, never 70."""
+    cases = {k: MATHLIB[k] for k in ("exp at run time", "a fold alone",
+                                     "a fold in h")}
+    cases["a quotient"] = (ROUTINE["a quotient"][0], [])
+    cases["kepler, looped"] = (KEPLER_RK4, [])
+    script = tmp_path / "nompmath.py"
+    script.write_text(_NO_MPMATH_CFTC, encoding="utf-8")
+    r = subprocess.run([sys.executable, str(script), str(ROOT / "python"),
+                        json.dumps(cases)], capture_output=True, text=True,
+                       cwd=str(tmp_path))
+    assert r.returncode == 0, r.stderr
+    got = json.loads(r.stdout)
+    for name, (text, ops) in cases.items():
+        for target in ("sw", "u50-rev8", "u50-rev7"):
+            zero = got[f"{name} {target} 0"]
+            assert zero[0] == "segment-steps", (name, target, zero)
+            res = got[f"{name} {target} 3"]
+            if ops:
+                assert res[:2] == ["routine-unavailable", None], res
+                assert res[2].startswith("this system computes exp at run "
+                                         "time"), res
+                assert "mathlib.py" in res[2] and "mpmath" in res[2]
+                assert "target-feature" in res[2]
+                continue
+            if name in ("a quotient", "kepler, looped") and \
+                    target == "u50-rev7":
+                assert res[0] == "target-feature", res
+                continue
+            from cftc import callloop
+            with pytest.MonkeyPatch.context() as m:
+                if name.endswith("looped"):
+                    m.setattr(callloop, "CALL_LOOP_ABOVE", 0)
+                here = cftc.compile_text(text, 3, target=target,
+                                         source="src.cftl")
+                if name.endswith("looped"):
+                    assert here.looped
+            assert res == {k: hashlib.sha256(v).hexdigest()
+                           for k, v in here.files().items()}, (name, target)
+    # the command line, mpmath taken away the same way
+    src = tmp_path / "e.cftl"
+    src.write_bytes(MATHLIB["exp at run time"][0].encode("ascii"))
+    run = ("import runpy, sys; sys.modules['mpmath'] = None; "
+           "sys.argv = ['cftc'] + sys.argv[1:]; "
+           f"runpy.run_path({str(ROOT / 'python' / 'cftc')!r}, "
+           f"run_name='__main__')")
+    r = subprocess.run([sys.executable, "-c", run, str(src), "--steps", "2",
+                        "--target", "u50-rev7", "--out", str(tmp_path / "o")],
+                       capture_output=True, text=True)
+    assert r.returncode == 3, (r.returncode, r.stderr)
+    assert r.stderr.startswith("cftc: refused routine-unavailable: "), \
+        r.stderr
+    assert f"{src.as_posix()}: this system computes exp" in \
+        r.stderr.replace("\\", "/") and "internal error" not in r.stderr
+    assert not (tmp_path / "o").exists()
+
+
+@needs_mpmath
+def test_a_marked_lane_through_a_compiled_image():
+    """exp at fp64 under rne, on lanes holding a structured centre whose
+    last bit the routine cannot decide (mathlib_family.FAMILY's first,
+    2^-53) and an ordinary argument: through the image's RAISE the centre's
+    lane is MARKED - R23's byte [7] - and STATUS[6] set; its guess is
+    compared only as a guess; the ordinary lane is unmarked and the
+    interpreter's, bit for bit with its flags."""
+    import mathlib_family as fam
+    fmt = FORMATS["fp64"]
+    c = cftc.compile_text(MATHLIB["exp at run time"][0], 1, source="e.cftl")
+    centre = fam.FAMILY["exp"]["fp64"]["rne"][0]
+    assert centre == (1, 53)
+    x = fam.argument(fmt, centre)
+    plain = K.round_once(fmt, sf.RND_RNE, Fraction(1, 3))[0]
+    r, marked = _held_lanes(c, [[plain], [x]], None, 1)
+    assert marked == [1]
+    assert r.lane_flags[1] & seq.LANE_MARKED and r.status & seq.STATUS_MARKED
+    assert not r.lane_flags[0] & seq.LANE_MARKED
+    # the guess, compared as a guess: the definition's value or a neighbour
+    ref = lang.run(c.graph, [[x]], 1).states[0][0]
+    assert abs(r.scratch_out[c.ir.m] - ref) <= 1
+
+
+def _rule_nodes(c, op, args):
+    """The step's language nodes computing `op` of `args` - each wanted
+    operand ("c", a const's exact value) or ("n", the op of the node it
+    is: a routine's for a routine's result) - in the lowered step, and the
+    image's ALU instructions computing them (the expanded step's nodes,
+    where a routine's result is the value of one of its instructions)."""
+    low, x = c.lowered, c.program.x
+
+    def low_op(j):
+        return low.nodes[j].op
+
+    def x_op(j):
+        nd = x.nodes[j]
+        if getattr(nd, "kind", "lang") == "quiet":
+            return low.nodes[nd.routine].op
+        return nd.op
+
+    def matches(ref, want, op_of):
+        if want[0] == "c":
+            return ref[0] == "c" and low.graph.const[ref[1]][0] == want[1]
+        return ref[0] == "n" and op_of(ref[1]) == want[1]
+    nodes = [j for j, nd in enumerate(low.nodes) if nd.op == op and
+             len(nd.args) == len(args) and all(
+                 matches(a, w, low_op) for a, w in zip(nd.args, args))]
+    alu = []
+    for ins in c.program.body:
+        nd = x.nodes[ins.node] if ins.node is not None else None
+        if ins.kind != "alu" or getattr(nd, "kind", "lang") != "lang" or \
+                nd.op != op or len(nd.args) != len(args):
+            continue
+        if all(matches(a, w, x_op) for a, w in zip(nd.args, args)):
+            alu.append(ins)
+    return nodes, alu
+
+
+@needs_mpmath
+def test_the_primal_only_values_are_computed_once_a_call():
+    """The six's tangent rules read values of the primal alone - 1 + r for
+    expm1, L r for exp2, r == r for the three logarithms, L a for log2 and
+    1 + a for log1p - which no tangent reads (ML's report: the compiler's
+    job). With two tangent vectors each is one node of the lowered step and
+    one instruction of the image a call, not one a vector; and the routine
+    itself runs once a call, its result shared by the primal and both
+    vectors."""
+    one = Fraction(1)
+    for fn in cftc.MATH:
+        text = (f"system p\nformat fp64\nstate x, y\ntangent v, w\n"
+                f"next x = {fn}(x * y)\nnext y = y\nstep map\n")
+        c = cftc.compile_text(text, 2, source="p.cftl")
+        assert c.manifest["routines"]["calls"][fn] == 1, fn
+        L = c.graph.const
+        lv = [v for v, _f, _b, _fl in L if v != one and v not in (0, -1, 2)]
+        want = []
+        if fn == "expm1":
+            want.append(("add", (("c", one), ("n", fn))))
+        if fn == "exp2":
+            want.append(("mul", (("c", lv[0]), ("n", fn))))
+        if fn.startswith("log"):
+            want.append(("cmpeq", (("n", fn), ("n", fn))))
+        if fn == "log1p":
+            want.append(("add", (("c", one), ("n", "mul"))))
+        if fn == "log2":
+            want.append(("mul", (("c", lv[0]), ("n", "mul"))))
+        for op, args in want:
+            nodes, alu = _rule_nodes(c, op, args)
+            if not nodes:
+                # an operand in the other order
+                nodes, alu = _rule_nodes(c, op, args[::-1])
+            assert len(nodes) == 1 and len(alu) == 1, (fn, op, nodes)
+        states, tans = _math_lanes(c.ir, f"once {fn}")
+        _held_lanes(c, states, tans, 2)
+
+
+@needs_mpmath
+def test_a_call_loop_of_the_six(monkeypatch):
+    """With the constant lowered, a step holding expm1 and log1p three times
+    each loops both batches - an exp-family and a log-family routine, one
+    copy each in a REPEAT over records of one slot - held by the internal
+    check, and runs on seq.py as lang.run runs it; the batches go in the
+    stated order, largest first, ties by depth and then by the eight's
+    order (callloop.ORDER)."""
+    from cftc import callloop
+    text = ("system loop\nformat fp64\nstate x[3], y[3]\n"
+            "next x[i] = expm1(x[i]) * 0.5\n"
+            "next y[i] = log1p(abs(y[i])) + y[i]\nstep map\n")
+    inl = cftc.compile_text(text, 2)
+    assert inl.looped == []
+    c = _looped(monkeypatch, text, 0)
+    assert sorted(_batches(c)) == [("expm1", 1, 3), ("log1p", 1, 3)]
+    sizes = {op: len(R.fragment(op, FORMATS["fp64"], sf.RND_RNE))
+             for op in ("expm1", "log1p")}
+    big = max(sizes, key=sizes.get)
+    assert _batches(c)[0][0] == big
+    loops = c.manifest["routines"]["call_loops"]["loops"]
+    assert {e["op"] for e in loops} == {"expm1", "log1p"}
+    assert all(e["records"][1] - e["records"][0] == 2 for e in loops)
+    assert callloop.ORDER == {op: k for k, op in enumerate(R.ROUTINES)}
+    states, _t = _math_lanes(c.ir, "loop six")
+    _held_lanes(c, states, None, 2)
+
+
+@needs_mpmath
+def test_the_internal_check_holds_a_routine_of_the_six():
+    """Controls for check.py on an image holding exp: an instruction of its
+    routine made to round under another attribute (its rdn made rne); the
+    raise dropped; the raise moved inside its region; a word's bits changed
+    in the bank. Each an InternalError; the image as written passes."""
+    c = cftc.compile_text("system p\nformat fp64\nstate x, y\n"
+                          "next x = exp(x) * y\nnext y = y + 1\nstep map\n", 2)
+    insns = list(asm.Image.from_bytes(c.image).insns)
+    dec = [asm.decode(w) for w in insns]
+
+    def ctrl(k, name):
+        return dec[k]["ctrl"] and asm.CTRL_NAMES.get(dec[k]["op"]) == name
+    q = next(k for k in range(len(dec)) if ctrl(k, "quiet"))
+    e = next(k for k in range(len(dec)) if ctrl(k, "endquiet"))
+    r = next(k for k in range(len(dec)) if ctrl(k, "raise"))
+
+    def refused(words):
+        with pytest.raises(cftc.InternalError):
+            cftc_check.verify(c.lowered, c.program, _image_with(c, words),
+                              c.steps, c.lowered.half_bits)
+    k = next(k for k in range(q, e) if not dec[k]["ctrl"]
+             and dec[k]["rnd"] == sf.RND_RDN)
+    w = list(insns)
+    w[k] = (insns[k] & ~(0x7 << 24)) | (sf.RND_RNE << 24)
+    refused(w)
+    refused(insns[:r] + insns[r + 1:])
+    w = list(insns)
+    w[e], w[r] = w[r], w[e]
+    refused(w)
+    k = next(k for k, s in enumerate(c.lowered.slots) if s.kind == "word")
+    c.lowered.slots[k].bits ^= 1
+    with pytest.raises(cftc.InternalError):
+        cftc_check.verify(c.lowered, c.program, c.image, c.steps,
+                          c.lowered.half_bits)
+    c.lowered.slots[k].bits ^= 1
+    cftc_check.verify(c.lowered, c.program, c.image, c.steps,
+                      c.lowered.half_bits)
+
+
+@needs_mpmath
+def test_the_internal_check_holds_each_fragment_to_its_routines_statement(
+        monkeypatch):
+    """check.held_fragment, the one door to every fragment the compiler
+    reads, refuses a fragment made for another attribute than the one
+    asked for; one breaking its routine's statement (exp's flag word made
+    to carry the mark without inexact); and the golden model's own
+    assertion at a fragment's making - each an InternalError naming the
+    routine, never a bare AssertionError."""
+    from cft_golden import routines as RR
+    fmt = FORMATS["fp64"]
+    good = RR.fragment
+    cftc_check._HELD.clear()
+    monkeypatch.setattr(RR, "fragment", lambda op, f, r: good(op, f, sf.RND_RTZ
+                                                              if r == sf.RND_RNE
+                                                              else r))
+    with pytest.raises(cftc.InternalError) as e:
+        cftc_check.held_fragment("exp", fmt, sf.RND_RNE)
+    assert "is exp's at fp64 under 1" in str(e.value)
+    monkeypatch.setattr(RR, "fragment", good)
+    f = good("exp", fmt, sf.RND_RNE)
+    bad = R.Fragment(f.op, f.fmt, f.rnd, f.inputs, list(f.body) + [
+        (sf.OP_IOR, None, (f.flags, ("w", "MARKED")))], f.result,
+        ("v", len(f.body)), dict(f.words, MARKED=0x80), f.stage)
+    cftc_check._HELD.clear()
+    monkeypatch.setattr(RR, "fragment", lambda op, f2, r: bad)
+    with pytest.raises(cftc.InternalError) as e:
+        cftc_check.held_fragment("exp", fmt, sf.RND_RNE)
+    assert "breaks its routine's invariants" in str(e.value) and \
+        "flag word's values" in str(e.value)
+
+    def asserting(op, f2, r):
+        raise AssertionError(f"{op} at {f2.name}, rnd {r}: planted")
+    cftc_check._HELD.clear()
+    monkeypatch.setattr(RR, "fragment", asserting)
+    with pytest.raises(cftc.InternalError) as e:
+        cftc_check.held_fragment("log", fmt, sf.RND_RNE)
+    assert "planted" in str(e.value)
+    monkeypatch.setattr(RR, "fragment", good)
+    cftc_check._HELD.clear()
+
+
+def test_the_bank_capacity_counts_the_sixs_words():
+    """The six's words are bank slots of the routine kind, after
+    division's in the eight's order: past 512 with the params, `bank-
+    capacity`, its sentence naming the routines in that order; one param
+    fewer compiles at exactly 512."""
+    if not have_mpmath():
+        pytest.skip(f"the six's fragments are built through mpmath: "
+                    f"{NO_MPMATH}")
+
+    def source(k):
+        ps = ", ".join(f"p{i} = {i + 1}" for i in range(k))
+        total = " + ".join(f"p{i}" for i in range(k))
+        return (f"system wide\nformat fp64\nstate x, y\nparam {ps}\n"
+                f"next x = log(x) / y + exp(y) + ({total})\nnext y = y\n"
+                f"step map\n")
+    fmt = FORMATS["fp64"]
+    words = len({b for op in ("div", "exp", "log") for b in
+                 R.fragment(op, fmt, sf.RND_RNE).words.values()})
+    over = 512 - words + 1
+    with pytest.raises(lang.Refusal) as e:
+        cftc.compile_text(source(over), 2)
+    assert e.value.name == "bank-capacity"
+    assert (f"{over} params, 0 constants and {words} words of the routines "
+            f"the compiler inlines for div, exp and log come to 513") in \
+        e.value.sentence
+    c = cftc.compile_text(source(over - 1), 2)
+    assert len(c.lowered.slots) == 512
+    kinds = [s.kind for s in c.lowered.slots]
+    assert kinds.index("word") == over - 1      # after the params
+    first = c.lowered.slots[kinds.index("word")]
+    assert first.names[0][0] == "div"           # division's words first
+
+
+def test_a_run_value_or_a_source_of_folds_compiles_as_its_constants():
+    """Two of the interim refusal's known limits, closed (ML's): `--param
+    p=exp(0)` compiled while a fold in the source was refused - now both
+    compile, the run value byte for byte as `p = 1`; and a fold-only
+    source was refused while its graph, read from its bytes, compiled -
+    now both compile, to the same image as the source that writes the
+    folded values."""
+    text = ("system r\nformat fp64\nstate x\nparam p = 2\n"
+            "next x = x * p\nstep map\n")
+    one = cftc.compile_text(text, 3, params={"p": "1"})
+    for v in ("exp(0)", "exp2(0)", "log2(2)", "expm1(0) + 1", "log1p(0) + 1"):
+        c = cftc.compile_text(text, 3, params={"p": v})
+        assert (c.image, c.bank) == (one.image, one.bank), v
+    with pytest.raises(lang.Refusal) as e:
+        cftc.compile_text(text, 3, params={"p": "exp(1)"})
+    assert e.value.name == "irrational-constant"
+    folds = cftc.compile_text(MATHLIB["a fold alone"][0], 3, stem="f")
+    written = cftc.compile_text("system f\nformat fp32\nstate x\n"
+                                "next x = x * 1 + -3\nstep map\n", 3,
+                                stem="f")
+    assert folds.graph_bytes == written.graph_bytes
+    assert (folds.image, folds.bank) == (written.image, written.bank)
+    back = lang.StepGraph.from_bytes(folds.graph_bytes)
+    assert cftc.compile_graph(back, 3).image == folds.image

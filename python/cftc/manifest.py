@@ -234,27 +234,45 @@ def build(c):
     if blocks or loops:
         # the routines' own entries (C4), only where the step has them, so
         # a manifest without them is what it was
-        from cft_golden import routines as R
+        from .check import held_fragment
         calls = {}
         for _j, op, _f, _r in blocks:
             calls[op] = calls.get(op, 0) + 1
         for li in loops or ():
             nd = x.nodes[li]
             calls[nd.op] = calls.get(nd.op, 0) + len(nd.calls)
+        # where the fragments come from, and what their raises do: C4's two
+        # sentences exactly where the step holds only division and root, so
+        # that such a manifest is what it was; the math library's six
+        # (M1's build, item 4) add theirs
+        six = [op for op in calls if op not in ("div", "sqrt")]
+        source, flags = [], ("each runs in a quiet region and raises exactly "
+                             "its operation's flags: revision 8's flag "
+                             "control, QUIET, ENDQUIET and RAISE "
+                             "(docs/SEQUENCER.md R24)")
+        if len(six) < len(calls):
+            source.append("divfull's and sqrtfull's instructions, relocated "
+                          "and specialised at the program's attribute")
+        if six:
+            source.append("the math library's fragments, cft_golden/"
+                          "mathlib.py's, built at the program's format and "
+                          "attribute")
+            flags += ("; the math library's six also set the raised word's "
+                      "bit 7 where their in-lane test cannot decide the last "
+                      "bit, which marks the lane (R23's byte [7], "
+                      "STATUS[6]): its value is then the routine's best "
+                      "guess, which the definition replays "
+                      "(docs/LANGUAGE.md, \"A marked lane\")")
         m["routines"] = {
             "calls": calls,
-            "per_call": {op: len(R.fragment(op, fmt, g.rnd))
+            "per_call": {op: len(held_fragment(op, fmt, g.rnd))
                          for op in calls},
             "words": sum(1 for s in low.slots if s.kind == "word"),
             "instructions_quiet": prog.routine_alu(),
             "raises": counts["raises"],
             "brackets": counts["brackets"],
-            "source": "cft_golden/routines.py: divfull's and sqrtfull's "
-                      "instructions, relocated and specialised at the "
-                      "program's attribute",
-            "flags": "each runs in a quiet region and raises exactly its "
-                     "operation's flags: revision 8's flag control, "
-                     "QUIET, ENDQUIET and RAISE (docs/SEQUENCER.md R24)",
+            "source": "cft_golden/routines.py: " + "; ".join(source),
+            "flags": flags,
         }
         if loops:
             # only where the step, its routines inlined, would pass the

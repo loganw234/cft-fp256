@@ -1,0 +1,21 @@
+; Two diodes and a source, with the circuit's variational equations: a
+; source s drives an inductor and a diode in series into a node held by a
+; capacitor, a second diode and a conductance g to ground. In the diodes'
+; own units - currents in units of the first diode's saturation current,
+; voltages in units of the thermal voltage, time in units that make the
+; inductance and the capacitance one - Shockley's law gives the series
+; diode's voltage at its current j as log1p(j), and the shunt diode's
+; current at its voltage v as k expm1(v), k its saturation current in the
+; first's units: the math library's log1p and expm1, each a routine inlined
+; (M1's build, item 4), with its rule in the tangent, select(r == r,
+; da / (1 + a), r) and (1 + r) * da. log1p's domain is the diode's: no
+; current below -1, the saturation current, flows backward through it.
+system diode
+format fp256
+round  rne
+state  j, v
+tangent w
+param  s = 6, k = 1/8, g = 1/4
+d/dt j = s - log1p(j) - v
+d/dt v = j - k * expm1(v) - g * v
+step   rk4, h = 1/64

@@ -19,8 +19,11 @@ expression, as the step graph has them.
 
 Only revision-7 instructions are written - the ALU opcodes the
 language's built-ins name, `ior` for a copy, and STL, LDL, REPEAT,
-ENDREP and HALT - so a tile can run every image, unless the step divides
-or takes a root (C4). Then each routine inlined is written
+ENDREP and HALT - so a tile can run every image, unless the step holds a
+routine: it divides or takes a root (C4), or computes one of the math
+library's six (M1's build, item 4; `exp(x): mathlib's exp routine, run
+quiet`, its instructions under up to five attributes, `add.rdn` and
+`add.rup` among them). Then each routine inlined is written
 
     quiet                     ; div(x, r3): divfull's routine, run quiet
       iand     r12, r3, b17   ; div(x, r3) [1/186]
@@ -47,6 +50,7 @@ from cft_golden import asm
 from cft_golden.lang import constants as K
 
 from . import callloop
+from .lower import names_and
 
 COMMENT_COL = 36
 COMMENT_MAX = 200
@@ -76,7 +80,7 @@ def bank_role(low, k):
             if name not in ops:
                 ops.append(name)
         also = sorted({n for _o, n in s.names} - {s.names[0][1]})
-        return f"a word of {' and '.join(ops)}" + \
+        return f"a word of {names_and(ops)}" + \
             (f", also {', '.join(also)}" if also else "")
     if s.factor is not None and s.factor != 0:
         return f"h-scaled x {K.literal(s.factor)}"
@@ -150,12 +154,16 @@ def _src(s):
     return f"r{s[1]}" if s[0] == "r" else f"b{s[1]}"
 
 
-ROUTINE_SOURCE = {"div": "divfull's", "sqrt": "sqrtfull's"}
+# whose instructions a routine is: divfull's and sqrtfull's (C4), and the
+# math library's generator's (mathlib.py; M1's build, item 4)
+ROUTINE_SOURCE = {"div": "divfull's", "sqrt": "sqrtfull's",
+                  **{op: f"mathlib's {op}" for op in
+                     ("exp", "expm1", "exp2", "log", "log1p", "log2")}}
 
 
 def routine_fragment(low, op):
-    from cft_golden import routines as R
-    return R.fragment(op, low.graph.fmt, low.graph.rnd)
+    from .check import held_fragment
+    return held_fragment(op, low.graph.fmt, low.graph.rnd)
 
 
 def _loop_text(low, namer, ins, pad):

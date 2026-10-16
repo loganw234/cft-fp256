@@ -1307,8 +1307,9 @@ class Definition:
 
 # The language's node operations whose golden function is decided through
 # mpmath (transcend.py): the math library's six since M1's build, item 3
-# (2026-10-15). No certificate can name a source holding one until the
-# compiler carries them (item 4), so no committed case reaches them yet.
+# (2026-10-15). The compiler carries them since item 4, so a certificate can
+# name a compiled source holding one (python/tests/test_cert2.py makes some);
+# no committed corpus case holds one.
 TRANSCEND_OPS = frozenset({"exp", "expm1", "exp2", "log", "log1p", "log2"})
 
 
@@ -2184,11 +2185,15 @@ def _check_source_params(r, graph, params):
 
 
 def _recompile(r, run, source_bytes, s, prog):
-    """Check 6 of step 4a: the auditor's cftc compiles the source with the
+    """Check 7 of step 4a: the auditor's cftc compiles the source with the
     run's steps, source params, format and target, and the image and bank
     must be the run's - for a half-step run the image, its bank being step
     8's. A difference is `source-image` where the auditor's compiler is the
-    named name and output version, else `compiler-differs`."""
+    named name and output version, else `compiler-differs`. One refusal of
+    the auditor's compile is neither: `routine-unavailable`, its compiler
+    unable to build the math library's routines on a host without mpmath
+    (M1's build, item 4), is the auditor's own limit and the same cause
+    a replay meets there - `definition-unavailable`, at the recompile."""
     import cftc
     from .lang.refusals import Refusal as LangRefusal
     name, ver, target = s.compiler
@@ -2209,6 +2214,17 @@ def _recompile(r, run, source_bytes, s, prog):
         c = compile_source(source_bytes, run.fmt, run.steps, target,
                            s.params)
     except LangRefusal as e:        # a ValueError too: caught first
+        if e.name == "routine-unavailable":
+            ops = cftc.math_nodes(source_graph(source_bytes, run.fmt))
+            raise Refusal(
+                "definition-unavailable",
+                f"run {r}: the auditor cannot evaluate the definition: the "
+                f"source computes {', '.join(ops)} at run time, whose "
+                f"routines the auditor's compiler builds through mpmath, "
+                f"and mpmath is not installed here - met first at the "
+                f"recompile, which its compiler refuses routine-unavailable "
+                f"(the auditor's own limit, not the certificate's)",
+                run=r) from None
         raise differs(f"the source does not compile for {target}: {e.name}: "
                       f"{e.sentence}") from None
     except cftc.InternalError as e:

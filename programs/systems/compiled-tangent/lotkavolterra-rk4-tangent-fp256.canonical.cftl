@@ -1,0 +1,82 @@
+; lotkavolterra - the canonical form, regenerated from the step graph
+; sha256 69bcacdfc2ef824464abf8830ecd2f4561f688ddec7344af041f24f471e01045
+;
+; Read back, this text gives the same step graph, byte for byte. Every
+; operation is written once, in the order it is performed; each one
+; that rounds rounds once, under rne (roundTiesToEven), in binary256.
+;
+; operations: the equations 6 (2 sub, 2 mul, 2 exp);
+;             a step 38 (12 fma, 2 add, 8 sub, 8 mul, 8 exp);
+;             each tangent vector's equations 7 (4 mul, 2 exp, 1 neg)
+;             and its step 42 (12 fma, 2 add, 16 mul, 8 exp, 4 neg)
+;
+; constants, exact value -> binary256 under rne:
+;   h    0.015625   0x3fff900000000000000000000000000000000000000000000000000000000000  0x1p-6                                                              exact
+;   h/2  0.0078125  0x3fff800000000000000000000000000000000000000000000000000000000000  0x1p-7                                                              exact
+;   h/6  1/384      0x3fff655555555555555555555555555555555555555555555555555555555555  0x1.55555555555555555555555555555555555555555555555555555555555p-9  inexact, relative error -2.2639e-72
+;   2    2          0x4000000000000000000000000000000000000000000000000000000000000000  0x1p+1                                                              exact
+; h-scaled, halved by a step-halving bank: h, h/2, h/6
+
+system lotkavolterra
+format fp256
+round  rne
+state  u, v
+tangent w
+param  alpha = 2/3   ; 0x3fffe55555555555555555555555555555555555555555555555555555555555  0x1.55555555555555555555555555555555555555555555555555555555555p-1  inexact, relative error -2.2639e-72
+param  beta = 4/3    ; 0x3ffff55555555555555555555555555555555555555555555555555555555555  0x1.55555555555555555555555555555555555555555555555555555555555p+0  inexact, relative error -2.2639e-72
+param  delta = 1     ; 0x3ffff00000000000000000000000000000000000000000000000000000000000  0x1p+0  exact
+param  gamma = 1     ; 0x3ffff00000000000000000000000000000000000000000000000000000000000  0x1p+0  exact
+
+d/dt u = alpha - (beta * exp(v))
+d/dt v = (delta * exp(u)) - gamma
+
+d/dt w.u = -(beta * (exp(v) * w.v))
+d/dt w.v = delta * (exp(u) * w.u)
+
+step rk4, h = 0.015625
+expansion
+  let k1.u = alpha - (beta * exp(v))
+  let k1.v = (delta * exp(u)) - gamma
+  let Y2.u = fma(h/2, k1.u, u)
+  let Y2.v = fma(h/2, k1.v, v)
+  let k2.u = alpha - (beta * exp(Y2.v))
+  let k2.v = (delta * exp(Y2.u)) - gamma
+  let Y3.u = fma(h/2, k2.u, u)
+  let Y3.v = fma(h/2, k2.v, v)
+  let k3.u = alpha - (beta * exp(Y3.v))
+  let k3.v = (delta * exp(Y3.u)) - gamma
+  let Y4.u = fma(h, k3.u, u)
+  let Y4.v = fma(h, k3.v, v)
+  let k4.u = alpha - (beta * exp(Y4.v))
+  let k4.v = (delta * exp(Y4.u)) - gamma
+  let S2.u = fma(2, k2.u, k1.u)
+  let S2.v = fma(2, k2.v, k1.v)
+  let S3.u = fma(2, k3.u, S2.u)
+  let S3.v = fma(2, k3.v, S2.v)
+  let S4.u = S3.u + k4.u
+  let S4.v = S3.v + k4.v
+  next u = fma(h/6, S4.u, u)
+  next v = fma(h/6, S4.v, v)
+  let w.k1.u = -(beta * (exp(v) * w.v))
+  let w.k1.v = delta * (exp(u) * w.u)
+  let w.Y2.u = fma(h/2, w.k1.u, w.u)
+  let w.Y2.v = fma(h/2, w.k1.v, w.v)
+  let w.k2.u = -(beta * (exp(Y2.v) * w.Y2.v))
+  let w.k2.v = delta * (exp(Y2.u) * w.Y2.u)
+  let w.Y3.u = fma(h/2, w.k2.u, w.u)
+  let w.Y3.v = fma(h/2, w.k2.v, w.v)
+  let w.k3.u = -(beta * (exp(Y3.v) * w.Y3.v))
+  let w.k3.v = delta * (exp(Y3.u) * w.Y3.u)
+  let w.Y4.u = fma(h, w.k3.u, w.u)
+  let w.Y4.v = fma(h, w.k3.v, w.v)
+  let w.k4.u = -(beta * (exp(Y4.v) * w.Y4.v))
+  let w.k4.v = delta * (exp(Y4.u) * w.Y4.u)
+  let w.S2.u = fma(2, w.k2.u, w.k1.u)
+  let w.S2.v = fma(2, w.k2.v, w.k1.v)
+  let w.S3.u = fma(2, w.k3.u, w.S2.u)
+  let w.S3.v = fma(2, w.k3.v, w.S2.v)
+  let w.S4.u = w.S3.u + w.k4.u
+  let w.S4.v = w.S3.v + w.k4.v
+  next w.u = fma(h/6, w.S4.u, w.u)
+  next w.v = fma(h/6, w.S4.v, w.v)
+end
