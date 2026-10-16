@@ -153,7 +153,8 @@ TREFS = {"lorenz63-rk4-tangent": 100, "lorenz96-rk4-tangent": 20,
 # The references holding the six: compiled only where mpmath imports, since
 # the routines' generator derives their constants through it (a leg that
 # compiles them skips them by name elsewhere), and run on lanes whose boxes
-# keep the logarithms in their domains, away from their structured windows
+# keep the logarithms in their domains; leg G's lanes mark none, and the leg
+# fails by name a segment that marks one
 MATH_TREFS = ("lotkavolterra-rk4-tangent", "diode-rk4-tangent",
               "culture-rk4-tangent")
 MATH_BOX = {"lotkavolterra-rk4": [(-1, 1), (-2, Fraction(1, 2))],

@@ -485,7 +485,8 @@ six, named as `python/cft_golden/transcend.py` names the functions.
   and root alone loops as it did before the six (M1's build, item 4). A
   batch of the six loops as a root's does, one slot a record (with the
   constant at 32,768, 72 components each calling expm1, exp, exp2 and
-  log1p loop the log1p and the exp batches; measured, M1's build, item
+  log1p loop the log1p and the exp batches, the records taking 398
+  scratch slots, past sw's 256; measured for sw:1024, M1's build, item
   4). A batch of one call is never looped - its loop would only add the
   loop's instructions to its one copy - so a step whose routines sit one
   to a batch, a chain of divisions each reading the last, is compiled

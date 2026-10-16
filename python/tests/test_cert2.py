@@ -1735,10 +1735,12 @@ def test_an_auditor_that_cannot_evaluate_the_definition(mk, lz,
                                                         monkeypatch):
     """A replay reaches transcend.py exactly where a node's golden function
     is one of its - the math library's six since M1's build, item 3, which
-    no committed case can hold until the compiler carries them: these
-    plants stand for them. Without mpmath, or where an enclosure reaches
-    its cap, the audit refuses `definition-unavailable` and the writer
-    `replay-undecided` - each the producer's or the auditor's own limit."""
+    no committed case holds (the compiler carries them since item 4, and
+    the next test makes a real certificate of one): these plants stand for
+    them on the committed cases. Without mpmath, or where an enclosure
+    reaches its cap, the audit refuses `definition-unavailable` and the
+    writer `replay-undecided` - each the producer's or the auditor's own
+    limit."""
     with monkeypatch.context() as m:
         m.setattr(cert2, "TRANSCEND_OPS", frozenset({"add"}))
         m.setattr(cert2, "_mpmath_version", lambda: None)
