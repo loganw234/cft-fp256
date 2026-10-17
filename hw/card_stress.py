@@ -312,8 +312,10 @@ DEVICE_FLAG_TOOLS = ("cft-segrun", "acceptance.py", "seq_check.py", "cft-audit")
 # Programs that open an xclbin they are handed: an argument ending .xclbin makes the process
 # a card user only when one of these is on its command line (a `cp`, `sha256sum` or editor
 # naming an image does not hold the card).
+# (hw/verify-image.sh is NOT here: it reads an xclbin with xclbinutil and never opens the card, and the
+# gate's `images` stage runs it.)
 XCLBIN_TOOLS = ("device-test", "run-device-test.sh", "card-segrun.sh", "card-identity.sh",
-                "verify-image.sh", "seq_check.py", "acceptance.py", "run-soak.sh",
+                "seq_check.py", "acceptance.py", "run-soak.sh",
                 "run-c5-soak.sh") + SOAK_TOOLS
 # The vendor tools' subcommands that touch the card (examine, which this driver itself
 # uses for telemetry, does not).

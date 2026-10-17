@@ -402,6 +402,30 @@ def group_commands(src: str = HERE) -> list:
         names = [it.name for it in d.items]
         c("the campaign has run-soak.sh's 5 exhaustive sqrt32 and 12 random divsqrt items first",
           names[:5] == [f"sqrt32-{m}" for m in L.MODES5] and names[5] == "div32-rne" and names[16] == "sqrt64-rup")
+        # the guard's matching rules, on synthetic command lines (what is a card user and what is not)
+        def user(*args):
+            return mod.card_user({"pid": 0, "ppid": 0, "args": list(args)})
+
+        c("guard rules: device-test, run-device-test.sh, card-segrun.sh, card-identity.sh with an xclbin ARE card users",
+          all(user(*a) for a in (("/x/device-test", "/i/q.xclbin", "-q"), ("bash", "hw/run-device-test.sh", "/i/q.xclbin", "-i"),
+                                 ("bash", "hw/card-segrun.sh", "/i/q.xclbin"), ("bash", "hw/card-identity.sh", "/i/q.xclbin"))))
+        c("guard rules: acceptance.py, seq_check.py and cft-segrun with --device <xclbin> ARE; with sw, sw:N or cft:// they are NOT",
+          all(user(*a) for a in (("python3", "programs/acceptance.py", "--device", "/i/q.xclbin"),
+                                 ("python3", "host/tests/seq_check.py", "--device", "/i/q.xclbin"),
+                                 ("host/cft-segrun", "--device=/i/q.xclbin")))
+          and not any(user(*a) for a in (("python3", "programs/acceptance.py", "--device", "sw"),
+                                         ("python3", "host/tests/seq_check.py", "--device", "sw:2048"),
+                                         ("host/cft-segrun", "--device", "cft://h:1"))))
+        c("guard rules: hw/verify-image.sh (xclbinutil, no card; the gate's images stage runs it), cp, sha256sum, an editor and "
+          "xclbinutil are NOT card users even with an xclbin argument",
+          not any(user(*a) for a in (("bash", "hw/verify-image.sh", "/i/q.xclbin"), ("cp", "/i/q.xclbin", "/j/"),
+                                     ("sha256sum", "/i/q.xclbin"), ("vim", "/i/q.xclbin"), ("xclbinutil", "-i", "/i/q.xclbin", "--info"))))
+        c("guard rules: xbutil/xrt-smi examine (what the driver's telemetry runs) is NOT a card user; program, reset and validate ARE",
+          not user("xbutil", "examine", "-d", "0000:02:00.1", "-r", "thermal") and not user("xrt-smi", "examine", "-d", "x")
+          and all(user("xbutil", sub, "-d", "0000:02:00.1") for sub in ("program", "reset", "validate")))
+        c("guard rules: a verify/run.sh run is recognised as one to allow beside it",
+          mod.is_verify_run({"pid": 0, "ppid": 0, "args": ["bash", "verify/run.sh", "--only", "seq"]})
+          and not mod.is_verify_run({"pid": 0, "ppid": 0, "args": ["bash", "hw/card-segrun.sh", "x.xclbin"]}))
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
         sys.path.remove(src)
@@ -1342,13 +1366,16 @@ def plants(env: Env) -> None:
     CONTROL run comes first: an unmodified copy, run through the heaviest scenarios, must pass every check."""
     streak_old = ('        elif st in ("timeout", "no_device"):\n            self.streak += 1\n'
                   '            if self.streak >= self.a.max_card_failures:')
-    ctl = make_plant_copy(env, "control", [])
-    for nm, fn in (("normal", scn_normal), ("fail", scn_fail_and_parse), ("nodevice", scn_nodevice),
-                   ("parsers", plant_parsers)):
-        res = fn(env, ctl)
-        bad = [n for n, ok, _ in res if not ok]
-        check(f"plants: the CONTROL (an unmodified copy of the code) passes the {nm} checks", not bad, "; ".join(bad)[:300])
-    print("plants: control done")
+    # CARD_STRESS_PLANT=<text>: a development aid - run only the plants whose name contains it, and no control
+    pick = os.environ.get("CARD_STRESS_PLANT")
+    if not pick:
+        ctl = make_plant_copy(env, "control", [])
+        for nm, fn in (("normal", scn_normal), ("fail", scn_fail_and_parse), ("nodevice", scn_nodevice),
+                       ("parsers", plant_parsers)):
+            res = fn(env, ctl)
+            bad = [n for n, ok, _ in res if not ok]
+            check(f"plants: the CONTROL (an unmodified copy of the code) passes the {nm} checks", not bad, "; ".join(bad)[:300])
+        print("plants: control done")
     P = [
         ("a timed-out leg is not classified as a timeout",
          [("card_stress.py", '        if res.timed_out:\n            return ("timeout"', '        if False:\n            return ("timeout"')],
@@ -1417,12 +1444,18 @@ def plants(env: Env) -> None:
         ("the exit status is not compared with the verdict",
          [("card_stress_lib.py", "    if ok and rc != 0:", "    if False:")],
          plant_parsers, ["a pass line with a nonzero exit status is refused", "pass with exit status 1 is refused"]),
+        ("verify-image.sh is counted as a card user",
+         [("card_stress.py", '"card-identity.sh",\n                "seq_check.py"',
+           '"card-identity.sh",\n                "verify-image.sh", "seq_check.py"')],
+         lambda env, src: group_commands(src), ["guard rules: hw/verify-image.sh"]),
         ("a verdict line's count is read as 0 when its pattern misses",
          [("card_stress_lib.py", '    m = _one(DT_TOTAL, text, "device-test totals")\n    checks, failed = int(m.group(1)), int(m.group(2))',
            '    m = DT_TOTAL.search(text)\n    checks, failed = (int(m.group(1)), int(m.group(2))) if m else (0, 0)')],
          plant_parsers, ["no totals line is refused"]),
     ]
     for name, edits, fn, expects in P:
+        if pick and pick not in name:
+            continue
         try:
             d = make_plant_copy(env, re.sub(r"\W+", "-", name)[:28], edits)
         except SystemExit as e:

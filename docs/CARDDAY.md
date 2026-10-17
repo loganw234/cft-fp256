@@ -995,7 +995,7 @@ printf it matches.
   started, by PID, never by a pattern, and ends with none of its children alive.
 - **The guard** refuses to start, and waits between legs (up to `--guard-wait-max`), while another
   process uses the card: a tool that opens an xclbin (`device-test`, `hw/card-segrun.sh`, any
-  `cft-*`, ...) with an xclbin argument, `acceptance.py`, `seq_check.py` or `cft-segrun` with a
+  `cft-*`, ...; not `hw/verify-image.sh`, which only reads an image) with an xclbin argument, `acceptance.py`, `seq_check.py` or `cft-segrun` with a
   `--device` that is not `sw`, a soak with `CFT_SOAK_ARTIFACT` in its environment, or `xbutil`
   or `xrt-smi` running `program`, `reset` or `validate`. It detects, never kills. `verify/run.sh`
   runs use no card and are allowed; the run records `beside` when it sees one.
