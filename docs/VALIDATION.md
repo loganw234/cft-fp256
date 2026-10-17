@@ -20795,3 +20795,123 @@ After d738f48 only documents, a comment and two docstrings changed (test_cert2.p
 - The POSIX-only checks (`nice`, `timeout`, a process that ignores SIGTERM, the real build) are skipped by name on Windows and run in WSL or on the box.
 
 **Appended note, same day, after the runs above** (this entry's own correction, so it stays append-only): the guard's list of tools that open an xclbin had `hw/verify-image.sh` in it, which reads an image with `xclbinutil` and never opens the card, and which the gate's `images` stage runs; tonight's gate run could have made the driver refuse to start. It is out of the list (hw/card_stress.py `XCLBIN_TOOLS`), docs/CARDDAY.md's guard bullet says so, and the `commands` group gained five checks of the guard's matching rules on synthetic command lines (what is and is not a card user, `xbutil examine` among the latter), now 30 checks, with a plant that puts `verify-image.sh` back, caught at its check: 21 plants. The counts in this entry's results are the runs before that change; after it, WSL's `parsers,commands,normal,fail,guard,buildreal` gave 186 checks, 0 failed, 68 s, and Windows' `parsers,commands,normal,fail,guard,report` 184 checks, 0 failed, 72 s, and the new plant alone was caught. The full suite was not run again after it.
+
+## 2026-10-16 - the sixth wave, closed: the small tasks (cftc's routine order held by tests; every extended hard workload compiled in the full census), the WebAssembly page at profile 3.1 (parcel WA, Sonnet), and the card's stress driver (parcel ST, Sonnet), merged and gated; the long run on the card started
+
+**What Logan asked,** verbatim, on 2026-10-16:
+- after the fifth wave's report: "Go ahead and take the small tasks and the webassembly rebuild for 3.1 before wrapping up for a pause over the weekend. Monday can carry on where this is left off";
+- "*Also, before the final wrap up tonight, I'd like to start a long run stress test on the card, ideally cycling across all of its capabilities and keeping metrics on it, the plan being to allow it to run from now until Monday morning, providing more than 48 hours of continuous operation. If we dont have a viable script already to perform such a run, we can dispatch a sonnet parcel to create one now";
+- "*Ideally utilize the quad tile image as well, the more work on the card the better, we can also use the time for lengthy sweeps if it would prove useful as well";
+- "*If the smoke test passes go ahead and allow it to begin while the verifier runs".
+
+**The lead's readings and decisions,** reported to Logan with this wave.
+1. **"The small tasks"** are the fifth wave's report's two follow-ups. The lead took the study note's two nits with them (VMC-2's and VIW5's).
+   - **A test holding the eight routines' order:** VMC found it held by no test or committed byte.
+   - **The three extended hard workloads,** compiled by no stage (the fourth wave's finding), put in the full census.
+2. **The census's cost, measured:** `acceptance-far` went from about ten minutes to 130 and `acceptance-rev8` from about half an hour to 174, so the full census grows by about four hours. Both stages are in no budget.
+3. **The models:**
+   - **WA,** a simpler task, had a Sonnet author and a Sonnet verifier (Logan's rule of 2026-10-12).
+   - **ST** had a Sonnet author, as Logan said, and a Sonnet verifier.
+   - **The small tasks** were the lead's, with a verifier.
+4. **WA's two (b)s,** both in its entry's sentences, were fixed by the lead (1f78e31) in VWA's words, as very small fixes (Logan's rule of 2026-10-13), and re-checked.
+5. **The long run started beside the driver's verifier,** at Logan's word, after the smoke passed. Before the run's first `selftest` leg the lead made vectors/out in its clone, on VST's early note.
+
+**The chain** (MEASURED, each verifier's ledger):
+
+| work | author | verifiers: (a), (b) | sent back |
+|---|---|---|---|
+| the small tasks (96bbd52; 2fcb96b) | the lead | VSM 0, 0 | - |
+| WA (2c2a4ac, fab800e; 1f78e31) | Sonnet 5.5 | VWA 0, 2; VWA-2 0, 0 | no: the lead fixed the two |
+| ST (949b39b, 59d9822, f0693b2) | Sonnet 5.5 | VST 0, 0 | - |
+| the merges (0fff0c3, c98b9b9, 51e98e1) | the lead | VIW6 0, 0 | - |
+
+- **VWA's (b)s:**
+  - the entry said the three page stages start no python, where the node stage starts the reference assembler;
+  - the page's line totals were one too many, the empty piece after the last newline counted.
+- **What VSM measured:**
+  - both order tests passing under five PYTHONHASHSEEDs, their premises true;
+  - the lead's two plants re-run, and six plants of its own each turning the intended test red;
+  - the far leg reaching Lorenz-tangent extended's compile, by a recorder;
+  - REV8_CENSUS equal to the record's ten;
+  - the gate leg's 11 non-card programs passing at parent and commit;
+  - the study's two sentences true;
+  - test_cftc.py 110 passed.
+- **What VWA measured:**
+  - its own `make vectors` and count by family;
+  - three container builds of its own, its clean export of fab800e giving the committed products byte for byte;
+  - the page split by its tokens, every part but the template's text equal;
+  - the negative controls red by name;
+  - the pages in headless Chrome, the committed page passing with 4,015 cases and the control failing by name.
+- **What VWA-2 measured:** the three restated lines, each by its own source. program_test.mjs makes 4 brief python spawns; wc -l gives 1,571 and 1,572; PS's known limit came six minutes after the commit that made the page stale.
+- **What VST measured:**
+  - the driver's suites, WSL 293 checks with its plants and Windows 253;
+  - the parsers against the tools' printf, a reworded printf failing them;
+  - every count of the smoke's 37 leg records equal to its own re-read of the card's logs;
+  - all 68 sweep items through the real soak binaries, none refused;
+  - the report on finished, cut, resumed and planted runs;
+  - the driver's signalling, deletions and vendor commands read line by line.
+- **What VIW6 measured at the merges:** each merge's composition by blob and mode, 0fff0c3's and c98b9b9's diffs byte-identical to their branches', and 51e98e1's two conflicted files the branches' changes exactly (VALIDATION 582953c's, then WA's 76 lines, then ST's 50); the order tests' plants re-run in an export of the merge, and its own; its own `make vectors` (168 sets, 1,072,415 cases); a rebuild of its own in the pinned emsdk image from exports of the merge and of 582953c, the committed products byte for byte; the conformance and demos controls red by name; 5,222 tests collected, test_cftc.py 110 passed, sync.py --check 35 identical, the driver's no-plants suite 253 checks and 0 failed.
+
+**Time and tokens** (MEASURED, the agents' transcripts; usage summed from the last line of each response):
+- **WA's author,** claude-sonnet-5-5: 85 min, 244 tool uses, 252,650 output tokens.
+- **ST's author,** claude-sonnet-5-5: 100 min, 402 tool uses, 555,639 output tokens. Beside it, a sub-agent of its own wrote the report and its test (claude-sonnet-5-5; 48 min, 54 tool uses, 440,064 output tokens).
+- **The verifiers,** all claude-sonnet-5-5:
+  - VSM: 50 min, 159, 216,114;
+  - VWA: 45 min, 161, 242,485;
+  - VWA-2: 22 min, 95, 144,321;
+  - VST: 42 min, 177, 232,534;
+  - VIW6: 54 min, 199, 239,906.
+
+**The census at the small tasks' commit** (MEASURED, amd-arc-box at 96bbd52, the lead's; side by side, each in its own clone, niced; python3 3.12.3):
+- **`acceptance-far`:** "acceptance: 5 of 5 PASS on sw (far); 17 checks ok, 0 failed, 7803 s", 130 min. Lorenz-tangent extended compiled for sw:32768 in 7,006.0 s, its image on seq.py equal to the pack's one-step vector.
+- **`acceptance-rev8`:** "acceptance rev8: 20 of 20 PASS on sw (oracle, set); 158 checks ok, 0 failed, 10411 s", 173 min.
+  - Gray-Scott extended compiled for u50-rev8-deep in 1,757.1 s, and Riccati extended for u50-rev8-quad in 6,086.9 s.
+  - Each holds the record's digests, made by parcel W8 under cftc's output version 5, so version 6 compiles them to the same images.
+  - Each revision-8 image on seq.py equals the pack's vector.
+- **Both counts are the ones VSM computed from the code.**
+
+**The card** (MEASURED, amd-arc-box and the U50, the lead's; the driver at f0693b2 from a clean clone):
+- **The smoke** (`--quick`): 18:39:56 to 18:57:57, 1,081 s, exit 0, "quick_done", the card left idle.
+  - **The legs:** 38, pass 37, and 1 skipped by name, acceptance-rev8 on the single, which the set gives no entry.
+  - **The quad:** device-test's identity 25 checks, and its three matrices 2,734, 10,374 and 2,417, as on 2026-10-06. card-segrun gave 6 checks, seq_check 741 programs, the acceptance set 2 entries and 23 checks, and the revision-8 set 1 entry and 27 checks.
+  - **The single and the deep:** 23, and 2,733, 10,373 and 2,416.
+  - **The sweep:** slices of 262,144 cases at 302,358 to 392,431 a second, 0 mismatches.
+  - **Telemetry:** 68 values a sample; FPGA 37 to 40 °C, Int Vcc 45 to 46 °C; 16.24 W, 22.3 W under the quad's acceptance legs, all from the slot (the 12 V auxiliary reads 0 truly; VST).
+- **The long run:** started at 18:58:23 with `--until "2026-10-19 08:00"`, out /data/card-stress-1016, the revision-8 set's two long images seeded from W8's compiles. By 19:10 its first quad battery had passed the full acceptance set, 20 of 20 and 174 checks, as on 2026-10-06. Its results are the next records'.
+- **vectors/out:** absent from the clean clone. The `selftest` leg replays it, and the smoke had not run that leg. The lead made it there at 19:08 (`make vectors`, 135 s; 168 sets, `sha256sum -c` all OK; the tree still clean), before the leg came round.
+
+**The gate** (MEASURED, amd-arc-box at 51e98e1, run 20261016-192821-51e98e1, niced, the pinned MPFR 4.2.2 copied in; python3 3.12.3, mpmath 1.4.1, gmpy2 2.3.1; beside the card's long run, whose host-side work shares the CPU): "VERDICT: PASS with 8 skip(s) and 4 inner skip(s) in golden (3), remote (1)", in 198 min (19:28:21 to 22:46:34). 36 stages executed, 0 failed.
+- **The 8 skips are the box's usual:** buildargs (a real Vitis), lang-rust, lang-julia, lang-go, lang-csharp, lang-r and lang-fortran (no toolchain), and demos (no node).
+- **The inner skips:** golden's 3 known, and remote's WebSocket leg (no node).
+- **golden:** "5219 passed, 3 skipped in 2578.22s (0:42:58)": 5,222 collected, the two order tests among them. The fifth wave's gate took 2,338.41 s for 5,217 beside no card run, so most of the 240 s more is the box's shared CPU, BELIEVED.
+- **The language's stages:**
+  - lang: "223 ok, 0 FAIL, 0 SKIP";
+  - lang-routines: "37 ok";
+  - tangent: "198 ok, 0 FAIL, 0 SKIP".
+- **acceptance:** "41 of 41 PASS on sw (oracle, set); 249 checks ok, 0 failed". Its lines for the seven extended programs now say which census stage compiles each image.
+- **The other stages:**
+  - audit: "17888 checks, 0 failed, 0 skipped";
+  - the corpus check: "311 checks, 0 failed, 0 skipped"; segrun "1078 checks";
+  - seq: "libcft and the golden model agree on every program: deposits, counts, flags and status";
+  - libcft "168 sets, 1228415 cases, all matching";
+  - transcend 610,717 and 584,477 comparisons.
+
+**The merge messages, restated** (they stand as written):
+- **0fff0c3's "six of its own":** VSM's ledger shows seven plants of its own, each turning the intended test red (VIW6).
+- **51e98e1's battery "each cycle", cft-selftest among it:** the `selftest` leg runs on an image's first visit and every third after (visits 1, 4, 7 ...), and is skipped by name otherwise (VIW6).
+
+**Known limits carried** (a selection of the verifiers' "other" notes, merged under Logan's rule; the rest stand in their ledgers and the parcels' entries):
+- **The stress run's:**
+  - FPGA HBM's temperature reads 0.0 in 3 of the smoke's 10 samples, under the quad's acceptance legs. The report's telemetry range for it is that artifact; read HBM from metrics.jsonl without the zeros.
+  - status.txt's telemetry line prints None for the sample's time, and only six rail values.
+  - The driver neither checks for vectors/out nor disables the `selftest` leg without it. docs/CARDDAY.md now says to make it.
+  - **Two watch items, BELIEVED (VST):** a leg timing out under the box's load kills a card run and poisons its tile until the reload ladder; cft-resident cannot see a tile abandoned earlier in its cycle.
+  - The report's test has no resumed-run fixture: 3 of 13 of VST's mutants survive there.
+  - The default telemetry omits clocks; a killed leg's exit 137 reads as a timeout.
+- **WA's:** no page was opened in a browser by the parcel (VWA opened them headless). No gate holds the page's stated counts to the generator's, which is how it went stale.
+- **The small tasks':** the census is about four hours longer, measured above.
+
+**Records:**
+- docs/VERIFICATION.md: the `acceptance-far` and `acceptance-rev8` rows and the census paragraph, with the times above, and the golden row's count;
+- docs/CARDDAY.md: `make vectors` before a long run;
+- docs/README.md recounted, and the docs check rc 0.
