@@ -1359,6 +1359,104 @@ bytes longer:
     bindings/wasm/conformance.html 1,409,959 bytes  sha256 0b58aa6593c10f12...
     bindings/wasm/demos.html         596,007 bytes  sha256 0ddf39d93ff72a69...
 
+### Rebuilt at ABI 0.18, 2026-10-16 (profile 3.1) - the page's text of the published counts
+
+No ABI change, and the module did not move. Parcel PS (2026-10-13) added
+3,500 signed threshold cases to the twenty transcendental sets, 175 to each,
+so `make vectors` writes 1,072,415 cases where it wrote 1,068,915: 536,765
+transcendental where it wrote 533,265, and 836,415 over the 148 sets that are
+not opcode sets where it wrote 832,915. The page's section 3, its replay
+note, `build.sh`'s comment and the two statements of the counts above still
+gave profile 3's. Since the 2026-10-05 rebuild the module's sources moved in
+comments and in two macros of `cft.h`, `CFT_PROFILE_MINOR` (profile 3.1) and
+`CFT_LANGUAGE_MINOR` (the language at 1.1). No export reaches either: C names
+them in `host/tools/segrun.c` and `audit.c` only, and the 17 sources the
+module is built from, the 16 of `host/src` and `wasm_api.c`, preprocess to
+the same text at both trees (`gcc -E -P`, 17 of 17 identical). So the module
+was rebuilt, as every change to its sources requires, and it came out the
+same bytes: `build.sh` on the unedited tree gave the committed module, loader
+and page byte for byte.
+
+The order was the 0.18 rebuild's, less one step the unchanged module did not
+need:
+1. the five native tools `verify_demos.mjs` runs, built from the same tree
+   (20 s, 0 warnings);
+2. `build.sh` (46 s), first on the unedited tree, which reproduced the
+   committed `cft_node.wasm`, `cft_node.js` and `conformance.html`, then on
+   the tree with the page's text restated (46 s);
+3. `verify_demos.mjs` in check mode (79 s), not `--record`: 48 checks, no
+   FAIL. The recording is stamped with the module and the module is the same,
+   so there was nothing to re-record; re-recording would only have moved the
+   date, the rates and the seconds;
+4. `build_demos.sh` (11 s), which reproduced the committed `demos.html`
+   (stage 2 holds the build's module to the committed one);
+5. a second clean build of both (47 s and 10 s), with `bindings/wasm/build/`
+   removed between. All 16 outputs, both negative-control pages among them,
+   came out byte for byte.
+
+The container was the pinned emsdk 6.0.9 image that both scripts run,
+`--inside`, with `--cpus 4 --memory 12g`. All 15 chains of the 13
+configurations are as committed: `demos_chains.json` was not touched.
+
+What moved in `conformance.html` is its text, 4 lines removed and 5 added:
+section 3's 1,068,915 and 533,265 become 1,072,415 and 536,765, with "and 175
+more cases in each set since conformance profile 3.1", and the replay note's
+count. The embedded sample (4,015 cases over 20 sets), the provenance block
+(vectors digest `bf92bee9...`) and the module's string literal are equal.
+Every other count the page states was measured against `make vectors`'s sets
+(105 s: 168 sets, 1,072,415 cases, `sha256sum -c` all OK, equal to
+`vectors/SHA256SUMS` line for line) and holds: 236,000 over the twenty opcode
+sets, 11,800 a set, 89,616, 10,240, 13,816, 9,728 and 176,250.
+
+With that `vectors/out` and the tree at the clean commit 2c2a4ac,
+`bash verify/run.sh --fresh --only wasm,node,demos` (run id
+20261016-170122-2c2a4ac, niced) gave **VERDICT: PASS, nothing skipped**, 3
+stages, 0 failed, 0 skipped, 0 inner skips, in 47 min 37 s:
+- the node stage, 1530 s: `bindings/node/test.mjs` passed 137 and failed 0,
+  `program_test.mjs` passed 38, and `conformance.mjs` passed 1,072,415 cases
+  over 168 sets through `cft_conformance` (545.0 s) and 836,415 over 148
+  through the package's own methods (706.0 s), 1,908,830 over 316 set
+  replays in all;
+- the wasm stage, 1224 s: `verify.mjs` gave **VERIFY OK**: abi 18 on both
+  sides and 141 `cftw_*` entry points, 4,015 embedded cases over 20 sets,
+  1,072,415 cases over 168 sets through the page's bytes and 836,415 over 148
+  through the wrappers themselves;
+- the demos stage, 97 s: `verify_demos.mjs` passed its 48 checks.
+
+The desktop was shared: a verifier's pytest at `-n 4` and a dry run ran on it
+beside this one. A sampler (80 readings, 35 s apart, over the run) puts the
+machine's load at 0 to 24 per cent, mean 3.5, and the niced node process at 25
+per cent of one core, so these are not CPU-bound figures; they come out within
+7 per cent of the 2026-10-05 run's (584 s, 701 s and 1,188 s).
+
+The negative controls, watched failing at the checkers; the pages were not
+opened in a browser:
+- `node bindings/wasm/verify.mjs --page bindings/wasm/build/negative_control.html`,
+  over a thinned copy of the sets (all 168 names, every 40th line, 26,853
+  lines, because the failure is the embedded sample's and the replay need not
+  take twenty minutes), fails by name at step 3b: `fp64.jsonl:2: fp64 fma rne`,
+  `expected 0x7ff8000000000001 flags 0x00`, `got 0x7ff8000000000000 flags
+  0x00`, `the page's embedded sample fails its own replay at fp64.jsonl`,
+  `VERIFY FAILED`, exit 1. Every other step reads ok, and the clean page on
+  the same thin copy gives **VERIFY OK**, so the page is the whole difference
+  between the two runs;
+- the demos page's control: the one-line sabotage `make_demos.py --corrupt`
+  puts in the page (the Collatz panel's running peak with `CFT_MIN` in place of
+  `CFT_MAX`), made from bytes into `demos_core.js`, hashes to the core the
+  negative-control build prints (`4fb2caf6e40dd352...`, 2 bytes from the
+  committed core). With it in place `verify_demos.mjs --panel collatz` prints
+  six FAIL lines - the page's core is not `demos_core.js`, the recording's core
+  stamp, and the trajectory and sweep chains each against the tool and against
+  the recording - and `VERDICT: FAILED`, exit 1. Restored by `git checkout --
+  bindings/wasm/demos_core.js`, it passes (10 ok, 0 FAIL).
+
+Still **141 `cftw_*` exports**, the same names. Nothing but the page moved:
+
+    bindings/node/cft_node.wasm      276,303 bytes  sha256 8e4e8298923a484a...  (unchanged)
+    bindings/node/cft_node.js         74,146 bytes  sha256 dc845833acf075cb...  (unchanged)
+    bindings/wasm/conformance.html 1,410,023 bytes  sha256 d7038764f11403a0...
+    bindings/wasm/demos.html         596,007 bytes  sha256 0ddf39d93ff72a69...  (unchanged)
+
 ## A second page: the five workloads, measured (2026-09-04)
 
 `demos.html` is the other deliverable of this directory. Same
