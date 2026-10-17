@@ -116,10 +116,10 @@ study's text stays as of 2026-10-05). cftc carries the six now, at its
 output version 6, and the STATUS line's "nothing here is built" no longer
 holds of anything (docs/VALIDATION.md, the entry of that date). What the
 build changed in this text's statements:
-- Section 6's cftc part. `routines.ROUTINES` and `ir.ROUTINES` are the
-  eight, in the language's order (div, sqrt, then the six), which is the
-  one order of their words in the bank and of the call loop's ties; the
-  six's fragments are mathlib.py's own, handed out by
+- Section 6's cftc part. `routines.ROUTINES` and `ir.ROUTINES` hold the
+  eight, the first in the language's order (div, sqrt, then the six; the
+  second is a set), the one order of their words in the bank and of the
+  call loop's ties; the six's fragments are mathlib.py's own, handed out by
   `routines.fragment`. The internal check's four failures are answered
   by one statement of the invariants in routines.py, per routine: the
   six's flag words take the mark (seen by an IOR rule in the walk), their
@@ -149,7 +149,7 @@ build changed in this text's statements:
   spills are measured (none in Lotka-Volterra's and the diodes' steps; 38
   slots in the culture's, most stored inside the routines' quiet
   regions), and so is one exp a step with values live across it - at
-  fp32, whose exp keeps 19 to 21 live against r3 to r31, spills begin
+  fp32, whose exp keeps 19 live against r3 to r31, spills begin
   with 11 values live beside it, at the double word's formats with 19.
 - Section 6's "A marked lane in the language's own checks": a compiled
   image marks a structured centre's lane on seq.py and on libcft's

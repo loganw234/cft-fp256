@@ -84,8 +84,9 @@ golden audit must each refuse - each must be caught.
 THE WORKLOADS' OWN ORACLE. The pack's reference/*.json are one-step
 vectors from the other model's own evaluator - a parser of the subset it
 writes, rounding with integers and Fractions, importing nothing of this
-repository. The compiled images of the 14 hard and wide programs, on
-seq.py, and the language's interpreter, lang.run, must equal each: states,
+repository. The compiled images of the 14 hard and wide programs and of
+Lorenz-tangent extended, on seq.py, and the language's interpreter,
+lang.run, must equal each: states,
 FLAGS, and each lane's FLAGS alone, with the pack's own digests and format
 layout.
   - `--legs oracle` (the `acceptance` stage, in the gate budget): the
@@ -96,11 +97,15 @@ layout.
     the lead's choice): the images of the four past revision 7's quad,
     Gray-Scott and Lorenz-tangent hard and wide, compiled here for
     sw:32768 - about 12 minutes on the desktop, so the gate leaves them
-    out (revision 8's quad holds all four: the revision-8 set, below);
+    out (revision 8's quad holds all four: the revision-8 set, below) -
+    and, since 2026-10-16, Lorenz-tangent extended's, which no
+    revision-8 image holds: its compile alone takes about two hours on
+    amd-arc-box;
   - the extended ones' images take minutes to hours each to compile and
-    are left out here (the pack's own runner verified them on
-    amd-arc-box, 2026-10-01 and 02); the revision-8 set's oracle holds
-    those it runs (below).
+    are left out of the gate (the pack's own runner verified them on
+    amd-arc-box, 2026-10-01 and 02). The full census compiles all seven:
+    Lorenz-tangent extended in the far leg, the other six in the
+    revision-8 set (below).
 Each leg's controls: a state bit and a lane's FLAGS planted in a copy of
 its first program's vector, each caught.
 
@@ -112,8 +117,11 @@ rule picks and held byte for byte to the committed digests. Ten of the
 eleven: Gray-Scott and Lorenz-tangent hard and wide and five extended
 programs on the quad, and Gray-Scott extended, at 5,690 slots a lane, on
 the deep single. Lorenz-tangent extended runs on none: cftc's image of it
-needs 15,347 slots a lane. The `acceptance-rev8` stage runs the eight
-whose compile takes minutes (verify/run.sh's REV8_CENSUS).
+needs 15,347 slots a lane. The `acceptance-rev8` stage runs all ten
+(verify/run.sh's REV8_CENSUS) since 2026-10-16. Until then it ran the
+eight whose compiles take minutes, and left Gray-Scott extended and
+Riccati extended to a card day: their compiles took 40 minutes and 2.2
+hours on amd-arc-box (parcel W8, 2026-10-12).
   - The rule: the quad, u50-rev8-quad, where it holds the image - 4,096
     scratch slots a lane and no R21; the single, u50-rev8, only where R21
     alone keeps the image off the quad, which no workload needs (cftc
@@ -140,7 +148,7 @@ is, and the entries the rule put on it run; on the software backend every
 entry runs at its own target's depth, or only `--target`'s.
 `--legs oracle` is the set's own oracle: each entry's image, its REPEAT
 set to 1, on seq.py equal to the pack's one-step vector, as `far` holds
-the four hard and wide ones. The controls: the acceptance set's, on the
+the four hard and wide ones and Lorenz-tangent extended. The controls: the acceptance set's, on the
 set's first entry, and its own - a bank with one bit flipped read from a
 copy of --images, an image there without its bank, another target's depth,
 another tile count, the entry put on another target, and three planted
@@ -1188,8 +1196,10 @@ def card_programs():
 
 
 def far_programs():
-    """The four hard and wide programs past the card: the `far` leg's."""
-    return [f"{f}_{t}" for t in ("hard_fp64", "wide_fp256") for f in FAR]
+    """The four hard and wide programs past the card, and Lorenz-tangent
+    extended, which no revision-8 image holds: the `far` leg's."""
+    return ([f"{f}_{t}" for t in ("hard_fp64", "wide_fp256") for f in FAR]
+            + ["lorenz_tangent_extended_fp64"])
 
 
 def oracle_consistency(wid, case, v, g):
@@ -1255,9 +1265,10 @@ def oracle_image(wid, c, req, lp):
 def leg_oracle(selected, far):
     """far False (the gate's): every program's interpreter, the ten card
     programs' images. far True (the full census's): the four images past
-    the card, compiled here for sw:32768."""
+    the card and Lorenz-tangent extended's, compiled here for sw:32768."""
     print("\n== the workloads' own oracle: the pack's one-step vectors"
-          + (", the four images past the card" if far else ""), flush=True)
+          + (", the four images past the card and Lorenz-tangent "
+             "extended's" if far else ""), flush=True)
     verdicts = []
     card = card_programs()
     controlled = False
@@ -1289,8 +1300,9 @@ def leg_oracle(selected, far):
                 oracle_controls(wid, r.states, r.flags, each, v)
             if wid not in card:
                 where = ("the full census's (the acceptance-far stage, "
-                         "--legs far)" if case["tier"] != "extended" else
-                         "not compiled here (minutes to hours)")
+                         "--legs far)" if wid in far_programs() else
+                         "the full census's (the acceptance-rev8 stage); "
+                         "minutes to hours to compile")
                 verdicts.append(f"FAIL  {wid}: {', '.join(failed)}" if failed
                                 else f"PASS  {wid}: the interpreter equals "
                                      f"the vector; its image is {where}")
