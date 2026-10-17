@@ -202,8 +202,8 @@ make verify         # the full census, hours: adds the cocotb suites,
                     # node, wasm, the staged images, the whole
                     # of that study, the hard workloads' oracle
                     # on the four images past revision 7's card
-                    # and the revision-8 set's eight workloads
-                    # that compile in minutes
+                    # and Lorenz-tangent extended's, and all ten
+                    # of the revision-8 set's workloads
 ```
 
 Every stage names itself, logs itself and writes a `.ok` or `.fail`

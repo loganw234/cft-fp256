@@ -352,8 +352,8 @@ docstring says what each check holds. On the software
 backend it is the `acceptance` runner stage, in the gate budget, with the
 hard workloads' own one-step vectors held against the interpreter and the
 ten card images; `acceptance-far`, in the full census only, holds the
-four images past the card to theirs. `--write` remakes the record, on the
-software backend only.
+four images past the card and Lorenz-tangent extended's to theirs.
+`--write` remakes the record, on the software backend only.
 
 ### The revision-8 set, `--set rev8`
 
@@ -381,8 +381,9 @@ depth:
 writes there what it compiles here, each held to the record's digests:
 Gray-Scott extended's and Riccati extended's compiles took 40 minutes and
 2.2 hours on amd-arc-box. `--legs oracle` holds each image to the pack's
-one-step vector. On the software backend the other eight are the
-`acceptance-rev8` runner stage, in the full census only.
+one-step vector. On the software backend all ten are the
+`acceptance-rev8` runner stage, in the full census only (until 2026-10-16
+the eight whose compiles take minutes).
 
 ## What waited on another half of the round, and no longer does
 

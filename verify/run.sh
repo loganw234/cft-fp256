@@ -1195,7 +1195,8 @@ stage acceptance "the acceptance set, a device's admission test, on libcft's sof
 # 289 s together, niced (2026-10-02). Since 2026-10-16 (Logan's word, the
 # small tasks after M1's build, item 4) it compiles Lorenz-tangent
 # extended too, which no revision-8 image holds and no stage compiled:
-# its compile alone took 7,077 s on amd-arc-box (2026-10-15).
+# its compile alone took 7,077 s on amd-arc-box under cftc's output
+# version 5 and 7,275 s under 6 (2026-10-15).
 need python
 stage acceptance-far "the hard workloads' own oracle on the four images past the card, Gray-Scott and Lorenz-tangent hard and wide, and on Lorenz-tangent extended: compiled for sw:32768, each on seq.py equal to the pack's one-step vector, states, FLAGS and each lane's FLAGS" -- \
   PY "$ROOT/programs/acceptance.py" --legs far

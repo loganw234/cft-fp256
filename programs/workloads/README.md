@@ -90,7 +90,8 @@ of them filling one block a tile, each perturbed exactly: lane k from 3
 on is lane k mod 3 with (k // 3) x 2^-30 added to its first value, and
 every lane is distinct. That set's `acceptance` stage holds the
 interpreter to all 21 vectors and the ten card images to theirs, and
-`acceptance-far` the other four hard and wide images.
+`acceptance-far` the other four hard and wide images and Lorenz-tangent
+extended's.
 
 ### On revision 8's images
 

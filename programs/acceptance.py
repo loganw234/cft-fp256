@@ -84,8 +84,9 @@ golden audit must each refuse - each must be caught.
 THE WORKLOADS' OWN ORACLE. The pack's reference/*.json are one-step
 vectors from the other model's own evaluator - a parser of the subset it
 writes, rounding with integers and Fractions, importing nothing of this
-repository. The compiled images of the 14 hard and wide programs, on
-seq.py, and the language's interpreter, lang.run, must equal each: states,
+repository. The compiled images of the 14 hard and wide programs and of
+Lorenz-tangent extended, on seq.py, and the language's interpreter,
+lang.run, must equal each: states,
 FLAGS, and each lane's FLAGS alone, with the pack's own digests and format
 layout.
   - `--legs oracle` (the `acceptance` stage, in the gate budget): the
@@ -117,10 +118,10 @@ eleven: Gray-Scott and Lorenz-tangent hard and wide and five extended
 programs on the quad, and Gray-Scott extended, at 5,690 slots a lane, on
 the deep single. Lorenz-tangent extended runs on none: cftc's image of it
 needs 15,347 slots a lane. The `acceptance-rev8` stage runs all ten
-(verify/run.sh's REV8_CENSUS): until 2026-10-16 the eight whose compile
-takes minutes, Gray-Scott extended and Riccati extended, whose compiles
-take about half an hour and two hours on amd-arc-box, left to a card
-day.
+(verify/run.sh's REV8_CENSUS) since 2026-10-16. Until then it ran the
+eight whose compiles take minutes, and left Gray-Scott extended and
+Riccati extended to a card day: their compiles took 40 minutes and 2.2
+hours on amd-arc-box (parcel W8, 2026-10-12).
   - The rule: the quad, u50-rev8-quad, where it holds the image - 4,096
     scratch slots a lane and no R21; the single, u50-rev8, only where R21
     alone keeps the image off the quad, which no workload needs (cftc
@@ -147,7 +148,7 @@ is, and the entries the rule put on it run; on the software backend every
 entry runs at its own target's depth, or only `--target`'s.
 `--legs oracle` is the set's own oracle: each entry's image, its REPEAT
 set to 1, on seq.py equal to the pack's one-step vector, as `far` holds
-the four hard and wide ones. The controls: the acceptance set's, on the
+the four hard and wide ones and Lorenz-tangent extended. The controls: the acceptance set's, on the
 set's first entry, and its own - a bank with one bit flipped read from a
 copy of --images, an image there without its bank, another target's depth,
 another tile count, the entry put on another target, and three planted

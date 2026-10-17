@@ -2000,7 +2000,7 @@ def test_the_routines_words_go_in_the_eights_order():
     eight's order (lower.routine_words, through lower.routines_of), one
     slot a bit pattern, a word shared by two routines in the earlier one's
     place. So on a step holding all eight, each word slot's first owner
-    never comes before the last slot's in that order: div's words first,
+    never comes before the previous slot's in that order: div's words first,
     then sqrt's, then the six's - where an order by name would put sqrt's
     after the six's and exp2's before expm1's."""
     text = ("system all8\nformat fp64\nstate x\n"
