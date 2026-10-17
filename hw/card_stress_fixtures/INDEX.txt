@@ -1,0 +1,19 @@
+# The real logs hw/test_card_stress.py reads: name, exit status, command [seconds].
+# Made 2026-10-16 in WSL (Ubuntu 22.04, gcc 11.4, Python 3.10.12) from commit 582953c's sources plus the
+# uncommitted hw/ of parcel ST, make -C host (XRT=0): the software backend only. No card, no amd-arc-box.
+# Each log is verbatim. A *-sab log is the soak's own negative control (CFT_SOAK_SABOTAGE=1), a real failing run.
+api-test.txt	0	host/api-test [0 s]
+dt-q8-sw.txt	0	timeout 600 host/device-test sw -q -n 8 [1 s]
+dt-n256-sw.txt	0	timeout 900 host/device-test sw -n 256 [1 s]
+dt-r-sw.txt	0	timeout 600 host/device-test sw -r [0 s]
+dt-b-sw.txt	0	timeout 600 host/device-test sw -b -n 256 [2 s]
+soak-sqrt32.txt	0	host/divsqrt-soak sqrt32 0 1048576 rne [5 s]
+soak-sqrt32-sab.txt	1	env CFT_SOAK_SABOTAGE=1 host/divsqrt-soak sqrt32 0x3F800000 0x3F810000 rne [1 s]
+soak-div32.txt	0	host/divsqrt-soak div32 200000 1342242817 rne [1 s]
+c5-nextup32.txt	0	host/clause5-soak nextup32 0 1048576 [0 s]
+c5-rint32.txt	0	host/clause5-soak rint32 0 262144 rne [1 s]
+c5-conv32to64.txt	0	host/clause5-soak conv32to64 200000 3305111552 [0 s]
+c5-rint32-sab.txt	1	env CFT_SOAK_SABOTAGE=1 host/clause5-soak rint32 0x3F800000 0x3F810000 rne [0 s]
+seq-sw.txt	0	timeout 900 python3 host/tests/seq_check.py --device sw --trials 250 --formats fp32 fp64 fp128 fp256 [47 s]
+acc-sw.txt	0	timeout 900 python3 programs/acceptance.py --device sw --only lorenz63-rk4-fp64 [12 s]
+acc-rev8-sw.txt	0	timeout 1500 python3 programs/acceptance.py --set rev8 --device sw --target u50-rev8-quad --only phi4_extended_fp64 --images <DIR> [88 s]
