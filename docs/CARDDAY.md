@@ -852,6 +852,186 @@ nowhere else: the software backend and a software server have one tile,
 so a writer that wrote 1 without asking the library passes every
 desktop check (P3's plants, 2026-09-28).
 
+## The long run (added 2026-10-16): `hw/card-stress.sh`
+
+Logan's word, 2026-10-16: a long stress test of the card, cycling across all its capabilities
+and keeping metrics, from the evening of the 16th until Monday morning, weighted toward the
+four-tile quad and using the time for lengthy sweeps. Until then the card had short legs, one
+image at a time, and two soaks that each drive one artifact. `hw/card-stress.sh` is the driver.
+It is written and dry-run (docs/VALIDATION.md, the entry "the long-run stress driver, parcel
+ST"); **it had not touched the card when this was written, and the lead's smoke below is its
+first card run.** Agents never run it: it opens the card.
+
+**What it does.** Rotates through revision 8's three images (default weights quad 4, single 1,
+deep 1), and on each visit runs a battery of the card's own legs and then fills the rest of the
+cycle with slices of the native-oracle soaks. Opening an image is switching to it: `cft_open`
+loads the xclbin through XRT (`host/src/backend_xrt.cpp`, `cftx_open`), so there is no program
+step. XRT treats loading the xclbin already there as a no-op, which is why a tile left running
+by an abandoned run is cured by loading another image and then this one (docs/HOSTAPI.md, "A tile
+a run was abandoned on") and why the failure policy does exactly that.
+
+### Start, stop, read
+
+```
+# from a clean checkout at the commit under test, on amd-arc-box, in tmux (or: setsid nohup ... &)
+bash hw/card-stress.sh --quick                              # the smoke
+bash hw/card-stress.sh --until "2026-10-19 08:00" --out /data/card-stress-1016   # the long run
+touch /data/card-stress-1016/STOP                           # stop: ends after the leg running
+cat  /data/card-stress-1016/status.txt                      # now, any time
+python3 hw/card_stress_report.py /data/card-stress-1016     # the report, any time (also report.txt)
+```
+
+- **Pre-flight, optional**: `bash hw/test-card-stress.sh --no-plants` runs the driver's dry-run
+  tests (the verdict parsers on real logs, the scheduler, the failure policy, the guard, the
+  sweep's resume, the report, and under POSIX the real `make` in a scratch copy) on the box, with
+  no card and no XRT: a few minutes, and it must be run alone on the host (two drivers at once
+  see each other's stand-ins as card users). `--no-plants` leaves out the negative controls, which
+  take about as long again.
+- **The smoke (`--quick`)**: every leg once on each image (quad, single, deep), short slices;
+  exit 0 only if every leg passed (a leg skipped by name, with its reason, is not a failure).
+  **Estimated** at 24 to 28 minutes on the card, from the 2026-10-06 card times where there are
+  some (card-segrun 169-185 s an image, device-test's three matrices about 2, 11-14 and 2 s, the
+  acceptance set 371-384 s for 20 entries so about 40 s for the two the smoke runs) and guesses
+  where there are none (api-test, `dt-i`, `seq-check` at 60-120 s, the sweep's slices, an image
+  load): COMPUTED and BELIEVED, not measured. If it runs past 30 minutes, those are the suspects.
+  Outside the estimate: the host build (`make -C host XRT=1 ...`, once) and, if
+  `--rev8-images` holds no cache, the revision-8 entry's 51 s compile on the quad.
+- **The long run** needs `--until` (the box's local time). Use a **new `--out`** (default
+  `~/card-stress-out/<stamp>-<commit>`; put it on `/data`) **outside the checkout** - files in the
+  tree make it untracked, which changes the build id `hw/card-segrun.sh` asserts, so the driver
+  refuses an `--out` inside it that git does not ignore - and a checkout nobody else touches:
+  the driver builds the tools from it once and `hw/card-segrun.sh` asserts at every run that
+  the tools' build id names HEAD, and the driver stops (`tree_moved`) if HEAD moves.
+  `--resume --out DIR` continues a run (the sweep's state is read back from `metrics.jsonl`; a
+  last line torn by a killed run is kept beside it as `metrics.torn-<time>.txt` and cut off, and
+  the run records a `torn_tail` event).
+- **Stop**: `touch $OUT/STOP`, or SIGTERM or SIGINT once. It ends **after the leg running**,
+  never in the middle of one (an abandoned card run poisons its tile until an image reload);
+  a sweep wave in flight finishes. A second signal terminates the legs running. Closing the
+  terminal does not stop it (SIGHUP is ignored). A stale `STOP` at the start is refused.
+- **Read**: `status.txt` (rewritten after every leg: time, cycle, image, totals by image,
+  consecutive card failures, the last telemetry and the host's load, the sweep's coverage and
+  rates, the deadline), `driver.log` (what the driver said), `metrics.jsonl` (the record),
+  `logs/` (each leg's log: a passing leg's gzipped, a failing leg's whole), `STOPPED.txt` (why,
+  when the policy stopped it), and the report. **What the smoke should print**: for each image
+  `leg dt-i on <image>: pass`, and `build step image <name>: ok - ... equal to SHA256SUMS`; at the
+  end `card-stress ends: quick_done (exit 0)`. Read `status.txt`'s `telemetry` line (values, or
+  "no values parsed" with the error) and its `sweep` rates: those are the two things the
+  dry run could not test against the real tools.
+
+### The legs, the sweep, the records
+
+| leg | command (all under `nice -n 10` and `timeout`) | verdict read | timeout (s) |
+|---|---|---|---|
+| `api-test` | `api-test` (built with XRT=1) | `api-test: all contract checks passed` | 300 |
+| `dt-i` | `hw/run-device-test.sh IMAGE -i` | `N checks, F failed`, "identity holds", the image's SHA-256 and tiles held to the file's | 300 |
+| `dt-q8`, `dt-full`, `dt-r`, `dt-b` | `... -q -n 8`; `-n 4096`; `-r`; `-b -n 4096` | `N checks, F failed`, the NOT-lines, "agree on every case that RAN" | 600, 900, 600, 600 |
+| `card-segrun` | `hw/card-segrun.sh IMAGE` | `== card-segrun: N checks, F failed` | 1500 |
+| `seq-check` | `host/tests/seq_check.py --trials 250 --formats fp32 fp64 fp128 fp256 --device IMAGE` | the device's "agree on every program" line, the program counts | 2400 |
+| `acceptance` | `programs/acceptance.py --device IMAGE` | `acceptance: N of M PASS ...; K checks ok, F failed` | 2400 |
+| `acceptance-rev8` | `... --set rev8 --legs set --device IMAGE --target T --images DIR --only ENTRIES` | the same, as `acceptance rev8` | 2400 (+14400 until the images are cached) |
+| `resident`, `selftest` | `cft-resident IMAGE`; `cft-selftest vectors/out IMAGE` (every 3rd visit) | `every row: status clean ...`; `N cases checked` | 600; 3600 |
+
+The timeouts are several times the card times of 2026-10-06 (docs/VALIDATION.md), with a floor.
+**A count in a record is a captured group of a line a pattern matched, or it is absent**; a log
+no pattern reads is a `parse_error` leg, kept whole, and a log whose exit status contradicts its
+verdict is refused the same way. `hw/card_stress_lib.py` holds every pattern, each citing the
+printf it matches.
+
+- **The revision-8 leg** runs the entries the image is (`--target`): programs/acceptance.py's
+  rule puts nine on the quad, one on the deep and **none on the single** (where R21 alone keeps a
+  workload off the quad, which none does), so the single's leg is recorded as skipped, by name.
+  Two entries compile for 40 minutes and 2.2 hours (Gray-Scott extended, the deep's only entry,
+  and Riccati extended): **they are left out unless their image and bank are already in
+  `--rev8-images`** (default `$OUT/rev8-images`), so by default the quad runs eight and the deep's
+  leg is skipped, by name, with that reason. The driver does not compile them in the background;
+  seed that directory from the lead's W8 images and it runs nine on the quad and one on the
+  deep. The eight that compile in minutes compile once, on the first visit of the quad, and are
+  read back after.
+- **The sweep** is hw/run-soak.sh's and hw/run-c5-soak.sh's campaigns - fp32 `sqrt32` under five
+  attributes, fp32 `roundToIntegral` under five, `nextUp`, `nextDown`, `logB`, `class`, each over
+  all 2^32 encodings, and the random banded `div32`, `div64`, `sqrt64` and clause-5 jobs with
+  those scripts' seeds - run slice by slice with `CFT_SOAK_ARTIFACT` naming the image. The
+  scripts themselves cannot be sliced or resumed (each wipes its output directory and runs
+  everything), so the driver runs the same binaries on the same job lines. Slices are sized from
+  the rate it measures: the first slice of each op on an image is a probe of 2^20, later ones fill
+  `--sweep-slice-seconds` (600) at the measured rate, in whole 2^20 steps. **On the quad the
+  jobs are four processes at once, one a tile (`CFT_XRT_TILES=1..4`)**, the shape docs/HOSTAPI.md
+  gives for independent jobs (a single process over four tiles pays to cut every small call);
+  a single image gets one job. The sweep takes `--sweep-minutes` of each cycle (quad 45, single
+  20, deep 20); exhaustive items outweigh random ones 3 to 1 (`--sweep-weights`).
+  Coverage is **rebuilt from `metrics.jsonl` alone**: a slice is covered when its job finished
+  with a verdict (a pass, or a disagreement, which is kept with its operands); a slice that timed
+  out or lost the device is not covered and is run again, and one that fails to finish
+  `--quarantine-after` (2) times is moved past and recorded. `--sweep-items sqrt32-rne,...`
+  restricts the campaign. `nextup32` and `nextdown32` report 8 more cases than their range (the
+  tool runs eight edge cases in every slice, clause5_soak.c `next_edges32`); the driver expects
+  exactly that and refuses any other count.
+- **Records.** `metrics.jsonl` is append-only: a `leg` record each (the cycle, the image and its
+  SHA-256, the leg, its start and end, exit status and class - pass, fail, timeout, no_device,
+  parse_error, skipped, error -, the counts its verdict line gave, cases or checks a second,
+  the log), a `telemetry` record a sample, and `run_start`, `build`, `cycle_start`, `cycle_end`,
+  `event` and `run_end` between. The report (`hw/card_stress_report.py`) reads it at any time:
+  runs, passes, failures, cases and rates over time by image and leg, the telemetry's range and
+  trend, every failure with its log, the sweep's coverage and every disagreement, the run's
+  uptime and gaps.
+
+### Failure policy, processes, and what it guarantees
+
+- **A failing leg** keeps its whole log, says so in its record, and the run goes on. So does an
+  unexpected exception in the driver itself: it is recorded as a `driver_error` event with its
+  traceback, what the run started is terminated, and the next cycle begins; the fifth in a row
+  stops the run, by name. `cft-resident` and `cft-selftest` serve optional legs: if either is not
+  built or not XRT-linked, its leg is skipped by name with that reason, and the run goes on.
+- **The card not answering** - a no-device open, a tile left running ("already running when this
+  handle opens it"), or a hang past the leg's timeout - waits `--retry-pause` (120 s) and retries
+  the leg once; the second consecutive time it waits twice as long, opens **another image and
+  comes back** (two `dt-i` legs recorded as `recovery`) and goes on to the next leg; after
+  `--max-card-failures` (6) in a row the
+  driver stops, writes `STOPPED.txt` and leaves the card idle. A leg that reached a verdict on the
+  card ends the run of failures; `api-test`, which needs no card, neither ends nor extends it.
+- **Timeouts and processes.** Every leg runs under GNU `timeout --signal=TERM -k 60` and
+  `nice -n 10` (POSIX), with a Python-side backstop; it signals only the process groups it
+  started, by PID, never by a pattern, and ends with none of its children alive.
+- **The guard** refuses to start, and waits between legs (up to `--guard-wait-max`), while another
+  process uses the card: a tool that opens an xclbin (`device-test`, `hw/card-segrun.sh`, any
+  `cft-*`, ...; not `hw/verify-image.sh`, which only reads an image) with an xclbin argument, `acceptance.py`, `seq_check.py` or `cft-segrun` with a
+  `--device` that is not `sw`, a soak with `CFT_SOAK_ARTIFACT` in its environment, or `xbutil`
+  or `xrt-smi` running `program`, `reset` or `validate`. It detects, never kills. `verify/run.sh`
+  runs use no card and are allowed; the run records `beside` when it sees one.
+- **The CPU share** is small by design: one battery leg at a time (its own host work, mostly
+  single-process Python) and, in a sweep, at most one soak process a tile - four on the quad, one
+  on a single image, so 4 of the box's 36 threads at most, about 11 per cent (`--soak-jobs N`
+  lowers it) - all under `nice -n 10`; the one-time build uses `--build-jobs` (4). The box's
+  other runs (a gate, census stages) are CPU-only and share what is left.
+- **The disk**: passing legs' logs are gzipped; the driver checks the free space of its output
+  directory and of `/data` before every leg and stops cleanly below `--disk-floor-gb` (5).
+- **The deadline** is read between legs: nothing starts after it, and a leg whose estimate would
+  end more than `--deadline-grace` (900 s) past it is skipped by name; sweep slices are sized to
+  the time left. A leg already running ends on its own.
+- **Telemetry**: `xrt-smi` or `xbutil examine -d 0000:02:00.1 -r electrical|thermal|mechanical`
+  (each report tries one tool and then the other, and remembers which answered), as JSON where
+  it will, else as text, on a timer (300 s) and between legs, with the host's load, memory and
+  free disk. **The JSON's shape is BELIEVED, not read from a card**: numbers are kept
+  under whatever labels their neighbours give them, and a sample with no readable number is
+  recorded as such, with its raw text, never as a reading. Add `platform` to
+  `--telemetry-reports` for the clocks; it has failed in `xrt-smi` before (docs/VALIDATION.md,
+  2026-09-08).
+
+**It guarantees**: the build is asserted (the tree's commit and content, every tool linked to XRT,
+the build id, each image against its SHA256SUMS and the hash it was given) before the card is
+touched; a stop never comes mid-leg; a leg that fails, hangs or loses the card is recorded and the
+run goes on or stops by the policy above; and every count in a record is read from a line the
+tool printed. **It does not guarantee**: that the run lasts to Monday (a card that stops
+answering, a disk below the floor, a moved tree or a build failure end it, by design, with the
+reason written); that a card the tools refuse is distinguishable from one that has failed (both
+are `no_device`); that a leg killed at its timeout leaves its tile healthy (it may not; the
+recovery is a reload, and the run records what happened); that the guard sees a card user it has
+no name for; anything about the card's rate or temperature (neither had been measured when this
+was written); or that a sweep disagrees only when the tile is wrong (the oracle is the host CPU;
+a disagreement is kept with its operands, and re-running the slice on the software backend,
+which the driver does not do, is the next step).
+
 ## What to record
 
 The manifest format already exists; the run record should match it in

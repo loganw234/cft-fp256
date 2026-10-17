@@ -1,0 +1,43 @@
+device sw: backend software, 1 tile, contract 0x00000000, seq_features 0x7ff1f, max_scratch 256; the model runs at 256 scratch slots a lane
+  it publishes every bit cft.h defines
+fp32: 177 programs compared
+fp32: 70 scratch-corpus programs compared
+fp32: 92 indexed-corpus programs compared
+fp32: 125 masked-corpus programs compared
+fp32: 102 revision-8-corpus programs compared
+fp32: 60 routine-corpus programs compared, 3210 lanes
+fp64: 186 programs compared
+fp64: 85 scratch-corpus programs compared
+fp64: 108 indexed-corpus programs compared
+fp64: 125 masked-corpus programs compared
+fp64: 96 revision-8-corpus programs compared
+fp64: 60 routine-corpus programs compared, 3374 lanes
+fp128: 196 programs compared
+fp128: 66 scratch-corpus programs compared
+fp128: 101 indexed-corpus programs compared
+fp128: 125 masked-corpus programs compared
+fp128: 101 revision-8-corpus programs compared
+fp128: 60 routine-corpus programs compared, 3584 lanes
+fp256: 182 programs compared
+fp256: 79 scratch-corpus programs compared
+fp256: 106 indexed-corpus programs compared
+fp256: 125 masked-corpus programs compared
+fp256: 93 revision-8-corpus programs compared
+fp256: 60 routine-corpus programs compared, 3315 lanes
+revision-8 remote leg: 4 refused by name on a server without the bits, 6 loaded where published or not needed
+flag-control remote leg: 4 refused by name on a server without the bits, 3 loaded where published
+routine-corpus remote leg: 1031 refused by name on servers without a bit or a capacity the program needs (CAPS2[13] 1, CAPS2[14] 360, CAPS[4] 120, CAPS[5] 30, CAPS[6] 240, cft_caps.max_consts 220, cft_caps.max_insns 60), 650 loaded where published
+deposit-ceiling leg: max_deposits 2^20, 2^20 + 1 and 2^32 - 1 on a handle publishing no deposit cap, each after the remote backend's own sentence was planted, against the golden model: 0 disagreements
+
+741 programs run through both implementations, 259 refused by both
+309 of them crossed libcft's 64-lane block boundary
+500 programs drawn from the extended corpus: 260 IMUL instructions, 742 indexed-constant instructions, 497 constant indices above 15
+300 programs from the scratch corpus run through both, 200 refused by both, 126 across the block boundary: 661 STL, 676 LDL, 637 STX, 688 LDX, 173 with a scratch block declared, 72 constant indices at or past 256, 104 with SCRATCH_STRICT of which 17 reported an out-of-range index
+407 programs from the indexed corpus run through both, 201 across the block boundary: 1108 tables with 13264 CFT_IDX_NONE entries among them, 93 indices at the source's length refused by both, 65 identity-table controls and 55 permuted ones
+500 programs from the masked corpus run through both, 251 across the block boundary: 21358 lanes run and 17167 masked, 84 all-ones masks, 101 all-zero, 111 sparse and 204 dense, 109 all-ones controls and 62 holed ones
+392 programs from the revision-8 corpus run through both, 108 refused by both, 189 across the block boundary: 1227 augadd, 1011 augerr, 547 recommended pairs, 647 stepped LDX, 393 stepped STX, 186 directed walks, 150 strict of which 73 reported an out-of-range index; runs raising invalid 164, overflow 33, underflow 119; 420 directed refusals refused by both; 96 own-index loads (ldx rX, rX, step) equal in both and to their unstepped twins, 43 of them strict and reporting
+215 programs from the flag-control corpus run through both with the per-lane block asked for, 33 broken ones refused by both, 86 across the block boundary: 370 quiet regions (162 nested), 367 raises outside a region and 266 inside one, 89 runs with a lane marked, 54 masked runs, 10744 lane bytes compared, 81 strict runs of which 23 reported, 80 with a deposit overflow; 188 directed refusals refused by both
+240 programs from the routine corpus run through both, 120 stand-alone and 120 compiled (fp32 60 programs and 3210 lanes, fp64 60 programs and 3374 lanes, fp128 60 programs and 3584 lanes, fp256 60 programs and 3315 lanes), 123 across the block boundary: 13483 lanes compared, 68 runs under a mask of which 55 masked a lane (1294 lanes masked), 178 runs with the per-lane block asked for (9999 lane bytes compared), 286 marked lanes in 48 compiled runs with STATUS[6] set and 318 marked flag words in the stand-alone ones; lanes compared by class: 778 NaN, 155 infinite, 162 zero, 454 subnormal, 11934 normal; and by source: 2061 special, 3353 edge pool, 2007 transcend pools, 499 committed centres or fp32 marks, 1509 beside them, 4054 random; compiled runs raising invalid 94, divideByZero 29, overflow 48, underflow 59, inexact 114; 1416 lanes where seq.py's deposits are mathlib.evaluate's
+the routines' programs against the device (software)'s limits (cft_get_caps; 240 programs): 178 to 438 instructions against max_insns 4294967295 (the most: log1p fp32 rdn compiled), 62 to 123 bank words against max_consts 512 (the most: log1p fp256 rdn compiled), registers r10 to r20 of 32 (the most: expm1 fp32 rdn compiled), 1 to 2 deposits a lane against max_deposits 1048576, one quiet region of the 4 that nest
+the device refused no program for a bit it lacks: every program was compared
+the device (sw) and the golden model agree on every program it ran: deposits, counts, flags and status, and every lane byte where asked; it refused by name every program needing a bit it does not publish

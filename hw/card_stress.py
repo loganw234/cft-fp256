@@ -1,0 +1,2000 @@
+#!/usr/bin/env python3
+# Copyright 2026 Logan W.
+# SPDX-License-Identifier: Apache-2.0
+"""A long-run stress driver for the U50: cycles of the card's own checks on revision 8's
+three images, weighted toward the four-tile quad, with the native-oracle soaks worked
+through slice by slice in the time between, and metrics kept as it goes.
+
+    bash hw/card-stress.sh --until "2026-10-19 08:00" [--out DIR]     the long run
+    bash hw/card-stress.sh --quick                                    the smoke
+    bash hw/card-stress.sh --dry-run ...                              no XRT, no card
+    touch $OUT/STOP                                                   stop after the leg running
+    python3 hw/card_stress_report.py $OUT                             read a run, any time
+
+docs/CARDDAY.md, "The long run", is the operator's page: how to start, stop and read it,
+and what it guarantees and does not. This file's text is the design.
+
+WHAT A CYCLE IS. The driver picks an image by a smooth weighted rotation (default quad 4,
+single 1, deep 1), runs the battery of legs on it - each an existing tool, below - and then
+fills the rest of the cycle with sweep slices of the soaks. Opening an image IS switching to
+it: libcft's cft_open loads the xclbin bytes through XRT (host/src/backend_xrt.cpp, the
+`D->dev.load_xclbin(*xb)` of cftx_open), so there is no separate programming step to script.
+XRT treats loading the xclbin already on the card as a no-op, which is why a tile left
+running by an abandoned run is cured by loading ANOTHER image and then this one
+(docs/HOSTAPI.md, "A tile a run was abandoned on") and why the failure policy below does
+exactly that.
+
+THE LEGS (each a command the 2026-10-06 and 2026-10-12 card runs used; docs/VALIDATION.md):
+  api-test         host/api-test: "all contract checks passed"
+  dt-i             hw/run-device-test.sh IMAGE -i: the image's identity (SHA-256 and tiles
+                   held to the driver's own check of the file)
+  dt-q8, dt-full,  device-test against the software backend: -q -n 8, -n 4096, -r, -b -n 4096
+  dt-r, dt-b       ("the device and the software backend agree on every case that RAN")
+  card-segrun      hw/card-segrun.sh IMAGE: the segment runner's card leg, certificates audited
+  seq-check        host/tests/seq_check.py --device IMAGE: the eight corpora on the card
+  acceptance       programs/acceptance.py --device IMAGE: the card's admission test
+  acceptance-rev8  the revision-8 set, --target the image, only the entries that image is
+  resident, selftest  (beyond the brief) cft-resident IMAGE; cft-selftest vectors/out IMAGE,
+                   every third visit
+and the SWEEP: hw/run-soak.sh's and hw/run-c5-soak.sh's own campaigns (their job lines, their
+seeds, hw/card_stress_lib.py's sweep_items), run slice by slice against the card with
+CFT_SOAK_ARTIFACT, resumed across cycles from metrics.jsonl alone. The scripts themselves cannot
+be sliced or resumed (each wipes its own output directory and runs everything), so this driver
+runs the same binaries on the same job lines.
+
+RECORDS. $OUT/metrics.jsonl is append-only: one `leg` record a leg, one `telemetry` record a
+sample, with `run_start`, `build`, `cycle_start`, `cycle_end`, `event` and `run_end` between
+(fields: hw/card_stress_lib.py and docs/CARDDAY.md). $OUT/status.txt is rewritten after every
+leg. A count in a record is a captured group of a line a pattern matched, or it is absent; a log
+a pattern cannot read is a `parse_error` leg, kept whole. Nothing is defaulted to 0.
+
+FAILURE POLICY. A failing leg keeps its whole log and the run goes on. The card not answering
+(a no-device open, a tile left poisoned, or a hang past the leg's timeout) is retried after a
+pause; the second consecutive time the driver opens another image and comes back; after
+--max-card-failures in a row it stops, writes $OUT/STOPPED.txt and leaves the card idle. A stop
+(the stop file, SIGINT or SIGTERM, the deadline) comes after the leg running, never in the
+middle of one: an abandoned card run poisons its tile until an image reload. An unexpected
+exception in the driver itself is recorded (event driver_error, with its traceback) and the next
+cycle begins - the fifth in a row stops the run; a sweep item whose slices keep giving logs no
+parser can read is disabled for the rest of the run, recorded, rather than starving the others;
+a metrics file torn by a killed run is repaired on --resume.
+
+PROCESSES. Every leg runs under `nice -n 10` and GNU `timeout --kill-after`; the driver
+signals only the process groups it started, by PID, and never by a pattern. A guard refuses to
+start, and waits between legs, while another process uses the card (it detects, never kills);
+verify/run.sh runs, which use none, are allowed and recorded.
+
+THE DRY RUN. --dry-run replaces every command by hw/card_stress_standin.py (which prints
+the tools' real verdict lines, and fails, hangs or loses the device on a scripted schedule);
+everything else - the scheduler, rotation, deadline, stop file, failure policy, disk floor,
+guard, metrics and the parsers - is this code. hw/test_card_stress.py drives it.
+
+Python 3.10 or later; standard library only.
+"""
+from __future__ import annotations
+
+import argparse
+import datetime
+import glob
+import gzip
+import hashlib
+import json
+import os
+import re
+import shlex
+import shutil
+import signal
+import subprocess
+import sys
+import threading
+import time
+import traceback
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import card_stress_lib as L  # noqa: E402
+
+ROOT = os.path.dirname(HERE)
+POSIX = os.name == "posix"
+
+# ---------------------------------------------------------------------------
+# the images, and what each is (docs/VALIDATION.md, step 6's closing records, 2026-10-06)
+# ---------------------------------------------------------------------------
+IMAGES = {
+    # name: (default path, tiles, programs/acceptance.py's --target, SHA-256 read from
+    #        docs/VALIDATION.md at 582953c; also checked against the SHA256SUMS beside it)
+    "quad": ("$HOME/cardday-rev8q/cft_hw_quad.xclbin", 4, "u50-rev8-quad",
+             "4f9921a25af65444abc5c267fff1117a8e14abbc16a75de643e43c9dbf6ef53b"),
+    "single": ("$HOME/cardday-rev8a/cft_hw_single.xclbin", 1, "u50-rev8",
+               "0639248e9c66f779e7c126f4449062af646d3d7e8abd0173926812790bc80450"),
+    "deep": ("$HOME/cardday-rev8d/cft_hw_deep.xclbin", 1, "u50-rev8-deep",
+             "bbf08fb3feb60940bcbdfcf0eebef12de8fd55c7d302b2f896534c49447316fa"),
+}
+
+# programs/acceptance.py:246-255 (REV8): the revision-8 set's entries and the image the rule
+# picks for each. hw/test_card_stress.py reads that source and fails if this table differs.
+REV8_ENTRIES = {
+    "u50-rev8-quad": ["gray_scott_hard_fp64", "gray_scott_wide_fp256",
+                      "lorenz_tangent_hard_fp64", "lorenz_tangent_wide_fp256",
+                      "fput_extended_fp64", "phi4_extended_fp64",
+                      "kuramoto_sivashinsky_extended_fp64", "reservoir_extended_fp64",
+                      "riccati_extended_fp64"],
+    "u50-rev8": [],
+    "u50-rev8-deep": ["gray_scott_extended_fp64"],
+}
+# Compiles of 40 minutes (Gray-Scott extended) and 2.2 hours (Riccati extended) on the box
+# (programs/acceptance.py:236-244): left out unless their image and bank are already cached.
+REV8_LONG_COMPILES = ("gray_scott_extended_fp64", "riccati_extended_fp64")
+# Short entries for --quick: a revision-7 set entry or two, and the revision-8 entry that
+# compiles in 51 s (phi4_extended_fp64, programs/acceptance.py:241-243).
+QUICK_ACCEPT_ONLY = "lorenz63-rk4-fp64,lorenz96-rk4-fp64"
+QUICK_REV8_ONLY = {"u50-rev8-quad": "phi4_extended_fp64",
+                   "u50-rev8-deep": "gray_scott_extended_fp64"}
+
+BATTERY = ["api-test", "dt-i", "dt-q8", "dt-full", "dt-r", "dt-b", "card-segrun",
+           "seq-check", "acceptance", "acceptance-rev8", "resident", "selftest"]
+QUICK_BATTERY = ["api-test", "dt-i", "dt-q8", "dt-full", "dt-r", "dt-b", "card-segrun",
+                 "seq-check", "acceptance", "acceptance-rev8"]
+# Seconds. Sized from the card runs of 2026-10-06 (docs/VALIDATION.md): device-test's three
+# matrices took about 2, 11-14 and 2 s; card-segrun 169-185 s; the acceptance set 371-384 s;
+# the revision-8 set 353 s on the quad (images cached) and 77 s on the deep. A timeout is a
+# several-times margin on those, with a floor, because a hang costs only its timeout and a
+# false timeout costs a run (an abandoned run poisons the tile). api-test, dt-i, dt-b,
+# seq-check, resident and selftest have no card figure in the records: BELIEVED, from their
+# software times (seq-check 50-79 s) and VERIFICATION.md's card rows (selftest about 10 min
+# an image, resident 20-40 s).
+DEFAULT_TIMEOUTS = {"api-test": 300, "dt-i": 300, "dt-q8": 600, "dt-full": 900, "dt-r": 600,
+                    "dt-b": 600, "card-segrun": 1500, "seq-check": 2400,
+                    "acceptance": 2400, "acceptance-rev8": 2400, "resident": 600,
+                    "selftest": 3600}
+REV8_FIRST_COMPILE_ALLOWANCE = 4 * 3600   # added when an entry's cached image is missing
+DEFAULT_EVERY = {"selftest": 3}
+# api-test opens no image (it may open device 0 for an instant and passes without a card), so
+# its result neither ends nor extends the run of consecutive card failures.
+NO_CARD_LEGS = ("api-test",)
+
+
+class Skip:
+    def __init__(self, reason: str):
+        self.reason = reason
+
+
+class Cmd:
+    def __init__(self, argv: List[str], timeout: float, parser: Callable[[str, Optional[int]], L.Verdict],
+                 env: Optional[Dict[str, str]] = None, tmpdir: bool = False,
+                 post: Optional[Callable[[L.Verdict], None]] = None):
+        self.argv = argv
+        self.timeout = timeout
+        self.parser = parser
+        self.env = env or {}
+        self.tmpdir = tmpdir
+        self.post = post
+
+
+class WrongAnswer(Exception):
+    """A leg that ran and parsed, whose content is wrong (a different image, tile count...)."""
+
+
+class Stop(Exception):
+    def __init__(self, reason: str, exit_code: int = 0, detail: str = ""):
+        super().__init__(reason)
+        self.reason = reason
+        self.exit_code = exit_code
+        self.detail = detail
+
+
+class Image:
+    def __init__(self, name: str, path: str, tiles: int, target: str, want_sha: Optional[str]):
+        self.name = name
+        self.path = path
+        self.tiles = tiles
+        self.target = target
+        self.want_sha = want_sha
+        self.sha = ""
+        self.bytes = 0
+
+
+class ProcResult:
+    def __init__(self):
+        self.rc: Optional[int] = None
+        self.start = 0.0
+        self.end = 0.0
+        self.timed_out = False
+        self.killed: Optional[str] = None
+        self.error: Optional[str] = None
+
+
+def sha256_file(path: str) -> Tuple[str, int]:
+    h = hashlib.sha256()
+    n = 0
+    with open(path, "rb") as fh:
+        while True:
+            b = fh.read(1 << 20)
+            if not b:
+                break
+            h.update(b)
+            n += len(b)
+    return h.hexdigest(), n
+
+
+def kv_ints(text: str, what: str, names: Optional[List[str]] = None) -> Dict[str, int]:
+    """'quad=4,single=1' -> {'quad': 4, ...}; refuses anything else by name."""
+    out: Dict[str, int] = {}
+    for part in text.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        m = re.fullmatch(r"([A-Za-z0-9_.-]+)=(\d+(?:\.\d+)?)", part)
+        if not m:
+            raise SystemExit(f"{what}: {part!r} is not NAME=NUMBER")
+        if names is not None and m.group(1) not in names:
+            raise SystemExit(f"{what}: {m.group(1)!r} is not one of {', '.join(names)}")
+        v = float(m.group(2))
+        out[m.group(1)] = int(v) if v == int(v) else v  # type: ignore[assignment]
+    return out
+
+
+def expand(path: str) -> str:
+    return os.path.expandvars(os.path.expanduser(path))
+
+
+# ---------------------------------------------------------------------------
+# processes on this host, for the guard (never to signal: the guard only reads)
+# ---------------------------------------------------------------------------
+
+def list_processes() -> List[Dict[str, Any]]:
+    """[{pid, ppid, args(list)}] from /proc, or ps, or (Windows) CIM. Best effort: a process
+    that vanishes while it is read is skipped."""
+    procs: List[Dict[str, Any]] = []
+    if os.path.isdir("/proc/self"):
+        for d in os.listdir("/proc"):
+            if not d.isdigit():
+                continue
+            try:
+                with open(f"/proc/{d}/cmdline", "rb") as fh:
+                    args = [a.decode("utf-8", "replace") for a in fh.read().split(b"\0") if a]
+                with open(f"/proc/{d}/stat", "r", errors="replace") as fh:
+                    stat = fh.read()
+                ppid = int(stat[stat.rindex(")") + 2:].split()[1])
+            except (OSError, ValueError):
+                continue
+            if args:
+                procs.append({"pid": int(d), "ppid": ppid, "args": args})
+        return procs
+    if sys.platform == "win32":
+        try:
+            out = subprocess.run(
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                 "Get-CimInstance Win32_Process | ForEach-Object { '{0}|{1}|{2}' -f "
+                 "$_.ProcessId, $_.ParentProcessId, $_.CommandLine }"],
+                capture_output=True, text=True, timeout=60).stdout
+        except (OSError, subprocess.TimeoutExpired):
+            return procs
+        for ln in out.splitlines():
+            parts = ln.split("|", 2)
+            if len(parts) == 3 and parts[0].isdigit() and parts[2].strip():
+                try:
+                    args = shlex.split(parts[2], posix=False)
+                except ValueError:
+                    args = parts[2].split()
+                procs.append({"pid": int(parts[0]), "ppid": int(parts[1] or 0), "args": args})
+        return procs
+    try:
+        out = subprocess.run(["ps", "-eo", "pid=,ppid=,args="], capture_output=True,
+                             text=True, timeout=30).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return procs
+    for ln in out.splitlines():
+        m = re.match(r"\s*(\d+)\s+(\d+)\s+(.*)$", ln)
+        if m:
+            procs.append({"pid": int(m.group(1)), "ppid": int(m.group(2)),
+                          "args": m.group(3).split()})
+    return procs
+
+
+def proc_environ(pid: int) -> Dict[str, str]:
+    try:
+        with open(f"/proc/{pid}/environ", "rb") as fh:
+            parts = fh.read().split(b"\0")
+    except OSError:
+        return {}
+    env: Dict[str, str] = {}
+    for p in parts:
+        if b"=" in p:
+            k, v = p.split(b"=", 1)
+            env[k.decode("utf-8", "replace")] = v.decode("utf-8", "replace")
+    return env
+
+
+SOAK_TOOLS = ("divsqrt-soak", "clause5-soak", "divsqrt_soak", "clause5_soak")
+DEVICE_FLAG_TOOLS = ("cft-segrun", "acceptance.py", "seq_check.py", "cft-audit")
+# Programs that open an xclbin they are handed: an argument ending .xclbin makes the process
+# a card user only when one of these is on its command line (a `cp`, `sha256sum` or editor
+# naming an image does not hold the card).
+# (hw/verify-image.sh is NOT here: it reads an xclbin with xclbinutil and never opens the card, and the
+# gate's `images` stage runs it.)
+XCLBIN_TOOLS = ("device-test", "run-device-test.sh", "card-segrun.sh", "card-identity.sh",
+                "seq_check.py", "acceptance.py", "run-soak.sh",
+                "run-c5-soak.sh") + SOAK_TOOLS
+# The vendor tools' subcommands that touch the card (examine, which this driver itself
+# uses for telemetry, does not).
+XRT_TOOLS = ("xbutil", "xrt-smi", "xbmgmt")
+XRT_ACTIVE = ("program", "reset", "validate", "advanced", "configure", "dump")
+
+
+def card_user(p: Dict[str, Any]) -> Optional[str]:
+    """Why this process uses the card, or None. A process uses it when an argument is an
+    xclbin and it is one of the tools that open one (device-test, run-device-test.sh,
+    card-segrun.sh, any cft-* tool, ...); when it is acceptance.py, seq_check.py or cft-segrun
+    given a --device that is not sw, sw:N or a cft:// URL; when it is a soak with
+    CFT_SOAK_ARTIFACT set; or when it is xbutil, xrt-smi or xbmgmt running a subcommand that
+    programs, resets or tests the card."""
+    args = p["args"]
+    base = [os.path.basename(a) for a in args]
+    names = [b[:-4] if b.endswith(".exe") else b for b in base]
+    for a in args:
+        if a.lower().endswith(".xclbin") and any(
+                n in XCLBIN_TOOLS or n.startswith("cft-") for n in names):
+            return f"an xclbin argument ({os.path.basename(a)})"
+    if names and names[0] in XRT_TOOLS and any(x in XRT_ACTIVE for x in args[1:3]):
+        return f"{names[0]} {' '.join(args[1:3])}"
+    if any(b in DEVICE_FLAG_TOOLS or b.startswith("cft-segrun") for b in base):
+        for i, a in enumerate(args):
+            if a == "--device" and i + 1 < len(args):
+                v = args[i + 1]
+                if v != "sw" and not v.startswith("sw:") and not v.startswith("cft://"):
+                    return f"--device {v}"
+            elif a.startswith("--device=") and not a[9:].startswith(("sw", "cft://")):
+                return a
+    if any(b in SOAK_TOOLS or b.startswith(("divsqrt-soak", "clause5-soak")) for b in base):
+        art = proc_environ(p["pid"]).get("CFT_SOAK_ARTIFACT")
+        if art:
+            return f"CFT_SOAK_ARTIFACT={os.path.basename(art)}"
+    return None
+
+
+def is_verify_run(p: Dict[str, Any]) -> bool:
+    return any(a.replace("\\", "/").endswith("verify/run.sh") for a in p["args"])
+
+
+def descendants_of(pid: int, procs: List[Dict[str, Any]]) -> set:
+    kids: Dict[int, List[int]] = {}
+    for p in procs:
+        kids.setdefault(p["ppid"], []).append(p["pid"])
+    seen = {pid}
+    stack = [pid]
+    while stack:
+        for c in kids.get(stack.pop(), []):
+            if c not in seen:
+                seen.add(c)
+                stack.append(c)
+    return seen
+
+
+def find_card_users(exclude_pids: Optional[set] = None) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """(foreign card users, verify/run.sh runs beside us). Our own process and everything we
+    started are excluded by ancestry."""
+    procs = list_processes()
+    mine = descendants_of(os.getpid(), procs) | (exclude_pids or set())
+    # our ancestors (a shell, the launcher) are not "another process" either
+    anc = set()
+    by_pid = {p["pid"]: p for p in procs}
+    cur = os.getpid()
+    while cur in by_pid and cur not in anc:
+        anc.add(cur)
+        cur = by_pid[cur]["ppid"]
+    users, beside = [], []
+    for p in procs:
+        if p["pid"] in mine or p["pid"] in anc:
+            continue
+        if is_verify_run(p):
+            beside.append({"pid": p["pid"], "args": " ".join(p["args"])[:200]})
+            continue
+        why = card_user(p)
+        if why:
+            users.append({"pid": p["pid"], "why": why, "args": " ".join(p["args"])[:200]})
+    return users, beside
+
+
+# ---------------------------------------------------------------------------
+# the driver
+# ---------------------------------------------------------------------------
+
+class Driver:
+    def __init__(self, a: argparse.Namespace):
+        self.a = a
+        self.root = os.path.abspath(a.root)
+        self.dry = a.dry_run
+        self.quick = a.quick
+        self.out = os.path.abspath(a.out)
+        self.metrics = os.path.join(self.out, "metrics.jsonl")
+        self.status_path = os.path.join(self.out, "status.txt")
+        self.stop_path = os.path.join(self.out, "STOP")
+        self.logs = os.path.join(self.out, "logs")
+        self.tmp = os.path.join(self.out, "tmp")
+        self.lock = threading.Lock()
+        self.children: Dict[int, subprocess.Popen] = {}
+        self.sig: Optional[str] = None
+        self.hard = False
+        self.seq = 0                       # leg counter, names the logs
+        self.cycle = 0
+        self.t0 = time.time()
+        self.deadline = L.parse_when(a.until) if a.until else None
+        self.images: Dict[str, Image] = {}
+        self.streak = 0                    # consecutive card failures (the policy's N)
+        self.counts: Dict[str, int] = {}   # leg statuses, for status.txt
+        self.by_image: Dict[str, Dict[str, int]] = {}
+        self.last_tel: Optional[Dict[str, Any]] = None
+        self.tel_json: Dict[str, bool] = {}   # per report: False once JSON gave nothing and text did
+        self.tel_worked: Dict[str, str] = {}  # per report: the tool that last gave values
+        self.tel_stop = threading.Event()
+        self.tel_thread: Optional[threading.Thread] = None
+        self.state = "STARTING"
+        self.current = ""
+        self.beside: List[Dict[str, Any]] = []
+        self.beside_seen: set = set()
+        self.internal_errors = 0
+        # A sweep item whose slices keep failing to give a readable verdict (parse_error, error) is not the
+        # card's fault and would otherwise starve every other item: it never counts as served, so it stays
+        # the least served and is picked again at once, every wave. After more than --quarantine-after in a
+        # row it is disabled for the rest of the run (and, rebuilt from the records, after a resume).
+        self.item_bad: Dict[str, int] = {}
+        self.disabled_items: Dict[str, str] = {}
+        self.torn_note = ""
+        self.disabled_legs: Dict[str, str] = {}   # a leg its tool's build check ruled out, and why
+        self.head = ""
+        self.started = False               # run_start written: only then does metrics.jsonl exist
+        self.tree: Dict[str, Any] = {}
+        self.python = a.python
+        self.items: List[L.Item] = []
+        self.intervals: Dict[str, List[Tuple[int, int]]] = {}
+        self.served: Dict[str, int] = {}
+        self.seed_n: Dict[str, int] = {}
+        self.quarantine: Dict[str, List[Tuple[int, int]]] = {}
+        self.fail_slices: Dict[Tuple[str, int, int], int] = {}
+        self.rate: Dict[str, float] = {}   # units per second, by "op@image"
+        self.visits: Dict[str, int] = {}
+        self.picked = 0
+        self.disagreements = 0
+        self.last_record_cycle = 0
+        self.timeouts = dict(DEFAULT_TIMEOUTS)
+        self.timeouts.update(kv_ints(a.timeout, "--timeout"))
+        self.every = dict(DEFAULT_EVERY)
+        self.every.update(kv_ints(a.every, "--every"))
+        self.weights = kv_ints(a.weights, "--weights", list(IMAGES))
+        self.sweep_minutes = kv_ints(a.sweep_minutes, "--sweep-minutes", list(IMAGES))
+        self.sweep_weights = kv_ints(a.sweep_weights, "--sweep-weights", ["exhaustive", "random"])
+        self.battery = [x for x in (a.legs.split(",") if a.legs else
+                                    (QUICK_BATTERY if self.quick else BATTERY)) if x]
+        for leg in self.battery:
+            if leg not in BATTERY:
+                raise SystemExit(f"--legs: {leg!r} is not one of {', '.join(BATTERY)}")
+        self.sweep_only = [x for x in a.sweep_items.split(",") if x]
+        self.rev8_images = expand(a.rev8_images) if a.rev8_images else os.path.join(self.out, "rev8-images")
+
+    # -- small things -------------------------------------------------------
+    def say(self, msg: str) -> None:
+        line = f"[{L.iso(time.time())}] {msg}"
+        with self.lock:
+            try:
+                print(line, flush=True)
+            except (OSError, ValueError):
+                pass                       # a closed terminal must not end a 60-hour run
+            try:
+                with open(os.path.join(self.out, "driver.log"), "a", encoding="utf-8") as fh:
+                    fh.write(line + "\n")
+            except OSError:
+                pass
+
+    def rec(self, rec: Dict[str, Any]) -> None:
+        L.append_record(self.metrics, rec)
+
+    def event(self, name: str, detail: str = "", **kw: Any) -> None:
+        self.say(f"event {name}: {detail}")
+        if self.started:
+            self.rec({"type": "event", "event": name, "detail": detail, **kw})
+
+    def card_paths(self) -> List[str]:
+        paths = [self.out]
+        if self.a.disk_extra and os.path.isdir(self.a.disk_extra):
+            paths.append(self.a.disk_extra)
+        return paths
+
+    # -- the rotation of images --------------------------------------------
+    def next_image(self) -> Image:
+        if self.quick:
+            order = [n for n in ("quad", "single", "deep") if n in self.images]
+            return self.images[order[self.picked % len(order)]]
+        name = L.smooth_wrr({k: self.weights.get(k, 1) for k in self.images}, self.picked + 1)[-1]
+        return self.images[name]
+
+    # -- stop conditions: all checked BETWEEN legs ----------------------------
+    def should_stop(self) -> Optional[Stop]:
+        if os.path.exists(self.stop_path):
+            return Stop("stop_file", 0, f"{self.stop_path} exists")
+        if self.sig:
+            return Stop("signal", 0, f"{self.sig} received")
+        if self.deadline is not None and time.time() >= self.deadline:
+            return Stop("deadline", 0, f"{L.iso(self.deadline)} reached")
+        low = []
+        for p in self.card_paths():
+            try:
+                free = shutil.disk_usage(p).free / 1e9
+            except OSError:
+                continue
+            if free < self.a.disk_floor_gb:
+                low.append(f"{p}: {free:.2f} GB free, floor {self.a.disk_floor_gb} GB")
+        if low:
+            return Stop("disk_floor", 3, "; ".join(low))
+        if self.head and not self.dry:
+            now = self.git_head()
+            if now and now != self.head:
+                return Stop("tree_moved", 3, f"HEAD was {self.head[:12]} at the start and is "
+                            f"{now[:12]} now: the tools were built from the first")
+        return None
+
+    def git_head(self) -> str:
+        try:
+            return subprocess.run(["git", "-C", self.root, "rev-parse", "HEAD"], capture_output=True,
+                                  text=True, timeout=30).stdout.strip()
+        except (OSError, subprocess.TimeoutExpired):
+            return ""
+
+    def estimate(self, leg: str) -> float:
+        return float(self.timeouts.get(leg, 600)) / 3.0
+
+    # -- the guard ---------------------------------------------------------
+    def guard(self, waiting_ok: bool) -> None:
+        """Refuse (at the start) or wait (between legs) while another process uses the card.
+        Detects, never kills."""
+        t_start = time.time()
+        announced = False
+        while True:
+            users, beside = find_card_users()
+            self.beside = beside
+            self.note_beside()
+            if not users:
+                if announced:
+                    self.event("guard_clear", f"the card is free after {time.time() - t_start:.0f} s")
+                return
+            desc = "; ".join(f"pid {u['pid']} {u['why']}" for u in users)
+            if not waiting_ok:
+                self.event("guard_refused", desc, users=users)
+                raise Stop("guard_refused", 2, desc)
+            if not announced:
+                self.event("guard_wait", desc, users=users)
+                announced = True
+            if time.time() - t_start > self.a.guard_wait_max:
+                raise Stop("guard_timeout", 3, f"still in use after {self.a.guard_wait_max:.0f} s: {desc}")
+            if os.path.exists(self.stop_path) or self.sig:
+                raise Stop("stop_file" if not self.sig else "signal", 0, "stopped while waiting for the card")
+            time.sleep(min(self.a.guard_poll, 30))
+
+    def note_beside(self) -> None:
+        """verify/run.sh uses no card: allowed, and recorded once a run. (A run seen at the start
+        is recorded as soon as run_start is written, since nothing is before it.)"""
+        if not self.started:
+            return
+        fresh = [b for b in self.beside if b["pid"] not in self.beside_seen]
+        if fresh:
+            self.beside_seen.update(b["pid"] for b in fresh)
+            self.event("beside", "verify/run.sh running beside this run (it uses no card): "
+                       + "; ".join(f"pid {b['pid']} {b['args'][:80]}" for b in fresh), runs=fresh)
+
+    # -- running one process --------------------------------------------------
+    def wrap(self, argv: List[str], timeout_s: float) -> List[str]:
+        cmd = list(argv)
+        if POSIX:
+            if shutil.which("timeout"):
+                cmd = ["timeout", "--signal=TERM", "-k", str(int(self.a.kill_after)),
+                       str(int(max(1, round(timeout_s)))) + "s"] + cmd
+            if self.a.nice and shutil.which("nice"):
+                cmd = ["nice", "-n", str(self.a.nice)] + cmd
+        return cmd
+
+    def spawn(self, argv: List[str], env_extra: Dict[str, str], logpath: str, cwd: str,
+              timeout_s: float) -> "Tuple[subprocess.Popen, Any, List[str]]":
+        env = dict(os.environ)
+        env.update(env_extra)
+        env.setdefault("PYTHONUNBUFFERED", "1")
+        cmd = self.wrap(argv, timeout_s)
+        logf = open(logpath, "wb")
+        kw: Dict[str, Any] = {}
+        if POSIX:
+            kw["start_new_session"] = True
+        elif hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP"):
+            kw["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        proc = subprocess.Popen(cmd, stdout=logf, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                                env=env, cwd=cwd, **kw)
+        self.children[proc.pid] = proc
+        return proc, logf, cmd
+
+    def kill_group(self, proc: subprocess.Popen, sig: str) -> None:
+        """Signal the process group WE started (its leader is our child), by PID."""
+        try:
+            if POSIX:
+                os.killpg(proc.pid, signal.SIGTERM if sig == "TERM" else signal.SIGKILL)
+            elif sig == "TERM":
+                proc.terminate()
+            else:
+                subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                               capture_output=True, timeout=30)
+                proc.kill()
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+
+    def await_proc(self, proc: subprocess.Popen, timeout_s: float, res: ProcResult) -> None:
+        """Wait for the process; at the timeout, TERM then (after --kill-after) KILL. On POSIX
+        the `timeout` wrapper does this itself and the Python-side deadline is only a backstop
+        a little later, for a wrapper that has died."""
+        limit = timeout_s + (self.a.kill_after + 30 if (POSIX and shutil.which("timeout")) else 0)
+        deadline = time.time() + limit
+        termed_at: Optional[float] = None
+        while True:
+            try:
+                res.rc = proc.wait(timeout=2)
+                break
+            except subprocess.TimeoutExpired:
+                pass
+            now = time.time()
+            if self.hard and termed_at is None:
+                self.kill_group(proc, "TERM")
+                termed_at = now
+                res.killed = "TERM"
+                res.timed_out = True
+            if now >= deadline and termed_at is None:
+                res.timed_out = True
+                res.killed = "TERM"
+                self.kill_group(proc, "TERM")
+                termed_at = now
+            elif termed_at is not None and now - termed_at >= self.a.kill_after:
+                self.kill_group(proc, "KILL")
+                res.killed = "KILL"
+                termed_at = now + 3600       # once
+            self.heartbeat()
+        if POSIX and res.rc == 124:
+            res.timed_out = True
+            res.killed = res.killed or "TERM"
+        elif POSIX and res.rc in (137, -9) and res.timed_out is False:
+            # killed by SIGKILL: -9 to Popen (137 to a shell) - by `timeout --kill-after`, whose
+            # own process goes with the group when a leg ignored SIGTERM, measured in WSL
+            # (coreutils 8.32); or from outside. Either way the leg did not finish.
+            res.timed_out = True
+            res.killed = "KILL"
+        self.children.pop(proc.pid, None)
+
+    def heartbeat(self) -> None:
+        now = time.time()
+        if now - getattr(self, "_hb", 0) >= 60:
+            self._hb = now
+            self.write_status()
+
+    # -- one leg ------------------------------------------------------------
+    def log_name(self, leg: str) -> Tuple[str, str]:
+        self.seq += 1
+        base = f"c{self.cycle:04d}-{self.seq:05d}-{leg}"
+        return base, os.path.join(self.logs, base + ".log")
+
+    def run_leg(self, leg: str, img: Image, cmd: Cmd, kind: str = "battery", attempt: int = 1,
+                sweep: Optional[Dict[str, Any]] = None, tile: Optional[int] = None,
+                expected_cases: Optional[int] = None) -> Dict[str, Any]:
+        """Run one command to its end, parse it, record it, return the record."""
+        base, logpath = self.log_name(leg)
+        tmpdir = None
+        env = dict(cmd.env)
+        if cmd.tmpdir:
+            tmpdir = os.path.join(self.tmp, base)
+            os.makedirs(tmpdir, exist_ok=True)
+            env["TMPDIR"] = tmpdir
+        self.current = f"{leg} on {img.name} (cycle {self.cycle}, attempt {attempt})"
+        self.say(f"leg {leg} on {img.name} starts: {shlex.join(cmd.argv)[:300]}")
+        res = ProcResult()
+        res.start = time.time()
+        try:
+            proc, logf, full = self.spawn(cmd.argv, env, logpath, self.root, cmd.timeout)
+        except OSError as e:
+            res.end = time.time()
+            res.error = f"could not start {cmd.argv[0]}: {e}"
+            return self.finish_leg(leg, img, kind, attempt, sweep, tile, res, None, base, logpath,
+                                   tmpdir, cmd, expected_cases)
+        try:
+            self.await_proc(proc, cmd.timeout, res)
+        finally:
+            logf.close()
+            res.end = time.time()
+        return self.finish_leg(leg, img, kind, attempt, sweep, tile, res, None, base, logpath,
+                               tmpdir, cmd, expected_cases)
+
+    def classify(self, res: ProcResult, text: str, cmd: Cmd) -> Tuple[str, Optional[L.Verdict], str]:
+        """(status, verdict, reason)."""
+        if res.error:
+            return "error", None, res.error
+        if res.timed_out:
+            return ("timeout", None, f"no verdict within {cmd.timeout:.0f} s; "
+                    f"signalled {res.killed or 'TERM'}")
+        try:
+            v = cmd.parser(text, res.rc)
+            if cmd.post:
+                cmd.post(v)
+        except WrongAnswer as e:
+            return "fail", None, str(e)
+        except L.VerdictError as e:
+            infra = L.classify_infra(text)
+            if infra:
+                return "no_device", None, f"{infra}: {e}"
+            return "parse_error", None, f"{e} (exit status {res.rc})"
+        return ("pass" if v.ok else "fail"), v, ""
+
+    def finish_leg(self, leg, img, kind, attempt, sweep, tile, res, _unused, base, logpath, tmpdir,
+                   cmd, expected_cases) -> Dict[str, Any]:
+        try:
+            with open(logpath, "r", encoding="utf-8", errors="replace") as fh:
+                text = fh.read()
+        except OSError:
+            text = ""
+        status, v, reason = self.classify(res, text, cmd)
+        dur = max(0.0, res.end - res.start)
+        counts = dict(v.counts) if v else None
+        extra = dict(v.extra) if v else {}
+        disagreements = extra.pop("disagreements", None) if v else None
+        if v is None and sweep is not None:
+            # a slice that did not finish still shows what the tool printed, if anything
+            disagreements = None
+        rate = None
+        if counts:
+            for key, unit in (("cases", "cases/s"), ("checks", "checks/s")):
+                if key in counts and dur > 0:
+                    rate = {"value": round(counts[key] / dur, 3), "unit": unit}
+                    break
+        kept = self.keep_log(logpath, status, tmpdir, extra)
+        rec: Dict[str, Any] = {
+            "type": "leg", "cycle": self.cycle, "image": img.name, "image_sha256": img.sha,
+            "leg": leg, "kind": kind, "attempt": attempt,
+            "start": L.iso(res.start), "end": L.iso(res.end),
+            "start_epoch": round(res.start, 3), "end_epoch": round(res.end, 3),
+            "duration_s": round(dur, 3), "rc": res.rc, "status": status,
+            "timed_out": bool(res.timed_out), "killed": res.killed, "counts": counts,
+            "rate": rate, "sweep": sweep, "disagreements": disagreements,
+            "log": os.path.relpath(kept[0], self.out).replace("\\", "/") if kept[0] else None,
+            "log_kept": kept[1], "reason": reason or None, "tile": tile,
+            "extra": extra or None, "argv": cmd.argv[:12] if status != "pass" else None,
+        }
+        if v and v.notes:
+            rec["notes"] = v.notes
+        self.rec(rec)
+        self.tally(img.name, status)
+        self.say(f"leg {leg} on {img.name}: {status} in {dur:.1f} s"
+                 + (f" ({reason})" if reason else "") + (f" {counts}" if counts else ""))
+        self.current = ""
+        self.write_status()
+        return rec
+
+    def keep_log(self, logpath: str, status: str, tmpdir: Optional[str],
+                 extra: Dict[str, Any]) -> Tuple[Optional[str], str]:
+        """A passing leg's log is gzipped (--keep-pass-logs gz), or cut to its last lines
+        (verdict) or dropped (none); anything else's is kept whole."""
+        kept: Tuple[Optional[str], str] = (logpath, "whole")
+        try:
+            if status == "pass":
+                mode = self.a.keep_pass_logs
+                if mode == "gz":
+                    gz = logpath + ".gz"
+                    with open(logpath, "rb") as src, gzip.open(gz, "wb", compresslevel=6) as dst:
+                        shutil.copyfileobj(src, dst)
+                    os.remove(logpath)
+                    kept = (gz, "gz")
+                elif mode == "verdict":
+                    with open(logpath, "r", encoding="utf-8", errors="replace") as fh:
+                        lines = fh.read().splitlines()
+                    with open(logpath, "w", encoding="utf-8") as fh:
+                        fh.write("\n".join(lines[:5] + ["..."] + lines[-25:]) + "\n")
+                    kept = (logpath, "whole")
+                elif mode == "none":
+                    os.remove(logpath)
+                    kept = (None, "none")
+            kd = extra.get("kept_dir")
+            if kd and os.path.isdir(kd):
+                dest = logpath[:-4] + "-kept"
+                shutil.move(kd, dest)
+                extra["kept_dir"] = os.path.relpath(dest, self.out).replace("\\", "/")
+        except OSError as e:
+            self.say(f"could not tidy {logpath}: {e}")
+        if tmpdir and os.path.isdir(tmpdir):
+            shutil.rmtree(tmpdir, ignore_errors=True)
+        return kept
+
+    def tally(self, image: str, status: str) -> None:
+        self.counts[status] = self.counts.get(status, 0) + 1
+        d = self.by_image.setdefault(image, {})
+        d[status] = d.get(status, 0) + 1
+
+    def skipped(self, leg: str, img: Image, reason: str, kind: str = "battery") -> None:
+        now = time.time()
+        self.rec({"type": "leg", "cycle": self.cycle, "image": img.name, "image_sha256": img.sha,
+                  "leg": leg, "kind": kind, "attempt": 1, "start": L.iso(now), "end": L.iso(now),
+                  "start_epoch": round(now, 3), "end_epoch": round(now, 3), "duration_s": 0.0,
+                  "rc": None, "status": "skipped", "timed_out": False, "killed": None,
+                  "counts": None, "rate": None, "sweep": None, "disagreements": None,
+                  "log": None, "log_kept": "none", "reason": reason, "tile": None, "extra": None})
+        self.tally(img.name, "skipped")
+        self.say(f"leg {leg} on {img.name}: SKIPPED ({reason})")
+
+    # -- the legs' commands ---------------------------------------------------
+    def standin(self, leg: str, real: List[str]) -> List[str]:
+        return [sys.executable, os.path.join(HERE, "card_stress_standin.py"), leg, "--"] + real
+
+    def leg_cmd(self, leg: str, img: Image, visit: int) -> "Cmd | Skip":
+        R = self.root
+        x = img.path
+        T = float(self.timeouts[leg])
+        if leg in self.disabled_legs:
+            return Skip(self.disabled_legs[leg])
+        every = int(self.every.get(leg, 1))
+        if every > 1 and (visit - 1) % every != 0:
+            return Skip(f"every {every} visits of an image; this is visit {visit}")
+        py = self.python
+        dt = ["bash", os.path.join(R, "hw", "run-device-test.sh"), x]
+
+        def wrap(real: List[str]) -> List[str]:
+            return self.standin(leg, real) if self.dry else real
+
+        def dtp(mode: str):
+            return lambda t, rc: L.parse_device_test(t, rc, mode)
+
+        if leg == "api-test":
+            return Cmd(wrap([os.path.join(R, "host", "api-test")]), T, L.parse_api_test)
+        if leg == "dt-i":
+            def post(v: L.Verdict, img=img) -> None:
+                e = v.extra
+                if e.get("image_sha256") != img.sha:
+                    raise WrongAnswer(f"device-test -i read the image as sha256 {e.get('image_sha256')}"
+                                      f"; the file hashes to {img.sha}")
+                if e.get("tiles") != img.tiles:
+                    raise WrongAnswer(f"device-test -i read {e.get('tiles')} tiles; {img.name} has {img.tiles}")
+                if e.get("backend") != "xrt":
+                    raise WrongAnswer(f"device-test -i opened backend {e.get('backend')!r}, not xrt")
+            return Cmd(wrap(dt + ["-i"]), T, dtp("i"), post=post)
+        if leg == "dt-q8":
+            return Cmd(wrap(dt + ["-q", "-n", "8"]), T, dtp("q8"))
+        if leg == "dt-full":
+            return Cmd(wrap(dt + ["-n", "4096"]), T, dtp("full"))
+        if leg == "dt-r":
+            return Cmd(wrap(dt + ["-r"]), T, dtp("r"))
+        if leg == "dt-b":
+            return Cmd(wrap(dt + ["-b", "-n", "4096"]), T, dtp("b"))
+        if leg == "card-segrun":
+            return Cmd(wrap(["bash", os.path.join(R, "hw", "card-segrun.sh"), x]), T,
+                       L.parse_card_segrun, tmpdir=True)
+        if leg == "seq-check":
+            argv = [py, os.path.join(R, "host", "tests", "seq_check.py"), "--trials", str(self.a.seq_trials),
+                    "--formats", "fp32", "fp64", "fp128", "fp256", "--device", x]
+            return Cmd(wrap(argv), T, lambda t, rc: L.parse_seq_check(t, rc, x))
+        if leg == "acceptance":
+            argv = [py, os.path.join(R, "programs", "acceptance.py"), "--device", x]
+            if self.quick:
+                argv += ["--only", QUICK_ACCEPT_ONLY]
+            return Cmd(wrap(argv), T, lambda t, rc: L.parse_acceptance(t, rc, device=x), tmpdir=True)
+        if leg == "acceptance-rev8":
+            entries = REV8_ENTRIES.get(img.target, [])
+            if not entries:
+                return Skip(f"the revision-8 set has no entry for {img.target}: its rule puts a workload "
+                            f"on the single only where R21 alone keeps it off the quad, which none does "
+                            f"(programs/acceptance.py, REV8)")
+            chosen, left_out = [], []
+            for e in entries:
+                cached = all(os.path.isfile(os.path.join(self.rev8_images, e + ext)) for ext in (".cftp", ".bank"))
+                if e in REV8_LONG_COMPILES and not cached:
+                    left_out.append(e)
+                else:
+                    chosen.append(e)
+            if self.quick:
+                q = QUICK_REV8_ONLY.get(img.target)
+                if q is None or q not in chosen:
+                    return Skip(f"--quick: {q} compiles in 40 minutes or more and no cached image is in "
+                                f"{self.rev8_images}; seed it (--rev8-images) to run it")
+                chosen = [q]
+            if not chosen:
+                return Skip(f"every {img.target} entry is a 40-minute-or-longer compile with no cached image "
+                            f"in {self.rev8_images}: {', '.join(left_out)}")
+            os.makedirs(self.rev8_images, exist_ok=True)
+            missing = [e for e in chosen if not all(os.path.isfile(os.path.join(self.rev8_images, e + ext))
+                                                    for ext in (".cftp", ".bank"))]
+            t = T + (REV8_FIRST_COMPILE_ALLOWANCE if missing else 0)
+            argv = [py, os.path.join(R, "programs", "acceptance.py"), "--set", "rev8", "--legs", "set",
+                    "--device", x, "--target", img.target, "--images", self.rev8_images,
+                    "--only", ",".join(chosen)]
+            return Cmd(wrap(argv), t, lambda tx, rc: L.parse_acceptance(tx, rc, device=x, rev8=True,
+                                                                         target=img.target), tmpdir=True)
+        if leg == "resident":
+            return Cmd(wrap([os.path.join(R, "host", "cft-resident"), x]), T, L.parse_resident)
+        if leg == "selftest":
+            return Cmd(wrap([os.path.join(R, "host", "cft-selftest"), os.path.join(R, "vectors", "out"), x]),
+                       T, L.parse_selftest)
+        raise SystemExit(f"internal: no command for leg {leg}")
+
+    # -- the failure policy ----------------------------------------------------
+    def other_image(self, img: Image) -> Optional[Image]:
+        """Another image, of another xclbin, for the reload: the one the rotation visits most
+        after this one (the quad when this is not it)."""
+        order = sorted((i for i in self.images.values() if i.sha != img.sha),
+                       key=lambda i: -self.weights.get(i.name, 1))
+        return order[0] if order else None
+
+    def recover(self, img: Image, streak: int) -> None:
+        """Pause; from the second consecutive failure, load another image and come back."""
+        pause = self.a.retry_pause * (1 if streak <= 1 else streak)
+        self.event("pause", f"card not answering (consecutive failure {streak}); waiting {pause:.0f} s",
+                   streak=streak)
+        self.sleep_interruptible(pause)
+        if streak >= 2:
+            other = self.other_image(img)
+            if other is None:
+                self.event("recover_start", "no other image to open; retrying this one only")
+                return
+            self.event("recover_start", f"open {other.name}, then {img.name} again", streak=streak)
+            self.event("image_switch", f"{img.name} -> {other.name} -> {img.name}")
+            for step in (other, img):
+                cmd = self.leg_cmd("dt-i", step, 1)
+                assert isinstance(cmd, Cmd)
+                r = self.run_leg("dt-i", step, cmd, kind="recovery")
+                if r["status"] in ("timeout", "no_device"):
+                    self.streak += 1
+                    self.event("recover_end", f"{step.name} dt-i: {r['status']}", ok=False)
+                    return
+            self.event("recover_end", f"{img.name} answers again (dt-i passed)", ok=True)
+
+    def sleep_interruptible(self, secs: float) -> None:
+        end = time.time() + secs
+        while time.time() < end:
+            if self.hard:
+                return
+            time.sleep(min(1.0, max(0.0, end - time.time())))
+
+    def after_result(self, rec: Dict[str, Any]) -> None:
+        """The streak of consecutive card failures: a leg that ran to a verdict on the card ends
+        it; a timeout or a no-device open adds one; the Nth stops the run."""
+        st = rec["status"]
+        if rec["leg"] in NO_CARD_LEGS:
+            return
+        if st in ("pass", "fail"):
+            self.streak = 0
+        elif st in ("timeout", "no_device"):
+            self.streak += 1
+            if self.streak >= self.a.max_card_failures:
+                raise Stop("card_lost", 3, f"{self.streak} consecutive failures of the card to answer; "
+                           f"the last: {rec['leg']} on {rec['image']}: {rec.get('reason')}")
+
+    def run_battery_leg(self, leg: str, img: Image, visit: int) -> Optional[Dict[str, Any]]:
+        attempt = 1
+        while True:
+            cmd = self.leg_cmd(leg, img, visit)
+            if isinstance(cmd, Skip):
+                if attempt == 1:
+                    self.skipped(leg, img, cmd.reason)
+                return None
+            rec = self.run_leg(leg, img, cmd, attempt=attempt)
+            self.after_result(rec)
+            if rec["status"] in ("timeout", "no_device") and attempt <= self.a.leg_retries:
+                self.recover(img, self.streak)
+                if self.hard or self.should_stop():
+                    return rec
+                attempt += 1
+                continue
+            if rec["status"] in ("timeout", "no_device"):
+                self.recover(img, self.streak)
+            return rec
+
+    # -- the sweep ----------------------------------------------------------
+    def load_state(self) -> None:
+        """Rebuild the cycle counter, the rotation, the visits, the sweep's coverage, the seeds,
+        the rates and the quarantine from metrics.jsonl alone."""
+        if not os.path.exists(self.metrics):
+            return
+        self.repair_tail()
+        recs, _partial, bad = L.read_records(self.metrics)
+        if bad:
+            raise SystemExit(f"{self.metrics}: lines {bad[:10]} do not parse; will not resume over them")
+        iv, served, _cases, seeds, dis = L.sweep_coverage(recs)
+        self.intervals = {k: list(v) for k, v in iv.items()}
+        self.served = dict(served)
+        self.seed_n = {k: v + 1 for k, v in seeds.items()}
+        self.disagreements = len(dis)
+        for r in recs:
+            t = r.get("type")
+            if t == "cycle_start":
+                self.cycle = max(self.cycle, int(r["cycle"]))
+                self.visits[r["image"]] = max(self.visits.get(r["image"], 0), int(r.get("visit", 0)))
+                if not r.get("quick"):
+                    self.picked += 1
+            elif t == "leg":
+                self.seq = max(self.seq, 0)
+                if r.get("kind") == "sweep":
+                    sw = r.get("sweep") or {}
+                    st_, nm_ = r.get("status"), sw.get("item")
+                    if nm_ and st_ in ("parse_error", "error"):
+                        self.item_bad[nm_] = self.item_bad.get(nm_, 0) + 1
+                    elif nm_ and st_ in ("pass", "fail"):
+                        self.item_bad[nm_] = 0
+                    if r.get("status") in ("timeout", "no_device", "parse_error") and "lo" in sw:
+                        k = (sw["item"], int(sw["lo"]), int(sw["hi"]))
+                        self.fail_slices[k] = self.fail_slices.get(k, 0) + 1
+                    self.note_rate(r)
+        for nm_, n_ in self.item_bad.items():
+            if n_ > self.a.quarantine_after:
+                self.disabled_items[nm_] = f"{n_} slices in a row gave no readable verdict (from the records)"
+        for (item, lo, hi), n in self.fail_slices.items():
+            if n >= self.a.quarantine_after:
+                self.quarantine.setdefault(item, []).append((lo, hi))
+        self.seq = len(glob.glob(os.path.join(self.logs, "*"))) + 1000
+
+    def repair_tail(self) -> None:
+        """A metrics file whose last line has no newline was caught mid-append (the driver or the host died in
+        the write). Appending to it would fuse the next record to that line and make a line no later resume
+        could read. A last line that is a whole record just gets its newline; a torn one is kept beside the
+        file (metrics.torn-<time>.txt) and the file is cut back to its last whole record."""
+        with open(self.metrics, "rb") as fh:
+            data = fh.read()
+        if not data or data.endswith(b"\n"):
+            return
+        cut = data.rfind(b"\n") + 1
+        tail = data[cut:]
+        try:
+            json.loads(tail.decode("utf-8"))
+            whole = True
+        except (ValueError, UnicodeDecodeError):
+            whole = False
+        if whole:
+            with open(self.metrics, "ab") as fh:
+                fh.write(b"\n")
+            self.torn_note = "the last record of metrics.jsonl was whole but had no newline: one was added"
+            return
+        side = os.path.join(self.out, f"metrics.torn-{int(time.time())}.txt")
+        with open(side, "wb") as fh:
+            fh.write(tail)
+        with open(self.metrics, "r+b") as fh:
+            fh.truncate(cut)
+        self.torn_note = (f"the last line of metrics.jsonl was torn ({len(tail)} bytes, a write cut short): kept in "
+                          f"{os.path.basename(side)}, the file cut back to its last whole record")
+
+    def note_rate(self, r: Dict[str, Any]) -> None:
+        if r.get("status") not in ("pass", "fail"):
+            return
+        sw = r.get("sweep") or {}
+        dur = float(r.get("duration_s") or 0)
+        if dur <= 0:
+            return
+        units = (int(sw["hi"]) - int(sw["lo"])) if "lo" in sw else int(sw.get("count") or 0)
+        if units <= 0:
+            return
+        key = f"{sw.get('op')}@{r.get('image')}"
+        j = max(1, int(sw.get("jobs", 1)))
+        # a slice's own rate, for ONE job; the longest slice seen is the least start-up-skewed
+        new = units / dur
+        if dur >= 20 or key not in self.rate:
+            self.rate[key] = new
+
+    def pick_item(self, reserved: Dict[str, List[Tuple[int, int]]], avoid: set,
+                  only: Optional[str] = None) -> Optional[Tuple[L.Item, Optional[Tuple[int, int]]]]:
+        """The next item by weighted rotation (fewest slices served per unit of weight), with
+        its next gap (exhaustive) or None (random). Exhaustive items already covered, and items
+        in `avoid` (served this wave), are not eligible."""
+        best, best_key = None, None
+        for idx, it in enumerate(self.items):
+            if it.name in avoid or (only is not None and it.name != only):
+                continue
+            if self.sweep_only and it.name not in self.sweep_only:
+                continue
+            if it.name in self.disabled_items:
+                continue
+            gap = None
+            if it.kind == "exhaustive":
+                have = self.intervals.get(it.name, []) + self.quarantine.get(it.name, []) + reserved.get(it.name, [])
+                gap = L.first_gap(have)
+                if gap is None:
+                    continue
+            w = self.sweep_weights.get(it.kind, 1) or 1
+            key = (self.served.get(it.name, 0) / w, idx)
+            if best_key is None or key < best_key:
+                best, best_key, best_gap = it, key, gap
+        if best is None:
+            return None
+        return best, best_gap  # type: ignore[possibly-undefined]
+
+    def slice_units(self, it: L.Item, img: Image, secs: float) -> int:
+        """Cases (or encodings) in a slice: the probe size until this op has a rate measured on
+        this image, then what the measured rate fills `secs` with, in whole ATOMs. --quick uses
+        its own small size: its slices measure the rate, they do not fill time."""
+        if self.quick:
+            return self.a.quick_slice_cases
+        rate = self.rate.get(f"{it.op}@{img.name}")
+        if rate is None:
+            return self.a.probe_cases
+        units = int(rate * secs)
+        units = max(L.ATOM, min(units, 1 << 28))
+        return units - units % L.ATOM
+
+    def soak_binary(self, it: L.Item) -> str:
+        return os.path.join(self.root, "host", "divsqrt-soak" if it.tool == "divsqrt" else "clause5-soak")
+
+    def plan_wave(self, img: Image, remaining: float, jobs: int,
+                  forced: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+        wave: List[Dict[str, Any]] = []
+        reserved: Dict[str, List[Tuple[int, int]]] = {}
+        avoid: set = set()
+        slice_secs = min(self.a.sweep_slice_seconds, max(5.0, remaining - 15))
+        for k in range(jobs):
+            pick = self.pick_item(reserved, avoid, forced[k] if forced and k < len(forced) else None)
+            if pick is None:
+                break
+            it, gap = pick
+            avoid.add(it.name)
+            units = self.slice_units(it, img, slice_secs)
+            job: Dict[str, Any] = {"item": it, "units": units, "slice_secs": slice_secs, "tile": None}
+            if it.kind == "exhaustive":
+                lo = gap[0]
+                hi = min(gap[1], lo + units)
+                job.update(lo=lo, hi=hi)
+                reserved.setdefault(it.name, []).append((lo, hi))
+                job["expected"] = it.expected_cases(lo, hi)
+                job["argv"] = it.argv(self.soak_binary(it), lo=lo, hi=hi)
+                job["sweep"] = {"item": it.name, "tool": it.tool, "op": it.op, "mode": it.mode,
+                                "lo": lo, "hi": hi, "tile": None}
+            else:
+                n = self.seed_n.get(it.name, 0)
+                seed = it.seed_for(n)
+                job.update(count=units, seed=seed, seed_n=n)
+                job["expected"] = None
+                job["argv"] = it.argv(self.soak_binary(it), count=units, seed=seed)
+                job["sweep"] = {"item": it.name, "tool": it.tool, "op": it.op, "mode": it.mode,
+                                "count": units, "seed": seed, "seed_n": n, "tile": None}
+            if jobs > 1 and img.tiles > 1:
+                job["tile"] = k + 1
+                job["sweep"]["tile"] = k + 1
+            job["timeout"] = max(180.0, 3.0 * slice_secs + 120.0)
+            wave.append(job)
+        return wave
+
+    def soak_jobs_for(self, img: Image) -> int:
+        if self.a.soak_jobs == "auto":
+            return img.tiles
+        return max(1, min(int(self.a.soak_jobs), img.tiles))
+
+    def run_wave(self, img: Image, wave: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Start the wave's jobs together (one process a tile on the quad), wait for all, parse
+        and record each. The jobs are the soak binaries on the job lines run-soak.sh and
+        run-c5-soak.sh print, with CFT_SOAK_ARTIFACT naming the image."""
+        procs = []
+        for job in wave:
+            it: L.Item = job["item"]
+            base, logpath = self.log_name(f"sweep-{it.name}")
+            env = {"CFT_SOAK_ARTIFACT": img.path}
+            if job["tile"]:
+                env["CFT_XRT_TILES"] = str(job["tile"])
+            argv = self.standin("soak", job["argv"]) if self.dry else job["argv"]
+            res = ProcResult()
+            res.start = time.time()
+            try:
+                proc, logf, full = self.spawn(argv, env, logpath, self.root, job["timeout"])
+            except OSError as e:
+                res.end = time.time()
+                res.error = f"could not start {argv[0]}: {e}"
+                proc = logf = None
+            procs.append((job, base, logpath, proc, logf, res))
+            self.say(f"sweep job {it.name} [{job['sweep'].get('lo', job['sweep'].get('count'))}"
+                     f"{'-' + str(job['sweep']['hi']) if 'hi' in job['sweep'] else ' cases'}]"
+                     f" on {img.name}{' tile ' + str(job['tile']) if job['tile'] else ''}")
+        self.current = f"{len(procs)} sweep job(s) on {img.name}"
+        threads = []
+        for job, base, logpath, proc, logf, res in procs:
+            if proc is None:
+                continue
+            t = threading.Thread(target=self._wait_job, args=(proc, job["timeout"], res, logf), daemon=True)
+            t.start()
+            threads.append(t)
+        for t in threads:
+            while t.is_alive():
+                t.join(timeout=5)
+                self.heartbeat()
+        recs = []
+        for job, base, logpath, proc, logf, res in procs:
+            it = job["item"]
+            exp = job["expected"]
+            cmd = Cmd(job["argv"], job["timeout"],
+                      (lambda t, rc, it=it, exp=exp, img=img: L.parse_soak(
+                          t, rc, it.op, it.verdict_mode, img.path, exp)))
+            sweep = dict(job["sweep"])
+            sweep["jobs"] = len(wave)
+            if exp is not None:
+                sweep["expected_cases"] = exp
+            rec = self.finish_leg(f"sweep-{it.name}", img, "sweep", 1, sweep, job["tile"], res, None,
+                                  base, logpath, None, cmd, exp)
+            recs.append(rec)
+            if rec["status"] in ("parse_error", "error"):
+                self.item_bad[it.name] = self.item_bad.get(it.name, 0) + 1
+                if self.item_bad[it.name] > self.a.quarantine_after:
+                    self.disabled_items[it.name] = (f"{self.item_bad[it.name]} slices in a row gave no readable verdict; "
+                                                    f"the last: {(rec.get('reason') or '')[:120]}")
+                    self.event("item_disabled", f"{it.name}: {self.disabled_items[it.name]}; the sweep goes on "
+                               f"without it", item=it.name)
+            elif rec["status"] in ("pass", "fail"):
+                self.item_bad[it.name] = 0
+            if rec["status"] in ("pass", "fail"):
+                self.served[it.name] = self.served.get(it.name, 0) + 1
+                if it.kind == "exhaustive":
+                    self.intervals.setdefault(it.name, []).append((job["lo"], job["hi"]))
+                else:
+                    self.seed_n[it.name] = job["seed_n"] + 1
+                self.note_rate(rec)
+                if rec["status"] == "fail":
+                    self.disagreements += 1
+            elif it.kind == "exhaustive":
+                k = (it.name, job["lo"], job["hi"])
+                self.fail_slices[k] = self.fail_slices.get(k, 0) + 1
+                if self.fail_slices[k] >= self.a.quarantine_after:
+                    self.quarantine.setdefault(it.name, []).append((job["lo"], job["hi"]))
+                    self.event("quarantine", f"{it.name} [{job['lo']}, {job['hi']}) failed to finish "
+                               f"{self.fail_slices[k]} times; the sweep moves past it", item=it.name)
+        return recs
+
+    def _wait_job(self, proc, timeout_s, res, logf) -> None:
+        try:
+            self.await_proc(proc, timeout_s, res)
+        finally:
+            try:
+                logf.close()
+            except OSError:
+                pass
+            res.end = time.time()
+
+    def sweep_phase(self, img: Image, minutes: float) -> None:
+        if self.a.no_sweep or minutes <= 0:
+            return
+        budget_end = time.time() + (self.a.quick_sweep_seconds if self.quick else minutes * 60.0)
+        if self.deadline is not None:
+            budget_end = min(budget_end, self.deadline)
+        jobs = self.soak_jobs_for(img)
+        waves = 0
+        while True:
+            stop = self.should_stop()
+            if stop:
+                raise stop
+            remaining = budget_end - time.time()
+            if remaining < self.a.min_slice_seconds and not (self.quick and waves == 0):
+                break
+            if self.quick and waves >= self.quick_waves(img):
+                break
+            self.guard(True)
+            wave = self.plan_wave(img, remaining, jobs, self.quick_items(img, waves) if self.quick else None)
+            if not wave:
+                self.say("sweep: nothing left to run in this campaign")
+                break
+            recs = self.run_wave(img, wave)
+            waves += 1
+            bad = [r for r in recs if r["status"] in ("timeout", "no_device")]
+            for r in recs:
+                if r["status"] in ("pass", "fail"):
+                    self.streak = 0
+            if bad:
+                self.streak += len(bad)
+                if self.streak >= self.a.max_card_failures:
+                    raise Stop("card_lost", 3, f"{self.streak} consecutive failures of the card to answer; "
+                               f"the last: {bad[-1]['leg']} on {img.name}: {bad[-1].get('reason')}")
+                self.recover(img, self.streak)
+
+    def quick_waves(self, img: Image) -> int:
+        return 1 if img.tiles > 1 else 2
+
+    def quick_items(self, img: Image, wave_no: int) -> List[str]:
+        """--quick's sweep, fixed so the smoke shows each soak tool once on each image: on the quad
+        one wave of four jobs, one a tile (both soak tools, a random item and a clause-5 next);
+        on a single, two waves of one job."""
+        if img.tiles > 1:
+            return ["sqrt32-rne", "rint32-rne", "div32-rne", "nextup32"]
+        return [["sqrt32-rne"], ["rint32-rne"]][min(wave_no, 1)]
+
+    # -- telemetry ------------------------------------------------------------
+    def examine(self, tool: str, rep: str, mode: str) -> Tuple[Dict[str, float], str, Optional[str]]:
+        """One `xbutil|xrt-smi examine -d CARD -r REP`, as JSON in a file (`--format JSON --output`)
+        or as the as-is text on stdout: (values read, the text, an error or None)."""
+        a = self.a
+        base = [tool, "examine", "-d", a.card, "-r", rep]
+        argv = self.standin("telemetry", base) if self.dry else base
+        try:
+            if mode == "json":
+                os.makedirs(self.tmp, exist_ok=True)
+                path = os.path.join(self.tmp, f"tel-{os.getpid()}-{threading.get_ident()}-{rep}.json")
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+                p = subprocess.run(argv + ["--format", "JSON", "--output", path], capture_output=True,
+                                   text=True, timeout=a.telemetry_timeout)
+                text = ""
+                if os.path.exists(path):
+                    with open(path, "r", encoding="utf-8", errors="replace") as fh:
+                        text = fh.read()
+                    os.remove(path)
+                got = L.parse_telemetry(text) if text else {}
+                err = None if got else f"--format JSON: no values (rc {p.returncode}) {p.stderr.strip()[:120]}"
+                return got, text, err
+            p = subprocess.run(argv, capture_output=True, text=True, timeout=a.telemetry_timeout)
+            got = L.parse_telemetry(p.stdout)
+            err = None if got else f"as-is text: no values (rc {p.returncode}) {p.stderr.strip()[:120]}"
+            return got, p.stdout, err
+        except (OSError, subprocess.TimeoutExpired) as e:
+            return {}, "", f"{mode}: {e}"
+
+    def telemetry(self, when: str, img: Optional[Image] = None) -> None:
+        """One sample: each report asked for as JSON, falling back to the as-is text (and
+        remembering, per report, that JSON gave nothing where the text did), then the host's
+        load, memory and free disk. A sample with no values is recorded as such - ok false, the
+        raw text beside it - and never as a reading."""
+        values: Dict[str, float] = {}
+        errors: List[str] = []
+        raws: List[str] = []
+        for rep in [r for r in self.a.telemetry_reports.split(",") if r]:
+            modes = ["json", "text"] if self.tel_json.get(rep, True) else ["text"]
+            got: Dict[str, float] = {}
+            text = ""
+            err = None
+            # the tool that worked for this report first, then the other one that is on PATH: the
+            # brief names xrt-smi and calls xbutil the old name, and which one answers `examine -r
+            # electrical` on this card was not known when this was written
+            tools = self.tel_tools(rep)
+            for tool in tools:
+                for mode in modes:
+                    got, text, err = self.examine(tool, rep, mode)
+                    if got:
+                        if mode == "text" and "json" in modes:
+                            self.tel_json[rep] = False
+                        self.tel_worked[rep] = tool
+                        break
+                if got:
+                    break
+            if got:
+                for k, v in got.items():
+                    values[f"{rep}.{k}"] = v
+            else:
+                errors.append(f"{rep}: {err}")
+                raws.append(f"[{rep}] {text[:400]}")
+        host = L.host_sample(self.card_paths())
+        rec = {"type": "telemetry", "cycle": self.cycle or None, "image": img.name if img else None,
+               "when": when, "ok": bool(values), "values": values or None, "host": host or None,
+               "raw": (" | ".join(raws)[:1200] if not values else None),
+               "error": ("; ".join(errors)[:500] if errors else None)}
+        self.rec(rec)
+        self.last_tel = rec
+
+    def tel_tool(self) -> str:
+        t = self.a.telemetry_tool
+        if t != "auto":
+            return t
+        if self.dry:
+            return "xbutil"
+        for cand in ("xrt-smi", "xbutil"):
+            if shutil.which(cand):
+                return cand
+        return "xbutil"
+
+    def tel_tools(self, rep: str) -> List[str]:
+        """Tools to try for a report, the one that worked before first. Naming a tool with
+        --telemetry-tool uses that one alone."""
+        if self.a.telemetry_tool != "auto" or self.dry:
+            return [self.tel_tool()]
+        have = [t for t in ("xrt-smi", "xbutil") if shutil.which(t)] or ["xbutil"]
+        w = self.tel_worked.get(rep)
+        return ([w] + [t for t in have if t != w]) if w in have else have
+
+    def tel_loop(self) -> None:
+        while not self.tel_stop.wait(self.a.telemetry_seconds):
+            try:
+                self.telemetry("timer")
+            except Exception as e:  # a sampler must never take the run down
+                self.say(f"telemetry sampler: {e!r}")
+
+    # -- the status file ---------------------------------------------------------
+    def write_status(self) -> None:
+        with self.lock:
+            now = time.time()
+            lines = [f"card-stress status   {L.iso(now)}", ""]
+            lines.append(f"run        {self.run_id}   out {self.out}"
+                         + ("   [QUICK]" if self.quick else "") + ("   [DRY RUN]" if self.dry else ""))
+            lines.append(f"state      {self.state}" + (f"   now: {self.current}" if self.current else ""))
+            lines.append(f"cycle      {self.cycle}   image {getattr(self, 'cur_image', '-')}"
+                         f"   visits {dict(sorted(self.visits.items()))}")
+            if self.deadline:
+                lines.append(f"deadline   {L.iso(self.deadline)}   remaining {self.deadline - now:.0f} s")
+            else:
+                lines.append("deadline   none (quick or open-ended)")
+            lines.append(f"running    since {L.iso(self.t0)}   {now - self.t0:.0f} s")
+            tot = sum(self.counts.values())
+            lines.append(f"legs       {tot}: " + ", ".join(f"{k} {v}" for k, v in sorted(self.counts.items())))
+            for im, d in sorted(self.by_image.items()):
+                lines.append(f"  {im:<8} " + ", ".join(f"{k} {v}" for k, v in sorted(d.items())))
+            lines.append(f"card       consecutive failures {self.streak} of {self.a.max_card_failures}")
+            if self.beside:
+                lines.append("beside     " + "; ".join(f"verify/run.sh pid {b['pid']}" for b in self.beside))
+            if self.last_tel:
+                v = self.last_tel.get("values") or {}
+                key = [f"{k}={x}" for k, x in list(v.items())[:6]]
+                lines.append(f"telemetry  {self.last_tel.get('ts')}: " + ("; ".join(key) if key else
+                             "no values parsed" + (f" ({self.last_tel.get('error')})" if self.last_tel.get("error") else "")))
+                h = self.last_tel.get("host") or {}
+                if h:
+                    lines.append(f"host       {h}")
+            # the sweep
+            ex_total = ex_cov = 0
+            for it in self.items:
+                if it.kind == "exhaustive":
+                    ex_total += L.EXH
+                    ex_cov += L.covered(self.intervals.get(it.name, []) or []) if self.intervals.get(it.name) else 0
+            rnd = sum(1 for it in self.items if it.kind == "random" and self.served.get(it.name))
+            lines.append(f"sweep      exhaustive {ex_cov:,} of {ex_total:,} encodings"
+                         f" ({(100.0 * ex_cov / ex_total) if ex_total else 0:.3f} %); "
+                         f"slices served {sum(self.served.values())}; random items begun {rnd};"
+                         f" disagreements {self.disagreements}; rates {{{', '.join(f'{k}: {v:,.0f}/s' for k, v in sorted(self.rate.items()))}}}")
+            if self.disabled_items:
+                lines.append("disabled   sweep items: " + "; ".join(f"{k} ({v[:60]})" for k, v in self.disabled_items.items()))
+            tmp = self.status_path + ".tmp"
+            try:
+                with open(tmp, "w", encoding="utf-8") as fh:
+                    fh.write("\n".join(lines) + "\n")
+                os.replace(tmp, self.status_path)
+            except OSError:
+                pass
+
+    # -- the start: tree, build, images ---------------------------------------
+    def pre_check(self) -> None:
+        """What run_start records: the commit and whether the tree is clean, and each image's
+        SHA-256 (read here; build_and_check holds it to SHA256SUMS and to the hash it was given)."""
+        self.head = self.git_head()
+        dirty = ""
+        try:
+            dirty = subprocess.run(["git", "-C", self.root, "status", "--porcelain", "--untracked-files=no"],
+                                   capture_output=True, text=True, timeout=60).stdout.strip()
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        self.tree = {"commit": self.head or None, "dirty": bool(dirty), "dirty_files": len(dirty.splitlines())}
+        for im in self.images.values():
+            try:
+                im.sha, im.bytes = sha256_file(im.path)
+            except OSError as e:
+                self.say(f"image {im.name}: cannot read {im.path}: {e}")
+
+    def build_and_check(self) -> None:
+        steps: List[Dict[str, Any]] = []
+        ok = True
+
+        def step(name: str, good: bool, detail: str) -> None:
+            nonlocal ok
+            steps.append({"name": name, "ok": good, "detail": detail[:600]})
+            ok = ok and good
+            self.say(f"build step {name}: {'ok' if good else 'FAILED'} - {detail[:200]}")
+
+        # 1. the tree: the SHA and, separately, the content (CLAUDE.md, "Before believing a remote build")
+        dirty = self.tree.get("dirty_files", 0)
+        step("tree", bool(self.head) or self.dry,
+             f"HEAD {self.head[:12] or 'unknown'}{', DIRTY (' + str(dirty) + ' files)' if self.tree.get('dirty') else ', clean'}")
+        markers = [("host/tests/seq_check.py", "THE ROUTINE CORPUS DID NOT REACH EVERY FORM"),
+                   ("programs/acceptance.py", "REV8_ORDER"),
+                   ("hw/card-segrun.sh", "== card-segrun:"),
+                   ("hw/card_stress.py", "THE LEGS")]
+        for rel, text in markers:
+            p = os.path.join(self.root, rel)
+            try:
+                with open(p, "r", encoding="utf-8", errors="replace") as fh:
+                    found = text in fh.read()
+            except OSError:
+                found = False
+            step(f"content {rel}", found, f"contains {text!r}" if found else f"does not contain {text!r} (a stale tree?)")
+        if self.dry:
+            step("tools", True, "dry run: no make, no ldd, no XRT (the stand-ins replace every command)")
+        else:
+            self.build_tools(step)
+        # 5. the images, held to SHA256SUMS beside each and to the hash this driver was given
+        for im in self.images.values():
+            if not im.sha:
+                step(f"image {im.name}", False, f"cannot read {im.path}")
+                continue
+            good, why = True, f"sha256 {im.sha[:16]}..., {im.bytes:,} bytes"
+            sums = os.path.join(os.path.dirname(im.path), "SHA256SUMS")
+            if os.path.exists(sums):
+                found = None
+                with open(sums, "r", encoding="utf-8", errors="replace") as fh:
+                    for ln in fh:
+                        m = re.match(r"([0-9a-fA-F]{64})\s+\*?(.+?)\s*$", ln)
+                        if m and os.path.basename(m.group(2)) == os.path.basename(im.path):
+                            found = m.group(1).lower()
+                if found is None:
+                    good, why = False, f"{sums} has no line for {os.path.basename(im.path)}"
+                elif found != im.sha:
+                    good, why = False, f"{sums} says {found[:16]}..., the file hashes to {im.sha[:16]}..."
+                else:
+                    why += ", equal to SHA256SUMS"
+            else:
+                good, why = False, f"no SHA256SUMS beside {im.path}"
+            if good and im.want_sha and im.want_sha != im.sha:
+                good, why = False, f"the file hashes to {im.sha[:16]}..., this driver was given {im.want_sha[:16]}..."
+            elif good and im.want_sha:
+                why += ", equal to the hash given"
+            step(f"image {im.name}", good, why)
+        self.rec({"type": "build", "ok": ok, "steps": steps})
+        if not ok:
+            raise Stop("build_failed", 3, "; ".join(f"{s['name']}: {s['detail']}" for s in steps if not s["ok"]))
+
+    def run_quiet(self, argv: List[str], timeout: float, cwd: Optional[str] = None,
+                  env: Optional[Dict[str, str]] = None) -> Tuple[int, str]:
+        e = dict(os.environ)
+        e.update(env or {})
+        try:
+            p = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, cwd=cwd or self.root, env=e)
+            return p.returncode, (p.stdout or "") + (p.stderr or "")
+        except (OSError, subprocess.TimeoutExpired) as ex:
+            return 127, f"{ex}"
+
+    def build_tools(self, step: Callable[[str, bool, str], None]) -> None:
+        a = self.a
+        host = os.path.join(self.root, "host")
+        c5defs = ""
+        probe_c = os.path.join(self.tmp, "re-probe.c")
+        os.makedirs(self.tmp, exist_ok=True)
+        with open(probe_c, "w") as fh:
+            fh.write("#define _GNU_SOURCE\n#include <math.h>\nint main(void){return (int)(roundeven(1.5)"
+                     "+roundevenf(2.5f));}\n")
+        rc, _ = self.run_quiet([os.environ.get("CC", "cc"), probe_c, "-lm", "-o", probe_c + ".out"], 120)
+        if rc == 0:
+            c5defs = "-DCFT_SOAK_HAVE_ROUNDEVEN=1"
+        for f in (probe_c, probe_c + ".out"):
+            try:
+                os.remove(f)
+            except OSError:
+                pass
+        step("roundeven probe", True, "present" if c5defs else "absent: the rne oracle is rint under FE_TONEAREST")
+        targets = ["all", "device-test", "api-test", "remote-test", "divsqrt-soak", "clause5-soak"]
+        xrt_flags = a.make_xrt_flags.split() if a.make_xrt_flags else ["XRT=1", f"XRT_ROOT={a.xrt_root}"]
+        argv = ["make", "-C", host, f"-j{a.build_jobs}"] + xrt_flags
+        if c5defs:
+            argv.append(f"C5DEFS={c5defs}")
+        argv += targets
+        if self.a.nice and shutil.which("nice"):
+            argv = ["nice", "-n", str(a.nice)] + argv
+        log = os.path.join(self.logs, "build.log")
+        t0 = time.time()
+        try:
+            with open(log, "wb") as lf:
+                p = subprocess.run(argv, stdout=lf, stderr=subprocess.STDOUT, timeout=a.build_timeout)
+            rc = p.returncode
+        except (OSError, subprocess.TimeoutExpired) as e:
+            rc = 127
+            self.say(f"build: {e}")
+        warns = []
+        try:
+            with open(log, "r", encoding="utf-8", errors="replace") as fh:
+                warns = [ln.strip() for ln in fh if "warning:" in ln]
+        except OSError:
+            pass
+        step("make", rc == 0, f"make -C host {' '.join(xrt_flags)} {' '.join(targets)}: rc {rc} in "
+             f"{time.time() - t0:.0f} s, {len(warns)} warning line(s) (the known two: "
+             f"tools/cft_resident.cpp:264 and :265, deprecated read_register); log {os.path.relpath(log, self.out)}")
+        if rc != 0:
+            return
+        if len(warns) != 2:
+            self.say("NOTE: CLAUDE.md says the XRT=1 host build carries exactly two known warnings; "
+                     f"this one has {len(warns)}: " + " | ".join(w[:120] for w in warns[:4]))
+        exes = ["device-test", "api-test", "remote-test", "cft-segrun", "cft-audit", "divsqrt-soak",
+                "clause5-soak", "cft-resident", "cft-selftest", "libcft.so"]
+        if "XRT=1" not in xrt_flags:
+            exes.remove("cft-resident")      # only an XRT=1 build makes it (the test's XRT=0 build has none)
+        # cft-resident and cft-selftest serve optional legs: a missing or unlinked one disables its leg
+        # by name (a skipped leg, with this reason) instead of refusing the whole run
+        optional = {"cft-resident": "resident", "cft-selftest": "selftest"}
+        for exe in exes:
+            path = os.path.join(host, exe)
+            if not os.path.exists(path):
+                if exe in optional:
+                    self.disabled_legs[optional[exe]] = f"{exe} was not built"
+                    step(f"xrt {exe}", True, f"not built: the {optional[exe]} leg is skipped, by name")
+                else:
+                    step(f"xrt {exe}", False, f"{path} was not built")
+                continue
+            rc, out = self.run_quiet(["ldd", path], 60)
+            if exe in optional and not (rc == 0 and "xrt_coreutil" in out):
+                self.disabled_legs[optional[exe]] = f"{exe} does not link XRT (ldd)"
+                step(f"xrt {exe}", True, f"NOT XRT-linked (an optional tool): the {optional[exe]} leg is skipped, by name")
+                continue
+            step(f"xrt {exe}", rc == 0 and "xrt_coreutil" in out,
+                 "links libxrt_coreutil" if "xrt_coreutil" in out else
+                 "does NOT link XRT: built without XRT=1 it answers every xclbin with 'no such device' (CLAUDE.md)")
+        rc, tid = self.run_quiet(["make", "-s", "-C", host, "print-build-id"], 120)
+        rc2, bid = self.run_quiet([os.path.join(host, "cft-segrun"), "--build-id"], 60)
+        step("build id", rc == 0 and rc2 == 0 and tid.strip() == bid.strip() and bool(bid.strip()),
+             f"the tree's {tid.strip()!r}, cft-segrun's {bid.strip()!r}")
+        for mod in ("mpmath", "pytest"):
+            rc, _ = self.run_quiet([self.python, "-c", f"import {mod}"], 60)
+            if rc != 0:
+                self.say(f"NOTE: {self.python} cannot import {mod}: seq-check's eighth corpus will print a SKIP "
+                         f"line, counted in its record as an inner skip")
+        # the clause-5 soak's environment probes decide which directed-mode jobs exist, as in
+        # hw/run-c5-soak.sh (host only: probes return before the device is opened)
+        c5 = os.path.join(host, "clause5-soak")
+        sc = L.MODES4 if self.run_quiet([c5, "probe", "scalbn"], 120)[0] == 0 else ("rne",)
+        cf = L.MODES4 if self.run_quiet([c5, "probe", "cvtfrom"], 120)[0] == 0 else ("rne",)
+        self.items = L.sweep_items(sc, cf)
+        step("probes", True, f"scaleb modes {','.join(sc)}; cvtfrom modes {','.join(cf)}")
+        # the card is there, as far as XRT can say (telemetry, and a cheap look)
+        tool = self.tel_tool()
+        if shutil.which(tool):
+            rc, out = self.run_quiet([tool, "examine", "-d", a.card], 60)
+            # advisory, never a reason to stop: xrt-smi 2.19's device-info parser has died on this card
+            # before ("Mac address exceed IP4 maximum value", docs/VALIDATION.md 2026-09-08), and the legs
+            # say whether the card answers
+            step("card visible", True, f"{tool} examine -d {a.card}: rc {rc} (advisory: the legs say whether "
+                 f"the card answers)")
+        else:
+            self.say(f"NOTE: {tool} is not on PATH: telemetry will record errors, and the run goes on")
+
+    # -- a cycle ---------------------------------------------------------------------
+    def run_cycle(self, img: Image) -> None:
+        self.cycle += 1
+        self.cur_image = img.name
+        self.visits[img.name] = self.visits.get(img.name, 0) + 1
+        visit = self.visits[img.name]
+        self.picked += 1
+        # the image on disk is still the one that was checked
+        if not self.dry or os.path.exists(img.path):
+            try:
+                sha, _ = sha256_file(img.path)
+            except OSError as e:
+                raise Stop("image_missing", 3, f"{img.path}: {e}")
+            if sha != img.sha:
+                raise Stop("image_changed", 3, f"{img.path} hashes to {sha[:16]}..., was {img.sha[:16]}...")
+        battery = [leg for leg in self.battery]
+        sweep_min = float(self.sweep_minutes.get(img.name, 0))
+        self.rec({"type": "cycle_start", "cycle": self.cycle, "image": img.name, "image_sha256": img.sha,
+                  "visit": visit, "battery": battery, "sweep_minutes": sweep_min, "quick": self.quick})
+        sweep_txt = f"{self.a.quick_sweep_seconds:.0f} s (quick)" if self.quick else f"{sweep_min:g} min"
+        self.say(f"cycle {self.cycle}: {img.name} (visit {visit}), battery {battery}, sweep {sweep_txt}")
+        t_cycle = time.time()
+        self.guard(True)
+        self.telemetry("before-cycle", img)
+        n_legs = n_failed = 0
+        try:
+            for leg in battery:
+                stop = self.should_stop()
+                if stop:
+                    raise stop
+                if self.deadline is not None and time.time() + self.estimate(leg) > self.deadline + self.a.deadline_grace:
+                    self.skipped(leg, img, f"its estimate ({self.estimate(leg):.0f} s) would end past the "
+                                 f"deadline by more than the {self.a.deadline_grace:.0f} s grace")
+                    continue
+                self.guard(True)
+                rec = self.run_battery_leg(leg, img, visit)
+                if rec is not None:
+                    n_legs += 1
+                    n_failed += rec["status"] != "pass"
+            self.telemetry("after-battery", img)
+            stop = self.should_stop()
+            if stop:
+                raise stop
+            self.sweep_phase(img, sweep_min)
+        finally:
+            self.rec({"type": "cycle_end", "cycle": self.cycle, "image": img.name, "legs": n_legs,
+                      "failed": n_failed, "seconds": round(time.time() - t_cycle, 1)})
+            self.refresh_report()
+
+    def refresh_report(self) -> None:
+        rp = os.path.join(HERE, "card_stress_report.py")
+        if not os.path.exists(rp):
+            return
+        try:
+            r = subprocess.run([sys.executable, rp, self.out], capture_output=True, text=True, timeout=120)
+            if r.returncode != 0:
+                self.say(f"the report script exited {r.returncode} (report.txt is as it was): {(r.stderr or r.stdout)[-200:]}")
+        except (OSError, subprocess.TimeoutExpired) as e:
+            self.say(f"the report script did not run: {e}")
+
+    # -- the whole run --------------------------------------------------------------
+    def run(self) -> int:
+        a = self.a
+        os.makedirs(self.logs, exist_ok=True)
+        os.makedirs(self.tmp, exist_ok=True)
+        self.run_id = os.path.basename(self.out.rstrip("/\\"))
+        if os.path.exists(self.stop_path):
+            print(f"{self.stop_path} exists: remove it to start (a stale stop file would end the run "
+                  f"after its first leg)", file=sys.stderr)
+            return 2
+        problem = self.out_in_tree()
+        if problem:
+            print(problem, file=sys.stderr)
+            return 2
+        resumed = os.path.exists(self.metrics)
+        if resumed and not a.resume:
+            print(f"{self.metrics} exists: give --resume {self.out} to continue that run, or a new --out",
+                  file=sys.stderr)
+            return 2
+        for name, (dflt, tiles, target, sha) in IMAGES.items():
+            path = a.image.get(name) if a.image else None
+            self.images[name] = Image(name, expand(path or dflt), tiles, target,
+                                      (a.sha or {}).get(name, sha if not self.dry else None))
+        self.items = L.sweep_items()
+        exit_code = 0
+        reason = "finished"
+        try:
+            self.load_state()
+            with open(os.path.join(self.out, "settings.json"), "w", encoding="utf-8") as fh:
+                json.dump({k: v for k, v in vars(a).items()}, fh, indent=1, default=str)
+            self.say(f"card-stress: out {self.out}{' (resumed)' if resumed else ''}; "
+                     f"{'QUICK ' if self.quick else ''}{'DRY RUN ' if self.dry else ''}"
+                     f"until {L.iso(self.deadline) if self.deadline else 'no deadline'}")
+            if self.quick:
+                self.say("--quick: every leg once on each image, short slices. ESTIMATED at 24 to 28 minutes on "
+                         "the card (docs/CARDDAY.md, \"The long run\"): from the 2026-10-06 card times where there "
+                         "are some, guesses for seq-check, the sweep slices and the image loads; not measured")
+            self.say(f"stop it: touch {self.stop_path}   (it ends after the leg running)")
+            self.say(f"read it: cat {self.status_path}   or   python3 {os.path.join(HERE, 'card_stress_report.py')} {self.out}")
+            self.state = "GUARD"
+            self.guard(False)
+            self.pre_check()
+            self.rec({"type": "run_start", "run_id": self.run_id, "out": self.out,
+                      "host": os.uname().nodename if hasattr(os, "uname") else os.environ.get("COMPUTERNAME", "?"),
+                      "argv": sys.argv[1:], "settings": {"until": L.iso(self.deadline) if self.deadline else None,
+                      "quick": self.quick, "dry_run": self.dry, "weights": self.weights,
+                      "sweep_minutes": self.sweep_minutes, "legs": self.battery,
+                      "timeouts": self.timeouts, "every": self.every, "nice": a.nice,
+                      "soak_jobs": a.soak_jobs, "max_card_failures": a.max_card_failures,
+                      "disk_floor_gb": a.disk_floor_gb},
+                      "tree": getattr(self, "tree", None),
+                      "images": {n: {"sha256": i.sha, "bytes": i.bytes, "tiles": i.tiles, "path": i.path,
+                                     "target": i.target} for n, i in self.images.items()},
+                      "deadline": L.iso(self.deadline) if self.deadline else None, "resumed": resumed})
+            self.started = True
+            if self.torn_note:
+                self.event("torn_tail", self.torn_note)
+            self.note_beside()
+            self.state = "BUILD"
+            self.build_and_check()
+            if not self.items:
+                self.items = L.sweep_items()
+            self.install_signals()
+            if a.telemetry_seconds > 0:
+                self.tel_thread = threading.Thread(target=self.tel_loop, daemon=True)
+                self.tel_thread.start()
+            self.state = "RUNNING"
+            self.write_status()
+            n_cycles = 0
+            while True:
+                stop = self.should_stop()
+                if stop:
+                    raise stop
+                img = self.next_image()
+                t_c = time.time()
+                try:
+                    self.run_cycle(img)
+                    self.internal_errors = 0
+                except Stop:
+                    raise
+                except Exception as e:
+                    # An unexpected exception (a defect in this driver, not a failing leg) must not end a
+                    # 60-hour run: record it with its traceback, make sure nothing of ours is left running,
+                    # and go on to the next cycle; the fifth in a row stops the run, by name.
+                    self.internal_errors += 1
+                    self.event("driver_error", f"{type(e).__name__}: {e}", n=self.internal_errors,
+                               traceback=traceback.format_exc()[-1800:])
+                    self.terminate_children()
+                    if self.internal_errors >= 5:
+                        raise Stop("driver_error", 3, f"{self.internal_errors} unexpected exceptions in a row; "
+                                   f"the last: {type(e).__name__}: {e}")
+                    self.sleep_interruptible(min(30.0, self.a.retry_pause))
+                n_cycles += 1
+                if time.time() - t_c < 1.0:
+                    time.sleep(1.0)       # a cycle that ran nothing must not spin
+                if self.quick and n_cycles >= len([n for n in ("quad", "single", "deep") if n in self.images]):
+                    raise Stop("quick_done", 0, "every image visited once")
+        except Stop as s:
+            reason, exit_code = s.reason, s.exit_code
+            self.event(s.reason if s.reason in ("deadline", "stop_file", "disk_floor", "tree_moved", "card_lost",
+                                                "guard_timeout", "driver_error") else "stop_requested",
+                       s.detail or s.reason, reason=s.reason)
+            if s.exit_code != 0:
+                self.write_stopped(s)
+        except SystemExit:
+            raise
+        except KeyboardInterrupt:
+            reason, exit_code = "interrupted", 3
+        finally:
+            self.tel_stop.set()
+            if self.tel_thread:
+                self.tel_thread.join(timeout=5)
+            self.terminate_children()
+            try:
+                if self.started:
+                    self.telemetry("end")
+            except Exception:
+                pass
+            if self.started:
+                self.rec({"type": "run_end", "reason": reason, "exit": exit_code, "cycles": self.cycle})
+            self.state = f"{'STOPPED' if exit_code else 'FINISHED'}: {reason}"
+            self.write_status()
+            if self.started:
+                self.refresh_report()
+        if self.quick and exit_code == 0:
+            # the smoke is a check: every leg must have passed (a skip is named, not a failure)
+            bad = {k: v for k, v in self.counts.items() if k not in ("pass", "skipped")}
+            if bad:
+                exit_code = 1
+                self.say(f"quick: not every leg passed: {bad}")
+        self.say(f"card-stress ends: {reason} (exit {exit_code}); the card is left idle "
+                 f"(no process of this run is alive)")
+        return exit_code
+
+    def out_in_tree(self) -> Optional[str]:
+        """--out inside the checkout would make the tree untracked and change the build id
+        hw/card-segrun.sh asserts on every run (the id the tools were built with names a tree
+        with no untracked files). Inside is allowed only where git ignores it."""
+        rel = os.path.relpath(self.out, self.root)
+        if rel.startswith("..") or os.path.isabs(rel):
+            return None
+        try:
+            r = subprocess.run(["git", "-C", self.root, "check-ignore", "-q", self.out], capture_output=True,
+                               timeout=60)
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        if r.returncode == 0:
+            return None
+        return (f"--out {self.out} is inside the checkout and git does not ignore it: its files would make the "
+                f"tree untracked, and hw/card-segrun.sh would then refuse the tools' build id. Give an --out "
+                f"outside {self.root}.")
+
+    def write_stopped(self, s: Stop) -> None:
+        try:
+            with open(os.path.join(self.out, "STOPPED.txt"), "w", encoding="utf-8") as fh:
+                fh.write(f"{L.iso(time.time())}  the driver stopped: {s.reason}\n{s.detail}\n"
+                         f"The card was left idle: no process this run started is alive. "
+                         f"Read {os.path.join(self.out, 'status.txt')} and the report.\n")
+        except OSError:
+            pass
+
+    def install_signals(self) -> None:
+        def handler(signum, _frame):
+            name = signal.Signals(signum).name
+            if self.sig is None:
+                self.sig = name
+                self.event("signal", f"{name}: the run ends after the leg running (send it again to "
+                           f"terminate the leg)")
+            else:
+                self.hard = True
+        for s in (signal.SIGINT, signal.SIGTERM):
+            try:
+                signal.signal(s, handler)
+            except (ValueError, OSError):
+                pass
+        if hasattr(signal, "SIGHUP"):
+            try:
+                signal.signal(signal.SIGHUP, signal.SIG_IGN)     # a closed terminal must not end the run
+            except (ValueError, OSError):
+                pass
+
+    def terminate_children(self) -> None:
+        """Whatever this run started and is still alive, by PID. Never by a pattern."""
+        for pid, proc in list(self.children.items()):
+            if proc.poll() is None:
+                self.say(f"terminating pid {pid} (started by this run)")
+                self.kill_group(proc, "TERM")
+                t_end = time.time() + self.a.kill_after
+                while time.time() < t_end and proc.poll() is None:
+                    time.sleep(0.5)
+                if proc.poll() is None:
+                    self.kill_group(proc, "KILL")
+            self.children.pop(pid, None)
+
+
+# ---------------------------------------------------------------------------
+# the command line
+# ---------------------------------------------------------------------------
+
+def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
+    ap = argparse.ArgumentParser(
+        prog="card-stress.sh", formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=__doc__.split("THE LEGS")[0],
+        epilog="Every default is stated in docs/CARDDAY.md, \"The long run\".")
+    g = ap.add_argument_group("the run")
+    g.add_argument("--until", help='deadline, the box\'s local time: "2026-10-19 08:00". Required for a long run.')
+    g.add_argument("--quick", action="store_true", help="the smoke: every leg once on each image, short slices")
+    g.add_argument("--dry-run", action="store_true", help="stand-ins for every command; no XRT, no card")
+    g.add_argument("--out", help="run directory (default: ~/card-stress-out/<stamp>-<commit>). Keep it OUTSIDE the "
+                   "checkout: files there make the tree untracked, and hw/card-segrun.sh asserts the tree's build id")
+    g.add_argument("--resume", action="store_true", help="continue the run in --out (sweep state is replayed)")
+    g.add_argument("--root", default=ROOT, help=argparse.SUPPRESS)
+    g.add_argument("--python", default=os.environ.get("PYTHON", "python3"),
+                   help="the python that runs seq_check.py and acceptance.py (default $PYTHON or python3)")
+    g = ap.add_argument_group("the images")
+    g.add_argument("--image", action="append", default=[], metavar="NAME=PATH",
+                   help="override an image's path (quad, single, deep); defaults are $HOME/cardday-rev8{q,a,d}/...")
+    g.add_argument("--sha", action="append", default=[], metavar="NAME=HEX",
+                   help="override the SHA-256 an image must have (defaults: VALIDATION.md's, 2026-10-06)")
+    g.add_argument("--weights", default="quad=4,single=1,deep=1", help="rotation weights (default %(default)s)")
+    g = ap.add_argument_group("the legs")
+    g.add_argument("--legs", default="", help="the battery, comma-separated, in order (default: all; --quick: the brief's)")
+    g.add_argument("--every", default="", help="LEG=N: run LEG on every Nth visit of an image (default selftest=3)")
+    g.add_argument("--timeout", default="", help="LEG=SECONDS overrides of the per-leg timeouts")
+    g.add_argument("--seq-trials", type=int, default=250, help="seq_check --trials (default %(default)s)")
+    g.add_argument("--rev8-images", help="acceptance.py --images for the revision-8 set (default OUT/rev8-images); "
+                   "seed it to include the two 40-minute-plus compiles")
+    g.add_argument("--keep-pass-logs", choices=("gz", "verdict", "none"), default="gz")
+    g = ap.add_argument_group("the sweep")
+    g.add_argument("--sweep-minutes", default="quad=45,single=20,deep=20", help="sweep time per cycle by image (default %(default)s)")
+    g.add_argument("--sweep-slice-seconds", type=float, default=600, help="target seconds a sweep job runs (default %(default)s)")
+    g.add_argument("--probe-cases", type=int, default=1 << 20, help="size of the first slice, which measures the rate (default %(default)s)")
+    g.add_argument("--quick-slice-cases", type=int, default=1 << 18, help="slice size in --quick (default %(default)s)")
+    g.add_argument("--min-slice-seconds", type=float, default=120, help="no sweep job starts with less cycle time than this")
+    g.add_argument("--quick-sweep-seconds", type=float, default=180, help="time budget of --quick's sweep on an image")
+    g.add_argument("--soak-jobs", default="auto", help="soak processes at once: auto = one a tile (4 on the quad, pinned by "
+                   "CFT_XRT_TILES), or a number")
+    g.add_argument("--sweep-weights", default="exhaustive=3,random=1", help="share of sweep slices by campaign kind")
+    g.add_argument("--quarantine-after", type=int, default=2, help="a slice that fails to finish this often is moved past")
+    g.add_argument("--no-sweep", action="store_true", help="the battery only")
+    g.add_argument("--sweep-items", default="", help="comma-separated campaign items to sweep, e.g. sqrt32-rne,rint32-rne "
+                   "(default: all; names are hw/card_stress_lib.py's sweep_items)")
+    g = ap.add_argument_group("policy")
+    g.add_argument("--retry-pause", type=float, default=120, help="seconds to wait after the card fails to answer")
+    g.add_argument("--max-card-failures", type=int, default=6, help="consecutive failures after which the run stops")
+    g.add_argument("--leg-retries", type=int, default=1, help="times a leg that lost the card is run again")
+    g.add_argument("--kill-after", type=float, default=60, help="seconds between TERM and KILL")
+    g.add_argument("--nice", type=int, default=10, help="nice -n for every leg (0: none)")
+    g.add_argument("--disk-floor-gb", type=float, default=5, help="stop cleanly below this much free space (default %(default)s)")
+    g.add_argument("--disk-extra", default="/data", help="a second filesystem held to the floor (default %(default)s, if present)")
+    g.add_argument("--guard-wait-max", type=float, default=4 * 3600, help="seconds to wait for another card user")
+    g.add_argument("--guard-poll", type=float, default=30)
+    g.add_argument("--deadline-grace", type=float, default=900, help="a leg whose estimate ends this far past the deadline is not started")
+    g = ap.add_argument_group("telemetry and the build")
+    g.add_argument("--card", default="0000:02:00.1", help="the user function's address (default %(default)s)")
+    g.add_argument("--telemetry-seconds", type=float, default=300, help="sample every N seconds (0: between legs only)")
+    g.add_argument("--telemetry-tool", default="auto", help="xrt-smi or xbutil (default: whichever is on PATH)")
+    g.add_argument("--telemetry-reports", default="electrical,thermal,mechanical")
+    g.add_argument("--telemetry-timeout", type=float, default=60)
+    g.add_argument("--xrt-root", default="/opt/xilinx/xrt")
+    g.add_argument("--build-jobs", type=int, default=4)
+    g.add_argument("--make-xrt-flags", default="", help=argparse.SUPPRESS)   # the test's: replaces XRT=1 XRT_ROOT=...
+    g.add_argument("--build-timeout", type=float, default=2400)
+    a = ap.parse_args(argv)
+    a.image = dict(kv.split("=", 1) for kv in a.image) if a.image else {}
+    for k in a.image:
+        if k not in IMAGES:
+            ap.error(f"--image {k}: not one of {', '.join(IMAGES)}")
+    a.sha = dict(kv.split("=", 1) for kv in a.sha) if a.sha else {}
+    if not a.quick and not a.until and not a.dry_run:
+        ap.error('a long run needs --until "YYYY-MM-DD HH:MM" (or --quick for the smoke)')
+    if a.until:
+        try:
+            L.parse_when(a.until)
+        except ValueError as e:
+            ap.error(str(e))
+    if a.sweep_items:
+        known = {it.name for it in L.sweep_items()}
+        for n in a.sweep_items.split(","):
+            if n and n not in known:
+                ap.error(f"--sweep-items {n!r}: not an item ({', '.join(sorted(known)[:6])}, ...)")
+    if a.soak_jobs != "auto" and not a.soak_jobs.isdigit():
+        ap.error("--soak-jobs is auto or a number")
+    if not a.out:
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        sha = ""
+        try:
+            sha = subprocess.run(["git", "-C", a.root, "rev-parse", "--short", "HEAD"], capture_output=True,
+                                 text=True, timeout=30).stdout.strip()
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        a.out = os.path.join(os.path.expanduser("~"), "card-stress-out",
+                             f"{stamp}-{sha or 'nogit'}{'-quick' if a.quick else ''}")
+    return a
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    a = parse_args(argv)
+    os.makedirs(a.out, exist_ok=True)
+    return Driver(a).run()
+
+
+if __name__ == "__main__":
+    sys.exit(main())

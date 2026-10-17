@@ -1,0 +1,455 @@
+libcft build commit=16a5e0058f5051e4938dd66213fc11972573a1b8 tracked=clean untracked=present
+    the completion witness at open: NOT TESTED - only an xclbin opens tiles
+device: backend software, 1 tile, contract 0x00000000, formats fp32 fp64 fp128 fp256
+  format refusals: NOT TESTED - this image carries all four formats, so there is nothing to refuse
+  image identity (software): refused by name - cft_get_image_id: the software backend loads no device image - no xclbin to hash and no CAPS register to read. What determines its bits is this library, whose identity is cft_build_id()
+  image identity (software): refused by name - cft_get_image_id: the software backend loads no device image - no xclbin to hash and no CAPS register to read. What determines its bits is this library, whose identity is cft_build_id()
+comparing 256 elements per case against the software backend
+the caps a backend reports are the caps it enforces
+  software reports max_deposits 1048576, max_insns 4294967295, max_consts 512, seq_features 0x7ff1f
+    +1 deposit slot -> operation or format not available on this device: this program's max_deposits is 1048577; this device's is 1048576 (deposit slots a lane). Ask cft_get_caps - cft_caps.max_deposits - before building one: a device refuses an image past its capacities itself, with a status bit and no explanation
+    max_insns: NOT TESTED - 4294967295, and an image past it is 34359738400 bytes
+    k[511] (kx, nine bits form) loads, at the cap
+    max_consts, one past it: NOT TESTED - 512, and an index past it does not fit the immediate's nine bits
+    scratch slot 255 loads, at the cap
+    scratch slot 256 -> operation or format not available on this device: this program's scratch slot is 256; this device's is 255 (scratch slots a lane, indexed from 0). Ask cft_get_caps - cft_caps.max_scratch - before building one: a device refuses an image past its capacities itself, with a status bit and no explanation
+    features: kx REGS32 BANK_PTR KX9 IMUL SCRATCH SCRATCH_IO SCRATCH_STRICT SCALAR REDUCE_SEG INDEXED LANE_MASK AUGADD SCRATCH_STEP LANE_FLAGS FLAG_CONTROL   max_scratch 256
+    REGS32 published, r31 loads
+    BANK_PTR published, a BANK_EXT image loads
+    SCRATCH published, STL/LDL loads
+    SCRATCH_IO published, a SCRATCH_IO image loads
+    SCRATCH_STRICT published, a strict image loads
+    CFT_SEQ_FEAT_AUGADD published, the augmentedAddition pair loads
+    CFT_SEQ_FEAT_SCRATCH_STEP published, a stepped STX/LDX loads
+    CFT_SEQ_FEAT_FLAG_CONTROL published, a raise and a quiet region loads
+    KX9 published, k[256] loads
+  device reports max_deposits 1048576, max_insns 4294967295, max_consts 512, seq_features 0x7ff1f
+    +1 deposit slot -> operation or format not available on this device: this program's max_deposits is 1048577; this device's is 1048576 (deposit slots a lane). Ask cft_get_caps - cft_caps.max_deposits - before building one: a device refuses an image past its capacities itself, with a status bit and no explanation
+    max_insns: NOT TESTED - 4294967295, and an image past it is 34359738400 bytes
+    k[511] (kx, nine bits form) loads, at the cap
+    max_consts, one past it: NOT TESTED - 512, and an index past it does not fit the immediate's nine bits
+    scratch slot 255 loads, at the cap
+    scratch slot 256 -> operation or format not available on this device: this program's scratch slot is 256; this device's is 255 (scratch slots a lane, indexed from 0). Ask cft_get_caps - cft_caps.max_scratch - before building one: a device refuses an image past its capacities itself, with a status bit and no explanation
+    features: kx REGS32 BANK_PTR KX9 IMUL SCRATCH SCRATCH_IO SCRATCH_STRICT SCALAR REDUCE_SEG INDEXED LANE_MASK AUGADD SCRATCH_STEP LANE_FLAGS FLAG_CONTROL   max_scratch 256
+    REGS32 published, r31 loads
+    BANK_PTR published, a BANK_EXT image loads
+    SCRATCH published, STL/LDL loads
+    SCRATCH_IO published, a SCRATCH_IO image loads
+    SCRATCH_STRICT published, a strict image loads
+    CFT_SEQ_FEAT_AUGADD published, the augmentedAddition pair loads
+    CFT_SEQ_FEAT_SCRATCH_STEP published, a stepped STX/LDX loads
+    CFT_SEQ_FEAT_FLAG_CONTROL published, a raise and a quiet region loads
+    KX9 published, k[256] loads
+fp32
+  fma ok: 65 checks so far, 0 failed
+  fma ok: 88 checks so far, 0 failed
+  fma ok: 111 checks so far, 0 failed
+  fma ok: 134 checks so far, 0 failed
+  fma ok: 157 checks so far, 0 failed
+    fp32 fma: 6 (scalar, indexed) operand pairs, call and constant-bank program both == dense
+  add ok: 240 checks so far, 0 failed
+  add ok: 263 checks so far, 0 failed
+  add ok: 286 checks so far, 0 failed
+  add ok: 309 checks so far, 0 failed
+  add ok: 332 checks so far, 0 failed
+    fp32 add: 2 (scalar, indexed) operand pairs, call and constant-bank program both == dense
+  sub ok: 375 checks so far, 0 failed
+  sub ok: 398 checks so far, 0 failed
+  sub ok: 421 checks so far, 0 failed
+  sub ok: 444 checks so far, 0 failed
+  sub ok: 467 checks so far, 0 failed
+    fp32 sub: 2 (scalar, indexed) operand pairs, call and constant-bank program both == dense
+  mul ok: 510 checks so far, 0 failed
+  mul ok: 533 checks so far, 0 failed
+  mul ok: 556 checks so far, 0 failed
+  mul ok: 579 checks so far, 0 failed
+  mul ok: 602 checks so far, 0 failed
+    fp32 mul: 2 (scalar, indexed) operand pairs, call and constant-bank program both == dense
+  min ok: 645 checks so far, 0 failed
+  min ok: 668 checks so far, 0 failed
+  min ok: 691 checks so far, 0 failed
+  min ok: 714 checks so far, 0 failed
+  min ok: 737 checks so far, 0 failed
+    fp32 min: 2 (scalar, indexed) operand pairs, call and constant-bank program both == dense
+  maxnum ok: 780 checks so far, 0 failed
+  maxnum ok: 803 checks so far, 0 failed
+  maxnum ok: 826 checks so far, 0 failed
+  maxnum ok: 849 checks so far, 0 failed
+  maxnum ok: 872 checks so far, 0 failed
+    fp32 maxnum: 2 (scalar, indexed) operand pairs, call and constant-bank program both == dense
+  cmplt ok: 915 checks so far, 0 failed
+  cmplt ok: 938 checks so far, 0 failed
+  cmplt ok: 961 checks so far, 0 failed
+  cmplt ok: 984 checks so far, 0 failed
+  cmplt ok: 1007 checks so far, 0 failed
+    fp32 cmplt: 2 (scalar, indexed) operand pairs, call and constant-bank program both == dense
+  select ok: 1050 checks so far, 0 failed
+  select ok: 1073 checks so far, 0 failed
+  select ok: 1096 checks so far, 0 failed
+  select ok: 1119 checks so far, 0 failed
+  select ok: 1142 checks so far, 0 failed
+    fp32 select: 6 (scalar, indexed) operand pairs, call and constant-bank program both == dense
+  ixor ok: 1225 checks so far, 0 failed
+  ixor ok: 1248 checks so far, 0 failed
+  ixor ok: 1271 checks so far, 0 failed
+  ixor ok: 1294 checks so far, 0 failed
+  ixor ok: 1317 checks so far, 0 failed
+    fp32 ixor: 2 (scalar, indexed) operand pairs, call and constant-bank program both == dense
+  ishr ok: 1360 checks so far, 0 failed
+  ishr ok: 1383 checks so far, 0 failed
+  ishr ok: 1406 checks so far, 0 failed
+  ishr ok: 1429 checks so far, 0 failed
+  ishr ok: 1452 checks so far, 0 failed
+    fp32 ishr: 2 (scalar, indexed) operand pairs, call and constant-bank program both == dense
+  recip_seed ok: 1495 checks so far, 0 failed
+  recip_seed ok: 1518 checks so far, 0 failed
+  recip_seed ok: 1541 checks so far, 0 failed
+  recip_seed ok: 1564 checks so far, 0 failed
+  recip_seed ok: 1587 checks so far, 0 failed
+  rsqrt_seed ok: 1610 checks so far, 0 failed
+  rsqrt_seed ok: 1633 checks so far, 0 failed
+  rsqrt_seed ok: 1656 checks so far, 0 failed
+  rsqrt_seed ok: 1679 checks so far, 0 failed
+  rsqrt_seed ok: 1702 checks so far, 0 failed
+    SCRATCH_STRICT: an index past the depth reads +0, stores nothing and is reported; in range, nothing is
+  the walk's depth against 256: NOT TESTED - this device has 256 slots a lane, so the walk wraps on both sides of the comparison
+  seq scratch block of 300 slots: NOT TESTED - this device has 256 scratch slots a lane, so the block is past its depth (refused by name above)
+    a scratch block at 256 slots (only the whole depth both ways): every lane's bytes; 256 + 1 refused by name
+    a program run of 32,768 lanes and of 32,769, no mask: one page of mask bits and one bit past it
+    a program at each tile's boundaries, 1 tile: a page of counts, of mask bits and - where the device publishes the block - of lane flags, each exactly and one beat past, with and without a mask - 10 of 10 right
+    a program past one tile's HBM channel: NOT TESTED - this backend has no HBM channel to run past
+    the completion witness's refusals: NOT TESTED - the software backend has no tile whose CTRL it reads
+    a resident output lost by a refused run: NOT TESTED - the software backend has no tile to refuse a run on
+    seq lane mask into resident outputs (fp32): 257 lanes, a third masked, fresh and after an unmasked run - every masked lane the caller's, every kept lane the run's
+  seq indexed inputs: 200 lanes through a 67-element source, 40 of them +0, identity == dense and rotated != dense, the bound refused on both
+  seq lane mask: 200 lanes, 67 of them masked, device == software, masked lanes untouched, all-ones == dense and holed != dense
+  seq indexed and masked: 200 lanes, 67 masked, a table of 40 sentinels into a 67-element source, device == software, masked lanes untouched, all-ones == unmasked
+  seq lane mask, scratch-out: 200 lanes, 67 of them masked, device == software, masked slots and counts untouched, kept lanes hold their own store
+  seq lane flags: 200 lanes, 67 masked, 62 marked, device == software, identities hold (FLAGS 0x1e, STATUS 0x00000040), masked bytes untouched, the region silent and its control loud
+  seq lane flags, no mask: 200 lanes, every byte written, device == software, identities hold (FLAGS 0x1e, STATUS 0x00000040)
+  seq lane flags, the reports image: under the mask and without it, device == software, counts included, identities hold, [5] set in 267 kept lanes and clear in 66, [6] set in 84 and clear in 249
+  sequencer programs: 1937 checks so far, 0 failed
+  div/sqrt ok: 1945 checks so far, 0 failed
+  div/sqrt ok: 1953 checks so far, 0 failed
+  div/sqrt ok: 1961 checks so far, 0 failed
+  div/sqrt ok: 1969 checks so far, 0 failed
+  div/sqrt ok: 1977 checks so far, 0 failed
+  boundary sizes done: 2017 checks, 0 failed
+  partition invariance done: 2020 checks, 0 failed
+  reductions
+    sum, finite operands: 2084 checks, 0 failed
+    sum, any bit pattern: 2088 checks, 0 failed
+    sum, all five attributes: 2108 checks, 0 failed
+    dot: 2141 checks, 0 failed
+    sumsq: 2189 checks, 0 failed
+    sumabs: 2237 checks, 0 failed
+    maxall: 2301 checks, 0 failed
+    per segment: 2581 checks, 0 failed (CAPS2[8] present, computed on the device)
+    reductions with b and c poisoned: NOT RUN - the software backend has no b and c of its own to poison
+fp64
+  fma ok: 2604 checks so far, 0 failed
+  fma ok: 2627 checks so far, 0 failed
+  fma ok: 2650 checks so far, 0 failed
+  fma ok: 2673 checks so far, 0 failed
+  fma ok: 2696 checks so far, 0 failed
+    fp64 fma: 6 (scalar, indexed) operand pairs, call and constant-bank program both == dense
+  add ok: 2779 checks so far, 0 failed
+  add ok: 2802 checks so far, 0 failed
+  add ok: 2825 checks so far, 0 failed
+  add ok: 2848 checks so far, 0 failed
+  add ok: 2871 checks so far, 0 failed
+    fp64 add: 2 (scalar, indexed) operand pairs, call and constant-bank program both == dense
+  sub ok: 2914 checks so far, 0 failed
+  sub ok: 2937 checks so far, 0 failed
+  sub ok: 2960 checks so far, 0 failed
+  sub ok: 2983 checks so far, 0 failed
+  sub ok: 3006 checks so far, 0 failed
+    fp64 sub: 2 (scalar, indexed) operand pairs, call and constant-bank program both == dense
+  mul ok: 3049 checks so far, 0 failed
+  mul ok: 3072 checks so far, 0 failed
+  mul ok: 3095 checks so far, 0 failed
+  mul ok: 3118 checks so far, 0 failed
+  mul ok: 3141 checks so far, 0 failed
+    fp64 mul: 2 (scalar, indexed) operand pairs, call and constant-bank program both == dense
+  min ok: 3184 checks so far, 0 failed
+  min ok: 3207 checks so far, 0 failed
+  min ok: 3230 checks so far, 0 failed
+  min ok: 3253 checks so far, 0 failed
+  min ok: 3276 checks so far, 0 failed
+    fp64 min: 2 (scalar, indexed) operand pairs, call and constant-bank program both == dense
+  maxnum ok: 3319 checks so far, 0 failed
+  maxnum ok: 3342 checks so far, 0 failed
+  maxnum ok: 3365 checks so far, 0 failed
+  maxnum ok: 3388 checks so far, 0 failed
+  maxnum ok: 3411 checks so far, 0 failed
+    fp64 maxnum: 2 (scalar, indexed) operand pairs, call and constant-bank program both == dense
+  cmplt ok: 3454 checks so far, 0 failed
+  cmplt ok: 3477 checks so far, 0 failed
+  cmplt ok: 3500 checks so far, 0 failed
+  cmplt ok: 3523 checks so far, 0 failed
+  cmplt ok: 3546 checks so far, 0 failed
+    fp64 cmplt: 2 (scalar, indexed) operand pairs, call and constant-bank program both == dense
+  select ok: 3589 checks so far, 0 failed
+  select ok: 3612 checks so far, 0 failed
+  select ok: 3635 checks so far, 0 failed
+  select ok: 3658 checks so far, 0 failed
+  select ok: 3681 checks so far, 0 failed
+    fp64 select: 6 (scalar, indexed) operand pairs, call and constant-bank program both == dense
+  ixor ok: 3764 checks so far, 0 failed
+  ixor ok: 3787 checks so far, 0 failed
+  ixor ok: 3810 checks so far, 0 failed
+  ixor ok: 3833 checks so far, 0 failed
+  ixor ok: 3856 checks so far, 0 failed
+    fp64 ixor: 2 (scalar, indexed) operand pairs, call and constant-bank program both == dense
+  ishr ok: 3899 checks so far, 0 failed
+  ishr ok: 3922 checks so far, 0 failed
+  ishr ok: 3945 checks so far, 0 failed
+  ishr ok: 3968 checks so far, 0 failed
+  ishr ok: 3991 checks so far, 0 failed
+    fp64 ishr: 2 (scalar, indexed) operand pairs, call and constant-bank program both == dense
+  recip_seed ok: 4034 checks so far, 0 failed
+  recip_seed ok: 4057 checks so far, 0 failed
+  recip_seed ok: 4080 checks so far, 0 failed
+  recip_seed ok: 4103 checks so far, 0 failed
+  recip_seed ok: 4126 checks so far, 0 failed
+  rsqrt_seed ok: 4149 checks so far, 0 failed
+  rsqrt_seed ok: 4172 checks so far, 0 failed
+  rsqrt_seed ok: 4195 checks so far, 0 failed
+  rsqrt_seed ok: 4218 checks so far, 0 failed
+  rsqrt_seed ok: 4241 checks so far, 0 failed
+    SCRATCH_STRICT: an index past the depth reads +0, stores nothing and is reported; in range, nothing is
+  the walk's depth against 256: NOT TESTED - this device has 256 slots a lane, so the walk wraps on both sides of the comparison
+  seq scratch block of 300 slots: NOT TESTED - this device has 256 scratch slots a lane, so the block is past its depth (refused by name above)
+    a scratch block at 256 slots (only the whole depth both ways): every lane's bytes; 256 + 1 refused by name
+    seq lane mask into resident outputs (fp64): 257 lanes, a third masked, fresh and after an unmasked run - every masked lane the caller's, every kept lane the run's
+  seq indexed inputs: 200 lanes through a 67-element source, 40 of them +0, identity == dense and rotated != dense, the bound refused on both
+  seq lane mask: 200 lanes, 67 of them masked, device == software, masked lanes untouched, all-ones == dense and holed != dense
+  seq indexed and masked: 200 lanes, 67 masked, a table of 40 sentinels into a 67-element source, device == software, masked lanes untouched, all-ones == unmasked
+  seq lane mask, scratch-out: 200 lanes, 67 of them masked, device == software, masked slots and counts untouched, kept lanes hold their own store
+  seq lane flags: 200 lanes, 67 masked, 69 marked, device == software, identities hold (FLAGS 0x1e, STATUS 0x00000040), masked bytes untouched, the region silent and its control loud
+  seq lane flags, no mask: 200 lanes, every byte written, device == software, identities hold (FLAGS 0x1e, STATUS 0x00000040)
+  seq lane flags, the reports image: under the mask and without it, device == software, counts included, identities hold, [5] set in 267 kept lanes and clear in 66, [6] set in 84 and clear in 249
+  sequencer programs: 4462 checks so far, 0 failed
+  div/sqrt ok: 4470 checks so far, 0 failed
+  div/sqrt ok: 4478 checks so far, 0 failed
+  div/sqrt ok: 4486 checks so far, 0 failed
+  div/sqrt ok: 4494 checks so far, 0 failed
+  div/sqrt ok: 4502 checks so far, 0 failed
+  boundary sizes done: 4542 checks, 0 failed
+  partition invariance done: 4545 checks, 0 failed
+  reductions
+    sum, finite operands: 4609 checks, 0 failed
+    sum, any bit pattern: 4613 checks, 0 failed
+    sum, all five attributes: 4633 checks, 0 failed
+    dot: 4666 checks, 0 failed
+    sumsq: 4714 checks, 0 failed
+    sumabs: 4762 checks, 0 failed
+    maxall: 4826 checks, 0 failed
+    per segment: 5106 checks, 0 failed (CAPS2[8] present, computed on the device)
+    reductions with b and c poisoned: NOT RUN - the software backend has no b and c of its own to poison
+fp128
+  fma ok: 5129 checks so far, 0 failed
+  fma ok: 5152 checks so far, 0 failed
+  fma ok: 5175 checks so far, 0 failed
+  fma ok: 5198 checks so far, 0 failed
+  fma ok: 5221 checks so far, 0 failed
+    fp128 fma: 6 (scalar, indexed) operand pairs, call and constant-bank program both == dense
+  add ok: 5304 checks so far, 0 failed
+  add ok: 5327 checks so far, 0 failed
+  add ok: 5350 checks so far, 0 failed
+  add ok: 5373 checks so far, 0 failed
+  add ok: 5396 checks so far, 0 failed
+    fp128 add: 2 (scalar, indexed) operand pairs, call and constant-bank program both == dense
+  sub ok: 5439 checks so far, 0 failed
+  sub ok: 5462 checks so far, 0 failed
+  sub ok: 5485 checks so far, 0 failed
+  sub ok: 5508 checks so far, 0 failed
+  sub ok: 5531 checks so far, 0 failed
+    fp128 sub: 2 (scalar, indexed) operand pairs, call and constant-bank program both == dense
+  mul ok: 5574 checks so far, 0 failed
+  mul ok: 5597 checks so far, 0 failed
+  mul ok: 5620 checks so far, 0 failed
+  mul ok: 5643 checks so far, 0 failed
+  mul ok: 5666 checks so far, 0 failed
+    fp128 mul: 2 (scalar, indexed) operand pairs, call and constant-bank program both == dense
+  min ok: 5709 checks so far, 0 failed
+  min ok: 5732 checks so far, 0 failed
+  min ok: 5755 checks so far, 0 failed
+  min ok: 5778 checks so far, 0 failed
+  min ok: 5801 checks so far, 0 failed
+    fp128 min: 2 (scalar, indexed) operand pairs, call and constant-bank program both == dense
+  maxnum ok: 5844 checks so far, 0 failed
+  maxnum ok: 5867 checks so far, 0 failed
+  maxnum ok: 5890 checks so far, 0 failed
+  maxnum ok: 5913 checks so far, 0 failed
+  maxnum ok: 5936 checks so far, 0 failed
+    fp128 maxnum: 2 (scalar, indexed) operand pairs, call and constant-bank program both == dense
+  cmplt ok: 5979 checks so far, 0 failed
+  cmplt ok: 6002 checks so far, 0 failed
+  cmplt ok: 6025 checks so far, 0 failed
+  cmplt ok: 6048 checks so far, 0 failed
+  cmplt ok: 6071 checks so far, 0 failed
+    fp128 cmplt: 2 (scalar, indexed) operand pairs, call and constant-bank program both == dense
+  select ok: 6114 checks so far, 0 failed
+  select ok: 6137 checks so far, 0 failed
+  select ok: 6160 checks so far, 0 failed
+  select ok: 6183 checks so far, 0 failed
+  select ok: 6206 checks so far, 0 failed
+    fp128 select: 6 (scalar, indexed) operand pairs, call and constant-bank program both == dense
+  ixor ok: 6289 checks so far, 0 failed
+  ixor ok: 6312 checks so far, 0 failed
+  ixor ok: 6335 checks so far, 0 failed
+  ixor ok: 6358 checks so far, 0 failed
+  ixor ok: 6381 checks so far, 0 failed
+    fp128 ixor: 2 (scalar, indexed) operand pairs, call and constant-bank program both == dense
+  ishr ok: 6424 checks so far, 0 failed
+  ishr ok: 6447 checks so far, 0 failed
+  ishr ok: 6470 checks so far, 0 failed
+  ishr ok: 6493 checks so far, 0 failed
+  ishr ok: 6516 checks so far, 0 failed
+    fp128 ishr: 2 (scalar, indexed) operand pairs, call and constant-bank program both == dense
+  recip_seed ok: 6559 checks so far, 0 failed
+  recip_seed ok: 6582 checks so far, 0 failed
+  recip_seed ok: 6605 checks so far, 0 failed
+  recip_seed ok: 6628 checks so far, 0 failed
+  recip_seed ok: 6651 checks so far, 0 failed
+  rsqrt_seed ok: 6674 checks so far, 0 failed
+  rsqrt_seed ok: 6697 checks so far, 0 failed
+  rsqrt_seed ok: 6720 checks so far, 0 failed
+  rsqrt_seed ok: 6743 checks so far, 0 failed
+  rsqrt_seed ok: 6766 checks so far, 0 failed
+    SCRATCH_STRICT: an index past the depth reads +0, stores nothing and is reported; in range, nothing is
+  the walk's depth against 256: NOT TESTED - this device has 256 slots a lane, so the walk wraps on both sides of the comparison
+  seq scratch block of 300 slots: NOT TESTED - this device has 256 scratch slots a lane, so the block is past its depth (refused by name above)
+    a scratch block at 256 slots (only the whole depth both ways): every lane's bytes; 256 + 1 refused by name
+    seq lane mask into resident outputs (fp128): 257 lanes, a third masked, fresh and after an unmasked run - every masked lane the caller's, every kept lane the run's
+  seq indexed inputs: 200 lanes through a 67-element source, 40 of them +0, identity == dense and rotated != dense, the bound refused on both
+  seq lane mask: 200 lanes, 67 of them masked, device == software, masked lanes untouched, all-ones == dense and holed != dense
+  seq indexed and masked: 200 lanes, 67 masked, a table of 40 sentinels into a 67-element source, device == software, masked lanes untouched, all-ones == unmasked
+  seq lane mask, scratch-out: 200 lanes, 67 of them masked, device == software, masked slots and counts untouched, kept lanes hold their own store
+  seq lane flags: 200 lanes, 67 masked, 77 marked, device == software, identities hold (FLAGS 0x1e, STATUS 0x00000040), masked bytes untouched, the region silent and its control loud
+  seq lane flags, no mask: 200 lanes, every byte written, device == software, identities hold (FLAGS 0x1e, STATUS 0x00000040)
+  seq lane flags, the reports image: under the mask and without it, device == software, counts included, identities hold, [5] set in 267 kept lanes and clear in 66, [6] set in 84 and clear in 249
+  sequencer programs: 6987 checks so far, 0 failed
+  div/sqrt ok: 6995 checks so far, 0 failed
+  div/sqrt ok: 7003 checks so far, 0 failed
+  div/sqrt ok: 7011 checks so far, 0 failed
+  div/sqrt ok: 7019 checks so far, 0 failed
+  div/sqrt ok: 7027 checks so far, 0 failed
+  boundary sizes done: 7067 checks, 0 failed
+  partition invariance done: 7070 checks, 0 failed
+  reductions
+    sum, finite operands: 7134 checks, 0 failed
+    sum, any bit pattern: 7138 checks, 0 failed
+    sum, all five attributes: 7158 checks, 0 failed
+    dot: 7191 checks, 0 failed
+    sumsq: 7239 checks, 0 failed
+    sumabs: 7287 checks, 0 failed
+    maxall: 7351 checks, 0 failed
+    per segment: 7631 checks, 0 failed (CAPS2[8] present, computed on the device)
+    reductions with b and c poisoned: NOT RUN - the software backend has no b and c of its own to poison
+fp256
+  fma ok: 7654 checks so far, 0 failed
+  fma ok: 7677 checks so far, 0 failed
+  fma ok: 7700 checks so far, 0 failed
+  fma ok: 7723 checks so far, 0 failed
+  fma ok: 7746 checks so far, 0 failed
+    fp256 fma: 6 (scalar, indexed) operand pairs, call and constant-bank program both == dense
+  add ok: 7829 checks so far, 0 failed
+  add ok: 7852 checks so far, 0 failed
+  add ok: 7875 checks so far, 0 failed
+  add ok: 7898 checks so far, 0 failed
+  add ok: 7921 checks so far, 0 failed
+    fp256 add: 2 (scalar, indexed) operand pairs, call and constant-bank program both == dense
+  sub ok: 7964 checks so far, 0 failed
+  sub ok: 7987 checks so far, 0 failed
+  sub ok: 8010 checks so far, 0 failed
+  sub ok: 8033 checks so far, 0 failed
+  sub ok: 8056 checks so far, 0 failed
+    fp256 sub: 2 (scalar, indexed) operand pairs, call and constant-bank program both == dense
+  mul ok: 8099 checks so far, 0 failed
+  mul ok: 8122 checks so far, 0 failed
+  mul ok: 8145 checks so far, 0 failed
+  mul ok: 8168 checks so far, 0 failed
+  mul ok: 8191 checks so far, 0 failed
+    fp256 mul: 2 (scalar, indexed) operand pairs, call and constant-bank program both == dense
+  min ok: 8234 checks so far, 0 failed
+  min ok: 8257 checks so far, 0 failed
+  min ok: 8280 checks so far, 0 failed
+  min ok: 8303 checks so far, 0 failed
+  min ok: 8326 checks so far, 0 failed
+    fp256 min: 2 (scalar, indexed) operand pairs, call and constant-bank program both == dense
+  maxnum ok: 8369 checks so far, 0 failed
+  maxnum ok: 8392 checks so far, 0 failed
+  maxnum ok: 8415 checks so far, 0 failed
+  maxnum ok: 8438 checks so far, 0 failed
+  maxnum ok: 8461 checks so far, 0 failed
+    fp256 maxnum: 2 (scalar, indexed) operand pairs, call and constant-bank program both == dense
+  cmplt ok: 8504 checks so far, 0 failed
+  cmplt ok: 8527 checks so far, 0 failed
+  cmplt ok: 8550 checks so far, 0 failed
+  cmplt ok: 8573 checks so far, 0 failed
+  cmplt ok: 8596 checks so far, 0 failed
+    fp256 cmplt: 2 (scalar, indexed) operand pairs, call and constant-bank program both == dense
+  select ok: 8639 checks so far, 0 failed
+  select ok: 8662 checks so far, 0 failed
+  select ok: 8685 checks so far, 0 failed
+  select ok: 8708 checks so far, 0 failed
+  select ok: 8731 checks so far, 0 failed
+    fp256 select: 6 (scalar, indexed) operand pairs, call and constant-bank program both == dense
+  ixor ok: 8814 checks so far, 0 failed
+  ixor ok: 8837 checks so far, 0 failed
+  ixor ok: 8860 checks so far, 0 failed
+  ixor ok: 8883 checks so far, 0 failed
+  ixor ok: 8906 checks so far, 0 failed
+    fp256 ixor: 2 (scalar, indexed) operand pairs, call and constant-bank program both == dense
+  ishr ok: 8949 checks so far, 0 failed
+  ishr ok: 8972 checks so far, 0 failed
+  ishr ok: 8995 checks so far, 0 failed
+  ishr ok: 9018 checks so far, 0 failed
+  ishr ok: 9041 checks so far, 0 failed
+    fp256 ishr: 2 (scalar, indexed) operand pairs, call and constant-bank program both == dense
+  recip_seed ok: 9084 checks so far, 0 failed
+  recip_seed ok: 9107 checks so far, 0 failed
+  recip_seed ok: 9130 checks so far, 0 failed
+  recip_seed ok: 9153 checks so far, 0 failed
+  recip_seed ok: 9176 checks so far, 0 failed
+  rsqrt_seed ok: 9199 checks so far, 0 failed
+  rsqrt_seed ok: 9222 checks so far, 0 failed
+  rsqrt_seed ok: 9245 checks so far, 0 failed
+  rsqrt_seed ok: 9268 checks so far, 0 failed
+  rsqrt_seed ok: 9291 checks so far, 0 failed
+    SCRATCH_STRICT: an index past the depth reads +0, stores nothing and is reported; in range, nothing is
+  the walk's depth against 256: NOT TESTED - this device has 256 slots a lane, so the walk wraps on both sides of the comparison
+  seq scratch block of 300 slots: NOT TESTED - this device has 256 scratch slots a lane, so the block is past its depth (refused by name above)
+    a scratch block at 256 slots (only the whole depth both ways): every lane's bytes; 256 + 1 refused by name
+    seq lane mask into resident outputs (fp256): 257 lanes, a third masked, fresh and after an unmasked run - every masked lane the caller's, every kept lane the run's
+  seq indexed inputs: 200 lanes through a 67-element source, 40 of them +0, identity == dense and rotated != dense, the bound refused on both
+  seq lane mask: 200 lanes, 67 of them masked, device == software, masked lanes untouched, all-ones == dense and holed != dense
+  seq indexed and masked: 200 lanes, 67 masked, a table of 40 sentinels into a 67-element source, device == software, masked lanes untouched, all-ones == unmasked
+  seq lane mask, scratch-out: 200 lanes, 67 of them masked, device == software, masked slots and counts untouched, kept lanes hold their own store
+  seq lane flags: 200 lanes, 67 masked, 60 marked, device == software, identities hold (FLAGS 0x1e, STATUS 0x00000040), masked bytes untouched, the region silent and its control loud
+  seq lane flags, no mask: 200 lanes, every byte written, device == software, identities hold (FLAGS 0x1e, STATUS 0x00000040)
+  seq lane flags, the reports image: under the mask and without it, device == software, counts included, identities hold, [5] set in 267 kept lanes and clear in 66, [6] set in 84 and clear in 249
+  sequencer programs: 9512 checks so far, 0 failed
+  div/sqrt ok: 9520 checks so far, 0 failed
+  div/sqrt ok: 9528 checks so far, 0 failed
+  div/sqrt ok: 9536 checks so far, 0 failed
+  div/sqrt ok: 9544 checks so far, 0 failed
+  div/sqrt ok: 9552 checks so far, 0 failed
+  boundary sizes done: 9592 checks, 0 failed
+  partition invariance done: 9595 checks, 0 failed
+  reductions
+    sum, finite operands: 9659 checks, 0 failed
+    sum, any bit pattern: 9663 checks, 0 failed
+    sum, all five attributes: 9683 checks, 0 failed
+    dot: 9716 checks, 0 failed
+    sumsq: 9764 checks, 0 failed
+    sumabs: 9812 checks, 0 failed
+    maxall: 9876 checks, 0 failed
+    per segment: 10156 checks, 0 failed (CAPS2[8] present, computed on the device)
+    reductions with b and c poisoned: NOT RUN - the software backend has no b and c of its own to poison
+
+10156 checks, 0 failed
+not on this device, each named above: NOT COMPARED 0 formats, 0 buffers legs, 0 opcodes and 0 other legs; NOT TESTED 17; NOT RUN 4
+the device and the software backend agree on every case that RAN, bits and flags

@@ -1,0 +1,25 @@
+
+== the acceptance set on sw
+-- lorenz63-rk4-fp64 (reference, fp64): 256 lanes, 4 segments of 100 steps
+  ok    lorenz63-rk4-fp64: its parameters, image, bank and initial state are the set's, byte for byte
+  ok    lorenz63-rk4-fp64: cft-segrun ran it on sw (1.2 s)
+  ok    lorenz63-rk4-fp64: the certificate reads; backend software, device-xclbin none, device-tiles 1, scratch depth 2048
+  ok    lorenz63-rk4-fp64: its boundary files are its hashes, and its lines are the run handed it
+  ok    lorenz63-rk4-fp64: every boundary hash, flag word and STATUS is the set's (5 boundaries, flags [29, 24, 24, 24])
+  ok    lorenz63-rk4-fp64: cft-audit accepts it in full (1.1 s)
+  ok    lorenz63-rk4-fp64: the golden audit accepts it, segment 3 re-run on seq.py (9.1 s), and cft-audit's verdict is its own line for line
+  ok    lorenz63-rk4-fp64: the golden spot check - segment 3 re-run on seq.py for lanes [0, 1, 2, 64, 127, 128, 191, 192, 255], each equal to its certified end (0.3 s)
+PASS  lorenz63-rk4-fp64: 256 lanes, 4 x 100 steps on software, flags [29, 24, 24, 24]; every digest the set's, cft-audit accepts in full, the golden audit re-ran segment 3, the spot check holds (11.9 s)
+-- the controls, on lorenz63-rk4-fp64's own certificate and states
+  ok    control: a boundary hash planted in the record is caught
+  ok    control: a flag word planted in the record is caught
+  ok    control: a parameter planted in the record is caught
+  ok    control: an initial state planted in the record is caught
+  ok    control: a bit flipped in boundary 2's file is caught by the file check
+  ok    control: a bit flipped in lane 0's certified end is caught by the spot check
+  ok    control: cft-audit refuses that state, state-hash (exit 4)
+  ok    control: the golden audit refuses that state, state-hash
+
+== verdicts
+PASS  lorenz63-rk4-fp64: 256 lanes, 4 x 100 steps on software, flags [29, 24, 24, 24]; every digest the set's, cft-audit accepts in full, the golden audit re-ran segment 3, the spot check holds (11.9 s)
+acceptance: 1 of 1 PASS on sw (set); 16 checks ok, 0 failed, 12 s

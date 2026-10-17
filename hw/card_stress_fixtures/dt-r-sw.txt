@@ -1,0 +1,90 @@
+libcft build commit=16a5e0058f5051e4938dd66213fc11972573a1b8 tracked=clean untracked=present
+    the completion witness at open: NOT TESTED - only an xclbin opens tiles
+device: backend software, 1 tile, contract 0x00000000, formats fp32 fp64 fp128 fp256
+  format refusals: NOT TESTED - this image carries all four formats, so there is nothing to refuse
+  image identity (software): refused by name - cft_get_image_id: the software backend loads no device image - no xclbin to hash and no CAPS register to read. What determines its bits is this library, whose identity is cft_build_id()
+  image identity (software): refused by name - cft_get_image_id: the software backend loads no device image - no xclbin to hash and no CAPS register to read. What determines its bits is this library, whose identity is cft_build_id()
+comparing 256 elements per case against the software backend
+the caps a backend reports are the caps it enforces
+  software reports max_deposits 1048576, max_insns 4294967295, max_consts 512, seq_features 0x7ff1f
+    +1 deposit slot -> operation or format not available on this device: this program's max_deposits is 1048577; this device's is 1048576 (deposit slots a lane). Ask cft_get_caps - cft_caps.max_deposits - before building one: a device refuses an image past its capacities itself, with a status bit and no explanation
+    max_insns: NOT TESTED - 4294967295, and an image past it is 34359738400 bytes
+    k[511] (kx, nine bits form) loads, at the cap
+    max_consts, one past it: NOT TESTED - 512, and an index past it does not fit the immediate's nine bits
+    scratch slot 255 loads, at the cap
+    scratch slot 256 -> operation or format not available on this device: this program's scratch slot is 256; this device's is 255 (scratch slots a lane, indexed from 0). Ask cft_get_caps - cft_caps.max_scratch - before building one: a device refuses an image past its capacities itself, with a status bit and no explanation
+    features: kx REGS32 BANK_PTR KX9 IMUL SCRATCH SCRATCH_IO SCRATCH_STRICT SCALAR REDUCE_SEG INDEXED LANE_MASK AUGADD SCRATCH_STEP LANE_FLAGS FLAG_CONTROL   max_scratch 256
+    REGS32 published, r31 loads
+    BANK_PTR published, a BANK_EXT image loads
+    SCRATCH published, STL/LDL loads
+    SCRATCH_IO published, a SCRATCH_IO image loads
+    SCRATCH_STRICT published, a strict image loads
+    CFT_SEQ_FEAT_AUGADD published, the augmentedAddition pair loads
+    CFT_SEQ_FEAT_SCRATCH_STEP published, a stepped STX/LDX loads
+    CFT_SEQ_FEAT_FLAG_CONTROL published, a raise and a quiet region loads
+    KX9 published, k[256] loads
+  device reports max_deposits 1048576, max_insns 4294967295, max_consts 512, seq_features 0x7ff1f
+    +1 deposit slot -> operation or format not available on this device: this program's max_deposits is 1048577; this device's is 1048576 (deposit slots a lane). Ask cft_get_caps - cft_caps.max_deposits - before building one: a device refuses an image past its capacities itself, with a status bit and no explanation
+    max_insns: NOT TESTED - 4294967295, and an image past it is 34359738400 bytes
+    k[511] (kx, nine bits form) loads, at the cap
+    max_consts, one past it: NOT TESTED - 512, and an index past it does not fit the immediate's nine bits
+    scratch slot 255 loads, at the cap
+    scratch slot 256 -> operation or format not available on this device: this program's scratch slot is 256; this device's is 255 (scratch slots a lane, indexed from 0). Ask cft_get_caps - cft_caps.max_scratch - before building one: a device refuses an image past its capacities itself, with a status bit and no explanation
+    features: kx REGS32 BANK_PTR KX9 IMUL SCRATCH SCRATCH_IO SCRATCH_STRICT SCALAR REDUCE_SEG INDEXED LANE_MASK AUGADD SCRATCH_STEP LANE_FLAGS FLAG_CONTROL   max_scratch 256
+    REGS32 published, r31 loads
+    BANK_PTR published, a BANK_EXT image loads
+    SCRATCH published, STL/LDL loads
+    SCRATCH_IO published, a SCRATCH_IO image loads
+    SCRATCH_STRICT published, a strict image loads
+    CFT_SEQ_FEAT_AUGADD published, the augmentedAddition pair loads
+    CFT_SEQ_FEAT_SCRATCH_STEP published, a stepped STX/LDX loads
+    CFT_SEQ_FEAT_FLAG_CONTROL published, a raise and a quiet region loads
+    KX9 published, k[256] loads
+fp32
+  reductions
+    sum, finite operands: 115 checks, 0 failed
+    sum, any bit pattern: 119 checks, 0 failed
+    sum, all five attributes: 139 checks, 0 failed
+    dot: 172 checks, 0 failed
+    sumsq: 220 checks, 0 failed
+    sumabs: 268 checks, 0 failed
+    maxall: 332 checks, 0 failed
+    per segment: 612 checks, 0 failed (CAPS2[8] present, computed on the device)
+    reductions with b and c poisoned: NOT RUN - the software backend has no b and c of its own to poison
+fp64
+  reductions
+    sum, finite operands: 685 checks, 0 failed
+    sum, any bit pattern: 689 checks, 0 failed
+    sum, all five attributes: 709 checks, 0 failed
+    dot: 742 checks, 0 failed
+    sumsq: 790 checks, 0 failed
+    sumabs: 838 checks, 0 failed
+    maxall: 902 checks, 0 failed
+    per segment: 1182 checks, 0 failed (CAPS2[8] present, computed on the device)
+    reductions with b and c poisoned: NOT RUN - the software backend has no b and c of its own to poison
+fp128
+  reductions
+    sum, finite operands: 1255 checks, 0 failed
+    sum, any bit pattern: 1259 checks, 0 failed
+    sum, all five attributes: 1279 checks, 0 failed
+    dot: 1312 checks, 0 failed
+    sumsq: 1360 checks, 0 failed
+    sumabs: 1408 checks, 0 failed
+    maxall: 1472 checks, 0 failed
+    per segment: 1752 checks, 0 failed (CAPS2[8] present, computed on the device)
+    reductions with b and c poisoned: NOT RUN - the software backend has no b and c of its own to poison
+fp256
+  reductions
+    sum, finite operands: 1825 checks, 0 failed
+    sum, any bit pattern: 1829 checks, 0 failed
+    sum, all five attributes: 1849 checks, 0 failed
+    dot: 1882 checks, 0 failed
+    sumsq: 1930 checks, 0 failed
+    sumabs: 1978 checks, 0 failed
+    maxall: 2042 checks, 0 failed
+    per segment: 2322 checks, 0 failed (CAPS2[8] present, computed on the device)
+    reductions with b and c poisoned: NOT RUN - the software backend has no b and c of its own to poison
+
+2322 checks, 0 failed
+not on this device, each named above: NOT COMPARED 0 formats, 0 buffers legs, 0 opcodes and 0 other legs; NOT TESTED 6; NOT RUN 4
+the device and the software backend agree on every case that RAN, bits and flags

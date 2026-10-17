@@ -1,0 +1,18 @@
+soaking the software backend
+  MISMATCH rne a=0x3f800000 lib=0x3f800001 cpu=0x3f800000
+  MISMATCH rne a=0x3f800001 lib=0x3f800001 cpu=0x3f800000
+  MISMATCH rne a=0x3f800002 lib=0x3f800000 cpu=0x3f800001
+  MISMATCH rne a=0x3f800003 lib=0x3f800000 cpu=0x3f800001
+  MISMATCH rne a=0x3f800004 lib=0x3f800003 cpu=0x3f800002
+  MISMATCH rne a=0x3f800005 lib=0x3f800003 cpu=0x3f800002
+  MISMATCH rne a=0x3f800006 lib=0x3f800002 cpu=0x3f800003
+  MISMATCH rne a=0x3f800007 lib=0x3f800002 cpu=0x3f800003
+  MISMATCH rne a=0x3f800008 lib=0x3f800005 cpu=0x3f800004
+  MISMATCH rne a=0x3f800009 lib=0x3f800005 cpu=0x3f800004
+  MISMATCH rne a=0x3f80000a lib=0x3f800004 cpu=0x3f800005
+  MISMATCH rne a=0x3f80000b lib=0x3f800004 cpu=0x3f800005
+  MISMATCH rne a=0x3f80000c lib=0x3f800007 cpu=0x3f800006
+  MISMATCH rne a=0x3f80000d lib=0x3f800007 cpu=0x3f800006
+  MISMATCH rne a=0x3f80000e lib=0x3f800006 cpu=0x3f800007
+  MISMATCH rne a=0x3f80000f lib=0x3f800006 cpu=0x3f800007
+sqrt32 rne: 65536 cases, 65536 value mismatches, 0 flag mismatches

@@ -1,0 +1,36 @@
+
+== the revision-8 set on sw, as u50-rev8-quad
+-- phi4_extended_fp64 (workload, fp64): 256 lanes, 4 segments of 2 steps, on u50-rev8-quad: 4 tiles of 4096 slots
+  ok    phi4_extended_fp64: lanes 0-2 are the pack's three initial conditions, its one-step vector's request
+  ok    phi4_extended_fp64: compiled for u50-rev8-quad at 2 steps a segment (58.5 s)
+  ok    phi4_extended_fp64: the rule's image is u50-rev8-quad, read from the image's own words
+  ok    phi4_extended_fp64: its parameters, image, bank and initial state are the set's, byte for byte
+  ok    phi4_extended_fp64: cft-segrun ran it on sw (6.1 s)
+  ok    phi4_extended_fp64: the certificate reads; backend software, device-xclbin none, device-tiles 1, scratch depth 4096
+  ok    phi4_extended_fp64: the device is u50-rev8-quad's tiles and depth
+  ok    phi4_extended_fp64: its boundary files are its hashes, and its lines are the run handed it
+  ok    phi4_extended_fp64: every boundary hash, flag word and STATUS is the set's (5 boundaries, flags [16, 16, 16, 16])
+  ok    phi4_extended_fp64: cft-audit accepts it in full (6.9 s)
+  ok    phi4_extended_fp64: the golden spot check - segment 3 re-run on seq.py for lanes [0, 1, 2, 64, 128, 192], each equal to its certified end (1.9 s)
+PASS  phi4_extended_fp64: 256 lanes, 4 x 2 steps on software, flags [16, 16, 16, 16]; every digest the set's, cft-audit accepts in full, no golden audit here (seq.py's cost), the spot check holds (76.4 s)
+-- the controls, on phi4_extended_fp64's own certificate and states
+  ok    control: a boundary hash planted in the record is caught
+  ok    control: a flag word planted in the record is caught
+  ok    control: a parameter planted in the record is caught
+  ok    control: an initial state planted in the record is caught
+  ok    control: a bit flipped in boundary 2's file is caught by the file check
+  ok    control: a bit flipped in lane 0's certified end is caught by the spot check
+  ok    control: cft-audit refuses that state, state-hash (exit 4)
+  ok    control: the golden audit refuses that state, state-hash
+  ok    control: a bank with one bit flipped, read from --images, is not the set's
+  ok    control: an image in --images without its bank is refused by name
+  ok    control: the identity checked against u50-rev8-deep's depth is caught
+  ok    control: a device of 2 tiles is caught
+  ok    control: the entry put on u50-rev8 is caught by the rule
+  ok    control: the rule puts an image storing to slot 4,096 on u50-rev8-deep
+  ok    control: the rule puts an image storing to slot 8,192 on no revision-8 target
+  ok    control: the rule puts an image holding an augadd (R21) on u50-rev8
+
+== verdicts
+PASS  phi4_extended_fp64: 256 lanes, 4 x 2 steps on software, flags [16, 16, 16, 16]; every digest the set's, cft-audit accepts in full, no golden audit here (seq.py's cost), the spot check holds (76.4 s)
+acceptance rev8: 1 of 1 PASS on sw as u50-rev8-quad (set); 27 checks ok, 0 failed, 87 s

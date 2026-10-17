@@ -1,0 +1,118 @@
+libcft build commit=16a5e0058f5051e4938dd66213fc11972573a1b8 tracked=clean untracked=present
+    the completion witness at open: NOT TESTED - only an xclbin opens tiles
+device: backend software, 1 tile, contract 0x00000000, formats fp32 fp64 fp128 fp256
+  format refusals: NOT TESTED - this image carries all four formats, so there is nothing to refuse
+  image identity (software): refused by name - cft_get_image_id: the software backend loads no device image - no xclbin to hash and no CAPS register to read. What determines its bits is this library, whose identity is cft_build_id()
+  image identity (software): refused by name - cft_get_image_id: the software backend loads no device image - no xclbin to hash and no CAPS register to read. What determines its bits is this library, whose identity is cft_build_id()
+comparing 256 elements per case against the software backend
+the caps a backend reports are the caps it enforces
+  software reports max_deposits 1048576, max_insns 4294967295, max_consts 512, seq_features 0x7ff1f
+    +1 deposit slot -> operation or format not available on this device: this program's max_deposits is 1048577; this device's is 1048576 (deposit slots a lane). Ask cft_get_caps - cft_caps.max_deposits - before building one: a device refuses an image past its capacities itself, with a status bit and no explanation
+    max_insns: NOT TESTED - 4294967295, and an image past it is 34359738400 bytes
+    k[511] (kx, nine bits form) loads, at the cap
+    max_consts, one past it: NOT TESTED - 512, and an index past it does not fit the immediate's nine bits
+    scratch slot 255 loads, at the cap
+    scratch slot 256 -> operation or format not available on this device: this program's scratch slot is 256; this device's is 255 (scratch slots a lane, indexed from 0). Ask cft_get_caps - cft_caps.max_scratch - before building one: a device refuses an image past its capacities itself, with a status bit and no explanation
+    features: kx REGS32 BANK_PTR KX9 IMUL SCRATCH SCRATCH_IO SCRATCH_STRICT SCALAR REDUCE_SEG INDEXED LANE_MASK AUGADD SCRATCH_STEP LANE_FLAGS FLAG_CONTROL   max_scratch 256
+    REGS32 published, r31 loads
+    BANK_PTR published, a BANK_EXT image loads
+    SCRATCH published, STL/LDL loads
+    SCRATCH_IO published, a SCRATCH_IO image loads
+    SCRATCH_STRICT published, a strict image loads
+    CFT_SEQ_FEAT_AUGADD published, the augmentedAddition pair loads
+    CFT_SEQ_FEAT_SCRATCH_STEP published, a stepped STX/LDX loads
+    CFT_SEQ_FEAT_FLAG_CONTROL published, a raise and a quiet region loads
+    KX9 published, k[256] loads
+  device reports max_deposits 1048576, max_insns 4294967295, max_consts 512, seq_features 0x7ff1f
+    +1 deposit slot -> operation or format not available on this device: this program's max_deposits is 1048577; this device's is 1048576 (deposit slots a lane). Ask cft_get_caps - cft_caps.max_deposits - before building one: a device refuses an image past its capacities itself, with a status bit and no explanation
+    max_insns: NOT TESTED - 4294967295, and an image past it is 34359738400 bytes
+    k[511] (kx, nine bits form) loads, at the cap
+    max_consts, one past it: NOT TESTED - 512, and an index past it does not fit the immediate's nine bits
+    scratch slot 255 loads, at the cap
+    scratch slot 256 -> operation or format not available on this device: this program's scratch slot is 256; this device's is 255 (scratch slots a lane, indexed from 0). Ask cft_get_caps - cft_caps.max_scratch - before building one: a device refuses an image past its capacities itself, with a status bit and no explanation
+    features: kx REGS32 BANK_PTR KX9 IMUL SCRATCH SCRATCH_IO SCRATCH_STRICT SCALAR REDUCE_SEG INDEXED LANE_MASK AUGADD SCRATCH_STEP LANE_FLAGS FLAG_CONTROL   max_scratch 256
+    REGS32 published, r31 loads
+    BANK_PTR published, a BANK_EXT image loads
+    SCRATCH published, STL/LDL loads
+    SCRATCH_IO published, a SCRATCH_IO image loads
+    SCRATCH_STRICT published, a strict image loads
+    CFT_SEQ_FEAT_AUGADD published, the augmentedAddition pair loads
+    CFT_SEQ_FEAT_SCRATCH_STEP published, a stepped STX/LDX loads
+    CFT_SEQ_FEAT_FLAG_CONTROL published, a raise and a quiet region loads
+    KX9 published, k[256] loads
+fp32
+  buffers, elementwise: 882 checks, 0 failed
+  buffers, an output window moved onto another tile's unflushed one: NOT TESTED - one tile (fp32), so the overlap across tiles it exists for is not reachable; the two runs themselves were compared
+  buffers, boundary sizes: 1012 checks, 0 failed
+  buffers, publish takes effect: 1020 checks, 0 failed
+    stale copies (fp32), S5: a read, a run into B, a run into half of it refused before its start, a read: NOT TESTED - the software backend has no tile to plant a refusal on, so it runs without one
+    stale copies (fp32), S7: a masked program into B refused after its fill, cft_reduce_seg into it, the masked program again: NOT TESTED - the software backend has no tile to plant a refusal on, so it runs without one
+    stale copies (fp32), outputs declined: NOT TESTED - the software backend has no bind to decline
+    stale copies (fp32): 106 of 106 scenarios agree with the software backend, transcript for transcript - V7's sequences and every entry point computed on the host, both ways
+    resident windows stay resident: NOT TESTED - this device keeps no device copies to count
+  buffers, stale copies: 1126 checks, 0 failed
+    fp32  staged scratch: 256 lanes through host pointers, identical to software
+    fp32  program scratch: 256 lanes, deposits and the scratch-out block identical staged and resident
+  buffers, a program's scratch: 1127 checks, 0 failed
+  fp32 indexed buffers: 256 lanes through a 87-element source and a 131-element pool, resident == staged, table binds 0
+  buffers, an indexed program: 1132 checks, 0 failed
+  buffers, reductions: 1240 checks, 0 failed
+fp64
+  buffers, elementwise: 2080 checks, 0 failed
+  buffers, an output window moved onto another tile's unflushed one: NOT TESTED - one tile (fp64), so the overlap across tiles it exists for is not reachable; the two runs themselves were compared
+  buffers, boundary sizes: 2210 checks, 0 failed
+  buffers, publish takes effect: 2218 checks, 0 failed
+    stale copies (fp64), S5: a read, a run into B, a run into half of it refused before its start, a read: NOT TESTED - the software backend has no tile to plant a refusal on, so it runs without one
+    stale copies (fp64), S7: a masked program into B refused after its fill, cft_reduce_seg into it, the masked program again: NOT TESTED - the software backend has no tile to plant a refusal on, so it runs without one
+    stale copies (fp64), outputs declined: NOT TESTED - the software backend has no bind to decline
+    stale copies (fp64): 108 of 108 scenarios agree with the software backend, transcript for transcript - V7's sequences and every entry point computed on the host, both ways
+    resident windows stay resident: NOT TESTED - this device keeps no device copies to count
+  buffers, stale copies: 2326 checks, 0 failed
+    fp64  staged scratch: 256 lanes through host pointers, identical to software
+    fp64  program scratch: 256 lanes, deposits and the scratch-out block identical staged and resident
+  buffers, a program's scratch: 2327 checks, 0 failed
+  fp64 indexed buffers: 256 lanes through a 87-element source and a 131-element pool, resident == staged, table binds 0
+  buffers, an indexed program: 2332 checks, 0 failed
+  buffers, reductions: 2440 checks, 0 failed
+fp128
+  buffers, elementwise: 3280 checks, 0 failed
+  buffers, an output window moved onto another tile's unflushed one: NOT TESTED - one tile (fp128), so the overlap across tiles it exists for is not reachable; the two runs themselves were compared
+  buffers, boundary sizes: 3410 checks, 0 failed
+  buffers, publish takes effect: 3418 checks, 0 failed
+    stale copies (fp128), S5: a read, a run into B, a run into half of it refused before its start, a read: NOT TESTED - the software backend has no tile to plant a refusal on, so it runs without one
+    stale copies (fp128), S7: a masked program into B refused after its fill, cft_reduce_seg into it, the masked program again: NOT TESTED - the software backend has no tile to plant a refusal on, so it runs without one
+    stale copies (fp128), outputs declined: NOT TESTED - the software backend has no bind to decline
+    stale copies (fp128): 108 of 108 scenarios agree with the software backend, transcript for transcript - V7's sequences and every entry point computed on the host, both ways
+    resident windows stay resident: NOT TESTED - this device keeps no device copies to count
+  buffers, stale copies: 3526 checks, 0 failed
+    fp128 staged scratch: 256 lanes through host pointers, identical to software
+    fp128 program scratch: 256 lanes, deposits and the scratch-out block identical staged and resident
+  buffers, a program's scratch: 3527 checks, 0 failed
+  fp128 indexed buffers: 256 lanes through a 87-element source and a 131-element pool, resident == staged, table binds 0
+  buffers, an indexed program: 3532 checks, 0 failed
+  buffers, reductions: 3640 checks, 0 failed
+fp256
+  buffers, elementwise: 4480 checks, 0 failed
+  buffers, an output window moved onto another tile's unflushed one: NOT TESTED - one tile (fp256), so the overlap across tiles it exists for is not reachable; the two runs themselves were compared
+  buffers, boundary sizes: 4610 checks, 0 failed
+  buffers, publish takes effect: 4618 checks, 0 failed
+    stale copies (fp256), S5: a read, a run into B, a run into half of it refused before its start, a read: NOT TESTED - the software backend has no tile to plant a refusal on, so it runs without one
+    stale copies (fp256), S7: a masked program into B refused after its fill, cft_reduce_seg into it, the masked program again: NOT TESTED - the software backend has no tile to plant a refusal on, so it runs without one
+    stale copies (fp256), outputs declined: NOT TESTED - the software backend has no bind to decline
+    stale copies (fp256): 106 of 106 scenarios agree with the software backend, transcript for transcript - V7's sequences and every entry point computed on the host, both ways
+    resident windows stay resident: NOT TESTED - this device keeps no device copies to count
+  buffers, stale copies: 4724 checks, 0 failed
+    fp256 staged scratch: 256 lanes through host pointers, identical to software
+    fp256 program scratch: 256 lanes, deposits and the scratch-out block identical staged and resident
+  buffers, a program's scratch: 4725 checks, 0 failed
+  fp256 indexed buffers: 256 lanes through a 87-element source and a 131-element pool, resident == staged, table binds 0
+  buffers, an indexed program: 4730 checks, 0 failed
+  buffers, reductions: 4838 checks, 0 failed
+
+bindings: 0 served from a device copy with no transfer, 0 copied
+  the last copy was made because: this backend keeps no device copies: the buffer is host memory and the sync calls are no-ops
+  this backend keeps no device copies, so both counters are zero by construction and the leg has proven the CONTRACT, not the saving
+
+4838 checks, 0 failed
+not on this device, each named above: NOT COMPARED 0 formats, 0 buffers legs, 0 opcodes and 0 other legs; NOT TESTED 26; NOT RUN 0
+the device and the software backend agree on every case that RAN, bits and flags

@@ -1,0 +1,163 @@
+libcft build commit=16a5e0058f5051e4938dd66213fc11972573a1b8 tracked=clean untracked=present
+    the completion witness at open: NOT TESTED - only an xclbin opens tiles
+device: backend software, 1 tile, contract 0x00000000, formats fp32 fp64 fp128 fp256
+  format refusals: NOT TESTED - this image carries all four formats, so there is nothing to refuse
+  image identity (software): refused by name - cft_get_image_id: the software backend loads no device image - no xclbin to hash and no CAPS register to read. What determines its bits is this library, whose identity is cft_build_id()
+  image identity (software): refused by name - cft_get_image_id: the software backend loads no device image - no xclbin to hash and no CAPS register to read. What determines its bits is this library, whose identity is cft_build_id()
+comparing 8 elements per case against the software backend
+the caps a backend reports are the caps it enforces
+  software reports max_deposits 1048576, max_insns 4294967295, max_consts 512, seq_features 0x7ff1f
+    +1 deposit slot -> operation or format not available on this device: this program's max_deposits is 1048577; this device's is 1048576 (deposit slots a lane). Ask cft_get_caps - cft_caps.max_deposits - before building one: a device refuses an image past its capacities itself, with a status bit and no explanation
+    max_insns: NOT TESTED - 4294967295, and an image past it is 34359738400 bytes
+    k[511] (kx, nine bits form) loads, at the cap
+    max_consts, one past it: NOT TESTED - 512, and an index past it does not fit the immediate's nine bits
+    scratch slot 255 loads, at the cap
+    scratch slot 256 -> operation or format not available on this device: this program's scratch slot is 256; this device's is 255 (scratch slots a lane, indexed from 0). Ask cft_get_caps - cft_caps.max_scratch - before building one: a device refuses an image past its capacities itself, with a status bit and no explanation
+    features: kx REGS32 BANK_PTR KX9 IMUL SCRATCH SCRATCH_IO SCRATCH_STRICT SCALAR REDUCE_SEG INDEXED LANE_MASK AUGADD SCRATCH_STEP LANE_FLAGS FLAG_CONTROL   max_scratch 256
+    REGS32 published, r31 loads
+    BANK_PTR published, a BANK_EXT image loads
+    SCRATCH published, STL/LDL loads
+    SCRATCH_IO published, a SCRATCH_IO image loads
+    SCRATCH_STRICT published, a strict image loads
+    CFT_SEQ_FEAT_AUGADD published, the augmentedAddition pair loads
+    CFT_SEQ_FEAT_SCRATCH_STEP published, a stepped STX/LDX loads
+    CFT_SEQ_FEAT_FLAG_CONTROL published, a raise and a quiet region loads
+    KX9 published, k[256] loads
+  device reports max_deposits 1048576, max_insns 4294967295, max_consts 512, seq_features 0x7ff1f
+    +1 deposit slot -> operation or format not available on this device: this program's max_deposits is 1048577; this device's is 1048576 (deposit slots a lane). Ask cft_get_caps - cft_caps.max_deposits - before building one: a device refuses an image past its capacities itself, with a status bit and no explanation
+    max_insns: NOT TESTED - 4294967295, and an image past it is 34359738400 bytes
+    k[511] (kx, nine bits form) loads, at the cap
+    max_consts, one past it: NOT TESTED - 512, and an index past it does not fit the immediate's nine bits
+    scratch slot 255 loads, at the cap
+    scratch slot 256 -> operation or format not available on this device: this program's scratch slot is 256; this device's is 255 (scratch slots a lane, indexed from 0). Ask cft_get_caps - cft_caps.max_scratch - before building one: a device refuses an image past its capacities itself, with a status bit and no explanation
+    features: kx REGS32 BANK_PTR KX9 IMUL SCRATCH SCRATCH_IO SCRATCH_STRICT SCALAR REDUCE_SEG INDEXED LANE_MASK AUGADD SCRATCH_STEP LANE_FLAGS FLAG_CONTROL   max_scratch 256
+    REGS32 published, r31 loads
+    BANK_PTR published, a BANK_EXT image loads
+    SCRATCH published, STL/LDL loads
+    SCRATCH_IO published, a SCRATCH_IO image loads
+    SCRATCH_STRICT published, a strict image loads
+    CFT_SEQ_FEAT_AUGADD published, the augmentedAddition pair loads
+    CFT_SEQ_FEAT_SCRATCH_STEP published, a stepped STX/LDX loads
+    CFT_SEQ_FEAT_FLAG_CONTROL published, a raise and a quiet region loads
+    KX9 published, k[256] loads
+fp32
+  fma ok: 65 checks so far, 0 failed
+    fp32 fma: 6 (scalar, indexed) operand pairs, call and constant-bank program both == dense
+    SCRATCH_STRICT: an index past the depth reads +0, stores nothing and is reported; in range, nothing is
+  the walk's depth against 256: NOT TESTED - this device has 256 slots a lane, so the walk wraps on both sides of the comparison
+  seq scratch block of 300 slots: NOT TESTED - this device has 256 scratch slots a lane, so the block is past its depth (refused by name above)
+    a scratch block at 256 slots (only the whole depth both ways): every lane's bytes; 256 + 1 refused by name
+    a program run of 32,768 lanes and of 32,769, no mask: one page of mask bits and one bit past it
+    a program at each tile's boundaries, 1 tile: a page of counts, of mask bits and - where the device publishes the block - of lane flags, each exactly and one beat past, with and without a mask - 10 of 10 right
+    a program past one tile's HBM channel: NOT TESTED - this backend has no HBM channel to run past
+    the completion witness's refusals: NOT TESTED - the software backend has no tile whose CTRL it reads
+    a resident output lost by a refused run: NOT TESTED - the software backend has no tile to refuse a run on
+    seq lane mask into resident outputs (fp32): 257 lanes, a third masked, fresh and after an unmasked run - every masked lane the caller's, every kept lane the run's
+  seq indexed inputs: 8 lanes through a 3-element source, 2 of them +0, identity == dense and rotated != dense, the bound refused on both
+  seq lane mask: 8 lanes, 3 of them masked, device == software, masked lanes untouched, all-ones == dense and holed != dense
+  seq indexed and masked: 8 lanes, 3 masked, a table of 2 sentinels into a 3-element source, device == software, masked lanes untouched, all-ones == unmasked
+  seq lane mask, scratch-out: 8 lanes, 3 of them masked, device == software, masked slots and counts untouched, kept lanes hold their own store
+  seq lane flags: 8 lanes, 3 masked, 4 marked, device == software, identities hold (FLAGS 0x1e, STATUS 0x00000040), masked bytes untouched, the region silent and its control loud
+  seq lane flags, no mask: 8 lanes, every byte written, device == software, identities hold (FLAGS 0x1e, STATUS 0x00000040)
+  seq lane flags, the reports image: under the mask and without it, device == software, counts included, identities hold, [5] set in 10 kept lanes and clear in 3, [6] set in 4 and clear in 9
+  sequencer programs: 360 checks so far, 0 failed
+  div/sqrt ok: 368 checks so far, 0 failed
+  boundary sizes done: 392 checks, 0 failed
+  partition invariance done: 395 checks, 0 failed
+  reductions
+    sum, finite operands: 431 checks, 0 failed
+    sum, any bit pattern: 435 checks, 0 failed
+    dot: 451 checks, 0 failed
+    sumsq: 475 checks, 0 failed
+    sumabs: 499 checks, 0 failed
+    maxall: 531 checks, 0 failed
+    per segment: 671 checks, 0 failed (CAPS2[8] present, computed on the device)
+    reductions with b and c poisoned: NOT RUN - the software backend has no b and c of its own to poison
+fp64
+  fma ok: 694 checks so far, 0 failed
+    fp64 fma: 6 (scalar, indexed) operand pairs, call and constant-bank program both == dense
+    SCRATCH_STRICT: an index past the depth reads +0, stores nothing and is reported; in range, nothing is
+  the walk's depth against 256: NOT TESTED - this device has 256 slots a lane, so the walk wraps on both sides of the comparison
+  seq scratch block of 300 slots: NOT TESTED - this device has 256 scratch slots a lane, so the block is past its depth (refused by name above)
+    a scratch block at 256 slots (only the whole depth both ways): every lane's bytes; 256 + 1 refused by name
+    seq lane mask into resident outputs (fp64): 257 lanes, a third masked, fresh and after an unmasked run - every masked lane the caller's, every kept lane the run's
+  seq indexed inputs: 8 lanes through a 3-element source, 2 of them +0, identity == dense and rotated != dense, the bound refused on both
+  seq lane mask: 8 lanes, 3 of them masked, device == software, masked lanes untouched, all-ones == dense and holed != dense
+  seq indexed and masked: 8 lanes, 3 masked, a table of 2 sentinels into a 3-element source, device == software, masked lanes untouched, all-ones == unmasked
+  seq lane mask, scratch-out: 8 lanes, 3 of them masked, device == software, masked slots and counts untouched, kept lanes hold their own store
+  seq lane flags: 8 lanes, 3 masked, 1 marked, device == software, identities hold (FLAGS 0x1e, STATUS 0x00000040), masked bytes untouched, the region silent and its control loud
+  seq lane flags, no mask: 8 lanes, every byte written, device == software, identities hold (FLAGS 0x1e, STATUS 0x00000040)
+  seq lane flags, the reports image: under the mask and without it, device == software, counts included, identities hold, [5] set in 10 kept lanes and clear in 3, [6] set in 4 and clear in 9
+  sequencer programs: 975 checks so far, 0 failed
+  div/sqrt ok: 983 checks so far, 0 failed
+  boundary sizes done: 1007 checks, 0 failed
+  partition invariance done: 1010 checks, 0 failed
+  reductions
+    sum, finite operands: 1046 checks, 0 failed
+    sum, any bit pattern: 1050 checks, 0 failed
+    dot: 1066 checks, 0 failed
+    sumsq: 1090 checks, 0 failed
+    sumabs: 1114 checks, 0 failed
+    maxall: 1146 checks, 0 failed
+    per segment: 1286 checks, 0 failed (CAPS2[8] present, computed on the device)
+    reductions with b and c poisoned: NOT RUN - the software backend has no b and c of its own to poison
+fp128
+  fma ok: 1309 checks so far, 0 failed
+    fp128 fma: 6 (scalar, indexed) operand pairs, call and constant-bank program both == dense
+    SCRATCH_STRICT: an index past the depth reads +0, stores nothing and is reported; in range, nothing is
+  the walk's depth against 256: NOT TESTED - this device has 256 slots a lane, so the walk wraps on both sides of the comparison
+  seq scratch block of 300 slots: NOT TESTED - this device has 256 scratch slots a lane, so the block is past its depth (refused by name above)
+    a scratch block at 256 slots (only the whole depth both ways): every lane's bytes; 256 + 1 refused by name
+    seq lane mask into resident outputs (fp128): 257 lanes, a third masked, fresh and after an unmasked run - every masked lane the caller's, every kept lane the run's
+  seq indexed inputs: 8 lanes through a 3-element source, 2 of them +0, identity == dense and rotated != dense, the bound refused on both
+  seq lane mask: 8 lanes, 3 of them masked, device == software, masked lanes untouched, all-ones == dense and holed != dense
+  seq indexed and masked: 8 lanes, 3 masked, a table of 2 sentinels into a 3-element source, device == software, masked lanes untouched, all-ones == unmasked
+  seq lane mask, scratch-out: 8 lanes, 3 of them masked, device == software, masked slots and counts untouched, kept lanes hold their own store
+  seq lane flags: 8 lanes, 3 masked, 1 marked, device == software, identities hold (FLAGS 0x16, STATUS 0x00000040), masked bytes untouched, the region silent and its control loud
+  seq lane flags, no mask: 8 lanes, every byte written, device == software, identities hold (FLAGS 0x1e, STATUS 0x00000040)
+  seq lane flags, the reports image: under the mask and without it, device == software, counts included, identities hold, [5] set in 10 kept lanes and clear in 3, [6] set in 4 and clear in 9
+  sequencer programs: 1590 checks so far, 0 failed
+  div/sqrt ok: 1598 checks so far, 0 failed
+  boundary sizes done: 1622 checks, 0 failed
+  partition invariance done: 1625 checks, 0 failed
+  reductions
+    sum, finite operands: 1661 checks, 0 failed
+    sum, any bit pattern: 1665 checks, 0 failed
+    dot: 1681 checks, 0 failed
+    sumsq: 1705 checks, 0 failed
+    sumabs: 1729 checks, 0 failed
+    maxall: 1761 checks, 0 failed
+    per segment: 1901 checks, 0 failed (CAPS2[8] present, computed on the device)
+    reductions with b and c poisoned: NOT RUN - the software backend has no b and c of its own to poison
+fp256
+  fma ok: 1924 checks so far, 0 failed
+    fp256 fma: 6 (scalar, indexed) operand pairs, call and constant-bank program both == dense
+    SCRATCH_STRICT: an index past the depth reads +0, stores nothing and is reported; in range, nothing is
+  the walk's depth against 256: NOT TESTED - this device has 256 slots a lane, so the walk wraps on both sides of the comparison
+  seq scratch block of 300 slots: NOT TESTED - this device has 256 scratch slots a lane, so the block is past its depth (refused by name above)
+    a scratch block at 256 slots (only the whole depth both ways): every lane's bytes; 256 + 1 refused by name
+    seq lane mask into resident outputs (fp256): 257 lanes, a third masked, fresh and after an unmasked run - every masked lane the caller's, every kept lane the run's
+  seq indexed inputs: 8 lanes through a 3-element source, 2 of them +0, identity == dense and rotated != dense, the bound refused on both
+  seq lane mask: 8 lanes, 3 of them masked, device == software, masked lanes untouched, all-ones == dense and holed != dense
+  seq indexed and masked: 8 lanes, 3 masked, a table of 2 sentinels into a 3-element source, device == software, masked lanes untouched, all-ones == unmasked
+  seq lane mask, scratch-out: 8 lanes, 3 of them masked, device == software, masked slots and counts untouched, kept lanes hold their own store
+  seq lane flags: 8 lanes, 3 masked, 2 marked, device == software, identities hold (FLAGS 0x1e, STATUS 0x00000040), masked bytes untouched, the region silent and its control loud
+  seq lane flags, no mask: 8 lanes, every byte written, device == software, identities hold (FLAGS 0x1e, STATUS 0x00000040)
+  seq lane flags, the reports image: under the mask and without it, device == software, counts included, identities hold, [5] set in 10 kept lanes and clear in 3, [6] set in 4 and clear in 9
+  sequencer programs: 2205 checks so far, 0 failed
+  div/sqrt ok: 2213 checks so far, 0 failed
+  boundary sizes done: 2237 checks, 0 failed
+  partition invariance done: 2240 checks, 0 failed
+  reductions
+    sum, finite operands: 2276 checks, 0 failed
+    sum, any bit pattern: 2280 checks, 0 failed
+    dot: 2296 checks, 0 failed
+    sumsq: 2320 checks, 0 failed
+    sumabs: 2344 checks, 0 failed
+    maxall: 2376 checks, 0 failed
+    per segment: 2516 checks, 0 failed (CAPS2[8] present, computed on the device)
+    reductions with b and c poisoned: NOT RUN - the software backend has no b and c of its own to poison
+
+2516 checks, 0 failed
+not on this device, each named above: NOT COMPARED 0 formats, 0 buffers legs, 0 opcodes and 0 other legs; NOT TESTED 17; NOT RUN 4
+the device and the software backend agree on every case that RAN, bits and flags

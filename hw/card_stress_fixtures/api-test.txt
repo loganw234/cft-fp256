@@ -1,0 +1,13 @@
+api-test: libcft build commit=16a5e0058f5051e4938dd66213fc11972573a1b8 tracked=clean untracked=present
+api-test: the build id was not held to the tree's (CFT_EXPECT_BUILD_ID is unset; make -C host test sets it)
+  the software handle publishes CAPS2[7] and CAPS2[8] (seq_features 0x7ff1f), and both calls are the definition: 140 scalar-operand runs, 140 of them where an ignored mask would have shown; 80 segmented reductions
+  zero operands are flag-free for all 256 opcodes x 4 formats x 5 attributes
+  work splits correctly for 27 sizes x 4 formats x 64 tile counts, and the padding total never depends on the tile count
+  CFT_XRT_TILES: 9 selections read as written, 24 malformed ones refused with a sentence, and all 64 at once; an atoi-style parse is caught on 13
+  tile order: 64 tile counts x 8 waves, seed 0 the identity, five seeds' orders each a permutation and repeatable, 80691 tasks moved; under seven seeds every seed moves tasks and varies its waves over three orders or more, no two seeds share a placement, every position moves; an order naming a tile twice and seven wrong shuffles are refused
+  lane cut: 4,000 random runs over both planners, every block covered exactly once - the per-lane flags block among them - and every indexed source whole; 3373 cuts off a beat boundary, 269 runs leaving a tile empty; a cut that slips scratch-in's width is caught in 1204, one that copies every tile's flags to lane 0 in 1741
+  a lane mask repacks correctly for 18 lane counts x 64 bit offsets, writing no byte past the tile's own lanes
+  capability words: 10 decodes as the plan computed them - a seam tile seq_features 0x7f1f and 32,768 instructions, revision 8 0x7ff1f (0x77f1f without R21) and 2^24, nothing of revision 8 believed below 0xB00 - and the software handle's word is revision 8's
+  revision 8 (ABI 0.17): a quiet region silences an FMA, a raise ORs its word and marks, each lane's byte is its own, a masked lane's is the caller's, and the field's shape and the 0.16 struct are refused by name
+  program load: 56 refusals, each its status and a sentence of its own after an earlier call's; a good load clears the library's slot
+api-test: all contract checks passed
