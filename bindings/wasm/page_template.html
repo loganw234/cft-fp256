@@ -153,10 +153,11 @@ footer pre { font-size: 0.75rem; }
   <h2>3 &middot; full replay: drop the published sets</h2>
   <p>The embedded sample is a sample. For the full claim, generate the
   complete sets in a checkout of this repo -
-  <code>make vectors</code>, which writes <strong>1,068,915 cases over
+  <code>make vectors</code>, which writes <strong>1,072,415 cases over
   168 sets</strong> to <code>vectors/out/</code>: 236,000 over twenty
-  opcode sets, 533,265 over twenty transcendental sets (all thirty-nine
-  functions since ABI 0.6, table 9.1 complete), 89,616 over the four
+  opcode sets, 536,765 over twenty transcendental sets (all thirty-nine
+  functions since ABI 0.6, table 9.1 complete, and 175 more cases in
+  each set since conformance profile 3.1), 89,616 over the four
   augmented sets of clause 9.5, 10,240 over twenty reduction sets,
   13,816 over twenty character sets, and since ABI 0.7 9,728 over the
   four magnitude sets of clause 9.6 and 176,250 over the eighty
@@ -821,7 +822,7 @@ async function replayBuiltin() {
       (name) => ({ name, text: CFT_SAMPLE[name] }));
     await replaySets(files, sectionUI("builtin"),
       "this is the embedded sample of the twenty OPCODE sets, not the " +
-      "full published set - section 3 replays all 1,068,915 cases over " +
+      "full published set - section 3 replays all 1,072,415 cases over " +
       "all 168");
   } finally {
     builtinRunning = false;
