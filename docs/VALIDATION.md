@@ -20808,7 +20808,7 @@ After d738f48 only documents, a comment and two docstrings changed (test_cert2.p
 1. **"The small tasks"** are the fifth wave's report's two follow-ups. The lead took the study note's two nits with them (VMC-2's and VIW5's).
    - **A test holding the eight routines' order:** VMC found it held by no test or committed byte.
    - **The three extended hard workloads,** compiled by no stage (the fourth wave's finding), put in the full census.
-2. **The census's cost, measured:** `acceptance-far` went from about ten minutes to 130 and `acceptance-rev8` from about half an hour to 174, so the full census grows by about four hours. Both stages are in no budget.
+2. **The census's cost, measured:** `acceptance-far` went from about ten minutes to 130 and `acceptance-rev8` from about half an hour to 173, so the full census grows by about four hours. Both stages are in no budget.
 3. **The models:**
    - **WA,** a simpler task, had a Sonnet author and a Sonnet verifier (Logan's rule of 2026-10-12).
    - **ST** had a Sonnet author, as Logan said, and a Sonnet verifier.
@@ -20816,7 +20816,7 @@ After d738f48 only documents, a comment and two docstrings changed (test_cert2.p
 4. **WA's two (b)s,** both in its entry's sentences, were fixed by the lead (1f78e31) in VWA's words, as very small fixes (Logan's rule of 2026-10-13), and re-checked.
 5. **The long run started beside the driver's verifier,** at Logan's word, after the smoke passed. Before the run's first `selftest` leg the lead made vectors/out in its clone, on VST's early note.
 
-**The chain** (MEASURED, each verifier's ledger):
+**The chain** (READ, each verifier's ledger):
 
 | work | author | verifiers: (a), (b) | sent back |
 |---|---|---|---|
@@ -20830,7 +20830,7 @@ After d738f48 only documents, a comment and two docstrings changed (test_cert2.p
   - the page's line totals were one too many, the empty piece after the last newline counted.
 - **What VSM measured:**
   - both order tests passing under five PYTHONHASHSEEDs, their premises true;
-  - the lead's two plants re-run, and six plants of its own each turning the intended test red;
+  - the lead's two plants re-run, and seven plants of its own (T1 to T3, B1 to B4) each turning the intended test red, and a control (C1) staying green;
   - the far leg reaching Lorenz-tangent extended's compile, by a recorder;
   - REV8_CENSUS equal to the record's ten;
   - the gate leg's 11 non-card programs passing at parent and commit;
@@ -20868,17 +20868,17 @@ After d738f48 only documents, a comment and two docstrings changed (test_cert2.p
   - Gray-Scott extended compiled for u50-rev8-deep in 1,757.1 s, and Riccati extended for u50-rev8-quad in 6,086.9 s.
   - Each holds the record's digests, made by parcel W8 under cftc's output version 5, so version 6 compiles them to the same images.
   - Each revision-8 image on seq.py equals the pack's vector.
-- **Both counts are the ones VSM computed from the code.**
+- **Both counts are VSM's expectations:** the 17 computed from the code, the 158 believed from W8's run of the whole set.
 
 **The card** (MEASURED, amd-arc-box and the U50, the lead's; the driver at f0693b2 from a clean clone):
 - **The smoke** (`--quick`): 18:39:56 to 18:57:57, 1,081 s, exit 0, "quick_done", the card left idle.
   - **The legs:** 38, pass 37, and 1 skipped by name, acceptance-rev8 on the single, which the set gives no entry.
   - **The quad:** device-test's identity 25 checks, and its three matrices 2,734, 10,374 and 2,417, as on 2026-10-06. card-segrun gave 6 checks, seq_check 741 programs, the acceptance set 2 entries and 23 checks, and the revision-8 set 1 entry and 27 checks.
-  - **The single and the deep:** 23, and 2,733, 10,373 and 2,416.
-  - **The sweep:** slices of 262,144 cases at 302,358 to 392,431 a second, 0 mismatches.
+  - **The single and the deep:** 23, and 2,733, 10,373 and 2,416. The `-b` matrix gave 4,918 on the quad and 4,917 on each single.
+  - **The sweep:** slices of 262,144 encodings (262,152 cases for nextup32) at 301,312 to 393,297 cases a second a tile, 0 mismatches.
   - **Telemetry:** 68 values a sample; FPGA 37 to 40 °C, Int Vcc 45 to 46 °C; 16.24 W, 22.3 W under the quad's acceptance legs, all from the slot (the 12 V auxiliary reads 0 truly; VST).
-- **The long run:** started at 18:58:23 with `--until "2026-10-19 08:00"`, out /data/card-stress-1016, the revision-8 set's two long images seeded from W8's compiles. By 19:10 its first quad battery had passed the full acceptance set, 20 of 20 and 174 checks, as on 2026-10-06. Its results are the next records'.
-- **vectors/out:** absent from the clean clone. The `selftest` leg replays it, and the smoke had not run that leg. The lead made it there at 19:08 (`make vectors`, 135 s; 168 sets, `sha256sum -c` all OK; the tree still clean), before the leg came round.
+- **The long run:** started at 18:58:23 with `--until "2026-10-19 08:00"`, out /data/card-stress-1016, the revision-8 set's two long images seeded from W8's compiles. By 19:10 its first quad battery had passed the full acceptance set, 20 of 20 and 174 checks, as on 2026-10-06, and at 19:58:10 its `selftest` leg replayed all 1,072,415 published cases through the card in 685.8 s. Its results are the next records'.
+- **vectors/out:** absent from the clean clone. The `selftest` leg replays it, and the smoke had not run that leg. The lead made it there from 19:07:54 to 19:10:10 (`make vectors`, 135 s; 168 sets, `sha256sum -c` all OK; the tree still clean), before the leg came round.
 
 **The gate** (MEASURED, amd-arc-box at 51e98e1, run 20261016-192821-51e98e1, niced, the pinned MPFR 4.2.2 copied in; python3 3.12.3, mpmath 1.4.1, gmpy2 2.3.1; beside the card's long run, whose host-side work shares the CPU): "VERDICT: PASS with 8 skip(s) and 4 inner skip(s) in golden (3), remote (1)", in 198 min (19:28:21 to 22:46:34). 36 stages executed, 0 failed.
 - **The 8 skips are the box's usual:** buildargs (a real Vitis), lang-rust, lang-julia, lang-go, lang-csharp, lang-r and lang-fortran (no toolchain), and demos (no node).

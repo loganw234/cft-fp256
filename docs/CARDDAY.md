@@ -883,8 +883,9 @@ python3 hw/card_stress_report.py /data/card-stress-1016     # the report, any ti
 
 - **Before the long run, `make vectors` in that checkout** (added 2026-10-16, after
   verifier-VST): the `selftest` leg replays `vectors/out`, which is gitignored, so a clean
-  clone lacks it, and the leg would then end as a parse error at every third visit of each
-  image (a loud failure, never a false pass). `make vectors` writes only ignored paths, so the
+  clone lacks it, and the leg would then end as a failed leg (status `fail`: cft-selftest prints
+  '0 cases checked' and 'CONFORMANCE FAILED: ...' and exits 1) at every third visit of each
+  image: a loud failure, never a false pass. `make vectors` writes only ignored paths, so the
   tree's build id stays clean; check it with `sha256sum -c SHA256SUMS` run in `vectors/`. The
   first long run's clone had it made by the lead before its first `selftest` leg.
 - **Pre-flight, optional**: `bash hw/test-card-stress.sh --no-plants` runs the driver's dry-run
