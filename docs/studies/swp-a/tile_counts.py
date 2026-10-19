@@ -233,9 +233,9 @@ def main():
         print("   %-9s %9.3f %9.1f %8.3f %10.1f %10.1f %8.1f%% %10.2f %10.2f %9.0f%% to %.0f%%" % (
             fam, ops / 1e6, ppo, job * 1e3, job / ppo * 1e6, tile / ppo * 1e6, 100.0 * tile / job, gbs3, gbs4, 100.0 * gbs4 / 3.3, 100.0 * gbs4 / 2.3))
     # the four words: patterns tie the claim to the text it was READ in (cftx_run_impl and stage(), host/src/backend_xrt.cpp), and a search ties "on the soak's path" to the
-    # soak's own sources. What the patterns hold: (1) the staging loop runs over every role below CFT_ROLE_D (a, b, c), skips a role only when it is bound to a resident buffer,
-    # and otherwise calls stage(); (2) stage() copies a non-null source, ZEROES a null one and uploads the padded size; (3) the task's collect step reads d back from the device and
-    # copies it out, after the early return for a RESIDENT output. What they do not hold: that a scalar operand is staged as one element (the `scal ?` branches), or the order of
+    # soak's own sources. What the patterns hold: (1) the staging loop runs over every role below CFT_ROLE_D (a, b, c), skips a role that is bound to a resident buffer,
+    # and later in the loop calls stage(); (2) stage() copies a non-null source, ZEROES a null one and uploads the padded size; (3) the task's collect step reads d back from the device and
+    # copies it out, after the early return for a RESIDENT output. What they do not hold: that nothing else in the loop skips a role (verifier-VSC), that a scalar operand is staged as one element (the `scal ?` branches), or the order of
     # the steps. What the search holds: clause5.c and clause5_soak.c never name a resident buffer or a scalar operand (cft_alloc, cft_buffer*, cft_run_ex, cft_elem_args, scalar_mask).
     with open(os.path.join(ROOT, "host", "src", "backend_xrt.cpp"), encoding="utf-8") as fh:
         be = fh.read()
@@ -244,7 +244,7 @@ def main():
     stage_part = whole[:whole.index("t.start = ")]
     collect_part = whole[whole.index("t.collect = "):]
     pat = r"for \(int r = 0; r < %s; r\+\+\) \{\s*if \(sb\[i\]\.bo\[r\]\)\s*continue;.*?stage\(\*tb\[r\],"
-    check("cftx_run_impl's staging loop runs over every role below D (a, b, c), skips one only if it is bound to a resident buffer, and calls stage() for the rest",
+    check("cftx_run_impl's staging loop runs over every role below D (a, b, c), skips one bound to a resident buffer, and later calls stage() (another skip is not excluded)",
           re.search(pat % "CFT_ROLE_D", stage_part, re.S) is not None)
     check("CONTROL: the same search for a staging loop over TWO roles finds nothing in the source (the check above can fail)",
           re.search(pat % "2", stage_part, re.S) is None)

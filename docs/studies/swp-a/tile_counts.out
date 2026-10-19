@@ -63,7 +63,7 @@ CHECK T4 saw rows to compare (the filter does not leave an empty table)         
    rint64        1.965       8.0    2.084      260.5        9.5      3.6%       1.51       2.01        61% to 88%
    scaleb32      0.853      19.0    4.804      252.8        4.7      1.9%       0.78       1.04        31% to 45%
    scaleb64      0.511      29.0    8.023      276.7        9.5      3.4%       1.42       1.90        57% to 82%
-CHECK cftx_run_impl's staging loop runs over every role below D (a, b, c), skips one only if it is bound to a resident buffer, and calls stage() for the rest ok 
+CHECK cftx_run_impl's staging loop runs over every role below D (a, b, c), skips one bound to a resident buffer, and later calls stage() (another skip is not excluded) ok 
 CHECK CONTROL: the same search for a staging loop over TWO roles finds nothing in the source (the check above can fail) ok 
 CHECK stage() copies a non-null source, ZEROES a null one (an operand the opcode does not read) and uploads the padded size ok 
 CHECK CONTROL: the same search for a stage() that SKIPS a null source (else return;) finds nothing in the source (the check above can fail) ok 
