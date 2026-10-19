@@ -1,0 +1,98 @@
+symmetry_check.py: the reductions of a sweep's space, tested on the golden model
+
+== G1, G2. sign mirror and mode folding (e4m3, every encoding and every pair)
+   div   : 65536 pairs x 5 attributes; sign-mirror violations 0; (rdn for s=0, rup for s=1) vs rtz violations 0
+CHECK div: div(-a, b, mirror(m)) = -div(a, b, m), bits and flags, for every pair and attribute     ok 
+CHECK div: for a positive result rdn = rtz and for a negative one rup = rtz, every pair            ok 
+CHECK CONTROL: the mirror with rne and rmm swapped is NOT a symmetry                               ok (88448 violations)
+CHECK CONTROL: folding the OTHER directed mode onto rtz is NOT valid                               ok (43960 violations)
+CHECK rint (exact variant): rint(-x, mirror(m)) = -rint(x, m) for every encoding and attribute     ok (0 violations)
+CHECK scaleb: scaleb(-x, n, mirror(m)) = -scaleb(x, n, m) for every encoding, n in [-18, 18], attribute ok (0 violations)
+CHECK convertFormat e5m6 -> e4m3: mirror holds for every source encoding and attribute             ok (0 violations)
+CHECK sqrt: for a positive result rdn = rtz (and -0's result keeps its sign), every encoding       ok (0 violations)
+CHECK div: the mirror on 400 random pairs x 5 attributes at each of fp32, fp64, fp128 (samples)    ok (0 of 6000)
+
+== G3. roundTiesToAway against roundTiesToEven
+   div  e4m3: 264 of 65,536 pairs give different results under rne and rmm; 0 of them have an exact quotient >= 2^emin
+CHECK div: RMM = RNE on EVERY pair whose exact quotient is >= the smallest normal (no midpoint there) ok (0 outside)
+CHECK div: the pairs where RMM and RNE differ exist, all with a quotient below the smallest normal ok (264 pairs)
+CHECK sqrt: RMM = RNE on every encoding of e4m3 (an inexact root is never a midpoint)              ok (0 differ)
+CHECK sqrt: RMM = RNE on 3,000 random operands at each of fp32 and fp64 (samples)                  ok (0 differ)
+CHECK CONTROL: for roundToIntegral RMM and RNE DO differ (ties exist), so the comparison can see a difference ok (8 of 256 encodings)
+
+== G4. scale invariance with its preconditions, and the edge strips (e4m3, every finite nonzero pair)
+   div rne: scaled pairs with both results in the core:  379280, violations 0; base in the core and scaled result OUTSIDE it:  100928, differing 79420, scaling exactly anyway 21508
+   div rtz: scaled pairs with both results in the core:  379280, violations 0; base in the core and scaled result OUTSIDE it:  100928, differing 79420, scaling exactly anyway 21508
+   div rdn: scaled pairs with both results in the core:  379280, violations 0; base in the core and scaled result OUTSIDE it:  100928, differing 79420, scaling exactly anyway 21508
+   div rup: scaled pairs with both results in the core:  379280, violations 0; base in the core and scaled result OUTSIDE it:  100928, differing 79420, scaling exactly anyway 21508
+CHECK div: a pair and its scaled pair whose EXACT quotients are both in [2^emin, 2^emax) give scaled results, bits and flags ok (1517120 checked, 0 violations)
+CHECK div: when the scaled pair's quotient leaves that core, scale invariance FAILS (the edge strips are real) ok (317680 of 403712 scaled pairs differ)
+CHECK div: but not always - the lemma is 'whenever', not 'iff': a pair whose scaled quotient left the core can still scale exactly ok (86032 of 403712 scaled pairs scale anyway; under rne the first is a = 0x01, b = 0x01, k = 7: quotient 1 -> 128)
+CHECK sqrt: sqrt(a 4^k) = sqrt(a) 2^k for EVERY positive input incl. subnormals, 3 attributes, k in [-6, 6] ok (2625 checked, 0 violations)
+CHECK rem: remainder(a 2^k, b 2^k) = remainder(a, b) 2^k for every pair and k in [-8, 8] (exact, no result edge) ok (519044 checked, 0 violations)
+
+== G5. the structure of rounding: the golden model equals a decision rule (kept bits, class of the dropped bits, lsb)
+   convertFormat e5m6 -> e4m3: 14680 (encoding, attribute) cases predicted (finite, no overflow; the carries out of the kept bits included); the decision needs only (sign, exponent, class) = 224 classes plus the kept lsb, against 4,096 source encodings
+CHECK convertFormat: result bits = the decision rule on (kept, class, lsb), every finite source encoding and attribute ok (14680 tested, 0 differ)
+CHECK every non-overflow case an exact rounding finds is among the cases compared (none is skipped) ok (exact rounding: 14680; compared: 14680; of them 390 carry out of the kept bits)
+CHECK CONTROL: the first draft's encode (a carry returns None) compares fewer cases than the exact rounding finds, and the check above sees it ok (14290 against 14680)
+CHECK CONTROL: a rule that forgets ties-to-even (a tie always rounds up) is NOT the model's convertFormat ok (120 differ)
+CHECK roundToIntegral: result bits = the decision rule on (kept, class, lsb), every finite encoding of e5m6 and attribute ok (19830 tested, 0 differ)
+CHECK CONTROL: the rule that forgets ties-to-even is NOT the model's roundToIntegral               ok (64 differ)
+
+== G6. the sizes that remain, and what they cost at the stress run's measured rates (COMPUTED)
+   division at e4m3: 448 distinct (significand pair, strip) keys are reached by the pairs; the bound (1 + (p+1) + 1) 4^(p-1) = 448
+CHECK div: the number of (significand pair, strip) keys reached is at most (p + 3) 4^(p-1) at e4m3 ok (448 <= 448)
+   magnitude functions: the distinct tables of the golden model at e4m3 over a family's attribute list (sweep_cost.py); '=' joins attributes that give one table
+CHECK magnitude functions of div32 and div64 (rne rtz rdn rup) over every positive pair: the model's distinct tables equal the count G6 multiplies by ok (3 against 3: rne | rtz = rdn | rup)
+CHECK magnitude functions of sqrt64 (rne rtz rdn rup) over every positive encoding: the model's distinct tables equal the count G6 multiplies by ok (3 against 3: rne | rtz = rdn | rup)
+CHECK magnitude functions of rint64 (rne rtz rdn rup rmm) over every positive encoding, both variants: the model's distinct tables equal the count G6 multiplies by ok (4 against 4: rne | rtz = rdn | rup | rmm)
+CHECK magnitude functions of conv64to32 (rne rtz rdn rup) over every positive e5m6 encoding: the model's distinct tables equal the count G6 multiplies by ok (3 against 3: rne | rtz = rdn | rup)
+CHECK magnitude functions of cvtto64 (rne rtz rdn rup rmm) over every positive operand, four targets: the model's distinct tables equal the count G6 multiplies by ok (4 against 4: rne | rtz = rdn | rup | rmm)
+CHECK magnitude functions of cvtto64 (rne rtz rdn rup rmm) over every negative operand, four targets: the model's distinct tables equal the count G6 multiplies by ok (4 against 4: rne | rtz = rup | rdn | rmm)
+CHECK magnitude functions of scaleb64 (rne rtz rdn rup) over every positive encoding x the wide range: the model's distinct tables equal the count G6 multiplies by ok (3 against 3: rne | rtz = rdn | rup)
+CHECK L1_div at e4m3 (per magnitude function) equals the number of (significand pair, strip) keys the pairs reach, counted above ok (448 against 448)
+CHECK L1_sqrt at e4m3 (per magnitude function) equals the number of (normalised significand, exponent parity) classes of the positive inputs ok (16 against 16)
+CHECK L1_rint at e4m3 (per magnitude function) equals the number of positive values in [1/2, 2^(p-1)) ok (32 against 32)
+CHECK L1_conv (e5m6 to e4m3, per magnitude function) equals the number of (source significand, destination strip) keys the encodings reach ok (448 against 448)
+CHECK L1_cvtto at e4m3 with 8-bit integer targets (per magnitude function) equals the number of (sign, binade, significand) operands in [1/2, 2^8) ok (144 against 144)
+CHECK L1_cvtto at e4m3 with 5-bit integer targets (per magnitude function) equals the number of (sign, binade, significand) operands in [1/2, 2^5) ok (96 against 96)
+CHECK L1_cvtto at e5m6 with 12-bit integer targets (per magnitude function) equals the number of (sign, binade, significand) operands in [1/2, 2^12) ok (1664 against 1664)
+CHECK L1_rem, called at fp32 and fp64, has emax - emin + p - 2 exponent gaps (275 and 2,096), the bound clause5.c states for the host's walk ok (275 = 275, 2096 = 2096)
+CHECK L1_scaleb_wide at e4m3 (per magnitude function) equals the number of (significand, result strip) keys the wide range reaches ok (56 against 56)
+CHECK scaleb: within each (significand, strip, attribute) key the golden model's result is ONE value (the strips are the classes of the wide range) ok (168 keys, 0 with more than one result)
+   level L1 = the sign, attribute and scale reductions of G1-G4 (PROVED for the golden model at e4m3; the arguments for p = 24 and 53 are in the study)
+   space            runs     L0 (log2)    L1 (log2)    L0 / L1     L1, one quad
+   div32            tile          66.0         52.3   1.29e+04           22.3 y
+   div64            tile         130.0        111.4   3.99e+05       1.76e+19 y
+   sqrt64           tile          66.0         54.6   2.73e+03            141 y
+   rint64           tile          66.3         59.7   9.66e+01       3.85e+03 y
+   conv64to32       host          66.0         58.3   2.02e+02            464 y
+   cvtto64          host          66.3         61.0   3.94e+01       7.55e+03 y
+   rem32            host          64.0         54.1   9.53e+02            333 y
+   rem64            host         128.0        115.0   8.00e+03       5.51e+21 y
+   scaleb64 (wide)  tile          78.0         59.4   4.09e+05            435 y
+
+   how many quads (four workers: tiles for 'tile' items, cores for 'host' items) finish the reduced sweep in a decade, a year, a month (COMPUTED):
+   space            runs     quads, 10 y     quads, 1 y quads, 1 month weekends of one card
+   div32            tile               3             23            268            3,209
+   div64            tile               -              -              -                -
+   sqrt64           tile              15            141           1690           20,235
+   rint64           tile             385           3849          46182          553,170
+   conv64to32       host              47            465           5572           66,731
+   cvtto64          host             755           7548          90570        1,084,856
+   rem32            host              34            334           3997           47,873
+   rem64            host               -              -              -                -
+   scaleb64 (wide)  tile              44            435           5218           62,501
+
+   div32's reduced space: 5699868278390784 = 3 magnitude functions x 27 strips-and-core x 2^46; one quad needs 22.3 years (L0: 3.0e5 years)
+CHECK div32's reduced sweep is under 100 quad-years (the raw one is over 300,000)                  ok (22.3 y)
+CHECK every reduced space is smaller than its raw space                                            ok 
+
+   level L2 (PLAUSIBLE, a structural assumption about the implementation; G5 shows the model's structure): the result depends on
+   (sign, exponent, class of the dropped bits, kept lsb, kept all-ones), so a representative per class plus a walking-ones set over
+   the dropped and kept bits covers it. conv64to32: 281 exponents x 4 classes x (lsb 2 x all-ones 2 + 52 walking bits) x 2 signs x 3 magnitude
+   functions = 377664 cases; at the measured conv64to32 rate of 6.2 M/s (a host item: one core) that is 0.06 seconds
+CHECK conv64to32's class-level sweep (a few hundred thousand cases) takes seconds, not years       ok (377664 cases)
+
+symmetry_check: every CHECK held

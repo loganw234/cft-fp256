@@ -1,0 +1,38 @@
+sw_rates_compare.py: the software backend (one core of this desktop) against the card run's per-job medians
+
+CHECK 24 jobs were measured on the software backend (18 random, 6 exhaustive)            ok (24)
+CHECK every job exited 0                                                                 ok 
+   kind  job                   sw M/s     card M/s   sw/card
+   host  class32               59.919       33.591     1.784
+   host  class64               37.453       22.196     1.687
+   host  conv32to64             5.544        5.995     0.925
+   host  conv64to32-rne         6.595        6.225     1.060
+   host  cvtfrom32-rne          1.723        1.901     0.906
+   host  cvtfrom64-rne          1.934        1.857     1.042
+   host  cvtto32-rne            1.808        2.302     0.785
+   host  cvtto64-rne            3.098        2.458     1.260
+   host  logb32                 9.709        8.570     1.133
+   host  logb64                 6.020        6.403     0.940
+   host  nextdown32            21.732       12.769     1.702
+   host  nextdown64            14.109        9.330     1.512
+   host  nextup32              37.449       19.562     1.914
+   host  nextup64              17.467       12.501     1.397
+   host  rem32                  0.552        0.460     1.199
+   host  rem64                  0.088        0.061     1.443
+   tile  div32-rne              0.155        2.022     0.077
+   tile  div64-rne              0.096        1.538     0.063
+   tile  rint32-rne             0.977        2.139     0.457
+   tile  rint64-rne             0.602        1.965     0.306
+   tile  scaleb32-rne           1.875       14.495     0.129
+   tile  scaleb64-rne           3.793       13.784     0.275
+   tile  sqrt32-rne             0.183        1.945     0.094
+   tile  sqrt64-rne             0.105        1.521     0.069
+
+   host jobs: median ratio 1.23, min 0.79, max 1.91 (16 jobs)
+   tile jobs: median ratio 0.11, min 0.06, max 0.46 (8 jobs); the card is 2.2 to 16.0 times faster
+
+CHECK every host job's software/card ratio lies in [0.5, 2.5]                            ok []
+CHECK every tile job's software/card ratio is below 0.5 (the card is at least 2x faster) ok []
+CHECK the 24 jobs split into 16 host jobs and 8 tile jobs (6 random + sqrt32-rne, rint32-rne) ok (16 host, 8 tile)
+
+sw_rates_compare: every CHECK held

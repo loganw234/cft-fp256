@@ -1,0 +1,26 @@
+PLANT div_strip       red at the check written for it
+        CHECK L1_div at e4m3 (per magnitude function) equals the number of (significand pair, strip) keys the pairs reach, counted above FAILED (384 against 448)
+PLANT sqrt_parity     red at the check written for it
+        CHECK L1_sqrt at e4m3 (per magnitude function) equals the number of (normalised significand, exponent parity) classes of the positive inputs FAILED (8 against 16)
+PLANT rint_binades    red at the check written for it
+        CHECK L1_rint at e4m3 (per magnitude function) equals the number of positive values in [1/2, 2^(p-1)) FAILED (24 against 32)
+PLANT conv_strip      red at the check written for it
+        CHECK L1_conv (e5m6 to e4m3, per magnitude function) equals the number of (source significand, destination strip) keys the encodings reach FAILED (384 against 448)
+PLANT cvtto_binades   red at the check written for it
+        CHECK L1_cvtto at e4m3 with 8-bit integer targets (per magnitude function) equals the number of (sign, binade, significand) operands in [1/2, 2^8) FAILED (128 against 144)
+PLANT rem_gap         red at the check written for it
+        CHECK L1_rem, called at fp32 and fp64, has emax - emin + p - 2 exponent gaps (275 and 2,096), the bound clause5.c states for the host's walk FAILED (276 = 275, 2097 = 2096)
+PLANT scaleb_strip    red at the check written for it
+        CHECK L1_scaleb_wide at e4m3 (per magnitude function) equals the number of (significand, result strip) keys the wide range reaches FAILED (48 against 56)
+PLANT scaleb_key      red at the check written for it
+        CHECK scaleb: within each (significand, strip, attribute) key the golden model's result is ONE value (the strips are the classes of the wide range) FAILED (72 keys, 24 with more than one result)
+PLANT cvtto_pbinades  red at the check written for it; L1_cvtto at e4m3 with 8-bit stays green
+        CHECK L1_cvtto at e5m6 with 12-bit integer targets (per magnitude function) equals the number of (sign, binade, significand) operands in [1/2, 2^12) FAILED (1536 against 1664)
+PLANT magn_rint       red at the check written for it; L1_rint at e4m3 stays green
+        CHECK magnitude functions of rint64 (rne rtz rdn rup rmm) over every positive encoding, both variants: the model's distinct tables equal the count G6 multiplies by FAILED (4 against 3: rne | rtz = rdn | rup | rmm)
+PLANT magn_cvtto      red at the check written for it; L1_cvtto at e4m3 with 8-bit stays green
+        CHECK magnitude functions of cvtto64 (rne rtz rdn rup rmm) over every positive operand, four targets: the model's distinct tables equal the count G6 multiplies by FAILED (4 against 3: rne | rtz = rdn | rup | rmm)
+PLANT magn_div        red at the check written for it; L1_div at e4m3 stays green
+        CHECK magnitude functions of div32 and div64 (rne rtz rdn rup) over every positive pair: the model's distinct tables equal the count G6 multiplies by FAILED (3 against 4: rne | rtz = rdn | rup)
+
+symmetry_check plants: all 12 slips were caught at their checks

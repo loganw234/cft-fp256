@@ -1,0 +1,91 @@
+hardcase_div.py: closest-approach divisions, constructed, verified, and measured against the campaign's sampler
+
+== H1. construction: one modular inverse a divisor, |N| = 1 verified in exact integers
+   fp32   mid +1: built for 1170 of 3000 odd divisors (39.0%), |N| = 1 verified on all of them (0 wrong)
+   fp32   mid -1: built for 1145 of 3000 odd divisors (38.2%), |N| = 1 verified on all of them (0 wrong)
+   fp32   rep +1: built for 1119 of 3000 odd divisors (37.3%), |N| = 1 verified on all of them (0 wrong)
+   fp32   rep -1: built for 1156 of 3000 odd divisors (38.5%), |N| = 1 verified on all of them (0 wrong)
+CHECK fp32: every constructed dividend has |N| = 1 exactly and lies in [my, 2^p)                       ok 
+CHECK fp32: the construction succeeds for 30 to 45% of odd divisors per sign (about 2 ln 2 - 1 = 38.6%) ok (38.6%)
+   fp64   mid +1: built for 1215 of 3000 odd divisors (40.5%), |N| = 1 verified on all of them (0 wrong)
+   fp64   mid -1: built for 1159 of 3000 odd divisors (38.6%), |N| = 1 verified on all of them (0 wrong)
+   fp64   rep +1: built for 1137 of 3000 odd divisors (37.9%), |N| = 1 verified on all of them (0 wrong)
+   fp64   rep -1: built for 1167 of 3000 odd divisors (38.9%), |N| = 1 verified on all of them (0 wrong)
+CHECK fp64: every constructed dividend has |N| = 1 exactly and lies in [my, 2^p)                       ok 
+CHECK fp64: the construction succeeds for 30 to 45% of odd divisors per sign (about 2 ln 2 - 1 = 38.6%) ok (39.6%)
+   fp128  mid +1: built for 1170 of 3000 odd divisors (39.0%), |N| = 1 verified on all of them (0 wrong)
+   fp128  mid -1: built for 1125 of 3000 odd divisors (37.5%), |N| = 1 verified on all of them (0 wrong)
+   fp128  rep +1: built for 1177 of 3000 odd divisors (39.2%), |N| = 1 verified on all of them (0 wrong)
+   fp128  rep -1: built for 1160 of 3000 odd divisors (38.7%), |N| = 1 verified on all of them (0 wrong)
+CHECK fp128: every constructed dividend has |N| = 1 exactly and lies in [my, 2^p)                      ok 
+CHECK fp128: the construction succeeds for 30 to 45% of odd divisors per sign (about 2 ln 2 - 1 = 38.6%) ok (38.2%)
+
+== H2. the golden model's division on the closest-approach cases against an independent exact arbiter
+CHECK fp32: golden div = exact arbiter on 300 constructed pairs x 5 attributes (bits and flags)        ok (1500 cases, 0 differ)
+CHECK fp64: golden div = exact arbiter on 300 constructed pairs x 5 attributes (bits and flags)        ok (1500 cases, 0 differ)
+CHECK fp128: golden div = exact arbiter on 120 constructed pairs x 5 attributes (bits and flags)       ok (600 cases, 0 differ)
+CHECK CONTROL: the arbiter's RNE answer differs from the model's RTZ answer on the near-midpoint cases (the comparison can see) ok (200 of 200)
+
+== H3. how close does the campaign's sampler come, and how many closest-approach cases would a weekend meet?
+   rho = |N| / my in [0, 1] is the distance to the nearest midpoint in units of half an ulp; |N| = 1 is the closest approach a divisor can allow
+   (only an ODD divisor allows it: N is a multiple of the divisor's power of two). Two boundary types, a midpoint and a representable number,
+   each with its own |N| = 1 set; the per-draw probability of ONE type is counted below, exactly where a count is possible.
+
+   the count of |N| = 1 pairs, one boundary type, p-bit significand pairs (dividend doubled when mx < my, as the sampler does):
+   p    type          pairs    brute force    sum of 1/my  closed form count/closed
+   8    mid           16384             87             87         88.7        0.981
+   8    rep           16384             84             84         88.7        0.947
+   10   mid          262144            359            359        354.9        1.012
+   10   rep          262144            336            336        354.9        0.947
+   11   mid         1048576            703            703        709.8        0.990
+   11   rep         1048576            702            702        709.8        0.989
+CHECK the sum over odd divisors of the solutions of X 2^k = +-1 equals the brute-force count of |N| = 1 pairs, p = 8, 10, 11, both types ok 
+CHECK the closed form ln 2 / 2^(p-1) a draw is within 5% of the exhaustive count at p = 11, both types ok (0.990, 0.989)
+CHECK CONTROL: the first draft's rate, 2 / (1.5 2^(p-1)) a draw, is NOT within 5% of the exhaustive count (it is out by a factor of about 1.9) ok (1.94 times the exhaustive rate at p = 11)
+
+   exactly at p = 24 (every odd divisor): midpoint 5815346 of 2^46 pairs (8.2641e-08 a draw), representable 5812730 (8.2604e-08); ln 2 / 2^23 = 8.2630e-08
+CHECK at p = 24 the exact count is within 0.1% of ln 2 / 2^23 a draw, both types                       ok (1.00014, 0.99969)
+
+   p = 24  200000 sampled odd divisors: solutions a divisor, midpoint 1.3873, representable 1.3858 (2 ln 2 = 1.3863): 8.269e-08 and 8.260e-08 a draw
+CHECK fp32: the sampled mean number of solutions a divisor is within 2% of 2 ln 2, both types          ok 
+CHECK fp32: the per-draw probability used below is ln 2 / 2^(p-1) within 2%, both types (a factor 2 slip is caught here) ok (1.001, 1.000)
+   p = 53  200000 sampled odd divisors: solutions a divisor, midpoint 1.3858, representable 1.3848 (2 ln 2 = 1.3863): 1.539e-16 and 1.537e-16 a draw
+CHECK fp64: the sampled mean number of solutions a divisor is within 2% of 2 ln 2, both types          ok 
+CHECK fp64: the per-draw probability used below is ln 2 / 2^(p-1) within 2%, both types (a factor 2 slip is caught here) ok (1.000, 0.999)
+   p = 113 200000 sampled odd divisors: solutions a divisor, midpoint 1.3845, representable 1.3855 (2 ln 2 = 1.3863): 1.333e-34 and 1.334e-34 a draw
+CHECK fp128: the sampled mean number of solutions a divisor is within 2% of 2 ln 2, both types         ok 
+CHECK fp128: the per-draw probability used below is ln 2 / 2^(p-1) within 2%, both types (a factor 2 slip is caught here) ok (0.999, 0.999)
+
+   how close the campaign's own sampler comes (its port, held to the real tool in seed_audit.py): the least rho over its draws,
+   against the expected number of closest-approach hits in a stress-run-sized item (14498660352 draws; an UPPER bound: a draw whose quotient is
+   subnormal or overflows has another boundary, and a banded operand is not a uniform significand)
+   format   draws here   least rho here     least possible rho         hits, one type       hits, both types
+   fp32         358161        2.307e-06              5.960e-08                1.2e+03                2.4e+03
+CHECK fp32: the least rho over 358161 draws is within a factor 10 of 1 / draws, as uniform draws predict ok (2.31e-06 against 2.79e-06)
+   fp64         362061        8.888e-07              1.110e-16               2.23e-06               4.46e-06
+CHECK fp64: the least rho over 362061 draws is within a factor 10 of 1 / draws, as uniform draws predict ok (8.89e-07 against 2.76e-06)
+CHECK fp32: the stress run's draws (1.45e10 a division item) expect over 1,000 closest-approach hits of the midpoint type alone ok (1199, and 2396 of both types)
+CHECK fp64: the same draws expect fewer than 10^-5 of either type (the class is invisible to sampling) ok (2.23e-06, and 4.46e-06 of both types)
+
+== H4. the repository's own failure family: a = 1, b = 1 - ulp (python/tests/test_sequences.py)
+   fp32   |N| = 1, rho = |N| / my = 5.960e-08 = 1 / my: a closest-approach case (the quotient is 1/(my 2^p), about 2^-48, from a midpoint: 2^-25 of an ulp)
+CHECK fp32: (1, 1 - ulp) has |N| <= 2, i.e. is within a factor 2 of the closest possible approach to a midpoint ok (|N| = 1)
+   fp64   |N| = 1, rho = |N| / my = 1.110e-16 = 1 / my: a closest-approach case (the quotient is 1/(my 2^p), about 2^-106, from a midpoint: 2^-54 of an ulp)
+CHECK fp64: (1, 1 - ulp) has |N| <= 2, i.e. is within a factor 2 of the closest possible approach to a midpoint ok (|N| = 1)
+
+== H5. a PLANTED defect only the constructed set finds: the quotient computed to g extra bits, rounded ties-to-even on those bits alone
+   the flawed division (g = 40 extra bits) at fp64: 0 failures in 272007 sampler draws; 606 failures in 2374 constructed closest-approach pairs
+   expected failures in a stress-run-sized item (1.45e10 draws): about 6.59e-03
+CHECK the sampler finds NO failure of the flawed division in 300,000 draws                             ok (0)
+CHECK the constructed closest-approach set finds the flawed division FAILING on about a quarter of its midpoint pairs at least ok (606 of 2374)
+CHECK a stress-run-sized item would expect under 0.01 failures: the defect would pass the weekend      ok (6.59e-03)
+CHECK CONTROL: with g = 80 extra bits the same method is correct on every constructed pair (the set does not just fail everything) ok (0 failures)
+
+== H6. square root: where is the closest approach to a midpoint? (fp32, every midpoint of the binade pair [1, 4))
+   least d over the 8388608 midpoints: 1, reached by 2 midpoint(s); the next values of d: [1, 7, 9, 15, 17, 23]
+CHECK fp32: the least d is 1 (a closest approach of 2^-48 to the midpoint M^2: the minimum an odd square allows) ok (d = 1)
+CHECK fp32: sqrt(1 + ulp), the repository's failure family under RMM (python/tests/test_sequences.py), has d = 1 ok (d = 1)
+   the 2 midpoint(s) with d = 1 of the 8388608; sampling reaches such an input with probability about 2 / 2^24 a draw
+CHECK fp32: golden sqrt = an exact integer arbiter on every closest-approach input (d = 1), all 5 attributes ok (10 cases, 0 differ)
+
+hardcase_div: every CHECK held

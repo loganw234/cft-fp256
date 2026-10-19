@@ -1,0 +1,5 @@
+lib_call replaced by the native computation
+built a divsqrt-soak whose library call is the native computation (no device, no softfloat)
+HOSTONLY div32    count=40000000 seconds=0.984 rate=40646045 rc=0  div32 rne: 40000000 cases, 0 value mismatches, 0 flag mismatches
+HOSTONLY div64    count=40000000 seconds=1.143 rate=35006283 rc=0  div64 rne: 40000000 cases, 0 value mismatches, 0 flag mismatches
+HOSTONLY sqrt64   count=40000000 seconds=0.506 rate=79054953 rc=0  sqrt64 rne: 40000000 cases, 0 value mismatches, 0 flag mismatches

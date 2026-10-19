@@ -1,0 +1,200 @@
+
+== B. bijectivity by exhaustion
+   (a bitmap of the outputs where it stays in cache, w <= 12; and for every w the left-inverse test: if
+    inverse(perm(i)) == i for ALL i of a finite domain, perm is injective, hence a bijection)
+CHECK w= 4 (2^8 inputs), 1 round(s): all outputs distinct                                  ok (256 of 256, 0.0 s)
+CHECK w= 4 (2^8 inputs), 2 round(s): all outputs distinct                                  ok (256 of 256, 0.0 s)
+CHECK w= 4 (2^8 inputs), 3 round(s): all outputs distinct                                  ok (256 of 256, 0.0 s)
+CHECK w= 4 (2^8 inputs), 4 round(s): all outputs distinct                                  ok (256 of 256, 0.0 s)
+CHECK w= 4 (2^8 inputs), 5 round(s): all outputs distinct                                  ok (256 of 256, 0.0 s)
+CHECK w= 4 (2^8 inputs), 6 round(s): all outputs distinct                                  ok (256 of 256, 0.0 s)
+CHECK w= 4 (2^8 inputs), 6 rounds: inverse(perm(i)) == i for EVERY i                       ok (0 failures, 0.0 s)
+CHECK w= 8 (2^16 inputs), 1 round(s): all outputs distinct                                 ok (65536 of 65536, 0.0 s)
+CHECK w= 8 (2^16 inputs), 2 round(s): all outputs distinct                                 ok (65536 of 65536, 0.0 s)
+CHECK w= 8 (2^16 inputs), 3 round(s): all outputs distinct                                 ok (65536 of 65536, 0.0 s)
+CHECK w= 8 (2^16 inputs), 4 round(s): all outputs distinct                                 ok (65536 of 65536, 0.0 s)
+CHECK w= 8 (2^16 inputs), 5 round(s): all outputs distinct                                 ok (65536 of 65536, 0.0 s)
+CHECK w= 8 (2^16 inputs), 6 round(s): all outputs distinct                                 ok (65536 of 65536, 0.0 s)
+CHECK w= 8 (2^16 inputs), 6 rounds: inverse(perm(i)) == i for EVERY i                      ok (0 failures, 0.0 s)
+CHECK w=12 (2^24 inputs), 1 round(s): all outputs distinct                                 ok (16777216 of 16777216, 0.1 s)
+CHECK w=12 (2^24 inputs), 2 round(s): all outputs distinct                                 ok (16777216 of 16777216, 0.2 s)
+CHECK w=12 (2^24 inputs), 3 round(s): all outputs distinct                                 ok (16777216 of 16777216, 0.2 s)
+CHECK w=12 (2^24 inputs), 4 round(s): all outputs distinct                                 ok (16777216 of 16777216, 0.3 s)
+CHECK w=12 (2^24 inputs), 5 round(s): all outputs distinct                                 ok (16777216 of 16777216, 0.4 s)
+CHECK w=12 (2^24 inputs), 6 round(s): all outputs distinct                                 ok (16777216 of 16777216, 0.4 s)
+CHECK w=12 (2^24 inputs), 6 rounds: inverse(perm(i)) == i for EVERY i                      ok (0 failures, 0.5 s)
+CHECK w=14 (2^28 inputs), 6 rounds: inverse(perm(i)) == i for EVERY i                      ok (0 failures, 8.5 s)
+CHECK w=16 (2^32 inputs), 6 rounds: inverse(perm(i)) == i for EVERY i                      ok (0 failures, 140.8 s)
+CHECK PLANT: a round that reads the wrong half is NOT a bijection at w=12 (collisions found) ok (2363750 distinct of 16777216)
+CHECK PLANT: the same broken round fails inverse(perm(i)) == i at w=8                      ok (65533 failures of 65,536)
+
+== Q. quality of perm(i), i = 0 .. 2^22 - 1, at 64 bits (w = 32); thresholds are z-scores
+   rounds   bit balance    avalanche  top-12 hist  serial corr   verdict
+   1            2048.00       141.42  47412534.63      2048.00   fail
+   2               2.90       141.42         1.60         1.38   fail
+   3               2.08         3.62         0.71         0.03   PASS
+   4               1.92         3.79         1.07         0.45   PASS
+   6               2.24         4.47         0.55         1.62   PASS
+   8               2.99         3.93         0.37         1.05   PASS
+   (bit balance: max over 64 bits of |ones - N/2| / sd; avalanche: max over 64 x 64 input-output bit pairs of
+    |flips - M/2| / sd, M = 20,000; top-12 hist: |chi-square - df| / sd of 4,096 bins; serial: |r| sqrt(N-1))
+CHECK one round FAILS the quality tests (the tests can fail)                               ok 
+CHECK two rounds fail the avalanche test                                                   ok (z = 141.4)
+CHECK four rounds pass every test                                                          ok (1.92 3.79 1.07 0.45)
+CHECK six and eight rounds pass every test                                                 ok 
+
+== C. cycle walking onto a range that is not a power of four
+CHECK N = 3,000,000 inside the domain 4^11: every output is in [0, N)                      ok (0 outside)
+CHECK N = 3,000,000: all N outputs distinct, a bijection of [0, N)                         ok (3000000 distinct)
+CHECK the mean number of permutation calls an index is near 4^11 / N = 1.398               ok (1.3981)
+CHECK PLANT: clamping out-of-range outputs instead of walking loses cases (not a bijection) ok (2146209 distinct of 3000000)
+
+== A. coverage accounting: the first K indices give exactly K distinct cases; shards are disjoint
+CHECK indices [0, 1): distinct cases                                                       ok (1)
+CHECK indices [0, 100): distinct cases                                                     ok (100)
+CHECK indices [0, 1000000): distinct cases                                                 ok (1000000)
+CHECK indices [0, 8000000): distinct cases                                                 ok (8000000)
+CHECK indices [0, 16777216): distinct cases                                                ok (16777216)
+CHECK two device shards, index ranges [0, 1e6) and [1e6, 3e6): the case sets are disjoint  ok (0 shared of 1000000 + 2000000)
+CHECK PLANT: shards [0, 1e6) and [9e5, 2e6) share exactly their 100,000 common indices     ok (100000 shared)
+
+== S. speed, this CPU, one core, gcc -O2 (see the study for the machine)
+   64-bit domain, 4 rounds :   9.29 ns a permutation (107.6 M/s)   [1000]
+   64-bit domain, 6 rounds :  16.19 ns a permutation ( 61.8 M/s)   [39b]
+   64-bit domain, 8 rounds :  21.54 ns a permutation ( 46.4 M/s)   [29ee]
+   128-bit domain, 6 rounds :  24.94 ns a permutation ( 40.1 M/s)   [a2ce]
+   for scale: the fastest sweep item (class32 exhaustive on the quad) ran 33.6 M cases/s a tile: 29.8 ns a case
+
+== V. vectors (for perm_check.py)
+VEC64 key=0000000000000000 i=22118258a9d111a0 out=606fee7d447cc31b
+VEC46 key=0000000000000000 i=0258a9d111a0 out=28b2d758e5fc
+VEC128 key=0000000000000000 i=346edce5f713f8ed1e9a57bc80e6721d out=0cf9afde38af835ed46ef327191c518d
+VECCW key=0000000000000000 n=50000000000000 i=02579829428640 out=44748582217212
+VEC64 key=0000000000000000 i=2d160e7e5c3f42ca out=992ddac288050d07
+VEC46 key=0000000000000000 i=0e7e5c3f42ca out=019ea6f52c35
+VEC128 key=0000000000000000 i=81c2e6dc980d78eb5647e55ad933f62e out=0b0da96b2bdb4fce606d5a9f32a3b39b
+VECCW key=0000000000000000 n=50000000000000 i=15935876317898 out=01780917546037
+VEC64 key=0000000000000000 i=1f6622b40cb38e42 out=58d7d771ffa0d5df
+VEC46 key=0000000000000000 i=22b40cb38e42 out=075dc8792516
+VEC128 key=0000000000000000 i=6e7411b06820371c7ad34039583ab917 out=4f55d66ec739c7ffb36e0a121cac1a9d
+VECCW key=0000000000000000 n=50000000000000 i=38156702551618 out=08099376735510
+VEC64 key=0000000000000000 i=de15eab5ce53fecf out=d93c3ad76405d6f3
+VEC46 key=0000000000000000 i=2ab5ce53fecf out=0d6c501af666
+VEC128 key=0000000000000000 i=2f43a94042571d8561571b285c0b9816 out=8abff4225183ca0e05e0fa3eee3fb579
+VECCW key=0000000000000000 n=50000000000000 i=46960339058383 out=14758851573350
+VEC64 key=0000000000000000 i=c3e04a9344b5f864 out=5ad6dcbdf346ac40
+VEC46 key=0000000000000000 i=0a9344b5f864 out=01cd4efd75e6
+VEC128 key=0000000000000000 i=e0b2f2ed05269a55f871cac18ae3fd10 out=be5af35f4abd43526d2fceee241d1fbc
+VECCW key=0000000000000000 n=50000000000000 i=11627629246564 out=01981305157094
+VEC64 key=0000000000000000 i=64415599d1caf6b6 out=2c350748e8efd0c8
+VEC46 key=0000000000000000 i=1599d1caf6b6 out=1f6ecfaaf2c9
+VEC128 key=0000000000000000 i=c8c99c0e445a0f1c8258515c9060b81e out=7f2abec40d9a3f3d2f7bed86ae94a932
+VECCW key=0000000000000000 n=50000000000000 i=23750393919158 out=34560790950601
+VEC64 key=0000000000000000 i=cfadec2a33ddb880 out=d56686457f2bb45d
+VEC46 key=0000000000000000 i=2c2a33ddb880 out=370fa248d0d6
+VEC128 key=0000000000000000 i=6049a845381e5deb24d32d1399489901 out=ef4dc75f838815ff9fbaac99fe92ac8a
+VECCW key=0000000000000000 n=50000000000000 i=48559770417280 out=28613558241790
+VEC64 key=0000000000000000 i=4b29d65cb143494c out=b888d141c8e76f0f
+VEC46 key=0000000000000000 i=165cb143494c out=24b7c8c3c89b
+VEC128 key=0000000000000000 i=2cf21c25c57316073e147a3bf7974d7f out=c19f17a76ff55304cd64d177b407cf7e
+VECCW key=0000000000000000 n=50000000000000 i=24587366779212 out=40371765889179
+VEC64 key=0000000000000001 i=2d41a8b08ad9f8db out=ff4cbfffbe2e58e3
+VEC46 key=0000000000000001 i=28b08ad9f8db out=1faaf0aeec5f
+VEC128 key=0000000000000001 i=56acaceec0049eb301cb443cfef6aab3 out=27337b7c28cc5103b2042b0756de422c
+VECCW key=0000000000000001 n=50000000000000 i=44738708895963 out=34819042896991
+VEC64 key=0000000000000001 i=1c402042b2a54fab out=af01d3682018197a
+VEC46 key=0000000000000001 i=2042b2a54fab out=0a33d0c0fd22
+VEC128 key=0000000000000001 i=34b63adf426806862d1d493910c8ca72 out=b2b5bf4625db100cb0bef88a215c1b8d
+VECCW key=0000000000000001 n=50000000000000 i=35470837108651 out=11217661918498
+VEC64 key=0000000000000001 i=d03f722dfba58d98 out=c3e9c5004417b3e7
+VEC46 key=0000000000000001 i=322dfba58d98 out=369b09ba78ed
+VEC128 key=0000000000000001 i=df6f910a08f884f2d14b5abdd461becc out=593c1d4b6b13c02b8086a1ec05c47643
+VECCW key=0000000000000001 n=50000000000000 i=05173076848024 out=41412604008077
+VEC64 key=0000000000000001 i=32c96246fef865fb out=6a11fd404cdf87ca
+VEC46 key=0000000000000001 i=2246fef865fb out=0c97873cbd5a
+VEC128 key=0000000000000001 i=b7e00591f67e271228da85de1c3689c3 out=d89cd48c47fdc590f8fc7ecc1a26d3ea
+VECCW key=0000000000000001 n=50000000000000 i=37688320747003 out=13844948499802
+VEC64 key=0000000000000001 i=4299ff6b2a265425 out=f09d9cd189bd44a4
+VEC46 key=0000000000000001 i=3f6b2a265425 out=2c9c21379577
+VEC128 key=0000000000000001 i=575ab7cb990947d969745f7fdde0976d out=b68cdae56243c93ebdd47f41b80501c0
+VECCW key=0000000000000001 n=50000000000000 i=19729501205541 out=08041372379487
+VEC64 key=0000000000000001 i=c1e57d333547d2d0 out=c0f18826c91c1efa
+VEC46 key=0000000000000001 i=3d333547d2d0 out=1389549e11d2
+VEC128 key=0000000000000001 i=d48210ddb8270f9c87bd64435417833d out=f0d11f8681153380123ffb449cfe652a
+VECCW key=0000000000000001 n=50000000000000 i=17290146525904 out=42365877302926
+VEC64 key=0000000000000001 i=de7932930b4323e6 out=877a2e2c478faf23
+VEC46 key=0000000000000001 i=32930b4323e6 out=07a0a4bb2547
+VEC128 key=0000000000000001 i=714e9fb7a8c0b15c1b9eddd8a28f5524 out=0c192bd28c592b3e3d4aba907f2a2379
+VECCW key=0000000000000001 n=50000000000000 i=05607130530790 out=27335288779514
+VEC64 key=0000000000000001 i=700e597242eb887a out=fb0807307b703344
+VEC46 key=0000000000000001 i=197242eb887a out=2afb74b86c2e
+VEC128 key=0000000000000001 i=713273c3dbbd1e02cecec0aa949bef57 out=792872366888ad5708da01542688e283
+VECCW key=0000000000000001 n=50000000000000 i=27978539698298 out=47259483401262
+VEC64 key=deadbeefcafef00d i=6f6692b54b84d0a6 out=000bf50d93dac945
+VEC46 key=deadbeefcafef00d i=12b54b84d0a6 out=1a799c024436
+VEC128 key=deadbeefcafef00d i=7951043aab2b1fd236410cd1d2c8d32a out=01ccab912825d47f11297b019d5a7423
+VECCW key=deadbeefcafef00d n=50000000000000 i=20569865375910 out=29109610759222
+VEC64 key=deadbeefcafef00d i=808bf999f84ae09d out=dc94203578395225
+VEC46 key=deadbeefcafef00d i=3999f84ae09d out=358cf046ba50
+VEC128 key=deadbeefcafef00d i=06acb90f3906bca82982ccc13327e297 out=dcbc947756d8fbe2479c12b0cfe9fbc1
+VECCW key=deadbeefcafef00d n=50000000000000 i=13333458436253 out=11944239191345
+VEC64 key=deadbeefcafef00d i=089b2e5a1666c210 out=60fa2bfcc4f20d9c
+VEC46 key=deadbeefcafef00d i=2e5a1666c210 out=3286962e3a5a
+VEC128 key=deadbeefcafef00d i=8410becfb2c17ccf3d1f587a5726a0b7 out=7e17ab06852c9657544f01e36c524d70
+VECCW key=deadbeefcafef00d n=50000000000000 i=00964457767440 out=40872153700665
+VEC64 key=deadbeefcafef00d i=023b77eeb84caf24 out=cf60446d495d9bcf
+VEC46 key=deadbeefcafef00d i=37eeb84caf24 out=3f124f4de072
+VEC128 key=deadbeefcafef00d i=f7385b6d270ee1db0315e4bcfb942919 out=863ada36c6a6d0c2c57896080be11684
+VECCW key=deadbeefcafef00d n=50000000000000 i=11498433777444 out=41959669316831
+VEC64 key=deadbeefcafef00d i=1cf15bd42222141c out=aade45d018d36fd9
+VEC46 key=deadbeefcafef00d i=1bd42222141c out=0d19206d85a1
+VEC128 key=deadbeefcafef00d i=47eb4e11682bce74362c29275a062d88 out=50e607d690f22dc8686057bb9674d524
+VECCW key=deadbeefcafef00d n=50000000000000 i=30597919675420 out=14401569392033
+VEC64 key=deadbeefcafef00d i=58fd964634268b06 out=860f649daa3b5e9a
+VEC46 key=deadbeefcafef00d i=164634268b06 out=02bc815b2075
+VEC128 key=deadbeefcafef00d i=02a6a6251f7496e9430e667e613046d6 out=ca31fb6091fefac6b64f2cc014613f7c
+VECCW key=deadbeefcafef00d n=50000000000000 i=24490778462982 out=03008647340149
+VEC64 key=deadbeefcafef00d i=9e9a17599bed6cb0 out=078115116a00927b
+VEC46 key=deadbeefcafef00d i=17599bed6cb0 out=3b46e36b52cc
+VEC128 key=deadbeefcafef00d i=2cf8b85d7b412a274f3d53d95603c32f out=a8ae4dbcf82b542297ff88aa9418e2f4
+VECCW key=deadbeefcafef00d n=50000000000000 i=25673635556528 out=05040545831542
+VEC64 key=deadbeefcafef00d i=7d9f7b24b2686212 out=d5a28bcd21cf33f9
+VEC46 key=deadbeefcafef00d i=3b24b2686212 out=0dc21a224542
+VEC128 key=deadbeefcafef00d i=a491d8b0698e06581cf960876f900c18 out=f47f792d2de025d69e377993386a265e
+VECCW key=deadbeefcafef00d n=50000000000000 i=15028798046738 out=41355983942789
+VEC64 key=ffffffffffffffff i=bc83a65c17422aa2 out=65dde5751c256fce
+VEC46 key=ffffffffffffffff i=265c17422aa2 out=1e368431ef74
+VEC128 key=ffffffffffffffff i=02ff7a9c1e5d70c0efa600f5f3d9d861 out=1fb01e88c3a0336c3429abb8f62eae89
+VECCW key=ffffffffffffffff n=50000000000000 i=42176969058978 out=33219494932340
+VEC64 key=ffffffffffffffff i=66dc510d26abbfb9 out=19b2ce74cf5e3bfd
+VEC46 key=ffffffffffffffff i=110d26abbfb9 out=3c2e45590f1e
+VEC128 key=ffffffffffffffff i=217871eb3f1a13e4c93f4443ecd1ff06 out=6602d75b623dceef287817d93563c0cf
+VECCW key=ffffffffffffffff n=50000000000000 i=18748181036985 out=19442151581666
+VEC64 key=ffffffffffffffff i=1414294fde440899 out=8145a4eef24928ff
+VEC46 key=ffffffffffffffff i=294fde440899 out=33d36b0409ed
+VEC128 key=ffffffffffffffff i=47df29c0fdb9669bfc9a151fa5d75a78 out=bf231ec162fe4738f4d9aa1e63dde1fa
+VECCW key=ffffffffffffffff n=50000000000000 i=45423008155801 out=26758705967037
+VEC64 key=ffffffffffffffff i=9022f63bfe745a82 out=9d32cee2292e3615
+VEC46 key=ffffffffffffffff i=363bfe745a82 out=177c4d4f7bd0
+VEC128 key=ffffffffffffffff i=561d310a1e2a4e61966783beb8c426dc out=20bb5aa2503658a8e9c55fd392f8e85e
+VECCW key=ffffffffffffffff n=50000000000000 i=09631300008578 out=24032207060644
+VEC64 key=ffffffffffffffff i=785d6e74f085a3d2 out=99efeca3d5ac344c
+VEC46 key=ffffffffffffffff i=2e74f085a3d2 out=2bd0dc5f0190
+VEC128 key=ffffffffffffffff i=d22f648c6e05a448d7a376a22baff27f out=6c2d8e0ae8b0b13e7a208e166a715e67
+VECCW key=ffffffffffffffff n=50000000000000 i=01079786374098 out=04062582991778
+VEC64 key=ffffffffffffffff i=6196cf563d0c9d70 out=cd594b4b39716ee5
+VEC46 key=ffffffffffffffff i=0f563d0c9d70 out=2efe7112085a
+VEC128 key=ffffffffffffffff i=4588a149fa306064b0eebe6b6ce00be1 out=ea38dec6e044c5b7bd2594adf4927190
+VECCW key=ffffffffffffffff n=50000000000000 i=16863065841008 out=23106675787683
+VEC64 key=ffffffffffffffff i=205af24410f441bf out=3a3996c732a10912
+VEC46 key=ffffffffffffffff i=324410f441bf out=1c05c05e4778
+VEC128 key=ffffffffffffffff i=845414e592a3364da125482adaef1700 out=031844c337b14a2f41d64c8c4e6a42b7
+VECCW key=ffffffffffffffff n=50000000000000 i=05267923607999 out=44661714828060
+VEC64 key=ffffffffffffffff i=be6ce7f9239b3e67 out=2dc58d4da40b7fbf
+VEC46 key=ffffffffffffffff i=27f9239b3e67 out=3e72fccf43b3
+VEC128 key=ffffffffffffffff i=17fdda0cbe6b360a8146178d63200e3d out=8c3924b839d245b5719e5d50000f041e
+VECCW key=ffffffffffffffff n=50000000000000 i=43950997716583 out=33519746256381
+CHECK 5,000,000 random round trips inverse(perm(x)) == x at 64 bits                        ok (0)
+CHECK 5,000,000 random round trips inverse(perm(x)) == x at 128 bits                       ok (0)
+
+perm_check.c: every CHECK held

@@ -1,0 +1,42 @@
+merge_law.py: the accumulation design's laws, on an executable model
+
+CHECK L1 merge order and grouping do not change coverage (commutative, associative)                    ok (3000 scenarios, 0 violations)
+CHECK L2 a second device's copy of every record (distinct records, the same slices) does not change coverage ok (0 violations)
+CHECK L3 coverage from interval union equals an independent bitmap of the same records                 ok (0 violations)
+CHECK L4 adding a record never reduces coverage (monotone)                                             ok (0 violations)
+CHECK L5 a record whose case count is wrong, or that found a mismatch, is not coverage                 ok (0 violations)
+CHECK L6 records of one subject class (RTL build) never count for another                              ok (0 violations)
+CHECK L7 coverage never exceeds the space although the cases RUN may                                   ok (0 violations)
+CHECK L7' ten devices on one slice: cases run = 10 N, coverage = N                                     ok 
+CHECK the correct fold credits build A with nothing when only build B ran                              ok 
+
+CHECK PLANT first     breaks L1: the same test reports violations                                      ok (3000 of 3000 scenarios; also broken: L3 3000)
+CHECK PLANT naive     breaks L2: the same test reports violations                                      ok (3000 of 3000 scenarios; also broken: L3 3000, L7 3000)
+CHECK PLANT badmerge  breaks L3: the same test reports violations                                      ok (3000 of 3000 scenarios; also broken: L4 138)
+CHECK PLANT overwrite breaks L4: the same test reports violations                                      ok (772 of 3000 scenarios; also broken: L1 684, L3 691)
+CHECK PLANT nocount   breaks L5: the same test reports violations                                      ok (3000 of 3000 scenarios; also broken: L3 2544)
+CHECK PLANT novm      breaks L5: the same test reports violations                                      ok (3000 of 3000 scenarios; also broken: L3 2558)
+CHECK PLANT blind     breaks L6: the same test reports violations                                      ok (2897 of 3000 scenarios; also broken: L3 3000)
+CHECK PLANT naive     breaks L7: the same test reports violations                                      ok (3000 of 3000 scenarios; also broken: L2 3000, L3 3000)
+CHECK PLANT naive on the ten devices of L7': coverage above the space                                  ok 
+CHECK PLANT blind on build B's half-space slice credits half the space to a build that never ran a case ok 
+
+CHECK L8 two devices with identical outputs have identical roots                                       ok 
+CHECK L8 one differing batch changes the root and is found by descent (300 trials, 4,096 batches)      ok (0 wrong)
+CHECK L8 the descent used at most 2 log2(n) + 2 = 26 comparisons, against 4,096 for a scan             ok (worst 13)
+CHECK with two differing batches the descent finds the FIRST (batch 7), and the rest by repeating on the remainder ok 
+CHECK PLANT a descent that always goes left breaks L8: the same trials find the wrong batch            ok (300 of 300 wrong)
+CHECK PLANT a root comparison alone says 'differs' but not where (the descent is what localizes)       ok 
+
+CHECK L9 an honest slice replays from its record and its campaign record alone                         ok 
+CHECK L9 a tampered slice is found by replay and its batch named                                       ok (differs at batch 5)
+CHECK L9 without the campaign record replay refuses by name (the cid is a hash, its preimage is not in the slice record) ok 
+CHECK L9 a campaign record that does not hash to the cid is refused by name                            ok 
+CHECK PLANT a replay that does not check the campaign record against the cid calls an honest slice tampered, not a bad campaign record ok (differs at batch 0)
+CHECK a campaign record is not coverage: a store holding only it covers nothing                        ok 
+
+R. a record as section 5.3 writes it, canonical JSON: 1223 bytes; a weekend of 3287 slices 4.0 MB; a decade of 520 weekends 2.09 GB
+   a campaign record (once for every slice that names it): 288 bytes
+CHECK a decade of weekly weekends from one device is under 5 GB of records (the study's 'not a size problem') ok (1223 bytes a record, 2.09 GB)
+
+merge_law: every CHECK held

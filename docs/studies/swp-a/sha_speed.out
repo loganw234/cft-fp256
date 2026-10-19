@@ -1,0 +1,12 @@
+sha_speed.sh: SHA-256 on one core, openssl speed -evp sha256 -seconds 3, niced
+openssl: OpenSSL 3.0.2 15 Mar 2022 (Library: OpenSSL 3.0.2 15 Mar 2022)
+CPU: 12th Gen Intel(R) Core(TM) i5-12400F
+
+-- run 1 (lines of the openssl table)
+type             16 bytes     64 bytes    256 bytes   1024 bytes   8192 bytes  16384 bytes
+sha256          109741.57k   332414.40k   845055.60k  1409828.84k  1727044.59k  1797160.96k
+   run 1: 1.797 GB/s at 16 KB; 16 bytes a case = 8.90 ns; against div32 500 ns: 1.8%, div64 650 ns: 1.4%
+-- run 2 (lines of the openssl table)
+type             16 bytes     64 bytes    256 bytes   1024 bytes   8192 bytes  16384 bytes
+sha256          116341.17k   375045.74k   926729.97k  1439688.35k  1768982.51k  1810736.35k
+   run 2: 1.811 GB/s at 16 KB; 16 bytes a case = 8.84 ns; against div32 500 ns: 1.8%, div64 650 ns: 1.4%

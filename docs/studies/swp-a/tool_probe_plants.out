@@ -1,0 +1,81 @@
+== CONTROL: an unmodified copy must pass
+tool_probe: every CHECK held
+CONTROL ok (probe rc 0)
+
+== P1: scaleb counts operands
+PLANT P1: 1 line(s) changed in clause5_soak.c
+      1105c1105
+      <         count = count > sub ? count - sub : 0;
+      ---
+      >         count = count > n ? count - n : 0;
+PLANT P1: red as written (probe rc 1), at the check for it:
+      CHECK scaleb32 count=69632 (=4096x17): one batch, cases = count  got 1183744, wanted 69632  FAILED
+      CHECK scaleb32 count=696320 (=10x69632): cases = count           got 11837440, wanted 696320  FAILED
+      CHECK scaleb64 count=110592 (=4096x27): cases = count            got 2985984, wanted 110592  FAILED
+      tool_probe: 3 CHECK(s) FAILED
+
+== P2: no seed | 1
+PLANT P2: 3 line(s) changed in divsqrt_soak.c
+      462c462
+      <         rng_state = strtoull(argv[3], NULL, 0) | 1;
+      ---
+      >         rng_state = strtoull(argv[3], NULL, 0);
+      465c465
+      <         rng_state = strtoull(argv[3], NULL, 0) | 1;
+      ---
+      >         rng_state = strtoull(argv[3], NULL, 0);
+      468c468
+      <         rng_state = strtoull(argv[3], NULL, 0) | 1;
+      ---
+      >         rng_state = strtoull(argv[3], NULL, 0);
+PLANT P2: red as written (probe rc 1), at the check for it:
+      CHECK div32 seeds 0x50AC0002 and 0x50AC0003                      got DIFFERENT, wanted IDENTICAL  FAILED
+      CHECK div64 seeds 0x50AC0002 and 0x50AC0003                      got DIFFERENT, wanted IDENTICAL  FAILED
+      CHECK sqrt64 seeds 0x50AC0002 and 0x50AC0003                     got DIFFERENT, wanted IDENTICAL  FAILED
+      tool_probe: 3 CHECK(s) FAILED
+
+== P3: the mode shifts the stream
+PLANT P3: 3 line(s) changed in divsqrt_soak.c
+      462c462
+      <         rng_state = strtoull(argv[3], NULL, 0) | 1;
+      ---
+      >         rng_state = (strtoull(argv[3], NULL, 0) | 1) + (uint64_t)(mi * 2);
+      465c465
+      <         rng_state = strtoull(argv[3], NULL, 0) | 1;
+      ---
+      >         rng_state = (strtoull(argv[3], NULL, 0) | 1) + (uint64_t)(mi * 2);
+      468c468
+      <         rng_state = strtoull(argv[3], NULL, 0) | 1;
+      ---
+      >         rng_state = (strtoull(argv[3], NULL, 0) | 1) + (uint64_t)(mi * 2);
+PLANT P3: red as written (probe rc 1), at the check for it:
+      CHECK div32 seed 0x50AC0001: rtz gives the rne operands          got DIFFERENT, wanted IDENTICAL  FAILED
+      CHECK div32 seed 0x50AC1F20: rtz gives the rne operands          got DIFFERENT, wanted IDENTICAL  FAILED
+      CHECK div32 seed 0x50AC0007: rtz gives the rne operands          got DIFFERENT, wanted IDENTICAL  FAILED
+      CHECK div64 seed 0x50AC0001: rtz gives the rne operands          got DIFFERENT, wanted IDENTICAL  FAILED
+      CHECK div64 seed 0x50AC1F20: rtz gives the rne operands          got DIFFERENT, wanted IDENTICAL  FAILED
+      CHECK div64 seed 0x50AC0007: rtz gives the rne operands          got DIFFERENT, wanted IDENTICAL  FAILED
+
+== P4: nextup32 without its eight edge cases
+PLANT P4: 1 line(s) changed in clause5_soak.c
+      633c633
+      <     if (next_edges32(up))
+      ---
+      >     if (0 && next_edges32(up))
+PLANT P4: red as written (probe rc 1), at the check for it:
+      CHECK nextup32 [0,4096): hi - lo + 8                             got 4096, wanted 4104  FAILED
+      CHECK nextdown32 [0,4096): hi - lo + 8                           got 4096, wanted 4104  FAILED
+      tool_probe: 2 CHECK(s) FAILED
+
+== P5: cvtfrom runs one source type
+PLANT P5: 1 line(s) changed in clause5_soak.c
+      1611c1611
+      <         for (si = 0; si < 4; si++) {
+      ---
+      >         for (si = 0; si < 1; si++) {
+PLANT P5: red as written (probe rc 1), at the check for it:
+      CHECK cvtfrom32 count=4096: 4 source types per lane              got 4096, wanted 16384  FAILED
+      CHECK cvtfrom64 count=4096: 4 source types per lane              got 4096, wanted 16384  FAILED
+      tool_probe: 2 CHECK(s) FAILED
+
+tool_probe_plants: the control passed and all five plants were caught at their checks
