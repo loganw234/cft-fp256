@@ -23,9 +23,9 @@ drawn. A render with its title and nothing below it passes. The completeness of 
 business; the packager pins the bytes with a SHA-256 and shows that a second render gives the same bytes.
 
 WHY ONLY A BAND. A pure-Python decode of the whole image took 53 s for those 34 files on a quiet desktop (1.6 s
-each: a PNG row may be filtered against the row above it and the pixel to its left, so every row is a loop; 111 s
-when it was first measured, beside other work), and 6.6 s for the band (10.7 s beside other work). A check that
-costs a minute or two is a check that gets skipped.
+each: a PNG row may be filtered against the row above it and the pixel to its left, so every row is a loop; a
+first measurement, earlier the same day, gave 111 s), and 6.6 s for the band (10.7 s then). A check that costs a
+minute or two is a check that gets skipped.
 
 `selftest()` is what python/project_packager.py --check runs: the decoder against the encoder below on every
 filter, and each fault planted and required to come back under its own name.

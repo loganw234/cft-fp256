@@ -220,8 +220,8 @@ Both numbers come from a measurement, not from a belief: across all 34 renders
 the top rows held at least 5.03% non-background pixels and 471 colours. The
 check reads the PNG with `python/packager_png.py`, a decoder of the standard
 library alone, and only the band, because a pure-Python decode of the whole
-image took 53 s for the 34 files on a quiet desktop and the band 6.6 s (111 s
-and 10.7 s when first measured, beside other work). Its decoder gives the
+image took 53 s for the 34 files on a quiet desktop and the band 6.6 s (a first
+measurement, earlier the same day, gave 111 s and 10.7 s). Its decoder gives the
 same pixels as Pillow's on all 34 (checked outside the repository). What
 it does not prove is that the whole figure was drawn: a render with its title
 and nothing below passes. The packager pins the bytes instead, with a SHA-256,
