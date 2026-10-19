@@ -54,7 +54,10 @@ and requires each to be caught by name (HonestFramework METHOD section 3).
 "Every check" is a measured claim, not an intention: on 2026-09-24 a
 mutation test disabled each check and branch in turn, in memory, and every
 mutation was caught by a control. Its first run found nine that were not,
-in the version that first claimed this sentence.
+in the version that first claimed this sentence. The bench count's
+branches added on 2026-10-19 had none until verifier-VCI said so; that
+day six mutations of them were each caught by name by one of the four
+controls then planted in tb/Makefile.
 
     python python/check_docs_index.py          # report and exit nonzero
     python python/check_docs_index.py --quiet  # only on failure
@@ -215,7 +218,8 @@ def check_sim_bench_count(problems, root):
                             "cannot expand (SIM_GROUPS %r, groups with no "
                             "assignment %r)" % (value, groups, missing))
             return None
-        total = sum(len(assigns["SIM_GROUP_" + g].split()) for g in groups)
+        total = sum(len(assigns.get("SIM_GROUP_" + g, "").split())
+                    for g in groups)
 
     WORDS = {20: "twenty", 21: "twenty-one", 22: "twenty-two",
              23: "twenty-three", 24: "twenty-four", 25: "twenty-five"}
@@ -816,6 +820,28 @@ def run_controls(root, tracked, baseline):
                       rs.replace('STATEROOT="$ROOT/verify/state"',
                                  'STATEROOT="$ROOT/verify/runs"', 1),
                       r"^verify/state is exempt as a product of verify/run\.sh"))
+        # The bench count's tb/Makefile, each way check_sim_bench_count
+        # refuses one and its flat form (2026-10-19, verifier-VCI): a
+        # SIM_BENCHES that is not the groups' foreach, a group listed with
+        # no assignment, no SIM_GROUPS, and a flat list of thirty.
+        tbm = (t / "tb" / "Makefile").read_text(encoding="utf-8")
+        union = "SIM_BENCHES = $(foreach g,$(SIM_GROUPS),$(SIM_GROUP_$(g)))"
+        cannot = (r"^tb/Makefile's SIM_BENCHES is .*, which this check "
+                  r"cannot expand \(SIM_GROUPS ")
+        edits += [
+            ("tb/Makefile", tbm, tbm.replace(union, "SIM_BENCHES = "
+                                             "$(SIM_GROUP_1) $(SIM_GROUP_2)", 1),
+             cannot + r"\[.+\], groups with no assignment \[\]\)$"),
+            ("tb/Makefile", tbm, re.sub(r"(?m)^(SIM_GROUPS = .*)$", r"\1 4",
+                                        tbm, count=1),
+             cannot + r"\[.*'4'\], groups with no assignment \['4'\]\)$"),
+            ("tb/Makefile", tbm, re.sub(r"(?m)^SIM_GROUPS =", "SIM_GROUPS_ =",
+                                        tbm, count=1),
+             cannot + r"\[\], groups with no assignment \[\]\)$"),
+            ("tb/Makefile", tbm, tbm.replace(union, "SIM_BENCHES = " + " ".join(
+                "b%d" % i for i in range(30)), 1),
+             r" where tb/Makefile derives 30 benches$"),
+        ]
         # The delivered pack's exemption, each way it can stop holding: a
         # document edited, and then checked like any other, so the broken
         # link and the missing path planted in it are reported too; the

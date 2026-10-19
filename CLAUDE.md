@@ -129,12 +129,16 @@ the check. Override it to gate a subset: `make sim SIM_BENCHES=fp32`.
 
 **Since 2026-10-19 `SIM_BENCHES` is the union of three groups**
 (`SIM_GROUP_1` to `SIM_GROUP_3`), and CI runs each group as its own job
-(`make sim-group-<n>`): as one job the suite came within 21 minutes of the
-hosted runner's 6-hour limit and once hit it. **A new bench goes into a
-group**, the one that keeps their CI times even (tb/Makefile gives them);
-outside every group it is in neither `make sim` nor CI.
-`make print-sim-groups`, which CI's matrix reads, refuses a bench in two
-groups or a `SIM_BENCHES` that is not their union.
+(`make -C tb sim-group-<n>`): as one job the suite came within 21 minutes
+of the hosted runner's 6-hour limit and once hit it. **A new bench goes
+into a group**, the one that keeps their CI times even (tb/Makefile gives
+them); outside every group it is in neither `make sim` nor CI.
+`make -C tb print-sim-groups`, which CI's matrix reads, refuses, naming
+what it found, a bench in two groups, a `SIM_BENCHES` that is not their
+union, a group in `SIM_GROUPS` with no bench, and a `SIM_GROUP_<n>`
+assigned but not listed in `SIM_GROUPS`. The three long sequencer benches
+run last, in `make sim` and in each group, so a quick bench's failure is
+not held behind them.
 
 **`make -C host all` does not build the test executables, on any
 host.** `api-test`, `device-test` and `remote-test` are separate

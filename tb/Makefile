@@ -1,10 +1,12 @@
 # Copyright 2026 Logan W.
 # SPDX-License-Identifier: Apache-2.0
 # Testbench dispatcher. Each target is one cocotb run with its own
-# build directory. `make sim` is the full suite; it is what CI runs
-# and what docker/Dockerfile.sim exists to run.
+# build directory. `make sim` is the full suite; CI runs it as one job
+# a group (`make sim-group-<n>`, below), and docker/Dockerfile.sim
+# exists to run it.
 #
 #   make sim                  everything (icarus)
+#   make sim-group-1          one of CI's groups (make print-sim-groups)
 #   make fp32 | fp64 | fp128 | fp256 | krnl   one bench
 #   make SIM=verilator sim    alternative simulator
 #   CFT_RANDOM=20000 make fp32   crank the vector count
@@ -106,7 +108,14 @@ SIM_RESULTS = $(foreach b,$(SIM_BENCHES),\
 # while the suite-level line here was the only guard. The path in each
 # `&& $(PYTHON) check_results.py` is the recipe's own COCOTB_RESULTS_FILE
 # expression, so the two cannot name different files.
-sim: $(SIM_BENCHES)
+#
+# So make stops at the first bench that fails, and the three long
+# sequencer benches run last - in `make sim` and in each group alike,
+# whatever order the groups list them in - so that a quick bench's
+# failure stops the run in minutes rather than after an hour or more of
+# seq_core.
+SIM_LAST = seq_core seq_coreu50 seq_corestr
+sim: $(filter-out $(SIM_LAST),$(SIM_BENCHES)) $(filter $(SIM_LAST),$(SIM_BENCHES))
 	@$(PYTHON) check_results.py $(SIM_RESULTS)
 
 # One group of the suite, as one of CI's rtl jobs runs it: `sim` over that
@@ -116,17 +125,25 @@ sim-group-%:
 	$(if $(strip $(SIM_GROUP_$*)),,$(error no bench in group '$*': SIM_GROUPS is '$(SIM_GROUPS)'))
 	$(MAKE) sim SIM_BENCHES='$(SIM_GROUP_$*)'
 
-# The groups, as the JSON array CI's matrix reads, after the two checks
-# that keep the split honest: the groups together are SIM_BENCHES, and no
-# bench is in two groups. Either failing refuses by name, so a bench
-# left out of every group, or run twice, stops CI before it runs.
+# The groups, as the JSON array CI's matrix reads, after the checks that
+# keep the split honest: every group assigned is listed in SIM_GROUPS
+# and every group listed has a bench; the groups together are
+# SIM_BENCHES; and no bench is in two groups. Each refuses naming what
+# it found, so a bench left out of every group, or run twice, stops CI
+# before it runs. (A SIM_GROUP_<n> assigned and not listed would be in
+# neither `make sim` nor CI, and nothing else would say so.)
 SIM_GROUPED = $(foreach g,$(SIM_GROUPS),$(SIM_GROUP_$(g)))
+SIM_UNLISTED = $(filter-out $(addprefix SIM_GROUP_,$(SIM_GROUPS)),$(filter SIM_GROUP_%,$(.VARIABLES)))
+SIM_EMPTY = $(strip $(foreach g,$(SIM_GROUPS),$(if $(strip $(SIM_GROUP_$(g))),,$(g))))
+SIM_DOUBLED = $(sort $(foreach b,$(SIM_GROUPED),$(if $(word 2,$(filter $(b),$(SIM_GROUPED))),$(b))))
 empty :=
 space := $(empty) $(empty)
 comma := ,
 print-sim-groups:
+	$(if $(SIM_UNLISTED),$(error a group is assigned and not in SIM_GROUPS, so in neither make sim nor CI: '$(strip $(SIM_UNLISTED))'))
+	$(if $(SIM_EMPTY),$(error a group in SIM_GROUPS has no bench: '$(strip $(SIM_EMPTY))'))
 	$(if $(filter-out $(sort $(SIM_GROUPED)),$(SIM_BENCHES))$(filter-out $(sort $(SIM_BENCHES)),$(SIM_GROUPED)),$(error the groups are not SIM_BENCHES: in the suite and no group '$(filter-out $(SIM_GROUPED),$(SIM_BENCHES))', in a group and not the suite '$(filter-out $(SIM_BENCHES),$(SIM_GROUPED))'))
-	$(if $(filter-out $(words $(SIM_GROUPED)),$(words $(sort $(SIM_GROUPED)))),$(error a bench is in two groups: SIM_GROUPED has $(words $(SIM_GROUPED)) names and $(words $(sort $(SIM_GROUPED))) distinct))
+	$(if $(SIM_DOUBLED),$(error a bench is in two groups: '$(SIM_DOUBLED)'))
 	@echo '[$(subst $(space),$(comma),$(foreach g,$(SIM_GROUPS),"$(g)"))]'
 
 # The suite at the multi-cycle pass budget MC: every bench that holds a
