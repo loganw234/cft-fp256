@@ -314,8 +314,8 @@ if there is no converter, because it was asked to use one.
 generator; the PNG legs do not belong in any stage.** The converter-free check
 owns no committed file, but it fails exactly when something it reads moves
 (the README, the gallery, a sidecar, the ledger's newest heading), which is the
-kind of drift the stage exists to find; it takes 38 to 46 s on the maintainer's
-Windows desktop and 14 s under WSL's Python 3.10 (2026-10-19); it needs git, to
+kind of drift the stage exists to find; it takes 38 to 45 s on the maintainer's
+Windows desktop and 14 to 17 s under WSL's Python 3.10 (2026-10-19); it needs git, to
 commit a copy of the files it reads in a temporary directory of its own (no
 history of the tree it checks, no network), and the standard library, nothing
 else: no converter, no Pillow, no PyMuPDF; it never skips and prints no `SKIP`
