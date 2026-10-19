@@ -129,9 +129,10 @@ sim-group-%:
 # keep the split honest: every group assigned is listed in SIM_GROUPS
 # and every group listed has a bench; the groups together are
 # SIM_BENCHES; and no bench is in two groups. Each refuses naming what
-# it found, so a bench left out of every group, or run twice, stops CI
-# before it runs. (A SIM_GROUP_<n> assigned and not listed would be in
-# neither `make sim` nor CI, and nothing else would say so.)
+# it found, so a bench that SIM_BENCHES names and no group does, or one
+# in two groups, stops CI before it runs. (A SIM_GROUP_<n> assigned and
+# not listed would be in neither `make sim` nor CI, and nothing else
+# would say so. A bench that neither names is in neither, as before.)
 SIM_GROUPED = $(foreach g,$(SIM_GROUPS),$(SIM_GROUP_$(g)))
 SIM_UNLISTED = $(filter-out $(addprefix SIM_GROUP_,$(SIM_GROUPS)),$(filter SIM_GROUP_%,$(.VARIABLES)))
 SIM_EMPTY = $(strip $(foreach g,$(SIM_GROUPS),$(if $(strip $(SIM_GROUP_$(g))),,$(g))))
