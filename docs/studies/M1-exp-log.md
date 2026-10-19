@@ -157,6 +157,39 @@ build changed in this text's statements:
   and until it the tangent stage's leg that certifies the references
   fails a marked segment by name.
 
+**A note of 2026-10-19** (parcel MS, M1's build, item 5; the study's text
+stays as of 2026-10-05). The stages hold the six now, with marked lanes
+replayed (docs/VALIDATION.md, the entry of that date). What the build
+changed in this text's statements:
+- Section 6's "A marked lane in the language's own checks" and section 8's
+  item 7 are built. `programs/lang_check.py` and `programs/tangent_check.py`
+  compare every image with `lang.run` under one rule, the interpreter run
+  lane by lane so that each lane's own flags are known: a lane whose byte
+  carries [7] is replayed by the definition and its guess counted and never
+  required; every other lane equals the definition bit for bit, its byte's
+  five flags included; FLAGS after the replay is `lang.run`'s, STATUS is
+  zero but for STATUS[6], and STATUS[6] is set exactly where a byte is
+  marked. The `lang-routines` stage's legs N1 to N3 and the `tangent`
+  stage's leg N run the six alone, in generated sources and in a call loop,
+  with the families' arguments in the lanes; the note of 2026-10-15 (later)
+  said the replay was this item's.
+- Section 8's item 4, the structured families as a committed list, is used
+  by those legs, and a lane the theory demands marked is asserted marked,
+  so that a mark silenced in a fragment is red by name even where its guess
+  was right. MEASURED over every committed centre of exp, expm1, log and
+  log1p at fp64, fp128 and fp256 under the five attributes, each with its
+  two neighbours a unit in the last place away (3,994 centres, 11,982 lanes,
+  `next x = f(x)` for one step on seq.py against `lang.run` lane by lane):
+  11,385 marked, 0 unmarked lanes wrong in bits or in their byte, and 6
+  guesses wrong - exp under rne at x = 2^-p and expm1 under rne at
+  x = 2^-(p-1), at each of the three formats - exactly verifier-VMC's six
+  (its ledger), with the census's "guesses wrong" column (exp under rne,
+  expm1 at fp64 under rne) among them; the gate-sized draw always holds
+  them.
+- Section 6's fp32: a family has no centre at fp32 (G = 40, section 3.5),
+  so no lane of the structured draw marks there, and the legs report 0
+  marked, 0 demanded.
+
 **Revised the same day,** after verifier-VM1 checked the first version
 (5b6de0d; the round's ledger, `verifier-VM1.md`). That check found one
 defect: log1p's r = x path ran its polynomial past the bound's rho, and

@@ -448,10 +448,47 @@ six, named as `python/cft_golden/transcend.py` names the functions.
     exp near 0, log near 1, the arguments x = c 2^-e and 1 + c ulp the
     study counts (docs/studies/M1-exp-log.md, 3.5) - that holds for
     whole windows of arguments, not for a few rare bits: a workload that
-    lives in such a window marks there on purpose, and the stages that
-    compare images with `lang.run` replay those lanes by the definition
-    (M1's build, item 5's legs; until then a stage leg that meets a
-    marked lane fails it by name).
+    lives in such a window marks there on purpose.
+  - **The stages replay a marked lane** (M1's build, item 5,
+    2026-10-19). The `lang`, `lang-routines` and `tangent` stages compare
+    every image with `lang.run` under one rule (`programs/lang_check.py`,
+    "the marked-lane rule", which `programs/tangent_check.py` shares),
+    after `python/cft_golden/cert2.py`'s `replay_segment`, which replays a
+    certificate version 2's marked lanes. The interpreter is run lane by
+    lane, so that each lane's own flags are known, and each checkpoint
+    - the image run for 1, 2, 5 and its own steps, each a run from the
+    initial states with nothing carried from one checkpoint's replay to
+    the next, since a lane's value after s steps is `lang.run` of that
+    lane for s steps - is held to this:
+    - a lane whose byte carries the mark is replayed by the definition:
+      its values - states and tangents - and its flags stand in for the
+      image's, whose guess is counted, reported where it is wrong in its
+      values or its flags, and never required;
+    - every other lane equals the definition bit for bit - states,
+      tangents, lane params - and its byte is exactly the definition's
+      five flags for that lane, [7:5] clear;
+    - FLAGS after the replay, the OR of the corrected bytes, is
+      `lang.run`'s, and FLAGS as the run reports it is the OR of the raw
+      bytes; STATUS is zero but for STATUS[6], which is set exactly when
+      some lane's byte is marked; and a lane marked at one checkpoint is
+      marked at every later one.
+
+    An image that marks no lane is held as it was before the rule, and by
+    its bytes besides. The structured families' arguments are put in the
+    lanes on purpose (`python/tests/mathlib_family.py`), every one of
+    those lanes that the study's theory demands marked is asserted
+    marked, and the rule has
+    controls of its own - a hand-written image that marks lanes, run with
+    a fault planted in a copy of its runs - so that a stage that never saw
+    a mark cannot pass for one that replayed it. A certificate from
+    cft-segrun does not replay a lane of the six: its version-1
+    certificate holds what the machine ran, a marked lane's guess
+    included (STATUS[6] on the segment), and its version-2 writer
+    replays only by an image of the source that decides the lane
+    (`replay-missing` without one, `replay-undecided` where the replay
+    image marks the lane too; docs/CERTIFICATES.md, "A marked lane"),
+    which no image of the six is. So a segment that marks a lane still
+    fails the `tangent` stage's certificate leg by name.
 - **Division and the square root** (L4, 2026-10-02) are each one
   correctly rounded operation, with exactly the flags the golden function
   raises: a quiet NaN in gives the canonical NaN and no flag, as every
@@ -2647,16 +2684,25 @@ command line (exit 3, never 70); its leg L holds the call loop - eight
 bodies under rk4, which the constant itself loops, and Kepler under rk4
 with the constant lowered; the `tangent` stage's leg L compiles the
 quotient's and the root's rules the same way, and its leg M holds the
-math library's six rules in the golden model, with plants (their
-compiled legs with generated sources, a marked lane replayed, are M1's
-build, item 5's; since item 4 its legs G, H and J read the three
-committed references that hold the six, and leg G fails by name a
-certified segment that marks a lane); and the `lang` stage
-certifies Kepler's routine images and holds the routines' four plants
-and the loop's three in its leg H. The routines themselves are held to
-softfloat by python/tests/test_routines.py and the `lang-routines`
-stage's leg K2, and their inlining and their loops by
-`python/tests/test_cftc.py`.
+math library's six rules in the golden model, with plants (since item 4
+its legs G, H and J read the three committed references that hold the
+six, and leg G fails by name a certified segment that marks a lane); and
+the `lang` stage certifies Kepler's routine images and holds the
+routines' four plants and the loop's three in its leg H. The math
+library's six are held there too since M1's build, item 5 (2026-10-19),
+with marked lanes replayed ("A marked lane" above): the `lang-routines`
+stage's leg N1 compiles and runs each of the six alone at every format
+and attribute, with the structured families' arguments in the lanes and
+each integrator among them, and refuses each on revision 7's targets;
+N2 compiles generated sources that call them beside division and the
+root, with and without tangent vectors; N3 loops batches of them with
+the constant lowered; and its leg O holds the rule itself with controls,
+on a hand-written image that marks lanes on purpose. The `tangent`
+stage's leg N compiles generated systems that call the six with one
+tangent vector or two and runs them the same way, tangents replayed
+whole. The routines themselves are held to softfloat by
+python/tests/test_routines.py and the `lang-routines` stage's leg K2,
+and their inlining and their loops by `python/tests/test_cftc.py`.
 
 ## What v1 does not do
 
