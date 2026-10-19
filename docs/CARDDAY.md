@@ -1036,7 +1036,12 @@ The card figures are `2^32 / (the stress run's median rate a tile)` from the 202
 (the random mode's count is decremented by the operands times the list's length), which is why
 `scaleb32-all` is 17 times and `scaleb32-wide` 568 times an operand-rate figure. The cvtfrom
 figures are upper bounds: the random mode makes four conversions a lane and these make two.
-The four tiles' column is four processes on four quarters of the space (below). **The software
+The `scaleb32-wide` figures carry a mix the rate was not measured on: the random mode's 17
+exponents are 15 on the tile and 2 on the host, the wide item's 568 are 433 on the tile and 135
+on the host, and verifier-VEX measured the wide item's tile exponents taking 1.43 tile passes a
+check against 1.27 for the random list's - so 47.5 h and 11.9 h are the right order, not a
+prediction to the hour. The four tiles' column is four processes on four quarters of the space
+(below). **The software
 column is the whole item on one CPU core; `conv32to64-all`, `cvtto32-all`, `cvtfrom32-all` and
 `cvtfrom64-all` are host operations, so any CPU's software backend is the same test as the
 card's, and `scaleb32-wide` is hardware-only in practice.** The software figures are estimates,
@@ -1044,8 +1049,13 @@ not runs (`conv32to64-all` was run whole: 526.5 s): 2^32 times the mean time an 
 small slices, one in the middle of each of 32 equal cells of the space, on a WSL desktop other
 sessions share (2026-10-19): good to about a quarter and no better - the same sampling gave
 `conv32to64-all` 6.9 minutes against the 8.8 it took. A figure taken from the first slice of the
-space is too high for scaleb32-all: those are subnormals, and it ran them at 169 K encodings a
-second against 285 K to 310 K at three places in the normal range.
+space runs high for scaleb32-all, whose start is subnormals: 169 K encodings a second there in
+one run against 285 K to 310 K at three places in the normal range; verifier-VEX measured 225 to
+238 K from the start against 248 to 314 K in the normal range, so the effect is real but smaller
+than that one run suggests. `cvtfrom64-all` under rtz, rdn and rup computes the same exact
+answers as under rne - a 32-bit integer converts to fp64 exactly - so three of its four
+attributes repeat rne's results (3 x 38 min of a tile); it still tests that the library takes
+each attribute's path.
 
 Through the driver, on the box (one job a distinct item, so name four items for four tiles; the
 driver builds the tools with XRT=1 itself):
@@ -1054,7 +1064,7 @@ driver builds the tools with XRT=1 itself):
          --legs api-test --weights quad=1,single=0,deep=0 --sweep-minutes quad=720,single=0,deep=0 \
          --sweep-items scaleb32-wide-rne,scaleb32-wide-rtz,scaleb32-wide-rdn,scaleb32-wide-rup
 
-(four wide attributes in about 47.5 h; `scaleb32-all-*`, the three host families and the older items
+(four wide attributes in about 47.5 h; `scaleb32-all-*`, the four host families and the older items
 are named the same way). A finished item shows in `status.txt` and in the report as 4,294,967,296 of
 4,294,967,296 encodings, 100.000%, with its reach.
 
@@ -1070,7 +1080,9 @@ One item on all four tiles, without the driver - any of the six (the same binary
 The same on a CPU's software backend, for the four host families (and any other item; four cores
 for four quarters): leave out the two variables of the loop's second line, so no
 `CFT_SOAK_ARTIFACT` names an image and `cft_open(NULL)` selects the software backend. It needs
-only `make -C host clause5-soak` (XRT=0 is the default) on a 64-bit Linux:
+only `make -C host clause5-soak` (XRT=0 is the default) on a 64-bit Linux. (hw/run-c5-soak.sh's
+no-argument form runs all of these, the wide item included: about 23 to 25 process-days, so
+roughly 19 to 21 hours on 30 workers, nearly all of it `scaleb32-wide`; its header says so.)
 
     JOB=cvtto32-all; ATTR=rne
     for k in 0 1 2 3; do
@@ -1087,15 +1099,21 @@ with E the quarter's 1,073,741,824 and cases + S the checks an encoding takes ti
 the same split for the same quarter). Over the whole space the four lines' E add up to
 4,294,967,296 and their value and flag mismatches are 0. A disagreement lists operands
 (`MISMATCH ... a=0x...`, and for the scaleB items the exponent as `b=`); `scaleb32-beyond` names a
-witness past the range's edge.
+witness past the range's edge. Values are compared per lane; **flags per batch** (the library's
+batch call returns one flags word, so the soak compares the OR over the batch and rechecks lanes
+alone only where it differs): a flag the library drops on one lane among others that raise it is
+not seen, e.g. one signalling NaN of many that fails to raise INVALID - the random modes share
+this; it is seen when that lane is the only one in its batch to raise the flag.
 
 The tool's side is tested by `python3 hw/test_c5_exhaustive.py` (POSIX with make and a C compiler,
 about a minute): every mode and attribute over 37 slices of the special regions (zeros,
 subnormals, the normal range's edges, infinities, quiet and signalling NaNs, the integer targets'
 boundaries) and 96 slices across the whole space, the refusals, a sabotage control for each mode,
 and plants - a library result changed for one operand, the oracle given the wrong attribute, the
-exponent range wrong by one, the encodings miscounted - each of which must go red at its operand
-or exponent; `--baseline-tree DIR` also compares the random modes byte for byte with another
+exponent range wrong by one, the encodings miscounted, a skip filter too eager - each of which
+must go red at its operand or exponent (`cvtto32-all`'s skipped pairs are also counted there
+independently of the tool, which the driver cannot do: it holds that mode to E and
+cases + S = 4E); `--baseline-tree DIR` also compares the random modes byte for byte with another
 tree's (`git archive REV host | tar -x -C DIR`). The driver's side is `hw/test-card-stress.sh`
 (group `sweepall`, and the plants).
 
