@@ -127,6 +127,15 @@ The bench list is the variable `SIM_BENCHES` and the files checked are
 *derived* from it, so a bench cannot be added to the run and left out of
 the check. Override it to gate a subset: `make sim SIM_BENCHES=fp32`.
 
+**Since 2026-10-19 `SIM_BENCHES` is the union of three groups**
+(`SIM_GROUP_1` to `SIM_GROUP_3`), and CI runs each group as its own job
+(`make sim-group-<n>`): as one job the suite came within 21 minutes of the
+hosted runner's 6-hour limit and once hit it. **A new bench goes into a
+group**, the one that keeps their CI times even (tb/Makefile gives them);
+outside every group it is in neither `make sim` nor CI.
+`make print-sim-groups`, which CI's matrix reads, refuses a bench in two
+groups or a `SIM_BENCHES` that is not their union.
+
 **`make -C host all` does not build the test executables, on any
 host.** `api-test`, `device-test` and `remote-test` are separate
 targets, and they link `libcft.a` STATICALLY - so after a library fix,

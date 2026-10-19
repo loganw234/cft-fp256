@@ -53,7 +53,7 @@ LATENCY_ENV = CFT_RD_LATENCY=$(RD_LATENCY) CFT_WR_LATENCY=$(WR_LATENCY)
 # it, and `make -C tb` is a fresh make.
 PYTHON ?= python3
 
-.PHONY: sim simmc fp32 fp64 fp128 fp256 mulfrac mulshare simpleops normseg normshare \
+.PHONY: sim simmc print-sim-groups fp32 fp64 fp128 fp256 mulfrac mulshare simpleops normseg normshare \
         normprobe seedop reduceacc reduce krnl krnlf128 krnlf64f128 krnlseq quarter faults \
         seq_core seq_coreu50 seq_coreu50mc seq_corestr seq_corestr_full ifetch seqprobe seqcycles seqcyclesstr seqtrace seqbp redprog krnlfused krnlplain cycles seqbanks \
         mulpass mulcycle mulcycle2 fp32mc fp64mc fp128mc fp256mc reducemc \
@@ -69,13 +69,25 @@ PYTHON ?= python3
 # and hangs were always caught (cocotb deletes the results file before
 # each run; the `timeout` wrappers handle the rest) - what escaped was
 # the one outcome this project exists to detect.
-SIM_BENCHES = fp32 fp64 fp128 fp256 mulfrac mulshare simpleops normseg \
-              normshare seedop reduceacc reduce reducenowide krnl krnlf128 \
-              krnlf64f128 \
-              quarter faults redprog \
-              seq_core seq_coreu50 seq_corestr krnlseq krnlseqnoaug \
-              seqbanks mulpass mulcycle mulcycle2 \
-              ifetch
+#
+# Since 2026-10-19 the list is three groups, and SIM_BENCHES is their
+# union: a bench is in the suite exactly when it is in a group. CI runs
+# each group as a job of its own (.github/workflows/gates.yml, the rtl
+# jobs, `make sim-group-<n>` for each group `make print-sim-groups`
+# names). As one job the suite took 4 h 28 min to 5 h 39 min of the
+# hosted runner's six hours, and one run hit that limit (582953c's,
+# cancelled at 6 h 00 min, 2026-10-16). The groups are balanced on each
+# bench's time in two CI runs (d3fef4b's and 97076f3's rtl jobs):
+# 5,464, 5,366 and 5,222 s at the faster, 6,896, 6,912 and 6,522 s at
+# the slower. A new bench goes into the group that keeps them even.
+SIM_GROUPS = 1 2 3
+SIM_GROUP_1 = seq_core fp32 fp64 fp128 fp256 mulfrac mulshare
+SIM_GROUP_2 = seq_coreu50 krnl krnlf128 krnlf64f128 krnlseqnoaug quarter \
+              faults seqbanks mulpass mulcycle mulcycle2 ifetch seedop \
+              reduceacc
+SIM_GROUP_3 = seq_corestr krnlseq reducenowide reduce normshare normseg \
+              redprog simpleops
+SIM_BENCHES = $(foreach g,$(SIM_GROUPS),$(SIM_GROUP_$(g)))
 
 # A bench writes sim_build/<target name>/results.xml. One does not: the
 # multi-cycle multiplier bench is parameterised by the pass budget, so
@@ -96,6 +108,26 @@ SIM_RESULTS = $(foreach b,$(SIM_BENCHES),\
 # expression, so the two cannot name different files.
 sim: $(SIM_BENCHES)
 	@$(PYTHON) check_results.py $(SIM_RESULTS)
+
+# One group of the suite, as one of CI's rtl jobs runs it: `sim` over that
+# group alone, its checker over that group's results. A group with no
+# benches is refused by name rather than run as an empty suite.
+sim-group-%:
+	$(if $(strip $(SIM_GROUP_$*)),,$(error no bench in group '$*': SIM_GROUPS is '$(SIM_GROUPS)'))
+	$(MAKE) sim SIM_BENCHES='$(SIM_GROUP_$*)'
+
+# The groups, as the JSON array CI's matrix reads, after the two checks
+# that keep the split honest: the groups together are SIM_BENCHES, and no
+# bench is in two groups. Either failing refuses by name, so a bench
+# left out of every group, or run twice, stops CI before it runs.
+SIM_GROUPED = $(foreach g,$(SIM_GROUPS),$(SIM_GROUP_$(g)))
+empty :=
+space := $(empty) $(empty)
+comma := ,
+print-sim-groups:
+	$(if $(filter-out $(sort $(SIM_GROUPED)),$(SIM_BENCHES))$(filter-out $(sort $(SIM_BENCHES)),$(SIM_GROUPED)),$(error the groups are not SIM_BENCHES: in the suite and no group '$(filter-out $(SIM_GROUPED),$(SIM_BENCHES))', in a group and not the suite '$(filter-out $(SIM_BENCHES),$(SIM_GROUPED))'))
+	$(if $(filter-out $(words $(SIM_GROUPED)),$(words $(sort $(SIM_GROUPED)))),$(error a bench is in two groups: SIM_GROUPED has $(words $(SIM_GROUPED)) names and $(words $(sort $(SIM_GROUPED))) distinct))
+	@echo '[$(subst $(space),$(comma),$(foreach g,$(SIM_GROUPS),"$(g)"))]'
 
 # The suite at the multi-cycle pass budget MC: every bench that holds a
 # pipe, a lane array or the kernel, run against the same golden model

@@ -185,7 +185,10 @@ def check_sim_bench_count(problems, root):
     so it is the only authority. Four documents quoted "21" by hand on
     2026-09-14 when the twenty-second bench (krnlf128) was added; a count
     that is transcribed is a count that drifts, which is what the stage
-    counts above already learned.
+    counts above already learned. Since 2026-10-19 SIM_BENCHES is the
+    union of the groups CI runs as separate jobs - SIM_GROUP_<g> for each
+    <g> in SIM_GROUPS - and the count is derived from them the same way;
+    a SIM_BENCHES this check cannot expand is a problem, never a guess.
     """
     mk = root / "tb" / "Makefile"
     if not mk.is_file():
@@ -194,11 +197,25 @@ def check_sim_bench_count(problems, root):
     text = mk.read_text(encoding="utf-8", errors="replace")
     # The assignment spans backslash-continued lines.
     text = text.replace("\\\n", " ")
-    m = re.search(r"^SIM_BENCHES\s*=\s*(.*)$", text, re.M)
-    if not m:
+    assigns = dict(re.findall(r"^([A-Za-z0-9_]+)[ \t]*=[ \t]*(.*)$", text,
+                              re.M))
+    if "SIM_BENCHES" not in assigns:
         problems.append("tb/Makefile has no SIM_BENCHES assignment")
         return None
-    total = len(m.group(1).split())
+    value = assigns["SIM_BENCHES"].strip()
+    if "$" not in value:
+        total = len(value.split())
+    else:
+        m = re.fullmatch(r"\$\(foreach (\w+),\$\(SIM_GROUPS\),"
+                         r"\$\(SIM_GROUP_\$\(\1\)\)\)", value)
+        groups = assigns.get("SIM_GROUPS", "").split()
+        missing = [g for g in groups if "SIM_GROUP_" + g not in assigns]
+        if not m or not groups or missing:
+            problems.append("tb/Makefile's SIM_BENCHES is %r, which this check "
+                            "cannot expand (SIM_GROUPS %r, groups with no "
+                            "assignment %r)" % (value, groups, missing))
+            return None
+        total = sum(len(assigns["SIM_GROUP_" + g].split()) for g in groups)
 
     WORDS = {20: "twenty", 21: "twenty-one", 22: "twenty-two",
              23: "twenty-three", 24: "twenty-four", 25: "twenty-five"}
