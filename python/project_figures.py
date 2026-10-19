@@ -34,6 +34,13 @@ byte, with the committed files, and fails by name on:
     present, or that no figure reads;
   - a number the record states that a figure disagrees with, or a statement that
     has quietly stopped being there - see CLAIMS below;
+  - an SVG GitHub's sanitiser would not keep, a text the canvas clips, a text
+    drawn over another, or a mark or a text drawn over the figure's own source
+    line (by the kit's estimate of text widths: svg_lint and svg_layout);
+  - a statement in the ledger of a kernel slack (or a negative WNS) which the
+    timing figure neither draws nor lists as left out, with the reason: the
+    extract's scan of the pinned prefix of docs/VALIDATION.md, statement by
+    statement, repeated here;
   - a personal path in anything it writes.
 Then it plants each of those faults in a scratch copy and requires the check to
 name it: a check that cannot fail is a defect (HonestFramework, METHOD 3), so
@@ -41,7 +48,9 @@ every run watches its own check fail first. One more control goes the other way:
 a file that a figure reads only in part (verify/run.sh, which changes with most
 rounds: the figure reads its stage names and its two budget lists) is held by
 what was read, not by the file's bytes, so an edit elsewhere in it must move
-nothing - a check that failed for that would fail for nothing, every round.
+nothing - a check that failed for that would fail for nothing, every round. So
+must an item of the library's sweep catalog that the stress run never served
+(the reduction is of the run's items; soak-exhaustive's catalog adds twenty-two).
 
 CLAIMS. Where the record states a figure's number in words - the README's "4.5x
 and 5.5x", docs/DETERMINISM.md's table of formats - the figure's number is held
@@ -54,6 +63,7 @@ job does: Python 3.10 to 3.13, Linux, macOS and Windows.
 """
 import argparse
 import csv
+import html
 import importlib.util
 import json
 import math
@@ -487,7 +497,7 @@ def draw_perf_speedup(theme, d, meta):
                "word is who the software was.", meta["alt"])
     T = p.T
     cw, rh = 80.0, 38.0
-    lx = 130.0
+    lx = 170.0                      # room for the widest row label ("fused multiply-add", bold) even in a wide font
     blocks = [("x86-64", "an x86-64 workstation", lx), ("arm64", "an M2 Pro laptop", lx + 4 * cw + 38)]
     rows = [(op, t) for op in ("mul", "fma", "add") for t in (1, 4)]
     top = 150.0
@@ -898,11 +908,11 @@ def build_history_size(src, claims):
 
 @build_history_size.drawer
 def draw_history_size(theme, d, meta):
-    W, H = 900, 800
+    W, H = 900, 814
     p = K.Plot(theme, W, H, meta["title"],
                "Top: the text lines of every tracked file, by area, at the end of each day on main's own line. Two "
-               "slices are kept apart because neither is the project's own authorship: the hard-workload pack, "
-               "written by another model and kept as delivered, and the Arduino library's copy of host/. Bottom: "
+               "slices are kept apart: the hard-workload pack, written by another model and kept as delivered, and "
+               "the Arduino library's vendored copy of host/, which counts that code a second time. Bottom: "
                "the ledger, and what was ever taken out of it.", meta["alt"])
     T = p.T
     days, n = d["days"], len(d["days"])
@@ -955,29 +965,32 @@ def draw_history_size(theme, d, meta):
     rx0 = 500.0
     p.text(rx0, by0 - 22, "Where the lines taken out of it were", size=12, weight="600")
     ed = Lk["edits"]
-    p.text(rx0, by0 + 6, "%s lines were added to the ledger over its life; %d were later deleted (%.1f%%)."
-           % (K.with_commas(Lk["added"]), Lk["deleted"], 100.0 * Lk["deleted"] / Lk["added"]), size=10.5, fill=T["muted"])
-    p.text(rx0, by0 + 21, "Distance from the newest entry, in entries, when the line was deleted:", size=10.5, fill=T["muted"])
+    intro = K.wrap("%s lines were added to the ledger over its life; %d were later deleted (%.1f%%). Distance from the "
+                   "newest entry, in entries, when the line was deleted:"
+                   % (K.with_commas(Lk["added"]), Lk["deleted"], 100.0 * Lk["deleted"] / Lk["added"]), W - rx0 - 24, 10.5)
+    for k, line in enumerate(intro):
+        p.text(rx0, by0 + 6 + 15 * k, line, size=10.5, fill=T["muted"])
+    top_bars = by0 + 6 + 15 * len(intro) + 12
     rows = []
     for k, v in sorted(ed["by_distance"].items(), key=lambda kv: int(kv[0])):
         lab = "the newest entry" if k == "0" else "%s entr%s back" % (k, "y" if k == "1" else "ies")
         rows.append((lab, v))
     mx = max(v for _l, v in rows)
     for i, (lab, v) in enumerate(rows):
-        y = by0 + 54 + i * 34
+        y = top_bars + i * 34
         p.text(rx0, y + 12, lab, size=11)
         bw = max(3.0, 150.0 * v / mx)
         p.rect(rx0 + 130, y, bw, 18, T["cats"][3])
         p.text(rx0 + 130 + bw + 6, y + 13, "%d  (%.1f%%)" % (v, 100.0 * v / ed["deleted"]), size=10.5, mono=True)
     for k, line in enumerate(K.wrap("The ledger's own rule is that an entry never edits history. %d of the %d lines taken out "
-                                    "were in the newest entry when they went, the one being written; %d were in older ones. "
-                                    "%d commits took lines out, and the subjects of %d of them say restated, corrected, fixed "
-                                    "or a verifier's finding." % (
+                                    "were in the newest entry when they went; %d were in older ones. These are positions in "
+                                    "the file, not whether the text had been pushed. %d commits took lines out, and the "
+                                    "subjects of %d of them say restated, corrected, fixed or a verifier's finding." % (
                                         ed["by_distance"].get("0", 0), ed["deleted"],
                                         sum(v for kk, v in ed["by_distance"].items() if kk != "0"),
                                         ed["commits_deleting"], ed["subjects_restating"]),
                                     W - rx0 - 24, 10.5)):
-        p.text(rx0, by0 + 54 + len(rows) * 34 + 12 + 15 * k, line, size=10.5, fill=T["muted"])
+        p.text(rx0, top_bars + len(rows) * 34 + 12 + 15 * k, line, size=10.5, fill=T["muted"])
     p.footer([source_line(meta)])
     return p.render()
 
@@ -989,13 +1002,17 @@ def caption_history_size(d):
     elsewhere = "; ".join("%d line%s %d entr%s back, in %s on %s" % (
         e["lines"], "" if e["lines"] == 1 else "s", e["entries_from_end"], "y" if e["entries_from_end"] == 1 else "ies",
         e["commit"], K.day_short(e["day"])) for e in ed["not_the_newest"])
+    big = sorted((a for a in d["areas"] if a not in ("pack", "vendored")), key=lambda a: -d["final"][a])[:4]
     return {"shows": "%s text lines in %s tracked text files at %s: the largest slice is the hard-workload pack (%s lines, "
-                     "written by another model and kept as delivered), then the host library and bindings, documents "
-                     "and the golden model. Beside it, the ledger (%s lines in %d entries) and a measurement of its "
-                     "rule that it is append-only: %d of the %s lines ever added to it were later deleted, %d of those "
-                     "in the newest entry at the time." % (
+                     "written by another model and kept as delivered), then %s. The Arduino library's vendored copy of "
+                     "host/'s sources adds %s lines, a second copy. Beside it, the ledger (%s lines in %d entries) and a "
+                     "measurement of its rule that it is append-only: %d of the %s lines ever added to it were later "
+                     "deleted, %d of those in the newest entry at the time." % (
                          K.with_commas(d["total"]), K.with_commas(d["files"]), d["as_of"][:7],
-                         K.with_commas(d["final"]["pack"]), K.with_commas(d["ledger"]["lines"][-1]),
+                         K.with_commas(d["final"]["pack"]),
+                         ", ".join("%s (%s)" % (d["names"][a], K.with_commas(d["final"][a])) for a in big[:-1]) +
+                         " and %s (%s)" % (d["names"][big[-1]], K.with_commas(d["final"][big[-1]])),
+                         K.with_commas(d["final"]["vendored"]), K.with_commas(d["ledger"]["lines"][-1]),
                          d["ledger"]["entries"][-1], ed["deleted"], K.with_commas(d["ledger"]["added"]),
                          ed["by_distance"].get("0", 0)),
             "not": "Lines of working code: data files, captured outputs and compiled programs are lines too, and a "
@@ -1004,14 +1021,13 @@ def caption_history_size(d):
             "notes": ["**Data and prose.** docs/VALIDATION.md says it is append-only and that \"an entry never edits "
                       "history\". Git says %d of the %s lines ever added to it were later deleted, by %d commits (%d "
                       "of whose subjects say restated, corrected, fixed or a verifier's finding: a count of those "
-                      "words, not a reading of each): %d (%.1f%%) from the newest entry at the time, an edit of the "
-                      "entry being written, and %d from older entries (%s). Only those %d lines of the %d belonged "
-                      "to an entry that was no longer the newest, which is the case the rule rules out; the rest "
-                      "restate the entry being written. This is reported as measured, and nothing here corrects it." % (
+                      "words, not a reading of each): %d (%.1f%%) from the newest entry at the time and %d from older "
+                      "entries (%s). These are positions in the file: whether the text had been pushed when it was edited "
+                      "is not in the repository's history, so it is not counted here. This is reported as measured, and "
+                      "nothing here corrects it." % (
                           ed["deleted"], K.with_commas(d["ledger"]["added"]), ed["commits_deleting"],
                           ed["subjects_restating"], ed["by_distance"].get("0", 0),
-                          100.0 * ed["by_distance"].get("0", 0) / ed["deleted"], off, elsewhere, off,
-                          ed["deleted"])]}
+                          100.0 * ed["by_distance"].get("0", 0) / ed["deleted"], off, elsewhere)]}
 
 
 # ------------------------------------------------------------ verify-growth
@@ -1058,7 +1074,7 @@ build_verify_growth.fresh = _fresh_verify_growth
 
 @build_verify_growth.drawer
 def draw_verify_growth(theme, d, meta):
-    W, H = 900, 604
+    W, H = 900, 614
     p = K.Plot(theme, W, H, meta["title"],
                "The size of the gate at the end of each day on main's own line: the runner's stages and budgets, the "
                "cocotb RTL benches, the formal proofs, and the test functions defined for the golden model. "
@@ -1094,8 +1110,9 @@ def draw_verify_growth(theme, d, meta):
             p.text(px1 - 3, Y(lastv) - 6, K.with_commas(lastv), size=10.5, fill=col, anchor="end", weight="600", mono=True)
         if len(items) > 1:
             p.legend([(c, l) for _k, l, c in items], px0 + 8, py0 + 16, pw - 20, size=10, line=True)
-    p.text(24, 562, "Test functions are the lines that define one (def test_...); pytest collects several times as many "
-           "because a function is run for each case it is given.", size=10.5, fill=T["muted"])
+    for k, line in enumerate(K.wrap("Test functions are the lines that define one (def test_...); pytest collects several "
+                                    "times as many because a function is run for each case it is given.", W - 48, 10.5)):
+        p.text(24, 562 + 15 * k, line, size=10.5, fill=T["muted"])
     p.footer([source_line(meta)])
     return p.render()
 
@@ -1249,7 +1266,7 @@ def build_hw_area(src, claims):
 def draw_hw_area(theme, d, meta):
     W = 900
     n = len(d["layouts"])
-    H = int(236 + n * 27 + 96)
+    H = int(242 + n * 27 + 96)
     p = K.Plot(theme, W, H, meta["title"],
                "Top: the logic cells one tile costs, out of context, split by the four banks of FMA lanes and the shared "
                "machinery. Below: every tile mix the layout generator catalogues for the U50, as a share of the part's "
@@ -1270,7 +1287,7 @@ def draw_hw_area(theme, d, meta):
         xx += v
     p.text(x0, y - 8, "one tile, out of context: %s LUTs" % K.with_commas(t["full"]), size=11.5, weight="600")
     # the catalogue
-    cy0 = y + 78
+    cy0 = y + 84
     lx0, lx1 = 250.0, 730.0
     sc = K.Lin(0, 100, lx0, lx1)
     p.text(24, cy0 - 12, "layouts, as a share of the U50's logic cells", size=11.5, weight="600")
@@ -1300,8 +1317,9 @@ def draw_hw_area(theme, d, meta):
                                      (d["limit"], "routing limit", T["lose"], "start", 4)):
         p.line(sc(pct_), cy0 - 2, sc(pct_), cy0 + n * 27, col, 1.4, dash="5 4")
         p.text(sc(pct_) + dx, cy0 - 5, "%.0f%% %s" % (pct_, lab), size=9.5, fill=col, anchor=anch)
-    p.text(lx1 + 10, cy0 - 5, "of the part", size=9.5, fill=T["muted"])
-    p.text(lx1 + 66, cy0 - 5, "clocks, MHz", size=9.5, fill=T["muted"])
+    # the two columns' heads, one row above the threshold labels (which run on to the right of the 85% line)
+    p.text(lx1 + 10, cy0 - 17, "share", size=9.5, fill=T["muted"])
+    p.text(lx1 + 66, cy0 - 17, "clocks, MHz", size=9.5, fill=T["muted"])
     for k, line in enumerate(K.wrap(
             "Grey: the shell and crossbar. Bold names are the two layouts built so far; the others are placeholders until "
             "narrow variants are packaged. * a clock target, not a measurement. The model is about 2%% optimistic: it "
@@ -1329,10 +1347,31 @@ def caption_hw_area(d):
 
 
 # ---------------------------------------------------------------- hw-clock
+# the images built at 130 and 135 MHz that are drawn, in the order they were built: a row a build, the ids of its attempts
+HW_LINEAGE = (("bac9f550 (130 MHz)", ("bac9f550-single", "bac9f550-quad")),
+              ("control (130 MHz)", ("control-130-single",)),
+              ("b1a014c (130 MHz)", ("ms-single", "ms-quad")),
+              ("39fc2c0", ("135-single", "135-quad")),
+              ("0e7264e, case ROM", ("caserom-single",)),
+              ("9f73107, the tip", ("tip-single", "tip-quad")),
+              ("ed752dd", ("ed752dd-single", "ed752dd-quad")),
+              ("revision 2", ("rev2-single", "rev2-quad")),
+              ("revision 3", ("rev3-single", "rev3-quad")),
+              ("read-ahead", ("ra-single", "ra-quad")),
+              ("revision 4", ("rev4-single", "rev4-quad")),
+              ("fp64/fp128 single", ("f64f128-single",)),
+              ("revision 5, seq5", ("seq5-single",)),
+              ("R14", ("r14-single",)),
+              ("seq6", ("seq6-single",)),
+              ("round 2", ("round2-single", "round2-quad-first", "round2-quad")),
+              ("revision 7", ("rev7b-single", "q135b-quad")),
+              ("revision 8", ("rev8a-single", "rev8q-quad", "rev8d-deep")))
+
+
 @figure("hw-clock", "hardware", "How far the clock was pushed, and what it left in slack",
-        lambda d: "Kernel slack against the clock for every timing attempt the ledger records for the U50 "
-                  "(%d attempts), and the slack of the images built at 135 MHz over time. One tile closes %d MHz; "
-                  "four tiles close %d." % (len(d["attempts"]), d["max_single"], d["max_quad"]))
+        lambda d: "Kernel slack against the clock for the %d U50 builds this figure reads from the ledger, and the "
+                  "slack of the images built at 130 and 135 MHz in build order. One tile closes %d MHz; four tiles "
+                  "close %d." % (len(d["attempts"]), d["max_single"], d["max_quad"]))
 def build_hw_clock(src, claims):
     led = src.extract("ledger")
     att = led["attempts"]
@@ -1346,22 +1385,83 @@ def build_hw_clock(src, claims):
                "README.md", "%d MHz, %s" % (top["mhz"], top["date"]),
                ("%s MHz, %s" % (m.group(1), m.group(2))) if m else None,
                bool(m) and (int(m.group(1)), m.group(2)) == (top["mhz"], top["date"]))
-    return {"attempts": att, "max_single": max_single, "max_quad": max_quad, "n_missed": len(att) - len(closed),
+    # What the figure does NOT say: that these are all the builds the ledger gives a slack for. What the extract's scan
+    # of the pinned ledger prefix (repeated by --check) accounts for is each STATEMENT of the two forms its patterns read:
+    # its number is a drawn build's or a listed item's. That is a claim about the scan, and the counts below are its.
+    acc = led["accounting"]
+    ids = {a["id"] for a in att}
+    scan = {}
+    for rule, what in (("kernel", "a kernel slack"), ("negative", "a negative WNS")):
+        rows = [r for r in acc["statements"] if r[0] == rule]
+        nd = sum(1 for r in rows if r[4] in ids)
+        scan[rule] = {"statements": len(rows), "drawn": nd, "listed": len(rows) - nd}
+        claims.add("scan-" + rule, "each statement of %s that the scan's rule finds in the ledger's pinned prefix carries "
+                   "the slack of a drawn build or of a listed item (a scan, repeated by --check; it finds what its rule "
+                   "reads)" % what, X.EXTRACT_DIR + "/ledger.json", "%d statements" % len(rows),
+                   "%d drawn and %d listed" % (nd, len(rows) - nd), nd + (len(rows) - nd) == len(rows))
+    drawn_ids = {i for _l, ids_ in HW_LINEAGE for i in ids_}
+    stray = [a["id"] for a in att if 130 <= a["mhz"] <= 135 and a["id"] not in drawn_ids]
+    if stray:
+        raise X.ExtractError("hw-clock: the 130 and 135 MHz attempts %s are in no row of HW_LINEAGE (add them, in build "
+                             "order)" % ", ".join(stray))
+    kinds = {}
+    for l in led["left_out"]:
+        kinds[l["kind"]] = kinds.get(l["kind"], 0) + 1
+    return {"attempts": att, "left_out": led["left_out"], "kinds": kinds, "scan": scan,
+            "rules": {"kernel": acc["kernel_rule"], "negative": acc["negative_rule"]},
+            "max_single": max_single, "max_quad": max_quad, "n_missed": len(att) - len(closed),
             "proven": top["mhz"], "quote": led["quotes"][0]}
+
+
+def _swarm(items, size, step):
+    """x offsets, in pixels, for markers at (base x, y) so that none overlaps another: each takes the first of 0, then
+    alternate sides by growing steps (the side it prefers first), that clears every marker placed before it.
+    items: [(key, base_x, y, prefer)] with prefer +1 or -1; returns {key: x}. Order in, order of placement."""
+    placed, out = [], {}
+    lim = (2.0 * size + 1.0) ** 2
+    for key, bx, y, prefer in items:
+        k = 0
+        while True:
+            off = 0.0 if k == 0 else prefer * ((k + 1) // 2) * step * (1 if k % 2 == 1 else -1)
+            x = bx + off
+            if all((x - px) ** 2 + (y - py) ** 2 >= lim for px, py in placed):
+                break
+            k += 1
+        placed.append((x, y))
+        out[key] = x
+    return out
+
+
+def _whole_design_text(d):
+    items = [l for l in d["left_out"] if l["kind"] == "whole-design"]
+    return "; ".join("%s at %d MHz, %s, %+.3f ns" % ("one tile" if l["tiles"] == 1 else "four tiles", l["mhz"],
+                                                    K.day_short(l["date"]), l["wns"]) for l in items)
+
+
+def _kinds_text(d):
+    """'8 repeats of a drawn build's slack, 3 mentions of one, ...' from the extract's kinds, in the extract's order."""
+    return ", ".join("%d %s" % (d["kinds"][k], words) for k, words in X.KIND_WORDS if d["kinds"].get(k))
+
+
+def _texts_text(d):
+    """The builds named only in running text, by label and slack."""
+    return "; ".join("%s %+.3f" % (l["label"], l["wns"]) for l in d["left_out"] if l["kind"] == "text")
 
 
 @build_hw_clock.drawer
 def draw_hw_clock(theme, d, meta):
-    W, H = 900, 640
+    W, H = 900, 700
     p = K.Plot(theme, W, H, meta["title"],
-               "Every kernel worst-negative-slack the ledger states for a build on the U50, read out of docs/VALIDATION.md. "
-               "A build closes timing when its slack is not negative. Left: slack against the clock it was built at. "
-               "Right: the images built at 130 and 135 MHz, in the order they were built.", meta["alt"])
+               "The slack of the kernel's worst path for the U50 builds this figure reads from docs/VALIDATION.md: for each, "
+               "a pattern that names the build's entry and captures the figure the ledger states there. A build closes timing "
+               "when its slack is not negative. Left: slack against the clock it was built at. Right: the drawn images built at "
+               "130 and 135 MHz, in the order they were built. The ledger's other slacks (repeats, probes, other designs, builds "
+               "named only in running text) are listed in the sidecar, not drawn.", meta["alt"])
     T = p.T
     att = [a for a in d["attempts"] if a["mhz"] < 200]
     off = [a for a in d["attempts"] if a["mhz"] >= 200]
     ylo, yhi = -0.45, 0.65
-    ay0, ay1 = 150.0, 470.0
+    ay0, ay1 = 176.0, 496.0
     Y = K.Lin(ylo, yhi, ay1, ay0)
     colr = {1: T["cats"][0], 4: T["cats"][1]}
 
@@ -1378,7 +1478,7 @@ def draw_hw_clock(theme, d, meta):
             else:
                 p.rect(x - size, y - size, 2 * size, 2 * size, T["bg"], stroke=T["lose"], sw=2)
     # left panel: slack against clock
-    lx0, lx1 = 84.0, 470.0
+    lx0, lx1 = 84.0, 440.0
     X1 = K.Lin(125, 180, lx0, lx1)
     p.text(lx0, ay0 - 14, "slack (ns) against the clock built for (MHz)", size=11.5, weight="600")
     p.panel(lx0, ay0, lx1, ay1)
@@ -1388,15 +1488,13 @@ def draw_hw_clock(theme, d, meta):
     for v in range(130, 181, 10):
         p.line(X1(v), ay0, X1(v), ay1, T["grid"], 1)
         p.text(X1(v), ay1 + 14, str(v), size=10, fill=T["muted"], anchor="middle", mono=True)
-    groups = {}
-    for a in att:
-        groups.setdefault((a["mhz"], a["tiles"]), []).append(a)
-    for (mhz, tiles), lst in sorted(groups.items()):
-        for j, a in enumerate(sorted(lst, key=lambda a: a["date"] + a["id"])):
-            x = X1(mhz) + (j - (len(lst) - 1) / 2.0) * 6 + (-5 if tiles == 1 else 5)
-            marker(x, Y(a["wns"]), tiles, a["closed"])
-            if mhz > 135 and (tiles == 1) and a["recipe"] == "standard" and not a["id"].startswith("bracket"):
-                p.text(x, Y(a["wns"]) - 11, "%+.3f" % a["wns"], size=8.5, fill=T["muted"], anchor="middle", mono=True)
+    order = sorted(att, key=lambda a: (a["mhz"], a["tiles"], a["wns"], a["id"]))
+    pos = _swarm([(a["id"], X1(a["mhz"]) + (-6.0 if a["tiles"] == 1 else 6.0), Y(a["wns"]), -1 if a["tiles"] == 1 else 1)
+                  for a in order], 5.0, 11.0)
+    for a in order:
+        marker(pos[a["id"]], Y(a["wns"]), a["tiles"], a["closed"], size=5.0)
+        if a["mhz"] > 135 and (a["tiles"] == 1) and a["recipe"] == "standard" and not a["id"].startswith("bracket"):
+            p.text(pos[a["id"]], Y(a["wns"]) - 11, "%+.3f" % a["wns"], size=8.5, fill=T["muted"], anchor="middle", mono=True)
     for a in att:
         if a["id"] == "sweep-175-extra":
             p.line(X1(175), Y(a["wns"]) + 7, X1(175), Y(-0.2), T["axis"], 1, dash="2 3")
@@ -1410,23 +1508,13 @@ def draw_hw_clock(theme, d, meta):
     p.text((lx0 + lx1) / 2, ay1 + 30, "target clock, MHz", size=10.5, fill=T["muted"], anchor="middle")
     # right panel: one row a build, a dot an image, in the order they were built
     by_id = {a["id"]: a for a in d["attempts"]}
-    lineage = (("bac9f550, 130 MHz", ("bac9f550-single", "bac9f550-quad")),
-               ("b1a014c, 130 MHz", ("ms-single", "ms-quad")),
-               ("39fc2c0", ("135-single", "135-quad")),
-               ("ed752dd", ("ed752dd-single", "ed752dd-quad")),
-               ("revision 2", ("rev2-single", "rev2-quad")),
-               ("revision 3", ("rev3-single", "rev3-quad")),
-               ("read-ahead", ("ra-single", "ra-quad")),
-               ("revision 4", ("rev4-single", "rev4-quad")),
-               ("round 2", ("round2-single", "round2-quad-first", "round2-quad")),
-               ("revision 7", ("rev7b-single", "q135b-quad")),
-               ("revision 8", ("rev8a-single", "rev8q-quad", "rev8d-deep")))
-    rx0, rx1 = 610.0, 872.0
-    X2 = K.Lin(-0.45, 0.5, rx0, rx1)
-    p.text(520, ay0 - 14, "slack of every 130 and 135 MHz image, in build order", size=11.5, weight="600")
+    lineage = HW_LINEAGE
+    rx0, rx1 = 640.0, 876.0
+    X2 = K.Lin(-0.45, 0.65, rx0, rx1)
+    p.text(500, ay0 - 14, "slack of the 130 and 135 MHz images drawn, in build order", size=11.5, weight="600")
     rowh = (ay1 - ay0) / float(len(lineage))
     p.panel(rx0, ay0, rx1, ay1)
-    for v in (-0.4, -0.2, 0, 0.2, 0.4):
+    for v in (-0.4, -0.2, 0, 0.2, 0.4, 0.6):
         p.line(X2(v), ay0, X2(v), ay1, T["axis"] if v == 0 else T["grid"], 1.5 if v == 0 else 1)
         p.text(X2(v), ay1 + 14, "%+.1f" % v if v else "0", size=10, fill=T["muted"], anchor="middle", mono=True)
     for r, (label, ids) in enumerate(lineage):
@@ -1439,23 +1527,26 @@ def draw_hw_clock(theme, d, meta):
             x = X2(a["wns"])
             if a["id"] == "rev8d-deep":
                 col = T["cats"][3]
-                p.polygon([(x, yc - 5.5), (x + 5.5, yc), (x, yc + 5.5), (x - 5.5, yc)], col)
+                p.polygon([(x, yc - 5.0), (x + 5.0, yc), (x, yc + 5.0), (x - 5.0, yc)], col)
             else:
-                marker(x, yc, a["tiles"], a["closed"], size=4.8)
+                marker(x, yc, a["tiles"], a["closed"], size=4.2)
     p.text((rx0 + rx1) / 2, ay1 + 30, "kernel slack, ns", size=10.5, fill=T["muted"], anchor="middle")
     ly = p.legend([(colr[1], "one tile (circle)"), (colr[4], "four tiles (square)"), (T["cats"][3], "deep single (diamond)"),
                    (T["lose"], "missed: red outline")],
-                  24, 530, W - 48, size=10.5)
+                  24, ay1 + 54, W - 48, size=10.5)
     missed = [a for a in d["attempts"] if not a["closed"]]
     sw = [a for a in d["attempts"] if a["id"].startswith("sweep-") and a["closed"]]
     swp = [a for a in sw if a["card"] and a["card"].endswith("pass")]
     q135 = [a["wns"] for a in d["attempts"] if a["tiles"] == 4 and a["closed"] and a["mhz"] == 135]
-    text = ("Missed, of %d attempts: %s. Every other one closed. The sweep's closed points (%s MHz) passed the conformance "
-            "set on the card at %d of %d; the quad closed 135 MHz %d times with slack from %+.3f to %+.3f ns."
+    text = ("Missed, of the %d builds drawn: %s. Every other one drawn closed. The sweep's closed points (%s MHz) passed the "
+            "conformance set on the card at %d of %d; of the four-tile builds drawn, %d closed 135 MHz, with slack from %+.3f "
+            "to %+.3f ns. Not drawn: the ledger's other slacks, listed in the sidecar - among them three misses at 135 MHz "
+            "that the ledger records with the whole design's slack only (%s)."
             % (len(d["attempts"]),
                "; ".join("%s at %d MHz, %+.3f (%s)" % ("one tile" if a["tiles"] == 1 else "four tiles", a["mhz"], a["wns"],
                                                       K.day_short(a["date"])) for a in missed),
-               ", ".join(str(a["mhz"]) for a in sw), len(swp), len(sw), len(q135), min(q135), max(q135)))
+               ", ".join(str(a["mhz"]) for a in sw), len(swp), len(sw), len(q135), min(q135), max(q135),
+               _whole_design_text(d)))
     for k, line in enumerate(K.wrap(text, W - 48, 10.5)):
         p.text(24, ly + 12 + 15 * k, line, size=10.5, fill=T["muted"])
     p.footer([source_line(meta)])
@@ -1465,26 +1556,35 @@ def draw_hw_clock(theme, d, meta):
 @build_hw_clock.captioner
 def caption_hw_clock(d):
     att = d["attempts"]
-    closed = [a for a in att if a["closed"]]
     q135 = [a for a in att if a["tiles"] == 4 and a["mhz"] == 135]
     q135c = [a for a in q135 if a["closed"]]
     q135m = [a for a in q135 if not a["closed"]]
     first = min(a["date"] for a in q135c)
     best = [a for a in att if a["id"] == "sweep-175-extra"][0]
     q = d["quote"]
-    return {"shows": "%d timing attempts the ledger records on the U50, %d of them missed. One tile closed %d MHz (by "
-                     "%+.3f ns, with the second recipe) and passed on the card. Four tiles closed 135 MHz %d times from "
-                     "%s, with slack from %+.3f to %+.3f ns, and missed it %s (%s; closed on a rebuild); at 145 they "
-                     "missed by %.3f. The long-shot build for 260 MHz missed by %.3f ns and is off the chart." % (
+    sk, sn = d["scan"]["kernel"], d["scan"]["negative"]
+    nman = sum(1 for l in d["left_out"] if l["manual"])
+    return {"shows": "%d U50 builds whose kernel slack this figure reads from the ledger, %d of them missed. One tile closed "
+                     "%d MHz (by %+.3f ns, with the second recipe) and passed on the card. Of the four-tile builds drawn, "
+                     "%d closed 135 MHz from %s, with slack from %+.3f to %+.3f ns, and %s missed it (%s; closed on a "
+                     "rebuild); at 145 they missed by %.3f. The long-shot build for 260 MHz missed by %.3f ns and is off "
+                     "the chart." % (
                          len(att), d["n_missed"], d["max_single"], best["wns"], len(q135c), K.day_short(first),
                          min(a["wns"] for a in q135c), max(a["wns"] for a in q135c),
-                         {1: "once", 2: "twice"}.get(len(q135m), "%d times" % len(q135m)),
+                         {1: "one", 2: "two"}.get(len(q135m), "%d" % len(q135m)),
                          "; ".join("%s, %+.3f" % (a["label"], a["wns"]) for a in q135m),
                          [a for a in att if a["id"] == "bracket-quad-145"][0]["wns"],
                          [a for a in att if a["id"] == "long-shot-260"][0]["wns"]),
-            "not": "How many builds were made: only builds for which the ledger states a kernel slack are here. A small "
+            "not": "Other slacks the ledger gives. The entries that record three misses at 135 MHz give the whole design's "
+                   "slack and no kernel slack of their own: %s. The extract lists %d other figures of slack, each with why "
+                   "it is not drawn: %s. The builds named only in running text are: %s. The check accounts for "
+                   "every statement of the two forms its patterns read in the ledger's pinned prefix (%d kernel-slack "
+                   "statements, %d of them a drawn build's; %d negative-WNS statements, %d of them a drawn build's; the rest "
+                   "are listed), so a new one fails until it is drawn or listed. It finds what its patterns read: the %d "
+                   "items listed by hand are what a reader found, and this page does not say there are no others. A small "
                    "positive slack is not a margin to build on: the ledger's own lesson (%s, line %d) is that %s." % (
-                       q["entry"][:10], q["line"], q["text"])}
+                       _whole_design_text(d), len(d["left_out"]), _kinds_text(d), _texts_text(d), sk["statements"],
+                       sk["drawn"], sn["statements"], sn["drawn"], nman, q["entry"][:10], q["line"], q["text"])}
 
 
 # ----------------------------------------------------------------- math-cost
@@ -1585,7 +1685,12 @@ def build_math_cost(src, claims):
 @build_math_cost.drawer
 def draw_math_cost(theme, d, meta):
     W = 900
-    H = 780
+    # the layout is fixed by the counts, so the canvas is sized to it: the last legend row, then the footer's lines
+    y0, pitch = 140.0, 36.0
+    ly = y0 + len(FN_ORDER) * pitch + 28
+    py0 = ly + 52
+    ly2 = py0 + len(d["phases"]) * 17 + 4 * 5 + 10
+    H = int(ly2 + 28 + 13 * len(K.footer_lines([source_line(meta)], W)))
     p = K.Plot(theme, W, H, meta["title"],
                "Instructions in the tile's own program for one correctly rounded result, per format. Exp and log "
                "families (M1): the most any rounding attribute needs. Sin, cos and tan (M2): the same at every attribute. "
@@ -1595,8 +1700,6 @@ def draw_math_cost(theme, d, meta):
     x0, x1 = 120.0, 800.0
     top = 450.0
     sx = K.Lin(0, top, x0, x1)
-    y0 = 140.0
-    pitch = 36.0
     for v in (0, 100, 200, 300, 400):
         p.line(sx(v), y0 - 6, sx(v), y0 + len(FN_ORDER) * pitch, T["grid"], 1)
         p.text(sx(v), y0 + len(FN_ORDER) * pitch + 12, str(v), size=10, fill=T["muted"], anchor="middle", mono=True)
@@ -1610,10 +1713,8 @@ def draw_math_cost(theme, d, meta):
             p.rect(x0, by, sx(r["instructions"]) - x0, 6.5, cols[r["format"]])
             lab = str(r["instructions"]) if r["min"] == r["instructions"] else "%d-%d" % (r["min"], r["instructions"])
             p.text(sx(r["instructions"]) + 5, by + 6, lab, size=9, fill=T["muted"], mono=True)
-    ly = y0 + len(FN_ORDER) * pitch + 28
     p.legend([(cols[f], FORMAT_LABEL[f]) for f in FORMATS], x0, ly, 700, size=10.5)
     # phases
-    py0 = ly + 52
     p.text(24, py0 - 14, "where sin, cos and tan spend their instructions", size=12, weight="600")
     gcol = {"range reduction": T["cats"][3], "the series": T["cats"][5], "choosing and finishing": T["cats"][8]}
     sx2 = K.Lin(0, 450, x0 + 50, x1)
@@ -1630,7 +1731,6 @@ def draw_math_cost(theme, d, meta):
                 p.text(a + wd / 2, yy + 10.5, str(v), size=9.5, anchor="middle", fill=ink_on(gcol[gname], T), mono=True)
             a += wd
         p.text(a + 6, yy + 10.5, str(r["total"]), size=9.5, fill=T["muted"], mono=True)
-    ly2 = py0 + len(rows) * 17 + 4 * 5 + 10
     p.legend([(gcol[g], g) for g in ("range reduction", "the series", "choosing and finishing")], x0 + 50, ly2, 700, size=10.5)
     p.footer([source_line(meta)])
     return p.render()
@@ -1707,7 +1807,7 @@ def build_math_marks(src, claims):
 @build_math_marks.drawer
 def draw_math_marks(theme, d, meta):
     W = 900
-    H = 846
+    H = 846 + 13 * (len(K.footer_lines([source_line(meta)], W)) - 1)     # this footer wraps: room for every line
     p = K.Plot(theme, W, H, meta["title"],
                "A lane is marked when the routine cannot decide its rounding within the bound, and the host then "
                "decides it. Each dot is a captured run: its marked share of lanes with a 95% binomial interval. The "
@@ -1941,7 +2041,7 @@ LEG_CMD = {"api-test": "api-test", "dt-i": "device-test -i", "dt-q8": "device-te
            "dt-full": "device-test -q -n 4096", "dt-r": "device-test -r", "dt-b": "device-test -b -n 4096",
            "card-segrun": "hw/card-segrun.sh", "seq-check": "seq_check.py --trials 250",
            "acceptance": "programs/acceptance.py", "acceptance-rev8": "acceptance.py --set rev8",
-           "resident": "cft-resident", "selftest": "cft-selftest vectors/out (every 3rd visit)"}
+           "resident": "cft-resident", "selftest": "cft-selftest vectors/out"}
 
 
 def clock_ticks(started, total_s):
@@ -2005,9 +2105,56 @@ def build_stress_timeline(src, claims):
     cs = s["sweep"]["cases"]
     tile_c = cs["tile_exhaustive"] + cs["tile_random"]
     host_c = cs["host_exhaustive"] + cs["host_random"]
+    # a visit the deadline cut: its battery ended with the run and no sweep slice followed. The legs it did not run are
+    # the tail of the battery's order, so the table's counts for them must read one fewer than the visits, which is
+    # checked here and not assumed.
+    cut = None
+    for c in s["cycles"]:
+        if c["end_s"] == c["battery_end_s"]:
+            if cut is not None or c is not s["cycles"][-1] or run["end_reason"] != "deadline":
+                raise X.ExtractError("stress-timeline: a visit other than the last, or a run that did not end at its "
+                                     "deadline, was cut short: the figure's wording does not cover that")
+            ran = c["legs"]
+            visit = sum(1 for c2 in s["cycles"] if c2["image"] == c["image"])
+            cut = {"cycle": c["n"], "image": c["image"], "visit": visit, "legs_run": ran, "legs_of": len(LEG_ORDER),
+                   "not_run": list(LEG_ORDER[ran:])}
+    if cut is not None:
+        idx = {(m["image"], m["leg"]): m for m in s["matrix"]}
+        n_vis = run["visits"][cut["image"]]
+        bad = []
+        for i, leg in enumerate(LEG_ORDER):
+            m = idx.get((cut["image"], leg))
+            have = (m["pass"] + m["skipped"]) if m else 0
+            want = n_vis if i < cut["legs_run"] else n_vis - 1
+            if have != want:
+                bad.append("%s %d (want %d)" % (leg, have, want))
+        cut["split"] = [{"leg": leg, "pass": idx[(cut["image"], leg)]["pass"], "skipped": idx[(cut["image"], leg)]["skipped"]}
+                        for leg in cut["not_run"] if idx.get((cut["image"], leg)) and idx[(cut["image"], leg)]["skipped"]]
+        claims.add("cut-visit", "the last visit was cut by the deadline: the %s's legs it ran count one more than the ones it "
+                   "did not (a leg skipped by design counts as reached)" % cut["image"], X.EXTRACT_DIR + "/stress.json",
+                   "%d legs of %d ran" % (cut["legs_run"], cut["legs_of"]),
+                   "per-leg counts agree" if not bad else "disagree: " + ", ".join(bad), not bad)
     return {"run": run, "legs": legs, "cycles": s["cycles"], "cycles_n": len(s["cycles"]), "matrix": s["matrix"],
-            "sweep_slices": sweep_by_img, "images": s["images"], "visits": run["visits"],
+            "sweep_slices": sweep_by_img, "images": s["images"], "visits": run["visits"], "cut": cut,
             "hours": r4(run["seconds"] / 3600.0), "host_case_share": r4(host_c / float(tile_c + host_c))}
+
+
+def _cut_clause(cut):
+    """What the deadline did to the last visit, for the figure's text and its caption ('' where it cut none)."""
+    if not cut:
+        return ""
+    nr = cut["not_run"]
+    split = "; ".join("%s's cell reads %d passes and %d skips, %d in all" % (s["leg"], s["pass"], s["skipped"],
+                                                                           s["pass"] + s["skipped"]) for s in cut["split"])
+    return ("the last visit (the %s's %s, cycle %d) was cut by the deadline after %d of the battery's %d legs, so %s were "
+            "reached, run or skipped by design, on %d of its %d visits%s and it ran no sweep slice" % (
+                cut["image"], _ordinal(cut["visit"]), cut["cycle"], cut["legs_run"], cut["legs_of"],
+                (", ".join(nr[:-1]) + " and " + nr[-1]) if len(nr) > 1 else "".join(nr), cut["visit"] - 1, cut["visit"],
+                (" (%s)" % split) if split else ""))
+
+
+def _ordinal(n):
+    return "%d%s" % (n, "th" if 10 <= n % 100 <= 20 else {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th"))
 
 
 @build_stress_timeline.drawer
@@ -2016,10 +2163,11 @@ def draw_stress_timeline(theme, d, meta):
     run = d["run"]
     p = K.Plot(theme, W, H, meta["title"],
                "The card's long run (%s), %s to %s on the box's clock: it cycled through its three images (%s), "
-               "weighted %d to %d to %d, and on each visit ran a battery of the card's own tests and then a slice of the "
+               "weighted %d to %d to %d, and on each visit%s ran a battery of the card's own tests and then a slice of the "
                "native-oracle sweeps. %s" % (run["id"], run["started"][:16], run["ended"][:16],
                                             ", ".join(d["images"][k]["target"] for k in ("quad", "single", "deep")),
                                             run["weights"]["quad"], run["weights"]["single"], run["weights"]["deep"],
+                                            " but the last" if d["cut"] else "",
                                             _verdict_sentence(d["legs"]["by_status"])), meta["alt"])
     T = p.T
     st = d["legs"]["by_status"]
@@ -2031,7 +2179,7 @@ def draw_stress_timeline(theme, d, meta):
     for val, lab in kpis:
         p.text(kx, 124, val, size=22, weight="600", mono=True)
         p.text(kx, 141, lab, size=10.5, fill=T["muted"])
-        kx += 146
+        kx += max(K.tw(val, 22, True), K.tw(lab, 10.5)) + 34         # room for the wider of the two, and for a wide font
     # the timeline
     x0, x1 = 90.0, 870.0
     total = run["seconds"]
@@ -2067,7 +2215,7 @@ def draw_stress_timeline(theme, d, meta):
     for r, leg in enumerate(rows):
         y = cy + 16 + r * rh
         p.text(24, y + 15, leg, size=10.5, mono=True, weight="600")
-        p.text(704, y + 15, LEG_CMD.get(leg, "slices of the divsqrt and clause-5 soaks"), size=9.5, fill=T["muted"])
+        p.text(704, y + 15, LEG_CMD.get(leg, "divsqrt, clause-5 soak slices"), size=9.5, fill=T["muted"])
         for img, cx in cols.items():
             if leg == "sweep":
                 n = d["sweep_slices"].get(img, 0)
@@ -2099,8 +2247,9 @@ def draw_stress_timeline(theme, d, meta):
             reasons.setdefault((m["leg"], why), []).append(m["image"])
     parts = ["%s on %s: %s" % (leg, " and ".join(imgs), why) for (leg, why), imgs in sorted(reasons.items())]
     for k, line in enumerate(K.wrap(
-            "The %d skips are by design and each carries its reason in the record - %s. Every other leg ran on every visit "
-            "and passed." % (d["legs"]["by_status"]["skipped"], "; ".join(parts)), W - 48, 10.5)):
+            "The %d skips are by design and each carries its reason in the record - %s. Every other leg ran on every visit%s "
+            "and passed%s." % (d["legs"]["by_status"]["skipped"], "; ".join(parts), " but the last" if d["cut"] else "",
+                               ("; " + _cut_clause(d["cut"])) if d["cut"] else ""), W - 48, 10.5)):
         p.text(24, ny + 15 * k, line, size=10.5, fill=T["muted"])
     p.footer([source_line(meta)])
     return p.render()
@@ -2112,11 +2261,12 @@ def caption_stress_timeline(d):
     return {"shows": "The card's long run, %s: %s legs in %d cycles over %.1f hours, %s passed, %d skipped by design, "
                      "and none failed, timed out, lost the device or failed to parse. It visited the quad %d times, the "
                      "single %d and the deep single %d, against weights of %d, %d and %d. It ended at %s on the box's "
-                     "clock; the reason it recorded is %s." % (
+                     "clock; the reason it recorded is %s%s." % (
                          run["id"], K.with_commas(d["legs"]["total"]), d["cycles_n"], d["hours"],
                          K.with_commas(st["pass"]), st["skipped"], run["visits"]["quad"], run["visits"]["single"],
                          run["visits"]["deep"], run["weights"]["quad"], run["weights"]["single"], run["weights"]["deep"],
-                         run["ended"][:16], run["end_reason"]),
+                         run["ended"][:16], run["end_reason"],
+                         (", and %s" % _cut_clause(d["cut"])) if d["cut"] else ""),
             "not": "How hard the card was driven: the legs are short tests and soak slices, and %.0f%% of the sweep's cases "
                    "ran in host code, where the tile does no work (see stress-sweep). Nor that the same card would last longer. "
                    "The times are the box's own clock; the run's commit and the images' digests are in the sidecar." % (
@@ -2159,8 +2309,19 @@ def build_stress_telemetry(src, claims):
 
 @build_stress_telemetry.drawer
 def draw_stress_telemetry(theme, d, meta):
-    W, H = 900, 760
+    W = 900
     run = d["run"]
+    q = d["by_activity"]["quad"]
+    note = K.wrap(
+        "The image loaded sets the board's power, not the work: on the quad, a sweep slice with tile items running "
+        "drew %.1f W at the median against %.1f W with only host items running and %.1f W between legs. Only "
+        "cft-resident's streaming leg, about %.0f s a visit, took it to %.1f W (one sample of %s). The card's HBM "
+        "temperature sensor read 0 in %s of the %s samples, so it is left out."
+        % (q["sweep, with tile items"]["median"], q["sweep, host items only"]["median"], q["between legs"]["median"],
+           d["resident_s"], d["peak"]["watts"], K.with_commas(d["n"]), K.with_commas(d["hbm_zero"]),
+           K.with_commas(d["n"])), W - 48, 10.5)
+    ny = 560.0 + 66 + 16 + 3 * 19 + 14          # by1 + 66 is the table's top; the note starts below its three rows
+    H = int(ny + 15 * (len(note) - 1) + 30 + 13 * (len(K.footer_lines([source_line(meta)], W)) - 1))
     p = K.Plot(theme, W, H, meta["title"],
                "The card's own sensors, read by the stress driver every five minutes and between legs: board power above, "
                "and below four temperature sensors, named as the card names them (FPGA, Int Vcc, PCB Top Front, PCB Top "
@@ -2224,17 +2385,7 @@ def draw_stress_telemetry(theme, d, meta):
                 p.text(cx, yy + 12, "%.1f  (%d)" % (v["median"], v["n"]), size=10.5, anchor="middle", mono=True)
             else:
                 p.text(cx, yy + 12, "-", size=10.5, anchor="middle", mono=True, fill=T["muted"])
-    q = d["by_activity"]["quad"]
-    ny = ty + 16 + 3 * 19 + 14
-    for k, line in enumerate(K.wrap(
-            "The image loaded sets the board's power, not the work: on the quad, a sweep slice with tile items running "
-            "drew %.1f W at the median against %.1f W with only host items running and %.1f W between legs. Only "
-            "cft-resident's streaming leg, about %.0f s a visit, took it to %.1f W (one sample of %s). The card's HBM "
-            "temperature sensor read 0 in %s of the %s samples, so it is left out."
-            % (q["sweep, with tile items"]["median"], q["sweep, host items only"]["median"], q["between legs"]["median"],
-               d["resident_s"], d["peak"]["watts"], K.with_commas(d["n"]), K.with_commas(d["hbm_zero"]),
-               K.with_commas(d["n"])),
-            W - 48, 10.5)):
+    for k, line in enumerate(note):
         p.text(24, ny + 15 * k, line, size=10.5, fill=T["muted"])
     p.footer([source_line(meta)])
     return p.render()
@@ -2281,7 +2432,18 @@ def build_stress_sweep(src, claims):
     comp = re.search(r"COMPOSED - cft_rint, cft_scaleb, cft_cmp_sig\.", flat)
     host = re.search(r"HOST - cft_convert, the integer conversions, cft_logb, cft_next_\*, cft_class, "
                      r"cft_total_order\*, cft_rem\.", flat)
-    runs = len(re.findall(r"\bcft_run\(dev", clause5))
+    # which function each pass is issued from: the last function header (a definition at column 0) before it
+    heads = [(m.start(), m.group(1)) for m in re.finditer(r"(?m)^(?:CFT_API |static )*[A-Za-z_]\w*[ *]+(\w+)\(", clause5)]
+
+    def enclosing(pos):
+        name = None
+        for at, nm in heads:
+            if at >= pos:
+                break
+            name = nm
+        return name
+    run_sites = sorted(enclosing(m.start()) for m in re.finditer(r"\bcft_run\(dev", clause5))
+    step_callers = sorted({enclosing(m.start()) for m in re.finditer(r"\bstep\(dev,", clause5)} - {"step"})
     claims.add("composed-ops", "host/src/clause5.c: the composed (on the tile) clause-5 operations are rint and scaleb",
                "host/src/clause5.c", "rint, scaleb", "COMPOSED - cft_rint, cft_scaleb, cft_cmp_sig" if comp else None,
                bool(comp))
@@ -2291,8 +2453,12 @@ def build_stress_sweep(src, claims):
                "is context", "host/src/clause5.c", "%d host ops" % len(sw["host_ops"]),
                "HOST - cft_convert, the integer conversions, cft_logb, cft_next_*, cft_class, cft_total_order*, cft_rem"
                if host else None, bool(host) and not bad)
-    claims.add("two-passes", "host/src/clause5.c issues cft_run() from exactly two places (rint and scaleb)",
-               "host/src/clause5.c", "2", str(runs), runs == 2)
+    claims.add("two-passes", "host/src/clause5.c issues cft_run() from exactly two places: its shared step() helper and "
+               "cft_scaleb's multiply chain", "host/src/clause5.c", "cft_scaleb, step", ", ".join(run_sites),
+               run_sites == ["cft_scaleb", "step"])
+    claims.add("step-callers", "... and step() is called only from cft_rint and cft_cmp_sig, so the passes of the "
+               "header's other two COMPOSED operations", "host/src/clause5.c", "cft_cmp_sig, cft_rint",
+               ", ".join(step_callers), step_callers == ["cft_cmp_sig", "cft_rint"])
     div = ("cft_div(dev" in divsqrt) and ("cft_sqrt(dev" in divsqrt)
     claims.add("divsqrt-tile", "host/tools/divsqrt_soak.c calls cft_div and cft_sqrt, which compose from the tile's opcodes",
                "host/tools/divsqrt_soak.c", "div32, div64, sqrt32, sqrt64", "cft_div(dev ... cft_sqrt(dev" if div else None, div)
@@ -2335,8 +2501,7 @@ def draw_stress_sweep(theme, d, meta):
     span = int(math.ceil(last_s / 3600.0 * 1.08))
     sx = K.Lin(0, span * 3600.0, ax0, ax1)
     sy = K.Lin(0, 100, ay1, ay0)
-    p.text(24, ay0 - 14, "the %d exhaustive items, each all 2^32 encodings: share covered, by hour" % len(d["coverage"]),
-           size=11.5, weight="600")
+    p.text(24, ay0 - 14, "the %d exhaustive items: share of 2^32 covered" % len(d["coverage"]), size=11.5, weight="600")
     p.panel(ax0, ay0, ax1, ay1)
     for v in (0, 25, 50, 75, 100):
         p.line(ax0, sy(v), ax1, sy(v), T["grid"], 1)
@@ -2495,9 +2660,11 @@ GALLERY_INTRO = (
     "number in a caption is the number in the figure.",
     "`python python/project_figures.py --check`, which is the `generated` stage's seventh generator in `verify/run.sh`, "
     "remakes everything in memory and fails by name on a figure, sidecar or caption that differs from a fresh generation, "
-    "on an extract whose digests no longer hold, and on a number that the README or another document states and a "
-    "figure disagrees with. It reads no git history, no network and no card, and then plants each of those faults in a "
-    "scratch copy to show that it would catch it.",
+    "on an extract whose digests no longer hold, on a number or sentence that the README or another document states and a "
+    "figure disagrees with, on an SVG outside what GitHub keeps or with a text clipped by its canvas, a text drawn over "
+    "another or a mark or a text drawn over its own source line, and on a statement in the ledger of a kernel slack (or "
+    "of a negative WNS) which the timing figure neither draws nor lists. It reads no git history, no network and no "
+    "card, and then plants each of those faults in a scratch copy to show that it would catch it.",
     "Each figure is a `<picture>`, so GitHub shows the reader's theme. The rules are `python/readme_charts.py`'s: literal "
     "geometry and colour only, no fonts, scripts or CSS variables. The README's own two charts (`docs/img/bench/`) are not "
     "repeated here.")
@@ -2505,12 +2672,15 @@ GALLERY_INTRO = (
 
 GALLERY_LIMITS = (
     "A figure of the current state (the benchmark sweeps, the layout generator, the formats, the design studies' captured "
-    "runs, the runner's stage list) is read from the tree every time, so it fails the check the moment the tree moves.",
+    "runs, the runner's stage names and budget lists) is read from the tree every time, so it fails the check the moment "
+    "what it reads moves.",
     "A figure of history reads an extract pinned to a commit and says so on its face; it lags the project until someone "
     "with the full history remakes it (`python python/figure_extracts.py history`, `tree`, `ledger`), and `--check` prints "
     "a note, and does not fail, when the gate's own files have moved past it.",
     "`python python/figure_extracts.py --verify` remakes every extract from its source and compares the bytes: it needs "
-    "the full git history, and for the stress run the raw `metrics.jsonl`, which is 8 MB and is never committed.",
+    "the full git history, and for the stress run the raw `metrics.jsonl`, which is 8 MB and is never committed; it then "
+    "repeats the stress reduction with items the library's catalog could add and the run never served injected, which "
+    "must not move a byte.",
     "A number the record states in words is held to the figure by a pattern; reword the sentence and the check says "
     "that the statement is gone, by name, rather than passing.")
 
@@ -2633,7 +2803,87 @@ def svg_lint(text):
                 out.append("xmlns %r" % v)
     if re.search(r"(?i)javascript:|url\(|var\(|@import|<!\[CDATA|&#x?[0-9a-f]+;[^<]{0,0}<script", text):
         out.append("a script, url() or var() reference")
+    out.extend(svg_layout(text))
     return sorted(set(out))
+
+
+def _overlap(a, b):
+    return a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]
+
+
+# Two texts are "drawn over each other" when their boxes overlap by more than this many px across and down. A box is
+# the full em, ascent and descent both, so lines set 9 or 10 px apart touch by a pixel or two without their ink
+# touching; and the estimate of a width is already generous (0.58 em for the sans stack, 0.61 for the mono one).
+TEXT_OVERLAP = (2.0, 3.0)
+
+
+def svg_layout(text):
+    """The reasons a figure would look broken in any renderer, by the kit's own estimate of text widths: a text that
+    runs off the canvas, a text drawn over another text, and anything drawn over the footer (the source lines at the
+    bottom). It cannot see a figure's meaning, only that nothing is clipped, nothing is written on top of a label and
+    nothing is drawn on top of the line that says where the numbers came from. An SVG with no width and height (a
+    stub) has no canvas to check."""
+    m = re.search(r'<svg [^>]*?\bwidth="(\d+)" height="(\d+)"', text)
+    if not m:
+        return []
+    W, H = int(m.group(1)), int(m.group(2))
+    out, texts = [], []
+    for t in re.finditer(r"<text ([^>]*)>(.*?)</text>", text, re.S):
+        a = dict(re.findall(r'([\w:-]+)="([^"]*)"', t.group(1)))
+        if "transform" in a:
+            continue
+        try:
+            x, y, size = float(a["x"]), float(a["y"]), float(a["font-size"])
+        except (KeyError, ValueError):
+            continue
+        s = html.unescape(t.group(2))
+        texts.append((K.text_box(x, y, s, size, a.get("text-anchor", "start"), a.get("font-family") == K.MONO), x, y,
+                      size, s))
+    for box, _x, _y, _size, s in texts:
+        if box[2] > W:
+            out.append("text %r runs off the right edge of the canvas by about %d px" % (s[:40], box[2] - W))
+        if box[0] < 0:
+            out.append("text %r runs off the left edge of the canvas" % s[:40])
+    # two labels written over each other: sweep the boxes by their left edge, so that only neighbours are compared
+    order = sorted(range(len(texts)), key=lambda k: texts[k][0][0])
+    for pos, i in enumerate(order):
+        a = texts[i][0]
+        for j in order[pos + 1:]:
+            b = texts[j][0]
+            if b[0] >= a[2] - TEXT_OVERLAP[0]:
+                break
+            down = min(a[3], b[3]) - max(a[1], b[1])
+            if down > TEXT_OVERLAP[1] and min(a[2], b[2]) - b[0] > TEXT_OVERLAP[0]:
+                first, second = sorted((i, j))
+                out.append("text %r is drawn over text %r (by about %d x %d px)" % (
+                    texts[first][4][:30], texts[second][4][:30], min(a[2], b[2]) - b[0], down))
+    # the footer: the trailing run of 10 px lines at x = 24, 13 px apart, the last 8 px above the bottom edge
+    foot = []
+    for item in reversed(texts):
+        _box, x, y, size, _s = item
+        if size == 10.0 and x == 24.0 and (not foot and y == H - 8.0 or foot and foot[-1][2] - y == 13.0):
+            foot.append(item)
+        else:
+            break
+    if foot:
+        fb = (min(i[0][0] for i in foot), min(i[0][1] for i in foot), max(i[0][2] for i in foot),
+              max(i[0][3] for i in foot) + 1.0)
+        for item in texts:
+            if item not in foot and _overlap(item[0], fb):
+                out.append("text %r overlaps the footer" % item[4][:40])
+        for r in re.finditer(r"<(rect|circle) ([^>]*?)/?>", text):
+            a = dict(re.findall(r'([\w:-]+)="([^"]*)"', r.group(2)))
+            try:
+                if r.group(1) == "rect":
+                    box = (float(a["x"]), float(a["y"]), float(a["x"]) + float(a["width"]), float(a["y"]) + float(a["height"]))
+                else:
+                    cx, cy, rr = float(a["cx"]), float(a["cy"]), float(a["r"])
+                    box = (cx - rr, cy - rr, cx + rr, cy + rr)
+            except (KeyError, ValueError):
+                continue                       # the background rect has no x and y
+            if _overlap(box, fb):
+                out.append("a %s at about (%d, %d) is drawn over the footer" % (r.group(1), box[0], box[1]))
+    return out
 
 
 def check_tree(root, only=None):
@@ -2810,6 +3060,28 @@ def controls(root, results):
                       lambda t, rel=rel: {rel: _edit_extract_source_digest(t / rel)},
                       r"^extract %s: its recorded source digest no longer matches" % re.escape(name))
                 break
+        # the timing figure's "every": the scan of the ledger prefix that holds it, and the numbers a repeat carries
+        led_rel = "%s/ledger.json" % X.EXTRACT_DIR
+        if (t / led_rel).is_file():
+            plant("a build the ledger states a kernel slack for, which the extract no longer draws or lists (its own digest "
+                  "made to agree)",
+                  lambda t: {led_rel: _drop_attempt(t / led_rel, "tip-quad")},
+                  r"^extract ledger: the ledger states a kernel slack \+0\.143 ")
+            plant("a second build's slack stated inside an entry that is drawn (the ledger prefix edited, the extract's "
+                  "digest of it made to agree, so that only the scan can notice)",
+                  lambda t: _plant_statement(t, led_rel),
+                  r"^extract ledger: the ledger states a kernel slack \+0\.321 ")
+            plant("the scan rules the extract records no longer the script's (its own digest made to agree)",
+                  lambda t: {led_rel: _edit_rule(t / led_rel)},
+                  r"^extract ledger: the scan rules it records are not the script's")
+            plant("a left-out entry whose number no longer equals the attempt it repeats (its own digest made to agree)",
+                  lambda t: {led_rel: _bump_left_out(t / led_rel)},
+                  r"^extract ledger: left-out item \S+ says \S+ where the attempt it repeats")
+            plant("the extract's record of the statements its scan found, edited (its own digest made to agree)",
+                  lambda t: {led_rel: _edit_statements(t / led_rel)},
+                  r"^extract ledger: its record of the statements the scan finds no longer matches")
+        else:
+            failures.append("NEGATIVE CONTROL FAILED TO FAIL: there is no ledger extract to plant the unaccounted build in")
         # and the rest of what the check claims to catch
         plant("a committed SVG deleted", lambda t: {svg_rel: None},
               r"^figure %s: %s is missing" % (re.escape(first), re.escape(svg_rel)), only=[first])
@@ -2841,6 +3113,38 @@ def controls(root, results):
                       r"^figure %s: the record disagrees with it, claim %s: .* no longer states it"
                       % (re.escape(r.fig.name), re.escape(c["id"])), only=[r.fig.name])
                 break
+        # the lint's CALL SITE in check_tree: a drawer that emits a <style>, its committed files remade to match it, so
+        # that the byte comparison has nothing to say and only the lint can notice
+        fig0 = next(f for f in FIGS if f.name == first)
+        saved_draw = fig0.draw
+        fig0.draw = lambda theme, d, meta, _o=saved_draw: _o(theme, d, meta).replace("<title>", "<style>x{}</style><title>", 1)
+        try:
+            plant("a drawer that emits a style element, its committed files remade to match it (only the lint can notice)",
+                  lambda t: {rel: txt for rel, txt in outputs(build_all(t, [first])).items()
+                             if rel.startswith("%s/%s" % (FIG_DIR, first))},
+                  r"would not survive GitHub's SVG handling: .*element <style>", only=[first])
+        finally:
+            fig0.draw = saved_draw
+        # the TOLERANCE branch of Claims.check: a number the record quotes from another run, moved beyond what it is
+        # held to; the exact-match plants above do not reach that branch
+        tol = None
+        for r in results:
+            for c in r.claims.rows:
+                if (c["verdict"] == "agrees" and c["document"] == "README.md" and "(held to" in (c.get("note") or "")
+                        and re.fullmatch(r"\d[\d,]*", c["stated"] or "")
+                        and len(re.findall(r"\b%s\b" % re.escape(c["stated"]), (root / "README.md").read_text(encoding="utf-8"))) == 1):
+                    tol = (r, c)
+                    break
+            if tol:
+                break
+        if tol is None:
+            failures.append("NEGATIVE CONTROL FAILED TO FAIL: no README number held to a tolerance could be planted against")
+        else:
+            r, c = tol
+            plant("a number the record quotes from another run, moved beyond its tolerance",
+                  lambda t, c=c: {"README.md": _scale_stated(t / "README.md", c)},
+                  r"^figure %s: the record disagrees with it, claim %s:" % (re.escape(r.fig.name), re.escape(c["id"])),
+                  only=[r.fig.name])
         # a figure that reads only part of a file that changes with most rounds: what it reads is held, the rest is not
         run_rel = "verify/run.sh"
         if any(r.fig.name == "verify-stages" for r in results):
@@ -2851,6 +3155,24 @@ def controls(root, results):
             stay("a comment added to the runner, outside what the stage figure reads",
                  lambda t: {run_rel: (t / run_rel).read_text(encoding="utf-8") + "\n# a comment, which no figure reads\n"},
                  only=["verify-stages"])
+        # the stress reduction is of the items the RUN served, so an item of the library's catalog that it never served
+        # (as soak-exhaustive's twenty-two are) must change nothing; this is the seam's own test, with no raw file, and
+        # figure_extracts --verify repeats it end to end on the real run, with decoys injected into the catalog
+        from types import SimpleNamespace as NS
+        catalog = [NS(name="served-exhaustive", kind="exhaustive", op="sqrt32"),
+                   NS(name="served-random", kind="random", op="div32"),
+                   NS(name="never-served", kind="exhaustive", op="zz-unknown-op32"),
+                   NS(name="only-timed-out", kind="exhaustive", op="rint32")]
+        legs = [{"kind": "sweep", "status": "pass", "sweep": {"item": "served-exhaustive"}},
+                {"kind": "sweep", "status": "fail", "sweep": {"item": "served-random"}},
+                {"kind": "sweep", "status": "timeout", "sweep": {"item": "only-timed-out"}},
+                {"kind": "battery", "status": "pass", "leg": "api-test"}]
+        got = list(X.served_items(catalog, legs))
+        if got == ["served-exhaustive", "served-random"]:
+            report.append("a catalog item the stress run never served -> left out of the reduction, as it should be "
+                          "(not counted as a fault)")
+        else:
+            failures.append("CONTROL FAILED: a catalog item the stress run never served got into the reduction: %s" % got)
         # the lint can fail: an SVG that carries a script, a style, a CSS variable, an external font or an image
         for label, bad_svg, want in (
                 ("an SVG with a script", '<svg xmlns="http://www.w3.org/2000/svg"><script>x()</script></svg>', "element <script>"),
@@ -2861,12 +3183,48 @@ def controls(root, results):
                 ("an SVG with an external font", '<svg xmlns="http://www.w3.org/2000/svg"><text font-family="Inter">a</text></svg>',
                  "font-family"),
                 ("an SVG with an embedded image", '<svg xmlns="http://www.w3.org/2000/svg"><image href="x.png"/></svg>',
-                 "element <image>")):
+                 "element <image>"),
+                ("an SVG with a text running off its canvas",
+                 '<svg xmlns="http://www.w3.org/2000/svg" width="900" height="100" viewBox="0 0 900 100" role="img" '
+                 'aria-label="x"><text x="24.0" y="50.0" font-family="%s" font-size="10" fill="#656d76">%s</text></svg>'
+                 % (K.FONT, "word " * 120), "runs off the right edge"),
+                ("an SVG with a legend swatch drawn over its footer",
+                 '<svg xmlns="http://www.w3.org/2000/svg" width="900" height="100" viewBox="0 0 900 100" role="img" '
+                 'aria-label="x"><rect x="30.0" y="84.0" width="14.0" height="10.0" fill="#0969da"/><text x="24.0" '
+                 'y="92.0" font-family="%s" font-size="10" fill="#656d76">source: x</text></svg>' % K.FONT,
+                 "is drawn over the footer"),
+                ("an SVG with a label written over its footer",
+                 '<svg xmlns="http://www.w3.org/2000/svg" width="900" height="100" viewBox="0 0 900 100" role="img" '
+                 'aria-label="x"><text x="40.0" y="90.0" font-family="%s" font-size="11" fill="#1f2328">a label</text>'
+                 '<text x="24.0" y="92.0" font-family="%s" font-size="10" fill="#656d76">source: x</text></svg>'
+                 % (K.FONT, K.FONT),
+                 "overlaps the footer"),
+                ("an SVG with one label written over another",
+                 '<svg xmlns="http://www.w3.org/2000/svg" width="900" height="100" viewBox="0 0 900 100" role="img" '
+                 'aria-label="x"><text x="100.0" y="50.0" font-family="%s" font-size="10.5" fill="#656d76">failed, '
+                 'timed out or lost</text><text x="200.0" y="50.0" font-family="%s" font-size="10.5" '
+                 'fill="#656d76">cycles</text></svg>' % (K.FONT, K.FONT),
+                 "is drawn over text")):
             hit = [x for x in svg_lint(bad_svg) if want in x]
             if hit:
                 report.append("%s -> %s" % (label, hit[0]))
             else:
                 failures.append("NEGATIVE CONTROL FAILED TO FAIL: the SVG lint passed %s" % label)
+        # and it must not cry wolf: lines set 9 px apart and labels that touch end to end have boxes that overlap by a
+        # pixel or two (a box is the full em) while their ink does not, and the figures set many such
+        touching = ('<svg xmlns="http://www.w3.org/2000/svg" width="900" height="100" viewBox="0 0 900 100" role="img" '
+                    'aria-label="x"><text x="24.0" y="40.0" font-family="%s" font-size="10.5" fill="#656d76">178-181'
+                    '</text><text x="24.0" y="49.0" font-family="%s" font-size="10.5" fill="#656d76">185-188</text>'
+                    '<text x="200.0" y="40.0" font-family="%s" font-size="10.5" fill="#656d76">abut</text>'
+                    '<text x="223.0" y="40.0" font-family="%s" font-size="10.5" fill="#656d76">ting</text></svg>'
+                    % (K.FONT, K.FONT, K.FONT, K.FONT))
+        wolf = svg_lint(touching)
+        if wolf:
+            failures.append("CONTROL FAILED: the SVG lint cried wolf over lines set 9 px apart and labels that touch "
+                            "end to end: %s" % wolf[0])
+        else:
+            report.append("lines set 9 px apart and labels that touch end to end -> no problem, as it should be "
+                          "(not counted as a fault)")
         try:
             with tripwire():
                 subprocess.run(["git", "--version"], capture_output=True)
@@ -2974,6 +3332,69 @@ def _change_stated(path, c):
     return new
 
 
+def _drop_attempt(path, aid):
+    ex = json.loads(path.read_text(encoding="utf-8"))
+    before = len(ex["data"]["attempts"])
+    ex["data"]["attempts"] = [a for a in ex["data"]["attempts"] if a["id"] != aid]
+    assert len(ex["data"]["attempts"]) == before - 1, aid
+    ex["body_sha256"] = X.body_digest(ex["data"])
+    return X.dumps(ex)
+
+
+def _plant_statement(t, led_rel):
+    """The scratch ledger with a second build's kernel slack stated in a line of the tip quad's entry, which is drawn
+    (a same-length replacement inside the pinned prefix), and the extract's record of the prefix's digest made to agree:
+    an entry-level scan finds nothing wrong here, a statement-level one finds the +0.321."""
+    ex = json.loads((t / led_rel).read_text(encoding="utf-8"))
+    src = ex["sources"][0]
+    path = t / src["path"]
+    data = bytearray(path.read_bytes())
+    prefix = bytes(data[:src["bytes"]]).decode("utf-8")
+    at = prefix.index("## 2026-09-02 - the tip quad closes at 135 MHz")
+    plant = "kernel WNS +0.321 ns at 135 MHz, a plant"
+    pos = prefix.index("\n\n", at) + 2             # the first paragraph after the entry's block of numbers
+    line_end = prefix.index("\n", pos)
+    assert line_end - pos >= len(plant) and plant not in prefix
+    new = prefix[:pos] + plant + prefix[pos + len(plant):]
+    assert len(new.encode("utf-8")) == src["bytes"]
+    data[:src["bytes"]] = new.encode("utf-8")
+    src["sha256"] = X.sha256_bytes(bytes(data[:src["bytes"]]))
+    return {src["path"]: bytes(data), led_rel: X.dumps(ex)}
+
+
+def _edit_rule(path):
+    ex = json.loads(path.read_text(encoding="utf-8"))
+    ex["data"]["accounting"]["kernel_rule"] += "|plant"
+    ex["body_sha256"] = X.body_digest(ex["data"])
+    return X.dumps(ex)
+
+
+def _edit_statements(path):
+    """The extract with the line number of the first statement in its record of the scan moved by one."""
+    ex = json.loads(path.read_text(encoding="utf-8"))
+    ex["data"]["accounting"]["statements"][0][2] += 1
+    ex["body_sha256"] = X.body_digest(ex["data"])
+    return X.dumps(ex)
+
+
+def _bump_left_out(path):
+    ex = json.loads(path.read_text(encoding="utf-8"))
+    item = next(i for i in ex["data"]["left_out"] if i["same_as"] is not None)
+    item["wns"] = round(item["wns"] + 0.001, 3)
+    ex["body_sha256"] = X.body_digest(ex["data"])
+    return X.dumps(ex)
+
+
+def _scale_stated(path, c):
+    """The README with the number a tolerance claim reads made 30% larger, beyond any tolerance a claim is held to."""
+    text = path.read_text(encoding="utf-8")
+    old = c["stated"]
+    big = "{:,}".format(int(round(float(old.replace(",", "")) * 1.3))) if "," in old else str(int(round(float(old) * 1.3)))
+    new = re.sub(r"\b%s\b" % re.escape(old), big, text, count=1)
+    assert new != text
+    return new
+
+
 def _remove_stated(path, c):
     text = path.read_text(encoding="utf-8")
     new = re.sub(r"\b%s(x)" % re.escape(c["stated"]), "some\\1", text, count=1)
@@ -3067,9 +3488,12 @@ def _cmd_check(root, only, run_controls=True):
               "python python/project_figures.py --write" % (len(problems), ", ".join(names[:8]) or "see above"))
         return 1
     n_stay = sum(1 for line in report if "not counted as a fault" in line)
-    print("project_figures: %d figures, %d files, every number the record states agrees%s"
-          % (len(results), 3 * len(results) + 1,
-             "; %d faults planted, each caught by name, and %d edit%s that must move nothing, which moved nothing" % (
+    rows = [c for r in results for c in r.claims.rows]
+    nums = sum(1 for c in rows if re.fullmatch(r"[+-]?[\d,]+(?:\.\d+)?", c["stated"] or ""))
+    print("project_figures: %d figures, %d files, every statement the record makes agrees (%d: %d numbers, %d phrase, "
+          "presence or consistency checks)%s"
+          % (len(results), 3 * len(results) + 1, len(rows), nums, len(rows) - nums,
+             "; %d faults planted, each caught by name, and %d control%s that must change nothing, which changed nothing" % (
                  len(report) - n_stay, n_stay, "" if n_stay == 1 else "s") if run_controls and not only else ""))
     return 0
 

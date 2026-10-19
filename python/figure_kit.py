@@ -108,6 +108,23 @@ def wrap(s, width, size, mono=False):
     return lines
 
 
+def footer_lines(lines, width):
+    """The footer's lines as they will be drawn: each wrapped to the canvas width less its 24 px margins. A figure
+    that sizes its canvas to its content asks this first, so that it leaves room for every line."""
+    out = []
+    for ln in lines:
+        out.extend(wrap(ln, width - 48, 10) or [""])
+    return out
+
+
+def text_box(x, y, s, size, anchor="start", mono=False):
+    """(left, top, right, bottom) a text will take, estimated as everywhere in this kit (for layout and for the
+    layout lint, never for drawing): the baseline is y, the ascent 0.8 em and the descent 0.2 em."""
+    w = tw(s, size, mono)
+    left = x - w if anchor == "end" else x - w / 2.0 if anchor == "middle" else x
+    return (left, y - 0.8 * size, left + w, y + 0.2 * size)
+
+
 def mix(a, b, t):
     """Blend two #rrggbb colours; t = 0 is a, t = 1 is b."""
     ca = [int(a[i:i + 2], 16) for i in (1, 3, 5)]
@@ -283,7 +300,9 @@ class Plot:
         return cy + 6
 
     def footer(self, lines, y=None):
-        """Source lines, small and muted, at the bottom of the figure."""
+        """Source lines, small and muted, at the bottom of the figure. A line longer than the canvas is
+        wrapped, never clipped; the last line stays 8 px above the bottom edge."""
+        lines = footer_lines(lines, self.w)
         y = (self.h - 8 - 13 * (len(lines) - 1)) if y is None else y
         for i, ln in enumerate(lines):
             self.text(24, y + 13 * i, ln, size=10, fill=self.T["muted"])

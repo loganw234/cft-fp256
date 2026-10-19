@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="900" height="846" viewBox="0 0 900 846" role="img" aria-label="Observed rates of marked (undecided) lanes for the six exp and log routines and for sin, cos and tan, against the law that predicts them: 30 runs, 564,000 lanes, and not one lane that was wrong went unmarked.">
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="859" viewBox="0 0 900 859" role="img" aria-label="Observed rates of marked (undecided) lanes for the six exp and log routines and for sin, cos and tan, against the law that predicts them: 30 runs, 564,000 lanes, and not one lane that was wrong went unmarked.">
 <title>Observed rates of marked (undecided) lanes for the six exp and log routines and for sin, cos and tan, against the law that predicts them: 30 runs, 564,000 lanes, and not one lane that was wrong went unmarked.</title>
-<rect width="900" height="846" fill="#0d1117"/>
+<rect width="900" height="859" fill="#0d1117"/>
 <text x="24.0" y="30.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="17" fill="#e6edf3" font-weight="600">How often a correctly rounded routine has to say 'undecided'</text>
 <text x="24.0" y="52.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#9198a1">A lane is marked when the routine cannot decide its rounding within the bound, and the host then decides it. Each dot</text>
 <text x="24.0" y="69.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#9198a1">is a captured run: its marked share of lanes with a 95% binomial interval. The diamond is the rate the first law</text>
@@ -143,5 +143,6 @@
 <text x="223.5" y="725.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#e6edf3">binary256</text>
 <text x="24.0" y="749.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#9198a1">30 runs, 564,000 lanes: 13,627 marked, and none of the lanes whose rounding was wrong was left unmarked. For sin and cos at binary64 the</text>
 <text x="24.0" y="764.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#9198a1">first law reads low by 3.4 to 4.1 standard deviations; the lane's own bound (hollow diamond) is within 1.0 of every run.</text>
-<text x="24.0" y="838.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#9198a1">source: docs/studies/m1/m1rate.fp64.out.txt (56c543cc); docs/studies/m2/box-out/rate-fp128.out.txt (99e10b25); docs/studies/m2/box-out/rate-fp256.out.txt (c1eb804e); docs/studies/m2/box-out/rate-fp64.out.txt (f649f6ec)</text>
+<text x="24.0" y="838.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#9198a1">source: docs/studies/m1/m1rate.fp64.out.txt (56c543cc); docs/studies/m2/box-out/rate-fp128.out.txt (99e10b25);</text>
+<text x="24.0" y="851.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#9198a1">docs/studies/m2/box-out/rate-fp256.out.txt (c1eb804e); docs/studies/m2/box-out/rate-fp64.out.txt (f649f6ec)</text>
 </svg>

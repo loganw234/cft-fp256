@@ -12,11 +12,11 @@
   {
    "name": "ledger",
    "path": "docs/figures/ledger.json",
-   "sha256": "c8f802c8166a6c1a5fccdec838a12bb26efb7720b151051457d1100020c30629",
+   "sha256": "9aa3692c22e70fdd61d787fe6088025c170b873ba8f6017a286f675a366a45d4",
    "read_at": "the first 1891030 bytes of docs/VALIDATION.md (sha256 below)",
    "label": "ledger, first 1,891,030 bytes",
-   "what": "the card's timing attempts (kernel WNS by image, tiles and clock) and the ledger's milestones, read out of docs/VALIDATION.md by patterns that name the entry",
-   "body_sha256": "00587cfb88c7e019e385c847c379823e4a07687e7993363d089f76b1f9892e69",
+   "what": "the U50 builds whose kernel slack the figures read from the ledger (kernel WNS by image, tiles and clock), the other slacks it gives and why each is not drawn, the scan that accounts for every statement its two patterns find, and the ledger's milestones, read out of docs/VALIDATION.md by patterns that name the entry",
+   "body_sha256": "14fa0c01c4c7813da7210733bf2694c38a399713822fa9e9b8b9875cbb6f741a",
    "remake": "python python/figure_extracts.py ledger",
    "sources": [
     {

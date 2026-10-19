@@ -894,7 +894,12 @@ do_generated() {
     if [ $grc -eq 0 ]; then
       printf '  ok    %s\n' "$g"
     elif printf '%s' "$out" | grep -qiE "stale|differs from a fresh|has drifted from host/"; then
-      printf '  STALE %s - regenerate with: python %s\n' "$g" "$g"
+      # the figures' generator writes only with --write; the others rewrite their files when run bare
+      case "$g" in
+        python/project_figures.py) fix="python $g --write" ;;
+        *) fix="python $g" ;;
+      esac
+      printf '  STALE %s - regenerate with: %s\n' "$g" "$fix"
       printf '%s\n' "$out" | tail -3 | sed 's/^/        /'
       rc=1
     elif [ "$cc" = 0 ] && [ "$g" = bindings/node/make_seq_corpus.py ] \

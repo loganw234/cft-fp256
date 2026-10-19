@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="900" height="780" viewBox="0 0 900 780" role="img" aria-label="Tile instructions per call for the nine correctly rounded functions at the formats they are built for (178 to 419), and where the trigonometric three spend theirs: range reduction takes 155 to 216 of each sin, cos and tan.">
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="819" viewBox="0 0 900 819" role="img" aria-label="Tile instructions per call for the nine correctly rounded functions at the formats they are built for (178 to 419), and where the trigonometric three spend theirs: range reduction takes 155 to 216 of each sin, cos and tan.">
 <title>Tile instructions per call for the nine correctly rounded functions at the formats they are built for (178 to 419), and where the trigonometric three spend theirs: range reduction takes 155 to 216 of each sin, cos and tan.</title>
-<rect width="900" height="780" fill="#ffffff"/>
+<rect width="900" height="819" fill="#ffffff"/>
 <text x="24.0" y="30.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="17" fill="#1f2328" font-weight="600">What a correctly rounded function costs the tile</text>
 <text x="24.0" y="52.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#656d76">Instructions in the tile's own program for one correctly rounded result, per format. Exp and log families (M1): the</text>
 <text x="24.0" y="69.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#656d76">most any rounding attribute needs. Sin, cos and tan (M2): the same at every attribute. Below: the three trigonometric</text>
@@ -196,5 +196,5 @@
 <text x="319.4" y="778.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#1f2328">the series</text>
 <rect x="398.2" y="769.5" width="14.0" height="9.5" fill="#6e7781" rx="2"/>
 <text x="418.2" y="778.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#1f2328">choosing and finishing</text>
-<text x="24.0" y="772.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#656d76">source: docs/studies/m1/final_counts.out.txt (5e8d4b7d); docs/studies/m2/ (4 files)</text>
+<text x="24.0" y="811.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#656d76">source: docs/studies/m1/final_counts.out.txt (5e8d4b7d); docs/studies/m2/ (4 files)</text>
 </svg>

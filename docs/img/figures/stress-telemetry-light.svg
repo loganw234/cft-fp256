@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="900" height="760" viewBox="0 0 900 760" role="img" aria-label="Board power and four temperatures at 865 samples over 61.0 hours: 22.2 W on the quad image, 15.7 W on the single and 16.1 W on the deep one at the median, with one sample at 34.4 W.">
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="773" viewBox="0 0 900 773" role="img" aria-label="Board power and four temperatures at 865 samples over 61.0 hours: 22.2 W on the quad image, 15.7 W on the single and 16.1 W on the deep one at the median, with one sample at 34.4 W.">
 <title>Board power and four temperatures at 865 samples over 61.0 hours: 22.2 W on the quad image, 15.7 W on the single and 16.1 W on the deep one at the median, with one sample at 34.4 W.</title>
-<rect width="900" height="760" fill="#ffffff"/>
+<rect width="900" height="773" fill="#ffffff"/>
 <text x="24.0" y="30.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="17" fill="#1f2328" font-weight="600">What the card drew and how warm it ran</text>
 <text x="24.0" y="52.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#656d76">The card's own sensors, read by the stress driver every five minutes and between legs: board power above, and below</text>
 <text x="24.0" y="69.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#656d76">four temperature sensors, named as the card names them (FPGA, Int Vcc, PCB Top Front, PCB Top Rear). Shading and</text>
@@ -1099,5 +1099,5 @@
 <text x="24.0" y="713.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#656d76">The image loaded sets the board's power, not the work: on the quad, a sweep slice with tile items running drew 22.5 W at the median against</text>
 <text x="24.0" y="728.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#656d76">22.1 W with only host items running and 22.1 W between legs. Only cft-resident's streaming leg, about 4 s a visit, took it to 34.4 W (one</text>
 <text x="24.0" y="743.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#656d76">sample of 865). The card's HBM temperature sensor read 0 in 670 of the 865 samples, so it is left out.</text>
-<text x="24.0" y="752.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#656d76">source: docs/figures/stress.json (extract; run ended 2026-10-19 08:01:13)</text>
+<text x="24.0" y="765.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#656d76">source: docs/figures/stress.json (extract; run ended 2026-10-19 08:01:13)</text>
 </svg>

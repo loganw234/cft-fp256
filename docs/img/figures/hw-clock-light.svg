@@ -1,153 +1,189 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="900" height="640" viewBox="0 0 900 640" role="img" aria-label="Kernel slack against the clock for every timing attempt the ledger records for the U50 (36 attempts), and the slack of the images built at 135 MHz over time. One tile closes 175 MHz; four tiles close 135.">
-<title>Kernel slack against the clock for every timing attempt the ledger records for the U50 (36 attempts), and the slack of the images built at 135 MHz over time. One tile closes 175 MHz; four tiles close 135.</title>
-<rect width="900" height="640" fill="#ffffff"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="700" viewBox="0 0 900 700" role="img" aria-label="Kernel slack against the clock for the 44 U50 builds this figure reads from the ledger, and the slack of the images built at 130 and 135 MHz in build order. One tile closes 175 MHz; four tiles close 135.">
+<title>Kernel slack against the clock for the 44 U50 builds this figure reads from the ledger, and the slack of the images built at 130 and 135 MHz in build order. One tile closes 175 MHz; four tiles close 135.</title>
+<rect width="900" height="700" fill="#ffffff"/>
 <text x="24.0" y="30.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="17" fill="#1f2328" font-weight="600">How far the clock was pushed, and what it left in slack</text>
-<text x="24.0" y="52.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#656d76">Every kernel worst-negative-slack the ledger states for a build on the U50, read out of docs/VALIDATION.md. A build</text>
-<text x="24.0" y="69.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#656d76">closes timing when its slack is not negative. Left: slack against the clock it was built at. Right: the images built</text>
-<text x="24.0" y="86.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#656d76">at 130 and 135 MHz, in the order they were built.</text>
-<text x="84.0" y="136.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11.5" fill="#1f2328" font-weight="600">slack (ns) against the clock built for (MHz)</text>
-<rect x="84.0" y="150.0" width="386.0" height="320.0" fill="#f6f8fa"/>
-<line x1="84.0" y1="455.5" x2="470.0" y2="455.5" stroke="#d8dee4" stroke-width="1"/>
-<text x="78.0" y="459.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#656d76" text-anchor="end">-0.4</text>
-<line x1="84.0" y1="397.3" x2="470.0" y2="397.3" stroke="#d8dee4" stroke-width="1"/>
-<text x="78.0" y="400.8" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#656d76" text-anchor="end">-0.2</text>
-<line x1="84.0" y1="339.1" x2="470.0" y2="339.1" stroke="#8c959f" stroke-width="1.5"/>
-<text x="78.0" y="342.6" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#656d76" text-anchor="end">0</text>
-<line x1="84.0" y1="280.9" x2="470.0" y2="280.9" stroke="#d8dee4" stroke-width="1"/>
-<text x="78.0" y="284.4" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#656d76" text-anchor="end">+0.2</text>
-<line x1="84.0" y1="222.7" x2="470.0" y2="222.7" stroke="#d8dee4" stroke-width="1"/>
-<text x="78.0" y="226.2" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#656d76" text-anchor="end">+0.4</text>
-<line x1="84.0" y1="164.5" x2="470.0" y2="164.5" stroke="#d8dee4" stroke-width="1"/>
-<text x="78.0" y="168.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#656d76" text-anchor="end">+0.6</text>
-<line x1="119.1" y1="150.0" x2="119.1" y2="470.0" stroke="#d8dee4" stroke-width="1"/>
-<text x="119.1" y="484.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#656d76" text-anchor="middle">130</text>
-<line x1="189.3" y1="150.0" x2="189.3" y2="470.0" stroke="#d8dee4" stroke-width="1"/>
-<text x="189.3" y="484.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#656d76" text-anchor="middle">140</text>
-<line x1="259.5" y1="150.0" x2="259.5" y2="470.0" stroke="#d8dee4" stroke-width="1"/>
-<text x="259.5" y="484.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#656d76" text-anchor="middle">150</text>
-<line x1="329.6" y1="150.0" x2="329.6" y2="470.0" stroke="#d8dee4" stroke-width="1"/>
-<text x="329.6" y="484.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#656d76" text-anchor="middle">160</text>
-<line x1="399.8" y1="150.0" x2="399.8" y2="470.0" stroke="#d8dee4" stroke-width="1"/>
-<text x="399.8" y="484.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#656d76" text-anchor="middle">170</text>
-<line x1="470.0" y1="150.0" x2="470.0" y2="470.0" stroke="#d8dee4" stroke-width="1"/>
-<text x="470.0" y="484.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#656d76" text-anchor="middle">180</text>
-<circle cx="111.1" cy="260.3" r="5.5" fill="#0969da"/>
-<circle cx="117.1" cy="275.1" r="5.5" fill="#0969da"/>
-<rect x="115.6" y="328.1" width="11.0" height="11.0" fill="#bc4c00"/>
-<rect x="121.6" y="331.0" width="11.0" height="11.0" fill="#bc4c00"/>
-<circle cx="122.2" cy="264.9" r="5.5" fill="#0969da"/>
-<circle cx="128.2" cy="247.2" r="5.5" fill="#0969da"/>
-<circle cx="134.2" cy="212.3" r="5.5" fill="#0969da"/>
-<circle cx="140.2" cy="258.5" r="5.5" fill="#0969da"/>
-<circle cx="146.2" cy="313.2" r="5.5" fill="#0969da"/>
-<circle cx="152.2" cy="278.0" r="5.5" fill="#0969da"/>
-<circle cx="158.2" cy="261.7" r="5.5" fill="#0969da"/>
-<circle cx="164.2" cy="216.0" r="5.5" fill="#0969da"/>
-<circle cx="170.2" cy="243.1" r="5.5" fill="#0969da"/>
-<circle cx="176.2" cy="328.6" r="5.5" fill="#0969da"/>
-<rect x="126.7" y="321.4" width="11.0" height="11.0" fill="#bc4c00"/>
-<rect x="132.7" y="314.1" width="11.0" height="11.0" fill="#bc4c00"/>
-<rect x="138.7" y="298.1" width="11.0" height="11.0" fill="#bc4c00"/>
-<rect x="144.7" y="322.0" width="11.0" height="11.0" fill="#bc4c00"/>
-<rect x="150.7" y="310.6" width="11.0" height="11.0" fill="#bc4c00"/>
-<rect x="156.7" y="327.2" width="11.0" height="11.0" fill="#bc4c00"/>
-<rect x="162.7" y="322.0" width="11.0" height="11.0" fill="#bc4c00"/>
-<rect x="168.7" y="439.2" width="11.0" height="11.0" fill="#ffffff" stroke="#cf222e" stroke-width="2"/>
-<rect x="174.7" y="332.7" width="11.0" height="11.0" fill="#bc4c00"/>
-<rect x="180.7" y="319.6" width="11.0" height="11.0" fill="#bc4c00"/>
-<circle cx="216.4" cy="329.8" r="5.5" fill="#0969da"/>
-<circle cx="222.4" cy="291.7" r="5.5" fill="#0969da"/>
-<text x="222.4" y="280.7" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="8.5" fill="#656d76" text-anchor="middle">+0.163</text>
-<rect x="223.9" y="421.4" width="11.0" height="11.0" fill="#ffffff" stroke="#cf222e" stroke-width="2"/>
-<circle cx="251.5" cy="359.5" r="5.5" fill="#ffffff" stroke="#cf222e" stroke-width="2"/>
-<circle cx="257.5" cy="303.6" r="5.5" fill="#0969da"/>
-<text x="257.5" y="292.6" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="8.5" fill="#656d76" text-anchor="middle">+0.122</text>
-<circle cx="289.5" cy="335.6" r="5.5" fill="#0969da"/>
-<text x="289.5" y="324.6" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="8.5" fill="#656d76" text-anchor="middle">+0.012</text>
-<circle cx="324.6" cy="317.3" r="5.5" fill="#0969da"/>
-<text x="324.6" y="306.3" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="8.5" fill="#656d76" text-anchor="middle">+0.075</text>
-<circle cx="359.7" cy="335.3" r="5.5" fill="#0969da"/>
-<text x="359.7" y="324.3" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="8.5" fill="#656d76" text-anchor="middle">+0.013</text>
-<circle cx="394.8" cy="330.7" r="5.5" fill="#0969da"/>
-<text x="394.8" y="319.7" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="8.5" fill="#656d76" text-anchor="middle">+0.029</text>
-<circle cx="426.9" cy="338.8" r="5.5" fill="#0969da"/>
-<circle cx="432.9" cy="368.8" r="5.5" fill="#ffffff" stroke="#cf222e" stroke-width="2"/>
-<text x="432.9" y="357.8" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="8.5" fill="#656d76" text-anchor="middle">-0.102</text>
-<line x1="434.9" y1="345.8" x2="434.9" y2="397.3" stroke="#8c959f" stroke-width="1" stroke-dasharray="2 3"/>
-<text x="442.9" y="401.3" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#1f2328" text-anchor="end">175 MHz: +0.001 with the second recipe</text>
-<text x="442.9" y="414.3" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#656d76" text-anchor="end">(-0.102 with the standard one)</text>
-<text x="466.0" y="462.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#cf222e" text-anchor="end">260 MHz: -3.163 ns (off the chart)</text>
-<text x="277.0" y="500.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#656d76" text-anchor="middle">target clock, MHz</text>
-<text x="520.0" y="136.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11.5" fill="#1f2328" font-weight="600">slack of every 130 and 135 MHz image, in build order</text>
-<rect x="610.0" y="150.0" width="262.0" height="320.0" fill="#f6f8fa"/>
-<line x1="623.8" y1="150.0" x2="623.8" y2="470.0" stroke="#d8dee4" stroke-width="1"/>
-<text x="623.8" y="484.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#656d76" text-anchor="middle">-0.4</text>
-<line x1="678.9" y1="150.0" x2="678.9" y2="470.0" stroke="#d8dee4" stroke-width="1"/>
-<text x="678.9" y="484.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#656d76" text-anchor="middle">-0.2</text>
-<line x1="734.1" y1="150.0" x2="734.1" y2="470.0" stroke="#8c959f" stroke-width="1.5"/>
-<text x="734.1" y="484.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#656d76" text-anchor="middle">0</text>
-<line x1="789.3" y1="150.0" x2="789.3" y2="470.0" stroke="#d8dee4" stroke-width="1"/>
-<text x="789.3" y="484.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#656d76" text-anchor="middle">+0.2</text>
-<line x1="844.4" y1="150.0" x2="844.4" y2="470.0" stroke="#d8dee4" stroke-width="1"/>
-<text x="844.4" y="484.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#656d76" text-anchor="middle">+0.4</text>
-<line x1="739.3" y1="164.5" x2="808.8" y2="164.5" stroke="#8c959f" stroke-width="1.2"/>
-<text x="602.0" y="168.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#1f2328" text-anchor="end">30 Aug  bac9f550, 130 MHz</text>
-<circle cx="808.8" cy="164.5" r="4.8" fill="#0969da"/>
-<rect x="734.5" y="159.7" width="9.6" height="9.6" fill="#bc4c00"/>
-<line x1="736.6" y1="193.6" x2="794.8" y2="193.6" stroke="#8c959f" stroke-width="1.2"/>
-<text x="602.0" y="197.1" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#1f2328" text-anchor="end">1 Sep  b1a014c, 130 MHz</text>
-<circle cx="794.8" cy="193.6" r="4.8" fill="#0969da"/>
-<rect x="731.8" y="188.8" width="9.6" height="9.6" fill="#bc4c00"/>
-<line x1="745.7" y1="222.7" x2="804.4" y2="222.7" stroke="#8c959f" stroke-width="1.2"/>
-<text x="602.0" y="226.2" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#1f2328" text-anchor="end">1 Sep  39fc2c0</text>
-<circle cx="804.4" cy="222.7" r="4.8" fill="#0969da"/>
-<rect x="740.9" y="217.9" width="9.6" height="9.6" fill="#bc4c00"/>
-<line x1="752.6" y1="251.8" x2="821.3" y2="251.8" stroke="#8c959f" stroke-width="1.2"/>
-<text x="602.0" y="255.3" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#1f2328" text-anchor="end">7 Sep  ed752dd</text>
-<circle cx="821.3" cy="251.8" r="4.8" fill="#0969da"/>
-<rect x="747.8" y="247.0" width="9.6" height="9.6" fill="#bc4c00"/>
-<line x1="767.8" y1="280.9" x2="854.3" y2="280.9" stroke="#8c959f" stroke-width="1.2"/>
-<text x="602.0" y="284.4" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#1f2328" text-anchor="end">8 Sep  revision 2</text>
-<circle cx="854.3" cy="280.9" r="4.8" fill="#0969da"/>
-<rect x="763.0" y="276.1" width="9.6" height="9.6" fill="#bc4c00"/>
-<line x1="745.1" y1="310.0" x2="810.5" y2="310.0" stroke="#8c959f" stroke-width="1.2"/>
-<text x="602.0" y="313.5" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#1f2328" text-anchor="end">8 Sep  revision 3</text>
-<circle cx="810.5" cy="310.0" r="4.8" fill="#0969da"/>
-<rect x="740.3" y="305.2" width="9.6" height="9.6" fill="#bc4c00"/>
-<line x1="755.9" y1="339.1" x2="758.7" y2="339.1" stroke="#8c959f" stroke-width="1.2"/>
-<text x="602.0" y="342.6" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#1f2328" text-anchor="end">9 Sep  read-ahead</text>
-<circle cx="758.7" cy="339.1" r="4.8" fill="#0969da"/>
-<rect x="751.1" y="334.3" width="9.6" height="9.6" fill="#bc4c00"/>
-<line x1="740.2" y1="368.2" x2="792.0" y2="368.2" stroke="#8c959f" stroke-width="1.2"/>
-<text x="602.0" y="371.7" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#1f2328" text-anchor="end">13 Sep  revision 4</text>
-<circle cx="792.0" cy="368.2" r="4.8" fill="#0969da"/>
-<rect x="735.4" y="363.4" width="9.6" height="9.6" fill="#bc4c00"/>
-<line x1="634.0" y1="397.3" x2="807.5" y2="397.3" stroke="#8c959f" stroke-width="1.2"/>
-<text x="602.0" y="400.8" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#1f2328" text-anchor="end">16 Sep  round 2</text>
-<circle cx="807.5" cy="397.3" r="4.8" fill="#0969da"/>
-<rect x="629.2" y="392.5" width="9.6" height="9.6" fill="#ffffff" stroke="#cf222e" stroke-width="2"/>
-<rect x="740.3" y="392.5" width="9.6" height="9.6" fill="#bc4c00"/>
-<line x1="734.9" y1="426.4" x2="850.8" y2="426.4" stroke="#8c959f" stroke-width="1.2"/>
-<text x="602.0" y="429.9" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#1f2328" text-anchor="end">29 Sep  revision 7</text>
-<circle cx="850.8" cy="426.4" r="4.8" fill="#0969da"/>
-<rect x="730.1" y="421.6" width="9.6" height="9.6" fill="#bc4c00"/>
-<line x1="744.0" y1="455.5" x2="825.1" y2="455.5" stroke="#8c959f" stroke-width="1.2"/>
-<text x="602.0" y="459.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#1f2328" text-anchor="end">6 Oct  revision 8</text>
-<circle cx="825.1" cy="455.5" r="4.8" fill="#0969da"/>
-<rect x="742.5" y="450.7" width="9.6" height="9.6" fill="#bc4c00"/>
-<polygon points="744.0,450.0 749.5,455.5 744.0,461.0 738.5,455.5" fill="#8250df"/>
-<text x="741.0" y="500.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#656d76" text-anchor="middle">kernel slack, ns</text>
-<rect x="24.0" y="521.5" width="14.0" height="9.5" fill="#0969da" rx="2"/>
-<text x="44.0" y="530.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#1f2328">one tile (circle)</text>
-<rect x="165.5" y="521.5" width="14.0" height="9.5" fill="#bc4c00" rx="2"/>
-<text x="185.5" y="530.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#1f2328">four tiles (square)</text>
-<rect x="319.2" y="521.5" width="14.0" height="9.5" fill="#8250df" rx="2"/>
-<text x="339.2" y="530.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#1f2328">deep single (diamond)</text>
-<rect x="485.1" y="521.5" width="14.0" height="9.5" fill="#cf222e" rx="2"/>
-<text x="505.1" y="530.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#1f2328">missed: red outline</text>
-<text x="24.0" y="548.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#656d76">Missed, of 36 attempts: one tile at 260 MHz, -3.163 (31 Aug); one tile at 150 MHz, -0.070 (1 Sep); four tiles at 145 MHz, -0.302 (1 Sep);</text>
-<text x="24.0" y="563.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#656d76">four tiles at 135 MHz, -0.363 (16 Sep); one tile at 175 MHz, -0.102 (24 Sep). Every other one closed. The sweep's closed points (145, 150,</text>
-<text x="24.0" y="578.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#656d76">155, 160, 165, 170, 175 MHz) passed the conformance set on the card at 7 of 7; the quad closed 135 MHz 9 times with slack from +0.003 to</text>
-<text x="24.0" y="593.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#656d76">+0.122 ns.</text>
-<text x="24.0" y="632.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#656d76">source: docs/figures/ledger.json (extract; ledger, first 1,891,030 bytes)</text>
+<text x="24.0" y="52.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#656d76">The slack of the kernel's worst path for the U50 builds this figure reads from docs/VALIDATION.md: for each, a</text>
+<text x="24.0" y="69.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#656d76">pattern that names the build's entry and captures the figure the ledger states there. A build closes timing when its</text>
+<text x="24.0" y="86.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#656d76">slack is not negative. Left: slack against the clock it was built at. Right: the drawn images built at 130 and 135</text>
+<text x="24.0" y="103.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#656d76">MHz, in the order they were built. The ledger's other slacks (repeats, probes, other designs, builds named only in</text>
+<text x="24.0" y="120.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#656d76">running text) are listed in the sidecar, not drawn.</text>
+<text x="84.0" y="162.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11.5" fill="#1f2328" font-weight="600">slack (ns) against the clock built for (MHz)</text>
+<rect x="84.0" y="176.0" width="356.0" height="320.0" fill="#f6f8fa"/>
+<line x1="84.0" y1="481.5" x2="440.0" y2="481.5" stroke="#d8dee4" stroke-width="1"/>
+<text x="78.0" y="485.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#656d76" text-anchor="end">-0.4</text>
+<line x1="84.0" y1="423.3" x2="440.0" y2="423.3" stroke="#d8dee4" stroke-width="1"/>
+<text x="78.0" y="426.8" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#656d76" text-anchor="end">-0.2</text>
+<line x1="84.0" y1="365.1" x2="440.0" y2="365.1" stroke="#8c959f" stroke-width="1.5"/>
+<text x="78.0" y="368.6" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#656d76" text-anchor="end">0</text>
+<line x1="84.0" y1="306.9" x2="440.0" y2="306.9" stroke="#d8dee4" stroke-width="1"/>
+<text x="78.0" y="310.4" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#656d76" text-anchor="end">+0.2</text>
+<line x1="84.0" y1="248.7" x2="440.0" y2="248.7" stroke="#d8dee4" stroke-width="1"/>
+<text x="78.0" y="252.2" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#656d76" text-anchor="end">+0.4</text>
+<line x1="84.0" y1="190.5" x2="440.0" y2="190.5" stroke="#d8dee4" stroke-width="1"/>
+<text x="78.0" y="194.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#656d76" text-anchor="end">+0.6</text>
+<line x1="116.4" y1="176.0" x2="116.4" y2="496.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="116.4" y="510.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#656d76" text-anchor="middle">130</text>
+<line x1="181.1" y1="176.0" x2="181.1" y2="496.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="181.1" y="510.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#656d76" text-anchor="middle">140</text>
+<line x1="245.8" y1="176.0" x2="245.8" y2="496.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="245.8" y="510.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#656d76" text-anchor="middle">150</text>
+<line x1="310.5" y1="176.0" x2="310.5" y2="496.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="310.5" y="510.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#656d76" text-anchor="middle">160</text>
+<line x1="375.3" y1="176.0" x2="375.3" y2="496.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="375.3" y="510.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#656d76" text-anchor="middle">170</text>
+<line x1="440.0" y1="176.0" x2="440.0" y2="496.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="440.0" y="510.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#656d76" text-anchor="middle">180</text>
+<circle cx="110.4" cy="301.1" r="5.0" fill="#0969da"/>
+<circle cx="110.4" cy="286.3" r="5.0" fill="#0969da"/>
+<circle cx="110.4" cy="234.2" r="5.0" fill="#0969da"/>
+<rect x="117.4" y="357.5" width="10.0" height="10.0" fill="#bc4c00"/>
+<rect x="128.4" y="354.6" width="10.0" height="10.0" fill="#bc4c00"/>
+<circle cx="153.7" cy="354.6" r="5.0" fill="#0969da"/>
+<circle cx="142.7" cy="339.2" r="5.0" fill="#0969da"/>
+<circle cx="142.7" cy="324.4" r="5.0" fill="#0969da"/>
+<circle cx="142.7" cy="309.5" r="5.0" fill="#0969da"/>
+<circle cx="131.7" cy="304.0" r="5.0" fill="#0969da"/>
+<circle cx="142.7" cy="291.5" r="5.0" fill="#0969da"/>
+<circle cx="131.7" cy="290.9" r="5.0" fill="#0969da"/>
+<circle cx="153.7" cy="287.7" r="5.0" fill="#0969da"/>
+<circle cx="164.7" cy="284.5" r="5.0" fill="#0969da"/>
+<circle cx="142.7" cy="275.5" r="5.0" fill="#0969da"/>
+<circle cx="131.7" cy="273.2" r="5.0" fill="#0969da"/>
+<circle cx="153.7" cy="269.1" r="5.0" fill="#0969da"/>
+<circle cx="142.7" cy="242.0" r="5.0" fill="#0969da"/>
+<circle cx="131.7" cy="239.1" r="5.0" fill="#0969da"/>
+<circle cx="153.7" cy="238.3" r="5.0" fill="#0969da"/>
+<circle cx="142.7" cy="185.3" r="5.0" fill="#0969da"/>
+<rect x="149.7" y="465.7" width="10.0" height="10.0" fill="#ffffff" stroke="#cf222e" stroke-width="2"/>
+<rect x="160.7" y="359.2" width="10.0" height="10.0" fill="#bc4c00"/>
+<rect x="171.7" y="353.7" width="10.0" height="10.0" fill="#bc4c00"/>
+<rect x="182.7" y="348.5" width="10.0" height="10.0" fill="#bc4c00"/>
+<rect x="193.7" y="348.5" width="10.0" height="10.0" fill="#bc4c00"/>
+<rect x="160.7" y="347.9" width="10.0" height="10.0" fill="#bc4c00"/>
+<rect x="116.7" y="346.1" width="10.0" height="10.0" fill="#bc4c00"/>
+<rect x="171.7" y="340.6" width="10.0" height="10.0" fill="#bc4c00"/>
+<rect x="149.7" y="337.1" width="10.0" height="10.0" fill="#bc4c00"/>
+<rect x="149.7" y="324.6" width="10.0" height="10.0" fill="#bc4c00"/>
+<rect x="160.7" y="318.5" width="10.0" height="10.0" fill="#bc4c00"/>
+<circle cx="218.5" cy="355.8" r="5.0" fill="#0969da"/>
+<circle cx="207.5" cy="317.7" r="5.0" fill="#0969da"/>
+<text x="207.5" y="306.7" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="8.5" fill="#656d76" text-anchor="middle">+0.163</text>
+<rect x="214.5" y="447.9" width="10.0" height="10.0" fill="#ffffff" stroke="#cf222e" stroke-width="2"/>
+<circle cx="239.8" cy="385.5" r="5.0" fill="#ffffff" stroke="#cf222e" stroke-width="2"/>
+<circle cx="239.8" cy="329.6" r="5.0" fill="#0969da"/>
+<text x="239.8" y="318.6" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="8.5" fill="#656d76" text-anchor="middle">+0.122</text>
+<circle cx="272.2" cy="361.6" r="5.0" fill="#0969da"/>
+<text x="272.2" y="350.6" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="8.5" fill="#656d76" text-anchor="middle">+0.012</text>
+<circle cx="304.5" cy="343.3" r="5.0" fill="#0969da"/>
+<text x="304.5" y="332.3" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="8.5" fill="#656d76" text-anchor="middle">+0.075</text>
+<circle cx="336.9" cy="361.3" r="5.0" fill="#0969da"/>
+<text x="336.9" y="350.3" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="8.5" fill="#656d76" text-anchor="middle">+0.013</text>
+<circle cx="369.3" cy="356.7" r="5.0" fill="#0969da"/>
+<text x="369.3" y="345.7" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="8.5" fill="#656d76" text-anchor="middle">+0.029</text>
+<circle cx="401.6" cy="394.8" r="5.0" fill="#ffffff" stroke="#cf222e" stroke-width="2"/>
+<text x="401.6" y="383.8" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="8.5" fill="#656d76" text-anchor="middle">-0.102</text>
+<circle cx="401.6" cy="364.8" r="5.0" fill="#0969da"/>
+<line x1="407.6" y1="371.8" x2="407.6" y2="423.3" stroke="#8c959f" stroke-width="1" stroke-dasharray="2 3"/>
+<text x="415.6" y="427.3" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#1f2328" text-anchor="end">175 MHz: +0.001 with the second recipe</text>
+<text x="415.6" y="440.3" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#656d76" text-anchor="end">(-0.102 with the standard one)</text>
+<text x="436.0" y="488.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#cf222e" text-anchor="end">260 MHz: -3.163 ns (off the chart)</text>
+<text x="262.0" y="526.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#656d76" text-anchor="middle">target clock, MHz</text>
+<text x="500.0" y="162.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11.5" fill="#1f2328" font-weight="600">slack of the 130 and 135 MHz images drawn, in build order</text>
+<rect x="640.0" y="176.0" width="236.0" height="320.0" fill="#f6f8fa"/>
+<line x1="650.7" y1="176.0" x2="650.7" y2="496.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="650.7" y="510.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#656d76" text-anchor="middle">-0.4</text>
+<line x1="693.6" y1="176.0" x2="693.6" y2="496.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="693.6" y="510.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#656d76" text-anchor="middle">-0.2</text>
+<line x1="736.5" y1="176.0" x2="736.5" y2="496.0" stroke="#8c959f" stroke-width="1.5"/>
+<text x="736.5" y="510.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#656d76" text-anchor="middle">0</text>
+<line x1="779.5" y1="176.0" x2="779.5" y2="496.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="779.5" y="510.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#656d76" text-anchor="middle">+0.2</text>
+<line x1="822.4" y1="176.0" x2="822.4" y2="496.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="822.4" y="510.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#656d76" text-anchor="middle">+0.4</text>
+<line x1="865.3" y1="176.0" x2="865.3" y2="496.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="865.3" y="510.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#656d76" text-anchor="middle">+0.6</text>
+<line x1="740.6" y1="184.9" x2="794.7" y2="184.9" stroke="#8c959f" stroke-width="1.2"/>
+<text x="632.0" y="188.4" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#1f2328" text-anchor="end">30 Aug  bac9f550 (130 MHz)</text>
+<circle cx="794.7" cy="184.9" r="4.2" fill="#0969da"/>
+<rect x="736.4" y="180.7" width="8.4" height="8.4" fill="#bc4c00"/>
+<line x1="833.1" y1="202.7" x2="833.1" y2="202.7" stroke="#8c959f" stroke-width="1.2"/>
+<text x="632.0" y="206.2" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#1f2328" text-anchor="end">31 Aug  control (130 MHz)</text>
+<circle cx="833.1" cy="202.7" r="4.2" fill="#0969da"/>
+<line x1="738.5" y1="220.4" x2="783.7" y2="220.4" stroke="#8c959f" stroke-width="1.2"/>
+<text x="632.0" y="223.9" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#1f2328" text-anchor="end">1 Sep  b1a014c (130 MHz)</text>
+<circle cx="783.7" cy="220.4" r="4.2" fill="#0969da"/>
+<rect x="734.3" y="216.2" width="8.4" height="8.4" fill="#bc4c00"/>
+<line x1="745.6" y1="238.2" x2="791.3" y2="238.2" stroke="#8c959f" stroke-width="1.2"/>
+<text x="632.0" y="241.7" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#1f2328" text-anchor="end">1 Sep  39fc2c0</text>
+<circle cx="791.3" cy="238.2" r="4.2" fill="#0969da"/>
+<rect x="741.4" y="234.0" width="8.4" height="8.4" fill="#bc4c00"/>
+<line x1="829.4" y1="256.0" x2="829.4" y2="256.0" stroke="#8c959f" stroke-width="1.2"/>
+<text x="632.0" y="259.5" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#1f2328" text-anchor="end">2 Sep  0e7264e, case ROM</text>
+<circle cx="829.4" cy="256.0" r="4.2" fill="#0969da"/>
+<line x1="767.2" y1="273.8" x2="869.1" y2="273.8" stroke="#8c959f" stroke-width="1.2"/>
+<text x="632.0" y="277.3" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#1f2328" text-anchor="end">2 Sep  9f73107, the tip</text>
+<circle cx="869.1" cy="273.8" r="4.2" fill="#0969da"/>
+<rect x="763.0" y="269.6" width="8.4" height="8.4" fill="#bc4c00"/>
+<line x1="750.9" y1="291.6" x2="804.3" y2="291.6" stroke="#8c959f" stroke-width="1.2"/>
+<text x="632.0" y="295.1" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#1f2328" text-anchor="end">7 Sep  ed752dd</text>
+<circle cx="804.3" cy="291.6" r="4.2" fill="#0969da"/>
+<rect x="746.7" y="287.4" width="8.4" height="8.4" fill="#bc4c00"/>
+<line x1="762.7" y1="309.3" x2="830.1" y2="309.3" stroke="#8c959f" stroke-width="1.2"/>
+<text x="632.0" y="312.8" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#1f2328" text-anchor="end">8 Sep  revision 2</text>
+<circle cx="830.1" cy="309.3" r="4.2" fill="#0969da"/>
+<rect x="758.5" y="305.1" width="8.4" height="8.4" fill="#bc4c00"/>
+<line x1="745.1" y1="327.1" x2="796.0" y2="327.1" stroke="#8c959f" stroke-width="1.2"/>
+<text x="632.0" y="330.6" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#1f2328" text-anchor="end">8 Sep  revision 3</text>
+<circle cx="796.0" cy="327.1" r="4.2" fill="#0969da"/>
+<rect x="740.9" y="322.9" width="8.4" height="8.4" fill="#bc4c00"/>
+<line x1="753.5" y1="344.9" x2="755.6" y2="344.9" stroke="#8c959f" stroke-width="1.2"/>
+<text x="632.0" y="348.4" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#1f2328" text-anchor="end">9 Sep  read-ahead</text>
+<circle cx="755.6" cy="344.9" r="4.2" fill="#0969da"/>
+<rect x="749.3" y="340.7" width="8.4" height="8.4" fill="#bc4c00"/>
+<line x1="741.3" y1="362.7" x2="781.6" y2="362.7" stroke="#8c959f" stroke-width="1.2"/>
+<text x="632.0" y="366.2" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#1f2328" text-anchor="end">13 Sep  revision 4</text>
+<circle cx="781.6" cy="362.7" r="4.2" fill="#0969da"/>
+<rect x="737.1" y="358.5" width="8.4" height="8.4" fill="#bc4c00"/>
+<line x1="790.8" y1="380.4" x2="790.8" y2="380.4" stroke="#8c959f" stroke-width="1.2"/>
+<text x="632.0" y="383.9" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#1f2328" text-anchor="end">14 Sep  fp64/fp128 single</text>
+<circle cx="790.8" cy="380.4" r="4.2" fill="#0969da"/>
+<line x1="802.6" y1="398.2" x2="802.6" y2="398.2" stroke="#8c959f" stroke-width="1.2"/>
+<text x="632.0" y="401.7" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#1f2328" text-anchor="end">14 Sep  revision 5, seq5</text>
+<circle cx="802.6" cy="398.2" r="4.2" fill="#0969da"/>
+<line x1="777.5" y1="416.0" x2="777.5" y2="416.0" stroke="#8c959f" stroke-width="1.2"/>
+<text x="632.0" y="419.5" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#1f2328" text-anchor="end">14 Sep  R14</text>
+<circle cx="777.5" cy="416.0" r="4.2" fill="#0969da"/>
+<line x1="766.6" y1="433.8" x2="766.6" y2="433.8" stroke="#8c959f" stroke-width="1.2"/>
+<text x="632.0" y="437.3" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#1f2328" text-anchor="end">14 Sep  seq6</text>
+<circle cx="766.6" cy="433.8" r="4.2" fill="#0969da"/>
+<line x1="658.7" y1="451.6" x2="793.6" y2="451.6" stroke="#8c959f" stroke-width="1.2"/>
+<text x="632.0" y="455.1" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#1f2328" text-anchor="end">16 Sep  round 2</text>
+<circle cx="793.6" cy="451.6" r="4.2" fill="#0969da"/>
+<rect x="654.5" y="447.4" width="8.4" height="8.4" fill="#ffffff" stroke="#cf222e" stroke-width="2"/>
+<rect x="740.9" y="447.4" width="8.4" height="8.4" fill="#bc4c00"/>
+<line x1="737.2" y1="469.3" x2="827.3" y2="469.3" stroke="#8c959f" stroke-width="1.2"/>
+<text x="632.0" y="472.8" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#1f2328" text-anchor="end">29 Sep  revision 7</text>
+<circle cx="827.3" cy="469.3" r="4.2" fill="#0969da"/>
+<rect x="733.0" y="465.1" width="8.4" height="8.4" fill="#bc4c00"/>
+<line x1="744.3" y1="487.1" x2="807.3" y2="487.1" stroke="#8c959f" stroke-width="1.2"/>
+<text x="632.0" y="490.6" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#1f2328" text-anchor="end">6 Oct  revision 8</text>
+<circle cx="807.3" cy="487.1" r="4.2" fill="#0969da"/>
+<rect x="742.6" y="482.9" width="8.4" height="8.4" fill="#bc4c00"/>
+<polygon points="744.3,482.1 749.3,487.1 744.3,492.1 739.3,487.1" fill="#8250df"/>
+<text x="758.0" y="526.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#656d76" text-anchor="middle">kernel slack, ns</text>
+<rect x="24.0" y="541.5" width="14.0" height="9.5" fill="#0969da" rx="2"/>
+<text x="44.0" y="550.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#1f2328">one tile (circle)</text>
+<rect x="165.5" y="541.5" width="14.0" height="9.5" fill="#bc4c00" rx="2"/>
+<text x="185.5" y="550.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#1f2328">four tiles (square)</text>
+<rect x="319.2" y="541.5" width="14.0" height="9.5" fill="#8250df" rx="2"/>
+<text x="339.2" y="550.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#1f2328">deep single (diamond)</text>
+<rect x="485.1" y="541.5" width="14.0" height="9.5" fill="#cf222e" rx="2"/>
+<text x="505.1" y="550.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#1f2328">missed: red outline</text>
+<text x="24.0" y="568.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#656d76">Missed, of the 44 builds drawn: one tile at 260 MHz, -3.163 (31 Aug); one tile at 150 MHz, -0.070 (1 Sep); four tiles at 145 MHz, -0.302 (1</text>
+<text x="24.0" y="583.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#656d76">Sep); four tiles at 135 MHz, -0.363 (16 Sep); one tile at 175 MHz, -0.102 (24 Sep). Every other one drawn closed. The sweep's closed points</text>
+<text x="24.0" y="598.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#656d76">(145, 150, 155, 160, 165, 170, 175 MHz) passed the conformance set on the card at 7 of 7; of the four-tile builds drawn, 10 closed 135 MHz,</text>
+<text x="24.0" y="613.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#656d76">with slack from +0.003 to +0.143 ns. Not drawn: the ledger's other slacks, listed in the sidecar - among them three misses at 135 MHz that</text>
+<text x="24.0" y="628.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#656d76">the ledger records with the whole design's slack only (one tile at 135 MHz, 1 Sep, -0.577 ns; four tiles at 135 MHz, 2 Sep, -0.141 ns; four</text>
+<text x="24.0" y="643.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#656d76">tiles at 135 MHz, 2 Sep, -0.113 ns).</text>
+<text x="24.0" y="692.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#656d76">source: docs/figures/ledger.json (extract; ledger, first 1,891,030 bytes)</text>
 </svg>
