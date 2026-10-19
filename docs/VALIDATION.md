@@ -21069,7 +21069,7 @@ The figures marked COMPUTED are the lead's, from that metrics.jsonl.
 - **The battery's rates held:** the report's trends run from -4.0% (dt-q8 on the deep) to +3.5% (the selftest on the single). Two spreads sit inside them (VSR): dt-i on the quad ran at 2.4 or 9.0 checks a second, the 22 fast visits each following a quad visit and the 23 slow ones following another image or none (COMPUTED; the cause is the image's load, BELIEVED); and acceptance-rev8's first visit on the quad took 2,189 s, its compile.
 
 **The sweep** (READ, the report; COMPUTED, the splits):
-- **3,287 slices,** each passed, no disagreement in any. 1,356,316,228,303 cases, each tool counting in its own unit, in verifier-VSR's words: "checks (an operand and an exponent) for scaleb, in-range operand-and-target pairs for cvtto (four integer targets, about two an operand), lanes a source type (four to an operand) for cvtfrom."
+- **3,287 slices,** each passed, no disagreement in any. 1,356,316,228,303 cases, each tool counting in its own unit, in verifier-VSR's words: "checks (an operand and an exponent) for scaleb, in-range operand-and-target pairs for cvtto (four integer targets, about two an operand), and lanes a source type (four to an operand) for cvtfrom."
 - **The 14 exhaustive fp32 items:** 60,129,542,144 of 60,129,542,144 encodings (100.000%), each item one interval.
 - **54 random items:** banded samples, the n-th slice of an item seeded `base_seed + 7919 * n`.
 - **Which items reached the tile.** host/include/cft.h, "The remaining clause-5 operations", READ: cft_rint, cft_scaleb and cft_cmp_sig are COMPOSED, "on a device it runs on the tile". Every other clause-5 operation is HOST, "results are bit-identical on every backend by construction". host/src/clause5.c has "remainder: host". Division and square root are the tile's.
@@ -21268,3 +21268,153 @@ The same faults are also the 17 + 2 controls the driver plants on the first rout
 - docs/LANGUAGE.md: "A marked lane" (the stages replay it: the rule, the checkpoints, the certificates' limits) and the stage paragraph. docs/VERIFICATION.md: the top paragraph, the `lang`, `lang-routines` and `tangent` rows (the legs, the counts and the times above) and the gate paragraph. docs/studies/M1-exp-log.md: a dated note. docs/README.md: recounted. verify/run.sh: the stages' comments and two descriptions. This entry. The docs check, `python python/check_docs_index.py`: **rc 0** (MEASURED, niced, about a minute: 44 documents, 47 links, 1,196 quoted paths, every count true, stage counts 52 / 31 / 44, 43 negative controls caught by name); its first run found rc 1, because it read two of my phrasings in VERIFICATION.md as counts - "of 8" as a count of stages and "four targets" as a count of benches - and I reworded them.
 - docs/ROADMAP.md and CLAUDE.md are the lead's and were not edited: ROADMAP's M1 build item 5 is built by this parcel once merged (branch m1-stages, not pushed). CLAUDE.md's stage counts (31 of 52 for quick, 44 of 52 for the gate) do not move: no stage was added, and the golden suite's count does not move: no test was.
 - Not changed, and said so: mathlib.py, transcend.py, cftc, the language and its interpreter, cert2.py, the C tools, python/tests, the committed references, the certificate corpus, the card and the RTL.
+
+## 2026-10-19 - M1's build, seventh wave, closed: the stages replay a marked lane (parcel MS, Sonnet) and the card's routine case (parcel MA, Sonnet), merged and gated; item 6's card leg passed on rev8q
+
+**What Logan asked,** verbatim, on 2026-10-19:
+- "Clear to resume where the round leftoff": M1's build, items 5 and 6.
+- "*A few sessions are running, as such some runs may be slow, no need to make special accommodations".
+
+The CI split and the card's stress run, merged in this wave beside the two parcels, have their own entries above.
+
+**main's first CI run of the split** (READ, `gh run view 39266330511` and its job logs, at 0b77387; the spans COMPUTED from GitHub's job times). The split's entry left this run open:
+- **The run:** "completed success", 14:08:58Z to 16:06:18Z, about 1 h 57 min.
+- **rtl-groups:** 6 s. It ran `make -C tb -s --no-print-directory print-sim-groups`, and none of its refusals fired on the committed Makefile.
+- **The three rtl jobs:**
+  - group 1: 1 h 57 min 09 s. Its last bench was seq_core, "TESTS=99 PASS=99 FAIL=0 SKIP=0", 14:12:50Z to 16:06:15Z;
+  - group 2: 1 h 07 min 59 s;
+  - group 3: 1 h 02 min 32 s.
+- **The others:**
+  - golden 22 min 25 s;
+  - portability 2 min 16 s;
+  - host 1 h 12 min 17 s, its docs stage "ok 20s".
+
+**The lead's readings and decisions,** reported to Logan with this wave:
+1. **Items 5 and 6 as two Sonnet parcels with Sonnet verifiers,** by Logan's rule of 2026-10-13. MS took the stages' legs and MA the card's routine case.
+2. **MA's three early findings, answered:**
+   - **A version-1 certificate carries no per-lane block,** so the block is read by a mark probe: ctypes onto libcft, re-running each segment. Four conditions were set on it: the same device, image and depth; each end state equal to the certificate's boundary file; STATUS equal; bit 7 exactly on the structured lanes.
+   - **REV8 stays the ten workloads,** and hw/ is untouched. The six routine entries reach the stress driver only through a follow-up.
+   - **The full `--set rev8 --write`** ran on the lead's copies of the ten images (20 files, each equal to the record's digests), to show pure additions.
+3. **The card leg** ran after the stress run, on rev8q only: the set's rule gives all six to the quad.
+4. **VMS's one (b),** wording in tangent_check.py, was fixed by the lead in VMS's words as a very small fix (c1e6a9a) and re-checked.
+
+**The chain** (READ, each verifier's ledger and report):
+
+| work | author | verifiers: (a), (b) | sent back |
+|---|---|---|---|
+| MS (536bb12, 48a6be2, 7c6c2ae, dd9fc0b, 938f7ad, 391b1be, 51bb14c; c1e6a9a) | Sonnet 5.5 | VMS 0, 1; VMS on c1e6a9a 0, 0 | no: the lead fixed the one |
+| MA (7fc03ab, b665ca5) | Sonnet 5.5 | VMA 0, 0 | - |
+| the merges (1c02d5f, f2ac63d, d1c9c34), the recount (df7dc43) and this record | the lead | VIW7 | - |
+
+- **VMS's (b):** tangent_check.py's guard text, in four places, said cft-segrun "answers `replay-missing`, or `replay-undecided` where the definition cannot be evaluated" and "replays nothing", where MS's entry says "the guard's text now says both". Each now reads, in VMS's words: "version 1 holds the machine's guess, STATUS[6] on the segment; cft-segrun's version-2 writer, which this leg does not use, refuses a marked lane `replay-missing` without a replay image and `replay-undecided` with one that marks it too".
+- **What VMS measured:**
+  - **The rule** read against cert2's `replay_segment`; each checkpoint an independent run.
+  - **Its own baselines from `git archive` exports:**
+    - lang core 223 against 223, its four leg H plants naming 8/8, 8/8, 4/4 and 8/8 lanes, true by a softfloat count;
+    - the routines group 37 against 91, all 37 identical;
+    - tangent 198 against 204.
+  - **Every N1, N2, N3 and tally figure** of MS's reproduced.
+  - **A scan of 3,994 structured centres** against transcend: 0 unmarked lanes wrong, 6 wrong guesses at the rne anchors.
+  - **All 17 of MS's plants** re-run red as named, and five of its own.
+  - **A real Python without mpmath** (MSYS2's 3.14.5): the six's legs skipped by name.
+  - **Linux** (Python 3.10, mpmath 1.4.1): every check line identical.
+  - **On c1e6a9a:** the AST equal to 51bb14c's with every string constant blanked (1,276 constants, three replaced), and 86 ok on `--only derivative,libcft`.
+- **What VMA measured:**
+  - **The record:** 858 lines added and 0 deleted, the first ten entries equal when parsed.
+  - **The images:** each held to its digest; cftc refusing u50-rev7-quad `target-feature`, its u50-rev8-quad compile equal to the committed image.
+  - **The structured lanes:** [3, 67, 131, 195] at fp64 and [3, 19, 35, 51] at fp256, byte 0x90 (bit 4 is INEXACT). exp(2^-53) worked by hand. Its own 133-lane scan: 112 marked, 21 clear, libcft's bytes equal to seq.py's.
+  - **The six on the software backend:** 117 checks, also without mpmath. The probe's four conditions each found in code and red in plants.
+  - **The real acceptance-rev8 stage, narrowed to the six:** "ok 70s" in WSL (Ubuntu 22.04, Python 3.10.12) and "ok 118s" on Windows.
+  - **The tests:** 17 pass with no host build.
+  - **The committed record on Linux:** 15 of the 16 entries, 216 checks, Riccati left out for time.
+
+**The box and the card** (MEASURED, amd-arc-box, the lead's; bundle wave7-pre.bundle, each clone asserted for HEAD, a clean tree and its content):
+- **MS's stages at 51bb14c:** `verify/run.sh --only docs,lang,lang-routines,tangent`, "VERDICT: PASS, nothing skipped", 839 s.
+  - lang 170 s, lang-routines 252 s (91 ok), tangent 382 s (204 ok).
+  - MA's card leg ran beside it for its first ten minutes.
+- **At d3fef4b, alone:** 658 s; lang 162 s, lang-routines 150 s, tangent 346 s.
+- **The check lines, d3fef4b's against 51bb14c's** (MS's compare_ok.py): every one present, but the four leg H plants, which now name the lanes they catch, and one temporary directory's name.
+- **The larger draws:**
+  - lang_check `--six-all`: "9 ok, 0 FAIL, 1 SKIP in 209 s", 77,472 kB;
+  - tangent_check `--six-all`: "6 ok, 0 FAIL, 0 SKIP in 62 s".
+- **MA's card leg, item 6:**
+  - **The build:** at b665ca5, `make -C host XRT=1 XRT_ROOT=/opt/xilinx/xrt cft-segrun cft-audit libcft.so`, 30 s, 0 warnings; ldd shows xrt_coreutil in all three. The image's sha256 is 4f9921a2...ef53b.
+  - **The set leg:** "acceptance rev8: 6 of 6 PASS on .../cft_hw_quad.xclbin as u50-rev8-quad (set); 118 checks ok, 0 failed, 57 s", as MA predicted (118, its card-only control "a probe on another image is caught").
+    - "the mark probe opened the certificate's device: xrt, 4 tiles, 4096 slots a lane".
+    - On every entry, the structured lanes carry bit 7 (byte 0x90) in segment 0 with STATUS 0x40, and bit 7 is on no other lane of any segment.
+    - **So item 6's claim holds on the card:** "STATUS[6] and the lane byte on a structured argument, and a routine case in the acceptance sets". The device reproduces the software backend's guess, mark and all.
+  - **With `--golden all`:** "6 of 6 PASS ... 124 checks ok, 0 failed, 530 s". The golden audit re-ran every segment on seq.py and accepted each, cft-audit's verdict its own line for line.
+- **Times against the estimates:** MA's BELIEVED 150 to 300 s for the set leg was high. MS's BELIEVED 197 to 235 s for lang-routines was low.
+
+**The gate** (MEASURED, amd-arc-box at df7dc43, niced, the pinned MPFR 4.2.2 copied in):
+- **The run:** `verify/run.sh --budget gate`, run 20261019-085318-df7dc43, 08:53:18 to 11:55:03, 181 min, exit 0: "VERDICT: PASS with 8 skip(s) and 4 inner skip(s) in golden (3), remote (1)".
+  - "36 stage(s) executed, 0 cached from earlier in the run, 0 failed, 8 skipped". 36 and 8 make the budget's 44.
+- **Its clone,** asserted before the run (READ, the run's summary): HEAD df7dc43cd59d1c5f6f06f0b9f7b44ea02bcd8a79, a clean status, rtl's tree 44b963dd6ba2fcf99e002c5face5ca94aad4515c, one hit each for a string of rev8-routines, rule_compare, the sim groups and the stress record, and no branch outside main's ancestry.
+- **The skips,** each by name:
+  - buildargs: "a real Vitis at /data/Xilinx is sourced by rebuild-2022.sh and takes PATH from the stub";
+  - lang-rust, lang-julia, lang-go, lang-csharp, lang-r and lang-fortran: "no rustc", "no julia", "no go", "no dotnet", "no Rscript" and "no gfortran on PATH";
+  - demos: "no node on PATH".
+- **The inner skips:**
+  - golden's three: two serial-replay legs with "no loopback binary", and one where "math.fma needs Python 3.13+";
+  - remote's WebSocket leg, "no node on PATH".
+  - The same eight stage skips and four inner skip lines, by name, as each of waves 1 to 6's gates on the box (READ, their run logs, the inner lines compared whitespace-normalized).
+- **The stages this wave touched:**
+  - lang 148 s; lang-routines 245 s, where waves 1 to 6 took 148 to 179 s: the six's legs, as MS's own box run showed (252 s);
+  - tangent 371 s; acceptance 528 s; audit 229 s; docs 36 s.
+  - The longest stages were golden (2,352 s), cpp (2,006 s), transcend (857 s) and libcft (782 s). Each is within waves 1 to 6's range: golden 1,588 to 2,579 s, cpp 1,982 to 2,165 s, transcend 847 to 962 s, libcft 768 to 885 s.
+
+**The entries above, restated** (they stand as written):
+- **MS's entry, in VMS's words:**
+  - "R9" is this entry's name for the rule's `block-length` check, which the code does not number.
+  - verify/run.sh's "+21 lines" is 17 insertions and 4 deletions.
+  - The no-mpmath SKIP list omits leg G's pre-existing skip.
+  - "about two fifths more" stands for 42 to 46%.
+  - "The golden suite's count, 5,222, does not move" is true of MS's parcel. With MA's tests merged the suite is 5,239, VERIFICATION's golden row.
+- **The stress run's entry,** after VSR's re-check:
+  - the fast dt-i visits ran at 8.43 to 9.21 checks a second, median 8.87, so the rates are "about 2.4 or about 9";
+  - "its compile" is READ from docs/CARDDAY.md;
+  - the two spreads sit beside the trends, not inside them;
+  - a slice's length is the rate times the slice time, capped at 2^28: 2,880 of 3,038 random slices sit at the cap and 63 at the 2^20 probe.
+  - The quotation of VSR's (b1) had dropped its "and" before "lanes a source type". The entry is unpushed, so the "and" is restored there, in place, by this record's commit.
+  - f539a2a's commit message keeps "Every battery leg gave the same counts on every visit" and "no gap over 1.215 s". The entry itself is right: VSR's sixth note.
+  - VSR's re-check of that entry: (a) 0, (b) 0, and these six notes.
+
+**Known limits carried** (the verifiers' "other" notes, merged under Logan's rule; the rest stand in their ledgers):
+- **MS's, in VMS's words:**
+  - "structured-lane placement is unasserted": N2, N3 and tangent N pass with "0 demanded".
+  - "a spurious mark is accepted in images that cannot mark": the brief's rule. A `may_mark` would keep the old detection.
+  - R4 fails only with R2.
+  - The lane-params span and R2's [7:5] half have no committed control.
+  - "a lane marked early is excused to the end of its checkpoint's run".
+  - lang-routines needs pytest on every host, pre-existing.
+- **MA's, in VMA's words:**
+  - "a deleted record key is not noticed": a routine entry's record with `marked` and `lane_flags_sha256` deleted still passes, and the success line still names them.
+  - One control is fragile under a neighbour-lane plant, never a false pass.
+  - The docstring and CARDDAY name `replay-missing` where a run naming no source is refused `replay-source` first.
+  - Nothing compares the probe's library with the certificate's build id.
+  - The six do not reach hw/card_stress.py's `REV8_ENTRIES`.
+- **The follow-ups:**
+  - the six in the stress driver's table and its test;
+  - `demanded > 0`;
+  - the record keys' guard;
+  - the fragile control;
+  - the refusal names;
+  - divsqrt_soak.c's header (VSR).
+
+**Beside the wave, not in this push** (Logan's requests of 2026-10-19). Their records follow when they merge:
+- **parcel EX,** the clause-5 soak's exhaustive modes: under its verifier;
+- **parcel SC,** a study of wider sweep coverage: its verifier's five (b)s are being fixed;
+- **parcel FG,** the project's figures: its verifier's four (b)s fixed, and under re-check;
+- **parcel PK,** a dated export of those figures, SVG and PNG, with a "where the project stands" document: running.
+
+**Time and tokens** (MEASURED, the agents' transcripts; usage summed from the last line of each response). All claude-sonnet-5-5:
+- **MS's author:** 151 min, 618 tool uses, 682,408 output tokens.
+- **MA's author:** 108 min, 393, 423,998.
+- **The verifiers:**
+  - VMS: 121 min, then 8 min on c1e6a9a; 288; 346,997;
+  - VMA: 55 min, 237, 254,889;
+  - VSR: 26 min, then 6 min on its re-check; 150; 239,471.
+
+**Records:**
+- docs/README.md recounted at df7dc43, and again with this entry;
+- the docs check rc 0.
