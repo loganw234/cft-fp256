@@ -1,10 +1,12 @@
 # Copyright 2026 Logan W.
 # SPDX-License-Identifier: Apache-2.0
 # Testbench dispatcher. Each target is one cocotb run with its own
-# build directory. `make sim` is the full suite; it is what CI runs
-# and what docker/Dockerfile.sim exists to run.
+# build directory. `make sim` is the full suite; CI runs it as one job
+# a group (`make sim-group-<n>`, below), and docker/Dockerfile.sim
+# exists to run it.
 #
 #   make sim                  everything (icarus)
+#   make sim-group-1          one of CI's groups (make print-sim-groups)
 #   make fp32 | fp64 | fp128 | fp256 | krnl   one bench
 #   make SIM=verilator sim    alternative simulator
 #   CFT_RANDOM=20000 make fp32   crank the vector count
@@ -53,7 +55,7 @@ LATENCY_ENV = CFT_RD_LATENCY=$(RD_LATENCY) CFT_WR_LATENCY=$(WR_LATENCY)
 # it, and `make -C tb` is a fresh make.
 PYTHON ?= python3
 
-.PHONY: sim simmc fp32 fp64 fp128 fp256 mulfrac mulshare simpleops normseg normshare \
+.PHONY: sim simmc print-sim-groups fp32 fp64 fp128 fp256 mulfrac mulshare simpleops normseg normshare \
         normprobe seedop reduceacc reduce krnl krnlf128 krnlf64f128 krnlseq quarter faults \
         seq_core seq_coreu50 seq_coreu50mc seq_corestr seq_corestr_full ifetch seqprobe seqcycles seqcyclesstr seqtrace seqbp redprog krnlfused krnlplain cycles seqbanks \
         mulpass mulcycle mulcycle2 fp32mc fp64mc fp128mc fp256mc reducemc \
@@ -69,13 +71,25 @@ PYTHON ?= python3
 # and hangs were always caught (cocotb deletes the results file before
 # each run; the `timeout` wrappers handle the rest) - what escaped was
 # the one outcome this project exists to detect.
-SIM_BENCHES = fp32 fp64 fp128 fp256 mulfrac mulshare simpleops normseg \
-              normshare seedop reduceacc reduce reducenowide krnl krnlf128 \
-              krnlf64f128 \
-              quarter faults redprog \
-              seq_core seq_coreu50 seq_corestr krnlseq krnlseqnoaug \
-              seqbanks mulpass mulcycle mulcycle2 \
-              ifetch
+#
+# Since 2026-10-19 the list is three groups, and SIM_BENCHES is their
+# union: a bench is in the suite exactly when it is in a group. CI runs
+# each group as a job of its own (.github/workflows/gates.yml, the rtl
+# jobs, `make sim-group-<n>` for each group `make print-sim-groups`
+# names). As one job the suite took 4 h 28 min to 5 h 39 min of the
+# hosted runner's six hours, and one run hit that limit (582953c's,
+# cancelled at 6 h 00 min, 2026-10-16). The groups are balanced on each
+# bench's time in two CI runs (d3fef4b's and 97076f3's rtl jobs):
+# 5,464, 5,366 and 5,222 s at the faster, 6,896, 6,912 and 6,522 s at
+# the slower. A new bench goes into the group that keeps them even.
+SIM_GROUPS = 1 2 3
+SIM_GROUP_1 = seq_core fp32 fp64 fp128 fp256 mulfrac mulshare
+SIM_GROUP_2 = seq_coreu50 krnl krnlf128 krnlf64f128 krnlseqnoaug quarter \
+              faults seqbanks mulpass mulcycle mulcycle2 ifetch seedop \
+              reduceacc
+SIM_GROUP_3 = seq_corestr krnlseq reducenowide reduce normshare normseg \
+              redprog simpleops
+SIM_BENCHES = $(foreach g,$(SIM_GROUPS),$(SIM_GROUP_$(g)))
 
 # A bench writes sim_build/<target name>/results.xml. One does not: the
 # multi-cycle multiplier bench is parameterised by the pass budget, so
@@ -94,8 +108,44 @@ SIM_RESULTS = $(foreach b,$(SIM_BENCHES),\
 # while the suite-level line here was the only guard. The path in each
 # `&& $(PYTHON) check_results.py` is the recipe's own COCOTB_RESULTS_FILE
 # expression, so the two cannot name different files.
-sim: $(SIM_BENCHES)
+#
+# So make stops at the first bench that fails, and the three long
+# sequencer benches run last - in `make sim` and in each group alike,
+# whatever order the groups list them in - so that a quick bench's
+# failure stops the run in minutes rather than after an hour or more of
+# seq_core.
+SIM_LAST = seq_core seq_coreu50 seq_corestr
+sim: $(filter-out $(SIM_LAST),$(SIM_BENCHES)) $(filter $(SIM_LAST),$(SIM_BENCHES))
 	@$(PYTHON) check_results.py $(SIM_RESULTS)
+
+# One group of the suite, as one of CI's rtl jobs runs it: `sim` over that
+# group alone, its checker over that group's results. A group with no
+# benches is refused by name rather than run as an empty suite.
+sim-group-%:
+	$(if $(strip $(SIM_GROUP_$*)),,$(error no bench in group '$*': SIM_GROUPS is '$(SIM_GROUPS)'))
+	$(MAKE) sim SIM_BENCHES='$(SIM_GROUP_$*)'
+
+# The groups, as the JSON array CI's matrix reads, after the checks that
+# keep the split honest: every group assigned is listed in SIM_GROUPS
+# and every group listed has a bench; the groups together are
+# SIM_BENCHES; and no bench is in two groups. Each refuses naming what
+# it found, so a bench that SIM_BENCHES names and no group does, or one
+# in two groups, stops CI before it runs. (A SIM_GROUP_<n> assigned and
+# not listed would be in neither `make sim` nor CI, and nothing else
+# would say so. A bench that neither names is in neither, as before.)
+SIM_GROUPED = $(foreach g,$(SIM_GROUPS),$(SIM_GROUP_$(g)))
+SIM_UNLISTED = $(filter-out $(addprefix SIM_GROUP_,$(SIM_GROUPS)),$(filter SIM_GROUP_%,$(.VARIABLES)))
+SIM_EMPTY = $(strip $(foreach g,$(SIM_GROUPS),$(if $(strip $(SIM_GROUP_$(g))),,$(g))))
+SIM_DOUBLED = $(sort $(foreach b,$(SIM_GROUPED),$(if $(word 2,$(filter $(b),$(SIM_GROUPED))),$(b))))
+empty :=
+space := $(empty) $(empty)
+comma := ,
+print-sim-groups:
+	$(if $(SIM_UNLISTED),$(error a group is assigned and not in SIM_GROUPS, so in neither make sim nor CI: '$(strip $(SIM_UNLISTED))'))
+	$(if $(SIM_EMPTY),$(error a group in SIM_GROUPS has no bench: '$(strip $(SIM_EMPTY))'))
+	$(if $(filter-out $(sort $(SIM_GROUPED)),$(SIM_BENCHES))$(filter-out $(sort $(SIM_BENCHES)),$(SIM_GROUPED)),$(error the groups are not SIM_BENCHES: in the suite and no group '$(filter-out $(SIM_GROUPED),$(SIM_BENCHES))', in a group and not the suite '$(filter-out $(SIM_BENCHES),$(SIM_GROUPED))'))
+	$(if $(SIM_DOUBLED),$(error a bench is in two groups: '$(SIM_DOUBLED)'))
+	@echo '[$(subst $(space),$(comma),$(foreach g,$(SIM_GROUPS),"$(g)"))]'
 
 # The suite at the multi-cycle pass budget MC: every bench that holds a
 # pipe, a lane array or the kernel, run against the same golden model
@@ -268,12 +318,13 @@ simpleops:
 # question and hw/synth_shiftcmp.tcl answers it - cft_mulfrac was
 # correct and still did not pay.
 #
-# PINNED TO VERILATOR, and it is the only target that is. The DUT is
+# PINNED TO VERILATOR, as normshare below is through the same variable:
+# the two benches of `make sim` that do not run under SIM. The DUT is
 # 720 bits by twenty stages of multiplexer plus fifteen reference
 # shifters beside it; Icarus spends over three hours on the sweep and
 # Verilator does it in one second. It has its own variable rather than
-# reading SIM, so `make sim` gets the fast simulator here and the
-# default everywhere else; to check the two agree, run
+# reading SIM, so `make sim` gets the fast simulator here and in
+# normshare, and the default everywhere else; to check the two agree, run
 # `make NORMSEG_SIM=icarus normseg` and bring a book.
 NORMSEG_SIM ?= verilator
 

@@ -20915,3 +20915,123 @@ After d738f48 only documents, a comment and two docstrings changed (test_cert2.p
 - docs/VERIFICATION.md: the `acceptance-far` and `acceptance-rev8` rows and the census paragraph, with the times above, and the golden row's count;
 - docs/CARDDAY.md: `make vectors` before a long run;
 - docs/README.md recounted, and the docs check rc 0.
+
+## 2026-10-19 - CI's RTL suite as three parallel jobs, one a bench group: tb/Makefile's SIM_GROUPS, read by the gates workflow's matrix, with refusals that name a bench run twice or left out (the lead's, with verifiers VCI and VCI2)
+
+**What Logan asked,** verbatim, on 2026-10-19: "Go ahead with the split". He was answering the lead's recommendation to run CI's rtl job as two or three parallel jobs by bench group, with a guard that no bench drops out.
+
+**Why:**
+- The gates workflow's rtl job ran `make -C tb sim`: all 29 cocotb benches, one after another (27 under Icarus; normseg and normshare are pinned to Verilator), in VCI2's words. 5eb35c2's message says all 29 ran under Icarus.
+  - It took 4 h 28 min at d3fef4b (run 39011195612) and 5 h 39 min at 97076f3 (run 38803495265), of the hosted runner's six hours (READ, GitHub's records).
+  - 582953c's rtl job was cancelled at 6 h 00 min on 2026-10-16. Its annotation reads "The job has exceeded the maximum execution time of 6h0m0s" (READ, by VCI).
+- From those two jobs' logs, the benches' times sum to 16,052 s and 20,330 s (MEASURED by the lead's parser; reproduced by VCI's own). Three sequencer benches are most of it:
+  - seq_core 5,304 and 6,682 s;
+  - seq_coreu50 5,070 and 6,506 s;
+  - seq_corestr 2,653 and 3,309 s.
+  - VCI, in its report: "krnlseq is 1,083 / 1,399 s, and nothing else exceeds 626 s."
+
+**What changed,** on branch ci-rtl-split, whose commits merge to main together:
+1. **5eb35c2, the split:**
+   - **tb/Makefile:**
+     - SIM_BENCHES is the union of SIM_GROUP_1 to SIM_GROUP_3, over SIM_GROUPS.
+     - `make sim-group-<n>` runs `sim` over one group, with the checker over that group's results.
+     - `make print-sim-groups` prints the groups as JSON for the matrix, after its refusals.
+   - **The gates workflow:**
+     - A job, rtl-groups, reads the groups from the Makefile. Its step assigns before it echoes, so a refusal fails the step under bash -e rather than handing the matrix an empty list.
+     - The rtl job is a matrix over those groups, with fail-fast off.
+   - **The docs check:** its bench count expands the groups.
+   - **CLAUDE.md:** the groups.
+   - **The balance:** the groups were balanced on the measured times: 5,464, 5,366 and 5,222 s at the faster pace, and 6,896, 6,912 and 6,522 s at the slower (COMPUTED; reproduced by VCI).
+2. **f2496ac, after VCI:**
+   - **print-sim-groups:**
+     - names the bench in two groups;
+     - refuses, by name, a SIM_GROUP_<n> assigned and not listed (whose benches were in neither `make sim` nor CI);
+     - refuses a listed group with no bench.
+   - **The order:** `sim` runs the three long sequencer benches last, in `make sim` and in each group, so a quick bench's failure is not held behind them.
+   - **The header** no longer says `make sim` is what CI runs.
+   - **The docs check:** four new controls, for the branches the split added to its bench count.
+   - **CLAUDE.md:** the commands with `-C tb`.
+3. **This entry,** with:
+   - the comment above print-sim-groups said in VCI2's sense;
+   - two comments that said normseg is the only bench pinned to Verilator (tb/Makefile's, and the workflow's rtl job's) now name normshare beside it;
+   - docs/README.md recounted.
+
+**The branch's CI run** (READ, run 39244156966 at 5eb35c2, 2026-10-19; the times are GitHub's job spans):
+- **The run:** "completed success" at head 5eb35c2, 11:22:23Z to 13:17:24Z, 1 h 55 min 01 s in all.
+- **rtl-groups** ran in 6 s. Its output is printed nowhere, but the matrix made exactly three jobs, `rtl (group 1)` to `(group 3)`, each running `make -C tb sim-group-<n>` under `bash -e` (READ by VCI). So it gave ["1","2","3"] (BELIEVED, VCI).
+- **The three rtl jobs:**
+  - group 1: 1 h 53 min 57 s;
+  - group 2: 1 h 54 min 50 s;
+  - group 3: 1 h 24 min 11 s.
+  - The old single rtl job took 4 h 28 min at d3fef4b and 5 h 39 min at 97076f3. Groups 1 and 2 ran near the slower run's pace, and group 3 under the faster one's (COMPUTED from the groups' bench-time sums).
+- **The other jobs,** each a success, against d3fef4b's run (READ by VCI):
+  - golden 32 min 25 s (38 min 38 s);
+  - portability 1 min 58 s (1 min 57 s);
+  - host 1 h 49 min 59 s (1 h 44 min 07 s).
+
+The run tested 5eb35c2. f2496ac's changes were checked locally by the lead and by VCI2, below. main's own run, once the merge is pushed, is the first CI run of the merged tip.
+
+**The lead's checks of f2496ac (MEASURED):**
+- **In WSL cft2204:**
+  - print-sim-groups gives ["1","2","3"].
+  - The same 29 benches as d3fef4b's, as a set.
+  - `make -pq` shows sim's prerequisites with seq_core, seq_coreu50 and seq_corestr last, for the suite and for each group.
+  - Seven refusals, each rc 2, naming what it found.
+- **The workflow step's two lines** under bash -e -o pipefail: rc 0 as written; on a planted duplicate, rc 2 with nothing written.
+- **The docs check:** rc 0 with 47 controls. A mutation test made six mutations of those branches, one at a time, in memory, and each was caught by name.
+- **The cft-sim container:** `make sim-group-2 SIM_GROUP_2='mulpass mulcycle'` gave rc 0, "PASS: 2 bench(es), no failures recorded".
+  - f2496ac's message says 141 s. That figure is the lead's shell's wall time around `docker run`, container start included. The log holds only the tests' own times, which sum to 105 s (VCI2's caveat).
+- **The lead's own slip, caught before the commit:** the first version of the empty-group refusal fired on the committed Makefile, naming ''. make's `$(if)` strips its condition before expanding it, so a foreach that expands only to spaces is true. `$(strip)` fixed it, and VCI2 reproduced both the bug and the fix.
+
+**The chain** (READ, each verifier's ledger and report):
+
+| work | author | verifiers: (a), (b) | sent back |
+|---|---|---|---|
+| the split (5eb35c2) | the lead | VCI 0, 0 | - |
+| its follow-up (f2496ac) | the lead | VCI2 0, 0 | - |
+| this record (3793d6f, restated in place twice) | the lead | VCI2 0, 2; on the restatement (5bddc52) 0, 1, a comment's clause; its re-check of that fix before the merge | no: the lead fixed each in VCI2's words |
+
+- **VCI's caveat on (b),** in its report's words: "I read 'refuses by name' in the repo's sense, meaning the refusal names its reason. In the duplicate-bench case the message does not name the bench itself (note 1 below). If you read the commit's sentence as 'names the bench', it is false for that one case, and the correction is verified." f2496ac names the bench.
+- **f2496ac's message, restated** (VCI2's note 1): it says VCI found no regression and no wrong answer in 5eb35c2. That verdict covered VCI's items 1 to 6 and 8, with the branch's CI run then pending; item 7 is above.
+- **What VCI measured:**
+  - The same 29 benches, by make's expansion and its own parser.
+  - Every group figure, from the two logs with its own parser.
+  - Every refusal rc 2 on plants. The workflow step, taken from the parsed YAML, under the real `bash -e`: rc 2 with nothing written on five plants, where the one-line form writes `groups=` and exits 0.
+  - Under a stub simulator, each group's checker over exactly its own results.
+  - In the cft-sim container, `make sim-group-2 SIM_GROUP_2='mulpass mulcycle'` rc 0 in 106 s. A planted wrong expectation in test_mulpass.py failed the group's make, rc 2.
+  - The YAML parsed, with golden, portability and host identical to d3fef4b's.
+  - The docs check's plants.
+- **What VCI found in the branch's run** (its item 7; READ, and COMPUTED by its own parsers):
+  - each group's job ran exactly its benches, in order, and ended with its checker's line: "PASS: 7 bench(es), no failures recorded", "PASS: 14 ..." and "PASS: 8 ...";
+  - 29 bench starts among the three, 29 distinct;
+  - each bench's case count equal to d3fef4b's and 97076f3's runs', 322 cases in each;
+  - the toolchain equal to d3fef4b's job's;
+  - golden "5220 passed, 2 skipped" as at d3fef4b, and host "VERDICT: PASS, nothing skipped" with 23 stages, as at d3fef4b.
+  - The groups' step spans were 6,817.0, 6,870.9 and 5,027.7 s. In its report's words, the spread "comes from which runner each job drew, not from the partition"; the longest is 32% of the six hours, where the single job was 94% at 97076f3's pace.
+- **What VCI2 measured:**
+  - The suite the same at d3fef4b, 5eb35c2 and f2496ac.
+  - 28 plants of the Makefile, each as expected under Make 4.3 and 4.4.1.
+  - Each of the 29 benches failed in turn under its stub simulator, make stopping exactly at it.
+  - The padding bug reproduced by three mutants and absent from all four conditions.
+  - Its own mutation test of the docs check: all six mutations caught by name, and none by 5eb35c2's script.
+  - A container run whose SIM_LAST reordered two benches under Icarus, rc 0, 107 s.
+  - `make -C tb ...` from the repository's root, as CLAUDE.md writes it.
+
+**Known limits** (the verifiers' other notes, not taken):
+- **The docs check:**
+  - On a tree whose SIM_BENCHES it cannot expand, three prose controls also print NEGATIVE CONTROL FAILED TO FAIL (VCI's note 3, its second half). It is a failure path, rc 1 either way, and its first line says why.
+  - It reads `# comment` text as values (VCI2's note 5): `SIM_GROUPS = 1 2 3 # the groups` is refused as "cannot expand", and `SIM_GROUP_2 = # emptied` counts two benches. In VCI2's words, after its re-check of this entry: "Pre-existing. In the cases tried it fails closed or gives a false alarm; it is no guarantee, since a bare trailing `#` can stand in for a removed bench and pass."
+- **The order costs a parallel run time** (VCI2's note 3, COMPUTED from the CI times):
+  - In VCI2's words: "From the CI per-bench times, `make -j4 sim` is about +591 s against 5eb35c2's order and about +232 s against d3fef4b's (+82 s at -j8)."
+  - verify/run.sh's sim stage runs `make -k -j"${SIM_JOBS:-1}" sim`, and under -k the order changes nothing about when a failure is reported.
+  - The lead takes the trade. CI's group jobs run serially, without -k, and there a broken quick bench in group 1 or 2 now stops its job after 115 to 170 s on average, where it waited about 5,300 s behind the long bench, at the faster pace; at the slower, 155 and 226 s against about 6,800 s (VCI2, COMPUTED).
+- **Group 3 still waits behind krnlseq,** which is not in SIM_LAST (VCI2's note 4, COMPUTED): a quick bench's failure there comes after a mean of 2,022 s and at worst 2,568 s at the faster pace.
+- **The unlisted-group refusal's small behaviours** (VCI2's note 6):
+  - it names the SIM_GROUP_<n> variables, in `.VARIABLES` order;
+  - an exported SIM_GROUP_9 in the environment triggers it;
+  - `SIM_GROUPS = 1 2 3 3` is refused as group 3's benches being in two groups.
+- **A plain `make -n` of the suite is not a faithful plan** (VCI2's note 7): the bench recipes contain `$(MAKE)`, so the checker's tail runs for real and stops at the first bench. `make -pq` or `-nk` is.
+
+**Time and tokens** (MEASURED, the agents' transcripts; usage summed from the last line of each response). The verifiers, all claude-sonnet-5-5:
+- VCI: 39 min, then 5 min for item 7; 164 tool uses; 243,192 output tokens.
+- VCI2: 44 min on f2496ac, 17 min re-checking this entry and 9 min re-checking its restatement; 291 tool uses; 452,229 output tokens. Its last re-check is not counted here.

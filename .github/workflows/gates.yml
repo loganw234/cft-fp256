@@ -5,7 +5,7 @@
 # share no code with it (native binary64, math.fma, mpmath, GNU MPFR
 # through gmpy2, and the hand-written IEEE 754 anchors). Job two proves
 # the RTL against the golden model, streamed, plus the full kernel
-# through AXI. Job three
+# through AXI, as one job a bench group. Job three
 # elaborates every RTL file in Yosys, which is what keeps the open-core
 # port a wrapper rather than a fork. Job four
 # builds the host library and runs every language that calls it,
@@ -55,8 +55,33 @@ jobs:
       - run: python -c "import gmpy2; print('gmpy2', gmpy2.version(), gmpy2.mpfr_version(), gmpy2.mp_version())"
       - run: python -m pytest python/tests -q
 
-  rtl:
+  # The RTL suite runs as one job a group (tb/Makefile's SIM_GROUPS, since
+  # 2026-10-19). As one job it took 4 h 28 min to 5 h 39 min of the hosted
+  # runner's six hours, and one run hit that limit (582953c's, cancelled
+  # at 6 h 00 min, 2026-10-16). The groups are read from the Makefile, not
+  # listed here, and `print-sim-groups` refuses a split that leaves a bench
+  # out or names one twice, so this matrix is the whole suite, once.
+  rtl-groups:
     runs-on: ubuntu-24.04
+    outputs:
+      groups: ${{ steps.groups.outputs.groups }}
+    steps:
+      - uses: actions/checkout@v4
+      # assigned first, so that a refusal fails this step (bash -e) rather
+      # than handing the matrix an empty list
+      - id: groups
+        run: |
+          groups=$(make -C tb -s --no-print-directory print-sim-groups)
+          echo "groups=$groups" >> "$GITHUB_OUTPUT"
+
+  rtl:
+    needs: rtl-groups
+    name: rtl (group ${{ matrix.group }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        group: ${{ fromJSON(needs.rtl-groups.outputs.groups) }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -64,12 +89,14 @@ jobs:
           python-version: "3.12"
       # verilator alongside iverilog: the segmented shifter bench is 720
       # bits by twenty stages of multiplexer and Icarus takes hours on
-      # it where Verilator takes a second, so tb/Makefile pins that one
-      # target. Every other target still runs on Icarus, which keeps the
-      # default simulator the one the rest of the suite is written for.
+      # it where Verilator takes a second, so tb/Makefile pins that
+      # target to Verilator; normshare, whose four banks that shifter
+      # feeds, reads the same pin. Every other target still runs on
+      # Icarus, which keeps the default simulator the one the rest of
+      # the suite is written for.
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends iverilog verilator
       - run: pip install -r tb/requirements.txt
-      - run: make -C tb sim
+      - run: make -C tb sim-group-${{ matrix.group }}
 
   portability:
     runs-on: ubuntu-24.04

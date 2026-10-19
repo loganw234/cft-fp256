@@ -54,7 +54,10 @@ and requires each to be caught by name (HonestFramework METHOD section 3).
 "Every check" is a measured claim, not an intention: on 2026-09-24 a
 mutation test disabled each check and branch in turn, in memory, and every
 mutation was caught by a control. Its first run found nine that were not,
-in the version that first claimed this sentence.
+in the version that first claimed this sentence. The bench count's
+branches added on 2026-10-19 had none until verifier-VCI said so; that
+day six mutations of them were each caught by name by one of the four
+controls then planted in tb/Makefile.
 
     python python/check_docs_index.py          # report and exit nonzero
     python python/check_docs_index.py --quiet  # only on failure
@@ -185,7 +188,10 @@ def check_sim_bench_count(problems, root):
     so it is the only authority. Four documents quoted "21" by hand on
     2026-09-14 when the twenty-second bench (krnlf128) was added; a count
     that is transcribed is a count that drifts, which is what the stage
-    counts above already learned.
+    counts above already learned. Since 2026-10-19 SIM_BENCHES is the
+    union of the groups CI runs as separate jobs - SIM_GROUP_<g> for each
+    <g> in SIM_GROUPS - and the count is derived from them the same way;
+    a SIM_BENCHES this check cannot expand is a problem, never a guess.
     """
     mk = root / "tb" / "Makefile"
     if not mk.is_file():
@@ -194,11 +200,26 @@ def check_sim_bench_count(problems, root):
     text = mk.read_text(encoding="utf-8", errors="replace")
     # The assignment spans backslash-continued lines.
     text = text.replace("\\\n", " ")
-    m = re.search(r"^SIM_BENCHES\s*=\s*(.*)$", text, re.M)
-    if not m:
+    assigns = dict(re.findall(r"^([A-Za-z0-9_]+)[ \t]*=[ \t]*(.*)$", text,
+                              re.M))
+    if "SIM_BENCHES" not in assigns:
         problems.append("tb/Makefile has no SIM_BENCHES assignment")
         return None
-    total = len(m.group(1).split())
+    value = assigns["SIM_BENCHES"].strip()
+    if "$" not in value:
+        total = len(value.split())
+    else:
+        m = re.fullmatch(r"\$\(foreach (\w+),\$\(SIM_GROUPS\),"
+                         r"\$\(SIM_GROUP_\$\(\1\)\)\)", value)
+        groups = assigns.get("SIM_GROUPS", "").split()
+        missing = [g for g in groups if "SIM_GROUP_" + g not in assigns]
+        if not m or not groups or missing:
+            problems.append("tb/Makefile's SIM_BENCHES is %r, which this check "
+                            "cannot expand (SIM_GROUPS %r, groups with no "
+                            "assignment %r)" % (value, groups, missing))
+            return None
+        total = sum(len(assigns.get("SIM_GROUP_" + g, "").split())
+                    for g in groups)
 
     WORDS = {20: "twenty", 21: "twenty-one", 22: "twenty-two",
              23: "twenty-three", 24: "twenty-four", 25: "twenty-five"}
@@ -799,6 +820,28 @@ def run_controls(root, tracked, baseline):
                       rs.replace('STATEROOT="$ROOT/verify/state"',
                                  'STATEROOT="$ROOT/verify/runs"', 1),
                       r"^verify/state is exempt as a product of verify/run\.sh"))
+        # The bench count's tb/Makefile, each way check_sim_bench_count
+        # refuses one and its flat form (2026-10-19, verifier-VCI): a
+        # SIM_BENCHES that is not the groups' foreach, a group listed with
+        # no assignment, no SIM_GROUPS, and a flat list of thirty.
+        tbm = (t / "tb" / "Makefile").read_text(encoding="utf-8")
+        union = "SIM_BENCHES = $(foreach g,$(SIM_GROUPS),$(SIM_GROUP_$(g)))"
+        cannot = (r"^tb/Makefile's SIM_BENCHES is .*, which this check "
+                  r"cannot expand \(SIM_GROUPS ")
+        edits += [
+            ("tb/Makefile", tbm, tbm.replace(union, "SIM_BENCHES = "
+                                             "$(SIM_GROUP_1) $(SIM_GROUP_2)", 1),
+             cannot + r"\[.+\], groups with no assignment \[\]\)$"),
+            ("tb/Makefile", tbm, re.sub(r"(?m)^(SIM_GROUPS = .*)$", r"\1 4",
+                                        tbm, count=1),
+             cannot + r"\[.*'4'\], groups with no assignment \['4'\]\)$"),
+            ("tb/Makefile", tbm, re.sub(r"(?m)^SIM_GROUPS =", "SIM_GROUPS_ =",
+                                        tbm, count=1),
+             cannot + r"\[\], groups with no assignment \[\]\)$"),
+            ("tb/Makefile", tbm, tbm.replace(union, "SIM_BENCHES = " + " ".join(
+                "b%d" % i for i in range(30)), 1),
+             r" where tb/Makefile derives 30 benches$"),
+        ]
         # The delivered pack's exemption, each way it can stop holding: a
         # document edited, and then checked like any other, so the broken
         # link and the missing path planted in it are reported too; the
