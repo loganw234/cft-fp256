@@ -3757,8 +3757,9 @@ def g_six(rng, k, tangent=None):
 def six_source_lanes(g, rng, direct, comps, k, everything=False):
     """The lanes a generated source of the six runs on: ordinary ones, the
     primal's three special lanes, a zero lane, and for each direct call two
-    lanes with the structured family's centres of its function put in its
-    component (the others ordinary). -> (lanes, roles)."""
+    lanes (twelve with `everything`) with the structured family's centres
+    of its function put in its component (the others ordinary).
+    -> (lanes, roles)."""
     fmt, n = g.fmt, g.n_state
     fam = family()
     lanes = lanes_for(fmt, n, rng, 3)
@@ -3769,7 +3770,7 @@ def six_source_lanes(g, rng, direct, comps, k, everything=False):
                                                       sf_[1])):
         picks = sample_centres(fam.FAMILY.get(fn, {}).get(fmt.name, {})
                                .get(g.round_name, []), fn, fmt, everything)
-        for j in range(min(2, len(picks))):
+        for j in range(min(12 if everything else 2, len(picks))):
             centre = picks[(k + j) % len(picks)]
             lane = list(lanes[j % 3])
             lane[comps.index(s)] = family().argument(fmt, centre)
