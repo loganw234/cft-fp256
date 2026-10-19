@@ -20989,7 +20989,7 @@ The run tested 5eb35c2. f2496ac's changes were checked locally by the lead and b
 |---|---|---|---|
 | the split (5eb35c2) | the lead | VCI 0, 0 | - |
 | its follow-up (f2496ac) | the lead | VCI2 0, 0 | - |
-| this record (3793d6f, restated in place) | the lead | VCI2 0, 2; its re-check of the restatement before the merge | no: the lead restated the two in VCI2's words |
+| this record (3793d6f, restated in place twice) | the lead | VCI2 0, 2; on the restatement (5bddc52) 0, 1, a comment's clause; its re-check of that fix before the merge | no: the lead fixed each in VCI2's words |
 
 - **VCI's caveat on (b),** in its report's words: "I read 'refuses by name' in the repo's sense, meaning the refusal names its reason. In the duplicate-bench case the message does not name the bench itself (note 1 below). If you read the commit's sentence as 'names the bench', it is false for that one case, and the correction is verified." f2496ac names the bench.
 - **f2496ac's message, restated** (VCI2's note 1): it says VCI found no regression and no wrong answer in 5eb35c2. That verdict covered VCI's items 1 to 6 and 8, with the branch's CI run then pending; item 7 is above.
@@ -21034,4 +21034,4 @@ The run tested 5eb35c2. f2496ac's changes were checked locally by the lead and b
 
 **Time and tokens** (MEASURED, the agents' transcripts; usage summed from the last line of each response). The verifiers, all claude-sonnet-5-5:
 - VCI: 39 min, then 5 min for item 7; 164 tool uses; 243,192 output tokens.
-- VCI2: 44 min on f2496ac, then 17 min re-checking this entry; 258 tool uses; 394,475 output tokens. Its re-check of the restatement is not counted here.
+- VCI2: 44 min on f2496ac, 17 min re-checking this entry and 9 min re-checking its restatement; 291 tool uses; 452,229 output tokens. Its last re-check is not counted here.

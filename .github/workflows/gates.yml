@@ -90,9 +90,10 @@ jobs:
       # verilator alongside iverilog: the segmented shifter bench is 720
       # bits by twenty stages of multiplexer and Icarus takes hours on
       # it where Verilator takes a second, so tb/Makefile pins that
-      # target, and normshare, whose four banks that shifter feeds, to
-      # Verilator. Every other target still runs on Icarus, which keeps the
-      # default simulator the one the rest of the suite is written for.
+      # target to Verilator; normshare, whose four banks that shifter
+      # feeds, reads the same pin. Every other target still runs on
+      # Icarus, which keeps the default simulator the one the rest of
+      # the suite is written for.
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends iverilog verilator
       - run: pip install -r tb/requirements.txt
       - run: make -C tb sim-group-${{ matrix.group }}

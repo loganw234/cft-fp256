@@ -323,8 +323,8 @@ simpleops:
 # 720 bits by twenty stages of multiplexer plus fifteen reference
 # shifters beside it; Icarus spends over three hours on the sweep and
 # Verilator does it in one second. It has its own variable rather than
-# reading SIM, so `make sim` gets the fast simulator here and the
-# default everywhere else; to check the two agree, run
+# reading SIM, so `make sim` gets the fast simulator here and in
+# normshare, and the default everywhere else; to check the two agree, run
 # `make NORMSEG_SIM=icarus normseg` and bring a book.
 NORMSEG_SIM ?= verilator
 
