@@ -208,8 +208,9 @@ def main():
     print("== T5. the composed items (rint, scaleb): the tile's share of a job, a pass's cost, and the staged traffic (quad, rne)")
     print("   a job is a batch of 4,096 operands; passes an operand: rint 2 calls x 4 (T2), scaleb the passes over the directed list (T2);")
     print("   tile time = beats / 108 M a second at lanes a beat; traffic of the four tiles = passes x words an element x element bytes, with 3 words (two read, one")
-    print("   written: the lower figure, BELIEVED) or 4 (the engine streams all three operand buffers, docs/VALIDATION.md 2026-09-16 'one read enable feeds all three FIFOs', and a pass writes one),")
-    print("   against the 2.3 to 3.3 GB/s of staged traffic that docs/VALIDATION.md 2026-09-08 measured whatever the format and the tile count")
+    print("   written: the lower figure, BELIEVED) or 4 (READ in cftx_run_impl, host/src/backend_xrt.cpp: it stages a, b and c for every run, a null operand zero-filled and uploaded, and a pass")
+    print("   writes d. docs/VALIDATION.md 2026-09-18, 'the reductions' missing rate', quotes the engine's reason, 'one read enable feeds all three FIFOs', in an entry about the REDUCTIONS: for rint")
+    print("   and scaleb the four words rest on the reading of cftx_run_impl), against the 2.3 to 3.3 GB/s of staged traffic that docs/VALIDATION.md 2026-09-08 measured whatever the format and the tile count")
     print("   %-9s %9s %9s %8s %10s %10s %9s %10s %10s %14s" % ("item", "M op/s", "passes/op", "job ms", "us/pass", "tile us", "tile %", "GB/s (3)", "GB/s (4)", "of the wall (4)"))
     composed = []
     for fam, fname, word in (("rint32", "fp32", 4), ("rint64", "fp64", 8), ("scaleb32", "fp32", 4), ("scaleb64", "fp64", 8)):
@@ -229,6 +230,16 @@ def main():
         composed.append((fam, ops, bound))
         print("   %-9s %9.3f %9.1f %8.3f %10.1f %10.1f %8.1f%% %10.2f %10.2f %9.0f%% to %.0f%%" % (
             fam, ops / 1e6, ppo, job * 1e3, job / ppo * 1e6, tile / ppo * 1e6, 100.0 * tile / job, gbs3, gbs4, 100.0 * gbs4 / 3.3, 100.0 * gbs4 / 2.3))
+    # the four words: the source must still stage a, b and c on every run, unless resident (a tie of the claim to the text it was READ in)
+    with open(os.path.join(ROOT, "host", "src", "backend_xrt.cpp"), encoding="utf-8") as fh:
+        be = fh.read()
+    body = be[be.index("static int cftx_run_impl("):]
+    body = body[:body.index("t.start = ")]
+    pat = r"for \(int r = 0; r < %s; r\+\+\) \{\s*if \(sb\[i\]\.bo\[r\]\)\s*continue;.*?stage\(\*tb\[r\],"
+    check("cftx_run_impl stages every operand role below D (a, b, c) on every run unless it is resident: the four words an element",
+          re.search(pat % "CFT_ROLE_D", body, re.S) is not None)
+    check("CONTROL: the same search for a staging loop over TWO roles finds nothing in the source (the check above can fail)",
+          re.search(pat % "2", body, re.S) is None)
     check("no measured composed rate exceeds its beat bound (lanes x beats / passes an operand)", all(o < b for _f, o, b in composed))
     # these items run at 2 to 4% of the bound, so only a much smaller beat rate can put the bound under them
     check("CONTROL: with a hundredth of the documented beat rate the bound falls below a measured rate (the check above can fail)",

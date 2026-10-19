@@ -12,11 +12,11 @@ CHECK the correct fold credits build A with nothing when only build B ran       
 
 CHECK PLANT first     breaks L1: the same test reports violations                                      ok (3000 of 3000 scenarios; also broken: L3 3000)
 CHECK PLANT naive     breaks L2: the same test reports violations                                      ok (3000 of 3000 scenarios; also broken: L3 3000, L7 3000)
-CHECK PLANT badmerge  breaks L3: the same test reports violations                                      ok (3000 of 3000 scenarios; also broken: L4 287)
-CHECK PLANT overwrite breaks L4: the same test reports violations                                      ok (16 of 3000 scenarios; also broken: L1 710, L3 730)
-CHECK PLANT nocount   breaks L5: the same test reports violations                                      ok (3000 of 3000 scenarios; also broken: L3 2500)
-CHECK PLANT novm      breaks L5: the same test reports violations                                      ok (3000 of 3000 scenarios; also broken: L3 2520)
-CHECK PLANT blind     breaks L6: the same test reports violations                                      ok (2895 of 3000 scenarios; also broken: L3 3000)
+CHECK PLANT badmerge  breaks L3: the same test reports violations                                      ok (3000 of 3000 scenarios; also broken: L4 138)
+CHECK PLANT overwrite breaks L4: the same test reports violations                                      ok (772 of 3000 scenarios; also broken: L1 684, L3 691)
+CHECK PLANT nocount   breaks L5: the same test reports violations                                      ok (3000 of 3000 scenarios; also broken: L3 2544)
+CHECK PLANT novm      breaks L5: the same test reports violations                                      ok (3000 of 3000 scenarios; also broken: L3 2558)
+CHECK PLANT blind     breaks L6: the same test reports violations                                      ok (2897 of 3000 scenarios; also broken: L3 3000)
 CHECK PLANT naive     breaks L7: the same test reports violations                                      ok (3000 of 3000 scenarios; also broken: L2 3000, L3 3000)
 CHECK PLANT naive on the ten devices of L7': coverage above the space                                  ok 
 CHECK PLANT blind on build B's half-space slice credits half the space to a build that never ran a case ok 
@@ -36,7 +36,7 @@ CHECK PLANT a replay that does not check the campaign record against the cid cal
 CHECK a campaign record is not coverage: a store holding only it covers nothing                        ok 
 
 R. a record as section 5.3 writes it, canonical JSON: 1223 bytes; a weekend of 3287 slices 4.0 MB; a decade of 520 weekends 2.09 GB
-   a campaign record (once for every slice that names it): 270 bytes
+   a campaign record (once for every slice that names it): 288 bytes
 CHECK a decade of weekly weekends from one device is under 5 GB of records (the study's 'not a size problem') ok (1223 bytes a record, 2.09 GB)
 
 merge_law: every CHECK held

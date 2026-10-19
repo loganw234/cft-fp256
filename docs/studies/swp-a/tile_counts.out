@@ -53,13 +53,16 @@ CHECK T4 saw rows to compare (the filter does not leave an empty table)         
 == T5. the composed items (rint, scaleb): the tile's share of a job, a pass's cost, and the staged traffic (quad, rne)
    a job is a batch of 4,096 operands; passes an operand: rint 2 calls x 4 (T2), scaleb the passes over the directed list (T2);
    tile time = beats / 108 M a second at lanes a beat; traffic of the four tiles = passes x words an element x element bytes, with 3 words (two read, one
-   written: the lower figure, BELIEVED) or 4 (the engine streams all three operand buffers, docs/VALIDATION.md 2026-09-16 'one read enable feeds all three FIFOs', and a pass writes one),
-   against the 2.3 to 3.3 GB/s of staged traffic that docs/VALIDATION.md 2026-09-08 measured whatever the format and the tile count
+   written: the lower figure, BELIEVED) or 4 (READ in cftx_run_impl, host/src/backend_xrt.cpp: it stages a, b and c for every run, a null operand zero-filled and uploaded, and a pass
+   writes d. docs/VALIDATION.md 2026-09-18, 'the reductions' missing rate', quotes the engine's reason, 'one read enable feeds all three FIFOs', in an entry about the REDUCTIONS: for rint
+   and scaleb the four words rest on the reading of cftx_run_impl), against the 2.3 to 3.3 GB/s of staged traffic that docs/VALIDATION.md 2026-09-08 measured whatever the format and the tile count
    item         M op/s passes/op   job ms    us/pass    tile us    tile %   GB/s (3)   GB/s (4) of the wall (4)
    rint32        2.139       8.0    1.915      239.3        4.7      2.0%       0.82       1.10        33% to 48%
    rint64        1.965       8.0    2.084      260.5        9.5      3.6%       1.51       2.01        61% to 88%
    scaleb32      0.853      19.0    4.804      252.8        4.7      1.9%       0.78       1.04        31% to 45%
    scaleb64      0.511      29.0    8.023      276.7        9.5      3.4%       1.42       1.90        57% to 82%
+CHECK cftx_run_impl stages every operand role below D (a, b, c) on every run unless it is resident: the four words an element ok 
+CHECK CONTROL: the same search for a staging loop over TWO roles finds nothing in the source (the check above can fail) ok 
 CHECK no measured composed rate exceeds its beat bound (lanes x beats / passes an operand)             ok 
 CHECK CONTROL: with a hundredth of the documented beat rate the bound falls below a measured rate (the check above can fail) ok 
 

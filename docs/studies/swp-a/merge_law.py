@@ -172,6 +172,12 @@ def scenarios(rng, N, t):
                                   extra=rec["extra"], device="d9")
             dups[rid] = cp
         xrid, xrec = random_record(rng, N, CIDS, SUBJECTS)                      # the record L4 adds
+        if rng.random() < 0.5:
+            # half the time a SHORTER TWIN of a good record of S1: the same campaign, subject class and lo, a smaller hi (a legitimate record)
+            good = [r for r in S1.values() if counts_as_coverage(r) and r["hi"] - r["lo"] > 1]
+            if good:
+                r0 = rng.choice(good)
+                xrid, xrec = make_record(r0["cid"], r0["subject"], r0["lo"], r0["lo"] + 1 + rng.randrange(r0["hi"] - r0["lo"] - 1), device="d8")
         out.append((S1, S2, S3, dups, (xrid, xrec)))
     return out
 
@@ -385,7 +391,7 @@ def main():
            "run": {"id": "card-stress-1016", "device": "d1", "start": "2026-10-16 18:58:23", "end": "2026-10-16 19:03:11", "rate": 1.99e6},
            "sig": {"alg": "ed25519", "key": "9" * 64, "sig": "8" * 128}}
     size = len(canon(rec))
-    camp_rec = {"v": 1, "operation": "div32", "attribute": "rne", "stratum": {"name": "core", "version": 1, "index": "4^23 significand pairs"},
+    camp_rec = {"v": 1, "kind": "campaign", "operation": "div32", "attribute": "rne", "stratum": {"name": "core", "version": 1, "index": "4^23 significand pairs"},
                 "enumeration": {"kind": "feistel", "width": 23, "rounds": 6, "key": "0x" + "5" * 16}, "oracle": "host-fpu+glibc",
                 "count_unit": "pairs", "expected_cases": "hi-lo"}
     csize = len(canon(camp_rec))

@@ -47,8 +47,10 @@ CHECK L1_div at e4m3 (per magnitude function) equals the number of (significand 
 CHECK L1_sqrt at e4m3 (per magnitude function) equals the number of (normalised significand, exponent parity) classes of the positive inputs ok (16 against 16)
 CHECK L1_rint at e4m3 (per magnitude function) equals the number of positive values in [1/2, 2^(p-1)) ok (32 against 32)
 CHECK L1_conv (e5m6 to e4m3, per magnitude function) equals the number of (source significand, destination strip) keys the encodings reach ok (448 against 448)
-CHECK L1_rem's exponent gaps equal emax - emin + p - 2, clause5.c's bound on the host's walk, at fp32 and fp64 (275 and 2,096) ok (275 = 275, 2096 = 2096)
-CHECK CONTROL: each L1 formula with one term dropped disagrees with its count (the guards above can fail) ok ((True, True, True, True, True))
+CHECK L1_cvtto at e4m3 with 8-bit integer targets (per magnitude function) equals the number of (sign, binade, significand) operands in [1/2, 2^8) ok (144 against 144)
+CHECK L1_rem, called at fp32 and fp64, has emax - emin + p - 2 exponent gaps (275 and 2,096), the bound clause5.c states for the host's walk ok (275 = 275, 2096 = 2096)
+CHECK L1_scaleb_wide at e4m3 (per magnitude function) equals the number of (significand, result strip) keys the wide range reaches ok (56 against 56)
+CHECK scaleb: within each (significand, strip, attribute) key the golden model's result is ONE value (the strips are the classes of the wide range) ok (168 keys, 0 with more than one result)
    level L1 = the sign, attribute and scale reductions of G1-G4 (PROVED for the golden model at e4m3; the arguments for p = 24 and 53 are in the study)
    space            runs     L0 (log2)    L1 (log2)    L0 / L1     L1, one quad
    div32            tile          66.0         52.3   1.29e+04           22.3 y
