@@ -1038,8 +1038,9 @@ The card figures are `2^32 / (the stress run's median rate a tile)` from the 202
 figures are upper bounds: the random mode makes four conversions a lane and these make two.
 The `scaleb32-wide` figures carry a mix the rate was not measured on: the random mode's 17
 exponents are 15 on the tile and 2 on the host, the wide item's 568 are 433 on the tile and 135
-on the host, and verifier-VEX measured the wide item's tile exponents taking 1.43 tile passes a
-check against 1.27 for the random list's - so 47.5 h and 11.9 h are the right order, not a
+on the host, and the wide item's tile exponents take 1.43 tile passes a check against 1.27 for
+the random list's (COMPUTED by verifier-VEX from the library's chunking rule, host/src/clause5.c),
+so 47.5 h and 11.9 h are the right order, not a
 prediction to the hour. The four tiles' column is four processes on four quarters of the space
 (below). **The software
 column is the whole item on one CPU core; `conv32to64-all`, `cvtto32-all`, `cvtfrom32-all` and
@@ -1082,7 +1083,7 @@ for four quarters): leave out the two variables of the loop's second line, so no
 `CFT_SOAK_ARTIFACT` names an image and `cft_open(NULL)` selects the software backend. It needs
 only `make -C host clause5-soak` (XRT=0 is the default) on a 64-bit Linux. (hw/run-c5-soak.sh's
 no-argument form runs all of these, the wide item included: about 23 to 25 process-days, so
-roughly 19 to 21 hours on 30 workers, nearly all of it `scaleb32-wide`; its header says so.)
+roughly 18 to 21 hours on 30 workers, nearly all of it `scaleb32-wide`; its header says so.)
 
     JOB=cvtto32-all; ATTR=rne
     for k in 0 1 2 3; do

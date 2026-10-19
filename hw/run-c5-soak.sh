@@ -44,12 +44,12 @@
 #     hw/card_stress_lib.py, OP_REACH).
 #     THE SIZE of the no-argument form: the four scaleb32-wide jobs alone
 #     are about 23 to 25 process-days of software backend (sampled over
-#     the space, 5.8 to 6.6 days an attribute; verifier-VEX's own measure
-#     gives 23 in all), so the full campaign is roughly 19 to 21 hours on
-#     30 workers, nearly all of it that one item; everything else this
-#     adds is about a day of process time. hw/card-stress.sh names its
-#     items with --sweep-items instead, and QUICK=1 cuts the wide jobs to
-#     4 slices of 2^16 encodings.
+#     the space, 5.8 to 6.6 days an attribute; verifier-VEX's own
+#     computation gives 23 in all), so the full campaign is roughly 18 to
+#     21 hours on 30 workers, nearly all of it that one item; everything
+#     else this adds is about a day of process time. hw/card-stress.sh
+#     names its items with --sweep-items instead, and QUICK=1 cuts the
+#     wide jobs to 4 slices over 2^16 encodings.
 #   * random banded fp64 rint; scaleB and the integer conversions in
 #     both widths under every mode their oracle honours (probed, not
 #     assumed - a failed probe drops the directed modes and the log
