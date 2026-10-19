@@ -350,15 +350,21 @@ def parse_resident(text: str, rc: Optional[int]) -> Verdict:
 
 
 # ---------------------------------------------------------------------------
-# the soaks   host/tools/divsqrt_soak.c:476, host/tools/clause5_soak.c:2023
+# the soaks   host/tools/divsqrt_soak.c:476, host/tools/clause5_soak.c:2023 (at 582953c)
 #   printf("%s %s: %llu cases, %llu value mismatches, %llu flag mismatches\n", job, mode,..)
 #   stderr first line (divsqrt_soak.c:446, clause5_soak.c:1951):
 #   "soaking the DEVICE backend: <artifact>"  or "soaking the software backend"
 #   a failed library call prints "  library call failed" (divsqrt) or
 #   "  library call failed in <what>" (clause5), then the verdict, exit 1
+# The clause-5 soak's EXHAUSTIVE modes of the conversions and scaleB (the -all and -wide jobs, the
+# `exh_mode` branch of its main) print the same line with ", E encodings, S skipped" appended: E
+# operand encodings ran, and each (encoding, check) pair was compared (a case) or skipped, so
+# cases + S is k * E with k fixed by the mode (PER_ENCODING below). That is how a slice's coverage
+# is checked exactly where its count of cases depends on the operands (cvtto32-all compares
+# in-range lanes only). Every other job's line is unchanged and has no such clause.
 # ---------------------------------------------------------------------------
 SOAK_LINE = re.compile(r"^(\S+) (\S+): (\d+) cases, (\d+) value mismatches, "
-                       r"(\d+) flag mismatches$", M)
+                       r"(\d+) flag mismatches(?:, (\d+) encodings, (\d+) skipped)?$", M)
 SOAK_DEVICE = re.compile(r"^soaking the DEVICE backend: (.+)$", M)
 SOAK_SOFTWARE = re.compile(r"^soaking the software backend$", M)
 SOAK_LIBFAIL = re.compile(r"^  library call failed(?: in .*)?$", M)
@@ -370,15 +376,23 @@ class SoakResult(Verdict):
 
 
 def parse_soak(text: str, rc: Optional[int], op: str, verdict_mode: str,
-               artifact: Optional[str], expected_cases: Optional[int]) -> Verdict:
+               artifact: Optional[str], expected_cases: Optional[int],
+               cover: Optional[Dict[str, int]] = None) -> Verdict:
     """artifact: the xclbin the job was told to soak (None: the software backend, which
     only the dry run and the rate-free self checks use). expected_cases: exact, where
-    the tool's counting is known (see Item.expected_cases), else None (then > 0)."""
+    the tool's counting is known (see Item.expected_cases), else None (then > 0).
+    cover: for a job whose line says what it covered (Item.cover_spec): {"encodings": the
+    slice's, "per_encoding": k}. The line must then carry ", E encodings, S skipped", E must
+    be the slice's encodings, and cases + S must be k * E - so a slice that ran short, or
+    long, or whose tool does not print the clause, is refused, and a slice that compared
+    nothing because every pair was skipped (an all-NaN slice of cvtto32-all) is not."""
     m = _one(SOAK_LINE, text, "soak verdict")
     if m.group(1) != op or m.group(2) != verdict_mode:
         raise VerdictError(f"soak: the verdict is for '{m.group(1)} {m.group(2)}', the job "
                            f"was '{op} {verdict_mode}'")
     cases, vm, fm = int(m.group(3)), int(m.group(4)), int(m.group(5))
+    enc = int(m.group(6)) if m.group(6) is not None else None
+    skp = int(m.group(7)) if m.group(7) is not None else None
     dev = _maybe_one(SOAK_DEVICE, text, "soak backend line")
     sw = _maybe_one(SOAK_SOFTWARE, text, "soak backend line")
     if artifact is not None:
@@ -390,6 +404,9 @@ def parse_soak(text: str, rc: Optional[int], op: str, verdict_mode: str,
     libfail = SOAK_LIBFAIL.search(text) is not None
     disagreements = [x.group(0).strip() for x in SOAK_DISAGREE.finditer(text)][:16]
     counts = {"cases": cases, "value_mismatches": vm, "flag_mismatches": fm}
+    if enc is not None:
+        counts["encodings"] = enc
+        counts["skipped"] = skp
     if libfail:
         # The tool printed a verdict for the cases before the failure; it is not a
         # completed slice, and not a disagreement either: the card failed to answer.
@@ -397,7 +414,18 @@ def parse_soak(text: str, rc: Optional[int], op: str, verdict_mode: str,
                            f"(after {cases} cases)")
     if expected_cases is not None and cases != expected_cases:
         raise VerdictError(f"soak: {cases} cases where the slice has {expected_cases}")
-    if expected_cases is None and cases == 0:
+    if cover is not None:
+        if enc is None:
+            raise VerdictError("soak: no ', E encodings, S skipped' clause on the verdict line, "
+                               "which this job's tool prints so that a slice's coverage can be "
+                               "checked - it is not the tool this driver was written for")
+        if enc != cover["encodings"]:
+            raise VerdictError(f"soak: {enc} encodings where the slice has {cover['encodings']}")
+        want = cover["per_encoding"] * enc
+        if cases + skp != want:
+            raise VerdictError(f"soak: {cases} cases and {skp} skipped make {cases + skp} checks "
+                               f"where {cover['per_encoding']} for each of {enc} encodings make {want}")
+    elif expected_cases is None and cases == 0:
         raise VerdictError("soak: 0 cases - the tool ran nothing (its probe may have "
                            "degraded the job)")
     ok = vm == 0 and fm == 0
@@ -443,6 +471,58 @@ ATOM = 1 << 20          # slice boundaries are multiples of this
 MODES5 = ("rne", "rtz", "rdn", "rup", "rmm")
 MODES4 = ("rne", "rtz", "rdn", "rup")
 
+# Checks a slice of each exhaustive conversion/scaleB mode makes for every encoding of its
+# operand, compared (a case) or skipped, held by the tool's own verdict line (its ", E
+# encodings, S skipped" clause) and by the real logs of hw/card_stress_fixtures. From
+# host/tools/clause5_soak.c's "Exhaustive modes" section: conv32to64-all widens each fp32
+# encoding once; cvtto32-all runs each against the four integer targets (a pair is skipped
+# where the rounded value leaves the target's range, so its CASES depend on the operands and
+# only cases + skipped is fixed); cvtfrom32-all and cvtfrom64-all convert each 32-bit integer as
+# an i32 and as a u32; scaleb32-all runs the 17 exponents of the directed list; scaleb32-wide the
+# 556 exponents -278..277 that can change a result and 12 witnesses past them.
+PER_ENCODING = {"conv32to64-all": 1, "cvtto32-all": 4, "cvtfrom32-all": 2, "cvtfrom64-all": 2,
+                "scaleb32-all": 17, "scaleb32-wide": 556 + 12}
+
+# WHERE EACH SOAK'S WORK RUNS: on the tile or on the host. The campaign's items are not all tests of
+# the card. From the library's own classification, host/include/cft.h ("The remaining clause-5
+# operations") and the header of host/src/clause5.c (lines 13-25): COMPOSED operations - cft_rint,
+# cft_scaleb, cft_cmp_sig - are cft_run() passes, "on a device it runs on the tile"; HOST
+# operations - cft_convert, the integer conversions, cft_logb, cft_next_*, cft_class,
+# cft_total_order*, cft_rem - "contain NO floating-point arithmetic at all ... nothing for a device
+# to accelerate and no backend pass to issue. The device argument is context ... not a
+# participant. They are bit-identical on every backend by construction". The section headings of
+# that file say the same: "roundToIntegral: composed", "scaleB: composed" against "format
+# conversion: host", "integer conversions: host", "logB: host", "nextUp / nextDown: host",
+# "classification: host", "remainder: host" (cft_rem has no cft_run call). cft_div and cft_sqrt
+# (host/src/divsqrt.c, header lines 4-21) are composed from the operations the tile has: every
+# floating-point step is one cft_run().
+# So a card soak of a HOST item runs libcft's host code on the box against the box's CPU: a
+# full-space test of the library that the software backend on any CPU repeats, and one in which
+# the tile computes nothing. The host items stay in the campaign, and every record says which
+# kind it is (sweep.reach). scaleB is TILE with one qualification: its multiplies run on
+# the tile only for an exponent at or above the format's subnormal floor (-149 for fp32, -1074 for
+# fp64); below that cft_scaleb takes its host path.
+TILE, HOST = "tile", "host"
+OP_REACH = {
+    # host/src/divsqrt.c: composed
+    "sqrt32": TILE, "sqrt64": TILE, "div32": TILE, "div64": TILE,
+    # host/src/clause5.c: roundToIntegral and scaleB are composed
+    "rint32": TILE, "rint64": TILE,
+    "scaleb32": TILE, "scaleb64": TILE, "scaleb32-all": TILE, "scaleb32-wide": TILE,
+    # host/src/clause5.c: host
+    "nextup32": HOST, "nextdown32": HOST, "logb32": HOST, "class32": HOST,
+    "nextup64": HOST, "nextdown64": HOST, "logb64": HOST, "class64": HOST,
+    "conv32to64": HOST, "conv64to32": HOST, "conv32to64-all": HOST,
+    "cvtto32": HOST, "cvtto64": HOST, "cvtto32-all": HOST,
+    "cvtfrom32": HOST, "cvtfrom64": HOST, "cvtfrom32-all": HOST, "cvtfrom64-all": HOST,
+    "rem32": HOST, "rem64": HOST,
+}
+
+
+def reach_of(op: Optional[str]) -> Optional[str]:
+    """'tile' or 'host' for a soak job word, or None for one this table does not know."""
+    return OP_REACH.get(op) if isinstance(op, str) else None
+
 
 class Item:
     """One campaign line. kind 'exhaustive': encodings [0, 2^32), sliced; kind 'random':
@@ -450,7 +530,7 @@ class Item:
 
     def __init__(self, name: str, tool: str, kind: str, op: str, mode: Optional[str],
                  base_seed: int = 0, verdict_mode: str = "-", extra_cases: int = 0,
-                 exact: bool = False):
+                 exact: bool = False, per_encoding: Optional[int] = None):
         self.name = name
         self.tool = tool              # 'divsqrt' | 'clause5'
         self.kind = kind              # 'exhaustive' | 'random'
@@ -460,6 +540,11 @@ class Item:
         self.verdict_mode = verdict_mode      # the second word of the tool's verdict line
         self.extra_cases = extra_cases        # cases the tool adds to every slice
         self.exact = exact                    # cases == slice size (+ extra) is known
+        # checks (compared or skipped) the tool makes for each encoding of a slice, for a job
+        # whose verdict line says what it covered (the -all and -wide modes); None for the rest
+        self.per_encoding = per_encoding
+        # 'tile' or 'host' (OP_REACH): whether the job's work runs on the card's tile at all
+        self.reach = OP_REACH[op]
 
     def argv(self, binary: str, lo: int = 0, hi: int = 0, count: int = 0,
              seed: int = 0) -> List[str]:
@@ -472,8 +557,18 @@ class Item:
         return a
 
     def expected_cases(self, lo: int, hi: int) -> Optional[int]:
+        """The exact count of cases a slice prints, where it is a function of the slice alone:
+        the slice's size times the checks an encoding takes, plus the cases the tool adds to
+        every slice (nextup32's eight edges). None where it is not (cvtto32-all, random)."""
         if self.kind == "exhaustive" and self.exact:
-            return hi - lo + self.extra_cases
+            return (hi - lo) * (self.per_encoding or 1) + self.extra_cases
+        return None
+
+    def cover_spec(self, lo: int, hi: int) -> Optional[Dict[str, int]]:
+        """What the verdict line of a slice must say it covered (parse_soak's `cover`), for the
+        jobs that say it; None for the others."""
+        if self.kind == "exhaustive" and self.per_encoding is not None:
+            return {"encodings": hi - lo, "per_encoding": self.per_encoding}
         return None
 
     def seed_for(self, n: int) -> int:
@@ -482,10 +577,15 @@ class Item:
 
 
 def sweep_items(scaleb_modes: Iterable[str] = MODES4,
-                cvtfrom_modes: Iterable[str] = MODES4) -> List[Item]:
+                cvtfrom_modes: Iterable[str] = MODES4,
+                wide_modes: Optional[Iterable[str]] = None) -> List[Item]:
     """The campaign, in run-soak.sh's and run-c5-soak.sh's own order and with their seeds.
     scaleb_modes and cvtfrom_modes are what run-c5-soak.sh's probes decide ('rne' alone
-    when a probe fails); hw/card_stress.py runs the same probes."""
+    when a probe fails); hw/card_stress.py runs the same probes. wide_modes are the modes
+    of scaleb32-wide: the scaleb modes, unless `probe scalebrange` found the derived exponent
+    range does not hold on this libm, and then none (the script drops those jobs the same way)."""
+    scaleb_modes, cvtfrom_modes = tuple(scaleb_modes), tuple(cvtfrom_modes)
+    wide_modes = scaleb_modes if wide_modes is None else tuple(wide_modes)
     items: List[Item] = []
     # hw/run-soak.sh: exhaustive fp32 sqrt, five modes (RMM rides the RNE oracle)
     for mode in MODES5:
@@ -512,6 +612,25 @@ def sweep_items(scaleb_modes: Iterable[str] = MODES4,
                       verdict_mode="-", exact=True))
     items.append(Item("class32", "clause5", "exhaustive", "class32", None,
                       verdict_mode="-", exact=True))
+    # hw/run-c5-soak.sh: the exhaustive modes of the 32-bit-operand conversions and scaleB, in
+    # its order. Each says what it covered on its verdict line (PER_ENCODING above); the four
+    # with a probe (cvtfrom32-all, cvtfrom64-all, scaleb32-all, scaleb32-wide) take the modes
+    # the probe allows, as their random modes do. conv32to64-all takes no mode word and its
+    # verdict says "rne", like conv32to64.
+    items.append(Item("conv32to64-all", "clause5", "exhaustive", "conv32to64-all", None,
+                      verdict_mode="rne", exact=True,
+                      per_encoding=PER_ENCODING["conv32to64-all"]))
+    for mode in MODES5:
+        items.append(Item(f"cvtto32-all-{mode}", "clause5", "exhaustive", "cvtto32-all", mode,
+                          verdict_mode=mode, per_encoding=PER_ENCODING["cvtto32-all"]))
+    for op in ("cvtfrom32-all", "cvtfrom64-all"):
+        for mode in cvtfrom_modes:
+            items.append(Item(f"{op}-{mode}", "clause5", "exhaustive", op, mode,
+                              verdict_mode=mode, exact=True, per_encoding=PER_ENCODING[op]))
+    for op, modes in (("scaleb32-all", scaleb_modes), ("scaleb32-wide", wide_modes)):
+        for mode in modes:
+            items.append(Item(f"{op}-{mode}", "clause5", "exhaustive", op, mode,
+                              verdict_mode=mode, exact=True, per_encoding=PER_ENCODING[op]))
     # hw/run-c5-soak.sh: the random campaigns, seed 0xC5000000 + s in its loop order
     s = 1
     for mode in MODES5:

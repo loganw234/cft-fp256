@@ -98,13 +98,30 @@ TILES = {"quad": 4, "single": 1, "deep": 1}
 DEFAULT_RC = {"pass": 0, "fail": 1, "timeout": 124, "no_device": 1, "parse_error": 0,
               "skipped": None, "error": None}
 ITEMS = {
-    "sqrt32-rne": dict(tool="divsqrt", op="sqrt32", mode="rne"),
-    "rint32-rne": dict(tool="clause5", op="rint32", mode="rne"),
-    "logb32": dict(tool="clause5", op="logb32", mode=None),
-    "nextup32": dict(tool="clause5", op="nextup32", mode=None),
+    "sqrt32-rne": dict(tool="divsqrt", op="sqrt32", mode="rne", reach="tile"),
+    "rint32-rne": dict(tool="clause5", op="rint32", mode="rne", reach="tile"),
+    "logb32": dict(tool="clause5", op="logb32", mode=None, reach="host"),
+    "nextup32": dict(tool="clause5", op="nextup32", mode=None, reach="host"),
+    # a record from before the driver wrote `reach`: the report reads it off the op, from the catalog's table
     "div64-rne": dict(tool="divsqrt", op="div64", mode="rne", base=0x50AC0000 + 5),
-    "sqrt64-rne": dict(tool="divsqrt", op="sqrt64", mode="rne", base=0x50AC0000 + 9),
+    "sqrt64-rne": dict(tool="divsqrt", op="sqrt64", mode="rne", base=0x50AC0000 + 9, reach="tile"),
 }
+# the operations whose reach the ORACLE knows by itself (independent of the report and of the lib's table), for
+# a record that does not say
+ORACLE_REACH = {"sqrt32": "tile", "sqrt64": "tile", "div64": "tile", "rint32": "tile", "logb32": "host",
+                "nextup32": "host", "rem32": "host", "conv32to64": "host", "conv32to64-all": "host",
+                "cvtfrom32-all": "host", "scaleb32-wide": "tile"}
+# items only the reach group's run uses: the exhaustive conversion and scaleB items of parcel EX (their records say what
+# they covered: `encodings` and `skipped` in counts, `expected_encodings` in the sweep), and records whose `reach` is
+# missing, invalid, or contradicts the table
+ITEMS.update({
+    "conv32to64-all": dict(tool="clause5", op="conv32to64-all", mode=None, reach="host", per=1),
+    "scaleb32-wide-rne": dict(tool="clause5", op="scaleb32-wide", mode="rne", reach="tile", per=568),
+    "cvtfrom32-all-rne": dict(tool="clause5", op="cvtfrom32-all", mode="rne", reach="fast", per=2),
+    "rem32": dict(tool="clause5", op="rem32", mode=None, base=0xC5000000 + 9),
+    "futureop-x": dict(tool="clause5", op="futureop", mode=None, base=7),
+    "conv32to64": dict(tool="clause5", op="conv32to64", mode=None, base=0xC5000000 + 8, reach="tile"),
+})
 SKIP_A = ("the revision-8 set has no entry for u50-rev8: its rule puts a workload on the single only "
           "where R21 alone keeps it off the quad, which none does")
 SKIP_B = "every u50-rev8-deep entry is a 40-minute-or-longer compile with no cached image"
@@ -219,9 +236,15 @@ class Fx:
             s, dur = s0 + j, (0 if st == "skipped" else 30 + 2 * j)
             info = ITEMS[it]
             sw = {"item": it, "tool": info["tool"], "op": info["op"], "mode": info["mode"]}
+            if info.get("reach") is not None:
+                sw["reach"] = info["reach"]
+            per = info.get("per")             # an item whose verdict line says what it covered (the -all / -wide modes)
             if "lo" in job:
-                sw.update(lo=job["lo"], hi=job["hi"], tile=j + 1, jobs=len(jobs), expected_cases=job["hi"] - job["lo"])
-                cases = job["hi"] - job["lo"]
+                sw.update(lo=job["lo"], hi=job["hi"], tile=j + 1, jobs=len(jobs),
+                          expected_cases=(job["hi"] - job["lo"]) * (per or 1))
+                cases = (job["hi"] - job["lo"]) * (per or 1)
+                if per:
+                    sw["expected_encodings"] = job["hi"] - job["lo"]
             else:
                 sw.update(count=job["count"], seed=info["base"] + 7919 * job["seed_n"], seed_n=job["seed_n"],
                           tile=j + 1, jobs=len(jobs))
@@ -229,6 +252,8 @@ class Fx:
             counts = rate = None
             if st in ("pass", "fail"):
                 counts = {"cases": cases, "value_mismatches": job["vm"], "flag_mismatches": job["fm"]}
+                if per:
+                    counts.update(encodings=job["hi"] - job["lo"], skipped=0)
                 rate = {"value": {"quad": 1000.0, "single": 5000.0}[image] + 10.0 * self.rate_n[image],
                         "unit": "cases/s"}
                 self.rate_n[image] += 1
@@ -571,7 +596,9 @@ def oracle(recs, now=None, gap_s=300):
         if r["kind"] != "sweep" or not sw or r["status"] == "skipped":
             continue
         it = items.setdefault(sw["item"], {"exh": "lo" in sw, "slices": 0, "cases": 0, "blocks": set(),
-                                           "inc": 0, "seed": None})
+                                           "inc": 0, "seed": None,
+                                           "reach": (sw["reach"] if sw.get("reach") in ("tile", "host")
+                                                     else ORACLE_REACH.get(sw.get("op")))})
         if r["status"] in ("pass", "fail"):
             it["slices"] += 1
             it["cases"] += r["counts"]["cases"]
@@ -589,6 +616,7 @@ def oracle(recs, now=None, gap_s=300):
         v, p = items[k], f"sweep.exh[{k}]."
         b = sorted(v["blocks"])
         F[p + "slices"], F[p + "cases"], F[p + "incomplete"] = v["slices"], v["cases"], v["inc"]
+        F[p + "reach"] = v["reach"] or "unknown"
         F[p + "covered"] = len(b) * A
         F[p + "pct"] = len(b) * A / EXH * 100
         F[p + "intervals"] = sum(1 for j, x in enumerate(b) if j == 0 or x != b[j - 1] + 1)
@@ -604,11 +632,22 @@ def oracle(recs, now=None, gap_s=300):
     F["sweep.total.total"] = len(exh) * EXH
     F["sweep.total.pct"] = tot_cov / (len(exh) * EXH) * 100 if exh else None
     F["sweep.total.complete"] = sum(1 for k in exh if len(items[k]["blocks"]) == EXH // A)
+    tr = []
+    for key in ("tile", "host", "unknown"):
+        mine = [k for k in exh if (items[k]["reach"] or "unknown") == key]
+        if mine:
+            cov = sum(len(items[k]["blocks"]) * A for k in mine)
+            tr.append((key, len(mine), cov, len(mine) * EXH, cov / (len(mine) * EXH) * 100,
+                       sum(1 for k in mine if len(items[k]["blocks"]) == EXH // A)))
+    F["sweep.total.reach"] = tr
     rnd = sorted(k for k, v in items.items() if not v["exh"])
     F["sweep.rand"] = rnd
     for k in rnd:
         v, p = items[k], f"sweep.rand[{k}]."
         F[p + "slices"], F[p + "cases"], F[p + "incomplete"], F[p + "max_seed_n"] = v["slices"], v["cases"], v["inc"], v["seed"]
+        F[p + "reach"] = v["reach"] or "unknown"
+    F["sweep.rand.reach"] = [(key, sum(1 for k in rnd if (items[k]["reach"] or "unknown") == key))
+                             for key in ("tile", "host", "unknown") if any((items[k]["reach"] or "unknown") == key for k in rnd)]
     sl = [r for _, r in legs if r["kind"] == "sweep"]
     F["sweep.completed"] = sum(1 for r in sl if r["status"] in ("pass", "fail"))
     F["sweep.failed"] = sum(1 for r in sl if r["status"] == "fail")
@@ -780,13 +819,18 @@ def summary_figs(S):
         for fld, key in (("slices", "slices"), ("cases", "cases"), ("covered", "covered"), ("pct", "pct"),
                          ("intervals", "intervals"), ("first_gap", "first_gap"), ("incomplete", "incomplete")):
             F[p + fld] = e[key]
+        F[p + "reach"] = e["reach"] or "unknown"
     tt = W["total_exhaustive"]
     F["sweep.total.items"], F["sweep.total.covered"], F["sweep.total.total"] = tt["items"], tt["covered"], tt["total"]
     F["sweep.total.pct"], F["sweep.total.complete"] = tt["pct"], tt["complete_items"]
+    F["sweep.total.reach"] = [(r["reach"] or "unknown", r["items"], r["covered"], r["total"], r["pct"], r["complete_items"])
+                              for r in tt["by_reach"]]
     F["sweep.rand"] = [e["item"] for e in W["random"]]
     for e in W["random"]:
         p = f'sweep.rand[{e["item"]}].'
         F[p + "slices"], F[p + "cases"], F[p + "incomplete"], F[p + "max_seed_n"] = e["slices"], e["cases"], e["incomplete"], e["max_seed_n"]
+        F[p + "reach"] = e["reach"] or "unknown"
+    F["sweep.rand.reach"] = [(r["reach"] or "unknown", r["items"]) for r in W["random_by_reach"]]
     F["sweep.completed"], F["sweep.failed"], F["sweep.skipped"] = W["completed"], W["failed"], W["skipped"]
     for s in ("timeout", "no_device", "parse_error"):
         F[f"sweep.nc.{s}"] = W["not_completed"][s]
@@ -1060,7 +1104,7 @@ def text_figs(T):
                        c["reason"], c["counts"], c["dis"] or None, c["dis_n"], c["notes"], c["log"]) for c in legs_]
     # ---- sweep
     sl = secs["SWEEP COVERAGE"]
-    exh = parse_table(sl, ["item", "slices", "cases", "covered", "pct", "intervals", "first_uncovered", "incomplete"],
+    exh = parse_table(sl, ["item", "slices", "cases", "covered", "pct", "intervals", "first_uncovered", "incomplete", "reach"],
                       stop=r"^  total:") or []
     F["sweep.exh"] = [r["item"] for r in exh]
     for r in exh:
@@ -1069,14 +1113,19 @@ def text_figs(T):
         F[p + "pct"] = Txt(r["pct"].rstrip("%"))
         F[p + "intervals"], F[p + "incomplete"] = int(r["intervals"]), int(r["incomplete"])
         F[p + "first_gap"] = hex_pair(r["first_uncovered"])
+        F[p + "reach"] = r["reach"]
     F.update({"sweep.total.items": 0, "sweep.total.covered": 0, "sweep.total.total": 0, "sweep.total.pct": None,
               "sweep.total.complete": 0, "sweep.none_phrase": None})
-    rnd = parse_table(sl, ["item", "slices", "cases", "highest_seed_n", "incomplete"]) or []
+    F["sweep.total.reach"] = []
+    rnd = parse_table(sl, ["item", "slices", "cases", "highest_seed_n", "incomplete", "reach"],
+                      stop=r"^  random reach:") or []
     F["sweep.rand"] = [r["item"] for r in rnd]
     for r in rnd:
         p = f'sweep.rand[{r["item"]}].'
         F[p + "slices"], F[p + "cases"], F[p + "incomplete"] = int(r["slices"]), int(r["cases"]), int(r["incomplete"])
         F[p + "max_seed_n"] = None if r["highest_seed_n"] == "-" else int(r["highest_seed_n"])
+        F[p + "reach"] = r["reach"]
+    F["sweep.rand.reach"] = []
     dis, cur = [], None
     for ln in sl:
         mt = re.match(r"^  total: (\d+) exhaustive item\(s\) seen; covered (\d+) of (\d+) encodings \((\S+)%\); "
@@ -1084,6 +1133,15 @@ def text_figs(T):
         if mt:
             F["sweep.total.items"], F["sweep.total.covered"], F["sweep.total.total"] = int(mt.group(1)), int(mt.group(2)), int(mt.group(3))
             F["sweep.total.pct"], F["sweep.total.complete"] = Txt(mt.group(4)), int(mt.group(5))
+        mr = re.match(r"^  reach (tile|host|unknown): (\d+) exhaustive item\(s\) seen; covered (\d+) of (\d+) encodings "
+                      r"\((\S+)%\); fully covered (\d+) of (\d+)$", ln)
+        if mr:
+            F["sweep.total.reach"].append((mr.group(1), int(mr.group(2)), int(mr.group(3)), int(mr.group(4)),
+                                           Txt(mr.group(5)), int(mr.group(6))))
+        mq = re.match(r"^  random reach: (.*)$", ln)
+        if mq:
+            F["sweep.rand.reach"] = [(m2.group(1), int(m2.group(2))) for m2 in
+                                     re.finditer(r"(tile|host|unknown) (\d+) item\(s\)", mq.group(1))]
         ms = re.match(r"^slices: (\d+) completed \(pass (\d+), fail (\d+)\); did not complete: timeout (\d+), "
                       r"no_device (\d+), parse_error (\d+)(?:, [^;]*)?; skipped (\d+)$", ln)
         if ms:
@@ -1373,6 +1431,12 @@ def group_pins(base, marks):
         "sweep.rand[sqrt64-rne].incomplete": 0,
         "sweep.completed": 16, "sweep.failed": 2, "sweep.nc.timeout": 2, "sweep.nc.no_device": 1,
         "sweep.nc.parse_error": 1, "sweep.skipped": 1, "sweep.none_phrase": None,
+        # which items reach the tile: from the record where it says (sqrt32-rne, rint32-rne, logb32, sqrt64-rne), from
+        # the op where it does not (div64-rne's records are from before the driver wrote `reach`)
+        "sweep.exh[sqrt32-rne].reach": "tile", "sweep.exh[rint32-rne].reach": "tile", "sweep.exh[logb32].reach": "host",
+        "sweep.total.reach": [("tile", 2, 10 * A, 2 * EXH, 10 * A / (2 * EXH) * 100, 0), ("host", 1, 0, EXH, 0.0, 0)],
+        "sweep.rand[div64-rne].reach": "tile", "sweep.rand[sqrt64-rne].reach": "tile",
+        "sweep.rand.reach": [("tile", 2)],
     })
     g0, g1 = marks["big_gap"]
     hand(base, {
@@ -1586,9 +1650,16 @@ def mutation_catalogue(marks):
                     r.update(start_epoch=s, end_epoch=e, start=box_ts(s), end=box_ts(e))
         rr.sort(key=lambda x: x["epoch"])
 
+    def flip_reach(rr):
+        for r in rr:
+            if r["type"] == "leg" and r.get("sweep") and r["sweep"].get("item") == "logb32":
+                r["sweep"]["reach"] = "tile"
+
     return [
         ("flip a status (quad dt-q8 #3 pass -> fail)", flip_status,
          ["totals.status.pass", "totals.status.fail", "row[quad/dt-q8].pass", "row[quad/dt-q8].fail", "fail.count", "fail.list"]),
+        ("an item's records say it reaches the tile (logb32: host -> tile)", flip_reach,
+         ["sweep.exh[logb32].reach", "sweep.total.reach"]),
         ("drop a sweep slice ([1,2) of sqrt32-rne)", drop_slice,
          ["sweep.exh[sqrt32-rne].slices", "sweep.exh[sqrt32-rne].covered", "sweep.exh[sqrt32-rne].intervals",
           "sweep.exh[sqrt32-rne].first_gap", "sweep.completed", "totals.legs", "row[quad/sweep (all items)].runs"]),
@@ -1738,6 +1809,69 @@ def group_files(base, marks, tmp):
     eq(len(S["input"]["bad_lines"]), 250, "and all 250 are in the data")
 
 
+def build_reach_run():
+    """A one-cycle run of the sweep items whose `reach` is the question: the new exhaustive conversion and scaleB items
+    (records that say what they covered), a record with no `reach` and an op the table names, a record with no `reach`
+    and an op it does not, an invalid `reach`, and a `reach` that contradicts the table."""
+    fx = Fx()
+    run_start_rec(fx, T0)
+    t = fx.begin_cycle(T0 + 5, "quad", 1, 3)
+    t = fx.battery(t, "quad", [dict(name="api-test", dur=10, counts={"failed": 0})])
+    t = fx.wave(t, "quad", [job_ex("conv32to64-all", 0, 2), job_ex("scaleb32-wide-rne", 0, 1),
+                            job_rd("rem32", 0, 100000), job_rd("futureop-x", 0, 100)])
+    t = fx.wave(t, "quad", [job_ex("cvtfrom32-all-rne", 0, 1), job_rd("conv32to64", 0, 50000),
+                            job_ex("conv32to64-all", 2, 3)])
+    fx.end_cycle(t)
+    fx.add("run_end", t + 10, reason="deadline", exit=0, cycles=1)
+    return fx.records()
+
+
+def group_reach():
+    group("reach")
+    recs = build_reach_run()
+    scn = Scn(recs)
+    compare_all(scn)
+    hand(scn, {
+        "sweep.exh": ["conv32to64-all", "cvtfrom32-all-rne", "scaleb32-wide-rne"],
+        # the record says host / tile; "fast" is not a reach, so the table's host for the op
+        "sweep.exh[conv32to64-all].reach": "host", "sweep.exh[scaleb32-wide-rne].reach": "tile",
+        "sweep.exh[cvtfrom32-all-rne].reach": "host",
+        "sweep.exh[conv32to64-all].covered": 3 * A, "sweep.exh[conv32to64-all].intervals": 1,
+        "sweep.exh[conv32to64-all].cases": 3 * A, "sweep.exh[scaleb32-wide-rne].cases": 568 * A,
+        "sweep.exh[cvtfrom32-all-rne].cases": 2 * A,
+        "sweep.total.reach": [("tile", 1, A, EXH, A / EXH * 100, 0), ("host", 2, 4 * A, 2 * EXH, 4 * A / (2 * EXH) * 100, 0)],
+        # no `reach` and an op the table names (rem32: host), no `reach` and an op it does not (unknown), and a record
+        # that says tile of an op the table says host (conv32to64: the record wins)
+        "sweep.rand": ["conv32to64", "futureop-x", "rem32"],
+        "sweep.rand[rem32].reach": "host", "sweep.rand[futureop-x].reach": "unknown",
+        "sweep.rand[conv32to64].reach": "tile",
+        "sweep.rand.reach": [("tile", 1), ("host", 1), ("unknown", 1)],
+    })
+    # the records the new driver writes: what the items covered rides in counts and in the sweep
+    wide = [r for r in recs if r.get("type") == "leg" and (r.get("sweep") or {}).get("item") == "scaleb32-wide-rne"][0]
+    eq((wide["counts"]["encodings"], wide["counts"]["skipped"], wide["sweep"]["expected_encodings"],
+        wide["sweep"]["expected_cases"], wide["sweep"]["reach"]), (A, 0, A, 568 * A, "tile"),
+       "the synthetic wide-item record has the shape the driver writes")
+    t = scn.T
+    check("  reach tile: 1 exhaustive item(s) seen; covered " + str(A) + " of " + str(EXH) in t, "the text has a tile line")
+    check("  reach host: 2 exhaustive item(s) seen; covered " + str(4 * A) + " of " + str(2 * EXH) in t, "the text has a host line")
+    check("  random reach: tile 1 item(s), host 1 item(s), unknown 1 item(s)" in t, "the text has the random items' reach")
+    check("  a host item is libcft's host code run against the CPU: a full-space test of the library in which the tile "
+          "computes nothing" in t, "the text says what a host item is")
+    check("  an unknown item has no `reach` in its records and an op the catalog's table does not name" in t,
+          "the text says what an unknown item is")
+    check(not any(ln.startswith("  reach unknown:") for ln in t.split("\n")),
+          "no 'reach unknown' line for exhaustive items when none is unknown")
+    # a run of the whole old kind: no record says anything, every op is in the table
+    old = mutate(recs, lambda rr: [r["sweep"].pop("reach", None) for r in rr if r.get("type") == "leg" and r.get("sweep")])
+    so = Scn(old)
+    compare_all(so)
+    eq(so.FS["sweep.exh[scaleb32-wide-rne].reach"], "tile", "records from before the driver wrote `reach` are read off the op: scaleb32-wide is tile")
+    eq(so.FS["sweep.rand[conv32to64].reach"], "host", "... and with the record's contradiction gone the table's host stands")
+    eq(changed(scn.FS, so.FS), ["sweep.rand.reach", "sweep.rand[conv32to64].reach"],
+       "only the one item whose record contradicted the table moves when the records' `reach` is removed")
+
+
 def group_weird(base):
     group("weird")
     fx = Fx()
@@ -1856,6 +1990,7 @@ def main():
         group_gaps(base, marks)
         group_telemetry_edges()
         group_json(base)
+        group_reach()
         group_controls(base, marks)
         group_sabotage(base)
         group_files(base, marks, tmp)
