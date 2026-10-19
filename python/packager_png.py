@@ -22,9 +22,9 @@ least of them, and a blank image (one colour, 0%) is nowhere near. WHAT IT DOES 
 drawn. A render with its title and nothing below it passes. The completeness of a render is the converter's
 business; the packager pins the bytes with a SHA-256 and shows that a second render gives the same bytes.
 
-WHY ONLY A BAND. A pure-Python decode of the whole image took 53 s for those 34 files on a quiet desktop (1.6 s
+WHY ONLY A BAND. A pure-Python decode of the whole image took 57 s for those 34 files on a quiet desktop (1.7 s
 each: a PNG row may be filtered against the row above it and the pixel to its left, so every row is a loop; a
-first measurement, earlier the same day, gave 111 s), and 6.6 s for the band (10.7 s then). A check that costs a
+first measurement, earlier the same day, gave 111 s), and 6.9 s for the band (10.7 s then). A check that costs a
 minute or two is a check that gets skipped.
 
 `selftest()` is what python/project_packager.py --check runs: the decoder against the encoder below on every

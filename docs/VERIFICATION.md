@@ -450,7 +450,7 @@ does); and an eighth that owns no committed file,
 still be made from this tree, builds, verifies and reproduces byte for
 byte, and that each refusal and each archive fault is named when planted
 in a scratch copy - and which needs no converter, no Pillow and no
-PyMuPDF (it takes about 40 s and needs git), so it never skips here
+PyMuPDF (it takes about 50 s and needs git), so it never skips here
 or in CI. **Nothing invoked
 any of them**, and by 2026-09-13 two had drifted: the five
 `hw/layouts/*.cfg` carried a superseded WNS note in a commented-out clock

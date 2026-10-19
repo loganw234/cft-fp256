@@ -167,8 +167,8 @@ and clock give the same zip, a clock a day and three seconds later changes
 only those date fields, and a build in another process under another
 `PYTHONHASHSEED` gives the same zip.
 
-Stored costs size: on 2026-10-19 the archive with PNGs was 10.3 MB, where
-the same entries deflated at the highest level were 8.7 MB, because the PNGs
+Stored costs size: on 2026-10-19 the archive with PNGs was 10.7 MB, where
+the same entries deflated at the highest level were 9.1 MB, because the PNGs
 (86% of it) are compressed already.
 
 ## The PNGs
@@ -220,7 +220,7 @@ Both numbers come from a measurement, not from a belief: across all 34 renders
 the top rows held at least 5.03% non-background pixels and 471 colours. The
 check reads the PNG with `python/packager_png.py`, a decoder of the standard
 library alone, and only the band, because a pure-Python decode of the whole
-image took 53 s for the 34 files on a quiet desktop and the band 6.6 s (a first
+image took 57 s for the 34 files on a quiet desktop and the band 6.9 s (a first
 measurement, earlier the same day, gave 111 s and 10.7 s). Its decoder gives the
 same pixels as Pillow's on all 34 (checked outside the repository). What
 it does not prove is that the whole figure was drawn: a render with its title
@@ -314,8 +314,8 @@ if there is no converter, because it was asked to use one.
 generator; the PNG legs do not belong in any stage.** The converter-free check
 owns no committed file, but it fails exactly when something it reads moves
 (the README, the gallery, a sidecar, the ledger's newest heading), which is the
-kind of drift the stage exists to find; it takes 38 to 45 s on the maintainer's
-Windows desktop and 14 to 17 s under WSL's Python 3.10 (2026-10-19); it needs git, to
+kind of drift the stage exists to find; it takes 38 to 51 s on the maintainer's
+Windows desktop and 14 to 19 s under WSL's Python 3.10 (2026-10-19); it needs git, to
 commit a copy of the files it reads in a temporary directory of its own (no
 history of the tree it checks, no network), and the standard library, nothing
 else: no converter, no Pillow, no PyMuPDF; it never skips and prints no `SKIP`
