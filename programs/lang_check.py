@@ -415,9 +415,11 @@ LANE_AUX = seq.LANE_DEPOSIT_OVERFLOW | seq.LANE_SCRATCH_RANGE      # [6:5]
 LANE_MARKED = seq.LANE_MARKED                   # [7]
 STATUS_MARKED = seq.STATUS_MARKED               # STATUS[6]
 
-# The checks a verdict names. The first two fail a lane; the rest fail the
-# run's FLAGS and STATUS part (flags_ok).
-RULE_LANE = ("lane-value", "lane-byte")
+# The checks a verdict names: lane-value and lane-byte (R1, R2) fail a lane,
+# and these fail the run's FLAGS and STATUS part (flags_ok): flags-replayed
+# (R4), status-other (R5, and a marked lane's byte carrying [6:5]),
+# status-mark (R6), flags-word (R7), marks-vanish (R8), and block-length, a
+# run whose block is not a byte a lane.
 RULE_RUN = ("flags-word", "flags-replayed", "status-other", "status-mark",
             "marks-vanish", "block-length")
 
@@ -3824,11 +3826,12 @@ def leg_six_generated(count, rng, everything=False):
         lang.render_math(g)
         try:
             t1 = time.perf_counter()
-            images = {}
+            images, c = {}, None
             for t in (SW_TARGETS if k < SIX_ALL_TARGETS else SW_TARGETS[:1]):
-                c = cftc.compile_text(text, 5, target=t, source=what,
-                                      stem="n")
-                images[t] = c.image
+                ct = cftc.compile_text(text, 5, target=t, source=what,
+                                       stem="n")
+                images[t] = ct.image
+                c = c or ct             # the run is sw's, at its own depth
             t_compile += time.perf_counter() - t1
             if len(set(images.values())) != 1:
                 wrong.append(f"{what}: the software targets' images differ")
@@ -3965,8 +3968,10 @@ SIX_LOOPS = {
           (("a", "exp"), ("b", "exp"), ("c", "expm1"), ("d", "expm1")),
           [("exp", 1, 2), ("expm1", 1, 2), ("log1p", 2, 2)]),
 }
-# source, format, attribute: A at all four formats, B at two
-SIX_LOOP_CASES = (("A", "fp64", "rtz"), ("A", "fp256", "rup"),
+# source, format, attribute: A under rne at fp64 (exp's anchor, whose guess is
+# wrong, marks inside the loop's first iteration), A at fp256 and B at fp128
+# under directed attributes (the long lists of centres)
+SIX_LOOP_CASES = (("A", "fp64", "rne"), ("A", "fp256", "rup"),
                   ("B", "fp128", "rdn"))
 
 
