@@ -1,14 +1,14 @@
 # The documents, by what you open them for
 
-Forty-four files, 79,825 lines. Flat in one directory they look like one
+Forty-four files, 80,188 lines. Flat in one directory they look like one
 undifferentiated pile; they are not, and the split is close to even:
 
-- **27,875 lines you consult while working** — the three under *Start here*,
+- **27,931 lines you consult while working** — the three under *Start here*,
   the contract, and the reference you call into;
 - **6,679 lines of tool manual**, one per shipped program;
-- **2,304 lines of operations**, read when you are about to do something to
+- **2,406 lines of operations**, read when you are about to do something to
   hardware;
-- **42,967 lines of record and argument** — the ledger, the roadmap and the
+- **43,172 lines of record and argument** — the ledger, the roadmap and the
   design studies. The history of how a decision was reached, worth keeping,
   and not what you open to get something done.
 
@@ -33,7 +33,7 @@ answer is not in here — it is `make verify-quick`, and
 | document | lines | what it is for |
 |---|---|---|
 | [INTEGRATION.md](INTEGRATION.md) | 253 | Choosing a path: which surface to use for which job. The shortest route from "I have a workload" to "I know what to call." |
-| [VERIFICATION.md](VERIFICATION.md) | 582 | Every gate, what it proves, how long it really takes. Twelve tiers, fifty-two runner stages. |
+| [VERIFICATION.md](VERIFICATION.md) | 591 | Every gate, what it proves, how long it really takes. Twelve tiers, fifty-two runner stages. |
 | [COMPLIANCE.md](COMPLIANCE.md) | 172 | IEEE 754-2019 clause by clause: what is implemented, what is refused, and where each is proven. |
 
 ## The contract
@@ -46,7 +46,7 @@ product, not the implementation.
 | [DETERMINISM.md](DETERMINISM.md) | 1,445 | The determinism contract itself — the argument the whole project rests on, including the unassigned-opcode hazard and every time it has fired. |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | 1,187 | The tile: register map, MODE and CAPS words, the rule for when VERSION moves. |
 | [SEQUENCER.md](SEQUENCER.md) | 4,037 | The orbit sequencer and the program model. |
-| [LANGUAGE.md](LANGUAGE.md) | 2,718 | The language for dynamical systems: the grammar, the semantics (literal evaluation, exact constants rounded once, one attribute a program), the integrators written in it, time (t in the state, a step counter, forcing by a rotation, each measured), the step graph, the reference interpreter that is the definition of correct for every compiled image, the intention-out, the variational equations (tangent vectors and the rule that differentiates each operation), the math library's exp, expm1, exp2, log, log1p and log2 since the language's 1.1, and every refusal by name. |
+| [LANGUAGE.md](LANGUAGE.md) | 2,764 | The language for dynamical systems: the grammar, the semantics (literal evaluation, exact constants rounded once, one attribute a program), the integrators written in it, time (t in the state, a step counter, forcing by a rotation, each measured), the step graph, the reference interpreter that is the definition of correct for every compiled image, the intention-out, the variational equations (tangent vectors and the rule that differentiates each operation), the math library's exp, expm1, exp2, log, log1p and log2 since the language's 1.1, and every refusal by name. |
 | [COMPATIBILITY.md](COMPATIBILITY.md) | 1,075 | One section per ABI step, with a per-surface table. Read before assuming a call exists on a given surface. |
 | [LAYOUTS.md](LAYOUTS.md) | 193 | Every xclbin layout the U50 could carry - tile mixes and their clocks - derived by `hw/gen_layouts.py`, never typed. |
 | [CERTIFICATES.md](CERTIFICATES.md) | 4,641 | The certificate, versions 1 and 2. Version 1: what a run was and how accurate it is, keyed or open, and the audit that re-runs its segments. Version 2: what the run means - each segment's per-lane flags, every lane a routine marked replayed by the program's definition, the source it was compiled from or is defined by and a wider-source run of it, the profile and language its bits are claimed under, provenance with its privacy defaults, and a detached Ed25519 signature for either version. Complete enough to write a reader and an auditor of either from the page. And the segment runner, `cft-segrun`, that writes either version from the library, version 2 by default, its accuracy entries included; the audit tool, `cft-audit`, that audits both versions in C - version 1 with the same exact arithmetic, and version 2 with Ed25519 and SHA-512 of its own, every step that needs no source; and the golden certificates in `certificates/` that hold the writers to committed bytes, version 2's cases and thirty controls among them. |
@@ -58,7 +58,7 @@ product, not the implementation.
 | [HOSTAPI.md](HOSTAPI.md) | 3,698 | The host API, function by function. The largest reference here and the one most often wanted. |
 | [TRANSCENDENTALS.md](TRANSCENDENTALS.md) | 1,737 | The thirty-nine correctly-rounded transcendentals, by ABI phase, with the evidence for each. |
 | [REMOTE.md](REMOTE.md) | 1,433 | The remote backend: a tile behind a socket, the frame protocol and the WebSocket path. |
-| [PROGRAMS.md](PROGRAMS.md) | 643 | Programs as files: the assembler, the program library, the runner. |
+| [PROGRAMS.md](PROGRAMS.md) | 644 | Programs as files: the assembler, the program library, the runner. |
 | [EMBEDDED.md](EMBEDDED.md) | 709 | libcft on microcontrollers, and the profiles the embedded gate runs. |
 | [PLATFORMS.md](PLATFORMS.md) | 2,928 | Which FPGA to buy, borrow or rent next, measured against the tile this project builds; every figure carries a source and every price the date it was seen. |
 | [SCALING.md](SCALING.md) | 424 | What more tiles buy, and what they do not. |
@@ -84,7 +84,7 @@ running.
 | document | lines | what it is for |
 |---|---|---|
 | [BITSTREAM-BUILDS.md](BITSTREAM-BUILDS.md) | 357 | Building a bitstream, and the five traps — three of which exit 0, and two that look like a design failure. `hw/build-pair.sh` is this document as an executable. |
-| [CARDDAY.md](CARDDAY.md) | 1,160 | Card day: the runbook as it was actually run, the staged pairs, the long run (`hw/card-stress.sh`: how to start, stop and read it), and the forensics kept when build trees are reclaimed. |
+| [CARDDAY.md](CARDDAY.md) | 1,262 | Card day: the runbook as it was actually run, the staged pairs, the long run (`hw/card-stress.sh`: how to start, stop and read it), and the forensics kept when build trees are reclaimed. |
 | [BRINGUP.md](BRINGUP.md) | 787 | Hardware bring-up, and the gates CI's green tick does not cover. |
 
 ## The record
@@ -94,7 +94,7 @@ reading material for a working session.
 
 | document | lines | what it is for |
 |---|---|---|
-| [VALIDATION.md](VALIDATION.md) | 21,098 | The validation ledger, append-only. Every run, including the ones that failed and the mistakes that produced them. A figure here is a fact about the run on its date and is never edited to match a later one. |
+| [VALIDATION.md](VALIDATION.md) | 21,270 | The validation ledger, append-only. Every run, including the ones that failed and the mistakes that produced them. A figure here is a fact about the run on its date and is never edited to match a later one. |
 | [ROADMAP.md](ROADMAP.md) | 6,384 | What is built, what is next, and what was decided against. |
 | [ROUND2.md](ROUND2.md) | 1,082 | The plan for the gather, the scatter, the lane mask and the broadcast as one parcel round, with its outcome at the top: the seam the lead lands first, a brief per parcel, the verifiers, the ledger, the merge order. |
 | [NOVEL.md](NOVEL.md) | 561 | Results for which no prior description was found, with the standard of evidence stated first. |
@@ -124,7 +124,7 @@ questions.
 | [studies/ACC-A-estimates.md](studies/ACC-A-estimates.md) | 685 | how well a certificate's two estimates indicate the errors they estimate: step-halving against a converged reference, the scheme at h/2^k, and wider against check.py's 300-digit arm, on every ODE case of the golden corpus and as h shrinks; the time shift the bank's rounded h/6 puts in the result, which neither estimate sees; its instrument is `programs/estimates.py`, and its captured runs are in `studies/acc-a/` |
 | [studies/R8S-streaming.md](studies/R8S-streaming.md) | 1,369 | the design of revision 8's instruction streaming, approved with revision 8's RTL plan on 2026-10-02: the fetch through the A master during a block, a 4,096-word store with a prefetched stream past it, loops replayed from the store, what a late fetch costs a step on the hard workloads, the block RAM it frees and the timing path it shortens, the CAPS2 field for the capacity, the deep build beside it, the verification, and the RTL plan's outline; and, since 2026-10-03, the fetch unit as built (rtl/cft_ifetch.sv, alone): the interface round 2 wires, where it departs from the design, its proof at two sizes, its bench, S8's nine plants and verifier-VRD1's tenth |
 | [studies/CERT-V2.md](studies/CERT-V2.md) | 2,363 | a design for certificate format version 2, approved by Logan on 2026-10-02 and built golden-first the same day (CERTIFICATES.md, "Version 2"; its C half built at ABI 0.18 on 2026-10-02 to 03): the per-lane flags, a marked lane replayed by the golden model and checked against it under the definition the certificate names, a wider run compiled from the named source (measured to see the constants' rounding that version 1's wider run cannot), and the scientific provenance surveyed from ISO/IEC 17025, W3C PROV, SLSA, RO-Crate and reproducibility certificates, field by field: carried or not, checked or reported, and its cost in privacy |
-| [studies/M1-exp-log.md](studies/M1-exp-log.md) | 1,884 | a design for the correctly rounded exp, expm1, exp2, log, log1p and log2 as tile routines, step 6's M1 before any of it is built: the reductions, an eight-entry table read by a SELECT tree, a polynomial with a double-word head and a single-word tail and no augadd, one rounding under the program's attribute, the in-lane test that marks an undecided lane, the bound written out and measured against mpmath, the mark rate's law, the specials and flags as transcend.py gives them, the cost against the surveyor's estimates and fp32's triple words, the language's nodes, refusals and derivative rules, and how phase 2 is to be held; revised the same day after verifier-VM1 found log1p's r = x path past the bound's rho, with fp64's margins stated by an error budget (thin in log1p's band and log2's cell at G = 46) and G = 44 proposed for fp64; verifier-VM1b's budget tool is committed in `studies/m1/vm1b/`; its model and captured runs are in `studies/m1/` |
+| [studies/M1-exp-log.md](studies/M1-exp-log.md) | 1,917 | a design for the correctly rounded exp, expm1, exp2, log, log1p and log2 as tile routines, step 6's M1 before any of it is built: the reductions, an eight-entry table read by a SELECT tree, a polynomial with a double-word head and a single-word tail and no augadd, one rounding under the program's attribute, the in-lane test that marks an undecided lane, the bound written out and measured against mpmath, the mark rate's law, the specials and flags as transcend.py gives them, the cost against the surveyor's estimates and fp32's triple words, the language's nodes, refusals and derivative rules, and how phase 2 is to be held; revised the same day after verifier-VM1 found log1p's r = x path past the bound's rho, with fp64's margins stated by an error budget (thin in log1p's band and log2's cell at G = 46) and G = 44 proposed for fp64; verifier-VM1b's budget tool is committed in `studies/m1/vm1b/`; its model and captured runs are in `studies/m1/` |
 | [studies/M2-trig.md](studies/M2-trig.md) | 1,560 | a design for the correctly rounded sin, cos and tan as tile routines, the math library round's M2 before any of it is built: one Payne-Hanek reduction for every lane, against 2/pi in bank words picked from the exponent by a SELECT shifter and carried exactly through the cancellation, with an audit of every instruction it calls exact; fp64's whole range and fp128's and fp256's to 2^1024, the range's cost measured; Taylor heads in double words, tan by its own quotient, and the clamp |sin x|, |cos x| < 1; the bound by verifier-VM1b's budget ported, the mark rate's law lane by lane, the structured families and their windows, the specials and flags as transcend.py gives them; the cost (sin 406, 382 and 389 instructions at fp64, fp128 and fp256, sin and cos of one argument 434, 411 and 418), fp32's double word at G = 18 and the triple word's estimate; the language's nodes, refusals and derivative rules, fourteen plants, and twelve questions for Logan; its model and captured runs are in `studies/m2/`, and its larger samples are handed to the lead (`studies/m2/box_m2s.sh`) |
 
 ---
