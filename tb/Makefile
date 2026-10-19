@@ -318,7 +318,8 @@ simpleops:
 # question and hw/synth_shiftcmp.tcl answers it - cft_mulfrac was
 # correct and still did not pay.
 #
-# PINNED TO VERILATOR, and it is the only target that is. The DUT is
+# PINNED TO VERILATOR, as normshare below is through the same variable:
+# the two benches of `make sim` that do not run under SIM. The DUT is
 # 720 bits by twenty stages of multiplexer plus fifteen reference
 # shifters beside it; Icarus spends over three hours on the sweep and
 # Verilator does it in one second. It has its own variable rather than
