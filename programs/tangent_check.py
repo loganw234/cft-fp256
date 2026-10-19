@@ -56,12 +56,13 @@ lang_check.py, whose helpers this reuses), with tangents:
      build, item 4, the three holding the math library's six
      (Lotka-Volterra, the diodes, the culture); the golden reader and
      audit and cft-audit accept each. A segment that marks a lane
-     (STATUS[6]) fails here by name: version 1 certifies the machine's
-     guess, and cft-segrun cannot replay a marked lane - it answers
-     `replay-missing`, or `replay-undecided` where the definition cannot
-     be evaluated - so a certificate stays what the machine ran, and the
-     replay of M1's build, item 5 is the stages' own comparisons' (leg N
-     below), never this leg's. The six's references are skipped by name on
+     (STATUS[6]) fails here by name: version 1 holds the machine's guess,
+     STATUS[6] on the segment; cft-segrun's version-2 writer, which this
+     leg does not use, refuses a marked lane `replay-missing` without a
+     replay image and `replay-undecided` with one that marks it too - so
+     a certificate stays what the machine ran, and the replay of M1's
+     build, item 5 is the stages' own comparisons' (leg N below), never
+     this leg's. The six's references are skipped by name on
      a host without mpmath, which builds them
   H  determinism: two processes under two PYTHONHASHSEEDs; the committed
      programs/systems/compiled-tangent/ is what the compiler writes, and
@@ -1109,9 +1110,10 @@ def leg_libcft(segrun_path, audit_path, rng, work):
 def certify(c, name, segrun_path, audit_path, rng, work):
     """lang_check's certify, its lanes given tangents. A certificate of
     version 1 holds what the machine ran, a marked lane's guess included
-    (STATUS[6] on its segment), and cft-segrun cannot replay it - it
-    answers `replay-missing`, or `replay-undecided` where the definition
-    cannot be evaluated; the stages' own comparisons replay a marked lane
+    (STATUS[6] on its segment); cft-segrun's version-2 writer, which this
+    leg does not use, refuses a marked lane `replay-missing` without a
+    replay image and `replay-undecided` with one that marks it too; the
+    stages' own comparisons replay a marked lane
     by the definition since M1's build, item 5 (lang_check.py's rule, this
     stage's leg N), and a certificate does not - so a segment that marks a
     lane fails here, by name, rather than pass on a guess."""
@@ -1168,10 +1170,11 @@ def certify(c, name, segrun_path, audit_path, rng, work):
     if not check(not marked, f"{name}: no segment marks a lane (STATUS[6] "
                  f"clear in every segment of both runs)",
                  f"a lane marked in run and segment {marked[:4]}: a "
-                 f"routine's undecided guess, which a certificate from "
-                 f"cft-segrun cannot replay (replay-missing, "
-                 f"replay-undecided; the stages' comparisons replay it, "
-                 f"leg N)"):
+                 f"routine's undecided guess, which a version-1 "
+                 f"certificate holds as the machine ran it (cft-segrun's "
+                 f"version-2 writer refuses it replay-missing, or "
+                 f"replay-undecided with a replay image that marks it "
+                 f"too; the stages' comparisons replay it, leg N)"):
         return
     sb = {ri: {b: (states_dir / f"run-{ri}-boundary-{b}.bin").read_bytes()
                for b in range(segs + 1)} for ri, segs in ((0, 2), (1, 4))}
@@ -2256,9 +2259,11 @@ def leg_math(count, rng):
 # are put in the lanes' primal where the calls read it, so that a mark
 # reaches the tangent comparison: a marked lane's guess can be wrong, and its
 # tangents, which the image computes from that guess, are wrong with it.
-# Leg G's guard stands: cft-segrun certifies what the machine ran, replays
-# nothing (it answers `replay-missing` or `replay-undecided`, C's), and a
-# certified segment that marks a lane still fails there by name.
+# Leg G's guard stands: version 1 holds the machine's guess, STATUS[6] on
+# the segment; cft-segrun's version-2 writer, which leg G does not use,
+# refuses a marked lane `replay-missing` without a replay image and
+# `replay-undecided` with one that marks it too; and a certified segment
+# that marks a lane still fails there by name.
 
 def six_controls():
     """The rule's controls with a tangent vector (lang_check's leg O has the
