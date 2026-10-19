@@ -501,6 +501,14 @@ def build(rd, ctx):
     f_vq = F("visits_quad", visits["quad"], commas(visits["quad"]), [s8], "visits to the quad image")
     f_vs = F("visits_single", visits["single"], commas(visits["single"]), [s8], "visits to the single image")
     f_vd = F("visits_deep", visits["deep"], commas(visits["deep"]), [s8], "visits to the deep image")
+    cut_img, s9 = sc(TL, "cut", "image")
+    cut_visit, s10 = sc(TL, "cut", "visit")
+    cut_run, s11 = sc(TL, "cut", "legs_run")
+    cut_of, s12 = sc(TL, "cut", "legs_of")
+    f_cimg = F("stress_cut_image", cut_img, cut_img, [s9], "the image the run's last visit was to, which the deadline cut")
+    f_cvis = F("stress_cut_visit", cut_visit, commas(cut_visit), [s10], "that visit's number among the visits to that image")
+    f_crun = F("stress_cut_run", cut_run, commas(cut_run), [s11], "the legs of the battery that visit ran before the deadline")
+    f_cof = F("stress_cut_of", cut_of, commas(cut_of), [s12], "the legs of the battery a visit has")
     cases, w1 = sc(SW, "cases_total")
     tile, w2 = sc(SW, "tile_cases")
     host, w3 = sc(SW, "host_cases")
@@ -529,11 +537,16 @@ def build(rd, ctx):
     one, c2 = sc(CK, "max_single")
     four, c3 = sc(CK, "max_quad")
     missed, c4 = sc(CK, "n_missed")
+    left, c5 = sc(CK, "left_out")
+    # The figure does not claim to draw every build the ledger gives a slack for (its caption: "this page does not say
+    # there are no others"), so these facts are the builds it DRAWS and the items it LISTS and does not draw.
     f_att = F("clock_attempts", len(att), commas(len(att)), [rd.src(CK, "the length of field attempts")],
-              "the timing attempts the ledger records for the U50")
-    f_c1 = F("clock_single", one, commas(one), [c2], "the highest clock at which one tile closed timing, in MHz")
-    f_c4 = F("clock_quad", four, commas(four), [c3], "the highest clock at which four tiles closed timing, in MHz")
-    f_cm = F("clock_missed", missed, commas(missed), [c4], "the attempts that missed")
+              "the U50 builds the figure draws: the entries of its `attempts`, whose kernel slack it reads from the ledger")
+    f_c1 = F("clock_single", one, commas(one), [c2], "the highest clock at which a drawn one-tile build closed timing, in MHz")
+    f_c4 = F("clock_quad", four, commas(four), [c3], "the highest clock at which a drawn four-tile build closed timing, in MHz")
+    f_cm = F("clock_missed", missed, commas(missed), [c4], "the drawn builds that missed")
+    f_left = F("clock_left_out", len(left), commas(len(left)), [rd.src(CK, "the length of field left_out")],
+               "the other figures of slack that the figure lists and does not draw, each with the reason")
     cells, p1 = sc(SP, "n_cells")
     wins, p2 = sc(SP, "wins")
     losses, p3 = sc(SP, "losses")
@@ -637,7 +650,9 @@ def build(rd, ctx):
     d.line("The card's long stress run, ", f_sid, ", from ", f_start, " to ", f_end, " on the box's clock (", f_hours,
            " hours), ran ", f_legs, " legs in ", f_cyc, " cycles through the quad, single and deep images (", f_vq, ", ",
            f_vs, " and ", f_vd, " visits): ", f_pass, " passed, ", f_skip, " were skipped, and ", f_other, " did "
-           "anything else (failed, timed out, found no device, could not be parsed, or errored). Figure `stress-timeline`.")
+           "anything else (failed, timed out, found no device, could not be parsed, or errored). The run's last visit, "
+           "to the ", f_cimg, " image (visit number ", f_cvis, "), was cut by the deadline after ", f_crun, " of its ",
+           f_cof, " legs. Figure `stress-timeline`.")
     d.blank()
     d.line("Its native-oracle sweep covered ", f_cases, " cases in all, of which ", f_tile, " (", f_tilep, ") came from "
            "items that exercise the tile and ", f_host, " from items that run in libcft's host code on the box's CPU, "
@@ -649,8 +664,10 @@ def build(rd, ctx):
            "quad image loaded, ", pw["single"], " W with the single and ", pw["deep"], " W with the deep one, and the "
            "highest sample was ", f_peak, " W. Figure `stress-telemetry`.")
     d.blank()
-    d.line("Clock: in the ", f_att, " timing attempts the ledger records for the U50, one tile closed timing at up to ",
-           f_c1, " MHz and four tiles at up to ", f_c4, " MHz; ", f_cm, " of the attempts missed. Figure `hw-clock`.")
+    d.line("Clock: the figure `hw-clock` draws the kernel slack of ", f_att, " U50 builds that it reads from the ledger, ",
+           f_cm, " of them missed; of the builds drawn, one tile closed timing at up to ", f_c1, " MHz and four tiles at up "
+           "to ", f_c4, " MHz. It lists ", f_left, " other figures of slack that it does not draw, each with the reason, and "
+           "it does not say there are no others.")
     d.blank()
     d.line("Speed: against the fastest real software the tile is ahead in ", f_wins, " of ", f_cells, " comparisons, by "
            "up to ", f_best, "x, and behind in ", f_loss, ", by up to ", f_worst, "x. Figure `perf-speedup`, which draws "
