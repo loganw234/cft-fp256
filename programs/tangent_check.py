@@ -1881,7 +1881,8 @@ def leg_routines(count, rng):
 # exact evaluations take it - a central difference in high precision holds
 # the derivative itself (M1's question 10, mpmath accepted). The compiler
 # carries the six since item 4; compiled images of generated sources holding
-# them are item 5's legs (the committed references are legs G, H and J's).
+# them are leg N's (item 5, below; the committed references are legs G, H
+# and J's).
 
 M1_SHAPES = {
     "one of each, a map": (
