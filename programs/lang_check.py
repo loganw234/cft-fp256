@@ -21,6 +21,18 @@ lane at the final step - the step map is many-to-one at the ulp scale
 many lanes and at several step counts: the image's REPEAT patched to 1,
 2 and 5 as well as its own count, against the interpreter's checkpoints.
 
+Every comparison is made under the marked-lane rule (M1's build, item 5;
+the section "the marked-lane rule" below states it, and tangent_check.py
+shares it). The interpreter is run lane by lane, so that each lane's own
+flags are known; an image of the math library's six can MARK a lane (bit 7
+of R23's byte, STATUS[6]) whose last bit its own test could not decide,
+and that lane is replayed - the definition's values and flags stand in for
+the image's, whose guess is counted and never required - while every
+other lane equals the definition bit for bit, its byte's five flags
+included, and FLAGS and STATUS are held to the bytes. An image that
+marks no lane is held as it was before the rule, and its per-lane bytes
+besides.
+
   A  the corpus: the three references at fp32, fp64, fp128 and fp256 and
      Lorenz-63 and Henon-Heiles under every attribute, then systems a
      seeded generator writes as .cftl text - every built-in, arrays
@@ -123,13 +135,44 @@ many lanes and at several step counts: the image's REPEAT patched to 1,
 
   I2 the routines' coverage: each of div and sqrt compiled and run at
      every format and under every attribute and integrator, the five
-     flags raised by those runs, and call loops run of both
+     flags raised by those runs, and call loops run of both; and, since
+     M1's build, item 5, the same for each of the math library's six -
+     every format, attribute and integrator, the five flags, the marks
+     seen and replayed (at fp64, fp128 and fp256 for the four with a
+     structured family), the call loops of the six, the refusals on
+     revision 7
+  O  the marked-lane rule's controls (M1's build, item 5): the golden
+     corpus's markstep, a hand-written image that marks lanes on purpose
+     (certificates/programs/markstep-fp64.cfta; no mpmath), run as it is
+     and with a fault planted in a copy of its runs - a bit of an
+     unmarked lane's value or byte, a flag, STATUS[6] against the bytes,
+     FLAGS against the bytes, a mark lost between checkpoints, a marked
+     lane's guess wrong in its value or its flags - each required to fail
+     the check it breaks and no other, and the guesses to pass
+  N  the math library's six, compiled and run (M1's build, item 5; needs
+     mpmath, else skipped by name): (N1) each alone, at every format and
+     attribute, each integrator among the twenty, on ordinary, special,
+     edge and structured-family arguments - the families' centres
+     (python/tests/mathlib_family.py), the anchors whose guess is wrong
+     among them, every lane the theory demands marked, marked - equal to
+     the interpreter under the rule, and refused `target-feature` on
+     revision 7's four targets; (N2) generated sources that call them
+     beside division, the root and the other operations, in equations and
+     lets, with and without tangent vectors, under every integrator,
+     format and attribute, compiled for the software targets, refused on
+     revision 7's and through the command line, run at 1, 2 and 5 steps
+     with structured arguments in the components the calls read; (N3) the
+     call loop over batches of the six, the constant lowered as leg L
+     lowers it
 
 The legs come in two groups, each with its tally (GROUPS, below): core,
 legs A to H and J with I its tally, which is the `lang` stage, in the
-quick budget; and routines, legs K, K2 and L with I2 its tally, the
+quick budget; and routines, legs K, K2, L, O and N with I2 its tally, the
 `lang-routines` stage, in the gate budget (verify/run.sh). `--group`
-runs a group; with no selection both run. A tally runs when every leg
+runs a group; with no selection both run. `--six N` is the number of
+generated sources in leg N2, and `--six-all` the larger draw of N1 and N2
+(every centre of each family, both neighbours, twelve ordinary lanes, every
+edge), minutes more than the gate-sized default. A tally runs when every leg
 of its group ran; where `--only` ran part of a group, its tally is a
 SKIP line.
 
@@ -314,31 +357,371 @@ def run_image(image, c, states, lane_params=None, bank=None, depth=None,
                    scratch_in=sin, scratch_depth=d)
 
 
-def compare(c, states, lane_params, top, bank=None, interp=None):
-    """seq.py on the image at 1, 2, 5 and `top` steps against lang.run's
-    checkpoints. -> (failing lanes, first step a lane or FLAGS parts,
-    flags equal everywhere)."""
-    marks = sorted({s for s in CHECKPOINTS if s < top} | {top})
-    ref = lang.run(c.graph, states, top, lane_params=lane_params,
-                   at=tuple(s for s in marks if s != top),
-                   **(interp or {}))
-    n, m = c.ir.n_state, c.ir.m
+# ---- the marked-lane rule (M1's build, item 5) ------------------------------------
+#
+# A routine of the math library's six marks a lane whose last bit its own
+# test could not decide (R24's raise with bit 7: the lane's byte in R23's
+# block carries [7], and STATUS[6] is set). The image's value in that lane is
+# a GUESS, and the definition - lang.run - decides it: the lane is REPLAYED
+# by lang.run of that lane alone, over the same steps from the same start,
+# as python/cft_golden/cert2.py's replay_segment replays a certified
+# segment's marked lanes (docs/LANGUAGE.md, "A marked lane"). Every
+# comparison of an image with lang.run, in this file and in tangent_check.py,
+# is this one: compare(), compare_routine() and the tangent stage's compare()
+# call rule_compare(), which runs the image on seq.py at each checkpoint and
+# hands the run to judge().
+#
+# THE RULE, at every checkpoint (1, 2, 5 and the image's own steps):
+#   R1  an unmarked lane equals the definition bit for bit: its state, its
+#       tangents and its lane params;
+#   R2  an unmarked lane's byte is exactly the definition's flags for that
+#       lane: [4:0] the lane's own five, [7:5] clear;
+#   R3  a marked lane is replayed: the definition's values and flags stand in
+#       for its own. Its guess is compared as a guess - counted, and
+#       reported when it is wrong in its values or in its flags - and never
+#       required. A marked lane's byte may carry [4:0] and the mark, and
+#       nothing in [6:5];
+#   R4  the run's FLAGS after the replay - the OR of the corrected bytes'
+#       [4:0], a marked lane's the definition's - equal lang.run's FLAGS;
+#   R5  STATUS is zero but for STATUS[6];
+#   R6  STATUS[6] is set exactly when some lane's byte is marked;
+#   R7  the block is the run's own: FLAGS, as the run reports it, is the OR of
+#       the raw bytes' [4:0] (seq.py's statement of R23, as the model's
+#       docstring makes it);
+#   R8  a mark is never lost between checkpoints: a lane marked at one is
+#       marked at every later one.
+# For an image that marks no lane the rule is the one before it - states,
+# tangents, lane params, FLAGS and STATUS equal the interpreter's - and the
+# per-lane bytes of R2 beside it: what the lockstep run could not show, since
+# it gave the OR of the lanes' FLAGS and no lane's own.
+#
+# A LANE MARKED AT ONE CHECKPOINT AND THE NEXT. Each checkpoint is its own
+# run of the image from the initial states, the image's REPEAT patched to the
+# checkpoint's steps (image_at), judged against the definition of that many
+# steps from the same initial states: nothing is carried from one checkpoint's
+# replay to the next, as cert2 carries a segment's corrected end state into
+# the next segment's start - there is no chain here, and each checkpoint is
+# one segment whose start is the initial state. That is the definition's own
+# rule: a lane's value after s steps is lang.run of that lane for s steps, a
+# function of its initial state alone. The runs are one deterministic
+# computation of which each shorter is the prefix, so a lane marked at s is
+# marked at every later checkpoint (R8) and its replay at the later one is the
+# definition again from the initial state, never the earlier replay's end; a
+# lane marked only at the later one (its mark came after step s) is judged
+# unmarked, bit for bit, at s.
+
+LANE_IEEE = seq.LANE_FLAGS_IEEE                 # R23's byte: [4:0] the five flags
+LANE_AUX = seq.LANE_DEPOSIT_OVERFLOW | seq.LANE_SCRATCH_RANGE      # [6:5]
+LANE_MARKED = seq.LANE_MARKED                   # [7]
+STATUS_MARKED = seq.STATUS_MARKED               # STATUS[6]
+
+# The checks a verdict names. The first two fail a lane; the rest fail the
+# run's FLAGS and STATUS part (flags_ok).
+RULE_LANE = ("lane-value", "lane-byte")
+RULE_RUN = ("flags-word", "flags-replayed", "status-other", "status-mark",
+            "marks-vanish", "block-length")
+
+
+class Ref:
+    """The definition, lane by lane: lang.run of each lane ALONE, which is
+    the lane as it is in the lockstep run (the interpreter's lanes are
+    independent, docs/LANGUAGE.md), through every checkpoint. It answers what
+    a lang.run Run answers (.states, .flags, .at, .tangents, .at_tangents,
+    .primal_flags), and what a Run cannot: each lane's own FLAGS, which R2
+    holds a lane's byte to. A marked lane's replay is this: its values and
+    flags at the checkpoint, from the initial state."""
+
+    def __init__(self, graph, states, top, marks, lane_params=None,
+                 tangents=None, interp=None):
+        self.top, self.marks = top, tuple(marks)
+        at = tuple(s for s in marks if s != top)
+        self.lanes = [lang.run(
+            graph, [st], top, at=at,
+            lane_params=None if lane_params is None else [lane_params[k]],
+            tangents=None if tangents is None else [tangents[k]],
+            **(interp or {})) for k, st in enumerate(states)]
+
+    def _lane(self, s, k):
+        r = self.lanes[k]
+        if s == self.top:
+            return r.states[0], r.flags, (r.tangents[0] if r.tangents
+                                          else None)
+        (sts, fl) = r.at[s]
+        return sts[0], fl, (r.at_tangents[s][0] if r.at_tangents else None)
+
+    def lane_flags(self, s, k):
+        """Lane k's own flags through s steps: lang.run of it alone."""
+        return self._lane(s, k)[1]
+
+    def vector(self, s, k, lane_params):
+        """What the image's lane k must hold after s steps: the state, the
+        tangent vectors in order, the lane params."""
+        st, _fl, tv = self._lane(s, k)
+        return list(st) + [v for vec in (tv or ()) for v in vec] \
+            + list(lane_params)
+
+    def flags_at(self, s):
+        """lang.run's FLAGS through s steps: the OR of the lanes'."""
+        out = 0
+        for k in range(len(self.lanes)):
+            out |= self.lane_flags(s, k)
+        return out
+
+    @property
+    def states(self):
+        return [r.states[0] for r in self.lanes]
+
+    @property
+    def flags(self):
+        return self.flags_at(self.top)
+
+    @property
+    def primal_flags(self):
+        out = 0
+        for r in self.lanes:
+            out |= r.primal_flags
+        return out
+
+    @property
+    def tangents(self):
+        return [r.tangents[0] for r in self.lanes] if self.lanes and \
+            self.lanes[0].tangents is not None else None
+
+    @property
+    def at(self):
+        return {s: ([self._lane(s, k)[0] for k in range(len(self.lanes))],
+                    self.flags_at(s)) for s in self.marks if s != self.top}
+
+    @property
+    def at_tangents(self):
+        if not self.lanes or self.lanes[0].tangents is None:
+            return {}
+        return {s: [self._lane(s, k)[2] for k in range(len(self.lanes))]
+                for s in self.marks if s != self.top}
+
+
+class Checkpoint:
+    """One checkpoint's verdict (judge): the unmarked lanes that differ, the
+    lanes replayed with the guesses that were wrong, and the names of the
+    rule's checks that failed."""
+
+    def __init__(self):
+        self.failing = set()
+        self.marked = []            # lanes whose byte carries the mark
+        self.wrong = []             # of them, guessed values that differ
+        self.wrong_tangents = []    # of those, the tangents among them
+        self.wrong_flags = []       # of them, a guessed byte that differs
+        self.broken = set()
+        self.why = []
+
+    @property
+    def flags_ok(self):
+        return not self.broken & set(RULE_RUN)
+
+    def fail(self, name, why):
+        self.broken.add(name)
+        if len(self.why) < 4:
+            self.why.append(f"{name}: {why}")
+
+
+def judge(outs, wants, got_bytes, got_flags, got_status, want_lane_flags,
+          want_flags, before=None, spans=(("values", 0, None),)):
+    """The rule (above) on one run. `outs` and `wants` are each lane's
+    values as the image left them and as the definition has them, `spans`
+    the parts of a lane they hold ((name, from, to): its states, its
+    tangents, its lane params); `got_*` the run's block, FLAGS and STATUS;
+    `want_lane_flags` each lane's own flags by the definition and
+    `want_flags` their OR; `before` the lanes marked at the previous
+    checkpoint, if there was one. -> a Checkpoint."""
+    cp = Checkpoint()
+    n = len(outs)
+    if len(got_bytes) != n:
+        cp.fail("block-length", f"{len(got_bytes)} bytes for {n} lanes")
+        return cp
+    raw = corrected = 0
+    for k in range(n):
+        b = got_bytes[k]
+        raw |= b & LANE_IEEE
+        differ = [name for name, lo, hi in spans
+                  if outs[k][lo:hi] != wants[k][lo:hi]]
+        if b & LANE_MARKED:
+            # R3: replayed, the guess counted and never required
+            cp.marked.append(k)
+            if differ:
+                cp.wrong.append(k)
+                if "tangents" in differ:
+                    cp.wrong_tangents.append(k)
+            if b & LANE_IEEE != want_lane_flags[k]:
+                cp.wrong_flags.append(k)
+            if b & LANE_AUX:
+                cp.fail("status-other", f"marked lane {k}'s byte {b:#04x} "
+                        f"carries [6:5]")
+            corrected |= want_lane_flags[k]
+        else:
+            # R1, R2: bit for bit, values and byte
+            if differ:
+                cp.failing.add(k)
+                cp.fail("lane-value", f"lane {k}'s {' and '.join(differ)} "
+                        f"differ from the definition's")
+            if b != want_lane_flags[k]:
+                cp.failing.add(k)
+                cp.fail("lane-byte", f"lane {k}'s byte is {b:#04x}, the "
+                        f"definition's flags {want_lane_flags[k]:#04x}")
+            corrected |= b & LANE_IEEE
+    if corrected != want_flags:                                     # R4
+        cp.fail("flags-replayed", f"FLAGS after the replay {corrected:#04x}, "
+                f"lang.run's {want_flags:#04x}")
+    if got_status & ~STATUS_MARKED:                                 # R5
+        cp.fail("status-other", f"STATUS {got_status:#04x}")
+    if bool(got_status & STATUS_MARKED) != bool(cp.marked):         # R6
+        cp.fail("status-mark", f"STATUS {got_status:#04x} with "
+                f"{len(cp.marked)} lanes marked")
+    if got_flags != raw:                                            # R7
+        cp.fail("flags-word", f"FLAGS {got_flags:#04x}, the bytes' OR "
+                f"{raw:#04x}")
+    if before is not None and not set(before) <= set(cp.marked):    # R8
+        cp.fail("marks-vanish", f"lanes {sorted(set(before) - set(cp.marked))}"
+                f" were marked at the checkpoint before")
+    return cp
+
+
+class Verdict:
+    """rule_compare's answer: the rule over every checkpoint of a run."""
+
+    def __init__(self, ref):
+        self.ref = ref
+        self.per = {}
+        self.failing = set()
+        self.first = None
+        self.flags_ok = True
+        self.broken = set()
+
+    def add(self, s, cp):
+        self.per[s] = cp
+        self.failing |= cp.failing
+        self.broken |= cp.broken
+        if cp.failing or not cp.flags_ok:
+            self.first = s if self.first is None else self.first
+        self.flags_ok = self.flags_ok and cp.flags_ok
+
+    @property
+    def top(self):
+        return self.per[self.ref.top]
+
+    def _union(self, attr):
+        return sorted({k for cp in self.per.values()
+                       for k in getattr(cp, attr)})
+
+    @property
+    def marked(self):
+        """The lanes marked at any checkpoint (R8 makes the last
+        checkpoint's the same)."""
+        return self._union("marked")
+
+    @property
+    def wrong(self):
+        """The lanes whose guess was wrong in its values at any checkpoint:
+        a later step can absorb a wrong last bit, which was wrong all the
+        same."""
+        return self._union("wrong")
+
+    @property
+    def wrong_tangents(self):
+        return self._union("wrong_tangents")
+
+    @property
+    def wrong_flags(self):
+        return self._union("wrong_flags")
+
+    def describe(self):
+        """What failed, for a check's message: the names, and the first
+        sentences of the first checkpoint that failed."""
+        if self.first is None:
+            return "none"
+        cp = self.per[self.first]
+        return (f"{', '.join(sorted(self.broken))}; at {self.first} steps: "
+                + "; ".join(cp.why))
+
+
+# the stage's tally of what the rule saw, every comparison counted once a lane
+# over its checkpoints: lanes judged, lanes marked (and so replayed), the
+# guesses that were wrong in their values and in their flags at any
+# checkpoint; by a leg's tag too
+MARKS = {"comparisons": 0, "lanes": 0, "marked": 0, "wrong": 0,
+         "wrong_tangents": 0, "wrong_flags": 0, "by_tag": {}}
+
+
+def note_marks(v, tag=None):
+    for d in [MARKS] + ([MARKS["by_tag"].setdefault(
+            tag, {"comparisons": 0, "lanes": 0, "marked": 0, "wrong": 0,
+                  "wrong_tangents": 0, "wrong_flags": 0})] if tag else []):
+        d["comparisons"] += 1
+        d["lanes"] += len(v.ref.lanes)
+        d["marked"] += len(v.marked)
+        d["wrong"] += len(v.wrong)
+        d["wrong_tangents"] += len(v.wrong_tangents)
+        d["wrong_flags"] += len(v.wrong_flags)
+
+
+def checkpoints(top):
+    """The steps an image is run for: CHECKPOINTS below `top`, and `top`."""
+    return sorted({s for s in CHECKPOINTS if s < top} | {top})
+
+
+def rule_compare(c, states, top, *, lane_params=None, tans=None, bank=None,
+                 interp=None, width=None, runner=None, ref=None, tag=None,
+                 tally=True):
+    """seq.py on the image at 1, 2, 5 and `top` steps, judged by the rule
+    against lang.run's definition of every lane. `tans` are the tangent
+    vectors of a system that carries them (lang.run's), `width` how much of
+    each lane the comparison reads (all of it: states, tangents, lane
+    params; a routine's legs read states and tangents), `runner(s)` a
+    stand-in for the run (the rule's controls plant their faults in it),
+    `ref` a definition already made, `tag` the leg's name for the tally and
+    `tally` false for a control, which is not the stage's own evidence.
+    -> a Verdict."""
+    marks = checkpoints(top)
+    if ref is None:
+        ref = Ref(c.graph, states, top, marks, lane_params, tans, interp)
+    g = c.ir
+    m = g.m
+    w = m if width is None else width
     lp = lane_params
     if lp is None:
-        lp = [[b for _n, _d, b in c.ir.lane] for _ in states]
-    failing, first, flags_ok = set(), None, True
+        lp = [[b for _n, _d, b in g.lane] for _ in states]
+    block = c.scratch_block(states, lane_params, tans)
+    if runner is None:
+        def runner(s):
+            return run_image(image_at(c.image, s), c, states, lane_params,
+                             bank, block=block)
+    # a lane's parts, as far as the comparison reads them
+    spans = [(name, lo, min(hi, w)) for name, lo, hi in
+             (("states", 0, g.n_primal), ("tangents", g.n_primal, g.n_state),
+              ("lane params", g.n_state, m)) if lo < min(hi, w)]
+    v = Verdict(ref)
+    before = None
     for s in marks:
-        r = run_image(image_at(c.image, s), c, states, lane_params, bank)
-        want, wflags = (ref.states, ref.flags) if s == top else ref.at[s]
-        for k in range(len(states)):
-            out = r.scratch_out[k * m:(k + 1) * m]
-            if out[:n] != want[k] or out[n:] != list(lp[k]):
-                failing.add(k)
-                first = s if first is None else first
-        if r.flags != wflags or r.status != 0:
-            flags_ok = False
-            first = s if first is None else first
-    return failing, first, flags_ok, ref
+        r = runner(s)
+        cp = judge([r.scratch_out[k * m:k * m + w]
+                    for k in range(len(states))],
+                   [ref.vector(s, k, lp[k])[:w] for k in range(len(states))],
+                   r.lane_flags, r.flags, r.status,
+                   [ref.lane_flags(s, k) for k in range(len(states))],
+                   ref.flags_at(s), before, spans)
+        v.add(s, cp)
+        before = cp.marked
+    if tally:
+        note_marks(v, tag)
+    return v
+
+
+def compare(c, states, lane_params, top, bank=None, interp=None):
+    """seq.py on the image at 1, 2, 5 and `top` steps against lang.run's
+    checkpoints, under the marked-lane rule above. -> (failing lanes, first
+    step a lane or FLAGS parts, flags equal everywhere, the definition)."""
+    v = rule_compare(c, states, top, lane_params=lane_params, bank=bank,
+                     interp=interp)
+    return v.failing, v.first, v.flags_ok, v.ref
 
 
 # ---- the generator ------------------------------------------------------
@@ -2233,36 +2616,10 @@ FLAG_TARGETS = ["sw", "u50-rev8", "u50-rev8-quad", "u50-rev8-deep"]
 def compare_routine(c, states, tans, top):
     """compare() with tangent vectors as well: seq.py on the image at 1, 2,
     5 and `top` steps against lang.run's checkpoints - states, tangents and
-    FLAGS. -> (failing lanes, first step a lane or FLAGS parts, flags equal
-    everywhere, the reference run)."""
-    marks = sorted({s for s in CHECKPOINTS if s < top} | {top})
-    ref = lang.run(c.graph, states, top, at=tuple(s for s in marks
-                                                  if s != top),
-                   tangents=tans)
-    g = c.ir
-    m, n, ns = g.m, g.n_primal, g.n_state
-    block = c.scratch_block(states, None, tans)
-    failing, first, flags_ok = set(), None, True
-    for s in marks:
-        r = run_image(image_at(c.image, s), c, states, block=block)
-        if s == top:
-            want, wflags = ref.states, ref.flags
-            wt = ref.tangents if tans is not None else None
-        else:
-            want, wflags = ref.at[s]
-            wt = ref.at_tangents[s] if tans is not None else None
-        for k in range(len(states)):
-            out = r.scratch_out[k * m:(k + 1) * m]
-            bad_lane = out[:n] != want[k]
-            if wt is not None:
-                bad_lane |= out[n:ns] != [v for vec in wt[k] for v in vec]
-            if bad_lane:
-                failing.add(k)
-                first = s if first is None else first
-        if r.flags != wflags or r.status != 0:
-            flags_ok = False
-            first = s if first is None else first
-    return failing, first, flags_ok, ref
+    FLAGS - under the marked-lane rule. -> (failing lanes, first step a lane
+    or FLAGS parts, flags equal everywhere, the definition)."""
+    v = rule_compare(c, states, top, tans=tans, width=c.ir.n_state)
+    return v.failing, v.first, v.flags_ok, v.ref
 
 
 def g_routine_expr(rng, states, ops, depth):
@@ -2744,6 +3101,978 @@ def leg_call_loops(rng, segrun=None, audit=None, work=None):
             Path(audit).resolve() if have_audit else None, rng, work)
 
 
+# ---- O: the marked-lane rule's controls (M1's build, item 5) ----------------------
+#
+# A check that cannot fail is a wrong answer, and the rule above can fail only
+# on a run that breaks it - which the legs' real images never do, once they are
+# right. So its controls are real runs with a fault planted in a copy of the
+# run (a Result's values, bytes, FLAGS or STATUS), each judged by rule_compare
+# itself and required to fail the check the fault breaks and no other, and the
+# unplanted runs required to pass. The subject is the golden corpus's markstep
+# (certificates/programs/markstep-fp64.cfta; its source, markstep-fp64.cftl,
+# is the definition): a hand-written image that marks lanes on purpose without
+# the math library's generator, so these controls need no mpmath and run on
+# every host. A mutation of the rule in a copy of this file - the replay
+# applied to every lane, a marked lane's guess required, the STATUS[6] check
+# removed - turns the control that holds that check red, by name (the
+# parcel's plants, docs/VALIDATION.md).
+
+CERT_PROGRAMS = ROOT / "certificates" / "programs"
+# markstep's lanes (k, x): the counter k decides where its test marks
+MARKSTEP_LANES = (("7", "0.3333"),      # marked at step 1, a wrong last bit
+                  ("106", "0.5"),       # marked at step 1, its value right
+                  ("50", "0.2"),        # never marked
+                  ("3", "0.7"),         # marked at step 5 only (k = 7 there)
+                  ("20", None))         # never marked; x the least subnormal
+MARKSTEP_TOP = 8
+
+
+def markstep_subject():
+    """markstep as a subject of the rule, in the shape rule_compare reads a
+    compilation: its source's graph, its image and bank (the source's a and
+    b rounded once, 1, 7, 106 and the raw words 1, 0x81 - invalid with the
+    mark - and 0), and the layout of two values a lane."""
+    import types
+    f64 = FORMATS["fp64"]
+
+    def d64(text):
+        return K.round_once(f64, sf.RND_RNE, Fraction(text))[0]
+    src = (CERT_PROGRAMS / "markstep-fp64.cftl").read_bytes().decode("ascii")
+    g = lang.compile_text(src, "markstep").graph
+    img = asm.assemble((CERT_PROGRAMS / "markstep-fp64.cfta")
+                       .read_text(encoding="utf-8"), "markstep-fp64")
+    pa = {p[0]: p[2] for p in g.param}
+    bank = [pa["a"], pa["b"], d64("1"), d64("7"), d64("106"), 1, 0x81, 0]
+    c = types.SimpleNamespace(
+        graph=g, image=img, depth=seq.SCRATCH_D,
+        ir=types.SimpleNamespace(m=2, n_state=2, n_primal=2, T=0, lane=[]),
+        lowered=types.SimpleNamespace(bank_values=lambda: list(bank)),
+        scratch_block=lambda states, lp=None, tans=None:
+        [v for st in states for v in st])
+    lanes = [[d64(k), sf.min_subnormal_bits(f64) if x is None else d64(x)]
+             for k, x in MARKSTEP_LANES]
+    return c, lanes
+
+
+class Fixture:
+    """An image's real runs at the rule's checkpoints, and verdicts on copies
+    of them with a fault planted: plant(step, run) edits the copy of the run
+    at that checkpoint."""
+
+    def __init__(self, c, states, top, tans=None, lane_params=None,
+                 width=None):
+        self.c, self.states, self.top, self.tans = c, states, top, tans
+        self.lane_params, self.width = lane_params, width
+        block = c.scratch_block(states, lane_params, tans)
+        self.real = {s: run_image(image_at(c.image, s), c, states,
+                                  lane_params, None, block=block)
+                     for s in checkpoints(top)}
+        self.ref = Ref(c.graph, states, top, checkpoints(top), lane_params,
+                       tans)
+
+    def verdict(self, plant=None):
+        import types
+
+        def runner(s):
+            r = self.real[s]
+            q = types.SimpleNamespace(scratch_out=list(r.scratch_out),
+                                      lane_flags=list(r.lane_flags),
+                                      flags=r.flags, status=r.status)
+            if plant is not None:
+                plant(s, q)
+            return q
+        return rule_compare(self.c, self.states, self.top, tans=self.tans,
+                            lane_params=self.lane_params, width=self.width,
+                            runner=runner, ref=self.ref, tally=False)
+
+
+def at_step(step, *edits, onward=False):
+    """A plant: each edit(run) at one checkpoint, or at it and every later
+    one (a mark planted on a lane persists, as a real mark does)."""
+    def plant(s, q):
+        if s == step or (onward and s > step):
+            for edit in edits:
+                edit(q)
+    return plant
+
+
+def value_edit(k, m, slot, bit=0):
+    """Flip one bit of lane k's value at `slot` of its m."""
+    def edit(q):
+        q.scratch_out[k * m + slot] ^= 1 << bit
+    return edit
+
+
+def byte_edit(k, mask=0, clear=0):
+    """Set and clear bits of lane k's byte."""
+    def edit(q):
+        q.lane_flags[k] = (q.lane_flags[k] | mask) & ~clear
+    return edit
+
+
+def flags_edit(mask=0, clear=0):
+    def edit(q):
+        q.flags = (q.flags | mask) & ~clear
+    return edit
+
+
+def status_edit(mask=0, clear=0):
+    def edit(q):
+        q.status = (q.status | mask) & ~clear
+    return edit
+
+
+def leg_rule():
+    section("O. the marked-lane rule's controls (M1's build, item 5): "
+            "markstep, a hand-written image that marks lanes on purpose, run "
+            "as it is and with a fault planted in a copy of its runs")
+    fx = Fixture(*markstep_subject(), MARKSTEP_TOP)
+    m = 2                               # values a lane: k, x
+
+    def value(k, bit=0):
+        return value_edit(k, m, 1, bit)
+    byte, flags, status = byte_edit, flags_edit, status_edit
+
+    base = fx.verdict()
+    per = {s: cp for s, cp in base.per.items()}
+    print(f"  markstep at 1, 2, 5 and 8 steps: lanes marked "
+          f"{ {s: cp.marked for s, cp in per.items()} }; guesses wrong in "
+          f"their values {  {s: cp.wrong for s, cp in per.items()} }, in "
+          f"their flags {  {s: cp.wrong_flags for s, cp in per.items()} }")
+    # O1: the unplanted run, a marking image
+    check(not base.failing and base.flags_ok and base.first is None and
+          per[1].marked == [0, 1] and per[2].marked == [0, 1] and
+          per[5].marked == [0, 1, 3] and per[8].marked == [0, 1, 3] and
+          per[1].wrong == [0] and per[2].wrong == [0] and
+          3 in per[5].wrong and per[1].wrong_flags == [0, 1],
+          "O1. markstep as it is: lanes k = 7 (a wrong last bit) and k = 106 "
+          "(its value right) marked at step 1, k = 3 only from step 5; each "
+          "marked lane replayed - a guess wrong in its value counted, and "
+          "both guesses raising invalid, which the definition does not, "
+          "counted - the other lanes bit for bit with their bytes, FLAGS "
+          "after the replay lang.run's, STATUS[6] set exactly where a byte "
+          "is marked, no mark lost between checkpoints",
+          base.describe())
+    # O2 to O4: a fault in an unmarked lane is red, in its value and in its byte
+    v = fx.verdict(at_step(5, value(2)))
+    check(v.failing == {2} and "lane-value" in v.broken and v.first == 5 and
+          not v.per[1].failing and not v.per[2].failing and
+          not v.per[8].failing and v.flags_ok,
+          "O2. a bit flipped in an unmarked lane's value (lane 2 at 5 steps) "
+          "is red there and only there - lane-value, FLAGS and STATUS fine",
+          v.describe())
+    v = fx.verdict(at_step(2, byte(2, mask=0x02), flags(mask=0x02)))
+    check(v.failing == {2} and {"lane-byte", "flags-replayed"} <= v.broken and
+          "flags-word" not in v.broken and v.first == 2,
+          "O3. a flag in an unmarked lane's byte that the definition does "
+          "not raise (divideByZero, FLAGS kept to the bytes' OR) is red - "
+          "lane-byte, and FLAGS after the replay differ from lang.run's",
+          v.describe())
+    v = fx.verdict(at_step(1, byte(4, clear=0x08), flags(clear=0x08)))
+    check(v.failing == {4} and "lane-byte" in v.broken and v.first == 1,
+          "O4. a flag the definition raises missing from an unmarked lane's "
+          "byte (underflow, lane 4) is red - lane-byte",
+          v.describe())
+    # O5: the unmarked lane with the mark set is replayed, harmlessly
+    v = fx.verdict(at_step(2, byte(2, mask=LANE_MARKED), onward=True))
+    check(not v.failing and v.flags_ok and v.per[1].marked == [0, 1] and
+          v.per[2].marked == [0, 1, 2] and v.per[5].marked == [0, 1, 2, 3] and
+          2 not in v.per[5].wrong and 2 not in v.per[5].wrong_flags,
+          "O5. a lane marked that did not need to be (lane 2 from 2 steps on) "
+          "is replayed, its guess - right in its value and its flags - "
+          "counted as right: a mark is never a fault, and the lane, unmarked "
+          "at 1 step, is judged unmarked there", v.describe())
+    # O6, O7: a marked lane's guess is never required
+    v = fx.verdict(at_step(1, value(1, 52)))
+    check(not v.failing and v.flags_ok and v.per[1].wrong == [0, 1],
+          "O6. a marked lane whose guess is wrong in its value (lane 1, a bit "
+          "flipped, at 1 step) is replayed and the guess counted - the "
+          "rule requires nothing of a guess", v.describe())
+    v = fx.verdict(at_step(5, byte(1, mask=0x04), flags(mask=0x04)))
+    check(not v.failing and v.flags_ok and 1 in v.per[5].wrong_flags and
+          1 in v.per[5].marked,
+          "O7. a marked lane whose guess raised a flag the definition does "
+          "not (overflow, lane 1 at 5 steps) is replayed: its flags are the "
+          "definition's and FLAGS after the replay lang.run's, the guess's "
+          "flags counted", v.describe())
+    # O8, O9: the guess of a lane that was not marked is a fault
+    v = fx.verdict(at_step(1, byte(0, clear=LANE_MARKED)))
+    check(0 in v.failing and {"lane-value", "lane-byte"} <= v.broken and
+          v.first == 1,
+          "O8. a lane marked at the run, whose mark is silenced in its byte "
+          "(lane 0 at 1 step, the mark of a wrong last bit lost), is a fault: "
+          "its guess is wrong and unmarked - lane-value, and lane-byte too, "
+          "the guess having raised invalid", v.describe())
+    # O9: the mark lost between checkpoints (R8): lane 1 unmarked at 5 steps,
+    # its byte and its right value exactly the definition's
+    d5 = fx.ref.lane_flags(5, 1)
+    v = fx.verdict(at_step(5, byte(1, clear=0xFF), byte(1, mask=d5)))
+    check("marks-vanish" in v.broken and v.first == 5 and not v.failing,
+          "O9. a mark lost between checkpoints (lane 1, marked at 1 and 2 "
+          "steps and not at 5, its value and byte exactly the definition's) "
+          "is red - marks-vanish alone", v.describe())
+    # O10 to O12: STATUS against the bytes
+    v = fx.verdict(at_step(2, status(clear=STATUS_MARKED)))
+    check(v.broken == {"status-mark"} and v.first == 2 and not v.failing,
+          "O10. STATUS[6] clear while lanes are marked is red - "
+          "status-mark", v.describe())
+    quiet = Fixture(*markstep_subject(), MARKSTEP_TOP)
+    keep = [2, 4]
+    quiet = Fixture(quiet.c, [quiet.states[i] for i in keep], MARKSTEP_TOP)
+    qbase = quiet.verdict()
+    v = quiet.verdict(at_step(5, status(mask=STATUS_MARKED)))
+    check(not qbase.failing and qbase.flags_ok and not qbase.marked and
+          v.broken == {"status-mark"} and v.first == 5,
+          "O11. an image that marks no lane is the rule before it - states, "
+          "bytes, FLAGS and STATUS equal the interpreter's, no mark, nothing "
+          "reported - and STATUS[6] set with no lane marked is red - "
+          "status-mark", v.describe())
+    v = fx.verdict(at_step(1, status(mask=0x10)))
+    check(v.broken == {"status-other"} and v.first == 1,
+          "O12. STATUS carrying a bit besides STATUS[6] (the deposit "
+          "overflow's) is red - status-other", v.describe())
+    v = fx.verdict(at_step(8, byte(0, mask=seq.LANE_DEPOSIT_OVERFLOW)))
+    check("status-other" in v.broken and not v.failing and v.first == 8,
+          "O13. a marked lane's byte carrying [5], the deposit overflow, "
+          "which no STATUS may show, is red - status-other", v.describe())
+    # O14, O15: FLAGS against the bytes
+    v = fx.verdict(at_step(2, flags(mask=0x02)))
+    check(v.broken == {"flags-word"} and v.first == 2 and not v.failing,
+          "O14. FLAGS, as the run reports it, that is not the OR of the "
+          "bytes' [4:0] is red - flags-word alone", v.describe())
+    v = fx.verdict(at_step(1, lambda q: q.lane_flags.pop()))
+    check(v.broken == {"block-length"} and v.first == 1,
+          "O15. a block that is not one byte a lane is red - block-length",
+          v.describe())
+    check(base.per[8].broken == set() and quiet.verdict().per[8].marked == [],
+          "O16. the controls pass what they should: the unplanted markstep "
+          "and the unplanted markless run break no check",
+          f"{base.per[8].broken}")
+
+
+# ---- N: the math library's six, compiled and run (M1's build, item 5) -------------
+#
+# The compiler carries exp, expm1, exp2, log, log1p and log2 as routines since
+# M1's build, item 4 (cftc's output version 6); the stage holds them as it holds
+# division and the root: every image on seq.py against lang.run, at 1, 2, 5
+# steps, under the marked-lane rule - which is what item 5 adds, since an image
+# of the six can mark a lane. The structured families (python/tests/
+# mathlib_family.py: the arguments next to an exact case, x = c 2^-e for exp,
+# expm1 and log1p, 1 + c ulp for log; Logan's answer to question 4) are put in
+# the lanes on purpose, each centre and its neighbours, so that marks occur
+# where the study counts them; exp2 and log2 have none. All of this needs
+# mpmath (the six's golden functions and their routines' generator), and a
+# host without it skips these legs by name.
+
+SIX = ("exp", "expm1", "exp2", "log", "log1p", "log2")
+FAMILY_FNS = ("exp", "expm1", "log", "log1p")
+FORMATS4 = ("fp32", "fp64", "fp128", "fp256")
+ATTRS5 = ("rne", "rtz", "rdn", "rup", "rmm")
+SHAPES5 = ("map", "maph", "rk4", "euler", "sv")
+# one function alone at one format and attribute: twenty configurations, the
+# shape by the configuration's place among them, so that a function meets each
+# integrator and the rest are maps (a mark is raised at the first call)
+ALONE_SHAPES = ("map", "rk4", "map", "euler", "map", "sv", "map", "maph",
+                "map", "map")
+RND_CODE = {name: code for code, name in sf.RND_NAMES.items()}
+_FAMILY = []
+
+
+def family():
+    """python/tests/mathlib_family: the structured families' committed
+    centres, and the theory that says which lane must mark."""
+    if not _FAMILY:
+        sys.path.insert(0, str(ROOT / "python" / "tests"))
+        try:
+            import mathlib_family
+        finally:
+            sys.path.remove(str(ROOT / "python" / "tests"))
+        _FAMILY.append(mathlib_family)
+    return _FAMILY[0]
+
+
+def sample_centres(centres, fn, fmt, everything=False):
+    """A gate-sized draw of a family's centres, in the list's order: the
+    anchor whose guess is wrong under round-to-nearest if the list holds it
+    (exp's x = 2^-p and expm1's 2^-(p-1), the study's census: python/tests/
+    mathlib_family.py, 3.5; MEASURED over every centre of the committed
+    lists at fp64, fp128 and fp256, the only six), the first three, the last
+    and two spread between; every centre with `everything`."""
+    if everything:
+        return list(centres)
+    anchor = {"exp": (1, fmt.prec), "expm1": (1, fmt.prec - 1)}.get(fn)
+    pick = {anchor} if anchor in centres else set()
+    pick |= set(centres[:3]) | set(centres[-1:])
+    mid = centres[3:-1]
+    if mid:
+        pick |= {mid[i * len(mid) // 2] for i in range(2)}
+    return [c for c in centres if c in pick]
+
+
+def ulp_away(fmt, bits, k):
+    """The encoding k ulps away in magnitude, kept finite and nonnegative."""
+    mag = max(0, min((bits & ~fmt.sign_mask) + k, sf.inf_bits(fmt) - 1))
+    return (bits & fmt.sign_mask) | mag
+
+
+def six_edges(fn, fmt, everything=False):
+    """Arguments beside where the result of exp, expm1 or exp2 overflows or
+    underflows, found by mpmath at 400 digits - each and its next, and with
+    `everything` the one before it and its negation too - and beside
+    log1p's pole."""
+    import mpmath
+    p, rn = fmt.prec, K.round_once
+
+    def enc(q):
+        return rn(fmt, sf.RND_RNE, Fraction(q))[0]
+    out = []
+    with mpmath.workdps(400):
+        ln2 = mpmath.log(2)
+        pts = []
+        if fn in ("exp", "expm1"):
+            pts = [mpmath.log(mpmath.mpf(2) ** (fmt.emax + 1)),
+                   -mpmath.log(mpmath.mpf(2) ** (p - fmt.emin + 1)),
+                   -mpmath.log(mpmath.mpf(2) ** (p - fmt.emin)),
+                   -(p + 1) * ln2, -p * ln2, -(p - 1) * ln2]
+        elif fn == "exp2":
+            pts = [fmt.emax + 1, fmt.emax, fmt.emin - 1, fmt.emin - p,
+                   fmt.emin - p - 1, fmt.emin - p - 2,
+                   mpmath.mpf(fmt.emax) + mpmath.mpf(1) / 2,
+                   fmt.emin - p + mpmath.mpf(1) / 2]
+        if not everything:
+            pts = pts[:3]
+        for v in pts:
+            q = Fraction(int(mpmath.floor(mpmath.mpf(v) * 2 ** (p + 8))),
+                         2 ** (p + 8))
+            b = enc(q)
+            out += [b, ulp_away(fmt, b, 1)]
+            if everything:
+                out += [ulp_away(fmt, b, -1), b ^ fmt.sign_mask]
+    if fn == "log1p":
+        out += [enc(-1), enc(Fraction(-1) + Fraction(1, 2 ** p)),
+                enc(Fraction(-1) - Fraction(1, 2 ** (p - 1))), enc(-2)]
+        if everything:
+            out += [enc(Fraction(-1, 2)), enc(Fraction(-3, 4))]
+    return out
+
+
+def alone_lanes(fn, fmtname, rnd, rng, everything=False):
+    """[(bits, role)]: the arguments one of the six is run on at one format
+    and attribute - a few ordinary ones, the specials (zeros, infinities,
+    both NaNs, one, the subnormal and normal ends), the edges of its range,
+    and the structured family's centres (sample_centres), each with its
+    neighbour a unit in the last place above and, for the first three, the
+    one below. A role beginning `structured` is one the theory
+    (mathlib_family.classify) may demand marked. With `everything` the
+    ordinary lanes are twelve, the edges all, and every centre has both
+    neighbours."""
+    F = FORMATS[fmtname]
+    fam = family()
+    sign, one = F.sign_mask, sf.one_bits(F)
+    lanes, seen = [], set()
+
+    def add(bits, role):
+        if bits not in seen:
+            seen.add(bits)
+            lanes.append((bits, role))
+    lo, hi = (-3, 3) if fn.startswith("exp") or fn == "expm1"         else (Fraction(1, 100), 8)
+    for _ in range(12 if everything else 3):
+        add(full_value(F, rng, lo, hi), "ordinary")
+    for bits, role in ((0, "+0"), (sign, "-0"), (sf.inf_bits(F), "+inf"),
+                       (sf.inf_bits(F, 1), "-inf"), (sf.qnan_bits(F), "qNaN"),
+                       (sf.snan_bits(F), "sNaN"), (one, "1"),
+                       (one | sign, "-1"), (1, "least subnormal"),
+                       (F.man_mask, "greatest subnormal"),
+                       (1 << F.man_w, "least normal"),
+                       (sf.max_normal_bits(F), "greatest normal"),
+                       (sf.max_normal_bits(F, 1), "-greatest normal")):
+        add(bits, role)
+    for b in six_edges(fn, F, everything):
+        add(b, "edge")
+    for i, centre in enumerate(sample_centres(
+            fam.FAMILY.get(fn, {}).get(fmtname, {}).get(rnd, []), fn, F,
+            everything)):
+        x = fam.argument(F, centre)
+        for d, tag in ((0, "centre"), (1, "+1 ulp"), (-1, "-1 ulp")):
+            if d >= 0 or i < 3 or everything:
+                add(ulp_away(F, x, d), f"structured {centre} {tag}")
+    return lanes
+
+
+def alone_text(fn, fmt, rnd, shape):
+    """`next x = fn(x)`, or its flow or Stormer-Verlet form: the call's
+    operand is the state itself at the first step, whatever the integrator."""
+    head = f"system v\nformat {fmt}\nround {rnd}\n"
+    if shape == "sv":
+        return (head + f"state q, p\nd/dt q = p\nd/dt p = {fn}(q)\n"
+                f"step stormer-verlet, h = 1/16, q = (q), p = (p)\n")
+    word, step = {"map": ("next", "step map"),
+                  "maph": ("next", "step map, h = 1/8"),
+                  "rk4": ("d/dt", "step rk4, h = 1/16"),
+                  "euler": ("d/dt", "step euler, h = 1/16")}[shape]
+    rhs = f"{fn}(x) + h" if shape == "maph" else f"{fn}(x)"
+    return head + f"state x\n{word} x = {rhs}\n{step}\n"
+
+
+# The six's own tally (the routines group's I2, from these legs alone): for
+# each function the formats, attributes and integrators an image holding it
+# was compiled and run under, the lanes the rule saw marked and the guesses
+# wrong; the flags those runs raised; the call loops run.
+SCOVER = {"images": 0, "flags": 0, "loops": 0, "looped_calls": 0,
+          "looped_ops": set(), "refusals": 0,
+          "by_op": {fn: {"formats": set(), "rounds": set(),
+                         "integrators": set(), "images": 0, "marked": 0,
+                         "wrong": 0, "wrong_flags": 0, "demanded": 0,
+                         "marked_formats": set()} for fn in SIX}}
+
+
+def scover(c, v, demanded=0):
+    """Count one image of the six run under the rule: `v` its Verdict,
+    `demanded` the lanes the theory demanded marked."""
+    SCOVER["images"] += 1
+    SCOVER["flags"] |= v.ref.flags
+    ops = c.ir.op_counts()
+    for fn, d in SCOVER["by_op"].items():
+        if ops.get(fn):
+            d["images"] += 1
+            d["formats"].add(c.ir.fmt_name)
+            d["rounds"].add(c.ir.rnd_name)
+            d["integrators"].add(c.ir.integrator[0])
+            if len([f for f in SIX if ops.get(f)]) == 1:
+                # one function alone: its marks are its own
+                d["marked"] += len(v.marked)
+                d["wrong"] += len(v.wrong)
+                d["wrong_flags"] += len(v.wrong_flags)
+                d["demanded"] += demanded
+                if v.marked:
+                    d["marked_formats"].add(c.ir.fmt_name)
+    for b in getattr(c, "looped", ()):
+        if b.op in SIX:
+            SCOVER["loops"] += 1
+            SCOVER["looped_calls"] += len(b.calls)
+            SCOVER["looped_ops"].add(b.op)
+
+
+def check_refused_rev7(text, what, wrong, internal, steps=2,
+                       targets=REV7_TARGETS):
+    """Each of revision 7's four targets refuses the source `target-feature`,
+    naming FLAG_CONTROL (CAPS2[14]). -> how many refused."""
+    n = 0
+    for t in targets:
+        try:
+            cftc.compile_text(text, steps, target=t, source=what, stem="n")
+            wrong.append(f"{what} on {t}: compiled")
+        except lang.Refusal as e:
+            if e.name != "target-feature" or \
+                    "FLAG_CONTROL (CAPS2[14])" not in e.sentence:
+                wrong.append(f"{what} on {t}: refused {e.name}, where "
+                             f"target-feature naming FLAG_CONTROL is due "
+                             f"({e.sentence[:80]})")
+            else:
+                n += 1
+        except cftc.InternalError as e:
+            internal.append(f"{what} on {t}: internal error (exit 70): "
+                            f"{str(e)[:120]}")
+    SCOVER["refusals"] += n
+    return n
+
+
+def leg_six_alone(rng, everything=False, fns=None):
+    section("N1. each of the math library's six alone, at every format and "
+            "attribute and each integrator: structured-family arguments put "
+            "in the lanes on purpose, the marks replayed (M1's build, item 5)")
+    if not have_mpmath():
+        skip("N1: the math library's six alone", "python has no mpmath "
+             "module, which their golden functions (python/cft_golden/"
+             "transcend.py) and their routines' generator (python/"
+             "cft_golden/mathlib.py) need (pip install mpmath)")
+        return
+    fam = family()
+    t0 = time.perf_counter()
+    steps = 2
+    for fn in (fns or SIX):
+        wrong, internal, notmarked = [], [], []
+        configs = lanes_n = marked = guess = gflags = gtang = 0
+        demanded = refused = 0
+        by_fmt = {}
+        shapes = set()
+        t1 = time.perf_counter()
+        for fi, fmtname in enumerate(FORMATS4):
+            F = FORMATS[fmtname]
+            for ri, rnd in enumerate(ATTRS5):
+                shape = ALONE_SHAPES[(fi * 5 + ri) % 10]
+                shapes.add(shape)
+                text = alone_text(fn, fmtname, rnd, shape)
+                what = f"{fn} {fmtname} {rnd} {shape}"
+                lanes = alone_lanes(fn, fmtname, rnd, rng, everything)
+                # Stormer-Verlet drifts q by h/2 p before the force is
+                # called: the call's operand is q itself where p is zero
+                states = [[b] if shape != "sv" else
+                          [b, full_value(F, rng, -1, 1) if role == "ordinary"
+                           else 0] for b, role in lanes]
+                try:
+                    c = cftc.compile_text(text, steps, source=what, stem="n")
+                except lang.Refusal as e:
+                    wrong.append(f"{what}: refused {e.name}: "
+                                 f"{e.sentence[:80]}")
+                    continue
+                except cftc.InternalError as e:
+                    internal.append(f"{what}: internal error (exit 70): "
+                                    f"{str(e)[:120]}")
+                    continue
+                v = rule_compare(c, states, steps, width=c.ir.n_state,
+                                 tag=fn)
+                must = [i for i, (b, role) in enumerate(lanes)
+                        if role.startswith("structured") and
+                        fam.classify(F, RND_CODE[rnd], b, None, fn) == "mark"]
+                scover(c, v, len(must))
+                configs += 1
+                lanes_n += len(lanes)
+                marked += len(v.marked)
+                guess += len(v.wrong)
+                gflags += len(v.wrong_flags)
+                demanded += len(must)
+                d = by_fmt.setdefault(fmtname, [0, 0, 0])
+                d[0] += len(v.marked)
+                d[1] += len(v.wrong)
+                d[2] += len(must)
+                if v.failing or not v.flags_ok:
+                    wrong.append(f"{what}: {len(v.failing)} unmarked lanes "
+                                 f"differ; {v.describe()}")
+                lost = [lanes[i][1] for i in must if i not in v.per[1].marked]
+                if lost:
+                    notmarked.append(f"{what}: demanded and not marked: "
+                                     f"{lost[:3]}")
+            # the revision-7 refusals, once a function: at the format its
+            # place among the six decides (a refusal costs a compile)
+            if fmtname == FORMATS4[SIX.index(fn) % 4]:
+                refused += check_refused_rev7(
+                    alone_text(fn, fmtname, "rne", "map"), f"{fn} {fmtname}",
+                    wrong, internal)
+        for f in (internal + wrong + notmarked)[:8]:
+            print(f"        {f}")
+        fmt_line = ", ".join(f"{f}: {a} marked, {b} wrong, {m} demanded"
+                             for f, (a, b, m) in by_fmt.items())
+        print(f"  {fn}: {configs} configurations, {lanes_n} lanes; marked "
+              f"{marked}, guesses wrong in value {guess}, in flags {gflags} "
+              f"({fmt_line}) [{time.perf_counter() - t1:.1f} s]")
+        at = " and ".join(str(s) for s in checkpoints(steps))
+        check(not internal and not wrong and not notmarked and
+              configs == 20 and refused == len(REV7_TARGETS),
+              f"N1. {fn}: 20 configurations (4 formats x 5 attributes, "
+              f"{', '.join(sorted(shapes))}), {lanes_n} lanes at {at} steps "
+              f"- ordinary, special, edge and structured ({demanded} the "
+              f"theory demands marked, every one marked) - equal the "
+              f"interpreter under the marked-lane rule: {marked} lanes "
+              f"marked and replayed, {guess} guesses wrong in their value, "
+              f"{gflags} in their flags; refused `target-feature`, naming "
+              f"FLAG_CONTROL, on revision 7's {len(REV7_TARGETS)} targets "
+              f"({refused})",
+              f"{len(wrong) + len(internal) + len(notmarked)} otherwise")
+    print(f"  ({time.perf_counter() - t0:.1f} s)")
+
+
+# ---- N2: generated sources that call the six --------------------------------------
+
+def g_six(rng, k, tangent=None):
+    """(text, direct, components): a system the language takes that calls
+    the math library's six beside division, the root and the other
+    operations - in equations and, one time in three, in a let - under the
+    integrator, format and attribute that the index decides (all five, four
+    and five within five systems), with or without tangent vectors (with,
+    one vector or two by the index, where `tangent` is true). `direct`
+    lists the (state component, function) pairs where a call reads a
+    component as it is at the first step - a structured argument put in
+    that component marks that call. Under Stormer-Verlet only the position
+    equations' calls do (they are evaluated at the momenta before the half
+    drift); a momentum equation's calls read the drifted position."""
+    shape = SHAPES5[k % 5]
+    fmt = FORMATS4[(k // 5 + k) % 4]
+    rnd = ATTRS5[(k + k // 5) % 5]
+    sv = shape == "sv"
+    comps = ["q0", "q1", "m0", "m1"] if sv else \
+        rng.choice([["x", "y"], ["x", "y", "z"]])
+    lines = [f"system sx{k}", f"format {fmt}", f"round {rnd}",
+             "state " + ", ".join(comps)]
+    if tangent:
+        lines.append("tangent v" + (", w" if k % 3 == 2 else ""))
+    elif tangent is None and rng.random() < 0.4:
+        lines.append("tangent v" + (", w" if rng.random() < 0.3 else ""))
+    params = [f"p{i}" for i in range(rng.randint(0, 1))]
+    if params:
+        lines.append("param " + ", ".join(f"{p} = {rng.choice(LITS[:6])}"
+                                          for p in params))
+    direct, count = [], [0]
+
+    def six_term(pool, allow_direct, force=False):
+        fn = SIX[(k + count[0]) % 6]
+        count[0] += 1
+        s, t = rng.choice(pool), rng.choice(pool)
+        lit = rng.choice(LITS[:6])
+        form = rng.randrange(5) if allow_direct and (force or
+                                                     rng.random() < 0.8) \
+            else rng.choice((5, 6))
+        expr = [f"{fn}({s})", f"{fn}({s}) * {lit}",
+                f"fma({fn}({s}), {t}, {lit})",
+                f"{fn}({s}) / ({t} * {t} + 1)",
+                f"sqrt(abs({fn}({s}))) + {t}",
+                f"{fn}({t} * {s})", f"{fn}(abs({s}) + 1)"][form]
+        if form < 5:
+            direct.append((s, fn))
+        return expr
+    extra = list(params)
+    if not sv and rng.random() < 0.33:
+        lines.append(f"let r = {six_term(comps, True)}")
+        extra.append("r")
+    if sv:
+        reads = {"q0": ["m0", "m1"], "q1": ["m0", "m1"],
+                 "m0": ["q0", "q1"], "m1": ["q0", "q1"]}
+        word, first_eq = "d/dt", len(lines) + 1
+    else:
+        reads = {c: comps + (["h"] if shape == "maph" else [])
+                 for c in comps}
+        word, first_eq = "next" if shape.startswith("map") else "d/dt", \
+            len(lines) + 1
+    for i, c in enumerate(comps):
+        pool = [s for s in reads[c] if s != "h"]
+        allow = (c[0] == "q") if sv else True
+        if (i == 0 and not direct) or rng.random() < 0.75:
+            rhs = six_term(pool, allow, force=(i == 0 and not direct))
+        else:
+            rhs = g_expr(rng, reads[c], 2)
+        lines.append(f"{word} {c} = {rhs}")
+    used = extra + (["h"] if shape == "maph" else [])
+    if used:
+        lines[first_eq - 1] += " + " + " + ".join(used)
+    lines.append({"map": "step map", "maph": "step map, h = 1/8",
+                  "rk4": "step rk4, h = 1/8", "euler": "step euler, h = 1/8",
+                  "sv": "step stormer-verlet, h = 1/8, q = (q0, q1), "
+                        "p = (m0, m1)"}[shape])
+    return "\n".join(lines) + "\n", direct, comps
+
+
+def six_source_lanes(g, rng, direct, comps, k, everything=False):
+    """The lanes a generated source of the six runs on: ordinary ones, the
+    primal's three special lanes, a zero lane, and for each direct call two
+    lanes with the structured family's centres of its function put in its
+    component (the others ordinary). -> (lanes, roles)."""
+    fmt, n = g.fmt, g.n_state
+    fam = family()
+    lanes = lanes_for(fmt, n, rng, 3)
+    lanes += special_lanes(fmt, n, lanes[0], rng)
+    lanes.append([0] * n)
+    roles = ["ordinary"] * 3 + ["special"] * 3 + ["zero"]
+    for s, fn in sorted(set(direct), key=lambda sf_: (comps.index(sf_[0]),
+                                                      sf_[1])):
+        picks = sample_centres(fam.FAMILY.get(fn, {}).get(fmt.name, {})
+                               .get(g.round_name, []), fn, fmt, everything)
+        for j in range(min(2, len(picks))):
+            centre = picks[(k + j) % len(picks)]
+            lane = list(lanes[j % 3])
+            lane[comps.index(s)] = family().argument(fmt, centre)
+            lanes.append(lane)
+            roles.append(("structured", fn, centre, comps.index(s)))
+    return lanes, roles
+
+
+# A refusal costs a compile, so a generated source is compiled for all three
+# software targets and refused by all four of revision 7's for the first
+# SIX_ALL_TARGETS of them, and for sw and u50-rev7 alone after that.
+SIX_ALL_TARGETS = 2
+
+# a generated source may fold a call of one of the six to a constant the
+# language refuses, besides ARTIFACTS: a power of two past every format, a
+# fold that overflows or rounds to zero
+SIX_ARTIFACTS = ARTIFACTS | {"constant-range", "constant-overflow",
+                             "constant-rounds-to-zero"}
+
+
+def leg_six_generated(count, rng, everything=False):
+    section(f"N2. {count} generated sources that call the math library's six "
+            f"beside division, the root and the other operations, compiled "
+            f"for the software targets and run against the interpreter "
+            f"under the marked-lane rule, and refused `target-feature` on "
+            f"revision 7's (M1's build, item 5)")
+    if not have_mpmath():
+        skip("N2: generated sources that call the math library's six",
+             "python has no mpmath module (see N1)")
+        return
+    fam = family()
+    t0 = time.perf_counter()
+    tally, wrong, internal = {}, [], []
+    held = marked = guess = gtan = demanded = flags = refused = 0
+    sixes, kinds, cli = set(), set(), []
+    t_compile = t_run = t_refuse = 0.0
+    for k in range(count):
+        text, direct, comps = g_six(random.Random(f"lang six {k}"), k)
+        what = f"six {k}"
+        try:
+            g = lang.compile_text(text, what).graph
+        except lang.Refusal as e:
+            tally[e.name] = tally.get(e.name, 0) + 1
+            if e.name not in SIX_ARTIFACTS:
+                wrong.append(f"{what}: the language refused {e}")
+            continue
+        used = {op for op in g.op_counts("step") if op in SIX}
+        if not used:
+            wrong.append(f"{what}: none of the six in its step")
+        canon = lang.render_canonical(g)
+        if lang.compile_text(canon, "canonical").graph.to_bytes() != \
+                g.to_bytes():
+            wrong.append(f"{what}: its canonical form reads back as "
+                         f"another graph")
+        lang.render_math(g)
+        try:
+            t1 = time.perf_counter()
+            images = {}
+            for t in (SW_TARGETS if k < SIX_ALL_TARGETS else SW_TARGETS[:1]):
+                c = cftc.compile_text(text, 5, target=t, source=what,
+                                      stem="n")
+                images[t] = c.image
+            t_compile += time.perf_counter() - t1
+            if len(set(images.values())) != 1:
+                wrong.append(f"{what}: the software targets' images differ")
+        except lang.Refusal as e:
+            tally[e.name] = tally.get(e.name, 0) + 1
+            wrong.append(f"{what}: refused {e.name} on the software "
+                         f"targets: {e.sentence[:100]}")
+            continue
+        except cftc.InternalError as e:
+            internal.append(f"{what}: internal error (exit 70): "
+                            f"{str(e)[:120]}")
+            continue
+        lanes, roles = six_source_lanes(g, rng, direct, comps, k, everything)
+        tans = None
+        if g.tangent:
+            tans = [[lanes_for(g.fmt, g.n_state, rng, 1)[0]
+                     for _ in g.tangent] for _ in lanes]
+        t1 = time.perf_counter()
+        v = rule_compare(c, lanes, 5, tans=tans, width=c.ir.n_state,
+                         tag="generated")
+        t_run += time.perf_counter() - t1
+        scover(c, v)
+        flags |= v.ref.flags
+        must = [i for i, r in enumerate(roles)
+                if isinstance(r, tuple) and fam.classify(
+                    g.fmt, RND_CODE[g.round_name], lanes[i][r[3]], None,
+                    r[1]) == "mark"]
+        lost = [roles[i][1:3] for i in must if i not in v.per[1].marked]
+        marked += len(v.marked)
+        guess += len(v.wrong)
+        gtan += len(v.wrong_tangents)
+        demanded += len(must)
+        sixes |= used
+        kinds.add(g.integrator[0])
+        if v.failing or not v.flags_ok:
+            wrong.append(f"{what}: {len(v.failing)} unmarked lanes differ; "
+                         f"{v.describe()}")
+        elif lost:
+            wrong.append(f"{what}: demanded and not marked: {lost[:3]}")
+        else:
+            held += 1
+        t1 = time.perf_counter()
+        refused += check_refused_rev7(
+            text, what, wrong, internal, 5,
+            REV7_TARGETS if k < SIX_ALL_TARGETS else REV7_TARGETS[:1])
+        t_refuse += time.perf_counter() - t1
+        if len(cli) < 2:
+            cli.append((k, text))
+    py = [sys.executable, str(ROOT / "python" / "cftc")]
+    with tempfile.TemporaryDirectory() as tmp:
+        for k, text in cli:
+            src = Path(tmp) / f"six{k}.cftl"
+            src.write_bytes(text.encode("ascii"))
+            out = Path(tmp) / f"sw{k}"
+            p = subprocess.run(py + [str(src), "--steps", "2", "--out",
+                                     str(out)], capture_output=True,
+                               text=True)
+            cfta = out / f"six{k}.cfta"
+            if p.returncode != 0 or not cfta.is_file() or \
+                    "\n  quiet " not in cfta.read_text(encoding="ascii"):
+                wrong.append(f"six {k} through the command line on sw: rc "
+                             f"{p.returncode}, {p.stderr.strip()[:120]}")
+            out = Path(tmp) / f"quad{k}"
+            p = subprocess.run(py + [str(src), "--steps", "2", "--target",
+                                     "u50-rev7-quad", "--out", str(out)],
+                               capture_output=True, text=True)
+            if p.returncode != 3 or not p.stderr.startswith(
+                    "cftc: refused target-feature: ") or out.exists():
+                wrong.append(f"six {k} through the command line on "
+                             f"u50-rev7-quad: rc {p.returncode}, "
+                             f"{p.stderr.strip()[:120]}")
+    for f in (internal + wrong)[:10]:
+        print(f"        {f}")
+    print(f"  outcomes: {dict(sorted(tally.items()))}; the six used: "
+          f"{sorted(sixes)}; integrators {sorted(kinds)}; FLAGS over the "
+          f"{held} sources held: {flags:#x}")
+    print(f"  compile {t_compile:.1f} s, run under the rule {t_run:.1f} s, "
+          f"the refusals {t_refuse:.1f} s")
+    check(not internal, f"no InternalError: {count} generated sources that "
+          f"call the six, on {len(SW_TARGETS) + len(REV7_TARGETS)} targets "
+          f"each", f"{len(internal)} stopped the compiler with an internal "
+          f"error, exit 70")
+    check(not wrong and held >= count // 2 and sixes == set(SIX),
+          f"N2. {held} sources accepted by the language read back, compiled "
+          f"for sw - the first {SIX_ALL_TARGETS} for sw:4096 and sw:32768 "
+          f"too, one image for the three - and run on seq.py equal to the "
+          f"interpreter at 1, 2 and 5 steps, states, tangents and FLAGS, "
+          f"under the marked-lane rule: structured arguments of the families "
+          f"in the lanes ({demanded} the theory demands marked, every one "
+          f"marked), {marked} lanes marked and replayed, {guess} guesses "
+          f"wrong in their values ({gtan} in their tangents too); all six "
+          f"among them, under {', '.join(sorted(kinds))}; each refused "
+          f"`target-feature`, naming FLAG_CONTROL, by u50-rev7, the first "
+          f"{SIX_ALL_TARGETS} by all {len(REV7_TARGETS)} of revision 7's "
+          f"targets ({refused} refusals), and {len(cli)} through the command "
+          f"line (exit 0 on sw with the text's regions, exit 3 on "
+          f"u50-rev7-quad, nothing written) "
+          f"({time.perf_counter() - t0:.1f} s)",
+          f"{len(wrong)} otherwise")
+
+
+def leg_six(count, rng_for, everything=False):
+    """N1 to N3, the math library's six compiled and run (each with its
+    own generator, so that one's lanes do not move another's)."""
+    leg_six_alone(rng_for("six alone"), everything)
+    leg_six_generated(count, rng_for("six generated"), everything)
+    leg_six_loops(rng_for("six loops"), everything)
+
+
+# ---- N3: the call loop over a batch of the six -------------------------------------
+#
+# The step's routines are looped when, inlined, they would pass 32,768
+# instructions (python/cftc/callloop.py), and the constant is the compiler's
+# own. As leg L lowers it for Kepler, it is lowered here for a step whose
+# batches are calls of the six: a batch of two or more calls of one function
+# at one routine depth runs once in a loop, called a record at a time, and
+# a lane that marks inside an iteration is marked all the same (R24's raise
+# is in the loop). A and B differ in where the batches sit: A's three are all
+# at depth 1 (exp, expm1 and log1p, each of two calls), B's log1p calls read
+# the exp calls' results, so its log1p batch is at depth 2.
+
+SIX_LOOPS = {
+    "A": ("system sixloopa\nformat {fmt}\nround {rnd}\nstate a, b, c, d\n"
+          "next a = exp(a) + b * 0.125\n"
+          "next b = exp(b) - expm1(a)\n"
+          "next c = expm1(c) + log1p(d)\n"
+          "next d = log1p(c) * (1/3)\nstep map\n",
+          # which centres go in which component: (component, function)
+          (("a", "exp"), ("b", "exp"), ("c", "expm1"), ("d", "log1p")),
+          [("exp", 1, 2), ("expm1", 1, 2), ("log1p", 1, 2)]),
+    "B": ("system sixloopb\nformat {fmt}\nround {rnd}\nstate a, b, c, d\n"
+          "next a = log1p(exp(a))\nnext b = log1p(exp(b)) * 0.5\n"
+          "next c = expm1(c)\nnext d = expm1(d) - 0.25\nstep map\n",
+          (("a", "exp"), ("b", "exp"), ("c", "expm1"), ("d", "expm1")),
+          [("exp", 1, 2), ("expm1", 1, 2), ("log1p", 2, 2)]),
+}
+# source, format, attribute: A at all four formats, B at two
+SIX_LOOP_CASES = (("A", "fp64", "rtz"), ("A", "fp256", "rup"),
+                  ("B", "fp128", "rdn"))
+
+
+def leg_six_loops(rng, everything=False):
+    from cftc import callloop
+    above = callloop.CALL_LOOP_ABOVE
+    section("N3. the call loop over a batch of the math library's six "
+            "(M1's build, item 5): the constant lowered as leg L lowers it "
+            "for Kepler, every batch looped and the largest alone, run "
+            "against the interpreter under the marked-lane rule")
+    if not have_mpmath():
+        skip("N3: the call loop over a batch of the six", "python has no "
+             "mpmath module (see N1)")
+        return
+    fam = family()
+    t0 = time.perf_counter()
+    wrong, internal = [], []
+    marked = guess = demanded = images = 0
+    for name, fmtname, rnd in SIX_LOOP_CASES:
+        template, places, want_all = SIX_LOOPS[name]
+        text = template.format(fmt=fmtname, rnd=rnd)
+        F = FORMATS[fmtname]
+        size = len(cftc.compile_text(text, 5, source=f"sixloop{name}")
+                   .program.body) + 1
+        try:
+            for low_to, what in ((0, "every batch"),
+                                 (size - 1, "the largest batch alone")):
+                callloop.CALL_LOOP_ABOVE = low_to
+                tag = f"six loop {name} {fmtname} {rnd}, {what}"
+                try:
+                    c = cftc.compile_text(text, 5, source=tag, stem="n")
+                except cftc.InternalError as e:
+                    internal.append(f"{tag}: internal error (exit 70): "
+                                    f"{str(e)[:120]}")
+                    continue
+                looped = sorted((b.op, b.depth, len(b.calls))
+                                for b in c.looped)
+                if low_to == 0:
+                    ok_loops = looped == want_all
+                else:
+                    fsize = {op: len(R.fragment(op, F, RND_CODE[rnd]))
+                             for op, _d, _n in want_all}
+                    best = max(want_all, key=lambda b: (b[2] * fsize[b[0]],
+                                                        -b[1]))
+                    ok_loops = looped == [best]
+                if not ok_loops:
+                    wrong.append(f"{tag}: looped {looped}")
+                g = c.ir
+                lanes = lanes_for(g.fmt, g.n_state, rng, 3, (-2, 2))
+                lanes += special_lanes(g.fmt, g.n_state, lanes[0], rng)
+                lanes.append([0] * g.n_state)
+                roles = ["ordinary"] * 3 + ["special"] * 3 + ["zero"]
+                comps = ["a", "b", "c", "d"]
+                for ci, (comp, fn) in enumerate(places):
+                    cs = fam.FAMILY.get(fn, {}).get(fmtname, {}).get(rnd, [])
+                    for j, centre in enumerate(cs[:2]):
+                        lane = list(lanes[j])
+                        lane[comps.index(comp)] = fam.argument(F, centre)
+                        lanes.append(lane)
+                        roles.append((fn, comp, centre))
+                lists = [fam.FAMILY.get(fn, {}).get(fmtname, {}).get(rnd, [])
+                         for _c, fn in places]
+                everyone = [lst[0] if lst else None for lst in lists]
+                if all(x is not None for x in everyone):
+                    # every component at a centre at once: all its calls mark
+                    lanes.append([fam.argument(F, x) for x in everyone])
+                    roles.append(("all", "abcd", tuple(everyone)))
+                v = rule_compare(c, lanes, 5, width=c.ir.n_state,
+                                 tag="loops")
+                scover(c, v)
+                must = [i for i, r in enumerate(roles)
+                        if isinstance(r, tuple) and r[0] != "all" and
+                        fam.classify(F, RND_CODE[rnd],
+                                     lanes[i][comps.index(r[1])], None,
+                                     r[0]) == "mark"]
+                marked += len(v.marked)
+                guess += len(v.wrong)
+                demanded += len(must)
+                images += 1
+                lost = [roles[i] for i in must if i not in v.per[1].marked]
+                if v.failing or not v.flags_ok:
+                    wrong.append(f"{tag}: {len(v.failing)} unmarked lanes "
+                                 f"differ; {v.describe()}")
+                if lost:
+                    wrong.append(f"{tag}: demanded and not marked: "
+                                 f"{lost[:3]}")
+        finally:
+            callloop.CALL_LOOP_ABOVE = above
+    for f in (internal + wrong)[:10]:
+        print(f"        {f}")
+    cases = ", ".join(f"{n} at {f} under {r}" for n, f, r in SIX_LOOP_CASES)
+    check(not internal and not wrong and images == 2 * len(SIX_LOOP_CASES),
+          f"N3. a step of the six looped, the constant lowered: {images} "
+          f"images - source A (an exp, an expm1 and a log1p batch of two "
+          f"calls, all at depth 1) and source B (a log1p batch at depth 2, "
+          f"reading the exp calls): {cases}; each with every batch looped "
+          f"and with the largest alone - run on seq.py at 1, 2 and 5 steps "
+          f"equal to the interpreter under the marked-lane rule, FLAGS "
+          f"included: structured arguments in the components the calls "
+          f"read ({demanded} the theory demands marked, every one marked, "
+          f"{marked} lanes marked and replayed, in the loops' iterations "
+          f"and out, {guess} guesses wrong) "
+          f"({time.perf_counter() - t0:.1f} s)",
+          f"{len(wrong) + len(internal)} otherwise")
+
+
 # ---- I: coverage ---------------------------------------------------------------
 
 def leg_coverage():
@@ -2810,6 +4139,65 @@ def leg_routine_coverage():
           f"call loops compiled and run: {RCOVER['loops']} loops of "
           f"{RCOVER['looped_calls']} calls, div's and sqrt's",
           f"{RCOVER['loops']} loops, of {sorted(RCOVER['looped_ops'])}")
+    if have_mpmath():
+        six_coverage()
+    else:
+        skip("I2: the math library's six", "python has no mpmath module, "
+             "which their legs (N1 to N3) need; the tally of div and sqrt "
+             "above stands alone")
+
+
+def six_coverage():
+    """The routines tally's second part (M1's build, item 5), from legs N1
+    to N3 and the rule's: each of the math library's six compiled and run at
+    every format, under every attribute and integrator; the five flags those
+    runs raised; the marks seen and replayed, and the guesses that were
+    wrong; the call loops of the six, run; and the refusals on revision 7."""
+    section("I2 (the math library's six). what legs N1 to N3 covered")
+    for fn, d in SCOVER["by_op"].items():
+        print(f"  {fn}: {d['images']} images; formats {sorted(d['formats'])}; "
+              f"attributes {sorted(d['rounds'])}; integrators "
+              f"{sorted(d['integrators'])}; alone, {d['marked']} lanes "
+              f"marked and replayed ({d['demanded']} demanded), "
+              f"{d['wrong']} guesses wrong in value, {d['wrong_flags']} in "
+              f"flags; marks at {sorted(d['marked_formats'])}")
+        check(d["images"] and d["formats"] == set(FORMATS4),
+              f"{fn}, a routine: compiled and run at every format",
+              f"{d['images']} images, at {sorted(d['formats'])}")
+        check(d["rounds"] == set(ATTRS5),
+              f"{fn}: under every attribute, the routine specialised at "
+              f"each", f"{sorted(d['rounds'])}")
+        check(d["integrators"] >= {"rk4", "euler", "stormer-verlet", "map"},
+              f"{fn}: under every integrator", f"{sorted(d['integrators'])}")
+        if fn in FAMILY_FNS:
+            check(d["marked_formats"] == {"fp64", "fp128", "fp256"} and
+                  d["marked"] >= d["demanded"] > 0,
+                  f"{fn}: marks seen and replayed at fp64, fp128 and fp256 "
+                  f"- every format where its family has a centre - "
+                  f"{d['marked']} lanes, {d['demanded']} of them demanded "
+                  f"by the theory, {d['wrong']} guesses wrong in value",
+                  f"marks at {sorted(d['marked_formats'])}: {d['marked']} "
+                  f"lanes of {d['demanded']} demanded")
+    for flag, word in ((sf.FLAG_INVALID, "invalid"),
+                       (sf.FLAG_DIVZERO, "divideByZero"),
+                       (sf.FLAG_OVERFLOW, "overflow"),
+                       (sf.FLAG_UNDERFLOW, "underflow"),
+                       (sf.FLAG_INEXACT, "inexact")):
+        check(SCOVER["flags"] & flag,
+              f"an image of the six's run raised {word}")
+    check(SCOVER["loops"] and {"exp", "expm1", "log1p"} <= SCOVER["looped_ops"],
+          f"call loops of the six compiled and run: {SCOVER['loops']} loops "
+          f"of {SCOVER['looped_calls']} calls, "
+          f"{', '.join(sorted(SCOVER['looped_ops']))}",
+          f"{SCOVER['loops']} loops, of {sorted(SCOVER['looped_ops'])}")
+    check(SCOVER["refusals"] > 0 and MARKS["marked"] > 0,
+          f"{SCOVER['refusals']} refusals `target-feature` on revision 7's "
+          f"targets; the rule saw {MARKS['marked']} lanes marked and "
+          f"replayed in {MARKS['comparisons']} comparisons of "
+          f"{MARKS['lanes']} lanes, {MARKS['wrong']} guesses wrong in "
+          f"value ({MARKS['wrong_tangents']} in tangents too), "
+          f"{MARKS['wrong_flags']} in flags",
+          f"{SCOVER['refusals']} refusals, {MARKS['marked']} lanes marked")
 
 
 # The legs in their two groups, each with its tally: `core` the `lang`
@@ -2822,7 +4210,7 @@ def leg_routine_coverage():
 GROUPS = (("core", ("refs", "corpus", "letmaps", "banks", "libcft",
                     "determinism", "refusals", "plants", "readback"),
            "I, the core tally"),
-          ("routines", ("routines", "pools", "loops"),
+          ("routines", ("routines", "pools", "loops", "rule", "six"),
            "I2, the routines' tally"))
 
 
@@ -2868,19 +4256,29 @@ def main(argv=None):
     ap.add_argument("--routines", type=int, default=40,
                     help="sources that divide or take a root in leg K "
                          "(default 40)")
+    ap.add_argument("--six", type=int, default=12,
+                    help="generated sources that call the math library's six "
+                         "in leg N2 (default 12)")
+    ap.add_argument("--six-all", action="store_true",
+                    help="the larger draw of the six's legs: every centre of "
+                         "each structured family, both neighbours of each, "
+                         "twelve ordinary lanes and every edge a function "
+                         "has, in N1 and N2 (minutes more; the default is "
+                         "gate-sized)")
     ap.add_argument("--group", default="",
                     help="a comma list of groups, each its legs and its tally: "
                          "core (refs, corpus, letmaps, banks, libcft, "
                          "determinism, refusals, plants, readback; the lang "
-                         "stage) and routines (routines, pools, loops; the "
-                         "lang-routines stage). With neither --group nor "
-                         "--only, both")
+                         "stage) and routines (routines, pools, loops, rule, "
+                         "six; the lang-routines stage). With neither "
+                         "--group nor --only, both")
     ap.add_argument("--only", default="",
                     help="a comma list of legs: refs, corpus, letmaps, banks, "
                          "libcft, determinism, refusals, plants, readback "
-                         "(the core group), routines, pools, loops (the "
-                         "routines group); a group's tally runs only when "
-                         "all its legs ran, and is a SKIP line otherwise")
+                         "(the core group), routines, pools, loops, rule, "
+                         "six (the routines group); a group's tally runs "
+                         "only when all its legs ran, and is a SKIP line "
+                         "otherwise")
     ap.add_argument("--write", action="store_true",
                     help="write programs/systems/compiled/ and exit")
     ap.add_argument("--record", action="store_true",
@@ -2931,7 +4329,9 @@ def main(argv=None):
                                               rng("routines"))),
             ("pools", leg_routine_pools),
             ("loops", lambda: leg_call_loops(rng("loops"), a.segrun,
-                                             a.audit, work))]
+                                             a.audit, work)),
+            ("rule", leg_rule),
+            ("six", lambda: leg_six(a.six, rng, a.six_all))]
     if sorted(name for name, _fn in legs) != sorted(known):
         raise AssertionError("a leg is in no group, or a group names a leg "
                              "there is not")

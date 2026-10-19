@@ -57,8 +57,12 @@ lang_check.py, whose helpers this reuses), with tangents:
      (Lotka-Volterra, the diodes, the culture); the golden reader and
      audit and cft-audit accept each. A segment that marks a lane
      (STATUS[6]) fails here by name: version 1 certifies the machine's
-     guess, and this leg replays nothing (item 5's). The six's references
-     are skipped by name on a host without mpmath, which builds them
+     guess, and cft-segrun cannot replay a marked lane - it answers
+     `replay-missing`, or `replay-undecided` where the definition cannot
+     be evaluated - so a certificate stays what the machine ran, and the
+     replay of M1's build, item 5 is the stages' own comparisons' (leg N
+     below), never this leg's. The six's references are skipped by name on
+     a host without mpmath, which builds them
   H  determinism: two processes under two PYTHONHASHSEEDs; the committed
      programs/systems/compiled-tangent/ is what the compiler writes, and
      the `lang` stage's 64 committed files still are (the six's
@@ -104,10 +108,28 @@ lang_check.py, whose helpers this reuses), with tangents:
      derivative). The compiler carries the six since M1's build, item 4,
      and its committed references holding them are legs G, H and J's;
      compiled images of generated sources holding them, a marked lane
-     replayed, are item 5's legs. The six's golden functions need
-     mpmath, so on a host without it this leg is skipped by name, as are
-     legs G and H's references holding the six; legs A to L never need it
+     replayed, are leg N's. The six's golden functions need mpmath, so on
+     a host without it this leg is skipped by name, as are legs G and H's
+     references holding the six and leg N; legs A to L never need it
      otherwise
+  N  the math library's six compiled, with tangent vectors (M1's build,
+     item 5): generated systems that call them beside division, the root
+     and the other operations, all with one tangent vector or two, under
+     every integrator, format and attribute, compiled for the software
+     backend and run on seq.py at 1, 2 and 5 steps against lang.run -
+     states, every tangent and FLAGS, three lanes with special tangents
+     among them - under the marked-lane rule of lang_check.py, which every
+     leg of this stage shares: a lane whose byte carries the mark is
+     replayed whole, its states and its tangents the definition's, and the
+     image's guess counted, never required; every other lane equal to
+     the definition bit for bit with its byte's five flags. The structured
+     families' centres (python/tests/mathlib_family.py) are put in the
+     primal where the calls read it, every lane the theory demands marked
+     asserted marked, so that a mark reaches the tangent comparison; and
+     controls with a tangent vector - exp at fp64 under rne, x = 2^-53,
+     whose guess is wrong and whose tangent, r * da with r the guess, is
+     wrong with it - show the replay whole and a fault planted in an
+     unmarked lane's tangent red. Skipped by name without mpmath
 
 A check skipped prints a line that starts with SKIP, which the runner
 counts and names on its VERDICT line.
@@ -253,31 +275,15 @@ def run_block(image, c, block, nlanes, bank=None):
 
 def compare(c, states, tangents, top, lane_params=None):
     """seq.py on the image at 1, 2, 5 and `top` steps against lang.run's
-    checkpoints: states, tangents, lane params and FLAGS. -> (failing
-    lanes, FLAGS equal everywhere, the interpreter's run)."""
-    marks = sorted({s for s in LC.CHECKPOINTS if s < top} | {top})
-    ref = lang.run(c.graph, states, top, lane_params=lane_params,
-                   at=tuple(s for s in marks if s != top), tangents=tangents)
-    g = c.ir
-    n, m, T = g.n_primal, g.m, g.T
-    lp = lane_params or [[b for _n, _d, b in g.lane] for _ in states]
-    block = c.scratch_block(states, lane_params, tangents)
-    failing, flags_ok = set(), True
-    for s in marks:
-        r = run_block(LC.image_at(c.image, s), c, block, len(states))
-        if s == top:
-            want_s, want_f, want_t = ref.states, ref.flags, ref.tangents
-        else:
-            (want_s, want_f), want_t = ref.at[s], ref.at_tangents[s]
-        for k in range(len(states)):
-            out = r.scratch_out[k * m:(k + 1) * m]
-            tv = [out[n * (j + 1):n * (j + 2)] for j in range(T)]
-            if out[:n] != want_s[k] or tv != want_t[k] or \
-                    out[n * (T + 1):] != list(lp[k]):
-                failing.add(k)
-        if r.flags != want_f or r.status != 0:
-            flags_ok = False
-    return failing, flags_ok, ref
+    checkpoints: states, tangents, lane params and FLAGS - under the
+    marked-lane rule of lang_check.py (item 5 of M1's build), which this
+    shares: a lane whose byte carries the mark is replayed whole, its
+    states and its tangents the definition's, and the image's guess is
+    counted and never required. -> (failing lanes, FLAGS and STATUS fine
+    everywhere, the definition)."""
+    v = LC.rule_compare(c, states, top, lane_params=lane_params,
+                        tans=tangents)
+    return v.failing, v.flags_ok, v.ref
 
 
 def by_value(g):
@@ -1103,9 +1109,12 @@ def leg_libcft(segrun_path, audit_path, rng, work):
 def certify(c, name, segrun_path, audit_path, rng, work):
     """lang_check's certify, its lanes given tangents. A certificate of
     version 1 holds what the machine ran, a marked lane's guess included
-    (STATUS[6] on its segment), and this leg replays nothing - the replay
-    in the stages is M1's build, item 5's - so a segment that marks a lane
-    fails here, by name, rather than pass on a guess."""
+    (STATUS[6] on its segment), and cft-segrun cannot replay it - it
+    answers `replay-missing`, or `replay-undecided` where the definition
+    cannot be evaluated; the stages' own comparisons replay a marked lane
+    by the definition since M1's build, item 5 (lang_check.py's rule, this
+    stage's leg N), and a certificate does not - so a segment that marks a
+    lane fails here, by name, rather than pass on a guess."""
     g = c.ir
     d = work / "certs" / name
     d.mkdir(parents=True, exist_ok=True)
@@ -1159,8 +1168,10 @@ def certify(c, name, segrun_path, audit_path, rng, work):
     if not check(not marked, f"{name}: no segment marks a lane (STATUS[6] "
                  f"clear in every segment of both runs)",
                  f"a lane marked in run and segment {marked[:4]}: a "
-                 f"routine's undecided guess, which this leg does not "
-                 f"replay (M1's build, item 5)"):
+                 f"routine's undecided guess, which a certificate from "
+                 f"cft-segrun cannot replay (replay-missing, "
+                 f"replay-undecided; the stages' comparisons replay it, "
+                 f"leg N)"):
         return
     sb = {ri: {b: (states_dir / f"run-{ri}-boundary-{b}.bin").read_bytes()
                for b in range(segs + 1)} for ri, segs in ((0, 2), (1, 4))}
@@ -2230,6 +2241,191 @@ def leg_math(count, rng):
     print(f"  ({time.perf_counter() - t0:.1f} s)")
 
 
+# ---- N: the math library's six, compiled with tangent vectors (item 5) -----------
+#
+# Leg M holds the six's rules in the golden model; the compiler carries the
+# six since M1's build, item 4, and these are the compiled legs its record
+# names: generated systems that call them, with one tangent vector and with
+# two, under every integrator, format and attribute, compiled for the software
+# backend and run on seq.py against lang.run - states, every tangent, lane
+# params and FLAGS - under the marked-lane rule of lang_check.py (which the
+# whole stage shares): a lane whose byte carries the mark is replayed whole,
+# its states and its tangents the definition's, and the image's guess is
+# counted. The structured families' centres (python/tests/mathlib_family.py)
+# are put in the lanes' primal where the calls read it, so that a mark
+# reaches the tangent comparison: a marked lane's guess can be wrong, and its
+# tangents, which the image computes from that guess, are wrong with it.
+# Leg G's guard stands: cft-segrun certifies what the machine ran, replays
+# nothing (it answers `replay-missing` or `replay-undecided`, C's), and a
+# certified segment that marks a lane still fails there by name.
+
+def six_controls():
+    """The rule's controls with a tangent vector (lang_check's leg O has the
+    rest): exp at fp64 under rne, x = 2^-53 - the one lane there whose guess
+    is wrong, 1.0 for 1 + 2^-52 - x = 3 * 2^-53, whose guess is right, and
+    two ordinary lanes, with tangents; each fault planted in a copy of the
+    runs and judged by the rule."""
+    c = cftc.compile_text("system te\nformat fp64\nround rne\nstate x\n"
+                          "tangent v\nnext x = exp(x)\nstep map\n", 5,
+                          source="tangent controls", stem="t")
+    fam = LC.family()
+    f64 = FORMATS["fp64"]
+    states = [[fam.argument(f64, (1, 53))], [fam.argument(f64, (3, 53))],
+              [K.round_once(f64, sf.RND_RNE, Fraction(3, 10))[0]],
+              [K.round_once(f64, sf.RND_RNE, Fraction(-7, 10))[0]]]
+    tans = [[[K.round_once(f64, sf.RND_RNE, Fraction(q))[0]]]
+            for q in (Fraction(3, 2), Fraction(-5, 4), Fraction(1, 3),
+                      Fraction(7, 5))]
+    fx = LC.Fixture(c, states, 2, tans=tans)
+    m = c.ir.m                  # values a lane: x, then its tangent
+    base = fx.verdict()
+    per = base.per
+
+    def tangent(k, bit=0):
+        return LC.value_edit(k, m, 1, bit)
+    t_ok = (0 in per[1].wrong_tangents and per[1].wrong == [0] and
+            1 not in per[1].wrong)
+    LC.check(not base.failing and base.flags_ok and per[1].marked == [0, 1]
+             and t_ok and base.first is None,
+             "N0a. exp at fp64 under rne with a tangent vector, x = 2^-53 "
+             "(marked, the guess 1.0 where 1 + 2^-52 is due) and 3 * 2^-53 "
+             "(marked, right): both replayed whole - the first's guess wrong "
+             "in its state and in its tangent, r * da with r the guess - the "
+             "ordinary lanes bit for bit, FLAGS and STATUS fine",
+             base.describe())
+    v = fx.verdict(LC.at_step(2, tangent(3)))
+    LC.check(v.failing == {3} and "lane-value" in v.broken and v.first == 2
+             and "tangents" in " ".join(v.per[2].why) and v.flags_ok,
+             "N0b. a bit flipped in an unmarked lane's tangent (lane 3 at 2 "
+             "steps) is red there - lane-value, in its tangents", v.describe())
+    v = fx.verdict(LC.at_step(1, tangent(1, 40)))
+    LC.check(not v.failing and v.flags_ok and v.per[1].wrong == [0, 1] and
+             v.per[1].wrong_tangents == [0, 1],
+             "N0c. a marked lane whose guess is wrong in its tangent alone "
+             "(lane 1, a bit flipped, at 1 step) is replayed whole and the "
+             "guess counted wrong in its tangents - the rule requires "
+             "nothing of a guess, a tangent's included", v.describe())
+    v = fx.verdict(LC.at_step(1, LC.byte_edit(0, clear=LC.LANE_MARKED),
+                              onward=True))
+    LC.check(0 in v.failing and "lane-value" in v.broken and v.first == 1,
+             "N0d. the wrong-guess lane with its mark silenced (lane 0, from "
+             "1 step) is a fault - its state and its tangent are wrong and "
+             "unmarked: lane-value", v.describe())
+
+
+def leg_six(count, rng, everything=False):
+    section(f"N. the math library's six compiled, with tangent vectors "
+            f"(M1's build, item 5): {count} generated systems that call "
+            f"them, one vector and two, run on seq.py against the "
+            f"interpreter - states, every tangent and FLAGS - with marked "
+            f"lanes replayed whole")
+    if not LC.have_mpmath():
+        skip("N: the math library's six, compiled with tangent vectors",
+             "python has no mpmath module, which their golden functions and "
+             "their routines' generator need (leg M, G and H skip by name "
+             "with it)")
+        return
+    fam = LC.family()
+    t0 = time.perf_counter()
+    six_controls()
+    wrong, internal, tally = [], [], {}
+    held = marked = guess = gtan = demanded = refused = flags = 0
+    seen = {"formats": set(), "rounds": set(), "integrators": set(),
+            "vectors": set(), "six": set()}
+    t_compile = t_run = 0.0
+    for k in range(count):
+        text, direct, comps = LC.g_six(random.Random(f"tangent six {k}"), k,
+                                       tangent=True)
+        what = f"tangent six {k}"
+        try:
+            g = lang.compile_text(text, what).graph
+        except lang.Refusal as e:
+            tally[e.name] = tally.get(e.name, 0) + 1
+            if e.name not in LC.SIX_ARTIFACTS:
+                wrong.append(f"{what}: the language refused {e}")
+            continue
+        if not g.tangent or not {op for op in g.op_counts("step")
+                                 if op in LC.SIX}:
+            wrong.append(f"{what}: no tangent vector, or none of the six")
+        try:
+            t1 = time.perf_counter()
+            c = cftc.compile_text(text, 5, source=what, stem="t")
+            t_compile += time.perf_counter() - t1
+        except lang.Refusal as e:
+            tally[e.name] = tally.get(e.name, 0) + 1
+            wrong.append(f"{what}: refused {e.name}: {e.sentence[:100]}")
+            continue
+        except cftc.InternalError as e:
+            internal.append(f"{what}: internal error (exit 70): "
+                            f"{str(e)[:120]}")
+            continue
+        lanes, roles = LC.six_source_lanes(g, rng, direct, comps, k,
+                                           everything)
+        n, T = g.n_state, len(g.tangent)
+        tans = [[LC.lanes_for(g.fmt, n, rng, 1)[0] for _ in g.tangent]
+                for _ in lanes]
+        # the three lanes whose tangents are special - a signalling NaN; a
+        # -0 and a subnormal; the largest finite - on the first lane's state
+        tspec = tangent_specials(g.fmt, n, T, tans[0])
+        lanes += [list(lanes[0]) for _ in tspec]
+        tans += tspec
+        roles += ["special tangent"] * 3
+        t1 = time.perf_counter()
+        v = LC.rule_compare(c, lanes, 5, tans=tans, tag="tangent six")
+        t_run += time.perf_counter() - t1
+        flags |= v.ref.flags
+        must = [i for i, r in enumerate(roles)
+                if isinstance(r, tuple) and fam.classify(
+                    g.fmt, LC.RND_CODE[g.round_name], lanes[i][r[3]], None,
+                    r[1]) == "mark"]
+        lost = [roles[i][1:3] for i in must if i not in v.per[1].marked]
+        marked += len(v.marked)
+        guess += len(v.wrong)
+        gtan += len(v.wrong_tangents)
+        demanded += len(must)
+        seen["formats"].add(g.fmt.name)
+        seen["rounds"].add(g.round_name)
+        seen["integrators"].add(g.integrator[0])
+        seen["vectors"].add(T)
+        seen["six"] |= {op for op in g.op_counts("step") if op in LC.SIX}
+        if v.failing or not v.flags_ok:
+            wrong.append(f"{what}: {len(v.failing)} unmarked lanes differ; "
+                         f"{v.describe()}")
+        elif lost:
+            wrong.append(f"{what}: demanded and not marked: {lost[:3]}")
+        else:
+            held += 1
+        if k == 0:
+            refused += LC.check_refused_rev7(text, what, wrong, internal, 5)
+    for f in (internal + wrong)[:10]:
+        print(f"        {f}")
+    print(f"  outcomes: {dict(sorted(tally.items())) or 'none refused'}; "
+          f"compile {t_compile:.1f} s, run under the rule {t_run:.1f} s; "
+          f"FLAGS over the {held} systems held: {flags:#x}")
+    check(not internal, f"no InternalError: {count} generated systems that "
+          f"call the six with tangent vectors",
+          f"{len(internal)} stopped the compiler with an internal error, "
+          f"exit 70")
+    check(not wrong and held >= count // 2 and
+          seen["formats"] == {"fp32", "fp64", "fp128", "fp256"} and
+          seen["rounds"] == {"rne", "rtz", "rdn", "rup", "rmm"} and
+          seen["integrators"] >= {"rk4", "euler", "stormer-verlet", "map"}
+          and seen["vectors"] == {1, 2} and seen["six"] == set(LC.SIX),
+          f"N. {held} generated systems holding all six, with one tangent "
+          f"vector and with two, at every format, under every attribute and "
+          f"under {', '.join(sorted(seen['integrators']))}, compiled for sw "
+          f"and run on seq.py at 1, 2 and 5 steps equal to the interpreter, "
+          f"states, every tangent and FLAGS, under the marked-lane rule: "
+          f"structured arguments of the families in the primal "
+          f"({demanded} the theory demands marked, every one marked), "
+          f"{marked} lanes marked and replayed whole, {guess} guesses wrong "
+          f"in their states and {gtan} of them in their tangents too; the "
+          f"first refused `target-feature`, naming FLAG_CONTROL, by revision "
+          f"7's {len(LC.REV7_TARGETS)} targets ({refused}) "
+          f"({time.perf_counter() - t0:.1f} s)",
+          f"{len(wrong)} otherwise; seen {seen}")
+
+
 # ---- the committed references ---------------------------------------------
 
 def write_references():
@@ -2257,10 +2453,19 @@ def main(argv=None):
     ap.add_argument("--math", type=int, default=16,
                     help="generated systems holding the math library's six "
                          "in leg M (default 16)")
+    ap.add_argument("--six", type=int, default=12,
+                    help="generated systems holding the math library's six, "
+                         "compiled and run with tangent vectors in leg N "
+                         "(default 12)")
+    ap.add_argument("--six-all", action="store_true",
+                    help="the larger draw of leg N: every centre of each "
+                         "structured family and both neighbours of each in "
+                         "the lanes (minutes more; the default is "
+                         "gate-sized)")
     ap.add_argument("--only", default="",
                     help="a comma list of legs: refs,corpus,derivative,"
                          "lyapunov,certified,libcft,determinism,refusals,"
-                         "plants,routines,math")
+                         "plants,routines,math,six")
     ap.add_argument("--write", action="store_true",
                     help="write programs/systems/compiled-tangent/ and exit")
     ap.add_argument("--digests", help=argparse.SUPPRESS)
@@ -2292,7 +2497,8 @@ def main(argv=None):
             ("plants", lambda: leg_plants(rng("plants"), segrun_path, work)),
             ("routines", lambda: leg_routines(a.routines,
                                               rng("routines"))),
-            ("math", lambda: leg_math(a.math, rng("math")))]
+            ("math", lambda: leg_math(a.math, rng("math"))),
+            ("six", lambda: leg_six(a.six, rng("six"), a.six_all))]
     try:
         for name, fn in legs:
             if only and name not in only:
