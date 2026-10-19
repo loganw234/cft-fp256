@@ -1220,16 +1220,23 @@ stage acceptance-far "the hard workloads' own oracle on the four images past the
 # a card day, which reads the box's compile back through --images; since
 # 2026-10-16 (Logan's word, the small tasks after M1's build, item 4) the
 # census runs all ten, so that every extended workload is compiled by
-# some stage of it.
-REV8_CENSUS=gray_scott_hard_fp64,gray_scott_wide_fp256,lorenz_tangent_hard_fp64,lorenz_tangent_wide_fp256,gray_scott_extended_fp64,fput_extended_fp64,phi4_extended_fp64,kuramoto_sivashinsky_extended_fp64,reservoir_extended_fp64,riccati_extended_fp64
+# some stage of it. Since parcel MA (M1's build, item 6) it also runs the
+# set's six routine entries - the committed Lotka-Volterra, diode and
+# culture references of the math library's six, at fp64 and fp256, a
+# structured lane a tile that marks - which need no compile and no mpmath
+# and add seconds: they are held to the record like the workloads, and
+# their per-lane blocks are read through libcft's shared library by ctypes
+# (a version-1 certificate carries none), so this stage builds it too.
+REV8_CENSUS=gray_scott_hard_fp64,gray_scott_wide_fp256,lorenz_tangent_hard_fp64,lorenz_tangent_wide_fp256,gray_scott_extended_fp64,fput_extended_fp64,phi4_extended_fp64,kuramoto_sivashinsky_extended_fp64,reservoir_extended_fp64,riccati_extended_fp64,lotkavolterra-rk4-tangent-fp64,lotkavolterra-rk4-tangent-fp256,diode-rk4-tangent-fp64,diode-rk4-tangent-fp256,culture-rk4-tangent-fp64,culture-rk4-tangent-fp256
 do_acceptance_rev8() {
-  HOSTMAKE "cft-segrun$EXE" "cft-audit$EXE" || return 1
+  HOSTMAKE "cft-segrun$EXE" "cft-audit$EXE" "$SHLIB_NAME" || return 1
   PY "$ROOT/programs/acceptance.py" --set rev8 --legs set,oracle \
      --only "$REV8_CENSUS" \
-     --segrun "$ROOT/host/cft-segrun$EXE" --audit "$ROOT/host/cft-audit$EXE"
+     --segrun "$ROOT/host/cft-segrun$EXE" --audit "$ROOT/host/cft-audit$EXE" \
+     --lib "$ROOT/host/$SHLIB_NAME"
 }
 need host-cc python
-stage acceptance-rev8 "the revision-8 set on libcft's software backend, all ten of its entries: hard workloads that missed revision 7 and a revision-8 image holds, each compiled for the image the rule picks and one fixed run at that image's depth, held to committed boundary hashes, flags and STATUS, cft-audit in full, the golden spot check, the device's identity and the rule, its controls caught; each image on seq.py equal to the pack's one-step vector" -- do_acceptance_rev8
+stage acceptance-rev8 "the revision-8 set on libcft's software backend, all sixteen of its entries: ten hard workloads that missed revision 7 and a revision-8 image holds, each compiled for the image the rule picks, and six routine references of the math library's six, their committed images, each with a structured lane a tile that marks; one fixed run each at the image's depth, held to committed boundary hashes, flags and STATUS (and the routine entries' marked lanes and per-lane blocks, read by a ctypes probe of libcft), cft-audit in full, the golden spot check (and the golden mark check), the device's identity and the rule, its controls caught; each workload's image on seq.py equal to the pack's one-step vector" -- do_acceptance_rev8
 
 # The C auditor held to the golden one (host/Makefile's audittest,
 # host/tests/audit_check.py; docs/CERTIFICATES.md, "The audit tool"):

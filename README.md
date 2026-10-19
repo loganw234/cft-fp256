@@ -203,7 +203,8 @@ make verify         # the full census, hours: adds the cocotb suites,
                     # of that study, the hard workloads' oracle
                     # on the four images past revision 7's card
                     # and Lorenz-tangent extended's, and all ten
-                    # of the revision-8 set's workloads
+                    # of the revision-8 set's workloads with its
+                    # six routine references
 ```
 
 Every stage names itself, logs itself and writes a `.ok` or `.fail`

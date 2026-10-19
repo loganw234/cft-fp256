@@ -385,6 +385,28 @@ one-step vector. On the software backend all ten are the
 `acceptance-rev8` runner stage, in the full census only (until 2026-10-16
 the eight whose compiles take minutes).
 
+Six routine entries follow the ten (parcel MA, M1's build, item 6): the
+committed variational references that hold the math library's six rules -
+Lotka-Volterra in logarithmic variables (exp), two diodes and a source
+(expm1, log1p) and a self-heating culture (exp2, log, log2), each at fp64
+and fp256, in `programs/systems/compiled-tangent/`. A routine needs flag
+control, which no revision-7 target publishes, so they are this set's
+alone; the rule puts all six on the quad, from the images' own words, and
+they need no compile and no mpmath. Each has a structured lane a tile: an
+argument at a centre of the function's structured family, where the
+routine's in-lane test cannot decide the last bit and marks the lane - bit
+7 of its byte and STATUS[6]. A version-1 certificate carries no per-lane
+block, so the driver reads the blocks itself, through libcft's shared
+library by ctypes (`--lib`, which defaults to the one `make -C host`
+builds, and which a card needs built with XRT=1):
+
+    python programs/acceptance.py --set rev8 --target u50-rev8-quad \
+        --device <rev8q's image.xclbin> --lib <libcft.so> \
+        --only lotkavolterra-rk4-tangent-fp64,diode-rk4-tangent-fp64,...
+
+The driver's docstring says what each check holds, and docs/CARDDAY.md has
+the card commands.
+
 ## What waited on another half of the round, and no longer does
 
 The first two entries below were written while the halves of the

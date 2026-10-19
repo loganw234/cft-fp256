@@ -467,6 +467,864 @@
    "steps": 2,
    "target": "u50-rev8-quad",
    "tiles": 4
+  },
+  {
+   "bank": "programs/systems/compiled-tangent/lotkavolterra-rk4-tangent-fp64.bank",
+   "bank_sha256": "84b4f96bc15520efd1333dcc4885811f4d031ab698b9902c0f72e7490ff1b2b6",
+   "boundaries": [
+    "5cd19822339e695754e8eedca22d117d7b2d9a5ef0fac27b38d494d38f29daa0",
+    "536fc6a3e9c7dd40371fab4f2d2731f79ecd948972340cd3576be69a2b5ff4e4",
+    "f4fad73593836d476553377132d6707c0d249c715215ff6198cb79d08c4a7951",
+    "21f9d18661d75929948ea9b5c86e505995169e46a576aa4997dbf0bec9a5a85a",
+    "630c04799515609892f7e59c91e5be06f888788ee9f0bdde64d2ef2632c726ce"
+   ],
+   "depth": 4096,
+   "flags": [
+    29,
+    24,
+    24,
+    24
+   ],
+   "format": "fp64",
+   "golden": [],
+   "image": "programs/systems/compiled-tangent/lotkavolterra-rk4-tangent-fp64.cftp",
+   "image_sha256": "c6bde7ca690829493cffae53fc867945202c03c3c1a1604ebf70cc651730ba16",
+   "init_sha256": "b7ae901354394bf8bb31252d9718d58042441a5675a4cdf7e0db189f1c682b4d",
+   "kind": "variational",
+   "lane_flags_sha256": [
+    "0d60c014c41e472e8b9069020fdfd5b0e5cf869ab3f00f4bd04a51bcb0c6a6d3",
+    "c4cc17998e45f449119ceac87d33194cf4e4971d842627957722f4abeb2bc13b",
+    "c4cc17998e45f449119ceac87d33194cf4e4971d842627957722f4abeb2bc13b",
+    "c4cc17998e45f449119ceac87d33194cf4e4971d842627957722f4abeb2bc13b"
+   ],
+   "lanes": 256,
+   "marked": [
+    [
+     [
+      3,
+      144
+     ],
+     [
+      67,
+      144
+     ],
+     [
+      131,
+      144
+     ],
+     [
+      195,
+      144
+     ]
+    ],
+    [],
+    [],
+    []
+   ],
+   "name": "lotkavolterra-rk4-tangent-fp64",
+   "segments": 4,
+   "slots": 4,
+   "source": "programs/systems/lotkavolterra-rk4-tangent-fp64.cftl",
+   "special": [
+    126,
+    127,
+    190,
+    191,
+    254,
+    255
+   ],
+   "spot": [
+    0,
+    1,
+    2,
+    3,
+    64,
+    67,
+    126,
+    127,
+    128,
+    131,
+    190,
+    191,
+    192,
+    195,
+    254,
+    255
+   ],
+   "status": [
+    64,
+    0,
+    0,
+    0
+   ],
+   "steps": 10,
+   "structured": [
+    {
+     "argument": "0x3ca0000000000000",
+     "centre": [
+      1,
+      53
+     ],
+     "component": 1,
+     "function": "exp",
+     "lane": 3,
+     "segment": 0,
+     "tile": 0
+    },
+    {
+     "argument": "0x3cb8000000000000",
+     "centre": [
+      3,
+      53
+     ],
+     "component": 0,
+     "function": "exp",
+     "lane": 67,
+     "segment": 0,
+     "tile": 1
+    },
+    {
+     "argument": "0xbc90000000000000",
+     "centre": [
+      -1,
+      54
+     ],
+     "component": 1,
+     "function": "exp",
+     "lane": 131,
+     "segment": 0,
+     "tile": 2
+    },
+    {
+     "argument": "0xbca8000000000000",
+     "centre": [
+      -3,
+      54
+     ],
+     "component": 0,
+     "function": "exp",
+     "lane": 195,
+     "segment": 0,
+     "tile": 3
+    }
+   ],
+   "target": "u50-rev8-quad",
+   "tiles": 4
+  },
+  {
+   "bank": "programs/systems/compiled-tangent/lotkavolterra-rk4-tangent-fp256.bank",
+   "bank_sha256": "05da40e937dac16a9ce72dd299486e9f822e60b9805a90f2d388d21eec539956",
+   "boundaries": [
+    "b30f28ed06d2e136c5921b37011a96a510521e9ceaffaa7761b8e1090d481fe2",
+    "02565df2acb7ffde5e92dd3da916f1f83ee38821d1c800a863359c354756f11b",
+    "420eb10a3736f0a3408dc82228f19ac3813f44b13527b9db2d8277f6055e8209",
+    "658ceb396968701d05e20b059d74f0f0caec28b94b39576421aa1436b70a83cf",
+    "86222ff9c0298050cc80b73c41ad50f8f03e5221c0c0d6649e3ca8410c2ba772"
+   ],
+   "depth": 4096,
+   "flags": [
+    29,
+    24,
+    24,
+    24
+   ],
+   "format": "fp256",
+   "golden": [],
+   "image": "programs/systems/compiled-tangent/lotkavolterra-rk4-tangent-fp256.cftp",
+   "image_sha256": "b4954235c1700bc99d580ec24b87f69adc3464a2ef597678018854b07523c18c",
+   "init_sha256": "f161e35c9ae6599b4c8c613a8b411104b199f2f6c15a3eaccfa774a0fd76a966",
+   "kind": "variational",
+   "lane_flags_sha256": [
+    "bc02163fd64308681b385aed8347415cf03afc2231a165eb9bb052a90eb09d6c",
+    "dc52ef2f2920f25ca15f54ef55a3bc6e570858766c94c38920a6393a83a387ad",
+    "dc52ef2f2920f25ca15f54ef55a3bc6e570858766c94c38920a6393a83a387ad",
+    "dc52ef2f2920f25ca15f54ef55a3bc6e570858766c94c38920a6393a83a387ad"
+   ],
+   "lanes": 64,
+   "marked": [
+    [
+     [
+      3,
+      144
+     ],
+     [
+      19,
+      144
+     ],
+     [
+      35,
+      144
+     ],
+     [
+      51,
+      144
+     ]
+    ],
+    [],
+    [],
+    []
+   ],
+   "name": "lotkavolterra-rk4-tangent-fp256",
+   "segments": 4,
+   "slots": 4,
+   "source": "programs/systems/lotkavolterra-rk4-tangent-fp256.cftl",
+   "special": [
+    30,
+    31,
+    46,
+    47,
+    62,
+    63
+   ],
+   "spot": [
+    0,
+    1,
+    2,
+    3,
+    16,
+    19,
+    30,
+    31,
+    32,
+    35,
+    46,
+    47,
+    48,
+    51,
+    62,
+    63
+   ],
+   "status": [
+    64,
+    0,
+    0,
+    0
+   ],
+   "steps": 10,
+   "structured": [
+    {
+     "argument": "0x3ff1200000000000000000000000000000000000000000000000000000000000",
+     "centre": [
+      1,
+      237
+     ],
+     "component": 1,
+     "function": "exp",
+     "lane": 3,
+     "segment": 0,
+     "tile": 0
+    },
+    {
+     "argument": "0x3ff1380000000000000000000000000000000000000000000000000000000000",
+     "centre": [
+      3,
+      237
+     ],
+     "component": 0,
+     "function": "exp",
+     "lane": 19,
+     "segment": 0,
+     "tile": 1
+    },
+    {
+     "argument": "0xbff1100000000000000000000000000000000000000000000000000000000000",
+     "centre": [
+      -1,
+      238
+     ],
+     "component": 1,
+     "function": "exp",
+     "lane": 35,
+     "segment": 0,
+     "tile": 2
+    },
+    {
+     "argument": "0xbff1280000000000000000000000000000000000000000000000000000000000",
+     "centre": [
+      -3,
+      238
+     ],
+     "component": 0,
+     "function": "exp",
+     "lane": 51,
+     "segment": 0,
+     "tile": 3
+    }
+   ],
+   "target": "u50-rev8-quad",
+   "tiles": 4
+  },
+  {
+   "bank": "programs/systems/compiled-tangent/diode-rk4-tangent-fp64.bank",
+   "bank_sha256": "eeef689f7991225e3b1f151cac493a5e07543fee33262363e213e8269d30fc9b",
+   "boundaries": [
+    "c196c2ff49cc2424bf13b3112e5d57b5b54cf393a42a8c0b3a9a6c4ca4df9d77",
+    "4ab9b38a86dbf0a4079970b6faae5ef440c7d4a29a3ea03277b114f19e24772d",
+    "10c2d45650711775da0eb63975225e4fe6fa46ec51caf0d975f60954930ac05d",
+    "a5b831ebbb208f3cf604cbf58f1d68227e53cb52797bbcd39c07fd9b3e41357d",
+    "847293c4d7355744445d4146f54460ec0410a553119ef81429fbc98fb52d0321"
+   ],
+   "depth": 4096,
+   "flags": [
+    29,
+    24,
+    24,
+    24
+   ],
+   "format": "fp64",
+   "golden": [],
+   "image": "programs/systems/compiled-tangent/diode-rk4-tangent-fp64.cftp",
+   "image_sha256": "97f6845caff20981267f788de05e2a17ce139d8a8129af282815a3d341e05ad4",
+   "init_sha256": "a5e4a06e3d6daf5d524e6b65b232f288c0ea2202a7355754a49c7a4f54ea47f5",
+   "kind": "variational",
+   "lane_flags_sha256": [
+    "3eb3286770a255898c5d732d605bdab0d397efd7c6f0f1810cf5e7e21babae63",
+    "c4cc17998e45f449119ceac87d33194cf4e4971d842627957722f4abeb2bc13b",
+    "c4cc17998e45f449119ceac87d33194cf4e4971d842627957722f4abeb2bc13b",
+    "c4cc17998e45f449119ceac87d33194cf4e4971d842627957722f4abeb2bc13b"
+   ],
+   "lanes": 256,
+   "marked": [
+    [
+     [
+      3,
+      144
+     ],
+     [
+      67,
+      144
+     ],
+     [
+      131,
+      144
+     ],
+     [
+      195,
+      144
+     ]
+    ],
+    [],
+    [],
+    []
+   ],
+   "name": "diode-rk4-tangent-fp64",
+   "segments": 4,
+   "slots": 4,
+   "source": "programs/systems/diode-rk4-tangent-fp64.cftl",
+   "special": [
+    126,
+    127,
+    190,
+    191,
+    254,
+    255
+   ],
+   "spot": [
+    0,
+    1,
+    2,
+    3,
+    64,
+    67,
+    126,
+    127,
+    128,
+    131,
+    190,
+    191,
+    192,
+    195,
+    254,
+    255
+   ],
+   "status": [
+    64,
+    0,
+    0,
+    0
+   ],
+   "steps": 10,
+   "structured": [
+    {
+     "argument": "0x3cd8000000000000",
+     "centre": [
+      3,
+      51
+     ],
+     "component": 0,
+     "function": "log1p",
+     "lane": 3,
+     "segment": 0,
+     "tile": 0
+    },
+    {
+     "argument": "0x3cb0000000000000",
+     "centre": [
+      1,
+      52
+     ],
+     "component": 1,
+     "function": "expm1",
+     "lane": 67,
+     "segment": 0,
+     "tile": 1
+    },
+    {
+     "argument": "0xbcb0000000000000",
+     "centre": [
+      -1,
+      52
+     ],
+     "component": 0,
+     "function": "log1p",
+     "lane": 131,
+     "segment": 0,
+     "tile": 2
+    },
+    {
+     "argument": "0xbca0000000000000",
+     "centre": [
+      -1,
+      53
+     ],
+     "component": 1,
+     "function": "expm1",
+     "lane": 195,
+     "segment": 0,
+     "tile": 3
+    }
+   ],
+   "target": "u50-rev8-quad",
+   "tiles": 4
+  },
+  {
+   "bank": "programs/systems/compiled-tangent/diode-rk4-tangent-fp256.bank",
+   "bank_sha256": "0c0fe09e8925d64dac770b140f365ca6d699d648ef9674dfe9839f5304ec41f3",
+   "boundaries": [
+    "43134fe5a87e1fca3bfc24aa6e01853a9e631b0f1628d2245963d21bb8b3e945",
+    "91f8500987efeb8555013335d26e98a62bb52b8299b7aafa8392dcef7228b6ee",
+    "9d696142fac1201582f741d86757fec01a4075adaa2564b57fb6f1baa6759d97",
+    "dad6dab6d6f683ebca6663b59c03046b4e6c6526e308eda2e84d3303580bb819",
+    "9145fc30fa209628ac63771595b30a035ed99bb05b95df08ddadc829b7ef4638"
+   ],
+   "depth": 4096,
+   "flags": [
+    29,
+    24,
+    24,
+    24
+   ],
+   "format": "fp256",
+   "golden": [],
+   "image": "programs/systems/compiled-tangent/diode-rk4-tangent-fp256.cftp",
+   "image_sha256": "1cb0d1987f38005d4f2c4beefa596681f51ccbdff85bd69812ced6c0c924845e",
+   "init_sha256": "04a5bf22f05369cbc1964ccc62a1bb2023db10e39448046c2fe4d54a1a366334",
+   "kind": "variational",
+   "lane_flags_sha256": [
+    "bea379d2e48ef917ec62bdaaad1c98421b1d8e0ab3cc8bb065594dc82c752271",
+    "dc52ef2f2920f25ca15f54ef55a3bc6e570858766c94c38920a6393a83a387ad",
+    "dc52ef2f2920f25ca15f54ef55a3bc6e570858766c94c38920a6393a83a387ad",
+    "dc52ef2f2920f25ca15f54ef55a3bc6e570858766c94c38920a6393a83a387ad"
+   ],
+   "lanes": 64,
+   "marked": [
+    [
+     [
+      3,
+      144
+     ],
+     [
+      19,
+      144
+     ],
+     [
+      35,
+      144
+     ],
+     [
+      51,
+      144
+     ]
+    ],
+    [],
+    [],
+    []
+   ],
+   "name": "diode-rk4-tangent-fp256",
+   "segments": 4,
+   "slots": 4,
+   "source": "programs/systems/diode-rk4-tangent-fp256.cftl",
+   "special": [
+    30,
+    31,
+    46,
+    47,
+    62,
+    63
+   ],
+   "spot": [
+    0,
+    1,
+    2,
+    3,
+    16,
+    19,
+    30,
+    31,
+    32,
+    35,
+    46,
+    47,
+    48,
+    51,
+    62,
+    63
+   ],
+   "status": [
+    64,
+    0,
+    0,
+    0
+   ],
+   "steps": 10,
+   "structured": [
+    {
+     "argument": "0x3ff1580000000000000000000000000000000000000000000000000000000000",
+     "centre": [
+      3,
+      235
+     ],
+     "component": 0,
+     "function": "log1p",
+     "lane": 3,
+     "segment": 0,
+     "tile": 0
+    },
+    {
+     "argument": "0x3ff1300000000000000000000000000000000000000000000000000000000000",
+     "centre": [
+      1,
+      236
+     ],
+     "component": 1,
+     "function": "expm1",
+     "lane": 19,
+     "segment": 0,
+     "tile": 1
+    },
+    {
+     "argument": "0xbff1300000000000000000000000000000000000000000000000000000000000",
+     "centre": [
+      -1,
+      236
+     ],
+     "component": 0,
+     "function": "log1p",
+     "lane": 35,
+     "segment": 0,
+     "tile": 2
+    },
+    {
+     "argument": "0xbff1200000000000000000000000000000000000000000000000000000000000",
+     "centre": [
+      -1,
+      237
+     ],
+     "component": 1,
+     "function": "expm1",
+     "lane": 51,
+     "segment": 0,
+     "tile": 3
+    }
+   ],
+   "target": "u50-rev8-quad",
+   "tiles": 4
+  },
+  {
+   "bank": "programs/systems/compiled-tangent/culture-rk4-tangent-fp64.bank",
+   "bank_sha256": "178fd0fdc0f57aa112fb811b901480e184ebe26e5dfa9766067060edb04136b2",
+   "boundaries": [
+    "8318a6b4dcbb45c1b7cb1b4a03e4531c174a88edecfd37c90a89c55368f977d7",
+    "070dd9133bbf9ebe57050ae119fccb2886dcbdf613c913d717cea08fc2bdcf61",
+    "029684fde6e642ecf70b9d19693e4f613108c92a0f16d42b1050a624257103b9",
+    "0fa78b192c05fe299ee0fae11d649773286f347782c0098be7d91e6590509a01",
+    "8ac89107cbe31ba3a076aa0c3929cf53725cf793ff5206560d8d753eb847ab1d"
+   ],
+   "depth": 4096,
+   "flags": [
+    29,
+    24,
+    24,
+    24
+   ],
+   "format": "fp64",
+   "golden": [],
+   "image": "programs/systems/compiled-tangent/culture-rk4-tangent-fp64.cftp",
+   "image_sha256": "a8dcca2617c2de2235799ab2e94e133eb183f9203e01f4ba77f1fe157f6a7bc3",
+   "init_sha256": "502f0ca6cf90947f2c80c8dcd20485d0a63570636fe9ba35bcaad0dcc6767468",
+   "kind": "variational",
+   "lane_flags_sha256": [
+    "8e2031b517913eff250b4f9627b2e828f17308e9ec0ab73667fc9914d5c297ad",
+    "c4cc17998e45f449119ceac87d33194cf4e4971d842627957722f4abeb2bc13b",
+    "c4cc17998e45f449119ceac87d33194cf4e4971d842627957722f4abeb2bc13b",
+    "c4cc17998e45f449119ceac87d33194cf4e4971d842627957722f4abeb2bc13b"
+   ],
+   "lanes": 256,
+   "marked": [
+    [
+     [
+      3,
+      144
+     ],
+     [
+      67,
+      144
+     ],
+     [
+      131,
+      144
+     ],
+     [
+      195,
+      144
+     ]
+    ],
+    [],
+    [],
+    []
+   ],
+   "name": "culture-rk4-tangent-fp64",
+   "segments": 4,
+   "slots": 4,
+   "source": "programs/systems/culture-rk4-tangent-fp64.cftl",
+   "special": [
+    126,
+    127,
+    190,
+    191,
+    254,
+    255
+   ],
+   "spot": [
+    0,
+    1,
+    2,
+    3,
+    64,
+    67,
+    126,
+    127,
+    128,
+    131,
+    190,
+    191,
+    192,
+    195,
+    254,
+    255
+   ],
+   "status": [
+    64,
+    0,
+    0,
+    0
+   ],
+   "steps": 10,
+   "structured": [
+    {
+     "argument": "0x3ff0000000000006",
+     "centre": [
+      "u",
+      6
+     ],
+     "component": 0,
+     "function": "log",
+     "lane": 3,
+     "segment": 0,
+     "tile": 0
+    },
+    {
+     "argument": "0x3feffffffffffffe",
+     "centre": [
+      "d",
+      2
+     ],
+     "component": 0,
+     "function": "log",
+     "lane": 67,
+     "segment": 0,
+     "tile": 1
+    },
+    {
+     "argument": "0x3feffffffffffff4",
+     "centre": [
+      "d",
+      12
+     ],
+     "component": 0,
+     "function": "log",
+     "lane": 131,
+     "segment": 0,
+     "tile": 2
+    },
+    {
+     "argument": "0x3ff0000000000006",
+     "centre": [
+      "u",
+      6
+     ],
+     "component": 0,
+     "function": "log",
+     "lane": 195,
+     "segment": 0,
+     "tile": 3
+    }
+   ],
+   "target": "u50-rev8-quad",
+   "tiles": 4
+  },
+  {
+   "bank": "programs/systems/compiled-tangent/culture-rk4-tangent-fp256.bank",
+   "bank_sha256": "c0f98d7d32ae37f774735f47da0aa4b63e44916b92e6eeab65c14f91d1fc8713",
+   "boundaries": [
+    "268389586c0577977a2085b498ff515a108c3e98d8dcc38dddc5d77463e4b7af",
+    "97bc534be3af820f469bb2d629d26328c20278632b1045f07711983e6f5625ca",
+    "5a63cf27fe2905a7bab37b5906d734b171d429e787ef0dea3be2bb41b90a417e",
+    "3b39fc683de71234b5aecb2c51558f00dba31dd6e24cc30238ed8fe5df965300",
+    "ae6182d49c81df644fbb15d1e3dcfb44a4389701afc945aae1589bc2e7f0d2d7"
+   ],
+   "depth": 4096,
+   "flags": [
+    29,
+    24,
+    24,
+    24
+   ],
+   "format": "fp256",
+   "golden": [],
+   "image": "programs/systems/compiled-tangent/culture-rk4-tangent-fp256.cftp",
+   "image_sha256": "a44f83c9b28e01bbab4fc75c899df76c011853f9e762aa38b67599149b7f0b15",
+   "init_sha256": "10c11a6b127ffc7ca72c5ad32324231c7603e237bd8086a4704933d73942ea3a",
+   "kind": "variational",
+   "lane_flags_sha256": [
+    "81c47330c59bf7f66101e7a3047ffc9fe71fd8f7cd9a24395356a7084eb3094f",
+    "dc52ef2f2920f25ca15f54ef55a3bc6e570858766c94c38920a6393a83a387ad",
+    "dc52ef2f2920f25ca15f54ef55a3bc6e570858766c94c38920a6393a83a387ad",
+    "dc52ef2f2920f25ca15f54ef55a3bc6e570858766c94c38920a6393a83a387ad"
+   ],
+   "lanes": 64,
+   "marked": [
+    [
+     [
+      3,
+      144
+     ],
+     [
+      19,
+      144
+     ],
+     [
+      35,
+      144
+     ],
+     [
+      51,
+      144
+     ]
+    ],
+    [],
+    [],
+    []
+   ],
+   "name": "culture-rk4-tangent-fp256",
+   "segments": 4,
+   "slots": 4,
+   "source": "programs/systems/culture-rk4-tangent-fp256.cftl",
+   "special": [
+    30,
+    31,
+    46,
+    47,
+    62,
+    63
+   ],
+   "spot": [
+    0,
+    1,
+    2,
+    3,
+    16,
+    19,
+    30,
+    31,
+    32,
+    35,
+    46,
+    47,
+    48,
+    51,
+    62,
+    63
+   ],
+   "status": [
+    64,
+    0,
+    0,
+    0
+   ],
+   "steps": 10,
+   "structured": [
+    {
+     "argument": "0x3ffff00000000000000000000000000000000000000000000000000000000006",
+     "centre": [
+      "u",
+      6
+     ],
+     "component": 0,
+     "function": "log",
+     "lane": 3,
+     "segment": 0,
+     "tile": 0
+    },
+    {
+     "argument": "0x3fffeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe",
+     "centre": [
+      "d",
+      2
+     ],
+     "component": 0,
+     "function": "log",
+     "lane": 19,
+     "segment": 0,
+     "tile": 1
+    },
+    {
+     "argument": "0x3fffeffffffffffffffffffffffffffffffffffffffffffffffffffffffffff4",
+     "centre": [
+      "d",
+      12
+     ],
+     "component": 0,
+     "function": "log",
+     "lane": 35,
+     "segment": 0,
+     "tile": 2
+    },
+    {
+     "argument": "0x3ffff00000000000000000000000000000000000000000000000000000000006",
+     "centre": [
+      "u",
+      6
+     ],
+     "component": 0,
+     "function": "log",
+     "lane": 51,
+     "segment": 0,
+     "tile": 3
+    }
+   ],
+   "target": "u50-rev8-quad",
+   "tiles": 4
   }
  ],
  "made": "programs/acceptance.py --set rev8 --write: libcft's software backend, cft-segrun --scratch-depth at each entry's target's depth, open certificates, each accepted by cft-audit in full and by the golden spot check",

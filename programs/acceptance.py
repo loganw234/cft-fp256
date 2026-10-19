@@ -6,8 +6,9 @@ each entry one run fixed in this repository - the admission test for a
 device, and the `acceptance` and `acceptance-rev8` runner stages on
 libcft's software backend. Two sets: the acceptance set, everything that
 runs on revision 7's quad and so on every card; and the revision-8 set,
-the hard workloads that missed revision 7 and a revision-8 image holds
-(below).
+the hard workloads that missed revision 7 and a revision-8 image holds,
+and the math library's routine references, which only revision 8's images
+can run (below).
 
     python programs/acceptance.py [--set rev7|rev8]
                                   [--device sw|<xclbin>|cft://host:port]
@@ -17,6 +18,7 @@ the hard workloads that missed revision 7 and a revision-8 image holds
                                   [--golden named|all] [--images DIR]
                                   [--segrun host/cft-segrun[.exe]]
                                   [--audit host/cft-audit[.exe]]
+                                  [--lib host/cft.dll|host/libcft.so]
                                   [--work DIR]
     python programs/acceptance.py --write    remake programs/acceptance.json
                                              on the software backend
@@ -109,8 +111,11 @@ layout.
 Each leg's controls: a state bit and a lane's FLAGS planted in a copy of
 its first program's vector, each caught.
 
-THE REVISION-8 SET (`--set rev8`; REV8 below; programs/acceptance-rev8.json
-holds what each entry must give): the hard workloads that missed
+THE REVISION-8 SET (`--set rev8`; REV8 and REV8_ROUTINES below;
+programs/acceptance-rev8.json holds what each entry must give): sixteen
+entries of two kinds - the ten hard workloads, and, since parcel MA (M1's
+build, item 6; the last section here), six routine references. THE
+WORKLOADS: the hard workloads that missed
 u50-rev7-quad and a revision-8 image holds, measured by parcel W8
 (2026-10-12; docs/VALIDATION.md), each compiled here for the image the
 rule picks and held byte for byte to the committed digests. Ten of the
@@ -146,21 +151,87 @@ on the quad, 1 on a single; 1 on the software backend) and the scratch
 depth it is audited at. On a card, `--target` names the image the device
 is, and the entries the rule put on it run; on the software backend every
 entry runs at its own target's depth, or only `--target`'s.
-`--legs oracle` is the set's own oracle: each entry's image, its REPEAT
+`--legs oracle` is the set's own oracle: each workload's image, its REPEAT
 set to 1, on seq.py equal to the pack's one-step vector, as `far` holds
-the four hard and wide ones and Lorenz-tangent extended. The controls: the acceptance set's, on the
-set's first entry, and its own - a bank with one bit flipped read from a
-copy of --images, an image there without its bank, another target's depth,
-another tile count, the entry put on another target, and three planted
-images the rule must place (a store to slot 4,096 on the deep, one to
-8,192 on none, an augadd on the single) - and the oracle's two.
+the four hard and wide ones and Lorenz-tangent extended (the routine
+entries have no vector: the oracle skips them). The controls: the
+acceptance set's, on the set's first entry, and its own - a bank with one
+bit flipped read from a copy of --images, an image there without its bank,
+another target's depth, another tile count, the entry put on another
+target, and three planted images the rule must place (a store to slot
+4,096 on the deep, one to 8,192 on none, an augadd on the single) - and
+the oracle's two.
 
 `--images DIR`, the revision-8 set's: each workload's image and bank are
 read from DIR/<name>.cftp and DIR/<name>.bank where both are there, and
 held to the record's digests by the same check a compilation here is;
 where neither is, the workload is compiled here and its pair written
 there. Two of these compile for 40 minutes and 2.2 hours (the REV8 note),
-so a card day compiles once and reads them back.
+so a card day compiles once and reads them back. The routine entries read
+the committed files and ignore it.
+
+THE ROUTINE ENTRIES (parcel MA, M1's build, item 6; REV8_ROUTINES, after
+the ten workloads in entries() and the record): the three committed
+variational references that hold the math library's six rules between
+them - Lotka-Volterra in logarithmic variables (exp), two diodes and a
+source (expm1, log1p) and a self-heating culture (exp2, log, log2) - each
+at fp64 and fp256, as programs/systems/compiled-tangent/ holds them. Their
+image and bank are those committed files, held byte for byte to the
+record's digests: no compile, and no mpmath, which only the compiler's
+build of the six needs.
+  - The image: a routine needs flag control (FLAG_CONTROL, CAPS2[14]),
+    which no revision-7 target publishes (python/cftc/targets.py; the
+    manifests' accepted_by lists no revision-7 target), so these entries
+    can enter this set alone and never the acceptance set, whose record
+    stays as it was. The rule puts all six on the quad, from each image's
+    own words: 1,537 to 3,642 instructions (a tile holds 4,096), 256
+    scratch slots declared, no R21.
+  - The lanes: the references' recipe (SHAKE-256 lanes in the system's box,
+    the special lanes on tiles 1 to 3, the special tangents) on one block a
+    tile of the quad, and a STRUCTURED lane on each tile (STRUCTURED): the
+    tile's fourth lane, one state component set to a centre of a structured
+    family of a function the reference holds - python/tests/
+    mathlib_family.py's FAMILY at rne, the arguments next to an exact case
+    where the routine's in-lane test cannot decide the last bit (the
+    study's section 3.5; docs/LANGUAGE.md, "A marked lane") - and the
+    recipe's tangent. That argument is the one the first stage of the
+    first step meets, so the lane marks in segment 0 and nowhere else:
+    bit 7 of its byte (R23; 0x90, the mark and INEXACT) and STATUS[6]
+    (0x40) of the segment.
+    All six entries can mark. exp2 and log2 have no family (parcel VMP):
+    the culture's lanes mark through log alone, and its eight exp2 and
+    log2 calls (nor its divisions) never mark. Every other lane of every
+    segment carries no mark.
+  - The segments: the set's four, of the image's own ten steps.
+  - A version-1 certificate carries no per-lane block: cft-segrun asks the
+    library for R23's byte a lane only at format version 2 (host/tools/
+    segrun.c), and version 2 refuses a segment that marks a lane unless an
+    image replays it (`replay-missing`). So the blocks are read by the MARK
+    PROBE: libcft through ctypes (--lib; host/tests/seq_check.py --device's
+    pattern) re-runs each segment from its certified start on the same
+    device and image at the same depth, asking for the block, and is held
+    to the certificate - the handle's backend, tiles, image and depth; each
+    end state the boundary file, bit for bit; the flag word and STATUS - and
+    to R23's identities (the lanes' bytes OR to the flag word, their [6:5]
+    to STATUS[5:4], their [7] to STATUS[6]).
+  - The marks are checked by name, not implied by a hash: bit 7 is set on
+    the four structured lanes in segment 0 and on no other lane of any
+    segment, and STATUS[6] on segment 0 and on no other segment; and the
+    golden half, seq.py re-running segment 0 for the spot lanes (the
+    structured ones among them), gives the probe's bytes, bit 7 on the
+    structured lanes alone, STATUS[6], and the certified end states.
+  - The record keeps the recipe (`structured`), the marked lanes with their
+    bytes (`marked`, a segment each) and each segment's block hash
+    (`lane_flags_sha256`, certificate version 2's open hash of the block),
+    and holds a device to them as to the digests.
+  - The controls, on the first routine entry: the marked lane's byte with
+    bit 7 cleared, STATUS[6] cleared, a lane marked that the recipe does not
+    mark, STATUS[6] in a segment with no marked lane, a flag word the lanes
+    do not OR to, a probe whose end state or STATUS is not the
+    certificate's, a probe on another backend, tile count, image or depth,
+    the record's marks, hashes and recipe edited, a committed image with a
+    word changed and a bank with a bit flipped (their digests), and the
+    structured lane moved off its centre, which no longer marks.
 
 One verdict line an entry and a program, and a total. Every check prints
 `ok` or `FAIL`, and none is skipped: without cft-segrun or cft-audit the
@@ -170,6 +241,7 @@ admitted.
 
 import argparse
 import copy
+import ctypes
 import hashlib
 import json
 import os
@@ -188,7 +260,7 @@ sys.path.insert(0, str(ROOT / "python"))
 import cftc                                               # noqa: E402
 from cftc import targets as CT                            # noqa: E402
 from cftc.ir import Graph                                 # noqa: E402
-from cft_golden import FORMATS, asm, cert, lang, seq      # noqa: E402
+from cft_golden import FORMATS, asm, cert, cert2, lang, seq   # noqa: E402
 from cft_golden import softfloat as sf                    # noqa: E402
 from cft_golden.lang import constants as K                # noqa: E402
 
@@ -226,10 +298,15 @@ REFERENCES = (
     ("lorenz96-rk4-tangent-fp64", "compiled-tangent", "lorenz96-rk4", ()),
     ("lorenz96-rk4-tangent-fp256", "compiled-tangent", "lorenz96-rk4", ()),
 )
-# lang_check's boxes, written here so that the set is its own.
+# lang_check's boxes, written here so that the set is its own. The last
+# three are the routine references' (programs/tangent_check.py's MATH_BOX):
+# boxes that keep the logarithms in their domains.
 BOX = {"lorenz63-rk4": [(-20, 20), (-25, 25), (5, 45)],
        "lorenz96-rk4": None,                      # every component (-3, 3)
-       "henonheiles-lf": [(Fraction(-2, 5), Fraction(2, 5))] * 4}
+       "henonheiles-lf": [(Fraction(-2, 5), Fraction(2, 5))] * 4,
+       "lotkavolterra-rk4": [(-1, 1), (-2, Fraction(1, 2))],
+       "diode-rk4": [(0, 4), (0, 4)],
+       "culture-rk4": [(Fraction(1, 20), Fraction(19, 20)), (0, 2)]}
 TANGENT_BOX = (-2, 2)
 
 # The workloads that fit u50-rev7-quad, and their steps a segment, the same
@@ -276,18 +353,91 @@ REV8_STEPS = 2
 REV8_ORDER = ("u50-rev8-quad", "u50-rev8", "u50-rev8-deep")
 REV8_TILES = {"u50-rev8-quad": 4, "u50-rev8": 1, "u50-rev8-deep": 1}
 
+# The revision-8 set's routine entries (parcel MA, M1's build, item 6): the
+# three committed variational references that hold the math library's six
+# between them - Lotka-Volterra in logarithmic variables (exp), two diodes
+# and a source (expm1, log1p) and a self-heating culture (exp2, log, log2) -
+# each at fp64 and fp256: their images and banks are the committed
+# programs/systems/compiled-tangent/ files, held byte for byte to the
+# record's digests, so the entries need no compile and no mpmath. A routine
+# needs flag control (FLAG_CONTROL, CAPS2[14]), which no revision-7 target
+# publishes (python/cftc/targets.py), so these can enter the revision-8 set
+# alone, on the image the rule picks - read from each image's own words, as the
+# workloads' is: the quad, for all six (instructions 1,537 to 3,642 a tile
+# holds, 256 scratch slots declared, no R21). Each is (name, system, the
+# target the rule must give).
+REV8_ROUTINES = (
+    ("lotkavolterra-rk4-tangent-fp64", "lotkavolterra-rk4", "u50-rev8-quad"),
+    ("lotkavolterra-rk4-tangent-fp256", "lotkavolterra-rk4", "u50-rev8-quad"),
+    ("diode-rk4-tangent-fp64", "diode-rk4", "u50-rev8-quad"),
+    ("diode-rk4-tangent-fp256", "diode-rk4", "u50-rev8-quad"),
+    ("culture-rk4-tangent-fp64", "culture-rk4", "u50-rev8-quad"),
+    ("culture-rk4-tangent-fp256", "culture-rk4", "u50-rev8-quad"))
+
+# The structured lanes: a lane on purpose whose argument sits at the centre
+# of a function's structured family (python/tests/mathlib_family.py, the
+# study's section 3.5: next to an exact case the routine's in-lane test
+# cannot decide the last bit, and marks the lane - bit 7 of R23's byte,
+# STATUS[6]). One a tile, the tile's fourth lane, one state component of it
+# set to the centre: the argument the first stage of the first step meets,
+# so the lane marks in segment 0 and only there. Per entry, in tile order:
+# (the function, the state component its argument is, the centre). The
+# centres are FAMILY's at rne, the references' attribute: exp's
+# c 2^-53 / c 2^-54 (c 2^-237 and c 2^-238 at fp256), expm1's and log1p's
+# (log1p's anchors, clear themselves, are left out), log's 1 + 6 eps,
+# 1 - 2 (eps/2) and 1 - 12 (eps/2). exp2 and log2 have no family (parcel
+# VMP; the theory, at every format and attribute): the culture's lanes mark
+# through log alone, and its exp2 and log2 calls never mark. python/tests/
+# test_acceptance_marks.py holds each centre to FAMILY and to the theory.
+STRUCTURED = {
+    "lotkavolterra-rk4-tangent-fp64": (
+        ("exp", 1, (1, 53)), ("exp", 0, (3, 53)),
+        ("exp", 1, (-1, 54)), ("exp", 0, (-3, 54))),
+    "lotkavolterra-rk4-tangent-fp256": (
+        ("exp", 1, (1, 237)), ("exp", 0, (3, 237)),
+        ("exp", 1, (-1, 238)), ("exp", 0, (-3, 238))),
+    "diode-rk4-tangent-fp64": (
+        ("log1p", 0, (3, 51)), ("expm1", 1, (1, 52)),
+        ("log1p", 0, (-1, 52)), ("expm1", 1, (-1, 53))),
+    "diode-rk4-tangent-fp256": (
+        ("log1p", 0, (3, 235)), ("expm1", 1, (1, 236)),
+        ("log1p", 0, (-1, 236)), ("expm1", 1, (-1, 237))),
+    "culture-rk4-tangent-fp64": (
+        ("log", 0, ("u", 6)), ("log", 0, ("d", 2)),
+        ("log", 0, ("d", 12)), ("log", 0, ("u", 6))),
+    "culture-rk4-tangent-fp256": (
+        ("log", 0, ("u", 6)), ("log", 0, ("d", 2)),
+        ("log", 0, ("d", 12)), ("log", 0, ("u", 6)))}
+# the structured lane of tile t is lane t * BLOCK + this: past the spot
+# check's ordinary lanes 0 to 2 and clear of the special lanes at the end of
+# tiles 1 to 3
+STRUCTURED_LANE = 3
+
 
 def entries(which="rev7"):
     """A set, in order: each entry's parameters. The revision-8 set's
-    carry their image's scratch depth and tiles besides."""
+    carry their image's scratch depth and tiles besides; its routine
+    entries (REV8_ROUTINES, after the workloads) their structured lanes."""
     if which == "rev8":
-        return [{"name": wid, "kind": "workload", "image": None,
-                 "bank": None, "source": f"{PACK_REL}/programs/{wid}.cftl",
-                 "target": target, "system": None, "steps": REV8_STEPS,
-                 "segments": SEGMENTS, "golden": [],
-                 "depth": cftc.get_target(target).scratch_depth,
-                 "tiles": REV8_TILES[target]}
-                for wid, target in REV8]
+        out = [{"name": wid, "kind": "workload", "image": None,
+                "bank": None, "source": f"{PACK_REL}/programs/{wid}.cftl",
+                "target": target, "system": None, "steps": REV8_STEPS,
+                "segments": SEGMENTS, "golden": [],
+                "depth": cftc.get_target(target).scratch_depth,
+                "tiles": REV8_TILES[target]}
+               for wid, target in REV8]
+        for name, system, target in REV8_ROUTINES:
+            sub = "programs/systems/compiled-tangent"
+            out.append({"name": name, "kind": "variational",
+                        "image": f"{sub}/{name}.cftp",
+                        "bank": f"{sub}/{name}.bank",
+                        "source": f"programs/systems/{name}.cftl",
+                        "target": target, "system": system, "steps": None,
+                        "segments": SEGMENTS, "golden": [],
+                        "depth": cftc.get_target(target).scratch_depth,
+                        "tiles": REV8_TILES[target],
+                        "structured": STRUCTURED[name]})
+        return out
     out = []
     for name, sub, system, golden in REFERENCES:
         out.append({"name": name,
@@ -395,11 +545,15 @@ def tangent_specials(fmt, n, nvec, base):
     return [snan, small, huge]
 
 
-def reference_lanes(entry, g):
-    """-> (the lane-major block, the special lanes): one block a tile."""
+def reference_lanes(entry, g, tiles=TILES):
+    """-> (the lane-major block, the special lanes): one block a tile of
+    `tiles`, which are four: the special lanes sit on tiles 1 to 3."""
     fmt, n, nvec = g.fmt, g.n_state, len(g.tangent)
     blk = BLOCK[fmt.name]
-    count = TILES * blk
+    if tiles < 4:
+        raise ValueError(f"the references' special lanes sit on tiles 1 to "
+                         f"3: {tiles} tiles hold no such lane")
+    count = tiles * blk
     box = BOX[entry["system"]]
     name = entry["name"]
 
@@ -427,6 +581,45 @@ def reference_lanes(entry, g):
         for t in range(nvec):
             block += tans[k][t]
     return block, sorted(special)
+
+
+def centre_bits(fmt, centre):
+    """The encoding of a family centre: c 2^-e for (c, e), c a signed
+    integer; 1 + c eps for ("u", c) and 1 - c eps/2 for ("d", c), eps the
+    ulp above 1. python/tests/mathlib_family.py's argument() in softfloat
+    alone, so that the set needs no mpmath (test_acceptance_marks.py holds
+    the two equal). expm1's second family, ("n", n) = RN(-n ln 2), needs
+    ln 2 and is not built here."""
+    a, b = centre
+    if a == "u":
+        return sf.one_bits(fmt) + b
+    if a == "d":
+        return sf.one_bits(fmt) - b
+    if isinstance(a, int):
+        return sf.round_pack(fmt, 1 if a < 0 else 0, abs(a), -b,
+                             sf.RND_RNE)[0]
+    raise ValueError(f"{centre!r} is not a centre this set builds")
+
+
+def structured_lanes(entry, fmt, block, slots, tiles):
+    """Set the entry's structured lanes in `block`, in place: one a tile,
+    the tile's lane STRUCTURED_LANE, its state component the centre's
+    encoding and everything else the recipe's - the tangent too. -> the
+    record's descriptors, a tile each; the lane marks in segment 0."""
+    recipe = entry["structured"]
+    if len(recipe) != tiles:
+        raise ValueError(f"{len(recipe)} structured lanes for {tiles} tiles")
+    blk = BLOCK[fmt.name]
+    out = []
+    for tile, (fn, comp, centre) in enumerate(recipe):
+        lane = tile * blk + STRUCTURED_LANE
+        bits = centre_bits(fmt, centre)
+        block[lane * slots + comp] = bits
+        out.append({"lane": lane, "tile": tile, "segment": 0,
+                    "function": fn, "component": comp,
+                    "centre": list(centre),
+                    "argument": f"{bits:#0{2 + fmt.width // 4}x}"})
+    return out
 
 
 def workload_lanes(case, c, tiles=TILES):
@@ -611,8 +804,9 @@ def identity_problems(tiles, depth, target, software):
 
 PARAMS = ("name", "kind", "image", "bank", "source", "target", "format",
           "lanes", "slots", "steps", "segments", "golden", "special", "spot")
-# the revision-8 set's: its image's scratch depth and tiles besides
-PARAMS_REV8 = PARAMS + ("depth", "tiles")
+# the revision-8 set's: its image's scratch depth and tiles besides, and
+# the routine entries' structured lanes (the other entries have none)
+PARAMS_REV8 = PARAMS + ("depth", "tiles", "structured")
 
 
 def committed_problems(rec, want, params=PARAMS, which="rev7"):
@@ -652,6 +846,152 @@ def outcome_problems(rec, want):
     if len(rec["boundaries"]) != len(want["boundaries"]):
         out.append(f"{len(rec['boundaries'])} boundaries where the set has "
                    f"{len(want['boundaries'])}")
+    # the routine entries' marks (parcel MA): the lanes that carry bit 7 of
+    # their byte in each segment, with the byte, and each segment's per-lane
+    # block, hashed as certificate version 2's open certificate hashes it
+    for key, what in (("marked", "marks"), ("lane_flags_sha256",
+                                            "lane block hashes")):
+        if key not in want:
+            continue
+        got = rec.get(key)
+        if got is None:
+            out.append(f"the {what} were not read, and the set has them")
+            continue
+        if len(got) != len(want[key]):
+            out.append(f"{len(got)} {what} where the set has "
+                       f"{len(want[key])}")
+        for k, (g, w) in enumerate(zip(got, want[key])):
+            if g == w:
+                continue
+            if key == "marked":
+                out.append(f"segment {k} marks {lane_text(g)} where the set "
+                           f"has {lane_text(w)}")
+            else:
+                out.append(f"segment {k}'s lane block hashes to {g[:16]} "
+                           f"where the set has {w[:16]}")
+    return out
+
+
+# ---- the marks (parcel MA), each a list of problems by name ---------------
+
+def lane_text(marks):
+    """Marked lanes, [lane, byte] pairs, as words."""
+    if not marks:
+        return "no lane"
+    return ("lane " if len(marks) == 1 else "lanes ") + ", ".join(
+        f"{lane} ({byte:#04x})" for lane, byte in marks)
+
+
+def marked_record(blocks):
+    """What the record keeps of the per-lane blocks, one a segment: the
+    marked lanes - [lane, byte] for each byte that carries bit 7 - and each
+    block's hash, certificate version 2's open one (docs/CERTIFICATES.md,
+    "Hashes in version 2"), so that a version-2 certificate's `lanes`
+    tokens and `raw-lanes` digests are these."""
+    marked = [[[i, b] for i, b in enumerate(blk) if b & seq.LANE_MARKED]
+              for blk in blocks]
+    return marked, [cert2.lane_flags_hash(None, blk) for blk in blocks]
+
+
+def block_problems(blocks, flags, status):
+    """R23's identities (docs/CERTIFICATES.md, "The per-lane flags"), a
+    segment at a time: the OR of the lanes' bytes [4:0] is the segment's
+    flag word, the OR of their [6:5] is STATUS[5:4] and the OR of their [7]
+    is STATUS[6]."""
+    out = []
+    for k, blk in enumerate(blocks):
+        acc = 0
+        for b in blk:
+            acc |= b
+        if acc & seq.LANE_FLAGS_IEEE != flags[k]:
+            out.append(f"segment {k}: the lanes' flags OR to "
+                       f"{acc & seq.LANE_FLAGS_IEEE:#x}, the flag word is "
+                       f"{flags[k]:#x}")
+        if (acc >> 5) & 3 != (status[k] >> 4) & 3:
+            out.append(f"segment {k}: the lanes' bits [6:5] OR to "
+                       f"{(acc >> 5) & 3:#x}, STATUS[5:4] is "
+                       f"{(status[k] >> 4) & 3:#x}")
+        if bool(acc & seq.LANE_MARKED) != bool(status[k]
+                                               & seq.STATUS_MARKED):
+            out.append(f"segment {k}: "
+                       + ("a lane carries bit 7 and STATUS "
+                          f"{status[k]:#x} lacks STATUS[6]"
+                          if acc & seq.LANE_MARKED else
+                          f"no lane carries bit 7 and STATUS "
+                          f"{status[k]:#x} carries STATUS[6]"))
+    return out
+
+
+def mark_problems(structured, blocks, status):
+    """The item's own claim, held by name rather than implied by a hash:
+    each structured lane's byte carries bit 7 in the segment it marks in
+    and that segment's STATUS carries STATUS[6]; bit 7 is set on those
+    lanes exactly - on no other lane of any segment - and STATUS[6] in no
+    other segment."""
+    out = []
+    marks = {(s["segment"], s["lane"]) for s in structured}
+    for s in structured:
+        seg, lane = s["segment"], s["lane"]
+        who = (f"lane {lane} (tile {s['tile']}, {s['function']} at "
+               f"component {s['component']} = centre {s['centre']})")
+        if not blocks[seg][lane] & seq.LANE_MARKED:
+            out.append(f"{who} has byte {blocks[seg][lane]:#04x} in segment "
+                       f"{seg}, without bit 7")
+        if not status[seg] & seq.STATUS_MARKED:
+            out.append(f"segment {seg}'s STATUS {status[seg]:#x} lacks "
+                       f"STATUS[6] where {who} marks")
+    for k, blk in enumerate(blocks):
+        extra = [i for i, b in enumerate(blk)
+                 if b & seq.LANE_MARKED and (k, i) not in marks]
+        if extra:
+            out.append(f"segment {k}: lanes {extra} carry bit 7, and the "
+                       f"recipe marks none of them")
+    segs = {s["segment"] for s in structured}
+    for k, st in enumerate(status):
+        if st & seq.STATUS_MARKED and k not in segs:
+            out.append(f"segment {k}'s STATUS {st:#x} carries STATUS[6], and "
+                       f"the recipe marks no lane in it")
+    return out
+
+
+def probe_device_problems(got, ident, depth):
+    """The mark probe's handle against the certificate's identity: the same
+    backend, the same number of tiles, the same image where the
+    certificate names one (an xclbin's SHA-256) and the same scratch depth,
+    the one the certificate is audited at."""
+    out = []
+    if got["backend"] != ident.backend:
+        out.append(f"the probe's backend is {got['backend']!r} where the "
+                   f"certificate says {ident.backend!r}")
+    if isinstance(ident.device_tiles, int) and \
+            got["tiles"] != ident.device_tiles:
+        out.append(f"the probe's device has {got['tiles']} tiles where the "
+                   f"certificate says {ident.device_tiles}")
+    if ident.device_xclbin not in ("none", "unknown") and \
+            got["xclbin"] != ident.device_xclbin:
+        out.append(f"the probe's image is {str(got['xclbin'])[:16]} where "
+                   f"the certificate's xclbin is {ident.device_xclbin[:16]}")
+    if got["depth"] != depth:
+        out.append(f"the probe's tile holds {got['depth']} scratch slots "
+                   f"where the certificate is audited at {depth}")
+    return out
+
+
+def probe_run_problems(probed, files, flags, status):
+    """Each segment the probe re-ran, from the certified start, against the
+    certificate: the end state the boundary file, bit for bit - so the
+    probe is shown to be the same run - and the flag word and STATUS."""
+    out = []
+    for k, (end, fl, st, _blk) in enumerate(probed):
+        if end != files[k + 1]:
+            out.append(f"segment {k}: the probe's end state is not "
+                       f"boundary {k + 1}'s file")
+        if fl != flags[k]:
+            out.append(f"segment {k}: the probe's flag word is {fl:#x}, the "
+                       f"certificate's {flags[k]:#x}")
+        if st != status[k]:
+            out.append(f"segment {k}: the probe's STATUS is {st:#x}, the "
+                       f"certificate's {status[k]:#x}")
     return out
 
 
@@ -755,6 +1095,232 @@ def audit_tool(tool, d, choose, states="states"):
     return r.returncode, lines, r.stderr.strip(), time.perf_counter() - t0
 
 
+# ---- the mark probe (parcel MA) -------------------------------------------
+# A version-1 certificate carries no per-lane block: cft-segrun asks the
+# library for R23's byte a lane only at format version 2 (host/tools/
+# segrun.c), and version 2 refuses a segment that marks a lane unless an
+# image replays it. So the routine entries' lane bytes are read here, by
+# libcft through ctypes as host/tests/seq_check.py --device reads a device:
+# each segment is run again, on the same device and image at the same
+# depth, from its certified start, asking for the block, and the run is held
+# to the certificate (LaneProbe, mark_probe).
+
+class ProbeError(Exception):
+    """The mark probe could not do what it was asked: the library is not
+    there, the device did not open, a run was refused."""
+
+
+class _RunArgs(ctypes.Structure):
+    """cft_run_args, field for field (host/include/cft.h, ABI 0.17), as
+    host/tests/seq_check.py mirrors it: the library holds the struct to its
+    size handshake and refuses a mirror of another size at every call."""
+    _fields_ = [("struct_size", ctypes.c_size_t),
+                ("a", ctypes.c_void_p), ("b", ctypes.c_void_p),
+                ("c", ctypes.c_void_p),
+                ("n", ctypes.c_size_t),
+                ("bank", ctypes.c_void_p), ("bank_bytes", ctypes.c_size_t),
+                ("scratch_in", ctypes.c_void_p),
+                ("scratch_in_bytes", ctypes.c_size_t),
+                ("scratch_out", ctypes.c_void_p),
+                ("scratch_out_bytes", ctypes.c_size_t),
+                ("deposits", ctypes.c_void_p),
+                ("counts", ctypes.POINTER(ctypes.c_uint32)),
+                ("flags_out", ctypes.POINTER(ctypes.c_uint32)),
+                ("bus_out", ctypes.POINTER(ctypes.c_uint32)),
+                ("idx_a", ctypes.c_void_p), ("idx_b", ctypes.c_void_p),
+                ("idx_c", ctypes.c_void_p),
+                ("idx_a_src", ctypes.c_size_t),
+                ("idx_b_src", ctypes.c_size_t),
+                ("idx_c_src", ctypes.c_size_t),
+                ("idx_scratch_in", ctypes.c_void_p),
+                ("idx_scratch_src", ctypes.c_size_t),
+                ("lane_mask", ctypes.c_void_p),
+                ("lane_mask_bytes", ctypes.c_size_t),
+                ("lane_flags", ctypes.c_void_p),
+                ("lane_flags_bytes", ctypes.c_size_t)]
+
+
+class _OpenArgs(ctypes.Structure):
+    """cft_open_args (ABI 0.16): a software handle at a tile's depth."""
+    _fields_ = [("struct_size", ctypes.c_size_t),
+                ("artifact", ctypes.c_char_p),
+                ("index", ctypes.c_int),
+                ("scratch_depth", ctypes.c_uint32)]
+
+
+class _Caps(ctypes.Structure):
+    """cft_caps, field for field to ABI 0.11's last (an output struct: the
+    size handshake fills what the mirror holds)."""
+    _fields_ = [("struct_size", ctypes.c_size_t),
+                ("format_mask", ctypes.c_uint32),
+                ("tiles", ctypes.c_uint32),
+                ("abi_version", ctypes.c_uint32),
+                ("device_version", ctypes.c_uint32),
+                ("flags_readable", ctypes.c_int),
+                ("backend", ctypes.c_char * 32),
+                ("max_deposits", ctypes.c_uint32),
+                ("max_insns", ctypes.c_uint32),
+                ("max_consts", ctypes.c_uint32),
+                ("seq_features", ctypes.c_uint32),
+                ("max_scratch", ctypes.c_uint32),
+                ("buffers_resident", ctypes.c_int)]
+
+
+class _ImageId(ctypes.Structure):
+    """cft_image_id to ABI 0.15's last field: an output struct, and a
+    caller built against 0.15 is filled exactly as it was (the xclbin's
+    SHA-256 is all the probe reads)."""
+    _fields_ = [("struct_size", ctypes.c_size_t),
+                ("sha256", ctypes.c_uint8 * 32),
+                ("image_bytes", ctypes.c_uint64),
+                ("version", ctypes.c_uint32),
+                ("n_caps", ctypes.c_uint32),
+                ("caps", ctypes.c_uint32 * 4)]
+
+
+def probe_library(arg=None):
+    """The library the probe loads: --lib, else $CFT_LIB, else host/cft.dll
+    (host/libcft.so, host/libcft.dylib) - the card-day tools' convention."""
+    if arg:
+        return Path(arg)
+    if os.environ.get("CFT_LIB"):
+        return Path(os.environ["CFT_LIB"])
+    name = {"win32": "cft.dll", "cygwin": "cft.dll",
+            "darwin": "libcft.dylib"}.get(sys.platform, "libcft.so")
+    return ROOT / "host" / name
+
+
+class LaneProbe:
+    """libcft through ctypes: one program on one handle, run a segment at a
+    time asking for R23's per-lane block. `device` is what --device is: sw
+    opens the software backend at `depth` scratch slots a lane
+    (cft_open_ex), anything else - an xclbin, cft://host:port - is
+    cft_open's artifact, a device's depth being its image's. `info` is what
+    the handle publishes and the certificate's identity is held to."""
+
+    def __init__(self, path, device, depth):
+        self.lib, self.dev, self.prog = None, ctypes.c_void_p(), None
+        if not Path(path).is_file():
+            raise ProbeError(f"{path} is not there: build the shared "
+                             f"library (make -C host {Path(path).name})")
+        try:
+            lib = ctypes.CDLL(str(path))
+        except OSError as e:
+            raise ProbeError(f"{path} does not load: {e}")
+        lib.cft_open.argtypes = [ctypes.c_char_p, ctypes.c_int,
+                                 ctypes.POINTER(ctypes.c_void_p)]
+        lib.cft_open.restype = ctypes.c_int
+        lib.cft_open_ex.argtypes = [ctypes.POINTER(_OpenArgs),
+                                    ctypes.POINTER(ctypes.c_void_p)]
+        lib.cft_open_ex.restype = ctypes.c_int
+        lib.cft_close.argtypes = [ctypes.c_void_p]
+        lib.cft_get_caps.argtypes = [ctypes.c_void_p,
+                                     ctypes.POINTER(_Caps)]
+        lib.cft_get_caps.restype = ctypes.c_int
+        lib.cft_get_image_id.argtypes = [ctypes.c_void_p,
+                                         ctypes.POINTER(_ImageId)]
+        lib.cft_get_image_id.restype = ctypes.c_int
+        lib.cft_program_load.argtypes = [ctypes.c_void_p, ctypes.c_void_p,
+                                         ctypes.c_size_t,
+                                         ctypes.POINTER(ctypes.c_void_p)]
+        lib.cft_program_load.restype = ctypes.c_int
+        lib.cft_program_free.argtypes = [ctypes.c_void_p]
+        lib.cft_program_run_ex.argtypes = [ctypes.c_void_p,
+                                           ctypes.POINTER(_RunArgs)]
+        lib.cft_program_run_ex.restype = ctypes.c_int
+        lib.cft_strerror.argtypes = [ctypes.c_int]
+        lib.cft_strerror.restype = ctypes.c_char_p
+        lib.cft_last_error.argtypes = []
+        lib.cft_last_error.restype = ctypes.c_char_p
+        self.lib = lib
+        if device == "sw":
+            oa = _OpenArgs(ctypes.sizeof(_OpenArgs), None, 0, depth)
+            st = lib.cft_open_ex(ctypes.byref(oa), ctypes.byref(self.dev))
+        else:
+            st = lib.cft_open(device.encode("utf-8"), 0,
+                              ctypes.byref(self.dev))
+        if st:
+            self.dev = ctypes.c_void_p()
+            raise self.error(f"cft_open of {device}", st)
+        caps = _Caps()
+        caps.struct_size = ctypes.sizeof(_Caps)
+        st = lib.cft_get_caps(self.dev, ctypes.byref(caps))
+        if st:
+            self.close()
+            raise self.error("cft_get_caps", st)
+        self.info = {"backend": caps.backend.decode("ascii", "replace"),
+                     "tiles": caps.tiles, "depth": caps.max_scratch,
+                     "features": caps.seq_features, "xclbin": None}
+        if self.info["backend"] not in ("software", "remote"):
+            iid = _ImageId()
+            iid.struct_size = ctypes.sizeof(_ImageId)
+            if lib.cft_get_image_id(self.dev, ctypes.byref(iid)) == 0:
+                self.info["xclbin"] = bytes(iid.sha256).hex()
+
+    def error(self, what, st):
+        said = self.lib.cft_strerror(st).decode("utf-8", "replace")
+        msg = self.lib.cft_last_error()
+        return ProbeError(f"{what}: {said}"
+                          + (f" - {msg.decode('utf-8', 'replace')}"
+                             if msg else ""))
+
+    def load(self, image, bank, esz):
+        """Load the image; `bank` its constants (None for none); `esz` the
+        format's bytes."""
+        self.bank, self.esz = bank or b"", esz
+        prog = ctypes.c_void_p()
+        buf = ctypes.create_string_buffer(image, len(image))
+        st = self.lib.cft_program_load(self.dev, buf, len(image),
+                                       ctypes.byref(prog))
+        if st:
+            raise self.error("cft_program_load", st)
+        self.prog = prog
+
+    def run(self, state, lanes):
+        """One segment from `state` (the lane-major scratch block, bytes)
+        over `lanes` lanes, the streams all +0 as cft-segrun runs it.
+        -> (end state bytes, flag word, STATUS, R23's block, a byte a
+        lane)."""
+        zero = ctypes.create_string_buffer(lanes * self.esz)
+        sin = ctypes.create_string_buffer(bytes(state), len(state))
+        sout = ctypes.create_string_buffer(len(state))
+        blk = ctypes.create_string_buffer(lanes)
+        bank = ctypes.create_string_buffer(self.bank, len(self.bank)) \
+            if self.bank else None
+        fl = ctypes.c_uint32(0xFFFFFFFF)
+        bus = ctypes.c_uint32(0)
+        ra = _RunArgs()
+        ra.struct_size = ctypes.sizeof(_RunArgs)
+        ra.a = ra.b = ra.c = ctypes.addressof(zero)
+        ra.n = lanes
+        if bank is not None:
+            ra.bank, ra.bank_bytes = ctypes.addressof(bank), len(self.bank)
+        ra.scratch_in = ctypes.addressof(sin)
+        ra.scratch_in_bytes = len(state)
+        ra.scratch_out = ctypes.addressof(sout)
+        ra.scratch_out_bytes = len(state)
+        ra.flags_out = ctypes.pointer(fl)
+        ra.bus_out = ctypes.pointer(bus)
+        ra.lane_flags = ctypes.addressof(blk)
+        ra.lane_flags_bytes = lanes
+        st = self.lib.cft_program_run_ex(self.prog, ctypes.byref(ra))
+        if st:
+            raise self.error("cft_program_run_ex", st)
+        if fl.value == 0xFFFFFFFF:
+            raise ProbeError("the library did not write the flag word")
+        return bytes(sout.raw), fl.value, bus.value, bytes(blk.raw)
+
+    def close(self):
+        if self.lib is None:
+            return
+        if self.prog is not None:
+            self.lib.cft_program_free(self.prog)
+            self.prog = None
+        if self.dev:
+            self.lib.cft_close(self.dev)
+            self.dev = ctypes.c_void_p()
+
+
 # ---- one entry ----------------------------------------------------------------
 
 def prepare(entry, images=None):
@@ -769,6 +1335,7 @@ def prepare(entry, images=None):
     tiles = entry["tiles"] if rev8 else TILES
     secs = 0.0
     special = []
+    structured = None
     first3 = None
     how = None
     if entry["kind"] == "workload":
@@ -784,20 +1351,159 @@ def prepare(entry, images=None):
         image = (ROOT / entry["image"]).read_bytes()
         bank = (ROOT / entry["bank"]).read_bytes()
         g = lang.load(ROOT / entry["source"]).graph
-        block, special = reference_lanes(entry, g)
+        block, special = reference_lanes(entry, g, tiles)
         fmt = g.fmt
+        if entry.get("structured") is not None:
+            structured = structured_lanes(
+                entry, fmt, block, seq.Program.from_bytes(
+                    image, scratch_depth=depth).n_scratch_in, tiles)
     slots = seq.Program.from_bytes(image, scratch_depth=depth).n_scratch_in
     blk = BLOCK[fmt.name]
     rec.update(format=fmt.name, lanes=len(block) // slots, slots=slots,
                steps=repeat_count(image), special=special,
                spot=sorted({0, 1, 2} | {t * blk for t in range(1, tiles)}
-                           | set(special)))
+                           | set(special)
+                           | {s["lane"] for s in structured or ()}))
     if rev8:
         rec.update(depth=depth, tiles=tiles)
+    if structured is not None:
+        rec["structured"] = structured
     init = cert.state_bytes(fmt, block)
     rec.update(image_sha256=sha(image), bank_sha256=sha(bank),
                init_sha256=sha(init))
     return image, bank, init, rec, first3, secs, how
+
+
+def mark_probe(args, rec, ident, depth, image, bank, files, failed):
+    """The routine entries' per-lane blocks, read from the device by the
+    probe (LaneProbe), and the checks that need no record: the probe opens
+    the certificate's device, image and depth; each segment it re-runs ends
+    where the certificate's boundary file does, with the certificate's flag
+    word and STATUS, so it is the same run; R23's identities hold on its
+    blocks; and the structured lanes - exactly them - mark. Sets rec's
+    `marked` and `lane_flags_sha256`. -> {the blocks, the probe's runs, its
+    handle's facts}, or None where the probe could not run."""
+    name = rec["name"]
+    fmt = FORMATS[rec["format"]]
+    t0 = time.perf_counter()
+    try:
+        probe = LaneProbe(probe_library(getattr(args, "lib", None)),
+                          args.device, depth)
+    except ProbeError as e:
+        bad(f"{name}: the mark probe could not open {args.device}: {e}")
+        failed.append("the mark probe")
+        return None
+    try:
+        info = dict(probe.info)
+        probs = probe_device_problems(info, ident, depth)
+        if not check(not probs, f"{name}: the mark probe opened the "
+                     f"certificate's device: {info['backend']}, "
+                     f"{info['tiles']} tile{'s' if info['tiles'] > 1 else ''}"
+                     f", {info['depth']} slots a lane"
+                     + (f", image {info['xclbin'][:16]}"
+                        if info["xclbin"] else ""), "; ".join(probs)):
+            failed.append("the probe's device")
+        probe.load(image, bank, fmt.width // 8)
+        probed = [probe.run(files[k], rec["lanes"])
+                  for k in range(rec["segments"])]
+    except ProbeError as e:
+        bad(f"{name}: the mark probe failed: {e}")
+        failed.append("the mark probe")
+        return None
+    finally:
+        probe.close()
+    secs = time.perf_counter() - t0
+    blocks = [p[3] for p in probed]
+    probs = probe_run_problems(probed, files, rec["flags"], rec["status"])
+    if not check(not probs, f"{name}: the probe's {len(probed)} segments, "
+                 f"re-run from their certified starts, end where the "
+                 f"certificate's boundaries do, bit for bit, with its flag "
+                 f"words and STATUS ({secs:.1f} s)", "; ".join(probs)):
+        failed.append("the probe's run")
+    probs = block_problems(blocks, rec["flags"], rec["status"])
+    if not check(not probs, f"{name}: R23's identities hold on every "
+                 f"segment's block: the lanes' flags OR to its flag word, "
+                 f"their bits [6:5] to STATUS[5:4], their bit 7 to "
+                 f"STATUS[6]", "; ".join(probs)):
+        failed.append("R23's identities")
+    marked = [s["lane"] for s in rec["structured"]]
+    probs = mark_problems(rec["structured"], blocks, rec["status"])
+    byte = {blocks[s["segment"]][s["lane"]] for s in rec["structured"]}
+    if not check(not probs, f"{name}: the structured lanes mark: lanes "
+                 f"{marked} carry bit 7 of their byte "
+                 f"({', '.join(f'{b:#04x}' for b in sorted(byte))}) in "
+                 f"segment 0 and its STATUS {rec['status'][0]:#x} carries "
+                 f"STATUS[6]; bit 7 is set on no other lane of any "
+                 f"segment, STATUS[6] in no other segment", "; ".join(probs)):
+        failed.append("the marks")
+    rec["marked"], rec["lane_flags_sha256"] = marked_record(blocks)
+    return {"blocks": blocks, "probed": probed, "info": info}
+
+
+def golden_segment(rec, image, bank, files, depth, k):
+    """seq.py re-runs segment `k` from its certified start for the spot
+    lanes alone - lanes do not interact. -> its Result, lane i of the spot
+    list at index i."""
+    fmt = FORMATS[rec["format"]]
+    slots = rec["slots"]
+    prog = seq.Program.from_bytes(image, scratch_depth=depth)
+    a = cert.state_values(fmt, files[k])
+    sin = []
+    for lane in rec["spot"]:
+        sin += a[lane * slots:(lane + 1) * slots]
+    z = [0] * len(rec["spot"])
+    return seq.run(prog, z, z, z, bank=bank_values(prog, bank),
+                   scratch_in=sin, scratch_depth=depth)
+
+
+def golden_mark_problems(rec, image, bank, files, blocks, depth, k,
+                         golden=None):
+    """seq.py's re-run of segment `k` (golden_segment, or `golden`, one
+    already made) held to the probe's blocks and the certified end states:
+    every end the certified one, every lane's byte the probe's, bit 7 on the
+    structured lanes among the spot lanes and on no other, STATUS[6] set.
+    -> the problems by name."""
+    fmt = FORMATS[rec["format"]]
+    slots, lanes = rec["slots"], rec["spot"]
+    r = golden or golden_segment(rec, image, bank, files, depth, k)
+    b = cert.state_values(fmt, files[k + 1])
+    want = sorted(s["lane"] for s in rec["structured"] if s["segment"] == k)
+    probs = []
+    for i, lane in enumerate(lanes):
+        mine = r.scratch_out[i * slots:(i + 1) * slots]
+        if mine != b[lane * slots:(lane + 1) * slots]:
+            probs.append(f"lane {lane} ends otherwise than certified")
+        if r.lane_flags[i] != blocks[k][lane]:
+            probs.append(f"lane {lane} has byte {blocks[k][lane]:#04x} in "
+                         f"the probe's block where seq.py gives "
+                         f"{r.lane_flags[i]:#04x}")
+    got = sorted(lane for i, lane in enumerate(lanes)
+                 if r.lane_flags[i] & seq.LANE_MARKED)
+    if got != want:
+        probs.append(f"bit 7 is set on lanes {got} where the recipe marks "
+                     f"{want}")
+    if not r.status & seq.STATUS_MARKED:
+        probs.append(f"STATUS {r.status:#x} lacks STATUS[6]")
+    return probs
+
+
+def golden_marks(rec, image, bank, files, blocks, depth, failed):
+    """The golden half of the marks, in each segment the recipe marks in
+    (the first): golden_mark_problems, as a check."""
+    name = rec["name"]
+    for k in sorted({s["segment"] for s in rec["structured"]}):
+        t0 = time.perf_counter()
+        probs = golden_mark_problems(rec, image, bank, files, blocks, depth,
+                                     k)
+        want = sorted(s["lane"] for s in rec["structured"]
+                      if s["segment"] == k)
+        if not check(not probs, f"{name}: the golden mark check - segment "
+                     f"{k} re-run on seq.py for lanes {rec['spot']}: each "
+                     f"end the certified one, each lane's byte the probe's, "
+                     f"bit 7 on lanes {want} and on no other of them, "
+                     f"STATUS[6] set ({time.perf_counter() - t0:.1f} s)",
+                     "; ".join(probs)):
+            failed.append("the golden mark check")
 
 
 def run_entry(entry, want, args, work):
@@ -888,11 +1594,21 @@ def run_entry(entry, want, args, work):
     if not check(not probs, f"{name}: its boundary files are its hashes, and "
                  f"its lines are the run handed it", "; ".join(probs)):
         failed.append("the certificate's own lines")
+    probe = None
+    if rec.get("structured") is not None:
+        # the routine entries: the per-lane blocks a version-1 certificate
+        # does not carry, from the device itself (mark_probe)
+        probe = mark_probe(args, rec, ident, depth, image, bank, files,
+                           failed)
     if want is not None:
         probs = outcome_problems(rec, want)
         if not check(not probs, f"{name}: every boundary hash, flag word and "
                      f"STATUS is the set's ({rec['segments'] + 1} "
-                     f"boundaries, flags {rec['flags']})", "; ".join(probs)):
+                     f"boundaries, flags {rec['flags']})"
+                     + ("" if probe is None else
+                        f", and so are the marked lanes with their bytes and "
+                        f"the {rec['segments']} per-lane blocks' hashes"),
+                     "; ".join(probs)):
             failed.append("the committed digests")
     # 2. cft-audit, in full
     rc, lines, err, asecs = audit_tool(args.audit, d, "all")
@@ -937,6 +1653,8 @@ def run_entry(entry, want, args, work):
                  f"certified end ({time.perf_counter() - t0:.1f} s)",
                  f"lanes {wrong} differ, STATUS {st:#x}"):
         failed.append("the golden spot check")
+    if probe is not None:
+        golden_marks(rec, image, bank, files, probe["blocks"], depth, failed)
     secs = time.perf_counter() - t_entry
     if not segs:
         golden = "no golden audit here (seq.py's cost)"
@@ -946,15 +1664,22 @@ def run_entry(entry, want, args, work):
         golden = "the golden audit re-ran segment " + \
             ", ".join(str(s) for s in segs)
     line = (f"{name}: {rec['lanes']} lanes, {rec['segments']} x "
-            f"{rec['steps']} steps on {ident.backend}, flags {rec['flags']}; ")
-    kept = (name, rec, want, image, bank, init, files, data, d, run0, depth)
+            f"{rec['steps']} steps on {ident.backend}, flags {rec['flags']}"
+            + (f", status {rec['status']}" if probe is not None else "")
+            + "; ")
+    kept = (name, rec, want, image, bank, init, files, data, d, run0, depth,
+            probe)
+    marks = "" if probe is None else (
+        f", {len(rec['structured'])} structured lanes mark (bit 7, "
+        f"STATUS[6])")
     if failed:
         return f"FAIL  {line}{'; '.join(failed)} ({secs:.1f} s)", rec, kept
     if want is None:
         return (f"MADE  {line}cft-audit accepts in full, {golden}, the spot "
-                f"check holds ({secs:.1f} s)"), rec, kept
+                f"check holds{marks} ({secs:.1f} s)"), rec, kept
     return (f"PASS  {line}every digest the set's, cft-audit accepts in full, "
-            f"{golden}, the spot check holds ({secs:.1f} s)"), rec, kept
+            f"{golden}, the spot check holds{marks} ({secs:.1f} s)"), \
+        rec, kept
 
 
 def flip(data, fmt, slots, lane):
@@ -966,7 +1691,7 @@ def flip(data, fmt, slots, lane):
 
 def set_controls(args, kept):
     """Each check above watched failing on one entry's own artifacts."""
-    name, rec, want, image, bank, init, files, data, d, run0, depth = kept
+    name, rec, want, image, bank, init, files, data, d, run0, depth = kept[:11]
     print(f"-- the controls, on {name}'s own certificate and states",
           flush=True)
     params, which = (PARAMS_REV8, "rev8") if "depth" in rec \
@@ -1038,14 +1763,13 @@ def planted_image(image, slot=None, augadd=False):
                      scratch_depth=depth, scratch_io=img.scratch_io).to_bytes()
 
 
-def rev8_controls(args, kept, entry):
-    """The revision-8 set's own checks, each watched failing on its first
-    entry: an image or bank read from --images that is not the set's, a
-    pair's missing half, another device's identity, and the rule."""
-    name, rec, want, image, bank, init, files, data, d, run0, depth = kept
+def images_controls(kept, entry):
+    """The workload entries' `--images` controls: a bank with one bit
+    flipped, read from a copy of --images, is not the set's, and an image
+    there without its bank is refused by name."""
+    name, rec, want, image, bank, init, files, data, d, run0, depth = kept[:11]
     base = want if want is not None else rec
-    target = rec["target"]
-    wid = (name, target)
+    wid = (name, rec["target"])
     held = _COMPILED.pop(wid, None)
     try:
         pdir = d / "images-planted"
@@ -1073,6 +1797,42 @@ def rev8_controls(args, kept, entry):
         _COMPILED.pop(wid, None)
         if held is not None:
             _COMPILED[wid] = held
+
+
+def reference_controls(kept):
+    """The routine entries' digest controls: their image and bank are the
+    repository's committed files, not --images's, so a planted pair is held
+    to the record's digests in memory - one word of the image changed, one
+    bit of the bank flipped."""
+    name, rec, want, image, bank, init, files, data, d, run0, depth = kept[:11]
+    base = want if want is not None else rec
+    word = bytearray(image)
+    word[len(word) // 2] ^= 1
+    check(any("the image is" in p for p in committed_problems(
+              dict(rec, image_sha256=sha(bytes(word))), base, PARAMS_REV8,
+              "rev8")),
+          "control: a committed reference image with one word changed is "
+          "not the set's (its digest)")
+    bit = bytearray(bank)
+    bit[-1] ^= 1
+    check(any("the bank is" in p for p in committed_problems(
+              dict(rec, bank_sha256=sha(bytes(bit))), base, PARAMS_REV8,
+              "rev8")),
+          "control: a committed reference bank with one bit flipped is not "
+          "the set's (its digest)")
+
+
+def rev8_controls(args, kept, entry):
+    """The revision-8 set's own checks, each watched failing on its first
+    entry: an image or bank read from --images that is not the set's, a
+    pair's missing half, another device's identity, and the rule. A
+    routine entry's image and bank are held to the digests instead."""
+    name, rec, want, image, bank, init, files, data, d, run0, depth = kept[:11]
+    target = rec["target"]
+    if entry["kind"] == "workload":
+        images_controls(kept, entry)
+    else:
+        reference_controls(kept)
     ident = cert.parse(data).identity
     software = args.device == "sw"
     other = next(t for t in REV8_ORDER
@@ -1102,6 +1862,145 @@ def rev8_controls(args, kept, entry):
               f"it said {rule_target(plant)}")
 
 
+def off_centre(fmt, bits):
+    """An argument moved off its centre by a relative 2^-20: far outside
+    any window, which is about 2^-44 of the argument wide at fp64 and 2^-46
+    at fp256 (python/tests/mathlib_family.py's half_width), so the lane is
+    an ordinary one - the theory marks none such, and
+    test_acceptance_marks.py holds that for every centre of the recipe."""
+    return bits + (1 << (fmt.man_w - 20))
+
+
+def mark_controls(args, kept):
+    """The marks' checks, each watched failing on the first routine
+    entry's own artifacts - its blocks, statuses, probe runs and record -
+    with a plant in a copy: a structured lane's byte with bit 7 cleared,
+    STATUS[6] cleared in a segment's STATUS, a lane that marks where the
+    recipe marks none, a segment with STATUS[6] and no lane, a probe whose
+    end state or STATUS is not the certificate's, a probe on another tile
+    or depth, the marks and the blocks' hashes and the recipe edited in the
+    record, and the structured lane moved off its centre, which no longer
+    marks on seq.py."""
+    name, rec, want, image, bank, init, files, data, d, run0, depth, probe \
+        = kept
+    base = want if want is not None else rec
+    fmt = FORMATS[rec["format"]]
+    st, flags, status = rec["structured"], rec["flags"], rec["status"]
+    blocks, probed, info = probe["blocks"], probe["probed"], probe["info"]
+    ident = cert.parse(data).identity
+    print(f"-- the marks' controls, on {name}", flush=True)
+    s0 = st[0]
+    seg, lane = s0["segment"], s0["lane"]
+
+    def copy_blocks():
+        return [bytearray(b) for b in blocks]
+
+    def frozen(bl):
+        return [bytes(b) for b in bl]
+    cut = copy_blocks()
+    cut[seg][lane] &= 0xFF & ~seq.LANE_MARKED
+    check(any(f"lane {lane} " in p and "without bit 7" in p
+              for p in mark_problems(st, frozen(cut), status)),
+          f"control: lane {lane}'s byte with bit 7 cleared, in a copy of "
+          f"segment {seg}'s block, is caught by the mark check")
+    cs = list(status)
+    cs[seg] &= ~seq.STATUS_MARKED
+    check(any("lacks STATUS[6]" in p for p in mark_problems(st, blocks, cs)),
+          f"control: STATUS[6] cleared in segment {seg}'s STATUS is caught "
+          f"by the mark check")
+    check(any("lacks STATUS[6]" in p for p in block_problems(blocks, flags,
+                                                             cs)),
+          f"control: the same STATUS is caught by R23's identity")
+    more = copy_blocks()
+    more[0][0] |= seq.LANE_MARKED
+    check(any("lanes [0] carry bit 7" in p
+              for p in mark_problems(st, frozen(more), status)),
+          "control: bit 7 set on a lane the recipe does not mark is caught")
+    cs = list(status)
+    cs[1] |= seq.STATUS_MARKED
+    check(any("marks no lane in it" in p
+              for p in mark_problems(st, blocks, cs)),
+          "control: STATUS[6] in a segment where no lane marks is caught")
+    fw = list(flags)
+    fw[0] ^= sf.FLAG_INEXACT
+    check(any("OR to" in p for p in block_problems(blocks, fw, status)),
+          "control: a flag word the lanes' bytes do not OR to is caught by "
+          "R23's identity")
+    end, fl, stt, blk = probed[0]
+    bent = bytearray(files[seg + 1])
+    bent[0] ^= 1
+    check(any("end state" in p for p in probe_run_problems(
+              [(bytes(bent), fl, stt, blk)] + probed[1:], files, flags,
+              status)),
+          "control: a probe whose end state differs by one bit from the "
+          "certificate's boundary is caught (it is not the same run)")
+    check(any("probe's STATUS" in p for p in probe_run_problems(
+              [(end, fl, status[seg] ^ seq.STATUS_MARKED, blk)] + probed[1:],
+              files, flags, status)),
+          "control: a probe whose STATUS differs from the certificate's is "
+          "caught")
+    check(any("scratch slots" in p for p in probe_device_problems(
+              dict(info, depth=info["depth"] * 2), ident, depth)),
+          "control: a probe on a tile of another depth is caught")
+    check(any("backend" in p for p in probe_device_problems(
+              dict(info, backend="xrt" if info["backend"] != "xrt"
+                   else "software"), ident, depth)),
+          "control: a probe on another backend is caught")
+    if isinstance(ident.device_tiles, int):
+        check(any("tiles" in p for p in probe_device_problems(
+                  dict(info, tiles=info["tiles"] + 1), ident, depth)),
+              "control: a probe on a device of another tile count is caught")
+    if ident.device_xclbin not in ("none", "unknown"):
+        check(any("image" in p for p in probe_device_problems(
+                  dict(info, xclbin="0" * 64), ident, depth)),
+              "control: a probe on another image is caught")
+    w = copy.deepcopy(rec)
+    w["marked"][seg][0][1] ^= seq.LANE_MARKED
+    check(any(f"segment {seg} marks" in p for p in outcome_problems(rec, w)),
+          "control: a marked lane's byte changed in the record is caught")
+    w = copy.deepcopy(rec)
+    w["lane_flags_sha256"][1] = sha(b"")
+    check(any("segment 1's lane block" in p
+              for p in outcome_problems(rec, w)),
+          "control: a lane block's hash changed in the record is caught")
+    w = copy.deepcopy(rec)
+    w["structured"][0]["centre"] = [s0["centre"][0], s0["centre"][1] + 1]
+    check(any("other parameters (structured)" in p for p in
+              committed_problems(rec, w, PARAMS_REV8, "rev8")),
+          "control: the recipe's centre changed in the record is caught")
+    # the structured lane moved off its centre in the recipe: the argument
+    # the recipe would have built, its lane run alone on seq.py from the
+    # segment's start, no longer marks
+    slots = rec["slots"]
+    start = cert.state_values(fmt, files[seg])[lane * slots:
+                                               (lane + 1) * slots]
+    start[s0["component"]] = off_centre(fmt, start[s0["component"]])
+    prog = seq.Program.from_bytes(image, scratch_depth=depth)
+    r = seq.run(prog, [0], [0], [0], bank=bank_values(prog, bank),
+                scratch_in=start, scratch_depth=depth)
+    check(not r.lane_flags[0] & seq.LANE_MARKED,
+          f"control: lane {lane}'s argument moved off its centre "
+          f"({s0['centre']}, {s0['argument']}, by a relative 2^-20) no "
+          f"longer marks on seq.py (byte {r.lane_flags[0]:#04x})")
+    gone = copy_blocks()
+    gone[seg][lane] = r.lane_flags[0]
+    check(any(f"lane {lane} " in p and "without bit 7" in p
+              for p in mark_problems(st, frozen(gone), status)),
+          "control: the mark check is red on that lane's byte")
+    # a probe byte that is not seq.py's: seq.py's own byte for the lane with
+    # bit 7 flipped, whatever the probe gave
+    gold = golden_segment(rec, image, bank, files, depth, seg)
+    other = copy_blocks()
+    golden_byte = gold.lane_flags[rec["spot"].index(lane)]
+    other[seg][lane] = golden_byte ^ seq.LANE_MARKED
+    check(any(f"lane {lane} has byte" in p
+              for p in golden_mark_problems(rec, image, bank, files,
+                                            frozen(other), depth, seg,
+                                            golden=gold)),
+          f"control: lane {lane}'s byte, seq.py's with bit 7 flipped, in a "
+          f"copy of the probe's block is caught by the golden mark check")
+
+
 # ---- the set -------------------------------------------------------------------
 
 def leg_set(args, work, selected):
@@ -1126,7 +2025,7 @@ def leg_set(args, work, selected):
             bad(f"{record.name}'s entries are not the driver's: "
                 f"{sorted(set(want) ^ set(have))}")
             return [f"FAIL  the set: {record.name}'s entries differ"]
-    verdicts, records, kept, first = [], [], None, None
+    verdicts, records, kept, first, routine = [], [], None, None, None
     for e in entries(args.set):
         if selected and e["name"] not in selected:
             continue
@@ -1139,10 +2038,14 @@ def leg_set(args, work, selected):
         records.append(rec)
         if kept is None and art:
             kept, first = art, e
+        if routine is None and art and art[11] is not None:
+            routine = art               # the first routine entry's
     if kept:
         set_controls(args, kept)
         if rev8:
             rev8_controls(args, kept, first)
+    if routine:
+        mark_controls(args, routine)
     if rev8 and not verdicts:
         what = (f"{'of --only ' if selected else ''}on "
                 f"{args.target or 'any target'}")
@@ -1351,6 +2254,8 @@ def leg_oracle_rev8(args, selected):
     controlled = False
     for e in entries("rev8"):
         wid = e["name"]
+        if e["kind"] != "workload":
+            continue                # the pack's oracle is the workloads'
         if selected and wid not in selected:
             continue
         if args.target and e["target"] != args.target:
@@ -1387,6 +2292,11 @@ def leg_oracle_rev8(args, selected):
                              f"equals the vector")
         print(verdicts[-1], flush=True)
     if not verdicts:
+        if selected and not any(e["kind"] == "workload" and e["name"] in
+                                selected for e in entries("rev8")):
+            print("  note  the revision-8 oracle is the workloads': --only "
+                  "names none, so it has nothing to run", flush=True)
+            return verdicts
         bad("the revision-8 oracle ran no program")
         verdicts.append("FAIL  the revision-8 oracle: no program")
     return verdicts
@@ -1429,6 +2339,13 @@ def main(argv=None):
                                             f"cft-segrun{EXE}"))
     ap.add_argument("--audit", default=str(ROOT / "host" /
                                            f"cft-audit{EXE}"))
+    ap.add_argument("--lib",
+                    help="the revision-8 set's routine entries: libcft's "
+                         "shared library, which their mark probe loads by "
+                         "ctypes to ask the device for R23's per-lane block, "
+                         "as a version-1 certificate carries none (default "
+                         "$CFT_LIB, else host/cft.dll, host/libcft.so or "
+                         "host/libcft.dylib; built with XRT=1 for a card)")
     ap.add_argument("--work", help="keep the certificates and states here "
                                    "(a new directory); otherwise a temporary "
                                    "one, removed")
@@ -1469,6 +2386,16 @@ def main(argv=None):
                          f"cft-segrun{EXE} cft-audit{EXE})")
         args.segrun = str(Path(args.segrun).resolve())
         args.audit = str(Path(args.audit).resolve())
+        if rev8 and any(e.get("structured") is not None
+                        and (not selected or e["name"] in selected)
+                        and (not args.target or e["target"] == args.target)
+                        for e in entries("rev8")):
+            lib = probe_library(args.lib)
+            if not lib.is_file():
+                ap.error(f"{lib} is not there: the routine entries read "
+                         f"their per-lane blocks through it (make -C host "
+                         f"{lib.name}, with XRT=1 for a card)")
+            args.lib = str(lib.resolve())
     if args.work:
         work = Path(args.work)
         if work.exists():
