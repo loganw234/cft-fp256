@@ -125,8 +125,13 @@ jobs:
           node-version: "22"
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gfortran
       - run: pip install pytest mpmath gmpy2 numpy
-      # `docs` and `generated` lead because they are a second each and
-      # they are the two that catch drift rather than breakage. Neither
+      # `docs` and `generated` lead because they are the two that catch
+      # drift rather than breakage, and are cheap: about a minute each
+      # (on the maintainer's desktop on 2026-10-19, docs took 29 to 39 s
+      # and generated 45 to 74 s, the top of that with the library built
+      # cold; since that day generated has included the status packager's
+      # self-test, about 50 s of it, which needs no converter, no Pillow
+      # and no PyMuPDF and prints no SKIP, so --require-all holds). Neither
       # was in this list before 2026-09-13, which is how six stale stage
       # counts and two stale generated artifacts reached main: the stages
       # existed, sat in the quick budget, and nothing on push selected

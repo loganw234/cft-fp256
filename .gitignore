@@ -179,3 +179,9 @@ bindings/arduino/loopback/*.o
 # sources by `make programs` and their hashes are in programs/MANIFEST,
 # which IS committed - the images themselves are not
 programs/out/
+
+# The packager's output (docs/EXPORT.md): the dated status archives that
+# python/project_packager.py writes. Never committed - each is made again
+# from a commit, and the packager refuses an output directory inside the
+# tree that git does not ignore, so this line is what lets it run twice.
+/exports/
