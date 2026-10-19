@@ -822,7 +822,8 @@ stage libcft "host library: build + contract tests + the build id regenerated + 
 # earlier (as this did when written) meant the corpus check took its
 # skip path on any clean checkout - including CI, where it would then
 # never have run the one check that had actually caught drift.
-# Seven generators' committed files, each held to its generator. Not
+# Seven generators' committed files, each held to its generator, and an
+# eighth that holds a packager to the tree it packages. Not
 # every generated file in the tree: host/include/cft_seq_flags.h is held
 # by `make seqflags` (python/gen_seq_flags.py --check) and
 # rtl/cft_seed_rom.svh by the golden suite's test_seed_rom_sync.py.
@@ -832,6 +833,17 @@ stage libcft "host library: build + contract tests + the build id regenerated + 
 # reads no git, network or card, plants its own faults first, and prints
 # "STALE figure NAME: FILE differs from a fresh generation" on drift, which
 # the pattern below recognises.
+# The eighth, python/project_packager.py (2026-10-19), owns no committed
+# file: it makes the dated status archive (docs/EXPORT.md) into an ignored
+# directory. Its --check is that archive's self-test: can one still be made
+# from this tree (the README, the gallery, the sidecars and the ledger
+# still say what its readers expect), does one build, verify and reproduce
+# byte for byte, and is each refusal and each archive fault named when
+# planted in a scratch copy. It needs no converter, so it never skips here:
+# the PNG legs (--check --png) need librsvg's rsvg-convert, which CI may
+# not have, and are not part of this stage. Its failure output never uses
+# the words the pattern below looks for, so a failure is a FAIL and not a
+# STALE: it has nothing to regenerate.
 #
 # Each of these scripts already carried a --check mode that exits 1 when
 # the file on disk differs from a fresh generation, and until 2026-09-13
@@ -877,7 +889,7 @@ do_generated() {
   for g in hw/gen_layouts.py host/tools/gen_2opi.py \
            host/tools/gen_mp_consts.py bindings/node/make_seq_corpus.py \
            python/gen_divfull.py bindings/arduino/sync.py \
-           python/project_figures.py; do
+           python/project_figures.py python/project_packager.py; do
     out=$(PY "$ROOT/$g" --check 2>&1); grc=$?
     if [ $grc -eq 0 ]; then
       printf '  ok    %s\n' "$g"
@@ -898,7 +910,7 @@ do_generated() {
   return $rc
 }
 need python
-stage generated "the committed output of seven generators still matches a fresh generation, by each one's --check (the Arduino copy of host/ and the project's figures, sidecars and gallery among them)" -- do_generated
+stage generated "the committed output of seven generators still matches a fresh generation, by each one's --check (the Arduino copy of host/ and the project's figures, sidecars and gallery among them), and the status archive's packager can still package the tree, by its own --check" -- do_generated
 
 do_selfcheck() {
   HOSTMAKE "device-test$EXE" || return 1

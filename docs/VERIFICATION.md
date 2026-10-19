@@ -414,7 +414,7 @@ list - they were kept by hand in three places once, and two of the copies
 drifted.
 
 The `docs` stage is the cheapest of them and exists for the same reason:
-`docs/README.md` indexes the forty-five documents, and
+`docs/README.md` indexes the forty-six documents, and
 `python/check_docs_index.py` refuses a broken link, a document missing
 from the index, or a stated line count that no longer matches the file.
 Since 2026-09-24 it holds every tracked document, not only the index:
@@ -444,7 +444,14 @@ and the gallery `docs/FIGURES.md` written from the same data - its
 check reads no git history, remakes everything in memory, compares
 byte for byte, holds each figure to the numbers the README and other
 documents state, and plants its own faults first, as the docs check
-does). **Nothing invoked
+does); and an eighth that owns no committed file,
+`python/project_packager.py`, on 2026-10-19: the dated status archive
+(docs/EXPORT.md), whose `--check` is its self-test - that an archive can
+still be made from this tree, builds, verifies and reproduces byte for
+byte, and that each refusal and each archive fault is named when planted
+in a scratch copy - and which needs no converter, no Pillow and no
+PyMuPDF (it takes about 40 s and needs git), so it never skips here
+or in CI. **Nothing invoked
 any of them**, and by 2026-09-13 two had drifted: the five
 `hw/layouts/*.cfg` carried a superseded WNS note in a commented-out clock
 line, and `bindings/node/seq_corpus.jsonl` had been stale since the `kx`
