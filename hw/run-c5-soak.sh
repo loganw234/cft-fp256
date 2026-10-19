@@ -23,6 +23,25 @@
 #     as roundToIntegralExact), nextUp, nextDown, logB and class.
 #     Nine sweeps, sliced so a stopped run loses one slice, not a
 #     sweep.
+#   * EXHAUSTIVE modes of the operations whose operand is 32 bits wide
+#     and that the random campaign below only samples - the -all and
+#     -wide jobs, each on the oracles, flag disciplines, probes and
+#     sabotage of its random mode: conv32to64-all (every fp32 encoding
+#     widened), cvtto32-all (every encoding against all four integer
+#     targets, five attributes), cvtfrom32-all and cvtfrom64-all (every
+#     32-bit integer as an i32 and a u32 source, under the probed
+#     modes), scaleb32-all (every encoding against the directed
+#     exponent list, probed modes) and scaleb32-wide (every encoding
+#     against every exponent that can change a result, -278..277, and
+#     twelve past those edges; probed modes, and only if
+#     `probe scalebrange` finds the range holds on this libm). Their
+#     verdict lines say what they covered - ", E encodings, S skipped" -
+#     which hw/card_stress.py holds each slice to. Sliced like rint32's,
+#     except the wide jobs, which do 568 checks an encoding and are cut
+#     WIDE_SLICES ways (default 1024, so a slice is minutes of software
+#     backend, not hours). Four of the six families are HOST operations
+#     in libcft: a card soak of them never reaches the tile (see
+#     hw/card_stress_lib.py, OP_REACH).
 #   * random banded fp64 rint; scaleB and the integer conversions in
 #     both widths under every mode their oracle honours (probed, not
 #     assumed - a failed probe drops the directed modes and the log
@@ -49,10 +68,15 @@ if [ -z "${JOBS:-}" ]; then
   [ "$JOBS" -gt "$MAXJ" ] && JOBS=$MAXJ
 fi
 
+WIDE_SLICES=${WIDE_SLICES:-1024}
+
 if [ "${QUICK:-0}" = "1" ]; then
   RANDN=2000000
   SLICES=4
   QUICK_SPAN=$((1 << 24))
+  # scaleb32-wide does 568 checks an encoding: a smoke of it covers 2^16 encodings in 4 slices
+  WIDE_SLICES=4
+  QUICK_WIDE_SPAN=$((1 << 16))
 fi
 
 mkdir -p "$OUT"
@@ -82,6 +106,12 @@ if "$BIN" probe scalbn; then SCALEB_MODES="rne rtz rdn rup"; fi
 CVTFROM_MODES="rne"
 if "$BIN" probe cvtfrom; then CVTFROM_MODES="rne rtz rdn rup"; fi
 "$BIN" probe castflags || true
+# scaleb32-wide's exponent range, measured on this libm: the range and its edges (host only, no device)
+WIDE_MODES="$SCALEB_MODES"
+if ! "$BIN" probe scalebrange; then
+  WIDE_MODES=""
+  echo "== scalebrange probe: the derived exponent range does NOT hold on this libm; no scaleb32-wide job runs"
+fi
 
 rm -f "$OUT"/*.log "$OUT"/joblist
 
@@ -97,6 +127,35 @@ rm -f "$OUT"/*.log "$OUT"/joblist
   for op in nextup32 nextdown32 logb32 class32; do
     for i in $(seq 0 $((SLICES - 1))); do
       echo "$op-$i $op $((i * span)) $(((i + 1) * span))"
+    done
+  done
+  # exhaustive modes of the conversions and scaleB (the -all and -wide jobs), sliced like rint32's:
+  # they take no seed, so the random campaign's seeds below are what they were
+  for i in $(seq 0 $((SLICES - 1))); do
+    echo "conv32to64-all-$i conv32to64-all $((i * span)) $(((i + 1) * span))"
+  done
+  for mode in rne rtz rdn rup rmm; do
+    for i in $(seq 0 $((SLICES - 1))); do
+      echo "cvtto32-all-$mode-$i cvtto32-all $((i * span)) $(((i + 1) * span)) $mode"
+    done
+  done
+  for op in cvtfrom32-all cvtfrom64-all; do
+    for mode in $CVTFROM_MODES; do
+      for i in $(seq 0 $((SLICES - 1))); do
+        echo "$op-$mode-$i $op $((i * span)) $(((i + 1) * span)) $mode"
+      done
+    done
+  done
+  for mode in $SCALEB_MODES; do
+    for i in $(seq 0 $((SLICES - 1))); do
+      echo "scaleb32-all-$mode-$i scaleb32-all $((i * span)) $(((i + 1) * span)) $mode"
+    done
+  done
+  # the wide item: 568 checks an encoding, so more and smaller slices
+  wspan=$(( ${QUICK_WIDE_SPAN:-4294967296} / WIDE_SLICES ))
+  for mode in $WIDE_MODES; do
+    for i in $(seq 0 $((WIDE_SLICES - 1))); do
+      echo "scaleb32-wide-$mode-$i scaleb32-wide $((i * wspan)) $(((i + 1) * wspan)) $mode"
     done
   done
   # random campaigns; seed encodes op and mode so reruns reproduce
@@ -158,6 +217,26 @@ if CFT_SOAK_SABOTAGE=1 "$BIN" rint32 0x3F800000 0x3F810000 rne \
   exit 1
 fi
 echo "== negative control: sabotaged run detected, harness can fail"
+
+# The same for each exhaustive mode, over a range whose results are never NaN (so the flipped bit
+# cannot hide in the NaN class): each must FAIL, or its green means nothing either. The wide control
+# runs only if the wide jobs do.
+while read -r ctl; do
+  [ -n "$ctl" ] || continue
+  # shellcheck disable=SC2086
+  if CFT_SOAK_SABOTAGE=1 "$BIN" $ctl > "$OUT/control-sabotage-${ctl%% *}.out" 2>&1; then
+    echo "== NEGATIVE CONTROL FAILED TO FAIL ($ctl) - harness cannot detect"
+    exit 1
+  fi
+  echo "== negative control: sabotaged ${ctl%% *} detected"
+done <<EOF
+conv32to64-all 0x3F800000 0x3F801000
+cvtto32-all 0x3F800000 0x3F801000 rne
+cvtfrom32-all 0x00001000 0x00002000 rne
+cvtfrom64-all 0x00001000 0x00002000 rne
+scaleb32-all 0x3F800000 0x3F801000 rne
+$([ -n "$WIDE_MODES" ] && echo "scaleb32-wide 0x3F800000 0x3F800010 rne")
+EOF
 
 echo "== summary"
 cat "$OUT"/*.log | grep -E "cases," | \
