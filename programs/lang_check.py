@@ -3141,8 +3141,9 @@ def markstep_subject():
         return K.round_once(f64, sf.RND_RNE, Fraction(text))[0]
     src = (CERT_PROGRAMS / "markstep-fp64.cftl").read_bytes().decode("ascii")
     g = lang.compile_text(src, "markstep").graph
-    img = asm.assemble((CERT_PROGRAMS / "markstep-fp64.cfta")
-                       .read_text(encoding="utf-8"), "markstep-fp64")
+    # the file's bytes, not a text-mode read (docs/PROGRAMS.md, on asm.py)
+    img = asm.assemble((CERT_PROGRAMS / "markstep-fp64.cfta").read_bytes(),
+                       "markstep-fp64")
     pa = {p[0]: p[2] for p in g.param}
     bank = [pa["a"], pa["b"], d64("1"), d64("7"), d64("106"), 1, 0x81, 0]
     c = types.SimpleNamespace(
