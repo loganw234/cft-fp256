@@ -1573,8 +1573,13 @@ static uint64_t cvtfrom_int(int width)
     if ((rng() & 7) == 0) {
         static const int ks[8] = { 23, 24, 31, 32, 52, 53, 62, 63 };
         v = (1ull << ks[rng() % 8]) + (uint64_t)((int64_t)(rng() % 5) - 2);
+        /* The negative of v modulo 2^64, in unsigned arithmetic. This was
+         * `(uint64_t)-(int64_t)v` from the generator's first commit, which
+         * is the same value for every v but overflows a signed negation
+         * when v is 2^63 (k = 63, offset 0) - undefined behaviour that
+         * UBSan reported on 2026-10-19. No operand changes. */
         if (rng() & 1)
-            v = (uint64_t)-(int64_t)v;
+            v = (uint64_t)0 - v;
     }
     if (width == 32)
         v &= 0xffffffffull;
