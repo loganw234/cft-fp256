@@ -9,10 +9,12 @@ the number in the figure.
 
 `python python/project_figures.py --check`, which is the `generated` stage's seventh generator in
 `verify/run.sh`, remakes everything in memory and fails by name on a figure, sidecar or caption that
-differs from a fresh generation, on an extract whose digests no longer hold, and on a number that
-the README or another document states and a figure disagrees with. It reads no git history, no
-network and no card, and then plants each of those faults in a scratch copy to show that it would
-catch it.
+differs from a fresh generation, on an extract whose digests no longer hold, on a number or sentence
+that the README or another document states and a figure disagrees with, on an SVG outside what
+GitHub keeps or with a text clipped by its canvas or a mark drawn over its own source line, and on a
+ledger entry that states a kernel slack which the timing figure neither draws nor lists. It reads no
+git history, no network and no card, and then plants each of those faults in a scratch copy to show
+that it would catch it.
 
 Each figure is a `<picture>`, so GitHub shows the reader's theme. The rules are
 `python/readme_charts.py`'s: literal geometry and colour only, no fonts, scripts or CSS variables.
@@ -73,10 +75,12 @@ numbers and digests are in `docs/img/figures/history-commits.json`.
 </picture>
 
 **Shows.** 844,665 text lines in 1,251 tracked text files at 0b77387: the largest slice is the
-hard-workload pack (251,757 lines, written by another model and kept as delivered), then the host
-library and bindings, documents and the golden model. Beside it, the ledger (21,037 lines in 192
-entries) and a measurement of its rule that it is append-only: 518 of the 21,561 lines ever added to
-it were later deleted, 515 of those in the newest entry at the time.
+hard-workload pack (251,757 lines, written by another model and kept as delivered), then host
+library and bindings (190,879), documents (127,058), programs and certificates (96,615) and golden
+model and compiler (76,476). The Arduino library's vendored copy of host/'s sources adds 36,060
+lines, a second copy. Beside it, the ledger (21,037 lines in 192 entries) and a measurement of its
+rule that it is append-only: 518 of the 21,561 lines ever added to it were later deleted, 515 of
+those in the newest entry at the time.
 
 **Does not show.** Lines of working code: data files, captured outputs and compiled programs are
 lines too, and a line is a line however long. Nor the ledger's content: it counts lines, not whether
@@ -93,11 +97,11 @@ digests are in `docs/img/figures/history-size.json`.
 **Data and prose.** docs/VALIDATION.md says it is append-only and that "an entry never edits
 history". Git says 518 of the 21,561 lines ever added to it were later deleted, by 82 commits (54 of
 whose subjects say restated, corrected, fixed or a verifier's finding: a count of those words, not a
-reading of each): 515 (99.4%) from the newest entry at the time, an edit of the entry being written,
-and 3 from older entries (1 line 19 entries back, in d9b5ac4 on 4 Sep; 1 line 1 entry back, in
-e3fe2ca on 6 Oct; 1 line 1 entry back, in 3947c44 on 6 Oct). Only those 3 lines of the 518 belonged
-to an entry that was no longer the newest, which is the case the rule rules out; the rest restate
-the entry being written. This is reported as measured, and nothing here corrects it.
+reading of each): 515 (99.4%) from the newest entry at the time and 3 from older entries (1 line 19
+entries back, in d9b5ac4 on 4 Sep; 1 line 1 entry back, in e3fe2ca on 6 Oct; 1 line 1 entry back, in
+3947c44 on 6 Oct). These are positions in the file: whether the text had been pushed when it was
+edited is not in the repository's history, so it is not counted here. This is reported as measured,
+and nothing here corrects it.
 
 ## Verification
 
@@ -197,26 +201,32 @@ layouts marked bold have been built.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="img/figures/hw-clock-dark.svg">
-  <img alt="Kernel slack against the clock for every timing attempt the ledger records for the U50 (36 attempts), and the slack of the images built at 135 MHz over time. One tile closes 175 MHz; four tiles close 135." src="img/figures/hw-clock-light.svg">
+  <img alt="Kernel slack against the clock for the 43 U50 builds the ledger states a kernel slack for, and the slack of the images built at 130 and 135 MHz in build order. One tile closes 175 MHz; four tiles close 135." src="img/figures/hw-clock-light.svg">
 </picture>
 
-**Shows.** 36 timing attempts the ledger records on the U50, 5 of them missed. One tile closed 175
-MHz (by +0.001 ns, with the second recipe) and passed on the card. Four tiles closed 135 MHz 9 times
-from 1 Sep, with slack from +0.003 to +0.122 ns, and missed it once (round 2 quad, first try,
--0.363; closed on a rebuild); at 145 they missed by -0.302. The long-shot build for 260 MHz missed
-by -3.163 ns and is off the chart.
+**Shows.** 43 U50 builds the ledger states a kernel slack for, 5 of them missed. One tile closed 175
+MHz (by +0.001 ns, with the second recipe) and passed on the card. Four tiles closed 135 MHz 10
+times from 1 Sep, with slack from +0.003 to +0.143 ns, and missed it once with a kernel slack stated
+(round 2 quad, first try, -0.363; closed on a rebuild); at 145 they missed by -0.302. The long-shot
+build for 260 MHz missed by -3.163 ns and is off the chart.
 
-**Does not show.** How many builds were made: only builds for which the ledger states a kernel slack
-are here. A small positive slack is not a margin to build on: the ledger's own lesson (2026-09-01,
-line 340) is that an achieved-period reading from a hopelessly over-constrained run understates what
-the router does for an achievable target.
+**Does not show.** Misses for which the ledger states only the whole design's slack and not the
+kernel's: one tile at 135 MHz, 1 Sep, -0.577 ns; four tiles at 135 MHz, 2 Sep, -0.141 ns; four tiles
+at 135 MHz, 2 Sep, -0.113 ns. They are not drawn, and neither are the ledger's out-of-context
+probes. What is drawn is every U50 build for which the ledger states a kernel slack, and the check
+holds that: it scans the ledger's pinned prefix on every run, and 21 of the 31 entries that state a
+kernel slack are drawn and the other 10 are listed with why (repeats of a drawn number, a citation,
+probes); likewise the 11 that state a negative WNS (6 drawn, 5 left out). The scan finds what its
+patterns can see, which the sidecar gives. A small positive slack is not a margin to build on: the
+ledger's own lesson (2026-09-01, line 340) is that an achieved-period reading from a hopelessly
+over-constrained run understates what the router does for an achievable target.
 
 **Source.** `docs/figures/ledger.json` (ledger, first 1,891,030 bytes). Remade by `python
 python/project_figures.py --only hw-clock --write`; the numbers and digests are in
 `docs/img/figures/hw-clock.json`.
 
-**Held to the record.** 1 statement is checked against this figure on every run, 1 agree:
-`README.md` (1).
+**Held to the record.** 3 statements are checked against this figure on every run, 3 agree:
+`README.md` (1), `docs/figures/ledger.json` (2).
 
 ## Performance
 
@@ -357,7 +367,10 @@ intervals are binomial, from the lane count alone.
 **Shows.** The card's long run, card-stress-1016: 4,086 legs in 67 cycles over 61.0 hours, 4,032
 passed, 54 skipped by design, and none failed, timed out, lost the device or failed to parse. It
 visited the quad 45 times, the single 11 and the deep single 11, against weights of 4, 1 and 1. It
-ended at 2026-10-19 08:01 on the box's clock; the reason it recorded is deadline.
+ended at 2026-10-19 08:01 on the box's clock; the reason it recorded is deadline, and the last visit
+(the quad's 45th, cycle 67) was cut by the deadline after 7 of the battery's 12 legs, so seq-check,
+acceptance, acceptance-rev8, resident and selftest show one pass fewer on the quad and it ran no
+sweep slice.
 
 **Does not show.** How hard the card was driven: the legs are short tests and soak slices, and 69%
 of the sweep's cases ran in host code, where the tile does no work (see stress-sweep). Nor that the
@@ -368,8 +381,8 @@ digests are in the sidecar.
 python/project_figures.py --only stress-timeline --write`; the numbers and digests are in
 `docs/img/figures/stress-timeline.json`.
 
-**Held to the record.** 3 statements are checked against this figure on every run, 3 agree:
-`docs/CARDDAY.md` (2), `docs/figures/stress.json` (1).
+**Held to the record.** 4 statements are checked against this figure on every run, 4 agree:
+`docs/CARDDAY.md` (2), `docs/figures/stress.json` (2).
 
 <a id="stress-telemetry"></a>
 ### What the card drew and how warm it ran
@@ -419,23 +432,23 @@ every check.
 python/project_figures.py --only stress-sweep --write`; the numbers and digests are in
 `docs/img/figures/stress-sweep.json`.
 
-**Held to the record.** 5 statements are checked against this figure on every run, 5 agree:
-`README.md` (1), `host/src/clause5.c` (3), `host/tools/divsqrt_soak.c` (1).
+**Held to the record.** 6 statements are checked against this figure on every run, 6 agree:
+`README.md` (1), `host/src/clause5.c` (4), `host/tools/divsqrt_soak.c` (1).
 
 ## Where the extracts come from
 
 | extract | what it is | read at | remake |
 |---|---|---|---|
 | `docs/figures/history.json` | commits per day and the areas each touched, the merges apart, and the ABI steps' dates | 0b77387 | `python python/figure_extracts.py history --as-of 0b77387ea1266f4d4a5e30c8798f57e8b6dc6ef8` |
-| `docs/figures/ledger.json` | the card's timing attempts (kernel WNS by image, tiles and clock) and the ledger's milestones, read out of docs/VALIDATION.md by patterns that name the entry | ledger, first 1,891,030 bytes | `python python/figure_extracts.py ledger` |
+| `docs/figures/ledger.json` | the U50 builds the ledger states a kernel slack for (kernel WNS by image, tiles and clock), what else it states a slack for and why that is not drawn, and the ledger's milestones, read out of docs/VALIDATION.md by patterns that name the entry | ledger, first 1,891,030 bytes | `python python/figure_extracts.py ledger` |
 | `docs/figures/stress.json` | the card's long stress run (card-stress-1016), reduced from its metrics.jsonl: the legs, the cycles, the telemetry, and the sweep with its tile items and host items apart | run ended 2026-10-19 08:01:13 | `python python/figure_extracts.py stress PATH/metrics.jsonl --report PATH/report.txt` |
 | `docs/figures/tree.json` | the tree at the end of each day on main's own line: text lines by area, the ledger's size and line traffic, and the size of the gate | 0b77387 | `python python/figure_extracts.py tree --as-of 0b77387ea1266f4d4a5e30c8798f57e8b6dc6ef8` |
 
 ## What the check does and does not do
 
 - A figure of the current state (the benchmark sweeps, the layout generator, the formats, the
-  design studies' captured runs, the runner's stage list) is read from the tree every time, so it
-  fails the check the moment the tree moves.
+  design studies' captured runs, the runner's stage names and budget lists) is read from the tree
+  every time, so it fails the check the moment what it reads moves.
 
 - A figure of history reads an extract pinned to a commit and says so on its face; it lags the
   project until someone with the full history remakes it (`python python/figure_extracts.py

@@ -54,10 +54,18 @@
   },
   {
    "id": "two-passes",
-   "claim": "host/src/clause5.c issues cft_run() from exactly two places (rint and scaleb)",
+   "claim": "host/src/clause5.c issues cft_run() from exactly two places: its shared step() helper and cft_scaleb's multiply chain",
    "document": "host/src/clause5.c",
-   "drawn": "2",
-   "stated": "2",
+   "drawn": "cft_scaleb, step",
+   "stated": "cft_scaleb, step",
+   "verdict": "agrees"
+  },
+  {
+   "id": "step-callers",
+   "claim": "... and step() is called only from cft_rint and cft_cmp_sig, so the passes of the header's other two COMPOSED operations",
+   "document": "host/src/clause5.c",
+   "drawn": "cft_cmp_sig, cft_rint",
+   "stated": "cft_cmp_sig, cft_rint",
    "verdict": "agrees"
   },
   {

@@ -3,8 +3,8 @@
 <rect width="900" height="760" fill="#ffffff"/>
 <text x="24.0" y="30.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="17" fill="#1f2328" font-weight="600">The card's long run: what ran, and what passed</text>
 <text x="24.0" y="52.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#656d76">The card's long run (card-stress-1016), 2026-10-16 18:58 to 2026-10-19 08:01 on the box's clock: it cycled through</text>
-<text x="24.0" y="69.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#656d76">its three images (u50-rev8-quad, u50-rev8, u50-rev8-deep), weighted 4 to 1 to 1, and on each visit ran a battery of</text>
-<text x="24.0" y="86.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#656d76">the card's own tests and then a slice of the native-oracle sweeps. No leg failed.</text>
+<text x="24.0" y="69.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#656d76">its three images (u50-rev8-quad, u50-rev8, u50-rev8-deep), weighted 4 to 1 to 1, and on each visit but the last ran a</text>
+<text x="24.0" y="86.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#656d76">battery of the card's own tests and then a slice of the native-oracle sweeps. No leg failed.</text>
 <text x="24.0" y="124.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="22" fill="#1f2328" font-weight="600">4,086</text>
 <text x="24.0" y="141.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#656d76">legs</text>
 <text x="170.0" y="124.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="22" fill="#1f2328" font-weight="600">4,032</text>
@@ -290,7 +290,7 @@
 <text x="562.0" y="547.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#1f2328" font-weight="600">11</text>
 <text x="686.0" y="547.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#1f2328" text-anchor="end" opacity="0.85">3.2 s</text>
 <text x="24.0" y="569.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#1f2328" font-weight="600">selftest</text>
-<text x="704.0" y="569.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#656d76">cft-selftest vectors/out (every 3rd visit)</text>
+<text x="704.0" y="569.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#656d76">cft-selftest vectors/out</text>
 <rect x="262.0" y="555.0" width="140.0" height="19.0" fill="#b4d4c0"/>
 <text x="270.0" y="569.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#1f2328" font-weight="600">15</text>
 <text x="306.0" y="569.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#1f2328" opacity="0.8">(+29)</text>
@@ -304,7 +304,7 @@
 <text x="598.0" y="569.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#1f2328" opacity="0.8">(+7)</text>
 <text x="686.0" y="569.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#1f2328" text-anchor="end" opacity="0.85">10.9 min</text>
 <text x="24.0" y="591.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#1f2328" font-weight="600">sweep</text>
-<text x="704.0" y="591.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#656d76">slices of the divsqrt and clause-5 soaks</text>
+<text x="704.0" y="591.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#656d76">divsqrt, clause-5 soak slices</text>
 <rect x="262.0" y="577.0" width="140.0" height="19.0" fill="#b4d4c0"/>
 <text x="270.0" y="591.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#1f2328" font-weight="600">2,948</text>
 <text x="394.0" y="591.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#1f2328" text-anchor="end" opacity="0.8">slices</text>
@@ -316,6 +316,8 @@
 <text x="686.0" y="591.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#1f2328" text-anchor="end" opacity="0.8">slices</text>
 <text x="24.0" y="618.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#656d76">The 54 skips are by design and each carries its reason in the record - acceptance-rev8 on single: the revision-8 set has no entry for</text>
 <text x="24.0" y="633.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#656d76">u50-rev8: its rule puts a workload on the single only where R21 alone keeps it off the quad, which none does (programs/acceptance.py,</text>
-<text x="24.0" y="648.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#656d76">REV8); selftest on quad and single and deep: every 3 visits of an image. Every other leg ran on every visit and passed.</text>
+<text x="24.0" y="648.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#656d76">REV8); selftest on quad and single and deep: every 3 visits of an image. Every other leg ran on every visit but the last and passed; the</text>
+<text x="24.0" y="663.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#656d76">last visit (the quad's 45th, cycle 67) was cut by the deadline after 7 of the battery's 12 legs, so seq-check, acceptance, acceptance-rev8,</text>
+<text x="24.0" y="678.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#656d76">resident and selftest show one pass fewer on the quad and it ran no sweep slice.</text>
 <text x="24.0" y="752.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#656d76">source: docs/figures/stress.json (extract; run ended 2026-10-19 08:01:13)</text>
 </svg>

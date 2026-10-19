@@ -1,10 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="900" height="800" viewBox="0 0 900 800" role="img" aria-label="Text lines in the repository by area at the end of each day, and the validation ledger's size, with the lines ever deleted from it: 518 of 21,561, 515 of them in the newest entry.">
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="814" viewBox="0 0 900 814" role="img" aria-label="Text lines in the repository by area at the end of each day, and the validation ledger's size, with the lines ever deleted from it: 518 of 21,561, 515 of them in the newest entry.">
 <title>Text lines in the repository by area at the end of each day, and the validation ledger's size, with the lines ever deleted from it: 518 of 21,561, 515 of them in the newest entry.</title>
-<rect width="900" height="800" fill="#0d1117"/>
+<rect width="900" height="814" fill="#0d1117"/>
 <text x="24.0" y="30.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="17" fill="#e6edf3" font-weight="600">What the repository is made of, and the record it keeps</text>
 <text x="24.0" y="52.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#9198a1">Top: the text lines of every tracked file, by area, at the end of each day on main's own line. Two slices are kept</text>
-<text x="24.0" y="69.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#9198a1">apart because neither is the project's own authorship: the hard-workload pack, written by another model and kept as</text>
-<text x="24.0" y="86.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#9198a1">delivered, and the Arduino library's copy of host/. Bottom: the ledger, and what was ever taken out of it.</text>
+<text x="24.0" y="69.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#9198a1">apart: the hard-workload pack, written by another model and kept as delivered, and the Arduino library's vendored</text>
+<text x="24.0" y="86.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#9198a1">copy of host/, which counts that code a second time. Bottom: the ledger, and what was ever taken out of it.</text>
 <rect x="90.0" y="160.0" width="740.0" height="240.0" fill="#161b22"/>
 <line x1="90.0" y1="400.0" x2="830.0" y2="400.0" stroke="#30363d" stroke-width="1"/>
 <text x="83.0" y="403.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#9198a1" text-anchor="end">0</text>
@@ -69,21 +69,23 @@
 <text x="392.9" y="714.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#9198a1" text-anchor="middle">12 Oct</text>
 <text x="436.0" y="519.9" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#e6edf3" font-weight="600" text-anchor="end">21,037 lines, 192 entries</text>
 <text x="500.0" y="498.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12" fill="#e6edf3" font-weight="600">Where the lines taken out of it were</text>
-<text x="500.0" y="526.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#9198a1">21,561 lines were added to the ledger over its life; 518 were later deleted (2.4%).</text>
-<text x="500.0" y="541.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#9198a1">Distance from the newest entry, in entries, when the line was deleted:</text>
-<text x="500.0" y="586.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" fill="#e6edf3">the newest entry</text>
-<rect x="630.0" y="574.0" width="150.0" height="18.0" fill="#a371f7"/>
-<text x="786.0" y="587.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#e6edf3">515  (99.4%)</text>
-<text x="500.0" y="620.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" fill="#e6edf3">1 entry back</text>
-<rect x="630.0" y="608.0" width="3.0" height="18.0" fill="#a371f7"/>
-<text x="639.0" y="621.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#e6edf3">2  (0.4%)</text>
-<text x="500.0" y="654.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" fill="#e6edf3">19 entries back</text>
-<rect x="630.0" y="642.0" width="3.0" height="18.0" fill="#a371f7"/>
-<text x="639.0" y="655.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#e6edf3">1  (0.2%)</text>
-<text x="500.0" y="688.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#9198a1">The ledger's own rule is that an entry never edits history.</text>
-<text x="500.0" y="703.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#9198a1">515 of the 518 lines taken out were in the newest entry when</text>
-<text x="500.0" y="718.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#9198a1">they went, the one being written; 3 were in older ones. 82</text>
-<text x="500.0" y="733.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#9198a1">commits took lines out, and the subjects of 54 of them say</text>
-<text x="500.0" y="748.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#9198a1">restated, corrected, fixed or a verifier's finding.</text>
-<text x="24.0" y="792.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#9198a1">source: docs/figures/ledger.json (extract; ledger, first 1,891,030 bytes); docs/figures/tree.json (extract; 0b77387)</text>
+<text x="500.0" y="526.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#9198a1">21,561 lines were added to the ledger over its life; 518 were</text>
+<text x="500.0" y="541.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#9198a1">later deleted (2.4%). Distance from the newest entry, in</text>
+<text x="500.0" y="556.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#9198a1">entries, when the line was deleted:</text>
+<text x="500.0" y="595.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" fill="#e6edf3">the newest entry</text>
+<rect x="630.0" y="583.0" width="150.0" height="18.0" fill="#a371f7"/>
+<text x="786.0" y="596.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#e6edf3">515  (99.4%)</text>
+<text x="500.0" y="629.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" fill="#e6edf3">1 entry back</text>
+<rect x="630.0" y="617.0" width="3.0" height="18.0" fill="#a371f7"/>
+<text x="639.0" y="630.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#e6edf3">2  (0.4%)</text>
+<text x="500.0" y="663.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" fill="#e6edf3">19 entries back</text>
+<rect x="630.0" y="651.0" width="3.0" height="18.0" fill="#a371f7"/>
+<text x="639.0" y="664.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#e6edf3">1  (0.2%)</text>
+<text x="500.0" y="697.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#9198a1">The ledger's own rule is that an entry never edits history.</text>
+<text x="500.0" y="712.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#9198a1">515 of the 518 lines taken out were in the newest entry when</text>
+<text x="500.0" y="727.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#9198a1">they went; 3 were in older ones. These are positions in the</text>
+<text x="500.0" y="742.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#9198a1">file, not whether the text had been pushed. 82 commits took</text>
+<text x="500.0" y="757.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#9198a1">lines out, and the subjects of 54 of them say restated,</text>
+<text x="500.0" y="772.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#9198a1">corrected, fixed or a verifier's finding.</text>
+<text x="24.0" y="806.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#9198a1">source: docs/figures/ledger.json (extract; ledger, first 1,891,030 bytes); docs/figures/tree.json (extract; 0b77387)</text>
 </svg>
