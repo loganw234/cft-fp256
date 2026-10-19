@@ -319,6 +319,8 @@ def status_plants():
     must("a quotation registered and never printed", unprinted_quote, ST.DocError, "never printed")
     must("a count that finds nothing is not zero", lambda: ST.count_lines("no stages here", r"^stage ", "stage lines", "x"),
          ST.SourceError, "no stage lines")
+    must("a document that is read for its newest date and writes none", lambda: ST.newest_written_date("no date here", "x"),
+         ST.SourceError, "writes no date")
     must("a README with no title", lambda: ST.readme_summary("text with no title"), ST.SourceError,
          "does not begin with its title")
     must("a README with no table of what is built", lambda: ST.readme_built("# t\n\n## Other\n\ntext\n"),
@@ -638,6 +640,26 @@ def archive_plants(base_zip, tmp, report, problems):
         writer=damaged_entry)
     run("a manifest whose commit's short name is not the start of its full name", "manifest-mismatch",
         lambda f, m: m["commit"].__setitem__("sha", "0" * 40))
+
+    def undeflatable_entry(p, f, m):
+        g = dict(f)
+        g["MANIFEST.json"] = PK.dumps(m).encode("utf-8")
+        with zipfile.ZipFile(str(p), "w", zipfile.ZIP_STORED) as z:
+            for rel, data in sorted(g.items()):
+                zi = zipfile.ZipInfo(root_dir + "/" + rel, date_time=PK.entry_stamp(when))
+                zi.compress_type = zipfile.ZIP_DEFLATED if rel == victim else zipfile.ZIP_STORED
+                zi.create_system = 3
+                zi.external_attr = PK.ZIP_MODE << 16
+                z.writestr(zi, data)
+        with zipfile.ZipFile(str(p)) as z:
+            offset = z.getinfo(root_dir + "/" + victim).header_offset
+        raw = bytearray(pathlib.Path(p).read_bytes())
+        name_len = int.from_bytes(raw[offset + 26:offset + 28], "little")
+        extra_len = int.from_bytes(raw[offset + 28:offset + 30], "little")
+        raw[offset + 30 + name_len + extra_len] = 0x07              # a deflate block header of the reserved type
+        pathlib.Path(p).write_bytes(bytes(raw))
+    run("a zip with one deflated entry whose stream cannot be inflated, its structure intact (zlib's error, not a CRC-32's)",
+        "archive-unreadable", lambda f, m: None, writer=undeflatable_entry)
     run("a size in the manifest changed", "size-mismatch",
         lambda f, m: [x.__setitem__("bytes", x["bytes"] + 1) for x in m["files"] if x["path"] == victim])
     run("the commit named in the manifest is not the one in the archive's name", "manifest-mismatch",
