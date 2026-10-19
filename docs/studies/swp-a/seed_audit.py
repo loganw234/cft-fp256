@@ -314,10 +314,11 @@ def main():
     items = [it for it in lib.sweep_items() if it.kind == "random"]
     check("the driver's catalog has 54 random items", len(items) == 54, "(%d)" % len(items))
     N = 57
-    print("   54 random items x n = 0 .. %d (the stress run reached n = 56)" % (N - 1))
+    print("   54 random items x n = 0 .. %d: the whole GRID of (item, n), n = 0 .. 56 for every item. It is not the run: the run's own 3,038" % (N - 1))
+    print("   slices (56 or 57 an item) are counted from its record in stress_records.out: 2,922 of them share a state.")
     print("   %-52s %8s %8s %12s %14s" % ("schedule", "slices", "distinct", "shared states", "slices sharing"))
     results = {}
-    for label, kind, odd in (("as run: seed = base + 7919 n, then | 1", "now", True),
+    for label, kind, odd in (("the driver's formula: seed = base + 7919 n, then | 1", "now", True),
                              ("the same without the | 1 the tools apply", "now", False),
                              ("A: (item << 40) | (n << 1) | 1", "A", True),
                              ("B: mix64(key ^ (item << 32 | n)) | 1", "B", True)):
@@ -326,13 +327,24 @@ def main():
         results[kind + str(odd)] = (d, sl, sh)
         print("   %-52s %8d %8d %12d %14d" % (label, len(st), d, sh, sl))
     d, sl, sh = results["nowTrue"]
-    check("as run, 96% or more of the slices share a state with another item's slice", sl >= 0.96 * 54 * N, "(%d of %d)" % (sl, 54 * N))
+    check("by the driver's formula, 96% or more of the grid's slices share a state with another item's slice", sl >= 0.96 * 54 * N, "(%d of %d)" % (sl, 54 * N))
     d, sl, sh = results["nowFalse"]
     check("without the `| 1` the same seeds never collide (the collisions ARE the `| 1`)", sl == 0 and sh == 0)
     d, sl, sh = results["AT" + "rue"]
     check("schedule A has no shared state", sl == 0 and sh == 0)
     d, sl, sh = results["BTrue"]
     check("schedule B has no shared state", sl == 0 and sh == 0)
+    print()
+    # the birthday bound on streams that overlap although their starting states differ: k streams of L draws on a cycle of 2^64 - 1
+    k = 3038
+    print("   the birthday bound k^2 L / 2^64 on two of the run's k = %d slices overlapping although their starting states differ:" % k)
+    for L, what in ((7e8, "L = 7 x 10^8 draws, a 2^28-count slice of a one-operand operation (2.5 draws an operand: the value, the band test, and two more in a quarter)"),
+                 (1.3e9, "L = 1.3 x 10^9 draws, a 2^28-count slice of a two-operand operation (5 draws a count)")):
+        print("     %s: %.1e" % (what, k * k * L / 2.0 ** 64))
+    check("the birthday bound for the run's 3,038 slices is under 10^-3 for either slice length (small, not zero; an enumeration makes it zero)",
+          k * k * 1.3e9 / 2.0 ** 64 < 1e-3, "(%.1e)" % (k * k * 1.3e9 / 2.0 ** 64))
+    check("CONTROL: ten times the slices (30,380, a run ten times as long) would NOT satisfy it, so the check can fail",
+          not (10 * k) ** 2 * 1.3e9 / 2.0 ** 64 < 1e-3, "(%.1e)" % ((10 * k) ** 2 * 1.3e9 / 2.0 ** 64))
     print()
     print("seed_audit: %s" % ("every CHECK held" if fails == 0 else "%d CHECK(s) FAILED" % fails))
     return 0 if fails == 0 else 1

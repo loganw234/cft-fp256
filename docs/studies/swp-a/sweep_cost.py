@@ -45,7 +45,8 @@ Every figure printed is COMPUTED from the file's numbers, a stated constant or a
 The script exits nonzero if any CHECK fails.
 
 usage: python sweep_cost.py                  (reads the files beside it)
-       python sweep_cost.py --controls       (seven mutated copies of the rates file; each must go red)
+       python sweep_cost.py --controls       (nine mutated copies of the rates file and three planted slips in the code,
+                                              switched on by SWEEP_COST_PLANT in a child process; each must go red)
        python sweep_cost.py --rates F --report G   (other copies of the primary inputs)
 """
 import math
@@ -54,6 +55,11 @@ import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.normpath(os.path.join(HERE, "..", "..", ".."))
+sys.path.insert(0, os.path.join(ROOT, "python"))
+SOAK = os.path.join(ROOT, "host", "tools", "clause5_soak.c")
+# a planted slip for the controls (--controls sets it in a child process): first_attribute, scaleb64_operands, wide64_off
+PLANT = os.environ.get("SWEEP_COST_PLANT", "")
 RATES = os.path.join(HERE, "stress-final-item-rates.txt")
 REPORT = os.path.join(HERE, "stress-final-report.txt")
 LEAD_RATES = os.path.join(HERE, "stress-item-rates.txt")
@@ -93,7 +99,7 @@ def scaleb_wide(emax, emin_sub):
 
 
 _lo32, _hi32, _n32 = scaleb_wide(127, -149)
-_lo64, _hi64, _n64 = scaleb_wide(1023, -1074)
+_lo64, _hi64, _n64 = scaleb_wide(1023, -1075 if PLANT == "wide64_off" else -1074)
 
 # --------------------------------------------------------------------------
 # the families: kind, modes, the rate's unit, and the spaces (in the rate's unit)
@@ -140,6 +146,9 @@ FAMILIES["scaleb32"] = dict(kind="tile", modes=MODES4, rate="count", unit="check
 FAMILIES["scaleb64"] = dict(kind="tile", modes=MODES4, rate="count", unit="checks (operand x exponent)",
                             spaces=[("fp64 x 27 directed exponents", S64 * 27),
                                     ("fp64 x %d wide exponents" % _n64, S64 * _n64)])
+
+if PLANT == "scaleb64_operands":
+    FAMILIES["scaleb64"]["spaces"][0] = ("fp64 operands (a plant: the 27 dropped)", S64)
 
 EXHAUSTIVE = ("sqrt32", "rint32", "nextup32", "nextdown32", "logb32", "class32")
 
@@ -216,6 +225,43 @@ def big(x):
     return "{:,}".format(x) if x < 1e7 else "%.2e" % x
 
 
+def soak_list_len(name):
+    """The number of directed exponents in the soak tool's own list, parsed from host/tools/clause5_soak.c."""
+    with open(SOAK, encoding="utf-8") as fh:
+        text = fh.read()
+    m = re.search(r"static const int64_t %s\[\] = \{(.*?)\};" % name, text, re.S)
+    return len(re.findall(r"-?\d+", m.group(1)))
+
+
+def golden_wide_check(fmt, lo, hi):
+    """Hold scaleb_wide's derived range [lo, hi] to the golden model's scaleb: below lo (and at it) every nonzero finite
+    operand of one sign gives ONE result for an attribute, one step inside the range some operand differs from it; the same
+    above hi. Returns (saturated below, tight below, saturated above, tight above)."""
+    from cft_golden import softfloat as sf
+    rnd = (sf.RND_RNE, sf.RND_RTZ, sf.RND_RDN, sf.RND_RUP, sf.RND_RMM)
+    mw = fmt.man_w
+    big = ((fmt.exp_mask - 1) << mw) | fmt.man_mask
+    xs = sorted({1, 3, (1 << mw) - 1, 1 << mw, (fmt.bias << mw) | 5, ((fmt.bias + 7) << mw) | 0x1234, big - 12345, big})
+    sat_lo = sat_hi = True
+    tight_lo = tight_hi = False
+    for m in rnd:
+        for sgn in (0, fmt.sign_mask):
+            ref_lo = sf.scaleb(fmt, xs[0] | sgn, lo, m)
+            ref_hi = sf.scaleb(fmt, xs[0] | sgn, hi, m)
+            for x in xs:
+                for n in (lo, lo - 1, lo - 37):
+                    if sf.scaleb(fmt, x | sgn, n, m) != ref_lo:
+                        sat_lo = False
+                for n in (hi, hi + 1, hi + 37):
+                    if sf.scaleb(fmt, x | sgn, n, m) != ref_hi:
+                        sat_hi = False
+                if sf.scaleb(fmt, x | sgn, lo + 1, m) != ref_lo:
+                    tight_lo = True
+                if sf.scaleb(fmt, x | sgn, hi - 1, m) != ref_hi:
+                    tight_hi = True
+    return sat_lo, tight_lo, sat_hi, tight_hi
+
+
 def controls():
     """Negative controls: mutated copies of the inputs, each of which must turn a named
     CHECK red. A script that cannot fail proves nothing."""
@@ -279,12 +325,35 @@ def controls():
     # C7: one random slice's cases one short: the per-family totals (Table 6) no longer add to the record's
     run("C7 div32-rne quad cases_sum one short", field_edit("div32-rne", "quad", 4, lambda v: v - 1),
         "the families' cases add to the record's totals")
+    # C8: class64's job-seconds halved (the host share of Table 5 would move): the job-seconds no longer fit the rate and the cases
+    run("C8 class64 quad jobsec_sum halved", field_edit("class64", "quad", 5, lambda v: v // 2),
+        "job-seconds")
+    # C9: div64-rne's rate cut to a tenth: its time per attribute leaves the lead's 10^24 to 10^25 years
+    run("C9 div64-rne quad count rate a tenth", field_edit("div64-rne", "quad", 6, lambda v: v // 10),
+        "div64 on one quad, per attribute and summed")
+
+    def plant(label, name, expect):
+        nonlocal bad
+        env = dict(os.environ, SWEEP_COST_PLANT=name)
+        p = subprocess.run([sys.executable, "-B", os.path.abspath(__file__)], capture_output=True, text=True, env=env)
+        failed = [l for l in p.stdout.splitlines() if l.startswith("CHECK") and "FAILED" in l]
+        hit = [l for l in failed if expect in l]
+        ok = p.returncode == 1 and bool(hit)
+        print("CONTROL %-58s %s" % (label, "red at the check written for it" if ok else "NOT CAUGHT  FAILED"))
+        for l in (hit or failed)[:2]:
+            print("        " + l[:150])
+        if not ok:
+            bad += 1
+    # P1 to P3: a slip in the CODE, switched on by the environment of the child process
+    plant("P1 Table 2 sums only the first attribute of a family", "first_attribute", "every family's sweep time is the sum over its attributes")
+    plant("P2 scaleb64's directed space counted in operands (the 27 dropped)", "scaleb64_operands", "the scaleb spaces carry the soak tool's own list lengths")
+    plant("P3 fp64's wide exponent range derived with emin_sub = -1075", "wide64_off", "wide exponent ranges agree with the golden model")
     shutil.rmtree(tmp, ignore_errors=True)
     print()
     if bad:
         print("sweep_cost controls: %d control(s) NOT CAUGHT" % bad)
         return 1
-    print("sweep_cost controls: all seven mutations were caught at their checks")
+    print("sweep_cost controls: all nine mutated inputs and three planted slips were caught at their checks")
     return 0
 
 
@@ -371,6 +440,20 @@ def main():
           (_lo32, _hi32, _n32) == (-278, 277, 556), "(%d, %d, %d)" % (_lo32, _hi32, _n32))
     print("   scaleb64 wide range derived as [%d, %+d] = %d exponents (same argument: emax 1023, smallest subnormal 2^-1074)"
           % (_lo64, _hi64, _n64))
+    from cft_golden.formats import FP32, FP64
+    g32, g64 = golden_wide_check(FP32, _lo32, _hi32), golden_wide_check(FP64, _lo64, _hi64)
+    check("the wide exponent ranges agree with the golden model's scaleb: saturated at and beyond each end, tight one step inside (fp32 and fp64)",
+          all(g32) and all(g64), "(fp32 %s, fp64 %s)" % (g32, g64))
+    l32, l64 = soak_list_len("SCALEB_N32"), soak_list_len("SCALEB_N64")
+    check("the scaleb spaces carry the soak tool's own list lengths (%d and %d exponents, parsed from clause5_soak.c)" % (l32, l64),
+          (l32, l64) == (17, 27) and FAMILIES["scaleb32"]["spaces"][0][1] == S32 * l32 and FAMILIES["scaleb64"]["spaces"][0][1] == S64 * l64
+          and FAMILIES["scaleb32"]["spaces"][1][1] == S32 * _n32 and FAMILIES["scaleb64"]["spaces"][1][1] == S64 * _n64,
+          "(%d, %d)" % (l32, l64))
+    # the job-seconds that Table 5 sums: a row's cases are about its job-seconds times its median rate (the median of a
+    # slice's rate against the sum of the slices' times); observed 0.84 to 1.08 on the rows of five or more slices
+    worst_j = max(abs(r["cases_sum"] / (r["jobsec"] * r["cases_rate"]) - 1.0) for r in rows.values() if r["slices"] >= 5 and r["jobsec"] > 0)
+    check("every row of five or more slices has cases within 25% of its job-seconds x its median rate (the job-seconds of Table 5 fit the rest of the record)",
+          worst_j < 0.25, "(the widest %.0f%%)" % (100.0 * worst_j))
     print()
 
     def rate(item, image="quad"):
@@ -407,14 +490,37 @@ def main():
     print("   one quad = 4 workers; 'workers' are tiles for tile items and CPU cores for host items")
     print("   %-11s %-5s %-30s %2s %12s %14s %14s %14s %14s" % (
         "family", "runs", "space", "n", "one quad", "workers 10 y", "workers 1 y", "workers 1 mo", "worker-y"))
+    sums_ok = True
     for fam, spec in FAMILIES.items():
         names = item_names(fam)
         for label, space in spec["spaces"]:
-            wsec = sum(space / rate(n) for n in names)
+            wsec = sum(space / rate(n) for n in (names[:1] if PLANT == "first_attribute" else names))
+            per = [space / rate(n) for n in names]
+            if not (min(per) * len(per) * 0.999 <= wsec <= max(per) * len(per) * 1.001):
+                sums_ok = False
             print("   %-11s %-5s %-30s %2d %12s %14s %14s %14s %14s" % (
                 fam, spec["kind"], label, len(names), span(wsec / 4.0),
                 big(workers_for(wsec, 10.0)), big(workers_for(wsec, 1.0)), big(workers_for(wsec, 1.0 / 12.0)),
                 ("%.3g" % (wsec / YEAR))))
+    check("Table 2: every family's sweep time is the sum over its attributes (between n times its fastest and n times its slowest attribute's)", sums_ok)
+    print()
+
+    print("== TABLE 2b. the same PER ATTRIBUTE on one quad, for the families of several attributes: space / (4 x the item's rate), fastest and slowest attribute")
+    print("   (Table 2's 'one quad' is the sum over the n attributes of the family; a figure compared with a per-space estimate is compared per attribute)")
+    print("   %-11s %-5s %-30s %2s %14s %14s" % ("family", "runs", "space", "n", "fastest", "slowest"))
+    per_attr = {}
+    for fam, spec in FAMILIES.items():
+        names = item_names(fam)
+        if len(names) < 2:
+            continue
+        for label, space in spec["spaces"]:
+            ys = [space / (4.0 * rate(n)) for n in names]
+            per_attr[(fam, label)] = (min(ys) / YEAR, max(ys) / YEAR)
+            print("   %-11s %-5s %-30s %2d %14s %14s" % (fam, spec["kind"], label, len(names), span(min(ys)), span(max(ys))))
+    lo_d, hi_d = per_attr[("div64", "fp64 pairs, 2^128")]
+    sum_d = sum(S128 / (4.0 * rate(n)) for n in item_names("div64")) / YEAR
+    check("div64 on one quad, per attribute and summed over its four attributes, is inside the lead's 'about 10^24 to 10^25 years'",
+          1e24 <= lo_d and hi_d <= 1e25 and sum_d <= 1e25, "(per attribute %.2e to %.2e years, the four together %.2e)" % (lo_d, hi_d, sum_d))
     print()
 
     # ---- table 3 -------------------------------------------------------------

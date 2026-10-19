@@ -271,6 +271,7 @@ def g4():
         # just below 2^emin can round UP into the normal range, having been rounded on the coarser
         # subnormal grid, and scale invariance then fails although the result is normal.)
         core_checked = core_bad = edge_checked = edge_bad = 0
+        example = None
         for a in fin:
             va = abs(value(fmt, a))
             for b in fin:
@@ -294,17 +295,26 @@ def g4():
                         edge_checked += 1
                         if rk is None or r2[0] != rk or r2[1] != r[1]:
                             edge_bad += 1
-        return core_checked, core_bad, edge_checked, edge_bad
+                        elif example is None:
+                            example = (a, b, k, q, q2)       # outside the core after scaling, and the result still scales exactly
+        return core_checked, core_bad, edge_checked, edge_bad, example
     tot = [0, 0, 0, 0]
+    examples = []
     for m in (sf.RND_RNE, sf.RND_RTZ, sf.RND_RDN, sf.RND_RUP):
         r = run_div(m)
-        tot = [x + y for x, y in zip(tot, r)]
-        print("   div %s: scaled pairs with both results in the core: %7d, violations %d; base in the core and scaled result OUTSIDE it: %7d, differing %d"
-              % (NAME[m], r[0], r[1], r[2], r[3]))
+        tot = [x + y for x, y in zip(tot, r[:4])]
+        examples.append(r[4])
+        print("   div %s: scaled pairs with both results in the core: %7d, violations %d; base in the core and scaled result OUTSIDE it: %7d, differing %d, scaling exactly anyway %d"
+              % (NAME[m], r[0], r[1], r[2], r[3], r[2] - r[3]))
     check("div: a pair and its scaled pair whose EXACT quotients are both in [2^emin, 2^emax) give scaled results, bits and flags",
           tot[1] == 0 and tot[0] > 100000, "(%d checked, %d violations)" % (tot[0], tot[1]))
     check("div: when the scaled pair's quotient leaves that core, scale invariance FAILS (the edge strips are real)", tot[3] > 0,
           "(%d of %d scaled pairs differ)" % (tot[3], tot[2]))
+    ex = examples[0]
+    check("div: but not always - the lemma is 'whenever', not 'iff': a pair whose scaled quotient left the core can still scale exactly",
+          tot[2] - tot[3] > 0 and ex is not None,
+          "(%d of %d scaled pairs scale anyway; under rne the first is a = 0x%02x, b = 0x%02x, k = %d: quotient %s -> %s)" % (
+              tot[2] - tot[3], tot[2], ex[0], ex[1], ex[2], ex[3], ex[4]))
     # sqrt: every positive finite nonzero input, subnormals included; shifts of 2k
     core = bad = 0
     pos = [a for a in fin if not (a >> (fmt.width - 1)) & 1]
@@ -372,6 +382,10 @@ def encode(fmt, sign, R, u):
     """The encoding of (-1)^sign * R * 2^u for an integer R >= 0, or None when it overflows."""
     if R == 0:
         return sign << (fmt.width - 1)
+    if R == 1 << (fmt.man_w + 1):
+        # a rounding that carried out of the kept bits (kept all ones, rounded up): the next binade, significand 1.0.
+        # The first draft returned None here and so skipped 390 cases of e5m6 -> e4m3 before the comparison.
+        R, u = R >> 1, u + 1
     top = R.bit_length() - 1 + u
     if top < fmt.emin:
         # subnormal: u is fixed at emin - man_w, R < 2^man_w
@@ -453,10 +467,62 @@ def g5():
             half = 1 << (dropped - 1)
             cls = 0 if rem == 0 else (1 if rem < half else (2 if rem == half else 3))
             classes.add((u.sign, top, dropped, cls))
-    print("   convertFormat e5m6 -> e4m3: %d (encoding, attribute) cases predicted (finite, no overflow); the decision needs only"
+    print("   convertFormat e5m6 -> e4m3: %d (encoding, attribute) cases predicted (finite, no overflow; the carries out of the kept bits included); the decision needs only"
           " (sign, exponent, class) = %d classes plus the kept lsb, against 4,096 source encodings" % (tested, len(classes)))
-    check("convertFormat: result bits = the decision rule on (kept, class, lsb), every finite source encoding and attribute", bad == 0 and tested > 14000,
+    check("convertFormat: result bits = the decision rule on (kept, class, lsb), every finite source encoding and attribute", bad == 0 and tested == 14680,
           "(%d tested, %d differ)" % (tested, bad))
+    # how many cases an exact rounding by Fractions keeps: the instrument must reach every one of them, and the carries are among them
+    carry = 0
+    nonov = 0
+    for x in range(1 << src.width):
+        u = sf.unpack(src, x)
+        if u.kind not in (sf.NORM, sf.SUB):
+            continue
+        for m in RND:
+            val = abs(value(src, x))
+            # the correctly rounded magnitude by exact rational arithmetic, to the destination's grid
+            top = u.m.bit_length() - 1 + u.e
+            ulp = max(top - dst.man_w, dst.emin - dst.man_w)
+            q = val / Fraction(2) ** ulp
+            j = q.numerator // q.denominator
+            frac = q - j
+            sign = u.sign
+            if frac == 0:
+                up = 0
+            elif m == sf.RND_RTZ:
+                up = 0
+            elif m == sf.RND_RUP:
+                up = 1 if sign == 0 else 0
+            elif m == sf.RND_RDN:
+                up = 1 if sign == 1 else 0
+            elif m == sf.RND_RNE:
+                up = 1 if (frac > Fraction(1, 2) or (frac == Fraction(1, 2) and j & 1)) else 0
+            else:
+                up = 1 if frac >= Fraction(1, 2) else 0
+            J = j + up
+            top2 = (J.bit_length() - 1 + ulp) if J else 0
+            if J and top2 > dst.emax:
+                continue                                    # overflow: not compared here
+            nonov += 1
+            if J == 1 << (dst.man_w + 1):
+                carry += 1
+    check("every non-overflow case an exact rounding finds is among the cases compared (none is skipped)", nonov == tested,
+          "(exact rounding: %d; compared: %d; of them %d carry out of the kept bits)" % (nonov, tested, carry))
+    # the control: the first draft's encode, which returned None for a carry and so skipped those cases
+    global encode
+    saved = encode
+
+    def encode_first_draft(fmt, sign, R, u):
+        if R == 1 << (fmt.man_w + 1):
+            return None
+        return saved(fmt, sign, R, u)
+    encode = encode_first_draft
+    try:
+        tested_old = sum(1 for x in range(1 << src.width) for m in RND if predict_convert(src, dst, x, m, decide) is not None)
+    finally:
+        encode = saved
+    check("CONTROL: the first draft's encode (a carry returns None) compares fewer cases than the exact rounding finds, and the check above sees it",
+          tested_old < nonov and tested_old == nonov - carry, "(%d against %d)" % (tested_old, nonov))
     check("CONTROL: a rule that forgets ties-to-even (a tie always rounds up) is NOT the model's convertFormat", badw > 0, "(%d differ)" % badw)
     fmt = E5M6
     tested = bad = badw = 0
@@ -546,6 +612,42 @@ def g6():
     def L1_rem(p, ew):
         gap = (1 << ew) + p - 5          # emax - emin + p - 2, clause5.c's bound on the host's walk: 275 at fp32, 2,096 at fp64
         return (1 << (2 * (p - 1))) * gap                        # significand pairs x exponent gaps
+
+    # ---- guards: each L1 formula is held to an enumeration, at the tiny format where it can be counted ----------------
+    e4, pe = E4M3, E4M3.prec
+    check("L1_div at e4m3 (per magnitude function) equals the number of (significand pair, strip) keys the pairs reach, counted above",
+          L1_div(pe) // magn == n, "(%d against %d)" % (L1_div(pe) // magn, n))
+    sq = set()
+    for x in finite(e4):
+        if value(e4, x) > 0:
+            u = sf.unpack(e4, x)
+            top = u.m.bit_length() - 1 + u.e
+            sq.add((u.m << (pe - u.m.bit_length()), top % 2))
+    check("L1_sqrt at e4m3 (per magnitude function) equals the number of (normalised significand, exponent parity) classes of the positive inputs",
+          L1_sqrt(pe) // magn == len(sq), "(%d against %d)" % (L1_sqrt(pe) // magn, len(sq)))
+    rr = [x for x in finite(e4) if Fraction(1, 2) <= value(e4, x) < Fraction(1 << (pe - 1))]
+    check("L1_rint at e4m3 (per magnitude function) equals the number of positive values in [1/2, 2^(p-1))",
+          L1_rint(pe) // magn == len(rr), "(%d against %d)" % (L1_rint(pe) // magn, len(rr)))
+    ck = set()
+    for x in finite(E5M6):
+        if value(E5M6, x) > 0:
+            u = sf.unpack(E5M6, x)
+            top = u.m.bit_length() - 1 + u.e
+            ms = u.m << (E5M6.prec - u.m.bit_length())
+            strip = "O" if top > e4.emax else (0 if top >= e4.emin else min(e4.emin - top, pe + 1))
+            ck.add((ms, strip))
+    check("L1_conv (e5m6 to e4m3, per magnitude function) equals the number of (source significand, destination strip) keys the encodings reach",
+          L1_conv(E5M6.prec, pe) // magn == len(ck), "(%d against %d)" % (L1_conv(E5M6.prec, pe) // magn, len(ck)))
+    gaps = [((1 << ew) + fm.prec - 5, fm.emax - fm.emin + fm.prec - 2) for fm, ew in ((FP32, 8), (FP64, 11))]
+    check("L1_rem's exponent gaps equal emax - emin + p - 2, clause5.c's bound on the host's walk, at fp32 and fp64 (275 and 2,096)",
+          all(a == b for a, b in gaps) and gaps[0][1] == 275 and gaps[1][1] == 2096, "(%s)" % ", ".join("%d = %d" % g for g in gaps))
+    # the guards can fail: each formula with one term dropped disagrees with its own count
+    dropped = (3 * (1 + (pe + 1)) * (1 << (2 * (pe - 1))) // magn != n,                                          # no overflow strip
+               magn * (1 << (pe - 1)) // magn != len(sq),                                                        # no exponent parity
+               magn * (pe - 1) * (1 << (pe - 1)) // magn != len(rr),                                              # one binade short
+               magn * (1 + (pe + 1)) * (1 << (E5M6.prec - 1)) // magn != len(ck),                                 # no overflow strip
+               (1 << 8) - 5 != 127 + 126 + 24 - 2)                                                               # no + p in the gap
+    check("CONTROL: each L1 formula with one term dropped disagrees with its count (the guards above can fail)", all(dropped), "(%s)" % (dropped,))
 
     rows = []
 

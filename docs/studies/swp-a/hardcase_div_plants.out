@@ -1,0 +1,7 @@
+PLANT closed2  red at the check written for it
+        CHECK the closed form ln 2 / 2^(p-1) a draw is within 5% of the exhaustive count at p = 11, both types FAILED (0.495, 0.495)
+PLANT prob2    red at the check written for it
+        CHECK fp32: the per-draw probability used below is ln 2 / 2^(p-1) within 2%, both types (a factor 2 slip is caught here) FAILED (2.001, 1.999)
+        CHECK fp64: the per-draw probability used below is ln 2 / 2^(p-1) within 2%, both types (a factor 2 slip is caught here) FAILED (1.999, 1.998)
+
+hardcase_div plants: both slips were caught at their checks

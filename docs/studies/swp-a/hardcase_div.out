@@ -26,15 +26,46 @@ CHECK fp64: golden div = exact arbiter on 300 constructed pairs x 5 attributes (
 CHECK fp128: golden div = exact arbiter on 120 constructed pairs x 5 attributes (bits and flags)       ok (600 cases, 0 differ)
 CHECK CONTROL: the arbiter's RNE answer differs from the model's RTZ answer on the near-midpoint cases (the comparison can see) ok (200 of 200)
 
-== H3. how close does the campaign's sampler come? (the least |N| / my over its draws)
-   rho = |N| / my in [0, 1] is the distance to the nearest midpoint in units of half an ulp; its least possible value is 1 / my.
-   format   draws here   least rho here   least possible rho expected hits of rho = 1/my in a 1.45e10-draw item
-   fp32         358161        2.307e-06            7.947e-08              2.3e+03                reached
+== H3. how close does the campaign's sampler come, and how many closest-approach cases would a weekend meet?
+   rho = |N| / my in [0, 1] is the distance to the nearest midpoint in units of half an ulp; |N| = 1 is the closest approach a divisor can allow
+   (only an ODD divisor allows it: N is a multiple of the divisor's power of two). Two boundary types, a midpoint and a representable number,
+   each with its own |N| = 1 set; the per-draw probability of ONE type is counted below, exactly where a count is possible.
+
+   the count of |N| = 1 pairs, one boundary type, p-bit significand pairs (dividend doubled when mx < my, as the sampler does):
+   p    type          pairs    brute force    sum of 1/my  closed form count/closed
+   8    mid           16384             87             87         88.7        0.981
+   8    rep           16384             84             84         88.7        0.947
+   10   mid          262144            359            359        354.9        1.012
+   10   rep          262144            336            336        354.9        0.947
+   11   mid         1048576            703            703        709.8        0.990
+   11   rep         1048576            702            702        709.8        0.989
+CHECK the sum over odd divisors of the solutions of X 2^k = +-1 equals the brute-force count of |N| = 1 pairs, p = 8, 10, 11, both types ok 
+CHECK the closed form ln 2 / 2^(p-1) a draw is within 5% of the exhaustive count at p = 11, both types ok (0.990, 0.989)
+CHECK CONTROL: the first draft's rate, 2 / (1.5 2^(p-1)) a draw, is NOT within 5% of the exhaustive count (it is out by a factor of about 1.9) ok (1.94 times the exhaustive rate at p = 11)
+
+   exactly at p = 24 (every odd divisor): midpoint 5815346 of 2^46 pairs (8.2641e-08 a draw), representable 5812730 (8.2604e-08); ln 2 / 2^23 = 8.2630e-08
+CHECK at p = 24 the exact count is within 0.1% of ln 2 / 2^23 a draw, both types                       ok (1.00014, 0.99969)
+
+   p = 24  200000 sampled odd divisors: solutions a divisor, midpoint 1.3873, representable 1.3858 (2 ln 2 = 1.3863): 8.269e-08 and 8.260e-08 a draw
+CHECK fp32: the sampled mean number of solutions a divisor is within 2% of 2 ln 2, both types          ok 
+CHECK fp32: the per-draw probability used below is ln 2 / 2^(p-1) within 2%, both types (a factor 2 slip is caught here) ok (1.001, 1.000)
+   p = 53  200000 sampled odd divisors: solutions a divisor, midpoint 1.3858, representable 1.3848 (2 ln 2 = 1.3863): 1.539e-16 and 1.537e-16 a draw
+CHECK fp64: the sampled mean number of solutions a divisor is within 2% of 2 ln 2, both types          ok 
+CHECK fp64: the per-draw probability used below is ln 2 / 2^(p-1) within 2%, both types (a factor 2 slip is caught here) ok (1.000, 0.999)
+   p = 113 200000 sampled odd divisors: solutions a divisor, midpoint 1.3845, representable 1.3855 (2 ln 2 = 1.3863): 1.333e-34 and 1.334e-34 a draw
+CHECK fp128: the sampled mean number of solutions a divisor is within 2% of 2 ln 2, both types         ok 
+CHECK fp128: the per-draw probability used below is ln 2 / 2^(p-1) within 2%, both types (a factor 2 slip is caught here) ok (0.999, 0.999)
+
+   how close the campaign's own sampler comes (its port, held to the real tool in seed_audit.py): the least rho over its draws,
+   against the expected number of closest-approach hits in a stress-run-sized item (14498660352 draws; an UPPER bound: a draw whose quotient is
+   subnormal or overflows has another boundary, and a banded operand is not a uniform significand)
+   format   draws here   least rho here     least possible rho         hits, one type       hits, both types
+   fp32         358161        2.307e-06              5.960e-08                1.2e+03                2.4e+03
 CHECK fp32: the least rho over 358161 draws is within a factor 10 of 1 / draws, as uniform draws predict ok (2.31e-06 against 2.79e-06)
-   fp64         362061        8.888e-07            1.480e-16             4.29e-06 NOT reached (expected 4.3e-06)
+   fp64         362061        8.888e-07              1.110e-16               2.23e-06               4.46e-06
 CHECK fp64: the least rho over 362061 draws is within a factor 10 of 1 / draws, as uniform draws predict ok (8.89e-07 against 2.76e-06)
-CHECK fp32: the stress run's draws (1.45e10 a division item) expect over 1,000 closest-approach (|N| = 1) hits ok (2304)
-CHECK fp64: the same draws expect fewer than 10^-5 closest-approach hits (the class is invisible to sampling) ok (4.29e-06)
+CHECK fp32: the stress run's draws (1.45e10 a division item) expect over 1,000 closest-approach hits of the midpoint type alone ok (1199, and 2396 of both types)
+CHECK fp64: the same draws expect fewer than 10^-5 of either type (the class is invisible to sampling) ok (2.23e-06, and 4.46e-06 of both types)
 
 == H4. the repository's own failure family: a = 1, b = 1 - ulp (python/tests/test_sequences.py)
    fp32   |N| = 1, rho = |N| / my = 5.960e-08 = 1 / my: a closest-approach case (the quotient is 1/(my 2^p), about 2^-48, from a midpoint: 2^-25 of an ulp)

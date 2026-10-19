@@ -21,9 +21,13 @@ This script
   H2  runs the golden model's division on them under all five attributes against an
       INDEPENDENT exact arbiter (Fractions, the decision rule of symmetry_check.py), bits and
       the inexact flag;
-  H3  measures how close the campaign's own sampler (host/tools/divsqrt_soak.c's banded
-      generator, ported in seed_audit.py and held there to the real tool) comes: the least
-      |N| / my over its draws, against the expected least for a campaign of 1.45 x 10^10 draws;
+  H3  counts the |N| = 1 pairs - only an odd divisor allows one - exhaustively at p = 8, 10 and 11, exactly at
+      p = 24 (a sum over every odd divisor) and by sampled odd divisors at p = 24, 53 and 113; the
+      closed form is ln 2 / 2^(p-1) a draw for ONE boundary type (a midpoint, or a representable number),
+      checked against the exhaustive counts (a rate twice too large is caught: the first draft's was);
+      what a campaign of 1.45 x 10^10 draws expects of them; and how close the campaign's own sampler
+      (host/tools/divsqrt_soak.c's banded generator, ported in seed_audit.py and held there to the
+      real tool) comes: the least |N| / my over its draws;
   H4  shows the repository's own failure family (a = 1, b = 1 - ulp, python/tests/
       test_sequences.py) is a closest-approach case: its |N| is computed;
   H5  PLANTS a defective division - the quotient computed to g extra bits and rounded
@@ -34,7 +38,8 @@ This script
       midpoints, one of them sqrt(1 + ulp), the repository's own failing family; the golden
       model agrees with an exact integer arbiter on them.
 
-usage: python hardcase_div.py
+usage: python hardcase_div.py            (the whole of it, 45 s)
+       python hardcase_div.py --plants   (two planted slips in H3, each of which must turn a named check red)
 """
 import os
 import random
@@ -52,6 +57,7 @@ import seed_audit as sa  # noqa: E402  (the port of the tools' sampler, held to 
 
 RND = (sf.RND_RNE, sf.RND_RTZ, sf.RND_RDN, sf.RND_RUP, sf.RND_RMM)
 fails = 0
+PLANT = None                          # a planted slip for H3 only (--plant NAME); see run_plants()
 CAMPAIGN_DRAWS = 14_498_660_352        # the stress run's div32-rne count (sweep_cost.py, final record)
 
 
@@ -84,6 +90,39 @@ def N_mid(p, mx, my):
 def N_rep(p, mx, my):
     r = (mx << (p - 1)) % my
     return r if r <= my // 2 else r - my
+
+
+def solutions(p, my, target):
+    """The dividend significands mx for which |N| = 1, for one odd divisor my, under the sampler's convention:
+    the numerator X is mx when mx >= my and 2 mx when mx < my, so X lies in [my, 2 my); |N| = 1 means
+    X 2^k = +1 or -1 (mod my), k = p for a midpoint and p - 1 for a representable number, which has exactly one
+    solution of each sign in [my, 2 my). A solution is a dividend when X < 2^p (mx = X), or when X >= 2^p and X is
+    even (mx = X / 2, which is below my). An even divisor has none: N is then a multiple of its power of two."""
+    if my % 2 == 0 or my < 3:
+        return []
+    k = p if target == "mid" else p - 1
+    inv = pow(1 << k, -1, my)
+    out = []
+    for sign in (+1, -1):
+        X = ((sign * inv) % my) + my
+        if X < (1 << p):
+            out.append(X)
+        elif X % 2 == 0:
+            out.append(X // 2)
+    return out
+
+
+def brute_hits(p, target):
+    """The number of (mx, my) pairs of p-bit significands with |N| = 1, by trying every pair."""
+    lo, hi = 1 << (p - 1), 1 << p
+    n = 0
+    for my in range(lo, hi):
+        for mx in range(lo, hi):
+            X = mx * 2 if mx < my else mx
+            nn = N_mid(p, X, my) if target == "mid" else N_rep(p, X, my)
+            if abs(nn) == 1:
+                n += 1
+    return n
 
 
 def exact_round(p, mx, my, mode):
@@ -121,11 +160,148 @@ def result_bits(fmt, J):
     return (fmt.bias << fmt.man_w) | (J - (1 << (p - 1)))
 
 
+def h3():
+    # ---- H3 -------------------------------------------------------------------
+    print("== H3. how close does the campaign's sampler come, and how many closest-approach cases would a weekend meet?")
+    print("   rho = |N| / my in [0, 1] is the distance to the nearest midpoint in units of half an ulp; |N| = 1 is the closest approach a divisor can allow")
+    print("   (only an ODD divisor allows it: N is a multiple of the divisor's power of two). Two boundary types, a midpoint and a representable number,")
+    print("   each with its own |N| = 1 set; the per-draw probability of ONE type is counted below, exactly where a count is possible.")
+    print()
+    print("   the count of |N| = 1 pairs, one boundary type, p-bit significand pairs (dividend doubled when mx < my, as the sampler does):")
+    print("   %-4s %-4s %14s %14s %14s %12s %12s" % ("p", "type", "pairs", "brute force", "sum of 1/my", "closed form", "count/closed"))
+    ln2 = 0.6931471805599453
+    closed_factor = 2.0 if PLANT == "closed2" else 1.0      # a planted slip: the closed form a factor 2 too large
+    prob_factor = 2.0 if PLANT == "prob2" else 1.0          # a planted slip: the per-draw probability a factor 2 too large
+    exh = {}
+    for pp in (8, 10, 11):
+        for target in ("mid", "rep"):
+            bf = brute_hits(pp, target)
+            lo_, hi_ = 1 << (pp - 1), 1 << pp
+            sm = sum(len(solutions(pp, my, target)) for my in range(lo_, hi_))
+            closed = closed_factor * ln2 / 2 ** (pp - 1) * 4 ** (pp - 1)
+            exh[(pp, target)] = (bf, sm, closed)
+            print("   %-4d %-4s %14d %14d %14d %12.1f %12.3f" % (pp, target, 4 ** (pp - 1), bf, sm, closed, bf / closed))
+    check("the sum over odd divisors of the solutions of X 2^k = +-1 equals the brute-force count of |N| = 1 pairs, p = 8, 10, 11, both types",
+          all(v[0] == v[1] for v in exh.values()))
+    check("the closed form ln 2 / 2^(p-1) a draw is within 5% of the exhaustive count at p = 11, both types",
+          all(abs(exh[(11, t)][0] / exh[(11, t)][2] - 1.0) < 0.05 for t in ("mid", "rep")),
+          "(%.3f, %.3f)" % (exh[(11, "mid")][0] / exh[(11, "mid")][2], exh[(11, "rep")][0] / exh[(11, "rep")][2]))
+    old_ratio = (2.0 / (1.5 * (1 << 10))) / (exh[(11, "mid")][0] / 4 ** 10)       # the first draft's 2 / my_typ against the exhaustive rate
+    check("CONTROL: the first draft's rate, 2 / (1.5 2^(p-1)) a draw, is NOT within 5% of the exhaustive count (it is out by a factor of about 1.9)",
+          abs(old_ratio - 1.0) > 0.5, "(%.2f times the exhaustive rate at p = 11)" % old_ratio)
+    if PLANT is None:
+        # exactly at p = 24, a sum over every odd divisor
+        p24 = {t: 0 for t in ("mid", "rep")}
+        for my in range((1 << 23) | 1, 1 << 24, 2):
+            for t in ("mid", "rep"):
+                p24[t] += len(solutions(24, my, t))
+        print()
+        print("   exactly at p = 24 (every odd divisor): midpoint %d of 2^46 pairs (%.4e a draw), representable %d (%.4e); ln 2 / 2^23 = %.4e" % (
+            p24["mid"], p24["mid"] / 2.0 ** 46, p24["rep"], p24["rep"] / 2.0 ** 46, ln2 / 2 ** 23))
+        check("at p = 24 the exact count is within 0.1% of ln 2 / 2^23 a draw, both types",
+              all(abs(p24[t] / 2.0 ** 46 / (ln2 / 2 ** 23) - 1.0) < 0.001 for t in p24),
+              "(%.5f, %.5f)" % (p24["mid"] / 2.0 ** 46 / (ln2 / 2 ** 23), p24["rep"] / 2.0 ** 46 / (ln2 / 2 ** 23)))
+    # by sampled odd divisors at p = 24, 53 and 113: the mean number of solutions a divisor is 2 ln 2, so a draw hits with probability mean / 2^p
+    print()
+    prob = {}
+    rngm = random.Random(77)
+    for fmt in (FP32, FP64, FP128):
+        pp = fmt.prec
+        nsamp = 200000
+        mean = {}
+        for t in ("mid", "rep"):
+            tot = 0
+            for _ in range(nsamp):
+                my = rngm.randrange(1 << (pp - 1), 1 << pp) | 1
+                tot += len(solutions(pp, my, t))
+            mean[t] = tot / nsamp
+        prob[fmt.name] = {t: prob_factor * mean[t] / 2.0 ** pp for t in mean}
+        print("   p = %-3d %d sampled odd divisors: solutions a divisor, midpoint %.4f, representable %.4f (2 ln 2 = %.4f): %.3e and %.3e a draw" % (
+            pp, nsamp, mean["mid"], mean["rep"], 2 * ln2, prob[fmt.name]["mid"], prob[fmt.name]["rep"]))
+        check("%s: the sampled mean number of solutions a divisor is within 2%% of 2 ln 2, both types" % fmt.name,
+              all(abs(mean[t] / (2 * ln2) - 1.0) < 0.02 for t in mean))
+        check("%s: the per-draw probability used below is ln 2 / 2^(p-1) within 2%%, both types (a factor 2 slip is caught here)" % fmt.name,
+              all(abs(prob[fmt.name][t] / (ln2 / 2.0 ** (pp - 1)) - 1.0) < 0.02 for t in mean),
+              "(%.3f, %.3f)" % (prob[fmt.name]["mid"] / (ln2 / 2.0 ** (pp - 1)), prob[fmt.name]["rep"] / (ln2 / 2.0 ** (pp - 1))))
+    print()
+    if PLANT is not None:
+        return
+    print("   how close the campaign's own sampler comes (its port, held to the real tool in seed_audit.py): the least rho over its draws,")
+    print("   against the expected number of closest-approach hits in a stress-run-sized item (%d draws; an UPPER bound: a draw whose quotient is" % CAMPAIGN_DRAWS)
+    print("   subnormal or overflows has another boundary, and a banded operand is not a uniform significand)")
+    print("   %-6s %12s %16s %22s %22s %22s" % ("format", "draws here", "least rho here", "least possible rho", "hits, one type", "hits, both types"))
+    hits = {}
+    for fmt, dr in ((FP32, 400000), (FP64, 400000)):
+        p = fmt.prec
+        r = sa.Rng(0x50AC0001)
+        least = 1.0
+        used = 0
+        for _ in range(dr):
+            a = sa.banded32(r) if fmt is FP32 else sa.banded64(r)
+            b = sa.banded32(r) if fmt is FP32 else sa.banded64(r)
+            mw = fmt.man_w
+            ea, eb = (a >> mw) & fmt.exp_mask, (b >> mw) & fmt.exp_mask
+            if ea in (0, fmt.exp_mask) or eb in (0, fmt.exp_mask):
+                continue                                  # the generator's band operands are subnormal or special: not a significand pair
+            mx = (a & fmt.man_mask) | (1 << mw)
+            my = (b & fmt.man_mask) | (1 << mw)
+            if mx < my:
+                mx *= 2                                   # Q in [1, 2): double the dividend significand (my unchanged)
+            nn = abs(N_mid(p, mx, my) if mx < (1 << (p + 1)) else 0)
+            rho = nn / my
+            used += 1
+            if rho < least:
+                least = rho
+        h1 = CAMPAIGN_DRAWS * prob[fmt.name]["mid"]
+        h2 = CAMPAIGN_DRAWS * (prob[fmt.name]["mid"] + prob[fmt.name]["rep"])
+        hits[fmt.name] = (h1, h2)
+        print("   %-6s %12d %16.3e %22.3e %22.3g %22.3g" % (fmt.name, used, least, 1.0 / ((1 << p) - 1), h1, h2))
+        # the least rho of `used` independent uniform draws on [0, 1] is about 1 / used: a guard on this computation
+        check("%s: the least rho over %d draws is within a factor 10 of 1 / draws, as uniform draws predict" % (fmt.name, used),
+              0.1 / used < least < 10.0 / used, "(%.2e against %.2e)" % (least, 1.0 / used))
+    check("fp32: the stress run's draws (1.45e10 a division item) expect over 1,000 closest-approach hits of the midpoint type alone",
+          hits["fp32"][0] > 1000, "(%.0f, and %.0f of both types)" % hits["fp32"])
+    check("fp64: the same draws expect fewer than 10^-5 of either type (the class is invisible to sampling)", hits["fp64"][1] < 1e-5,
+          "(%.2e, and %.2e of both types)" % hits["fp64"])
+    print()
+
+
+def run_plants():
+    """Each planted slip, run through H3 alone (--plant NAME), must turn a named check red."""
+    import subprocess
+    expect = {"closed2": "the closed form ln 2 / 2^(p-1) a draw is within 5% of the exhaustive count at p = 11",
+              "prob2": "the per-draw probability used below is ln 2 / 2^(p-1) within 2%"}
+    bad = 0
+    for name, text in expect.items():
+        p = subprocess.run([sys.executable, "-B", os.path.abspath(__file__), "--plant", name], capture_output=True, text=True)
+        failed = [ln for ln in p.stdout.splitlines() if ln.startswith("CHECK") and "FAILED" in ln]
+        hit = [ln for ln in failed if text in ln]
+        ok = p.returncode == 1 and bool(hit)
+        print("PLANT %-8s %s" % (name, "red at the check written for it" if ok else "NOT CAUGHT  FAILED"))
+        for ln in (hit or failed)[:2]:
+            print("        " + ln[:170])
+        bad += 0 if ok else 1
+    print()
+    print("hardcase_div plants: %s" % ("both slips were caught at their checks" if bad == 0 else "%d plant(s) NOT CAUGHT" % bad))
+    return 1 if bad else 0
+
+
 def main():
+    global PLANT
     try:
         sys.stdout.reconfigure(newline="\n")
     except (AttributeError, ValueError):
         pass
+    argv = sys.argv[1:]
+    if "--plants" in argv:
+        return run_plants()
+    if "--plant" in argv:
+        PLANT = argv[argv.index("--plant") + 1]
+        print("hardcase_div.py: H3 alone, with the planted slip %r" % PLANT)
+        print()
+        h3()
+        print("hardcase_div (plant %s): %s" % (PLANT, "every CHECK held" if fails == 0 else "%d CHECK(s) FAILED" % fails))
+        return 0 if fails == 0 else 1
     rng = random.Random(2026)
     print("hardcase_div.py: closest-approach divisions, constructed, verified, and measured against the campaign's sampler")
     print()
@@ -196,43 +372,7 @@ def main():
           bad > 0, "(%d of 200)" % bad)
     print()
 
-    # ---- H3 -------------------------------------------------------------------
-    print("== H3. how close does the campaign's sampler come? (the least |N| / my over its draws)")
-    print("   rho = |N| / my in [0, 1] is the distance to the nearest midpoint in units of half an ulp; its least possible value is 1 / my.")
-    print("   %-6s %12s %16s %20s %20s %22s" % ("format", "draws here", "least rho here", "least possible rho", "expected hits of rho = 1/my", "in a 1.45e10-draw item"))
-    for fmt, dr in ((FP32, 400000), (FP64, 400000)):
-        p = fmt.prec
-        r = sa.Rng(0x50AC0001)
-        least = 1.0
-        used = 0
-        for _ in range(dr):
-            a = sa.banded32(r) if fmt is FP32 else sa.banded64(r)
-            b = sa.banded32(r) if fmt is FP32 else sa.banded64(r)
-            mw = fmt.man_w
-            ea, eb = (a >> mw) & fmt.exp_mask, (b >> mw) & fmt.exp_mask
-            if ea in (0, fmt.exp_mask) or eb in (0, fmt.exp_mask):
-                continue                                  # the generator's band operands are subnormal or special: not a significand pair
-            mx = (a & fmt.man_mask) | (1 << mw)
-            my = (b & fmt.man_mask) | (1 << mw)
-            if mx < my:
-                mx *= 2                                   # Q in [1, 2): double the dividend significand (my unchanged)
-            nn = abs(N_mid(p, mx, my) if mx < (1 << (p + 1)) else 0)
-            rho = nn / my
-            used += 1
-            if rho < least:
-                least = rho
-        my_typ = 1.5 * (1 << (p - 1))
-        exp_hits = CAMPAIGN_DRAWS * 2 / my_typ
-        print("   %-6s %12d %16.3e %20.3e %20.3g %22s" % (fmt.name, used, least, 1.0 / my_typ, exp_hits,
-                                                      "reached" if exp_hits > 1 else "NOT reached (expected %.1e)" % exp_hits))
-        # the least rho of `used` independent uniform draws on [0, 1] is about 1 / used: a guard on this computation
-        check("%s: the least rho over %d draws is within a factor 10 of 1 / draws, as uniform draws predict" % (fmt.name, used),
-              0.1 / used < least < 10.0 / used, "(%.2e against %.2e)" % (least, 1.0 / used))
-    f32_hits = CAMPAIGN_DRAWS * 2 / (1.5 * (1 << 23))
-    f64_hits = CAMPAIGN_DRAWS * 2 / (1.5 * (1 << 52))
-    check("fp32: the stress run's draws (1.45e10 a division item) expect over 1,000 closest-approach (|N| = 1) hits", f32_hits > 1000, "(%.0f)" % f32_hits)
-    check("fp64: the same draws expect fewer than 10^-5 closest-approach hits (the class is invisible to sampling)", f64_hits < 1e-5, "(%.2e)" % f64_hits)
-    print()
+    h3()
 
     # ---- H4 -------------------------------------------------------------------
     print("== H4. the repository's own failure family: a = 1, b = 1 - ulp (python/tests/test_sequences.py)")

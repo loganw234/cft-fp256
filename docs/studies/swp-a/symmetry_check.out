@@ -21,18 +21,21 @@ CHECK sqrt: RMM = RNE on 3,000 random operands at each of fp32 and fp64 (samples
 CHECK CONTROL: for roundToIntegral RMM and RNE DO differ (ties exist), so the comparison can see a difference ok (8 of 256 encodings)
 
 == G4. scale invariance with its preconditions, and the edge strips (e4m3, every finite nonzero pair)
-   div rne: scaled pairs with both results in the core:  379280, violations 0; base in the core and scaled result OUTSIDE it:  100928, differing 79420
-   div rtz: scaled pairs with both results in the core:  379280, violations 0; base in the core and scaled result OUTSIDE it:  100928, differing 79420
-   div rdn: scaled pairs with both results in the core:  379280, violations 0; base in the core and scaled result OUTSIDE it:  100928, differing 79420
-   div rup: scaled pairs with both results in the core:  379280, violations 0; base in the core and scaled result OUTSIDE it:  100928, differing 79420
+   div rne: scaled pairs with both results in the core:  379280, violations 0; base in the core and scaled result OUTSIDE it:  100928, differing 79420, scaling exactly anyway 21508
+   div rtz: scaled pairs with both results in the core:  379280, violations 0; base in the core and scaled result OUTSIDE it:  100928, differing 79420, scaling exactly anyway 21508
+   div rdn: scaled pairs with both results in the core:  379280, violations 0; base in the core and scaled result OUTSIDE it:  100928, differing 79420, scaling exactly anyway 21508
+   div rup: scaled pairs with both results in the core:  379280, violations 0; base in the core and scaled result OUTSIDE it:  100928, differing 79420, scaling exactly anyway 21508
 CHECK div: a pair and its scaled pair whose EXACT quotients are both in [2^emin, 2^emax) give scaled results, bits and flags ok (1517120 checked, 0 violations)
 CHECK div: when the scaled pair's quotient leaves that core, scale invariance FAILS (the edge strips are real) ok (317680 of 403712 scaled pairs differ)
+CHECK div: but not always - the lemma is 'whenever', not 'iff': a pair whose scaled quotient left the core can still scale exactly ok (86032 of 403712 scaled pairs scale anyway; under rne the first is a = 0x01, b = 0x01, k = 7: quotient 1 -> 128)
 CHECK sqrt: sqrt(a 4^k) = sqrt(a) 2^k for EVERY positive input incl. subnormals, 3 attributes, k in [-6, 6] ok (2625 checked, 0 violations)
 CHECK rem: remainder(a 2^k, b 2^k) = remainder(a, b) 2^k for every pair and k in [-8, 8] (exact, no result edge) ok (519044 checked, 0 violations)
 
 == G5. the structure of rounding: the golden model equals a decision rule (kept bits, class of the dropped bits, lsb)
-   convertFormat e5m6 -> e4m3: 14290 (encoding, attribute) cases predicted (finite, no overflow); the decision needs only (sign, exponent, class) = 224 classes plus the kept lsb, against 4,096 source encodings
-CHECK convertFormat: result bits = the decision rule on (kept, class, lsb), every finite source encoding and attribute ok (14290 tested, 0 differ)
+   convertFormat e5m6 -> e4m3: 14680 (encoding, attribute) cases predicted (finite, no overflow; the carries out of the kept bits included); the decision needs only (sign, exponent, class) = 224 classes plus the kept lsb, against 4,096 source encodings
+CHECK convertFormat: result bits = the decision rule on (kept, class, lsb), every finite source encoding and attribute ok (14680 tested, 0 differ)
+CHECK every non-overflow case an exact rounding finds is among the cases compared (none is skipped) ok (exact rounding: 14680; compared: 14680; of them 390 carry out of the kept bits)
+CHECK CONTROL: the first draft's encode (a carry returns None) compares fewer cases than the exact rounding finds, and the check above sees it ok (14290 against 14680)
 CHECK CONTROL: a rule that forgets ties-to-even (a tie always rounds up) is NOT the model's convertFormat ok (120 differ)
 CHECK roundToIntegral: result bits = the decision rule on (kept, class, lsb), every finite encoding of e5m6 and attribute ok (19830 tested, 0 differ)
 CHECK CONTROL: the rule that forgets ties-to-even is NOT the model's roundToIntegral               ok (64 differ)
@@ -40,6 +43,12 @@ CHECK CONTROL: the rule that forgets ties-to-even is NOT the model's roundToInte
 == G6. the sizes that remain, and what they cost at the stress run's measured rates (COMPUTED)
    division at e4m3: 448 distinct (significand pair, strip) keys are reached by the pairs; the bound (1 + (p+1) + 1) 4^(p-1) = 448
 CHECK div: the number of (significand pair, strip) keys reached is at most (p + 3) 4^(p-1) at e4m3 ok (448 <= 448)
+CHECK L1_div at e4m3 (per magnitude function) equals the number of (significand pair, strip) keys the pairs reach, counted above ok (448 against 448)
+CHECK L1_sqrt at e4m3 (per magnitude function) equals the number of (normalised significand, exponent parity) classes of the positive inputs ok (16 against 16)
+CHECK L1_rint at e4m3 (per magnitude function) equals the number of positive values in [1/2, 2^(p-1)) ok (32 against 32)
+CHECK L1_conv (e5m6 to e4m3, per magnitude function) equals the number of (source significand, destination strip) keys the encodings reach ok (448 against 448)
+CHECK L1_rem's exponent gaps equal emax - emin + p - 2, clause5.c's bound on the host's walk, at fp32 and fp64 (275 and 2,096) ok (275 = 275, 2096 = 2096)
+CHECK CONTROL: each L1 formula with one term dropped disagrees with its count (the guards above can fail) ok ((True, True, True, True, True))
    level L1 = the sign, attribute and scale reductions of G1-G4 (PROVED for the golden model at e4m3; the arguments for p = 24 and 53 are in the study)
    space            runs     L0 (log2)    L1 (log2)    L0 / L1     L1, one quad
    div32            tile          66.0         52.3   1.29e+04           22.3 y

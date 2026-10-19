@@ -12,5 +12,15 @@ CONTROL C6 scaleb32-rne quad cases_sum 17 x count_sum              red at the ch
         CHECK scaleb32: cases_sum is within 0.1% of count_sum (count IS checks, not operands) FAILED (199289221120 vs 11719933952)
 CONTROL C7 div32-rne quad cases_sum one short                      red at the check written for it
         CHECK the families' cases add to the record's totals (1,296,186,685,863 random, 60,129,542,440 exhaustive) FAILED (1296186685862, 60129542440)
+CONTROL C8 class64 quad jobsec_sum halved                          red at the check written for it
+        CHECK every row of five or more slices has cases within 25% of its job-seconds x its median rate (the job-seconds of Table 5 fit the rest of the recor
+CONTROL C9 div64-rne quad count rate a tenth                       red at the check written for it
+        CHECK div64 on one quad, per attribute and summed over its four attributes, is inside the lead's 'about 10^24 to 10^25 years' FAILED (per attribute 1.
+CONTROL P1 Table 2 sums only the first attribute of a family       red at the check written for it
+        CHECK Table 2: every family's sweep time is the sum over its attributes (between n times its fastest and n times its slowest attribute's) FAILED 
+CONTROL P2 scaleb64's directed space counted in operands (the 27 dropped) red at the check written for it
+        CHECK the scaleb spaces carry the soak tool's own list lengths (17 and 27 exponents, parsed from clause5_soak.c) FAILED (17, 27)
+CONTROL P3 fp64's wide exponent range derived with emin_sub = -1075 red at the check written for it
+        CHECK the wide exponent ranges agree with the golden model's scaleb: saturated at and beyond each end, tight one step inside (fp32 and fp64) FAILED (f
 
-sweep_cost controls: all seven mutations were caught at their checks
+sweep_cost controls: all nine mutated inputs and three planted slips were caught at their checks

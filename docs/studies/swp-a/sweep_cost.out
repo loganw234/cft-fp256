@@ -22,6 +22,9 @@ CHECK cvtfrom32: cases_sum is 4 x count_sum (4 source types a lane)             
 CHECK cvtto32: cases_sum is between 1 x and 4 x count_sum (in-range pairs only)    ok (ratio 2.27)
 CHECK scaleb32 wide range derived as [-278, +277] = 556 exponents (EX's BELIEVED figure) ok (-278, 277, 556)
    scaleb64 wide range derived as [-2099, +2098] = 4198 exponents (same argument: emax 1023, smallest subnormal 2^-1074)
+CHECK the wide exponent ranges agree with the golden model's scaleb: saturated at and beyond each end, tight one step inside (fp32 and fp64) ok (fp32 (True, True, True, True), fp64 (True, True, True, True))
+CHECK the scaleb spaces carry the soak tool's own list lengths (17 and 27 exponents, parsed from clause5_soak.c) ok (17, 27)
+CHECK every row of five or more slices has cases within 25% of its job-seconds x its median rate (the job-seconds of Table 5 fit the rest of the record) ok (the widest 17%)
 
 CHECK class64 over 2^64 on one quad is about 6,600 years (the lead's COMPUTED)     ok (6584 y)
 CHECK rem32 over 2^64 pairs on one quad is about 320,000 years (the lead's COMPUTED) ok (317491 y)
@@ -88,6 +91,29 @@ CHECK 35 items run on the tile and 33 are host code                             
    scaleb32    tile  fp32 x 556 wide exponents       4       46.5 h              1              1              1         0.0212
    scaleb64    tile  fp64 x 27 directed exponents    4   1.16e+06 y        462,052      4,620,515       5.54e+07       4.62e+06
    scaleb64    tile  fp64 x 4198 wide exponents      4    1.8e+08 y       7.18e+07       7.18e+08       8.62e+09       7.18e+08
+CHECK Table 2: every family's sweep time is the sum over its attributes (between n times its fastest and n times its slowest attribute's) ok 
+
+== TABLE 2b. the same PER ATTRIBUTE on one quad, for the families of several attributes: space / (4 x the item's rate), fastest and slowest attribute
+   (Table 2's 'one quad' is the sum over the n attributes of the family; a figure compared with a per-space estimate is compared per attribute)
+   family      runs  space                           n        fastest        slowest
+   sqrt32      tile  2^32 encodings                  5        7.7 min        9.2 min
+   rint32      tile  2^32 encodings                  5        8.4 min        8.7 min
+   cvtto32     host  fp32 operands, 2^32             5        6.7 min        7.9 min
+   rint64      tile  fp64 operands, 2^64             5     7.44e+04 y     7.82e+04 y
+   sqrt64      tile  fp64 operands, 2^64             4     9.48e+04 y     9.61e+04 y
+   conv64to32  host  fp64 operands, 2^64             4     2.35e+04 y     2.62e+04 y
+   cvtto64     host  fp64 operands, 2^64             5     5.07e+04 y     5.98e+04 y
+   cvtfrom32   host  i32/u32 sources, 2^32           4        9.2 min        9.4 min
+   cvtfrom32   host  i64/u64 sources, 2^64           4     7.54e+04 y     7.69e+04 y
+   cvtfrom64   host  i32/u32 sources, 2^32           4        9.4 min        9.6 min
+   cvtfrom64   host  i64/u64 sources, 2^64           4     7.69e+04 y     7.87e+04 y
+   div32       tile  fp32 pairs, 2^64                4     7.23e+04 y     7.71e+04 y
+   div64       tile  fp64 pairs, 2^128               4     1.75e+24 y     1.81e+24 y
+   scaleb32    tile  fp32 x 17 directed exponents    4       20.9 min       21.7 min
+   scaleb32    tile  fp32 x 556 wide exponents       4         11.4 h         11.8 h
+   scaleb64    tile  fp64 x 27 directed exponents    4     2.85e+05 y     2.92e+05 y
+   scaleb64    tile  fp64 x 4198 wide exponents      4     4.44e+07 y     4.54e+07 y
+CHECK div64 on one quad, per attribute and summed over its four attributes, is inside the lead's 'about 10^24 to 10^25 years' ok (per attribute 1.75e+24 to 1.81e+24 years, the four together 7.18e+24)
 
 == TABLE 3. what the 2026-10-16..19 run covered of each large space, and the defect share it could see
    count = the run's total in the item's own unit (all images), from the rates file; fraction = count / space.

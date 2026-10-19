@@ -36,13 +36,16 @@ to add up from weekend to weekend and from device to device. The findings, in th
    software backend runs them at 0.79 to 1.91 times the card run's rate (MEASURED), and **52.5 per cent of the run's
    sweep job-seconds went to them** (COMPUTED). Their full sweeps need CPUs, not cards (sections 2.3, 6.2).
 3. **A sampler cannot reach the cases that matter most at 64 bits, and they can be built.** The class "quotient
-   closest to a rounding boundary" has probability about 3 x 10^-16 a draw at fp64: a weekend's 1.45 x 10^10 draws
-   expect 4.3 x 10^-6 of them (COMPUTED). One modular inverse a divisor constructs them (MEASURED, 37 to 41 per
-   cent of odd divisors, exact), the golden model agrees with an independent exact arbiter on them, and the repository's
-   own known failure family (a = 1, b = 1 - ulp) is one. A planted division with 40 guard bits fails on 25.5 per
-   cent of the constructed set and on none of 272,007 sampler draws (section 4.2).
-4. **Proved reductions shrink some spaces by 10^3 to 10^5 and do nothing for others.** Sign, directed-mode and scale
-   symmetries (PROVED for the golden model at e4m3 by exhaustion, with the argument for p = 24 and 53 written out) take
+   closest to a rounding boundary" (the least distance a divisor allows, |N| = 1, which only an odd divisor does;
+   the boundary a midpoint or a representable number) has probability ln 2 / 2^(p-1) a draw for each boundary type,
+   1.5 x 10^-16 at fp64: a weekend's 1.45 x 10^10 draws expect 2.2 x 10^-6 of each type at fp64 and about 1,200 of each
+   at fp32 (COMPUTED from a rate checked by exhaustion at small p and exactly at p = 24, MEASURED). One modular inverse
+   a divisor constructs them (MEASURED, 37 to 41 per cent of odd divisors, exact), the golden model agrees with an
+   independent exact arbiter on them, and the repository's own known failure family (a = 1, b = 1 - ulp) is one.
+   A planted division with 40 guard bits fails on 25.5 per cent of the constructed set and on none of 272,007
+   sampler draws (section 4.2).
+4. **Reductions shrink some spaces by 10^3 to 10^5 and do nothing for others.** Sign, directed-mode and scale
+   symmetries (PROVED for the golden model at e4m3 and e5m6 by exhaustion; an argument, written out, at p = 24 and 53) take
    fp32 division from 3.0 x 10^5 quad-years to 22.3, square root at fp64 from 3.8 x 10^5 to 141, and remainder at fp32
    from 3.2 x 10^5 to 333; fp64 division and remainder stay out of reach (10^19 and 5 x 10^21 years). A second level,
    by classes of the dropped bits, takes the conversions and rounding to a few hundred thousand cases, **PLAUSIBLE** for
@@ -51,8 +54,9 @@ to add up from weekend to weekend and from device to device. The findings, in th
    six rounds, is a bijection (checked over all 2^32 inputs at w = 16), passes its quality tests from three rounds up,
    costs 14 to 19 ns a 64-bit case and 21 to 25 ns at 128 bits on one core (six runs), and a second implementation reproduces its
    vectors (section 4.5). The store it enables is a set of immutable records whose coverage is a pure function of
-   the set; the merge laws hold on 3,000 random scenarios, and a differing batch among 4,096 is localised in at most
-   13 hash comparisons (MEASURED on a model, section 5).
+   the set; the merge laws hold on 3,000 random scenarios, each with a planted wrong fold that the same test catches,
+   a differing batch among 4,096 is localised in at most 13 hash comparisons, and a slice replays from its record, its
+   campaign record and the tool (MEASURED on a model, section 5).
 6. **The long road.** Full sweeps of the 64-bit spaces are 10^4 to 10^6 quad-years raw (COMPUTED, section 6.1), which is
    not a number of devices a project fields in a decade (2,600 to 153,000 workers for the 64-bit unary and fp32-pair spaces, 462,000 for
    scaleb64's directed list; the fp64-pair spaces are beyond any count), but the reduced spaces of section 4.3
@@ -152,7 +156,7 @@ neither card evidence nor card-bound: their coverage can come from any number of
 seed `base_seed + 7919 n` (`Item.seed_for`, `card_stress_lib.py` line 481); n is rebuilt from the run's own `metrics.jsonl` only
 (`Driver.load_state`, `card_stress.py` lines 989 to 1029; the wave planner takes `self.seed_n.get(it.name, 0)`, line 1144); a new `--out` has no
 metrics file, so every item restarts at n = 0; `main` refuses an existing metrics file without `--resume`, and the
-default `--out` is a new `~/card-stress-out/<stamp>-<commit>` (`card_stress.py` lines 1711 to 1715, 1905). **Confirmed.**
+default `--out` is a new `~/card-stress-out/<stamp>-<commit>` (`card_stress.py` lines 1711 to 1715; the default is built at 1980 to 1988, and the help text at 1905 states it). **Confirmed.**
 
 **MEASURED on the driver itself** (`swp-a/seed_replay.sh`: `hw/card_stress.py --dry-run --quick`, stand-in tools, no card, three
 invocations; `seed_replay_check.py`, whose control moves a seed by one and must report "not a replay"): run A (a fresh
@@ -183,8 +187,8 @@ the driver's slice 0 uses the scripts' own seeds, so it overlaps the 2026-09-01 
   their 28 or 29 shared slices each (check passes; a planted collision it does not predict is caught). 339 of the shared states join slices
   of one operation under different rounding modes (conv64to32 168 slices, div32 170, div64 170, sqrt64 170): 88,619,352,064 operand counts
   were seen again by a second mode, 36.9 to 37.3% of each of those four operations' count. The other 1,122 join different operations, whose
-  generators consume the draws differently: correlated, not duplicates. `seed_audit.py` shows the schedule as it ran collides on 2,962 of 3,078
-  (item, n) slices, the same seeds without `| 1` on none, and two candidate schedules on none (section 5.2). I judge the effect small
+  generators consume the draws differently: correlated, not duplicates. `seed_audit.py` shows the driver's formula, over the whole 54 x 57 grid of (item, n), colliding on 2,962 of 3,078
+  slices (the run's own 3,038 are the 2,922 above), the same seeds without `| 1` on none, and two candidate schedules on none (section 5.2). I judge the effect small
   (BELIEVED): each (operand, mode) test is new, and a defect that does not depend on the mode is found about 37% less often per case in four of
   54 items.
 - **The draw order is the compiler's.** `banded32` and `banded64` contain `e = bands[rng() % 7] + (rng() % 3)`: two `rng()` calls in one C
@@ -268,7 +272,7 @@ division, square root, the rounding unit, conversions.** The sweep and the seque
 |---|---|---|---|---|---|---|---|
 | affects at least 10^-9 of the sampled distribution | yes | some | yes | - | - | - | - |
 | affects 10^-10 to 10^-13 | named families only | no | yes after several weekends | no | no | no | accumulation, strata |
-| closest-approach / tie / exact-quotient cases at fp64 | named families | no | never (4.3 x 10^-6 a weekend) | no | wide formats | no | constructed lists |
+| closest-approach / tie / exact-quotient cases at fp64 | named families | no | never (2.2 x 10^-6 a weekend of each boundary type) | no | wide formats | no | constructed lists |
 | a stuck bit in a zero-detect, class, sticky tree | no | no | by volume only at fp32 | no | no | no | class representatives with walking ones |
 | control-logic hazard over all traffic | benches | no | no | no | no | yes | - |
 | image, bitstream, driver, thermal, bus | no | selftest | yes (60 h, 0 failures) | no | no | no | the stress run itself |
@@ -277,7 +281,8 @@ division, square root, the rounding unit, conversions.** The sweep and the seque
 ## 4. A survey of methods, and what each finds here
 
 Each subsection gives the source, what it would find that the stress run does not, and then its fit to this repository. Sources
-are numbered [n] and listed with their verification status in section 10. Costs are COMPUTED from the measured rates where a
+are numbered [n] and listed with their verification status in section 10; a dagger inside the brackets ([18†]) marks a source I know only from a search result, a listing or a citing paper and did not read (the
+others without a dagger carry a note where they are cited, or were read). Costs are COMPUTED from the measured rates where a
 rate applies; a quad is four tiles, a worker one soak process (a tile for tile items, a core for host items).
 
 ### 4.1 Coverage models for floating-point test generation
@@ -328,8 +333,8 @@ Dutton, Anand, Enenkel and Mueller [7] (arXiv:2404.00387, 2024) prove it for rec
 excepted). The condition of [5] is the one this study's G3 finds: on every pair of e4m3, RMM and RNE differ on 264 of 65,536 pairs, all with an exact quotient below the smallest
 normal (the grid there is coarser, so a midpoint of it can be a quotient), none above, and never for square root (MEASURED,
 `symmetry_check.out`). Because the numerator N = mx 2^p - c my of a quotient's distance to a midpoint (c the odd integer nearest mx 2^p / my; the docstring of
-`swp-a/hardcase_div.py` derives it) is a nonzero integer, the closest possible approach is |N| = 1: a distance of 1/(my 2^p), about 2^-2p, 2^-(p+1) of an ulp. For an odd divisor
-one modular inverse builds the dividend: mx = +-(2^p)^-1 mod my, shifted into range. MEASURED (`hardcase_div.py`):
+`swp-a/hardcase_div.py` derives it) is a nonzero integer and a multiple of the divisor's power of two, the closest possible approach is |N| = 1, which only an odd divisor allows: a distance of 1/(my 2^p), about 2^-2p,
+2^-(p+1) of an ulp. For an odd divisor one modular inverse builds the dividend: mx = +-(2^p)^-1 mod my, shifted into range. MEASURED (`hardcase_div.py`):
 
 - the construction succeeds for 37.3 to 40.5% of odd divisors per target and sign at p = 24, 53 and 113 (the prediction 2 ln 2 - 1 = 38.6%), and
   |N| = 1 is verified in exact integers on every one built (twelve counts of 3,000 divisors each, none wrong);
@@ -337,10 +342,17 @@ one modular inverse builds the dividend: mx = +-(2^p)^-1 mod my, shifted into ra
   closest-approach cases at p = 24, 53, 113, under all five attributes, bits and flags (the arbiter's RNE and the model's RTZ do differ on the near-midpoint
   cases, so the comparison can see); and the same construction at a representable boundary (N' = mx 2^(p-1) - j my) builds the cases that test directed rounding and the
   inexact flag;
+- **how often a draw lands on one** (MEASURED, `hardcase_div.out` H3): |N| = 1 needs an odd divisor, and then X 2^k = +1 or -1 (mod my), X the numerator, has one solution of each sign in a window of my
+  numerators, so an odd divisor has 2 ln 2 = 1.386 dividends on average, and a uniform pair of p-bit significands lands on a closest approach to a boundary of one type with probability
+  **ln 2 / 2^(p-1)** (8.26 x 10^-8 at fp32, 1.54 x 10^-16 at fp64, 1.33 x 10^-34 at fp128). The rate is checked by trying every pair at p = 8, 10 and 11 (within 6% at p = 8 and 10, 1.1% at p = 11,
+  both types, and the sum over odd divisors equals the brute-force count exactly), exactly at p = 24 (every odd divisor: 5,815,346 of 2^46 pairs for the midpoint type and 5,812,730 for the representable type,
+  8.264 and 8.260 x 10^-8 a draw against ln 2 / 2^23 = 8.263 x 10^-8) and by 200,000 sampled odd divisors at p = 24, 53 and 113 (1.386 dividends a divisor). A rate twice as large, which this study's first draft had (it
+  took 2 / the typical divisor and so counted even divisors, which have none), is caught against the exhaustive count, and so are a closed form and a conversion a factor 2 out
+  (`hardcase_div_plants.out`);
 - the campaign's own sampler (the port of the soak's generator, held to the real tool in `seed_audit.py`) reaches a least rho = |N|/my of 2.3 x 10^-6 in 358,161 fp32
-  draws and 8.9 x 10^-7 in 362,061 fp64 draws, the 1/draws that uniform draws predict; the least possible is 7.9 x 10^-8 (fp32) and 1.5 x 10^-16 (fp64). A weekend
-  item's 1.45 x 10^10 draws expect **2,304 closest-approach hits at fp32 and 4.3 x 10^-6 at fp64** (COMPUTED): at fp32 the class is reached by volume, at fp64 it is not
-  reached at all;
+  draws and 8.9 x 10^-7 in 362,061 fp64 draws, the 1/draws that uniform draws predict; the least a pair can reach is 6.0 x 10^-8 (fp32) and 1.1 x 10^-16 (fp64), one over the largest odd divisor. A weekend
+  item's 1.45 x 10^10 draws expect **about 1,200 closest approaches to a midpoint at fp32, and as many to a representable number, and 2.2 x 10^-6 of each at fp64** (COMPUTED from that rate, and an upper bound: a draw whose
+  quotient is subnormal or overflows, or whose operand is banded, is not a uniform significand pair): at fp32 the class is reached by volume, at fp64 it is not reached at all;
 - the repository's failure family a = 1, b = 1 - ulp (the exact-tie divisor family that broke the Markstein finish) has |N| = 1 at both formats: it is a closest-approach
   case, found in the repository by structure and invisible to sampling at fp64;
 - **square root** by the same argument, scanned exhaustively at fp32: the input nearest the square of each of the 8,388,608 midpoints is at a distance d 2^-2p with d an
@@ -356,7 +368,7 @@ six consecutive ones in bit positions 5 to 10 (Edelman [8], the abstract as a se
 only at that rate. The tile's own tables are `cft_seedop`'s reciprocal and reciprocal-root
 seeds, whose accuracy is exhausted at fp32 by `python/tests/test_seeds.py` and whose special-case routing is proved in `formal/`.
 
-**The theorems that make the algorithm right, and so where a slip shows.** Markstein's result [10] (IBM J. Res. Dev. 34(1), 1990, as Harrison's slides [11] state it, from a search summary of them, BELIEVED: a
+**The theorems that make the algorithm right, and so where a slip shows.** Markstein's result [10] (IBM J. Res. Dev. 34(1), 1990, as Harrison's slides [11†] state it, from a search summary of them, BELIEVED: a
 quotient estimate within one ulp and a correctly rounded reciprocal, two fused multiply-adds, the correctly rounded quotient in any attribute, with an exception when the
 divisor's significand is all ones) is the premise of the tile's composed division (READ: `python/tests/test_sequences.py` names a "Markstein finish" that the a = 1, b = 1 - ulp family broke); the
 closest-approach cases are the inputs where a finish step that is correct *except* at a boundary shows itself.
@@ -398,32 +410,33 @@ structured families it found (READ, `docs/TRANSCENDENTALS.md`; the Table Maker's
 
 ### 4.3 Reductions by symmetry and equivalence
 
-The sizes of the spaces are mostly redundancy. What follows states each reduction, whether it is proved, and what edge it leaves. Throughout, "proved" is for the **golden model**, by an
-argument written here and by exhaustion on tiny formats of the same family in `swp-a/symmetry_check.py` (e4m3 and e5m6; the model accepts any exponent and fraction width); the
-**tile's** RTL is not covered by any of it (section 8).
+The sizes of the spaces are mostly redundancy. What follows states each reduction, whether it is proved, and what edge it leaves. Throughout, "proved" means PROVED for the **golden model** at the tiny formats e4m3 and e5m6, by exhaustion in
+`swp-a/symmetry_check.py` (the model accepts any exponent and fraction width); at p = 24 and 53 a reduction rests on the argument written here, which the exhaustion does not replace and which
+holds only if the model implements the definitions at those widths (the samples at fp32, fp64 and fp128 agree). The **tile's** RTL is not covered by any of it (section 8).
 
 **Sign and attribute.** (a) Negating an operand mirrors the attribute (rdn and rup swap; rne, rtz and rmm stay): division, roundToIntegral, scaleB and convertFormat, every encoding or
 pair of e4m3 and every attribute, bits and flags: 0 violations (the control with rne and rmm swapped has 88,448). (b) For a positive result rdn equals rtz, for a negative one rup does (every
 pair: 0 violations; the control that folds the other directed mode has 43,960). So the sixteen (attribute, operand-sign) combinations of a division are three *magnitude functions*: nearest,
 truncate, away from zero. (c) RMM equals RNE for square root on every e4m3 input (and on 3,000 random fp32 and 3,000 fp64 operands), and for division except where the exact quotient is below
-the smallest normal ([5], [7], section 4.2): the nearest function is one function outside the subnormal strip. These are proved for the model by the definitions of the rounding directions
-(RD(-x) = -RU(x), and the rest), and the no-midpoint theorem for (c). Edge: the rtl's *decode of the five mode codes* and *sign handling* are separate logic; cover each code and each
+the smallest normal ([5], [7], section 4.2): the nearest function is one function outside the subnormal strip. These are PROVED for the model at e4m3 by exhaustion; at p = 24 and 53 they follow from
+the definitions of the rounding directions (RD(-x) = -RU(x), and the rest), and the no-midpoint lemmas for (c). Edge: the rtl's *decode of the five mode codes* and *sign handling* are separate logic; cover each code and each
 sign combination on the classes where they differ, a handful of cases.
 
 **Scale.** Rounding to p bits commutes with multiplication by 2^k when the exact value before and after has exponent in [emin, emax], because the rounding position is a function of the
-exponent alone and ulp(2^k y) = 2^k ulp(y). Hence: division of a scaled pair equals the scaled quotient **iff the exact quotients of both pairs lie in [2^emin, 2^emax)**; square root of a 4^k
+exponent alone and ulp(2^k y) = 2^k ulp(y). Hence: division of a scaled pair equals the scaled quotient **whenever the exact quotients of both pairs lie in [2^emin, 2^emax)** (sufficient, not necessary: see below); square root of a 4^k
 scaled input equals the scaled root **always** (a root of a positive finite is normal, subnormal operands included); remainder of operands scaled by the same 2^k equals the scaled remainder
 **always** (the remainder is exact). MEASURED on e4m3, every finite nonzero pair and k in [-8, 8]: 1,517,120 scaled pairs with both quotients in the core, **0 violations** in each of rne, rtz,
-rdn and rup; 317,680 of 403,712 pairs whose scaled quotient leaves the core give a different result (the edge strips are real); sqrt 2,625 checks, 0 violations, including subnormals; rem 519,044
+rdn and rup; 317,680 of 403,712 pairs whose scaled quotient leaves the core give a different result (the edge strips are real) and 86,032 (21,508 an attribute) still scale exactly, the first being
+a = b = the smallest subnormal at k = 7, whose quotient 1 becomes 2^emax = 128, outside the half-open core and exact, so the condition is not necessary; sqrt 2,625 checks, 0 violations, including subnormals; rem 519,044
 checks, 0 violations. The instrument's first version defined the core by the *rounded* result and found 4,744 violations: a quotient just below 2^emin can round up into the normal range,
 having been rounded on the coarse grid, so the core must be defined by the exact quotient. The edge is therefore exactly the **strips**: the quotient's exponent below emin by s places
 (s = 1 .. p + 1, p + 1 strips, each its own rounding position) and the overflow strip; every (significand pair, strip) key is reached by e4m3's pairs: 448 keys, the bound (p + 3) 4^(p-1) exactly.
 
 **Rounding structure (classes).** The result of convertFormat and roundToIntegral is a function of the sign, the rounding position, the kept bits and the class of the dropped bits (zero, below
 half, half, above half), through the kept lsb and the carry: a decision rule written here from the definitions (`decide`) equals the model on every finite source encoding of e5m6 to e4m3
-(14,290 case-attribute pairs, 0 differ) and of e5m6 roundToIntegral (19,830, 0 differ); the rule that forgets ties-to-even differs on 120 and 64. The decision needs only 224 classes
-(sign, exponent, class) plus the lsb against 4,096 source encodings at that size. Proved for the model by the definition of the directed and nearest roundings; the **tile** is
-PLAUSIBLY structured the same way, which is the assumption of the second level below.
+(14,680 case-attribute pairs, 390 of them carries out of the kept bits, none skipped: the exact rounding by Fractions finds the same 14,680; 0 differ) and of e5m6 roundToIntegral (19,830, 0 differ); the rule that forgets
+ties-to-even differs on 120 and 64. The decision needs only 224 classes (sign, exponent, class) plus the lsb against 4,096 source encodings at that size. PROVED for the model at those formats by
+exhaustion; at p = 24 and 53 an argument from the definitions of the directed and nearest roundings; the **tile** is PLAUSIBLY structured the same way, which is the assumption of the second level below.
 
 **What remains** (COMPUTED in `symmetry_check.py` G6; one quad; L0 is the raw sweep of the soak's attributes):
 
@@ -461,9 +474,9 @@ The assumption is a claim about RTL and is what `formal/` could prove at small w
 
 ### 4.4 Stratified and low-discrepancy sampling
 
-Latin hypercube sampling (McKay, Beckman, Conover [18], Technometrics 21(2), 1979) divides each input into equal-probability strata and draws once from each, which reduces the
-variance of estimators of a mean; Sobol' sequences [19] (1967) and their better constructions (Joe and Kuo [20], SIAM J. Sci. Comput. 30(5), 2008) fill a cube more evenly than random
-points; the combinatorial-testing line (Kuhn, Wallace, Gallo [21], IEEE TSE 30(6), 2004, and NIST SP 800-142 [22]) argues that most failures need only a few conditions at once, so every t-way
+Latin hypercube sampling (McKay, Beckman, Conover [18†], Technometrics 21(2), 1979) divides each input into equal-probability strata and draws once from each, which reduces the
+variance of estimators of a mean; Sobol' sequences [19†] (1967) and their better constructions (Joe and Kuo [20†], SIAM J. Sci. Comput. 30(5), 2008) fill a cube more evenly than random
+points; the combinatorial-testing line (Kuhn, Wallace, Gallo [21†], IEEE TSE 30(6), 2004, and NIST SP 800-142 [22†]) argues that most failures need only a few conditions at once, so every t-way
 combination of parameters is nearly as good as exhaustive. **What they would find here:** little beyond what random draws already find, by arithmetic. Their advantage is for smooth integrands in
 few dimensions; a bit-pattern defect has no smoothness. And at the stress run's volume random draws already cover every t-bit pattern on every set of t positions of an operand for t up to about 27
 (COMPUTED, `sweep_cost.out` Table 7: the coupon-collector union bound needs 2^t (t ln 2 + ln C(64, t) + 3) draws for a probability of 0.95, 8.5 x 10^9 at t = 27 and 1.7 x 10^10 at t = 28 against 1.45 x 10^10). The classes the banded sampler
@@ -482,16 +495,16 @@ regardless of its sampling probability, which is what a ledger by stratum (5.3) 
 
 A permutation of the case space, numbered by index, gives exact counts and a range of indices that is a resumable, shardable unit. Four ways to make one:
 
-- **A keyed Feistel network** (Luby and Rackoff [23], SIAM J. Comput. 17(2), 1988: a pseudorandom permutation from round functions; and a bijection whatever the round function is, because
-  it is inverted by running the rounds backwards). For a range that is not a power of four, **cycle walking** (Black and Rogaway [24], CT-RSA 2002: apply the permutation again until the result lands
+- **A keyed Feistel network** (Luby and Rackoff [23†], SIAM J. Comput. 17(2), 1988: a pseudorandom permutation from round functions; and a bijection whatever the round function is, because
+  it is inverted by running the rounds backwards). For a range that is not a power of four, **cycle walking** (Black and Rogaway [24†], CT-RSA 2002: apply the permutation again until the result lands
   in range) gives a bijection on [0, N) at an expected 4^w / N calls.
 - **A full-period linear congruential generator** (Hull and Dobell [25], SIAM Review 4(3), 1962; READ in the Wikipedia reference list and the page's statement of the conditions: for a modulus 2^64 the
-  increment odd and the multiplier 1 mod 4). It visits every value once and can jump ahead in O(log n) steps (Brown [26], Trans. Am. Nucl. Soc. 71, 1994), but the low bits have short periods (bit j has
+  increment odd and the multiplier 1 mod 4). It visits every value once and can jump ahead in O(log n) steps (Brown [26†], Trans. Am. Nucl. Soc. 71, 1994), but the low bits have short periods (bit j has
   period 2^(j+1): the lowest alternates), which are precisely the bits that decide rounding and sticky; it needs an output permutation, and then it is no simpler than the Feistel network.
 - **A counter-based generator** (Salmon, Moraes, Dror, Shaw [27], SC11: Philox and Threefry, stateless keyed functions of a counter, at least 2^64 streams of period 2^128 or more that pass BigCrush, by the abstract as
   a search summary reports it): the library route; heavier than a 64-bit bijection needs to be.
 - **The soak's xorshift stream today** (`rng_state = seed | 1`): no exact count, sequential only (a slice cannot resume inside itself), a probable but unproved disjointness of slices (BELIEVED: the birthday
-  estimate for 55 streams of 7 x 10^8 draws on a 2^64 cycle is about 10^-7), and the two caveats of 2.4.
+  bound k^2 L / 2^64 for the run's k = 3,038 slices of L = 7 x 10^8 to 1.3 x 10^9 draws on a 2^64 cycle is 3.5 to 6.5 x 10^-4, `seed_audit.out`: small, not zero), and the two caveats of 2.4.
 
 MEASURED (`swp-a/perm_check.c`, `.py`, `.sh`, WSL, gcc 11.4, one core of an i5-12400F; the full capture is `perm_check.c.out` and `perm_check.out`):
 
@@ -508,8 +521,8 @@ MEASURED (`swp-a/perm_check.c`, `.py`, `.sh`, WSL, gcc 11.4, one core of an i5-1
   all 128 vectors the C program printed (64-bit, 46-bit, 128-bit and cycle-walking vectors), and with one key bit changed or one round fewer reproduces none (a control), and passes its own round-trip and small-width
   exhaustion checks.
 
-The cost against a case: 14 to 19 ns is 2.8 to 3.9% of div32's 500 ns tile case, and the 128-bit permutation of a div64 pair, 21 to 25 ns, is 3.2 to 3.8% of its 650 ns; it is about half to two thirds of the 30 ns a case of the cheapest host item
-(class32 sequentially), but that item has no reason to be sampled (the class level of 4.3 gives it in seconds, and EX sweeps its 2^32 exhaustively). The permutation parallelises trivially (stateless).
+The cost against a case: 14 to 19 ns is 2.8 to 3.9% of div32's 500 ns tile case, and the 128-bit permutation of a div64 pair, 21 to 25 ns, is 3.2 to 3.8% of its 650 ns; it is about half to two thirds of the 30 ns a case that the card run took for class32, the cheapest
+host item (16.7 ns on the software backend, `sw_rates.out`), but that item has no reason to be sampled (the class level of 4.3 gives it in seconds, and EX sweeps its 2^32 exhaustively). The permutation parallelises trivially (stateless).
 
 | | |
 |---|---|
@@ -520,12 +533,12 @@ The cost against a case: 14 to 19 ns is 2.8 to 3.9% of div32's 500 ns tile case,
 
 ### 4.6 Distributed computing with verification
 
-**BOINC** (Anderson [28], GRID 2004; a platform for public-resource computing) and the sabotage-tolerance work behind it (Sarmenta [29], FGCS 18(4), 2002) frame the problem: a volunteer's result is
+**BOINC** (Anderson [28†], GRID 2004; a platform for public-resource computing) and the sabotage-tolerance work behind it (Sarmenta [29], FGCS 18(4), 2002) frame the problem: a volunteer's result is
 believed only because of **redundancy** (majority voting: work done at least twice, so at best 50% efficiency), **spot-checking** (a task whose answer the manager knows, sent without being recognised; a wrong
 answer blacklists the worker and invalidates what depended on it, READ on Sarmenta's project page) and **credibility** estimated from a worker's history. Golle and Mironov [30] (CT-RSA 2001) treat
 the economic version, a participant paid for work who might claim credit without doing it. Their "ringers" idea, which is commonly attributed to that paper, **was not confirmed by anything I could read** and is not
-relied on here. For the log that carries the results, **hash trees** (Merkle [31], CRYPTO '87) give a short digest of a long record, **audit paths** that prove one leaf belongs to it, and **consistency proofs**
-that a later tree extends an earlier one, as RFC 6962 [32] (Certificate Transparency, 2013) specifies for certificate logs and Crosby and Wallach [33] (USENIX Security 2009) for tamper-evident logging with
+relied on here. For the log that carries the results, **hash trees** (Merkle [31†], CRYPTO '87) give a short digest of a long record, **audit paths** that prove one leaf belongs to it, and **consistency proofs**
+that a later tree extends an earlier one, as RFC 6962 [32†] (Certificate Transparency, 2013; since obsoleted by RFC 9162) specifies for certificate logs and Crosby and Wallach [33†] (USENIX Security 2009) for tamper-evident logging with
 logarithmic proofs.
 
 **What this project has that BOINC projects usually do not.** The contract makes the result of element i independent of which tile computed it (`docs/SCALING.md`: "determinism constrains which INDEX is computed, never
@@ -544,14 +557,14 @@ microseconds on the golden model**, so a *failure* self-certifies. It is the *pa
 
 What a proof covers that no sweep can: **all inputs of the proved width and unbounded time**. `formal/` shows it: `cft_fifo` and `cft_ifetch` are proved for unbounded time and all traffic, `cft_simpleops` equal to
 its reference over 2^104 inputs in two seconds, `cft_mulpass` exact at the real chunk for all seven geometries (section 3.5); a sweep of any of those would sample a vanishing part. What a sweep covers that these
-proofs do not: the **values** of the datapath, the bitstream as built, timing, the card, the host and the bus. At Intel and AMD formal verification of arithmetic datapaths is established: Kaivola et al. [34]
+proofs do not: the **values** of the datapath, the bitstream as built, timing, the card, the host and the bus. At Intel and AMD formal verification of arithmetic datapaths is established: Kaivola et al. [34†]
 (CAV 2009, pages 414 to 429) report formal verification as the *primary* validation vehicle for the Core i7's execution cluster with coverage-driven testing dropped, and state that arithmetic datapaths were already
-verified formally at Intel; Russinoff [35] (LMS J. Comput. Math. 1, 1998) proved in ACL2 that the AMD-K7's multiplication, division and square root conform to IEEE 754; Harrison [11] (TPHOLs 2000) proved Intel's
+verified formally at Intel; Russinoff [35†] (LMS J. Comput. Math. 1, 1998) proved in ACL2 that the AMD-K7's multiplication, division and square root conform to IEEE 754; Harrison [11†] (TPHOLs 2000) proved Intel's
 IA-64 division algorithms in HOL Light. The Handbook of Floating-Point Arithmetic [36] has a chapter on formal verification (BELIEVED from its table of contents, from a search listing).
 
 For this repository the complement that fits is narrow and cheap, not a datapath proof: (a) **prove the reduction lemmas on the RTL's rounding unit at small width**, a combinational miter of the unit against the decision rule of section 4.3 (the style `equiv.sby` closed over 2^104 inputs in two seconds): that turns the
 second level's PLAUSIBLE into PROVED at the unit's width parameters, and the argument that nothing in the unit branches on the width values is the one `formal/README.md` already makes and marks "an argument, not a proof";
-(b) an **algorithm-level proof of the div and sqrt cores' final correction** in the style of [10, 11, 35], which sampling can never establish at fp64 and whose premises the closest-approach cases exercise; (c) leave timing and
+(b) an **algorithm-level proof of the div and sqrt cores' final correction** in the style of [10, 11†, 35†], which sampling can never establish at fp64 and whose premises the closest-approach cases exercise; (c) leave timing and
 image faults to the stress runs. The proofs cannot see a wrong image, a stale build, a bus fault or thermal behaviour, which is what the 60-hour run did exercise.
 
 | | |
@@ -583,7 +596,8 @@ and the fraction reaches 1 after 10^6 to 5 x 10^7 weekends. Three quantities do 
 ### 5.2 Campaign, stratum and enumeration
 
 A **campaign** is the unit a coverage claim is about, named by a hash of its canonical description: `cid = SHA-256(canonical JSON { operation, attribute, stratum definition and its version, enumeration (kind, width, rounds, key),
-oracle kind, the unit of a count, the rule for expected cases })`. Change any of it and the campaign is a new one: **coverage never merges across a change of definition**.
+oracle kind, the unit of a count, the rule for expected cases })`. Change any of it and the campaign is a new one: **coverage never merges across a change of definition**. A hash cannot be replayed, so the canonical
+JSON is itself a record of the store (kind `campaign`, 5.3), kept once for every slice that names its cid.
 
 A **stratum** is an enumerable set of cases with its own index space [0, N) and a `unrank(stratum, j)` giving the operands: the *core* significand pairs of a division (4^(p-1) by index arithmetic), a *subnormal-result strip* (s = 1 .. p + 1),
 the *overflow strip*, the *closest-approach list* (index = divisor index x target x sign, constructed by 4.2), the *dropped-bit class lists* of a conversion, the *special and boundary operand cross-product* of `vectors.py`, a *relational
@@ -611,6 +625,16 @@ One record is one finished slice, immutable, a JSON object in canonical form (so
   "sig": { "alg": "ed25519", "key": "<hex>", "sig": "<hex>" } }
 ```
 
+The store holds a second kind of record, the **campaign record**: the canonical description whose SHA-256 is the cid. It is stored once (270 bytes, `merge_law.out` section R) and every slice record names it, because a slice cannot be
+replayed from a hash (its preimage is the operation, the attribute, the stratum and its version, the enumeration and its key). A campaign record is not coverage, and the fold ignores it.
+
+```
+{ "v": 1, "kind": "campaign", "operation": "div32", "attribute": "rne",
+  "stratum": { "name": "core", "version": 1, "index": "4^23 significand pairs" },
+  "enumeration": { "kind": "feistel", "width": 23, "rounds": 6, "key": "0x<16 hex>" },
+  "oracle": "host-fpu+glibc", "count_unit": "pairs", "expected_cases": "hi-lo" }
+```
+
 1,223 bytes with the fields filled to the lengths the design gives them (MEASURED, `merge_law.out` section R): a weekend of 3,287 slices is 4 MB, a decade of weekly weekends 2 GB from one device; the store is not a size problem for one device (a fleet multiplies it by its size, and a digest a record and not a hash a case is what keeps it small). **Why each field is there** is section 6.6's argument. The fields the stress driver's `leg` record already carries
 (the item, the range or seed, counts, image SHA-256, tile, times, the log) are a subset. A **disagreement** is a separate record kind: (cid, index, operands, device value and flags, oracle value and flags), the unit that self-certifies.
 
@@ -620,19 +644,20 @@ A store is a **set** of records, in any medium (a directory of files, a JSON-lin
 intervals of the records that are *consistent* (cases equal the rule's expected count for `[lo, hi)`: `hi - lo`, or `+ 8` for nextup32 and nextdown32, a rule the driver already enforces) and *clean* (no mismatch); a record that finds a mismatch
 is not coverage, it is a finding. The fold also returns each interval's **multiplicity** (how many records, and from how many owners, cover it).
 
-MEASURED on an executable model (`swp-a/merge_law.py`, 3,000 random scenarios of three stores of forty records over two campaigns and two subject classes, 80% good, 10% with a wrong case count, 10% with mismatches; every law
-also has a planted wrong version that the same test catches):
+MEASURED on an executable model (`swp-a/merge_law.py`, 3,000 random scenarios of three stores of forty records over two campaigns and two subject classes, 80% good, 10% with a wrong case count, 10% with mismatches). Every law is run on the
+right fold, where it must find no violation, and then through the SAME test on a planted wrong fold (or descent), where it must find some; a law whose test cannot be made to fail would prove nothing:
 
-| law | result |
-|---|---|
-| L1 merge order and grouping do not change coverage | 0 violations |
-| L2 duplicate records do not change coverage | 0 |
-| L3 coverage by interval union equals an independent bitmap of the same records | 0 |
-| L4 adding a record never reduces coverage | 0 |
-| L5 a record with a wrong case count, or that found a mismatch, is not coverage | 0 |
-| L6 records of one subject class never count for another | 0 |
-| L7 coverage never exceeds the space, though the cases run may (ten devices on one slice: 10 N run, N covered) | 0; the plant that sums lengths gives coverage above N |
-| the plant that ignores the subject class credits half the space to a build that ran nothing | caught |
+| law | violations on the right fold | the plant, and the violations the same test finds on it |
+|---|---|---|
+| L1 merge order and grouping do not change coverage | 0 | the first record of a group wins: 3,000 of 3,000 scenarios |
+| L2 a second device's copy of every record (distinct records, the same slices) does not change coverage | 0 | lengths summed, not unioned: 3,000 |
+| L3 coverage by interval union equals an independent bitmap of the same records | 0 | a nested interval ends the merge early: 3,000 |
+| L4 adding a record never reduces coverage | 0 | a later record with the same lo replaces the earlier: 16 |
+| L5 a record with a wrong case count, or that found a mismatch, is not coverage | 0 | the count rule not applied: 3,000; the mismatch not read: 3,000 |
+| L6 records of one subject class never count for another | 0 | the subject class ignored: 2,895 (and, on a store where only build B ran, half the space credited to build A) |
+| L7 coverage never exceeds the space, though the cases run may (ten devices on one slice: 10 N run, N covered) | 0 | lengths summed: 3,000 (and coverage above N on the ten devices) |
+| L8 a differing batch among 4,096 is found by descent in at most 13 hash comparisons (300 trials) | 0 wrong | a descent that always goes left: 300 of 300 wrong |
+| L9 a slice replays from its record, the campaign record its cid hashes and the tool; without that record, or with one that does not hash to the cid, replay refuses by name | an honest slice replays, a tampered one is found and its batch named | a replay that skips the hash check calls an honest slice tampered |
 
 A **subject class** is what the coverage is evidence about. The default proposed: the git tree hash of `rtl/` together with the arithmetic-relevant generics, so that every image built from the same RTL (the single, the quad and the deep share the
 tile's arithmetic) counts for the same class, and a rebuilt bitstream with unchanged RTL does not reset coverage while a changed RTL does. Whether the three images are one class is a decision for Logan (question 4), because the stress run
@@ -648,7 +673,10 @@ its state from `metrics.jsonl` alone, a property this keeps).
 
 ### 5.6 Re-checking a slice
 
-- **Replay is exact**: `(cid, lo, hi)` gives identical operands on any backend and any host (the stream's dependence on the compiler's draw order, 2.4, disappears with the permutation, whose C and Python implementations agree on 128 vectors).
+- **Replay is exact, and needs three things**: the slice record, the campaign record its cid hashes, and the tool. `(campaign record, lo, hi)` gives identical operands on any backend and any host (the stream's dependence on the compiler's draw order, 2.4,
+  disappears with the permutation, whose C and Python implementations agree on 128 vectors). The campaign record is refused by name when it is absent from the store or does not hash to the cid (MEASURED on the model, `merge_law.out` L9: a tampered slice is found and its batch named, and
+  a replay that skips the hash check misreports an honest slice). The tool is rebuilt from `tool.commit`, `tool.flags` and `tool.cc` and its build id compared with the record's `tool.build_id`; that the same commit, flags and compiler give the same tool is BELIEVED (libcft stamps the source tree it
+  was compiled from, `cft_build_id()` in `host/src/build_id.c`, which a tool linking it can report; a byte-identical rebuild of the soak tools is not shown here), and a mismatch is a refusal by name, not a replay.
 - **Which slices**: deterministic from the store, so anyone can recompute the plan: every record whose id hash satisfies `hash mod round(1/r) == 0` (a re-check rate r, say 5%), every record whose tool build or subject is new, and the records
   adjacent to any finding.
 - **How**: run the slice on the software backend (`libcft`, whose agreement with the golden model the existing gates hold) or on a second device, and compare the **digest**: a Merkle root over the per-batch SHA-256 of the outputs and flags of
@@ -665,7 +693,7 @@ the weekend on the one item, with four tiles, at its quad rate (Table 4).
 
 | space | what a weekend adds, as run | what a whole weekend could add | weekends of one whole card to finish the reduced space (L1) | what the strata add |
 |---|---|---|---|---|
-| div32, all four attributes | 6.0 x 10^10 cases of 7.4 x 10^19 (L0) | 1.78 x 10^12 | 3,209 | closest approach reached by volume (2,304 hits); the constructed list adds the rest |
+| div32, all four attributes | 6.0 x 10^10 cases of 7.4 x 10^19 (L0) | 1.78 x 10^12 | 3,209 | closest approach reached by volume (about 1,200 hits of each boundary type); the constructed list adds the rest |
 | div64 | 5.9 x 10^10 of 1.4 x 10^39 | 1.35 x 10^12 | none (10^19 years) | closest approach, exact quotients, subnormal ties: constructed |
 | sqrt64 | 6.0 x 10^10 of 7.4 x 10^19 | 1.34 x 10^12 | 20,235 | sqrt(1 + ulp)-class inputs: constructed |
 | rem32 (host) | 1.2 x 10^10 | 4.0 x 10^11 | 47,873 | longest exponent gaps; CPUs, not the card |
@@ -688,7 +716,7 @@ intervals; they import as legacy `stream` records `(item, seed, count)` that nev
 COMPUTED (`sweep_cost.out` Table 2): the sum over the family's attributes of space / (the per-job median rate of its item on the quad), one quad of four workers, a Julian year. A worker is a **tile** for the tile items and a **CPU core** for the host items,
 so for a host item the "quad" column is four cores. The unit of each space is the unit of its rate (2.2): scaleb's spaces are in checks.
 
-| space (unit) | runs | attributes | one quad | workers for a decade | for a year | for a month |
+| space (unit) | runs | attributes | one quad, the family (all its attributes) | workers for a decade | for a year | for a month |
 |---|---|---|---|---|---|---|
 | class64 (fp64 encodings) | host | 1 | 6,584 years | 2,634 | 26,336 | 316,028 |
 | nextup64 | host | 1 | 1.17 x 10^4 | 4,676 | 46,760 | 561,113 |
@@ -707,7 +735,8 @@ so for a host item the "quad" column is four cores. The unit of each space is th
 | div64 (fp64 pairs, 2^128) | tile | 4 | 7.18 x 10^24 | 2.87 x 10^24 | 2.87 x 10^25 | 3.44 x 10^26 |
 | rem64 (fp64 pairs) | host | 1 | 4.41 x 10^25 | 1.76 x 10^25 | 1.76 x 10^26 | 2.12 x 10^27 |
 
-The brief's range, the lead's estimates (class64 about 6,600 years to rem32 about 320,000) is reproduced; the 128-bit spaces come to 7.2 x 10^24 years (div64) and 4.4 x 10^25 (rem64), a little above his "about 10^24 to 10^25". The scaleb64 wide range of 4,198 exponents is derived by the argument of `sweep_cost.py`'s
+The brief's range, the lead's estimates (class64 about 6,600 years to rem32 about 320,000) is reproduced. For the 128-bit spaces the table's div64 figure, 7.2 x 10^24 years, is the sum over its four attributes (the attributes column); per attribute (`sweep_cost.out`, Table 2b) it is 1.75 to 1.81 x 10^24, so
+both are inside his "about 10^24 to 10^25", and rem64, which has no attribute, is 4.4 x 10^25, a little above it. The scaleb64 wide range of 4,198 exponents is derived by the argument of `sweep_cost.py`'s
 `scaleb_wide`: for n at or above emax - emin_subnormal + 1 = 2,098 every nonzero finite operand overflows and for n at or below -(emax + 2 - emin_subnormal) = -2,099 every one lands below half the smallest subnormal, so the delivered value depends on sign and attribute only
 (the same argument gives EX's [-278, +277] = 556 at fp32; COMPUTED, and for fp32 equal to EX's BELIEVED figure). **No number of devices a project could field moves any of these into a decade except by the reductions of 4.3**; the reduced spaces and their device counts are in 6.4.
 
@@ -717,29 +746,31 @@ The measurements tell some of it. By family (COMPUTED from the records unless ma
 
 | family | bound | evidence |
 |---|---|---|
-| **host** (class, logB, next, conversions, remainder) | the soak process's CPU core: operand generation, the library's host code, the native oracle, the compare | MEASURED: the software backend on one core runs at 0.79 to 1.91 times the card run's rate for all 16 host jobs (the device is only opened); rem: the host's quotient-bit walk, up to 2,096 steps a pair at fp64, with a quarter of the pairs aimed at the longest gaps (READ), which is why rem64 runs at 0.061 M/s, 16 microseconds a case (several hundred steps on average at tens of nanoseconds a step: BELIEVED); the cheapest items are a 30 to 50 ns loop (class32 and class64: 30 and 27 ns a case on the software backend, MEASURED) |
+| **host** (class, logB, next, conversions, remainder) | the soak process's CPU core: operand generation, the library's host code, the native oracle, the compare | MEASURED: the software backend on one core runs at 0.79 to 1.91 times the card run's rate for all 16 host jobs (the device is only opened); rem: the host's quotient-bit walk, up to 2,096 steps a pair at fp64, with a quarter of the pairs aimed at the longest gaps (READ), which is why rem64 runs at 0.061 M/s, 16 microseconds a case (several hundred steps on average at tens of nanoseconds a step: BELIEVED); the cheapest items are a 30 to 50 ns loop in the card run (class32 29.8 ns, class64 45 ns, nextup32 51 ns a case, from the final rates) and 17 and 27 ns on the software backend (class32 and class64, MEASURED, `sw_rates.out`) |
 | **tile: division, square root** | the tile's instruction issue, with slack; not the host | COMPUTED: if the whole-divide program runs one instruction a beat at 108 M beats a second (docs/VALIDATION.md, 2026-09-08) on 8 fp32 or 4 fp64 lanes (docs/ARCHITECTURE.md), a tile does 4.11 (div32), 2.04 (div64), 4.65 (sqrt32) and 2.29 (sqrt64) M/s from the programs' 210, 212, 186 and 189 instructions (MEASURED by `tile_counts.py`, `len(Program.insns)`); the measured 2.02, 1.54, 1.95 and 1.52 (rne, quad) are **49%, 75%, 42% and 67%** of that (`tile_counts.out` T3), and no measured rate of any attribute exceeds its bound. The host side is at most about 5% of a job (MEASURED upper bound, 2.5). BELIEVED: the model's instruction timing, and that the on-chip route is the one taken |
 | **tile: rint, scaleb** | the per-call path of composed passes, not the arithmetic | rint is 4 passes a call (copysign, add, subtract, copysign: READ, `clause5.c` lines 320 to 327; MEASURED by `tile_counts.py`, 4 for every one of 200 operands) and the soak makes two calls an operand (`clause5_soak.c` lines 399 to 402 and 431 to 434, exact = 0 and 1), so 8 passes an operand; scaleb takes 0 to 3 multiplies a check, 19 passes for the 17 directed exponents at fp32 and 29 for the 27 at fp64 (`tile_counts.out` T2). At 4,096 elements a pass (`CFT_CHUNK`, READ in `cft_config.h`) the beat bound is 108 M rint32 operands/s a tile (8 lanes x 108 M beats / 8 passes), against 2.1 measured, **2% of it** (rint64 and scaleb64 about 4%): the other 98% of a job is call, staging and host (COMPUTED from the measured rates, `tile_counts.out` T5: about 240 microseconds a pass for rint32 and 250 for scaleb32, whose job includes the host's 17 oracle loops, against 4.7 microseconds of tile time for 4,096 fp32 elements; rint64 and scaleb64 about 260 and 280 against 9.5). BELIEVED |
 
 Three more facts bound the *kind* of bound. The four tiles' medians agree (max/min across the four tiles: median 1.02, widest 1.18, MEASURED), so jobs on different tiles do not interfere much; a tile in the quad runs at 0.90 to 0.98 of the single image's rate for division
 and scaleb32 (the single ran alone; `tile_counts.out` T4 compares 16 items, 0.90 to 1.25, scaleb64's single-image medians on four slices each swinging between 11.0 and 14.5 M/s), so four at once cost a tile at most about 10% (MEASURED; the cause is not known) and
 **no shared resource (the bus, the box's 36 threads) is the main limit yet**. But
-on the quad rint32 moves about 0.8 GB/s and scaleb32 0.8, rint64 1.5 and scaleb64 1.4 (4 tiles x passes x three words an element, COMPUTED, `tile_counts.out` T5; two words read and one written is BELIEVED): a quarter to a third of the 2.3 to 3.3 GB/s staged-traffic wall measured in 2026-09 (READ, `docs/VALIDATION.md`)
-at fp32 and about half to two thirds at fp64, so **the call-bound composed items would meet the bus wall within a factor of about 3 to 4 (fp32) or 1.5 to 2.3 (fp64) of their present rate if the call path were cheapened** (BELIEVED), which is the reason a sweep image keeping the cases on the device matters. Each job is one serial process: generate, oracle, stage, run, wait, read back, compare, with **no overlap between the host and the device**. What the measurements **cannot** tell is the split between the tile's arithmetic and the call path for div and sqrt
+on the quad, if the engine streams all three operand buffers and a pass writes one (four words an element: READ in `docs/VALIDATION.md`, 2026-09-16, "one read enable feeds all three FIFOs"), rint32 moves about 1.1 GB/s, scaleb32 1.0, rint64 2.0 and scaleb64 1.9
+(4 tiles x passes x words x bytes, COMPUTED, `tile_counts.out` T5; with only the three words an op uses it would be 0.8, 0.8, 1.5 and 1.4, BELIEVED, and the lower figure): a third to a half of the 2.3 to 3.3 GB/s staged-traffic wall measured in 2026-09 (READ, `docs/VALIDATION.md`)
+at fp32 and 57 to 88% of it at fp64, so **the call-bound composed items would meet the bus wall within a factor of about 2 to 3 (fp32) or 1.1 to 1.8 (fp64) of their present rate if the call path were cheapened** (BELIEVED), which is the reason a sweep image keeping the cases on the device matters. Each job is one serial process: generate, oracle, stage, run, wait, read back, compare, with **no overlap between the host and the device**. What the measurements **cannot** tell is the split between the tile's arithmetic and the call path for div and sqrt
 (the two models of 6.2 fit within a factor of two of the data), and the experiment that decides it is cheap and needs the card: rebuild both soak tools with `BATCH` 4x larger and 4x smaller (a compile-time constant, `#define BATCH 4096`) and run one slice a tile op: a rate that scales with BATCH is call-bound, one that does not is tile-bound. It is not in this parcel (the card is not mine).
 
 ### 6.3 What would move the rates
 
 COMPUTED where a number is given, BELIEVED otherwise; the factors multiply only if the bounds are separable, which 6.2 says they are not.
 
-- **For the host items, cores and loops, not cards.** The box has 36 threads and the sweep used 4 (11%); running the 33 host items as CPU jobs raises their throughput by up to 9 times on the same machine (36 / 4), and no card is opened. A purpose-built loop would beat the soak's 30 to 50 ns a case (class64: 27 ns at the software backend's whole-loop 37 M/s, MEASURED) by a large factor,
+- **For the host items, cores and loops, not cards.** The box has 36 threads and the sweep used 4 (11%); running the 33 host items as CPU jobs raises their throughput by up to 9 times on the same machine (36 / 4), and no card is opened. A purpose-built loop would beat the soak's 30 to 50 ns a case in the card run (class64: 27 ns at the software backend's whole-loop 37 M/s, MEASURED) by a large factor,
   BELIEVED 10 to 50 times with SIMD; the class-level and L1 reductions are then the way to use it.
 - **For the tile items, tiles.** `docs/PLATFORMS.md` (READ, with its dates) prices candidates by tiles a part holds: the U50 holds 4 (built); a used U200 5 (at $1,150 to $1,373, 2026-09-05), a used U250 7 by area and about 5 by bandwidth, a BittWare CVP-13 8 (budget A). Tile count scales a sweep linearly (the property `docs/SCALING.md` states: which tile computes an index cannot enter the answer).
   The clock: the single tile closed 175 MHz and the conformance set agreed on the card (`docs/VALIDATION.md`, 2026-09-24, READ), against the quad's 135: +30% (BELIEVED for a quad that closes there).
 - **For div and sqrt, the program and the pipeline.** If the model of 6.2 is right, at most 1.3 to 2.4 times is left between today's rates and the instruction-issue bound (75% at div64: little; 42 to 49% at fp32); a shorter correctly rounded program or more lanes moves the bound itself.
-- **For rint and scaleb, bigger batches.** If the call path is 98% of a job, a batch large enough that the tile's time matters could raise them until the staged-traffic wall, about 3 to 4 times at fp32 and 1.5 to 2 at fp64 (BELIEVED); the experiment above decides.
+- **For rint and scaleb, bigger batches.** If the call path is 98% of a job, a batch large enough that the tile's time matters could raise them until the staged-traffic wall, about 2 to 3 times at fp32 and 1.1 to 1.8 at fp64 (BELIEVED); the experiment above decides.
 - **A sweep image.** The permutation is a handful of multiply-xorshift rounds, a few DSPs and LUTs per tile, and a digest is a hash core: with **the enumeration and the digest in the fabric** the host exchanges only (lo, hi) and a root a slice, nothing per case crosses the bus, and the oracle (the host FPU, the only independent one) is run separately, on CPUs, against the same indices, with the digests compared. That makes the tile the only bound for the tile
-  items, at most about 2 to 2.4 times today's rate for fp32 and 1.3 to 1.5 times for fp64 by the arithmetic above (`tile_counts.out` T3), BELIEVED, and it moves the host-side work (the oracle's 5% of a job) off the card's critical path; it is the design to consider **after** the ledger and the reductions, not before.
+  items: for division and square root at most about 2 to 2.4 times today's rate at fp32 and 1.3 to 1.5 times at fp64 (`tile_counts.out` T3), and for rint and scaleb, whose jobs are now 2 to 4% tile, a rate 25 to 50 times higher in principle (T5) that the
+  bus no longer limits because nothing per case crosses it (BELIEVED, all of it), and it moves the host-side work (the oracle's 5% of a job) off the card's critical path; it is the design to consider **after** the ledger and the reductions, not before.
 
 **Taken together no lever moves a raw 64-bit sweep into reach**: they multiply to perhaps 10^2 to 10^3 against raw spaces of 10^4 to 10^6 quad-years. They do matter for the reduced spaces of 6.4.
 
@@ -765,7 +796,7 @@ spaces have no reduction that helps: **their coverage is hard cases, classes and
 ### 6.5 What would be swept, then
 
 A project that wanted a defensible statement "swept in full" could mean, in order of cost: (i) the 32-bit operand spaces, exhaustively (EX; minutes to hours each; 46.5 hours for the wide scaleb32); (ii) every **class** of every operation at every format (L2; seconds to minutes; PLAUSIBLE until the rounding unit is proved against the decision rule); (iii) every constructed hard case of division
-and square root at fp64 and fp128 for a stated list of targets (minutes); (iv) **fp32 division, remainder and fp64 square root at the value level** (L1; 3, 15 and 34 quads for a decade, 23, 141 and 334 for a year; PROVED for the golden model, PLAUSIBLE for the tile where the strips and the sign and subnormal-operand logic are covered by their own strata); (v) the rest is statistics with a stated
+and square root at fp64 and fp128 for a stated list of targets (minutes); (iv) **fp32 division, remainder and fp64 square root at the value level** (L1; 3, 15 and 34 quads for a decade, 23, 141 and 334 for a year; PROVED for the golden model at e4m3 and e5m6 by exhaustion and an argument at p = 24 and 53, PLAUSIBLE for the tile where the strips and the sign and subnormal-operand logic are covered by their own strata); (v) the rest is statistics with a stated
 floor. Each claim should name its level. That naming is question 5.
 
 ### 6.6 What a contributed result must carry to be trusted
@@ -780,7 +811,7 @@ volunteers, where a contributor who gains by claiming credit may fabricate. (The
 
 | field | what it lets a verifier do |
 |---|---|
-| `cid`, `stratum`, `lo`, `hi` | replay the slice exactly on any backend; place it in the fold |
+| `cid` (and the campaign record it hashes), `stratum`, `lo`, `hi` | replay the slice exactly on any backend, given the campaign record; place it in the fold |
 | `cases` and the counts, with the rule | refuse a slice whose count is not the rule's (the driver already does) |
 | `digest` (Merkle root of the per-batch SHA-256 of outputs and flags) | confirm against a second device or the software backend by equality; localise a difference in about 2 log2 n hash comparisons; it is the one field that lets a re-check be a comparison and not a full second claim |
 | `subject` (RTL tree hash, xclbin SHA-256, tile, ABI) | say what the coverage is about; refuse a build not on the allow-list of known-good hashes (the manifests' SHA-256s) |
@@ -803,17 +834,17 @@ Ranked by what they find for what they cost; effort is mine (BELIEVED), card tim
 
 | rank | do | finds | card time | effort | evidence |
 |---|---|---|---|---|---|
-| 1 | **Take the 33 host items off the card**: run them as CPU jobs on the box's idle threads (the soak tools without `CFT_SOAK_ARTIFACT`), beside the card's sweep; give the card's sweep time to the 35 tile items | nothing new by itself; the tile items get about twice their sweep time and the host items up to 9 times their throughput; EX's exhaustive host modes (conv32to64 3 min, cvtto32 2 s a slice per core) run anywhere | negative | hours (the lead's schedule) | 2.3, 6.2, 6.3 |
+| 1 | **Take the 33 host items off the card**: run them as CPU jobs on the box's idle threads (the soak tools without `CFT_SOAK_ARTIFACT`), beside the card's sweep; give the card's sweep time to the 35 tile items | nothing new by itself; the tile items get about twice their sweep time and the host items up to 9 times their throughput; EX's exhaustive host modes run anywhere (COMPUTED from the card run's host rates, `sweep_cost.out` Table 2: conv32to64 3.0 minutes and cvtto32 37.9 minutes over its five attributes, on four cores) | negative | hours (the lead's schedule) | 2.3, 6.2, 6.3 |
 | 2 | **Make the seeds collision-free and let n continue across runs** (a stopgap): the seed `(item << 40) + 2n + 1` (schedule A of `seed_audit.py`, which writes the same number with shifts and an or), or the keyed mixer, and start n at the highest n of earlier output directories + 1 | a rerun stops repeating (about 96% of draws today), the floor improves as 1/W; four operations lose their 37% repeated operand counts | none | hours, in `hw/card_stress_lib.py` and the tools' parsers | 2.4, 5.2 |
-| 3 | **The BATCH experiment**: rebuild the soak tools with `BATCH` 4x larger and smaller, one slice a tile op | tells whether rint, scaleb, div and sqrt are call-bound (rint and scaleb up to about 1.5 to 4 times from a constant, until the bus wall) or tile-bound | about one card-hour | an hour's work | 6.2 |
-| 4 | **Constructed hard-case lists as directed sweep items** for div and sqrt (closest approach to a midpoint and to a representable number, exact quotients, ties in the subnormal strip, b = 1 +- k ulp, powers of two), conversions' dropped-bit patterns, scaleb's strips | the classes with probability near 10^-16 a draw at fp64 (a weekend expects 4.3 x 10^-6 of them) which the repository's own failure history shows are where slips live | 10^6 pairs per (format, target, sign) is 0.16 s on a quad | days (the instrument is the prototype) | 3.1, 4.2 |
+| 3 | **The BATCH experiment**: rebuild the soak tools with `BATCH` 4x larger and smaller, one slice a tile op | tells whether rint, scaleb, div and sqrt are call-bound (rint and scaleb up to about 1.1 to 3 times from a constant, until the bus wall) or tile-bound | about one card-hour | an hour's work | 6.2 |
+| 4 | **Constructed hard-case lists as directed sweep items** for div and sqrt (closest approach to a midpoint and to a representable number, exact quotients, ties in the subnormal strip, b = 1 +- k ulp, powers of two), conversions' dropped-bit patterns, scaleb's strips | the classes with probability near 10^-16 a draw at fp64 (a weekend expects 2.2 x 10^-6 of each boundary type) which the repository's own failure history shows are where slips live | 10^6 pairs per (format, target, sign) is 0.16 s on a quad | days (the instrument is the prototype) | 3.1, 4.2 |
 | 5 | **Class-level sweeps (L2)** for every unary and conversion operation: a representative per class plus a walking-ones set | structural defects of the rounding unit, completely, if the tile has the structure of 4.3; conv64to32's list is 377,664 cases, 0.06 s | seconds | days a family, plus the structural argument | 4.3, G5 |
 | 6 | **The coverage ledger**: records, the fold, `next_uncovered`, the keyed-permutation enumeration for enumerated strata, per-batch digests in the tools | nothing itself; it is what makes 7 to 9 add up across weekends and devices | none | weeks (the tools' `enum` mode and digest, the driver, the report, tests) | 5, 4.5 |
 | 7 | **Rotate enumerated L1 chunks** of the tile items (div32 core and strips first) through the weekly schedule | all defects of the reduced function, over 3,209 whole-card weekends for div32: so only with more than one device | the weekly sweep share | days once 6 exists | 5.7, 6.4 |
 | 8 | **The published binary64 hard-to-round tables as the math routines' corpus** once exp, log, sin, cos, tan run on the card | the mark-and-replay path (2.9 x 10^-4 marked lanes a random weekend at G = 46, 1.2 x 10^-3 at G = 44) | minutes | days, plus permission to download | 4.2 |
 | 9 | **Prove the rounding unit against the decision rule at small width** in `formal/` | turns L2's PLAUSIBLE into PROVED at the unit's parameters | none | days to weeks | 4.3, 4.7 |
 | 10 | **Second owner, signing, replay verifier, honeypots, quorum** | makes a contributed coverage believable | 1 + r | weeks to months, only when a second owner exists | 6.6 |
-| 11 | **A sweep image** (the enumeration and digest in the fabric) | moves the tile items to the tile's own bound (about 2 to 2.4 times at fp32, 1.3 to 1.5 times at fp64), frees the host | a build | months; after 6 and 7 | 6.3 |
+| 11 | **A sweep image** (the enumeration and digest in the fabric) | moves division and square root to the tile's own bound (about 2 to 2.4 times at fp32, 1.3 to 1.5 times at fp64) and rint and scaleb far past the bus wall they would meet first (their jobs are 2 to 4% tile), frees the host | a build | months; after 6 and 7 | 6.3 |
 
 **Phases.**
 
@@ -829,7 +860,7 @@ Ranked by what they find for what they cost; effort is mine (BELIEVED), card tim
 2. **Seeds** (2.4). Approve the stopgap fix of `seed_for` and the continuation of n across runs (rank 2), or go straight to the enumerated mode? (Recommended: the stopgap now, the enumeration with the ledger.) Does a build-order-independent draw (two statements for the banded exponent) go in the tools with it?
 3. **Hard cases** (4.2). Approve a generator for the hard-case and class lists, and say where it lives: inside the soak tools as new modes, or as its own tool. May it adopt UCBTEST's number-theoretic generators or the published binary64 tables (each needs a licence check and a download I did not make)?
 4. **What coverage is about** (5.4). Per image, or per RTL tree and generics (the single, quad and deep as one class)? The stress run served the single and deep images 0 to 6% of any exhaustive item; if coverage is per image, they need their own sweep share. (Recommended: per RTL tree, with the three images reported separately.)
-5. **Naming "swept in full"** (6.5). May a claim of full coverage be made at the value level (L1, PROVED for the model, PLAUSIBLE for the tile) and the class level (L2, PLAUSIBLE), provided each statement names its level and what the tile's structure is assumed to be?
+5. **Naming "swept in full"** (6.5). May a claim of full coverage be made at the value level (L1: PROVED for the model at e4m3 and e5m6 by exhaustion, an argument at p = 24 and 53, PLAUSIBLE for the tile) and the class level (L2, PLAUSIBLE), provided each statement names its level and what the tile's structure is assumed to be?
 6. **Who contributes** (6.6). Only the project's own devices for now, or vetted collaborators too? Is an Ed25519 key per owner acceptable, and may records carry a pseudonymous device id?
 7. **A fleet** (6.4). Is fp32 division's reduced sweep (3 quads for a decade, 23 for a year) a goal, or is the class-level and hard-case plan the target for 64-bit-and-below spaces? The same for sqrt64 (15 quads for a decade).
 8. **The oracle** (2.5, 6.6). Keep the host FPU and libm as the only sweep oracle, with the golden model and the software backend only for re-checks and arbitration? (Recommended: yes; it is the independent one.)
@@ -851,6 +882,10 @@ Ranked by what they find for what they cost; effort is mine (BELIEVED), card tim
 11. **The soaks cover fp32 and fp64 against the host FPU**; fp128 and fp256 have MPFR parity (3.4) and the repository's tests. The methods here extend to them (the constructed division cases are verified at p = 113); a sweep of them is out of the question.
 12. **The record format and the store are a design**; the merge laws are checked on a model, not on an implementation.
 13. **A weekend's arithmetic takes the stress run's per-job rates as given**; a different image, clock or batch changes them, and EX's new modes in the same two files may change what `count` means for the items they touch. The units are those of 0b77387.
+14. **The replay of the model is a toy**: in `merge_law.py` L9 the "tool" is a hash of the campaign description and the index, so what is shown is the store's logic (the campaign record, its hash, the refusals by name, the descent), not that a real soak tool
+    rebuilt from a commit, its flags and a compiler is byte-identical, which is BELIEVED and would need two builds compared.
+15. **The closest-approach counts are for uniform significand pairs**, per boundary type; a banded operand, or a quotient that is subnormal or overflows, is not one, so the weekend's expected hits (about 1,200 of each type at fp32) are an upper bound,
+    and the sampler's actual share of that class was not counted.
 
 ## 9. The instruments and their captured runs
 
@@ -862,21 +897,21 @@ Python 3.10; every Python script gives byte-identical output under Windows Pytho
 | `tool_probe.sh`, `tool_probe_plants.sh` | what a count is per operation; the operand stream is a function of (op, seed) and not the attribute; the seed's low bit forced to 1 (the collision of 2.4); five planted defects each caught | `tool_probe.out`, `tool_probe_plants.out` | `bash tool_probe.sh DIR` (7 s); `bash tool_probe_plants.sh HOSTDIR WORK` (2 min) |
 | `seed_replay.sh`, `seed_replay_check.py` | the real driver's dry run, three invocations: a new `--out` replays, `--resume` continues | `seed_replay.out` | `bash seed_replay.sh WORK PYTHON` (4 to 8 min: 49 to 164 s an invocation, by the desktop's load) |
 | `stress_records.py` | the final record: totals, the derived rates, the seed schedule as run, coverage by image, tiles; six tampered records caught | `stress_records.out`, `stress_records_controls.out`, `stress-final-item-rates.txt` | `python stress_records.py METRICS --report stress-final-report.txt --write-rates stress-final-item-rates.txt` (under 1 s; `--controls` 4 s) |
-| `sweep_cost.py` | the full-sweep cost of every space; the units; the two quoted extremes reproduced; the per-family totals of the run; the union bound of 4.4; seven mutated inputs caught | `sweep_cost.out`, `sweep_cost_controls.out` | `python sweep_cost.py` (under 1 s; `--controls` 1 s) |
-| `seed_audit.py`, `eval_order.sh` | the port of the tools' generator held to the real tools (288 lanes); the draw order on seven builds; the schedule's collisions and two collision-free candidates | `seed_audit.out`, `eval_order.out` | `python seed_audit.py` (under 1 s); `bash eval_order.sh HOSTDIR WORK` (14 s) |
+| `sweep_cost.py` | the full-sweep cost of every space; the units; the two quoted extremes reproduced; the per-family totals of the run; the per-attribute times; the union bound of 4.4; the scaleb ranges held to the golden model and the soak's own lists; nine mutated inputs and three planted slips caught | `sweep_cost.out`, `sweep_cost_controls.out` | `python sweep_cost.py` (under 1 s; `--controls` 3 s) |
+| `seed_audit.py`, `eval_order.sh` | the port of the tools' generator held to the real tools (288 lanes); the draw order on seven builds; the driver's formula over the 54 x 57 grid, its collisions, two collision-free candidates and the birthday bound | `seed_audit.out`, `eval_order.out` | `python seed_audit.py` (under 1 s); `bash eval_order.sh HOSTDIR WORK` (14 s) |
 | `perm_check.c`, `.py`, `.sh` | the Feistel permutation: bijectivity by exhaustion to 2^32, quality by rounds, cycle walking, accounting, speed, 128 vectors reproduced in Python | `perm_check.c.out`, `perm_check.out`, `perm_check.speed.out` | `bash perm_check.sh python3` (about 3.5 min) |
-| `symmetry_check.py` | the reductions on the golden model by exhaustion on e4m3 and e5m6; the reduced sizes and device counts | `symmetry_check.out` | `python symmetry_check.py` (1.5 min) |
-| `hardcase_div.py` | closest-approach division and square root: construction, the exact arbiter, the sampler's reach, the repository's failure families, a planted defect | `hardcase_div.out` | `python hardcase_div.py` (27 s) |
-| `merge_law.py` | the store's laws on a model; Merkle localisation | `merge_law.out` | `python merge_law.py` (8 s) |
+| `symmetry_check.py` | the reductions on the golden model by exhaustion on e4m3 and e5m6 (G5 compares all 14,680 non-overflow conversions, 390 of them carries); each L1 formula held to an enumeration at the tiny format; the reduced sizes and device counts | `symmetry_check.out` | `python symmetry_check.py` (1.4 min) |
+| `hardcase_div.py` | closest-approach division and square root: construction, the exact arbiter, the count of pairs at N = +-1 (exhaustive at p = 8, 10, 11, exact at p = 24, sampled at 24, 53, 113), the sampler's reach, the repository's failure families, a planted defect; `--plants`: two slips in H3, each caught | `hardcase_div.out`, `hardcase_div_plants.out` | `python hardcase_div.py` (48 s); `python hardcase_div.py --plants` (15 s) |
+| `merge_law.py` | the store's laws L1 to L9 on a model, each run on a planted wrong fold or descent by the same test; Merkle localisation; replay from the store; the size of a record | `merge_law.out` | `python merge_law.py` (26 s) |
 | `sha_speed.sh` | SHA-256 throughput of one core (the digest's cost, 4.6) | `sha_speed.out` | `bash sha_speed.sh` (40 s) |
-| `tile_counts.py` | the whole-divide and whole-square-root programs' instruction counts; the passes of the composed routes (rint 4 a call, scaleb 19 and 29 over the directed lists); the issue-bound model against the measured rates; the quad against the single image | `tile_counts.out` | `python tile_counts.py` (under 1 s) |
+| `tile_counts.py` | the whole-divide and whole-square-root programs' instruction counts; the passes of the composed routes (rint 4 a call, scaleb 19 and 29 over the directed lists); the issue-bound model against the measured rates; the quad against the single image; the composed items' tile share, pass cost and staged traffic at three and at four words | `tile_counts.out` | `python tile_counts.py` (under 1 s) |
 | `sw_rates.sh`, `sw_rates_compare.py`, `host_only_rate.sh` | the software backend's rate per job against the card's; the host side alone | `sw_rates.out`, `sw_rates_compare.out`, `sw_rates_compare_controls.out`, `host_only_rate.out` | `bash sw_rates.sh DIR` (2 min); `python sw_rates_compare.py`; `bash host_only_rate.sh HOSTDIR WORK` |
 
 The inputs are the stress run's files: `stress-final-report.txt` (a copy of the final report), `stress-final-item-rates.txt` (derived from the final `metrics.jsonl` by `stress_records.py`), and the lead's `stress-item-rates.txt` and `stress-report-0655.txt` (unchanged, the cross-check).
 
 ## 10. Sources
 
-Verification status is stated for each: **READ** means I read the page or file named; the others were taken from a search result, a listing or a citing paper, and the entry says so. Quotation is limited to a few words.
+Verification status is stated for each: **READ** means I read the page or file named; the others were taken from a search result, a listing or a citing paper, and the entry says so (a dagger in the body, [18†], marks those cited without a note of their own). Quotation is limited to a few words.
 
 1. M. Aharoni, S. Asaf, L. Fournier, A. Koifman, R. Nagel, "FPgen - A test generation framework for datapath floating-point verification", HLDVT 2003, published 12 November 2003. https://www.research.ibm.com/publications/fpgen-a-test-generation-framework-for-datapath-floating-point-verification (READ: title, authors, venue, date, abstract).
 2. L. Fournier, S. Asaf, "FPgen - A Deep-Knowledge Test-Generator for Floating Point Verification", IBM Research Report H-0140, 2002. https://dominoweb.draco.res.ibm.com/reports/H-0140.pdf (NOT READ: the server refused the connection; title, authors and the "All IEEE Types" model from a search summary).
@@ -909,7 +944,7 @@ Verification status is stated for each: **READ** means I read the page or file n
 29. L. F. G. Sarmenta, "Sabotage-tolerance mechanisms for volunteer computing systems", Future Generation Computer Systems 18(4):561-572, 2002 (the venue and pages from a citing paper's reference list; READ: the spotter-task, blacklisting and voting descriptions on the project page https://groups.csail.mit.edu/cag/bayanihan/papers/fgcs/html/node11.html, which is an early version of the work).
 30. P. Golle, I. Mironov, "Uncheatable distributed computations", Topics in Cryptology - CT-RSA 2001, pp. 425-440 (READ: the entry on https://crypto.stanford.edu/~mironov/research.html; its content not read, and "ringers" is not attributed to it here).
 31. R. C. Merkle, "A digital signature based on a conventional encryption function", CRYPTO '87, LNCS 293:369-378, 1988, doi 10.1007/3-540-48184-2_32 (from search results).
-32. B. Laurie, A. Langley, E. Kasper, "Certificate Transparency", RFC 6962, June 2013. https://www.rfc-editor.org/rfc/rfc6962 (from search results quoting its text on Merkle trees, audit paths and consistency proofs).
+32. B. Laurie, A. Langley, E. Kasper, "Certificate Transparency", RFC 6962, June 2013. https://www.rfc-editor.org/rfc/rfc6962 (from search results quoting its text on Merkle trees, audit paths and consistency proofs; the RFC Editor's page for it says it is Experimental and obsolete, replaced by RFC 9162, "Certificate Transparency Version 2.0", which I did not read).
 33. S. A. Crosby, D. S. Wallach, "Efficient data structures for tamper-evident logging", 18th USENIX Security Symposium, 2009. https://www.usenix.org/conference/usenixsecurity09/technical-sessions/presentation/efficient-data-structures-tamper-evident (from search results).
 34. R. Kaivola, R. Ghughal, N. Narasimhan, A. Telfer, J. Whittemore, S. Pandav, A. Slobodova, C. Taylor, V. A. Frolov, E. Reeber, A. Naik, "Replacing testing with formal verification in Intel Core i7 processor execution engine validation", CAV 2009, pp. 414-429 (from search results, the Springer listing).
 35. D. M. Russinoff, "A mechanically checked proof of IEEE compliance of the floating point multiplication, division and square root algorithms of the AMD-K7 processor", LMS J. Comput. Math. 1:148-200, 1998, doi 10.1112/S1461157000000176 (from search results).
