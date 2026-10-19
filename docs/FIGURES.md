@@ -457,7 +457,8 @@ python/project_figures.py --only stress-sweep --write`; the numbers and digests 
 
 - `python python/figure_extracts.py --verify` remakes every extract from its source and compares
   the bytes: it needs the full git history, and for the stress run the raw `metrics.jsonl`, which
-  is 8 MB and is never committed.
+  is 8 MB and is never committed; it then repeats the stress reduction with items the library's
+  catalog could add and the run never served injected, which must not move a byte.
 
 - A number the record states in words is held to the figure by a pattern; reword the sentence and
   the check says that the statement is gone, by name, rather than passing.

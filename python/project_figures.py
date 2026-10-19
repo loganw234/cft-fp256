@@ -47,7 +47,9 @@ every run watches its own check fail first. One more control goes the other way:
 a file that a figure reads only in part (verify/run.sh, which changes with most
 rounds: the figure reads its stage names and its two budget lists) is held by
 what was read, not by the file's bytes, so an edit elsewhere in it must move
-nothing - a check that failed for that would fail for nothing, every round.
+nothing - a check that failed for that would fail for nothing, every round. So
+must an item of the library's sweep catalog that the stress run never served
+(the reduction is of the run's items; soak-exhaustive's catalog adds twenty-two).
 
 CLAIMS. Where the record states a figure's number in words - the README's "4.5x
 and 5.5x", docs/DETERMINISM.md's table of formats - the figure's number is held
@@ -2652,7 +2654,9 @@ GALLERY_LIMITS = (
     "with the full history remakes it (`python python/figure_extracts.py history`, `tree`, `ledger`), and `--check` prints "
     "a note, and does not fail, when the gate's own files have moved past it.",
     "`python python/figure_extracts.py --verify` remakes every extract from its source and compares the bytes: it needs "
-    "the full git history, and for the stress run the raw `metrics.jsonl`, which is 8 MB and is never committed.",
+    "the full git history, and for the stress run the raw `metrics.jsonl`, which is 8 MB and is never committed; it then "
+    "repeats the stress reduction with items the library's catalog could add and the run never served injected, which "
+    "must not move a byte.",
     "A number the record states in words is held to the figure by a pattern; reword the sentence and the check says "
     "that the statement is gone, by name, rather than passing.")
 
@@ -3097,6 +3101,24 @@ def controls(root, results):
             stay("a comment added to the runner, outside what the stage figure reads",
                  lambda t: {run_rel: (t / run_rel).read_text(encoding="utf-8") + "\n# a comment, which no figure reads\n"},
                  only=["verify-stages"])
+        # the stress reduction is of the items the RUN served, so an item of the library's catalog that it never served
+        # (as soak-exhaustive's twenty-two are) must change nothing; this is the seam's own test, with no raw file, and
+        # figure_extracts --verify repeats it end to end on the real run, with decoys injected into the catalog
+        from types import SimpleNamespace as NS
+        catalog = [NS(name="served-exhaustive", kind="exhaustive", op="sqrt32"),
+                   NS(name="served-random", kind="random", op="div32"),
+                   NS(name="never-served", kind="exhaustive", op="zz-unknown-op32"),
+                   NS(name="only-timed-out", kind="exhaustive", op="rint32")]
+        legs = [{"kind": "sweep", "status": "pass", "sweep": {"item": "served-exhaustive"}},
+                {"kind": "sweep", "status": "fail", "sweep": {"item": "served-random"}},
+                {"kind": "sweep", "status": "timeout", "sweep": {"item": "only-timed-out"}},
+                {"kind": "battery", "status": "pass", "leg": "api-test"}]
+        got = list(X.served_items(catalog, legs))
+        if got == ["served-exhaustive", "served-random"]:
+            report.append("a catalog item the stress run never served -> left out of the reduction, as it should be "
+                          "(not counted as a fault)")
+        else:
+            failures.append("CONTROL FAILED: a catalog item the stress run never served got into the reduction: %s" % got)
         # the lint can fail: an SVG that carries a script, a style, a CSS variable, an external font or an image
         for label, bad_svg, want in (
                 ("an SVG with a script", '<svg xmlns="http://www.w3.org/2000/svg"><script>x()</script></svg>', "element <script>"),
@@ -3354,7 +3376,7 @@ def _cmd_check(root, only, run_controls=True):
     print("project_figures: %d figures, %d files, every statement the record makes agrees (%d: %d numbers, %d phrase, "
           "presence or consistency checks)%s"
           % (len(results), 3 * len(results) + 1, len(rows), nums, len(rows) - nums,
-             "; %d faults planted, each caught by name, and %d edit%s that must move nothing, which moved nothing" % (
+             "; %d faults planted, each caught by name, and %d control%s that must change nothing, which changed nothing" % (
                  len(report) - n_stay, n_stay, "" if n_stay == 1 else "s") if run_controls and not only else ""))
     return 0
 

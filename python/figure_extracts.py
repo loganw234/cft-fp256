@@ -35,7 +35,9 @@ AN EXTRACT IS NOT TRUSTED BECAUSE IT IS COMMITTED. Each records:
 can (a source that is a file in the tree is re-hashed; one that is not is named
 as not rechecked here) and `python python/figure_extracts.py --verify` remakes
 every extract it can from its source and compares the bytes - which needs the
-full history, and the raw metrics file for the stress run.
+full history, and the raw metrics file for the stress run, whose reduction it
+then repeats with items the library's catalog could add and the run never
+served injected, which must not move a byte.
 
 No extract is a measurement of its own. A number in one is a count, a sum or a
 pattern's capture group over its source, never an estimate, and a source that
@@ -860,6 +862,13 @@ def make_ledger(root=ROOT, existing=None):
 # conversions, cft_logb, cft_next_*, cft_class, cft_total_order*, cft_rem; and
 # host/tools/divsqrt_soak.c's lib_call calls cft_div and cft_sqrt. project_figures.py re-reads
 # those two files on every --check and fails by name if they stop saying so.
+#
+# THIS TABLE COVERS THE OPS OF THE ITEMS THE RUN SERVED, AND ONLY THOSE (card-stress-1016 served 68
+# items of hw/card_stress_lib.py's catalog, 14 exhaustive and 54 random). The catalog is the library's
+# and grows: soak-exhaustive adds twenty-two exhaustive items (conv32to64-all, cvtto32-all,
+# cvtfrom32-all, cvtfrom64-all, scaleb32-all, scaleb32-wide) and its own table of the same fact,
+# OP_REACH, which knows their ops and this one does not. make_stress therefore reduces the run's items
+# (served_items) and, where the library has OP_REACH, holds the served ops to it.
 STRESS_TILE_OPS = ("sqrt32", "div32", "div64", "sqrt64", "rint32", "rint64", "scaleb32", "scaleb64")
 STRESS_TEL = {
     "power_w": "electrical.devices[0].electrical.power_consumption_watts",
@@ -874,6 +883,34 @@ STRESS_TEL = {
 def _median(vals):
     import statistics
     return statistics.median(vals) if vals else None
+
+
+def served_items(catalog, legs):
+    """{name: item} of the catalog's items that the run served - at least one sweep slice that passed or failed - in
+    the catalog's order. The catalog is the library's list of everything the driver can run, and it grows; the
+    reduction is of the RUN, so an item the run never served is not in it: not a row, not a coverage list (an
+    exhaustive item with no slice has no last coverage point, which broke this reduction once, when a later catalog
+    added items this run never served)."""
+    served = {r["sweep"]["item"] for r in legs if r.get("kind") == "sweep" and r.get("status") in ("pass", "fail")}
+    return {it.name: it for it in catalog if it.name in served}
+
+
+def _decoys(catalog):
+    """Items the run never served, of the three kinds a later catalog brings, made as copies of real ones under new
+    names: an exhaustive item of a served op, a random one, and an exhaustive one of an op nothing here knows. Only
+    attributes are set after the copy, so a library whose Item looks its op up in a table is not asked to."""
+    import copy
+    ex = next(it for it in catalog if it.kind == "exhaustive")
+    rn = next(it for it in catalog if it.kind == "random")
+    out = []
+    for base, name, op in ((ex, ex.name + "-decoy", None), (rn, rn.name + "-decoy", None),
+                           (ex, "decoy-unknown-op", "zz-unknown-op32")):
+        d = copy.copy(base)
+        d.name = name
+        if op:
+            d.op = op
+        out.append(d)
+    return out
 
 
 def _report_facts(text):
@@ -901,9 +938,10 @@ def _report_facts(text):
     return facts
 
 
-def make_stress(metrics, root=ROOT, report=None):
+def make_stress(metrics, root=ROOT, report=None, decoys=False):
     """The long stress run, reduced. `metrics` is the run's metrics.jsonl (never committed);
-    `report` is its report.txt, which the reduction is held to when given."""
+    `report` is its report.txt, which the reduction is held to when given. `decoys` gives the library's catalog items
+    the run never served (see _decoys): the reduction must not change by a byte, which --verify holds."""
     import collections
     root = pathlib.Path(root)
     metrics = pathlib.Path(metrics)
@@ -929,11 +967,20 @@ def make_stress(metrics, root=ROOT, report=None):
 
     def off(e):
         return int(round(float(e) - t0))
-    items = {it.name: it for it in L.sweep_items()}
+    catalog = list(L.sweep_items())
+    if decoys:
+        catalog += _decoys(catalog)
+    items = served_items(catalog, by["leg"])
     host_ops = sorted({it.op for it in items.values()} - set(STRESS_TILE_OPS))
-    for it in items.values():
-        if it.op not in STRESS_TILE_OPS and it.op not in host_ops:
-            raise ExtractError("a sweep op %s is in neither list" % it.op)
+    reach = getattr(L, "OP_REACH", None)          # the library's own table of the same fact, where it has one
+    if reach is not None:
+        wrong = sorted(op for op in {it.op for it in items.values()}
+                       if reach.get(op) != ("tile" if op in STRESS_TILE_OPS else "host"))
+        if wrong:
+            raise ExtractError("the library's OP_REACH and STRESS_TILE_OPS disagree about the served op%s %s: %s there, "
+                               "%s here" % ("" if len(wrong) == 1 else "s", ", ".join(wrong),
+                                            ", ".join(str(reach.get(op)) for op in wrong),
+                                            ", ".join("tile" if op in STRESS_TILE_OPS else "host" for op in wrong)))
     legs = [r for r in by["leg"]]
     ran = [r for r in legs if r["status"] != "skipped"]
     status = collections.Counter(r["status"] for r in legs)
@@ -1218,6 +1265,22 @@ def main(argv):
             else:
                 print("DIFFERS %s: the committed extract is not what its source gives" % name)
                 bad += 1
+            if name == "stress":
+                # the control: the library's catalog grows, and an item the run never served must not move a byte
+                # (or break the reduction, which is what an unserved exhaustive item did to it once)
+                try:
+                    ex2 = make_stress(metrics, a.out, a.stress_report, decoys=True)
+                except Exception as e:          # whatever a catalog adds must not be able to break the reduction
+                    print("DIFFERS stress (control): the reduction broke on catalog items the run never served: %s: %s"
+                          % (type(e).__name__, e))
+                    bad += 1
+                else:
+                    if dumps(ex2) == dumps(ex):
+                        print("ok      stress is unchanged by catalog items the run never served (3 decoys: an "
+                              "exhaustive item of a served op, a random one, an exhaustive one of an unknown op)")
+                    else:
+                        print("DIFFERS stress (control): catalog items the run never served changed the reduction")
+                        bad += 1
         else:
             p, text = _write(a.out, name, ex)
             print("wrote  %s (%d bytes; %s)" % (p.relative_to(pathlib.Path(a.out)).as_posix(),
