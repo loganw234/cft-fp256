@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="900" height="604" viewBox="0 0 900 604" role="img" aria-label="Four small charts over time: the verification runner's stages (52, of which 44 in the gate budget and 31 in the quick one), the RTL benches (29), the formal proofs (38) and the golden-model test functions (1,027).">
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="614" viewBox="0 0 900 614" role="img" aria-label="Four small charts over time: the verification runner's stages (52, of which 44 in the gate budget and 31 in the quick one), the RTL benches (29), the formal proofs (38) and the golden-model test functions (1,027).">
 <title>Four small charts over time: the verification runner's stages (52, of which 44 in the gate budget and 31 in the quick one), the RTL benches (29), the formal proofs (38) and the golden-model test functions (1,027).</title>
-<rect width="900" height="604" fill="#ffffff"/>
+<rect width="900" height="614" fill="#ffffff"/>
 <text x="24.0" y="30.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="17" fill="#1f2328" font-weight="600">How the gate grew</text>
 <text x="24.0" y="52.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#656d76">The size of the gate at the end of each day on main's own line: the runner's stages and budgets, the cocotb RTL</text>
 <text x="24.0" y="69.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#656d76">benches, the formal proofs, and the test functions defined for the golden model. A count a file did not yet give is a</text>
@@ -75,5 +75,5 @@
 <text x="847.0" y="411.3" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#0e7a86" font-weight="600" text-anchor="end">1,027</text>
 <text x="24.0" y="562.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#656d76">Test functions are the lines that define one (def test_...); pytest collects several times as many because a function is run for each case</text>
 <text x="24.0" y="577.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#656d76">it is given.</text>
-<text x="24.0" y="596.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#656d76">source: docs/figures/tree.json (extract; 0b77387)</text>
+<text x="24.0" y="606.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#656d76">source: docs/figures/tree.json (extract; 0b77387)</text>
 </svg>

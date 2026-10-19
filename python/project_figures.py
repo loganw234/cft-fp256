@@ -1071,7 +1071,7 @@ build_verify_growth.fresh = _fresh_verify_growth
 
 @build_verify_growth.drawer
 def draw_verify_growth(theme, d, meta):
-    W, H = 900, 604
+    W, H = 900, 614
     p = K.Plot(theme, W, H, meta["title"],
                "The size of the gate at the end of each day on main's own line: the runner's stages and budgets, the "
                "cocotb RTL benches, the formal proofs, and the test functions defined for the golden model. "
