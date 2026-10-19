@@ -45,7 +45,7 @@ PNG far enough to say whether it is the right size and not blank;
 | `--converter PATH` | an `rsvg-convert` to use instead of the one on PATH. |
 | `--scale N` | the PNG scale, 1 to 4; the default is 2. |
 | `--allow-dirty` | make an archive of a tree with uncommitted changes: its name ends `-dirty` and its manifest lists the paths that differ. |
-| `--now UTC` | fix the clock, as `2026-10-19T17:31:02Z`, to reproduce an archive exactly. The manifest says the clock was given. |
+| `--now UTC` | fix the clock, as `2026-10-19T17:31:02Z`, so that two builds can be compared byte for byte. The manifest says the clock was given (`archive.clock`). |
 | `--force` | replace an archive of the same name. |
 
 ## What is in the archive
@@ -159,10 +159,13 @@ run:
 So two runs at one commit, with one converter on one set of fonts, give the
 same files byte for byte, and differ only in `MANIFEST.json`'s `created_utc`
 and `date_utc`, in the archive's name and in the directory the entries sit in,
-which carry the date. With `--now` fixed the whole zip is the same. The
-self-test shows all three: the same commit and clock give the same zip, a
-clock a day and three seconds later changes only those date fields, and a
-build in another process under another `PYTHONHASHSEED` gives the same zip.
+which carry the date. With the same `--now` the whole zip is the same. The
+manifest records that the clock was given (`archive.clock`), so an archive made
+with `--now` set to the time an earlier archive recorded differs from that one
+in this field and in no other. The self-test shows all three: the same commit
+and clock give the same zip, a clock a day and three seconds later changes
+only those date fields, and a build in another process under another
+`PYTHONHASHSEED` gives the same zip.
 
 Stored costs size: on 2026-10-19 the archive with PNGs was 10.3 MB, where
 the same entries deflated at the highest level were 8.7 MB, because the PNGs
@@ -217,8 +220,9 @@ Both numbers come from a measurement, not from a belief: across all 34 renders
 the top rows held at least 5.03% non-background pixels and 471 colours. The
 check reads the PNG with `python/packager_png.py`, a decoder of the standard
 library alone, and only the band, because a pure-Python decode of the whole
-image took 111 s for the 34 files and the band 10.7 s. Its decoder gives the
-same pixels as Pillow's on all 34 (checked once, outside the repository). What
+image took 53 s for the 34 files on a quiet desktop and the band 6.6 s (111 s
+and 10.7 s when first measured, beside other work). Its decoder gives the
+same pixels as Pillow's on all 34 (checked outside the repository). What
 it does not prove is that the whole figure was drawn: a render with its title
 and nothing below passes. The packager pins the bytes instead, with a SHA-256,
 and shows that a second render is the same bytes.

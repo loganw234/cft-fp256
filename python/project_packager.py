@@ -23,7 +23,8 @@ carries the commit, not the date; the PNGs are what one converter makes of one S
 commit's own committer time in UTC rounded down to an even second (a zip entry has no zone and two-second
 resolution), unix mode 0644. So two runs at one commit with one converter differ in MANIFEST.json's created_utc
 and date_utc, in the date in the file name and in the directory the entries sit in, and in nothing else. `--now`
-fixes the clock, so the whole zip can be compared.
+fixes the clock, so two builds can be compared as a whole zip; the manifest then says, in archive.clock, that the
+clock was given.
 
 WHAT IT REFUSES, by name (exit 1, nothing written; independent refusals are reported together):
   no-git, not-a-git-tree   there is no git, or the root is not the top of a work tree with a commit.
@@ -909,7 +910,7 @@ def main(argv=None):
     ap.add_argument("--converter", metavar="PATH", help="an rsvg-convert to use instead of the one on PATH")
     ap.add_argument("--scale", type=int, default=SCALE_DEFAULT, help="PNG scale, 1 to 4 (default %d)" % SCALE_DEFAULT)
     ap.add_argument("--allow-dirty", action="store_true", help="export a dirty tree: the name ends -dirty and the manifest says so")
-    ap.add_argument("--now", metavar="UTC", help="fix the clock, as 2026-10-19T17:31:02Z (for reproducing an archive)")
+    ap.add_argument("--now", metavar="UTC", help="fix the clock, as 2026-10-19T17:31:02Z (so two builds compare byte for byte)")
     ap.add_argument("--force", action="store_true", help="replace an archive of the same name")
     ap.add_argument("--figure-check-args", default="", help=argparse.SUPPRESS)      # the self-test's: --no-controls
     a = ap.parse_args(argv)

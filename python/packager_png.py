@@ -17,14 +17,15 @@ Then it decodes the first BAND_ROWS rows exactly (all five filters) and counts w
 figure of this project - at least MIN_INK of the pixels differ from the corner pixel, and at least MIN_COLOURS
 distinct colours occur. Both thresholds come from a measurement, not a belief: on all 34 renders of the
 project's 17 figures at 2x (rsvg-convert 2.58.4) the band held at least 5.03% non-background pixels and at least
-471 distinct colours (text is anti-aliased), so the thresholds sit ten times and fourteen times below the least
-of them, and a blank image (one colour, 0%) is nowhere near. WHAT IT DOES NOT PROVE: that the whole figure was
+471 distinct colours (text is anti-aliased), so the thresholds sit ten times and nearly fifteen times below the
+least of them, and a blank image (one colour, 0%) is nowhere near. WHAT IT DOES NOT PROVE: that the whole figure was
 drawn. A render with its title and nothing below it passes. The completeness of a render is the converter's
 business; the packager pins the bytes with a SHA-256 and shows that a second render gives the same bytes.
 
-WHY ONLY A BAND. A pure-Python decode of the whole image took 111 s for those 34 files (3.3 s each: a PNG row
-may be filtered against the row above it and the pixel to its left, so every row is a loop), and 10.7 s for the
-band. A check that costs two minutes is a check that gets skipped.
+WHY ONLY A BAND. A pure-Python decode of the whole image took 53 s for those 34 files on a quiet desktop (1.6 s
+each: a PNG row may be filtered against the row above it and the pixel to its left, so every row is a loop; 111 s
+when it was first measured, beside other work), and 6.6 s for the band (10.7 s beside other work). A check that
+costs a minute or two is a check that gets skipped.
 
 `selftest()` is what python/project_packager.py --check runs: the decoder against the encoder below on every
 filter, and each fault planted and required to come back under its own name.
