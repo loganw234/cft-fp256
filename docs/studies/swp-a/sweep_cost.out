@@ -1,0 +1,178 @@
+sweep_cost.py: full-sweep cost from the stress run's measured rates
+   rates  : stress-final-item-rates.txt (derived by stress_records.py from the final metrics.jsonl)
+   report : stress-final-report.txt      cross-checks: the lead's stress-item-rates.txt, stress-report-0655.txt
+   year   : 31557600 s (Julian); month = year / 12; one weekend of the card = 219550 s (the final report's 'on the card')
+
+CHECK the final report states the run's seconds on the card                        ok (219550 s)
+CHECK the final derived file has the nine columns this script reads                ok (9 columns)
+CHECK the rates file has 182 data rows (183 lines with its header)                 ok (182)
+CHECK 68 distinct items in the rates file (14 exhaustive + 54 random)              ok (68)
+CHECK every item belongs to a family with a stated unit and space                  ok []
+CHECK the final report lists 54 random and 14 exhaustive items                     ok (54 random, 14 exhaustive)
+CHECK every item has a quad row (the lead's per-tile convention)                   ok []
+CHECK all 68 items' slices and cases equal the final report's tables exactly, summed over images ok []
+CHECK the lead's earlier rates file has the nine columns this script reads         ok (9 columns)
+CHECK the lead's earlier rates file is never ahead of the final record on any item ok []
+CHECK the 06:55 report is never ahead of the final record on any item              ok []
+CHECK the lead's medians (07:17, rows with >= 5 slices) agree with the final derivation within 3% ok (178 medians compared; the widest 0.59% at ('cvtto64-rmm', 'quad'))
+CHECK the exhaustive items' count column is 0 everywhere (so cases/s is their rate) ok 
+CHECK the random items' count rates are all positive                               ok 
+CHECK scaleb32: cases_sum is within 0.1% of count_sum (count IS checks, not operands) ok (11722895360 vs 11719933952)
+CHECK cvtfrom32: cases_sum is 4 x count_sum (4 source types a lane)                ok (50470060032 vs 12617515008)
+CHECK cvtto32: cases_sum is between 1 x and 4 x count_sum (in-range pairs only)    ok (ratio 2.27)
+CHECK scaleb32 wide range derived as [-278, +277] = 556 exponents (EX's BELIEVED figure) ok (-278, 277, 556)
+   scaleb64 wide range derived as [-2099, +2098] = 4198 exponents (same argument: emax 1023, smallest subnormal 2^-1074)
+
+CHECK class64 over 2^64 on one quad is about 6,600 years (the lead's COMPUTED)     ok (6584 y)
+CHECK rem32 over 2^64 pairs on one quad is about 320,000 years (the lead's COMPUTED) ok (317491 y)
+CHECK div64 and rem64 over 2^128 pairs: 10^24 .. 10^26 years on one quad (the lead's COMPUTED) ok (1.75e+24, 4.41e+25 y)
+CHECK 35 items run on the tile and 33 are host code                                ok (35, 33)
+
+== TABLE 1. families, where each runs, what its rate counts, and the quad's per-job median rates
+   'tile' = passes on the device; 'host' = libcft host code, so its rate here is one CPU core of the box
+   family      runs  one count is               items    min M/s    max M/s   spaces
+   sqrt32      tile  encodings                      5      1.945      2.338   2^32 encodings
+   rint32      tile  encodings                      5      2.067      2.139   2^32 encodings
+   nextup32    host  encodings                      1     19.562     19.562   2^32 encodings
+   nextdown32  host  encodings                      1     12.769     12.769   2^32 encodings
+   logb32      host  encodings                      1      8.570      8.570   2^32 encodings
+   class32     host  encodings                      1     33.591     33.591   2^32 encodings
+   conv32to64  host  operands                       1      5.995      5.995   fp32 operands, 2^32
+   cvtto32     host  operands (x4 targets)          5      2.256      2.654   fp32 operands, 2^32
+   class64     host  operands                       1     22.196     22.196   fp64 operands, 2^64
+   logb64      host  operands                       1      6.403      6.403   fp64 operands, 2^64
+   nextup64    host  operands                       1     12.501     12.501   fp64 operands, 2^64
+   nextdown64  host  operands                       1      9.330      9.330   fp64 operands, 2^64
+   rint64      tile  operands (x2 variants)         5      1.869      1.965   fp64 operands, 2^64
+   sqrt64      tile  operands                       4      1.521      1.541   fp64 operands, 2^64
+   conv64to32  host  operands                       4      5.578      6.225   fp64 operands, 2^64
+   cvtto64     host  operands (x4 targets)          5      2.445      2.884   fp64 operands, 2^64
+   cvtfrom32   host  lanes (x4 sources)             4      1.901      1.938   i32/u32 sources, 2^32; i64/u64 sources, 2^64
+   cvtfrom64   host  lanes (x4 sources)             4      1.857      1.901   i32/u32 sources, 2^32; i64/u64 sources, 2^64
+   div32       tile  pairs                          4      1.896      2.022   fp32 pairs, 2^64
+   rem32       host  pairs                          1      0.460      0.460   fp32 pairs, 2^64
+   div64       tile  pairs                          4      1.487      1.538   fp64 pairs, 2^128
+   rem64       host  pairs                          1      0.061      0.061   fp64 pairs, 2^128
+   scaleb32    tile  checks (operand x exponent)     4     14.004     14.534   fp32 x 17 directed exponents; fp32 x 556 wide exponents
+   scaleb64    tile  checks (operand x exponent)     4     13.508     13.823   fp64 x 27 directed exponents; fp64 x 4198 wide exponents
+
+== TABLE 2. a full sweep of each space at the measured rates (COMPUTED)
+   worker-seconds = sum over the family's attributes of space / per-job median rate
+   one quad = 4 workers; 'workers' are tiles for tile items and CPU cores for host items
+   family      runs  space                           n     one quad   workers 10 y    workers 1 y   workers 1 mo       worker-y
+   sqrt32      tile  2^32 encodings                  5     40.9 min              1              1              1       0.000311
+   rint32      tile  2^32 encodings                  5     42.8 min              1              1              1       0.000325
+   nextup32    host  2^32 encodings                  1         55 s              1              1              1       6.96e-06
+   nextdown32  host  2^32 encodings                  1         84 s              1              1              1       1.07e-05
+   logb32      host  2^32 encodings                  1      2.1 min              1              1              1       1.59e-05
+   class32     host  2^32 encodings                  1         32 s              1              1              1       4.05e-06
+   conv32to64  host  fp32 operands, 2^32             1      3.0 min              1              1              1       2.27e-05
+   cvtto32     host  fp32 operands, 2^32             5     37.9 min              1              1              1       0.000288
+   class64     host  fp64 operands, 2^64             1       6584 y          2,634         26,336        316,028       2.63e+04
+   logb64      host  fp64 operands, 2^64             1   2.28e+04 y          9,130         91,294      1,095,519       9.13e+04
+   nextup64    host  fp64 operands, 2^64             1   1.17e+04 y          4,676         46,760        561,113       4.68e+04
+   nextdown64  host  fp64 operands, 2^64             1   1.57e+04 y          6,266         62,652        751,817       6.27e+04
+   rint64      tile  fp64 operands, 2^64             5   3.83e+05 y        153,140      1,531,395       1.84e+07       1.53e+06
+   sqrt64      tile  fp64 operands, 2^64             4   3.81e+05 y        152,557      1,525,567       1.83e+07       1.53e+06
+   conv64to32  host  fp64 operands, 2^64             4      1e+05 y         40,143        401,428      4,817,132       4.01e+05
+   cvtto64     host  fp64 operands, 2^64             5   2.88e+05 y        115,241      1,152,403       1.38e+07       1.15e+06
+   cvtfrom32   host  i32/u32 sources, 2^32           4     37.1 min              1              1              1       0.000282
+   cvtfrom32   host  i64/u64 sources, 2^64           4   3.03e+05 y        121,303      1,213,025       1.46e+07       1.21e+06
+   cvtfrom64   host  i32/u32 sources, 2^32           4     37.9 min              1              1              1       0.000289
+   cvtfrom64   host  i64/u64 sources, 2^64           4    3.1e+05 y        123,923      1,239,227       1.49e+07       1.24e+06
+   div32       tile  fp32 pairs, 2^64                4   3.02e+05 y        120,803      1,208,023       1.45e+07       1.21e+06
+   rem32       host  fp32 pairs, 2^64                1   3.17e+05 y        126,997      1,269,963       1.52e+07       1.27e+06
+   div64       tile  fp64 pairs, 2^128               4   7.18e+24 y       2.87e+24       2.87e+25       3.44e+26       2.87e+25
+   rem64       host  fp64 pairs, 2^128               1   4.41e+25 y       1.76e+25       1.76e+26       2.12e+27       1.76e+26
+   scaleb32    tile  fp32 x 17 directed exponents    4     85.3 min              1              1              1       0.000648
+   scaleb32    tile  fp32 x 556 wide exponents       4       46.5 h              1              1              1         0.0212
+   scaleb64    tile  fp64 x 27 directed exponents    4   1.16e+06 y        462,052      4,620,515       5.54e+07       4.62e+06
+   scaleb64    tile  fp64 x 4198 wide exponents      4    1.8e+08 y       7.18e+07       7.18e+08       8.62e+09       7.18e+08
+
+== TABLE 3. what the 2026-10-16..19 run covered of each large space, and the defect share it could see
+   count = the run's total in the item's own unit (all images), from the rates file; fraction = count / space.
+   floor95 = 3 / count: the smallest share of the SAMPLED distribution a defect can occupy and still be hit
+   with probability 0.95 by that many independent draws (1 - exp(-3) = 0.95). 'W weekends' means W runs of
+   this size with INDEPENDENT samples; with today's seeds a rerun repeats the first (see seed_audit.py).
+   For the two 2^32 spaces the run drew MORE than the space; the share of distinct points a uniform
+   sampler would have hit is 1 - exp(-fraction) (the banded sampler is not uniform, so this is an upper bound).
+   item (rne or only) runs        count, one run    fraction distinct if uniform  floor95 1w floor95 13w floor95 52w
+   conv32to64       host        14,230,224,896    3.31e+00       96.4%    2.11e-10    1.62e-11    4.05e-12
+   cvtto32-rne      host        15,033,434,112    3.50e+00       97.0%    2.00e-10    1.54e-11    3.84e-12
+   class64          host        14,230,224,896    7.71e-10           -    2.11e-10    1.62e-11    4.05e-12
+   logb64           host        14,230,224,896    7.71e-10           -    2.11e-10    1.62e-11    4.05e-12
+   nextup64         host        14,230,224,896    7.71e-10           -    2.11e-10    1.62e-11    4.05e-12
+   nextdown64       host        14,230,224,896    7.71e-10           -    2.11e-10    1.62e-11    4.05e-12
+   rint64-rne       tile        15,033,434,112    8.15e-10           -    2.00e-10    1.54e-11    3.84e-12
+   sqrt64-rne       tile        15,033,434,112    8.15e-10           -    2.00e-10    1.54e-11    3.84e-12
+   conv64to32-rne   host        14,230,224,896    7.71e-10           -    2.11e-10    1.62e-11    4.05e-12
+   cvtto64-rne      host        14,764,998,656    8.00e-10           -    2.03e-10    1.56e-11    3.91e-12
+   cvtfrom32-rne    host        14,497,611,776    7.86e-10           -    2.07e-10    1.59e-11    3.98e-12
+   cvtfrom64-rne    host        14,490,271,744    7.86e-10           -    2.07e-10    1.59e-11    3.98e-12
+   div32-rne        tile        14,498,660,352    7.86e-10           -    2.07e-10    1.59e-11    3.98e-12
+   rem32            host        12,459,180,032    6.75e-10           -    2.41e-10    1.85e-11    4.63e-12
+   div64-rne        tile        14,498,660,352    4.26e-29           -    2.07e-10    1.59e-11    3.98e-12
+   rem64            host         1,755,316,224    5.16e-30           -    1.71e-09    1.31e-10    3.29e-11
+   scaleb32-rne     tile        14,136,901,632    5.92e-03        0.6%    2.12e-10    1.63e-11    4.08e-12
+   scaleb64-rne     tile        14,230,224,896    1.84e-13           -    2.11e-10    1.62e-11    4.05e-12
+
+== TABLE 4. the whole weekend (219550 s, four workers) on ONE item: the most one weekend could add
+   item             runs      cases in a weekend     fraction  weekends to 1.0
+   class64          host      19,492,388,444,400     1.06e-06         9.46e+05
+   rem32            host         404,220,530,600     2.19e-08         4.56e+07
+   div32-rne        tile       1,776,094,513,200     9.63e-08         1.04e+07
+   sqrt64-rne       tile       1,335,387,407,200     7.24e-08         1.38e+07
+   rint64-rne       tile       1,725,983,543,000     9.36e-08         1.07e+07
+   conv64to32-rne   host       5,466,562,277,000     2.96e-07         3.37e+06
+   cvtto64-rne      host       2,158,692,881,600     1.17e-07         8.55e+06
+   div64-rne        tile       1,350,697,946,000     3.97e-27         2.52e+26
+   rem64            host          53,670,314,800     1.58e-28         6.34e+27
+
+== TABLE 5. where the run's sweep job-seconds went (jobsec_sum, all images)
+   tile items: 177,245 job-s (47.5%), 414,541,012,992 cases;  host items: 195,834 job-s (52.5%), 941,775,215,311 cases
+   quad    tile   162586 job-s, host   185511 job-s (host share 53.3%)
+   single  tile     8618 job-s, host     3865 job-s (host share 31.0%)
+   deep    tile     6041 job-s, host     6458 job-s (host share 51.7%)
+
+== TABLE 6. what the run did, per family, summed over the family's attributes and the three images (as run)
+   'cases' is the verdict's own case count; 'count' is the soak's argument, in the unit of 2.2 (0 for the exhaustive items)
+   family      runs  items                cases                count
+   sqrt32      tile      5       21,474,836,480                    0
+   rint32      tile      5       21,474,836,480                    0
+   nextup32    host      1        4,294,967,448                    0
+   nextdown32  host      1        4,294,967,440                    0
+   logb32      host      1        4,294,967,296                    0
+   class32     host      1        4,294,967,296                    0
+   conv32to64  host      1       14,230,224,896       14,230,224,896
+   cvtto32     host      5      164,121,171,250       74,628,202,496
+   class64     host      1       14,230,224,896       14,230,224,896
+   logb64      host      1       14,230,224,896       14,230,224,896
+   nextup64    host      1       14,230,225,344       14,230,224,896
+   nextdown64  host      1       14,230,225,344       14,230,224,896
+   rint64      tile      5       74,482,450,432       74,482,450,432
+   sqrt64      tile      4       60,401,123,328       60,401,123,328
+   conv64to32  host      4       58,748,567,552       58,748,567,552
+   cvtto64     host      5      143,095,693,557       74,092,380,160
+   cvtfrom32   host      4      236,235,784,192       59,058,946,048
+   cvtfrom64   host      4      237,028,507,648       59,257,126,912
+   div32       tile      4       59,859,009,536       59,859,009,536
+   rem32       host      1       12,459,180,032       12,459,180,032
+   div64       tile      4       59,467,890,688       59,467,890,688
+   rem64       host      1        1,755,316,224        1,755,316,224
+   scaleb32    tile      4       58,035,208,192       58,020,855,808
+   scaleb64    tile      4       59,345,657,856       59,327,381,504
+   random 1,296,186,685,863 cases, exhaustive 60,129,542,440 cases
+CHECK the families' cases add to the record's totals (1,296,186,685,863 random, 60,129,542,440 exhaustive) ok (1296186685863, 60129542440)
+
+== TABLE 7. the union bound: draws needed so that EVERY pattern of t bits on EVERY set of t of an operand's 64 positions
+   is seen, with probability at least 1 - e^-3 = 0.95, by uniform draws: N >= 2^t (t ln 2 + ln C(64, t) + 3)
+   one weekend item (div32-rne, as run): 14,498,660,352 draws
+   t = 20  needs 5.702e+07 draws  (covered by a weekend item)
+   t = 24  needs 1.002e+09 draws  (covered by a weekend item)
+   t = 26  needs 4.158e+09 draws  (covered by a weekend item)
+   t = 27  needs 8.455e+09 draws  (covered by a weekend item)
+   t = 28  needs 1.717e+10 draws  (not covered by a weekend item)
+   t = 29  needs 3.483e+10 draws  (not covered by a weekend item)
+CHECK a weekend item covers every 27-bit pattern and not every 28-bit pattern (the quoted 'up to about 27') ok (8.46e+09 <= 1.45e+10 < 1.72e+10)
+
+sweep_cost: every CHECK held

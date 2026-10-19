@@ -1,0 +1,60 @@
+hardcase_div.py: closest-approach divisions, constructed, verified, and measured against the campaign's sampler
+
+== H1. construction: one modular inverse a divisor, |N| = 1 verified in exact integers
+   fp32   mid +1: built for 1170 of 3000 odd divisors (39.0%), |N| = 1 verified on all of them (0 wrong)
+   fp32   mid -1: built for 1145 of 3000 odd divisors (38.2%), |N| = 1 verified on all of them (0 wrong)
+   fp32   rep +1: built for 1119 of 3000 odd divisors (37.3%), |N| = 1 verified on all of them (0 wrong)
+   fp32   rep -1: built for 1156 of 3000 odd divisors (38.5%), |N| = 1 verified on all of them (0 wrong)
+CHECK fp32: every constructed dividend has |N| = 1 exactly and lies in [my, 2^p)                       ok 
+CHECK fp32: the construction succeeds for 30 to 45% of odd divisors per sign (about 2 ln 2 - 1 = 38.6%) ok (38.6%)
+   fp64   mid +1: built for 1215 of 3000 odd divisors (40.5%), |N| = 1 verified on all of them (0 wrong)
+   fp64   mid -1: built for 1159 of 3000 odd divisors (38.6%), |N| = 1 verified on all of them (0 wrong)
+   fp64   rep +1: built for 1137 of 3000 odd divisors (37.9%), |N| = 1 verified on all of them (0 wrong)
+   fp64   rep -1: built for 1167 of 3000 odd divisors (38.9%), |N| = 1 verified on all of them (0 wrong)
+CHECK fp64: every constructed dividend has |N| = 1 exactly and lies in [my, 2^p)                       ok 
+CHECK fp64: the construction succeeds for 30 to 45% of odd divisors per sign (about 2 ln 2 - 1 = 38.6%) ok (39.6%)
+   fp128  mid +1: built for 1170 of 3000 odd divisors (39.0%), |N| = 1 verified on all of them (0 wrong)
+   fp128  mid -1: built for 1125 of 3000 odd divisors (37.5%), |N| = 1 verified on all of them (0 wrong)
+   fp128  rep +1: built for 1177 of 3000 odd divisors (39.2%), |N| = 1 verified on all of them (0 wrong)
+   fp128  rep -1: built for 1160 of 3000 odd divisors (38.7%), |N| = 1 verified on all of them (0 wrong)
+CHECK fp128: every constructed dividend has |N| = 1 exactly and lies in [my, 2^p)                      ok 
+CHECK fp128: the construction succeeds for 30 to 45% of odd divisors per sign (about 2 ln 2 - 1 = 38.6%) ok (38.2%)
+
+== H2. the golden model's division on the closest-approach cases against an independent exact arbiter
+CHECK fp32: golden div = exact arbiter on 300 constructed pairs x 5 attributes (bits and flags)        ok (1500 cases, 0 differ)
+CHECK fp64: golden div = exact arbiter on 300 constructed pairs x 5 attributes (bits and flags)        ok (1500 cases, 0 differ)
+CHECK fp128: golden div = exact arbiter on 120 constructed pairs x 5 attributes (bits and flags)       ok (600 cases, 0 differ)
+CHECK CONTROL: the arbiter's RNE answer differs from the model's RTZ answer on the near-midpoint cases (the comparison can see) ok (200 of 200)
+
+== H3. how close does the campaign's sampler come? (the least |N| / my over its draws)
+   rho = |N| / my in [0, 1] is the distance to the nearest midpoint in units of half an ulp; its least possible value is 1 / my.
+   format   draws here   least rho here   least possible rho expected hits of rho = 1/my in a 1.45e10-draw item
+   fp32         358161        2.307e-06            7.947e-08              2.3e+03                reached
+CHECK fp32: the least rho over 358161 draws is within a factor 10 of 1 / draws, as uniform draws predict ok (2.31e-06 against 2.79e-06)
+   fp64         362061        8.888e-07            1.480e-16             4.29e-06 NOT reached (expected 4.3e-06)
+CHECK fp64: the least rho over 362061 draws is within a factor 10 of 1 / draws, as uniform draws predict ok (8.89e-07 against 2.76e-06)
+CHECK fp32: the stress run's draws (1.45e10 a division item) expect over 1,000 closest-approach (|N| = 1) hits ok (2304)
+CHECK fp64: the same draws expect fewer than 10^-5 closest-approach hits (the class is invisible to sampling) ok (4.29e-06)
+
+== H4. the repository's own failure family: a = 1, b = 1 - ulp (python/tests/test_sequences.py)
+   fp32   |N| = 1, rho = |N| / my = 5.960e-08 = 1 / my: a closest-approach case (the quotient is 1/(my 2^p), about 2^-48, from a midpoint: 2^-25 of an ulp)
+CHECK fp32: (1, 1 - ulp) has |N| <= 2, i.e. is within a factor 2 of the closest possible approach to a midpoint ok (|N| = 1)
+   fp64   |N| = 1, rho = |N| / my = 1.110e-16 = 1 / my: a closest-approach case (the quotient is 1/(my 2^p), about 2^-106, from a midpoint: 2^-54 of an ulp)
+CHECK fp64: (1, 1 - ulp) has |N| <= 2, i.e. is within a factor 2 of the closest possible approach to a midpoint ok (|N| = 1)
+
+== H5. a PLANTED defect only the constructed set finds: the quotient computed to g extra bits, rounded ties-to-even on those bits alone
+   the flawed division (g = 40 extra bits) at fp64: 0 failures in 272007 sampler draws; 606 failures in 2374 constructed closest-approach pairs
+   expected failures in a stress-run-sized item (1.45e10 draws): about 6.59e-03
+CHECK the sampler finds NO failure of the flawed division in 300,000 draws                             ok (0)
+CHECK the constructed closest-approach set finds the flawed division FAILING on about a quarter of its midpoint pairs at least ok (606 of 2374)
+CHECK a stress-run-sized item would expect under 0.01 failures: the defect would pass the weekend      ok (6.59e-03)
+CHECK CONTROL: with g = 80 extra bits the same method is correct on every constructed pair (the set does not just fail everything) ok (0 failures)
+
+== H6. square root: where is the closest approach to a midpoint? (fp32, every midpoint of the binade pair [1, 4))
+   least d over the 8388608 midpoints: 1, reached by 2 midpoint(s); the next values of d: [1, 7, 9, 15, 17, 23]
+CHECK fp32: the least d is 1 (a closest approach of 2^-48 to the midpoint M^2: the minimum an odd square allows) ok (d = 1)
+CHECK fp32: sqrt(1 + ulp), the repository's failure family under RMM (python/tests/test_sequences.py), has d = 1 ok (d = 1)
+   the 2 midpoint(s) with d = 1 of the 8388608; sampling reaches such an input with probability about 2 / 2^24 a draw
+CHECK fp32: golden sqrt = an exact integer arbiter on every closest-approach input (d = 1), all 5 attributes ok (10 cases, 0 differ)
+
+hardcase_div: every CHECK held

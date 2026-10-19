@@ -1,0 +1,468 @@
+== A. what one unit of count is
+   (the verdict line's cases against the count asked for)
+$ clause5-soak scaleb32 1 1 rne
+    soaking the software backend
+    scaleb32 rne: 17 cases, 0 value mismatches, 0 flag mismatches
+    exit 0
+CHECK scaleb32 count=1: one operand x 17 exponents               17 = 17  ok
+$ clause5-soak scaleb32 4096 1 rne
+    soaking the software backend
+    scaleb32 rne: 69632 cases, 0 value mismatches, 0 flag mismatches
+    exit 0
+CHECK scaleb32 count=4096: 4096 operands x 17 exponents          69632 = 69632  ok
+$ clause5-soak scaleb32 69632 1 rne
+    soaking the software backend
+    scaleb32 rne: 69632 cases, 0 value mismatches, 0 flag mismatches
+    exit 0
+CHECK scaleb32 count=69632 (=4096x17): one batch, cases = count  69632 = 69632  ok
+$ clause5-soak scaleb32 696320 1 rne
+    soaking the software backend
+    scaleb32 rne: 696320 cases, 0 value mismatches, 0 flag mismatches
+    exit 0
+CHECK scaleb32 count=696320 (=10x69632): cases = count           696320 = 696320  ok
+$ clause5-soak scaleb64 4096 1 rne
+    soaking the software backend
+    scaleb64 rne: 110592 cases, 0 value mismatches, 0 flag mismatches
+    exit 0
+CHECK scaleb64 count=4096: 4096 operands x 27 exponents          110592 = 110592  ok
+$ clause5-soak scaleb64 110592 1 rne
+    soaking the software backend
+    scaleb64 rne: 110592 cases, 0 value mismatches, 0 flag mismatches
+    exit 0
+CHECK scaleb64 count=110592 (=4096x27): cases = count            110592 = 110592  ok
+$ clause5-soak cvtfrom32 4096 1 rne
+    soaking the software backend
+    cvtfrom32 rne: 16384 cases, 0 value mismatches, 0 flag mismatches
+    exit 0
+CHECK cvtfrom32 count=4096: 4 source types per lane              16384 = 16384  ok
+$ clause5-soak cvtfrom64 4096 1 rne
+    soaking the software backend
+    cvtfrom64 rne: 16384 cases, 0 value mismatches, 0 flag mismatches
+    exit 0
+CHECK cvtfrom64 count=4096: 4 source types per lane              16384 = 16384  ok
+$ clause5-soak cvtto32 4096 1 rne
+    soaking the software backend
+      skipped 6999 lane-target pairs outside the target range (invalid table is model-pinned)
+    cvtto32 rne: 9385 cases, 0 value mismatches, 0 flag mismatches
+    exit 0
+NOTE  cvtto32 count=4096 reports 9385 cases: in-range (lane, target) pairs only, of at most 16384
+$ clause5-soak cvtto64 4096 1 rne
+    soaking the software backend
+      skipped 8017 lane-target pairs outside the target range (invalid table is model-pinned)
+    cvtto64 rne: 8367 cases, 0 value mismatches, 0 flag mismatches
+    exit 0
+NOTE  cvtto64 count=4096 reports 8367 cases: in-range (lane, target) pairs only, of at most 16384
+$ clause5-soak conv64to32 4096 1 rne
+    soaking the software backend
+    conv64to32 rne: 4096 cases, 0 value mismatches, 0 flag mismatches
+    exit 0
+CHECK conv64to32 count=4096: one case an operand                 4096 = 4096  ok
+$ clause5-soak conv32to64 4096 1
+    soaking the software backend
+    conv32to64 rne: 4096 cases, 0 value mismatches, 0 flag mismatches
+    exit 0
+CHECK conv32to64 count=4096: one case an operand                 4096 = 4096  ok
+$ clause5-soak rint64 4096 1 rne
+    soaking the software backend
+    rint64 rne: 4096 cases, 0 value mismatches, 0 flag mismatches
+    exit 0
+CHECK rint64 count=4096: one case an operand                     4096 = 4096  ok
+$ clause5-soak rem32 4096 1
+    soaking the software backend
+    rem32 -: 4096 cases, 0 value mismatches, 0 flag mismatches
+    exit 0
+CHECK rem32 count=4096: one case a pair                          4096 = 4096  ok
+$ clause5-soak rem64 4096 1
+    soaking the software backend
+    rem64 -: 4096 cases, 0 value mismatches, 0 flag mismatches
+    exit 0
+CHECK rem64 count=4096: one case a pair                          4096 = 4096  ok
+$ clause5-soak class64 4096 1
+    soaking the software backend
+    class64 -: 4096 cases, 0 value mismatches, 0 flag mismatches
+    exit 0
+CHECK class64 count=4096: one case an operand                    4096 = 4096  ok
+$ clause5-soak logb64 4096 1
+    soaking the software backend
+    logb64 -: 4096 cases, 0 value mismatches, 0 flag mismatches
+    exit 0
+CHECK logb64 count=4096: one case an operand                     4096 = 4096  ok
+$ clause5-soak nextup64 4096 1
+    soaking the software backend
+    nextup64 -: 4104 cases, 0 value mismatches, 0 flag mismatches
+    exit 0
+NOTE  nextup64 count=4096 reports 4104 cases (the eight edge cases of next_edges64 are counted too)
+$ divsqrt-soak div32 4096 1 rne
+    soaking the software backend
+    div32 rne: 4096 cases, 0 value mismatches, 0 flag mismatches
+    exit 0
+CHECK div32 count=4096: one case a pair                          4096 = 4096  ok
+$ divsqrt-soak div64 4096 1 rne
+    soaking the software backend
+    div64 rne: 4096 cases, 0 value mismatches, 0 flag mismatches
+    exit 0
+CHECK div64 count=4096: one case a pair                          4096 = 4096  ok
+$ divsqrt-soak sqrt64 4096 1 rne
+    soaking the software backend
+    sqrt64 rne: 4096 cases, 0 value mismatches, 0 flag mismatches
+    exit 0
+CHECK sqrt64 count=4096: one case an operand                     4096 = 4096  ok
+
+== D. the exhaustive modes' case counts
+$ divsqrt-soak sqrt32 0 4096 rne
+    soaking the software backend
+    sqrt32 rne: 4096 cases, 0 value mismatches, 0 flag mismatches
+    exit 0
+CHECK sqrt32 [0,4096): hi - lo                                   4096 = 4096  ok
+$ clause5-soak rint32 0 4096 rne
+    soaking the software backend
+    rint32 rne: 4096 cases, 0 value mismatches, 0 flag mismatches
+    exit 0
+CHECK rint32 [0,4096): hi - lo                                   4096 = 4096  ok
+$ clause5-soak nextup32 0 4096
+    soaking the software backend
+    nextup32 -: 4104 cases, 0 value mismatches, 0 flag mismatches
+    exit 0
+CHECK nextup32 [0,4096): hi - lo + 8                             4104 = 4104  ok
+$ clause5-soak nextdown32 0 4096
+    soaking the software backend
+    nextdown32 -: 4104 cases, 0 value mismatches, 0 flag mismatches
+    exit 0
+CHECK nextdown32 [0,4096): hi - lo + 8                           4104 = 4104  ok
+$ clause5-soak logb32 0 4096
+    soaking the software backend
+    logb32 -: 4096 cases, 0 value mismatches, 0 flag mismatches
+    exit 0
+CHECK logb32 [0,4096): hi - lo                                   4096 = 4096  ok
+$ clause5-soak class32 0 4096
+    soaking the software backend
+    class32 -: 4096 cases, 0 value mismatches, 0 flag mismatches
+    exit 0
+CHECK class32 [0,4096): hi - lo                                  4096 = 4096  ok
+
+== B. the operand stream is a function of (operation, seed)
+OPERANDS div32 0x50AC0001 rne 0 a=0x0b8f7841 b=0x8266921c
+OPERANDS div32 0x50AC0001 rne 1 a=0xcca6447a b=0xc3ef005e
+OPERANDS div32 0x50AC0001 rne 2 a=0xafc4804d b=0x38eec839
+OPERANDS div32 0x50AC0001 rne 3 a=0xa50811de b=0x47868651
+OPERANDS div32 0x50AC0001 rne 4 a=0x7f76e823 b=0xf5e1e129
+OPERANDS div32 0x50AC0001 rne 5 a=0x5bc400fa b=0x80b73d57
+OPERANDS div32 0x50AC0001 rne 6 a=0x3fb5ee60 b=0x35e32429
+OPERANDS div32 0x50AC0001 rne 7 a=0x6d05edf1 b=0x14d2fd9e
+OPERANDS div32 0x50AC0001 rne 8 a=0x7f2edd5a b=0xd1ccdf55
+OPERANDS div32 0x50AC0001 rne 9 a=0x10a6710c b=0xb75f4893
+OPERANDS div32 0x50AC0001 rne 10 a=0x7545a927 b=0x89bad1e2
+OPERANDS div32 0x50AC0001 rne 11 a=0xc34fcbb8 b=0xb9ebf49b
+OPERANDS div32 0x50AC0001 rne 12 a=0xc2dc6df9 b=0xf92960f4
+OPERANDS div32 0x50AC0001 rne 13 a=0xd0690d6b b=0x8914223a
+OPERANDS div32 0x50AC0001 rne 14 a=0x922050f7 b=0x814d2d8d
+OPERANDS div32 0x50AC0001 rne 15 a=0x8197a3ff b=0x271b5fae
+CHECK div32 seed 0x50AC0001: 16 lanes named                      16 = 16  ok
+CHECK div32 seed 0x50AC0001: second run of the same seed         IDENTICAL = IDENTICAL  ok
+CHECK div32 seed 0x50AC0001: rtz gives the rne operands          IDENTICAL = IDENTICAL  ok
+OPERANDS div32 0x50AC1F20 rne 0 a=0xa650af5f b=0x37d6d5f2
+OPERANDS div32 0x50AC1F20 rne 1 a=0xfe0500ad b=0xa156b12b
+OPERANDS div32 0x50AC1F20 rne 2 a=0x82e2aaa4 b=0x01772c3c
+OPERANDS div32 0x50AC1F20 rne 3 a=0xd24dcc52 b=0x339a99cc
+OPERANDS div32 0x50AC1F20 rne 4 a=0x76f77880 b=0x340b675d
+OPERANDS div32 0x50AC1F20 rne 5 a=0x3a1b3c1e b=0x92dbabfd
+OPERANDS div32 0x50AC1F20 rne 6 a=0xe04387ed b=0x5f4e4595
+OPERANDS div32 0x50AC1F20 rne 7 a=0x122f15e6 b=0x809010e9
+OPERANDS div32 0x50AC1F20 rne 8 a=0xddb44436 b=0xcc4ca77c
+OPERANDS div32 0x50AC1F20 rne 9 a=0xdf4c8170 b=0x8b5d287a
+OPERANDS div32 0x50AC1F20 rne 10 a=0xc0ec13b3 b=0xad24c3b2
+OPERANDS div32 0x50AC1F20 rne 11 a=0x0dbd8fb8 b=0x4062ab52
+OPERANDS div32 0x50AC1F20 rne 12 a=0x1da1d267 b=0x758bc113
+OPERANDS div32 0x50AC1F20 rne 13 a=0x55aa67f5 b=0x1b759426
+OPERANDS div32 0x50AC1F20 rne 14 a=0x09bba863 b=0x80106a7c
+OPERANDS div32 0x50AC1F20 rne 15 a=0xc06f8882 b=0xff7ce5bd
+CHECK div32 seed 0x50AC1F20: 16 lanes named                      16 = 16  ok
+CHECK div32 seed 0x50AC1F20: second run of the same seed         IDENTICAL = IDENTICAL  ok
+CHECK div32 seed 0x50AC1F20: rtz gives the rne operands          IDENTICAL = IDENTICAL  ok
+OPERANDS div32 0x50AC0007 rne 0 a=0x8003b9c7 b=0x6e90856f
+OPERANDS div32 0x50AC0007 rne 1 a=0xd17f40da b=0x3314df8a
+OPERANDS div32 0x50AC0007 rne 2 a=0x5a84655c b=0x13788063
+OPERANDS div32 0x50AC0007 rne 3 a=0x32766970 b=0x7e9d3491
+OPERANDS div32 0x50AC0007 rne 4 a=0x7f22c35e b=0x07964cde
+OPERANDS div32 0x50AC0007 rne 5 a=0xc05eb928 b=0xc1a25a46
+OPERANDS div32 0x50AC0007 rne 6 a=0x8ef4e56c b=0x1bc89d89
+OPERANDS div32 0x50AC0007 rne 7 a=0x5a49a8ef b=0x8d47d23e
+OPERANDS div32 0x50AC0007 rne 8 a=0x3ff660be b=0x81b88cf8
+OPERANDS div32 0x50AC0007 rne 9 a=0x473c9026 b=0x0963fd47
+OPERANDS div32 0x50AC0007 rne 10 a=0xd5ee4d2b b=0xe14a6447
+OPERANDS div32 0x50AC0007 rne 11 a=0xff58bc8d b=0x127c4190
+OPERANDS div32 0x50AC0007 rne 12 a=0x71e94069 b=0xd816a9b8
+OPERANDS div32 0x50AC0007 rne 13 a=0xb5ebebfe b=0x491e67ee
+OPERANDS div32 0x50AC0007 rne 14 a=0x40893c20 b=0x7f04e664
+OPERANDS div32 0x50AC0007 rne 15 a=0x769e18cb b=0x4d378856
+CHECK div32 seed 0x50AC0007: 16 lanes named                      16 = 16  ok
+CHECK div32 seed 0x50AC0007: second run of the same seed         IDENTICAL = IDENTICAL  ok
+CHECK div32 seed 0x50AC0007: rtz gives the rne operands          IDENTICAL = IDENTICAL  ok
+OPERANDS div64 0x50AC0001 rne 0 a=0x1403fc1b0b8f7841 b=0x8041793e8066921c
+OPERANDS div64 0x50AC0001 rne 1 a=0x715a04c3cca6447a b=0x1132450bc3ef005e
+OPERANDS div64 0x50AC0001 rne 2 a=0x23e2e0cbafc4804d b=0xad1a375938eec839
+OPERANDS div64 0x50AC0001 rne 3 a=0x28247ce4a50811de b=0xff737f2547868651
+OPERANDS div64 0x50AC0001 rne 4 a=0xf5febc057f76e823 b=0xc4b8530df5e1e129
+OPERANDS div64 0x50AC0001 rne 5 a=0x6f12aadf5bc400fa b=0x8782b67580b73d57
+OPERANDS div64 0x50AC0001 rne 6 a=0x3ff445021eb5ee60 b=0x595831a935e32429
+OPERANDS div64 0x50AC0001 rne 7 a=0x602decc26d05edf1 b=0x3c0d0b6914d2fd9e
+OPERANDS div64 0x50AC0001 rne 8 a=0xffe1048d46aedd5a b=0xa6934027d1ccdf55
+OPERANDS div64 0x50AC0001 rne 9 a=0x2007e03a10a6710c b=0x833d9aa4b75f4893
+OPERANDS div64 0x50AC0001 rne 10 a=0x92c6249b7545a927 b=0x58d0d9fa89bad1e2
+OPERANDS div64 0x50AC0001 rne 11 a=0x2a3bc787c34fcbb8 b=0xf3ff0e1fb9ebf49b
+OPERANDS div64 0x50AC0001 rne 12 a=0x4374024ac2dc6df9 b=0xbd4171d3f92960f4
+OPERANDS div64 0x50AC0001 rne 13 a=0xcebd7b6ad0690d6b b=0xc946d0458914223a
+OPERANDS div64 0x50AC0001 rne 14 a=0xf4435e98922050f7 b=0x28f451c0814d2d8d
+OPERANDS div64 0x50AC0001 rne 15 a=0x803a214f9097a3ff b=0x35184828271b5fae
+CHECK div64 seed 0x50AC0001: 16 lanes named                      16 = 16  ok
+CHECK div64 seed 0x50AC0001: second run of the same seed         IDENTICAL = IDENTICAL  ok
+CHECK div64 seed 0x50AC0001: rtz gives the rne operands          IDENTICAL = IDENTICAL  ok
+OPERANDS div64 0x50AC1F20 rne 0 a=0x1403fbdca650af5f b=0x187864c137d6d5f2
+OPERANDS div64 0x50AC1F20 rne 1 a=0x7fc91f10a18500ad b=0x7a39eb29a156b12b
+OPERANDS div64 0x50AC1F20 rne 2 a=0x3699f98f82e2aaa4 b=0x002df19f56772c3c
+OPERANDS div64 0x50AC1F20 rne 3 a=0xdf57c944d24dcc52 b=0xc74f093c339a99cc
+OPERANDS div64 0x50AC1F20 rne 4 a=0x2f6faf5d76f77880 b=0x0fdf9519340b675d
+OPERANDS div64 0x50AC1F20 rne 5 a=0xdbdbd4c03a1b3c1e b=0x16f81b0992dbabfd
+OPERANDS div64 0x50AC1F20 rne 6 a=0xdf7708dce04387ed b=0xb4fb834e5f4e4595
+OPERANDS div64 0x50AC1F20 rne 7 a=0x57753bd8122f15e6 b=0x001dc8dffc1010e9
+OPERANDS div64 0x50AC1F20 rne 8 a=0x8c025f6eddb44436 b=0x55b12e5dcc4ca77c
+OPERANDS div64 0x50AC1F20 rne 9 a=0x158db301df4c8170 b=0xd0774b2d8b5d287a
+OPERANDS div64 0x50AC1F20 rne 10 a=0x40114829cd6c13b3 b=0x75472328ad24c3b2
+OPERANDS div64 0x50AC1F20 rne 11 a=0x799581090dbd8fb8 b=0xc002dcf30962ab52
+OPERANDS div64 0x50AC1F20 rne 12 a=0x8a243c431da1d267 b=0x22ab960c758bc113
+OPERANDS div64 0x50AC1F20 rne 13 a=0x13e57b2855aa67f5 b=0xe520e8e31b759426
+OPERANDS div64 0x50AC1F20 rne 14 a=0xffbeda0b09bba863 b=0x0001e339cf106a7c
+OPERANDS div64 0x50AC1F20 rne 15 a=0x3d0555e6c06f8882 b=0xf628d523ff7ce5bd
+CHECK div64 seed 0x50AC1F20: 16 lanes named                      16 = 16  ok
+CHECK div64 seed 0x50AC1F20: second run of the same seed         IDENTICAL = IDENTICAL  ok
+CHECK div64 seed 0x50AC1F20: rtz gives the rne operands          IDENTICAL = IDENTICAL  ok
+OPERANDS div64 0x50AC0007 rne 0 a=0x0003fc1a8883b9c7 b=0x05b888ee6e90856f
+OPERANDS div64 0x50AC0007 rne 1 a=0x9baf6999d17f40da b=0xbbf3a91a3314df8a
+OPERANDS div64 0x50AC0007 rne 2 a=0xca4673ea5a84655c b=0x48d28f4213788063
+OPERANDS div64 0x50AC0007 rne 3 a=0xdfd9faff32766970 b=0xffd65d5f6f1d3491
+OPERANDS div64 0x50AC0007 rne 4 a=0xffed1ce40ba2c35e b=0xd0ecb8c107964cde
+OPERANDS div64 0x50AC0007 rne 5 a=0xa477269bc05eb928 b=0x27a9b8bcc1a25a46
+OPERANDS div64 0x50AC0007 rne 6 a=0x9924d6da8ef4e56c b=0x47c0df161bc89d89
+OPERANDS div64 0x50AC0007 rne 7 a=0x7c9e00605a49a8ef b=0x1ea479e48d47d23e
+OPERANDS div64 0x50AC0007 rne 8 a=0x758776113ff660be b=0x6e3da99281b88cf8
+OPERANDS div64 0x50AC0007 rne 9 a=0x174b8bd7473c9026 b=0x2cc1c5d60963fd47
+OPERANDS div64 0x50AC0007 rne 10 a=0xab677d1dd5ee4d2b b=0x6b7d35f5e14a6447
+OPERANDS div64 0x50AC0007 rne 11 a=0xffecedb2f4d8bc8d b=0xe6861fe3127c4190
+OPERANDS div64 0x50AC0007 rne 12 a=0xfbd6747e71e94069 b=0x42e5efd9d816a9b8
+OPERANDS div64 0x50AC0007 rne 13 a=0x6fa03c92b5ebebfe b=0xd914095a491e67ee
+OPERANDS div64 0x50AC0007 rne 14 a=0x401850853a093c20 b=0xffebb0364e84e664
+OPERANDS div64 0x50AC0007 rne 15 a=0x93bcc989769e18cb b=0x49fde9294d378856
+CHECK div64 seed 0x50AC0007: 16 lanes named                      16 = 16  ok
+CHECK div64 seed 0x50AC0007: second run of the same seed         IDENTICAL = IDENTICAL  ok
+CHECK div64 seed 0x50AC0007: rtz gives the rne operands          IDENTICAL = IDENTICAL  ok
+OPERANDS sqrt64 0x50AC0001 rne 0 a=0x1403fc1b0b8f7841
+OPERANDS sqrt64 0x50AC0001 rne 1 a=0x715a04c3cca6447a
+OPERANDS sqrt64 0x50AC0001 rne 2 a=0x1132450bc3ef005e
+OPERANDS sqrt64 0x50AC0001 rne 3 a=0x23e2e0cbafc4804d
+OPERANDS sqrt64 0x50AC0001 rne 4 a=0x28247ce4a50811de
+OPERANDS sqrt64 0x50AC0001 rne 5 a=0x6f12aadf5bc400fa
+OPERANDS sqrt64 0x50AC0001 rne 6 a=0x3ff445021eb5ee60
+OPERANDS sqrt64 0x50AC0001 rne 7 a=0x595831a935e32429
+OPERANDS sqrt64 0x50AC0001 rne 8 a=0x602decc26d05edf1
+OPERANDS sqrt64 0x50AC0001 rne 9 a=0x3c0d0b6914d2fd9e
+OPERANDS sqrt64 0x50AC0001 rne 10 a=0x2007e03a10a6710c
+OPERANDS sqrt64 0x50AC0001 rne 11 a=0x58d0d9fa89bad1e2
+OPERANDS sqrt64 0x50AC0001 rne 12 a=0x2a3bc787c34fcbb8
+OPERANDS sqrt64 0x50AC0001 rne 13 a=0x4374024ac2dc6df9
+OPERANDS sqrt64 0x50AC0001 rne 14 a=0x28f451c0814d2d8d
+OPERANDS sqrt64 0x50AC0001 rne 15 a=0x35184828271b5fae
+CHECK sqrt64 seed 0x50AC0001: 16 lanes named                     16 = 16  ok
+CHECK sqrt64 seed 0x50AC0001: second run of the same seed        IDENTICAL = IDENTICAL  ok
+CHECK sqrt64 seed 0x50AC0001: rtz gives the rne operands         IDENTICAL = IDENTICAL  ok
+OPERANDS sqrt64 0x50AC1F20 rne 0 a=0x1403fbdca650af5f
+OPERANDS sqrt64 0x50AC1F20 rne 1 a=0x187864c137d6d5f2
+OPERANDS sqrt64 0x50AC1F20 rne 2 a=0x7fc91f10a18500ad
+OPERANDS sqrt64 0x50AC1F20 rne 3 a=0x7a39eb29a156b12b
+OPERANDS sqrt64 0x50AC1F20 rne 4 a=0x3699f98f82e2aaa4
+OPERANDS sqrt64 0x50AC1F20 rne 5 a=0x002df19f56772c3c
+OPERANDS sqrt64 0x50AC1F20 rne 6 a=0x2f6faf5d76f77880
+OPERANDS sqrt64 0x50AC1F20 rne 7 a=0x0fdf9519340b675d
+OPERANDS sqrt64 0x50AC1F20 rne 8 a=0x16f81b0992dbabfd
+OPERANDS sqrt64 0x50AC1F20 rne 9 a=0x57753bd8122f15e6
+OPERANDS sqrt64 0x50AC1F20 rne 10 a=0x001dc8dffc1010e9
+OPERANDS sqrt64 0x50AC1F20 rne 11 a=0x55b12e5dcc4ca77c
+OPERANDS sqrt64 0x50AC1F20 rne 12 a=0x158db301df4c8170
+OPERANDS sqrt64 0x50AC1F20 rne 13 a=0x40114829cd6c13b3
+OPERANDS sqrt64 0x50AC1F20 rne 14 a=0x75472328ad24c3b2
+OPERANDS sqrt64 0x50AC1F20 rne 15 a=0x799581090dbd8fb8
+CHECK sqrt64 seed 0x50AC1F20: 16 lanes named                     16 = 16  ok
+CHECK sqrt64 seed 0x50AC1F20: second run of the same seed        IDENTICAL = IDENTICAL  ok
+CHECK sqrt64 seed 0x50AC1F20: rtz gives the rne operands         IDENTICAL = IDENTICAL  ok
+OPERANDS sqrt64 0x50AC0007 rne 0 a=0x0003fc1a8883b9c7
+OPERANDS sqrt64 0x50AC0007 rne 1 a=0x05b888ee6e90856f
+OPERANDS sqrt64 0x50AC0007 rne 2 a=0x48d28f4213788063
+OPERANDS sqrt64 0x50AC0007 rne 3 a=0x27a9b8bcc1a25a46
+OPERANDS sqrt64 0x50AC0007 rne 4 a=0x47c0df161bc89d89
+OPERANDS sqrt64 0x50AC0007 rne 5 a=0x7c9e00605a49a8ef
+OPERANDS sqrt64 0x50AC0007 rne 6 a=0x1ea479e48d47d23e
+OPERANDS sqrt64 0x50AC0007 rne 7 a=0x758776113ff660be
+OPERANDS sqrt64 0x50AC0007 rne 8 a=0x6e3da99281b88cf8
+OPERANDS sqrt64 0x50AC0007 rne 9 a=0x174b8bd7473c9026
+OPERANDS sqrt64 0x50AC0007 rne 10 a=0x2cc1c5d60963fd47
+OPERANDS sqrt64 0x50AC0007 rne 11 a=0x6b7d35f5e14a6447
+OPERANDS sqrt64 0x50AC0007 rne 12 a=0x42e5efd9d816a9b8
+OPERANDS sqrt64 0x50AC0007 rne 13 a=0x6fa03c92b5ebebfe
+OPERANDS sqrt64 0x50AC0007 rne 14 a=0x401850853a093c20
+OPERANDS sqrt64 0x50AC0007 rne 15 a=0x49fde9294d378856
+CHECK sqrt64 seed 0x50AC0007: 16 lanes named                     16 = 16  ok
+CHECK sqrt64 seed 0x50AC0007: second run of the same seed        IDENTICAL = IDENTICAL  ok
+CHECK sqrt64 seed 0x50AC0007: rtz gives the rne operands         IDENTICAL = IDENTICAL  ok
+
+== C. rng_state = seed | 1: seeds 2k and 2k+1 are one stream
+CHECK div32 seeds 0x50AC0002 and 0x50AC0003                      IDENTICAL = IDENTICAL  ok
+CHECK div32 seeds 0x50AC0003 and 0x50AC0004                      DIFFERENT = DIFFERENT  ok
+OPERANDS div32 0x50AC0002 rne 0 a=0x8a8b38c3 b=0x5568fa0e
+OPERANDS div32 0x50AC0002 rne 1 a=0xf358a42a b=0xdc104bdd
+OPERANDS div32 0x50AC0002 rne 2 a=0x7f32d4f2 b=0x7d957880
+OPERANDS div32 0x50AC0002 rne 3 a=0xfe394ad5 b=0x3fad1b1e
+OPERANDS div32 0x50AC0002 rne 4 a=0x01e435b3 b=0x5615c72f
+OPERANDS div32 0x50AC0002 rne 5 a=0x0c541211 b=0x71f0e309
+OPERANDS div32 0x50AC0002 rne 6 a=0x00e58a8e b=0x2b25069f
+OPERANDS div32 0x50AC0002 rne 7 a=0x970515c4 b=0x1622a4f2
+OPERANDS div32 0x50AC0002 rne 8 a=0x01f92cc1 b=0x8e8dc262
+OPERANDS div32 0x50AC0002 rne 9 a=0xb0b458e4 b=0x07c59707
+OPERANDS div32 0x50AC0002 rne 10 a=0x10485dd2 b=0x08708c5a
+OPERANDS div32 0x50AC0002 rne 11 a=0x17cc1335 b=0x1e965d5f
+OPERANDS div32 0x50AC0002 rne 12 a=0x81d65f6d b=0x80eedf42
+OPERANDS div32 0x50AC0002 rne 13 a=0x5bfc0557 b=0x919c7b4c
+OPERANDS div32 0x50AC0002 rne 14 a=0x3cf6e446 b=0x8a1e5e3e
+OPERANDS div32 0x50AC0002 rne 15 a=0x79bb91d8 b=0x7efe0d1a
+OPERANDS div32 0x50AC0003 rne 0 a=0x8a8b38c3 b=0x5568fa0e
+OPERANDS div32 0x50AC0003 rne 1 a=0xf358a42a b=0xdc104bdd
+OPERANDS div32 0x50AC0003 rne 2 a=0x7f32d4f2 b=0x7d957880
+OPERANDS div32 0x50AC0003 rne 3 a=0xfe394ad5 b=0x3fad1b1e
+OPERANDS div32 0x50AC0003 rne 4 a=0x01e435b3 b=0x5615c72f
+OPERANDS div32 0x50AC0003 rne 5 a=0x0c541211 b=0x71f0e309
+OPERANDS div32 0x50AC0003 rne 6 a=0x00e58a8e b=0x2b25069f
+OPERANDS div32 0x50AC0003 rne 7 a=0x970515c4 b=0x1622a4f2
+OPERANDS div32 0x50AC0003 rne 8 a=0x01f92cc1 b=0x8e8dc262
+OPERANDS div32 0x50AC0003 rne 9 a=0xb0b458e4 b=0x07c59707
+OPERANDS div32 0x50AC0003 rne 10 a=0x10485dd2 b=0x08708c5a
+OPERANDS div32 0x50AC0003 rne 11 a=0x17cc1335 b=0x1e965d5f
+OPERANDS div32 0x50AC0003 rne 12 a=0x81d65f6d b=0x80eedf42
+OPERANDS div32 0x50AC0003 rne 13 a=0x5bfc0557 b=0x919c7b4c
+OPERANDS div32 0x50AC0003 rne 14 a=0x3cf6e446 b=0x8a1e5e3e
+OPERANDS div32 0x50AC0003 rne 15 a=0x79bb91d8 b=0x7efe0d1a
+OPERANDS div32 0x50AC0004 rne 0 a=0x0987f945 b=0x7f7a4238
+OPERANDS div32 0x50AC0004 rne 1 a=0xc1c94f7d b=0xff490b26
+OPERANDS div32 0x50AC0004 rne 2 a=0xb72f028f b=0x034405f4
+OPERANDS div32 0x50AC0004 rne 3 a=0x7936a9de b=0xbeee8eab
+OPERANDS div32 0x50AC0004 rne 4 a=0xaba717c4 b=0xa118447a
+OPERANDS div32 0x50AC0004 rne 5 a=0xd134b6a6 b=0x0258b7e7
+OPERANDS div32 0x50AC0004 rne 6 a=0xd9426f40 b=0x7a996269
+OPERANDS div32 0x50AC0004 rne 7 a=0x016bb678 b=0xc59c976d
+OPERANDS div32 0x50AC0004 rne 8 a=0xc7714669 b=0x41b845d8
+OPERANDS div32 0x50AC0004 rne 9 a=0xfbc59915 b=0xa5babf49
+OPERANDS div32 0x50AC0004 rne 10 a=0xbffd77c7 b=0xe3f50f35
+OPERANDS div32 0x50AC0004 rne 11 a=0xc06871bb b=0x1fb3b7e6
+OPERANDS div32 0x50AC0004 rne 12 a=0x2269949b b=0x706563f0
+OPERANDS div32 0x50AC0004 rne 13 a=0x916b625d b=0x5a11849e
+OPERANDS div32 0x50AC0004 rne 14 a=0x9cc55757 b=0xcecea5a9
+OPERANDS div32 0x50AC0004 rne 15 a=0x86178cc7 b=0xfe958d7a
+CHECK div64 seeds 0x50AC0002 and 0x50AC0003                      IDENTICAL = IDENTICAL  ok
+CHECK div64 seeds 0x50AC0003 and 0x50AC0004                      DIFFERENT = DIFFERENT  ok
+OPERANDS div64 0x50AC0002 rne 0 a=0x1403fc1b8a8b38c3 b=0xf84cf0645568fa0e
+OPERANDS div64 0x50AC0002 rne 1 a=0x595dc742f358a42a b=0xd80ee0e7dc104bdd
+OPERANDS div64 0x50AC0002 rne 2 a=0x3fbc4ffa7f32d4f2 b=0x61338fa97d957880
+OPERANDS div64 0x50AC0002 rne 3 a=0xffc4f20b9cb94ad5 b=0x3ffd4d2b51ad1b1e
+OPERANDS div64 0x50AC0002 rne 4 a=0x803c431955e435b3 b=0xc7bfd0b55615c72f
+OPERANDS div64 0x50AC0002 rne 5 a=0x4810b4210c541211 b=0xe8ae08c971f0e309
+OPERANDS div64 0x50AC0002 rne 6 a=0x8e2424da00e58a8e b=0x2bed80122b25069f
+OPERANDS div64 0x50AC0002 rne 7 a=0x9aa5ee1e970515c4 b=0x61c61a651622a4f2
+OPERANDS div64 0x50AC0002 rne 8 a=0x803e458945f92cc1 b=0x9a1296878e8dc262
+OPERANDS div64 0x50AC0002 rne 9 a=0x349db2bfb0b458e4 b=0xe82b46bf07c59707
+OPERANDS div64 0x50AC0002 rne 10 a=0x3b6fe77910485dd2 b=0x7d291bde08708c5a
+OPERANDS div64 0x50AC0002 rne 11 a=0x8514a11a17cc1335 b=0xff8c61061e965d5f
+OPERANDS div64 0x50AC0002 rne 12 a=0xf0ebcc7381d65f6d b=0x801623b4f9eedf42
+OPERANDS div64 0x50AC0002 rne 13 a=0xaa38af8d5bfc0557 b=0x2cc11ff5919c7b4c
+OPERANDS div64 0x50AC0002 rne 14 a=0x18c72c2b3cf6e446 b=0x7eefbf918a1e5e3e
+OPERANDS div64 0x50AC0002 rne 15 a=0x00a5429679bb91d8 b=0x7fd54db472fe0d1a
+OPERANDS div64 0x50AC0003 rne 0 a=0x1403fc1b8a8b38c3 b=0xf84cf0645568fa0e
+OPERANDS div64 0x50AC0003 rne 1 a=0x595dc742f358a42a b=0xd80ee0e7dc104bdd
+OPERANDS div64 0x50AC0003 rne 2 a=0x3fbc4ffa7f32d4f2 b=0x61338fa97d957880
+OPERANDS div64 0x50AC0003 rne 3 a=0xffc4f20b9cb94ad5 b=0x3ffd4d2b51ad1b1e
+OPERANDS div64 0x50AC0003 rne 4 a=0x803c431955e435b3 b=0xc7bfd0b55615c72f
+OPERANDS div64 0x50AC0003 rne 5 a=0x4810b4210c541211 b=0xe8ae08c971f0e309
+OPERANDS div64 0x50AC0003 rne 6 a=0x8e2424da00e58a8e b=0x2bed80122b25069f
+OPERANDS div64 0x50AC0003 rne 7 a=0x9aa5ee1e970515c4 b=0x61c61a651622a4f2
+OPERANDS div64 0x50AC0003 rne 8 a=0x803e458945f92cc1 b=0x9a1296878e8dc262
+OPERANDS div64 0x50AC0003 rne 9 a=0x349db2bfb0b458e4 b=0xe82b46bf07c59707
+OPERANDS div64 0x50AC0003 rne 10 a=0x3b6fe77910485dd2 b=0x7d291bde08708c5a
+OPERANDS div64 0x50AC0003 rne 11 a=0x8514a11a17cc1335 b=0xff8c61061e965d5f
+OPERANDS div64 0x50AC0003 rne 12 a=0xf0ebcc7381d65f6d b=0x801623b4f9eedf42
+OPERANDS div64 0x50AC0003 rne 13 a=0xaa38af8d5bfc0557 b=0x2cc11ff5919c7b4c
+OPERANDS div64 0x50AC0003 rne 14 a=0x18c72c2b3cf6e446 b=0x7eefbf918a1e5e3e
+OPERANDS div64 0x50AC0003 rne 15 a=0x00a5429679bb91d8 b=0x7fd54db472fe0d1a
+OPERANDS div64 0x50AC0004 rne 0 a=0x1403fc1a0987f945 b=0xffea6b8b2a7a4238
+OPERANDS div64 0x50AC0004 rne 1 a=0x32fb8dbdc1c94f7d b=0xffeda3eb8fc90b26
+OPERANDS div64 0x50AC0004 rne 2 a=0x738c4a10b72f028f b=0x0720848b034405f4
+OPERANDS div64 0x50AC0004 rne 3 a=0x2c286f517936a9de b=0x3e97f868beee8eab
+OPERANDS div64 0x50AC0004 rne 4 a=0xc6390cf0aba717c4 b=0x7320231aa118447a
+OPERANDS div64 0x50AC0004 rne 5 a=0x90d1de01d134b6a6 b=0x00493d112258b7e7
+OPERANDS div64 0x50AC0004 rne 6 a=0x21ccdd4bd9426f40 b=0x6ffd87f57a996269
+OPERANDS div64 0x50AC0004 rne 7 a=0x802d03c03f6bb678 b=0x5a7b59e6c59c976d
+OPERANDS div64 0x50AC0004 rne 8 a=0x520b07abc7714669 b=0x568a718841b845d8
+OPERANDS div64 0x50AC0004 rne 9 a=0x58c21afbfbc59915 b=0x2a0f5d0ca5babf49
+OPERANDS div64 0x50AC0004 rne 10 a=0xbfff7a88e67d77c7 b=0xc671fffbe3f50f35
+OPERANDS div64 0x50AC0004 rne 11 a=0xc00dfad0c0e871bb b=0x094c35a91fb3b7e6
+OPERANDS div64 0x50AC0004 rne 12 a=0x596a8dd12269949b b=0xca19f3cc706563f0
+OPERANDS div64 0x50AC0004 rne 13 a=0xf8457057916b625d b=0x4f65c7a75a11849e
+OPERANDS div64 0x50AC0004 rne 14 a=0x02d2e4df9cc55757 b=0x96bd05a0cecea5a9
+OPERANDS div64 0x50AC0004 rne 15 a=0x7ade7a3386178cc7 b=0x7fdf22f0fa158d7a
+CHECK sqrt64 seeds 0x50AC0002 and 0x50AC0003                     IDENTICAL = IDENTICAL  ok
+CHECK sqrt64 seeds 0x50AC0003 and 0x50AC0004                     DIFFERENT = DIFFERENT  ok
+OPERANDS sqrt64 0x50AC0002 rne 0 a=0x1403fc1b8a8b38c3
+OPERANDS sqrt64 0x50AC0002 rne 1 a=0x595dc742f358a42a
+OPERANDS sqrt64 0x50AC0002 rne 2 a=0x3fbc4ffa7f32d4f2
+OPERANDS sqrt64 0x50AC0002 rne 3 a=0x61338fa97d957880
+OPERANDS sqrt64 0x50AC0002 rne 4 a=0x3ffd4d2b51ad1b1e
+OPERANDS sqrt64 0x50AC0002 rne 5 a=0x4810b4210c541211
+OPERANDS sqrt64 0x50AC0002 rne 6 a=0x2bed80122b25069f
+OPERANDS sqrt64 0x50AC0002 rne 7 a=0x61c61a651622a4f2
+OPERANDS sqrt64 0x50AC0002 rne 8 a=0x349db2bfb0b458e4
+OPERANDS sqrt64 0x50AC0002 rne 9 a=0x3b6fe77910485dd2
+OPERANDS sqrt64 0x50AC0002 rne 10 a=0x7d291bde08708c5a
+OPERANDS sqrt64 0x50AC0002 rne 11 a=0x2cc11ff5919c7b4c
+OPERANDS sqrt64 0x50AC0002 rne 12 a=0x18c72c2b3cf6e446
+OPERANDS sqrt64 0x50AC0002 rne 13 a=0x7eefbf918a1e5e3e
+OPERANDS sqrt64 0x50AC0002 rne 14 a=0x00a5429679bb91d8
+OPERANDS sqrt64 0x50AC0002 rne 15 a=0x7fd54db472fe0d1a
+OPERANDS sqrt64 0x50AC0003 rne 0 a=0x1403fc1b8a8b38c3
+OPERANDS sqrt64 0x50AC0003 rne 1 a=0x595dc742f358a42a
+OPERANDS sqrt64 0x50AC0003 rne 2 a=0x3fbc4ffa7f32d4f2
+OPERANDS sqrt64 0x50AC0003 rne 3 a=0x61338fa97d957880
+OPERANDS sqrt64 0x50AC0003 rne 4 a=0x3ffd4d2b51ad1b1e
+OPERANDS sqrt64 0x50AC0003 rne 5 a=0x4810b4210c541211
+OPERANDS sqrt64 0x50AC0003 rne 6 a=0x2bed80122b25069f
+OPERANDS sqrt64 0x50AC0003 rne 7 a=0x61c61a651622a4f2
+OPERANDS sqrt64 0x50AC0003 rne 8 a=0x349db2bfb0b458e4
+OPERANDS sqrt64 0x50AC0003 rne 9 a=0x3b6fe77910485dd2
+OPERANDS sqrt64 0x50AC0003 rne 10 a=0x7d291bde08708c5a
+OPERANDS sqrt64 0x50AC0003 rne 11 a=0x2cc11ff5919c7b4c
+OPERANDS sqrt64 0x50AC0003 rne 12 a=0x18c72c2b3cf6e446
+OPERANDS sqrt64 0x50AC0003 rne 13 a=0x7eefbf918a1e5e3e
+OPERANDS sqrt64 0x50AC0003 rne 14 a=0x00a5429679bb91d8
+OPERANDS sqrt64 0x50AC0003 rne 15 a=0x7fd54db472fe0d1a
+OPERANDS sqrt64 0x50AC0004 rne 0 a=0x1403fc1a0987f945
+OPERANDS sqrt64 0x50AC0004 rne 1 a=0x32fb8dbdc1c94f7d
+OPERANDS sqrt64 0x50AC0004 rne 2 a=0x738c4a10b72f028f
+OPERANDS sqrt64 0x50AC0004 rne 3 a=0x0720848b034405f4
+OPERANDS sqrt64 0x50AC0004 rne 4 a=0x2c286f517936a9de
+OPERANDS sqrt64 0x50AC0004 rne 5 a=0x3e97f868beee8eab
+OPERANDS sqrt64 0x50AC0004 rne 6 a=0x7320231aa118447a
+OPERANDS sqrt64 0x50AC0004 rne 7 a=0x00493d112258b7e7
+OPERANDS sqrt64 0x50AC0004 rne 8 a=0x21ccdd4bd9426f40
+OPERANDS sqrt64 0x50AC0004 rne 9 a=0x6ffd87f57a996269
+OPERANDS sqrt64 0x50AC0004 rne 10 a=0x5a7b59e6c59c976d
+OPERANDS sqrt64 0x50AC0004 rne 11 a=0x520b07abc7714669
+OPERANDS sqrt64 0x50AC0004 rne 12 a=0x568a718841b845d8
+OPERANDS sqrt64 0x50AC0004 rne 13 a=0x58c21afbfbc59915
+OPERANDS sqrt64 0x50AC0004 rne 14 a=0x2a0f5d0ca5babf49
+OPERANDS sqrt64 0x50AC0004 rne 15 a=0x094c35a91fb3b7e6
+
+tool_probe: every CHECK held

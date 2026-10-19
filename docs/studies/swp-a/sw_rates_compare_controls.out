@@ -1,0 +1,8 @@
+CONTROL D1 class64's software rate cut to 1% (a host job 100x off)     red at the check written for it
+        CHECK every host job's software/card ratio lies in [0.5, 2.5]                            FAILED [('class64', 0.02)]
+CONTROL D2 div32's software rate raised 20x (a tile job no slower than the card) red at the check written for it
+        CHECK every tile job's software/card ratio is below 0.5 (the card is at least 2x faster) FAILED [('div32-rne', 1.54)]
+CONTROL D3 a job missing                                               red at the check written for it
+        CHECK 24 jobs were measured on the software backend (18 random, 6 exhaustive)            FAILED (23)
+
+sw_rates_compare controls: all three tampered inputs were caught at their checks

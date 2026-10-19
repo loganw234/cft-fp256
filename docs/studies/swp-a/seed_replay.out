@@ -1,0 +1,50 @@
+== the three invocations (stand-in tools; dry run, no card)
+A: card_stress.py --dry-run --quick --out WORK/replay-A
+A: rc 0 in 160 s; last line: card-stress ends: quick_done (exit 0); the card is left idle (no process of this run is alive)
+B: card_stress.py --dry-run --quick --out WORK/replay-B        (a NEW directory)
+B: rc 0 in 130 s; last line: card-stress ends: quick_done (exit 0); the card is left idle (no process of this run is alive)
+C: card_stress.py --dry-run --quick --resume --out WORK/replay-A  (A, continued)
+C: rc 0 in 164 s; last line: card-stress ends: quick_done (exit 0); the card is left idle (no process of this run is alive)
+
+== what the records say
+sweep legs read:  A first invocation 8, A resumed 8, B 8
+
+  invocation  image   item          seed_n  seed         lo       hi
+  A.1         quad    sqrt32-rne    -       -            0        262144 
+  A.1         quad    rint32-rne    -       -            0        262144 
+  A.1         quad    div32-rne     0       1353449473   -        -      
+  A.1         quad    nextup32      -       -            0        262144 
+  A.1         single  sqrt32-rne    -       -            262144   524288 
+  A.1         single  rint32-rne    -       -            262144   524288 
+  A.1         deep    sqrt32-rne    -       -            524288   786432 
+  A.1         deep    rint32-rne    -       -            524288   786432 
+  B           quad    sqrt32-rne    -       -            0        262144 
+  B           quad    rint32-rne    -       -            0        262144 
+  B           quad    div32-rne     0       1353449473   -        -      
+  B           quad    nextup32      -       -            0        262144 
+  B           single  sqrt32-rne    -       -            262144   524288 
+  B           single  rint32-rne    -       -            262144   524288 
+  B           deep    sqrt32-rne    -       -            524288   786432 
+  B           deep    rint32-rne    -       -            524288   786432 
+  A.2         quad    sqrt32-rne    -       -            786432   1048576
+  A.2         quad    rint32-rne    -       -            786432   1048576
+  A.2         quad    div32-rne     1       1353457392   -        -      
+  A.2         quad    nextup32      -       -            262144   524288 
+  A.2         single  sqrt32-rne    -       -            1048576  1310720
+  A.2         single  rint32-rne    -       -            1048576  1310720
+  A.2         deep    sqrt32-rne    -       -            1310720  1572864
+  A.2         deep    rint32-rne    -       -            1310720  1572864
+
+CHECK both fresh runs served the same number of sweep legs               ok (8, 8)
+CHECK B (a new --out) served exactly A's first invocation's slices       ok 
+CHECK there is at least one random item in the runs                      ok (div32-rne)
+CHECK every random item in B started at seed_n = 0                       ok 
+CHECK every exhaustive item in B started at lo = 0 (its first slice)     ok 
+CHECK A resumed: div32-rne seed_n 0 -> 1                                 ok 
+CHECK A resumed: div32-rne seed = first seed + 7919 x seed_n             ok (1353457392)
+CHECK A resumed: nextup32 starts where A's slices ended (262144)         ok 
+CHECK A resumed: rint32-rne starts where A's slices ended (786432)       ok 
+CHECK A resumed: sqrt32-rne starts where A's slices ended (786432)       ok 
+CHECK CONTROL: B with div32-rne's seed moved by one is NOT a replay of A ok 
+
+seed_replay_check: every CHECK held

@@ -1,0 +1,43 @@
+seed_audit.py: the soak tools' operand streams and the stress driver's seed schedule
+
+== 1. THE PORT, held to the real tools' operands (tool_probe.out)
+CHECK tool_probe.out holds the tools' operands: 3 operations x (3 seeds in B + 3 in C) streams ok (18 streams)
+   evaluation order bands[rng() % 7] first : 18 of 18 streams match the tool (288 lanes)
+   evaluation order (rng() % 3) first      : 1 of 18 streams match the tool (288 lanes)
+CHECK one evaluation order reproduces every stream the tool printed, lane for lane           ok (18 of 18, 288 lanes)
+   the compiled tool (gcc 11.4, this tree's host/Makefile flags) drew bands[rng() % 7] first
+CHECK the other evaluation order does NOT match (the probe distinguishes the two orders)     ok (1 of 18)
+CHECK CONTROL: a port with the third shift 16 instead of 17 does not match the tool          ok (0 of 18)
+CHECK CONTROL: a port without `| 1` does not match every stream the tool printed             ok (9 of 18)
+CHECK the port gives seeds 0x50AC0002 and 0x50AC0003 one stream, and 0x50AC0003 and 0x50AC0004 two ok 
+CHECK CONTROL: without `| 1` the port gives those two seeds two streams                      ok 
+CHECK two slices that share a state (counts 5,000 and 8,000): the shorter is the longer's prefix ok 
+
+== 1b. DOES THE STREAM DEPEND ON THE COMPILER? (eval_order.out: the same source, built several ways)
+CHECK eval_order.out holds seven builds of 9 streams each                                    ok (7 builds)
+   build         bands-first (rng()%3)-first   neither
+   gcc11-O0           8 of 9         0 of 9         0
+   gcc11-O1           8 of 9         0 of 9         0
+   gcc11-O2           8 of 9         0 of 9         0
+   gcc11-O3           8 of 9         0 of 9         0
+   gcc12-O0           8 of 9         0 of 9         0
+   gcc12-O2           8 of 9         0 of 9         0
+   gcc12-O3           8 of 9         0 of 9         0
+CHECK every build's streams are reproduced by the port in ONE of the two orders (none unexplained) ok 
+   orders seen across the 7 builds: bands
+   -> every build here drew the same order; C still leaves it unspecified, so a build elsewhere may differ
+
+== 2. THE SCHEDULE: how many (item, n) slices start from a state another slice started from
+CHECK the driver's catalog has 54 random items                                               ok (54)
+   54 random items x n = 0 .. 56 (the stress run reached n = 56)
+   schedule                                               slices distinct shared states slices sharing
+   as run: seed = base + 7919 n, then | 1                   3078     1597         1481           2962
+   the same without the | 1 the tools apply                 3078     3078            0              0
+   A: (item << 40) | (n << 1) | 1                           3078     3078            0              0
+   B: mix64(key ^ (item << 32 | n)) | 1                     3078     3078            0              0
+CHECK as run, 96% or more of the slices share a state with another item's slice              ok (2962 of 3078)
+CHECK without the `| 1` the same seeds never collide (the collisions ARE the `| 1`)          ok 
+CHECK schedule A has no shared state                                                         ok 
+CHECK schedule B has no shared state                                                         ok 
+
+seed_audit: every CHECK held

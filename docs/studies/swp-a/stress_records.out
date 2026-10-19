@@ -1,0 +1,120 @@
+stress_records.py: the record is metrics.jsonl, 7982931 bytes, sha256 e7989f88efded691ea7461e921840d8de5d449e069980f6ba92e6a8f87e007cc
+CHECK the record's SHA-256 is the one given                                            ok 
+
+== 1. SUMMARY (final)
+   records 5108: build 1, cycle_end 67, cycle_start 67, event 20, leg 4086, run_end 1, run_start 1, telemetry 865
+   run_start: run id card-stress-1016 on amd-arc-box, first record 2026-10-16 18:58:23, resumed=False
+   run_end: reason deadline, exit 0, 67 cycles, at 2026-10-19 08:01:13
+   sweep slices with a verdict: 3287 (3038 random, 249 exhaustive); by image: deep 176, quad 2948, single 163
+   value mismatches 0, flag mismatches 0, slices with status fail 0
+   cases: 1,296,186,685,863 random, 60,129,542,440 exhaustive
+   random slices' size: 63 at the 2^20 probe, 2880 at the 2^28 cap, 95 other
+   share of the random COUNT in slices of the probe or cap size (a rerun's slice n has the same length): 98.8%
+CHECK (final) a run_end record exists and says exit 0                                  ok (deadline)
+CHECK (final) every sweep slice with a verdict passed: no disagreement in the record   ok 
+CHECK (final) 68 items: 54 random and 14 exhaustive                                    ok (54, 14)
+
+== 2. RATES: 182 (item, image) rows derived; the median is over slices of count (cases for the
+   exhaustive items) per second of the slice's own job time, as the lead's file defines it
+   written to the file named by --write-rates (182 rows + header)
+CHECK (final) all 68 items' slices and cases equal the report's tables exactly         ok []
+
+== 3. SEEDS: the formula, the counter, and the streams that start in the same place
+CHECK (final) every random slice's seed is hw/card_stress_lib.py's base_seed + 7919 n  ok (3038 slices; [])
+CHECK (final) each random item's slices are n = 0, 1, 2, ... with no gap and no repeat ok []
+CHECK (final) all 54 random items have slices; the highest seed_n of any is shown      ok (max seed_n 56)
+CHECK (final) no item repeats a starting state within itself                           ok 
+   slices 3038, distinct starting states 1577; states shared by two or more items: 1461
+   slices whose starting state another item's slice also started from: 2922 of 3038 (96.2%)
+   of those, 339 share one OPERATION (the same operands go to different rounding modes) and 1122 mix operations
+   operation    slices  in a shared operand count seen again  share of the op's count
+   conv64to32      224          168         21,702,377,472                    36.9%
+   div32           228          170         22,274,899,968                    37.2%
+   div64           228          170         22,092,447,744                    37.2%
+   sqrt64          228          170         22,549,626,880                    37.3%
+   total operand count seen again by a second rounding mode of the same operation: 88,619,352,064
+   the item pairs that shared a state, by number of slices (n) they shared it on:
+      class64 + logb64                   28 slices
+      conv32to64 + cvtfrom64-rup         28 slices
+      conv32to64 + rem32                 28 slices
+      conv64to32-rdn + conv64to32-rtz    28 slices
+      conv64to32-rdn + conv64to32-rup    28 slices
+      conv64to32-rne + conv64to32-rtz    28 slices
+      conv64to32-rne + scaleb64-rup      28 slices
+      conv64to32-rup + cvtfrom32-rne     28 slices
+      cvtfrom32-rdn + cvtfrom64-rdn      28 slices
+      cvtfrom32-rdn + cvtfrom64-rtz      28 slices
+      cvtfrom32-rne + cvtfrom64-rne      28 slices
+      cvtfrom32-rtz + cvtfrom64-rne      28 slices
+      cvtfrom32-rtz + cvtfrom64-rtz      28 slices
+      cvtfrom32-rup + cvtfrom64-rdn      28 slices
+      cvtfrom32-rup + cvtfrom64-rup      28 slices
+      cvtto32-rdn + cvtto64-rdn          28 slices
+      cvtto32-rdn + rint64-rdn           28 slices
+      cvtto32-rmm + cvtto64-rmm          28 slices
+      cvtto32-rmm + rint64-rmm           28 slices
+      cvtto32-rne + cvtto64-rne          28 slices
+      cvtto32-rne + rint64-rne           28 slices
+      cvtto32-rtz + cvtto64-rtz          28 slices
+      cvtto32-rtz + rint64-rtz           28 slices
+      cvtto32-rup + cvtto64-rup          28 slices
+      cvtto32-rup + rint64-rup           28 slices
+      cvtto64-rdn + rint64-rup           28 slices
+      cvtto64-rmm + scaleb32-rne         28 slices
+      cvtto64-rne + rint64-rtz           28 slices
+      cvtto64-rtz + rint64-rdn           28 slices
+      cvtto64-rup + rint64-rmm           28 slices
+      div32-rdn + div32-rtz              29 slices
+      div32-rdn + div32-rup              28 slices
+      div32-rne + div32-rtz              28 slices
+      div32-rup + div64-rne              29 slices
+      div64-rdn + div64-rtz              29 slices
+      div64-rdn + div64-rup              28 slices
+      div64-rne + div64-rtz              28 slices
+      div64-rup + sqrt64-rne             29 slices
+      logb64 + nextdown64                28 slices
+      nextdown64 + nextup64              28 slices
+      nextup64 + rem64                   28 slices
+      rem32 + rem64                      28 slices
+      scaleb32-rdn + scaleb64-rdn        28 slices
+      scaleb32-rdn + scaleb64-rtz        28 slices
+      scaleb32-rne + scaleb64-rne        28 slices
+      scaleb32-rtz + scaleb64-rne        28 slices
+      scaleb32-rtz + scaleb64-rtz        28 slices
+      scaleb32-rup + scaleb64-rdn        28 slices
+      scaleb32-rup + scaleb64-rup        28 slices
+      sqrt64-rdn + sqrt64-rtz            29 slices
+      sqrt64-rdn + sqrt64-rup            28 slices
+      sqrt64-rne + sqrt64-rtz            28 slices
+CHECK (final) the formula alone (seed | 1, same n) predicts exactly the pairs and slice counts in the record ok (52 pairs predicted, 52 seen)
+
+== 4. EXHAUSTIVE items: which image served the slices (the driver keys coverage by ITEM)
+   item                 quad       single         deep   union
+   class32            99.98%        0.02%        0.00%   [0, 2^32), no overlap
+   logb32             99.98%        0.02%        0.00%   [0, 2^32), no overlap
+   nextdown32         99.98%        0.02%        0.00%   [0, 2^32), no overlap
+   nextup32           99.98%        0.02%        0.00%   [0, 2^32), no overlap
+   rint32-rdn         87.50%        6.25%        6.25%   [0, 2^32), no overlap
+   rint32-rmm         87.50%        6.25%        6.25%   [0, 2^32), no overlap
+   rint32-rne         93.73%        6.25%        0.02%   [0, 2^32), no overlap
+   rint32-rtz         87.50%        6.25%        6.25%   [0, 2^32), no overlap
+   rint32-rup         87.48%        6.27%        6.25%   [0, 2^32), no overlap
+   sqrt32-rdn         87.50%        6.25%        6.25%   [0, 2^32), no overlap
+   sqrt32-rmm         87.50%        6.25%        6.25%   [0, 2^32), no overlap
+   sqrt32-rne         99.95%        0.02%        0.02%   [0, 2^32), no overlap
+   sqrt32-rtz         87.50%        6.25%        6.25%   [0, 2^32), no overlap
+   sqrt32-rup         87.50%        6.25%        6.25%   [0, 2^32), no overlap
+CHECK (final) every exhaustive item's slices tile [0, 2^32) exactly, with no overlap   ok []
+
+== 5. TILES: per-tile median rates on the quad (count, or cases for the exhaustive items), M/s
+   item               tile 1   tile 2   tile 3   tile 4   max/min
+   cvtto64-rmm         2.791    2.697    2.393    2.358   1.184
+   cvtto32-rmm         2.548    2.259    2.235    2.242   1.140
+   logb64              6.257    6.403    6.941    6.875   1.109
+   div32-rne           1.942    1.988    2.044    2.104   1.083
+   rint64-rtz          1.926    1.799    1.861    1.927   1.071
+   cvtfrom32-rne       1.834    1.870    1.909    1.964   1.071
+   (the six widest of the 45 items that have a median on each of the four tiles, slices over 20 s)
+   max/min across the four tiles: median 1.020, widest 1.184
+
+stress_records: every CHECK held

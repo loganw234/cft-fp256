@@ -1,0 +1,64 @@
+tile_counts.py: passes and program instructions of the tile items, and the issue-bound model of 6.2
+
+CHECK docs/ARCHITECTURE.md still says the tile's lanes are eight fp32 / four fp64 / two fp128          ok 
+CHECK docs/VALIDATION.md still says the tile's own rate is 108 M beats/s at 135 MHz and 1.25 cycles a beat ok 
+
+== T1. the whole-divide and whole-square-root programs (len(Program.insns))
+   fp32: div_full 210 instructions, sqrt_full 186
+   fp64: div_full 212 instructions, sqrt_full 189
+
+== T2. the elementwise routes, in passes (compute() calls) - what a composed item issues a call
+   fp32 div_seq 16 passes, sqrt_seq 23 passes (one operand pair)
+   fp32 rint_seq exact=False: 4.00 passes a call on average (min 4, max 4, over 200 operands with a fraction)
+   fp32 rint_seq exact=True : 4.00 passes a call on average (min 4, max 4, over 200 operands with a fraction)
+   fp32 scaleb_seq over the tool's 17 directed exponents: 19 passes in all; passes by exponent: 0:1 1:1 -1:1 23:1 -23:1 52:1 -52:1 126:1 -126:1 127:1 -127:1 149:2 -149:1 150:2 -150:0 1000:3 -1000:0
+CHECK fp32: every pass is counted once whether counted at the step function or at compute()            ok 
+   fp64 div_seq 18 passes, sqrt_seq 26 passes (one operand pair)
+   fp64 rint_seq exact=False: 4.00 passes a call on average (min 4, max 4, over 200 operands with a fraction)
+   fp64 rint_seq exact=True : 4.00 passes a call on average (min 4, max 4, over 200 operands with a fraction)
+   fp64 scaleb_seq over the tool's 27 directed exponents: 29 passes in all; passes by exponent: 0:1 1:1 -1:1 23:1 -23:1 52:1 -52:1 126:1 -126:1 127:1 -127:1 149:1 -149:1 150:1 -150:1 1000:1 -1000:1 1022:1 -1022:1 1023:1 -1023:1 1074:2 -1074:1 1075:2 -1075:0 2200:3 -2200:0
+CHECK fp64: every pass is counted once whether counted at the step function or at compute()            ok 
+
+== T3. the issue-bound model against the measured per-job quad rates (M cases a second a tile)
+   bound = lanes x 108 M beats / instructions, one instruction a beat; the measured rate is the card run's median per job
+   div32   bound  4.11   measured rne 2.022 (49% of the bound), best of four attributes 2.022 (49%)
+   div64   bound  2.04   measured rne 1.538 (75% of the bound), best of four attributes 1.538 (75%)
+   sqrt32  bound  4.65   measured rne 1.945 (42% of the bound), best of four attributes 2.238 (48%)
+   sqrt64  bound  2.29   measured rne 1.521 (67% of the bound), best of four attributes 1.541 (67%)
+CHECK no measured rate exceeds the issue bound (a model the data exceeds is wrong)                     ok 
+CHECK CONTROL: a bound at a quarter of the documented beat rate lies below the measured rates (the check above can fail) ok 
+
+== T4. does a tile slow down when four run at once? the quad's per-job median against the single image's, same item
+   (rows with at least 3 slices on both images; the single ran one job at a time, the quad four; M/s a tile)
+   item             slices     quad   single quad/single
+   div32-rne       48/6      2.022    2.136    0.947
+   div32-rtz       48/6      1.929    2.115    0.912
+   div32-rdn       48/6      1.900    2.103    0.904
+   div32-rup       48/6      1.896    2.100    0.903
+   div64-rne       49/6      1.538    1.564    0.983
+   div64-rtz       49/6      1.487    1.562    0.952
+   div64-rdn       50/6      1.491    1.566    0.952
+   rint64-rmm      46/4      1.869    1.822    1.026
+   scaleb32-rne    46/4     14.495   15.566    0.931
+   scaleb32-rtz    45/4     14.534   15.796    0.920
+   scaleb32-rdn    45/4     14.004   15.084    0.928
+   scaleb32-rup    47/4     14.076   14.979    0.940
+   scaleb64-rne    45/4     13.784   11.036    1.249
+   scaleb64-rtz    45/4     13.823   13.994    0.988
+   scaleb64-rdn    45/4     13.508   14.496    0.932
+   scaleb64-rup    47/4     13.543   11.007    1.230
+   quad/single over 16 items: 0.90 (div32-rup) to 1.25 (scaleb64-rne)
+CHECK T4 saw rows to compare (the filter does not leave an empty table)                                ok (16 rows)
+
+== T5. the composed items (rint, scaleb): the tile's share of a job, a pass's cost, and the staged traffic (quad, rne)
+   a job is a batch of 4,096 operands; passes an operand: rint 2 calls x 4 (T2), scaleb the passes over the directed list (T2);
+   tile time = beats / 108 M a second at lanes a beat; traffic = passes x 3 words an element (two read, one written)
+   item         M op/s passes/op   job ms    us/pass    tile us    tile %   GB/s x4
+   rint32        2.139       8.0    1.915      239.3        4.7      2.0%      0.82
+   rint64        1.965       8.0    2.084      260.5        9.5      3.6%      1.51
+   scaleb32      0.853      19.0    4.804      252.8        4.7      1.9%      0.78
+   scaleb64      0.511      29.0    8.023      276.7        9.5      3.4%      1.42
+CHECK no measured composed rate exceeds its beat bound (lanes x beats / passes an operand)             ok 
+CHECK CONTROL: with a hundredth of the documented beat rate the bound falls below a measured rate (the check above can fail) ok 
+
+tile_counts: every CHECK held

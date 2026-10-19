@@ -1,0 +1,16 @@
+CONTROL C1 all rates doubled                                       red at the check written for it
+        CHECK class64 over 2^64 on one quad is about 6,600 years (the lead's COMPUTED)     FAILED (3292 y)
+CONTROL C2 the rem32 quad row removed                              red at the check written for it
+        CHECK every item has a quad row (the lead's per-tile convention)                   FAILED ['rem32']
+CONTROL C3 class32 quad cases_sum one short                        red at the check written for it
+        CHECK all 68 items' slices and cases equal the final report's tables exactly, summed over images FAILED [('class32', (19, 4294967295), (19, 4294967296
+CONTROL C4 cvtfrom32-rne quad cases_sum +1                         red at the check written for it
+        CHECK cvtfrom32: cases_sum is 4 x count_sum (4 source types a lane)                FAILED (50470060033 vs 12617515008)
+CONTROL C5 an unknown item added                                   red at the check written for it
+        CHECK every item belongs to a family with a stated unit and space                  FAILED ['frobnicate64-rne']
+CONTROL C6 scaleb32-rne quad cases_sum 17 x count_sum              red at the check written for it
+        CHECK scaleb32: cases_sum is within 0.1% of count_sum (count IS checks, not operands) FAILED (199289221120 vs 11719933952)
+CONTROL C7 div32-rne quad cases_sum one short                      red at the check written for it
+        CHECK the families' cases add to the record's totals (1,296,186,685,863 random, 60,129,542,440 exhaustive) FAILED (1296186685862, 60129542440)
+
+sweep_cost controls: all seven mutations were caught at their checks

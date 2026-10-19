@@ -1,0 +1,15 @@
+perm_check.py: Python reference against the vectors of perm_check.c (section V)
+
+CHECK the C program printed 32 vectors of each of the four kinds                           ok {'VEC64': 32, 'VEC46': 32, 'VEC128': 32, 'VECCW': 32}
+CHECK 64-bit domain, 6 rounds: Python reproduces every C output                            ok (0 differ)
+CHECK 46-bit domain (the significand pairs of fp32 division), 5 rounds: Python reproduces every C output ok (0 differ)
+CHECK 128-bit domain, 6 rounds: Python reproduces every C output                           ok (0 differ)
+CHECK cycle walking onto N = 5 x 10^13 inside the 46-bit domain: Python reproduces every C output ok (0 differ)
+CHECK CONTROL: with the key changed by one bit Python does NOT reproduce the C outputs     ok (32 of 32 differ)
+CHECK CONTROL: with five rounds instead of six Python does NOT reproduce the C outputs     ok (32 of 32 differ)
+CHECK Python: inverse(perm(x)) == x on 20,000 random 64-bit inputs                         ok 
+CHECK Python: inverse(perm(x)) == x on 20,000 random 128-bit inputs                        ok 
+CHECK Python: w = 6 (a 4,096-element domain) is a bijection by exhaustion                  ok 
+CHECK Python: cycle walking onto N = 1,000 inside 4,096 is a bijection of [0, 1,000) by exhaustion ok 
+
+perm_check.py: every CHECK held

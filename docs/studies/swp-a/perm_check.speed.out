@@ -1,0 +1,25 @@
+-- speed run 1
+   64-bit domain, 4 rounds :   9.11 ns a permutation (109.8 M/s)   [1000]
+   64-bit domain, 6 rounds :  17.30 ns a permutation ( 57.8 M/s)   [39b]
+   64-bit domain, 8 rounds :  30.90 ns a permutation ( 32.4 M/s)   [29ee]
+   128-bit domain, 6 rounds :  24.22 ns a permutation ( 41.3 M/s)   [a2ce]
+-- speed run 2
+   64-bit domain, 4 rounds :   9.85 ns a permutation (101.6 M/s)   [1000]
+   64-bit domain, 6 rounds :  15.02 ns a permutation ( 66.6 M/s)   [39b]
+   64-bit domain, 8 rounds :  22.12 ns a permutation ( 45.2 M/s)   [29ee]
+   128-bit domain, 6 rounds :  21.99 ns a permutation ( 45.5 M/s)   [a2ce]
+-- speed run 3
+   64-bit domain, 4 rounds :   9.61 ns a permutation (104.1 M/s)   [1000]
+   64-bit domain, 6 rounds :  14.02 ns a permutation ( 71.3 M/s)   [39b]
+   64-bit domain, 8 rounds :  24.32 ns a permutation ( 41.1 M/s)   [29ee]
+   128-bit domain, 6 rounds :  21.29 ns a permutation ( 47.0 M/s)   [a2ce]
+-- speed run 4
+   64-bit domain, 4 rounds :  12.84 ns a permutation ( 77.9 M/s)   [1000]
+   64-bit domain, 6 rounds :  18.38 ns a permutation ( 54.4 M/s)   [39b]
+   64-bit domain, 8 rounds :  24.91 ns a permutation ( 40.1 M/s)   [29ee]
+   128-bit domain, 6 rounds :  21.05 ns a permutation ( 47.5 M/s)   [a2ce]
+-- speed run 5
+   64-bit domain, 4 rounds :  10.24 ns a permutation ( 97.6 M/s)   [1000]
+   64-bit domain, 6 rounds :  19.37 ns a permutation ( 51.6 M/s)   [39b]
+   64-bit domain, 8 rounds :  22.89 ns a permutation ( 43.7 M/s)   [29ee]
+   128-bit domain, 6 rounds :  21.39 ns a permutation ( 46.7 M/s)   [a2ce]

@@ -1,0 +1,24 @@
+merge_law.py: the accumulation design's laws, on an executable model
+
+CHECK L1 merge order and grouping do not change coverage (commutative, associative)                    ok (3000 scenarios, 0 violations)
+CHECK L2 duplicate records do not change coverage (idempotent)                                         ok (0 violations)
+CHECK L3 coverage from interval union equals an independent bitmap of the same records                 ok (0 violations)
+CHECK L4 adding a record never reduces coverage (monotone)                                             ok (0 violations)
+CHECK L5 a record whose case count is wrong, or that found a mismatch, is not coverage                 ok (0 violations)
+CHECK L6 records of one subject class (RTL build) never count for another                              ok (0 violations)
+CHECK L7 coverage never exceeds the space although the cases RUN may                                   ok (0 violations)
+CHECK L7' ten devices on one slice: cases run = 10 N, coverage = N                                     ok 
+CHECK PLANT: a fold that SUMS interval lengths double-counts duplicates (ten devices on one slice: coverage above the space) ok 
+CHECK the correct fold credits build A with nothing when only build B ran                              ok (0)
+CHECK PLANT: a fold that ignores the subject class credits half the space to a build that never ran a case ok (128 of 256)
+
+CHECK L8 two devices with identical outputs have identical roots                                       ok 
+CHECK L8 one differing batch changes the root and is found by descent (300 trials, 4,096 batches)      ok (0 wrong)
+CHECK L8 the descent used at most 2 log2(n) + 2 = 26 comparisons, against 4,096 for a scan             ok (worst 13)
+CHECK with two differing batches the descent finds the FIRST (batch 7), and the rest by repeating on the remainder ok 
+CHECK PLANT: a root comparison alone says 'differs' but not where (the descent is what localizes)      ok 
+
+R. a record as section 5.3 writes it, canonical JSON: 1223 bytes; a weekend of 3287 slices 4.0 MB; a decade of 520 weekends 2.09 GB
+CHECK a decade of weekly weekends from one device is under 5 GB of records (the study's 'not a size problem') ok (1223 bytes a record, 2.09 GB)
+
+merge_law: every CHECK held

@@ -1,0 +1,318 @@
+card stress report: derived from metrics.jsonl, which is the record; this text is rewritten whole at each run of the report
+
+== HEADER ==
+run id         : card-stress-1016
+host           : amd-arc-box
+out            : /data/card-stress-1016
+tree           : commit f0693b2301ede438f4235ccdc61d7ed2370a08a5 (clean)
+started        : 2026-10-16 18:58:23
+run_start      : 1 record(s), 0 marked resumed
+ended          : RUNNING: last record 2026-10-19 06:55:59, 0 s ago
+deadline       : 2026-10-19 08:00:00; 3841 s (1 h 04 m 01 s) remaining
+flags          : quick no, dry_run no
+images         : quad 4 tiles sha256 4f9921a25af6; single 1 tiles sha256 0639248e9c66; deep 1 tiles sha256 bbf08fb3feb6
+
+== TOTALS ==
+legs           : 4003 recorded; pass 3950, fail 0, timeout 0, no_device 0, parse_error 0, skipped 53, error 0
+cycles         : 65 started, 65 ended; started and not ended: none
+by image       : quad 43, single 11, deep 11
+cycle_end      : 0 of 65 records that report it show failed legs
+build          : ok (23 steps)
+records        : run_start 1, event 19, build 1, cycle_start 65, telemetry 848, leg 4003, cycle_end 65
+
+== PER IMAGE AND LEG ==
+  image   leg                runs  pass  fail  timeout  no_device  parse_error  skipped  error  checks  cases
+  quad    api-test           43    43    0     0        0          0            0        0
+  quad    dt-i               43    43    0     0        0          0            0        0      1075
+  quad    dt-q8              43    43    0     0        0          0            0        0      117562
+  quad    dt-full            43    43    0     0        0          0            0        0      446082
+  quad    dt-r               43    43    0     0        0          0            0        0      103931
+  quad    dt-b               43    43    0     0        0          0            0        0      211474
+  quad    card-segrun        43    43    0     0        0          0            0        0      258
+  quad    seq-check          43    43    0     0        0          0            0        0
+  quad    acceptance         43    43    0     0        0          0            0        0      7482
+  quad    acceptance-rev8    43    43    0     0        0          0            0        0      4945
+  quad    resident           43    43    0     0        0          0            0        0
+  quad    selftest           43    15    0     0        0          0            28       0              16086225
+  quad    sweep (all items)  2884  2884  0     0        0          0            0        0              1218602621750
+  single  api-test           11    11    0     0        0          0            0        0
+  single  dt-i               11    11    0     0        0          0            0        0      253
+  single  dt-q8              11    11    0     0        0          0            0        0      30063
+  single  dt-full            11    11    0     0        0          0            0        0      114103
+  single  dt-r               11    11    0     0        0          0            0        0      26576
+  single  dt-b               11    11    0     0        0          0            0        0      54087
+  single  card-segrun        11    11    0     0        0          0            0        0      66
+  single  seq-check          11    11    0     0        0          0            0        0
+  single  acceptance         11    11    0     0        0          0            0        0      1914
+  single  acceptance-rev8    11    0     0     0        0          0            11       0
+  single  resident           11    11    0     0        0          0            0        0
+  single  selftest           11    4     0     0        0          0            7        0              4289660
+  single  sweep (all items)  163   163   0     0        0          0            0        0              52190068426
+  deep    api-test           11    11    0     0        0          0            0        0
+  deep    dt-i               11    11    0     0        0          0            0        0      253
+  deep    dt-q8              11    11    0     0        0          0            0        0      30063
+  deep    dt-full            11    11    0     0        0          0            0        0      114103
+  deep    dt-r               11    11    0     0        0          0            0        0      26576
+  deep    dt-b               11    11    0     0        0          0            0        0      54087
+  deep    card-segrun        11    11    0     0        0          0            0        0      66
+  deep    seq-check          11    11    0     0        0          0            0        0
+  deep    acceptance         11    11    0     0        0          0            0        0      1914
+  deep    acceptance-rev8    11    11    0     0        0          0            0        0      297
+  deep    resident           11    11    0     0        0          0            0        0
+  deep    selftest           11    4     0     0        0          0            7        0              4289660
+  deep    sweep (all items)  176   176   0     0        0          0            0        0              58930814793
+
+  image   leg                dur_med_s  dur_min_s  dur_max_s  rate_unit  n_rates  rate_med  rate_min  rate_max  trend
+  quad    api-test           0.1150     0.06400    0.1150     -          0        -         -         -         -
+  quad    dt-i               10.12      2.716      10.52      checks/s   43       2.471     2.377     9.205     +1.2%
+  quad    dt-q8              3.520      3.369      3.770      checks/s   43       776.7     725.3     811.6     +0.7%
+  quad    dt-full            11.87      11.52      12.22      checks/s   43       873.9     849.2     900.5     +0.4%
+  quad    dt-r               2.065      1.820      2.215      checks/s   43       1171      1091      1328      -2.3%
+  quad    dt-b               6.167      6.017      6.366      checks/s   43       797.5     772.5     817.3     -0.8%
+  quad    card-segrun        189.7      187.7      197.0      checks/s   43       0.03200   0.03000   0.03200   +3.2%
+  quad    seq-check          45.22      44.47      47.22      -          0        -         -         -         -
+  quad    acceptance         402.9      399.2      432.6      checks/s   43       0.4320    0.4020    0.4360    +0.9%
+  quad    acceptance-rev8    349.2      346.8      2189       checks/s   43       0.3290    0.05300   0.3320    +0.0%
+  quad    resident           3.820      3.670      3.971      -          0        -         -         -         -
+  quad    selftest           658.4      651.8      685.8      cases/s    15       1629      1564      1645      +0.3%
+  quad    sweep (all items)  120.7      0.9180     617.9      cases/s    2884     5135619   56929     35931670  +112.7%
+  single  api-test           0.1150     0.06400    0.1150     -          0        -         -         -         -
+  single  dt-i               5.970      5.820      6.216      checks/s   11       3.852     3.700     3.952     +0.7%
+  single  dt-q8              2.265      2.215      2.316      checks/s   11       1206      1180      1234      +0.0%
+  single  dt-full            12.17      12.00      12.37      checks/s   11       852.5     838.8     864.3     -0.5%
+  single  dt-r               1.418      1.367      1.469      checks/s   11       1704      1645      1768      -1.8%
+  single  dt-b               5.168      4.967      5.268      checks/s   11       951.4     933.3     989.8     -0.1%
+  single  card-segrun        185.0      182.0      191.1      checks/s   11       0.03200   0.03100   0.03300   +1.6%
+  single  seq-check          44.62      44.17      46.42      -          0        -         -         -         -
+  single  acceptance         400.5      398.3      415.1      checks/s   11       0.4350    0.4190    0.4370    +1.5%
+  single  acceptance-rev8    -          -          -          -          0        -         -         -         -
+  single  resident           3.218      3.118      3.269      -          0        -         -         -         -
+  single  selftest           657.0      651.9      678.6      cases/s    4        1632      1580      1645      +3.5%
+  single  sweep (all items)  76.17      0.4660     173.3      cases/s    163      5785716   60716     26921647  +263.4%
+  deep    api-test           0.1150     0.06500    0.1150     -          0        -         -         -         -
+  deep    dt-i               6.466      6.316      6.868      checks/s   11       3.557     3.349     3.642     +1.5%
+  deep    dt-q8              2.516      2.315      2.616      checks/s   11       1086      1045      1180      -4.0%
+  deep    dt-full            14.00      13.72      14.17      checks/s   11       740.8     732.2     756.0     -0.6%
+  deep    dt-r               1.569      1.518      1.769      checks/s   11       1540      1366      1592      -1.5%
+  deep    dt-b               5.318      5.217      5.469      checks/s   11       924.6     899.1     942.4     -0.5%
+  deep    card-segrun        187.1      185.4      189.5      checks/s   11       0.03200   0.03200   0.03200   +0.0%
+  deep    seq-check          46.02      45.32      46.37      -          0        -         -         -         -
+  deep    acceptance         402.0      399.8      406.4      checks/s   11       0.4330    0.4280    0.4350    -1.0%
+  deep    acceptance-rev8    71.42      69.93      73.17      checks/s   11       0.3780    0.3690    0.3860    +1.3%
+  deep    resident           3.168      3.068      3.319      -          0        -         -         -         -
+  deep    selftest           654.7      653.0      656.5      cases/s    4        1638      1634      1642      +0.5%
+  deep    sweep (all items)  41.80      0.5160     589.9      cases/s    176      6377527   61799     26019617  +215.3%
+
+  rates over time (evenly picked, at most 12 a row), oldest first:
+  quad / dt-i [checks/s, 43 rates, 12 picked]: 2.423 9.033 8.874 2.471 2.471 2.388 2.447 2.435 2.459 2.435 2.412 2.412
+  quad / dt-q8 [checks/s, 43 rates, 12 picked]: 735.2 755.4 777.0 788.1 745.0 788.2 776.8 788.1 745.0 811.5 776.9 788.2
+  quad / dt-full [checks/s, 43 rates, 12 picked]: 849.2 859.8 881.2 863.8 859.7 873.9 866.6 873.9 888.9 849.2 870.1 877.6
+  quad / dt-r [checks/s, 43 rates, 12 picked]: 1189 1171 1260 1328 1143 1143 1170 1259 1143 1142 1171 1170
+  quad / dt-b [checks/s, 43 rates, 12 picked]: 791.2 804.2 797.7 784.7 804.2 791.2 797.6 791.2 804.3 784.9 797.7 810.9
+  quad / card-segrun [checks/s, 43 rates, 12 picked]: 0.03000 0.03200 0.03100 0.03200 0.03200 0.03200 0.03200 0.03200 0.03200 0.03200 0.03100 0.03200
+  quad / acceptance [checks/s, 43 rates, 12 picked]: 0.4060 0.4350 0.4320 0.4290 0.4320 0.4300 0.4300 0.4300 0.4330 0.4320 0.4340 0.4300
+  quad / acceptance-rev8 [checks/s, 43 rates, 12 picked]: 0.05300 0.3300 0.3300 0.3280 0.3290 0.3290 0.3280 0.3310 0.3290 0.3310 0.3300 0.3300
+  quad / selftest [cases/s, 15 rates, 12 picked]: 1564 1624 1627 1640 1632 1629 1627 1636 1625 1634 1629 1629
+  quad / sweep (all items) [cases/s, 2884 rates, 12 picked]: 737372 2410100 1486886 5745326 1494745 7591915 1542006 5216349 61746 1946836 2010979 471744
+  single / dt-i [checks/s, 11 rates]: 3.731 3.952 3.918 3.832 3.886 3.761 3.700 3.792 3.885 3.885 3.852
+  single / dt-q8 [checks/s, 11 rates]: 1206 1180 1206 1180 1207 1180 1234 1206 1234 1180 1206
+  single / dt-full [checks/s, 11 rates]: 864.3 849.1 838.8 859.7 863.1 849.1 849.0 856.1 852.5 852.6 852.5
+  single / dt-r [checks/s, 11 rates]: 1766 1704 1703 1645 1768 1704 1645 1705 1645 1704 1704
+  single / dt-b [checks/s, 11 rates]: 933.3 989.8 970.2 970.0 951.4 960.5 942.4 942.4 942.2 951.4 970.3
+  single / card-segrun [checks/s, 11 rates]: 0.03100 0.03200 0.03200 0.03200 0.03300 0.03300 0.03200 0.03300 0.03300 0.03200 0.03200
+  single / acceptance [checks/s, 11 rates]: 0.4190 0.4370 0.4330 0.4350 0.4320 0.4260 0.4350 0.4350 0.4350 0.4370 0.4320
+  single / selftest [cases/s, 4 rates]: 1580 1645 1630 1635
+  single / sweep (all items) [cases/s, 163 rates, 12 picked]: 1284041 2917915 14780593 393163 2114885 1574101 6153435 1570410 15638011 14040727 15502580 8455925
+  deep / dt-i [checks/s, 11 rates]: 3.476 3.613 3.529 3.530 3.349 3.642 3.557 3.642 3.424 3.612 3.585
+  deep / dt-q8 [checks/s, 11 rates]: 1180 1086 1108 1065 1180 1065 1065 1045 1155 1045 1131
+  deep / dt-full [checks/s, 11 rates]: 740.8 756.0 732.2 747.9 734.7 737.5 739.1 740.8 745.2 745.2 742.4
+  deep / dt-r [checks/s, 11 rates]: 1540 1540 1540 1541 1540 1366 1542 1540 1592 1540 1493
+  deep / dt-b [checks/s, 11 rates]: 924.5 933.2 933.3 907.2 933.3 933.1 899.1 899.3 942.4 924.5 924.6
+  deep / card-segrun [checks/s, 11 rates]: 0.03200 0.03200 0.03200 0.03200 0.03200 0.03200 0.03200 0.03200 0.03200 0.03200 0.03200
+  deep / acceptance [checks/s, 11 rates]: 0.4350 0.4340 0.4310 0.4330 0.4280 0.4330 0.4340 0.4330 0.4300 0.4300 0.4300
+  deep / acceptance-rev8 [checks/s, 11 rates]: 0.3800 0.3800 0.3710 0.3700 0.3740 0.3820 0.3690 0.3780 0.3780 0.3840 0.3860
+  deep / selftest [cases/s, 4 rates]: 1634 1635 1641 1642
+  deep / sweep (all items) [cases/s, 176 rates, 12 picked]: 61799 1671510 8510035 7485145 6007522 15457472 10310060 6176104 15547458 2101575 12928616 2094155
+
+  note: a sweep row mixes items whose rates differ, so its trend reflects the mix of items as well as the card
+
+== TELEMETRY ==
+telemetry: 848 samples, 848 with values, 0 without, 0 marked ok=false
+  by when: before-cycle 65, timer 718, after-battery 65
+
+  device labels: 68; the 40 with the widest range (max - min) are shown, 28 left out
+  label                                                                   samples  min     max     mean    first   last    slope_per_h
+  thermal.devices[0].thermals.FPGA HBM.temp_C                             848      0       35.00   7.335   35.00   31.00   +0.01661
+  electrical.devices[0].electrical.power_consumption_watts                848      15.40   34.38   20.85   16.19   16.19   -0.004142
+  electrical.devices[0].electrical.power_rails.Internal FPGA Vcc.curr...  848      5.600   24.50   9.590   6.400   6.500   -0.002869
+  thermal.devices[0].thermals.FPGA.temp_C                                 848      28.00   40.00   34.69   40.00   36.00   -0.01557
+  thermal.devices[0].thermals.Int Vcc.temp_C                              848      38.00   47.00   43.38   45.00   41.00   -0.01480
+  thermal.devices[0].thermals.PCB Top Front.temp_C                        848      28.00   37.00   34.10   35.00   32.00   -0.01957
+  thermal.devices[0].thermals.PCB Top Rear.temp_C                         848      31.00   39.00   36.25   38.00   35.00   -0.01372
+  electrical.devices[0].electrical.power_rails.Internal FPGA Vcc IO.c...  848      1.400   4.400   3.165   1.800   1.900   -0.0006623
+  electrical.devices[0].electrical.power_rails.12 Volts PCI Express.c...  848      0.8290  2.413   1.283   0.8950  0.8950  -0.0003426
+  electrical.devices[0].electrical.power_rails.12 Volts PCI Express.v...  848      11.97   11.99   11.99   11.99   11.99   -0.00001093
+  electrical.devices[0].electrical.power_rails.3.3 Volts PCI Express....  848      1.633   1.649   1.644   1.637   1.637   -0.000003838
+  electrical.devices[0].electrical.power_rails.5.5 Volts System.volta...  848      4.919   4.929   4.923   4.923   4.925   -0.000001451
+  electrical.devices[0].electrical.power_rails.3.3 Volts Vcc.voltage....  848      3.336   3.345   3.341   3.344   3.341   -0.000003750
+  electrical.devices[0].electrical.power_rails.3.3 Volts PCI Express....  848      3.333   3.338   3.335   3.335   3.335   -0.000003716
+  electrical.devices[0].electrical.power_rails.1.2 Volts HBM.voltage....  848      1.197   1.201   1.199   1.198   1.200   +0.000001651
+  electrical.devices[0].electrical.power_rails.Vpp 2.5 Volts.voltage....  848      2.502   2.504   2.503   2.503   2.503   +0.0000004109
+  electrical.devices[0].electrical.power_rails.1.8 Volts Top.voltage....  848      1.814   1.816   1.815   1.815   1.815   -0.000001869
+  electrical.devices[0].electrical.power_rails.Internal FPGA Vcc IO.v...  848      0.8480  0.8500  0.8492  0.8500  0.8490  -0.000001193
+  electrical.devices[0].electrical.power_rails.0.9 Volts Vcc.voltage....  848      0.9100  0.9110  0.9100  0.9100  0.9100  -0.0000002534
+  electrical.devices[0].electrical.power_rails.Mgt Vtt.voltage.volts      848      1.213   1.214   1.214   1.214   1.213   -0.000001612
+  electrical.devices[0].electrical.power_consumption_max_watts            848      150.0   150.0   150.0   150.0   150.0   0
+  electrical.devices[0].electrical.power_rails.0.9 Volts Vcc Vcu.curr...  848      0       0       0       0       0       0
+  electrical.devices[0].electrical.power_rails.0.9 Volts Vcc Vcu.volt...  848      0       0       0       0       0       0
+  electrical.devices[0].electrical.power_rails.0.9 Volts Vcc.current....  848      0       0       0       0       0       0
+  electrical.devices[0].electrical.power_rails.1.2 Volts HBM.current....  848      0       0       0       0       0       0
+  electrical.devices[0].electrical.power_rails.1.8 Volts Top.current....  848      0       0       0       0       0       0
+  electrical.devices[0].electrical.power_rails.12 Volts Aux1.current....  848      0       0       0       0       0       0
+  electrical.devices[0].electrical.power_rails.12 Volts Aux1.voltage....  848      0       0       0       0       0       0
+  electrical.devices[0].electrical.power_rails.12 Volts Auxillary.cur...  848      0       0       0       0       0       0
+  electrical.devices[0].electrical.power_rails.12 Volts Auxillary.vol...  848      0       0       0       0       0       0
+  electrical.devices[0].electrical.power_rails.12 Volts SW.current.amps   848      0       0       0       0       0       0
+  electrical.devices[0].electrical.power_rails.12 Volts SW.voltage.volts  848      0       0       0       0       0       0
+  electrical.devices[0].electrical.power_rails.3.3 Volts Auxillary.cu...  848      0       0       0       0       0       0
+  electrical.devices[0].electrical.power_rails.3.3 Volts Auxillary.vo...  848      0       0       0       0       0       0
+  electrical.devices[0].electrical.power_rails.3.3 Volts Vcc.current....  848      0       0       0       0       0       0
+  electrical.devices[0].electrical.power_rails.5.5 Volts System.curre...  848      0       0       0       0       0       0
+  electrical.devices[0].electrical.power_rails.DDR Vpp Bottom.current...  848      0       0       0       0       0       0
+  electrical.devices[0].electrical.power_rails.DDR Vpp Bottom.voltage...  848      0       0       0       0       0       0
+  electrical.devices[0].electrical.power_rails.DDR Vpp Top.current.amps   848      0       0       0       0       0       0
+  electrical.devices[0].electrical.power_rails.DDR Vpp Top.voltage.volts  848      0       0       0       0       0       0
+
+  host fields:
+  label                                      samples  min    max    mean   first  last   slope_per_h
+  host.load1                                 848      2.040  6.740  3.424  3.190  2.420  -0.004748
+  host.load5                                 848      2.230  6.240  3.451  4.100  2.340  -0.005133
+  host.load15                                848      2.320  5.610  3.487  4.040  2.580  -0.004999
+  host.mem_avail_mb                          848      43420  45330  45080  44193  45181  +1.008
+  host.mem_total_mb                          848      48061  48061  48061  48061  48061  0
+  host.disk_free_gb[/data/card-stress-1016]  848      19.91  20.69  20.06  20.69  20.05  -0.001164
+  host.disk_free_gb[/data]                   848      19.91  20.69  20.06  20.69  20.05  -0.001164
+
+== FAILURES ==
+no leg has a status other than pass or skipped
+
+skipped legs: 53 in 29 group(s), by (leg, reason):
+  selftest: 3 x "every 3 visits of an image; this is visit 2" (images: deep, quad, single)
+  acceptance-rev8: 11 x "the revision-8 set has no entry for u50-rev8: its rule puts a workload on the single only where R21 alone keeps it off the quad, which none does (programs/acceptance.py, REV8)" (images: single)
+  selftest: 3 x "every 3 visits of an image; this is visit 3" (images: deep, quad, single)
+  selftest: 3 x "every 3 visits of an image; this is visit 5" (images: deep, quad, single)
+  selftest: 3 x "every 3 visits of an image; this is visit 6" (images: deep, quad, single)
+  selftest: 3 x "every 3 visits of an image; this is visit 8" (images: deep, quad, single)
+  selftest: 3 x "every 3 visits of an image; this is visit 9" (images: deep, quad, single)
+  selftest: 3 x "every 3 visits of an image; this is visit 11" (images: deep, quad, single)
+  selftest: 1 x "every 3 visits of an image; this is visit 12" (images: quad)
+  selftest: 1 x "every 3 visits of an image; this is visit 14" (images: quad)
+  selftest: 1 x "every 3 visits of an image; this is visit 15" (images: quad)
+  selftest: 1 x "every 3 visits of an image; this is visit 17" (images: quad)
+  selftest: 1 x "every 3 visits of an image; this is visit 18" (images: quad)
+  selftest: 1 x "every 3 visits of an image; this is visit 20" (images: quad)
+  selftest: 1 x "every 3 visits of an image; this is visit 21" (images: quad)
+  selftest: 1 x "every 3 visits of an image; this is visit 23" (images: quad)
+  selftest: 1 x "every 3 visits of an image; this is visit 24" (images: quad)
+  selftest: 1 x "every 3 visits of an image; this is visit 26" (images: quad)
+  selftest: 1 x "every 3 visits of an image; this is visit 27" (images: quad)
+  selftest: 1 x "every 3 visits of an image; this is visit 29" (images: quad)
+  selftest: 1 x "every 3 visits of an image; this is visit 30" (images: quad)
+  selftest: 1 x "every 3 visits of an image; this is visit 32" (images: quad)
+  selftest: 1 x "every 3 visits of an image; this is visit 33" (images: quad)
+  selftest: 1 x "every 3 visits of an image; this is visit 35" (images: quad)
+  selftest: 1 x "every 3 visits of an image; this is visit 36" (images: quad)
+  selftest: 1 x "every 3 visits of an image; this is visit 38" (images: quad)
+  selftest: 1 x "every 3 visits of an image; this is visit 39" (images: quad)
+  selftest: 1 x "every 3 visits of an image; this is visit 41" (images: quad)
+  selftest: 1 x "every 3 visits of an image; this is visit 42" (images: quad)
+
+== SWEEP COVERAGE ==
+exhaustive items (encodings of 2**32 = 4294967296):
+  item        slices  cases       covered     pct       intervals  first_uncovered  incomplete
+  class32     19      4294967296  4294967296  100.000%  1          none             0
+  logb32      18      4294967296  4294967296  100.000%  1          none             0
+  nextdown32  18      4294967440  4294967296  100.000%  1          none             0
+  nextup32    19      4294967448  4294967296  100.000%  1          none             0
+  rint32-rdn  18      4294967296  4294967296  100.000%  1          none             0
+  rint32-rmm  16      4294967296  4294967296  100.000%  1          none             0
+  rint32-rne  19      4294967296  4294967296  100.000%  1          none             0
+  rint32-rtz  18      4294967296  4294967296  100.000%  1          none             0
+  rint32-rup  17      4294967296  4294967296  100.000%  1          none             0
+  sqrt32-rdn  17      4294967296  4294967296  100.000%  1          none             0
+  sqrt32-rmm  17      4294967296  4294967296  100.000%  1          none             0
+  sqrt32-rne  19      4294967296  4294967296  100.000%  1          none             0
+  sqrt32-rtz  17      4294967296  4294967296  100.000%  1          none             0
+  sqrt32-rup  17      4294967296  4294967296  100.000%  1          none             0
+  total: 14 exhaustive item(s) seen; covered 60129542144 of 60129542144 encodings (100.000%); fully covered 14 of 14
+
+random items (highest seed_n among completed slices):
+  item            slices  cases        highest_seed_n  incomplete
+  class64         55      13961789440  54              0
+  conv32to64      55      13961789440  54              0
+  conv64to32-rdn  55      14496563200  54              0
+  conv64to32-rne  55      13961789440  54              0
+  conv64to32-rtz  55      14452523008  54              0
+  conv64to32-rup  55      14763950080  54              0
+  cvtfrom32-rdn   55      57986252800  54              0
+  cvtfrom32-rne   55      56916705280  54              0
+  cvtfrom32-rtz   55      57986252800  54              0
+  cvtfrom32-rup   55      59051606016  54              0
+  cvtfrom64-rdn   55      59055800320  54              0
+  cvtfrom64-rne   55      56887345152  54              0
+  cvtfrom64-rtz   55      57759760384  54              0
+  cvtfrom64-rup   55      59030634496  54              0
+  cvtto32-rdn     55      28244395277  54              0
+  cvtto32-rmm     55      33518482524  54              0
+  cvtto32-rne     55      32910835892  54              0
+  cvtto32-rtz     55      32942799838  54              0
+  cvtto32-rup     55      32942908854  54              0
+  cvtto64-rdn     55      24299143715  54              0
+  cvtto64-rmm     55      29541427664  54              0
+  cvtto64-rne     55      29006316632  54              0
+  cvtto64-rtz     55      28644768335  54              0
+  cvtto64-rup     55      29010398822  54              0
+  div32-rdn       56      14764998656  55              0
+  div32-rne       56      14230224896  55              0
+  div32-rtz       56      14764998656  55              0
+  div32-rup       56      15025045504  55              0
+  div64-rdn       55      14496563200  54              0
+  div64-rne       55      13961789440  54              0
+  div64-rtz       55      14306770944  54              0
+  div64-rup       55      14555283456  54              0
+  logb64          55      13961789440  54              0
+  nextdown64      55      13961789880  54              0
+  nextup64        55      13961789880  54              0
+  rem32           55      12190744576  54              0
+  rem64           55      1719664640   54              0
+  rint64-rdn      55      14350811136  54              0
+  rint64-rmm      55      14763950080  54              0
+  rint64-rne      55      14496563200  54              0
+  rint64-rtz      55      14763950080  54              0
+  rint64-rup      55      14496563200  54              0
+  scaleb32-rdn    55      14529413120  54              0
+  scaleb32-rne    55      13872017408  54              0
+  scaleb32-rtz    55      13988372480  54              0
+  scaleb32-rup    55      14571401216  54              0
+  scaleb64-rdn    55      14768455680  54              0
+  scaleb64-rne    55      13966221312  54              0
+  scaleb64-rtz    55      14768455680  54              0
+  scaleb64-rup    55      14768455680  54              0
+  sqrt64-rdn      55      14496563200  54              0
+  sqrt64-rne      55      14496563200  54              0
+  sqrt64-rtz      55      14496563200  54              0
+  sqrt64-rup      55      14763950080  54              0
+
+slices: 3223 completed (pass 3223, fail 0); did not complete: timeout 0, no_device 0, parse_error 0; skipped 0
+no disagreement recorded in 3223 completed slices
+
+== UPTIME AND GAPS ==
+wall span      : 215856 s (2 d 11 h 57 m 36 s), the first record (2026-10-16 18:58:23) to now
+in legs        : 215641 s (2 d 11 h 54 m 01 s), 99.9% of the wall span; the union of 4003 leg interval(s), sweep legs overlap
+on the card    : 215641 s (2 d 11 h 54 m 01 s), 99.9%; battery and sweep legs, not skipped
+before 1st leg : 1.389 s
+after last leg : 0.1733 s
+longest gap    : 1.215 s (1 s), from 2026-10-19 05:11:11 to 2026-10-19 05:11:12
+gaps > 300 s   : 0
+events         : beside 19
+run_end        : none recorded

@@ -1,0 +1,27 @@
+sw_rates: the software backend, one process, niced; Linux 5.15.153.1-microsoft-standard-WSL2, 12 threads, load 0.49 0.56 0.83
+          CPU: 12th Gen Intel(R) Core(TM) i5-12400F
+
+RATE div32-rne      divsqrt-soak div32 2000000 7 rne units=2000000 seconds=12.867 rate=155436 rc=0
+RATE div64-rne      divsqrt-soak div64 2000000 7 rne units=2000000 seconds=20.802 rate=96145 rc=0
+RATE sqrt64-rne     divsqrt-soak sqrt64 2000000 7 rne units=2000000 seconds=19.015 rate=105180 rc=0
+RATE rint64-rne     clause5-soak rint64 2000000 7 rne units=2000000 seconds=3.324 rate=601685 rc=0
+RATE scaleb32-rne   clause5-soak scaleb32 8000000 7 rne units=8000000 seconds=4.267 rate=1874854 rc=0
+RATE scaleb64-rne   clause5-soak scaleb64 8000000 7 rne units=8000000 seconds=2.109 rate=3793267 rc=0
+RATE conv64to32-rne clause5-soak conv64to32 8000000 7 rne units=8000000 seconds=1.213 rate=6595218 rc=0
+RATE conv32to64     clause5-soak conv32to64 8000000 7 units=8000000 seconds=1.443 rate=5544006 rc=0
+RATE cvtto32-rne    clause5-soak cvtto32 4000000 7 rne units=4000000 seconds=2.213 rate=1807501 rc=0
+RATE cvtto64-rne    clause5-soak cvtto64 4000000 7 rne units=4000000 seconds=1.291 rate=3098373 rc=0
+RATE cvtfrom32-rne  clause5-soak cvtfrom32 2000000 7 rne units=2000000 seconds=1.161 rate=1722653 rc=0
+RATE cvtfrom64-rne  clause5-soak cvtfrom64 2000000 7 rne units=2000000 seconds=1.034 rate=1934236 rc=0
+RATE rem32          clause5-soak rem32 1000000 7 units=1000000 seconds=1.812 rate=551876 rc=0
+RATE rem64          clause5-soak rem64 100000 7 units=100000 seconds=1.134 rate=88183 rc=0
+RATE nextup64       clause5-soak nextup64 8000000 7 units=8000000 seconds=0.458 rate=17467249 rc=0
+RATE nextdown64     clause5-soak nextdown64 8000000 7 units=8000000 seconds=0.567 rate=14109347 rc=0
+RATE logb64         clause5-soak logb64 8000000 7 units=8000000 seconds=1.329 rate=6019564 rc=0
+RATE class64        clause5-soak class64 20000000 7 units=20000000 seconds=0.534 rate=37453184 rc=0
+RATE sqrt32-rne     divsqrt-soak sqrt32 rne 8x[lo,lo+2^19) units=4194304 seconds=22.961 rate=182671 rc=0
+RATE rint32-rne     clause5-soak rint32 rne 8x[lo,lo+2^19) units=4194304 seconds=4.294 rate=976782 rc=0
+RATE nextup32       clause5-soak nextup32  8x[lo,lo+2^19) units=4194304 seconds=0.112 rate=37449143 rc=0
+RATE nextdown32     clause5-soak nextdown32  8x[lo,lo+2^19) units=4194304 seconds=0.193 rate=21732145 rc=0
+RATE logb32         clause5-soak logb32  8x[lo,lo+2^19) units=4194304 seconds=0.432 rate=9709037 rc=0
+RATE class32        clause5-soak class32  8x[lo,lo+2^19) units=4194304 seconds=0.070 rate=59918629 rc=0

@@ -1,0 +1,14 @@
+CONTROL T1 a div64-rne slice dropped from the record                   red at the check written for it
+        CHECK (final) all 68 items' slices and cases equal the report's tables exactly         FAILED [('div64-rne', (56, 14230224896), (57, 14498660352))]
+CONTROL T2 one random slice's seed moved by one                        red at the check written for it
+        CHECK (final) every random slice's seed is hw/card_stress_lib.py's base_seed + 7919 n  FAILED (3038 slices; [('sqrt64-rtz', 5)])
+CONTROL T3 an exhaustive slice shortened by one encoding               red at the check written for it
+        CHECK (final) every exhaustive item's slices tile [0, 2^32) exactly, with no overlap   FAILED ['class32']
+CONTROL T4 one slice reports a value mismatch                          red at the check written for it
+        CHECK (final) every sweep slice with a verdict passed: no disagreement in the record   FAILED 
+CONTROL T5 the run ended with exit 3                                   red at the check written for it
+        CHECK (final) a run_end record exists and says exit 0                                  FAILED (deadline)
+CONTROL T6 a starting state shared that the seed | 1 formula does not predict red at the check written for it
+        CHECK (final) the formula alone (seed | 1, same n) predicts exactly the pairs and slice counts in the record FAILED (52 pairs predicted, 53 seen)
+
+stress_records controls: all six tampered records were caught at their checks
