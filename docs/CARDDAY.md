@@ -954,7 +954,11 @@ printf it matches.
   leg is skipped, by name, with that reason. The driver does not compile them in the background;
   seed that directory from the lead's W8 images and it runs nine on the quad and one on the
   deep. The eight that compile in minutes compile once, on the first visit of the quad, and are
-  read back after.
+  read back after. The revision-8 set holds six more entries since 2026-10-19, the math library's
+  routine references (the section "Owed to the next card day (added 2026-10-19)" below), which this
+  table does not name: `REV8_ENTRIES` is hard-coded to the ten workloads and
+  `hw/test_card_stress.py` holds it to `REV8` in programs/acceptance.py, so the stress run does not
+  run the six until they are added to the quad's list here and to that test's count.
 - **The sweep** is hw/run-soak.sh's and hw/run-c5-soak.sh's campaigns - fp32 `sqrt32` under five
   attributes, fp32 `roundToIntegral` under five, `nextUp`, `nextDown`, `logB`, `class`, each over
   all 2^32 encodings, and the random banded `div32`, `div64`, `sqrt64` and clause-5 jobs with
@@ -1038,6 +1042,104 @@ no name for; anything about the card's rate or temperature (neither had been mea
 was written); or that a sweep disagrees only when the tile is wrong (the oracle is the host CPU;
 a disagreement is kept with its operands, and re-running the slice on the software backend,
 which the driver does not do, is the next step).
+
+## Owed to the next card day (added 2026-10-19): the math library's routine entries in the revision-8 set
+
+M1's build, item 6 (docs/ROADMAP.md, "The math library: experiment E1, then M1's build and M2 to
+M4"): STATUS[6] and the lane byte on a structured argument, and a routine case in the acceptance
+sets. Parcel MA built the software side (docs/VALIDATION.md, 2026-10-19): `programs/acceptance.py
+--set rev8` holds six routine entries after its ten workloads - the committed Lotka-Volterra
+(exp), diode (expm1, log1p) and culture (exp2, log, log2) references at fp64 and fp256, each with
+a structured lane on every tile that the routine marks. The driver's docstring ("The routine
+entries") is the definition. **Nothing here has touched the card or amd-arc-box.**
+
+Four facts that shape the commands:
+- **Quad only.** The rule puts all six on `u50-rev8-quad`, read from each image's own words
+  (1,537 to 3,642 instructions, 256 scratch slots declared, no R21). `--target u50-rev8-deep`
+  selects none of them: the driver prints `FAIL  the set: no entry of --only on u50-rev8-deep` and
+  exits 1 (MEASURED on the software backend), and `--target u50-rev8` does the same (READ: the
+  filter is the entry's target). rev8a and rev8d have no routine entry, and the set gives an entry
+  one target.
+- **The stress run does not run them** (the table above): `hw/card_stress.py` and its test hold the
+  ten workloads. Adding the six is a follow-up.
+- **The lane byte needs libcft's shared library.** A version-1 certificate carries no per-lane
+  block: cft-segrun asks the library for R23's byte a lane at format version 2 only, which refuses
+  a segment that marks a lane unless an image replays it. So the driver's *mark probe* re-runs
+  each segment from its certified start through libcft by ctypes (`--lib`), on the same device and
+  image at the same depth, and asks for the block. The library must be the XRT-linked one: built
+  without `XRT=1`, `cft_open` of an xclbin answers `no such device`.
+- **The record is the software backend's.** The card must reproduce it bit for bit: every
+  boundary, the flag words [29, 24, 24, 24], STATUS [64, 0, 0, 0], which lanes carry bit 7 (the
+  four structured ones, byte 0x90, segment 0 only) and each segment's block hash. A tile that does
+  not mark, marks another lane, or raises another flag fails by name.
+
+On amd-arc-box, from the root of the branch's checkout (no other card user: a manual run is a
+card user, and the stress run's guard sees it):
+
+    source /opt/xilinx/xrt/setup.sh
+    make -C host XRT=1 XRT_ROOT=/opt/xilinx/xrt cft-segrun cft-audit libcft.so
+    ldd host/cft-segrun | grep xrt        # libxrt_coreutil
+    ldd host/libcft.so  | grep xrt        # the same; none means an XRT=0 build
+    X=$HOME/cardday-rev8q/cft_hw_quad.xclbin
+    sha256sum $X                          # 4f9921a25af65444abc5c267fff1117a8e14abbc16a75de643e43c9dbf6ef53b
+    python3 programs/acceptance.py --set rev8 --legs set --device $X --target u50-rev8-quad \
+        --segrun host/cft-segrun --audit host/cft-audit --lib host/libcft.so \
+        --only lotkavolterra-rk4-tangent-fp64,lotkavolterra-rk4-tangent-fp256,diode-rk4-tangent-fp64,diode-rk4-tangent-fp256,culture-rk4-tangent-fp64,culture-rk4-tangent-fp256 \
+        > routines-rev8q.log 2>&1; echo rc=$?
+
+**What it must print** (the software backend's run, MEASURED; the card's differences are marked):
+- exit 0, and last, `acceptance rev8: 6 of 6 PASS on $X as u50-rev8-quad (set); 118 checks ok, 0
+  failed, N s`. The software backend counts 117: the marks' controls add one on a card, the
+  planted image (COMPUTED from the code, not run on a card). `N` is BELIEVED 150 to 300 (below).
+- six `PASS` lines, each `... on xrt, flags [29, 24, 24, 24], status [64, 0, 0, 0]; every digest
+  the set's, cft-audit accepts in full, no golden audit here (seq.py's cost), the spot check holds,
+  4 structured lanes mark (bit 7, STATUS[6])`, and per entry fourteen `ok` lines, among them (the
+  software backend's wording, a card's `xrt` and `device-tiles 4`):
+  - `the rule's image is u50-rev8-quad, read from the image's own words`
+  - `the certificate reads; backend xrt, device-xclbin 4f9921a25af65444, device-tiles 4, scratch
+    depth 4096` and `the device is u50-rev8-quad's tiles and depth`
+  - `the mark probe opened the certificate's device: xrt, 4 tiles, 4096 slots a lane, image
+    4f9921a25af65444`
+  - `the probe's 4 segments, re-run from their certified starts, end where the certificate's
+    boundaries do, bit for bit, with its flag words and STATUS`
+  - `R23's identities hold on every segment's block`
+  - `the structured lanes mark: lanes [3, 67, 131, 195] carry bit 7 of their byte (0x90) in segment
+    0 and its STATUS 0x40 carries STATUS[6]; bit 7 is set on no other lane of any segment,
+    STATUS[6] in no other segment` (lanes [3, 19, 35, 51] at fp256)
+  - `every boundary hash, flag word and STATUS is the set's (5 boundaries, flags [29, 24, 24, 24]),
+    and so are the marked lanes with their bytes and the 4 per-lane blocks' hashes`
+  - `cft-audit accepts it in full`, `the golden spot check`, `the golden mark check - segment 0`
+- then the controls, once: 16 `ok` lines (the set's), then the marks' controls, 17 (18 on a
+  card), none `FAIL`.
+- A failure names its check. A tile that does not mark is `the structured lanes mark: lane L (tile
+  T ...) has byte 0x10 in segment 0, without bit 7`; a STATUS that disagrees with the
+  certificate's, a flag word or an end state that does is under `the probe's 4 segments ... end
+  where the certificate's boundaries do`, and one that disagrees with the blocks under `R23's
+  identities`; a mark the record does not have is under `every boundary hash, flag word and
+  STATUS is the set's`, by lane; a library built without XRT is `the mark probe could not open
+  ...: no such device`.
+
+**Time.** The software backend took 113 s for the six at the stage's arguments on the desktop
+(niced, shared with other sessions; 67 s in a quieter hour; MEASURED). On the box: BELIEVED 150 to
+300 s, COMPUTED from the desktop's 67 to 113 s scaled by the box's pace against the desktop's (535
+s against 375 s for the acceptance stage, docs/VERIFICATION.md), plus the card's opens -
+cft-segrun's and the probe's, one each an entry - against 353 s for nine workloads on the quad
+(2026-10-12), 39 s an entry, the same host-side work. No card figure exists for these entries; a
+card run of a segment (256 lanes, ten steps) is BELIEVED well under a second.
+
+**Optional, the same day:**
+- `--golden all` on the same command adds the golden audit over every segment of every entry, on
+  seq.py, and holds cft-audit's verdict to it line for line. It accepts the marked segment 0
+  (MEASURED on the software backend, the desktop niced and shared, in three runs of under ten
+  minutes each): the audit over the four segments took 113 s for Lotka-Volterra at fp64 and 47 s at
+  fp256, 142 s and 44 s for the diodes, 156 s and 48 s for the culture, 550 s for the six - the same
+  host-side work on the box, BELIEVED about as long. Not in the default run, by seq.py's cost.
+- The remade record on the box, a determinism check of the record across platforms (Windows made
+  it): `python3 programs/acceptance.py --set rev8 --write --images /data/card-stress-rev8images`
+  on the software backend (no `--device`), then `git diff --stat programs/acceptance-rev8.json`
+  must print nothing. All sixteen entries; the desktop took 558 s, the box BELIEVED 10 to 15 minutes.
+- **Not on this day:** rev8d (the command above selects no entry there) and the stress run's
+  table (above).
 
 ## What to record
 
