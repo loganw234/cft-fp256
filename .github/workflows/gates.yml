@@ -127,7 +127,7 @@ jobs:
       - run: pip install pytest mpmath gmpy2 numpy
       # `docs` and `generated` lead because they are the two that catch
       # drift rather than breakage, and are cheap: about a minute each
-      # (on the maintainer's desktop on 2026-10-19, docs took 29 to 36 s
+      # (on the maintainer's desktop on 2026-10-19, docs took 29 to 39 s
       # and generated 45 to 74 s, the top of that with the library built
       # cold; since that day generated has included the status packager's
       # self-test, about 50 s of it, which needs no converter, no Pillow
