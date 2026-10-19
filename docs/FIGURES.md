@@ -11,10 +11,10 @@ the number in the figure.
 `verify/run.sh`, remakes everything in memory and fails by name on a figure, sidecar or caption that
 differs from a fresh generation, on an extract whose digests no longer hold, on a number or sentence
 that the README or another document states and a figure disagrees with, on an SVG outside what
-GitHub keeps or with a text clipped by its canvas or a mark drawn over its own source line, and on a
-ledger entry that states a kernel slack which the timing figure neither draws nor lists. It reads no
-git history, no network and no card, and then plants each of those faults in a scratch copy to show
-that it would catch it.
+GitHub keeps or with a text clipped by its canvas, a text drawn over another or a mark or a text
+drawn over its own source line, and on a statement in the ledger of a kernel slack (or of a negative
+WNS) which the timing figure neither draws nor lists. It reads no git history, no network and no
+card, and then plants each of those faults in a scratch copy to show that it would catch it.
 
 Each figure is a `<picture>`, so GitHub shows the reader's theme. The rules are
 `python/readme_charts.py`'s: literal geometry and colour only, no fonts, scripts or CSS variables.
@@ -201,25 +201,32 @@ layouts marked bold have been built.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="img/figures/hw-clock-dark.svg">
-  <img alt="Kernel slack against the clock for the 43 U50 builds the ledger states a kernel slack for, and the slack of the images built at 130 and 135 MHz in build order. One tile closes 175 MHz; four tiles close 135." src="img/figures/hw-clock-light.svg">
+  <img alt="Kernel slack against the clock for the 44 U50 builds this figure reads from the ledger, and the slack of the images built at 130 and 135 MHz in build order. One tile closes 175 MHz; four tiles close 135." src="img/figures/hw-clock-light.svg">
 </picture>
 
-**Shows.** 43 U50 builds the ledger states a kernel slack for, 5 of them missed. One tile closed 175
-MHz (by +0.001 ns, with the second recipe) and passed on the card. Four tiles closed 135 MHz 10
-times from 1 Sep, with slack from +0.003 to +0.143 ns, and missed it once with a kernel slack stated
+**Shows.** 44 U50 builds whose kernel slack this figure reads from the ledger, 5 of them missed. One
+tile closed 175 MHz (by +0.001 ns, with the second recipe) and passed on the card. Of the four-tile
+builds drawn, 10 closed 135 MHz from 1 Sep, with slack from +0.003 to +0.143 ns, and one missed it
 (round 2 quad, first try, -0.363; closed on a rebuild); at 145 they missed by -0.302. The long-shot
 build for 260 MHz missed by -3.163 ns and is off the chart.
 
-**Does not show.** Misses for which the ledger states only the whole design's slack and not the
-kernel's: one tile at 135 MHz, 1 Sep, -0.577 ns; four tiles at 135 MHz, 2 Sep, -0.141 ns; four tiles
-at 135 MHz, 2 Sep, -0.113 ns. They are not drawn, and neither are the ledger's out-of-context
-probes. What is drawn is every U50 build for which the ledger states a kernel slack, and the check
-holds that: it scans the ledger's pinned prefix on every run, and 21 of the 31 entries that state a
-kernel slack are drawn and the other 10 are listed with why (repeats of a drawn number, a citation,
-probes); likewise the 11 that state a negative WNS (6 drawn, 5 left out). The scan finds what its
-patterns can see, which the sidecar gives. A small positive slack is not a margin to build on: the
-ledger's own lesson (2026-09-01, line 340) is that an achieved-period reading from a hopelessly
-over-constrained run understates what the router does for an achievable target.
+**Does not show.** Other slacks the ledger gives. The entries that record three misses at 135 MHz
+give the whole design's slack and no kernel slack of their own: one tile at 135 MHz, 1 Sep, -0.577
+ns; four tiles at 135 MHz, 2 Sep, -0.141 ns; four tiles at 135 MHz, 2 Sep, -0.113 ns. The extract
+lists 42 other figures of slack, each with why it is not drawn: 8 repeats of a drawn build's slack,
+3 mentions of one, 6 other numbers of drawn builds (an earlier stage of a run, the whole design's,
+another clock), 3 misses recorded only with the whole design's slack, 9 out-of-context probes, 5
+figures of other designs and parts, 8 builds named only in running text. The builds named only in
+running text are: rev7a probe single +0.065; first sweep, 115 MHz +0.409; first sweep, 145 MHz
++0.084; first sweep, 175 MHz -0.562; build-seq135s -0.286; single one commit earlier, 135 MHz
++0.045; single, retiming on, 135 MHz +0.045; build-diet-quad -0.113. The check accounts for every
+statement of the two forms its patterns read in the ledger's pinned prefix (50 kernel-slack
+statements, 34 of them a drawn build's; 17 negative-WNS statements, 5 of them a drawn build's; the
+rest are listed), so a new one fails until it is drawn or listed. It finds what its patterns read:
+the 9 items listed by hand are what a reader found, and this page does not say there are no others.
+A small positive slack is not a margin to build on: the ledger's own lesson (2026-09-01, line 340)
+is that an achieved-period reading from a hopelessly over-constrained run understates what the
+router does for an achievable target.
 
 **Source.** `docs/figures/ledger.json` (ledger, first 1,891,030 bytes). Remade by `python
 python/project_figures.py --only hw-clock --write`; the numbers and digests are in
@@ -369,8 +376,8 @@ passed, 54 skipped by design, and none failed, timed out, lost the device or fai
 visited the quad 45 times, the single 11 and the deep single 11, against weights of 4, 1 and 1. It
 ended at 2026-10-19 08:01 on the box's clock; the reason it recorded is deadline, and the last visit
 (the quad's 45th, cycle 67) was cut by the deadline after 7 of the battery's 12 legs, so seq-check,
-acceptance, acceptance-rev8, resident and selftest show one pass fewer on the quad and it ran no
-sweep slice.
+acceptance, acceptance-rev8, resident and selftest were reached, run or skipped by design, on 44 of
+its 45 visits (selftest's cell reads 15 passes and 29 skips, 44 in all) and it ran no sweep slice.
 
 **Does not show.** How hard the card was driven: the legs are short tests and soak slices, and 69%
 of the sweep's cases ran in host code, where the tile does no work (see stress-sweep). Nor that the
@@ -440,7 +447,7 @@ python/project_figures.py --only stress-sweep --write`; the numbers and digests 
 | extract | what it is | read at | remake |
 |---|---|---|---|
 | `docs/figures/history.json` | commits per day and the areas each touched, the merges apart, and the ABI steps' dates | 0b77387 | `python python/figure_extracts.py history --as-of 0b77387ea1266f4d4a5e30c8798f57e8b6dc6ef8` |
-| `docs/figures/ledger.json` | the U50 builds the ledger states a kernel slack for (kernel WNS by image, tiles and clock), what else it states a slack for and why that is not drawn, and the ledger's milestones, read out of docs/VALIDATION.md by patterns that name the entry | ledger, first 1,891,030 bytes | `python python/figure_extracts.py ledger` |
+| `docs/figures/ledger.json` | the U50 builds whose kernel slack the figures read from the ledger (kernel WNS by image, tiles and clock), the other slacks it gives and why each is not drawn, the scan that accounts for every statement its two patterns find, and the ledger's milestones, read out of docs/VALIDATION.md by patterns that name the entry | ledger, first 1,891,030 bytes | `python python/figure_extracts.py ledger` |
 | `docs/figures/stress.json` | the card's long stress run (card-stress-1016), reduced from its metrics.jsonl: the legs, the cycles, the telemetry, and the sweep with its tile items and host items apart | run ended 2026-10-19 08:01:13 | `python python/figure_extracts.py stress PATH/metrics.jsonl --report PATH/report.txt` |
 | `docs/figures/tree.json` | the tree at the end of each day on main's own line: text lines by area, the ledger's size and line traffic, and the size of the gate | 0b77387 | `python python/figure_extracts.py tree --as-of 0b77387ea1266f4d4a5e30c8798f57e8b6dc6ef8` |
 

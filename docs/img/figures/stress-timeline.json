@@ -62,7 +62,7 @@
   },
   {
    "id": "cut-visit",
-   "claim": "the last visit was cut by the deadline: the quad's legs it ran count one more than the ones it did not",
+   "claim": "the last visit was cut by the deadline: the quad's legs it ran count one more than the ones it did not (a leg skipped by design counts as reached)",
    "document": "docs/figures/stress.json",
    "drawn": "7 legs of 12 ran",
    "stated": "per-leg counts agree",
@@ -1221,7 +1221,14 @@
    "visit": 45,
    "legs_run": 7,
    "legs_of": 12,
-   "not_run": ["seq-check", "acceptance", "acceptance-rev8", "resident", "selftest"]
+   "not_run": ["seq-check", "acceptance", "acceptance-rev8", "resident", "selftest"],
+   "split": [
+    {
+     "leg": "selftest",
+     "pass": 15,
+     "skipped": 29
+    }
+   ]
   },
   "hours": 61.0472,
   "host_case_share": 0.694363

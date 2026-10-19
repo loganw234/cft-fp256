@@ -34,12 +34,13 @@ byte, with the committed files, and fails by name on:
     present, or that no figure reads;
   - a number the record states that a figure disagrees with, or a statement that
     has quietly stopped being there - see CLAIMS below;
-  - an SVG GitHub's sanitiser would not keep, a text the canvas clips or a mark
-    drawn over the figure's own source line (by the kit's estimate of text
-    widths: svg_lint and svg_layout);
-  - a ledger entry that states a kernel slack (or a negative WNS) which the
+  - an SVG GitHub's sanitiser would not keep, a text the canvas clips, a text
+    drawn over another, or a mark or a text drawn over the figure's own source
+    line (by the kit's estimate of text widths: svg_lint and svg_layout);
+  - a statement in the ledger of a kernel slack (or a negative WNS) which the
     timing figure neither draws nor lists as left out, with the reason: the
-    extract's scan of the pinned prefix of docs/VALIDATION.md, repeated here;
+    extract's scan of the pinned prefix of docs/VALIDATION.md, statement by
+    statement, repeated here;
   - a personal path in anything it writes.
 Then it plants each of those faults in a scratch copy and requires the check to
 name it: a check that cannot fail is a defect (HonestFramework, METHOD 3), so
@@ -496,7 +497,7 @@ def draw_perf_speedup(theme, d, meta):
                "word is who the software was.", meta["alt"])
     T = p.T
     cw, rh = 80.0, 38.0
-    lx = 130.0
+    lx = 170.0                      # room for the widest row label ("fused multiply-add", bold) even in a wide font
     blocks = [("x86-64", "an x86-64 workstation", lx), ("arm64", "an M2 Pro laptop", lx + 4 * cw + 38)]
     rows = [(op, t) for op in ("mul", "fma", "add") for t in (1, 4)]
     top = 150.0
@@ -1265,7 +1266,7 @@ def build_hw_area(src, claims):
 def draw_hw_area(theme, d, meta):
     W = 900
     n = len(d["layouts"])
-    H = int(236 + n * 27 + 96)
+    H = int(242 + n * 27 + 96)
     p = K.Plot(theme, W, H, meta["title"],
                "Top: the logic cells one tile costs, out of context, split by the four banks of FMA lanes and the shared "
                "machinery. Below: every tile mix the layout generator catalogues for the U50, as a share of the part's "
@@ -1286,7 +1287,7 @@ def draw_hw_area(theme, d, meta):
         xx += v
     p.text(x0, y - 8, "one tile, out of context: %s LUTs" % K.with_commas(t["full"]), size=11.5, weight="600")
     # the catalogue
-    cy0 = y + 78
+    cy0 = y + 84
     lx0, lx1 = 250.0, 730.0
     sc = K.Lin(0, 100, lx0, lx1)
     p.text(24, cy0 - 12, "layouts, as a share of the U50's logic cells", size=11.5, weight="600")
@@ -1316,8 +1317,9 @@ def draw_hw_area(theme, d, meta):
                                      (d["limit"], "routing limit", T["lose"], "start", 4)):
         p.line(sc(pct_), cy0 - 2, sc(pct_), cy0 + n * 27, col, 1.4, dash="5 4")
         p.text(sc(pct_) + dx, cy0 - 5, "%.0f%% %s" % (pct_, lab), size=9.5, fill=col, anchor=anch)
-    p.text(lx1 + 10, cy0 - 5, "of the part", size=9.5, fill=T["muted"])
-    p.text(lx1 + 66, cy0 - 5, "clocks, MHz", size=9.5, fill=T["muted"])
+    # the two columns' heads, one row above the threshold labels (which run on to the right of the 85% line)
+    p.text(lx1 + 10, cy0 - 17, "share", size=9.5, fill=T["muted"])
+    p.text(lx1 + 66, cy0 - 17, "clocks, MHz", size=9.5, fill=T["muted"])
     for k, line in enumerate(K.wrap(
             "Grey: the shell and crossbar. Bold names are the two layouts built so far; the others are placeholders until "
             "narrow variants are packaged. * a clock target, not a measurement. The model is about 2%% optimistic: it "
@@ -1345,8 +1347,9 @@ def caption_hw_area(d):
 
 
 # ---------------------------------------------------------------- hw-clock
-# the images built at 130 and 135 MHz, in the order they were built: a row a build, the ids of its attempts
+# the images built at 130 and 135 MHz that are drawn, in the order they were built: a row a build, the ids of its attempts
 HW_LINEAGE = (("bac9f550 (130 MHz)", ("bac9f550-single", "bac9f550-quad")),
+              ("control (130 MHz)", ("control-130-single",)),
               ("b1a014c (130 MHz)", ("ms-single", "ms-quad")),
               ("39fc2c0", ("135-single", "135-quad")),
               ("0e7264e, case ROM", ("caserom-single",)),
@@ -1366,7 +1369,7 @@ HW_LINEAGE = (("bac9f550 (130 MHz)", ("bac9f550-single", "bac9f550-quad")),
 
 
 @figure("hw-clock", "hardware", "How far the clock was pushed, and what it left in slack",
-        lambda d: "Kernel slack against the clock for the %d U50 builds the ledger states a kernel slack for, and the "
+        lambda d: "Kernel slack against the clock for the %d U50 builds this figure reads from the ledger, and the "
                   "slack of the images built at 130 and 135 MHz in build order. One tile closes %d MHz; four tiles "
                   "close %d." % (len(d["attempts"]), d["max_single"], d["max_quad"]))
 def build_hw_clock(src, claims):
@@ -1382,24 +1385,29 @@ def build_hw_clock(src, claims):
                "README.md", "%d MHz, %s" % (top["mhz"], top["date"]),
                ("%s MHz, %s" % (m.group(1), m.group(2))) if m else None,
                bool(m) and (int(m.group(1)), m.group(2)) == (top["mhz"], top["date"]))
-    # "every": the extract's scan of the pinned ledger prefix (repeated by --check) accounts for each entry that states
-    # a kernel slack or a negative WNS, as drawn or as left out with its reason
+    # What the figure does NOT say: that these are all the builds the ledger gives a slack for. What the extract's scan
+    # of the pinned ledger prefix (repeated by --check) accounts for is each STATEMENT of the two forms its patterns read:
+    # its number is a drawn build's or a listed item's. That is a claim about the scan, and the counts below are its.
     acc = led["accounting"]
+    ids = {a["id"] for a in att}
     scan = {}
     for rule, what in (("kernel", "a kernel slack"), ("negative", "a negative WNS")):
-        rows = acc[rule]
-        nd = sum(1 for r in rows if "drawn" in r)
-        nl = sum(1 for r in rows if "left_out" in r)
-        scan[rule] = {"entries": len(rows), "drawn": nd, "left_out": nl}
-        claims.add("every-" + rule, "every entry of the ledger's pinned prefix that states %s is drawn or listed as left "
-                   "out, with the reason (a scan, repeated by --check)" % what, X.EXTRACT_DIR + "/ledger.json",
-                   "%d entries" % len(rows), "%d drawn and %d left out" % (nd, nl), nd + nl == len(rows))
-    drawn_ids = {i for _l, ids in HW_LINEAGE for i in ids}
+        rows = [r for r in acc["statements"] if r[0] == rule]
+        nd = sum(1 for r in rows if r[4] in ids)
+        scan[rule] = {"statements": len(rows), "drawn": nd, "listed": len(rows) - nd}
+        claims.add("scan-" + rule, "each statement of %s that the scan's rule finds in the ledger's pinned prefix carries "
+                   "the slack of a drawn build or of a listed item (a scan, repeated by --check; it finds what its rule "
+                   "reads)" % what, X.EXTRACT_DIR + "/ledger.json", "%d statements" % len(rows),
+                   "%d drawn and %d listed" % (nd, len(rows) - nd), nd + (len(rows) - nd) == len(rows))
+    drawn_ids = {i for _l, ids_ in HW_LINEAGE for i in ids_}
     stray = [a["id"] for a in att if 130 <= a["mhz"] <= 135 and a["id"] not in drawn_ids]
     if stray:
         raise X.ExtractError("hw-clock: the 130 and 135 MHz attempts %s are in no row of HW_LINEAGE (add them, in build "
                              "order)" % ", ".join(stray))
-    return {"attempts": att, "left_out": led["left_out"], "scan": scan,
+    kinds = {}
+    for l in led["left_out"]:
+        kinds[l["kind"]] = kinds.get(l["kind"], 0) + 1
+    return {"attempts": att, "left_out": led["left_out"], "kinds": kinds, "scan": scan,
             "rules": {"kernel": acc["kernel_rule"], "negative": acc["negative_rule"]},
             "max_single": max_single, "max_quad": max_quad, "n_missed": len(att) - len(closed),
             "proven": top["mhz"], "quote": led["quotes"][0]}
@@ -1430,19 +1438,30 @@ def _whole_design_text(d):
                                                     K.day_short(l["date"]), l["wns"]) for l in items)
 
 
+def _kinds_text(d):
+    """'8 repeats of a drawn build's slack, 3 mentions of one, ...' from the extract's kinds, in the extract's order."""
+    return ", ".join("%d %s" % (d["kinds"][k], words) for k, words in X.KIND_WORDS if d["kinds"].get(k))
+
+
+def _texts_text(d):
+    """The builds named only in running text, by label and slack."""
+    return "; ".join("%s %+.3f" % (l["label"], l["wns"]) for l in d["left_out"] if l["kind"] == "text")
+
+
 @build_hw_clock.drawer
 def draw_hw_clock(theme, d, meta):
     W, H = 900, 700
     p = K.Plot(theme, W, H, meta["title"],
-               "The slack of the kernel's worst path for every U50 build the ledger states it for, read out of "
-               "docs/VALIDATION.md; a scan of the ledger, repeated on every check, holds that none is missing (the rule is "
-               "in the sidecar). A build closes timing when its slack is not negative. Left: slack against the clock it was "
-               "built at. Right: the images built at 130 and 135 MHz, in the order they were built.", meta["alt"])
+               "The slack of the kernel's worst path for the U50 builds this figure reads from docs/VALIDATION.md: for each, "
+               "a pattern that names the build's entry and captures the figure the ledger states there. A build closes timing "
+               "when its slack is not negative. Left: slack against the clock it was built at. Right: the drawn images built at "
+               "130 and 135 MHz, in the order they were built. The ledger's other slacks (repeats, probes, other designs, builds "
+               "named only in running text) are listed in the sidecar, not drawn.", meta["alt"])
     T = p.T
     att = [a for a in d["attempts"] if a["mhz"] < 200]
     off = [a for a in d["attempts"] if a["mhz"] >= 200]
     ylo, yhi = -0.45, 0.65
-    ay0, ay1 = 166.0, 486.0
+    ay0, ay1 = 176.0, 496.0
     Y = K.Lin(ylo, yhi, ay1, ay0)
     colr = {1: T["cats"][0], 4: T["cats"][1]}
 
@@ -1492,7 +1511,7 @@ def draw_hw_clock(theme, d, meta):
     lineage = HW_LINEAGE
     rx0, rx1 = 640.0, 876.0
     X2 = K.Lin(-0.45, 0.65, rx0, rx1)
-    p.text(500, ay0 - 14, "slack of every 130 and 135 MHz image, in build order", size=11.5, weight="600")
+    p.text(500, ay0 - 14, "slack of the 130 and 135 MHz images drawn, in build order", size=11.5, weight="600")
     rowh = (ay1 - ay0) / float(len(lineage))
     p.panel(rx0, ay0, rx1, ay1)
     for v in (-0.4, -0.2, 0, 0.2, 0.4, 0.6):
@@ -1519,9 +1538,10 @@ def draw_hw_clock(theme, d, meta):
     sw = [a for a in d["attempts"] if a["id"].startswith("sweep-") and a["closed"]]
     swp = [a for a in sw if a["card"] and a["card"].endswith("pass")]
     q135 = [a["wns"] for a in d["attempts"] if a["tiles"] == 4 and a["closed"] and a["mhz"] == 135]
-    text = ("Missed, of %d builds with a stated kernel slack: %s. Every other one closed. The sweep's closed points (%s MHz) "
-            "passed the conformance set on the card at %d of %d; the quad closed 135 MHz %d times with slack from %+.3f to "
-            "%+.3f ns. Not drawn, because the ledger states only the whole design's slack for them: %s."
+    text = ("Missed, of the %d builds drawn: %s. Every other one drawn closed. The sweep's closed points (%s MHz) passed the "
+            "conformance set on the card at %d of %d; of the four-tile builds drawn, %d closed 135 MHz, with slack from %+.3f "
+            "to %+.3f ns. Not drawn: the ledger's other slacks, listed in the sidecar - among them three misses at 135 MHz "
+            "that the ledger records with the whole design's slack only (%s)."
             % (len(d["attempts"]),
                "; ".join("%s at %d MHz, %+.3f (%s)" % ("one tile" if a["tiles"] == 1 else "four tiles", a["mhz"], a["wns"],
                                                       K.day_short(a["date"])) for a in missed),
@@ -1536,35 +1556,35 @@ def draw_hw_clock(theme, d, meta):
 @build_hw_clock.captioner
 def caption_hw_clock(d):
     att = d["attempts"]
-    closed = [a for a in att if a["closed"]]
     q135 = [a for a in att if a["tiles"] == 4 and a["mhz"] == 135]
     q135c = [a for a in q135 if a["closed"]]
     q135m = [a for a in q135 if not a["closed"]]
     first = min(a["date"] for a in q135c)
     best = [a for a in att if a["id"] == "sweep-175-extra"][0]
     q = d["quote"]
-    sc = d["scan"]
-    return {"shows": "%d U50 builds the ledger states a kernel slack for, %d of them missed. One tile closed %d MHz (by "
-                     "%+.3f ns, with the second recipe) and passed on the card. Four tiles closed 135 MHz %d times from "
-                     "%s, with slack from %+.3f to %+.3f ns, and missed it %s with a kernel slack stated (%s; closed on a "
+    sk, sn = d["scan"]["kernel"], d["scan"]["negative"]
+    nman = sum(1 for l in d["left_out"] if l["manual"])
+    return {"shows": "%d U50 builds whose kernel slack this figure reads from the ledger, %d of them missed. One tile closed "
+                     "%d MHz (by %+.3f ns, with the second recipe) and passed on the card. Of the four-tile builds drawn, "
+                     "%d closed 135 MHz from %s, with slack from %+.3f to %+.3f ns, and %s missed it (%s; closed on a "
                      "rebuild); at 145 they missed by %.3f. The long-shot build for 260 MHz missed by %.3f ns and is off "
                      "the chart." % (
                          len(att), d["n_missed"], d["max_single"], best["wns"], len(q135c), K.day_short(first),
                          min(a["wns"] for a in q135c), max(a["wns"] for a in q135c),
-                         {1: "once", 2: "twice"}.get(len(q135m), "%d times" % len(q135m)),
+                         {1: "one", 2: "two"}.get(len(q135m), "%d" % len(q135m)),
                          "; ".join("%s, %+.3f" % (a["label"], a["wns"]) for a in q135m),
                          [a for a in att if a["id"] == "bracket-quad-145"][0]["wns"],
                          [a for a in att if a["id"] == "long-shot-260"][0]["wns"]),
-            "not": "Misses for which the ledger states only the whole design's slack and not the kernel's: %s. They are "
-                   "not drawn, and neither are the ledger's out-of-context probes. What is drawn is every U50 build for which "
-                   "the ledger states a kernel slack, and the check holds that: it scans the ledger's pinned prefix on every "
-                   "run, and %d of the %d entries that state a kernel slack are drawn and the other %d are listed with why "
-                   "(repeats of a drawn number, a citation, probes); likewise the %d that state a negative WNS (%d drawn, %d "
-                   "left out). The scan finds what its patterns can see, which the sidecar gives. A small positive slack is "
-                   "not a margin to build on: the ledger's own lesson (%s, line %d) is that %s." % (
-                       _whole_design_text(d), sc["kernel"]["drawn"], sc["kernel"]["entries"], sc["kernel"]["left_out"],
-                       sc["negative"]["entries"], sc["negative"]["drawn"], sc["negative"]["left_out"],
-                       q["entry"][:10], q["line"], q["text"])}
+            "not": "Other slacks the ledger gives. The entries that record three misses at 135 MHz give the whole design's "
+                   "slack and no kernel slack of their own: %s. The extract lists %d other figures of slack, each with why "
+                   "it is not drawn: %s. The builds named only in running text are: %s. The check accounts for "
+                   "every statement of the two forms its patterns read in the ledger's pinned prefix (%d kernel-slack "
+                   "statements, %d of them a drawn build's; %d negative-WNS statements, %d of them a drawn build's; the rest "
+                   "are listed), so a new one fails until it is drawn or listed. It finds what its patterns read: the %d "
+                   "items listed by hand are what a reader found, and this page does not say there are no others. A small "
+                   "positive slack is not a margin to build on: the ledger's own lesson (%s, line %d) is that %s." % (
+                       _whole_design_text(d), len(d["left_out"]), _kinds_text(d), _texts_text(d), sk["statements"],
+                       sk["drawn"], sn["statements"], sn["drawn"], nman, q["entry"][:10], q["line"], q["text"])}
 
 
 # ----------------------------------------------------------------- math-cost
@@ -2108,8 +2128,10 @@ def build_stress_timeline(src, claims):
             want = n_vis if i < cut["legs_run"] else n_vis - 1
             if have != want:
                 bad.append("%s %d (want %d)" % (leg, have, want))
+        cut["split"] = [{"leg": leg, "pass": idx[(cut["image"], leg)]["pass"], "skipped": idx[(cut["image"], leg)]["skipped"]}
+                        for leg in cut["not_run"] if idx.get((cut["image"], leg)) and idx[(cut["image"], leg)]["skipped"]]
         claims.add("cut-visit", "the last visit was cut by the deadline: the %s's legs it ran count one more than the ones it "
-                   "did not" % cut["image"], X.EXTRACT_DIR + "/stress.json",
+                   "did not (a leg skipped by design counts as reached)" % cut["image"], X.EXTRACT_DIR + "/stress.json",
                    "%d legs of %d ran" % (cut["legs_run"], cut["legs_of"]),
                    "per-leg counts agree" if not bad else "disagree: " + ", ".join(bad), not bad)
     return {"run": run, "legs": legs, "cycles": s["cycles"], "cycles_n": len(s["cycles"]), "matrix": s["matrix"],
@@ -2122,10 +2144,13 @@ def _cut_clause(cut):
     if not cut:
         return ""
     nr = cut["not_run"]
-    return ("the last visit (the %s's %s, cycle %d) was cut by the deadline after %d of the battery's %d legs, so %s show "
-            "one pass fewer on the %s and it ran no sweep slice" % (
+    split = "; ".join("%s's cell reads %d passes and %d skips, %d in all" % (s["leg"], s["pass"], s["skipped"],
+                                                                           s["pass"] + s["skipped"]) for s in cut["split"])
+    return ("the last visit (the %s's %s, cycle %d) was cut by the deadline after %d of the battery's %d legs, so %s were "
+            "reached, run or skipped by design, on %d of its %d visits%s and it ran no sweep slice" % (
                 cut["image"], _ordinal(cut["visit"]), cut["cycle"], cut["legs_run"], cut["legs_of"],
-                (", ".join(nr[:-1]) + " and " + nr[-1]) if len(nr) > 1 else "".join(nr), cut["image"]))
+                (", ".join(nr[:-1]) + " and " + nr[-1]) if len(nr) > 1 else "".join(nr), cut["visit"] - 1, cut["visit"],
+                (" (%s)" % split) if split else ""))
 
 
 def _ordinal(n):
@@ -2154,7 +2179,7 @@ def draw_stress_timeline(theme, d, meta):
     for val, lab in kpis:
         p.text(kx, 124, val, size=22, weight="600", mono=True)
         p.text(kx, 141, lab, size=10.5, fill=T["muted"])
-        kx += 146
+        kx += max(K.tw(val, 22, True), K.tw(lab, 10.5)) + 34         # room for the wider of the two, and for a wide font
     # the timeline
     x0, x1 = 90.0, 870.0
     total = run["seconds"]
@@ -2476,8 +2501,7 @@ def draw_stress_sweep(theme, d, meta):
     span = int(math.ceil(last_s / 3600.0 * 1.08))
     sx = K.Lin(0, span * 3600.0, ax0, ax1)
     sy = K.Lin(0, 100, ay1, ay0)
-    p.text(24, ay0 - 14, "the %d exhaustive items, each all 2^32 encodings: share covered, by hour" % len(d["coverage"]),
-           size=11.5, weight="600")
+    p.text(24, ay0 - 14, "the %d exhaustive items: share of 2^32 covered" % len(d["coverage"]), size=11.5, weight="600")
     p.panel(ax0, ay0, ax1, ay1)
     for v in (0, 25, 50, 75, 100):
         p.line(ax0, sy(v), ax1, sy(v), T["grid"], 1)
@@ -2637,10 +2661,10 @@ GALLERY_INTRO = (
     "`python python/project_figures.py --check`, which is the `generated` stage's seventh generator in `verify/run.sh`, "
     "remakes everything in memory and fails by name on a figure, sidecar or caption that differs from a fresh generation, "
     "on an extract whose digests no longer hold, on a number or sentence that the README or another document states and a "
-    "figure disagrees with, on an SVG outside what GitHub keeps or with a text clipped by its canvas or a mark drawn over "
-    "its own source line, and on a ledger entry that states a kernel slack which the timing figure neither draws nor "
-    "lists. It reads no git history, no network and no card, and then plants each of those faults in a scratch copy to "
-    "show that it would catch it.",
+    "figure disagrees with, on an SVG outside what GitHub keeps or with a text clipped by its canvas, a text drawn over "
+    "another or a mark or a text drawn over its own source line, and on a statement in the ledger of a kernel slack (or "
+    "of a negative WNS) which the timing figure neither draws nor lists. It reads no git history, no network and no "
+    "card, and then plants each of those faults in a scratch copy to show that it would catch it.",
     "Each figure is a `<picture>`, so GitHub shows the reader's theme. The rules are `python/readme_charts.py`'s: literal "
     "geometry and colour only, no fonts, scripts or CSS variables. The README's own two charts (`docs/img/bench/`) are not "
     "repeated here.")
@@ -2787,11 +2811,18 @@ def _overlap(a, b):
     return a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]
 
 
+# Two texts are "drawn over each other" when their boxes overlap by more than this many px across and down. A box is
+# the full em, ascent and descent both, so lines set 9 or 10 px apart touch by a pixel or two without their ink
+# touching; and the estimate of a width is already generous (0.58 em for the sans stack, 0.61 for the mono one).
+TEXT_OVERLAP = (2.0, 3.0)
+
+
 def svg_layout(text):
     """The reasons a figure would look broken in any renderer, by the kit's own estimate of text widths: a text that
-    runs off the canvas, and anything drawn over the footer (the source lines at the bottom). It cannot see a figure's
-    meaning, only that nothing is clipped or drawn on top of the line that says where the numbers came from. An SVG
-    with no width and height (a stub) has no canvas to check."""
+    runs off the canvas, a text drawn over another text, and anything drawn over the footer (the source lines at the
+    bottom). It cannot see a figure's meaning, only that nothing is clipped, nothing is written on top of a label and
+    nothing is drawn on top of the line that says where the numbers came from. An SVG with no width and height (a
+    stub) has no canvas to check."""
     m = re.search(r'<svg [^>]*?\bwidth="(\d+)" height="(\d+)"', text)
     if not m:
         return []
@@ -2813,6 +2844,19 @@ def svg_layout(text):
             out.append("text %r runs off the right edge of the canvas by about %d px" % (s[:40], box[2] - W))
         if box[0] < 0:
             out.append("text %r runs off the left edge of the canvas" % s[:40])
+    # two labels written over each other: sweep the boxes by their left edge, so that only neighbours are compared
+    order = sorted(range(len(texts)), key=lambda k: texts[k][0][0])
+    for pos, i in enumerate(order):
+        a = texts[i][0]
+        for j in order[pos + 1:]:
+            b = texts[j][0]
+            if b[0] >= a[2] - TEXT_OVERLAP[0]:
+                break
+            down = min(a[3], b[3]) - max(a[1], b[1])
+            if down > TEXT_OVERLAP[1] and min(a[2], b[2]) - b[0] > TEXT_OVERLAP[0]:
+                first, second = sorted((i, j))
+                out.append("text %r is drawn over text %r (by about %d x %d px)" % (
+                    texts[first][4][:30], texts[second][4][:30], min(a[2], b[2]) - b[0], down))
     # the footer: the trailing run of 10 px lines at x = 24, 13 px apart, the last 8 px above the bottom edge
     foot = []
     for item in reversed(texts):
@@ -3022,10 +3066,20 @@ def controls(root, results):
             plant("a build the ledger states a kernel slack for, which the extract no longer draws or lists (its own digest "
                   "made to agree)",
                   lambda t: {led_rel: _drop_attempt(t / led_rel, "tip-quad")},
-                  r"^extract ledger: the ledger states a kernel slack in the entry headed")
+                  r"^extract ledger: the ledger states a kernel slack \+0\.143 ")
+            plant("a second build's slack stated inside an entry that is drawn (the ledger prefix edited, the extract's "
+                  "digest of it made to agree, so that only the scan can notice)",
+                  lambda t: _plant_statement(t, led_rel),
+                  r"^extract ledger: the ledger states a kernel slack \+0\.321 ")
+            plant("the scan rules the extract records no longer the script's (its own digest made to agree)",
+                  lambda t: {led_rel: _edit_rule(t / led_rel)},
+                  r"^extract ledger: the scan rules it records are not the script's")
             plant("a left-out entry whose number no longer equals the attempt it repeats (its own digest made to agree)",
                   lambda t: {led_rel: _bump_left_out(t / led_rel)},
                   r"^extract ledger: left-out item \S+ says \S+ where the attempt it repeats")
+            plant("the extract's record of the statements its scan found, edited (its own digest made to agree)",
+                  lambda t: {led_rel: _edit_statements(t / led_rel)},
+                  r"^extract ledger: its record of the statements the scan finds no longer matches")
         else:
             failures.append("NEGATIVE CONTROL FAILED TO FAIL: there is no ledger extract to plant the unaccounted build in")
         # and the rest of what the check claims to catch
@@ -3138,12 +3192,39 @@ def controls(root, results):
                  '<svg xmlns="http://www.w3.org/2000/svg" width="900" height="100" viewBox="0 0 900 100" role="img" '
                  'aria-label="x"><rect x="30.0" y="84.0" width="14.0" height="10.0" fill="#0969da"/><text x="24.0" '
                  'y="92.0" font-family="%s" font-size="10" fill="#656d76">source: x</text></svg>' % K.FONT,
-                 "is drawn over the footer")):
+                 "is drawn over the footer"),
+                ("an SVG with a label written over its footer",
+                 '<svg xmlns="http://www.w3.org/2000/svg" width="900" height="100" viewBox="0 0 900 100" role="img" '
+                 'aria-label="x"><text x="40.0" y="90.0" font-family="%s" font-size="11" fill="#1f2328">a label</text>'
+                 '<text x="24.0" y="92.0" font-family="%s" font-size="10" fill="#656d76">source: x</text></svg>'
+                 % (K.FONT, K.FONT),
+                 "overlaps the footer"),
+                ("an SVG with one label written over another",
+                 '<svg xmlns="http://www.w3.org/2000/svg" width="900" height="100" viewBox="0 0 900 100" role="img" '
+                 'aria-label="x"><text x="100.0" y="50.0" font-family="%s" font-size="10.5" fill="#656d76">failed, '
+                 'timed out or lost</text><text x="200.0" y="50.0" font-family="%s" font-size="10.5" '
+                 'fill="#656d76">cycles</text></svg>' % (K.FONT, K.FONT),
+                 "is drawn over text")):
             hit = [x for x in svg_lint(bad_svg) if want in x]
             if hit:
                 report.append("%s -> %s" % (label, hit[0]))
             else:
                 failures.append("NEGATIVE CONTROL FAILED TO FAIL: the SVG lint passed %s" % label)
+        # and it must not cry wolf: lines set 9 px apart and labels that touch end to end have boxes that overlap by a
+        # pixel or two (a box is the full em) while their ink does not, and the figures set many such
+        touching = ('<svg xmlns="http://www.w3.org/2000/svg" width="900" height="100" viewBox="0 0 900 100" role="img" '
+                    'aria-label="x"><text x="24.0" y="40.0" font-family="%s" font-size="10.5" fill="#656d76">178-181'
+                    '</text><text x="24.0" y="49.0" font-family="%s" font-size="10.5" fill="#656d76">185-188</text>'
+                    '<text x="200.0" y="40.0" font-family="%s" font-size="10.5" fill="#656d76">abut</text>'
+                    '<text x="223.0" y="40.0" font-family="%s" font-size="10.5" fill="#656d76">ting</text></svg>'
+                    % (K.FONT, K.FONT, K.FONT, K.FONT))
+        wolf = svg_lint(touching)
+        if wolf:
+            failures.append("CONTROL FAILED: the SVG lint cried wolf over lines set 9 px apart and labels that touch "
+                            "end to end: %s" % wolf[0])
+        else:
+            report.append("lines set 9 px apart and labels that touch end to end -> no problem, as it should be "
+                          "(not counted as a fault)")
         try:
             with tripwire():
                 subprocess.run(["git", "--version"], capture_output=True)
@@ -3256,6 +3337,42 @@ def _drop_attempt(path, aid):
     before = len(ex["data"]["attempts"])
     ex["data"]["attempts"] = [a for a in ex["data"]["attempts"] if a["id"] != aid]
     assert len(ex["data"]["attempts"]) == before - 1, aid
+    ex["body_sha256"] = X.body_digest(ex["data"])
+    return X.dumps(ex)
+
+
+def _plant_statement(t, led_rel):
+    """The scratch ledger with a second build's kernel slack stated in a line of the tip quad's entry, which is drawn
+    (a same-length replacement inside the pinned prefix), and the extract's record of the prefix's digest made to agree:
+    an entry-level scan finds nothing wrong here, a statement-level one finds the +0.321."""
+    ex = json.loads((t / led_rel).read_text(encoding="utf-8"))
+    src = ex["sources"][0]
+    path = t / src["path"]
+    data = bytearray(path.read_bytes())
+    prefix = bytes(data[:src["bytes"]]).decode("utf-8")
+    at = prefix.index("## 2026-09-02 - the tip quad closes at 135 MHz")
+    plant = "kernel WNS +0.321 ns at 135 MHz, a plant"
+    pos = prefix.index("\n\n", at) + 2             # the first paragraph after the entry's block of numbers
+    line_end = prefix.index("\n", pos)
+    assert line_end - pos >= len(plant) and plant not in prefix
+    new = prefix[:pos] + plant + prefix[pos + len(plant):]
+    assert len(new.encode("utf-8")) == src["bytes"]
+    data[:src["bytes"]] = new.encode("utf-8")
+    src["sha256"] = X.sha256_bytes(bytes(data[:src["bytes"]]))
+    return {src["path"]: bytes(data), led_rel: X.dumps(ex)}
+
+
+def _edit_rule(path):
+    ex = json.loads(path.read_text(encoding="utf-8"))
+    ex["data"]["accounting"]["kernel_rule"] += "|plant"
+    ex["body_sha256"] = X.body_digest(ex["data"])
+    return X.dumps(ex)
+
+
+def _edit_statements(path):
+    """The extract with the line number of the first statement in its record of the scan moved by one."""
+    ex = json.loads(path.read_text(encoding="utf-8"))
+    ex["data"]["accounting"]["statements"][0][2] += 1
     ex["body_sha256"] = X.body_digest(ex["data"])
     return X.dumps(ex)
 

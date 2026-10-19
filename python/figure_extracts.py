@@ -197,16 +197,20 @@ def source_problems(root, ex):
 
 
 def _ledger_problems(ex, text):
-    """What a fresh scan of the pinned prefix finds that the ledger extract does not account for, or a record
-    of the scan that no longer matches it. The prefix is a file in the tree, so --check can do this with no git."""
+    """What a fresh scan of the pinned prefix finds that the ledger extract does not account for statement by
+    statement, the rules it records where they are not the script's, or a record of the scan that no longer matches a
+    fresh one. The prefix is a file in the tree, so --check can do this with no git."""
     d = ex["data"]
-    problems, rec = ledger_accounting(ledger_scan(text), d["attempts"], d["left_out"])
-    out = ["extract ledger: " + p for p in problems]
-    if not problems:
-        for rule, what in (("kernel", "a kernel slack"), ("negative", "a negative WNS")):
-            if rec[rule] != d["accounting"][rule]:
-                out.append("extract ledger: its record of the entries that state %s no longer matches a fresh scan of "
-                           "the pinned prefix (remake: %s)" % (what, ex["remake"]))
+    acc = d["accounting"]
+    out = []
+    if acc.get("kernel_rule") != KERNEL_SLACK.pattern or acc.get("negative_rule") != NEGATIVE_WNS.pattern:
+        out.append("extract ledger: the scan rules it records are not the script's (the script's rules changed, or "
+                   "the extract was edited; remake: %s)" % ex["remake"])
+    problems, rows = ledger_accounting(ledger_scan(text), d["attempts"], d["left_out"])
+    out += ["extract ledger: " + p for p in problems]
+    if not problems and rows != acc["statements"]:
+        out.append("extract ledger: its record of the statements the scan finds no longer matches a fresh scan of the "
+                   "pinned prefix (remake: %s)" % ex["remake"])
     return out
 
 
@@ -563,6 +567,8 @@ CLOCK_SPECS = (
      r"cft_hw_quad\.xclbin\s+kernel_wns ([+-]\d+\.\d+) ns", "b1a014c quad"),
     ("long-shot-260", "2026-08-31 - the 260 MHz attempt", 1, 260,
      r"WNS\s+([+-]\d+\.\d+) ns\s+\(target period 3\.846 ns\)", "260 MHz long shot"),
+    ("control-130-single", "2026-08-31 - the 260 MHz attempt", 1, 130,
+     r"130 MHz from the same tree closed at kernel_wns ([+-]\d+\.\d+)", "130 MHz control single (the 260 MHz tree)"),
     ("bracket-single-145", "2026-09-01 - the ceiling bracket completes", 1, 145,
      r"single @145\s+CLOSED\s+kernel_wns ([+-]\d+\.\d+)", "single at 145"),
     ("bracket-single-150", "2026-09-01 - the ceiling bracket completes", 1, 150,
@@ -630,15 +636,20 @@ CLOCK_SPECS = (
 SWEEP_ENTRY = "2026-09-24 - the U50 single closes 175 MHz with the second recipe"
 SWEEP_ROW = re.compile(r"(?m)^\| (\d+) \| (standard|ExtraTimingOpt / AggressiveExplore) \| "
                        r"(?:\*\*)?([+-]\d+\.\d+)(?:\*\*)? \| ([^|]*?) \|$")
-# WHAT "EVERY" MEANS FOR THE TIMING FIGURE, AND THE CHECK THAT IT HOLDS. A scan of the ledger prefix
-# finds each entry that pairs the word "kernel" with a worst-slack figure (KERNEL_SLACK: the forms the
-# ledger uses for a build - "kernel_wns", "kernel WNS", "kernel worst path", "kernel +0.143", "+0.433 in
-# the kernel", "the kernel's WNS") and each entry that states a negative WNS (NEGATIVE_WNS). Each entry the
-# scan finds is either DRAWN (it is the entry of an attempt above or in the sweep's table) or listed in
-# LEFT_OUT with the reason it is not. make_ledger refuses to write an extract in which one is neither, and
-# source_problems repeats the scan on the pinned prefix on every --check, so "every U50 build the ledger
-# states a kernel slack for" is held by the check, up to what the two patterns can see. The first version of
-# the attempts list failed this, by seven builds: that is what the scan is for.
+# WHAT THE TIMING FIGURE DRAWS, AND WHAT THE CHECK CAN AND CANNOT SAY ABOUT THE REST OF THE LEDGER. The figure
+# draws the builds in CLOCK_SPECS and the sweep's table: each is read by a pattern that names its entry and
+# captures the slack the ledger states there. It does NOT claim these are all the builds the ledger gives a slack
+# for: the ledger is twenty-one thousand lines of prose, and a build can be given a slack in a sentence, a table
+# cell, a neighbour's entry or another repository's design. What this module does is account for STATEMENTS. A
+# scan of the pinned prefix finds each line that pairs the word "kernel" with a worst-slack figure (KERNEL_SLACK)
+# and each that gives a negative WNS (NEGATIVE_WNS); the number of every such statement must be the slack of a
+# build drawn from that entry, or of an item of LEFT_OUT, which says what the statement is and why it is not drawn.
+# make_ledger refuses an extract with a statement that is neither, and source_problems repeats the scan on the
+# pinned prefix on every --check: a new statement of those two forms fails by name until it is drawn or listed. An
+# entry is no longer the unit: the first version of this scan accounted for ENTRIES, which let a second build
+# inside a drawn entry through (verifier-VFG found two). LEFT_OUT also lists, by hand (manual), builds the ledger
+# gives a slack for in words the two patterns do not read: that is what a reader found, and it is not claimed to be
+# complete.
 KERNEL_SLACK = re.compile(
     r"(?i)kernel(?:'s)?[ _-]*(?:side[ _-]*)?(?:wns|slack|worst[ _-]+path)[^\n]{0,60}?[+-]\d+\.\d+"
     r"|kernel[^\n]{0,24}?[+-]\d+\.\d+\s*ns"
@@ -646,49 +657,145 @@ KERNEL_SLACK = re.compile(
     r"|kernel\s+[+-]\d+\.\d+")
 NEGATIVE_WNS = re.compile(
     r"(?i)(?:\bwns\b|kernel_wns|worst[- ]negative[- ]slack|\bslack\b)[^\n]{0,40}?(?<![\w.])-\d+\.\d+")
-# id, kind, entry heading prefix, pattern for the entry's number (or None), the attempt whose number it
-# repeats (or None), tiles, MHz, why it is not drawn. Kinds: "repeat" and "citation" restate the number
-# of an attempt drawn from another entry (the capture must equal it); "whole-design" is a miss at a stated
-# clock whose only slack the ledger states is the whole design's, with the worst paths in the kernel, so
-# there is no kernel figure to draw; "probe" is an out-of-context run, not a build of an image;
-# "other-device" is a part that is not the U50.
+_SIGNED = re.compile(r"[+-]\d+\.\d+")
+
+# The kinds of a left-out item, with the words a caption uses (in this order):
+#   repeat         a drawn build's kernel slack, stated again in another entry (its number must equal the attempt's)
+#   mention        a drawn build's kernel slack, named in passing in another build's entry or in a list
+#   other-number   another number of a drawn build: its whole-design slack, an earlier stage of its run, another clock
+#   whole-design   a miss recorded only with the whole design's slack, in an entry that gives no kernel slack
+#   probe          an out-of-context run of the kernel or of a toy, not a build of an image
+#   other-design   not this project's U50 image: another part, or another repository's design
+#   text           a U50 build named only in running text: its slack is given without a table, a build block or a
+#                  heading, and a pattern here reads it; `manual` says the scan's two patterns do not find it
+KIND_WORDS = (("repeat", "repeats of a drawn build's slack"), ("mention", "mentions of one"),
+              ("other-number", "other numbers of drawn builds (an earlier stage of a run, the whole design's, another "
+                               "clock)"),
+              ("whole-design", "misses recorded only with the whole design's slack"),
+              ("probe", "out-of-context probes"), ("other-design", "figures of other designs and parts"),
+              ("text", "builds named only in running text"))
+
+
+def _lo(lid, kind, entry, pattern, why, same_as=None, tiles=None, mhz=None, group=1, many=False, manual=False,
+        label=None):
+    """One item of LEFT_OUT: `pattern` finds the number in the entry (group `group`; once, or more than once where
+    `many`), and `same_as` names the attempt whose number a repeat or a mention must equal."""
+    return {"id": lid, "kind": kind, "entry": entry, "pattern": pattern, "why": why, "same_as": same_as,
+            "tiles": tiles, "mhz": mhz, "group": group, "many": many, "manual": manual, "label": label or lid}
+
+
+_SWEEP_WHY = "the clock sweep's own entry for that point; the 24 Sep table's row is drawn"
 LEFT_OUT = (
-    ("round2-single-again", "repeat", "2026-09-15 - round 2's card day, second half",
-     r"kernel WNS ([+-]\d+\.\d+)", "round2-single", None, None,
-     "the same image as the 16 Sep table's row, stated a day earlier"),
-    ("sweep-145-entry", "repeat", "2026-09-23 - the U50 single closes 145 MHz", r"kernel WNS\s+([+-]\d+\.\d+) ns",
-     "sweep-145-std", None, None, "the sweep's own entry for that point; the 24 Sep table's row is drawn"),
-    ("sweep-150-entry", "repeat", "2026-09-23 - the U50 single closes 150 MHz", r"kernel WNS\s+([+-]\d+\.\d+) ns",
-     "sweep-150-std", None, None, "the sweep's own entry for that point; the 24 Sep table's row is drawn"),
-    ("sweep-155-entry", "repeat", "2026-09-23 - the U50 single closes 155 MHz", r"kernel WNS\s+([+-]\d+\.\d+) ns",
-     "sweep-155-std", None, None, "the sweep's own entry for that point; the 24 Sep table's row is drawn"),
-    ("sweep-160-entry", "repeat", "2026-09-23 - the U50 single closes 160 MHz", r"kernel WNS\s+([+-]\d+\.\d+) ns",
-     "sweep-160-std", None, None, "the sweep's own entry for that point; the 24 Sep table's row is drawn"),
-    ("sweep-165-entry", "repeat", "2026-09-23 - the U50 single closes 165 MHz", r"kernel WNS\s+([+-]\d+\.\d+) ns",
-     "sweep-165-std", None, None, "the sweep's own entry for that point; the 24 Sep table's row is drawn"),
-    ("sweep-170-entry", "repeat", "2026-09-24 - the U50 single closes 170 MHz", r"kernel WNS\s+([+-]\d+\.\d+) ns",
-     "sweep-170-std", None, None, "the sweep's own entry for that point; the 24 Sep table's row is drawn"),
-    ("tip-quad-cited", "citation", "2026-09-30 - the fixes round",
-     r'tip quad \(2026-09-02, "closes at 135 MHz: kernel ([+-]\d+\.\d+)"', "tip-quad", None, None,
-     "names the 2 Sep tip quad in a list of quads"),
-    ("rev8a-first", "repeat", "2026-10-06 - step 6's closing records, part one", r"Kernel WNS \*\*([+-]\d+\.\d+) ns\*\*",
-     "rev8a-single", None, None, "the same image as part two's table row, stated in part one"),
-    ("probes-s-k", "probe", "2026-10-05 - step 6's round 2: revision 8's sequencer in the tile", None, None, None, None,
-     "out-of-context runs of the kernel (probes S and K), not builds of an image"),
-    ("retiming-toys", "probe", "2026-10-12 - does RETIMING=1 retime?", None, None, None, None,
-     "out-of-context toy pipelines for the retiming question, not builds"),
-    ("single-ladders-135", "whole-design", "2026-09-01 - one ALU array", r"missed at \*\*WNS ([+-]\d+\.\d+) ns", None, 1,
-     135, "a single tile linked at 135 MHz with the ladders on; the ledger states the whole design's WNS (the worst "
-          "path is in the kernel) and no kernel slack of its own"),
-    ("quad-retimed-135", "whole-design", "2026-09-02 - the retimed quad at 135 MHz misses", r"routed WNS ([+-]\d+\.\d+)\s+TNS",
-     None, 4, 135, "four tiles, retimed, no xclbin; the whole design's routed WNS, the worst paths in the kernel, and no "
-                   "kernel slack of its own"),
-    ("quad-plain-135", "whole-design", "2026-09-02 - the retimed quad at 135 MHz misses", r"without retiming: ([+-]\d+\.\d+) /",
-     None, 4, 135, "the same four tiles without retiming; the whole design's routed WNS, and no kernel slack of its own"),
-    ("seven-series-survey", "other-device", "2026-09-06 - the multi-cycle fp256 rung", None, None, None, None,
-     "a 7-series part survey (Kintex-7 325T at a 100 MHz ask), not the U50"),
-    ("kintex-flows", "other-device", "2026-09-23 - the Kintex-7 in both flows", None, None, None, None,
-     "the Kintex-7 325T in Vivado 2026.1, not the U50"),
+    # a drawn build's number, stated again
+    _lo("round2-single-again", "repeat", "2026-09-15 - round 2's card day, second half", r"kernel WNS ([+-]\d+\.\d+)",
+        "the same image as the 16 Sep table's row, stated a day earlier", same_as="round2-single"),
+    _lo("sweep-145-entry", "repeat", "2026-09-23 - the U50 single closes 145 MHz", r"kernel WNS\s+([+-]\d+\.\d+) ns",
+        _SWEEP_WHY, same_as="sweep-145-std"),
+    _lo("sweep-150-entry", "repeat", "2026-09-23 - the U50 single closes 150 MHz", r"kernel WNS\s+([+-]\d+\.\d+) ns",
+        _SWEEP_WHY, same_as="sweep-150-std"),
+    _lo("sweep-155-entry", "repeat", "2026-09-23 - the U50 single closes 155 MHz", r"kernel WNS\s+([+-]\d+\.\d+) ns",
+        _SWEEP_WHY, same_as="sweep-155-std"),
+    _lo("sweep-160-entry", "repeat", "2026-09-23 - the U50 single closes 160 MHz", r"kernel WNS\s+([+-]\d+\.\d+) ns",
+        _SWEEP_WHY, same_as="sweep-160-std"),
+    _lo("sweep-165-entry", "repeat", "2026-09-23 - the U50 single closes 165 MHz", r"kernel WNS\s+([+-]\d+\.\d+) ns",
+        _SWEEP_WHY, same_as="sweep-165-std"),
+    _lo("sweep-170-entry", "repeat", "2026-09-24 - the U50 single closes 170 MHz", r"kernel WNS\s+([+-]\d+\.\d+) ns",
+        _SWEEP_WHY, same_as="sweep-170-std"),
+    _lo("rev8a-first", "repeat", "2026-10-06 - step 6's closing records, part one", r"Kernel WNS \*\*([+-]\d+\.\d+) ns\*\*",
+        "the same image as part two's table row, stated in part one", same_as="rev8a-single"),
+    # a drawn build's number, named in passing
+    _lo("tip-quad-cited", "mention", "2026-09-30 - the fixes round",
+        r'tip quad \(2026-09-02, "closes at 135 MHz: kernel ([+-]\d+\.\d+)"',
+        "names the 2 Sep tip quad in a list of quads", same_as="tip-quad"),
+    _lo("caserom-in-tip-single", "mention", "2026-09-02 - the tip single closes at 135 MHz",
+        r"case-ROM single from 0e7264e \(kernel ([+-]\d+\.\d+)\)",
+        "the entry's comparison with the case-ROM single, whose own entry is drawn", same_as="caserom-single"),
+    _lo("round2-single-in-quad-entry", "mention", "2026-09-16 - round 2's quad", r"\(kernel ([+-]\d+\.\d+) ns, routed",
+        "the round's single, named in the failing quad's entry as unaffected; its own row is drawn", same_as="round2-single"),
+    # another number of a drawn build
+    _lo("round2-quad-system-clock", "other-number", "2026-09-16 - round 2's quad", r"system-clock slack ([+-]\d+\.\d+) ns",
+        "the failing quad's slack on the system clock, beside its kernel slack (-0.363, drawn)"),
+    _lo("sweep-175-before-physopt", "other-number", "2026-09-24 - the U50 single closes 175 MHz with the second recipe",
+        r"kernel WNS - ([+-]\d+\.\d+) ns, 92 failing endpoints",
+        "the 175 MHz build's kernel WNS in the summary written before post-route phys_opt, which then closed it (+0.001, "
+        "drawn)"),
+    _lo("q135b-before-physopt", "other-number", "2026-09-30 - the steps 5 and 6 round",
+        r"Routed WNS ([+-]\d+\.\d+), which Vitis's optional post-route phys_opt took to",
+        "revision 7's quad's routed WNS before post-route phys_opt took it to +0.003 (drawn)"),
+    _lo("rev8q-whole-design", "other-number", "2026-10-06 - step 6's closing records, part two",
+        r"the whole design's routed WNS ([+-]\d+\.\d+) ns, shell included",
+        "revision 8's quad's whole-design routed WNS, beside its kernel slack (drawn)"),
+    _lo("rev8-routes", "other-number", "2026-10-06 - step 6's closing records, part two",
+        r"after global iterations 0 to 3, ([+-]\d+\.\d+) \(TNS",
+        "the first negative step of revision 8's quad's and deep single's routes, before their post-routing summaries "
+        "(drawn)", many=True),
+    # a miss recorded only with the whole design's slack
+    _lo("single-ladders-135", "whole-design", "2026-09-01 - one ALU array", r"missed at \*\*WNS ([+-]\d+\.\d+) ns",
+        "a single tile linked at 135 MHz with the ladders on; the entry gives the whole design's WNS (the worst path is "
+        "in the kernel) and no kernel slack of its own", tiles=1, mhz=135, label="single, ladders on, 135 MHz"),
+    _lo("quad-retimed-135", "whole-design", "2026-09-02 - the retimed quad at 135 MHz misses",
+        r"routed WNS ([+-]\d+\.\d+)\s+TNS",
+        "four tiles, retimed, no xclbin; the entry gives the whole design's routed WNS, the worst paths in the kernel, "
+        "and no kernel slack of its own", tiles=4, mhz=135, label="quad, retimed, 135 MHz"),
+    _lo("quad-plain-135", "whole-design", "2026-09-02 - the retimed quad at 135 MHz misses",
+        r"without retiming: ([+-]\d+\.\d+) /",
+        "the same four tiles without retiming; the entry gives the whole design's routed WNS and no kernel slack of its "
+        "own (a later entry's judge calls build-diet-quad MISSED at the same number: see that item)", tiles=4, mhz=135,
+        label="quad, not retimed, 135 MHz"),
+    # out-of-context runs
+    _lo("probes-s-k", "probe", "2026-10-05 - step 6's round 2: revision 8's sequencer in the tile",
+        r"the kernel's WNS ([+-]\d+\.\d+)",
+        "out-of-context runs of the kernel (probes S and K), not builds of an image", many=True),
+    _lo("retiming-toys", "probe", "2026-10-12 - does RETIMING=1 retime?", r"WNS ([+-]\d+\.\d+)",
+        "out-of-context toy pipelines for the retiming question, not builds", many=True),
+    # not this project's U50 image
+    _lo("seven-series-survey", "other-design", "2026-09-06 - the multi-cycle fp256 rung",
+        r"WNS of ([+-]\d+\.\d+) - which is a far better clock",
+        "a 7-series part survey (Kintex-7 325T at a 100 MHz ask), not the U50"),
+    _lo("kintex-flows", "other-design", "2026-09-23 - the Kintex-7 in both flows",
+        r"(?m)^\s+(?:synthesis|routed)\s+WNS ([+-]\d+\.\d+) ns", "the Kintex-7 325T in Vivado 2026.1, not the U50",
+        many=True),
+    _lo("f128x6-routed", "other-design", "2026-09-23 - hw/sweep_freq.sh rebuilt on build-pair",
+        r"routed ([+-]\d+\.\d+) \(written", "a sibling repository's design (cft-rebound's build-hw-f128x6) built on the same "
+        "box: its routed WNS, which the manifest recorded", manual=True, label="cft-rebound f128x6, routed"),
+    _lo("f128x6-postroute", "other-design", "2026-09-23 - hw/sweep_freq.sh rebuilt on build-pair",
+        r"post-route ([+-]\d+\.\d+) \(19:09\)", "the same sibling build's post-route WNS, 74 minutes later, after "
+        "phys_opt", manual=True, label="cft-rebound f128x6, post-route"),
+    # U50 builds named only in running text
+    _lo("rev7a-probe-single", "text", "2026-09-29 - revision 7: control codes",
+        r"The probe single \(rev7a, 3582de0, pre-fix\):\*\* kernel WNS ([+-]\d+\.\d+) ns",
+        "a single tile's probe build before the fix; the entry states no clock for it (the final single beside it is at "
+        "135 MHz)", tiles=1, label="rev7a probe single"),
+    _lo("old-sweep-115", "text", "2026-09-23 - hw/sweep_freq.sh rebuilt on build-pair",
+        r"same reports, had ([+-]\d+\.\d+), ([+-]\d+\.\d+) and ([+-]\d+\.\d+) ns",
+        "a build of the first clock sweep (27f94cf), left on the box: the entry gives its whole-design WNS in a table and "
+        "its kernel clock's slack in one sentence, by clock only; 115 MHz is below the chart's range", mhz=115, group=1,
+        manual=True, label="first sweep, 115 MHz"),
+    _lo("old-sweep-145", "text", "2026-09-23 - hw/sweep_freq.sh rebuilt on build-pair",
+        r"same reports, had ([+-]\d+\.\d+), ([+-]\d+\.\d+) and ([+-]\d+\.\d+) ns",
+        "the first clock sweep's 145 MHz build, in the same sentence", mhz=145, group=2, manual=True,
+        label="first sweep, 145 MHz"),
+    _lo("old-sweep-175", "text", "2026-09-23 - hw/sweep_freq.sh rebuilt on build-pair",
+        r"same reports, had ([+-]\d+\.\d+), ([+-]\d+\.\d+) and ([+-]\d+\.\d+) ns",
+        "the first clock sweep's 175 MHz build, which failed, in the same sentence", mhz=175, group=3, manual=True,
+        label="first sweep, 175 MHz"),
+    _lo("build-seq135s", "text", "2026-09-12 - two gates that could not fail",
+        r"`build-seq135s` at \*\*([+-]\d+\.\d+)\*\*",
+        "a sequencer build that did not close, named build-seq135s and limited by a sequencer path; its clock and tile "
+        "count are not stated beyond the name", manual=True, label="build-seq135s"),
+    _lo("single-045-earlier", "text", "2026-09-02 - the case-ROM single closes at 135 MHz",
+        r"closed the same clock at ([+-]\d+\.\d+);",
+        "the case-ROM single's predecessor, one commit earlier, stated in one clause without the word kernel", tiles=1,
+        mhz=135, manual=True, label="single one commit earlier, 135 MHz"),
+    _lo("single-045-table", "text", "2026-10-12 - does RETIMING=1 retime?",
+        r"closes at ([+-]\d+\.\d+) with retiming and at ([+-]\d+\.\d+) without it",
+        "a table cell that reads the single's +0.045 as two link builds, retiming on and off (the first number; the second "
+        "is the same)", tiles=1, mhz=135, manual=True, label="single, retiming on, 135 MHz"),
+    _lo("build-diet-quad", "text", "2026-09-23 - hw/sweep_freq.sh rebuilt on build-pair",
+        r"called `build-diet-quad` MISSED at ([+-]\d+\.\d+)",
+        "the sweep judge, which reads the kernel clock by name, calls this quad build MISSED; the number equals the 2 Sep "
+        "unretimed quad's (listed above) and the ledger does not say they are the same build (BELIEVED that they are)",
+        tiles=4, manual=True, label="build-diet-quad"),
 )
 # entries a figure marks as milestones: the entry's own heading is the evidence, its date the date
 MILESTONES = (
@@ -720,52 +827,54 @@ def _entry(entries, prefix):
 
 
 def ledger_scan(text):
-    """The entries of a ledger text that state a kernel slack, and those that state a negative WNS:
-    {"kernel": [(line, heading)], "negative": [(line, heading)]}, in ledger order."""
-    out = {"kernel": [], "negative": []}
+    """The statements of a ledger text that the two rules find, one per match, in ledger order:
+    [(rule, entry_line, line, number, heading)] with the number as the ledger writes it. A statement is a line that
+    pairs the word kernel with a worst-slack figure (KERNEL_SLACK) or gives a negative WNS (NEGATIVE_WNS); the number
+    is the last signed decimal of the match. What the rules do not read, a scan cannot find."""
+    out, seen = [], set()
     for head, line, body in _entries(text):
-        if KERNEL_SLACK.search(body):
-            out["kernel"].append((line, head))
-        if NEGATIVE_WNS.search(body):
-            out["negative"].append((line, head))
-    return out
+        for rule, rx in (("kernel", KERNEL_SLACK), ("negative", NEGATIVE_WNS)):
+            for m in rx.finditer(body):
+                nums = _SIGNED.findall(m.group(0))
+                if not nums:
+                    continue
+                key = (rule, line, line + body[:m.start()].count("\n"), nums[-1])
+                if key not in seen:
+                    seen.add(key)
+                    out.append(key + (head,))
+    return sorted(out, key=lambda s: (s[2], s[0]))
 
 
-def ledger_accounting(scan, attempts, left_out):
-    """(problems, record): every entry the scan found must be drawn (the entry of an attempt) or listed as left
-    out, and every left-out item must still be in an entry the scan finds; a repeat or a citation must carry the
-    number of the attempt it repeats. The record is what the extract stores, so that --check can compare it with a
-    fresh scan of the pinned prefix."""
-    drawn, out_ = {}, {}
+def ledger_accounting(statements, attempts, left_out):
+    """(problems, rows): every statement the scan found must carry the number of a build drawn from its entry or of an
+    item listed from it, and a repeat or a mention must carry the number of the attempt it names. `rows` is what the
+    extract stores - [rule, entry_line, line, number, id of the attempt or item that carries it] - so that --check can
+    compare it with a fresh scan of the pinned prefix. The unit is the STATEMENT, and it is matched by its number within
+    its entry: a second number that a drawn entry states is not covered by the first."""
+    carried = {}
     for a in attempts:
-        drawn.setdefault(a["entry_line"], []).append(a["id"])
+        carried.setdefault((a["entry_line"], a["wns"]), a["id"])
     for item in left_out:
-        out_.setdefault(item["entry_line"], []).append(item["id"])
+        if item["wns"] is not None:
+            carried.setdefault((item["entry_line"], item["wns"]), item["id"])
     by_id = {a["id"]: a for a in attempts}
-    problems, rec = [], {}
-    for rule, what in (("kernel", "a kernel slack"), ("negative", "a negative WNS")):
-        rows = []
-        for line, head in scan[rule]:
-            if line in drawn:
-                rows.append({"line": line, "entry": head[:110], "drawn": drawn[line]})
-            elif line in out_:
-                rows.append({"line": line, "entry": head[:110], "left_out": out_[line]})
-            else:
-                problems.append("the ledger states %s in the entry headed %r (line %d), which the extract neither "
-                                "draws nor lists as left out (draw it in CLOCK_SPECS, or list it in LEFT_OUT with the "
-                                "reason)" % (what, head[:70], line))
-        rec[rule] = rows
-    found = {line for rule in scan for line, _h in scan[rule]}
+    problems, rows = [], []
+    for rule, entry_line, line, number, head in statements:
+        by = carried.get((entry_line, float(number)))
+        if by is None:
+            problems.append("the ledger states %s %s at line %d (the entry headed %r, line %d), which the extract neither "
+                            "draws nor lists as left out (draw it in CLOCK_SPECS, or list it in LEFT_OUT with the reason)"
+                            % ("a kernel slack" if rule == "kernel" else "a negative WNS", number, line, head[:60],
+                               entry_line))
+        else:
+            rows.append([rule, entry_line, line, number, by])
     for item in left_out:
-        if item["entry_line"] not in found:
-            problems.append("left-out item %s: the scan no longer finds a statement in its entry (line %d)"
-                            % (item["id"], item["entry_line"]))
         if item["same_as"] is not None:
             a = by_id.get(item["same_as"])
             if a is None or item["wns"] != a["wns"]:
                 problems.append("left-out item %s says %s where the attempt it repeats (%s) says %s" % (
                     item["id"], item["wns"], item["same_as"], None if a is None else a["wns"]))
-    return problems, rec
+    return problems, rows
 
 
 def make_ledger(root=ROOT, existing=None):
@@ -813,24 +922,24 @@ def make_ledger(root=ROOT, existing=None):
                          "wns": w, "closed": w >= 0, "entry_line": line, "line": None,
                          "recipe": "standard" if recipe == "standard" else "second", "card": card.strip()})
     left_out = []
-    for lid, kind, entry, pat, same_as, tiles, mhz, why in LEFT_OUT:
-        head, line, body = _entry(entries, entry)
-        wns, at = None, line
-        if pat is not None:
-            ms = list(re.finditer(pat, body))
-            if len(ms) != 1:
-                raise ExtractError("left-out item %s: the pattern finds %d matches in the entry %r (want one)"
-                                   % (lid, len(ms), entry))
-            wns = float(ms[0].group(1))
-            at = line + body[:ms[0].start()].count("\n")
-        left_out.append({"id": lid, "kind": kind, "date": head[:10], "entry": head[:110], "entry_line": line,
-                         "line": at, "tiles": tiles, "mhz": mhz, "wns": wns, "same_as": same_as, "why": why})
-    scan = ledger_scan(text)
-    problems, accounting = ledger_accounting(scan, attempts, left_out)
+    for spec in LEFT_OUT:
+        head, line, body = _entry(entries, spec["entry"])
+        ms = list(re.finditer(spec["pattern"], body))
+        if not ms or (len(ms) != 1 and not spec["many"]):
+            raise ExtractError("left-out item %s: the pattern finds %d matches in the entry %r (want %s)" % (
+                spec["id"], len(ms), spec["entry"], "one or more" if spec["many"] else "one"))
+        for k, m in enumerate(ms):
+            left_out.append({"id": spec["id"] if len(ms) == 1 else "%s-%d" % (spec["id"], k + 1), "kind": spec["kind"],
+                             "manual": spec["manual"], "label": spec["label"], "date": head[:10],
+                             "entry": head[:110], "entry_line": line, "line": line + body[:m.start()].count("\n"),
+                             "tiles": spec["tiles"], "mhz": spec["mhz"], "wns": float(m.group(spec["group"])),
+                             "same_as": spec["same_as"], "why": spec["why"]})
+    problems, statements = ledger_accounting(ledger_scan(text), attempts, left_out)
     if problems:
-        raise ExtractError("the timing record is not complete: " + "; ".join(problems))
-    accounting["kernel_rule"] = KERNEL_SLACK.pattern
-    accounting["negative_rule"] = NEGATIVE_WNS.pattern
+        raise ExtractError("the timing record accounts for every statement its scan finds, and does not: "
+                           + "; ".join(problems))
+    accounting = {"kernel_rule": KERNEL_SLACK.pattern, "negative_rule": NEGATIVE_WNS.pattern,
+                  "statements": statements}
     mil = []
     for mid, entry, label in MILESTONES:
         head, line, _ = _entry(entries, entry)
@@ -846,9 +955,10 @@ def make_ledger(root=ROOT, existing=None):
     data_ = {"attempts": attempts, "left_out": left_out, "accounting": accounting, "milestones": mil, "quotes": quotes,
              "entries": len(entries), "prefix_lines": text.count("\n")}
     return finish(
-        "ledger", "the U50 builds the ledger states a kernel slack for (kernel WNS by image, tiles and clock), what "
-                  "else it states a slack for and why that is not drawn, and the ledger's milestones, read out of "
-                  "docs/VALIDATION.md by patterns that name the entry",
+        "ledger", "the U50 builds whose kernel slack the figures read from the ledger (kernel WNS by image, tiles and "
+                  "clock), the other slacks it gives and why each is not drawn, the scan that accounts for every "
+                  "statement its two patterns find, and the ledger's milestones, read out of docs/VALIDATION.md by "
+                  "patterns that name the entry",
         "the first %d bytes of docs/VALIDATION.md (sha256 below)" % n,
         [{"kind": "file-prefix", "path": LEDGER, "bytes": n, "sha256": sha256_bytes(prefix)}],
         "python python/figure_extracts.py ledger", data_, label="ledger, first %s bytes" % "{:,}".format(n))
