@@ -17,3 +17,21 @@ c5-rint32-sab.txt	1	env CFT_SOAK_SABOTAGE=1 host/clause5-soak rint32 0x3F800000 
 seq-sw.txt	0	timeout 900 python3 host/tests/seq_check.py --device sw --trials 250 --formats fp32 fp64 fp128 fp256 [47 s]
 acc-sw.txt	0	timeout 900 python3 programs/acceptance.py --device sw --only lorenz63-rk4-fp64 [12 s]
 acc-rev8-sw.txt	0	timeout 1500 python3 programs/acceptance.py --set rev8 --device sw --target u50-rev8-quad --only phi4_extended_fp64 --images <DIR> [88 s]
+# c5x-*: the clause-5 soak's exhaustive modes (the -all and -wide jobs), made 2026-10-19 in WSL (Ubuntu 22.04, gcc 11.4)
+# from host/tools/clause5_soak.c of the soak-exhaustive tree, make -C host (XRT=0): the software backend only. Each log is
+# verbatim; the -sab logs are the modes' own negative controls (CFT_SOAK_SABOTAGE=1), real failing runs; c5x-probe-scalebrange is
+# the host-only probe of the wide range. cvtto32-all-nan is a slice with no encoding in range for any target: 0 cases, all skipped.
+c5x-conv32to64-all.txt	0	host/clause5-soak conv32to64-all 0 1048576 [0 s]
+c5x-cvtto32-all.txt	0	host/clause5-soak cvtto32-all 0x4EF80000 0x4F080000 rup [0 s]
+c5x-cvtto32-all-nan.txt	0	host/clause5-soak cvtto32-all 0x7FC00000 0x7FC01000 rne [0 s]
+c5x-cvtfrom32-all.txt	0	host/clause5-soak cvtfrom32-all 0xFFF00000 0x100000000 rup [0 s]
+c5x-cvtfrom64-all.txt	0	host/clause5-soak cvtfrom64-all 0x7FF80000 0x80080000 rtz [0 s]
+c5x-scaleb32-all.txt	0	host/clause5-soak scaleb32-all 0x00000000 0x00040000 rdn [1 s]
+c5x-scaleb32-wide.txt	0	host/clause5-soak scaleb32-wide 0x7F7FFF00 0x7F800100 rup [0 s]
+c5x-conv32to64-all-sab.txt	1	env CFT_SOAK_SABOTAGE=1 host/clause5-soak conv32to64-all 0x3F800000 0x3F810000 [0 s]
+c5x-cvtto32-all-sab.txt	1	env CFT_SOAK_SABOTAGE=1 host/clause5-soak cvtto32-all 0x3F800000 0x3F810000 rne [0 s]
+c5x-cvtfrom32-all-sab.txt	1	env CFT_SOAK_SABOTAGE=1 host/clause5-soak cvtfrom32-all 0x00001000 0x00011000 rne [0 s]
+c5x-cvtfrom64-all-sab.txt	1	env CFT_SOAK_SABOTAGE=1 host/clause5-soak cvtfrom64-all 0x00001000 0x00011000 rne [0 s]
+c5x-scaleb32-all-sab.txt	1	env CFT_SOAK_SABOTAGE=1 host/clause5-soak scaleb32-all 0x3F800000 0x3F801000 rne [0 s]
+c5x-scaleb32-wide-sab.txt	1	env CFT_SOAK_SABOTAGE=1 host/clause5-soak scaleb32-wide 0x3F800000 0x3F800010 rne [0 s]
+c5x-probe-scalebrange.txt	0	host/clause5-soak probe scalebrange [1 s]

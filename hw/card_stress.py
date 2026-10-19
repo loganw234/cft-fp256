@@ -40,7 +40,13 @@ and the SWEEP: hw/run-soak.sh's and hw/run-c5-soak.sh's own campaigns (their job
 seeds, hw/card_stress_lib.py's sweep_items), run slice by slice against the card with
 CFT_SOAK_ARTIFACT, resumed across cycles from metrics.jsonl alone. The scripts themselves cannot
 be sliced or resumed (each wipes its own output directory and runs everything), so this driver
-runs the same binaries on the same job lines.
+runs the same binaries on the same job lines. Each item is marked TILE or HOST
+(hw/card_stress_lib.py, OP_REACH, from the library's own composed/host classification): a HOST
+item - the conversions, next, logB, class, remainder - is libcft's host code run on the box
+against its CPU, a full-space test of the library in which the tile computes nothing, and the
+records (sweep.reach), status.txt and the report all say which an item is. The exhaustive
+conversion and scaleB modes (the -all and -wide items) also say what they covered on their
+verdict line, and a slice's encodings are held to it exactly.
 
 RECORDS. $OUT/metrics.jsonl is append-only: one `leg` record a leg, one `telemetry` record a
 sample, with `run_start`, `build`, `cycle_start`, `cycle_end`, `event` and `run_end` between
@@ -1137,17 +1143,20 @@ class Driver:
                 job.update(lo=lo, hi=hi)
                 reserved.setdefault(it.name, []).append((lo, hi))
                 job["expected"] = it.expected_cases(lo, hi)
+                job["cover"] = it.cover_spec(lo, hi)
                 job["argv"] = it.argv(self.soak_binary(it), lo=lo, hi=hi)
                 job["sweep"] = {"item": it.name, "tool": it.tool, "op": it.op, "mode": it.mode,
-                                "lo": lo, "hi": hi, "tile": None}
+                                "reach": it.reach, "lo": lo, "hi": hi, "tile": None}
             else:
                 n = self.seed_n.get(it.name, 0)
                 seed = it.seed_for(n)
                 job.update(count=units, seed=seed, seed_n=n)
                 job["expected"] = None
+                job["cover"] = None
                 job["argv"] = it.argv(self.soak_binary(it), count=units, seed=seed)
                 job["sweep"] = {"item": it.name, "tool": it.tool, "op": it.op, "mode": it.mode,
-                                "count": units, "seed": seed, "seed_n": n, "tile": None}
+                                "reach": it.reach, "count": units, "seed": seed, "seed_n": n,
+                                "tile": None}
             if jobs > 1 and img.tiles > 1:
                 job["tile"] = k + 1
                 job["sweep"]["tile"] = k + 1
@@ -1200,13 +1209,16 @@ class Driver:
         for job, base, logpath, proc, logf, res in procs:
             it = job["item"]
             exp = job["expected"]
+            cover = job["cover"]
             cmd = Cmd(job["argv"], job["timeout"],
-                      (lambda t, rc, it=it, exp=exp, img=img: L.parse_soak(
-                          t, rc, it.op, it.verdict_mode, img.path, exp)))
+                      (lambda t, rc, it=it, exp=exp, cover=cover, img=img: L.parse_soak(
+                          t, rc, it.op, it.verdict_mode, img.path, exp, cover)))
             sweep = dict(job["sweep"])
             sweep["jobs"] = len(wave)
             if exp is not None:
                 sweep["expected_cases"] = exp
+            if cover is not None:
+                sweep["expected_encodings"] = cover["encodings"]
             rec = self.finish_leg(f"sweep-{it.name}", img, "sweep", 1, sweep, job["tile"], res, None,
                                   base, logpath, None, cmd, exp)
             recs.append(rec)
@@ -1425,15 +1437,28 @@ class Driver:
                     lines.append(f"host       {h}")
             # the sweep
             ex_total = ex_cov = 0
+            by_reach = {L.TILE: [0, 0, 0, 0], L.HOST: [0, 0, 0, 0]}   # exhaustive items, covered, total; random begun
             for it in self.items:
                 if it.kind == "exhaustive":
+                    cov_it = L.covered(self.intervals.get(it.name, []) or []) if self.intervals.get(it.name) else 0
                     ex_total += L.EXH
-                    ex_cov += L.covered(self.intervals.get(it.name, []) or []) if self.intervals.get(it.name) else 0
+                    ex_cov += cov_it
+                    by_reach[it.reach][0] += 1
+                    by_reach[it.reach][1] += cov_it
+                    by_reach[it.reach][2] += L.EXH
+                elif self.served.get(it.name):
+                    by_reach[it.reach][3] += 1
             rnd = sum(1 for it in self.items if it.kind == "random" and self.served.get(it.name))
             lines.append(f"sweep      exhaustive {ex_cov:,} of {ex_total:,} encodings"
                          f" ({(100.0 * ex_cov / ex_total) if ex_total else 0:.3f} %); "
                          f"slices served {sum(self.served.values())}; random items begun {rnd};"
                          f" disagreements {self.disagreements}; rates {{{', '.join(f'{k}: {v:,.0f}/s' for k, v in sorted(self.rate.items()))}}}")
+            # which items reach the tile at all (hw/card_stress_lib.py, OP_REACH): a HOST item is libcft's host
+            # code on the box, a full-space test of the library with the tile computing nothing
+            lines.append("reach      " + "; ".join(
+                f"{k} items: exhaustive {v[1]:,} of {v[2]:,} encodings ({(100.0 * v[1] / v[2]) if v[2] else 0:.3f} %)"
+                f" over {v[0]} item(s), random begun {v[3]}" for k, v in by_reach.items())
+                         + "; the tile computes nothing for a host item")
             if self.disabled_items:
                 lines.append("disabled   sweep items: " + "; ".join(f"{k} ({v[:60]})" for k, v in self.disabled_items.items()))
             tmp = self.status_path + ".tmp"
@@ -1620,8 +1645,12 @@ class Driver:
         c5 = os.path.join(host, "clause5-soak")
         sc = L.MODES4 if self.run_quiet([c5, "probe", "scalbn"], 120)[0] == 0 else ("rne",)
         cf = L.MODES4 if self.run_quiet([c5, "probe", "cvtfrom"], 120)[0] == 0 else ("rne",)
-        self.items = L.sweep_items(sc, cf)
-        step("probes", True, f"scaleb modes {','.join(sc)}; cvtfrom modes {','.join(cf)}")
+        # scaleb32-wide's exponent range, measured on this libm (host only): if it does not hold the wide items
+        # do not exist, as run-c5-soak.sh drops their jobs
+        wd = sc if self.run_quiet([c5, "probe", "scalebrange"], 120)[0] == 0 else ()
+        self.items = L.sweep_items(sc, cf, wd)
+        step("probes", True, f"scaleb modes {','.join(sc)}; cvtfrom modes {','.join(cf)}; scaleb32-wide modes "
+             f"{','.join(wd) if wd else 'none (probe scalebrange: the derived exponent range does not hold on this libm)'}")
         # the card is there, as far as XRT can say (telemetry, and a cheap look)
         tool = self.tel_tool()
         if shutil.which(tool):
@@ -1935,7 +1964,8 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     g.add_argument("--quarantine-after", type=int, default=2, help="a slice that fails to finish this often is moved past")
     g.add_argument("--no-sweep", action="store_true", help="the battery only")
     g.add_argument("--sweep-items", default="", help="comma-separated campaign items to sweep, e.g. sqrt32-rne,rint32-rne "
-                   "(default: all; names are hw/card_stress_lib.py's sweep_items)")
+                   "(default: all; names are hw/card_stress_lib.py's sweep_items). A wave runs one job a distinct item, so "
+                   "name four items to use the quad's four tiles")
     g = ap.add_argument_group("policy")
     g.add_argument("--retry-pause", type=float, default=120, help="seconds to wait after the card fails to answer")
     g.add_argument("--max-card-failures", type=int, default=6, help="consecutive failures after which the run stops")

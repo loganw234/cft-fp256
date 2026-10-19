@@ -25,6 +25,9 @@ failure policy meets each kind of failure:
           garbage     exits 0 and prints nothing a parser can read
           crash       exits 139 with no verdict
           mismatch    (soak) a disagreement with its operands, exit 1
+          short       (soak, the -all and -wide modes) a slice one ENCODING short: the tool ran
+                      [lo, hi - 1) and says so, its counts consistent, exit 0
+          shortcase   (soak, the same modes) the right encodings and ONE CASE too few, exit 0
           slow:N      N seconds, then the normal verdict
     CFT_STANDIN_STATE=<dir>            where the counts are kept (required with a scenario)
     CFT_STANDIN_SOAK_RATE=<cases/s>    a soak takes cases / rate seconds (default 0: at once)
@@ -73,6 +76,14 @@ def count(state: str, key: str) -> int:
 
 
 OP = ""      # a soak job's op (argv[1] after the binary), for rules that name one
+
+# The checks a slice of each exhaustive conversion/scaleB mode makes for every encoding of its operand:
+# host/tools/clause5_soak.c's "Exhaustive modes" section, and hw/card_stress_lib.py's PER_ENCODING (the
+# driver's tests hold this copy to the real tool's logs). cvtto32-all skips the pairs whose rounded value
+# leaves the target's range; the stand-in does not know the operands, so it skips a third, which is
+# only a count that adds up.
+EXH_PER = {"conv32to64-all": 1, "cvtto32-all": 4, "cvtfrom32-all": 2, "cvtfrom64-all": 2,
+           "scaleb32-all": 17, "scaleb32-wide": 568}
 
 
 def image_name(args) -> str:
@@ -199,7 +210,7 @@ def main() -> int:
             pass
     do = rule_for("soak" if leg == "soak" else leg, image) or ""
     fail = do == "fail"
-    if do and do not in ("fail", "mismatch", "wrongsha", "wrongtiles", "software"):
+    if do and do not in ("fail", "mismatch", "wrongsha", "wrongtiles", "software", "short", "shortcase"):
         apply_misbehaviour(do, leg, xb)
 
     tiles = int(os.environ.get("CFT_STANDIN_TILES") or (4 if "quad" in (xb or "") else 1))
@@ -319,10 +330,19 @@ def main() -> int:
 
     if leg == "soak":
         op = real[1]
-        if op in ("sqrt32", "rint32", "nextup32", "nextdown32", "logb32", "class32"):
+        tail = ""                 # the exhaustive modes' ", E encodings, S skipped" clause
+        if op in ("sqrt32", "rint32", "nextup32", "nextdown32", "logb32", "class32") or op in EXH_PER:
             lo, hi = int(real[2], 0), int(real[3], 0)
             cases = hi - lo + (8 if op in ("nextup32", "nextdown32") else 0)
-            mode = real[4] if len(real) > 4 else "-"
+            mode = real[4] if len(real) > 4 else ("rne" if op == "conv32to64-all" else "-")
+            if op in EXH_PER:
+                enc = hi - lo - (1 if do == "short" else 0)
+                skipped = (enc * EXH_PER[op]) // 3 if op == "cvtto32-all" else 0
+                cases = enc * EXH_PER[op] - skipped - (1 if do == "shortcase" else 0)
+                if skipped:
+                    out(f"  skipped {skipped} lane-target pairs outside the target range "
+                        f"(invalid table is model-pinned)")
+                tail = f", {enc} encodings, {skipped} skipped"
         else:
             cases = int(real[2], 0)
             mode = real[4] if len(real) > 4 else ("rne" if op == "conv32to64" else "-")
@@ -336,9 +356,9 @@ def main() -> int:
         if do == "mismatch":
             out(f"  MISMATCH {mode if mode != '-' else op} a=0x3f800001 lib=0x3f800000 cpu=0x3f800001")
             out(f"  FLAGS {mode if mode != '-' else op} a=0x3f800002 lib=0x01 cpu=0x00")
-            out(f"{op} {mode}: {cases} cases, 1 value mismatches, 1 flag mismatches")
+            out(f"{op} {mode}: {cases} cases, 1 value mismatches, 1 flag mismatches{tail}")
             return 1
-        out(f"{op} {mode}: {cases} cases, 0 value mismatches, 0 flag mismatches")
+        out(f"{op} {mode}: {cases} cases, 0 value mismatches, 0 flag mismatches{tail}")
         return 0
 
     print(f"card_stress_standin: no stand-in for leg {leg!r}", file=sys.stderr)

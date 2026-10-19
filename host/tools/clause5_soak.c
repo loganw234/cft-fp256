@@ -72,6 +72,48 @@
  *       report the environment verdicts and exit 0 iff values honour
  *       the rounding modes (the script gates directed jobs on this)
  *
+ * EXHAUSTIVE modes of the operations whose operand is 32 bits wide, one
+ * for each random mode that would otherwise only sample it. Each takes
+ * the operand's encodings [lo, hi) - 0 <= lo < hi <= 2^32, so a slice
+ * is any part of the space - and calls the same batch kernels as the
+ * random mode of the operation: the oracle, flag discipline, probes and
+ * sabotage below are that mode's, and only the operand source differs.
+ * A reader tells one from the other by the job word, which ends -all or
+ * -wide here, and by the arguments: <lo> <hi>, not <count> <seed>.
+ *
+ *   clause5-soak conv32to64-all <lo> <hi>
+ *       every fp32 encoding widened to fp64
+ *   clause5-soak cvtto32-all <lo> <hi> <rne|rtz|rdn|rup|rmm>
+ *       every fp32 encoding against all four integer targets, each
+ *       in-range lane as exact=0 and exact=1
+ *   clause5-soak cvtfrom32-all|cvtfrom64-all <lo> <hi> <rne|rtz|rdn|rup>
+ *       every 32-bit integer as an i32 and as a u32 source, converted to
+ *       fp32 (cvtfrom32-all) or fp64 (cvtfrom64-all)
+ *   clause5-soak scaleb32-all <lo> <hi> <rne|rtz|rdn|rup>
+ *       every fp32 encoding against the directed exponent list
+ *   clause5-soak scaleb32-wide <lo> <hi> <rne|rtz|rdn|rup>
+ *       every fp32 encoding against every exponent that can change a
+ *       result, -278..277, and against twelve past those edges that
+ *       must land as the edges do
+ *   clause5-soak probe scalebrange
+ *       measure that range on the host's libm and exit 0 iff it holds
+ *
+ * The exhaustive modes print "..., E encodings, S skipped" after the
+ * usual counts on the verdict line: E operand encodings ran, and every
+ * (encoding, check) pair was either compared or skipped, so cases + S is
+ * k * E with k fixed by the mode (1, 4, 2, 2, 17 and 568). Skipped is
+ * zero except in cvtto32-all, which compares in-range lanes only. See
+ * the section "Exhaustive modes" below.
+ *
+ * Which of them reach a device: scaleb32-all and scaleb32-wide are
+ * composed from tile passes (below the format's subnormal floor, -149
+ * for fp32, cft_scaleb takes its host path). conv32to64-all, cvtto32-all,
+ * cvtfrom32-all and cvtfrom64-all are libcft HOST operations (the
+ * header of host/src/clause5.c: no floating-point arithmetic, the
+ * device argument is context): a run of them against a device is
+ * libcft's host code against this CPU, bit-identical on every backend
+ * by construction, and the software backend repeats it.
+ *
  * CFT_SOAK_SABOTAGE=1 flips the low bit of the first result of every
  * library call, after the library computes it. A harness that cannot
  * fail proves nothing; the runner requires one sabotaged job to fail
@@ -96,6 +138,10 @@
 static cft_device *dev;
 static uint64_t mismatches, flag_mismatches, cases, skipped;
 static int shown;
+static uint64_t encodings;   /* exhaustive modes: operand encodings run (see the section
+                              * "Exhaustive modes" below) */
+static int exh_mode;          /* set for the -all and -wide jobs: their verdict line
+                              * says what they covered */
 
 /* ---- rounding modes ----------------------------------------------- */
 
@@ -1016,91 +1062,127 @@ static int probe_scalbn(int *flags_ok)
     return ok;
 }
 
-static int drv_scaleb(int is64, uint64_t count, int mi)
+/* The scalbn probe's verdict, applied: 1 when a job may run. The random
+ * modes and the exhaustive ones say the same words. */
+static int scaleb_gate(int mi, int *flags_ok)
 {
-    static uint32_t A32[BATCH], D32[BATCH], W32[BATCH];
-    static uint64_t A64[BATCH], D64[BATCH], W64[BATCH];
-    const int64_t *list = is64 ? SCALEB_N64 : SCALEB_N32;
-    size_t listn = is64 ? sizeof(SCALEB_N64) / sizeof(SCALEB_N64[0])
-                        : sizeof(SCALEB_N32) / sizeof(SCALEB_N32[0]);
-    const char *nm = is64 ? "scaleb64" : "scaleb32";
-    int flags_ok = 1;
-    int values_ok = probe_scalbn(&flags_ok);
+    int values_ok = probe_scalbn(flags_ok);
 
     if (!values_ok && mi != 0) {
         printf("scalbn probe: directed-mode values NOT honoured; "
                "this job is covered by rne + the model matrix\n");
         return 0;                 /* main prints the zero-case line */
     }
-    if (!flags_ok)
+    if (!*flags_ok)
         printf("scalbn probe: flag environment unreliable; "
                "comparing values only\n");
+    return 1;
+}
+
+/* One batch of n operands (fp32 or fp64, by is64) against each exponent
+ * of `list`: the oracle's scalbn under the attribute's rounding mode,
+ * then the library, values compared per lane and flags by the batch OR
+ * first, the lane named by n=1 calls only when the OR disagrees.
+ * `orc`, when given, is the exponent the ORACLE is asked for where the
+ * library is asked for list[li]: scaleb32-wide checks the exponents
+ * past its range against the oracle at the range's edge that way. Every
+ * exponent adds n to `cases`. The random mode and the exhaustive ones
+ * both run exactly this. */
+static int scaleb_batch(int is64, int mi, const void *ops, size_t n,
+                        const int64_t *list, const int64_t *orc,
+                        size_t listn, int flags_ok, const char *nm)
+{
+    static uint32_t D32[BATCH], W32[BATCH];
+    static uint64_t D64[BATCH], W64[BATCH];
+    const uint32_t *A32 = (const uint32_t *)ops;
+    const uint64_t *A64 = (const uint64_t *)ops;
+    size_t i, li;
+
+    for (li = 0; li < listn; li++) {
+        int nn = (int)(orc ? orc[li] : list[li]);
+        uint32_t nf, lf = 0;
+        int raised;
+        cft_status st;
+        fesetround(MODES[mi].fe);
+        feclearexcept(FE_ALL_EXCEPT);
+        if (is64)
+            for (i = 0; i < n; i++)
+                W64[i] = d2u(scalbn(u2d(A64[i]), nn));
+        else
+            for (i = 0; i < n; i++)
+                W32[i] = f2u(scalbnf(u2f(A32[i]), nn));
+        raised = fetestexcept(FE_ALL_EXCEPT);
+        fesetround(FE_TONEAREST);
+        nf = fe_to_cft(raised);
+        st = is64
+            ? cft_scaleb(dev, CFT_FP64, MODES[mi].cr, A64, list[li],
+                         D64, n, &lf, NULL)
+            : cft_scaleb(dev, CFT_FP32, MODES[mi].cr, A32, list[li],
+                         D32, n, &lf, NULL);
+        if (st != CFT_OK) { hard_fail(nm); return 1; }
+        sab(is64 ? (void *)D64 : (void *)D32, is64 ? 8 : 4, n);
+        for (i = 0; i < n; i++) {
+            if (is64 ? !agree64(D64[i], W64[i])
+                     : !agree32(D32[i], W32[i]))
+                vmis(nm, MODES[mi].name,
+                     is64 ? A64[i] : (uint64_t)A32[i], 1,
+                     (uint64_t)list[li],
+                     is64 ? D64[i] : (uint64_t)D32[i],
+                     is64 ? W64[i] : (uint64_t)W32[i]);
+        }
+        if (flags_ok && lf != nf) {
+            /* name the lane: per-element oracle and library */
+            for (i = 0; i < n; i++) {
+                uint32_t f1 = 0, w1;
+                uint64_t dv;
+                fesetround(MODES[mi].fe);
+                feclearexcept(FE_ALL_EXCEPT);
+                c5_sink64 = is64
+                    ? d2u(scalbn(u2d(A64[i]), nn))
+                    : (uint64_t)f2u(scalbnf(u2f(A32[i]), nn));
+                raised = fetestexcept(FE_ALL_EXCEPT);
+                fesetround(FE_TONEAREST);
+                w1 = fe_to_cft(raised);
+                st = is64
+                    ? cft_scaleb(dev, CFT_FP64, MODES[mi].cr, &A64[i],
+                                 list[li], &dv, 1, &f1, NULL)
+                    : cft_scaleb(dev, CFT_FP32, MODES[mi].cr, &A32[i],
+                                 list[li], &D32[i], 1, &f1, NULL);
+                if (st != CFT_OK)
+                    continue;
+                if (f1 != w1)
+                    fmis(nm, MODES[mi].name,
+                         is64 ? A64[i] : (uint64_t)A32[i], f1, w1);
+            }
+        }
+        cases += n;
+    }
+    return 0;
+}
+
+static int drv_scaleb(int is64, uint64_t count, int mi)
+{
+    static uint32_t A32[BATCH];
+    static uint64_t A64[BATCH];
+    const int64_t *list = is64 ? SCALEB_N64 : SCALEB_N32;
+    size_t listn = is64 ? sizeof(SCALEB_N64) / sizeof(SCALEB_N64[0])
+                        : sizeof(SCALEB_N32) / sizeof(SCALEB_N32[0]);
+    const char *nm = is64 ? "scaleb64" : "scaleb32";
+    int flags_ok = 1;
+
+    if (!scaleb_gate(mi, &flags_ok))
+        return 0;                 /* main prints the zero-case line */
 
     while (count) {
-        size_t n = count > BATCH ? BATCH : (size_t)count, i, li;
+        size_t n = count > BATCH ? BATCH : (size_t)count, i;
         uint64_t sub;
         for (i = 0; i < n; i++) {
             if (is64) A64[i] = banded64(); else A32[i] = banded32();
         }
-        for (li = 0; li < listn; li++) {
-            int nn = (int)list[li];
-            uint32_t nf, lf = 0;
-            int raised;
-            cft_status st;
-            fesetround(MODES[mi].fe);
-            feclearexcept(FE_ALL_EXCEPT);
-            if (is64)
-                for (i = 0; i < n; i++)
-                    W64[i] = d2u(scalbn(u2d(A64[i]), nn));
-            else
-                for (i = 0; i < n; i++)
-                    W32[i] = f2u(scalbnf(u2f(A32[i]), nn));
-            raised = fetestexcept(FE_ALL_EXCEPT);
-            fesetround(FE_TONEAREST);
-            nf = fe_to_cft(raised);
-            st = is64
-                ? cft_scaleb(dev, CFT_FP64, MODES[mi].cr, A64, list[li],
-                             D64, n, &lf, NULL)
-                : cft_scaleb(dev, CFT_FP32, MODES[mi].cr, A32, list[li],
-                             D32, n, &lf, NULL);
-            if (st != CFT_OK) { hard_fail(nm); return 1; }
-            sab(is64 ? (void *)D64 : (void *)D32, is64 ? 8 : 4, n);
-            for (i = 0; i < n; i++) {
-                if (is64 ? !agree64(D64[i], W64[i])
-                         : !agree32(D32[i], W32[i]))
-                    vmis(nm, MODES[mi].name,
-                         is64 ? A64[i] : (uint64_t)A32[i], 1,
-                         (uint64_t)(int64_t)nn,
-                         is64 ? D64[i] : (uint64_t)D32[i],
-                         is64 ? W64[i] : (uint64_t)W32[i]);
-            }
-            if (flags_ok && lf != nf) {
-                /* name the lane: per-element oracle and library */
-                for (i = 0; i < n; i++) {
-                    uint32_t f1 = 0, w1;
-                    uint64_t dv;
-                    fesetround(MODES[mi].fe);
-                    feclearexcept(FE_ALL_EXCEPT);
-                    c5_sink64 = is64
-                        ? d2u(scalbn(u2d(A64[i]), nn))
-                        : (uint64_t)f2u(scalbnf(u2f(A32[i]), nn));
-                    raised = fetestexcept(FE_ALL_EXCEPT);
-                    fesetround(FE_TONEAREST);
-                    w1 = fe_to_cft(raised);
-                    st = is64
-                        ? cft_scaleb(dev, CFT_FP64, MODES[mi].cr, &A64[i],
-                                     list[li], &dv, 1, &f1, NULL)
-                        : cft_scaleb(dev, CFT_FP32, MODES[mi].cr, &A32[i],
-                                     list[li], &D32[i], 1, &f1, NULL);
-                    if (st != CFT_OK)
-                        continue;
-                    if (f1 != w1)
-                        fmis(nm, MODES[mi].name,
-                             is64 ? A64[i] : (uint64_t)A32[i], f1, w1);
-                }
-            }
-            cases += n;
-        }
+        if (scaleb_batch(is64, mi,
+                         is64 ? (const void *)A64 : (const void *)A32, n,
+                         list, NULL, listn, flags_ok, nm))
+            return 1;
         sub = (uint64_t)n * listn;
         count = count > sub ? count - sub : 0;
     }
@@ -1227,41 +1309,53 @@ static int drv_conv64to32(uint64_t count, int mi)
     return 0;
 }
 
+/* One batch of n fp32 encodings widened to fp64: exact, so the oracle
+ * is the cast and the only expected flag is invalid-on-sNaN, derived.
+ * The random mode and conv32to64-all both run exactly this. */
+static int conv32to64_batch(const uint32_t *A, size_t n)
+{
+    static uint64_t W[BATCH], D[BATCH];
+    size_t i;
+    uint32_t lf = 0, ex = 0;
+    for (i = 0; i < n; i++) {
+        W[i] = d2u((double)u2f(A[i]));
+        if (is_snan32(A[i]))
+            ex |= CFT_FLAG_INVALID;
+    }
+    feclearexcept(FE_ALL_EXCEPT);
+    if (cft_convert(dev, CFT_FP32, CFT_FP64, CFT_RNE, A, D, n, &lf)
+        != CFT_OK) {
+        hard_fail("conv32to64"); return 1;
+    }
+    sab(D, 8, n);
+    for (i = 0; i < n; i++)
+        if (!agree64(D[i], W[i]))
+            vmis("conv32to64", "rne", A[i], 0, 0, D[i], W[i]);
+    if (lf != ex) {
+        for (i = 0; i < n; i++) {
+            uint64_t d1;
+            uint32_t f1 = 0, w1;
+            if (cft_convert(dev, CFT_FP32, CFT_FP64, CFT_RNE, &A[i],
+                            &d1, 1, &f1) != CFT_OK)
+                continue;
+            w1 = is_snan32(A[i]) ? CFT_FLAG_INVALID : 0;
+            if (f1 != w1)
+                fmis("conv32to64", "rne", A[i], f1, w1);
+        }
+    }
+    cases += n;
+    return 0;
+}
+
 static int drv_conv32to64(uint64_t count)
 {
     static uint32_t A[BATCH];
-    static uint64_t W[BATCH], D[BATCH];
     while (count) {
         size_t n = count > BATCH ? BATCH : (size_t)count, i;
-        uint32_t lf = 0, ex = 0;
-        for (i = 0; i < n; i++) {
-            A[i] = banded32();
-            W[i] = d2u((double)u2f(A[i]));
-            if (is_snan32(A[i]))
-                ex |= CFT_FLAG_INVALID;
-        }
-        feclearexcept(FE_ALL_EXCEPT);
-        if (cft_convert(dev, CFT_FP32, CFT_FP64, CFT_RNE, A, D, n, &lf)
-            != CFT_OK) {
-            hard_fail("conv32to64"); return 1;
-        }
-        sab(D, 8, n);
         for (i = 0; i < n; i++)
-            if (!agree64(D[i], W[i]))
-                vmis("conv32to64", "rne", A[i], 0, 0, D[i], W[i]);
-        if (lf != ex) {
-            for (i = 0; i < n; i++) {
-                uint64_t d1;
-                uint32_t f1 = 0, w1;
-                if (cft_convert(dev, CFT_FP32, CFT_FP64, CFT_RNE, &A[i],
-                                &d1, 1, &f1) != CFT_OK)
-                    continue;
-                w1 = is_snan32(A[i]) ? CFT_FLAG_INVALID : 0;
-                if (f1 != w1)
-                    fmis("conv32to64", "rne", A[i], f1, w1);
-            }
-        }
-        cases += n;
+            A[i] = banded32();
+        if (conv32to64_batch(A, n))
+            return 1;
         count -= n;
     }
     return 0;
@@ -1332,145 +1426,162 @@ static uint32_t cvtto_operand32(void)
     return banded32();
 }
 
-static int drv_cvtto(int is64, uint64_t count, int mi)
+/* One batch of n operands (fp32 or fp64, by is64) against all four
+ * integer targets under attribute mi, each in-range lane as exact=0 and
+ * exact=1. The random mode and cvtto32-all both run exactly this; the
+ * lane-target pairs it leaves out are counted in `skipped`, so for any
+ * batch cases + skipped is 4 * n. */
+static int cvtto_batch(int is64, int mi, const void *ops, size_t n)
 {
-    static uint64_t A64[BATCH];
-    static uint32_t A32[BATCH];
     static uint8_t C[BATCH * 8];        /* compacted operands */
     static uint64_t EXPV[BATCH];        /* expected integer bits */
     static uint8_t INX[BATCH];          /* per-lane derived inexact */
     static uint8_t OUT[BATCH * 8];
+    const uint64_t *A64 = (const uint64_t *)ops;
+    const uint32_t *A32 = (const uint32_t *)ops;
     cft_format fmt = is64 ? CFT_FP64 : CFT_FP32;
     size_t esz = is64 ? 8 : 4;
+    size_t i;
+    int ti;
+
+    for (ti = 0; ti < 4; ti++) {
+        size_t m = 0;
+        int exact;
+        uint32_t orinx = 0;
+        fesetround(MODES[mi].fe);
+        for (i = 0; i < n; i++) {
+            double xv;
+            long long r;
+            int hi_half = 0;
+            uint64_t bits = is64 ? A64[i] : (uint64_t)A32[i];
+            if (is64 ? !is_finite64(A64[i]) : !is_finite32(A32[i])) {
+                skipped++;
+                continue;
+            }
+            xv = is64 ? u2d(A64[i]) : (double)u2f(A32[i]);
+            if (TGT[ti].is_signed == 0 && TGT[ti].width == 64 &&
+                xv >= 0x1p63 && xv < 0x1p64) {
+                /* integral by construction: values past 2^53 have
+                 * no fraction, so no rounding and no mode */
+                EXPV[m] = (uint64_t)xv;
+                INX[m] = 0;
+                hi_half = 1;
+                r = 0;
+            } else if (!(xv >= -0x1p63 && xv < 0x1p63)) {
+                skipped++;
+                continue;
+            } else if (mi == 4) {
+                r = is64 ? llround(u2d(A64[i]))
+                         : llroundf(u2f(A32[i]));
+            } else {
+                r = is64 ? llrint(u2d(A64[i]))
+                         : llrintf(u2f(A32[i]));
+                if (mi == 1) {
+                    /* the oracle cross-checks itself in RTZ */
+                    long long r2 = is64 ? (long long)u2d(A64[i])
+                                        : (long long)u2f(A32[i]);
+                    if (r2 != r) {
+                        printf("  ORACLE llrint vs cast disagree "
+                               "a=0x%016llx\n",
+                               (unsigned long long)bits);
+                        mismatches++;
+                    }
+                }
+            }
+            if (!hi_half) {
+                if (TGT[ti].width == 32) {
+                    if (TGT[ti].is_signed) {
+                        if (r < (long long)INT32_MIN ||
+                            r > (long long)INT32_MAX) {
+                            skipped++;
+                            continue;
+                        }
+                    } else if (r < 0 || r > (long long)UINT32_MAX) {
+                        skipped++;
+                        continue;
+                    }
+                } else if (!TGT[ti].is_signed && r < 0) {
+                    skipped++;
+                    continue;
+                }
+                EXPV[m] = (uint64_t)r;
+                /* (double)r is exact here: |r| < 2^63 and either
+                 * |r| <= 2^53 or r equals the already-integral
+                 * operand, so the compare is exact. */
+                INX[m] = ((double)r != xv);
+            }
+            if (INX[m])
+                orinx = CFT_FLAG_INEXACT;
+            memcpy(C + m * esz,
+                   is64 ? (void *)&A64[i] : (void *)&A32[i], esz);
+            m++;
+        }
+        fesetround(FE_TONEAREST);
+        if (m == 0)
+            continue;
+        for (exact = 0; exact <= 1; exact++) {
+            uint32_t lf = 0, want = exact ? orinx : 0;
+            size_t osz = (size_t)TGT[ti].width / 8;
+            if (cvtto_call(ti, fmt, mi, exact, C, OUT, m, &lf)
+                != CFT_OK) {
+                hard_fail(TGT[ti].nm);
+                return 1;
+            }
+            sab(OUT, osz, m);
+            for (i = 0; i < m; i++) {
+                uint64_t got;
+                if (osz == 4) {
+                    uint32_t g;
+                    memcpy(&g, OUT + i * 4, 4);
+                    got = g;
+                } else {
+                    memcpy(&got, OUT + i * 8, 8);
+                }
+                if ((osz == 4 ? (got != (EXPV[i] & 0xffffffffull))
+                              : (got != EXPV[i]))) {
+                    uint64_t inbits;
+                    memcpy(&inbits, C + i * esz, esz);
+                    if (esz == 4) inbits &= 0xffffffffull;
+                    vmis(TGT[ti].nm, MODES[mi].name, inbits, 0, 0,
+                         got, osz == 4 ? (EXPV[i] & 0xffffffffull)
+                                       : EXPV[i]);
+                }
+            }
+            if (lf != want) {
+                for (i = 0; i < m; i++) {
+                    uint32_t f1 = 0, w1;
+                    uint64_t inbits;
+                    memcpy(&inbits, C + i * esz, esz);
+                    if (esz == 4) inbits &= 0xffffffffull;
+                    if (cvtto_call(ti, fmt, mi, exact, C + i * esz,
+                                   OUT, 1, &f1) != CFT_OK)
+                        continue;
+                    w1 = (exact && INX[i]) ? CFT_FLAG_INEXACT : 0;
+                    if (f1 != w1)
+                        fmis(TGT[ti].nm, MODES[mi].name, inbits,
+                             f1, w1);
+                }
+            }
+        }
+        cases += m;
+    }
+    return 0;
+}
+
+static int drv_cvtto(int is64, uint64_t count, int mi)
+{
+    static uint64_t A64[BATCH];
+    static uint32_t A32[BATCH];
 
     while (count) {
         size_t n = count > BATCH ? BATCH : (size_t)count, i;
-        int ti;
         for (i = 0; i < n; i++) {
             if (is64) A64[i] = cvtto_operand64();
             else      A32[i] = cvtto_operand32();
         }
-        for (ti = 0; ti < 4; ti++) {
-            size_t m = 0;
-            int exact;
-            uint32_t orinx = 0;
-            fesetround(MODES[mi].fe);
-            for (i = 0; i < n; i++) {
-                double xv;
-                long long r;
-                int hi_half = 0;
-                uint64_t bits = is64 ? A64[i] : (uint64_t)A32[i];
-                if (is64 ? !is_finite64(A64[i]) : !is_finite32(A32[i])) {
-                    skipped++;
-                    continue;
-                }
-                xv = is64 ? u2d(A64[i]) : (double)u2f(A32[i]);
-                if (TGT[ti].is_signed == 0 && TGT[ti].width == 64 &&
-                    xv >= 0x1p63 && xv < 0x1p64) {
-                    /* integral by construction: values past 2^53 have
-                     * no fraction, so no rounding and no mode */
-                    EXPV[m] = (uint64_t)xv;
-                    INX[m] = 0;
-                    hi_half = 1;
-                    r = 0;
-                } else if (!(xv >= -0x1p63 && xv < 0x1p63)) {
-                    skipped++;
-                    continue;
-                } else if (mi == 4) {
-                    r = is64 ? llround(u2d(A64[i]))
-                             : llroundf(u2f(A32[i]));
-                } else {
-                    r = is64 ? llrint(u2d(A64[i]))
-                             : llrintf(u2f(A32[i]));
-                    if (mi == 1) {
-                        /* the oracle cross-checks itself in RTZ */
-                        long long r2 = is64 ? (long long)u2d(A64[i])
-                                            : (long long)u2f(A32[i]);
-                        if (r2 != r) {
-                            printf("  ORACLE llrint vs cast disagree "
-                                   "a=0x%016llx\n",
-                                   (unsigned long long)bits);
-                            mismatches++;
-                        }
-                    }
-                }
-                if (!hi_half) {
-                    if (TGT[ti].width == 32) {
-                        if (TGT[ti].is_signed) {
-                            if (r < (long long)INT32_MIN ||
-                                r > (long long)INT32_MAX) {
-                                skipped++;
-                                continue;
-                            }
-                        } else if (r < 0 || r > (long long)UINT32_MAX) {
-                            skipped++;
-                            continue;
-                        }
-                    } else if (!TGT[ti].is_signed && r < 0) {
-                        skipped++;
-                        continue;
-                    }
-                    EXPV[m] = (uint64_t)r;
-                    /* (double)r is exact here: |r| < 2^63 and either
-                     * |r| <= 2^53 or r equals the already-integral
-                     * operand, so the compare is exact. */
-                    INX[m] = ((double)r != xv);
-                }
-                if (INX[m])
-                    orinx = CFT_FLAG_INEXACT;
-                memcpy(C + m * esz,
-                       is64 ? (void *)&A64[i] : (void *)&A32[i], esz);
-                m++;
-            }
-            fesetround(FE_TONEAREST);
-            if (m == 0)
-                continue;
-            for (exact = 0; exact <= 1; exact++) {
-                uint32_t lf = 0, want = exact ? orinx : 0;
-                size_t osz = (size_t)TGT[ti].width / 8;
-                if (cvtto_call(ti, fmt, mi, exact, C, OUT, m, &lf)
-                    != CFT_OK) {
-                    hard_fail(TGT[ti].nm);
-                    return 1;
-                }
-                sab(OUT, osz, m);
-                for (i = 0; i < m; i++) {
-                    uint64_t got;
-                    if (osz == 4) {
-                        uint32_t g;
-                        memcpy(&g, OUT + i * 4, 4);
-                        got = g;
-                    } else {
-                        memcpy(&got, OUT + i * 8, 8);
-                    }
-                    if ((osz == 4 ? (got != (EXPV[i] & 0xffffffffull))
-                                  : (got != EXPV[i]))) {
-                        uint64_t inbits;
-                        memcpy(&inbits, C + i * esz, esz);
-                        if (esz == 4) inbits &= 0xffffffffull;
-                        vmis(TGT[ti].nm, MODES[mi].name, inbits, 0, 0,
-                             got, osz == 4 ? (EXPV[i] & 0xffffffffull)
-                                           : EXPV[i]);
-                    }
-                }
-                if (lf != want) {
-                    for (i = 0; i < m; i++) {
-                        uint32_t f1 = 0, w1;
-                        uint64_t inbits;
-                        memcpy(&inbits, C + i * esz, esz);
-                        if (esz == 4) inbits &= 0xffffffffull;
-                        if (cvtto_call(ti, fmt, mi, exact, C + i * esz,
-                                       OUT, 1, &f1) != CFT_OK)
-                            continue;
-                        w1 = (exact && INX[i]) ? CFT_FLAG_INEXACT : 0;
-                        if (f1 != w1)
-                            fmis(TGT[ti].nm, MODES[mi].name, inbits,
-                                 f1, w1);
-                    }
-                }
-            }
-            cases += m;
-        }
+        if (cvtto_batch(is64, mi,
+                        is64 ? (const void *)A64 : (const void *)A32, n))
+            return 1;
         count -= n;
     }
     return 0;
@@ -1573,12 +1684,165 @@ static uint64_t cvtfrom_int(int width)
     if ((rng() & 7) == 0) {
         static const int ks[8] = { 23, 24, 31, 32, 52, 53, 62, 63 };
         v = (1ull << ks[rng() % 8]) + (uint64_t)((int64_t)(rng() % 5) - 2);
+        /* The negative of v modulo 2^64, in unsigned arithmetic. This was
+         * `(uint64_t)-(int64_t)v` from the generator's first commit, which
+         * is the same value for every v but overflows a signed negation
+         * when v is 2^63 (k = 63, offset 0) - undefined behaviour that
+         * UBSan reported on 2026-10-19. No operand changes. */
         if (rng() & 1)
-            v = (uint64_t)-(int64_t)v;
+            v = (uint64_t)0 - v;
     }
     if (width == 32)
         v &= 0xffffffffull;
     return v;
+}
+
+static const struct { int w; int sg; const char *nm; } SRC[4] = {
+    { 32, 1, "cvt_from_i32" }, { 32, 0, "cvt_from_u32" },
+    { 64, 1, "cvt_from_i64" }, { 64, 0, "cvt_from_u64" },
+};
+
+/* The cvtfrom probe's verdict, applied: 1 when a job may run. The
+ * random mode and the exhaustive ones say the same words. */
+static int cvtfrom_gate(int mi, int *flags_ok)
+{
+    int values_ok = probe_cvtfrom(flags_ok);
+
+    if (!values_ok && mi != 0) {
+        printf("cvtfrom probe: directed-mode values NOT honoured; "
+               "this job is covered by rne + the model matrix\n");
+        return 0;                 /* main prints the zero-case line */
+    }
+    if (!*flags_ok)
+        printf("cvtfrom probe: inexact flag unreliable; "
+               "comparing values only\n");
+    return 1;
+}
+
+/* One source type (si indexes SRC: i32, u32, i64, u64) of one batch of
+ * n lanes under attribute mi, converted to fp64 when is64 and to fp32
+ * otherwise. S32 or S64 holds the source lanes by the source's width;
+ * V is each lane as the log prints it. The random mode and
+ * cvtfrom32-all / cvtfrom64-all both run exactly this. */
+static int cvtfrom_check(int is64, int mi, int si, size_t n, int flags_ok,
+                         const uint64_t *V, const uint32_t *S32,
+                         const uint64_t *S64)
+{
+    static uint32_t W32[BATCH], D32[BATCH];
+    static uint64_t W64[BATCH], D64[BATCH];
+    cft_format fmt = is64 ? CFT_FP64 : CFT_FP32;
+    uint32_t nf, lf = 0;
+    int raised;
+    cft_status st;
+    size_t i;
+
+    fesetround(MODES[mi].fe);
+    feclearexcept(FE_ALL_EXCEPT);
+    for (i = 0; i < n; i++) {
+        if (is64) {
+            double r;
+            if (SRC[si].w == 32)
+                r = SRC[si].sg ? (double)(int32_t)S32[i]
+                               : (double)S32[i];
+            else
+                r = SRC[si].sg ? (double)(int64_t)S64[i]
+                               : (double)S64[i];
+            W64[i] = d2u(r);
+        } else {
+            float r;
+            if (SRC[si].w == 32)
+                r = SRC[si].sg ? (float)(int32_t)S32[i]
+                               : (float)S32[i];
+            else
+                r = SRC[si].sg ? (float)(int64_t)S64[i]
+                               : (float)S64[i];
+            W32[i] = f2u(r);
+        }
+    }
+    raised = fetestexcept(FE_ALL_EXCEPT);
+    fesetround(FE_TONEAREST);
+    nf = fe_to_cft(raised) & CFT_FLAG_INEXACT;
+    switch (si) {
+    case 0: st = cft_cvt_from_i32(dev, fmt, MODES[mi].cr,
+                (const int32_t *)(const void *)S32,
+                is64 ? (void *)D64 : (void *)D32, n, &lf);
+        break;
+    case 1: st = cft_cvt_from_u32(dev, fmt, MODES[mi].cr, S32,
+                is64 ? (void *)D64 : (void *)D32, n, &lf);
+        break;
+    case 2: st = cft_cvt_from_i64(dev, fmt, MODES[mi].cr,
+                (const int64_t *)(const void *)S64,
+                is64 ? (void *)D64 : (void *)D32, n, &lf);
+        break;
+    default: st = cft_cvt_from_u64(dev, fmt, MODES[mi].cr, S64,
+                is64 ? (void *)D64 : (void *)D32, n, &lf);
+        break;
+    }
+    if (st != CFT_OK) { hard_fail(SRC[si].nm); return 1; }
+    sab(is64 ? (void *)D64 : (void *)D32, is64 ? 8 : 4, n);
+    for (i = 0; i < n; i++) {
+        if (is64 ? (D64[i] != W64[i]) : (D32[i] != W32[i]))
+            vmis(SRC[si].nm, MODES[mi].name, V[i], 0, 0,
+                 is64 ? D64[i] : (uint64_t)D32[i],
+                 is64 ? W64[i] : (uint64_t)W32[i]);
+    }
+    if (flags_ok && lf != nf) {
+        for (i = 0; i < n; i++) {
+            uint32_t f1 = 0, w1;
+            fesetround(MODES[mi].fe);
+            feclearexcept(FE_ALL_EXCEPT);
+            if (is64) {
+                double r;
+                if (SRC[si].w == 32)
+                    r = SRC[si].sg ? (double)(int32_t)S32[i]
+                                   : (double)S32[i];
+                else
+                    r = SRC[si].sg ? (double)(int64_t)S64[i]
+                                   : (double)S64[i];
+                c5_sink64 = d2u(r);
+            } else {
+                float r;
+                if (SRC[si].w == 32)
+                    r = SRC[si].sg ? (float)(int32_t)S32[i]
+                                   : (float)S32[i];
+                else
+                    r = SRC[si].sg ? (float)(int64_t)S64[i]
+                                   : (float)S64[i];
+                c5_sink32 = f2u(r);
+            }
+            raised = fetestexcept(FE_ALL_EXCEPT);
+            fesetround(FE_TONEAREST);
+            w1 = fe_to_cft(raised) & CFT_FLAG_INEXACT;
+            switch (si) {
+            case 0: st = cft_cvt_from_i32(dev, fmt, MODES[mi].cr,
+                        (const int32_t *)(const void *)&S32[i],
+                        is64 ? (void *)&D64[i] : (void *)&D32[i],
+                        1, &f1);
+                break;
+            case 1: st = cft_cvt_from_u32(dev, fmt, MODES[mi].cr,
+                        &S32[i],
+                        is64 ? (void *)&D64[i] : (void *)&D32[i],
+                        1, &f1);
+                break;
+            case 2: st = cft_cvt_from_i64(dev, fmt, MODES[mi].cr,
+                        (const int64_t *)(const void *)&S64[i],
+                        is64 ? (void *)&D64[i] : (void *)&D32[i],
+                        1, &f1);
+                break;
+            default: st = cft_cvt_from_u64(dev, fmt, MODES[mi].cr,
+                        &S64[i],
+                        is64 ? (void *)&D64[i] : (void *)&D32[i],
+                        1, &f1);
+                break;
+            }
+            if (st != CFT_OK)
+                continue;
+            if (f1 != w1)
+                fmis(SRC[si].nm, MODES[mi].name, V[i], f1, w1);
+        }
+    }
+    cases += n;
+    return 0;
 }
 
 static int drv_cvtfrom(int is64, uint64_t count, int mi)
@@ -1586,32 +1850,15 @@ static int drv_cvtfrom(int is64, uint64_t count, int mi)
     static uint64_t V[BATCH];
     static uint32_t S32[BATCH];
     static uint64_t S64[BATCH];
-    static uint32_t W32[BATCH], D32[BATCH];
-    static uint64_t W64[BATCH], D64[BATCH];
-    static const struct { int w; int sg; const char *nm; } SRC[4] = {
-        { 32, 1, "cvt_from_i32" }, { 32, 0, "cvt_from_u32" },
-        { 64, 1, "cvt_from_i64" }, { 64, 0, "cvt_from_u64" },
-    };
-    cft_format fmt = is64 ? CFT_FP64 : CFT_FP32;
     int flags_ok = 1;
-    int values_ok = probe_cvtfrom(&flags_ok);
 
-    if (!values_ok && mi != 0) {
-        printf("cvtfrom probe: directed-mode values NOT honoured; "
-               "this job is covered by rne + the model matrix\n");
+    if (!cvtfrom_gate(mi, &flags_ok))
         return 0;                 /* main prints the zero-case line */
-    }
-    if (!flags_ok)
-        printf("cvtfrom probe: inexact flag unreliable; "
-               "comparing values only\n");
 
     while (count) {
         size_t n = count > BATCH ? BATCH : (size_t)count, i;
         int si;
         for (si = 0; si < 4; si++) {
-            uint32_t nf, lf = 0;
-            int raised;
-            cft_status st;
             for (i = 0; i < n; i++) {
                 V[i] = cvtfrom_int(SRC[si].w);
                 if (SRC[si].w == 32)
@@ -1619,112 +1866,8 @@ static int drv_cvtfrom(int is64, uint64_t count, int mi)
                 else
                     S64[i] = V[i];
             }
-            fesetround(MODES[mi].fe);
-            feclearexcept(FE_ALL_EXCEPT);
-            for (i = 0; i < n; i++) {
-                if (is64) {
-                    double r;
-                    if (SRC[si].w == 32)
-                        r = SRC[si].sg ? (double)(int32_t)S32[i]
-                                       : (double)S32[i];
-                    else
-                        r = SRC[si].sg ? (double)(int64_t)S64[i]
-                                       : (double)S64[i];
-                    W64[i] = d2u(r);
-                } else {
-                    float r;
-                    if (SRC[si].w == 32)
-                        r = SRC[si].sg ? (float)(int32_t)S32[i]
-                                       : (float)S32[i];
-                    else
-                        r = SRC[si].sg ? (float)(int64_t)S64[i]
-                                       : (float)S64[i];
-                    W32[i] = f2u(r);
-                }
-            }
-            raised = fetestexcept(FE_ALL_EXCEPT);
-            fesetround(FE_TONEAREST);
-            nf = fe_to_cft(raised) & CFT_FLAG_INEXACT;
-            switch (si) {
-            case 0: st = cft_cvt_from_i32(dev, fmt, MODES[mi].cr,
-                        (const int32_t *)(const void *)S32,
-                        is64 ? (void *)D64 : (void *)D32, n, &lf);
-                break;
-            case 1: st = cft_cvt_from_u32(dev, fmt, MODES[mi].cr, S32,
-                        is64 ? (void *)D64 : (void *)D32, n, &lf);
-                break;
-            case 2: st = cft_cvt_from_i64(dev, fmt, MODES[mi].cr,
-                        (const int64_t *)(const void *)S64,
-                        is64 ? (void *)D64 : (void *)D32, n, &lf);
-                break;
-            default: st = cft_cvt_from_u64(dev, fmt, MODES[mi].cr, S64,
-                        is64 ? (void *)D64 : (void *)D32, n, &lf);
-                break;
-            }
-            if (st != CFT_OK) { hard_fail(SRC[si].nm); return 1; }
-            sab(is64 ? (void *)D64 : (void *)D32, is64 ? 8 : 4, n);
-            for (i = 0; i < n; i++) {
-                if (is64 ? (D64[i] != W64[i]) : (D32[i] != W32[i]))
-                    vmis(SRC[si].nm, MODES[mi].name, V[i], 0, 0,
-                         is64 ? D64[i] : (uint64_t)D32[i],
-                         is64 ? W64[i] : (uint64_t)W32[i]);
-            }
-            if (flags_ok && lf != nf) {
-                for (i = 0; i < n; i++) {
-                    uint32_t f1 = 0, w1;
-                    fesetround(MODES[mi].fe);
-                    feclearexcept(FE_ALL_EXCEPT);
-                    if (is64) {
-                        double r;
-                        if (SRC[si].w == 32)
-                            r = SRC[si].sg ? (double)(int32_t)S32[i]
-                                           : (double)S32[i];
-                        else
-                            r = SRC[si].sg ? (double)(int64_t)S64[i]
-                                           : (double)S64[i];
-                        c5_sink64 = d2u(r);
-                    } else {
-                        float r;
-                        if (SRC[si].w == 32)
-                            r = SRC[si].sg ? (float)(int32_t)S32[i]
-                                           : (float)S32[i];
-                        else
-                            r = SRC[si].sg ? (float)(int64_t)S64[i]
-                                           : (float)S64[i];
-                        c5_sink32 = f2u(r);
-                    }
-                    raised = fetestexcept(FE_ALL_EXCEPT);
-                    fesetround(FE_TONEAREST);
-                    w1 = fe_to_cft(raised) & CFT_FLAG_INEXACT;
-                    switch (si) {
-                    case 0: st = cft_cvt_from_i32(dev, fmt, MODES[mi].cr,
-                                (const int32_t *)(const void *)&S32[i],
-                                is64 ? (void *)&D64[i] : (void *)&D32[i],
-                                1, &f1);
-                        break;
-                    case 1: st = cft_cvt_from_u32(dev, fmt, MODES[mi].cr,
-                                &S32[i],
-                                is64 ? (void *)&D64[i] : (void *)&D32[i],
-                                1, &f1);
-                        break;
-                    case 2: st = cft_cvt_from_i64(dev, fmt, MODES[mi].cr,
-                                (const int64_t *)(const void *)&S64[i],
-                                is64 ? (void *)&D64[i] : (void *)&D32[i],
-                                1, &f1);
-                        break;
-                    default: st = cft_cvt_from_u64(dev, fmt, MODES[mi].cr,
-                                &S64[i],
-                                is64 ? (void *)&D64[i] : (void *)&D32[i],
-                                1, &f1);
-                        break;
-                    }
-                    if (st != CFT_OK)
-                        continue;
-                    if (f1 != w1)
-                        fmis(SRC[si].nm, MODES[mi].name, V[i], f1, w1);
-                }
-            }
-            cases += n;
+            if (cvtfrom_check(is64, mi, si, n, flags_ok, V, S32, S64))
+                return 1;
         }
         count -= n;
     }
@@ -1853,6 +1996,310 @@ static int drv_rem(int is64, uint64_t count)
     return 0;
 }
 
+/* ================================================================
+ * Exhaustive modes: every encoding of a 32-bit operand
+ *
+ * conv32to64-all, cvtto32-all, cvtfrom32-all, cvtfrom64-all,
+ * scaleb32-all and scaleb32-wide take <lo> <hi> over the operand's 2^32
+ * encodings, the way rint32 and its neighbours do. They call the SAME
+ * batch kernels as the random mode of the operation (conv32to64_batch,
+ * cvtto_batch, cvtfrom_check, scaleb_batch, with the same probe
+ * gates), so the oracle, the flag discipline, the probes and the
+ * sabotage are the random mode's by construction; only the operand
+ * source differs. A job word ending -all or -wide is how a log says
+ * which one ran.
+ *
+ * Coverage. A count of checks alone cannot show a slice ran whole:
+ * cvtto32-all skips the lane-target pairs whose rounded value leaves
+ * the target's range, so its checks depend on the operands. These modes
+ * therefore count the operand encodings they ran, in the batch loop,
+ * and their verdict line says it: "..., E encodings, S skipped". Every
+ * (encoding, check) pair is either compared, and counted in cases, or
+ * skipped, so cases + skipped is k * encodings with k fixed by the
+ * mode - 1, 4, 2, 2, 17 and 568 for the six, in the order above - and
+ * hw/card_stress_lib.py holds the line to both.
+ * ================================================================ */
+
+/* [lo, hi) must be a non-empty part of the 2^32 encodings. The loops
+ * below cast the running value to the operand's 32 bits, so a range
+ * past 2^32 would quietly wrap and run encodings twice: it is refused
+ * by name instead, as is anything that is not a whole number. */
+static int exh_range(const char *slo, const char *shi, uint64_t *lo,
+                     uint64_t *hi)
+{
+    char *e1, *e2;
+    *lo = strtoull(slo, &e1, 0);
+    *hi = strtoull(shi, &e2, 0);
+    if (!*slo || !*shi || *e1 || *e2 || *lo >= *hi ||
+        *hi > 0x100000000ull) {
+        fprintf(stderr, "need 0 <= lo < hi <= 2^32 (the encodings of a "
+                "32-bit operand), got [%s, %s)\n", slo, shi);
+        return 1;
+    }
+    return 0;
+}
+
+static int drv_conv32to64_all(uint64_t lo, uint64_t hi)
+{
+    static uint32_t A[BATCH];
+    uint64_t v = lo;
+    while (v < hi) {
+        size_t n = hi - v > BATCH ? BATCH : (size_t)(hi - v), i;
+        for (i = 0; i < n; i++)
+            A[i] = (uint32_t)(v + i);
+        if (conv32to64_batch(A, n))
+            return 1;
+        encodings += n;
+        v += n;
+    }
+    return 0;
+}
+
+static int drv_cvtto32_all(uint64_t lo, uint64_t hi, int mi)
+{
+    static uint32_t A[BATCH];
+    uint64_t v = lo;
+    while (v < hi) {
+        size_t n = hi - v > BATCH ? BATCH : (size_t)(hi - v), i;
+        for (i = 0; i < n; i++)
+            A[i] = (uint32_t)(v + i);
+        if (cvtto_batch(0, mi, A, n))
+            return 1;
+        encodings += n;
+        v += n;
+    }
+    return 0;
+}
+
+/* Every 32-bit integer as an i32 source and as a u32 source, converted
+ * to fp32 (is64 = 0) or to fp64. The i64 and u64 sources of the random
+ * mode have 2^64 values and are not part of this one. */
+static int drv_cvtfrom_all(int is64, uint64_t lo, uint64_t hi, int mi)
+{
+    static uint64_t V[BATCH];
+    static uint32_t S32[BATCH];
+    int flags_ok = 1;
+    uint64_t v = lo;
+
+    if (!cvtfrom_gate(mi, &flags_ok))
+        return 0;                 /* main prints the zero-case line */
+    while (v < hi) {
+        size_t n = hi - v > BATCH ? BATCH : (size_t)(hi - v), i;
+        int si;
+        for (i = 0; i < n; i++) {
+            S32[i] = (uint32_t)(v + i);
+            V[i] = S32[i];
+        }
+        for (si = 0; si < 2; si++)              /* i32, then u32 */
+            if (cvtfrom_check(is64, mi, si, n, flags_ok, V, S32, NULL))
+                return 1;
+        encodings += n;
+        v += n;
+    }
+    return 0;
+}
+
+static int drv_scaleb32_all(uint64_t lo, uint64_t hi, int mi)
+{
+    static uint32_t A[BATCH];
+    int flags_ok = 1;
+    uint64_t v = lo;
+
+    if (!scaleb_gate(mi, &flags_ok))
+        return 0;                 /* main prints the zero-case line */
+    while (v < hi) {
+        size_t n = hi - v > BATCH ? BATCH : (size_t)(hi - v), i;
+        for (i = 0; i < n; i++)
+            A[i] = (uint32_t)(v + i);
+        if (scaleb_batch(0, mi, A, n, SCALEB_N32, NULL,
+                         sizeof(SCALEB_N32) / sizeof(SCALEB_N32[0]),
+                         flags_ok, "scaleb32"))
+            return 1;
+        encodings += n;
+        v += n;
+    }
+    return 0;
+}
+
+/* ----------------------------------------------------------------
+ * scaleb32-wide: every exponent that can change a result
+ *
+ * A finite nonzero fp32 operand x has 2^-149 <= |x| < 2^128 (the
+ * smallest subnormal, and the largest finite value's ceiling), so x *
+ * 2^n has two edges.
+ *
+ *   High. n = 277 is the first exponent that overflows EVERY nonzero
+ *   finite operand: 2^-149 * 2^277 = 2^128 is already out of range, and
+ *   at n = 276 the same operand gives 2^127, finite. From 277 on, a
+ *   nonzero finite operand's result is the overflow landing of its sign
+ *   and the attribute (infinity, or max_normal), whatever n is.
+ *
+ *   Low. n = -278 is the first exponent that puts EVERY finite operand
+ *   strictly below half the smallest subnormal: |x| * 2^-278 < 2^128 *
+ *   2^-278 = 2^-150. Rne then gives a signed zero, and rtz, rdn and
+ *   rup give what the attribute gives any value in (0, 2^-149): zero or
+ *   min_subnormal, by sign. At n = -277 rne does not saturate (1.5 *
+ *   2^127 * 2^-277 = 0.75 * 2^-149 rounds to min_subnormal, where -278
+ *   gives zero); the three directed attributes already saturate there,
+ *   and are last changed at -276 (1.5 * 2^127 * 2^-276 = 1.5 *
+ *   2^-149 is 2 * 2^-149 under rup).
+ *
+ * Zero, infinity and NaN operands do not depend on n. So the exponents
+ * that can change a result are -277..276, and the range - those plus
+ * one saturated exponent on each side to stand for everything beyond
+ * it - is [-278, 277]: 556 exponents. `probe scalebrange` measures the
+ * edges on the host's libm; the exponents past them are CHECKED, not
+ * assumed, on every operand of every slice: BEYOND lists twelve, six
+ * on each side, among them the library's own clamps (-556, 381) and
+ * the extremes of an int and of an int64_t, and each is compared with
+ * the oracle at the edge it must equal (scaleb_batch's `orc`). A range
+ * too narrow by one would show there as a disagreement, named
+ * "scaleb32-beyond".
+ * ---------------------------------------------------------------- */
+
+#define WIDE_LO (-278)
+#define WIDE_HI 277
+#define WIDE_N (WIDE_HI - WIDE_LO + 1)
+
+static const int64_t BEYOND[] = {
+    -279, -556, -557, -100000, -2147483647, INT64_MIN,
+    278, 381, 382, 100000, 2147483647, INT64_MAX
+};
+#define BEYOND_N (sizeof(BEYOND) / sizeof(BEYOND[0]))
+
+static int drv_scaleb32_wide(uint64_t lo, uint64_t hi, int mi)
+{
+    static uint32_t A[BATCH];
+    static int64_t list[WIDE_N], orc[BEYOND_N];
+    int flags_ok = 1;
+    uint64_t v = lo;
+    size_t k;
+
+    if (!scaleb_gate(mi, &flags_ok))
+        return 0;                 /* main prints the zero-case line */
+    for (k = 0; k < WIDE_N; k++)
+        list[k] = WIDE_LO + (int64_t)k;
+    for (k = 0; k < BEYOND_N; k++)
+        orc[k] = BEYOND[k] < 0 ? WIDE_LO : WIDE_HI;
+    while (v < hi) {
+        size_t n = hi - v > BATCH ? BATCH : (size_t)(hi - v), i;
+        for (i = 0; i < n; i++)
+            A[i] = (uint32_t)(v + i);
+        if (scaleb_batch(0, mi, A, n, list, NULL, WIDE_N, flags_ok,
+                         "scaleb32") ||
+            scaleb_batch(0, mi, A, n, BEYOND, orc, BEYOND_N, flags_ok,
+                         "scaleb32-beyond"))
+            return 1;
+        encodings += n;
+        v += n;
+    }
+    return 0;
+}
+
+/* The wide range, measured on the host's libm alone (no device is
+ * opened). For each attribute and a fixed operand set - the directed
+ * values below with both signs, and 8192 banded ones - it finds the
+ * lowest exponent from -300 whose result differs from the one at -300,
+ * and the highest up to 300 whose result differs from the one at 300:
+ * the range must be exactly one exponent outside the widest of those,
+ * and every exponent past either edge, including an int's extremes,
+ * must land as the edge does, values and flags both. */
+static uint32_t range_oracle(int fe, uint32_t x, int nn, uint32_t *fl)
+{
+    volatile uint32_t vx = x;
+    uint32_t got;
+    int raised;
+    fesetround(fe);
+    feclearexcept(FE_ALL_EXCEPT);
+    got = f2u(scalbnf(u2f(vx), nn));
+    c5_sink32 = got;
+    raised = fetestexcept(FE_ALL_EXCEPT);
+    fesetround(FE_TONEAREST);
+    *fl = fe_to_cft(raised);
+    return got;
+}
+
+static int range_same(int fe, uint32_t x, int n1, int n2)
+{
+    uint32_t f1, f2;
+    uint32_t v1 = range_oracle(fe, x, n1, &f1);
+    uint32_t v2 = range_oracle(fe, x, n2, &f2);
+    return agree32(v1, v2) && f1 == f2;
+}
+
+static int probe_scalebrange(void)
+{
+    enum { ND = 14, NB = 8192, NS = 2 * ND + NB };
+    static const uint32_t directed[ND] = {
+        0x00000000u, 0x00000001u, 0x00000002u, 0x007fffffu, 0x00800000u,
+        0x3f800000u, 0x3fc00000u, 0x3f800001u, 0x7f000000u, 0x7f400000u,
+        0x7f7fffffu, 0x7f800000u, 0x7fc00000u, 0x7f800001u
+    };
+    static const int below[] = { -279, -280, -400, -556, -557, -100000,
+                                 -2147483647, INT32_MIN };
+    static const int above[] = { 278, 279, 300, 381, 382, 100000,
+                                 2000000000, INT32_MAX };
+    static uint32_t S[NS];
+    int first[4], last[4];
+    int at, k, n, holds = 1, lo_edge = 0, hi_edge = 0;
+    size_t i;
+
+    for (i = 0; i < ND; i++) {
+        S[2 * i] = directed[i];
+        S[2 * i + 1] = directed[i] | SIGN32;
+    }
+    rng_state = 0xC5A1E0005ull;
+    for (i = 0; i < NB; i++)
+        S[2 * ND + i] = banded32();
+
+    for (at = 0; at < 4; at++) {
+        int fe = MODES[at].fe;
+        int sat_ok = 1;
+        for (i = 0; i < NS; i++) {
+            for (k = 0; k < (int)(sizeof(below) / sizeof(below[0])); k++)
+                if (!range_same(fe, S[i], below[k], WIDE_LO))
+                    sat_ok = 0;
+            for (k = 0; k < (int)(sizeof(above) / sizeof(above[0])); k++)
+                if (!range_same(fe, S[i], above[k], WIDE_HI))
+                    sat_ok = 0;
+        }
+        first[at] = last[at] = 0;
+        for (n = -300; n <= -250 && !first[at]; n++)
+            for (i = 0; i < NS; i++)
+                if (!range_same(fe, S[i], n, -300)) {
+                    first[at] = n;
+                    break;
+                }
+        for (n = 300; n >= 250 && !last[at]; n--)
+            for (i = 0; i < NS; i++)
+                if (!range_same(fe, S[i], n, 300)) {
+                    last[at] = n;
+                    break;
+                }
+        if (!sat_ok) {
+            printf("probe scalebrange: %s: an exponent past an edge does "
+                   "NOT land as the edge does\n", MODES[at].name);
+            holds = 0;
+        }
+        if (!lo_edge || first[at] < lo_edge)
+            lo_edge = first[at];
+        if (!hi_edge || last[at] > hi_edge)
+            hi_edge = last[at];
+    }
+    printf("probe scalebrange: lowest exponent that changes a result: "
+           "rne %d, rtz %d, rdn %d, rup %d; highest: rne %d, rtz %d, "
+           "rdn %d, rup %d\n", first[0], first[1], first[2], first[3],
+           last[0], last[1], last[2], last[3]);
+    if (lo_edge - 1 != WIDE_LO || hi_edge + 1 != WIDE_HI)
+        holds = 0;
+    printf("probe scalebrange: range [%d, %d] is one exponent outside "
+           "[%d, %d]: %s; %d operands, %d exponents past each edge, "
+           "every attribute, values and flags\n", WIDE_LO, WIDE_HI,
+           lo_edge, hi_edge, holds ? "HOLDS" : "DOES NOT HOLD", NS,
+           (int)(sizeof(below) / sizeof(below[0])));
+    return holds;
+}
+
 /* ---- main --------------------------------------------------------- */
 
 static void usage(const char *argv0)
@@ -1865,8 +2312,12 @@ static void usage(const char *argv0)
         "<count> <seed> <rne|rtz|rdn|rup>\n"
         "       %s conv32to64|rem32|rem64|nextup64|nextdown64|logb64|"
         "class64 <count> <seed>\n"
-        "       %s probe scalbn|castflags|cvtfrom\n",
-        argv0, argv0, argv0, argv0, argv0, argv0);
+        "       %s conv32to64-all <lo> <hi>\n"
+        "       %s cvtto32-all <lo> <hi> <rne|rtz|rdn|rup|rmm>\n"
+        "       %s cvtfrom32-all|cvtfrom64-all|scaleb32-all|scaleb32-wide "
+        "<lo> <hi> <rne|rtz|rdn|rup>\n"
+        "       %s probe scalbn|castflags|cvtfrom|scalebrange\n",
+        argv0, argv0, argv0, argv0, argv0, argv0, argv0, argv0, argv0);
 }
 
 int main(int argc, char **argv)
@@ -1905,6 +2356,8 @@ int main(int argc, char **argv)
                    fok ? "RELIABLE" : "UNRELIABLE");
             return vok ? 0 : 1;
         }
+        if (!strcmp(argv[2], "scalebrange"))
+            return probe_scalebrange() ? 0 : 1;
         usage(argv[0]);
         return 2;
     }
@@ -2010,6 +2463,34 @@ int main(int argc, char **argv)
     } else if (!strcmp(job, "class64") && argc == 4) {
         rng_state = p2 | 1;
         rc = drv_class64(p1);
+    } else if ((!strcmp(job, "conv32to64-all") && argc == 4) ||
+               (!strcmp(job, "cvtto32-all") && argc == 5) ||
+               ((!strcmp(job, "cvtfrom32-all") ||
+                 !strcmp(job, "cvtfrom64-all") ||
+                 !strcmp(job, "scaleb32-all") ||
+                 !strcmp(job, "scaleb32-wide")) && argc == 5 && mi != 4)) {
+        /* the exhaustive modes: <lo> <hi> over a 32-bit operand's
+         * encodings, validated here (a range the loops would wrap is
+         * refused), and a verdict line that says what was covered */
+        if (exh_range(argv[2], argv[3], &p1, &p2)) {
+            cft_close(dev);
+            return 2;
+        }
+        exh_mode = 1;
+        if (!strcmp(job, "conv32to64-all")) {
+            modename = "rne";
+            rc = drv_conv32to64_all(p1, p2);
+        } else if (!strcmp(job, "cvtto32-all")) {
+            rc = drv_cvtto32_all(p1, p2, mi);
+        } else if (!strcmp(job, "cvtfrom32-all")) {
+            rc = drv_cvtfrom_all(0, p1, p2, mi);
+        } else if (!strcmp(job, "cvtfrom64-all")) {
+            rc = drv_cvtfrom_all(1, p1, p2, mi);
+        } else if (!strcmp(job, "scaleb32-all")) {
+            rc = drv_scaleb32_all(p1, p2, mi);
+        } else {
+            rc = drv_scaleb32_wide(p1, p2, mi);
+        }
     } else {
         usage(argv[0]);
         cft_close(dev);
@@ -2020,10 +2501,17 @@ int main(int argc, char **argv)
         printf("  skipped %llu lane-target pairs outside the target "
                "range (invalid table is model-pinned)\n",
                (unsigned long long)skipped);
-    printf("%s %s: %llu cases, %llu value mismatches, %llu flag "
-           "mismatches\n", job, modename, (unsigned long long)cases,
-           (unsigned long long)mismatches,
-           (unsigned long long)flag_mismatches);
+    if (exh_mode)
+        printf("%s %s: %llu cases, %llu value mismatches, %llu flag "
+               "mismatches, %llu encodings, %llu skipped\n", job, modename,
+               (unsigned long long)cases, (unsigned long long)mismatches,
+               (unsigned long long)flag_mismatches,
+               (unsigned long long)encodings, (unsigned long long)skipped);
+    else
+        printf("%s %s: %llu cases, %llu value mismatches, %llu flag "
+               "mismatches\n", job, modename, (unsigned long long)cases,
+               (unsigned long long)mismatches,
+               (unsigned long long)flag_mismatches);
     cft_close(dev);
     if (rc || mismatches || flag_mismatches)
         return 1;

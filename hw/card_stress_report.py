@@ -43,6 +43,14 @@ be computed is "-" or "n/a", never 0. Choices a reader could otherwise take anot
   - A sweep slice is completed when its status is pass or fail; the coverage, the slice
     counts and the highest seed_n are lib.sweep_coverage's. A sweep leg whose fields it
     could not take (a range outside [0, 2**32), a non-integer seed_n) is named and left out.
+  - Every sweep item has a REACH: "tile" if its work runs on the card's tile, "host" if it is
+    libcft's host code run against the CPU (the conversions, next, logB, class, remainder: a
+    full-space test of the library in which the tile computes nothing). It is what the item's
+    first record says (`sweep.reach`, written by the driver from card_stress_lib.OP_REACH), or,
+    for a record from before the driver wrote it, what that table says of the record's op;
+    "unknown" when neither does. It is the LAST column of the sweep tables, so the tables read as
+    they did and a reader that takes columns by position still does. The coverage is totalled by
+    reach, so the report says how much of the exhaustive space the tile itself has seen.
 """
 from __future__ import annotations
 
@@ -64,8 +72,8 @@ from typing import Any, Dict, List, Optional, Tuple
 _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)            # python -I does not put the script's directory there
-from card_stress_lib import (EXH, covered, first_gap, iso, merge_intervals,  # noqa: E402
-                             read_records, sweep_coverage)
+from card_stress_lib import (EXH, HOST, TILE, covered, first_gap, iso,  # noqa: E402
+                             merge_intervals, read_records, reach_of, sweep_coverage)
 
 KNOWN = ("pass", "fail", "timeout", "no_device", "parse_error", "skipped", "error")
 SWEEP_ROW = "sweep (all items)"
@@ -598,6 +606,7 @@ def _sweep(objs: List[Dict[str, Any]], views: List[Dict[str, Any]]) -> Dict[str,
     not_completed: Counter = Counter()
     incomplete: Counter = Counter()
     seen_kind: Dict[str, str] = {}
+    seen_reach: Dict[str, Optional[str]] = {}
     for v in sviews:
         st, sw = v["status"], v["r"].get("sweep")
         sw = sw if isinstance(sw, dict) else {}
@@ -614,6 +623,11 @@ def _sweep(objs: List[Dict[str, Any]], views: List[Dict[str, Any]]) -> Dict[str,
         if st != "skipped" and item and item not in seen_kind:
             seen_kind[item] = ("exhaustive" if ("lo" in sw or "hi" in sw) else
                                "random" if ("seed_n" in sw or "seed" in sw or "count" in sw) else "other")
+            # whether the item's work reaches the tile: what its first record says, else what the
+            # catalog's table says of its op (a record from before the driver wrote `reach`); None when
+            # neither knows - never a guess
+            rch = sw.get("reach")
+            seen_reach[item] = rch if rch in (TILE, HOST) else reach_of(sw.get("op"))
     nc = {k: not_completed.get(k, 0) for k in ("timeout", "no_device", "parse_error")}
     for k, n in not_completed.items():
         if k not in nc:
@@ -622,7 +636,7 @@ def _sweep(objs: List[Dict[str, Any]], views: List[Dict[str, Any]]) -> Dict[str,
     items = sorted(set(served) | set(seen_kind))
     exh, rnd, other = [], [], []
     for it in items:
-        base = {"item": it, "slices": served.get(it, 0), "cases": cases.get(it, 0),
+        base = {"item": it, "reach": seen_reach.get(it), "slices": served.get(it, 0), "cases": cases.get(it, 0),
                 "incomplete": incomplete.get(it, 0)}
         if it in intervals or (it not in seeds and seen_kind.get(it) == "exhaustive"):
             iv = intervals.get(it, [])
@@ -638,11 +652,25 @@ def _sweep(objs: List[Dict[str, Any]], views: List[Dict[str, Any]]) -> Dict[str,
             other.append(base)
     n_exh = len(exh)
     tot_cov = sum(e["covered"] for e in exh)
+    # by reach: which of the items exercise the tile at all (tile first, then host, then the ones
+    # nothing says anything of); only the kinds present are listed
+    by_reach = []
+    for key in (TILE, HOST, None):
+        mine = [e for e in exh if e["reach"] == key]
+        if mine:
+            cov = sum(e["covered"] for e in mine)
+            by_reach.append({"reach": key, "items": len(mine), "covered": cov, "total": len(mine) * EXH,
+                             "pct": 100.0 * cov / (len(mine) * EXH),
+                             "complete_items": sum(1 for e in mine if e["covered"] == EXH)})
+    rnd_reach = [{"reach": key, "items": sum(1 for e in rnd if e["reach"] == key)}
+                 for key in (TILE, HOST, None) if any(e["reach"] == key for e in rnd)]
     return {
         "exhaustive": exh, "random": rnd, "other": other,
         "total_exhaustive": {"items": n_exh, "covered": tot_cov, "total": n_exh * EXH,
                              "pct": (100.0 * tot_cov / (n_exh * EXH)) if n_exh else None,
-                             "complete_items": sum(1 for e in exh if e["covered"] == EXH)},
+                             "complete_items": sum(1 for e in exh if e["covered"] == EXH),
+                             "by_reach": by_reach},
+        "random_by_reach": rnd_reach,
         "completed": completed, "failed": failed_slices, "not_completed": nc, "skipped": skipped,
         "outside_coverage": completed - sum(served.values()), "malformed": malformed,
         "disagreements": [{"item": d["item"], "image": d["image"], "start": d["start"], "sweep": d["sweep"],
@@ -1093,27 +1121,53 @@ def _r_failures(S: Dict[str, Any]) -> List[str]:
     return L
 
 
+def _reach_text(r: Optional[str]) -> str:
+    """'tile', 'host', or 'unknown' for an item whose records and the catalog's table both say nothing."""
+    return r if r in (TILE, HOST) else "unknown"
+
+
+def _reach_note(rows: List[Dict[str, Any]]) -> List[str]:
+    """One sentence, when any item is a host item, on what that means (hw/card_stress_lib.py, OP_REACH)."""
+    L: List[str] = []
+    if any(r["reach"] == HOST for r in rows):
+        L.append("  a host item is libcft's host code run against the CPU: a full-space test of the library in "
+                 "which the tile computes nothing")
+    if any(r["reach"] not in (TILE, HOST) for r in rows):
+        L.append("  an unknown item has no `reach` in its records and an op the catalog's table does not name")
+    return L
+
+
 def _r_sweep(S: Dict[str, Any]) -> List[str]:
     W = S["sweep"]
     L = ["== SWEEP COVERAGE =="]
     if W["exhaustive"]:
         L.append(f"exhaustive items (encodings of 2**32 = {EXH}):")
-        L += _table(["item", "slices", "cases", "covered", "pct", "intervals", "first_uncovered", "incomplete"],
+        # `reach` is the last column: the table is the one it was, plus one column at its end
+        L += _table(["item", "slices", "cases", "covered", "pct", "intervals", "first_uncovered", "incomplete", "reach"],
                     [[e["item"], str(e["slices"]), str(e["cases"]), str(e["covered"]),
                       _pct3(e["covered"], e["total"]), str(e["intervals"]),
-                      _hex_range(*e["first_gap"]) if e["first_gap"] else "none", str(e["incomplete"])]
+                      _hex_range(*e["first_gap"]) if e["first_gap"] else "none", str(e["incomplete"]),
+                      _reach_text(e["reach"])]
                      for e in W["exhaustive"]])
         t = W["total_exhaustive"]
         L.append(f"  total: {t['items']} exhaustive item(s) seen; covered {t['covered']} of {t['total']} "
                  f"encodings ({_pct3(t['covered'], t['total'])}); fully covered {t['complete_items']} of {t['items']}")
+        for r in t["by_reach"]:
+            L.append(f"  reach {_reach_text(r['reach'])}: {r['items']} exhaustive item(s) seen; covered {r['covered']} "
+                     f"of {r['total']} encodings ({_pct3(r['covered'], r['total'])}); fully covered "
+                     f"{r['complete_items']} of {r['items']}")
+        L += _reach_note(t["by_reach"])
     else:
         L.append("exhaustive items: none seen")
     L.append("")
     if W["random"]:
         L.append("random items (highest seed_n among completed slices):")
-        L += _table(["item", "slices", "cases", "highest_seed_n", "incomplete"],
-                    [[e["item"], str(e["slices"]), str(e["cases"]), _g(e["max_seed_n"]), str(e["incomplete"])]
-                     for e in W["random"]])
+        L += _table(["item", "slices", "cases", "highest_seed_n", "incomplete", "reach"],
+                    [[e["item"], str(e["slices"]), str(e["cases"]), _g(e["max_seed_n"]),
+                      str(e["incomplete"]), _reach_text(e["reach"])] for e in W["random"]])
+        L.append("  random reach: " + ", ".join(f"{_reach_text(r['reach'])} {r['items']} item(s)"
+                                                for r in W["random_by_reach"]))
+        L += _reach_note(W["random_by_reach"])
     else:
         L.append("random items: none seen")
     if W["other"]:

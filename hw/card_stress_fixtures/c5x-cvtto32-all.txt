@@ -1,0 +1,3 @@
+soaking the software backend
+  skipped 524288 lane-target pairs outside the target range (invalid table is model-pinned)
+cvtto32-all rup: 3670016 cases, 0 value mismatches, 0 flag mismatches, 1048576 encodings, 524288 skipped

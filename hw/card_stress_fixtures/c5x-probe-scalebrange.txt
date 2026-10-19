@@ -1,0 +1,2 @@
+probe scalebrange: lowest exponent that changes a result: rne -277, rtz -276, rdn -276, rup -276; highest: rne 276, rtz 276, rdn 276, rup 276
+probe scalebrange: range [-278, 277] is one exponent outside [-277, 276]: HOLDS; 8220 operands, 8 exponents past each edge, every attribute, values and flags

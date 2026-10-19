@@ -78,6 +78,15 @@ def fixture(name: str) -> str:
         return fh.read()
 
 
+def fixture_job(index: dict, nm: str):
+    """(op, lo, hi, mode) of the soak command a fixture was made with, read from INDEX.txt, so
+    the slice a check holds a log to is the one the log was made over."""
+    cmd = re.sub(r" \[\d+ s\]$", "", index[nm][1]).split()
+    while cmd and (cmd[0] == "env" or "=" in cmd[0]):
+        cmd.pop(0)
+    return cmd[1], int(cmd[2], 0), int(cmd[3], 0), (cmd[4] if len(cmd) > 4 else None)
+
+
 def raises(fn) -> bool:
     try:
         fn()
@@ -274,6 +283,8 @@ def group_parsers(tag: str = "") -> list:
         c(f"soak {nm}: a failing log with exit status 0 is refused", raises(lambda t=t, op=op, vm=vm, exp=exp:
                                                                          L.parse_soak(t, 0, op, vm, None, exp)))
 
+    parsers_exhaustive(c, index, rc_of)
+
     # -- cft-selftest and cft-resident: the source's text
     c("cft-selftest: '1224915 cases checked'", L.parse_selftest("1224915 cases checked\n", 0).counts == {"cases": 1224915})
     c("cft-selftest: CONFORMANCE FAILED is a failure", not L.parse_selftest("CONFORMANCE FAILED: x\n", 1).ok)
@@ -311,9 +322,309 @@ def group_parsers(tag: str = "") -> list:
     return out
 
 
+SOAK_EXH_LINE = re.compile(r"^(\S+) (\S+): (\d+) cases, (\d+) value mismatches, (\d+) flag mismatches, "
+                           r"(\d+) encodings, (\d+) skipped$", re.M)
+
+
+def c_array_len(src_text: str, decl: str) -> int:
+    """Entries of the C array whose declaration starts with `decl`: the numbers between its braces."""
+    i = src_text.index(decl)
+    body = src_text[src_text.index("{", i) + 1:src_text.index("}", i)]
+    body = re.sub(r"/\*.*?\*/", "", body, flags=re.S)
+    return len([x for x in body.replace("\n", " ").split(",") if x.strip()])
+
+
+def parse_ok(fn):
+    """(Verdict, '') or (None, the VerdictError's text): a check about a log that SHOULD parse must go red when the parser
+    refuses it, not crash the whole group."""
+    try:
+        return fn(), ""
+    except L.VerdictError as e:
+        return None, str(e)
+
+
+def parsers_exhaustive(c, index: dict, rc_of) -> None:
+    """The clause-5 soak's exhaustive conversion and scaleB modes (the -all and -wide jobs; parcel EX) on
+    REAL logs of the software backend. Their verdict line says what they covered, ", E encodings, S
+    skipped", and a slice is held to it exactly: E the slice's encodings, and cases + S the checks an
+    encoding takes times E. Every refusal below is shown on a real log with one thing changed."""
+    items = {it.name: it for it in L.sweep_items()}
+    standin = os.path.join(HERE, "card_stress_standin.py")
+    good = (("c5x-conv32to64-all.txt", "conv32to64-all"), ("c5x-cvtto32-all.txt", "cvtto32-all-rup"),
+            ("c5x-cvtto32-all-nan.txt", "cvtto32-all-rne"), ("c5x-cvtfrom32-all.txt", "cvtfrom32-all-rup"),
+            ("c5x-cvtfrom64-all.txt", "cvtfrom64-all-rtz"), ("c5x-scaleb32-all.txt", "scaleb32-all-rdn"),
+            ("c5x-scaleb32-wide.txt", "scaleb32-wide-rup"))
+    for nm, iname in good:
+        it = items[iname]
+        op, lo, hi, mode = fixture_job(index, nm)
+        t = fixture(nm)
+        m = SOAK_EXH_LINE.search(t)
+        c(f"exhaustive {nm}: the real verdict line carries the encodings and skipped clause", m is not None)
+        if m is None:
+            continue
+        cases, enc, skp = int(m.group(3)), int(m.group(6)), int(m.group(7))
+        exp, cover = it.expected_cases(lo, hi), it.cover_spec(lo, hi)
+        c(f"exhaustive {nm}: made by the command line of {iname} (its job word and mode word)",
+          (op, mode) == (it.op, it.mode) and m.group(1) == it.op and m.group(2) == it.verdict_mode)
+        v, why = parse_ok(lambda: L.parse_soak(t, rc_of(nm), it.op, it.verdict_mode, None, exp, cover))
+        c(f"exhaustive {nm}: pass, with the log's own cases, encodings and skipped",
+          v is not None and v.ok and v.counts == {"cases": cases, "value_mismatches": 0, "flag_mismatches": 0,
+                                                  "encodings": enc, "skipped": skp}, why or str(v.counts))
+        c(f"exhaustive {nm}: the encodings are the slice's {hi - lo}, and cases + skipped are "
+          f"{it.per_encoding} for each", enc == hi - lo and cases + skp == it.per_encoding * (hi - lo),
+          f"{cases} + {skp} vs {it.per_encoding} x {hi - lo}")
+        if it.exact:
+            c(f"exhaustive {nm}: the catalog's expected_cases is the real tool's count, and nothing was skipped",
+              exp == cases and skp == 0, f"{exp} vs {cases}, skipped {skp}")
+        else:
+            c(f"exhaustive {nm}: cases are not a function of the slice (expected_cases is None): coverage is "
+              f"the encodings alone plus the identity", exp is None and cover is not None)
+        for what, tweak in (("longer by one encoding", dict(cover, encodings=hi - lo + 1)),
+                            ("shorter by one encoding", dict(cover, encodings=hi - lo - 1)),
+                            ("with one more check an encoding", dict(cover, per_encoding=it.per_encoding + 1)),
+                            ("with one fewer check an encoding", dict(cover, per_encoding=it.per_encoding - 1))):
+            c(f"exhaustive {nm}: a slice {what} than the log is refused",
+              raises(lambda tweak=tweak: L.parse_soak(t, 0, it.op, it.verdict_mode, None, exp, tweak)))
+        if it.exact:
+            c(f"exhaustive {nm}: a count of cases one more than the real one is refused",
+              raises(lambda: L.parse_soak(t, 0, it.op, it.verdict_mode, None, exp + 1, cover)))
+        line = m.group(0)
+        for what, bad in (("its encodings clause removed", line.replace(f", {enc} encodings, {skp} skipped", "")),
+                          ("one encoding fewer printed", line.replace(f", {enc} encodings,", f", {enc - 1} encodings,")),
+                          ("one case more printed", line.replace(f": {cases} cases,", f": {cases + 1} cases,")),
+                          ("one skipped pair more printed", line.replace(f", {skp} skipped", f", {skp + 1} skipped"))):
+            c(f"exhaustive {nm}: the log with {what} is refused",
+              raises(lambda bad=bad: L.parse_soak(t.replace(line, bad), 0, it.op, it.verdict_mode, None, exp, cover)))
+        c(f"exhaustive {nm}: no verdict line is refused", raises(lambda: L.parse_soak(
+            t.replace(line, ""), 0, it.op, it.verdict_mode, None, exp, cover)))
+        c(f"exhaustive {nm}: a doubled verdict line is refused", raises(lambda: L.parse_soak(
+            t + line + "\n", 0, it.op, it.verdict_mode, None, exp, cover)))
+        c(f"exhaustive {nm}: another job's verdict (wrong op) is refused", raises(lambda: L.parse_soak(
+            t, 0, "nosuchop", it.verdict_mode, None, exp, cover)))
+        dev = t.replace("soaking the software backend", "soaking the DEVICE backend: /box/img.xclbin")
+        pv, why = parse_ok(lambda: L.parse_soak(dev, 0, it.op, it.verdict_mode, "/box/img.xclbin", exp, cover))
+        c(f"exhaustive {nm}: the DEVICE line is read and held to the image; the software line, for a card job, is refused",
+          pv is not None and pv.ok
+          and raises(lambda: L.parse_soak(t, 0, it.op, it.verdict_mode, "/box/img.xclbin", exp, cover))
+          and raises(lambda: L.parse_soak(dev, 0, it.op, it.verdict_mode, "/box/other.xclbin", exp, cover)), why)
+        # the stand-in must print what the real tool prints for the same slice
+        argv = [sys.executable, standin, "soak", "--", "host/clause5-soak", op, str(lo), str(hi)] + ([mode] if mode else [])
+        p = subprocess.run(argv, capture_output=True, text=True, timeout=60)
+        sm = SOAK_EXH_LINE.search(p.stdout)
+        c(f"exhaustive {nm}: the dry-run stand-in prints the real tool's line for this slice "
+          f"({'whole' if it.exact else 'the encodings, and cases + skipped'})",
+          sm is not None and sm.group(1, 2, 4, 5, 6) == m.group(1, 2, 4, 5, 6)
+          and (sm.group(0) == m.group(0) if it.exact else int(sm.group(3)) + int(sm.group(7)) == cases + skp),
+          (sm.group(0) if sm else p.stdout[-200:]) + " | " + m.group(0))
+    t = fixture("c5x-cvtto32-all-nan.txt")
+    v, why = parse_ok(lambda: L.parse_soak(t, 0, "cvtto32-all", "rne", None, None,
+                                           items["cvtto32-all-rne"].cover_spec(0x7FC00000, 0x7FC01000)))
+    c("exhaustive cvtto32-all: a slice that compared nothing because every pair was skipped (all NaN) is a pass "
+      "with 0 cases, not 'the tool ran nothing'", v is not None and v.ok and v.counts["cases"] == 0 and v.counts["skipped"] == 4 * 4096
+      and raises(lambda: L.parse_soak(t, 0, "cvtto32-all", "rne", None, None,
+                                      dict(items["cvtto32-all-rne"].cover_spec(0x7FC00000, 0x7FC01000), encodings=4095))), why)
+    for nm, iname in (("c5x-conv32to64-all-sab.txt", "conv32to64-all"), ("c5x-cvtto32-all-sab.txt", "cvtto32-all-rne"),
+                      ("c5x-cvtfrom32-all-sab.txt", "cvtfrom32-all-rne"), ("c5x-cvtfrom64-all-sab.txt", "cvtfrom64-all-rne"),
+                      ("c5x-scaleb32-all-sab.txt", "scaleb32-all-rne"), ("c5x-scaleb32-wide-sab.txt", "scaleb32-wide-rne")):
+        it = items[iname]
+        op, lo, hi, mode = fixture_job(index, nm)
+        t = fixture(nm)
+        m = SOAK_EXH_LINE.search(t)
+        exp, cover = it.expected_cases(lo, hi), it.cover_spec(lo, hi)
+        v, why = parse_ok(lambda: L.parse_soak(t, rc_of(nm), it.op, it.verdict_mode, None, exp, cover))
+        c(f"exhaustive {nm}: the sabotage control's real failing log is a failure with its counts, its slice's "
+          f"encodings and operands", v is not None and (not v.ok) and v.counts["value_mismatches"] == int(m.group(4)) > 0
+          and v.counts["encodings"] == hi - lo and len(v.extra["disagreements"]) >= 3
+          and all(re.search(r"a=0x[0-9a-f]+", d) for d in v.extra["disagreements"]), why or str(v.counts))
+        c(f"exhaustive {nm}: a failing log with exit status 0 is refused",
+          raises(lambda: L.parse_soak(t, 0, it.op, it.verdict_mode, None, exp, cover)))
+        c(f"exhaustive {nm}: a failing log whose slice ran one encoding short is refused, not recorded as a failure",
+          raises(lambda: L.parse_soak(t, 1, it.op, it.verdict_mode, None, exp, dict(cover, encodings=hi - lo + 1))))
+    c("exhaustive: a probe-degraded job (the directed modes not honoured: 0 cases, 0 encodings) is refused for any slice",
+      raises(lambda: L.parse_soak("soaking the software backend\nscalbn probe: directed-mode values NOT honoured; this job is "
+                                  "covered by rne + the model matrix\nscaleb32-all rtz: 0 cases, 0 value mismatches, 0 flag "
+                                  "mismatches, 0 encodings, 0 skipped\n", 0, "scaleb32-all", "rtz", None,
+                                  items["scaleb32-all-rtz"].expected_cases(0, 1 << 20),
+                                  items["scaleb32-all-rtz"].cover_spec(0, 1 << 20))))
+    c("exhaustive: the older tool's line (no clause) is refused for a job that must say what it covered, and is still read "
+      "for the jobs that do not", raises(lambda: L.parse_soak(
+          "soaking the software backend\nscaleb32-all rdn: 4456448 cases, 0 value mismatches, 0 flag mismatches\n", 0,
+          "scaleb32-all", "rdn", None, items["scaleb32-all-rdn"].expected_cases(0, 1 << 18),
+          items["scaleb32-all-rdn"].cover_spec(0, 1 << 18)))
+      and (parse_ok(lambda: L.parse_soak(fixture("c5-rint32.txt"), 0, "rint32", "rne", None, 262144))[0] or L.Verdict(False, {})).ok)
+    # the catalog's per-encoding counts are the tool's own constants (read from its source)
+    with open(os.path.join(ROOT, "host", "tools", "clause5_soak.c"), "r", encoding="utf-8") as fh:
+        src = fh.read()
+    n17 = c_array_len(src, "static const int64_t SCALEB_N32[]")
+    lo_e = int(re.search(r"#define WIDE_LO \((-?\d+)\)", src).group(1))
+    hi_e = int(re.search(r"#define WIDE_HI (\d+)", src).group(1))
+    nb = c_array_len(src, "static const int64_t BEYOND[]")
+    c("exhaustive: PER_ENCODING's scaleb counts are the C source's lists: 17 directed exponents, the range "
+      f"{lo_e}..{hi_e} and its {nb} witnesses", L.PER_ENCODING["scaleb32-all"] == n17 == 17
+      and L.PER_ENCODING["scaleb32-wide"] == (hi_e - lo_e + 1) + nb == 568 and (lo_e, hi_e) == (-278, 277))
+    import importlib
+    st_mod = importlib.import_module("card_stress_standin")       # HERE is on sys.path
+    c("exhaustive: the stand-in's per-encoding table is the library's", st_mod.EXH_PER == L.PER_ENCODING)
+
+
 # ---------------------------------------------------------------------------------------
 # a Driver, read but not run: the legs' command lines
 # ---------------------------------------------------------------------------------------
+
+def script_job_lines(env_vars: dict):
+    """The job lines hw/run-c5-soak.sh would run: its job-list block, lifted out of the script and run by bash
+    with the given variables (as the script sets them), printing one tuple a line: (name, op, a, b, mode or
+    None). None when there is no bash."""
+    bash = shutil.which("bash")
+    if not bash:
+        return None
+    with open(os.path.join(ROOT, "hw", "run-c5-soak.sh"), "r", encoding="utf-8") as fh:
+        text = fh.read()
+    a = text.index("\n{\n", text.index("# ---- job list")) + 1
+    b = text.index('} > "$OUT/joblist"', a)
+    pre = "set -euo pipefail\n" + "".join(f'{k}="{v}"\n' for k, v in env_vars.items())
+    p = subprocess.run([bash, "-c", pre + text[a:b + 1]], capture_output=True, text=True, timeout=120)
+    if p.returncode != 0:
+        raise SystemExit(f"the script's job-list block did not run: {p.stderr[-300:]}")
+    rows = []
+    for ln in p.stdout.splitlines():
+        w = ln.split()
+        rows.append((w[0], w[1], int(w[2]), int(w[3]), w[4] if len(w) > 4 else None))
+    return rows
+
+
+def catalog_checks(c, mod, d, q) -> None:
+    """The driver's catalog of the soaks' campaigns, and the exhaustive conversion and scaleB items parcel EX
+    added to it: their order, their per-encoding counts, their command lines, which of them reach the tile, and
+    that the campaign script's own job lines are the catalog's, item for item."""
+    L = mod.L                    # the lib the driver under test imported (a plant's copy has its own)
+    items = L.sweep_items()
+    by_name = {it.name: it for it in items}
+    new = (["conv32to64-all"] + [f"cvtto32-all-{m}" for m in L.MODES5]
+           + [f"cvtfrom32-all-{m}" for m in L.MODES4] + [f"cvtfrom64-all-{m}" for m in L.MODES4]
+           + [f"scaleb32-all-{m}" for m in L.MODES4] + [f"scaleb32-wide-{m}" for m in L.MODES4])
+    names = [it.name for it in items]
+    i0 = names.index("class32") + 1
+    c("catalog: the 22 exhaustive conversion and scaleB items follow class32, in the script's order",
+      names[i0:i0 + 22] == new, str(names[i0:i0 + 22]))
+    exh = [it for it in items if it.kind == "exhaustive"]
+    c("catalog: 36 exhaustive items (the 14 of the last run and the 22 new) and the 54 random ones, none gone",
+      len(exh) == 36 and len(items) - len(exh) == 54 and all(it.kind == "random" for it in items[i0 + 22:]),
+      f"{len(exh)} exhaustive of {len(items)}")
+    c("catalog: the new items have per-encoding counts 1, 4, 2, 2, 17, 568; only cvtto32-all has no fixed case count",
+      [(by_name[n].per_encoding, by_name[n].exact) for n in ("conv32to64-all", "cvtto32-all-rne", "cvtfrom32-all-rup",
+                                                              "cvtfrom64-all-rdn", "scaleb32-all-rtz", "scaleb32-wide-rne")]
+      == [(1, True), (4, False), (2, True), (2, True), (17, True), (568, True)])
+    c("catalog: only the new items say what they covered (the 14 older exhaustive items and every random one do not)",
+      sorted(it.name for it in items if it.per_encoding is not None and it.name not in new) == []
+      and all(by_name[n].per_encoding is not None for n in new))
+    c("catalog: a probe that allows rne alone leaves the new cvtfrom and scaleB items rne alone and cvtto32-all its five",
+      [it.name for it in L.sweep_items(("rne",), ("rne",)) if it.name in new]
+      == ["conv32to64-all"] + [f"cvtto32-all-{m}" for m in L.MODES5] + ["cvtfrom32-all-rne", "cvtfrom64-all-rne",
+                                                                          "scaleb32-all-rne", "scaleb32-wide-rne"])
+    # which items reach the tile: the library's own classification, read from its source
+    cft_h = open(os.path.join(ROOT, "host", "include", "cft.h"), "r", encoding="utf-8", errors="replace").read()
+    c5_c = open(os.path.join(ROOT, "host", "src", "clause5.c"), "r", encoding="utf-8", errors="replace").read()
+    flat = re.sub(r"\s+", " ", re.sub(r"^\s*\*", " ", cft_h, flags=re.M))
+    c("reach: the library's own classification says what it says: COMPOSED (cft_rint, cft_scaleb, cft_cmp_sig) and "
+      "HOST (everything else), and that cft_div and cft_sqrt are composed", "COMPOSED (cft_rint, cft_scaleb, cft_cmp_sig)" in flat
+      and "HOST (everything else)" in flat and "the composed operations (cft_div, cft_sqrt, cft_rint, cft_scaleb" in flat)
+    heads = {"rint": "roundToIntegral: composed", "scaleb": "scaleB: composed", "conv": "format conversion: host",
+             "cvt": "integer conversions: host", "logb": "logB: host", "next": "nextUp / nextDown: host",
+             "class": "classification: host", "rem": "remainder: host"}
+    c("reach: host/src/clause5.c's section headings are the ones this classification was read from",
+      all(f"/* ---- {h}" in c5_c for h in heads.values()))
+    fam = {"sqrt": L.TILE, "div": L.TILE, "rint": L.TILE, "scaleb": L.TILE, "conv": L.HOST, "cvt": L.HOST,
+           "logb": L.HOST, "next": L.HOST, "class": L.HOST, "rem": L.HOST}
+    bad = [(it.name, it.reach) for it in items
+           if it.reach != fam[re.match(r"(sqrt|div|rint|scaleb|conv|cvt|logb|next|class|rem)", it.op).group(1)]]
+    c("reach: every item is marked as its operation's family is (sqrt, div, rint, scaleb: tile; conversions, "
+      "next, logb, class, rem: host)", not bad, str(bad[:4]))
+    c("reach: the table has no operation the catalog does not use, and 43 items reach the tile and 47 do not",
+      set(L.OP_REACH) == {it.op for it in items} and sum(it.reach == L.TILE for it in items) == 43
+      and sum(it.reach == L.HOST for it in items) == 47,
+      f"{sorted(set(L.OP_REACH) ^ {it.op for it in items})}")
+    c("reach: of the 54 random items 25 reach the tile (div32, div64, sqrt64 x4 each; rint64 x5; scaleb32, scaleb64 x4 "
+      "each) and 29 are host; of the 36 exhaustive items 18 and 18",
+      [(k, r, sum(it.kind == k and it.reach == r for it in items))
+       for k in ("random", "exhaustive") for r in (L.TILE, L.HOST)]
+      == [("random", "tile", 25), ("random", "host", 29), ("exhaustive", "tile", 18), ("exhaustive", "host", 18)]
+      and sorted({it.op for it in items if it.kind == "random" and it.reach == L.TILE})
+      == ["div32", "div64", "rint64", "scaleb32", "scaleb64", "sqrt64"]
+      and "rem32" in {it.op for it in items if it.reach == L.HOST} and "rem64" in {it.op for it in items if it.reach == L.HOST})
+    c5_head = c5_c[:c5_c.index("#include")]
+    c("reach: cft_rem is HOST by the header of host/src/clause5.c ('HOST - cft_convert, the integer conversions, cft_logb, "
+      "cft_next_*, cft_class, cft_total_order*, cft_rem') and by its code (no cft_run in its section)",
+      re.search(r"HOST - cft_convert, the integer conversions, cft_logb, cft_next_\*,\s*\*\s*cft_class, cft_total_order\*, cft_rem\.", c5_head) is not None
+      and "cft_run(" not in c5_c[c5_c.index("/* ---- remainder: host"):c5_c.index("The magnitude forms of minimum and maximum")])
+    # a wave job for a new item: its command line, what the verdict must cover, what the record says
+    d.items = items
+    d.rate = {}
+    wave = d.plan_wave(q, 3600, 1, ["cvtto32-all-rup"])
+    j = wave[0]
+    b = d.soak_binary(j["item"])
+    c("a wave job for cvtto32-all-rup: clause5-soak cvtto32-all <lo> <hi> rup, over the probe size from 0",
+      j["argv"] == [b, "cvtto32-all", "0", str(j["units"]), "rup"] and j["units"] == d.a.probe_cases, str(j["argv"]))
+    c("... it must cover its slice's encodings at 4 checks an encoding, with no fixed case count, and its record says "
+      "reach host", j["cover"] == {"encodings": j["units"], "per_encoding": 4} and j["expected"] is None
+      and j["sweep"]["reach"] == "host", str((j["cover"], j["expected"], j["sweep"])))
+    j = d.plan_wave(q, 3600, 1, ["conv32to64-all"])[0]
+    c("a wave job for conv32to64-all: no mode word, exactly one case an encoding, record reach host",
+      j["argv"] == [b, "conv32to64-all", "0", str(j["units"])] and j["expected"] == j["units"]
+      and j["cover"] == {"encodings": j["units"], "per_encoding": 1} and j["sweep"]["reach"] == "host", str(j["argv"]))
+    j = d.plan_wave(q, 3600, 1, ["scaleb32-wide-rdn"])[0]
+    c("a wave job for scaleb32-wide-rdn: 568 checks an encoding, record reach tile",
+      j["argv"][1:] == ["scaleb32-wide", "0", str(j["units"]), "rdn"] and j["expected"] == 568 * j["units"]
+      and j["cover"]["per_encoding"] == 568 and j["sweep"]["reach"] == "tile")
+    j = d.plan_wave(q, 3600, 1, ["rint32-rne"])[0]
+    c("a wave job for an older exhaustive item is as it was (the encodings, no coverage clause) and says reach tile",
+      j["expected"] == j["units"] and j["cover"] is None and j["sweep"]["reach"] == "tile")
+    j = d.plan_wave(q, 3600, 1, ["nextup32"])[0]
+    c("nextup32 still expects its 8 edge cases beyond the slice, reach host",
+      j["expected"] == j["units"] + 8 and j["cover"] is None and j["sweep"]["reach"] == "host")
+    j = d.plan_wave(q, 3600, 1, ["cvtfrom64-rne"])[0]
+    c("a random item's job records its reach and has no coverage to check",
+      j["cover"] is None and j["expected"] is None and j["sweep"]["reach"] == "host" and "count" in j["sweep"])
+    # the campaign script's own job lines are the catalog's, item for item, in order, with its seeds and slices
+    def compare_script(label, env_vars, probe_limited):
+        rows = script_job_lines(env_vars)
+        if rows is None:
+            skip(f"catalog: {label}", "no bash on this host")
+            return
+        cat = [it for it in (L.sweep_items(("rne",), ("rne",)) if probe_limited else L.sweep_items()) if it.tool == "clause5"]
+        order: list = []
+        for r in rows:
+            if (r[1], r[4]) not in order:
+                order.append((r[1], r[4]))
+        c(f"catalog: {label}: the script's job lines run the catalog's clause-5 items in the catalog's order",
+          order == [(it.op, it.mode) for it in cat], f"{len(order)} vs {len(cat)}; first difference "
+          f"{next(((a, b2) for a, b2 in zip(order, [(it.op, it.mode) for it in cat]) if a != b2), None)}")
+        okslices = okseed = True
+        why = ""
+        for it in cat:
+            mine = [r for r in rows if (r[1], r[4]) == (it.op, it.mode)]
+            if it.kind == "exhaustive":
+                n = int(env_vars["WIDE_SLICES"]) if it.op == "scaleb32-wide" else int(env_vars["SLICES"])
+                span = int(env_vars.get("QUICK_WIDE_SPAN" if it.op == "scaleb32-wide" else "QUICK_SPAN", 1 << 32))
+                if not (len(mine) == n and mine[0][2] == 0 and mine[-1][3] == span
+                        and all(mine[k][3] == mine[k + 1][2] for k in range(n - 1))
+                        and len({r[3] - r[2] for r in mine}) == 1
+                        and [r[0] for r in mine] == [f"{it.name}-{k}" for k in range(n)]):
+                    okslices, why = False, f"{it.name}: {len(mine)} slices {mine[:1]}"
+            elif len(mine) != 1 or mine[0][3] != it.base_seed or mine[0][0] != it.name:
+                okseed, why = False, f"{it.name}: {mine[:1]} vs seed {it.base_seed:#x}"
+        c(f"catalog: {label}: every exhaustive item's slices tile its span, and every random item has the script's seed",
+          okslices and okseed, why)
+
+    compare_script("full campaign", dict(SLICES=64, WIDE_SLICES=1024, RANDN=30000000, SCALEB_MODES="rne rtz rdn rup",
+                                         CVTFROM_MODES="rne rtz rdn rup", WIDE_MODES="rne rtz rdn rup"), False)
+    compare_script("QUICK campaign", dict(SLICES=4, QUICK_SPAN=1 << 24, WIDE_SLICES=4, QUICK_WIDE_SPAN=1 << 16, RANDN=2000000,
+                                          SCALEB_MODES="rne rtz rdn rup", CVTFROM_MODES="rne rtz rdn rup",
+                                          WIDE_MODES="rne rtz rdn rup"), False)
+    compare_script("campaign with every directed probe failed (rne alone)",
+                   dict(SLICES=64, WIDE_SLICES=1024, RANDN=30000000, SCALEB_MODES="rne", CVTFROM_MODES="rne",
+                        WIDE_MODES="rne"), True)
+
 
 def group_commands(src: str = HERE) -> list:
     out: list = []
@@ -323,6 +634,8 @@ def group_commands(src: str = HERE) -> list:
 
     sys.path.insert(0, src)
     import importlib
+    # a plant's copy has its own card_stress_lib: the driver module must import THAT, not the cached real one
+    saved_lib = sys.modules.pop("card_stress_lib", None) if os.path.abspath(src) != os.path.abspath(HERE) else None
     mod = importlib.import_module("card_stress")
     tmp = tempfile.mkdtemp(prefix="cs-cmd-")
     try:
@@ -402,6 +715,7 @@ def group_commands(src: str = HERE) -> list:
         names = [it.name for it in d.items]
         c("the campaign has run-soak.sh's 5 exhaustive sqrt32 and 12 random divsqrt items first",
           names[:5] == [f"sqrt32-{m}" for m in L.MODES5] and names[5] == "div32-rne" and names[16] == "sqrt64-rup")
+        catalog_checks(c, mod, d, q)
         # the guard's matching rules, on synthetic command lines (what is a card user and what is not)
         def user(*args):
             return mod.card_user({"pid": 0, "ppid": 0, "args": list(args)})
@@ -430,6 +744,8 @@ def group_commands(src: str = HERE) -> list:
         shutil.rmtree(tmp, ignore_errors=True)
         sys.path.remove(src)
         sys.modules.pop("card_stress", None)
+        if saved_lib is not None:
+            sys.modules["card_stress_lib"] = saved_lib
     return out
 
 
@@ -485,6 +801,9 @@ class Run:
             self.proc.kill()
             self.text, _ = self.proc.communicate()
             self.rc = "TIMEOUT"
+        if self.text is None and getattr(self, "stdout_path", None):       # the driver wrote to a file, not a pipe
+            with open(self.stdout_path, "r", encoding="utf-8", errors="replace") as fh:
+                self.text = fh.read()
         return self
 
     @property
@@ -519,7 +838,10 @@ def pid_alive(pid: int) -> bool:
 
 
 def start_driver(env: Env, name: str, args: list, scenario=None, src: str = HERE, extra_env=None,
-                 base_extra=None, pre_stop: bool = False) -> Run:
+                 base_extra=None, pre_stop: bool = False, to_file: bool = False) -> Run:
+    """to_file: send the driver's output to a file instead of a pipe. A scenario that polls while a long run writes a
+    lot of log would otherwise stall the driver in print() once the pipe's small buffer is full, because nothing
+    reads it until the run ends."""
     env.n += 1
     out = os.path.join(env.tmp, f"{env.n:02d}-{name}")
     state = out + "-state"
@@ -542,9 +864,16 @@ def start_driver(env: Env, name: str, args: list, scenario=None, src: str = HERE
             json.dump(scenario, fh)
         e["CFT_STANDIN_SCENARIO"] = sc
     e.update(extra_env or {})
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=e, cwd=ROOT)
+    if to_file:
+        stdout_path = out + "-stdout.txt"
+        with open(stdout_path, "w", encoding="utf-8") as sink:
+            proc = subprocess.Popen(cmd, stdout=sink, stderr=subprocess.STDOUT, text=True, env=e, cwd=ROOT)
+    else:
+        stdout_path = None
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=e, cwd=ROOT)
     r = Run(out, proc)
     r.state = state
+    r.stdout_path = stdout_path
     return r
 
 
@@ -947,6 +1276,181 @@ def scn_sweep_resume(env: Env, A: Run, args: list, rate: dict, src: str) -> list
     return out
 
 
+def dg(d, *keys):
+    """d[k1][k2]... or None when any step is missing: a check about a record a broken driver left incomplete must go red,
+    not crash the scenario."""
+    for k in keys:
+        d = d.get(k) if isinstance(d, dict) else None
+    return d
+
+
+def stop_run(r: Run) -> None:
+    with open(os.path.join(r.out, "STOP"), "w") as fh:
+        fh.write("stop")
+
+
+def scn_sweep_all(env: Env, src: str = HERE) -> list:
+    """The exhaustive conversion and scaleB items (parcel EX: conv32to64-all, cvtto32-all, cvtfrom32-all, scaleb32-wide)
+    served by the driver against the stand-in. A: four of them, one a tile, each to the end of the 2^32 space - every
+    slice held to its encodings and to its checks, reach recorded, the status file and the report saying how much of
+    the space each kind has seen. B: a slice the tool ran one encoding or one case short is parse_error, not covered,
+    and served again. C: a refused slice survives a restart as a gap and is the first thing the resumed run serves."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    names = ["conv32to64-all", "cvtto32-all-rup", "cvtfrom32-all-rne", "scaleb32-wide-rdn"]
+    base = SWEEP_ALL_BASE
+    # -- A: served to the end
+    r = start_driver(env, "sweepall", ["--until", until(300), "--sweep-items", ",".join(names)] + base, src=src, to_file=True)
+
+    def complete():
+        iv = L.sweep_coverage(r.recs)[0]
+        return all(iv.get(n) and L.first_gap(iv[n]) is None for n in names)
+
+    done = wait_for(complete, 200, 0.5)
+    stop_run(r)
+    r.finish(90)
+    legs = r.legs(kind="sweep")
+    c("sweep all: the four items were each served to the end of the space (2^32 encodings, no gap), then it stopped on STOP",
+      done and r.rc == 0, f"done {done}, rc {r.rc}")
+    c("sweep all: every slice passed", bool(legs) and all(x["status"] == "pass" for x in legs),
+      str(sorted({x["status"] for x in legs})))
+    per = {"conv32to64-all": 1, "cvtto32-all-rup": 4, "cvtfrom32-all-rne": 2, "scaleb32-wide-rdn": 568}
+    host = {"conv32to64-all": "host", "cvtto32-all-rup": "host", "cvtfrom32-all-rne": "host", "scaleb32-wide-rdn": "tile"}
+    for n in names:
+        mine = sorted((x for x in legs if x["sweep"]["item"] == n), key=lambda x: x["sweep"]["lo"])
+        enc = sum(dg(x, "counts", "encodings") or 0 for x in mine)
+        c(f"sweep all {n}: the slices' encodings add up to exactly 2^32 and are contiguous from 0 (each slice's own "
+          f"count read from its verdict line)", bool(mine) and enc == EXH_T and mine[0]["sweep"]["lo"] == 0
+          and mine[-1]["sweep"]["hi"] == EXH_T and all(a["sweep"]["hi"] == b["sweep"]["lo"] for a, b in zip(mine, mine[1:])),
+          f"{enc} encodings in {len(mine)} slices")
+        c(f"sweep all {n}: each slice's verdict covered its slice, and its checks were {per[n]} an encoding",
+          bool(mine) and all(dg(x, "counts", "encodings") == x["sweep"]["hi"] - x["sweep"]["lo"] == dg(x, "sweep", "expected_encodings")
+                             and (dg(x, "counts", "cases") or 0) + (dg(x, "counts", "skipped") or 0) == per[n] * (dg(x, "counts", "encodings") or 0)
+                             for x in mine))
+        if n == "cvtto32-all-rup":
+            c(f"sweep all {n}: no fixed count of cases is expected of it (its cases depend on the operands), and some pairs "
+              f"were skipped", bool(mine) and all("expected_cases" not in x["sweep"] for x in mine)
+              and sum(dg(x, "counts", "skipped") or 0 for x in mine) > 0)
+        else:
+            c(f"sweep all {n}: its cases are exactly {per[n]} a encoding, expected_cases recorded, nothing skipped",
+              bool(mine) and all(dg(x, "sweep", "expected_cases") == per[n] * (x["sweep"]["hi"] - x["sweep"]["lo"])
+                                 == dg(x, "counts", "cases") and dg(x, "counts", "skipped") == 0 for x in mine))
+        job_word = {"conv32to64-all": "conv32to64-all", "cvtto32-all-rup": "cvtto32-all",
+                    "cvtfrom32-all-rne": "cvtfrom32-all", "scaleb32-wide-rdn": "scaleb32-wide"}[n]
+        c(f"sweep all {n}: every record says its reach ({host[n]}) and the tool's job word ({job_word})",
+          bool(mine) and all(dg(x, "sweep", "reach") == host[n] and dg(x, "sweep", "op") == job_word for x in mine))
+    c("sweep all: the first slice of each item is the probe size and the later ones are whole 2^20 atoms, capped at 2^28",
+      all((lambda sl: bool(sl) and sl[0]["sweep"]["lo"] == 0 and sl[0]["sweep"]["hi"] == 1 << 20
+           and all((x["sweep"]["hi"] - x["sweep"]["lo"]) % (1 << 20) == 0 and (x["sweep"]["hi"] - x["sweep"]["lo"]) <= 1 << 28 for x in sl))
+          (sorted((x for x in legs if x["sweep"]["item"] == n), key=lambda x: x["sweep"]["lo"])) for n in names))
+    st = open(os.path.join(r.out, "status.txt")).read()
+    ex36 = 18 * EXH_T
+    c("sweep all: status.txt says what the tile has seen and what it has not, on a line of its own that begins 'reach': one tile "
+      "item done of 18, three host items of 18",
+      re.search(r"^reach      tile items: exhaustive %s of %s encodings .*; host items: exhaustive %s of %s encodings .*; "
+                r"the tile computes nothing for a host item$" % (f"{EXH_T:,}", f"{ex36:,}", f"{3 * EXH_T:,}", f"{ex36:,}"), st, re.M)
+      is not None, st[st.find("reach"):][:400])
+    c("sweep all: and its sweep line counts all 36 exhaustive items' encodings, the new ones included",
+      f"exhaustive {4 * EXH_T:,} of {36 * EXH_T:,} encodings" in st, st[st.find("sweep "):][:200])
+    rp = os.path.join(HERE, "card_stress_report.py")
+    p = subprocess.run([sys.executable, "-I", rp, r.out, "--no-write"], capture_output=True, text=True, timeout=120)
+    t = p.stdout
+    c("sweep all: the report gives each item's reach and totals the coverage by reach",
+      p.returncode == 0 and re.search(r"^  conv32to64-all\s.*\shost$", t, re.M) and re.search(r"^  scaleb32-wide-rdn\s.*\stile$", t, re.M)
+      and re.search(r"^  reach tile: 1 exhaustive item\(s\) seen; covered %d of %d encodings \(100\.000%%\); fully covered 1 of 1$" % (EXH_T, EXH_T), t, re.M)
+      and re.search(r"^  reach host: 3 exhaustive item\(s\) seen; covered %d of %d encodings \(100\.000%%\); fully covered 3 of 3$" % (3 * EXH_T, 3 * EXH_T), t, re.M)
+      is not None, t[t.find("exhaustive items"):][:900])
+    return out + scn_sweep_short(env, src, base)
+
+
+def scn_sweep_short(env: Env, src: str, base: list) -> list:
+    """B: a slice the tool ran one encoding or one case short is parse_error, by the rule written for it, not covered,
+    and served again."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    sc = [{"leg": "soak", "op": "cvtto32-all", "nth": [1], "do": "short"},
+          {"leg": "soak", "op": "cvtto32-all", "nth": [2], "do": "shortcase"},
+          {"leg": "soak", "op": "conv32to64-all", "nth": [1], "do": "shortcase"},
+          {"leg": "soak", "op": "cvtfrom64-all", "nth": [1], "do": "short"}]
+    bn = ["cvtto32-all-rne", "conv32to64-all", "cvtfrom64-all-rne"]
+    r2 = start_driver(env, "sweepshort", ["--until", until(120), "--sweep-items", ",".join(bn)] + base, sc, src=src,
+                      to_file=True)
+
+    def served():
+        return all(any(x["status"] == "pass" and x["sweep"]["item"] == n for x in r2.legs(kind="sweep")) for n in bn)
+
+    got = wait_for(served, 90, 0.4)
+    stop_run(r2)
+    r2.finish(60)
+    for n, want in (("cvtto32-all-rne", ["encodings where the slice has", "checks where"]),
+                    ("conv32to64-all", ["cases where the slice has"]), ("cvtfrom64-all-rne", ["cases where the slice has"])):
+        mine = sorted((x for x in r2.legs(kind="sweep") if x["sweep"]["item"] == n), key=lambda x: x["start_epoch"])
+        k = len(want)
+        c(f"sweep short {n}: the first {k} slice(s) came back short and were refused as parse_error, by the rule written for each "
+          f"({', '.join(want)}), with no counts recorded",
+          got and len(mine) > k and all(x["status"] == "parse_error" and x["counts"] is None and w in (x["reason"] or "")
+                                         for x, w in zip(mine[:k], want)), str([(x["status"], x["reason"]) for x in mine[:k + 1]]))
+        c(f"sweep short {n}: the same slice [0, 2^20) was served again each time, and then passed",
+          got and all((x["sweep"]["lo"], x["sweep"]["hi"]) == (0, 1 << 20) for x in mine[:k + 1]) and mine[k]["status"] == "pass"
+          and mine[k]["counts"]["encodings"] == 1 << 20, str([(x["sweep"]["lo"], x["sweep"]["hi"]) for x in mine[:k + 1]]))
+        iv, served_n, _cases, _seeds, _dis = L.sweep_coverage(r2.recs)
+        c(f"sweep short {n}: the refused slices are not covered: the coverage the records give starts with the passing slice "
+          f"and counts only passing slices", (iv.get(n) or [(None, None)])[0][0] == 0
+          and served_n.get(n) == sum(1 for x in mine if x["status"] == "pass"))
+    return out + scn_sweep_gap(env, src, base)
+
+
+def scn_sweep_gap(env: Env, src: str, base: list) -> list:
+    """C: a refused slice is a gap that survives a restart, and is the first thing the resumed run serves."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    scc = [{"leg": "soak", "op": "cvtto32-all", "from": 1, "do": "short"}]
+    r3 = start_driver(env, "sweepgapA", ["--until", until(90), "--sweep-items", "cvtto32-all-rup"] + base, scc, src=src,
+                      to_file=True)
+    wait_for(lambda: len(r3.legs(kind="sweep")) >= 2, 60, 0.3)
+    stop_run(r3)
+    r3.finish(60)
+    a = r3.legs(kind="sweep")
+    c("sweep gap: run A's every attempt came back short and was refused (parse_error); the item has no coverage at all",
+      len(a) >= 2 and all(x["status"] == "parse_error" and (x["sweep"]["lo"], x["sweep"]["hi"]) == (0, 1 << 20) for x in a)
+      and not L.sweep_coverage(r3.recs)[0].get("cvtto32-all-rup"), str([(x["status"], x["sweep"]["lo"]) for x in a][:4]))
+    os.remove(os.path.join(r3.out, "STOP"))                 # a stale STOP would refuse the resume, by design
+    env.n += 1
+    cmd = [sys.executable, "-I", os.path.join(src, "card_stress.py"), "--root", ROOT, "--out", r3.out, "--resume", "--dry-run",
+           "--telemetry-seconds", "0", "--disk-extra", "", "--retry-pause", "1", "--kill-after", "2", "--guard-poll", "1",
+           "--until", until(14), "--sweep-items", "cvtto32-all-rup"] + base
+    for nm, pth in env.imgs.items():
+        cmd += ["--image", f"{nm}={pth}"]
+    e = dict(os.environ)
+    e["CFT_STANDIN_STATE"] = r3.state
+    e.pop("CFT_STANDIN_SCENARIO", None)                     # the tool is whole again
+    pr = subprocess.run(cmd, capture_output=True, text=True, env=e, cwd=ROOT, timeout=150)
+    recs = L.read_records(os.path.join(r3.out, "metrics.jsonl"))[0]
+    second = [i for i, x in enumerate(recs) if x.get("type") == "run_start"][1]
+    after = [x for x in recs[second:] if x.get("type") == "leg" and x["kind"] == "sweep"]
+    c("sweep gap: the resumed run served the refused slice FIRST: its first slice starts at 0 and passes",
+      pr.returncode == 0 and bool(after) and after[0]["status"] == "pass" and after[0]["sweep"]["lo"] == 0
+      and after[0]["counts"]["encodings"] == after[0]["sweep"]["hi"] - after[0]["sweep"]["lo"], f"rc {pr.returncode}: {pr.stdout[-300:]}")
+    iv = L.sweep_coverage(recs)[0].get("cvtto32-all-rup", [])
+    c("sweep gap: and the passing slices that followed are one contiguous range from 0",
+      len(L.merge_intervals(iv)) == 1 and L.merge_intervals(iv)[0][0] == 0, str(L.merge_intervals(iv)[:3]))
+    return out
+
+
+EXH_T = 1 << 32
+SWEEP_ALL_BASE = ["--legs", "api-test", "--weights", "quad=1,single=0,deep=0", "--sweep-minutes", "quad=5,single=5,deep=5",
+                  "--sweep-slice-seconds", "600", "--min-slice-seconds", "3", "--quarantine-after", "1000"]
+
+
 def scn_disagree(env: Env, src: str = HERE) -> list:
     out: list = []
 
@@ -1272,7 +1776,7 @@ def scn_report(env: Env, src: str = HERE) -> list:
     def c(n, ok, d=""):
         out.append((n, bool(ok), d))
 
-    rp = os.path.join(HERE, "card_stress_report.py")
+    rp = os.path.join(src, "card_stress_report.py")     # src is HERE, or a plant's copy of the code
     if not os.path.exists(rp):
         skip("report", "hw/card_stress_report.py is not there")
         return out
@@ -1299,6 +1803,12 @@ def scn_report(env: Env, src: str = HERE) -> list:
     c("report: sqrt32-rne's covered encodings and percentage are the ones counted from the records",
       bool(m) and int(m.group(3)) == cov and abs(float(m.group(4)) - 100.0 * cov / 2 ** 32) < 0.0006,
       f"records say {cov}; report line {m.group(0) if m else None}")
+    # parcel EX: the table's last column is the item's reach
+    mr = re.search(r"^\s*sqrt32-rne\s.*\s(\w+)$", txt, re.M)
+    recs_reach = {r["sweep"].get("reach") for r in legs if r["kind"] == "sweep" and r["sweep"]["item"] == "sqrt32-rne"}
+    c("report: and its reach column (the last) is what the driver wrote into every one of its records (sqrt32 reaches the tile)",
+      bool(mr) and recs_reach == {"tile"} and mr.group(1) == "tile",
+      f"records say {sorted(map(str, recs_reach))}; report line {mr.group(0) if mr else None}")
     # a copy with one record changed must change the report, to the new truth
     cp = os.path.join(env.tmp, "rep-copy")
     os.makedirs(cp, exist_ok=True)
@@ -1357,6 +1867,17 @@ def plant_parsers(env: Env, src: str) -> list:
     if p.returncode != 0 and not bad:
         bad = [f"parser group crashed under the plant: {p.stderr[-200:]}"]
     return [(b, False, "") for b in bad] or [("parser group passes under the plant", True, "")]
+
+
+def plant_report(env: Env, src: str) -> list:
+    """The report's own test (hw/test_card_stress_report.py), run from the plant's directory so it tests the plant's
+    report; every FAIL line it prints is a failing check, named by its text."""
+    p = subprocess.run([sys.executable, "-B", "-I", os.path.join(src, "test_card_stress_report.py")], capture_output=True,
+                       text=True, timeout=300)
+    bad = [re.sub(r"^\s*FAIL \[[^\]]*\] ", "", ln).strip() for ln in p.stdout.splitlines() if ln.lstrip().startswith("FAIL [")]
+    if p.returncode != 0 and not bad:
+        bad = [f"the report test crashed under the plant: {p.stderr[-200:]}"]
+    return [(b, False, "") for b in bad] or [("the report test passes under the plant", True, "")]
 
 
 def plants(env: Env) -> None:
@@ -1452,6 +1973,56 @@ def plants(env: Env) -> None:
          [("card_stress_lib.py", '    m = _one(DT_TOTAL, text, "device-test totals")\n    checks, failed = int(m.group(1)), int(m.group(2))',
            '    m = DT_TOTAL.search(text)\n    checks, failed = (int(m.group(1)), int(m.group(2))) if m else (0, 0)')],
          plant_parsers, ["no totals line is refused"]),
+        # parcel EX: the exhaustive conversion and scaleB items, and which items reach the tile
+        ("a slice that ran one encoding short is covered",
+         [("card_stress_lib.py", '        if enc != cover["encodings"]:', "        if False:")],
+         lambda env, src: scn_sweep_short(env, src, SWEEP_ALL_BASE) + plant_parsers(env, src),
+         ["sweep short cvtto32-all-rne: the first 2 slice(s) came back short", "a slice shorter by one encoding than the log is refused"]),
+        ("a slice that made one check too few is covered",
+         [("card_stress_lib.py", "        if cases + skp != want:", "        if False:")],
+         lambda env, src: scn_sweep_short(env, src, SWEEP_ALL_BASE) + plant_parsers(env, src),
+         ["sweep short cvtto32-all-rup: the first 2 slice(s)", "sweep short cvtto32-all-rne: the first 2 slice(s) came back short",
+          "the log with one case more printed is refused"]),
+        ("the driver does not hold a slice to what it covered",
+         [("card_stress.py", '            cover = job["cover"]\n', "            cover = None\n")],
+         lambda env, src: scn_sweep_short(env, src, SWEEP_ALL_BASE),
+         ["sweep short cvtto32-all-rne: the first 2 slice(s) came back short"]),
+        ("a refused slice is counted covered, so a restart skips it",
+         [("card_stress_lib.py", '        if not item or r.get("status") not in ("pass", "fail"):',
+           '        if not item or r.get("status") not in ("pass", "fail", "parse_error"):')],
+         lambda env, src: scn_sweep_short(env, src, SWEEP_ALL_BASE) + scn_sweep_gap(env, src, SWEEP_ALL_BASE),
+         ["sweep short cvtto32-all-rne: the refused slices are not covered", "sweep gap: the resumed run served the refused slice FIRST"]),
+        ("a slice that compared nothing because every pair was skipped is refused",
+         [("card_stress_lib.py", "    elif expected_cases is None and cases == 0:", "    if expected_cases is None and cases == 0:")],
+         plant_parsers, ["a slice that compared nothing because every pair was skipped (all NaN) is a pass"]),
+        ("the stand-in prints the wrong count of checks for scaleb32-wide",
+         [("card_stress_standin.py", '"scaleb32-all": 17, "scaleb32-wide": 568}', '"scaleb32-all": 17, "scaleb32-wide": 567}')],
+         plant_parsers, ["the dry-run stand-in prints the real tool's line for this slice", "the stand-in's per-encoding table is the library's"]),
+        ("the library's per-encoding count for scaleb32-wide is one too many",
+         [("card_stress_lib.py", '"scaleb32-all": 17, "scaleb32-wide": 556 + 12}', '"scaleb32-all": 17, "scaleb32-wide": 556 + 13}')],
+         plant_parsers, ["PER_ENCODING's scaleb counts are the C source's lists"]),
+        ("remainder is marked as reaching the tile",
+         [("card_stress_lib.py", '"rem32": HOST, "rem64": HOST,', '"rem32": TILE, "rem64": HOST,')],
+         lambda env, src: group_commands(src), ["reach: of the 54 random items 25 reach the tile"]),
+        ("a driver that does not record an item's reach",
+         [("card_stress.py", '                                "reach": it.reach, "lo": lo, "hi": hi, "tile": None}',
+           '                                "lo": lo, "hi": hi, "tile": None}')],
+         lambda env, src: scn_sweep_all(env, src), ["sweep all conv32to64-all: every record says its reach (host)"]),
+        ("the status file does not state which items reach the tile",
+         [("card_stress.py", '            lines.append("reach      " + "; ".join(', '            lines.append("xreach     " + "; ".join(')],
+         lambda env, src: scn_sweep_all(env, src), ["sweep all: status.txt says what the tile has seen"]),
+        ("the report prints every item as reaching the tile",
+         [("card_stress_report.py", '                      _reach_text(e["reach"])]\n                     for e in W["exhaustive"]])',
+           '                      "tile"]\n                     for e in W["exhaustive"]])')],
+         plant_report, ["sweep.exh[logb32].reach", "sweep.exh[conv32to64-all].reach", "sweep.exh[cvtfrom32-all-rne].reach"]),
+        ("the report totals the coverage by reach wrongly (every item counted as a tile item)",
+         [("card_stress_report.py", '        mine = [e for e in exh if e["reach"] == key]\n',
+           '        mine = [e for e in exh if (e["reach"] == key or key == TILE)]\n')],
+         plant_report, ["sweep.total.reach"]),
+        ("the report prints every exhaustive item as a host item, whatever the records say",
+         [("card_stress_report.py", '                      _reach_text(e["reach"])]\n                     for e in W["exhaustive"]])',
+           '                      "host"]\n                     for e in W["exhaustive"]])')],
+         lambda env, src: scn_report(env, src), ["report: and its reach column (the last) is what the driver wrote into every one of its records"]),
     ]
     for name, edits, fn, expects in P:
         if pick and pick not in name:
@@ -1519,7 +2090,8 @@ def main() -> int:
                                       ("build", scn_build_refusals, False), ("buildreal", scn_buildreal, False),
                                       ("internal", scn_internal_error, False), ("signal", scn_signal, True),
                                       ("torn", scn_torn_tail, False),
-                                      ("disable", scn_item_disabled, False)):
+                                      ("disable", scn_item_disabled, False),
+                                      ("sweepall", scn_sweep_all, False)):
             if not want(gname):
                 continue
             if posix_only and not POSIX:
