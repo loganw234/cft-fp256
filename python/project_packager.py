@@ -76,6 +76,7 @@ import sys
 import tempfile
 import time
 import zipfile
+import zlib
 
 HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parent
@@ -106,9 +107,10 @@ LEAK = re.compile(r"[A-Za-z]:[\\/]+%s[\\/]|/%s/[A-Za-z]|/%s/[A-Za-z]|\\%s\\" % (
 LIGHT_DOCS = (
     ("README.md", "the project's front page: what it is, how fast it is and how it is checked"),
     ("docs/FIGURES.md", "the gallery as published: each figure's caption, its sources and the notes that go with it"),
-    ("CAPABILITIES.md", "what the tile can and cannot do, mark by mark: the features as they stand"),
+    ("CAPABILITIES.md", "what the tile can and cannot do, mark by mark, as that document states it (it dates its own "
+                        "marks)"),
     ("docs/COMPLIANCE.md", "the standard's clauses one by one: what is implemented, what is refused, where each is "
-                           "proven"),
+                           "proven, as that document states it for the ABI it names"),
     ("LICENSE", "the licence terms the project, and so these figures, are distributed under"),
     ("NOTICE", "the attribution notice that the licence asks every redistribution to carry"),
 )
@@ -749,6 +751,16 @@ def verify_archive(path):
     except (zipfile.BadZipFile, OSError) as e:
         return [("archive-unreadable", "%s is not a zip archive (%s)" % (pathlib.Path(path).name, e))]
     with z:
+        # an entry whose bytes fail their own CRC-32 is a damaged archive, said by name, and the check stops there:
+        # nothing below can be read from it
+        try:
+            damaged = z.testzip()
+        except (zipfile.BadZipFile, zlib.error, NotImplementedError, RuntimeError, OSError) as e:
+            return [("archive-unreadable", "an entry of %s cannot be read from it (%s: %s)" % (
+                pathlib.Path(path).name, type(e).__name__, e))]
+        if damaged is not None:
+            return [("archive-unreadable", "the entry %s of %s fails its own CRC-32: the zip is damaged" % (
+                damaged, pathlib.Path(path).name))]
         infos = z.infolist()
         names = [i.filename for i in infos]
         if len(set(names)) != len(names):
@@ -775,6 +787,9 @@ def verify_archive(path):
         if man.get("manifest_format") != FORMAT:
             bad("manifest-unreadable", "MANIFEST.json is format %r; this reader knows %d" % (man.get("manifest_format"), FORMAT))
         arch, commit, tree, z_meta = (sub(man, k) for k in ("archive", "commit", "tree", "zip"))
+        if str(commit.get("short")) != str(commit.get("sha"))[:7]:
+            bad("manifest-mismatch", "MANIFEST.json gives the commit's short name as %r and its full name as %r, whose "
+                "first seven characters differ" % (commit.get("short"), commit.get("sha")))
         # the manifest agrees with itself: the name is the date, the commit and the tree's state it records
         want = "%s-%s-%s%s" % (STEM, arch.get("date_utc"), commit.get("short"), "" if tree.get("clean") else "-dirty")
         if arch.get("name") != want or arch.get("root_dir") != root_dir:
@@ -891,7 +906,7 @@ def verify_archive(path):
 
 # ---------------------------------------------------------------------------------------------------- CLI
 def human(n):
-    return "%.1f MB" % (n / 1048576.0) if n >= 1048576 else "%.1f KB" % (n / 1024.0)
+    return "%.1f MiB" % (n / 1048576.0) if n >= 1048576 else "%.1f KiB" % (n / 1024.0)
 
 
 def main(argv=None):

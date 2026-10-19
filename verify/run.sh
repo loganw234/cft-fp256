@@ -839,7 +839,7 @@ stage libcft "host library: build + contract tests + the build id regenerated + 
 # from this tree (the README, the gallery, the sidecars and the ledger
 # still say what its readers expect), does one build, verify and reproduce
 # byte for byte, and is each refusal and each archive fault named when
-# planted in a scratch copy. It needs no converter, so it never skips here:
+# planted in a scratch copy. It needs no converter, so it prints no SKIP line:
 # the PNG legs (--check --png) need librsvg's rsvg-convert, which CI may
 # not have, and are not part of this stage. Its failure output never uses
 # the words the pattern below looks for, so a failure is a FAIL and not a

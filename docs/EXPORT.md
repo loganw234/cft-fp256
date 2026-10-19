@@ -167,8 +167,8 @@ and clock give the same zip, a clock a day and three seconds later changes
 only those date fields, and a build in another process under another
 `PYTHONHASHSEED` gives the same zip.
 
-Stored costs size: on 2026-10-19 the archive with PNGs was 10.7 MB, where
-the same entries deflated at the highest level were 9.1 MB, because the PNGs
+Stored costs size: on 2026-10-19 the archive with PNGs was 10.7 MiB, where
+the same entries deflated at the highest level were 9.1 MiB, because the PNGs
 (86% of it) are compressed already.
 
 ## The PNGs
@@ -261,13 +261,15 @@ ignore, so that its own output cannot make the next run find the tree dirty.
 `--verify ARCHIVE` opens the zip and re-hashes every file against the manifest,
 and then checks what a hash cannot: that the manifest agrees with itself and
 with the archive. It prints every problem it finds, by name, and exits 1 if
-there is one.
+there is one. A file that is not a zip, or a zip with an entry whose bytes fail
+its own CRC-32, ends the check at that point, named `archive-unreadable`:
+nothing below it can be read.
 
 | name | when |
 |---|---|
-| `archive-unreadable`, `archive-structure` | the file is not a zip; its entries are not all under one directory, an entry name occurs twice, or an entry would extract outside its directory |
+| `archive-unreadable`, `archive-structure` | the file is not a zip, or an entry of it fails its own CRC-32; its entries are not all under one directory, an entry name occurs twice, or an entry would extract outside its directory |
 | `manifest-missing`, `manifest-unreadable` | there is no `MANIFEST.json`, or it does not parse, is not a manifest, or is a format this reader does not know |
-| `manifest-mismatch` | the manifest disagrees with itself: the archive's name is not its date, commit and tree state; the time it was made is not on its date; it says the tree was clean and lists differing paths, or the reverse; the commit's time rounded down is not the entries' stamp; or the statistics it records for a PNG are not the PNG's |
+| `manifest-mismatch` | the manifest disagrees with itself: the archive's name is not its date, commit and tree state; the time it was made is not on its date; it says the tree was clean and lists differing paths, or the reverse; the commit's short name is not the first seven characters of its full name; the commit's time rounded down is not the entries' stamp; or the statistics it records for a PNG are not the PNG's |
 | `file-unlisted`, `file-missing` | a file is in the archive and not in the manifest, or the reverse |
 | `size-mismatch`, `hash-mismatch` | a file's size or SHA-256 is not what the manifest says |
 | `zip-metadata` | an entry is not stored, not Unix-made, not mode 0644, has a time that is not the manifest's, or the entries are not sorted by path |
@@ -280,6 +282,12 @@ there is one.
 Each of these is planted in an archive that has been rewritten so that its
 hashes still agree, to show that it is that check that fails and not the hash
 that catches it first.
+
+`--verify` does not authenticate the manifest. It checks the manifest against
+itself and against the files it lists, and takes its other claims as written: the
+commit it names, that the tree was clean, which clock was used, the converter's
+version and fonts. Whoever can rewrite the zip can rewrite those too, and git is
+not asked.
 
 ## The packager's own check, and the runner
 
@@ -318,8 +326,10 @@ kind of drift the stage exists to find; it takes 38 to 51 s on the maintainer's
 Windows desktop and 14 to 19 s under WSL's Python 3.10 (2026-10-19); it needs git, to
 commit a copy of the files it reads in a temporary directory of its own (no
 history of the tree it checks, no network), and the standard library, nothing
-else: no converter, no Pillow, no PyMuPDF; it never skips and prints no `SKIP`
-line, so `--require-all` is satisfied; and its failure output avoids the words
+else: no converter, no Pillow, no PyMuPDF; it skips nothing on Linux and prints no
+`SKIP` line anywhere, so `--require-all` is satisfied (on Windows one plant, the
+backslash, cannot run: the report names it apart from the count of controls that
+ran); and its failure output avoids the words
 that make the stage print STALE, because there is nothing to regenerate. The
 legs that need a converter
 cannot join it: CI's host job installs no librsvg (`.github/workflows/gates.yml`
@@ -354,4 +364,4 @@ hand, on a host that has one.
   directory, and Python's `zipfile` reads a backslash as a slash on Windows, so
   no archive read there can show it. The self-test plants it where `os.sep` is a
   slash, and says in its report that it did not run it where it is not.
-- **Stored is larger.** About 1.6 MB, 15%, on the archive of 2026-10-19.
+- **Stored is larger.** About 1.6 MiB, 15%, on the archive of 2026-10-19.

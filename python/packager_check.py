@@ -63,6 +63,7 @@ import packager_status as ST                                         # noqa: E40
 import project_packager as PK                                        # noqa: E402
 
 UTC = datetime.timezone.utc
+NOT_RUN = []        # plants that cannot run on this platform: counted and named apart from the controls that ran
 NOW = datetime.datetime(2026, 10, 19, 12, 0, 0, tzinfo=UTC)
 # The path the plants write, assembled so that this file itself carries no path under a user's directory.
 PLANTED_PATH = ("C:" + "/" + "Users" + "/someone/notes").encode("ascii")
@@ -621,6 +622,22 @@ def archive_plants(base_zip, tmp, report, problems):
     def notzip(p, f, m):
         pathlib.Path(p).write_bytes(b"this is not a zip archive")
     run("a file that is not a zip", "archive-unreadable", lambda f, m: None, writer=notzip)
+
+    def damaged_entry(p, f, m):
+        g = dict(f)
+        g["MANIFEST.json"] = PK.dumps(m).encode("utf-8")
+        PK.write_zip(p, root_dir, list(g.items()), when)
+        with zipfile.ZipFile(str(p)) as z:
+            offset = z.getinfo(root_dir + "/" + victim).header_offset
+        raw = bytearray(pathlib.Path(p).read_bytes())
+        name_len = int.from_bytes(raw[offset + 26:offset + 28], "little")
+        extra_len = int.from_bytes(raw[offset + 28:offset + 30], "little")
+        raw[offset + 30 + name_len + extra_len + 10] ^= 0x01        # one bit inside the entry's own data
+        pathlib.Path(p).write_bytes(bytes(raw))
+    run("a zip with one entry's bytes damaged and its structure intact", "archive-unreadable", lambda f, m: None,
+        writer=damaged_entry)
+    run("a manifest whose commit's short name is not the start of its full name", "manifest-mismatch",
+        lambda f, m: m["commit"].__setitem__("sha", "0" * 40))
     run("a size in the manifest changed", "size-mismatch",
         lambda f, m: [x.__setitem__("bytes", x["bytes"] + 1) for x in m["files"] if x["path"] == victim])
     run("the commit named in the manifest is not the one in the archive's name", "manifest-mismatch",
@@ -680,8 +697,8 @@ def archive_plants(base_zip, tmp, report, problems):
         run("an entry with a backslash in its name", "archive-structure", lambda f, m: None,
             writer=extra_entry(root_dir + "/a" + chr(92) + "b.txt"), only=False)
     else:               # MEASURED 2026-10-19 on Python 3.12: on Windows zipfile reads a backslash in an entry name as a slash
-        report.append("archive plant, an entry with a backslash in its name: not run here: zipfile on Windows reads a "
-                      "backslash as a slash, so no archive can show it; it runs where os.sep is a slash")
+        NOT_RUN.append("archive plant, an entry with a backslash in its name: zipfile on Windows reads a backslash as a "
+                       "slash, so no archive can show it; it runs where os.sep is a slash")
 
     def absolute(p, f, m):
         g = dict(f)
@@ -1158,6 +1175,7 @@ def defuse(text):
 def main(root, with_png=False):
     t0 = time.monotonic()
     problems, report = [], []
+    NOT_RUN.clear()
     root = pathlib.Path(root).resolve()
     problems += real_tree(root, report)
     p, r = status_plants()
@@ -1178,7 +1196,10 @@ def main(root, with_png=False):
         return 1
     for line in report:
         print("  control: %s" % line)
-    print("project_packager: --check passed: the tree can be packaged, %d controls each refused or failed by name, a "
-          "build verifies and reproduces%s (%.0f s)" % (len(report), ", with the real converter too" if with_png else "",
-                                                        time.monotonic() - t0))
+    for item in NOT_RUN:
+        print("  not run on this platform: %s" % item)
+    print("project_packager: --check passed: the tree can be packaged, %d controls each refused or failed by name%s, a "
+          "build verifies and reproduces%s (%.0f s)" % (
+              len(report), "" if not NOT_RUN else " (plus %d that could not run on this platform, named above)" % len(NOT_RUN),
+              ", with the real converter too" if with_png else "", time.monotonic() - t0))
     return 0

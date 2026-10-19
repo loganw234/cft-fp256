@@ -120,6 +120,18 @@ def count_lines(text, pattern, what, rel):
     return n
 
 
+DATED_DOCS = ("CAPABILITIES.md", "docs/COMPLIANCE.md")      # the light documents whose reasons speak of the present
+
+
+def newest_written_date(text, rel):
+    """The newest YYYY-MM-DD the document itself writes. It is the document's own word, read from its text: nothing of
+    the tree's history is used, so a shallow clone gives the same answer."""
+    dates = re.findall(r"\b(20\d\d-\d\d-\d\d)\b", text)
+    if not dates:
+        raise SourceError("%s writes no date, and this archive says how current it is by the newest one" % rel)
+    return max(dates)
+
+
 def read_runner(rd):
     """Stages and budgets, as python/check_docs_index.py and python/figure_extracts.py read them: the runner's own
     `stage NAME "..."` lines, and the members of its two BUDGET_ lists."""
@@ -165,7 +177,8 @@ def read_tests(rd):
 
 
 def read_sidecar_claims(rd):
-    """(statements, agreeing, source) over every figure sidecar's `checks`: what the figures' own check holds to the record."""
+    """(checks, agreeing, source) over every figure sidecar's `checks`: numbers the README and other documents state,
+    phrases, and presence or consistency checks, as the figures' own check holds them to the record."""
     files = sorted("%s/%s" % (SIDECAR_DIR, p.name) for p in (rd.root / SIDECAR_DIR).glob("*.json"))
     if not files:
         raise SourceError("%s holds no sidecar" % SIDECAR_DIR)
@@ -471,8 +484,8 @@ def build(rd, ctx):
     f_tests = F("tests", tests, commas(tests), [tests_src], "lines beginning `def test_` in python/tests/*.py")
     f_tfiles = F("test_files", defining, commas(defining), [tests_src], "the .py files of python/tests that define at least one")
     total, agree, claims_src = read_sidecar_claims(rd)
-    f_claims = F("statements", total, commas(total), [claims_src], "the `checks` rows of every figure sidecar")
-    f_agree = F("statements_agree", agree, commas(agree), [claims_src], "those rows whose verdict is `agrees`")
+    f_claims = F("sidecar_checks", total, commas(total), [claims_src], "the `checks` rows of every figure sidecar")
+    f_agree = F("sidecar_checks_agree", agree, commas(agree), [claims_src], "those rows whose verdict is `agrees`")
 
     # ---- the card
     TL, SW, TM, CK, SP = (SIDECAR_DIR + "/" + n + ".json" for n in
@@ -559,6 +572,10 @@ def build(rd, ctx):
     f_loss = F("speed_losses", losses, commas(losses), [p3], "comparisons in which it is behind")
     f_best = F("speed_best", best, "%.1f" % best, [p4], "the largest ratio of the tile's rate to the software's")
     f_worst = F("speed_worst", 1.0 / worst, "%.1f" % (1.0 / worst), [p5], "the reciprocal of the smallest such ratio")
+    grid, p6 = sc(SP, "cells")
+    n_min, n_max = min(c["n"] for c in grid), max(c["n"] for c in grid)
+    f_nmin = F("speed_n_min", n_min, commas(n_min), [p6], "the smallest element count at which a drawn cell was measured")
+    f_nmax = F("speed_n_max", n_max, commas(n_max), [p6], "the largest element count at which a drawn cell was measured")
 
     # ---- the math library
     MC, MM = SIDECAR_DIR + "/math-cost.json", SIDECAR_DIR + "/math-marks.json"
@@ -637,10 +654,10 @@ def build(rd, ctx):
     d.line("| test functions in `python/tests` | ", f_tests, " | ", f_tfiles, " files: the lines beginning `def test_` |")
     d.blank()
     d.line("That last count is functions defined; pytest collects more, because one function can be run for each of "
-           "many cases. Beside the gate, the figures are held to the record: of the ", f_claims, " statements that the "
-           "README and other documents make in words about the numbers the figures draw, ", f_agree, " agree with "
-           "them. Each figure's sidecar lists them, and `python/project_figures.py --check`, which ran before this "
-           "archive was made, compares them on every run.")
+           "many cases. Beside the gate, the figures are held to the record: of the ", f_claims, " checks the figures' "
+           "sidecars hold (numbers that the README and other documents state, phrases, and presence or consistency "
+           "checks), ", f_agree, " agree. Each figure's sidecar lists its own, and `python/project_figures.py --check`, "
+           "which ran before this archive was made, makes them again on every run.")
     d.blank()
     d.line("## The card: its latest results")
     d.blank()
@@ -669,9 +686,13 @@ def build(rd, ctx):
            "to ", f_c4, " MHz. It lists ", f_left, " other figures of slack that it does not draw, each with the reason, and "
            "it does not say there are no others.")
     d.blank()
-    d.line("Speed: against the fastest real software the tile is ahead in ", f_wins, " of ", f_cells, " comparisons, by "
-           "up to ", f_best, "x, and behind in ", f_loss, ", by up to ", f_worst, "x. Figure `perf-speedup`, which draws "
-           "the same data the README's own charts do.")
+    d.line("Speed: the figure `perf-speedup` compares the resident tiles with the fastest real software for multiply, "
+           "fused multiply-add and add, in ", f_cells, " cells (each an operation, a format, a machine and a number of "
+           "tiles), each at the largest size that both the device sweep and the peer runs measured (", f_nmin, " to ",
+           f_nmax, " elements here) and never below the figure's floor, under which a device call is mostly fixed cost. "
+           "The tile is ahead in ", f_wins, " of them, by up to ", f_best, "x, and behind in ", f_loss, ", by up to ",
+           f_worst, "x. It does not show divide, square root, the other operations or smaller sizes; its data is the "
+           "README's own, the sweep and the peer runs in `docs/bench/`.")
     d.blank()
     d.line("The math library: its correctly rounded routines are programs of ", f_cmin, " to ", f_cmax, " tile "
            "instructions, and range reduction takes ", f_rmin, " to ", f_rmax, " of each of sin, cos and tan (figure "
@@ -684,8 +705,8 @@ def build(rd, ctx):
     d.blank()
     d.line(d.block("plan"))
     d.blank()
-    d.line("The validation ledger, `docs/VALIDATION.md`, is append-only: it holds ", f_ent, " entries in ", f_lines,
-           " lines, from ", f_first, " to ", f_last, ". Its newest entries, in its own words:")
+    d.line("The validation ledger, `docs/VALIDATION.md`, describes itself as append-only. It holds ", f_ent, " entries in ",
+           f_lines, " lines, from ", f_first, " to ", f_last, ". Its newest entries, in its own words:")
     d.blank()
     d.line(d.block("ledger_newest"))
     d.blank()
@@ -736,9 +757,16 @@ def build(rd, ctx):
     d.line("Light documents, copied as they stand, each for the reason given:")
     d.blank()
     for rel, why in ctx["light_docs"]:
-        d.line("- `", d.ref(rel), "`: ", why)
+        if rel in DATED_DOCS:
+            day = newest_written_date(rd.text(rel), rel)
+            f_day = F("written_" + re.sub(r"[^a-z]+", "_", rel.lower()).strip("_"), day, day,
+                      [rd.src(rel, "the newest YYYY-MM-DD it writes")],
+                      "the newest date written in the document itself, read from its text")
+            d.line("- `", d.ref(rel), "`: ", why, "; the newest date the document itself writes is ", f_day, ".")
+        else:
+            d.line("- `", d.ref(rel), "`: ", why)
     d.blank()
-    d.line("`MANIFEST.json` lists every file here with its size and SHA-256 and where it came from, the converter and "
+    d.line("`MANIFEST.json` lists every other file here with its size and SHA-256 and where it came from, the converter and "
            "its fonts, and the sources of every number above. To check an archive against it, run `python "
            "python/project_packager.py --verify ARCHIVE.zip`. `", d.ref("STATUS.html"), "` is this page again, "
            "rendered for a browser: its words are checked against this page's, and `--verify` renders it again and "
