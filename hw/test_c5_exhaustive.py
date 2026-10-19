@@ -33,9 +33,11 @@ Prints one line a group and a last line "c5-exhaustive test: N checks, F failed,
 """
 from __future__ import annotations
 
+import math
 import os
 import random
 import re
+import struct
 import shutil
 import subprocess
 import sys
@@ -122,9 +124,53 @@ def copy_tree(src_root: str, dst: str) -> str:
     return dst
 
 
-def judge(job, attr, k, exact, lo, hi, rc, out, m, label=""):
+# The integers each of cvtto32-all's four targets holds: i32, u32, i64, u64.
+TARGET_RANGES = ((-2 ** 31, 2 ** 31 - 1), (0, 2 ** 32 - 1), (-2 ** 63, 2 ** 63 - 1), (0, 2 ** 64 - 1))
+
+
+def round_to_integer(f: float, attr: str) -> int:
+    """The integer an attribute rounds the finite value f to (f is an fp32 value, so exact in a double), by the rule of
+    the attribute and nothing the tool does: rtz toward zero, rdn down, rup up, rne to nearest with ties to even, rmm to
+    nearest with ties away from zero."""
+    fl = math.floor(f)
+    frac = f - fl                      # exact: a double holding an fp32 value, and a fraction only below 2^23
+    if frac == 0:
+        return fl
+    if attr == "rtz":
+        return fl if f > 0 else fl + 1
+    if attr == "rdn":
+        return fl
+    if attr == "rup":
+        return fl + 1
+    if frac < 0.5:
+        return fl
+    if frac > 0.5:
+        return fl + 1
+    if attr == "rmm":
+        return fl + 1 if f > 0 else fl
+    return fl if fl % 2 == 0 else fl + 1
+
+
+def expected_skipped_cvtto32(lo: int, hi: int, attr: str) -> int:
+    """The number of (encoding, target) pairs of the slice [lo, hi) that cvtto32-all must SKIP, counted here and not by
+    the tool: a pair is compared exactly when the integer the attribute rounds the operand to lies in the target's range,
+    and NaNs and infinities are in no target's range. The driver cannot count this (it does not see the operands), so
+    this is the independent check of the split between compared and skipped that `cases + skipped = 4 x E` leaves open."""
+    skipped = 0
+    for enc in range(lo, hi):
+        f = struct.unpack("<f", struct.pack("<I", enc))[0]
+        if math.isnan(f) or math.isinf(f):
+            skipped += len(TARGET_RANGES)
+            continue
+        r = round_to_integer(f, attr)
+        skipped += sum(1 for tmin, tmax in TARGET_RANGES if not tmin <= r <= tmax)
+    return skipped
+
+
+def judge(job, attr, k, exact, lo, hi, rc, out, m, label="", skips=True):
     """The checks every passing slice must meet: exit 0, no mismatches, the encodings the slice has, and the checks
-    the mode promises (skipped is zero except where the mode skips)."""
+    the mode promises (skipped is zero except where the mode skips). For cvtto32-all, which skips the pairs a target
+    cannot hold, `skips` also holds the skipped count to expected_skipped_cvtto32's independent one."""
     if m is None:
         return False, f"no verdict line: rc {rc}: {out[-200:]}"
     cases, vm, fm, enc, skp = int(m.group(3)), int(m.group(4)), int(m.group(5)), int(m.group(6)), int(m.group(7))
@@ -138,6 +184,11 @@ def judge(job, attr, k, exact, lo, hi, rc, out, m, label=""):
         return False, f"{cases} cases + {skp} skipped is not {k} x {enc}"
     if exact and skp != 0:
         return False, f"{skp} skipped in a mode that skips nothing"
+    if job == "cvtto32-all" and skips:
+        want = expected_skipped_cvtto32(lo, hi, attr or "rne")
+        if skp != want:
+            return False, (f"{skp} pairs skipped where the independent count of the pairs the targets cannot hold is {want} "
+                           f"({cases} compared)")
     return True, ""
 
 
@@ -482,6 +533,27 @@ def group_plants(tool: Tool, built_tree: str, work: str) -> None:
         ok, why = judge("conv32to64-all", None, 1, True, 0x3F800000, 0x3F801000, rc, out, m)
         check("plant (count): a tool that counts one encoding too few in its batch loop is caught by the checks every slice must "
               "meet (the encodings are the slice's)", not ok and "encodings for a slice of" in why, why)
+    # (e) cvtto32-all's u32 skip filter too eager: lanes the target CAN hold are counted as skipped instead of compared. The tool
+    # still prints E encodings and cases + skipped = 4 x E, no mismatch and exit 0 - so everything the driver's parse_soak can
+    # check passes - and only the independent count of the pairs the targets cannot hold sees it.
+    wf = plant_tool(built_tree, work, "skipfilter", [("} else if (r < 0 || r > (long long)UINT32_MAX) {",
+                                                        "} else if (r < 0 || r >= (long long)INT32_MAX) {")])
+    if wf is None:
+        check("plants: the skip-filter plant builds", False, "make failed")
+    else:
+        flo, fhi = 0x4EFFFFC0, 0x4F000040          # 64 encodings below 2^31, 64 from 2^31 up
+        rc0, out0, m0 = tool.run("cvtto32-all", flo, fhi, "rne")
+        ok0, why0 = judge("cvtto32-all", "rne", 4, False, flo, fhi, rc0, out0, m0)
+        check("plant (skip filter) CONTROL: the real tool passes the slice around 2^31, the independent skip count included",
+              ok0, why0)
+        rc, out, m = wf.run("cvtto32-all", flo, fhi, "rne")
+        ok_blind, why_blind = judge("cvtto32-all", "rne", 4, False, flo, fhi, rc, out, m, skips=False)
+        ok_full, why_full = judge("cvtto32-all", "rne", 4, False, flo, fhi, rc, out, m)
+        check("plant (skip filter): a u32 skip filter that is too eager passes every check but the independent count (exit 0, "
+              "no mismatch, E encodings, cases + skipped = 4 x E): the driver's parse_soak could not see it", ok_blind, why_blind)
+        check("plant (skip filter): and the independent count of the pairs the targets cannot hold catches it (64 lanes the u32 "
+              "target holds were counted as skipped)", not ok_full and "independent count" in why_full
+              and m is not None and int(m.group(7)) == expected_skipped_cvtto32(flo, fhi, "rne") + 64, why_full)
 
 
 def group_unchanged(tool: Tool, base_dir: str, work: str) -> None:
