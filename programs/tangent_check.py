@@ -2241,7 +2241,7 @@ def leg_math(count, rng):
     print(f"  ({time.perf_counter() - t0:.1f} s)")
 
 
-# ---- N: the math library's six, compiled with tangent vectors (item 5) -----------
+# ---- N: the math library's six, compiled with tangent vectors (item 5) -----
 #
 # Leg M holds the six's rules in the golden model; the compiler carries the
 # six since M1's build, item 4, and these are the compiled legs its record

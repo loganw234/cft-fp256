@@ -357,7 +357,7 @@ def run_image(image, c, states, lane_params=None, bank=None, depth=None,
                    scratch_in=sin, scratch_depth=d)
 
 
-# ---- the marked-lane rule (M1's build, item 5) ------------------------------------
+# ---- the marked-lane rule (M1's build, item 5) -----------------------------
 #
 # A routine of the math library's six marks a lane whose last bit its own
 # test could not decide (R24's raise with bit 7: the lane's byte in R23's
@@ -410,7 +410,7 @@ def run_image(image, c, states, lane_params=None, bank=None, depth=None,
 # lane marked only at the later one (its mark came after step s) is judged
 # unmarked, bit for bit, at s.
 
-LANE_IEEE = seq.LANE_FLAGS_IEEE                 # R23's byte: [4:0] the five flags
+LANE_IEEE = seq.LANE_FLAGS_IEEE                 # R23's byte: [4:0] flags
 LANE_AUX = seq.LANE_DEPOSIT_OVERFLOW | seq.LANE_SCRATCH_RANGE      # [6:5]
 LANE_MARKED = seq.LANE_MARKED                   # [7]
 STATUS_MARKED = seq.STATUS_MARKED               # STATUS[6]
@@ -3103,7 +3103,7 @@ def leg_call_loops(rng, segrun=None, audit=None, work=None):
             Path(audit).resolve() if have_audit else None, rng, work)
 
 
-# ---- O: the marked-lane rule's controls (M1's build, item 5) ----------------------
+# ---- O: the marked-lane rule's controls (M1's build, item 5) ---------------
 #
 # A check that cannot fail is a wrong answer, and the rule above can fail only
 # on a run that breaks it - which the legs' real images never do, once they are
@@ -3256,7 +3256,7 @@ def leg_rule():
           "after the replay lang.run's, STATUS[6] set exactly where a byte "
           "is marked, no mark lost between checkpoints",
           base.describe())
-    # O2 to O4: a fault in an unmarked lane is red, in its value and in its byte
+    # O2 to O4: a fault in an unmarked lane is red, in its value or its byte
     v = fx.verdict(at_step(5, value(2)))
     check(v.failing == {2} and "lane-value" in v.broken and v.first == 5 and
           not v.per[1].failing and not v.per[2].failing and
@@ -3353,13 +3353,13 @@ def leg_rule():
           f"{base.per[8].broken}")
 
 
-# ---- N: the math library's six, compiled and run (M1's build, item 5) -------------
+# ---- N: the math library's six, compiled and run (M1's build, item 5) ------
 #
 # The compiler carries exp, expm1, exp2, log, log1p and log2 as routines since
-# M1's build, item 4 (cftc's output version 6); the stage holds them as it holds
-# division and the root: every image on seq.py against lang.run, at 1, 2, 5
-# steps, under the marked-lane rule - which is what item 5 adds, since an image
-# of the six can mark a lane. The structured families (python/tests/
+# M1's build, item 4 (cftc's output version 6); the stage holds them as it
+# holds division and the root: every image on seq.py against lang.run, at 1,
+# 2, 5 steps, under the marked-lane rule - which is what item 5 adds, since an
+# image of the six can mark a lane. The structured families (python/tests/
 # mathlib_family.py: the arguments next to an exact case, x = c 2^-e for exp,
 # expm1 and log1p, 1 + c ulp for log; Logan's answer to question 4) are put in
 # the lanes on purpose, each centre and its neighbours, so that marks occur
@@ -3478,7 +3478,8 @@ def alone_lanes(fn, fmtname, rnd, rng, everything=False):
         if bits not in seen:
             seen.add(bits)
             lanes.append((bits, role))
-    lo, hi = (-3, 3) if fn.startswith("exp") or fn == "expm1"         else (Fraction(1, 100), 8)
+    lo, hi = ((-3, 3) if fn.startswith("exp") or fn == "expm1"
+              else (Fraction(1, 100), 8))
     for _ in range(12 if everything else 3):
         add(full_value(F, rng, lo, hi), "ordinary")
     for bits, role in ((0, "+0"), (sign, "-0"), (sf.inf_bits(F), "+inf"),
@@ -3675,7 +3676,7 @@ def leg_six_alone(rng, everything=False, fns=None):
     print(f"  ({time.perf_counter() - t0:.1f} s)")
 
 
-# ---- N2: generated sources that call the six --------------------------------------
+# ---- N2: generated sources that call the six -------------------------------
 
 def g_six(rng, k, tangent=None):
     """(text, direct, components): a system the language takes that calls
@@ -3943,7 +3944,7 @@ def leg_six(count, rng_for, everything=False):
     leg_six_loops(rng_for("six loops"), everything)
 
 
-# ---- N3: the call loop over a batch of the six -------------------------------------
+# ---- N3: the call loop over a batch of the six -----------------------------
 #
 # The step's routines are looped when, inlined, they would pass 32,768
 # instructions (python/cftc/callloop.py), and the constant is the compiler's
@@ -4192,7 +4193,8 @@ def six_coverage():
                        (sf.FLAG_INEXACT, "inexact")):
         check(SCOVER["flags"] & flag,
               f"an image of the six's run raised {word}")
-    check(SCOVER["loops"] and {"exp", "expm1", "log1p"} <= SCOVER["looped_ops"],
+    check(SCOVER["loops"] and
+          {"exp", "expm1", "log1p"} <= SCOVER["looped_ops"],
           f"call loops of the six compiled and run: {SCOVER['loops']} loops "
           f"of {SCOVER['looped_calls']} calls, "
           f"{', '.join(sorted(SCOVER['looped_ops']))}",
