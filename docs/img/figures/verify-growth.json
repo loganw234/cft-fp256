@@ -1,0 +1,98 @@
+{
+ "figure": "verify-growth",
+ "title": "How the gate grew",
+ "group": "verification",
+ "alt": "Four small charts over time: the verification runner's stages (52, of which 44 in the gate budget and 31 in the quick one), the RTL benches (29), the formal proofs (38) and the golden-model test functions (1,027).",
+ "files": ["docs/img/figures/verify-growth-light.svg", "docs/img/figures/verify-growth-dark.svg"],
+ "maker": "python/project_figures.py: build_verify_growth, draw_verify_growth",
+ "commit": "0b77387ea1266f4d4a5e30c8798f57e8b6dc6ef8",
+ "commit_means": "the commit the extracts below were read at; a file read from the tree is identified by its SHA-256 instead",
+ "sources": [],
+ "extracts": [
+  {
+   "name": "tree",
+   "path": "docs/figures/tree.json",
+   "sha256": "83e09354c53306c6f3f2e940f6612b55e3184b83d6fce382f8294620d52bf8d0",
+   "read_at": "0b77387ea1266f4d4a5e30c8798f57e8b6dc6ef8",
+   "label": "0b77387",
+   "what": "the tree at the end of each day on main's own line: text lines by area, the ledger's size and line traffic, and the size of the gate",
+   "body_sha256": "bdb65b70acafe09753de32b5ca3d67c8d815926144548aeecd52a01bd1f846b0",
+   "remake": "python python/figure_extracts.py tree --as-of 0b77387ea1266f4d4a5e30c8798f57e8b6dc6ef8",
+   "sources": [
+    {
+     "kind": "git",
+     "as_of": "0b77387ea1266f4d4a5e30c8798f57e8b6dc6ef8",
+     "commands": [
+       "git log --first-parent --reverse --format=%H|%ad --date=format:%Y-%m-%d AS_OF",
+       "git grep -I -c '' TIP -- .",
+       "git show TIP:docs/VALIDATION.md, verify/run.sh, tb/Makefile, formal/run.sh",
+       "git grep -c -E '^\\s*def test_' TIP -- python/tests",
+       "git log AS_OF --no-renames --numstat -- docs/VALIDATION.md"
+     ]
+    }
+   ]
+  }
+ ],
+ "checks": [],
+ "data": {
+  "days": [
+    "2026-08-28", "2026-08-29", "2026-08-30", "2026-08-31", "2026-09-01", "2026-09-02", "2026-09-03",
+    "2026-09-04", "2026-09-05", "2026-09-06", "2026-09-07", "2026-09-08", "2026-09-09", "2026-09-10",
+    "2026-09-11", "2026-09-12", "2026-09-13", "2026-09-14", "2026-09-15", "2026-09-16", "2026-09-17",
+    "2026-09-18", "2026-09-19", "2026-09-20", "2026-09-21", "2026-09-22", "2026-09-23", "2026-09-24",
+    "2026-09-25", "2026-09-26", "2026-09-27", "2026-09-28", "2026-09-29", "2026-09-30", "2026-10-01",
+    "2026-10-02", "2026-10-03", "2026-10-04", "2026-10-05", "2026-10-06", "2026-10-07", "2026-10-08",
+    "2026-10-09", "2026-10-10", "2026-10-11", "2026-10-12", "2026-10-13", "2026-10-14", "2026-10-15",
+    "2026-10-16", "2026-10-17", "2026-10-18", "2026-10-19"
+  ],
+  "series": {
+   "stages": [
+     null, null, null, 14, 15, 26, 29, 33, 33, 35, 35, 35, 35, 35, 35, 36, 38, 38, 38, 38, 38, 39, 39,
+     39, 39, 39, 40, 40, 41, 41, 41, 41, 41, 46, 48, 51, 51, 51, 51, 51, 51, 51, 51, 51, 51, 52, 52,
+     52, 52, 52, 52, 52, 52
+   ],
+   "quick": [
+     null, null, null, null, null, null, null, 21, 21, 22, 22, 22, 22, 22, 22, 23, 25, 25, 25, 25, 25,
+     26, 26, 26, 26, 26, 27, 27, 28, 28, 28, 28, 28, 30, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31,
+     31, 31, 31, 31, 31, 31, 31, 31
+   ],
+   "gate": [
+     null, null, null, null, null, null, null, 29, 29, 30, 30, 30, 30, 30, 30, 31, 33, 33, 33, 33, 33,
+     34, 34, 34, 34, 34, 35, 35, 36, 36, 36, 36, 36, 40, 42, 44, 44, 44, 44, 44, 44, 44, 44, 44, 44,
+     44, 44, 44, 44, 44, 44, 44, 44
+   ],
+   "benches": [
+     3, 6, 12, 15, 17, 18, 18, 18, 18, 21, 21, 21, 21, 21, 21, 21, 21, 23, 25, 25, 25, 25, 25, 25, 25,
+     25, 25, 25, 25, 25, 25, 25, 26, 26, 26, 26, 26, 26, 29, 29, 29, 29, 29, 29, 29, 29, 29, 29, 29,
+     29, 29, 29, 29
+   ],
+   "proofs": [
+     null, null, null, 6, 6, 6, 6, 6, 6, 6, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30,
+     30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 38, 38, 38, 38, 38, 38, 38, 38, 38, 38,
+     38, 38, 38, 38, 38
+   ],
+   "tests": [
+     13, 45, 69, 86, 127, 127, 251, 275, 275, 275, 284, 373, 391, 392, 393, 393, 393, 409, 428, 428,
+     428, 428, 428, 428, 428, 428, 428, 428, 428, 428, 428, 510, 573, 575, 698, 901, 901, 901, 909,
+     909, 909, 909, 909, 909, 909, 909, 968, 984, 1025, 1027, 1027, 1027, 1027
+   ]
+  },
+  "tip": {
+   "stages": 52,
+   "quick": 31,
+   "gate": 44,
+   "benches": 29,
+   "proofs": 38,
+   "tests": 1027
+  },
+  "first": {
+   "stages": "2026-08-31",
+   "quick": "2026-09-04",
+   "gate": "2026-09-04",
+   "benches": "2026-08-28",
+   "proofs": "2026-08-31",
+   "tests": "2026-08-28"
+  },
+  "as_of": "0b77387ea1266f4d4a5e30c8798f57e8b6dc6ef8"
+ }
+}

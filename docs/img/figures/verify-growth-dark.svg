@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="614" viewBox="0 0 900 614" role="img" aria-label="Four small charts over time: the verification runner's stages (52, of which 44 in the gate budget and 31 in the quick one), the RTL benches (29), the formal proofs (38) and the golden-model test functions (1,027).">
+<title>Four small charts over time: the verification runner's stages (52, of which 44 in the gate budget and 31 in the quick one), the RTL benches (29), the formal proofs (38) and the golden-model test functions (1,027).</title>
+<rect width="900" height="614" fill="#0d1117"/>
+<text x="24.0" y="30.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="17" fill="#e6edf3" font-weight="600">How the gate grew</text>
+<text x="24.0" y="52.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#9198a1">The size of the gate at the end of each day on main's own line: the runner's stages and budgets, the cocotb RTL</text>
+<text x="24.0" y="69.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#9198a1">benches, the formal proofs, and the test functions defined for the golden model. A count a file did not yet give is a</text>
+<text x="24.0" y="86.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#9198a1">gap, not a zero.</text>
+<text x="24.0" y="142.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12" fill="#e6edf3" font-weight="600">Runner stages</text>
+<rect x="92.0" y="152.0" width="348.0" height="150.0" fill="#161b22"/>
+<line x1="92.0" y1="302.0" x2="440.0" y2="302.0" stroke="#30363d" stroke-width="1"/>
+<text x="86.0" y="305.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#9198a1" text-anchor="end">0</text>
+<line x1="92.0" y1="252.0" x2="440.0" y2="252.0" stroke="#30363d" stroke-width="1"/>
+<text x="86.0" y="255.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#9198a1" text-anchor="end">20</text>
+<line x1="92.0" y1="202.0" x2="440.0" y2="202.0" stroke="#30363d" stroke-width="1"/>
+<text x="86.0" y="205.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#9198a1" text-anchor="end">40</text>
+<text x="112.1" y="315.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="middle">31 Aug</text>
+<text x="205.8" y="315.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="middle">14 Sep</text>
+<text x="299.5" y="315.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="middle">28 Sep</text>
+<text x="393.2" y="315.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="middle">12 Oct</text>
+<path d="M112.1,267.0 L118.8,264.5 L125.5,237.0 L132.2,229.5 L138.8,219.5 L145.5,219.5 L152.2,214.5 L158.9,214.5 L165.6,214.5 L172.3,214.5 L179.0,214.5 L185.7,214.5 L192.4,212.0 L199.1,207.0 L205.8,207.0 L212.5,207.0 L219.2,207.0 L225.8,207.0 L232.5,204.5 L239.2,204.5 L245.9,204.5 L252.6,204.5 L259.3,204.5 L266.0,202.0 L272.7,202.0 L279.4,199.5 L286.1,199.5 L292.8,199.5 L299.5,199.5 L306.2,199.5 L312.8,187.0 L319.5,182.0 L326.2,174.5 L332.9,174.5 L339.6,174.5 L346.3,174.5 L353.0,174.5 L359.7,174.5 L366.4,174.5 L373.1,174.5 L379.8,174.5 L386.5,174.5 L393.2,172.0 L399.8,172.0 L406.5,172.0 L413.2,172.0 L419.9,172.0 L426.6,172.0 L433.3,172.0 L440.0,172.0" fill="none" stroke="#54aeff" stroke-width="2.2" stroke-linejoin="round"/>
+<text x="437.0" y="166.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#54aeff" font-weight="600" text-anchor="end">52</text>
+<path d="M138.8,229.5 L145.5,229.5 L152.2,227.0 L158.9,227.0 L165.6,227.0 L172.3,227.0 L179.0,227.0 L185.7,227.0 L192.4,224.5 L199.1,219.5 L205.8,219.5 L212.5,219.5 L219.2,219.5 L225.8,219.5 L232.5,217.0 L239.2,217.0 L245.9,217.0 L252.6,217.0 L259.3,217.0 L266.0,214.5 L272.7,214.5 L279.4,212.0 L286.1,212.0 L292.8,212.0 L299.5,212.0 L306.2,212.0 L312.8,202.0 L319.5,197.0 L326.2,192.0 L332.9,192.0 L339.6,192.0 L346.3,192.0 L353.0,192.0 L359.7,192.0 L366.4,192.0 L373.1,192.0 L379.8,192.0 L386.5,192.0 L393.2,192.0 L399.8,192.0 L406.5,192.0 L413.2,192.0 L419.9,192.0 L426.6,192.0 L433.3,192.0 L440.0,192.0" fill="none" stroke="#db6d28" stroke-width="2.2" stroke-linejoin="round"/>
+<text x="437.0" y="186.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#db6d28" font-weight="600" text-anchor="end">44</text>
+<path d="M138.8,249.5 L145.5,249.5 L152.2,247.0 L158.9,247.0 L165.6,247.0 L172.3,247.0 L179.0,247.0 L185.7,247.0 L192.4,244.5 L199.1,239.5 L205.8,239.5 L212.5,239.5 L219.2,239.5 L225.8,239.5 L232.5,237.0 L239.2,237.0 L245.9,237.0 L252.6,237.0 L259.3,237.0 L266.0,234.5 L272.7,234.5 L279.4,232.0 L286.1,232.0 L292.8,232.0 L299.5,232.0 L306.2,232.0 L312.8,227.0 L319.5,224.5 L326.2,224.5 L332.9,224.5 L339.6,224.5 L346.3,224.5 L353.0,224.5 L359.7,224.5 L366.4,224.5 L373.1,224.5 L379.8,224.5 L386.5,224.5 L393.2,224.5 L399.8,224.5 L406.5,224.5 L413.2,224.5 L419.9,224.5 L426.6,224.5 L433.3,224.5 L440.0,224.5" fill="none" stroke="#3fb950" stroke-width="2.2" stroke-linejoin="round"/>
+<text x="437.0" y="218.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#3fb950" font-weight="600" text-anchor="end">31</text>
+<line x1="100.0" y1="164.5" x2="118.0" y2="164.5" stroke="#54aeff" stroke-width="2.4"/>
+<text x="124.0" y="168.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#e6edf3">all stages</text>
+<line x1="200.0" y1="164.5" x2="218.0" y2="164.5" stroke="#db6d28" stroke-width="2.4"/>
+<text x="224.0" y="168.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#e6edf3">in the gate budget</text>
+<line x1="100.0" y1="183.5" x2="118.0" y2="183.5" stroke="#3fb950" stroke-width="2.4"/>
+<text x="124.0" y="187.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#e6edf3">in the quick budget</text>
+<text x="434.0" y="142.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12" fill="#e6edf3" font-weight="600">RTL benches, make sim</text>
+<rect x="502.0" y="152.0" width="348.0" height="150.0" fill="#161b22"/>
+<line x1="502.0" y1="302.0" x2="850.0" y2="302.0" stroke="#30363d" stroke-width="1"/>
+<text x="496.0" y="305.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#9198a1" text-anchor="end">0</text>
+<line x1="502.0" y1="252.0" x2="850.0" y2="252.0" stroke="#30363d" stroke-width="1"/>
+<text x="496.0" y="255.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#9198a1" text-anchor="end">10</text>
+<line x1="502.0" y1="202.0" x2="850.0" y2="202.0" stroke="#30363d" stroke-width="1"/>
+<text x="496.0" y="205.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#9198a1" text-anchor="end">20</text>
+<line x1="502.0" y1="152.0" x2="850.0" y2="152.0" stroke="#30363d" stroke-width="1"/>
+<text x="496.0" y="155.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#9198a1" text-anchor="end">30</text>
+<text x="522.1" y="315.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="middle">31 Aug</text>
+<text x="615.8" y="315.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="middle">14 Sep</text>
+<text x="709.5" y="315.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="middle">28 Sep</text>
+<text x="803.2" y="315.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="middle">12 Oct</text>
+<path d="M502.0,287.0 L508.7,272.0 L515.4,242.0 L522.1,227.0 L528.8,217.0 L535.5,212.0 L542.2,212.0 L548.8,212.0 L555.5,212.0 L562.2,197.0 L568.9,197.0 L575.6,197.0 L582.3,197.0 L589.0,197.0 L595.7,197.0 L602.4,197.0 L609.1,197.0 L615.8,187.0 L622.5,177.0 L629.2,177.0 L635.8,177.0 L642.5,177.0 L649.2,177.0 L655.9,177.0 L662.6,177.0 L669.3,177.0 L676.0,177.0 L682.7,177.0 L689.4,177.0 L696.1,177.0 L702.8,177.0 L709.5,177.0 L716.2,172.0 L722.8,172.0 L729.5,172.0 L736.2,172.0 L742.9,172.0 L749.6,172.0 L756.3,157.0 L763.0,157.0 L769.7,157.0 L776.4,157.0 L783.1,157.0 L789.8,157.0 L796.5,157.0 L803.2,157.0 L809.8,157.0 L816.5,157.0 L823.2,157.0 L829.9,157.0 L836.6,157.0 L843.3,157.0 L850.0,157.0" fill="none" stroke="#a371f7" stroke-width="2.2" stroke-linejoin="round"/>
+<text x="847.0" y="151.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#a371f7" font-weight="600" text-anchor="end">29</text>
+<text x="24.0" y="360.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12" fill="#e6edf3" font-weight="600">Formal proofs</text>
+<rect x="92.0" y="370.0" width="348.0" height="150.0" fill="#161b22"/>
+<line x1="92.0" y1="520.0" x2="440.0" y2="520.0" stroke="#30363d" stroke-width="1"/>
+<text x="86.0" y="523.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#9198a1" text-anchor="end">0</text>
+<line x1="92.0" y1="445.0" x2="440.0" y2="445.0" stroke="#30363d" stroke-width="1"/>
+<text x="86.0" y="448.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#9198a1" text-anchor="end">20</text>
+<line x1="92.0" y1="370.0" x2="440.0" y2="370.0" stroke="#30363d" stroke-width="1"/>
+<text x="86.0" y="373.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#9198a1" text-anchor="end">40</text>
+<text x="112.1" y="533.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="middle">31 Aug</text>
+<text x="205.8" y="533.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="middle">14 Sep</text>
+<text x="299.5" y="533.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="middle">28 Sep</text>
+<text x="393.2" y="533.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="middle">12 Oct</text>
+<path d="M112.1,497.5 L118.8,497.5 L125.5,497.5 L132.2,497.5 L138.8,497.5 L145.5,497.5 L152.2,497.5 L158.9,407.5 L165.6,407.5 L172.3,407.5 L179.0,407.5 L185.7,407.5 L192.4,407.5 L199.1,407.5 L205.8,407.5 L212.5,407.5 L219.2,407.5 L225.8,407.5 L232.5,407.5 L239.2,407.5 L245.9,407.5 L252.6,407.5 L259.3,407.5 L266.0,407.5 L272.7,407.5 L279.4,407.5 L286.1,407.5 L292.8,407.5 L299.5,407.5 L306.2,407.5 L312.8,407.5 L319.5,407.5 L326.2,407.5 L332.9,407.5 L339.6,407.5 L346.3,377.5 L353.0,377.5 L359.7,377.5 L366.4,377.5 L373.1,377.5 L379.8,377.5 L386.5,377.5 L393.2,377.5 L399.8,377.5 L406.5,377.5 L413.2,377.5 L419.9,377.5 L426.6,377.5 L433.3,377.5 L440.0,377.5" fill="none" stroke="#f85149" stroke-width="2.2" stroke-linejoin="round"/>
+<text x="437.0" y="371.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#f85149" font-weight="600" text-anchor="end">38</text>
+<text x="434.0" y="360.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12" fill="#e6edf3" font-weight="600">Test functions in python/tests</text>
+<rect x="502.0" y="370.0" width="348.0" height="150.0" fill="#161b22"/>
+<line x1="502.0" y1="520.0" x2="850.0" y2="520.0" stroke="#30363d" stroke-width="1"/>
+<text x="496.0" y="523.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#9198a1" text-anchor="end">0</text>
+<line x1="502.0" y1="470.0" x2="850.0" y2="470.0" stroke="#30363d" stroke-width="1"/>
+<text x="496.0" y="473.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#9198a1" text-anchor="end">500</text>
+<line x1="502.0" y1="420.0" x2="850.0" y2="420.0" stroke="#30363d" stroke-width="1"/>
+<text x="496.0" y="423.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#9198a1" text-anchor="end">1,000</text>
+<text x="522.1" y="533.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="middle">31 Aug</text>
+<text x="615.8" y="533.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="middle">14 Sep</text>
+<text x="709.5" y="533.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="middle">28 Sep</text>
+<text x="803.2" y="533.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="middle">12 Oct</text>
+<path d="M502.0,518.7 L508.7,515.5 L515.4,513.1 L522.1,511.4 L528.8,507.3 L535.5,507.3 L542.2,494.9 L548.8,492.5 L555.5,492.5 L562.2,492.5 L568.9,491.6 L575.6,482.7 L582.3,480.9 L589.0,480.8 L595.7,480.7 L602.4,480.7 L609.1,480.7 L615.8,479.1 L622.5,477.2 L629.2,477.2 L635.8,477.2 L642.5,477.2 L649.2,477.2 L655.9,477.2 L662.6,477.2 L669.3,477.2 L676.0,477.2 L682.7,477.2 L689.4,477.2 L696.1,477.2 L702.8,477.2 L709.5,469.0 L716.2,462.7 L722.8,462.5 L729.5,450.2 L736.2,429.9 L742.9,429.9 L749.6,429.9 L756.3,429.1 L763.0,429.1 L769.7,429.1 L776.4,429.1 L783.1,429.1 L789.8,429.1 L796.5,429.1 L803.2,429.1 L809.8,423.2 L816.5,421.6 L823.2,417.5 L829.9,417.3 L836.6,417.3 L843.3,417.3 L850.0,417.3" fill="none" stroke="#39c5cf" stroke-width="2.2" stroke-linejoin="round"/>
+<text x="847.0" y="411.3" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#39c5cf" font-weight="600" text-anchor="end">1,027</text>
+<text x="24.0" y="562.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#9198a1">Test functions are the lines that define one (def test_...); pytest collects several times as many because a function is run for each case</text>
+<text x="24.0" y="577.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#9198a1">it is given.</text>
+<text x="24.0" y="606.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#9198a1">source: docs/figures/tree.json (extract; 0b77387)</text>
+</svg>

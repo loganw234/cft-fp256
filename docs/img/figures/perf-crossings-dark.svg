@@ -1,0 +1,179 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="612" viewBox="0 0 900 612" role="img" aria-label="For each format and way of calling the card, the number of elements a call needs before the tile beats the fastest real software, for multiply, fused multiply-add and add on two machines: from 571 elements to never.">
+<title>For each format and way of calling the card, the number of elements a call needs before the tile beats the fastest real software, for multiply, fused multiply-add and add on two machines: from 571 elements to never.</title>
+<rect width="900" height="612" fill="#0d1117"/>
+<text x="24.0" y="30.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="17" fill="#e6edf3" font-weight="600">How many elements a call needs before the card pays</text>
+<text x="24.0" y="52.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#9198a1">Each mark is the size of call, in elements, from which the tile's time per element stays under the fastest real</text>
+<text x="24.0" y="69.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#9198a1">software's, found between the two measured sizes on a log-log line. Rows are the format and how the card is called;</text>
+<text x="24.0" y="86.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#9198a1">the cross at the right is a tile that never wins in the measured range.</text>
+<text x="24.0" y="114.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12" fill="#e6edf3" font-weight="600">an x86-64 workstation</text>
+<line x1="136.0" y1="144.0" x2="136.0" y2="510.0" stroke="#30363d" stroke-width="1"/>
+<text x="136.0" y="523.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#9198a1" text-anchor="middle">100</text>
+<line x1="187.6" y1="144.0" x2="187.6" y2="510.0" stroke="#30363d" stroke-width="1"/>
+<text x="187.6" y="523.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#9198a1" text-anchor="middle">1k</text>
+<line x1="239.2" y1="144.0" x2="239.2" y2="510.0" stroke="#30363d" stroke-width="1"/>
+<text x="239.2" y="523.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#9198a1" text-anchor="middle">10k</text>
+<line x1="290.8" y1="144.0" x2="290.8" y2="510.0" stroke="#30363d" stroke-width="1"/>
+<text x="290.8" y="523.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#9198a1" text-anchor="middle">100k</text>
+<line x1="342.4" y1="144.0" x2="342.4" y2="510.0" stroke="#30363d" stroke-width="1"/>
+<text x="342.4" y="523.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#9198a1" text-anchor="middle">1M</text>
+<line x1="394.0" y1="144.0" x2="394.0" y2="510.0" stroke="#30363d" stroke-width="1"/>
+<text x="394.0" y="523.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#9198a1" text-anchor="middle">10M</text>
+<text x="24.0" y="161.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" fill="#e6edf3" font-weight="600">binary32</text>
+<text x="128.0" y="178.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#9198a1" text-anchor="end">1 tile, resident</text>
+<text x="398.0" y="178.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#54aeff" font-weight="600">x</text>
+<polygon points="282.6,168.8 287.8,174.0 282.6,179.2 277.4,174.0" fill="#db6d28"/>
+<text x="414.0" y="178.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#3fb950" font-weight="600">x</text>
+<text x="128.0" y="195.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#9198a1" text-anchor="end">4 tiles, resident</text>
+<circle cx="312.2" cy="191.0" r="4.2" fill="#54aeff"/>
+<polygon points="278.9,185.8 284.1,191.0 278.9,196.2 273.7,191.0" fill="#db6d28"/>
+<rect x="304.4" y="187.2" width="7.6" height="7.6" fill="#3fb950"/>
+<text x="128.0" y="212.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#9198a1" text-anchor="end">1 tile, over PCIe</text>
+<text x="398.0" y="212.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#54aeff" font-weight="600">x</text>
+<text x="406.0" y="212.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#db6d28" font-weight="600">x</text>
+<text x="414.0" y="212.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#3fb950" font-weight="600">x</text>
+<text x="128.0" y="229.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#9198a1" text-anchor="end">4 tiles, over PCIe</text>
+<text x="398.0" y="229.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#54aeff" font-weight="600">x</text>
+<text x="406.0" y="229.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#db6d28" font-weight="600">x</text>
+<text x="414.0" y="229.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#3fb950" font-weight="600">x</text>
+<text x="24.0" y="251.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" fill="#e6edf3" font-weight="600">binary64</text>
+<text x="128.0" y="268.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#9198a1" text-anchor="end">1 tile, resident</text>
+<text x="398.0" y="268.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#54aeff" font-weight="600">x</text>
+<polygon points="355.8,258.8 361.0,264.0 355.8,269.2 350.6,264.0" fill="#db6d28"/>
+<text x="414.0" y="268.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#3fb950" font-weight="600">x</text>
+<text x="128.0" y="285.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#9198a1" text-anchor="end">4 tiles, resident</text>
+<circle cx="311.3" cy="281.0" r="4.2" fill="#54aeff"/>
+<polygon points="278.4,275.8 283.6,281.0 278.4,286.2 273.2,281.0" fill="#db6d28"/>
+<rect x="306.1" y="277.2" width="7.6" height="7.6" fill="#3fb950"/>
+<text x="128.0" y="302.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#9198a1" text-anchor="end">1 tile, over PCIe</text>
+<text x="398.0" y="302.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#54aeff" font-weight="600">x</text>
+<text x="406.0" y="302.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#db6d28" font-weight="600">x</text>
+<text x="414.0" y="302.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#3fb950" font-weight="600">x</text>
+<text x="128.0" y="319.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#9198a1" text-anchor="end">4 tiles, over PCIe</text>
+<text x="398.0" y="319.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#54aeff" font-weight="600">x</text>
+<text x="406.0" y="319.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#db6d28" font-weight="600">x</text>
+<text x="414.0" y="319.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#3fb950" font-weight="600">x</text>
+<text x="24.0" y="341.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" fill="#e6edf3" font-weight="600">binary128</text>
+<text x="128.0" y="358.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#9198a1" text-anchor="end">1 tile, resident</text>
+<circle cx="209.9" cy="354.0" r="4.2" fill="#54aeff"/>
+<polygon points="185.3,348.8 190.5,354.0 185.3,359.2 180.1,354.0" fill="#db6d28"/>
+<rect x="203.5" y="350.2" width="7.6" height="7.6" fill="#3fb950"/>
+<text x="128.0" y="375.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#9198a1" text-anchor="end">4 tiles, resident</text>
+<circle cx="216.1" cy="371.0" r="4.2" fill="#54aeff"/>
+<polygon points="190.0,365.8 195.2,371.0 190.0,376.2 184.8,371.0" fill="#db6d28"/>
+<rect x="209.0" y="367.2" width="7.6" height="7.6" fill="#3fb950"/>
+<text x="128.0" y="392.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#9198a1" text-anchor="end">1 tile, over PCIe</text>
+<text x="398.0" y="392.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#54aeff" font-weight="600">x</text>
+<polygon points="211.2,382.8 216.4,388.0 211.2,393.2 206.0,388.0" fill="#db6d28"/>
+<rect x="305.5" y="384.2" width="7.6" height="7.6" fill="#3fb950"/>
+<text x="128.0" y="409.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#9198a1" text-anchor="end">4 tiles, over PCIe</text>
+<circle cx="366.1" cy="405.0" r="4.2" fill="#54aeff"/>
+<polygon points="241.0,399.8 246.2,405.0 241.0,410.2 235.8,405.0" fill="#db6d28"/>
+<rect x="349.4" y="401.2" width="7.6" height="7.6" fill="#3fb950"/>
+<text x="24.0" y="431.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" fill="#e6edf3" font-weight="600">binary256</text>
+<text x="128.0" y="448.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#9198a1" text-anchor="end">1 tile, resident</text>
+<circle cx="188.8" cy="444.0" r="4.2" fill="#54aeff"/>
+<polygon points="175.0,438.8 180.2,444.0 175.0,449.2 169.8,444.0" fill="#db6d28"/>
+<rect x="198.0" y="440.2" width="7.6" height="7.6" fill="#3fb950"/>
+<text x="128.0" y="465.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#9198a1" text-anchor="end">4 tiles, resident</text>
+<circle cx="201.1" cy="461.0" r="4.2" fill="#54aeff"/>
+<polygon points="185.7,455.8 190.9,461.0 185.7,466.2 180.5,461.0" fill="#db6d28"/>
+<rect x="205.0" y="457.2" width="7.6" height="7.6" fill="#3fb950"/>
+<text x="128.0" y="482.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#9198a1" text-anchor="end">1 tile, over PCIe</text>
+<circle cx="294.4" cy="478.0" r="4.2" fill="#54aeff"/>
+<polygon points="233.1,472.8 238.3,478.0 233.1,483.2 227.9,478.0" fill="#db6d28"/>
+<text x="414.0" y="482.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#3fb950" font-weight="600">x</text>
+<text x="128.0" y="499.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#9198a1" text-anchor="end">4 tiles, over PCIe</text>
+<circle cx="298.6" cy="495.0" r="4.2" fill="#54aeff"/>
+<polygon points="236.1,489.8 241.3,495.0 236.1,500.2 230.9,495.0" fill="#db6d28"/>
+<rect x="317.4" y="491.2" width="7.6" height="7.6" fill="#3fb950"/>
+<text x="265.0" y="548.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#9198a1" text-anchor="middle">elements per call</text>
+<text x="466.0" y="114.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12" fill="#e6edf3" font-weight="600">an M2 Pro laptop</text>
+<line x1="578.0" y1="144.0" x2="578.0" y2="510.0" stroke="#30363d" stroke-width="1"/>
+<text x="578.0" y="523.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#9198a1" text-anchor="middle">100</text>
+<line x1="629.6" y1="144.0" x2="629.6" y2="510.0" stroke="#30363d" stroke-width="1"/>
+<text x="629.6" y="523.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#9198a1" text-anchor="middle">1k</text>
+<line x1="681.2" y1="144.0" x2="681.2" y2="510.0" stroke="#30363d" stroke-width="1"/>
+<text x="681.2" y="523.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#9198a1" text-anchor="middle">10k</text>
+<line x1="732.8" y1="144.0" x2="732.8" y2="510.0" stroke="#30363d" stroke-width="1"/>
+<text x="732.8" y="523.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#9198a1" text-anchor="middle">100k</text>
+<line x1="784.4" y1="144.0" x2="784.4" y2="510.0" stroke="#30363d" stroke-width="1"/>
+<text x="784.4" y="523.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#9198a1" text-anchor="middle">1M</text>
+<line x1="836.0" y1="144.0" x2="836.0" y2="510.0" stroke="#30363d" stroke-width="1"/>
+<text x="836.0" y="523.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#9198a1" text-anchor="middle">10M</text>
+<text x="466.0" y="161.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" fill="#e6edf3" font-weight="600">binary32</text>
+<text x="570.0" y="178.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#9198a1" text-anchor="end">1 tile, resident</text>
+<text x="840.0" y="178.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#54aeff" font-weight="600">x</text>
+<text x="848.0" y="178.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#db6d28" font-weight="600">x</text>
+<text x="856.0" y="178.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#3fb950" font-weight="600">x</text>
+<text x="570.0" y="195.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#9198a1" text-anchor="end">4 tiles, resident</text>
+<text x="840.0" y="195.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#54aeff" font-weight="600">x</text>
+<text x="848.0" y="195.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#db6d28" font-weight="600">x</text>
+<text x="856.0" y="195.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#3fb950" font-weight="600">x</text>
+<text x="570.0" y="212.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#9198a1" text-anchor="end">1 tile, over PCIe</text>
+<text x="840.0" y="212.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#54aeff" font-weight="600">x</text>
+<text x="848.0" y="212.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#db6d28" font-weight="600">x</text>
+<text x="856.0" y="212.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#3fb950" font-weight="600">x</text>
+<text x="570.0" y="229.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#9198a1" text-anchor="end">4 tiles, over PCIe</text>
+<text x="840.0" y="229.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#54aeff" font-weight="600">x</text>
+<text x="848.0" y="229.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#db6d28" font-weight="600">x</text>
+<text x="856.0" y="229.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#3fb950" font-weight="600">x</text>
+<text x="466.0" y="251.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" fill="#e6edf3" font-weight="600">binary64</text>
+<text x="570.0" y="268.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#9198a1" text-anchor="end">1 tile, resident</text>
+<text x="840.0" y="268.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#54aeff" font-weight="600">x</text>
+<text x="848.0" y="268.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#db6d28" font-weight="600">x</text>
+<text x="856.0" y="268.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#3fb950" font-weight="600">x</text>
+<text x="570.0" y="285.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#9198a1" text-anchor="end">4 tiles, resident</text>
+<text x="840.0" y="285.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#54aeff" font-weight="600">x</text>
+<text x="848.0" y="285.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#db6d28" font-weight="600">x</text>
+<text x="856.0" y="285.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#3fb950" font-weight="600">x</text>
+<text x="570.0" y="302.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#9198a1" text-anchor="end">1 tile, over PCIe</text>
+<text x="840.0" y="302.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#54aeff" font-weight="600">x</text>
+<text x="848.0" y="302.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#db6d28" font-weight="600">x</text>
+<text x="856.0" y="302.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#3fb950" font-weight="600">x</text>
+<text x="570.0" y="319.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#9198a1" text-anchor="end">4 tiles, over PCIe</text>
+<text x="840.0" y="319.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#54aeff" font-weight="600">x</text>
+<text x="848.0" y="319.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#db6d28" font-weight="600">x</text>
+<text x="856.0" y="319.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#3fb950" font-weight="600">x</text>
+<text x="466.0" y="341.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" fill="#e6edf3" font-weight="600">binary128</text>
+<text x="570.0" y="358.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#9198a1" text-anchor="end">1 tile, resident</text>
+<circle cx="658.7" cy="354.0" r="4.2" fill="#54aeff"/>
+<polygon points="633.0,348.8 638.2,354.0 633.0,359.2 627.8,354.0" fill="#db6d28"/>
+<rect x="654.2" y="350.2" width="7.6" height="7.6" fill="#3fb950"/>
+<text x="570.0" y="375.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#9198a1" text-anchor="end">4 tiles, resident</text>
+<circle cx="669.8" cy="371.0" r="4.2" fill="#54aeff"/>
+<polygon points="637.8,365.8 643.0,371.0 637.8,376.2 632.6,371.0" fill="#db6d28"/>
+<rect x="662.5" y="367.2" width="7.6" height="7.6" fill="#3fb950"/>
+<text x="570.0" y="392.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#9198a1" text-anchor="end">1 tile, over PCIe</text>
+<text x="840.0" y="392.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#54aeff" font-weight="600">x</text>
+<polygon points="660.3,382.8 665.5,388.0 660.3,393.2 655.1,388.0" fill="#db6d28"/>
+<text x="856.0" y="392.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#3fb950" font-weight="600">x</text>
+<text x="570.0" y="409.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#9198a1" text-anchor="end">4 tiles, over PCIe</text>
+<text x="840.0" y="409.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#54aeff" font-weight="600">x</text>
+<polygon points="690.9,399.8 696.1,405.0 690.9,410.2 685.7,405.0" fill="#db6d28"/>
+<rect x="811.1" y="401.2" width="7.6" height="7.6" fill="#3fb950"/>
+<text x="466.0" y="431.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" fill="#e6edf3" font-weight="600">binary256</text>
+<text x="570.0" y="448.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#9198a1" text-anchor="end">1 tile, resident</text>
+<circle cx="636.0" cy="444.0" r="4.2" fill="#54aeff"/>
+<polygon points="625.1,438.8 630.3,444.0 625.1,449.2 619.9,444.0" fill="#db6d28"/>
+<rect x="651.9" y="440.2" width="7.6" height="7.6" fill="#3fb950"/>
+<text x="570.0" y="465.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#9198a1" text-anchor="end">4 tiles, resident</text>
+<circle cx="646.7" cy="461.0" r="4.2" fill="#54aeff"/>
+<polygon points="636.7,455.8 641.9,461.0 636.7,466.2 631.5,461.0" fill="#db6d28"/>
+<rect x="656.1" y="457.2" width="7.6" height="7.6" fill="#3fb950"/>
+<text x="570.0" y="482.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#9198a1" text-anchor="end">1 tile, over PCIe</text>
+<text x="840.0" y="482.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#54aeff" font-weight="600">x</text>
+<polygon points="702.7,472.8 707.9,478.0 702.7,483.2 697.5,478.0" fill="#db6d28"/>
+<text x="856.0" y="482.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#3fb950" font-weight="600">x</text>
+<text x="570.0" y="499.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#9198a1" text-anchor="end">4 tiles, over PCIe</text>
+<text x="840.0" y="499.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#54aeff" font-weight="600">x</text>
+<polygon points="687.7,489.8 692.9,495.0 687.7,500.2 682.5,495.0" fill="#db6d28"/>
+<text x="856.0" y="499.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#3fb950" font-weight="600">x</text>
+<text x="707.0" y="548.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#9198a1" text-anchor="middle">elements per call</text>
+<rect x="24.0" y="563.5" width="14.0" height="9.5" fill="#54aeff" rx="2"/>
+<text x="44.0" y="572.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#e6edf3">multiply (circle)</text>
+<rect x="165.5" y="563.5" width="14.0" height="9.5" fill="#db6d28" rx="2"/>
+<text x="185.5" y="572.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#e6edf3">fused multiply-add (diamond)</text>
+<rect x="374.0" y="563.5" width="14.0" height="9.5" fill="#3fb950" rx="2"/>
+<text x="394.0" y="572.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#e6edf3">add (square)</text>
+<text x="24.0" y="604.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#9198a1">source: docs/bench/peers-arm64.csv (4224b471); docs/bench/peers-x86_64.csv (0a725a61); docs/bench/sweep-x86_64.csv (b52a1574)</text>
+</svg>

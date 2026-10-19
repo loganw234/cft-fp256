@@ -1,0 +1,1236 @@
+{
+ "figure": "stress-timeline",
+ "title": "The card's long run: what ran, and what passed",
+ "group": "reliability",
+ "alt": "A timeline of the 67 cycles of the card's stress run on three images, and a table of the legs run on each: 4,086 legs, 4,032 passed, 54 skipped by design, none failed.",
+ "files": ["docs/img/figures/stress-timeline-light.svg", "docs/img/figures/stress-timeline-dark.svg"],
+ "maker": "python/project_figures.py: build_stress_timeline, draw_stress_timeline",
+ "commit": "0b77387ea1266f4d4a5e30c8798f57e8b6dc6ef8",
+ "commit_means": "the commit the extracts below were read at; a file read from the tree is identified by its SHA-256 instead",
+ "sources": [],
+ "extracts": [
+  {
+   "name": "stress",
+   "path": "docs/figures/stress.json",
+   "sha256": "d8ad64ae79e96fd192b2d01296dc3e490acd2db48aaabee429522603991b24b1",
+   "read_at": "the raw file's own digest (below); the run ended 2026-10-19 08:01:13 on the box's clock",
+   "label": "run ended 2026-10-19 08:01:13",
+   "what": "the card's long stress run (card-stress-1016), reduced from its metrics.jsonl: the legs, the cycles, the telemetry, and the sweep with its tile items and host items apart",
+   "body_sha256": "d135fd907409169c225165c42c280b9e7a7e4fbda5b2bc818697c74bf79cee33",
+   "remake": "python python/figure_extracts.py stress PATH/metrics.jsonl --report PATH/report.txt",
+   "sources": [
+    {
+     "kind": "raw",
+     "name": "metrics.jsonl",
+     "sha256": "e7989f88efded691ea7461e921840d8de5d449e069980f6ba92e6a8f87e007cc",
+     "bytes": 7982931,
+     "records": 5108
+    },
+    {
+     "kind": "raw",
+     "name": "report.txt",
+     "sha256": "4a426b57d752a5b135714f6f4ef45f0844e58be2485e2c92ff7c923a9ffa1e04",
+     "bytes": 27974
+    }
+   ]
+  }
+ ],
+ "checks": [
+  {
+   "id": "legs-named",
+   "claim": "each of the run's twelve battery legs is a row of docs/CARDDAY.md's table of legs",
+   "document": "docs/CARDDAY.md",
+   "drawn": "12 of 12",
+   "stated": "all found",
+   "verdict": "agrees"
+  },
+  {
+   "id": "weights",
+   "claim": "the images' visit weights the run was started with",
+   "document": "docs/CARDDAY.md",
+   "drawn": "quad 4, single 1, deep 1",
+   "stated": "quad 4, single 1, deep 1",
+   "verdict": "agrees"
+  },
+  {
+   "id": "sweep-slices",
+   "claim": "the sweep slices by image add up to the sweep legs",
+   "document": "docs/figures/stress.json",
+   "drawn": "3287",
+   "stated": "3287",
+   "verdict": "agrees"
+  },
+  {
+   "id": "cut-visit",
+   "claim": "the last visit was cut by the deadline: the quad's legs it ran count one more than the ones it did not (a leg skipped by design counts as reached)",
+   "document": "docs/figures/stress.json",
+   "drawn": "7 legs of 12 ran",
+   "stated": "per-leg counts agree",
+   "verdict": "agrees"
+  }
+ ],
+ "data": {
+  "run": {
+   "id": "card-stress-1016",
+   "commit": "f0693b2301ede438f4235ccdc61d7ed2370a08a5",
+   "tree_dirty": false,
+   "started": "2026-10-16 18:58:23",
+   "ended": "2026-10-19 08:01:13",
+   "end_reason": "deadline",
+   "exit": 0,
+   "seconds": 219770,
+   "clock": "the box's local time, as the records give it",
+   "deadline": "2026-10-19 08:00:00",
+   "weights": {
+    "quad": 4,
+    "single": 1,
+    "deep": 1
+   },
+   "sweep_minutes": {
+    "quad": 45,
+    "single": 20,
+    "deep": 20
+   },
+   "telemetry_seconds": 300,
+   "visits": {
+    "quad": 45,
+    "single": 11,
+    "deep": 11
+   }
+  },
+  "legs": {
+   "total": 4086,
+   "battery": 799,
+   "sweep": 3287,
+   "by_status": {
+    "pass": 4032,
+    "fail": 0,
+    "timeout": 0,
+    "no_device": 0,
+    "parse_error": 0,
+    "skipped": 54,
+    "error": 0
+   }
+  },
+  "cycles": [
+   {
+    "n": 1,
+    "image": "quad",
+    "start_s": 1,
+    "battery_end_s": 3587,
+    "end_s": 6225,
+    "legs": 12,
+    "failed": 0
+   },
+   {
+    "n": 2,
+    "image": "quad",
+    "start_s": 6225,
+    "battery_end_s": 7276,
+    "end_s": 9962,
+    "legs": 11,
+    "failed": 0
+   },
+   {
+    "n": 3,
+    "image": "single",
+    "start_s": 9963,
+    "battery_end_s": 11326,
+    "end_s": 12497,
+    "legs": 11,
+    "failed": 0
+   },
+   {
+    "n": 4,
+    "image": "quad",
+    "start_s": 12497,
+    "battery_end_s": 13572,
+    "end_s": 16219,
+    "legs": 11,
+    "failed": 0
+   },
+   {
+    "n": 5,
+    "image": "deep",
+    "start_s": 16219,
+    "battery_end_s": 17612,
+    "end_s": 18714,
+    "legs": 12,
+    "failed": 0
+   },
+   {
+    "n": 6,
+    "image": "quad",
+    "start_s": 18715,
+    "battery_end_s": 20400,
+    "end_s": 23090,
+    "legs": 12,
+    "failed": 0
+   },
+   {
+    "n": 7,
+    "image": "quad",
+    "start_s": 23090,
+    "battery_end_s": 24105,
+    "end_s": 26793,
+    "legs": 11,
+    "failed": 0
+   },
+   {
+    "n": 8,
+    "image": "quad",
+    "start_s": 26793,
+    "battery_end_s": 27807,
+    "end_s": 30410,
+    "legs": 11,
+    "failed": 0
+   },
+   {
+    "n": 9,
+    "image": "single",
+    "start_s": 30410,
+    "battery_end_s": 31070,
+    "end_s": 32156,
+    "legs": 10,
+    "failed": 0
+   },
+   {
+    "n": 10,
+    "image": "quad",
+    "start_s": 32156,
+    "battery_end_s": 33835,
+    "end_s": 36525,
+    "legs": 12,
+    "failed": 0
+   },
+   {
+    "n": 11,
+    "image": "deep",
+    "start_s": 36526,
+    "battery_end_s": 37265,
+    "end_s": 38442,
+    "legs": 11,
+    "failed": 0
+   },
+   {
+    "n": 12,
+    "image": "quad",
+    "start_s": 38443,
+    "battery_end_s": 39472,
+    "end_s": 42158,
+    "legs": 11,
+    "failed": 0
+   },
+   {
+    "n": 13,
+    "image": "quad",
+    "start_s": 42158,
+    "battery_end_s": 43178,
+    "end_s": 45782,
+    "legs": 11,
+    "failed": 0
+   },
+   {
+    "n": 14,
+    "image": "quad",
+    "start_s": 45782,
+    "battery_end_s": 47460,
+    "end_s": 50083,
+    "legs": 12,
+    "failed": 0
+   },
+   {
+    "n": 15,
+    "image": "single",
+    "start_s": 50083,
+    "battery_end_s": 50746,
+    "end_s": 51887,
+    "legs": 10,
+    "failed": 0
+   },
+   {
+    "n": 16,
+    "image": "quad",
+    "start_s": 51888,
+    "battery_end_s": 52916,
+    "end_s": 55601,
+    "legs": 11,
+    "failed": 0
+   },
+   {
+    "n": 17,
+    "image": "deep",
+    "start_s": 55602,
+    "battery_end_s": 56344,
+    "end_s": 57525,
+    "legs": 11,
+    "failed": 0
+   },
+   {
+    "n": 18,
+    "image": "quad",
+    "start_s": 57526,
+    "battery_end_s": 58555,
+    "end_s": 61230,
+    "legs": 11,
+    "failed": 0
+   },
+   {
+    "n": 19,
+    "image": "quad",
+    "start_s": 61231,
+    "battery_end_s": 62909,
+    "end_s": 65554,
+    "legs": 12,
+    "failed": 0
+   },
+   {
+    "n": 20,
+    "image": "quad",
+    "start_s": 65554,
+    "battery_end_s": 66572,
+    "end_s": 69229,
+    "legs": 11,
+    "failed": 0
+   },
+   {
+    "n": 21,
+    "image": "single",
+    "start_s": 69229,
+    "battery_end_s": 70543,
+    "end_s": 71729,
+    "legs": 11,
+    "failed": 0
+   },
+   {
+    "n": 22,
+    "image": "quad",
+    "start_s": 71729,
+    "battery_end_s": 72756,
+    "end_s": 75446,
+    "legs": 11,
+    "failed": 0
+   },
+   {
+    "n": 23,
+    "image": "deep",
+    "start_s": 75446,
+    "battery_end_s": 76843,
+    "end_s": 77929,
+    "legs": 12,
+    "failed": 0
+   },
+   {
+    "n": 24,
+    "image": "quad",
+    "start_s": 77930,
+    "battery_end_s": 79614,
+    "end_s": 82208,
+    "legs": 12,
+    "failed": 0
+   },
+   {
+    "n": 25,
+    "image": "quad",
+    "start_s": 82208,
+    "battery_end_s": 83223,
+    "end_s": 85911,
+    "legs": 11,
+    "failed": 0
+   },
+   {
+    "n": 26,
+    "image": "quad",
+    "start_s": 85912,
+    "battery_end_s": 86927,
+    "end_s": 89593,
+    "legs": 11,
+    "failed": 0
+   },
+   {
+    "n": 27,
+    "image": "single",
+    "start_s": 89593,
+    "battery_end_s": 90256,
+    "end_s": 91346,
+    "legs": 10,
+    "failed": 0
+   },
+   {
+    "n": 28,
+    "image": "quad",
+    "start_s": 91346,
+    "battery_end_s": 93029,
+    "end_s": 95718,
+    "legs": 12,
+    "failed": 0
+   },
+   {
+    "n": 29,
+    "image": "deep",
+    "start_s": 95719,
+    "battery_end_s": 96464,
+    "end_s": 97614,
+    "legs": 11,
+    "failed": 0
+   },
+   {
+    "n": 30,
+    "image": "quad",
+    "start_s": 97614,
+    "battery_end_s": 98642,
+    "end_s": 101328,
+    "legs": 11,
+    "failed": 0
+   },
+   {
+    "n": 31,
+    "image": "quad",
+    "start_s": 101328,
+    "battery_end_s": 102344,
+    "end_s": 105006,
+    "legs": 11,
+    "failed": 0
+   },
+   {
+    "n": 32,
+    "image": "quad",
+    "start_s": 105007,
+    "battery_end_s": 106686,
+    "end_s": 109293,
+    "legs": 12,
+    "failed": 0
+   },
+   {
+    "n": 33,
+    "image": "single",
+    "start_s": 109293,
+    "battery_end_s": 109963,
+    "end_s": 111135,
+    "legs": 10,
+    "failed": 0
+   },
+   {
+    "n": 34,
+    "image": "quad",
+    "start_s": 111135,
+    "battery_end_s": 112161,
+    "end_s": 114840,
+    "legs": 11,
+    "failed": 0
+   },
+   {
+    "n": 35,
+    "image": "deep",
+    "start_s": 114841,
+    "battery_end_s": 115582,
+    "end_s": 116700,
+    "legs": 11,
+    "failed": 0
+   },
+   {
+    "n": 36,
+    "image": "quad",
+    "start_s": 116701,
+    "battery_end_s": 117728,
+    "end_s": 120382,
+    "legs": 11,
+    "failed": 0
+   },
+   {
+    "n": 37,
+    "image": "quad",
+    "start_s": 120382,
+    "battery_end_s": 122063,
+    "end_s": 124659,
+    "legs": 12,
+    "failed": 0
+   },
+   {
+    "n": 38,
+    "image": "quad",
+    "start_s": 124660,
+    "battery_end_s": 125675,
+    "end_s": 128360,
+    "legs": 11,
+    "failed": 0
+   },
+   {
+    "n": 39,
+    "image": "single",
+    "start_s": 128361,
+    "battery_end_s": 129680,
+    "end_s": 130866,
+    "legs": 11,
+    "failed": 0
+   },
+   {
+    "n": 40,
+    "image": "quad",
+    "start_s": 130867,
+    "battery_end_s": 131889,
+    "end_s": 134523,
+    "legs": 11,
+    "failed": 0
+   },
+   {
+    "n": 41,
+    "image": "deep",
+    "start_s": 134524,
+    "battery_end_s": 135920,
+    "end_s": 137013,
+    "legs": 12,
+    "failed": 0
+   },
+   {
+    "n": 42,
+    "image": "quad",
+    "start_s": 137014,
+    "battery_end_s": 138696,
+    "end_s": 141277,
+    "legs": 12,
+    "failed": 0
+   },
+   {
+    "n": 43,
+    "image": "quad",
+    "start_s": 141278,
+    "battery_end_s": 142296,
+    "end_s": 144986,
+    "legs": 11,
+    "failed": 0
+   },
+   {
+    "n": 44,
+    "image": "quad",
+    "start_s": 144987,
+    "battery_end_s": 146006,
+    "end_s": 148668,
+    "legs": 11,
+    "failed": 0
+   },
+   {
+    "n": 45,
+    "image": "single",
+    "start_s": 148669,
+    "battery_end_s": 149327,
+    "end_s": 150422,
+    "legs": 10,
+    "failed": 0
+   },
+   {
+    "n": 46,
+    "image": "quad",
+    "start_s": 150422,
+    "battery_end_s": 152107,
+    "end_s": 154787,
+    "legs": 12,
+    "failed": 0
+   },
+   {
+    "n": 47,
+    "image": "deep",
+    "start_s": 154787,
+    "battery_end_s": 155529,
+    "end_s": 156648,
+    "legs": 11,
+    "failed": 0
+   },
+   {
+    "n": 48,
+    "image": "quad",
+    "start_s": 156649,
+    "battery_end_s": 157672,
+    "end_s": 160362,
+    "legs": 11,
+    "failed": 0
+   },
+   {
+    "n": 49,
+    "image": "quad",
+    "start_s": 160362,
+    "battery_end_s": 161382,
+    "end_s": 164051,
+    "legs": 11,
+    "failed": 0
+   },
+   {
+    "n": 50,
+    "image": "quad",
+    "start_s": 164051,
+    "battery_end_s": 165723,
+    "end_s": 168329,
+    "legs": 12,
+    "failed": 0
+   },
+   {
+    "n": 51,
+    "image": "single",
+    "start_s": 168330,
+    "battery_end_s": 168990,
+    "end_s": 170071,
+    "legs": 10,
+    "failed": 0
+   },
+   {
+    "n": 52,
+    "image": "quad",
+    "start_s": 170072,
+    "battery_end_s": 171096,
+    "end_s": 173777,
+    "legs": 11,
+    "failed": 0
+   },
+   {
+    "n": 53,
+    "image": "deep",
+    "start_s": 173778,
+    "battery_end_s": 174524,
+    "end_s": 175709,
+    "legs": 11,
+    "failed": 0
+   },
+   {
+    "n": 54,
+    "image": "quad",
+    "start_s": 175710,
+    "battery_end_s": 176740,
+    "end_s": 179374,
+    "legs": 11,
+    "failed": 0
+   },
+   {
+    "n": 55,
+    "image": "quad",
+    "start_s": 179375,
+    "battery_end_s": 181045,
+    "end_s": 183669,
+    "legs": 12,
+    "failed": 0
+   },
+   {
+    "n": 56,
+    "image": "quad",
+    "start_s": 183669,
+    "battery_end_s": 184687,
+    "end_s": 187372,
+    "legs": 11,
+    "failed": 0
+   },
+   {
+    "n": 57,
+    "image": "single",
+    "start_s": 187372,
+    "battery_end_s": 188688,
+    "end_s": 189807,
+    "legs": 11,
+    "failed": 0
+   },
+   {
+    "n": 58,
+    "image": "quad",
+    "start_s": 189808,
+    "battery_end_s": 190834,
+    "end_s": 193505,
+    "legs": 11,
+    "failed": 0
+   },
+   {
+    "n": 59,
+    "image": "deep",
+    "start_s": 193506,
+    "battery_end_s": 194903,
+    "end_s": 196020,
+    "legs": 12,
+    "failed": 0
+   },
+   {
+    "n": 60,
+    "image": "quad",
+    "start_s": 196020,
+    "battery_end_s": 197715,
+    "end_s": 200405,
+    "legs": 12,
+    "failed": 0
+   },
+   {
+    "n": 61,
+    "image": "quad",
+    "start_s": 200406,
+    "battery_end_s": 201426,
+    "end_s": 204083,
+    "legs": 11,
+    "failed": 0
+   },
+   {
+    "n": 62,
+    "image": "quad",
+    "start_s": 204083,
+    "battery_end_s": 205096,
+    "end_s": 207735,
+    "legs": 11,
+    "failed": 0
+   },
+   {
+    "n": 63,
+    "image": "single",
+    "start_s": 207735,
+    "battery_end_s": 208400,
+    "end_s": 209568,
+    "legs": 10,
+    "failed": 0
+   },
+   {
+    "n": 64,
+    "image": "quad",
+    "start_s": 209569,
+    "battery_end_s": 211255,
+    "end_s": 213929,
+    "legs": 12,
+    "failed": 0
+   },
+   {
+    "n": 65,
+    "image": "deep",
+    "start_s": 213929,
+    "battery_end_s": 214670,
+    "end_s": 215856,
+    "legs": 11,
+    "failed": 0
+   },
+   {
+    "n": 66,
+    "image": "quad",
+    "start_s": 215856,
+    "battery_end_s": 216889,
+    "end_s": 219552,
+    "legs": 11,
+    "failed": 0
+   },
+   {
+    "n": 67,
+    "image": "quad",
+    "start_s": 219553,
+    "battery_end_s": 219770,
+    "end_s": 219770,
+    "legs": 7,
+    "failed": 0
+   }
+  ],
+  "cycles_n": 67,
+  "matrix": [
+   {
+    "image": "quad",
+    "leg": "api-test",
+    "runs": 45,
+    "pass": 45,
+    "skipped": 0,
+    "other": 0,
+    "seconds_median": 0.115,
+    "rate_median": null,
+    "rate_unit": null,
+    "checks": null,
+    "skip_reason": null
+   },
+   {
+    "image": "quad",
+    "leg": "dt-i",
+    "runs": 45,
+    "pass": 45,
+    "skipped": 0,
+    "other": 0,
+    "seconds_median": 10.116,
+    "rate_median": 2.471,
+    "rate_unit": "checks/s",
+    "checks": 1125,
+    "skip_reason": null
+   },
+   {
+    "image": "quad",
+    "leg": "dt-q8",
+    "runs": 45,
+    "pass": 45,
+    "skipped": 0,
+    "other": 0,
+    "seconds_median": 3.519,
+    "rate_median": 776.844,
+    "rate_unit": "checks/s",
+    "checks": 123030,
+    "skip_reason": null
+   },
+   {
+    "image": "quad",
+    "leg": "dt-full",
+    "runs": 45,
+    "pass": 45,
+    "skipped": 0,
+    "other": 0,
+    "seconds_median": 11.871,
+    "rate_median": 873.881,
+    "rate_unit": "checks/s",
+    "checks": 466830,
+    "skip_reason": null
+   },
+   {
+    "image": "quad",
+    "leg": "dt-r",
+    "runs": 45,
+    "pass": 45,
+    "skipped": 0,
+    "other": 0,
+    "seconds_median": 2.065,
+    "rate_median": 1170.532,
+    "rate_unit": "checks/s",
+    "checks": 108765,
+    "skip_reason": null
+   },
+   {
+    "image": "quad",
+    "leg": "dt-b",
+    "runs": 45,
+    "pass": 45,
+    "skipped": 0,
+    "other": 0,
+    "seconds_median": 6.215,
+    "rate_median": 791.255,
+    "rate_unit": "checks/s",
+    "checks": 221310,
+    "skip_reason": null
+   },
+   {
+    "image": "quad",
+    "leg": "card-segrun",
+    "runs": 45,
+    "pass": 45,
+    "skipped": 0,
+    "other": 0,
+    "seconds_median": 189.638,
+    "rate_median": 0.032,
+    "rate_unit": "checks/s",
+    "checks": 270,
+    "skip_reason": null
+   },
+   {
+    "image": "quad",
+    "leg": "seq-check",
+    "runs": 44,
+    "pass": 44,
+    "skipped": 0,
+    "other": 0,
+    "seconds_median": 45.221,
+    "rate_median": null,
+    "rate_unit": null,
+    "checks": null,
+    "skip_reason": null
+   },
+   {
+    "image": "quad",
+    "leg": "acceptance",
+    "runs": 44,
+    "pass": 44,
+    "skipped": 0,
+    "other": 0,
+    "seconds_median": 402.857,
+    "rate_median": 0.432,
+    "rate_unit": "checks/s",
+    "checks": 7656,
+    "skip_reason": null
+   },
+   {
+    "image": "quad",
+    "leg": "acceptance-rev8",
+    "runs": 44,
+    "pass": 44,
+    "skipped": 0,
+    "other": 0,
+    "seconds_median": 349.203,
+    "rate_median": 0.329,
+    "rate_unit": "checks/s",
+    "checks": 5060,
+    "skip_reason": null
+   },
+   {
+    "image": "quad",
+    "leg": "resident",
+    "runs": 44,
+    "pass": 44,
+    "skipped": 0,
+    "other": 0,
+    "seconds_median": 3.82,
+    "rate_median": null,
+    "rate_unit": null,
+    "checks": null,
+    "skip_reason": null
+   },
+   {
+    "image": "quad",
+    "leg": "selftest",
+    "runs": 44,
+    "pass": 15,
+    "skipped": 29,
+    "other": 0,
+    "seconds_median": 658.379,
+    "rate_median": 1628.873,
+    "rate_unit": "cases/s",
+    "checks": null,
+    "skip_reason": "every 3 visits of an image; this is visit 11"
+   },
+   {
+    "image": "single",
+    "leg": "api-test",
+    "runs": 11,
+    "pass": 11,
+    "skipped": 0,
+    "other": 0,
+    "seconds_median": 0.115,
+    "rate_median": null,
+    "rate_unit": null,
+    "checks": null,
+    "skip_reason": null
+   },
+   {
+    "image": "single",
+    "leg": "dt-i",
+    "runs": 11,
+    "pass": 11,
+    "skipped": 0,
+    "other": 0,
+    "seconds_median": 5.97,
+    "rate_median": 3.852,
+    "rate_unit": "checks/s",
+    "checks": 253,
+    "skip_reason": null
+   },
+   {
+    "image": "single",
+    "leg": "dt-q8",
+    "runs": 11,
+    "pass": 11,
+    "skipped": 0,
+    "other": 0,
+    "seconds_median": 2.265,
+    "rate_median": 1206.422,
+    "rate_unit": "checks/s",
+    "checks": 30063,
+    "skip_reason": null
+   },
+   {
+    "image": "single",
+    "leg": "dt-full",
+    "runs": 11,
+    "pass": 11,
+    "skipped": 0,
+    "other": 0,
+    "seconds_median": 12.167,
+    "rate_median": 852.535,
+    "rate_unit": "checks/s",
+    "checks": 114103,
+    "skip_reason": null
+   },
+   {
+    "image": "single",
+    "leg": "dt-r",
+    "runs": 11,
+    "pass": 11,
+    "skipped": 0,
+    "other": 0,
+    "seconds_median": 1.418,
+    "rate_median": 1703.718,
+    "rate_unit": "checks/s",
+    "checks": 26576,
+    "skip_reason": null
+   },
+   {
+    "image": "single",
+    "leg": "dt-b",
+    "runs": 11,
+    "pass": 11,
+    "skipped": 0,
+    "other": 0,
+    "seconds_median": 5.168,
+    "rate_median": 951.439,
+    "rate_unit": "checks/s",
+    "checks": 54087,
+    "skip_reason": null
+   },
+   {
+    "image": "single",
+    "leg": "card-segrun",
+    "runs": 11,
+    "pass": 11,
+    "skipped": 0,
+    "other": 0,
+    "seconds_median": 185.036,
+    "rate_median": 0.032,
+    "rate_unit": "checks/s",
+    "checks": 66,
+    "skip_reason": null
+   },
+   {
+    "image": "single",
+    "leg": "seq-check",
+    "runs": 11,
+    "pass": 11,
+    "skipped": 0,
+    "other": 0,
+    "seconds_median": 44.621,
+    "rate_median": null,
+    "rate_unit": null,
+    "checks": null,
+    "skip_reason": null
+   },
+   {
+    "image": "single",
+    "leg": "acceptance",
+    "runs": 11,
+    "pass": 11,
+    "skipped": 0,
+    "other": 0,
+    "seconds_median": 400.456,
+    "rate_median": 0.435,
+    "rate_unit": "checks/s",
+    "checks": 1914,
+    "skip_reason": null
+   },
+   {
+    "image": "single",
+    "leg": "acceptance-rev8",
+    "runs": 11,
+    "pass": 0,
+    "skipped": 11,
+    "other": 0,
+    "seconds_median": null,
+    "rate_median": null,
+    "rate_unit": null,
+    "checks": null,
+    "skip_reason": "the revision-8 set has no entry for u50-rev8: its rule puts a workload on the single only where R21 alone keeps it off the quad, which none does (programs/acceptance.py, REV8)"
+   },
+   {
+    "image": "single",
+    "leg": "resident",
+    "runs": 11,
+    "pass": 11,
+    "skipped": 0,
+    "other": 0,
+    "seconds_median": 3.218,
+    "rate_median": null,
+    "rate_unit": null,
+    "checks": null,
+    "skip_reason": null
+   },
+   {
+    "image": "single",
+    "leg": "selftest",
+    "runs": 11,
+    "pass": 4,
+    "skipped": 7,
+    "other": 0,
+    "seconds_median": 656.982,
+    "rate_median": 1632.338,
+    "rate_unit": "cases/s",
+    "checks": null,
+    "skip_reason": "every 3 visits of an image; this is visit 11"
+   },
+   {
+    "image": "deep",
+    "leg": "api-test",
+    "runs": 11,
+    "pass": 11,
+    "skipped": 0,
+    "other": 0,
+    "seconds_median": 0.115,
+    "rate_median": null,
+    "rate_unit": null,
+    "checks": null,
+    "skip_reason": null
+   },
+   {
+    "image": "deep",
+    "leg": "dt-i",
+    "runs": 11,
+    "pass": 11,
+    "skipped": 0,
+    "other": 0,
+    "seconds_median": 6.466,
+    "rate_median": 3.557,
+    "rate_unit": "checks/s",
+    "checks": 253,
+    "skip_reason": null
+   },
+   {
+    "image": "deep",
+    "leg": "dt-q8",
+    "runs": 11,
+    "pass": 11,
+    "skipped": 0,
+    "other": 0,
+    "seconds_median": 2.516,
+    "rate_median": 1086.168,
+    "rate_unit": "checks/s",
+    "checks": 30063,
+    "skip_reason": null
+   },
+   {
+    "image": "deep",
+    "leg": "dt-full",
+    "runs": 11,
+    "pass": 11,
+    "skipped": 0,
+    "other": 0,
+    "seconds_median": 14.002,
+    "rate_median": 740.805,
+    "rate_unit": "checks/s",
+    "checks": 114103,
+    "skip_reason": null
+   },
+   {
+    "image": "deep",
+    "leg": "dt-r",
+    "runs": 11,
+    "pass": 11,
+    "skipped": 0,
+    "other": 0,
+    "seconds_median": 1.569,
+    "rate_median": 1540.135,
+    "rate_unit": "checks/s",
+    "checks": 26576,
+    "skip_reason": null
+   },
+   {
+    "image": "deep",
+    "leg": "dt-b",
+    "runs": 11,
+    "pass": 11,
+    "skipped": 0,
+    "other": 0,
+    "seconds_median": 5.318,
+    "rate_median": 924.649,
+    "rate_unit": "checks/s",
+    "checks": 54087,
+    "skip_reason": null
+   },
+   {
+    "image": "deep",
+    "leg": "card-segrun",
+    "runs": 11,
+    "pass": 11,
+    "skipped": 0,
+    "other": 0,
+    "seconds_median": 187.087,
+    "rate_median": 0.032,
+    "rate_unit": "checks/s",
+    "checks": 66,
+    "skip_reason": null
+   },
+   {
+    "image": "deep",
+    "leg": "seq-check",
+    "runs": 11,
+    "pass": 11,
+    "skipped": 0,
+    "other": 0,
+    "seconds_median": 46.02,
+    "rate_median": null,
+    "rate_unit": null,
+    "checks": null,
+    "skip_reason": null
+   },
+   {
+    "image": "deep",
+    "leg": "acceptance",
+    "runs": 11,
+    "pass": 11,
+    "skipped": 0,
+    "other": 0,
+    "seconds_median": 402.011,
+    "rate_median": 0.433,
+    "rate_unit": "checks/s",
+    "checks": 1914,
+    "skip_reason": null
+   },
+   {
+    "image": "deep",
+    "leg": "acceptance-rev8",
+    "runs": 11,
+    "pass": 11,
+    "skipped": 0,
+    "other": 0,
+    "seconds_median": 71.425,
+    "rate_median": 0.378,
+    "rate_unit": "checks/s",
+    "checks": 297,
+    "skip_reason": null
+   },
+   {
+    "image": "deep",
+    "leg": "resident",
+    "runs": 11,
+    "pass": 11,
+    "skipped": 0,
+    "other": 0,
+    "seconds_median": 3.168,
+    "rate_median": null,
+    "rate_unit": null,
+    "checks": null,
+    "skip_reason": null
+   },
+   {
+    "image": "deep",
+    "leg": "selftest",
+    "runs": 11,
+    "pass": 4,
+    "skipped": 7,
+    "other": 0,
+    "seconds_median": 654.679,
+    "rate_median": 1638.084,
+    "rate_unit": "cases/s",
+    "checks": null,
+    "skip_reason": "every 3 visits of an image; this is visit 11"
+   }
+  ],
+  "sweep_slices": {
+   "deep": 176,
+   "quad": 2948,
+   "single": 163
+  },
+  "images": {
+   "quad": {
+    "sha256": "4f9921a25af65444abc5c267fff1117a8e14abbc16a75de643e43c9dbf6ef53b",
+    "tiles": 4,
+    "target": "u50-rev8-quad"
+   },
+   "single": {
+    "sha256": "0639248e9c66f779e7c126f4449062af646d3d7e8abd0173926812790bc80450",
+    "tiles": 1,
+    "target": "u50-rev8"
+   },
+   "deep": {
+    "sha256": "bbf08fb3feb60940bcbdfcf0eebef12de8fd55c7d302b2f896534c49447316fa",
+    "tiles": 1,
+    "target": "u50-rev8-deep"
+   }
+  },
+  "visits": {
+   "quad": 45,
+   "single": 11,
+   "deep": 11
+  },
+  "cut": {
+   "cycle": 67,
+   "image": "quad",
+   "visit": 45,
+   "legs_run": 7,
+   "legs_of": 12,
+   "not_run": ["seq-check", "acceptance", "acceptance-rev8", "resident", "selftest"],
+   "split": [
+    {
+     "leg": "selftest",
+     "pass": 15,
+     "skipped": 29
+    }
+   ]
+  },
+  "hours": 61.0472,
+  "host_case_share": 0.694363
+ }
+}

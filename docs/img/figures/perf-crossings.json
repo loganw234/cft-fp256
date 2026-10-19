@@ -1,0 +1,832 @@
+{
+ "figure": "perf-crossings",
+ "title": "How many elements a call needs before the card pays",
+ "group": "performance",
+ "alt": "For each format and way of calling the card, the number of elements a call needs before the tile beats the fastest real software, for multiply, fused multiply-add and add on two machines: from 571 elements to never.",
+ "files": ["docs/img/figures/perf-crossings-light.svg", "docs/img/figures/perf-crossings-dark.svg"],
+ "maker": "python/project_figures.py: build_perf_crossings, draw_perf_crossings",
+ "commit": "0b77387ea1266f4d4a5e30c8798f57e8b6dc6ef8",
+ "commit_means": "the commit the extracts below were read at; a file read from the tree is identified by its SHA-256 instead",
+ "sources": [
+  {
+   "path": "docs/bench/peers-arm64.csv",
+   "sha256": "4224b47161838f4f43af20cc858443d18ff9b7304ab3ce48aaf41032194328ba",
+   "bytes": 51921
+  },
+  {
+   "path": "docs/bench/peers-x86_64.csv",
+   "sha256": "0a725a61399ace706d6ca12f120a7659709b176c49b36b1cca8cba51f6d9363e",
+   "bytes": 55560
+  },
+  {
+   "path": "docs/bench/sweep-x86_64.csv",
+   "sha256": "b52a1574388d84072a6ac48a7ba6f7cc3850c706306ab378ac93985ae8dfa0c7",
+   "bytes": 766712
+  }
+ ],
+ "extracts": [],
+ "checks": [
+  {
+   "id": "fp256-mul-crossing",
+   "claim": "one tile resident passes the best software at about this many elements, binary256",
+   "document": "README.md",
+   "drawn": "1056",
+   "stated": "1,000",
+   "verdict": "agrees",
+   "note": " (held to 10%)"
+  },
+  {
+   "id": "fp128-mul-crossing",
+   "claim": "... and binary128",
+   "document": "README.md",
+   "drawn": "2703",
+   "stated": "2,700",
+   "verdict": "agrees",
+   "note": " (held to 2%)"
+  },
+  {
+   "id": "pcie-over-resident",
+   "claim": "staging operands across PCIe costs roughly this many times resident, at a million elements (median over the four formats)",
+   "document": "README.md",
+   "drawn": "4.71",
+   "stated": "five",
+   "verdict": "agrees",
+   "note": "the README writes the word; five is 5 (held to 10%)"
+  }
+ ],
+ "data": {
+  "cells": [
+   {
+    "arch": "x86-64",
+    "op": "mul",
+    "format": "fp32",
+    "config": "1 tile, resident",
+    "n": null,
+    "never_ratio": 0.609386
+   },
+   {
+    "arch": "x86-64",
+    "op": "mul",
+    "format": "fp32",
+    "config": "4 tiles, resident",
+    "n": 259974,
+    "never_ratio": null
+   },
+   {
+    "arch": "x86-64",
+    "op": "mul",
+    "format": "fp32",
+    "config": "1 tile, over PCIe",
+    "n": null,
+    "never_ratio": 0.125828
+   },
+   {
+    "arch": "x86-64",
+    "op": "mul",
+    "format": "fp32",
+    "config": "4 tiles, over PCIe",
+    "n": null,
+    "never_ratio": 0.105231
+   },
+   {
+    "arch": "x86-64",
+    "op": "mul",
+    "format": "fp64",
+    "config": "1 tile, resident",
+    "n": null,
+    "never_ratio": 0.896508
+   },
+   {
+    "arch": "x86-64",
+    "op": "mul",
+    "format": "fp64",
+    "config": "4 tiles, resident",
+    "n": 249098,
+    "never_ratio": null
+   },
+   {
+    "arch": "x86-64",
+    "op": "mul",
+    "format": "fp64",
+    "config": "1 tile, over PCIe",
+    "n": null,
+    "never_ratio": 0.178406
+   },
+   {
+    "arch": "x86-64",
+    "op": "mul",
+    "format": "fp64",
+    "config": "4 tiles, over PCIe",
+    "n": null,
+    "never_ratio": 0.204289
+   },
+   {
+    "arch": "x86-64",
+    "op": "mul",
+    "format": "fp128",
+    "config": "1 tile, resident",
+    "n": 2703,
+    "never_ratio": null
+   },
+   {
+    "arch": "x86-64",
+    "op": "mul",
+    "format": "fp128",
+    "config": "4 tiles, resident",
+    "n": 3567,
+    "never_ratio": null
+   },
+   {
+    "arch": "x86-64",
+    "op": "mul",
+    "format": "fp128",
+    "config": "1 tile, over PCIe",
+    "n": null,
+    "never_ratio": 0.918888
+   },
+   {
+    "arch": "x86-64",
+    "op": "mul",
+    "format": "fp128",
+    "config": "4 tiles, over PCIe",
+    "n": 2879059,
+    "never_ratio": null
+   },
+   {
+    "arch": "x86-64",
+    "op": "mul",
+    "format": "fp256",
+    "config": "1 tile, resident",
+    "n": 1056,
+    "never_ratio": null
+   },
+   {
+    "arch": "x86-64",
+    "op": "mul",
+    "format": "fp256",
+    "config": "4 tiles, resident",
+    "n": 1823,
+    "never_ratio": null
+   },
+   {
+    "arch": "x86-64",
+    "op": "mul",
+    "format": "fp256",
+    "config": "1 tile, over PCIe",
+    "n": 117379,
+    "never_ratio": null
+   },
+   {
+    "arch": "x86-64",
+    "op": "mul",
+    "format": "fp256",
+    "config": "4 tiles, over PCIe",
+    "n": 141648,
+    "never_ratio": null
+   },
+   {
+    "arch": "x86-64",
+    "op": "fma",
+    "format": "fp32",
+    "config": "1 tile, resident",
+    "n": 69374,
+    "never_ratio": null
+   },
+   {
+    "arch": "x86-64",
+    "op": "fma",
+    "format": "fp32",
+    "config": "4 tiles, resident",
+    "n": 58847,
+    "never_ratio": null
+   },
+   {
+    "arch": "x86-64",
+    "op": "fma",
+    "format": "fp32",
+    "config": "1 tile, over PCIe",
+    "n": null,
+    "never_ratio": 0.320071
+   },
+   {
+    "arch": "x86-64",
+    "op": "fma",
+    "format": "fp32",
+    "config": "4 tiles, over PCIe",
+    "n": null,
+    "never_ratio": 0.268194
+   },
+   {
+    "arch": "x86-64",
+    "op": "fma",
+    "format": "fp64",
+    "config": "1 tile, resident",
+    "n": 1815251,
+    "never_ratio": null
+   },
+   {
+    "arch": "x86-64",
+    "op": "fma",
+    "format": "fp64",
+    "config": "4 tiles, resident",
+    "n": 57420,
+    "never_ratio": null
+   },
+   {
+    "arch": "x86-64",
+    "op": "fma",
+    "format": "fp64",
+    "config": "1 tile, over PCIe",
+    "n": null,
+    "never_ratio": 0.248655
+   },
+   {
+    "arch": "x86-64",
+    "op": "fma",
+    "format": "fp64",
+    "config": "4 tiles, over PCIe",
+    "n": null,
+    "never_ratio": 0.285906
+   },
+   {
+    "arch": "x86-64",
+    "op": "fma",
+    "format": "fp128",
+    "config": "1 tile, resident",
+    "n": 904,
+    "never_ratio": null
+   },
+   {
+    "arch": "x86-64",
+    "op": "fma",
+    "format": "fp128",
+    "config": "4 tiles, resident",
+    "n": 1111,
+    "never_ratio": null
+   },
+   {
+    "arch": "x86-64",
+    "op": "fma",
+    "format": "fp128",
+    "config": "1 tile, over PCIe",
+    "n": 2863,
+    "never_ratio": null
+   },
+   {
+    "arch": "x86-64",
+    "op": "fma",
+    "format": "fp128",
+    "config": "4 tiles, over PCIe",
+    "n": 10822,
+    "never_ratio": null
+   },
+   {
+    "arch": "x86-64",
+    "op": "fma",
+    "format": "fp256",
+    "config": "1 tile, resident",
+    "n": 571,
+    "never_ratio": null
+   },
+   {
+    "arch": "x86-64",
+    "op": "fma",
+    "format": "fp256",
+    "config": "4 tiles, resident",
+    "n": 920,
+    "never_ratio": null
+   },
+   {
+    "arch": "x86-64",
+    "op": "fma",
+    "format": "fp256",
+    "config": "1 tile, over PCIe",
+    "n": 7619,
+    "never_ratio": null
+   },
+   {
+    "arch": "x86-64",
+    "op": "fma",
+    "format": "fp256",
+    "config": "4 tiles, over PCIe",
+    "n": 8719,
+    "never_ratio": null
+   },
+   {
+    "arch": "x86-64",
+    "op": "add",
+    "format": "fp32",
+    "config": "1 tile, resident",
+    "n": null,
+    "never_ratio": 0.613064
+   },
+   {
+    "arch": "x86-64",
+    "op": "add",
+    "format": "fp32",
+    "config": "4 tiles, resident",
+    "n": 217205,
+    "never_ratio": null
+   },
+   {
+    "arch": "x86-64",
+    "op": "add",
+    "format": "fp32",
+    "config": "1 tile, over PCIe",
+    "n": null,
+    "never_ratio": 0.126778
+   },
+   {
+    "arch": "x86-64",
+    "op": "add",
+    "format": "fp32",
+    "config": "4 tiles, over PCIe",
+    "n": null,
+    "never_ratio": 0.116466
+   },
+   {
+    "arch": "x86-64",
+    "op": "add",
+    "format": "fp64",
+    "config": "1 tile, resident",
+    "n": null,
+    "never_ratio": 0.896712
+   },
+   {
+    "arch": "x86-64",
+    "op": "add",
+    "format": "fp64",
+    "config": "4 tiles, resident",
+    "n": 234244,
+    "never_ratio": null
+   },
+   {
+    "arch": "x86-64",
+    "op": "add",
+    "format": "fp64",
+    "config": "1 tile, over PCIe",
+    "n": null,
+    "never_ratio": 0.178339
+   },
+   {
+    "arch": "x86-64",
+    "op": "add",
+    "format": "fp64",
+    "config": "4 tiles, over PCIe",
+    "n": null,
+    "never_ratio": 0.20526
+   },
+   {
+    "arch": "x86-64",
+    "op": "add",
+    "format": "fp128",
+    "config": "1 tile, resident",
+    "n": 2404,
+    "never_ratio": null
+   },
+   {
+    "arch": "x86-64",
+    "op": "add",
+    "format": "fp128",
+    "config": "4 tiles, resident",
+    "n": 3085,
+    "never_ratio": null
+   },
+   {
+    "arch": "x86-64",
+    "op": "add",
+    "format": "fp128",
+    "config": "1 tile, over PCIe",
+    "n": 228507,
+    "never_ratio": null
+   },
+   {
+    "arch": "x86-64",
+    "op": "add",
+    "format": "fp128",
+    "config": "4 tiles, over PCIe",
+    "n": 1620174,
+    "never_ratio": null
+   },
+   {
+    "arch": "x86-64",
+    "op": "add",
+    "format": "fp256",
+    "config": "1 tile, resident",
+    "n": 1885,
+    "never_ratio": null
+   },
+   {
+    "arch": "x86-64",
+    "op": "add",
+    "format": "fp256",
+    "config": "4 tiles, resident",
+    "n": 2575,
+    "never_ratio": null
+   },
+   {
+    "arch": "x86-64",
+    "op": "add",
+    "format": "fp256",
+    "config": "1 tile, over PCIe",
+    "n": null,
+    "never_ratio": 0.964852
+   },
+   {
+    "arch": "x86-64",
+    "op": "add",
+    "format": "fp256",
+    "config": "4 tiles, over PCIe",
+    "n": 388854,
+    "never_ratio": null
+   },
+   {
+    "arch": "arm64",
+    "op": "mul",
+    "format": "fp32",
+    "config": "1 tile, resident",
+    "n": null,
+    "never_ratio": 0.137998
+   },
+   {
+    "arch": "arm64",
+    "op": "mul",
+    "format": "fp32",
+    "config": "4 tiles, resident",
+    "n": null,
+    "never_ratio": 0.507449
+   },
+   {
+    "arch": "arm64",
+    "op": "mul",
+    "format": "fp32",
+    "config": "1 tile, over PCIe",
+    "n": null,
+    "never_ratio": 0.0284942
+   },
+   {
+    "arch": "arm64",
+    "op": "mul",
+    "format": "fp32",
+    "config": "4 tiles, over PCIe",
+    "n": null,
+    "never_ratio": 0.02383
+   },
+   {
+    "arch": "arm64",
+    "op": "mul",
+    "format": "fp64",
+    "config": "1 tile, resident",
+    "n": null,
+    "never_ratio": 0.139783
+   },
+   {
+    "arch": "arm64",
+    "op": "mul",
+    "format": "fp64",
+    "config": "4 tiles, resident",
+    "n": null,
+    "never_ratio": 0.53725
+   },
+   {
+    "arch": "arm64",
+    "op": "mul",
+    "format": "fp64",
+    "config": "1 tile, over PCIe",
+    "n": null,
+    "never_ratio": 0.027817
+   },
+   {
+    "arch": "arm64",
+    "op": "mul",
+    "format": "fp64",
+    "config": "4 tiles, over PCIe",
+    "n": null,
+    "never_ratio": 0.0318526
+   },
+   {
+    "arch": "arm64",
+    "op": "mul",
+    "format": "fp128",
+    "config": "1 tile, resident",
+    "n": 3667,
+    "never_ratio": null
+   },
+   {
+    "arch": "arm64",
+    "op": "mul",
+    "format": "fp128",
+    "config": "4 tiles, resident",
+    "n": 6012,
+    "never_ratio": null
+   },
+   {
+    "arch": "arm64",
+    "op": "mul",
+    "format": "fp128",
+    "config": "1 tile, over PCIe",
+    "n": null,
+    "never_ratio": 0.568131
+   },
+   {
+    "arch": "arm64",
+    "op": "mul",
+    "format": "fp128",
+    "config": "4 tiles, over PCIe",
+    "n": null,
+    "never_ratio": 0.689193
+   },
+   {
+    "arch": "arm64",
+    "op": "mul",
+    "format": "fp256",
+    "config": "1 tile, resident",
+    "n": 1331,
+    "never_ratio": null
+   },
+   {
+    "arch": "arm64",
+    "op": "mul",
+    "format": "fp256",
+    "config": "4 tiles, resident",
+    "n": 2141,
+    "never_ratio": null
+   },
+   {
+    "arch": "arm64",
+    "op": "mul",
+    "format": "fp256",
+    "config": "1 tile, over PCIe",
+    "n": null,
+    "never_ratio": 0.858417
+   },
+   {
+    "arch": "arm64",
+    "op": "mul",
+    "format": "fp256",
+    "config": "4 tiles, over PCIe",
+    "n": null,
+    "never_ratio": 0.935699
+   },
+   {
+    "arch": "arm64",
+    "op": "fma",
+    "format": "fp32",
+    "config": "1 tile, resident",
+    "n": null,
+    "never_ratio": 0.18778
+   },
+   {
+    "arch": "arm64",
+    "op": "fma",
+    "format": "fp32",
+    "config": "4 tiles, resident",
+    "n": null,
+    "never_ratio": 0.689281
+   },
+   {
+    "arch": "arm64",
+    "op": "fma",
+    "format": "fp32",
+    "config": "1 tile, over PCIe",
+    "n": null,
+    "never_ratio": 0.0388436
+   },
+   {
+    "arch": "arm64",
+    "op": "fma",
+    "format": "fp32",
+    "config": "4 tiles, over PCIe",
+    "n": null,
+    "never_ratio": 0.0325478
+   },
+   {
+    "arch": "arm64",
+    "op": "fma",
+    "format": "fp64",
+    "config": "1 tile, resident",
+    "n": null,
+    "never_ratio": 0.176152
+   },
+   {
+    "arch": "arm64",
+    "op": "fma",
+    "format": "fp64",
+    "config": "4 tiles, resident",
+    "n": null,
+    "never_ratio": 0.676948
+   },
+   {
+    "arch": "arm64",
+    "op": "fma",
+    "format": "fp64",
+    "config": "1 tile, over PCIe",
+    "n": null,
+    "never_ratio": 0.0351197
+   },
+   {
+    "arch": "arm64",
+    "op": "fma",
+    "format": "fp64",
+    "config": "4 tiles, over PCIe",
+    "n": null,
+    "never_ratio": 0.0403809
+   },
+   {
+    "arch": "arm64",
+    "op": "fma",
+    "format": "fp128",
+    "config": "1 tile, resident",
+    "n": 1163,
+    "never_ratio": null
+   },
+   {
+    "arch": "arm64",
+    "op": "fma",
+    "format": "fp128",
+    "config": "4 tiles, resident",
+    "n": 1440,
+    "never_ratio": null
+   },
+   {
+    "arch": "arm64",
+    "op": "fma",
+    "format": "fp128",
+    "config": "1 tile, over PCIe",
+    "n": 3941,
+    "never_ratio": null
+   },
+   {
+    "arch": "arm64",
+    "op": "fma",
+    "format": "fp128",
+    "config": "4 tiles, over PCIe",
+    "n": 15429,
+    "never_ratio": null
+   },
+   {
+    "arch": "arm64",
+    "op": "fma",
+    "format": "fp256",
+    "config": "1 tile, resident",
+    "n": 818,
+    "never_ratio": null
+   },
+   {
+    "arch": "arm64",
+    "op": "fma",
+    "format": "fp256",
+    "config": "4 tiles, resident",
+    "n": 1375,
+    "never_ratio": null
+   },
+   {
+    "arch": "arm64",
+    "op": "fma",
+    "format": "fp256",
+    "config": "1 tile, over PCIe",
+    "n": 26083,
+    "never_ratio": null
+   },
+   {
+    "arch": "arm64",
+    "op": "fma",
+    "format": "fp256",
+    "config": "4 tiles, over PCIe",
+    "n": 13346,
+    "never_ratio": null
+   },
+   {
+    "arch": "arm64",
+    "op": "add",
+    "format": "fp32",
+    "config": "1 tile, resident",
+    "n": null,
+    "never_ratio": 0.142351
+   },
+   {
+    "arch": "arm64",
+    "op": "add",
+    "format": "fp32",
+    "config": "4 tiles, resident",
+    "n": null,
+    "never_ratio": 0.524534
+   },
+   {
+    "arch": "arm64",
+    "op": "add",
+    "format": "fp32",
+    "config": "1 tile, over PCIe",
+    "n": null,
+    "never_ratio": 0.0294374
+   },
+   {
+    "arch": "arm64",
+    "op": "add",
+    "format": "fp32",
+    "config": "4 tiles, over PCIe",
+    "n": null,
+    "never_ratio": 0.027043
+   },
+   {
+    "arch": "arm64",
+    "op": "add",
+    "format": "fp64",
+    "config": "1 tile, resident",
+    "n": null,
+    "never_ratio": 0.140777
+   },
+   {
+    "arch": "arm64",
+    "op": "add",
+    "format": "fp64",
+    "config": "4 tiles, resident",
+    "n": null,
+    "never_ratio": 0.540492
+   },
+   {
+    "arch": "arm64",
+    "op": "add",
+    "format": "fp64",
+    "config": "1 tile, over PCIe",
+    "n": null,
+    "never_ratio": 0.0279979
+   },
+   {
+    "arch": "arm64",
+    "op": "add",
+    "format": "fp64",
+    "config": "4 tiles, over PCIe",
+    "n": null,
+    "never_ratio": 0.0322243
+   },
+   {
+    "arch": "arm64",
+    "op": "add",
+    "format": "fp128",
+    "config": "1 tile, resident",
+    "n": 3554,
+    "never_ratio": null
+   },
+   {
+    "arch": "arm64",
+    "op": "add",
+    "format": "fp128",
+    "config": "4 tiles, resident",
+    "n": 5140,
+    "never_ratio": null
+   },
+   {
+    "arch": "arm64",
+    "op": "add",
+    "format": "fp128",
+    "config": "1 tile, over PCIe",
+    "n": null,
+    "never_ratio": 0.855766
+   },
+   {
+    "arch": "arm64",
+    "op": "add",
+    "format": "fp128",
+    "config": "4 tiles, over PCIe",
+    "n": 3901378,
+    "never_ratio": null
+   },
+   {
+    "arch": "arm64",
+    "op": "add",
+    "format": "fp256",
+    "config": "1 tile, resident",
+    "n": 3198,
+    "never_ratio": null
+   },
+   {
+    "arch": "arm64",
+    "op": "add",
+    "format": "fp256",
+    "config": "4 tiles, resident",
+    "n": 3867,
+    "never_ratio": null
+   },
+   {
+    "arch": "arm64",
+    "op": "add",
+    "format": "fp256",
+    "config": "1 tile, over PCIe",
+    "n": null,
+    "never_ratio": 0.591649
+   },
+   {
+    "arch": "arm64",
+    "op": "add",
+    "format": "fp256",
+    "config": "4 tiles, over PCIe",
+    "n": null,
+    "never_ratio": 0.663586
+   }
+  ],
+  "lowest": 571,
+  "pcie_ratio": 4.71479,
+  "ratios": [4.57443, 4.64303, 4.78655, 4.88072]
+ }
+}

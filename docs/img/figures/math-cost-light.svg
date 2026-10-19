@@ -1,0 +1,200 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="819" viewBox="0 0 900 819" role="img" aria-label="Tile instructions per call for the nine correctly rounded functions at the formats they are built for (178 to 419), and where the trigonometric three spend theirs: range reduction takes 155 to 216 of each sin, cos and tan.">
+<title>Tile instructions per call for the nine correctly rounded functions at the formats they are built for (178 to 419), and where the trigonometric three spend theirs: range reduction takes 155 to 216 of each sin, cos and tan.</title>
+<rect width="900" height="819" fill="#ffffff"/>
+<text x="24.0" y="30.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="17" fill="#1f2328" font-weight="600">What a correctly rounded function costs the tile</text>
+<text x="24.0" y="52.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#656d76">Instructions in the tile's own program for one correctly rounded result, per format. Exp and log families (M1): the</text>
+<text x="24.0" y="69.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#656d76">most any rounding attribute needs. Sin, cos and tan (M2): the same at every attribute. Below: the three trigonometric</text>
+<text x="24.0" y="86.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#656d76">functions split into range reduction, the series and the finish.</text>
+<line x1="120.0" y1="134.0" x2="120.0" y2="464.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="120.0" y="476.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#656d76" text-anchor="middle">0</text>
+<line x1="271.1" y1="134.0" x2="271.1" y2="464.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="271.1" y="476.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#656d76" text-anchor="middle">100</text>
+<line x1="422.2" y1="134.0" x2="422.2" y2="464.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="422.2" y="476.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#656d76" text-anchor="middle">200</text>
+<line x1="573.3" y1="134.0" x2="573.3" y2="464.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="573.3" y="476.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#656d76" text-anchor="middle">300</text>
+<line x1="724.4" y1="134.0" x2="724.4" y2="464.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="724.4" y="476.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#656d76" text-anchor="middle">400</text>
+<text x="120.0" y="126.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#656d76">tile instructions per call</text>
+<text x="24.0" y="158.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="12" fill="#1f2328" font-weight="600">exp</text>
+<rect x="120.0" y="142.0" width="273.5" height="6.5" fill="#bc4c00"/>
+<text x="398.5" y="148.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9" fill="#656d76">178-181</text>
+<rect x="120.0" y="149.5" width="284.1" height="6.5" fill="#1a7f37"/>
+<text x="409.1" y="155.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9" fill="#656d76">185-188</text>
+<rect x="120.0" y="157.0" width="303.7" height="6.5" fill="#0969da"/>
+<text x="428.7" y="163.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9" fill="#656d76">198-201</text>
+<text x="24.0" y="194.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="12" fill="#1f2328" font-weight="600">exp2</text>
+<rect x="120.0" y="178.0" width="270.5" height="6.5" fill="#bc4c00"/>
+<text x="395.5" y="184.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9" fill="#656d76">176-179</text>
+<rect x="120.0" y="185.5" width="281.1" height="6.5" fill="#1a7f37"/>
+<text x="406.1" y="191.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9" fill="#656d76">183-186</text>
+<rect x="120.0" y="193.0" width="300.7" height="6.5" fill="#0969da"/>
+<text x="425.7" y="199.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9" fill="#656d76">196-199</text>
+<text x="24.0" y="230.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="12" fill="#1f2328" font-weight="600">expm1</text>
+<rect x="120.0" y="214.0" width="269.0" height="6.5" fill="#bc4c00"/>
+<text x="394.0" y="220.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9" fill="#656d76">175-178</text>
+<rect x="120.0" y="221.5" width="279.6" height="6.5" fill="#1a7f37"/>
+<text x="404.6" y="227.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9" fill="#656d76">182-185</text>
+<rect x="120.0" y="229.0" width="299.2" height="6.5" fill="#0969da"/>
+<text x="424.2" y="235.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9" fill="#656d76">195-198</text>
+<text x="24.0" y="266.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="12" fill="#1f2328" font-weight="600">log</text>
+<rect x="120.0" y="250.0" width="291.6" height="6.5" fill="#bc4c00"/>
+<text x="416.6" y="256.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9" fill="#656d76">193</text>
+<rect x="120.0" y="257.5" width="314.3" height="6.5" fill="#1a7f37"/>
+<text x="439.3" y="263.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9" fill="#656d76">208</text>
+<rect x="120.0" y="265.0" width="359.6" height="6.5" fill="#0969da"/>
+<text x="484.6" y="271.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9" fill="#656d76">238</text>
+<text x="24.0" y="302.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="12" fill="#1f2328" font-weight="600">log2</text>
+<rect x="120.0" y="286.0" width="282.6" height="6.5" fill="#bc4c00"/>
+<text x="407.6" y="292.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9" fill="#656d76">187</text>
+<rect x="120.0" y="293.5" width="305.2" height="6.5" fill="#1a7f37"/>
+<text x="430.2" y="299.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9" fill="#656d76">202</text>
+<rect x="120.0" y="301.0" width="350.6" height="6.5" fill="#0969da"/>
+<text x="475.6" y="307.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9" fill="#656d76">232</text>
+<text x="24.0" y="338.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="12" fill="#1f2328" font-weight="600">log1p</text>
+<rect x="120.0" y="322.0" width="346.0" height="6.5" fill="#bc4c00"/>
+<text x="471.0" y="328.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9" fill="#656d76">227-229</text>
+<rect x="120.0" y="329.5" width="368.7" height="6.5" fill="#1a7f37"/>
+<text x="493.7" y="335.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9" fill="#656d76">242-244</text>
+<rect x="120.0" y="337.0" width="414.0" height="6.5" fill="#0969da"/>
+<text x="539.0" y="343.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9" fill="#656d76">272-274</text>
+<text x="24.0" y="374.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="12" fill="#1f2328" font-weight="600">sin</text>
+<rect x="120.0" y="358.0" width="525.9" height="6.5" fill="#cf222e"/>
+<text x="650.9" y="364.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9" fill="#656d76">348</text>
+<rect x="120.0" y="365.5" width="613.5" height="6.5" fill="#bc4c00"/>
+<text x="738.5" y="371.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9" fill="#656d76">406</text>
+<rect x="120.0" y="373.0" width="577.2" height="6.5" fill="#1a7f37"/>
+<text x="702.2" y="379.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9" fill="#656d76">382</text>
+<rect x="120.0" y="380.5" width="587.8" height="6.5" fill="#0969da"/>
+<text x="712.8" y="386.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9" fill="#656d76">389</text>
+<text x="24.0" y="410.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="12" fill="#1f2328" font-weight="600">cos</text>
+<rect x="120.0" y="394.0" width="519.8" height="6.5" fill="#cf222e"/>
+<text x="644.8" y="400.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9" fill="#656d76">344</text>
+<rect x="120.0" y="401.5" width="607.5" height="6.5" fill="#bc4c00"/>
+<text x="732.5" y="407.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9" fill="#656d76">402</text>
+<rect x="120.0" y="409.0" width="571.2" height="6.5" fill="#1a7f37"/>
+<text x="696.2" y="415.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9" fill="#656d76">378</text>
+<rect x="120.0" y="416.5" width="581.8" height="6.5" fill="#0969da"/>
+<text x="706.8" y="422.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9" fill="#656d76">385</text>
+<text x="24.0" y="446.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="12" fill="#1f2328" font-weight="600">tan</text>
+<rect x="120.0" y="430.0" width="542.5" height="6.5" fill="#cf222e"/>
+<text x="667.5" y="436.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9" fill="#656d76">359</text>
+<rect x="120.0" y="437.5" width="633.2" height="6.5" fill="#bc4c00"/>
+<text x="758.2" y="443.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9" fill="#656d76">419</text>
+<rect x="120.0" y="445.0" width="599.9" height="6.5" fill="#1a7f37"/>
+<text x="724.9" y="451.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9" fill="#656d76">397</text>
+<rect x="120.0" y="452.5" width="613.5" height="6.5" fill="#0969da"/>
+<text x="738.5" y="458.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9" fill="#656d76">406</text>
+<rect x="120.0" y="483.5" width="14.0" height="9.5" fill="#cf222e" rx="2"/>
+<text x="140.0" y="492.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#1f2328">binary32</text>
+<rect x="206.7" y="483.5" width="14.0" height="9.5" fill="#bc4c00" rx="2"/>
+<text x="226.7" y="492.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#1f2328">binary64</text>
+<rect x="293.4" y="483.5" width="14.0" height="9.5" fill="#1a7f37" rx="2"/>
+<text x="313.4" y="492.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#1f2328">binary128</text>
+<rect x="386.2" y="483.5" width="14.0" height="9.5" fill="#0969da" rx="2"/>
+<text x="406.2" y="492.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#1f2328">binary256</text>
+<text x="24.0" y="530.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12" fill="#1f2328" font-weight="600">where sin, cos and tan spend their instructions</text>
+<text x="24.0" y="555.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#1f2328">sin, binary32</text>
+<rect x="170.0" y="544.0" width="302.4" height="13.0" fill="#8250df"/>
+<text x="321.2" y="554.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#ffffff" text-anchor="middle">216</text>
+<rect x="472.4" y="544.0" width="117.6" height="13.0" fill="#9a6700"/>
+<text x="531.2" y="554.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#ffffff" text-anchor="middle">84</text>
+<rect x="590.0" y="544.0" width="67.2" height="13.0" fill="#6e7781"/>
+<text x="623.6" y="554.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#ffffff" text-anchor="middle">48</text>
+<text x="663.2" y="554.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#656d76">348</text>
+<text x="24.0" y="572.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#1f2328">cos, binary32</text>
+<rect x="170.0" y="561.0" width="302.4" height="13.0" fill="#8250df"/>
+<text x="321.2" y="571.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#ffffff" text-anchor="middle">216</text>
+<rect x="472.4" y="561.0" width="117.6" height="13.0" fill="#9a6700"/>
+<text x="531.2" y="571.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#ffffff" text-anchor="middle">84</text>
+<rect x="590.0" y="561.0" width="61.6" height="13.0" fill="#6e7781"/>
+<text x="620.8" y="571.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#ffffff" text-anchor="middle">44</text>
+<text x="657.6" y="571.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#656d76">344</text>
+<text x="24.0" y="589.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#1f2328">tan, binary32</text>
+<rect x="170.0" y="578.0" width="302.4" height="13.0" fill="#8250df"/>
+<text x="321.2" y="588.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#ffffff" text-anchor="middle">216</text>
+<rect x="472.4" y="578.0" width="117.6" height="13.0" fill="#9a6700"/>
+<text x="531.2" y="588.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#ffffff" text-anchor="middle">84</text>
+<rect x="590.0" y="578.0" width="82.6" height="13.0" fill="#6e7781"/>
+<text x="631.3" y="588.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#ffffff" text-anchor="middle">59</text>
+<text x="678.6" y="588.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#656d76">359</text>
+<text x="24.0" y="611.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#1f2328">sin, binary64</text>
+<rect x="170.0" y="600.0" width="288.4" height="13.0" fill="#8250df"/>
+<text x="314.2" y="610.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#ffffff" text-anchor="middle">206</text>
+<rect x="458.4" y="600.0" width="212.8" height="13.0" fill="#9a6700"/>
+<text x="564.8" y="610.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#ffffff" text-anchor="middle">152</text>
+<rect x="671.2" y="600.0" width="67.2" height="13.0" fill="#6e7781"/>
+<text x="704.8" y="610.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#ffffff" text-anchor="middle">48</text>
+<text x="744.4" y="610.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#656d76">406</text>
+<text x="24.0" y="628.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#1f2328">cos, binary64</text>
+<rect x="170.0" y="617.0" width="288.4" height="13.0" fill="#8250df"/>
+<text x="314.2" y="627.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#ffffff" text-anchor="middle">206</text>
+<rect x="458.4" y="617.0" width="212.8" height="13.0" fill="#9a6700"/>
+<text x="564.8" y="627.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#ffffff" text-anchor="middle">152</text>
+<rect x="671.2" y="617.0" width="61.6" height="13.0" fill="#6e7781"/>
+<text x="702.0" y="627.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#ffffff" text-anchor="middle">44</text>
+<text x="738.8" y="627.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#656d76">402</text>
+<text x="24.0" y="645.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#1f2328">tan, binary64</text>
+<rect x="170.0" y="634.0" width="288.4" height="13.0" fill="#8250df"/>
+<text x="314.2" y="644.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#ffffff" text-anchor="middle">206</text>
+<rect x="458.4" y="634.0" width="212.8" height="13.0" fill="#9a6700"/>
+<text x="564.8" y="644.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#ffffff" text-anchor="middle">152</text>
+<rect x="671.2" y="634.0" width="85.4" height="13.0" fill="#6e7781"/>
+<text x="713.9" y="644.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#ffffff" text-anchor="middle">61</text>
+<text x="762.6" y="644.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#656d76">419</text>
+<text x="24.0" y="667.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#1f2328">sin, binary128</text>
+<rect x="170.0" y="656.0" width="235.2" height="13.0" fill="#8250df"/>
+<text x="287.6" y="666.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#ffffff" text-anchor="middle">168</text>
+<rect x="405.2" y="656.0" width="229.6" height="13.0" fill="#9a6700"/>
+<text x="520.0" y="666.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#ffffff" text-anchor="middle">164</text>
+<rect x="634.8" y="656.0" width="70.0" height="13.0" fill="#6e7781"/>
+<text x="669.8" y="666.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#ffffff" text-anchor="middle">50</text>
+<text x="710.8" y="666.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#656d76">382</text>
+<text x="24.0" y="684.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#1f2328">cos, binary128</text>
+<rect x="170.0" y="673.0" width="235.2" height="13.0" fill="#8250df"/>
+<text x="287.6" y="683.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#ffffff" text-anchor="middle">168</text>
+<rect x="405.2" y="673.0" width="229.6" height="13.0" fill="#9a6700"/>
+<text x="520.0" y="683.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#ffffff" text-anchor="middle">164</text>
+<rect x="634.8" y="673.0" width="64.4" height="13.0" fill="#6e7781"/>
+<text x="667.0" y="683.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#ffffff" text-anchor="middle">46</text>
+<text x="705.2" y="683.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#656d76">378</text>
+<text x="24.0" y="701.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#1f2328">tan, binary128</text>
+<rect x="170.0" y="690.0" width="235.2" height="13.0" fill="#8250df"/>
+<text x="287.6" y="700.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#ffffff" text-anchor="middle">168</text>
+<rect x="405.2" y="690.0" width="229.6" height="13.0" fill="#9a6700"/>
+<text x="520.0" y="700.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#ffffff" text-anchor="middle">164</text>
+<rect x="634.8" y="690.0" width="91.0" height="13.0" fill="#6e7781"/>
+<text x="680.3" y="700.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#ffffff" text-anchor="middle">65</text>
+<text x="731.8" y="700.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#656d76">397</text>
+<text x="24.0" y="723.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#1f2328">sin, binary256</text>
+<rect x="170.0" y="712.0" width="217.0" height="13.0" fill="#8250df"/>
+<text x="278.5" y="722.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#ffffff" text-anchor="middle">155</text>
+<rect x="387.0" y="712.0" width="257.6" height="13.0" fill="#9a6700"/>
+<text x="515.8" y="722.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#ffffff" text-anchor="middle">184</text>
+<rect x="644.6" y="712.0" width="70.0" height="13.0" fill="#6e7781"/>
+<text x="679.6" y="722.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#ffffff" text-anchor="middle">50</text>
+<text x="720.6" y="722.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#656d76">389</text>
+<text x="24.0" y="740.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#1f2328">cos, binary256</text>
+<rect x="170.0" y="729.0" width="217.0" height="13.0" fill="#8250df"/>
+<text x="278.5" y="739.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#ffffff" text-anchor="middle">155</text>
+<rect x="387.0" y="729.0" width="257.6" height="13.0" fill="#9a6700"/>
+<text x="515.8" y="739.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#ffffff" text-anchor="middle">184</text>
+<rect x="644.6" y="729.0" width="64.4" height="13.0" fill="#6e7781"/>
+<text x="676.8" y="739.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#ffffff" text-anchor="middle">46</text>
+<text x="715.0" y="739.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#656d76">385</text>
+<text x="24.0" y="757.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#1f2328">tan, binary256</text>
+<rect x="170.0" y="746.0" width="217.0" height="13.0" fill="#8250df"/>
+<text x="278.5" y="756.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#ffffff" text-anchor="middle">155</text>
+<rect x="387.0" y="746.0" width="257.6" height="13.0" fill="#9a6700"/>
+<text x="515.8" y="756.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#ffffff" text-anchor="middle">184</text>
+<rect x="644.6" y="746.0" width="93.8" height="13.0" fill="#6e7781"/>
+<text x="691.5" y="756.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#ffffff" text-anchor="middle">67</text>
+<text x="744.4" y="756.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#656d76">406</text>
+<rect x="170.0" y="769.5" width="14.0" height="9.5" fill="#8250df" rx="2"/>
+<text x="190.0" y="778.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#1f2328">range reduction</text>
+<rect x="299.4" y="769.5" width="14.0" height="9.5" fill="#9a6700" rx="2"/>
+<text x="319.4" y="778.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#1f2328">the series</text>
+<rect x="398.2" y="769.5" width="14.0" height="9.5" fill="#6e7781" rx="2"/>
+<text x="418.2" y="778.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#1f2328">choosing and finishing</text>
+<text x="24.0" y="811.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#656d76">source: docs/studies/m1/final_counts.out.txt (5e8d4b7d); docs/studies/m2/ (4 files)</text>
+</svg>

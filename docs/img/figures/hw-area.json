@@ -1,0 +1,224 @@
+{
+ "figure": "hw-area",
+ "title": "Where a tile's area goes, and what the U50 could carry",
+ "group": "hardware",
+ "alt": "One tile's logic cells by bank, and the 12 layouts the layout generator derives for the U50, each as a share of the part: four full tiles fit at 78.9%.",
+ "files": ["docs/img/figures/hw-area-light.svg", "docs/img/figures/hw-area-dark.svg"],
+ "maker": "python/project_figures.py: build_hw_area, draw_hw_area",
+ "commit": "0b77387ea1266f4d4a5e30c8798f57e8b6dc6ef8",
+ "commit_means": "the commit the extracts below were read at; a file read from the tree is identified by its SHA-256 instead",
+ "sources": [
+  {
+   "path": "hw/gen_layouts.py",
+   "sha256": "17df9e8ca4f1efd7ff045ecf6e5f2d1857786cbb55e92ff6ebd176f89fbb1c87",
+   "bytes": 16074
+  }
+ ],
+ "extracts": [],
+ "checks": [
+  {
+   "id": "quad-model",
+   "claim": "the model's LUTs for four full tiles",
+   "document": "docs/LAYOUTS.md",
+   "drawn": "687319",
+   "stated": "687,319",
+   "verdict": "agrees"
+  }
+ ],
+ "data": {
+  "tile": {
+   "full": 131386,
+   "banks": {
+    "fp32": 26592,
+    "fp64": 25304,
+    "fp128": 27492,
+    "fp256": 35333
+   },
+   "shared": 16665
+  },
+  "layouts": [
+   {
+    "name": "u50-4xfp256",
+    "tiles": 4,
+    "shell": 161775,
+    "total": 687319,
+    "pct": 78.9369,
+    "mix": [
+     ["fp256", 4, 131386]
+    ],
+    "mhz": [135],
+    "measured": true,
+    "status": "built",
+    "built": true
+   },
+   {
+    "name": "u50-1xfp256",
+    "tiles": 1,
+    "shell": 123897,
+    "total": 255283,
+    "pct": 29.3186,
+    "mix": [
+     ["fp256", 1, 131386]
+    ],
+    "mhz": [135],
+    "measured": true,
+    "status": "built",
+    "built": true
+   },
+   {
+    "name": "u50-1xfp256-4xfp128",
+    "tiles": 5,
+    "shell": 174401,
+    "total": 689999,
+    "pct": 79.2446,
+    "mix": [
+     ["fp256", 1, 131386],
+     ["fp128", 4, 96053]
+    ],
+    "mhz": [135, 150],
+    "measured": false,
+    "status": "placeholder (needs variant packaging + per-CU host split)",
+    "built": false
+   },
+   {
+    "name": "u50-1xfp256-5xfp64",
+    "tiles": 6,
+    "shell": 187027,
+    "total": 661218,
+    "pct": 75.9392,
+    "mix": [
+     ["fp256", 1, 131386],
+     ["fp64", 5, 68561]
+    ],
+    "mhz": [135, 170],
+    "measured": false,
+    "status": "placeholder (needs variant packaging + per-CU host split)",
+    "built": false
+   },
+   {
+    "name": "u50-1xfp256-7xfp32",
+    "tiles": 8,
+    "shell": 212279,
+    "total": 646464,
+    "pct": 74.2448,
+    "mix": [
+     ["fp256", 1, 131386],
+     ["fp32", 7, 43257]
+    ],
+    "mhz": [135, 190],
+    "measured": false,
+    "status": "placeholder (needs variant packaging + per-CU host split)",
+    "built": false
+   },
+   {
+    "name": "u50-1xfp128-5xfp64",
+    "tiles": 6,
+    "shell": 187027,
+    "total": 625885,
+    "pct": 71.8813,
+    "mix": [
+     ["fp128", 1, 96053],
+     ["fp64", 5, 68561]
+    ],
+    "mhz": [150, 170],
+    "measured": false,
+    "status": "placeholder (needs variant packaging + per-CU host split)",
+    "built": false
+   },
+   {
+    "name": "u50-1xfp128-7xfp32",
+    "tiles": 8,
+    "shell": 212279,
+    "total": 611131,
+    "pct": 70.1869,
+    "mix": [
+     ["fp128", 1, 96053],
+     ["fp32", 7, 43257]
+    ],
+    "mhz": [150, 190],
+    "measured": false,
+    "status": "placeholder (needs variant packaging + per-CU host split)",
+    "built": false
+   },
+   {
+    "name": "u50-1xfp64-7xfp32",
+    "tiles": 8,
+    "shell": 212279,
+    "total": 583639,
+    "pct": 67.0295,
+    "mix": [
+     ["fp64", 1, 68561],
+     ["fp32", 7, 43257]
+    ],
+    "mhz": [170, 190],
+    "measured": false,
+    "status": "placeholder (needs variant packaging + per-CU host split)",
+    "built": false
+   },
+   {
+    "name": "u50-5xfp128",
+    "tiles": 5,
+    "shell": 174401,
+    "total": 654666,
+    "pct": 75.1867,
+    "mix": [
+     ["fp128", 5, 96053]
+    ],
+    "mhz": [150],
+    "measured": false,
+    "status": "placeholder (needs variant packaging; host-ready)",
+    "built": false
+   },
+   {
+    "name": "u50-7xfp64",
+    "tiles": 7,
+    "shell": 199653,
+    "total": 679580,
+    "pct": 78.0481,
+    "mix": [
+     ["fp64", 7, 68561]
+    ],
+    "mhz": [170],
+    "measured": false,
+    "status": "placeholder (needs variant packaging; host-ready)",
+    "built": false
+   },
+   {
+    "name": "u50-8xfp32",
+    "tiles": 8,
+    "shell": 212279,
+    "total": 558335,
+    "pct": 64.1234,
+    "mix": [
+     ["fp32", 8, 43257]
+    ],
+    "mhz": [190],
+    "measured": false,
+    "status": "placeholder (needs variant packaging; host-ready)",
+    "built": false
+   },
+   {
+    "name": "u50-7xfp64fp128",
+    "tiles": 7,
+    "shell": 199653,
+    "total": 685880,
+    "pct": 78.7716,
+    "mix": [
+     ["fp64fp128", 7, 69461]
+    ],
+    "mhz": [135],
+    "measured": true,
+    "status": "placeholder (needs variant packaging; host-ready)",
+    "built": false
+   }
+  ],
+  "device": 870720,
+  "fits": 80.0,
+  "limit": 85.0,
+  "max_tiles": 8,
+  "quad_pct": 78.9369,
+  "quad_total": 687319,
+  "shell_1cu": 123897,
+  "shell_per_extra": 12626
+ }
+}

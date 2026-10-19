@@ -1,0 +1,210 @@
+{
+ "figure": "perf-lanes",
+ "title": "The tile is beat-limited: throughput follows the lanes in a beat",
+ "group": "performance",
+ "alt": "Elements per second against problem size for the four formats on one resident tile, and the same rates relative to binary256: they climb towards eight, four and two, the number of lanes in a beat.",
+ "files": ["docs/img/figures/perf-lanes-light.svg", "docs/img/figures/perf-lanes-dark.svg"],
+ "maker": "python/project_figures.py: build_perf_lanes, draw_perf_lanes",
+ "commit": "0b77387ea1266f4d4a5e30c8798f57e8b6dc6ef8",
+ "commit_means": "the commit the extracts below were read at; a file read from the tree is identified by its SHA-256 instead",
+ "sources": [
+  {
+   "path": "docs/bench/sweep-x86_64.csv",
+   "sha256": "b52a1574388d84072a6ac48a7ba6f7cc3850c706306ab378ac93985ae8dfa0c7",
+   "bytes": 766712
+  }
+ ],
+ "extracts": [],
+ "checks": [
+  {
+   "id": "readme-fp32-1m",
+   "claim": "binary32, one tile, resident, million elements/s at 1M",
+   "document": "README.md",
+   "drawn": "788",
+   "stated": "812",
+   "verdict": "agrees",
+   "note": "the README quotes docs/BENCHMARKS.md's cft-resident run of 2026-09-16; the sweep is a different run, through cft-bench (held to 5%)"
+  },
+  {
+   "id": "readme-fp256-1m",
+   "claim": "binary256, one tile, resident, million elements/s at 1M",
+   "document": "README.md",
+   "drawn": "107",
+   "stated": "107",
+   "verdict": "agrees",
+   "note": "the README quotes docs/BENCHMARKS.md's cft-resident run of 2026-09-16; the sweep is a different run, through cft-bench (held to 5%)"
+  },
+  {
+   "id": "readme-settle-fp32",
+   "claim": "the README's figure caption: the binary32 ratio settles on",
+   "document": "README.md",
+   "drawn": "8",
+   "stated": "8",
+   "verdict": "agrees"
+  },
+  {
+   "id": "readme-settle-fp64",
+   "claim": "the README's figure caption: the binary64 ratio settles on",
+   "document": "README.md",
+   "drawn": "4",
+   "stated": "4",
+   "verdict": "agrees"
+  },
+  {
+   "id": "readme-settle-fp128",
+   "claim": "the README's figure caption: the binary128 ratio settles on",
+   "document": "README.md",
+   "drawn": "2",
+   "stated": "2",
+   "verdict": "agrees"
+  }
+ ],
+ "data": {
+  "series": {
+   "fp32": [
+    [4096, 88.0565],
+    [8192, 187.18],
+    [16384, 282.64],
+    [32768, 450.086],
+    [65536, 589.498],
+    [131072, 733.315],
+    [262144, 646.707],
+    [524288, 731.258],
+    [1048576, 787.858],
+    [2097152, 825.07],
+    [4194304, 844.018],
+    [8388608, 853.938],
+    [16777216, 858.582],
+    [33554432, 861.455]
+   ],
+   "fp64": [
+    [4096, 91.8285],
+    [8192, 133.513],
+    [16384, 218.72],
+    [32768, 294.962],
+    [65536, 345.755],
+    [131072, 322.011],
+    [262144, 363.168],
+    [524288, 394.338],
+    [1048576, 414.21],
+    [2097152, 422.212],
+    [4194304, 426.952],
+    [8388608, 429.306],
+    [16777216, 430.601]
+   ],
+   "fp128": [
+    [4096, 90.992],
+    [8192, 103.926],
+    [16384, 142.953],
+    [32768, 173.207],
+    [65536, 161.076],
+    [131072, 182.157],
+    [262144, 196.6],
+    [524288, 206.247],
+    [1048576, 211.276],
+    [2097152, 213.652],
+    [4194304, 214.721],
+    [8388608, 215.377]
+   ],
+   "fp256": [
+    [4096, 55.9919],
+    [8192, 73.7192],
+    [16384, 87.1839],
+    [32768, 80.7534],
+    [65536, 90.91],
+    [131072, 98.2703],
+    [262144, 103.208],
+    [524288, 105.508],
+    [1048576, 106.831],
+    [2097152, 107.35]
+   ]
+  },
+  "top": {
+   "fp32": {
+    "n": 33554432,
+    "rate_m": 861.455
+   },
+   "fp64": {
+    "n": 16777216,
+    "rate_m": 430.601
+   },
+   "fp128": {
+    "n": 8388608,
+    "rate_m": 215.377
+   },
+   "fp256": {
+    "n": 2097152,
+    "rate_m": 107.35
+   }
+  },
+  "ratio": {
+   "fp32": [
+    [4096, 1.57267],
+    [8192, 2.53909],
+    [16384, 3.24189],
+    [32768, 5.57359],
+    [65536, 6.48442],
+    [131072, 7.46222],
+    [262144, 6.26606],
+    [524288, 6.93084],
+    [1048576, 7.37482],
+    [2097152, 7.68578]
+   ],
+   "fp64": [
+    [4096, 1.64003],
+    [8192, 1.8111],
+    [16384, 2.50872],
+    [32768, 3.65263],
+    [65536, 3.80327],
+    [131072, 3.27679],
+    [262144, 3.5188],
+    [524288, 3.73752],
+    [1048576, 3.87725],
+    [2097152, 3.93303]
+   ],
+   "fp128": [
+    [4096, 1.62509],
+    [8192, 1.40976],
+    [16384, 1.63968],
+    [32768, 2.14488],
+    [65536, 1.77182],
+    [131072, 1.85364],
+    [262144, 1.90489],
+    [524288, 1.9548],
+    [1048576, 1.97766],
+    [2097152, 1.99023]
+   ]
+  },
+  "ratio_ext": {
+   "fp32": [
+    [4194304, 7.86229],
+    [8388608, 7.9547],
+    [16777216, 7.99795],
+    [33554432, 8.02472]
+   ],
+   "fp64": [
+    [4194304, 3.97719],
+    [8388608, 3.99912],
+    [16777216, 4.01118]
+   ],
+   "fp128": [
+    [4194304, 2.00019],
+    [8388608, 2.00631]
+   ]
+  },
+  "saturated_ratio": {
+   "fp32": 8.02472,
+   "fp64": 4.01118,
+   "fp128": 2.00631
+  },
+  "at_1m_m": {
+   "fp32": 787.858,
+   "fp64": 414.21,
+   "fp128": 211.276,
+   "fp256": 106.831
+  },
+  "n_min": 4096,
+  "best256_n": 2097152,
+  "op_spread": 0.000467073
+ }
+}

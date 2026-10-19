@@ -92,6 +92,27 @@ published conformance cases** - every binary32 and binary64 family,
 complete - and disagreed with the reference on none of them. It is the
 same library the card runs, compiled small.
 
+The card rows, measured. One tile, resident, from 4,096 elements a call
+up: the rate follows the number of lanes in a beat, and the ratios
+settle on 8, 4 and 2. More figures drawn the same way, from the
+project's own data and checked on every gate run, are in
+[docs/FIGURES.md](docs/FIGURES.md).
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/figures/perf-lanes-dark.svg">
+  <img alt="Elements per second against problem size for the four formats on one resident tile, and the same rates relative to binary256: they climb towards eight, four and two, the number of lanes in a beat." src="docs/img/figures/perf-lanes-light.svg">
+</picture>
+
+And the card's power over its long stress run, 61 hours, sampled every
+five minutes and between legs: the image loaded sets it (about 22 W on
+the quad, 16 W on the single), and the table's 35 W is four tiles
+streaming, which the run sampled once.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/figures/stress-telemetry-dark.svg">
+  <img alt="Board power and four temperatures over the card's 61-hour stress run, by the image loaded: the quad image sits near 22 watts, the single and the deep image near 16, with one sample at 34 watts." src="docs/img/figures/stress-telemetry-light.svg">
+</picture>
+
 ### When this matters, and when it does not
 
 The first row of that table is **this library's own softfloat**. It
@@ -213,6 +234,11 @@ commits. A stage whose tools are absent is **skipped by name with the
 reason** rather than passed. `bash verify/run.sh --list` prints all 52 with
 a `*` against the ones a given budget selects, and `docs/VERIFICATION.md`
 maps what each one proves and how long it really takes.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/figures/verify-stages-dark.svg">
+  <img alt="The stages of the verification runner in eight groups, each shaded by the smallest budget that runs it: quick, gate, or only the full census." src="docs/img/figures/verify-stages-light.svg">
+</picture>
 
 What is being checked is written down once, as a profile an independent
 implementation can be scored against: `CONFORMANCE.md`, which says where
