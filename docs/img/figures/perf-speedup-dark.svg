@@ -1,0 +1,173 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="468" viewBox="0 0 900 468" role="img" aria-label="A grid of speed-ups of the resident tiles over the fastest real software, for multiply, fused multiply-add and add, at four formats, on two machines: the tile is ahead in 32 of 48 cells, by up to 55 times, and behind in 16, by up to 7.2 times.">
+<title>A grid of speed-ups of the resident tiles over the fastest real software, for multiply, fused multiply-add and add, at four formats, on two machines: the tile is ahead in 32 of 48 cells, by up to 55 times, and behind in 16, by up to 7.2 times.</title>
+<rect width="900" height="468" fill="#0d1117"/>
+<text x="24.0" y="30.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="17" fill="#e6edf3" font-weight="600">Where the card wins, for every operation</text>
+<text x="24.0" y="52.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#9198a1">Resident tiles against the fastest real software on the same machine, each at the largest element count both sides</text>
+<text x="24.0" y="69.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#9198a1">measured (at least 65,536). Green: the tile is ahead. Red: it is behind. The small word is who the software was.</text>
+<text x="130.0" y="112.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#e6edf3" font-weight="600">an x86-64 workstation</text>
+<text x="170.0" y="138.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" fill="#9198a1" text-anchor="middle">binary32</text>
+<text x="250.0" y="138.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" fill="#9198a1" text-anchor="middle">binary64</text>
+<text x="330.0" y="138.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" fill="#9198a1" text-anchor="middle">binary128</text>
+<text x="410.0" y="138.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" fill="#9198a1" text-anchor="middle">binary256</text>
+<rect x="131.0" y="151.0" width="78.0" height="36.0" fill="#5f2d2f"/>
+<text x="170.0" y="167.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="12.5" fill="#e6edf3" font-weight="600" text-anchor="middle">/1.64</text>
+<text x="170.0" y="181.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9" fill="#e6edf3" text-anchor="middle" opacity="0.9">cpu-hw</text>
+<rect x="211.0" y="151.0" width="78.0" height="36.0" fill="#3f2529"/>
+<text x="250.0" y="167.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="12.5" fill="#e6edf3" font-weight="600" text-anchor="middle">/1.12</text>
+<text x="250.0" y="181.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9" fill="#e6edf3" text-anchor="middle" opacity="0.9">cpu-hw</text>
+<rect x="291.0" y="151.0" width="78.0" height="36.0" fill="#296437"/>
+<text x="330.0" y="167.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="12.5" fill="#e6edf3" font-weight="600" text-anchor="middle">4.46x</text>
+<text x="330.0" y="181.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9" fill="#e6edf3" text-anchor="middle" opacity="0.9">quadmath</text>
+<rect x="371.0" y="151.0" width="78.0" height="36.0" fill="#2b6b39"/>
+<text x="410.0" y="167.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="12.5" fill="#e6edf3" font-weight="600" text-anchor="middle">5.49x</text>
+<text x="410.0" y="181.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9" fill="#e6edf3" text-anchor="middle" opacity="0.9">mpfr</text>
+<rect x="131.0" y="189.0" width="78.0" height="36.0" fill="#234c30"/>
+<text x="170.0" y="205.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="12.5" fill="#e6edf3" font-weight="600" text-anchor="middle">2.24x</text>
+<text x="170.0" y="219.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9" fill="#e6edf3" text-anchor="middle" opacity="0.9">cpu-hw</text>
+<rect x="211.0" y="189.0" width="78.0" height="36.0" fill="#275b35"/>
+<text x="250.0" y="205.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="12.5" fill="#e6edf3" font-weight="600" text-anchor="middle">3.45x</text>
+<text x="250.0" y="219.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9" fill="#e6edf3" text-anchor="middle" opacity="0.9">cpu-hw</text>
+<rect x="291.0" y="189.0" width="78.0" height="36.0" fill="#359245"/>
+<text x="330.0" y="205.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="12.5" fill="#0d1117" font-weight="600" text-anchor="middle">17.5x</text>
+<text x="330.0" y="219.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9" fill="#0d1117" text-anchor="middle" opacity="0.9">quadmath</text>
+<rect x="371.0" y="189.0" width="78.0" height="36.0" fill="#369846"/>
+<text x="410.0" y="205.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="12.5" fill="#0d1117" font-weight="600" text-anchor="middle">21.1x</text>
+<text x="410.0" y="219.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9" fill="#0d1117" text-anchor="middle" opacity="0.9">mpfr</text>
+<rect x="131.0" y="227.0" width="78.0" height="36.0" fill="#20402d"/>
+<text x="170.0" y="243.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="12.5" fill="#e6edf3" font-weight="600" text-anchor="middle">1.55x</text>
+<text x="170.0" y="257.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9" fill="#e6edf3" text-anchor="middle" opacity="0.9">cpu-hw</text>
+<rect x="211.0" y="227.0" width="78.0" height="36.0" fill="#1e392b"/>
+<text x="250.0" y="243.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="12.5" fill="#e6edf3" font-weight="600" text-anchor="middle">1.25x</text>
+<text x="250.0" y="257.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9" fill="#e6edf3" text-anchor="middle" opacity="0.9">cpu-hw</text>
+<rect x="291.0" y="227.0" width="78.0" height="36.0" fill="#338a42"/>
+<text x="330.0" y="243.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="12.5" fill="#0d1117" font-weight="600" text-anchor="middle">14.0x</text>
+<text x="330.0" y="257.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9" fill="#0d1117" text-anchor="middle" opacity="0.9">mpfr</text>
+<rect x="371.0" y="227.0" width="78.0" height="36.0" fill="#2f7b3e"/>
+<text x="410.0" y="243.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="12.5" fill="#e6edf3" font-weight="600" text-anchor="middle">8.84x</text>
+<text x="410.0" y="257.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9" fill="#e6edf3" text-anchor="middle" opacity="0.9">mpfr</text>
+<rect x="131.0" y="265.0" width="78.0" height="36.0" fill="#2b6c39"/>
+<text x="170.0" y="281.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="12.5" fill="#e6edf3" font-weight="600" text-anchor="middle">5.68x</text>
+<text x="170.0" y="295.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9" fill="#e6edf3" text-anchor="middle" opacity="0.9">cpu-hw</text>
+<rect x="211.0" y="265.0" width="78.0" height="36.0" fill="#296638"/>
+<text x="250.0" y="281.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="12.5" fill="#e6edf3" font-weight="600" text-anchor="middle">4.79x</text>
+<text x="250.0" y="295.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9" fill="#e6edf3" text-anchor="middle" opacity="0.9">cpu-hw</text>
+<rect x="291.0" y="265.0" width="78.0" height="36.0" fill="#3fb850"/>
+<text x="330.0" y="281.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="12.5" fill="#0d1117" font-weight="600" text-anchor="middle">55.1x</text>
+<text x="330.0" y="295.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9" fill="#0d1117" text-anchor="middle" opacity="0.9">mpfr</text>
+<rect x="371.0" y="265.0" width="78.0" height="36.0" fill="#3ba84b"/>
+<text x="410.0" y="281.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="12.5" fill="#0d1117" font-weight="600" text-anchor="middle">34.0x</text>
+<text x="410.0" y="295.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9" fill="#0d1117" text-anchor="middle" opacity="0.9">mpfr</text>
+<rect x="131.0" y="303.0" width="78.0" height="36.0" fill="#5f2c2f"/>
+<text x="170.0" y="319.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="12.5" fill="#e6edf3" font-weight="600" text-anchor="middle">/1.63</text>
+<text x="170.0" y="333.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9" fill="#e6edf3" text-anchor="middle" opacity="0.9">cpu-hw</text>
+<rect x="211.0" y="303.0" width="78.0" height="36.0" fill="#3f2529"/>
+<text x="250.0" y="319.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="12.5" fill="#e6edf3" font-weight="600" text-anchor="middle">/1.12</text>
+<text x="250.0" y="333.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9" fill="#e6edf3" text-anchor="middle" opacity="0.9">cpu-hw</text>
+<rect x="291.0" y="303.0" width="78.0" height="36.0" fill="#2a6939"/>
+<text x="330.0" y="319.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="12.5" fill="#e6edf3" font-weight="600" text-anchor="middle">5.24x</text>
+<text x="330.0" y="333.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9" fill="#e6edf3" text-anchor="middle" opacity="0.9">quadmath</text>
+<rect x="371.0" y="303.0" width="78.0" height="36.0" fill="#296537"/>
+<text x="410.0" y="319.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="12.5" fill="#e6edf3" font-weight="600" text-anchor="middle">4.61x</text>
+<text x="410.0" y="333.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9" fill="#e6edf3" text-anchor="middle" opacity="0.9">mpfr</text>
+<rect x="131.0" y="341.0" width="78.0" height="36.0" fill="#234d30"/>
+<text x="170.0" y="357.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="12.5" fill="#e6edf3" font-weight="600" text-anchor="middle">2.26x</text>
+<text x="170.0" y="371.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9" fill="#e6edf3" text-anchor="middle" opacity="0.9">cpu-hw</text>
+<rect x="211.0" y="341.0" width="78.0" height="36.0" fill="#275b35"/>
+<text x="250.0" y="357.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="12.5" fill="#e6edf3" font-weight="600" text-anchor="middle">3.44x</text>
+<text x="250.0" y="371.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9" fill="#e6edf3" text-anchor="middle" opacity="0.9">cpu-hw</text>
+<rect x="291.0" y="341.0" width="78.0" height="36.0" fill="#369746"/>
+<text x="330.0" y="357.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="12.5" fill="#0d1117" font-weight="600" text-anchor="middle">20.6x</text>
+<text x="330.0" y="371.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9" fill="#0d1117" text-anchor="middle" opacity="0.9">quadmath</text>
+<rect x="371.0" y="341.0" width="78.0" height="36.0" fill="#359245"/>
+<text x="410.0" y="357.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="12.5" fill="#0d1117" font-weight="600" text-anchor="middle">17.8x</text>
+<text x="410.0" y="371.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9" fill="#0d1117" text-anchor="middle" opacity="0.9">mpfr</text>
+<text x="488.0" y="112.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#e6edf3" font-weight="600">an M2 Pro laptop</text>
+<text x="528.0" y="138.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" fill="#9198a1" text-anchor="middle">binary32</text>
+<text x="608.0" y="138.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" fill="#9198a1" text-anchor="middle">binary64</text>
+<text x="688.0" y="138.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" fill="#9198a1" text-anchor="middle">binary128</text>
+<text x="768.0" y="138.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" fill="#9198a1" text-anchor="middle">binary256</text>
+<rect x="489.0" y="151.0" width="78.0" height="36.0" fill="#dd4b44"/>
+<text x="528.0" y="167.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="12.5" fill="#0d1117" font-weight="600" text-anchor="middle">/7.25</text>
+<text x="528.0" y="181.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9" fill="#0d1117" text-anchor="middle" opacity="0.9">cpu-hw</text>
+<rect x="569.0" y="151.0" width="78.0" height="36.0" fill="#dc4a44"/>
+<text x="608.0" y="167.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="12.5" fill="#0d1117" font-weight="600" text-anchor="middle">/7.15</text>
+<text x="608.0" y="181.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9" fill="#0d1117" text-anchor="middle" opacity="0.9">cpu-hw</text>
+<rect x="649.0" y="151.0" width="78.0" height="36.0" fill="#255332"/>
+<text x="688.0" y="167.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="12.5" fill="#e6edf3" font-weight="600" text-anchor="middle">2.76x</text>
+<text x="688.0" y="181.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9" fill="#e6edf3" text-anchor="middle" opacity="0.9">mpfr</text>
+<rect x="729.0" y="151.0" width="78.0" height="36.0" fill="#286036"/>
+<text x="768.0" y="167.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="12.5" fill="#e6edf3" font-weight="600" text-anchor="middle">3.97x</text>
+<text x="768.0" y="181.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9" fill="#e6edf3" text-anchor="middle" opacity="0.9">mpfr</text>
+<rect x="489.0" y="189.0" width="78.0" height="36.0" fill="#6f3031"/>
+<text x="528.0" y="205.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="12.5" fill="#e6edf3" font-weight="600" text-anchor="middle">/1.97</text>
+<text x="528.0" y="219.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9" fill="#e6edf3" text-anchor="middle" opacity="0.9">cpu-hw</text>
+<rect x="569.0" y="189.0" width="78.0" height="36.0" fill="#6a2f31"/>
+<text x="608.0" y="205.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="12.5" fill="#e6edf3" font-weight="600" text-anchor="middle">/1.86</text>
+<text x="608.0" y="219.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9" fill="#e6edf3" text-anchor="middle" opacity="0.9">cpu-hw</text>
+<rect x="649.0" y="189.0" width="78.0" height="36.0" fill="#318140"/>
+<text x="688.0" y="205.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="12.5" fill="#e6edf3" font-weight="600" text-anchor="middle">10.8x</text>
+<text x="688.0" y="219.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9" fill="#e6edf3" text-anchor="middle" opacity="0.9">mpfr</text>
+<rect x="729.0" y="189.0" width="78.0" height="36.0" fill="#348d43"/>
+<text x="768.0" y="205.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="12.5" fill="#0d1117" font-weight="600" text-anchor="middle">15.3x</text>
+<text x="768.0" y="219.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9" fill="#0d1117" text-anchor="middle" opacity="0.9">mpfr</text>
+<rect x="489.0" y="227.0" width="78.0" height="36.0" fill="#c34440"/>
+<text x="528.0" y="243.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="12.5" fill="#e6edf3" font-weight="600" text-anchor="middle">/5.33</text>
+<text x="528.0" y="257.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9" fill="#e6edf3" text-anchor="middle" opacity="0.9">cpu-hw</text>
+<rect x="569.0" y="227.0" width="78.0" height="36.0" fill="#c84641"/>
+<text x="608.0" y="243.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="12.5" fill="#e6edf3" font-weight="600" text-anchor="middle">/5.68</text>
+<text x="608.0" y="257.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9" fill="#e6edf3" text-anchor="middle" opacity="0.9">cpu-hw</text>
+<rect x="649.0" y="227.0" width="78.0" height="36.0" fill="#318140"/>
+<text x="688.0" y="243.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="12.5" fill="#e6edf3" font-weight="600" text-anchor="middle">10.8x</text>
+<text x="688.0" y="257.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9" fill="#e6edf3" text-anchor="middle" opacity="0.9">mpfr</text>
+<rect x="729.0" y="227.0" width="78.0" height="36.0" fill="#2c6e3a"/>
+<text x="768.0" y="243.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="12.5" fill="#e6edf3" font-weight="600" text-anchor="middle">6.11x</text>
+<text x="768.0" y="257.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9" fill="#e6edf3" text-anchor="middle" opacity="0.9">mpfr</text>
+<rect x="489.0" y="265.0" width="78.0" height="36.0" fill="#552a2d"/>
+<text x="528.0" y="281.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="12.5" fill="#e6edf3" font-weight="600" text-anchor="middle">/1.45</text>
+<text x="528.0" y="295.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9" fill="#e6edf3" text-anchor="middle" opacity="0.9">cpu-hw</text>
+<rect x="569.0" y="265.0" width="78.0" height="36.0" fill="#572a2d"/>
+<text x="608.0" y="281.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="12.5" fill="#e6edf3" font-weight="600" text-anchor="middle">/1.48</text>
+<text x="608.0" y="295.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9" fill="#e6edf3" text-anchor="middle" opacity="0.9">cpu-hw</text>
+<rect x="649.0" y="265.0" width="78.0" height="36.0" fill="#3daf4d"/>
+<text x="688.0" y="281.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="12.5" fill="#0d1117" font-weight="600" text-anchor="middle">42.3x</text>
+<text x="688.0" y="295.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9" fill="#0d1117" text-anchor="middle" opacity="0.9">mpfr</text>
+<rect x="729.0" y="265.0" width="78.0" height="36.0" fill="#379c47"/>
+<text x="768.0" y="281.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="12.5" fill="#0d1117" font-weight="600" text-anchor="middle">23.5x</text>
+<text x="768.0" y="295.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9" fill="#0d1117" text-anchor="middle" opacity="0.9">mpfr</text>
+<rect x="489.0" y="303.0" width="78.0" height="36.0" fill="#da4a44"/>
+<text x="528.0" y="319.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="12.5" fill="#0d1117" font-weight="600" text-anchor="middle">/7.02</text>
+<text x="528.0" y="333.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9" fill="#0d1117" text-anchor="middle" opacity="0.9">cpu-hw</text>
+<rect x="569.0" y="303.0" width="78.0" height="36.0" fill="#db4a44"/>
+<text x="608.0" y="319.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="12.5" fill="#0d1117" font-weight="600" text-anchor="middle">/7.10</text>
+<text x="608.0" y="333.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9" fill="#0d1117" text-anchor="middle" opacity="0.9">cpu-hw</text>
+<rect x="649.0" y="303.0" width="78.0" height="36.0" fill="#286136"/>
+<text x="688.0" y="319.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="12.5" fill="#e6edf3" font-weight="600" text-anchor="middle">4.16x</text>
+<text x="688.0" y="333.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9" fill="#e6edf3" text-anchor="middle" opacity="0.9">mpfr</text>
+<rect x="729.0" y="303.0" width="78.0" height="36.0" fill="#255433"/>
+<text x="768.0" y="319.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="12.5" fill="#e6edf3" font-weight="600" text-anchor="middle">2.80x</text>
+<text x="768.0" y="333.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9" fill="#e6edf3" text-anchor="middle" opacity="0.9">mpfr</text>
+<rect x="489.0" y="341.0" width="78.0" height="36.0" fill="#6c3031"/>
+<text x="528.0" y="357.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="12.5" fill="#e6edf3" font-weight="600" text-anchor="middle">/1.91</text>
+<text x="528.0" y="371.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9" fill="#e6edf3" text-anchor="middle" opacity="0.9">cpu-hw</text>
+<rect x="569.0" y="341.0" width="78.0" height="36.0" fill="#6a2f30"/>
+<text x="608.0" y="357.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="12.5" fill="#e6edf3" font-weight="600" text-anchor="middle">/1.85</text>
+<text x="608.0" y="371.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9" fill="#e6edf3" text-anchor="middle" opacity="0.9">cpu-hw</text>
+<rect x="649.0" y="341.0" width="78.0" height="36.0" fill="#348f44"/>
+<text x="688.0" y="357.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="12.5" fill="#0d1117" font-weight="600" text-anchor="middle">16.3x</text>
+<text x="688.0" y="371.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9" fill="#0d1117" text-anchor="middle" opacity="0.9">mpfr</text>
+<rect x="729.0" y="341.0" width="78.0" height="36.0" fill="#318140"/>
+<text x="768.0" y="357.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="12.5" fill="#e6edf3" font-weight="600" text-anchor="middle">10.8x</text>
+<text x="768.0" y="371.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9" fill="#e6edf3" text-anchor="middle" opacity="0.9">mpfr</text>
+<text x="24.0" y="166.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12" fill="#e6edf3" font-weight="600">multiply</text>
+<text x="24.0" y="181.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#9198a1">1 tile</text>
+<text x="24.0" y="204.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#9198a1">4 tiles</text>
+<text x="24.0" y="242.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12" fill="#e6edf3" font-weight="600">fused multiply-add</text>
+<text x="24.0" y="257.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#9198a1">1 tile</text>
+<text x="24.0" y="280.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#9198a1">4 tiles</text>
+<text x="24.0" y="318.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12" fill="#e6edf3" font-weight="600">add</text>
+<text x="24.0" y="333.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#9198a1">1 tile</text>
+<text x="24.0" y="356.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#9198a1">4 tiles</text>
+<text x="24.0" y="402.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#9198a1">A loss is written as a divisor: /7.2 means the tile takes 7.2 times as long. Fused multiply-add flatters the tile because glibc's fma is a</text>
+<text x="24.0" y="417.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#9198a1">function call and __float128's is a soft routine; add and multiply are one instruction on a CPU that has the format.</text>
+<text x="24.0" y="460.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#9198a1">source: docs/bench/peers-arm64.csv (4224b471); docs/bench/peers-x86_64.csv (0a725a61); docs/bench/sweep-x86_64.csv (b52a1574)</text>
+</svg>

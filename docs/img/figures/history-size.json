@@ -1,0 +1,236 @@
+{
+ "figure": "history-size",
+ "title": "What the repository is made of, and the record it keeps",
+ "group": "history",
+ "alt": "Text lines in the repository by area at the end of each day, and the validation ledger's size, with the lines ever deleted from it: 518 of 21,561, 515 of them in the newest entry.",
+ "files": ["docs/img/figures/history-size-light.svg", "docs/img/figures/history-size-dark.svg"],
+ "maker": "python/project_figures.py: build_history_size, draw_history_size",
+ "commit": "0b77387ea1266f4d4a5e30c8798f57e8b6dc6ef8",
+ "commit_means": "the commit the extracts below were read at; a file read from the tree is identified by its SHA-256 instead",
+ "sources": [],
+ "extracts": [
+  {
+   "name": "ledger",
+   "path": "docs/figures/ledger.json",
+   "sha256": "c8f802c8166a6c1a5fccdec838a12bb26efb7720b151051457d1100020c30629",
+   "read_at": "the first 1891030 bytes of docs/VALIDATION.md (sha256 below)",
+   "label": "ledger, first 1,891,030 bytes",
+   "what": "the card's timing attempts (kernel WNS by image, tiles and clock) and the ledger's milestones, read out of docs/VALIDATION.md by patterns that name the entry",
+   "body_sha256": "00587cfb88c7e019e385c847c379823e4a07687e7993363d089f76b1f9892e69",
+   "remake": "python python/figure_extracts.py ledger",
+   "sources": [
+    {
+     "kind": "file-prefix",
+     "path": "docs/VALIDATION.md",
+     "bytes": 1891030,
+     "sha256": "300660c895da4e28f314d22f009da254ef44816686adeb39bcdd375986f8ae70"
+    }
+   ]
+  },
+  {
+   "name": "tree",
+   "path": "docs/figures/tree.json",
+   "sha256": "83e09354c53306c6f3f2e940f6612b55e3184b83d6fce382f8294620d52bf8d0",
+   "read_at": "0b77387ea1266f4d4a5e30c8798f57e8b6dc6ef8",
+   "label": "0b77387",
+   "what": "the tree at the end of each day on main's own line: text lines by area, the ledger's size and line traffic, and the size of the gate",
+   "body_sha256": "bdb65b70acafe09753de32b5ca3d67c8d815926144548aeecd52a01bd1f846b0",
+   "remake": "python python/figure_extracts.py tree --as-of 0b77387ea1266f4d4a5e30c8798f57e8b6dc6ef8",
+   "sources": [
+    {
+     "kind": "git",
+     "as_of": "0b77387ea1266f4d4a5e30c8798f57e8b6dc6ef8",
+     "commands": [
+       "git log --first-parent --reverse --format=%H|%ad --date=format:%Y-%m-%d AS_OF",
+       "git grep -I -c '' TIP -- .",
+       "git show TIP:docs/VALIDATION.md, verify/run.sh, tb/Makefile, formal/run.sh",
+       "git grep -c -E '^\\s*def test_' TIP -- python/tests",
+       "git log AS_OF --no-renames --numstat -- docs/VALIDATION.md"
+     ]
+    }
+   ]
+  }
+ ],
+ "checks": [
+  {
+   "id": "ledger-size",
+   "claim": "the ledger's lines and entries at the as-of commit (git) and in the pinned prefix of the file",
+   "document": "docs/VALIDATION.md",
+   "drawn": "21,037 lines, 192 entries (git)",
+   "stated": "21,037 lines, 192 entries (the file's prefix)",
+   "verdict": "agrees"
+  },
+  {
+   "id": "pack-delivered",
+   "claim": "the hard-workload pack is kept as delivered, by another model",
+   "document": "programs/workloads/README.md",
+   "drawn": "stated in the subtitle",
+   "stated": "written by an OpenAI model",
+   "verdict": "agrees"
+  },
+  {
+   "id": "pack-kept",
+   "claim": "... and says so in its title",
+   "document": "programs/workloads/README.md",
+   "drawn": "stated in the subtitle",
+   "stated": "programs written elsewhere, kept as delivered",
+   "verdict": "agrees"
+  },
+  {
+   "id": "arduino-copy",
+   "claim": "the Arduino library holds a vendored copy of host/",
+   "document": "bindings/arduino/sync.py",
+   "drawn": "stated in the subtitle",
+   "stated": "Vendor libcft into the Arduino library",
+   "verdict": "agrees"
+  },
+  {
+   "id": "ledger-deleted",
+   "claim": "the lines deleted, counted by commit and by position",
+   "document": "docs/figures/tree.json",
+   "drawn": "518",
+   "stated": "518",
+   "verdict": "agrees"
+  }
+ ],
+ "data": {
+  "days": [
+    "2026-08-28", "2026-08-29", "2026-08-30", "2026-08-31", "2026-09-01", "2026-09-02", "2026-09-03",
+    "2026-09-04", "2026-09-05", "2026-09-06", "2026-09-07", "2026-09-08", "2026-09-09", "2026-09-10",
+    "2026-09-11", "2026-09-12", "2026-09-13", "2026-09-14", "2026-09-15", "2026-09-16", "2026-09-17",
+    "2026-09-18", "2026-09-19", "2026-09-20", "2026-09-21", "2026-09-22", "2026-09-23", "2026-09-24",
+    "2026-09-25", "2026-09-26", "2026-09-27", "2026-09-28", "2026-09-29", "2026-09-30", "2026-10-01",
+    "2026-10-02", "2026-10-03", "2026-10-04", "2026-10-05", "2026-10-06", "2026-10-07", "2026-10-08",
+    "2026-10-09", "2026-10-10", "2026-10-11", "2026-10-12", "2026-10-13", "2026-10-14", "2026-10-15",
+    "2026-10-16", "2026-10-17", "2026-10-18", "2026-10-19"
+  ],
+  "areas": ["rtl", "golden", "host", "programs", "hw", "gates", "docs", "pack", "vendored"],
+  "names": {
+   "rtl": "RTL, benches and proofs",
+   "golden": "golden model and compiler",
+   "host": "host library and bindings",
+   "programs": "programs and certificates",
+   "hw": "FPGA builds and the card",
+   "gates": "gates and plumbing",
+   "docs": "documents",
+   "pack": "the delivered hard-workload pack",
+   "vendored": "the Arduino copy of host/"
+  },
+  "lines": {
+   "rtl": [
+     1447, 3894, 8346, 12438, 16251, 18473, 18473, 18473, 18473, 20171, 22642, 24921, 25497, 25506,
+     25728, 26186, 26186, 27615, 31542, 31542, 31542, 31542, 31542, 31542, 31542, 31542, 31670, 31735,
+     31739, 31739, 31739, 31739, 35214, 35214, 35214, 35214, 36295, 36295, 44199, 44199, 44199, 44199,
+     44199, 44199, 44199, 44199, 44199, 44199, 44199, 44199, 44199, 44199, 44250
+   ],
+   "golden": [
+     909, 2766, 3613, 5006, 7273, 7284, 16876, 18866, 18866, 18866, 19696, 23478, 23771, 23873, 24170,
+     24445, 25413, 26680, 27291, 27459, 27459, 27461, 27461, 27461, 27461, 27461, 27461, 27982, 27982,
+     27982, 27982, 32738, 35703, 35823, 48964, 62685, 62688, 62688, 63045, 63135, 63135, 63135, 63135,
+     63135, 63135, 63136, 70138, 73445, 76386, 76433, 76433, 76433, 76476
+   ],
+   "host": [
+     105, 6211, 8456, 14044, 24513, 31079, 61929, 95364, 95364, 99396, 110149, 120677, 132838, 132936,
+     133238, 134279, 134397, 137416, 144055, 144228, 144228, 145402, 145402, 145402, 145402, 145402,
+     145402, 146771, 151648, 152397, 152810, 159474, 162727, 177676, 178248, 180221, 188444, 188444,
+     189397, 189840, 189840, 189840, 189840, 189840, 189840, 189840, 189872, 190776, 190778, 190879,
+     190879, 190879, 190879
+   ],
+   "programs": [
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3820, 3836, 3846, 3846, 3846, 3846, 6376, 6376, 6376, 6376,
+     6376, 6376, 6376, 6376, 6376, 6376, 6377, 12416, 12416, 12416, 13664, 16278, 17743, 43685, 61639,
+     61836, 61836, 61850, 62012, 62012, 62012, 62012, 62012, 62012, 62972, 62972, 62972, 96601, 96615,
+     96615, 96615, 96615
+   ],
+   "hw": [
+     203, 851, 1094, 1871, 2071, 3150, 3150, 3150, 3150, 3293, 3300, 3343, 3343, 3348, 3348, 3596,
+     3951, 4328, 4353, 4353, 4353, 4353, 4353, 4353, 4353, 4353, 6430, 6442, 6444, 6444, 6444, 6951,
+     6960, 7153, 7153, 7153, 7468, 7468, 7782, 7789, 7789, 7789, 7789, 7789, 7789, 8977, 8977, 8977,
+     8977, 17922, 17922, 17922, 17922
+   ],
+   "gates": [
+     146, 233, 235, 792, 991, 1198, 1237, 1379, 1379, 1416, 1515, 1566, 1607, 1627, 1637, 1705, 1813,
+     1814, 1814, 1814, 1814, 1839, 1839, 1839, 1839, 1839, 1850, 2691, 2716, 2716, 2716, 2749, 3249,
+     3374, 3432, 3537, 3552, 3552, 3576, 3578, 3578, 3578, 3578, 3578, 3578, 3606, 3614, 3614, 3614,
+     3621, 3621, 3621, 3648
+   ],
+   "docs": [
+     892, 3059, 4686, 5531, 6530, 8458, 13526, 20949, 23297, 25073, 32481, 36221, 40200, 40542, 40654,
+     42001, 74266, 75598, 78179, 78961, 78961, 79865, 79865, 79909, 82144, 82144, 83259, 83807, 84703,
+     84751, 84773, 88275, 91352, 95002, 97292, 105343, 106069, 106069, 107713, 114121, 114121, 114121,
+     114121, 114121, 114121, 115053, 124867, 125521, 126358, 126925, 126925, 126925, 127058
+   ],
+   "pack": [
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 251757, 251757, 251757, 251757, 251757, 251757, 251757, 251757, 251757, 251757, 251757,
+     251757, 251757, 251757, 251757, 251757, 251757, 251757
+   ],
+   "vendored": [
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 28075, 28075, 28075, 28690, 28690, 30960, 32485, 32485,
+     32485, 32492, 32492, 32492, 32492, 32492, 32492, 32797, 33595, 33649, 33743, 34028, 34482, 35249,
+     35295, 35628, 36012, 36012, 36056, 36056, 36056, 36056, 36056, 36056, 36056, 36056, 36058, 36058,
+     36060, 36060, 36060, 36060, 36060
+   ]
+  },
+  "final": {
+   "rtl": 44250,
+   "golden": 76476,
+   "host": 190879,
+   "programs": 96615,
+   "hw": 17922,
+   "gates": 3648,
+   "docs": 127058,
+   "pack": 251757,
+   "vendored": 36060
+  },
+  "total": 844665,
+  "files": 1251,
+  "ledger": {
+   "lines": [
+     0, 0, 0, 332, 712, 1222, 2409, 4098, 4098, 4422, 6225, 8283, 10570, 10570, 10570, 11136, 11227,
+     11912, 12742, 12957, 12957, 13389, 13389, 13389, 13389, 13389, 14152, 14370, 14821, 14821, 14821,
+     15626, 16153, 16670, 16846, 17478, 17478, 17478, 18201, 18673, 18673, 18673, 18673, 18673, 18673,
+     18991, 19639, 20206, 20549, 20917, 20917, 20917, 21037
+   ],
+   "entries": [
+     0, 0, 0, 16, 29, 41, 53, 62, 62, 64, 77, 87, 96, 96, 96, 100, 101, 113, 123, 126, 126, 132, 132,
+     132, 132, 132, 144, 147, 150, 150, 150, 151, 153, 156, 157, 161, 161, 161, 164, 168, 168, 168,
+     168, 168, 168, 171, 179, 184, 187, 191, 191, 191, 192
+   ],
+   "added": 21561,
+   "deleted": 518,
+   "edits": {
+    "deleted": 518,
+    "by_distance": {
+     "0": 515,
+     "1": 2,
+     "19": 1
+    },
+    "not_the_newest": [
+     {
+      "commit": "d9b5ac4",
+      "day": "2026-09-04",
+      "entries_from_end": 19,
+      "lines": 1
+     },
+     {
+      "commit": "e3fe2ca",
+      "day": "2026-10-06",
+      "entries_from_end": 1,
+      "lines": 1
+     },
+     {
+      "commit": "3947c44",
+      "day": "2026-10-06",
+      "entries_from_end": 1,
+      "lines": 1
+     }
+    ],
+    "commits_deleting": 82,
+    "subjects_restating": 54,
+    "subject_words": "restat|correct|verifier|made true|finding|send-back|fix"
+   }
+  },
+  "as_of": "0b77387ea1266f4d4a5e30c8798f57e8b6dc6ef8"
+ }
+}

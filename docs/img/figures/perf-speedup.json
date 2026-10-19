@@ -1,0 +1,592 @@
+{
+ "figure": "perf-speedup",
+ "title": "Where the card wins, for every operation",
+ "group": "performance",
+ "alt": "A grid of speed-ups of the resident tiles over the fastest real software, for multiply, fused multiply-add and add, at four formats, on two machines: the tile is ahead in 32 of 48 cells, by up to 55 times, and behind in 16, by up to 7.2 times.",
+ "files": ["docs/img/figures/perf-speedup-light.svg", "docs/img/figures/perf-speedup-dark.svg"],
+ "maker": "python/project_figures.py: build_perf_speedup, draw_perf_speedup",
+ "commit": "0b77387ea1266f4d4a5e30c8798f57e8b6dc6ef8",
+ "commit_means": "the commit the extracts below were read at; a file read from the tree is identified by its SHA-256 instead",
+ "sources": [
+  {
+   "path": "docs/bench/peers-arm64.csv",
+   "sha256": "4224b47161838f4f43af20cc858443d18ff9b7304ab3ce48aaf41032194328ba",
+   "bytes": 51921
+  },
+  {
+   "path": "docs/bench/peers-x86_64.csv",
+   "sha256": "0a725a61399ace706d6ca12f120a7659709b176c49b36b1cca8cba51f6d9363e",
+   "bytes": 55560
+  },
+  {
+   "path": "docs/bench/sweep-x86_64.csv",
+   "sha256": "b52a1574388d84072a6ac48a7ba6f7cc3850c706306ab378ac93985ae8dfa0c7",
+   "bytes": 766712
+  }
+ ],
+ "extracts": [],
+ "checks": [
+  {
+   "id": "mul-1t-f128",
+   "claim": "multiply, one tile, x86-64: binary128",
+   "document": "README.md",
+   "drawn": "4.5",
+   "stated": "4.5",
+   "verdict": "agrees"
+  },
+  {
+   "id": "mul-1t-f256",
+   "claim": "multiply, one tile, x86-64: binary256",
+   "document": "README.md",
+   "drawn": "5.5",
+   "stated": "5.5",
+   "verdict": "agrees"
+  },
+  {
+   "id": "mul-4t-f128",
+   "claim": "multiply, four tiles, x86-64: binary128",
+   "document": "README.md",
+   "drawn": "17.5",
+   "stated": "17.5",
+   "verdict": "agrees"
+  },
+  {
+   "id": "mul-4t-f256",
+   "claim": "multiply, four tiles, x86-64: binary256",
+   "document": "README.md",
+   "drawn": "21.1",
+   "stated": "21.1",
+   "verdict": "agrees"
+  },
+  {
+   "id": "mul-1t-f32-behind",
+   "claim": "multiply, one tile, x86-64, binary32: times behind",
+   "document": "README.md",
+   "drawn": "1.6",
+   "stated": "1.6",
+   "verdict": "agrees"
+  },
+  {
+   "id": "mul-1t-f64-behind",
+   "claim": "multiply, one tile, x86-64, binary64: times behind",
+   "document": "README.md",
+   "drawn": "1.1",
+   "stated": "1.1",
+   "verdict": "agrees"
+  },
+  {
+   "id": "mul-1t-f32-m2",
+   "claim": "multiply, one tile, M2 Pro, binary32: times behind",
+   "document": "README.md",
+   "drawn": "7.2",
+   "stated": "7.2",
+   "verdict": "agrees"
+  },
+  {
+   "id": "fma-1t-f128",
+   "claim": "fused multiply-add, one tile, x86-64: binary128",
+   "document": "README.md",
+   "drawn": "14.0",
+   "stated": "14.0",
+   "verdict": "agrees"
+  },
+  {
+   "id": "fma-4t-f128",
+   "claim": "fused multiply-add, four tiles, x86-64: binary128",
+   "document": "README.md",
+   "drawn": "55.1",
+   "stated": "55.1",
+   "verdict": "agrees"
+  },
+  {
+   "id": "fma-1t-f32",
+   "claim": "fused multiply-add, one tile, x86-64: binary32, ahead by",
+   "document": "README.md",
+   "drawn": "1.55",
+   "stated": "1.55",
+   "verdict": "agrees"
+  },
+  {
+   "id": "fma-1t-f64",
+   "claim": "fused multiply-add, one tile, x86-64: binary64, ahead by",
+   "document": "README.md",
+   "drawn": "1.25",
+   "stated": "1.25",
+   "verdict": "agrees"
+  },
+  {
+   "id": "fma-1t-f32-m2",
+   "claim": "fused multiply-add, one tile, M2 Pro: binary32 reaches",
+   "document": "README.md",
+   "drawn": "0.19",
+   "stated": "0.19",
+   "verdict": "agrees"
+  },
+  {
+   "id": "fma-1t-f64-m2",
+   "claim": "fused multiply-add, one tile, M2 Pro: binary64 reaches",
+   "document": "README.md",
+   "drawn": "0.18",
+   "stated": "0.18",
+   "verdict": "agrees"
+  },
+  {
+   "id": "glibc-fma",
+   "claim": "the README's reason fused multiply-add flatters the tile on a CPU",
+   "document": "README.md",
+   "drawn": "stated in the caption",
+   "stated": "glibc's `fma` is a function call",
+   "verdict": "agrees"
+  },
+  {
+   "id": "fmaq-soft",
+   "claim": "the README's reason binary128 fused multiply-add flatters it",
+   "document": "README.md",
+   "drawn": "stated in the caption",
+   "stated": "`fmaq` is a soft routine",
+   "verdict": "agrees"
+  }
+ ],
+ "data": {
+  "cells": [
+   {
+    "op": "mul",
+    "tiles": 1,
+    "arch": "x86-64",
+    "format": "fp32",
+    "ratio": 0.609386,
+    "n": 4194304,
+    "best": "cpu-hw"
+   },
+   {
+    "op": "mul",
+    "tiles": 1,
+    "arch": "x86-64",
+    "format": "fp64",
+    "ratio": 0.896508,
+    "n": 4194304,
+    "best": "cpu-hw"
+   },
+   {
+    "op": "mul",
+    "tiles": 1,
+    "arch": "x86-64",
+    "format": "fp128",
+    "ratio": 4.4641,
+    "n": 4194304,
+    "best": "quadmath"
+   },
+   {
+    "op": "mul",
+    "tiles": 1,
+    "arch": "x86-64",
+    "format": "fp256",
+    "ratio": 5.48924,
+    "n": 1048576,
+    "best": "mpfr"
+   },
+   {
+    "op": "mul",
+    "tiles": 1,
+    "arch": "arm64",
+    "format": "fp32",
+    "ratio": 0.137998,
+    "n": 4194304,
+    "best": "cpu-hw"
+   },
+   {
+    "op": "mul",
+    "tiles": 1,
+    "arch": "arm64",
+    "format": "fp64",
+    "ratio": 0.139783,
+    "n": 4194304,
+    "best": "cpu-hw"
+   },
+   {
+    "op": "mul",
+    "tiles": 1,
+    "arch": "arm64",
+    "format": "fp128",
+    "ratio": 2.76007,
+    "n": 4194304,
+    "best": "mpfr"
+   },
+   {
+    "op": "mul",
+    "tiles": 1,
+    "arch": "arm64",
+    "format": "fp256",
+    "ratio": 3.97479,
+    "n": 1048576,
+    "best": "mpfr"
+   },
+   {
+    "op": "mul",
+    "tiles": 4,
+    "arch": "x86-64",
+    "format": "fp32",
+    "ratio": 2.24084,
+    "n": 4194304,
+    "best": "cpu-hw"
+   },
+   {
+    "op": "mul",
+    "tiles": 4,
+    "arch": "x86-64",
+    "format": "fp64",
+    "ratio": 3.44568,
+    "n": 4194304,
+    "best": "cpu-hw"
+   },
+   {
+    "op": "mul",
+    "tiles": 4,
+    "arch": "x86-64",
+    "format": "fp128",
+    "ratio": 17.5223,
+    "n": 4194304,
+    "best": "quadmath"
+   },
+   {
+    "op": "mul",
+    "tiles": 4,
+    "arch": "x86-64",
+    "format": "fp256",
+    "ratio": 21.08,
+    "n": 1048576,
+    "best": "mpfr"
+   },
+   {
+    "op": "mul",
+    "tiles": 4,
+    "arch": "arm64",
+    "format": "fp32",
+    "ratio": 0.507449,
+    "n": 4194304,
+    "best": "cpu-hw"
+   },
+   {
+    "op": "mul",
+    "tiles": 4,
+    "arch": "arm64",
+    "format": "fp64",
+    "ratio": 0.53725,
+    "n": 4194304,
+    "best": "cpu-hw"
+   },
+   {
+    "op": "mul",
+    "tiles": 4,
+    "arch": "arm64",
+    "format": "fp128",
+    "ratio": 10.8337,
+    "n": 4194304,
+    "best": "mpfr"
+   },
+   {
+    "op": "mul",
+    "tiles": 4,
+    "arch": "arm64",
+    "format": "fp256",
+    "ratio": 15.2642,
+    "n": 1048576,
+    "best": "mpfr"
+   },
+   {
+    "op": "fma",
+    "tiles": 1,
+    "arch": "x86-64",
+    "format": "fp32",
+    "ratio": 1.5473,
+    "n": 4194304,
+    "best": "cpu-hw"
+   },
+   {
+    "op": "fma",
+    "tiles": 1,
+    "arch": "x86-64",
+    "format": "fp64",
+    "ratio": 1.24719,
+    "n": 4194304,
+    "best": "cpu-hw"
+   },
+   {
+    "op": "fma",
+    "tiles": 1,
+    "arch": "x86-64",
+    "format": "fp128",
+    "ratio": 14.025,
+    "n": 4194304,
+    "best": "mpfr"
+   },
+   {
+    "op": "fma",
+    "tiles": 1,
+    "arch": "x86-64",
+    "format": "fp256",
+    "ratio": 8.84024,
+    "n": 1048576,
+    "best": "mpfr"
+   },
+   {
+    "op": "fma",
+    "tiles": 1,
+    "arch": "arm64",
+    "format": "fp32",
+    "ratio": 0.18778,
+    "n": 4194304,
+    "best": "cpu-hw"
+   },
+   {
+    "op": "fma",
+    "tiles": 1,
+    "arch": "arm64",
+    "format": "fp64",
+    "ratio": 0.176152,
+    "n": 4194304,
+    "best": "cpu-hw"
+   },
+   {
+    "op": "fma",
+    "tiles": 1,
+    "arch": "arm64",
+    "format": "fp128",
+    "ratio": 10.7836,
+    "n": 4194304,
+    "best": "mpfr"
+   },
+   {
+    "op": "fma",
+    "tiles": 1,
+    "arch": "arm64",
+    "format": "fp256",
+    "ratio": 6.11442,
+    "n": 1048576,
+    "best": "mpfr"
+   },
+   {
+    "op": "fma",
+    "tiles": 4,
+    "arch": "x86-64",
+    "format": "fp32",
+    "ratio": 5.67968,
+    "n": 4194304,
+    "best": "cpu-hw"
+   },
+   {
+    "op": "fma",
+    "tiles": 4,
+    "arch": "x86-64",
+    "format": "fp64",
+    "ratio": 4.79295,
+    "n": 4194304,
+    "best": "cpu-hw"
+   },
+   {
+    "op": "fma",
+    "tiles": 4,
+    "arch": "x86-64",
+    "format": "fp128",
+    "ratio": 55.0667,
+    "n": 4194304,
+    "best": "mpfr"
+   },
+   {
+    "op": "fma",
+    "tiles": 4,
+    "arch": "x86-64",
+    "format": "fp256",
+    "ratio": 33.9817,
+    "n": 1048576,
+    "best": "mpfr"
+   },
+   {
+    "op": "fma",
+    "tiles": 4,
+    "arch": "arm64",
+    "format": "fp32",
+    "ratio": 0.689281,
+    "n": 4194304,
+    "best": "cpu-hw"
+   },
+   {
+    "op": "fma",
+    "tiles": 4,
+    "arch": "arm64",
+    "format": "fp64",
+    "ratio": 0.676948,
+    "n": 4194304,
+    "best": "cpu-hw"
+   },
+   {
+    "op": "fma",
+    "tiles": 4,
+    "arch": "arm64",
+    "format": "fp128",
+    "ratio": 42.3397,
+    "n": 4194304,
+    "best": "mpfr"
+   },
+   {
+    "op": "fma",
+    "tiles": 4,
+    "arch": "arm64",
+    "format": "fp256",
+    "ratio": 23.5037,
+    "n": 1048576,
+    "best": "mpfr"
+   },
+   {
+    "op": "add",
+    "tiles": 1,
+    "arch": "x86-64",
+    "format": "fp32",
+    "ratio": 0.613064,
+    "n": 4194304,
+    "best": "cpu-hw"
+   },
+   {
+    "op": "add",
+    "tiles": 1,
+    "arch": "x86-64",
+    "format": "fp64",
+    "ratio": 0.896712,
+    "n": 4194304,
+    "best": "cpu-hw"
+   },
+   {
+    "op": "add",
+    "tiles": 1,
+    "arch": "x86-64",
+    "format": "fp128",
+    "ratio": 5.24399,
+    "n": 4194304,
+    "best": "quadmath"
+   },
+   {
+    "op": "add",
+    "tiles": 1,
+    "arch": "x86-64",
+    "format": "fp256",
+    "ratio": 4.61153,
+    "n": 1048576,
+    "best": "mpfr"
+   },
+   {
+    "op": "add",
+    "tiles": 1,
+    "arch": "arm64",
+    "format": "fp32",
+    "ratio": 0.142351,
+    "n": 4194304,
+    "best": "cpu-hw"
+   },
+   {
+    "op": "add",
+    "tiles": 1,
+    "arch": "arm64",
+    "format": "fp64",
+    "ratio": 0.140777,
+    "n": 4194304,
+    "best": "cpu-hw"
+   },
+   {
+    "op": "add",
+    "tiles": 1,
+    "arch": "arm64",
+    "format": "fp128",
+    "ratio": 4.15929,
+    "n": 4194304,
+    "best": "mpfr"
+   },
+   {
+    "op": "add",
+    "tiles": 1,
+    "arch": "arm64",
+    "format": "fp256",
+    "ratio": 2.80499,
+    "n": 1048576,
+    "best": "mpfr"
+   },
+   {
+    "op": "add",
+    "tiles": 4,
+    "arch": "x86-64",
+    "format": "fp32",
+    "ratio": 2.25901,
+    "n": 4194304,
+    "best": "cpu-hw"
+   },
+   {
+    "op": "add",
+    "tiles": 4,
+    "arch": "x86-64",
+    "format": "fp64",
+    "ratio": 3.44279,
+    "n": 4194304,
+    "best": "cpu-hw"
+   },
+   {
+    "op": "add",
+    "tiles": 4,
+    "arch": "x86-64",
+    "format": "fp128",
+    "ratio": 20.5918,
+    "n": 4194304,
+    "best": "quadmath"
+   },
+   {
+    "op": "add",
+    "tiles": 4,
+    "arch": "x86-64",
+    "format": "fp256",
+    "ratio": 17.7521,
+    "n": 1048576,
+    "best": "mpfr"
+   },
+   {
+    "op": "add",
+    "tiles": 4,
+    "arch": "arm64",
+    "format": "fp32",
+    "ratio": 0.524534,
+    "n": 4194304,
+    "best": "cpu-hw"
+   },
+   {
+    "op": "add",
+    "tiles": 4,
+    "arch": "arm64",
+    "format": "fp64",
+    "ratio": 0.540492,
+    "n": 4194304,
+    "best": "cpu-hw"
+   },
+   {
+    "op": "add",
+    "tiles": 4,
+    "arch": "arm64",
+    "format": "fp128",
+    "ratio": 16.3324,
+    "n": 4194304,
+    "best": "mpfr"
+   },
+   {
+    "op": "add",
+    "tiles": 4,
+    "arch": "arm64",
+    "format": "fp256",
+    "ratio": 10.7978,
+    "n": 1048576,
+    "best": "mpfr"
+   }
+  ],
+  "n_cells": 48,
+  "wins": 32,
+  "losses": 16,
+  "best": 55.0667,
+  "worst": 0.137998,
+  "peer_only_ops": ["div", "sqrt"]
+ }
+}

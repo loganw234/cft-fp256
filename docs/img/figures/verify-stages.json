@@ -1,0 +1,166 @@
+{
+ "figure": "verify-stages",
+ "title": "The runner's stages, and which budget runs each",
+ "group": "verification",
+ "alt": "The 52 stages of the verification runner in eight groups, each shaded by the smallest budget that runs it: 31 in quick, 13 more in gate, 8 only in the full census.",
+ "files": ["docs/img/figures/verify-stages-light.svg", "docs/img/figures/verify-stages-dark.svg"],
+ "maker": "python/project_figures.py: build_verify_stages, draw_verify_stages",
+ "commit": "0b77387ea1266f4d4a5e30c8798f57e8b6dc6ef8",
+ "commit_means": "the commit the extracts below were read at; a file read from the tree is identified by its SHA-256 instead",
+ "sources": [
+  {
+   "path": "verify/run.sh",
+   "sha256": "a4c8852cebb12cef6c9a9edefa0be946a63b14a3e120593c14d828041b9ec3a1",
+   "bytes": 1398,
+   "reads": "the stage names and the two budget lists"
+  }
+ ],
+ "extracts": [],
+ "checks": [
+  {
+   "id": "quick-of-total",
+   "claim": "the quick budget's size, of the stages",
+   "document": "CLAUDE.md",
+   "drawn": "31",
+   "stated": "31",
+   "verdict": "agrees"
+  },
+  {
+   "id": "total-of-quick",
+   "claim": "the stage count the quick line is of",
+   "document": "CLAUDE.md",
+   "drawn": "52",
+   "stated": "52",
+   "verdict": "agrees"
+  },
+  {
+   "id": "gate-of-total",
+   "claim": "the gate budget's size, of the stages",
+   "document": "CLAUDE.md",
+   "drawn": "44",
+   "stated": "44",
+   "verdict": "agrees"
+  },
+  {
+   "id": "readme-quick",
+   "claim": "README: the quick budget's size",
+   "document": "README.md",
+   "drawn": "31",
+   "stated": "31",
+   "verdict": "agrees"
+  },
+  {
+   "id": "readme-gate",
+   "claim": "README: the gate budget's size",
+   "document": "README.md",
+   "drawn": "44",
+   "stated": "44",
+   "verdict": "agrees"
+  }
+ ],
+ "data": {
+  "groups": [
+   {
+    "name": "keeping the tree honest",
+    "stages": ["docs", "generated", "buildargs", "sweepjudge", "innerskips", "ensurevectors"]
+   },
+   {
+    "name": "the golden model and its vectors",
+    "stages": ["golden", "vectors"]
+   },
+   {
+    "name": "the RTL",
+    "stages": ["sim", "simmc", "lint", "formal"]
+   },
+   {
+    "name": "the host library against the model",
+    "stages": [
+      "libcft", "selfcheck", "divsqrt", "clause5", "character", "transcend", "augmented", "status96",
+      "formatof", "diff", "seq", "reduce", "mpfr"
+    ]
+   },
+   {
+    "name": "programs, language, certificates",
+    "stages": [
+      "programs", "lang", "lang-routines", "tangent", "acceptance", "acceptance-far",
+      "acceptance-rev8", "audit", "estimates", "estimates-full"
+    ]
+   },
+   {
+    "name": "languages and surfaces",
+    "stages": [
+      "bindings", "cpp", "lang-cpp", "lang-rust", "lang-julia", "lang-go", "lang-csharp", "lang-r",
+      "lang-fortran", "node", "wasm"
+    ]
+   },
+   {
+    "name": "real workloads",
+    "stages": ["photograph", "workloads", "demos"]
+   },
+   {
+    "name": "hardware and remote",
+    "stages": ["soak-quick", "images", "remote"]
+   }
+  ],
+  "tier": {
+   "docs": "quick",
+   "buildargs": "quick",
+   "sweepjudge": "quick",
+   "innerskips": "quick",
+   "ensurevectors": "quick",
+   "golden": "gate",
+   "vectors": "gate",
+   "sim": "full",
+   "simmc": "full",
+   "lint": "gate",
+   "formal": "gate",
+   "libcft": "gate",
+   "generated": "quick",
+   "selfcheck": "quick",
+   "divsqrt": "quick",
+   "clause5": "quick",
+   "character": "quick",
+   "transcend": "gate",
+   "augmented": "quick",
+   "status96": "quick",
+   "formatof": "quick",
+   "diff": "quick",
+   "seq": "quick",
+   "programs": "quick",
+   "lang": "quick",
+   "lang-routines": "gate",
+   "tangent": "gate",
+   "acceptance": "gate",
+   "acceptance-far": "full",
+   "acceptance-rev8": "full",
+   "audit": "gate",
+   "estimates": "gate",
+   "estimates-full": "full",
+   "reduce": "quick",
+   "photograph": "quick",
+   "bindings": "quick",
+   "cpp": "gate",
+   "lang-cpp": "quick",
+   "lang-rust": "quick",
+   "lang-julia": "quick",
+   "lang-go": "quick",
+   "lang-csharp": "quick",
+   "lang-r": "quick",
+   "lang-fortran": "quick",
+   "node": "full",
+   "wasm": "full",
+   "workloads": "quick",
+   "demos": "quick",
+   "mpfr": "gate",
+   "soak-quick": "quick",
+   "images": "full",
+   "remote": "quick"
+  },
+  "total": 52,
+  "n_quick": 31,
+  "n_gate_only": 13,
+  "n_full_only": 8,
+  "budget_gate": 44,
+  "full_only": ["sim", "simmc", "acceptance-far", "acceptance-rev8", "estimates-full", "node", "wasm", "images"]
+ }
+}

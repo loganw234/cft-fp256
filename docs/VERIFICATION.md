@@ -414,7 +414,7 @@ list - they were kept by hand in three places once, and two of the copies
 drifted.
 
 The `docs` stage is the cheapest of them and exists for the same reason:
-`docs/README.md` indexes the forty-four documents, and
+`docs/README.md` indexes the forty-five documents, and
 `python/check_docs_index.py` refuses a broken link, a document missing
 from the index, or a stated line count that no longer matches the file.
 Since 2026-09-24 it holds every tracked document, not only the index:
@@ -437,7 +437,14 @@ generation - `hw/gen_layouts.py`, `host/tools/gen_2opi.py`,
 fifth, `python/gen_divfull.py`, joined on 2026-09-14, and a sixth,
 `bindings/arduino/sync.py`, on 2026-09-30: the Arduino library's
 vendored copy of host/, which no stage had checked until then, as
-verifier-F4 of the fixes round found). **Nothing invoked
+verifier-F4 of the fixes round found; and a seventh,
+`python/project_figures.py`, on 2026-10-19: the project's figures, each
+a pair of SVGs with a sidecar of its numbers and its sources' digests,
+and the gallery `docs/FIGURES.md` written from the same data - its
+check reads no git history, remakes everything in memory, compares
+byte for byte, holds each figure to the numbers the README and other
+documents state, and plants its own faults first, as the docs check
+does). **Nothing invoked
 any of them**, and by 2026-09-13 two had drifted: the five
 `hw/layouts/*.cfg` carried a superseded WNS note in a commented-out clock
 line, and `bindings/node/seq_corpus.jsonl` had been stale since the `kx`

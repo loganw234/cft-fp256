@@ -1,0 +1,237 @@
+{
+ "figure": "formats",
+ "title": "One 256-bit beat, and the four formats it carries",
+ "group": "hardware",
+ "alt": "The four binary formats drawn to scale across one 256-bit beat: one binary256 lane, two binary128, four binary64 or eight binary32.",
+ "files": ["docs/img/figures/formats-light.svg", "docs/img/figures/formats-dark.svg"],
+ "maker": "python/project_figures.py: build_formats, draw_formats",
+ "commit": "0b77387ea1266f4d4a5e30c8798f57e8b6dc6ef8",
+ "commit_means": "the commit the extracts below were read at; a file read from the tree is identified by its SHA-256 instead",
+ "sources": [
+  {
+   "path": "python/cft_golden/formats.py",
+   "sha256": "3a4d02f54aa91290bdf4719b9ab85104a1f598b583af684b25f5e9048db71e27",
+   "bytes": 1798
+  }
+ ],
+ "extracts": [],
+ "checks": [
+  {
+   "id": "fp256-exponent",
+   "claim": "binary256, exponent bits",
+   "document": "docs/DETERMINISM.md",
+   "drawn": "19",
+   "stated": "19",
+   "verdict": "agrees"
+  },
+  {
+   "id": "fp256-trailing",
+   "claim": "binary256, trailing significand bits",
+   "document": "docs/DETERMINISM.md",
+   "drawn": "236",
+   "stated": "236",
+   "verdict": "agrees"
+  },
+  {
+   "id": "fp256-precision",
+   "claim": "binary256, precision p",
+   "document": "docs/DETERMINISM.md",
+   "drawn": "237",
+   "stated": "237",
+   "verdict": "agrees"
+  },
+  {
+   "id": "fp256-emax",
+   "claim": "binary256, emax",
+   "document": "docs/DETERMINISM.md",
+   "drawn": "262143",
+   "stated": "262143",
+   "verdict": "agrees"
+  },
+  {
+   "id": "fp256-bias",
+   "claim": "binary256, bias",
+   "document": "docs/DETERMINISM.md",
+   "drawn": "262143",
+   "stated": "262143",
+   "verdict": "agrees"
+  },
+  {
+   "id": "fp128-exponent",
+   "claim": "binary128, exponent bits",
+   "document": "docs/DETERMINISM.md",
+   "drawn": "15",
+   "stated": "15",
+   "verdict": "agrees"
+  },
+  {
+   "id": "fp128-trailing",
+   "claim": "binary128, trailing significand bits",
+   "document": "docs/DETERMINISM.md",
+   "drawn": "112",
+   "stated": "112",
+   "verdict": "agrees"
+  },
+  {
+   "id": "fp128-precision",
+   "claim": "binary128, precision p",
+   "document": "docs/DETERMINISM.md",
+   "drawn": "113",
+   "stated": "113",
+   "verdict": "agrees"
+  },
+  {
+   "id": "fp128-emax",
+   "claim": "binary128, emax",
+   "document": "docs/DETERMINISM.md",
+   "drawn": "16383",
+   "stated": "16383",
+   "verdict": "agrees"
+  },
+  {
+   "id": "fp128-bias",
+   "claim": "binary128, bias",
+   "document": "docs/DETERMINISM.md",
+   "drawn": "16383",
+   "stated": "16383",
+   "verdict": "agrees"
+  },
+  {
+   "id": "fp64-exponent",
+   "claim": "binary64, exponent bits",
+   "document": "docs/DETERMINISM.md",
+   "drawn": "11",
+   "stated": "11",
+   "verdict": "agrees"
+  },
+  {
+   "id": "fp64-trailing",
+   "claim": "binary64, trailing significand bits",
+   "document": "docs/DETERMINISM.md",
+   "drawn": "52",
+   "stated": "52",
+   "verdict": "agrees"
+  },
+  {
+   "id": "fp64-precision",
+   "claim": "binary64, precision p",
+   "document": "docs/DETERMINISM.md",
+   "drawn": "53",
+   "stated": "53",
+   "verdict": "agrees"
+  },
+  {
+   "id": "fp64-emax",
+   "claim": "binary64, emax",
+   "document": "docs/DETERMINISM.md",
+   "drawn": "1023",
+   "stated": "1023",
+   "verdict": "agrees"
+  },
+  {
+   "id": "fp64-bias",
+   "claim": "binary64, bias",
+   "document": "docs/DETERMINISM.md",
+   "drawn": "1023",
+   "stated": "1023",
+   "verdict": "agrees"
+  },
+  {
+   "id": "fp32-exponent",
+   "claim": "binary32, exponent bits",
+   "document": "docs/DETERMINISM.md",
+   "drawn": "8",
+   "stated": "8",
+   "verdict": "agrees"
+  },
+  {
+   "id": "fp32-trailing",
+   "claim": "binary32, trailing significand bits",
+   "document": "docs/DETERMINISM.md",
+   "drawn": "23",
+   "stated": "23",
+   "verdict": "agrees"
+  },
+  {
+   "id": "fp32-precision",
+   "claim": "binary32, precision p",
+   "document": "docs/DETERMINISM.md",
+   "drawn": "24",
+   "stated": "24",
+   "verdict": "agrees"
+  },
+  {
+   "id": "fp32-emax",
+   "claim": "binary32, emax",
+   "document": "docs/DETERMINISM.md",
+   "drawn": "127",
+   "stated": "127",
+   "verdict": "agrees"
+  },
+  {
+   "id": "fp32-bias",
+   "claim": "binary32, bias",
+   "document": "docs/DETERMINISM.md",
+   "drawn": "127",
+   "stated": "127",
+   "verdict": "agrees"
+  },
+  {
+   "id": "fifteen-cores",
+   "claim": "FMA cores in four banks, 8 + 4 + 2 + 1",
+   "document": "README.md",
+   "drawn": "15 (8x fp32, 4x fp64, 2x fp128, 1x fp256)",
+   "stated": "Fifteen, 8x fp32, 4x fp64, 2x fp128, 1x fp256",
+   "verdict": "agrees"
+  }
+ ],
+ "data": {
+  "rows": [
+   {
+    "format": "fp256",
+    "width": 256,
+    "exp": 19,
+    "man": 236,
+    "p": 237,
+    "emax": 262143,
+    "bias": 262143,
+    "lanes": 1,
+    "digits": 71.3441
+   },
+   {
+    "format": "fp128",
+    "width": 128,
+    "exp": 15,
+    "man": 112,
+    "p": 113,
+    "emax": 16383,
+    "bias": 16383,
+    "lanes": 2,
+    "digits": 34.0164
+   },
+   {
+    "format": "fp64",
+    "width": 64,
+    "exp": 11,
+    "man": 52,
+    "p": 53,
+    "emax": 1023,
+    "bias": 1023,
+    "lanes": 4,
+    "digits": 15.9546
+   },
+   {
+    "format": "fp32",
+    "width": 32,
+    "exp": 8,
+    "man": 23,
+    "p": 24,
+    "emax": 127,
+    "bias": 127,
+    "lanes": 8,
+    "digits": 7.22472
+   }
+  ],
+  "beat": 256
+ }
+}

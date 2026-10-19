@@ -1,0 +1,131 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="656" viewBox="0 0 900 656" role="img" aria-label="One tile's logic cells by bank, and the 12 layouts the layout generator derives for the U50, each as a share of the part: four full tiles fit at 78.9%.">
+<title>One tile's logic cells by bank, and the 12 layouts the layout generator derives for the U50, each as a share of the part: four full tiles fit at 78.9%.</title>
+<rect width="900" height="656" fill="#0d1117"/>
+<text x="24.0" y="30.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="17" fill="#e6edf3" font-weight="600">Where a tile's area goes, and what the U50 could carry</text>
+<text x="24.0" y="52.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#9198a1">Top: the logic cells one tile costs, out of context, split by the four banks of FMA lanes and the shared machinery.</text>
+<text x="24.0" y="69.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#9198a1">Below: every tile mix the layout generator catalogues for the U50, as a share of the part's 870,720 LUTs: the shell,</text>
+<text x="24.0" y="86.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#9198a1">then the tiles. The two built layouts are marked.</text>
+<rect x="24.0" y="130.0" width="172.4" height="30.0" fill="#54aeff"/>
+<text x="110.2" y="149.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="11" fill="#0d1117" text-anchor="middle">26,592</text>
+<text x="110.2" y="176.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#9198a1" text-anchor="middle">binary32</text>
+<rect x="196.4" y="130.0" width="164.1" height="30.0" fill="#db6d28"/>
+<text x="278.5" y="149.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="11" fill="#0d1117" text-anchor="middle">25,304</text>
+<text x="278.5" y="176.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#9198a1" text-anchor="middle">binary64</text>
+<rect x="360.5" y="130.0" width="178.3" height="30.0" fill="#3fb950"/>
+<text x="449.7" y="149.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="11" fill="#0d1117" text-anchor="middle">27,492</text>
+<text x="449.7" y="176.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#9198a1" text-anchor="middle">binary128</text>
+<rect x="538.8" y="130.0" width="229.1" height="30.0" fill="#a371f7"/>
+<text x="653.4" y="149.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="11" fill="#0d1117" text-anchor="middle">35,333</text>
+<text x="653.4" y="176.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#9198a1" text-anchor="middle">binary256</text>
+<rect x="767.9" y="130.0" width="108.1" height="30.0" fill="#d29922"/>
+<text x="822.0" y="149.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="11" fill="#0d1117" text-anchor="middle">16,665</text>
+<text x="822.0" y="176.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#9198a1" text-anchor="middle">shared machinery</text>
+<text x="24.0" y="122.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11.5" fill="#e6edf3" font-weight="600">one tile, out of context: 131,386 LUTs</text>
+<text x="24.0" y="196.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11.5" fill="#e6edf3" font-weight="600">layouts, as a share of the U50's logic cells</text>
+<line x1="250.0" y1="208.0" x2="250.0" y2="532.0" stroke="#30363d" stroke-width="1"/>
+<text x="250.0" y="545.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#9198a1" text-anchor="middle">0%</text>
+<line x1="346.0" y1="208.0" x2="346.0" y2="532.0" stroke="#30363d" stroke-width="1"/>
+<text x="346.0" y="545.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#9198a1" text-anchor="middle">20%</text>
+<line x1="442.0" y1="208.0" x2="442.0" y2="532.0" stroke="#30363d" stroke-width="1"/>
+<text x="442.0" y="545.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#9198a1" text-anchor="middle">40%</text>
+<line x1="538.0" y1="208.0" x2="538.0" y2="532.0" stroke="#30363d" stroke-width="1"/>
+<text x="538.0" y="545.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#9198a1" text-anchor="middle">60%</text>
+<line x1="634.0" y1="208.0" x2="634.0" y2="532.0" stroke="#30363d" stroke-width="1"/>
+<text x="634.0" y="545.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#9198a1" text-anchor="middle">80%</text>
+<line x1="730.0" y1="208.0" x2="730.0" y2="532.0" stroke="#30363d" stroke-width="1"/>
+<text x="730.0" y="545.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#9198a1" text-anchor="middle">100%</text>
+<text x="24.0" y="223.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#e6edf3" font-weight="600">4xfp256</text>
+<rect x="250.0" y="211.0" width="89.2" height="17.0" fill="#9198a1" opacity="0.5"/>
+<rect x="339.2" y="211.0" width="289.7" height="17.0" fill="#a371f7"/>
+<text x="484.0" y="223.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#0d1117" text-anchor="middle">4x 256</text>
+<text x="740.0" y="223.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#e6edf3">78.9%</text>
+<text x="796.0" y="223.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#9198a1">135 MHz</text>
+<text x="24.0" y="250.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#e6edf3" font-weight="600">1xfp256</text>
+<rect x="250.0" y="238.0" width="68.3" height="17.0" fill="#9198a1" opacity="0.5"/>
+<rect x="318.3" y="238.0" width="72.4" height="17.0" fill="#a371f7"/>
+<text x="354.5" y="250.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#0d1117" text-anchor="middle">1x 256</text>
+<text x="740.0" y="250.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#e6edf3">29.3%</text>
+<text x="796.0" y="250.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#9198a1">135 MHz</text>
+<text x="24.0" y="277.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#e6edf3">1xfp256-4xfp128</text>
+<rect x="250.0" y="265.0" width="96.1" height="17.0" fill="#9198a1" opacity="0.5"/>
+<rect x="346.1" y="265.0" width="72.4" height="17.0" fill="#a371f7"/>
+<text x="382.4" y="277.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#0d1117" text-anchor="middle">1x 256</text>
+<rect x="418.6" y="265.0" width="211.8" height="17.0" fill="#3fb950"/>
+<text x="524.5" y="277.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#0d1117" text-anchor="middle">4x 128</text>
+<text x="740.0" y="277.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#e6edf3">79.2%</text>
+<text x="796.0" y="277.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#9198a1">135/150 MHz*</text>
+<text x="24.0" y="304.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#e6edf3">1xfp256-5xfp64</text>
+<rect x="250.0" y="292.0" width="103.1" height="17.0" fill="#9198a1" opacity="0.5"/>
+<rect x="353.1" y="292.0" width="72.4" height="17.0" fill="#a371f7"/>
+<text x="389.3" y="304.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#0d1117" text-anchor="middle">1x 256</text>
+<rect x="425.5" y="292.0" width="189.0" height="17.0" fill="#db6d28"/>
+<text x="520.0" y="304.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#0d1117" text-anchor="middle">5x 64</text>
+<text x="740.0" y="304.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#e6edf3">75.9%</text>
+<text x="796.0" y="304.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#9198a1">135/170 MHz*</text>
+<text x="24.0" y="331.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#e6edf3">1xfp256-7xfp32</text>
+<rect x="250.0" y="319.0" width="117.0" height="17.0" fill="#9198a1" opacity="0.5"/>
+<rect x="367.0" y="319.0" width="72.4" height="17.0" fill="#a371f7"/>
+<text x="403.2" y="331.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#0d1117" text-anchor="middle">1x 256</text>
+<rect x="439.5" y="319.0" width="166.9" height="17.0" fill="#54aeff"/>
+<text x="522.9" y="331.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#0d1117" text-anchor="middle">7x 32</text>
+<text x="740.0" y="331.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#e6edf3">74.2%</text>
+<text x="796.0" y="331.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#9198a1">135/190 MHz*</text>
+<text x="24.0" y="358.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#e6edf3">1xfp128-5xfp64</text>
+<rect x="250.0" y="346.0" width="103.1" height="17.0" fill="#9198a1" opacity="0.5"/>
+<rect x="353.1" y="346.0" width="53.0" height="17.0" fill="#3fb950"/>
+<text x="379.6" y="358.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#0d1117" text-anchor="middle">1x 128</text>
+<rect x="406.1" y="346.0" width="189.0" height="17.0" fill="#db6d28"/>
+<text x="500.5" y="358.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#0d1117" text-anchor="middle">5x 64</text>
+<text x="740.0" y="358.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#e6edf3">71.9%</text>
+<text x="796.0" y="358.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#9198a1">150/170 MHz*</text>
+<text x="24.0" y="385.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#e6edf3">1xfp128-7xfp32</text>
+<rect x="250.0" y="373.0" width="117.0" height="17.0" fill="#9198a1" opacity="0.5"/>
+<rect x="367.0" y="373.0" width="53.0" height="17.0" fill="#3fb950"/>
+<text x="393.5" y="385.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#0d1117" text-anchor="middle">1x 128</text>
+<rect x="420.0" y="373.0" width="166.9" height="17.0" fill="#54aeff"/>
+<text x="503.4" y="385.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#0d1117" text-anchor="middle">7x 32</text>
+<text x="740.0" y="385.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#e6edf3">70.2%</text>
+<text x="796.0" y="385.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#9198a1">150/190 MHz*</text>
+<text x="24.0" y="412.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#e6edf3">1xfp64-7xfp32</text>
+<rect x="250.0" y="400.0" width="117.0" height="17.0" fill="#9198a1" opacity="0.5"/>
+<rect x="367.0" y="400.0" width="37.8" height="17.0" fill="#db6d28"/>
+<text x="385.9" y="412.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#0d1117" text-anchor="middle">1x 64</text>
+<rect x="404.8" y="400.0" width="166.9" height="17.0" fill="#54aeff"/>
+<text x="488.3" y="412.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#0d1117" text-anchor="middle">7x 32</text>
+<text x="740.0" y="412.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#e6edf3">67.0%</text>
+<text x="796.0" y="412.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#9198a1">170/190 MHz*</text>
+<text x="24.0" y="439.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#e6edf3">5xfp128</text>
+<rect x="250.0" y="427.0" width="96.1" height="17.0" fill="#9198a1" opacity="0.5"/>
+<rect x="346.1" y="427.0" width="264.8" height="17.0" fill="#3fb950"/>
+<text x="478.5" y="439.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#0d1117" text-anchor="middle">5x 128</text>
+<text x="740.0" y="439.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#e6edf3">75.2%</text>
+<text x="796.0" y="439.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#9198a1">150 MHz*</text>
+<text x="24.0" y="466.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#e6edf3">7xfp64</text>
+<rect x="250.0" y="454.0" width="110.1" height="17.0" fill="#9198a1" opacity="0.5"/>
+<rect x="360.1" y="454.0" width="264.6" height="17.0" fill="#db6d28"/>
+<text x="492.3" y="466.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#0d1117" text-anchor="middle">7x 64</text>
+<text x="740.0" y="466.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#e6edf3">78.0%</text>
+<text x="796.0" y="466.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#9198a1">170 MHz*</text>
+<text x="24.0" y="493.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#e6edf3">8xfp32</text>
+<rect x="250.0" y="481.0" width="117.0" height="17.0" fill="#9198a1" opacity="0.5"/>
+<rect x="367.0" y="481.0" width="190.8" height="17.0" fill="#54aeff"/>
+<text x="462.4" y="493.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#0d1117" text-anchor="middle">8x 32</text>
+<text x="740.0" y="493.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#e6edf3">64.1%</text>
+<text x="796.0" y="493.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#9198a1">190 MHz*</text>
+<text x="24.0" y="520.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#e6edf3">7xfp64fp128</text>
+<rect x="250.0" y="508.0" width="110.1" height="17.0" fill="#9198a1" opacity="0.5"/>
+<rect x="360.1" y="508.0" width="268.0" height="17.0" fill="#39c5cf"/>
+<text x="494.1" y="520.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#0d1117" text-anchor="middle">7x 64128</text>
+<text x="740.0" y="520.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#e6edf3">78.8%</text>
+<text x="796.0" y="520.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#9198a1">135 MHz</text>
+<line x1="634.0" y1="206.0" x2="634.0" y2="532.0" stroke="#3fb950" stroke-width="1.4" stroke-dasharray="5 4"/>
+<text x="630.0" y="203.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#3fb950" text-anchor="end">80% fits</text>
+<line x1="658.0" y1="206.0" x2="658.0" y2="532.0" stroke="#f85149" stroke-width="1.4" stroke-dasharray="5 4"/>
+<text x="662.0" y="203.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#f85149">85% routing limit</text>
+<text x="740.0" y="203.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#9198a1">of the part</text>
+<text x="796.0" y="203.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#9198a1">clocks, MHz</text>
+<text x="24.0" y="566.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#9198a1">Grey: the shell and crossbar. Bold names are the two layouts built so far; the others are placeholders until narrow variants are packaged.</text>
+<text x="24.0" y="581.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#9198a1">* a clock target, not a measurement. The model is about 2% optimistic: it puts four full tiles at 687,319 LUTs, where the routed quad</text>
+<text x="24.0" y="596.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#9198a1">placed higher.</text>
+<text x="24.0" y="648.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#9198a1">source: hw/gen_layouts.py (17df9e8c)</text>
+</svg>

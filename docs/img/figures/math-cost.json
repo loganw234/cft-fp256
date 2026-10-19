@@ -1,0 +1,500 @@
+{
+ "figure": "math-cost",
+ "title": "What a correctly rounded function costs the tile",
+ "group": "math",
+ "alt": "Tile instructions per call for the nine correctly rounded functions at the formats they are built for (178 to 419), and where the trigonometric three spend theirs: range reduction takes 155 to 216 of each sin, cos and tan.",
+ "files": ["docs/img/figures/math-cost-light.svg", "docs/img/figures/math-cost-dark.svg"],
+ "maker": "python/project_figures.py: build_math_cost, draw_math_cost",
+ "commit": "0b77387ea1266f4d4a5e30c8798f57e8b6dc6ef8",
+ "commit_means": "the commit the extracts below were read at; a file read from the tree is identified by its SHA-256 instead",
+ "sources": [
+  {
+   "path": "docs/studies/m1/final_counts.out.txt",
+   "sha256": "5e8d4b7df8e51bebb5b239e2f22869d4d920a3fe85b7c8fb4199f2605ee85df7",
+   "bytes": 1762
+  },
+  {
+   "path": "docs/studies/m2/costs.fp128.out.txt",
+   "sha256": "b6d2254acede55ae41d2421c6319b5315a09fa79570456ec85d57678b1ee2497",
+   "bytes": 6205
+  },
+  {
+   "path": "docs/studies/m2/costs.fp256.out.txt",
+   "sha256": "79d8abbf2b7b8d2ca44b1183e55ef5c1dfe7f075c967884f6db0bc57fdd0df3c",
+   "bytes": 6205
+  },
+  {
+   "path": "docs/studies/m2/costs.fp32.out.txt",
+   "sha256": "3374bfde25e10a88c1d41d6e90a1ceb83a4d4b877b495d6b14d87f3d7de2b678",
+   "bytes": 6118
+  },
+  {
+   "path": "docs/studies/m2/costs.fp64.out.txt",
+   "sha256": "79049a16d74f85bed176013ae8a0f3bde33656f3effcdd562c4076c270fb7d00",
+   "bytes": 6143
+  }
+ ],
+ "extracts": [],
+ "checks": [
+  {
+   "id": "sin-fp64",
+   "claim": "sin's instructions at binary64",
+   "document": "docs/studies/M2-trig.md",
+   "drawn": "406",
+   "stated": "406",
+   "verdict": "agrees"
+  },
+  {
+   "id": "sin-fp128",
+   "claim": "sin's instructions at binary128",
+   "document": "docs/studies/M2-trig.md",
+   "drawn": "382",
+   "stated": "382",
+   "verdict": "agrees"
+  },
+  {
+   "id": "sin-fp256",
+   "claim": "sin's instructions at binary256",
+   "document": "docs/studies/M2-trig.md",
+   "drawn": "389",
+   "stated": "389",
+   "verdict": "agrees"
+  },
+  {
+   "id": "cos-fewer",
+   "claim": "how many fewer instructions cos takes than sin, at every format",
+   "document": "docs/studies/M2-trig.md",
+   "drawn": "4",
+   "stated": "4",
+   "verdict": "agrees"
+  },
+  {
+   "id": "tan-more",
+   "claim": "how many more instructions tan takes than sin, fp64 to fp256",
+   "document": "docs/studies/M2-trig.md",
+   "drawn": "13 to 17",
+   "stated": "13 to 17",
+   "verdict": "agrees"
+  },
+  {
+   "id": "phases-add-up",
+   "claim": "each routine's phases add up to its instructions",
+   "document": "docs/studies/m2/costs.*.out.txt",
+   "drawn": "12 of 12",
+   "stated": "12 of 12",
+   "verdict": "agrees"
+  }
+ ],
+ "data": {
+  "rows": [
+   {
+    "fn": "exp",
+    "format": "fp64",
+    "instructions": 181,
+    "min": 178,
+    "from": "M1",
+    "words": 64,
+    "live": 23
+   },
+   {
+    "fn": "exp",
+    "format": "fp128",
+    "instructions": 188,
+    "min": 185,
+    "from": "M1",
+    "words": 72,
+    "live": 23
+   },
+   {
+    "fn": "exp",
+    "format": "fp256",
+    "instructions": 201,
+    "min": 198,
+    "from": "M1",
+    "words": 85,
+    "live": 23
+   },
+   {
+    "fn": "exp2",
+    "format": "fp64",
+    "instructions": 179,
+    "min": 176,
+    "from": "M1",
+    "words": 65,
+    "live": 24
+   },
+   {
+    "fn": "exp2",
+    "format": "fp128",
+    "instructions": 186,
+    "min": 183,
+    "from": "M1",
+    "words": 73,
+    "live": 24
+   },
+   {
+    "fn": "exp2",
+    "format": "fp256",
+    "instructions": 199,
+    "min": 196,
+    "from": "M1",
+    "words": 86,
+    "live": 24
+   },
+   {
+    "fn": "expm1",
+    "format": "fp64",
+    "instructions": 178,
+    "min": 175,
+    "from": "M1",
+    "words": 68,
+    "live": 22
+   },
+   {
+    "fn": "expm1",
+    "format": "fp128",
+    "instructions": 185,
+    "min": 182,
+    "from": "M1",
+    "words": 75,
+    "live": 22
+   },
+   {
+    "fn": "expm1",
+    "format": "fp256",
+    "instructions": 198,
+    "min": 195,
+    "from": "M1",
+    "words": 88,
+    "live": 22
+   },
+   {
+    "fn": "log",
+    "format": "fp64",
+    "instructions": 193,
+    "min": 193,
+    "from": "M1",
+    "words": 75,
+    "live": 16
+   },
+   {
+    "fn": "log",
+    "format": "fp128",
+    "instructions": 208,
+    "min": 208,
+    "from": "M1",
+    "words": 90,
+    "live": 16
+   },
+   {
+    "fn": "log",
+    "format": "fp256",
+    "instructions": 238,
+    "min": 238,
+    "from": "M1",
+    "words": 120,
+    "live": 16
+   },
+   {
+    "fn": "log2",
+    "format": "fp64",
+    "instructions": 187,
+    "min": 187,
+    "from": "M1",
+    "words": 75,
+    "live": 14
+   },
+   {
+    "fn": "log2",
+    "format": "fp128",
+    "instructions": 202,
+    "min": 202,
+    "from": "M1",
+    "words": 90,
+    "live": 14
+   },
+   {
+    "fn": "log2",
+    "format": "fp256",
+    "instructions": 232,
+    "min": 232,
+    "from": "M1",
+    "words": 120,
+    "live": 14
+   },
+   {
+    "fn": "log1p",
+    "format": "fp64",
+    "instructions": 229,
+    "min": 227,
+    "from": "M1",
+    "words": 77,
+    "live": 18
+   },
+   {
+    "fn": "log1p",
+    "format": "fp128",
+    "instructions": 244,
+    "min": 242,
+    "from": "M1",
+    "words": 92,
+    "live": 18
+   },
+   {
+    "fn": "log1p",
+    "format": "fp256",
+    "instructions": 274,
+    "min": 272,
+    "from": "M1",
+    "words": 122,
+    "live": 18
+   },
+   {
+    "fn": "sin",
+    "format": "fp32",
+    "instructions": 348,
+    "min": 348,
+    "from": "M2",
+    "words": 77,
+    "live": 22
+   },
+   {
+    "fn": "sin",
+    "format": "fp64",
+    "instructions": 406,
+    "min": 406,
+    "from": "M2",
+    "words": 107,
+    "live": 26
+   },
+   {
+    "fn": "sin",
+    "format": "fp128",
+    "instructions": 382,
+    "min": 382,
+    "from": "M2",
+    "words": 104,
+    "live": 17
+   },
+   {
+    "fn": "sin",
+    "format": "fp256",
+    "instructions": 389,
+    "min": 389,
+    "from": "M2",
+    "words": 118,
+    "live": 16
+   },
+   {
+    "fn": "cos",
+    "format": "fp32",
+    "instructions": 344,
+    "min": 344,
+    "from": "M2",
+    "words": 74,
+    "live": 22
+   },
+   {
+    "fn": "cos",
+    "format": "fp64",
+    "instructions": 402,
+    "min": 402,
+    "from": "M2",
+    "words": 104,
+    "live": 26
+   },
+   {
+    "fn": "cos",
+    "format": "fp128",
+    "instructions": 378,
+    "min": 378,
+    "from": "M2",
+    "words": 101,
+    "live": 17
+   },
+   {
+    "fn": "cos",
+    "format": "fp256",
+    "instructions": 385,
+    "min": 385,
+    "from": "M2",
+    "words": 115,
+    "live": 16
+   },
+   {
+    "fn": "tan",
+    "format": "fp32",
+    "instructions": 359,
+    "min": 359,
+    "from": "M2",
+    "words": 76,
+    "live": 22
+   },
+   {
+    "fn": "tan",
+    "format": "fp64",
+    "instructions": 419,
+    "min": 419,
+    "from": "M2",
+    "words": 106,
+    "live": 26
+   },
+   {
+    "fn": "tan",
+    "format": "fp128",
+    "instructions": 397,
+    "min": 397,
+    "from": "M2",
+    "words": 103,
+    "live": 17
+   },
+   {
+    "fn": "tan",
+    "format": "fp256",
+    "instructions": 406,
+    "min": 406,
+    "from": "M2",
+    "words": 117,
+    "live": 16
+   }
+  ],
+  "phases": [
+   {
+    "fn": "sin",
+    "format": "fp32",
+    "total": 348,
+    "phase_sum": 348,
+    "groups": {
+     "range reduction": 216,
+     "the series": 84,
+     "choosing and finishing": 48
+    }
+   },
+   {
+    "fn": "cos",
+    "format": "fp32",
+    "total": 344,
+    "phase_sum": 344,
+    "groups": {
+     "range reduction": 216,
+     "the series": 84,
+     "choosing and finishing": 44
+    }
+   },
+   {
+    "fn": "tan",
+    "format": "fp32",
+    "total": 359,
+    "phase_sum": 359,
+    "groups": {
+     "range reduction": 216,
+     "the series": 84,
+     "choosing and finishing": 59
+    }
+   },
+   {
+    "fn": "sin",
+    "format": "fp64",
+    "total": 406,
+    "phase_sum": 406,
+    "groups": {
+     "range reduction": 206,
+     "the series": 152,
+     "choosing and finishing": 48
+    }
+   },
+   {
+    "fn": "cos",
+    "format": "fp64",
+    "total": 402,
+    "phase_sum": 402,
+    "groups": {
+     "range reduction": 206,
+     "the series": 152,
+     "choosing and finishing": 44
+    }
+   },
+   {
+    "fn": "tan",
+    "format": "fp64",
+    "total": 419,
+    "phase_sum": 419,
+    "groups": {
+     "range reduction": 206,
+     "the series": 152,
+     "choosing and finishing": 61
+    }
+   },
+   {
+    "fn": "sin",
+    "format": "fp128",
+    "total": 382,
+    "phase_sum": 382,
+    "groups": {
+     "range reduction": 168,
+     "the series": 164,
+     "choosing and finishing": 50
+    }
+   },
+   {
+    "fn": "cos",
+    "format": "fp128",
+    "total": 378,
+    "phase_sum": 378,
+    "groups": {
+     "range reduction": 168,
+     "the series": 164,
+     "choosing and finishing": 46
+    }
+   },
+   {
+    "fn": "tan",
+    "format": "fp128",
+    "total": 397,
+    "phase_sum": 397,
+    "groups": {
+     "range reduction": 168,
+     "the series": 164,
+     "choosing and finishing": 65
+    }
+   },
+   {
+    "fn": "sin",
+    "format": "fp256",
+    "total": 389,
+    "phase_sum": 389,
+    "groups": {
+     "range reduction": 155,
+     "the series": 184,
+     "choosing and finishing": 50
+    }
+   },
+   {
+    "fn": "cos",
+    "format": "fp256",
+    "total": 385,
+    "phase_sum": 385,
+    "groups": {
+     "range reduction": 155,
+     "the series": 184,
+     "choosing and finishing": 46
+    }
+   },
+   {
+    "fn": "tan",
+    "format": "fp256",
+    "total": 406,
+    "phase_sum": 406,
+    "groups": {
+     "range reduction": 155,
+     "the series": 184,
+     "choosing and finishing": 67
+    }
+   }
+  ],
+  "min": 178,
+  "max": 419,
+  "red_min": 155,
+  "red_max": 216
+ }
+}

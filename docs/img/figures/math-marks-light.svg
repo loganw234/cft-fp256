@@ -1,0 +1,147 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="846" viewBox="0 0 900 846" role="img" aria-label="Observed rates of marked (undecided) lanes for the six exp and log routines and for sin, cos and tan, against the law that predicts them: 30 runs, 564,000 lanes, and not one lane that was wrong went unmarked.">
+<title>Observed rates of marked (undecided) lanes for the six exp and log routines and for sin, cos and tan, against the law that predicts them: 30 runs, 564,000 lanes, and not one lane that was wrong went unmarked.</title>
+<rect width="900" height="846" fill="#ffffff"/>
+<text x="24.0" y="30.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="17" fill="#1f2328" font-weight="600">How often a correctly rounded routine has to say 'undecided'</text>
+<text x="24.0" y="52.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#656d76">A lane is marked when the routine cannot decide its rounding within the bound, and the host then decides it. Each dot</text>
+<text x="24.0" y="69.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#656d76">is a captured run: its marked share of lanes with a 95% binomial interval. The diamond is the rate the first law</text>
+<text x="24.0" y="86.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#656d76">predicts; the hollow one, for sin, cos and tan, the rate the lane's own bound predicts. Filled is round to nearest</text>
+<text x="24.0" y="103.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#656d76">even, hollow is toward zero.</text>
+<line x1="230.0" y1="160.0" x2="230.0" y2="685.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="230.0" y="698.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#656d76" text-anchor="middle">1.0%</text>
+<line x1="331.9" y1="160.0" x2="331.9" y2="685.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="331.9" y="698.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#656d76" text-anchor="middle">1.5%</text>
+<line x1="433.8" y1="160.0" x2="433.8" y2="685.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="433.8" y="698.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#656d76" text-anchor="middle">2.0%</text>
+<line x1="535.8" y1="160.0" x2="535.8" y2="685.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="535.8" y="698.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#656d76" text-anchor="middle">2.5%</text>
+<line x1="637.7" y1="160.0" x2="637.7" y2="685.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="637.7" y="698.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#656d76" text-anchor="middle">3.0%</text>
+<line x1="739.6" y1="160.0" x2="739.6" y2="685.0" stroke="#d8dee4" stroke-width="1"/>
+<text x="739.6" y="698.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10" fill="#656d76" text-anchor="middle">3.5%</text>
+<text x="230.0" y="154.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#656d76">marked lanes, share of the run</text>
+<text x="24.0" y="132.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" fill="#1f2328" font-weight="600">M1, the exp and log family at binary64: 2,000 lanes a run</text>
+<text x="24.0" y="186.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#1f2328">exp, binary64</text>
+<polygon points="482.8,171.0 488.8,180.0 482.8,189.0 476.8,180.0" fill="#1f2328"/>
+<line x1="326.1" y1="176.0" x2="582.3" y2="176.0" stroke="#bc4c00" stroke-width="1.6"/>
+<circle cx="454.2" cy="176.0" r="3.8" fill="#bc4c00"/>
+<line x1="414.0" y1="184.0" x2="698.3" y2="184.0" stroke="#bc4c00" stroke-width="1.6"/>
+<circle cx="556.2" cy="184.0" r="3.8" fill="#ffffff" stroke="#bc4c00" stroke-width="1.8"/>
+<text x="776.0" y="184.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#656d76">0 wrong unmarked</text>
+<text x="24.0" y="219.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#1f2328">exp2, binary64</text>
+<polygon points="488.9,204.0 494.9,213.0 488.9,222.0 482.9,213.0" fill="#1f2328"/>
+<line x1="274.3" y1="209.0" x2="511.9" y2="209.0" stroke="#bc4c00" stroke-width="1.6"/>
+<circle cx="393.1" cy="209.0" r="3.8" fill="#bc4c00"/>
+<line x1="291.5" y1="217.0" x2="535.4" y2="217.0" stroke="#bc4c00" stroke-width="1.6"/>
+<circle cx="413.5" cy="217.0" r="3.8" fill="#ffffff" stroke="#bc4c00" stroke-width="1.8"/>
+<text x="776.0" y="217.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#656d76">0 wrong unmarked</text>
+<text x="24.0" y="252.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#1f2328">expm1, binary64</text>
+<polygon points="495.0,237.0 501.0,246.0 495.0,255.0 489.0,246.0" fill="#1f2328"/>
+<line x1="257.2" y1="242.0" x2="488.2" y2="242.0" stroke="#bc4c00" stroke-width="1.6"/>
+<circle cx="372.7" cy="242.0" r="3.8" fill="#bc4c00"/>
+<line x1="449.5" y1="250.0" x2="744.3" y2="250.0" stroke="#bc4c00" stroke-width="1.6"/>
+<circle cx="596.9" cy="250.0" r="3.8" fill="#ffffff" stroke="#bc4c00" stroke-width="1.8"/>
+<text x="776.0" y="250.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#656d76">0 wrong unmarked</text>
+<text x="24.0" y="285.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#1f2328">log, binary64</text>
+<polygon points="476.7,270.0 482.7,279.0 476.7,288.0 470.7,279.0" fill="#1f2328"/>
+<line x1="361.1" y1="275.0" x2="628.9" y2="275.0" stroke="#bc4c00" stroke-width="1.6"/>
+<circle cx="495.0" cy="275.0" r="3.8" fill="#bc4c00"/>
+<line x1="378.7" y1="283.0" x2="652.1" y2="283.0" stroke="#bc4c00" stroke-width="1.6"/>
+<circle cx="515.4" cy="283.0" r="3.8" fill="#ffffff" stroke="#bc4c00" stroke-width="1.8"/>
+<text x="776.0" y="283.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#656d76">0 wrong unmarked</text>
+<text x="24.0" y="318.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#1f2328">log2, binary64</text>
+<polygon points="503.2,303.0 509.2,312.0 503.2,321.0 497.2,312.0" fill="#1f2328"/>
+<line x1="396.3" y1="308.0" x2="675.3" y2="308.0" stroke="#bc4c00" stroke-width="1.6"/>
+<circle cx="535.8" cy="308.0" r="3.8" fill="#bc4c00"/>
+<line x1="317.4" y1="316.0" x2="570.6" y2="316.0" stroke="#bc4c00" stroke-width="1.6"/>
+<circle cx="444.0" cy="316.0" r="3.8" fill="#ffffff" stroke="#bc4c00" stroke-width="1.8"/>
+<text x="776.0" y="316.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#656d76">0 wrong unmarked</text>
+<text x="24.0" y="351.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#1f2328">log1p, binary64</text>
+<polygon points="484.8,336.0 490.8,345.0 484.8,354.0 478.8,345.0" fill="#1f2328"/>
+<line x1="361.1" y1="341.0" x2="628.9" y2="341.0" stroke="#bc4c00" stroke-width="1.6"/>
+<circle cx="495.0" cy="341.0" r="3.8" fill="#bc4c00"/>
+<line x1="387.5" y1="349.0" x2="663.7" y2="349.0" stroke="#bc4c00" stroke-width="1.6"/>
+<circle cx="525.6" cy="349.0" r="3.8" fill="#ffffff" stroke="#bc4c00" stroke-width="1.8"/>
+<text x="776.0" y="349.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#656d76">0 wrong unmarked</text>
+<text x="24.0" y="378.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" fill="#1f2328" font-weight="600">M2, sin, cos and tan: 50,000 at binary64, 20,000 at binary128, 20,000 at binary256 lanes a run</text>
+<text x="24.0" y="406.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#1f2328">sin, binary64</text>
+<polygon points="486.8,391.0 492.8,400.0 486.8,409.0 480.8,400.0" fill="#1f2328"/>
+<path d="M535.8,392.0 L540.8,400.0 L535.8,408.0 L530.8,400.0 Z" fill="none" stroke="#1f2328" stroke-width="1.6" stroke-linejoin="round"/>
+<line x1="510.3" y1="396.0" x2="566.2" y2="396.0" stroke="#bc4c00" stroke-width="1.6"/>
+<circle cx="538.2" cy="396.0" r="3.8" fill="#bc4c00"/>
+<line x1="513.4" y1="404.0" x2="569.5" y2="404.0" stroke="#bc4c00" stroke-width="1.6"/>
+<circle cx="541.5" cy="404.0" r="3.8" fill="#ffffff" stroke="#bc4c00" stroke-width="1.8"/>
+<text x="776.0" y="404.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#656d76">0 wrong unmarked</text>
+<text x="24.0" y="439.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#1f2328">cos, binary64</text>
+<polygon points="486.8,424.0 492.8,433.0 486.8,442.0 480.8,433.0" fill="#1f2328"/>
+<path d="M539.8,425.0 L544.8,433.0 L539.8,441.0 L534.8,433.0 Z" fill="none" stroke="#1f2328" stroke-width="1.6" stroke-linejoin="round"/>
+<line x1="504.3" y1="429.0" x2="559.9" y2="429.0" stroke="#bc4c00" stroke-width="1.6"/>
+<circle cx="532.1" cy="429.0" r="3.8" fill="#bc4c00"/>
+<line x1="505.5" y1="437.0" x2="561.2" y2="437.0" stroke="#bc4c00" stroke-width="1.6"/>
+<circle cx="533.3" cy="437.0" r="3.8" fill="#ffffff" stroke="#bc4c00" stroke-width="1.8"/>
+<text x="776.0" y="437.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#656d76">0 wrong unmarked</text>
+<text x="24.0" y="472.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#1f2328">tan, binary64</text>
+<polygon points="486.8,457.0 492.8,466.0 486.8,475.0 480.8,466.0" fill="#1f2328"/>
+<path d="M486.8,458.0 L491.8,466.0 L486.8,474.0 L481.8,466.0 Z" fill="none" stroke="#1f2328" stroke-width="1.6" stroke-linejoin="round"/>
+<line x1="453.6" y1="462.0" x2="506.3" y2="462.0" stroke="#bc4c00" stroke-width="1.6"/>
+<circle cx="479.9" cy="462.0" r="3.8" fill="#bc4c00"/>
+<line x1="446.8" y1="470.0" x2="499.1" y2="470.0" stroke="#bc4c00" stroke-width="1.6"/>
+<circle cx="473.0" cy="470.0" r="3.8" fill="#ffffff" stroke="#bc4c00" stroke-width="1.8"/>
+<text x="776.0" y="470.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#656d76">0 wrong unmarked</text>
+<text x="24.0" y="505.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#1f2328">sin, binary128</text>
+<polygon points="486.8,490.0 492.8,499.0 486.8,508.0 480.8,499.0" fill="#1f2328"/>
+<path d="M535.8,491.0 L540.8,499.0 L535.8,507.0 L530.8,499.0 Z" fill="none" stroke="#1f2328" stroke-width="1.6" stroke-linejoin="round"/>
+<line x1="477.0" y1="495.0" x2="563.9" y2="495.0" stroke="#1a7f37" stroke-width="1.6"/>
+<circle cx="520.5" cy="495.0" r="3.8" fill="#1a7f37"/>
+<line x1="492.6" y1="503.0" x2="580.9" y2="503.0" stroke="#1a7f37" stroke-width="1.6"/>
+<circle cx="536.8" cy="503.0" r="3.8" fill="#ffffff" stroke="#1a7f37" stroke-width="1.8"/>
+<text x="776.0" y="503.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#656d76">0 wrong unmarked</text>
+<text x="24.0" y="538.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#1f2328">cos, binary128</text>
+<polygon points="486.8,523.0 492.8,532.0 486.8,541.0 480.8,532.0" fill="#1f2328"/>
+<path d="M533.7,524.0 L538.7,532.0 L533.7,540.0 L528.7,532.0 Z" fill="none" stroke="#1f2328" stroke-width="1.6" stroke-linejoin="round"/>
+<line x1="504.4" y1="528.0" x2="593.7" y2="528.0" stroke="#1a7f37" stroke-width="1.6"/>
+<circle cx="549.0" cy="528.0" r="3.8" fill="#1a7f37"/>
+<line x1="500.4" y1="536.0" x2="589.4" y2="536.0" stroke="#1a7f37" stroke-width="1.6"/>
+<circle cx="544.9" cy="536.0" r="3.8" fill="#ffffff" stroke="#1a7f37" stroke-width="1.8"/>
+<text x="776.0" y="536.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#656d76">0 wrong unmarked</text>
+<text x="24.0" y="571.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#1f2328">tan, binary128</text>
+<polygon points="486.8,556.0 492.8,565.0 486.8,574.0 480.8,565.0" fill="#1f2328"/>
+<path d="M486.8,557.0 L491.8,565.0 L486.8,573.0 L481.8,565.0 Z" fill="none" stroke="#1f2328" stroke-width="1.6" stroke-linejoin="round"/>
+<line x1="461.4" y1="561.0" x2="546.9" y2="561.0" stroke="#1a7f37" stroke-width="1.6"/>
+<circle cx="504.2" cy="561.0" r="3.8" fill="#1a7f37"/>
+<line x1="452.6" y1="569.0" x2="537.4" y2="569.0" stroke="#1a7f37" stroke-width="1.6"/>
+<circle cx="495.0" cy="569.0" r="3.8" fill="#ffffff" stroke="#1a7f37" stroke-width="1.8"/>
+<text x="776.0" y="569.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#656d76">0 wrong unmarked</text>
+<text x="24.0" y="604.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#1f2328">sin, binary256</text>
+<polygon points="486.8,589.0 492.8,598.0 486.8,607.0 480.8,598.0" fill="#1f2328"/>
+<path d="M533.7,590.0 L538.7,598.0 L533.7,606.0 L528.7,598.0 Z" fill="none" stroke="#1f2328" stroke-width="1.6" stroke-linejoin="round"/>
+<line x1="477.0" y1="594.0" x2="563.9" y2="594.0" stroke="#0969da" stroke-width="1.6"/>
+<circle cx="520.5" cy="594.0" r="3.8" fill="#0969da"/>
+<line x1="508.3" y1="602.0" x2="597.9" y2="602.0" stroke="#0969da" stroke-width="1.6"/>
+<circle cx="553.1" cy="602.0" r="3.8" fill="#ffffff" stroke="#0969da" stroke-width="1.8"/>
+<text x="776.0" y="602.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#656d76">0 wrong unmarked</text>
+<text x="24.0" y="637.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#1f2328">cos, binary256</text>
+<polygon points="486.8,622.0 492.8,631.0 486.8,640.0 480.8,631.0" fill="#1f2328"/>
+<path d="M525.6,623.0 L530.6,631.0 L525.6,639.0 L520.6,631.0 Z" fill="none" stroke="#1f2328" stroke-width="1.6" stroke-linejoin="round"/>
+<line x1="501.4" y1="627.0" x2="590.5" y2="627.0" stroke="#0969da" stroke-width="1.6"/>
+<circle cx="546.0" cy="627.0" r="3.8" fill="#0969da"/>
+<line x1="491.7" y1="635.0" x2="579.9" y2="635.0" stroke="#0969da" stroke-width="1.6"/>
+<circle cx="535.8" cy="635.0" r="3.8" fill="#ffffff" stroke="#0969da" stroke-width="1.8"/>
+<text x="776.0" y="635.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#656d76">0 wrong unmarked</text>
+<text x="24.0" y="670.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#1f2328">tan, binary256</text>
+<polygon points="486.8,655.0 492.8,664.0 486.8,673.0 480.8,664.0" fill="#1f2328"/>
+<path d="M488.9,656.0 L493.9,664.0 L488.9,672.0 L483.9,664.0 Z" fill="none" stroke="#1f2328" stroke-width="1.6" stroke-linejoin="round"/>
+<line x1="444.9" y1="660.0" x2="528.8" y2="660.0" stroke="#0969da" stroke-width="1.6"/>
+<circle cx="486.8" cy="660.0" r="3.8" fill="#0969da"/>
+<line x1="466.3" y1="668.0" x2="552.2" y2="668.0" stroke="#0969da" stroke-width="1.6"/>
+<circle cx="509.3" cy="668.0" r="3.8" fill="#ffffff" stroke="#0969da" stroke-width="1.8"/>
+<text x="776.0" y="668.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#656d76">0 wrong unmarked</text>
+<rect x="24.0" y="716.5" width="14.0" height="9.5" fill="#bc4c00" rx="2"/>
+<text x="44.0" y="725.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#1f2328">binary64</text>
+<rect x="110.7" y="716.5" width="14.0" height="9.5" fill="#1a7f37" rx="2"/>
+<text x="130.7" y="725.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#1f2328">binary128</text>
+<rect x="203.5" y="716.5" width="14.0" height="9.5" fill="#0969da" rx="2"/>
+<text x="223.5" y="725.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#1f2328">binary256</text>
+<text x="24.0" y="749.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#656d76">30 runs, 564,000 lanes: 13,627 marked, and none of the lanes whose rounding was wrong was left unmarked. For sin and cos at binary64 the</text>
+<text x="24.0" y="764.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#656d76">first law reads low by 3.4 to 4.1 standard deviations; the lane's own bound (hollow diamond) is within 1.0 of every run.</text>
+<text x="24.0" y="838.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#656d76">source: docs/studies/m1/m1rate.fp64.out.txt (56c543cc); docs/studies/m2/box-out/rate-fp128.out.txt (99e10b25); docs/studies/m2/box-out/rate-fp256.out.txt (c1eb804e); docs/studies/m2/box-out/rate-fp64.out.txt (f649f6ec)</text>
+</svg>
