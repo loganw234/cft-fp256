@@ -21304,7 +21304,7 @@ The CI split and the card's stress run, merged in this wave beside the two parce
 |---|---|---|---|
 | MS (536bb12, 48a6be2, 7c6c2ae, dd9fc0b, 938f7ad, 391b1be, 51bb14c; c1e6a9a) | Sonnet 5.5 | VMS 0, 1; VMS on c1e6a9a 0, 0 | no: the lead fixed the one |
 | MA (7fc03ab, b665ca5) | Sonnet 5.5 | VMA 0, 0 | - |
-| the merges (1c02d5f, f2ac63d, d1c9c34), the recount (df7dc43) and this record | the lead | VIW7 | - |
+| the merges (1c02d5f, f2ac63d, d1c9c34), the recount (df7dc43) and this record | the lead | VIW7 0, 1 | no: the lead restated the record in place (below) |
 
 - **VMS's (b):** tangent_check.py's guard text, in four places, said cft-segrun "answers `replay-missing`, or `replay-undecided` where the definition cannot be evaluated" and "replays nothing", where MS's entry says "the guard's text now says both". Each now reads, in VMS's words: "version 1 holds the machine's guess, STATUS[6] on the segment; cft-segrun's version-2 writer, which this leg does not use, refuses a marked lane `replay-missing` without a replay image and `replay-undecided` with one that marks it too".
 - **What VMS measured:**
@@ -21335,7 +21335,7 @@ The CI split and the card's stress run, merged in this wave beside the two parce
 - **At d3fef4b, alone:** 658 s; lang 162 s, lang-routines 150 s, tangent 346 s.
 - **The check lines, d3fef4b's against 51bb14c's** (MS's compare_ok.py): every one present, but the four leg H plants, which now name the lanes they catch, and one temporary directory's name.
 - **The larger draws:**
-  - lang_check `--six-all`: "9 ok, 0 FAIL, 1 SKIP in 209 s", 77,472 kB;
+  - lang_check `--six-all`: "9 ok, 0 FAIL, 1 SKIP in 209 s", 77,472 kB, the SKIP being the tally's under `--only`;
   - tangent_check `--six-all`: "6 ok, 0 FAIL, 0 SKIP in 62 s".
 - **MA's card leg, item 6:**
   - **The build:** at b665ca5, `make -C host XRT=1 XRT_ROOT=/opt/xilinx/xrt cft-segrun cft-audit libcft.so`, 30 s, 0 warnings; ldd shows xrt_coreutil in all three. The image's sha256 is 4f9921a2...ef53b.
@@ -21368,7 +21368,7 @@ The CI split and the card's stress run, merged in this wave beside the two parce
   - "R9" is this entry's name for the rule's `block-length` check, which the code does not number.
   - verify/run.sh's "+21 lines" is 17 insertions and 4 deletions.
   - The no-mpmath SKIP list omits leg G's pre-existing skip.
-  - "about two fifths more" stands for 42 to 46%.
+  - "about two fifths more" (docs/VERIFICATION.md's budget paragraph) stands for MS's 42 to 46%. In VMS's words, "the box estimate for lang-routines was low, and the quiet-desktop and Linux proportions are 51 to 61 per cent, not 42 to 46". The box gave two thirds more, 252 s against 150 s (above).
   - "The golden suite's count, 5,222, does not move" is true of MS's parcel. With MA's tests merged the suite is 5,239, VERIFICATION's golden row.
 - **The stress run's entry,** after VSR's re-check:
   - the fast dt-i visits ran at 8.43 to 9.21 checks a second, median 8.87, so the rates are "about 2.4 or about 9";
@@ -21382,26 +21382,31 @@ The CI split and the card's stress run, merged in this wave beside the two parce
 **Known limits carried** (the verifiers' "other" notes, merged under Logan's rule; the rest stand in their ledgers):
 - **MS's, in VMS's words:**
   - "structured-lane placement is unasserted": N2, N3 and tangent N pass with "0 demanded".
-  - "a spurious mark is accepted in images that cannot mark": the brief's rule. A `may_mark` would keep the old detection.
+  - "a spurious mark is now accepted in images that cannot mark": the brief's rule. A `may_mark` would keep the old detection.
   - R4 fails only with R2.
   - The lane-params span and R2's [7:5] half have no committed control.
   - "a lane marked early is excused to the end of its checkpoint's run".
   - lang-routines needs pytest on every host, pre-existing.
-- **MA's, in VMA's words:**
+- **MA's, in VMA's words** (its six other notes):
   - "a deleted record key is not noticed": a routine entry's record with `marked` and `lane_flags_sha256` deleted still passes, and the success line still names them.
   - One control is fragile under a neighbour-lane plant, never a false pass.
+  - "MA's final report says 'the old file is a byte prefix of the new one': only the old file up to its last entry's closing brace is (the whole old file is not); the committed records say it exactly".
   - The docstring and CARDDAY name `replay-missing` where a run naming no source is refused `replay-source` first.
   - Nothing compares the probe's library with the certificate's build id.
-  - The six do not reach hw/card_stress.py's `REV8_ENTRIES`.
+  - "the record's `made` string does not mention the probe (kept so the old file's text is unchanged)".
+- **MA's own:** the six do not reach hw/card_stress.py's `REV8_ENTRIES`.
 - **The follow-ups:**
   - the six in the stress driver's table and its test;
-  - `demanded > 0`;
+  - `demanded > 0` (VMS's note 1);
+  - a `may_mark`, so that an image that cannot mark fails a mark again (VMS's note 2);
+  - committed controls for the lane-params span and for [7:5] alone (VMS's note 4);
+  - lang-routines' need for pytest (VMS's note 8);
   - the record keys' guard;
   - the fragile control;
   - the refusal names;
   - divsqrt_soak.c's header (VSR).
 
-**Beside the wave, not in this push** (Logan's requests of 2026-10-19). Their records follow when they merge:
+**Beside the wave, not in this push** (Logan's requests of 2026-10-19; READ, the lead's ledger). Their records follow when they merge:
 - **parcel EX,** the clause-5 soak's exhaustive modes: under its verifier;
 - **parcel SC,** a study of wider sweep coverage: its verifier's five (b)s are being fixed;
 - **parcel FG,** the project's figures: its verifier's four (b)s fixed, and under re-check;
@@ -21417,4 +21422,6 @@ The CI split and the card's stress run, merged in this wave beside the two parce
 
 **Records:**
 - docs/README.md recounted at df7dc43, and again with this entry;
-- the docs check rc 0.
+- docs/VERIFICATION.md's `lang-routines` and `tangent` rows, and its budget paragraph, carry the box's figures above, which they had left to the lead;
+- the docs check rc 0 (MEASURED).
+- **verifier-VIW7** (Sonnet) on 9d3c3f7: (a) 0, (b) 1. f2ac63d's message says VMA's six notes are known limits in this record, and it carried four of them, with a fifth bullet that was MA's own. Restated above in VMA's words, with VIW7's smaller notes: the dropped "now", VMS's note 6, the follow-ups the lead's ledger named, the SKIP's name and these marks.
