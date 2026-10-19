@@ -21035,3 +21035,64 @@ The run tested 5eb35c2. f2496ac's changes were checked locally by the lead and b
 **Time and tokens** (MEASURED, the agents' transcripts; usage summed from the last line of each response). The verifiers, all claude-sonnet-5-5:
 - VCI: 39 min, then 5 min for item 7; 164 tool uses; 243,192 output tokens.
 - VCI2: 44 min on f2496ac, 17 min re-checking this entry and 9 min re-checking its restatement; 291 tool uses; 452,229 output tokens. Its last re-check is not counted here.
+
+## 2026-10-19 - the card's long stress run, closed: 61 hours on the three revision-8 images, 4,086 legs and 0 failures, 3,287 sweep slices and 0 disagreements, the 14 exhaustive fp32 items complete; and which of the sweep's items reached the tile
+
+**What Logan asked,** on 2026-10-16, quoted whole in the sixth wave's closing record: a long run on the card "cycling across all of its capabilities and keeping metrics on it", from that evening to Monday morning, "Ideally utilize the quad tile image as well, the more work on the card the better, we can also use the time for lengthy sweeps if it would prove useful as well".
+
+**The sources** (READ):
+- the run's report.txt, status.txt, settings.json and metrics.jsonl;
+- each copied from amd-arc-box after the run ended, its SHA-256 equal to the box's;
+- metrics.jsonl: 7,982,931 bytes, 5,108 records, sha256 e7989f88efded691ea7461e921840d8de5d449e069980f6ba92e6a8f87e007cc;
+- report.txt: sha256 4a426b57d752a5b135714f6f4ef45f0844e58be2485e2c92ff7c923a9ffa1e04.
+
+The figures marked COMPUTED are the lead's, from that metrics.jsonl.
+
+**The run:**
+- **The driver:** hw/card-stress.sh, parcel ST's (verifier-VST: 0, 0), from a clone at f0693b2, clean, out /data/card-stress-1016.
+- **The images:** the quad (4 tiles, sha256 4f9921a25af6...), the single (0639248e9c66...) and the deep (bbf08fb3feb6...). The extended revision-8 entries ran because the run's revision-8 images directory was seeded from W8's compiles (the sixth wave's record).
+- **Start and end:** started 2026-10-16 18:58:23; ended 2026-10-19 08:01:13, "reason deadline, exit 0, cycles 67". It ran 74 s past the 08:00 deadline because a leg running then finishes (card-segrun on the quad, 189.1 s). The wall span was 219,770 s (2 d 13 h 02 m 50 s).
+- **The cycles:** 67 in all, the quad 45, the single 11 and the deep 11. In verifier-VSR's words: "each visit a battery and then sweep slices, except the last: the quad's 45th visit (cycle 67) ran 7 of its 12 battery legs, api-test to card-segrun, and no sweep slice, because the deadline passed while card-segrun ran."
+
+**The legs** (READ): 4,086 recorded.
+- **Pass:** 4,032; fail, timeout, no_device, parse_error and error 0 each.
+- **Skipped:** 54.
+  - The selftest runs every third visit of an image: 43 skips (29 on the quad, 7 each on the single and the deep).
+  - acceptance-rev8 on the single: 11 skips. The revision-8 set has no entry for u50-rev8 by its rule.
+- **What a visit's battery runs:**
+  - api-test; device-test's legs i, q8, full, r and b;
+  - card-segrun; seq-check;
+  - the acceptance set: 20 of 20 entries, 174 checks;
+  - the revision-8 set: 9 entries and 115 checks on the quad, 1 entry and 27 checks on the deep;
+  - the resident tool; and the selftest: 1,072,415 cases a run, COMPUTED as 16,086,225 over the quad's 15 runs.
+- **Every battery leg gave the same counts on every visit on which it ran:** 35 groups by image and leg, each one distinct set of counts once the reported seconds are left out (COMPUTED). The selftest ran on 15 of the quad's 44 visits that reached it and 4 each of the single's and the deep's 11; the single's acceptance-rev8 never ran (VSR, COMPUTED).
+- **The battery's rates held:** the report's trends run from -4.0% (dt-q8 on the deep) to +3.5% (the selftest on the single). Two spreads sit inside them (VSR): dt-i on the quad ran at 2.4 or 9.0 checks a second, the 22 fast visits each following a quad visit and the 23 slow ones following another image or none (COMPUTED; the cause is the image's load, BELIEVED); and acceptance-rev8's first visit on the quad took 2,189 s, its compile.
+
+**The sweep** (READ, the report; COMPUTED, the splits):
+- **3,287 slices,** each passed, no disagreement in any. 1,356,316,228,303 cases, each tool counting in its own unit, in verifier-VSR's words: "checks (an operand and an exponent) for scaleb, in-range operand-and-target pairs for cvtto (four integer targets, about two an operand), lanes a source type (four to an operand) for cvtfrom."
+- **The 14 exhaustive fp32 items:** 60,129,542,144 of 60,129,542,144 encodings (100.000%), each item one interval.
+- **54 random items:** banded samples, the n-th slice of an item seeded `base_seed + 7919 * n`.
+- **Which items reached the tile.** host/include/cft.h, "The remaining clause-5 operations", READ: cft_rint, cft_scaleb and cft_cmp_sig are COMPOSED, "on a device it runs on the tile". Every other clause-5 operation is HOST, "results are bit-identical on every backend by construction". host/src/clause5.c has "remainder: host". Division and square root are the tile's.
+  - **35 items ran on the tile:** their floating-point work is the tile's passes, with the host keeping integer bookkeeping. cft_scaleb takes a host path for exponents below the subnormal floor (clause5.c 461-501), which the soak's lists carry 2 of 17 at fp32 and 2 of 27 at fp64 (VSR, READ).
+    - sqrt32 and rint32, five attributes each, exhaustive: 42,949,672,960 encodings in 175 slices;
+    - div32, div64 and sqrt64 under four attributes, rint64 under five, scaleb32 and scaleb64 under four: 371,591,340,032 cases in 1,413 slices.
+  - **33 items ran libcft's host code on the box's CPU,** with the card open:
+    - nextup32, nextdown32, logb32 and class32, exhaustive: 17,179,869,480 cases in 74 slices, 4 x 2^32 and nextup's and nextdown's eight edge cases a slice;
+    - the 64-bit next, logB and class, the format and integer conversions, and the remainder: 924,595,345,831 cases in 1,625 slices.
+  - **So "on the card" holds for the 35.** The 33 test the library under a device's context, and the software backend on any CPU gives them the same assurance (BELIEVED, from cft.h's "bit-identical on every backend by construction"). Parcel EX found this, reading cft.h, on 2026-10-19.
+
+**Telemetry** (READ, the report; COMPUTED, the extremes' times): 865 samples, none without values.
+- **The FPGA:** 28 to 40 C, mean 34.65; 40 C last at 2026-10-18 18:12:55.
+- **The card's power:** 15.40 to 34.38 W, mean 20.87.
+  - The 34.38 W sample, at 2026-10-18 13:02:29, fell inside the quad's resident leg (13:02:27 to 13:02:31).
+  - The next highest sample was 23.47 W.
+- **The host:** load (one minute) 2.04 to 6.74; memory available 43,420 to 45,330 MB of 48,061.
+
+**Uptime** (READ): in legs 219,550 s, 99.9% of the wall span. The longest gap between legs was 1.215 s, and no gap was over 300 s. That counts any leg: a leg using the tile ran in 71.6% of the wall span, host items' jobs filling the rest, and the quad's sweep phases averaged 2.98 of 4 jobs running (VSR, COMPUTED).
+
+**Known limits:**
+- **The HBM temperature reads 0** in 670 of 865 samples (mean 7.2 C, maximum 35), where the sixth wave's smoke saw it in 3 of 10 (VSR). Several of XRT's rails, the 12 V auxiliary among them, read 0 on this card.
+- **The random samples do not accumulate.** A random item's seed number is rebuilt from the run's own metrics.jsonl (hw/card_stress.py, hw/card_stress_lib.py `seed_for`), so a new run in a new directory repeats these seeds, so the same streams, from their start (the lead's reading, 2026-10-19; VSR's words). A slice's length is set by the measured rate, so where two runs' lengths differ one slice is a prefix of the other. Parcel SC's study takes it up.
+- **The units differ by item.** The sweep's case totals add items whose tools count different things (above); "1.36 trillion" is a count of the tools' cases, not of operands.
+
+**Who ran it:** the lead, on amd-arc-box; no agent touched the card. verifier-VSR (Sonnet) checked this record at f539a2a: (a) 0, (b) 2, both restated here in its words, and eight of its nine other notes taken; the ninth, divsqrt_soak.c's header still saying it "cannot validate ... the tile itself" against its own main(), is a follow-up.
