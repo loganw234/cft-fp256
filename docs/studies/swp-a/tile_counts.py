@@ -208,9 +208,11 @@ def main():
     print("== T5. the composed items (rint, scaleb): the tile's share of a job, a pass's cost, and the staged traffic (quad, rne)")
     print("   a job is a batch of 4,096 operands; passes an operand: rint 2 calls x 4 (T2), scaleb the passes over the directed list (T2);")
     print("   tile time = beats / 108 M a second at lanes a beat; traffic of the four tiles = passes x words an element x element bytes, with 3 words (two read, one")
-    print("   written: the lower figure, BELIEVED) or 4 (READ in cftx_run_impl, host/src/backend_xrt.cpp: it stages a, b and c for every run, a null operand zero-filled and uploaded, and a pass")
-    print("   writes d. docs/VALIDATION.md 2026-09-18, 'the reductions' missing rate', quotes the engine's reason, 'one read enable feeds all three FIFOs', in an entry about the REDUCTIONS: for rint")
-    print("   and scaleb the four words rest on the reading of cftx_run_impl), against the 2.3 to 3.3 GB/s of staged traffic that docs/VALIDATION.md 2026-09-08 measured whatever the format and the tile count")
+    print("   written: the lower figure, BELIEVED) or 4 (READ in cftx_run_impl and stage(), host/src/backend_xrt.cpp: a run stages a, b and c, a role skipped only if it is bound to a resident buffer")
+    print("   (a scalar operand is staged as one element), a null operand zero-filled and uploaded, and a pass reads d back. Neither a resident buffer nor a scalar is on the path of the rint and scaleb")
+    print("   soaks, which reach the backend through cft_run (clause5.c): the source checks below the table hold the staging loop, stage(), the read-back and that path to the text. docs/VALIDATION.md 2026-09-18, 'the reductions'")
+    print("   missing rate', quotes the engine's reason, 'one read enable feeds all three FIFOs', in an entry about the REDUCTIONS: for rint and scaleb the four words rest on the reading of the source),")
+    print("   against the 2.3 to 3.3 GB/s of staged traffic that docs/VALIDATION.md 2026-09-08 measured whatever the format and the tile count")
     print("   %-9s %9s %9s %8s %10s %10s %9s %10s %10s %14s" % ("item", "M op/s", "passes/op", "job ms", "us/pass", "tile us", "tile %", "GB/s (3)", "GB/s (4)", "of the wall (4)"))
     composed = []
     for fam, fname, word in (("rint32", "fp32", 4), ("rint64", "fp64", 8), ("scaleb32", "fp32", 4), ("scaleb64", "fp64", 8)):
@@ -230,16 +232,43 @@ def main():
         composed.append((fam, ops, bound))
         print("   %-9s %9.3f %9.1f %8.3f %10.1f %10.1f %8.1f%% %10.2f %10.2f %9.0f%% to %.0f%%" % (
             fam, ops / 1e6, ppo, job * 1e3, job / ppo * 1e6, tile / ppo * 1e6, 100.0 * tile / job, gbs3, gbs4, 100.0 * gbs4 / 3.3, 100.0 * gbs4 / 2.3))
-    # the four words: the source must still stage a, b and c on every run, unless resident (a tie of the claim to the text it was READ in)
+    # the four words: patterns tie the claim to the text it was READ in (cftx_run_impl and stage(), host/src/backend_xrt.cpp), and a search ties "on the soak's path" to the
+    # soak's own sources. What the patterns hold: (1) the staging loop runs over every role below CFT_ROLE_D (a, b, c), skips a role only when it is bound to a resident buffer,
+    # and otherwise calls stage(); (2) stage() copies a non-null source, ZEROES a null one and uploads the padded size; (3) the task's collect step reads d back from the device and
+    # copies it out, after the early return for a RESIDENT output. What they do not hold: that a scalar operand is staged as one element (the `scal ?` branches), or the order of
+    # the steps. What the search holds: clause5.c and clause5_soak.c never name a resident buffer or a scalar operand (cft_alloc, cft_buffer*, cft_run_ex, cft_elem_args, scalar_mask).
     with open(os.path.join(ROOT, "host", "src", "backend_xrt.cpp"), encoding="utf-8") as fh:
         be = fh.read()
-    body = be[be.index("static int cftx_run_impl("):]
-    body = body[:body.index("t.start = ")]
+    whole = be[be.index("static int cftx_run_impl("):]
+    whole = whole[:whole.index("J.tasks.push_back(std::move(t));")]
+    stage_part = whole[:whole.index("t.start = ")]
+    collect_part = whole[whole.index("t.collect = "):]
     pat = r"for \(int r = 0; r < %s; r\+\+\) \{\s*if \(sb\[i\]\.bo\[r\]\)\s*continue;.*?stage\(\*tb\[r\],"
-    check("cftx_run_impl stages every operand role below D (a, b, c) on every run unless it is resident: the four words an element",
-          re.search(pat % "CFT_ROLE_D", body, re.S) is not None)
+    check("cftx_run_impl's staging loop runs over every role below D (a, b, c), skips one only if it is bound to a resident buffer, and calls stage() for the rest",
+          re.search(pat % "CFT_ROLE_D", stage_part, re.S) is not None)
     check("CONTROL: the same search for a staging loop over TWO roles finds nothing in the source (the check above can fail)",
-          re.search(pat % "2", body, re.S) is None)
+          re.search(pat % "2", stage_part, re.S) is None)
+    st_null = r"std::memset\(p, 0, real_bytes\);"
+    st_pat = (r"void stage\(xrt::bo &bo, const uint8_t \*src, size_t real_bytes,\s*size_t padded_bytes\)\s*\{[^}]*?if \(src\)\s*std::memcpy\(p, src, real_bytes\);\s*else\s*" + st_null +
+              r"[^}]*?bo\.sync\(XCL_BO_SYNC_BO_TO_DEVICE, padded_bytes, 0\);")
+    check("stage() copies a non-null source, ZEROES a null one (an operand the opcode does not read) and uploads the padded size",
+          re.search(st_pat, be, re.S) is not None)
+    check("CONTROL: the same search for a stage() that SKIPS a null source (else return;) finds nothing in the source (the check above can fail)",
+          re.search(st_pat.replace(st_null, r"return;"), be, re.S) is None and st_pat.replace(st_null, r"return;") != st_pat)
+    rb_pat = (r"return;\s*\}\s*tile\.d\.sync\(XCL_BO_SYNC_BO_%s, s\.padded \* esz, 0\);\s*std::memcpy\(pd \+ s\.first_elem \* esz, tile\.d\.map<uint8_t \*>\(\),\s*s\.real \* esz\);")
+    check("the collect step reads d back from the device and copies it to the caller's array, after the early return for a RESIDENT output",
+          re.search(rb_pat % "FROM_DEVICE", collect_part, re.S) is not None)
+    check("CONTROL: the same search for a read-back that syncs TO_DEVICE finds nothing in the source (the check above can fail)",
+          re.search(rb_pat % "TO_DEVICE", collect_part, re.S) is None)
+    path_names = ("cft_alloc", "cft_buffer", "cft_run_ex", "cft_elem_args", "scalar_mask")
+    path_text = ""
+    for rel in (("host", "src", "clause5.c"), ("host", "tools", "clause5_soak.c")):
+        with open(os.path.join(ROOT, *rel), encoding="utf-8") as fh:
+            path_text += fh.read()
+    named = [w for w in path_names if w in path_text]
+    check("the rint and scaleb soak's path (clause5.c, clause5_soak.c) names no resident buffer and no scalar operand: no " + ", ".join(path_names),
+          not named, "(found: %s)" % (", ".join(named) if named else "none"))
+    check("CONTROL: the same search finds cft_run( in them, the call the path does make, so it can find a name", "cft_run(" in path_text)
     check("no measured composed rate exceeds its beat bound (lanes x beats / passes an operand)", all(o < b for _f, o, b in composed))
     # these items run at 2 to 4% of the bound, so only a much smaller beat rate can put the bound under them
     check("CONTROL: with a hundredth of the documented beat rate the bound falls below a measured rate (the check above can fail)",

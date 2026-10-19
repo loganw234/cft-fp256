@@ -25,14 +25,20 @@ TILE honours the same structure is a claim about its RTL that nothing here tests
       written here from the definitions (kept bits, the class of the dropped bits - zero,
       below half, half, above half - and the kept lsb), on every finite source encoding
   G6  the sizes that remain, and what they cost at the stress run's measured rates; each L1 formula
-      (div, sqrt, rint, conv, cvtto, scaleb wide) is CALLED and held to a count at a tiny format, and rem's
-      gap to the bound clause5.c states; scaleb's result is shown to be a function of its (significand,
-      result strip, attribute) key
+      (div, sqrt, rint, conv, cvtto, scaleb wide) is CALLED and held to a count at a tiny format (cvtto at
+      three of them), and rem's gap to the bound clause5.c states; the number of MAGNITUDE FUNCTIONS each
+      formula multiplies by is COUNTED on the golden model over the attribute list that sweep_cost.py gives
+      the family (four for roundToIntegral and the integer conversions, whose five attributes include RMM,
+      which differs from RNE at ties; three for the families run with four attributes); scaleb's result is
+      shown to be a function of its (significand, result strip, attribute) key
 
-CONTROLS: each group has a deliberately wrong version that must be caught; G6's formulas have a planted
-slip each (--plants runs them: eight slips, each of which must turn its own guard red).
-usage: python symmetry_check.py          (reads stress-final-item-rates.txt beside it; about 70 s)
-       python symmetry_check.py --plants (G6 alone, once for each planted slip; about 10 s)
+CONTROLS: each group has a deliberately wrong version that must be caught. G6 plants a slip in each of its
+seven L1 formulas, one in the scaleb strip classification, one wrong form of L1_cvtto that its first guard
+cannot see (the other two points must), and three wrong counts of magnitude functions (--plants runs them all:
+each must turn its own guard red, and where another guard was blind to the slip that guard must stay green in
+the same run, which is how the blindness is shown).
+usage: python symmetry_check.py          (reads stress-final-item-rates.txt beside it; about 80 s)
+       python symmetry_check.py --plants (G6 alone, once for each planted slip; about 20 s)
 """
 import math
 import os
@@ -43,9 +49,12 @@ from fractions import Fraction
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, "..", "..", ".."))
 sys.path.insert(0, os.path.join(ROOT, "python"))
+sys.path.insert(0, HERE)
+sys.dont_write_bytecode = True                         # importing sweep_cost.py leaves no __pycache__ beside it
 
 from cft_golden import softfloat as sf  # noqa: E402
 from cft_golden.formats import FpFormat, FP32, FP64, FP128  # noqa: E402
+import sweep_cost as SC  # noqa: E402  (FAMILIES: the attribute list of each family, the one source of the cost model's raw spaces)
 
 RND = (sf.RND_RNE, sf.RND_RTZ, sf.RND_RDN, sf.RND_RUP, sf.RND_RMM)
 NAME = sf.RND_NAMES
@@ -598,6 +607,19 @@ def scaleb_wide_range(emax, emin_sub):
     return lo, hi, hi - lo + 1
 
 
+ATTR = {"rne": sf.RND_RNE, "rtz": sf.RND_RTZ, "rdn": sf.RND_RDN, "rup": sf.RND_RUP, "rmm": sf.RND_RMM}
+
+
+def distinct_functions(modes, table):
+    """How many different functions the attributes of a family are, on the golden model: table(m) is the model's whole result table
+    (bits and flags, every operand or operand pair of a tiny format, the positive ones where the sign mirror folds the rest) under
+    attribute m, and attributes with equal tables are one function. Returns (the count, the groups: '|' between functions, '=' within one)."""
+    groups = {}
+    for name in modes:
+        groups.setdefault(table(ATTR[name]), []).append(name)
+    return len(groups), " | ".join(" = ".join(g) for g in groups.values())
+
+
 def g6():
     print("== G6. the sizes that remain, and what they cost at the stress run's measured rates (COMPUTED)")
     n, bound = div_keys(E4M3)
@@ -606,26 +628,38 @@ def g6():
     rates = read_rates()
     # a sweep's reduced space, level L1 (PROVED for the model at e4m3 and e5m6 by exhaustion, G1-G5; an argument at p = 24 and 53), in the unit of the soak's count
     p32, p64 = 24, 53
-    magn = 3                                                     # nearest, truncate, away (G1, G2, G3)
-    # PLANT (set by --plant NAME, G6 alone) writes one slip into one formula; every guard below must see its own formula's slip
+    # The magnitude functions of an operation: its attribute list (sweep_cost.py's FAMILIES, the source of the cost model's raw spaces) folded by the sign
+    # mirror and by rdn = rtz on a positive result (G1, G2) leaves nearest (rne), truncate (rtz) and away (rup), and RMM as a function of its own wherever it
+    # differs from RNE (G3: at the ties of roundToIntegral and of the conversions to integer; never for square root; division and the other operations in this
+    # table are run with four attributes, without rmm). The numbers are written here and COUNTED on the golden model below, family by family.
+    magn = {"div": 3, "sqrt": 3, "rint": 4, "conv": 3, "cvtto": 4, "scaleb": 3}
+    # PLANT (set by --plant NAME, G6 alone) writes one slip into one formula or count; every guard below must see its own formula's slip
+    if PLANT == "magn_rint":
+        magn["rint"] = 3                                         # a five-attribute family left at three functions, the form the table first had
+    elif PLANT == "magn_cvtto":
+        magn["cvtto"] = 3
+    elif PLANT == "magn_div":
+        magn["div"] = 4                                          # the other direction: a four-attribute family counted as if it ran rmm
 
     def L1_div(p):
         strips = (1 + (p + 1)) if PLANT == "div_strip" else (1 + (p + 1) + 1)
-        return magn * strips * (1 << (2 * (p - 1)))              # core + subnormal strips + overflow strip, per magnitude function
+        return magn["div"] * strips * (1 << (2 * (p - 1)))       # core + subnormal strips + overflow strip, per magnitude function
 
     def L1_sqrt(p):
-        return magn * (1 << (p - 1 if PLANT == "sqrt_parity" else p))   # mantissa x exponent parity; subnormals normalise into it
+        return magn["sqrt"] * (1 << (p - 1 if PLANT == "sqrt_parity" else p))   # mantissa x exponent parity; subnormals normalise into it
 
     def L1_rint(p):
-        return magn * (p - 1 if PLANT == "rint_binades" else p) * (1 << (p - 1))   # |x| in [1/2, 2^(p-1)): p binades of 2^(p-1) significands
+        return magn["rint"] * (p - 1 if PLANT == "rint_binades" else p) * (1 << (p - 1))   # |x| in [1/2, 2^(p-1)): p binades of 2^(p-1) significands
 
     def L1_conv(ps, pd):
         strips = (1 + (pd + 1)) if PLANT == "conv_strip" else (1 + (pd + 1) + 1)
-        return magn * strips * (1 << (ps - 1))                   # normal core + subnormal strips + overflow strip
+        return magn["conv"] * strips * (1 << (ps - 1))           # normal core + subnormal strips + overflow strip
 
     def L1_cvtto(p, w):
         # operand sign x the binades e in [-1, w - 1] of the operands a w-bit integer target can hold (w + 1 of them: 65 for w = 64) x significands
-        return 2 * (w if PLANT == "cvtto_binades" else w + 1) * (1 << (p - 1)) * magn
+        # cvtto_pbinades: p + 5 binades, which equals w + 1 at the first guard's point (p = 4, w = 8) and nowhere else the guards look
+        binades = w if PLANT == "cvtto_binades" else (p + 5 if PLANT == "cvtto_pbinades" else w + 1)
+        return 2 * binades * (1 << (p - 1)) * magn["cvtto"]
 
     def L1_rem(p, ew):
         gap = (1 << ew) + p - (4 if PLANT == "rem_gap" else 5)   # emax - emin + p - 2, clause5.c's bound on the host's walk: 275 at fp32, 2,096 at fp64
@@ -633,12 +667,33 @@ def g6():
 
     def L1_scaleb_wide(p):
         strips = (1 + (p + 1)) if PLANT == "scaleb_strip" else (1 + (p + 1) + 1)
-        return magn * strips * (1 << (p - 1))                    # results in range are exact: core + subnormal strips + overflow strip, per significand
+        return magn["scaleb"] * strips * (1 << (p - 1))          # results in range are exact: core + subnormal strips + overflow strip, per significand
+
+    # ---- the magnitude functions, COUNTED: the factor every L1 formula carries, held to the golden model over each family's attribute list ----------
+    e4, e5, pe = E4M3, E5M6, E4M3.prec
+    pos4 = list(range(1 << (e4.width - 1)))                      # every encoding with the sign bit clear: finite, zero, infinity and the NaNs
+    neg4 = [x | e4.sign_mask for x in pos4]
+    pos5 = list(range(1 << (e5.width - 1)))
+    lo_w, hi_w, _n = scaleb_wide_range(e4.emax, e4.emin - (pe - 1))
+    targets = ((8, True), (8, False), (5, True), (5, False))     # the soak's four integer targets (i32, u32, i64, u64), at e4m3's size
+    print("   magnitude functions: the distinct tables of the golden model at e4m3 over a family's attribute list (sweep_cost.py); '=' joins attributes that give one table")
+    for key, fams, table, what in (
+            ("div", ("div32", "div64"), lambda m: tuple(sf.div(e4, a, b, m) for a in pos4 for b in pos4), "every positive pair"),
+            ("sqrt", ("sqrt64",), lambda m: tuple(sf.sqrt(e4, a, m) for a in pos4), "every positive encoding"),
+            ("rint", ("rint64",), lambda m: tuple(sf.round_int(e4, a, m, ex) for ex in (False, True) for a in pos4), "every positive encoding, both variants"),
+            ("conv", ("conv64to32",), lambda m: tuple(sf.convert(e5, e4, a, m) for a in pos5), "every positive e5m6 encoding"),
+            ("cvtto", ("cvtto64",), lambda m: tuple(sf.to_int(e4, a, w, sg, m) for w, sg in targets for a in pos4), "every positive operand, four targets"),
+            ("cvtto", ("cvtto64",), lambda m: tuple(sf.to_int(e4, a, w, sg, m) for w, sg in targets for a in neg4), "every negative operand, four targets"),
+            ("scaleb", ("scaleb64",), lambda m: tuple(sf.scaleb(e4, a, nn, m) for a in pos4 for nn in range(lo_w, hi_w + 1)), "every positive encoding x the wide range")):
+        lists = {SC.FAMILIES[f]["modes"] for f in fams}
+        modes = SC.FAMILIES[fams[0]]["modes"]
+        count, groups = distinct_functions(modes, table)
+        check("magnitude functions of %s (%s) over %s: the model's distinct tables equal the count G6 multiplies by" % (" and ".join(fams), " ".join(modes), what),
+              len(lists) == 1 and count == magn[key], "(%d against %d: %s)" % (count, magn[key], groups))
 
     # ---- guards: each L1 formula is CALLED and held to a count at a tiny format, or (rem) to the bound clause5.c states ----------------
-    e4, pe = E4M3, E4M3.prec
     check("L1_div at e4m3 (per magnitude function) equals the number of (significand pair, strip) keys the pairs reach, counted above",
-          L1_div(pe) // magn == n, "(%d against %d)" % (L1_div(pe) // magn, n))
+          L1_div(pe) // magn["div"] == n, "(%d against %d)" % (L1_div(pe) // magn["div"], n))
     sq = set()
     for x in finite(e4):
         if value(e4, x) > 0:
@@ -646,10 +701,10 @@ def g6():
             top = u.m.bit_length() - 1 + u.e
             sq.add((u.m << (pe - u.m.bit_length()), top % 2))
     check("L1_sqrt at e4m3 (per magnitude function) equals the number of (normalised significand, exponent parity) classes of the positive inputs",
-          L1_sqrt(pe) // magn == len(sq), "(%d against %d)" % (L1_sqrt(pe) // magn, len(sq)))
+          L1_sqrt(pe) // magn["sqrt"] == len(sq), "(%d against %d)" % (L1_sqrt(pe) // magn["sqrt"], len(sq)))
     rr = [x for x in finite(e4) if Fraction(1, 2) <= value(e4, x) < Fraction(1 << (pe - 1))]
     check("L1_rint at e4m3 (per magnitude function) equals the number of positive values in [1/2, 2^(p-1))",
-          L1_rint(pe) // magn == len(rr), "(%d against %d)" % (L1_rint(pe) // magn, len(rr)))
+          L1_rint(pe) // magn["rint"] == len(rr), "(%d against %d)" % (L1_rint(pe) // magn["rint"], len(rr)))
     ck = set()
     for x in finite(E5M6):
         if value(E5M6, x) > 0:
@@ -659,18 +714,20 @@ def g6():
             strip = "O" if top > e4.emax else (0 if top >= e4.emin else min(e4.emin - top, pe + 1))
             ck.add((ms, strip))
     check("L1_conv (e5m6 to e4m3, per magnitude function) equals the number of (source significand, destination strip) keys the encodings reach",
-          L1_conv(E5M6.prec, pe) // magn == len(ck), "(%d against %d)" % (L1_conv(E5M6.prec, pe) // magn, len(ck)))
-    # cvtto: the operands an 8-bit integer target can hold, by (sign, binade, significand): e in [-1, 7], and e4m3 reaches every one
-    wint = 8
-    cv = set()
-    for x in finite(e4):
-        v = abs(value(e4, x))
-        if Fraction(1, 2) <= v < Fraction(1 << wint):
-            u = sf.unpack(e4, x)
-            top = u.m.bit_length() - 1 + u.e
-            cv.add((u.sign, top, u.m << (pe - u.m.bit_length())))
-    check("L1_cvtto at e4m3 with 8-bit integer targets (per magnitude function) equals the number of (sign, binade, significand) operands in [1/2, 2^8)",
-          L1_cvtto(pe, wint) // magn == len(cv), "(%d against %d)" % (L1_cvtto(pe, wint) // magn, len(cv)))
+          L1_conv(E5M6.prec, pe) // magn["conv"] == len(ck), "(%d against %d)" % (L1_conv(E5M6.prec, pe) // magn["conv"], len(ck)))
+    # cvtto: the operands a w-bit integer target can hold, by (sign, binade, significand): e in [-1, w - 1], at three points that a formula linear in p and w cannot
+    # fit by accident - (p = 4, w = 8), (p = 4, w = 5) and (p = 7, w = 12) - because the first alone is met by p + 5 binades as well as by w + 1
+    for fmt_c, wint in ((e4, 8), (e4, 5), (E5M6, 12)):
+        cv = set()
+        for x in finite(fmt_c):
+            v = abs(value(fmt_c, x))
+            if Fraction(1, 2) <= v < Fraction(1 << wint):
+                u = sf.unpack(fmt_c, x)
+                top = u.m.bit_length() - 1 + u.e
+                cv.add((u.sign, top, u.m << (fmt_c.prec - u.m.bit_length())))
+        check("L1_cvtto at %s with %d-bit integer targets (per magnitude function) equals the number of (sign, binade, significand) operands in [1/2, 2^%d)"
+              % (fmt_c.name, wint, wint),
+              L1_cvtto(fmt_c.prec, wint) // magn["cvtto"] == len(cv), "(%d against %d)" % (L1_cvtto(fmt_c.prec, wint) // magn["cvtto"], len(cv)))
     gaps = [(L1_rem(fm.prec, fm.exp_w) // (1 << (2 * (fm.prec - 1))), fm.emax - fm.emin + fm.prec - 2) for fm in (FP32, FP64)]
     with open(os.path.join(ROOT, "host", "src", "clause5.c"), encoding="utf-8") as fh:
         c5_text = fh.read()
@@ -678,7 +735,6 @@ def g6():
           all(a == b for a, b in gaps) and gaps[0][1] == 275 and gaps[1][1] == 2096 and "emax - emin + p - 2" in c5_text,
           "(%s)" % ", ".join("%d = %d" % g for g in gaps))
     # scaleb over the wide exponent range: (normalised significand, strip of the RESULT) keys, and the golden model's result a function of the key
-    lo_w, hi_w, _n = scaleb_wide_range(e4.emax, e4.emin - (pe - 1))
     keys = {}
     for x in finite(e4):
         if value(e4, x) <= 0:
@@ -701,7 +757,7 @@ def g6():
                 keys.setdefault((ms, strip, m), set()).add(rep)
     nkeys = len({(ms, strip) for ms, strip, m in keys})
     check("L1_scaleb_wide at e4m3 (per magnitude function) equals the number of (significand, result strip) keys the wide range reaches",
-          L1_scaleb_wide(pe) // magn == nkeys, "(%d against %d)" % (L1_scaleb_wide(pe) // magn, nkeys))
+          L1_scaleb_wide(pe) // magn["scaleb"] == nkeys, "(%d against %d)" % (L1_scaleb_wide(pe) // magn["scaleb"], nkeys))
     bad_keys = sum(1 for v in keys.values() if len(v) > 1)
     check("scaleb: within each (significand, strip, attribute) key the golden model's result is ONE value (the strips are the classes of the wide range)",
           bad_keys == 0, "(%d keys, %d with more than one result)" % (len(keys), bad_keys))
@@ -713,15 +769,18 @@ def g6():
         sec = space1 / (workers_per_quad * rate)
         rows.append((name, space0, space1, sec / YEAR, note))
 
-    add("div32", 4 * (1 << 64), L1_div(p32), "div32-rne", 4, "tile")
-    add("div64", 4 * (1 << 128), L1_div(p64), "div64-rne", 4, "tile")
-    add("sqrt64", 4 * (1 << 64), L1_sqrt(p64), "sqrt64-rne", 4, "tile")
-    add("rint64", 5 * (1 << 64), L1_rint(p64), "rint64-rne", 4, "tile")
-    add("conv64to32", 4 * (1 << 64), L1_conv(p64, 24), "conv64to32-rne", 4, "host")
-    add("cvtto64", 5 * (1 << 64), L1_cvtto(p64, 64), "cvtto64-rne", 4, "host")
+    def attrs(family):                                           # the raw space (L0) counts the family's attributes, from the same list the guards above count
+        return len(SC.FAMILIES[family]["modes"])
+
+    add("div32", attrs("div32") * (1 << 64), L1_div(p32), "div32-rne", 4, "tile")
+    add("div64", attrs("div64") * (1 << 128), L1_div(p64), "div64-rne", 4, "tile")
+    add("sqrt64", attrs("sqrt64") * (1 << 64), L1_sqrt(p64), "sqrt64-rne", 4, "tile")
+    add("rint64", attrs("rint64") * (1 << 64), L1_rint(p64), "rint64-rne", 4, "tile")
+    add("conv64to32", attrs("conv64to32") * (1 << 64), L1_conv(p64, 24), "conv64to32-rne", 4, "host")
+    add("cvtto64", attrs("cvtto64") * (1 << 64), L1_cvtto(p64, 64), "cvtto64-rne", 4, "host")
     add("rem32", 1 * (1 << 64), L1_rem(p32, 8), "rem32", 4, "host")
     add("rem64", 1 * (1 << 128), L1_rem(p64, 11), "rem64", 4, "host")
-    add("scaleb64 (wide)", 4 * (1 << 64) * 4198, L1_scaleb_wide(p64), "scaleb64-rne", 4, "tile")
+    add("scaleb64 (wide)", attrs("scaleb64") * (1 << 64) * 4198, L1_scaleb_wide(p64), "scaleb64-rne", 4, "tile")
     print("   level L1 = the sign, attribute and scale reductions of G1-G4 (PROVED for the golden model at e4m3; the arguments for p = 24 and 53 are in the study)")
     print("   %-16s %-5s %12s %12s %10s %16s" % ("space", "runs", "L0 (log2)", "L1 (log2)", "L0 / L1", "L1, one quad"))
     for name, s0, s1, yrs, note in rows:
@@ -739,46 +798,55 @@ def g6():
                                                     "{:,}".format(int(yrs / weekend_y))))
     d32 = [r for r in rows if r[0] == "div32"][0]
     print()
-    print("   div32's reduced space: %d = 3 magnitude functions x 27 strips-and-core x 2^46; one quad needs %.3g years (L0: 3.0e5 years)" % (d32[2], d32[3]))
+    print("   div32's reduced space: %d = %d magnitude functions x 27 strips-and-core x 2^46; one quad needs %.3g years (L0: 3.0e5 years)" % (d32[2], magn["div"], d32[3]))
     check("div32's reduced sweep is under 100 quad-years (the raw one is over 300,000)", d32[3] < 100 and d32[1] / d32[2] > 1e4, "(%.1f y)" % d32[3])
     check("every reduced space is smaller than its raw space", all(r[2] < r[1] for r in rows))
     # the L2 level: class representatives
     print()
     print("   level L2 (PLAUSIBLE, a structural assumption about the implementation; G5 shows the model's structure): the result depends on")
     print("   (sign, exponent, class of the dropped bits, kept lsb, kept all-ones), so a representative per class plus a walking-ones set over")
-    print("   the dropped and kept bits covers it. conv64to32: %d exponents x 4 classes x (lsb 2 x all-ones 2 + %d walking bits) x 2 signs x 3 magnitude"
-          % (254 + 25 + 2, 52))
-    l2 = (254 + 25 + 2) * 4 * (4 + 52) * 2 * 3
+    print("   the dropped and kept bits covers it. conv64to32: %d exponents x 4 classes x (lsb 2 x all-ones 2 + %d walking bits) x 2 signs x %d magnitude"
+          % (254 + 25 + 2, 52, magn["conv"]))
+    l2 = (254 + 25 + 2) * 4 * (4 + 52) * 2 * magn["conv"]
     print("   functions = %d cases; at the measured conv64to32 rate of %.1f M/s (a host item: one core) that is %.2f seconds" %
           (l2, rates["conv64to32-rne"][0] / 1e6, l2 / rates["conv64to32-rne"][0]))
     check("conv64to32's class-level sweep (a few hundred thousand cases) takes seconds, not years", l2 / rates["conv64to32-rne"][0] < 120, "(%d cases)" % l2)
     print()
 
 
-PLANTS = {   # name: the check that must turn red
-    "div_strip": "L1_div at e4m3",
-    "sqrt_parity": "L1_sqrt at e4m3",
-    "rint_binades": "L1_rint at e4m3",
-    "conv_strip": "L1_conv (e5m6 to e4m3",
-    "cvtto_binades": "L1_cvtto at e4m3",
-    "rem_gap": "L1_rem, called at fp32 and fp64",
-    "scaleb_strip": "L1_scaleb_wide at e4m3",
-    "scaleb_key": "scaleb: within each (significand, strip, attribute) key",
+PLANTS = {   # name: (the check that must turn red, a check that is blind to it and must stay green in the same run, or None)
+    "div_strip": ("L1_div at e4m3", None),
+    "sqrt_parity": ("L1_sqrt at e4m3", None),
+    "rint_binades": ("L1_rint at e4m3", None),
+    "conv_strip": ("L1_conv (e5m6 to e4m3", None),
+    "cvtto_binades": ("L1_cvtto at e4m3 with 8-bit", None),
+    "rem_gap": ("L1_rem, called at fp32 and fp64", None),
+    "scaleb_strip": ("L1_scaleb_wide at e4m3", None),
+    "scaleb_key": ("scaleb: within each (significand, strip, attribute) key", None),
+    # a second wrong form of L1_cvtto: met by the first guard's point (p = 4, w = 8), so only the other two points can see it
+    "cvtto_pbinades": ("L1_cvtto at e5m6 with 12-bit", "L1_cvtto at e4m3 with 8-bit"),
+    # a wrong count of magnitude functions: every L1 guard divides its own formula by the same count, so those stay green and only the COUNTED functions can see it
+    "magn_rint": ("magnitude functions of rint64", "L1_rint at e4m3"),
+    "magn_cvtto": ("magnitude functions of cvtto64", "L1_cvtto at e4m3 with 8-bit"),
+    "magn_div": ("magnitude functions of div32 and div64", "L1_div at e4m3"),
 }
 
 
 def run_plants():
-    """Each planted slip, written into one L1 formula and run through G6 alone (--plant NAME), must turn its own guard red."""
+    """Each planted slip, written into one L1 formula or count and run through G6 alone (--plant NAME), must turn its own guard red; where a plant is one that
+    another guard was blind to, that guard must stay green in the same run (so the capture shows the blindness, not only the catch)."""
     import subprocess
     bad = 0
-    for name, text in PLANTS.items():
+    for name, (red, green) in PLANTS.items():
         p = subprocess.run([sys.executable, "-B", os.path.abspath(__file__), "--plant", name], capture_output=True, text=True)
-        failed = [ln for ln in p.stdout.splitlines() if ln.startswith("CHECK") and "FAILED" in ln]
-        hit = [ln for ln in failed if text in ln]
-        ok = p.returncode == 1 and bool(hit)
-        print("PLANT %-14s %s" % (name, "red at the check written for it" if ok else "NOT CAUGHT  FAILED"))
+        checks = [ln for ln in p.stdout.splitlines() if ln.startswith("CHECK")]
+        failed = [ln for ln in checks if "FAILED" in ln]
+        hit = [ln for ln in failed if red in ln]
+        blind = [ln for ln in checks if green and green in ln and "FAILED" not in ln]
+        ok = p.returncode == 1 and bool(hit) and (green is None or bool(blind))
+        print("PLANT %-15s %s" % (name, ("red at the check written for it" + ("; %s stays green" % green if green else "")) if ok else "NOT CAUGHT  FAILED"))
         for ln in (hit or failed)[:1]:
-            print("        " + ln[:170])
+            print("        " + ln[:240])
         bad += 0 if ok else 1
     print()
     print("symmetry_check plants: %s" % ("all %d slips were caught at their checks" % len(PLANTS) if bad == 0 else "%d plant(s) NOT CAUGHT" % bad))
@@ -796,6 +864,9 @@ def main():
         return run_plants()
     if "--plant" in argv:
         PLANT = argv[argv.index("--plant") + 1]
+        if PLANT not in PLANTS:
+            print("symmetry_check.py: no planted slip is named %r (they are: %s)" % (PLANT, ", ".join(PLANTS)))
+            return 2
         print("symmetry_check.py: G6 alone, with the planted slip %r" % PLANT)
         print()
         g6()
