@@ -891,9 +891,10 @@ python3 hw/card_stress_report.py /data/card-stress-1016     # the report, any ti
 - **Pre-flight, optional**: `bash hw/test-card-stress.sh --no-plants` runs the driver's dry-run
   tests (the verdict parsers on real logs, the scheduler, the failure policy, the guard, the
   sweep's resume, the report, and under POSIX the real `make` in a scratch copy) on the box, with
-  no card and no XRT: a few minutes, and it must be run alone on the host (two drivers at once
-  see each other's stand-ins as card users). `--no-plants` leaves out the negative controls, which
-  take about as long again.
+  no card and no XRT: about 5 minutes under WSL and 6 to 8 under Git Bash (2026-10-19, a desktop other
+  sessions share), and it must be run alone on the host (two drivers at once see each other's
+  stand-ins as card users). `--no-plants` leaves out the negative controls, which take about
+  twice as long as everything else together (11 minutes under WSL).
 - **The smoke (`--quick`)**: every leg once on each image (quad, single, deep), short slices;
   exit 0 only if every leg passed (a leg skipped by name, with its reason, is not a failure).
   **Estimated** at 24 to 28 minutes on the card, from the 2026-10-06 card times where there are
@@ -957,8 +958,14 @@ printf it matches.
   read back after.
 - **The sweep** is hw/run-soak.sh's and hw/run-c5-soak.sh's campaigns - fp32 `sqrt32` under five
   attributes, fp32 `roundToIntegral` under five, `nextUp`, `nextDown`, `logB`, `class`, each over
-  all 2^32 encodings, and the random banded `div32`, `div64`, `sqrt64` and clause-5 jobs with
-  those scripts' seeds - run slice by slice with `CFT_SOAK_ARTIFACT` naming the image. The
+  all 2^32 encodings; **the exhaustive conversion and scaleB items**, also over all 2^32
+  encodings - `conv32to64-all`, `cvtto32-all` under five attributes, `cvtfrom32-all` and
+  `cvtfrom64-all` (every 32-bit integer as an i32 and as a u32 source), `scaleb32-all` (every
+  encoding against the directed exponent list) and `scaleb32-wide` (every encoding against the 556
+  exponents, -278 to 277, that can change a result, and 12 past those edges that must land as
+  the edges do), the last four under the four attributes the probes allow; and the random banded
+  `div32`, `div64`, `sqrt64` and clause-5 jobs with those scripts' seeds (the 90 items: 36
+  exhaustive and 54 random) - run slice by slice with `CFT_SOAK_ARTIFACT` naming the image. The
   scripts themselves cannot be sliced or resumed (each wipes its output directory and runs
   everything), so the driver runs the same binaries on the same job lines. Slices are sized from
   the rate it measures: the first slice of each op on an image is a probe of 2^20, later ones fill
@@ -971,9 +978,30 @@ printf it matches.
   with a verdict (a pass, or a disagreement, which is kept with its operands); a slice that timed
   out or lost the device is not covered and is run again, and one that fails to finish
   `--quarantine-after` (2) times is moved past and recorded. `--sweep-items sqrt32-rne,...`
-  restricts the campaign. `nextup32` and `nextdown32` report 8 more cases than their range (the
+  restricts the campaign (a wave runs one job a distinct item, so one tile per item named: name
+  four items for four tiles). `nextup32` and `nextdown32` report 8 more cases than their range (the
   tool runs eight edge cases in every slice, clause5_soak.c `next_edges32`); the driver expects
   exactly that and refuses any other count.
+  **The exhaustive conversion and scaleB items say what they covered**: their verdict line ends
+  `, E encodings, S skipped`, and the driver holds each slice to it exactly - E is the slice's
+  encodings, and cases + S is E times the checks an encoding takes (1, 4, 2, 2, 17 and 568 for
+  the six modes in the order above). A slice short by one encoding or by one check is a
+  `parse_error`, not covered, and served again, across a restart too. `cvtto32-all` compares
+  in-range lanes only, so its cases are not a function of the slice (a slice of NaNs compares
+  nothing and skips every pair, and is a pass): it is held to the encodings and that sum, and
+  `S` is the pairs it left out. The other five skip nothing.
+  **Which items reach the tile.** Each item is marked `tile` or `host`
+  (hw/card_stress_lib.py, `OP_REACH`), from the library's own classification (the header of
+  host/src/clause5.c, lines 13-25, and host/include/cft.h): `cft_rint`, `cft_scaleb`, `cft_div`
+  and `cft_sqrt` are composed of tile passes (scaleB takes a host path below the subnormal floor,
+  -149 for fp32); the conversions, `nextUp`/`nextDown`, `logB`, `class` and `remainder` are HOST
+  operations - no floating-point arithmetic, "nothing for a device to accelerate", bit-identical
+  on every backend by construction. **A card soak of a host item is libcft's host code run on
+  the box against its CPU**: a full-space test of the library in which the tile computes nothing,
+  which the software backend on any CPU repeats. 43 of the 90 items reach the tile (25 of the 54
+  random, 18 of the 36 exhaustive) and 47 do not. The host items stay in the campaign. Every
+  sweep record carries `sweep.reach`, status.txt has a `reach` line (how much of the exhaustive
+  space each kind has covered), and the report a `reach` column (its last) and totals by reach.
 - **Records.** `metrics.jsonl` is append-only: a `leg` record each (the cycle, the image and its
   SHA-256, the leg, its start and end, exit status and class - pass, fail, timeout, no_device,
   parse_error, skipped, error -, the counts its verdict line gave, cases or checks a second,
@@ -982,6 +1010,94 @@ printf it matches.
   runs, passes, failures, cases and rates over time by image and leg, the telemetry's range and
   trend, every failure with its log, the sweep's coverage and every disagreement, the run's
   uptime and gaps.
+
+### The exhaustive conversion and scaleB items: what to run, what it costs, what it must print
+
+The six modes (host/tools/clause5_soak.c, "Exhaustive modes": `conv32to64-all`, `cvtto32-all`,
+`cvtfrom32-all`, `cvtfrom64-all`, `scaleb32-all`, `scaleb32-wide`) take `<lo> <hi>` over the 32-bit
+operand's encodings and, per attribute, are the random mode of the same operation with its operands
+enumerated. `scaleb32-wide`'s exponent range, -278 to 277, is derived in the source above its
+constants and **measured on the host's libm by `clause5-soak probe scalebrange`**: the lowest exponent
+that changes a result is -277 under rne and -276 under rtz, rdn and rup, the highest is 276, and 12
+witnesses past the edges (to the extremes of an int and of an int64) are checked on every operand
+against the oracle at the edge they must equal.
+
+| item (per attribute) | checks an encoding | one tile (COMPUTED) | four tiles on one item | software backend, one process (MEASURED, sampled) | reaches the tile |
+|---|---|---|---|---|---|
+| `conv32to64-all` (no attribute) | 1 | 12 min | 3.0 min | 9 min (run whole: 8.8) | no (host) |
+| `cvtto32-all` (five) | 4 (some skipped) | 30 min | 7.5 min | 19 min (rne), 26 min (rup), 19 min (rmm) | no (host) |
+| `cvtfrom32-all` (four) | 2 | at most 37 min | at most 9.3 min | 14 min (rne), 14 min (rup) | no (host) |
+| `cvtfrom64-all` (four) | 2 | at most 38 min | at most 9.5 min | 12 min (rne), 16 min (rup) | no (host) |
+| `scaleb32-all` (four) | 17 | 85 min | 21 min | 4.2 h (rne), 4.9 h (rdn) | yes |
+| `scaleb32-wide` (four) | 568 | **47.5 h** | **11.9 h** | 5.8 days (rne), 6.6 days (rup) | yes |
+
+The card figures are `2^32 / (the stress run's median rate a tile)` from the 2026-10-16 to 19 run's
+`metrics.jsonl`, per job on a tile of the quad; the scaleB rates there are **checks** a second
+(the random mode's count is decremented by the operands times the list's length), which is why
+`scaleb32-all` is 17 times and `scaleb32-wide` 568 times an operand-rate figure. The cvtfrom
+figures are upper bounds: the random mode makes four conversions a lane and these make two.
+The four tiles' column is four processes on four quarters of the space (below). **The software
+column is the whole item on one CPU core; `conv32to64-all`, `cvtto32-all`, `cvtfrom32-all` and
+`cvtfrom64-all` are host operations, so any CPU's software backend is the same test as the
+card's, and `scaleb32-wide` is hardware-only in practice.** The software figures are estimates,
+not runs (`conv32to64-all` was run whole: 526.5 s): 2^32 times the mean time an encoding over 32
+small slices, one in the middle of each of 32 equal cells of the space, on a WSL desktop other
+sessions share (2026-10-19): good to about a quarter and no better - the same sampling gave
+`conv32to64-all` 6.9 minutes against the 8.8 it took. A figure taken from the first slice of the
+space is too high for scaleb32-all: those are subnormals, and it ran them at 169 K encodings a
+second against 285 K to 310 K at three places in the normal range.
+
+Through the driver, on the box (one job a distinct item, so name four items for four tiles; the
+driver builds the tools with XRT=1 itself):
+
+    bash hw/card-stress.sh --until "YYYY-MM-DD HH:MM" --out ~/card-stress-exh \
+         --legs api-test --weights quad=1,single=0,deep=0 --sweep-minutes quad=720,single=0,deep=0 \
+         --sweep-items scaleb32-wide-rne,scaleb32-wide-rtz,scaleb32-wide-rdn,scaleb32-wide-rup
+
+(four wide attributes in about 47.5 h; `scaleb32-all-*`, the three host families and the older items
+are named the same way). A finished item shows in `status.txt` and in the report as 4,294,967,296 of
+4,294,967,296 encodings, 100.000%, with its reach.
+
+One item on all four tiles, without the driver - any of the six (the same binary and oracle;
+`$IMG` the quad's xclbin built with XRT=1; `conv32to64-all` takes no attribute word):
+
+    JOB=scaleb32-wide; ATTR=rne
+    for k in 0 1 2 3; do
+      CFT_SOAK_ARTIFACT=$IMG CFT_XRT_TILES=$((k + 1)) nice -n 10 host/clause5-soak $JOB \
+          $((k << 30)) $(((k + 1) << 30)) $ATTR > $JOB-$ATTR-q$k.log 2>&1 &
+    done; wait; grep -h " cases," $JOB-$ATTR-q?.log
+
+The same on a CPU's software backend, for the four host families (and any other item; four cores
+for four quarters): leave out the two variables of the loop's second line, so no
+`CFT_SOAK_ARTIFACT` names an image and `cft_open(NULL)` selects the software backend. It needs
+only `make -C host clause5-soak` (XRT=0 is the default) on a 64-bit Linux:
+
+    JOB=cvtto32-all; ATTR=rne
+    for k in 0 1 2 3; do
+      nice -n 10 host/clause5-soak $JOB $((k << 30)) $(((k + 1) << 30)) $ATTR > $JOB-$ATTR-q$k.log 2>&1 &
+    done; wait; grep -h " cases," $JOB-$ATTR-q?.log
+
+**What each must print.** The first line of each log is `soaking the DEVICE backend: <xclbin>`
+(`soaking the software backend` when no artifact is named); the last is
+`JOB ATTR: C cases, 0 value mismatches, 0 flag mismatches, E encodings, S skipped`, exit status 0,
+with E the quarter's 1,073,741,824 and cases + S the checks an encoding takes times E:
+`conv32to64-all rne` 1,073,741,824 cases, 0 skipped; `cvtfrom32-all` and `cvtfrom64-all`
+2,147,483,648; `scaleb32-all` 18,253,611,008; `scaleb32-wide` 609,885,356,032; `cvtto32-all`
+4,294,967,296 as cases plus skipped, the split being the attribute's (the software backend gives
+the same split for the same quarter). Over the whole space the four lines' E add up to
+4,294,967,296 and their value and flag mismatches are 0. A disagreement lists operands
+(`MISMATCH ... a=0x...`, and for the scaleB items the exponent as `b=`); `scaleb32-beyond` names a
+witness past the range's edge.
+
+The tool's side is tested by `python3 hw/test_c5_exhaustive.py` (POSIX with make and a C compiler,
+about a minute): every mode and attribute over 37 slices of the special regions (zeros,
+subnormals, the normal range's edges, infinities, quiet and signalling NaNs, the integer targets'
+boundaries) and 96 slices across the whole space, the refusals, a sabotage control for each mode,
+and plants - a library result changed for one operand, the oracle given the wrong attribute, the
+exponent range wrong by one, the encodings miscounted - each of which must go red at its operand
+or exponent; `--baseline-tree DIR` also compares the random modes byte for byte with another
+tree's (`git archive REV host | tar -x -C DIR`). The driver's side is `hw/test-card-stress.sh`
+(group `sweepall`, and the plants).
 
 ### Failure policy, processes, and what it guarantees
 
