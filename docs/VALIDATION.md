@@ -21704,3 +21704,133 @@ The CI split and the card's stress run, merged in this wave beside the two parce
 - `python python/check_docs_index.py`: rc 0, 31 s before the merge (68 tracked documents, 47 negative controls); rc 0 after it, with the records restated and docs/README.md recounted (80,773 lines).
 - The reproducibility builds and `--verify` above: 28 to 30 s a build with 34 PNGs, 5 to 6 s a `--verify`.
 - The mutation harness: about two hours of runs in all across its passes, the last (the three operators over the final sources) 43 minutes.
+
+## 2026-10-19 - the side parcels of 2026-10-19, closed: the project's figures (FG), the clause-5 soak's exhaustive modes (EX), a study of wider sweep coverage (SC) and a dated status export (PK), merged and gated
+
+**What Logan asked,** verbatim, on 2026-10-19:
+- "Go ahead and dispatch a sonnet parcel for the exhaustive modes, as well as one to research potential options for more comprehensive sweep coverage, not necessarily 100% but potentially more thorough edge case testing or methods to slowly accumulate the coverage over time, its impossible today but in the future perhaps multiple devices could work toward actually doing a full sweep, though obviously a long term goal."
+- "As a 'standalone' parcel, I'd like to create some more visualizations of the data collected and progress made across the project, dispatch a Sonnet agent with the task of simply creating visualizations/charts/graphs/etc from data sourced from the project, created via script (Point them at the StoryDocs repo for examples on how figures were generated, or the ones already present in this projects readme as well) to ensure they stay accurate like the rest of the project."
+- "Go ahead and make a 'packager' for the various charts and graphs it produced, both to make exporting it for other use easier (also convert svg to png in the export) and to have a dated archive to know when the images were produced. If applicable, it could also include other light documents describing the project and features currently. Sort of a "where the project currently stands" export"
+- "PK has been going for over 4 hours, check in on their progress and what might be taking so long"
+- "Once PK wraps up and you finalize and push, go ahead and pause work and begin more stress testing with the new scripts, they can run overnight to ensure things are working properly"
+
+Each parcel's own entry is above, in the order of the merges: FG's, EX's, SC's and PK's.
+
+**The lead's readings and decisions,** reported to Logan as they were made:
+1. **Four Sonnet authors, Sonnet verifiers.** PK was labelled the simplest, which Logan's rule of 2026-10-12 would allow a Haiku verifier. It had a Sonnet one, since it came to about 3,900 lines.
+2. **EX's UBSan finding** (a signed negation that overflows in the random cvtfrom generator, since 6ffffc4) was fixed inside EX's parcel, with byte-identical random-mode output against 0b77387's binary as the condition.
+3. **FG's timing figure:** after VFG's second pass found it still incomplete, the lead told FG to drop the completeness claim over free text rather than chase it. The figure now states what it draws and lists what it leaves out, with reasons.
+4. **Two of the verifiers' last (b)s were wording,** so the lead fixed them as very small fixes (Logan's rule of 2026-10-13), each checked by its verifier: EX's 7876c6c and SC's 046c8a1.
+5. **PK's check in the `generated` stage** must pass CI's host job, which runs that stage with `--require-all` on a runner whose converters nobody has checked, and where an inner skip fails the run. PK made the stage's part converter-free, and showed it so with every converter hidden.
+6. **A pre-existing flake EX reported,** in hw/test_card_stress.py's telemetry check (two sampling paths race), is a follow-up. No runner stage runs that file.
+7. **Logan's question on PK's time,** answered from its ledger and transcript:
+   - the brief asked for five plants, and PK built a 260-mutation harness at about 27 s a `--check`, about two hours of compute;
+   - it also built a 210-control self-test, a stdlib PNG reader, an HTML page and an independent audit;
+   - the desktop was shared and niced, and the lead's CI constraint arrived mid-run.
+   - Briefs now carry a scope ceiling and a time box.
+8. **The merge order** was FG, EX, SC, then PK. The full gate ran at a1401ae, and a narrower run covered the tip after PK's merge.
+
+**The chain** (READ, each verifier's ledger and report; (a), (b) per pass):
+
+| work | author | verifier's passes | sent back |
+|---|---|---|---|
+| FG (dfeb249; b49b930, 3f59da3; ecf58ac, f21267b) | Sonnet 5.5 | VFG 0, 4; 0, 2; 0, 0 | twice |
+| EX (fe391b5, c09567a, da2b52f, c7d7e53; df3742a, 343d6e7, 7881542; 7876c6c) | Sonnet 5.5, then the lead | VEX 1, 2; 0, 2; 0, 0 | once, then the lead fixed the wording |
+| SC (d98de85, 500553f; d42500a; c11054d; d3474d7; 046c8a1) | Sonnet 5.5, then the lead | VSC 0, 5; 0, 1; 0, 1; 0, 1; 0, 0 | three times, then the lead fixed the wording |
+| PK (99a6086, 8d5fc29, c7cc1dd, 0aeb839; 13c9211, e1ff860, efd5865; a7903ab, fc9e769, cdf3db7) | Sonnet 5.5 | VPK 0, 2; 0, 1; 0, 0 | twice |
+| the merges (4f3ca92, 309f95f, a1401ae, 5dc7eec) and this record | the lead | VIW8 | - |
+
+- **VEX's (a)** was in FG's code, found at a trial merge: `figure_extracts.py --verify` died on main + EX + FG, because the stress reduction took the live catalog, which EX grows with items the run never served. FG fixed it in ecf58ac, VFG checked it in a three-way clone, and the lead's merge of EX ran it: rc 0, five ok.
+- **SC's later (b)s:**
+  - two were in claims its own fixes introduced: G6's reach over the L1 formulas, and tile_counts' "only";
+  - one was a figure present since the first commit, which the first two passes missed: rint64 and cvtto64 have four rounding functions, so 3,850 and 7,550 quad-years, not 2,890 and 5,660.
+  - No conclusion moved.
+
+**Found at the merges (MEASURED, the main checkout):**
+- **The line-ending finding.** At FG's merge, `project_figures.py --check` called the `formats` figure STALE.
+  - **The cause:** python/cft_golden/formats.py had CRLF line endings on disk since 2026-08-29 (`git ls-files --eol`: i/lf w/crlf), where git, under `* text=auto eol=lf`, showed it clean. The check hashes the bytes on disk.
+  - **A second such file:** hw/openxc7/census-2026-09-22.txt.
+  - **The repair:** both equal their index blobs apart from line endings. Both were restored from the index, and the check then passes.
+  - **No other host affected:** a fresh checkout gets LF, so the box and CI were never exposed.
+  - **The hazard, a follow-up:** on such a checkout, the check's remedy, `--write`, would commit a CRLF hash.
+- **At EX's merge,** `figure_extracts.py --verify` (with the stress run's metrics) gave rc 0, 5 ok, its served-items decoy among them.
+
+**The box** (MEASURED, amd-arc-box, niced, the pinned MPFR 4.2.2 copied in; bundle wave8-a1401ae.bundle, sha256 03edfd6b..., and box_wave8_gate.sh, sha256 d2bc61b1..., each equal on the box; the clone asserted for HEAD, a clean status, rtl's tree 44b963dd, a string from each parcel and every branch tip an ancestor):
+- **The gate at a1401ae** (FG, EX and SC merged): `verify/run.sh --budget gate`, run 20261019-145724-a1401ae, 14:57:24 to 17:59:07, 181 min, exit 0: "VERDICT: PASS with 8 skip(s) and 4 inner skip(s) in golden (3), remote (1)".
+  - "36 stage(s) executed, 0 cached from earlier in the run, 0 failed, 8 skipped".
+  - **The clone,** asserted at 14:57:24: HEAD a1401ae8edecd4b40e886a886a8fb2f8b759e19e, status 0, rtl 44b963dd6ba2fcf99e002c5face5ca94aad4515c, `served_items` x1 (FG's ecf58ac), the UB fix x1 (EX), tile_counts' label x1 (SC's 046c8a1), scaleb32-wide in the catalog x6, and the four branch tips ancestors. The pinned MPFR 4.2.2 copied in; python 3.12.3, mpmath 1.4.1, gmpy2 2.3.1.
+  - **The skips:** the same eight stage skips and four inner skip lines, by name, as each of waves 1 to 7's gates on the box (READ, their run logs, the inner lines compared whitespace-normalized): buildargs, lang-rust, lang-julia, lang-go, lang-csharp, lang-r, lang-fortran and demos; golden's two serial-replay legs and its `math.fma` test, and remote's WebSocket leg.
+  - **The stages this wave touched:**
+    - generated 11 s, against 0 to 1 s in waves 1 to 7: FG's generator, its seventh. PK's eighth is in the tip run below;
+    - docs 36 s;
+    - soak-quick 53 s, which runs the divsqrt campaign, not EX's;
+    - lang 150 s, lang-routines 251 s, tangent 372 s.
+  - **The longest stages:** golden 2,350 s, cpp 1,995 s, transcend 857 s and libcft 779 s, each within waves 1 to 7's range (golden 1,588 to 2,579 s, cpp 1,982 to 2,165 s, transcend 847 to 962 s, libcft 768 to 885 s).
+  - **No stage runs EX's clause5-soak or the stress driver's tests.** Their check is VEX's runs and tonight's card run.
+- **The tip, 5dc7eec (PK merged):** `verify/run.sh --only docs,generated,buildargs,sweepjudge,innerskips,ensurevectors`, 16:35:27 to 16:37:39, 132 s, exit 0: "VERDICT: PASS with 1 skip(s)".
+  - "5 stage(s) executed, ... 0 failed, 1 skipped, 0 inner skip(s)". buildargs skipped by its usual name on the box.
+  - generated 45 s: FG's and PK's generators, PK's under Linux Python 3.12.3 for the first time; docs 38 s.
+  - bundle wave8-5dc7eec.bundle (sha256 20f0b9a6...) and box_wave8_tip.sh (sha256 4c511cee...), each equal on the box. The clone was asserted the same way, with the packager present and PK's and a1401ae's tips ancestors.
+  - PK's merge changes no stage but docs and generated, the runner's script only in its generator list and descriptions, and the workflow only in a comment.
+
+**Conduct:**
+- **PK deleted a directory that was not its own.** At about 22:01Z it ran `rm -rf` on a Windows-Temp `packager-check-9imh646m` it took for a leftover of its own, while VPK's self-test was using it.
+  - VPK's run crashed (`status-source: README.md is not in the tree`), was recognised, and was re-run: rc 0.
+  - PK reported it unprompted, with the mtimes that showed it.
+  - **The rule, restated:** scratch in a shared directory is deleted by the exact path recorded when it was made, never by prefix.
+- **Browser tabs.** FG's browser `navigate` without a tab id landed twice on another agent's tab, one VFG had opened to view an SVG, and VFG later closed it as its own. Verifiers' briefs now say: open your own tab and act on it by its id.
+- **PK's `msedge.exe --version`** started the browser. PK stopped that process tree by PID.
+
+**Known limits carried** (the verifiers' "other" notes, merged under Logan's rule; each parcel's own entry has the rest):
+- **FG, in VFG's words:**
+  - the scan-kernel and scan-negative verdicts in python/project_figures.py "are an identity that cannot disagree";
+  - the SVG's bottom sentence lacks the build-diet-quad hedge that the extract and gallery carry;
+  - the entry's "fourteen runs of mutations" against "The runs"' twenty-five;
+  - "8 builds named only in running text" counts statements;
+  - `ledger --extend` is refused on the current file, and the entry does not say so.
+- **EX, in VEX's words:**
+  - "23 to 25" process-days stops at 20.0 h, where the header's "18 to 21 hours" reaches 26.4 days ("23 to 26" would line the two up);
+  - the old test_card_stress_report.py cannot parse the new header (EX changed its two header lists, disclosed);
+  - EX's "the HEAD tree rebuilds to exactly that hash" was not checked.
+- **SC, in VSC's words:**
+  - tile_counts.py's comment says the pattern holds a stage() call "later in the loop", where it holds one later in the staging part;
+  - the formulas other than L1_cvtto are held at one point (L1_rint with 2p-4 binades for p goes undetected);
+  - "the table's call sites and inputs are not tied to the formats";
+  - two sweep_cost plants stay green: a host row's job-seconds x0.9, inside the 25% tolerance, and Table 2b over 3 workers.
+- **PK, in VPK's words:**
+  - "a miscounting reader goes unnoticed by `--check`": with read_runner's quick budget plus one it stays green, and number correctness is held only by independent audits;
+  - a relative `--out` is taken from the repository's root, not the working directory, and `--now` accepts a date before the commit;
+  - "one tile" and "four tiles" are typed words in the clock sentence (they match the data);
+  - "it dates its own marks" is true of 13 of CAPABILITIES.md's 106 rows; its 2026-09-24 is a mention, and the file was last committed 2026-09-29;
+  - `--verify` takes the full commit name beyond its first seven characters as written, and nothing compares STATUS.md's printed name with the manifest's.
+
+**The follow-ups:**
+- the telemetry check's race (EX's report): take the stand-in's temperature from the call's own sample, or compare in counter order;
+- the CRLF hazard in project_figures.py's `--check` (above);
+- the six routine entries in hw/card_stress.py's REV8_ENTRIES and their test (wave 7's);
+- SC's ten questions for Logan, which the study lists and which wait for his answers. First among them: "Do the host items leave the card?"
+- the wide scaleB item's card run, about 47.5 h of the quad, which the overnight run begins.
+
+**Wave 7's entry, restated** (pushed, so here; VIW7's notes on 514e2c5):
+- its tangent figure (382 s at 51bb14c) ran with MA's golden card audit beside it for its first 160 s;
+- "two thirds more" is about two thirds (68%);
+- the README was recounted a third time in 514e2c5.
+- With this record, docs/VERIFICATION.md's `lang` row and docs/CARDDAY.md's two estimates of MA's card leg carry the measured figures (below).
+
+**Time and tokens** (MEASURED, the agents' transcripts; usage summed from the last line of each response). All claude-sonnet-5-5:
+- **The authors:**
+  - FG: 120, 42 and 59 min (three passes); 1,044 tool uses; 1,174,038 output tokens;
+  - EX: 215 and 18 min; 712; 838,342;
+  - SC: 175, 50, 19 and 34 min; 937; 1,185,132;
+  - PK: 257, 23, 17 and 8 min; 926; 1,119,454.
+- **The verifiers:**
+  - VFG: 98, 76 and 37 min; 666; 870,819;
+  - VEX: 119, 18 and 4 min; 369; 429,074;
+  - VSC: 70, 38, 29, 20 and 6 min; 536; 763,669;
+  - VPK: 89, 22 and 9 min; 329; 425,997.
+- The minutes are each pass's own, from the harness's notice; the tools and tokens are all passes together.
+
+**Records:**
+- docs/VERIFICATION.md's `lang` row: the box's figure, 170 s at 51bb14c (223 checks, nothing skipped), 162 s at d3fef4b alone, and 148 s in wave 7's gate.
+- docs/CARDDAY.md: MA's card leg, BELIEVED 150 to 300 s, ran in 57 s; its golden audit, BELIEVED about as long as the desktop's 550 s, took 530 s (wave 7's record).
+- docs/README.md recounted. The docs check rc 0.

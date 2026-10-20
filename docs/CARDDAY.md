@@ -1225,7 +1225,8 @@ card user, and the stress run's guard sees it):
 **What it must print** (the software backend's run, MEASURED; the card's differences are marked):
 - exit 0, and last, `acceptance rev8: 6 of 6 PASS on $X as u50-rev8-quad (set); 118 checks ok, 0
   failed, N s`. The software backend counts 117: the marks' controls add one on a card, the
-  planted image (COMPUTED from the code, not run on a card). `N` is BELIEVED 150 to 300 (below).
+  planted image (COMPUTED from the code, not run on a card). `N` was BELIEVED 150 to 300 (below); on the
+  card it was 57 (MEASURED, the lead's, rev8q, 2026-10-19: 118 checks, as predicted).
 - six `PASS` lines, each `... on xrt, flags [29, 24, 24, 24], status [64, 0, 0, 0]; every digest
   the set's, cft-audit accepts in full, no golden audit here (seq.py's cost), the spot check holds,
   4 structured lanes mark (bit 7, STATUS[6])`, and per entry fourteen `ok` lines, among them (the
@@ -1259,8 +1260,9 @@ card user, and the stress run's guard sees it):
 300 s, COMPUTED from the desktop's 67 to 113 s scaled by the box's pace against the desktop's (535
 s against 375 s for the acceptance stage, docs/VERIFICATION.md), plus the card's opens -
 cft-segrun's and the probe's, one each an entry - against 353 s for nine workloads on the quad
-(2026-10-12), 39 s an entry, the same host-side work. No card figure exists for these entries; a
-card run of a segment (256 lanes, ten steps) is BELIEVED well under a second.
+(2026-10-12), 39 s an entry, the same host-side work. The card has since run them: 57 s for the six
+(MEASURED, the lead's, rev8q, 2026-10-19, with the box's stage runs beside it); a card run of
+a segment (256 lanes, ten steps) is BELIEVED well under a second.
 
 **Optional, the same day:**
 - `--golden all` on the same command adds the golden audit over every segment of every entry, on
@@ -1268,7 +1270,8 @@ card run of a segment (256 lanes, ten steps) is BELIEVED well under a second.
   (MEASURED on the software backend, the desktop niced and shared, in three runs of under ten
   minutes each): the audit over the four segments took 113 s for Lotka-Volterra at fp64 and 47 s at
   fp256, 142 s and 44 s for the diodes, 156 s and 48 s for the culture, 550 s for the six - the same
-  host-side work on the box, BELIEVED about as long. Not in the default run, by seq.py's cost.
+  host-side work on the box, BELIEVED about as long, and 530 s on the card's run (MEASURED, the lead's,
+  rev8q, 2026-10-19: "6 of 6 PASS ... 124 checks ok, 0 failed"). Not in the default run, by seq.py's cost.
 - The remade record on the box, a determinism check of the record across platforms (Windows made
   it): `python3 programs/acceptance.py --set rev8 --write --images /data/card-stress-rev8images`
   on the software backend (no `--device`), then `git diff --stat programs/acceptance-rev8.json`
