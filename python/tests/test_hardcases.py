@@ -200,6 +200,12 @@ def test_f0_skip_rate_is_the_number_theory():
     d = [s for n_, s, c in sp.segs if n_ == "F0D"][0]
     assert sum(1 for i in range(a, a + 2000) if H.base_case(sp, i) is None) < 40
     assert 0.4 < sum(1 for i in range(d, d + 2000) if H.base_case(sp, i) is None) / 2000 < 0.6
+    # the keyed stream is stratified: the top 12 fraction bits of the divisor take every value once in any 4,096
+    # consecutive divisors (the cell order is scrambled, so a short slice is spread, but a full period is whole)
+    for first in (0, 123456, (1 << 26) - 4096):
+        cells = {(H.f0_divisor(sp, "K", jj) >> 40) & 4095 for jj in range(first, first + 4096)}
+        assert cells == set(range(4096)), first
+    assert len({(H.f0_divisor(sp, "K", jj) >> 40) & 4095 for jj in range(64)}) > 40   # and 64 divisors already spread
 
 
 def _tiny_space(p):
