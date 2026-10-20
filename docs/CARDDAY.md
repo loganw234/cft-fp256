@@ -1503,8 +1503,9 @@ the lead's first experiment, the one that changed nothing.
    no flag, so it cannot show item 1.
 
 **Evidence** (MEASURED, software backend, WSL cft2204, niced): the driver's 90 sweep items at two
-slices each, HC's three hard-case modes at the start, middle and end of every segment under every
-attribute, and CL's five class modes over their whole spaces and a third of them, 352 comparisons
+slices each, HC's three hard-case modes under every attribute at the start of every segment and
+the end and middle of the long ones, and CL's five class modes over their whole spaces and a
+third of them, 352 comparisons
 of a default build and a `SOAK_CHUNK=16384` one: **352 of 352 verdict lines identical** (cases,
 value and flag mismatches, encodings, skipped; all with 0 mismatches), stdout byte for byte, and
 the chunked stderr the default's with the one line added; and 118 sabotaged comparisons that all
