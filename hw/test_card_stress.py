@@ -2392,7 +2392,7 @@ def plants(env: Env) -> None:
          lambda env, src: group_commands(src) + scn_quick_sweep(env, src),
          ["quick with --sweep-items: the quad's wave is four jobs", "quick sweep: with --sweep-items naming 22 items"]),
         ("an item outside --sweep-items is called covered in the empty wave's sentence",
-         [("card_stress.py", '                cause, tag = "outside --sweep-items", n\n', '                cause, tag = "covered", n\n')],
+         [("card_stress.py", '                return "outside --sweep-items", n\n', '                return "covered", n\n')],
          lambda env, src: group_commands(src), ["empty wave, the case of 2026-10-19"]),
         ("an empty wave still says the campaign is finished",
          [("card_stress.py", "                why, cause = self.why_no_wave(forced)\n",
