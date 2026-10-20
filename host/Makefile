@@ -870,8 +870,11 @@ endif
 # remote frame cap is 1 GiB.
 #
 # Nothing here is a prerequisite of `all`. `clean` removes the products
-# of every pass size, found by name pattern, and no more. Products are in
-# .gitignore, or a build would mark the next build id untracked=present.
+# of every size the list below allows, each by its exact name (a file or
+# directory of yours that only begins like one, a divsqrt-soak-c16384.log
+# or a soak-c16384-notes/, stays). The products are in .gitignore, by their
+# shape (the name and four or five digits), or a build would mark the next
+# build id untracked=present; the comment there says what that covers.
 # ====================================================================
 SOAK_CHUNK       ?=
 SOAK_CHUNK_OK    := 4096 8192 12288 16384 20480 24576 28672 32768 \
@@ -950,15 +953,22 @@ clause5-soak-c$(SOAK_CHUNK): $(SOAK_C5)
 endif
 endif
 
-# Outside the conditional on purpose: a clean needs no SOAK_CHUNK, and
-# removes what any pass size built. Binaries (the .exe forms included by
-# the trailing *), archives and object directories, each by its own
-# name pattern; the `[0-9]` keeps it to products, and the `/` after the
-# directory pattern to directories.
+# Outside the conditional on purpose: a clean needs no SOAK_CHUNK. It
+# removes what any size the list allows built, and only that: for each
+# size its two binaries in both forms (.exe or none, as `clean` removes
+# every platform's products), its archive and its object directory, each
+# by its EXACT name. An earlier version used globs (divsqrt-soak-c[0-9]*),
+# and the `*` took anything after the digits: a divsqrt-soak-c16384.log
+# of the user's went with them. A name of a size the list refuses is no
+# product of this Makefile and stays.
+SOAK_CHUNK_FILES := $(foreach n,$(SOAK_CHUNK_OK),divsqrt-soak-c$(n) \
+                    divsqrt-soak-c$(n).exe clause5-soak-c$(n) \
+                    clause5-soak-c$(n).exe libcft-c$(n).a)
+SOAK_CHUNK_DIRS  := $(foreach n,$(SOAK_CHUNK_OK),soak-c$(n))
 clean: clean-soak-chunk
 clean-soak-chunk:
-	rm -f divsqrt-soak-c[0-9]* clause5-soak-c[0-9]* libcft-c[0-9]*.a
-	rm -rf soak-c[0-9]*/
+	rm -f $(SOAK_CHUNK_FILES)
+	rm -rf $(SOAK_CHUNK_DIRS)
 .PHONY: clean-soak-chunk
 
 # MPFR parity: the third oracle, and the only independent one that
