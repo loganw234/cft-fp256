@@ -868,7 +868,10 @@ cycle with slices of the native-oracle soaks. Opening an image is switching to i
 loads the xclbin through XRT (`host/src/backend_xrt.cpp`, `cftx_open`), so there is no program
 step. XRT treats loading the xclbin already there as a no-op, which is why a tile left running
 by an abandoned run is cured by loading another image and then this one (docs/HOSTAPI.md, "A tile
-a run was abandoned on") and why the failure policy does exactly that.
+a run was abandoned on") and why the failure policy does exactly that. **Since 2026-10-20** the
+47 host items among its 90 sweep items (libcft's host code, which no tile computes) do not use the
+card at all: a pool of CPU jobs runs them beside the whole run, and the card's sweep takes the 43
+tile items only ("The host pool, the seeds, and coverage per tree" below).
 
 ### Start, stop, read
 
@@ -906,7 +909,13 @@ python3 hw/card_stress_report.py /data/card-stress-1016     # the report, any ti
   `--rev8-images` holds no cache, the revision-8 entry's 51 s compile on the quad. Since
   2026-10-20 the smoke's revision-8 leg on the quad also runs one routine entry, about 10 s
   (COMPUTED from the lead's 57 s for six), inside the estimate's margin. With `--sweep-items` the
-  smoke sweeps the items named, not its own four (the sweep paragraph below).
+  smoke sweeps the tile items named, not its own four (the sweep paragraph below). **Its four on
+  the quad are now `sqrt32-rne`, `rint32-rne`, `div32-rne` and `rint64-rne`**: tile items only (the
+  fourth was `nextup32`, a host item), so each soak tool is still shown once. **The host pool
+  serves three host items once each in the smoke** - `nextup32`, `conv32to64-all` and `rem32`,
+  2^18 each, or the host items named by `--sweep-items` - as CPU jobs beside the card's legs, and
+  the run waits for them before it ends: seconds, not minutes (COMPUTED: `rem32`, the slowest of the
+  three, runs 0.46 M/s in the study, so its 2^18 cases are 0.6 s), inside the estimate.
 - **The long run** needs `--until` (the box's local time). Use a **new `--out`** (default
   `~/card-stress-out/<stamp>-<commit>`; put it on `/data`) **outside the checkout** - files in the
   tree make it untracked, which changes the build id `hw/card-segrun.sh` asserts, so the driver
@@ -922,7 +931,7 @@ python3 hw/card_stress_report.py /data/card-stress-1016     # the report, any ti
   terminal does not stop it (SIGHUP is ignored). A stale `STOP` at the start is refused.
 - **Read**: `status.txt` (rewritten after every leg: time, cycle, image, totals by image,
   consecutive card failures, the last telemetry and the host's load, the sweep's coverage and
-  rates, the deadline), `driver.log` (what the driver said), `metrics.jsonl` (the record),
+  rates, the host pool's line, the deadline), `driver.log` (what the driver said), `metrics.jsonl` (the record),
   `logs/` (each leg's log: a passing leg's gzipped, a failing leg's whole), `STOPPED.txt` (why,
   when the policy stopped it), and the report. **What the smoke should print**: for each image
   `leg dt-i on <image>: pass`, and `build step image <name>: ok - ... equal to SHA256SUMS`; at the
@@ -984,28 +993,31 @@ printf it matches.
   encoding against the directed exponent list) and `scaleb32-wide` (every encoding against the 556
   exponents, -278 to 277, that can change a result, and 12 past those edges that must land as
   the edges do), the last four under the four attributes the probes allow; and the random banded
-  `div32`, `div64`, `sqrt64` and clause-5 jobs with those scripts' seeds (the 90 items: 36
-  exhaustive and 54 random) - run slice by slice with `CFT_SOAK_ARTIFACT` naming the image. The
+  `div32`, `div64`, `sqrt64` and clause-5 jobs (the 90 items: 36 exhaustive and 54 random) -
+  run slice by slice: **the 43 tile items on the card, with `CFT_SOAK_ARTIFACT` naming the image,
+  and the 47 host items as CPU jobs on the host pool** (below). A random slice's seed is no longer
+  the scripts' (below). The
   scripts themselves cannot be sliced or resumed (each wipes its output directory and runs
   everything), so the driver runs the same binaries on the same job lines. Slices are sized from
   the rate it measures: the first slice of each op on an image is a probe of 2^20, later ones fill
   `--sweep-slice-seconds` (600) at the measured rate, in whole 2^20 steps. **On the quad the
   jobs are four processes at once, one a tile (`CFT_XRT_TILES=1..4`)**, the shape docs/HOSTAPI.md
   gives for independent jobs (a single process over four tiles pays to cut every small call);
-  a single image gets one job. The sweep takes `--sweep-minutes` of each cycle (quad 45, single
-  20, deep 20); exhaustive items outweigh random ones 3 to 1 (`--sweep-weights`).
+  a single image gets one job. The card's sweep takes `--sweep-minutes` of each cycle (quad 45,
+  single 20, deep 20); exhaustive items outweigh random ones 3 to 1 (`--sweep-weights`, for the
+  pool as well).
   Coverage is **rebuilt from `metrics.jsonl` alone**: a slice is covered when its job finished
   with a verdict (a pass, or a disagreement, which is kept with its operands); a slice that timed
   out or lost the device is not covered and is run again, and one that fails to finish
   `--quarantine-after` (2) times is moved past and recorded. `--sweep-items sqrt32-rne,...`
   restricts the campaign (a wave runs one job a distinct item, so one tile per item named: name
-  four items for four tiles). **With `--quick` the smoke's waves are those items** (since
-  2026-10-20), in the order named and the least served first, skipping any that cannot run: the
+  four tile items for four tiles; a host item named is the pool's, not the card's). **With
+  `--quick` the smoke's waves are those tile items** (since 2026-10-20), in the order named and the least served first, skipping any that cannot run: the
   first four on the quad, one a wave (two waves) on a single image, so the single and then the deep
   take the next ones and not the same again, and with `--resume` a second smoke should go on again (read from
   `load_state`, which rebuilds the served counts; not run).
   Until then the smoke planned its own four items (`sqrt32-rne`, `rint32-rne`, `div32-rne`,
-  `nextup32` on the quad) whatever was named: on 2026-10-19 `--quick --sweep-items` naming EX's 22
+  `nextup32` on the quad; the fourth is `rint64-rne` since the pool took the host items) whatever was named: on 2026-10-19 `--quick --sweep-items` naming EX's 22
   exhaustive items named none of them, every wave was empty (the lead's account: the report said
   "slices: 0 completed") and the log said "sweep: nothing left to run in this campaign" on each
   image, which reads like a finished campaign. **A wave with nothing to run now says why**, in
@@ -1014,7 +1026,7 @@ printf it matches.
   item it could have run is an exhaustive item already covered; otherwise `no sweep job could
   start, and the campaign is NOT finished`, with the items by cause (outside `--sweep-items`,
   disabled, covered, moved past by the quarantine, not in this run's catalog because a probe ruled
-  it out). `nextup32` and `nextdown32` report 8 more cases than their range (the
+  it out; a host item named is said to be the pool's, not the card's). `nextup32` and `nextdown32` report 8 more cases than their range (the
   tool runs eight edge cases in every slice, clause5_soak.c `next_edges32`); the driver expects
   exactly that and refuses any other count.
   **The exhaustive conversion and scaleB items say what they covered**: their verdict line ends
@@ -1031,20 +1043,153 @@ printf it matches.
   and `cft_sqrt` are composed of tile passes (scaleB takes a host path below the subnormal floor,
   -149 for fp32); the conversions, `nextUp`/`nextDown`, `logB`, `class` and `remainder` are HOST
   operations - no floating-point arithmetic, "nothing for a device to accelerate", bit-identical
-  on every backend by construction. **A card soak of a host item is libcft's host code run on
+  on every backend by construction. **A card soak of a host item was libcft's host code run on
   the box against its CPU**: a full-space test of the library in which the tile computes nothing,
-  which the software backend on any CPU repeats. 43 of the 90 items reach the tile (25 of the 54
-  random, 18 of the 36 exhaustive) and 47 do not. The host items stay in the campaign. Every
-  sweep record carries `sweep.reach`, status.txt has a `reach` line (how much of the exhaustive
-  space each kind has covered), and the report a `reach` column (its last) and totals by reach.
+  which the software backend on any CPU repeats - and it took 52.5 per cent of the final stress
+  run's sweep job-seconds (COMPUTED, docs/studies/SWP-A-coverage.md, 2.3). 43 of the 90 items reach
+  the tile (25 of the 54 random, 18 of the 36 exhaustive) and 47 do not. **Since 2026-10-20 the
+  host items run on the host pool, beside the card, and the card's sweep takes tile items only.**
+  Every sweep record carries `sweep.reach`, status.txt has a `reach` line (how much of the
+  exhaustive space each kind has covered), and the report a `reach` column (its last) and totals
+  by reach.
 - **Records.** `metrics.jsonl` is append-only: a `leg` record each (the cycle, the image and its
   SHA-256, the leg, its start and end, exit status and class - pass, fail, timeout, no_device,
   parse_error, skipped, error -, the counts its verdict line gave, cases or checks a second,
   the log), a `telemetry` record a sample, and `run_start`, `build`, `cycle_start`, `cycle_end`,
   `event` and `run_end` between. The report (`hw/card_stress_report.py`) reads it at any time:
   runs, passes, failures, cases and rates over time by image and leg, the telemetry's range and
-  trend, every failure with its log, the sweep's coverage and every disagreement, the run's
-  uptime and gaps.
+  trend, every failure with its log, the sweep's coverage (and, since 2026-10-20, by tree) and
+  every disagreement, the run's uptime and gaps. Since 2026-10-20 a host pool slice is a sweep
+  `leg` of the image `cpu`; `run_start` carries the RTL and host/ trees and the compiler
+  (`tree.rtl`, `tree.host_src`, `tree.cc`, each with a `_dirty` flag) and, with `--earlier-runs`,
+  the runs named and the first n each item got; a random slice's `sweep` carries `seed_scheme`.
+  New events: `host_pool`, `host_job_abandoned`, `host_pool_stopped`, `tree_changed`.
+
+### The host pool, the seeds, and coverage per tree (added 2026-10-20)
+
+Three changes to the sweep, from the study docs/studies/SWP-A-coverage.md (parcel SC, 2026-10-19) and Logan's
+answers of 2026-10-20 to its questions 1 ("Yes"), 2 ("Stopgap now") and 4 ("Per tree"): parcel DR2. **The
+box has not run this code** (docs/VALIDATION.md, the entry of 2026-10-20 for DR2, says what was run, and where).
+
+**The host pool.**
+
+- **What it runs.** The 47 host items - the conversions, `nextUp`/`nextDown`, `logB`, `class` and `remainder`,
+  every item `OP_REACH` marks `host`. host/src/clause5.c (lines 11 to 35) says they "contain NO floating-point
+  arithmetic at all", are "bit-identical on every backend by construction", and take the device as "context",
+  "not a participant". DR2 read that against the code and not only the comment (the greps are in
+  docs/VALIDATION.md): no `cft_run` in the host operations' section, `cft_host_io` a no-op for the soaks' plain
+  arrays, `cft_open(NULL)` a software device that never touches XRT. So a host item run without
+  `CFT_SOAK_ARTIFACT` runs the code the card run ran, and its log says `soaking the software backend`.
+- **How.** `--host-workers N` threads of the driver (default **8**; 0: the host items do not run at all, and
+  the card does not take them), from the start of the run to its end. Each starts one soak process at a time:
+  the same `clause5-soak` on the same job line, under `nice -n 10` and `timeout` like every leg, with
+  `CFT_SOAK_ARTIFACT` and `CFT_XRT_TILES` **removed from its environment** (not merely left unset by the driver:
+  an operator's shell that has them does not reach a host job). Its log must say `soaking the software backend`;
+  one that names a DEVICE is refused as a `parse_error` ("a CPU job opened the card") and stops the pool. One slice
+  of an item at a time. Slices are sized as the card's are (a probe of 2^20, then the measured rate times
+  `--sweep-slice-seconds`, whole 2^20 steps, cut to the time before the deadline) but held at 2^36 counts and not
+  2^28: at 2^28 a fast host item (about 37 M/s) would get 7-second slices, and the rotation, which equalises slices
+  served, would give it 7 s a turn against a slow item's 600 s.
+- **Why 8** (COMPUTED, and a starting figure: the box has not run it). The box has 36 threads. The card's sweep
+  takes at most four of them (a soak process a tile on the quad) and the battery one, and the driver, the sampler
+  and the report a little; the rest is the lead's other work (gates, links of 25 to 30 GB, other agents), which
+  runs at `nice` 0 and outranks the pool's 10. Eight is a quarter of the threads, 12 of 36 with the card's four,
+  and about 3.8 times the throughput the host items had on the card (52.5 per cent of four job slots is 2.1
+  processes: study 2.3), while the card's four slots go wholly to the tile items (about twice their sweep time,
+  study 5.7). Raise it with `--host-workers` on an idle box, lower it beside a gate.
+- **Records.** A host slice is a `leg` record of kind `sweep` with `image: cpu`, no `image_sha256`, no tile, and
+  `sweep.pool` = the worker, the machine and the tools' build id. status.txt has a `hostpool` line (the workers,
+  the slices recorded, the slices in flight). The report lists `cpu / sweep (all items)` among its rows, and its
+  "on the card" time no longer counts those legs.
+- **The run's rules hold for it.** STOP, a signal, the deadline, the disk floor and a moved tree stop the pool as
+  they stop the run: every worker asks before it starts a slice, so none starts after one. A slice already running
+  is given `--kill-after` (60 s) from the end of the last card leg to finish, and is then terminated by PID and
+  recorded as the event `host_job_abandoned`, **not as a slice**: a CPU job needs none of a card leg's "never in
+  the middle" (it poisons nothing), and a killed slice recorded as a failure would count toward disabling its
+  item. It is not covered, so a resumed run serves it again. `--resume` rebuilds the pool's coverage, seeds and
+  rates from `metrics.jsonl` as the card's. `--quick` waits for its three slices.
+- **A host job's failure is its item's, never the card's.** Its log is never read for "the card did not answer"
+  (so no `no_device`); a failing job is a `fail` (a disagreement, kept with its operands) or a `parse_error` (the
+  item is disabled after `--quarantine-after`, as on the card); and nothing it does touches the
+  consecutive-failure count, the recovery ladder or the `card_lost` stop. A failure in the card's cycle
+  (`driver_error`) does not end the pool's jobs either.
+- **The estimates.** `--quick`'s 24 to 28 minutes are the card's legs; the pool's three slices run beside them
+  (above). A long run's host slices are cut to the deadline like the card's; `--deadline-grace` is about card legs
+  and is unchanged.
+
+**The seeds.** The study (2.4) found the old schedule - `seed = base_seed + 7919 n`, n restarting at 0 in every new
+`--out` - repeating the last run's draws and starting neighbouring items from one state (the tools do
+`rng_state = seed | 1`): 96.2 per cent of the final run's random slices shared a state with another item's.
+
+- **The seed** of an item's n-th random slice is now `(item index << 40) | (n << 1) | 1` (schedule A of
+  docs/studies/swp-a/seed_audit.py): odd already, and different for every (item, n) with n below 2^39, by
+  construction. The index is the item's place in `RANDOM_SEED_ORDER` (hw/card_stress_lib.py) **by name**, not its
+  place in the catalog, which loses items when a probe fails; a new random item is appended there, and the
+  catalog refuses, by name, one that is not. The suite shows it with seed_audit.py's method over the driver's own
+  catalog: 54 items by 605 slice numbers (to 2^38) leave 32,670 different tool states, and the same method on the
+  old schedule (54 items by 57 slice numbers) finds the study's 2,962 of 3,078 slices on a shared state, which is
+  what shows the check can fail. Each random slice's record
+  says `seed_scheme: 2`; a record without it is the old schedule.
+- **n continues across runs: `--earlier-runs DIR[,DIR...]`**, named, never searched for. Each random item's first
+  n in the new run is above the highest n of a completed slice (pass or fail) in any named run's `metrics.jsonl`
+  (and above its own, when it is resumed); `run_start` records the runs named and the first n each item got. A
+  name that is not a directory, a directory with no `metrics.jsonl`, and one whose `metrics.jsonl` has a line that
+  does not parse (a floor that is too low repeats draws without a word) are refused **by name**, before anything
+  starts. A torn last line, the mark of a killed run, is allowed and noted. **Name every earlier run**: the option
+  does not find them.
+- **A guard.** A planned slice whose tool state (seed `| 1`) a slice of another (item, n) in this file or in a
+  named directory already started from is refused by name (a `driver_error`); the same item and n again (a slice
+  served after a failure) is not.
+- **An old run resumed** (`--resume` on a directory the old schedule wrote): n continues from the file's own
+  highest completed n + 1, as it always did, and the new slices use the new formula. The two cannot meet: an old
+  seed is `base_seed + 7919 n` (base_seed 1,353,449,473 and up for the divsqrt items, 3,305,111,553 and up for
+  the clause-5 ones: below 2^32 for n up to about 125,000), and a new seed is at least 2^40 except item 0's, which
+  is `2n + 1` and would have to reach n of 676,724,736 to meet the smallest old one. The guard checks it at run
+  time, and the suite resumes a file made by a copy of the old code: the new slices continue each item's n, and
+  their states meet none of the old ones, which collide among themselves.
+- **What it does not do.** Exhaustive items still restart at encoding 0 in a new `--out` (carrying their
+  coverage across runs is the study's ledger, rank 6), and the build-order-independent draw (two statements in
+  each soak tool, study 2.4) is not here: the tools are other parcels'.
+
+**Coverage per tree.** What a slice is evidence about depends on what it ran. Logan's answer to question 4 of the
+study is per RTL tree, with the three images reported separately beneath it.
+
+- **The run records its tree** in `run_start`: `tree.rtl` (`git rev-parse HEAD:rtl` of the checkout it runs from),
+  `tree.host_src` (the same for host/), `tree.cc` (the C compiler's first version line), and `tree.rtl_dirty` and
+  `tree.host_src_dirty` (git status of that directory, untracked files included: an untracked .sv is compiled
+  into a bitstream all the same). A resume writes its own `run_start`; a resume on another RTL tree also records
+  the event `tree_changed`.
+- **The report** has a section "SWEEP COVERAGE BY TREE", after the sweep's. A tile item's coverage is counted
+  **per RTL tree**, the images beneath it: the tree's figure is the union over the images, and an image's column
+  is what it covered alone (the study found the quad serving 87.5 to 99.98 per cent of an exhaustive item and the
+  single and deep 0 to 6). A host item's coverage is counted by **what it is about - the library's source,
+  host/'s tree hash, and the compiler** (the same host/ tree under two compilers is two classes) - whether it ran
+  on the pool or, in a run before 2026-10-20, on the card. The section says which key it uses. A tree with
+  uncommitted changes is a class of its own ("modified"). A run that recorded no tree (every run before
+  2026-10-20) is kept apart by its commit, as "not recorded". A slice is counted under the **last `run_start`
+  before it** in its file, so a run resumed from another checkout counts what follows under that checkout's tree.
+- **Several runs:** `python3 hw/card_stress_report.py RUN_DIR --also DIR [--also DIR ...]` adds other runs'
+  directories to that section **alone** (the sections before it are RUN_DIR's): coverage accumulated over runs,
+  each slice under its own run's tree, so two trees are never summed. A directory with no `metrics.jsonl` is
+  refused by name.
+- **What it cannot know.** The tree is the one the driver RUNS FROM. It is the tree the images were built from
+  only if they were: the three rev8 images were, from rtl 44b963dd (READ, docs/VALIDATION.md), and the stress
+  run's commit f0693b2 has that rtl tree (MEASURED, `git rev-parse f0693b2:rtl`). Run from a checkout whose rtl/
+  is the images' (the manifest's `commit:` line gives the images': `git rev-parse <commit>:rtl`); the images' own
+  identity is their SHA-256, in every leg and in `run_start`. The tree hash covers rtl/ alone, and the three images
+  were built with different generics (the quad's EN_AUGADD=0, the deep's SEQ_SCRATCH_D=8192), which the images
+  beneath the tree keep apart. The driver does not track trees when it resumes: `--resume` goes on from the whole
+  file's coverage, so a resume on another RTL tree continues where the file's coverage ends and the report shows
+  the new tree with only what ran after; use a new `--out` to cover a new tree from the start.
+
+**For the next run:** check that `git rev-parse HEAD:rtl` of the box's checkout is the images' tree (the rev8
+images': 44b963dd6ba2fcf99e002c5face5ca94aad4515c); start it with every earlier run named - `bash hw/card-stress.sh
+--until "..." --out /data/card-stress-NNNN --earlier-runs /data/card-stress-1016` - and read the pool in
+status.txt's `hostpool` line and the report's section by tree; `bash hw/test-card-stress.sh` is the pre-flight.
+The run of 2026-10-16 was made by the old schedule, so naming it is harmless and not what keeps the new draws
+different from its own (its states cannot meet the new ones, above); it only starts each random item's n
+above that run's highest (its highest were 55 for 40 items and 56 for 14: the report's table). What the option is for is the runs made from now on: name each of them,
+or the next run's n restarts at 0 and draws what theirs drew.
 
 ### The exhaustive conversion and scaleB items: what to run, what it costs, what it must print
 
@@ -1100,9 +1245,10 @@ driver builds the tools with XRT=1 itself):
          --legs api-test --weights quad=1,single=0,deep=0 --sweep-minutes quad=720,single=0,deep=0 \
          --sweep-items scaleb32-wide-rne,scaleb32-wide-rtz,scaleb32-wide-rdn,scaleb32-wide-rup
 
-(four wide attributes in about 47.5 h; `scaleb32-all-*`, the four host families and the older items
-are named the same way). A finished item shows in `status.txt` and in the report as 4,294,967,296 of
-4,294,967,296 encodings, 100.000%, with its reach.
+(four wide attributes in about 47.5 h; `scaleb32-all-*` and the older tile items are named the same
+way. The host families are the pool's since 2026-10-20: name them in `--sweep-items` and they run on
+CPUs, `--host-workers` of them at a time, not on a tile.) A finished item shows in `status.txt` and in
+the report as 4,294,967,296 of 4,294,967,296 encodings, 100.000%, with its reach.
 
 One item on all four tiles, without the driver - any of the six (the same binary and oracle;
 `$IMG` the quad's xclbin built with XRT=1; `conv32to64-all` takes no attribute word):
@@ -1179,8 +1325,10 @@ tree's (`git archive REV host | tar -x -C DIR`). The driver's side is `hw/test-c
 - **The CPU share** is small by design: one battery leg at a time (its own host work, mostly
   single-process Python) and, in a sweep, at most one soak process a tile - four on the quad, one
   on a single image, so 4 of the box's 36 threads at most, about 11 per cent (`--soak-jobs N`
-  lowers it) - all under `nice -n 10`; the one-time build uses `--build-jobs` (4). The box's
-  other runs (a gate, census stages) are CPU-only and share what is left.
+  lowers it) - and, since 2026-10-20, the host pool's `--host-workers` (8) CPU-only soak processes
+  beside them, so 12 of the 36 threads at most, a third (`--host-workers N` lowers it) - all under
+  `nice -n 10`; the one-time build uses `--build-jobs` (4). The box's other runs (a gate, census
+  stages) are CPU-only and share what is left; at `nice` 0 they outrank every job here.
 - **The disk**: passing legs' logs are gzipped; the driver checks the free space of its output
   directory and of `/data` before every leg and stops cleanly below `--disk-floor-gb` (5).
 - **The deadline** is read between legs: nothing starts after it, and a leg whose estimate would
