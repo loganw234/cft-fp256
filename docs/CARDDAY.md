@@ -1446,9 +1446,15 @@ compiled `-DCFT_CHUNK=16384 -DBATCH=16384` and linked against `libcft-c16384.a`,
 own: the library's sources compiled `-DCFT_CHUNK=16384` into the directory `soak-c16384/`. XRT=1,
 XRT_ROOT and `C5DEFS` act as they do for `divsqrt-soak` and `clause5-soak`. **The default
 `libcft.a`, `divsqrt-soak`, `clause5-soak` and every other tool are not touched**: nothing here is
-a prerequisite of `all`, sizes sit side by side, `make -C host clean` removes the products of
-every size by name pattern and no more, and .gitignore ignores them, so a build leaves the next
-build id `untracked=none`. **Refused by name**, at parse time, when one of these goals is asked
+a prerequisite of `all`, sizes sit side by side, and `make -C host clean` removes the products of
+every size the build allows (the 16 values below), each by its exact name: a
+`divsqrt-soak-c16384.log` or a `soak-c16384-notes/` of yours stays (the first version used globs,
+`divsqrt-soak-c[0-9]*`, which took them; verifier VCK found it). .gitignore ignores the binaries
+and the directory by SHAPE, the name and exactly four or five digits and nothing after them, so a
+build leaves the next build id `untracked=none`. A shape is wider than the list: a five-digit name
+that is no allowed size is ignored too (and `clean` leaves it), and a `.log` or an archive of that
+name is ignored by the blanket `*.log` and `host/*.a` that were there before. **Refused by name**,
+at parse time, when one of these goals is asked
 for: no `SOAK_CHUNK` or an empty one; a value that is not one plain decimal number that is a
 positive multiple of 4096 up to 65536 (`4097`, `0x4000`, `016384`, `65537` and `16384 8192` are
 refused, each message giving the value); and a goal that names another size than `SOAK_CHUNK`
@@ -1513,8 +1519,11 @@ fail (above). `python3 host/tests/soak_chunk_check.py --baseline-tree DIR` holds
 refusals by name, the dry run of every recipe, the real build at 16384 and 8192, a probe linked
 against each archive with `--wrap=cft_run` that finds the pass size the library really has
 (largest pass 16384, 8192 and 4096, for division, square root, rint and scaleB), the stderr
-lines, `clean`, `.gitignore`, the default tools' output and objects unchanged against a baseline,
-and six planted breakages each caught by the check written for it. **Not done:** the stress driver
+lines, `clean` (the products of all 16 sizes, a synthetic set beside the tree's own build, gone; names
+that only begin like a product, a `.log`, a `.txt`, `-old`, `-notes/`, still there), `.gitignore` (every
+product ignored, and no pattern of this build taking such a name), the default tools' output and
+objects unchanged against a baseline, and nine planted breakages each caught by the check written
+for it, the earlier globs put back among them, in `clean` and in `.gitignore`. **Not done:** the stress driver
 does not use these tools yet (hw/ is parcel DR3's), and the pass size is not adjustable at run
 time.
 
