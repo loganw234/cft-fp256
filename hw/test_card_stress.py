@@ -2426,11 +2426,17 @@ def append_lock_checks(src: str = HERE) -> list:
     """The metrics file has one writer at a time in this process (parcel DR2). Eight threads - the host pool's workers, the card's
     thread, the telemetry sampler - append at one instant, over and over. THE CAUSE, on every platform: the write is slowed by 5 ms
     inside, and no two threads may ever be inside it together (a lock held across the write makes this true; without it all eight
-    are). THE SYMPTOM, which only Windows shows (its emulation of O_APPEND seeks to the end and then writes, so two writers at once
-    overwrite each other: a dry run lost a leg record that way when the pool's workers finished together, and POSIX appends
-    atomically): every record is in the file, none torn, in the order of its epoch. The symptom is not reproduced every time
-    without the lock (MEASURED, Windows 11, Python 3.12.9: 4 trials in 60 of eight threads by twenty-five rounds damaged the file, and none lost a whole
-    record), which is why the cause is checked as well."""
+    are). THE SYMPTOM is what the file shows without the lock, and the two kinds of host show it differently (MEASURED with this
+    check's own shape, 60 trials of eight threads by twelve rounds, the lock replaced by a no-op). Windows, whose emulation of
+    O_APPEND seeks to the end and then writes, lets two writers at once overwrite each other: records were lost in 60 trials of 60
+    (2,841 of 5,760 records in all; a dry run lost a leg record that way when the pool's workers finished together) and the file's
+    order was not its epochs' order in 7 (Windows 11, Python 3.12.9). POSIX appends atomically, so no record is lost or torn, but
+    the epoch is stamped before the write, so without the lock the file's order stops being its epochs' order: in 53 trials of 60
+    (WSL2, Ubuntu 22.04, Python 3.10.12; 12 of 12 for verifier-VDR2). With the lock all of it is 0 of 60 on both. The check asks for
+    the three things together - every record in the file, none torn, in the order of its epochs - and is red without the lock on both
+    hosts (every time on Windows, most times on POSIX), which is why the cause is checked as well. An earlier version of this
+    docstring said that only Windows shows the symptom, and gave 4 damaged trials in 60 with no record lost: the script that
+    measured that gave both of its passes' files one name, so the second pass appended to the first's and the duplicates hid the loss."""
     out: list = []
     tmp = tempfile.mkdtemp(prefix="cs-app-")
     real_write = os.write
