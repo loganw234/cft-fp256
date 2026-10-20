@@ -897,7 +897,10 @@ python3 hw/card_stress_report.py /data/card-stress-1016     # the report, any ti
   no card and no XRT: about 5 minutes under WSL and 6 to 8 under Git Bash (2026-10-19, a desktop other
   sessions share), and it must be run alone on the host (two drivers at once see each other's
   stand-ins as card users). `--no-plants` leaves out the negative controls, which take about
-  twice as long as everything else together (11 minutes under WSL).
+  twice as long as everything else together (11 minutes under WSL). The runner and the pythons
+  the suite itself starts run with `-B` (`-I` ignores `PYTHONDONTWRITEBYTECODE`); the report script
+  the driver starts for itself does not, so a run in the tree under WSL still leaves one git-ignored
+  card_stress_lib file in hw/__pycache__ unless that variable is set.
 - **The smoke (`--quick`)**: every leg once on each image (quad, single, deep), short slices;
   exit 0 only if every leg passed (a leg skipped by name, with its reason, is not a failure).
   **Estimated** at 24 to 28 minutes on the card, from the 2026-10-06 card times where there are
@@ -1022,11 +1025,18 @@ printf it matches.
   "slices: 0 completed") and the log said "sweep: nothing left to run in this campaign" on each
   image, which reads like a finished campaign. **A wave with nothing to run now says why**, in
   the log and as a `sweep_empty` event in `metrics.jsonl` (the report counts it in its events
-  line): `nothing left to run in this campaign` only when every
-  item it could have run is an exhaustive item already covered; otherwise `no sweep job could
-  start, and the campaign is NOT finished`, with the items by cause (outside `--sweep-items`,
-  disabled, covered, moved past by the quarantine, not in this run's catalog because a probe ruled
-  it out; a host item named is said to be the pool's, not the card's). `nextup32` and `nextdown32` report 8 more cases than their range (the
+  line): `nothing left to run in this campaign` (`nothing left to run for the items named by
+  --sweep-items` when some are named) only when every item of the campaign is an exhaustive item
+  already covered - decided over the campaign, never over the wave's own list. When only the
+  wave's list is blocked it says `no job from this wave's list could start (...), but the campaign
+  is NOT finished` and names what can still run; when nothing can run, `no sweep job could start,
+  and the campaign is NOT finished`, with the items by cause (outside `--sweep-items`, disabled,
+  covered, moved past by the quarantine, not in this run's catalog because a probe ruled it out; a
+  host item named is said to be the pool's, not the card's, and is not counted among those that can
+  still run).
+  On a single image or the deep, if the smoke's first item cannot run (a covered `sqrt32-rne`, a
+  resumed run's), it goes on to the second (`rint32-rne`) instead of ending that image's sweep.
+  `nextup32` and `nextdown32` report 8 more cases than their range (the
   tool runs eight edge cases in every slice, clause5_soak.c `next_edges32`); the driver expects
   exactly that and refuses any other count.
   **The exhaustive conversion and scaleB items say what they covered**: their verdict line ends
