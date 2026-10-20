@@ -893,11 +893,12 @@ python3 hw/card_stress_report.py /data/card-stress-1016     # the report, any ti
   first long run's clone had it made by the lead before its first `selftest` leg.
 - **Pre-flight, optional**: `bash hw/test-card-stress.sh --no-plants` runs the driver's dry-run
   tests (the verdict parsers on real logs, the scheduler, the failure policy, the guard, the
-  sweep's resume, the report, and under POSIX the real `make` in a scratch copy) on the box, with
-  no card and no XRT: about 5 minutes under WSL and 6 to 8 under Git Bash (2026-10-19, a desktop other
-  sessions share), and it must be run alone on the host (two drivers at once see each other's
+  sweep's resume, the host pool, the seeds, the trees, the report, and under POSIX the real `make` in
+  a scratch copy) on the box, with no card and no XRT: about 7.5 minutes under WSL and 9 under Git
+  Bash (2026-10-20: 448 s and 553 s, on a desktop other sessions share; a busier desktop made a Git
+  Bash run 636 s), and it must be run alone on the host (two drivers at once see each other's
   stand-ins as card users). `--no-plants` leaves out the negative controls, which take about
-  twice as long as everything else together (11 minutes under WSL). The runner and the pythons
+  twice as long as everything else together (the whole suite is 22.5 minutes under WSL). The runner and the pythons
   the suite itself starts run with `-B` (`-I` ignores `PYTHONDONTWRITEBYTECODE`); the report script
   the driver starts for itself does not, so a run in the tree under WSL still leaves one git-ignored
   card_stress_lib file in hw/__pycache__ unless that variable is set.
@@ -1105,8 +1106,9 @@ box has not run this code** (docs/VALIDATION.md, the entry of 2026-10-20 for DR2
   and the report a little; the rest is the lead's other work (gates, links of 25 to 30 GB, other agents), which
   runs at `nice` 0 and outranks the pool's 10. Eight is a quarter of the threads, 12 of 36 with the card's four,
   and about 3.8 times the throughput the host items had on the card (52.5 per cent of four job slots is 2.1
-  processes: study 2.3), while the card's four slots go wholly to the tile items (about twice their sweep time,
-  study 5.7). Raise it with `--host-workers` on an idle box, lower it beside a gate.
+  processes, if the four were full all the sweep time; the 52.5 per cent is section 2.3 of the study), while the
+  card's four slots go wholly to the tile items (about twice their sweep time: section 5.7 of the study). Raise it
+  with `--host-workers` on an idle box, lower it beside a gate.
 - **Records.** A host slice is a `leg` record of kind `sweep` with `image: cpu`, no `image_sha256`, no tile, and
   `sweep.pool` = the worker, the machine and the tools' build id. status.txt has a `hostpool` line (the workers,
   the slices recorded, the slices in flight). The report lists `cpu / sweep (all items)` among its rows, and its
