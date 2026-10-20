@@ -870,11 +870,15 @@ endif
 # remote frame cap is 1 GiB.
 #
 # Nothing here is a prerequisite of `all`. `clean` removes the products
-# of every size the list below allows, each by its exact name (a file or
-# directory of yours that only begins like one, a divsqrt-soak-c16384.log
-# or a soak-c16384-notes/, stays). The products are in .gitignore, by their
-# shape (the name and four or five digits), or a build would mark the next
-# build id untracked=present; the comment there says what that covers.
+# of every size the list below allows, each by its exact name and only if
+# it is the kind of thing a build makes: a binary or archive that is not a
+# directory, an object directory that is a directory and no symlink. What
+# only begins like a product stays (a divsqrt-soak-c16384.log, a
+# soak-c16384-notes/), and so does a file named exactly like an object
+# directory (soak-c8192) or a directory named exactly like a binary. The
+# products are in .gitignore, by their shape (the name and four or five
+# digits), or a build would mark the next build id untracked=present; the
+# comment there says what that covers.
 # ====================================================================
 SOAK_CHUNK       ?=
 SOAK_CHUNK_OK    := 4096 8192 12288 16384 20480 24576 28672 32768 \
@@ -954,21 +958,27 @@ endif
 endif
 
 # Outside the conditional on purpose: a clean needs no SOAK_CHUNK. It
-# removes what any size the list allows built, and only that: for each
-# size its two binaries in both forms (.exe or none, as `clean` removes
-# every platform's products), its archive and its object directory, each
-# by its EXACT name. An earlier version used globs (divsqrt-soak-c[0-9]*),
-# and the `*` took anything after the digits: a divsqrt-soak-c16384.log
-# of the user's went with them. A name of a size the list refuses is no
-# product of this Makefile and stays.
+# removes what a build of any size the list allows made, and only that:
+# for each size its two binaries in both forms (.exe or none, as `clean`
+# removes every platform's products), its archive and its object
+# directory, each by its EXACT name AND ONLY IF IT IS THE KIND OF THING
+# the build makes. The binaries and the archive go unless the name is a
+# directory (rm -f refuses one, and make would stop there); the object
+# directory goes only if it is a directory and no symlink (rm -rf on the
+# bare name takes a file too: a file called soak-c8192 went with it in
+# 67fd3f6). So these stay: a name of a size the list refuses, a name that
+# only begins like a product, a file or symlink named like an object
+# directory, a directory named like a binary. The first version used globs
+# (divsqrt-soak-c[0-9]*), and the `*` took anything after the digits: a
+# divsqrt-soak-c16384.log of the user's went with them.
 SOAK_CHUNK_FILES := $(foreach n,$(SOAK_CHUNK_OK),divsqrt-soak-c$(n) \
                     divsqrt-soak-c$(n).exe clause5-soak-c$(n) \
                     clause5-soak-c$(n).exe libcft-c$(n).a)
 SOAK_CHUNK_DIRS  := $(foreach n,$(SOAK_CHUNK_OK),soak-c$(n))
 clean: clean-soak-chunk
 clean-soak-chunk:
-	rm -f $(SOAK_CHUNK_FILES)
-	rm -rf $(SOAK_CHUNK_DIRS)
+	for f in $(SOAK_CHUNK_FILES); do if [ ! -d "$$f" ]; then rm -f "$$f"; fi; done
+	for d in $(SOAK_CHUNK_DIRS); do if [ -d "$$d" ] && [ ! -L "$$d" ]; then rm -rf "$$d"; fi; done
 .PHONY: clean-soak-chunk
 
 # MPFR parity: the third oracle, and the only independent one that

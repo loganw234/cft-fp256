@@ -27,12 +27,17 @@ It builds in a scratch copy of host/ (Makefile, include, src, tools, examples) a
              byte; stdout is the same at every size for 15 invocations; sabotage fails at every size
   clean      `make clean` removes the products of every size the Makefile allows - the tree's own build at three
              sizes and a synthetic one of all sixteen, binaries in both forms, archives, object directories - by their
-             exact names, and the tree is as it was, with the names that only BEGIN like a product still there:
-             without digits, with a size's digits and a suffix (a .log, a .txt, -old, -notes/), and with digits of
-             no allowed size
-  ignore     git ignores every product (all sixteen sizes), so a build leaves the next build id untracked=none, and
-             none of this build's patterns takes a name that only begins like one; a scratch repository holding this
-             tree's .gitignore passes the same check (CONTROL), and one holding the earlier [0-9]* globs fails it. Two
+             exact names AND ONLY IF each is the kind of thing a build makes, and the tree is as it was, with these
+             still there: names that only BEGIN like a product (without digits, with a size's digits and a suffix -
+             a .log, a .txt, -old, -notes/ - and with digits of no allowed size, four or five), a regular file named
+             exactly like an object directory (soak-c61440; 67fd3f6 removed it), and a directory named exactly like
+             a binary (divsqrt-soak-c61440/; `rm -f` refuses it and make stopped there)
+  ignore     git ignores every product (all sixteen sizes), so a build leaves the next build id untracked=none.
+             No pattern of this build takes a name that only begins like a product, WITH ONE DOCUMENTED EXCEPTION:
+             the shape is the tool's name and exactly four or five digits, so a name of that shape is ignored by
+             this build's patterns whether or not the size is allowed (divsqrt-soak-c1234, divsqrt-soak-c12345,
+             soak-c12345/), and `make clean` keeps it; the check holds both. A scratch repository holding this tree's
+             .gitignore passes the same check (CONTROL), and one holding the earlier [0-9]* globs fails it. Two
              decoys are ignored by blanket rules that were there before (*.log, host/*.a), and the check says which
   unchanged  (with --baseline-tree DIR, a directory holding the baseline's host/ - `git archive REV host | tar -x
              -C DIR`) the default tools of that tree and of this one print the same bytes and exit with the same
@@ -43,7 +48,9 @@ It builds in a scratch copy of host/ (Makefile, include, src, tools, examples) a
              16384 and only the probe sees 4096), the tool built without -DBATCH, the tool linked against libcft.a,
              the validation removed, `clean` leaving the object directory, `clean` with the earlier globs put back
              (it removes a divsqrt-soak-c16384.log: verifier VCK's finding at 318b597), `clean` that misses one
-             size, and the stderr line printed at the defaults
+             size, `clean` with the unguarded `rm -rf` put back (it removes the file soak-c61440: VCK's finding at
+             67fd3f6), `clean` with the unguarded `rm -f` put back (it stops on the directory divsqrt-soak-c61440/),
+             and the stderr line printed at the defaults
 
 Prints one line a group and a last line "soak-chunk test: N checks, F failed, S skipped".
 """
@@ -68,13 +75,18 @@ SKIPS: list = []
 NICE = ["nice", "-n", "10"] if shutil.which("nice") else []
 CHUNK = 16384
 OK_VALUES = [4096 * k for k in range(1, 17)]
-# Names that only BEGIN like a product of this build, which `make clean` must leave. The first five carry no digits;
-# the rest carry a size's digits and something after them (the earlier globs, divsqrt-soak-c[0-9]*, took a .log of
-# the user's: verifier VCK, 318b597), or digits of a size the Makefile refuses. None is a product of any size.
+# Names `make clean` must leave. None is a product of any size the Makefile allows. The first five carry no digits;
+# the next five carry a size's digits and something after them (the earlier globs, divsqrt-soak-c[0-9]*, took a .log
+# of the user's: verifier VCK, 318b597); then names of four or five digits that are no allowed size (which
+# .gitignore's shape DOES ignore, and clean keeps); then, at size 61440, which the tree does not build, two names that
+# ARE a product's name and the wrong kind of thing: a regular file named like an object directory (67fd3f6 removed
+# it: verifier VCK) and a directory named like a binary (`rm -f` refuses it, and make stopped there).
 DECOYS = {"divsqrt-soak-cfg": "x", "clause5-soak-chunks.txt": "x", "libcft-core.a": "x", "soak-corpus/keep.txt": "x",
           "soak-c.notes": "x",
           "divsqrt-soak-c16384.log": "x", "clause5-soak-c16384.txt": "x", "libcft-c16384-old.a": "x",
-          "soak-c16384-notes/keep.txt": "x", "clause5-soak-c16384-old": "x", "divsqrt-soak-c12345": "x"}
+          "soak-c16384-notes/keep.txt": "x", "clause5-soak-c16384-old": "x",
+          "divsqrt-soak-c1234": "x", "divsqrt-soak-c12345": "x", "soak-c12345/keep.txt": "x",
+          "soak-c61440": "x", "divsqrt-soak-c61440/keep.txt": "x"}
 EXTRA = "soaking with BATCH %d and CFT_CHUNK %d (the defaults are 4096)\n"
 BACKEND = "soaking the software backend\n"
 
@@ -348,17 +360,20 @@ def problems_tools(host: str, n: int, with_stdout: bool = True) -> list:
     return bad
 
 
-def make_synthetic_products(host: str) -> None:
+def make_synthetic_products(host: str, skip: set) -> None:
     """Every kind of product a build of every size the Makefile allows leaves, whether or not this tree built it: the
-    two binaries in both forms, the archive, the object directory with an object in it."""
+    two binaries in both forms, the archive, the object directory with an object in it. A name in `skip` is made by
+    a decoy instead (a file named like an object directory, a directory named like a binary)."""
     for n in OK_VALUES:
         for name in (f"divsqrt-soak-c{n}", f"divsqrt-soak-c{n}.exe", f"clause5-soak-c{n}", f"clause5-soak-c{n}.exe",
                      f"libcft-c{n}.a"):
-            with open(os.path.join(host, name), "w") as f:
+            if name not in skip:
+                with open(os.path.join(host, name), "w") as f:
+                    f.write("x")
+        if f"soak-c{n}" not in skip:
+            os.makedirs(os.path.join(host, f"soak-c{n}", "src"), exist_ok=True)
+            with open(os.path.join(host, f"soak-c{n}", "src", "x.o"), "w") as f:
                 f.write("x")
-        os.makedirs(os.path.join(host, f"soak-c{n}", "src"), exist_ok=True)
-        with open(os.path.join(host, f"soak-c{n}", "src", "x.o"), "w") as f:
-            f.write("x")
 
 
 def problems_clean(host: str, pristine: set, decoys: dict) -> list:
@@ -366,7 +381,7 @@ def problems_clean(host: str, pristine: set, decoys: dict) -> list:
     afterwards the tree must be the pristine tree plus the decoys - every product gone (left = in the tree and in
     neither), every decoy and every pristine file still there (gone = in neither the tree nor the decoys)."""
     bad = []
-    make_synthetic_products(host)
+    make_synthetic_products(host, {n.split("/")[0] for n in decoys})
     for name, content in decoys.items():
         path = os.path.join(host, name)
         os.makedirs(os.path.dirname(path) or host, exist_ok=True)
@@ -406,10 +421,15 @@ def ignore_answers(root: str, paths: list) -> dict:
 
 
 def problems_ignore(root: str) -> list:
-    """What git, in the repository `root`, ignores of the soak-chunk build's names. The products of all sixteen sizes
-    must be ignored. Names that only BEGIN like a product must not be taken by any pattern this build added: the
-    first group is ignored by nothing at all; the second is taken by a blanket rule that was there before (*.log, and
-    host/*.a for any archive) or by nothing, and the check says which pattern, so a pattern of this build is told apart."""
+    """What git, in the repository `root`, ignores of the soak-chunk build's names. (1) The products of all sixteen
+    sizes must be ignored. (2) Names that only BEGIN like a product - a suffix after the digits, another digit count, a
+    directory beside - must not be taken by any pattern this build added: the first group is ignored by nothing at all;
+    the second is taken by a blanket rule that was there before (*.log, and host/*.a for any archive) or by nothing, and
+    the check says which pattern, so a pattern of this build is told apart. (3) THE ONE DOCUMENTED EXCEPTION: the
+    patterns are a SHAPE, the tool's name and exactly four or five digits, so a name of that shape is ignored by this
+    build's patterns whether or not the size is allowed; `make clean` keeps such a name (the clean group holds that
+    half). Verifier VCK, at 67fd3f6: the generic sentence "no pattern takes a name that only begins like one" left
+    this exception out, and the check did not look at it."""
     products = []
     for n in OK_VALUES:
         for ext in ("", ".exe"):
@@ -419,7 +439,9 @@ def problems_ignore(root: str) -> list:
              "host/divsqrt-soak-c163840", "host/divsqrt-soak-c409", "host/divsqrt-soak-cfg", "host/soak-corpus/keep.txt",
              "host/soak-c.notes"]
     blanket = ["host/divsqrt-soak-c16384.log", "host/libcft-c16384-old.a"]
-    got = ignore_answers(root, products + clear + blanket)
+    shape = ["host/divsqrt-soak-c1234", "host/divsqrt-soak-c12345", "host/clause5-soak-c1234", "host/clause5-soak-c12345",
+             "host/soak-c1234/keep.txt", "host/soak-c12345/keep.txt"]
+    got = ignore_answers(root, products + clear + blanket + shape)
     bad = []
     if not got:
         return ["git answered nothing"]
@@ -434,12 +456,20 @@ def problems_ignore(root: str) -> list:
     for p in blanket:
         if got.get(p) and MINE.search(got[p]):
             bad.append(f"{p} is taken by this build's pattern {got[p]}")
+    for p in shape:
+        if p not in got:
+            bad.append(f"git gave no answer for {p}")
+        elif not (got[p] and MINE.search(got[p])):
+            bad.append(f"{p} has the shape of a product (the tool's name and four or five digits, no allowed size) and is "
+                       f"{'not ignored' if got[p] is None else 'ignored by ' + got[p]}, where the documented width is "
+                       "ignored by a pattern of this build")
     return bad
 
 
 def scratch_repo(base: str, name: str, gitignore: str):
-    """A repository in base/name holding only the given .gitignore. `git init` writes nothing outside the directory and
-    sets no configuration anywhere; no template is copied."""
+    """A repository in base/name holding only the given .gitignore. `git init` writes the scratch repository's own
+    .git/config and nothing outside the directory; it changes no global or system configuration, and with --template=
+    it copies no template."""
     d = os.path.join(base, name)
     os.makedirs(d)
     rc, out, err = sh(["git", "init", "-q", "--template=", d])
@@ -561,7 +591,9 @@ def group_ignore(base: str) -> None:
     bad = problems_ignore(ROOT)
     check("ignore: git ignores every product of all 16 sizes (binaries in both forms, archive, object directory), so a "
           "build leaves the next build id untracked=none, and no pattern of this build takes a name that only begins "
-          "like one (a .txt, a -notes/ directory, a -old name, six digits, three digits, no digits)", not bad,
+          "like one (a .txt, a -notes/ directory, a -old name, six digits, three digits, no digits), except the "
+          "documented width: the tool's name and four or five digits is ignored by this build's patterns whether or "
+          "not the size is allowed", not bad,
           "; ".join(bad)[:700])
     try:
         text = open(os.path.join(ROOT, ".gitignore"), encoding="utf-8").read()
@@ -741,15 +773,19 @@ def group_plants(base: str, state: dict) -> None:
         bad = problems_refuse(host)
         check("plants: a Makefile that lets 4097 through is caught by the refusals' check",
               any("SOAK_CHUNK='4097' was accepted" in b for b in bad), "; ".join(bad)[:300])
+    # the two guarded lines of `clean` as the Makefile has them (the shell test is the point of the second fix)
+    files_line = '\tfor f in $(SOAK_CHUNK_FILES); do if [ ! -d "$$f" ]; then rm -f "$$f"; fi; done\n'
+    dirs_line = '\tfor d in $(SOAK_CHUNK_DIRS); do if [ -d "$$d" ] && [ ! -L "$$d" ]; then rm -rf "$$d"; fi; done\n'
     # 5. clean that leaves the object directory
-    host = plant(base, "clean", [(mk, "\trm -rf $(SOAK_CHUNK_DIRS)\n", "\t@true\n")], None)
+    host = plant(base, "clean", [(mk, dirs_line, "\t@true\n")], None)
     if host:
         bad = problems_clean(host, pristine, DECOYS)
         check("plants: a clean that leaves the object directory is caught by the clean check",
               any("clean left" in b and "soak-c16384" in b for b in bad), "; ".join(bad)[:300])
     # 5b. the earlier globs put back (verifier VCK's finding at 318b597): the control above passed the same decoys
-    host = plant(base, "glob", [(mk, "\trm -f $(SOAK_CHUNK_FILES)\n\trm -rf $(SOAK_CHUNK_DIRS)\n",
-                                 "\trm -f divsqrt-soak-c[0-9]* clause5-soak-c[0-9]* libcft-c[0-9]*.a\n\trm -rf soak-c[0-9]*/\n")],
+    # (directories first here: the directory decoy named like a binary would stop an `rm -f` before the `rm -rf`)
+    host = plant(base, "glob", [(mk, files_line + dirs_line,
+                                 "\trm -rf soak-c[0-9]*/\n\trm -f divsqrt-soak-c[0-9]* clause5-soak-c[0-9]* libcft-c[0-9]*.a\n")],
                  None)
     if host:
         bad = problems_clean(host, pristine, DECOYS)
@@ -766,6 +802,20 @@ def group_plants(base: str, state: dict) -> None:
         check("plants: a clean that misses the size 65536 is caught (by the synthetic products of all 16 sizes: the "
               "tree's own build has three)", any("clean left" in b and "divsqrt-soak-c65536" in b for b in bad),
               "; ".join(bad)[:300])
+    # 5d. the unguarded `rm -rf` of 67fd3f6 put back (verifier VCK's (a)): it removes the regular file soak-c61440
+    host = plant(base, "rmrf", [(mk, dirs_line, "\trm -rf $(SOAK_CHUNK_DIRS)\n")], None)
+    if host:
+        bad = problems_clean(host, pristine, DECOYS)
+        check("plants: the unguarded `rm -rf` of the object directories put back is caught: it removes the regular file "
+              "soak-c61440 that is no directory (verifier VCK, 67fd3f6)",
+              any("clean removed what it did not make" in b and "'soak-c61440'" in b for b in bad), "; ".join(bad)[:400])
+    # 5e. the unguarded `rm -f` put back: it refuses the directory divsqrt-soak-c61440/ and make stops there
+    host = plant(base, "rmf", [(mk, files_line, "\trm -f $(SOAK_CHUNK_FILES)\n")], None)
+    if host:
+        bad = problems_clean(host, pristine, DECOYS)
+        check("plants: the unguarded `rm -f` of the binaries put back is caught: `make clean` stops on the directory "
+              "divsqrt-soak-c61440/ that has a binary's name", any("make clean exited" in b for b in bad),
+              "; ".join(bad)[:400])
     # 6. the stderr line printed at the defaults too
     host = plant(base, "line", [("tools/divsqrt_soak.c", "#if BATCH != 4096 || CFT_CHUNK != 4096", "#if 1")],
                  ["divsqrt-soak", "clause5-soak", "SOAK_CHUNK=4096", "soak-chunk"])
