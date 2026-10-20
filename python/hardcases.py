@@ -268,7 +268,8 @@ def gen(mode, idx):
 
 
 # ------------------------------------------------------------------------------------------------------------
-# the exact classification: written from the definitions, sharing nothing with the builders
+# the exact classification: written from the definitions; its arithmetic shares nothing with the builders, and
+# verify takes its operands from them (and, for a skipped F0 index, its divisor from f0_divisor)
 # ------------------------------------------------------------------------------------------------------------
 
 def decode(sp, bits):

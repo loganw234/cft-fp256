@@ -222,10 +222,12 @@ def test_f0_finds_every_closest_approach_and_only_those_at_small_precision(p):
     # reason a skip means "no such dividend", checked over the whole space at a size the brute force reaches.
     sp = _tiny_space(p)
     n_div = built = 0
+    seen = set()
     for stream in ("A", "D"):
         for jj in range(1 << (p - 3)):
             my = H.f0_divisor(sp, stream, jj)
-            assert my % 2 == 1
+            assert my % 2 == 1 and sp.P1 < my < sp.P and my not in seen, (stream, jj, my)
+            seen.add(my)
             b = H._enc(sp, sp.bias, my)
             sols = {(t, s): [] for t in (0, 1) for s in (0, 1)}
             for mx in range(sp.P1, sp.P):
@@ -246,7 +248,7 @@ def test_f0_finds_every_closest_approach_and_only_those_at_small_precision(p):
                 else:
                     assert want == [(got[0] & (sp.P1 - 1)) | sp.P1], (stream, jj, v)
                     built += 1
-    assert n_div == 1 << (p - 2)                        # every odd divisor
+    assert n_div == len(seen) == 1 << (p - 2)           # every odd divisor of the binade, each once
     assert 0.55 < built / (4 * n_div) < 0.85            # about 1 - (1 - ln 2) = 69% of constructions exist
 
 
