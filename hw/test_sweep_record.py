@@ -470,7 +470,7 @@ def group_export(tmp):
     rep = verify_lines(lines, None, False)
     check("the unsigned file verifies, with --allow-unsigned, as one run", (rep["slices"], rep["streams"], rep["clean"],
           len(rep["findings"]), rep["unsigned"], rep["run"]) == (9, 3, 11, 1, 12, "card-stress-test-1"), str(rep["slices"]))
-    check("a finding is not clean, and its cases are not counted as covered",
+    check("a finding is not clean, and its cases are not among the cases in clean records",
           rep["cases"] == sum(r["cases"] for r in flat if not S.is_finding(r)))
     red("unsigned records where signatures are required", "signature", verify_lines, lines)
 
@@ -855,7 +855,7 @@ def group_real(tmp, metrics):
     check("real: every record equals its raw leg, field by field (interval, counts, image, tile, run, rate, log, tree)", not bad, str(bad[:3]))
     total = sum(l["counts"]["cases"] for l in fin)
     rep = verify_lines(lines, None, False)
-    check(f"real: the cases covered, {rep['cases']:,}, are the sum of the raw legs' ({total:,}), and none is a finding",
+    check(f"real: the cases in clean records, {rep['cases']:,}, are the sum of the raw legs' ({total:,}), and none is a finding",
           rep["cases"] == total and rep["findings"] == [])
     doc = open(os.path.join(ROOT, "docs", "SWEEP-RECORDS.md"), encoding="utf-8").read()
     check("real: the document's example slice is the run's first slice, exported for the test's key A",

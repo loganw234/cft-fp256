@@ -332,6 +332,13 @@ applied here:
   false hole in the coverage, which only a replay or a second owner closes
   (rank 10). The honest statement of a coverage is "covered by K owners each
   replayed", and version 1 has one owner, unreplayed.
+- **that no one ran the golden model in software and reported the card's
+  identity** (section 6.6's second clause): a contributor can run it, slowly, and
+  sign a record that names the card's image. The study's defence is a rate above
+  the measured maximum for the operation and the tile count (6.6 says 1.5 times),
+  which refuses the fast fabrications, and that a slow, honest-looking one costs
+  the fabricator more than running the card (BELIEVED). Version 1 checks neither:
+  its `run` rule compares a record's rate only with its own cases and times.
 - **that the image named was on the card**: the driver hashed the file it passed
   to XRT and held it to its `SHA256SUMS`; nothing in the record shows what the
   card ran, and the tree the image's RTL came from is not in the record.
@@ -385,6 +392,9 @@ for a 60-hour run's 3,300 slices; `verify` 3.3 ms a slice.
 - The `build` record is required, and the item table is the exporting tree's:
   a run is exported from the tree it ran at, and `export` refuses a leg whose
   recorded expectations are not that catalog's.
+- The case total `verify` prints is the sum of the clean records' cases. Two
+  slices of one campaign that overlap count twice, and nothing refuses an
+  overlap or a gap: the fold (the study's rank 6) takes the union.
 - A resumed run's file is one run, as the driver names it: the same run id and
   device. Two runs given one id by the same key are not told apart.
 - `splice` and `device` are the only protection of a file's membership; there is
