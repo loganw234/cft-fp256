@@ -1182,8 +1182,8 @@ each of the tile's four fp64 lanes. The kernels compare values per lane but flag
 at a lane by itself only where the ORs differ, so a flag a defect drops on one operand among others
 that raise it is unseen in a batch: **MEASURED**, a library that drops INEXACT for the operands whose
 dropped bits are exactly 0...01 passes the whole `conv64to32-class` space in batches of 4,096 under all four
-attributes and fails the one index 68,152 (0x3ff0000000000001) alone; under rtz a fault in the sticky tree shows
-only in the flags, so the batch OR hides all of rtz's evidence for it. And an element goes to the tile's
+attributes and fails when the index 68,152 (0x3ff0000000000001) is run alone; under rtz a fault in the sticky tree can show
+only in the flags (the planted one showed nothing under rtz), so the batch OR would hide all of rtz's evidence for it. And an element goes to the tile's
 lane (its place in a pass) mod 4, the index space puts pattern t at index mod 4 = t mod 4, so a whole-space run
 in batches meets each pattern in one lane: **MEASURED**, a fault planted in lane 2 of `cft_rint` that only the
 operand with fraction field 0x20 meets passes a run that does not rotate and fails the default. So
@@ -1244,7 +1244,7 @@ class level does not name (the i32 and u32 sources of cvtfrom, which `cvtfrom64-
 `docs/ARCHITECTURE.md` and the lane an element takes from the staging order (BELIEVED); a build with another count takes `-DCLS_LANES`.
 
 The tool's side is tested by `python3 hw/test_c5_class.py` (POSIX with make and a C compiler, a minute and a half)
-and the enumerator's by `python -m pytest python/tests/test_c5_class_enum.py` (seven seconds): the dump equal to the reference
+and the enumerator's by `python -m pytest python/tests/test_c5_class_enum.py` (eight seconds): the dump equal to the reference
 for every index; every mode and attribute over its whole space and over 968 slices of odd alignment; the refusals; a sabotage control
 for each; and plants, each red at the check written for it - a slice counted one index short (the cover rule), a mode that skips every index
 (the cover rule passes it; the rule that a class item compare something refuses it), a wrong class selector (the dump comparison), a skip
