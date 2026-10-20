@@ -119,6 +119,13 @@ host/cpp-api-test20
 host/device-test
 host/divsqrt-soak
 host/clause5-soak
+# the soak tools at another pass size (host/Makefile, SOAK_CHUNK=n): per n
+# the two binaries (the .exe forms are host/*.exe above), the library
+# archive (host/*.a above) and its object directory. A build of them that
+# left these visible would make every later build id untracked=present.
+host/divsqrt-soak-c[0-9]*
+host/clause5-soak-c[0-9]*
+host/soak-c[0-9]*/
 host/mpfr-check
 host/mp-err-check
 host/cft-collatz

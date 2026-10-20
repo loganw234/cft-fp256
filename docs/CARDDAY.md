@@ -1423,6 +1423,100 @@ the random and exhaustive modes of another tree's tool (`git archive REV host | 
 compared byte for byte; `python/tests/test_hardcases.py` holds the generator and the golden
 model's answers on its cases to an exact arbiter, and the builders to exhaustion at small precision.
 
+### The soak at a larger pass size (added 2026-10-20): how to build it, what it prints, what it gives up
+
+**Why.** `cft_div`, `cft_sqrt`, `cft_rint` and `cft_scaleb` are composed of `cft_run` passes over
+chunks of at most `CFT_CHUNK` elements (host/include/cft_config.h, 4096), and each soak tool hands
+the library `BATCH` operands a call (4096 too: host/tools/divsqrt_soak.c, host/tools/clause5_soak.c).
+On the card a pass is a staged run, so the passes set the rate. Logan, 2026-10-20: "Build time
+override for now with future plans to make adjustable more easily" (docs/ROADMAP.md, "Decided
+2026-10-20"). This is the override; the adjustable form is not built. MEASURED, the lead's,
+2026-10-20 (`Data/runs/2026-10-12-math-round/box/batch-chunk/`, which is not in the repository):
+on one tile of the quad at revision 8, BATCH and CFT_CHUNK both 16384 ran rint32 2.81 times as
+fast as at 4096, rint64 2.00, scaleb32 1.25 and division and square root 1.13 to 1.22, with 0
+mismatches; BATCH alone at 16384 changed nothing, since each call was still four passes.
+
+**Build it.**
+
+    make -C host SOAK_CHUNK=16384 soak-chunk
+    make -C host XRT=1 XRT_ROOT=/opt/xilinx/xrt SOAK_CHUNK=16384 soak-chunk   # to open an artifact
+
+makes `divsqrt-soak-c16384` and `clause5-soak-c16384` (`.exe` where the platform has it). Each is
+compiled `-DCFT_CHUNK=16384 -DBATCH=16384` and linked against `libcft-c16384.a`, a library of its
+own: the library's sources compiled `-DCFT_CHUNK=16384` into the directory `soak-c16384/`. XRT=1,
+XRT_ROOT and `C5DEFS` act as they do for `divsqrt-soak` and `clause5-soak`. **The default
+`libcft.a`, `divsqrt-soak`, `clause5-soak` and every other tool are not touched**: nothing here is
+a prerequisite of `all`, sizes sit side by side, `make -C host clean` removes the products of
+every size by name pattern and no more, and .gitignore ignores them, so a build leaves the next
+build id `untracked=none`. **Refused by name**, at parse time, when one of these goals is asked
+for: no `SOAK_CHUNK` or an empty one; a value that is not one plain decimal number that is a
+positive multiple of 4096 up to 65536 (`4097`, `0x4000`, `016384`, `65537` and `16384 8192` are
+refused, each message giving the value); and a goal that names another size than `SOAK_CHUNK`
+does. The 65536 is a bound this build sets, not a limit found in the library (READ: the scratch is
+`malloc` of `CFT_CHUNK` times the element size, host/src/divsqrt.c and host/src/clause5.c; no
+index there is narrower than `size_t`; the only check on `CFT_CHUNK` is that it is at least 1,
+host/include/cft_config.h; the remote frame cap is 1 GiB and the kernel's `n` argument is 64 bits).
+Nothing above 16384 has been run on the card.
+
+**What the tool says.** When BATCH or CFT_CHUNK is not 4096 a tool prints a second line on stderr
+after its `soaking the ... backend` line: `soaking with BATCH 16384 and CFT_CHUNK 16384 (the
+defaults are 4096)`. The backend line is untouched, because hw/card_stress_lib.py matches it with
+anchors. A default build compiles the new line out and prints nothing more, and its object file
+is byte for byte the one built before (MEASURED, gcc 11.4 with the Makefile's flags). Both numbers
+are the TOOL's own compile-time values, so they are the library's pass size only when the two
+match, which these targets guarantee; a hand build with `-DBATCH=16384` alone prints both and is
+the lead's first experiment, the one that changed nothing.
+
+**What it gives up.** Read before comparing a chunked run with a default one.
+
+1. **Flags are compared per batch** (the OR over a call; the tools' headers), so a flag defect on
+   one operand among many that raise the same flag is hidden, and a larger batch is more operands
+   to hide among. With p the share of operands that raise a flag and independence assumed, a
+   batch of n has another operand raising it with probability 1 - (1 - p)^(n - 1) (COMPUTED): for
+   p = 1/10,000 that is 34% at 4096 and 81% at 16384, for p = 1/100,000 4% and 15%. Parcel CL
+   measured the effect itself (docs/VALIDATION.md, its entry: a dropped INEXACT that passes in
+   batches and fails alone). **The lane-exact class items stay as they are**: the `*-class` modes
+   run an operand a call (`CLS_BATCH`, 1) whatever BATCH is. A chunked soak is for throughput over
+   the value comparison, and the per-batch flag comparison is weaker in it.
+2. **A random scaleB slice's number of cases follows BATCH.** In `scaleb32` and `scaleb64`
+   `count` is cases and a batch takes n = min(count, BATCH) operands against the list's 17 or 27
+   exponents, so the cases of a slice are `count` rounded up by whole batches: `scaleb32 100000
+   5 rne` ran 139,264 cases at 4096 and 278,528 at 16384 (MEASURED). A count of 17 (or 27) times
+   32,768 is the same at both. Every other random mode takes `count` as operands.
+3. **The same seed can mean another operand set in `cvtfrom32` and `cvtfrom64`** (random: they draw
+   a full batch for each of four source types, clause5_soak.c; READ, not run; the case counts do
+   agree). The other modes draw the same sequence at any BATCH.
+4. **A call of a few operands is slower.** MEASURED (200,000 calls, two repetitions): `cft_rint`
+   at fp64 over 1 operand 767 and 837 ns at 4096, 4,320 and 5,620 ns at 16384; `cft_div` over 1
+   operand 16.0 and 18.6 microseconds against 21.3 and 21.8; `strace -c` counts `brk` calls at
+   4,003 against 21,001 over 4,000 rint and 1,000 div calls (each composed call mallocs its
+   scratch; READ, clause5.c's rint takes three buffers of CHUNK x 8 bytes and one of CHUNK bytes
+   at fp64, 410 KB a call at 16384 and 102 KB at 4096). On the card a call is several passes of
+   about 260 microseconds (BELIEVED), so this is under 1% there; on the software backend CL's
+   class modes took 4.5 s at the default and 11.6 s with the chunked tools.
+5. **A sabotaged run's counts follow the calls.** `CFT_SOAK_SABOTAGE=1` flips the first result of
+   every library call, so the value-mismatch count of a mode that checks a call whole is about 3.8
+   times smaller at 16384 (median over 73 of the sweep's 90 items), and in the modes that re-run a
+   failing batch an element at a time it is larger (11 items: a batch whose first result is a NaN
+   is not seen to fail, and the larger batch loses fewer of them). **Both sizes FAIL in every
+   one** (118 of 118), and the flag-mismatch count is 0 at both in every one: the sabotage touches
+   no flag, so it cannot show item 1.
+
+**Evidence** (MEASURED, software backend, WSL cft2204, niced): the driver's 90 sweep items at two
+slices each, HC's three hard-case modes at the start, middle and end of every segment under every
+attribute, and CL's five class modes over their whole spaces and a third of them, 352 comparisons
+of a default build and a `SOAK_CHUNK=16384` one: **352 of 352 verdict lines identical** (cases,
+value and flag mismatches, encodings, skipped; all with 0 mismatches), stdout byte for byte, and
+the chunked stderr the default's with the one line added; and 118 sabotaged comparisons that all
+fail (above). `python3 host/tests/soak_chunk_check.py --baseline-tree DIR` holds the build: the
+refusals by name, the dry run of every recipe, the real build at 16384 and 8192, a probe linked
+against each archive with `--wrap=cft_run` that finds the pass size the library really has
+(largest pass 16384, 8192 and 4096, for division, square root, rint and scaleB), the stderr
+lines, `clean`, `.gitignore`, the default tools' output and objects unchanged against a baseline,
+and six planted breakages each caught by the check written for it. **Not done:** the stress driver
+does not use these tools yet (hw/ is parcel DR3's), and the pass size is not adjustable at run
+time.
+
 ### Failure policy, processes, and what it guarantees
 
 - **A failing leg** keeps its whole log, says so in its record, and the run goes on. So does an

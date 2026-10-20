@@ -11,6 +11,10 @@
 #   make profiles-check  compile the library at every build profile
 #                        and every cft_config.h switch alone, which
 #                        nothing that builds the default one does
+#   make SOAK_CHUNK=16384 soak-chunk
+#                        the two soak tools at another pass size, in a
+#                        build of their own beside the default ones (the
+#                        block after the soak targets says how)
 #   make examples-lang   the C/Python identity check again, for the
 #                        optional toolchains: C++, Julia, Rust, Go, C#
 #                        and R are each run and diffed if present,
@@ -839,6 +843,123 @@ mp-err-check: mp-err-check$(EXE)
 cft-bench-peers: cft-bench-peers$(EXE)
 .PHONY: divsqrt-soak clause5-soak mpfr-check mp-err-check cft-bench-peers
 endif
+
+# ====================================================================
+# The soak tools at another pass size (parcel CK, 2026-10-20)
+#
+# cft_div, cft_sqrt, cft_rint and cft_scaleb work in passes of at most
+# CFT_CHUNK elements (include/cft_config.h, 4096), and each soak tool
+# hands the library BATCH operands a call (4096 too). On a card a pass is
+# a staged run, so a bigger pair is more work to a round trip. It is a
+# BUILD choice because both numbers are compile-time, and a build of its
+# own so that the default libcft.a and tools stay what they are:
+#
+#   make SOAK_CHUNK=16384 soak-chunk
+#       divsqrt-soak-c16384 and clause5-soak-c16384 (+ $(EXE)), each
+#       compiled -DCFT_CHUNK=16384 -DBATCH=16384 and linked against
+#       libcft-c16384.a, a library of its own: the same sources compiled
+#       -DCFT_CHUNK=16384 into the directory soak-c16384/. XRT=1,
+#       XRT_ROOT and C5DEFS work as they do for the default soak targets.
+#
+# Refused by name, at parse time, when a goal below is asked for: no
+# SOAK_CHUNK, or one that is not a positive multiple of 4096 up to 65536
+# (a plain decimal: 016384 and 0x4000 are refused, since the former is
+# an octal constant to the compiler). 65536 is a bound set here, not a
+# limit found in the library: its scratch is malloc, sized
+# CFT_CHUNK * element size (host/src/divsqrt.c, clause5.c), and the
+# remote frame cap is 1 GiB.
+#
+# Nothing here is a prerequisite of `all`. `clean` removes the products
+# of every pass size, found by name pattern, and no more. Products are in
+# .gitignore, or a build would mark the next build id untracked=present.
+# ====================================================================
+SOAK_CHUNK       ?=
+SOAK_CHUNK_OK    := 4096 8192 12288 16384 20480 24576 28672 32768 \
+                    36864 40960 45056 49152 53248 57344 61440 65536
+SOAK_CHUNK_GOALS := $(filter soak-chunk divsqrt-soak-c% clause5-soak-c% \
+                    libcft-c%.a,$(MAKECMDGOALS))
+SOAK_CHUNK_VALID := $(if $(filter 1,$(words $(SOAK_CHUNK))),$(filter \
+                    $(SOAK_CHUNK_OK),$(SOAK_CHUNK)))
+
+ifneq ($(SOAK_CHUNK_GOALS),)
+  ifeq ($(strip $(SOAK_CHUNK)),)
+    $(error SOAK_CHUNK is unset or empty, and $(firstword $(SOAK_CHUNK_GOALS)) builds a soak tool at the pass size it names: give a positive multiple of 4096 no greater than 65536, as in `make SOAK_CHUNK=16384 soak-chunk`)
+  else ifeq ($(SOAK_CHUNK_VALID),)
+    $(error SOAK_CHUNK=$(SOAK_CHUNK) is refused: it must be one value, a positive multiple of 4096 no greater than 65536, in plain decimal digits (4096 8192 12288 ... 65536))
+  endif
+  SOAK_CHUNK_MINE := soak-chunk libcft-c$(SOAK_CHUNK).a \
+                     divsqrt-soak-c$(SOAK_CHUNK) divsqrt-soak-c$(SOAK_CHUNK)$(EXE) \
+                     clause5-soak-c$(SOAK_CHUNK) clause5-soak-c$(SOAK_CHUNK)$(EXE)
+  ifneq ($(filter-out $(SOAK_CHUNK_MINE),$(SOAK_CHUNK_GOALS)),)
+    $(error $(firstword $(filter-out $(SOAK_CHUNK_MINE),$(SOAK_CHUNK_GOALS))) is not a target of SOAK_CHUNK=$(SOAK_CHUNK): the pass size is named by SOAK_CHUNK, and a goal that names another is refused rather than built at the wrong one)
+  endif
+endif
+
+ifneq ($(SOAK_CHUNK_VALID),)
+SOAK_DIR := soak-c$(SOAK_CHUNK)
+SOAK_LIB := libcft-c$(SOAK_CHUNK).a
+SOAK_OBJ := $(addprefix $(SOAK_DIR)/,$(OBJ))
+SOAK_DIV := divsqrt-soak-c$(SOAK_CHUNK)$(EXE)
+SOAK_C5  := clause5-soak-c$(SOAK_CHUNK)$(EXE)
+
+.PHONY: soak-chunk
+soak-chunk: $(SOAK_DIV) $(SOAK_C5)
+
+$(SOAK_OBJ): $(HDRS)
+
+# The default object rules' own command lines, with the pass size added
+# and the object in its own directory.
+$(SOAK_DIR)/%.o: %.c
+	@mkdir -p $(@D)
+	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) $(XRTDEF) $(IDDEF) \
+	  -DCFT_CHUNK=$(SOAK_CHUNK) -c $< -o $@
+
+$(SOAK_DIR)/%.o: %.cpp
+	@mkdir -p $(@D)
+	$(CXX) $(CXXSTD) $(CFLAGS) $(WARN) $(INC) $(XRTINC) \
+	  -DCFT_CHUNK=$(SOAK_CHUNK) -c $< -o $@
+
+# The build id, as the default build gives it: src/build_id.c finds the
+# header through its own directory, so the object's place does not matter.
+$(SOAK_DIR)/src/build_id.o: $(BUILD_ID_H)
+$(SOAK_DIR)/src/build_id.o: IDDEF := -DCFT_BUILD_ID_H='"../$(BUILD_ID_H)"'
+
+# Removed first: ar rcs only adds and replaces, and an archive that kept
+# an earlier build's member (backend_xrt.o of an XRT=1 build) would be a
+# library nobody asked for.
+$(SOAK_LIB): $(SOAK_OBJ)
+	rm -f $@
+	$(AR) rcs $@ $^
+
+$(SOAK_DIV): tools/divsqrt_soak.c $(SOAK_LIB)
+	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) -fno-math-errno \
+	  -frounding-math -DCFT_CHUNK=$(SOAK_CHUNK) -DBATCH=$(SOAK_CHUNK) \
+	  tools/divsqrt_soak.c $(SOAK_LIB) -o $@ \
+	  $(XRTLIBS) $(LDLIBS) -lm
+
+$(SOAK_C5): tools/clause5_soak.c $(SOAK_LIB)
+	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) -fno-math-errno \
+	  -frounding-math -DCFT_CHUNK=$(SOAK_CHUNK) -DBATCH=$(SOAK_CHUNK) \
+	  $(C5DEFS) tools/clause5_soak.c $(SOAK_LIB) -o $@ \
+	  $(XRTLIBS) $(LDLIBS) -lm
+
+ifneq ($(EXE),)
+divsqrt-soak-c$(SOAK_CHUNK): $(SOAK_DIV)
+clause5-soak-c$(SOAK_CHUNK): $(SOAK_C5)
+.PHONY: divsqrt-soak-c$(SOAK_CHUNK) clause5-soak-c$(SOAK_CHUNK)
+endif
+endif
+
+# Outside the conditional on purpose: a clean needs no SOAK_CHUNK, and
+# removes what any pass size built. Binaries (the .exe forms included by
+# the trailing *), archives and object directories, each by its own
+# name pattern; the `[0-9]` keeps it to products, and the `/` after the
+# directory pattern to directories.
+clean: clean-soak-chunk
+clean-soak-chunk:
+	rm -f divsqrt-soak-c[0-9]* clause5-soak-c[0-9]* libcft-c[0-9]*.a
+	rm -rf soak-c[0-9]*/
+.PHONY: clean-soak-chunk
 
 # MPFR parity: the third oracle, and the only independent one that
 # reaches fp128/fp256. Needs libmpfr/libgmp (mingw64 carries them as

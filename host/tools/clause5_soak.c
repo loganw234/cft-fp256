@@ -166,7 +166,16 @@
 
 #pragma STDC FENV_ACCESS ON
 
+/* Operands a call: 4096, unless the build says otherwise. host/Makefile's
+ * SOAK_CHUNK targets compile this tool with -DBATCH=<n>, and the library it
+ * links with -DCFT_CHUNK=<n>, the same n, so that one call is one pass.
+ * Flags are compared per batch, so a larger BATCH compares them over more
+ * operands at once; the class modes' own call size is CLS_BATCH, below, and
+ * stays 1 whatever BATCH is. main names BATCH and CFT_CHUNK on stderr when
+ * either is not 4096. */
+#ifndef BATCH
 #define BATCH 4096
+#endif
 
 static cft_device *dev;
 static uint64_t mismatches, flag_mismatches, cases, skipped;
@@ -2946,6 +2955,15 @@ int main(int argc, char **argv)
         fprintf(stderr, "soaking the %s backend%s%s\n",
                 art ? "DEVICE" : "software",
                 art ? ": " : "", art ? art : "");
+#if BATCH != 4096 || CFT_CHUNK != 4096
+        /* A build that moved the call size or the library's pass size says
+         * so, on a line of its own: the line above is parsed by
+         * hw/card_stress_lib.py and stays as it was, and a default build
+         * compiles this out and prints nothing more. */
+        fprintf(stderr, "soaking with BATCH %lu and CFT_CHUNK %lu "
+                "(the defaults are 4096)\n",
+                (unsigned long)BATCH, (unsigned long)CFT_CHUNK);
+#endif
     }
     fesetround(FE_TONEAREST);
 
