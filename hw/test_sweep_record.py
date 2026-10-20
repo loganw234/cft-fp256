@@ -12,8 +12,11 @@
            left out, a resume, records of types the exporter does not know) exported, signed and
            verified; the exporter's refusals
   keys     key files, the keyring, the device pseudonym, a key inside a working tree
-  domain   a certificate's signature and a record's cannot stand for each other, both ways, on the
-           committed certificate
+  domain   a certificate's signature and a record's, on the committed certificate and a throwaway key:
+           the certificate's own signature in a record line is `signature`; a certificate-domain
+           signature over the record's own id is `signature-domain`; a record-domain signature over
+           the certificate's body hash is refused `signature` by the certificate reader; and, as a
+           function call only, the committed signature over that hash given as an id is `signature-domain`
   plants   one defect each put into a signed file, and the refusal it must draw, by name; and the
            verifier without a check, which lets its plant through
   real     (needs --metrics) the same on a copy of a real run's metrics.jsonl, every field read back
@@ -650,16 +653,28 @@ def group_domain(tmp):
               e.name == "signature", e.name)
     check("control: the same key's certificate-domain signature over that hash is accepted",
           cert2.check_signature_file(data, cert2.signature_file(seed, data)) == pub.hex())
-    # a certificate's signature, taken for a record's
+    # a certificate's signature in a record FILE. The committed signature signs the certificate's body hash, so on a record
+    # line, whose id is the hash of its own bytes, it verifies under neither domain: `signature`, not `signature-domain`
     key_hex, _cert_hex, sig_hex = cert2.read_signature_file(sigfile)
+    lines = export(metrics_file(tmp), public=pub)[1]
+    certsig = lambda o: o.update(sig={"alg": "ed25519", "key": key_hex, "sig": sig_hex})
+    red("a record line whose sig is the committed certificate's key and signature, with the record's own id (a file)",
+        "signature", verify_lines, [lines[0], edit(lines[1], certsig)] + lines[2:])
+    # a certificate-domain signature over the record's own id: this is what `signature-domain` is, in a file
+    signed = export(metrics_file(tmp), signer=K["signer_a"])[1]
+    certdomain = lambda o: o["sig"].update(sig=ed25519.sign(seed, cert2.signature_message(o["id"])).hex())
+    check("control: the same file with the key's record-domain signatures verifies", verdict(signed, K["ring_a"]) == "ok")
+    red("a record line whose sig is the key's certificate-domain signature over the record's own id (a file)",
+        "signature-domain", verify_lines, [signed[0], edit(signed[1], certdomain)] + signed[2:], K["ring_a"])
+    # a function call only: no file has a record whose id is the certificate's body hash (that would be a SHA-256 preimage)
     rec = {"id": h, "sig": {"alg": "ed25519", "key": key_hex, "sig": sig_hex}, "run": {"device": S.device_of(bytes.fromhex(key_hex))}}
-    red("the committed certificate's own signature, taken for a record's signature over its body hash as an id",
+    red("check_signature, given the certificate's body hash as the id (a value no file can have): the committed signature",
         "signature-domain", S.check_signature, rec, None)
     mine = {"id": h, "sig": {"alg": "ed25519", "key": pub.hex(), "sig": ed25519.sign(seed, S.TAG_RECORD + bytes.fromhex(h)).hex()},
             "run": {"device": S.device_of(pub)}}
     check("control: a record-domain signature over the same 32 bytes verifies as a record's", refusal(S.check_signature, mine, None) is None)
     mine["sig"]["sig"] = ed25519.sign(seed, cert2.signature_message(h)).hex()
-    red("the key's own certificate-domain signature over the same 32 bytes, taken for a record's", "signature-domain",
+    red("check_signature, the key's certificate-domain signature over the same 32 bytes", "signature-domain",
         S.check_signature, mine, None)
 
 

@@ -165,12 +165,21 @@ caught; a float or a null is not in version 1's form at all (`form`).
 signature is over `cft-signature 1`, a NUL and the body hash
 (`docs/CERTIFICATES.md`, "The detached signature"): two messages that differ in
 their first bytes and their length, so that neither signature verifies as the
-other, even for the same 32 bytes. The test shows both refusals on the
-committed certificate `certificates/signed-fp64/signed-fp64.cert`: the
-certificate's own signature, taken for a record's signature over its body hash
-as an id, is refused `signature-domain`; and a record-domain signature over that
-hash, written into a signature file for the certificate, is refused
-`signature` by the certificate reader.
+other, even over the same 32 bytes. The test shows it on the committed
+certificate `certificates/signed-fp64/signed-fp64.cert` and a throwaway key:
+- the certificate's own signature, written as the `sig` of a record line with
+  that record's own id, gives `signature` from `verify`: it signs the
+  certificate's body hash, which is not that id;
+- a signature made under the certificate's domain over the record's own id gives
+  `signature-domain`, and the same key's record-domain signature over that id
+  verifies;
+- the other way, the key's record-domain signature over the certificate's body
+  hash, written into a signature file for the certificate, is refused
+  `signature` by the certificate reader;
+- as a function call only, `check_signature` given the certificate's body hash
+  as the id, which no file can have (a record's id is the SHA-256 of its own
+  bytes), gives the committed signature `signature-domain`. That shows the two
+  domains separating the same 32 bytes under one key, and no more.
 
 **The device pseudonym** is the first 16 hex digits of SHA-256 over
 `cft-sweep-device 1`, a NUL and the 32-byte public key. It is made from the key
