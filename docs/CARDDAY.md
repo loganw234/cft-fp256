@@ -1136,7 +1136,8 @@ section 4.2). One modular inverse builds one: for an odd divisor `my` the divide
 `mx 2^k = +-1 (mod my)` is the closest a quotient can come to a midpoint (k = p) or to a
 representable number (k = p - 1); square root has the same structure in the squares of odd integers.
 A division that computes 40 guard bits and ignores the remainder fails on 25 per cent of the
-cases the generator builds at fp64 and on none of as many random draws; and a copy of the library
+closest-approach-to-a-midpoint cases the generator builds at fp64 and on none of as many random
+draws; and a copy of the library
 whose guard test is blind to a quotient that close to a midpoint fails 485,236 of the 1.9 million
 cases of one slice of `div64-hard` under rne, while 2,000,000 of the random mode's draws pass it
 (MEASURED, `hw/test_divsqrt_hard.py`, plants).
@@ -1159,9 +1160,9 @@ root one. Inside a segment an index is 4j + v: j picks the base and v one of fou
 
 **What a skip is.** An index whose construction yields no operand pair; all k of its slots are
 skipped. Only two families skip: F0, for a divisor that has no dividend at |N| = 1 for the index's
-target and sign in either quotient binade (30.7 per cent of the keyed stream, 1 - ln 2 for uniform
-divisors; almost none near 1.0, exactly half near 2.0), and S0, for a rho with no root in range
-for the index's parity (64.6 per cent). The whole spaces, counted by `hard-count` (the builders
+target and sign in either quotient binade (at fp64 30.7 per cent of the keyed stream, 1 - ln 2
+for uniform divisors; 4 slots of 33.5 million within 2^22 ulps of 1.0 and exactly half within 2^22
+ulps of 2.0), and S0, for a rho with no root in range for the index's parity (64.6 per cent). The whole spaces, counted by `hard-count` (the builders
 alone; MEASURED): div32-hard 64,346,592 cases and 20,596,560 skipped slots, div64-hard
 812,489,184 and 346,253,600, sqrt64-hard 1,745,752 and 2,710,696. (The prototype's window
 mx >= my skips about 61 per cent of odd divisors; these modes use the sampler's convention, the
