@@ -1252,6 +1252,138 @@ filter too eager (the independent count), a sticky tree without the lowest dropp
 the random mode's draws, 100 times as many, do not), a defect only a flag shows and one only a lane shows (both caught by the default build and missed by the builds the knobs make). `--baseline-tree DIR` compares
 the random and the exhaustive modes byte for byte with another tree's.
 
+### The hard-case division and square-root items: what they are, what a skip is, how to run one
+
+Three more modes of the divsqrt soak (host/tools/divsqrt_soak.c, the section "Hard cases":
+`div32-hard`, `div64-hard`, `sqrt64-hard`) take `<lo> <hi> <attribute>` over a deterministic **index
+space** of constructed operands and call the same batch kernel as the random modes of the
+operation, so the oracle (the host CPU's own division and square root in the prevailing rounding
+mode), the flag discipline and the sabotage control are theirs. They exist because a sampler cannot
+reach what they hold: a quotient of two p-bit significands comes within 2^-p of an ulp of a rounding
+boundary with probability about ln 2 / 2^(p-1) a draw, 8 x 10^-8 at fp32 and 1.5 x 10^-16 at fp64
+(a stress-run item of 1.45 x 10^10 draws expects 2.2 x 10^-6 of them: docs/studies/SWP-A-coverage.md
+section 4.2). One modular inverse builds one: for an odd divisor `my` the dividend with
+`mx 2^k = +-1 (mod my)` is the closest a quotient can come to a midpoint (k = p) or to a
+representable number (k = p - 1); square root has the same structure in the squares of odd integers.
+A division that computes 40 guard bits and ignores the remainder fails on 25 per cent of the
+closest-approach-to-a-midpoint cases the generator builds at fp64 and on none of as many random
+draws; and a copy of the library
+whose guard test is blind to a quotient that close to a midpoint fails 485,236 of the 1.9 million
+cases of one slice of `div64-hard` under rne, while 2,000,000 of the random mode's draws pass it
+(MEASURED, `hw/test_divsqrt_hard.py`, plants).
+
+**The space.** A mode is a list of segments, smallest first (`divsqrt-soak hard-space MODE` prints
+it). An index belongs to one segment and makes **k slots**: for division the four sign
+combinations of one operand pair (slot s is the sign of a plus twice the sign of b), for square
+root one. Inside a segment an index is 4j + v: j picks the base and v one of four variants of it.
+
+| segment | what its indices build | div32-hard | div64-hard | sqrt64-hard |
+|---|---|---|---|---|
+| F3a | ties in the subnormal strip: b = 2^(s+3) and an a for which the exact quotient is an odd multiple of half the smallest subnormal, s = 1..p places below the smallest normal, in four bit patterns | 96 | 212 | - |
+| F3b | powers of two across the quotient exponent's whole range (every strip, the core, overflow): b = 2^m with a = 2 - ulp or 1.5, and a = 2^m with b = 2 - ulp or 1.5 | 2,028 | 16,364 | - |
+| F2 | b = 1 + k ulp and b = 1 - k ulp, k = 1..65,536, with a = 1.0 or 2 - ulp; j = 0, a = 1.0, b = 1 - ulp is the family that broke the Markstein finish | 262,144 | 262,144 | - |
+| F1 | exact quotients a = ob oq, b = ob (odd parts below 2^((p-1)/2), keyed), in four exponent classes, one of them with an exact subnormal quotient | 4,194,304 | 4,194,304 | - |
+| F0 | closest approach to a midpoint or a representable number, above or below, for odd divisors from the bottom of the binade (A), from the top (D) and, at fp64, keyed with the top 12 fraction bits taking every value once in 4,096 divisors (K) | 8,388,608 + 8,388,608 | 8,388,608 + 8,388,608 + 268,435,456 | - |
+| S1 | sqrt(1 + k ulp) for odd k, and x = 4 - k ulp, 1 - k ulp, 4^255 (1 + k ulp) | - | - | 262,144 |
+| S0 | the inputs nearest the squares of midpoints: the 2-adic square roots of rho = 8m + 1 (1, -7, 9, -15, ...) in both binade parities, at distance |rho| 2^-2p of the root's grid | - | - | 4,194,304 |
+| **indices** (k) | | **21,235,788** (4) | **289,685,696** (4) | **4,456,448** (1) |
+
+**What a skip is.** An index whose construction yields no operand pair; all k of its slots are
+skipped. Only two families skip: F0, for a divisor that has no dividend at |N| = 1 for the index's
+target and sign in either quotient binade (at fp64 30.7 per cent of the keyed stream, 1 - ln 2
+for uniform divisors; 4 slots of 33.5 million within 2^22 ulps of 1.0 and exactly half within 2^22
+ulps of 2.0), and S0, for a rho with no root in range for the index's parity (64.6 per cent). The whole spaces, counted by `hard-count` (the builders
+alone; MEASURED): div32-hard 64,346,592 cases and 20,596,560 skipped slots, div64-hard
+812,489,184 and 346,253,600, sqrt64-hard 1,745,752 and 2,710,696. (The prototype's window
+mx >= my skips about 61 per cent of odd divisors; these modes use the sampler's convention, the
+dividend doubled when it is below the divisor, which reaches both quotient binades.)
+
+**What it must print.** The first line of the log is `soaking the DEVICE backend: <xclbin>` (or
+`soaking the software backend`); the last is the exhaustive modes' line,
+
+    div64-hard rne: 812489184 cases, 0 value mismatches, 0 flag mismatches, 289685696 encodings, 346253600 skipped
+
+and exit status 0. E counts **indices** (the clause's word is the driver's), every (index, slot)
+is compared, a case, or skipped, so cases + S = k x E; the cases are not a function of the slice's
+bounds, and `divsqrt-soak hard-count MODE LO HI` prints a slice's cases and skipped slots by
+segment, then the longest run of consecutive skipped indices, without the library (60 s for the
+whole of div64-hard). A slice of 64 or more indices in which every index skipped is **refused by
+name** (exit 2, no verdict line): unlike `cvtto32-all`'s all-NaN slices, which are a pass, a run
+of skips that long here means the construction is broken - the longest run in the whole spaces is
+2 (div32-hard and div64-hard) and 5 (sqrt64-hard; MEASURED by `hard-count`), so a correct tool
+never meets the rule. Refused by name too: a range that is empty, reversed, past the space or not a number,
+rmm under division (the ties of division are in the subnormal strip, which has no host rounding
+mode), and a build whose compiler has no 128-bit integer. Every F0 case is checked in exact
+128-bit integers as it is built (|N| = 1 and its sign) and every S0 case (u^2 = rho mod 2^s); a
+failure refuses the run, by name. A disagreement lists operands (`MISMATCH ... a=0x... b=0x...`).
+
+**What is proved about the cases, and what is not.** `python/hardcases.py verify` decodes the
+operand bits and classifies each case in exact integers (Fractions and isqrt), sharing nothing with
+the builders: F0 has |N| = 1 and the designed sign (and its skips are genuine, by a second
+construction), S0 has its nearest input rho 2^-2p from the square of a midpoint, S1 has |D| = k^2,
+F1's quotient is exact, F2's operands are the designed ones, F3a's quotient is a half-integer of the
+subnormal grid s places down, F3b's operand exponents differ by the designed quotient exponent and
+its binade is exact. F2 and F3b are structural: their distance to a boundary is computed and not
+claimed small. ARGUED at fp64, MEASURED by exhaustion at small precision
+(`python/tests/test_hardcases.py`: F0 over every odd divisor and dividend at p = 9 and 10, S0 over
+every input of [1, 4) at p = 10, 12 and 14): that F0 builds every dividend at |N| = 1 and only
+those, that S0 lists every input at a given distance (the roots of u^2 = rho mod 2^s are four, which
+the construction takes whole), and that sqrt(1 + ulp) and the predecessor of 4 are the only inputs
+at distance 1 (the next distances are 7, 9, 15, 17, 23, as at fp32 in the study).
+
+| item (per attribute) | indices | k | cases | one quad (COMPUTED) | software backend, one process (MEASURED) |
+|---|---|---|---|---|---|
+| `div32-hard` (four) | 21,235,788 | 4 | 64,346,592 | 8.0 to 8.5 s | rne run whole: 259 s (0.25 M cases a second), 0 mismatches |
+| `div64-hard` (four) | 289,685,696 | 4 | 812,489,184 | 132 to 137 s | slices: the four structural segments (4,473,024 indices) 72 s under rne; the first 2^20 indices of F0A, F0D and F0K 9 to 21 s each under all four; the whole item about an hour a process (COMPUTED from 0.20 to 0.25 M cases a second) |
+| `sqrt64-hard` (five) | 4,456,448 | 1 | 1,745,752 | 0.3 s | whole: 9.7 to 11.7 s under each of the five |
+
+The quad figures are cases over four times the median rate of a tile job on the quad in the
+2026-10-16 to 19 run (docs/studies/swp-a/stress-final-item-rates.txt: div32 1.90 to 2.02, div64 1.49
+to 1.54, sqrt64 1.52 to 1.54 M cases a second a tile; sqrt64 under rmm has no row there and takes rne's),
+four tiles on four quarters of the space: all thirteen items in 9.6 minutes. The generator's cost is
+not in them (60 s for the builders over the whole of div64-hard, against about 530 s of a tile).
+All three reach the tile, as the random modes do: `cft_div` and `cft_sqrt` are composed of tile
+passes.
+
+By hand, on a CPU's software backend (it needs only `make -C host divsqrt-soak`, XRT=0, on a 64-bit
+Linux) or on the card (the quad's xclbin built with XRT=1, one process a tile, as for the items above):
+
+    host/divsqrt-soak hard-space div64-hard
+    nice -n 10 host/divsqrt-soak div64-hard 0 289685696 rne
+    N=289685696; JOB=div64-hard; ATTR=rne
+    for k in 0 1 2 3; do
+      CFT_SOAK_ARTIFACT=$IMG CFT_XRT_TILES=$((k + 1)) nice -n 10 host/divsqrt-soak $JOB \
+          $((N * k / 4)) $((N * (k + 1) / 4)) $ATTR > $JOB-$ATTR-q$k.log 2>&1 &
+    done; wait; grep -h " cases," $JOB-$ATTR-q?.log
+
+The four lines' encodings add up to N and their skipped slots to the whole space's (346,253,600
+for div64-hard). The stress driver does not name these items yet (`hw/card_stress_lib.py` carries
+the six exhaustive conversion and scaleB modes, not these); each item is `tile`, k above, the
+space is not 2^32, and its cases are held to cases + S = k x E.
+
+Known limits. Flags are compared per batch, as in every mode here: a flag the library drops on one
+lane among others that raise it is not seen. The families are contiguous segments, so a batch is
+nearly always one family, and F1's batches are the one family whose flags are all clear (a spurious
+inexact there is seen). Operands are positive normal magnitudes in the four sign combinations;
+zeros, infinities, NaNs and subnormal operands stay with the random modes' bands. F0 is built at
+one exponent pair (both operands in [1, 2)), F1 and F3 at others with their own significands: the
+product of structure and exponent is not swept (the scale lemma of the study, 4.3, argued at
+p = 24 and 53), and a closest approach to a midpoint of the subnormal grid that is not a tie is
+not built. The fp64 keyed stream is 2^26 of 2^51 odd divisors. The oracle is the host's, so
+division under rmm is not checked.
+
+The tool's side is tested by `python3 hw/test_divsqrt_hard.py --baseline-tree DIR` (POSIX with
+make and a C compiler, about four minutes, a minute of it the three whole spaces counted): the
+segment tables and 53,104 operand lines against `python/hardcases.py`, the whole-space figures
+above, every mode and attribute over 173 slices of the segments' starts, ends and boundaries and
+312 across the spaces (each also accepted by the driver's own `parse_soak`), the refusals, a
+sabotage control for each mode, the plants (a construction off by one, a slice one encoding or one
+skipped slot short, a mode that skips every index, a library whose guard test is blind to the
+closest approach to a midpoint, a build with no 128-bit integer, the 40-guard-bit division), and
+the random and exhaustive modes of another tree's tool (`git archive REV host | tar -x -C DIR`)
+compared byte for byte; `python/tests/test_hardcases.py` holds the generator and the golden
+model's answers on its cases to an exact arbiter, and the builders to exhaustion at small precision.
+
 ### Failure policy, processes, and what it guarantees
 
 - **A failing leg** keeps its whole log, says so in its record, and the run goes on. So does an
