@@ -985,6 +985,25 @@ def pid_alive(pid: int) -> bool:
     return str(pid) in p.stdout
 
 
+def standin_alive(pid: int) -> bool:
+    """Whether `pid` is still a card_stress_standin.py process. pid_alive alone cannot tell it from the NEXT process the OS gave
+    that pid to (Windows hands a freed pid out again at once - to the very tasklist that asks, or to another session's process),
+    so a hung stand-in the driver had killed could look alive: the hang check failed once in 7.5 minutes of a Git Bash run, six
+    reruns of the same scenario passed, and this is the likely cause (BELIEVED). When the command line cannot be read it is alive."""
+    if not pid_alive(pid):
+        return False
+    if POSIX:
+        try:
+            with open(f"/proc/{pid}/cmdline", "rb") as fh:
+                return b"card_stress_standin" in fh.read()
+        except OSError:
+            return False
+    q = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                        f"(Get-CimInstance Win32_Process -Filter 'ProcessId={pid}').CommandLine"],
+                       capture_output=True, text=True, timeout=60)
+    return q.returncode != 0 or "card_stress_standin" in q.stdout
+
+
 def start_driver(env: Env, name: str, args: list, scenario=None, src: str = HERE, extra_env=None,
                  base_extra=None, pre_stop: bool = False, to_file: bool = False) -> Run:
     """to_file: send the driver's output to a file instead of a pipe. A scenario that polls while a long run writes a
@@ -1778,10 +1797,12 @@ def scn_telemetry_hang(env: Env, src: str = HERE) -> list:
     pids = [int(open(os.path.join(r.state, f)).read()) for f in os.listdir(r.state) if f.startswith("hang-telemetry-")]
     to_first = (tel[0]["epoch"] - recs[0]["epoch"]) if tel and recs else 0.0     # run_start to the first telemetry record
     late = end.get("epoch", 1e9) - t_stop
+    alive = [p for p in pids if standin_alive(p)]
     c("telemetry hang: every examine call hung and was killed at --telemetry-timeout: each sample is an error record "
       "('timed out'), never a reading, and no hung process is left", began and bool(tel) and bool(pids)
-      and all((not x["ok"]) and x["values"] is None and "timed out" in (x["error"] or "") for x in tel)
-      and not any(pid_alive(p) for p in pids), f"{len(tel)} samples, {len(pids)} hung calls, first error {(tel[:1] or [{}])[0].get('error')}")
+      and all((not x["ok"]) and x["values"] is None and "timed out" in (x["error"] or "") for x in tel) and not alive,
+      f"began {began}; {len(tel)} samples (timed out, ok) {[('timed out' in (x['error'] or ''), x['ok']) for x in tel]}; "
+      f"{len(pids)} hung calls, stand-ins still alive {alive}")
     c("telemetry hang: no two samples ran at once (consecutive records at least a sample, 3.5 s, apart)",
       len(tel) >= 2 and all(b["epoch"] - a["epoch"] >= 3.5 for a, b in zip(tel, tel[1:])),
       str([round(b["epoch"] - a["epoch"], 1) for a, b in zip(tel, tel[1:])]))
