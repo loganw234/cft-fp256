@@ -27,4 +27,4 @@ if [ -z "$PY" ]; then
   done
 fi
 [ -n "$PY" ] || { echo "test-card-stress: no python3 on PATH (set PYTHON)" >&2; exit 2; }
-exec "$PY" -I "$ROOT/hw/test_card_stress.py" "$@"
+exec "$PY" -B -I "$ROOT/hw/test_card_stress.py" "$@"

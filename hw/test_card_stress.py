@@ -626,6 +626,126 @@ def catalog_checks(c, mod, d, q) -> None:
                         WIDE_MODES="rne"), True)
 
 
+def exhaustive_conversion_items(L) -> list:
+    """The 22 exhaustive conversion and scaleB items parcel EX added, in the catalog's order: none of them is in --quick's
+    own four (sqrt32-rne, rint32-rne, div32-rne, nextup32), which is the case that misled 2026-10-19's smoke."""
+    return (["conv32to64-all"] + [f"cvtto32-all-{m}" for m in L.MODES5] + [f"cvtfrom32-all-{m}" for m in L.MODES4]
+            + [f"cvtfrom64-all-{m}" for m in L.MODES4] + [f"scaleb32-all-{m}" for m in L.MODES4]
+            + [f"scaleb32-wide-{m}" for m in L.MODES4])
+
+
+def quick_checks(c, mod, tmp: str, imgs: dict) -> None:
+    """--quick's revision-8 leg and sweep, read off a Driver without running it (parcel DR1, 2026-10-20): the routine entry the
+    smoke now runs on the quad; --quick with --sweep-items, which used to plan only quick's own four items, so that every wave
+    was empty whenever none was named and the log said the campaign was finished; and why a wave is empty, said by cause."""
+    L = mod.L
+    q, s, dp = imgs["quad"], imgs["single"], imgs["deep"]
+
+    def drv(*extra):
+        a = mod.parse_args(["--out", os.path.join(tmp, "quick"), "--quick", "--root", ROOT, "--rev8-images",
+                            os.path.join(tmp, "quick-imgs"), "--disk-extra", ""] + list(extra))
+        d = mod.Driver(a)
+        d.items = L.sweep_items()
+        return d
+
+    d0 = drv()
+    r8 = d0.leg_cmd("acceptance-rev8", q, 1)
+    only = r8.argv[r8.argv.index("--only") + 1].split(",")
+    c("quick: the quad's revision-8 leg is phi4_extended_fp64 and one routine entry (no compile), with --lib",
+      only == ["phi4_extended_fp64", "lotkavolterra-rk4-tangent-fp64"] and "--lib" in r8.argv, str(only))
+    c("quick: without --sweep-items the sweep is still its own: four items on the quad, sqrt32-rne then rint32-rne on a single",
+      d0.quick_items(q, 0) == ["sqrt32-rne", "rint32-rne", "div32-rne", "nextup32"]
+      and [d0.quick_items(s, 0), d0.quick_items(s, 1)] == [["sqrt32-rne"], ["rint32-rne"]])
+    ex = exhaustive_conversion_items(L)
+    c("quick: the 22 exhaustive conversion and scaleB items are 22, and not one is in quick's own four", len(ex) == 22
+      and not set(ex) & {"sqrt32-rne", "rint32-rne", "div32-rne", "nextup32"})
+    # --quick with --sweep-items: the named items, in the order named; the shuffle shows "named", not "the catalog's"
+    named = ex[::-1]
+    d1 = drv("--sweep-items", ",".join(named))
+    forced = d1.quick_items(q, 0)
+    wave = d1.plan_wave(q, 3600, 4, forced)
+    c("quick with --sweep-items: the quad's wave is four jobs, one a tile, on the first four items named in the order named "
+      "(none of them one of quick's own)", forced == named[:4] and [(j["tile"], j["item"].name) for j in wave]
+      == [(1, named[0]), (2, named[1]), (3, named[2]), (4, named[3])], str([j["item"].name for j in wave]))
+    for j in wave:
+        d1.served[j["item"].name] = 1                       # as run_wave counts a slice served
+    w5 = d1.plan_wave(s, 3600, 1, d1.quick_items(s, 0))
+    d1.served[named[4]] = 1
+    w6 = d1.plan_wave(s, 3600, 1, d1.quick_items(s, 1))
+    c("quick with --sweep-items: a single image takes one item a wave, the least served first - the next two items named, "
+      "not the first four again", [j["item"].name for j in w5 + w6] == named[4:6] and [j["tile"] for j in w5 + w6] == [None, None],
+      str([j["item"].name for j in w5 + w6]))
+    d2 = drv("--sweep-items", f"{ex[0]},{ex[0]},{ex[1]}")
+    c("quick with --sweep-items: a name given twice is one item, and fewer items than tiles are fewer jobs",
+      d2.quick_items(q, 0) == [ex[0], ex[1]] and len(d2.plan_wave(q, 3600, 4, d2.quick_items(q, 0))) == 2)
+    d1.disabled_items = {named[0]: "x"}
+    d1.intervals = {named[1]: [(0, L.EXH)]}
+    c("quick with --sweep-items: an item that is disabled or covered is passed over, and the wave takes the least served "
+      "of the rest (the first five are served, so the next four named)", d1.quick_items(q, 0) == named[5:9], str(d1.quick_items(q, 0)))
+    # a fixed list with a disabled item no longer loses the whole wave
+    d3 = drv()
+    d3.disabled_items = {"sqrt32-rne": "x"}
+    w3 = d3.plan_wave(q, 3600, 4, d3.quick_items(q, 0))
+    c("quick: one disabled item in quick's own four no longer empties the quad's wave: the other three run, on their own tiles",
+      [(j["tile"], j["item"].name) for j in w3] == [(2, "rint32-rne"), (3, "div32-rne"), (4, "nextup32")], str(w3))
+    # an empty wave says why: the campaign is finished only when it is
+    d4 = drv("--sweep-items", f"{ex[0]},{ex[17]}")
+    d4.intervals = {ex[0]: [(0, L.EXH)], ex[17]: [(0, 1 << 31), (1 << 31, L.EXH)]}
+    f4 = d4.quick_items(q, 0)
+    why4, cause4 = d4.why_no_wave(f4)
+    c("empty wave, every item named is covered: the campaign IS finished, and says so for the items named, with how many",
+      f4 == [] and d4.plan_wave(q, 3600, 4, f4) == [] and cause4 == "finished"
+      and why4 == "nothing left to run for the items named by --sweep-items: all 2 are exhaustive and covered", why4)
+    d5 = drv("--sweep-items", f"{ex[0]},{ex[1]}")
+    d5.disabled_items = {ex[0]: "3 slices in a row gave no readable verdict", ex[1]: "3 slices in a row gave no readable verdict"}
+    f5 = d5.quick_items(q, 0)
+    why5, cause5 = d5.why_no_wave(f5)
+    c("empty wave, every item disabled: NOT finished, and the sentence names the cause and the items",
+      d5.plan_wave(q, 3600, 4, f5) == [] and cause5 == "blocked" and "NOT finished" in why5 and "2 disabled" in why5
+      and ex[0] in why5 and "nothing left to run" not in why5, why5)
+    d6 = drv("--sweep-items", f"{ex[0]},{ex[1]}")
+    d6.intervals = {ex[0]: [(0, L.EXH)]}
+    d6.disabled_items = {ex[1]: "x"}
+    why6, cause6 = d6.why_no_wave(d6.quick_items(q, 0))
+    c("empty wave, one covered and one disabled: NOT finished, and both causes are named",
+      cause6 == "blocked" and "1 covered" in why6 and "1 disabled" in why6, why6)
+    d7 = drv("--sweep-items", ",".join(ex))
+    old = ["sqrt32-rne", "rint32-rne", "div32-rne", "nextup32"]
+    why7, cause7 = d7.why_no_wave(old)
+    c("empty wave, the case of 2026-10-19: quick's own four planned with --sweep-items naming 22 others: every one is "
+      "outside --sweep-items, NOT finished, and nothing is called covered",
+      d7.plan_wave(q, 3600, 4, old) == [] and cause7 == "blocked" and "4 outside --sweep-items" in why7
+      and "NOT finished" in why7 and "covered" not in why7 and "nothing left to run" not in why7, why7)
+    d8 = drv("--sweep-items", "scaleb32-wide-rtz")
+    d8.items = L.sweep_items(("rne",), ("rne",), ("rne",))
+    why8, cause8 = d8.why_no_wave(d8.quick_items(q, 0))
+    c("empty wave, an item named that this run's probes ruled out: it says so by name",
+      cause8 == "blocked" and "not in this run's catalog" in why8 and "scaleb32-wide-rtz" in why8, why8)
+    # verifier-VDR1 (b-1): "finished" is decided over the campaign, not over the wave's own list
+    d9 = drv()
+    d9.intervals = {"sqrt32-rne": [(0, L.EXH)]}
+    f9 = d9.quick_items(s, 0)
+    why9, cause9 = d9.why_no_wave(f9)
+    c("empty wave, a single image whose sqrt32-rne is covered: its list plans no job while sqrt32-rtz is still to run, and "
+      "the sentence says the campaign is NOT finished and what remains, not that nothing is left",
+      f9 == ["sqrt32-rne"] and d9.plan_wave(s, 3600, 1, f9) == []
+      and [j["item"].name for j in d9.plan_wave(s, 3600, 1, None)] == ["sqrt32-rtz"]
+      and cause9 == "blocked" and "NOT finished" in why9 and "1 covered: sqrt32-rne" in why9
+      and "can still run (sqrt32-rtz," in why9 and "nothing left to run" not in why9, why9)
+    # ... and the smoke goes on to the single's second item when its first cannot run (881bbcb stopped at the empty wave)
+    import contextlib
+    import io
+    d10 = drv()
+    d10.intervals = {"sqrt32-rne": [(0, L.EXH)]}
+    asked: list = []
+    d10.guard = lambda waiting_ok: None
+    d10.run_wave = lambda img, wave: asked.append([j["item"].name for j in wave]) or []
+    with contextlib.redirect_stdout(io.StringIO()):
+        d10.sweep_phase(s, 20.0)
+    c("quick: a single image whose first item cannot run goes on to its second (rint32-rne) in the same smoke",
+      asked == [["rint32-rne"]], str(asked))
+
+
 def group_commands(src: str = HERE) -> list:
     out: list = []
 
@@ -672,8 +792,12 @@ def group_commands(src: str = HERE) -> list:
         only = r8[r8.index("--only") + 1].split(",")
         c("acceptance-rev8 on the quad: --set rev8 --target u50-rev8-quad --images DIR",
           r8[r8.index("--set") + 1] == "rev8" and r8[r8.index("--target") + 1] == "u50-rev8-quad" and "--images" in r8)
-        c("acceptance-rev8 on the quad: eight entries, the two long compiles left out",
-          len(only) == 8 and "riccati_extended_fp64" not in only and "gray_scott_extended_fp64" not in only, str(only))
+        c("acceptance-rev8 on the quad: eight workloads and the six routine entries, the two long compiles left out",
+          len(only) == 14 and "riccati_extended_fp64" not in only and "gray_scott_extended_fp64" not in only
+          and all(e in only for e in mod.REV8_ROUTINE_ENTRIES), str(only))
+        c("acceptance-rev8 on the quad: the routine entries make the leg name --lib, this tree's host/libcft.so (the "
+          "XRT-linked one the build step checked)",
+          "--lib" in r8 and r8[r8.index("--lib") + 1] == os.path.join(os.path.abspath(ROOT), "host", "libcft.so"), str(r8[-4:]))
         c("acceptance-rev8: the single has no entry, and the leg says so by name",
           isinstance(argv("acceptance-rev8", s), mod.Skip) and "u50-rev8" in argv("acceptance-rev8", s).reason)
         c("acceptance-rev8: the deep's one entry is a 40-minute compile with no cache, so it is skipped by name",
@@ -681,19 +805,27 @@ def group_commands(src: str = HERE) -> list:
         t_uncached = d.leg_cmd("acceptance-rev8", q, 1).timeout
         os.makedirs(os.path.join(tmp, "imgs"), exist_ok=True)
         for e in mod.REV8_ENTRIES["u50-rev8-quad"] + mod.REV8_ENTRIES["u50-rev8-deep"]:
+            if e in mod.REV8_ROUTINE_ENTRIES:
+                continue                   # a routine entry's files are committed: nothing of it is ever in the cache
             for ext in (".cftp", ".bank"):
                 open(os.path.join(tmp, "imgs", e + ext), "w").close()
         r8c = d.leg_cmd("acceptance-rev8", q, 1)
-        c("acceptance-rev8: with every image cached the quad runs nine, riccati included, and the timeout drops "
-          "its compile allowance", len(r8c.argv[r8c.argv.index("--only") + 1].split(",")) == 9
-          and r8c.timeout == t_uncached - mod.REV8_FIRST_COMPILE_ALLOWANCE)
-        c("acceptance-rev8: with the cache the deep runs gray_scott_extended",
-          not isinstance(d.leg_cmd("acceptance-rev8", dp, 1), mod.Skip))
+        c("acceptance-rev8: with every workload cached the quad runs fifteen, riccati and the six routine entries "
+          "included, and the timeout drops its compile allowance", len(r8c.argv[r8c.argv.index("--only") + 1].split(",")) == 15
+          and r8c.timeout == t_uncached - mod.REV8_FIRST_COMPILE_ALLOWANCE, f"{r8c.timeout} vs {t_uncached}")
+        c("acceptance-rev8: the routine entries are never 'uncached' (their image and bank are committed files): with "
+          "the workloads cached the timeout is the leg's own, not the leg's plus the 4-hour compile allowance",
+          r8c.timeout == float(mod.DEFAULT_TIMEOUTS["acceptance-rev8"]), str(r8c.timeout))
+        r8d = d.leg_cmd("acceptance-rev8", dp, 1)
+        c("acceptance-rev8: with the cache the deep runs gray_scott_extended, and names no --lib (no routine entry)",
+          not isinstance(r8d, mod.Skip) and "--lib" not in r8d.argv)
         c("selftest: every third visit of an image (visit 1 runs, 2 and 3 skip, 4 runs)",
           [isinstance(d.leg_cmd("selftest", q, v), mod.Skip) for v in (1, 2, 3, 4)] == [False, True, True, False])
         c("timeouts: every leg has one, from the card's measured times with a floor",
           all(mod.DEFAULT_TIMEOUTS[leg] >= 300 for leg in mod.BATTERY))
-        c("REV8_ENTRIES is acceptance.py's table (read from its source)", rev8_table_matches(mod))
+        ok8, why8 = rev8_table_matches(mod)
+        c("REV8_ENTRIES is acceptance.py's table: REV8's ten workloads then REV8_ROUTINES' six, entry for entry and target "
+          "for target (read from its source), and acceptance.py has no other REV8 name this test has not been shown", ok8, why8)
         # the sweep's argv is the soak scripts' job line, one slice
         d.items = L.sweep_items()
         d.rate = {}
@@ -716,6 +848,7 @@ def group_commands(src: str = HERE) -> list:
         c("the campaign has run-soak.sh's 5 exhaustive sqrt32 and 12 random divsqrt items first",
           names[:5] == [f"sqrt32-{m}" for m in L.MODES5] and names[5] == "div32-rne" and names[16] == "sqrt64-rup")
         catalog_checks(c, mod, d, q)
+        quick_checks(c, mod, tmp, imgs)
         # the guard's matching rules, on synthetic command lines (what is a card user and what is not)
         def user(*args):
             return mod.card_user({"pid": 0, "ppid": 0, "args": list(args)})
@@ -749,17 +882,32 @@ def group_commands(src: str = HERE) -> list:
     return out
 
 
-def rev8_table_matches(mod) -> bool:
+def rev8_table_matches(mod) -> tuple:
+    """(ok, why): the driver's table is programs/acceptance.py's REV8 (ten workloads, a name and a target each) and then
+    its REV8_ROUTINES (six routine entries, a name, a system and a target each), read from the source: every entry,
+    every target and the order, with the routine names the leg treats as having no compile the same six. Parcel MA added
+    REV8_ROUTINES on 2026-10-19 and this test read REV8 alone, counting its ten, so the six went by unseen; so any other
+    module-level name that begins REV8 makes this red until it has been looked at and added to `known`."""
     with open(os.path.join(ROOT, "programs", "acceptance.py"), "r", encoding="utf-8") as fh:
         text = fh.read()
     m = re.search(r"^REV8 = \((.*?)\)\n#", text, re.S | re.M)
-    if not m:
-        return False
+    r = re.search(r"^REV8_ROUTINES = \(.*?\)\)\n", text, re.S | re.M)
+    if not m or not r:
+        return False, "REV8 or REV8_ROUTINES is not where this test reads it in programs/acceptance.py"
     pairs = re.findall(r'\("([a-z0-9_]+)", "(u50-rev8[a-z-]*)"\)', m.group(1))
+    trips = re.findall(r'\("([a-z0-9-]+)", "([a-z0-9-]+)", "(u50-rev8[a-z-]*)"\)', r.group(0))
     table: dict = {"u50-rev8-quad": [], "u50-rev8": [], "u50-rev8-deep": []}
     for name, target in pairs:
         table[target].append(name)
-    return table == mod.REV8_ENTRIES and len(pairs) == 10
+    for name, _system, target in trips:
+        table[target].append(name)
+    known = {"REV8", "REV8_ROUTINES", "REV8_STEPS", "REV8_ORDER", "REV8_TILES"}
+    other = sorted(set(re.findall(r"^(REV8\w*) = ", text, re.M)) - known)
+    ok = (table == mod.REV8_ENTRIES and len(pairs) == 10 and len(trips) == 6
+          and list(mod.REV8_ROUTINE_ENTRIES) == [n for n, _s, _t in trips] and not other)
+    return ok, (f"REV8 has {len(pairs)} entries and REV8_ROUTINES {len(trips)}; the table differs by "
+                f"{sorted({n for v in table.values() for n in v} ^ {n for v in mod.REV8_ENTRIES.values() for n in v})}; "
+                f"routine names {list(mod.REV8_ROUTINE_ENTRIES) == [n for n, _s, _t in trips]}; other REV8 names {other}")
 
 
 # ---------------------------------------------------------------------------------------
@@ -837,6 +985,25 @@ def pid_alive(pid: int) -> bool:
     return str(pid) in p.stdout
 
 
+def standin_alive(pid: int) -> bool:
+    """Whether `pid` is still a card_stress_standin.py process. pid_alive alone cannot tell it from the NEXT process the OS gave
+    that pid to (Windows hands a freed pid out again at once - to the very tasklist that asks, or to another session's process),
+    so a hung stand-in the driver had killed could look alive: the hang check failed once in 7.5 minutes of a Git Bash run, six
+    reruns of the same scenario passed, and this is the likely cause (BELIEVED). When the command line cannot be read it is alive."""
+    if not pid_alive(pid):
+        return False
+    if POSIX:
+        try:
+            with open(f"/proc/{pid}/cmdline", "rb") as fh:
+                return b"card_stress_standin" in fh.read()
+        except OSError:
+            return False
+    q = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                        f"(Get-CimInstance Win32_Process -Filter 'ProcessId={pid}').CommandLine"],
+                       capture_output=True, text=True, timeout=60)
+    return q.returncode != 0 or "card_stress_standin" in q.stdout
+
+
 def start_driver(env: Env, name: str, args: list, scenario=None, src: str = HERE, extra_env=None,
                  base_extra=None, pre_stop: bool = False, to_file: bool = False) -> Run:
     """to_file: send the driver's output to a file instead of a pipe. A scenario that polls while a long run writes a
@@ -850,7 +1017,7 @@ def start_driver(env: Env, name: str, args: list, scenario=None, src: str = HERE
         os.makedirs(out, exist_ok=True)
         with open(os.path.join(out, "STOP"), "w") as fh:
             fh.write("stale")
-    cmd = [sys.executable, "-I", os.path.join(src, "card_stress.py"), "--root", ROOT, "--out", out, "--dry-run",
+    cmd = [sys.executable, "-B", "-I", os.path.join(src, "card_stress.py"), "--root", ROOT, "--out", out, "--dry-run",
            "--telemetry-seconds", "0", "--disk-extra", "", "--retry-pause", "1", "--kill-after", "2",
            "--guard-poll", "1"]
     for n, p in env.imgs.items():
@@ -950,6 +1117,11 @@ def scn_normal(env: Env, src: str = HERE) -> list:
       [(r["counts"] or {}).get("cases", 0) - (r["sweep"]["hi"] - r["sweep"]["lo"]) for r in sw if r["sweep"]["item"] == "nextup32"] == [8])
     c("normal: every sweep job soaked the DEVICE (the stand-in prints the line only when CFT_SOAK_ARTIFACT is set)",
       all("soaking the DEVICE backend: " + env.imgs[r["image"]] in log_text(R, r) for r in sw))
+    r8 = R.legs("acceptance-rev8", "quad")
+    t8 = log_text(R, r8[0]) if r8 else ""
+    c("normal: the quad's revision-8 leg ran phi4_extended_fp64 and one routine entry, naming --lib (the stand-in prints "
+      "the command it was given)", len(r8) == 1 and r8[0]["status"] == "pass"
+      and "--only phi4_extended_fp64,lotkavolterra-rk4-tangent-fp64" in t8 and " --lib " in t8, t8[:300])
     c("normal: status.txt exists and names the legs, the card, the sweep and the deadline",
       all(k in open(os.path.join(R.out, "status.txt")).read() for k in ("legs", "card ", "sweep ", "deadline", "FINISHED: quick_done")))
     c("normal: metrics.jsonl lines are whole JSON, one per record (read_records finds none bad)",
@@ -1242,7 +1414,7 @@ def scn_sweep_resume(env: Env, A: Run, args: list, rate: dict, src: str) -> list
         out.append((n, bool(ok), d))
 
     env.n += 1
-    cmd = [sys.executable, "-I", os.path.join(src, "card_stress.py"), "--root", ROOT, "--out", A.out, "--resume", "--dry-run",
+    cmd = [sys.executable, "-B", "-I", os.path.join(src, "card_stress.py"), "--root", ROOT, "--out", A.out, "--resume", "--dry-run",
            "--telemetry-seconds", "0", "--disk-extra", "", "--retry-pause", "1", "--kill-after", "2", "--guard-poll", "1",
            "--until", until(22), "--max-card-failures", "20"] + args
     for n, p in env.imgs.items():
@@ -1356,7 +1528,7 @@ def scn_sweep_all(env: Env, src: str = HERE) -> list:
     c("sweep all: and its sweep line counts all 36 exhaustive items' encodings, the new ones included",
       f"exhaustive {4 * EXH_T:,} of {36 * EXH_T:,} encodings" in st, st[st.find("sweep "):][:200])
     rp = os.path.join(HERE, "card_stress_report.py")
-    p = subprocess.run([sys.executable, "-I", rp, r.out, "--no-write"], capture_output=True, text=True, timeout=120)
+    p = subprocess.run([sys.executable, "-B", "-I", rp, r.out, "--no-write"], capture_output=True, text=True, timeout=120)
     t = p.stdout
     c("sweep all: the report gives each item's reach and totals the coverage by reach",
       p.returncode == 0 and re.search(r"^  conv32to64-all\s.*\shost$", t, re.M) and re.search(r"^  scaleb32-wide-rdn\s.*\stile$", t, re.M)
@@ -1425,7 +1597,7 @@ def scn_sweep_gap(env: Env, src: str, base: list) -> list:
       and not L.sweep_coverage(r3.recs)[0].get("cvtto32-all-rup"), str([(x["status"], x["sweep"]["lo"]) for x in a][:4]))
     os.remove(os.path.join(r3.out, "STOP"))                 # a stale STOP would refuse the resume, by design
     env.n += 1
-    cmd = [sys.executable, "-I", os.path.join(src, "card_stress.py"), "--root", ROOT, "--out", r3.out, "--resume", "--dry-run",
+    cmd = [sys.executable, "-B", "-I", os.path.join(src, "card_stress.py"), "--root", ROOT, "--out", r3.out, "--resume", "--dry-run",
            "--telemetry-seconds", "0", "--disk-extra", "", "--retry-pause", "1", "--kill-after", "2", "--guard-poll", "1",
            "--until", until(14), "--sweep-items", "cvtto32-all-rup"] + base
     for nm, pth in env.imgs.items():
@@ -1472,6 +1644,100 @@ def scn_disagree(env: Env, src: str = HERE) -> list:
     return out
 
 
+def telemetry_order_checks(src: str = HERE) -> list:
+    """Whether two samples that overlap are recorded in the order their readings were taken, FORCED rather than waited for
+    (parcel DR1, 2026-10-20; scn_telemetry's check of the stand-in's temperature saw one pair swapped on a busy desktop). A
+    sample A takes its reading and is held inside its examine call, as a process the OS has not yet scheduled again; a second
+    sample B then starts. A driver that lets B run takes B's reading second and appends B's record FIRST; one that serialises
+    its samples keeps B waiting, and the records come out A, B. No load, no luck: the interleaving is the test's own."""
+    import importlib
+    import threading
+    out: list = []
+    sys.path.insert(0, src)
+    saved_lib = sys.modules.pop("card_stress_lib", None) if os.path.abspath(src) != os.path.abspath(HERE) else None
+    tmp = tempfile.mkdtemp(prefix="cs-tel-")
+    go, go2 = threading.Event(), threading.Event()
+    try:
+        mod = importlib.import_module("card_stress")
+        a = mod.parse_args(["--out", tmp, "--root", ROOT, "--dry-run", "--telemetry-reports", "thermal"])
+        d = mod.Driver(a)
+        mu = threading.Lock()
+        taken: list = []
+        held, b_in = threading.Event(), threading.Event()
+
+        def examine(tool, rep, mode):
+            with mu:
+                taken.append(threading.current_thread().name)
+                n = len(taken)
+            if threading.current_thread().name == "A":
+                held.set()
+                go.wait(30)                    # A holds its reading, n = 1, and is not scheduled again until released
+            else:
+                b_in.set()
+            return {"FPGA Temperature": 30.0 + 0.5 * n}, "", None
+
+        d.examine = examine
+        ta = threading.Thread(target=d.telemetry, args=("A",), name="A")
+        tb = threading.Thread(target=d.telemetry, args=("B",), name="B")
+        ta.start()
+        held.wait(10)
+        tb.start()
+        if b_in.wait(1.5):                     # unserialised, B reads and appends at once; serialised, it waits for A
+            tb.join(10)
+        go.set()
+        ta.join(10)
+        tb.join(10)
+        recs = [r for r in L.read_records(os.path.join(tmp, "metrics.jsonl"))[0] if r.get("type") == "telemetry"]
+        whens = [r["when"] for r in recs]
+        temps = [(r.get("values") or {}).get("thermal.FPGA Temperature") for r in recs]
+        epochs = [r["epoch"] for r in recs]
+        out.append(("telemetry: two samples that overlap are recorded in the order their readings were taken (A took "
+                    "n=1 and was held; B started meanwhile)", taken == ["A", "B"] and whens == taken
+                    and temps == [30.5, 31.0] and epochs == sorted(epochs) and not ta.is_alive() and not tb.is_alive(),
+                    f"readings taken {taken}, records appended {whens}, temperatures {temps}"))
+        # the run's stop reaches a timer sample that is in flight, with the run's own "end" sample waiting behind it
+        d.a.telemetry_reports = "thermal,electrical"           # two examine calls a sample
+        taken2: list = []
+        held2 = threading.Event()
+
+        def examine2(tool, rep, mode):
+            with mu:
+                taken2.append(threading.current_thread().name)
+            if threading.current_thread().name == "T":
+                held2.set()
+                go2.wait(30)
+            return {"FPGA Temperature": 50.0}, "", None
+
+        d.examine = examine2
+        tt = threading.Thread(target=d.telemetry, args=("timer",), name="T")
+        te = threading.Thread(target=d.telemetry, args=("end",), name="E")
+        tt.start()
+        held2.wait(10)
+        d.tel_stop.set()
+        te.start()
+        go2.set()
+        tt.join(10)
+        te.join(10)
+        whens2 = [r["when"] for r in L.read_records(os.path.join(tmp, "metrics.jsonl"))[0]
+                  if r.get("type") == "telemetry" and r["when"] in ("timer", "end")]
+        out.append(("telemetry: a timer sample the run's stop reaches while it is in flight is dropped at its next "
+                    "examine call, and the 'end' sample waiting behind it is taken and recorded", taken2 == ["T", "E", "E"]
+                    and whens2 == ["end"] and not tt.is_alive() and not te.is_alive(),
+                    f"examine calls {taken2}, records {whens2}"))
+    except Exception as e:                     # a driver that cannot be driven this way is a red check, not a crash
+        out.append(("telemetry: two samples that overlap are recorded in the order their readings were taken (the driver "
+                    "could not be driven)", False, repr(e)))
+    finally:
+        go.set()
+        go2.set()
+        sys.path.remove(src)
+        sys.modules.pop("card_stress", None)
+        if saved_lib is not None:
+            sys.modules["card_stress_lib"] = saved_lib
+        shutil.rmtree(tmp, ignore_errors=True)
+    return out
+
+
 def scn_telemetry(env: Env, src: str = HERE) -> list:
     out: list = []
 
@@ -1501,6 +1767,58 @@ def scn_telemetry(env: Env, src: str = HERE) -> list:
     c("telemetry parser: as-is text rows", L.parse_telemetry("  FPGA Temperature   : 31 C\n  Power   15.5 W\nnot a row\n") ==
       {"FPGA Temperature": 31.0, "Power": 15.5})
     c("telemetry parser: nothing readable is {} (never a reading of 0)", L.parse_telemetry("ERROR: no device\n") == {})
+    return out + telemetry_order_checks(src) + scn_telemetry_hang(env, src)
+
+
+def scn_telemetry_hang(env: Env, src: str = HERE) -> list:
+    """What the sampler's lock can cost the driver when the vendor tool hangs, as a process against the stand-in (parcel DR1,
+    2026-10-20, the lead's question). EVERY examine call hangs (the stand-in sleeps for ever) and --telemetry-timeout is 2 s: each
+    is killed at 2 s, so a sample - one report, as JSON and then as text - takes about 4 s and lets go of the lock. STOP is touched
+    while the run's own first sample is in flight. The run goes on to what it must - that sample, the timer's, its own `end` - and
+    ends by STOP, within about two samples, one timeout and a margin of the moment it was touched, however long a hung call would
+    have been. The bound is measured from the run, not from a sample: 2 x the time from the run's start to its first telemetry
+    record (that sample and about 0.6 s of setup) + 2 s + 10 s. Every sample is an error record, never a reading, no hung
+    process is left, and no two samples ran at once (each takes at least 2 x 2 s, so two records 3.5 s apart or more)."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    r = start_driver(env, "telhang", ["--until", until(300), "--legs", "api-test", "--no-sweep", "--telemetry-seconds", "1",
+                                      "--telemetry-timeout", "2", "--telemetry-reports", "electrical"],
+                     [{"leg": "telemetry", "from": 1, "do": "hang"}], src=src)
+    began = wait_for(lambda: any(f.startswith("hang-telemetry-") for f in os.listdir(r.state)), 60)
+    t_stop = time.time()
+    stop_run(r)
+    r.finish(120)
+    recs = r.recs
+    tel = [x for x in recs if x.get("type") == "telemetry"]
+    end = r.last("run_end") or {}
+    pids = [int(open(os.path.join(r.state, f)).read()) for f in os.listdir(r.state) if f.startswith("hang-telemetry-")]
+    to_first = (tel[0]["epoch"] - recs[0]["epoch"]) if tel and recs else 0.0     # run_start to the first telemetry record
+    late = end.get("epoch", 1e9) - t_stop
+    alive = [p for p in pids if standin_alive(p)]
+    c("telemetry hang: every examine call hung and was killed at --telemetry-timeout: each sample is an error record "
+      "('timed out'), never a reading, and no hung process is left", began and bool(tel) and bool(pids)
+      and all((not x["ok"]) and x["values"] is None and "timed out" in (x["error"] or "") for x in tel) and not alive,
+      f"began {began}; {len(tel)} samples (timed out, ok) {[('timed out' in (x['error'] or ''), x['ok']) for x in tel]}; "
+      f"{len(pids)} hung calls, stand-ins still alive {alive}")
+    for pid in alive:                  # a check that fails must not leave a hung stand-in behind: it is ours, killed by its pid
+        try:
+            if POSIX:
+                os.kill(pid, signal.SIGKILL)
+            else:
+                subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True, timeout=60)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    c("telemetry hang: no two samples ran at once (consecutive records at least a sample, 3.5 s, apart)",
+      len(tel) >= 2 and all(b["epoch"] - a["epoch"] >= 3.5 for a, b in zip(tel, tel[1:])),
+      str([round(b["epoch"] - a["epoch"], 1) for a, b in zip(tel, tel[1:])]))
+    c("telemetry hang: STOP, touched while the first sample was in flight, ended the run (exit 0, stop_file) within 2 x the "
+      "time from the run's start to its first telemetry record, one timeout and 10 s of it",
+      r.rc == 0 and end.get("reason") == "stop_file" and 0 < late <= 2 * to_first + 2 + 10,
+      f"rc {r.rc}, {end.get('reason')}, ended {late:.1f} s after STOP; the first telemetry record came {to_first:.1f} s "
+      f"after the run began")
     return out
 
 
@@ -1532,7 +1850,7 @@ def scn_build_refusals(env: Env, src: str = HERE) -> list:
     c("args: an unknown leg is refused by name", R.rc != 0 and "nosuchleg" in R.text)
     intree = os.path.join(ROOT, f"card-stress-intree-{os.getpid()}")
     try:
-        cmd = [sys.executable, "-I", os.path.join(src, "card_stress.py"), "--root", ROOT, "--out", intree, "--dry-run", "--quick",
+        cmd = [sys.executable, "-B", "-I", os.path.join(src, "card_stress.py"), "--root", ROOT, "--out", intree, "--dry-run", "--quick",
                "--legs", "api-test", "--no-sweep", "--telemetry-seconds", "0", "--disk-extra", ""]
         for n, pth in env.imgs.items():
             cmd += ["--image", f"{n}={pth}"]
@@ -1598,7 +1916,7 @@ def scn_buildreal(env: Env, src: str = HERE) -> list:
     def drive(name, fake, extra):
         env.n += 1
         o = os.path.join(env.tmp, f"{env.n:02d}-{name}")
-        cmd = [sys.executable, "-I", os.path.join(src, "card_stress.py"), "--root", root, "--out", o, "--quick",
+        cmd = [sys.executable, "-B", "-I", os.path.join(src, "card_stress.py"), "--root", root, "--out", o, "--quick",
                "--legs", "api-test", "--no-sweep", "--telemetry-seconds", "0", "--disk-extra", "", "--retry-pause", "1",
                "--kill-after", "2", "--guard-poll", "1", "--build-jobs", "2"]
         for n, pth in env.imgs.items():
@@ -1723,7 +2041,7 @@ def scn_torn_tail(env: Env, src: str = HERE) -> list:
     with open(mp, "ab") as fh:
         fh.write(torn)
     env.n += 1
-    cmd = [sys.executable, "-I", os.path.join(src, "card_stress.py"), "--root", ROOT, "--out", A.out, "--resume", "--dry-run",
+    cmd = [sys.executable, "-B", "-I", os.path.join(src, "card_stress.py"), "--root", ROOT, "--out", A.out, "--resume", "--dry-run",
            "--telemetry-seconds", "0", "--disk-extra", "", "--retry-pause", "1", "--kill-after", "2", "--guard-poll", "1",
            "--quick", "--legs", "api-test", "--no-sweep"]
     for n, pth in env.imgs.items():
@@ -1765,6 +2083,52 @@ def scn_item_disabled(env: Env, src: str = HERE) -> list:
       len(good) >= 3 and any(x["start_epoch"] > ev[0]["epoch"] for x in good) if ev else False, f"{len(good)} passing")
     c("item disabled: nothing of the disabled item started after the event", bool(ev) and all(x["start_epoch"] < ev[0]["epoch"] for x in bad))
     c("item disabled: status.txt names it", "disabled   sweep items: sqrt32-rne" in open(os.path.join(R.out, "status.txt")).read())
+    return out + scn_quick_sweep(env, src)
+
+
+def scn_quick_sweep(env: Env, src: str = HERE) -> list:
+    """--quick with --sweep-items, as a process against the stand-in (parcel DR1, 2026-10-20). A: EX's 22 exhaustive items,
+    none of them one of quick's own four - the case of 2026-10-19's smoke, whose every wave was empty while the log said
+    the campaign was finished: the waves are now the first four named on the quad and the next two, then the next two, on
+    the single and the deep. B: the only item named is disabled on the way: the empty wave that follows says so, by name,
+    and does not say the campaign is finished."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    named = exhaustive_conversion_items(L)[::-1]            # reversed: "the order named" is not the catalog's order
+    R = run_driver(env, "quicksweep", ["--quick", "--legs", "api-test", "--sweep-items", ",".join(named)], src=src, cap=150)
+    sw = sorted(R.legs(kind="sweep"), key=lambda x: (x["start_epoch"], x["tile"] or 0))
+    quad = sorted((x for x in sw if x["image"] == "quad"), key=lambda x: x["tile"] or 0)
+    names_of = lambda im: [x["sweep"]["item"] for x in sw if x["image"] == im]
+    c("quick sweep: with --sweep-items naming 22 items none of which is quick's own, the quad's wave is the first four named, "
+      "one a tile, in the order named", [(x["tile"], x["sweep"]["item"]) for x in quad] == [(i + 1, named[i]) for i in range(4)],
+      str([(x["tile"], x["sweep"]["item"]) for x in quad]))
+    c("quick sweep: the single and then the deep take one item a wave, the next two named each, not the first again",
+      names_of("single") == named[4:6] and names_of("deep") == named[6:8], f"{names_of('single')} {names_of('deep')}")
+    c("quick sweep: all eight slices passed, each of quick's own size (2^18 encodings), and the smoke exits 0",
+      len(sw) == 8 and all(x["status"] == "pass" and x["sweep"]["hi"] - x["sweep"]["lo"] == 1 << 18 for x in sw) and R.rc == 0,
+      f"rc {R.rc}, {len(sw)} slices, {sorted({x['status'] for x in sw})}")
+    c("quick sweep: no wave was empty (no sweep_empty event), and the log never says the campaign is finished",
+      not R.events("sweep_empty") and "nothing left to run" not in R.text, str([e["detail"] for e in R.events("sweep_empty")][:2]))
+    R2 = run_driver(env, "quickdisabled", ["--quick", "--legs", "api-test", "--sweep-items", "sqrt32-rne"],
+                    [{"leg": "soak", "op": "sqrt32", "from": 1, "do": "garbage"}], src=src, cap=150)
+    dis, emp = R2.events("item_disabled"), R2.events("sweep_empty")
+    c("quick sweep: the only item named gave three unreadable slices and was disabled (quad, then the single's two waves)",
+      len(R2.legs(kind="sweep")) == 3 and all(x["status"] == "parse_error" for x in R2.legs(kind="sweep")) and len(dis) == 1,
+      f"{[x['status'] for x in R2.legs(kind='sweep')]}, {len(dis)} events")
+    c("quick sweep: the empty wave that follows says it is blocked, by name and by cause - the item disabled - and that the "
+      "campaign is NOT finished, and the old 'nothing left to run in this campaign' is not said",
+      len(emp) == 1 and emp[0].get("cause") == "blocked" and "sqrt32-rne" in emp[0]["detail"] and "disabled" in emp[0]["detail"]
+      and "NOT finished" in emp[0]["detail"] and "nothing left to run" not in emp[0]["detail"] + R2.text
+      and emp[0]["image"] == "deep" and bool(dis) and dis[0]["epoch"] <= emp[0]["epoch"], str([e["detail"] for e in emp][:2]))
+    rp = os.path.join(src, "card_stress_report.py")         # src is HERE, or a plant's copy of the code
+    if os.path.exists(rp):
+        p = subprocess.run([sys.executable, "-B", "-I", rp, R2.out, "--no-write"], capture_output=True, text=True, timeout=120)
+        c("quick sweep: the report reads a run directory that holds a sweep_empty event: exit 0, and its events line counts it",
+          p.returncode == 0 and re.search(r"^\s*events\s*:.*\bsweep_empty 1\b", p.stdout, re.M) is not None,
+          f"rc {p.returncode}: {p.stderr[-160:]}")
     return out
 
 
@@ -1782,7 +2146,7 @@ def scn_report(env: Env, src: str = HERE) -> list:
         return out
     R = env.normal
     jpath = os.path.join(env.tmp, "rep.json")
-    p = subprocess.run([sys.executable, "-I", rp, R.out, "--json", jpath], capture_output=True, text=True, timeout=120)
+    p = subprocess.run([sys.executable, "-B", "-I", rp, R.out, "--json", jpath], capture_output=True, text=True, timeout=120)
     txt = p.stdout
     legs = R.legs()
     n_pass = sum(r["status"] == "pass" for r in legs)
@@ -1822,7 +2186,7 @@ def scn_report(env: Env, src: str = HERE) -> list:
     with open(os.path.join(cp, "metrics.jsonl"), "w") as fh:
         for r in recs:
             fh.write(json.dumps(r) + "\n")
-    p2 = subprocess.run([sys.executable, "-I", rp, cp, "--no-write"], capture_output=True, text=True, timeout=120)
+    p2 = subprocess.run([sys.executable, "-B", "-I", rp, cp, "--no-write"], capture_output=True, text=True, timeout=120)
     c("report: one leg changed to fail: the totals say pass one fewer and fail 1, and the failure is listed with its log path",
       f"{len(legs)} recorded; pass {n_pass - 1}, fail 1" in p2.stdout and "the-planted-failure.log" in p2.stdout
       and "the-planted-failure.log" not in txt, p2.stdout[p2.stdout.find("== TOTALS"):][:300])
@@ -1861,7 +2225,7 @@ def plant_parsers(env: Env, src: str) -> list:
     card_stress_lib), reading the real tree's tool sources."""
     e = dict(os.environ)
     e["CARD_STRESS_TEST_ROOT"] = ROOT
-    p = subprocess.run([sys.executable, "-I", os.path.join(src, "test_card_stress.py"), "--only", "parsers", "--no-plants"],
+    p = subprocess.run([sys.executable, "-B", "-I", os.path.join(src, "test_card_stress.py"), "--only", "parsers", "--no-plants"],
                        capture_output=True, text=True, env=e, timeout=120)
     bad = [ln.strip()[6:].strip() for ln in p.stdout.splitlines() if ln.startswith("  FAIL  ")]
     if p.returncode != 0 and not bad:
@@ -2023,6 +2387,71 @@ def plants(env: Env) -> None:
          [("card_stress_report.py", '                      _reach_text(e["reach"])]\n                     for e in W["exhaustive"]])',
            '                      "host"]\n                     for e in W["exhaustive"]])')],
          lambda env, src: scn_report(env, src), ["report: and its reach column (the last) is what the driver wrote into every one of its records"]),
+        # parcel DR1 (2026-10-20): the telemetry sampler's order, the revision-8 table, --quick with --sweep-items
+        ("the telemetry sampler is not serialised",
+         [("card_stress.py", "        with self.tel_lock:\n            self.take_sample(when, img)\n", "        self.take_sample(when, img)\n")],
+         lambda env, src: telemetry_order_checks(src) + scn_telemetry_hang(env, src),
+         ["telemetry: two samples that overlap are recorded in the order their readings were taken",
+          "telemetry hang: no two samples ran at once"]),
+        ("the run's stop does not reach a timer sample in flight",
+         [("card_stress.py", '                    if when == "timer" and self.tel_stop.is_set():\n'
+           '                        return          # the run is ending and its own "end" sample is next: not behind this one\n', "")],
+         lambda env, src: telemetry_order_checks(src),
+         ["telemetry: a timer sample the run's stop reaches while it is in flight is dropped"]),
+        ("the driver appends telemetry records in swapped pairs",
+         [("card_stress.py", "        self.rec(rec)\n        self.last_tel = rec\n",
+           "        held = getattr(self, '_held', None)\n        if held is None:\n            self._held = rec\n"
+           "        else:\n            self.rec(rec)\n            self.rec(held)\n            self._held = None\n"
+           "        self.last_tel = rec\n")],
+         scn_telemetry, ["telemetry: the stand-in's temperature rises with time and the samples show it, in order"]),
+        ("the revision-8 table drops a routine entry",
+         [("card_stress.py", '"culture-rk4-tangent-fp64", "culture-rk4-tangent-fp256")', '"culture-rk4-tangent-fp64")')],
+         lambda env, src: group_commands(src), ["REV8_ENTRIES is acceptance.py's table"]),
+        ("a routine entry counts as an image that is not cached",
+         [("card_stress.py", "            missing = [e for e in chosen if e not in REV8_ROUTINE_ENTRIES\n                       and not all(",
+           "            missing = [e for e in chosen\n                       if not all(")],
+         lambda env, src: group_commands(src), ["acceptance-rev8: the routine entries are never 'uncached'",
+                                                "acceptance-rev8: with every workload cached the quad runs fifteen"]),
+        ("the revision-8 leg does not name --lib for the routine entries",
+         [("card_stress.py", '                argv += ["--lib", os.path.join(R, "host", "libcft.so")]\n', "                pass\n")],
+         lambda env, src: group_commands(src), ["acceptance-rev8 on the quad: the routine entries make the leg name --lib"]),
+        ("--quick ignores --sweep-items again",
+         [("card_stress.py", "        if self.sweep_only:\n            names = [n for n in dict.fromkeys(self.sweep_only)",
+           "        if False:\n            names = [n for n in dict.fromkeys(self.sweep_only)")],
+         lambda env, src: group_commands(src) + scn_quick_sweep(env, src),
+         ["quick with --sweep-items: the quad's wave is four jobs", "quick sweep: with --sweep-items naming 22 items"]),
+        ("an item outside --sweep-items is called covered in the empty wave's sentence",
+         [("card_stress.py", '                return "outside --sweep-items", n\n', '                return "covered", n\n')],
+         lambda env, src: group_commands(src), ["empty wave, the case of 2026-10-19"]),
+        ("an empty wave still says the campaign is finished",
+         [("card_stress.py", "                why, cause = self.why_no_wave(forced)\n",
+           '                why, cause = "nothing left to run in this campaign", "finished"\n')],
+         lambda env, src: scn_quick_sweep(env, src),
+         ["quick sweep: the empty wave that follows says it is blocked"]),
+        # verifier-VDR1's two (2026-10-20): "finished" decided over the campaign, and the smoke's next item
+        ("the finished sentence is decided over the wave's list again",
+         [("card_stress.py", "        campaign = named or [it.name for it in self.items]\n",
+           "        campaign = list(forced) if forced else (named or [it.name for it in self.items])\n")],
+         lambda env, src: group_commands(src), ["empty wave, a single image whose sqrt32-rne is covered"]),
+        ("an empty quick wave ends the image's sweep again",
+         [("card_stress.py", "                if self.quick and not self.sweep_only and waves + 1 < self.quick_waves(img):\n",
+           "                if False:\n")],
+         lambda env, src: group_commands(src), ["quick: a single image whose first item cannot run goes on to its second"]),
+        # the lead's question about ab92598: the narrowed pid test must still see a stand-in that really is left hung
+        ("a hung examine call is not killed at its timeout",
+         [("card_stress.py", "def expand(path: str) -> str:\n    return os.path.expandvars(os.path.expanduser(path))\n",
+           "def expand(path: str) -> str:\n    return os.path.expandvars(os.path.expanduser(path))\n\n\n"
+           "def _run_no_kill(argv, timeout):\n"
+           "    p = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)\n"
+           "    out, err = p.communicate(timeout=timeout)     # a timeout raises and the child is left running: the defect\n"
+           "    return subprocess.CompletedProcess(argv, p.returncode, out, err)\n"),
+          ("card_stress.py", 'p = subprocess.run(argv + ["--format", "JSON", "--output", path], capture_output=True,\n'
+           '                                   text=True, timeout=a.telemetry_timeout)',
+           'p = _run_no_kill(argv + ["--format", "JSON", "--output", path], a.telemetry_timeout)'),
+          ("card_stress.py", "p = subprocess.run(argv, capture_output=True, text=True, timeout=a.telemetry_timeout)",
+           "p = _run_no_kill(argv, a.telemetry_timeout)")],
+         lambda env, src: scn_telemetry_hang(env, src),
+         ["telemetry hang: every examine call hung and was killed at --telemetry-timeout"]),
     ]
     for name, edits, fn, expects in P:
         if pick and pick not in name:

@@ -894,7 +894,10 @@ python3 hw/card_stress_report.py /data/card-stress-1016     # the report, any ti
   no card and no XRT: about 5 minutes under WSL and 6 to 8 under Git Bash (2026-10-19, a desktop other
   sessions share), and it must be run alone on the host (two drivers at once see each other's
   stand-ins as card users). `--no-plants` leaves out the negative controls, which take about
-  twice as long as everything else together (11 minutes under WSL).
+  twice as long as everything else together (11 minutes under WSL). The runner and the pythons
+  the suite itself starts run with `-B` (`-I` ignores `PYTHONDONTWRITEBYTECODE`); the report script
+  the driver starts for itself does not, so a run in the tree under WSL still leaves one git-ignored
+  card_stress_lib file in hw/__pycache__ unless that variable is set.
 - **The smoke (`--quick`)**: every leg once on each image (quad, single, deep), short slices;
   exit 0 only if every leg passed (a leg skipped by name, with its reason, is not a failure).
   **Estimated** at 24 to 28 minutes on the card, from the 2026-10-06 card times where there are
@@ -903,7 +906,10 @@ python3 hw/card_stress_report.py /data/card-stress-1016     # the report, any ti
   where there are none (api-test, `dt-i`, `seq-check` at 60-120 s, the sweep's slices, an image
   load): COMPUTED and BELIEVED, not measured. If it runs past 30 minutes, those are the suspects.
   Outside the estimate: the host build (`make -C host XRT=1 ...`, once) and, if
-  `--rev8-images` holds no cache, the revision-8 entry's 51 s compile on the quad.
+  `--rev8-images` holds no cache, the revision-8 entry's 51 s compile on the quad. Since
+  2026-10-20 the smoke's revision-8 leg on the quad also runs one routine entry, about 10 s
+  (COMPUTED from the lead's 57 s for six), inside the estimate's margin. With `--sweep-items` the
+  smoke sweeps the items named, not its own four (the sweep paragraph below).
 - **The long run** needs `--until` (the box's local time). Use a **new `--out`** (default
   `~/card-stress-out/<stamp>-<commit>`; put it on `/data`) **outside the checkout** - files in the
   tree make it untracked, which changes the build id `hw/card-segrun.sh` asserts, so the driver
@@ -937,7 +943,7 @@ python3 hw/card_stress_report.py /data/card-stress-1016     # the report, any ti
 | `card-segrun` | `hw/card-segrun.sh IMAGE` | `== card-segrun: N checks, F failed` | 1500 |
 | `seq-check` | `host/tests/seq_check.py --trials 250 --formats fp32 fp64 fp128 fp256 --device IMAGE` | the device's "agree on every program" line, the program counts | 2400 |
 | `acceptance` | `programs/acceptance.py --device IMAGE` | `acceptance: N of M PASS ...; K checks ok, F failed` | 2400 |
-| `acceptance-rev8` | `... --set rev8 --legs set --device IMAGE --target T --images DIR --only ENTRIES` | the same, as `acceptance rev8` | 2400 (+14400 until the images are cached) |
+| `acceptance-rev8` | `... --set rev8 --legs set --device IMAGE --target T --images DIR --only ENTRIES` (+ `--lib`, naming this tree's host/libcft.so, when ENTRIES has a routine entry, as on the quad) | the same, as `acceptance rev8` | 2400 (+14400 until the workloads' images are cached) |
 | `resident`, `selftest` | `cft-resident IMAGE`; `cft-selftest vectors/out IMAGE` (every 3rd visit) | `every row: status clean ...`; `N cases checked` | 600; 3600 |
 
 The timeouts are several times the card times of 2026-10-06 (docs/VALIDATION.md), with a floor.
@@ -947,19 +953,32 @@ verdict is refused the same way. `hw/card_stress_lib.py` holds every pattern, ea
 printf it matches.
 
 - **The revision-8 leg** runs the entries the image is (`--target`): programs/acceptance.py's
-  rule puts nine on the quad, one on the deep and **none on the single** (where R21 alone keeps a
+  rule puts fifteen on the quad - nine workloads and the six routine entries the math library
+  added on 2026-10-19 - one on the deep and **none on the single** (where R21 alone keeps a
   workload off the quad, which none does), so the single's leg is recorded as skipped, by name.
   Two entries compile for 40 minutes and 2.2 hours (Gray-Scott extended, the deep's only entry,
   and Riccati extended): **they are left out unless their image and bank are already in
-  `--rev8-images`** (default `$OUT/rev8-images`), so by default the quad runs eight and the deep's
-  leg is skipped, by name, with that reason. The driver does not compile them in the background;
-  seed that directory from the lead's W8 images and it runs nine on the quad and one on the
-  deep. The eight that compile in minutes compile once, on the first visit of the quad, and are
-  read back after. The revision-8 set holds six more entries since 2026-10-19, the math library's
-  routine references (the section "Owed to the next card day (added 2026-10-19)" below), which this
-  table does not name: `REV8_ENTRIES` is hard-coded to the ten workloads and
-  `hw/test_card_stress.py` holds it to `REV8` in programs/acceptance.py, so the stress run does not
-  run the six until they are added to the quad's list here and to that test's count.
+  `--rev8-images`** (default `$OUT/rev8-images`), so by default the quad runs fourteen (eight
+  workloads and the six routine entries) and the deep's leg is skipped, by name, with that reason.
+  The driver does not compile them in the background; seed that directory from the lead's W8
+  images and it runs fifteen on the quad and one on the deep. The eight workloads that compile in
+  minutes compile once, on the first visit of the quad, and are read back after.
+  **The six routine entries** (the Lotka-Volterra, diode and culture references at fp64 and
+  fp256: `REV8_ROUTINES` in programs/acceptance.py, the section "Owed to the next card day" below)
+  have nothing to compile or to cache: their image and bank are committed files under
+  programs/systems/compiled-tangent/, which `--images` does not touch, so they never add the
+  compile allowance to the leg's timeout. They need libcft's shared library for the mark probe,
+  and the leg names this tree's own, host/libcft.so, with `--lib`, rather than leave it to `$CFT_LIB`
+  (acceptance.py's default); the build step has already asserted that library is XRT-linked. Of the
+  box the six ask nothing the driver's build does not already make. They were missing from the
+  driver from 2026-10-19 to 2026-10-20: `REV8_ENTRIES` is a table in hw/card_stress.py, and its test
+  read `REV8` alone and counted its ten. The test now holds the table to `REV8` and
+  `REV8_ROUTINES`, entry for entry and target for target, and goes red on any other `REV8` name in
+  programs/acceptance.py that it has not been shown. The six took 57 s on the card (MEASURED, the
+  lead's, below); the leg's 2400 s is 5.9 times the quad's fifteen, 353 s for the nine workloads
+  (2026-10-12) and 57 s for the six, 410 s (COMPUTED). The smoke (`--quick`) runs one of them,
+  `lotkavolterra-rk4-tangent-fp64`, beside `phi4_extended_fp64`: about 10 s more (COMPUTED, 57 s
+  over six), the routine path on the card in the smoke instead of in the long run's first cycle.
 - **The sweep** is hw/run-soak.sh's and hw/run-c5-soak.sh's campaigns - fp32 `sqrt32` under five
   attributes, fp32 `roundToIntegral` under five, `nextUp`, `nextDown`, `logB`, `class`, each over
   all 2^32 encodings; **the exhaustive conversion and scaleB items**, also over all 2^32
@@ -983,7 +1002,27 @@ printf it matches.
   out or lost the device is not covered and is run again, and one that fails to finish
   `--quarantine-after` (2) times is moved past and recorded. `--sweep-items sqrt32-rne,...`
   restricts the campaign (a wave runs one job a distinct item, so one tile per item named: name
-  four items for four tiles). `nextup32` and `nextdown32` report 8 more cases than their range (the
+  four items for four tiles). **With `--quick` the smoke's waves are those items** (since
+  2026-10-20), in the order named and the least served first, skipping any that cannot run: the
+  first four on the quad, one a wave (two waves) on a single image, so the single and then the deep
+  take the next ones and not the same again, and with `--resume` a second smoke should go on again (read from
+  `load_state`, which rebuilds the served counts; not run).
+  Until then the smoke planned its own four items (`sqrt32-rne`, `rint32-rne`, `div32-rne`,
+  `nextup32` on the quad) whatever was named: on 2026-10-19 `--quick --sweep-items` naming EX's 22
+  exhaustive items named none of them, every wave was empty (the lead's account: the report said
+  "slices: 0 completed") and the log said "sweep: nothing left to run in this campaign" on each
+  image, which reads like a finished campaign. **A wave with nothing to run now says why**, in
+  the log and as a `sweep_empty` event in `metrics.jsonl` (the report counts it in its events
+  line): `nothing left to run in this campaign` (`nothing left to run for the items named by
+  --sweep-items` when some are named) only when every item of the campaign is an exhaustive item
+  already covered - decided over the campaign, never over the wave's own list. When only the
+  wave's list is blocked it says `no job from this wave's list could start (...), but the campaign
+  is NOT finished` and names what can still run; when nothing can run, `no sweep job could start,
+  and the campaign is NOT finished`, with the items by cause (outside `--sweep-items`, disabled,
+  covered, moved past by the quarantine, not in this run's catalog because a probe ruled it out).
+  On a single image or the deep, if the smoke's first item cannot run (a covered `sqrt32-rne`, a
+  resumed run's), it goes on to the second (`rint32-rne`) instead of ending that image's sweep.
+  `nextup32` and `nextdown32` report 8 more cases than their range (the
   tool runs eight edge cases in every slice, clause5_soak.c `next_edges32`); the driver expects
   exactly that and refuses any other count.
   **The exhaustive conversion and scaleB items say what they covered**: their verdict line ends
@@ -1420,7 +1459,23 @@ model's answers on its cases to an exact arbiter, and the builders to exhaustion
 - **Telemetry**: `xrt-smi` or `xbutil examine -d 0000:02:00.1 -r electrical|thermal|mechanical`
   (each report tries one tool and then the other, and remembers which answered), as JSON where
   it will, else as text, on a timer (300 s) and between legs, with the host's load, memory and
-  free disk. **The JSON's shape is BELIEVED, not read from a card**: numbers are kept
+  free disk. **A sample is taken one at a time** (since 2026-10-20): the timer's thread and the
+  run's own calls (before a cycle, after its battery, at the end) hold one lock from the first
+  examine call to the append, so the records are in the order the readings were taken. Before,
+  two overlapping samples could append in the other order; the dry-run test's telemetry check saw
+  one pair swapped, once, on a busy desktop (docs/VALIDATION.md, parcel EX). **What the lock can
+  cost**: a call that arrives while a sample is in flight waits for it, then takes its own. Every
+  examine call is killed at `--telemetry-timeout` (60 s), and a sample is at most 12 calls (three
+  reports, two tools, JSON and text), so the wait is at most 720 s, and only if every call hangs;
+  a sample that answers takes about a second (BELIEVED: the stand-in's, not timed on the card). A
+  run that is stopping (STOP, a signal, the deadline) drops the timer's sample at its next
+  examine call, so the run's `end` sample waits for at most one call more: stopping takes at most
+  one sample and one timeout longer than before, worst alignment, all calls hung. MEASURED in the
+  dry run, every examine call hung and
+  `--telemetry-timeout 2`, STOP touched during the first sample: STOP to end 8.4 s without the
+  lock (the first two samples overlapped), 11.9 s with the lock alone and 9.8 s with the lock and
+  that rule; each hung call was killed at its timeout and none was left running
+  (`hw/test_card_stress.py`, group `telemetry`). **The JSON's shape is BELIEVED, not read from a card**: numbers are kept
   under whatever labels their neighbours give them, and a sample with no readable number is
   recorded as such, with its raw text, never as a reading. Add `platform` to
   `--telemetry-reports` for the clocks; it has failed in `xrt-smi` before (docs/VALIDATION.md,
@@ -1457,8 +1512,10 @@ Four facts that shape the commands:
   exits 1 (MEASURED on the software backend), and `--target u50-rev8` does the same (READ: the
   filter is the entry's target). rev8a and rev8d have no routine entry, and the set gives an entry
   one target.
-- **The stress run does not run them** (the table above): `hw/card_stress.py` and its test hold the
-  ten workloads. Adding the six is a follow-up.
+- **The stress run runs them since 2026-10-20** (the revision-8 leg, above): `hw/card_stress.py`'s
+  table and its test now hold the ten workloads and the six, and the leg names the tree's own libcft with `--lib` for them. Of the box that asks nothing the driver's build does not already
+  make: host/libcft.so (XRT=1, ldd-checked), `cft-segrun` and `cft-audit`, and the six's committed
+  files, which a checkout has.
 - **The lane byte needs libcft's shared library.** A version-1 certificate carries no per-lane
   block: cft-segrun asks the library for R23's byte a lane at format version 2 only, which refuses
   a segment that marks a lane unless an image replays it. So the driver's *mark probe* re-runs
@@ -1538,8 +1595,7 @@ a segment (256 lanes, ten steps) is BELIEVED well under a second.
   it): `python3 programs/acceptance.py --set rev8 --write --images /data/card-stress-rev8images`
   on the software backend (no `--device`), then `git diff --stat programs/acceptance-rev8.json`
   must print nothing. All sixteen entries; the desktop took 558 s, the box BELIEVED 10 to 15 minutes.
-- **Not on this day:** rev8d (the command above selects no entry there) and the stress run's
-  table (above).
+- **Not on this day:** rev8d (the command above selects no entry there).
 
 ## What to record
 

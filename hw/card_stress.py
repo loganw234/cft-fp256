@@ -33,7 +33,9 @@ THE LEGS (each a command the 2026-10-06 and 2026-10-12 card runs used; docs/VALI
   card-segrun      hw/card-segrun.sh IMAGE: the segment runner's card leg, certificates audited
   seq-check        host/tests/seq_check.py --device IMAGE: the eight corpora on the card
   acceptance       programs/acceptance.py --device IMAGE: the card's admission test
-  acceptance-rev8  the revision-8 set, --target the image, only the entries that image is
+  acceptance-rev8  the revision-8 set, --target the image, only the entries the rule gives that
+                   image: the quad's nine workloads and six routine entries (the routine
+                   entries read committed files and --lib host/libcft.so), the deep's one
   resident, selftest  (beyond the brief) cft-resident IMAGE; cft-selftest vectors/out IMAGE,
                    every third visit
 and the SWEEP: hw/run-soak.sh's and hw/run-c5-soak.sh's own campaigns (their job lines, their
@@ -118,25 +120,38 @@ IMAGES = {
              "bbf08fb3feb60940bcbdfcf0eebef12de8fd55c7d302b2f896534c49447316fa"),
 }
 
-# programs/acceptance.py:246-255 (REV8): the revision-8 set's entries and the image the rule
-# picks for each. hw/test_card_stress.py reads that source and fails if this table differs.
+# programs/acceptance.py, REV8 and REV8_ROUTINES: the revision-8 set's entries and the image the
+# rule picks for each - the ten workloads, then the six routine entries (parcel MA, 2026-10-19),
+# all six on the quad. hw/test_card_stress.py reads that source and fails if this table is not
+# both tuples, entry for entry, or if acceptance.py has a REV8 name the test has not been shown.
+# The six were missing from here from 2026-10-19 to 2026-10-20: the test read REV8 alone and
+# counted its ten, so a second tuple in the same file went by unseen.
+# A routine entry's image and bank are committed files (programs/systems/compiled-tangent/): no
+# compile, nothing to cache in --rev8-images, which acceptance.py ignores for them.
+REV8_ROUTINE_ENTRIES = ("lotkavolterra-rk4-tangent-fp64", "lotkavolterra-rk4-tangent-fp256",
+                        "diode-rk4-tangent-fp64", "diode-rk4-tangent-fp256",
+                        "culture-rk4-tangent-fp64", "culture-rk4-tangent-fp256")
 REV8_ENTRIES = {
     "u50-rev8-quad": ["gray_scott_hard_fp64", "gray_scott_wide_fp256",
                       "lorenz_tangent_hard_fp64", "lorenz_tangent_wide_fp256",
                       "fput_extended_fp64", "phi4_extended_fp64",
                       "kuramoto_sivashinsky_extended_fp64", "reservoir_extended_fp64",
-                      "riccati_extended_fp64"],
+                      "riccati_extended_fp64"] + list(REV8_ROUTINE_ENTRIES),
     "u50-rev8": [],
     "u50-rev8-deep": ["gray_scott_extended_fp64"],
 }
 # Compiles of 40 minutes (Gray-Scott extended) and 2.2 hours (Riccati extended) on the box
-# (programs/acceptance.py:236-244): left out unless their image and bank are already cached.
+# (programs/acceptance.py, the note above REV8): left out unless their image and bank are
+# already cached.
 REV8_LONG_COMPILES = ("gray_scott_extended_fp64", "riccati_extended_fp64")
-# Short entries for --quick: a revision-7 set entry or two, and the revision-8 entry that
-# compiles in 51 s (phi4_extended_fp64, programs/acceptance.py:241-243).
+# Short entries for --quick: a revision-7 set entry or two, the revision-8 entry that compiles
+# in 51 s (phi4_extended_fp64, the same note) and, on the quad, one routine entry: it has no
+# compile, so the smoke takes the routine path (the --lib probe, the structured lanes) on the
+# card instead of the long run's first cycle finding out.
 QUICK_ACCEPT_ONLY = "lorenz63-rk4-fp64,lorenz96-rk4-fp64"
 QUICK_REV8_ONLY = {"u50-rev8-quad": "phi4_extended_fp64",
                    "u50-rev8-deep": "gray_scott_extended_fp64"}
+QUICK_REV8_ROUTINE = {"u50-rev8-quad": "lotkavolterra-rk4-tangent-fp64"}
 
 BATTERY = ["api-test", "dt-i", "dt-q8", "dt-full", "dt-r", "dt-b", "card-segrun",
            "seq-check", "acceptance", "acceptance-rev8", "resident", "selftest"]
@@ -144,7 +159,9 @@ QUICK_BATTERY = ["api-test", "dt-i", "dt-q8", "dt-full", "dt-r", "dt-b", "card-s
                  "seq-check", "acceptance", "acceptance-rev8"]
 # Seconds. Sized from the card runs of 2026-10-06 (docs/VALIDATION.md): device-test's three
 # matrices took about 2, 11-14 and 2 s; card-segrun 169-185 s; the acceptance set 371-384 s;
-# the revision-8 set 353 s on the quad (images cached) and 77 s on the deep. A timeout is a
+# the revision-8 set 353 s on the quad (images cached) and 77 s on the deep, and 57 s for the six
+# routine entries (docs/CARDDAY.md, 2026-10-19), so 410 s for the quad's fifteen: 2400 s is 5.9
+# times that (COMPUTED). A timeout is a
 # several-times margin on those, with a floor, because a hang costs only its timeout and a
 # false timeout costs a run (an abandoned run poisons the tile). api-test, dt-i, dt-b,
 # seq-check, resident and selftest have no card figure in the records: BELIEVED, from their
@@ -154,7 +171,7 @@ DEFAULT_TIMEOUTS = {"api-test": 300, "dt-i": 300, "dt-q8": 600, "dt-full": 900, 
                     "dt-b": 600, "card-segrun": 1500, "seq-check": 2400,
                     "acceptance": 2400, "acceptance-rev8": 2400, "resident": 600,
                     "selftest": 3600}
-REV8_FIRST_COMPILE_ALLOWANCE = 4 * 3600   # added when an entry's cached image is missing
+REV8_FIRST_COMPILE_ALLOWANCE = 4 * 3600   # added when a workload's cached image is missing (never for a routine entry)
 DEFAULT_EVERY = {"selftest": 3}
 # api-test opens no image (it may open device 0 for an instant and passes without a card), so
 # its result neither ends nor extends the run of consecutive card failures.
@@ -435,6 +452,7 @@ class Driver:
         self.tel_json: Dict[str, bool] = {}   # per report: False once JSON gave nothing and text did
         self.tel_worked: Dict[str, str] = {}  # per report: the tool that last gave values
         self.tel_stop = threading.Event()
+        self.tel_lock = threading.Lock()      # one sample at a time, from the examine calls to the append
         self.tel_thread: Optional[threading.Thread] = None
         self.state = "STARTING"
         self.current = ""
@@ -899,17 +917,24 @@ class Driver:
                 if q is None or q not in chosen:
                     return Skip(f"--quick: {q} compiles in 40 minutes or more and no cached image is in "
                                 f"{self.rev8_images}; seed it (--rev8-images) to run it")
-                chosen = [q]
+                chosen = [q] + [r for r in [QUICK_REV8_ROUTINE.get(img.target)] if r in chosen]
             if not chosen:
                 return Skip(f"every {img.target} entry is a 40-minute-or-longer compile with no cached image "
                             f"in {self.rev8_images}: {', '.join(left_out)}")
             os.makedirs(self.rev8_images, exist_ok=True)
-            missing = [e for e in chosen if not all(os.path.isfile(os.path.join(self.rev8_images, e + ext))
-                                                    for ext in (".cftp", ".bank"))]
+            # a routine entry reads committed files and has nothing to compile or to cache: never "missing"
+            # (counted so, it would add the 4-hour compile allowance to every quad leg for ever)
+            missing = [e for e in chosen if e not in REV8_ROUTINE_ENTRIES
+                       and not all(os.path.isfile(os.path.join(self.rev8_images, e + ext)) for ext in (".cftp", ".bank"))]
             t = T + (REV8_FIRST_COMPILE_ALLOWANCE if missing else 0)
             argv = [py, os.path.join(R, "programs", "acceptance.py"), "--set", "rev8", "--legs", "set",
                     "--device", x, "--target", img.target, "--images", self.rev8_images,
                     "--only", ",".join(chosen)]
+            if any(e in REV8_ROUTINE_ENTRIES for e in chosen):
+                # the routine entries read each segment's per-lane block through libcft by ctypes (acceptance.py
+                # --lib, whose default is $CFT_LIB first): this tree's library, the XRT-linked one build_tools
+                # checked with ldd, not whatever the environment names
+                argv += ["--lib", os.path.join(R, "host", "libcft.so")]
             return Cmd(wrap(argv), t, lambda tx, rc: L.parse_acceptance(tx, rc, device=x, rev8=True,
                                                                          target=img.target), tmpdir=True)
         if leg == "resident":
@@ -1132,6 +1157,8 @@ class Driver:
         for k in range(jobs):
             pick = self.pick_item(reserved, avoid, forced[k] if forced and k < len(forced) else None)
             if pick is None:
+                if forced and k < len(forced):
+                    continue         # that item cannot run (disabled, covered): the rest of the wave still can
                 break
             it, gap = pick
             avoid.add(it.name)
@@ -1277,9 +1304,14 @@ class Driver:
             if self.quick and waves >= self.quick_waves(img):
                 break
             self.guard(True)
-            wave = self.plan_wave(img, remaining, jobs, self.quick_items(img, waves) if self.quick else None)
+            forced = self.quick_items(img, waves) if self.quick else None
+            wave = self.plan_wave(img, remaining, jobs, forced)
             if not wave:
-                self.say("sweep: nothing left to run in this campaign")
+                why, cause = self.why_no_wave(forced)
+                self.event("sweep_empty", why, image=img.name, cause=cause)
+                if self.quick and not self.sweep_only and waves + 1 < self.quick_waves(img):
+                    waves += 1       # quick's own list: the next wave has another item (a single's rint32-rne after a covered sqrt32-rne)
+                    continue
                 break
             recs = self.run_wave(img, wave)
             waves += 1
@@ -1300,10 +1332,70 @@ class Driver:
     def quick_items(self, img: Image, wave_no: int) -> List[str]:
         """--quick's sweep, fixed so the smoke shows each soak tool once on each image: on the quad
         one wave of four jobs, one a tile (both soak tools, a random item and a clause-5 next);
-        on a single, two waves of one job."""
+        on a single, two waves of one job.
+
+        With --sweep-items the named items replace that list (2026-10-20; before, every wave was
+        empty whenever none of the four was named, and the log said the campaign was finished). They
+        are taken in the order named, the least served first, and an item that cannot run is passed
+        over: the first four distinct ones on the quad, and on a single image one a wave, so a
+        second image's waves are the next items and not the same ones again (with --resume, a
+        second smoke goes on again)."""
+        if self.sweep_only:
+            names = [n for n in dict.fromkeys(self.sweep_only) if self.pick_item({}, set(), n)]
+            names.sort(key=lambda n: self.served.get(n, 0))     # stable: a tie stays in the order named
+            return names[:img.tiles if img.tiles > 1 else 1]
         if img.tiles > 1:
             return ["sqrt32-rne", "rint32-rne", "div32-rne", "nextup32"]
         return [["sqrt32-rne"], ["rint32-rne"]][min(wave_no, 1)]
+
+    def why_no_wave(self, forced: Optional[List[str]]) -> Tuple[str, str]:
+        """(a sentence, its cause - "finished" or "blocked") for a wave that plan_wave could not fill with one job.
+        The campaign is the catalog, or the items named by --sweep-items. It is finished only when every item of it is
+        an exhaustive item already covered, and only then does the sentence say `nothing left to run`: decided over the
+        CAMPAIGN, never over the wave's own list (verifier-VDR1: a single image whose sqrt32-rne was covered planned no
+        job from its list while sqrt32-rtz was still to run, and the sentence called the campaign finished). The wave's
+        list gives the causes, and when it is blocked and the campaign is not, the sentence says what remains.
+        2026-10-19's smoke printed the finished words on each image when --sweep-items named none of --quick's own items."""
+        have = {it.name: it for it in self.items}
+        named = list(dict.fromkeys(self.sweep_only))
+        campaign = named or [it.name for it in self.items]
+        scope = "named by --sweep-items" if named else "in the campaign"
+
+        def stopped_by(n: str) -> Tuple[str, str]:
+            """(what stops the item, how it is listed); "" for an item that can run."""
+            it = have.get(n)
+            iv = self.intervals.get(n, [])
+            if it is None:
+                return "not in this run's catalog (a probe at the build ruled it out)", n
+            if self.sweep_only and n not in self.sweep_only:
+                return "outside --sweep-items", n
+            if n in self.disabled_items:
+                return "disabled", f"{n} ({self.disabled_items[n][:90]})"
+            if it.kind == "exhaustive" and L.first_gap(iv) is None:
+                return "covered", n
+            if it.kind == "exhaustive" and L.first_gap(iv + self.quarantine.get(n, [])) is None:
+                return "moved past by the quarantine", n
+            return "", n
+
+        def causes(names: List[str]) -> str:
+            by: Dict[str, List[str]] = {}
+            for n in names:
+                c, tag = stopped_by(n)
+                by.setdefault(c or "able to run, but no job was planned (a defect in this driver)", []).append(tag)
+            return "; ".join(f"{len(v)} {k}: {', '.join(v[:6])}{', ...' if len(v) > 6 else ''}" for k, v in by.items())
+
+        can_run = [n for n in campaign if not stopped_by(n)[0]]
+        if all(stopped_by(n)[0] == "covered" for n in campaign):
+            return (f"nothing left to run {'for the items named by --sweep-items' if named else 'in this campaign'}: all "
+                    f"{len(campaign)} {'are' if named else 'items are'} exhaustive and covered", "finished")
+        left = f"{len(can_run)} of the {len(campaign)} items {scope} can still run ({', '.join(can_run[:6])}{', ...' if len(can_run) > 6 else ''})"
+        if can_run and forced:
+            return (f"no job from this wave's list could start ({causes(list(forced))}), but the campaign is NOT finished: "
+                    f"{left}", "blocked")
+        if can_run:
+            return f"no sweep job was planned although {left}: a defect in this driver", "blocked"
+        return (f"no sweep job could start, and the campaign is NOT finished - of the {len(campaign)} items {scope}, "
+                + causes(campaign), "blocked")
 
     # -- telemetry ------------------------------------------------------------
     def examine(self, tool: str, rep: str, mode: str) -> Tuple[Dict[str, float], str, Optional[str]]:
@@ -1338,6 +1430,21 @@ class Driver:
             return {}, "", f"{mode}: {e}"
 
     def telemetry(self, when: str, img: Optional[Image] = None) -> None:
+        """One sample, its record appended in the order the sample was taken. The timer's thread
+        and the run's own calls (before-cycle, after-battery, end) can overlap, and unserialised
+        two overlapping samples took their readings in one order and appended their records in the
+        other: hw/test_card_stress.py's telemetry check saw one pair swapped on a busy desktop
+        (docs/VALIDATION.md, parcel EX). So a sample holds tel_lock from its first examine call to
+        its append, and a call waits for the sample in flight: no longer than that sample's own
+        examine calls, each killed at --telemetry-timeout (3 reports, 2 tools, JSON and text: 12
+        calls, 720 s at the default 60 s, only if every call hangs). A timer sample the run's stop
+        reaches is dropped at its next examine call, so the "end" sample never waits behind a whole
+        new one. It also asks the vendor tool one question at a time of a card that a leg may be
+        using."""
+        with self.tel_lock:
+            self.take_sample(when, img)
+
+    def take_sample(self, when: str, img: Optional[Image] = None) -> None:
         """One sample: each report asked for as JSON, falling back to the as-is text (and
         remembering, per report, that JSON gave nothing where the text did), then the host's
         load, memory and free disk. A sample with no values is recorded as such - ok false, the
@@ -1356,6 +1463,8 @@ class Driver:
             tools = self.tel_tools(rep)
             for tool in tools:
                 for mode in modes:
+                    if when == "timer" and self.tel_stop.is_set():
+                        return          # the run is ending and its own "end" sample is next: not behind this one
                     got, text, err = self.examine(tool, rep, mode)
                     if got:
                         if mode == "text" and "json" in modes:
@@ -1965,7 +2074,9 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     g.add_argument("--no-sweep", action="store_true", help="the battery only")
     g.add_argument("--sweep-items", default="", help="comma-separated campaign items to sweep, e.g. sqrt32-rne,rint32-rne "
                    "(default: all; names are hw/card_stress_lib.py's sweep_items). A wave runs one job a distinct item, so "
-                   "name four items to use the quad's four tiles")
+                   "name four items to use the quad's four tiles. With --quick the smoke's waves are these items, in the "
+                   "order named, the least served first (instead of its own four): the first four on the quad, one a "
+                   "wave on a single image")
     g = ap.add_argument_group("policy")
     g.add_argument("--retry-pause", type=float, default=120, help="seconds to wait after the card fails to answer")
     g.add_argument("--max-card-failures", type=int, default=6, help="consecutive failures after which the run stops")
