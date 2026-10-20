@@ -21854,3 +21854,122 @@ Each parcel's own entry is above, in the order of the merges: FG's, EX's, SC's a
     - the four tips;
     - Logan's second request, quoted whole.
   - **VIW8's re-check** on 6db584a: (a) 0, (b) 1. The (b) was in its own words, which 6db584a quoted: git's "clean" for a CRLF file depends on the size the index entry recorded, and a changed mtime alone does not make the file show. Restated above, with its note on how VPK holds the "probably".
+
+## 2026-10-20 - the stress driver's three fixes: the telemetry sampler serialised, the six routine entries in the revision-8 leg, `--quick` with `--sweep-items`, and an empty wave that says why (parcel DR1, Sonnet 5.5); **none of it has touched the card or amd-arc-box**
+
+**What Logan asked,** verbatim, on 2026-10-20: "Math round may be slightly delayed to handle 6 and 9, as well as the task chips once the stress test is finished".
+- **The chips** are "The follow-ups" of the entry "2026-10-19 - the side parcels of 2026-10-19, closed". Three are the stress driver's, and they are this parcel: the telemetry check's race, the six routine entries in hw/card_stress.py's `REV8_ENTRIES`, and (from the smoke of 2026-10-19) `--quick` with `--sweep-items`. The fourth, the CRLF hazard in python/project_figures.py, is parcel FX's.
+- **The lead added two checks** while this parcel ran: the lock's worst case, and the new event read by the report and by the figure reduction (below).
+
+**Fix 1: the telemetry check's race** (hw/card_stress.py, hw/test_card_stress.py).
+- **The cause (READ, hw/card_stress.py, hw/card_stress_lib.py's `append_record`, hw/card_stress_standin.py):**
+  - the timer's thread and the run's own calls (before a cycle, after its battery, at the end) both ran `telemetry()`;
+  - the stand-in's thermal temperature is `30 + 0.5 n` for the n a file counter gives each examine call, and `append_record` stamps `ts` and `epoch` as it writes;
+  - so two overlapping calls could take n in one order and write in the other.
+  - COMPUTED from the stand-in: a telemetry call in the test makes four examine calls (electrical; thermal; mechanical as JSON and as text, which the stand-in does not know and fails both ways), so consecutive samples step by 2.0. EX's sequence steps 37.0 to 40.0 (six counter values: another sample's calls between) and then to 39.5.
+- **The decision: the driver, not the test.** A sample holds one lock from its first examine call to its append, so records are in the order the readings were taken.
+  - **Why not the record's two suggestions:** "take the stand-in's temperature from the call's own sample" needs a stand-in that knows the sample, which it does not. "Compare in counter order" is sorting by temperature, since the temperature is a function of the counter: `ts == sorted(ts)` would be true by construction, a check that cannot fail.
+  - Two samples of one card at once are also two questions at once to the vendor tool.
+- **MEASURED, the race forced, not waited for** (`telemetry_order_checks`, in hw/test_card_stress.py; no load): a sample A takes its reading and is held inside its examine call, a second sample B starts, A is released.
+  - **881bbcb's driver** (hw/card_stress.py and hw/card_stress_lib.py from `git show 881bbcb:...`): RED, `readings taken ['A', 'B'], records appended ['B', 'A'], temperatures [31.0, 30.5]`. EX's pair, made on demand.
+  - **The final driver:** green.
+- **The lock's worst case** (the lead's first added check).
+  - **READ:** `examine` is `subprocess.run(..., timeout=--telemetry-timeout)`, which kills the child at the timeout. A sample is at most 3 reports x 2 tools x 2 modes = 12 calls.
+  - **COMPUTED:** at the default 60 s a sample is at most 720 s, and only if every call hangs. A per-leg `telemetry()` that arrives behind the timer's sample waits at most that, then takes its own (at 881bbcb: its own alone). The wait is bounded by each call's timeout, not by the hung process.
+  - **The finding that mattered:** with the lock alone, a stopping run waited for a whole NEW timer sample: the timer's thread, blocked on the lock, takes it the moment the run's own sample lets go, and the run's `end` sample queues behind it. So a timer sample now drops itself at its next examine call once the run's stop is set (3 lines). The worst alignment is one sample plus one examine timeout longer to stop than at 881bbcb, only if every call hangs.
+  - **MEASURED, Windows (Miniconda 3.12.9), dry run** (`scn_telemetry_hang`, `measure_hang.py`, two runs each, no added load): every examine call hangs, `--telemetry-timeout 2`, one report (a sample is two calls), STOP touched when the first hung call began.
+
+    | driver | STOP to end | records | gaps between records | hung calls, alive after |
+    |---|---|---|---|---|
+    | 881bbcb, no lock | 8.3, 8.4 s | before-cycle, timer, end | 0.5, 4.0 s (the first two samples overlapped) | 6, 0 |
+    | the lock alone | 11.9, 11.9 s | before-cycle, timer, end | 4.0, 4.0 s | 6, 0 |
+    | the lock and the stop rule (final) | 9.8, 9.8 s | before-cycle, end | 6.1 s | 5, 0 |
+
+  - Each hung call was killed at its 2 s and the run obeyed STOP (exit 0, `stop_file`) in every run. The deadline shares the path (READ: `should_stop()` returns Stop for the stop file, a signal and the deadline in one function, checked between legs).
+- **The suite:** `scn_telemetry_hang` (three checks) in group `telemetry`, and a second phase of the forced check for the stop rule. **Plants,** each MEASURED red at the check written for it:
+  - the lock removed: the forced check, and the hang scenario's "no two samples ran at once";
+  - the stop rule removed: its own check;
+  - records appended in swapped pairs: scn_telemetry's own `ts == sorted(ts)` check, by name.
+- **Not seen:** a swapped pair at natural load, in the ten runs under "What I ran" (EX's came at load 2.15). **Not measured:** how long a sample takes on the card (BELIEVED about a second).
+
+**Fix 2: the six routine entries in the revision-8 leg** (hw/card_stress.py, hw/test_card_stress.py).
+- **The premise holds (READ):** the leg's `--only` named the ten workloads' entries alone, and acceptance.py runs `selected` entries only, so the six never ran in the leg; docs/CARDDAY.md said so twice.
+- **What the leg must pass for them (READ, programs/acceptance.py's `prepare`, `probe_library`, `main`):**
+  - `--only` with their names;
+  - `--lib host/libcft.so`: the mark probe loads libcft by ctypes, and acceptance.py's default is `$CFT_LIB` first. The leg names this tree's library, the one the build step ldd-checks, rather than trust the environment;
+  - nothing for `--images`: `prepare` reads `--images` for `workload` entries only, and the six read `programs/systems/compiled-tangent/<name>.cftp` and `.bank`, committed files.
+- **The trap:** the leg's `missing` list (entries whose files are not in `--rev8-images`) adds the 14,400 s first-compile allowance to the leg's timeout. The six are never in `--rev8-images`, so counted as missing they would add it to every quad leg for ever. They are exempt, and a check holds that.
+- **The decision: a table in the driver, held by the test to both tuples** (the must-have's own words), not derived at run time. The driver is standard-library only, and a parse failure at the start of a 60-hour run is a new way to lose it. **How the drift happened:** MA added `REV8_ROUTINES`, a second tuple in the same file, and the test read `REV8` alone and counted its ten. **How it is shut:** the test reads both tuples, entry for entry and target for target, and refuses any other module-level `REV8` name in acceptance.py that it has not been shown.
+- **MEASURED,** the old table check does notice a changed table: with only the driver's table edited, 3 of the 54 `commands` checks went red, the three that encode the old counts. It never read the second tuple.
+- **Timeout and estimates (COMPUTED, two figures read from the records):** 353 s for the nine workloads on the quad (2026-10-12) and 57 s for the six on the card (the lead's, 2026-10-19, in docs/CARDDAY.md) make 410 s for the quad's fifteen; the leg's 2400 s is 5.9 times that and is unchanged. `estimate()` is the timeout over three, 800 s, used only against the deadline, also unchanged.
+- **`--quick`:** its revision-8 leg runs `phi4_extended_fp64` (a 51 s compile) alone. Routine entries have no compile, so the smoke now also runs one, `lotkavolterra-rk4-tangent-fp64`, on the quad: the routine path (the `--lib` probe, the structured lanes, cft-audit) on the card in the smoke instead of in the long run's first cycle. About 10 s (COMPUTED: 57 s over six, not a measure of that entry), inside the smoke's 24 to 28 minute estimate.
+- **What the box needs before the next stress run: nothing beyond a checkout that has this commit and the build the driver already does.**
+  - The six's files and programs/acceptance-rev8.json are in git.
+  - `host/libcft.so` (XRT=1), `cft-segrun` and `cft-audit` are in `make -C host all`, and the driver's build step ldd-checks them.
+  - The lead's by-hand run of the same acceptance.py on rev8q needed no more.
+  - `$CFT_LIB` is no longer consulted by the leg.
+  - `--rev8-images` stays as it was: only the two long compiles want it, and the six do not use it.
+- **The suite:** the table check over both tuples; the quad's leg has 14 entries (eight workloads and the six) and names `--lib`; with the workloads cached it has 15 and its timeout is the leg's own (the routine entries never make it uncached); the deep has no `--lib`; the quick leg is `phi4_extended_fp64,lotkavolterra-rk4-tangent-fp64` with `--lib`; and `scn_normal` reads the stand-in's echo of the command the quick run gave. **Plants,** each MEASURED red at the check written for it: the table drops `culture-rk4-tangent-fp256`; a routine entry counted as uncached; `--lib` not named.
+
+**Fix 3: `--quick` with `--sweep-items`** (hw/card_stress.py, hw/test_card_stress.py).
+- **The cause (READ, as the brief says):** `--quick`'s sweep was a fixed list (four items on the quad, `sqrt32-rne` then `rint32-rne` on a single). `plan_wave` passed each to `pick_item` as `only=`, which skips an item that is not in `--sweep-items`. The EX items the lead named were none of quick's four, so every wave was empty; `sweep_phase` then printed "sweep: nothing left to run in this campaign", the words for a finished campaign. The long run was not affected.
+- **The decision: (a), and why not (b).**
+  - Under `--sweep-items`, quick takes the named items, in the order named, the least served first; the quad takes the first four, a single image one a wave; an item that cannot run is passed over.
+  - **Against (b), refusing the pair:** it would send the operator to the long run's whole battery for a smoke of a few items, which is what 2026-10-19's command wanted to avoid. The refusal stays the fallback if the lead prefers it.
+  - **A deliberate reading of "the first two on a single image":** the rotation means the single and then the deep take the NEXT items, not the first two again. On a fresh run the quad's four are the first four named, as the brief says. With `--resume` a second smoke should go on again (READ: `load_state` rebuilds the served counts from the records; not run), so 22 items are reached in about three smokes (COMPUTED: eight a smoke) instead of the first four being served again and again.
+- **An empty wave says why** (`why_no_wave`; a log line and a `sweep_empty` event in metrics.jsonl). Each item the wave could have run is classed as covered, disabled, outside `--sweep-items`, moved past by the quarantine, or not in this run's catalog (a probe ruled it out). "Nothing left to run in this campaign" is said only when every one is an exhaustive item already covered; otherwise "no sweep job could start, and the campaign is NOT finished", with the items by cause.
+- **`plan_wave` also changed:** a forced item that cannot run (disabled, covered) no longer ends the wave, `break` to `continue`. Before, one disabled item among quick's own four emptied the quad's wave while three others could run.
+- **The suite:**
+  - **in-process (13 checks):** named order against the catalog's (the 22 items are named reversed); the quad's wave of four on tiles 1 to 4; the single's next two; duplicates; a disabled or covered item passed over; the `continue`; and each empty-wave cause by name, including the case that misled the smoke (quick's own four planned with `--sweep-items` naming 22 others: all four "outside --sweep-items", none called covered);
+  - **end to end, against the stand-in (`scn_quick_sweep`, seven checks, the last the report's reading below):** `--quick --sweep-items` over the 22 items sweeps eight slices, the quad's four on tiles 1 to 4 and then two and two, all passing, exit 0, no empty wave. An item disabled on the way gives an empty wave that says "disabled" and "NOT finished" and not "nothing left to run".
+- **Plants,** each MEASURED red at the check written for it: `--quick` ignoring `--sweep-items` again (the in-process checks and the end-to-end ones, 13 red); an item outside `--sweep-items` called covered; an empty wave that still says the campaign is finished (the end-to-end check).
+
+**The `sweep_empty` event is read without error** (the lead's second check; figure_extracts.py was not touched).
+- **MEASURED, `python python/figure_extracts.py --verify --stress-metrics <the lead's metrics.jsonl> --stress-report <its report.txt>`** from this worktree, 30 s: rc 0 and five `ok` lines (history, tree, ledger, stress, and the stress control). The lead's copy of the inputs had its SHA256SUMS checked before (all four files OK) and after; nothing was written there.
+- **MEASURED (one process, nothing in the repository written):**
+  - a dry-run run directory made by the suite's own scenario holds one `sweep_empty` event, and hw/card_stress_report.py reads it: rc 0, `events : item_disabled 1, quarantine 1, stop_requested 1, sweep_empty 1`;
+  - **figure_extracts' stress reduction cannot take a dry run** (`ExtractError: telemetry has no 'electrical.devices[0].electrical.power_consumption_watts'`: it wants the card's own telemetry labels, the stand-in's differ), a named refusal that has nothing to do with the event;
+  - **the lead's real metrics.jsonl with the same event inserted** after a `cycle_start` (5,108 to 5,109 records): the reduction runs without error, and the only top-level key that differs from the reduction of the original is `sources` (the raw file's digest, bytes and record count). The report on that directory: rc 0, `events : beside 19, deadline 1, sweep_empty 1`, against `beside 19, deadline 1` as it was.
+  - **READ:** `make_stress` groups the records by type and reads leg, cycle_start, cycle_end, telemetry, run_start and run_end; `by["event"]` is never read. `--verify` cannot be run on the modified file, because it compares bytes with the committed extract, whose sources record the original's digest.
+- The suite holds the report half now: `scn_quick_sweep` runs the report on its dry-run directory with the event and requires rc 0 and `sweep_empty 1` in the events line.
+
+**What I ran** (MEASURED; WSL cft2204 is Ubuntu 22.04, Python 3.10.12, `nice -n 10`, the worktree read through /mnt/c; Windows is Git Bash with Miniconda 3.12.9; nothing else of mine ran beside any of them):
+- **WSL, `nice -n 10 bash hw/test-card-stress.sh --no-plants`,** 08:51:03, the working tree equal to dcc171b's code: **509 checks, 0 failed, 0 skipped, 322 s** (`real 5m23s`).
+  - By group: parsers 271, commands 69, normal 19, fail 6, timeout 6, deaf 2, nodevice 6, cardlost 6, stopfile 5, deadline 4, rotation 2, diskfloor 2, guard 8, sweep 9, disagree 6, telemetry 13, build 6, buildreal 7, internal 2, signal 4, torn 3, disable 11, sweepall 34, report 8.
+  - COMPUTED: 481 at 881bbcb, the 509 less the 28 added (commands 15, normal 1, telemetry 5, disable 7).
+- **WSL, `nice -n 10 bash hw/test-card-stress.sh`** (everything, plants included) **at dcc171b**, 08:57:51 to 09:14:59: **556 checks, 0 failed, 0 skipped, 1028 s** (`real 17m8s`). The groups above, then the control's 4 checks and 43 plants, nine of them new. **No flake seen** in either WSL run.
+- **Windows (Git Bash, Miniconda 3.12.9), `nice -n 10 python -B -I hw/test_card_stress.py --no-plants`,** 09:18:52, dcc171b's code: **494 checks, 0 failed, 3 skipped, 388 s** (`real 6m28s`).
+  - The skips, by name: `deaf` and `signal` (need POSIX) and `buildreal` (needs POSIX with make, cc, git and bash). `normal` is 17 where WSL's is 19: the two POSIX checks of it, the leg's `nice` and `timeout`. That is the 15 fewer than WSL's 509.
+  - A first Windows try, from PowerShell, failed in the `commands` group before the run began: PowerShell's `bash` is the WSL launcher, which mangled the variables `script_job_lines` hands it ("4294967296 / SLICES : division by 0"). Run from Git Bash it passes. That sensitivity is 881bbcb's, and not touched.
+- **Windows, `--only commands`,** 2 s: 54 checks at 881bbcb, 69 now.
+- **The nine new plants, one at a time** (`CARD_STRESS_PLANT=<text> ... --only plants`, Windows): each caught at its own check, 2 to 24 s (the lock's and the stop rule's again after the lead's checks, 11 s and 2 s); and all nine again in the full WSL run.
+- **The suite's own telemetry scenario, five times against each driver** (Windows, natural load, nothing added; `measure_tel.py`):
+  - 881bbcb: 72 samples (27 the timer's, at least 5 a run), 0 adjacent decreases, and 25 of the 67 steps between samples not 2.0, which are overlaps of the timer's path and the run's own, about 37 per cent of the pairs;
+  - the final driver: 60 samples (25 the timer's), 0 decreases, 0 of 55 steps not 2.0. The lock does not starve the timer.
+  - A swap needs the later-starting sample to append first: none in these ten runs, and EX saw one at load 2.15. The forced interleaving is what shows it on demand.
+- **The all-hang scenario against three drivers** (the table above): `measure_hang.py`, two runs each, 75 s in all.
+- **`python python/figure_extracts.py --verify --stress-metrics ... --stress-report ...`,** 30 s, rc 0, five ok; and the event readings above (`fe_event.py`).
+
+**Known limits:**
+- **The card was not touched,** so the routine path through the DRIVER (`--lib`, the six's committed files, the leg of fifteen) ran only against the stand-in, which does not parse flags. That the command is right is BELIEVED: it is the lead's by-hand command of 2026-10-19 (rev8q, 57 s, 118 checks) with the driver's usual `--images` and `--only`, and `prepare` reads `--images` for workloads alone.
+- **The lock's worst case** is stated above and was measured only in the dry run: a call that waits behind a hung sample waits at most 720 s and then takes its own, and a stopping run can take one sample and one timeout longer than at 881bbcb (+1.4 s measured, with a 2 s timeout). A sample's real duration on the card is BELIEVED about a second.
+- **The race itself at natural load** is shown by the forced interleaving, not by waiting for it; see "What I ran" for the overlaps counted at 881bbcb.
+- **A reading of (a):** the single and the deep take the next named items, not the first two again (above); the literal reading (the same first items on every image) is simpler and covers fewer items, and the refusal (b) is the fallback.
+- **The smoke's estimate** ("24 to 28 minutes", the driver's start message and CARDDAY) is unchanged: the routine entry adds about 10 s (COMPUTED).
+- **The `REV8` name guard** in the table test can go red for a harmless new name, by design: it asks that someone look.
+- **Size:** 586 lines changed in hw/card_stress.py, hw/test_card_stress.py and docs/CARDDAY.md (540 insertions, 46 deletions; 474 and 28 of them in the two Python files), against the brief's "about 100 to 300"; with this entry and the README's recount, five files, 664 insertions and 51 deletions. The excess is the tests and plants (a check and a plant for each fix, the separation of the empty wave's causes, the lead's two added checks) and the doc lines. The lead said it was fine if the report says so.
+- **The timing text in hw/test-card-stress.sh's header** ("about 16 minutes under WSL") is not this parcel's file; the full suite took 17 m 8 s at dcc171b, with nine more plants and 47 more checks. docs/CARDDAY.md's "about 5 minutes under WSL" and "6 to 8 under Git Bash" for `--no-plants` hold: 5 m 23 s and 6 m 28 s.
+- **For parcel DR2,** the regions this parcel touched in hw/card_stress.py: `leg_cmd`'s acceptance-rev8 block, `plan_wave`'s forced miss, `sweep_phase`'s empty-wave branch, `quick_items` and the new `why_no_wave`, `telemetry` and the new `take_sample`, and the `--sweep-items` help.
+- **`hw/__pycache__`** in the worktree (git-ignored) was made by the suite's own driver subprocesses and removed at the end, by its exact path.
+
+**What the brief got wrong:**
+- **"Every telemetry call takes a value from the stand-in's counter":** a call in the test takes four, one for each examine call (electrical; thermal; mechanical as JSON and as text), and the temperature is the thermal one's, so consecutive samples step by 2.0.
+- **The record's two suggestions** ("take the stand-in's temperature from the call's own sample, or compare in counter order") cannot work, as above: the stand-in knows no sample, and a counter order is a temperature order, so the second makes the check unable to fail. The brief's own alternative, fixing the driver, was the right one.
+- **"About 100 to 300 changed lines in all"** had an upper figure about half of what three fixes took when each wants a check and a plant; it also came before the lead's two added checks.
+- **The brief's wording of (a)** ("the first two on a single image") can be read as the same two items on every image; the rotation (above) is the better rule and is not that.
+- **It did not say that the lock can lengthen stopping.** The lead asked about the lock's worst case after the brief; the stop rule above is the answer.
+
+**Records:**
+- docs/CARDDAY.md: the revision-8 leg's paragraph (fifteen entries, the six, `--lib`, the timeout), the legs table's row, the smoke, the sweep paragraph (`--quick` with `--sweep-items`, the empty wave and its event), the telemetry bullet (the lock, its worst case, the measured table) and the routine entries' section (the stress run runs them).
+- docs/README.md recounted (CARDDAY.md 1,448 lines and VALIDATION.md 21,975, and the totals). `python python/check_docs_index.py`: **rc 0**, 34 s: "47 documents, 50 links, every count true", "47 negative controls planted, each caught by name". Its first try gave 6 problems: the two line counts, and `host/libcft.so` quoted in backticks in CARDDAY four times (a build product, which the check does not know); the path is written without backticks there now.
+- The ledger: Data/runs/2026-10-12-math-round/ledger/DR1.md.

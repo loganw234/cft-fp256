@@ -940,7 +940,7 @@ python3 hw/card_stress_report.py /data/card-stress-1016     # the report, any ti
 | `card-segrun` | `hw/card-segrun.sh IMAGE` | `== card-segrun: N checks, F failed` | 1500 |
 | `seq-check` | `host/tests/seq_check.py --trials 250 --formats fp32 fp64 fp128 fp256 --device IMAGE` | the device's "agree on every program" line, the program counts | 2400 |
 | `acceptance` | `programs/acceptance.py --device IMAGE` | `acceptance: N of M PASS ...; K checks ok, F failed` | 2400 |
-| `acceptance-rev8` | `... --set rev8 --legs set --device IMAGE --target T --images DIR --only ENTRIES` (+ `--lib host/libcft.so` when ENTRIES has a routine entry, as on the quad) | the same, as `acceptance rev8` | 2400 (+14400 until the workloads' images are cached) |
+| `acceptance-rev8` | `... --set rev8 --legs set --device IMAGE --target T --images DIR --only ENTRIES` (+ `--lib`, naming this tree's host/libcft.so, when ENTRIES has a routine entry, as on the quad) | the same, as `acceptance rev8` | 2400 (+14400 until the workloads' images are cached) |
 | `resident`, `selftest` | `cft-resident IMAGE`; `cft-selftest vectors/out IMAGE` (every 3rd visit) | `every row: status clean ...`; `N cases checked` | 600; 3600 |
 
 The timeouts are several times the card times of 2026-10-06 (docs/VALIDATION.md), with a floor.
@@ -965,7 +965,7 @@ printf it matches.
   have nothing to compile or to cache: their image and bank are committed files under
   programs/systems/compiled-tangent/, which `--images` does not touch, so they never add the
   compile allowance to the leg's timeout. They need libcft's shared library for the mark probe,
-  and the leg names this tree's own, `--lib host/libcft.so`, rather than leave it to `$CFT_LIB`
+  and the leg names this tree's own, host/libcft.so, with `--lib`, rather than leave it to `$CFT_LIB`
   (acceptance.py's default); the build step has already asserted that library is XRT-linked. Of the
   box the six ask nothing the driver's build does not already make. They were missing from the
   driver from 2026-10-19 to 2026-10-20: `REV8_ENTRIES` is a table in hw/card_stress.py, and its test
@@ -1002,7 +1002,8 @@ printf it matches.
   four items for four tiles). **With `--quick` the smoke's waves are those items** (since
   2026-10-20), in the order named and the least served first, skipping any that cannot run: the
   first four on the quad, one a wave (two waves) on a single image, so the single and then the deep
-  take the next ones and not the same again, and with `--resume` a second smoke goes on again.
+  take the next ones and not the same again, and with `--resume` a second smoke should go on again (read from
+  `load_state`, which rebuilds the served counts; not run).
   Until then the smoke planned its own four items (`sqrt32-rne`, `rint32-rne`, `div32-rne`,
   `nextup32` on the quad) whatever was named: on 2026-10-19 `--quick --sweep-items` naming EX's 22
   exhaustive items named none of them, every wave was empty (the lead's account: the report said
@@ -1242,9 +1243,8 @@ Four facts that shape the commands:
   filter is the entry's target). rev8a and rev8d have no routine entry, and the set gives an entry
   one target.
 - **The stress run runs them since 2026-10-20** (the revision-8 leg, above): `hw/card_stress.py`'s
-  table and its test now hold the ten workloads and the six, and the leg names `--lib
-  host/libcft.so` for them. Of the box that asks nothing the driver's build does not already make:
-  `host/libcft.so` (XRT=1, ldd-checked), `cft-segrun` and `cft-audit`, and the six's committed
+  table and its test now hold the ten workloads and the six, and the leg names the tree's own libcft with `--lib` for them. Of the box that asks nothing the driver's build does not already
+  make: host/libcft.so (XRT=1, ldd-checked), `cft-segrun` and `cft-audit`, and the six's committed
   files, which a checkout has.
 - **The lane byte needs libcft's shared library.** A version-1 certificate carries no per-lane
   block: cft-segrun asks the library for R23's byte a lane at format version 2 only, which refuses
