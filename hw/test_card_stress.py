@@ -1803,6 +1803,14 @@ def scn_telemetry_hang(env: Env, src: str = HERE) -> list:
       and all((not x["ok"]) and x["values"] is None and "timed out" in (x["error"] or "") for x in tel) and not alive,
       f"began {began}; {len(tel)} samples (timed out, ok) {[('timed out' in (x['error'] or ''), x['ok']) for x in tel]}; "
       f"{len(pids)} hung calls, stand-ins still alive {alive}")
+    for pid in alive:                  # a check that fails must not leave a hung stand-in behind: it is ours, killed by its pid
+        try:
+            if POSIX:
+                os.kill(pid, signal.SIGKILL)
+            else:
+                subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True, timeout=60)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
     c("telemetry hang: no two samples ran at once (consecutive records at least a sample, 3.5 s, apart)",
       len(tel) >= 2 and all(b["epoch"] - a["epoch"] >= 3.5 for a, b in zip(tel, tel[1:])),
       str([round(b["epoch"] - a["epoch"], 1) for a, b in zip(tel, tel[1:])]))
@@ -2429,6 +2437,21 @@ def plants(env: Env) -> None:
          [("card_stress.py", "                if self.quick and not self.sweep_only and waves + 1 < self.quick_waves(img):\n",
            "                if False:\n")],
          lambda env, src: group_commands(src), ["quick: a single image whose first item cannot run goes on to its second"]),
+        # the lead's question about ab92598: the narrowed pid test must still see a stand-in that really is left hung
+        ("a hung examine call is not killed at its timeout",
+         [("card_stress.py", "def expand(path: str) -> str:\n    return os.path.expandvars(os.path.expanduser(path))\n",
+           "def expand(path: str) -> str:\n    return os.path.expandvars(os.path.expanduser(path))\n\n\n"
+           "def _run_no_kill(argv, timeout):\n"
+           "    p = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)\n"
+           "    out, err = p.communicate(timeout=timeout)     # a timeout raises and the child is left running: the defect\n"
+           "    return subprocess.CompletedProcess(argv, p.returncode, out, err)\n"),
+          ("card_stress.py", 'p = subprocess.run(argv + ["--format", "JSON", "--output", path], capture_output=True,\n'
+           '                                   text=True, timeout=a.telemetry_timeout)',
+           'p = _run_no_kill(argv + ["--format", "JSON", "--output", path], a.telemetry_timeout)'),
+          ("card_stress.py", "p = subprocess.run(argv, capture_output=True, text=True, timeout=a.telemetry_timeout)",
+           "p = _run_no_kill(argv, a.telemetry_timeout)")],
+         lambda env, src: scn_telemetry_hang(env, src),
+         ["telemetry hang: every examine call hung and was killed at --telemetry-timeout"]),
     ]
     for name, edits, fn, expects in P:
         if pick and pick not in name:
