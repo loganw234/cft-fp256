@@ -515,8 +515,11 @@ own tests, which no stage ran until 2026-09-30. A stage table widened
 by one commit broke `verify/test-inner-skips.sh`, which matches the
 inner-skip rows exactly, and only a verifier running it by hand saw
 it (verifier-W2, the steps 5 and 6 round). `innerskips` needs bash
-alone (about a minute); `ensurevectors` runs the vector generator at
-small counts, so it needs python with mpmath (about a minute).
+alone (about a minute and a half in Git Bash, 2 s on Linux; since
+2026-10-20 it also drives the runner's own `do_generated` over stand-in
+generators, which took it from 57 s); `ensurevectors` runs the vector
+generator at small counts, so it needs python with mpmath (about a
+minute).
 
 `sweepjudge` holds a frequency sweep's verdicts without a build. A point
 of `hw/sweep_freq.sh` is CLOSED when the kernel clock's own WNS - read by

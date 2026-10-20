@@ -372,7 +372,7 @@ local software backend` - and those shapes are now refused in both
 programs' sources.
 
 `bash verify/test-inner-skips.sh` holds the accounting to synthetic
-stages, with four negative controls; then each counted program line
+stages, with five negative controls; then each counted program line
 (cpp-api-test's, `host/tests/remote_check.py`'s, check_results.py's) as
 printed now, which must count and fail `--require-all` alone, beside the
 same gap as printed before, which must count nothing; then the

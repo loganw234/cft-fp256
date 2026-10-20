@@ -1,14 +1,14 @@
 # The documents, by what you open them for
 
-Forty-eight files, 83,618 lines. Flat in one directory they look like one
+Forty-eight files, 83,685 lines. Flat in one directory they look like one
 undifferentiated pile; they are not, and the split is close to even:
 
-- **27,948 lines you consult while working** — the three under *Start here*,
+- **27,951 lines you consult while working** — the three under *Start here*,
   the contract, and the reference you call into;
-- **7,472 lines of tool manual**, one per shipped program;
+- **7,485 lines of tool manual**, one per shipped program;
 - **2,806 lines of operations**, read when you are about to do something to
   hardware;
-- **45,392 lines of record and argument** — the ledger, the roadmap and the
+- **45,443 lines of record and argument** — the ledger, the roadmap and the
   design studies. The history of how a decision was reached, worth keeping,
   and not what you open to get something done.
 
@@ -33,7 +33,7 @@ answer is not in here — it is `make verify-quick`, and
 | document | lines | what it is for |
 |---|---|---|
 | [INTEGRATION.md](INTEGRATION.md) | 253 | Choosing a path: which surface to use for which job. The shortest route from "I have a workload" to "I know what to call." |
-| [VERIFICATION.md](VERIFICATION.md) | 608 | Every gate, what it proves, how long it really takes. Twelve tiers, fifty-two runner stages. |
+| [VERIFICATION.md](VERIFICATION.md) | 611 | Every gate, what it proves, how long it really takes. Twelve tiers, fifty-two runner stages. |
 | [COMPLIANCE.md](COMPLIANCE.md) | 172 | IEEE 754-2019 clause by clause: what is implemented, what is refused, and where each is proven. |
 
 ## The contract
@@ -79,7 +79,7 @@ tool you are running.
 | [COLLATZ.md](COLLATZ.md) | 648 | `cft-collatz` — Collatz trajectories |
 | [DEMOS.md](DEMOS.md) | 763 | the same five workloads in one browser tab, on the conformance wasm module |
 | [BENCHMARKS.md](BENCHMARKS.md) | 631 | what all of the above measure, in software and on the card |
-| [EXPORT.md](EXPORT.md) | 367 | `python/project_packager.py` — the dated status archive: every figure as SVG and PNG with its sidecar and caption, a status document made by script, the light documents, and a manifest of where each file came from; how to make one, check one, and what it refuses |
+| [EXPORT.md](EXPORT.md) | 380 | `python/project_packager.py` — the dated status archive: every figure as SVG and PNG with its sidecar and caption, a status document made by script, the light documents, and a manifest of where each file came from; how to make one, check one, and what it refuses |
 | [SWEEP-RECORDS.md](SWEEP-RECORDS.md) | 426 | `hw/sweep_record.py` — the card stress run's finished sweep slices as signed records: export, sign and verify; the record's version 1 field by field and what the run does not let it carry (no RTL tree hash, no digest), the campaign record and the driver's own counting rule held to it, the device pseudonym, the signing domain a certificate's signature cannot pass, the key (made with `cft_sign.py`, kept outside every repository, refused inside one), every refusal by name, a finding told from coverage, what a signature proves and what it does not, and what the driver calls and what it costs |
 
 ## Operations — doing a thing to hardware
@@ -97,7 +97,7 @@ reading material for a working session.
 
 | document | lines | what it is for |
 |---|---|---|
-| [VALIDATION.md](VALIDATION.md) | 22,060 | The validation ledger, append-only. Every run, including the ones that failed and the mistakes that produced them. A figure here is a fact about the run on its date and is never edited to match a later one. |
+| [VALIDATION.md](VALIDATION.md) | 22,111 | The validation ledger, append-only. Every run, including the ones that failed and the mistakes that produced them. A figure here is a fact about the run on its date and is never edited to match a later one. |
 | [FIGURES.md](FIGURES.md) | 471 | Fifteen figures of the project - its history, its gate, the card's clocks and its long stress run, the benchmarks, the math library's costs - drawn by script from the record's own data, light and dark, each with a sidecar of its numbers and the digests of its sources, and held to the numbers the README and other documents state. The page is written by `python/project_figures.py`, the `generated` stage's seventh generator, not by hand. |
 | [ROADMAP.md](ROADMAP.md) | 6,384 | What is built, what is next, and what was decided against. |
 | [ROUND2.md](ROUND2.md) | 1,082 | The plan for the gather, the scatter, the lane mask and the broadcast as one parcel round, with its outcome at the top: the seam the lead lands first, a brief per parcel, the verifiers, the ledger, the merge order. |

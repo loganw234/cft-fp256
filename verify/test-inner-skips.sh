@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # verify/run.sh's inner-skip accounting, held to synthetic stages: no
-# host build and no python; seconds on Linux, under a minute in Git Bash.
+# host build and no python; seconds on Linux, under two minutes in Git Bash.
 #
 #     bash verify/test-inner-skips.sh      # exit 0 pass, 1 fail
 #
