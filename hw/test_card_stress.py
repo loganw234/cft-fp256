@@ -2776,18 +2776,19 @@ def union_len(iv: list) -> int:
     return n
 
 
-def scn_trees(env: Env, src: str = HERE) -> list:
-    """Coverage kept apart by tree (parcel DR2). (1) The driver records the tree it runs from: rtl and host/ tree hashes, whether each is
-    modified, and the compiler, read here by the test's own git commands. (2) The report counts a tile item's coverage per RTL tree
-    with the images beneath, and a host item's per host/ tree and compiler, on a synthetic pair of runs whose truth is counted here:
-    the other tree's slices are disjoint from the first tree's, so a report that summed trees would show it. (3) --also adds a
-    second run directory to that section alone; a run that recorded no tree is kept apart by its commit."""
+def tree_record_checks(env: Env, src: str = HERE) -> list:
+    """The driver records the tree it runs from (parcel DR2): rtl and host/ tree hashes, whether each is modified, and the compiler,
+    read here by the test's own git commands. Skipped by name where git cannot read this tree at all (a worktree whose .git file
+    names a Windows path, read from WSL: the driver then records nothing, honestly, and there is nothing to compare)."""
     out: list = []
 
     def c(n, ok, d=""):
         out.append((n, bool(ok), d))
 
-    # (1)
+    if git_out("rev-parse", "HEAD:rtl") is None:
+        skip("trees: run_start records the tree", "git cannot read this tree on this host (a worktree whose .git file names a Windows path, "
+             "read from WSL), so the driver records none and there is nothing to compare it with")
+        return []
     R = run_driver(env, "treerec", ["--quick", "--legs", "api-test", "--no-sweep"], src=src, cap=150)
     tr = (R.recs[0] if R.recs else {}).get("tree") or {}
     dirty_rtl = git_out("status", "--porcelain", "--untracked-files=all", "--", "rtl")
@@ -2803,6 +2804,21 @@ def scn_trees(env: Env, src: str = HERE) -> list:
       tr.get("rtl") == git_out("rev-parse", "HEAD:rtl") and tr.get("host_src") == git_out("rev-parse", "HEAD:host")
       and tr.get("rtl_dirty") == bool(dirty_rtl) and tr.get("host_src_dirty") == bool(dirty_host) and tr.get("cc") == want_cc
       and bool(tr.get("rtl")), str(tr))
+    return out
+
+
+def scn_trees(env: Env, src: str = HERE) -> list:
+    """Coverage kept apart by tree (parcel DR2). (1) The driver records the tree it runs from: rtl and host/ tree hashes, whether each is
+    modified, and the compiler, read here by the test's own git commands. (2) The report counts a tile item's coverage per RTL tree
+    with the images beneath, and a host item's per host/ tree and compiler, on a synthetic pair of runs whose truth is counted here:
+    the other tree's slices are disjoint from the first tree's, so a report that summed trees would show it. (3) --also adds a
+    second run directory to that section alone; a run that recorded no tree is kept apart by its commit."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    out += tree_record_checks(env, src)
     # (2)
     d1 = os.path.join(env.tmp, "trees-d1")
     d2 = os.path.join(env.tmp, "trees-d2")
@@ -3185,7 +3201,7 @@ def plants(env: Env) -> None:
          lambda env, src: seed_checks(src), ["seeds: an item's seeds do not depend on which other items exist"]),
         ("the driver does not record the tree it runs from",
          [("card_stress.py", "        self.tree.update(self.tree_facts())\n", "")],
-         scn_trees, ["trees: run_start records the tree the driver runs from"]),
+         tree_record_checks, ["trees: run_start records the tree the driver runs from"]),
         ("the report counts every tile item under one tree",
          [("card_stress_report.py", "        return (h + (\"+modified\" if mod else \"\"),\n                f\"RTL tree {h[:12]}\"",
            "        return (\"one\",\n                f\"RTL tree {h[:12]}\"")],
