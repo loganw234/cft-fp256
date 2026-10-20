@@ -21738,7 +21738,7 @@ Each parcel's own entry is above, in the order of the merges: FG's, EX's, SC's a
 | EX (fe391b5, c09567a, da2b52f, c7d7e53; df3742a, 343d6e7, 7881542; 7876c6c) | Sonnet 5.5, then the lead | VEX 1, 2; 0, 2; 0, 0 | once, then the lead fixed the wording |
 | SC (d98de85, 500553f; d42500a; c11054d; d3474d7; 046c8a1) | Sonnet 5.5, then the lead | VSC 0, 5; 0, 1; 0, 1; 0, 1; 0, 0 | three times, then the lead fixed the wording |
 | PK (99a6086, 8d5fc29, c7cc1dd, 0aeb839; 13c9211, e1ff860, efd5865; a7903ab, fc9e769, cdf3db7) | Sonnet 5.5 | VPK 0, 2; 0, 1; 0, 0 | twice |
-| the merges (4f3ca92, 309f95f, a1401ae, 5dc7eec) and this record | the lead | VIW8 0, 2 | no: the lead restated the record in place (below) |
+| the merges (4f3ca92, 309f95f, a1401ae, 5dc7eec) and this record | the lead | VIW8 0, 2; 0, 1 | no: the lead restated the record in place, twice (below) |
 
 - **VEX's (a)** was in FG's code, found at a trial merge: `figure_extracts.py --verify` died on main + EX + FG, because the stress reduction took the live catalog, which EX grows with items the run never served. FG fixed it in ecf58ac, VFG checked it in a three-way clone, and the lead's merge of EX ran it: rc 0, five ok.
 - **SC's later (b)s:**
@@ -21748,7 +21748,7 @@ Each parcel's own entry is above, in the order of the merges: FG's, EX's, SC's a
 
 **Found at the merges (MEASURED, the main checkout):**
 - **The line-ending finding.** At FG's merge, `project_figures.py --check` called the `formats` figure STALE.
-  - **The cause:** python/cft_golden/formats.py had CRLF line endings on disk since 2026-08-29 (`git ls-files --eol`: i/lf w/crlf), where git, under `* text=auto eol=lf`, showed it clean. In VIW8's words, that "holds only while the index stat entry matches": in its scratch clone, a CRLF rewrite shows ` M` with an empty diff. The check hashes the bytes on disk.
+  - **The cause:** python/cft_golden/formats.py had CRLF line endings on disk since 2026-08-29 (`git ls-files --eol`: i/lf w/crlf), where git, under `* text=auto eol=lf`, showed it clean. In VIW8's words, that "holds while the index entry's recorded size is the CRLF file's (the entry was written while the file was already CRLF); a touched file of the same size stays clean, and a CRLF rewrite of a file the index recorded as LF shows ` M` with an empty diff". The lead's throwaway repository shows both (MEASURED). The check hashes the bytes on disk.
   - **A second such file:** hw/openxc7/census-2026-09-22.txt. Its only commit is f49b09b, of 2026-09-23. So 4f3ca92's message, which says both files had CRLF line endings on disk since August, holds for formats.py only.
   - **The repair:** both equal their index blobs apart from line endings. Both were restored from the index, and the check then passes.
   - **No other host affected:** a fresh checkout gets LF, so the box and CI were never exposed.
@@ -21778,7 +21778,7 @@ Each parcel's own entry is above, in the order of the merges: FG's, EX's, SC's a
   - PK's merge changes no stage but docs and generated, the runner's script only in its generator list and descriptions, and the workflow only in a comment.
 
 **Conduct:**
-- **PK deleted a directory that was not its own.** At about 22:01Z it ran `rm -rf` on a Windows-Temp `packager-check-9imh646m` it took for a leftover of its own. VPK's self-test was probably using it, as PK, VPK and the lead all say. The evidence is strong but circumstantial:
+- **PK deleted a directory that was not its own.** At about 22:01Z it ran `rm -rf` on a Windows-Temp `packager-check-9imh646m` it took for a leftover of its own. VPK's self-test was probably using it: PK and the lead say "probably", and VPK marks it BELIEVED, not having seen the deletion. The evidence is strong but circumstantial:
   - the directory's mtime, 22:00:47Z, against PK's runner ending at 22:00:28Z (15:00:47 and 15:00:28 local);
   - VPK's run, started 22:00:17Z, crashed at 22:01:17Z (`status-source: README.md is not in the tree`). It was recognised and re-run: rc 0.
   - PK reported it unprompted, with the mtimes that showed it.
@@ -21853,3 +21853,4 @@ Each parcel's own entry is above, in the order of the merges: FG's, EX's, SC's a
     - the spliced quotation;
     - the four tips;
     - Logan's second request, quoted whole.
+  - **VIW8's re-check** on 6db584a: (a) 0, (b) 1. The (b) was in its own words, which 6db584a quoted: git's "clean" for a CRLF file depends on the size the index entry recorded, and a changed mtime alone does not make the file show. Restated above, with its note on how VPK holds the "probably".
