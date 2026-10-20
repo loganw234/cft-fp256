@@ -49,7 +49,7 @@ TestFloat is compiled into our tool, the same binary takes a device, and `testfl
 comparisons) is held to the golden model by `make -C host tf-subject-test`. `CFT_TF_ORACLE=host` makes the same
 subject compute on the host CPU instead (six functions, binary32 and binary64, four modes; the rest refused by
 name), and `arbitrate --host` names the classes for it. `CFT_SOAK_SABOTAGE=1|2` (and `..._EVERY=N`) is its negative
-control.
+control: a sabotaged subject still exits 0, and it is `testfloat_ver` that reports the wrong lines and exits 1.
 
 The mulAdd prefix is `--level 2 --only _mulAdd --limit 134217728`. The strict probes are `run --level 1
 --max-errors 0` with `--ver-flags=-checkInvInts --only _to_ui32,_to_ui64,_to_i32,_to_i64`, with `--tininess before`,
@@ -180,3 +180,8 @@ binary64 is covered by TestFloat and UCBTEST.
   (outside TestFloat's formats).
 - IBM: binary32 only; its trapped cases are not libcft's model; the three letters for underflow (u, v, w) are one flag
   here and only `u` occurs in these files.
+- `external_tf.py run` exits 0 when errors are reported (its health rule accepts the verifier's status 1, a reported
+  case being data for the arbitration) and `arbitrate` exits 0 even with FINDING lines, so neither is a gate: the
+  counts and the classes are what is read.
+- The UCBTEST-vector runner reuses the IBM runner's judge, so its class names say "IBM" where they mean the
+  vector (the sabotage control's output, which holds LIBCFT DEFECT on purpose, reads so).
