@@ -21854,3 +21854,77 @@ Each parcel's own entry is above, in the order of the merges: FG's, EX's, SC's a
     - the four tips;
     - Logan's second request, quoted whole.
   - **VIW8's re-check** on 6db584a: (a) 0, (b) 1. The (b) was in its own words, which 6db584a quoted: git's "clean" for a CRLF file depends on the size the index entry recorded, and a changed mtime alone does not make the file show. Restated above, with its note on how VPK holds the "probably".
+
+## 2026-10-20 - the CRLF hazard in project_figures.py's `--check` and `--write`, closed (parcel FX): a text file of the tree is read and digested as git's blob holds it
+
+**What Logan asked,** verbatim, on 2026-10-20: "Math round may be slightly delayed to handle 6 and 9, as well as the task chips once the stress test is finished". The chip is the follow-up of the side parcels' closing record (2026-10-19): "the CRLF hazard in project_figures.py's `--check`".
+
+**The hazard, shown** (MEASURED; 881bbcb's own scripts, run on scratch trees of the 80 files the check reads; the LF tree passes, rc 0):
+- **One source saved CRLF** (python/cft_golden/formats.py, as on 2026-10-19): `--check` rc 1, three STALE lines (formats-dark.svg, formats-light.svg, formats.json).
+  - **The check's remedy records the CRLF digest:** `--write` on a copy gives formats.py as sha256 47ee0ad7934f... and 1,863 bytes, where the committed sidecar has 3a4d02f54aa9... and 1,798. Every LF checkout would then fail the check.
+- **docs/VALIDATION.md saved CRLF** (the ledger extract reads a byte prefix of it): `--check` rc 1, "extract ledger: its recorded source digest no longer matches: the first 1891030 bytes of docs/VALIDATION.md hashes to d3267b0e4d2c..., the extract says 300660c895da...", and the closing line says STALE and "remake with --write", which does not apply.
+  - `figure_extracts.py ledger` refuses, "the clock sweep's table has 0 rows ... (want 8)", because its patterns are LF-bound, and writes nothing.
+  - So figure_extracts.py's exposure was a misleading refusal and a misleading line; project_figures.py's was a recorded CRLF digest.
+- **Which file is likelier to bite** (BELIEVED): docs/VALIDATION.md, not formats.py. Agents write it on Windows all the time, and a CRLF save followed by `git add` leaves an LF blob, a CRLF file and a clean status.
+- **No tracked text file is legitimately CRLF** (MEASURED, `git ls-files --eol` at 881bbcb): the 16 tree files that sidecars or extracts digest are all `i/lf w/lf`; of 1,781 tracked files none is `i/crlf`, `i/mixed` or `w/crlf`; the 398 that are `-text` are binary (320 by attribute, 78 by git's own sniff).
+
+**The choice** is (a), read a text file as git's blob holds it, with a note naming each file so read:
+- **Not (b), git's blob:** `--check` runs under a tripwire that forbids a process, because "reads no git" is its stated design and CI's checkout is shallow; and the controls' scratch copy is not a git tree.
+- **Not (c) alone:** the check would go red for a condition git itself calls clean, and its only cure would be restoring files from the index. (a) removes the hazard where the file is read, so `--write` cannot record a CRLF digest; the note keeps it from being silent.
+- **The rule,** `figure_extracts.lf_form`, the one definition:
+  - a file with a NUL byte, or that is not UTF-8, is not text and is read as it is; so is a lone CR, since only a CRLF pair is a line ending;
+  - any other file has each CRLF read as LF.
+  - This is how a binary file is told from a text one without git. A legitimately CRLF text file cannot be told from a CRLF copy of an LF blob by its bytes; none exists today (above), and if one did, its digest would be of its LF form on every platform, so the sidecars would still agree across platforms, though not with `sha256sum`.
+
+**What changed** (two files; the sidecars, SVGs, gallery and extracts are byte-identical, below):
+- **python/figure_extracts.py:**
+  - `lf_form`, `tree_bytes` and `crlf_note` are new, and `sha256_file`, whose one caller was `Src.extract`, is gone;
+  - `source_problems` and `make_ledger` read through `tree_bytes`, so the recorded byte count of the ledger prefix means the same prefix on every checkout;
+  - `source_problems` returns the note, and `make_ledger` prints it to stderr.
+- **python/project_figures.py:**
+  - `Src._read`, the one place a tree file is read, returns the LF form and remembers the file (`Src.crlf`); `Src.extract` digests through it;
+  - `--check` and `--write` print one `note:` line per file read as LF;
+  - a committed output (an SVG, a sidecar, the gallery) is still held to its bytes, because the check cannot tell a CRLF blob from a CRLF working copy without git. It is STALE with CRLF, and the line now says "only in its line endings (CRLF on disk, LF made; --write writes LF)";
+  - the controls' scratch copy is the tree in its LF form, so a CRLF checkout runs the same controls, whose plants cut files at byte offsets.
+- **Eight new controls,** which take the check from 32 faults planted and 3 controls that change nothing to 35 and 8:
+  - a unit check of `lf_form` on six byte strings (CRLF, mixed, LF, a lone CR, a NUL, not UTF-8);
+  - four copies saved CRLF that must give no problem and a note naming the file: a source a figure reads whole (the first one), verify/run.sh (read in part by two figures), docs/VALIDATION.md (the ledger's byte prefix) and an extract's own file;
+  - three faults that must fail by name: a one-digit edit of a bench CSV saved CRLF (STALE), the same inside the ledger's prefix in a CRLF copy ("its recorded source digest no longer matches"), and a CRLF SVG (STALE, "only in its line endings").
+- The packager, project_packager.py, is not changed (below).
+
+**Evidence** (MEASURED, the desktop, niced; scratch trees and copies in a scratch directory):
+- **The check:** `python -B python/project_figures.py --check` rc 0 in 14.0 s, against 12.6 s at 881bbcb: "35 faults planted, each caught by name, and 8 controls that must change nothing, which changed nothing".
+- **Nothing committed changes on LF:**
+  - `--write` in a scratch copy: 46 files (45 under docs/img/figures and docs/FIGURES.md), `cmp` identical to the committed ones;
+  - `figure_extracts.py ledger` into a copy whose ledger.json had first been made different: it writes the committed docs/figures/ledger.json byte for byte (38,806 bytes), as 881bbcb's script does;
+  - history, tree and stress are not rewritten by either command.
+- **On CRLF:**
+  - only formats.py CRLF: `--check` rc 0 with one note; `--write` on the copy that 881bbcb's `--write` had poisoned gives 46 files identical to the committed ones;
+  - only docs/VALIDATION.md CRLF: `--check` rc 0 with one note; `figure_extracts.py ledger` writes the committed extract byte for byte, with the note on stderr (the same `bytes` and sha256 300660c895da... as committed);
+  - every input CRLF (34 of the 80 files): `--check` rc 0 with a note a file; `--write` 46 identical;
+  - every file CRLF, outputs too (80): `--check` rc 1, 46 STALE lines, each "only in its line endings"; `--write` 46 identical, no CR in the sidecars or the gallery.
+- **`figure_extracts.py --verify`** with the lead's copy of the stress run (its SHA256SUMS checked: metrics.jsonl 7,982,931 bytes, e7989f88efde..., and report.txt, 4a426b57d752...): rc 0, five ok (history, tree, ledger, stress, and stress unchanged by the three decoy catalog items), 32 s.
+- **The gate** (run A): `bash verify/run.sh --only docs,generated` under Git Bash, run 20261020-091305-881bbcb, 09:13:04 to 09:14:56 (112 s), on the two script changes before the records were written: docs 35 s ok, generated 72 s ok, "VERDICT: PASS, nothing skipped", 0 inner skips. The runner used `python`, which it prefers on Windows: Python 3.12.9 (Miniconda), first on PATH. The same command on the final commit is in the parcel's report, not here: an entry cannot name its own commit.
+- **The controls can fail:** five one-off breakages in a scratch copy of the scripts, none committed, each made the check fail by name.
+  - `lf_form` returning its input: six controls fail (the unit check, four copies, the CRLF SVG's wording);
+  - `lf_form` stripping every CR: the unit check fails (the lone CR);
+  - `source_problems` skipping the digest when the file had CRLF: the in-prefix edit in a CRLF copy "failed to fail";
+  - no note: the four copies "wanted a note";
+  - the outputs' wording removed: the CRLF SVG "failed to fail".
+
+**Known limits:**
+- **project_packager.py, report only, not changed** (the lead's word).
+  - MEASURED: its `check_sidecar`, called unchanged on the CRLF-formats tree, gives one refusal, `sidecar-mismatch`: "figure formats: docs/img/figures/formats.json records python/cft_golden/formats.py with digest 3a4d02f54aa9..., and the tree's file is 47ee0ad7934f...". It gives none on the LF tree.
+  - It re-hashes each sidecar source from its raw bytes. On a CRLF checkout it is now the first thing to refuse, since `--check` passes. docs/EXPORT.md's `sidecar-mismatch` row ("or whose digest is not the tree's file") describes it.
+  - READ, not run: an archive made from a CRLF checkout would hold CRLF bytes of any CRLF document or output.
+  - The fix is the same helper in `check_sidecar`, about four lines, and the lead's to order.
+- **Outputs are held to their bytes** (above): a CRLF output is STALE, by design.
+- **The text rule is simpler than git's,** which also weighs a lone CR and the share of unprintable bytes: a file git would sniff as binary on those grounds, that is UTF-8 with CRLF pairs, would be read as LF. None of the 16 sources is that (MEASURED, above).
+- **A source that is not in the tree** keeps the digest of its own bytes: the stress run's metrics.jsonl and report.txt.
+- **`figure_extracts.py ledger --extend` is refused on the current file,** in 881bbcb and here alike (MEASURED): the ledger now states a kernel slack, -0.363 at line 21472, that the extract neither draws nor lists. It is VFG's note, and not touched here.
+- **Other raw digests of tree files** (the vendoring check in bindings/arduino/sync.py, the image digests in hw/card_stress.py) were not looked at: the brief named three files (READ, `git grep sha256_file`).
+
+**Conduct** (MEASURED):
+- A command of mine started `python3 -` with no input and hung. I stopped that background task by its id and listed the python processes read-only: one of 10/15 that is not mine, none of mine.
+- I started a job with `&` inside a background task, which makes the task's "completed" mean only that its wrapper shell exited (PK's ledger has the same lesson). The job was a 32 s `--verify`; I waited for its own output file.
+- Scratch trees were deleted by their exact paths.
