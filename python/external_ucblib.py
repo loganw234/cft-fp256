@@ -106,6 +106,9 @@ def main(argv):
     ap.add_argument("--subject", required=True)
     ap.add_argument("--show", type=int, default=10)
     a = ap.parse_args(argv)
+    if os.environ.get("CFT_TF_ORACLE") == "host":
+        print("subject: the HOST CPU (CFT_TF_ORACLE=host), not libcft: read "
+              "'libcft' below as the host")
 
     cases, refused, other = [], Counter(), 0
     for stem in ("adds", "subs", "muls", "divs", "sqrts",

@@ -57,12 +57,22 @@
  * the 1,024 (a caller that sends the subject short streams, as the vector
  * runners do, needs a smaller period for the control to fire at all).
  *
+ * CFT_TF_ORACLE=host makes the subject compute on the HOST CPU instead of
+ * libcft, so that the same pipeline judges the machine's own IEEE hardware
+ * (the sweep's oracle) the way it judges libcft: add, sub, mul, mulAdd, div and
+ * sqrt at f32 and f64, in the four modes x86 has; anything else is refused by
+ * name. fmaf and fma are libm's, and on a machine with fused multiply-add they
+ * are the instruction. The banner says HOST CPU. Built with -frounding-math
+ * and -fno-math-errno, as the soak tools are.
+ *
  * Exit status: 0 at the end of input, 2 for any usage, input or library
  * failure, named on stderr. It never writes a line it did not compute.
  *
  * Build: make -C host cft-tf-subject
  */
 
+#include <fenv.h>
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -242,10 +252,72 @@ static void die(const char *what, cft_status st)
     exit(2);
 }
 
+/* ---- the host CPU as the system under test (CFT_TF_ORACLE=host) --- */
+
+static int host_mode;
+
+static unsigned fe_to_tf(int ex)
+{
+    return ((ex & FE_INEXACT)   ? 1u  : 0u) |
+           ((ex & FE_UNDERFLOW) ? 2u  : 0u) |
+           ((ex & FE_OVERFLOW)  ? 4u  : 0u) |
+           ((ex & FE_DIVBYZERO) ? 8u  : 0u) |
+           ((ex & FE_INVALID)   ? 16u : 0u);
+}
+
+/* The six functions the CPU has natively, in the modes it has. The flags
+ * come out already in TestFloat's bits. */
+static void host_case(const fn_t *f, cft_round rnd, const val in[3], val *out,
+                      uint32_t *fl)
+{
+    int fe = rnd == CFT_RTZ ? FE_TOWARDZERO : rnd == CFT_RDN ? FE_DOWNWARD :
+             rnd == CFT_RUP ? FE_UPWARD : FE_TONEAREST;
+    memset(out, 0, sizeof *out);
+    fesetround(fe);
+    feclearexcept(FE_ALL_EXCEPT);
+    if (f->fmt == CFT_FP32) {
+        volatile float a, b, c;
+        float z = 0;
+        memcpy((void *)&a, in[0].b, 4);
+        memcpy((void *)&b, in[1].b, 4);
+        memcpy((void *)&c, in[2].b, 4);
+        switch (f->k) {
+        case K_ADD:  z = a + b; break;
+        case K_SUB:  z = a - b; break;
+        case K_MUL:  z = a * b; break;
+        case K_DIV:  z = a / b; break;
+        case K_SQRT: z = sqrtf(a); break;
+        default:     z = fmaf(a, b, c); break;
+        }
+        memcpy(out->b, &z, 4);
+    } else {
+        volatile double a, b, c;
+        double z = 0;
+        memcpy((void *)&a, in[0].b, 8);
+        memcpy((void *)&b, in[1].b, 8);
+        memcpy((void *)&c, in[2].b, 8);
+        switch (f->k) {
+        case K_ADD:  z = a + b; break;
+        case K_SUB:  z = a - b; break;
+        case K_MUL:  z = a * b; break;
+        case K_DIV:  z = a / b; break;
+        case K_SQRT: z = sqrt(a); break;
+        default:     z = fma(a, b, c); break;
+        }
+        memcpy(out->b, &z, 8);
+    }
+    *fl = fe_to_tf(fetestexcept(FE_ALL_EXCEPT));
+    fesetround(FE_TONEAREST);
+}
+
 /* One case. */
 static void run_case(const fn_t *f, cft_round rnd, int exact,
                      const val in[3], val *out, uint32_t *fl)
 {
+    if (host_mode) {
+        host_case(f, rnd, in, out, fl);
+        return;
+    }
     const unsigned char *A = in[0].b, *B = in[1].b, *C = in[2].b;
     unsigned char Z[16];
     cft_status st = CFT_OK;
@@ -406,15 +478,32 @@ int main(int argc, char **argv)
         }
     }
 
-    art = getenv("CFT_SOAK_ARTIFACT");
-    if (art && !*art)
-        art = NULL;
-    ost = cft_open(art, 0, &dev);
-    if (ost != CFT_OK)
-        die(art ? "cft_open of the artifact failed" : "cft_open failed", ost);
-    fprintf(stderr, "cft-tf-subject: %s %s%s on the %s backend%s%s\n", argv[1],
-            rname, exact ? " exact" : "", art ? "DEVICE" : "software",
-            art ? ": " : "", art ? art : "");
+    e = getenv("CFT_TF_ORACLE");
+    if (e && *e) {
+        if (strcmp(e, "host") != 0) {
+            fprintf(stderr, "cft-tf-subject: refused: CFT_TF_ORACLE=%s (only host is known)\n", e);
+            return 2;
+        }
+        if ((f.k != K_ADD && f.k != K_SUB && f.k != K_MUL && f.k != K_FMA &&
+             f.k != K_DIV && f.k != K_SQRT) || f.fmt == CFT_FP128 || rnd == CFT_RMM) {
+            fprintf(stderr, "cft-tf-subject: refused: the host CPU has no %s in %s "
+                    "(it has add sub mul mulAdd div sqrt at f32 and f64, not near_maxMag)\n",
+                    argv[1], rname);
+            return 2;
+        }
+        host_mode = 1;
+        fprintf(stderr, "cft-tf-subject: %s %s on the HOST CPU (not libcft)\n", argv[1], rname);
+    } else {
+        art = getenv("CFT_SOAK_ARTIFACT");
+        if (art && !*art)
+            art = NULL;
+        ost = cft_open(art, 0, &dev);
+        if (ost != CFT_OK)
+            die(art ? "cft_open of the artifact failed" : "cft_open failed", ost);
+        fprintf(stderr, "cft-tf-subject: %s %s%s on the %s backend%s%s\n", argv[1],
+                rname, exact ? " exact" : "", art ? "DEVICE" : "software",
+                art ? ": " : "", art ? art : "");
+    }
     e = getenv("CFT_SOAK_SABOTAGE");
     if (e && (*e == '1' || *e == '2'))
         sabotage = *e - '0';
@@ -465,6 +554,7 @@ int main(int argc, char **argv)
     flush_out();
     fflush(stdout);
     fprintf(stderr, "cft-tf-subject: %s %s%s: %llu cases\n", argv[1], rname, exact ? " exact" : "", n);
-    cft_close(dev);
+    if (dev)
+        cft_close(dev);
     return 0;
 }

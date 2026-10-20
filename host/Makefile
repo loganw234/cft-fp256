@@ -401,7 +401,8 @@ enclose-clean:
 .PHONY: tf-subject tf-subject-test tf-subject-clean
 
 cft-tf-subject$(EXE): tools/tf_subject.c libcft.a
-	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) $^ -o $@ $(XRTLIBS) $(LDLIBS) -lm
+	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) -fno-math-errno -frounding-math \
+	  $^ -o $@ $(XRTLIBS) $(LDLIBS) -lm
 
 tf-subject: cft-tf-subject$(EXE)
 

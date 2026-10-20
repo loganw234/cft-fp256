@@ -295,6 +295,9 @@ def main(argv):
     ap.add_argument("--show", type=int, default=10,
                     help="how many cases of each disagreement class to name")
     a = ap.parse_args(argv)
+    if os.environ.get("CFT_TF_ORACLE") == "host":
+        print("subject: the HOST CPU (CFT_TF_ORACLE=host), not libcft: read "
+              "'libcft' below as the host")
 
     cases, refused, nheader = [], Counter(), 0
     for name in sorted(os.listdir(a.dir)):

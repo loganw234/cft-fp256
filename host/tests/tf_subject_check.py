@@ -107,7 +107,15 @@ def cases(fn):
     pool = {"f32": F32, "f64": F64, "f128": F128}[kinds[0]]
     if n == 3:
         small = pool[::3]                        # 10 values: 1,000 triples
-        return list(itertools.product(small, repeat=3))
+        eb, mb = xtf.WIDTHS[kinds[0]]
+        zero, nzero = 0, 1 << (eb + mb)
+        inf = ((1 << eb) - 1) << mb
+        qnan, snan = inf | (1 << (mb - 1)), inf | 1
+        # the row on which TestFloat and the contract part - product 0 x infinity,
+        # addend a quiet NaN - and its neighbours: a signaling addend, no NaN at all
+        row = [(zero, inf, qnan), (inf, nzero, qnan), (nzero, inf | (1 << (eb + mb)), qnan),
+               (zero, inf, snan), (inf, zero, snan), (zero, inf, zero), (inf, zero, qnan ^ 5)]
+        return list(itertools.product(small, repeat=3)) + row
     if n == 2:
         return list(itertools.product(pool, repeat=2))
     return [(v,) for v in pool]
@@ -188,6 +196,50 @@ def main(argv):
                             print(f"FAIL {fn} {mode}{' exact' if exact else ''}: got {g!r} want {want!r}")
     print(f"{ntot} cases over {len(functions())} function names and {len(MODES)} rounding modes: "
           f"{bad} wrong")
+
+    # CFT_TF_ORACLE=host: the subject computes on the host CPU. It must agree with
+    # golden bit for bit and flag for flag, but for a NaN result, whose payload the
+    # hardware propagates and the contract canonicalises (a NaN against a NaN is
+    # equal here, the flags still exact), and it takes only the six functions
+    # the CPU has, in the four modes x86 has
+    hnan = hcases = hwrong = 0
+    for f in ("f32", "f64"):
+        for op in ("add", "sub", "mul", "div", "sqrt", "mulAdd"):
+            fn = f"{f}_{op}"
+            for mode in ("near_even", "minMag", "min", "max"):
+                exp = expected_lines(fn, mode, False)
+                env = dict(os.environ, CFT_TF_ORACLE="host")
+                p = run_subject(binary, fn, mode, False, [e[0] for e in exp], env)
+                got = p.stdout.decode().split("\n")[:-1]
+                if p.returncode != 0 or len(got) != len(exp):
+                    print(f"FAIL host {fn} {mode}: rc {p.returncode}, {len(got)} lines")
+                    bad += 1
+                    continue
+                dg = digits_of(f)
+                for g, (ops, v, fl) in zip(got, exp):
+                    hcases += 1
+                    gops, gv, gfl = g.rsplit(" ", 2)
+                    exp_nan = xtf.is_nan(f, int(v, 16))
+                    if exp_nan:
+                        hnan += 1
+                    same = gops == ops and gfl == fl and (
+                        gv == v or (exp_nan and xtf.is_nan(f, int(gv, 16))))
+                    if not same:
+                        hwrong += 1
+                        bad += 1
+                        if hwrong <= 12:
+                            print(f"FAIL host {fn} {mode}: got {g!r} want {ops} {v} {fl}")
+    print(f"host CPU as the subject: {hcases} cases ({hnan} with a NaN result), {hwrong} wrong")
+    for name, mode in (("f32_to_i32", "near_even"), ("f128_add", "near_even"),
+                       ("f32_add", "near_maxMag"), ("f32_eq", "near_even")):
+        p = run_subject(binary, name, mode, False, [], dict(os.environ, CFT_TF_ORACLE="host"))
+        if p.returncode != 2 or b"refused" not in p.stderr:
+            print(f"FAIL: host mode did not refuse {name} {mode} (rc {p.returncode})")
+            bad += 1
+    p = run_subject(binary, "f32_add", "near_even", False, [], dict(os.environ, CFT_TF_ORACLE="gpu"))
+    if p.returncode != 2:
+        print("FAIL: an unknown CFT_TF_ORACLE was not refused")
+        bad += 1
 
     # negative control 1: the sabotage switches must make this check fail
     stream = [e[0] for e in expected_lines("f32_add", "near_even", False)]

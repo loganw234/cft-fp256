@@ -303,7 +303,8 @@ def kinds_for(fn):
     return ["int", m.group(2)], 1
 
 
-def classify_error(fn, mode, exact, line, nan_bits=False, gold=None):
+def classify_error(fn, mode, exact, line, nan_bits=False, gold=None,
+                   host=False):
     """One testfloat_ver error line, against the golden model: the class
     (name, detail) and the line's decoded parts. The classes:
       libcft = golden != SoftFloat   the outside expected value is the
@@ -313,7 +314,10 @@ def classify_error(fn, mode, exact, line, nan_bits=False, gold=None):
       all three differ               neither side is the golden model
       both agree with golden         the line is no error: a bug in this tool
     nan_bits: the run was made with -checkNaNs, so SoftFloat's NaN bits are
-    held to golden's too; by default a NaN against a NaN is equal."""
+    held to golden's too; by default a NaN against a NaN is equal.
+    host: the subject of the run was the HOST CPU (CFT_TF_ORACLE=host), not
+    libcft: the classes say so, and its NaN against golden's NaN is equal (the
+    hardware propagates a payload, the contract canonicalises: both legal)."""
     kinds, nops = kinds_for(fn)
     ops, ov, ofl, ev, efl = parse_error(line, nops, kinds)
     gold = gold or golden_for(fn, mode, exact)
@@ -322,14 +326,17 @@ def classify_error(fn, mode, exact, line, nan_bits=False, gold=None):
     gv, gfl = gold(*ops)
     if kinds[-1] == "bool":
         gv = int(gv != 0)
-    lib_ok = (ov, ofl) == (gv, gfl)
+    who = "the host CPU" if host else "libcft"
+    lib_ok = (same_value(kinds[-1], ov, gv) if host else ov == gv) \
+        and ofl == gfl
     sf_ok = (ev == gv if nan_bits else same_value(kinds[-1], ev, gv)) \
         and efl == gfl
     if lib_ok and not sf_ok:
-        return ("libcft = golden, SoftFloat differs",
+        return (f"{who} = golden, SoftFloat differs",
                 why(fn, ops, ov, ofl, ev, efl, kinds))
     if sf_ok and not lib_ok:
-        return ("LIBCFT DEFECT: libcft differs from golden = SoftFloat", fn)
+        return (f"{who.upper()} DEFECT: {who} differs from golden = SoftFloat",
+                fn)
     if lib_ok and sf_ok:
         return ("both agree with golden (the error line is a bug in this "
                 "tool)", fn)
@@ -357,8 +364,10 @@ def cmd_arbitrate(a):
                 classes[(level, "not arbitrated (past --sample)", fn)] += 1
                 continue
             total += 1
-            cls = classify_error(fn, mode, ex == "x", line, a.nan_bits, gold)
-            if cls[0].startswith(("LIBCFT DEFECT", "all three")):
+            cls = classify_error(fn, mode, ex == "x", line, a.nan_bits, gold,
+                                 getattr(a, "host", False))
+            if cls[0].startswith(("LIBCFT DEFECT", "THE HOST CPU DEFECT",
+                                  "all three")):
                 print("FINDING", name, cls[0], line, file=sys.stderr)
             classes[(level,) + cls] += 1
             perfile[(fn, mode, "exact" if ex == "x" else "notexact") + cls] += 1
@@ -448,6 +457,8 @@ def main(argv):
     b.add_argument("--out", required=True)
     b.add_argument("--nan-bits", action="store_true",
                    help="the run was made with -checkNaNs: NaN bits count")
+    b.add_argument("--host", action="store_true",
+                   help="the run's subject was the host CPU (CFT_TF_ORACLE=host)")
     b.add_argument("--by-file", action="store_true",
                    help="also the count of each class for every function and mode")
     b.add_argument("--sample", type=int, default=0,
