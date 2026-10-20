@@ -52,6 +52,15 @@ nothing - a check that failed for that would fail for nothing, every round. So
 must an item of the library's sweep catalog that the stress run never served
 (the reduction is of the run's items; soak-exhaustive's catalog adds twenty-two).
 
+LINE ENDINGS. The repository is `* text=auto eol=lf`, and on Windows a tracked file can lie on disk with CRLF while
+git calls it clean (the index recorded the CRLF file's size). A digest of its bytes would then differ from every LF
+checkout's - CI's, the box's, a fresh clone's - and --write, the check's own remedy, would commit that digest. So a
+file of the tree is read, digested and cut to a byte prefix in its LF form (figure_extracts.lf_form: a text file's
+CRLF read as LF; a file with a NUL byte or that is not UTF-8 is not text, and is read as it is), and each file read
+that way is named in a note. --check then passes on such a checkout, --write records the digests an LF checkout
+records, and an edit that is more than line endings still fails by name. A committed OUTPUT (an SVG, a sidecar, the
+gallery) is held to its bytes: with CRLF it is STALE, and the message says line endings are all that differ.
+
 CLAIMS. Where the record states a figure's number in words - the README's "4.5x
 and 5.5x", docs/DETERMINISM.md's table of formats - the figure's number is held
 to it, at the precision the record gives. Agreement is recorded in the sidecar.
@@ -69,7 +78,6 @@ import json
 import math
 import pathlib
 import re
-import shutil
 import socket
 import subprocess
 import sys
@@ -107,12 +115,19 @@ class Src:
         self.files = {}          # rel -> {"sha256", "bytes"}: read, digested, named in the sidecar
         self.docs = set()        # rel: read only to check a claim; named in no sidecar (see doc())
         self.extracts = {}       # name -> envelope
+        self.crlf = set()        # rel: CRLF on disk, read as LF (see _read)
 
     def _read(self, rel):
+        """A file of the tree in its LF form, which is what git's blob holds (X.lf_form): a checkout whose working
+        files have CRLF then agrees with one whose files have LF, in every digest and in what a figure parses. A file
+        that had CRLF is remembered in self.crlf, for the check and --write to name it."""
         p = self.root / rel
         if not p.is_file():
             raise X.ExtractError("%s is not in the tree" % rel)
-        return p.read_bytes()
+        b, crlf = X.tree_bytes(p)
+        if crlf:
+            self.crlf.add(rel)
+        return b
 
     def bytes(self, rel):
         b = self._read(rel)
@@ -155,8 +170,9 @@ class Src:
     def extract(self, name):
         ex = X.load(self.root, name)
         self.extracts[name] = ex
-        p = X.extract_path(self.root, name)
-        self.files[X.EXTRACT_DIR + "/" + name + ".json"] = {"sha256": X.sha256_file(p), "bytes": p.stat().st_size}
+        rel = X.EXTRACT_DIR + "/" + name + ".json"
+        b = self._read(rel)
+        self.files[rel] = {"sha256": X.sha256_bytes(b), "bytes": len(b)}
         return ex["data"]
 
     def prefix(self, rel, nbytes):
@@ -2917,6 +2933,9 @@ def check_tree(root, only=None):
     for r in results:
         if getattr(r.fig, "fresh", None):
             notes += r.fig.fresh(r.src, r.data)
+    for rel in sorted({rel for r in results for rel in r.src.crlf}):        # read as LF, after every read: say which
+        if X.crlf_note(rel) not in notes:
+            notes.append(X.crlf_note(rel))
     outs = outputs(results)
     for rel in sorted(outs):
         if only and not any(rel.startswith("%s/%s" % (FIG_DIR, n)) for n in only):
@@ -2930,8 +2949,10 @@ def check_tree(root, only=None):
             problems.append("figure %s: %s is missing; remake with: python python/project_figures.py --write"
                             % (who, rel))
         elif p.read_bytes() != outs[rel].encode("utf-8"):
-            problems.append("STALE figure %s: %s differs from a fresh generation; remake with: "
-                            "python python/project_figures.py --write" % (who, rel))
+            eol = (" only in its line endings (CRLF on disk, LF made; --write writes LF)"
+                   if X.lf_form(p.read_bytes()) == outs[rel].encode("utf-8") else "")
+            problems.append("STALE figure %s: %s differs from a fresh generation%s; remake with: "
+                            "python python/project_figures.py --write" % (who, rel, eol))
         if rel.endswith(".svg") and svg_lint(outs[rel]):
             problems.append("figure %s: %s would not survive GitHub's SVG handling: %s" % (
                 who, rel, "; ".join(svg_lint(outs[rel])[:4])))
@@ -2979,7 +3000,9 @@ def controls(root, results):
         for rel in sorted(need):
             if (root / rel).is_file():
                 (t / rel).parent.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(root / rel, t / rel)
+                # the tree in its LF form, so that a checkout whose files have CRLF runs the same controls: several
+                # plants cut a file at a byte offset. The line-ending plants put CRLF back, one file at a time.
+                (t / rel).write_bytes(X.lf_form((root / rel).read_bytes()))
         base, _, _ = check_tree(t)
         if base:
             return (["the scratch copy does not reproduce the tree's own verdict, so no control below proves "
@@ -2988,7 +3011,8 @@ def controls(root, results):
         side = next((r for r in results if r.claims.rows), results[0])
 
         def mutated(mutate, only):
-            """The check's problems on the scratch copy with `mutate`'s change in it, the copy then restored."""
+            """(the check's problems, its notes) on the scratch copy with `mutate`'s change in it, the copy then
+            restored."""
             saved = {}
             try:
                 for rel, new in mutate(t).items():
@@ -3000,7 +3024,7 @@ def controls(root, results):
                     else:
                         p.parent.mkdir(parents=True, exist_ok=True)
                         p.write_bytes(new if isinstance(new, bytes) else new.encode("utf-8"))
-                got, _, _ = check_tree(t, only)
+                got, notes_, _ = check_tree(t, only)
             finally:
                 for rel, old in saved.items():
                     p = t / rel
@@ -3009,10 +3033,10 @@ def controls(root, results):
                             p.unlink()
                     else:
                         p.write_bytes(old)
-            return got
+            return got, notes_
 
         def plant(label, mutate, pattern, only=None):
-            got = mutated(mutate, only)
+            got, _ = mutated(mutate, only)
             hit = next((g for g in got if re.search(pattern, g)), None)
             if hit is None:
                 failures.append("NEGATIVE CONTROL FAILED TO FAIL: %s; wanted /%s/, got %s" % (
@@ -3023,11 +3047,29 @@ def controls(root, results):
         def stay(label, mutate, only=None):
             """The converse of a plant: a change to a file that the figure reads only in part, outside the part
             it reads, must move nothing - a check that failed on it would fail for nothing, on every round."""
-            got = mutated(mutate, only)
+            got, _ = mutated(mutate, only)
             if got:
                 failures.append("CONTROL FAILED: %s moved a figure that does not read it: %s" % (label, got[0][:150]))
             else:
                 report.append("%s -> no problem, as it should be (not counted as a fault)" % label)
+
+        def named(label, mutate, pattern, only=None):
+            """A condition that is no fault and must not be passed in silence: the check finds no problem, and a note
+            names it. A tree saved with CRLF that git calls clean is that condition."""
+            got, notes_ = mutated(mutate, only)
+            hit = next((n_ for n_ in notes_ if re.search(pattern, n_)), None)
+            if got:
+                failures.append("CONTROL FAILED: %s moved a figure, and it must not: %s" % (label, got[0][:150]))
+            elif hit is None:
+                failures.append("NEGATIVE CONTROL FAILED TO FAIL: %s; wanted a note /%s/, got %s" % (
+                    label, pattern, notes_ or "no note at all"))
+            else:
+                report.append("%s -> no problem, and a note names it: %s (not counted as a fault)" % (
+                    label, hit.split(";")[0]))
+
+        def crlf(rel):
+            """The mutation that saves a file of the scratch copy, which is in its LF form, with CRLF."""
+            return lambda t: {rel: (t / rel).read_bytes().replace(b"\n", b"\r\n")}
 
         svg_rel = "%s/%s-light.svg" % (FIG_DIR, first)
         side_rel = "%s/%s.json" % (FIG_DIR, side.fig.name)
@@ -3155,6 +3197,61 @@ def controls(root, results):
             stay("a comment added to the runner, outside what the stage figure reads",
                  lambda t: {run_rel: (t / run_rel).read_text(encoding="utf-8") + "\n# a comment, which no figure reads\n"},
                  only=["verify-stages"])
+            named("the runner saved with CRLF line endings (two figures read it in part: its stage names and budget lists, "
+                  "and the gate's size)", crlf(run_rel), re.escape(run_rel) + r" has CRLF line endings on disk",
+                  only=[r.fig.name for r in results if r.fig.name in ("verify-stages", "verify-growth")])
+        # line endings (see LINE ENDINGS in the header): a tree saved with CRLF that git calls clean must agree with the same
+        # tree saved with LF, and be named; an edit that is more than line endings must still be caught in a CRLF copy, or the
+        # reading would hide edits; and a committed output saved with CRLF is stale, and says that is all that differs
+        eol_cases = (("a text file saved with CRLF", b"a\r\nb\r\n", b"a\nb\n"),
+                     ("mixed endings", b"a\r\nb\nc\r\n", b"a\nb\nc\n"),
+                     ("a file with LF only", b"a\nb\n", b"a\nb\n"),
+                     ("a lone CR, which is no line ending here", b"a\rb\r\n", b"a\rb\n"),
+                     ("a file with a NUL byte, which is not text", b"a\r\nb\x00\r\n", b"a\r\nb\x00\r\n"),
+                     ("a file that is not UTF-8, which is not text", b"a\r\n\xff\xfe\r\n", b"a\r\n\xff\xfe\r\n"))
+        wrong = [(label, X.lf_form(raw), want) for label, raw, want in eol_cases if X.lf_form(raw) != want]
+        if wrong:
+            failures.append("CONTROL FAILED: the LF reader took %s for %r, not %r" % wrong[0])
+        else:
+            report.append("the LF reader on %d byte strings (a CRLF text, mixed endings, LF, a lone CR, a NUL file, a file "
+                          "that is not UTF-8) -> each as stated (not counted as a fault)" % len(eol_cases))
+        whole = next(((r, f["path"]) for r in results for f in r.meta["files"] if "reads" not in f), None)
+        if whole is None:
+            failures.append("NEGATIVE CONTROL FAILED TO FAIL: no figure reads a whole file of the tree to plant a CRLF copy in")
+        else:
+            r, rel = whole
+            named("a file a figure reads, saved with CRLF line endings (the figure and its digest are the LF checkout's)",
+                  crlf(rel), re.escape(rel) + r" has CRLF line endings on disk", only=[r.fig.name])
+        for r in results:
+            files = [f["path"] for f in r.meta["files"] if f["path"].startswith("docs/bench/")]
+            if files:
+                plant("a file a figure reads, edited by one digit and saved with CRLF line endings (more than line endings: "
+                      "still stale)",
+                      lambda t, f=files[0]: {f: _bump_digit((t / f).read_bytes(), len((t / f).read_bytes()) // 2).replace(
+                          b"\n", b"\r\n")},
+                      r"^STALE figure %s: " % re.escape(r.fig.name), only=[r.fig.name])
+                break
+        pre = next(((n_, s_) for n_ in names for s_ in X.load(t, n_)["sources"] if s_.get("kind") == "file-prefix"), None)
+        if pre is None:
+            failures.append("NEGATIVE CONTROL FAILED TO FAIL: no extract is read from a prefix of a file of the tree to "
+                            "plant a CRLF copy in")
+        else:
+            n_, s_ = pre
+            named("an extract's source, which it reads as a byte prefix, saved with CRLF line endings (the prefix is cut "
+                  "from the LF form, and its digest is the recorded one)",
+                  crlf(s_["path"]), re.escape(s_["path"]) + r" has CRLF line endings on disk")
+            plant("one digit changed inside that prefix, in a copy saved with CRLF line endings: still not the recorded digest",
+                  lambda t, s_=s_: {s_["path"]: _bump_digit((t / s_["path"]).read_bytes(), s_["bytes"] // 2).replace(
+                      b"\n", b"\r\n")},
+                  r"^extract %s: its recorded source digest no longer matches" % re.escape(n_))
+        if names:
+            rel = "%s/%s.json" % (X.EXTRACT_DIR, names[0])
+            named("an extract's own file saved with CRLF line endings (a figure digests it and parses it)",
+                  crlf(rel), re.escape(rel) + r" has CRLF line endings on disk")
+        plant("a committed SVG saved with CRLF line endings (stale, and the message says that is all that differs)",
+              crlf(svg_rel),
+              r"^STALE figure %s: %s differs from a fresh generation only in its line endings"
+              % (re.escape(first), re.escape(svg_rel)), only=[first])
         # the stress reduction is of the items the RUN served, so an item of the library's catalog that it never served
         # (as soak-exhaustive's twenty-two are) must change nothing; this is the seam's own test, with no raw file, and
         # figure_extracts --verify repeats it end to end on the real run, with decoys injected into the catalog
@@ -3406,6 +3503,8 @@ def _remove_stated(path, c):
 def cmd_write(root, only):
     results = build_all(root, only)
     outs = outputs(results)
+    for rel in sorted({rel for r in results for rel in r.src.crlf}):        # read as LF: say which
+        print("note: %s" % X.crlf_note(rel))
     n = 0
     for rel in sorted(outs):
         if only and not any(rel.startswith("%s/%s" % (FIG_DIR, nm)) for nm in only):

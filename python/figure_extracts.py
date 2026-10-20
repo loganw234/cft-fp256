@@ -26,7 +26,8 @@ docs/figures/ that is committed and that a figure reads instead:
 
 AN EXTRACT IS NOT TRUSTED BECAUSE IT IS COMMITTED. Each records:
   read_at    the commit it was read at (a data source that is the tree itself
-             records the digest of exactly the bytes it read instead);
+             records the digest of exactly the bytes it read instead, a text
+             file in its LF form: see LINE ENDINGS);
   sources    what it was made from, with digests where the source is a file;
   remake     the command that rewrites it;
   body_sha256   the digest of its own `data`, so a hand edit that does not also
@@ -38,6 +39,15 @@ every extract it can from its source and compares the bytes - which needs the
 full history, and the raw metrics file for the stress run, whose reduction it
 then repeats with items the library's catalog could add and the run never
 served injected, which must not move a byte.
+
+LINE ENDINGS. A file of the tree is read, hashed and cut to a byte prefix in its
+LF form (lf_form), whatever the checkout. The repository is `* text=auto
+eol=lf`, and on Windows a tracked file can lie on disk with CRLF while git calls
+it clean (the index recorded the CRLF file's size): its raw digest would differ
+from every LF checkout's, and a remake would record that digest. A text file
+that has CRLF on disk is read as LF and named, in a note; a file with a NUL byte
+or that is not UTF-8 is not text, and is read as it is. A source that is not in
+the tree (a raw metrics file) keeps the digest of its own bytes.
 
 No extract is a measurement of its own. A number in one is a count, a sum or a
 pattern's capture group over its source, never an estimate, and a source that
@@ -70,8 +80,35 @@ def sha256_bytes(b):
     return hashlib.sha256(b).hexdigest()
 
 
-def sha256_file(path):
-    return sha256_bytes(pathlib.Path(path).read_bytes())
+def lf_form(b):
+    """The bytes of a file of the tree as git's blob holds them. The repository is `* text=auto eol=lf`, so for a
+    text file each CRLF is read as LF; on Windows a tracked file can lie on disk with CRLF while git calls it clean
+    (the index recorded the CRLF file's size), and hashed as it lies it would differ from every LF checkout's.
+    A file with a NUL byte, or that is not UTF-8, is not text and is returned as it is; so is a lone CR, since only a
+    CRLF pair is a line ending here. (Git's own sniff of text also weighs a lone CR and the share of unprintable
+    bytes; this is the simpler rule, and the files the figures read are UTF-8 text.)"""
+    if b"\r\n" not in b or b"\0" in b:
+        return b
+    try:
+        b.decode("utf-8")
+    except UnicodeDecodeError:
+        return b
+    return b.replace(b"\r\n", b"\n")
+
+
+def tree_bytes(path):
+    """(bytes, crlf): a file of the tree in its LF form, and whether the file on disk had CRLF line endings, so that
+    the caller can say so (crlf_note). Every read of a file of the tree that is digested or cut to a prefix is this."""
+    raw = pathlib.Path(path).read_bytes()
+    b = lf_form(raw)
+    return b, len(b) != len(raw)
+
+
+def crlf_note(rel):
+    """The sentence that names a file read as LF, for a note: said, since a digest that is not of the bytes on disk
+    must not be taken for one."""
+    return ("%s has CRLF line endings on disk; it is read as LF, as git's blob holds it, so what is made from it, and "
+            "its digest where one is recorded, are an LF checkout's" % rel)
 
 
 def canon(obj):
@@ -168,7 +205,9 @@ def source_problems(root, ex):
             if not p.is_file():
                 problems.append("extract %s: its source %s is not in the tree" % (ex["extract"], s["path"]))
                 continue
-            data = p.read_bytes()
+            data, crlf = tree_bytes(p)
+            if crlf:
+                notes.append(crlf_note(s["path"]))
             if kind == "file-prefix":
                 if len(data) < s["bytes"]:
                     problems.append("extract %s: its source %s is now shorter (%d bytes) than the %d bytes "
@@ -884,7 +923,9 @@ def make_ledger(root=ROOT, existing=None):
     is pinned is its first N bytes: appending an entry leaves the digest valid, editing an old one does
     not. N is the whole file the first time, and what the committed extract recorded when remaking it."""
     root = pathlib.Path(root)
-    data = (root / LEDGER).read_bytes()
+    data, crlf = tree_bytes(root / LEDGER)           # the LF form: N means the same prefix on every checkout
+    if crlf:
+        print("figure_extracts: note: " + crlf_note(LEDGER), file=sys.stderr)
     if existing is not None and pathlib.Path(existing).is_file():
         n = json.loads(pathlib.Path(existing).read_text(encoding="utf-8"))["sources"][0]["bytes"]
     else:
