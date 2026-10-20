@@ -6390,9 +6390,11 @@ formatof.py's fused form, host/src/softfloat.c and formatof.c and
 their vendored copies under bindings/arduino (sync.py), the tile's FMA
 unit (rtl/cft_fpfma_pipe.sv) and rtl/cft_fpfma.sv (a combinational
 form the benches compile and nothing instantiates), every staged image
-(rebuilt and card-proven), the tests that pin today's rule,
-DETERMINISM.md's paragraph, and parcel XG's TestFloat runs, which
-would then agree with SoftFloat on that row too.
+(rebuilt and card-proven), the cross-checks that hold libcft and the
+RTL to the golden model (no test pins this row explicitly today; the
+change should add the first), DETERMINISM.md's paragraph, and parcel
+XG's TestFloat runs, which would then agree with SoftFloat on that row
+too.
 
 **The soak tools' pass size (CFT_CHUNK).** Logan, verbatim: "Build time
 override for now with future plans to make adjustable more easily".
