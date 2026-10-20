@@ -103,6 +103,8 @@ verify/_mpfr-prefix-build/
 # make clean removes these and none of them belong in the tree
 host/cft-selftest
 host/cft-bench
+# the TestFloat pipe's libcft end (docs/EXTERNAL-GENERATORS.md)
+host/cft-tf-subject
 # Both of these were missed when the tool was added, and both turned up
 # untracked on a Linux and a macOS host on 2026-09-13. The .exe forms
 # were always covered by `host/*.exe` above, so the gap only showed where
