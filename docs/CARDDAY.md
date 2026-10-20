@@ -1113,11 +1113,19 @@ box has not run this code** (docs/VALIDATION.md, the entry of 2026-10-20 for DR2
   `sweep.pool` = the worker, the machine and the tools' build id. status.txt has a `hostpool` line (the workers,
   the slices recorded, the slices in flight). The report lists `cpu / sweep (all items)` among its rows, and its
   "on the card" time no longer counts those legs.
-- **The run's rules hold for it.** STOP, a signal, the deadline, the disk floor and a moved tree stop the pool as
-  they stop the run: every worker asks before it starts a slice, so none starts after one. A slice already running
-  is given `--kill-after` (60 s) from the end of the last card leg to finish, and is then terminated by PID and
-  recorded as the event `host_job_abandoned`, **not as a slice**: a CPU job needs none of a card leg's "never in
-  the middle" (it poisons nothing), and a killed slice recorded as a failure would count toward disabling its
+- **The run's rules hold for it.** Before it plans each slice a worker asks the main loop's own test,
+  `should_stop()`: the STOP file, a signal, the deadline, the disk floor and, in a real run, a moved tree - `git
+  rev-parse HEAD` against the commit the run started from, one git call a slice start (20 ms, measured on
+  Windows; a slice lasts from a fraction of a second, the first probe of an op, to `--sweep-slice-seconds`, so the
+  pool needs no interval for it). A moved tree is latched: no worker plans another slice, and the main loop, at its
+  next check between legs, ends the run as `tree_moved` (exit 3) and records it as it records any stop. **What is
+  guaranteed is that no worker plans a slice after anyone has seen a stop**: a slice planned in the same few
+  milliseconds still starts, and a slice running when HEAD moves runs on, as a card leg does. A `--dry-run` does
+  not test the tree (its `--root` may be a checkout somebody is committing to) unless it is given
+  `--check-tree-in-dry-run`, which the suite uses on a scratch repository. A slice already running when the run
+  ends is given `--kill-after` (60 s) from the end of the last card leg to finish, and is then terminated by PID
+  and recorded as the event `host_job_abandoned`, **not as a slice**: a CPU job needs none of a card leg's "never
+  in the middle" (it poisons nothing), and a killed slice recorded as a failure would count toward disabling its
   item. It is not covered, so a resumed run serves it again. `--resume` rebuilds the pool's coverage, seeds and
   rates from `metrics.jsonl` as the card's. `--quick` waits for its three slices.
 - **A host job's failure is its item's, never the card's.** Its log is never read for "the card did not answer"
