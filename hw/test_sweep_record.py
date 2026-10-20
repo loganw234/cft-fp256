@@ -70,12 +70,14 @@ def skip(name, why):
 
 
 def refusal(fn, *a, **k):
-    """The name of the Refusal fn raises, or None."""
+    """The name of the Refusal fn raises, or None; any other exception is a defect, shown as what it drew."""
     try:
         fn(*a, **k)
     except S.Refusal as e:
         SEEN.add(e.name)
         return e.name
+    except Exception as e:
+        return f"uncaught {type(e).__name__}"
     return None
 
 
@@ -538,11 +540,37 @@ def group_export(tmp):
         ("a start time that is no number", mut(2, lambda r: r.update(start_epoch="x"))),
         ("a run id with no version-1 spelling", mut(0, lambda r: r.update(run_id="a b"))),
         ("a log path that is absolute", mut(2, lambda r: r.update(log="/var/x/y.log"))),
-        ("a second run in the file", good[:3] + [fake_start("card-stress-test-2"), fake_build(), good[3]]))
+        ("a second run in the file", good[:3] + [fake_start("card-stress-test-2"), fake_build(), good[3]]),
+        # VSG's (b)-3: each of these was dropped with rc 0 or an uncaught OverflowError before bc962f4's follow-up
+        ("a pass leg whose counts are null", mut(2, lambda r: r.update(counts=None))),
+        ("a fail leg whose counts are null", mut(11, lambda r: r.update(counts=None))),
+        ("a pass sweep leg with no sweep block", mut(2, lambda r: r.pop("sweep"))),
+        ("a fail sweep leg whose sweep block is null", mut(11, lambda r: r.update(sweep=None))),
+        ("a rate that is Infinity", mut(2, lambda r: r["rate"].update(value=float("inf")))),
+        ("a start time that is Infinity", mut(2, lambda r: r.update(start_epoch=float("inf")))),
+        ("an end time that is -Infinity", mut(2, lambda r: r.update(end_epoch=float("-inf")))),
+        ("a rate that is NaN (refused before)", mut(2, lambda r: r["rate"].update(value=float("nan")))),
+        ("a start time that is NaN (refused before)", mut(2, lambda r: r.update(start_epoch=float("nan")))))
     for n, (label, recs) in enumerate(cases):
         p = os.path.join(tmp, f"bad{n}.jsonl")
         write_metrics(p, recs)
         red(f"export: {label}", "metrics", export, p, public=pub)
+    for n, label in ((len(cases) - 9, "null counts"), (len(cases) - 7, "no sweep block"), (len(cases) - 5, "a rate of Infinity")):
+        rc, so, se = cli("export", os.path.join(tmp, f"bad{n}.jsonl"), "--out", os.path.join(tmp, f"bad{n}.out"), "--device-key", pub.hex())
+        check(f"CLI export of a pass leg with {label}: refused metrics, exit 2, no traceback, nothing written",
+              rc == 2 and "refused metrics" in se and "Traceback" not in se and not os.path.exists(os.path.join(tmp, f"bad{n}.out")),
+              f"rc {rc} {se[-160:]}")
+    unfinished = mut(12, lambda r: r.pop("sweep"))
+    write_metrics(os.path.join(tmp, "unfinished.jsonl"), unfinished)
+    exf = export(os.path.join(tmp, "unfinished.jsonl"), public=pub)
+    check("control: a sweep leg that did not finish is counted as left out, whatever blocks it lacks, and is no refusal",
+          exf[0].left == ex.left and exf[1] == lines)
+    red("a finite-number check on a time that is Infinity", "metrics", S._ms, float("inf"), "start_epoch")
+    red("a finite-number check on a time that is NaN", "metrics", S._ms, float("nan"), "start_epoch")
+    check("a finite-number check keeps a finite time as the epoch in ms", S._ms(1792000017.0, "t") == 1792000017000)
+    for label, what in (("a record that is no dict", [1, 2]), ("a run id that is no string", {"run_id": ["x"], "images": {}}),
+                        ("images that are no dict", {"run_id": "x", "images": []})):
+        red(f"run_start given {label}", "metrics", S.Exporter(public=pub).run_start, what)
     p = os.path.join(tmp, "alltimeout.jsonl")
     write_metrics(p, [good[0], good[1], good[12]])
     red("export: a run whose sweep legs all timed out", "empty", export, p, public=pub)

@@ -13,19 +13,25 @@ export  reads RUN (a run directory, or a metrics.jsonl) and writes FILE, a file 
         --key it signs them; with --device-key (a public key, 64 hex) it leaves them for `sign`.
 sign    adds each record's signature: Ed25519 over `cft-sweep-record 1`, a NUL and the 32-byte id,
         by a key file in python/cft_sign.py's format that lies outside every git working tree.
-verify  holds a file to the rules as one run's records. Exit 0; 3 when they verify and some record
-        is a FINDING (a slice that found a mismatch: a record, never coverage); 2 and
-        `cft-sweep: refused <name>: <why>` otherwise. Signatures are required unless
+verify  holds a file to the rules as one run's records. Signatures are required unless
         --allow-unsigned; with --keyring (cft_sign's format) the key must be in it.
+
+Exit status, all three commands: 0; 3 (verify) when the records verify and some record is a
+FINDING (a slice that found a mismatch: a record, never coverage); 2 for a refusal, printed as
+`cft-sweep: refused <name>: <why>`; 64 for usage, key-file and key-in-tree; 73 for output.
 
 Design: docs/studies/SWP-A-coverage.md 5.3 and 6.6. The record, its keys and what a signature
 proves: docs/SWEEP-RECORDS.md. Version 1 holds what a leg record and run_start hold and no more:
 a field the data cannot fill is ABSENT, never a default.
 
 From the driver: Exporter(Signer(load_seed(KEY))) takes the run_start, build and leg records the
-driver writes (.run_start(rec), .build(rec), .leg(rec)) and returns the lines to append, none for
-a leg that is not a finished sweep slice; a leg that cannot be a record is a Refusal, by name,
-and the exporter stays as it was. Standard library and the repository's own Ed25519.
+driver writes (.run_start(rec), .build(rec), .leg(rec)) and returns the lines to append: none for
+a leg that is not a sweep leg, or that did not finish (a status other than pass or fail, counted
+in .left). A run_start or a leg that cannot be a record - a finished sweep leg with no sweep block
+or no counts, a time or rate that is not a finite number, a leg the catalog disagrees with - is a
+Refusal named `metrics`, and the exporter stays as it was. It imports hw/card_stress_lib.py (the
+item table and the driver's rules), python/cft_sign.py (the key file format) and python/cft_golden
+(cert, cert2, ed25519); every other import is the standard library.
 """
 from __future__ import annotations
 
@@ -70,7 +76,7 @@ REFUSALS = {                                # every refusal, by name
     "key": "a signing key the keyring handed does not name",
     "device": "a run.device that is not the pseudonym of the key (or of the signing key)",
     "signed": "sign was given a record that carries a signature already",
-    "splice": "a record of another run in a file that is one run's",
+    "splice": "a record of another run, or another device, in a file that is one run's",
     "campaign": "a record naming a campaign that is not in the file, or not of its kind",
     "counts": "counts that break the driver's rules for the campaign",
     "run": "a run block whose times and rate disagree with each other",
@@ -447,10 +453,14 @@ def verify_records(recs, ring=None, require_signed=True):
 
 # ---- export: a leg record becomes a record --------------------------------------------------
 
-def _ms(x, what):
+def _ms(x, what, scale=1000):
+    """x times `scale` (seconds to milliseconds), rounded to an integer; a Refusal for what is no finite number."""
     if isinstance(x, bool) or not isinstance(x, (int, float)):
         raise Refusal("metrics", f"{what} is missing or not a number")
-    return int(round(x * 1000))
+    try:
+        return int(round(x * scale))
+    except (OverflowError, ValueError):                 # Infinity, NaN
+        raise Refusal("metrics", f"{what} is not a finite number") from None
 
 
 class Exporter:
@@ -467,16 +477,19 @@ class Exporter:
         self.legs = self.findings = 0
 
     def run_start(self, rec):
-        rid = rec.get("run_id")
-        if not isinstance(rid, str) or not RUNID.fullmatch(rid):
-            raise Refusal("metrics", f"run_start: the run id {rid!r} has no version-{VERSION} spelling")
-        if isinstance(rec.get("settings"), dict) and rec["settings"].get("dry_run"):
-            raise Refusal("metrics", f"run {rid} is a dry run (settings.dry_run): its legs came from "
-                                     f"stand-ins, not the card, and are never exported")
-        if self.start is not None and self.start["run_id"] != rid:
-            raise Refusal("metrics", f"the file holds two runs, {self.start['run_id']} and {rid}")
-        if not isinstance(rec.get("images"), dict):
-            raise Refusal("metrics", f"run {rid}: run_start has no images")
+        try:
+            rid = rec.get("run_id")
+            if not isinstance(rid, str) or not RUNID.fullmatch(rid):
+                raise Refusal("metrics", f"run_start: the run id {rid!r} has no version-{VERSION} spelling")
+            if isinstance(rec.get("settings"), dict) and rec["settings"].get("dry_run"):
+                raise Refusal("metrics", f"run {rid} is a dry run (settings.dry_run): its legs came from "
+                                         f"stand-ins, not the card, and are never exported")
+            if self.start is not None and self.start["run_id"] != rid:
+                raise Refusal("metrics", f"the file holds two runs, {self.start['run_id']} and {rid}")
+            if not isinstance(rec.get("images"), dict):
+                raise Refusal("metrics", f"run {rid}: run_start has no images")
+        except (AttributeError, KeyError, TypeError, ValueError, OverflowError) as e:
+            raise Refusal("metrics", f"run_start: {type(e).__name__}: {e}") from None
         self.start, self.built = rec, False
 
     def build(self, rec):
@@ -520,7 +533,7 @@ class Exporter:
             body["subject"]["tile"] = sw["tile"]
         rate = rec.get("rate")
         if isinstance(rate, dict) and rate.get("unit") == "cases/s" and isinstance(rate.get("value"), (int, float)):
-            body["run"]["rate"] = int(round(rate["value"]))
+            body["run"]["rate"] = _ms(rate["value"], "rate.value", 1)
         if rec.get("log"):
             body["run"]["log"] = rec["log"]
         tree = self.start.get("tree")
@@ -537,14 +550,18 @@ class Exporter:
 
     def leg(self, rec):
         """The lines to append for one record of the run: [] unless it is a sweep leg that finished with
-        a verdict; the campaign's line first the first time its item is met."""
-        sw, counts, status = rec.get("sweep"), rec.get("counts"), rec.get("status")
-        if rec.get("type") != "leg" or rec.get("kind") != "sweep" or not isinstance(sw, dict):
+        a verdict; the campaign's line first the first time its item is met. A leg that did not finish
+        is counted in .left. A finished one that cannot be a record is a Refusal named `metrics`."""
+        if rec.get("type") != "leg" or rec.get("kind") != "sweep":
             return []
-        if status not in ("pass", "fail") or not isinstance(counts, dict):
+        sw, counts, status = rec.get("sweep"), rec.get("counts"), rec.get("status")
+        if status not in ("pass", "fail"):
             self.left[str(status)] += 1
             return []
-        where = f"the {status} leg of {sw.get('item')!r} started {rec.get('start')}"
+        where = f"the {status} leg of {sw.get('item') if isinstance(sw, dict) else None!r} started {rec.get('start')}"
+        if not isinstance(sw, dict) or not isinstance(counts, dict):
+            raise Refusal("metrics", f"{where}: a finished sweep leg has a sweep block and counts, and this one has "
+                                     + ("no sweep block" if not isinstance(sw, dict) else "no counts"))
         if self.start is None or not self.built:
             raise Refusal("metrics", f"{where}: no run_start, or no passing build record since it: the tools "
                                      f"were not held to the tree")
@@ -559,7 +576,7 @@ class Exporter:
             if e.name == "metrics":
                 raise
             raise Refusal("metrics", f"{where} is not a version-{VERSION} record: {e.name}: {e.why}") from None
-        except (KeyError, TypeError, ValueError) as e:
+        except (KeyError, TypeError, ValueError, OverflowError) as e:
             raise Refusal("metrics", f"{where}: {type(e).__name__}: {e}") from None
         lines = [] if camp["id"] in self.seen else [canon(camp) + b"\n"]
         self.seen.add(camp["id"])

@@ -31,8 +31,10 @@ tree: a leg with no passing `build` since its `run_start` is refused) and the
 `hw/card_stress_lib.py`). Every other record is ignored without error:
 telemetry, cycles, events, battery legs, a record type no one has written yet.
 A sweep leg that did not finish (timeout, no device, parse error) is counted
-and named in what `export` prints, and is no record. A run whose `run_start`
-says `dry_run` is refused: its legs came from stand-ins.
+and named in what `export` prints, and is no record. A leg that says it finished
+(`pass` or `fail`) but has no sweep block or no counts is refused (`metrics`), not
+dropped. A run whose `run_start` says `dry_run` is refused: its legs came from
+stand-ins.
 
 ## The record, version 1
 
@@ -361,8 +363,13 @@ lines = ex.leg(leg_record)                    # for every leg record, as finish_
 ```
 
 `run_start` and `leg` raise `SR.Refusal` (name `metrics`) for a run or a leg that
-cannot be records, and `leg` leaves the exporter as it was: the driver should log
-an `event` and go on, since a record error must never stop a long run. After a
+cannot be records: a finished sweep leg (pass or fail) with no sweep block or no
+counts, a time or a rate that is not a finite number (Infinity or NaN), a leg the
+catalog disagrees with, counts the driver's rule would not have passed, a dry
+run. A sweep leg that did not finish returns no lines and is counted in `ex.left`,
+by status, whatever it lacks; a leg that is no sweep leg returns none. `leg`
+leaves the exporter as it was after a refusal: the driver should log an `event`
+and go on, since a record error must never stop a long run. After a
 resume the exporter has seen no campaign, so it writes each campaign line again
 (harmless: a repeated campaign line is the same record); fill `ex.seen` from the
 file to avoid it. Cost per slice on the desktop (MEASURED, the 2026-10-19 run's
