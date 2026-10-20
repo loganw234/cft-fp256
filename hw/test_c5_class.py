@@ -358,7 +358,8 @@ def group_plants(tool, built_tree: str, work: str) -> None:
     rc, out, m = wl.run("cvtfrom64-class", 0, N2, "rup")
     check("plant (rounding defect): cvtfrom64-class, which rounds through the same function, is caught too under rup",
           rc == 1 and m is not None and int(m.group(4)) > 0, out[:200])
-    # (e) a defect only a FLAG shows: the library drops INEXACT for the operands whose dropped bits are exactly 0...01 (the value is
+    # (e) a defect only a FLAG shows: the library drops INEXACT for the operands whose dropped bits are exactly 0...01 and which
+    # do not overflow fp32, whose path raises INEXACT itself (the value is
     # right in every attribute). In a batch the flags are compared as an OR, and the other operands raise INEXACT, so it is unseen
     # (-DCLS_BATCH=4092: the whole space passes); a class case run alone has its own flags, and the default build sees it
     sf_edit = [("src/softfloat.c", "    *inexact = 1;\n    return 0;\n}\n",

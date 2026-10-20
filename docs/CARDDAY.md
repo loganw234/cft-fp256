@@ -1181,7 +1181,7 @@ soak runs (four, five, five, four, four): 22 items, 1,422,092 indices.
 each of the tile's four fp64 lanes. The kernels compare values per lane but flags as the OR over a call, and look
 at a lane by itself only where the ORs differ, so a flag a defect drops on one operand among others
 that raise it is unseen in a batch: **MEASURED**, a library that drops INEXACT for the operands whose
-dropped bits are exactly 0...01 passes the whole `conv64to32-class` space in batches of 4,096 under all four
+dropped bits are exactly 0...01 and which do not overflow fp32 (the overflow path raises INEXACT itself) passes the whole `conv64to32-class` space in batches of 4,096 under all four
 attributes and fails when the index 68,152 (0x3ff0000000000001) is run alone; under rtz a fault in the sticky tree can show
 only in the flags (the planted one showed nothing under rtz), so the batch OR would hide all of rtz's evidence for it. And an element goes to the tile's
 lane (its place in a pass) mod 4, the index space puts pattern t at index mod 4 = t mod 4, so a whole-space run
