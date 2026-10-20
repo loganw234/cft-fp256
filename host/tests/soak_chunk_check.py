@@ -434,9 +434,9 @@ def problems_clean(host: str, pristine: set, decoys: dict) -> list:
     left = sorted(after - keep)
     gone = sorted(keep - after)
     if left:
-        bad.append(f"clean left {left[:12]}")
+        bad.append(f"clean left {left[:40]}")
     if gone:
-        bad.append(f"clean removed what it did not make: {gone[:12]}")
+        bad.append(f"clean removed what it did not make: {gone[:40]}")
     if not (before - keep):
         bad.append("nothing was built before the clean, so it removed nothing")
     return bad
