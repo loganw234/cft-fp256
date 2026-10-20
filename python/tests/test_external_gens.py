@@ -18,6 +18,7 @@ or a test run.
 
 import hashlib
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -425,6 +426,53 @@ def test_the_golden_functions_agree_with_the_model_they_wrap():
     assert g(0xFFFFFFFF) == sf.from_int(FP32, -1, sf.RND_RNE)   # TestFloat prints i32 two's complement
     assert xtf.golden_for("f32_eq", "near_even", False)(0x3F800000, 0x3F800000)[0] != 0
     assert xtf.golden_for("f16_add", "near_even", False) is None
+
+
+# ---- the orchestrator's health check ---------------------------------------
+
+class _Done:
+    def __init__(self, stdout):
+        self.stdout, self.stderr = stdout, ""
+
+
+def _fake_shell(statuses, ver_err, ver_out="Errors found in f32_add.\n"):
+    """What subprocess.run gives run_one in place of the shell: the two files
+    the script redirects the verifier to (named in the script text) written,
+    and the pipeline's exit statuses printed as `echo ${PIPESTATUS[@]}` does."""
+    def run(cmd, **kwargs):
+        m = re.search(r"> '([^']*)' 2> '([^']*)'\n", cmd[2])
+        Path(m.group(1)).write_text(ver_out)
+        Path(m.group(2)).write_text(ver_err)
+        return _Done(statuses + "\n")
+    return run
+
+
+@pytest.mark.parametrize("statuses, limit, err, ok, tests, errs", [
+    ("0 0 0", 0, "46464 tests performed.\n", True, 46464, 0),
+    ("0 0 1", 0, "46464 tests performed; 40 errors found.\n", True, 46464, 40),
+    ("0 0 1", 0, "46464 tests performed; 1 error found.\n", True, 46464, 1),
+    ("141 0 0 0", 5, "5 tests performed.\n", True, 5, 0),          # head closed the generator on purpose
+    ("0 0 0 0", 5, "5 tests performed.\n", True, 5, 0),
+    ("0 2 0", 0, "46464 tests performed.\n", False, 46464, 0),      # the subject refused or died
+    ("0 0 2", 0, "46464 tests performed.\n", False, 46464, 0),      # the verifier itself failed
+    ("141 0 0", 0, "46464 tests performed.\n", False, 46464, 0),    # the generator cut off, none asked
+    ("0 0", 0, "46464 tests performed.\n", False, 46464, 0),        # a process missing
+    ("0 0 0 0", 0, "46464 tests performed.\n", False, 46464, 0),    # one too many
+    ("0 0 0", 0, "the verifier said nothing\n", False, -1, -1),     # no count line at all
+    ("141 0 2 0", 5, "5 tests performed.\n", False, 5, 0),          # the subject died behind a cut generator
+])
+def test_a_pipeline_is_healthy_only_when_every_process_ended_as_it_should(
+        statuses, limit, err, ok, tests, errs, tmp_path, monkeypatch):
+    (tmp_path / "errors").mkdir()
+    monkeypatch.setattr(xtf.subprocess, "run", _fake_shell(statuses, err))
+    row = xtf.run_one("TF", "SUBJECT", str(tmp_path), "f32_add", "near_even", False, 1, limit, "", "after")
+    assert row[:6] == (1, "f32_add", "near_even", "notexact", tests, errs)
+    assert row[-1] == ("ok" if ok else "BAD")
+    kept = sorted(p.name for p in (tmp_path / "errors").iterdir())
+    # a clean healthy run leaves nothing behind; one with errors, or one not
+    # healthy, keeps both files for the arbitration to read
+    clean = ok and errs == 0
+    assert kept == ([] if clean else ["L1.f32_add.near_even.n.err", "L1.f32_add.near_even.n.out"])
 
 
 # ---- the fetch-and-verify script ------------------------------------------
