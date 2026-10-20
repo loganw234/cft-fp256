@@ -41,6 +41,7 @@ import os
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -71,6 +72,25 @@ def check(name: str, ok: bool, detail: str = "") -> bool:
         FAILS.append(f"{name}: {detail}")
         print(f"  FAIL  {name}  {detail}"[:400])
     return bool(ok)
+
+
+def rmtree_force(path) -> None:
+    """shutil.rmtree that also removes read-only files. The object files of a git repository are read-only, and on Windows
+    shutil.rmtree(path, ignore_errors=True) leaves such a directory behind without a word (found 2026-10-20: thirteen of this
+    parcel's own, each holding a scratch repository the tree tests made)."""
+    def fix(func, p, _exc):
+        try:
+            os.chmod(p, stat.S_IWRITE)
+            func(p)
+        except OSError:
+            pass
+    try:
+        if sys.version_info >= (3, 12):
+            shutil.rmtree(path, onexc=fix)
+        else:
+            shutil.rmtree(path, onerror=fix)
+    except OSError:
+        pass
 
 
 def skip(name: str, why: str) -> None:
@@ -2593,7 +2613,7 @@ def pool_tree_unit_checks(src: str = HERE) -> list:
     repo = make_scratch_repo(os.path.join(tmp, "repo"))
     if repo is None:
         skip("pool tree (unit)", "git cannot make a scratch repository on this host")
-        shutil.rmtree(tmp, ignore_errors=True)
+        rmtree_force(tmp)
         return []
     sys.path.insert(0, src)
     saved_lib = sys.modules.pop("card_stress_lib", None) if os.path.abspath(src) != os.path.abspath(HERE) else None
@@ -2634,7 +2654,9 @@ def pool_tree_unit_checks(src: str = HERE) -> list:
         sys.modules.pop("card_stress", None)
         if saved_lib is not None:
             sys.modules["card_stress_lib"] = saved_lib
-        shutil.rmtree(tmp, ignore_errors=True)
+        rmtree_force(tmp)
+    c("pool tree: the scratch repository is removed afterwards (git's object files are read-only, which keeps a plain rmtree from "
+      "removing it on Windows)", not os.path.exists(tmp), tmp)
     return out
 
 
@@ -3596,7 +3618,7 @@ def main() -> int:
         if want("plants") and "--no-plants" not in sys.argv:
             plants(env)
     finally:
-        shutil.rmtree(tmp, ignore_errors=True)
+        rmtree_force(tmp)
     print(f"card-stress test: {CHECKS} checks, {len(FAILS)} failed, {len(SKIPS)} skipped, {time.time() - t0:.0f} s")
     for f in FAILS:
         print("  FAILED:", f[:300])
