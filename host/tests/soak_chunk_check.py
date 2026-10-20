@@ -27,11 +27,16 @@ It builds in a scratch copy of host/ (Makefile, include, src, tools, examples) a
              byte; stdout is the same at every size for 15 invocations; sabotage fails at every size
   clean      `make clean` removes the products of every size the Makefile allows - the tree's own build at three
              sizes and a synthetic one of all sixteen, binaries in both forms, archives, object directories - by their
-             exact names AND ONLY IF each is the kind of thing a build makes, and the tree is as it was, with these
-             still there: names that only BEGIN like a product (without digits, with a size's digits and a suffix -
-             a .log, a .txt, -old, -notes/ - and with digits of no allowed size, four or five), a regular file named
-             exactly like an object directory (soak-c61440; 67fd3f6 removed it), and a directory named exactly like
-             a binary (divsqrt-soak-c61440/; `rm -f` refuses it and make stopped there)
+             exact names AND ONLY WHEN EACH IS THE RIGHT KIND OF THING (a binary or archive: a regular file and no
+             symlink; an object directory: a directory and no symlink), and the tree is as it was, with these still
+             there: names that only BEGIN like a product (without digits, with a size's digits and a suffix - a .log,
+             a .txt, -old, -notes/ - and with digits of no allowed size, four or five); a regular file named exactly
+             like an object directory (soak-c61440; 67fd3f6 removed it) and a directory named exactly like a binary
+             (divsqrt-soak-c61440/; `rm -f` refuses it and make stopped there); and, of the allowed sizes, a symlink
+             to a file named like a binary, a dangling symlink and a FIFO named like an archive, a symlink to a
+             directory named like a binary and one named like an object directory (5446351 removed the first three:
+             its test excluded only directories; a FIFO is made with os.mkfifo and skipped by name where there is
+             none). A regular file with a product's exact name is the build's to remove, and is removed
   ignore     git ignores every product (all sixteen sizes), so a build leaves the next build id untracked=none.
              No pattern of this build takes a name that only begins like a product, WITH ONE DOCUMENTED EXCEPTION:
              the shape is the tool's name and exactly four or five digits, so a name of that shape is ignored by
@@ -50,7 +55,9 @@ It builds in a scratch copy of host/ (Makefile, include, src, tools, examples) a
              (it removes a divsqrt-soak-c16384.log: verifier VCK's finding at 318b597), `clean` that misses one
              size, `clean` with the unguarded `rm -rf` put back (it removes the file soak-c61440: VCK's finding at
              67fd3f6), `clean` with the unguarded `rm -f` put back (it stops on the directory divsqrt-soak-c61440/),
-             and the stderr line printed at the defaults
+             `clean` with the directories-only test `[ ! -d ]` put back (it removes the symlinks and the FIFO: VCK's
+             finding at 5446351), `clean` without the symlink test on the object directories (it removes the symlink
+             soak-c40960), and the stderr line printed at the defaults
 
 Prints one line a group and a last line "soak-chunk test: N checks, F failed, S skipped".
 """
@@ -87,7 +94,17 @@ DECOYS = {"divsqrt-soak-cfg": "x", "clause5-soak-chunks.txt": "x", "libcft-core.
           "soak-c16384-notes/keep.txt": "x", "clause5-soak-c16384-old": "x",
           "divsqrt-soak-c1234": "x", "divsqrt-soak-c12345": "x", "soak-c12345/keep.txt": "x",
           "soak-c61440": "x", "divsqrt-soak-c61440/keep.txt": "x"}
-EXTRA = "soaking with BATCH %d and CFT_CHUNK %d (the defaults are 4096)\n"
+# Names of allowed sizes that are the wrong kind of thing, which `make clean` must also leave (verifier VCK, 5446351: its
+# test on binaries and archives excluded only directories, and it removed the first three): a symlink to a file named
+# like a binary, a dangling symlink and a FIFO named like an archive, a symlink to a directory named like a binary, and
+# one named like an object directory. (name, what it is, the link's target: a decoy above for the symlinks that
+# resolve, a name that is not there for the dangling one, None for the FIFO). Sizes the tree does not build.
+SPECIAL_DECOYS = [("divsqrt-soak-c57344", "symlink to a file", "libcft-core.a"),
+                  ("libcft-c53248.a", "dangling symlink", "no-such-target-ck"),
+                  ("libcft-c49152.a", "FIFO", None),
+                  ("clause5-soak-c45056", "symlink to a directory", "soak-corpus"),
+                  ("soak-c40960", "symlink to a directory", "soak-corpus")]
+EXTRA ="soaking with BATCH %d and CFT_CHUNK %d (the defaults are 4096)\n"
 BACKEND = "soaking the software backend\n"
 
 
@@ -376,18 +393,39 @@ def make_synthetic_products(host: str, skip: set) -> None:
                 f.write("x")
 
 
+def make_special_decoys(host: str) -> list:
+    """The SPECIAL_DECOYS the platform can make, in `host` (after the decoys they point at); returns their snapshot keys
+    (a symlink to a directory is listed as a directory). One it cannot make is skipped by name."""
+    keys = []
+    for name, kind, target in SPECIAL_DECOYS:
+        path = os.path.join(host, name)
+        try:
+            if kind == "FIFO":
+                os.mkfifo(path)
+            else:
+                os.symlink(target, path)
+        except (AttributeError, NotImplementedError, OSError) as ex:
+            skip(f"clean: the {kind} decoy {name}", f"this platform cannot make one ({type(ex).__name__}: {ex})")
+            continue
+        keys.append(name + ("/" if kind == "symlink to a directory" else ""))
+    return keys
+
+
 def problems_clean(host: str, pristine: set, decoys: dict) -> list:
-    """`make clean` in `host`, which has a build in it, holds synthetic products of all sixteen sizes and the decoys:
-    afterwards the tree must be the pristine tree plus the decoys - every product gone (left = in the tree and in
-    neither), every decoy and every pristine file still there (gone = in neither the tree nor the decoys)."""
+    """`make clean` in `host`, which has a build in it, holds synthetic products of all sixteen sizes, the decoys and
+    (where the platform has symlinks and FIFOs) the special decoys: afterwards the tree must be the pristine tree plus
+    the decoys - every product gone (left = in the tree and in neither), every decoy and every pristine file still
+    there (gone = in neither the tree nor the decoys). A decoy is kept whatever kind of thing it is; a regular file
+    with a product's exact name is a product (the synthetic ones), and is removed."""
     bad = []
-    make_synthetic_products(host, {n.split("/")[0] for n in decoys})
+    make_synthetic_products(host, {n.split("/")[0] for n in decoys} | {n for n, _, _ in SPECIAL_DECOYS})
     for name, content in decoys.items():
         path = os.path.join(host, name)
         os.makedirs(os.path.dirname(path) or host, exist_ok=True)
         with open(path, "w") as f:
             f.write(content)
     keep = pristine | {n for n in decoys} | {os.path.dirname(n) + "/" for n in decoys if os.path.dirname(n)}
+    keep |= set(make_special_decoys(host))
     before = snapshot(host)
     rc, out, err = make(host, "clean", nice=False)
     if rc != 0:
@@ -576,8 +614,10 @@ def group_clean(base: str, state: dict) -> None:
     bad = problems_clean(host, state["pristine"], DECOYS)
     check("clean: make clean removes the products of every allowed size (this tree's three and a synthetic set of all "
           "16, .exe forms included) and the default products by their exact names, leaves the tree as it was, and leaves "
-          f"the {len(DECOYS)} names that only begin like a product, a divsqrt-soak-c16384.log and a soak-c16384-notes/ "
-          "among them", not bad, "; ".join(bad))
+          f"the {len(DECOYS)} names that only begin like a product (a divsqrt-soak-c16384.log, a soak-c16384-notes/, a "
+          "regular file named like an object directory, a directory named like a binary) and the "
+          f"{len(SPECIAL_DECOYS)} of an allowed size that are a symlink, a dangling symlink or a FIFO", not bad,
+          "; ".join(bad))
 
 
 def group_ignore(base: str) -> None:
@@ -774,7 +814,7 @@ def group_plants(base: str, state: dict) -> None:
         check("plants: a Makefile that lets 4097 through is caught by the refusals' check",
               any("SOAK_CHUNK='4097' was accepted" in b for b in bad), "; ".join(bad)[:300])
     # the two guarded lines of `clean` as the Makefile has them (the shell test is the point of the second fix)
-    files_line = '\tfor f in $(SOAK_CHUNK_FILES); do if [ ! -d "$$f" ]; then rm -f "$$f"; fi; done\n'
+    files_line = '\tfor f in $(SOAK_CHUNK_FILES); do if [ -f "$$f" ] && [ ! -L "$$f" ]; then rm -f "$$f"; fi; done\n'
     dirs_line = '\tfor d in $(SOAK_CHUNK_DIRS); do if [ -d "$$d" ] && [ ! -L "$$d" ]; then rm -rf "$$d"; fi; done\n'
     # 5. clean that leaves the object directory
     host = plant(base, "clean", [(mk, dirs_line, "\t@true\n")], None)
@@ -815,6 +855,25 @@ def group_plants(base: str, state: dict) -> None:
         bad = problems_clean(host, pristine, DECOYS)
         check("plants: the unguarded `rm -f` of the binaries put back is caught: `make clean` stops on the directory "
               "divsqrt-soak-c61440/ that has a binary's name", any("make clean exited" in b for b in bad),
+              "; ".join(bad)[:400])
+    # 5f. 5446351's test on the binaries and archives put back (verifier VCK's (a) of the third pass): it excludes only
+    # directories, and removes the symlink to a file, the dangling symlink and the FIFO
+    host = plant(base, "notd", [(mk, files_line,
+                                 '\tfor f in $(SOAK_CHUNK_FILES); do if [ ! -d "$$f" ]; then rm -f "$$f"; fi; done\n')], None)
+    if host:
+        bad = problems_clean(host, pristine, DECOYS)
+        gone = " ".join(bad)
+        check("plants: the directories-only test `[ ! -d ]` put back is caught: it removes the symlink to a file "
+              "(divsqrt-soak-c57344), the dangling symlink (libcft-c53248.a) and the FIFO (libcft-c49152.a) (verifier VCK, "
+              "5446351)", all(x in gone for x in ("divsqrt-soak-c57344", "libcft-c53248.a", "libcft-c49152.a")),
+              gone[:500])
+    # 5g. the symlink test taken off the object directories: it removes the symlink soak-c40960
+    host = plant(base, "dirlink", [(mk, dirs_line,
+                                    '\tfor d in $(SOAK_CHUNK_DIRS); do if [ -d "$$d" ]; then rm -rf "$$d"; fi; done\n')], None)
+    if host:
+        bad = problems_clean(host, pristine, DECOYS)
+        check("plants: an object-directory loop without the symlink test is caught: it removes the symlink soak-c40960 "
+              "that points at a directory", any("clean removed what it did not make" in b and "soak-c40960" in b for b in bad),
               "; ".join(bad)[:400])
     # 6. the stderr line printed at the defaults too
     host = plant(base, "line", [("tools/divsqrt_soak.c", "#if BATCH != 4096 || CFT_CHUNK != 4096", "#if 1")],

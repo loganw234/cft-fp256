@@ -870,15 +870,17 @@ endif
 # remote frame cap is 1 GiB.
 #
 # Nothing here is a prerequisite of `all`. `clean` removes the products
-# of every size the list below allows, each by its exact name and only if
-# it is the kind of thing a build makes: a binary or archive that is not a
-# directory, an object directory that is a directory and no symlink. What
-# only begins like a product stays (a divsqrt-soak-c16384.log, a
-# soak-c16384-notes/), and so does a file named exactly like an object
-# directory (soak-c8192) or a directory named exactly like a binary. The
-# products are in .gitignore, by their shape (the name and four or five
-# digits), or a build would mark the next build id untracked=present; the
-# comment there says what that covers.
+# of every size the list below allows, each by its exact name and only
+# when it is the right kind of thing: a binary or archive when it is a
+# regular file and no symlink, an object directory when it is a directory
+# and no symlink. Anything else of those names stays: a symlink to
+# anything, a dangling symlink, a FIFO, a directory named like a binary, a
+# file named like an object directory (soak-c8192). What only begins like
+# a product stays too (a divsqrt-soak-c16384.log, a soak-c16384-notes/).
+# A regular file with a product's exact name is the build's to remove.
+# The products are in .gitignore, by their shape (the name and four or
+# five digits), or a build would mark the next build id untracked=present;
+# the comment there says what that covers.
 # ====================================================================
 SOAK_CHUNK       ?=
 SOAK_CHUNK_OK    := 4096 8192 12288 16384 20480 24576 28672 32768 \
@@ -961,23 +963,27 @@ endif
 # removes what a build of any size the list allows made, and only that:
 # for each size its two binaries in both forms (.exe or none, as `clean`
 # removes every platform's products), its archive and its object
-# directory, each by its EXACT name AND ONLY IF IT IS THE KIND OF THING
-# the build makes. The binaries and the archive go unless the name is a
-# directory (rm -f refuses one, and make would stop there); the object
-# directory goes only if it is a directory and no symlink (rm -rf on the
-# bare name takes a file too: a file called soak-c8192 went with it in
-# 67fd3f6). So these stay: a name of a size the list refuses, a name that
-# only begins like a product, a file or symlink named like an object
-# directory, a directory named like a binary. The first version used globs
-# (divsqrt-soak-c[0-9]*), and the `*` took anything after the digits: a
-# divsqrt-soak-c16384.log of the user's went with them.
+# directory, each by its EXACT name AND ONLY WHEN IT IS THE RIGHT KIND OF
+# THING. A binary or archive goes when it is a regular file and no
+# symlink ([ -f ] && [ ! -L ]; a test that excluded only directories, as
+# 5446351's did, took a symlink, a dangling symlink and a FIFO). An object
+# directory goes when it is a directory and no symlink (rm -rf on the bare
+# name takes a file too: a file called soak-c8192 went with it in
+# 67fd3f6). Anything else of those names stays: a symlink to anything, a
+# dangling symlink, a FIFO, a directory named like a binary, a file or
+# symlink named like an object directory; so does a name of a size the
+# list refuses and a name that only begins like a product. A regular file
+# with a product's exact name is the build's to remove, which is what
+# clean is for. The first version used globs (divsqrt-soak-c[0-9]*), and
+# the `*` took anything after the digits: a divsqrt-soak-c16384.log of the
+# user's went with them.
 SOAK_CHUNK_FILES := $(foreach n,$(SOAK_CHUNK_OK),divsqrt-soak-c$(n) \
                     divsqrt-soak-c$(n).exe clause5-soak-c$(n) \
                     clause5-soak-c$(n).exe libcft-c$(n).a)
 SOAK_CHUNK_DIRS  := $(foreach n,$(SOAK_CHUNK_OK),soak-c$(n))
 clean: clean-soak-chunk
 clean-soak-chunk:
-	for f in $(SOAK_CHUNK_FILES); do if [ ! -d "$$f" ]; then rm -f "$$f"; fi; done
+	for f in $(SOAK_CHUNK_FILES); do if [ -f "$$f" ] && [ ! -L "$$f" ]; then rm -f "$$f"; fi; done
 	for d in $(SOAK_CHUNK_DIRS); do if [ -d "$$d" ] && [ ! -L "$$d" ]; then rm -rf "$$d"; fi; done
 .PHONY: clean-soak-chunk
 
