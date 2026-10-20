@@ -28,10 +28,14 @@ failure policy meets each kind of failure:
           short       (soak, the -all and -wide modes) a slice one ENCODING short: the tool ran
                       [lo, hi - 1) and says so, its counts consistent, exit 0
           shortcase   (soak, the same modes) the right encodings and ONE CASE too few, exit 0
+          badenc      (soak, the same modes) the right cases, and an encodings clause ONE TOO FEW: the tool's own account of
+                      what it covered contradicts the job, though its case count is the job's, exit 0
           slow:N      N seconds, then the normal verdict
     CFT_STANDIN_STATE=<dir>            where the counts are kept (required with a scenario)
     CFT_STANDIN_SOAK_RATE=<cases/s>    a soak takes cases / rate seconds (default 0: at once)
     CFT_STANDIN_TILES=<n>              tiles the identity says (default: 4 for a path with "quad")
+  Every soak job also prints "standin: env CFT_SOAK_ARTIFACT=... CFT_XRT_TILES=..." (the two variables as the job was handed
+  them, "<unset>" for none): the tests hold a host-pool job to neither, and a card job to its image and tile.
 
 Python 3.10 or later; standard library only. The text below that is NOT a tool's own is marked.
 """
@@ -215,7 +219,7 @@ def main() -> int:
             f"CFT_XRT_TILES={os.environ.get('CFT_XRT_TILES', '<unset>')}")
     do = rule_for("soak" if leg == "soak" else leg, image) or ""
     fail = do == "fail"
-    if do and do not in ("fail", "mismatch", "wrongsha", "wrongtiles", "software", "short", "shortcase"):
+    if do and do not in ("fail", "mismatch", "wrongsha", "wrongtiles", "software", "short", "shortcase", "badenc"):
         apply_misbehaviour(do, leg, xb)
 
     tiles = int(os.environ.get("CFT_STANDIN_TILES") or (4 if "quad" in (xb or "") else 1))
@@ -347,7 +351,7 @@ def main() -> int:
                 if skipped:
                     out(f"  skipped {skipped} lane-target pairs outside the target range "
                         f"(invalid table is model-pinned)")
-                tail = f", {enc} encodings, {skipped} skipped"
+                tail = f", {enc - (1 if do == 'badenc' else 0)} encodings, {skipped} skipped"
         else:
             cases = int(real[2], 0)
             mode = real[4] if len(real) > 4 else ("rne" if op == "conv32to64" else "-")

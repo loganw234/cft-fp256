@@ -1554,7 +1554,9 @@ def scn_sweep_all(env: Env, src: str = HERE) -> list:
 
 def scn_sweep_short(env: Env, src: str, base: list) -> list:
     """B: a slice the tool ran one encoding or one case short is parse_error, by the rule written for it, not covered,
-    and served again."""
+    and served again. Three of the items are HOST items, which the pool serves (image cpu), and one is a TILE item that has
+    a cover spec (scaleb32-wide), which the card serves: the two paths each hold a slice to what it covered, so each is
+    shown here, and a plant of either is caught by its own item."""
     out: list = []
 
     def c(n, ok, d=""):
@@ -1563,8 +1565,11 @@ def scn_sweep_short(env: Env, src: str, base: list) -> list:
     sc = [{"leg": "soak", "op": "cvtto32-all", "nth": [1], "do": "short"},
           {"leg": "soak", "op": "cvtto32-all", "nth": [2], "do": "shortcase"},
           {"leg": "soak", "op": "conv32to64-all", "nth": [1], "do": "shortcase"},
-          {"leg": "soak", "op": "cvtfrom64-all", "nth": [1], "do": "short"}]
-    bn = ["cvtto32-all-rne", "conv32to64-all", "cvtfrom64-all-rne"]
+          {"leg": "soak", "op": "cvtfrom64-all", "nth": [1], "do": "short"},
+          {"leg": "soak", "op": "scaleb32-wide", "nth": [1], "do": "short"},
+          {"leg": "soak", "op": "scaleb32-wide", "nth": [2], "do": "shortcase"},
+          {"leg": "soak", "op": "scaleb32-wide", "nth": [3], "do": "badenc"}]
+    bn = ["cvtto32-all-rne", "conv32to64-all", "cvtfrom64-all-rne", "scaleb32-wide-rne"]
     r2 = start_driver(env, "sweepshort", ["--until", until(120), "--sweep-items", ",".join(bn)] + base, sc, src=src,
                       to_file=True)
 
@@ -1575,7 +1580,8 @@ def scn_sweep_short(env: Env, src: str, base: list) -> list:
     stop_run(r2)
     r2.finish(60)
     for n, want in (("cvtto32-all-rne", ["encodings where the slice has", "checks where"]),
-                    ("conv32to64-all", ["cases where the slice has"]), ("cvtfrom64-all-rne", ["cases where the slice has"])):
+                    ("conv32to64-all", ["cases where the slice has"]), ("cvtfrom64-all-rne", ["cases where the slice has"]),
+                    ("scaleb32-wide-rne", ["cases where the slice has", "cases where the slice has", "encodings where the slice has"])):
         mine = sorted((x for x in r2.legs(kind="sweep") if x["sweep"]["item"] == n), key=lambda x: x["start_epoch"])
         k = len(want)
         c(f"sweep short {n}: the first {k} slice(s) came back short and were refused as parse_error, by the rule written for each "
@@ -1584,7 +1590,8 @@ def scn_sweep_short(env: Env, src: str, base: list) -> list:
                                          for x, w in zip(mine[:k], want)), str([(x["status"], x["reason"]) for x in mine[:k + 1]]))
         c(f"sweep short {n}: the same slice [0, 2^20) was served again each time, and then passed",
           got and all((x["sweep"]["lo"], x["sweep"]["hi"]) == (0, 1 << 20) for x in mine[:k + 1]) and mine[k]["status"] == "pass"
-          and mine[k]["counts"]["encodings"] == 1 << 20, str([(x["sweep"]["lo"], x["sweep"]["hi"]) for x in mine[:k + 1]]))
+          and mine[k]["counts"]["encodings"] == 1 << 20,
+          f"got {got}; " + str([(x["sweep"]["lo"], x["sweep"]["hi"], x["status"], (x["reason"] or "")[:60]) for x in mine[:k + 1]]))
         iv, served_n, _cases, _seeds, _dis = L.sweep_coverage(r2.recs)
         c(f"sweep short {n}: the refused slices are not covered: the coverage the records give starts with the passing slice "
           f"and counts only passing slices", (iv.get(n) or [(None, None)])[0][0] == 0
@@ -3107,6 +3114,10 @@ def plants(env: Env) -> None:
         ("the driver does not hold a slice to what it covered",
          [("card_stress.py", '            cover = job["cover"]\n', "            cover = None\n")],
          lambda env, src: scn_sweep_short(env, src, SWEEP_ALL_BASE),
+         ["sweep short scaleb32-wide-rne: the first 3 slice(s) came back short"]),
+        ("the host pool does not hold a slice to what it covered",
+         [("card_stress.py", '        exp, cover = job["expected"], job["cover"]\n', '        exp, cover = job["expected"], None\n')],
+         lambda env, src: scn_sweep_short(env, src, SWEEP_ALL_BASE),
          ["sweep short cvtto32-all-rne: the first 2 slice(s) came back short"]),
         ("a refused slice is counted covered, so a restart skips it",
          [("card_stress_lib.py", '        if not item or r.get("status") not in ("pass", "fail"):',
@@ -3190,8 +3201,8 @@ def plants(env: Env) -> None:
          [("card_stress.py", "        for k in drop:\n            env.pop(k, None)\n", "        for k in ():\n            env.pop(k, None)\n")],
          scn_normal, ["normal: no host job named the card although the driver's own environment did"]),
         ("the card's sweep picks host items too (and the pool tile items)",
-         [("card_stress.py", "                if reach is not None and it.reach != reach:\n                    continue\n",
-           "                if False:\n                    continue\n")],
+         [("card_stress.py", "            if reach is not None and it.reach != reach:\n                continue\n",
+           "            if False:\n                continue\n")],
          lambda env, src: pool_unit_checks(src), ["pool: over a whole rotation the card's waves plan the 43 TILE items", "pool: and the pool's slices are the 47 HOST items"]),
         ("the host pool does not look for a stop before it starts a slice",
          [("card_stress.py", "                if self.should_stop(git=False) is not None:\n", "                if False:\n")],
