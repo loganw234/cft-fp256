@@ -385,6 +385,33 @@ clean: enclose-clean
 enclose-clean:
 	rm -f cft-enclose cft-enclose.exe
 
+# ====================================================================
+# cft-tf-subject - libcft as the system under test in a Berkeley
+# TestFloat pipe (docs/EXTERNAL-GENERATORS.md):
+#
+#   testfloat_gen F | cft-tf-subject F | testfloat_ver F
+#
+# Not part of `all`: the outside programs it works with are not in this
+# repository. tf-subject-test needs none of them - it scores the subject's
+# glue (operand places, flag order, comparison kinds, integer widths)
+# against the golden model on cases of our own. The UCBTEST hooks
+# (tools/ucb_hooks.c) are built by tools/ucb_run.sh, which compiles the
+# sources of an extracted UCBTEST archive of the caller's.
+# ====================================================================
+.PHONY: tf-subject tf-subject-test tf-subject-clean
+
+cft-tf-subject$(EXE): tools/tf_subject.c libcft.a
+	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) $^ -o $@ $(XRTLIBS) $(LDLIBS) -lm
+
+tf-subject: cft-tf-subject$(EXE)
+
+tf-subject-test: cft-tf-subject$(EXE)
+	$(PYTHON) tests/tf_subject_check.py ./cft-tf-subject$(EXE)
+
+clean: tf-subject-clean
+tf-subject-clean:
+	rm -f cft-tf-subject cft-tf-subject.exe
+
 api-test$(EXE): tests/api_test.c libcft.a
 	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) $(XRTDEF) $^ -o $@ $(XRTLIBS)
 
