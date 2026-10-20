@@ -12,8 +12,9 @@ It builds the tool in a scratch copy of host/ (make clause5-soak, XRT=0) and run
   build      the tool builds; each mode's index space is the size python/c5_class_enum.py gives; the C tool's `dump` of
              EVERY index of each of the five spaces equals the Python reference's, line for line (not a sample)
   whole      each mode over its whole index space under every attribute it takes: no mismatch, the verdict clause holds
-             (E = the indices, cases + skipped = k x E, which parse_soak's cover rule says), and for cvtto64-class the
-             skipped pairs equal an INDEPENDENT count, in Python, from the rule alone
+             (E = the indices, cases + skipped = k x E, which parse_soak's cover rule says; k is 4 for the two tile modes,
+             a case a lane, and for cvtto64-class, a case a target), and for cvtto64-class the skipped pairs equal an
+             INDEPENDENT count, in Python, from the rule alone
   spread     each mode and attribute over slices of odd alignment and size across the space, each held to the same rules
   refuse     a range that is empty, reversed, past the space, or not a number is refused by name (exit 2); so are an
              attribute a mode has no oracle for, a missing attribute, and a dump of a job that is not a class mode
@@ -22,11 +23,16 @@ It builds the tool in a scratch copy of host/ (make clause5-soak, XRT=0) and run
              CONTROL that the unplanted copy passes: a slice counted one index short (parse_soak's cover rule); a mode that
              skips every index (cvtto64-class given NaNs: the cover rule passes it, the rule that a class item compare
              something refuses it); a wrong class selector in the C operand builder (the dump comparison names the first
-             index); and a rounding defect in the library (a sticky tree without the lowest dropped bit) that the class
-             mode catches and the same number of the random mode's draws do not
+             index); a skip filter too eager (the independent skip count); a rounding defect in the library (a sticky tree
+             without the lowest dropped bit) that the class mode catches and the same number of the random mode's draws
+             do not; a defect only a FLAG shows (the library drops INEXACT for one class of operand: seen by a class case
+             run alone, unseen in the batched build); and a defect of ONE LANE of a tile (seen by the default build, which
+             runs each operand in each lane, unseen by the build that does not rotate)
   port       the Python port of the tool's random generator equals the operands the real tool prints, 16 batches
-  unchanged  (with --baseline-tree DIR, a directory holding the baseline's host/) the random modes and the exhaustive
-             modes of that tree's tool and of this tree's print the same bytes and exit with the same status
+  unchanged  (with --baseline-tree DIR, a directory holding the baseline's host/, e.g. `git archive 881bbcb host | tar -x -C DIR`)
+             the random modes and the exhaustive modes of that tree's tool and of this tree's print the same bytes and exit
+             with the same status - 259 invocations, 301 with --thorough - and so does the failing path of conv64to32 under
+             a fault planted in both trees' library; a control shows the comparison can tell a changed random mode
 
 Prints one line a group and a last line "c5-class test: N checks, F failed, S skipped".
 """
@@ -534,8 +540,9 @@ def group_unchanged(tool, built_tree: str, base_dir: str, work: str, thorough: b
         if not ok:
             check(f"unchanged: the argument error {' '.join(args)} keeps its old usage lines", False, res[1][2][:200])
     # the failing paths of the one random mode whose driver was split (conv64to32): the SAME fault is planted in both trees'
-    # library - an extra divide-by-zero flag, which no conversion and no oracle ever raises, for every operand in [1, 2) - which makes the batch flags disagree and sends the mode down
-    # its per-lane flag recheck; the output, FLAGS lines and counts and all, must be the same from both tools
+    # library - an extra divide-by-zero flag, which no conversion and no oracle ever raises, for every operand in [1, 2) -
+    # which makes the batch flags disagree and sends the mode down its per-lane flag recheck; the output, FLAGS lines and
+    # counts and all, must be the same from both tools
     flag_edit = ("            acc |= fl;\n        }\n        lane_store(fd, (uint8_t *)d, i, &v);",
                  "            acc |= fl;\n            if (e == -52)\n                acc |= CFT_SF_DIVZERO;\n        }\n"
                  "        lane_store(fd, (uint8_t *)d, i, &v);")

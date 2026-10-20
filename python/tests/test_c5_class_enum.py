@@ -210,6 +210,28 @@ def test_cvtto_skips_are_counted_by_the_rule():
     # the whole space for one attribute: the skips are strictly between none and all
     s = C.expected_skipped_cvtto(e, 0, e.N, "rne")
     assert 0 < s < 4 * e.N
+    # the targets compared, by name, on a few operands: 1.0 is held by all four, -1.0 by the two signed, 2^63 by u64 alone,
+    # 2^31 (rne) by every target but i32, a NaN by none
+    class _One:                                               # an enumerator stand-in that returns one fixed operand
+        src = C.FP64
+        def __init__(self, x): self.x = x
+        def operand(self, i): return self.x
+    assert C.compared_targets(_One(one), 0, "rne") == ("i32", "u32", "i64", "u64")
+    assert C.compared_targets(_One(one | (1 << 63)), 0, "rne") == ("i32", "i64")
+    assert C.compared_targets(_One(big), 0, "rtz") == ("u64",)
+    assert C.compared_targets(_One((1023 + 31) << 52), 0, "rne") == ("u32", "i64", "u64")
+    assert C.compared_targets(_One(nan), 0, "rne") == ()
+
+
+def test_cvtto_cases_by_the_rule_are_the_tools_counts():
+    """The cases cvtto64-class makes over its whole space, counted in Python from the rounding rule alone, equal the numbers the
+    C tool printed on the software backend (MEASURED, 2026-10-20: hw/test_c5_class.py holds the tool to its own count on every
+    run; these are the figures a driver can hold the whole item to)."""
+    e = ENUMS64["cvtto64-class"]
+    want = {"rne": 91005, "rtz": 91484, "rdn": 85141, "rup": 91478, "rmm": 90986}
+    got = {a: C.expected_compared_cvtto(e, 0, e.N, a) for a in e.attrs}
+    assert got == want
+    assert all(got[a] + C.expected_skipped_cvtto(e, 0, e.N, a) == 4 * e.N for a in e.attrs)
 
 
 def test_the_planted_rounding_defect_is_caught_by_the_class_set_and_missed_by_random_draws():

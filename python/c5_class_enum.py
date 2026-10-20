@@ -493,7 +493,7 @@ def constructive(e) -> tuple:
     the key of the operand the enumerator BUILDS equals the key the index NAMES: (sign, position, class, lsb,
     kept all ones). Every such tuple is then reached, by construction, at this width as at the small ones. The
     rest of a key's validity (which classes and patterns exist at a position) is a function of whether the dropped
-    width is 0, 1 or at least 2 and the kept width at most 0, 1, 2 or at least 3, and the small formats hold every such regime. Returns (indices
+    width is 0, 1 or at least 2 and the kept width is below 0, 0, 1, 2 or at least 3, and the small formats hold every such regime. Returns (indices
     checked, indices whose actual key differs from the named one, the first few of those)."""
     checked, bad, firsts = 0, 0, []
 
@@ -600,14 +600,28 @@ def rounded_integer(fmt: FpFormat, x: int, attr: str):
     return -mag if u.sign else mag
 
 
+TARGET_NAMES = ("i32", "u32", "i64", "u64")
+
+
+def compared_targets(e: RoundEnum, i: int, attr: str) -> tuple:
+    """The integer targets the soak compares for index i of cvtto64-class under `attr`, by the rule alone: every target whose
+    range holds the integer the attribute rounds the operand to (the soak runs each operand against all four, as exact=0 and
+    exact=1, and skips the rest). The operand's own fields are in e.operand(i)."""
+    r = rounded_integer(e.src, e.operand(i), attr)
+    if r is None:
+        return ()
+    return tuple(n for n, (tmin, tmax) in zip(TARGET_NAMES, TARGET_RANGES) if tmin <= r <= tmax)
+
+
 def expected_skipped_cvtto(e: RoundEnum, lo: int, hi: int, attr: str) -> int:
     """The (operand, target) pairs of the indices [lo, hi) that cvtto64-class must SKIP, counted here from the rule
     alone: a pair is compared exactly when the rounded integer lies in the target's range."""
-    skipped = 0
-    for i in range(lo, hi):
-        r = rounded_integer(e.src, e.operand(i), attr)
-        skipped += len(TARGET_RANGES) if r is None else sum(1 for tmin, tmax in TARGET_RANGES if not tmin <= r <= tmax)
-    return skipped
+    return sum(len(TARGET_NAMES) - len(compared_targets(e, i, attr)) for i in range(lo, hi))
+
+
+def expected_compared_cvtto(e: RoundEnum, lo: int, hi: int, attr: str) -> int:
+    """The (operand, target) pairs of [lo, hi) the soak compares: the cases of cvtto64-class over that slice."""
+    return sum(len(compared_targets(e, i, attr)) for i in range(lo, hi))
 
 
 # ---------------------------------------------------------------------------------------------------

@@ -1163,14 +1163,14 @@ it are all ones, or a walking one at one fraction bit). **How each space was cou
 | `scaleb64-class` | 3 routes x 54 strips x 448, + 36 overflow + 36 deeper than the last strip | 72,648 | 4 | 65,992 |
 
 The study's 377,664 for conv64to32 is 281 x 4 x (2 x 2 + 52) x 2 x 3: three magnitude functions
-(nearest, truncate, away from zero), and a function is run once however many attributes and signs
-reach it. The soak runs one attribute a job, and each attribute covers its own mode code and sign path
+(nearest, truncate, away from zero) with both signs each, a (function, sign) pair run once however
+many (attribute, sign) pairs reach it (eight of them reach six). The soak runs one attribute a job, and each attribute covers its own mode code and sign path
 (the study's own edge note, 4.3 (d)), so the figure per attribute is the same formula without the
 three: 281 x 448 = 125,888, and 3 x 125,888 = 377,664 exactly. Mine is 136,192 = (281 + 23) x 448, the 23
 being the exponent witnesses that make "the exponent matters only through a rebias and range checks"
 testable at the 11-bit field's bits and not only across the 281 exponents where the result changes
-class. **k** is the checks an index makes: one for the two operations with no lanes and one result; a case
-a target for `cvtto64-class` (the four integer targets, each in-range lane as exact=0 and exact=1: **S, the
+class. **k** is the checks an index makes: one for `conv64to32-class` and `cvtfrom64-class` (host operations, one
+result an index); a case a target for `cvtto64-class` (the four integer targets, each in-range lane as exact=0 and exact=1: **S, the
 skipped, is the (operand, target) pairs whose rounded integer leaves the target's range, and only this
 mode skips**); and a case a lane for the two that reach a tile (below). A space is regular by
 construction, so a class or pattern that does not exist at a position repeats an operand: the last
@@ -1232,7 +1232,7 @@ for all five operations: 8 instances, from 46 to 416 keys each, 0 missing (`pyth
 classes of each instance, and the classification the keys read off the definitions equals python/cft_golden's results on every
 enumerated case. At p = 24 and 53 exhaustion is out of reach, and the argument is that it is **the same enumerator, wider**:
 one function of (exponent width, fraction width, target), built at 4, 5, 8 and 11 exponent bits; a key's validity (which
-classes and patterns exist at a position) depends on whether the dropped width is 0, 1 or at least 2 and the kept width at most 0,
+classes and patterns exist at a position) depends on whether the dropped width is 0, 1 or at least 2 and the kept width is below 0, 0,
 1, 2 or at least 3, and the small formats hold every such regime; and, measured over the enumerator's own whole space at p = 24 and 53, for every
 one of the 22,480 non-degenerate indices of nine instances the key of the operand it builds equals the key the index names. What this does not show
 is that the rounding unit has the structure.

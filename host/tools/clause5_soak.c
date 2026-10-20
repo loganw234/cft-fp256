@@ -2372,7 +2372,8 @@ static int probe_scalebrange(void)
  * as the random mode of the operation (conv64to32_batch, rint_batch64,
  * cvtto_batch, cvtfrom_check, scaleb_batch, behind the same probe
  * gates), so the oracle, the flag discipline and the sabotage are the
- * random mode's; only the operand source differs. The verdict line is
+ * random mode's; only the operand source and the shape of a call (below,
+ * "How a class case is run") differ. The verdict line is
  * the exhaustive modes': ", E encodings, S skipped", E counting INDICES
  * here, and cases + S is k * E with k fixed by the mode (1, 4, 4, 1, 4 for
  * the five in the order below: a case a lane for the two tile modes, a case
