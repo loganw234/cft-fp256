@@ -30,6 +30,10 @@ WHAT IT REFUSES, by name (exit 1, nothing written; independent refusals are repo
   no-git, not-a-git-tree   there is no git, or the root is not the top of a work tree with a commit.
   dirty-tree          the tree differs from HEAD. The archive names a commit, so it must be made from it; with
                       --allow-dirty the name ends -dirty and the manifest lists the paths that differ.
+  crlf-checkout       a file the archive copies, or whose digest a sidecar holds, is saved with CRLF line endings on
+                      disk, which git calls clean here (the repository is eol=lf). The archive holds the tree's bytes,
+                      so one made from it would not be an LF checkout's. It is refused first, naming the files, so
+                      that the digests are never compared and the fault is not reported as a sidecar-mismatch.
   output-not-ignored  the output directory is inside the tree and git does not ignore it.
   exists              the archive is already there (--force replaces it).
   no-converter, converter-unusable   there is no rsvg-convert, or the one named does not answer as one, and
@@ -82,6 +86,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parent
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
+import figure_extracts as X                                          # noqa: E402  (tree_bytes: the one definition of CRLF)
 import packager_html as HTML                                         # noqa: E402
 import packager_png as PNG                                           # noqa: E402
 import packager_status as ST                                         # noqa: E402
@@ -223,10 +228,47 @@ def svg_labels(text):
     return (unesc(t.group(1)) if t else None), (unesc(a.group(1)) if a else None)
 
 
+def crlf_files(root):
+    """The files saved with CRLF line endings on disk (figure_extracts.tree_bytes says which), among those whose bytes
+    reach the archive: the ones it copies (the figures' SVGs and sidecars, the README charts' SVGs, the light
+    documents), the data the README charts are made from, whose digests the manifest records, and every source and
+    extract a sidecar holds a digest of, which check_sidecar re-hashes from raw bytes. Not the files STATUS.md is only
+    read from: no byte of those is copied or digested here."""
+    fig_dir = root / FIG_DIR
+    rels = [rel for rel, _why in LIGHT_DOCS] + list(README_CHARTS_DATA)
+    rels += ["%s/%s-%s.svg" % (BENCH_DIR, n, t) for n in README_CHARTS for t in THEMES]
+    rels += ["%s/%s" % (FIG_DIR, p.name) for p in sorted(fig_dir.glob("*")) if p.suffix in (".svg", ".json")]
+    for p in sorted(fig_dir.glob("*.json")):
+        try:
+            sc = json.loads(p.read_text(encoding="utf-8"))
+            rels += [s["path"] for s in sc.get("sources", []) if "reads" not in s] + [e["path"] for e in sc.get("extracts", [])]
+        except (OSError, ValueError, AttributeError, KeyError, TypeError):
+            pass                      # not JSON, or not shaped like a sidecar: check_sidecar names that
+    return [rel for rel in dict.fromkeys(rels) if (root / rel).is_file() and X.tree_bytes(root / rel)[1]]
+
+
+def crlf_read(root, rd):
+    """The files a reader has read that are saved with CRLF on disk. After STATUS.md is built that is every file it was
+    made from, which crlf_files cannot list ahead: MEASURED, a CRLF docs/VALIDATION.md, docs/ROADMAP.md or tb/Makefile
+    builds a STATUS.md that is not the LF tree's (the first holds CR bytes), and nothing refused it."""
+    return [rel for rel in sorted(rd.log) if X.tree_bytes(root / rel)[1]]
+
+
+def crlf_problem(files):
+    """The refusal for a tree with CRLF files: how many, and the first few by path."""
+    return ("crlf-checkout", "%d file(s) of the tree are saved with CRLF line endings on disk (%s%s); the repository is "
+            "eol=lf, so git can call such a tree clean, and the archive holds the tree's bytes and their digests, so one "
+            "made from them would not be an LF checkout's. Restore them from git, or save them with LF line endings" % (
+                len(files), "; ".join(files[:5]), "; ..." if len(files) > 5 else ""))
+
+
 def collect_figures(root, rd):
     """The figures the archive holds, in the gallery's order and then the README's: (figures, problems).
     A figure is a dict (see packager_status.build's ctx); problems are (code, message) refusals."""
     problems = []
+    crlf = crlf_files(root)
+    if crlf:
+        return [], [crlf_problem(crlf)]      # before anything is read or compared: no digest of a CRLF file means anything
     try:
         gallery = ST.parse_gallery(rd.text(GALLERY))
     except ST.SourceError as e:
@@ -635,10 +677,16 @@ def build(root, out_dir, no_png=False, converter=None, scale=SCALE_DEFAULT, allo
     ctx = {"commit_sha": g["sha"], "commit_utc": g["committed"].strftime("%Y-%m-%d %H:%M:%S"),
            "tree_clean": g["clean"], "png": not no_png, "figures": figs, "light_docs": list(LIGHT_DOCS),
            "archive_paths": all_paths}
+    status_error = None
     try:
         text, facts, quotes, refs, reads, dropped = ST.build(rd, ctx)
     except (ST.SourceError, ST.DocError) as e:
-        refuse("status-source", str(e))
+        status_error = e
+    crlf = crlf_read(root, rd)                  # every file STATUS.md was made from, now that the reader has read them
+    if crlf:
+        raise Refused([crlf_problem(crlf)])     # first: a CRLF file may be why its reader failed, and the page differs anyway
+    if status_error is not None:
+        refuse("status-source", str(status_error))
     for rel in refs:
         if rel not in all_paths:
             refuse("status-source", "STATUS.md refers to %s, which the archive does not hold" % rel)
