@@ -2316,6 +2316,49 @@ def pool_unit_checks(src: str = HERE) -> list:
     return out
 
 
+def cpu_parse_checks(src: str = HERE) -> list:
+    """parse_soak(cpu=True), the parser of a host-pool job, on REAL logs of the software backend (hw/card_stress_fixtures/: the same
+    tools, made on the path the pool runs, with no CFT_SOAK_ARTIFACT): they pass; the same log whose backend line names a DEVICE
+    is refused by name (a CPU job that opened the card); and so is one that names no backend."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    index = {}
+    with open(os.path.join(FIX, "INDEX.txt"), "r", encoding="utf-8") as fh:
+        for ln in fh:
+            if ln.strip() and not ln.startswith("#"):
+                nm, rc, cmd = ln.rstrip("\n").split("\t", 2)
+                index[nm] = (int(rc), cmd)
+    with lib_from(src) as L2:
+        items = {it.name: it for it in L2.sweep_items()}
+
+        def refusal(fn):
+            try:
+                fn()
+            except L2.VerdictError as e:
+                return str(e)
+            return None
+        for nm, iname in (("c5-nextup32.txt", "nextup32"), ("c5x-conv32to64-all.txt", "conv32to64-all"),
+                          ("c5x-cvtto32-all.txt", "cvtto32-all-rup")):
+            it = items[iname]
+            op, lo, hi, mode = fixture_job(index, nm)
+            t, rc = fixture(nm), index[nm][0]
+            exp, cover = it.expected_cases(lo, hi), it.cover_spec(lo, hi)
+
+            def parse(text, it=it, exp=exp, cover=cover, rc=rc):
+                return L2.parse_soak(text, rc, it.op, it.verdict_mode, None, exp, cover, cpu=True)
+            why = refusal(lambda: parse(t))
+            dev = refusal(lambda: parse(t.replace("soaking the software backend", "soaking the DEVICE backend: /box/quad.xclbin")))
+            none = refusal(lambda: parse(t.replace("soaking the software backend\n", "")))
+            c(f"cpu parser {nm}: a real log of the software backend passes as a host job's, and a log that names a DEVICE is refused "
+              f"as a CPU job that opened the card, one that names no backend is refused",
+              "soaking the software backend" in t and why is None and dev is not None and dev.startswith(L2.CPU_OPENED_CARD)
+              and none is not None and "software backend" in none, f"{why} | {dev} | {none}")
+    return out
+
+
 def append_lock_checks(src: str = HERE) -> list:
     """The metrics file has one writer at a time in this process (parcel DR2). Eight threads - the host pool's workers, the card's
     thread, the telemetry sampler - append at one instant, over and over. THE CAUSE, on every platform: the write is slowed by 5 ms
@@ -3157,6 +3200,9 @@ def plants(env: Env) -> None:
         ("a host job the run's end terminated is recorded as a slice of its item",
          [("card_stress.py", "        if slot[\"abandon\"] or (self.hard and res.killed):\n", "        if False:\n")],
          scn_pool_stop, ["pool stop: the hung host job was terminated", "pool deadline: the run ended at the deadline"]),
+        ("a CPU job's log that names a DEVICE passes",
+         [("card_stress_lib.py", "        if dev:\n            raise VerdictError(f\"{CPU_OPENED_CARD}", "        if False:\n            raise VerdictError(f\"{CPU_OPENED_CARD}")],
+         lambda env, src: cpu_parse_checks(src), ["cpu parser c5-nextup32.txt"]),
         ("a host job's log is read for the card's failures: 'no such device' is no_device",
          [("card_stress.py", "            infra = L.classify_infra(text) if cmd.card else None\n", "            infra = L.classify_infra(text)\n")],
          scn_pool_failure, ["pool failure: a host job that prints 'no such device' is a parse_error of ITS item"]),
@@ -3253,7 +3299,7 @@ def scn_soak_software(env: Env, src: str = HERE) -> list:
 
 def group_pool(env: Env, src: str = HERE) -> list:
     """The host pool (parcel DR2): the in-process checks, then STOP and the deadline, a host job's failure, and --resume."""
-    return (pool_unit_checks(src) + append_lock_checks(src) + scn_pool_stop(env, src) + scn_pool_failure(env, src)
+    return (pool_unit_checks(src) + cpu_parse_checks(src) + append_lock_checks(src) + scn_pool_stop(env, src) + scn_pool_failure(env, src)
             + scn_pool_resume(env, src) + scn_pool_survives(env, src) + scn_pool_nice(env, src))
 
 
