@@ -1309,6 +1309,9 @@ class Driver:
             if not wave:
                 why, cause = self.why_no_wave(forced)
                 self.event("sweep_empty", why, image=img.name, cause=cause)
+                if self.quick and not self.sweep_only and waves + 1 < self.quick_waves(img):
+                    waves += 1       # quick's own list: the next wave has another item (a single's rint32-rne after a covered sqrt32-rne)
+                    continue
                 break
             recs = self.run_wave(img, wave)
             waves += 1
@@ -1346,41 +1349,53 @@ class Driver:
         return [["sqrt32-rne"], ["rint32-rne"]][min(wave_no, 1)]
 
     def why_no_wave(self, forced: Optional[List[str]]) -> Tuple[str, str]:
-        """(a sentence, its cause - "finished" or "blocked") for a wave that plan_wave could not fill
-        with one job: each item it could have run, classed by what stops it. Only when every one is an
-        exhaustive item already covered is the campaign finished, and only then does the sentence say
-        `nothing left to run in this campaign`: 2026-10-19's smoke printed that on each image when
-        --sweep-items named none of --quick's own items, and it read like a finished campaign."""
+        """(a sentence, its cause - "finished" or "blocked") for a wave that plan_wave could not fill with one job.
+        The campaign is the catalog, or the items named by --sweep-items. It is finished only when every item of it is
+        an exhaustive item already covered, and only then does the sentence say `nothing left to run`: decided over the
+        CAMPAIGN, never over the wave's own list (verifier-VDR1: a single image whose sqrt32-rne was covered planned no
+        job from its list while sqrt32-rtz was still to run, and the sentence called the campaign finished). The wave's
+        list gives the causes, and when it is blocked and the campaign is not, the sentence says what remains.
+        2026-10-19's smoke printed the finished words on each image when --sweep-items named none of --quick's own items."""
         have = {it.name: it for it in self.items}
-        if forced:
-            pool, scope = list(forced), "in this wave's list"
-        elif self.sweep_only:
-            pool, scope = list(dict.fromkeys(self.sweep_only)), "named by --sweep-items"
-        else:
-            pool, scope = [it.name for it in self.items], "in the campaign"
-        by: Dict[str, List[str]] = {}
-        for n in pool:
+        named = list(dict.fromkeys(self.sweep_only))
+        campaign = named or [it.name for it in self.items]
+        scope = "named by --sweep-items" if named else "in the campaign"
+
+        def stopped_by(n: str) -> Tuple[str, str]:
+            """(what stops the item, how it is listed); "" for an item that can run."""
             it = have.get(n)
             iv = self.intervals.get(n, [])
             if it is None:
-                cause, tag = "not in this run's catalog (a probe at the build ruled it out)", n
-            elif self.sweep_only and n not in self.sweep_only:
-                cause, tag = "outside --sweep-items", n
-            elif n in self.disabled_items:
-                cause, tag = "disabled", f"{n} ({self.disabled_items[n][:90]})"
-            elif it.kind == "exhaustive" and L.first_gap(iv) is None:
-                cause, tag = "covered", n
-            elif it.kind == "exhaustive" and L.first_gap(iv + self.quarantine.get(n, [])) is None:
-                cause, tag = "moved past by the quarantine", n
-            else:
-                cause, tag = "able to run, but no job was planned (a defect in this driver)", n
-            by.setdefault(cause, []).append(tag)
-        if list(by) == ["covered"]:
-            return (f"nothing left to run in this campaign: all {len(pool)} items {scope} are exhaustive and "
-                    f"covered", "finished")
-        parts = [f"{len(v)} {k}: {', '.join(v[:6])}{', ...' if len(v) > 6 else ''}" for k, v in by.items()]
-        return (f"no sweep job could start, and the campaign is NOT finished - of the {len(pool)} items {scope}, "
-                + "; ".join(parts), "blocked")
+                return "not in this run's catalog (a probe at the build ruled it out)", n
+            if self.sweep_only and n not in self.sweep_only:
+                return "outside --sweep-items", n
+            if n in self.disabled_items:
+                return "disabled", f"{n} ({self.disabled_items[n][:90]})"
+            if it.kind == "exhaustive" and L.first_gap(iv) is None:
+                return "covered", n
+            if it.kind == "exhaustive" and L.first_gap(iv + self.quarantine.get(n, [])) is None:
+                return "moved past by the quarantine", n
+            return "", n
+
+        def causes(names: List[str]) -> str:
+            by: Dict[str, List[str]] = {}
+            for n in names:
+                c, tag = stopped_by(n)
+                by.setdefault(c or "able to run, but no job was planned (a defect in this driver)", []).append(tag)
+            return "; ".join(f"{len(v)} {k}: {', '.join(v[:6])}{', ...' if len(v) > 6 else ''}" for k, v in by.items())
+
+        can_run = [n for n in campaign if not stopped_by(n)[0]]
+        if all(stopped_by(n)[0] == "covered" for n in campaign):
+            return (f"nothing left to run {'for the items named by --sweep-items' if named else 'in this campaign'}: all "
+                    f"{len(campaign)} {'are' if named else 'items are'} exhaustive and covered", "finished")
+        left = f"{len(can_run)} of the {len(campaign)} items {scope} can still run ({', '.join(can_run[:6])}{', ...' if len(can_run) > 6 else ''})"
+        if can_run and forced:
+            return (f"no job from this wave's list could start ({causes(list(forced))}), but the campaign is NOT finished: "
+                    f"{left}", "blocked")
+        if can_run:
+            return f"no sweep job was planned although {left}: a defect in this driver", "blocked"
+        return (f"no sweep job could start, and the campaign is NOT finished - of the {len(campaign)} items {scope}, "
+                + causes(campaign), "blocked")
 
     # -- telemetry ------------------------------------------------------------
     def examine(self, tool: str, rep: str, mode: str) -> Tuple[Dict[str, float], str, Optional[str]]:

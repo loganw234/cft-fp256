@@ -643,7 +643,7 @@ def quick_checks(c, mod, tmp: str, imgs: dict) -> None:
 
     def drv(*extra):
         a = mod.parse_args(["--out", os.path.join(tmp, "quick"), "--quick", "--root", ROOT, "--rev8-images",
-                            os.path.join(tmp, "quick-imgs")] + list(extra))
+                            os.path.join(tmp, "quick-imgs"), "--disk-extra", ""] + list(extra))
         d = mod.Driver(a)
         d.items = L.sweep_items()
         return d
@@ -693,9 +693,9 @@ def quick_checks(c, mod, tmp: str, imgs: dict) -> None:
     d4.intervals = {ex[0]: [(0, L.EXH)], ex[17]: [(0, 1 << 31), (1 << 31, L.EXH)]}
     f4 = d4.quick_items(q, 0)
     why4, cause4 = d4.why_no_wave(f4)
-    c("empty wave, every item covered: the campaign IS finished, and says so in the old words, with how many",
+    c("empty wave, every item named is covered: the campaign IS finished, and says so for the items named, with how many",
       f4 == [] and d4.plan_wave(q, 3600, 4, f4) == [] and cause4 == "finished"
-      and why4.startswith("nothing left to run in this campaign") and "2 items named by --sweep-items" in why4, why4)
+      and why4 == "nothing left to run for the items named by --sweep-items: all 2 are exhaustive and covered", why4)
     d5 = drv("--sweep-items", f"{ex[0]},{ex[1]}")
     d5.disabled_items = {ex[0]: "3 slices in a row gave no readable verdict", ex[1]: "3 slices in a row gave no readable verdict"}
     f5 = d5.quick_items(q, 0)
@@ -721,6 +721,29 @@ def quick_checks(c, mod, tmp: str, imgs: dict) -> None:
     why8, cause8 = d8.why_no_wave(d8.quick_items(q, 0))
     c("empty wave, an item named that this run's probes ruled out: it says so by name",
       cause8 == "blocked" and "not in this run's catalog" in why8 and "scaleb32-wide-rtz" in why8, why8)
+    # verifier-VDR1 (b-1): "finished" is decided over the campaign, not over the wave's own list
+    d9 = drv()
+    d9.intervals = {"sqrt32-rne": [(0, L.EXH)]}
+    f9 = d9.quick_items(s, 0)
+    why9, cause9 = d9.why_no_wave(f9)
+    c("empty wave, a single image whose sqrt32-rne is covered: its list plans no job while sqrt32-rtz is still to run, and "
+      "the sentence says the campaign is NOT finished and what remains, not that nothing is left",
+      f9 == ["sqrt32-rne"] and d9.plan_wave(s, 3600, 1, f9) == []
+      and [j["item"].name for j in d9.plan_wave(s, 3600, 1, None)] == ["sqrt32-rtz"]
+      and cause9 == "blocked" and "NOT finished" in why9 and "1 covered: sqrt32-rne" in why9
+      and "can still run (sqrt32-rtz," in why9 and "nothing left to run" not in why9, why9)
+    # ... and the smoke goes on to the single's second item when its first cannot run (881bbcb stopped at the empty wave)
+    import contextlib
+    import io
+    d10 = drv()
+    d10.intervals = {"sqrt32-rne": [(0, L.EXH)]}
+    asked: list = []
+    d10.guard = lambda waiting_ok: None
+    d10.run_wave = lambda img, wave: asked.append([j["item"].name for j in wave]) or []
+    with contextlib.redirect_stdout(io.StringIO()):
+        d10.sweep_phase(s, 20.0)
+    c("quick: a single image whose first item cannot run goes on to its second (rint32-rne) in the same smoke",
+      asked == [["rint32-rne"]], str(asked))
 
 
 def group_commands(src: str = HERE) -> list:
@@ -975,7 +998,7 @@ def start_driver(env: Env, name: str, args: list, scenario=None, src: str = HERE
         os.makedirs(out, exist_ok=True)
         with open(os.path.join(out, "STOP"), "w") as fh:
             fh.write("stale")
-    cmd = [sys.executable, "-I", os.path.join(src, "card_stress.py"), "--root", ROOT, "--out", out, "--dry-run",
+    cmd = [sys.executable, "-B", "-I", os.path.join(src, "card_stress.py"), "--root", ROOT, "--out", out, "--dry-run",
            "--telemetry-seconds", "0", "--disk-extra", "", "--retry-pause", "1", "--kill-after", "2",
            "--guard-poll", "1"]
     for n, p in env.imgs.items():
@@ -1372,7 +1395,7 @@ def scn_sweep_resume(env: Env, A: Run, args: list, rate: dict, src: str) -> list
         out.append((n, bool(ok), d))
 
     env.n += 1
-    cmd = [sys.executable, "-I", os.path.join(src, "card_stress.py"), "--root", ROOT, "--out", A.out, "--resume", "--dry-run",
+    cmd = [sys.executable, "-B", "-I", os.path.join(src, "card_stress.py"), "--root", ROOT, "--out", A.out, "--resume", "--dry-run",
            "--telemetry-seconds", "0", "--disk-extra", "", "--retry-pause", "1", "--kill-after", "2", "--guard-poll", "1",
            "--until", until(22), "--max-card-failures", "20"] + args
     for n, p in env.imgs.items():
@@ -1486,7 +1509,7 @@ def scn_sweep_all(env: Env, src: str = HERE) -> list:
     c("sweep all: and its sweep line counts all 36 exhaustive items' encodings, the new ones included",
       f"exhaustive {4 * EXH_T:,} of {36 * EXH_T:,} encodings" in st, st[st.find("sweep "):][:200])
     rp = os.path.join(HERE, "card_stress_report.py")
-    p = subprocess.run([sys.executable, "-I", rp, r.out, "--no-write"], capture_output=True, text=True, timeout=120)
+    p = subprocess.run([sys.executable, "-B", "-I", rp, r.out, "--no-write"], capture_output=True, text=True, timeout=120)
     t = p.stdout
     c("sweep all: the report gives each item's reach and totals the coverage by reach",
       p.returncode == 0 and re.search(r"^  conv32to64-all\s.*\shost$", t, re.M) and re.search(r"^  scaleb32-wide-rdn\s.*\stile$", t, re.M)
@@ -1555,7 +1578,7 @@ def scn_sweep_gap(env: Env, src: str, base: list) -> list:
       and not L.sweep_coverage(r3.recs)[0].get("cvtto32-all-rup"), str([(x["status"], x["sweep"]["lo"]) for x in a][:4]))
     os.remove(os.path.join(r3.out, "STOP"))                 # a stale STOP would refuse the resume, by design
     env.n += 1
-    cmd = [sys.executable, "-I", os.path.join(src, "card_stress.py"), "--root", ROOT, "--out", r3.out, "--resume", "--dry-run",
+    cmd = [sys.executable, "-B", "-I", os.path.join(src, "card_stress.py"), "--root", ROOT, "--out", r3.out, "--resume", "--dry-run",
            "--telemetry-seconds", "0", "--disk-extra", "", "--retry-pause", "1", "--kill-after", "2", "--guard-poll", "1",
            "--until", until(14), "--sweep-items", "cvtto32-all-rup"] + base
     for nm, pth in env.imgs.items():
@@ -1733,8 +1756,9 @@ def scn_telemetry_hang(env: Env, src: str = HERE) -> list:
     2026-10-20, the lead's question). EVERY examine call hangs (the stand-in sleeps for ever) and --telemetry-timeout is 2 s: each
     is killed at 2 s, so a sample - one report, as JSON and then as text - takes about 4 s and lets go of the lock. STOP is touched
     while the run's own first sample is in flight. The run goes on to what it must - that sample, the timer's, its own `end` - and
-    ends by STOP, within two samples, one timeout and a margin of the moment it was touched, however long a hung call would have
-    been: the bound is 2 x the first sample's own time + 2 s + 10 s. Every sample is an error record, never a reading, no hung
+    ends by STOP, within about two samples, one timeout and a margin of the moment it was touched, however long a hung call would
+    have been. The bound is measured from the run, not from a sample: 2 x the time from the run's start to its first telemetry
+    record (that sample and about 0.6 s of setup) + 2 s + 10 s. Every sample is an error record, never a reading, no hung
     process is left, and no two samples ran at once (each takes at least 2 x 2 s, so two records 3.5 s apart or more)."""
     out: list = []
 
@@ -1752,7 +1776,7 @@ def scn_telemetry_hang(env: Env, src: str = HERE) -> list:
     tel = [x for x in recs if x.get("type") == "telemetry"]
     end = r.last("run_end") or {}
     pids = [int(open(os.path.join(r.state, f)).read()) for f in os.listdir(r.state) if f.startswith("hang-telemetry-")]
-    first = (tel[0]["epoch"] - recs[0]["epoch"]) if tel and recs else 0.0
+    to_first = (tel[0]["epoch"] - recs[0]["epoch"]) if tel and recs else 0.0     # run_start to the first telemetry record
     late = end.get("epoch", 1e9) - t_stop
     c("telemetry hang: every examine call hung and was killed at --telemetry-timeout: each sample is an error record "
       "('timed out'), never a reading, and no hung process is left", began and bool(tel) and bool(pids)
@@ -1761,9 +1785,11 @@ def scn_telemetry_hang(env: Env, src: str = HERE) -> list:
     c("telemetry hang: no two samples ran at once (consecutive records at least a sample, 3.5 s, apart)",
       len(tel) >= 2 and all(b["epoch"] - a["epoch"] >= 3.5 for a, b in zip(tel, tel[1:])),
       str([round(b["epoch"] - a["epoch"], 1) for a, b in zip(tel, tel[1:])]))
-    c("telemetry hang: STOP, touched while the first sample was in flight, ended the run (exit 0, stop_file) within two "
-      "samples, one timeout and 10 s of it", r.rc == 0 and end.get("reason") == "stop_file" and 0 < late <= 2 * first + 2 + 10,
-      f"rc {r.rc}, {end.get('reason')}, ended {late:.1f} s after STOP; the first sample took {first:.1f} s")
+    c("telemetry hang: STOP, touched while the first sample was in flight, ended the run (exit 0, stop_file) within 2 x the "
+      "time from the run's start to its first telemetry record, one timeout and 10 s of it",
+      r.rc == 0 and end.get("reason") == "stop_file" and 0 < late <= 2 * to_first + 2 + 10,
+      f"rc {r.rc}, {end.get('reason')}, ended {late:.1f} s after STOP; the first telemetry record came {to_first:.1f} s "
+      f"after the run began")
     return out
 
 
@@ -1795,7 +1821,7 @@ def scn_build_refusals(env: Env, src: str = HERE) -> list:
     c("args: an unknown leg is refused by name", R.rc != 0 and "nosuchleg" in R.text)
     intree = os.path.join(ROOT, f"card-stress-intree-{os.getpid()}")
     try:
-        cmd = [sys.executable, "-I", os.path.join(src, "card_stress.py"), "--root", ROOT, "--out", intree, "--dry-run", "--quick",
+        cmd = [sys.executable, "-B", "-I", os.path.join(src, "card_stress.py"), "--root", ROOT, "--out", intree, "--dry-run", "--quick",
                "--legs", "api-test", "--no-sweep", "--telemetry-seconds", "0", "--disk-extra", ""]
         for n, pth in env.imgs.items():
             cmd += ["--image", f"{n}={pth}"]
@@ -1861,7 +1887,7 @@ def scn_buildreal(env: Env, src: str = HERE) -> list:
     def drive(name, fake, extra):
         env.n += 1
         o = os.path.join(env.tmp, f"{env.n:02d}-{name}")
-        cmd = [sys.executable, "-I", os.path.join(src, "card_stress.py"), "--root", root, "--out", o, "--quick",
+        cmd = [sys.executable, "-B", "-I", os.path.join(src, "card_stress.py"), "--root", root, "--out", o, "--quick",
                "--legs", "api-test", "--no-sweep", "--telemetry-seconds", "0", "--disk-extra", "", "--retry-pause", "1",
                "--kill-after", "2", "--guard-poll", "1", "--build-jobs", "2"]
         for n, pth in env.imgs.items():
@@ -1986,7 +2012,7 @@ def scn_torn_tail(env: Env, src: str = HERE) -> list:
     with open(mp, "ab") as fh:
         fh.write(torn)
     env.n += 1
-    cmd = [sys.executable, "-I", os.path.join(src, "card_stress.py"), "--root", ROOT, "--out", A.out, "--resume", "--dry-run",
+    cmd = [sys.executable, "-B", "-I", os.path.join(src, "card_stress.py"), "--root", ROOT, "--out", A.out, "--resume", "--dry-run",
            "--telemetry-seconds", "0", "--disk-extra", "", "--retry-pause", "1", "--kill-after", "2", "--guard-poll", "1",
            "--quick", "--legs", "api-test", "--no-sweep"]
     for n, pth in env.imgs.items():
@@ -2070,7 +2096,7 @@ def scn_quick_sweep(env: Env, src: str = HERE) -> list:
       and emp[0]["image"] == "deep" and bool(dis) and dis[0]["epoch"] <= emp[0]["epoch"], str([e["detail"] for e in emp][:2]))
     rp = os.path.join(src, "card_stress_report.py")         # src is HERE, or a plant's copy of the code
     if os.path.exists(rp):
-        p = subprocess.run([sys.executable, "-I", rp, R2.out, "--no-write"], capture_output=True, text=True, timeout=120)
+        p = subprocess.run([sys.executable, "-B", "-I", rp, R2.out, "--no-write"], capture_output=True, text=True, timeout=120)
         c("quick sweep: the report reads a run directory that holds a sweep_empty event: exit 0, and its events line counts it",
           p.returncode == 0 and re.search(r"^\s*events\s*:.*\bsweep_empty 1\b", p.stdout, re.M) is not None,
           f"rc {p.returncode}: {p.stderr[-160:]}")
@@ -2091,7 +2117,7 @@ def scn_report(env: Env, src: str = HERE) -> list:
         return out
     R = env.normal
     jpath = os.path.join(env.tmp, "rep.json")
-    p = subprocess.run([sys.executable, "-I", rp, R.out, "--json", jpath], capture_output=True, text=True, timeout=120)
+    p = subprocess.run([sys.executable, "-B", "-I", rp, R.out, "--json", jpath], capture_output=True, text=True, timeout=120)
     txt = p.stdout
     legs = R.legs()
     n_pass = sum(r["status"] == "pass" for r in legs)
@@ -2131,7 +2157,7 @@ def scn_report(env: Env, src: str = HERE) -> list:
     with open(os.path.join(cp, "metrics.jsonl"), "w") as fh:
         for r in recs:
             fh.write(json.dumps(r) + "\n")
-    p2 = subprocess.run([sys.executable, "-I", rp, cp, "--no-write"], capture_output=True, text=True, timeout=120)
+    p2 = subprocess.run([sys.executable, "-B", "-I", rp, cp, "--no-write"], capture_output=True, text=True, timeout=120)
     c("report: one leg changed to fail: the totals say pass one fewer and fail 1, and the failure is listed with its log path",
       f"{len(legs)} recorded; pass {n_pass - 1}, fail 1" in p2.stdout and "the-planted-failure.log" in p2.stdout
       and "the-planted-failure.log" not in txt, p2.stdout[p2.stdout.find("== TOTALS"):][:300])
@@ -2170,7 +2196,7 @@ def plant_parsers(env: Env, src: str) -> list:
     card_stress_lib), reading the real tree's tool sources."""
     e = dict(os.environ)
     e["CARD_STRESS_TEST_ROOT"] = ROOT
-    p = subprocess.run([sys.executable, "-I", os.path.join(src, "test_card_stress.py"), "--only", "parsers", "--no-plants"],
+    p = subprocess.run([sys.executable, "-B", "-I", os.path.join(src, "test_card_stress.py"), "--only", "parsers", "--no-plants"],
                        capture_output=True, text=True, env=e, timeout=120)
     bad = [ln.strip()[6:].strip() for ln in p.stdout.splitlines() if ln.startswith("  FAIL  ")]
     if p.returncode != 0 and not bad:
@@ -2373,6 +2399,15 @@ def plants(env: Env) -> None:
            '                why, cause = "nothing left to run in this campaign", "finished"\n')],
          lambda env, src: scn_quick_sweep(env, src),
          ["quick sweep: the empty wave that follows says it is blocked"]),
+        # verifier-VDR1's two (2026-10-20): "finished" decided over the campaign, and the smoke's next item
+        ("the finished sentence is decided over the wave's list again",
+         [("card_stress.py", "        campaign = named or [it.name for it in self.items]\n",
+           "        campaign = list(forced) if forced else (named or [it.name for it in self.items])\n")],
+         lambda env, src: group_commands(src), ["empty wave, a single image whose sqrt32-rne is covered"]),
+        ("an empty quick wave ends the image's sweep again",
+         [("card_stress.py", "                if self.quick and not self.sweep_only and waves + 1 < self.quick_waves(img):\n",
+           "                if False:\n")],
+         lambda env, src: group_commands(src), ["quick: a single image whose first item cannot run goes on to its second"]),
     ]
     for name, edits, fn, expects in P:
         if pick and pick not in name:
