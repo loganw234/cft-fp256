@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
 import time
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -375,9 +376,12 @@ class SoakResult(Verdict):
     pass
 
 
+CPU_OPENED_CARD = "soak: a CPU job opened the card"     # a CPU job's log that names a DEVICE: the pool's one promise broken
+
+
 def parse_soak(text: str, rc: Optional[int], op: str, verdict_mode: str,
                artifact: Optional[str], expected_cases: Optional[int],
-               cover: Optional[Dict[str, int]] = None) -> Verdict:
+               cover: Optional[Dict[str, int]] = None, cpu: bool = False) -> Verdict:
     """artifact: the xclbin the job was told to soak (None: the software backend, which
     only the dry run and the rate-free self checks use). expected_cases: exact, where
     the tool's counting is known (see Item.expected_cases), else None (then > 0).
@@ -385,7 +389,10 @@ def parse_soak(text: str, rc: Optional[int], op: str, verdict_mode: str,
     slice's, "per_encoding": k}. The line must then carry ", E encodings, S skipped", E must
     be the slice's encodings, and cases + S must be k * E - so a slice that ran short, or
     long, or whose tool does not print the clause, is refused, and a slice that compared
-    nothing because every pair was skipped (an all-NaN slice of cvtto32-all) is not."""
+    nothing because every pair was skipped (an all-NaN slice of cvtto32-all) is not.
+    cpu: a job of the host pool, which is told no image and must say it soaked the software
+    backend; a log that names a DEVICE is refused, by name (CPU_OPENED_CARD), because a CPU job
+    that opened the card has broken the one promise the pool makes."""
     m = _one(SOAK_LINE, text, "soak verdict")
     if m.group(1) != op or m.group(2) != verdict_mode:
         raise VerdictError(f"soak: the verdict is for '{m.group(1)} {m.group(2)}', the job "
@@ -395,6 +402,13 @@ def parse_soak(text: str, rc: Optional[int], op: str, verdict_mode: str,
     skp = int(m.group(7)) if m.group(7) is not None else None
     dev = _maybe_one(SOAK_DEVICE, text, "soak backend line")
     sw = _maybe_one(SOAK_SOFTWARE, text, "soak backend line")
+    if cpu:
+        if dev:
+            raise VerdictError(f"{CPU_OPENED_CARD} ('soaking the DEVICE backend: {dev.group(1)}'): CFT_SOAK_ARTIFACT "
+                               f"reached a job the pool starts without an image")
+        if not sw:
+            raise VerdictError("soak: a CPU job's log has no 'soaking the software backend' line, so it is not "
+                               "known which backend it ran on")
     if artifact is not None:
         if not dev or sw:
             raise VerdictError("soak: no 'soaking the DEVICE backend' line - the job did "
@@ -524,6 +538,43 @@ def reach_of(op: Optional[str]) -> Optional[str]:
     return OP_REACH.get(op) if isinstance(op, str) else None
 
 
+# THE SEEDS. Both soak tools set rng_state = seed | 1 and draw from there, so two slices of one state draw the
+# same operands, and the schedule up to 2026-10-19 (seed = base_seed + 7919 n, n restarting at 0 in every new
+# --out) gave neighbouring items one state on half the n and every new run the last run's draws
+# (docs/studies/SWP-A-coverage.md, 2.4: 96.2 per cent of the final run's random slices shared a state). From
+# 2026-10-20 a random item's n-th slice has the seed
+#     (item index << 40) | (n << 1) | 1
+# (schedule A of docs/studies/swp-a/seed_audit.py): odd already, so `| 1` changes nothing, and distinct for
+# every (item, n) with n < 2^39 by construction - the index fills bits 40 up, n bits 1 to 39. The index is the
+# item's place in this table BY NAME, not its place in the catalog: the catalog loses items when a probe fails
+# (a run on a libm without directed scalbn has fewer), and a position would then shift every later item's seeds.
+# A new random item is APPENDED here (sweep_items refuses a random item that is not in the table, by name).
+# `seed_scheme` 2 is recorded in each random slice's record; a record without it is the old schedule (1).
+SEED_SCHEME = 2
+SEED_N_LIMIT = 1 << 39
+RANDOM_SEED_ORDER = (
+    "div32-rne", "div32-rtz", "div32-rdn", "div32-rup", "div64-rne", "div64-rtz", "div64-rdn", "div64-rup",
+    "sqrt64-rne", "sqrt64-rtz", "sqrt64-rdn", "sqrt64-rup",
+    "rint64-rne", "cvtto32-rne", "cvtto64-rne", "rint64-rtz", "cvtto32-rtz", "cvtto64-rtz",
+    "rint64-rdn", "cvtto32-rdn", "cvtto64-rdn", "rint64-rup", "cvtto32-rup", "cvtto64-rup",
+    "rint64-rmm", "cvtto32-rmm", "cvtto64-rmm",
+    "scaleb32-rne", "scaleb64-rne", "scaleb32-rtz", "scaleb64-rtz", "scaleb32-rdn", "scaleb64-rdn",
+    "scaleb32-rup", "scaleb64-rup",
+    "conv64to32-rne", "conv64to32-rtz", "conv64to32-rdn", "conv64to32-rup",
+    "cvtfrom32-rne", "cvtfrom64-rne", "cvtfrom32-rtz", "cvtfrom64-rtz", "cvtfrom32-rdn", "cvtfrom64-rdn",
+    "cvtfrom32-rup", "cvtfrom64-rup",
+    "conv32to64", "rem32", "rem64", "nextup64", "nextdown64", "logb64", "class64",
+)
+RANDOM_SEED_INDEX = {name: i for i, name in enumerate(RANDOM_SEED_ORDER)}
+
+# The host pool's slices are recorded under this image name: no image, no card (hw/card_stress.py, the pool).
+CPU = "cpu"
+# A host slice is sized like a card slice (the probe, then the measured rate x the target seconds, whole ATOMs)
+# but is held at this many counts, not the card's 2^28: at 2^28 a fast host item (about 37 M/s) gets 7-second
+# slices and the rotation, which equalises slices, would give it 7 s a turn against a slow item's 600 s.
+HOST_SLICE_CAP = 1 << 36
+
+
 class Item:
     """One campaign line. kind 'exhaustive': encodings [0, 2^32), sliced; kind 'random':
     a count of cases from a seed, any number of slices, each its own seed."""
@@ -536,7 +587,8 @@ class Item:
         self.kind = kind              # 'exhaustive' | 'random'
         self.op = op
         self.mode = mode              # argv's mode word, or None when the job takes none
-        self.base_seed = base_seed
+        self.base_seed = base_seed    # the soak SCRIPTS' seed (hw/run-soak.sh, run-c5-soak.sh); not the driver's since 2026-10-20
+        self.seed_index = None        # a random item's place in RANDOM_SEED_ORDER (sweep_items sets it)
         self.verdict_mode = verdict_mode      # the second word of the tool's verdict line
         self.extra_cases = extra_cases        # cases the tool adds to every slice
         self.exact = exact                    # cases == slice size (+ extra) is known
@@ -572,8 +624,13 @@ class Item:
         return None
 
     def seed_for(self, n: int) -> int:
-        """The n-th random slice's seed (0-based): distinct, nonzero, recorded."""
-        return self.base_seed + 7919 * n
+        """The n-th random slice's seed (0-based): (item index << 40) | (n << 1) | 1, distinct for every
+        (item, n), odd (so the tools' `| 1` changes nothing), recorded. See SEED_SCHEME above."""
+        if self.seed_index is None:
+            raise ValueError(f"{self.name}: not a random item, it has no seeds")
+        if not 0 <= n < SEED_N_LIMIT:
+            raise ValueError(f"{self.name}: slice number {n} is outside [0, 2^39), the room the seed gives n")
+        return (self.seed_index << 40) | (n << 1) | 1
 
 
 def sweep_items(scaleb_modes: Iterable[str] = MODES4,
@@ -663,6 +720,12 @@ def sweep_items(scaleb_modes: Iterable[str] = MODES4,
     for op in ("nextup64", "nextdown64", "logb64", "class64"):
         items.append(Item(op, "clause5", "random", op, None,
                           base_seed=0xC5000000 + s, verdict_mode="-")); s += 1
+    for it in items:
+        if it.kind == "random":
+            if it.name not in RANDOM_SEED_INDEX:
+                raise ValueError(f"random item {it.name!r} has no seed index: append it to RANDOM_SEED_ORDER "
+                                 f"(hw/card_stress_lib.py), never insert it, so that no item's seeds move")
+            it.seed_index = RANDOM_SEED_INDEX[it.name]
     return items
 
 
@@ -704,21 +767,29 @@ def first_gap(iv: Iterable[Tuple[int, int]], total: int = EXH) -> Optional[Tuple
 # the metrics file: one JSON object a line, appended, never rewritten
 # ---------------------------------------------------------------------------
 
+# One writer at a time in this process. O_APPEND makes each write atomic on POSIX, but Windows' emulation of it
+# seeks to the end and then writes, so two threads writing at once (the card's thread, the telemetry sampler, and
+# since 2026-10-20 the host pool's workers) can both seek to one offset and one record overwrites the other: a
+# dry run on Windows lost a leg record that way (the log said "pass", the file did not hold it).
+_APPEND_LOCK = threading.Lock()
+
+
 def append_record(path: str, rec: Dict[str, Any]) -> None:
     """One whole line in one write on an O_APPEND descriptor, so a reader sees a
     record or none; then fsync (a few records a minute at most)."""
     rec = dict(rec)
     rec.setdefault("v", 1)
-    now = time.time()
-    rec.setdefault("ts", iso(now))
-    rec.setdefault("epoch", round(now, 3))
-    line = (json.dumps(rec, sort_keys=False, separators=(",", ":")) + "\n").encode("utf-8")
-    fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
-    try:
-        os.write(fd, line)
-        os.fsync(fd)
-    finally:
-        os.close(fd)
+    with _APPEND_LOCK:
+        now = time.time()               # stamped inside the lock: the file's order is the epochs' order
+        rec.setdefault("ts", iso(now))
+        rec.setdefault("epoch", round(now, 3))
+        line = (json.dumps(rec, sort_keys=False, separators=(",", ":")) + "\n").encode("utf-8")
+        fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
+        try:
+            os.write(fd, line)
+            os.fsync(fd)
+        finally:
+            os.close(fd)
 
 
 def read_records(path: str) -> Tuple[List[Dict[str, Any]], bool, List[int]]:
@@ -777,6 +848,53 @@ def sweep_coverage(records: Iterable[Dict[str, Any]]):
                              "lines": r.get("disagreements") or [], "log": r.get("log"),
                              "start": r.get("start"), "image": r.get("image")})
     return intervals, served, cases, seeds, disagree
+
+
+def seed_states(records: Iterable[Dict[str, Any]]) -> Dict[int, Tuple[str, int]]:
+    """{the state a slice's tool started from (seed | 1): (item, n)} for every random slice the records name, whatever
+    its status: a slice that timed out drew from its seed all the same. Under the schedule before 2026-10-20 two
+    items share a state on half the n, and the later record wins here; the new schedule never shares one."""
+    out: Dict[int, Tuple[str, int]] = {}
+    for r in records:
+        if r.get("type") != "leg" or r.get("kind") != "sweep":
+            continue
+        sw = r.get("sweep") or {}
+        if isinstance(sw.get("item"), str) and isinstance(sw.get("seed"), int) and isinstance(sw.get("seed_n"), int):
+            out[sw["seed"] | 1] = (sw["item"], sw["seed_n"])
+    return out
+
+
+class EarlierRunError(ValueError):
+    """A directory named as an earlier run cannot be used as one; the message names it."""
+
+
+def earlier_runs(dirs: Iterable[str]) -> Tuple[Dict[str, int], Dict[int, Tuple[str, int]], List[Dict[str, Any]]]:
+    """(the first slice number n each random item may use, the states those runs started from, a note a directory):
+    for each directory NAMED (never found by looking), its metrics.jsonl's highest seed_n of a completed slice
+    (pass or fail) of an item, plus one - a slice that did not complete is served again by the run that left it, and
+    is not a draw a later run must avoid. Refused by name: a name that is not a directory, a directory with no
+    metrics.jsonl, and a file with lines that do not parse (they might be the slices with the highest n, and a floor
+    that is too low repeats draws without a word). A torn last line, the mark of a killed run, is allowed and noted."""
+    floor: Dict[str, int] = {}
+    states: Dict[int, Tuple[str, int]] = {}
+    notes: List[Dict[str, Any]] = []
+    for d in dirs:
+        path = os.path.join(d, "metrics.jsonl")
+        if not os.path.isdir(d):
+            raise EarlierRunError(f"--earlier-runs {d}: not a directory")
+        if not os.path.isfile(path):
+            raise EarlierRunError(f"--earlier-runs {d}: no metrics.jsonl in it, so it cannot say which seeds it used "
+                                  f"(name a run's output directory, the one that holds metrics.jsonl)")
+        recs, partial, bad = read_records(path)
+        if bad:
+            raise EarlierRunError(f"--earlier-runs {d}: metrics.jsonl lines {bad[:10]} do not parse; a run whose "
+                                  f"record is damaged cannot say which seeds it used")
+        seeds = sweep_coverage(recs)[3]
+        for item, n in seeds.items():
+            floor[item] = max(floor.get(item, 0), n + 1)
+        states.update(seed_states(recs))
+        notes.append({"dir": d, "records": len(recs), "items": len(seeds), "torn_tail": bool(partial)})
+    return floor, states, notes
 
 
 # ---------------------------------------------------------------------------

@@ -208,6 +208,11 @@ def main() -> int:
                 out("standin: parent: " + fh.read().replace(bytes([0]), b" ").decode("utf-8", "replace").strip())
         except OSError:
             pass
+    if leg == "soak":
+        # what the driver's environment handed this job: the tests hold a host-pool job to "<unset>" for both
+        # (a host job must not be able to name the card), and a card job to its image and its tile
+        out(f"standin: env CFT_SOAK_ARTIFACT={os.environ.get('CFT_SOAK_ARTIFACT', '<unset>')} "
+            f"CFT_XRT_TILES={os.environ.get('CFT_XRT_TILES', '<unset>')}")
     do = rule_for("soak" if leg == "soak" else leg, image) or ""
     fail = do == "fail"
     if do and do not in ("fail", "mismatch", "wrongsha", "wrongtiles", "software", "short", "shortcase"):
