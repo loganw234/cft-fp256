@@ -5,7 +5,7 @@
 per (image, leg), the telemetry, every failure, the sweep's coverage and every disagreement,
 and the run's uptime and gaps.
 
-    python3 hw/card_stress_report.py RUN_DIR [--json FILE] [--no-write] [--gap-seconds N]
+    python3 hw/card_stress_report.py RUN_DIR [--json FILE] [--no-write] [--gap-seconds N] [--also DIR]...
 
 It runs at any time, during a run or after. A last line that does not parse is the driver
 caught mid-append: noted, skipped, not an error. A line in the middle that does not parse is
@@ -51,6 +51,19 @@ be computed is "-" or "n/a", never 0. Choices a reader could otherwise take anot
     "unknown" when neither does. It is the LAST column of the sweep tables, so the tables read as
     they did and a reader that takes columns by position still does. The coverage is totalled by
     reach, so the report says how much of the exhaustive space the tile itself has seen.
+  - COVERAGE BY TREE (the section after the sweep's; since 2026-10-20). What a slice is evidence
+    about depends on what it ran: a TILE item, on the RTL it ran on; a HOST item, on the library's
+    source and the compiler. So that section counts a tile item's coverage per RTL tree - the git
+    tree hash of rtl/ of the checkout the run started from, which the driver records in run_start
+    as tree.rtl - with the images (quad, single, deep) reported separately beneath it, each by what
+    it covered alone; and a host item's per library source: tree.host_src, the tree hash of host/,
+    with tree.cc, the C compiler's version line. A tree with uncommitted changes is a class of its
+    own (tree.rtl_dirty, tree.host_src_dirty); a run that recorded none of it (every run before
+    2026-10-20) is kept apart by its commit, as "not recorded". A slice belongs to the LAST run_start
+    before it in its file, so a run resumed from another checkout counts what follows under that
+    checkout's tree. `--also DIR` adds other runs' directories to that section (and only to it):
+    coverage accumulated over runs, each slice under its own run's tree, so two trees are never
+    summed. The first sections are of RUN_DIR alone, as they were.
 """
 from __future__ import annotations
 
@@ -72,7 +85,7 @@ from typing import Any, Dict, List, Optional, Tuple
 _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)            # python -I does not put the script's directory there
-from card_stress_lib import (EXH, HOST, TILE, covered, first_gap, iso,  # noqa: E402
+from card_stress_lib import (CPU, EXH, HOST, TILE, covered, first_gap, iso,  # noqa: E402
                              merge_intervals, read_records, reach_of, sweep_coverage)
 
 KNOWN = ("pass", "fail", "timeout", "no_device", "parse_error", "skipped", "error")
@@ -268,6 +281,8 @@ def _header(objs: List[Dict[str, Any]], by_type: Dict[str, List[Tuple[int, Dict[
             "i": i, "ts": _when(r.get("ts"), r.get("epoch")), "epoch": _num(r.get("epoch")),
             "run_id": _str(r.get("run_id")), "host": _str(r.get("host")), "out": _str(r.get("out")),
             "commit": _str(tr.get("commit")), "dirty": _bool(tr.get("dirty")),
+            "rtl": _str(tr.get("rtl")), "rtl_dirty": _bool(tr.get("rtl_dirty")), "host_src": _str(tr.get("host_src")),
+            "host_src_dirty": _bool(tr.get("host_src_dirty")), "cc": _str(tr.get("cc")),
             "deadline": _str(r.get("deadline")) or None, "until": _str(st.get("until")) or None,
             "quick": _bool(st.get("quick")), "dry_run": _bool(st.get("dry_run")),
             "resumed": _bool(r.get("resumed")),
@@ -284,6 +299,7 @@ def _header(objs: List[Dict[str, Any]], by_type: Dict[str, List[Tuple[int, Dict[
     trees: List[Dict[str, Any]] = []
     for s in starts:
         t = {"commit": s["commit"], "dirty": s["dirty"]}
+        t.update({k: s[k] for k in ("rtl", "rtl_dirty", "host_src", "host_src_dirty", "cc") if s[k] is not None})
         if (t["commit"] is not None or t["dirty"] is not None) and t not in trees:
             trees.append(t)
 
@@ -679,6 +695,120 @@ def _sweep(objs: List[Dict[str, Any]], views: List[Dict[str, Any]]) -> Dict[str,
     }
 
 
+IMAGE_ORDER = ("quad", "single", "deep", CPU)
+TREE_KINDS = (TILE, HOST, "unknown")
+
+
+def _tree_class(kind: str, rs: Optional[Dict[str, Any]]) -> Tuple[str, str]:
+    """(key, label) of the class a slice of this reach falls in, under the run_start it ran after (None: it ran after
+    none). A TILE item is keyed by the RTL tree the run recorded; a HOST item by the library's source (host/'s tree
+    hash) and the compiler's version line; a tree with uncommitted changes is its own key ('+modified'); a run that
+    recorded none of it is kept apart by its commit. Two runs share a class only when every part of the key is equal."""
+    tr = rs.get("tree") if isinstance(rs, dict) and isinstance(rs.get("tree"), dict) else {}
+    commit = _str(tr.get("commit"))
+    nc = f"not recorded (commit {commit[:12] if commit else 'unknown'})"
+    if kind == TILE:
+        h, mod = _str(tr.get("rtl")), _bool(tr.get("rtl_dirty"))
+        if not h:
+            return "unrecorded:" + (commit or "?"), f"RTL tree {nc}"
+        return (h + ("+modified" if mod else ""),
+                f"RTL tree {h[:12]}" + (" MODIFIED (uncommitted changes under rtl/)" if mod else "")
+                + ("" if mod is not None else " (whether it was modified is not recorded)"))
+    if kind == HOST:
+        h, mod, cc = _str(tr.get("host_src")), _bool(tr.get("host_src_dirty")), _str(tr.get("cc"))
+        if not h:
+            return "unrecorded:" + (commit or "?"), f"library source and compiler {nc}"
+        return (h + ("+modified" if mod else "") + "|" + (cc or "compiler not recorded"),
+                f"host/ tree {h[:12]}" + (" MODIFIED (uncommitted changes under host/)" if mod else "")
+                + f", compiler {_line(cc, 80) if cc else 'not recorded'}")
+    return "none", "reach unknown (no key: neither the records nor the catalog's table say whether the tile is involved)"
+
+
+def _trees(sources: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Coverage by tree: every completed sweep slice of every source (a run's records, in file order), attributed to the
+    last run_start before it, and counted in the class its reach and that run's tree give (_tree_class). The coverage
+    of an exhaustive item in a class is the union of its slices' intervals over every image; each image's own is
+    beside it. Nothing here is summed across classes."""
+    classes: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    for src in sources:
+        rs: Optional[Dict[str, Any]] = None
+        for r in src["objs"]:
+            typ = r.get("type")
+            if typ == "run_start":
+                rs = r
+                continue
+            if typ != "leg" or r.get("kind") != "sweep" or r.get("status") not in ("pass", "fail") or _sweep_defect(r):
+                continue
+            sw = r.get("sweep")
+            item = sw.get("item") if isinstance(sw, dict) else None
+            if not isinstance(item, str) or not item:
+                continue
+            rch = sw.get("reach") if sw.get("reach") in (TILE, HOST) else reach_of(sw.get("op"))
+            kind = rch or "unknown"
+            key, label = _tree_class(kind, rs)
+            c = classes.setdefault((kind, key), {"kind": kind, "key": key, "label": label, "runs": [], "commits": [],
+                                                 "iv": {}, "rnd": {}})
+            rid = _str(rs.get("run_id")) if isinstance(rs, dict) else None
+            cm = _str((rs.get("tree") or {}).get("commit")) if isinstance(rs, dict) and isinstance(rs.get("tree"), dict) else None
+            if rid and rid not in c["runs"]:
+                c["runs"].append(rid)
+            if cm and cm not in c["commits"]:
+                c["commits"].append(cm)
+            image = _str(r.get("image")) or "-"
+            cases = _int((r.get("counts") or {}).get("cases")) if isinstance(r.get("counts"), dict) else None
+            if "lo" in sw or "hi" in sw:
+                d = c["iv"].setdefault(item, {})
+                d.setdefault(image, {"iv": [], "slices": 0, "cases": 0})
+                d[image]["iv"].append((int(sw["lo"]), int(sw["hi"])))
+                d[image]["slices"] += 1
+                d[image]["cases"] += cases or 0
+            else:
+                d = c["rnd"].setdefault(item, {})
+                d.setdefault(image, {"slices": 0, "cases": 0, "max_seed_n": None})
+                d[image]["slices"] += 1
+                d[image]["cases"] += cases or 0
+                sn = _int(sw.get("seed_n"))
+                if sn is not None:
+                    d[image]["max_seed_n"] = sn if d[image]["max_seed_n"] is None else max(d[image]["max_seed_n"], sn)
+
+    def img_key(i: str) -> Tuple[int, str]:
+        return (IMAGE_ORDER.index(i), i) if i in IMAGE_ORDER else (len(IMAGE_ORDER), i)
+
+    out = []
+    for kind in TREE_KINDS:
+        for (k2, key), c in classes.items():
+            if k2 != kind:
+                continue
+            imgs = sorted({i for d in list(c["iv"].values()) + list(c["rnd"].values()) for i in d}, key=img_key)
+            exh = []
+            for item in sorted(c["iv"]):
+                per = c["iv"][item]
+                cov = covered([iv for v in per.values() for iv in v["iv"]])
+                exh.append({"item": item, "slices": sum(v["slices"] for v in per.values()),
+                            "cases": sum(v["cases"] for v in per.values()), "covered": cov, "total": EXH,
+                            "pct": 100.0 * cov / EXH, "complete": cov == EXH,
+                            "by_image": {i: covered(per[i]["iv"]) for i in sorted(per, key=img_key)}})
+            rnd = []
+            for item in sorted(c["rnd"]):
+                per = c["rnd"][item]
+                seeds = [v["max_seed_n"] for v in per.values() if v["max_seed_n"] is not None]
+                rnd.append({"item": item, "slices": sum(v["slices"] for v in per.values()),
+                            "cases": sum(v["cases"] for v in per.values()), "max_seed_n": max(seeds) if seeds else None,
+                            "by_image": {i: per[i]["cases"] for i in sorted(per, key=img_key)}})
+            tot_cov = sum(e["covered"] for e in exh)
+            out.append({
+                "kind": kind, "key": key, "label": c["label"], "runs": c["runs"], "commits": c["commits"], "images": imgs,
+                "exhaustive": exh, "random": rnd,
+                "total": {"items": len(exh), "covered": tot_cov, "total": len(exh) * EXH,
+                          "pct": (100.0 * tot_cov / (len(exh) * EXH)) if exh else None,
+                          "complete_items": sum(1 for e in exh if e["complete"]),
+                          "by_image": {i: sum(e["by_image"].get(i, 0) for e in exh) for i in imgs if any(i in e["by_image"] for e in exh)}},
+            })
+    return {"classes": out,
+            "sources": [{"source": s["source"], "records": len(s["objs"]), "bad_lines": sorted(s.get("bad_lines") or []),
+                         "partial_tail": bool(s.get("partial_tail"))} for s in sources]}
+
+
 def _uptime(objs: List[Dict[str, Any]], by_type: Dict[str, List[Tuple[int, Dict[str, Any]]]],
             views: List[Dict[str, Any]], now: float, ended: bool, gap_seconds: float) -> Dict[str, Any]:
     stamped = [(e, i) for i, r in enumerate(objs) if (e := _num(r.get("epoch"))) is not None]
@@ -705,8 +835,8 @@ def _uptime(objs: List[Dict[str, Any]], by_type: Dict[str, List[Tuple[int, Dict[
             continue
         it = (se, ee, _when(v["r"].get("start"), se), _when(v["r"].get("end"), ee))
         used.append(it)
-        if v["kind"] in ("battery", "sweep") and v["status"] != "skipped":
-            card.append(it)
+        if v["kind"] in ("battery", "sweep") and v["status"] != "skipped" and v["image"] != CPU:
+            card.append(it)                  # a host pool slice (image cpu) runs beside the card, and is not time on it
     pieces = _time_union(used)
     union = math.fsum(p[1] - p[0] for p in pieces)
     cunion = math.fsum(p[1] - p[0] for p in _time_union(card))
@@ -756,10 +886,13 @@ def _uptime(objs: List[Dict[str, Any]], by_type: Dict[str, List[Tuple[int, Dict[
 
 
 def summarize(records: List[Any], now: Optional[float] = None, gap_seconds: float = 300, *,
-              partial_tail: bool = False, bad_lines: Optional[List[int]] = None) -> Dict[str, Any]:
+              partial_tail: bool = False, bad_lines: Optional[List[int]] = None,
+              also: Optional[List[Dict[str, Any]]] = None, run_label: str = "this run") -> Dict[str, Any]:
     """The run's figures as plain, JSON-safe data. `records` is read_records()'s list;
     `now` (epoch seconds, default time.time()) is used only while the run has no run_end;
-    partial_tail and bad_lines carry what read_records() reported, for the text to say first."""
+    partial_tail and bad_lines carry what read_records() reported, for the text to say first.
+    `also`: other runs' records for the coverage-by-tree section alone, each {"source": name, "objs": the
+    records that are objects, "bad_lines": [...], "partial_tail": bool} (main() reads them from --also)."""
     records = list(records)
     now = time.time() if now is None else float(now)
     gap_seconds = float(gap_seconds)
@@ -773,6 +906,9 @@ def summarize(records: List[Any], now: Optional[float] = None, gap_seconds: floa
     offset = _box_offset(objs)
     header = _header(objs, by_type, now, offset)
     versions = Counter(str(r.get("v")) if "v" in r else "(absent)" for r in objs if _int(r.get("v")) != 1)
+    sweep = _sweep(objs, views)
+    sweep["trees"] = _trees([{"source": run_label, "objs": objs, "bad_lines": bad_lines, "partial_tail": partial_tail}]
+                            + list(also or []))
     summary = {
         "report_version": 1,
         "input": {
@@ -786,7 +922,7 @@ def summarize(records: List[Any], now: Optional[float] = None, gap_seconds: floa
         "rows": _rows(views),
         "telemetry": _telemetry(by_type),
         "failures": _failures(views),
-        "sweep": _sweep(objs, views),
+        "sweep": sweep,
         "uptime": _uptime(objs, by_type, views, now, not header["running"], gap_seconds),
     }
     return _clean(summary)
@@ -918,6 +1054,9 @@ def _r_header(S: Dict[str, Any]) -> List[str]:
     L.append(_kv("host", ", ".join(h["hosts"]) or "-"))
     L.append(_kv("out", ", ".join(h["outs"]) or "-"))
     trees = [f"commit {t['commit'] or '-'} ({'DIRTY' if t['dirty'] else 'clean' if t['dirty'] is False else 'dirty unknown'})"
+             + (f", rtl {t['rtl'][:12]}{' MODIFIED' if t.get('rtl_dirty') else ''}" if t.get("rtl") else ", rtl not recorded")
+             + (f", host/ {t['host_src'][:12]}{' MODIFIED' if t.get('host_src_dirty') else ''}" if t.get("host_src") else "")
+             + (f", cc {_line(t['cc'], 60)}" if t.get("cc") else "")
              for t in h["trees"]]
     L.append(_kv("tree", "; ".join(trees) or "-"))
     L.append(_kv("started", h["started"]["ts"] if h["started"] else "-"))
@@ -1204,6 +1343,51 @@ def _r_sweep(S: Dict[str, Any]) -> List[str]:
     return L
 
 
+def _r_trees(S: Dict[str, Any]) -> List[str]:
+    T = S["sweep"]["trees"]
+    L = ["== SWEEP COVERAGE BY TREE =="]
+    L.append("the key: a TILE item's slices are counted per RTL tree (`git rev-parse HEAD:rtl` of the checkout the run started from,")
+    L.append("recorded in run_start), the images beneath each by what it covered alone; a HOST item's per library source (the tree hash of")
+    L.append("host/) and compiler, since no tile computes it. A modified tree is its own class; a run that recorded none is kept apart by")
+    L.append("its commit. A slice is counted under the last run_start before it in its file. Nothing is summed across classes.")
+    for s in T["sources"]:
+        extra = ""
+        if s["bad_lines"]:
+            extra += f"; !!! {len(s['bad_lines'])} UNPARSABLE LINE(S) left out (line number(s) {', '.join(str(n) for n in s['bad_lines'][:20])})"
+        if s["partial_tail"]:
+            extra += "; a partial last line left out"
+        L.append(f"read: {_line(s['source'], 120)} ({s['records']} records{extra})")
+    if not T["classes"]:
+        L.append("no completed sweep slice in the runs read")
+        return L
+    for c in T["classes"]:
+        L.append("")
+        runs = ", ".join(_line(r, 60) for r in c["runs"]) or "no run id"
+        cms = ", ".join(x[:12] for x in c["commits"]) or "none recorded"
+        L.append(f"{c['kind']} items - {c['label']}")
+        L.append(f"  runs: {runs}; commits: {cms}; images that served it: {', '.join(c['images']) or 'none'}")
+        imgs = c["images"]
+        if c["exhaustive"]:
+            L.append("  exhaustive items (encodings of 2**32; an image's column is what that image covered alone):")
+            L += _table(["item", "covered", "pct", "slices"] + imgs,
+                        [[e["item"], str(e["covered"]), _pct3(e["covered"], e["total"]), str(e["slices"])]
+                         + [str(e["by_image"][i]) if i in e["by_image"] else "-" for i in imgs] for e in c["exhaustive"]])
+            t = c["total"]
+            L.append(f"  total: {t['items']} exhaustive item(s) seen; covers {t['covered']} of {t['total']} encodings "
+                     f"({_pct3(t['covered'], t['total'])}); fully covered {t['complete_items']} of {t['items']}; by image: "
+                     + (", ".join(f"{i} {n}" for i, n in t["by_image"].items()) or "none"))
+        else:
+            L.append("  exhaustive items: none seen")
+        if c["random"]:
+            L.append("  random items (cases by image; highest seed_n among completed slices):")
+            L += _table(["item", "slices", "cases", "highest_seed_n"] + [f"cases_{i}" for i in imgs],
+                        [[e["item"], str(e["slices"]), str(e["cases"]), _g(e["max_seed_n"])]
+                         + [str(e["by_image"][i]) if i in e["by_image"] else "-" for i in imgs] for e in c["random"]])
+        else:
+            L.append("  random items: none seen")
+    return L
+
+
 def _r_uptime(S: Dict[str, Any]) -> List[str]:
     U, h = S["uptime"], S["header"]
     L = ["== UPTIME AND GAPS =="]
@@ -1260,7 +1444,7 @@ def render(summary: Dict[str, Any]) -> str:
     out.append("card stress report: derived from metrics.jsonl, which is the record; this text is "
                "rewritten whole at each run of the report")
     out.append("")
-    for part in (_r_header, _r_totals, _r_rows, _r_telemetry, _r_failures, _r_sweep, _r_uptime):
+    for part in (_r_header, _r_totals, _r_rows, _r_telemetry, _r_failures, _r_sweep, _r_trees, _r_uptime):
         out += part(summary)
         out.append("")
     return "\n".join(out).rstrip("\n") + "\n"
@@ -1296,6 +1480,9 @@ def main(argv: Optional[List[str]] = None) -> int:
                     help="do not write RUN_DIR/report.txt (the text still goes to stdout)")
     ap.add_argument("--gap-seconds", type=float, default=300.0, metavar="N",
                     help="list the gaps between legs longer than N seconds (default 300)")
+    ap.add_argument("--also", action="append", default=[], metavar="DIR",
+                    help="another run's directory, whose sweep slices are added to the coverage-by-tree section ALONE "
+                         "(coverage accumulated over runs; each slice stays under its own run's tree); repeatable")
     a = ap.parse_args(argv)
     if not math.isfinite(a.gap_seconds) or a.gap_seconds < 0:
         ap.error("--gap-seconds must be a number of seconds, 0 or more")
@@ -1324,8 +1511,21 @@ def main(argv: Optional[List[str]] = None) -> int:
                   f"unparsable line(s): {', '.join(str(n) for n in bad) or 'none'}; "
                   f"a partial last line: {'yes' if partial else 'no'})", file=sys.stderr)
         return 2
+    also = []
+    for d in a.also:
+        mp = os.path.join(d, "metrics.jsonl")
+        if not os.path.isfile(mp):
+            print(f"{me}: --also {d}: no metrics.jsonl there: name a run's output directory", file=sys.stderr)
+            return 2
+        try:
+            recs2, partial2, bad2 = read_records(mp)
+        except OSError as e:
+            print(f"{me}: --also {d}: cannot read {mp}: {e}", file=sys.stderr)
+            return 2
+        also.append({"source": d, "objs": [r for r in recs2 if isinstance(r, dict)], "bad_lines": bad2,
+                     "partial_tail": partial2})
     try:
-        summary = summarize(records, gap_seconds=a.gap_seconds, partial_tail=partial, bad_lines=bad)
+        summary = summarize(records, gap_seconds=a.gap_seconds, partial_tail=partial, bad_lines=bad, also=also)
         text = render(summary)
     except Exception as e:          # a bug here must not leave a stale report that looks current
         msg = f"the report itself failed: {type(e).__name__}: {e}"

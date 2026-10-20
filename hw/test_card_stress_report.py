@@ -1468,8 +1468,9 @@ def group_families(base):
         check(n > 0, f"{fam}: the oracle has figures to compare", n)
     group("text")
     top, secs = sections(base.T)
-    eq(list(secs), ["HEADER", "TOTALS", "PER IMAGE AND LEG", "TELEMETRY", "FAILURES", "SWEEP COVERAGE", "UPTIME AND GAPS"],
-       "the seven sections, in the spec's order")
+    eq(list(secs), ["HEADER", "TOTALS", "PER IMAGE AND LEG", "TELEMETRY", "FAILURES", "SWEEP COVERAGE",
+                    "SWEEP COVERAGE BY TREE", "UPTIME AND GAPS"],
+       "the eight sections, in the spec's order (the coverage by tree, parcel DR2, follows the sweep's)")
     check(base.T.endswith("\n") and not base.T.endswith("\n\n"), "the text ends with one newline")
     check(all(ord(c) < 128 for c in base.T), "the report's own text is ASCII")
     check("RUNNING" not in base.T, "an ended run does not say RUNNING")

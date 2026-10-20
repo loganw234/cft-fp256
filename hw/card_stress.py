@@ -38,17 +38,26 @@ THE LEGS (each a command the 2026-10-06 and 2026-10-12 card runs used; docs/VALI
                    entries read committed files and --lib host/libcft.so), the deep's one
   resident, selftest  (beyond the brief) cft-resident IMAGE; cft-selftest vectors/out IMAGE,
                    every third visit
-and the SWEEP: hw/run-soak.sh's and hw/run-c5-soak.sh's own campaigns (their job lines, their
-seeds, hw/card_stress_lib.py's sweep_items), run slice by slice against the card with
-CFT_SOAK_ARTIFACT, resumed across cycles from metrics.jsonl alone. The scripts themselves cannot
-be sliced or resumed (each wipes its own output directory and runs everything), so this driver
-runs the same binaries on the same job lines. Each item is marked TILE or HOST
-(hw/card_stress_lib.py, OP_REACH, from the library's own composed/host classification): a HOST
-item - the conversions, next, logB, class, remainder - is libcft's host code run on the box
-against its CPU, a full-space test of the library in which the tile computes nothing, and the
-records (sweep.reach), status.txt and the report all say which an item is. The exhaustive
+and the SWEEP: hw/run-soak.sh's and hw/run-c5-soak.sh's own campaigns (their job lines,
+hw/card_stress_lib.py's sweep_items), run slice by slice, resumed across cycles from
+metrics.jsonl alone. The scripts themselves cannot be sliced or resumed (each wipes its own
+output directory and runs everything), so this driver runs the same binaries on the same job
+lines. Each item is marked TILE or HOST (hw/card_stress_lib.py, OP_REACH, from the library's own
+composed/host classification), and the two kinds run in different places (since 2026-10-20):
+  - the card's sweep, between the battery legs of each cycle, takes TILE items only, with
+    CFT_SOAK_ARTIFACT naming the image (one job a tile on the quad);
+  - a HOST item - the conversions, next, logB, class, remainder - is libcft's host code, which
+    "contains NO floating-point arithmetic at all" and is "bit-identical on every backend by
+    construction" (host/src/clause5.c, 11-35): a test of the library in which the tile computes
+    nothing. It runs on the HOST POOL, --host-workers CPU-only jobs (default 8) from the run's
+    start to its end, beside the battery and the card's sweep, niced like every leg, with no
+    CFT_SOAK_ARTIFACT and no CFT_XRT_TILES - the software backend, no card opened - and their
+    slices are recorded like the card's, under the image name `cpu`.
+The records (sweep.reach), status.txt and the report say which an item is. The exhaustive
 conversion and scaleB modes (the -all and -wide items) also say what they covered on their
-verdict line, and a slice's encodings are held to it exactly.
+verdict line, and a slice's encodings are held to it exactly. A random slice's seed is
+(item index << 40) | (n << 1) | 1 and n continues across runs (--earlier-runs); the run records
+the RTL tree it runs from, and the report counts coverage per tree.
 
 RECORDS. $OUT/metrics.jsonl is append-only: one `leg` record a leg, one `telemetry` record a
 sample, with `run_start`, `build`, `cycle_start`, `cycle_end`, `event` and `run_end` between
@@ -152,6 +161,15 @@ QUICK_ACCEPT_ONLY = "lorenz63-rk4-fp64,lorenz96-rk4-fp64"
 QUICK_REV8_ONLY = {"u50-rev8-quad": "phi4_extended_fp64",
                    "u50-rev8-deep": "gray_scott_extended_fp64"}
 QUICK_REV8_ROUTINE = {"u50-rev8-quad": "lotkavolterra-rk4-tangent-fp64"}
+# --quick's sweep. The card's: TILE items only (a host item is the pool's), so each soak tool is still shown once on
+# the quad - divsqrt by sqrt32-rne and div32-rne, clause5 by rint32-rne and rint64-rne (the fourth was nextup32,
+# a host item, until 2026-10-20). The pool's: one slice of each of these, a plain exhaustive item with edge cases,
+# one that says what it covered, and a random one, all of 2^18 (--quick-slice-cases), seconds on a CPU.
+QUICK_QUAD_ITEMS = ("sqrt32-rne", "rint32-rne", "div32-rne", "rint64-rne")
+QUICK_SINGLE_ITEMS = ("sqrt32-rne", "rint32-rne")
+QUICK_HOST_ITEMS = ("nextup32", "conv32to64-all", "rem32")
+# What a host job must not see, whatever the environment the driver was started in: it names the card (and a tile of it)
+HOST_JOB_DROPS = ("CFT_SOAK_ARTIFACT", "CFT_XRT_TILES")
 
 BATTERY = ["api-test", "dt-i", "dt-q8", "dt-full", "dt-r", "dt-b", "card-segrun",
            "seq-check", "acceptance", "acceptance-rev8", "resident", "selftest"]
@@ -186,13 +204,14 @@ class Skip:
 class Cmd:
     def __init__(self, argv: List[str], timeout: float, parser: Callable[[str, Optional[int]], L.Verdict],
                  env: Optional[Dict[str, str]] = None, tmpdir: bool = False,
-                 post: Optional[Callable[[L.Verdict], None]] = None):
+                 post: Optional[Callable[[L.Verdict], None]] = None, card: bool = True):
         self.argv = argv
         self.timeout = timeout
         self.parser = parser
         self.env = env or {}
         self.tmpdir = tmpdir
         self.post = post
+        self.card = card          # False for a host job: no card, so no log of it is "the card did not answer"
 
 
 class WrongAnswer(Exception):
@@ -429,6 +448,8 @@ class Driver:
         self.a = a
         self.root = os.path.abspath(a.root)
         self.dry = a.dry_run
+        self.tree_check = (not a.dry_run) or bool(getattr(a, "check_tree_in_dry_run", False))   # the tree test of should_stop
+        self.tree_stop: Optional[Stop] = None      # a moved tree, once anyone (the main loop or a pool worker) has seen it
         self.quick = a.quick
         self.out = os.path.abspath(a.out)
         self.metrics = os.path.join(self.out, "metrics.jsonl")
@@ -475,8 +496,27 @@ class Driver:
         self.intervals: Dict[str, List[Tuple[int, int]]] = {}
         self.served: Dict[str, int] = {}
         self.seed_n: Dict[str, int] = {}
+        self.seed_states: Dict[int, Tuple[str, int]] = {}   # tool state (seed | 1) -> (item, n), this file and --earlier-runs
+        self.seed_floor: Dict[str, int] = {}                # the first n --earlier-runs leaves each item
+        self.earlier_notes: List[Dict[str, Any]] = []
+        self.prev_rtl: Optional[str] = None                 # the RTL tree the last run_start of a resumed file recorded
+        self.build_id: Optional[str] = None                 # the tools' build id, once the build step has asserted it
         self.quarantine: Dict[str, List[Tuple[int, int]]] = {}
         self.fail_slices: Dict[Tuple[str, int, int], int] = {}
+        # The host pool (below): threads of this process, one soak process each, on the `cpu` pseudo-image. The sweep's
+        # state above (served, intervals, seed_n, item_bad, disabled_items, fail_slices, quarantine, rate) is shared by
+        # the card's sweep, which only touches TILE items, and the pool, which only touches HOST ones; pool_lock (re-entrant)
+        # guards every change to it. NEVER call say(), event() or write_status() while holding pool_lock: write_status
+        # holds `lock` and takes pool_lock inside it, so the other order would deadlock.
+        self.cpu = Image(L.CPU, "", 0, "", None)
+        self.pool_lock = threading.RLock()
+        self.tally_lock = threading.Lock()
+        self.pool_stop = threading.Event()
+        self.pool_threads: List[threading.Thread] = []
+        self.pool_busy: Dict[str, Dict[str, Any]] = {}      # item name -> {"job", "proc", "abandon"}: slices in flight
+        self.pool_queue: Optional[List[str]] = None         # --quick: the host items still owed their one slice
+        self.pool_note = "not started"
+        self.pool_served = 0
         self.rate: Dict[str, float] = {}   # units per second, by "op@image"
         self.visits: Dict[str, int] = {}
         self.picked = 0
@@ -534,7 +574,16 @@ class Driver:
         return self.images[name]
 
     # -- stop conditions: all checked BETWEEN legs ----------------------------
-    def should_stop(self) -> Optional[Stop]:
+    def should_stop(self, git: bool = True) -> Optional[Stop]:
+        """Why the run is to end, or None: the STOP file, a signal, the deadline, the disk floor and, with git, HEAD against
+        the commit the tools were built from (a real run; a --dry-run only with --check-tree-in-dry-run). The main loop asks
+        between legs, waves and cycles, and every host-pool worker asks, tree test included, before it plans each slice: one
+        `git rev-parse HEAD` a slice (20 ms, MEASURED on Windows; a slice lasts from a fraction of a second, the first probe
+        of an op, to --sweep-slice-seconds). A moved tree is LATCHED: once anyone has seen it every later call says so without
+        asking git, so no worker plans another slice, and the main loop ends the run as `tree_moved` at its next check, as it
+        always did. A slice a worker had planned in the same few milliseconds still starts, and a slice in flight runs on,
+        as a card leg in flight does. git=False skips the tree test: the pool's workers asked that way until the second pass
+        of 2026-10-20 (verifier-VDR2), and a plant of the suite puts it back."""
         if os.path.exists(self.stop_path):
             return Stop("stop_file", 0, f"{self.stop_path} exists")
         if self.sig:
@@ -551,11 +600,14 @@ class Driver:
                 low.append(f"{p}: {free:.2f} GB free, floor {self.a.disk_floor_gb} GB")
         if low:
             return Stop("disk_floor", 3, "; ".join(low))
-        if self.head and not self.dry:
-            now = self.git_head()
-            if now and now != self.head:
-                return Stop("tree_moved", 3, f"HEAD was {self.head[:12]} at the start and is "
-                            f"{now[:12]} now: the tools were built from the first")
+        if git and self.head and self.tree_check:
+            if self.tree_stop is None:
+                now = self.git_head()
+                if now and now != self.head:
+                    self.tree_stop = Stop("tree_moved", 3, f"HEAD was {self.head[:12]} at the start and is "
+                                          f"{now[:12]} now: the tools were built from the first")
+            if self.tree_stop is not None:
+                return self.tree_stop
         return None
 
     def git_head(self) -> str:
@@ -618,8 +670,13 @@ class Driver:
         return cmd
 
     def spawn(self, argv: List[str], env_extra: Dict[str, str], logpath: str, cwd: str,
-              timeout_s: float) -> "Tuple[subprocess.Popen, Any, List[str]]":
+              timeout_s: float, drop: Tuple[str, ...] = ()) -> "Tuple[subprocess.Popen, Any, List[str]]":
+        """drop: variables REMOVED from the child's environment, after the driver's own are copied in - a host
+        job is started with HOST_JOB_DROPS, so a CFT_SOAK_ARTIFACT in the environment the driver itself was started
+        in cannot reach it and open the card."""
         env = dict(os.environ)
+        for k in drop:
+            env.pop(k, None)
         env.update(env_extra)
         env.setdefault("PYTHONUNBUFFERED", "1")
         cmd = self.wrap(argv, timeout_s)
@@ -696,8 +753,10 @@ class Driver:
 
     # -- one leg ------------------------------------------------------------
     def log_name(self, leg: str) -> Tuple[str, str]:
-        self.seq += 1
-        base = f"c{self.cycle:04d}-{self.seq:05d}-{leg}"
+        with self.tally_lock:                 # the pool's workers name logs too
+            self.seq += 1
+            seq = self.seq
+        base = f"c{self.cycle:04d}-{seq:05d}-{leg}"
         return base, os.path.join(self.logs, base + ".log")
 
     def run_leg(self, leg: str, img: Image, cmd: Cmd, kind: str = "battery", attempt: int = 1,
@@ -744,7 +803,8 @@ class Driver:
         except WrongAnswer as e:
             return "fail", None, str(e)
         except L.VerdictError as e:
-            infra = L.classify_infra(text)
+            # a log that is not a verdict is "the card did not answer" only for a job that uses the card
+            infra = L.classify_infra(text) if cmd.card else None
             if infra:
                 return "no_device", None, f"{infra}: {e}"
             return "parse_error", None, f"{e} (exit status {res.rc})"
@@ -773,7 +833,7 @@ class Driver:
                     break
         kept = self.keep_log(logpath, status, tmpdir, extra)
         rec: Dict[str, Any] = {
-            "type": "leg", "cycle": self.cycle, "image": img.name, "image_sha256": img.sha,
+            "type": "leg", "cycle": self.cycle, "image": img.name, "image_sha256": img.sha or None,
             "leg": leg, "kind": kind, "attempt": attempt,
             "start": L.iso(res.start), "end": L.iso(res.end),
             "start_epoch": round(res.start, 3), "end_epoch": round(res.end, 3),
@@ -790,7 +850,8 @@ class Driver:
         self.tally(img.name, status)
         self.say(f"leg {leg} on {img.name}: {status} in {dur:.1f} s"
                  + (f" ({reason})" if reason else "") + (f" {counts}" if counts else ""))
-        self.current = ""
+        if cmd.card:
+            self.current = ""             # what the card is doing now; a host job ending says nothing of it
         self.write_status()
         return rec
 
@@ -829,9 +890,10 @@ class Driver:
         return kept
 
     def tally(self, image: str, status: str) -> None:
-        self.counts[status] = self.counts.get(status, 0) + 1
-        d = self.by_image.setdefault(image, {})
-        d[status] = d.get(status, 0) + 1
+        with self.tally_lock:                 # the card's thread and the pool's workers all count
+            self.counts[status] = self.counts.get(status, 0) + 1
+            d = self.by_image.setdefault(image, {})
+            d[status] = d.get(status, 0) + 1
 
     def skipped(self, leg: str, img: Image, reason: str, kind: str = "battery") -> None:
         now = time.time()
@@ -1030,9 +1092,12 @@ class Driver:
         self.intervals = {k: list(v) for k, v in iv.items()}
         self.served = dict(served)
         self.seed_n = {k: v + 1 for k, v in seeds.items()}
+        self.seed_states.update(L.seed_states(recs))
         self.disagreements = len(dis)
         for r in recs:
             t = r.get("type")
+            if t == "run_start" and isinstance(r.get("tree"), dict):
+                self.prev_rtl = r["tree"].get("rtl") or None
             if t == "cycle_start":
                 self.cycle = max(self.cycle, int(r["cycle"]))
                 self.visits[r["image"]] = max(self.visits.get(r["image"], 0), int(r.get("visit", 0)))
@@ -1058,6 +1123,23 @@ class Driver:
             if n >= self.a.quarantine_after:
                 self.quarantine.setdefault(item, []).append((lo, hi))
         self.seq = len(glob.glob(os.path.join(self.logs, "*"))) + 1000
+
+    def load_earlier(self) -> None:
+        """--earlier-runs: each random item's first n here is above the highest n any named run used (and above this
+        file's own, when it is resumed), so a new --out draws new operands and not the last run's again. The
+        directories are named, never searched for; parse_args has refused a name that is no run, and a directory
+        that changed since is refused again here, by name."""
+        if not self.a.earlier_runs:
+            return
+        try:
+            floor, states, notes = L.earlier_runs(self.a.earlier_runs)
+        except L.EarlierRunError as e:
+            raise SystemExit(str(e))
+        self.seed_floor, self.earlier_notes = floor, notes
+        for state, who in states.items():
+            self.seed_states.setdefault(state, who)
+        for item, n in floor.items():
+            self.seed_n[item] = max(self.seed_n.get(item, 0), n)
 
     def repair_tail(self) -> None:
         """A metrics file whose last line has no newline was caught mid-append (the driver or the host died in
@@ -1106,13 +1188,18 @@ class Driver:
             self.rate[key] = new
 
     def pick_item(self, reserved: Dict[str, List[Tuple[int, int]]], avoid: set,
-                  only: Optional[str] = None) -> Optional[Tuple[L.Item, Optional[Tuple[int, int]]]]:
+                  only: Optional[str] = None, reach: Optional[str] = None
+                  ) -> Optional[Tuple[L.Item, Optional[Tuple[int, int]]]]:
         """The next item by weighted rotation (fewest slices served per unit of weight), with
         its next gap (exhaustive) or None (random). Exhaustive items already covered, and items
-        in `avoid` (served this wave), are not eligible."""
+        in `avoid` (served this wave), are not eligible. `reach` limits the choice to the items
+        of one kind: the card's sweep asks for TILE, the host pool for HOST (under pool_lock, so
+        that its pick and its reservation are one step; the two kinds touch different items)."""
         best, best_key = None, None
         for idx, it in enumerate(self.items):
             if it.name in avoid or (only is not None and it.name != only):
+                continue
+            if reach is not None and it.reach != reach:
                 continue
             if self.sweep_only and it.name not in self.sweep_only:
                 continue
@@ -1135,27 +1222,32 @@ class Driver:
     def slice_units(self, it: L.Item, img: Image, secs: float) -> int:
         """Cases (or encodings) in a slice: the probe size until this op has a rate measured on
         this image, then what the measured rate fills `secs` with, in whole ATOMs. --quick uses
-        its own small size: its slices measure the rate, they do not fill time."""
+        its own small size: its slices measure the rate, they do not fill time. The card's slices
+        are held at 2^28; a host job's at L.HOST_SLICE_CAP (see there)."""
         if self.quick:
             return self.a.quick_slice_cases
         rate = self.rate.get(f"{it.op}@{img.name}")
         if rate is None:
             return self.a.probe_cases
         units = int(rate * secs)
-        units = max(L.ATOM, min(units, 1 << 28))
+        units = max(L.ATOM, min(units, L.HOST_SLICE_CAP if img.name == L.CPU else 1 << 28))
         return units - units % L.ATOM
 
     def soak_binary(self, it: L.Item) -> str:
         return os.path.join(self.root, "host", "divsqrt-soak" if it.tool == "divsqrt" else "clause5-soak")
 
     def plan_wave(self, img: Image, remaining: float, jobs: int,
-                  forced: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+                  forced: Optional[List[str]] = None, reach: str = L.TILE,
+                  busy: Optional[set] = None) -> List[Dict[str, Any]]:
+        """The jobs of one wave. `reach` is the kind of item they may be: the card's sweep plans TILE items
+        and never a host item (the host pool plans those, with img = the cpu pseudo-image and reach HOST);
+        `busy` is the items already running, which this wave does not take again."""
         wave: List[Dict[str, Any]] = []
         reserved: Dict[str, List[Tuple[int, int]]] = {}
-        avoid: set = set()
+        avoid: set = set(busy or ())
         slice_secs = min(self.a.sweep_slice_seconds, max(5.0, remaining - 15))
         for k in range(jobs):
-            pick = self.pick_item(reserved, avoid, forced[k] if forced and k < len(forced) else None)
+            pick = self.pick_item(reserved, avoid, forced[k] if forced and k < len(forced) else None, reach)
             if pick is None:
                 if forced and k < len(forced):
                     continue         # that item cannot run (disabled, covered): the rest of the wave still can
@@ -1177,13 +1269,19 @@ class Driver:
             else:
                 n = self.seed_n.get(it.name, 0)
                 seed = it.seed_for(n)
+                # the tool starts from seed | 1: refuse, by name, a state a slice of ANOTHER (item, n) in this file or in
+                # an --earlier-runs directory already started from (the same item and n is a slice served again)
+                prior = self.seed_states.get(seed | 1)
+                if prior is not None and prior != (it.name, n):
+                    raise RuntimeError(f"seed collision: {it.name} slice {n} would start from tool state {seed | 1:#x}, which "
+                                       f"{prior[0]} slice {prior[1]} already started from; its draws would repeat")
                 job.update(count=units, seed=seed, seed_n=n)
                 job["expected"] = None
                 job["cover"] = None
                 job["argv"] = it.argv(self.soak_binary(it), count=units, seed=seed)
                 job["sweep"] = {"item": it.name, "tool": it.tool, "op": it.op, "mode": it.mode,
                                 "reach": it.reach, "count": units, "seed": seed, "seed_n": n,
-                                "tile": None}
+                                "seed_scheme": L.SEED_SCHEME, "tile": None}
             if jobs > 1 and img.tiles > 1:
                 job["tile"] = k + 1
                 job["sweep"]["tile"] = k + 1
@@ -1249,32 +1347,47 @@ class Driver:
             rec = self.finish_leg(f"sweep-{it.name}", img, "sweep", 1, sweep, job["tile"], res, None,
                                   base, logpath, None, cmd, exp)
             recs.append(rec)
-            if rec["status"] in ("parse_error", "error"):
+            for name, detail, kw in self.account_slice(rec, job):
+                self.event(name, detail, **kw)
+        return recs
+
+    def account_slice(self, rec: Dict[str, Any], job: Dict[str, Any]) -> List[Tuple[str, str, Dict[str, Any]]]:
+        """Fold one finished sweep slice into what the driver knows - the item's good and bad streak, the slices
+        served, the coverage, the next seed number, the rate, the quarantine - for the card's wave and the host
+        pool alike. Returns the events to emit, which the caller emits AFTER this has let go of pool_lock."""
+        it: L.Item = job["item"]
+        st = rec["status"]
+        ev: List[Tuple[str, str, Dict[str, Any]]] = []
+        with self.pool_lock:
+            if it.kind == "random":
+                # started from this seed, whatever came of it: the guard in plan_wave refuses another (item, n) on it
+                self.seed_states[job["seed"] | 1] = (it.name, job["seed_n"])
+            if st in ("parse_error", "error"):
                 self.item_bad[it.name] = self.item_bad.get(it.name, 0) + 1
                 if self.item_bad[it.name] > self.a.quarantine_after:
                     self.disabled_items[it.name] = (f"{self.item_bad[it.name]} slices in a row gave no readable verdict; "
                                                     f"the last: {(rec.get('reason') or '')[:120]}")
-                    self.event("item_disabled", f"{it.name}: {self.disabled_items[it.name]}; the sweep goes on "
-                               f"without it", item=it.name)
-            elif rec["status"] in ("pass", "fail"):
+                    ev.append(("item_disabled", f"{it.name}: {self.disabled_items[it.name]}; the sweep goes on "
+                               f"without it", {"item": it.name}))
+            elif st in ("pass", "fail"):
                 self.item_bad[it.name] = 0
-            if rec["status"] in ("pass", "fail"):
+            if st in ("pass", "fail"):
                 self.served[it.name] = self.served.get(it.name, 0) + 1
                 if it.kind == "exhaustive":
                     self.intervals.setdefault(it.name, []).append((job["lo"], job["hi"]))
                 else:
                     self.seed_n[it.name] = job["seed_n"] + 1
                 self.note_rate(rec)
-                if rec["status"] == "fail":
+                if st == "fail":
                     self.disagreements += 1
             elif it.kind == "exhaustive":
                 k = (it.name, job["lo"], job["hi"])
                 self.fail_slices[k] = self.fail_slices.get(k, 0) + 1
                 if self.fail_slices[k] >= self.a.quarantine_after:
                     self.quarantine.setdefault(it.name, []).append((job["lo"], job["hi"]))
-                    self.event("quarantine", f"{it.name} [{job['lo']}, {job['hi']}) failed to finish "
-                               f"{self.fail_slices[k]} times; the sweep moves past it", item=it.name)
-        return recs
+                    ev.append(("quarantine", f"{it.name} [{job['lo']}, {job['hi']}) failed to finish "
+                               f"{self.fail_slices[k]} times; the sweep moves past it", {"item": it.name}))
+        return ev
 
     def _wait_job(self, proc, timeout_s, res, logf) -> None:
         try:
@@ -1331,22 +1444,23 @@ class Driver:
 
     def quick_items(self, img: Image, wave_no: int) -> List[str]:
         """--quick's sweep, fixed so the smoke shows each soak tool once on each image: on the quad
-        one wave of four jobs, one a tile (both soak tools, a random item and a clause-5 next);
-        on a single, two waves of one job.
+        one wave of four jobs, one a tile (QUICK_QUAD_ITEMS: both soak tools, an exhaustive and a random
+        item of the clause-5 tool); on a single, two waves of one job. TILE items only: a host item is
+        the pool's (QUICK_HOST_ITEMS), and the card is not asked to run it.
 
-        With --sweep-items the named items replace that list (2026-10-20; before, every wave was
+        With --sweep-items the named tile items replace that list (2026-10-20; before, every wave was
         empty whenever none of the four was named, and the log said the campaign was finished). They
         are taken in the order named, the least served first, and an item that cannot run is passed
         over: the first four distinct ones on the quad, and on a single image one a wave, so a
         second image's waves are the next items and not the same ones again (with --resume, a
         second smoke goes on again)."""
         if self.sweep_only:
-            names = [n for n in dict.fromkeys(self.sweep_only) if self.pick_item({}, set(), n)]
+            names = [n for n in dict.fromkeys(self.sweep_only) if self.pick_item({}, set(), n, L.TILE)]
             names.sort(key=lambda n: self.served.get(n, 0))     # stable: a tie stays in the order named
             return names[:img.tiles if img.tiles > 1 else 1]
         if img.tiles > 1:
-            return ["sqrt32-rne", "rint32-rne", "div32-rne", "nextup32"]
-        return [["sqrt32-rne"], ["rint32-rne"]][min(wave_no, 1)]
+            return list(QUICK_QUAD_ITEMS)
+        return [[QUICK_SINGLE_ITEMS[0]], [QUICK_SINGLE_ITEMS[1]]][min(wave_no, 1)]
 
     def why_no_wave(self, forced: Optional[List[str]]) -> Tuple[str, str]:
         """(a sentence, its cause - "finished" or "blocked") for a wave that plan_wave could not fill with one job.
@@ -1375,6 +1489,8 @@ class Driver:
                 return "covered", n
             if it.kind == "exhaustive" and L.first_gap(iv + self.quarantine.get(n, [])) is None:
                 return "moved past by the quarantine", n
+            if it.reach == L.HOST:
+                return "a host item the CPU pool runs, not the card", n
             return "", n
 
         def causes(names: List[str]) -> str:
@@ -1396,6 +1512,191 @@ class Driver:
             return f"no sweep job was planned although {left}: a defect in this driver", "blocked"
         return (f"no sweep job could start, and the campaign is NOT finished - of the {len(campaign)} items {scope}, "
                 + causes(campaign), "blocked")
+
+    # -- the host pool --------------------------------------------------------
+    # The HOST items (hw/card_stress_lib.py, OP_REACH) are libcft's host code: no floating-point arithmetic, "bit-identical
+    # on every backend by construction", the device argument "context ... not a participant" (host/src/clause5.c, 11-35,
+    # read again for this parcel against the code of that section and of the soaks). A card soak of one tested the library
+    # on the box's CPU and spent a tile's sweep time on it: 52.5 per cent of the final stress run's sweep job-seconds
+    # (docs/studies/SWP-A-coverage.md, 2.3). So they run here instead: --host-workers threads, each starting one soak process
+    # at a time, from the start of the run to its end, beside the battery and the card's sweep. A host job is the same soak
+    # binary on the same job line, niced and under `timeout` like every leg, with CFT_SOAK_ARTIFACT and CFT_XRT_TILES removed
+    # from its environment: it soaks the software backend and cannot open the card. Its slices are recorded as sweep legs
+    # of the image `cpu`. A host job's failure is its item's, never the card's: nothing here touches the streak, recover()
+    # or the card_lost stop.
+    def node(self) -> str:
+        return os.uname().nodename if hasattr(os, "uname") else os.environ.get("COMPUTERNAME", "?")
+
+    def pool_start(self) -> None:
+        a = self.a
+        if a.no_sweep or a.host_workers <= 0:
+            self.pool_note = f"off ({'--no-sweep' if a.no_sweep else '--host-workers 0'}): the host items do not run"
+            self.say(f"host pool: {self.pool_note}")
+            return
+        host = self.host_items()
+        if self.quick:
+            names = list(dict.fromkeys(self.sweep_only)) if self.sweep_only else list(QUICK_HOST_ITEMS)
+            have = {it.name for it in host}
+            self.pool_queue = [n for n in names if n in have]
+            host = [it for it in host if it.name in self.pool_queue]
+        if not host or (not self.quick and self.pick_item({}, set(), None, L.HOST) is None):
+            self.pool_note = "off: no host item to run (none in this run's campaign, or all covered)"
+            self.say(f"host pool: {self.pool_note}")
+            return
+        n = min(a.host_workers, len(host))
+        self.pool_note = f"{n} worker(s) over {len(host)} host item(s)"
+        self.event("host_pool", f"{self.pool_note}: CPU-only jobs, niced {a.nice}, no CFT_SOAK_ARTIFACT, no CFT_XRT_TILES"
+                   + (f"; --quick: one slice of each of {', '.join(self.pool_queue or [])}" if self.quick else ""),
+                   workers=n, items=len(host))
+        for k in range(1, n + 1):
+            t = threading.Thread(target=self.pool_worker, args=(k,), name=f"host-pool-{k}", daemon=True)
+            t.start()
+            self.pool_threads.append(t)
+
+    def host_items(self) -> List[L.Item]:
+        return [it for it in self.items if it.reach == L.HOST and (not self.sweep_only or it.name in self.sweep_only)]
+
+    def pool_plan(self) -> Optional[Dict[str, Any]]:
+        """The next host slice for a free worker, or None: the pick and the reservation (the item is busy from here) are one
+        step under pool_lock, so two workers never take one item, and a slice is sized to the time left before the deadline."""
+        with self.pool_lock:
+            remaining = (self.deadline - time.time()) if self.deadline is not None else 1e12
+            if remaining < self.a.min_slice_seconds and not self.quick:
+                return None                    # as the card's sweep: no slice starts with less time than this
+            forced = None
+            if self.pool_queue is not None:    # --quick: each host item once
+                while self.pool_queue and forced is None:
+                    name = self.pool_queue.pop(0)
+                    if self.pick_item({}, set(self.pool_busy), name, L.HOST):
+                        forced = [name]        # an item that is disabled, covered or outside --sweep-items is passed over
+                if forced is None:
+                    return None
+            wave = self.plan_wave(self.cpu, remaining, 1, forced, L.HOST, set(self.pool_busy))
+            if not wave:
+                return None
+            self.pool_busy[wave[0]["item"].name] = {"job": wave[0], "proc": None, "abandon": False}
+            return wave[0]
+
+    def pool_done(self) -> bool:
+        """Nothing a worker could ever run again: --quick's list is served, or every host item is covered, disabled or
+        outside --sweep-items (an item another worker has in flight is not 'nothing')."""
+        with self.pool_lock:
+            if self.pool_queue is not None:
+                return not self.pool_queue
+            return self.pick_item({}, set(), None, L.HOST) is None
+
+    def pool_worker(self, k: int) -> None:
+        errors = 0
+        while not self.pool_stop.is_set():
+            job = None
+            try:
+                stop = self.should_stop()
+                if stop is not None:           # a stop (STOP, a signal, the deadline, the disk floor, a moved tree): no slice starts
+                    self.say(f"host pool worker {k}: no more slices ({stop.reason}: {stop.detail})")
+                    return
+                job = self.pool_plan()
+                if job is None:
+                    if self.pool_done():
+                        return
+                    self.pool_stop.wait(3.0)
+                    continue
+                self.run_host_slice(k, job)
+                errors = 0
+            except Exception as e:             # a worker must never take the run down, nor stop silently
+                errors += 1
+                self.event("driver_error", f"host pool worker {k}: {type(e).__name__}: {e}", n=errors,
+                           traceback=traceback.format_exc()[-1800:])
+                if errors >= 5:
+                    self.event("host_pool_worker_gone", f"worker {k} stopped after {errors} errors in a row", worker=k)
+                    return
+                self.pool_stop.wait(min(30.0, self.a.retry_pause))
+            finally:
+                if job is not None:
+                    with self.pool_lock:
+                        self.pool_busy.pop(job["item"].name, None)
+
+    def run_host_slice(self, k: int, job: Dict[str, Any]) -> None:
+        """One host slice: start the soak, wait for it, and record it like a card slice - unless the run's end killed it."""
+        it: L.Item = job["item"]
+        if self.pool_stop.is_set():
+            return                             # the run is ending: pool_end has already looked for what is running
+        base, logpath = self.log_name(f"sweep-{it.name}")
+        argv = self.standin("soak", job["argv"]) if self.dry else job["argv"]
+        slot = self.pool_busy[it.name]
+        res = ProcResult()
+        res.start = time.time()
+        logf = None
+        try:
+            proc, logf, full = self.spawn(argv, {}, logpath, self.root, job["timeout"], drop=HOST_JOB_DROPS)
+            slot["proc"] = proc
+        except OSError as e:
+            res.end = time.time()
+            res.error = f"could not start {argv[0]}: {e}"
+            proc = None
+        what = job["sweep"].get("lo", job["sweep"].get("count"))
+        self.say(f"host job {it.name} [{what}{'-' + str(job['sweep']['hi']) if 'hi' in job['sweep'] else ' cases'}] "
+                 f"on {L.CPU} (worker {k})")
+        if proc is not None:
+            try:
+                self.await_proc(proc, job["timeout"], res)
+            finally:
+                if logf is not None:
+                    logf.close()
+                res.end = time.time()
+        if slot["abandon"] or (self.hard and res.killed):
+            # The run ended with this job in flight, and the job was terminated for it (pool_end, or a second signal).
+            # Nothing of that is the item's failure, so it is NOT a leg - as a parse_error or a timeout it would count
+            # toward disabling the item or quarantining its range - and the slice is not covered, so a resume serves it
+            # again. The event says so.
+            self.event("host_job_abandoned", f"{it.name} [{what}{'-' + str(job['sweep']['hi']) if 'hi' in job['sweep'] else ' cases'}]"
+                       f" was terminated because the run ended; it is not recorded as a slice, and a resumed run serves it again",
+                       item=it.name)
+            return
+        exp, cover = job["expected"], job["cover"]
+        cmd = Cmd(job["argv"], job["timeout"],
+                  (lambda t, rc, it=it, exp=exp, cover=cover: L.parse_soak(t, rc, it.op, it.verdict_mode, None, exp, cover,
+                                                                           cpu=True)), card=False)
+        sweep = dict(job["sweep"])
+        sweep["jobs"] = 1
+        sweep["pool"] = {"worker": k, "host": self.node(), "build_id": self.build_id}
+        if exp is not None:
+            sweep["expected_cases"] = exp
+        if cover is not None:
+            sweep["expected_encodings"] = cover["encodings"]
+        rec = self.finish_leg(f"sweep-{it.name}", self.cpu, "sweep", 1, sweep, None, res, None, base, logpath, None, cmd, exp)
+        for name, detail, kw in self.account_slice(rec, job):
+            self.event(name, detail, **kw)
+        with self.pool_lock:
+            self.pool_served += 1
+        if rec["status"] == "parse_error" and (rec.get("reason") or "").startswith(L.CPU_OPENED_CARD):
+            self.event("host_pool_stopped", "a host job opened the card, which the pool's jobs are started without any way "
+                       "to do; the pool stops here and no further host job starts", item=it.name)
+            self.pool_stop.set()
+
+    def pool_end(self, drain: bool) -> None:
+        """End the pool. A --quick run that finished lets the host items it still owes their one slice finish (seconds)
+        first. Then no slice starts, and a slice still running gets --kill-after seconds from now - the run's last card
+        leg has just ended - before it is marked abandoned for terminate_children() to end (nothing of a host job
+        needs protecting from a stop, as a card leg does: a CPU job poisons nothing)."""
+        if not self.pool_threads:
+            return
+        grace = max(1.0, float(self.a.kill_after))
+        if drain and not self.hard:
+            t_end = time.time() + max(60.0, grace)
+            for t in self.pool_threads:
+                t.join(timeout=max(0.0, t_end - time.time()))
+        self.pool_stop.set()
+        t_end = time.time() + grace
+        for t in self.pool_threads:
+            t.join(timeout=max(0.0, t_end - time.time()))
+        with self.pool_lock:
+            live = [s for s in self.pool_busy.values() if s["proc"] is not None and s["proc"].poll() is None]
+            for s in live:
+                s["abandon"] = True
+
+    def pool_join(self) -> None:
+        for t in self.pool_threads:
+            t.join(timeout=10.0)
 
     # -- telemetry ------------------------------------------------------------
     def examine(self, tool: str, rep: str, mode: str) -> Tuple[Dict[str, float], str, Optional[str]]:
@@ -1518,6 +1819,18 @@ class Driver:
     def write_status(self) -> None:
         with self.lock:
             now = time.time()
+            # a copy of what the card's thread and the host pool's workers change, taken under their locks (lock order:
+            # `lock`, then these; no code that holds one of these calls say(), event() or this)
+            with self.tally_lock:
+                counts = dict(self.counts)
+                by_image = {k: dict(v) for k, v in self.by_image.items()}
+            with self.pool_lock:
+                intervals = {k: list(v) for k, v in self.intervals.items()}
+                served, rate, disabled = dict(self.served), dict(self.rate), dict(self.disabled_items)
+                disagreements, pool_served = self.disagreements, self.pool_served
+                in_flight = sorted(f"{n} [{s['job']['sweep'].get('lo', s['job']['sweep'].get('count'))}"
+                                   f"{'-' + str(s['job']['sweep']['hi']) if 'hi' in s['job']['sweep'] else ' cases'}]"
+                                   for n, s in self.pool_busy.items())
             lines = [f"card-stress status   {L.iso(now)}", ""]
             lines.append(f"run        {self.run_id}   out {self.out}"
                          + ("   [QUICK]" if self.quick else "") + ("   [DRY RUN]" if self.dry else ""))
@@ -1529,9 +1842,9 @@ class Driver:
             else:
                 lines.append("deadline   none (quick or open-ended)")
             lines.append(f"running    since {L.iso(self.t0)}   {now - self.t0:.0f} s")
-            tot = sum(self.counts.values())
-            lines.append(f"legs       {tot}: " + ", ".join(f"{k} {v}" for k, v in sorted(self.counts.items())))
-            for im, d in sorted(self.by_image.items()):
+            tot = sum(counts.values())
+            lines.append(f"legs       {tot}: " + ", ".join(f"{k} {v}" for k, v in sorted(counts.items())))
+            for im, d in sorted(by_image.items()):
                 lines.append(f"  {im:<8} " + ", ".join(f"{k} {v}" for k, v in sorted(d.items())))
             lines.append(f"card       consecutive failures {self.streak} of {self.a.max_card_failures}")
             if self.beside:
@@ -1549,27 +1862,29 @@ class Driver:
             by_reach = {L.TILE: [0, 0, 0, 0], L.HOST: [0, 0, 0, 0]}   # exhaustive items, covered, total; random begun
             for it in self.items:
                 if it.kind == "exhaustive":
-                    cov_it = L.covered(self.intervals.get(it.name, []) or []) if self.intervals.get(it.name) else 0
+                    cov_it = L.covered(intervals.get(it.name, []) or []) if intervals.get(it.name) else 0
                     ex_total += L.EXH
                     ex_cov += cov_it
                     by_reach[it.reach][0] += 1
                     by_reach[it.reach][1] += cov_it
                     by_reach[it.reach][2] += L.EXH
-                elif self.served.get(it.name):
+                elif served.get(it.name):
                     by_reach[it.reach][3] += 1
-            rnd = sum(1 for it in self.items if it.kind == "random" and self.served.get(it.name))
+            rnd = sum(1 for it in self.items if it.kind == "random" and served.get(it.name))
             lines.append(f"sweep      exhaustive {ex_cov:,} of {ex_total:,} encodings"
                          f" ({(100.0 * ex_cov / ex_total) if ex_total else 0:.3f} %); "
-                         f"slices served {sum(self.served.values())}; random items begun {rnd};"
-                         f" disagreements {self.disagreements}; rates {{{', '.join(f'{k}: {v:,.0f}/s' for k, v in sorted(self.rate.items()))}}}")
+                         f"slices served {sum(served.values())}; random items begun {rnd};"
+                         f" disagreements {disagreements}; rates {{{', '.join(f'{k}: {v:,.0f}/s' for k, v in sorted(rate.items()))}}}")
             # which items reach the tile at all (hw/card_stress_lib.py, OP_REACH): a HOST item is libcft's host
-            # code on the box, a full-space test of the library with the tile computing nothing
+            # code, which the host pool runs on CPUs beside the card, the tile computing nothing for it
             lines.append("reach      " + "; ".join(
                 f"{k} items: exhaustive {v[1]:,} of {v[2]:,} encodings ({(100.0 * v[1] / v[2]) if v[2] else 0:.3f} %)"
                 f" over {v[0]} item(s), random begun {v[3]}" for k, v in by_reach.items())
                          + "; the tile computes nothing for a host item")
-            if self.disabled_items:
-                lines.append("disabled   sweep items: " + "; ".join(f"{k} ({v[:60]})" for k, v in self.disabled_items.items()))
+            lines.append(f"hostpool   {self.pool_note}; {pool_served} slice(s) recorded; in flight: "
+                         + ("; ".join(in_flight) if in_flight else "none"))
+            if disabled:
+                lines.append("disabled   sweep items: " + "; ".join(f"{k} ({v[:60]})" for k, v in disabled.items()))
             tmp = self.status_path + ".tmp"
             try:
                 with open(tmp, "w", encoding="utf-8") as fh:
@@ -1590,11 +1905,42 @@ class Driver:
         except (OSError, subprocess.TimeoutExpired):
             pass
         self.tree = {"commit": self.head or None, "dirty": bool(dirty), "dirty_files": len(dirty.splitlines())}
+        self.tree.update(self.tree_facts())
         for im in self.images.values():
             try:
                 im.sha, im.bytes = sha256_file(im.path)
             except OSError as e:
                 self.say(f"image {im.name}: cannot read {im.path}: {e}")
+
+    def tree_facts(self) -> Dict[str, Any]:
+        """What the report keys a slice's coverage by, recorded in run_start (docs/CARDDAY.md, "The long run"):
+        rtl, the git tree hash of rtl/ at HEAD (`git rev-parse HEAD:rtl`), which is what a tile item is evidence about; host_src,
+        the same for host/, and cc, the C compiler's first version line, which is what a host item is about; each with a
+        `_dirty` flag, true when git status of that directory shows a change, untracked files included (an untracked
+        .sv is compiled into a bitstream all the same: hw/rebuild-2022.sh). None where git cannot say, never a guess.
+        This is the tree the driver RUNS FROM. It is the tree the images were built from only if they were; the images'
+        own identity is their SHA-256, recorded beside it."""
+        out: Dict[str, Any] = {}
+        for key, rel in (("rtl", "rtl"), ("host_src", "host")):
+            h = d = None
+            try:
+                p = subprocess.run(["git", "-C", self.root, "rev-parse", f"HEAD:{rel}"], capture_output=True, text=True, timeout=30)
+                h = p.stdout.strip() if p.returncode == 0 and p.stdout.strip() else None
+                if h:
+                    s = subprocess.run(["git", "-C", self.root, "status", "--porcelain", "--untracked-files=all", "--", rel],
+                                       capture_output=True, text=True, timeout=60)
+                    d = bool(s.stdout.strip()) if s.returncode == 0 else None
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+            out[key], out[key + "_dirty"] = h, d
+        cc = None
+        try:
+            p = subprocess.run([os.environ.get("CC", "cc"), "--version"], capture_output=True, text=True, timeout=30)
+            cc = (p.stdout or p.stderr).strip().splitlines()[0].strip() if p.returncode == 0 and (p.stdout or p.stderr).strip() else None
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        out["cc"] = cc
+        return out
 
     def build_and_check(self) -> None:
         steps: List[Dict[str, Any]] = []
@@ -1744,6 +2090,8 @@ class Driver:
         rc2, bid = self.run_quiet([os.path.join(host, "cft-segrun"), "--build-id"], 60)
         step("build id", rc == 0 and rc2 == 0 and tid.strip() == bid.strip() and bool(bid.strip()),
              f"the tree's {tid.strip()!r}, cft-segrun's {bid.strip()!r}")
+        if rc == 0 and rc2 == 0 and tid.strip() == bid.strip() and bid.strip():
+            self.build_id = bid.strip()          # what a host slice's record says was run
         for mod in ("mpmath", "pytest"):
             rc, _ = self.run_quiet([self.python, "-c", f"import {mod}"], 60)
             if rc != 0:
@@ -1860,6 +2208,7 @@ class Driver:
         reason = "finished"
         try:
             self.load_state()
+            self.load_earlier()
             with open(os.path.join(self.out, "settings.json"), "w", encoding="utf-8") as fh:
                 json.dump({k: v for k, v in vars(a).items()}, fh, indent=1, default=str)
             self.say(f"card-stress: out {self.out}{' (resumed)' if resumed else ''}; "
@@ -1875,20 +2224,28 @@ class Driver:
             self.guard(False)
             self.pre_check()
             self.rec({"type": "run_start", "run_id": self.run_id, "out": self.out,
-                      "host": os.uname().nodename if hasattr(os, "uname") else os.environ.get("COMPUTERNAME", "?"),
+                      "host": self.node(),
                       "argv": sys.argv[1:], "settings": {"until": L.iso(self.deadline) if self.deadline else None,
                       "quick": self.quick, "dry_run": self.dry, "weights": self.weights,
                       "sweep_minutes": self.sweep_minutes, "legs": self.battery,
                       "timeouts": self.timeouts, "every": self.every, "nice": a.nice,
                       "soak_jobs": a.soak_jobs, "max_card_failures": a.max_card_failures,
-                      "disk_floor_gb": a.disk_floor_gb},
+                      "disk_floor_gb": a.disk_floor_gb, "host_workers": a.host_workers,
+                      "seed_scheme": L.SEED_SCHEME},
                       "tree": getattr(self, "tree", None),
+                      "earlier_runs": ({"dirs": self.earlier_notes, "first_n": self.seed_floor}
+                                       if self.earlier_notes else None),
                       "images": {n: {"sha256": i.sha, "bytes": i.bytes, "tiles": i.tiles, "path": i.path,
                                      "target": i.target} for n, i in self.images.items()},
                       "deadline": L.iso(self.deadline) if self.deadline else None, "resumed": resumed})
             self.started = True
             if self.torn_note:
                 self.event("torn_tail", self.torn_note)
+            if resumed and self.prev_rtl and self.tree.get("rtl") and self.prev_rtl != self.tree["rtl"]:
+                self.event("tree_changed", f"resumed on RTL tree {self.tree['rtl'][:12]}; the file's earlier run_start recorded "
+                           f"{self.prev_rtl[:12]}. The report counts the slices before and after as different trees; this driver "
+                           f"goes on from the whole file's coverage, so it does not redo the earlier tree's tile slices. Use a new "
+                           f"--out to cover the new tree from the start", before=self.prev_rtl, now=self.tree["rtl"])
             self.note_beside()
             self.state = "BUILD"
             self.build_and_check()
@@ -1898,6 +2255,7 @@ class Driver:
             if a.telemetry_seconds > 0:
                 self.tel_thread = threading.Thread(target=self.tel_loop, daemon=True)
                 self.tel_thread.start()
+            self.pool_start()
             self.state = "RUNNING"
             self.write_status()
             n_cycles = 0
@@ -1919,7 +2277,7 @@ class Driver:
                     self.internal_errors += 1
                     self.event("driver_error", f"{type(e).__name__}: {e}", n=self.internal_errors,
                                traceback=traceback.format_exc()[-1800:])
-                    self.terminate_children()
+                    self.terminate_children(card_only=True)
                     if self.internal_errors >= 5:
                         raise Stop("driver_error", 3, f"{self.internal_errors} unexpected exceptions in a row; "
                                    f"the last: {type(e).__name__}: {e}")
@@ -1944,7 +2302,9 @@ class Driver:
             self.tel_stop.set()
             if self.tel_thread:
                 self.tel_thread.join(timeout=5)
+            self.pool_end(drain=reason == "quick_done")      # no host slice starts; the ones in flight get --kill-after
             self.terminate_children()
+            self.pool_join()
             try:
                 if self.started:
                     self.telemetry("end")
@@ -2013,9 +2373,17 @@ class Driver:
             except (ValueError, OSError):
                 pass
 
-    def terminate_children(self) -> None:
-        """Whatever this run started and is still alive, by PID. Never by a pattern."""
+    def terminate_children(self, card_only: bool = False) -> None:
+        """Whatever this run started and is still alive, by PID. Never by a pattern. card_only leaves the host pool's
+        jobs alone: a failure in the card's cycle (driver_error) must not kill CPU jobs that are running beside it, and
+        have them recorded as failures of their items."""
+        keep = set()
+        if card_only:
+            with self.pool_lock:
+                keep = {s["proc"].pid for s in self.pool_busy.values() if s["proc"] is not None}
         for pid, proc in list(self.children.items()):
+            if pid in keep:
+                continue
             if proc.poll() is None:
                 self.say(f"terminating pid {pid} (started by this run)")
                 self.kill_group(proc, "TERM")
@@ -2040,6 +2408,10 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     g.add_argument("--until", help='deadline, the box\'s local time: "2026-10-19 08:00". Required for a long run.')
     g.add_argument("--quick", action="store_true", help="the smoke: every leg once on each image, short slices")
     g.add_argument("--dry-run", action="store_true", help="stand-ins for every command; no XRT, no card")
+    g.add_argument("--check-tree-in-dry-run", action="store_true",
+                   help="in a --dry-run too, compare HEAD with the commit the run started from before every leg, wave, cycle and host "
+                        "slice, and stop (tree_moved) when it moved. A dry run does not by default: its --root may be a checkout somebody "
+                        "is committing to. The suite's test of the moved tree uses it, on a scratch repository.")
     g.add_argument("--out", help="run directory (default: ~/card-stress-out/<stamp>-<commit>). Keep it OUTSIDE the "
                    "checkout: files there make the tree untracked, and hw/card-segrun.sh asserts the tree's build id")
     g.add_argument("--resume", action="store_true", help="continue the run in --out (sweep state is replayed)")
@@ -2071,12 +2443,23 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
                    "CFT_XRT_TILES), or a number")
     g.add_argument("--sweep-weights", default="exhaustive=3,random=1", help="share of sweep slices by campaign kind")
     g.add_argument("--quarantine-after", type=int, default=2, help="a slice that fails to finish this often is moved past")
-    g.add_argument("--no-sweep", action="store_true", help="the battery only")
+    g.add_argument("--no-sweep", action="store_true", help="the battery only (no host pool either)")
+    g.add_argument("--host-workers", type=int, default=8, help="the host pool: this many CPU-only soak processes at once, "
+                   "from the run's start to its end, for the HOST items (the conversions, next, logB, class, remainder: "
+                   "libcft's host code, which no tile computes), niced like every leg, with no CFT_SOAK_ARTIFACT, so "
+                   "no card is opened; the card's sweep then takes tile items only. 0: the host items do not run at "
+                   "all (default %(default)s: a quarter of the box's 36 threads, beside the card's four and the "
+                   "battery; docs/CARDDAY.md says why)")
+    g.add_argument("--earlier-runs", action="append", default=[], metavar="DIR[,DIR...]",
+                   help="earlier runs' output directories, named: each random item's first slice number n here is above "
+                   "the highest any of them used, so this run's draws are new (docs/CARDDAY.md, \"The long run\"). A "
+                   "directory without a metrics.jsonl, or whose lines do not parse, is refused by name")
     g.add_argument("--sweep-items", default="", help="comma-separated campaign items to sweep, e.g. sqrt32-rne,rint32-rne "
                    "(default: all; names are hw/card_stress_lib.py's sweep_items). A wave runs one job a distinct item, so "
-                   "name four items to use the quad's four tiles. With --quick the smoke's waves are these items, in the "
-                   "order named, the least served first (instead of its own four): the first four on the quad, one a "
-                   "wave on a single image")
+                   "name four tile items to use the quad's four tiles; a host item named here is the host pool's, not "
+                   "the card's. With --quick the smoke's waves are these tile items, in the order named, the least "
+                   "served first (instead of its own four): the first four on the quad, one a wave on a single image; "
+                   "and the pool serves each host item named once")
     g = ap.add_argument_group("policy")
     g.add_argument("--retry-pause", type=float, default=120, help="seconds to wait after the card fails to answer")
     g.add_argument("--max-card-failures", type=int, default=6, help="consecutive failures after which the run stops")
@@ -2118,6 +2501,14 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
                 ap.error(f"--sweep-items {n!r}: not an item ({', '.join(sorted(known)[:6])}, ...)")
     if a.soak_jobs != "auto" and not a.soak_jobs.isdigit():
         ap.error("--soak-jobs is auto or a number")
+    if a.host_workers < 0:
+        ap.error("--host-workers is 0 (the host items do not run) or a number of CPU-only soak processes")
+    a.earlier_runs = [expand(x.strip()) for v in a.earlier_runs for x in v.split(",") if x.strip()]
+    if a.earlier_runs:
+        try:
+            L.earlier_runs(a.earlier_runs)            # refuse a name that is no run's directory now, not after hours
+        except L.EarlierRunError as e:
+            ap.error(str(e))
     if not a.out:
         stamp = time.strftime("%Y%m%d-%H%M%S")
         sha = ""

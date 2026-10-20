@@ -20,6 +20,10 @@ Three kinds of group, then the plants (the groups, by name, are in hw/test-card-
   plants    a NEGATIVE CONTROL for each class of check: one defect put back into a copy of the
             code, and the scenario written for it must FAIL. A check that cannot fail proves
             nothing (the standard hw/test-sweep-judge.sh sets).
+  pool, seeds, trees   (parcel DR2, 2026-10-20) the host pool - the card's waves and the pool's slices by
+            reach, STOP and the deadline, a host job's failure, --resume, the lock on the metrics
+            file - the seed schedule over the catalog and across runs (--earlier-runs, an old run
+            resumed), and coverage by tree (the tree the driver records, the report's section, --also).
 
 POSIX-only checks (the `nice` and `timeout` wrappers, a process that ignores SIGTERM) are
 SKIPped by name on Windows and run under WSL or on the box. Everything runs niced by the
@@ -28,16 +32,20 @@ caller's choice; nothing here starts anything heavy. Prints one line a group and
 """
 from __future__ import annotations
 
+import contextlib
 import gzip
 import hashlib
+import importlib
 import json
 import os
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -49,6 +57,8 @@ import card_stress_lib as L  # noqa: E402
 
 POSIX = os.name == "posix"
 FIX = os.path.join(HERE, "card_stress_fixtures")
+# an image the driver's OWN environment names, as an operator's shell might: no host-pool job may inherit it
+LEAKED_ARTIFACT = "/leaked/by/the/environment.xclbin"
 
 CHECKS = 0
 FAILS: list = []
@@ -62,6 +72,25 @@ def check(name: str, ok: bool, detail: str = "") -> bool:
         FAILS.append(f"{name}: {detail}")
         print(f"  FAIL  {name}  {detail}"[:400])
     return bool(ok)
+
+
+def rmtree_force(path) -> None:
+    """shutil.rmtree that also removes read-only files. The object files of a git repository are read-only, and on Windows
+    shutil.rmtree(path, ignore_errors=True) leaves such a directory behind without a word (found 2026-10-20: thirteen of this
+    parcel's own, each holding a scratch repository the tree tests made)."""
+    def fix(func, p, _exc):
+        try:
+            os.chmod(p, stat.S_IWRITE)
+            func(p)
+        except OSError:
+            pass
+    try:
+        if sys.version_info >= (3, 12):
+            shutil.rmtree(path, onexc=fix)
+        else:
+            shutil.rmtree(path, onerror=fix)
+    except OSError:
+        pass
 
 
 def skip(name: str, why: str) -> None:
@@ -560,7 +589,9 @@ def catalog_checks(c, mod, d, q) -> None:
     # a wave job for a new item: its command line, what the verdict must cover, what the record says
     d.items = items
     d.rate = {}
-    wave = d.plan_wave(q, 3600, 1, ["cvtto32-all-rup"])
+    # a HOST item is planned for the pool (the cpu pseudo-image, reach host), never for the card; a TILE item for the card
+    H = L.HOST
+    wave = d.plan_wave(d.cpu, 3600, 1, ["cvtto32-all-rup"], H)
     j = wave[0]
     b = d.soak_binary(j["item"])
     c("a wave job for cvtto32-all-rup: clause5-soak cvtto32-all <lo> <hi> rup, over the probe size from 0",
@@ -568,7 +599,7 @@ def catalog_checks(c, mod, d, q) -> None:
     c("... it must cover its slice's encodings at 4 checks an encoding, with no fixed case count, and its record says "
       "reach host", j["cover"] == {"encodings": j["units"], "per_encoding": 4} and j["expected"] is None
       and j["sweep"]["reach"] == "host", str((j["cover"], j["expected"], j["sweep"])))
-    j = d.plan_wave(q, 3600, 1, ["conv32to64-all"])[0]
+    j = d.plan_wave(d.cpu, 3600, 1, ["conv32to64-all"], H)[0]
     c("a wave job for conv32to64-all: no mode word, exactly one case an encoding, record reach host",
       j["argv"] == [b, "conv32to64-all", "0", str(j["units"])] and j["expected"] == j["units"]
       and j["cover"] == {"encodings": j["units"], "per_encoding": 1} and j["sweep"]["reach"] == "host", str(j["argv"]))
@@ -579,10 +610,10 @@ def catalog_checks(c, mod, d, q) -> None:
     j = d.plan_wave(q, 3600, 1, ["rint32-rne"])[0]
     c("a wave job for an older exhaustive item is as it was (the encodings, no coverage clause) and says reach tile",
       j["expected"] == j["units"] and j["cover"] is None and j["sweep"]["reach"] == "tile")
-    j = d.plan_wave(q, 3600, 1, ["nextup32"])[0]
+    j = d.plan_wave(d.cpu, 3600, 1, ["nextup32"], H)[0]
     c("nextup32 still expects its 8 edge cases beyond the slice, reach host",
       j["expected"] == j["units"] + 8 and j["cover"] is None and j["sweep"]["reach"] == "host")
-    j = d.plan_wave(q, 3600, 1, ["cvtfrom64-rne"])[0]
+    j = d.plan_wave(d.cpu, 3600, 1, ["cvtfrom64-rne"], H)[0]
     c("a random item's job records its reach and has no coverage to check",
       j["cover"] is None and j["expected"] is None and j["sweep"]["reach"] == "host" and "count" in j["sweep"])
     # the campaign script's own job lines are the catalog's, item for item, in order, with its seeds and slices
@@ -653,12 +684,18 @@ def quick_checks(c, mod, tmp: str, imgs: dict) -> None:
     only = r8.argv[r8.argv.index("--only") + 1].split(",")
     c("quick: the quad's revision-8 leg is phi4_extended_fp64 and one routine entry (no compile), with --lib",
       only == ["phi4_extended_fp64", "lotkavolterra-rk4-tangent-fp64"] and "--lib" in r8.argv, str(only))
-    c("quick: without --sweep-items the sweep is still its own: four items on the quad, sqrt32-rne then rint32-rne on a single",
-      d0.quick_items(q, 0) == ["sqrt32-rne", "rint32-rne", "div32-rne", "nextup32"]
-      and [d0.quick_items(s, 0), d0.quick_items(s, 1)] == [["sqrt32-rne"], ["rint32-rne"]])
+    byname = {it.name: it for it in d0.items}
+    c("quick: without --sweep-items the sweep is still its own: four items on the quad, sqrt32-rne then rint32-rne on a single; "
+      "all TILE items now (the fourth was nextup32, a host item, which is the pool's)",
+      d0.quick_items(q, 0) == ["sqrt32-rne", "rint32-rne", "div32-rne", "rint64-rne"]
+      and [d0.quick_items(s, 0), d0.quick_items(s, 1)] == [["sqrt32-rne"], ["rint32-rne"]]
+      and all(byname[n].reach == L.TILE for n in d0.quick_items(q, 0)), str(d0.quick_items(q, 0)))
+    c("quick: the pool's own list is host items only: a plain exhaustive one (with edge cases), one that says what it covered, "
+      "and a random one", list(mod.QUICK_HOST_ITEMS) == ["nextup32", "conv32to64-all", "rem32"]
+      and all(byname[n].reach == L.HOST for n in mod.QUICK_HOST_ITEMS))
     ex = exhaustive_conversion_items(L)
     c("quick: the 22 exhaustive conversion and scaleB items are 22, and not one is in quick's own four", len(ex) == 22
-      and not set(ex) & {"sqrt32-rne", "rint32-rne", "div32-rne", "nextup32"})
+      and not set(ex) & {"sqrt32-rne", "rint32-rne", "div32-rne", "rint64-rne"})
     # --quick with --sweep-items: the named items, in the order named; the shuffle shows "named", not "the catalog's"
     named = ex[::-1]
     d1 = drv("--sweep-items", ",".join(named))
@@ -675,42 +712,45 @@ def quick_checks(c, mod, tmp: str, imgs: dict) -> None:
     c("quick with --sweep-items: a single image takes one item a wave, the least served first - the next two items named, "
       "not the first four again", [j["item"].name for j in w5 + w6] == named[4:6] and [j["tile"] for j in w5 + w6] == [None, None],
       str([j["item"].name for j in w5 + w6]))
-    d2 = drv("--sweep-items", f"{ex[0]},{ex[0]},{ex[1]}")
+    d2 = drv("--sweep-items", f"{ex[14]},{ex[14]},{ex[15]}")
     c("quick with --sweep-items: a name given twice is one item, and fewer items than tiles are fewer jobs",
-      d2.quick_items(q, 0) == [ex[0], ex[1]] and len(d2.plan_wave(q, 3600, 4, d2.quick_items(q, 0))) == 2)
+      d2.quick_items(q, 0) == [ex[14], ex[15]] and len(d2.plan_wave(q, 3600, 4, d2.quick_items(q, 0))) == 2)
     d1.disabled_items = {named[0]: "x"}
     d1.intervals = {named[1]: [(0, L.EXH)]}
     c("quick with --sweep-items: an item that is disabled or covered is passed over, and the wave takes the least served "
-      "of the rest (the first five are served, so the next four named)", d1.quick_items(q, 0) == named[5:9], str(d1.quick_items(q, 0)))
+      "of the rest (named[0..4] are served and named[0], [1] are out; of the eight TILE items named, [5] to [7] are unserved "
+      "and then [2]; the host items named are the pool's, not the card's)",
+      d1.quick_items(q, 0) == [named[5], named[6], named[7], named[2]], str(d1.quick_items(q, 0)))
     # a fixed list with a disabled item no longer loses the whole wave
     d3 = drv()
     d3.disabled_items = {"sqrt32-rne": "x"}
     w3 = d3.plan_wave(q, 3600, 4, d3.quick_items(q, 0))
     c("quick: one disabled item in quick's own four no longer empties the quad's wave: the other three run, on their own tiles",
-      [(j["tile"], j["item"].name) for j in w3] == [(2, "rint32-rne"), (3, "div32-rne"), (4, "nextup32")], str(w3))
-    # an empty wave says why: the campaign is finished only when it is
-    d4 = drv("--sweep-items", f"{ex[0]},{ex[17]}")
-    d4.intervals = {ex[0]: [(0, L.EXH)], ex[17]: [(0, 1 << 31), (1 << 31, L.EXH)]}
+      [(j["tile"], j["item"].name) for j in w3] == [(2, "rint32-rne"), (3, "div32-rne"), (4, "rint64-rne")], str(w3))
+    # an empty wave says why: the campaign is finished only when it is. (ex[14..17] are scaleb32-all, TILE items; ex[0..13] are
+    # host items, the pool's, which the card is not asked to run - the checks after d8)
+    d4 = drv("--sweep-items", f"{ex[14]},{ex[17]}")
+    d4.intervals = {ex[14]: [(0, L.EXH)], ex[17]: [(0, 1 << 31), (1 << 31, L.EXH)]}
     f4 = d4.quick_items(q, 0)
     why4, cause4 = d4.why_no_wave(f4)
     c("empty wave, every item named is covered: the campaign IS finished, and says so for the items named, with how many",
       f4 == [] and d4.plan_wave(q, 3600, 4, f4) == [] and cause4 == "finished"
       and why4 == "nothing left to run for the items named by --sweep-items: all 2 are exhaustive and covered", why4)
-    d5 = drv("--sweep-items", f"{ex[0]},{ex[1]}")
-    d5.disabled_items = {ex[0]: "3 slices in a row gave no readable verdict", ex[1]: "3 slices in a row gave no readable verdict"}
+    d5 = drv("--sweep-items", f"{ex[14]},{ex[15]}")
+    d5.disabled_items = {ex[14]: "3 slices in a row gave no readable verdict", ex[15]: "3 slices in a row gave no readable verdict"}
     f5 = d5.quick_items(q, 0)
     why5, cause5 = d5.why_no_wave(f5)
     c("empty wave, every item disabled: NOT finished, and the sentence names the cause and the items",
       d5.plan_wave(q, 3600, 4, f5) == [] and cause5 == "blocked" and "NOT finished" in why5 and "2 disabled" in why5
-      and ex[0] in why5 and "nothing left to run" not in why5, why5)
-    d6 = drv("--sweep-items", f"{ex[0]},{ex[1]}")
-    d6.intervals = {ex[0]: [(0, L.EXH)]}
-    d6.disabled_items = {ex[1]: "x"}
+      and ex[14] in why5 and "nothing left to run" not in why5, why5)
+    d6 = drv("--sweep-items", f"{ex[14]},{ex[15]}")
+    d6.intervals = {ex[14]: [(0, L.EXH)]}
+    d6.disabled_items = {ex[15]: "x"}
     why6, cause6 = d6.why_no_wave(d6.quick_items(q, 0))
     c("empty wave, one covered and one disabled: NOT finished, and both causes are named",
       cause6 == "blocked" and "1 covered" in why6 and "1 disabled" in why6, why6)
     d7 = drv("--sweep-items", ",".join(ex))
-    old = ["sqrt32-rne", "rint32-rne", "div32-rne", "nextup32"]
+    old = ["sqrt32-rne", "rint32-rne", "div32-rne", "rint64-rne"]
     why7, cause7 = d7.why_no_wave(old)
     c("empty wave, the case of 2026-10-19: quick's own four planned with --sweep-items naming 22 others: every one is "
       "outside --sweep-items, NOT finished, and nothing is called covered",
@@ -744,6 +784,18 @@ def quick_checks(c, mod, tmp: str, imgs: dict) -> None:
         d10.sweep_phase(s, 20.0)
     c("quick: a single image whose first item cannot run goes on to its second (rint32-rne) in the same smoke",
       asked == [["rint32-rne"]], str(asked))
+    # a HOST item is the CPU pool's, not the card's: the card's wave never takes one, and the sentence for an empty wave names it so
+    # (not covered, not disabled, and not "a defect in this driver")
+    d11 = drv("--sweep-items", f"{ex[14]},{ex[0]}")
+    d11.intervals = {ex[14]: [(0, L.EXH)]}
+    why11, cause11 = d11.why_no_wave(d11.quick_items(q, 0))
+    c("empty wave, a covered tile item and a host item named: the host item is called the CPU pool's - not covered, not a defect - "
+      "and the campaign is NOT finished (the pool has work)", d11.quick_items(q, 0) == [] and cause11 == "blocked"
+      and "1 covered" in why11 and "1 a host item the CPU pool runs, not the card" in why11 and "defect" not in why11
+      and "nothing left to run" not in why11, why11)
+    d12 = drv("--sweep-items", f"{ex[0]},{ex[1]}")
+    c("only host items named: the card's wave is empty by design (quick_items gives none, plan_wave plans none), whatever is served",
+      d12.quick_items(q, 0) == [] and d12.plan_wave(q, 3600, 4, []) == [] and d12.plan_wave(q, 3600, 4, [ex[0]]) == [])
 
 
 def group_commands(src: str = HERE) -> list:
@@ -1080,13 +1132,16 @@ def scn_normal(env: Env, src: str = HERE) -> list:
     def c(n, ok, d=""):
         out.append((n, bool(ok), d))
 
-    R = run_driver(env, "normal", ["--quick"], src=src)
+    # the driver is started with CFT_SOAK_ARTIFACT in ITS OWN environment (a card job sets its own over it; a host job
+    # must not inherit it: the pool removes it from the child's environment)
+    R = run_driver(env, "normal", ["--quick"], src=src, extra_env={"CFT_SOAK_ARTIFACT": LEAKED_ARTIFACT})
     env.normal = R
     legs = R.legs()
+    cpu = [r for r in legs if r["image"] == "cpu"]
     c("normal: exit 0, every leg passed (quick is a check)", R.rc == 0, f"rc {R.rc}: {R.text[-300:]}")
-    c("normal: 38 leg records: 36 passes and the two named skips",
-      len(legs) == 38 and sum(r["status"] == "pass" for r in legs) == 36 and sum(r["status"] == "skipped" for r in legs) == 2,
-      f"{len(legs)} legs, {sorted({r['status'] for r in legs})}")
+    c("normal: 41 leg records: 39 passes (36 on the card's images, the 3 host slices on cpu) and the two named skips",
+      len(legs) == 41 and sum(r["status"] == "pass" for r in legs) == 39 and sum(r["status"] == "skipped" for r in legs) == 2
+      and len(cpu) == 3, f"{len(legs)} legs, {sorted({r['status'] for r in legs})}")
     skipped = [(r["leg"], r["image"]) for r in legs if r["status"] == "skipped"]
     c("normal: the skips are acceptance-rev8 on the single (no entry) and on the deep (a 40-minute compile uncached)",
       sorted(skipped) == [("acceptance-rev8", "deep"), ("acceptance-rev8", "single")] and all(r["reason"] for r in legs if r["status"] == "skipped"))
@@ -1103,27 +1158,45 @@ def scn_normal(env: Env, src: str = HERE) -> list:
     c("normal: each dt-i read the image's SHA-256 and tile count (the file's, 4/1/1)",
       len(ids) == 3 and all((r["extra"] or {}).get("image_sha256") == env.shas[r["image"]]
                             and (r["extra"] or {}).get("tiles") == (4 if r["image"] == "quad" else 1) for r in ids))
-    c("normal: every leg record has its image's hash, its times and a log", all(
-        r["image_sha256"] == env.shas[r["image"]] and r["start_epoch"] <= r["end_epoch"] and (r["status"] == "skipped" or r["log"]) for r in legs))
+    c("normal: every card leg record has its image's hash, its times and a log", all(
+        r["image_sha256"] == env.shas[r["image"]] and r["start_epoch"] <= r["end_epoch"] and (r["status"] == "skipped" or r["log"])
+        for r in legs if r["image"] != "cpu"))
     c("normal: a passing leg's log is gzipped and readable", all(
         r["log_kept"] == "gz" and os.path.exists(os.path.join(R.out, r["log"])) and "standin: would run" in log_text(R, r)
         for r in legs if r["status"] == "pass"))
     sw = R.legs(kind="sweep")
+    swc, swh = [r for r in sw if r["image"] != "cpu"], [r for r in sw if r["image"] == "cpu"]
     c("normal: the quad's sweep is four jobs on tiles 1 to 4; the others one job, no tile",
       sorted(r["tile"] for r in sw if r["image"] == "quad") == [1, 2, 3, 4] and all(r["tile"] is None for r in sw if r["image"] != "quad"))
     c("normal: every sweep job reports its cases (read from its verdict line) and its rate", all(
         (r["counts"] or {}).get("cases", 0) > 0 and (r["rate"] or {}).get("unit") == "cases/s" for r in sw))
     c("normal: nextup32's slice reports the 8 edge cases beyond its range, read, not assumed",
       [(r["counts"] or {}).get("cases", 0) - (r["sweep"]["hi"] - r["sweep"]["lo"]) for r in sw if r["sweep"]["item"] == "nextup32"] == [8])
-    c("normal: every sweep job soaked the DEVICE (the stand-in prints the line only when CFT_SOAK_ARTIFACT is set)",
-      all("soaking the DEVICE backend: " + env.imgs[r["image"]] in log_text(R, r) for r in sw))
+    c("normal: every sweep job on the card's images soaked the DEVICE (the stand-in prints the line only when CFT_SOAK_ARTIFACT is "
+      "set), and NONE of them is a host item: the card's sweep picked tile items only",
+      all("soaking the DEVICE backend: " + env.imgs[r["image"]] in log_text(R, r) for r in swc)
+      and {r["sweep"]["reach"] for r in swc} == {"tile"}, str(sorted({r["sweep"]["item"] for r in swc})))
+    c("normal: the host pool ran quick's three host items once each, as CPU jobs: image cpu, no tile, no image hash, reach host, "
+      "each recording the worker, the host and the tools' build id",
+      sorted(r["sweep"]["item"] for r in swh) == ["conv32to64-all", "nextup32", "rem32"]
+      and all(r["tile"] is None and r["image_sha256"] is None and r["sweep"]["reach"] == "host" and r["kind"] == "sweep"
+              and set(r["sweep"]["pool"]) == {"worker", "host", "build_id"} for r in swh), str([r["sweep"] for r in swh][:1]))
+    c("normal: no host job named the card although the driver's own environment did: each said 'soaking the software backend', "
+      "never DEVICE, and was handed neither CFT_SOAK_ARTIFACT nor CFT_XRT_TILES (the stand-in prints what it was given)",
+      len(swh) == 3 and all("soaking the software backend" in log_text(R, r) and "DEVICE" not in log_text(R, r)
+                            and "standin: env CFT_SOAK_ARTIFACT=<unset> CFT_XRT_TILES=<unset>" in log_text(R, r) for r in swh),
+      str([log_text(R, r)[:400] for r in swh][:1]))
+    c("normal: a card job is handed its own image and its tile, over the leaked variable",
+      len(swc) >= 1 and all(f"standin: env CFT_SOAK_ARTIFACT={env.imgs[r['image']]} CFT_XRT_TILES={r['tile'] or '<unset>'}" in log_text(R, r)
+                            for r in swc), f"{len(swc)} card sweep jobs")
     r8 = R.legs("acceptance-rev8", "quad")
     t8 = log_text(R, r8[0]) if r8 else ""
     c("normal: the quad's revision-8 leg ran phi4_extended_fp64 and one routine entry, naming --lib (the stand-in prints "
       "the command it was given)", len(r8) == 1 and r8[0]["status"] == "pass"
       and "--only phi4_extended_fp64,lotkavolterra-rk4-tangent-fp64" in t8 and " --lib " in t8, t8[:300])
-    c("normal: status.txt exists and names the legs, the card, the sweep and the deadline",
-      all(k in open(os.path.join(R.out, "status.txt")).read() for k in ("legs", "card ", "sweep ", "deadline", "FINISHED: quick_done")))
+    c("normal: status.txt exists and names the legs, the card, the sweep, the host pool and the deadline",
+      all(k in open(os.path.join(R.out, "status.txt")).read() for k in ("legs", "card ", "sweep ", "hostpool   3 worker(s)",
+                                                                          "deadline", "FINISHED: quick_done")))
     c("normal: metrics.jsonl lines are whole JSON, one per record (read_records finds none bad)",
       L.read_records(os.path.join(R.out, "metrics.jsonl"))[1:] == (False, []))
     if POSIX:
@@ -1299,7 +1372,7 @@ def scn_rotation(env: Env, src: str = HERE) -> list:
 
 def scn_diskfloor(env: Env, src: str = HERE) -> list:
     R = run_driver(env, "disk", ["--quick", "--legs", "api-test,dt-i", "--disk-floor-gb", "1000000000"], src=src, cap=60)
-    return [("disk floor: below the floor the driver stops before any leg, exit 3, reason disk_floor",
+    return [("disk floor: below the floor the driver stops before any leg - not a host slice either - exit 3, reason disk_floor",
              R.rc == 3 and not R.legs() and (R.last("run_end") or {}).get("reason") == "disk_floor", f"rc {R.rc} legs {len(R.legs())}"),
             ("disk floor: it says which filesystem and how much, in STOPPED.txt",
              os.path.exists(os.path.join(R.out, "STOPPED.txt"))
@@ -1514,10 +1587,14 @@ def scn_sweep_all(env: Env, src: str = HERE) -> list:
                     "cvtfrom32-all-rne": "cvtfrom32-all", "scaleb32-wide-rdn": "scaleb32-wide"}[n]
         c(f"sweep all {n}: every record says its reach ({host[n]}) and the tool's job word ({job_word})",
           bool(mine) and all(dg(x, "sweep", "reach") == host[n] and dg(x, "sweep", "op") == job_word for x in mine))
-    c("sweep all: the first slice of each item is the probe size and the later ones are whole 2^20 atoms, capped at 2^28",
-      all((lambda sl: bool(sl) and sl[0]["sweep"]["lo"] == 0 and sl[0]["sweep"]["hi"] == 1 << 20
-           and all((x["sweep"]["hi"] - x["sweep"]["lo"]) % (1 << 20) == 0 and (x["sweep"]["hi"] - x["sweep"]["lo"]) <= 1 << 28 for x in sl))
-          (sorted((x for x in legs if x["sweep"]["item"] == n), key=lambda x: x["sweep"]["lo"])) for n in names))
+    c("sweep all: the first slice of each item is the probe size and the later ones are whole 2^20 atoms, capped at 2^28 on the "
+      "card and at 2^36 for a host job",
+      all((lambda sl, cap: bool(sl) and sl[0]["sweep"]["lo"] == 0 and sl[0]["sweep"]["hi"] == 1 << 20
+           and all((x["sweep"]["hi"] - x["sweep"]["lo"]) % (1 << 20) == 0 and (x["sweep"]["hi"] - x["sweep"]["lo"]) <= cap for x in sl))
+          (sorted((x for x in legs if x["sweep"]["item"] == n), key=lambda x: x["sweep"]["lo"]),
+           1 << 36 if host[n] == "host" else 1 << 28) for n in names))
+    c("sweep all: the three host items ran on the pool (image cpu) and the one tile item on the card (the quad)",
+      all({x["image"] for x in legs if x["sweep"]["item"] == n} == ({"cpu"} if host[n] == "host" else {"quad"}) for n in names))
     st = open(os.path.join(r.out, "status.txt")).read()
     ex36 = 18 * EXH_T
     c("sweep all: status.txt says what the tile has seen and what it has not, on a line of its own that begins 'reach': one tile "
@@ -1540,7 +1617,9 @@ def scn_sweep_all(env: Env, src: str = HERE) -> list:
 
 def scn_sweep_short(env: Env, src: str, base: list) -> list:
     """B: a slice the tool ran one encoding or one case short is parse_error, by the rule written for it, not covered,
-    and served again."""
+    and served again. Three of the items are HOST items, which the pool serves (image cpu), and one is a TILE item that has
+    a cover spec (scaleb32-wide), which the card serves: the two paths each hold a slice to what it covered, so each is
+    shown here, and a plant of either is caught by its own item."""
     out: list = []
 
     def c(n, ok, d=""):
@@ -1549,8 +1628,11 @@ def scn_sweep_short(env: Env, src: str, base: list) -> list:
     sc = [{"leg": "soak", "op": "cvtto32-all", "nth": [1], "do": "short"},
           {"leg": "soak", "op": "cvtto32-all", "nth": [2], "do": "shortcase"},
           {"leg": "soak", "op": "conv32to64-all", "nth": [1], "do": "shortcase"},
-          {"leg": "soak", "op": "cvtfrom64-all", "nth": [1], "do": "short"}]
-    bn = ["cvtto32-all-rne", "conv32to64-all", "cvtfrom64-all-rne"]
+          {"leg": "soak", "op": "cvtfrom64-all", "nth": [1], "do": "short"},
+          {"leg": "soak", "op": "scaleb32-wide", "nth": [1], "do": "short"},
+          {"leg": "soak", "op": "scaleb32-wide", "nth": [2], "do": "shortcase"},
+          {"leg": "soak", "op": "scaleb32-wide", "nth": [3], "do": "badenc"}]
+    bn = ["cvtto32-all-rne", "conv32to64-all", "cvtfrom64-all-rne", "scaleb32-wide-rne"]
     r2 = start_driver(env, "sweepshort", ["--until", until(120), "--sweep-items", ",".join(bn)] + base, sc, src=src,
                       to_file=True)
 
@@ -1561,7 +1643,8 @@ def scn_sweep_short(env: Env, src: str, base: list) -> list:
     stop_run(r2)
     r2.finish(60)
     for n, want in (("cvtto32-all-rne", ["encodings where the slice has", "checks where"]),
-                    ("conv32to64-all", ["cases where the slice has"]), ("cvtfrom64-all-rne", ["cases where the slice has"])):
+                    ("conv32to64-all", ["cases where the slice has"]), ("cvtfrom64-all-rne", ["cases where the slice has"]),
+                    ("scaleb32-wide-rne", ["cases where the slice has", "cases where the slice has", "encodings where the slice has"])):
         mine = sorted((x for x in r2.legs(kind="sweep") if x["sweep"]["item"] == n), key=lambda x: x["start_epoch"])
         k = len(want)
         c(f"sweep short {n}: the first {k} slice(s) came back short and were refused as parse_error, by the rule written for each "
@@ -1570,7 +1653,8 @@ def scn_sweep_short(env: Env, src: str, base: list) -> list:
                                          for x, w in zip(mine[:k], want)), str([(x["status"], x["reason"]) for x in mine[:k + 1]]))
         c(f"sweep short {n}: the same slice [0, 2^20) was served again each time, and then passed",
           got and all((x["sweep"]["lo"], x["sweep"]["hi"]) == (0, 1 << 20) for x in mine[:k + 1]) and mine[k]["status"] == "pass"
-          and mine[k]["counts"]["encodings"] == 1 << 20, str([(x["sweep"]["lo"], x["sweep"]["hi"]) for x in mine[:k + 1]]))
+          and mine[k]["counts"]["encodings"] == 1 << 20,
+          f"got {got}; " + str([(x["sweep"]["lo"], x["sweep"]["hi"], x["status"], (x["reason"] or "")[:60]) for x in mine[:k + 1]]))
         iv, served_n, _cases, _seeds, _dis = L.sweep_coverage(r2.recs)
         c(f"sweep short {n}: the refused slices are not covered: the coverage the records give starts with the passing slice "
           f"and counts only passing slices", (iv.get(n) or [(None, None)])[0][0] == 0
@@ -1964,9 +2048,9 @@ def scn_buildreal(env: Env, src: str = HERE) -> list:
 
 # a defect in the driver, injected into a copy: its leg tally raises once, on the third pass. The driver must record
 # it (driver_error, with its traceback) and go on, as an unattended run has to.
-INJECT = [("card_stress.py", "    def tally(self, image: str, status: str) -> None:\n        self.counts[status] = self.counts.get(status, 0) + 1\n",
+INJECT = [("card_stress.py", "    def tally(self, image: str, status: str) -> None:\n        with self.tally_lock:",
            "    def tally(self, image: str, status: str) -> None:\n        if status == 'pass' and self.counts.get('pass', 0) == 2 and not getattr(self, '_boom', False):\n"
-           "            self._boom = True\n            raise RuntimeError('injected fault')\n        self.counts[status] = self.counts.get(status, 0) + 1\n")]
+           "            self._boom = True\n            raise RuntimeError('injected fault')\n        with self.tally_lock:")]
 
 
 def scn_internal_error(env: Env, src: str = HERE) -> list:
@@ -2099,7 +2183,7 @@ def scn_quick_sweep(env: Env, src: str = HERE) -> list:
 
     named = exhaustive_conversion_items(L)[::-1]            # reversed: "the order named" is not the catalog's order
     R = run_driver(env, "quicksweep", ["--quick", "--legs", "api-test", "--sweep-items", ",".join(named)], src=src, cap=150)
-    sw = sorted(R.legs(kind="sweep"), key=lambda x: (x["start_epoch"], x["tile"] or 0))
+    sw = sorted((x for x in R.legs(kind="sweep") if x["image"] != "cpu"), key=lambda x: (x["start_epoch"], x["tile"] or 0))
     quad = sorted((x for x in sw if x["image"] == "quad"), key=lambda x: x["tile"] or 0)
     names_of = lambda im: [x["sweep"]["item"] for x in sw if x["image"] == im]
     c("quick sweep: with --sweep-items naming 22 items none of which is quick's own, the quad's wave is the first four named, "
@@ -2107,9 +2191,15 @@ def scn_quick_sweep(env: Env, src: str = HERE) -> list:
       str([(x["tile"], x["sweep"]["item"]) for x in quad]))
     c("quick sweep: the single and then the deep take one item a wave, the next two named each, not the first again",
       names_of("single") == named[4:6] and names_of("deep") == named[6:8], f"{names_of('single')} {names_of('deep')}")
-    c("quick sweep: all eight slices passed, each of quick's own size (2^18 encodings), and the smoke exits 0",
+    host = [x for x in R.legs(kind="sweep") if x["image"] == "cpu"]
+    c("quick sweep: all eight card slices passed, each of quick's own size (2^18 encodings), and the smoke exits 0",
       len(sw) == 8 and all(x["status"] == "pass" and x["sweep"]["hi"] - x["sweep"]["lo"] == 1 << 18 for x in sw) and R.rc == 0,
       f"rc {R.rc}, {len(sw)} slices, {sorted({x['status'] for x in sw})}")
+    c("quick sweep: and the 14 host items among the 22 named were each served once by the pool, as CPU jobs (the card was asked "
+      "for none of them), every slice passed and the file holds every one",
+      sorted(x["sweep"]["item"] for x in host) == sorted(n for n in named if n not in {x["sweep"]["item"] for x in sw})
+      and len(host) == 14 and all(x["status"] == "pass" and x["tile"] is None for x in host)
+      and len({x["sweep"]["item"] for x in host} & {x["sweep"]["item"] for x in sw}) == 0, f"{len(host)} host slices")
     c("quick sweep: no wave was empty (no sweep_empty event), and the log never says the campaign is finished",
       not R.events("sweep_empty") and "nothing left to run" not in R.text, str([e["detail"] for e in R.events("sweep_empty")][:2]))
     R2 = run_driver(env, "quickdisabled", ["--quick", "--legs", "api-test", "--sweep-items", "sqrt32-rne"],
@@ -2190,6 +2280,898 @@ def scn_report(env: Env, src: str = HERE) -> list:
     c("report: one leg changed to fail: the totals say pass one fewer and fail 1, and the failure is listed with its log path",
       f"{len(legs)} recorded; pass {n_pass - 1}, fail 1" in p2.stdout and "the-planted-failure.log" in p2.stdout
       and "the-planted-failure.log" not in txt, p2.stdout[p2.stdout.find("== TOTALS"):][:300])
+    return out
+
+
+# ---------------------------------------------------------------------------------------
+# parcel DR2 (2026-10-20): the host pool, the seeds, and coverage by tree
+# ---------------------------------------------------------------------------------------
+
+@contextlib.contextmanager
+def lib_from(src: str):
+    """card_stress_lib as the copy of the code under test in `src` has it (a plant's own, not the cached real one)."""
+    saved = sys.modules.pop("card_stress_lib", None)
+    sys.path.insert(0, src)
+    try:
+        yield importlib.import_module("card_stress_lib")
+    finally:
+        sys.path.remove(src)
+        sys.modules.pop("card_stress_lib", None)
+        if saved is not None:
+            sys.modules["card_stress_lib"] = saved
+
+
+def git_out(*args) -> "str | None":
+    """git's output at ROOT, or None: the test's own reading of the facts the driver records, by its own commands."""
+    try:
+        p = subprocess.run(["git", "-C", ROOT] + list(args), capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return p.stdout.strip() if p.returncode == 0 else None
+
+
+# the host-pool scenarios: a non-quick run whose card sweep has nothing to do (the items named are host items), a card leg
+# that is quick, and a stand-in that runs a soak at 4 M cases a second
+POOL_BASE = ["--legs", "api-test", "--weights", "quad=1,single=0,deep=0", "--sweep-minutes", "quad=5,single=5,deep=5",
+             "--sweep-slice-seconds", "2", "--min-slice-seconds", "3", "--probe-cases", str(1 << 20), "--kill-after", "2"]
+POOL_RATE = {"CFT_STANDIN_SOAK_RATE": "4000000"}
+
+
+def pool_unit_checks(src: str = HERE) -> list:
+    """In-process, on a Driver that is never run (parcel DR2). Over a whole rotation of the catalog the card's wave plans TILE
+    items and never a HOST one, and the pool plans HOST items and never a tile one; two workers never take one item; and the
+    seed guard refuses a slice whose tool state another (item, n) already started from."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    sys.path.insert(0, src)
+    saved_lib = sys.modules.pop("card_stress_lib", None) if os.path.abspath(src) != os.path.abspath(HERE) else None
+    tmp = tempfile.mkdtemp(prefix="cs-pool-")
+    try:
+        mod = importlib.import_module("card_stress")
+        L2 = mod.L
+        d = mod.Driver(mod.parse_args(["--out", os.path.join(tmp, "o"), "--dry-run", "--root", ROOT]))
+        d.items = L2.sweep_items()
+        q = mod.Image("quad", "/box/quad.xclbin", 4, "u50-rev8-quad", None)
+        card, pool = {}, {}
+        for _ in range(24):                                   # 96 card jobs: every one of the 43 tile items about twice
+            for j in d.plan_wave(q, 3600, 4):
+                card[j["item"].name] = j["item"].reach
+                d.served[j["item"].name] = d.served.get(j["item"].name, 0) + 1
+        d.served = {}
+        for _ in range(94):                                   # two turns of the 47 host items
+            j = d.pool_plan()
+            if j is None:
+                break
+            pool[j["item"].name] = (j["item"].reach, j["sweep"]["reach"], j["tile"])
+            d.pool_busy.pop(j["item"].name, None)             # the slice is done
+            d.served[j["item"].name] = d.served.get(j["item"].name, 0) + 1
+        c("pool: over a whole rotation the card's waves plan the 43 TILE items and not one host item",
+          len(card) == 43 and set(card.values()) == {"tile"}, f"{len(card)} items, reaches {sorted(set(card.values()))}")
+        c("pool: and the pool's slices are the 47 HOST items and not one tile item, no tile pinned, each record saying reach host",
+          len(pool) == 47 and {v[0] for v in pool.values()} == {"host"} and {v[1] for v in pool.values()} == {"host"}
+          and {v[2] for v in pool.values()} == {None}, f"{len(pool)} items, {sorted({v[0] for v in pool.values()})}")
+        d.pool_busy.clear()
+        j1, j2 = d.pool_plan(), d.pool_plan()
+        c("pool: two workers never take one item at once (the second plan, with the first still in flight, is another item)",
+          j1 is not None and j2 is not None and j1["item"].name != j2["item"].name
+          and set(d.pool_busy) == {j1["item"].name, j2["item"].name})
+        # the seed guard
+        it = next(i for i in d.items if i.kind == "random" and i.reach == L2.TILE)
+        st = it.seed_for(0) | 1
+        d.seed_n = {}
+        d.seed_states = {st: ("some-other-item", 7)}
+        try:
+            d.plan_wave(q, 3600, 1, [it.name])
+            raised = None
+        except RuntimeError as e:
+            raised = str(e)
+        c("seeds: a slice whose tool state another (item, n) already started from is refused, by name, naming both",
+          raised is not None and it.name in raised and "some-other-item" in raised and "slice 7" in raised, str(raised))
+        d.seed_states = {st: (it.name, 0)}
+        try:
+            again = len(d.plan_wave(q, 3600, 1, [it.name])) == 1
+        except RuntimeError:
+            again = False
+        c("seeds: the same item and n again (a slice served again after a failure) is not refused", again)
+        # the run's rules reach a worker: started below the disk floor (above any disk's free space) it plans nothing and returns at once
+        d3 = mod.Driver(mod.parse_args(["--out", os.path.join(tmp, "o3"), "--dry-run", "--root", ROOT, "--disk-floor-gb", "1000000000"]))
+        os.makedirs(d3.out, exist_ok=True)     # the floor is read from the filesystem the run's directory is on
+        d3.items = L2.sweep_items()
+        t3 = threading.Thread(target=d3.pool_worker, args=(1,), daemon=True)
+        t3.start()
+        t3.join(5)
+        returned = not t3.is_alive()
+        d3.pool_stop.set()                     # (only a worker that did not return needs this)
+        t3.join(10)
+        c("pool: a worker started below the disk floor plans nothing and returns at once",
+          returned and not d3.pool_busy and not d3.served and d3.pool_served == 0, f"returned {returned}")
+    except Exception as e:                     # a driver that cannot be driven this way is a red check, not a crash
+        c("pool: the driver could be driven in-process", False, repr(e))
+    finally:
+        sys.path.remove(src)
+        sys.modules.pop("card_stress", None)
+        if saved_lib is not None:
+            sys.modules["card_stress_lib"] = saved_lib
+        shutil.rmtree(tmp, ignore_errors=True)
+    return out
+
+
+def cpu_parse_checks(src: str = HERE) -> list:
+    """parse_soak(cpu=True), the parser of a host-pool job, on REAL logs of the software backend (hw/card_stress_fixtures/: the same
+    tools, made on the path the pool runs, with no CFT_SOAK_ARTIFACT): they pass; the same log whose backend line names a DEVICE
+    is refused by name (a CPU job that opened the card); and so is one that names no backend."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    index = {}
+    with open(os.path.join(FIX, "INDEX.txt"), "r", encoding="utf-8") as fh:
+        for ln in fh:
+            if ln.strip() and not ln.startswith("#"):
+                nm, rc, cmd = ln.rstrip("\n").split("\t", 2)
+                index[nm] = (int(rc), cmd)
+    with lib_from(src) as L2:
+        items = {it.name: it for it in L2.sweep_items()}
+
+        def refusal(fn):
+            try:
+                fn()
+            except L2.VerdictError as e:
+                return str(e)
+            return None
+        for nm, iname in (("c5-nextup32.txt", "nextup32"), ("c5x-conv32to64-all.txt", "conv32to64-all"),
+                          ("c5x-cvtto32-all.txt", "cvtto32-all-rup")):
+            it = items[iname]
+            op, lo, hi, mode = fixture_job(index, nm)
+            t, rc = fixture(nm), index[nm][0]
+            exp, cover = it.expected_cases(lo, hi), it.cover_spec(lo, hi)
+
+            def parse(text, it=it, exp=exp, cover=cover, rc=rc):
+                return L2.parse_soak(text, rc, it.op, it.verdict_mode, None, exp, cover, cpu=True)
+            why = refusal(lambda: parse(t))
+            dev = refusal(lambda: parse(t.replace("soaking the software backend", "soaking the DEVICE backend: /box/quad.xclbin")))
+            none = refusal(lambda: parse(t.replace("soaking the software backend\n", "")))
+            c(f"cpu parser {nm}: a real log of the software backend passes as a host job's, and a log that names a DEVICE is refused "
+              f"as a CPU job that opened the card, one that names no backend is refused",
+              "soaking the software backend" in t and why is None and dev is not None and dev.startswith(L2.CPU_OPENED_CARD)
+              and none is not None and "software backend" in none, f"{why} | {dev} | {none}")
+    return out
+
+
+def append_lock_checks(src: str = HERE) -> list:
+    """The metrics file has one writer at a time in this process (parcel DR2). Eight threads - the host pool's workers, the card's
+    thread, the telemetry sampler - append at one instant, over and over. THE CAUSE, on every platform: the write is slowed by 5 ms
+    inside, and no two threads may ever be inside it together (a lock held across the write makes this true; without it all eight
+    are). THE SYMPTOM is what the file shows without the lock, and the two kinds of host show it differently (MEASURED with this
+    check's own shape, 60 trials of eight threads by twelve rounds, the lock replaced by a no-op). Windows, whose emulation of
+    O_APPEND seeks to the end and then writes, lets two writers at once overwrite each other: records were lost in 60 trials of 60
+    (2,841 of 5,760 records in all; a dry run lost a leg record that way when the pool's workers finished together) and the file's
+    order was not its epochs' order in 7 (Windows 11, Python 3.12.9). POSIX appends atomically, so no record is lost or torn, but
+    the epoch is stamped before the write, so without the lock the file's order stops being its epochs' order: in 53 trials of 60
+    (WSL2, Ubuntu 22.04, Python 3.10.12; 12 of 12 for verifier-VDR2). With the lock all of it is 0 of 60 on both. The check asks for
+    the three things together - every record in the file, none torn, in the order of its epochs - and is red without the lock on both
+    hosts (every time on Windows, most times on POSIX), which is why the cause is checked as well. An earlier version of this
+    docstring said that only Windows shows the symptom, and gave 4 damaged trials in 60 with no record lost: the script that
+    measured that gave both of its passes' files one name, so the second pass appended to the first's and the duplicates hid the loss."""
+    out: list = []
+    tmp = tempfile.mkdtemp(prefix="cs-app-")
+    real_write = os.write
+    try:
+        with lib_from(src) as L2:
+            n_thr, rounds = 8, 12
+            state = {"in": 0, "max": 0}
+            mu = threading.Lock()
+
+            def slow_write(fd, data):
+                with mu:
+                    state["in"] += 1
+                    state["max"] = max(state["max"], state["in"])
+                time.sleep(0.005)
+                try:
+                    return real_write(fd, data)
+                finally:
+                    with mu:
+                        state["in"] -= 1
+
+            def run(path):
+                bar = threading.Barrier(n_thr)
+
+                def work(k):
+                    for i in range(rounds):
+                        bar.wait()
+                        L2.append_record(path, {"type": "t", "k": k, "i": i})
+                ts = [threading.Thread(target=work, args=(k,)) for k in range(n_thr)]
+                for t in ts:
+                    t.start()
+                for t in ts:
+                    t.join(120)
+
+            os.write = slow_write
+            try:
+                run(os.path.join(tmp, "slow.jsonl"))
+            finally:
+                os.write = real_write
+            out.append(("pool: no two threads are ever inside the metrics file's write at once (eight threads, twelve rounds, the write "
+                        "slowed to 5 ms: the most at once was one)", state["max"] == 1, f"{state['max']} writers at once"))
+            path = os.path.join(tmp, "metrics.jsonl")
+            run(path)
+            recs, partial, bad = L2.read_records(path)
+            got = sorted((r["k"], r["i"]) for r in recs)
+            ep = [r["epoch"] for r in recs]
+            out.append(("pool: records written by eight threads at one instant are all in the file, none torn, and in the order of their epochs",
+                        got == [(k, i) for k in range(n_thr) for i in range(rounds)] and not bad and not partial and ep == sorted(ep),
+                        f"{len(recs)} of {n_thr * rounds} records, bad {bad}"))
+    finally:
+        os.write = real_write
+        shutil.rmtree(tmp, ignore_errors=True)
+    return out
+
+
+def scn_pool_stop(env: Env, src: str = HERE) -> list:
+    """STOP and the deadline end host jobs. A host job is in flight (nextup32's first slice hangs for ever) and another
+    item's slices run all the while (logb32's, quick). A: STOP is touched during a card leg that takes 9 s. No host slice starts
+    after it; the run ends when the card leg has, not when the hung job would have; the hung job is terminated and recorded
+    as an EVENT and not as a slice (a killed slice recorded as a parse_error would count toward disabling its item). B: the
+    same with the deadline."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    base = POOL_BASE + ["--sweep-items", "nextup32,logb32", "--host-workers", "2"]
+    base[base.index("--legs") + 1] = "dt-full"
+    sc = [{"leg": "soak", "op": "nextup32", "nth": [1], "do": "hang"}, {"leg": "dt-full", "nth": [1], "do": "slow:9"}]
+    r = start_driver(env, "poolstop", ["--until", until(180)] + base, sc, src=src, extra_env=POOL_RATE)
+    log = os.path.join(r.out, "driver.log")
+    began = wait_for(lambda: os.path.exists(log) and "leg dt-full on quad starts" in open(log).read()
+                     and any(f.startswith("hang-soak-") for f in os.listdir(r.state)), 120)
+    time.sleep(2.0)
+    t_touch = time.time()
+    n_before = len([x for x in r.legs(kind="sweep") if x["image"] == "cpu"])
+    stop_run(r)
+    r.finish(120)
+    end = r.last("run_end") or {}
+    host = [x for x in r.legs(kind="sweep") if x["image"] == "cpu"]
+    pids = [int(open(os.path.join(r.state, f)).read()) for f in os.listdir(r.state) if f.startswith("hang-soak-")]
+    ab = [e for e in r.events("host_job_abandoned")]
+    c("pool stop: the host pool was working beside the card leg (logb32 slices recorded, nextup32's first hung) when STOP was touched",
+      began and n_before >= 2 and len(pids) == 1, f"began {began}, {n_before} host slices before, {len(pids)} hung")
+    c("pool stop: no host slice STARTED after STOP (a second of margin for a worker that had just passed its check)",
+      began and not [x for x in host if x["start_epoch"] > t_touch + 1.0],
+      str([(x["sweep"]["item"], round(x["start_epoch"] - t_touch, 1)) for x in host if x["start_epoch"] > t_touch + 1.0][:4]))
+    c("pool stop: the run ended by STOP (exit 0) when the card leg had, nine seconds long, plus the pool's grace and a margin",
+      r.rc == 0 and end.get("reason") == "stop_file" and end.get("epoch", 1e12) - t_touch <= 9 + 2 + 15,
+      f"rc {r.rc}, {end.get('reason')}, {end.get('epoch', 0) - t_touch:.1f} s after STOP")
+    c("pool stop: the hung host job was terminated (its process is gone) and is NOT a recorded slice: an event names it, no leg "
+      "of nextup32 exists, and the item was neither disabled nor quarantined",
+      bool(pids) and not any(pid_alive(p) for p in pids) and len(ab) == 1 and "nextup32" in ab[0]["detail"]
+      and not [x for x in host if x["sweep"]["item"] == "nextup32"]
+      and not r.events("item_disabled") and not r.events("quarantine"), f"{len(ab)} events, {[x['sweep']['item'] for x in host][:3]}")
+    # B: the deadline
+    sc2 = [{"leg": "soak", "op": "nextup32", "nth": [1], "do": "hang"}]
+    t0 = time.time()
+    deadline = t0 + 14
+    r2 = start_driver(env, "pooldeadline", ["--until", until(14)] + POOL_BASE + ["--sweep-items", "nextup32,logb32", "--host-workers", "2"],
+                      sc2, src=src, extra_env=POOL_RATE)
+    r2.finish(120)
+    end2 = r2.last("run_end") or {}
+    host2 = [x for x in r2.legs(kind="sweep") if x["image"] == "cpu"]
+    pids2 = [int(open(os.path.join(r2.state, f)).read()) for f in os.listdir(r2.state) if f.startswith("hang-soak-")]
+    c("pool deadline: the run ended at the deadline (exit 0), no host slice started after it, and the hung job was terminated "
+      "and recorded as an event and not as a slice",
+      r2.rc == 0 and end2.get("reason") == "deadline" and end2.get("epoch", 1e12) - deadline <= 20
+      and not [x for x in host2 if x["start_epoch"] > deadline + 1.0] and len(host2) >= 2
+      and len(pids2) == 1 and not any(pid_alive(p) for p in pids2) and len(r2.events("host_job_abandoned")) == 1
+      and not [x for x in host2 if x["sweep"]["item"] == "nextup32"],
+      f"rc {r2.rc}, {end2.get('reason')}, {end2.get('epoch', 0) - deadline:.1f} s past it, {len(host2)} host slices")
+    return out
+
+
+def git_in(repo, *args):
+    """git run in `repo` with its identity given on the command line, so that nobody's configuration is read for it or changed."""
+    return subprocess.run(["git", "-c", "user.name=card-stress-test", "-c", "user.email=card-stress-test@example.invalid",
+                           "-c", "commit.gpgsign=false", "-C", repo] + list(args), capture_output=True, text=True, timeout=60)
+
+
+# the files the driver's build step looks into at --root, for the marker strings that tell it a tree is not stale (a driver
+# started on a scratch repository without them ends at the build step, "build_failed")
+MARKER_FILES = ("host/tests/seq_check.py", "programs/acceptance.py", "hw/card-segrun.sh", "hw/card_stress.py")
+
+
+def make_scratch_repo(path, copy=()):
+    """A repository of its own with one commit (the files of `copy`, copied from this tree, or empty), for a test that moves
+    HEAD; None where git cannot make one."""
+    try:
+        os.makedirs(path, exist_ok=True)
+        if subprocess.run(["git", "init", "-q", path], capture_output=True, text=True, timeout=60).returncode != 0:
+            return None
+        for rel in copy:
+            os.makedirs(os.path.dirname(os.path.join(path, rel)), exist_ok=True)
+            shutil.copy(os.path.join(ROOT, rel), os.path.join(path, rel))
+        if copy and git_in(path, "add", "-A").returncode != 0:
+            return None
+        return path if git_in(path, "commit", "-q", "--allow-empty", "-m", "first").returncode == 0 else None
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def pool_tree_unit_checks(src: str = HERE) -> list:
+    """A moved tree stops the host pool's workers (parcel DR2, after verifier-VDR2's (b-1): the records said so and the workers asked
+    should_stop(git=False)). In-process, on Drivers that are never run, rooted in a scratch repository with the tree test switched on
+    (--check-tree-in-dry-run: a plain dry run has it off by design) whose HEAD this test moves. The main loop's test says tree_moved;
+    a worker started after the move plans nothing and returns at once, and has latched the same stop."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    tmp = tempfile.mkdtemp(prefix="cs-tree-")
+    repo = make_scratch_repo(os.path.join(tmp, "repo"))
+    if repo is None:
+        skip("pool tree (unit)", "git cannot make a scratch repository on this host")
+        rmtree_force(tmp)
+        return []
+    sys.path.insert(0, src)
+    saved_lib = sys.modules.pop("card_stress_lib", None) if os.path.abspath(src) != os.path.abspath(HERE) else None
+    try:
+        mod = importlib.import_module("card_stress")
+        L2 = mod.L
+
+        def driver(name, *extra):
+            d = mod.Driver(mod.parse_args(["--out", os.path.join(tmp, name), "--dry-run", "--root", repo] + list(extra)))
+            os.makedirs(d.out, exist_ok=True)
+            d.items = L2.sweep_items()
+            d.head = d.git_head()
+            return d
+        dm, dw, dp = driver("main", "--check-tree-in-dry-run"), driver("worker", "--check-tree-in-dry-run"), driver("plain")
+        before = [dm.should_stop(), dw.should_stop()]
+        moved = git_in(repo, "commit", "-q", "--allow-empty", "-m", "second").returncode == 0 and dm.git_head() != dm.head
+        sm = dm.should_stop()
+        t = threading.Thread(target=dw.pool_worker, args=(1,), daemon=True)
+        t.start()
+        t.join(5)
+        returned = not t.is_alive()
+        dw.pool_stop.set()                     # (only a worker that did not return needs this)
+        t.join(10)
+        sp = dp.should_stop()
+        c("pool tree: before HEAD moves no driver is told to stop (git is on, in a scratch repository, so the checks below can fail)",
+          before == [None, None] and bool(dm.head) and dm.tree_check and dw.tree_check, f"{before}, head {dm.head[:12]}")
+        c("pool tree: the main loop's test says tree_moved, exit 3, once HEAD has moved",
+          moved and sm is not None and sm.reason == "tree_moved" and sm.exit_code == 3, f"moved {moved}, {sm and (sm.reason, sm.exit_code)}")
+        c("pool tree: a worker started after HEAD moved plans nothing and returns at once, having latched the same stop (no host slice starts)",
+          returned and not dw.pool_busy and not dw.served and dw.pool_served == 0 and dw.tree_stop is not None
+          and dw.tree_stop.reason == "tree_moved", f"returned {returned}, busy {list(dw.pool_busy)}, latched {dw.tree_stop and dw.tree_stop.reason}")
+        c("pool tree: a plain --dry-run does not test the tree, by design (its --root may be a checkout somebody is committing to)",
+          sp is None and not dp.tree_check, f"{sp}")
+    except Exception as e:                     # a driver that cannot be driven this way is a red check, not a crash
+        c("pool tree: the driver could be driven in-process", False, repr(e))
+    finally:
+        sys.path.remove(src)
+        sys.modules.pop("card_stress", None)
+        if saved_lib is not None:
+            sys.modules["card_stress_lib"] = saved_lib
+        rmtree_force(tmp)
+    c("pool tree: the scratch repository is removed afterwards (git's object files are read-only, which keeps a plain rmtree from "
+      "removing it on Windows)", not os.path.exists(tmp), tmp)
+    return out
+
+
+def scn_pool_tree(env: Env, src: str = HERE) -> list:
+    """A moved tree stops the host pool, as a process (parcel DR2, after verifier-VDR2's (b-1)). git is ENABLED - a dry run has the tree
+    test off unless --check-tree-in-dry-run - and the driver's --root is a scratch repository whose HEAD this test moves while a card
+    leg of 12 s is in flight. The main loop looks at the tree only between legs, so in those seconds only a worker's own test can stop
+    the pool, which is running two quick host items all the while. After the commit no host slice may START; the run ends at the
+    leg's end by tree_moved (exit 3), recorded as the main loop records any stop (one event, run_end's reason)."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    repo = make_scratch_repo(os.path.join(env.tmp, "treerepo"), MARKER_FILES)
+    if repo is None:
+        skip("pool tree", "git cannot make a scratch repository on this host")
+        return []
+    base = POOL_BASE + ["--sweep-items", "logb32,class32", "--host-workers", "2", "--root", repo, "--check-tree-in-dry-run"]
+    base[base.index("--legs") + 1] = "dt-full"
+    sc = [{"leg": "dt-full", "nth": [1], "do": "slow:12"}]
+    r = start_driver(env, "pooltree", ["--until", until(180)] + base, sc, src=src, extra_env=POOL_RATE)
+    log = os.path.join(r.out, "driver.log")
+    began = wait_for(lambda: os.path.exists(log) and "leg dt-full on quad starts" in open(log).read()
+                     and len([x for x in r.legs(kind="sweep") if x["image"] == "cpu"]) >= 3, 120)
+    q = git_in(repo, "commit", "-q", "--allow-empty", "-m", "second")
+    t_move = time.time()
+    n_before = len([x for x in r.legs(kind="sweep") if x["image"] == "cpu"])
+    if not wait_for(lambda: r.proc.poll() is not None, 30):      # the run ends by itself within the leg's seconds; a defect must
+        stop_run(r)                                              # not make this wait for the deadline
+    r.finish(120)
+    end = r.last("run_end") or {}
+    host = [x for x in r.legs(kind="sweep") if x["image"] == "cpu"]
+    late = [x for x in host if x["start_epoch"] > t_move + 1.0]
+    ev = r.events("tree_moved")
+    c("pool tree: the pool was working beside the card's 12-second leg when HEAD moved (three host slices already recorded)",
+      began and q.returncode == 0 and n_before >= 3, f"began {began}, commit rc {q.returncode}, {n_before} host slices before")
+    c("pool tree: after HEAD moved no host slice STARTED (a second of margin for a worker that had just passed its check), though the "
+      "card's leg went on for seconds more",
+      began and not late, str([(x["sweep"]["item"], round(x["start_epoch"] - t_move, 1)) for x in late][:5]))
+    c("pool tree: the run ended by tree_moved at the main loop's next check, exit 3, recorded as it records any stop: one event "
+      "tree_moved and run_end's reason tree_moved",
+      r.rc == 3 and end.get("reason") == "tree_moved" and end.get("exit") == 3 and len(ev) == 1,
+      f"rc {r.rc}, run_end {end.get('reason')}, {len(ev)} events")
+    return out
+
+
+def scn_pool_failure(env: Env, src: str = HERE) -> list:
+    """A host job's failure is its item's, never the card's. Every nextup32 job prints the tool's 'no such device' and exits 2
+    (what makes a CARD leg no_device and counts toward stopping the run); logb32's first slice disagrees with the oracle.
+    --max-card-failures is 2, so the card's rule, applied to a host job, would stop this run in its second slice."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    sc = [{"leg": "soak", "op": "nextup32", "from": 1, "do": "nodevice"}, {"leg": "soak", "op": "logb32", "nth": [1], "do": "mismatch"}]
+    R = run_driver(env, "poolfail", ["--until", until(14)] + POOL_BASE + ["--sweep-items", "nextup32,logb32,class32", "--host-workers", "3",
+                                                                          "--max-card-failures", "2", "--quarantine-after", "2"],
+                   sc, src=src, cap=120, extra_env=POOL_RATE)
+    host = [x for x in R.legs(kind="sweep") if x["image"] == "cpu"]
+    nu = [x for x in host if x["sweep"]["item"] == "nextup32"]
+    lb = sorted((x for x in host if x["sweep"]["item"] == "logb32"), key=lambda x: x["start_epoch"])
+    st = open(os.path.join(R.out, "status.txt")).read()
+    c("pool failure: the run was not stopped by its host jobs failing: it ran to its deadline (exit 0, no STOPPED.txt), "
+      "though --max-card-failures is 2",
+      R.rc == 0 and (R.last("run_end") or {}).get("reason") == "deadline" and not os.path.exists(os.path.join(R.out, "STOPPED.txt")),
+      f"rc {R.rc}: {R.text[-200:]}")
+    c("pool failure: a host job that prints 'no such device' is a parse_error of ITS item - never no_device - three times, "
+      "and then the item is disabled, recorded, and the pool goes on with the others",
+      len(nu) == 3 and all(x["status"] == "parse_error" for x in nu) and len(R.events("item_disabled")) == 1
+      and "nextup32" in R.events("item_disabled")[0]["detail"] and len([x for x in host if x["status"] == "pass"]) >= 3,
+      str([(x["status"], x["reason"]) for x in nu][:3]))
+    c("pool failure: nor did it start the card's recovery ladder (no pause, no image switch), and the card's streak is 0",
+      not R.events("pause") and not R.events("recover_start") and not R.events("image_switch")
+      and re.search(r"^card\s+consecutive failures 0 of 2$", st, re.M) is not None, st[st.find("card "):][:80])
+    c("pool failure: a host job that disagrees with the oracle is a recorded disagreement (status fail, with its operands) and "
+      "the slice counts as covered; the next slice of the item passes",
+      len(lb) >= 2 and lb[0]["status"] == "fail" and lb[0]["disagreements"] and lb[1]["status"] == "pass"
+      and "disagreements 1" in st, str([(x["status"]) for x in lb][:3]))
+    api = R.legs("api-test")
+    c("pool failure: the card's own legs were not touched: there were api-test legs and every one passed",
+      len(api) >= 1 and all(x["status"] == "pass" for x in api), f"{len(api)} legs: {sorted({x['status'] for x in api})}")
+    return out
+
+
+def scn_pool_survives(env: Env, src: str = HERE) -> list:
+    """A failure in the CARD's cycle must not take the host pool's jobs with it. The cycle's tally raises once (the fault of
+    scn_internal_error: the driver records driver_error, terminates what the card side started, and goes on); a host job is in
+    flight meanwhile (nextup32's first slice takes 9 s). It must run to its end and be recorded as a pass, not be killed with the
+    card's children and recorded as a failure of its item."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    if src == HERE:
+        src = make_plant_copy(env, "inject-pool", INJECT)
+    base = list(POOL_BASE)
+    base[base.index("--legs") + 1] = "api-test,dt-i"
+    R = run_driver(env, "poolsurvive", ["--until", until(26)] + base + ["--sweep-items", "nextup32", "--host-workers", "1"],
+                   [{"leg": "soak", "op": "nextup32", "nth": [1], "do": "slow:9"}], src=src, cap=120, extra_env=POOL_RATE)
+    first = sorted((x for x in R.legs(kind="sweep") if x["image"] == "cpu"), key=lambda x: x["start_epoch"])[:1]
+    err = R.events("driver_error")
+    c("pool survives: the card's cycle failed (one driver_error, its traceback recorded) while a host job was in flight",
+      len(err) == 1 and "injected fault" in err[0]["detail"] and bool(first) and first[0]["start_epoch"] < err[0]["epoch"] < first[0]["end_epoch"],
+      f"{len(err)} driver_error events; first host slice {[(x['start_epoch'], x['end_epoch']) for x in first]}")
+    c("pool survives: the host job in flight when the card's cycle failed ran to its end and is a recorded PASS (not killed with the "
+      "card's children and recorded as a failure of its item), and the run went on to its deadline",
+      bool(first) and first[0]["status"] == "pass" and not first[0]["killed"] and first[0]["duration_s"] >= 8.5
+      and R.rc == 0 and (R.last("run_end") or {}).get("reason") == "deadline" and not R.events("item_disabled"),
+      f"rc {R.rc}: {first[:1]}")
+    return out
+
+
+def scn_pool_nice(env: Env, src: str = HERE) -> list:
+    """POSIX: a host job is niced and under `timeout` like every leg (the stand-in prints how it was started). Skipped by name on
+    Windows, which has neither."""
+    if not POSIX:
+        skip("pool nice", "needs POSIX (`nice` and `timeout`)")
+        return []
+    R = run_driver(env, "poolnice", ["--quick", "--legs", "api-test", "--sweep-items", "nextup32,rem32", "--host-workers", "2"],
+                   src=src, cap=120)
+    host = [x for x in R.legs(kind="sweep") if x["image"] == "cpu"]
+    want = min(19, os.nice(0) + 10)          # `nice -n 10` adds to the caller's niceness
+    return [(f"pool nice (POSIX): a host job runs at `nice -n 10` (this test's own niceness {os.nice(0)} + 10, at most 19: {want}) and under "
+             f"`timeout --signal=TERM -k 2 <secs>s`, like every leg",
+             len(host) == 2 and all(f"standin: nice {want}" in log_text(R, x)
+                                    and re.search(r"standin: parent: timeout --signal=TERM -k 2 \d+s ", log_text(R, x)) is not None for x in host),
+             str([log_text(R, x)[:300] for x in host][:1]))]
+
+
+def scn_pool_resume(env: Env, src: str = HERE) -> list:
+    """--resume holds for the pool: a run stopped after some host slices is continued from the records alone - the next slice is
+    the first uncovered one, nothing is run twice, and the rate measured on the cpu image is rebuilt (the first slice is not the
+    probe size again)."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    args = POOL_BASE + ["--sweep-items", "nextup32", "--host-workers", "1", "--sweep-slice-seconds", "4"]
+    A = start_driver(env, "poolresA", ["--until", until(120)] + args, src=src, extra_env=POOL_RATE)
+    wait_for(lambda: len([x for x in A.legs(kind="sweep", status="pass") if x["image"] == "cpu"]) >= 3, 90)
+    stop_run(A)
+    A.finish(60)
+    passA = [x for x in A.legs(kind="sweep", status="pass") if x["image"] == "cpu"]
+    covA = max((x["sweep"]["hi"] for x in passA), default=0)
+    c("pool resume: run A served at least three host slices of nextup32, the first the probe size, from 0",
+      len(passA) >= 3 and passA[0]["sweep"]["lo"] == 0 and passA[0]["sweep"]["hi"] == 1 << 20, f"{len(passA)} slices")
+    if len(passA) < 3:
+        return out
+    os.remove(os.path.join(A.out, "STOP"))               # a stale STOP would refuse the resume, by design
+    env.n += 1
+    cmd = [sys.executable, "-B", "-I", os.path.join(src, "card_stress.py"), "--root", ROOT, "--out", A.out, "--resume", "--dry-run",
+           "--telemetry-seconds", "0", "--disk-extra", "", "--retry-pause", "1", "--guard-poll", "1", "--until", until(14)] + args
+    for nm, pth in env.imgs.items():
+        cmd += ["--image", f"{nm}={pth}"]
+    e = dict(os.environ)
+    e.update(POOL_RATE)
+    e["CFT_STANDIN_STATE"] = A.state
+    e.pop("CFT_STANDIN_SCENARIO", None)
+    p = subprocess.run(cmd, capture_output=True, text=True, env=e, cwd=ROOT, timeout=150)
+    R = Run(A.out)
+    recs = R.recs
+    second = [i for i, x in enumerate(recs) if x.get("type") == "run_start"][1]
+    after = [x for x in recs[second:] if x.get("type") == "leg" and x["kind"] == "sweep" and x["image"] == "cpu"]
+    c("pool resume: the resumed run's first host slice starts exactly where run A's coverage ended, and passes",
+      p.returncode == 0 and bool(after) and after[0]["status"] == "pass" and after[0]["sweep"]["lo"] == covA,
+      f"rc {p.returncode}; A covered to {covA}; B's first {after[0]['sweep'] if after else None}")
+    allpass = [x for x in recs if x.get("type") == "leg" and x["kind"] == "sweep" and x["image"] == "cpu" and x["status"] == "pass"]
+    iv = [(x["sweep"]["lo"], x["sweep"]["hi"]) for x in allpass]
+    merged = L.merge_intervals(iv)
+    c("pool resume: after it the passing host slices are one contiguous range from 0, longer than A's, and no range was run twice",
+      len(merged) == 1 and merged[0][0] == 0 and merged[0][1] > covA and sum(h - l for l, h in iv) == merged[0][1], str(merged[:3]))
+    c("pool resume: the rate measured on cpu was rebuilt from the records (B's first slice is not the probe size again)",
+      bool(after) and after[0]["sweep"]["hi"] - after[0]["sweep"]["lo"] != 1 << 20, str([x["sweep"]["hi"] - x["sweep"]["lo"] for x in after][:3]))
+    return out
+
+
+def seed_checks(src: str = HERE) -> list:
+    """The seed schedule, shown with the method of docs/studies/swp-a/seed_audit.py over the driver's own catalog: the tool
+    starts from state = seed | 1, and no two (item, n) may start it from one state."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    with lib_from(src) as L2:
+        rnd = [it for it in L2.sweep_items() if it.kind == "random"]
+        c("seeds: the index table is the catalog's 54 random items, by name, in the catalog's order, each once; item i has index i",
+          [it.name for it in rnd] == list(L2.RANDOM_SEED_ORDER) and len(set(L2.RANDOM_SEED_ORDER)) == 54
+          and [it.seed_index for it in rnd] == list(range(54)))
+        probed = {it.name: it.seed_index for it in L2.sweep_items(("rne",), ("rne",)) if it.seed_index is not None}
+        c("seeds: an item's seeds do not depend on which other items exist: a run whose probes dropped the directed scaleB and cvtFrom "
+          "modes (fewer than the 54 random items, some) gives every item it still has the same index",
+          0 < len(probed) < 54 and all(L2.RANDOM_SEED_INDEX[n] == i for n, i in probed.items()), f"{len(probed)} random items")
+        ns = list(range(600)) + [10 ** 5, 10 ** 6, 2 ** 20, 2 ** 31, 2 ** 38]
+        states: dict = {}
+        for it in rnd:
+            for n in ns:
+                states.setdefault(it.seed_for(n) | 1, []).append((it.name, n))
+        c("seeds: over the 54 random items x 605 slice numbers (to 2^38) no two (item, n) start the tool from one state "
+          "(seed_audit.py's method: count the states the tool's `| 1` leaves)", len(states) == 54 * len(ns),
+          f"{len(states)} states for {54 * len(ns)} slices; shared: {[v for v in states.values() if len(v) > 1][:2]}")
+        c("seeds: every seed is odd, so the tool's `| 1` changes nothing, and fits the 64 bits strtoull reads",
+          all(it.seed_for(n) % 2 == 1 and it.seed_for(n) < 2 ** 64 for it in rnd for n in ns))
+        old: dict = {}
+        for it in rnd:
+            for n in range(57):
+                old.setdefault((it.base_seed + 7919 * n) | 1, []).append((it.name, n))
+        shared_old = sum(len(v) for v in old.values() if len(v) > 1)
+        c("seeds: CONTROL, the same method on the schedule before 2026-10-20 (base_seed + 7919 n, 54 items x n = 0..56, the grid of "
+          "seed_audit.py) finds 2,962 of 3,078 slices on a shared state, as the study did: the check can fail",
+          shared_old == 2962 and len(old) == 1597, f"{shared_old} slices shared, {len(old)} states")
+        try:
+            rnd[0].seed_for(2 ** 39)
+            refused = None
+        except ValueError as e:
+            refused = str(e)
+        c("seeds: a slice number the seed has no room for is refused, by name", refused is not None and rnd[0].name in refused, str(refused))
+        saved = dict(L2.RANDOM_SEED_INDEX)
+        try:
+            del L2.RANDOM_SEED_INDEX["rem32"]
+            try:
+                L2.sweep_items()
+                unnamed = None
+            except ValueError as e:
+                unnamed = str(e)
+        finally:
+            L2.RANDOM_SEED_INDEX.clear()
+            L2.RANDOM_SEED_INDEX.update(saved)
+        c("seeds: a random item missing from the table is refused by name when the catalog is built (append it, never insert)",
+          unnamed is not None and "rem32" in unnamed and "RANDOM_SEED_ORDER" in unnamed, str(unnamed))
+    return out
+
+
+def scn_seeds(env: Env, src: str = HERE) -> list:
+    """The seeds across runs, as processes (parcel DR2). A: a fresh run draws each item from n = 0 with the new seeds. B: a new
+    --out that NAMES A (--earlier-runs) starts every item above A's highest n, so no seed repeats. C: a named directory that is
+    no run is refused by name, before anything starts. D: a run made by the schedule before 2026-10-20 (the old formula, the
+    collisions the study measured in it) is RESUMED by this driver: its new slices continue the n, meet none of the old states,
+    and say seed_scheme 2."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    def rnd(R):
+        return [x for x in R.legs(kind="sweep") if "seed_n" in x["sweep"]]
+
+    items = "div32-rne,div32-rtz"
+    qargs = ["--quick", "--legs", "api-test", "--sweep-items", items]
+    idx = {n: i for i, n in enumerate(L.RANDOM_SEED_ORDER)}          # the table as this test knows it: by name
+    A = run_driver(env, "seedsA", qargs, src=src, cap=150)
+    sa = rnd(A)
+    na = {}
+    for x in sa:
+        na.setdefault(x["sweep"]["item"], []).append(x["sweep"]["seed_n"])
+    c("seeds A: a fresh run draws both items from n = 0, contiguous, each seed (item index << 40) | (n << 1) | 1 as the test computes it, "
+      "and the record says seed_scheme 2",
+      len(sa) == 6 and all(sorted(v) == list(range(len(v))) for v in na.values()) and set(na) == set(items.split(","))
+      and all(x["sweep"]["seed"] == (idx[x["sweep"]["item"]] << 40) | (x["sweep"]["seed_n"] << 1) | 1 and x["sweep"]["seed_scheme"] == 2
+              for x in sa), f"{len(sa)} slices, n by item {na}")
+    maxa = {k: max(v) for k, v in na.items()}
+    B = run_driver(env, "seedsB", qargs + ["--earlier-runs", A.out], src=src, cap=150)
+    sb = rnd(B)
+    nb = {}
+    for x in sb:
+        nb.setdefault(x["sweep"]["item"], []).append(x["sweep"]["seed_n"])
+    rsb = B.recs[0] if B.recs else {}
+    c("seeds B: a new --out naming run A starts each item at A's highest n + 1 and goes on contiguously",
+      len(sb) == 6 and all(sorted(v) == list(range(maxa[k] + 1, maxa[k] + 1 + len(v))) for k, v in nb.items()), f"A's max {maxa}, B's n {nb}")
+    c("seeds B: run_start says which runs were named and the first n each item got from them",
+      (rsb.get("earlier_runs") or {}).get("first_n") == {k: v + 1 for k, v in maxa.items()}
+      and [d["dir"] for d in (rsb.get("earlier_runs") or {}).get("dirs", [])] == [A.out], str(rsb.get("earlier_runs"))[:300])
+    st_a = {x["sweep"]["seed"] | 1 for x in sa}
+    st_b = {x["sweep"]["seed"] | 1 for x in sb}
+    c("seeds B: no seed of B is a seed of A: the tool's states (seed | 1) of the two runs are twelve different ones",
+      len(st_a) == 6 and len(st_b) == 6 and not st_a & st_b, f"{len(st_a)} + {len(st_b)} states, common {sorted(st_a & st_b)[:2]}")
+    # C: refused by name
+    empty = os.path.join(env.tmp, "not-a-run")
+    os.makedirs(empty, exist_ok=True)
+    damaged = os.path.join(env.tmp, "damaged-run")
+    os.makedirs(damaged, exist_ok=True)
+    with open(os.path.join(damaged, "metrics.jsonl"), "w") as fh:
+        fh.write('{"type":"run_start"}\nthis line is not json\n')
+    C1 = run_driver(env, "seedsC1", qargs + ["--earlier-runs", empty], src=src, cap=60)
+    C2 = run_driver(env, "seedsC2", qargs + ["--earlier-runs", damaged], src=src, cap=60)
+    C3 = run_driver(env, "seedsC3", qargs + ["--earlier-runs", A.out + "-no-such"], src=src, cap=60)
+    c("seeds C: a named directory with no metrics.jsonl is refused by name (exit 2), the directory and the file named, and nothing started",
+      C1.rc == 2 and empty in C1.text and "no metrics.jsonl" in C1.text and not os.path.exists(os.path.join(C1.out, "metrics.jsonl")),
+      f"rc {C1.rc}: {C1.text[-300:]}")
+    c("seeds C: so are a directory whose metrics.jsonl has a line that does not parse, and one that does not exist",
+      C2.rc == 2 and damaged in C2.text and "do not parse" in C2.text and C3.rc == 2 and "not a directory" in C3.text,
+      f"{C2.rc}: {C2.text[-200:]} | {C3.rc}: {C3.text[-200:]}")
+    # D: a run made by the old schedule, resumed by this driver
+    edits = [("card_stress_lib.py", "        return (self.seed_index << 40) | (n << 1) | 1\n", "        return self.base_seed + 7919 * n\n"),
+             ("card_stress.py", "                if prior is not None and prior != (it.name, n):\n", "                if False:\n"),
+             ("card_stress.py", '                                "seed_scheme": L.SEED_SCHEME, "tile": None}', '                                "tile": None}')]
+    old_src = make_plant_copy(env, "oldseeds", edits)       # a copy of the code as it was: the old seeds, no guard, no marker
+    names4 = "div32-rne,div32-rtz,div32-rdn,div32-rup"
+    O = run_driver(env, "seedsOld", ["--quick", "--legs", "api-test", "--sweep-items", names4], src=old_src, cap=150)
+    so = rnd(O)
+    old_states = [x["sweep"]["seed"] | 1 for x in so]
+    c("seeds D: the run made by the old schedule is what the study found: old seeds (base_seed + 7919 n), no seed_scheme, and two items "
+      "that started the tool from one state", len(so) == 8 and all("seed_scheme" not in x["sweep"] for x in so)
+      and len(set(old_states)) < len(old_states), f"{len(so)} slices, {len(set(old_states))} states")
+    maxo = {}
+    for x in so:
+        maxo[x["sweep"]["item"]] = max(maxo.get(x["sweep"]["item"], -1), x["sweep"]["seed_n"])
+    env.n += 1
+    cmd = [sys.executable, "-B", "-I", os.path.join(src, "card_stress.py"), "--root", ROOT, "--out", O.out, "--resume", "--dry-run",
+           "--telemetry-seconds", "0", "--disk-extra", "", "--retry-pause", "1", "--kill-after", "2", "--guard-poll", "1",
+           "--quick", "--legs", "api-test", "--sweep-items", names4]
+    for nm, pth in env.imgs.items():
+        cmd += ["--image", f"{nm}={pth}"]
+    e = dict(os.environ)
+    e["CFT_STANDIN_STATE"] = O.state
+    p = subprocess.run(cmd, capture_output=True, text=True, env=e, cwd=ROOT, timeout=150)
+    R2 = Run(O.out)
+    sr = [x for x in rnd(R2) if "seed_scheme" in x["sweep"]]
+    new_states = [x["sweep"]["seed"] | 1 for x in sr]
+    nr = {}
+    for x in sr:
+        nr.setdefault(x["sweep"]["item"], []).append(x["sweep"]["seed_n"])
+    c("seeds D: this driver resumed the old run (exit 0, no driver_error), continued every item's n from the old run's highest + 1 "
+      "(not from 0), and the new slices say seed_scheme 2",
+      p.returncode == 0 and not R2.events("driver_error") and len(sr) >= 8 and set(nr) == set(names4.split(","))
+      and all(sorted(v) == list(range(maxo[k] + 1, maxo[k] + 1 + len(v))) for k, v in nr.items()), f"rc {p.returncode}: n {nr}, old max {maxo}: {p.stdout[-200:]}")
+    c("seeds D: and the new seeds are safe beside the old: the new slices' states are all different from each other and from every old "
+      "state, though the old ones collide among themselves",
+      len(set(new_states)) == len(new_states) > 0 and not set(new_states) & set(old_states), f"{len(new_states)} new, {len(set(old_states))} old")
+    return out
+
+
+# ---- coverage by tree: a synthetic pair of runs with known truth ----
+
+TREE_A = {"commit": "a" * 40, "dirty": False, "dirty_files": 0, "rtl": "1" * 40, "rtl_dirty": False, "host_src": "2" * 40,
+          "host_src_dirty": False, "cc": "gcc (fixture) 11.4.0"}
+TREE_B = {"commit": "b" * 40, "dirty": False, "dirty_files": 0, "rtl": "3" * 40, "rtl_dirty": False, "host_src": "2" * 40,
+          "host_src_dirty": False, "cc": "gcc (fixture) 12.2.0"}          # another RTL tree, the same host/ tree, another compiler
+TREE_OLD = {"commit": "c" * 40, "dirty": False, "dirty_files": 0}      # a run from before 2026-10-20: it recorded no tree
+M20, M28 = 1 << 20, 1 << 28
+
+
+def tree_fixture(path: str, parts: list) -> None:
+    """A metrics.jsonl: for each part (tree, [slice, ...]) a run_start naming the tree, then the slices, all passing. A slice is
+    (image, item, op, reach, lo, hi) for an exhaustive item or (image, item, op, reach, n, count) for a random one."""
+    recs = []
+    t = 1_800_000_000.0
+    for k, (tree, slices) in enumerate(parts):
+        t += 10
+        recs.append({"type": "run_start", "v": 1, "ts": L.iso(t), "epoch": t, "run_id": f"fixture-{k}", "host": "fixture", "out": path,
+                     "argv": [], "settings": {"until": None, "quick": False, "dry_run": True}, "tree": tree,
+                     "images": {n: {"sha256": "0" * 64, "bytes": 1, "tiles": 1, "path": "x", "target": "t"} for n in ("quad", "single", "deep")},
+                     "deadline": None, "resumed": k > 0})
+        for (image, item, op, reach, a, b) in slices:
+            t += 5
+            sw = {"item": item, "tool": "clause5", "op": op, "mode": "rne", "reach": reach, "tile": None}
+            if item.startswith("div32"):
+                sw.update(count=b, seed=(a << 1) | 1, seed_n=a, seed_scheme=2)
+                cases = b
+            else:
+                sw.update(lo=a, hi=b)
+                cases = b - a
+            recs.append({"type": "leg", "v": 1, "ts": L.iso(t), "epoch": t, "cycle": 1, "image": image, "image_sha256": None,
+                         "leg": f"sweep-{item}", "kind": "sweep", "attempt": 1, "start": L.iso(t - 4), "end": L.iso(t),
+                         "start_epoch": t - 4, "end_epoch": t, "duration_s": 4.0, "rc": 0, "status": "pass", "timed_out": False,
+                         "killed": None, "counts": {"cases": cases, "value_mismatches": 0, "flag_mismatches": 0},
+                         "rate": {"value": cases / 4.0, "unit": "cases/s"}, "sweep": sw, "disagreements": None, "log": None,
+                         "log_kept": "none", "reason": None, "tile": None, "extra": None})
+    with open(path, "w", encoding="utf-8", newline="\n") as fh:
+        for r in recs:
+            fh.write(json.dumps(r) + "\n")
+
+
+def union_len(iv: list) -> int:
+    """The length of a union of [lo, hi) intervals, counted here by plain sorting (not by the library's code)."""
+    n, end = 0, -1
+    for lo, hi in sorted(iv):
+        if hi > max(lo, end):
+            n += hi - max(lo, end)
+            end = hi
+    return n
+
+
+def tree_record_checks(env: Env, src: str = HERE) -> list:
+    """The driver records the tree it runs from (parcel DR2): rtl and host/ tree hashes, whether each is modified, and the compiler,
+    read here by the test's own git commands. Skipped by name where git cannot read this tree at all (a worktree whose .git file
+    names a Windows path, read from WSL: the driver then records nothing, honestly, and there is nothing to compare)."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    if git_out("rev-parse", "HEAD:rtl") is None:
+        skip("trees: run_start records the tree", "git cannot read this tree on this host (a worktree whose .git file names a Windows path, "
+             "read from WSL), so the driver records none and there is nothing to compare it with")
+        return []
+    R = run_driver(env, "treerec", ["--quick", "--legs", "api-test", "--no-sweep"], src=src, cap=150)
+    tr = (R.recs[0] if R.recs else {}).get("tree") or {}
+    dirty_rtl = git_out("status", "--porcelain", "--untracked-files=all", "--", "rtl")
+    dirty_host = git_out("status", "--porcelain", "--untracked-files=all", "--", "host")
+    want_cc = None
+    try:
+        p = subprocess.run([os.environ.get("CC", "cc"), "--version"], capture_output=True, text=True, timeout=30)
+        want_cc = (p.stdout or p.stderr).strip().splitlines()[0].strip() if p.returncode == 0 and (p.stdout or p.stderr).strip() else None
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    c("trees: run_start records the tree the driver runs from: git rev-parse HEAD:rtl and HEAD:host as this test reads them, whether "
+      "each is modified, and the compiler's version line",
+      tr.get("rtl") == git_out("rev-parse", "HEAD:rtl") and tr.get("host_src") == git_out("rev-parse", "HEAD:host")
+      and tr.get("rtl_dirty") == bool(dirty_rtl) and tr.get("host_src_dirty") == bool(dirty_host) and tr.get("cc") == want_cc
+      and bool(tr.get("rtl")), str(tr))
+    return out
+
+
+def scn_trees(env: Env, src: str = HERE) -> list:
+    """Coverage kept apart by tree (parcel DR2). (1) The driver records the tree it runs from: rtl and host/ tree hashes, whether each is
+    modified, and the compiler, read here by the test's own git commands. (2) The report counts a tile item's coverage per RTL tree
+    with the images beneath, and a host item's per host/ tree and compiler, on a synthetic pair of runs whose truth is counted here:
+    the other tree's slices are disjoint from the first tree's, so a report that summed trees would show it. (3) --also adds a
+    second run directory to that section alone; a run that recorded no tree is kept apart by its commit."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    out += tree_record_checks(env, src)
+    # (2)
+    d1 = os.path.join(env.tmp, "trees-d1")
+    d2 = os.path.join(env.tmp, "trees-d2")
+    os.makedirs(d1, exist_ok=True)
+    os.makedirs(d2, exist_ok=True)
+    S = "sqrt32-rne"
+    P1 = [(TREE_A, [("quad", S, "sqrt32", "tile", 0, M28), ("single", S, "sqrt32", "tile", M28, M28 + M20), ("deep", S, "sqrt32", "tile", 0, M20),
+                    ("quad", "rint32-rne", "rint32", "tile", 0, M20),
+                    ("quad", "div32-rne", "div32", "tile", 0, 1000), ("single", "div32-rne", "div32", "tile", 1, 500),
+                    ("cpu", "nextup32", "nextup32", "host", 0, M20)]),
+          (TREE_B, [("quad", S, "sqrt32", "tile", M28 + M20, M28 + 2 * M20), ("cpu", "nextup32", "nextup32", "host", M20, 2 * M20)])]
+    P2 = [(TREE_A, [("quad", S, "sqrt32", "tile", M28 + 2 * M20, M28 + 3 * M20), ("cpu", "nextup32", "nextup32", "host", 2 * M20, 3 * M20)]),
+          (TREE_OLD, [("quad", S, "sqrt32", "tile", 0, M20), ("quad", "nextup32", "nextup32", "host", 0, M20)])]
+    tree_fixture(os.path.join(d1, "metrics.jsonl"), P1)
+    tree_fixture(os.path.join(d2, "metrics.jsonl"), P2)
+    rp = os.path.join(src, "card_stress_report.py")             # src is HERE, or a plant's copy of the code
+    jp = os.path.join(env.tmp, "trees.json")
+
+    def report(*extra):
+        p = subprocess.run([sys.executable, "-B", "-I", rp, d1, "--no-write", "--json", jp] + list(extra), capture_output=True, text=True, timeout=120)
+        try:
+            js = json.load(open(jp, encoding="utf-8"))
+        except (OSError, ValueError):
+            js = {}
+        return p, js
+
+    def cls(js, kind):
+        return [x for x in (js.get("sweep") or {}).get("trees", {}).get("classes", []) if x["kind"] == kind]
+
+    def item(cl, name, which="exhaustive"):
+        """The entry for an item in a class, or {} when there is no such class or item: a report that lost a class is a red
+        check, not a crash."""
+        return next((e for e in (cl or {}).get(which, []) if e["item"] == name), {})
+    p1, j1 = report()
+    tile, hostc = cls(j1, "tile"), cls(j1, "host")
+    ta = next((x for x in tile if x["key"] == "1" * 40), {})
+    tb = next((x for x in tile if x["key"] == "3" * 40), {})
+    sa = item(ta, S) if ta else {}
+    union_a = union_len([(0, M28), (M28, M28 + M20), (0, M20)])
+    c("trees: a tile item's coverage is counted per RTL tree: two runs' trees are two classes, and nothing is summed across them",
+      p1.returncode == 0 and len(tile) == 2 and ta and tb and item(tb, S).get("covered") == M20 and sa.get("covered") == union_a == M28 + M20,
+      f"rc {p1.returncode}; {[(x['key'][:4], x['label']) for x in tile]}; A {sa.get('covered')} want {union_a}; B {item(tb, S).get('covered') if tb else None}")
+    c("trees: and the images are reported separately beneath the tree: what quad, single and deep each covered ALONE (the quad's and "
+      "the deep's overlap, so the tree's figure is their union and not their sum)",
+      sa.get("by_image") == {"quad": M28, "single": M20, "deep": M20} and sa.get("covered") < sum(sa.get("by_image", {}).values())
+      and ta.get("total", {}).get("by_image", {}).get("quad") == M28 + M20 and ta.get("images") == ["quad", "single", "deep"],
+      str(sa.get("by_image")))
+    dv = item(ta, "div32-rne", "random") if ta else {}
+    c("trees: a random tile item has its slices, cases, highest seed_n and cases by image under the tree",
+      dv.get("slices") == 2 and dv.get("cases") == 1500 and dv.get("max_seed_n") == 1 and dv.get("by_image") == {"quad": 1000, "single": 500}, str(dv))
+    ha = next((x for x in hostc if x["key"].startswith("2" * 40) and "11.4.0" in x["key"]), {})
+    hb = next((x for x in hostc if x["key"].startswith("2" * 40) and "12.2.0" in x["key"]), {})
+    c("trees: a host item's coverage is counted by what it is about, the library's source (host/'s tree) AND the compiler: the same "
+      "host/ tree under two compilers is two classes, on the cpu image",
+      len(hostc) == 2 and item(ha, "nextup32").get("covered") == M20 and item(hb, "nextup32").get("covered") == M20
+      and item(ha, "nextup32").get("by_image") == {"cpu": M20}, str([(x["key"][-12:], x["total"]) for x in hostc]))
+    t1 = p1.stdout
+    c("trees: the text says which key it uses (the RTL tree for tile items, the host/ tree and compiler for host items), names each "
+      "class, and the header shows the tree's parts",
+      "== SWEEP COVERAGE BY TREE ==" in t1 and "git rev-parse HEAD:rtl" in t1 and "host/" in t1 and "compiler" in t1
+      and f"RTL tree {'1' * 12}" in t1 and f"RTL tree {'3' * 12}" in t1 and f"host/ tree {'2' * 12}, compiler gcc (fixture) 11.4.0" in t1
+      and re.search(r"^tree\s+: commit a+ \(clean\), rtl 1{12}, host/ 2{12}, cc gcc \(fixture\) 11\.4\.0; commit b+", t1, re.M) is not None, t1[t1.find("== SWEEP COVERAGE BY TREE"):][:700])
+    # (3)
+    p2, j2 = report("--also", d2)
+    tile2, host2 = cls(j2, "tile"), cls(j2, "host")
+    ta2 = next((x for x in tile2 if x["key"] == "1" * 40), {})
+    tb2 = next((x for x in tile2 if x["key"] == "3" * 40), {})
+    to2 = [x for x in tile2 if x["key"].startswith("unrecorded:")]
+    want_a2 = union_len([(0, M28 + M20), (M28 + 2 * M20, M28 + 3 * M20)])
+    c("trees --also: a second run directory adds to the tree it ran on and to no other: tree A gains the second run's slice (a gap of "
+      "tree B's range stays between them), tree B is as it was, and a run that recorded no tree is a class of its own, kept apart by its commit",
+      p2.returncode == 0 and item(ta2, S).get("covered") == want_a2
+      and item(tb2, S).get("covered") == M20 and len(to2) == 1 and "c" * 12 in to2[0]["label"] and item(to2[0], S).get("covered") == M20
+      and len(tile2) == 3, f"rc {p2.returncode}; A {item(ta2, S).get('covered')} want {want_a2}; classes {[x['label'][:40] for x in tile2]}")
+    ha2 = next((x for x in host2 if x["key"].startswith("2" * 40) and "11.4.0" in x["key"]), {})
+    c("trees --also: a host item's second run on the same host/ tree and compiler adds to the same class (nextup32: two ranges, 2 x 2^20), "
+      "and the old run's host slices (on the quad, before the pool) are their own class, by commit",
+      item(ha2, "nextup32").get("covered") == 2 * M20 and len(host2) == 3 and any(x["key"].startswith("unrecorded:") for x in host2),
+      str([(x["key"][-14:], item(x, "nextup32").get("covered")) for x in host2]))
+    c("trees --also: the sections before it are of the first directory alone, as they were (the same legs line with and without)",
+      re.search(r"^legs\s+: .*$", p1.stdout, re.M).group(0) == re.search(r"^legs\s+: .*$", p2.stdout, re.M).group(0))
+    p3 = subprocess.run([sys.executable, "-B", "-I", rp, d1, "--no-write", "--also", os.path.join(env.tmp, "no-such-run")], capture_output=True,
+                        text=True, timeout=60)
+    c("trees --also: a directory with no metrics.jsonl is refused by name (exit 2)",
+      p3.returncode == 2 and "no-such-run" in p3.stderr and "metrics.jsonl" in p3.stderr, f"rc {p3.returncode}: {p3.stderr[-200:]}")
     return out
 
 
@@ -2350,6 +3332,10 @@ def plants(env: Env) -> None:
         ("the driver does not hold a slice to what it covered",
          [("card_stress.py", '            cover = job["cover"]\n', "            cover = None\n")],
          lambda env, src: scn_sweep_short(env, src, SWEEP_ALL_BASE),
+         ["sweep short scaleb32-wide-rne: the first 3 slice(s) came back short"]),
+        ("the host pool does not hold a slice to what it covered",
+         [("card_stress.py", '        exp, cover = job["expected"], job["cover"]\n', '        exp, cover = job["expected"], None\n')],
+         lambda env, src: scn_sweep_short(env, src, SWEEP_ALL_BASE),
          ["sweep short cvtto32-all-rne: the first 2 slice(s) came back short"]),
         ("a refused slice is counted covered, so a restart skips it",
          [("card_stress_lib.py", '        if not item or r.get("status") not in ("pass", "fail"):',
@@ -2452,6 +3438,92 @@ def plants(env: Env) -> None:
            "p = _run_no_kill(argv, a.telemetry_timeout)")],
          lambda env, src: scn_telemetry_hang(env, src),
          ["telemetry hang: every examine call hung and was killed at --telemetry-timeout"]),
+        # parcel DR2 (2026-10-20): the host pool, the seeds, coverage by tree
+        ("a host job inherits CFT_SOAK_ARTIFACT and CFT_XRT_TILES from the driver's environment",
+         [("card_stress.py", "        for k in drop:\n            env.pop(k, None)\n", "        for k in ():\n            env.pop(k, None)\n")],
+         scn_normal, ["normal: no host job named the card although the driver's own environment did"]),
+        ("the card's sweep picks host items too (and the pool tile items)",
+         [("card_stress.py", "            if reach is not None and it.reach != reach:\n                continue\n",
+           "            if False:\n                continue\n")],
+         lambda env, src: pool_unit_checks(src), ["pool: over a whole rotation the card's waves plan the 43 TILE items", "pool: and the pool's slices are the 47 HOST items"]),
+        ("the host pool does not look for a stop before it starts a slice",
+         [("card_stress.py", "                stop = self.should_stop()\n                if stop is not None:",
+           "                stop = None\n                if stop is not None:")],
+         lambda env, src: pool_unit_checks(src) + scn_pool_stop(env, src),
+         ["pool stop: no host slice STARTED after STOP", "pool: a worker started below the disk floor plans nothing"]),
+        ("the host pool's workers do not test the tree before they start a slice",
+         [("card_stress.py", "                stop = self.should_stop()\n                if stop is not None:",
+           "                stop = self.should_stop(git=False)\n                if stop is not None:")],
+         lambda env, src: pool_tree_unit_checks(src) + scn_pool_tree(env, src),
+         ["pool tree: after HEAD moved no host slice STARTED", "pool tree: a worker started after HEAD moved plans nothing"]),
+        ("the tree test stays off in a dry run even when asked for",
+         [("card_stress.py", "        self.tree_check = (not a.dry_run) or bool(getattr(a, \"check_tree_in_dry_run\", False))",
+           "        self.tree_check = not a.dry_run")],
+         lambda env, src: pool_tree_unit_checks(src),
+         ["pool tree: before HEAD moves no driver is told to stop", "pool tree: the main loop's test says tree_moved"]),
+        ("a host job the run's end terminated is recorded as a slice of its item",
+         [("card_stress.py", "        if slot[\"abandon\"] or (self.hard and res.killed):\n", "        if False:\n")],
+         scn_pool_stop, ["pool stop: the hung host job was terminated", "pool deadline: the run ended at the deadline"]),
+        ("a CPU job's log that names a DEVICE passes",
+         [("card_stress_lib.py", "        if dev:\n            raise VerdictError(f\"{CPU_OPENED_CARD}", "        if False:\n            raise VerdictError(f\"{CPU_OPENED_CARD}")],
+         lambda env, src: cpu_parse_checks(src), ["cpu parser c5-nextup32.txt"]),
+        ("a host job's log is read for the card's failures: 'no such device' is no_device",
+         [("card_stress.py", "            infra = L.classify_infra(text) if cmd.card else None\n", "            infra = L.classify_infra(text)\n")],
+         scn_pool_failure, ["pool failure: a host job that prints 'no such device' is a parse_error of ITS item"]),
+        ("a host job's failure is counted in the card's streak",
+         [("card_stress.py", "        with self.pool_lock:\n            self.pool_served += 1\n",
+           "        with self.pool_lock:\n            self.pool_served += 1\n            if rec[\"status\"] != \"pass\":\n                self.streak += 1\n")],
+         scn_pool_failure, ["pool failure: nor did it start the card's recovery ladder"]),
+        ("a resumed run does not read the cpu image's slices",
+         [("card_stress_lib.py", "        if r.get(\"type\") != \"leg\" or r.get(\"kind\") != \"sweep\":\n            continue\n        sw = r.get(\"sweep\") or {}\n        item = sw.get(\"item\")\n",
+           "        if r.get(\"type\") != \"leg\" or r.get(\"kind\") != \"sweep\" or r.get(\"image\") == \"cpu\":\n            continue\n        sw = r.get(\"sweep\") or {}\n        item = sw.get(\"item\")\n")],
+         scn_pool_resume, ["pool resume: the resumed run's first host slice starts exactly where run A's coverage ended"]),
+        ("a failure in the card's cycle terminates the host pool's jobs too",
+         INJECT + [("card_stress.py", "                    self.terminate_children(card_only=True)\n", "                    self.terminate_children()\n")],
+         scn_pool_survives, ["pool survives: the host job in flight when the card's cycle failed ran to its end"]),
+        ("a host job is not niced",
+         [("card_stress.py", "            if self.a.nice and shutil.which(\"nice\"):\n",
+           "            if self.a.nice and shutil.which(\"nice\") and not threading.current_thread().name.startswith(\"host-pool\"):\n")],
+         scn_pool_nice, ["pool nice (POSIX): a host job runs at `nice -n 10`"]),
+        ("the metrics file is written by several threads without a lock",
+         [("card_stress_lib.py", "    with _APPEND_LOCK:\n        now = time.time()", "    if True:\n        now = time.time()")],
+         lambda env, src: append_lock_checks(src), ["pool: no two threads are ever inside the metrics file's write at once"]),
+        ("the seeds are the old schedule again (base_seed + 7919 n)",
+         [("card_stress_lib.py", "        return (self.seed_index << 40) | (n << 1) | 1\n", "        return self.base_seed + 7919 * n\n")],
+         lambda env, src: seed_checks(src) + scn_seeds(env, src),
+         ["seeds: over the 54 random items x 605 slice numbers", "seeds A: a fresh run draws both items"]),
+        ("--earlier-runs is accepted and ignored",
+         [("card_stress.py", "        if not self.a.earlier_runs:\n            return\n        try:\n", "        return\n        try:\n")],
+         scn_seeds, ["seeds B: a new --out naming run A starts each item at A's highest n + 1"]),
+        ("a slice may start the tool from a state another (item, n) already used",
+         [("card_stress.py", "                if prior is not None and prior != (it.name, n):\n", "                if False:\n")],
+         lambda env, src: pool_unit_checks(src), ["seeds: a slice whose tool state another (item, n) already started from is refused"]),
+        ("the pool lets two workers take one item at once",
+         [("card_stress.py", "            wave = self.plan_wave(self.cpu, remaining, 1, forced, L.HOST, set(self.pool_busy))\n",
+           "            wave = self.plan_wave(self.cpu, remaining, 1, forced, L.HOST, set())\n")],
+         lambda env, src: pool_unit_checks(src), ["pool: two workers never take one item at once"]),
+        ("the seed guard refuses a slice served again after a failure",
+         [("card_stress.py", "                if prior is not None and prior != (it.name, n):\n", "                if prior is not None:\n")],
+         lambda env, src: pool_unit_checks(src), ["seeds: the same item and n again (a slice served again after a failure) is not refused"]),
+        ("an item's seed index is its place in the catalog, not in the table",
+         [("card_stress_lib.py", "            it.seed_index = RANDOM_SEED_INDEX[it.name]\n",
+           "            it.seed_index = [x.kind for x in items[:items.index(it)]].count(\"random\")\n")],
+         lambda env, src: seed_checks(src), ["seeds: an item's seeds do not depend on which other items exist"]),
+        ("the driver does not record the tree it runs from",
+         [("card_stress.py", "        self.tree.update(self.tree_facts())\n", "")],
+         tree_record_checks, ["trees: run_start records the tree the driver runs from"]),
+        ("the report counts every tile item under one tree",
+         [("card_stress_report.py", "        return (h + (\"+modified\" if mod else \"\"),\n                f\"RTL tree {h[:12]}\"",
+           "        return (\"one\",\n                f\"RTL tree {h[:12]}\"")],
+         scn_trees, ["trees: a tile item's coverage is counted per RTL tree"]),
+        ("the report counts a host item's coverage under the host/ tree alone, not the compiler",
+         [("card_stress_report.py", "        return (h + (\"+modified\" if mod else \"\") + \"|\" + (cc or \"compiler not recorded\"),",
+           "        return (h + (\"+modified\" if mod else \"\"),")],
+         scn_trees, ["trees: a host item's coverage is counted by what it is about"]),
+        ("the report adds the images' coverage of a tree instead of taking its union",
+         [("card_stress_report.py", "                cov = covered([iv for v in per.values() for iv in v[\"iv\"]])\n",
+           "                cov = sum(covered(v[\"iv\"]) for v in per.values())\n")],
+         scn_trees, ["trees: and the images are reported separately beneath the tree"]),
     ]
     for name, edits, fn, expects in P:
         if pick and pick not in name:
@@ -2489,6 +3561,18 @@ def scn_soak_software(env: Env, src: str = HERE) -> list:
              str(first and (first["status"], first["reason"])))]
 
 
+def group_pool(env: Env, src: str = HERE) -> list:
+    """The host pool (parcel DR2): the in-process checks, then STOP and the deadline, a host job's failure, and --resume."""
+    return (pool_unit_checks(src) + pool_tree_unit_checks(src) + cpu_parse_checks(src) + append_lock_checks(src) + scn_pool_stop(env, src)
+            + scn_pool_tree(env, src) + scn_pool_failure(env, src) + scn_pool_resume(env, src) + scn_pool_survives(env, src)
+            + scn_pool_nice(env, src))
+
+
+def group_seeds(env: Env, src: str = HERE) -> list:
+    """The seeds (parcel DR2): the schedule over the catalog, then across runs and over an old run."""
+    return seed_checks(src) + scn_seeds(env, src)
+
+
 def run_group(name: str, results: list) -> None:
     bad = [(n, d) for n, ok, d in results if not ok]
     for n, ok, d in results:
@@ -2520,7 +3604,9 @@ def main() -> int:
                                       ("internal", scn_internal_error, False), ("signal", scn_signal, True),
                                       ("torn", scn_torn_tail, False),
                                       ("disable", scn_item_disabled, False),
-                                      ("sweepall", scn_sweep_all, False)):
+                                      ("sweepall", scn_sweep_all, False),
+                                      ("pool", group_pool, False), ("seeds", group_seeds, False),
+                                      ("trees", scn_trees, False)):
             if not want(gname):
                 continue
             if posix_only and not POSIX:
@@ -2532,7 +3618,7 @@ def main() -> int:
         if want("plants") and "--no-plants" not in sys.argv:
             plants(env)
     finally:
-        shutil.rmtree(tmp, ignore_errors=True)
+        rmtree_force(tmp)
     print(f"card-stress test: {CHECKS} checks, {len(FAILS)} failed, {len(SKIPS)} skipped, {time.time() - t0:.0f} s")
     for f in FAILS:
         print("  FAILED:", f[:300])
