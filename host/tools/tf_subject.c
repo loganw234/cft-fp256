@@ -58,12 +58,12 @@
  * runners do, needs a smaller period for the control to fire at all).
  *
  * CFT_TF_ORACLE=host makes the subject compute on the HOST CPU instead of
- * libcft, so that the same pipeline judges the machine's own IEEE hardware
- * (the sweep's oracle) the way it judges libcft: add, sub, mul, mulAdd, div and
+ * libcft, so that the same pipeline judges the host's own arithmetic (the
+ * sweep's oracle) the way it judges libcft: add, sub, mul, mulAdd, div and
  * sqrt at f32 and f64, in the four modes x86 has; anything else is refused by
- * name. fmaf and fma are libm's, and on a machine with fused multiply-add they
- * are the instruction. The banner says HOST CPU. Built with -frounding-math
- * and -fno-math-errno, as the soak tools are.
+ * name. fmaf and fma are libm's (glibc's, called through the PLT); that they
+ * are the machine's FMA instruction is not shown here. The banner says HOST
+ * CPU. Built with -frounding-math and -fno-math-errno, as the soak tools are.
  *
  * Exit status: 0 at the end of input, 2 for any usage, input or library
  * failure, named on stderr. It never writes a line it did not compute.

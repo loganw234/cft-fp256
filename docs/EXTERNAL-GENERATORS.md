@@ -93,22 +93,24 @@ binary64 one. Those lines alternate a random triple with a structured one (READ 
 structured half runs a outer, b middle, c inner, so it holds only the first values of a (MEASURED from the
 generator's output). At binary32 they are 0x00000000 and the powers of two 0x00000001 to 0x00008000, each against all
 3,748,096 b-and-c pairs, and 3,391,232 pairs of the 18th, 0x00010000; at binary64 the first three, 0x0, 0x1 and 0x2,
-each against 20,142,144 pairs, and 6,682,432 pairs of the fourth, 0x4. The prefix ran at 1.4 M cases a second through
-the whole pipe (948 s for the ten prefixes, MEASURED), so the five modes of the whole stream would take about 14 hours
-at binary32 and 7 days at binary64 at that rate (COMPUTED); the generator alone writes 2.7 M lines a second at
-binary32 and 1.7 M at binary64 (MEASURED: 30,000,000 lines beside the running chain).
+each against 20,142,144 pairs, and 6,682,432 pairs of the fourth, 0x4. The prefixes ran through the whole pipe at
+1.7 M cases a second at binary32 (399 s for its five) and 1.2 M at binary64 (549 s), MEASURED, so the five modes of
+the whole stream would take about 12 hours at binary32 and 8.6 days at binary64 at those rates (COMPUTED); the
+generator alone writes 2.7 M lines a second at binary32 and 1.7 M at binary64 (MEASURED: 30,000,000 lines beside the
+running chain).
 Software division runs 65 K cases a second at binary32 and 52 K at binary64 at one case a call (MEASURED: 105.9 to
 115.9 s for each of the five binary32 modes, 7,496,192 cases; 762.6 to 886.0 s for each of the five binary64 modes,
 40,284,288 cases; niced, at the desktop's natural load). I had estimated about 2 minutes a binary64 mode; the
 binary32 rate said about 10, five times the guess, and the runs took 12.7 to 14.8 minutes.
 
-**The host CPU as a subject** (the brief's "host oracle where it applies"): with `CFT_TF_ORACLE=host` the same
-subject computes on the machine's own hardware (SSE for + - * / and square root, libm's `fmaf` and `fma` for mulAdd;
-a 12th Gen Intel i5-12400F with FMA, glibc 2.35) and every other function is refused by name. MEASURED: it agrees with
-SoftFloat, bits and flags (a NaN's payload apart), on every level-1 case of add, sub, mul, div and sqrt, and on
-mulAdd everywhere but the 0 x infinity + quiet-NaN row, where it returns the addend itself and raises no invalid
-(libcft returns the canonical NaN and raises no invalid either); on IBM's vectors it has libcft's 20 disagreements; on
-UCBTEST's ten vector files none.
+**The host as a subject** (the brief's "host oracle where it applies"): with `CFT_TF_ORACLE=host` the same
+subject computes on the host's own arithmetic instead: + - * / and square root as C operators and `sqrt`, and mulAdd
+with libm's `fmaf` and `fma` (glibc 2.35, called through the PLT: a library routine, not shown to be the FMA
+instruction, on a 12th Gen Intel i5-12400F that has it); every other function is refused by name. MEASURED: it agrees
+with SoftFloat, bits and flags (a NaN's payload apart), on every level-1 case of add, sub, mul, div and sqrt, and on
+mulAdd everywhere but the 0 x infinity + quiet-NaN row, where the host's libm fma returns the addend itself and
+raises no invalid (libcft returns the canonical NaN and raises no invalid either); on IBM's vectors it has libcft's 20
+disagreements; on UCBTEST's ten vector files none.
 
 **Strict probes** (level 1, beyond the brief; three of TestFloat's switches that check what its default leaves loose,
 every error line arbitrated by the golden model, 0 libcft defects):
@@ -149,7 +151,7 @@ binary64 is covered by TestFloat and UCBTEST.
 
 | class | cases | what it is |
 |---|---|---|
-| **fused multiply-add, product 0 x infinity, quiet-NaN addend** | level 1: 39 a mode at binary32 (195), 33 a mode at binary64 (165). Level 2 prefix: 176 a mode (880) and 408 a mode (2,040). Binary128, level 1: 38 a mode (190) | libcft returns the canonical qNaN with no invalid flag; SoftFloat raises invalid (READ in `s_mulAddF32.c`) and TestFloat expects it (its documents, section 6.3). Each case was read back to bits and checked three ways: libcft equals the golden model in bits and flags, SoftFloat differs from it by the sign of the NaN and the invalid flag only, and the operands are the row (one factor zero, the other infinite, the addend a NaN with its quiet bit set); none failed any. The host CPU's own fused multiply-add, run as a subject (above), also returns the addend with no invalid: the hardware's flags are libcft's and the contract's, not SoftFloat's. A **convention difference**, not a defect: RISC-V requires invalid here, and its note says 754-2008 allows but does not demand it (READ by the lead, riscv-isa-manual `f-st-ext.adoc` lines 319-326; 754 itself was not read here). The contract's NaN-first rule is the same in `host/src/softfloat.c`, `rtl/cft_fpfma.sv` and `rtl/cft_fpfma_pipe.sv` (READ by the lead), so the tile cannot disagree with golden on this row. `docs/DETERMINISM.md`'s NaN section does not say which of its two sentences wins here: an unstated precedence. Logan decides |
+| **fused multiply-add, product 0 x infinity, quiet-NaN addend** | level 1: 39 a mode at binary32 (195), 33 a mode at binary64 (165). Level 2 prefix: 176 a mode (880) and 408 a mode (2,040). Binary128, level 1: 38 a mode (190) | libcft returns the canonical qNaN with no invalid flag; SoftFloat raises invalid (READ in `s_mulAddF32.c`) and TestFloat expects it (its documents, section 6.3). Each case was read back to bits and checked three ways: libcft equals the golden model in bits and flags, SoftFloat differs from it by the sign of the NaN and the invalid flag only, and the operands are the row (one factor zero, the other infinite, the addend a NaN with its quiet bit set); none failed any. The host's libm fma (glibc's `fmaf` and `fma`; a library routine, not shown to be the FMA instruction), run as a subject (above), also returns the addend with no invalid: the sweep's own oracle gives libcft's and the contract's flags here, not SoftFloat's. A **convention difference**, not a defect: RISC-V requires invalid here, and its note says 754-2008 allows but does not demand it (READ by the lead, riscv-isa-manual `f-st-ext.adoc` lines 319-326; 754 itself was not read here). The contract's NaN-first rule is the same in `host/src/softfloat.c`, `rtl/cft_fpfma.sv` and `rtl/cft_fpfma_pipe.sv` (READ by the lead), so the tile cannot disagree with golden on this row. `docs/DETERMINISM.md`'s NaN section does not say which of its two sentences wins here: an unstated precedence. Logan decides |
 | **IBM, underflow flag where libcft raises none** | 20 of 5,293 comparable (10 `*`, 10 `*+`) | the vector's flags equal what tininess detected **before** rounding gives; libcft detects it **after**. Each was checked: the value agrees, only the underflow bit differs, the before-rounding prediction (exact rational arithmetic, golden's inexact bit) equals the vector's flags, and the result is the smallest normal number; and these are all the cases on which the two detections differ among the 5,293 (IBM sides with "before" in 20 and with "after" in 0) |
 | **IBM, trap taken** | 1,505 of 6,798 (505 overflow, 1,000 underflow) | IEEE 754-1985's trapped results (exponent wrapped); libcft's flags are sticky data, never traps. Not compared: every one has its untrapped twin (same operands and rounding) in the same file, among the 5,293 |
 | **float-to-integer, the integer delivered with invalid raised** (the `-checkInvInts` probe only) | 13,412 of 54,720 | libcft delivers the contract's RISC-V values and SoftFloat's 8086-SSE the x86 indefinite integer (section 3); TestFloat's default does not look. A **convention difference**, pinned by `docs/DETERMINISM.md` |
@@ -164,7 +166,7 @@ binary64 is covered by TestFloat and UCBTEST.
 |---|---|
 | `testfloat_ver` (SoftFloat 3e, specialization 8086-SSE) | the TestFloat pipelines and the replay of UCBTEST's cases; SoftFloat itself checked in this build against TestFloat's slowfloat by `testsoftfloat -level 1` over the 46 functions the pipelines use: 281 combinations of function, rounding mode (the five and round to odd) and tininess setting, 150,759,744 tests, 0 errors |
 | UCBTEST's own arithmetic (exact integers, Kahan's constructions) | `ucbdivtest`, `ucbsqrtest`, `ucbmultest` |
-| the host CPU's own hardware (`CFT_UCB_HOSTCHECK`; and as a subject, `CFT_TF_ORACLE=host`) | every call of the six UCB programs, bits and flags: 0 and 0; and the CPU itself judged by `testfloat_ver` and by IBM's vectors, beside libcft (above) |
+| the host's own arithmetic (`CFT_UCB_HOSTCHECK`; and as a subject, `CFT_TF_ORACLE=host`) | every call of the six UCB programs, bits and flags: 0 and 0; and the host itself judged by `testfloat_ver` and by IBM's vectors, beside libcft (above) |
 | the vectors' own expected values | IBM's files and UCBTEST's ten, with the arbitration of section 4 |
 | `python/cft_golden` | every disagreement: libcft = golden against an outside value is a convention or an outside error; a golden that agrees with the outside value against libcft would be a defect |
 
