@@ -22211,3 +22211,38 @@ All thirteen on one quad: 575 s, 9.6 minutes; one tile four times each. **Per tr
 - docs/CARDDAY.md: the revision-8 leg's paragraph (fifteen entries, the six, `--lib`, the timeout), the legs table's row, the smoke, the sweep paragraph (`--quick` with `--sweep-items`, the empty wave and its event), the telemetry bullet (the lock, its worst case, the measured table) and the routine entries' section (the stress run runs them).
 - docs/README.md recounted (CARDDAY.md 1,456 lines and VALIDATION.md 22,009, and the totals). `python python/check_docs_index.py`: **rc 0**, 34 s: "47 documents, 50 links, every count true", "47 negative controls planted, each caught by name". Its first try gave 6 problems: the two line counts, and `host/libcft.so` quoted in backticks in CARDDAY four times (a build product, which the check does not know); the path is written without backticks there now. In the second pass its first try found one more such path (a `hw/__pycache__` file in CARDDAY's `-B` sentence), written without backticks too; then **rc 0** again, 34 s, and `python python/project_figures.py --check` rc 0, 11 s.
 - The ledger: Data/runs/2026-10-12-math-round/ledger/DR1.md.
+
+## 2026-10-20 - the random draws made in one order on every compiler (the lead's fix, 1db9592): seven expressions in three host tools that drew two values inside one unsequenced expression, each now two statements in the order every gcc at hand already used, so no draw changes; ten more of the kind remain in a fuzzer and two tests
+
+**Why.** C leaves unspecified the order in which a sum's, a shift's or a call's operands are evaluated (BELIEVED: C99 6.5p3 and 6.5.2.2p10, from the lead's and verifier-VLD's knowledge; the standard is not in the repository). An expression such as `bands[rng() % 7] + (rng() % 3)` therefore drew the band and the offset in the order the compiler chose, and the soak tools' operand streams could depend on the build.
+
+**What changed** (1db9592; `git diff --stat c9741e0 1db9592`: the three files, 25 insertions, 8 deletions):
+- host/tools/divsqrt_soak.c: `banded32` and `banded64`;
+- host/tools/clause5_soak.c: `banded32`, `banded64` and `cvtfrom_int`;
+- host/tools/mpfr_check.c: `rand_enc`'s band, and `check_cvt_from`'s `rng() >> (rng() & 63)`.
+- Each of the seven is two statements, the left operand's draw first.
+
+**The evidence** (MEASURED, but for the amd-arc-box results, which are READ: they are the lead's runs, whose logs are transcriptions from the ssh sessions (`replicas-box.log`, `objcmp-box.log`) or their captured output (`c5draws-box.log`, `d5draws-box.log`); the scripts and logs are in the round's records, `briefs/lead-draw/` with a SHA256SUMS file, not committed):
+- **Replicas** of the three expression shapes, 3 seeds x 10^6 draws: every compiler at hand calls the left operand's rng() first, at -O0 and -O2. The compilers are MSYS2 gcc 16.1.0 on the desktop (i686-w64-mingw32), gcc 11.4.0 in cft2204 and gcc 13.3.0 on amd-arc-box. clang is on none of the three; verifier-VLD checked the desktop and cft2204.
+- **Objects**, old (c9741e0) against new, with the Makefile's flags, with and without `-DCFT_SOAK_HAVE_ROUNDEVEN=1`:
+  - divsqrt_soak's are byte-identical under gcc 11.4 and 13.3, and mpfr_check's under 13.3 and 16.1 (16.1 measured by VLD);
+  - clause5_soak's code differs under 11.4 and 13.3; under 16.1 (VLD) divsqrt_soak's differs, and clause5_soak's differs without the define (with it, clause5_soak does not build there: `roundeven` and `roundevenf` are undeclared).
+  - cft2204's MPFR 4.1 is below mpfr_check's 4.2 floor, so mpfr_check was not built there.
+- **The draw functions from the real sources.** The tool's file is included whole in a harness, with `main` renamed, and each function is hashed over 3 seeds x 10^6 draws.
+  - divsqrt_soak's `banded32` and `banded64`, and clause5_soak's `banded32`, `banded64`, `cvtfrom_int(32)` and `cvtfrom_int(64)`, give the same hashes old and new, at -O2 and -O0: clause5_soak's under gcc 11.4 and 13.3 with and without the define, and under 16.1 without it; divsqrt_soak's under 11.4 (VLD), 13.3 and 16.1, with and without the define (16.1 with it by VLD).
+  - The hashes are the same on all three compilers.
+  - A control, the new source with a pair drawn the other way, changes the hash of what it plants.
+  - mpfr_check has no such harness; its objects are byte-identical under 13.3 and 16.1.
+- **The tools' own comparisons** (verifier-VLD, cft2204, with c9741e0's host tree as the baseline): `hw/test_divsqrt_hard.py --only unchanged` gives 59 of 59 invocations identical (100 s), and `hw/test_c5_class.py --only unchanged` 259 of 259 (44 s). With the old order planted back, they fail 3 of 59 invocations (4 checks) and 36 of 37 checks. divsqrt's random summaries are counts, so there the draws show only through its four sabotage runs, which name operands.
+
+**Corrections to 1db9592's message, by verifier-VLD** (the message stands as written):
+- "Five such expressions" is seven.
+- "Found by a search of every C source" overstates the search: it matched one generator's name twice within one line (the lead's own command, READ), so it missed draws through two functions over one state, and cpp_api_test.cpp's expression, whose five calls stand on five lines. VLD's search (MEASURED, over the 125 tracked C and C++ sources) finds **ten more instances of the defect**, none changed here:
+  - host/fuzz/cft_fuzz.c lines 232 and 235 (`rnd_below` and `rnd`, one state);
+  - host/tests/mp_err_check.c lines 303, 1627, 1821, 1824, 1827, 1831 and 1833 (`next`, `below` and `rnd_spec` over one state, several as arguments of one call);
+  - host/tests/cpp_api_test.cpp line 979 (five `rng_byte()` in one C++ expression).
+
+**Known limits.**
+- The ten instances above stay as they are. Several are arguments of one call, an order that has not been measured under gcc. A follow-up must measure each before it sequences them, if their streams are to stay as recorded.
+- A compiler that evaluates these seven in the other order is not at hand. Its builds' streams change with this commit, toward every gcc build's.
+- Verifier-VLD: 0 (a), 2 (b), both in the commit message and both corrected above. One more note: its 13.3 replica result had no artifact until `replicas-box.log` was added, transcribed by the lead from the ssh sessions. VLD's re-check of this entry: 0 (a), 2 (b) - the define claimed for 16.1, where clause5_soak does not build with it, and the box's results marked MEASURED - both corrected here; divsqrt_soak's draws on 13.3, then not in the record, were run since (`d5draws-box.log`).

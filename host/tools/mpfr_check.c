@@ -593,7 +593,11 @@ static void rand_enc(const fdesc *f, uint8_t *b)
         unsigned long span = (2ul << (f->exp_w - 1)) - 1;
         unsigned long base[7] = {0, 1, 2, span / 2, span - 3, span - 2,
                                  span - 1};
-        unsigned long e = base[rng() % 7] + (unsigned long)(rng() % 3);
+        /* Two statements, so the two draws come in one order on every
+         * compiler (C leaves the order of a sum's operands open): the
+         * band first, as every gcc build measured on 2026-10-20 did. */
+        unsigned long e = base[rng() % 7];
+        e += (unsigned long)(rng() % 3);
         if (e > span) e = span;
         set_field(b, f->man_w, f->exp_w, e);
     }
@@ -1271,8 +1275,10 @@ static void check_cvt_from(int fj, int nrand)
 
     for (i = 0; i < (int)NDI; i++)
         vals[nv++] = DI[i];
-    for (i = 0; i < nrand && nv < (int)NDI + 96; i++)
-        vals[nv++] = rng() >> (rng() & 63);
+    for (i = 0; i < nrand && nv < (int)NDI + 96; i++) {
+        uint64_t v = rng();        /* the value, then its shift: two */
+        vals[nv++] = v >> (rng() & 63);   /* statements, as above */
+    }
 
     for (ty = 0; ty < 4; ty++)
         for (mi = 0; mi < 5; mi++)
