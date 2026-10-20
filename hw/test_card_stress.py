@@ -1167,7 +1167,8 @@ def scn_normal(env: Env, src: str = HERE) -> list:
                             and "standin: env CFT_SOAK_ARTIFACT=<unset> CFT_XRT_TILES=<unset>" in log_text(R, r) for r in swh),
       str([log_text(R, r)[:400] for r in swh][:1]))
     c("normal: a card job is handed its own image and its tile, over the leaked variable",
-      all(f"standin: env CFT_SOAK_ARTIFACT={env.imgs[r['image']]} CFT_XRT_TILES={r['tile'] or '<unset>'}" in log_text(R, r) for r in swc))
+      len(swc) >= 1 and all(f"standin: env CFT_SOAK_ARTIFACT={env.imgs[r['image']]} CFT_XRT_TILES={r['tile'] or '<unset>'}" in log_text(R, r)
+                            for r in swc), f"{len(swc)} card sweep jobs")
     r8 = R.legs("acceptance-rev8", "quad")
     t8 = log_text(R, r8[0]) if r8 else ""
     c("normal: the quad's revision-8 leg ran phi4_extended_fp64 and one routine entry, naming --lib (the stand-in prints "
@@ -2577,7 +2578,9 @@ def scn_pool_failure(env: Env, src: str = HERE) -> list:
       "the slice counts as covered; the next slice of the item passes",
       len(lb) >= 2 and lb[0]["status"] == "fail" and lb[0]["disagreements"] and lb[1]["status"] == "pass"
       and "disagreements 1" in st, str([(x["status"]) for x in lb][:3]))
-    c("pool failure: the card's own legs were not touched: every api-test passed", all(x["status"] == "pass" for x in R.legs("api-test")))
+    api = R.legs("api-test")
+    c("pool failure: the card's own legs were not touched: there were api-test legs and every one passed",
+      len(api) >= 1 and all(x["status"] == "pass" for x in api), f"{len(api)} legs: {sorted({x['status'] for x in api})}")
     return out
 
 
@@ -2688,9 +2691,10 @@ def seed_checks(src: str = HERE) -> list:
         c("seeds: the index table is the catalog's 54 random items, by name, in the catalog's order, each once; item i has index i",
           [it.name for it in rnd] == list(L2.RANDOM_SEED_ORDER) and len(set(L2.RANDOM_SEED_ORDER)) == 54
           and [it.seed_index for it in rnd] == list(range(54)))
-        probed = {it.name: it.seed_index for it in L2.sweep_items(("rne",), ("rne",))}
+        probed = {it.name: it.seed_index for it in L2.sweep_items(("rne",), ("rne",)) if it.seed_index is not None}
         c("seeds: an item's seeds do not depend on which other items exist: a run whose probes dropped the directed scaleB and cvtFrom "
-          "modes gives every item it still has the same index", all(L2.RANDOM_SEED_INDEX[n] == i for n, i in probed.items() if i is not None))
+          "modes (fewer than the 54 random items, some) gives every item it still has the same index",
+          0 < len(probed) < 54 and all(L2.RANDOM_SEED_INDEX[n] == i for n, i in probed.items()), f"{len(probed)} random items")
         ns = list(range(600)) + [10 ** 5, 10 ** 6, 2 ** 20, 2 ** 31, 2 ** 38]
         states: dict = {}
         for it in rnd:
