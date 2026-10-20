@@ -1279,7 +1279,9 @@ with c a quiet NaN - the NaN operand wins: the canonical qNaN, and no
 invalid. The golden model, libcft and the RTL all test the NaN
 operands before `inf * 0`, in fusedMultiplyAdd and in its formatOf
 form (python/cft_golden/softfloat.py and formatof.py, host/src/
-softfloat.c and formatof.c, rtl/cft_fpfma.sv and cft_fpfma_pipe.sv).
+softfloat.c and formatof.c, and rtl/cft_fpfma_pipe.sv, the tile's FMA
+unit, as does rtl/cft_fpfma.sv, a combinational form the benches
+compile and nothing instantiates).
 IEEE 754-2008 "permits, but does not require, raising the invalid
 exception" here, in RISC-V's words (its F extension's note; 754 was
 not re-read for this). RISC-V itself requires it, "even when the
