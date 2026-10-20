@@ -276,7 +276,11 @@ static uint32_t banded32(void)
     uint32_t x = (uint32_t)rng();
     if ((rng() & 3) == 0) {
         static const uint32_t bands[7] = {0, 1, 2, 127, 252, 253, 254};
-        uint32_t e = bands[rng() % 7] + (uint32_t)(rng() % 3);
+        /* Two statements, so the two draws come in one order on every
+         * compiler (C leaves the order of a sum's operands open): the
+         * band first, as every gcc build measured on 2026-10-20 did. */
+        uint32_t e = bands[rng() % 7];
+        e += (uint32_t)(rng() % 3);
         if (e > 255) e = 255;
         x = (x & 0x807fffffu) | (e << 23);
     }
@@ -288,7 +292,8 @@ static uint64_t banded64(void)
     uint64_t x = rng();
     if ((rng() & 3) == 0) {
         static const uint64_t bands[7] = {0, 1, 2, 1023, 2044, 2045, 2046};
-        uint64_t e = bands[rng() % 7] + (rng() % 3);
+        uint64_t e = bands[rng() % 7];      /* two statements, as above */
+        e += rng() % 3;
         if (e > 2047) e = 2047;
         x = (x & 0x800fffffffffffffull) | (e << 52);
     }
@@ -1740,7 +1745,8 @@ static uint64_t cvtfrom_int(int width)
     uint64_t v = rng();
     if ((rng() & 7) == 0) {
         static const int ks[8] = { 23, 24, 31, 32, 52, 53, 62, 63 };
-        v = (1ull << ks[rng() % 8]) + (uint64_t)((int64_t)(rng() % 5) - 2);
+        v = 1ull << ks[rng() % 8];        /* two statements, as in banded32 */
+        v += (uint64_t)((int64_t)(rng() % 5) - 2);
         /* The negative of v modulo 2^64, in unsigned arithmetic. This was
          * `(uint64_t)-(int64_t)v` from the generator's first commit, which
          * is the same value for every v but overflows a signed negation
