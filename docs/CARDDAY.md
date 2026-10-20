@@ -1447,13 +1447,16 @@ own: the library's sources compiled `-DCFT_CHUNK=16384` into the directory `soak
 XRT_ROOT and `C5DEFS` act as they do for `divsqrt-soak` and `clause5-soak`. **The default
 `libcft.a`, `divsqrt-soak`, `clause5-soak` and every other tool are not touched**: nothing here is
 a prerequisite of `all`, sizes sit side by side, and `make -C host clean` removes the products of
-every size the build allows (the 16 values below), each by its exact name and only if it is the
-kind of thing a build makes: a binary or archive unless the name is a directory, an object
-directory only if it is a directory and no symlink. A `divsqrt-soak-c16384.log` or a
-`soak-c16384-notes/` of yours stays (the first version used globs, `divsqrt-soak-c[0-9]*`, which
-took them), and so does a file named like an object directory (`soak-c8192`) or a directory named
-like a binary (the second version removed the file and stopped on the directory); verifier VCK
-found both. .gitignore ignores the binaries and the directory by SHAPE, the name and exactly four
+every size the build allows (the 16 values below), each by its exact name and only when it is the
+right kind of thing: a binary or archive when it is a regular file and no symlink, an object
+directory when it is a directory and no symlink. Anything else of those names stays: a symlink to
+anything, a dangling symlink, a FIFO, a directory named like a binary, a file named like an object
+directory (`soak-c8192`). A `divsqrt-soak-c16384.log` or a `soak-c16384-notes/` of yours stays too.
+A regular file with a product's exact name is the build's to remove, which is what `clean` is for.
+(The first version used globs, `divsqrt-soak-c[0-9]*`, which took the `.log`; the second removed
+the file `soak-c8192` and stopped on a directory with a binary's name; the third excluded only
+directories and took a symlink, a dangling symlink and a FIFO; verifier VCK found each.)
+.gitignore ignores the binaries and the directory by SHAPE, the name and exactly four
 or five digits and nothing after them, so a build leaves the next build id `untracked=none`. A
 shape is wider than the list: a four- or five-digit name that is no allowed size
 (`divsqrt-soak-c1234`, `divsqrt-soak-c12345`) is ignored by these patterns too, and `clean` leaves
@@ -1526,12 +1529,15 @@ against each archive with `--wrap=cft_run` that finds the pass size the library 
 (largest pass 16384, 8192 and 4096, for division, square root, rint and scaleB), the stderr
 lines, `clean` (the products of all 16 sizes, a synthetic set beside the tree's own build, gone; names
 that only begin like a product, a `.log`, a `.txt`, `-old`, `-notes/`, a four- or five-digit name of no
-allowed size, a file named like an object directory and a directory named like a binary, still there),
+allowed size, a file named like an object directory, a directory named like a binary, and of the
+allowed sizes a symlink to a file, a dangling symlink, a FIFO and a symlink to a directory, still
+there),
 `.gitignore` (every product ignored, and no pattern of this build taking a name that only begins like
 one, except the shape itself: the tool's name and four or five digits, which is ignored whether or not
-the size is allowed), the default tools' output and objects unchanged against a baseline, and eleven
-planted breakages each caught by the check written for it, the earlier globs and the unguarded
-`rm -rf` and `rm -f` put back among them, in `clean` and in `.gitignore`. **Not done:** the stress driver
+the size is allowed), the default tools' output and objects unchanged against a baseline, and
+thirteen planted breakages each caught by the check written for it, the earlier globs, the unguarded
+`rm -rf` and `rm -f`, the directories-only test `[ ! -d ]` and the missing symlink test put back
+among them, in `clean` and in `.gitignore`. **Not done:** the stress driver
 does not use these tools yet (hw/ is parcel DR3's), and the pass size is not adjustable at run
 time.
 
