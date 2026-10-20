@@ -6374,6 +6374,37 @@ unclean, and a candidate rule that let one found between checks slip
 past the chain - restated above in its words. The round held when E1
 finished, and Logan's answers are in E1's result, above.
 
+### Decided 2026-10-20: the fma invalid row, and the soak tools' pass size (plan of record)
+
+Two of Logan's answers on 2026-10-20, each with a part done now and a
+part planned.
+
+**fusedMultiplyAdd(inf, 0, quiet NaN).** Logan, verbatim: "A now, B
+planned". Now: the contract states its rule (docs/DETERMINISM.md,
+"NaN") - a NaN operand wins, so the result is the canonical qNaN with
+no invalid, which is what the golden model, libcft and the RTL all do.
+Planned, at the next RTL revision: RISC-V's rule, invalid raised for
+`0 x inf` even when the addend is a quiet NaN, as RISC-V's F extension
+requires and SoftFloat does. It touches softfloat.py's `fma` and
+formatof.py's fused form, host/src/softfloat.c and formatof.c, both
+FMA units (rtl/cft_fpfma.sv and rtl/cft_fpfma_pipe.sv), every staged
+image (rebuilt and card-proven), DETERMINISM.md's paragraph, and
+parcel XG's TestFloat runs, which would then agree with SoftFloat on
+that row too.
+
+**The soak tools' pass size (CFT_CHUNK).** Logan, verbatim: "Build time
+override for now with future plans to make adjustable more easily".
+The lead's BATCH runs of 2026-10-20 (MEASURED, on one tile of the
+quad; the coverage wave's closing record has them) found the tools'
+batch held to a library pass of at most CFT_CHUNK = 4096 elements. With
+the batch and CFT_CHUNK both 16384, rint32 ran 2.81 times as fast,
+rint64 2.00 times, scaleb32 1.25 times, and division and square root
+1.13 to 1.22 times. Now: a build-time override for the stress run's
+soak builds. Planned: the pass size adjustable without a rebuild. A
+larger batch also compares flags over more operands at once, and
+parcel CL found that batched runs hide per-operand flag defects, so
+the override is for throughput, beside the lane-exact class items.
+
 ## The adoption story these serve
 
 Two tiers, one contract: a software library anyone can run on

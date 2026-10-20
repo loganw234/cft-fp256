@@ -1274,6 +1274,21 @@ quiet bit set, payload zero. A signaling NaN operand raises invalid
 (7.2). Invalid operations (`inf * 0`, `inf - inf` in any fused
 arrangement) produce the same canonical qNaN with invalid raised.
 
+When the two rules meet - fusedMultiplyAdd(inf, 0, c) or (0, inf, c)
+with c a quiet NaN - the NaN operand wins: the canonical qNaN, and no
+invalid. The golden model, libcft and the RTL all test the NaN
+operands before `inf * 0`, in fusedMultiplyAdd and in its formatOf
+form (python/cft_golden/softfloat.py and formatof.py, host/src/
+softfloat.c and formatof.c, rtl/cft_fpfma.sv and cft_fpfma_pipe.sv).
+IEEE 754-2008 "permits, but does not require, raising the invalid
+exception" here, in RISC-V's words (its F extension's note; 754 was
+not re-read for this). RISC-V itself requires it, "even when the
+addend is a quiet NaN", and SoftFloat raises it, so this one row is
+where the contract departs from RISC-V: parcel XG's TestFloat runs
+of 2026-10-20 found it, the only disagreement of their default runs.
+Moving to RISC-V's rule is planned for the next RTL revision
+(docs/ROADMAP.md, "Decided 2026-10-20").
+
 Deliberate deviation from a 754 *recommendation*: 6.2.3 recommends
 (should, not shall) propagating an input NaN's payload. Payload
 propagation order is exactly where implementations diverge - which
