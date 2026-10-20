@@ -448,6 +448,8 @@ class Driver:
         self.a = a
         self.root = os.path.abspath(a.root)
         self.dry = a.dry_run
+        self.tree_check = (not a.dry_run) or bool(getattr(a, "check_tree_in_dry_run", False))   # the tree test of should_stop
+        self.tree_stop: Optional[Stop] = None      # a moved tree, once anyone (the main loop or a pool worker) has seen it
         self.quick = a.quick
         self.out = os.path.abspath(a.out)
         self.metrics = os.path.join(self.out, "metrics.jsonl")
@@ -573,9 +575,15 @@ class Driver:
 
     # -- stop conditions: all checked BETWEEN legs ----------------------------
     def should_stop(self, git: bool = True) -> Optional[Stop]:
-        """Why the run is to end, or None. The host pool's workers ask it too, before every slice they would
-        start, with git=False (a `git rev-parse` a worker per few seconds is not worth the one check the
-        main loop makes: a slice started a moment after HEAD moved runs the binaries built before it)."""
+        """Why the run is to end, or None: the STOP file, a signal, the deadline, the disk floor and, with git, HEAD against
+        the commit the tools were built from (a real run; a --dry-run only with --check-tree-in-dry-run). The main loop asks
+        between legs, waves and cycles, and every host-pool worker asks, tree test included, before it plans each slice: one
+        `git rev-parse HEAD` a slice (20 ms, MEASURED on Windows; a slice lasts from a fraction of a second, the first probe
+        of an op, to --sweep-slice-seconds). A moved tree is LATCHED: once anyone has seen it every later call says so without
+        asking git, so no worker plans another slice, and the main loop ends the run as `tree_moved` at its next check, as it
+        always did. A slice a worker had planned in the same few milliseconds still starts, and a slice in flight runs on,
+        as a card leg in flight does. git=False skips the tree test: the pool's workers asked that way until the second pass
+        of 2026-10-20 (verifier-VDR2), and a plant of the suite puts it back."""
         if os.path.exists(self.stop_path):
             return Stop("stop_file", 0, f"{self.stop_path} exists")
         if self.sig:
@@ -592,11 +600,14 @@ class Driver:
                 low.append(f"{p}: {free:.2f} GB free, floor {self.a.disk_floor_gb} GB")
         if low:
             return Stop("disk_floor", 3, "; ".join(low))
-        if git and self.head and not self.dry:
-            now = self.git_head()
-            if now and now != self.head:
-                return Stop("tree_moved", 3, f"HEAD was {self.head[:12]} at the start and is "
-                            f"{now[:12]} now: the tools were built from the first")
+        if git and self.head and self.tree_check:
+            if self.tree_stop is None:
+                now = self.git_head()
+                if now and now != self.head:
+                    self.tree_stop = Stop("tree_moved", 3, f"HEAD was {self.head[:12]} at the start and is "
+                                          f"{now[:12]} now: the tools were built from the first")
+            if self.tree_stop is not None:
+                return self.tree_stop
         return None
 
     def git_head(self) -> str:
@@ -1579,8 +1590,10 @@ class Driver:
         while not self.pool_stop.is_set():
             job = None
             try:
-                if self.should_stop(git=False) is not None:
-                    return                     # a stop (STOP, a signal, the deadline, the disk floor): no slice starts
+                stop = self.should_stop()
+                if stop is not None:           # a stop (STOP, a signal, the deadline, the disk floor, a moved tree): no slice starts
+                    self.say(f"host pool worker {k}: no more slices ({stop.reason}: {stop.detail})")
+                    return
                 job = self.pool_plan()
                 if job is None:
                     if self.pool_done():
@@ -2395,6 +2408,10 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     g.add_argument("--until", help='deadline, the box\'s local time: "2026-10-19 08:00". Required for a long run.')
     g.add_argument("--quick", action="store_true", help="the smoke: every leg once on each image, short slices")
     g.add_argument("--dry-run", action="store_true", help="stand-ins for every command; no XRT, no card")
+    g.add_argument("--check-tree-in-dry-run", action="store_true",
+                   help="in a --dry-run too, compare HEAD with the commit the run started from before every leg, wave, cycle and host "
+                        "slice, and stop (tree_moved) when it moved. A dry run does not by default: its --root may be a checkout somebody "
+                        "is committing to. The suite's test of the moved tree uses it, on a scratch repository.")
     g.add_argument("--out", help="run directory (default: ~/card-stress-out/<stamp>-<commit>). Keep it OUTSIDE the "
                    "checkout: files there make the tree untracked, and hw/card-segrun.sh asserts the tree's build id")
     g.add_argument("--resume", action="store_true", help="continue the run in --out (sweep state is replayed)")

@@ -2545,6 +2545,137 @@ def scn_pool_stop(env: Env, src: str = HERE) -> list:
     return out
 
 
+def git_in(repo, *args):
+    """git run in `repo` with its identity given on the command line, so that nobody's configuration is read for it or changed."""
+    return subprocess.run(["git", "-c", "user.name=card-stress-test", "-c", "user.email=card-stress-test@example.invalid",
+                           "-c", "commit.gpgsign=false", "-C", repo] + list(args), capture_output=True, text=True, timeout=60)
+
+
+# the files the driver's build step looks into at --root, for the marker strings that tell it a tree is not stale (a driver
+# started on a scratch repository without them ends at the build step, "build_failed")
+MARKER_FILES = ("host/tests/seq_check.py", "programs/acceptance.py", "hw/card-segrun.sh", "hw/card_stress.py")
+
+
+def make_scratch_repo(path, copy=()):
+    """A repository of its own with one commit (the files of `copy`, copied from this tree, or empty), for a test that moves
+    HEAD; None where git cannot make one."""
+    try:
+        os.makedirs(path, exist_ok=True)
+        if subprocess.run(["git", "init", "-q", path], capture_output=True, text=True, timeout=60).returncode != 0:
+            return None
+        for rel in copy:
+            os.makedirs(os.path.dirname(os.path.join(path, rel)), exist_ok=True)
+            shutil.copy(os.path.join(ROOT, rel), os.path.join(path, rel))
+        if copy and git_in(path, "add", "-A").returncode != 0:
+            return None
+        return path if git_in(path, "commit", "-q", "--allow-empty", "-m", "first").returncode == 0 else None
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def pool_tree_unit_checks(src: str = HERE) -> list:
+    """A moved tree stops the host pool's workers (parcel DR2, after verifier-VDR2's (b-1): the records said so and the workers asked
+    should_stop(git=False)). In-process, on Drivers that are never run, rooted in a scratch repository with the tree test switched on
+    (--check-tree-in-dry-run: a plain dry run has it off by design) whose HEAD this test moves. The main loop's test says tree_moved;
+    a worker started after the move plans nothing and returns at once, and has latched the same stop."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    tmp = tempfile.mkdtemp(prefix="cs-tree-")
+    repo = make_scratch_repo(os.path.join(tmp, "repo"))
+    if repo is None:
+        skip("pool tree (unit)", "git cannot make a scratch repository on this host")
+        shutil.rmtree(tmp, ignore_errors=True)
+        return []
+    sys.path.insert(0, src)
+    saved_lib = sys.modules.pop("card_stress_lib", None) if os.path.abspath(src) != os.path.abspath(HERE) else None
+    try:
+        mod = importlib.import_module("card_stress")
+        L2 = mod.L
+
+        def driver(name, *extra):
+            d = mod.Driver(mod.parse_args(["--out", os.path.join(tmp, name), "--dry-run", "--root", repo] + list(extra)))
+            os.makedirs(d.out, exist_ok=True)
+            d.items = L2.sweep_items()
+            d.head = d.git_head()
+            return d
+        dm, dw, dp = driver("main", "--check-tree-in-dry-run"), driver("worker", "--check-tree-in-dry-run"), driver("plain")
+        before = [dm.should_stop(), dw.should_stop()]
+        moved = git_in(repo, "commit", "-q", "--allow-empty", "-m", "second").returncode == 0 and dm.git_head() != dm.head
+        sm = dm.should_stop()
+        t = threading.Thread(target=dw.pool_worker, args=(1,), daemon=True)
+        t.start()
+        t.join(5)
+        returned = not t.is_alive()
+        dw.pool_stop.set()                     # (only a worker that did not return needs this)
+        t.join(10)
+        sp = dp.should_stop()
+        c("pool tree: before HEAD moves no driver is told to stop (git is on, in a scratch repository, so the checks below can fail)",
+          before == [None, None] and bool(dm.head) and dm.tree_check and dw.tree_check, f"{before}, head {dm.head[:12]}")
+        c("pool tree: the main loop's test says tree_moved, exit 3, once HEAD has moved",
+          moved and sm is not None and sm.reason == "tree_moved" and sm.exit_code == 3, f"moved {moved}, {sm and (sm.reason, sm.exit_code)}")
+        c("pool tree: a worker started after HEAD moved plans nothing and returns at once, having latched the same stop (no host slice starts)",
+          returned and not dw.pool_busy and not dw.served and dw.pool_served == 0 and dw.tree_stop is not None
+          and dw.tree_stop.reason == "tree_moved", f"returned {returned}, busy {list(dw.pool_busy)}, latched {dw.tree_stop and dw.tree_stop.reason}")
+        c("pool tree: a plain --dry-run does not test the tree, by design (its --root may be a checkout somebody is committing to)",
+          sp is None and not dp.tree_check, f"{sp}")
+    except Exception as e:                     # a driver that cannot be driven this way is a red check, not a crash
+        c("pool tree: the driver could be driven in-process", False, repr(e))
+    finally:
+        sys.path.remove(src)
+        sys.modules.pop("card_stress", None)
+        if saved_lib is not None:
+            sys.modules["card_stress_lib"] = saved_lib
+        shutil.rmtree(tmp, ignore_errors=True)
+    return out
+
+
+def scn_pool_tree(env: Env, src: str = HERE) -> list:
+    """A moved tree stops the host pool, as a process (parcel DR2, after verifier-VDR2's (b-1)). git is ENABLED - a dry run has the tree
+    test off unless --check-tree-in-dry-run - and the driver's --root is a scratch repository whose HEAD this test moves while a card
+    leg of 12 s is in flight. The main loop looks at the tree only between legs, so in those seconds only a worker's own test can stop
+    the pool, which is running two quick host items all the while. After the commit no host slice may START; the run ends at the
+    leg's end by tree_moved (exit 3), recorded as the main loop records any stop (one event, run_end's reason)."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    repo = make_scratch_repo(os.path.join(env.tmp, "treerepo"), MARKER_FILES)
+    if repo is None:
+        skip("pool tree", "git cannot make a scratch repository on this host")
+        return []
+    base = POOL_BASE + ["--sweep-items", "logb32,class32", "--host-workers", "2", "--root", repo, "--check-tree-in-dry-run"]
+    base[base.index("--legs") + 1] = "dt-full"
+    sc = [{"leg": "dt-full", "nth": [1], "do": "slow:12"}]
+    r = start_driver(env, "pooltree", ["--until", until(180)] + base, sc, src=src, extra_env=POOL_RATE)
+    log = os.path.join(r.out, "driver.log")
+    began = wait_for(lambda: os.path.exists(log) and "leg dt-full on quad starts" in open(log).read()
+                     and len([x for x in r.legs(kind="sweep") if x["image"] == "cpu"]) >= 3, 120)
+    q = git_in(repo, "commit", "-q", "--allow-empty", "-m", "second")
+    t_move = time.time()
+    n_before = len([x for x in r.legs(kind="sweep") if x["image"] == "cpu"])
+    if not wait_for(lambda: r.proc.poll() is not None, 30):      # the run ends by itself within the leg's seconds; a defect must
+        stop_run(r)                                              # not make this wait for the deadline
+    r.finish(120)
+    end = r.last("run_end") or {}
+    host = [x for x in r.legs(kind="sweep") if x["image"] == "cpu"]
+    late = [x for x in host if x["start_epoch"] > t_move + 1.0]
+    ev = r.events("tree_moved")
+    c("pool tree: the pool was working beside the card's 12-second leg when HEAD moved (three host slices already recorded)",
+      began and q.returncode == 0 and n_before >= 3, f"began {began}, commit rc {q.returncode}, {n_before} host slices before")
+    c("pool tree: after HEAD moved no host slice STARTED (a second of margin for a worker that had just passed its check), though the "
+      "card's leg went on for seconds more",
+      began and not late, str([(x["sweep"]["item"], round(x["start_epoch"] - t_move, 1)) for x in late][:5]))
+    c("pool tree: the run ended by tree_moved at the main loop's next check, exit 3, recorded as it records any stop: one event "
+      "tree_moved and run_end's reason tree_moved",
+      r.rc == 3 and end.get("reason") == "tree_moved" and end.get("exit") == 3 and len(ev) == 1,
+      f"rc {r.rc}, run_end {end.get('reason')}, {len(ev)} events")
+    return out
+
+
 def scn_pool_failure(env: Env, src: str = HERE) -> list:
     """A host job's failure is its item's, never the card's. Every nextup32 job prints the tool's 'no such device' and exits 2
     (what makes a CARD leg no_device and counts toward stopping the run); logb32's first slice disagrees with the oracle.
@@ -3288,9 +3419,20 @@ def plants(env: Env) -> None:
            "            if False:\n                continue\n")],
          lambda env, src: pool_unit_checks(src), ["pool: over a whole rotation the card's waves plan the 43 TILE items", "pool: and the pool's slices are the 47 HOST items"]),
         ("the host pool does not look for a stop before it starts a slice",
-         [("card_stress.py", "                if self.should_stop(git=False) is not None:\n", "                if False:\n")],
+         [("card_stress.py", "                stop = self.should_stop()\n                if stop is not None:",
+           "                stop = None\n                if stop is not None:")],
          lambda env, src: pool_unit_checks(src) + scn_pool_stop(env, src),
          ["pool stop: no host slice STARTED after STOP", "pool: a worker started below the disk floor plans nothing"]),
+        ("the host pool's workers do not test the tree before they start a slice",
+         [("card_stress.py", "                stop = self.should_stop()\n                if stop is not None:",
+           "                stop = self.should_stop(git=False)\n                if stop is not None:")],
+         lambda env, src: pool_tree_unit_checks(src) + scn_pool_tree(env, src),
+         ["pool tree: after HEAD moved no host slice STARTED", "pool tree: a worker started after HEAD moved plans nothing"]),
+        ("the tree test stays off in a dry run even when asked for",
+         [("card_stress.py", "        self.tree_check = (not a.dry_run) or bool(getattr(a, \"check_tree_in_dry_run\", False))",
+           "        self.tree_check = not a.dry_run")],
+         lambda env, src: pool_tree_unit_checks(src),
+         ["pool tree: before HEAD moves no driver is told to stop", "pool tree: the main loop's test says tree_moved"]),
         ("a host job the run's end terminated is recorded as a slice of its item",
          [("card_stress.py", "        if slot[\"abandon\"] or (self.hard and res.killed):\n", "        if False:\n")],
          scn_pool_stop, ["pool stop: the hung host job was terminated", "pool deadline: the run ended at the deadline"]),
@@ -3393,8 +3535,9 @@ def scn_soak_software(env: Env, src: str = HERE) -> list:
 
 def group_pool(env: Env, src: str = HERE) -> list:
     """The host pool (parcel DR2): the in-process checks, then STOP and the deadline, a host job's failure, and --resume."""
-    return (pool_unit_checks(src) + cpu_parse_checks(src) + append_lock_checks(src) + scn_pool_stop(env, src) + scn_pool_failure(env, src)
-            + scn_pool_resume(env, src) + scn_pool_survives(env, src) + scn_pool_nice(env, src))
+    return (pool_unit_checks(src) + pool_tree_unit_checks(src) + cpu_parse_checks(src) + append_lock_checks(src) + scn_pool_stop(env, src)
+            + scn_pool_tree(env, src) + scn_pool_failure(env, src) + scn_pool_resume(env, src) + scn_pool_survives(env, src)
+            + scn_pool_nice(env, src))
 
 
 def group_seeds(env: Env, src: str = HERE) -> list:
