@@ -121,6 +121,26 @@ host/cpp-api-test20
 host/device-test
 host/divsqrt-soak
 host/clause5-soak
+# the soak tools at another pass size (host/Makefile, SOAK_CHUNK=n): per n
+# the two binaries (the .exe forms are host/*.exe above), the library
+# archive (host/*.a above, which takes any .a in host/) and its object
+# directory. A build of them that left these visible would make every later
+# build id untracked=present. The binaries and the directory are ignored by
+# SHAPE: the name and exactly four digits (4096, 8192) or exactly five
+# (12288 to 65536), nothing after them, so these patterns do not take a
+# clause5-soak-c16384.txt or a soak-c16384-notes/ (an earlier [0-9]* glob
+# did). A divsqrt-soak-c16384.log is ignored all the same, by the older *.log
+# rule near the top of this file, and any .a by host/*.a: not by these
+# patterns. A shape is wider than the list of allowed sizes: a four- or
+# five-digit name that is no allowed size (divsqrt-soak-c1234,
+# divsqrt-soak-c12345) is ignored by these patterns too, and `make clean`
+# leaves it (it removes the allowed sizes' products by exact name).
+host/divsqrt-soak-c[0-9][0-9][0-9][0-9]
+host/divsqrt-soak-c[0-9][0-9][0-9][0-9][0-9]
+host/clause5-soak-c[0-9][0-9][0-9][0-9]
+host/clause5-soak-c[0-9][0-9][0-9][0-9][0-9]
+host/soak-c[0-9][0-9][0-9][0-9]/
+host/soak-c[0-9][0-9][0-9][0-9][0-9]/
 host/mpfr-check
 host/mp-err-check
 host/cft-collatz
