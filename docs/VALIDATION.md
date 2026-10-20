@@ -22058,3 +22058,38 @@ All thirteen on one quad: 575 s, 9.6 minutes; one tile four times each. **Per tr
 - A command of mine started `python3 -` with no input and hung. I stopped that background task by its id and listed the python processes read-only: one of 10/15 that is not mine, none of mine.
 - I started a job with `&` inside a background task, which makes the task's "completed" mean only that its wrapper shell exited (PK's ledger has the same lesson). The job was a 32 s `--verify`; I waited for its own output file.
 - Scratch trees were deleted by their exact paths.
+
+## 2026-10-20 - the random draws made in one order on every compiler (the lead's fix, 1db9592): seven expressions in three host tools that drew two values inside one unsequenced expression, each now two statements in the order every gcc at hand already used, so no draw changes; ten more of the kind remain in a fuzzer and two tests
+
+**Why.** C leaves unspecified the order in which a sum's, a shift's or a call's operands are evaluated (BELIEVED: C99 6.5p3 and 6.5.2.2p10, from the lead's and verifier-VLD's knowledge; the standard is not in the repository). An expression such as `bands[rng() % 7] + (rng() % 3)` therefore drew the band and the offset in the order the compiler chose, and the soak tools' operand streams could depend on the build. The draw-order item was one of the small fixes the coverage wave's plan gave the lead.
+
+**What changed** (1db9592; `git diff --stat c9741e0 1db9592`: the three files, 25 insertions, 8 deletions):
+- host/tools/divsqrt_soak.c: `banded32` and `banded64`;
+- host/tools/clause5_soak.c: `banded32`, `banded64` and `cvtfrom_int`;
+- host/tools/mpfr_check.c: `rand_enc`'s band, and `check_cvt_from`'s `rng() >> (rng() & 63)`.
+- Each of the seven is two statements, the left operand's draw first.
+
+**The evidence** (MEASURED; the scripts and logs are in the round's records, `briefs/lead-draw/` with a SHA256SUMS file, not committed):
+- **Replicas** of the three expression shapes, 3 seeds x 10^6 draws: every compiler at hand calls the left operand's rng() first, at -O0 and -O2. The compilers are MSYS2 gcc 16.1.0 on the desktop (i686-w64-mingw32), gcc 11.4.0 in cft2204 and gcc 13.3.0 on amd-arc-box. clang is on none of the three; verifier-VLD checked the desktop and cft2204.
+- **Objects**, old (c9741e0) against new, with the Makefile's flags, with and without `-DCFT_SOAK_HAVE_ROUNDEVEN=1`:
+  - divsqrt_soak's are byte-identical under gcc 11.4 and 13.3, and mpfr_check's under 13.3 and 16.1 (16.1 measured by VLD);
+  - clause5_soak's code differs under 11.4 and 13.3, and divsqrt_soak's and clause5_soak's under 16.1 (VLD).
+  - cft2204's MPFR 4.1 is below mpfr_check's 4.2 floor, so mpfr_check was not built there.
+- **The draw functions from the real sources.** The tool's file is included whole in a harness, with `main` renamed, and each function is hashed over 3 seeds x 10^6 draws.
+  - divsqrt_soak's `banded32` and `banded64`, and clause5_soak's `banded32`, `banded64`, `cvtfrom_int(32)` and `cvtfrom_int(64)`, give the same hashes old and new: under gcc 11.4 and 13.3 (clause5_soak) and 16.1 (both tools), at -O2 and -O0, with and without the define.
+  - The hashes are the same on all three compilers.
+  - A control, the new source with a pair drawn the other way, changes the hash of what it plants.
+  - mpfr_check has no such harness; its objects are byte-identical under 13.3 and 16.1.
+- **The tools' own comparisons** (verifier-VLD, cft2204, with c9741e0's host tree as the baseline): `hw/test_divsqrt_hard.py --only unchanged` gives 59 of 59 invocations identical (100 s), and `hw/test_c5_class.py --only unchanged` 259 of 259 (44 s). With the old order planted back, they fail 3 of 59 and 36 of 37 checks. divsqrt's random summaries are counts, so there the draws show only through its four sabotage runs, which name operands.
+
+**Corrections to 1db9592's message, by verifier-VLD** (the message stands as written):
+- "Five such expressions" is seven.
+- "Found by a search of every C source" overstates the search: it matched one generator's name twice in a line. VLD's search (MEASURED, over the 125 tracked C and C++ sources) finds **ten more instances of the defect**, none changed here:
+  - host/fuzz/cft_fuzz.c lines 232 and 235 (`rnd_below` and `rnd`, one state);
+  - host/tests/mp_err_check.c lines 303, 1627, 1821, 1824, 1827, 1831 and 1833 (`next`, `below` and `rnd_spec` over one state, several as arguments of one call);
+  - host/tests/cpp_api_test.cpp line 979 (five `rng_byte()` in one C++ expression).
+
+**Known limits.**
+- The ten instances above stay as they are. Several are arguments of one call, an order that has not been measured under gcc. A follow-up must measure each before it sequences them, if their streams are to stay as recorded.
+- A compiler that evaluates these seven in the other order is not at hand. Its builds' streams change with this commit, toward every gcc build's.
+- Verifier-VLD: 0 (a), 2 (b), both in the commit message and both corrected above. One more note: its 13.3 replica result had no artifact until `replicas-box.log` was added, transcribed by the lead from the ssh sessions.
