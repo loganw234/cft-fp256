@@ -367,6 +367,17 @@ json_esc() { local s=${1//\\/\\\\}; s=${s//\"/\\\"}; printf '%s' "${s//$'\t'/\\t
 # reached no log. A check that reports its skip in any third way is
 # invisible here, and should print the SKIP marker.
 #
+# do_generated is the stage that does not log what its tools print: it
+# runs eight --checks and prints "ok <tool>" for each that passed, and
+# until 2026-10-20 that dropped the rest. A tool that passed and printed
+# SKIP was invisible here, and on Windows `--require-all --only generated`
+# said "PASS, nothing skipped" over the packager's one plant that cannot
+# run there (verifier-VFX). do_generated now carries a passing tool's skip
+# lines into its log (carry_skips, below) as SKIP lines that name the
+# tool, so this scan counts them. The convention is unchanged: the tool
+# prints the marker and the runner reads it; what is carried is what this
+# scan would count, in whichever form the tool printed it.
+#
 # A line is matched as text, not as a terminal paints it. pytest under
 # FORCE_COLOR=1, PY_COLORS=1 or PYTEST_ADDOPTS=--color=yes writes
 # "ESC[33mSKIPPEDESC[0m [n] ...", and when only the ESC byte was removed
@@ -384,6 +395,16 @@ REPLAY_SKIP_RE=': ([^[:space:]]+ )?skipped, .*on this device$'    # INNER-SKIP-R
 inner_scan() {  # <log>  ->  its inner-skip lines, trimmed, one per line
   LC_ALL=C sed -E "$ANSI_STRIP" < "$1" | tr -d '\000-\010\013-\037' \
     | grep -E -e "$INNER_SKIP_RE" -e "$REPLAY_SKIP_RE" | sed -E 's/^[[:space:]]+//'
+}
+# <tool> <what it printed> -> one SKIP line, naming the tool, for each line
+# of it that inner_scan would count, with the tool's own marker replaced by
+# ours (a SKIPPED [n] count is carried as one: no tool of do_generated's
+# prints that form). The scan is inner_scan itself, so a line is a skip
+# here exactly when it is one in a log. Always succeeds: grep finding
+# nothing is the usual case, and do_generated runs under pipefail.
+carry_skips() {
+  inner_scan <(printf '%s\n' "$2") | sed -E "s|^(SKIP(PED)?[[:space:]:]*)?|  SKIP  $1 - |"
+  return 0
 }
 
 stage() {  # <name> <description> -- command...
@@ -839,9 +860,13 @@ stage libcft "host library: build + contract tests + the build id regenerated + 
 # from this tree (the README, the gallery, the sidecars and the ledger
 # still say what its readers expect), does one build, verify and reproduce
 # byte for byte, and is each refusal and each archive fault named when
-# planted in a scratch copy. It needs no converter, so it prints no SKIP line:
-# the PNG legs (--check --png) need librsvg's rsvg-convert, which CI may
-# not have, and are not part of this stage. Its failure output never uses
+# planted in a scratch copy. It needs no converter, so it prints no SKIP line
+# for that: the PNG legs (--check --png) need librsvg's rsvg-convert, which
+# CI may not have, and are not part of this stage. It prints one SKIP line
+# on Windows only, for the one plant that platform cannot run (an archive
+# entry named with a backslash); a passing tool's SKIP lines are carried
+# into this stage's log (carry_skips), so that one is an inner skip there
+# and none on Linux. Its failure output never uses
 # the words the pattern below looks for, so a failure is a FAIL and not a
 # STALE: it has nothing to regenerate.
 #
@@ -893,6 +918,7 @@ do_generated() {
     out=$(PY "$ROOT/$g" --check 2>&1); grc=$?
     if [ $grc -eq 0 ]; then
       printf '  ok    %s\n' "$g"
+      carry_skips "$g" "$out"    # INNER-SKIP-CARRY
     elif printf '%s' "$out" | grep -qiE "stale|differs from a fresh|has drifted from host/"; then
       # the figures' generator writes only with --write; the others rewrite their files when run bare
       case "$g" in

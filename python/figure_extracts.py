@@ -1410,7 +1410,12 @@ def main(argv):
             return 1
         if a.verify:
             p = extract_path(a.out, name)
-            have = p.read_text(encoding="utf-8") if p.is_file() else None
+            have = None
+            if p.is_file():
+                raw, crlf = tree_bytes(p)        # the LF form, as --check reads it: a CRLF file is named, not passed in silence
+                have = raw.decode("utf-8")
+                if crlf:
+                    print("figure_extracts: note: " + crlf_note("%s/%s.json" % (EXTRACT_DIR, name)), file=sys.stderr)
             if have == dumps(ex):
                 print("ok      %s remakes byte for byte from %s" % (name, how))
             else:

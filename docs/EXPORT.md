@@ -236,6 +236,7 @@ Several that do not depend on each other are reported together.
 |---|---|
 | `no-git`, `not-a-git-tree` | there is no git, or the root is not the top of a work tree that has a commit |
 | `dirty-tree` | the tree differs from `HEAD`. The archive names a commit, so it is made from a clean tree; `--allow-dirty` records the difference instead, in the name and the manifest. |
+| `crlf-checkout` | a file the archive copies (the figures' SVGs and sidecars, the README charts' SVGs, the light documents), a file whose digest the manifest or a sidecar holds (the charts' data, a sidecar's sources and extracts), or a file `STATUS.md` was made from, is saved with CRLF line endings on disk, by `figure_extracts.tree_bytes`, the repository's one definition of that. The repository is `eol=lf`, and git's clean status for a CRLF file "holds while the index entry's recorded size is the CRLF file's (the entry was written while the file was already CRLF)" (docs/VALIDATION.md, the record of the side parcels of 2026-10-19), which is the state after `git add`. A file an editor has just saved CRLF is modified to git, and `dirty-tree` is then refused first: beside `crlf-checkout` for a file the archive copies or holds a digest of, alone for a file only `STATUS.md` reads. An archive made from CRLF files would hold CRLF bytes, or digests of them, or a `STATUS.md` with them in it: not an LF checkout's. The refusal names the first five files and how many. For a file the archive copies or holds a digest of it comes before any digest is compared, so it is not reported as a `sidecar-mismatch`; for a file only `STATUS.md` reads it comes after the figure check, the PNG renders when they are made, and the other files' digests. The packager does not read CRLF as LF and package it. |
 | `missing-figure`, `missing-document` | a figure's light or dark SVG or its sidecar is absent, or a README chart's SVG is absent or has no `aria-label` to name it by; a figure's files have no place in the gallery; or a light document is absent |
 | `gallery-unreadable`, `readme-unreadable` | `docs/FIGURES.md` or the README no longer has the structure the packager reads |
 | `sidecar-mismatch` | a sidecar is not JSON or not shaped like a sidecar, or does not describe its figure: another name, other files, an alt text that is not its SVG's or the gallery's, a title that is not the gallery's, an SVG that declares no size, a source or an extract that is not in the tree, or whose digest is not the tree's file |
@@ -327,9 +328,13 @@ Windows desktop and 14 to 19 s under WSL's Python 3.10 (2026-10-19); it needs gi
 commit a copy of the files it reads in a temporary directory of its own (no
 history of the tree it checks, no network), and the standard library, nothing
 else: no converter, no Pillow, no PyMuPDF; it skips nothing on Linux and prints no
-`SKIP` line anywhere, so `--require-all` is satisfied (on Windows one plant, the
-backslash, cannot run: the report names it apart from the count of controls that
-ran); and its failure output avoids the words
+`SKIP` line there, so `--require-all` is satisfied (on Windows one plant, the
+backslash, cannot run: the report prints it with `SKIP` first, apart from the
+count of controls that ran, and the runner carries a passing tool's `SKIP` lines
+into the stage's log, so there it is one inner skip of `generated`, named, and
+`--require-all` fails it; before 2026-10-20 the line began "not run" and the
+runner dropped everything a passing tool printed, so it counted nothing); and its
+failure output avoids the words
 that make the stage print STALE, because there is nothing to regenerate. The
 legs that need a converter
 cannot join it: CI's host job installs no librsvg (`.github/workflows/gates.yml`
@@ -363,5 +368,13 @@ hand, on a host that has one.
   name has a backslash is refused as one that could extract outside its
   directory, and Python's `zipfile` reads a backslash as a slash on Windows, so
   no archive read there can show it. The self-test plants it where `os.sep` is a
-  slash, and says in its report that it did not run it where it is not.
+  slash, and says in its report, with `SKIP` first, that it did not run it where
+  it is not; the gate's runner counts that line as an inner skip of `generated`.
+- **A CRLF checkout is refused, not packaged.** Reading CRLF as LF, as the
+  figures' check does, would give an archive with an LF checkout's bytes, but the
+  manifest would then digest bytes that are not the file's on disk, and the
+  reproducibility the archive claims would rest on a rule about line endings; that
+  is a larger change, and is not made. The refusal looks at the files named under
+  `crlf-checkout` above; a CRLF file the archive neither copies, digests nor reads
+  `STATUS.md` from is not looked at.
 - **Stored is larger.** About 1.6 MiB, 15%, on the archive of 2026-10-19.

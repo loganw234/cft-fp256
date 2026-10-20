@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # verify/run.sh's inner-skip accounting, held to synthetic stages: no
-# host build and no python; seconds on Linux, under a minute in Git Bash.
+# host build and no python; seconds on Linux, under two minutes in Git Bash.
 #
 #     bash verify/test-inner-skips.sh      # exit 0 pass, 1 fail
 #
@@ -31,10 +31,20 @@
 #  - pytest's marker as a coloured terminal gets it, "ESC[33mSKIPPEDESC[0m
 #    [2] ...", counts two and is named without its colour, a coloured
 #    "2 skipped" beside it counts nothing, and --require-all FAILS it.
-# Four negative controls put a defect back into a copy of the runner -
+# do_generated is driven as well, the runner's own: it prints only "ok
+# <tool>" for a tool whose --check passed, and used to drop the rest. The
+# copy of the runner takes it from the runner under test and writes a
+# stand-in script at each path its loop runs (PY runs them with bash, so
+# there is still no python here). A tool that passed and printed a SKIP
+# line, and the packager's line for the one plant Windows cannot run, count
+# two inner skips of `generated`, each named with its tool, and fail
+# --require-all; the packager's line as it was printed until 2026-10-20,
+# without SKIP first, counts nothing - which is why it was reprinted.
+# Five negative controls put a defect back into a copy of the runner -
 # the scan disabled, the replay's form dropped, a pass with inner skips
-# cached like a clean one, and the colour left in - and the check written
-# for each must catch it.
+# cached like a clean one, the colour left in, and do_generated's carrying
+# of a passing tool's skip lines removed - and the check written for each
+# must catch it.
 # Then the skip lines the stages' programs print (cpp-api-test,
 # remote_check.py, tb/check_results.py), each as printed since 2026-09-24
 # and as printed before: the new one counts and fails --require-all
@@ -162,19 +172,52 @@ stage sim-case-old "the same bench, as check_results.py printed it until 2026-09
     '-- 1 bench(es), 3 case(s), 1 skipped' 'PASS: 1 bench(es), no failures recorded'
 EOF
 
+# The stage list's last stage is the runner's own do_generated (mkrunner
+# puts it in front of these lines), over stand-ins for its tools: a build
+# is never started, and PY runs a stand-in with bash.
+cat >> "$T/stages.sh" << 'EOF'
+have_host_cc() { return 1; }
+PY() { bash "$@"; }
+need
+stage generated "do_generated over stand-in generators, a passing tool's skip lines carried" -- do_generated
+EOF
+
+# One generator's --check as the stand-in prints it, by GEN_MODE: a pass
+# with look-alikes of a skip (none counts); "skip": two tools also print a
+# SKIP line, the packager's CRLF-ended, as python prints on Windows; "old":
+# the packager's line as it was printed until 2026-10-20.
+cat > "$T/standin.sh" << 'EOF'
+t=${0##*/}
+printf '%s\n' "$t: every output is current" 'it SKIPPED nothing' '5 passed, 2 skipped in 0.10s'
+PL='archive plant, an entry with a backslash in its name: zipfile on Windows reads a backslash as a slash, so no archive can show it; it runs where os.sep is a slash'
+case "${GEN_MODE:-}:$t" in
+  skip:gen_2opi.py) printf '%s\n' '  SKIP  one check - did not run here' ;;
+  skip:project_packager.py) printf '%s\r\n' "  SKIP  not run on this platform: $PL" \
+    '213 controls each refused or failed by name (plus 1 that could not run on this platform, named above)' ;;
+  old:project_packager.py) printf '%s\r\n' "  not run on this platform: $PL" \
+    '213 controls each refused or failed by name (plus 1 that could not run on this platform, named above)' ;;
+esac
+EOF
+
 # mkrunner <run.sh> <dir>: <dir>/verify/run.sh is that runner with its
-# stage list, everything between the two markers, replaced by the
-# synthetic stages. ROOT is then <dir>, so its state lands there.
+# stage list, everything between the two markers, replaced by its own
+# do_generated and the synthetic stages. ROOT is then <dir>, so its state
+# lands there, and so do the stand-ins, one at each path do_generated runs.
 mkrunner () {
-  if ! grep -q '^# ---- the stages' "$1" || ! grep -q '^# ---- report' "$1"; then
-    echo "  FAIL  $1 has lost its '# ---- the stages' or '# ---- report' marker"
+  if ! grep -q '^# ---- the stages' "$1" || ! grep -q '^# ---- report' "$1" || ! grep -q '^do_generated() {' "$1"; then
+    echo "  FAIL  $1 has lost its '# ---- the stages' or '# ---- report' marker, or do_generated"
     return 1
   fi
   mkdir -p "$2/verify"
-  awk -v stages="$T/stages.sh" '
+  { sed -n '/^do_generated() {/,/^}/p' "$1"; cat "$T/stages.sh"; } > "$2/stages.sh"
+  awk -v stages="$2/stages.sh" '
     /^# ---- the stages/ { print; while ((getline l < stages) > 0) print l; cut = 1; next }
     /^# ---- report/     { cut = 0 }
     !cut' "$1" > "$2/verify/run.sh"
+  local g
+  for g in $(sed -n '/^  for g in /,/; do$/p' "$2/stages.sh" | grep -oE '[A-Za-z0-9_]+(/[A-Za-z0-9_]+)*\.py'); do
+    mkdir -p "$2/$(dirname "$g")" && cp "$T/standin.sh" "$2/$g"
+  done
 }
 
 # go <dir> <tag> <args...>: run that copy; OUT, RC, VERDICT, RUNID, JSONL
@@ -274,6 +317,7 @@ cases () {  # <runner>  ->  returns the number of checks it got wrong
   same  "strict: the coloured skip alone fails --require-all" "$RC" 1 || bad=$((bad + 1))
   same  "strict: the coloured skip alone, on the VERDICT" "$VERDICT" \
         "VERDICT: FAIL (1 stage(s), including under --require-all 2 inner skip(s) in colour (2))" || bad=$((bad + 1))
+
   return "$bad"
 }
 NCHECKS=32
@@ -384,6 +428,38 @@ uncounted () {  # <runner>  ->  returns the number of checks it got wrong
 }
 NUNCOUNTED=14
 
+# ...and do_generated, which prints only "ok <tool>" for a tool whose --check
+# passed: the runner's own, over stand-ins (mkrunner), with the skip lines a
+# passing tool prints carried into its log and counted.
+carried () {  # <runner>  ->  returns the number of checks it got wrong
+  local d="$T/g.$RANDOM$RANDOM" bad=0
+  mkrunner "$1" "$d" || return 1
+
+  echo "-- generated: do_generated over stand-in generators, a passing tool's skip lines carried"
+  GEN_MODE=none go "$d" gen-none --only generated --require-all
+  same  "generated: tools that skip nothing, --require-all exits 0" "$RC" 0 || bad=$((bad + 1))
+  same  "generated: tools that skip nothing, the VERDICT" "$VERDICT" "VERDICT: PASS, nothing skipped" || bad=$((bad + 1))
+  GEN_MODE=old go "$d" gen-old --only generated --require-all
+  same  "generated: the packager's line as printed until 2026-10-20 counts nothing" "$VERDICT" \
+        "VERDICT: PASS, nothing skipped" || bad=$((bad + 1))
+  GEN_MODE=skip go "$d" gen-skip --only generated
+  same  "generated: two passing tools with a SKIP line, exit 0" "$RC" 0 || bad=$((bad + 1))
+  same  "generated: the VERDICT counts both, in the stage" "$VERDICT" \
+        "VERDICT: PASS with 2 inner skip(s) in generated (2) - see reasons above" || bad=$((bad + 1))
+  check "generated: its row counts 2" grep -qE '^generated +ok +[0-9]+s  \+ 2 inner skip\(s\)' "$OUT" || bad=$((bad + 1))
+  check "generated: a tool's SKIP line named under the row, with the tool" \
+        grep -qxF "$SUBROW"'SKIP  host/tools/gen_2opi.py - one check - did not run here' "$OUT" || bad=$((bad + 1))
+  check "generated: the packager's line named under the row, with the tool, its CR gone" \
+        grep -qxF "$SUBROW"'SKIP  python/project_packager.py - not run on this platform: archive plant, an entry with a backslash in its name: zipfile on Windows reads a backslash as a slash, so no archive can show it; it runs where os.sep is a slash' \
+        "$OUT" || bad=$((bad + 1))
+  GEN_MODE=skip go "$d" gen-strict --only generated --require-all
+  same  "generated: --require-all exits 1 on them" "$RC" 1 || bad=$((bad + 1))
+  same  "generated: --require-all, on the VERDICT" "$VERDICT" \
+        "VERDICT: FAIL (1 stage(s), including under --require-all 2 inner skip(s) in generated (2))" || bad=$((bad + 1))
+  return "$bad"
+}
+NCARRIED=10
+
 # ...and the sources still print them so. A fixture line is a claim
 # about a program's output; these hold each claim to the line of source
 # that makes it, and refuse the form it replaced. A form that was never
@@ -416,6 +492,8 @@ tb/check_results.py|print("  SKIP  %s: %s" % (bench, line))|
 bindings/node/remote_test.mjs|console.log(`SKIP  remote_test.mjs golden comparison: no vector ` +|comparison is NOT RUN. Falling back
 bindings/node/remote_test.mjs|console.log(`SKIP  remote_test.mjs REDUCE replay: no vector sets in ${VECTORS}`);|vectors/out is not generated; NOT RUN.
 bindings/wasm/verify_demos.mjs|console.log("SKIP  verify_demos.mjs checks 1-2: the page is not built - run " +|note("skipped: run `bash bindings/wasm/build_demos.sh`
+python/packager_check.py|print("  SKIP  not run on this platform: %s" % item)|print("  not run on this platform: %s" % item)
+python/packager_check.py|NOT_RUN.append("archive plant, an entry with a backslash in its name: zipfile on Windows reads a backslash as a "|
 PINS
   for row in "${rows[@]}"; do
     IFS='|' read -r f new old <<< "$row"
@@ -429,7 +507,7 @@ PINS
   done
   return "$bad"
 }
-NPINS=15
+NPINS=17
 
 # ...and no other shape survives in the two programs whose matrices adapt
 # to the device: no printf that starts SKIP, and none of the shapes the
@@ -466,6 +544,9 @@ forms "$ROOT/verify/run.sh"; n=$?
 echo "== the programs' not-on-this-device lines, as committed"
 uncounted "$ROOT/verify/run.sh"; n=$?
 [ "$n" -eq 0 ] || { echo "FAIL: $n of $NUNCOUNTED check(s) wrong"; FAILS=$((FAILS + 1)); }
+echo "== do_generated, as committed: a passing tool's skip lines"
+carried "$ROOT/verify/run.sh"; n=$?
+[ "$n" -eq 0 ] || { echo "FAIL: $n of $NCARRIED check(s) wrong"; FAILS=$((FAILS + 1)); }
 echo "== the sources that print them"
 pins; n=$?
 [ "$n" -eq 0 ] || { echo "FAIL: $n of $NPINS pin(s) do not hold"; FAILS=$((FAILS + 1)); }
@@ -489,13 +570,13 @@ fi
 
 # Each control: the defect put back into a copy that still parses, and
 # the check written for it must be among those that catch it.
-control () {  # <name> <marker> <replacement line> <the check that must catch it>
+control () {  # <name> <marker> <replacement line> <the check that must catch it> [<the function that runs the checks: cases>]
   local c="$T/run.$1.sh"
   grep -q "$2" "$ROOT/verify/run.sh" || { echo "FAIL: control $1 - marker $2 not found"; FAILS=$((FAILS + 1)); return; }
   REPL="$3" awk -v m="$2" 'index($0, m) {print ENVIRON["REPL"]; next} {print}' "$ROOT/verify/run.sh" > "$c"
   echo "== negative control, $1"
   bash -n "$c" || { echo "FAIL: control $1 - the copy does not parse, so it proves nothing"; FAILS=$((FAILS + 1)); return; }
-  cases "$c" > "$T/control.out" 2>&1
+  "${5:-cases}" "$c" > "$T/control.out" 2>&1
   if grep -qF "FAIL  $4" "$T/control.out"; then
     grep -F "FAIL  $4" "$T/control.out" | cut -c1-200
     echo "  caught by \"$4\" ($(grep -c 'FAIL  ' "$T/control.out") check(s) wrong in all)"
@@ -517,12 +598,16 @@ control cached-like-clean INNER-SKIP-NO-CACHE \
 control colour-left-in INNER-SKIP-ANSI \
   "ANSI_STRIP='s/^//'    # the control: no colour removed, only the ESC byte" \
   "strict: the coloured skip alone fails --require-all"
+control carry-removed INNER-SKIP-CARRY \
+  '      : # the control: the passing tool'"'"'s skip lines not carried into the log' \
+  "generated: its row counts 2" carried
 
 if [ "$FAILS" -eq 0 ]; then
-  echo "PASS: $NCHECKS checks right, all four controls caught by their own checks;" \
+  echo "PASS: $NCHECKS checks right, all five controls caught by their own checks;" \
        "$NFORMS checks of the programs' skip lines right, $NUNCOUNTED of their" \
-       "not-on-this-device lines right, $NPINS pins held, and the one form held" \
-       "with its control caught"
+       "not-on-this-device lines right, $NCARRIED of do_generated's carrying of" \
+       "a passing tool's skip lines right, $NPINS pins held, and the one form" \
+       "held with its control caught"
   exit 0
 fi
 echo "FAIL: $FAILS problem(s)"

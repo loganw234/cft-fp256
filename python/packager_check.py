@@ -27,7 +27,8 @@ WHAT IT DOES (no count is written here: the report it prints counts what it ran)
          run (no git; a root that is not a work tree, or not its top); a figure, a sidecar, an SVG, a source, an
          extract, a caption, a light document, a README chart or the README's picture of one, changed or removed; a
          figure check gutted to exit 0 and say nothing; sidecars corrupted past a stubbed figure check; a personal
-         path; the README's heading gone; a dirty tree, with a second fault beside it, and one allowed; no
+         path; the README's heading gone; files saved with CRLF line endings, git calling the tree clean; a
+         dirty tree, with a second fault beside it, and one allowed; no
          converter, a tool that is not one or cannot be run, and a fake that fails or writes a blank, half-size,
          16-bit or non-PNG image; an output directory git does not ignore; an archive already there; and the
          refusals that stand for a defect in the packager itself (a page that is not its Markdown, a status
@@ -157,10 +158,16 @@ def real_tree(root, report):
         return ["the tree: %s: %s" % p for p in probs]
     ctx = {"commit_sha": "0" * 40, "commit_utc": "1980-01-01 00:00:00", "tree_clean": True, "png": True,
            "figures": figs, "light_docs": list(PK.LIGHT_DOCS), "archive_paths": archive_paths_for(figs)}
+    err = None
     try:
         text, facts, quotes, refs, reads, dropped = ST.build(rd, ctx)
     except (ST.SourceError, ST.DocError) as e:
-        return ["the tree: STATUS.md cannot be made: %s" % e]
+        err = e
+    crlf = PK.crlf_read(root, rd)                 # as a build does: before the reason a CRLF file may have broken a reader
+    if crlf:
+        return ["the tree: %s: %s" % PK.crlf_problem(crlf)]
+    if err is not None:
+        return ["the tree: STATUS.md cannot be made: %s" % err]
     out = []
     for rel in refs:
         if rel not in ctx["archive_paths"]:
@@ -820,14 +827,18 @@ def scratch_checks(root, with_png, problems, report):
             kw.setdefault("now", NOW)
             return PK.build(S, outs / sub, figure_check_args=FAST, say=quiet, memo=memo, **kw)
 
-        def expect(label, code, fn, say=None):
-            """fn must raise Refused with `code` among its refusals and, if `say` is given, those words in its message."""
+        def expect(label, code, fn, say=None, without=()):
+            """fn must raise Refused with `code` among its refusals and, if `say` is given, those words in its message;
+            and with none of the codes in `without` beside it (a fault named under its own name AND under a wrong one)."""
             try:
                 fn()
             except PK.Refused as r:
                 codes = codes_of(r.items)
                 if code not in codes:
                     problems.append("plant, %s: refused under %s, not %s: %s" % (label, codes, code, r.items[0][1][:100]))
+                elif [c for c in without if c in codes]:
+                    problems.append("plant, %s: refused under %s, beside %s, which names a reason the plant does not have" % (
+                        label, codes, code))
                 elif say is not None and say not in dict(r.items)[code]:
                     problems.append("plant, %s: refused under %s, but not for the reason planted (it said %r, and the "
                                     "reason has %r)" % (label, code, dict(r.items)[code][:100], say))
@@ -880,10 +891,10 @@ def scratch_checks(root, with_png, problems, report):
         else:
             report.append("reproducibility, another process under another PYTHONHASHSEED: the same zip, byte for byte")
         # ---- the plants
-        def plant(label, code, setup, say=None, **kw):
+        def plant(label, code, setup, say=None, without=(), **kw):
             try:
                 setup()
-                expect(label, code, lambda: build("p-" + code, **kw), say=say)
+                expect(label, code, lambda: build("p-" + code, **kw), say=say, without=without)
             finally:
                 restore(S, c0)
         # No figure is named here by hand: the first of the gallery, the first of the README's charts and the first data
@@ -1005,6 +1016,33 @@ def scratch_checks(root, with_png, problems, report):
         DOC = PK.LIGHT_DOCS[-1][0]                       # a light document, taken from the packager's own list
         plant("a light document missing", "missing-document",
               lambda: (os.remove(str(S / DOC)), sgit(S, "commit", "-q", "--no-verify", "-am", "plant: remove " + DOC)))
+
+        # A CRLF checkout is refused as one, by name, and not as the sidecar-mismatch its raw digests would also give.
+        # The files are rewritten CRLF and then `git add`ed. MEASURED: a file just saved CRLF shows ` M` to git, and the
+        # packager's first gate, dirty-tree, refuses it (beside crlf-checkout, or alone for a file only STATUS.md
+        # reads); after `git add` the index records the CRLF file's size, the blob is the same LF one, and git's clean
+        # status "holds while the index entry's recorded size is the CRLF file's" (VIW8), as FX's formats.py was left.
+        # Only the packager's own look at the bytes can see that.
+        def crlf_plant(label, rels, say):
+            try:
+                for rel in rels:
+                    mutate(S, rel, lambda b: b.replace(b"\n", b"\r\n"), commit=False)
+                sgit(S, "add", "-A")
+                expect(label, "crlf-checkout", lambda: build("p-crlf-checkout"), say=say, without=("sidecar-mismatch", "dirty-tree"))
+            finally:
+                restore(S, c0)
+                for rel in rels:     # MEASURED: the index now records each file as it lies, so neither a reset nor a checkout
+                    (S / rel).write_bytes((S / rel).read_bytes().replace(b"\r\n", b"\n"))      # rewrites it: write it LF
+                sgit(S, "add", "-A")
+                if any(b"\r" in (S / rel).read_bytes() for rel in rels) or sgit(S, "status", "--porcelain=v1").strip():
+                    raise RuntimeError("the scratch tree is not as it was after the plant on %s" % ", ".join(rels))
+        SRC = PK.README_CHARTS_DATA[0]
+        crlf_plant("a file a sidecar was drawn from, saved with CRLF line endings, the tree clean to git", [SRC], SRC)
+        crlf_plant("an extract a sidecar was read from, saved with CRLF line endings", [extract], extract)
+        crlf_plant("a light document the archive copies and a source, both saved with CRLF line endings", [DOC, SRC], "2 file(s)")
+        # MEASURED: with the ledger CRLF, STATUS.md builds, holds CR bytes and is not the LF tree's; the packager's reader
+        # does not fail, so only a look at the files it read can refuse it
+        crlf_plant("the ledger, a file STATUS.md is only read from, saved with CRLF line endings", [ST.LEDGER], ST.LEDGER)
         plant("a tree with an edit that is not committed", "dirty-tree",
               lambda: mutate(S, "README.md", lambda b: b + b"\nAn edit nobody committed.\n", commit=False))
         # independent refusals come back together, not one to a run
@@ -1219,7 +1257,7 @@ def main(root, with_png=False):
     for line in report:
         print("  control: %s" % line)
     for item in NOT_RUN:
-        print("  not run on this platform: %s" % item)
+        print("  SKIP  not run on this platform: %s" % item)         # the marker first: verify/run.sh counts it (carry_skips)
     print("project_packager: --check passed: the tree can be packaged, %d controls each refused or failed by name%s, a "
           "build verifies and reproduces%s (%.0f s)" % (
               len(report), "" if not NOT_RUN else " (plus %d that could not run on this platform, named above)" % len(NOT_RUN),
