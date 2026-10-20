@@ -27,7 +27,8 @@ WHAT IT DOES (no count is written here: the report it prints counts what it ran)
          run (no git; a root that is not a work tree, or not its top); a figure, a sidecar, an SVG, a source, an
          extract, a caption, a light document, a README chart or the README's picture of one, changed or removed; a
          figure check gutted to exit 0 and say nothing; sidecars corrupted past a stubbed figure check; a personal
-         path; the README's heading gone; a dirty tree, with a second fault beside it, and one allowed; no
+         path; the README's heading gone; files saved with CRLF line endings, git calling the tree clean; a
+         dirty tree, with a second fault beside it, and one allowed; no
          converter, a tool that is not one or cannot be run, and a fake that fails or writes a blank, half-size,
          16-bit or non-PNG image; an output directory git does not ignore; an archive already there; and the
          refusals that stand for a defect in the packager itself (a page that is not its Markdown, a status

@@ -30,10 +30,11 @@ WHAT IT REFUSES, by name (exit 1, nothing written; independent refusals are repo
   no-git, not-a-git-tree   there is no git, or the root is not the top of a work tree with a commit.
   dirty-tree          the tree differs from HEAD. The archive names a commit, so it must be made from it; with
                       --allow-dirty the name ends -dirty and the manifest lists the paths that differ.
-  crlf-checkout       a file the archive copies, or whose digest a sidecar holds, is saved with CRLF line endings on
-                      disk, which git calls clean here (the repository is eol=lf). The archive holds the tree's bytes,
-                      so one made from it would not be an LF checkout's. It is refused first, naming the files, so
-                      that the digests are never compared and the fault is not reported as a sidecar-mismatch.
+  crlf-checkout       a file the archive copies, or whose digest a sidecar holds, or that STATUS.md was made from, is
+                      saved with CRLF line endings on disk, which git can call clean here (the repository is eol=lf).
+                      The archive holds the tree's bytes, so one made from it would not be an LF checkout's. It is
+                      refused first, naming the files, so that the digests are never compared and the fault is not
+                      reported as a sidecar-mismatch.
   output-not-ignored  the output directory is inside the tree and git does not ignore it.
   exists              the archive is already there (--force replaces it).
   no-converter, converter-unusable   there is no rsvg-convert, or the one named does not answer as one, and
@@ -232,8 +233,8 @@ def crlf_files(root):
     """The files saved with CRLF line endings on disk (figure_extracts.tree_bytes says which), among those whose bytes
     reach the archive: the ones it copies (the figures' SVGs and sidecars, the README charts' SVGs, the light
     documents), the data the README charts are made from, whose digests the manifest records, and every source and
-    extract a sidecar holds a digest of, which check_sidecar re-hashes from raw bytes. Not the files STATUS.md is only
-    read from: no byte of those is copied or digested here."""
+    extract a sidecar holds a digest of, which check_sidecar re-hashes from raw bytes. The files STATUS.md is only
+    read from are crlf_read's."""
     fig_dir = root / FIG_DIR
     rels = [rel for rel, _why in LIGHT_DOCS] + list(README_CHARTS_DATA)
     rels += ["%s/%s-%s.svg" % (BENCH_DIR, n, t) for n in README_CHARTS for t in THEMES]
