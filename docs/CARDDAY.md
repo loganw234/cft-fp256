@@ -1122,6 +1122,136 @@ cases + S = 4E); `--baseline-tree DIR` also compares the random modes byte for b
 tree's (`git archive REV host | tar -x -C DIR`). The driver's side is `hw/test-card-stress.sh`
 (group `sweepall`, and the plants).
 
+### The class-level items for the 64-bit rounding operations: what to run, what it costs, what it must print
+
+(Parcel CL, 2026-10-20. This section is CL's alone; parcel HC may add one of its own, for division and square root.)
+
+The 64-bit operand spaces (2^64 encodings, 2^128 pairs) are not swept; what a sweep can reach is every
+**class** of operand, under the structure `docs/studies/SWP-A-coverage.md` section 4.3 calls the second
+level: the rounding unit depends on the dropped bits only through guard and a sticky tree, on the kept
+bits only through the lsb and the carry, and on the exponent only through a rebias and range checks. So
+a representative of every class of dropped bits (zero, below half, half, above half), with the kept lsb
+and the kept bits all ones, and a walking one over the kept and dropped bits, is run at every rounding
+position and at the range edges. **A pass is a claim at the class level (L2), and it is PLAUSIBLE, not
+proved**: it rests on that structural assumption about the tile (and, for the three host operations,
+about libcft's own rounding code), which nothing here tests. It is not a claim at the value level (L1)
+and not a sweep. The five modes (host/tools/clause5_soak.c, "Class-level (L2) modes"): `conv64to32-class`,
+`rint64-class`, `cvtto64-class`, `cvtfrom64-class` and `scaleb64-class`, each `<lo> <hi> <attribute>`
+over the operation's index space, calling the same batch kernels as the random mode of the operation
+(so the oracle, the flag discipline, the probes and the sabotage are the random mode's) and printing
+the exhaustive modes' verdict clause, `, E encodings, S skipped`, with E counting indices. The index maps are
+written in `python/c5_class_enum.py`, which is the reference; `clause5-soak dump <job> size` and
+`dump <job> <lo> <hi>` print the C side of them (no device opened), and the tool test holds all of it
+equal to the Python, index for index.
+
+**What an index is.** One operand (one operand-exponent pair for scaleB), numbered
+
+    index = ((position * 2 + sign) * 4 + class) * (4 + W) + pattern
+
+by an exponent or rounding position (the exponents at which the rounding position or the range class
+changes, then 23 witnesses: the walking ones and zeros of the biased exponent field and the
+subnormals), a sign, a class of the dropped bits, and a pattern (the kept lsb and whether the bits above
+it are all ones, or a walking one at one fraction bit). **How each space was counted** (COMPUTED,
+`python python/c5_class_enum.py --sizes`):
+
+| mode | the space | N | k | distinct operands |
+|---|---|---|---|---|
+| `conv64to32-class` | (281 structural exponents, -152 to 128, + 23 witnesses) x 2 signs x 4 classes x 56 patterns | 136,192 | 1 | 124,984 |
+| `rint64-class` | (57, exponents -3 to 53, + 23) x 448 | 35,840 | 4 | 26,032 |
+| `cvtto64-class` | (68, exponents -3 to 64, + 23) x 448 | 40,768 | 4 | 27,242 |
+| `cvtfrom64-class` | 190 cells (i64 positive, i64 negative, u64, by bit length) x 4 classes x 67 patterns + 3 (-2^63, 0 as i64, 0 as u64) | 50,923 | 1 | 11,557 |
+| `scaleb64-class` | 3 routes x 54 strips x 448, + 36 overflow + 36 deeper than the last strip | 72,648 | 4 | 65,992 |
+
+The study's 377,664 for conv64to32 is 281 x 4 x (2 x 2 + 52) x 2 x 3: three magnitude functions
+(nearest, truncate, away from zero), and a function is run once however many attributes and signs
+reach it. The soak runs one attribute a job, and each attribute covers its own mode code and sign path
+(the study's own edge note, 4.3 (d)), so the figure per attribute is the same formula without the
+three: 281 x 448 = 125,888, and 3 x 125,888 = 377,664 exactly. Mine is 136,192 = (281 + 23) x 448, the 23
+being the exponent witnesses that make "the exponent matters only through a rebias and range checks"
+testable at the 11-bit field's bits and not only across the 281 exponents where the result changes
+class. **k** is the checks an index makes: one for the two operations with no lanes and one result; a case
+a target for `cvtto64-class` (the four integer targets, each in-range lane as exact=0 and exact=1: **S, the
+skipped, is the (operand, target) pairs whose rounded integer leaves the target's range, and only this
+mode skips**); and a case a lane for the two that reach a tile (below). A space is regular by
+construction, so a class or pattern that does not exist at a position repeats an operand: the last
+column is the operands that differ, and a repeat costs cases and no coverage. Over the attributes the
+soak runs (four, five, five, four, four): 22 items, 1,422,092 indices.
+
+**How a class case is run.** Alone (`CLS_BATCH` = 1 operand a kernel call), and the two tile modes in
+each of the tile's four fp64 lanes. The kernels compare values per lane but flags as the OR over a call, and look
+at a lane by itself only where the ORs differ, so a flag a defect drops on one operand among others
+that raise it is unseen in a batch: **MEASURED**, a library that drops INEXACT for the operands whose
+dropped bits are exactly 0...01 passes the whole `conv64to32-class` space in batches of 4,096 under all four
+attributes and fails the one index 68,152 (0x3ff0000000000001) alone; under rtz a fault in the sticky tree shows
+only in the flags, so the batch OR hides all of rtz's evidence for it. And an element goes to the tile's
+lane (its place in a pass) mod 4, the index space puts pattern t at index mod 4 = t mod 4, so a whole-space run
+in batches meets each pattern in one lane: **MEASURED**, a fault planted in lane 2 of `cft_rint` that only the
+operand with fraction field 0x20 meets passes a run that does not rotate and fails the default. So
+each operand of `rint64-class` and `scaleb64-class` is run once in each lane, behind 0 to 3 benign
+operands (1.0, +0: exact, no flags, not counted as cases), which is why k is 4 for them. The cost is calls,
+not cases (the software backend has no lanes, so there it is only work). Build with
+`-DCLS_BATCH=4092` for batches (flags per batch, lanes still rotated) or `-DCLS_LANES=1` for no rotation.
+
+| item (per attribute) | cases a attribute | reaches the tile | software backend, one process, the whole item (MEASURED) | on the card, one tile (COMPUTED) |
+|---|---|---|---|---|
+| `conv64to32-class` (rne rtz rdn rup) | 136,192 | no (host) | 0.03 s | the stress run's rates, 5.6 to 6.2 M cases/s: 0.022 to 0.024 s |
+| `rint64-class` (rne rtz rdn rup rmm) | 143,360 | yes | 0.5 s | lane-exact, 8 passes of about 260 microseconds a call and 4 calls an index: **about 5 min**; in batches (`-DCLS_BATCH=4092`) at 1.87 to 1.97 M cases/s: 0.073 to 0.077 s |
+| `cvtto64-class` (rne rtz rdn rup rmm) | 91,005 / 91,484 / 85,141 / 91,478 / 90,986 compared, with 72,067 / 71,588 / 77,931 / 71,594 / 72,086 skipped | no (host) | 0.02 s | the stress run's rates, 4.7 to 5.0 M cases/s: 0.018 to 0.019 s |
+| `cvtfrom64-class` (rne rtz rdn rup) | 50,923 | no (host) | 0.01 s | 7.4 to 7.6 M cases/s: 0.007 s |
+| `scaleb64-class` (rne rtz rdn rup) | 290,592 | yes | 0.14 s | lane-exact, about one pass of 280 microseconds a call and 4 calls an index: **about 1.4 min**; in batches at 13.5 to 13.8 M cases/s: 0.021 to 0.022 s |
+
+The host rates are the 2026-10-16 to 19 run's per-job medians on the quad (`docs/studies/swp-a/stress-final-item-rates.txt`);
+a host item is a CPU job, so the software column is the same test as the card's. The tile
+items' lane-exact figures use the study's per-pass cost (`tile_counts.out` T5, BELIEVED: a pass is
+dominated by the call, not the 1 to 4 elements) and are the right order, not a prediction: on all five
+attributes `rint64-class` is about 25 minutes of one tile and `scaleb64-class` about 6, no single item over about five
+minutes, and none has run on a card yet. `cvtto64-class`'s compared cases are
+the tool's counts on the software backend, each equal to an independent count made in Python from the
+rounding rule alone, so a driver can hold the whole item to them.
+
+On a tile of the quad, one item (the same binary and oracle; `$IMG` the quad's xclbin built with XRT=1; the four
+attributes of `scaleb64-class` shown; `cvtto64-class` and `rint64-class` also take `rmm`):
+
+    for ATTR in rne rtz rdn rup; do
+      CFT_SOAK_ARTIFACT=$IMG CFT_XRT_TILES=1 nice -n 10 host/clause5-soak scaleb64-class 0 72648 $ATTR \
+          > scaleb64-class-$ATTR.log 2>&1
+    done; grep -h " cases," scaleb64-class-*.log
+
+and on a CPU's software backend, for any of them, with no `CFT_SOAK_ARTIFACT`. **What each must print**: the last line
+`JOB ATTR: C cases, 0 value mismatches, 0 flag mismatches, E encodings, S skipped`, exit 0, E the
+slice's indices (the whole space: 136,192, 35,840, 40,768, 50,923, 72,648) and cases + S = k x E (k as
+in the table above); a slice's coverage is held by `parse_soak`'s cover rule as it is for the exhaustive
+modes. A disagreement lists operands (`MISMATCH ... a=0x...`, the exponent as `b=` for scaleB), and in a tile
+mode a mismatch on a benign operand names 1.0 or +0. A range outside the space is refused by name (exit 2).
+
+**The coverage check, and p = 24 and 53.** At e4m3 and e5m6, the formats where the study's exhaustion works, the
+same enumerator built at those widths reaches every key (sign, position, class, kept lsb, kept all ones) that any encoding
+exhibits, and every carry out of the kept bits (a (key, attribute) pair whose kept bits are all ones and whose attribute rounds up),
+for all five operations: 8 instances, from 46 to 416 keys each, 0 missing (`python python/c5_class_enum.py --check`,
+`python/tests/test_c5_class_enum.py`); a plant that never produces one class fails it by name, for each of the four
+classes of each instance, and the classification the keys read off the definitions equals python/cft_golden's results on every
+enumerated case. At p = 24 and 53 exhaustion is out of reach, and the argument is that it is **the same enumerator, wider**:
+one function of (exponent width, fraction width, target), built at 4, 5, 8 and 11 exponent bits; a key's validity (which
+classes and patterns exist at a position) depends on whether the dropped width is 0, 1 or at least 2 and the kept width at most 0,
+1, 2 or at least 3, and the small formats hold every such regime; and, measured over the enumerator's own whole space at p = 24 and 53, for every
+one of the 22,480 non-degenerate indices of nine instances the key of the operand it builds equals the key the index names. What this does not show
+is that the rounding unit has the structure.
+
+**What the assumption excludes** (the study's own list, and this parcel's): a defect keyed by a combination of dropped bits beyond the walking
+set (a carry-chain fault that needs a pattern longer than the walk); a pattern-dependent timing fault; the subnormal-operand
+normalization paths of scaleB beyond the one leading-bit position it uses, and of the other operations beyond the b = 0 witness; and everything the
+class level does not name (the i32 and u32 sources of cvtfrom, which `cvtfrom64-all` sweeps in full). The lane count (4) is read from
+`docs/ARCHITECTURE.md` and the lane an element takes from the staging order (BELIEVED); a build with another count takes `-DCLS_LANES`.
+
+The tool's side is tested by `python3 hw/test_c5_class.py` (POSIX with make and a C compiler, a minute and a half)
+and the enumerator's by `python -m pytest python/tests/test_c5_class_enum.py` (seven seconds): the dump equal to the reference
+for every index; every mode and attribute over its whole space and over 968 slices of odd alignment; the refusals; a sabotage control
+for each; and plants, each red at the check written for it - a slice counted one index short (the cover rule), a mode that skips every index
+(the cover rule passes it; the rule that a class item compare something refuses it), a wrong class selector (the dump comparison), a skip
+filter too eager (the independent count), a sticky tree without the lowest dropped bit (the class mode catches it under rne, rdn and rup, and
+the random mode's draws, 100 times as many, do not), a defect only a flag shows and one only a lane shows (both caught by the default build and missed by the builds the knobs make). `--baseline-tree DIR` compares
+the random and the exhaustive modes byte for byte with another tree's.
+
 ### Failure policy, processes, and what it guarantees
 
 - **A failing leg** keeps its whole log, says so in its record, and the run goes on. So does an

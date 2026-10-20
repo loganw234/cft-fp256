@@ -114,6 +114,39 @@
  * libcft's host code against this CPU, bit-identical on every backend
  * by construction, and the software backend repeats it.
  *
+ * CLASS-LEVEL (L2) modes of the 64-bit rounding operations, one for each of
+ * five random modes whose operand space (2^64) no sweep reaches. Each takes
+ * <lo> <hi> over the operation's INDEX space (the operands of a representative
+ * of every class of dropped bits, with a walking one over the kept and dropped
+ * bits, at every rounding position and at the range edges), calls the same
+ * batch kernels as the random mode, and prints the exhaustive modes' verdict
+ * clause with k fixed by the mode (1 for conv64to32-class and cvtfrom64-class;
+ * 4 for cvtto64-class, a case a target, and for rint64-class and
+ * scaleb64-class, a case a lane of a tile), E counting indices. A class
+ * case is run alone, and the tile modes in each lane. The job word ends
+ * -class. See the
+ * section "Class-level (L2) modes" below, and python/c5_class_enum.py, which is
+ * the reference for the index maps and the counts. The claim is at the class
+ * level and is plausible: it rests on the structure SWP-A section 4.3 assumes.
+ *
+ *   clause5-soak conv64to32-class|cvtfrom64-class|scaleb64-class <lo> <hi>
+ *                <rne|rtz|rdn|rup>
+ *       the fp64 -> fp32 narrowing; the 64-bit integer sources i64 and u64
+ *       converted to fp64; x * 2^n in the subnormal strips and at overflow
+ *   clause5-soak rint64-class|cvtto64-class <lo> <hi> <rne|rtz|rdn|rup|rmm>
+ *       roundToIntegral, both variants (k = 4: each operand in each lane); fp64
+ *       against all four integer targets, in-range lanes only (cvtto64-class:
+ *       k = 4, S counts the rest)
+ *   clause5-soak dump <job>-class size | <lo> <hi>
+ *       print the index space's size, or one line an index (index, operand,
+ *       and the source type or the exponent), for a diff against the Python
+ *       reference; opens no device
+ *
+ * Which of them reach a device: rint64-class and scaleb64-class (the latter
+ * for exponents at or above -1074; below that cft_scaleb takes its host path).
+ * conv64to32-class, cvtto64-class and cvtfrom64-class are libcft HOST
+ * operations, as their random modes are.
+ *
  * CFT_SOAK_SABOTAGE=1 flips the low bit of the first result of every
  * library call, after the library computes it. A harness that cannot
  * fail proves nothing; the runner requires one sabotaged job to fail
@@ -140,8 +173,8 @@ static uint64_t mismatches, flag_mismatches, cases, skipped;
 static int shown;
 static uint64_t encodings;   /* exhaustive modes: operand encodings run (see the section
                               * "Exhaustive modes" below) */
-static int exh_mode;          /* set for the -all and -wide jobs: their verdict line
-                              * says what they covered */
+static int exh_mode;          /* set for the -all, -wide and -class jobs: their
+                              * verdict line says what they covered */
 
 /* ---- rounding modes ----------------------------------------------- */
 
@@ -1258,52 +1291,76 @@ static int probe_castflags(void)
     return ok;
 }
 
-static int drv_conv64to32(uint64_t count, int mi)
+/* One batch of n fp64 encodings narrowed to fp32 under attribute mi: the
+ * oracle is the (float) cast in the dynamic rounding mode, values compared
+ * per lane and flags by the batch OR first, the lane named by n=1 calls
+ * only when the OR disagrees. The random mode and conv64to32-class both
+ * run exactly this. */
+static int conv64to32_batch(int mi, const uint64_t *A, size_t n,
+                            int flags_ok)
 {
-    static uint64_t A[BATCH];
     static uint32_t W[BATCH], D[BATCH];
+    uint32_t nf, lf = 0;
+    int raised;
+    size_t i;
+
+    fesetround(MODES[mi].fe);
+    feclearexcept(FE_ALL_EXCEPT);
+    for (i = 0; i < n; i++)
+        W[i] = f2u((float)u2d(A[i]));
+    raised = fetestexcept(FE_ALL_EXCEPT);
+    fesetround(FE_TONEAREST);
+    nf = fe_to_cft(raised);
+    if (cft_convert(dev, CFT_FP64, CFT_FP32, MODES[mi].cr, A, D, n,
+                    &lf) != CFT_OK) {
+        hard_fail("conv64to32"); return 1;
+    }
+    sab(D, 4, n);
+    for (i = 0; i < n; i++)
+        if (!agree32(D[i], W[i]))
+            vmis("conv64to32", MODES[mi].name, A[i], 0, 0, D[i], W[i]);
+    if (flags_ok && lf != nf) {
+        for (i = 0; i < n; i++) {
+            uint32_t d1, f1 = 0, w1;
+            fesetround(MODES[mi].fe);
+            feclearexcept(FE_ALL_EXCEPT);
+            c5_sink32 = f2u((float)u2d(A[i]));
+            raised = fetestexcept(FE_ALL_EXCEPT);
+            fesetround(FE_TONEAREST);
+            w1 = fe_to_cft(raised);
+            if (cft_convert(dev, CFT_FP64, CFT_FP32, MODES[mi].cr,
+                            &A[i], &d1, 1, &f1) != CFT_OK)
+                continue;
+            if (f1 != w1)
+                fmis("conv64to32", MODES[mi].name, A[i], f1, w1);
+        }
+    }
+    cases += n;
+    return 0;
+}
+
+/* The castflags probe's verdict, applied: the flag comparison degrades to
+ * values only, said out loud. The random mode and conv64to32-class say the
+ * same words. */
+static int conv64to32_gate(void)
+{
     int flags_ok = probe_castflags();
     if (!flags_ok)
         printf("castflags probe: flag environment unreliable; "
                "comparing values only\n");
+    return flags_ok;
+}
+
+static int drv_conv64to32(uint64_t count, int mi)
+{
+    static uint64_t A[BATCH];
+    int flags_ok = conv64to32_gate();
     while (count) {
         size_t n = count > BATCH ? BATCH : (size_t)count, i;
-        uint32_t nf, lf = 0;
-        int raised;
         for (i = 0; i < n; i++)
             A[i] = banded64();
-        fesetround(MODES[mi].fe);
-        feclearexcept(FE_ALL_EXCEPT);
-        for (i = 0; i < n; i++)
-            W[i] = f2u((float)u2d(A[i]));
-        raised = fetestexcept(FE_ALL_EXCEPT);
-        fesetround(FE_TONEAREST);
-        nf = fe_to_cft(raised);
-        if (cft_convert(dev, CFT_FP64, CFT_FP32, MODES[mi].cr, A, D, n,
-                        &lf) != CFT_OK) {
-            hard_fail("conv64to32"); return 1;
-        }
-        sab(D, 4, n);
-        for (i = 0; i < n; i++)
-            if (!agree32(D[i], W[i]))
-                vmis("conv64to32", MODES[mi].name, A[i], 0, 0, D[i], W[i]);
-        if (flags_ok && lf != nf) {
-            for (i = 0; i < n; i++) {
-                uint32_t d1, f1 = 0, w1;
-                fesetround(MODES[mi].fe);
-                feclearexcept(FE_ALL_EXCEPT);
-                c5_sink32 = f2u((float)u2d(A[i]));
-                raised = fetestexcept(FE_ALL_EXCEPT);
-                fesetround(FE_TONEAREST);
-                w1 = fe_to_cft(raised);
-                if (cft_convert(dev, CFT_FP64, CFT_FP32, MODES[mi].cr,
-                                &A[i], &d1, 1, &f1) != CFT_OK)
-                    continue;
-                if (f1 != w1)
-                    fmis("conv64to32", MODES[mi].name, A[i], f1, w1);
-            }
-        }
-        cases += n;
+        if (conv64to32_batch(mi, A, n, flags_ok))
+            return 1;
         count -= n;
     }
     return 0;
@@ -2300,6 +2357,472 @@ static int probe_scalebrange(void)
     return holds;
 }
 
+/* ================================================================
+ * Class-level (L2) modes: the 64-bit rounding operations by classes
+ *
+ * A 64-bit operand has 2^64 encodings and no sweep reaches them; what a
+ * sweep CAN reach is every CLASS of operand, under the structure
+ * docs/studies/SWP-A-coverage.md section 4.3 assumes of the rounding
+ * unit: it depends on the dropped bits only through guard and a sticky
+ * tree, on the kept bits only through the lsb and the carry, and on the
+ * exponent only through a rebias and range checks. conv64to32-class,
+ * rint64-class, cvtto64-class, cvtfrom64-class and scaleb64-class take
+ * <lo> <hi> over the INDEX SPACE of the operation, one index an operand
+ * (an operand-exponent pair for scaleB), and call the SAME batch kernels
+ * as the random mode of the operation (conv64to32_batch, rint_batch64,
+ * cvtto_batch, cvtfrom_check, scaleb_batch, behind the same probe
+ * gates), so the oracle, the flag discipline and the sabotage are the
+ * random mode's; only the operand source differs. The verdict line is
+ * the exhaustive modes': ", E encodings, S skipped", E counting INDICES
+ * here, and cases + S is k * E with k fixed by the mode (1, 4, 4, 1, 4 for
+ * the five in the order below: a case a lane for the two tile modes, a case
+ * a target for cvtto64-class). Skipped is zero except in cvtto64-class,
+ * which compares in-range lanes only, as cvtto32-all does.
+ *
+ * THE CLAIM IS AT THE CLASS LEVEL (L2) AND IS PLAUSIBLE: a pass says the
+ * library agrees with the host FPU on a representative of every class
+ * and a walking one over the dropped and kept bits, not that the unit
+ * has the structure. The index maps are python/c5_class_enum.py's, which
+ * is the reference; `dump` prints this file's side of them for a diff:
+ *
+ *   index = ((position * 2 + sign) * 4 + class) * (4 + W) + pattern
+ *
+ * position: the exponents at which the rounding position or the range
+ * class changes, then the witnesses (the walking ones and zeros of the
+ * biased exponent field, and the subnormals); sign; class of the dropped
+ * bits (0 zero, 1 below half, 2 half, 3 above half); pattern t < 4 the
+ * kept lsb and whether the bits above it are all ones, t >= 4 a walking
+ * one at fraction bit t - 4. cvtfrom64-class is cells of (source type,
+ * bit length) and scaleb64-class cells of (route, strip); see
+ * python/c5_class_enum.py for both and for the counts.
+ * ================================================================ */
+
+enum { CLS_CONV, CLS_RINT, CLS_CVTTO, CLS_CVTFROM, CLS_SCALEB, CLS_NJOB };
+
+static const struct { const char *job; int rmm; } CLASS_JOBS[CLS_NJOB] = {
+    { "conv64to32-class", 0 }, { "rint64-class", 1 },
+    { "cvtto64-class", 1 }, { "cvtfrom64-class", 0 },
+    { "scaleb64-class", 0 },
+};
+
+#define CLS_NCLS 4
+#define CLS_W 52                        /* fraction bits of an fp64 operand */
+#define CLS_NPAT (4 + CLS_W)            /* 4 kept patterns + a walking one a bit */
+#define CLS_CELL (2 * CLS_NCLS * CLS_NPAT)   /* a position: sign x class x pattern */
+#define CLS_NWIT 23                     /* exponent witnesses: 2 * 11 + 1 */
+#define CLS_NPAT_FROM (4 + 63)          /* cvtfrom: a walking one per magnitude bit */
+#define CLS_NCELL_FROM (63 + 63 + 64)   /* i64+ L=1..63, i64- L=1..63, u64 L=1..64 */
+#define CLS_NSPECIAL_FROM 3             /* -2^63, 0 as i64, 0 as u64 */
+#define CLS_NSTRIP 54                   /* scaleb strips: p + 1 */
+#define CLS_STRIPIDX (3 * CLS_NSTRIP * CLS_CELL)   /* 3 routes */
+#define CLS_BLOCK 36                    /* 2 signs x 3 operands x 6 exponents */
+
+/* The structural exponents of the three floating-point operations: the
+ * first and last exponent at which a rounding position or a range class
+ * changes, with one saturated exponent beyond each end. */
+static const int CLS_LO_E[3] = { -152, -3, -3 };
+static const int CLS_HI_E[3] = { 128, 53, 64 };
+
+static uint64_t cls_mask(int n)
+{
+    return n <= 0 ? 0 : (n >= 64 ? ~0ull : (1ull << n) - 1);
+}
+
+/* The P-bit significand (top bit set) whose low d bits the rounding
+ * drops, of class c and pattern t: python/c5_class_enum.py `sig`. */
+static uint64_t cls_sig(int P, int d, int c, int t)
+{
+    uint64_t K, D = 0, walk = 0, half;
+    int k;
+
+    if (d > P + 1)
+        d = P + 1;
+    k = P - d;
+    if (t >= 4) {
+        walk = 1ull << (t - 4);
+        K = k >= 1 ? 1ull << (k - 1) : 0;
+    } else if (k <= 0) {
+        K = 0;
+    } else if (k == 1) {
+        K = 1;
+    } else {
+        K = ((t >> 1) ? cls_mask(k) - 1 : 1ull << (k - 1)) |
+            (uint64_t)(t & 1);
+    }
+    if (d >= 1) {
+        half = (d - 1) < 64 ? 1ull << (d - 1) : 0;
+        D = c == 0 ? 0 : (c == 1 ? 1 : (c == 2 ? half : (half | 1)));
+    }
+    return ((d < 64 ? K << d : 0) | D | walk | (1ull << (P - 1))) &
+           cls_mask(P);
+}
+
+/* The biased exponent field of witness j: 2^j, then the all-ones field
+ * with bit j cleared, then 0 (the subnormals). */
+static int cls_witness(int j)
+{
+    if (j < 11)
+        return 1 << j;
+    if (j < 22)
+        return 2047 ^ (1 << (j - 11));
+    return 0;
+}
+
+static int cls_nstruct(int job) { return CLS_HI_E[job] - CLS_LO_E[job] + 1; }
+
+/* Indices of the operation `job`'s space. */
+static uint64_t cls_size(int job)
+{
+    switch (job) {
+    case CLS_CONV: case CLS_RINT: case CLS_CVTTO:
+        return (uint64_t)(cls_nstruct(job) + CLS_NWIT) * CLS_CELL;
+    case CLS_CVTFROM:
+        return (uint64_t)CLS_NCELL_FROM * CLS_NCLS * CLS_NPAT_FROM +
+               CLS_NSPECIAL_FROM;
+    default:
+        return (uint64_t)CLS_STRIPIDX + 2 * CLS_BLOCK;
+    }
+}
+
+/* The fp64 operand of index i of conv64to32, rint64 or cvtto64. */
+static uint64_t cls_round_operand(int job, uint64_t i)
+{
+    int t = (int)(i % CLS_NPAT), c, sign, e, b, d;
+    uint64_t pi;
+
+    i /= CLS_NPAT;
+    c = (int)(i % CLS_NCLS);
+    i /= CLS_NCLS;
+    sign = (int)(i % 2);
+    pi = i / 2;
+    if (pi < (uint64_t)cls_nstruct(job)) {
+        e = CLS_LO_E[job] + (int)pi;
+        b = e + 1023;
+    } else {
+        b = cls_witness((int)(pi - (uint64_t)cls_nstruct(job)));
+        e = b - 1023;
+    }
+    if (b == 0)
+        d = CLS_W + 2;                  /* the subnormals: P + 1 */
+    else if (job == CLS_CONV)
+        d = 29 + (e < -126 ? -126 - e : 0);
+    else
+        d = e < CLS_W ? CLS_W - e : 0;
+    return ((uint64_t)sign << 63) | ((uint64_t)b << 52) |
+           (cls_sig(CLS_W + 1, d, c, t) & cls_mask(CLS_W));
+}
+
+/* The 64-bit source of index i of cvtfrom64: its bit pattern, and whether
+ * it is a u64 (else an i64). */
+static void cls_cvtfrom_operand(uint64_t i, uint64_t *v, int *is_u64)
+{
+    const uint64_t base = (uint64_t)CLS_NCELL_FROM * CLS_NCLS * CLS_NPAT_FROM;
+
+    if (i >= base) {
+        *is_u64 = (i - base) == 2;
+        *v = (i - base) == 0 ? 1ull << 63 : 0;
+        return;
+    }
+    {
+        int t = (int)(i % CLS_NPAT_FROM);
+        int c = (int)((i / CLS_NPAT_FROM) % CLS_NCLS);
+        int ci = (int)(i / ((uint64_t)CLS_NPAT_FROM * CLS_NCLS));
+        int sv, L;
+        uint64_t m;
+        if (ci < 63)       { sv = 0; L = ci + 1; }
+        else if (ci < 126) { sv = 1; L = ci - 63 + 1; }
+        else               { sv = 2; L = ci - 126 + 1; }
+        m = cls_sig(L, L > 53 ? L - 53 : 0, c, t);
+        *v = sv == 1 ? (uint64_t)0 - m : m;
+        *is_u64 = sv == 2;
+    }
+}
+
+/* The (operand, exponent) pair of index i of scaleb64: the strips, then
+ * the overflow block, then the block deeper than the last strip. */
+static void cls_scaleb_operand(uint64_t i, uint64_t *a, int64_t *nx)
+{
+    if (i < (uint64_t)CLS_STRIPIDX) {
+        int t = (int)(i % CLS_NPAT), c, sign, route, s;
+        uint64_t pi;
+        i /= CLS_NPAT;
+        c = (int)(i % CLS_NCLS);
+        i /= CLS_NCLS;
+        sign = (int)(i % 2);
+        pi = i / 2;
+        route = (int)(pi / CLS_NSTRIP);
+        s = (int)(pi % CLS_NSTRIP) + 1;
+        if (route == 0) {
+            *a = ((uint64_t)sign << 63) | (1023ull << 52) |
+                 (cls_sig(53, s, c, t) & cls_mask(52));
+            *nx = -1022 - s;
+        } else if (route == 1) {
+            *a = ((uint64_t)sign << 63) | (2046ull << 52) |
+                 (cls_sig(53, s, c, t) & cls_mask(52));
+            *nx = -1022 - s - 1023;
+        } else {
+            *a = ((uint64_t)sign << 63) | (cls_sig(52, s - 1, c, t) & cls_mask(52));
+            *nx = 1 - s;
+        }
+    } else {
+        int j = (int)(i - CLS_STRIPIDX), deep = j >= CLS_BLOCK, sign, oi, li;
+        uint64_t b, frac;
+        int64_t ex;
+        j %= CLS_BLOCK;
+        sign = j / 18;
+        j %= 18;
+        oi = j / 6;
+        li = j % 6;
+        if (oi == 0)      { b = 1023; frac = 0; ex = 0; }
+        else if (oi == 1) { b = 2046; frac = cls_mask(52); ex = 1023; }
+        else              { b = 0; frac = 1; ex = -1074; }
+        *a = ((uint64_t)sign << 63) | (b << 52) | frac;
+        if (!deep) {
+            int64_t nf = 1023 + 1 - ex;
+            const int64_t l[6] = { nf, nf + 1, 3 * 1023, 3 * 1023 + 1, 100000,
+                                   INT64_MAX };
+            *nx = l[li];
+        } else {
+            int64_t nl = -1022 - 53 - 2 - ex;
+            const int64_t l[6] = { nl, nl - 1, -(4 * 1023 + 2 * 53),
+                                   -(4 * 1023 + 2 * 53) - 1, -100000,
+                                   INT64_MIN };
+            *nx = l[li];
+        }
+    }
+}
+
+static int class_job(const char *job)
+{
+    int j;
+    for (j = 0; j < CLS_NJOB; j++)
+        if (!strcmp(job, CLASS_JOBS[j].job))
+            return j;
+    return -1;
+}
+
+/* [lo, hi) must be a non-empty part of the operation's index space. The
+ * drivers index the space with the running value, so a range past it
+ * would read operands that do not exist: refused by name, as is anything
+ * that is not a whole number. */
+static int class_range(int job, const char *slo, const char *shi,
+                       uint64_t *lo, uint64_t *hi)
+{
+    char *e1, *e2;
+    *lo = strtoull(slo, &e1, 0);
+    *hi = strtoull(shi, &e2, 0);
+    if (!*slo || !*shi || *e1 || *e2 || *lo >= *hi || *hi > cls_size(job)) {
+        fprintf(stderr, "need 0 <= lo < hi <= %llu (the indices of the %s "
+                "space), got [%s, %s)\n",
+                (unsigned long long)cls_size(job), CLASS_JOBS[job].job,
+                slo, shi);
+        return 1;
+    }
+    return 0;
+}
+
+/* HOW A CLASS CASE IS RUN. A class case is a deliberate operand, so it is run
+ * ALONE: CLS_BATCH operands a kernel call, 1 by default. The kernels compare
+ * values per lane but flags by the OR over a call, and only where the ORs
+ * disagree do they look at a lane by itself, so a flag a defect drops on one
+ * operand among others that raise it goes unseen in a batch (MEASURED, a
+ * library that drops INEXACT for the one operand whose dropped bits are 0...01:
+ * the whole conv64to32-class space passes in batches and one index of it fails
+ * alone). A call of one operand makes every flag the operand's own.
+ *
+ * The TILE modes (rint64-class, scaleb64-class) have a second axis. A tile's
+ * fp64 array is CLS_LANES lanes wide and an element goes to lane (its place in
+ * the pass) mod CLS_LANES, so an operand always run first in a call would
+ * only ever meet lane 0, and one run in a long batch would meet the one lane
+ * its index gives it. Each operand is therefore run once in each lane, behind
+ * 0 to CLS_LANES - 1 benign operands (1.0 for rint, +0 for scaleB: exact, no
+ * flags, answered correctly by the oracle and the library alike, and not
+ * counted as cases), which also keeps its flags the only ones in the call.
+ * The cost of both is calls, not cases: k is CLS_LANES for these two modes,
+ * and a call on a device is dominated by its passes, so a whole space takes
+ * minutes on a tile where the software backend takes seconds. Build with
+ * -DCLS_BATCH=4092 for batches (fast, flags per batch, lanes still rotated),
+ * -DCLS_LANES=1 for no rotation, -DCLS_LANES=<n> for a tile of n lanes. */
+
+#ifndef CLS_BATCH
+#define CLS_BATCH 1
+#endif
+#ifndef CLS_LANES
+#define CLS_LANES 4                     /* fp64 lanes of a tile (docs/ARCHITECTURE.md) */
+#endif
+#if CLS_BATCH < 1 || CLS_LANES < 1 || CLS_BATCH + CLS_LANES - 1 > BATCH
+#error "CLS_BATCH and CLS_LANES must leave room for the benign operands in front of a call"
+#endif
+#define CLS_ONE64 0x3ff0000000000000ull /* 1.0, the benign operand of rint */
+
+static int drv_class_conv(uint64_t lo, uint64_t hi, int mi)
+{
+    static uint64_t A[BATCH];
+    int flags_ok = conv64to32_gate();
+    uint64_t v = lo;
+    while (v < hi) {
+        size_t n = hi - v > CLS_BATCH ? CLS_BATCH : (size_t)(hi - v), i;
+        for (i = 0; i < n; i++)
+            A[i] = cls_round_operand(CLS_CONV, v + i);
+        if (conv64to32_batch(mi, A, n, flags_ok))
+            return 1;
+        encodings += n;
+        v += n;
+    }
+    return 0;
+}
+
+/* rint64: a tile mode. Each operand runs in each lane behind 1.0s. */
+static int drv_class_rint(uint64_t lo, uint64_t hi, int mi)
+{
+    static uint64_t A[BATCH];
+    uint64_t v = lo;
+    while (v < hi) {
+        size_t n = hi - v > CLS_BATCH ? CLS_BATCH : (size_t)(hi - v), i;
+        int ln;
+        for (ln = 0; ln < CLS_LANES; ln++) {
+            for (i = 0; i < (size_t)ln; i++)
+                A[i] = CLS_ONE64;
+            for (i = 0; i < n; i++)
+                A[(size_t)ln + i] = cls_round_operand(CLS_RINT, v + i);
+            if (rint_batch64(mi, A, n + (size_t)ln))
+                return 1;
+            cases -= (uint64_t)ln;             /* the 1.0s are not cases */
+        }
+        encodings += n;
+        v += n;
+    }
+    return 0;
+}
+
+static int drv_class_cvtto(uint64_t lo, uint64_t hi, int mi)
+{
+    static uint64_t A[BATCH];
+    uint64_t v = lo;
+    while (v < hi) {
+        size_t n = hi - v > CLS_BATCH ? CLS_BATCH : (size_t)(hi - v), i;
+        for (i = 0; i < n; i++)
+            A[i] = cls_round_operand(CLS_CVTTO, v + i);
+        if (cvtto_batch(1, mi, A, n))
+            return 1;
+        encodings += n;
+        v += n;
+    }
+    return 0;
+}
+
+/* The sources run as i64 or u64 by runs of one type: a call is cut where
+ * the type changes. */
+static int drv_class_cvtfrom(uint64_t lo, uint64_t hi, int mi)
+{
+    static uint64_t V[BATCH], S64[BATCH];
+    static int U[BATCH];
+    int flags_ok = 1;
+    uint64_t v = lo;
+
+    if (!cvtfrom_gate(mi, &flags_ok))
+        return 0;                 /* main prints the zero-case line */
+    while (v < hi) {
+        size_t n = hi - v > CLS_BATCH ? CLS_BATCH : (size_t)(hi - v), i, j;
+        for (i = 0; i < n; i++) {
+            cls_cvtfrom_operand(v + i, &S64[i], &U[i]);
+            V[i] = S64[i];
+        }
+        for (i = 0; i < n; i = j) {
+            for (j = i + 1; j < n && U[j] == U[i]; j++)
+                ;
+            if (cvtfrom_check(1, mi, U[i] ? 3 : 2, j - i, flags_ok,
+                              V + i, NULL, S64 + i))
+                return 1;
+        }
+        encodings += n;
+        v += n;
+    }
+    return 0;
+}
+
+/* scaleb64: a tile mode. The operands of a run of one exponent are one
+ * scaleb_batch call per lane, behind +0s. The library takes an int64_t
+ * exponent and the oracle's scalbn an int, so the oracle is asked for the
+ * exponent clamped to int's range: past 2098 and below -2099 every nonzero
+ * finite fp64 operand overflows or falls under half the smallest subnormal, so
+ * x * 2^INT64_MAX and x * 2^INT32_MAX have the same correctly rounded value
+ * (the blocks' last exponents are 2^63 - 1 and -2^63, and without the clamp
+ * the cast to int would be -1 and 0). */
+static int drv_class_scaleb(uint64_t lo, uint64_t hi, int mi)
+{
+    static uint64_t A[BATCH], B[BATCH];
+    static int64_t NX[BATCH];
+    int flags_ok = 1;
+    uint64_t v = lo;
+
+    if (!scaleb_gate(mi, &flags_ok))
+        return 0;                 /* main prints the zero-case line */
+    while (v < hi) {
+        size_t n = hi - v > CLS_BATCH ? CLS_BATCH : (size_t)(hi - v), i, j;
+        for (i = 0; i < n; i++)
+            cls_scaleb_operand(v + i, &A[i], &NX[i]);
+        for (i = 0; i < n; i = j) {
+            int64_t oc = NX[i] > INT32_MAX ? INT32_MAX
+                       : (NX[i] < INT32_MIN ? INT32_MIN : NX[i]);
+            int ln;
+            for (j = i + 1; j < n && NX[j] == NX[i]; j++)
+                ;
+            for (ln = 0; ln < CLS_LANES; ln++) {
+                size_t q;
+                for (q = 0; q < (size_t)ln; q++)
+                    B[q] = 0;                  /* +0 rides the multiply, no flags */
+                memcpy(B + ln, A + i, (j - i) * sizeof B[0]);
+                if (scaleb_batch(1, mi, B, (j - i) + (size_t)ln, &NX[i], &oc, 1,
+                                 flags_ok, "scaleb64"))
+                    return 1;
+                cases -= (uint64_t)ln;         /* the +0s are not cases */
+            }
+        }
+        encodings += n;
+        v += n;
+    }
+    return 0;
+}
+
+/* `dump <job> size` prints the size of the job's index space; `dump <job>
+ * <lo> <hi>` prints one line a index: the index, the operand as 16 hex
+ * digits, and for cvtfrom64-class the source type, for scaleb64-class the
+ * exponent. No device is opened. python/c5_class_enum.py --dump prints the
+ * same lines from its side, and the test diffs them. */
+static int class_dump(int argc, char **argv)
+{
+    int job = argc >= 4 ? class_job(argv[2]) : -1;
+    uint64_t lo, hi, i;
+
+    if (job < 0)
+        return 2;
+    if (argc == 4 && !strcmp(argv[3], "size")) {
+        printf("%llu\n", (unsigned long long)cls_size(job));
+        return 0;
+    }
+    if (argc != 5 || class_range(job, argv[3], argv[4], &lo, &hi))
+        return 2;
+    for (i = lo; i < hi; i++) {
+        uint64_t a;
+        int64_t nx;
+        int u;
+        if (job == CLS_CVTFROM) {
+            cls_cvtfrom_operand(i, &a, &u);
+            printf("%llu 0x%016llx %s\n", (unsigned long long)i,
+                   (unsigned long long)a, u ? "u64" : "i64");
+        } else if (job == CLS_SCALEB) {
+            cls_scaleb_operand(i, &a, &nx);
+            printf("%llu 0x%016llx %lld\n", (unsigned long long)i,
+                   (unsigned long long)a, (long long)nx);
+        } else {
+            printf("%llu 0x%016llx\n", (unsigned long long)i,
+                   (unsigned long long)cls_round_operand(job, i));
+        }
+    }
+    return 0;
+}
+
 /* ---- main --------------------------------------------------------- */
 
 static void usage(const char *argv0)
@@ -2316,8 +2839,13 @@ static void usage(const char *argv0)
         "       %s cvtto32-all <lo> <hi> <rne|rtz|rdn|rup|rmm>\n"
         "       %s cvtfrom32-all|cvtfrom64-all|scaleb32-all|scaleb32-wide "
         "<lo> <hi> <rne|rtz|rdn|rup>\n"
+        "       %s conv64to32-class|cvtfrom64-class|scaleb64-class "
+        "<lo> <hi> <rne|rtz|rdn|rup>\n"
+        "       %s rint64-class|cvtto64-class <lo> <hi> <mode+rmm>\n"
+        "       %s dump <job>-class size | <lo> <hi>\n"
         "       %s probe scalbn|castflags|cvtfrom|scalebrange\n",
-        argv0, argv0, argv0, argv0, argv0, argv0, argv0, argv0, argv0);
+        argv0, argv0, argv0, argv0, argv0, argv0, argv0, argv0, argv0,
+        argv0, argv0, argv0);
 }
 
 int main(int argc, char **argv)
@@ -2360,6 +2888,13 @@ int main(int argc, char **argv)
             return probe_scalebrange() ? 0 : 1;
         usage(argv[0]);
         return 2;
+    }
+
+    if (!strcmp(job, "dump")) {
+        int drc = class_dump(argc, argv);
+        if (drc == 2)
+            usage(argv[0]);
+        return drc;
     }
 
     if (argc < 4) {
@@ -2490,6 +3025,24 @@ int main(int argc, char **argv)
             rc = drv_scaleb32_all(p1, p2, mi);
         } else {
             rc = drv_scaleb32_wide(p1, p2, mi);
+        }
+    } else if (class_job(job) >= 0 && argc == 5 &&
+               (mi != 4 || CLASS_JOBS[class_job(job)].rmm)) {
+        /* the class-level modes: <lo> <hi> over the operation's index
+         * space, validated here, and a verdict line that says what was
+         * covered */
+        int cj = class_job(job);
+        if (class_range(cj, argv[2], argv[3], &p1, &p2)) {
+            cft_close(dev);
+            return 2;
+        }
+        exh_mode = 1;
+        switch (cj) {
+        case CLS_CONV:    rc = drv_class_conv(p1, p2, mi); break;
+        case CLS_RINT:    rc = drv_class_rint(p1, p2, mi); break;
+        case CLS_CVTTO:   rc = drv_class_cvtto(p1, p2, mi); break;
+        case CLS_CVTFROM: rc = drv_class_cvtfrom(p1, p2, mi); break;
+        default:          rc = drv_class_scaleb(p1, p2, mi); break;
         }
     } else {
         usage(argv[0]);
