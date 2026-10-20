@@ -51,6 +51,11 @@ subject compute on the host CPU instead (six functions, binary32 and binary64, f
 name), and `arbitrate --host` names the classes for it. `CFT_SOAK_SABOTAGE=1|2` (and `..._EVERY=N`) is its negative
 control.
 
+The mulAdd prefix is `--level 2 --only _mulAdd --limit 134217728`. The strict probes are `run --level 1
+--max-errors 0` with `--ver-flags=-checkInvInts --only _to_ui32,_to_ui64,_to_i32,_to_i64`, with `--tininess before`,
+and with `--ver-flags=-checkNaNs --skip _mulAdd` (and again `--only _mulAdd --limit 600000`); the last two are
+arbitrated with `--nan-bits`. Binary128 is `--wide`; the host CPU is `CFT_TF_ORACLE=host` in `run`'s environment.
+
 **UCBTEST.** `host/tools/ucb_run.sh UCBDIR host BUILDDIR NTESTS` compiles UCBTEST's sources, unchanged, with
 `host/tools/ucb_hooks.c`, which supplies from libcft the `testdivd_`, `testsqrtd_`, `testmuld_` family (UCBTEST keeps
 the arithmetic it tests in those functions, for a platform to supply), and runs the six programs; UCBTEST's own
@@ -64,11 +69,13 @@ for `ucb_run.sh --replay`, which sends them through `testfloat_ver`. The ten vec
 
 ## 3. What each covered
 
-**TestFloat** (software backend; tininess after rounding, which is what libcft detects and also TestFloat's own
-default, passed as `-tininessafter`). Binary32 and binary64: add, sub, mul, mulAdd, div, sqrt, rem, roundToInt (with
-and without `-exact`), eq, le, lt and their signaling and quiet kin, `f32_to_f64`, `f64_to_f32`, the eight
-integer-to-float and eight float-to-integer conversions (with and without `-exact`); every function that rounds in
-all five modes both libraries share (near_even, near_maxMag, minMag, min, max).
+**TestFloat** (software backend; tininess after rounding, which is what libcft detects - READ in
+`docs/DETERMINISM.md`, "Tininess is detected after rounding", and in `round_pack` of
+`python/cft_golden/softfloat.py` - and also TestFloat's own default, passed as `-tininessafter`). Binary32 and
+binary64: add, sub, mul, mulAdd, div, sqrt, rem, roundToInt (with and without `-exact`), eq, le, lt and their
+signaling and quiet kin, `f32_to_f64`, `f64_to_f32`, the eight integer-to-float and eight float-to-integer
+conversions (with and without `-exact`); every function that rounds in all five modes both libraries share
+(near_even, near_maxMag, minMag, min, max).
 
 | run | pipelines | cases | reported | note |
 |---|---|---|---|---|
@@ -158,7 +165,7 @@ binary64 is covered by TestFloat and UCBTEST.
 | `testfloat_ver` (SoftFloat 3e, specialization 8086-SSE) | the TestFloat pipelines and the replay of UCBTEST's cases; SoftFloat itself checked in this build against TestFloat's slowfloat by `testsoftfloat -level 1` over the 46 functions the pipelines use: 281 combinations of function, rounding mode (the five and round to odd) and tininess setting, 150,759,744 tests, 0 errors |
 | UCBTEST's own arithmetic (exact integers, Kahan's constructions) | `ucbdivtest`, `ucbsqrtest`, `ucbmultest` |
 | the host CPU's own hardware (`CFT_UCB_HOSTCHECK`; and as a subject, `CFT_TF_ORACLE=host`) | every call of the six UCB programs, bits and flags: 0 and 0; and the CPU itself judged by `testfloat_ver` and by IBM's vectors, beside libcft (above) |
-| the vectors' own expected values | IBM's files and UCBTEST's ten, with the arbitration below |
+| the vectors' own expected values | IBM's files and UCBTEST's ten, with the arbitration of section 4 |
 | `python/cft_golden` | every disagreement: libcft = golden against an outside value is a convention or an outside error; a golden that agrees with the outside value against libcft would be a defect |
 
 ## 6. Known limits
