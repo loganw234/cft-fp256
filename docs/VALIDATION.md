@@ -22061,7 +22061,7 @@ All thirteen on one quad: 575 s, 9.6 minutes; one tile four times each. **Per tr
 
 ## 2026-10-20 - the `generated` stage counts the checks its passing tools skip, and a CRLF checkout and a CRLF extract are named for what they are (parcel GS, Sonnet 5.5)
 
-**What Logan asked,** verbatim, on 2026-10-20: "Math round may be slightly delayed to handle 6 and 9, as well as the task chips once the stress test is finished". This is the chip that follows parcel FX's entry (above): verifier-VFX found four things while checking FX, and this closes them. Each is shown first at c9741e0, then fixed.
+**What Logan asked,** verbatim, on 2026-10-20: "Math round may be slightly delayed to handle 6 and 9, as well as the task chips once the stress test is finished". This is the chip that follows parcel FX's entry (above): verifier-VFX found four things while checking FX, and this closes them. Two are known limits that FX's entry lists: "project_packager.py, report only, not changed" (the CRLF refusal, 3 below) and "`figure_extracts.py ledger --verify` on a CRLF-saved extract" printing "ok ... remakes byte for byte" with no note (4 below); the other two are the runner's (1 and 2). FX's entry is not edited (the ledger is append-only), so those two limits still stand in it, and this entry closes them. Each is shown first at c9741e0, then fixed.
 
 **The four, and what closes each:**
 1. **The runner's hole.**
