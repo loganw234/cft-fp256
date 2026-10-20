@@ -1018,8 +1018,11 @@ def scratch_checks(root, with_png, problems, report):
               lambda: (os.remove(str(S / DOC)), sgit(S, "commit", "-q", "--no-verify", "-am", "plant: remove " + DOC)))
 
         # A CRLF checkout is refused as one, by name, and not as the sidecar-mismatch its raw digests would also give.
-        # The files are rewritten CRLF and `git add`ed, as a Windows editor leaves a tracked file: the blob is the same
-        # LF one, so git calls the tree clean, and only the packager's own look at the bytes can see it.
+        # The files are rewritten CRLF and then `git add`ed. MEASURED: a file just saved CRLF shows ` M` to git, and the
+        # packager's first gate, dirty-tree, refuses it (beside crlf-checkout, or alone for a file only STATUS.md
+        # reads); after `git add` the index records the CRLF file's size, the blob is the same LF one, and git's clean
+        # status "holds while the index entry's recorded size is the CRLF file's" (VIW8), as FX's formats.py was left.
+        # Only the packager's own look at the bytes can see that.
         def crlf_plant(label, rels, say):
             try:
                 for rel in rels:

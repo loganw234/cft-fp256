@@ -31,10 +31,14 @@ WHAT IT REFUSES, by name (exit 1, nothing written; independent refusals are repo
   dirty-tree          the tree differs from HEAD. The archive names a commit, so it must be made from it; with
                       --allow-dirty the name ends -dirty and the manifest lists the paths that differ.
   crlf-checkout       a file the archive copies, or whose digest a sidecar holds, or that STATUS.md was made from, is
-                      saved with CRLF line endings on disk, which git can call clean here (the repository is eol=lf).
-                      The archive holds the tree's bytes, so one made from it would not be an LF checkout's. It is
-                      refused first, naming the files, so that the digests are never compared and the fault is not
-                      reported as a sidecar-mismatch.
+                      saved with CRLF line endings on disk. The archive holds the tree's bytes, so one made from it
+                      would not be an LF checkout's. Git's clean status for such a file "holds while the index entry's
+                      recorded size is the CRLF file's" (VIW8, in docs/VALIDATION.md), which is the state after a
+                      `git add`. One an editor has just saved shows as modified, and dirty-tree is refused first: beside
+                      this for a file the archive copies or holds a digest of, alone for a file only STATUS.md reads.
+                      For a file the archive copies or holds a digest of, this is refused before any digest is compared,
+                      so it is not reported as a sidecar-mismatch; for a file only STATUS.md reads, after the figure
+                      check and the other files' digests. It names the first five files and how many.
   output-not-ignored  the output directory is inside the tree and git does not ignore it.
   exists              the archive is already there (--force replaces it).
   no-converter, converter-unusable   there is no rsvg-convert, or the one named does not answer as one, and
@@ -251,7 +255,8 @@ def crlf_files(root):
 def crlf_read(root, rd):
     """The files a reader has read that are saved with CRLF on disk. After STATUS.md is built that is every file it was
     made from, which crlf_files cannot list ahead: MEASURED, a CRLF docs/VALIDATION.md, docs/ROADMAP.md or tb/Makefile
-    builds a STATUS.md that is not the LF tree's (the first holds CR bytes), and nothing refused it."""
+    builds a STATUS.md that is not the LF tree's (the first holds CR bytes), and, once git called the tree clean (after
+    a `git add`), nothing refused it; unstaged, dirty-tree did."""
     return [rel for rel in sorted(rd.log) if X.tree_bytes(root / rel)[1]]
 
 
