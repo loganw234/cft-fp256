@@ -1,0 +1,18 @@
+soaking the software backend
+  MISMATCH rne a=0x027fffff b=0x41800000 lib=0x00800001 cpu=0x00800000
+  MISMATCH rne a=0x827fffff b=0x41800000 lib=0x80800001 cpu=0x80800000
+  MISMATCH rne a=0x027fffff b=0xc1800000 lib=0x80800001 cpu=0x80800000
+  MISMATCH rne a=0x827fffff b=0xc1800000 lib=0x00800001 cpu=0x00800000
+  MISMATCH rne a=0x02000001 b=0x41800000 lib=0x00400001 cpu=0x00400000
+  MISMATCH rne a=0x82000001 b=0x41800000 lib=0x80400001 cpu=0x80400000
+  MISMATCH rne a=0x02000001 b=0xc1800000 lib=0x80400001 cpu=0x80400000
+  MISMATCH rne a=0x82000001 b=0xc1800000 lib=0x00400001 cpu=0x00400000
+  MISMATCH rne a=0x02555555 b=0x41800000 lib=0x006aaaab cpu=0x006aaaaa
+  MISMATCH rne a=0x82555555 b=0x41800000 lib=0x806aaaab cpu=0x806aaaaa
+  MISMATCH rne a=0x02555555 b=0xc1800000 lib=0x806aaaab cpu=0x806aaaaa
+  MISMATCH rne a=0x82555555 b=0xc1800000 lib=0x006aaaab cpu=0x006aaaaa
+  MISMATCH rne a=0x027ffffd b=0x41800000 lib=0x007fffff cpu=0x007ffffe
+  MISMATCH rne a=0x827ffffd b=0x41800000 lib=0x807fffff cpu=0x807ffffe
+  MISMATCH rne a=0x027ffffd b=0xc1800000 lib=0x807fffff cpu=0x807ffffe
+  MISMATCH rne a=0x827ffffd b=0xc1800000 lib=0x007fffff cpu=0x007ffffe
+div32-hard rne: 16384 cases, 16384 value mismatches, 0 flag mismatches, 4096 encodings, 0 skipped

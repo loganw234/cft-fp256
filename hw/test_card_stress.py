@@ -24,6 +24,13 @@ Three kinds of group, then the plants (the groups, by name, are in hw/test-card-
             reach, STOP and the deadline, a host job's failure, --resume, the lock on the metrics
             file - the seed schedule over the catalog and across runs (--earlier-runs, an old run
             resumed), and coverage by tree (the tree the driver records, the report's section, --also).
+  items, chunk, records, notes, standin   (parcel DR3, 2026-10-21) items: the 35 hard-case and class-level items in the catalog - held to
+            the documents' figures and to the REAL tools' logs, planned, served to the end of their spaces and refused when short; chunk:
+            --sweep-chunk, the tool's pass-size line held to the request, random scaleB's cases at a BATCH, and the rule for which random
+            streams are repeats of which; records: the campaign's own space, --records/--sign-key/--device-key and their refusals, the record
+            sink on a real dry run's records (refused as they stand; written with the one field that says 'dry run' changed in a scratch
+            directory) and a real, NOT dry run of the driver over test doubles (POSIX); notes: --quick --sweep-items after an empty wave,
+            figure_extracts' cpu filter (needs CARD_STRESS_METRICS), and standin_alive (its own group, `standin`, which its plants run).
 
 POSIX-only checks (the `nice` and `timeout` wrappers, a process that ignores SIGTERM) are
 SKIPped by name on Windows and run under WSL or on the box. Everything runs niced by the
@@ -536,16 +543,19 @@ def catalog_checks(c, mod, d, q) -> None:
     i0 = names.index("class32") + 1
     c("catalog: the 22 exhaustive conversion and scaleB items follow class32, in the script's order",
       names[i0:i0 + 22] == new, str(names[i0:i0 + 22]))
-    exh = [it for it in items if it.kind == "exhaustive"]
-    c("catalog: 36 exhaustive items (the 14 of the last run and the 22 new) and the 54 random ones, none gone",
-      len(exh) == 36 and len(items) - len(exh) == 54 and all(it.kind == "random" for it in items[i0 + 22:]),
-      f"{len(exh)} exhaustive of {len(items)}")
+    camp = items[:90]                 # the scripts' campaign; the coverage wave's 35 index-based items are appended after it
+    exh = [it for it in camp if it.kind == "exhaustive"]
+    c("catalog: the scripts' campaign is the first 90 items - 36 exhaustive (the 14 of the last run and the 22 new) and 54 random, "
+      "none gone - and the coverage wave's 35 exhaustive hard-case and class-level items follow it",
+      len(items) == 125 and len(exh) == 36 and len(camp) - len(exh) == 54 and all(it.kind == "random" for it in items[i0 + 22:90])
+      and all(it.kind == "exhaustive" and it.level in ("hard", "class") for it in items[90:]),
+      f"{len(exh)} exhaustive of the first {len(camp)}, {len(items)} in all")
     c("catalog: the new items have per-encoding counts 1, 4, 2, 2, 17, 568; only cvtto32-all has no fixed case count",
       [(by_name[n].per_encoding, by_name[n].exact) for n in ("conv32to64-all", "cvtto32-all-rne", "cvtfrom32-all-rup",
                                                               "cvtfrom64-all-rdn", "scaleb32-all-rtz", "scaleb32-wide-rne")]
       == [(1, True), (4, False), (2, True), (2, True), (17, True), (568, True)])
     c("catalog: only the new items say what they covered (the 14 older exhaustive items and every random one do not)",
-      sorted(it.name for it in items if it.per_encoding is not None and it.name not in new) == []
+      sorted(it.name for it in camp if it.per_encoding is not None and it.name not in new) == []
       and all(by_name[n].per_encoding is not None for n in new))
     c("catalog: a probe that allows rne alone leaves the new cvtfrom and scaleB items rne alone and cvtto32-all its five",
       [it.name for it in L.sweep_items(("rne",), ("rne",)) if it.name in new]
@@ -569,13 +579,16 @@ def catalog_checks(c, mod, d, q) -> None:
            if it.reach != fam[re.match(r"(sqrt|div|rint|scaleb|conv|cvt|logb|next|class|rem)", it.op).group(1)]]
     c("reach: every item is marked as its operation's family is (sqrt, div, rint, scaleb: tile; conversions, "
       "next, logb, class, rem: host)", not bad, str(bad[:4]))
-    c("reach: the table has no operation the catalog does not use, and 43 items reach the tile and 47 do not",
-      set(L.OP_REACH) == {it.op for it in items} and sum(it.reach == L.TILE for it in items) == 43
-      and sum(it.reach == L.HOST for it in items) == 47,
+    c("reach: the table has no operation the catalog does not use; of the scripts' 90 items 43 reach the tile and 47 do not, and "
+      "of the coverage wave's 35, 22 do (13 hard-case, 9 class-level: rint64-class and scaleb64-class) and 13 do not",
+      set(L.OP_REACH) == {it.op for it in items} and sum(it.reach == L.TILE for it in camp) == 43
+      and sum(it.reach == L.HOST for it in camp) == 47
+      and sum(it.reach == L.TILE for it in items[90:]) == 22 and sum(it.reach == L.HOST for it in items[90:]) == 13
+      and sum(it.reach == L.TILE for it in items) == 65,
       f"{sorted(set(L.OP_REACH) ^ {it.op for it in items})}")
     c("reach: of the 54 random items 25 reach the tile (div32, div64, sqrt64 x4 each; rint64 x5; scaleb32, scaleb64 x4 "
-      "each) and 29 are host; of the 36 exhaustive items 18 and 18",
-      [(k, r, sum(it.kind == k and it.reach == r for it in items))
+      "each) and 29 are host; of the 36 exhaustive items of the scripts' campaign 18 and 18",
+      [(k, r, sum(it.kind == k and it.reach == r for it in camp))
        for k in ("random", "exhaustive") for r in (L.TILE, L.HOST)]
       == [("random", "tile", 25), ("random", "host", 29), ("exhaustive", "tile", 18), ("exhaustive", "host", 18)]
       and sorted({it.op for it in items if it.kind == "random" and it.reach == L.TILE})
@@ -622,7 +635,9 @@ def catalog_checks(c, mod, d, q) -> None:
         if rows is None:
             skip(f"catalog: {label}", "no bash on this host")
             return
-        cat = [it for it in (L.sweep_items(("rne",), ("rne",)) if probe_limited else L.sweep_items()) if it.tool == "clause5"]
+        # the clause-5 items the SCRIPT runs: the hard-case and class-level items are the driver's own, appended by the coverage wave
+        cat = [it for it in (L.sweep_items(("rne",), ("rne",)) if probe_limited else L.sweep_items())
+               if it.tool == "clause5" and it.level not in ("hard", "class")]
         order: list = []
         for r in rows:
             if (r[1], r[4]) not in order:
@@ -1041,7 +1056,11 @@ def standin_alive(pid: int) -> bool:
     """Whether `pid` is still a card_stress_standin.py process. pid_alive alone cannot tell it from the NEXT process the OS gave
     that pid to (Windows hands a freed pid out again at once - to the very tasklist that asks, or to another session's process),
     so a hung stand-in the driver had killed could look alive: the hang check failed once in 7.5 minutes of a Git Bash run, six
-    reruns of the same scenario passed, and this is the likely cause (BELIEVED). When the command line cannot be read it is alive."""
+    reruns of the same scenario passed, and this is the likely cause (BELIEVED). When the command line cannot be read it is ALIVE
+    (verifier-VDR1, 2026-10-20, notes 2 and 3; fixed 2026-10-21): on Windows that is a PowerShell call that times out (the 60 s limit,
+    on a loaded desktop: it used to raise and error the scenario instead of failing it), cannot be started, fails, or reads an empty
+    command line of a pid that is still there (the code treated that as dead while this text said alive). The one empty answer that
+    is dead is the pid's having exited between the first look and the query, which a second look at the pid tells."""
     if not pid_alive(pid):
         return False
     if POSIX:
@@ -1050,10 +1069,17 @@ def standin_alive(pid: int) -> bool:
                 return b"card_stress_standin" in fh.read()
         except OSError:
             return False
-    q = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command",
-                        f"(Get-CimInstance Win32_Process -Filter 'ProcessId={pid}').CommandLine"],
-                       capture_output=True, text=True, timeout=60)
-    return q.returncode != 0 or "card_stress_standin" in q.stdout
+    try:
+        q = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                            f"(Get-CimInstance Win32_Process -Filter 'ProcessId={pid}').CommandLine"],
+                           capture_output=True, text=True, timeout=60)
+    except (subprocess.TimeoutExpired, OSError):
+        return True
+    if q.returncode != 0:
+        return True
+    if not q.stdout.strip():
+        return pid_alive(pid)
+    return "card_stress_standin" in q.stdout
 
 
 def start_driver(env: Env, name: str, args: list, scenario=None, src: str = HERE, extra_env=None,
@@ -1596,14 +1622,19 @@ def scn_sweep_all(env: Env, src: str = HERE) -> list:
     c("sweep all: the three host items ran on the pool (image cpu) and the one tile item on the card (the quad)",
       all({x["image"] for x in legs if x["sweep"]["item"] == n} == ({"cpu"} if host[n] == "host" else {"quad"}) for n in names))
     st = open(os.path.join(r.out, "status.txt")).read()
-    ex36 = 18 * EXH_T
+    # the exhaustive items' spaces: 2^32 for each of the scripts' 36 (18 tile, 18 host), and for the coverage wave's 35 the indices of
+    # the mode's own space (the library's table; the catalog check holds each to the documents' figures)
+    ex_items = [it for it in L.sweep_items() if it.kind == "exhaustive"]
+    sp_all = sum(it.space for it in ex_items)
+    sp_t = sum(it.space for it in ex_items if it.reach == "tile")
+    sp_h = sum(it.space for it in ex_items if it.reach == "host")
     c("sweep all: status.txt says what the tile has seen and what it has not, on a line of its own that begins 'reach': one tile "
-      "item done of 18, three host items of 18",
+      "item done of 40 (18 of the scripts' and the coverage wave's 22), three host items of 31 (18 and 13)",
       re.search(r"^reach      tile items: exhaustive %s of %s encodings .*; host items: exhaustive %s of %s encodings .*; "
-                r"the tile computes nothing for a host item$" % (f"{EXH_T:,}", f"{ex36:,}", f"{3 * EXH_T:,}", f"{ex36:,}"), st, re.M)
-      is not None, st[st.find("reach"):][:400])
-    c("sweep all: and its sweep line counts all 36 exhaustive items' encodings, the new ones included",
-      f"exhaustive {4 * EXH_T:,} of {36 * EXH_T:,} encodings" in st, st[st.find("sweep "):][:200])
+                r"the tile computes nothing for a host item$" % (f"{EXH_T:,}", f"{sp_t:,}", f"{3 * EXH_T:,}", f"{sp_h:,}"), st, re.M)
+      is not None and len(ex_items) == 71 and sp_t > 18 * EXH_T and sp_h > 18 * EXH_T, st[st.find("reach"):][:400])
+    c("sweep all: and its sweep line counts all 71 exhaustive items' encodings, the new ones included, each over its own space",
+      f"exhaustive {4 * EXH_T:,} of {sp_all:,} encodings" in st and sp_all == sp_t + sp_h, st[st.find("sweep "):][:200])
     rp = os.path.join(HERE, "card_stress_report.py")
     p = subprocess.run([sys.executable, "-B", "-I", rp, r.out, "--no-write"], capture_output=True, text=True, timeout=120)
     t = p.stdout
@@ -2336,22 +2367,24 @@ def pool_unit_checks(src: str = HERE) -> list:
         d.items = L2.sweep_items()
         q = mod.Image("quad", "/box/quad.xclbin", 4, "u50-rev8-quad", None)
         card, pool = {}, {}
-        for _ in range(24):                                   # 96 card jobs: every one of the 43 tile items about twice
+        for _ in range(33):                                   # 132 card jobs: every one of the 65 tile items about twice
             for j in d.plan_wave(q, 3600, 4):
                 card[j["item"].name] = j["item"].reach
                 d.served[j["item"].name] = d.served.get(j["item"].name, 0) + 1
         d.served = {}
-        for _ in range(94):                                   # two turns of the 47 host items
+        for _ in range(120):                                  # two turns of the 60 host items
             j = d.pool_plan()
             if j is None:
                 break
             pool[j["item"].name] = (j["item"].reach, j["sweep"]["reach"], j["tile"])
             d.pool_busy.pop(j["item"].name, None)             # the slice is done
             d.served[j["item"].name] = d.served.get(j["item"].name, 0) + 1
-        c("pool: over a whole rotation the card's waves plan the 43 TILE items and not one host item",
-          len(card) == 43 and set(card.values()) == {"tile"}, f"{len(card)} items, reaches {sorted(set(card.values()))}")
-        c("pool: and the pool's slices are the 47 HOST items and not one tile item, no tile pinned, each record saying reach host",
-          len(pool) == 47 and {v[0] for v in pool.values()} == {"host"} and {v[1] for v in pool.values()} == {"host"}
+        c("pool: over a whole rotation the card's waves plan the 65 TILE items (the 43 of the scripts' campaign and the coverage "
+          "wave's 22) and not one host item",
+          len(card) == 65 and set(card.values()) == {"tile"}, f"{len(card)} items, reaches {sorted(set(card.values()))}")
+        c("pool: and the pool's slices are the 60 HOST items (the 47 and the wave's 13 class-level ones) and not one tile item, no "
+          "tile pinned, each record saying reach host",
+          len(pool) == 60 and {v[0] for v in pool.values()} == {"host"} and {v[1] for v in pool.values()} == {"host"}
           and {v[2] for v in pool.values()} == {None}, f"{len(pool)} items, {sorted({v[0] for v in pool.values()})}")
         d.pool_busy.clear()
         j1, j2 = d.pool_plan(), d.pool_plan()
@@ -3176,6 +3209,1361 @@ def scn_trees(env: Env, src: str = HERE) -> list:
 
 
 # ---------------------------------------------------------------------------------------
+# parcel DR3 (2026-10-21): the coverage wave's items, pass size and signed records, in the driver
+# ---------------------------------------------------------------------------------------
+
+M4, M5 = ("rne", "rtz", "rdn", "rup"), ("rne", "rtz", "rdn", "rup", "rmm")
+# The documents' figures for the 35 index-based items (docs/CARDDAY.md; HC's and CL's VALIDATION entries), written out here and not
+# read from the library: op -> (indices, k checks an index, attributes, reach, the (cases, skipped) of the whole space by attribute,
+# None for k x indices and 0). The tool's own `hard-count` and whole-space runs (hw/card_stress_fixtures/count-*, cl-*) hold them.
+DOC_INDEX = {
+    "div32-hard": (21_235_788, 4, M4, "tile", {m: (64_346_592, 20_596_560) for m in M4}),
+    "div64-hard": (289_685_696, 4, M4, "tile", {m: (812_489_184, 346_253_600) for m in M4}),
+    "sqrt64-hard": (4_456_448, 1, M5, "tile", {m: (1_745_752, 2_710_696) for m in M5}),
+    "conv64to32-class": (136_192, 1, M4, "host", None),
+    "rint64-class": (35_840, 4, M5, "tile", None),
+    "cvtto64-class": (40_768, 4, M5, "host", {"rne": (91_005, 72_067), "rtz": (91_484, 71_588), "rdn": (85_141, 77_931),
+                                              "rup": (91_478, 71_594), "rmm": (90_986, 72_086)}),
+    "cvtfrom64-class": (50_923, 1, M4, "host", None),
+    "scaleb64-class": (72_648, 4, M4, "tile", None),
+}
+DOC_NAMES = [f"{op}-{m}" for op, v in DOC_INDEX.items() for m in v[2]]
+
+
+def read_bytes(path: str) -> bytes:
+    """A file's bytes, or b'' where it is not there: a check about a file a broken driver did not write must go red, not crash."""
+    try:
+        with open(path, "rb") as fh:
+            return fh.read()
+    except OSError:
+        return b""
+
+
+def raises_in(L2, fn) -> bool:
+    """raises(), for the library a check imported itself (lib_from gives a module of its own, with its own VerdictError)."""
+    try:
+        fn()
+    except L2.VerdictError:
+        return True
+    return False
+
+
+def parse_ok_in(L2, fn):
+    """parse_ok(), for the same."""
+    try:
+        return fn(), ""
+    except L2.VerdictError as e:
+        return None, str(e)
+
+
+def fixture_index() -> dict:
+    index = {}
+    with open(os.path.join(FIX, "INDEX.txt"), "r", encoding="utf-8") as fh:
+        for ln in fh:
+            if ln.strip() and not ln.startswith("#"):
+                nm, rc, cmd = ln.rstrip("\n").split("\t", 2)
+                index[nm] = (int(rc), cmd)
+    return index
+
+
+@contextlib.contextmanager
+def driver_from(src: str, extra=()):
+    """A Driver (never run) of the copy of the code in `src`, in a scratch directory: (module, driver, lib). A plant's copy has its own
+    library and its own sweep_record.py, which the driver imports when --records is asked for, and python/ (cft_sign, cft_golden) is
+    where the real tree has it."""
+    pydir = os.path.join(ROOT, "python")
+    plant = os.path.abspath(src) != os.path.abspath(HERE)
+    sys.path.insert(0, src)
+    sys.path.insert(1, pydir)
+    saved = {k: sys.modules.pop(k, None) for k in ("card_stress_lib", "sweep_record")} if plant else {}
+    tmp = tempfile.mkdtemp(prefix="cs-dr3-")
+    try:
+        mod = importlib.import_module("card_stress")
+        d = mod.Driver(mod.parse_args(["--out", os.path.join(tmp, "o"), "--dry-run", "--root", ROOT] + list(extra)))
+        d.items = mod.L.sweep_items()
+        d.rate = {}
+        yield mod, d, mod.L
+    finally:
+        sys.path.remove(src)
+        sys.path.remove(pydir)
+        sys.modules.pop("card_stress", None)
+        if plant:
+            sys.modules.pop("sweep_record", None)
+            for k, v in saved.items():
+                if v is not None:
+                    sys.modules[k] = v
+        rmtree_force(tmp)
+
+
+@contextlib.contextmanager
+def sr_from(src: str):
+    """hw/sweep_record.py as the copy of the code in `src` has it (a plant's own), with its library: (module, lib)."""
+    pydir = os.path.join(ROOT, "python")                    # a plant's copy sits outside the tree: its imports still need python/
+    sys.path.insert(0, src)
+    sys.path.insert(0, pydir)
+    saved = {k: sys.modules.pop(k, None) for k in ("sweep_record", "card_stress_lib")} if os.path.abspath(src) != os.path.abspath(HERE) else {}
+    try:
+        mod = importlib.import_module("sweep_record")
+        yield mod, mod.L
+    finally:
+        sys.path.remove(src)
+        sys.path.remove(pydir)
+        if saved:
+            sys.modules.pop("sweep_record", None)
+            for k, v in saved.items():
+                if v is not None:
+                    sys.modules[k] = v
+
+
+def index_item_checks(src: str = HERE) -> list:
+    """The 35 index-based items (parcels HC and CL) in the catalog: their spaces, k, reach, attributes, exactness and whole-space
+    figures against the documents' and against the REAL tools' logs; each real log through parse_soak with the item's own rule, and
+    damaged every way the rule must refuse; the stand-in printing the real tool's line; and the plans the driver makes for them."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    index = fixture_index()
+    with lib_from(src) as L2:
+        raises = lambda fn: raises_in(L2, fn)               # noqa: E731
+        parse_ok = lambda fn: parse_ok_in(L2, fn)           # noqa: E731
+        everything = L2.sweep_items()
+        by = {it.name: it for it in everything}
+        new = everything[90:]
+        c("index items: the 35 follow the scripts' 90, in HC's then CL's order, one a (mode, attribute) and each attribute its "
+          "operation's", [it.name for it in new] == DOC_NAMES and len(new) == 35, str([it.name for it in new][:5]))
+        bad = []
+        for op, (space, k, ms, reach, whole) in DOC_INDEX.items():
+            for m in ms:
+                it = by.get(f"{op}-{m}")
+                if it is None:
+                    bad.append(f"{op}-{m} missing")
+                    continue
+                w = whole[m] if whole else (k * space, 0)
+                got = (it.op, it.mode, it.kind, it.space, it.per_encoding, it.reach, it.tool, it.verdict_mode, it.whole, it.exact)
+                want = (op, m, "exhaustive", space, k, reach, "divsqrt" if op.endswith("-hard") else "clause5", m, w,
+                        op in ("conv64to32-class", "rint64-class", "cvtfrom64-class", "scaleb64-class"))
+                if got != want:
+                    bad.append(f"{it.name}: {got} vs {want}")
+        c("index items: each has the documents' space, k, reach, tool, verdict word and whole-space figures, and is exact where "
+          "its cases are k x E (the four class modes that skip nothing) and not for the hard-case modes and cvtto64-class",
+          not bad, "; ".join(bad[:2]))
+        if any(f"{op}-{m}" not in by for op, spec in DOC_INDEX.items() for m in spec[2]):
+            return out              # a catalog without one of the 35 is red at the two checks above; the rest look an item up by name
+        it = by["rint64-class-rne"]
+        c("index items: the job line is `<tool> <op> <lo> <hi> <attribute>` over the item's own indices",
+          it.argv("B", lo=3, hi=9) == ["B", "rint64-class", "3", "9", "rne"] and by["sqrt64-hard-rmm"].argv("B", lo=0, hi=7) ==
+          ["B", "sqrt64-hard", "0", "7", "rmm"])
+        lim = {i.name for i in L2.sweep_items(("rne",), ("rne",)) if i.level in ("hard", "class")}
+        c("index items: a probe that allows rne alone leaves scaleb64-class and cvtfrom64-class rne alone and the others their modes",
+          {n for n in lim if n.startswith(("scaleb64-class", "cvtfrom64-class"))} == {"scaleb64-class-rne", "cvtfrom64-class-rne"}
+          and len(lim) == 35 - 3 - 3, str(len(lim)))
+        # the whole-space figures against the real tool's own counts
+        for mode, (space, k, _ms, _r, whole) in ((m, DOC_INDEX[m]) for m in ("div32-hard", "div64-hard", "sqrt64-hard")):
+            lines = fixture(f"count-{mode}.txt").splitlines()
+            tot = next((ln.split() for ln in lines if ln.startswith("total ")), None)
+            segs = [ln.split() for ln in lines[1:] if ln and not ln.startswith(("total ", "maxskip "))]
+            c(f"index items: hard-count of {mode}'s whole space (the real tool's log) gives {space:,} indices, the cases and "
+              f"skipped slots the catalog holds, and its segments add up",
+              tot is not None and tuple(int(x) for x in tot[1:]) == (space,) + whole["rne"]
+              and sum(int(s[1]) for s in segs) == space and sum(int(s[2]) for s in segs) == whole["rne"][0]
+              and sum(int(s[3]) for s in segs) == whole["rne"][1] and by[f"{mode}-rne"].whole == whole["rne"], str(tot))
+        # real logs, each through the item's own rule
+        goods = (("hc-div32-hard.txt", "div32-hard-rne"), ("hc-div64-hard.txt", "div64-hard-rtz"),
+                 ("hc-sqrt64-hard.txt", "sqrt64-hard-rmm"), ("cl-conv64to32-class.txt", "conv64to32-class-rne"),
+                 ("cl-rint64-class.txt", "rint64-class-rmm"), ("cl-cvtto64-class.txt", "cvtto64-class-rup"),
+                 ("cl-cvtfrom64-class.txt", "cvtfrom64-class-rtz"), ("cl-scaleb64-class.txt", "scaleb64-class-rdn"))
+        standin = os.path.join(src, "card_stress_standin.py")           # src: the code under test, or a plant's copy of it
+        for nm, iname in goods:
+            it = by[iname]
+            op, lo, hi, mode = fixture_job(index, nm)
+            t = fixture(nm)
+            m = SOAK_EXH_LINE.search(t)
+            if m is None:
+                c(f"index {nm}: the real verdict line carries the encodings and skipped clause", False)
+                continue
+            cases, enc, skp = int(m.group(3)), int(m.group(6)), int(m.group(7))
+            exp, cover = it.expected_cases(lo, hi), it.cover_spec(lo, hi)
+            if cover is None:                    # an item with no cover rule is a red check here, not a crash further down
+                c(f"index {nm}: {iname} has a cover rule: its verdict line says what a slice covered, and the slice is held to it", False)
+                continue
+            rc = index[nm][0]
+            v, why = parse_ok(lambda: L2.parse_soak(t, rc, it.op, it.verdict_mode, None, exp, cover))
+            c(f"index {nm}: made by {iname}'s command line; passes with the log's own cases, encodings and skipped, E the slice's "
+              f"{hi - lo:,} indices and cases + skipped k x E (k = {it.per_encoding})",
+              (op, mode) == (it.op, it.mode) and v is not None and v.ok and enc == hi - lo and cases + skp == it.per_encoding * (hi - lo)
+              and v.counts == {"cases": cases, "value_mismatches": 0, "flag_mismatches": 0, "encodings": enc, "skipped": skp}, why)
+            if lo == 0 and hi == it.space:
+                c(f"index {nm}: a whole-space log: its cases and skipped are the catalog's whole-space figures for {iname}",
+                  (cases, skp) == it.whole, f"{(cases, skp)} vs {it.whole}")
+            if it.exact:
+                c(f"index {nm}: the catalog's expected_cases is the real tool's count, and nothing was skipped",
+                  exp == cases and skp == 0, f"{exp} vs {cases}, skipped {skp}")
+            else:
+                c(f"index {nm}: its cases are not a function of the slice (expected_cases is None): coverage is the indices "
+                  f"alone plus k x E", exp is None and cover is not None)
+            for what, tweak in (("longer by one index", dict(cover, encodings=hi - lo + 1)),
+                                ("shorter by one index", dict(cover, encodings=hi - lo - 1)),
+                                ("with one more check an index", dict(cover, per_encoding=it.per_encoding + 1)),
+                                ("with one fewer check an index", dict(cover, per_encoding=it.per_encoding - 1))):
+                c(f"index {nm}: a slice {what} than the log is refused",
+                  raises(lambda tweak=tweak: L2.parse_soak(t, 0, it.op, it.verdict_mode, None, exp, tweak)))
+            if it.exact:
+                c(f"index {nm}: a count of cases one more than the real one is refused",
+                  raises(lambda: L2.parse_soak(t, 0, it.op, it.verdict_mode, None, exp + 1, cover)))
+            line = m.group(0)
+            for what, bad in (("its encodings clause removed", line.replace(f", {enc} encodings, {skp} skipped", "")),
+                              ("one index fewer printed", line.replace(f", {enc} encodings,", f", {enc - 1} encodings,")),
+                              ("one case more printed", line.replace(f": {cases} cases,", f": {cases + 1} cases,")),
+                              ("one skipped slot more printed", line.replace(f", {skp} skipped", f", {skp + 1} skipped"))):
+                c(f"index {nm}: the log with {what} is refused",
+                  raises(lambda bad=bad: L2.parse_soak(t.replace(line, bad), 0, it.op, it.verdict_mode, None, exp, cover)))
+            c(f"index {nm}: no verdict line, a doubled one and another job's verdict are each refused",
+              raises(lambda: L2.parse_soak(t.replace(line, ""), 0, it.op, it.verdict_mode, None, exp, cover))
+              and raises(lambda: L2.parse_soak(t + line + "\n", 0, it.op, it.verdict_mode, None, exp, cover))
+              and raises(lambda: L2.parse_soak(t, 0, "nosuchop", it.verdict_mode, None, exp, cover)))
+            dev = t.replace("soaking the software backend", "soaking the DEVICE backend: /box/img.xclbin")
+            pv, why = parse_ok(lambda: L2.parse_soak(dev, 0, it.op, it.verdict_mode, "/box/img.xclbin", exp, cover))
+            c(f"index {nm}: the DEVICE line is read and held to the image, the software line for a card job is refused, and a CPU "
+              f"job's log that names a DEVICE is refused",
+              pv is not None and pv.ok and raises(lambda: L2.parse_soak(t, 0, it.op, it.verdict_mode, "/box/img.xclbin", exp, cover))
+              and raises(lambda: L2.parse_soak(dev, 0, it.op, it.verdict_mode, None, exp, cover, cpu=True)), why)
+            argv = [sys.executable, standin, "soak", "--", "host/" + ("divsqrt-soak" if it.tool == "divsqrt" else "clause5-soak"),
+                    op, str(lo), str(hi), mode]
+            p = subprocess.run(argv, capture_output=True, text=True, timeout=60)
+            sm = SOAK_EXH_LINE.search(p.stdout)
+            c(f"index {nm}: the dry-run stand-in prints the real tool's line for this slice "
+              f"({'whole' if lo == 0 and hi == it.space and it.exact or iname == 'cvtto64-class-rup' else 'its indices, and cases + skipped'})",
+              sm is not None and sm.group(1, 2, 4, 5, 6) == m.group(1, 2, 4, 5, 6)
+              and (sm.group(0) == m.group(0) if (it.exact or iname == "cvtto64-class-rup") else int(sm.group(3)) + int(sm.group(7)) == cases + skp),
+              (sm.group(0) if sm else p.stdout[-200:]) + " | " + m.group(0))
+        for nm, iname in (("hc-div32-hard-sab.txt", "div32-hard-rne"), ("cl-rint64-class-sab.txt", "rint64-class-rne")):
+            it = by[iname]
+            op, lo, hi, mode = fixture_job(index, nm)
+            t = fixture(nm)
+            exp, cover = it.expected_cases(lo, hi), it.cover_spec(lo, hi)
+            v, why = parse_ok(lambda: L2.parse_soak(t, index[nm][0], it.op, it.verdict_mode, None, exp, cover))
+            c(f"index {nm}: the mode's own negative control, a real failing log, is a failure with its counts and operands, "
+              f"and a failing log with exit status 0 is refused",
+              v is not None and (not v.ok) and v.counts["value_mismatches"] > 0 and v.counts["encodings"] == hi - lo
+              and len(v.extra["disagreements"]) >= 3 and all(re.search(r"a=0x[0-9a-f]+", x) for x in v.extra["disagreements"])
+              and raises(lambda: L2.parse_soak(t, 0, it.op, it.verdict_mode, None, exp, cover)), why)
+        # the stand-in's tables are the library's (the stand-in of `src`, loaded from its file: a cached import of the real one would hide a plant)
+        import importlib.util
+        st_spec = importlib.util.spec_from_file_location("card_stress_standin_under_test", standin)
+        st_mod = importlib.util.module_from_spec(st_spec)
+        st_spec.loader.exec_module(st_mod)
+        diff = []
+        for op, (space, k, ms, _r, whole) in DOC_INDEX.items():
+            if st_mod.IDX[op][:2] != (space, k):
+                diff.append(op)
+            for m in ms:
+                ws = whole[m][1] if whole else 0
+                if (st_mod.IDX[op][2] if st_mod.IDX[op][2] is not None else st_mod.CVTTO64_SKIPPED[m]) != ws:
+                    diff.append(f"{op}-{m}")
+        cuts = [0, 1, 777, 65536, 1 << 20, 3_000_001, 4_000_000, 21_235_787, 21_235_788]
+        sums_ok = all(sum(st_mod.idx_skipped(op, m, a, b) for a, b in zip(cs, cs[1:])) == (whole[m][1] if whole else 0)
+                      for op, (space, _k, ms, _r, whole) in DOC_INDEX.items() for m in ms
+                      for cs in [[x for x in cuts if x < space] + [space]])
+        c("index items: the stand-in's tables (indices, k, whole-space skips) are the documents' and the library's, and its skips "
+          "spread over any partition of a space add up to the whole space's exactly", not diff and sums_ok, str(diff[:3]))
+    return out
+
+
+def index_plan_checks(src: str = HERE) -> list:
+    """The jobs the driver plans for the index-based items, in-process: the space is the item's own (a short last slice, a whole-space
+    first slice for a small space, none after it), the card's wave takes tile items and the pool host ones, and a record says what the
+    slice was held to."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    try:
+        with driver_from(src) as (mod, d, L2):
+            q = mod.Image("quad", "/box/quad.xclbin", 4, "u50-rev8-quad", None)
+            j = d.plan_wave(q, 3600, 1, ["rint64-class-rne"])[0]
+            b = d.soak_binary(j["item"])
+            c("index plan: rint64-class-rne's first slice is the WHOLE space (35,840 indices: the probe, 2^20, is cut to it): "
+              "`clause5-soak rint64-class 0 35840 rne`, cover 4 checks an index, 143,360 cases expected, reach tile, tile pinned only "
+              "in a wave of several",
+              j["argv"] == [b, "rint64-class", "0", "35840", "rne"] and j["cover"] == {"encodings": 35840, "per_encoding": 4}
+              and j["expected"] == 143360 and j["sweep"]["reach"] == "tile" and (j["lo"], j["hi"]) == (0, 35840), str(j["argv"]))
+            d.intervals["rint64-class-rne"] = [(0, 35840)]
+            c("index plan: once the whole space is covered the item is no longer planned (no gap)",
+              d.plan_wave(q, 3600, 1, ["rint64-class-rne"]) == [])
+            j = d.plan_wave(q, 3600, 1, ["div64-hard-rtz"])[0]
+            c("index plan: div64-hard-rtz's first slice is the probe 2^20 from 0, cover 4 checks an index, NO fixed case count (a "
+              "skipped index skips its four slots), reach tile",
+              (j["lo"], j["hi"]) == (0, 1 << 20) and j["cover"] == {"encodings": 1 << 20, "per_encoding": 4} and j["expected"] is None
+              and j["sweep"]["reach"] == "tile" and "expected_cases" not in j["sweep"], str((j["lo"], j["hi"], j["cover"])))
+            sp = 289_685_696
+            d.intervals["div64-hard-rtz"] = [(0, sp - 100)]
+            j = d.plan_wave(q, 3600, 1, ["div64-hard-rtz"])[0]
+            c("index plan: the last slice is short and ends exactly at the space's end, 289,685,696, not at 2^32",
+              (j["lo"], j["hi"]) == (sp - 100, sp), str((j["lo"], j["hi"])))
+            d.intervals["div64-hard-rtz"] = [(0, 1 << 20)]
+            d.rate = {"div64-hard@quad": 1e9}
+            j = d.plan_wave(q, 3600, 1, ["div64-hard-rtz"])[0]
+            c("index plan: with a rate measured the next slice is a whole number of 2^20 atoms capped at the card's 2^28",
+              j["lo"] == 1 << 20 and j["hi"] - j["lo"] == 1 << 28 and (j["hi"] - j["lo"]) % (1 << 20) == 0, str((j["lo"], j["hi"])))
+            d.intervals["div64-hard-rtz"] = [(0, 1 << 20), ((1 << 20) + (1 << 28), sp - (1 << 20))]
+            j = d.plan_wave(q, 3600, 1, ["div64-hard-rtz"])[0]
+            c("index plan: a gap in the middle is served before the tail, and bounded by the next covered range",
+              (j["lo"], j["hi"]) == (1 << 20, (1 << 20) + (1 << 28)), str((j["lo"], j["hi"])))
+            j = d.plan_wave(d.cpu, 3600, 1, ["cvtto64-class-rne"], L2.HOST)[0]
+            c("index plan: a host class item goes to the pool's plan (image cpu), reach host, with a cover but no fixed count of "
+              "cases (cvtto64-class skips pairs)",
+              j["sweep"]["reach"] == "host" and j["cover"] == {"encodings": 40768, "per_encoding": 4} and j["expected"] is None
+              and j["tile"] is None, str(j["sweep"]))
+            c("index plan: the card's sweep never plans a host class item and the pool never a tile one",
+              d.plan_wave(q, 3600, 1, ["cvtto64-class-rne"]) == [] and d.plan_wave(d.cpu, 3600, 1, ["rint64-class-rne"], L2.HOST) == [])
+    except Exception as e:                      # a driver that cannot be driven this way is a red check, not a crash
+        c("index plan: the driver could be driven in-process", False, repr(e))
+    return out
+
+
+INDEX_TILE = ["div32-hard-rne", "sqrt64-hard-rmm", "rint64-class-rne", "scaleb64-class-rne"]
+INDEX_HOST = ["cvtto64-class-rne", "conv64to32-class-rtz", "cvtfrom64-class-rup"]
+
+
+def scn_index_items(env: Env, src: str = HERE) -> list:
+    """The index-based items served by the driver against the stand-in, to the end of their own spaces: four tile items on the quad's
+    four tiles (a hard-case item that needs several slices, one whose space is smaller than the probe, two class items) and three host
+    items on the pool. Every slice held to its indices and to k x E, the space's end exact (a short last slice), the whole-space
+    check run once per item, the status file and the report counting each item over its own space."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    names = INDEX_TILE + INDEX_HOST
+    space = {f"{op}-{m}": v[0] for op, v in DOC_INDEX.items() for m in v[2]}
+    kk = {f"{op}-{m}": v[1] for op, v in DOC_INDEX.items() for m in v[2]}
+    r = start_driver(env, "indexitems", ["--until", until(300), "--sweep-items", ",".join(names)] + SWEEP_ALL_BASE, src=src, to_file=True)
+
+    def complete():
+        iv = L.sweep_coverage(r.recs)[0]
+        return all(iv.get(n) and L.first_gap(iv[n], space[n]) is None for n in names)
+
+    done = wait_for(complete, 200, 0.5)
+    stop_run(r)
+    r.finish(90)
+    legs = r.legs(kind="sweep")
+    c("index items: the seven items were each served to the end of their own space, then it stopped on STOP",
+      done and r.rc == 0, f"done {done}, rc {r.rc}")
+    c("index items: every slice passed", bool(legs) and all(x["status"] == "pass" for x in legs), str(sorted({x["status"] for x in legs})))
+    for n in names:
+        mine = sorted((x for x in legs if x["sweep"]["item"] == n), key=lambda x: x["sweep"]["lo"])
+        enc = sum(dg(x, "counts", "encodings") or 0 for x in mine)
+        c(f"index items {n}: the slices' indices are contiguous from 0 to exactly {space[n]:,} and add up to it, none run twice "
+          f"(each slice's own count read from its verdict line)",
+          bool(mine) and enc == space[n] and mine[0]["sweep"]["lo"] == 0 and mine[-1]["sweep"]["hi"] == space[n]
+          and all(a["sweep"]["hi"] == b["sweep"]["lo"] for a, b in zip(mine, mine[1:])), f"{enc} in {len(mine)} slices")
+        c(f"index items {n}: each slice's verdict covered its slice and made {kk[n]} checks an index, held to what the record says",
+          bool(mine) and all(dg(x, "counts", "encodings") == x["sweep"]["hi"] - x["sweep"]["lo"] == dg(x, "sweep", "expected_encodings")
+                             and (dg(x, "counts", "cases") or 0) + (dg(x, "counts", "skipped") or 0) == kk[n] * (dg(x, "counts", "encodings") or 0)
+                             for x in mine))
+        if n.startswith(("rint64-class", "scaleb64-class", "conv64to32-class", "cvtfrom64-class")):
+            c(f"index items {n}: its cases are exactly {kk[n]} an index, expected_cases recorded, nothing skipped",
+              bool(mine) and all(dg(x, "sweep", "expected_cases") == kk[n] * (x["sweep"]["hi"] - x["sweep"]["lo"]) == dg(x, "counts", "cases")
+                                 and dg(x, "counts", "skipped") == 0 for x in mine))
+        else:
+            c(f"index items {n}: no fixed count of cases is expected of it (a skipped index skips its slots) and some were skipped",
+              bool(mine) and all("expected_cases" not in x["sweep"] for x in mine) and sum(dg(x, "counts", "skipped") or 0 for x in mine) > 0)
+    hard = sorted((x for x in legs if x["sweep"]["item"] == "div32-hard-rne"), key=lambda x: x["sweep"]["lo"])
+    c("index items: div32-hard-rne took the probe [0, 2^20) and then a last slice that is SHORT (the space is no multiple of 2^20) and "
+      "ends at 21,235,788; each class item's one slice is the whole space",
+      len(hard) == 2 and (hard[0]["sweep"]["lo"], hard[0]["sweep"]["hi"]) == (0, 1 << 20) and hard[1]["sweep"]["hi"] == 21_235_788
+      and (hard[1]["sweep"]["hi"] - hard[1]["sweep"]["lo"]) % (1 << 20) != 0
+      and all(len([x for x in legs if x["sweep"]["item"] == n]) == 1 for n in ("rint64-class-rne", "scaleb64-class-rne", "cvtto64-class-rne")),
+      str([(x["sweep"]["lo"], x["sweep"]["hi"]) for x in hard]))
+    c("index items: the four tile items ran on the card (the quad, reach tile) and the three host items on the pool (image cpu, reach host)",
+      all({(x["image"], x["sweep"]["reach"]) for x in legs if x["sweep"]["item"] == n} == {("quad", "tile")} for n in INDEX_TILE)
+      and all({(x["image"], x["sweep"]["reach"]) for x in legs if x["sweep"]["item"] == n} == {("cpu", "host")} for n in INDEX_HOST))
+    ev = r.events("whole_space_ok")
+    c("index items: the whole-space check ran once for each of the seven items and found every one's slices adding up to the whole "
+      "space's cases and skipped slots, and none disagreed",
+      sorted(e["item"] for e in ev) == sorted(names) and not r.events("whole_space_mismatch"), str([e["item"] for e in ev]))
+    st = open(os.path.join(r.out, "status.txt")).read()
+    cov = sum(space[n] for n in names)
+    ex_items = [it for it in L.sweep_items() if it.kind == "exhaustive"]
+    c("index items: status.txt counts the seven items' indices over their own spaces in its sweep line",
+      f"exhaustive {cov:,} of {sum(it.space for it in ex_items):,} encodings" in st, st[st.find("sweep "):][:200])
+    rp = os.path.join(src, "card_stress_report.py")
+    p = subprocess.run([sys.executable, "-B", "-I", rp, r.out, "--no-write"], capture_output=True, text=True, timeout=120)
+    t = p.stdout
+    tt, th = sum(space[n] for n in INDEX_TILE), sum(space[n] for n in INDEX_HOST)
+    c("index items: the report counts each item over its own space - the item says [N indices], 100.000% of it - totals the "
+      "coverage by reach from those spaces, and says what a class-level and a hard-case pass are",
+      p.returncode == 0
+      and re.search(r"^  rint64-class-rne \[35,840 indices\]\s+1\s+143360\s+35840\s+100\.000%", t, re.M)
+      and re.search(r"^  div32-hard-rne \[21,235,788 indices\]\s+2\s+\d+\s+21235788\s+100\.000%", t, re.M)
+      and re.search(r"^  reach tile: 4 exhaustive item\(s\) seen; covered %d of %d encodings \(100\.000%%\); fully covered 4 of 4$"
+                    % (tt, tt), t, re.M)
+      and re.search(r"^  reach host: 3 exhaustive item\(s\) seen; covered %d of %d encodings \(100\.000%%\); fully covered 3 of 3$"
+                    % (th, th), t, re.M)
+      and "claim at the class level (L2), PLAUSIBLE and not proved" in t and "deterministic space of constructed operands" in t,
+      t[t.find("exhaustive items"):][:900])
+    return out + scn_index_refusals(env, src)
+
+
+def scn_index_refusals(env: Env, src: str = HERE) -> list:
+    """A slice the tool ran one index or one case short is parse_error, by the rule written for it, not covered, and served again - the
+    hard-case items and the class items alike; and a tool whose skips are wrong by one slot passes every slice's cover rule (cases +
+    skipped is still k x E) and is caught only by the SUM over the covered item, which must say whole_space_mismatch."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    sc = [{"leg": "soak", "op": "div32-hard", "nth": [1], "do": "short"},
+          {"leg": "soak", "op": "div32-hard", "nth": [2], "do": "shortcase"},
+          {"leg": "soak", "op": "div32-hard", "nth": [3], "do": "badenc"},
+          {"leg": "soak", "op": "cvtto64-class", "nth": [1], "do": "short"},
+          {"leg": "soak", "op": "rint64-class", "nth": [1], "do": "shortcase"},
+          {"leg": "soak", "op": "sqrt64-hard", "from": 1, "do": "skipoff"}]
+    bn = ["div32-hard-rne", "cvtto64-class-rne", "rint64-class-rne", "sqrt64-hard-rmm"]
+    space = {"div32-hard-rne": 21_235_788, "cvtto64-class-rne": 40_768, "rint64-class-rne": 35_840, "sqrt64-hard-rmm": 4_456_448}
+    r = start_driver(env, "indexshort", ["--until", until(180), "--sweep-items", ",".join(bn)] + SWEEP_ALL_BASE, sc, src=src, to_file=True)
+
+    def covered_all():
+        iv = L.sweep_coverage(r.recs)[0]
+        return all(iv.get(n) and L.first_gap(iv[n], space[n]) is None for n in bn)
+
+    got = wait_for(covered_all, 120, 0.4)
+    stop_run(r)
+    r.finish(60)
+    for n, want in (("div32-hard-rne", ["encodings where the slice has", "checks where", "encodings where the slice has"]),
+                    ("cvtto64-class-rne", ["encodings where the slice has"]), ("rint64-class-rne", ["cases where the slice has"])):
+        mine = sorted((x for x in r.legs(kind="sweep") if x["sweep"]["item"] == n), key=lambda x: x["start_epoch"])
+        k = len(want)
+        c(f"index short {n}: the first {k} slice(s) came back short and were refused as parse_error, by the rule written for each "
+          f"({', '.join(want)}), with no counts recorded",
+          got and len(mine) > k and all(x["status"] == "parse_error" and x["counts"] is None and w in (x["reason"] or "")
+                                         for x, w in zip(mine[:k], want)), str([(x["status"], x["reason"]) for x in mine[:k + 1]]))
+        c(f"index short {n}: the same first slice was served again each time, and then passed; the refused ones are not covered",
+          got and len(mine) > k and len({(x["sweep"]["lo"], x["sweep"]["hi"]) for x in mine[:k + 1]}) == 1 and mine[k]["status"] == "pass"
+          and (L.sweep_coverage(r.recs)[0].get(n) or [(None, None)])[0][0] == 0
+          and L.sweep_coverage(r.recs)[1].get(n) == sum(1 for x in mine if x["status"] == "pass"),
+          str([(x["sweep"]["lo"], x["sweep"]["hi"], x["status"]) for x in mine[:k + 1]]))
+    bad = r.events("whole_space_mismatch")
+    ok = r.events("whole_space_ok")
+    c("index short: sqrt64-hard-rmm, whose every slice is one skipped slot off (cases + skipped still k x E: every slice passed its "
+      "cover rule), is caught by the whole-space check: ONE whole_space_mismatch event naming it and the figures, and the others' ok",
+      got and len(bad) == 1 and bad[0]["item"] == "sqrt64-hard-rmm" and "NOT the whole space's" in bad[0]["detail"]
+      and bad[0]["cases"] < bad[0]["want_cases"] and bad[0]["skipped"] > bad[0]["want_skipped"]
+      and sorted(e["item"] for e in ok) == sorted(n for n in bn if n != "sqrt64-hard-rmm")
+      and all(x["status"] == "pass" for x in r.legs(kind="sweep") if x["sweep"]["item"] == "sqrt64-hard-rmm"),
+      str([e["detail"][:200] for e in bad]))
+    return out
+
+
+def cases_in(text: str) -> int:
+    """The cases a soak log's verdict line says (the first number of its one verdict line)."""
+    m = re.search(r"^\S+ \S+: (\d+) cases,", text, re.M)
+    return int(m.group(1)) if m else -1
+
+
+def synth_run(path: str, legs: list, tree: "dict | None" = None) -> None:
+    """A metrics.jsonl for the report: a run_start, then each leg (image, sweep block, cases) as a passing sweep leg."""
+    recs = []
+    t = 1_800_000_000.0
+    recs.append({"type": "run_start", "v": 1, "ts": L.iso(t), "epoch": t, "run_id": "fixture-0", "host": "fixture", "out": path, "argv": [],
+                 "settings": {"until": None, "quick": False, "dry_run": True}, "tree": tree or {"commit": "a" * 40},
+                 "images": {n: {"sha256": "0" * 64, "bytes": 1, "tiles": 1, "path": "x", "target": "t"} for n in ("quad", "single", "deep")},
+                 "deadline": None, "resumed": False})
+    for image, sw, cases in legs:
+        t += 5
+        recs.append({"type": "leg", "v": 1, "ts": L.iso(t), "epoch": t, "cycle": 1, "image": image, "image_sha256": None,
+                     "leg": "sweep-" + sw["item"], "kind": "sweep", "attempt": 1, "start": L.iso(t - 4), "end": L.iso(t),
+                     "start_epoch": t - 4, "end_epoch": t, "duration_s": 4.0, "rc": 0, "status": "pass", "timed_out": False,
+                     "killed": None, "counts": {"cases": cases, "value_mismatches": 0, "flag_mismatches": 0},
+                     "rate": {"value": cases / 4.0, "unit": "cases/s"}, "sweep": sw, "disagreements": None, "log": None,
+                     "log_kept": "none", "reason": None, "tile": None, "extra": None})
+    os.makedirs(path, exist_ok=True)
+    with open(os.path.join(path, "metrics.jsonl"), "w", encoding="utf-8", newline="\n") as fh:
+        for r in recs:
+            fh.write(json.dumps(r) + "\n")
+
+
+def chunk_unit_checks(src: str = HERE) -> list:
+    """The pass size (parcel CK's chunked tools) in the driver, in-process: the tool's own stderr line read from REAL logs and held
+    to the request, random scaleB's cases at a BATCH, and the rule for what is a repeat of what when the pass size differs."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    with lib_from(src) as L2:
+        raises = lambda fn: raises_in(L2, fn)               # noqa: E731
+        parse_ok = lambda fn: parse_ok_in(L2, fn)           # noqa: E731
+        by = {it.name: it for it in L2.sweep_items()}
+        tc = fixture("chunk-scaleb32-c16384.txt")
+        td = fixture("chunk-scaleb32-default.txt")
+
+        def parse(text, chunk, exp=None, op="scaleb32", mode="rne", cover=None, rc=0):
+            return L2.parse_soak(text, rc, op, mode, None, exp, cover, chunk=chunk)
+        v, why = parse_ok(lambda: parse(tc, 16384, 278528))
+        c("chunk: the chunked tool's REAL log ('soaking with BATCH 16384 and CFT_CHUNK 16384 (the defaults are 4096)') asked as pass size "
+          "16384 passes, and the verdict says its batch and chunk",
+          v is not None and v.ok and v.extra.get("batch") == 16384 and v.extra.get("chunk") == 16384 and v.counts["cases"] == 278528, why)
+        c("chunk: ... asked at 8192, at 4096 or as the default tool it is refused, by name (the numbers disagree with the request; "
+          "a default job's tool does not print them)",
+          all(raises(lambda ch=ch: parse(tc, ch)) for ch in (8192, 4096, None)))
+        c("chunk: the line wrong in either number is refused: BATCH 16384 with CFT_CHUNK 4096, and the other way",
+          raises(lambda: parse(tc.replace("CFT_CHUNK 16384", "CFT_CHUNK 4096"), 16384))
+          and raises(lambda: parse(tc.replace("BATCH 16384", "BATCH 4096"), 16384)))
+        c("chunk: the line twice, or the chunked log without its line, is refused for a job asked at 16384",
+          raises(lambda: parse(tc.replace("soaking the software backend\n", "soaking the software backend\n" + tc.splitlines()[1] + "\n"), 16384))
+          and raises(lambda: parse(td, 16384)))
+        v, why = parse_ok(lambda: parse(td, None, 139264))
+        c("chunk: the default tool's REAL log passes as a default job and its verdict carries no batch or chunk (its record is as it was)",
+          v is not None and v.ok and "batch" not in v.extra and "chunk" not in v.extra, why)
+        v, why = parse_ok(lambda: parse(td, 4096, 139264))
+        c("chunk: a tool built at 4096 prints no pass-size line, so a job asked at 4096 passes on the default log and says 4096 and 4096; "
+          "and a line in that log is refused",
+          v is not None and v.extra.get("batch") == 4096 and v.extra.get("chunk") == 4096
+          and raises(lambda: parse(tc, 4096)), why)
+        for nm, iname, cl in (("chunk-rint64-class-c16384.txt", "rint64-class-rne", 16384), ("chunk-sqrt64-hard-c16384.txt", "sqrt64-hard-rne", 16384)):
+            it = by[iname]
+            op, lo, hi, mode = fixture_job(fixture_index(), nm)
+            t = fixture(nm)
+            v, why = parse_ok(lambda: L2.parse_soak(t, 0, it.op, it.verdict_mode, None, it.expected_cases(lo, hi), it.cover_spec(lo, hi), chunk=cl))
+            c(f"chunk {nm}: a class-level or hard-case slice of the chunked tool passes its own rule, at batch {cl}",
+              v is not None and v.ok and v.extra.get("batch") == cl, why)
+        # random scaleB's cases at a BATCH: the real tools' lines
+        s32, s64 = by["scaleb32-rne"], by["scaleb64-rne"]
+        c("chunk: random scaleB's cases are its count rounded up by whole batches: for 100,000 the REAL tool printed 139,264 at 4096, "
+          "278,528 at 16384 (scaleb32) and 442,368 at 16384 (scaleb64), and Item.random_cases gives each",
+          s32.random_cases(100000, 4096) == cases_in(td) == 139264 and s32.random_cases(100000, 16384) == cases_in(tc) == 278528
+          and s64.random_cases(100000, 16384) == cases_in(fixture("chunk-scaleb64-c16384.txt")) == 442368,
+          f"{s32.random_cases(100000, 4096)} {s32.random_cases(100000, 16384)} {s64.random_cases(100000, 16384)}")
+        c("chunk: ... a count that is a whole number of batches is its own (17 x 4096 x 4 at 4096), a count below one batch's cases is "
+          "rounded up to the batch, and no other random op, count 0 or batch 0 has a figure",
+          s32.random_cases(17 * 4096 * 4, 4096) == 17 * 4096 * 4 and s32.random_cases(5, 16384) == 5 * 17
+          and by["cvtfrom64-rne"].random_cases(100000, 4096) is None and by["conv64to32-rne"].random_cases(1000, 4096) is None
+          and s32.random_cases(0, 4096) is None and s32.random_cases(10, 0) is None
+          and by["rint64-class-rne"].random_cases(10, 4096) is None)
+        # the stand-in prints what the chunked tool prints
+        standin = os.path.join(src, "card_stress_standin.py")
+        pr = subprocess.run([sys.executable, standin, "soak", "--", "host/clause5-soak-c16384", "scaleb32", "100000", "5", "rne"],
+                            capture_output=True, text=True, timeout=60)
+        pr2 = subprocess.run([sys.executable, standin, "soak", "--", "host/clause5-soak-c16384", "scaleb64", "100000", "5", "rne"],
+                             capture_output=True, text=True, timeout=60)
+        c("chunk: the stand-in, told the chunked tool's name, prints the real tool's pass-size line and its cases (278,528 and 442,368)",
+          "soaking with BATCH 16384 and CFT_CHUNK 16384 (the defaults are 4096)" in pr.stderr and cases_in(pr.stdout) == 278528
+          and cases_in(pr2.stdout) == 442368, pr.stderr[-200:] + pr.stdout[-120:])
+        # the stream rule: what is a repeat of what
+        try:
+            with driver_from(src, ["--sweep-chunk", "16384"]) as (mod, d, L3):
+                cf = next(i for i in d.items if i.name == "cvtfrom64-rne")
+                cv = next(i for i in d.items if i.name == "conv64to32-rne")
+                st_cf, st_cv = cf.seed_for(0) | 1, cv.seed_for(0) | 1
+
+                def planned(it, states):
+                    d.seed_n, d.seed_states = {}, states
+                    try:
+                        d.plan_wave(d.cpu, 3600, 1, [it.name], L3.HOST)
+                        return None
+                    except RuntimeError as e:
+                        return str(e)
+                c("chunk streams: a cvtfrom slice at 16384 from a state another item's DEFAULT-batch slice used is NOT refused - its draws "
+                  "go to other source types, so it is another stream",
+                  planned(cf, {(st_cf, 4096): ("another-item", 3)}) is None)
+                why = planned(cf, {(st_cf, 16384): ("another-item", 3)})
+                c("chunk streams: ... a cvtfrom slice from a state a slice at the SAME batch used is refused, naming the batch and both",
+                  why is not None and "batch 16384" in why and "another-item" in why and "slice 3" in why, str(why))
+                why = planned(cv, {st_cv: ("another-item", 3)})
+                c("chunk streams: every other item is keyed by its state alone: a chunked conv64to32 slice from a state a default slice "
+                  "used IS refused (its operand sequence is the same at any batch), and the item's own slice again is not",
+                  why is not None and "another-item" in why and planned(cv, {st_cv: (cv.name, 0)}) is None, str(why))
+        except Exception as e:
+            c("chunk streams: the driver could be driven in-process", False, repr(e))
+        # records a chunked run left, and what a later run takes from them
+        tmp = tempfile.mkdtemp(prefix="cs-chunk-")
+        try:
+            def run_dir(name, batch):
+                recs = []
+                for n in range(5 if batch is None else 10):
+                    for iname in ("cvtfrom64-rne", "conv64to32-rne"):
+                        it = by[iname]
+                        sw = {"item": iname, "op": it.op, "tool": "clause5", "count": 1 << 20, "seed": it.seed_for(n), "seed_n": n}
+                        if batch:
+                            sw.update(batch=batch, chunk=batch)
+                        recs.append({"type": "leg", "kind": "sweep", "status": "pass", "image": "cpu", "sweep": sw,
+                                     "counts": {"cases": 1 << 20}})
+                d = os.path.join(tmp, name)
+                os.makedirs(d)
+                with open(os.path.join(d, "metrics.jsonl"), "w") as fh:
+                    for r in recs:
+                        fh.write(json.dumps(r) + "\n")
+                return d
+            A, B = run_dir("A", None), run_dir("B", 16384)
+            fl = lambda dirs, b: L2.earlier_runs(dirs, b)[0]
+            c("chunk streams: --earlier-runs: a default earlier run (n to 4) floors BOTH items for a default run, and for a chunked run "
+              "only conv64to32 (cvtfrom's chunked draws are other draws); a chunked earlier run (n to 9) floors both for a chunked "
+              "run and only conv64to32 for a default one; and with no batch given every slice counts, as before the chunked tools",
+              fl([A], 4096) == {"cvtfrom64-rne": 5, "conv64to32-rne": 5} and fl([A], 16384) == {"conv64to32-rne": 5}
+              and fl([B], 16384) == {"cvtfrom64-rne": 10, "conv64to32-rne": 10} and fl([B], 4096) == {"conv64to32-rne": 10}
+              and fl([A], None) == {"cvtfrom64-rne": 5, "conv64to32-rne": 5} and fl([B], None) == {"cvtfrom64-rne": 10, "conv64to32-rne": 10},
+              f"{fl([A], 4096)} {fl([A], 16384)} {fl([B], 16384)} {fl([B], 4096)}")
+            states = L2.earlier_runs([B], 16384)[1]
+            c("chunk streams: the streams an earlier run started are keyed (state, batch) for a cvtfrom item and by state for the rest",
+              (by["cvtfrom64-rne"].seed_for(3) | 1, 16384) in states and (by["conv64to32-rne"].seed_for(3) | 1) in states
+              and (by["cvtfrom64-rne"].seed_for(3) | 1) not in states)
+        finally:
+            rmtree_force(tmp)
+    return out
+
+
+def chunk_report_checks(env: Env, src: str = HERE) -> list:
+    """The report with chunked slices: a random item's coverage is a row of its own per batch (a cvtfrom slice's operands, and every
+    slice's flag comparison, depend on it), and the sweep section says the pass size of an item that ran at another than the default;
+    a run with none is reported as before."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    rp = os.path.join(src, "card_stress_report.py")
+    if not os.path.exists(rp):
+        skip("chunk report", "hw/card_stress_report.py is not there")
+        return out
+    cl = {"item": "rint64-class-rne", "tool": "clause5", "op": "rint64-class", "mode": "rne", "reach": "tile", "lo": 0, "hi": 35840,
+          "tile": None, "batch": 16384, "chunk": 16384}
+    r0 = {"item": "cvtfrom64-rne", "tool": "clause5", "op": "cvtfrom64", "mode": "rne", "reach": "host", "count": 1 << 20, "seed": 3,
+          "seed_n": 1, "seed_scheme": 2, "tile": None}
+    r1 = dict(r0, seed=5, seed_n=2, batch=16384, chunk=16384)
+    d1, d2 = os.path.join(env.tmp, "rep-chunk"), os.path.join(env.tmp, "rep-nochunk")
+    tree = {"commit": "b" * 40, "rtl": "c" * 40, "rtl_dirty": False, "host_src": "d" * 40, "host_src_dirty": False, "cc": "gcc 11"}
+    synth_run(d1, [("quad", cl, 143360), ("cpu", r0, 1 << 20), ("cpu", r1, 1 << 20)], tree)
+    synth_run(d2, [("quad", {k: v for k, v in cl.items() if k not in ("batch", "chunk")}, 143360), ("cpu", r0, 1 << 20)], tree)
+    p1 = subprocess.run([sys.executable, "-B", "-I", rp, d1, "--no-write"], capture_output=True, text=True, timeout=120)
+    p2 = subprocess.run([sys.executable, "-B", "-I", rp, d2, "--no-write"], capture_output=True, text=True, timeout=120)
+    t1, t2 = p1.stdout, p2.stdout
+    c("chunk report: a run with chunked slices says the pass size of each item that ran at another than 4096, and how many slices at each",
+      p1.returncode == 0 and "pass size, items with a slice that ran at another than the default 4096" in t1
+      and re.search(r"^  rint64-class-rne\s+1 at 16384$", t1, re.M) and re.search(r"^  cvtfrom64-rne\s+1 at 4096, 1 at 16384$", t1, re.M),
+      t1[t1.find("slices:"):][:500])
+    tr1 = t1[t1.find("== SWEEP COVERAGE BY TREE =="):]
+    c("chunk report: coverage by tree keeps a random item's chunked and default streams in rows of their own, never summed",
+      re.search(r"^\s+cvtfrom64-rne\s+1\s", tr1, re.M) and re.search(r"^\s+cvtfrom64-rne @batch 16384\s+1\s", tr1, re.M),
+      tr1[tr1.find("random items (cases by image"):][:500])
+    c("chunk report: a run with no chunked slice has no pass-size lines and one row for the item, as it always had",
+      p2.returncode == 0 and "pass size" not in t2 and "@batch" not in t2 and re.search(r"^\s+cvtfrom64-rne\s+1\s", t2[t2.find("== SWEEP COVERAGE BY TREE =="):], re.M) is not None,
+      t2[:200])
+    return out
+
+
+def scn_chunk(env: Env, src: str = HERE) -> list:
+    """--sweep-chunk against the stand-in, a dry run: the sweep's slices - the card's and the pool's - run the -c<N> tools and the
+    battery's legs the default ones; every record carries the batch and chunk the tool said, held to the request; a tool that
+    leaves its line out, says another number, or (a default job) says one at all, is refused by name; random scaleB is held to the
+    cases its BATCH gives. And, without the flag, nothing changes."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    names = ["scaleb64-rne", "rint64-class-rne", "div32-hard-rne", "sqrt64-hard-rup", "cvtfrom64-rne"]
+    sc = [{"leg": "soak", "op": "rint64-class", "nth": [1], "do": "nochunk"}, {"leg": "soak", "op": "div32-hard", "nth": [1], "do": "wrongchunk"}]
+    R = run_driver(env, "chunk", ["--quick", "--legs", "api-test", "--sweep-chunk", "16384", "--sweep-items", ",".join(names)], sc, src=src,
+                   cap=150)
+    sw = R.legs(kind="sweep")
+    good = [x for x in sw if x["status"] == "pass"]
+    bad = [x for x in sw if x["status"] != "pass"]
+    c("chunk run: every slice that passed carries the batch and chunk its tool said, 16384 and 16384, on the card's images and on the pool",
+      bool(good) and all(dg(x, "sweep", "batch") == 16384 and dg(x, "sweep", "chunk") == 16384 for x in good)
+      and {x["image"] for x in good} >= {"quad", "cpu"}, str(sorted({x["image"] for x in good})))
+    c("chunk run: the two slices whose tool left out its line or said another number were refused as parse_error, by name, with no batch "
+      "recorded, and the items went on (served again, passing)",
+      len(bad) == 2 and all(x["status"] == "parse_error" and "asked to run at pass size 16384" in (x["reason"] or "") and "batch" not in x["sweep"]
+                            for x in bad)
+      and {x["sweep"]["item"] for x in bad} == {"rint64-class-rne", "div32-hard-rne"}
+      and all(any(g["sweep"]["item"] == b["sweep"]["item"] for g in good) for b in bad), str([(x["status"], x["reason"]) for x in bad]))
+    c("chunk run: the tools the sweep ran are the -c16384 ones (the stand-in prints the command it was given): every sweep log, the card's "
+      "and the pool's, names clause5-soak-c16384 or divsqrt-soak-c16384, and the battery's api-test the default host/api-test",
+      bool(sw) and all(re.search(r"would run: .*(clause5|divsqrt)-soak-c16384 ", log_text(R, x)) for x in sw if x["log"])
+      and all("api-test" in log_text(R, x) and "-c16384" not in log_text(R, x) for x in R.legs("api-test")), "")
+    rs = R.recs[0]
+    c("chunk run: run_start records the pass size, and so does settings.json",
+      dg(rs, "settings", "sweep_chunk") == 16384 and json.load(open(os.path.join(R.out, "settings.json"))).get("sweep_chunk") == 16384)
+
+    def bf(count, b, ln):
+        total, left = 0, count
+        while left > 0:
+            n = min(left, b)
+            total += n * ln
+            left = left - n * ln if left > n * ln else 0
+        return total
+    rnd = [x for x in good if x["sweep"]["item"] == "scaleb64-rne"]
+    c("chunk run: a random scaleB slice is held to the cases its BATCH gives (the count rounded up by whole batches of 27 exponents, "
+      "computed here): expected_cases is recorded, is not the count, and is what the tool printed",
+      bool(rnd) and all(x["sweep"].get("expected_cases") == bf(x["sweep"]["count"], 16384, 27) == dg(x, "counts", "cases")
+                        and x["sweep"]["expected_cases"] != x["sweep"]["count"] for x in rnd), str([x["sweep"] for x in rnd][:1]))
+    # the same items without the flag: nothing changes
+    sc2 = [{"leg": "soak", "op": "rint64-class", "nth": [1], "do": "defchunk"}]
+    D = run_driver(env, "nochunk", ["--quick", "--legs", "api-test", "--sweep-items", ",".join(names)], sc2, src=src, cap=150)
+    dsw = D.legs(kind="sweep")
+    dbad = [x for x in dsw if x["status"] != "pass"]
+    c("no chunk: without the flag no sweep record has a batch or chunk, run_start and settings.json do not name a pass size, and the tools "
+      "are the default ones",
+      bool(dsw) and all("batch" not in x["sweep"] and "chunk" not in x["sweep"] for x in dsw) and "sweep_chunk" not in D.recs[0]["settings"]
+      and "sweep_chunk" not in json.load(open(os.path.join(D.out, "settings.json")))
+      and all("-c16384" not in log_text(D, x) and "-c4096" not in log_text(D, x) for x in dsw if x["log"]), "")
+    c("no chunk: a default job whose tool says it ran at a pass size is refused by name (that binary is not the default build)",
+      len(dbad) == 1 and dbad[0]["status"] == "parse_error" and "default tool says it ran at BATCH 16384" in (dbad[0]["reason"] or ""),
+      str([(x["status"], x["reason"]) for x in dbad]))
+    # the flag's own refusals, by name, before anything starts
+    refused = []
+    for bad_n in ("5000", "0", "70000", "-4096", "4097", "8191"):
+        p = subprocess.run([sys.executable, "-B", "-I", os.path.join(src, "card_stress.py"), "--root", ROOT, "--out", os.path.join(env.tmp, "x-" + bad_n),
+                            "--dry-run", "--quick", "--sweep-chunk", bad_n], capture_output=True, text=True, timeout=60)
+        refused.append(p.returncode == 2 and "--sweep-chunk" in p.stderr and "multiple of 4096 up to 65536" in p.stderr)
+    c("chunk args: a pass size that is not a positive multiple of 4096 up to 65536 is refused by name (exit 2), the Makefile's own rule",
+      all(refused), str(refused))
+    return out
+
+
+# The digest of the campaign records of the scripts' 90 items, by name and id, in catalog order - MEASURED at 827c3cf, before this parcel
+# touched hw/sweep_record.py (a clean clone, `campaign_digest` below run there): the campaign of an item whose space is 2^32 must stay
+# what it was, byte for byte, so that every campaign id a run has already written stays valid.
+OLD_CAMPAIGN_DIGEST = "b8555f2f9edc1cf9ac4c097eb57e2553f4b7cbf3933831744ed653a5d415432d"
+CONV32TO64_CAMPAIGN_ID = "c2aaacbea9016dc8da1472d1a71f15e161d49bdecdb2db6cadc4177a4fb3edc1"      # docs/SWEEP-RECORDS.md's own figure
+
+
+def campaign_digest(SR, items) -> str:
+    h = hashlib.sha256()
+    for it in items:
+        h.update(f"{it.name} {SR.record_id(SR.campaign_body(it))}\n".encode())
+    return h.hexdigest()
+
+
+def campaign_space_checks(src: str = HERE) -> list:
+    """A campaign record says its item's own space (hw/sweep_record.py, changed at the lead's word on 2026-10-21): the 90 old items' campaign
+    records and ids are byte for byte what they were at 827c3cf, the 35 new ones say their own spaces, and counts_problem now catches an
+    interval past a new item's real space."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    with sr_from(src) as (SR, LS):
+        items = LS.sweep_items()
+        dg_now = campaign_digest(SR, items[:90])
+        c("campaign space: the campaign records of the scripts' 90 items hash to what they did at 827c3cf (one digest over every name and "
+          "id), and conv32to64-all's id is the one docs/SWEEP-RECORDS.md prints",
+          dg_now == OLD_CAMPAIGN_DIGEST and SR.record_id(SR.campaign_body(next(i for i in items if i.name == "conv32to64-all"))) ==
+          CONV32TO64_CAMPAIGN_ID, dg_now)
+        c("campaign space: every old exhaustive item's campaign says 2^32 and every random one's has no space",
+          all((SR.campaign_body(i).get("space") == (1 << 32)) if i.kind == "exhaustive" else ("space" not in SR.campaign_body(i)) for i in items[:90]))
+        bad = []
+        for op, (space, k, ms, _r, whole) in DOC_INDEX.items():
+            for m in ms:
+                it = next(i for i in items if i.name == f"{op}-{m}")
+                camp = SR.campaign_body(it)
+                camp["id"] = SR.record_id(camp)
+                try:
+                    SR.check_shape(camp, "test")
+                except SR.Refusal as e:
+                    bad.append(f"{it.name}: {e}")
+                if (camp.get("space"), camp.get("per_encoding"), camp.get("exact")) != (space, k, op in ("conv64to32-class", "rint64-class", "cvtfrom64-class", "scaleb64-class")):
+                    bad.append(f"{it.name}: {camp}")
+        c("campaign space: each of the 35 new items' campaign says its own space (the documents'), its checks an index and whether its cases are "
+          "exact, and is a campaign the verifier's form accepts", not bad, "; ".join(bad[:2]))
+        d32 = next(i for i in items if i.name == "div32-hard-rne")
+        camp = SR.campaign_body(d32)
+        past = {"kind": "slice", "lo": 21_235_000, "hi": 21_235_789, "cases": 4 * 789, "skipped": 0}
+        ends = {"kind": "slice", "lo": 21_235_000, "hi": 21_235_788, "cases": 4 * 788, "skipped": 0}
+        r64 = next(i for i in items if i.name == "rint64-class-rne")
+        cr = SR.campaign_body(r64)
+        old = next(i for i in items if i.name == "sqrt32-rne")
+        co = SR.campaign_body(old)
+        why = SR.counts_problem(camp, past)
+        c("campaign space: counts_problem refuses an interval one past a new item's real space, by name and figure (21,235,789 past 21,235,788; "
+          "35,841 past 35,840), and accepts one that ends exactly at it",
+          why is not None and "past the campaign's space of 21235788" in why and SR.counts_problem(camp, ends) is None
+          and "past the campaign's space of 35840" in (SR.counts_problem(cr, {"kind": "slice", "lo": 0, "hi": 35841, "cases": 4 * 35841,
+                                                                               "skipped": 0}) or "")
+          and SR.counts_problem(cr, {"kind": "slice", "lo": 0, "hi": 35840, "cases": 4 * 35840, "skipped": 0}) is None, str(why))
+        c("campaign space: an old item's space is still 2^32: an interval to 2^32 is accepted and one past it is refused",
+          SR.counts_problem(co, {"kind": "slice", "lo": 0, "hi": 1 << 32, "cases": 1 << 32}) is None
+          and "past the campaign's space of 4294967296" in (SR.counts_problem(co, {"kind": "slice", "lo": 0, "hi": (1 << 32) + 1,
+                                                                                    "cases": (1 << 32) + 1}) or ""))
+    return out
+
+
+def make_key(tmp: str, name: str):
+    """A throwaway Ed25519 key made now by python/cft_sign.py keygen in `tmp`: (path, public key hex, secret seed hex). Never a real key, never in a
+    tree (the caller holds `tmp` to be outside every working tree)."""
+    path = os.path.join(tmp, name)
+    p = subprocess.run([sys.executable, "-B", "-I", os.path.join(ROOT, "python", "cft_sign.py"), "keygen", "--out", path],
+                       capture_output=True, text=True, timeout=60)
+    pub = re.findall(r"[0-9a-f]{64}", p.stdout)
+    seed = re.search(r"^seed ([0-9a-f]{64})$", open(path).read(), re.M) if os.path.exists(path) else None
+    return (path, pub[-1], seed.group(1)) if pub and seed else (None, None, None)
+
+
+def outside_trees(path: str) -> bool:
+    """Whether `path` is outside every git working tree (a key made there could be used by the driver): the test's own temp directory is,
+    unless the machine's temp directory is inside a repository, in which case the key tests are skipped by name."""
+    p = os.path.abspath(path)
+    return not any(os.path.exists(os.path.join(d, ".git")) for d in [p] + list(_parents(p)))
+
+
+def _parents(p: str):
+    while True:
+        q = os.path.dirname(p)
+        if q == p:
+            return
+        yield q
+        p = q
+
+
+def parse_refusal(mod, argv: list):
+    """The text a refused command line printed, or None when it was accepted."""
+    import io
+    buf = io.StringIO()
+    try:
+        with contextlib.redirect_stderr(buf):
+            mod.parse_args(argv)
+        return None
+    except SystemExit:
+        return buf.getvalue()
+
+
+def records_args_checks(env: Env, src: str = HERE) -> list:
+    """--records, --sign-key and --device-key at the command line, in-process: each refusal by name before anything starts, a key inside a git
+    working tree refused (key-in-tree) whether or not it exists, the secret never read into a setting; and without the flags nothing is
+    written or recorded that was not."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    kd = tempfile.mkdtemp(prefix="cs-key-")
+    scratch = os.path.join(env.tmp, "keyrepo")
+    try:
+        if not outside_trees(kd):
+            skip("records args", f"the temp directory {kd} is inside a git working tree: a key made here would be refused (key-in-tree)")
+            return out
+        key, pub, seed = make_key(kd, "a.key")
+        c("records args: a throwaway key is made at run time by cft_sign.py keygen, outside every git working tree", key is not None, str(key))
+        if key is None:
+            return out
+        with driver_from(src) as (mod, d, L2):
+            base = ["--out", os.path.join(kd, "o"), "--quick", "--root", ROOT]
+            r = parse_refusal(mod, base + ["--dry-run", "--records", "--sign-key", key])
+            c("records args: --records with --dry-run is refused by name - the exporter refuses a run whose legs came from stand-ins - and "
+              "nothing starts", r is not None and "refused with --dry-run" in r and "sweep_record" in r and "stand-ins" in r, str(r))
+            r = parse_refusal(mod, base + ["--records"])
+            c("records args: --records alone is refused: version 1 puts the device in every record, so it needs --sign-key or --device-key",
+              r is not None and "needs a device" in r and "--sign-key" in r and "--device-key" in r, str(r))
+            r = parse_refusal(mod, base + ["--sign-key", key])
+            c("records args: --sign-key without --records is refused", r is not None and "give --records too" in r, str(r))
+            r = parse_refusal(mod, base + ["--records", "--sign-key", key, "--device-key", pub])
+            c("records args: --sign-key and --device-key together are refused (the key that signs names the device)",
+              r is not None and "alternatives" in r, str(r))
+            r = parse_refusal(mod, base + ["--records", "--device-key", "ab" * 31])
+            c("records args: a --device-key that is not a public key is refused by name", r is not None and "64 lowercase hex" in r, str(r))
+            r = parse_refusal(mod, base + ["--records", "--sign-key", os.path.join(ROOT, "hw", "never-made.key")])
+            c("records args: a key path inside this repository is refused by name (key-in-tree) before any file is read, though no file is there",
+              r is not None and "key-in-tree" in r, str(r))
+            repo = make_scratch_repo(scratch)
+            kin, _p, _s = make_key(scratch, "in.key") if repo else (None, None, None)
+            r = parse_refusal(mod, base + ["--records", "--sign-key", kin]) if kin else None
+            c("records args: a real key file inside ANOTHER git working tree is refused by name (key-in-tree) too",
+              (repo is None and skip("records args", "git cannot make a scratch repository here") is None) or
+              (kin is not None and r is not None and "key-in-tree" in r), str(r))
+            if POSIX:
+                loose = os.path.join(kd, "loose.key")
+                shutil.copy(key, loose)
+                os.chmod(loose, 0o644)
+                r = parse_refusal(mod, base + ["--records", "--sign-key", loose])
+                c("records args (POSIX): a key file others may read is refused by name (key-file)", r is not None and "key-file" in r, str(r))
+            else:
+                skip("records args (POSIX): a key file others may read", "Windows' permissions are ACLs, which cft_sign.py does not check")
+            r = parse_refusal(mod, base + ["--records", "--sign-key", os.path.join(kd, "missing.key")])
+            c("records args: a key file that is not there is refused by name (key-file), not a crash", r is not None and "key-file" in r, str(r))
+            import io
+            with contextlib.redirect_stderr(io.StringIO()):
+                a = mod.parse_args(base + ["--records", "--sign-key", key])
+                b = mod.parse_args(base + ["--records", "--device-key", pub])
+            c("records args: a good key and --records, or --device-key and --records, are accepted; the key's PATH is a setting and its "
+              "SECRET is in no setting (the namespace settings.json is written from)",
+              a.records and a.sign_key == key and b.records and b.device_key == pub and a.device_key is None
+              and seed not in json.dumps(vars(a), default=str) and seed not in json.dumps(vars(b), default=str), "")
+    finally:
+        rmtree_force(kd)
+        rmtree_force(scratch)
+    # without the flags: no file, no setting, no status line - the run is as it was
+    R = run_driver(env, "norec", ["--quick", "--legs", "api-test", "--sweep-items", "rint64-class-rne"], src=src, cap=100)
+    st = open(os.path.join(R.out, "status.txt")).read()
+    c("records args: without --records no records file is written, run_start names no records, settings.json names no records, key or pass "
+      "size, and status.txt has no records line",
+      not os.path.exists(os.path.join(R.out, "sweep-records.jsonl")) and "records" not in R.recs[0]["settings"]
+      and not (set(json.load(open(os.path.join(R.out, "settings.json")))) & {"records", "sign_key", "device_key", "sweep_chunk"})
+      and "records    " not in st and R.rc == 0, f"rc {R.rc}")
+    return out
+
+
+def records_sink_checks(env: Env, src: str = HERE) -> list:
+    """The driver's record sink on the records of a real dry run (the stand-in's slices of index-based items, host and card): REFUSED as
+    they stand - the exporter refuses a dry run - and, with one flag of run_start set to say the run was real, written, held to the
+    verifier and to the driver's own coverage. This is how --records is exercised end to end on every platform without weakening that
+    refusal: the same stream gives records only when the one field that says 'a dry run' is changed, in a scratch directory, by the
+    test; nothing in the driver or the exporter offers such a switch. A leg the exporter refuses is named and the run goes on; a resumed
+    run continues its file."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    kd = tempfile.mkdtemp(prefix="cs-key-")
+    try:
+        if not outside_trees(kd):
+            skip("records sink", f"the temp directory {kd} is inside a git working tree")
+            return out
+        key, pub, seed = make_key(kd, "s.key")
+        key2, pub2, _s2 = make_key(kd, "t.key")
+        if key is None or key2 is None:
+            c("records sink: throwaway keys were made", False)
+            return out
+        R = run_driver(env, "recsrc", ["--quick", "--legs", "api-test", "--sweep-items",
+                                       "rint64-class-rne,div32-hard-rne,sqrt64-hard-rmm,scaleb64-class-rne,cvtto64-class-rne,conv64to32-class-rtz"],
+                       src=src, cap=150)
+        recs = R.recs
+        card = [r for r in recs if r.get("type") == "leg" and r.get("kind") == "sweep" and r["status"] == "pass" and r["image"] != "cpu"]
+        host = [r for r in recs if r.get("type") == "leg" and r.get("kind") == "sweep" and r["status"] == "pass" and r["image"] == "cpu"]
+        c("records sink: the source run is a dry run with card slices on the quad, the single and the deep and host slices on the pool",
+          dg(recs[0], "settings", "dry_run") is True and len(card) >= 8 and len(host) == 2 and {r["image"] for r in card} == {"quad", "single", "deep"},
+          f"{len(card)} card, {len(host)} host")
+        want_cases = sum(r["counts"]["cases"] for r in card)
+
+        def feed_all(mod, sink, stream, dry_flag, via=None):
+            for r in stream:
+                r = json.loads(json.dumps(r))
+                if r.get("type") == "run_start" and dry_flag is not None:
+                    r["settings"]["dry_run"] = dry_flag
+                (via.rec if via is not None else sink.feed)(r)
+
+        with driver_from(src) as (mod, d, L2):
+            def new_sink(path, k=None, dev=None):
+                ev = []
+                return mod.RecordSink(path, k, dev, emit=lambda name, detail, **kw: ev.append((name, detail))), ev
+            # 1. the stream as it stands: refused, nothing written
+            p1 = os.path.join(kd, "dry.jsonl")
+            s1, ev1 = new_sink(p1, key)
+            try:
+                feed_all(mod, s1, recs, None)
+                crash1 = None
+            except Exception as e:                 # a refusal that escapes the sink would end a long run: a red check, not a crash
+                crash1 = repr(e)
+            c("records sink: the dry run's records fed as they stand are REFUSED by the exporter: one records_disabled event naming the dry run, "
+              "every finished card slice counted as not exported, and no file",
+              crash1 is None and not os.path.exists(p1) and [n for n, _ in ev1].count("records_disabled") == 1 and "dry run" in ev1[0][1]
+              and s1.refused.get("disabled") == len(card) and s1.written == 0, str(crash1 or ev1[:2]))
+            SR = s1.SR
+            ex = SR.Exporter(public=bytes.fromhex(pub))
+            try:
+                ex.run_start(dict(recs[0]))
+                raised = None
+            except SR.Refusal as e:
+                raised = (e.name, e.why)
+            c("records sink: and the exporter itself still refuses that run_start, by name (metrics: a dry run)",
+              raised is not None and raised[0] == "metrics" and "dry run" in raised[1], str(raised))
+            # 2. the same stream with the one field changed: written, through the driver's own rec(), signed
+            os.makedirs(d.out, exist_ok=True)
+            p2 = os.path.join(kd, "signed.jsonl")
+            s2, ev2 = new_sink(p2, key)
+            d.sink = s2
+            feed_all(mod, s2, recs, False, via=d)
+            ring = os.path.join(kd, "ring.keyring")
+            with open(ring, "w", newline="\n") as fh:
+                fh.write(f"key {pub} Throwaway%20Holder\n")
+            parsed = []
+            try:
+                parsed = SR.parse_file(read_bytes(p2))
+                rep = SR.verify_records(parsed, SR.read_keyring(ring), require_signed=True)
+                vr = (rep["clean"], rep["cases"], len(rep["findings"]), rep["slices"], rep["campaigns"], rep["unsigned"])
+            except SR.Refusal as e:
+                vr = ("refused", str(e))
+            c("records sink: through Driver.rec the same stream, with only settings.dry_run said False, is written: the file verifies signed by "
+              "the throwaway key against its keyring, every finished CARD slice is one record, no finding, and the cases total is the driver's "
+              "own coverage of those slices",
+              vr == (len(card), want_cases, 0, len(card), len({r["sweep"]["item"] for r in card}), 0), str(vr))
+            camps = {r["operation"] + "-" + r.get("attribute", ""): r for _n, r in parsed if r["kind"] == "campaign"}
+            c("records sink: the campaign records say each item's own space (div32-hard 21,235,788, rint64-class 35,840, cvtto64-class is a host "
+              "item and has none), and Driver.rec still wrote metrics.jsonl first, every record of it",
+              camps.get("div32-hard-rne", {}).get("space") == 21_235_788 and camps.get("rint64-class-rne", {}).get("space") == 35_840
+              and "cvtto64-class-rne" not in camps and len(L.read_records(d.metrics)[0]) == len(recs), str(sorted(camps)))
+            c("records sink: the host-pool slices are counted, not offered to the exporter (version 1 has no form for a slice with no image): "
+              "2 counted, one records_host_slices event, and not one record_refused",
+              s2.host_slices == len(host) == 2 and [n for n, _ in ev2].count("records_host_slices") == 1 and not s2.refused
+              and "record_refused" not in [n for n, _ in ev2], str([(n, x[:60]) for n, x in ev2]))
+            def slurp(pth):
+                return read_bytes(pth).decode("utf-8", "replace")
+            secret_in = any(seed in slurp(pth) for pth in (p2, d.metrics))
+            c("records sink: the key's secret is in neither the records nor metrics.jsonl", not secret_in and seed not in s2.summary())
+            # 3. unsigned, for a later `sign`: the file verifies only as unsigned, and sign makes it verify signed
+            p3 = os.path.join(kd, "unsigned.jsonl")
+            s3, _ev3 = new_sink(p3, None, pub)
+            feed_all(mod, s3, recs, False)
+            try:
+                rep3 = SR.verify_records(SR.parse_file(read_bytes(p3)), None, require_signed=False)
+                un = (rep3["clean"], rep3["unsigned"])
+                try:
+                    SR.verify_records(SR.parse_file(read_bytes(p3)), None, require_signed=True)
+                    sig_needed = False
+                except SR.Refusal as e:
+                    sig_needed = e.name == "signature"
+            except SR.Refusal as e:
+                un, sig_needed = ("refused", str(e)), False
+            c("records sink: with --device-key the records are written unsigned (verify without --allow-unsigned refuses them: signature) and "
+              "name the key's device", un == (len(card), len(card)) and sig_needed and s3.ex.device == SR.device_of(bytes.fromhex(pub)), str(un))
+            # 4. a leg the exporter refuses is named and the run goes on
+            p4 = os.path.join(kd, "refused.jsonl")
+            s4, ev4 = new_sink(p4, key)
+            stream = json.loads(json.dumps(recs))
+            victim = next(r for r in stream if r.get("type") == "leg" and r.get("kind") == "sweep" and r["status"] == "pass"
+                          and r["image"] != "cpu" and r["sweep"]["item"] == "rint64-class-rne")
+            victim["counts"]["cases"] += 1                     # a count the item's own rule (4 an index) would not have passed
+            try:
+                feed_all(mod, s4, stream, False)
+                crashed = None
+            except Exception as e:                              # a refusal that escapes the sink would end a long run
+                crashed = repr(e)
+            rep4 = SR.verify_records(SR.parse_file(read_bytes(p4)), None, require_signed=True) if os.path.exists(p4) else {"clean": -1}
+            named = [x for n, x in ev4 if n == "record_refused"]
+            c("records sink: a leg whose counts the exporter refuses is a record_refused event naming the refusal and the leg, the sink does not "
+              "crash, and every other slice is still written",
+              crashed is None and len(named) == 1 and named[0].startswith("metrics:") and "rint64-class-rne" in named[0] and "counts" in named[0]
+              and s4.refused == {"metrics": 1} and rep4["clean"] == len(card) - 1, f"{crashed} {named[:1]} {rep4['clean']}")
+            # 5. a resumed run continues its file: campaigns not repeated, another key refused, a torn tail cut back
+            p5 = os.path.join(kd, "resume.jsonl")
+            s5, _ev5 = new_sink(p5, key)
+            not_deep = [r for r in recs if r.get("type") != "leg" or r.get("kind") != "sweep" or r["image"] != "deep"]
+            feed_all(mod, s5, not_deep, False)
+            first_n = s5.written
+            s6, _ev6 = new_sink(p5, key)
+            notes = s6.adopt(R.recs[0]["run_id"])
+            feed_all(mod, s6, [r for r in recs if r.get("type") == "run_start" or r.get("type") == "build"
+                               or (r.get("type") == "leg" and r.get("kind") == "sweep" and r["image"] == "deep")], False)
+            lines = read_bytes(p5).split(b"\n")
+            ncamp = sum(1 for ln in lines if b'"kind":"campaign"' in ln)
+            try:
+                rep5 = SR.verify_records(SR.parse_file(read_bytes(p5)), None, require_signed=True)
+                v5 = (rep5["clean"], rep5["campaigns"])
+            except SR.Refusal as e:
+                v5 = ("refused", str(e))
+            c("records sink: a resumed run's sink adopts the file (its campaigns are known: none is written twice) and the file, all of it, "
+              "verifies as one run's, every card slice once",
+              first_n > 0 and notes and v5 == (len(card), ncamp) and ncamp == len({r["sweep"]["item"] for r in card}), f"{v5} {ncamp} {notes}")
+            s7, _ev7 = new_sink(p5, key2)
+            try:
+                s7.adopt(R.recs[0]["run_id"])
+                other = None
+            except mod.RecordsError as e:
+                other = str(e)
+            c("records sink: a resume with ANOTHER key is refused by name (the file is one device's), not appended to",
+              other is not None and "device" in other, str(other))
+            with open(p5, "ab") as fh:
+                fh.write(b'{"kind":"slice","lo":0,"hi')
+            s8, _ev8 = new_sink(p5, key)
+            n8 = s8.adopt(R.recs[0]["run_id"])
+            c("records sink: a torn last line (a write cut short) is cut back to the last whole record, and said",
+              read_bytes(p5).endswith(b"\n") and any("torn" in x for x in n8), str(n8))
+    finally:
+        rmtree_force(kd)
+    return out
+
+
+def scn_records_real(env: Env, src: str = HERE) -> list:
+    """--records on a run that is NOT a dry run: the driver's real path (its build step, its guard, its tools run as processes, its record
+    sink) over a scratch checkout whose tools and `make` and `ldd` are TEST DOUBLES - shell scripts that run the stand-in. The exporter
+    refuses a dry run's legs and cannot tell a double from a card, which is exactly why this lives in a throwaway tree under the test's
+    temp directory and offers nothing a real run could reach. A: the default tools, signed with a throwaway key; the file verifies against
+    its keyring and its case total is the driver's coverage of the card slices; the secret is nowhere in the run; the host slice is counted.
+    B: --sweep-chunk, unsigned with --device-key: the build step runs `make SOAK_CHUNK=n soak-chunk` with the default build's flags,
+    every slice says its pass size, `sweep_record.py sign` signs the file, and it verifies."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    need = [x for x in ("git", "sh", "nice", "timeout") if not shutil.which(x)]
+    if not POSIX or need:
+        skip("records real", "needs POSIX with git, sh, nice and timeout" + (f" (missing: {', '.join(need)})" if need else ""))
+        return out
+    kd = tempfile.mkdtemp(prefix="cs-key-")
+    try:
+        if not outside_trees(kd):
+            skip("records real", f"the temp directory {kd} is inside a git working tree")
+            return out
+        key, pub, seed = make_key(kd, "r.key")
+        ring = os.path.join(kd, "r.keyring")
+        with open(ring, "w", newline="\n") as fh:
+            fh.write(f"key {pub} Throwaway%20Holder\n")
+        root = os.path.join(env.tmp, "faketree")
+        for rel in ("host/tests/seq_check.py", "programs/acceptance.py", "hw/card-segrun.sh"):
+            os.makedirs(os.path.dirname(os.path.join(root, rel)), exist_ok=True)
+            shutil.copy(os.path.join(ROOT, rel), os.path.join(root, rel))
+        shutil.copy(os.path.join(src, "card_stress.py"), os.path.join(root, "hw", "card_stress.py"))
+        standin = os.path.join(src, "card_stress_standin.py")
+
+        def script(path, body):
+            with open(path, "w") as fh:
+                fh.write("#!/bin/sh\n" + body + "\n")
+            os.chmod(path, 0o755)
+        run_standin = f"exec '{sys.executable}' '{standin}'"
+        for name in ("divsqrt-soak", "clause5-soak"):
+            script(os.path.join(root, "host", name), f'case "$1" in probe) exit 0;; esac\n{run_standin} soak -- "$0" "$@"')
+        script(os.path.join(root, "host", "api-test"), f'{run_standin} api-test -- "$0" "$@"')
+        script(os.path.join(root, "host", "cft-segrun"), 'echo FAKEBUILDID')
+        for name in ("device-test", "remote-test", "cft-audit", "cft-selftest"):
+            script(os.path.join(root, "host", name), "exit 0")
+        open(os.path.join(root, "host", "libcft.so"), "w").close()
+        for git in (["init", "-q"], ["add", "-A"], ["-c", "user.email=t@example.invalid", "-c", "user.name=t", "commit", "-qm", "t"]):
+            subprocess.run(["git", "-C", root] + git, capture_output=True, timeout=120)
+        fb = os.path.join(env.tmp, "fakebin-rec")
+        os.makedirs(fb, exist_ok=True)
+        script(os.path.join(fb, "ldd"), "echo '\tlibxrt_coreutil.so.2 => /fake/libxrt_coreutil.so.2 (0x0)'")
+        script(os.path.join(fb, "make"),
+               'echo "$@" >> "$FAKE_MAKE_LOG"\ndir=.; prev=; n=\nfor a in "$@"; do\n  case "$prev" in -C) dir="$a";; esac\n'
+               '  case "$a" in print-build-id) echo FAKEBUILDID; exit 0;; SOAK_CHUNK=*) n="${a#SOAK_CHUNK=}";; esac\n  prev="$a"\ndone\n'
+               'if [ -n "$n" ]; then for t in divsqrt-soak clause5-soak; do cp "$dir/$t" "$dir/$t-c$n"; done; fi\nexit 0')
+        items = "rint64-class-rne,scaleb64-class-rne,div32-hard-rne,sqrt64-hard-rmm,cvtto64-class-rne"
+
+        def drive(name, extra):
+            env.n += 1
+            o = os.path.join(env.tmp, f"{env.n:02d}-{name}")
+            makelog = os.path.join(env.tmp, f"{env.n:02d}-{name}-make.log")
+            cmd = [sys.executable, "-B", "-I", os.path.join(src, "card_stress.py"), "--root", root, "--out", o, "--quick", "--legs", "api-test",
+                   "--telemetry-seconds", "0", "--disk-extra", "", "--retry-pause", "1", "--kill-after", "2", "--guard-poll", "1",
+                   "--build-jobs", "2", "--make-xrt-flags", "XRT=0", "--sweep-items", items]
+            for n, pth in env.imgs.items():
+                cmd += ["--image", f"{n}={pth}", "--sha", f"{n}={env.shas[n]}"]
+            e = dict(os.environ)
+            e["PATH"] = fb + os.pathsep + e["PATH"]
+            e["FAKE_MAKE_LOG"] = makelog
+            p = subprocess.run(cmd + extra, capture_output=True, text=True, env=e, cwd=ROOT, timeout=300)
+            r = Run(o)
+            r.rc, r.text = p.returncode, p.stdout + p.stderr
+            r.makelog = open(makelog).read().splitlines() if os.path.exists(makelog) else []
+            return r
+
+        def cardslices(r):
+            return [x for x in r.legs(kind="sweep", status="pass") if x["image"] != "cpu"]
+
+        def sr(*args):
+            return subprocess.run([sys.executable, "-B", "-I", os.path.join(src, "sweep_record.py")] + list(args),
+                                  capture_output=True, text=True, timeout=120)
+
+        def slurp_tree(d):
+            blob = b""
+            for dp, _dn, fns in os.walk(d):
+                for fn in fns:
+                    with open(os.path.join(dp, fn), "rb") as fh:
+                        blob += fh.read()
+            return blob
+        # A: the default tools, signed
+        A = drive("rec-real-a", ["--records", "--sign-key", key])
+        rf = os.path.join(A.out, "sweep-records.jsonl")
+        cs = cardslices(A)
+        v = sr("verify", rf, "--keyring", ring) if os.path.exists(rf) else None
+        m = re.search(r"(\d+) slices and 0 streams; (\d+) clean \((\d+) cases\), 0 FINDINGS", v.stdout) if v else None
+        c("records real (A): a run that is not a dry run, with --records and --sign-key, exits 0 and its run_start says it was real and "
+          "names the records file, signed",
+          A.rc == 0 and dg(A.recs[0], "settings", "dry_run") is False and dg(A.recs[0], "settings", "records") == {"file": "sweep-records.jsonl", "signed": True}
+          and len(cs) >= 8, f"rc {A.rc}: {A.text[-300:]}")
+        c("records real (A): sweep_record.py verify of the file against its keyring says clean (exit 0), one record for every finished CARD "
+          "slice, and a case total equal to the driver's coverage of those slices (summed here from metrics.jsonl)",
+          v is not None and v.returncode == 0 and m is not None and int(m.group(1)) == int(m.group(2)) == len(cs)
+          and int(m.group(3)) == sum(x["counts"]["cases"] for x in cs), (v.stdout + v.stderr)[-300:] if v else "no file")
+        c("records real (A): signed by the throwaway key, the keyring's holder named; its secret is in no file of the run (settings, "
+          "metrics, logs, records, driver.log)", v is not None and pub in v.stdout and "Throwaway%20Holder" in v.stdout
+          and seed.encode() not in slurp_tree(A.out), v.stdout[-200:] if v else "")
+        hs, sm = A.events("records_host_slices"), A.events("records_summary")
+        c("records real (A): the host-pool slice is counted and said once (records_host_slices), the summary event names the key and the "
+          "counts, and no leg was refused", len(hs) == 1 and len(sm) == 1 and f"signed by key {pub}" in sm[0]["detail"]
+          and "refused: none" in sm[0]["detail"] and not A.events("record_refused"), str([e["detail"][:120] for e in sm]))
+        c("records real (A): the default tools were built and run: no soak-chunk in the make log, no -c in any tool's name",
+          bool(A.makelog) and not any("soak-chunk" in ln for ln in A.makelog) and all("sweep" not in x or "batch" not in x["sweep"] for x in cs), str(A.makelog[:2]))
+        # B: --sweep-chunk, unsigned, signed afterwards by `sweep_record.py sign`
+        B = drive("rec-real-b", ["--sweep-chunk", "16384", "--records", "--device-key", pub])
+        bf = os.path.join(B.out, "sweep-records.jsonl")
+        cb = cardslices(B)
+        mk_def = next((ln.split() for ln in B.makelog if " all " in ln + " " and "SOAK_CHUNK" not in ln), [])
+        mk_chk = next((ln.split() for ln in B.makelog if "SOAK_CHUNK=16384" in ln and "soak-chunk" in ln), [])
+
+        def flags(tokens):
+            i = tokens.index("-j2") + 1 if "-j2" in tokens else 0
+            fl = []
+            while i < len(tokens) and re.fullmatch(r"[A-Z0-9_]+=\S*", tokens[i]) and not tokens[i].startswith("SOAK_CHUNK="):
+                fl.append(tokens[i])
+                i += 1
+            return fl
+        c("records real (B): the build step ran the default make and then `make -C host SOAK_CHUNK=16384 soak-chunk`, with exactly the flags "
+          "the default build took (XRT=0 here, and C5DEFS where the probe found roundeven)",
+          bool(mk_def) and bool(mk_chk) and mk_chk[:2] == ["-C", mk_def[1]] and flags(mk_chk) == flags(mk_def) and "XRT=0" in flags(mk_chk)
+          and mk_chk[-1] == "soak-chunk" and mk_chk[-2] == "SOAK_CHUNK=16384", f"{mk_def} | {mk_chk}")
+        c("records real (B): every finished slice, on the card's images and the pool, carries the pass size its tool said (16384 and 16384), and "
+          "the record file's run says the build asserted the chunked tools XRT-linked",
+          B.rc == 0 and bool(cb) and all(dg(x, "sweep", "batch") == 16384 and dg(x, "sweep", "chunk") == 16384 for x in B.legs(kind="sweep", status="pass"))
+          and any(s["name"] == "xrt divsqrt-soak-c16384" and s["ok"] for s in (B.last("build") or {}).get("steps", [])), f"rc {B.rc}: {B.text[-300:]}")
+        vu = sr("verify", bf)
+        vu2 = sr("verify", bf, "--allow-unsigned")
+        signed = os.path.join(kd, "b-signed.jsonl")
+        sg = sr("sign", bf, "--key", key, "--out", signed)
+        vs = sr("verify", signed, "--keyring", ring) if sg.returncode == 0 else None
+        mb = re.search(r"(\d+) slices and 0 streams; (\d+) clean \((\d+) cases\)", vs.stdout) if vs else None
+        c("records real (B): --device-key writes unsigned records (verify refuses them without --allow-unsigned, accepts them with it), "
+          "`sweep_record.py sign` with the key signs the whole file, and the signed file verifies against the keyring with the driver's own case total",
+          vu.returncode == 2 and vu2.returncode == 0 and sg.returncode == 0 and vs is not None and vs.returncode == 0 and mb is not None
+          and int(mb.group(1)) == len(cb) and int(mb.group(3)) == sum(x["counts"]["cases"] for x in cb),
+          f"{vu.returncode} {vu2.returncode} {sg.returncode} {(vs.stdout + vs.stderr)[-200:] if vs else ''}")
+    finally:
+        rmtree_force(kd)
+    return out
+
+
+def quick_empty_wave_checks(env: Env, src: str = HERE) -> list:
+    """VDR1-1: --quick with --sweep-items ends an image's sweep after ONE empty wave. A host-only list leaves every card wave empty; the quad
+    (one quick wave) and the single and the deep (two) each say so once - not twice, which is what the smoke would do on those two images if
+    the empty wave were followed by the next one of quick's own list while items are named."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    R = run_driver(env, "quickempty", ["--quick", "--legs", "api-test", "--sweep-items", "nextup32"], src=src, cap=120)
+    emp = R.events("sweep_empty")
+    c("quick sweep: with --sweep-items an empty wave ends the image's sweep at once - one sweep_empty event for each of the quad, the "
+      "single and the deep, in that order, not two for the images that have two quick waves - and the smoke still exits 0",
+      [e["image"] for e in emp] == ["quad", "single", "deep"] and all(e.get("cause") == "blocked" for e in emp) and R.rc == 0
+      and len(R.legs(kind="sweep")) == 1, f"rc {R.rc}: {[(e['image'], e.get('cause')) for e in emp]}")
+    return out
+
+
+def standin_alive_checks() -> list:
+    """VDR1-2 and VDR1-3: standin_alive on Windows asks PowerShell for a process's command line. A call that times out must not error the
+    scenario (it counts the pid as alive: the check then fails, as it should for a stand-in it cannot show is gone), and an unreadable
+    command line is ALIVE, as the docstring says: a call that fails, or reads an empty command line of a pid that is still there. An
+    empty answer for a pid that has exited since the first look is the process having ended between the two calls: dead. Run here on any
+    platform, by naming the Windows branch (POSIX set False) and giving it a PowerShell that times out, fails or answers."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    g = globals()
+    saved = (g["POSIX"], g["pid_alive"], subprocess.run)
+
+    def with_ps(answer, alive):
+        """standin_alive(1234) with POSIX False, pid_alive answering from `alive` (a list, one answer a call), and subprocess.run being `answer`."""
+        calls = list(alive)
+        g["POSIX"] = False
+        g["pid_alive"] = lambda pid: calls.pop(0) if calls else False
+        subprocess.run = answer
+        try:
+            return standin_alive(1234)
+        except Exception as e:
+            return f"raised {type(e).__name__}"
+        finally:
+            g["POSIX"], g["pid_alive"], subprocess.run = saved
+
+    def cp(rc, stdout):
+        return lambda *a, **k: subprocess.CompletedProcess(a[0] if a else [], rc, stdout, "")
+
+    def timeout(*a, **k):
+        raise subprocess.TimeoutExpired(a[0] if a else "powershell", 60)
+
+    def missing(*a, **k):
+        raise FileNotFoundError("powershell")
+    c("standin_alive: a PowerShell call that times out does not raise: the pid counts as alive (VDR1-2)", with_ps(timeout, [True]) is True,
+      str(with_ps(timeout, [True])))
+    c("standin_alive: a PowerShell that cannot be started, or fails, counts the pid as alive", with_ps(missing, [True]) is True and with_ps(cp(1, ""), [True]) is True)
+    c("standin_alive: an EMPTY command line of a pid that is still there is unreadable, so ALIVE - the docstring's word, now the code's "
+      "(VDR1-3)", with_ps(cp(0, ""), [True, True]) is True and with_ps(cp(0, "  \r\n"), [True, True]) is True,
+      str((with_ps(cp(0, ""), [True, True]), with_ps(cp(0, "  \r\n"), [True, True]))))
+    c("standin_alive: an empty answer for a pid that has exited since the first look is the process gone between the two calls: dead",
+      with_ps(cp(0, ""), [True, False]) is False)
+    c("standin_alive: a command line that names card_stress_standin is alive, another program's (a recycled pid) is dead, and a pid that is "
+      "not alive at the first look is dead without asking",
+      with_ps(cp(0, "python card_stress_standin.py soak"), [True]) is True and with_ps(cp(0, "notepad.exe"), [True]) is False
+      and with_ps(cp(0, "x"), [False]) is False)
+    return out
+
+
+def fx_cpu_filter_checks(env: Env, src: str = HERE) -> list:
+    """DR2's note on python/figure_extracts.py: a `cpu` (host-pool) sweep leg runs beside the card and is no card activity. The stress figure's
+    power by activity, made from a real run's metrics.jsonl (set CARD_STRESS_METRICS to it: the lead's stress copy is the committed figures'
+    source), must be the same when a cpu leg sits over every telemetry sample - the samples taken between legs must not become 'sweep, host
+    items only'. Skipped by name without the file."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    path = os.environ.get("CARD_STRESS_METRICS", "")
+    if not path or not os.path.isfile(path):
+        skip("fx filter", "set CARD_STRESS_METRICS to a finished run's metrics.jsonl (the stress copy the committed figures come from)")
+        return out
+    import importlib.util
+    fe_path = os.path.join(src, "figure_extracts.py")
+    if not os.path.exists(fe_path):
+        fe_path = os.path.join(ROOT, "python", "figure_extracts.py")
+    sys.path.insert(0, os.path.join(ROOT, "python"))
+    try:
+        spec = importlib.util.spec_from_file_location("figure_extracts_under_test", fe_path)
+        FE = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(FE)
+        base = FE.make_stress(path, root=ROOT)["data"]["telemetry"]["power_by_activity"]
+        recs = L.read_records(path)[0]
+        host_leg = next(r for r in recs if r.get("type") == "leg" and r.get("kind") == "sweep" and r["sweep"].get("op") == "nextup32"
+                        and r["status"] == "pass")
+        extra = [dict(host_leg, image="cpu", start_epoch=r["epoch"] - 0.5, end_epoch=r["epoch"] + 0.5)
+                 for r in recs if r.get("type") == "telemetry" and r.get("epoch")]
+        dp = os.path.join(env.tmp, "fx-doctored.jsonl")
+        with open(dp, "w", encoding="utf-8", newline="\n") as fh:
+            for r in recs + extra:
+                fh.write(json.dumps(r) + "\n")
+        withcpu = FE.make_stress(dp, root=ROOT)["data"]["telemetry"]["power_by_activity"]
+        c("fx filter: the stress figure's power by activity from the real run, and from the same run with a cpu sweep leg over every telemetry "
+          "sample, are the same: a pool slice is not 'sweep, host items only' (the samples between legs stay between legs)",
+          base == withcpu and base["quad"]["between legs"]["n"] > 0, f"{base['quad'].get('between legs')} vs {withcpu['quad'].get('between legs')}, "
+          f"host-only {base['quad'].get('sweep, host items only')} vs {withcpu['quad'].get('sweep, host items only')}")
+    except Exception as e:
+        c("fx filter: the stress figure could be made from the real run and from the doctored one", False, repr(e))
+    finally:
+        sys.path.remove(os.path.join(ROOT, "python"))
+    return out
+
+
+def group_items(env: Env, src: str = HERE) -> list:
+    """Parcel DR3, the coverage wave's items in the driver: the catalog and its real logs, the plans, the served items and their refusals."""
+    return index_item_checks(src) + index_plan_checks(src) + scn_index_items(env, src)
+
+
+def group_chunk(env: Env, src: str = HERE) -> list:
+    """Parcel DR3, the pass size: the tool's line read and held to the request, the rule for what is a repeat of what, the report, the run."""
+    return chunk_unit_checks(src) + chunk_report_checks(env, src) + scn_chunk(env, src)
+
+
+def group_records(env: Env, src: str = HERE) -> list:
+    """Parcel DR3, signed records from the driver: the campaign's own space, the flags and their refusals, the sink on a real dry run's
+    records, and a real (not dry) run over test doubles."""
+    return (campaign_space_checks(src) + records_args_checks(env, src) + records_sink_checks(env, src) + scn_records_real(env, src))
+
+
+def group_notes(env: Env, src: str = HERE) -> list:
+    """Parcel DR3, four verifiers' notes: --quick --sweep-items stops after one empty wave, the Windows stand-in check, figure_extracts' filter."""
+    return quick_empty_wave_checks(env, src) + standin_alive_checks() + fx_cpu_filter_checks(env, src)
+
+
+# ---------------------------------------------------------------------------------------
 # the plants: one defect put back into a copy of the code; the scenario for it must FAIL
 # ---------------------------------------------------------------------------------------
 
@@ -3185,11 +4573,22 @@ def make_plant_copy(env: Env, name: str, edits: list) -> str:
     prove nothing."""
     d = os.path.join(env.tmp, "plant-" + name)
     os.makedirs(d, exist_ok=True)
+    # hw/sweep_record.py finds python/ (cft_sign, cft_golden) BESIDE the directory that holds it, so a plant's copy, one level down in
+    # env.tmp, needs one there: without it a driver run from a copy that asks for --records cannot start (ModuleNotFoundError: cft_sign),
+    # and a plant of that scenario goes red at every check for a reason that is not its own. Made once, by copy, never by link.
+    pyd = os.path.join(env.tmp, "python")
+    if not os.path.isdir(pyd):
+        os.makedirs(pyd)
+        shutil.copy(os.path.join(ROOT, "python", "cft_sign.py"), pyd)
+        shutil.copytree(os.path.join(ROOT, "python", "cft_golden"), os.path.join(pyd, "cft_golden"),
+                        ignore=shutil.ignore_patterns("__pycache__"))
     for f in os.listdir(HERE):
         if f.endswith((".py", ".sh")):
             shutil.copy(os.path.join(HERE, f), os.path.join(d, f))
     if os.path.isdir(FIX) and not os.path.exists(os.path.join(d, "card_stress_fixtures")):
         shutil.copytree(FIX, os.path.join(d, "card_stress_fixtures"))
+    if any(e[0] == "figure_extracts.py" for e in edits):          # lives in python/, not hw/: a plant of it gets its own copy
+        shutil.copy(os.path.join(ROOT, "python", "figure_extracts.py"), os.path.join(d, "figure_extracts.py"))
     for fname, old, new in edits:
         p = os.path.join(d, fname)
         with open(p, "r", encoding="utf-8", newline="") as fh:
@@ -3213,6 +4612,19 @@ def plant_parsers(env: Env, src: str) -> list:
     if p.returncode != 0 and not bad:
         bad = [f"parser group crashed under the plant: {p.stderr[-200:]}"]
     return [(b, False, "") for b in bad] or [("parser group passes under the plant", True, "")]
+
+
+def plant_standin(env: Env, src: str) -> list:
+    """The `standin` group of THIS test (standin_alive's own checks), run as a subprocess from the plant's directory, so it tests the plant's
+    copy of the test; every FAIL line it prints is a failing check, named by its text."""
+    e = dict(os.environ)
+    e["CARD_STRESS_TEST_ROOT"] = ROOT
+    p = subprocess.run([sys.executable, "-B", "-I", os.path.join(src, "test_card_stress.py"), "--only", "standin", "--no-plants"],
+                       capture_output=True, text=True, env=e, timeout=120)
+    bad = [ln.strip()[6:].strip() for ln in p.stdout.splitlines() if ln.startswith("  FAIL  ")]
+    if p.returncode != 0 and not bad:
+        bad = [f"the standin group crashed under the plant: {p.stderr[-200:]}"]
+    return [(b, False, "") for b in bad] or [("the standin group passes under the plant", True, "")]
 
 
 def plant_report(env: Env, src: str) -> list:
@@ -3445,7 +4857,7 @@ def plants(env: Env) -> None:
         ("the card's sweep picks host items too (and the pool tile items)",
          [("card_stress.py", "            if reach is not None and it.reach != reach:\n                continue\n",
            "            if False:\n                continue\n")],
-         lambda env, src: pool_unit_checks(src), ["pool: over a whole rotation the card's waves plan the 43 TILE items", "pool: and the pool's slices are the 47 HOST items"]),
+         lambda env, src: pool_unit_checks(src), ["pool: over a whole rotation the card's waves plan the 65 TILE items", "pool: and the pool's slices are the 60 HOST items"]),
         ("the host pool does not look for a stop before it starts a slice",
          [("card_stress.py", "                stop = self.should_stop()\n                if stop is not None:",
            "                stop = None\n                if stop is not None:")],
@@ -3524,6 +4936,170 @@ def plants(env: Env) -> None:
          [("card_stress_report.py", "                cov = covered([iv for v in per.values() for iv in v[\"iv\"]])\n",
            "                cov = sum(covered(v[\"iv\"]) for v in per.values())\n")],
          scn_trees, ["trees: and the images are reported separately beneath the tree"]),
+        # parcel DR3 (2026-10-21): the index-based items, the pass size, the signed records, four verifiers' notes
+        ("an index-based hard-case item says nothing of what its slice covered",
+         [("card_stress_lib.py", 'per_encoding=k, space=space, level="hard", whole=HARD_WHOLE[op]))',
+           'per_encoding=None, space=space, level="hard", whole=HARD_WHOLE[op]))')],
+         lambda env, src: index_item_checks(src), ["index items: each has the documents' space, k, reach, tool"]),
+        ("cvtto64-class is held to k x E cases though it skips pairs",
+         [("card_stress_lib.py", 'exact=op != "cvtto64-class", per_encoding=k', 'exact=True, per_encoding=k')],
+         lambda env, src: index_item_checks(src), ["index cl-cvtto64-class.txt: made by cvtto64-class-rup's command line"]),
+        ("the stand-in's skipped slots for div32-hard are one off the whole space's",
+         [("card_stress_standin.py", '"div32-hard": (21235788, 4, 20596560)', '"div32-hard": (21235788, 4, 20596561)')],
+         lambda env, src: index_item_checks(src), ["index items: the stand-in's tables"]),
+        ("a hard-case item is marked as a host item",
+         [("card_stress_lib.py", '"div32-hard": TILE, "div64-hard": TILE, "sqrt64-hard": TILE,', '"div32-hard": HOST, "div64-hard": TILE, "sqrt64-hard": TILE,')],
+         lambda env, src: group_commands(src), ["reach: every item is marked as its operation's family is"]),
+        ("the driver's gap is over 2^32 encodings, not the item's own space",
+         [("card_stress.py", "gap = L.first_gap(have, it.space)", "gap = L.first_gap(have)")],
+         lambda env, src: index_plan_checks(src),
+         ["index plan: the last slice is short and ends exactly at the space's end", "index plan: rint64-class-rne's first slice is the WHOLE space"]),
+        ("the status file counts every exhaustive item over 2^32",
+         [("card_stress.py", "ex_total += it.space", "ex_total += L.EXH")],
+         lambda env, src: scn_index_items(env, src), ["index items: status.txt counts the seven items' indices"]),
+        ("the report counts every exhaustive item over 2^32",
+         [("card_stress_report.py", "space = ITEM_SPACE.get(it, EXH)", "space = EXH")],
+         lambda env, src: scn_index_items(env, src), ["index items: the report counts each item over its own space"]),
+        ("the whole-space check never runs",
+         [("card_stress.py", "                    ev += self.whole_space_events(it)\n", "")],
+         lambda env, src: scn_index_items(env, src),
+         ["index items: the whole-space check ran once for each of the seven items", "index short: sqrt64-hard-rmm, whose every slice is one skipped slot off"]),
+        ("the driver does not hold an index item's slice to what it covered (the card's path)",
+         [("card_stress.py", '            cover = job["cover"]\n', "            cover = None\n")],
+         lambda env, src: scn_index_refusals(env, src), ["index short div32-hard-rne: the first 3 slice(s) came back short"]),
+        ("the host pool does not hold an index item's slice to what it covered",
+         [("card_stress.py", '        exp, cover = job["expected"], job["cover"]\n', '        exp, cover = job["expected"], None\n')],
+         lambda env, src: scn_index_refusals(env, src), ["index short cvtto64-class-rne: the first 1 slice(s) came back short"]),
+        # the pass size
+        ("a pass-size line that disagrees with the request is accepted",
+         [("card_stress_lib.py", "        if int(cl.group(1)) != chunk or int(cl.group(2)) != chunk:", "        if False:")],
+         lambda env, src: chunk_unit_checks(src) + scn_chunk(env, src),
+         ["asked at 8192, at 4096 or as the default tool it is refused", "chunk run: the two slices whose tool left out its line"]),
+        ("a default job's log that carries a pass-size line is accepted",
+         [("card_stress_lib.py", "    if chunk is None:\n        if cl:\n", "    if chunk is None:\n        if False:\n")],
+         lambda env, src: chunk_unit_checks(src) + scn_chunk(env, src),
+         ["asked at 8192, at 4096 or as the default tool it is refused", "no chunk: a default job whose tool says it ran at a pass size is refused"]),
+        ("the pool's slices are not held to the pass size",
+         [("card_stress.py", "cpu=True, chunk=self.chunk)), card=False)", "cpu=True)), card=False)")],
+         lambda env, src: scn_chunk(env, src), ["chunk run: every slice that passed carries the batch and chunk its tool said"]),
+        ("the card's slices are not held to the pass size",
+         [("card_stress.py", "t, rc, it.op, it.verdict_mode, img.path, exp, cover, chunk=self.chunk)))", "t, rc, it.op, it.verdict_mode, img.path, exp, cover)))")],
+         lambda env, src: scn_chunk(env, src), ["chunk run: every slice that passed carries the batch and chunk its tool said"]),
+        ("the sweep runs the default tools whatever --sweep-chunk says",
+         [("card_stress.py", 'f"{name}-c{self.chunk}" if self.chunk else name', "name")],
+         lambda env, src: scn_chunk(env, src),
+         ["chunk run: every slice that passed carries the batch and chunk its tool said", "chunk run: the tools the sweep ran are the -c16384 ones"]),
+        ("random scaleB is not held to the cases its BATCH gives",
+         [("card_stress.py", 'job["expected"] = it.random_cases(units, self.batch) if self.chunk else None', 'job["expected"] = None')],
+         lambda env, src: scn_chunk(env, src), ["chunk run: a random scaleB slice is held to the cases its BATCH gives"]),
+        ("the build step does not build the chunked tools",
+         [("card_stress.py", "        if self.chunk:\n            # --sweep-chunk N: the sweep's slices run the tools built at pass size N",
+           "        if False:\n            # --sweep-chunk N: the sweep's slices run the tools built at pass size N")],
+         lambda env, src: scn_records_real(env, src), ["records real (B): the build step ran the default make and then"]),
+        ("the chunked build leaves out the default build's XRT flags",
+         [("card_stress.py", '            cargv = ["make", "-C", host, f"-j{a.build_jobs}"] + xrt_flags\n', '            cargv = ["make", "-C", host, f"-j{a.build_jobs}"]\n')],
+         lambda env, src: scn_records_real(env, src), ["records real (B): the build step ran the default make and then"]),
+        ("a cvtfrom slice's stream is keyed by its tool state alone, whatever the batch",
+         [("card_stress_lib.py", "    return (seed | 1, batch) if op in LAYOUT_OPS else seed | 1", "    return seed | 1")],
+         lambda env, src: chunk_unit_checks(src), ["a cvtfrom slice from a state a slice at the SAME batch used is refused"]),
+        ("every random item's stream is keyed by its batch",
+         [("card_stress_lib.py", "    return (seed | 1, batch) if op in LAYOUT_OPS else seed | 1", "    return (seed | 1, batch)")],
+         lambda env, src: chunk_unit_checks(src), ["chunk streams: every other item is keyed by its state alone"]),
+        ("--earlier-runs floors a cvtfrom item by slices of every batch",
+         [("card_stress_lib.py", "        if batch is not None:\n            # a layout-dependent item's highest n", "        if False:\n            # a layout-dependent item's highest n")],
+         lambda env, src: chunk_unit_checks(src), ["chunk streams: --earlier-runs:"]),
+        ("the report keys a random item's coverage by item alone, chunked or not",
+         [("card_stress_report.py", 'rk = item if bt == DEFAULT_BATCH else f"{item} @batch {bt}"', "rk = item")],
+         lambda env, src: chunk_report_checks(env, src), ["chunk report: coverage by tree keeps a random item's chunked and default streams"]),
+        ("the report says nothing of the pass size",
+         [("card_stress_report.py", '    if W.get("batches"):', "    if False:")],
+         lambda env, src: chunk_report_checks(env, src), ["chunk report: a run with chunked slices says the pass size"]),
+        # the signed records
+        ("--records is accepted with --dry-run",
+         [("card_stress.py", '        if a.dry_run:\n            ap.error("--records: refused with --dry-run.', '        if False:\n            ap.error("--records: refused with --dry-run.')],
+         lambda env, src: records_args_checks(env, src), ["records args: --records with --dry-run is refused by name"]),
+        ("a key inside a git working tree is not refused at the command line",
+         [("card_stress.py", "                    SR.load_seed(a.sign_key)\n                except SR.Refusal as e:", "                    pass\n                except SR.Refusal as e:")],
+         lambda env, src: records_args_checks(env, src),
+         ["records args: a key path inside this repository is refused by name (key-in-tree)", "records args: a real key file inside ANOTHER git working tree"]),
+        ("the key's secret is read into a setting",
+         [("card_stress.py", "                    SR.load_seed(a.sign_key)\n                except SR.Refusal as e:",
+           "                    a.sign_seed = SR.load_seed(a.sign_key).hex()\n                except SR.Refusal as e:")],
+         lambda env, src: records_args_checks(env, src) + scn_records_real(env, src),
+         ["records args: a good key and --records", "records real (A): signed by the throwaway key"]),
+        ("the exporter accepts a dry run's legs",
+         [("sweep_record.py", '            if isinstance(rec.get("settings"), dict) and rec["settings"].get("dry_run"):', "            if False:")],
+         lambda env, src: records_sink_checks(env, src),
+         ["records sink: the dry run's records fed as they stand are REFUSED by the exporter", "records sink: and the exporter itself still refuses that run_start"]),
+        ("the sink offers a host-pool slice to the exporter",
+         [("card_stress.py", '                    if rec.get("image") == L.CPU:', "                    if False:")],
+         lambda env, src: records_sink_checks(env, src), ["records sink: the host-pool slices are counted, not offered to the exporter"]),
+        ("a refusal escapes the record sink",
+         [("card_stress.py", '            except self.SR.Refusal as e:\n                if typ == "run_start":', '            except KeyError as e:\n                if typ == "run_start":')],
+         lambda env, src: records_sink_checks(env, src),
+         ["records sink: the dry run's records fed as they stand are REFUSED by the exporter",
+          "records sink: a leg whose counts the exporter refuses is a record_refused event"]),
+        ("a resumed sink does not know the campaigns already in its file",
+         [("card_stress.py", '                self.ex.seen.add(r["id"])', "                pass")],
+         lambda env, src: records_sink_checks(env, src), ["records sink: a resumed run's sink adopts the file"]),
+        ("a resumed sink appends another key's records to the file",
+         [("card_stress.py", '                if r["run"]["device"] != self.ex.device:', "                if False:")],
+         lambda env, src: records_sink_checks(env, src), ["records sink: a resume with ANOTHER key is refused by name"]),
+        ("Driver.rec does not feed the record sink",
+         [("card_stress.py", "        if self.sink is not None:\n            self.sink.feed(rec)", "        if False:\n            self.sink.feed(rec)")],
+         lambda env, src: records_sink_checks(env, src), ["records sink: through Driver.rec the same stream"]),
+        ("a campaign says 2^32 for an item whose space is smaller (the space forced back)",
+         [("sweep_record.py", 'c["space"], c["exact"] = getattr(it, "space", L.EXH), bool(it.exact)', 'c["space"], c["exact"] = L.EXH, bool(it.exact)')],
+         lambda env, src: campaign_space_checks(src),
+         ["campaign space: counts_problem refuses an interval one past a new item's real space",
+          "campaign space: each of the 35 new items' campaign says its own space"]),
+        # what the brief says must not change without the flags, what the older campaigns' ids must stay, the attributes of an item, and
+        # the case total `verify` prints on the driver's own file
+        ("settings.json gains the coverage wave's flags when they are unset",
+         [("card_stress.py", "if not (k in unset and v in (None, False))", "if not (k in () and v in (None, False))")],
+         lambda env, src: records_args_checks(env, src), ["records args: without --records no records file is written"]),
+        ("run_start names a pass size when --sweep-chunk is not given",
+         [("card_stress.py", '            if self.chunk:\n                settings["sweep_chunk"] = self.chunk',
+           '            if True:\n                settings["sweep_chunk"] = self.chunk')],
+         lambda env, src: scn_chunk(env, src), ["no chunk: without the flag no sweep record has a batch or chunk"]),
+        ("a campaign record of an older item gains a field",
+         [("sweep_record.py", 'c["space"], c["exact"] = getattr(it, "space", L.EXH), bool(it.exact)',
+           'c["space"], c["exact"] = getattr(it, "space", L.EXH), bool(it.exact)\n        c["level"] = getattr(it, "level", None)')],
+         lambda env, src: campaign_space_checks(src),
+         ["campaign space: the campaign records of the scripts' 90 items hash to what they did at 827c3cf"]),
+        ("sqrt64-hard has four attributes, not five",
+         [("card_stress_lib.py", '("sqrt64-hard", MODES5)):', '("sqrt64-hard", MODES4)):')],
+         lambda env, src: index_item_checks(src), ["index items: the 35 follow the scripts' 90"]),
+        ("the record sink writes only the first line of a leg's lines",
+         [("card_stress.py", 'os.write(fd, b"".join(lines))', 'os.write(fd, b"".join(lines[:1]))')],
+         lambda env, src: scn_records_real(env, src),
+         ["records real (A): sweep_record.py verify of the file against its keyring says clean"]),
+        # the verifiers' notes
+        ("--quick with --sweep-items tries a second wave after an empty one",
+         [("card_stress.py", "                if self.quick and not self.sweep_only and waves + 1 < self.quick_waves(img):",
+           "                if self.quick and waves + 1 < self.quick_waves(img):")],
+         lambda env, src: quick_empty_wave_checks(env, src), ["quick sweep: with --sweep-items an empty wave ends the image's sweep at once"]),
+        ("standin_alive lets a PowerShell timeout escape",
+         [("test_card_stress.py", "    except (subprocess.TimeoutExpired, OSError):\n        return True\n    if q.returncode != 0:",
+           "    except OSError:\n        return True\n    if q.returncode != 0:")],
+         plant_standin, ["standin_alive: a PowerShell call that times out does not raise"]),
+        ("standin_alive counts an empty command line as dead",
+         [("test_card_stress.py", '    if not q.stdout.strip():\n        return pid_alive(pid)\n    return "card_stress_standin" in q.stdout',
+           '    return "card_stress_standin" in q.stdout')],
+         plant_standin, ["standin_alive: an EMPTY command line of a pid that is still there"]),
+        ("a job asked at the default pass size 4096 is recorded as having no pass size",
+         [("card_stress_lib.py", '        pass_size = {"batch": DEFAULT_BATCH, "chunk": DEFAULT_BATCH}', "        pass_size = {}")],
+         lambda env, src: chunk_unit_checks(src), ["chunk: a tool built at 4096 prints no pass-size line"]),
+        ("a --sweep-chunk that is no multiple of 4096 up to 65536 is accepted",
+         [("card_stress.py", "    if a.sweep_chunk is not None and not (4096 <= a.sweep_chunk <= 65536 and a.sweep_chunk % 4096 == 0):", "    if False:")],
+         lambda env, src: scn_chunk(env, src), ["chunk args: a pass size that is not a positive multiple of 4096 up to 65536 is refused by name"]),
+        ("a torn last line of the records file is not cut back on resume",
+         [("card_stress.py", '            with open(self.path, "r+b") as fh:\n                fh.truncate(cut)', '            with open(self.path, "r+b") as fh:\n                pass')],
+         lambda env, src: records_sink_checks(env, src), ["records sink: a torn last line (a write cut short) is cut back to the last whole record"]),
+        ("figure_extracts counts a host-pool slice as sweep activity beside the card",
+         [("figure_extracts.py", 'sweeps_run = [r for r in ran if r["kind"] == "sweep" and r["image"] != "cpu"]',
+           'sweeps_run = [r for r in ran if r["kind"] == "sweep"]')],
+         lambda env, src: fx_cpu_filter_checks(env, src), ["fx filter: the stress figure's power by activity"]),
     ]
     for name, edits, fn, expects in P:
         if pick and pick not in name:
@@ -3544,10 +5120,12 @@ def plants(env: Env) -> None:
         intended = [n for n, _ in caught if any(e in n for e in expects)]
         check(f"plant [{name}]: its scenario FAILS, at the check written for it", bool(intended),
               "caught by: " + ("; ".join(n[:90] for n, _ in caught[:3]) if caught else "nothing - every check passed under the plant"))
-        for n, d2 in caught[:2]:
-            print(f"        caught by: {n[:110]}" + (f"  [{d2[:160]}]" if n.startswith("the scenario crashed") else ""))
-        if len(caught) > 2:
-            print(f"        ... and {len(caught) - 2} more failing checks")
+        full = bool(os.environ.get("CARD_STRESS_PLANT_ALL"))      # a development aid: every failing check, with its detail, not the first two
+        shown = caught if full else caught[:2]
+        for n, d2 in shown:
+            print(f"        caught by: {n[:110]}" + (f"  [{d2[:200]}]" if full or n.startswith("the scenario crashed") else ""))
+        if len(caught) > len(shown):
+            print(f"        ... and {len(caught) - len(shown)} more failing checks")
 
 
 def scn_soak_software(env: Env, src: str = HERE) -> list:
@@ -3593,6 +5171,8 @@ def main() -> int:
             run_group("parsers", group_parsers())
         if want("commands"):
             run_group("commands", group_commands())
+        if want("standin"):
+            run_group("standin", standin_alive_checks())
         for gname, fn, posix_only in (("normal", scn_normal, False), ("fail", scn_fail_and_parse, False),
                                       ("timeout", scn_timeout, False), ("deaf", scn_deaf, True),
                                       ("nodevice", scn_nodevice, False), ("cardlost", scn_cardlost, False),
@@ -3606,7 +5186,9 @@ def main() -> int:
                                       ("disable", scn_item_disabled, False),
                                       ("sweepall", scn_sweep_all, False),
                                       ("pool", group_pool, False), ("seeds", group_seeds, False),
-                                      ("trees", scn_trees, False)):
+                                      ("trees", scn_trees, False),
+                                      ("items", group_items, False), ("chunk", group_chunk, False),
+                                      ("records", group_records, False), ("notes", group_notes, False)):
             if not want(gname):
                 continue
             if posix_only and not POSIX:

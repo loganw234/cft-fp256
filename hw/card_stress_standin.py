@@ -30,6 +30,12 @@ failure policy meets each kind of failure:
           shortcase   (soak, the same modes) the right encodings and ONE CASE too few, exit 0
           badenc      (soak, the same modes) the right cases, and an encodings clause ONE TOO FEW: the tool's own account of
                       what it covered contradicts the job, though its case count is the job's, exit 0
+          skipoff     (soak, the hard-case and class-level modes) one skipped slot more and one case fewer than the mode's
+                      whole-space counts spread over the slice: the cover rule (cases + skipped = k x E) still holds, so
+                      only the sum over a covered item's slices can tell, exit 0
+          nochunk     (soak, a chunked tool) the pass-size stderr line left out
+          wrongchunk  (soak) a pass-size line saying twice the pass size the tool's name carries
+          defchunk    (soak) a pass-size line, from a tool whose name carries no pass size (the default build prints none)
           slow:N      N seconds, then the normal verdict
     CFT_STANDIN_STATE=<dir>            where the counts are kept (required with a scenario)
     CFT_STANDIN_SOAK_RATE=<cases/s>    a soak takes cases / rate seconds (default 0: at once)
@@ -88,6 +94,44 @@ OP = ""      # a soak job's op (argv[1] after the binary), for rules that name o
 # only a count that adds up.
 EXH_PER = {"conv32to64-all": 1, "cvtto32-all": 4, "cvtfrom32-all": 2, "cvtfrom64-all": 2,
            "scaleb32-all": 17, "scaleb32-wide": 568}
+
+# The coverage wave's index-based modes (parcels HC and CL): op -> (the mode's indices, k checks an index, the skipped slots
+# over its whole space). The stand-in cannot build the operands, so it SPREADS the whole space's skips evenly over the indices:
+# a slice [lo, hi) skips g x (F(hi) - F(lo)) slots with F(x) = x x (whole skips / g) // indices (g = k where a skipped index
+# skips all its k slots - the hard-case modes - and 1 for cvtto64-class, whose unit is a pair), so ANY partition of the space
+# into slices gives the whole space's totals exactly, which is what the driver's whole-space check holds a covered item to.
+# The suite holds this table equal to the library's, item for item. cvtto64-class's skips depend on the attribute.
+IDX = {"div32-hard": (21235788, 4, 20596560), "div64-hard": (289685696, 4, 346253600), "sqrt64-hard": (4456448, 1, 2710696),
+       "conv64to32-class": (136192, 1, 0), "rint64-class": (35840, 4, 0), "cvtto64-class": (40768, 4, None),
+       "cvtfrom64-class": (50923, 1, 0), "scaleb64-class": (72648, 4, 0)}
+CVTTO64_SKIPPED = {"rne": 72067, "rtz": 71588, "rdn": 77931, "rup": 71594, "rmm": 72086}
+SCALEB_LIST = {"scaleb32": 17, "scaleb64": 27}       # the exponent lists random scaleB runs a batch against (clause5_soak.c)
+
+
+def idx_skipped(op: str, mode: str, lo: int, hi: int) -> int:
+    space, k, whole = IDX[op]
+    if whole is None:
+        whole = CVTTO64_SKIPPED[mode]
+    g = k if op.endswith("-hard") else 1
+    per = whole // g
+    return g * ((hi * per) // space - (lo * per) // space)
+
+
+def scaleb_cases(count: int, batch: int, ln: int) -> int:
+    """Random scaleB's cases at a BATCH (clause5_soak.c drv_scaleb): a batch of n = min(left, BATCH) operands makes n x ln cases
+    and takes that many off the count."""
+    total, left = 0, count
+    while left > 0:
+        n = min(left, batch)
+        total += n * ln
+        left = left - n * ln if left > n * ln else 0
+    return total
+
+
+def chunk_of(argv0: str) -> int:
+    """The pass size a chunked tool's name carries (divsqrt-soak-c16384, .exe or not), 0 for the default tool."""
+    m = re.search(r"-c(\d+)(?:\.exe)?$", os.path.basename(argv0))
+    return int(m.group(1)) if m else 0
 
 
 def image_name(args) -> str:
@@ -219,7 +263,8 @@ def main() -> int:
             f"CFT_XRT_TILES={os.environ.get('CFT_XRT_TILES', '<unset>')}")
     do = rule_for("soak" if leg == "soak" else leg, image) or ""
     fail = do == "fail"
-    if do and do not in ("fail", "mismatch", "wrongsha", "wrongtiles", "software", "short", "shortcase", "badenc"):
+    if do and do not in ("fail", "mismatch", "wrongsha", "wrongtiles", "software", "short", "shortcase", "badenc", "skipoff",
+                         "nochunk", "wrongchunk", "defchunk"):
         apply_misbehaviour(do, leg, xb)
 
     tiles = int(os.environ.get("CFT_STANDIN_TILES") or (4 if "quad" in (xb or "") else 1))
@@ -340,7 +385,23 @@ def main() -> int:
     if leg == "soak":
         op = real[1]
         tail = ""                 # the exhaustive modes' ", E encodings, S skipped" clause
-        if op in ("sqrt32", "rint32", "nextup32", "nextdown32", "logb32", "class32") or op in EXH_PER:
+        refuse = None             # a range the tool refuses by name, after its backend line, exit 2
+        chunk = chunk_of(real[0])
+        if op in IDX:
+            lo, hi = int(real[2], 0), int(real[3], 0)
+            space, k, _w = IDX[op]
+            mode = real[4]
+            if not 0 <= lo < hi <= space:
+                refuse = f"need 0 <= lo < hi <= {space} (the indices of {op}), got [{real[2]}, {real[3]})"
+                cases = 0
+            else:
+                enc = hi - lo - (1 if do == "short" else 0)
+                skipped = idx_skipped(op, mode, lo, lo + enc) + (1 if do == "skipoff" else 0)
+                cases = enc * k - skipped - (1 if do == "shortcase" else 0)       # skipoff: skipped one slot more, cases one fewer, the sum k x E
+                if skipped and op == "cvtto64-class":
+                    out(f"  skipped {skipped} lane-target pairs outside the target range (invalid table is model-pinned)")
+                tail = f", {enc - (1 if do == 'badenc' else 0)} encodings, {skipped} skipped"
+        elif op in ("sqrt32", "rint32", "nextup32", "nextdown32", "logb32", "class32") or op in EXH_PER:
             lo, hi = int(real[2], 0), int(real[3], 0)
             cases = hi - lo + (8 if op in ("nextup32", "nextdown32") else 0)
             mode = real[4] if len(real) > 4 else ("rne" if op == "conv32to64-all" else "-")
@@ -354,11 +415,23 @@ def main() -> int:
                 tail = f", {enc - (1 if do == 'badenc' else 0)} encodings, {skipped} skipped"
         else:
             cases = int(real[2], 0)
+            if op in SCALEB_LIST and chunk:
+                cases = scaleb_cases(cases, chunk, SCALEB_LIST[op])      # the chunked tools' BATCH, which sets the rounding
             mode = real[4] if len(real) > 4 else ("rne" if op == "conv32to64" else "-")
         art = os.environ.get("CFT_SOAK_ARTIFACT")
         if do == "software":
             art = None            # a soak that fell back to the software backend
         err(f"soaking the {'DEVICE' if art else 'software'} backend{': ' + art if art else ''}")
+        if do == "wrongchunk":
+            n = (chunk or 4096) * 2
+            err(f"soaking with BATCH {n} and CFT_CHUNK {n} (the defaults are 4096)")
+        elif do == "defchunk" and not chunk:
+            err("soaking with BATCH 16384 and CFT_CHUNK 16384 (the defaults are 4096)")
+        elif chunk and chunk != 4096 and do != "nochunk":
+            err(f"soaking with BATCH {chunk} and CFT_CHUNK {chunk} (the defaults are 4096)")
+        if refuse:
+            err(refuse)
+            return 2
         rate = float(os.environ.get("CFT_STANDIN_SOAK_RATE") or 0)
         if rate > 0:
             time.sleep(cases / rate)

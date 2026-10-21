@@ -330,7 +330,10 @@ def campaign_body(it) -> dict:
     if it.mode is not None:
         c["attribute"] = it.mode
     if exh:
-        c["space"], c["exact"] = L.EXH, bool(it.exact)
+        # the item's own space: 2^32 encodings for the fp32-operand items (Item.space's default, so every one of those campaign
+        # records and its hash is what it was), the mode's indices for the hard-case and class-level items (2026-10-21, DR3, at the
+        # lead's word: before it every campaign said 2^32, and counts_problem could not see an interval past a smaller space)
+        c["space"], c["exact"] = getattr(it, "space", L.EXH), bool(it.exact)
         if it.extra_cases:
             c["extra_cases"] = it.extra_cases
         if it.per_encoding is not None:

@@ -869,9 +869,12 @@ loads the xclbin through XRT (`host/src/backend_xrt.cpp`, `cftx_open`), so there
 step. XRT treats loading the xclbin already there as a no-op, which is why a tile left running
 by an abandoned run is cured by loading another image and then this one (docs/HOSTAPI.md, "A tile
 a run was abandoned on") and why the failure policy does exactly that. **Since 2026-10-20** the
-47 host items among its 90 sweep items (libcft's host code, which no tile computes) do not use the
+47 host items among the scripts' 90 sweep items (libcft's host code, which no tile computes) do not use the
 card at all: a pool of CPU jobs runs them beside the whole run, and the card's sweep takes the 43
-tile items only ("The host pool, the seeds, and coverage per tree" below).
+tile items only ("The host pool, the seeds, and coverage per tree" below). **Since 2026-10-21** the
+catalog has 35 more, the coverage wave's hard-case and class-level items (125 in all: 65 tile and 60 host), and
+the driver can write its finished slices as signed records and run its sweep at a larger pass size ("The
+coverage wave in the driver", below, after "The soak at a larger pass size").
 
 ### Start, stop, read
 
@@ -893,12 +896,12 @@ python3 hw/card_stress_report.py /data/card-stress-1016     # the report, any ti
   first long run's clone had it made by the lead before its first `selftest` leg.
 - **Pre-flight, optional**: `bash hw/test-card-stress.sh --no-plants` runs the driver's dry-run
   tests (the verdict parsers on real logs, the scheduler, the failure policy, the guard, the
-  sweep's resume, the host pool, the seeds, the trees, the report, and under POSIX the real `make` in
-  a scratch copy) on the box, with no card and no XRT: about 7.5 minutes under WSL and 9 under Git
-  Bash (2026-10-20: 448 s and 553 s, on a desktop other sessions share; a busier desktop made a Git
-  Bash run 636 s), and it must be run alone on the host (two drivers at once see each other's
+  sweep's resume, the host pool, the seeds, the trees, the items, the pass size, the records, the report, and under POSIX the real `make` in
+  a scratch copy) on the box, with no card and no XRT: about 10 minutes under WSL and 11 under Git
+  Bash (2026-10-21, with the coverage wave's groups: 644 s under Git Bash and about 600 s under WSL, read off the clock; 2026-10-20, before them: 448 s and 553 s, and a busier desktop made a Git
+  Bash run 636 s), on a desktop other sessions share, and it must be run alone on the host (two drivers at once see each other's
   stand-ins as card users). `--no-plants` leaves out the negative controls, which take about
-  twice as long as everything else together (the whole suite is 22.5 minutes under WSL). The runner and the pythons
+  one and a half to two times as long as everything else together (the whole suite is 27 minutes under WSL: 1,636 s on 2026-10-21, with 115 plants; 22.5 minutes before). The runner and the pythons
   the suite itself starts run with `-B` (`-I` ignores `PYTHONDONTWRITEBYTECODE`); the report script
   the driver starts for itself does not, so a run in the tree under WSL still leaves one git-ignored
   card_stress_lib file in hw/__pycache__ unless that variable is set.
@@ -997,7 +1000,8 @@ printf it matches.
   encoding against the directed exponent list) and `scaleb32-wide` (every encoding against the 556
   exponents, -278 to 277, that can change a result, and 12 past those edges that must land as
   the edges do), the last four under the four attributes the probes allow; and the random banded
-  `div32`, `div64`, `sqrt64` and clause-5 jobs (the 90 items: 36 exhaustive and 54 random) -
+  `div32`, `div64`, `sqrt64` and clause-5 jobs (the 90 items: 36 exhaustive and 54 random; the coverage
+  wave's 35 more, since 2026-10-21, are the last section's) -
   run slice by slice: **the 43 tile items on the card, with `CFT_SOAK_ARTIFACT` naming the image,
   and the 47 host items as CPU jobs on the host pool** (below). A random slice's seed is no longer
   the scripts' (below). The
@@ -1058,7 +1062,7 @@ printf it matches.
   the box against its CPU**: a full-space test of the library in which the tile computes nothing,
   which the software backend on any CPU repeats - and it took 52.5 per cent of the final stress
   run's sweep job-seconds (COMPUTED, docs/studies/SWP-A-coverage.md, 2.3). 43 of the 90 items reach
-  the tile (25 of the 54 random, 18 of the 36 exhaustive) and 47 do not. **Since 2026-10-20 the
+  the tile (25 of the 54 random, 18 of the 36 exhaustive) and 47 do not (the coverage wave's 35: 22 tile, 13 host). **Since 2026-10-20 the
   host items run on the host pool, beside the card, and the card's sweep takes tile items only.**
   Every sweep record carries `sweep.reach`, status.txt has a `reach` line (how much of the
   exhaustive space each kind has covered), and the report a `reach` column (its last) and totals
@@ -1084,8 +1088,8 @@ box has not run this code** (docs/VALIDATION.md, the entry of 2026-10-20 for DR2
 
 **The host pool.**
 
-- **What it runs.** The 47 host items - the conversions, `nextUp`/`nextDown`, `logB`, `class` and `remainder`,
-  every item `OP_REACH` marks `host`. host/src/clause5.c (lines 11 to 35) says they "contain NO floating-point
+- **What it runs.** The 47 host items (60 since 2026-10-21, with the 13 class-level ones) - the conversions, `nextUp`/`nextDown`,
+  `logB`, `class` and `remainder`, every item `OP_REACH` marks `host`. host/src/clause5.c (lines 11 to 35) says they "contain NO floating-point
   arithmetic at all", are "bit-identical on every backend by construction", and take the device as "context",
   "not a participant". DR2 read that against the code and not only the comment (the greps are in
   docs/VALIDATION.md): no `cft_run` in the host operations' section, `cft_host_io` a no-op for the soaks' plain
@@ -1554,9 +1558,9 @@ Linux) or on the card (the quad's xclbin built with XRT=1, one process a tile, a
     done; wait; grep -h " cases," $JOB-$ATTR-q?.log
 
 The four lines' encodings add up to N and their skipped slots to the whole space's (346,253,600
-for div64-hard). The stress driver does not name these items yet (`hw/card_stress_lib.py` carries
-the six exhaustive conversion and scaleB modes, not these); each item is `tile`, k above, the
-space is not 2^32, and its cases are held to cases + S = k x E.
+for div64-hard). The stress driver names these items since 2026-10-21 (parcel DR3, "The coverage wave
+in the driver" below): each is `tile`, with k above, a space that is not 2^32, and its cases held to
+cases + S = k x E and, summed over a covered item, to the whole-space figures above.
 
 Known limits. Flags are compared per batch, as in every mode here: a flag the library drops on one
 lane among others that raise it is not seen. The families are contiguous segments, so a batch is
@@ -1695,9 +1699,136 @@ one, except the shape itself: the tool's name and four or five digits, which is 
 the size is allowed), the default tools' output and objects unchanged against a baseline, and
 thirteen planted breakages each caught by the check written for it, the earlier globs, the unguarded
 `rm -rf` and `rm -f`, the directories-only test `[ ! -d ]` and the missing symlink test put back
-among them, in `clean` and in `.gitignore`. **Not done:** the stress driver
-does not use these tools yet (hw/ is parcel DR3's), and the pass size is not adjustable at run
-time.
+among them, in `clean` and in `.gitignore`. **Not done:** the pass size is not adjustable at run
+time. (The stress driver uses these tools since 2026-10-21, with `--sweep-chunk`: "The coverage wave
+in the driver", next.)
+
+### The coverage wave in the driver (added 2026-10-21, parcel DR3): the new items, signed records, the pass size
+
+Logan, 2026-10-20: "Class level and hard case to begin, others are long term goals"; on signing, "At the
+moment only my device, though built to support a signing key would be good"; on the soak's pass size, "Build
+time override for now with future plans to make adjustable more easily". Four parcels built the parts (HC, CL,
+SG, CK); this is the driver using them. **The box has not run this code**; the card has run slices of the new
+modes only through the lead's smoke (docs/VALIDATION.md, the entry for DR3, says what was run, and where).
+
+**The 35 items.** `hw/card_stress_lib.py` appends them to the catalog, after the scripts' 90 (so no earlier item's
+place in the rotation moves), as exhaustive items over a space of their own: `Item.space`, 2^32 for every older
+item, the mode's indices for these.
+
+| items (a mode word, then each attribute) | indices (space) | k | reaches | attributes |
+|---|---|---|---|---|
+| `div32-hard`, `div64-hard` | 21,235,788; 289,685,696 | 4 | tile | rne rtz rdn rup |
+| `sqrt64-hard` | 4,456,448 | 1 | tile | those and rmm |
+| `rint64-class`, `scaleb64-class` | 35,840; 72,648 | 4 | tile | rint64: five; scaleb64: the four the probe allows |
+| `conv64to32-class`, `cvtfrom64-class`, `cvtto64-class` | 136,192; 50,923; 40,768 | 1, 1, 4 | host | four; the probe's; five |
+
+13 hard-case items and 22 class-level ones; 22 tile (the card's rotation takes them with the other 43) and 13 host (the
+pool takes them with the other 47). A slice is `<tool> <mode> <lo> <hi> <attribute>`, sliced as every exhaustive item
+is (the probe of 2^20, then the measured rate times `--sweep-slice-seconds`, whole 2^20 atoms, at most 2^28 on the card and
+2^36 on the pool) over the item's own space, so at the default probe size a class item's first slice is its whole space
+and the last slice of a hard-case item is short and ends at the space's end. Each is held to what its verdict line says it covered
+(`, E encodings, S skipped`, E counting indices): E the slice's indices and cases + S = k x E. The cases are a function
+of the slice only for the class modes but `cvtto64-class` (exactly k x E, `expected_cases` recorded); a hard-case slice's
+cases are not (an index with no construction skips all its slots), nor are `cvtto64-class`'s (it skips pairs). So each
+item also carries its WHOLE-SPACE figures, and **when an item becomes wholly covered the driver adds up its slices' cases
+and skipped slots once and compares them with it**: `whole_space_ok`, or `whole_space_mismatch` naming both. The hard-case
+figures are `divsqrt-soak hard-count`'s totals (div32-hard 64,346,592 cases and 20,596,560 skipped, div64-hard
+812,489,184 and 346,253,600, sqrt64-hard 1,745,752 and 2,710,696: MEASURED again by this parcel, WSL, one run of each, the
+last about a minute), `cvtto64-class`'s the tool's own counts (91,005 / 91,484 / 85,141 / 91,478 / 90,986 compared and
+72,067 / 71,588 / 77,931 / 71,594 / 72,086 skipped under rne rtz rdn rup rmm), and k x E and 0 for the other class modes. The
+cover rule alone cannot see a tool that skips the wrong indices, and the sum can; the figures are the ones in the documents
+above, held to the real tool's logs in the suite (hw/card_stress_fixtures).
+
+**What a pass is.** A class item's is a claim at the class level (L2), PLAUSIBLE and not proved, and a hard-case item's is a
+deterministic space of constructed operands, not the operand space: the report says both, under its sweep table, wherever
+such an item appears, and shows a coverage of 100% as 100% of the item's own indices (`rint64-class-rne [35,840 indices]`).
+
+**What they cost, and how the rotation treats it.** The rotation picks the item with the fewest slices served per unit of
+weight (exhaustive 3, random 1; a tie goes to the catalog's order), a slice being a slice whatever its length, and an item that
+is wholly covered leaves it. So a short item does not take more than its slices: the cost of a new item is once a RUN, not once
+a cycle. The lane-exact class items run an operand a call and each operand in each of the tile's four lanes, so their cost
+is calls. **From the lead's card smoke** (MEASURED, one tile of the quad, rev8, start-up included; docs/VALIDATION.md and the
+lead's ledger, "card smoke"): rint64-class 2,000 indices in 8.2 and 8.5 s, scaleb64-class 4,000 in 2.5 and 2.8 s, div32-hard
+the first 2^20 indices in 2.6 and 2.5 s, div64-hard 700,000 indices of its F0K segment in 2.3 and 2.4 s, sqrt64-hard
+its whole space in 2.8 s each. **Scaled** (COMPUTED, linear in indices with the start-up left in the per-index figure, so
+each is an UPPER BOUND on the whole item and a slice that amortises the start-up is faster): rint64-class 4.1 to 4.25 ms an
+index, so 147 to 152 s, **about 2.5 minutes an attribute and at most 12.7 for the five**; scaleb64-class 0.63 to 0.70 ms, so 45 to
+51 s an attribute and at most 3.4 minutes for the four; div32-hard 2.5 microseconds an index, so at most 53 s an attribute;
+div64-hard 3.3 to 3.4 microseconds an index, so at most 16.6 minutes an attribute (15.9 at the shorter of the two times; HC's COMPUTED figure from the stress run's rates
+is 132 to 137 s on a quad, 9 minutes of one tile: the segments differ in cost, and the F0K slice the smoke ran is not the
+average); sqrt64-hard 2.8 s an attribute. All 22 tile items, once: **at most about 86 minutes of tile time (COMPUTED upper
+bound, from the longer of each pair of smoke times: rint64-class 12.7, scaleb64-class 3.4, div32-hard 3.5, div64-hard 66.2, sqrt64-hard 0.2), about 21.5 minutes of the quad's
+four**; HC's COMPUTED figure for the thirteen hard-case items is 9.6 minutes of a quad, 38 tile-minutes. The 13 host items run on the pool in
+seconds (0.01 to 0.03 s each on the software backend, MEASURED by CL). **How a slow item fits:** its slice is its slice.
+A wave of four runs its jobs together and waits for the slowest, so a short job leaves its tile idle for the rest of the
+wave - at worst a class job of 150 s beside three 600-s slices idles 450 s, scaleb64-class 550 s - about 74 tile-minutes in
+all if all nine class tile items were placed so, once (COMPUTED). The new items are served after every older tile item has
+had a slice (ties go to the catalog's order, and they are last in it): on a 60-hour run they begin after the first pass over
+the 43 older ones, about 11 waves (BELIEVED two to three hours of sweep time, a few of the quad's 45-minute cycles). To run
+them first, name them: `--sweep-items` serves the named items only.
+
+    bash hw/card-stress.sh --until "YYYY-MM-DD HH:MM" --out /data/card-stress-NNNN --earlier-runs /data/card-stress-1016 \
+         --sweep-items div32-hard-rne,rint64-class-rne,scaleb64-class-rne,sqrt64-hard-rmm
+
+**Signed records.** `--records` writes each finished sweep slice as a canonical record, version 1
+(docs/SWEEP-RECORDS.md), to `OUT/sweep-records.jsonl` as the leg finishes, through `hw/sweep_record.py`'s `Exporter`.
+Version 1 puts the device in every record, so a key is needed: **`--sign-key KEYFILE`** signs with a `python/cft_sign.py` key
+(Logan's, made once, by him, on the machine that signs, outside every git working tree: `keygen` writes where it is told, and
+the driver REFUSES a key inside a working tree, by name `key-in-tree`, and a key file that cannot be read or that others may
+read, `key-file`, at the command line, before anything starts), or **`--device-key HEX`** names the device of a public key and
+writes the records unsigned, for `sweep_record.py sign` to sign later. `--records` alone is refused by name, as is
+`--sign-key` without `--records`, and **`--records` with `--dry-run`** (the exporter refuses a run whose legs came from
+stand-ins, and so does the driver, at the command line). A leg the exporter refuses is an event `record_refused` naming the
+refusal and the leg, in the log and in metrics.jsonl, and the run goes on; a run the exporter refuses (a run id it cannot
+spell) is one event, `records_disabled`. The secret is held in the signer for the run and is in no record, setting or log.
+**What it costs:** a signed slice takes 3.0 ms to export (median) and 853 bytes of file on average, so a 60-hour run's 3,300 slices
+are about 2.8 MB (READ, SG's measurements on the desktop, docs/SWEEP-RECORDS.md); the driver writes and syncs one line a slice.
+Without the flags nothing is written or recorded that was not: no file, no `records` in `run_start`'s settings or in
+settings.json, no line in status.txt. `--resume` continues the file (the campaigns it holds are known, so none is written
+twice; a different key than the file's is refused, `device`; a torn last line is cut back and said). At the end:
+
+    python -B hw/sweep_record.py verify /data/card-stress-NNNN/sweep-records.jsonl --keyring RING
+
+says clean, with a case total equal to the driver's own coverage of the same slices (the suite shows it on a real - not dry - run
+of the driver over test doubles). **Host-pool slices are not in the file**: version 1's record names an image and its xclbin's
+SHA-256, which a CPU job has none of, so the exporter would refuse each; the driver counts them, says so once
+(`records_host_slices`) and `metrics.jsonl` has them. Signing a host item needs a subject without an image, a change of format,
+and it is Logan's to decide. The campaign record of an item says its own space (hw/sweep_record.py, one line, changed at the
+lead's word: every older campaign's record and id is what it was, held in the suite by one digest taken at 827c3cf).
+
+**The pass size.** `--sweep-chunk N` (N a positive multiple of 4096 up to 65536, the Makefile's rule, refused by name
+otherwise) makes the build step also run `make -C host SOAK_CHUNK=N soak-chunk` with the XRT flags and `C5DEFS` of the
+default build, assert the two tools XRT-linked like the others (the build took 2 s in WSL at `-j4`, MEASURED, XRT=0, after the
+default build; the XRT=1 build on the box is not measured), and then run **every sweep slice - the card's and the pool's -
+with `divsqrt-soak-cN` and `clause5-soak-cN`**; the battery's legs keep the default tools. Each sweep record carries the
+`batch` and `chunk` its tool said on its stderr line (`soaking with BATCH n and CFT_CHUNK n (the defaults are 4096)`), parsed
+and held to the request: a log without the line, with another number, or (for a default job) with a line at all, is a
+`parse_error` naming it. A tool built at 4096 prints no line, so a run at 4096 records 4096 and 4096. Without the flag
+nothing changes: no `batch` or `chunk` in any record, none in `run_start` or settings.json. **Parcel CK's findings, as the driver
+holds them:** (i) random `scaleb32` and `scaleb64` round their cases up by whole batches (a batch of n operands makes n x 17 or
+x 27 cases and takes that many off the count; 100,000 gives 139,264 at 4096 and 278,528 at 16384, MEASURED, the real tool, and
+442,368 for scaleb64), so with `--sweep-chunk` a random scaleB slice is held to the cases its BATCH gives
+(`expected_cases`, recorded; the default run has never held a random slice to a count and still does not); (ii) random
+`cvtfrom32` and `cvtfrom64` draw n operands for each of four source types in turn inside a batch, so the same draw goes to another
+type at another BATCH (MEASURED by the sabotage control's operand list: 0xce824531 is an i32 operand at 4096 and a u32 operand at 16384);
+CK's reading of every other random driver is CHECKED (READ, drv_*: each draws an element at a time in order, so its operand
+sequence from a state is the same at any BATCH). **The rule:** a random stream is the tool state (seed | 1), and for the
+two cvtfrom items the batch too. The seed guard refuses a slice whose stream another (item, n) already started, so a chunked
+cvtfrom slice is not refused for a state a default slice used (another stream) and a chunked slice of any other item IS (the
+same draws); `--earlier-runs` floors a cvtfrom item's first n only by earlier slices of the same batch and every other item's
+by all of them, whatever their batch. The report counts random coverage by tree per batch (`cvtfrom64-rne @batch 16384` is a row
+of its own) so streams that differ are not summed. (iii) The tools compare flags per batch, so a larger batch compares them over
+more operands (a flag one operand drops among many that raise it is hidden, more likely the larger the batch): the report
+says, per item, the slices that ran at each batch other than 4096 and each disagreement's batch; a class-level item compares
+flags per operand call whatever the batch is (CLS_BATCH). A host item gains nothing from a larger chunk (the software backend
+has no passes to amortise; CK measured CL's class modes at 4.5 s with the default tools and 11.6 s with the chunked ones) and
+compares flags over more operands: `--sweep-chunk` is for the tile items, and applies to the pool's slices too, since the flag
+names the tools of the sweep. The signed record has no field for the pass size (version 1): a stream of a
+chunked run cannot be told from a default run's by its record, only by metrics.jsonl.
+
+**Known limits** (docs/VALIDATION.md, the entry for DR3): the host slices are not signable (above); python/figure_extracts.py's
+`STRESS_TILE_OPS` does not list the five new tile modes, so the stress figures' extractor refuses, loudly, a run that served them,
+until FX's list gains them (its filter for cpu legs, which this parcel added, is the one change made there).
 
 ### Failure policy, processes, and what it guarantees
 

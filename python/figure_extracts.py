@@ -1193,7 +1193,9 @@ def make_stress(metrics, root=ROOT, report=None, decoys=False):
         v = [power[i] for i in range(len(power)) if series["image"][i] == img]
         by_image[img] = {"n": len(v), "median": round(_median(v), 3), "min": min(v), "max": max(v)}
     # what was running when each sample was taken: the one thing the card's power could follow besides the image
-    sweeps_run = [r for r in ran if r["kind"] == "sweep"]
+    # a host-pool slice (image "cpu", since the driver of 2026-10-20) runs on CPUs beside the card and is no card activity: leaving
+    # it in would count a pool slice as "sweep, host items only" for a sample taken while the card idled or ran a battery leg
+    sweeps_run = [r for r in ran if r["kind"] == "sweep" and r["image"] != "cpu"]
     batt_run = [r for r in ran if r["kind"] == "battery"]
 
     def activity_at(epoch):

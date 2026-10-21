@@ -64,6 +64,16 @@ be computed is "-" or "n/a", never 0. Choices a reader could otherwise take anot
     checkout's tree. `--also DIR` adds other runs' directories to that section (and only to it):
     coverage accumulated over runs, each slice under its own run's tree, so two trees are never
     summed. The first sections are of RUN_DIR alone, as they were.
+  - SPACE (since 2026-10-21, parcel DR3). An exhaustive item's coverage is counted over ITS space, which the catalog gives
+    (`Item.space`): 2**32 encodings for every item the scripts' campaign has, the mode's indices for the coverage wave's hard-case
+    and class-level items (21,235,788 for div32-hard, 35,840 for rint64-class, ...). An item whose space is not 2**32 says so in the
+    tables ("rint64-class-rne [35,840 indices]") and its 100% is of its own indices; a class-level pass is a claim at the class level
+    (L2, PLAUSIBLE and not proved) and a hard-case pass a space of constructed operands, and the report says both under its table.
+    A record of an item the catalog does not name is counted over 2**32, as every item was.
+  - PASS SIZE (with `--sweep-chunk`). A sweep slice carries `sweep.batch`, the BATCH its tool ran at (a slice with none ran the default
+    tools' 4096); an item with a slice at another batch gets a line saying how many ran at each, since the tools compare flags per batch,
+    and random coverage by tree is a row per (item, batch): a chunked item's slices are never summed with the default tools'. A run with
+    no chunked slice is reported as it always was.
 """
 from __future__ import annotations
 
@@ -85,8 +95,15 @@ from typing import Any, Dict, List, Optional, Tuple
 _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)            # python -I does not put the script's directory there
-from card_stress_lib import (CPU, EXH, HOST, TILE, covered, first_gap, iso,  # noqa: E402
-                             merge_intervals, read_records, reach_of, sweep_coverage)
+from card_stress_lib import (CPU, DEFAULT_BATCH, EXH, HOST, TILE, covered, first_gap, iso,  # noqa: E402
+                             merge_intervals, read_records, reach_of, record_batch, sweep_coverage, sweep_items)
+
+# What the catalog says of each item: the space its coverage is counted over (2^32 encodings for the fp32-operand items, the
+# indices of a mode's own space for the hard-case and class-level items) and what a pass claims ("exhaustive", "hard", "class",
+# "random"). An item the catalog does not name (a record of another tree's) is counted over 2**32, as every item was before.
+_CATALOG = {it.name: it for it in sweep_items()}
+ITEM_SPACE = {n: it.space for n, it in _CATALOG.items()}
+ITEM_LEVEL = {n: it.level for n, it in _CATALOG.items()}
 
 KNOWN = ("pass", "fail", "timeout", "no_device", "parse_error", "skipped", "error")
 SWEEP_ROW = "sweep (all items)"
@@ -656,10 +673,11 @@ def _sweep(objs: List[Dict[str, Any]], views: List[Dict[str, Any]]) -> Dict[str,
                 "incomplete": incomplete.get(it, 0)}
         if it in intervals or (it not in seeds and seen_kind.get(it) == "exhaustive"):
             iv = intervals.get(it, [])
-            gap = first_gap(iv)
+            space = ITEM_SPACE.get(it, EXH)
+            gap = first_gap(iv, space)
             cov = covered(iv)
-            base.update(covered=cov, total=EXH, pct=100.0 * cov / EXH, intervals=len(merge_intervals(iv)),
-                        first_gap=list(gap) if gap else None)
+            base.update(covered=cov, total=space, pct=100.0 * cov / space, intervals=len(merge_intervals(iv)),
+                        first_gap=list(gap) if gap else None, level=ITEM_LEVEL.get(it))
             exh.append(base)
         elif it in seeds or seen_kind.get(it) == "random":
             base["max_seed_n"] = seeds.get(it)
@@ -675,16 +693,29 @@ def _sweep(objs: List[Dict[str, Any]], views: List[Dict[str, Any]]) -> Dict[str,
         mine = [e for e in exh if e["reach"] == key]
         if mine:
             cov = sum(e["covered"] for e in mine)
-            by_reach.append({"reach": key, "items": len(mine), "covered": cov, "total": len(mine) * EXH,
-                             "pct": 100.0 * cov / (len(mine) * EXH),
-                             "complete_items": sum(1 for e in mine if e["covered"] == EXH)})
+            tot = sum(e["total"] for e in mine)
+            by_reach.append({"reach": key, "items": len(mine), "covered": cov, "total": tot,
+                             "pct": 100.0 * cov / tot,
+                             "complete_items": sum(1 for e in mine if e["covered"] == e["total"])})
     rnd_reach = [{"reach": key, "items": sum(1 for e in rnd if e["reach"] == key)}
                  for key in (TILE, HOST, None) if any(e["reach"] == key for e in rnd)]
+    tot_all = sum(e["total"] for e in exh)
+    # the pass size each item's completed slices ran at, where any ran at one the records name (the chunked tools): per item,
+    # {batch: slices}; a slice with no `batch` ran the default tools' 4096. Empty - and the report unchanged - for a run that
+    # used no chunked tool
+    by_batch: Dict[str, Counter] = {}
+    for v in sviews:
+        sw = v["r"].get("sweep")
+        if v["status"] in ("pass", "fail") and isinstance(sw, dict) and isinstance(sw.get("item"), str) and sw["item"] \
+                and id(v["r"]) not in bad_ids:
+            by_batch.setdefault(sw["item"], Counter())[record_batch(sw)] += 1
+    batches = [{"item": it, "by_batch": {str(b): n for b, n in sorted(c.items())}}
+               for it, c in sorted(by_batch.items()) if any(b != DEFAULT_BATCH for b in c)]
     return {
-        "exhaustive": exh, "random": rnd, "other": other,
-        "total_exhaustive": {"items": n_exh, "covered": tot_cov, "total": n_exh * EXH,
-                             "pct": (100.0 * tot_cov / (n_exh * EXH)) if n_exh else None,
-                             "complete_items": sum(1 for e in exh if e["covered"] == EXH),
+        "exhaustive": exh, "random": rnd, "other": other, "batches": batches,
+        "total_exhaustive": {"items": n_exh, "covered": tot_cov, "total": tot_all,
+                             "pct": (100.0 * tot_cov / tot_all) if n_exh else None,
+                             "complete_items": sum(1 for e in exh if e["covered"] == e["total"]),
                              "by_reach": by_reach},
         "random_by_reach": rnd_reach,
         "completed": completed, "failed": failed_slices, "not_completed": nc, "skipped": skipped,
@@ -763,7 +794,12 @@ def _trees(sources: List[Dict[str, Any]]) -> Dict[str, Any]:
                 d[image]["slices"] += 1
                 d[image]["cases"] += cases or 0
             else:
-                d = c["rnd"].setdefault(item, {})
+                # a random item's coverage is keyed by the BATCH its slices ran at (the chunked tools: --sweep-chunk): the flags
+                # of a slice were compared over that many operands, a scaleB slice's cases follow it, and a cvtfrom slice's operand
+                # stream does too, so a chunked item's slices are a row of their own and never summed with the default tools'
+                bt = record_batch(sw)
+                rk = item if bt == DEFAULT_BATCH else f"{item} @batch {bt}"
+                d = c["rnd"].setdefault(rk, {})
                 d.setdefault(image, {"slices": 0, "cases": 0, "max_seed_n": None})
                 d[image]["slices"] += 1
                 d[image]["cases"] += cases or 0
@@ -784,9 +820,10 @@ def _trees(sources: List[Dict[str, Any]]) -> Dict[str, Any]:
             for item in sorted(c["iv"]):
                 per = c["iv"][item]
                 cov = covered([iv for v in per.values() for iv in v["iv"]])
+                sp = ITEM_SPACE.get(item, EXH)
                 exh.append({"item": item, "slices": sum(v["slices"] for v in per.values()),
-                            "cases": sum(v["cases"] for v in per.values()), "covered": cov, "total": EXH,
-                            "pct": 100.0 * cov / EXH, "complete": cov == EXH,
+                            "cases": sum(v["cases"] for v in per.values()), "covered": cov, "total": sp,
+                            "pct": 100.0 * cov / sp, "complete": cov == sp,
                             "by_image": {i: covered(per[i]["iv"]) for i in sorted(per, key=img_key)}})
             rnd = []
             for item in sorted(c["rnd"]):
@@ -796,11 +833,12 @@ def _trees(sources: List[Dict[str, Any]]) -> Dict[str, Any]:
                             "cases": sum(v["cases"] for v in per.values()), "max_seed_n": max(seeds) if seeds else None,
                             "by_image": {i: per[i]["cases"] for i in sorted(per, key=img_key)}})
             tot_cov = sum(e["covered"] for e in exh)
+            tot_sp = sum(e["total"] for e in exh)
             out.append({
                 "kind": kind, "key": key, "label": c["label"], "runs": c["runs"], "commits": c["commits"], "images": imgs,
                 "exhaustive": exh, "random": rnd,
-                "total": {"items": len(exh), "covered": tot_cov, "total": len(exh) * EXH,
-                          "pct": (100.0 * tot_cov / (len(exh) * EXH)) if exh else None,
+                "total": {"items": len(exh), "covered": tot_cov, "total": tot_sp,
+                          "pct": (100.0 * tot_cov / tot_sp) if exh else None,
                           "complete_items": sum(1 for e in exh if e["complete"]),
                           "by_image": {i: sum(e["by_image"].get(i, 0) for e in exh) for i in imgs if any(i in e["by_image"] for e in exh)}},
             })
@@ -1280,11 +1318,14 @@ def _r_sweep(S: Dict[str, Any]) -> List[str]:
     W = S["sweep"]
     L = ["== SWEEP COVERAGE =="]
     if W["exhaustive"]:
-        L.append(f"exhaustive items (encodings of 2**32 = {EXH}):")
+        own = [e for e in W["exhaustive"] if e["total"] != EXH]
+        L.append(f"exhaustive items (encodings of 2**32 = {EXH}"
+                 + ("; an item marked [N indices] counts the indices of its own space, the hard-case and class-level modes'" if own else "")
+                 + "):")
         # `reach` is the last column: the table is the one it was, plus one column at its end
         L += _table(["item", "slices", "cases", "covered", "pct", "intervals", "first_uncovered", "incomplete", "reach"],
-                    [[e["item"], str(e["slices"]), str(e["cases"]), str(e["covered"]),
-                      _pct3(e["covered"], e["total"]), str(e["intervals"]),
+                    [[e["item"] + (f" [{e['total']:,} indices]" if e["total"] != EXH else ""), str(e["slices"]), str(e["cases"]),
+                      str(e["covered"]), _pct3(e["covered"], e["total"]), str(e["intervals"]),
                       _hex_range(*e["first_gap"]) if e["first_gap"] else "none", str(e["incomplete"]),
                       _reach_text(e["reach"])]
                      for e in W["exhaustive"]])
@@ -1296,6 +1337,12 @@ def _r_sweep(S: Dict[str, Any]) -> List[str]:
                      f"of {r['total']} encodings ({_pct3(r['covered'], r['total'])}); fully covered "
                      f"{r['complete_items']} of {r['items']}")
         L += _reach_note(t["by_reach"])
+        if any(e.get("level") == "class" for e in W["exhaustive"]):
+            L.append("  a class-level item (an op ending -class) is a claim at the class level (L2), PLAUSIBLE and not proved: a "
+                     "representative of every class of operand, not a sweep of the operand space (docs/CARDDAY.md)")
+        if any(e.get("level") == "hard" for e in W["exhaustive"]):
+            L.append("  a hard-case item (an op ending -hard) is a deterministic space of constructed operands, the closest "
+                     "approaches to a rounding boundary and the exact and edge quotients a sampler cannot reach, not the operand space")
     else:
         L.append("exhaustive items: none seen")
     L.append("")
@@ -1318,6 +1365,14 @@ def _r_sweep(S: Dict[str, Any]) -> List[str]:
     nc = ", ".join(f"{k} {n}" for k, n in W["not_completed"].items())
     L.append(f"slices: {W['completed']} completed (pass {W['completed'] - W['failed']}, fail {W['failed']}); "
              f"did not complete: {nc}; skipped {W['skipped']}")
+    if W.get("batches"):
+        # only when the run used the chunked tools (--sweep-chunk): the BATCH each slice's tool ran at, which is the number of
+        # operands a flag word was compared over (the tools compare flags per batch: docs/CARDDAY.md, "The soak at a larger pass size")
+        L.append("pass size, items with a slice that ran at another than the default 4096 (the BATCH its tool said; a slice with "
+                 "none ran the default tools; flags are compared over a batch's operands, so a larger one hides a flag defect "
+                 "among more of them; a class-level item compares flags per operand call whatever the batch is):")
+        L += _table(["item", "slices by batch"],
+                    [[b["item"], ", ".join(f"{n} at {bt}" for bt, n in b["by_batch"].items())] for b in W["batches"]])
     if W["outside_coverage"]:
         L.append(f"note: {W['outside_coverage']} completed sweep leg(s) carry no item or have fields "
                  f"the coverage cannot take, and are not in it")
@@ -1335,6 +1390,8 @@ def _r_sweep(S: Dict[str, Any]) -> List[str]:
                 what = f"range {_hex_range(int(sw['lo']), int(sw['hi']))}"
             else:
                 what = (f"seed {_g(sw.get('seed'))} (seed_n {_g(sw.get('seed_n'))}, count {_g(sw.get('count'))})")
+            if isinstance(sw.get("batch"), int):
+                what += f", batch {sw['batch']}"
             L.append(f"  [{k}] item {d['item']}, image {d['image'] or '-'}, start {d['start'] or '-'}, {what}")
             L.append(f"      counts: {_counts_text(d['counts'])}")
             for x in d["lines"]:
@@ -1368,9 +1425,12 @@ def _r_trees(S: Dict[str, Any]) -> List[str]:
         L.append(f"  runs: {runs}; commits: {cms}; images that served it: {', '.join(c['images']) or 'none'}")
         imgs = c["images"]
         if c["exhaustive"]:
-            L.append("  exhaustive items (encodings of 2**32; an image's column is what that image covered alone):")
+            L.append("  exhaustive items (encodings of 2**32"
+                     + ("; an item marked [N indices] counts the indices of its own space" if any(e["total"] != EXH for e in c["exhaustive"]) else "")
+                     + "; an image's column is what that image covered alone):")
             L += _table(["item", "covered", "pct", "slices"] + imgs,
-                        [[e["item"], str(e["covered"]), _pct3(e["covered"], e["total"]), str(e["slices"])]
+                        [[e["item"] + (f" [{e['total']:,} indices]" if e["total"] != EXH else ""), str(e["covered"]),
+                          _pct3(e["covered"], e["total"]), str(e["slices"])]
                          + [str(e["by_image"][i]) if i in e["by_image"] else "-" for i in imgs] for e in c["exhaustive"]])
             t = c["total"]
             L.append(f"  total: {t['items']} exhaustive item(s) seen; covers {t['covered']} of {t['total']} encodings "

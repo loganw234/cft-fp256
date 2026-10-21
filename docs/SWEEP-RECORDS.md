@@ -123,7 +123,7 @@ signature: its hash is its identity.
 | `tool`, `args` | `clause5-soak` or `divsqrt-soak`; the argument form, `op lo hi [mode]` or `op count seed [mode]` | `tool`, `argv` |
 | `oracle` | `host-fpu+glibc`: the soaks compare with the host FPU and libm (the study, 2.5) | |
 | `reach` | `tile` or `host`: whether the job's work runs on the card's tile at all | `reach` |
-| `space` | exhaustive only: the indices are `[0, space)`, 2^32 | `EXH` |
+| `space` | exhaustive only: the indices are `[0, space)`: 2^32 encodings for the fp32-operand items, the mode's own index count for a hard-case or class-level item (21,235,788 for `div32-hard`, 35,840 for `rint64-class`, ...) | `space` (`EXH`, 2^32, where an item has none) |
 | `exact`, `extra_cases`, `per_encoding` | exhaustive only: the count rule (below) | `exact`, `extra_cases`, `per_encoding` |
 
 The count rule is the driver's, not a second one: `parse_soak`'s. Where `exact`,
@@ -356,7 +356,9 @@ applied here:
 
 ## From the driver
 
-Parcel DR2 wires this into the stress driver. What it calls:
+Parcel DR3 wired this into the stress driver on 2026-10-21 (this section said DR2 would; the plan moved it, and
+DR2's work was the host pool, the seeds and the trees). `hw/card_stress.py --records`, with `--sign-key KEYFILE` or
+`--device-key HEX` (unsigned records, for `sign` to sign later), does the following; what it calls:
 
 ```python
 import sweep_record as SR
@@ -368,6 +370,25 @@ lines = ex.leg(leg_record)                    # for every leg record, as finish_
 # lines: [] unless a sweep leg finished with a verdict; else [campaign line (first time), record line]:
 # whole lines in canonical form ending in LF, to append to a file beside metrics.jsonl
 ```
+
+**How the driver calls it** (`RecordSink` in `hw/card_stress.py`). Every record the driver appends to `metrics.jsonl` goes to
+the sink AFTER the append (`Driver.rec`, the one place every record passes): `run_start` to `ex.run_start`, `build` to
+`ex.build`, and each sweep `leg` to `ex.leg`, whose lines are appended to `OUT/sweep-records.jsonl` in one write, so a slice is
+never in the file without its campaign. The sink has a lock of its own (the card's thread and the host pool's workers finish
+legs at once). **A leg the exporter refuses** (`Refusal`, named `metrics`) is an `event` `record_refused` in `metrics.jsonl` and
+`driver.log`, with the refusal's name and reason, and the run goes on (the first 50 are named, the rest counted); a `run_start`
+it refuses disables the sink with one event, `records_disabled`. **A host-pool slice** (image `cpu`) is not offered to `leg()`:
+version 1's subject is an image and the SHA-256 of its xclbin, which a CPU job has none of, so `leg()` would refuse each by name;
+the sink counts them and says so once (`records_host_slices`), and `metrics.jsonl` has them. **A dry run is refused twice**: at the
+command line (`--records` with `--dry-run` is an argument error), and, if it ever got through, by `run_start`. The key is checked
+at the command line too: `load_seed`'s `key-in-tree` and `key-file` refusals, by name, before anything starts; the secret is read
+there and let go, and again when the sink is made, and is in no setting, record or log. On `--resume` the sink reads the file, takes its campaigns into
+`ex.seen` (none is written twice), refuses a file of another device or run (`device`), and cuts back a torn last line. At the
+end an event `records_summary` gives the counts and `driver.log` the `verify` command. **The case total `verify` prints is the sum of
+the clean card slices' cases, which is the driver's own coverage of those slices**, and the tests hold it to that on a run that is
+not a dry run (the tools of that run are test doubles in a scratch tree, which is the one way the exporter's refusal of a dry run
+can be met without weakening it). The pass size is not in a version-1 record: a `--sweep-chunk` run's streams are told from a
+default run's by `metrics.jsonl` (`sweep.batch`, `sweep.chunk`) and not by the file.
 
 `run_start` and `leg` raise `SR.Refusal` (name `metrics`) for a run or a leg that
 cannot be records: a finished sweep leg (pass or fail) with no sweep block or no
