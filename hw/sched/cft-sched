@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Copyright 2026 Logan W.
+# SPDX-License-Identifier: Apache-2.0
+#
+# cft-sched: the card scheduler's command. A wrapper that finds a python and runs hw/sched/cft_sched.py, whose
+# docstring (or `bash hw/sched/cft-sched --help`) lists the verbs. Like every script in hw/ it is mode 100644 in git, so run
+# it with bash (a direct run is rc 126). It starts nothing else and installs nothing.
+set -uo pipefail
+HERE=$(cd "$(dirname "$0")" && pwd)
+PY=${PYTHON:-}
+if [ -z "$PY" ]; then
+  for c in python3 python; do
+    if command -v "$c" >/dev/null 2>&1; then PY=$c; break; fi
+  done
+fi
+[ -n "$PY" ] || { echo "cft-sched: no python3 on PATH (set PYTHON)" >&2; exit 2; }
+exec "$PY" -B -I "$HERE/cft_sched.py" "$@"
