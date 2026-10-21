@@ -497,14 +497,18 @@ What it has shown so far:
 
 It also sent work back the other way. What that integrator asked for
 is recorded in `docs/ROADMAP.md`, ranked by measurement, and by
-2026-09-15 six of its seven asks were built - the device-side gather
-(its scatter is a gather by a static table and a fold), the per-run
-lane mask, the scalar broadcast, the per-segment reduction - and
-measured on the card the same night: one indexed program run replaces
-127 dense calls at 1.5 to 1.7 times their speed and removes the host
-gathers with them (`docs/VALIDATION.md`, the card day of 2026-09-15).
-The general lesson about irregular access patterns is in
-`docs/INTEGRATION.md`.
+2026-09-15 all eight of its asks were built or done - the device-side
+gather (its scatter is a gather by a static table and a fold), the
+per-run lane mask, the scalar broadcast and the per-segment reduction
+among them - though the eighth, correct rounding of divide and square
+root on the card, was measured an hour after it was done and "the
+premise was wrong": the whole-program divide is slower than the older
+route, which stays the default. The card measured the gather, the mask
+and the segmented reduction on the night of 2026-09-15: one indexed
+program run replaces 127 dense calls at 1.5 to 1.7 times their speed
+and removes the host gathers with them (`docs/VALIDATION.md`, the card
+day of 2026-09-15). The general lesson about irregular access patterns
+is in `docs/INTEGRATION.md`.
 
 The port is in active development and its own
 `cft-rebound/docs/VALIDATION.md` carries the numbers, the dates and the
