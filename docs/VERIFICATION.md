@@ -462,8 +462,11 @@ still be made from this tree, builds, verifies and reproduces byte for
 byte, and that each refusal and each archive fault is named when planted
 in a scratch copy - and which needs no converter, no Pillow and no
 PyMuPDF (about 50 s on the maintainer's desktop on 2026-10-19, and it needs git),
-so it prints no SKIP line on the desktop or in a WSL clone, where it was run, and
-is believed to print none in CI, which has not run it. **Nothing invoked
+so it prints no SKIP line in a WSL clone, where it was run, and is believed
+to print none in CI, which has not run it; on the Windows desktop it prints
+one, for the plant that platform cannot run (an archive entry named with a
+backslash), and the runner has counted that as an inner skip of
+`generated` since 2026-10-20. **Nothing invoked
 any of them**, and by 2026-09-13 two had drifted: the five
 `hw/layouts/*.cfg` carried a superseded WNS note in a commented-out clock
 line, and `bindings/node/seq_corpus.jsonl` had been stale since the `kx`
