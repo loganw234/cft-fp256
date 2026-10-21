@@ -6412,6 +6412,134 @@ larger batch also compares flags over more operands at once, and
 parcel CL found that batched runs hide per-operand flag defects, so
 the override is for throughput, beside the lane-exact class items.
 
+### Decided 2026-10-21: the card scheduler, the nightly window, and the week before M2 (plan of record)
+
+Logan's direction on 2026-10-21, verbatim: "Lets try sticking with
+the Sonnet parcels and haiku leads once we reach the M2 build simply
+to see if it still holds up well on harder work. Every night from
+6pm-8am we can run the card on wherever it hasnt reached yet, perhaps
+a parcel for setting up a 'scheduler' which could be utilized in the
+future as well for staging program runs etc while retaining metrics
+about the card and performance, rather than having to rely on scripts
+as we have so far. Could be beneficial if more cards ever exist in the
+future, allowing 1 scheduler to manage many cards on a machine for user
+simplicity. M2 will be delayed until next Monday, the remainder of this
+week will be focusing on whats present and polishing/refining things
+that were able to slip by. I believe the main project readme has some
+stale info about transcendentals still"
+
+**The week.** M2's build (the math library's next step, in "The math
+library: experiment E1, then M1's build and M2 to M4" above) starts on
+Monday 2026-10-26, with Sonnet authors and Haiku verifiers ("haiku
+leads" read as the verifiers), to see whether the coverage wave's
+result holds on harder work. Until then the work is polish: what slipped
+by is found and fixed. The README's transcendentals came first (parcel
+RM, 827c3cf3).
+
+**The nightly window.** The card runs every night from 18:00 to 08:00
+on what it has not yet covered. Until the scheduler takes the window,
+the lead launches each night by hand, with 07:45 as the run's deadline:
+the driver may start a leg whose estimate ends up to its deadline grace
+(`--deadline-grace`, 900 s) past the deadline, and night two ran to
+08:03 against 08:00.
+
+**The scheduler.** The design study is
+`docs/studies/SCHED-A-card-scheduler.md` (parcel SD, 374ff4e6). Logan
+answered its thirteen questions (its section 7) the same day, verbatim:
+"1. Yes, ac recommended 2. Wrap it 3. Yes, just the basics for now 4.
+Yes 5. Yes 6. Yes, aim to always have the card doing something rather
+than idle during the overnight periods 7. Yes 8. Yes to both 9. Allow
+both sources, box has internet access 10. Yes, change now for DR3's
+issue 11. Yes but twice as thorough polling and archiving than
+suggested. You are clear to backup older vivado bitstream builds to
+this PC to make more room on the box if needed. 12. Not soon enough to
+be worth building out now, the likely next addition will be the open
+core design on the smaller board which will end up being over ethernet
+or usb anyway and more limited in capability/speed. 13. Yes". Later,
+on question 12's probe: "You do have permission to do the xbutil probe
+at anytime".
+
+What the answers decide, each against the study's question:
+
+1. **Names.** The card scheduler is `cft-sched`, its code is in
+   `hw/sched/`, and new text calls the library's `run_job` "the tile
+   scheduler".
+2. **Architecture.** A scheduler process around the unchanged driver
+   (the study's option D).
+3. **v1's scope.** One card, the nightly window, staged runs, and card
+   ids in every record. Several cards, a coverage ledger beyond one
+   fold, served sessions, load shedding and signed submissions wait.
+4. **Deployment.** The lead launches the scheduler, with no unit and no
+   crontab. Whether a systemd user unit or cron `@reboot` may be
+   installed is asked again after two clean weeks.
+5. **Priority.** A staged run outranks the nightly sweep and stops it at
+   a safe point, the window resuming at its deadline. A job that cannot
+   wait says `preempt: never`, and a person using the card by hand takes
+   `cft-sched hold`.
+6. **The card is never idle overnight.** When the finite items are
+   covered, the window runs the battery and the random items with new
+   draws; new finite items run first as they appear in the catalog, and
+   everything runs again on a new rtl/ tree.
+7. **The preamble.** `make vectors` and the driver's dry tests run only
+   when the commit changed; the smoke runs every night, as the card's
+   health check.
+8. **Coverage.** The minimal fold and focus list (S4) and the driver's
+   class-aware resume (parcel DR4) come after parcel DR3; the rest of
+   the sweep study's rank 6 waits for the end of the math round. A host
+   item is keyed by the whole host/ tree and the compiler (the coarse
+   key), to be changed if it churns.
+9. **The code the box runs.** Both sources: bundles the lead puts on the
+   box, and a pushed commit fetched by its SHA from the public remote
+   (the box has outbound access). A job may run an unpushed commit when
+   it says so, and the record says it.
+10. **Who submits, and signing.** Only the box user, over ssh, with no
+    listener. The spec reserves a `signature` field and verifies nothing
+    yet. And, now: the signed sweep records change so that a host-pool
+    slice can be signed (parcel DR3 found that format version 1's
+    subject needs a card image; parcel SR2).
+11. **Retention and sampling, at twice the study's figures** (the lead's
+    reading of "twice as thorough"): an idle sample every 7.5 minutes;
+    the scheduler's own clones kept 14 days and passing legs' logs 360
+    days, deleted by exact path with a record of each batch; every
+    record kept; the driver's 5 GB floor left until a week of its use is
+    read. The lead may move older Vivado bitstream builds from the box
+    to the desktop when `/data` needs the room.
+12. **Several cards.** No device selector now (S6 deferred). The next
+    device is likely the open-core board over Ethernet or USB, slower,
+    so a card in the configuration has a `kind` and nothing may assume a
+    PCIe XRT device. The lead's read-only probe (2026-10-21 11:47) found
+    one device, `xilinx_u50_gen3x16_xdma_base_5` at 0000:02:00.1.
+13. **A finding.** The window goes on after a slice finds a mismatch;
+    `status` marks the epoch "needs review", the item is never
+    "complete", and the job's outcome is `done-with-findings`.
+
+**The build order** (the study's section 6, with question 10's change
+added):
+- S1, the core: the spec, the refusals' table, the state root, the file
+  queue, the locks, the job's record, the CLI, and a fake runner.
+- SR2, signed records for host-pool slices, and DR4, the driver's
+  resume counted per tree, beside it.
+- S2, the runner: the clone from a bundle or the remote and its
+  assertions, the build and its checks, the image registry, the guard,
+  the steps.
+- S3, the windows: the calendar, the window job, the preflight,
+  preemption and the resume at the same deadline, restart recovery.
+- S4, metrics and coverage: the extracts, the fold by item and class,
+  the focus list, the idle sampler, retention, the window's summary.
+- S5, the switch: docs/SCHEDULER.md, the study's section 5.3 (what the
+  scheduler replaces of the lead's scripts, line by line) made true, and
+  a unit file written but not installed.
+- S6, several cards, waits for a second card.
+
+No parcel's suite touches the card: S1's runs a fake runner, and the
+later ones are to run the driver's stand-in and its dry run, as the
+study's section 6 says. Only the lead's runs touch the card, after the
+suite is green on both interpreters.
+
+*Status when this section was written (2026-10-21, with S1's merge): S1 is built and
+verified (`hw/sched/`, `hw/test-sched.sh`; docs/VALIDATION.md, its entry). SR2
+and DR4 are built and in verification. S2 to S5 are not started.*
+
 ## The adoption story these serve
 
 Two tiers, one contract: a software library anyone can run on
