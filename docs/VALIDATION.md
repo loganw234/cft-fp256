@@ -22832,10 +22832,10 @@ Each parcel's own entry is above, in the order of the merges: CL's, HC's, SG's, 
 - **The stages' rule and the routines' bound:** the stages hold every unmarked lane to the golden model bit for bit on the cases they run (docs/LANGUAGE.md's rule), which README's bullet now says (VRM's note O3), not on every argument; the bound is the studies' and the routines' tests', by budget and sampling.
 - **docs/ROADMAP.md line 4296** (above), for the lead.
 
-**Checks** (MEASURED, the desktop, in the worktree readme-polish; the last two lines are of the commit that carries this entry):
+**Checks** (MEASURED, the desktop, in the worktree readme-polish; the docs, packager and diff lines are of the commit that carries this entry):
 - `python -B python/project_figures.py --check`: rc 0, 13 s: "15 figures, 46 files, every statement the record makes agrees (83: 58 numbers, 25 phrase, presence or consistency checks); 35 faults planted, each caught by name, and 8 controls that must change nothing, which changed nothing", at the README as edited.
 - `python -B python/check_docs_index.py`: rc 1 on the first run, with the two line-count drifts the edits had made (HOSTAPI.md and TRANSCENDENTALS.md); rc 0 once the index was recounted with this entry.
-- `python -B python/project_packager.py --check` (the packager's own self-test, the `generated` stage's eighth generator): rc 0, 47 s, "the tree can be packaged, 217 controls each refused or failed by name (plus 1 that could not run on this platform, named above), a build verifies and reproduces".
+- `python -B python/project_packager.py --check` (the packager's own self-test, the `generated` stage's eighth generator): rc 0, 49 s, "the tree can be packaged, 217 controls each refused or failed by name (plus 1 that could not run on this platform, named above), a build verifies and reproduces".
 - `git diff --check 0b7c959 HEAD`: clean. No personal path in an added line (a grep of the diff's added lines for a Windows user-profile path, a home directory and root's).
 
 **Records:** docs/README.md recounted with this entry (TRANSCENDENTALS.md 1,737 to 1,809, HOSTAPI.md 3,698 to 3,704, VALIDATION.md 22,787 to 22,843, and the totals and subtotals those rows sum to). Parcel RM's ledger is the round's RM.md.
