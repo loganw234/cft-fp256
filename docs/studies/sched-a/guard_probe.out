@@ -1,0 +1,40 @@
+== card_user on single processes (the driver's own function)
+  ok    an idle cft-serve fronting the quad image                                -> an xclbin argument (cft_hw_quad.xclbin)
+  ok    cft-serve on the software backend                                        -> not a card user
+  ok    telemetry: xbutil examine                                                -> not a card user
+  ok    telemetry: xrt-smi examine                                               -> not a card user
+  ok    xbutil program (loads an image)                                          -> xbutil program -d
+  ok    device-test on an image                                                  -> an xclbin argument (cft_hw_quad.xclbin)
+  ok    acceptance.py on the card                                                -> an xclbin argument (cft_hw_quad.xclbin)
+  ok    acceptance.py on the software backend                                    -> not a card user
+  ok    a gate: bash verify/run.sh --budget gate                                 -> not a card user
+  ok    the lead's waiting nightly script                                        -> not a card user
+  ok    cp of an image                                                           -> not a card user
+  ok    a shell whose one argument is the text of a command that names the patte -> not a card user
+CHECK ok   every command line above is classified as the driver's design says (12 cases)
+CHECK ok   a soak with CFT_SOAK_ARTIFACT in its environment is a card user, and the same soak without it (a host-pool job) is not
+
+== a table of processes: what the driver's find_card_users and `pgrep -fc` each say
+driver  : foreign card users [600]; verify/run.sh beside [400]
+pgrep -f: matches [200, 400] (2)
+CHECK ok   the driver's guard names the idle cft-serve (pid 600) and nothing else as a card user
+CHECK ok   the driver allows the gate (pid 400) and records it as beside, as docs/CARDDAY.md says
+CHECK ok   the driver does not count the asker's own launching shell (pid 200: its one argument is a command text that holds the pattern)
+CHECK ok   pgrep -f counts the asker's launching shell (pid 200) and the gate (pid 400): 2 matches where no process uses the card
+
+== controls: the lead's pgrep pattern, put through the same twelve cases, must fail the checks above
+  MISS  an idle cft-serve fronting the quad image                                -> not a card user
+  ok    cft-serve on the software backend                                        -> not a card user
+  ok    telemetry: xbutil examine                                                -> not a card user
+  ok    telemetry: xrt-smi examine                                               -> not a card user
+  MISS  xbutil program (loads an image)                                          -> not a card user
+  MISS  device-test on an image                                                  -> not a card user
+  MISS  acceptance.py on the card                                                -> not a card user
+  ok    acceptance.py on the software backend                                    -> not a card user
+  FALSE a gate: bash verify/run.sh --budget gate                                 -> the pattern is in the command line
+  ok    the lead's waiting nightly script                                        -> not a card user
+  ok    cp of an image                                                           -> not a card user
+  FALSE a shell whose one argument is the text of a command that names the patte -> the pattern is in the command line
+CONTROL ok   the pattern guard gets 6 of 12 cases wrong (it MISSES 4 card users the driver names, and FLAGS 2 processes that use no card) and flags the launching shell; the checks above would go red on it
+CONTROL ok   with the cft-serve gone the driver's guard finds nothing and `pgrep -f` still counts 2 (the shell and the gate)
+guard_probe: every check held

@@ -1,0 +1,110 @@
+== stress-1016
+file     : 7,982,931 bytes, 5108 lines, sha256 e7989f88efded691ea7461e921840d8de5d449e069980f6ba92e6a8f87e007cc
+type           count      bytes   share  B/record
+run_start          1      1,587    0.0%      1587
+event             20      5,520    0.1%       276
+build              1      2,409    0.0%      2409
+cycle_start       67     25,032    0.3%       374
+telemetry        865  4,712,543   59.0%      5448
+leg             4086  3,226,275   40.4%       790
+cycle_end         67      9,449    0.1%       141
+run_end            1        116    0.0%       116
+all             5108  7,982,931
+span     : 2026-10-17 01:58:23Z to 2026-10-19 15:01:13Z, 61.047 hours (219770 s)
+per hour : 130766 bytes, 83.67 records
+           telemetry 77195 B/h (14.2 samples/h), legs 52849 B/h (66.9 legs/h)
+per night: 1.83 MB for a 14-hour window at this mix (COMPUTED: bytes/hour x 14)
+per year : 668 MB for 365 such nights (0.67 GB), of which telemetry 394 MB
+telemetry: 865 records with values; 865 carry all six keys the figures read; a compact record of those six plus the host's load and memory is 227 B on average against 5448 B (a 24.0x reduction, COMPUTED)
+disk free: the run directory  first 20.69 GB, last 20.04 GB, min 19.91, max 20.69 GB over 865 samples (net change -0.65 GB; samples are rounded to 0.01 GB)
+disk free: /data              first 20.69 GB, last 20.04 GB, min 19.91, max 20.69 GB over 865 samples (net change -0.65 GB; samples are rounded to 0.01 GB)
+host     : 865 samples; load1 median 3.22, max 6.74; memory total 48,061 MB, available at least 43,420 MB (the host's own, as the driver sampled it)
+logs     : 4032 legs name a log file (log_kept: gz 4032, none 54); the records do not carry a log's size
+host pool: 0 legs ran on the image `cpu` (the host pool's slices)
+CHECK ok   stress-1016: every line parses and the file ends with a newline
+CHECK ok   stress-1016: the bytes by type add up to the file's size
+CHECK ok   stress-1016: the records counted equal the file's newline count
+
+== overnight-1019
+part     : run 1 of 2 in its file: lines 1 to 751 of 1308; the whole file is 2,676,057 bytes, sha256 38f243c792c7089c811156d51f17f9ccb58b2037b2336cf6d59d3a208a78fb2e
+file     : 1,431,954 bytes, 751 lines, sha256 cd0aec75c8fa9abbb7bbaaa0eca09bbdf2eb43e0257d77fd539e62f7199f578b
+type           count      bytes   share  B/record
+run_start          1      1,984    0.1%      1984
+build              1      2,446    0.2%      2446
+cycle_start       14      5,217    0.4%       373
+telemetry        176    958,479   66.9%      5446
+leg              543    461,595   32.2%       850
+cycle_end         14      1,966    0.1%       140
+event              1        151    0.0%       151
+run_end            1        116    0.0%       116
+all              751  1,431,954
+span     : 2026-10-20 02:36:47Z to 2026-10-20 15:00:31Z, 12.395 hours (44624 s)
+per hour : 115522 bytes, 60.59 records
+           telemetry 77325 B/h (14.2 samples/h), legs 37239 B/h (43.8 legs/h)
+per night: 1.62 MB for a 14-hour window at this mix (COMPUTED: bytes/hour x 14)
+per year : 590 MB for 365 such nights (0.59 GB), of which telemetry 395 MB
+telemetry: 176 records with values; 176 carry all six keys the figures read; a compact record of those six plus the host's load and memory is 227 B on average against 5446 B (a 24.0x reduction, COMPUTED)
+disk free: the run directory  first 18.60 GB, last 18.60 GB, min 18.45, max 18.60 GB over 176 samples (net change 0.00 GB; samples are rounded to 0.01 GB)
+disk free: /data              first 18.60 GB, last 18.60 GB, min 18.45, max 18.60 GB over 176 samples (net change 0.00 GB; samples are rounded to 0.01 GB)
+host     : 176 samples; load1 median 2.88, max 5.75; memory total 48,061 MB, available at least 44,369 MB (the host's own, as the driver sampled it)
+logs     : 533 legs name a log file (log_kept: gz 533, none 10); the records do not carry a log's size
+host pool: 0 legs ran on the image `cpu` (the host pool's slices)
+CHECK ok   overnight-1019: every line parses and the file ends with a newline
+CHECK ok   overnight-1019: the bytes by type add up to the file's size
+CHECK ok   overnight-1019: the records counted equal the file's newline count
+CHECK ok   overnight-1019: the file's runs, in order, are the file from its first run_start to its end
+
+== night-2-1020
+part     : run 2 of 2 in its file: lines 752 to 1308 of 1308; the whole file is 2,676,057 bytes, sha256 38f243c792c7089c811156d51f17f9ccb58b2037b2336cf6d59d3a208a78fb2e
+file     : 1,244,103 bytes, 557 lines, sha256 0cda30cd94c5d037cf4a2c252e8612659e1e8fa5f48fd4d8894008d5a4a9793f
+type           count      bytes   share  B/record
+run_start          1      2,241    0.2%      2241
+build              1      2,446    0.2%      2446
+cycle_start       15      5,609    0.5%       374
+telemetry        174    947,987   76.2%      5448
+leg              349    283,436   22.8%       812
+cycle_end         15      2,118    0.2%       141
+event              1        150    0.0%       150
+run_end            1        116    0.0%       116
+all              557  1,244,103
+span     : 2026-10-21 02:57:26Z to 2026-10-21 15:03:01Z, 12.093 hours (43535 s)
+per hour : 102878 bytes, 46.06 records
+           telemetry 78392 B/h (14.4 samples/h), legs 23438 B/h (28.9 legs/h)
+per night: 1.44 MB for a 14-hour window at this mix (COMPUTED: bytes/hour x 14)
+per year : 526 MB for 365 such nights (0.53 GB), of which telemetry 401 MB
+telemetry: 174 records with values; 174 carry all six keys the figures read; a compact record of those six plus the host's load and memory is 227 B on average against 5448 B (a 24.0x reduction, COMPUTED)
+disk free: the run directory  first 17.34 GB, last 17.34 GB, min 17.19, max 17.34 GB over 174 samples (net change 0.00 GB; samples are rounded to 0.01 GB)
+disk free: /data              first 17.34 GB, last 17.34 GB, min 17.19, max 17.34 GB over 174 samples (net change 0.00 GB; samples are rounded to 0.01 GB)
+host     : 174 samples; load1 median 3.28, max 5.69; memory total 48,061 MB, available at least 44,565 MB (the host's own, as the driver sampled it)
+logs     : 336 legs name a log file (log_kept: gz 336, none 13); the records do not carry a log's size
+host pool: 0 legs ran on the image `cpu` (the host pool's slices)
+CHECK ok   night-2-1020: every line parses and the file ends with a newline
+CHECK ok   night-2-1020: the bytes by type add up to the file's size
+CHECK ok   night-2-1020: the records counted equal the file's newline count
+CHECK ok   night-2-1020: the file's runs, in order, are the file from its first run_start to its end
+
+== box-overnight-1019 (a directory of records copied back from a batch)
+files    : 5 files, 28,807 bytes in all; the largest: overnight-report-final.txt 23,464 B, box_overnight.sh 3,871 B, overnight-summary.txt 911 B
+           0 of them are jsonl records; a logs/ directory of a run: none
+CHECK ok   box-overnight-1019: the bytes by file add up to the directory's total
+
+== box-wave9 (a directory of records copied back from a batch)
+files    : 61 files, 223,805 bytes in all; the largest: card-stress.log 18,687 B, wave9chunk-runs.jsonl 16,190 B, gate-run.log 12,391 B
+           1 of them are jsonl records; a logs/ directory of a run: none
+CHECK ok   box-wave9: the bytes by file add up to the directory's total
+
+== the measured runs side by side (a 14-hour window at each one's own mix; 365 such nights)
+run                       hours       bytes    bytes/h  MB/night   MB/year   telem.   load1
+stress-1016              61.047   7,982,931     130766      1.83       668    59.0%    3.22
+overnight-1019           12.395   1,431,954     115522      1.62       590    66.9%    2.88
+night-2-1020             12.093   1,244,103     102878      1.44       526    76.2%    3.28
+ranges   : 1.44 to 1.83 MB a night, 526 to 668 MB a year, telemetry 59.0 to 76.2 per cent of the bytes, load1 median 2.88 to 3.28 (COMPUTED over 3 runs)
+CHECK ok   the ranges are the least and the greatest of the rows above
+
+== controls
+CONTROL ok   a record torn in the middle: the checks go red, as they must
+CONTROL ok   a garbage line appended: the checks go red, as they must
+CONTROL ok   the final newline cut: the checks go red, as they must
+CONTROL ok   a run the file does not have (3 and 0) is refused, not read as another
+CONTROL ok   a file one byte short is not the runs it was split into (the partition check can fail)
+volumes: every check held

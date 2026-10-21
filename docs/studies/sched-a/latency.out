@@ -1,0 +1,118 @@
+== stress-1016
+activities: 1821 (745 battery or recovery legs, 1076 sweep waves); 0 overlap each other; 0 host-slice legs (image cpu) left out
+span      : 219768 s (61.047 h) from the first activity's start to the last one's end; 99.90% of it is inside an activity
+start-up  : the first activity starts 1.4 s after the run's `run_start` record, which the driver writes as it starts: its tree facts, build step, probes, image hashes and a first telemetry sample all fall in that time
+waves     : 1076 sweep waves, mean length 131.8 s, longest 617.9 s
+mean wait : 151.7 s (2.5 min)
+p50  wait : 99.2 s (1.7 min)
+p90  wait : 366.4 s (6.1 min)
+p95  wait : 481.2 s (8.0 min)
+p99  wait : 631.0 s (10.5 min)
+P(wait >   60 s) = 0.6723
+P(wait >  300 s) = 0.1528
+P(wait >  600 s) = 0.0138
+P(wait > 1200 s) = 0.0045
+longest   : acceptance-rev8 quad 2188.6 s (36.5 min); selftest quad 685.8 s (11.4 min); selftest single 678.6 s (11.3 min)
+longest leg: acceptance-rev8 on quad, cycle 1, 2188.6 s; the same leg in the other 43 visits: median 349.2 s, from 346.8 to 361.9 s
+by kind (activities, total s, share of the span, mean s, max s):
+  sweep wave       1076    141847   64.5%    131.8    617.9
+  acceptance         66     26657   12.1%    403.9    432.6
+  acceptance-rev8    55     18017    8.2%    327.6   2188.6
+  selftest           23     15152    6.9%    658.8    685.8
+  card-segrun        67     12651    5.8%    188.8    197.0
+  seq-check          66      2993    1.4%     45.3     47.2
+  dt-full            67       823    0.4%     12.3     14.2
+  dt-i               67       436    0.2%      6.5     10.5
+  dt-b               67       394    0.2%      5.9      6.4
+  resident           66       238    0.1%      3.6      4.0
+  dt-q8              67       212    0.1%      3.2      3.8
+  dt-r               67       124    0.1%      1.9      2.2
+  api-test           67         7    0.0%      0.1      0.1
+CHECK ok   stress-1016: the exact mean 151.7 s and p95 481.2 s agree with a seeded Monte Carlo of the same definition (151.9 s, 483.2 s)
+CHECK ok   stress-1016: no two activities overlap
+CHECK ok   stress-1016: the 1076 sweep waves found equal the sum of 1/jobs over the sweep legs (1076.000), the wave size each leg records
+
+== overnight-1019
+activities: 260 (155 battery or recovery legs, 105 sweep waves); 0 overlap each other; 0 host-slice legs (image cpu) left out
+span      : 44621 s (12.395 h) from the first activity's start to the last one's end; 99.92% of it is inside an activity
+start-up  : the first activity starts 1.9 s after the run's `run_start` record, which the driver writes as it starts: its tree facts, build step, probes, image hashes and a first telemetry sample all fall in that time
+waves     : 105 sweep waves, mean length 272.8 s, longest 615.4 s
+mean wait : 212.4 s (3.5 min)
+p50  wait : 179.3 s (3.0 min)
+p90  wait : 464.0 s (7.7 min)
+p95  wait : 524.2 s (8.7 min)
+p99  wait : 595.9 s (9.9 min)
+P(wait >   60 s) = 0.7829
+P(wait >  300 s) = 0.2861
+P(wait >  600 s) = 0.0087
+P(wait > 1200 s) = 0.0000
+longest   : selftest quad 659.4 s (11.0 min); selftest quad 659.3 s (11.0 min); selftest deep 656.6 s (10.9 min)
+longest leg: selftest on quad, cycle 6, 659.4 s; the same leg in the other 2 visits: median 659.3 s, from 656.4 to 659.3 s
+by kind (activities, total s, share of the span, mean s, max s):
+  sweep wave        105     28644   64.2%    272.8    615.4
+  acceptance         14      5633   12.6%    402.4    405.3
+  acceptance-rev8    11      3290    7.4%    299.1    352.5
+  selftest            5      3286    7.4%    657.2    659.4
+  card-segrun        14      2637    5.9%    188.4    191.3
+  seq-check          14       633    1.4%     45.2     46.4
+  dt-full            14       170    0.4%     12.2     13.9
+  dt-i               14        90    0.2%      6.4     10.5
+  dt-b               14        83    0.2%      5.9      6.3
+  resident           13        47    0.1%      3.6      3.8
+  dt-q8              14        45    0.1%      3.2      3.7
+  dt-r               14        26    0.1%      1.9      2.1
+  api-test           14         2    0.0%      0.1      0.1
+CHECK ok   overnight-1019: the exact mean 212.4 s and p95 524.2 s agree with a seeded Monte Carlo of the same definition (212.4 s, 525.0 s)
+CHECK ok   overnight-1019: no two activities overlap
+CHECK ok   overnight-1019: the 105 sweep waves found equal the sum of 1/jobs over the sweep legs (105.000), the wave size each leg records
+
+== night-2-1020
+activities: 213 (162 battery or recovery legs, 51 sweep waves); 0 overlap each other; 0 host-slice legs (image cpu) left out
+span      : 43532 s (12.092 h) from the first activity's start to the last one's end; 99.92% of it is inside an activity
+start-up  : the first activity starts 1.9 s after the run's `run_start` record, which the driver writes as it starts: its tree facts, build step, probes, image hashes and a first telemetry sample all fall in that time
+waves     : 51 sweep waves, mean length 539.7 s, longest 623.1 s
+mean wait : 245.1 s (4.1 min)
+p50  wait : 226.4 s (3.8 min)
+p90  wait : 494.0 s (8.2 min)
+p95  wait : 541.3 s (9.0 min)
+p99  wait : 580.6 s (9.7 min)
+P(wait >   60 s) = 0.8424
+P(wait >  300 s) = 0.3698
+P(wait >  600 s) = 0.0061
+P(wait > 1200 s) = 0.0000
+longest   : selftest quad 660.4 s (11.0 min); selftest quad 655.6 s (10.9 min); selftest single 655.1 s (10.9 min)
+longest leg: selftest on quad, cycle 19, 660.4 s; the same leg in the other 1 visits: median 655.6 s, from 655.6 to 655.6 s
+by kind (activities, total s, share of the span, mean s, max s):
+  sweep wave         51     27524   63.2%    539.7    623.1
+  acceptance         14      5651   13.0%    403.6    407.4
+  acceptance-rev8    11      3753    8.6%    341.2    403.0
+  card-segrun        15      2821    6.5%    188.0    191.8
+  selftest            4      2621    6.0%    655.4    660.4
+  seq-check          14       633    1.5%     45.2     46.4
+  dt-full            15       184    0.4%     12.2     14.2
+  dt-i               15       100    0.2%      6.7     10.5
+  dt-b               15        87    0.2%      5.8      6.3
+  resident           14        50    0.1%      3.6      3.9
+  dt-q8              15        46    0.1%      3.1      3.7
+  dt-r               15        28    0.1%      1.8      2.1
+  api-test           15         2    0.0%      0.1      0.1
+CHECK ok   night-2-1020: the exact mean 245.1 s and p95 541.3 s agree with a seeded Monte Carlo of the same definition (245.2 s, 541.0 s)
+CHECK ok   night-2-1020: no two activities overlap
+CHECK ok   night-2-1020: the 51 sweep waves found equal the sum of 1/jobs over the sweep legs (51.000), the wave size each leg records
+
+== the runs side by side (the wait of a stop request, a request arriving uniformly over each run's span)
+run                  hours  waves    wave s mean wait s  p95 wait s  p99 wait s  P(>600s) start-up s
+stress-1016         61.047   1076     131.8       151.7       481.2       631.0    0.0138        1.4
+overnight-1019      12.395    105     272.8       212.4       524.2       595.9    0.0087        1.9
+night-2-1020        12.092     51     539.7       245.1       541.3       580.6    0.0061        1.9
+ranges    : mean wait 151.7 to 245.1 s (2.5 to 4.1 min), p95 481.2 to 541.3 s (8.0 to 9.0 min), a wave's mean length 131.8 to 539.7 s (COMPUTED over 3 runs)
+CHECK ok   the ranges are the least and the greatest of the rows above
+
+== control: the mean computed with d where d/2 belongs must be caught by the Monte Carlo check
+CONTROL ok   a wrong formula is caught by the check, as it must be
+== control: every sweep leg of a cycle called one wave must be caught by the wave-count check
+CONTROL ok   a wrong grouping is caught by the check, as it must be
+== control: a host-slice leg (image cpu) beside a card leg is left out; counted as a card activity it must be caught
+CONTROL ok   a host slice is left out and every check stays green
+CONTROL ok   a host slice counted as a card activity is caught by the no-overlap check, as it must be
+latency: every check held
