@@ -22831,4 +22831,4 @@ Each parcel's own entry is above, in the order of the merges: CL's, HC's, SG's, 
 
 **Records:** docs/README.md recounted with this entry (TRANSCENDENTALS.md 1,737 to 1,836, HOSTAPI.md 3,698 to 3,704, VALIDATION.md 22,787 to 22,834, and the totals and subtotals those rows sum to). Parcel RM's ledger is the round's RM.md.
 
-**Time** (MEASURED, `date`): parcel RM's author, one agent, Sonnet 5.5, 07:34 to 08:10 on 2026-10-21.
+**Time** (MEASURED, `date`): parcel RM's author, one agent, Sonnet 5.5, 07:34 to about 08:10 on 2026-10-21.
