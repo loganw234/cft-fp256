@@ -65,7 +65,7 @@ Its jobs are of two kinds. A **window** job runs the unchanged driver as a subpr
 resuming the run directory its commit's trees call for and focusing it on the finite items still unfinished there. A **staged**
 job is a chain of named steps (the driver's legs, a soak slice, `make vectors`, the driver's own dry tests), each judged by the
 driver's parsers and never by an exit status alone. Every job clones a full SHA and asserts it (HEAD, a clean status, the rtl/
-tree, a string from each change), builds with `XRT=1` and checks `ldd`, finds other card users by the driver's ancestry rule, and
+tree, a string from each change), builds with `XRT=1` and checks `ldd`, finds other card users by the driver's own rule, and
 ends in a record whose last word is a name. A staged job outranks the sweep, which is stopped at a safe point and resumed. The
 records stay `metrics.jsonl`-shaped, so the report, the figures and the signed-record exporter read them unchanged. **Deferred:**
 several cards, a coverage ledger beyond one fold, served sessions, load shedding, signed submissions, a network listener. **It
