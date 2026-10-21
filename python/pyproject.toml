@@ -10,10 +10,23 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
 authors = [{ name = "Logan W." }]
-dependencies = []
+# What the package imports (python/tests/test_package_dependencies.py holds
+# this list to the imports, and the floor to tb/requirements.txt's).
+# mpmath: cft_golden/mathlib.py imports it at module level, and transcend.py
+# (the interval context that decides a rounding), vectors.py, cert2.py, the
+# language (lang/graph.py, lang/interp.py) and cftc import it where they
+# need it. Its floor, 1.3, is the one this file's test extra and
+# tb/requirements.txt declared, and the lowest version the record runs on
+# (the desktop's 1.3.0; the box's and CI's 1.4.1).
+dependencies = ["mpmath>=1.3"]
 
 [project.optional-dependencies]
-test = ["pytest>=8", "mpmath>=1.3"]
+test = ["pytest>=8"]
+# GNU MPFR, the oracle of python/tests/test_transcend.py::test_mpfr_parity,
+# which skips by name without it. Nothing in the package imports it. Its
+# floor, 2.2.1, is the oldest version the record runs on (CI's pin in
+# .github/workflows/gates.yml and the desktop's; the box has 2.3.1).
+mpfr = ["gmpy2>=2.2.1"]
 
 [tool.setuptools.packages.find]
 include = ["cft_golden*", "cftc*"]
