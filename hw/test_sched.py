@@ -550,14 +550,17 @@ def spawn(root, *args):
 
 def group_locks():
     root, cfg = mkroot("l-nolocks")
-    sub(root, cfg, spec())
+    j = sub(root, cfg, spec())[0]
     rc, out, err = cli(root, "serve", "--drain", "--no-locks")
     cl = S.read_records(os.path.join(root, "cards", "u50-0", "card.jsonl"))
-    check("locks: `serve --no-locks` runs without locks and says so by name, in its output and in the card's record",
-          rc == 0 and "SKIPPED" in out and cl and cl[0]["type"] == "service_start" and cl[0]["locks"] == "skipped" and not os.path.exists(os.path.join(root, "lock")))
     if S.HAVE_FLOCK:
+        check("locks: `serve --no-locks` where flock exists is refused `locks-required`, with a record, and runs nothing",
+              rc == 2 and "locks-required" in err and "locks-required" in open(os.path.join(root, "refusals.jsonl")).read() and not cl and os.path.isdir(os.path.join(root, "queue", j)))
+        skip("locks: `serve --no-locks` runs without locks and says so by name", "this platform has flock(2): the option is refused instead")
         skip("locks: serve without flock is refused `locks-unavailable`", "this platform has flock(2)")
     else:
+        check("locks: `serve --no-locks` runs without locks and says so by name, in its output and in the card's record",
+              rc == 0 and "SKIPPED" in out and cl and cl[0]["type"] == "service_start" and cl[0]["locks"] == "skipped" and not os.path.exists(os.path.join(root, "lock")))
         rc, out, err = cli(root, "serve", "--drain")
         check("locks: where there is no flock(2), `serve` is refused `locks-unavailable` by name, with a record",
               rc == 2 and "locks-unavailable" in err and "locks-unavailable" in open(os.path.join(root, "refusals.jsonl")).read())
@@ -595,6 +598,17 @@ def group_locks():
             p.wait()
     check("locks: the card's lock is free again once the job has ended, and the job is done",
           S.lock_held(os.path.join(root, "cards", "u50-0", "CARDLOCK")) is False and rec(root, "jobs", j).get("outcome") == "done")
+    root, cfg = mkroot("l-foreign")
+    j = sub(root, cfg, spec())[0]
+    fd = os.open(os.path.join(root, "cards", "u50-0", "CARDLOCK"), os.O_RDWR | os.O_CREAT)
+    S.fcntl.flock(fd, S.fcntl.LOCK_EX | S.fcntl.LOCK_NB)             # a holder the scheduler does not own
+    rc, out, _ = cli(root, "serve", "--drain")
+    state = json.loads(cli(root, "status", "--json")[1])["cards"][0]["state"]
+    left = os.path.isdir(os.path.join(root, "queue", j))
+    os.close(fd)
+    rc2, out2, _ = cli(root, "serve", "--drain")
+    check("locks: a card whose lock someone else holds is not claimed on (the job stays queued, status says locked), and runs once the holder lets go",
+          rc == 0 and left and "claimed" not in out and state == "locked" and rc2 == 0 and rec(root, "jobs", j).get("outcome") == "done", f"{state} {out!r}")
     root, cfg = mkroot("l-orphan")
     j1 = sub(root, cfg, spec(name="long", steps=[{"type": "sleep", "seconds": 30}]))[0]
     j2 = sub(root, cfg, spec(name="short"))[0]
@@ -714,6 +728,22 @@ def group_cli():
     check("cli: serve --drain runs what is queued and exits 0; status for a job gives its outcome; status gives the last outcome and an empty queue",
           rc == 0 and "j000001 ended: done" in out and "j000001: jobs" in out2 and "outcome done" in out2 and st["queue"] == [] and st["last"]["id"] == "j000001" and st["last"]["outcome"] == "done", out2)
     check("cli: status of an id nobody has is `job-unknown`", cli(root, "status", "j424242")[0] == 2)
+    live = os.path.join(TMP, "c-live")
+    cli(live, "init")
+    ROOTS.append(live)
+    p = spawn(live, *([] if S.HAVE_FLOCK else ["--no-locks"]))
+    try:
+        rc, out, _ = cli(live, "submit", "-", stdin=json.dumps(spec(steps=[{"type": "sleep", "seconds": 1.5}] * 3)))     # while the service runs
+        jid = out.split()[-1]
+        started = wait_for(lambda: os.path.isdir(os.path.join(live, "running", jid)), 30)
+        rc2, out2, _ = cli(live, "cancel", jid)
+        ended = wait_for(lambda: os.path.isdir(os.path.join(live, "jobs", jid)), 30)
+    finally:
+        p.kill()
+        p.wait()
+    st = [x["status"] for x in recs(live, "jobs", jid) if x["type"] == "step"]
+    check("cli: a job submitted while the service loops is picked up, and `cancel` of it while it runs stops it at a safe point (cancelled; a step passed, the last skipped)",
+          rc == 0 and started and ended and "stop requested" in out2 and rec(live, "jobs", jid).get("outcome") == "cancelled" and st[:1] == ["pass"] and st[-1:] == ["skipped"], f"{out2!r} {st}")
     if os.name == "posix" and shutil.which("bash"):
         p = subprocess.run(["bash", os.path.join(SCHED, "cft-sched"), "--root", root, "status"], capture_output=True, text=True, env={**os.environ, "PYTHON": sys.executable})
         check("cli: the cft-sched wrapper runs the command", p.returncode == 0 and "cft-sched status" in p.stdout, p.stderr[:200])
@@ -728,14 +758,13 @@ def every_s1_refusal_was_raised():
         names |= {x.get("name") for x in S.read_records(os.path.join(r, "refusals.jsonl"))}
         for j in os.listdir(os.path.join(r, "jobs")) if os.path.isdir(os.path.join(r, "jobs")) else []:
             names |= {x.get("name") for x in recs(r, "jobs", j) if x["type"] == "refused"}
-    want = {n for n, (by, _w, _m) in N.REFUSALS.items() if by == "S1"} - ({"locks-unavailable"} if S.HAVE_FLOCK else {"lock-held"})
+    want = {n for n, (by, _w, _m) in N.REFUSALS.items() if by == "S1"} - ({"locks-unavailable"} if S.HAVE_FLOCK else {"lock-held", "locks-required"})
     check("the table: every refusal it gives to S1 was raised by a scenario above, and each one left its record", want <= names, f"never raised: {sorted(want - names)}")
 
 
 # ---------------------------------------------------------------------------------------- plants
 
 GROUPS = {"spec": group_spec, "queue": group_queue, "records": group_records, "cli": group_cli, "locks": group_locks}
-POSIX_PLANT = "needs flock(2), which this platform lacks"
 
 
 def make_copy(name: str, edits: list) -> str:
@@ -769,8 +798,8 @@ def E(f, old, new):
     return (f, old, new)
 
 
-PLANTS = [  # (what is wrong, edits, the groups written for it, a fragment of the check that must fail, needs flock)
-    ("a second service is allowed", [E("sched_run.py", "    if not svc.acquire(tries=3, delay=0.1):", "    svc.acquire(tries=3, delay=0.1)\n    if False:")], "locks", "a second service on the same root is refused", True),
+PLANTS = [  # (what is wrong, edits, the groups written for it, a fragment of the check that must fail, None | "flock" | "noflock": where it can run)
+    ("a second service is allowed", [E("sched_run.py", "    if not svc.acquire(tries=3, delay=0.1):", "    svc.acquire(tries=3, delay=0.1)\n    if False:")], "locks", "a second service on the same root is refused", "flock"),
     ("a claim that two workers can win", [E("sched_state.py", "        return True\n    except FileNotFoundError:\n        return False", "        return True\n    except FileNotFoundError:\n        return True")],
      "queue", "a second claim of a claimed job loses", False),
     ("an unknown field is accepted", [E("sched_spec.py", '        if key not in _children(""):', "        if False:")], "spec", "an unknown field is refused spec-form", False),
@@ -779,8 +808,9 @@ PLANTS = [  # (what is wrong, edits, the groups written for it, a fragment of th
     ("a job id is reused", [E("sched_state.py", "for m in map(ID_RE.match, os.listdir(d))", 'for m in map(ID_RE.match, os.listdir(os.path.join(root, "queue")) + os.listdir(os.path.join(root, "running")))'),
                             E("sched_state.py", "os.open(os.path.join(d, jid), os.O_CREAT | os.O_EXCL | os.O_WRONLY)", "os.open(os.path.join(d, jid), os.O_CREAT | os.O_WRONLY)")],
      "queue", "ids never repeat", False),
-    ("the card lock is not held for the job", [E("sched_run.py", 'lk = Lock(os.path.join(root, "cards", cid, "CARDLOCK"), skip=skip_locks)', 'lk = Lock(os.path.join(root, "cards", cid, "CARDLOCK"), skip=True)')],
-     "locks", "the card's lock is held while its job runs", True),
+    ("the card lock is not held for the job", [E("sched_run.py", "                try:\n                    if hold_info(root, cid) is not None:\n                        continue",
+                                                  "                lk.release()\n                try:\n                    if hold_info(root, cid) is not None:\n                        continue")],
+     "locks", "the card's lock is held while its job runs", "flock"),
     ("a root inside a checkout is accepted", [E("sched_config.py", '        if os.path.lexists(os.path.join(d, ".git")):', "        if False:")], "cli", "a root inside a git working tree is refused", False),
     ("a hold does not stop claims", [E("sched_run.py", "                if hold_info(root, cid) is not None:\n                    continue\n                lk", "                lk"),
                                      E("sched_run.py", "                    if hold_info(root, cid) is not None:\n                        continue", "                    if False:\n                        continue")],
@@ -804,7 +834,12 @@ PLANTS = [  # (what is wrong, edits, the groups written for it, a fragment of th
     ("a job past its deadline is run", [E("sched_state.py", "            if dl is not None and now_t > dl:", "            if False:")], "queue", "a job past its deadline is refused `deadline-passed`", False),
     ("not_before is ignored", [E("sched_state.py", "            if isinstance(nb, (int, float)) and now_t < nb:", "            if False:")], "queue", "a job whose not_before is in the future waits", False),
     ("a job id from the command line is not checked", [E("sched_state.py", "    if not isinstance(text, str) or not ID_RE.match(text):", "    if not isinstance(text, str):")], "queue", "what is not a job id", False),
-    ("--no-locks is not said in the record", [E("sched_run.py", '        locks = "skipped" if skip_locks else "flock"', '        locks = "flock"')], "locks", "`serve --no-locks` runs without locks and says so", False),
+    ("the service takes a card whose lock another holds", [E("sched_run.py", "                if not lk.acquire():\n                    continue ", "                lk.acquire()\n                if False:\n                    continue ")], "locks",
+     "a card whose lock someone else holds is not claimed on", "flock"),
+    ("a cancel of a running job leaves its STOP where the runner does not look", [E("sched_state.py", 'fd = os.open(os.path.join(r, "STOP"),', 'fd = os.open(os.path.join(r, "STOP.x"),')], "cli",
+     "a job submitted while the service loops is picked up", False),
+    ("--no-locks is not said in the record", [E("sched_run.py", '        locks = "skipped" if skip_locks else "flock"', '        locks = "flock"')], "locks", "`serve --no-locks` runs without locks and says so", "noflock"),
+    ("--no-locks is accepted where flock exists", [E("sched_run.py", "    if skip_locks and HAVE_FLOCK:", "    if False:")], "locks", "`serve --no-locks` where flock exists is refused", "flock"),
     ("an abbreviated commit is accepted", [E("sched_spec.py", r'COMMIT_RE = re.compile(r"[0-9a-f]{40}\Z")', r'COMMIT_RE = re.compile(r"[0-9a-f]{7,40}\Z")')], "spec", "an abbreviated commit is refused", False),
     ("version 2 is read as version 1", [E("sched_spec.py", '    if obj["v"] != SPEC_VERSION:', "    if False:")], "spec", "version 2, with fields version 1 does not know", False),
     ("a step type the registry does not hold is accepted", [E("sched_spec.py", "        if params is None:", "        if False:")], "spec", "a step type the registry does not hold is refused", False),
@@ -831,8 +866,8 @@ def plants(only_text: str | None):
     for label, edits, g, want, posix in PLANTS:
         if only_text and only_text not in label:
             continue
-        if posix and not S.HAVE_FLOCK:
-            skip(f"plant [{label}]", POSIX_PLANT)
+        if (posix == "flock" and not S.HAVE_FLOCK) or (posix == "noflock" and S.HAVE_FLOCK):
+            skip(f"plant [{label}]", "needs flock(2), which this platform lacks" if posix == "flock" else "needs a platform without flock(2)")
             continue
         try:
             d = make_copy(re.sub(r"\W+", "-", label)[:30], edits)

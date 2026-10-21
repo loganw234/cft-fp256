@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """The state root's operations: the locks, the job's record, the file queue, hold and release.
 
-A JOB IS A DIRECTORY THAT MOVES BY RENAME, and a rename is atomic on one filesystem:
+A JOB IS A DIRECTORY THAT MOVES BY RENAME, and on POSIX a rename is atomic on one filesystem:
   submit   built whole as queue/.tmp-ID, then renamed to queue/ID (the queue never shows half a job);
   claim    queue/ID -> running/ID, so of two claimants exactly one wins, and the loser's rename fails;
   cancel   of a queued job: queue/ID -> jobs/ID (it competes for the same rename, so it cannot also run);
@@ -11,6 +11,9 @@ A JOB IS A DIRECTORY THAT MOVES BY RENAME, and a rename is atomic on one filesys
 job.jsonl is born at submit, so a refusal has somewhere to leave its record. Ids come from markers
 (ids/jNNNNNN, created O_EXCL and never deleted), so an id is never reused and no lock is needed for it.
 Order is priority, then id: the id sequence is the scheduler's own clock of submissions and cannot step back.
+THE EXCLUSIVITY IS POSIX rename(2)'S, NOT THIS CODE'S: on the Windows this was written on, eight threads renaming one
+directory to one target all report success (measured, test_sched.py's rename_exclusive), so there a claim is exclusive
+only if one claimant is the only one, which `serve --no-locks` says by name. The service runs on Linux.
 """
 from __future__ import annotations
 
@@ -281,7 +284,7 @@ def queue_entries(root: str) -> list:
 
 
 def claim(root: str, jid: str) -> bool:
-    """Win queue/ID by renaming it into running/. Exactly one of any number of claimants succeeds."""
+    """Win queue/ID by renaming it into running/. On POSIX exactly one of any number of claimants succeeds."""
     try:
         os.rename(os.path.join(root, "queue", jid), os.path.join(root, "running", jid))
         return True

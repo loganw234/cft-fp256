@@ -35,6 +35,7 @@ REFUSALS = {
     # -- the locks and the queue's verbs (S1)
     "lock-held": ("S1", "root", "another service holds this root's lock: one service per root"),
     "locks-unavailable": ("S1", "root", "this platform has no flock(2); `serve --no-locks` runs without locks and says so in its records"),
+    "locks-required": ("S1", "root", "`serve --no-locks` was asked where flock(2) exists: the option is for a platform without it, and a service without its lock cannot be seen by `status`"),
     "card-held": ("S1", "root", "the card already has a hold; the message names who holds it"),
     "card-not-held": ("S1", "root", "release of a card that has no hold"),
     "job-unknown": ("S1", "root", "no job has this id (or it is not an id: j and six or more digits)"),

@@ -13,11 +13,10 @@ from __future__ import annotations
 import json
 import os
 import socket
-import sys
 import time
 
 from sched_names import Refusal
-from sched_state import (ID_RE, Lock, Log, card_log, claim_next, finish, hold_info, lock_held, queue_entries, read_records,
+from sched_state import (HAVE_FLOCK, ID_RE, Lock, Log, card_log, claim_next, finish, hold_info, lock_held, queue_entries, read_records,
                          recover, stop_info)
 
 VERSION = "1"
@@ -93,6 +92,8 @@ def serve(root: str, cfg: dict, runner, poll: float = 1.0, drain: bool = False, 
           skip_locks: bool = False, out=None) -> int:
     """The loop. One service per root (the root's lock); one job at a time per card (the card's lock)."""
     out = out or (lambda s: print(s, flush=True))
+    if skip_locks and HAVE_FLOCK:
+        raise Refusal("locks-required", "this platform has flock(2): run with the locks")
     svc = Lock(os.path.join(root, "lock"), skip=skip_locks)
     if not svc.acquire(tries=3, delay=0.1):
         raise Refusal("lock-held", f"another service holds {os.path.join(root, 'lock')}")
@@ -175,8 +176,9 @@ def gather_status(root: str, cfg: dict) -> dict:
         cid = c["id"]
         mine = [j for j in jobs["running"] if j["card"] == cid]
         h = hold_info(root, cid)
-        orphan = bool(mine) and lock_held(os.path.join(root, "cards", cid, "CARDLOCK")) is False
-        cards.append({"id": cid, "kind": c["kind"], "state": "orphaned" if orphan else "held" if h else "busy" if mine else "ready",
+        lh = lock_held(os.path.join(root, "cards", cid, "CARDLOCK"))     # True: held; False: free; None: cannot tell
+        # orphaned: a job sits in running/ and nobody holds the lock; locked: somebody holds it and no job of ours is there
+        cards.append({"id": cid, "kind": c["kind"], "state": "orphaned" if mine and lh is False else "held" if h else "busy" if mine else "locked" if lh else "ready",
                       "running": mine[0] if mine else None, "hold": h,
                       "queued": sum(1 for j in jobs["queued"] if j["card"] in (cid, "any"))})
     recent = [job_view(root, "jobs", j) for j in _ids(root, "jobs")[-20:]]
