@@ -216,13 +216,10 @@ getting one.
 log1p and log2 - now also run on the tile, as routines the language
 compiles (M1's build, 2026-10-13 to 2026-10-19; docs/TRANSCENDENTALS.md,
 "The six on the tile"). That qualifies "in the library, not in the tile"
-for those six and for no other function, and it is the paragraph above
-carried out rather than contradicted: a routine is a program of the
-tile's existing instructions, the tile still has no transcendental
-datapath, and the routines the roadmap plans next (sin, cos and tan
-first) are programs too. A routine decides its last bit in the lane or
-marks the lane for the definition to replay; the host operations are as
-described above, and `cft_exp` is still one.
+for those six and no other function, and it carries the paragraph above
+out rather than contradicting it: a routine is a program of the tile's
+existing instructions, and the tile still has no transcendental
+datapath. The host operations are as described, `cft_exp` included.
 
 ## The atlas-engine det_* library
 

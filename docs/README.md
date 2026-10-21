@@ -1,9 +1,9 @@
 # The documents, by what you open them for
 
-Forty-nine files, 85,091 lines. Flat in one directory they look like one
+Forty-nine files, 85,060 lines. Flat in one directory they look like one
 undifferentiated pile; they are not, and the split is close to even:
 
-- **28,073 lines you consult while working** — the three under *Start here*,
+- **28,042 lines you consult while working** — the three under *Start here*,
   the contract, and the reference you call into;
 - **7,674 lines of tool manual**, one per shipped program;
 - **3,140 lines of operations**, read when you are about to do something to
@@ -56,7 +56,7 @@ product, not the implementation.
 | document | lines | what it is for |
 |---|---|---|
 | [HOSTAPI.md](HOSTAPI.md) | 3,704 | The host API, function by function. The largest reference here and the one most often wanted. |
-| [TRANSCENDENTALS.md](TRANSCENDENTALS.md) | 1,836 | The thirty-nine correctly-rounded transcendentals, by ABI phase, with the evidence for each, and the six of them that also run on the tile. |
+| [TRANSCENDENTALS.md](TRANSCENDENTALS.md) | 1,805 | The thirty-nine correctly-rounded transcendentals, by ABI phase, with the evidence for each, and the six of them that also run on the tile. |
 | [REMOTE.md](REMOTE.md) | 1,433 | The remote backend: a tile behind a socket, the frame protocol and the WebSocket path. |
 | [PROGRAMS.md](PROGRAMS.md) | 644 | Programs as files: the assembler, the program library, the runner. |
 | [EMBEDDED.md](EMBEDDED.md) | 709 | libcft on microcontrollers, and the profiles the embedded gate runs. |

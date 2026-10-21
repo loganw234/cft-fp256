@@ -421,29 +421,26 @@ throughput and what bounds each number.
 short form on 2026-10-21. The card has reproduced the vectors since
 2026-09-08. Since this section was last written (2026-09-15) the project
 has added the language for dynamical systems and its compiler
-(`docs/LANGUAGE.md`); certificates, and an auditor that re-runs a
-certified run apart from the machine that made it
+(`docs/LANGUAGE.md`); certificates and an auditor
 (`docs/CERTIFICATES.md`); revision 8 of the tile, closed at 135 MHz and
-proven on the card in three images (`docs/VALIDATION.md`, 2026-10-06);
-the first six functions of the math library as tile routines (above);
-a 61-hour stress run of the card with no failure; and the sweep's
-coverage work, three outside test sources among it.
+proven on the card in three images; the first six functions of the math
+library as tile routines (above); a 61-hour stress run of the card with
+no failure; and the sweep's coverage work.
 
 What is planned:
 
 - **The rest of the math library**, each part a design study before it
-  is built. sin, cos and tan (M2, whose study is
-  `docs/studies/M2-trig.md`) are the next build, then atan, atan2, asin
-  and acos (M4), and the pow family (M3) last.
+  is built: sin, cos and tan (M2, `docs/studies/M2-trig.md`) are the
+  next build, then atan, atan2, asin and acos (M4), and the pow family
+  (M3) last.
 - **One gallery**, "with literature-checked answers and published
   certificates", as the roadmap puts it: step 7 of its work order, after
-  step 6 (`docs/ROADMAP.md`, "Step 6: the math library, revision 8 and
-  programs past one tile"). It is not `docs/FIGURES.md`, which is the
-  gallery of the project's figures.
+  step 6. It is not `docs/FIGURES.md`, the gallery of the project's
+  figures.
 - **At the next RTL revision**, RISC-V's rule for a fused multiply-add
   of zero times infinity with a quiet NaN addend: invalid raised, where
-  the contract today lets the NaN operand win and raises nothing
-  (`docs/DETERMINISM.md`, "NaN").
+  the contract today lets the NaN operand win (`docs/DETERMINISM.md`,
+  "NaN").
 - **The open tier**: the same tile on an open Kintex-7 board, through
   openXC7. Vivado routed one tile (the board configuration, out of
   context) into 53% of a 325T at 100 MHz on 2026-09-23; openXC7's own
