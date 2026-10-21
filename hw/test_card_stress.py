@@ -4297,7 +4297,9 @@ def records_sink_checks(env: Env, src: str = HERE) -> list:
             except Exception as e:
                 crashed_b = repr(e)
             named_b = [x for n, x in ev4b if n == "record_refused"]
-            rep4b = SR.verify_records(SR.parse_file(read_bytes(p4b)), None, require_signed=True)
+            # a sink that wrote nothing (a refusal that escaped it, a plant) is a red check, not a crash on a file that is not there
+            rep4b = (SR.verify_records(SR.parse_file(read_bytes(p4b)), None, require_signed=True) if os.path.exists(p4b)
+                     else {"clean": -1, "kinds": {"card": {"records": -1, "cases": -1}, "host": {"records": -1, "cases": -1}}})
             c("records sink: the host-pool slices of a run that recorded no host/ tree are each a record_refused event saying so (a refusal named "
               "metrics), the sink does not crash, and the card's slices are written: the file's host total is 0 and the card's is the driver's",
               crashed_b is None and len(named_b) == len(host) and all(x.startswith("metrics:") and "no host/ tree" in x for x in named_b)
