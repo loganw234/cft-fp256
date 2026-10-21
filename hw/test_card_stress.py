@@ -32,6 +32,11 @@ Three kinds of group, then the plants (the groups, by name, are in hw/test-card-
             directory) and a real, NOT dry run of the driver over test doubles (POSIX); notes: --quick --sweep-items after an empty wave,
             figure_extracts' cpu filter (needs CARD_STRESS_METRICS), and standin_alive (its own group, `standin`, which its plants run).
 
+  resume   (parcel DR4, 2026-10-21) --resume counts coverage per tree class: the counting on synthetic files (each part of the report's key
+            alone, an old run's trees derived from its commit, an unknown class never counted, the events), the planner held to the report's
+            figures, the driver itself resuming a file from another host/ tree and from another rtl/ tree, and - when CARD_STRESS_RESUME_RUN
+            names the lead's two-night run directory - the planner over that real file.
+
 POSIX-only checks (the `nice` and `timeout` wrappers, a process that ignores SIGTERM) are
 SKIPped by name on Windows and run under WSL or on the box. Everything runs niced by the
 caller's choice; nothing here starts anything heavy. Prints one line a group and a last line
@@ -4542,6 +4547,391 @@ def fx_cpu_filter_checks(env: Env, src: str = HERE) -> list:
     return out
 
 
+# ---------------------------------------------------------------------------------------
+# parcel DR4 (2026-10-21): --resume counts coverage per tree class
+# ---------------------------------------------------------------------------------------
+
+# The tree a resuming run starts from in the in-process checks (fake hashes), and the file's runs on other trees, one part of the key
+# different at a time. TREE_OLD (above) is a run from before 2026-10-20: a commit, a clean checkout and no tree.
+T_NOW = {"commit": "e" * 40, "dirty": False, "dirty_files": 0, "rtl": "1" * 40, "rtl_dirty": False, "host_src": "2" * 40,
+         "host_src_dirty": False, "cc": "gcc (fixture) 11.4.0"}
+RS_TILE, RS_HOST = "sqrt32-rne", "nextup32"
+M3 = 3 * M20
+
+
+def tree_with(**kw) -> dict:
+    t = dict(T_NOW)
+    t.update(kw)
+    return t
+
+
+def sl_tile(a: int, b: int, item: str = RS_TILE, op: str = "sqrt32") -> tuple:
+    return ("quad", item, op, "tile", a, b)
+
+
+def sl_host(a: int, b: int) -> tuple:
+    return ("cpu", RS_HOST, "nextup32", "host", a, b)
+
+
+def resume_case(src: str, parts: list, now: dict, rev=None, events: bool = False) -> dict:
+    """What a Driver that is never run plans after RESUMING a synthetic file (tree_fixture's parts) from the tree `now`: the first gap of the
+    tile and of the host item (None: covered), the tally, the counts it keeps (served, sums, seeds, rates) and, with `events`, the events
+    tree_events makes. `rev` stands in for git, a dict (commit, rel) -> tree hash, so the derivation under test is the test's own."""
+    with driver_from(src) as (mod, d, L2):
+        evs: list = []
+        d.event = lambda name, detail, **kw: evs.append((name, detail, kw))
+        os.makedirs(d.out, exist_ok=True)
+        tree_fixture(d.metrics, parts)
+        d.load_state()
+        d.tree = dict(now)
+        if rev is not None:
+            d.git_tree = lambda commit, rel: rev.get((commit, rel))
+        d.count_by_class()
+        if events:
+            d.tree_events()
+
+        def gap(name, reach):
+            pick = d.pick_item({}, set(), name, reach)
+            return None if pick is None else pick[1]
+        return {"tile": gap(RS_TILE, L2.TILE), "host": gap(RS_HOST, L2.HOST), "tally": d.class_tally, "not_counted": d.not_counted,
+                "served": dict(d.served), "sums": {k: list(v) for k, v in d.sums.items()}, "seed_n": dict(d.seed_n),
+                "rate": dict(d.rate), "events": evs, "iv": {k: list(v) for k, v in d.intervals.items()}}
+
+
+def resume_unit_checks(src: str = HERE) -> list:
+    """The resume's counting, in-process, on synthetic files whose truth is written here: a slice counts when the class of the run it ran
+    under - the report's key: the rtl/ tree for a tile item, the host/ tree and the compiler for a host item - is KNOWN and is this run's.
+    One part of the key differs at a time; an old run's trees are derived from its commit (here by a stand-in for git); an unknown class
+    is never counted; and the three events say what changed and what was left out."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    E = L.EXH
+    A = tree_with(host_src="4" * 40, commit="f" * 40)                 # another host/ tree, the same rtl/ tree
+    B = tree_with(rtl="3" * 40, commit="b" * 40)                      # another rtl/ tree, the same host/ tree and compiler
+    CC2 = tree_with(cc="gcc (fixture) 12.2.0", commit="f" * 40)       # the same trees, another compiler
+    MOD = tree_with(rtl_dirty=True, host_src_dirty=True)
+    OLD = {"commit": "c" * 40, "dirty": False, "dirty_files": 0}      # before 2026-10-20: a commit, a clean checkout, no tree
+    rev = {("c" * 40, "rtl"): T_NOW["rtl"], ("c" * 40, "host"): T_NOW["host_src"]}    # git's answer for that commit: this run's trees
+    both = [sl_tile(0, M3), sl_host(0, M3)]
+    try:
+        r = resume_case(src, [(T_NOW, both)], T_NOW)
+        c("resume: a resume on the trees of the file counts every slice, as it always did: both items go on from the file's coverage and "
+          "nothing is left out", r["tile"] == (M3, E) and r["host"] == (M3, E) and r["not_counted"] == (0, 0)
+          and r["tally"]["counted"] == {"tile": 1, "host": 1}, str((r["tile"], r["host"], r["not_counted"])))
+        r = resume_case(src, [(A, both)], T_NOW)
+        c("resume: a host slice of another host/ tree is not counted: the host item starts again at 0, while the tile item, on the same "
+          "rtl/ tree, goes on", r["host"] == (0, E) and r["tile"] == (M3, E) and r["not_counted"] == (1, 0), str((r["tile"], r["host"], r["not_counted"])))
+        c("resume: the rotation counts are this class's: an item whose slices are all of another class has served none here, one of this "
+          "class has served its slice", RS_HOST not in r["served"] and r["served"].get(RS_TILE) == 1, str(r["served"]))
+        r = resume_case(src, [(CC2, [sl_host(0, M3)])], T_NOW)
+        c("resume: the same host/ tree under another compiler is another class: the host slice is not counted",
+          r["host"] == (0, E) and r["not_counted"] == (1, 0), str((r["host"], r["not_counted"])))
+        r = resume_case(src, [(B, both)], T_NOW)
+        c("resume: a tile slice of another rtl/ tree is not counted: the tile item starts again at 0, while the host item, on the same "
+          "host/ tree and compiler, goes on", r["tile"] == (0, E) and r["host"] == (M3, E) and r["not_counted"] == (1, 0),
+          str((r["tile"], r["host"], r["not_counted"])))
+        r = resume_case(src, [(B, [sl_tile(0, M3)]), (T_NOW, [sl_tile(M3, 2 * M3)])], T_NOW)
+        c("resume: each slice is counted by its own run's class: with a run on another rtl/ tree before this tree's, the first gap is "
+          "that other run's range (0, 3 x 2^20) and not the end of the file's coverage", r["tile"] == (0, M3) and r["not_counted"] == (1, 0)
+          and r["served"].get(RS_TILE) == 1, str((r["tile"], r["not_counted"], r["served"])))
+        rc, rm, rs = (resume_case(src, [(T_NOW, both)], MOD), resume_case(src, [(MOD, both)], T_NOW), resume_case(src, [(MOD, both)], MOD))
+        c("resume: a tree with uncommitted changes is a class of its own, as in the report: a clean run's slices are not counted by a "
+          "modified one nor the reverse, and a modified run counts a modified one",
+          rc["tile"] == (0, E) and rc["host"] == (0, E) and rm["tile"] == (0, E) and rm["host"] == (0, E)
+          and rs["tile"] == (M3, E) and rs["host"] == (M3, E), str((rc["tile"], rm["tile"], rs["tile"])))
+        # the old run: no tree recorded, its commit's trees from git
+        r = resume_case(src, [(OLD, both)], T_NOW, rev)
+        c("resume: a run before 2026-10-20 recorded no tree: its tile slice is counted by the rtl/ tree git derives for its commit (this run's), "
+          "its host slice is not, for no compiler was recorded and the class is unknown", r["tile"] == (M3, E) and r["host"] == (0, E)
+          and r["not_counted"] == (0, 1) and [(u["reach"], u["why"], u["n"]) for u in r["tally"]["unknown"]] == [("host", "compiler not recorded", 1)],
+          str((r["tile"], r["host"], r["tally"]["unknown"])))
+        r2 = resume_case(src, [(OLD, both)], T_NOW, {**rev, ("c" * 40, "rtl"): "7" * 40})
+        c("resume: the derived tree is the commit's: an old run whose commit has ANOTHER rtl/ tree is of another class, not counted",
+          r2["tile"] == (0, E) and r2["not_counted"] == (1, 1), str((r2["tile"], r2["not_counted"])))
+        r = resume_case(src, [({"commit": "d" * 40, "dirty": False, "dirty_files": 0}, both)], T_NOW, rev, events=True)
+        ev = [e for e in r["events"] if e[0] == "slices_not_counted"]
+        c("resume: an old run whose commit this checkout does not hold is of an unknown class: none of its slices is counted (both items "
+          "start at 0) and ONE event says so, naming the commit and the reason", r["tile"] == (0, E) and r["host"] == (0, E)
+          and r["not_counted"] == (0, 2) and len(ev) == 1 and "d" * 12 in ev[0][1] and "not in this checkout" in ev[0][1]
+          and ev[0][2].get("unknown_class") == 2, str((r["tile"], r["host"], r["not_counted"], [e[1][:200] for e in ev])))
+        NOCC = tree_with(cc=None)
+        r = resume_case(src, [(NOCC, both)], NOCC)
+        c("resume: a class that lacks a part is never counted, not even by a run that lacks the same part: with no compiler recorded by "
+          "either, the host slice (the keys are equal, 'compiler not recorded') is not counted, and the tile slice, whose key is whole, is",
+          r["host"] == (0, E) and r["tile"] == (M3, E) and r["not_counted"] == (0, 1), str((r["tile"], r["host"], r["not_counted"])))
+        r = resume_case(src, [({}, both)], {})
+        c("resume: a run that recorded nothing, resumed by a run that can read nothing: the keys are equal ('unrecorded:?') and no slice is "
+          "counted", r["tile"] == (0, E) and r["host"] == (0, E) and r["not_counted"] == (0, 2), str((r["tile"], r["host"], r["not_counted"])))
+        r = resume_case(src, [({"commit": "c" * 40, "dirty": True, "dirty_files": 2}, [sl_tile(0, M3)])], T_NOW, rev)
+        c("resume: an old run recorded dirty is not derived: its commit's tree is not what ran, so its slices are of an unknown class and "
+          "not counted, by name", r["tile"] == (0, E) and r["not_counted"] == (0, 1) and "not recorded clean" in r["tally"]["unknown"][0]["why"],
+          str((r["tile"], r["tally"]["unknown"])))
+        REC = tree_with(commit="c" * 40)                                   # recorded the rtl/ tree this run has
+        good = resume_case(src, [(REC, [sl_tile(0, M3)])], T_NOW, rev)
+        bad = resume_case(src, [(REC, [sl_tile(0, M3)])], T_NOW, {**rev, ("c" * 40, "rtl"): "5" * 40})
+        c("resume: where a run recorded its trees and git is asked about its commit the two must agree: equal, the slice is counted; a "
+          "recorded rtl/ tree that is not git's for the commit is of an unknown class, by name, and not counted",
+          good["tile"] == (M3, E) and good["not_counted"] == (0, 0) and bad["tile"] == (0, E) and bad["not_counted"] == (0, 1)
+          and "git does not give" in bad["tally"]["unknown"][0]["why"], str((good["tile"], bad["tile"], bad["tally"]["unknown"])))
+        # what stays the whole file's, and what is this class's alone
+        W = "rint64-class-rne"                                              # an item with whole-space figures: its sums are held to them
+        r = resume_case(src, [(B, [sl_tile(0, 35840, W, "rint64-class")]), (T_NOW, [sl_tile(0, 10000, W, "rint64-class")])], T_NOW)
+        c("resume: the cases an item's whole-space check adds up are this class's alone: another tree's covering slice is not in them",
+          r["sums"].get(W) == [10000, 0] and r["not_counted"] == (1, 0), str(r["sums"].get(W)))
+        r = resume_case(src, [(B, [("quad", "div32-rne", "div32", "tile", 5, 1000)])], T_NOW)
+        c("resume: the seeds and the rates stay the whole file's: a random item's next slice number is above a slice of another tree's and "
+          "its rate is known, while its rotation count in this class is none", r["seed_n"].get("div32-rne") == 6 and "div32@quad" in r["rate"]
+          and "div32-rne" not in r["served"] and r["not_counted"] == (1, 0), str((r["seed_n"], list(r["rate"]), r["served"])))
+        # the events
+        ra = resume_case(src, [(B, [sl_tile(0, M20)])], T_NOW, events=True)
+        rh = resume_case(src, [(A, [sl_host(0, M20)])], T_NOW, events=True)
+        rk = resume_case(src, [(CC2, [sl_host(0, M20)])], T_NOW, events=True)
+        rn = resume_case(src, [(T_NOW, [sl_tile(0, M20), sl_host(0, M20)])], T_NOW, events=True)
+        ro = resume_case(src, [(OLD, [sl_tile(0, M20)])], T_NOW, {**rev, ("c" * 40, "rtl"): "7" * 40}, events=True)
+
+        def evs(r, name):
+            return [e for e in r["events"] if e[0] == name]
+        t1 = evs(ra, "tree_changed")
+        c("resume: tree_changed names an rtl/ tree that changed, both trees (before, now), and only that",
+          len(t1) == 1 and t1[0][2].get("before") == "3" * 40 and t1[0][2].get("now") == "1" * 40 and not evs(ra, "host_tree_changed"),
+          str([(e[0], e[2]) for e in ra["events"]]))
+        t2 = evs(rh, "host_tree_changed")
+        c("resume: host_tree_changed names a host/ tree that changed, both trees (before, now) and the compilers, and says nothing of rtl/",
+          len(t2) == 1 and t2[0][2].get("before") == "4" * 40 and t2[0][2].get("now") == "2" * 40 and t2[0][2].get("cc_now") == T_NOW["cc"]
+          and not evs(rh, "tree_changed"), str([(e[0], e[2]) for e in rh["events"]]))
+        t3 = evs(rk, "host_tree_changed")
+        c("resume: host_tree_changed also says the compiler changed under one host/ tree (the host key is the tree AND the compiler)",
+          len(t3) == 1 and t3[0][2].get("before") == t3[0][2].get("now") == "2" * 40 and t3[0][2].get("cc_before") == "gcc (fixture) 12.2.0"
+          and t3[0][2].get("cc_now") == T_NOW["cc"], str([(e[0], e[2]) for e in rk["events"]]))
+        c("resume: a resume on the very trees of the file records none of the three events (tree_changed, host_tree_changed, slices_not_counted)",
+          not rn["events"], str([(e[0], e[2]) for e in rn["events"]]))
+        t4 = evs(ro, "tree_changed")
+        c("resume: tree_changed over an old run says that its tree is derived from its commit, and names the derived tree",
+          len(t4) == 1 and t4[0][2].get("before") == "7" * 40 and "derived from its commit" in t4[0][1], str([(e[0], e[1][:160]) for e in ro["events"]]))
+    except Exception as e:                         # a driver that cannot be driven this way is a red check, not a crash
+        c("resume: the driver could be driven in-process", False, repr(e))
+    return out
+
+
+def resume_report_checks(env: Env, src: str = HERE) -> list:
+    """The planner and the report cannot drift: over a file of five runs on four trees, the coverage the driver keeps of an item equals
+    the one the report's section by tree gives the class of the resuming run's tree - and both equal the count made here by hand."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    A = tree_with(host_src="4" * 40, commit="f" * 40)
+    B = tree_with(rtl="3" * 40, commit="b" * 40)
+    CC2 = tree_with(cc="gcc (fixture) 12.2.0", commit="d" * 40)
+    parts = [(T_NOW, [sl_tile(0, M20), sl_host(0, M20)]), (A, [sl_tile(M20, 2 * M20), sl_host(M20, 2 * M20)]),
+             (B, [sl_tile(2 * M20, 3 * M20), sl_host(2 * M20, 3 * M20)]), (CC2, [sl_host(3 * M20, 4 * M20)]),
+             (T_NOW, [sl_tile(4 * M20, 5 * M20), sl_host(4 * M20, 5 * M20)])]
+    # by hand: the tile class (rtl 1111) holds runs 1, 2 and 5: [0, M20), [M20, 2 M20), [4 M20, 5 M20) = 3 M20; the host class (host 2222 with
+    # the compiler 11.4.0) holds runs 1, 3 and 5: [0, M20), [2 M20, 3 M20), [4 M20, 5 M20) = 3 M20; run 4's host slice is another compiler
+    d1 = os.path.join(env.tmp, "resume-rep")
+    os.makedirs(d1, exist_ok=True)
+    tree_fixture(os.path.join(d1, "metrics.jsonl"), parts)
+    jp = os.path.join(env.tmp, "resume-rep.json")
+    p = subprocess.run([sys.executable, "-B", "-I", os.path.join(src, "card_stress_report.py"), d1, "--no-write", "--json", jp],
+                       capture_output=True, text=True, timeout=120)
+    try:
+        classes = json.load(open(jp, encoding="utf-8"))["sweep"]["trees"]["classes"]
+    except (OSError, ValueError, KeyError):
+        classes = []
+
+    def reported(kind, key, item):
+        cl = next((x for x in classes if x["kind"] == kind and x["key"] == key), {})
+        return next((e["covered"] for e in cl.get("exhaustive", []) if e["item"] == item), None)
+
+    try:
+        r = resume_case(src, parts, T_NOW)
+        with lib_from(src) as L2:
+            mine = {n: L2.covered(r["iv"].get(n, [])) for n in (RS_TILE, RS_HOST)}
+        rep = {RS_TILE: reported("tile", T_NOW["rtl"], RS_TILE), RS_HOST: reported("host", T_NOW["host_src"] + "|" + T_NOW["cc"], RS_HOST)}
+        c("resume: the planner counts what the report puts in this run's class: per item, the coverage the driver keeps is the report's "
+          "for the class of the same tree, and both are the 3 x 2^20 counted by hand", p.returncode == 0 and mine == rep == {RS_TILE: M3, RS_HOST: M3},
+          f"rc {p.returncode}; planner {mine}; report {rep}")
+    except Exception as e:
+        c("resume: the planner counts what the report puts in this run's class", False, repr(e))
+    return out
+
+
+def cur_tree(cc: str) -> "dict | None":
+    """The `tree` the driver records for ROOT, read here by this test's own commands (a modified directory is a class of its own, so the
+    test reads that the way the driver does) with the compiler line `cc`; None where git cannot read this tree."""
+    rtl, host, head = git_out("rev-parse", "HEAD:rtl"), git_out("rev-parse", "HEAD:host"), git_out("rev-parse", "HEAD")
+    if not (rtl and host and head):
+        return None
+    return {"commit": head, "dirty": False, "dirty_files": 0, "rtl": rtl, "host_src": host, "cc": cc,
+            "rtl_dirty": bool(git_out("status", "--porcelain", "--untracked-files=all", "--", "rtl")),
+            "host_src_dirty": bool(git_out("status", "--porcelain", "--untracked-files=all", "--", "host"))}
+
+
+def resume_run(env: Env, name: str, parts: list, args: list, src: str, seconds: int = 14) -> Run:
+    """The driver, dry, RESUMING a synthetic metrics.jsonl (tree_fixture's parts) with the compiler it is told (CC: this interpreter, whose
+    `--version` line is the same every time), against the stand-in; the run ends at its deadline."""
+    env.n += 1
+    out = os.path.join(env.tmp, f"{env.n:02d}-{name}")
+    state = out + "-state"
+    os.makedirs(out)
+    os.makedirs(state)
+    tree_fixture(os.path.join(out, "metrics.jsonl"), parts)
+    cmd = [sys.executable, "-B", "-I", os.path.join(src, "card_stress.py"), "--root", ROOT, "--out", out, "--resume", "--dry-run",
+           "--telemetry-seconds", "0", "--disk-extra", "", "--retry-pause", "1", "--kill-after", "2", "--guard-poll", "1",
+           "--until", until(seconds)] + args
+    for nm, pth in env.imgs.items():
+        cmd += ["--image", f"{nm}={pth}"]
+    e = dict(os.environ)
+    e.update(POOL_RATE)
+    e["CFT_STANDIN_STATE"] = state
+    e["CC"] = sys.executable
+    e.pop("CFT_STANDIN_SCENARIO", None)
+    p = subprocess.run(cmd, capture_output=True, text=True, env=e, cwd=ROOT, timeout=150)
+    R = Run(out)
+    R.rc, R.text, R.state = p.returncode, p.stdout, state
+    return R
+
+
+def scn_resume(env: Env, src: str = HERE) -> list:
+    """The driver itself, dry, resuming a file whose earlier run stood on another tree, three times: another host/ tree (the host item must
+    start again at 0 on the pool while the tile item goes on from the file's coverage), another rtl/ tree (the reverse), and the same
+    trees (both go on, no event). The first slice each reach plans after the resume, the three events and status.txt are read."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    pc = subprocess.run([sys.executable, "--version"], capture_output=True, text=True, timeout=30)
+    cc = (pc.stdout or pc.stderr).strip().splitlines()[0].strip() if pc.returncode == 0 else None
+    now = cur_tree(cc) if cc else None
+    if now is None:
+        skip("resume run: the driver resuming a file from another tree", "git cannot read this tree on this host, so the driver records none "
+             "and there is nothing to key the earlier run against")
+        return []
+    args = POOL_BASE + ["--sweep-items", f"{RS_TILE},{RS_HOST}", "--host-workers", "1", "--sweep-slice-seconds", "4"]
+    both = [sl_tile(0, M3), sl_host(0, M3)]
+
+    def first(R, image):
+        starts = [i for i, x in enumerate(R.recs) if x.get("type") == "run_start"]
+        after = [x for x in R.recs[starts[-1]:] if x.get("type") == "leg" and x["kind"] == "sweep" and x["image"] == image
+                 and x["status"] == "pass"] if starts else []
+        return after[0]["sweep"] if after else None
+
+    def status(R):
+        try:
+            with open(os.path.join(R.out, "status.txt"), "r", encoding="utf-8") as fh:
+                return fh.read()
+        except OSError:
+            return ""
+
+    def evs(R, name):
+        return [x for x in R.events() if x["event"] == name]
+
+    other_host = dict(now, host_src="4" * 40, commit="f" * 40)
+    other_rtl = dict(now, rtl="3" * 40, commit="b" * 40)
+    R = resume_run(env, "resume-host", [(other_host, both)], args, src)
+    q, h = first(R, "quad"), first(R, "cpu")
+    ev = evs(R, "host_tree_changed")
+    c("resume run (host/ tree changed): the host item starts again at 0 on the pool, the tile item goes on from the file's coverage "
+      "(3 x 2^20)", R.rc == 0 and h is not None and h["lo"] == 0 and q is not None and q["lo"] == M3,
+      f"rc {R.rc}; quad first {q and q['lo']}, cpu first {h and h['lo']}; {R.text[-200:]}")
+    c("resume run (host/ tree changed): host_tree_changed names both host/ trees, the other events do not appear for rtl/, and "
+      "slices_not_counted counts the one host slice left out",
+      len(ev) == 1 and ev[0].get("before") == "4" * 40 and ev[0].get("now") == now["host_src"] and not evs(R, "tree_changed")
+      and len(evs(R, "slices_not_counted")) == 1 and evs(R, "slices_not_counted")[0].get("other_class") == 1,
+      str([(x["event"], x.get("before"), x.get("now"), x.get("other_class")) for x in R.events()][:6]))
+    c("resume run (host/ tree changed): status.txt says what the run left out of its figures",
+      "resume     this run counts its own tree class: 1 finished sweep slice(s) of other classes and 0 of an unknown class" in status(R),
+      status(R)[-300:])
+    R = resume_run(env, "resume-rtl", [(other_rtl, both)], args, src)
+    q, h = first(R, "quad"), first(R, "cpu")
+    ev = evs(R, "tree_changed")
+    c("resume run (rtl/ tree changed): the tile item starts again at 0 on the quad, the host item goes on from the file's coverage "
+      "(3 x 2^20)", R.rc == 0 and q is not None and q["lo"] == 0 and h is not None and h["lo"] == M3,
+      f"rc {R.rc}; quad first {q and q['lo']}, cpu first {h and h['lo']}; {R.text[-200:]}")
+    c("resume run (rtl/ tree changed): tree_changed names both rtl/ trees and host_tree_changed does not appear",
+      len(ev) == 1 and ev[0].get("before") == "3" * 40 and ev[0].get("now") == now["rtl"] and not evs(R, "host_tree_changed"),
+      str([(x["event"], x.get("before"), x.get("now")) for x in R.events()][:6]))
+    R = resume_run(env, "resume-same", [(now, both)], args, src)
+    q, h = first(R, "quad"), first(R, "cpu")
+    c("resume run (the same trees): both items go on from the file's coverage, as the driver always did",
+      R.rc == 0 and q is not None and q["lo"] == M3 and h is not None and h["lo"] == M3, f"rc {R.rc}; quad first {q and q['lo']}, cpu first {h and h['lo']}")
+    c("resume run (the same trees): no tree_changed, host_tree_changed or slices_not_counted, and no `resume` line in status.txt",
+      not any(evs(R, n) for n in ("tree_changed", "host_tree_changed", "slices_not_counted")) and "\nresume " not in status(R),
+      str([x["event"] for x in R.events()][:8]))
+    return out
+
+
+def resume_real_checks(env: Env, src: str = HERE) -> list:
+    """The planner over a copy of the REAL two-night file (the lead's resume of 2026-10-19 and 2026-10-20, from the box): a resume at the second
+    run's commit, 0b7c959. CARD_STRESS_RESUME_RUN names the run's directory (the one holding metrics.jsonl); without it this is skipped by name.
+    The figures are READ from that file and from docs/studies/sched-a/coverage_state.out (the first gaps of the four wide items)."""
+    run = os.environ.get("CARD_STRESS_RESUME_RUN")
+    if not run or not os.path.isfile(os.path.join(run, "metrics.jsonl")):
+        skip("resume real: the planner over the real two-night file", "CARD_STRESS_RESUME_RUN does not name a run directory holding a "
+             "metrics.jsonl (the lead's box/resume-1020/run)")
+        return []
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    first_run, second_run = "881bbcb676bbede9da20858325b7a966c56a25bf", "0b7c95996c12c01027f6c4905faa597ec8e22ef0"
+    if git_out("cat-file", "-e", first_run + "^{commit}") is None:
+        skip("resume real: the planner over the real two-night file", f"{first_run[:7]} is not in this checkout, so the first run's trees cannot be derived")
+        return []
+    nightly = ("conv32to64-all,cvtto32-all-rne,cvtto32-all-rtz,cvtto32-all-rdn,cvtto32-all-rup,cvtto32-all-rmm,cvtfrom32-all-rne,cvtfrom32-all-rtz,"
+               "cvtfrom32-all-rdn,cvtfrom32-all-rup,cvtfrom64-all-rne,cvtfrom64-all-rtz,cvtfrom64-all-rdn,cvtfrom64-all-rup,scaleb32-all-rne,"
+               "scaleb32-all-rtz,scaleb32-all-rdn,scaleb32-all-rup,scaleb32-wide-rne,scaleb32-wide-rtz,scaleb32-wide-rdn,scaleb32-wide-rup").split(",")
+    try:
+        with driver_from(src) as (mod, d, L2):
+            os.makedirs(d.out, exist_ok=True)
+            shutil.copyfile(os.path.join(run, "metrics.jsonl"), d.metrics)
+            d.load_state()
+            starts = [r for r in d.file_recs if r.get("type") == "run_start"]
+            reach = {i.name: i.reach for i in d.items}
+
+            def plan():
+                """item -> where the driver's own pick_item starts it (None: covered)"""
+                picks = {n: d.pick_item({}, set(), n, reach[n]) for n in nightly}
+                return {n: (None if p is None else p[1][0]) for n, p in picks.items()}
+            before = plan()                                   # the whole file's coverage: what the planner counted before this parcel
+            d.tree = dict(starts[1]["tree"])                  # a resume at the second run's commit: its trees and its compiler
+            d.count_by_class()
+            after = plan()
+            t = d.class_tally
+            host = [n for n in nightly if reach[n] == L2.HOST]
+            wide = {"scaleb32-wide-rne": 821035008, "scaleb32-wide-rtz": 843055104, "scaleb32-wide-rdn": 838860800, "scaleb32-wide-rup": 846200832}
+            c("resume real: the file is the lead's: two run_starts (the first with no tree, the second with its trees), 552 finished sweep slices",
+              len(starts) == 2 and "rtl" not in starts[0]["tree"] and "rtl" in starts[1]["tree"] and t["slices"] == 552, str((len(starts), t["slices"])))
+            c("resume real: the second run's recorded rtl/ and host/ trees are what git derives for its commit (equal where both exist)",
+              d.git_tree(second_run, "rtl") == starts[1]["tree"]["rtl"] and d.git_tree(second_run, "host") == starts[1]["tree"]["host_src"],
+              str((d.git_tree(second_run, "rtl"), starts[1]["tree"]["rtl"])))
+            c("resume real: before this parcel the resume planned no host item of the nightly's 22 (the whole file's coverage had all 14 covered) and the "
+              "four wide tile items at the first gaps coverage_state.py found",
+              all(before[n] is None for n in host) and all(before[n] == g for n, g in wide.items()), str({n: before[n] for n in wide}))
+            c("resume real: a resume at 0b7c959 plans the same four wide items at the same first gaps, the four scaleb32-all items stay covered (the first "
+              "run's rtl/ tree derived from its commit is the second's), and all 14 host items start at 0 again",
+              all(after[n] == g for n, g in wide.items()) and all(after[n] is None for n in nightly if n.startswith("scaleb32-all"))
+              and all(after[n] == 0 for n in host) and len(host) == 14, str({n: after[n] for n in list(wide) + host[:2]}))
+            c("resume real: the tally - 320 tile slices counted (both runs), the first run's 232 host slices not counted (no compiler recorded), none of "
+              "another class", t["counted"] == {"tile": 320, "host": 0} and t["other"] == {"tile": 0, "host": 0}
+              and [(u["reach"], u["n"], u["why"]) for u in t["unknown"]] == [("host", 232, "compiler not recorded")], str(t["unknown"]))
+    except Exception as e:
+        c("resume real: the planner could be driven over the real file", False, repr(e))
+    return out
+
+
+def group_resume(env: Env, src: str = HERE) -> list:
+    """Parcel DR4, --resume counts coverage per tree class: the counting on synthetic files (each part of the key, an old run's derived trees,
+    an unknown class, the events), the planner against the report, the driver resuming from another tree, and the real two-night file."""
+    return resume_unit_checks(src) + resume_report_checks(env, src) + scn_resume(env, src) + resume_real_checks(env, src)
+
+
 def group_items(env: Env, src: str = HERE) -> list:
     """Parcel DR3, the coverage wave's items in the driver: the catalog and its real logs, the plans, the served items and their refusals."""
     return index_item_checks(src) + index_plan_checks(src) + scn_index_items(env, src)
@@ -4650,7 +5040,8 @@ def plants(env: Env) -> None:
     if not pick:
         ctl = make_plant_copy(env, "control", [])
         for nm, fn in (("normal", scn_normal), ("fail", scn_fail_and_parse), ("nodevice", scn_nodevice),
-                       ("parsers", plant_parsers)):
+                       ("parsers", plant_parsers),
+                       ("resume", lambda env, src: resume_unit_checks(src) + resume_report_checks(env, src))):
             res = fn(env, ctl)
             bad = [n for n, ok, _ in res if not ok]
             check(f"plants: the CONTROL (an unmodified copy of the code) passes the {nm} checks", not bad, "; ".join(bad)[:300])
@@ -4924,13 +5315,13 @@ def plants(env: Env) -> None:
         ("the driver does not record the tree it runs from",
          [("card_stress.py", "        self.tree.update(self.tree_facts())\n", "")],
          tree_record_checks, ["trees: run_start records the tree the driver runs from"]),
-        ("the report counts every tile item under one tree",
-         [("card_stress_report.py", "        return (h + (\"+modified\" if mod else \"\"),\n                f\"RTL tree {h[:12]}\"",
-           "        return (\"one\",\n                f\"RTL tree {h[:12]}\"")],
+        ("the shared key counts every tile item under one tree (the report's and the resume's: card_stress_lib.tree_key)",
+         [("card_stress_lib.py", "        return h + (\"+modified\" if tr.get(\"rtl_dirty\") is True else \"\"), None\n",
+           "        return \"one\", None\n")],
          scn_trees, ["trees: a tile item's coverage is counted per RTL tree"]),
-        ("the report counts a host item's coverage under the host/ tree alone, not the compiler",
-         [("card_stress_report.py", "        return (h + (\"+modified\" if mod else \"\") + \"|\" + (cc or \"compiler not recorded\"),",
-           "        return (h + (\"+modified\" if mod else \"\"),")],
+        ("the shared key counts a host item's coverage under the host/ tree alone, not the compiler",
+         [("card_stress_lib.py", "        return (h + (\"+modified\" if tr.get(\"host_src_dirty\") is True else \"\") + \"|\" + (cc or \"compiler not recorded\"),\n",
+           "        return (h + (\"+modified\" if tr.get(\"host_src_dirty\") is True else \"\"),\n")],
          scn_trees, ["trees: a host item's coverage is counted by what it is about"]),
         ("the report adds the images' coverage of a tree instead of taking its union",
          [("card_stress_report.py", "                cov = covered([iv for v in per.values() for iv in v[\"iv\"]])\n",
@@ -5100,6 +5491,53 @@ def plants(env: Env) -> None:
          [("figure_extracts.py", 'sweeps_run = [r for r in ran if r["kind"] == "sweep" and r["image"] != "cpu"]',
            'sweeps_run = [r for r in ran if r["kind"] == "sweep"]')],
          lambda env, src: fx_cpu_filter_checks(env, src), ["fx filter: the stress figure's power by activity"]),
+        # parcel DR4 (2026-10-21): --resume counts coverage per tree class
+        ("a host slice of another host/ tree is counted",
+         [("card_stress_lib.py", "        if unknown is None and key == want[0]:\n            counted.append(r)\n", "        if unknown is None and (key == want[0] or reach == HOST):\n            counted.append(r)\n")],
+         lambda env, src: resume_unit_checks(src), ["resume: a host slice of another host/ tree is not counted"]),
+        ("a tile slice of another rtl/ tree is counted",
+         [("card_stress_lib.py", "        if unknown is None and key == want[0]:\n            counted.append(r)\n", "        if unknown is None and (key == want[0] or reach == TILE):\n            counted.append(r)\n")],
+         lambda env, src: resume_unit_checks(src), ["resume: a tile slice of another rtl/ tree is not counted"]),
+        ("a slice of an unknown class is counted by a run whose own class is as unknown",
+         [("card_stress_lib.py", "        if unknown is None and key == want[0]:\n            counted.append(r)\n", "        if key == want[0]:\n            counted.append(r)\n")],
+         lambda env, src: resume_unit_checks(src),
+         ["resume: a class that lacks a part is never counted", "resume: a run that recorded nothing, resumed by a run that can read nothing"]),
+        ("a resume counts none of the slices of an earlier run, whatever its trees",
+         [("card_stress_lib.py", "        if unknown is None and key == want[0]:\n            counted.append(r)\n", "        if unknown is None and key == want[0] and False:\n            counted.append(r)\n")],
+         lambda env, src: resume_unit_checks(src), ["resume: a resume on the trees of the file counts every slice"]),
+        ("tree_changed is blind to host/: a host/ tree or a compiler that changed says nothing",
+         [("card_stress.py", "        if b_host and n_host and (b_host != n_host or (b_cc and n_cc and b_cc != n_cc)):\n",
+           "        if False and b_host and n_host and (b_host != n_host or (b_cc and n_cc and b_cc != n_cc)):\n")],
+         lambda env, src: resume_unit_checks(src),
+         ["resume: host_tree_changed names a host/ tree that changed", "resume: host_tree_changed also says the compiler changed"]),
+        ("an old run's trees are not derived from its commit",
+         [("card_stress_lib.py", "        got = rev(commit, rel) if (rev is not None and commit) else None\n", "        got = None\n")],
+         lambda env, src: resume_unit_checks(src), ["resume: a run before 2026-10-20 recorded no tree"]),
+        ("a tree is derived for an old run whose checkout was dirty",
+         [("card_stress_lib.py", "        elif tr.get(\"dirty\") is not False:\n", "        elif False:\n")],
+         lambda env, src: resume_unit_checks(src), ["resume: an old run recorded dirty is not derived"]),
+        ("a recorded tree that git does not give for its commit is trusted",
+         [("card_stress_lib.py", "            if got is not None and got != have:\n", "            if False:\n")],
+         lambda env, src: resume_unit_checks(src), ["resume: where a run recorded its trees and git is asked about its commit"]),
+        ("the planner keys a host class by the host/ tree alone, not by the report's key",
+         [("card_stress.py", "        self.class_now = L.run_classes(self.tree)\n",
+           "        self.class_now = {k: (v[0].split(\"|\")[0], v[1]) for k, v in L.run_classes(self.tree).items()}\n")],
+         lambda env, src: resume_report_checks(env, src), ["resume: the planner counts what the report puts in this run's class"]),
+        ("the driver never counts by class: --resume goes on from the whole file's coverage",
+         [("card_stress.py", "            self.count_by_class()             # the tree is known now: this run's coverage is its own class's (parcel DR4)\n", "")],
+         lambda env, src: scn_resume(env, src),
+         ["resume run (host/ tree changed): the host item starts again at 0", "resume run (rtl/ tree changed): the tile item starts again at 0"]),
+        ("the whole-space sums keep the cases of another class's slices",
+         [("card_stress.py", "        self.served = dict(served)\n        self.sums = {}\n        for r in counted:\n",
+           "        self.served = dict(served)\n        for r in counted:\n")],
+         lambda env, src: resume_unit_checks(src), ["resume: the cases an item's whole-space check adds up are this class's alone"]),
+        ("the rotation counts keep the slices of another class",
+         [("card_stress.py", "        self.served = dict(served)\n        self.sums = {}\n", "        self.sums = {}\n")],
+         lambda env, src: resume_unit_checks(src), ["resume: the rotation counts are this class's"]),
+        ("the seeds are counted by class too",
+         [("card_stress.py", "        self.served = dict(served)\n        self.sums = {}\n",
+           "        self.served = dict(served)\n        self.seed_n = {k: v + 1 for k, v in _seeds.items()}\n        self.sums = {}\n")],
+         lambda env, src: resume_unit_checks(src), ["resume: the seeds and the rates stay the whole file's"]),
     ]
     for name, edits, fn, expects in P:
         if pick and pick not in name:
@@ -5188,7 +5626,8 @@ def main() -> int:
                                       ("pool", group_pool, False), ("seeds", group_seeds, False),
                                       ("trees", scn_trees, False),
                                       ("items", group_items, False), ("chunk", group_chunk, False),
-                                      ("records", group_records, False), ("notes", group_notes, False)):
+                                      ("records", group_records, False), ("notes", group_notes, False),
+                                      ("resume", group_resume, False)):
             if not want(gname):
                 continue
             if posix_only and not POSIX:

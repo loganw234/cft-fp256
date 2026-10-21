@@ -57,7 +57,10 @@ The records (sweep.reach), status.txt and the report say which an item is. The e
 conversion and scaleB modes (the -all and -wide items) also say what they covered on their
 verdict line, and a slice's encodings are held to it exactly. A random slice's seed is
 (item index << 40) | (n << 1) | 1 and n continues across runs (--earlier-runs); the run records
-the RTL tree it runs from, and the report counts coverage per tree.
+the RTL tree it runs from, and the report counts coverage per tree. Since 2026-10-21 (parcel DR4) --resume counts it per tree too: a slice
+counts toward the run only if it ran in the run's own class (a tile item's by the rtl/ tree, a host item's by the host/ tree and the
+compiler, the report's key: card_stress_lib.tree_key), an old run's trees are derived from its commit where the checkout holds it, and a
+class that is not known is not counted (Driver.count_by_class; docs/CARDDAY.md, "The resume counts per tree class").
 Since 2026-10-21 (parcel DR3, the coverage wave) the catalog has 35 more items, the hard-case and class-level modes
 (hw/card_stress_lib.py: Item.space, HARD_SPACE, CLASS_SPACE): each exhaustive over a space of its own, held to cases + S = k x E
 and, once wholly covered, to its whole-space figures. --records writes the finished sweep slices as canonical records through
@@ -667,7 +670,15 @@ class Driver:
         self.whole_done: set = set()
         self.sink: Optional["RecordSink"] = None            # --records: the canonical records, written as the legs finish
         self.earlier_notes: List[Dict[str, Any]] = []
-        self.prev_rtl: Optional[str] = None                 # the RTL tree the last run_start of a resumed file recorded
+        # --resume counts coverage per tree class (parcel DR4; count_by_class): the records load_state read, held until the tree this run
+        # starts from is known; the `tree` of the file's last run_start; what a resume left out of its counts; git's answers for old runs
+        self.file_recs: Optional[List[Dict[str, Any]]] = None
+        self.file_slices = 0                                # the finished sweep slices the whole file holds (served, below, is this class's)
+        self.prev_tree: Optional[Dict[str, Any]] = None
+        self.class_now: Dict[str, Tuple[str, Optional[str]]] = {}
+        self.class_tally: Optional[Dict[str, Any]] = None
+        self.not_counted = (0, 0)                           # finished sweep slices of other classes, of an unknown class: kept, not counted
+        self.git_trees: Dict[Tuple[str, str], Optional[str]] = {}
         self.build_id: Optional[str] = None                 # the tools' build id, once the build step has asserted it
         self.quarantine: Dict[str, List[Tuple[int, int]]] = {}
         self.fail_slices: Dict[Tuple[str, int, int], int] = {}
@@ -1265,15 +1276,18 @@ class Driver:
         if bad:
             raise SystemExit(f"{self.metrics}: lines {bad[:10]} do not parse; will not resume over them")
         iv, served, _cases, seeds, dis = L.sweep_coverage(recs)
+        # the whole file's, until count_by_class (once the tree this run starts from is known) keeps of intervals, served and sums
+        # the slices of this run's own class; the seeds, the rates, the quarantine and the disagreements stay the whole file's
         self.intervals = {k: list(v) for k, v in iv.items()}
         self.served = dict(served)
+        self.file_recs, self.file_slices = recs, sum(served.values())
         self.seed_n = {k: v + 1 for k, v in seeds.items()}
         self.seed_states.update(L.seed_states(recs))
         self.disagreements = len(dis)
         for r in recs:
             t = r.get("type")
-            if t == "run_start" and isinstance(r.get("tree"), dict):
-                self.prev_rtl = r["tree"].get("rtl") or None
+            if t == "run_start":
+                self.prev_tree = r.get("tree") if isinstance(r.get("tree"), dict) else None
             if t == "cycle_start":
                 self.cycle = max(self.cycle, int(r["cycle"]))
                 self.visits[r["image"]] = max(self.visits.get(r["image"], 0), int(r.get("visit", 0)))
@@ -1303,6 +1317,89 @@ class Driver:
             if n >= self.a.quarantine_after:
                 self.quarantine.setdefault(item, []).append((lo, hi))
         self.seq = len(glob.glob(os.path.join(self.logs, "*"))) + 1000
+
+    def git_tree(self, commit: str, rel: str) -> Optional[str]:
+        """`git rev-parse COMMIT:REL` in this run's checkout, kept: the tree hash of a directory at a commit, or None where git cannot say
+        (the commit is not in this checkout, it is not a whole hash, or git is not there). What L.resolve_tree derives an old run's trees from."""
+        k = (commit, rel)
+        if k not in self.git_trees:
+            h = None
+            if L.GIT_HASH.fullmatch(commit or ""):
+                try:
+                    p = subprocess.run(["git", "-C", self.root, "rev-parse", f"{commit}:{rel}"], capture_output=True, text=True, timeout=30)
+                    h = p.stdout.strip() if p.returncode == 0 and L.GIT_HASH.fullmatch(p.stdout.strip()) else None
+                except (OSError, subprocess.TimeoutExpired):
+                    pass
+            self.git_trees[k] = h
+        return self.git_trees[k]
+
+    def count_by_class(self) -> None:
+        """--resume counts coverage per tree class (parcel DR4; docs/CARDDAY.md, "The resume counts per tree class"). load_state read the
+        whole file; this, run once the tree this run starts from is known (pre_check), keeps in `intervals`, `served` and `sums` only the
+        slices the report would put in this run's class - a tile item's by the rtl/ tree, a host item's by the host/ tree and the compiler,
+        by the one key (L.tree_key) - so a run on a tree the file has not covered plans that tree's items as uncovered. A slice of another
+        class stays in the file and the report and is not counted; so does one of an UNKNOWN class (an old run whose commit this checkout
+        does not hold, a compiler not recorded), which tree_events says once, by name. The seeds, rates, quarantine and disagreements stay
+        the whole file's. A run with no file, or whose file is all of this class, is left as load_state made it."""
+        recs, self.file_recs = self.file_recs, None
+        if not recs:
+            return
+        self.class_now = L.run_classes(self.tree)
+        counted, self.class_tally = L.count_slices(recs, self.class_now, self.git_tree)
+        self.not_counted = (sum(self.class_tally["other"].values()), sum(u["n"] for u in self.class_tally["unknown"]))
+        if not any(self.not_counted):
+            return
+        iv, served, _cases, _seeds, _dis = L.sweep_coverage(counted)
+        self.intervals = {k: list(v) for k, v in iv.items()}
+        self.served = dict(served)
+        self.sums = {}
+        for r in counted:
+            sw, counts = r["sweep"], r.get("counts") or {}
+            if "lo" in sw:
+                sm = self.sums.setdefault(sw["item"], [0, 0])
+                sm[0] += int(counts.get("cases", 0))
+                sm[1] += int(counts.get("skipped", 0))
+
+    def tree_events(self) -> None:
+        """After a resume's run_start: what changed since the file's last run_start - the rtl/ tree (`tree_changed`), the host/ tree or the
+        compiler (`host_tree_changed`) - and what this run left out of its counts (`slices_not_counted`). Information: nothing stops on it.
+        An old run's trees are the ones the counting derived from its commit."""
+        t = self.class_tally
+        if t is None:
+            return
+        prev, _why = L.resolve_tree(self.prev_tree, self.git_tree)
+        was = self.prev_tree or {}
+
+        def at(tr: Dict[str, Any], key: str) -> Optional[Tuple[str, bool]]:
+            return (tr[key], tr.get(key + "_dirty") is True) if tr.get(key) else None
+
+        def show(x: Tuple[str, bool]) -> str:
+            return x[0][:12] + (" (modified)" if x[1] else "")
+
+        b_rtl, n_rtl = at(prev, "rtl"), at(self.tree, "rtl")
+        if b_rtl and n_rtl and b_rtl != n_rtl:
+            self.event("tree_changed", f"resumed on RTL tree {show(n_rtl)}; the file's last run_start{'' if was.get('rtl') else ' (derived from its commit)'} "
+                       f"had {show(b_rtl)}. A tile item's coverage is counted by RTL tree, as the report counts it: this run counts what the "
+                       f"file holds of tree {n_rtl[0][:12]} alone and plans a tile item an earlier tree finished again ({t['other'][L.TILE]} "
+                       f"finished tile slice(s) of other trees stay in the file and the report, and are not counted)", before=b_rtl[0], now=n_rtl[0])
+        b_host, n_host = at(prev, "host_src"), at(self.tree, "host_src")
+        b_cc, n_cc = prev.get("cc") or None, self.tree.get("cc") or None
+        if b_host and n_host and (b_host != n_host or (b_cc and n_cc and b_cc != n_cc)):
+            skipped = t["other"][L.HOST] + sum(u["n"] for u in t["unknown"] if u["reach"] == L.HOST)
+            self.event("host_tree_changed", f"resumed on host/ tree {show(n_host)} with compiler {n_cc or 'not recorded'}; the file's last run_start"
+                       f"{'' if was.get('host_src') else ' (derived from its commit)'} had host/ tree {show(b_host)} with compiler "
+                       f"{b_cc or 'not recorded'}. A host item's coverage is counted by host/ tree and compiler, as the report counts it: this "
+                       f"run counts what the file holds of that class alone and plans a host item an earlier class finished again ({skipped} "
+                       f"finished host slice(s) of other classes, or of one whose compiler was not recorded, stay in the file and the report, "
+                       f"and are not counted)", before=b_host[0], now=n_host[0], cc_before=b_cc, cc_now=n_cc)
+        other, unknown = self.not_counted
+        if other or unknown:
+            named = "; ".join(f"{u['n']} {u['reach']} slice(s) of the run started {u['ts']} at commit {(u['commit'] or '?')[:12]}: {u['why']}"
+                              for u in t["unknown"][:6])
+            self.event("slices_not_counted", f"of the file's {t['slices']} finished sweep slice(s) this run counts {sum(t['counted'].values())} "
+                       f"(tile {t['counted'][L.TILE]}, host {t['counted'][L.HOST]}); {other} are of another tree class and {unknown} of an unknown "
+                       f"class{': ' + named if named else ''}. They stay in metrics.jsonl and in the report and are not counted: a class is "
+                       f"never guessed", counted=sum(t["counted"].values()), other_class=other, unknown_class=unknown)
 
     def load_earlier(self) -> None:
         """--earlier-runs: each random item's first n here is above the highest n any named run used (and above this
@@ -2083,6 +2180,9 @@ class Driver:
                          f" ({(100.0 * ex_cov / ex_total) if ex_total else 0:.3f} %); "
                          f"slices served {sum(served.values())}; random items begun {rnd};"
                          f" disagreements {disagreements}; rates {{{', '.join(f'{k}: {v:,.0f}/s' for k, v in sorted(rate.items()))}}}")
+            if any(self.not_counted):
+                lines.append(f"resume     this run counts its own tree class: {self.not_counted[0]} finished sweep slice(s) of other classes and "
+                             f"{self.not_counted[1]} of an unknown class stay in metrics.jsonl and are not in the figures above")
             # which items reach the tile at all (hw/card_stress_lib.py, OP_REACH): a HOST item is libcft's host
             # code, which the host pool runs on CPUs beside the card, the tile computing nothing for it
             lines.append("reach      " + "; ".join(
@@ -2475,6 +2575,7 @@ class Driver:
             self.state = "GUARD"
             self.guard(False)
             self.pre_check()
+            self.count_by_class()             # the tree is known now: this run's coverage is its own class's (parcel DR4)
             settings = {"until": L.iso(self.deadline) if self.deadline else None,
                         "quick": self.quick, "dry_run": self.dry, "weights": self.weights,
                         "sweep_minutes": self.sweep_minutes, "legs": self.battery,
@@ -2498,15 +2599,12 @@ class Driver:
             self.started = True
             if self.torn_note:
                 self.event("torn_tail", self.torn_note)
-            if self.sink is not None and resumed and self.sink.written == 0 and sum(self.served.values()):
+            if self.sink is not None and resumed and self.sink.written == 0 and self.file_slices:
                 self.event("records_partial", f"resumed with --records on a run whose metrics.jsonl already holds "
-                           f"{sum(self.served.values())} finished sweep slice(s) and whose {RECORDS_FILE} holds none: the file "
+                           f"{self.file_slices} finished sweep slice(s) and whose {RECORDS_FILE} holds none: the file "
                            f"starts here, and `sweep_record.py export` of the whole run makes the complete one")
-            if resumed and self.prev_rtl and self.tree.get("rtl") and self.prev_rtl != self.tree["rtl"]:
-                self.event("tree_changed", f"resumed on RTL tree {self.tree['rtl'][:12]}; the file's earlier run_start recorded "
-                           f"{self.prev_rtl[:12]}. The report counts the slices before and after as different trees; this driver "
-                           f"goes on from the whole file's coverage, so it does not redo the earlier tree's tile slices. Use a new "
-                           f"--out to cover the new tree from the start", before=self.prev_rtl, now=self.tree["rtl"])
+            if resumed:
+                self.tree_events()
             self.note_beside()
             self.state = "BUILD"
             self.build_and_check()
@@ -2679,7 +2777,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
                         "is committing to. The suite's test of the moved tree uses it, on a scratch repository.")
     g.add_argument("--out", help="run directory (default: ~/card-stress-out/<stamp>-<commit>). Keep it OUTSIDE the "
                    "checkout: files there make the tree untracked, and hw/card-segrun.sh asserts the tree's build id")
-    g.add_argument("--resume", action="store_true", help="continue the run in --out (sweep state is replayed)")
+    g.add_argument("--resume", action="store_true", help="continue the run in --out (sweep state is replayed, each slice counted in the tree class it ran in)")
     g.add_argument("--root", default=ROOT, help=argparse.SUPPRESS)
     g.add_argument("--python", default=os.environ.get("PYTHON", "python3"),
                    help="the python that runs seq_check.py and acceptance.py (default $PYTHON or python3)")
