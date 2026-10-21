@@ -22534,6 +22534,8 @@ All thirteen on one quad: 575 s, 9.6 minutes; one tile four times each. **Per tr
 - "If needed it can have more time, though how have the time bounds been working so far? I noticed you started giving the agents them, good choice"
 - "Once you wrap up and push go ahead and resume the stress test and pause till tomorrow"
 - "Ill be using my PC so runs may be slower, no need to stop work though."
+- "Clear to push once the gate and verifier finish, though do a quick check as it may have finished already"
+- "The PC is free for heavy work again, go ahead and investigate the 2 failures as you already are"
 
 Each parcel's own entry is above, in the order of the merges: CL's, HC's, SG's, FX's, DR1's, the lead's draw-order fix, XG's, GS's, DR2's and CK's. The fma paragraph and the plan of record are in docs/DETERMINISM.md and docs/ROADMAP.md ("Decided 2026-10-20").
 
@@ -22545,6 +22547,7 @@ Each parcel's own entry is above, in the order of the merges: CL's, HC's, SG's, 
 5. **The pass size:** a build-time override (parcel CK), not a runtime one; the stress driver's use of it is parcel DR3's, after this record.
 6. **Windows `--require-all` with `generated` now fails, honestly:** GS's packager plant for backslash entries cannot run on Windows, and the stage now counts it. CI runs ubuntu only (gates.yml, READ), and the desktop is not a full verification host, so this is a known limit, not a change.
 7. **Sent back, by Logan's rule** (a regression or a wrong answer): DR1 once, SG once, XG once, GS twice, DR2 once, CK three times. FX, HC and CL went back to no author: their verifiers' (b)s were the lead's to fix (FX's entry was restated by the lead; HC's and CL's were wording).
+8. **The card-stress suite's two failures in the gate's clone** are not a regression: the same two fail before the wave in a checkout with host/ built, and pass at 9255ab8 in a fresh one (the box, below). They are a known limit of the test, by Logan's rule.
 
 **The pass-size experiment** (the lead's, on the card, inside the card-hour Logan approved for SC's question 9; MEASURED, amd-arc-box, tile 1 of the quad (rev8q), niced; the records are copied with the box's sha256s into Data/runs/2026-10-12-math-round/box/batch-chunk/, and the clones were deleted at Logan's word):
 - **Part one,** 08:08:06 to 08:30:01: three clones of 881bbcb with the soak tools' `#define BATCH` at 4096 (the committed value), 1024 and 16384, the change asserted; eight items (div32, div64, sqrt32, sqrt64, rint32, rint64, scaleb32, scaleb64, all rne) over the same slice at 4096, 1024, 16384 and 4096 again; 33 jobs, all clean. 1024 ran at 0.29 to 0.65 of 4096; 16384 at 0.986 to 1.056 for the seven items but scaleb64, inside the control's spread of 0.967 to 1.014 but for scaleb32's 1.056 (COMPUTED from the jobs' cases over wall time). scaleb64's two committed runs disagree by 2.05 times (below).
@@ -22554,7 +22557,7 @@ Each parcel's own entry is above, in the order of the merges: CL's, HC's, SG's, 
 - **A reading,** under a two-term model (BELIEVED as a model: time an element = per-element work + per-pass cost / pass size): division and square root are mostly bound by per-element work, 15 to 24% of a job per pass at 4096; rint by the per-pass path (rint32 86%, rint64 67%).
 - **About 34 card-minutes.** Logan's answer made the override a build (parcel CK, below); the driver's use of it is DR3's.
 
-**The overnight run** (the stress driver at 881bbcb on amd-arc-box, 2026-10-19 19:36:46 to 2026-10-20 08:00:31, Logan's "they can run overnight"; MEASURED, /data/m1e1/overnight-summary.txt and card_stress_report.py's report):
+**The overnight run** (the stress driver at 881bbcb on amd-arc-box, 2026-10-19 19:36:46 to 2026-10-20 08:00:31, Logan's "they can run overnight"; MEASURED, the box's overnight-summary.txt and card_stress_report.py's report, copied with the box's sha256s into Data/runs/2026-10-12-math-round/box/overnight-1019/ for this record, every copy equal):
 - "card-stress ends: deadline (exit 0); the card is left idle". 44,624 s; on the card 99.9%; no gap over 300 s.
 - **Legs:** 14 cycles (quad 10, single 2, deep 2); 543 legs: 533 pass, 0 fail, 0 timeout, 0 no_device, 0 parse_error, 10 skipped by rule (selftest every third visit 8; acceptance-rev8 on the single 2).
 - **Telemetry:** FPGA 29 to 39 C, mean 33.1; 15.5 to 22.7 W, mean 20.8.
@@ -22572,7 +22575,7 @@ Each parcel's own entry is above, in the order of the merges: CL's, HC's, SG's, 
 | rint64-class rne, rmm | [0, 2000) | 8.2 s, 8.5 s | 0.1 s each | 8,000 | 0 |
 | scaleb64-class rne, rdn | [0, 4000) | 2.5 s, 2.8 s | under 0.1 s | 16,000 | 0 |
 
-- The div64-hard and sqrt64-hard counts equal HC's records. rint64-class ran lane-exact at about 4 ms an index, start-up included (COMPUTED from the two jobs), against the 8 ms (about 5 minutes an attribute) that CL's CARDDAY section estimates from the study's per-pass cost (BELIEVED there, before any card run).
+- The div64-hard slice's 1,939,360 cases and 860,640 skipped equal verifier-VHC's measurement of the same slice (its ledger, line 62; HC's own records say "about 1.9 million"), and sqrt64-hard's whole space equals HC's table (1,745,752 cases, 2,710,696 skipped). rint64-class ran lane-exact at about 4 ms an index, start-up included (COMPUTED from the two jobs), against the 8 ms (about 5 minutes an attribute) that CL's CARDDAY section estimates from the study's per-pass cost (BELIEVED there, before any card run).
 
 **The chain** (READ, each verifier's ledger and report; (a), (b) per pass):
 
@@ -22589,13 +22592,13 @@ Each parcel's own entry is above, in the order of the merges: CL's, HC's, SG's, 
 | GS (1093c90, 55be365, 7a197ef; ca8e6b0, 93f882b, 8477471, 3905e62; 3698a8f) | Sonnet 5.5 | VGS 0, 2; 0, 2; 0, 0 | twice |
 | DR2 (b29f996, 32f7ec3, f3c3bc1, 0ae1a13, b5462f7, 8d753f4, 48c40a8, c75d7ce, 1c036ce; 43660c2, f76b7fc, fe4f4b0, 60d435c) | Sonnet 5.5 | VDR2 0, 2; 0, 0 | once |
 | CK (6098f21, 318b597; 98a1ac6, 67fd3f6; 1dd88ac, 5446351; 6395650, f2af491, c66a0a4) | Sonnet 5.5 | VCK 0, 1; 1, 4; 1, 2; 0, 0 | three times |
-| the merges and this record | the lead | VIW9 (Haiku 5.5): at this commit, its first pass | |
+| the merges (ca807c6 to 3e02cdf) and this record (1c16d73, restated in place) | the lead | VIW9 0, 0; its re-check (Records) | no: the lead restated the record with VIW9's notes and the gate's result |
 
 - **Every (a) and (b) a Haiku verifier raised held up:** each was confirmed by the author or the lead and fixed. Three of the verifiers' own supporting statements were wrong, each corrected by its verifier: VCL's "never reach the patched line" (its 10:20:49 ledger entry, which the lead took into a401025's message), VXG's "320 text files lacking copyright" (from `grep -rIL`, under which a binary file counts as no match; XG could not reproduce it; 302) and VLD's "clause5's objects with the define differ on 16.1" (that build had failed for both trees).
 - **Twelve of the wave's thirty-eight (b)s were the lead's own words** (COMPUTED from the chain above; READ, the verifiers' reports):
   - CL's a401025, two: its message ("never reach the patched line": VCL MEASURED index 125,496 reaching the patched line, which softfloat.c line 236 then undoes) and its test comment, which tied the clause to the wrong operands;
   - HC's df9ed6d, two: "shares no arithmetic with the builders" (false: the modular inverse is shared) and a paraphrase of UCBTEST's README, which says "Some sample *.sh scripts";
-  - FX's b6f2493, one: a line number taken from a note without a run;
+  - FX's b6f2493, one, with two false details in one bullet: "and in this file this sentence too", and line 21429 given as a statement where it is the entry's heading, a line number taken from a note without a run;
   - the draw-order fix, four: "Five" for seven; a search called complete that missed ten; "with and without the define" for runs that had no define; MEASURED for results a reader has only as the lead's transcriptions;
   - the fma docs, two: "has" for a record not yet written; "one row" for the default runs only.
   - CK's third pass, one: a sentence on `rm` and a trailing slash, from the lead's second send-back, unmeasured (GNU rm under -f exits 0 and leaves a regular file).
@@ -22631,9 +22634,30 @@ Each parcel's own entry is above, in the order of the merges: CL's, HC's, SG's, 
 - **The docs check during a merge:** while a conflicted file is still unresolved in the index, `git ls-files` lists it once per stage, and the check said "74 tracked documents, 235 links" against 70 and 131 once resolved. Its rc was 0 either way; cosmetic.
 - **No `__pycache__` written today** in the main checkout: none of its 15 such directories (outside .venv and Data) holds a file newer than 2026-10-20 00:00 (MEASURED, `find -newermt`, after DR2's merge).
 
-**The box** (MEASURED, amd-arc-box, niced; the logs and scripts copied with the box's sha256s into Data/runs/2026-10-12-math-round/box/wave9/, every copy equal; each clone asserted for HEAD, a clean status, rtl's tree 44b963dd, a string from each parcel, and every branch tip an ancestor):
-- **The gate at 9255ab8** (DR2 merged, CK not yet): `verify/run.sh --budget gate`, started 15:19:43 (bundle wave9-9255ab8.bundle, sha256 22de1db5...; box_wave9_gate.sh, 063b0af8...), and after it the wave's five suites: hw/test-card-stress.sh whole, plants included; hw/test_sweep_record.py with `--metrics`, a copy of the 2026-10-19 run's metrics.jsonl taken at the start (cd0aec75..., the file SG measured against); hw/test_divsqrt_hard.py and hw/test_c5_class.py with 881bbcb's host/ as their baseline; and `make -C host tf-subject-test`. **Its result is added to this entry, restated in place, before the push.**
+**The box** (MEASURED, amd-arc-box, niced; the logs and scripts copied with the box's sha256s into Data/runs/2026-10-12-math-round/box/wave9/, every copy equal; the gate's and the tip's clones each asserted for HEAD, a clean status, rtl's tree 44b963dd, a string from each parcel, and every branch tip an ancestor, the others as their bullets say):
+- **The gate at 9255ab8** (DR2 merged, CK not yet): `verify/run.sh --budget gate`, started 15:19:43 (bundle wave9-9255ab8.bundle, sha256 22de1db5...; box_wave9_gate.sh, 063b0af8...), and after it the wave's five suites: hw/test-card-stress.sh whole, plants included; hw/test_sweep_record.py with `--metrics`, a copy of the 2026-10-19 run's metrics.jsonl taken at the start (cd0aec75..., the file SG measured against); hw/test_divsqrt_hard.py and hw/test_c5_class.py with 881bbcb's host/ as their baseline; and `make -C host tf-subject-test`.
   - **The clone,** asserted at 15:19:43: HEAD 9255ab8, status 0, rtl 44b963dd, div64-hard x11, rint64-class x7, the two-statement draw x1, RANDOM_SEED_ORDER x4, check_tree_in_dry_run x1, sweep_record.py and tf_subject.c present, and the eleven tips ancestors (CL ad944e4, HC 6907f0f, SG 6c6534c, FX 6eb1c1b, DR1 e579245, lead-draw 7583ae2, lead-fma-doc 86f561d, XG b16d2d8, GS 3698a8f, DR2 60d435c, and 881bbcb). The pinned MPFR 4.2.2 copied in; python 3.12.3, mpmath 1.4.1, gmpy2 2.3.1.
+  - **The run:** 20261020-151943-9255ab8, 15:19:43 to 18:24:24, 184 min, exit 0: "VERDICT: PASS with 8 skip(s) and 4 inner skip(s) in golden (3), remote (1)"; "36 stage(s) executed, 0 cached from earlier in the run, 0 failed, 8 skipped". Waves 6, 7 and 8's gates took 198, 181 and 181 minutes.
+  - **The skips:** the same eight stage skips and four inner skip lines, by name, as each of waves 1 to 8's gates (MEASURED, their run logs on the box, whitespace-normalized: the twelve lines are identical in all nine): buildargs, lang-rust, lang-julia, lang-go, lang-csharp, lang-r, lang-fortran and demos; golden's two serial-replay legs and its `math.fma` test, and remote's WebSocket leg.
+  - **The stages, against wave 8's gate** (MEASURED, the two run logs; when each ran, from its `.ok` marker's time):
+    - golden 2,375 s against 2,350, with 5,381 tests against 5,239 at 881bbcb (VIW9's count);
+    - generated 41 s against 11: the eighth generator, PK's, was merged after wave 8's gate, and wave 8's tip run gave 45 s with it;
+    - formal 634 s against 587, and libcft 865 s against 779: formal ran 16:09:01 to 16:19:35 and libcft from then to 16:34:00, beside the tip run (16:08:49 to 16:33:18), the card check (16:10:56 to 16:22:49) and the rint32 A/B (BELIEVED the cause);
+    - every other stage within 8 s of wave 8's, among them docs 37 s, innerskips 5 s, divsqrt 1 s, clause5 3 s and soak-quick 53 s.
+  - **The suites** (MEASURED, their logs):
+    - hw/test_sweep_record.py: exit 0, 19 s, "sweep-record test: 240 checks, 0 failed, 4 skipped, 19 s". Its four skips are checks of real records this run does not have, each by name: nextup32, sqrt32, rem64 and a random campaign.
+    - hw/test_divsqrt_hard.py: exit 0, 413 s, "97 checks, 0 failed, 0 skipped".
+    - hw/test_c5_class.py: exit 0, 113 s, "148 checks, 0 failed, 0 skipped".
+    - `make -C host tf-subject-test`: exit 0, 5 s: "170955 cases over 84 function names and 5 rounding modes: 0 wrong"; "host CPU as the subject: 37096 cases (4192 with a NaN result), 0 wrong"; its four sabotage runs reported 2 wrong lines of 2,100 twice and 10 of 100 twice; "PASS".
+    - **hw/test-card-stress.sh: exit 1, 1,446 s, "658 checks, 2 failed, 0 skipped".** Both failures are in its `buildreal` group, "every tool is asserted XRT-linked (ldd), the build id equals cft-segrun's, the clause-5 probes ran" and "the REAL api-test ran through the driver on each image: pass, 'failed' 0 read from its own line", each with rc 3. The driver had stopped at its build-id step: for the same scratch commit (761cda55...), the tree's build id read "tracked=modified untracked=present" and cft-segrun's "tracked=clean".
+    - The clone's status after the suites: 0 lines.
+  - **The two card-stress failures are not a regression** (MEASURED, box_br_ab.sh, sha256 eb65cf82...; 18:58:28 to 18:59:56; four fresh clones from the gate's bundle, each asserted for HEAD and a clean status; the logs copied with the box's sha256s into box/wave9/brab/, every copy equal). `bash hw/test-card-stress.sh --only buildreal`, which needs no card, in each:
+    - 9255ab8, nothing built: 7 checks, 0 failed;
+    - 9255ab8, after `make -C host -j8 all api-test device-test remote-test divsqrt-soak clause5-soak`: 2 failed, the same two, after the same event (its own scratch commit apart);
+    - 881bbcb, before the wave, built the same way: 2 failed, the same two, after the same event;
+    - 881bbcb, nothing built: 7 checks, 0 failed.
+  - **Why:** the group copies host/ and hw/ into a scratch repository, leaving out only `__pycache__`, `*.o`, `*.lo`, `*.a` and `*.so`, and commits all of it (READ, hw/test_card_stress.py line 1982). The driver then compares the tree's build id after its make with cft-segrun's (READ, hw/card_stress.py lines 2089 to 2092). The gate's clone held 28 entries git ignores that the copy takes: 27 built tools and outputs, api-test, cft-segrun, device-test, remote-test and divsqrt-soak among them, and host/gen/ (MEASURED, gate-clone-copied.txt). Committed in the scratch repository, they are rewritten by its build (BELIEVED: the A/B shows the condition, not which file).
+  - **The lead's:** box_wave9_gate.sh ran the suites in the gate's clone after the gate had built host/ there. The stress run's dry tests run in a fresh clone before anything is built (the 2026-10-19 run's: "481 checks, 0 failed, 0 skipped"), so they are not affected.
 - **The tip, 3e02cdf (CK merged):** `verify/run.sh --only docs,generated,libcft,soak-quick,buildargs,sweepjudge,innerskips,ensurevectors`, run 20261020-160849-3e02cdf, 16:08:49 to 16:33:18, 1,469 s, exit 0: "VERDICT: PASS with 1 skip(s)"; "7 stage(s) executed, 0 cached from earlier in the run, 0 failed, 1 skipped, 0 inner skip(s)". buildargs skipped by its usual name on the box.
   - **The stages:** docs 40 s, sweepjudge 1 s, innerskips 4 s, ensurevectors 44 s, libcft 1,282 s, generated 41 s, soak-quick 56 s. libcft took longer than waves 1 to 8's 768 to 885 s because it ran beside the gate (the load about 2.5 at the tip run's start, with the gate's two runner processes beside it).
   - **The stages CK's merge touches:** libcft (host/Makefile, .gitignore and the build id, every build profile), soak-quick (the divsqrt soak's default build, which CK's BATCH guard must leave as it was), and docs and generated (its records).
@@ -22651,7 +22675,7 @@ Each parcel's own entry is above, in the order of the merges: CL's, HC's, SG's, 
 - **DR2 left 13 scratch repositories** of its tree tests in Windows Temp (git's objects are read-only, and `rmtree(ignore_errors=True)` left them). It found them itself, removed each by exact path after checking it held its own repository, and fixed the cause with a check (60d435c).
 - **HC's fetch tool saved one PDF unasked** (167,757 bytes), disclosed and read with a stdlib script under -I; HC ran one read-only `ls` from the records directory inside the main checkout.
 - **Left in WSL:** CL's cl-build (96 MB) and HC's hc-build (77 MB), their build directories in the distro's root home (MEASURED, the lead's listing in WSL this afternoon). Not removed: neither is the lead's.
-- **VDR1 polled its own background run** every 15 to 20 seconds, reporting each wait, until the lead asked it to wait on one event; later Haiku briefs say "wait on one quiet event; do not report a wait".
+- **VDR1 polled its own background run** about every 15 to 20 seconds (the lead's ledger, 10:04:03, from the harness's notices), reporting each wait, until the lead asked it to wait on one event; later Haiku briefs say "wait on one quiet event; do not report a wait".
 - **VDR2's first WSL clone was empty:** the lead's bundle, made by `git bundle create <file> <branch>`, has no HEAD. It asserted SHA, tree and content on the rerun; later bundles are cloned with `-b <branch>`.
 - **The lead's own:** ten ledger headings were written as estimates, not from the clock; the five checked against git and the agents' ledgers ran 10 to 40 minutes late (the ledger's correction of 14:04:27). One empty directory of the lead's draw probe was left in WSL's /tmp from 10:57 and removed by its exact path.
 
@@ -22667,11 +22691,12 @@ Each parcel's own entry is above, in the order of the merges: CL's, HC's, SG's, 
 - **Time:** first passes took 14 to 54 minutes (median 23) against boxes of 30 to 120; re-checks up to 41. The wave-8 Sonnet verifiers' first passes took 70 to 119 minutes on that wave's parcels (median 94; that wave's record), so Haiku's were about a quarter as long by the medians; the parcels differ, so this is not a measured comparison.
 - **Tokens** (output, the lead's method: the last line of each response summed): Haiku verifiers 3,832,047 in all, a chain 219,385 to 498,230; Sonnet authors 4,450,402, a parcel 187,107 to 815,942.
 - **Conduct:** one serious slip (VGS's `git bundle unbundle` in the main checkout, repaired and checked), one wasteful habit (VDR1's polling, stopped when asked), and small setup errors each verifier found and re-ran itself (VCK, VHC, VGS). Every frozen tree was clean before and after its pass. This wave's Haiku verifiers kept the ten-minute check-in rule (VDR1, VHC), which VRC, a Haiku verifier of 2026-10-14, had not.
-- **The Sonnet authors:** first passes took 54 to 193 minutes; FX (117 against 90) and GS (77 against 75) ran past their boxes, the small ones; DR1 (664 lines against 100 to 300), CL, HC, SG, XG (3,317 against "a few hundred") and DR2 went past their size ceilings and said so (READ, their reports). One conduct slip (GS's global `safe.directory`, removed) and one leak (DR2's, found and removed by DR2).
+- **The Sonnet authors:** first passes took 54 to 193 minutes; FX (117 against 90) and GS (77 against 75) ran past their boxes, the small ones; DR1 (664 lines against 100 to 300), CL, HC, SG, XG (3,317 against "a few hundred") and DR2 went past their size ceilings and said so (READ, their reports; each size at its report's HEAD). One conduct slip (GS's global `safe.directory`, removed) and one leak (DR2's, found and removed by DR2).
 - **The lead's reading,** for Logan: on this wave, Haiku verifiers were adequate for checking Sonnet parcels by Logan's rule: their findings held, their passes were short, and their slips were caught. The cost was more passes: CK took four, GS three, and the lead's own small fixes drew (b)s on most of their first passes.
 
 **Known limits carried** (the verifiers' notes, merged under Logan's rule; each parcel's own entry has the rest):
-- **No runner stage runs the wave's own tool tests:** hw/test-card-stress.sh, hw/test_sweep_record.py, hw/test_divsqrt_hard.py, hw/test_c5_class.py, host/tests/soak_chunk_check.py and `make -C host tf-subject-test`. The box session below ran them after the gate; between waves, their authors' and verifiers' runs are their record.
+- **No runner stage runs the wave's own tool tests:** hw/test-card-stress.sh, hw/test_sweep_record.py, hw/test_divsqrt_hard.py, hw/test_c5_class.py, host/tests/soak_chunk_check.py and `make -C host tf-subject-test`. The box session above ran five of them after the gate and CK's at the tip; between waves, their authors' and verifiers' runs are their record.
+- **The card-stress suite's `buildreal` group assumes nothing is built in host/:** in a checkout where it is, two of its checks fail, before the wave as after it (the box, above). A copy of only what git tracks would remove the condition.
 - **The flake list,** each seen only under load and passing alone: the hang scenario's first check (DR1's and DR2's runs), `stopfile` (VDR1's: "load-sensitive, so it belongs on the flake list"), and once the second check of cvtto32-all-rne in DR2's extended scn_sweep_short.
 - **CL, in VCL's words:**
   - "`stand_in_vs_golden` checks only candidates and every 61st index. The test comment reads as if it covers the whole space."
@@ -22707,6 +22732,7 @@ Each parcel's own entry is above, in the order of the merges: CL's, HC's, SG's, 
 - **Ten more unsequenced draws** in host/tools/cft_fuzz.c, host/tests/mp_err_check.c and host/tests/cpp_api_test.cpp (the draw-order entry); a chip offers them.
 - **The fma row to RISC-V's rule** in the next RTL revision (ROADMAP), and the first test that pins the row explicitly.
 - **A runtime-adjustable pass size,** later (Logan's "future plans").
+- **buildreal's scratch copy** to take only what git tracks (the known limit above); a chip offers it.
 - **CL's and HC's WSL build directories** (above).
 - **Wave 8's follow-ups, closed here:** the telemetry check's race (DR1), the CRLF hazard in project_figures.py's `--check` (FX), the six routine entries in REV8_ENTRIES (DR1), SC's ten questions (answered, above). The wide scaleB item continued on the overnight run (5.6 to 6.1% of its space).
 
@@ -22734,13 +22760,22 @@ Each parcel's own entry is above, in the order of the merges: CL's, HC's, SG's, 
 | VGS | Haiku 5.5 | 3 | 22; 34 | 105 | 296,562 |
 | VDR2 | Haiku 5.5 | 2 | 40; 80 | 190 | 388,313 |
 | VCK | Haiku 5.5 | 4 | 22; 67 | 205 | 498,230 |
+| VIW9, the integration verifier | Haiku 5.5 | 1, before its re-check | 34; 36 | 129 | 317,382 |
 
-- **Sums** (COMPUTED from the rows): the nine Sonnet authors 4,450,402 output tokens, 3,182 tool uses, about 1,246 minutes; the eleven Haiku verifiers 3,832,047, 1,498 and about 508 minutes.
+- **Sums** (COMPUTED from the rows): the nine Sonnet authors 4,450,402 output tokens, 3,182 tool uses, about 1,246 minutes; the eleven Haiku verifiers of the parcels 3,832,047, 1,498 and about 508 minutes. VIW9's 36 minutes are its first pass (34) and its check of the overnight copies (2).
 - VDR1's first pass is its transcript's span (41 min), in which it polled its own run about every 15 to 20 seconds; its active minutes sum to fewer.
-- **The time boxes** (reported to Logan on his question): the authors' first passes against their boxes were DR1 86/120, CL 93/240, HC 111/240, SG 135/180, XG 157/240, DR2 193/240, FX 117/90, GS 77/75 and CK 54/75 minutes; the two overruns were small parcels' boxes (90 and 75 minutes). Most went past their briefs' size ceilings, from about 1.2 times (GS, 308 changed lines against "About 80 to 250") to about ten (XG, 3,317 against "a few hundred lines in all"). Haiku verifiers' first passes took 14 to 54 minutes of boxes of 30 to 120.
+- **The time boxes** (reported to Logan on his question): the authors' first passes against their boxes were DR1 86/120, CL 93/240, HC 111/240, SG 135/180, XG 157/240, DR2 193/240, FX 117/90, GS 77/75 and CK 54/75 minutes; the two overruns were small parcels' boxes (90 and 75 minutes). Most went past their briefs' size ceilings, from about 1.2 times (GS, 308 changed lines against "About 80 to 250") to about ten (XG, 3,317 against "a few hundred lines in all"), each size at its report's HEAD. Haiku verifiers' first passes took 14 to 54 minutes of boxes of 30 to 120.
 
 **Records:**
 - docs/VERIFICATION.md's golden row: 5,314 since CL, 5,333 since HC, 5,381 since XG (MEASURED, `pytest --collect-only` at each merge).
 - docs/README.md recounted at each merge and for this record. The docs check rc 0.
-- The box's logs: Data/runs/2026-10-12-math-round/box/wave9/ (SHA256SUMS-early.box; the gate's follow).
-- **verifier-VIW9** (Haiku 5.5) checks the merges and this record; its passes are added here.
+- The box's logs: Data/runs/2026-10-12-math-round/box/wave9/ (SHA256SUMS-early.box, SHA256SUMS-gate.box, and brab/SHA256SUMS-brab.box for the buildreal A/B).
+- **verifier-VIW9** (Haiku 5.5) on 1c16d73: (a) 0, (b) 0.
+  - **Restated above**, with its notes:
+    - the overnight run's figures, which had no copy under Data/runs: the lead copied the box's summary, report and script with their sha256s, and VIW9 then checked every overnight figure against the copies;
+    - the div64-hard slice's exact count, which is verifier-VHC's measurement (HC's records say "about 1.9 million");
+    - FX's (b) of the lead's, whose one bullet had two false details;
+    - VDR1's polling interval, cited to the lead's ledger;
+    - each size against a ceiling taken at its report's HEAD.
+  - **Not taken:** the single quotation marks nested inside three double-quoted quotations (the words are verbatim, VIW9's note); its notes on what it did not check, which its ledger lists.
+  - **Its re-check** of the gate's result, the A/B and this restatement is added here when it is done, before the push.
