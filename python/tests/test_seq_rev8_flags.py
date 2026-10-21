@@ -518,6 +518,33 @@ def test_the_flag_control_arm_draws_nothing_when_off():
             assert p1 == p2 and r1.random() == r2.random()
 
 
+def test_the_scratch_depth_is_part_of_a_flag_control_draw():
+    """`random_program` names the depth's last slot, so one seed at two
+    depths makes programs that differ - in the slot of each STL and LDL that
+    picked that last one, and nowhere else - and leaves the stream where it
+    was. host/tests/seq_check.py draws its flag-control corpus at the
+    device's depth, so one seed and one feature word are not one corpus
+    (docs/VERIFICATION.md's row: one seed, one feature word and one scratch
+    depth are)."""
+    moved = 0
+    for seed in range(50):
+        r1, r2 = random.Random(seed), random.Random(seed)
+        arms = dict(scratch=True, wide_regs=True, rev8=True, flags=True)
+        i1, c1 = seq.random_program(FP64, r1, scratch_depth=256, **arms)
+        i2, c2 = seq.random_program(FP64, r2, scratch_depth=4096, **arms)
+        assert r1.random() == r2.random(), "a depth drew from the stream"
+        assert c1 == c2 and len(i1) == len(i2)
+        for w1, w2 in zip(i1, i2):
+            if w1 != w2:
+                d1 = seq.decode(w1)
+                assert d1["ctrl"] and d1["op"] in (seq.STL, seq.LDL)
+                # the slot is imm's low bits, at 255 and at 4,095 and
+                # nothing else of the word differs
+                assert w2 - w1 == (4095 - 255) << 32, (hex(w1), hex(w2))
+                moved += 1
+    assert moved > 0, "no program named the depth's last slot"
+
+
 # ---- 7. what R24 is for: divfull and sqrtfull, flag-exact ------------------------
 
 def _wrapped(prog):

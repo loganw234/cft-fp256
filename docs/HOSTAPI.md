@@ -3512,13 +3512,18 @@ No ABI step: 0.17 has every field.
 
 **A run that does not ask** binds the one-beat stand-in, with MODE[24]
 clear, so every program launch on 0xB00 still passes eighteen arguments
-(0x900's lesson). **A map below 0xB00** has no LFLAGS_PTR: a block that
-reached the backend there - only a device whose CAPS2 and VERSION
-disagree could send one past `device.c` - is refused by name, "this
-bitstream's contract is 0x..., which has no LFLAGS_PTR - the per-lane
-flags block arrived at 0x00000b00", the same second line every pointer
-since 0x700 has. `CFT_XRT_TRACE` prints argument 17 as the tile holds it
-beside the buffer bound, and patterns the block's last beat past each
+(0x900's lesson). **A map below 0xB00** has no LFLAGS_PTR, and a block
+meant for one is refused in `device.c`, before the backend, by name, for
+CFT_SEQ_FEAT_LANE_FLAGS: `caps_decode.h` believes CAPS2[13] only from
+0xB00, so the feature is never set below it, whatever CAPS2 says
+(api-test holds that: an 0xA00 map claiming revision 8's bits decodes
+without them). The backend's own refusal, "this bitstream's contract is
+0x..., which has no LFLAGS_PTR - the per-lane flags block arrived at
+0x00000b00", the same second line every pointer since 0x700 has, stands
+behind that and is not reached through the library's entry points (READ,
+2026-10-21: the decode and the backend's `D.version` are the one VERSION
+word, read at open). `CFT_XRT_TRACE` prints argument 17 as the tile holds
+it beside the buffer bound, and patterns the block's last beat past each
 tile's N with 0xCC before the run and reads it back after, the WSTRB test
 the counts have had since 2026-09-15.
 
