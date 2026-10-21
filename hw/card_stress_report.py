@@ -96,7 +96,8 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)            # python -I does not put the script's directory there
 from card_stress_lib import (CPU, DEFAULT_BATCH, EXH, HOST, TILE, covered, first_gap, iso,  # noqa: E402
-                             merge_intervals, read_records, reach_of, record_batch, sweep_coverage, sweep_items)
+                             merge_intervals, read_records, reach_of, record_batch, slice_reach, sweep_coverage, sweep_items,
+                             tree_key)
 
 # What the catalog says of each item: the space its coverage is counted over (2^32 encodings for the fp32-operand items, the
 # indices of a mode's own space for the hard-case and class-level items) and what a pass claims ("exhaustive", "hard", "class",
@@ -734,25 +735,27 @@ def _tree_class(kind: str, rs: Optional[Dict[str, Any]]) -> Tuple[str, str]:
     """(key, label) of the class a slice of this reach falls in, under the run_start it ran after (None: it ran after
     none). A TILE item is keyed by the RTL tree the run recorded; a HOST item by the library's source (host/'s tree
     hash) and the compiler's version line; a tree with uncommitted changes is its own key ('+modified'); a run that
-    recorded none of it is kept apart by its commit. Two runs share a class only when every part of the key is equal."""
+    recorded none of it is kept apart by its commit. Two runs share a class only when every part of the key is equal.
+    The KEY is card_stress_lib.tree_key's, the one the driver's --resume counts by (parcel DR4); the label is this report's."""
     tr = rs.get("tree") if isinstance(rs, dict) and isinstance(rs.get("tree"), dict) else {}
+    key, _unknown = tree_key(kind, tr)
     commit = _str(tr.get("commit"))
     nc = f"not recorded (commit {commit[:12] if commit else 'unknown'})"
     if kind == TILE:
         h, mod = _str(tr.get("rtl")), _bool(tr.get("rtl_dirty"))
         if not h:
-            return "unrecorded:" + (commit or "?"), f"RTL tree {nc}"
-        return (h + ("+modified" if mod else ""),
+            return key, f"RTL tree {nc}"
+        return (key,
                 f"RTL tree {h[:12]}" + (" MODIFIED (uncommitted changes under rtl/)" if mod else "")
                 + ("" if mod is not None else " (whether it was modified is not recorded)"))
     if kind == HOST:
         h, mod, cc = _str(tr.get("host_src")), _bool(tr.get("host_src_dirty")), _str(tr.get("cc"))
         if not h:
-            return "unrecorded:" + (commit or "?"), f"library source and compiler {nc}"
-        return (h + ("+modified" if mod else "") + "|" + (cc or "compiler not recorded"),
+            return key, f"library source and compiler {nc}"
+        return (key,
                 f"host/ tree {h[:12]}" + (" MODIFIED (uncommitted changes under host/)" if mod else "")
                 + f", compiler {_line(cc, 80) if cc else 'not recorded'}")
-    return "none", "reach unknown (no key: neither the records nor the catalog's table say whether the tile is involved)"
+    return key, "reach unknown (no key: neither the records nor the catalog's table say whether the tile is involved)"
 
 
 def _trees(sources: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -774,8 +777,7 @@ def _trees(sources: List[Dict[str, Any]]) -> Dict[str, Any]:
             item = sw.get("item") if isinstance(sw, dict) else None
             if not isinstance(item, str) or not item:
                 continue
-            rch = sw.get("reach") if sw.get("reach") in (TILE, HOST) else reach_of(sw.get("op"))
-            kind = rch or "unknown"
+            kind = slice_reach(sw) or "unknown"
             key, label = _tree_class(kind, rs)
             c = classes.setdefault((kind, key), {"kind": kind, "key": key, "label": label, "runs": [], "commits": [],
                                                  "iv": {}, "rnd": {}})

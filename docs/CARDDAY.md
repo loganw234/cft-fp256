@@ -896,12 +896,13 @@ python3 hw/card_stress_report.py /data/card-stress-1016     # the report, any ti
   first long run's clone had it made by the lead before its first `selftest` leg.
 - **Pre-flight, optional**: `bash hw/test-card-stress.sh --no-plants` runs the driver's dry-run
   tests (the verdict parsers on real logs, the scheduler, the failure policy, the guard, the
-  sweep's resume, the host pool, the seeds, the trees, the items, the pass size, the records, the report, and under POSIX the real `make` in
+  sweep's resume, the host pool, the seeds, the trees, the resume per tree class, the items, the pass size, the records, the report, and under POSIX the real `make` in
   a scratch copy) on the box, with no card and no XRT: about 10 minutes under WSL and 11 under Git
   Bash (2026-10-21, with the coverage wave's groups: 644 s under Git Bash and about 600 s under WSL, read off the clock; 2026-10-20, before them: 448 s and 553 s, and a busier desktop made a Git
   Bash run 636 s), on a desktop other sessions share, and it must be run alone on the host (two drivers at once see each other's
-  stand-ins as card users). `--no-plants` leaves out the negative controls, which take about
-  one and a half to two times as long as everything else together (the whole suite is 27 minutes under WSL: 1,636 s on 2026-10-21, with 115 plants; 22.5 minutes before). The runner and the pythons
+  stand-ins as card users: the guard scans every process of the WSL distro, or of the Windows desktop, it runs in, so two suites in
+  one distro make each other's drivers refuse to start, `guard_refused`, exit 2 - found by parcel SR2, 2026-10-21). `--no-plants` leaves out the negative controls, which take about
+  one and a half to two times as long as everything else together (the whole suite is 29 minutes under WSL: 1,761 s on 2026-10-21 with 130 plants, parcel DR4's; 27 minutes, 1,636 s, with 115; 22.5 minutes before). The runner and the pythons
   the suite itself starts run with `-B` (`-I` ignores `PYTHONDONTWRITEBYTECODE`); the report script
   the driver starts for itself does not, so a run in the tree under WSL still leaves one git-ignored
   card_stress_lib file in hw/__pycache__ unless that variable is set.
@@ -929,7 +930,9 @@ python3 hw/card_stress_report.py /data/card-stress-1016     # the report, any ti
   refuses an `--out` inside it that git does not ignore - and a checkout nobody else touches:
   the driver builds the tools from it once and `hw/card-segrun.sh` asserts at every run that
   the tools' build id names HEAD, and the driver stops (`tree_moved`) if HEAD moves.
-  `--resume --out DIR` continues a run (the sweep's state is read back from `metrics.jsonl`; a
+  `--resume --out DIR` continues a run (the sweep's state is read back from `metrics.jsonl`, each slice
+  counted in the tree class it ran in - a tile item's by the rtl/ tree, a host item's by the host/ tree and the
+  compiler, as the report keys them: "The resume counts per tree class", below; a
   last line torn by a killed run is kept beside it as `metrics.torn-<time>.txt` and cut off, and
   the run records a `torn_tail` event).
 - **Stop**: `touch $OUT/STOP`, or SIGTERM or SIGINT once. It ends **after the leg running**,
@@ -938,7 +941,7 @@ python3 hw/card_stress_report.py /data/card-stress-1016     # the report, any ti
   terminal does not stop it (SIGHUP is ignored). A stale `STOP` at the start is refused.
 - **Read**: `status.txt` (rewritten after every leg: time, cycle, image, totals by image,
   consecutive card failures, the last telemetry and the host's load, the sweep's coverage and
-  rates, the host pool's line, the deadline), `driver.log` (what the driver said), `metrics.jsonl` (the record),
+  rates, the host pool's line, a `resume` line when a resume left slices out of its counts, the deadline), `driver.log` (what the driver said), `metrics.jsonl` (the record),
   `logs/` (each leg's log: a passing leg's gzipped, a failing leg's whole), `STOPPED.txt` (why,
   when the policy stopped it), and the report. **What the smoke should print**: for each image
   `leg dt-i on <image>: pass`, and `build step image <name>: ok - ... equal to SHA256SUMS`; at the
@@ -1130,8 +1133,8 @@ box has not run this code** (docs/VALIDATION.md, the entry of 2026-10-20 for DR2
   ends is given `--kill-after` (60 s) from the end of the last card leg to finish, and is then terminated by PID
   and recorded as the event `host_job_abandoned`, **not as a slice**: a CPU job needs none of a card leg's "never
   in the middle" (it poisons nothing), and a killed slice recorded as a failure would count toward disabling its
-  item. It is not covered, so a resumed run serves it again. `--resume` rebuilds the pool's coverage, seeds and
-  rates from `metrics.jsonl` as the card's. `--quick` waits for its three slices.
+  item. It is not covered, so a resumed run serves it again. `--resume` rebuilds the pool's coverage (of its own
+  tree class, below), seeds and rates from `metrics.jsonl` as the card's. `--quick` waits for its three slices.
 - **A host job's failure is its item's, never the card's.** Its log is never read for "the card did not answer"
   (so no `no_device`); a failing job is a `fail` (a disagreement, kept with its operands) or a `parse_error` (the
   item is disabled after `--quarantine-after`, as on the card); and nothing it does touches the
@@ -1181,8 +1184,9 @@ study is per RTL tree, with the three images reported separately beneath it.
 - **The run records its tree** in `run_start`: `tree.rtl` (`git rev-parse HEAD:rtl` of the checkout it runs from),
   `tree.host_src` (the same for host/), `tree.cc` (the C compiler's first version line), and `tree.rtl_dirty` and
   `tree.host_src_dirty` (git status of that directory, untracked files included: an untracked .sv is compiled
-  into a bitstream all the same). A resume writes its own `run_start`; a resume on another RTL tree also records
-  the event `tree_changed`.
+  into a bitstream all the same). A resume writes its own `run_start`, and records the events `tree_changed` (the
+  rtl/ tree differs from the file's last `run_start`'s), `host_tree_changed` (the host/ tree or the compiler does) and
+  `slices_not_counted` when it leaves slices out of its counts ("The resume counts per tree class", below).
 - **The report** has a section "SWEEP COVERAGE BY TREE", after the sweep's. A tile item's coverage is counted
   **per RTL tree**, the images beneath it: the tree's figure is the union over the images, and an image's column
   is what it covered alone (the study found the quad serving 87.5 to 99.98 per cent of an exhaustive item and the
@@ -1202,9 +1206,57 @@ study is per RTL tree, with the three images reported separately beneath it.
   is the images' (the manifest's `commit:` line gives the images': `git rev-parse <commit>:rtl`); the images' own
   identity is their SHA-256, in every leg and in `run_start`. The tree hash covers rtl/ alone, and the three images
   were built with different generics (the quad's EN_AUGADD=0, the deep's SEQ_SCRATCH_D=8192), which the images
-  beneath the tree keep apart. The driver does not track trees when it resumes: `--resume` goes on from the whole
-  file's coverage, so a resume on another RTL tree continues where the file's coverage ends and the report shows
-  the new tree with only what ran after; use a new `--out` to cover a new tree from the start.
+  beneath the tree keep apart. Until 2026-10-21 the driver did not track trees when it resumed (`--resume` went on
+  from the whole file's coverage, so a resume on a new host/ tree planned no host item: night 2 of the stress run,
+  2026-10-20/21, ran no host slice, MEASURED on its records); it does now, below.
+
+**The resume counts per tree class** (parcel DR4, 2026-10-21; Logan, to the scheduler study's question 8: "Yes to
+both" - the class-aware planner in the driver, and the coarse key, the whole host/ tree and the compiler, kept for now).
+
+- **The rule.** Once the run has read the tree it starts from (`pre_check`, the tree `run_start` records),
+  `Driver.count_by_class` keeps in the planner's `intervals`, `served` (the rotation's count) and `sums` (what the
+  whole-space check adds up) only the finished sweep slices the report would put in **this run's class**: a tile
+  item's by the rtl/ tree (`tree.rtl`; a modified tree is a class of its own), a host item's by the host/ tree and the
+  compiler's version line (`tree.host_src`, `tree.cc`). The key is **one function**, `card_stress_lib.tree_key`, which
+  the report's section by tree calls too, so the two cannot drift; a slice is under the last `run_start` before it, as
+  in the report. A slice of another class stays in `metrics.jsonl` and in the report and is not counted: a resumed run
+  on a tree the file has not covered plans that tree's items from the start, a tile item and a host item each by its own
+  class. The seeds, the rates, the quarantine, the disabled items and the disagreements stay the whole file's (a random
+  item draws operands no earlier slice drew, whatever its tree; a finding is never forgotten). A run that does not
+  resume, and a resume whose file is all of this class, plan exactly as before.
+- **An old run.** A run before 2026-10-20 recorded its commit and no tree. Where the checkout the driver runs from holds
+  that commit and the run recorded `dirty: false`, its trees are derived (`git rev-parse COMMIT:rtl` and `COMMIT:host`; the
+  study found the recorded and the derived trees equal where both exist, and a check holds that, with git's answer stood in
+  and, when CARD_STRESS_RESUME_RUN names the lead's two-night run, on that file). A tree that was
+  not clean is not the commit's, and a commit this checkout does not hold gives none: those slices are of an unknown class.
+  A run that recorded a tree whose commit is here is held to it: a recorded hash that is not git's for its commit is
+  unknown too. **A compiler line is never derived**: the host slices of an old run are of an unknown host class, so a
+  resume re-covers its host items (the study: all 18 host exhaustive items are about 4.3 core-hours, 0.5 hours on eight
+  workers, COMPUTED, the pool's own rates unmeasured) while its tile slices count by the derived rtl/ tree.
+- **An unknown class is never counted**, not even by a run that lacks the same fact (neither recorded a compiler,
+  neither a commit): two runs that lack the same part of the key are not known to have run the same thing. The report
+  keeps such slices in a class of their own ("compiler not recorded", "not recorded (commit ...)"); the planner leaves
+  them out.
+- **What is said**, once, at the resume (information; nothing stops on it): `tree_changed` (before, now), `host_tree_changed`
+  (before, now, cc_before, cc_now) and `slices_not_counted` (the slices counted, those of another class and those of an
+  unknown one; EVERY unknown class is named in the text by its run, commit and reason, with no cap, and listed in the event's
+  `unknown_by_run` field); `status.txt` has a `resume` line while slices are left out.
+- **At 0b7c959** (MEASURED 2026-10-21, the driver's own `pick_item` over a copy of the lead's two-night file, 552
+  finished sweep slices, with the second run's tree as the resuming run's): 320 tile slices counted (both runs: the first
+  run's rtl/ tree derived from 881bbcb is 44b963dd, the second's recorded one) and 232 host slices not (the first run's,
+  no compiler recorded), none of another class. It plans the four `scaleb32-wide` items at 821,035,008, 843,055,104,
+  838,860,800 and 846,200,832 (the first gaps `docs/studies/sched-a/coverage_state.py` found), keeps the four
+  `scaleb32-all` items covered and plans all 14 host items of the nightly's list from 0 again, which the whole file's
+  coverage did not. Of the catalog's 71 exhaustive items it plans 36 tile and 31 host (the study's 18 host items and
+  parcel DR3's 13; 17 before this change: the 4 never served in that file and DR3's 13).
+- **What it does not do.** A quarantined range (a slice that did not finish `--quarantine-after` times) and a disabled
+  item stay the whole file's: a resume on a new tree still skips a range that hung the card on an old one. A modified
+  tree is one class per base hash, as the report keys it (the change itself is not recorded). The report keeps an old run
+  apart by its commit and does not derive, so for such a run the report's class ("not recorded") and the planner's (the
+  derived rtl/ tree) differ by design. A resume that cannot read its own tree or compiler counts nothing of that reach,
+  said by name. The key is the whole host/ tree and the compiler (Logan kept it): any commit that touches host/
+  re-covers the host items, 15 of the 88 commits between 881bbcb and 0b7c959 did and none of them touched the library's
+  source (`host/src`, `host/include`; READ in the study).
 
 **For the next run:** check that `git rev-parse HEAD:rtl` of the box's checkout is the images' tree (the rev8
 images': 44b963dd6ba2fcf99e002c5face5ca94aad4515c); start it with every earlier run named - `bash hw/card-stress.sh

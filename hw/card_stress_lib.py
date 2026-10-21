@@ -24,7 +24,7 @@ import os
 import re
 import threading
 import time
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 
 class VerdictError(Exception):
@@ -965,6 +965,140 @@ def record_batch(sw: Dict[str, Any]) -> int:
     tools), else the default tools' 4096 - every record before 2026-10-21 and every default run's."""
     b = sw.get("batch")
     return b if isinstance(b, int) and not isinstance(b, bool) and b > 0 else DEFAULT_BATCH
+
+
+# ---------------------------------------------------------------------------
+# coverage by tree: the key the report and the resume share, and what a resume counts (parcel DR4, 2026-10-21)
+# ---------------------------------------------------------------------------
+
+def tree_key(kind: str, tr: Optional[Dict[str, Any]]) -> Tuple[str, Optional[str]]:
+    """(key, unknown): the class a sweep slice of this reach falls in, given the `tree` of the run_start it ran after (None: it had none).
+    THE definition of the key: the report's coverage by tree (card_stress_report.py) and the driver's --resume (Driver.count_by_class)
+    both call it, so what the report puts in a class is what a resume counts. A TILE item is evidence about the RTL tree it ran on
+    (tree.rtl, `git rev-parse HEAD:rtl`); a HOST item about the library's source and the compiler (tree.host_src, the tree hash of host/,
+    and tree.cc, the compiler's first version line). A tree with uncommitted changes is a key of its own ('+modified'); a run that
+    recorded none of it is kept apart by its commit ('unrecorded:<commit>'). `unknown` is None when every part of the key was recorded,
+    and else names the part that was not: the report keeps such slices in a class of their own, and a resume never counts them (it does
+    not guess that two runs lacking the same fact ran the same thing)."""
+    tr = tr if isinstance(tr, dict) else {}
+
+    def text(k: str) -> Optional[str]:
+        v = tr.get(k)
+        return v if isinstance(v, str) and v else None
+
+    commit = text("commit")
+    if kind == TILE:
+        h = text("rtl")
+        if not h:
+            return "unrecorded:" + (commit or "?"), "no rtl/ tree recorded"
+        return h + ("+modified" if tr.get("rtl_dirty") is True else ""), None
+    if kind == HOST:
+        h, cc = text("host_src"), text("cc")
+        if not h:
+            return "unrecorded:" + (commit or "?"), "no host/ tree recorded"
+        return (h + ("+modified" if tr.get("host_src_dirty") is True else "") + "|" + (cc or "compiler not recorded"),
+                None if cc else "compiler not recorded")
+    return "none", "reach unknown"
+
+
+def slice_reach(sw: Any) -> Optional[str]:
+    """'tile' or 'host' for a sweep record's `sweep` object: what the record says (sweep.reach, written by the driver from OP_REACH),
+    else what OP_REACH says of its op; None when neither does."""
+    if not isinstance(sw, dict):
+        return None
+    return sw["reach"] if sw.get("reach") in (TILE, HOST) else reach_of(sw.get("op"))
+
+
+GIT_HASH = re.compile(r"[0-9a-f]{40}")
+
+
+def resolve_tree(tr: Optional[Dict[str, Any]], rev: Optional[Callable[[str, str], Optional[str]]] = None
+                 ) -> Tuple[Dict[str, Any], Dict[str, str]]:
+    """(the tree, why): a run_start's `tree` with what the run did not record taken from its commit where it can be, and, by directory
+    ('rtl', 'host'), what could not be known. A run before 2026-10-20 recorded its commit and no tree hashes; `rev(commit, rel)` is
+    `git rev-parse COMMIT:REL` in the driver's checkout (None where git cannot say) and gives them, as a DERIVED fact. A tree is derived
+    only from a commit this checkout holds and only when the run's checkout was recorded clean (`dirty` is false: a tree that was not
+    clean is not the commit's). A run that DID record a tree whose commit is here is held to it: a recorded hash that is not git's for
+    that commit is unknown, by name, and is not chosen between. With no `rev` nothing is derived (the resuming run's own tree)."""
+    tr = tr if isinstance(tr, dict) else {}
+    commit = tr["commit"] if isinstance(tr.get("commit"), str) and GIT_HASH.fullmatch(tr["commit"]) else None
+    use: Dict[str, Any] = dict(tr)
+    why: Dict[str, str] = {}
+    for key, dirty_key, rel in (("rtl", "rtl_dirty", "rtl"), ("host_src", "host_src_dirty", "host")):
+        have = tr[key] if isinstance(tr.get(key), str) and tr[key] else None
+        got = rev(commit, rel) if (rev is not None and commit) else None
+        if have is not None:
+            if got is not None and got != have:
+                use[key] = None
+                why[rel] = f"it recorded {rel}/ tree {have[:12]}, which git does not give for its commit {commit[:12]} ({got[:12]})"
+        elif got is None:
+            why[rel] = "no tree recorded" + ("" if rev is None else f" and its commit {commit[:12]} is not in this checkout (or has no {rel}/)"
+                                             if commit else " and no usable commit either")
+        elif tr.get("dirty") is not False:
+            why[rel] = (f"no tree recorded, and its checkout was not recorded clean (dirty: {tr.get('dirty')}), so its commit "
+                        f"{commit[:12]} is not what ran")
+        else:
+            use[key], use[dirty_key] = got, False
+    return use, why
+
+
+def run_classes(tr: Optional[Dict[str, Any]], rev: Optional[Callable[[str, str], Optional[str]]] = None
+                ) -> Dict[str, Tuple[str, Optional[str]]]:
+    """{TILE: (key, unknown), HOST: (key, unknown)} for a run_start's `tree`: tree_key over resolve_tree's tree, the reason resolve_tree
+    gives for a directory it could not know taking the place of tree_key's own."""
+    use, why = resolve_tree(tr, rev)
+    out: Dict[str, Tuple[str, Optional[str]]] = {}
+    for kind, rel in ((TILE, "rtl"), (HOST, "host")):
+        key, unknown = tree_key(kind, use)
+        out[kind] = (key, why.get(rel) or unknown)
+    return out
+
+
+def count_slices(records: Iterable[Dict[str, Any]], now: Dict[str, Tuple[str, Optional[str]]],
+                 rev: Optional[Callable[[str, str], Optional[str]]] = None) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """What a RESUME counts (parcel DR4): of a metrics file's records, in order, the finished sweep slices (a leg of kind sweep with status pass
+    or fail and an item: what sweep_coverage takes) whose class, under the last run_start before them, is known and is the one `now` gives
+    their reach (`run_classes` of the resuming run's own tree). Every other slice stays in the file and in the report and is not counted:
+    it is of another class, or of an unknown one (its own, or - when this run's own is unknown - every one). Returns (the slices counted,
+    in order, and a tally): `slices` (all finished), `counted` and `other` ({reach: n}) and `unknown`, a list of {ts, commit, reach, why, n},
+    one for each run_start, reach and reason."""
+    counted: List[Dict[str, Any]] = []
+    tally: Dict[str, Any] = {"slices": 0, "counted": {TILE: 0, HOST: 0}, "other": {TILE: 0, HOST: 0}, "unknown": []}
+    cur: Optional[Dict[str, Tuple[str, Optional[str]]]] = None
+    start: Dict[str, Any] = {}
+    names: Dict[Tuple[Any, ...], Dict[str, Any]] = {}
+    for r in records:
+        typ = r.get("type")
+        if typ == "run_start":
+            tr = r.get("tree") if isinstance(r.get("tree"), dict) else None
+            cur, start = run_classes(tr, rev), {"ts": r.get("ts"), "commit": (tr or {}).get("commit") if isinstance((tr or {}).get("commit"), str) else None}
+            continue
+        if typ != "leg" or r.get("kind") != "sweep" or r.get("status") not in ("pass", "fail"):
+            continue
+        sw = r.get("sweep") if isinstance(r.get("sweep"), dict) else {}
+        if not sw.get("item"):
+            continue
+        tally["slices"] += 1
+        reach = slice_reach(sw)
+        if reach not in (TILE, HOST):
+            key, unknown, want = "none", "reach unknown", ("", None)
+        else:
+            key, unknown = (cur if cur is not None else run_classes(None, rev))[reach]
+            want = now.get(reach, ("", "this run's own class is not known"))
+            if unknown is None and want[1] is not None:
+                unknown = f"this run's own {reach} class is not known ({want[1]})"
+        if unknown is None and key == want[0]:
+            counted.append(r)
+            tally["counted"][reach] += 1
+        elif unknown is None:
+            tally["other"][reach] += 1
+        else:
+            k = (start.get("ts"), start.get("commit"), reach, unknown)
+            if k not in names:
+                names[k] = {"ts": start.get("ts"), "commit": start.get("commit"), "reach": reach, "why": unknown, "n": 0}
+                tally["unknown"].append(names[k])
+            names[k]["n"] += 1
+    return counted, tally
 
 
 def stream_key(op: Optional[str], seed: int, batch: int):
