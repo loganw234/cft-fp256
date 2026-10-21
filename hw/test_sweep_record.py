@@ -41,7 +41,9 @@ import tempfile
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.dirname(HERE)
+# ROOT holds docs/, certificates/ and python/. SWEEP_RECORD_TEST_ROOT names it for a copy of this test run from another directory (the driver's
+# test runs it from a plant's copy of the code, which has none of them beside it); the module and the library imported are HERE's.
+ROOT = os.environ.get("SWEEP_RECORD_TEST_ROOT") or os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(ROOT, "python"))
 import card_stress_lib as L  # noqa: E402
@@ -120,11 +122,19 @@ ITEMS = {it.name: it for it in L.sweep_items()}
 IMG = {n: (hashlib.sha256(b"test image " + n.encode()).hexdigest(), t)
        for n, t in (("quad", 4), ("single", 1), ("deep", 1))}
 C1, C2 = "1" * 40, "2" * 40
+# The sha256 of the whole export of fake_run() below at 77c5dbca (DR3's merge, before version 2): unsigned for key A, then signed by it.
+BASE_FAKE_RUN = ("e2922293f9f36a4878c503067383c778344520ecbc5b21f9ce3a3952663a7b38",
+                 "4b4eb1bf091364ed4326cdcd71747a4c6bf068956311a4da153680aef7e7dcf9")
+# The digest over the name and campaign id of every item of the catalog at 77c5dbca (the 125; the first 90 are DR3's b8555f2f...).
+BASE_CAMPAIGN_DIGEST = "2e8d96089a143918556275f5321c28f3fd9e78cae8b6044fe4dd88fbe52536b2"
 
 
-def fake_start(rid, commit=C1, dirty=False, dry=False, resumed=False, t=1792000000.0):
+def fake_start(rid, commit=C1, dirty=False, dry=False, resumed=False, t=1792000000.0, host_tree=None):
+    """host_tree: the keys DR2's driver adds to run_start.tree (host_src, host_src_dirty, cc, rtl, rtl_dirty), or none: a run that
+    recorded none of them, as the 2026-10-19 run's first run_start."""
     return {"type": "run_start", "run_id": rid, "out": "out/" + rid, "host": "testhost", "argv": [],
-            "settings": {"quick": False, "dry_run": dry}, "tree": {"commit": commit, "dirty": dirty, "dirty_files": 0},
+            "settings": {"quick": False, "dry_run": dry},
+            "tree": dict({"commit": commit, "dirty": dirty, "dirty_files": 0}, **(host_tree or {})),
             "images": {n: {"sha256": h, "bytes": 1, "tiles": k, "path": f"images/{n}.xclbin", "target": "t-" + n}
                        for n, (h, k) in IMG.items()},
             "deadline": None, "resumed": resumed, "v": 1, "ts": "2026-10-20 00:00:00", "epoch": t}
@@ -154,8 +164,11 @@ def fake_leg(item, *, image="quad", lo=0, hi=1 << 20, count=1 << 20, seed=0x50AC
         c = count if cases is None else cases
         counts = {"cases": c, "value_mismatches": vm, "flag_mismatches": fm}
         sw.update(count=count, seed=seed, seed_n=seed_n, tile=tile, jobs=jobs)
+    host = image == "cpu"                                  # a host-pool leg (hw/card_stress.py run_host_slice): no image, no tile, the pool's mark
+    if host:
+        sw["pool"] = {"worker": 1, "host": "testhost", "build_id": "commit=" + "3" * 40 + " tracked=clean untracked=none"}
     done = status in ("pass", "fail")
-    return {"type": "leg", "cycle": 1, "image": image, "image_sha256": IMG[image][0], "leg": "sweep-" + item,
+    return {"type": "leg", "cycle": 1, "image": image, "image_sha256": None if host else IMG[image][0], "leg": "sweep-" + item,
             "kind": "sweep", "attempt": 1, "start": "2026-10-20 00:01:40", "end": "2026-10-20 00:01:42",
             "start_epoch": round(t, 3), "end_epoch": round(t + dur, 3), "duration_s": round(dur, 3),
             "rc": 0 if status == "pass" else 1, "status": status, "timed_out": status == "timeout", "killed": None,
@@ -251,6 +264,71 @@ def campaign_line(lines, idx):
     return next(ln for ln in lines if json.loads(ln)["id"] == cid)
 
 
+def moved_legs(raw):
+    """The finished sweep legs of `raw` whose run_start in force names another commit (or dirty flag) than the file's first run_start
+    does: the legs a first-run_start expectation gets wrong, and no other."""
+    key = lambda s: ((s.get("tree") or {}).get("commit"), (s.get("tree") or {}).get("dirty"))
+    first = cur = None
+    out = []
+    for r in raw:
+        if r["type"] == "run_start":
+            cur = r
+            first = first or r
+        elif r["type"] == "leg" and r["kind"] == "sweep" and r["status"] in ("pass", "fail") and key(cur) != key(first):
+            out.append(r["leg"])
+    return out
+
+
+def readback(raw, flat, device, first_only=False):
+    """Every finished sweep leg of `raw` (a run's records, in file order) against its record in `flat` (the exported slices and streams,
+    in the same order), field by field, by code that shares nothing with the exporter. A leg is held to the run_start IN FORCE for it:
+    the last one before it in the file, because a resumed run writes one run_start for each invocation and the exporter stamps each
+    slice with the one in force (the images, the run id and the tool's commit and dirty flag can differ between them; the 2026-10-19
+    run's file has two, of different commits). first_only is the PLANT: the first run_start's for every leg, which is what this check
+    did until 2026-10-21 and what it must go red on, for the legs after a resume. Returns [(the leg's name, the fields that differ)]."""
+    cur, fin = None, []
+    for r in raw:
+        if r["type"] == "run_start":
+            cur = cur if (first_only and cur is not None) else r
+        elif r["type"] == "leg" and r["kind"] == "sweep" and r["status"] in ("pass", "fail"):
+            fin.append((r, cur))
+    if len(fin) != len(flat):
+        return [("the number of finished legs and of records", [f"{len(fin)} legs, {len(flat)} records"])]
+    bad = []
+    for (leg, st), r in zip(fin, flat):
+        sw, c, tr = leg["sweep"], leg["counts"], st.get("tree") or {}
+        diff = []
+        if "lo" in sw:
+            diff += [k for k, v in (("lo", sw["lo"]), ("hi", sw["hi"])) if r.get(k) != v]
+            diff += ["skipped"] if r.get("skipped") != c.get("skipped") else []
+        else:
+            diff += [k for k, v in (("seed", sw["seed"]), ("count", sw["count"])) if r.get(k) != v] + (["skipped"] if "skipped" in r else [])
+        diff += [k for k, v in (("cases", c["cases"]), ("vm", c["value_mismatches"]), ("fm", c["flag_mismatches"])) if r.get(k) != v]
+        if leg["image"] == "cpu":                        # a host-pool leg: version 2, the host build run_start.tree names
+            want = {"src": tr.get("host_src")}
+            if isinstance(tr.get("host_src_dirty"), bool):
+                want["dirty"] = tr["host_src_dirty"]
+            if isinstance(tr.get("cc"), str):
+                want["cc"] = tr["cc"]
+            diff += [k for k, ok in (("v", r["v"] == 2), ("subject", r["subject"] == want), ("image_sha256", leg["image_sha256"] is None)) if not ok]
+        else:                                            # a card leg: version 1, the image run_start names and the tile the leg ran on
+            im = st["images"][leg["image"]]
+            want = dict({"image": leg["image"], "xclbin": leg["image_sha256"], "tiles": im["tiles"]},
+                        **({} if sw["tile"] is None else {"tile": sw["tile"]}))
+            diff += [k for k, ok in (("v", r["v"] == 1), ("subject", r["subject"] == want), ("image_sha256", leg["image_sha256"] == im["sha256"])) if not ok]
+        run = {"id": st["run_id"], "device": device, "start_ms": round(leg["start_epoch"] * 1000), "end_ms": round(leg["end_epoch"] * 1000),
+               "rate": round(leg["rate"]["value"])}
+        if leg["log"]:
+            run["log"] = leg["log"]
+        diff += ["run"] if r["run"] != run else []
+        tool = {"commit": tr["commit"], "dirty": tr["dirty"]} if isinstance(tr.get("commit"), str) and isinstance(tr.get("dirty"), bool) else None
+        diff += ["tool"] if r.get("tool") != tool else []
+        diff += ["finding"] if (not S.is_finding(r)) != (leg["status"] == "pass") else []
+        if diff:
+            bad.append((leg["leg"], diff))
+    return bad
+
+
 # ---- forms ----------------------------------------------------------------------------------------
 
 def group_forms(tmp):
@@ -293,9 +371,11 @@ def group_forms(tmp):
             ("no version", nov, "form"),
             ("a version that is a string", raw(v="1"), "form"),
             ("a version that is a bool", raw(v=True), "form"),
-            ("version 2", raw(v=2), "version"),
-            ("version 0", raw(v=0), "version")):
+            ("version 3 (version 2 is known since 2026-10-21: the host-pool slice)", raw(v=3), "version"),
+            ("version 0", raw(v=0), "version"),
+            ("a negative version", raw(v=-1), "version")):
         red(f"line: {label}", want, S.read_record_line, line, 1)
+    check("a line of version 2 reads, as a line: version 2 is known", S.read_record_line(raw(v=2), 1)["v"] == 2)
     red("a file whose last line has no LF", "canonical", S.parse_file, b"".join(lines)[:-1])
     red("an empty file", "empty", S.parse_file, b"")
     red("a record whose bytes do not hash to its id", "id", S.parse_file, edit(lines[0], lambda o: o.update(space=1)))
@@ -463,6 +543,21 @@ def group_export(tmp):
                                               o["div32-rne"]["subject"]["image"]} == {"quad", "deep", "single"})
     check("the tool's commit follows the resume's run_start", o["sqrt32-rne"]["tool"]["commit"] == C1 and
           o["rint32-rne"]["tool"]["commit"] == C2 and o["sqrt32-rne"]["tool"]["dirty"] is False)
+    # the read-back every `--metrics` run does on a real file, here on the synthetic one, in every run of the suite (found 2026-10-21: the
+    # real run's file has two run_starts, and a check that took the FIRST for every leg failed the legs of the second; SG's test, not a regression)
+    raw0, dev0 = fake_run(), S.device_of(pub)
+    check("readback: every record equals its raw leg, field by field, each against the run_start in force for it: this file has two run_starts, "
+          "of commits C1 and C2 (a resume's), and the legs after the second carry C2", readback(raw0, flat, dev0) == [] and moved_legs(raw0) == ["sweep-rint32-rne", "sweep-class32"])
+    planted = readback(raw0, flat, dev0, first_only=True)
+    check("readback, the plant: the first run_start's expectation for every leg is red on this file, at the two legs after the resume and on the tool's "
+          "commit alone (so the check can fail, and for the reason it is there)",
+          [b[0] for b in planted] == moved_legs(raw0) and all(b[1] == ["tool"] for b in planted), str(planted))
+    wrong = json.loads(json.dumps(flat))
+    wrong[0]["subject"]["tiles"] = 7
+    wrong[-1]["tool"]["commit"] = C1
+    names = [r["leg"] for r in raw0 if r["type"] == "leg" and r["kind"] == "sweep" and r["status"] in ("pass", "fail")]
+    check("readback: a wrong tile count on the first record and the first run_start's commit on the last are each found, and nothing else",
+          readback(raw0, wrong, dev0) == [(names[0], ["subject"]), (names[-1], ["tool"])], str(readback(raw0, wrong, dev0)))
     f = o["sqrt32-rtz"]
     check("the finding is a record that says what it found, and the only finding",
           S.is_finding(f) and len(f["disagreements"]) == 2 and sum(S.is_finding(r) for r in flat) == 1)
@@ -478,6 +573,11 @@ def group_export(tmp):
 
     ex2, lines2, _ = export(path, signer=signer)
     check("a signed file verifies with the keyring naming the key", verdict(lines2, K["ring_a"]) == "ok")
+    check("version 1 is byte for byte what it was at 77c5dbca, before version 2: this synthetic run's whole export (12 slices and streams, "
+          "12 campaigns), unsigned for key A and signed by it, hashes to what the base's code gave (MEASURED at 77c5dbca, "
+          "scratch/digest_fake_run.py), and none of its records is version 2",
+          (len(lines), hashlib.sha256(b"".join(lines)).hexdigest(), len(lines2), hashlib.sha256(b"".join(lines2)).hexdigest()) ==
+          (24,) + BASE_FAKE_RUN[:1] + (24,) + BASE_FAKE_RUN[1:] and all(json.loads(ln)["v"] == 1 for ln in lines))
     check("export is deterministic: the same run and key give the same bytes",
           export(path, signer=signer)[1] == lines2 and export(path, public=pub)[1] == lines)
     unk = [{"type": "event", "event": "sweep_empty", "detail": "nothing left", "v": 1, "ts": "x", "epoch": 1.0},
@@ -753,7 +853,9 @@ def group_plants(tmp, lines=None, tag="synthetic"):
     # 5. a key file inside the tree: group keys. 6. the rest of the list
     case("a signature missing where signatures are required", "signature", lambda: put(i, edit(lines[i], lambda o: o.pop("sig"))))
     case("a key the keyring does not name", "key", lambda: lines, {K["pub_b"].hex(): "B"})
-    case("version 2", "version", lambda: put(i, edit(lines[i], lambda o: o.update(v=2))))
+    case("version 3 (unknown)", "version", lambda: put(i, edit(lines[i], lambda o: o.update(v=3))))
+    case("a card slice given version 2 (a card subject in a version-2 record: a card slice is version 1)", "form",
+         lambda: put(i, edit(lines[i], lambda o: o.update(v=2))))
     case("spaces after the separators", "canonical", lambda: put(i, json.dumps(json.loads(lines[i]), sort_keys=True).encode() + b"\n"))
     case("the file written with CRLF line endings", "canonical", lambda: [ln[:-1] + b"\r\n" for ln in lines])
     case("a key of small order on a signature", "signer", lambda: put(i, edit(lines[i], lambda o: o["sig"].update(key="01" + "00" * 31))))
@@ -819,12 +921,251 @@ def group_plants(tmp, lines=None, tag="synthetic"):
         check(t("the verifier without run_problem accepts the validly signed wrong rate"), verdict(badr, RA) == "ok")
 
 
+# ---- host: version 2, the host-pool slice and stream ----------------------------------------------------
+
+HA, HB = "a1" * 20, "b2" * 20                           # two host/ tree hashes (git tree hashes: 40 hex)
+CCV = "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0"      # a compiler's first version line, as the 2026-10-19 run's second run_start has one
+
+
+def host_tree(src=HA, dirty=False, cc=CCV):
+    """The keys DR2's driver adds to run_start.tree (hw/card_stress.py tree_facts)."""
+    return {"host_src": src, "host_src_dirty": dirty, "cc": cc, "rtl": "c3" * 20, "rtl_dirty": False}
+
+
+def fake_host_run(rid="card-stress-host-1", t0=1792300000.0):
+    """A run of the driver's format that holds card slices (a tile item's, and one of a host item, which is what the card swept before the
+    host pool) and host-pool slices (image cpu: no image hash, no tile, the pool's mark): records 4 to 9 are host legs, 9 timed out; the
+    resume's run_start (another host/ tree, a host_src_dirty that git could not say and no compiler) is followed by one more host slice."""
+    st = {"t": t0 + 10, "n": 0}
+
+    def leg(item, **kw):
+        st["t"] += 7
+        st["n"] += 1
+        return fake_leg(item, t=st["t"], n=st["n"], **kw)
+
+    def host(item, **kw):
+        return leg(item, image="cpu", **kw)
+    bad = ["MISMATCH class32 a=0x7f800001 dev=0x00000001 ref=0x00000002", "FLAGS class32 a=0x00000001"]
+    return [fake_start(rid, t=t0, host_tree=host_tree()), fake_build(),
+            leg("sqrt32-rne", tile=1, jobs=4), leg("conv32to64-all", image="deep"),
+            host("conv32to64-all"), host("nextup32", lo=1 << 20, hi=2 << 20), host("cvtto32-all-rne", lo=1 << 20, hi=2 << 20),
+            host("rem64", seed=0xC5000000 + 41, seed_n=3), host("class32", lo=0, hi=1 << 20, status="fail", vm=1, fm=1, dis=bad),
+            host("logb32", status="timeout"),
+            fake_start(rid, commit=C2, resumed=True, t=st["t"] + 60, host_tree=host_tree(HB, None, None)), fake_build(),
+            host("logb32", lo=0, hi=1 << 20)]
+
+
+def snap(ex):
+    """What an exporter's state is, for 'a refusal leaves it as it was'."""
+    return (ex.legs, ex.findings, sorted(ex.seen), dict(ex.left), ex.built, ex.start and ex.start["run_id"])
+
+
+def group_host(tmp):
+    pub, A, RA = K["pub_a"], K["signer_a"], K["ring_a"]
+    raw = fake_host_run()
+    path = metrics_file(tmp, "host1.jsonl", raw)
+    try:
+        ex, lines, _ = export(path, signer=A)
+    except S.Refusal as e:                       # a defect in the exporter is a red check, not a crash of the group
+        check("host: the run exports 8 finished legs (2 card, 6 host-pool) as 7 slices and a stream, over 7 campaigns", False, f"refused {e.name}: {e.why}")
+        return
+    recs = [json.loads(ln) for ln in lines]
+    flat = [r for r in recs if r["kind"] != "campaign"]
+    camps = {r["id"]: r for r in recs if r["kind"] == "campaign"}
+    dev = S.device_of(pub)
+    check("host: the run exports 8 finished legs (2 card, 6 host-pool) as 7 slices and a stream, over 7 campaigns; the host job that timed out "
+          "is counted as left", collections.Counter((r["kind"], r["v"]) for r in recs) ==
+          {("campaign", 1): 7, ("slice", 1): 2, ("slice", 2): 5, ("stream", 2): 1} and ex.legs == 8 and ex.left == {"timeout": 1}, str(ex.left))
+    check("host: the card legs are version 1, the host-pool legs version 2, and every campaign version 1 (a campaign is version 1's whatever "
+          "version the records naming it are)", [r["v"] for r in flat] == [1, 1, 2, 2, 2, 2, 2, 2] and all(c["v"] == 1 for c in camps.values()))
+    check("host: the first host slice's subject is run_start.tree's host_src, host_src_dirty and cc, read as they stand (and nothing of the "
+          "machine: no node name, no CPU)", flat[2]["subject"] == {"src": HA, "dirty": False, "cc": CCV} and flat[2]["tool"] == {"commit": C1, "dirty": False},
+          str(flat[2]["subject"]))
+    check("host: after the resume, whose run_start recorded another host/ tree, git could not say whether host/ differed and no compiler, the "
+          "slice has the new tree and no `dirty` and no `cc`: a field the data cannot fill is absent, not False and not null",
+          flat[7]["subject"] == {"src": HB} and flat[7]["tool"]["commit"] == C2 and "testhost" not in json.dumps(recs))
+    check("host: no host subject has a card field and no card subject a host field; no host record has a tile, tiles, image or xclbin",
+          all(not {"image", "xclbin", "tiles", "tile"} & set(r["subject"]) for r in flat if r["v"] == 2)
+          and all("src" not in r["subject"] and "dirty" not in r["subject"] and "cc" not in r["subject"] for r in flat if r["v"] == 1))
+    check("host: readback - every record equals its raw leg, field by field, against the run_start in force for it (this file has two)",
+          readback(raw, flat, dev) == [], str(readback(raw, flat, dev)))
+    planted = readback(raw, flat, dev, first_only=True)
+    check("host: readback, the plant - the first run_start's expectation is red here, at the one host slice after the resume, on its subject and "
+          "the tool's commit", planted == [("sweep-logb32", ["subject", "tool"])], str(planted))
+    # the campaign: the same record whoever computed the slice, and unchanged since 77c5dbca
+    i_card, i_host = (next(n for n, r in enumerate(flat) if r["v"] == v and camps[r["cid"]]["operation"] == "conv32to64-all") for v in (1, 2))
+    conv_id = "c2aaacbea9016dc8da1472d1a71f15e161d49bdecdb2db6cadc4177a4fb3edc1"
+    check("host: a host-pool slice and a card image's slice of the same item name one campaign, whose id is the one the document prints; the "
+          "campaign says reach host and the oracle kind host-fpu+glibc", flat[i_card]["cid"] == flat[i_host]["cid"] == conv_id and
+          camps[conv_id]["reach"] == "host" and camps[conv_id]["oracle"] == "host-fpu+glibc"
+          and all(c["reach"] == "host" for c in camps.values() if c["operation"] != "sqrt32"), str(sorted(camps.values(), key=lambda c: c["operation"])[0]))
+    alone = os.path.join(tmp, "host-alone.jsonl")
+    write_metrics(alone, raw[:2] + [raw[4]])
+    exa, la, _ = export(alone, signer=A)
+    camp_line = next(ln for ln in lines if json.loads(ln)["id"] == conv_id)
+    cards_only = export(metrics_file(tmp), signer=A)[1]
+    check("host: a host slice's cid and campaign line are the same exported alone as with the card slices of the run, and the same as the card-only "
+          "synthetic run's line for that item (no card campaign id moves)", len(la) == 2 and la[0] == camp_line and json.loads(la[1])["cid"] == conv_id and
+          camp_line == next(ln for ln in cards_only if json.loads(ln)["id"] == conv_id))
+    dig = hashlib.sha256()
+    for it in L.sweep_items():
+        dig.update(f"{it.name} {S.record_id(S.campaign_body(it))}\n".encode())
+    check("host: the campaign ids of all 125 catalog items are what they were at 77c5dbca (one digest over each name and id; the first 90 are DR3's)",
+          dig.hexdigest() == BASE_CAMPAIGN_DIGEST and len(L.sweep_items()) == 125, dig.hexdigest())
+    # verify: both versions in one file, the totals by subject kind equal to the raw legs'
+    rep = verify_lines(lines, RA)
+    done = [x for x in raw if x["type"] == "leg" and x["kind"] == "sweep" and x["status"] == "pass"]
+    want = {k: (sum(1 for x in done if (x["image"] == "cpu") == (k == "host")),
+                sum(x["counts"]["cases"] for x in done if (x["image"] == "cpu") == (k == "host"))) for k in ("card", "host")}
+    check("host: the mixed file verifies signed against the keyring; its totals by subject kind (records, clean, cases) are the raw legs' own, summed apart",
+          (rep["slices"], rep["streams"], len(rep["findings"]), rep["clean"], rep["cases"]) == (7, 1, 1, 7, sum(w[1] for w in want.values())) and
+          {k: (v["clean"], v["cases"]) for k, v in rep["kinds"].items()} == want and rep["kinds"]["host"]["records"] == 6 and rep["kinds"]["card"]["records"] == 2,
+          f"{rep['kinds']} {want}")
+    rc, so, se = cli("verify", write_lines(tmp, "host-signed.jsonl", lines), "--keyring", K["ring_a_path"])
+    check("host: `verify` prints the first line as it always did and a line of the totals by subject kind; the host finding exits 3",
+          rc == 3 and f"7 clean ({rep['cases']} cases), 1 FINDINGS" in so and
+          f"by subject: card {want['card'][0]} clean ({want['card'][1]} cases); host {want['host'][0]} clean ({want['host'][1]} cases), 1 findings" in so, so[-400:])
+    hl = [ln for ln in lines if json.loads(ln).get("v") == 2]
+    only_host = [ln for ln in lines if json.loads(ln)["kind"] == "campaign" and json.loads(ln)["id"] in {json.loads(h)["cid"] for h in hl}] + hl
+    rep_h = verify_lines(only_host, RA)
+    check("host: a file of host-pool records alone (version-1 campaigns, version-2 slices) verifies, and its card total is 0",
+          rep_h["kinds"]["card"] == {"records": 0, "clean": 0, "cases": 0} and rep_h["kinds"]["host"]["records"] == 6)
+    unsigned = export(path, public=pub)[1]
+    p_un, p_sg = os.path.join(tmp, "host-un.jsonl"), os.path.join(tmp, "host-sg.jsonl")
+    write_lines(tmp, "host-un.jsonl", unsigned)
+    rc, so, se = cli("sign", p_un, "--key", K["key_a"], "--out", p_sg)
+    check("host: `sign` of the unsigned file equals `export --key`, byte for byte, version-2 records included", rc == 0 and open(p_sg, "rb").read() == b"".join(lines), se[-200:])
+    check("host: export is deterministic, the unsigned file verifies only as unsigned, and every host record has an id and no signature",
+          export(path, signer=A)[1] == lines and verdict(unsigned, None, False) == "ok" and verdict(unsigned) == "signature"
+          and all("sig" not in json.loads(ln) for ln in unsigned))
+    # the example in the document: a host slice, from this synthetic run (a real run holds none: night 1's run_start recorded no host/ tree)
+    doc = open(os.path.join(ROOT, "docs", "SWEEP-RECORDS.md"), encoding="utf-8").read().splitlines()
+    check("host: the document's example host slice is this synthetic run's first host slice, exported unsigned for the test's key A",
+          unsigned[lines.index(next(ln for ln in lines if json.loads(ln).get("v") == 2))].decode().rstrip("\n") in doc)
+
+    # version rule
+    i_h = next(n for n, ln in enumerate(lines) if json.loads(ln).get("v") == 2)
+    red("a version-3 record in the mixed file", "version", S.parse_file, b"".join(lines[:i_h] + [edit(lines[i_h], lambda o: o.update(v=3))] + lines[i_h + 1:]))
+    why = None
+    try:
+        S.parse_file(edit(lines[i_h], lambda o: o.update(v=3)))
+    except S.Refusal as e:
+        why = e.why
+    check("host: an unknown version is refused by that name and the message says which versions are known", why is not None and "version 3" in why and "versions 1 and 2" in why, str(why))
+    red("a campaign record given version 2 (a campaign is version 1's)", "form", S.parse_file,
+        b"".join([edit(lines[0], lambda o: o.update(v=2), fix_id=True)] + lines[1:]))
+
+    # the exporter's refusals, each leaving it as it was
+    tile_on_cpu = fake_leg("sqrt32-rne", image="cpu")      # a TILE item's job given to the host pool
+
+    def refuse(label, want_in, mutate_leg=None, mutate_start=None, the_leg=None):
+        e = S.Exporter(public=pub)
+        st = json.loads(json.dumps(raw[0]))
+        (mutate_start or (lambda s: None))(st)
+        e.run_start(st)
+        e.build(raw[1])
+        e.leg(raw[2])                                       # a card slice first: the exporter has a run, a build, a campaign and a leg to keep
+        before = snap(e)
+        leg = json.loads(json.dumps(the_leg or raw[4]))
+        (mutate_leg or (lambda s: None))(leg)
+        try:
+            e.leg(leg)
+            got = None
+        except S.Refusal as x:
+            SEEN.add(x.name)
+            got = (x.name, x.why)
+        after = snap(e)
+        check(f"host export: {label} -> refused metrics, saying {want_in!r}", got is not None and got[0] == "metrics" and want_in in got[1], str(got))
+        nxt = e.leg(raw[3])                                 # a card slice of another item: its campaign line, then itself
+        check(f"host export: {label} - the exporter is as it was after the refusal, and the next good leg still brings its campaign first",
+              after == before and len(nxt) == 2 and json.loads(nxt[0])["kind"] == "campaign" and e.legs == before[0] + 1, f"{before} -> {after}")
+    refuse("a host slice whose run recorded no host/ tree (run_start.tree has no host_src: night 1 of the 2026-10-19 run)", "no host/ tree",
+           mutate_start=lambda s: s["tree"].pop("host_src"))
+    refuse("a host slice whose run_start.tree says host_src is null", "no host/ tree", mutate_start=lambda s: s["tree"].update(host_src=None))
+    refuse("a host slice whose host_src is not a tree hash (an abbreviation)", "no host/ tree", mutate_start=lambda s: s["tree"].update(host_src="4d9905f"))
+    refuse("a host slice whose run_start has no tree at all", "no host/ tree", mutate_start=lambda s: s.update(tree=None))
+    refuse("a card slice dressed as a host one: the image cpu with an image hash", "dressed as a host-pool one",
+           mutate_leg=lambda s: s.update(image_sha256=IMG["quad"][0]))
+    refuse("a card slice dressed as a host one: the image cpu with a tile", "dressed as a host-pool one", mutate_leg=lambda s: s["sweep"].update(tile=2))
+    refuse("a host slice dressed as a card one: a card image's name and hash, with the host pool's mark (sweep.pool)", "dressed as a card one",
+           mutate_leg=lambda s: s.update(image="quad", image_sha256=IMG["quad"][0]))
+    refuse("a host-pool slice of a tile item (sqrt32-rne on the image cpu): a host build is no evidence about the tile", "an item whose reach is tile",
+           the_leg=tile_on_cpu)
+    refuse("a compiler line with a control character", "compiler version line", mutate_start=lambda s: s["tree"].update(cc="gcc 13\x07"))
+    refuse("a compiler line of 257 characters", "compiler version line", mutate_start=lambda s: s["tree"].update(cc="x" * 257))
+    ok_cc = S.Exporter(public=pub)
+    ok_cc.run_start(dict(raw[0], tree=dict(raw[0]["tree"], cc="x" * 256)))
+    ok_cc.build(raw[1])
+    check("host export: a compiler line of exactly 256 characters is held as it is", json.loads(ok_cc.leg(raw[4])[-1])["subject"]["cc"] == "x" * 256)
+
+    # the verifier's refusals, on validly signed records, so that only the check aimed at can fire
+    ih = next(n for n, ln in enumerate(lines) if json.loads(ln).get("v") == 2)
+    ic = next(n for n, ln in enumerate(lines) if json.loads(ln).get("v") == 1 and json.loads(ln)["kind"] == "slice")
+    sqrt_cid = next(c["id"] for c in camps.values() if c["operation"] == "sqrt32")
+    # the host slice moved to a tile campaign must otherwise be fit for it, so that only the reach check can refuse it: logb32's slice is exact,
+    # takes one case an encoding and prints no clause, as sqrt32's campaign says of its own
+    il = next(n for n, ln in enumerate(lines) if json.loads(ln).get("v") == 2 and camps[json.loads(ln)["cid"]]["operation"] == "logb32")
+    put = lambda k, new: [new if n == k else ln for n, ln in enumerate(lines)]
+    card_subject = lambda o: o.update(subject={"image": "quad", "xclbin": IMG["quad"][0], "tiles": 4})
+    for label, want, make in (
+            ("a host-pool slice edited to carry a card image's subject (a card slice dressed as a host one): the record says version 2", "form",
+             lambda: put(ih, resign(lines[ih], card_subject, A))),
+            ("a card slice edited to carry a host build's subject (a host slice dressed as a card one): the record says version 1", "form",
+             lambda: put(ic, resign(lines[ic], lambda o: o.update(subject={"src": HA}), A))),
+            ("a host-pool slice given version 1 (its host subject is not version 1's)", "form",
+             lambda: put(ih, resign(lines[ih], lambda o: o.update(v=1), A))),
+            ("a host-pool slice naming a campaign whose reach is the tile (a host build is no evidence about the tile)", "campaign",
+             lambda: put(il, resign(lines[il], lambda o: o.update(cid=sqrt_cid), A)))):
+        red(f"verify: {label}", want, verify_lines, make(), RA)
+    why = {}
+    for label, make in (("a card subject in version 2", lambda: put(ih, resign(lines[ih], card_subject, A))),
+                        ("a host subject in version 1", lambda: put(ic, resign(lines[ic], lambda o: o.update(subject={"src": HA}), A))),
+                        ("a host slice of a tile campaign", lambda: put(il, resign(lines[il], lambda o: o.update(cid=sqrt_cid), A)))):
+        try:
+            verify_lines(make(), RA)
+        except S.Refusal as e:
+            why[label] = e.why
+    check("host: each of those refusals says what it refuses: a card slice is version 1, a host-pool slice is version 2, and a host build's reach",
+          "a card slice is version 1" in why.get("a card subject in version 2", "") and "a host-pool slice is version 2" in why.get("a host subject in version 1", "")
+          and "reach is tile" in why.get("a host slice of a tile campaign", ""), str(why))
+    h = json.loads(lines[ih])
+    for label, fn in (("no src", lambda o: o["subject"].pop("src")), ("src in capitals", lambda o: o["subject"].update(src=HA.upper())),
+                      ("src of 39 characters", lambda o: o["subject"].update(src=HA[:39])), ("src that is not a string", lambda o: o["subject"].update(src=5)),
+                      ("dirty that is 0", lambda o: o["subject"].update(dirty=0)), ("an empty cc", lambda o: o["subject"].update(cc="")),
+                      ("a cc of 257 characters", lambda o: o["subject"].update(cc="x" * 257)), ("a cc with a control character", lambda o: o["subject"].update(cc="a\x00b")),
+                      ("a null cc", lambda o: o["subject"].update(cc=None)), ("a node name in the subject", lambda o: o["subject"].update(host="testhost")),
+                      ("a tile in a host subject", lambda o: o["subject"].update(tile=1)), ("tiles in a host subject", lambda o: o["subject"].update(tiles=1)),
+                      ("a host/ build id the form does not have", lambda o: o["subject"].update(build_id="x"))):
+        o = json.loads(json.dumps(h))
+        fn(o)
+        red(f"shape (version 2): {label}", "form", S.check_shape, o, "x")
+    check("host: the host subject's optional fields may be absent and the record is still of its form: src alone, src and dirty, src and cc",
+          all(refusal(S.check_shape, dict(h, subject=sub), "x") is None for sub in ({"src": HA}, {"src": HA, "dirty": True}, {"src": HA, "cc": "x"})))
+    # the verifier without the check lets its plant through
+    ontile = put(il, resign(lines[il], lambda o: o.update(cid=sqrt_cid), A))
+    with without("subject_problem", lambda camp, rec: None):
+        check("host: the verifier without subject_problem accepts the validly signed host-pool slice of a tile campaign", verdict(ontile, RA) == "ok")
+    dressed = put(ih, resign(lines[ih], card_subject, A))
+    with without("check_shape", lambda obj, where: None):
+        check("host: the verifier without check_shape accepts the validly signed card subject in a version-2 record", verdict(dressed, RA) == "ok")
+    # a finding is a record: the host finding
+    hf = next(r for r in flat if r["v"] == 2 and S.is_finding(r))
+    check("host: the host slice that found a mismatch is a record with its first lines, version 2, and a finding, never coverage",
+          hf["vm"] == 1 and len(hf["disagreements"]) == 2 and hf["v"] == 2 and rep["kinds"]["host"]["records"] - rep["kinds"]["host"]["clean"] == 1)
+
+
+def write_lines(tmp, name, lines):
+    p = os.path.join(tmp, name)
+    with open(p, "wb") as f:
+        f.write(b"".join(lines))
+    return p
+
+
 # ---- real -------------------------------------------------------------------------------------------
 
 def group_real(tmp, metrics):
     p = os.path.join(metrics, "metrics.jsonl") if os.path.isdir(metrics) else metrics
     raw = [json.loads(ln) for ln in open(p, "rb").read().split(b"\n") if ln.strip()]
-    start = next(r for r in raw if r["type"] == "run_start")
     fin = [r for r in raw if r["type"] == "leg" and r["kind"] == "sweep" and r["status"] in ("pass", "fail")]
     others = collections.Counter(r["type"] for r in raw if r["type"] not in ("run_start", "build", "leg"))
     def shape_of(r):
@@ -840,21 +1181,20 @@ def group_real(tmp, metrics):
     check(f"real: {len(fin)} finished sweep legs make {len(fin)} records and {len({l['sweep']['item'] for l in fin})} campaigns; "
           f"{sum(others.values())} records of other types ({dict(others)}) are ignored",
           len(flat) == len(fin) and len(recs) - len(flat) == len({l["sweep"]["item"] for l in fin}))
-    bad = []
-    for leg, r in zip(fin, flat):                          # every field read back from the raw leg, literally
-        sw, c, im = leg["sweep"], leg["counts"], start["images"][leg["image"]]
-        ok = all(r.get(k) == v for k, v in (("lo", sw["lo"]), ("hi", sw["hi"]), ("cases", c["cases"]), ("vm", c["value_mismatches"]),
-                                            ("fm", c["flag_mismatches"]))) and r.get("skipped") == c.get("skipped")
-        ok = ok and r["subject"] == dict({"image": leg["image"], "xclbin": leg["image_sha256"], "tiles": im["tiles"]},
-                                         **({} if sw["tile"] is None else {"tile": sw["tile"]})) and leg["image_sha256"] == im["sha256"]
-        ok = ok and r["run"] == dict({"id": start["run_id"], "device": S.device_of(K["pub_a"]), "start_ms": round(leg["start_epoch"] * 1000),
-                                      "end_ms": round(leg["end_epoch"] * 1000), "rate": round(leg["rate"]["value"])},
-                                     **({"log": leg["log"]} if leg["log"] else {}))
-        ok = ok and r["tool"] == {"commit": start["tree"]["commit"], "dirty": start["tree"]["dirty"]}
-        ok = ok and (not S.is_finding(r)) == (leg["status"] == "pass")
-        if not ok:
-            bad.append(leg["leg"])
-    check("real: every record equals its raw leg, field by field (interval, counts, image, tile, run, rate, log, tree)", not bad, str(bad[:3]))
+    # every field read back from the raw leg, literally, against the run_start IN FORCE for the leg (a resumed run's file has one for each
+    # invocation: the 2026-10-19 run's two, of commits 881bbcb6 and 0b7c9599, give 378 records the first and 174 the second)
+    bad = readback(raw, flat, S.device_of(K["pub_a"]))
+    check("real: every record equals its raw leg, field by field (interval, counts, image, tile, run, rate, log, tree), each against the "
+          "run_start in force for it", not bad, str(bad[:3]))
+    starts = [r for r in raw if r["type"] == "run_start"]
+    moved = moved_legs(raw)
+    if moved:
+        planted = readback(raw, flat, S.device_of(K["pub_a"]), first_only=True)
+        check(f"real: the plant, the first run_start's expectation for every leg, is red on this file ({len(starts)} run_starts, commits "
+              f"{', '.join(str((s.get('tree') or {}).get('commit'))[:8] for s in starts)}): it fails the {len(moved)} legs the later ones are "
+              f"in force for, on the tool's commit, and no other", [b[0] for b in planted] == moved and all("tool" in b[1] for b in planted), str(planted[:2]))
+    else:
+        skip("real: the first-run_start plant", "this file has one run_start, or several of one commit: the plant would not differ")
     total = sum(l["counts"]["cases"] for l in fin)
     rep = verify_lines(lines, None, False)
     check(f"real: the cases in clean records, {rep['cases']:,}, are the sum of the raw legs' ({total:,}), and none is a finding",
@@ -916,7 +1256,7 @@ def main():
         K["ring_a"] = {K["pub_a"].hex(): "test key A"}
         K["ring_ab"] = dict(K["ring_a"], **{K["pub_b"].hex(): "test key B"})
         for name, fn in (("forms", group_forms), ("rules", group_rules), ("export", group_export), ("keys", group_keys),
-                         ("domain", group_domain), ("plants", group_plants)):
+                         ("domain", group_domain), ("plants", group_plants), ("host", group_host)):
             if want(name):
                 n0, f0 = CHECKS, len(FAILS)
                 fn(tmp)

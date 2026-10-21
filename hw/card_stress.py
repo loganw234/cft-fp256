@@ -474,9 +474,13 @@ class RecordSink:
     A leg the exporter REFUSES (a Refusal, by name: it cannot be a version-1 record) is an `event` named record_refused in
     metrics.jsonl and driver.log, with the refusal's name and reason, and the run goes on: a record error never stops a long run.
     A run_start it refuses (a run id with no version-1 spelling) disables the sink with one event, `records_disabled`, and every
-    leg after it is counted as not exported. A host-pool slice (image cpu) is not offered to it: version 1's subject is an image and
-    the SHA-256 of its xclbin, which a CPU job has none of (the exporter would refuse each by name); they are counted, and said
-    once, as `records_host_slices` - a limit of the format, which a later version can lift.
+    leg after it is counted as not exported. Every finished sweep leg is offered to the exporter, a host-pool slice (image cpu) as
+    well as a card slice: the exporter writes it as a version-2 record, whose subject is the host build (run_start.tree's host_src,
+    host_src_dirty and cc), and refuses it by name where the run recorded no host/ tree (an event `record_refused`, like any other
+    refusal). The event `records_host_slices` of this sink's first version, which said the host slices were not in the file, is
+    RETIRED: it was true only until version 2 of the record (docs/SWEEP-RECORDS.md, "From the driver"). The sink counts what it
+    wrote by what computed it, card and host, with the clean ones and their cases, and `summary()` says them: those are the
+    figures `sweep_record.py verify` prints, and both are the driver's own coverage of the clean slices it recorded.
     With --sign-key the exporter signs; with --device-key it names the device and leaves the signing to `sweep_record.py sign`.
     The secret is held in the Signer for the run and is in no record, no setting and no log."""
 
@@ -498,10 +502,12 @@ class RecordSink:
             raise RecordsError("--records needs a device: --sign-key KEYFILE (signs the records) or --device-key HEX "
                                "(unsigned, for `sweep_record.py sign` later): version 1 puts the device in every record")
         self.signed = key_path is not None
-        self.written = 0                   # slice and stream records
+        self.written = 0                   # slice and stream records, of both kinds
         self.campaigns = 0
         self.refused: Dict[str, int] = {}
-        self.host_slices = 0
+        # by what computed them ("card": a card image, version 1; "host": a host-pool job, version 2): records written, of which clean
+        # (no mismatch), and the cases of the clean ones - what `sweep_record.py verify` prints as `by subject`
+        self.kinds: Dict[str, List[int]] = {"card": [0, 0, 0], "host": [0, 0, 0]}
         self.disabled: Optional[str] = None
         self.n_events = 0
 
@@ -533,6 +539,7 @@ class RecordSink:
                 self.campaigns += 1
             else:
                 self.written += 1
+                self.count(r)
                 if r["run"]["device"] != self.ex.device:
                     raise RecordsError(f"{self.path} holds records of device {r['run']['device']}; this run's key makes device "
                                        f"{self.ex.device} - a resumed run takes the key it started with")
@@ -540,6 +547,14 @@ class RecordSink:
                     raise RecordsError(f"{self.path} holds records of run {r['run']['id']}, not {resumed_run_id}")
         notes.append(f"continuing {os.path.basename(self.path)}: {self.written} record(s) and {self.campaigns} campaign(s) already in it")
         return notes
+
+    def count(self, r: Dict[str, Any]) -> None:
+        """One slice or stream record of the file, by what computed it: written, clean, and the cases of a clean one."""
+        row = self.kinds[self.SR.subject_kind(r)]
+        row[0] += 1
+        if not self.SR.is_finding(r):
+            row[1] += 1
+            row[2] += r["cases"]
 
     def feed(self, rec: Dict[str, Any]) -> None:
         typ = rec.get("type")
@@ -554,14 +569,7 @@ class RecordSink:
                 elif typ == "build":
                     self.ex.build(rec)
                 elif rec.get("kind") == "sweep":
-                    if rec.get("image") == L.CPU:
-                        if rec.get("status") in ("pass", "fail"):
-                            self.host_slices += 1
-                            if self.host_slices == 1:
-                                events.append(("records_host_slices", "a host-pool slice (image cpu) finished: version 1's record has "
-                                               "an image and its xclbin's SHA-256, which a CPU job has none of, so the host items' "
-                                               "slices are not in sweep-records.jsonl (metrics.jsonl has them); counted, said once"))
-                    elif self.disabled is not None:
+                    if self.disabled is not None:
                         if rec.get("status") in ("pass", "fail"):
                             self.refused["disabled"] = self.refused.get("disabled", 0) + 1
                     else:
@@ -575,6 +583,7 @@ class RecordSink:
                                 os.close(fd)
                             self.written += 1
                             self.campaigns += len(lines) - 1
+                            self.count(json.loads(lines[-1]))
             except self.SR.Refusal as e:
                 if typ == "run_start":
                     self.disabled = f"{e.name}: {e.why}"[:300]
@@ -593,10 +602,11 @@ class RecordSink:
 
     def summary(self) -> str:
         left = dict(self.ex.left)
+        by = "; ".join(f"{k} {v[0]} record(s), {v[1]} clean ({v[2]} cases)" for k, v in self.kinds.items())
         return (f"{self.written} record(s) and {self.campaigns} campaign(s) in {os.path.basename(self.path)} "
                 f"({'signed by key ' + self.ex.public.hex() if self.signed else 'UNSIGNED, for key ' + self.ex.public.hex()}, "
-                f"device {self.ex.device}); {self.ex.findings} finding(s); refused: {self.refused or 'none'}; "
-                f"slices not finished: {left or 'none'}; host-pool slices not in it: {self.host_slices}")
+                f"device {self.ex.device}); by subject: {by}; {self.ex.findings} finding(s); refused: {self.refused or 'none'}; "
+                f"slices not finished: {left or 'none'}")
 
 
 # ---------------------------------------------------------------------------
@@ -2735,10 +2745,12 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
                    "and the pool serves each host item named once")
     g = ap.add_argument_group("signed records (hw/sweep_record.py; docs/SWEEP-RECORDS.md, \"From the driver\")")
     g.add_argument("--records", action="store_true",
-                   help="write the finished sweep slices as canonical records, version 1, to OUT/sweep-records.jsonl as the legs "
-                   "finish, through hw/sweep_record.py's Exporter; needs --sign-key or --device-key; refused with --dry-run (the "
-                   "exporter refuses a run whose legs came from stand-ins). A leg the exporter refuses is an event, named, and the "
-                   "run goes on. A host-pool slice (image cpu) has no xclbin to name and is not in the file. Default: no file")
+                   help="write the finished sweep slices as canonical records to OUT/sweep-records.jsonl as the legs finish, "
+                   "through hw/sweep_record.py's Exporter (a card slice is a version-1 record, a host-pool slice a version-2 one "
+                   "whose subject is the host/ tree and compiler run_start recorded); needs --sign-key or --device-key; refused "
+                   "with --dry-run (the exporter refuses a run whose legs came from stand-ins). A leg the exporter refuses, a "
+                   "host-pool slice of a run that recorded no host/ tree among them, is an event, named, and the run goes on. "
+                   "Default: no file")
     g.add_argument("--sign-key", default=None, metavar="KEYFILE",
                    help="sign the records with this Ed25519 key (python/cft_sign.py's key file; made once with `cft_sign.py keygen`, "
                    "outside every git working tree: a key inside one is refused by name, key-in-tree)")
