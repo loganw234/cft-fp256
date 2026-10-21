@@ -4720,6 +4720,11 @@ def resume_unit_checks(src: str = HERE) -> list:
             ok, why = False, repr(e)
         c("resume: junk in a run_start's tree (a number for a commit, a list for a tree) is an unknown class, said once by name, and does not stop "
           "the resume", ok, why)
+        rx = resume_case(src, [({"commit": "d" * 40, "dirty": False, "dirty_files": 0}, [sl_host(0, M20)]), (A, [sl_host(0, M20)])], T_NOW, rev, events=True)
+        tx = evs(rx, "host_tree_changed")
+        c("resume: host_tree_changed counts the host slices left out as of another class OR of an unknown class (here one of each: 2), and does not "
+          "give the compiler as the only reason", len(tx) == 1 and "(2 finished host slice(s) of other classes or of an unknown class" in tx[0][1]
+          and "compiler was not recorded" not in tx[0][1], str([e[1][-240:] for e in rx["events"] if e[0] == "host_tree_changed"]))
         # more unknown classes than any cap: four old runs, each of a commit this checkout does not hold, with a tile and a host slice, are eight
         rm = resume_case(src, [({"commit": ch * 40, "dirty": False, "dirty_files": 0}, both) for ch in "5678"], T_NOW, rev, events=True)
         em = evs(rm, "slices_not_counted")
@@ -5578,6 +5583,10 @@ def plants(env: Env) -> None:
         ("a junk commit in a run_start's tree stops the resume (the tally keeps the commit as it was recorded)",
          [("card_stress_lib.py", " if isinstance((tr or {}).get(\"commit\"), str) else None}", "}")],
          lambda env, src: resume_unit_checks(src), ["resume: junk in a run_start's tree"]),
+        ("the host event says the slices left out are of other classes or of one whose compiler was not recorded",
+         [("card_stress.py", "finished host slice(s) of other classes or of an unknown class, which slices_not_counted names, stay in the file and the report, ",
+           "finished host slice(s) of other classes, or of one whose compiler was not recorded, stay in the file and the report, ")],
+         lambda env, src: resume_unit_checks(src), ["resume: host_tree_changed counts the host slices left out"]),
         ("the slices_not_counted event names only the first six unknown classes",
          [("card_stress.py", "                              for u in t[\"unknown\"])\n", "                              for u in t[\"unknown\"][:6])\n")],
          lambda env, src: resume_unit_checks(src), ["resume: EVERY unknown class is named"]),

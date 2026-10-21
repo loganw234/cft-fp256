@@ -1390,7 +1390,7 @@ class Driver:
                        f"{'' if was.get('host_src') else ' (derived from its commit)'} had host/ tree {show(b_host)} with compiler "
                        f"{b_cc or 'not recorded'}. A host item's coverage is counted by host/ tree and compiler, as the report counts it: this "
                        f"run counts what the file holds of that class alone and plans a host item an earlier class finished again ({skipped} "
-                       f"finished host slice(s) of other classes, or of one whose compiler was not recorded, stay in the file and the report, "
+                       f"finished host slice(s) of other classes or of an unknown class, which slices_not_counted names, stay in the file and the report, "
                        f"and are not counted)", before=b_host[0], now=n_host[0], cc_before=b_cc, cc_now=n_cc)
         other, unknown = self.not_counted
         if other or unknown:
