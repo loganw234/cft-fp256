@@ -6431,8 +6431,8 @@ stale info about transcendentals still"
 **The week.** M2's build (the math library's next step, in "The math
 library: experiment E1, then M1's build and M2 to M4" above) starts on
 Monday 2026-10-26, with Sonnet authors and Haiku verifiers ("haiku
-leads" read as the verifiers), to see whether the coverage wave's
-result holds on harder work. Until then the work is polish: what slipped
+leads" read as the verifiers), "simply to see if it still holds up
+well on harder work", in Logan's words. Until then the work is polish: what slipped
 by is found and fixed. The README's transcendentals came first (parcel
 RM, 827c3cf3).
 
@@ -6457,7 +6457,7 @@ be worth building out now, the likely next addition will be the open
 core design on the smaller board which will end up being over ethernet
 or usb anyway and more limited in capability/speed. 13. Yes". Later,
 on question 12's probe: "You do have permission to do the xbutil probe
-at anytime".
+at anytime, forgot to answer that".
 
 What the answers decide, each against the study's question:
 
@@ -6502,8 +6502,8 @@ What the answers decide, each against the study's question:
     the scheduler's own clones kept 14 days and passing legs' logs 360
     days, deleted by exact path with a record of each batch; every
     record kept; the driver's 5 GB floor left until a week of its use is
-    read. The lead may move older Vivado bitstream builds from the box
-    to the desktop when `/data` needs the room.
+    read. Logan: "You are clear to backup older vivado bitstream builds
+    to this PC to make more room on the box if needed."
 12. **Several cards.** No device selector now (S6 deferred). The next
     device is likely the open-core board over Ethernet or USB, slower,
     so a card in the configuration has a `kind` and nothing may assume a
@@ -6538,7 +6538,8 @@ suite is green on both interpreters.
 
 *Status when this section was written (2026-10-21, with S1's merge): S1 is built and
 verified (`hw/sched/`, `hw/test-sched.sh`; docs/VALIDATION.md, its entry). SR2
-and DR4 are built and in verification. S2 to S5 are not started.*
+and DR4 are built and in verification (DR4 sent back once). S2 to S5
+are not started.*
 
 ## The adoption story these serve
 
