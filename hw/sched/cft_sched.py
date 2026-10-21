@@ -30,6 +30,13 @@ import sched_state as S           # noqa: E402
 from sched_names import Refusal   # noqa: E402
 
 
+def open_root(root):
+    """The configuration, with the layout made good: a root made by hand with only a config.json works like an `init`ed one."""
+    cfg = C.load_config(root)
+    C.ensure_layout(root, cfg)
+    return cfg
+
+
 def cmd_init(a, root):
     path = os.path.join(root, "config.json")
     try:
@@ -37,13 +44,13 @@ def cmd_init(a, root):
             fh.write(C.default_config_text().encode())
     except FileExistsError:
         raise Refusal("config-exists", f"{path} exists: edit it, `init` does not overwrite")
-    C.ensure_layout(root, C.load_config(root))
+    open_root(root)
     print(f"initialized {root}: config.json holds the defaults and one card, u50-0 (xrt); edit it for this machine")
     return 0
 
 
 def cmd_submit(a, root):
-    cfg = C.load_config(root)
+    cfg = open_root(root)
     try:
         if a.file == "-":
             raw = sys.stdin.buffer.read()
@@ -61,14 +68,14 @@ def cmd_submit(a, root):
 
 
 def cmd_list(a, root):
-    C.load_config(root)
+    open_root(root)
     v = R.list_jobs(root, a.all)
     print(json.dumps(v, sort_keys=True) if a.json else R.format_list(v))
     return 0
 
 
 def cmd_status(a, root):
-    cfg = C.load_config(root)
+    cfg = open_root(root)
     if a.id:
         jid = S.parse_job_id(a.id)
         for where in ("queue", "running", "jobs"):
@@ -86,7 +93,7 @@ def cmd_status(a, root):
 
 
 def cmd_cancel(a, root):
-    C.load_config(root)
+    open_root(root)
     how = S.cancel(root, a.id, S.user())
     print({"dequeued": f"{a.id}: removed from the queue; outcome cancelled",
            "stop-requested": f"{a.id}: stop requested; it ends at its next safe point",
@@ -95,20 +102,19 @@ def cmd_cancel(a, root):
 
 
 def cmd_hold(a, root):
-    S.hold(root, C.load_config(root), a.card, S.user(), a.why)
+    S.hold(root, open_root(root), a.card, S.user(), a.why)
     print(f"{a.card}: held; no new claims, what runs is not touched")
     return 0
 
 
 def cmd_release(a, root):
-    S.release(root, C.load_config(root), a.card, S.user())
+    S.release(root, open_root(root), a.card, S.user())
     print(f"{a.card}: released")
     return 0
 
 
 def cmd_serve(a, root):
-    cfg = C.load_config(root)
-    C.ensure_layout(root, cfg)
+    cfg = open_root(root)
     R.serve(root, cfg, R.FakeRunner(), poll=a.poll, drain=a.drain, max_jobs=a.max_jobs, skip_locks=a.no_locks)
     return 0
 
@@ -139,7 +145,7 @@ def parser() -> argparse.ArgumentParser:
             p.add_argument("--drain", action="store_true", help="run what is eligible, then exit")
             p.add_argument("--poll", type=float, default=1.0, help="seconds between looks at the queue (default 1)")
             p.add_argument("--max-jobs", type=int, default=None)
-            p.add_argument("--no-locks", action="store_true", help="take no locks, and say so in the records (for a platform without flock)")
+            p.add_argument("--no-locks", action="store_true", help="take no locks, and say so in the records: for a platform without flock, refused where flock exists")
     return ap
 
 

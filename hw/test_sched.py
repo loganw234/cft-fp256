@@ -449,6 +449,14 @@ def group_records():
     check("records: the last word is an outcome from the named set", rs[-1:] and rs[-1].get("outcome") == "done" and rs[-1]["outcome"] in N.OUTCOMES)
     check("records: SHA256SUMS lists every file and each sum matches (an independent sha256sum -c), and the scheduler's own check agrees",
           verify_sums(d) == [] and S.check_sums(d) == [])
+    if shutil.which("sha256sum"):
+        d2 = os.path.join(TMP, "sums-copy")
+        shutil.copytree(d, d2)
+        open(os.path.join(d2, "job.jsonl"), "ab").write(b"x")
+        sumc = lambda dd: subprocess.run(["sha256sum", "-c", "SHA256SUMS"], cwd=dd, capture_output=True, text=True).returncode
+        check("records: SHA256SUMS is a real one: `sha256sum -c` passes in a job's directory and fails on a copy with one byte added", sumc(d) == 0 and sumc(d2) != 0)
+    else:
+        skip("records: SHA256SUMS is a real one (`sha256sum -c`)", "no sha256sum on PATH")
     check("records: every record names its card, and `any` is resolved to the card's id from the claimed record on",
           all(r.get("card") for r in rs) and rs[1]["card"] == "u50-0" and rs[1]["card_requested"] == "any" and all(r["card"] == "u50-0" for r in rs[1:]),
           str([r.get("card") for r in rs]))
@@ -650,6 +658,10 @@ def group_cli():
     cfg_text = open(os.path.join(root, "config.json"), "rb").read()
     cfg = C.load_config(root)
     check("cli: `init` makes the root with the layout and a config.json that loads", rc == 0 and all(os.path.isdir(os.path.join(root, d)) for d in C.LAYOUT + ("cards/u50-0",)))
+    if os.name == "posix":
+        check("cli: `init` makes the root private, mode 0700, so that only the box user can submit", os.stat(root).st_mode & 0o077 == 0, oct(os.stat(root).st_mode))
+    else:
+        skip("cli: `init` makes the root private, mode 0700", "file modes mean nothing on this platform")
     ROOTS.append(root)
     check("cli: $CFT_SCHED_ROOT names the root when there is no --root, and --root wins over it",
           cli(None, "status", env={C.ENV_ROOT: root})[0] == 0 and cli(root, "status", env={C.ENV_ROOT: ghost})[0] == 0 and cli(None, "status", env={C.ENV_ROOT: ghost})[0] == 2)
@@ -693,6 +705,12 @@ def group_cli():
     check("cli: submit prints the id of the job it queued (from a file and from stdin), and a refused spec exits 2 naming the job, the refusal and the field",
           rc == 0 and out.strip() == "submitted j000001" and rc2 == 0 and out2.strip() == "submitted j000002"
           and rc3 == 2 and re.match(r"refused j000003: spec-form: field needs is unknown", err3), f"{out!r} {out2!r} {err3!r}")
+    bare = os.path.join(TMP, "c-bare")
+    os.makedirs(bare)
+    open(os.path.join(bare, "config.json"), "w").write(json.dumps(GOOD))
+    ROOTS.append(bare)
+    rc, out, err = cli(bare, "submit", good)
+    check("cli: a root made by hand with only a config.json works: the verbs make the layout good", rc == 0 and out.strip() == "submitted j000001" and os.path.isdir(os.path.join(bare, "queue", "j000001")), err[-120:])
     rc, out, err = cli(root, "submit", os.path.join(TMP, "nope.json"))
     check("cli: submit of a file that is not there says so and queues nothing", rc != 0 and "cannot read" in err and sorted(os.listdir(os.path.join(root, "queue"))) == ["j000001", "j000002"])
     rc, out, _ = cli(root, "list")
@@ -850,6 +868,7 @@ PLANTS = [  # (what is wrong, edits, the groups written for it, a fragment of th
     ("a second hold replaces the first", [E("sched_state.py", '"HOLD"), os.O_CREAT | os.O_EXCL | os.O_WRONLY | O_BINARY)', '"HOLD"), os.O_CREAT | os.O_TRUNC | os.O_WRONLY | O_BINARY)')],
      "queue", "a second hold is `card-held`", False),
     ("release of a card with no hold passes in silence", [E("sched_state.py", '        raise Refusal("card-not-held", f"{card} has no hold")', "        pass")], "queue", "release of a card that is not held is `card-not-held`", False),
+    ("init makes the root readable by others", [E("sched_config.py", "os.makedirs(real, mode=0o700)", "os.makedirs(real); os.chmod(real, 0o755)")], "cli", "`init` makes the root private", "flock"),
     ("an unknown key in config.json is accepted", [E("sched_config.py", "        if k not in required + optional:", "        if False:")], "cli", "config.json with an unknown top-level key is refused", False),
     ("a card's worker takes another card's job", [E("sched_state.py", "            if want in cards and want != card_id:\n                continue", "            if False:\n                continue")], "queue", "a job runs on the card it names", False),
 ]
@@ -867,7 +886,7 @@ def plants(only_text: str | None):
         if only_text and only_text not in label:
             continue
         if (posix == "flock" and not S.HAVE_FLOCK) or (posix == "noflock" and S.HAVE_FLOCK):
-            skip(f"plant [{label}]", "needs flock(2), which this platform lacks" if posix == "flock" else "needs a platform without flock(2)")
+            skip(f"plant [{label}]", "needs POSIX (flock(2), file modes), which this platform lacks" if posix == "flock" else "needs a platform without flock(2)")
             continue
         try:
             d = make_copy(re.sub(r"\W+", "-", label)[:30], edits)

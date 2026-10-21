@@ -60,7 +60,7 @@ def check_root(root: str, create: bool = False) -> str:
     if not os.path.isdir(real):
         if not create:
             raise Refusal("root-missing", f"{root} does not exist (`init` creates a root)")
-        os.makedirs(real)
+        os.makedirs(real, mode=0o700)            # private: this is how only the box user can submit (the study's 4.7)
     return real
 
 
