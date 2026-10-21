@@ -369,6 +369,8 @@ def group_rules(tmp):
         camp = S.campaign_body(it)
         if it.kind == "exhaustive":
             for n in (1, 3, 1 << 20):
+                if 5 + n > it.space:
+                    continue    # past the item's own space (a campaign says it since 2026-10-21): the verifier refuses it, parse_soak has no space
                 per = it.per_encoding
                 good = n * (per or 1) + it.extra_cases
                 tries = [(good, 0), (good - 1, 0), (good + 1, 0), (good, 1), (good - 1, 1), (0, 0)]

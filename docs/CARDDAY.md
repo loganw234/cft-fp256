@@ -896,12 +896,12 @@ python3 hw/card_stress_report.py /data/card-stress-1016     # the report, any ti
   first long run's clone had it made by the lead before its first `selftest` leg.
 - **Pre-flight, optional**: `bash hw/test-card-stress.sh --no-plants` runs the driver's dry-run
   tests (the verdict parsers on real logs, the scheduler, the failure policy, the guard, the
-  sweep's resume, the host pool, the seeds, the trees, the report, and under POSIX the real `make` in
-  a scratch copy) on the box, with no card and no XRT: about 7.5 minutes under WSL and 9 under Git
-  Bash (2026-10-20: 448 s and 553 s, on a desktop other sessions share; a busier desktop made a Git
-  Bash run 636 s), and it must be run alone on the host (two drivers at once see each other's
+  sweep's resume, the host pool, the seeds, the trees, the items, the pass size, the records, the report, and under POSIX the real `make` in
+  a scratch copy) on the box, with no card and no XRT: about 10 minutes under WSL and 11 under Git
+  Bash (2026-10-21, with the coverage wave's groups: 644 s under Git Bash and about 600 s under WSL, read off the clock; 2026-10-20, before them: 448 s and 553 s, and a busier desktop made a Git
+  Bash run 636 s), on a desktop other sessions share, and it must be run alone on the host (two drivers at once see each other's
   stand-ins as card users). `--no-plants` leaves out the negative controls, which take about
-  twice as long as everything else together (the whole suite is 22.5 minutes under WSL). The runner and the pythons
+  one and a half times as long as everything else together (the whole suite is 26 minutes under WSL: 1,573 s on 2026-10-21, 22.5 minutes before). The runner and the pythons
   the suite itself starts run with `-B` (`-I` ignores `PYTHONDONTWRITEBYTECODE`); the report script
   the driver starts for itself does not, so a run in the tree under WSL still leaves one git-ignored
   card_stress_lib file in hw/__pycache__ unless that variable is set.
@@ -1754,11 +1754,11 @@ its whole space in 2.8 s each. **Scaled** (COMPUTED, linear in indices with the 
 each is an UPPER BOUND on the whole item and a slice that amortises the start-up is faster): rint64-class 4.1 to 4.25 ms an
 index, so 147 to 152 s, **about 2.5 minutes an attribute and 12.5 for the five**; scaleb64-class 0.63 to 0.70 ms, so 45 to
 51 s an attribute and at most 3.4 minutes for the four; div32-hard 2.5 microseconds an index, so at most 53 s an attribute;
-div64-hard 3.3 microseconds an index, so at most 16 minutes an attribute (the lead's COMPUTED figure from the stress run's rates
+div64-hard 3.3 microseconds an index, so at most 16 minutes an attribute (HC's COMPUTED figure from the stress run's rates
 is 132 to 137 s on a quad, 9 minutes of one tile: the segments differ in cost, and the F0K slice the smoke ran is not the
 average); sqrt64-hard 2.8 s an attribute. All 22 tile items, once: **at most about 83 minutes of tile time (COMPUTED upper
 bound: rint64-class 12.5, scaleb64-class 3.4, div32-hard 3.5, div64-hard 63.5, sqrt64-hard 0.2), about 21 minutes of the quad's
-four**; the lead's own figures put the thirteen hard-case items at 38 tile-minutes. The 13 host items run on the pool in
+four**; HC's COMPUTED figure for the thirteen hard-case items is 9.6 minutes of a quad, 38 tile-minutes. The 13 host items run on the pool in
 seconds (0.01 to 0.03 s each on the software backend, MEASURED by CL). **How a slow item fits:** its slice is its slice.
 A wave of four runs its jobs together and waits for the slowest, so a short job leaves its tile idle for the rest of the
 wave - at worst a class job of 150 s beside three 600-s slices idles 450 s, scaleb64-class 550 s - about 74 tile-minutes in
@@ -1821,8 +1821,9 @@ of its own) so streams that differ are not summed. (iii) The tools compare flags
 more operands (a flag one operand drops among many that raise it is hidden, more likely the larger the batch): the report
 says, per item, the slices that ran at each batch other than 4096 and each disagreement's batch; a class-level item compares
 flags per operand call whatever the batch is (CLS_BATCH). A host item gains nothing from a larger chunk (the software backend
-has no passes to amortise) and compares flags over more operands: `--sweep-chunk` is for the tile items, and applies to the pool's
-slices too, since the flag names the tools of the sweep. The signed record has no field for the pass size (version 1): a stream of a
+has no passes to amortise; CK measured CL's class modes at 4.5 s with the default tools and 11.6 s with the chunked ones) and
+compares flags over more operands: `--sweep-chunk` is for the tile items, and applies to the pool's slices too, since the flag
+names the tools of the sweep. The signed record has no field for the pass size (version 1): a stream of a
 chunked run cannot be told from a default run's by its record, only by metrics.jsonl.
 
 **Known limits** (docs/VALIDATION.md, the entry for DR3): the host slices are not signable (above); python/figure_extracts.py's
