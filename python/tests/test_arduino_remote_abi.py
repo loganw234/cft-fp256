@@ -72,9 +72,16 @@ def test_the_remote_examples_claim_the_trees_abi():
     major, minor = tree_abi(CFT_H.read_text(encoding="utf-8"))
     found = sorted(p.name for p in EXAMPLES.glob("Remote*"))
     assert found == list(SKETCHES), found
+    bad = {}
     for name in SKETCHES:
         text = (EXAMPLES / name / (name + ".ino")).read_text(encoding="utf-8")
-        assert drift(text, major, minor) == [], name
+        if drift(text, major, minor):
+            bad[name] = drift(text, major, minor)
+    assert not bad, (
+        "libcft is at %d.%d and these sketches claim another ABI: %r - set "
+        "CFT_REMOTE_ABI in each from `python host/tools/cft-serial-bridge.py "
+        "--probe-abi HOST:PORT` against a cft-serve built from this tree"
+        % (major, minor, bad))
 
 
 def test_the_abi_check_fails_where_it_should():
