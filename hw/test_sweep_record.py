@@ -25,9 +25,11 @@
            the version rule, each export refusal with the exporter left as it was, each verifier refusal on a
            validly signed record, and the verifier without subject_problem and without check_shape
   real     (needs --metrics) the same on a copy of a real run's metrics.jsonl, every field read back
-           from the raw legs by code that does not share the exporter's, each against the run_start IN
-           FORCE for it (a resumed run's file has one for each invocation: `readback`, which `export` also runs
-           on a synthetic file of two, with its plant, the first run_start's expectation, red there)
+           from the raw legs by `readback`, which calls nothing of the module under test (a check reads its
+           source for that; the device pseudonym is written out from the key with hashlib, a finding is
+           vm + fm > 0), each against the run_start IN FORCE for it (a resumed run's file has one for each
+           invocation: `readback` also runs in `export`, on a synthetic file of two, with its plant, the
+           first run_start's expectation, red there)
 
 SWEEP_RECORD_TEST_ROOT names the tree that holds docs/, certificates/ and python/ when this file is run from a
 copy of the code (the driver's test runs it from each plant's copy of hw/).
@@ -289,13 +291,25 @@ def moved_legs(raw):
     return out
 
 
-def readback(raw, flat, device, first_only=False):
+def names_in_source(src):
+    """The attributes of `S`, the module under test, that a piece of source names: what it takes from the exporter."""
+    import ast
+    return sorted({n.attr for n in ast.walk(ast.parse(src)) if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name) and n.value.id == "S"})
+
+
+def readback(raw, flat, pub, first_only=False):
     """Every finished sweep leg of `raw` (a run's records, in file order) against its record in `flat` (the exported slices and streams,
-    in the same order), field by field, by code that shares nothing with the exporter. A leg is held to the run_start IN FORCE for it:
+    in the same order), field by field, by code that shares nothing with the exporter: it calls nothing of the module under test (a check
+    reads this function's source for that), the device pseudonym is written out here from the public key `pub` (16 hex of SHA-256 over
+    `cft-sweep-device 1`, a NUL and the 32-byte key, docs/SWEEP-RECORDS.md) and a finding is vm + fm > 0. The exporter's own
+    `device_of` and `is_finding`, which the first version of this took (sent back for it, 2026-10-21), are held on their own:
+    `device_of` against hashlib in `keys` and `export`, `is_finding` against the one failing leg of each synthetic run in `export`
+    and `host`. A leg is held to the run_start IN FORCE for it:
     the last one before it in the file, because a resumed run writes one run_start for each invocation and the exporter stamps each
     slice with the one in force (the images, the run id and the tool's commit and dirty flag can differ between them; the 2026-10-19
     run's file has two, of different commits). first_only is the PLANT: the first run_start's for every leg, which is what this check
     did until 2026-10-21 and what it must go red on, for the legs after a resume. Returns [(the leg's name, the fields that differ)]."""
+    device = hashlib.sha256(b"cft-sweep-device 1\x00" + bytes(pub)).hexdigest()[:16]
     cur, fin = None, []
     for r in raw:
         if r["type"] == "run_start":
@@ -333,7 +347,7 @@ def readback(raw, flat, device, first_only=False):
         diff += ["run"] if r["run"] != run else []
         tool = {"commit": tr["commit"], "dirty": tr["dirty"]} if isinstance(tr.get("commit"), str) and isinstance(tr.get("dirty"), bool) else None
         diff += ["tool"] if r.get("tool") != tool else []
-        diff += ["finding"] if (not S.is_finding(r)) != (leg["status"] == "pass") else []
+        diff += ["finding"] if (r["vm"] + r["fm"] == 0) != (leg["status"] == "pass") else []
         if diff:
             bad.append((leg["leg"], diff))
     return bad
@@ -555,10 +569,10 @@ def group_export(tmp):
           o["rint32-rne"]["tool"]["commit"] == C2 and o["sqrt32-rne"]["tool"]["dirty"] is False)
     # the read-back every `--metrics` run does on a real file, here on the synthetic one, in every run of the suite (found 2026-10-21: the
     # real run's file has two run_starts, and a check that took the FIRST for every leg failed the legs of the second; SG's test, not a regression)
-    raw0, dev0 = fake_run(), S.device_of(pub)
+    raw0 = fake_run()
     check("readback: every record equals its raw leg, field by field, each against the run_start in force for it: this file has two run_starts, "
-          "of commits C1 and C2 (a resume's), and the legs after the second carry C2", readback(raw0, flat, dev0) == [] and moved_legs(raw0) == ["sweep-rint32-rne", "sweep-class32"])
-    planted = readback(raw0, flat, dev0, first_only=True)
+          "of commits C1 and C2 (a resume's), and the legs after the second carry C2", readback(raw0, flat, pub) == [] and moved_legs(raw0) == ["sweep-rint32-rne", "sweep-class32"])
+    planted = readback(raw0, flat, pub, first_only=True)
     check("readback, the plant: the first run_start's expectation for every leg is red on this file, at the two legs after the resume and on the tool's "
           "commit alone (so the check can fail, and for the reason it is there)",
           [b[0] for b in planted] == moved_legs(raw0) and all(b[1] == ["tool"] for b in planted), str(planted))
@@ -567,7 +581,14 @@ def group_export(tmp):
     wrong[-1]["tool"]["commit"] = C1
     names = [r["leg"] for r in raw0 if r["type"] == "leg" and r["kind"] == "sweep" and r["status"] in ("pass", "fail")]
     check("readback: a wrong tile count on the first record and the first run_start's commit on the last are each found, and nothing else",
-          readback(raw0, wrong, dev0) == [(names[0], ["subject"]), (names[-1], ["tool"])], str(readback(raw0, wrong, dev0)))
+          readback(raw0, wrong, pub) == [(names[0], ["subject"]), (names[-1], ["tool"])], str(readback(raw0, wrong, pub)))
+    import inspect
+    check("readback shares nothing with the exporter: its source (and moved_legs') names no attribute of the module under test - the device "
+          "pseudonym is written out with hashlib from the key, a finding is vm + fm > 0", names_in_source(inspect.getsource(readback)) == [] and
+          names_in_source(inspect.getsource(moved_legs)) == [], str(names_in_source(inspect.getsource(readback))))
+    check("readback shares nothing, the plant: that check reads a source that calls the exporter's is_finding or device_of as naming exactly those",
+          names_in_source("def f(r):\n    return S.is_finding(r)\n") == ["is_finding"] and
+          names_in_source("def f(p):\n    return S.device_of(p)\n") == ["device_of"] and names_in_source("def f(p):\n    return hashlib.sha256(p)\n") == [])
     f = o["sqrt32-rtz"]
     check("the finding is a record that says what it found, and the only finding",
           S.is_finding(f) and len(f["disagreements"]) == 2 and sum(S.is_finding(r) for r in flat) == 1)
@@ -982,7 +1003,6 @@ def group_host(tmp):
     recs = [json.loads(ln) for ln in lines]
     flat = [r for r in recs if r["kind"] != "campaign"]
     camps = {r["id"]: r for r in recs if r["kind"] == "campaign"}
-    dev = S.device_of(pub)
     check("host: the run exports 8 finished legs (2 card, 6 host-pool) as 7 slices and a stream, over 7 campaigns; the host job that timed out "
           "is counted as left", collections.Counter((r["kind"], r["v"]) for r in recs) ==
           {("campaign", 1): 7, ("slice", 1): 2, ("slice", 2): 5, ("stream", 2): 1} and ex.legs == 8 and ex.left == {"timeout": 1}, str(ex.left))
@@ -998,8 +1018,8 @@ def group_host(tmp):
           all(not {"image", "xclbin", "tiles", "tile"} & set(r["subject"]) for r in flat if r["v"] == 2)
           and all("src" not in r["subject"] and "dirty" not in r["subject"] and "cc" not in r["subject"] for r in flat if r["v"] == 1))
     check("host: readback - every record equals its raw leg, field by field, against the run_start in force for it (this file has two)",
-          readback(raw, flat, dev) == [], str(readback(raw, flat, dev)))
-    planted = readback(raw, flat, dev, first_only=True)
+          readback(raw, flat, pub) == [], str(readback(raw, flat, pub)))
+    planted = readback(raw, flat, pub, first_only=True)
     check("host: readback, the plant - the first run_start's expectation is red here, at the one host slice after the resume, on its subject and "
           "the tool's commit", planted == [("sweep-logb32", ["subject", "tool"])], str(planted))
     # the campaign: the same record whoever computed the slice, and unchanged since 77c5dbca
@@ -1195,13 +1215,13 @@ def group_real(tmp, metrics):
           len(flat) == len(fin) and len(recs) - len(flat) == len({l["sweep"]["item"] for l in fin}))
     # every field read back from the raw leg, literally, against the run_start IN FORCE for the leg (a resumed run's file has one for each
     # invocation: the 2026-10-19 run's two, of commits 881bbcb6 and 0b7c9599, give 378 records the first and 174 the second)
-    bad = readback(raw, flat, S.device_of(K["pub_a"]))
+    bad = readback(raw, flat, K["pub_a"])
     check("real: every record equals its raw leg, field by field (interval, counts, image, tile, run, rate, log, tree), each against the "
           "run_start in force for it", not bad, str(bad[:3]))
     starts = [r for r in raw if r["type"] == "run_start"]
     moved = moved_legs(raw)
     if moved:
-        planted = readback(raw, flat, S.device_of(K["pub_a"]), first_only=True)
+        planted = readback(raw, flat, K["pub_a"], first_only=True)
         check(f"real: the plant, the first run_start's expectation for every leg, is red on this file ({len(starts)} run_starts, commits "
               f"{', '.join(str((s.get('tree') or {}).get('commit'))[:8] for s in starts)}): it fails the {len(moved)} legs the later ones are "
               f"in force for, on the tool's commit, and no other", [b[0] for b in planted] == moved and all("tool" in b[1] for b in planted), str(planted[:2]))

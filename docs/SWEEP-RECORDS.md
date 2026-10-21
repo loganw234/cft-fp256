@@ -214,10 +214,12 @@ line as it is written. The tree hash and the commit are made up:
 
 Its `cid` is the campaign the card image's slice of `conv32to64-all` names, `c2aaacbe...`, the one below.
 
-**MEASURED, version 1 is byte for byte what it was.** The 2026-10-19 run's `metrics.jsonl` (the copy of the lead's, sha256
-`38f243c7...`), exported by the code of 77c5dbca and by this parcel's with the same throwaway key: `export --key` and `export --device-key`
-each give the same 574 lines (552 records and 22 campaigns), sha256 `69a67871...` signed and `97896ddf...` unsigned, equal
-under `cmp`. The campaign ids of all 125 items of the catalog (the 90 of the scripts and the 35 of the coverage wave) are one
+**MEASURED, version 1 is byte for byte what it was.** The 2026-10-19 run's `metrics.jsonl` (the lead's copy, sha256
+`38f243c7...`; it is not in the repository), exported by the code of 77c5dbca and by this parcel's with the same key, the test's key A
+(its secret is derived from a label in `hw/test_sweep_record.py`, so anyone can make it with that file's `write_key`; the public key
+is `b93a34db...`, the one the example above was made for): `export --key` and `export --device-key` each give the same 574 lines (552
+records and 22 campaigns), equal under `cmp`, sha256 `403d3c7a...` signed and `8d4ce840...` unsigned: figures a reader who has that
+file can reproduce. The campaign ids of all 125 items of the catalog (the 90 of the scripts and the 35 of the coverage wave) are one
 digest, `2e8d9608...`, at both. The suite holds both: the synthetic card-only run's whole export hashes to what the code of 77c5dbca gave,
 and the 125 campaign ids to the digest (`hw/test_sweep_record.py`, `hw/test_card_stress.py`, group `records`).
 
@@ -607,7 +609,10 @@ seconds), and the stage counts are the lead's.
 **The read-back reads the `run_start` in force.** A resumed run's file has one `run_start` for each invocation, and the
 exporter stamps each slice with the one in force for it (the images, the run id, the tool's commit and dirty flag, and a host
 record's tree can differ between them). `readback` re-derives every record from its raw leg and that `run_start`, by code
-that shares nothing with the exporter. Before 2026-10-21 `real` took the file's first `run_start` for every leg, which failed
+that shares nothing with the exporter: it calls nothing of the module under test (a check reads its source for that, and a plant of
+that check shows it can fail), writes out the device pseudonym from the key with hashlib and tests a finding as `vm + fm > 0`; the
+exporter's own `device_of` and `is_finding` are held on their own, against hashlib and against the synthetic runs' one failing leg.
+Before 2026-10-21 `real` took the file's first `run_start` for every leg, which failed
 the 174 legs of the 2026-10-19 file's second invocation (0b7c9599 after 881bbcb6: SG's test, not a regression); it now holds
 on the real file (`--metrics`), and in every run of the suite on a synthetic file of two `run_start`s of different commits, with its
 plant, the first-`run_start` expectation, which must be red there at exactly the legs after the resume and on the tool's commit
