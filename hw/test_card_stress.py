@@ -31,6 +31,11 @@ Three kinds of group, then the plants (the groups, by name, are in hw/test-card-
             sink on a real dry run's records (refused as they stand; written with the one field that says 'dry run' changed in a scratch
             directory) and a real, NOT dry run of the driver over test doubles (POSIX); notes: --quick --sweep-items after an empty wave,
             figure_extracts' cpu filter (needs CARD_STRESS_METRICS), and standin_alive (its own group, `standin`, which its plants run).
+            Since parcel SR2 (2026-10-21) the records group also holds the host pool's slices, which are version-2 records: the sink's totals by
+            subject kind equal to the raw legs' and to what `sweep_record.py verify` prints, a host slice of a run with no host/ tree refused by
+            name, and the campaign ids of all 125 items unchanged; its plants for the format run hw/test_sweep_record.py from a plant's copy.
+  Two suites of this file in one WSL distro at once collide: the card guard scans every process of the distro, and a stand-in with
+            CFT_SOAK_ARTIFACT in its environment makes the other suite's drivers refuse to start (guard_refused, rc 2, no records).
 
 POSIX-only checks (the `nice` and `timeout` wrappers, a process that ignores SIGTERM) are
 SKIPped by name on Windows and run under WSL or on the box. Everything runs niced by the
