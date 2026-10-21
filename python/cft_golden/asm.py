@@ -737,7 +737,8 @@ class Image:
             raise AsmError(f"{self.fmt.name} is not on the precision ladder")
         if not 0 <= self.max_deposits <= MAX_DEPOSITS:
             raise AsmError(
-                f"max_deposits={self.max_deposits}, cap {MAX_DEPOSITS}")
+                f"max_deposits={_int_text(self.max_deposits)}, "
+                f"cap {MAX_DEPOSITS}")
         if self.flags & FLAGS_RESERVED:
             raise AsmError(
                 f"header flags {self.flags:#010x}: only "
@@ -1031,13 +1032,37 @@ def _source_text(text, source):
     return text
 
 
+def _decimal_int(text):
+    """int(text, 10) for a decimal of at most MAX_DECIMAL_DIGITS digits, on
+    any interpreter and under any sys.set_int_max_str_digits: a process can
+    lower Python's own limit below the text form's, and int() then raised an
+    uncaught ValueError on a decimal the text form accepts (KL-377). The
+    limit is lifted for the length of this conversion, as chars.py does for
+    its longer ones; the caller has bounded the digits."""
+    return chars._int_from_digits(text)
+
+
+def _int_text(v):
+    """A parsed number as a refusal prints it: its decimal, as Python's str()
+    gives it - unless str() is past the interpreter's digit limit, which a
+    0x number of any length (about 3,600 hex digits and up) or a decimal
+    under a lowered limit can be, and the message then raised an uncaught
+    ValueError instead of refusing (KL-377). Past it the number is named by
+    its leading hex digits and their count: bounded however long it is."""
+    try:
+        return str(v)
+    except ValueError:
+        h = f"{abs(v):x}"                  # base 16 has no digit limit
+        return f"{'-' if v < 0 else ''}0x{h[:12]}... ({len(h)} hex digits)"
+
+
 def _decimal_value(tok, digits, what):
     """A decimal number's value, refused by name past
     MAX_DECIMAL_DIGITS digits - before int(), which would raise."""
     if len(digits) > MAX_DECIMAL_DIGITS:
         raise AsmError(f"{what}: {tok!r} has {len(digits)} digits, and a "
                        f"decimal number has at most {MAX_DECIMAL_DIGITS}")
-    return int(digits)
+    return _decimal_int(digits)
 
 
 # ---- the assembler ---------------------------------------------------
@@ -1072,7 +1097,7 @@ def _parse_uint(tok, what):
         if n > MAX_DECIMAL_DIGITS:
             raise AsmError(f"{what}: {tok!r} has {n} digits, and a decimal "
                            f"number has at most {MAX_DECIMAL_DIGITS}")
-        return int(t, 10)
+        return _decimal_int(t)
     raise AsmError(f"{what}: {tok!r} is not a number")
 
 
@@ -1107,6 +1132,17 @@ class _Asm:
         except AsmError as exc:
             self.fail(str(exc))
 
+    def uint(self, tok, what):
+        """_parse_uint, its refusal located at this line: the file and line
+        every other refusal of this assembler carries. Until 2026-10-21 the
+        two refusals of a number - "is not a number" and the digit bound -
+        came out bare, because the directives called _parse_uint directly
+        (KL-378)."""
+        try:
+            return _parse_uint(tok, what)
+        except AsmError as exc:
+            self.fail(str(exc))
+
     # -- operands ------------------------------------------------------
 
     def reg(self, tok):
@@ -1126,7 +1162,7 @@ class _Asm:
             self.fail(f"{tok!r} is not a register")
         n = self.decimal(tok, m.group(1), "a register")
         if not 0 <= n < NREG:
-            self.fail(f"r{n} is outside r0..r{NREG - 1}")
+            self.fail(f"r{_int_text(n)} is outside r0..r{NREG - 1}")
         return n
 
     def slot(self, tok):
@@ -1146,7 +1182,7 @@ class _Asm:
                           f"or a `.slot` name - the indexed form is `stx` "
                           f"and `ldx`")
             self.fail(f"{tok!r} is not a slot")
-        v = _parse_uint(tok, "a scratch slot")
+        v = self.uint(tok, "a scratch slot")
         return v
 
     def step(self, tok):
@@ -1162,11 +1198,11 @@ class _Asm:
         if _REGNAME.match(body) or body.lower() in self.reg_names:
             self.fail(f"{tok} is a register, and a post-step is a signed "
                       f"number")
-        v = _parse_uint(body, "a post-step")
+        v = self.uint(body, "a post-step")
         v = -v if tok.startswith("-") else v
         if not STEP_MIN <= v <= STEP_MAX:
-            self.fail(f"step {v} outside {STEP_MIN}..{STEP_MAX}: a post-step "
-                      f"is a signed {STEP_BITS}-bit field")
+            self.fail(f"step {_int_text(v)} outside {STEP_MIN}..{STEP_MAX}: "
+                      f"a post-step is a signed {STEP_BITS}-bit field")
         return v
 
     def operand(self, tok):
@@ -1194,7 +1230,7 @@ class _Asm:
     def do_deposits(self, args):
         if len(args) != 1:
             self.fail(".deposits takes one number")
-        self.max_deposits = _parse_uint(args[0], ".deposits")
+        self.max_deposits = self.uint(args[0], ".deposits")
 
     def do_bank(self, args):
         if len(args) != 1 or args[0].lower() != "external":
@@ -1228,7 +1264,7 @@ class _Asm:
         if len(args) == 1:
             if self.have_depth:
                 self.fail(".scratch N appears twice")
-            v = _parse_uint(args[0], ".scratch")
+            v = self.uint(args[0], ".scratch")
             if v < 1 or v > SCRATCH_D_MAX or (v & (v - 1)):
                 self.fail(f".scratch takes a power of two in "
                           f"1..{SCRATCH_D_MAX}")
@@ -1238,7 +1274,7 @@ class _Asm:
         if len(args) != 2 or args[0].lower() not in ("in", "out"):
             self.fail(".scratch takes a depth, `strict`, or `in N`, or `out M`")
         which = args[0].lower()
-        v = _parse_uint(args[1], f".scratch {which}")
+        v = self.uint(args[1], f".scratch {which}")
         # Below zero too (2026-10-01). _parse_uint takes a sign, as
         # int() does, and run() packs each count into its sixteen bits
         # with a mask - so until this date -1 was written as 65535 and
@@ -1247,8 +1283,8 @@ class _Asm:
         # refused both). The model refuses such a count as well
         # (seq.py's validate).
         if v < 0:
-            self.fail(f".scratch {which} is a sixteen-bit count, and {v} "
-                      f"is below zero")
+            self.fail(f".scratch {which} is a sixteen-bit count, and "
+                      f"{_int_text(v)} is below zero")
         if v > SCRATCH_IO_MAX:
             self.fail(f".scratch {which} is a sixteen-bit count, at most "
                       f"{SCRATCH_IO_MAX}")
@@ -1280,7 +1316,7 @@ class _Asm:
             self.fail(f"{name} is already defined")
         if _REGNAME.match(name):
             self.fail(f"{name} would shadow a register")
-        v = _parse_uint(args[2], ".slot")
+        v = self.uint(args[2], ".slot")
         if v > SLOT_MASK:
             self.fail(f"a static slot is imm[23:0], so at most {SLOT_MASK}")
         self.slot_names[low] = v
@@ -1332,7 +1368,7 @@ class _Asm:
             self.fail(f"{args[2]!r} is not r0..r{NREG - 1}")
         n = self.decimal(args[2], m.group(1), "a register")
         if not 0 <= n < NREG:
-            self.fail(f"r{n} is outside r0..r{NREG - 1}")
+            self.fail(f"r{_int_text(n)} is outside r0..r{NREG - 1}")
         self.reg_names[low] = n
 
     def literal(self, text):
@@ -1391,7 +1427,7 @@ class _Asm:
         if code == REPEAT:
             if len(args) != 1:
                 self.fail("repeat takes a trip count")
-            trip = _parse_uint(args[0], "repeat")
+            trip = self.uint(args[0], "repeat")
             if trip == 0:
                 self.fail("repeat 0 is not a loop; omit it")
             if trip >= (1 << 32):
@@ -1468,7 +1504,7 @@ class _Asm:
         if m:
             op = self.decimal(name, m.group(1), "an opcode")
             if op > 255:
-                self.fail(f"op{op} does not fit the opcode byte")
+                self.fail(f"op{_int_text(op)} does not fit the opcode byte")
             fields = (A, B, C)          # an opcode we cannot name has
             explicit_only = True        # no arity we can know
         else:
