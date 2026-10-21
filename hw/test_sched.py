@@ -540,7 +540,7 @@ def group_records():
     said = S.Log(pn, "j000001", None, "no card in the spec").append("x")
     no_job = S.Log(os.path.join(TMP, "no-job.jsonl"), None, None).append("x")
     check("records: a job's log refuses to write a record that names no card and gives no reason; given a reason the record says so; a log that is no job's may name no card",
-          refused_write and said["card"] is None and said["card_unreadable"] == "no card in the spec" and no_job["card"] is None)
+          refused_write and said.get("card") is None and said.get("card_unreadable") == "no card in the spec" and no_job.get("card") is None)
     d = os.path.join(root, "jobs", jd)
     open(os.path.join(d, "job.jsonl"), "ab").write(b"x")
     open(os.path.join(d, "extra"), "wb").write(b"y")
