@@ -4573,6 +4573,15 @@ def make_plant_copy(env: Env, name: str, edits: list) -> str:
     prove nothing."""
     d = os.path.join(env.tmp, "plant-" + name)
     os.makedirs(d, exist_ok=True)
+    # hw/sweep_record.py finds python/ (cft_sign, cft_golden) BESIDE the directory that holds it, so a plant's copy, one level down in
+    # env.tmp, needs one there: without it a driver run from a copy that asks for --records cannot start (ModuleNotFoundError: cft_sign),
+    # and a plant of that scenario goes red at every check for a reason that is not its own. Made once, by copy, never by link.
+    pyd = os.path.join(env.tmp, "python")
+    if not os.path.isdir(pyd):
+        os.makedirs(pyd)
+        shutil.copy(os.path.join(ROOT, "python", "cft_sign.py"), pyd)
+        shutil.copytree(os.path.join(ROOT, "python", "cft_golden"), os.path.join(pyd, "cft_golden"),
+                        ignore=shutil.ignore_patterns("__pycache__"))
     for f in os.listdir(HERE):
         if f.endswith((".py", ".sh")):
             shutil.copy(os.path.join(HERE, f), os.path.join(d, f))
@@ -5111,10 +5120,12 @@ def plants(env: Env) -> None:
         intended = [n for n, _ in caught if any(e in n for e in expects)]
         check(f"plant [{name}]: its scenario FAILS, at the check written for it", bool(intended),
               "caught by: " + ("; ".join(n[:90] for n, _ in caught[:3]) if caught else "nothing - every check passed under the plant"))
-        for n, d2 in caught[:2]:
-            print(f"        caught by: {n[:110]}" + (f"  [{d2[:160]}]" if n.startswith("the scenario crashed") else ""))
-        if len(caught) > 2:
-            print(f"        ... and {len(caught) - 2} more failing checks")
+        full = bool(os.environ.get("CARD_STRESS_PLANT_ALL"))      # a development aid: every failing check, with its detail, not the first two
+        shown = caught if full else caught[:2]
+        for n, d2 in shown:
+            print(f"        caught by: {n[:110]}" + (f"  [{d2[:200]}]" if full or n.startswith("the scenario crashed") else ""))
+        if len(caught) > len(shown):
+            print(f"        ... and {len(caught) - len(shown)} more failing checks")
 
 
 def scn_soak_software(env: Env, src: str = HERE) -> list:
