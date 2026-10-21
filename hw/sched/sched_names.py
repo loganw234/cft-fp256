@@ -59,6 +59,7 @@ REFUSALS = {
     "no-verdict": ("S2", "job", "a step's output holds no verdict line"),
     "rc-only": ("S2", "job", "a verdict that is only an exit status, labelled so wherever it appears"),
     "dry-run-as-card": ("S2", "job", "a stand-in's output was offered as a card's"),
+    "job-exists": ("S2", "job", "a path the job would write (a step's log, a clone or run directory) already exists: refused rather than written over (the study's 5.3: 'refuse if the outputs exist')"),
     # -- the cards and the windows (S3)
     "card-unavailable": ("S3", "job", "the card did not answer its start-up look"),
     "card-quarantined": ("S3", "job", "the card is quarantined"),

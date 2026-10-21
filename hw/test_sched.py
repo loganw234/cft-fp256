@@ -32,6 +32,7 @@ import time
 import traceback
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.environ.get("SCHED_TEST_ROOT") or os.path.dirname(HERE)       # a plant's copy reads the real tree's docs, not its own parent
 SCHED = os.path.join(HERE, "sched")
 sys.path.insert(0, SCHED)
 import sched_config as C     # noqa: E402
@@ -799,18 +800,33 @@ def group_cli():
         skip("cli: the cft-sched wrapper runs the command", "needs POSIX bash")
 
 
-def every_s1_refusal_was_raised():
-    """The table gives a name to S1 only if a scenario raised it: a name filed under `job` or `root` must be found in a record (a
-    job's `refused` record, or refusals.jsonl), and one filed `none` (no usable root to write in) on the command's stderr."""
-    recorded = set()
+def table_checks():
+    """Two checks on the refusals' table. (1) It holds every name of the study's section 5.4, read from the study. (2) Each name it
+    gives to S1 was raised by a scenario and left a record exactly where its row says: `job` a job's `refused` record and nowhere
+    else, `root` a line of refusals.jsonl and nowhere else, `job, root` both, `none` (no usable root to write in) stderr only."""
+    sp = os.path.join(ROOT, "docs", "studies", "SCHED-A-card-scheduler.md")
+    if not os.path.isfile(sp):
+        skip("the table: it holds every refusal name of the study's section 5.4", "the study is not in this tree")
+    else:
+        with open(sp, encoding="utf-8") as fh:
+            text = fh.read()
+        study = set(re.findall(r"`([a-z]+(?:-[a-z]+)+)`", text[text.index("### 5.4 Refusals, by name"):text.index("### 5.5")]))
+        missing = sorted(study - set(N.REFUSALS))
+        check("the table: it holds every refusal name of the study's section 5.4 (read from the study, not copied)", len(study) >= 30 and not missing, f"{len(study)} names read, missing {missing}")
+    in_jobs, in_root = set(), set()
     for r in ROOTS:
-        recorded |= {x.get("name") for x in S.read_records(os.path.join(r, "refusals.jsonl"))}
-        for j in os.listdir(os.path.join(r, "jobs")) if os.path.isdir(os.path.join(r, "jobs")) else []:
-            recorded |= {x.get("name") for x in recs(r, "jobs", j) if x["type"] == "refused"}
-    off = {"locks-unavailable"} if S.HAVE_FLOCK else {"lock-held", "locks-required"}      # what this platform cannot raise
-    s1 = {n: w for n, (by, w, _m) in N.REFUSALS.items() if by == "S1" and n not in off}
-    lost = sorted(n for n, w in s1.items() if (n not in SEEN if w == "none" else n not in recorded))
-    check("the table: every refusal it gives to S1 was raised by a scenario above, and left its record where its row says (none: on stderr)", not lost, f"missing: {lost}")
+        in_root |= {x.get("name") for x in S.read_records(os.path.join(r, "refusals.jsonl"))}
+        jd = os.path.join(r, "jobs")
+        for j in os.listdir(jd) if os.path.isdir(jd) else []:
+            in_jobs |= {x.get("name") for x in recs(r, "jobs", j) if x["type"] == "refused"}
+    off = {"locks-unavailable"} if S.HAVE_FLOCK else {"lock-held", "locks-required"}        # what this platform cannot raise
+    wrong = []
+    for n, (by, where, _m) in N.REFUSALS.items():
+        if by == "S1" and n not in off:
+            want = ("job" in where.split(", "), "root" in where.split(", "))
+            if (n in in_jobs, n in in_root) != want or (where == "none" and n not in SEEN):
+                wrong.append(f"{n} (row says {where}; jobs {n in in_jobs}, refusals.jsonl {n in in_root}, stderr {n in SEEN})")
+    check("the table: every refusal it gives to S1 was raised by a scenario and left a record exactly where its row says", not wrong, f"wrong: {wrong}")
 
 
 # ---------------------------------------------------------------------------------------- plants
@@ -835,7 +851,8 @@ def make_copy(name: str, edits: list) -> str:
 
 
 def run_copy(d: str, groups: str):
-    p = subprocess.run([sys.executable, "-B", "-I", os.path.join(d, "test_sched.py"), "--only", groups, "--no-plants"], capture_output=True, text=True, timeout=900)
+    p = subprocess.run([sys.executable, "-B", "-I", os.path.join(d, "test_sched.py"), "--only", groups, "--no-plants"], capture_output=True, text=True, timeout=900,
+                       env={**os.environ, "SCHED_TEST_ROOT": ROOT})
     m = re.search(r"sched test: (\d+) checks, (\d+) failed", p.stdout)
     return p.returncode, int(m.group(1)) if m else -1, [ln[6:].strip() for ln in p.stdout.splitlines() if ln.startswith("  FAIL  ")], p.stderr
 
@@ -913,6 +930,10 @@ PLANTS = [  # (what is wrong, edits, the groups written for it, a fragment of th
     ("init makes the root readable by others", [E("sched_config.py", "os.makedirs(real, mode=0o700)", "os.makedirs(real); os.chmod(real, 0o755)")], "cli", "`init` makes the root private", "flock"),
     ("a refusal the table gives to S1 that nothing raises", [E("sched_names.py", '    "card-held": ("S1", "root",', '    "never-raised": ("S1", "root", "x"), "card-held": ("S1", "root",')],
      "spec,queue,records,cli,locks,table", "the table: every refusal it gives to S1", None),
+    ("a name of the study's 5.4 is left out of the table", [E("sched_names.py", '    "job-exists": ("S2", "job",', '    "job-exists-x": ("S2", "job",')],
+     "spec,queue,records,cli,locks,table", "the table: it holds every refusal name of the study's section 5.4", None),
+    ("a name filed under job and root is recorded under one", [E("sched_state.py", '    if "root" in REFUSALS[r.name][1] and os.path.isdir(root):', '    if REFUSALS[r.name][1] == "root" and os.path.isdir(root):')],
+     "spec,queue,records,cli,locks,table", "left a record exactly where its row says", None),
     ("an unknown key in config.json is accepted", [E("sched_config.py", "        if k not in required + optional:", "        if False:")], "cli", "config.json with an unknown top-level key is refused", False),
     ("a card's worker takes another card's job", [E("sched_state.py", "            if want in cards and want != card_id:\n                continue", "            if False:\n                continue")], "queue", "a job runs on the card it names", False),
 ]
@@ -964,7 +985,7 @@ def main() -> int:
                     check(f"{name}: the group ran to its end", False, "it crashed (traceback above)")
                 print(f"{name}: {CHECKS - before} checks, {len(FAILS) - bad} failed")
         if (only is None or "table" in only) and not plant_text:
-            every_s1_refusal_was_raised()
+            table_checks()
         if (only is None or "plants" in only) and "--no-plants" not in sys.argv:
             plants(plant_text)
     finally:
