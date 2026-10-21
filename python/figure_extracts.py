@@ -1014,13 +1014,29 @@ def make_ledger(root=ROOT, existing=None):
 # host/tools/divsqrt_soak.c's lib_call calls cft_div and cft_sqrt. project_figures.py re-reads
 # those two files on every --check and fails by name if they stop saying so.
 #
-# THIS TABLE COVERS THE OPS OF THE ITEMS THE RUN SERVED, AND ONLY THOSE (card-stress-1016 served 68
-# items of hw/card_stress_lib.py's catalog, 14 exhaustive and 54 random). The catalog is the library's
-# and grows: soak-exhaustive adds twenty-two exhaustive items (conv32to64-all, cvtto32-all,
-# cvtfrom32-all, cvtfrom64-all, scaleb32-all, scaleb32-wide) and its own table of the same fact,
-# OP_REACH, which knows their ops and this one does not. make_stress therefore reduces the run's items
-# (served_items) and, where the library has OP_REACH, holds the served ops to it.
-STRESS_TILE_OPS = ("sqrt32", "div32", "div64", "sqrt64", "rint32", "rint64", "scaleb32", "scaleb64")
+# THE TABLE IS THE CATALOG'S TILE OPS: fifteen since 2026-10-21 (KL-135), the first eight being the ones
+# card-stress-1016's 68 items of hw/card_stress_lib.py's catalog (14 exhaustive, 54 random) served. The
+# catalog is the library's and grows, and it keeps its own table of the same fact, OP_REACH, which knows
+# every op the driver can run. THE TWO STAY TWO, and this one is not derived from OP_REACH: they are two
+# statements of one fact made apart, this one read from the C tools' own headers (the lines below), and
+# make_stress holds the ops a run served to the library's (_check_reach). A table read out of OP_REACH
+# would have that check compare a table with itself, so a wrong entry there would be believed here, and
+# the figures' "x% of the cases exercised the tile" would rest on the driver's word. The cost of the
+# separation is the one this table paid until 2026-10-21: the catalog gained seven tile ops (parcel HC's
+# div32-hard, div64-hard and sqrt64-hard, CL's rint64-class and scaleb64-class, EX's scaleb32-all and
+# scaleb32-wide) and this table did not, so the check refused by name every run that served one.
+# python/tests/test_figure_extracts.py now holds the whole of OP_REACH to this table on every test run,
+# not only the ops of one run when it is reduced.
+# Each of the seven, READ at aa7cb603: scaleb32-all and scaleb32-wide "are composed from tile passes"
+# (host/tools/clause5_soak.c, the header's "Which of them reach a device", line 108); rint64-class and
+# scaleb64-class are the class modes that "reach a device" (the same header, line 145); and those four call
+# "the SAME batch kernels as the random mode of the operation" (the sections "Exhaustive modes" and
+# "Class-level (L2) modes"), whose operations, rint and scaleb, are the COMPOSED ones above. div32-hard,
+# div64-hard and sqrt64-hard run soak_hard -> run_batch -> lib_call, which calls cft_div and cft_sqrt
+# (host/tools/divsqrt_soak.c, lines 762, 357, 253), the calls the first four ops were read from.
+STRESS_TILE_OPS = ("sqrt32", "div32", "div64", "sqrt64", "rint32", "rint64", "scaleb32", "scaleb64",
+                   "div32-hard", "div64-hard", "sqrt64-hard", "rint64-class", "scaleb64-class",
+                   "scaleb32-all", "scaleb32-wide")
 STRESS_TEL = {
     "power_w": "electrical.devices[0].electrical.power_consumption_watts",
     "fpga_c": "thermal.devices[0].thermals.FPGA.temp_C",
@@ -1029,6 +1045,26 @@ STRESS_TEL = {
     "pcb_rear_c": "thermal.devices[0].thermals.PCB Top Rear.temp_C",
     "hbm_c": "thermal.devices[0].thermals.FPGA HBM.temp_C",
 }
+
+
+def tile_ops_served(served_ops):
+    """The tile operations among `served_ops`, in STRESS_TILE_OPS's order: the extract's `tile_ops`. Of the RUN,
+    not of the table: the table grows with the catalog (KL-135), and the reduction of a run must not change by a
+    byte because the catalog did (what `decoys` and --verify hold). For card-stress-1016, which served the table's
+    first eight, this is the list the committed docs/figures/stress.json holds."""
+    return [op for op in STRESS_TILE_OPS if op in served_ops]
+
+
+def _check_reach(served_ops, reach):
+    """The ops a run served, held to the library's own table of the same fact (OP_REACH) - the check that stands
+    only while the two tables stay two (see STRESS_TILE_OPS). Raises ExtractError by name where they disagree."""
+    wrong = sorted(op for op in served_ops
+                   if reach.get(op) != ("tile" if op in STRESS_TILE_OPS else "host"))
+    if wrong:
+        raise ExtractError("the library's OP_REACH and STRESS_TILE_OPS disagree about the served op%s %s: %s there, "
+                           "%s here" % ("" if len(wrong) == 1 else "s", ", ".join(wrong),
+                                        ", ".join(str(reach.get(op)) for op in wrong),
+                                        ", ".join("tile" if op in STRESS_TILE_OPS else "host" for op in wrong)))
 
 
 def _median(vals):
@@ -1122,16 +1158,11 @@ def make_stress(metrics, root=ROOT, report=None, decoys=False):
     if decoys:
         catalog += _decoys(catalog)
     items = served_items(catalog, by["leg"])
-    host_ops = sorted({it.op for it in items.values()} - set(STRESS_TILE_OPS))
+    served_ops = {it.op for it in items.values()}
+    host_ops = sorted(served_ops - set(STRESS_TILE_OPS))
     reach = getattr(L, "OP_REACH", None)          # the library's own table of the same fact, where it has one
     if reach is not None:
-        wrong = sorted(op for op in {it.op for it in items.values()}
-                       if reach.get(op) != ("tile" if op in STRESS_TILE_OPS else "host"))
-        if wrong:
-            raise ExtractError("the library's OP_REACH and STRESS_TILE_OPS disagree about the served op%s %s: %s there, "
-                               "%s here" % ("" if len(wrong) == 1 else "s", ", ".join(wrong),
-                                            ", ".join(str(reach.get(op)) for op in wrong),
-                                            ", ".join("tile" if op in STRESS_TILE_OPS else "host" for op in wrong)))
+        _check_reach(served_ops, reach)
     legs = [r for r in by["leg"]]
     ran = [r for r in legs if r["status"] != "skipped"]
     status = collections.Counter(r["status"] for r in legs)
@@ -1331,7 +1362,7 @@ def make_stress(metrics, root=ROOT, report=None, decoys=False):
         "matrix": matrix,
         "telemetry": telemetry,
         "sweep": {
-            "tile_ops": list(STRESS_TILE_OPS), "host_ops": host_ops,
+            "tile_ops": tile_ops_served(served_ops), "host_ops": host_ops,
             "items": item_rows,
             "mismatches": mism,
             "cases": {"tile_exhaustive": totals[("tile", "exhaustive")], "tile_random": totals[("tile", "random")],
