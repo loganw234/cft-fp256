@@ -896,11 +896,12 @@ python3 hw/card_stress_report.py /data/card-stress-1016     # the report, any ti
   first long run's clone had it made by the lead before its first `selftest` leg.
 - **Pre-flight, optional**: `bash hw/test-card-stress.sh --no-plants` runs the driver's dry-run
   tests (the verdict parsers on real logs, the scheduler, the failure policy, the guard, the
-  sweep's resume, the host pool, the seeds, the trees, the items, the pass size, the records, the report, and under POSIX the real `make` in
+  sweep's resume, the host pool, the seeds, the trees, the resume per tree class, the items, the pass size, the records, the report, and under POSIX the real `make` in
   a scratch copy) on the box, with no card and no XRT: about 10 minutes under WSL and 11 under Git
   Bash (2026-10-21, with the coverage wave's groups: 644 s under Git Bash and about 600 s under WSL, read off the clock; 2026-10-20, before them: 448 s and 553 s, and a busier desktop made a Git
   Bash run 636 s), on a desktop other sessions share, and it must be run alone on the host (two drivers at once see each other's
-  stand-ins as card users). `--no-plants` leaves out the negative controls, which take about
+  stand-ins as card users: the guard scans every process of the WSL distro, or of the Windows desktop, it runs in, so two suites in
+  one distro make each other's drivers refuse to start, `guard_refused`, exit 2 - found by parcel SR2, 2026-10-21). `--no-plants` leaves out the negative controls, which take about
   one and a half to two times as long as everything else together (the whole suite is 27 minutes under WSL: 1,636 s on 2026-10-21, with 115 plants; 22.5 minutes before). The runner and the pythons
   the suite itself starts run with `-B` (`-I` ignores `PYTHONDONTWRITEBYTECODE`); the report script
   the driver starts for itself does not, so a run in the tree under WSL still leaves one git-ignored
