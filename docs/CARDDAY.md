@@ -902,7 +902,7 @@ python3 hw/card_stress_report.py /data/card-stress-1016     # the report, any ti
   Bash run 636 s), on a desktop other sessions share, and it must be run alone on the host (two drivers at once see each other's
   stand-ins as card users: the guard scans every process of the WSL distro, or of the Windows desktop, it runs in, so two suites in
   one distro make each other's drivers refuse to start, `guard_refused`, exit 2 - found by parcel SR2, 2026-10-21). `--no-plants` leaves out the negative controls, which take about
-  one and a half to two times as long as everything else together (the whole suite is 27 minutes under WSL: 1,636 s on 2026-10-21, with 115 plants; 22.5 minutes before). The runner and the pythons
+  one and a half to two times as long as everything else together (the whole suite is 29 minutes under WSL: 1,761 s on 2026-10-21 with 130 plants, parcel DR4's; 27 minutes, 1,636 s, with 115; 22.5 minutes before). The runner and the pythons
   the suite itself starts run with `-B` (`-I` ignores `PYTHONDONTWRITEBYTECODE`); the report script
   the driver starts for itself does not, so a run in the tree under WSL still leaves one git-ignored
   card_stress_lib file in hw/__pycache__ unless that variable is set.
