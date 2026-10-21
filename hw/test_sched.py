@@ -292,8 +292,9 @@ def group_queue():
     c = safely(lambda: sub(root, cfg, spec())[0])
     d = safely(lambda: sub(root, cfg, b"{")[0])
     e = safely(lambda: sub(root, cfg, spec())[0])
+    check("queue: cancel of a queued job (b, in this scenario) answers `dequeued`", how == "dequeued", str(how))
     check("queue: ids never repeat, though every earlier job has left queue/ and running/ (one cancelled, one run, one refused)",
-          how == "dequeued" and len({a, b, c, d, e}) == 5 and [a, b, c, d, e] == sorted([a, b, c, d, e]), str([a, b, c, d, e]))
+          len({a, b, c, d, e}) == 5 and [a, b, c, d, e] == sorted([a, b, c, d, e]), str([a, b, c, d, e]))
     out, lock = [], threading.Lock()
 
     def alloc():
@@ -943,7 +944,7 @@ def plants(only_text: str | None):
               whole(d) and n == ctl[g] and "Traceback" not in err, f"imports {whole(d)}, {n} checks against {ctl[g]}, stderr {err[-160:]!r}")
         hit = [f for f in fails if want in f]
         check(f"plant [{label}]: it turns the {g} group red at the check written for it", bool(hit), f"failing set: {[f[:80] for f in fails[:4]]}")
-        print(f"  plant [{label}] -> {g}: failing set ({len(fails)}): " + " | ".join(f[:84] for f in fails[:3]) + (f" | ... {len(fails) - 3} more" if len(fails) > 3 else ""))
+        print(f"  plant [{label}] -> {g}: failing set ({len(fails)}): " + " | ".join(f[:72] for f in fails[:6]) + (f" | ... {len(fails) - 6} more" if len(fails) > 6 else ""))
 
 
 def main() -> int:
