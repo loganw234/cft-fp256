@@ -162,10 +162,18 @@ CATALOGUE = {
 # source naming one of the math library's six; item 4 compiles them, and
 # the eighth is now routine-unavailable, the one that depends on the host
 # (2026-10-15).
+#
+# scratch-capacity's depths are the built-in targets' (python/cftc/
+# targets.py); this string said "2,048 slots on the U50's revision 7, 256
+# elsewhere" after revision 8's 4,096 and 8,192 joined the table, until
+# 2026-10-21. python/tests/test_lang.py holds it, and docs/LANGUAGE.md's
+# row, to that table clause by clause, so a depth that changes or a target
+# that joins is a failure there until both are restated.
 COMPILER_REFUSALS = {
     "scratch-capacity": "registers plus scratch past the target's: "
-                        "2,048 slots on the U50's revision 7, 256 "
-                        "elsewhere",
+                        "4,096 slots on the U50's revision-8 single and "
+                        "quad and 8,192 on its deep single, 2,048 on "
+                        "revision 7, 256 elsewhere, N on sw:N",
     "program-capacity": "more instructions than the target's image "
                         "holds",
     "loader-bound": "more than 2^40 worst-case instructions, the "

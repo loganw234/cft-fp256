@@ -32,7 +32,9 @@ Here:
   a run's h            of the graph's sign, the system compiled at that h;
                        of the other sign, refused
   the documents        docs/LANGUAGE.md's refusal table and its copy of
-                       the integrators are the code's
+                       the integrators are the code's; scratch-capacity's
+                       statement, the catalogue's and the document's,
+                       gives each built-in target its depth
 """
 
 import hashlib
@@ -42,6 +44,7 @@ import re
 import subprocess
 import sys
 import unicodedata
+from dataclasses import replace
 from fractions import Fraction
 from functools import lru_cache
 from pathlib import Path
@@ -532,6 +535,148 @@ def test_the_documents_table_is_the_catalogue():
     section = text.split("## Every refusal, by name", 1)[1].split("\n## ", 1)[0]
     names = set(re.findall(r"^\| `([a-z0-9-]+)` \|", section, re.M))
     assert names == set(lang.CATALOGUE) | set(lang.COMPILER_REFUSALS)
+
+
+# scratch-capacity's statement, held to the targets it speaks of. The
+# catalogue's string and the document's cell each say how many slots a lane
+# the compiler's targets hold, and the names above were held without the
+# numbers: revision 8's 4,096 and 8,192 reached the document's row and not
+# the string, which went on saying "2,048 on revision 7, 256 elsewhere"
+# until 2026-10-21. The table both are held to is python/cftc/targets.py,
+# the one the row's section cites.
+
+# The clauses of the statement and the built-in targets each speaks for: a
+# phrase the clause contains, then its targets. Every built-in target is in
+# exactly one, so a target that joins the table is a failure until a clause
+# says where it belongs; `sw:N` is the last clause, N a power of two.
+SCRATCH_CLAUSES = {
+    "revision-8 single and quad": ("u50-rev8", "u50-rev8-quad"),
+    "deep single": ("u50-rev8-deep",),
+    "revision 7": ("u50-rev7", "u50-rev7-quad"),
+    "elsewhere": ("sw", "u50-round2", "open-core"),
+}
+
+
+def scratch_capacity_drift(statement, builtin):
+    """How a scratch-capacity statement - the catalogue's string or
+    docs/LANGUAGE.md's cell - departs from a table of built-in targets, as
+    a list of sentences; empty when it gives every target its depth.
+
+    The statement is a lead-in, a colon and then clauses of the forms
+    "<depth> [slots] on <who>", "<depth> elsewhere" and "N on sw:N"; each
+    is read for the depth it gives the targets its phrase names."""
+    body = statement.split(": ", 1)[-1]
+    clauses = re.findall(
+        r"(\d[\d,]*|\bN\b)(?: slots)? (on [^,]+?|elsewhere)(?=,| and \d|$)",
+        body)
+    bad, covered, used = [], set(), 0
+    for phrase, names in SCRATCH_CLAUSES.items():
+        said = [n for n, who in clauses if phrase in who]
+        if len(said) != 1:
+            bad.append(f"{len(said)} clauses carry {phrase!r}, not one")
+            continue
+        used += 1
+        for name in names:
+            covered.add(name)
+            if name not in builtin:
+                bad.append(f"{name} is no built-in target")
+            elif said[0] != f"{builtin[name].scratch_depth:,}":
+                bad.append(f"{name} holds {builtin[name].scratch_depth:,} "
+                           f"slots and the statement gives it {said[0]}")
+    for name, target in builtin.items():
+        if name not in covered:
+            bad.append(f"{name} ({target.scratch_depth:,} slots) is in no "
+                       f"clause")
+    sw_n = [who for n, who in clauses if n == "N"]
+    if len(sw_n) != 1 or "sw:N" not in sw_n[0]:
+        bad.append("no clause 'N on sw:N'")
+    if len(clauses) != used + len(sw_n):
+        bad.append("a clause that no target's phrase accounts for")
+    return bad
+
+
+def _doc_scratch_capacity_cell():
+    text = DOC.read_text(encoding="utf-8")
+    section = text.split("## Every refusal, by name", 1)[1].split("\n## ", 1)[0]
+    cells = re.findall(r"^\| `scratch-capacity` \| ([^|]*?) \|", section, re.M)
+    assert len(cells) == 1, cells
+    return cells[0]
+
+
+def test_scratch_capacity_is_stated_as_the_targets_hold_it():
+    """The catalogue's string and docs/LANGUAGE.md's row each give every
+    built-in target the scratch depth python/cftc/targets.py gives it -
+    revision 8's three, revision 7's two, the 256 of the rest - and `sw:N`
+    its N. A depth that changes in the table, or a target that joins it,
+    fails here until both statements are restated."""
+    from cftc import targets
+    for what, statement in (
+            ("the catalogue's string", lang.COMPILER_REFUSALS[
+                "scratch-capacity"]),
+            ("docs/LANGUAGE.md's row", _doc_scratch_capacity_cell())):
+        assert scratch_capacity_drift(statement, targets.BUILTIN) == [], what
+    for n in (1, 2, 256, 1024, 32768):
+        assert targets.get(f"sw:{n}").scratch_depth == n
+    assert targets.get("sw").scratch_depth == 256
+
+
+def test_the_scratch_capacity_check_fails_where_it_should():
+    """The check above is red on each drift it is there for: the string as
+    it stood until 2026-10-21, two depths swapped, a depth changed in the
+    table, a target joined to it, a clause with no target, and the same
+    changes to the document's own cell."""
+    from cftc import targets
+    builtin = targets.BUILTIN
+    good = lang.COMPILER_REFUSALS["scratch-capacity"]
+    cell = _doc_scratch_capacity_cell()
+    assert scratch_capacity_drift(good, builtin) == []
+    assert scratch_capacity_drift(cell, builtin) == []
+
+    old = ("registers plus scratch past the target's: 2,048 slots on the "
+           "U50's revision 7, 256 elsewhere")
+    got = scratch_capacity_drift(old, builtin)
+    for name in ("u50-rev8", "u50-rev8-quad", "u50-rev8-deep"):
+        assert any(g.startswith(name) and "no clause" in g for g in got), got
+
+    for statement in (good, cell):
+        swapped = statement.replace("4,096 slots", "8,192 slots", 1) \
+            .replace("and 8,192 on", "and 4,096 on", 1)
+        assert swapped != statement
+        got = scratch_capacity_drift(swapped, builtin)
+        assert [g for g in got if " holds " in g] == [
+            "u50-rev8 holds 4,096 slots and the statement gives it 8,192",
+            "u50-rev8-quad holds 4,096 slots and the statement gives it "
+            "8,192",
+            "u50-rev8-deep holds 8,192 slots and the statement gives it "
+            "4,096"], got
+
+        stale = statement.replace("2,048 on revision 7", "256 on revision 7")
+        assert stale != statement
+        assert any(g.startswith("u50-rev7 holds 2,048") for g in
+                   scratch_capacity_drift(stale, builtin))
+
+        extra = statement.replace("256 elsewhere",
+                                  "16,384 on revision 9, 256 elsewhere")
+        assert extra != statement
+        assert scratch_capacity_drift(extra, builtin) == [
+            "a clause that no target's phrase accounts for"]
+
+        no_sw = statement.replace("N on", "M on")
+        assert no_sw != statement
+        assert "no clause 'N on sw:N'" in scratch_capacity_drift(
+            no_sw, builtin)
+
+    deeper = dict(builtin, **{"u50-rev8": replace(
+        builtin["u50-rev8"], scratch_depth=8192)})
+    assert [g for g in scratch_capacity_drift(good, deeper)] == [
+        "u50-rev8 holds 8,192 slots and the statement gives it 4,096"]
+    joined = dict(builtin, **{"u50-rev9": replace(
+        builtin["u50-rev8"], name="u50-rev9", scratch_depth=16384)})
+    assert scratch_capacity_drift(good, joined) == [
+        "u50-rev9 (16,384 slots) is in no clause"]
+    gone = {k: v for k, v in builtin.items() if k != "open-core"}
+    assert scratch_capacity_drift(good, gone) == [
+        "open-core is no built-in target"]
 
 
 _POOL = ["x", "y", "(", ")", "*", "-", "+", "/", "1", "0", ".", "[", "]",
