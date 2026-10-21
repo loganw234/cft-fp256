@@ -149,8 +149,9 @@ is the cost of changing the driver**, and it is why section 4.1 does not grow th
   legs, and during the build step, nothing of the driver's holds the card, so a second driver started then passes the guard
   (BELIEVED, from `card_user` and `find_card_users`; not run, since it needs two real drivers on a card). XRT's exclusive
   compute-unit access then makes the loser's next open fail, which the driver reads as `no_device`, counts toward its streak and,
-  from the second failure in a row, answers by loading another image (READ: `INFRA_PATTERNS` and `recover`). Ownership by
-  a lock, not by looking, is a requirement (R3).
+  from the second failure in a row, answers by loading another image (READ: `INFRA_PATTERNS` and `recover`). The window it leaves
+  is small, since a run's legs and waves cover 99.90 to 99.92 per cent of its span (MEASURED, `latency.out`), but it is open in the
+  build step at the start of a run and in the ladder's pauses. Ownership by a lock, not by looking, is a requirement (R3).
 - **A service.** A run ends at its deadline. It ignores SIGHUP so that a closed terminal does not end it, and that is all.
 - **A coverage view across runs, for planning.** `--earlier-runs` carries the random items' n and nothing else; an exhaustive
   item "still restarts at encoding 0 in a new `--out`" (docs/CARDDAY.md and docs/VALIDATION.md, DR2's known limits). The report's
