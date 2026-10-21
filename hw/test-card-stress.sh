@@ -15,12 +15,17 @@
 #                                               # under WSL, 9 under Git Bash
 #   bash hw/test-card-stress.sh --only parsers,commands     # seconds
 #
-# Groups for --only: parsers commands normal fail timeout deaf nodevice cardlost stopfile deadline
+# Groups for --only: parsers commands standin normal fail timeout deaf nodevice cardlost stopfile deadline
 # rotation diskfloor guard sweep disagree telemetry build buildreal internal signal torn disable sweepall
-# pool seeds trees report plants. `deaf` (a process that ignores SIGTERM), `signal` and `buildreal` need
-# POSIX, and so does the pool group's niceness check: each is skipped by name elsewhere. `trees` skips its
+# pool seeds trees items chunk records notes report plants. `deaf` (a process that ignores SIGTERM),
+# `signal` and `buildreal` need POSIX, and so does the pool group's niceness check and the records group's
+# real (not dry) run over test doubles: each is skipped by name elsewhere. `trees` skips its
 # one check of the recorded tree, by name, where git cannot read this tree (a worktree whose .git file
-# names a Windows path, read from WSL).
+# names a Windows path, read from WSL). The four groups of parcel DR3 (2026-10-21): `items` the 35 hard-case
+# and class-level items (real logs, plans, served and refused), `chunk` --sweep-chunk and its streams, `records`
+# --records and the campaign's space, `notes` four verifiers' notes (`standin` is one of them, run alone by its
+# plants). `notes` skips its figure_extracts check, by name, unless CARD_STRESS_METRICS names a finished run's
+# metrics.jsonl (the stress copy the committed figures come from).
 set -uo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 PY=${PYTHON:-}

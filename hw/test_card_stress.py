@@ -24,6 +24,13 @@ Three kinds of group, then the plants (the groups, by name, are in hw/test-card-
             reach, STOP and the deadline, a host job's failure, --resume, the lock on the metrics
             file - the seed schedule over the catalog and across runs (--earlier-runs, an old run
             resumed), and coverage by tree (the tree the driver records, the report's section, --also).
+  items, chunk, records, notes, standin   (parcel DR3, 2026-10-21) items: the 35 hard-case and class-level items in the catalog - held to
+            the documents' figures and to the REAL tools' logs, planned, served to the end of their spaces and refused when short; chunk:
+            --sweep-chunk, the tool's pass-size line held to the request, random scaleB's cases at a BATCH, and the rule for which random
+            streams are repeats of which; records: the campaign's own space, --records/--sign-key/--device-key and their refusals, the record
+            sink on a real dry run's records (refused as they stand; written with the one field that says 'dry run' changed in a scratch
+            directory) and a real, NOT dry run of the driver over test doubles (POSIX); notes: --quick --sweep-items after an empty wave,
+            figure_extracts' cpu filter (needs CARD_STRESS_METRICS), and standin_alive (its own group, `standin`, which its plants run).
 
 POSIX-only checks (the `nice` and `timeout` wrappers, a process that ignores SIGTERM) are
 SKIPped by name on Windows and run under WSL or on the box. Everything runs niced by the
@@ -3223,6 +3230,15 @@ DOC_INDEX = {
 DOC_NAMES = [f"{op}-{m}" for op, v in DOC_INDEX.items() for m in v[2]]
 
 
+def read_bytes(path: str) -> bytes:
+    """A file's bytes, or b'' where it is not there: a check about a file a broken driver did not write must go red, not crash."""
+    try:
+        with open(path, "rb") as fh:
+            return fh.read()
+    except OSError:
+        return b""
+
+
 def raises_in(L2, fn) -> bool:
     """raises(), for the library a check imported itself (lib_from gives a module of its own, with its own VerdictError)."""
     try:
@@ -3356,7 +3372,7 @@ def index_item_checks(src: str = HERE) -> list:
                  ("hc-sqrt64-hard.txt", "sqrt64-hard-rmm"), ("cl-conv64to32-class.txt", "conv64to32-class-rne"),
                  ("cl-rint64-class.txt", "rint64-class-rmm"), ("cl-cvtto64-class.txt", "cvtto64-class-rup"),
                  ("cl-cvtfrom64-class.txt", "cvtfrom64-class-rtz"), ("cl-scaleb64-class.txt", "scaleb64-class-rdn"))
-        standin = os.path.join(HERE, "card_stress_standin.py")
+        standin = os.path.join(src, "card_stress_standin.py")           # src: the code under test, or a plant's copy of it
         for nm, iname in goods:
             it = by[iname]
             op, lo, hi, mode = fixture_job(index, nm)
@@ -3367,6 +3383,9 @@ def index_item_checks(src: str = HERE) -> list:
                 continue
             cases, enc, skp = int(m.group(3)), int(m.group(6)), int(m.group(7))
             exp, cover = it.expected_cases(lo, hi), it.cover_spec(lo, hi)
+            if cover is None:                    # an item with no cover rule is a red check here, not a crash further down
+                c(f"index {nm}: {iname} has a cover rule: its verdict line says what a slice covered, and the slice is held to it", False)
+                continue
             rc = index[nm][0]
             v, why = parse_ok(lambda: L2.parse_soak(t, rc, it.op, it.verdict_mode, None, exp, cover))
             c(f"index {nm}: made by {iname}'s command line; passes with the log's own cases, encodings and skipped, E the slice's "
@@ -3428,8 +3447,11 @@ def index_item_checks(src: str = HERE) -> list:
               v is not None and (not v.ok) and v.counts["value_mismatches"] > 0 and v.counts["encodings"] == hi - lo
               and len(v.extra["disagreements"]) >= 3 and all(re.search(r"a=0x[0-9a-f]+", x) for x in v.extra["disagreements"])
               and raises(lambda: L2.parse_soak(t, 0, it.op, it.verdict_mode, None, exp, cover)), why)
-        # the stand-in's tables are the library's
-        st_mod = importlib.import_module("card_stress_standin")
+        # the stand-in's tables are the library's (the stand-in of `src`, loaded from its file: a cached import of the real one would hide a plant)
+        import importlib.util
+        st_spec = importlib.util.spec_from_file_location("card_stress_standin_under_test", standin)
+        st_mod = importlib.util.module_from_spec(st_spec)
+        st_spec.loader.exec_module(st_mod)
         diff = []
         for op, (space, k, ms, _r, whole) in DOC_INDEX.items():
             if st_mod.IDX[op][:2] != (space, k):
@@ -3567,7 +3589,7 @@ def scn_index_items(env: Env, src: str = HERE) -> list:
     ex_items = [it for it in L.sweep_items() if it.kind == "exhaustive"]
     c("index items: status.txt counts the seven items' indices over their own spaces in its sweep line",
       f"exhaustive {cov:,} of {sum(it.space for it in ex_items):,} encodings" in st, st[st.find("sweep "):][:200])
-    rp = os.path.join(HERE, "card_stress_report.py")
+    rp = os.path.join(src, "card_stress_report.py")
     p = subprocess.run([sys.executable, "-B", "-I", rp, r.out, "--no-write"], capture_output=True, text=True, timeout=120)
     t = p.stdout
     tt, th = sum(space[n] for n in INDEX_TILE), sum(space[n] for n in INDEX_HOST)
@@ -3620,7 +3642,7 @@ def scn_index_refusals(env: Env, src: str = HERE) -> list:
           got and len(mine) > k and all(x["status"] == "parse_error" and x["counts"] is None and w in (x["reason"] or "")
                                          for x, w in zip(mine[:k], want)), str([(x["status"], x["reason"]) for x in mine[:k + 1]]))
         c(f"index short {n}: the same first slice was served again each time, and then passed; the refused ones are not covered",
-          got and len({(x["sweep"]["lo"], x["sweep"]["hi"]) for x in mine[:k + 1]}) == 1 and mine[k]["status"] == "pass"
+          got and len(mine) > k and len({(x["sweep"]["lo"], x["sweep"]["hi"]) for x in mine[:k + 1]}) == 1 and mine[k]["status"] == "pass"
           and (L.sweep_coverage(r.recs)[0].get(n) or [(None, None)])[0][0] == 0
           and L.sweep_coverage(r.recs)[1].get(n) == sum(1 for x in mine if x["status"] == "pass"),
           str([(x["sweep"]["lo"], x["sweep"]["hi"], x["status"]) for x in mine[:k + 1]]))
@@ -3723,7 +3745,7 @@ def chunk_unit_checks(src: str = HERE) -> list:
           and s32.random_cases(0, 4096) is None and s32.random_cases(10, 0) is None
           and by["rint64-class-rne"].random_cases(10, 4096) is None)
         # the stand-in prints what the chunked tool prints
-        standin = os.path.join(HERE, "card_stress_standin.py")
+        standin = os.path.join(src, "card_stress_standin.py")
         pr = subprocess.run([sys.executable, standin, "soak", "--", "host/clause5-soak-c16384", "scaleb32", "100000", "5", "rne"],
                             capture_output=True, text=True, timeout=60)
         pr2 = subprocess.run([sys.executable, standin, "soak", "--", "host/clause5-soak-c16384", "scaleb64", "100000", "5", "rne"],
@@ -4132,11 +4154,15 @@ def records_sink_checks(env: Env, src: str = HERE) -> list:
             # 1. the stream as it stands: refused, nothing written
             p1 = os.path.join(kd, "dry.jsonl")
             s1, ev1 = new_sink(p1, key)
-            feed_all(mod, s1, recs, None)
+            try:
+                feed_all(mod, s1, recs, None)
+                crash1 = None
+            except Exception as e:                 # a refusal that escapes the sink would end a long run: a red check, not a crash
+                crash1 = repr(e)
             c("records sink: the dry run's records fed as they stand are REFUSED by the exporter: one records_disabled event naming the dry run, "
               "every finished card slice counted as not exported, and no file",
-              not os.path.exists(p1) and [n for n, _ in ev1].count("records_disabled") == 1 and "dry run" in ev1[0][1]
-              and s1.refused.get("disabled") == len(card) and s1.written == 0, str(ev1[:2]))
+              crash1 is None and not os.path.exists(p1) and [n for n, _ in ev1].count("records_disabled") == 1 and "dry run" in ev1[0][1]
+              and s1.refused.get("disabled") == len(card) and s1.written == 0, str(crash1 or ev1[:2]))
             SR = s1.SR
             ex = SR.Exporter(public=bytes.fromhex(pub))
             try:
@@ -4157,7 +4183,7 @@ def records_sink_checks(env: Env, src: str = HERE) -> list:
                 fh.write(f"key {pub} Throwaway%20Holder\n")
             parsed = []
             try:
-                parsed = SR.parse_file(open(p2, "rb").read())
+                parsed = SR.parse_file(read_bytes(p2))
                 rep = SR.verify_records(parsed, SR.read_keyring(ring), require_signed=True)
                 vr = (rep["clean"], rep["cases"], len(rep["findings"]), rep["slices"], rep["campaigns"], rep["unsigned"])
             except SR.Refusal as e:
@@ -4176,8 +4202,7 @@ def records_sink_checks(env: Env, src: str = HERE) -> list:
               s2.host_slices == len(host) == 2 and [n for n, _ in ev2].count("records_host_slices") == 1 and not s2.refused
               and "record_refused" not in [n for n, _ in ev2], str([(n, x[:60]) for n, x in ev2]))
             def slurp(pth):
-                with open(pth, "r", errors="replace") as fh:
-                    return fh.read()
+                return read_bytes(pth).decode("utf-8", "replace")
             secret_in = any(seed in slurp(pth) for pth in (p2, d.metrics))
             c("records sink: the key's secret is in neither the records nor metrics.jsonl", not secret_in and seed not in s2.summary())
             # 3. unsigned, for a later `sign`: the file verifies only as unsigned, and sign makes it verify signed
@@ -4185,10 +4210,10 @@ def records_sink_checks(env: Env, src: str = HERE) -> list:
             s3, _ev3 = new_sink(p3, None, pub)
             feed_all(mod, s3, recs, False)
             try:
-                rep3 = SR.verify_records(SR.parse_file(open(p3, "rb").read()), None, require_signed=False)
+                rep3 = SR.verify_records(SR.parse_file(read_bytes(p3)), None, require_signed=False)
                 un = (rep3["clean"], rep3["unsigned"])
                 try:
-                    SR.verify_records(SR.parse_file(open(p3, "rb").read()), None, require_signed=True)
+                    SR.verify_records(SR.parse_file(read_bytes(p3)), None, require_signed=True)
                     sig_needed = False
                 except SR.Refusal as e:
                     sig_needed = e.name == "signature"
@@ -4208,7 +4233,7 @@ def records_sink_checks(env: Env, src: str = HERE) -> list:
                 crashed = None
             except Exception as e:                              # a refusal that escapes the sink would end a long run
                 crashed = repr(e)
-            rep4 = SR.verify_records(SR.parse_file(open(p4, "rb").read()), None, require_signed=True) if os.path.exists(p4) else {"clean": -1}
+            rep4 = SR.verify_records(SR.parse_file(read_bytes(p4)), None, require_signed=True) if os.path.exists(p4) else {"clean": -1}
             named = [x for n, x in ev4 if n == "record_refused"]
             c("records sink: a leg whose counts the exporter refuses is a record_refused event naming the refusal and the leg, the sink does not "
               "crash, and every other slice is still written",
@@ -4224,10 +4249,10 @@ def records_sink_checks(env: Env, src: str = HERE) -> list:
             notes = s6.adopt(R.recs[0]["run_id"])
             feed_all(mod, s6, [r for r in recs if r.get("type") == "run_start" or r.get("type") == "build"
                                or (r.get("type") == "leg" and r.get("kind") == "sweep" and r["image"] == "deep")], False)
-            lines = open(p5, "rb").read().split(b"\n")
+            lines = read_bytes(p5).split(b"\n")
             ncamp = sum(1 for ln in lines if b'"kind":"campaign"' in ln)
             try:
-                rep5 = SR.verify_records(SR.parse_file(open(p5, "rb").read()), None, require_signed=True)
+                rep5 = SR.verify_records(SR.parse_file(read_bytes(p5)), None, require_signed=True)
                 v5 = (rep5["clean"], rep5["campaigns"])
             except SR.Refusal as e:
                 v5 = ("refused", str(e))
@@ -4247,7 +4272,7 @@ def records_sink_checks(env: Env, src: str = HERE) -> list:
             s8, _ev8 = new_sink(p5, key)
             n8 = s8.adopt(R.recs[0]["run_id"])
             c("records sink: a torn last line (a write cut short) is cut back to the last whole record, and said",
-              open(p5, "rb").read().endswith(b"\n") and any("torn" in x for x in n8), str(n8))
+              read_bytes(p5).endswith(b"\n") and any("torn" in x for x in n8), str(n8))
     finally:
         rmtree_force(kd)
     return out
@@ -4551,6 +4576,8 @@ def make_plant_copy(env: Env, name: str, edits: list) -> str:
             shutil.copy(os.path.join(HERE, f), os.path.join(d, f))
     if os.path.isdir(FIX) and not os.path.exists(os.path.join(d, "card_stress_fixtures")):
         shutil.copytree(FIX, os.path.join(d, "card_stress_fixtures"))
+    if any(e[0] == "figure_extracts.py" for e in edits):          # lives in python/, not hw/: a plant of it gets its own copy
+        shutil.copy(os.path.join(ROOT, "python", "figure_extracts.py"), os.path.join(d, "figure_extracts.py"))
     for fname, old, new in edits:
         p = os.path.join(d, fname)
         with open(p, "r", encoding="utf-8", newline="") as fh:
@@ -4574,6 +4601,19 @@ def plant_parsers(env: Env, src: str) -> list:
     if p.returncode != 0 and not bad:
         bad = [f"parser group crashed under the plant: {p.stderr[-200:]}"]
     return [(b, False, "") for b in bad] or [("parser group passes under the plant", True, "")]
+
+
+def plant_standin(env: Env, src: str) -> list:
+    """The `standin` group of THIS test (standin_alive's own checks), run as a subprocess from the plant's directory, so it tests the plant's
+    copy of the test; every FAIL line it prints is a failing check, named by its text."""
+    e = dict(os.environ)
+    e["CARD_STRESS_TEST_ROOT"] = ROOT
+    p = subprocess.run([sys.executable, "-B", "-I", os.path.join(src, "test_card_stress.py"), "--only", "standin", "--no-plants"],
+                       capture_output=True, text=True, env=e, timeout=120)
+    bad = [ln.strip()[6:].strip() for ln in p.stdout.splitlines() if ln.startswith("  FAIL  ")]
+    if p.returncode != 0 and not bad:
+        bad = [f"the standin group crashed under the plant: {p.stderr[-200:]}"]
+    return [(b, False, "") for b in bad] or [("the standin group passes under the plant", True, "")]
 
 
 def plant_report(env: Env, src: str) -> list:
@@ -4885,6 +4925,140 @@ def plants(env: Env) -> None:
          [("card_stress_report.py", "                cov = covered([iv for v in per.values() for iv in v[\"iv\"]])\n",
            "                cov = sum(covered(v[\"iv\"]) for v in per.values())\n")],
          scn_trees, ["trees: and the images are reported separately beneath the tree"]),
+        # parcel DR3 (2026-10-21): the index-based items, the pass size, the signed records, four verifiers' notes
+        ("an index-based hard-case item says nothing of what its slice covered",
+         [("card_stress_lib.py", 'per_encoding=k, space=space, level="hard", whole=HARD_WHOLE[op]))',
+           'per_encoding=None, space=space, level="hard", whole=HARD_WHOLE[op]))')],
+         lambda env, src: index_item_checks(src), ["index items: each has the documents' space, k, reach, tool"]),
+        ("cvtto64-class is held to k x E cases though it skips pairs",
+         [("card_stress_lib.py", 'exact=op != "cvtto64-class", per_encoding=k', 'exact=True, per_encoding=k')],
+         lambda env, src: index_item_checks(src), ["index cl-cvtto64-class.txt: made by cvtto64-class-rup's command line"]),
+        ("the stand-in's skipped slots for div32-hard are one off the whole space's",
+         [("card_stress_standin.py", '"div32-hard": (21235788, 4, 20596560)', '"div32-hard": (21235788, 4, 20596561)')],
+         lambda env, src: index_item_checks(src), ["index items: the stand-in's tables"]),
+        ("a hard-case item is marked as a host item",
+         [("card_stress_lib.py", '"div32-hard": TILE, "div64-hard": TILE, "sqrt64-hard": TILE,', '"div32-hard": HOST, "div64-hard": TILE, "sqrt64-hard": TILE,')],
+         lambda env, src: group_commands(src), ["reach: every item is marked as its operation's family is"]),
+        ("the driver's gap is over 2^32 encodings, not the item's own space",
+         [("card_stress.py", "gap = L.first_gap(have, it.space)", "gap = L.first_gap(have)")],
+         lambda env, src: index_plan_checks(src),
+         ["index plan: the last slice is short and ends exactly at the space's end", "index plan: rint64-class-rne's first slice is the WHOLE space"]),
+        ("the status file counts every exhaustive item over 2^32",
+         [("card_stress.py", "ex_total += it.space", "ex_total += L.EXH")],
+         lambda env, src: scn_index_items(env, src), ["index items: status.txt counts the seven items' indices"]),
+        ("the report counts every exhaustive item over 2^32",
+         [("card_stress_report.py", "space = ITEM_SPACE.get(it, EXH)", "space = EXH")],
+         lambda env, src: scn_index_items(env, src), ["index items: the report counts each item over its own space"]),
+        ("the whole-space check never runs",
+         [("card_stress.py", "                    ev += self.whole_space_events(it)\n", "")],
+         lambda env, src: scn_index_items(env, src),
+         ["index items: the whole-space check ran once for each of the seven items", "index short: sqrt64-hard-rmm, whose every slice is one skipped slot off"]),
+        ("the driver does not hold an index item's slice to what it covered (the card's path)",
+         [("card_stress.py", '            cover = job["cover"]\n', "            cover = None\n")],
+         lambda env, src: scn_index_refusals(env, src), ["index short div32-hard-rne: the first 3 slice(s) came back short"]),
+        ("the host pool does not hold an index item's slice to what it covered",
+         [("card_stress.py", '        exp, cover = job["expected"], job["cover"]\n', '        exp, cover = job["expected"], None\n')],
+         lambda env, src: scn_index_refusals(env, src), ["index short cvtto64-class-rne: the first 1 slice(s) came back short"]),
+        # the pass size
+        ("a pass-size line that disagrees with the request is accepted",
+         [("card_stress_lib.py", "        if int(cl.group(1)) != chunk or int(cl.group(2)) != chunk:", "        if False:")],
+         lambda env, src: chunk_unit_checks(src) + scn_chunk(env, src),
+         ["asked at 8192, at 4096 or as the default tool it is refused", "chunk run: the two slices whose tool left out its line"]),
+        ("a default job's log that carries a pass-size line is accepted",
+         [("card_stress_lib.py", "    if chunk is None:\n        if cl:\n", "    if chunk is None:\n        if False:\n")],
+         lambda env, src: chunk_unit_checks(src) + scn_chunk(env, src),
+         ["asked at 8192, at 4096 or as the default tool it is refused", "no chunk: a default job whose tool says it ran at a pass size is refused"]),
+        ("the pool's slices are not held to the pass size",
+         [("card_stress.py", "cpu=True, chunk=self.chunk)), card=False)", "cpu=True)), card=False)")],
+         lambda env, src: scn_chunk(env, src), ["chunk run: every slice that passed carries the batch and chunk its tool said"]),
+        ("the card's slices are not held to the pass size",
+         [("card_stress.py", "t, rc, it.op, it.verdict_mode, img.path, exp, cover, chunk=self.chunk)))", "t, rc, it.op, it.verdict_mode, img.path, exp, cover)))")],
+         lambda env, src: scn_chunk(env, src), ["chunk run: every slice that passed carries the batch and chunk its tool said"]),
+        ("the sweep runs the default tools whatever --sweep-chunk says",
+         [("card_stress.py", 'f"{name}-c{self.chunk}" if self.chunk else name', "name")],
+         lambda env, src: scn_chunk(env, src),
+         ["chunk run: every slice that passed carries the batch and chunk its tool said", "chunk run: the tools the sweep ran are the -c16384 ones"]),
+        ("random scaleB is not held to the cases its BATCH gives",
+         [("card_stress.py", 'job["expected"] = it.random_cases(units, self.batch) if self.chunk else None', 'job["expected"] = None')],
+         lambda env, src: scn_chunk(env, src), ["chunk run: a random scaleB slice is held to the cases its BATCH gives"]),
+        ("the build step does not build the chunked tools",
+         [("card_stress.py", "        if self.chunk:\n            # --sweep-chunk N: the sweep's slices run the tools built at pass size N",
+           "        if False:\n            # --sweep-chunk N: the sweep's slices run the tools built at pass size N")],
+         lambda env, src: scn_records_real(env, src), ["records real (B): the build step ran the default make and then"]),
+        ("the chunked build leaves out the default build's XRT flags",
+         [("card_stress.py", '            cargv = ["make", "-C", host, f"-j{a.build_jobs}"] + xrt_flags\n', '            cargv = ["make", "-C", host, f"-j{a.build_jobs}"]\n')],
+         lambda env, src: scn_records_real(env, src), ["records real (B): the build step ran the default make and then"]),
+        ("a cvtfrom slice's stream is keyed by its tool state alone, whatever the batch",
+         [("card_stress_lib.py", "    return (seed | 1, batch) if op in LAYOUT_OPS else seed | 1", "    return seed | 1")],
+         lambda env, src: chunk_unit_checks(src), ["a cvtfrom slice from a state a slice at the SAME batch used is refused"]),
+        ("every random item's stream is keyed by its batch",
+         [("card_stress_lib.py", "    return (seed | 1, batch) if op in LAYOUT_OPS else seed | 1", "    return (seed | 1, batch)")],
+         lambda env, src: chunk_unit_checks(src), ["chunk streams: every other item is keyed by its state alone"]),
+        ("--earlier-runs floors a cvtfrom item by slices of every batch",
+         [("card_stress_lib.py", "        if batch is not None:\n            # a layout-dependent item's highest n", "        if False:\n            # a layout-dependent item's highest n")],
+         lambda env, src: chunk_unit_checks(src), ["chunk streams: --earlier-runs:"]),
+        ("the report keys a random item's coverage by item alone, chunked or not",
+         [("card_stress_report.py", 'rk = item if bt == DEFAULT_BATCH else f"{item} @batch {bt}"', "rk = item")],
+         lambda env, src: chunk_report_checks(env, src), ["chunk report: coverage by tree keeps a random item's chunked and default streams"]),
+        ("the report says nothing of the pass size",
+         [("card_stress_report.py", '    if W.get("batches"):', "    if False:")],
+         lambda env, src: chunk_report_checks(env, src), ["chunk report: a run with chunked slices says the pass size"]),
+        # the signed records
+        ("--records is accepted with --dry-run",
+         [("card_stress.py", '        if a.dry_run:\n            ap.error("--records: refused with --dry-run.', '        if False:\n            ap.error("--records: refused with --dry-run.')],
+         lambda env, src: records_args_checks(env, src), ["records args: --records with --dry-run is refused by name"]),
+        ("a key inside a git working tree is not refused at the command line",
+         [("card_stress.py", "                    SR.load_seed(a.sign_key)\n                except SR.Refusal as e:", "                    pass\n                except SR.Refusal as e:")],
+         lambda env, src: records_args_checks(env, src),
+         ["records args: a key path inside this repository is refused by name (key-in-tree)", "records args: a real key file inside ANOTHER git working tree"]),
+        ("the key's secret is read into a setting",
+         [("card_stress.py", "                    SR.load_seed(a.sign_key)\n                except SR.Refusal as e:",
+           "                    a.sign_seed = SR.load_seed(a.sign_key).hex()\n                except SR.Refusal as e:")],
+         lambda env, src: records_args_checks(env, src) + scn_records_real(env, src),
+         ["records args: a good key and --records", "records real (A): signed by the throwaway key"]),
+        ("the exporter accepts a dry run's legs",
+         [("sweep_record.py", '            if isinstance(rec.get("settings"), dict) and rec["settings"].get("dry_run"):', "            if False:")],
+         lambda env, src: records_sink_checks(env, src),
+         ["records sink: the dry run's records fed as they stand are REFUSED by the exporter", "records sink: and the exporter itself still refuses that run_start"]),
+        ("the sink offers a host-pool slice to the exporter",
+         [("card_stress.py", '                    if rec.get("image") == L.CPU:', "                    if False:")],
+         lambda env, src: records_sink_checks(env, src), ["records sink: the host-pool slices are counted, not offered to the exporter"]),
+        ("a refusal escapes the record sink",
+         [("card_stress.py", '            except self.SR.Refusal as e:\n                if typ == "run_start":', '            except KeyError as e:\n                if typ == "run_start":')],
+         lambda env, src: records_sink_checks(env, src),
+         ["records sink: the dry run's records fed as they stand are REFUSED by the exporter",
+          "records sink: a leg whose counts the exporter refuses is a record_refused event"]),
+        ("a resumed sink does not know the campaigns already in its file",
+         [("card_stress.py", '                self.ex.seen.add(r["id"])', "                pass")],
+         lambda env, src: records_sink_checks(env, src), ["records sink: a resumed run's sink adopts the file"]),
+        ("a resumed sink appends another key's records to the file",
+         [("card_stress.py", '                if r["run"]["device"] != self.ex.device:', "                if False:")],
+         lambda env, src: records_sink_checks(env, src), ["records sink: a resume with ANOTHER key is refused by name"]),
+        ("Driver.rec does not feed the record sink",
+         [("card_stress.py", "        if self.sink is not None:\n            self.sink.feed(rec)", "        if False:\n            self.sink.feed(rec)")],
+         lambda env, src: records_sink_checks(env, src), ["records sink: through Driver.rec the same stream"]),
+        ("a campaign says 2^32 for an item whose space is smaller (the space forced back)",
+         [("sweep_record.py", 'c["space"], c["exact"] = getattr(it, "space", L.EXH), bool(it.exact)', 'c["space"], c["exact"] = L.EXH, bool(it.exact)')],
+         lambda env, src: campaign_space_checks(src),
+         ["campaign space: counts_problem refuses an interval one past a new item's real space",
+          "campaign space: each of the 35 new items' campaign says its own space"]),
+        # the verifiers' notes
+        ("--quick with --sweep-items tries a second wave after an empty one",
+         [("card_stress.py", "                if self.quick and not self.sweep_only and waves + 1 < self.quick_waves(img):",
+           "                if self.quick and waves + 1 < self.quick_waves(img):")],
+         lambda env, src: quick_empty_wave_checks(env, src), ["quick sweep: with --sweep-items an empty wave ends the image's sweep at once"]),
+        ("standin_alive lets a PowerShell timeout escape",
+         [("test_card_stress.py", "    except (subprocess.TimeoutExpired, OSError):\n        return True\n    if q.returncode != 0:",
+           "    except OSError:\n        return True\n    if q.returncode != 0:")],
+         plant_standin, ["standin_alive: a PowerShell call that times out does not raise"]),
+        ("standin_alive counts an empty command line as dead",
+         [("test_card_stress.py", '    if not q.stdout.strip():\n        return pid_alive(pid)\n    return "card_stress_standin" in q.stdout',
+           '    return "card_stress_standin" in q.stdout')],
+         plant_standin, ["standin_alive: an EMPTY command line of a pid that is still there"]),
+        ("figure_extracts counts a host-pool slice as sweep activity beside the card",
+         [("figure_extracts.py", 'sweeps_run = [r for r in ran if r["kind"] == "sweep" and r["image"] != "cpu"]',
+           'sweeps_run = [r for r in ran if r["kind"] == "sweep"]')],
+         lambda env, src: fx_cpu_filter_checks(env, src), ["fx filter: the stress figure's power by activity"]),
     ]
     for name, edits, fn, expects in P:
         if pick and pick not in name:
