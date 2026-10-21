@@ -116,10 +116,15 @@ def main(argv):
         if not HEADER.is_file():
             print("gen_divfull: %s is missing" % HEADER)
             return 1
-        have = HEADER.read_text(encoding="utf-8")
-        if have != text:
-            print("gen_divfull: STALE %s - run python python/gen_divfull.py"
-                  % HEADER.relative_to(ROOT))
+        # BYTES, not read_text: a text-mode read folds CRLF to LF, so a
+        # header an editor had saved with CRLF compared equal to the
+        # generated text and this check could not see it (KL-609).
+        have, want = HEADER.read_bytes(), text.encode("utf-8")
+        if have != want:
+            crlf = (" (CRLF line ends; the generator writes LF)"
+                    if have.replace(b"\r\n", b"\n") == want else "")
+            print("gen_divfull: STALE %s%s - run python python/gen_divfull.py"
+                  % (HEADER.relative_to(ROOT), crlf))
             return 1
         print("gen_divfull: host/src/divfull_images.h matches divfull.py")
         return 0

@@ -91,6 +91,25 @@ def hexes(vals, esz):
     return [v.to_bytes(esz, "little").hex() for v in vals]
 
 
+def check_committed(text, ncases):
+    """`--check`'s verdict: the committed file against a fresh generation,
+    as BYTES - a text-mode read folds CRLF to LF, so a copy saved with CRLF
+    compared equal and the check could not see it (KL-609). Split out of
+    main() so a test can hand it a text and a file without libcft."""
+    if not OUT.exists():
+        print(f"{OUT} does not exist")
+        return 1
+    have, want = OUT.read_bytes(), text.encode("utf-8")
+    if have != want:
+        crlf = (", and it has CRLF line ends"
+                if have.replace(b"\r\n", b"\n") == want else "")
+        print(f"{OUT} differs from a fresh generation "
+              f"({len(have)} bytes on disk, {len(want)} generated{crlf})")
+        return 1
+    print(f"{OUT}: {ncases} cases, identical to a fresh generation")
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--check", action="store_true",
@@ -242,16 +261,7 @@ def main():
     text = json.dumps(header, sort_keys=True) + "\n" + body
 
     if args.check:
-        if not OUT.exists():
-            print(f"{OUT} does not exist")
-            return 1
-        have = OUT.read_text(encoding="utf-8")
-        if have != text:
-            print(f"{OUT} differs from a fresh generation "
-                  f"({len(have)} bytes on disk, {len(text)} generated)")
-            return 1
-        print(f"{OUT}: {len(lines)} cases, identical to a fresh generation")
-        return 0
+        return check_committed(text, len(lines))
 
     OUT.write_text(text, encoding="utf-8", newline="\n")
     print(f"{OUT}: {len(lines)} cases "
