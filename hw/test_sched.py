@@ -91,6 +91,8 @@ def serve_here(root, cfg, **kw):
 
 
 def recs(root, where, jid):
+    if not (isinstance(jid, str) and S.ID_RE.match(jid)):         # what `safely` returns for a crash is no id, and on Windows a path made of it is an OSError
+        return []
     return S.read_records(os.path.join(root, where, jid, "job.jsonl"))
 
 
