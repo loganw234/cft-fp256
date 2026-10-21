@@ -56,10 +56,11 @@
  *
  * A wrong value is not a silent hazard: HELLO comes back refused, with
  * both versions in the message, and this sketch prints it. The value
- * below is one against any server but a 0.11: it is what the probe
- * printed when this example was written, and the library's version
- * steps do not move it. */
-#define CFT_REMOTE_ABI 0x0000000BUL      /* libcft 0.11 */
+ * below is the ABI of the libcft in the tree these sketches ship with,
+ * which is what the probe prints for a server built from it; a server
+ * built from any other libcft refuses it, and every step of the ABI is
+ * another. */
+#define CFT_REMOTE_ABI 0x00000012UL      /* libcft 0.18 */
 
 #define CFT_PORT Serial                  /* the protocol's port */
 #define CFT_LOG  Serial                  /* where this sketch talks */
