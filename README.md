@@ -435,9 +435,11 @@ What is planned:
   is built. sin, cos and tan (M2, whose study is
   `docs/studies/M2-trig.md`) are the next build, then atan, atan2, asin
   and acos (M4), and the pow family (M3) last.
-- **One gallery** of worked systems, with literature-checked answers and
-  published certificates (`docs/ROADMAP.md`, "Step 6: the math library,
-  revision 8 and programs past one tile").
+- **One gallery**, "with literature-checked answers and published
+  certificates", as the roadmap puts it: step 7 of its work order, after
+  step 6 (`docs/ROADMAP.md`, "Step 6: the math library, revision 8 and
+  programs past one tile"). It is not `docs/FIGURES.md`, which is the
+  gallery of the project's figures.
 - **At the next RTL revision**, RISC-V's rule for a fused multiply-add
   of zero times infinity with a quiet NaN addend: invalid raised, where
   the contract today lets the NaN operand win and raises nothing
