@@ -14,6 +14,15 @@ the transcendental set, landed 2026-09-02 as ABI 0.3. This is the
 design, the proofs it rests on, and the measurements that were actually
 taken.
 
+*Note of 2026-10-21. Everything below is about libcft's host operations
+(`cft_exp` and the rest), which the math library's M1 build left as they
+were. Since that build (2026-10-13 to 2026-10-19) six of these
+functions - exp, expm1, exp2, log, log1p and log2 - also run on the
+tile, as routines the language compiles; the last section, "The six on
+the tile", says what that is. A passage below that calls a
+tile-assisted path a plausible later optimisation is as written on its
+date, 2026-09-02 or 09-03.*
+
 ## The promise, and why it is the only one worth making
 
 **Correctly rounded, at all four formats, under all five rounding
@@ -63,6 +72,22 @@ optimisation - the tile's FMA could carry a polynomial evaluation, with
 the host deciding only the cases the polynomial cannot - but it would
 have to reproduce these bits exactly, and that makes it an optimisation
 rather than a different answer. It is not part of this contract.
+
+*Note of 2026-10-21. For six of these functions that tile path now
+exists, built differently from how this section pictured it. M1's build
+(2026-10-13 to 2026-10-19) made exp, expm1, exp2, log, log1p and log2
+into routines of the tile's own instructions, which the language's
+compiler writes into a program. The routine decides a lane's last bit
+where its error bound allows; where the true value lies within that
+bound of a rounding boundary, it marks the lane (bit 7 of the lane byte,
+STATUS[6]) and the definition replays that lane, so the multiprecision
+evaluator decides only the cases the routine cannot, as this section
+guessed the host would. The argument above is not changed by it: no
+fused operation says which side of a boundary e^x lies on, which is why
+a routine can mark a lane and cannot always decide it. Nor are the host
+operations: `cft_exp` and the rest of the thirty-nine still issue no
+`cft_run` pass, and the contract is still `transcend.py`. The last
+section, "The six on the tile", has the details and the record.*
 
 ## Two implementations, one definition
 
@@ -578,6 +603,11 @@ by what came after.*
 - **Tile assistance.** Every one of these is host work today. A
   narrow-format fast path on the tile's FMA is a phase-2 optimisation
   and would have to reproduce these bits exactly.
+
+  *Status 2026-10-21: built for six of them, as routines of the
+  language and at all four formats, not as a narrow-format fast path
+  behind the host calls (the last section). The bullet stays as written
+  on 2026-09-02, and still holds of the thirty-nine host entry points.*
 - **The rest of clause 9.** sin, cos, tan and the inverse trigonometric
   and hyperbolic functions need one thing this set did not: an
   argument reduction against pi, which is a different and harder
@@ -1734,4 +1764,73 @@ the rule it breaks is one of the two this set added.
   in this set reads it.
 - **Anything else from table 9.1.** There is nothing else: with these
   ten the binary half of the table is complete.
+
+---
+
+# The six on the tile
+
+exp, expm1, exp2, log, log1p and log2 - six of phase 1's nine - are also
+routines the tile runs, since the math library round's M1 build
+(2026-10-13 to 2026-10-19). Everything above is about libcft's host
+operations, and this section leaves it as it was: it says what the six
+routines are, what they are not, and where the record is.
+
+## What they are
+
+- **Programs of the tile's existing instructions.** No RTL was built for
+  them (the rtl tree, 44b963dd, last changed on 2026-10-05; docs/ROADMAP.md,
+  "The math library: experiment E1, then M1's build and M2 to M4",
+  "What it is not"); they need revision 8's flag control, a routine
+  running in a quiet region and then raising the flags of its
+  operation, and a mark is read from its lane byte.
+  `python/cft_golden/mathlib.py` generates each routine at each of the
+  four formats and five attributes, 120 fragments in all, of 175 to 433
+  instructions (docs/VALIDATION.md, M1's build, item 4); the design is
+  docs/studies/M1-exp-log.md.
+- **Operations of the language, not of the ABI.** `exp(a)` and the rest
+  are operations of the language since language 1.1 (2026-10-15), and
+  `cftc` compiles each run-time call as a routine inlined where its node
+  stands, since its output version 6 (2026-10-15), for the software
+  targets and revision 8's; revision 7's targets refuse such a program,
+  `target-feature`. `cft_exp` and the other host entry points do not
+  call a routine: a program reaches one through the language
+  (docs/LANGUAGE.md, "The operations").
+- **Decided in the lane, or marked.** A routine decides its last bit in
+  the lane where its error bound allows. Where the true value lies
+  within that bound of a rounding boundary - for whole windows of
+  arguments, exp near 0 and log near 1 among them - it marks the lane,
+  bit 7 of the lane byte and STATUS[6], and the definition replays it
+  (docs/LANGUAGE.md, "A marked lane"). `transcend.py` stays the one
+  definition.
+
+## How it is held
+
+- **Golden-first.** The routines were built in the golden model before
+  anything else, with a planted fault for every check
+  (`python/tests/test_mathlib.py`; docs/VALIDATION.md, the entries of
+  2026-10-12 to 2026-10-14).
+- **Through libcft's sequencer.** `host/tests/seq_check.py`'s eighth
+  corpus runs the 120 fragments in two shapes against `seq.py`: 240
+  programs and 13,483 lanes at the gate's arguments, 0 mismatches
+  (docs/VALIDATION.md, 2026-10-14, M1's build, item 2).
+- **Compiled.** The `lang`, `lang-routines` and `tangent` stages hold
+  every compiled image to the language's interpreter under one rule: an
+  unmarked lane equals the definition bit for bit, flags included, and
+  a marked lane is replayed by it (docs/LANGUAGE.md, "The stages replay
+  a marked lane"; M1's build, item 5, 2026-10-19).
+- **On the card.** The quad image, rev8q, ran the math library's six
+  routine references on 2026-10-19: "6 of 6 PASS", "118 checks ok, 0
+  failed", the structured lanes carrying bit 7 and STATUS[6] set
+  (docs/VALIDATION.md, "M1's build, seventh wave, closed";
+  docs/CARDDAY.md, "Owed to the next card day").
+
+## What is not here
+
+- **The other thirty-three** are host operations only, log10, pow and
+  hypot among them. The roadmap's next builds are sin, cos and tan (M2,
+  whose study is docs/studies/M2-trig.md), then atan, atan2, asin and
+  acos (M4), and the pow family (M3) last.
+- **A performance claim,** for the routines as for the host operations.
+  docs/FIGURES.md's "What a correctly rounded function costs the tile"
+  counts instructions, and says it is not time.
 

@@ -19,7 +19,7 @@ Apache-2.0.
 | What it computes | How you call it | How it is checked | On the card | When it pays |
 |---|---|---|---|---|
 | binary32 / 64 / 128 / 256 | C, C++, Python, Rust, Julia, Go, C#, R, Fortran | **1,072,415** conformance cases | Alveo U50: 1,071,635, 1,224,915, then the published 1,068,915 cases replayed on silicon | **binary128 4.5x**, **binary256 5.5x** |
-| 31 opcodes, 5 rounding modes, 39 transcendentals | one ABI; software, FPGA or remote; no dependencies | **52** gate stages, 29 RTL sims, 38 proofs | 427 M elem/s, 4 tiles, ~35 W | **binary32 / 64: a CPU wins** |
+| 31 opcodes, 5 rounding modes, 39 transcendentals (6 also run on the tile) | one ABI; software, FPGA or remote; no dependencies | **52** gate stages, 29 RTL sims, 38 proofs | 427 M elem/s, 4 tiles, ~35 W | **binary32 / 64: a CPU wins** |
 
 <sub>Speed-ups are **multiply**, one tile against the fastest software on the same machine - the CPU's own FPU, `__float128` or MPFR, never our own softfloat. Four tiles reach 17.5x and 21.1x. Fused multiply-add is a different picture, and better: 14.0x at binary128 on one tile. [Where those lines fall, measured](#when-this-matters-and-when-it-does-not).</sub>
 
@@ -189,7 +189,7 @@ the tables and the method; the charts regenerate with
 
 | piece | what it is |
 |---|---|
-| `python/cft_golden` | The definition of correct. Exact Python - integers only, the standard library alone for the arithmetic, with mpmath's interval context deciding the transcendentals: 31 opcodes, all five rounding modes, the complete IEEE clause 5 function set, and all thirty-nine transcendentals correctly rounded. Everything else is scored against this, never against each other. |
+| `python/cft_golden` | The definition of correct. Exact Python - integers only, the standard library alone for the arithmetic, with mpmath's interval context deciding the transcendentals: 31 opcodes, all five rounding modes, the complete IEEE clause 5 function set, and all thirty-nine transcendentals correctly rounded. It also generates the six transcendental routines that run on the tile (`python/cft_golden/mathlib.py`), and its definition replays any lane one of them marks undecided. Everything else is scored against this, never against each other. |
 | `rtl/` | The tile. Fifteen 16-stage pipelined fused-multiply-add cores in four banks - 8x fp32, 4x fp64, 2x fp128, 1x fp256, each a separate pipe at its own significand width - plus operand steering, a streaming engine, a reduction accumulator and an on-chip program sequencer. (A shared fracturable multiplier exists behind `FUSE_MUL` and ships **off**: fracturing spends DSP blocks to save logic, which is the wrong trade on an FPGA - `docs/NOVEL.md` entry 6.) Yosys-clean, portability enforced in CI. |
 | `tb/` and `formal/` | 29 simulation targets checking every result and every flag against the golden model, and 38 machine-checked proofs, plus a negative control that must be refuted or the gate has stopped being able to catch a bug. |
 | `host/` | **libcft**: about 24,000 lines of C99 in `host/src`, no dependencies, no build step for callers. One ABI reachable from C, C++, Python, Rust, Julia, Go, C#, R and Fortran, with software, FPGA and remote backends behind identical calls. On a multi-tile card an elementwise call is split across every tile and a segmented reduction by whole segments; a whole-array reduction takes the largest power of two of the tiles, because only that cuts the tree at a node; and, since 2026-09-25, a sequencer program's lanes are cut across every tile the same way an elementwise call's elements are. |
@@ -267,7 +267,13 @@ runs that failed stay in the record. The load-bearing ones:
   root together, under all five attributes (2026-08-31).
 - **The transcendentals** are held against MPFR over 306,460 cases -
   the transcendental share of a 739,234-case campaign at ABI 0.7
-  (2026-09-04) - with zero value and zero flag mismatches.
+  (2026-09-04) - with zero value and zero flag mismatches. The `mpfr`
+  stage still runs that campaign, and the gate of 2026-10-20 passed
+  with it. It is libcft's own evaluator that this holds, the host
+  operations behind `cft_exp` and the rest. The 3,500 cases that
+  profile 3.1 added to the vector sets (2026-10-13) are not in the
+  campaign; the parcel that added them checked each against MPFR apart
+  from it, 3,500 of 3,500.
 - **The error bound behind them is checked rule by rule**: every rule
   of the multiprecision evaluator's arithmetic held to its claim
   exactly, in GMP, over 16.8 million results - every significand pair
@@ -278,6 +284,19 @@ runs that failed stay in the record. The load-bearing ones:
   before that day, whose count saturated at 2^40, fails the same check
   of the arithmetic on 3,969,901 of 10,334,817 (the check built against
   that library, on the desktop, 2026-09-30).
+- **Six of the thirty-nine also run on the tile**: exp, expm1, exp2,
+  log, log1p and log2, as routines the language's compiler writes into
+  a program that revision 8's tiles run (the math library's M1 build,
+  2026-10-13 to 2026-10-19). A routine decides its last bit in the
+  lane; where it cannot, it marks the lane (bit 7 of the lane byte,
+  STATUS[6]) and the definition replays that lane, and the stages hold
+  every lane it does not mark to the golden model bit for bit. The card
+  ran the six routine references on the quad image on 2026-10-19: 6 of
+  6 passed, 118 checks, none failed (`docs/VALIDATION.md`, "M1's build,
+  seventh wave, closed"; `docs/LANGUAGE.md`, "The operations"). The
+  host operations are unchanged: `cft_exp` still issues no `cft_run`
+  pass, and a routine is reached by compiling a program, not by that
+  call.
 - **A GPU agrees, bit for bit, on a real workload.** atlas-engine's
   deterministic camera around a plate, lowered to a sequencer program:
   a million samples a pass, five words a sample, and every pass's
@@ -398,13 +417,39 @@ throughput and what bounds each number.
 
 ## Where this is going
 
-`docs/ROADMAP.md` has the detail. In short: the card is up and
-reproducing the vectors; the next tier is the same tile on an open
-Kintex-7 board, where one tile fits in 53% of a 325T; and the roadmap
-carries what the first outside workload asked the library for, ranked
-by measurement rather than by guess - six of its seven asks built by
-2026-09-15, the last four of them as one parcel round
-(`docs/ROUND2.md`) and measured on the card the same night.
+`docs/ROADMAP.md` has the detail and is the plan of record; this is its
+short form on 2026-10-21. The card has reproduced the vectors since
+2026-09-08. Since this section was last written (2026-09-15) the project
+has added the language for dynamical systems and its compiler
+(`docs/LANGUAGE.md`); certificates, and an auditor that re-runs a
+certified run apart from the machine that made it
+(`docs/CERTIFICATES.md`); revision 8 of the tile, closed at 135 MHz and
+proven on the card in three images (`docs/VALIDATION.md`, 2026-10-06);
+the first six functions of the math library as tile routines (above);
+a 61-hour stress run of the card with no failure; and the sweep's
+coverage work, three outside test sources among it.
+
+What is planned:
+
+- **The rest of the math library**, each part a design study before it
+  is built. sin, cos and tan (M2, whose study is
+  `docs/studies/M2-trig.md`) are the next build, then atan, atan2, asin
+  and acos (M4), and the pow family (M3) last.
+- **One gallery** of worked systems, with literature-checked answers and
+  published certificates (`docs/ROADMAP.md`, "Step 6: the math library,
+  revision 8 and programs past one tile").
+- **At the next RTL revision**, RISC-V's rule for a fused multiply-add
+  of zero times infinity with a quiet NaN addend: invalid raised, where
+  the contract today lets the NaN operand win and raises nothing
+  (`docs/DETERMINISM.md`, "NaN").
+- **The open tier**: the same tile on an open Kintex-7 board, through
+  openXC7. Vivado routed one tile (the board configuration, out of
+  context) into 53% of a 325T at 100 MHz on 2026-09-23; openXC7's own
+  router did not converge on it when that was studied
+  (`docs/studies/TOOL-A-dense-router.md`).
+
+The first outside workload's asks, six of seven built by 2026-09-15,
+are ranked in `docs/ROADMAP.md` and recorded in `docs/ROUND2.md`.
 
 ## Built on it
 

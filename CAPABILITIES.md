@@ -212,6 +212,18 @@ correctly rounded no longer has to build it - and what it does not
 change is that the tile has no transcendental datapath and is not
 getting one.
 
+*Note of 2026-10-21.* Six of the thirty-nine - exp, expm1, exp2, log,
+log1p and log2 - now also run on the tile, as routines the language
+compiles (M1's build, 2026-10-13 to 2026-10-19; docs/TRANSCENDENTALS.md,
+"The six on the tile"). That qualifies "in the library, not in the tile"
+for those six and for no other function, and it is the paragraph above
+carried out rather than contradicted: a routine is a program of the
+tile's existing instructions, the tile still has no transcendental
+datapath, and the routines the roadmap plans next (sin, cos and tan
+first) are programs too. A routine decides its last bit in the lane or
+marks the lane for the definition to replay; the host operations are as
+described above, and `cft_exp` is still one.
+
 ## The atlas-engine det_* library
 
 `atlas-engine`'s deterministic library is the workload this tile exists
@@ -320,8 +332,10 @@ in docs/COMPATIBILITY.md) gets the full story.
   nextDown, classification, totalOrder, the signaling comparisons,
   remainder. Clause 9 followed in four steps between 2026-09-02 and
   2026-09-03: all thirty-nine functions of table 9.1, correctly rounded
-  in the library rather than in the tile, with the radian trigonometry
-  reduced against a 270,336-bit 2/pi; the seven reductions of 9.4; the
+  in the library rather than in the tile (six of them also as tile
+  routines since M1's build, 2026-10-13 to 2026-10-19; see "Recommended
+  operations"), with the radian trigonometry reduced against a
+  270,336-bit 2/pi; the seven reductions of 9.4; the
   three augmented operations of 9.5; the three payload operations of
   9.7. The character-sequence conversions of 5.4.2/5.4.3/5.12 - decimal
   and hexadecimal, both directions, correctly rounded at every digit

@@ -866,6 +866,12 @@ tile's FMA could carry a polynomial, with the host deciding only the
 cases it cannot - but it would have to reproduce these bits exactly,
 which makes it an optimisation and not a different answer.
 
+*Note of 2026-10-21.* For six of these (exp, expm1, exp2, log, log1p
+and log2) a tile path exists now, but not behind these calls: they stay
+host operations, and the tile runs the six as routines of a program the
+language compiles (M1's build, 2026-10-13 to 2026-10-19;
+docs/TRANSCENDENTALS.md, "The six on the tile").
+
 The signatures follow the clause-5 host operations exactly:
 
 ```c
