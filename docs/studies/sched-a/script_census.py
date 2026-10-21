@@ -19,6 +19,9 @@ and the totals are held to the rows (a CHECK). A pattern that matched a comment 
 merely mentions a thing in a comment is not told apart from one that does it, and the count says "mentions
 or does" for that reason (BELIEVED small: the scripts' comments are headers of a few lines).
 
+The output is written with LF line ends on every platform (Windows Python would write CRLF to a redirected stdout), so the
+capture beside this script is LF and compares equal as it stands.
+
 Python 3.10 or later; standard library only. Prints no path.
 """
 import glob
@@ -71,6 +74,10 @@ def census(scripts):
 
 
 def main(argv):
+    try:
+        sys.stdout.reconfigure(newline="\n")      # LF on every platform, so a capture is the same bytes everywhere
+    except (AttributeError, ValueError):
+        pass
     args = [a for a in argv if not a.startswith("--")]
     if len(args) != 1:
         print(__doc__)

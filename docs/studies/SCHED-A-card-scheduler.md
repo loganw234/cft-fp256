@@ -2,12 +2,18 @@
 
 **Date:** 2026-10-21. **Parcel:** SD, a design study (Sonnet 5.5; a verifier follows). **Status:** nothing here is built. The five
 instruments in `docs/studies/sched-a/` read local copies and call the driver's own functions on synthetic input, and nothing under
-`host/`, `hw/`, `rtl/`, `python/`, `programs/` or `tb/` changed. **Basis:** the tree at 0b7c959 (main after the coverage wave); two
-local copies of a driver run's `metrics.jsonl`, the 60-hour run of 2026-10-16 to 19 (5,108 records, 7,982,931 bytes, SHA-256
-e7989f88efded691ea7461e921840d8de5d449e069980f6ba92e6a8f87e007cc) and the overnight run of 2026-10-19 to 20 (751 records,
-1,431,954 bytes, SHA-256 cd0aec75c8fa9abbb7bbaaa0eca09bbdf2eb43e0257d77fd539e62f7199f578b), which the lead holds and which are
-not in the repository; and the lead's box scripts, read in place and named here by file name only. The card and amd-arc-box were
-not touched and nothing was measured on them: every figure about the box is a figure from a record.
+`host/`, `hw/`, `rtl/`, `python/`, `programs/` or `tb/` changed. **Basis:** the tree at 0b7c959 (main after the coverage wave); local
+copies of a driver run's `metrics.jsonl`, which the lead holds and which are not in the repository: the 60-hour run of 2026-10-16 to 19
+(5,108 records, 7,982,931 bytes, SHA-256 e7989f88efded691ea7461e921840d8de5d449e069980f6ba92e6a8f87e007cc); the overnight run of
+2026-10-19 to 20 (751 records, 1,431,954 bytes, SHA-256 cd0aec75c8fa9abbb7bbaaa0eca09bbdf2eb43e0257d77fd539e62f7199f578b); and, from the
+send-back of 2026-10-21, **the third copy**, the whole two-night file the lead copied back from the box with the box's own sums
+(`Data/runs/2026-10-12-math-round/box/resume-1020/run/metrics.jsonl`, 1,308 records, 2,676,057 bytes, SHA-256
+38f243c792c7089c811156d51f17f9ccb58b2037b2336cf6d59d3a208a78fb2e, equal to the box's sum). Its first 751 lines are the overnight copy
+(MEASURED: their SHA-256 is the overnight copy's) and its last 557 are **night 2**, the run of 2026-10-20 19:57 to 2026-10-21 08:03
+(its `run_start` is line 752), which the probes read as `FILE@2`; and the lead's box scripts, read in place and named here by file name
+only. The card and amd-arc-box were not touched and nothing was measured on them: every figure about the box is a figure from a record.
+**Three runs are measured**, the 60-hour run, night 1 (the overnight run) and night 2; a figure that varies with the run is given for
+all three, and a range is the least and the greatest of the three.
 
 **Marks.** Every figure is one of: **MEASURED** (a run of mine, named: an instrument in `docs/studies/sched-a/`, or `git` and
 `wc` on this tree), **READ** (a file or a record, named, including a figure the lead measured and wrote down), **COMPUTED**
@@ -41,23 +47,31 @@ In the order they matter:
    with every named item complete the card's waves are empty (event `sweep_empty`) and the cycles are battery only, unless
    someone edits the script. And the resume is blind to trees in its planner while the report is not: night 2 ran at 0b7c959,
    whose rtl/ tree is the images' but whose host/ tree is a third one (MEASURED: `git rev-parse`; section 2.6).
-5. **The finite part of "wherever it hasn't reached yet" closes within about a week.** At the pace the files show (0.84 to 1.24
-   points of its space an hour for each of the four unfinished items, COMPUTED) and the pace the lead read on the second night
-   (1.10, READ), the four `scaleb32-wide` items finish between the mornings of 2026-10-26 and 2026-10-29 (BELIEVED). After that
+5. **The finite part of "wherever it hasn't reached yet" closes within about a week.** Night 2 gained 13.55 to 13.94 points of its
+   space for each of the four unfinished items in 12.09 run hours, **1.12 to 1.15 points an hour** (MEASURED, `coverage_state.py` on the
+   third copy), inside the 0.84 to 1.24 that night 1's slot-seconds gave (COMPUTED), and left them at 19.12 to 19.70 per cent. At that pace
+   and the 12.2 run hours a night has given, the four `scaleb32-wide` items finish during the night that ends on the morning of
+   2026-10-27 (COMPUTED, BELIEVED steady: a night without the card moves it a night later). After that
    the work "not reached" is the new finite items the driver is about to gain (parcel DR3), the random items, the host items on
-   each new host/ tree, and everything again on a new rtl/ tree (6 to 9 nights, COMPUTED).
+   each new host/ tree, and everything again on a new rtl/ tree (6 to 9 nights of 14 hours, 7 to 10 at the run hours a night has
+   given, COMPUTED).
 6. **Preemption is cheap because the driver stops at leg boundaries.** A request to stop waits, for a request arriving at a random
-   instant of a run, 3.5 minutes on average and 8.7 at the 95th percentile (the overnight run; 2.5 and 8.0 in the 60-hour run),
-   the longest leg being about 11 minutes, and 36.5 minutes once, the first visit's `acceptance-rev8` leg (BELIEVED a compile; COMPUTED
-   from 543 and 4,086 legs, `latency.py`). A staged run can therefore outrank the sweep.
-7. **The record's volume is no obstacle; the box's disk is.** A night's `metrics.jsonl` is 1.6 to 1.8 MB and a year of nights 590
-   to 670 MB, three fifths to two thirds of it telemetry that a compact record would hold in a twenty-fourth of the bytes (COMPUTED,
-   `volumes.py`); a year of whole run directories, logs included, is about 2.2 GB by the one `du` the lead took (READ, COMPUTED); and
-   `/data` was 93 per cent used with 18 GB free on 2026-10-20 (READ), mostly files that are not this project's runs.
+   instant of a run, **2.5 to 4.1 minutes on average and 8.0 to 9.0 at the 95th percentile**: 2.5 and 8.0 in the 60-hour run, 3.5 and
+   8.7 on night 1, 4.1 and 9.0 on night 2 (the three runs measured), the longest leg being about 11 minutes, and 36.5 minutes once, the
+   first visit's `acceptance-rev8` leg (BELIEVED a compile; COMPUTED from 4,086, 543 and 349 legs, `latency.py`). The wait grows as the
+   sweep narrows, because its waves lengthen (a wave averages 131.8, 272.8 and 539.7 s in the three runs: night 2 had only the four
+   long items left), and the class items will change it again. A staged run can therefore outrank the sweep.
+7. **The record's volume is no obstacle; the box's disk is.** A night's `metrics.jsonl` is 1.4 to 1.8 MB (1.44, 1.62 and 1.83 MB
+   for a 14-hour window at night 2's, night 1's and the 60-hour run's mix) and a year of nights 526 to 668 MB, three fifths to three
+   quarters of it telemetry (59.0 to 76.2 per cent of a file's bytes) that a compact record would hold in a twenty-fourth of the bytes
+   (COMPUTED, `volumes.py`); a year of whole run directories, logs included, is about 2.2 GB by the one `du` the lead took (READ,
+   COMPUTED); and the box's `/data` was recorded as 93 per cent used with 18 G free on 2026-10-20 (READ; the lead's other readings of it
+   do not agree with that one, section 2.3), mostly files that are not this project's runs.
 8. **"Scheduler" is taken, and several cards need more than a scheduler.** docs/ROADMAP.md and docs/HOSTAPI.md use the word for the
    library's tile scheduler (placing a run's waves on the tiles of one handle). This study calls its subject the card scheduler.
    Several cards also need a device selector that does not exist: `cft_open` takes an index, the soak tools pass 0 (READ,
-   `divsqrt_soak.c:1013` and `clause5_soak.c:2940`), and the driver's `--card` names the card for telemetry only.
+   `divsqrt_soak.c:1013` and `clause5_soak.c:2940`), and the driver's `--card` names the card for telemetry and for the start-up
+   `examine -d` look and selects no device (READ, section 2.1).
 
 **Recommended v1 (section 5):** one Python process per machine, standard library only, launched by the lead (no unit and no
 crontab until Logan says), that holds one lock, one file queue and one worker per card (one card in v1, card ids everywhere).
@@ -133,8 +147,10 @@ the stand-in (normal, failing, timing out, deaf, no device, card lost, stop file
 telemetry, build, signal, torn tail, disabled items, pool, seeds, trees, report), and a plants stage that puts a defect back into
 a copy of the code and requires the scenario written for it to fail at its own check (READ, the script's header and the test's
 docstring). The lead's run in a fresh clone on the box on 2026-10-20 gave "card-stress test: 584 checks, 0 failed, 0 skipped" in
-456 s without plants (READ, the lead's ledger); the whole suite with plants is about 22.5 minutes under WSL (READ, the script's
-header) and 658 checks in the gate's run of 2026-10-20 (READ, docs/VALIDATION.md, the coverage wave's record). **A suite of this size
+456 s without plants (READ, the lead's ledger): 584 is the count without plants. The whole suite with plants is about 22.5 minutes
+under WSL (READ, the script's header), and the gate's run of 2026-10-20, with plants, logged 658 checks while its group lines sum to 584
+(READ, docs/VALIDATION.md, the coverage wave's record: the difference is 74, VIW9's reading there is that the plants print no group
+total, and the record quotes the log's own total). **A suite of this size
 is the cost of changing the driver**, and it is why section 4.1 does not grow the driver into the scheduler.
 
 **What it does not do.** Each of the following is READ in the code named, and the brief's list is confirmed:
@@ -144,7 +160,9 @@ is the cost of changing the driver**, and it is why section 4.1 does not grow th
 - **Several campaigns.** One run has one catalog (`sweep_items()`), narrowed by `--sweep-items`, and one output directory.
 - **Time windows.** `--until` is a deadline; there is no start time. The lead's nightly script sleeps until the start itself.
 - **More than one card.** `IMAGES` holds default paths under `$HOME/cardday-rev8{q,a,d}`; the soak tools and `device-test` call
-  `cft_open(artifact, 0, ...)`; `--card` (default `0000:02:00.1`) is used for telemetry and nothing else.
+  `cft_open(artifact, 0, ...)`; `--card` (default `0000:02:00.1`) is used for the telemetry (`examine -d`, `hw/card_stress.py` line
+  1706) and for the start-up "card visible" look, an `examine -d` the run goes on after whatever it says (lines 2114 to 2118; READ).
+  It selects no device in either use: the legs and the tools open the card through `cft_open`'s index.
 - **A lock.** The guard reads the command lines, and a soak's environment, of the processes alive at the instant it asks. Between two
   legs, and during the build step, nothing of the driver's holds the card, so a second driver started then passes the guard
   (BELIEVED, from `card_user` and `find_card_users`; not run, since it needs two real drivers on a card). XRT's exclusive
@@ -214,8 +232,8 @@ nothing or refused for the wrong reason):
 **Their niceness.** 15 of the 17 run their work at `nice -n 10` (MEASURED, the census), the gates included (`box_wave9_gate.sh` runs
 `nice -n 10 bash verify/run.sh --budget gate`, READ), which is the niceness of the driver's legs and of the host pool. A gate beside a
 window therefore competes with them at equal priority, whereas docs/CARDDAY.md's account of the pool assumes the box's other runs
-outrank it: "at `nice` 0 they outrank every job here" (READ). The load the card run itself puts on the box is a median of 2.9 to 3.2
-(section 2.3), so there is room; the point for the scheduler is to record the load beside every job and to assume no order.
+outrank it: "at `nice` 0 they outrank every job here" (READ). The load the card run itself puts on the box is a median of 2.9 to 3.3
+(2.88, 3.22 and 3.28 in the three runs, section 2.3), so there is room; the point for the scheduler is to record the load beside every job and to assume no order.
 
 **Tonight's window is one of them.** At 07:35:21 on 2026-10-21 the lead launched `box_nightly.sh` detached with `0b7c959
 stress-0b7c959.bundle 1021 "2026-10-21 18:00" "2026-10-22 08:00"`; it sleeps 624 minutes in the script, then runs the preamble and
@@ -228,9 +246,9 @@ All READ in the file named unless marked. `docs/CARDDAY.md` and `docs/VALIDATION
 | fact | value | where |
 |---|---|---|
 | the machine | `amd-arc-box`, Xeon E5-2697 v4, 36 threads, two NVMe disks, Ubuntu 24.04; key-authenticated ssh as `logan` | `CLAUDE.md`, `docs/BRINGUP.md` lab map |
-| its memory | 48,061 total and at least 44,369 available throughout the overnight run, in the records' `mem_total_mb` and `mem_avail_mb` (`/proc/meminfo` divided by 1024, so MiB; MEASURED, `volumes.out`); `CLAUDE.md` says 46 GB | the telemetry records |
-| its load beside the card run | load1 median 2.88 and maximum 5.75 over 176 samples (overnight run); median 3.22 and maximum 6.74 over 865 (60-hour run) (MEASURED, `volumes.out`) | the telemetry records |
-| its disk | `/data`: 205G of 234G in use, 93 per cent used and 18 G free on 2026-10-20 (the lead's `df` readings: the percentage and the free figure are `df`'s, which leaves out blocks reserved for root, BELIEVED); the biggest tenants are `/data/Xilinx` 107G, `dense-archive` 23G, `step6` 13G and `rev7-quad` 11G, "none of them this round's" | the lead's ledger, 2026-10-20 13:0x |
+| its memory | 48,061 total and at least 44,369 available throughout the overnight run (44,565 on night 2 and 43,420 in the 60-hour run), in the records' `mem_total_mb` and `mem_avail_mb` (`/proc/meminfo` divided by 1024, so MiB; MEASURED, `volumes.out`); `CLAUDE.md` says 46 GB | the telemetry records |
+| its load beside the card run | load1 median 2.88 and maximum 5.75 over 176 samples (night 1); median 3.28 and maximum 5.69 over 174 (night 2); median 3.22 and maximum 6.74 over 865 (60-hour run) (MEASURED, `volumes.out`) | the telemetry records |
+| its disk | `/data`, as the lead's ledger records it on 2026-10-20 (READ): 93 per cent used with 18 G free after the smoke; 93 per cent with 205G of 234G in use at 13:0x; 17G free at 19:30. **These do not reconcile**: 205G of 234G is 87.6 per cent used and leaves 29G, not 18G (COMPUTED). BELIEVED the cause: `df`'s percentage and its free figure leave out the blocks reserved for root, about 5 per cent of 234G (11.7G) on an ext4 default, and 29G less 11.7G is 17.3G, which would make 18G free and 93 per cent the `df` figures; the filesystem's type and reserve are not recorded, so this is unverified. The driver's own samples of `/data`'s free space are MEASURED (`volumes.out`): 17.34 GB at night 2's first and last sample, 18.60 GB on night 1, and 20.69 falling to 20.04 GB in the 60-hour run, which agree with the 17G and the 18G. The biggest tenants are `/data/Xilinx` 107G, `dense-archive` 23G, `step6` 13G and `rev7-quad` 11G, "none of them this round's" | the lead's ledger, 2026-10-20 (the three readings above), the telemetry records |
 | the card | one Alveo U50 (this project's custom active-cooled unit), `02:00.0`, whose user function is `0000:02:00.1`; shell `xilinx_u50_gen3x16_xdma_base_5`; XRT 2.19.194; images are built by Vitis 2022.2 | `CLAUDE.md`, `docs/BRINGUP.md` |
 | its images | revision 8's three, in `$HOME/cardday-rev8{q,a,d}/`: **quad** (4 tiles) 51,714,554 bytes, SHA-256 4f9921a2...; **single** (1 tile) 40,076,366, 0639248e...; **deep** (1 tile) 47,197,081, bbf08fb3... | the overnight run's `build` record, and `hw/card_stress.py` `IMAGES` |
 | loading an image | `cft_open` loads the xclbin through XRT (`xrt::device(index)` then `load_xclbin`); there is no separate program step; loading the image already there is a no-op; the first pass of a run that opens it carries the load: 5 s and 9 s, for the single and the quad in the entry's order | `host/src/backend_xrt.cpp`, `docs/HOSTAPI.md`, `docs/VALIDATION.md` (2026-09-18, the card half) |
@@ -281,7 +299,7 @@ them working:
 - **The report**, `hw/card_stress_report.py RUN_DIR [--json FILE] [--also DIR]...`: header, totals, a row per (image, leg), telemetry,
   failures, the sweep's coverage and, since 2026-10-20, coverage by tree; the driver runs it after every cycle with a 120 s limit.
   DR2 measured it at 0.49 s on the 8 MB file (READ). If it is linear in the file (BELIEVED), a single file the size of a year of
-  nights (about 0.6 to 0.7 GB, section 2.7) would take near 40 s, and a file of about 2 GB would pass its limit (COMPUTED, at the
+  nights (about 0.5 to 0.7 GB, section 2.7) would take near 40 s, and a file of about 2 GB would pass its limit (COMPUTED, at the
   desktop's speed): rotation of the run directory is a requirement for a year, not for a month.
 - **`python/figure_extracts.py stress`**: reduces one run's `metrics.jsonl` and `report.txt` to `docs/figures/stress.json`, with the
   raw file's SHA-256 and the command that remakes it; three figures (`stress-timeline`, `stress-telemetry`, `stress-sweep`) read the
@@ -305,8 +323,9 @@ leg" and a `SystemExit` message, READ in `card_stress.py` `run` and `load_earlie
 `docs/studies/SWP-A-coverage.md` (READ) plans, in its section 5 and as rank 6 ("weeks"), a store of immutable records whose coverage
 is a pure function of the set: campaigns named by a hash of their description, strata with their own index spaces, a keyed
 permutation to enumerate the 64-bit spaces without repeats, a digest per batch, a fold with merge laws L1 to L9 (each shown on a
-planted wrong fold), and shards for several devices. Logan placed rank 6 after the math round (the brief; the lead's note of his answer
-to question 10). Parcel SG built the record and its signature (`hw/sweep_record.py`, version 1); DR2 built the key the study's
+planted wrong fold), and shards for several devices. Whether rank 6 comes after the math round is the lead's reading, not a word of Logan's that this study has: the lead's note of his
+answers to that study's questions puts ranks 4 and 5 before the math round and does not place rank 6 (its "6 and 9" are questions 6 and 9),
+and the brief repeats the reading (READ; question 8 asks Logan to confirm it). Parcel SG built the record and its signature (`hw/sweep_record.py`, version 1); DR2 built the key the study's
 question 4 asked for (coverage per tree); nothing builds the fold.
 
 **What a nightly window needs of it is much smaller**, and it is a query: *which finite items of the tree this commit is on are not
@@ -315,7 +334,8 @@ complete, and where does each one's first gap lie?* The pieces:
 1. **A key**: (item, subject class), the class being the rtl/ tree hash for a tile item and the host/ tree hash with the compiler's
    version line for a host item, as the report keys them. A run before 2026-10-20 recorded its commit and no tree hashes; the commit gives them (`git
    rev-parse <commit>:rtl`), a derived fact to be recorded as derived. MEASURED (`coverage_state.py`): the 60-hour run (f0693b2)
-   and the overnight run (881bbcb) both stand on rtl 44b963dd...
+   and the overnight run (881bbcb) both stand on rtl 44b963dd, as does night 2 (0b7c959), which recorded its trees and whose recorded
+   rtl/ and host/ hashes are the ones git derives for its commit (the checks hold the recorded to the derived)...
 2. **A fold**: the union of the finished intervals of every run of one class, by the driver's own `merge_intervals` and `first_gap`;
    held in `coverage_state.py` to an independent merge, and each check shown able to fail.
 3. **A rule for findings**: a slice that found a mismatch is a record, never coverage (the study's rule); the driver counts it served
@@ -334,17 +354,17 @@ complete, and where does each one's first gap lie?* The pieces:
 |---|---|---|---|
 | rtl/ tree | 44b963dd | 44b963dd | 44b963dd |
 | host/ tree | 8a138d18 | 276ed15a | 4d9905f8 |
-| exhaustive items its file served | 14 (10 tile, 4 host) | 22 (8 tile, 14 host) | night 1's file, resumed |
-| host items complete in the file | 4 of 18 | 14 of 18 | no host slice ran (BELIEVED, from the code): the 14 the file names are complete, and the other 4 are not on its list |
-| tile items complete in the file | 10 of 18 | 4 of 18 (the four others served, `scaleb32-wide`, at 5.566 to 6.079 per cent) | the four wide items running |
+| exhaustive items its file served | 14 (10 tile, 4 host) | 22 (8 tile, 14 host) | night 1's file, resumed: the same 22, night 2 gaining slices on the four wide items only (MEASURED) |
+| host items complete in the file | 4 of 18 | 14 of 18 | 14 of 18 as night 1's; **no host slice ran on night 2** (MEASURED: its own records hold no host item and no leg on the image `cpu`), so the new host/ tree has 0 of 18 under the report's key, and the other 4 are not on the lead's list |
+| tile items complete in the file | 10 of 18 | 4 of 18 (the four others served, `scaleb32-wide`, at 5.566 to 6.079 per cent) | 4 of 18 as night 1's; the four wide items stand at 19.116, 19.531, 19.629 and 19.702 per cent at the end of night 2 (MEASURED) |
 
-Folded by rtl/ class (`coverage_state.py`), the two files make 14 of the 18 tile items complete and leave the four wide ones.
+Folded by rtl/ class (`coverage_state.py`), the three runs make 14 of the 18 tile items complete and leave the four wide ones.
 host/ changed in 15 of the 88 commits between 881bbcb and 0b7c959 and the library's own source did not: `host/src` and
 `host/include` are byte-identical at all three commits (the same tree hashes, 60685ae4... and 6b0dc232..., and no commit between
 the last two touched them; MEASURED, `coverage_state.out`); what changed is the Makefile, the soak tools (the new modes and the
 draw-order fix) and the tests. The driver's `tree_changed` event compares only the rtl/ tree (READ, `run`), and
 its planner counts the whole file's coverage, so the resumed run has no host item to run for the new host class (READ, `pick_item` and
-`pool_start`; that no host slice ran on night 2 is BELIEVED, since its own record is not in a local copy), while the report, over
+`pool_start`; that no host slice ran on night 2 is MEASURED on the third copy, whose 174 sweep slices are the four wide tile items and which holds no leg on the image `cpu`), while the report, over
 the same file, shows that class with only what ran after. The cost of doing as the report's key says is
 small: all 18 host exhaustive items again are 4.3 core-hours, about 0.5 hours on eight workers (COMPUTED from card-run rates of host
 code; the pool's own rates are unmeasured). **So the planner should be class-aware, and that is one small driver parcel** (DR4,
@@ -357,74 +377,99 @@ accumulation across owners and for the 2^64 spaces. The existing exhaustive item
 today from the runs' own records and later from the ledger's fold with no change to the scheduler.
 
 **The finite part ends soon** (`coverage_state.py`, COMPUTED unless marked). Of the 18 tile exhaustive items 14 are complete on
-rtl 44b963dd across the two files; the four `scaleb32-wide` items stood at 5.566, 5.591, 5.762 and 6.079 per cent after night 1 and
-run at 25,596 to 26,277 encodings a second a job (MEASURED). The four shared the card with 18 others until 11.9 hours
-into the 12.4 and so give no clean pace; from the slot-seconds the file's waves held (91 waves of four jobs, 6.67 h, and 14 of one,
-1.29 h; the legs ran 70 per cent of the slot-seconds the waves held, a wave waiting for its slowest job) the four items alone would
-gain 0.84 points of their space an hour, and 1.24 if every slot of every wave were busy. On the second night the lead read 14.233 to
-14.746 per cent at 03:48 (READ, the lead's ledger), that is 8.667 points in the 7.85 hours since the resume, **1.10 an hour**, inside
-that range. At 1.10 an hour and a 14-hour night less its 27 minutes of preamble, about 15 points a night, they complete during the
-night that ends on the morning of 2026-10-27, and between the mornings of 2026-10-26 and 2026-10-29 at the range's ends (BELIEVED:
-from about 19 per cent on the morning of the 21st, COMPUTED as the lead's reading plus 4.2 more hours at 1.10).
+rtl 44b963dd across the three runs; the four `scaleb32-wide` items stood at 5.566, 5.591, 5.762 and 6.079 per cent after night 1 and
+run at 25,543 to 26,239 encodings a second a job on night 2 (25,596 to 26,277 on night 1; MEASURED). On night 1 the four shared the card
+with 18 others until 11.9 hours into the 12.4 and gave no clean pace; the slot-seconds that file's waves held (91 waves of four jobs,
+6.67 h, and 14 of one, 1.29 h; the legs ran 70 per cent of the slot-seconds the waves held, a wave waiting for its slowest job) bracketed
+the four items alone at 0.84 points of their space an hour, and 1.24 if every slot of every wave were busy (COMPUTED). **Night 2 was
+theirs alone**, all its 12.09 run hours (41 waves of four jobs, 6.03 h, and 10 of one, 1.62 h; the legs ran 98 per cent of the
+slot-seconds the waves held, 2.09 slots busy), and gained 13.55 points on `scaleb32-wide-rne` and `-rtz` and 13.94 on `-rdn` and `-rup`,
+**1.12 and 1.15 points an hour**, in the upper half of night 1's bracket (MEASURED, `coverage_state.out`: the file's coverage at the end
+of night 2 less its coverage before it, over the run's own hours, the idle hours between the nights left out; the earlier probe
+divided by the file's whole span and, on this file, VSD read 0.66 to 0.81 from it, low by the idle hours, so it now divides by run
+hours). It left them at 19.116, 19.531, 19.629 and 19.702
+per cent. The lead's reading at 03:48, 1.10 an hour since the resume (14.233 to 14.746 per cent, READ, his ledger), was close. At the
+observed pace and the 12.2 run hours a night has given (12.40 and 12.09), they need 5.7 to 5.9 nights from the morning of the 21st
+(5.0 to 5.2 at 14 hours), so they complete during the night that ends on the morning of 2026-10-27 (COMPUTED, BELIEVED steady: a night the
+card does other work, or the box does not run, moves it a night later). The first estimate, between the mornings of 2026-10-26 and
+2026-10-29, was the two ends of night 1's bracket.
 Then, with the list as scripted, the card's waves are empty. After that the finite work is whatever the driver gains (DR3: 13
 hard-case items and the class items), the host items per host/ tree (0.5 hours of the pool), and, if rtl/ changes, all 18 tile items
-again: 194 slot-hours, 94.5 per cent of them `scaleb32-wide`, which is 6.1 to 8.8 nights (a night holding 31.6 slot-hours with every
-slot busy and 22.0 at the file's use of them). Question 6 asks what the window does in the gaps.
+again: 194 slot-hours, 94.5 per cent of them `scaleb32-wide`, which is 6.1 to 8.8 nights of 14 hours, or 7.0 to 10.1 of the 12.2 run hours a night has given (COMPUTED over
+the three runs' use of the slots: a 14-hour night holds 22.0 to 29.2 slot-hours at a run's own use and 29.8 to 31.6 with every slot busy). Question 6 asks what the window does in the gaps.
 
 ### 2.7 Data volumes
 
-MEASURED, `volumes.out`, by `volumes.py` on the two local copies. `box/overnight-1019/` and `box/wave9/`, the directories the lead
-copies a batch's records into, hold no `metrics.jsonl` and no `logs/`: the first is 5 files and 28,807 bytes (the overnight run's
-report 23,464 B, its summary, the launching script and the sums), the second 61 files and 223,805 bytes for a whole day of gate,
-narrow run, card checks, A/B and suites (the largest file 18,687 B). So the copies of `metrics.jsonl` the lead keeps elsewhere are the
-ones read. The first three rows and the counts and sizes in the next two are MEASURED; the shares and everything below them are
-COMPUTED from them.
+MEASURED, `volumes.out`, by `volumes.py` on the three copies, night 1 and night 2 being the first and the second run of the third
+(`FILE@1`, `FILE@2`: each is read as a file of its own, from its `run_start` to the next one's). `box/overnight-1019/` and `box/wave9/`,
+the directories the lead copies a batch's records into, hold no `metrics.jsonl` and no `logs/`: the first is 5 files and 28,807 bytes
+(the overnight run's report 23,464 B, its summary, the launching script and the sums), the second 61 files and 223,805 bytes for a whole
+day of gate, narrow run, card checks, A/B and suites (the largest file 18,687 B). `box/resume-1020/run/` does hold one, the third copy
+(2,676,057 B), beside the run's `driver.log`, `report.txt`, `settings.json`, `status.txt` and the box's sums, and no `logs/` either (its
+`smoke/` holds the smoke's own `metrics.jsonl`, 103,621 B, not read here). So the copies of `metrics.jsonl` the lead keeps are the
+ones read: two in his working directories and the third in `box/resume-1020/run/`, whose SHA-256 is equal to the box's sum (MEASURED).
+The first three rows and the counts and sizes in the next two are MEASURED; the shares and everything below them are COMPUTED from them.
 
-| | overnight run (881bbcb) | 60-hour run (f0693b2) |
-|---|---|---|
-| file, records, span | 1,431,954 B, 751, 12.395 h | 7,982,931 B, 5,108, 61.047 h |
-| telemetry | 176 records, 5,446 B each, 66.9% of the bytes | 865, 5,448 B, 59.0% |
-| legs | 543, 850 B each, 32.2% | 4,086, 790 B, 40.4% |
-| everything else (cycles, build, events) | 0.8% | 0.6% |
-| bytes an hour | 115,522 | 130,766 |
-| a 14-hour night (the window) | 1.62 MB | 1.83 MB |
-| 365 such nights | 590 MB, of it telemetry 395 MB | 668 MB, of it telemetry 394 MB |
-| a compact telemetry record (the six values `figure_extracts.py` reads, plus load and memory) | 227 B, 24.0 times smaller | the same |
-| `/data` free, first and last sample | 18.60 and 18.60 GB (minimum 18.45) | 20.69 and 20.04 GB (-0.65, other writers) |
+| | night 1 (881bbcb) | night 2 (0b7c959) | 60-hour run (f0693b2) | range |
+|---|---|---|---|---|
+| file, records, span | 1,431,954 B, 751, 12.395 h | 1,244,103 B, 557, 12.093 h | 7,982,931 B, 5,108, 61.047 h | |
+| telemetry | 176 records, 5,446 B each, 66.9% of the bytes | 174, 5,448 B, 76.2% | 865, 5,448 B, 59.0% | 59.0 to 76.2% |
+| legs | 543, 850 B each, 32.2% | 349, 812 B, 22.8% | 4,086, 790 B, 40.4% | 22.8 to 40.4% |
+| everything else (cycles, build, events) | 0.8% | 1.0% | 0.6% | |
+| bytes an hour | 115,522 | 102,878 | 130,766 | 102,878 to 130,766 |
+| a 14-hour night (the window) | 1.62 MB | 1.44 MB | 1.83 MB | 1.44 to 1.83 MB |
+| 365 such nights | 590 MB, of it telemetry 395 MB | 526 MB, of it telemetry 401 MB | 668 MB, of it telemetry 394 MB | 526 to 668 MB |
+| a compact telemetry record (the six values `figure_extracts.py` reads, plus load and memory) | 227 B, 24.0 times smaller | the same | the same | |
+| `/data` free, first and last sample | 18.60 and 18.60 GB (minimum 18.45) | 17.34 and 17.34 GB (minimum 17.19) | 20.69 and 20.04 GB (-0.65, other writers) | |
+
+The file shrinks as the sweep narrows: night 2 ran 28.9 legs an hour against 43.8 on night 1 and 66.9 in the 60-hour run, while the
+telemetry did not change (14.2 to 14.4 samples an hour), so its share rose to 76.2 per cent. The volume follows the number of legs, so
+the finite items DR3 adds will lift it again: the range is of three mixes, not a bound.
 
 Three facts the table cannot give, and where each stands. **The logs**: the records name each leg's log (`log`, `log_kept`: 533
-gzipped and 10 none in night 1) and not its size, and no local copy holds a `logs/` directory. The one measurement is the lead's:
+gzipped and 10 none in night 1, 336 and 13 on night 2) and not its size, and no local copy holds a `logs/` directory. The one measurement is the lead's:
 `du -sh` of the 60-hour run's directory read 24 MB with 3,766 files in `logs/`, at 62 cycles and 57.0 hours (READ, the lead's ledger,
 2026-10-19 03:59), which is 5.9 MB a 14-hour night and about 2.2 GB for 365 (COMPUTED from that one reading, BELIEVED for the same
 mix). The host pool adds one log a slice, and its volume is unmeasured. **The clones**: a built clone is about 70 MB (READ, the
 lead's ledger: scratch clones "about 70 MB each", the pass-size clones 71 to 74 MB), so seven nights' clones are about 0.5 GB (COMPUTED).
 **The disk is the box's, not the project's**: the 60-hour run's `/data` fell 0.65 GB while its own directory held about 24 MB, and
-`/data` is 93 per cent full of other things. The driver's floor of 5 GB free on `/data` is the only guard, and a year of run
-directories at the lead's one reading (about 2.2 GB, metrics included) is 12 per cent of what is free now (COMPUTED).
+`/data` is nearly full of other things (section 2.3 gives the lead's readings of it and where they disagree). The driver's floor of
+5 GB free on `/data` is the only guard, and a year of run directories at the lead's one reading (about 2.2 GB, metrics included) is
+13 per cent of the 17.34 GB free at night 2's last sample (COMPUTED).
 
 ### 2.8 What a preemption costs
 
 MEASURED, `latency.out`, by `latency.py`: from each run's own leg intervals, with a sweep wave being the sweep legs of a cycle whose
-intervals overlap (105 waves in the overnight run and 1,076 in the 60-hour run, each count equal to the sum of 1/jobs over the legs,
-the wave size each leg records) and the wait for a request at a uniformly random instant being the time to the end of the activity
-it falls in. 99.92 and 99.90 per cent of the span is inside an activity.
+intervals overlap (105 waves on night 1, 51 on night 2 and 1,076 in the 60-hour run, each count equal to the sum of 1/jobs over the
+legs, the wave size each leg records) and the wait for a request at a uniformly random instant being the time to the end of the activity
+it falls in, over each run's own span (night 2 as `FILE@2`, so the idle hours between the nights are not in it). 99.92, 99.92 and 99.90
+per cent of the span is inside an activity, and no leg of the three runs is on the image `cpu` (a host slice would be left out, and is
+counted).
 
-| wait for a safe point | overnight run | 60-hour run |
-|---|---|---|
-| mean | 212.4 s (3.5 min) | 151.7 s (2.5 min) |
-| 50th, 90th percentile | 179.3 s, 464.0 s | 99.2 s, 366.4 s |
-| 95th, 99th percentile | 524.2 s (8.7 min), 595.9 s (9.9 min) | 481.2 s (8.0 min), 631.0 s (10.5 min) |
-| more than 300 s, more than 600 s | 28.6%, 0.9% | 15.3%, 1.4% |
-| the longest activities | selftest 659.4 s (11.0 min), a wave 615.4 s | `acceptance-rev8` on the quad, cycle 1, 2,188.6 s (36.5 min) against a median of 349.2 s in its other 43 visits (the first visit compiles the eight workloads: BELIEVED the cause, from docs/CARDDAY.md), selftest 685.8 s |
+| wait for a safe point | night 1 | night 2 | 60-hour run | range |
+|---|---|---|---|---|
+| mean | 212.4 s (3.5 min) | 245.1 s (4.1 min) | 151.7 s (2.5 min) | 151.7 to 245.1 s (2.5 to 4.1 min) |
+| 50th, 90th percentile | 179.3 s, 464.0 s | 226.4 s, 494.0 s | 99.2 s, 366.4 s | |
+| 95th, 99th percentile | 524.2 s (8.7 min), 595.9 s (9.9 min) | 541.3 s (9.0 min), 580.6 s (9.7 min) | 481.2 s (8.0 min), 631.0 s (10.5 min) | p95 481.2 to 541.3 s (8.0 to 9.0 min) |
+| more than 300 s, more than 600 s | 28.6%, 0.9% | 37.0%, 0.6% | 15.3%, 1.4% | 15.3 to 37.0%, 0.6 to 1.4% |
+| sweep waves: count, mean length, longest | 105, 272.8 s, 615.4 s | 51, 539.7 s, 623.1 s | 1,076, 131.8 s, 617.9 s | mean 131.8 to 539.7 s |
+| the longest activities | selftest 659.4 s (11.0 min), a wave 615.4 s | selftest 660.4 s (11.0 min), a wave 623.1 s | `acceptance-rev8` on the quad, cycle 1, 2,188.6 s (36.5 min) against a median of 349.2 s in its other 43 visits (the first visit compiles the eight workloads: BELIEVED the cause, from docs/CARDDAY.md), selftest 685.8 s | |
 
-A seeded Monte Carlo of the same definition agrees with the exact figures (212.4 against 212.4 s; 525.0 against 524.2 s at the 95th
-percentile), and two planted slips, a wrong mean and a wrong grouping of waves, are each caught. **The host pool adds about a minute
-(`--kill-after`, 60 s) after the last card leg** (READ, `pool_end`: a slice in flight is given that grace, then terminated by PID and
+The wait grows as the sweep narrows: night 2 had only the four wide items left, so its waves average 539.7 s against 272.8 s on night 1,
+and a request meets a long wave more often (37.0 per cent of requests wait more than 300 s, against 28.6 and 15.3). The class items DR3
+adds will change the waves again, so the three runs are three mixes and not a bound.
+
+A seeded Monte Carlo of the same definition agrees with the exact figures (night 1 212.4 against 212.4 s and 525.0 against 524.2 s at
+the 95th percentile; night 2 245.2 against 245.1 s and 541.0 against 541.3 s; the 60-hour run 151.9 against 151.7 s and 483.2 against
+481.2 s), and three planted slips are each caught: a wrong mean, a wrong grouping of waves and a host slice counted as a card activity.
+**The host pool adds about a minute (`--kill-after`, 60 s) after the last card leg** (READ, `pool_end`: a slice in flight is given that grace, then terminated by PID and
 recorded as `host_job_abandoned`, which is not a slice and is served again), and a resumed driver costs its start (the tree facts, a
 `make` that finds nothing to do, ten `ldd`s, the build id and three probes of the soak tool, three image hashes, a telemetry sample;
-its measured size is not in any local copy: the overnight file holds one `run_start`, and the resumed one is on the box). **So a staged
-job waits on average 3.5 minutes for the sweep to reach a safe point, and more than 10 minutes in about 1 request in 100** (the longest
-leg is 11 minutes; the one longer, the first visit's `acceptance-rev8` leg of 36.5 minutes, holds 0.45 per cent of the 60-hour run's
+its measured size is 1.9 s from the `run_start` record to the first activity on night 2 and on night 1, and 1.4 s in the 60-hour run,
+MEASURED, `latency.out`, BELIEVED short because the clone's tools were already built; the driver's own stop at its 08:00 deadline is the
+same wait seen three times, 74 s after the deadline in the 60-hour run, 31 s on night 1 and 181 s on night 2, READ, the records'
+`deadline` and `run_end`). **So a staged job waits on average 2.5 to 4.1 minutes for the sweep to reach a safe point (3.5 on night 1),
+8.0 to 9.0 at the 95th percentile, and more than 10 minutes for 0.6 to 1.4 per cent of requests** (the longest leg is 11 minutes; the one longer, the first visit's `acceptance-rev8` leg of 36.5 minutes, holds 0.45 per cent of the 60-hour run's
 instants for more than 20 minutes), **and a window loses that wait and the driver's restart each time it is preempted.** A job that
 cannot accept the wait declares `preempt: never` and runs when the card is free.
 
@@ -470,7 +515,7 @@ code to change (R13), whether it needs persistent configuration (R11), and the s
 | owns the card between jobs, and samples it idle | yes | no: only while it runs | only while a run lives | yes |
 | takes a staged run at 15:00 | yes | no: a second launcher and a lock between the two | polls a queue file inside a run that may be asleep in a guard wait of up to 4 h | yes |
 | several cards | a worker each | a runner each | no: one `self.images`, one `--card`, one guard, process-global signals | a worker each |
-| exposure of verified code | none (new code) | none | all: 2,532 lines under a suite of 584 checks and about 70 plants, 22.5 minutes with them | none in v1 (small driver parcels later) |
+| exposure of verified code | none (new code) | none | all: 2,532 lines under a suite of 584 checks (without the plants; the run with them logs 658 while its group lines sum to 584, section 2.1) and about 70 plants, 22.5 minutes with them | none in v1 (small driver parcels later) |
 | persistent configuration | none if the lead launches it | a timer is a unit or a crontab | none | none if the lead launches it |
 | what must be right before a first night | the most | the least | much (every added concern edits guarded code) | the most of the new code, none of the old |
 | failure domain | one process owns everything; state on disk | a process a window: the cleanest | the run's | one process owns everything; the driver is its own |
@@ -546,8 +591,8 @@ Recommended: the first two behind one `source` field, always as a clone checked 
 typed is 40 hex and equals `git rev-parse` (the lead's rule: never a SHA from memory, which was refused twice), a clean status, the
 rtl/ tree hash when the spec gives one, a count of each string the spec names, and every named ancestor an ancestor. A bundle made by
 `git bundle create <file> <branch>` has no HEAD (the lead's ledger), so the clone is `-b <branch>` and the SHA checked out. A commit
-that is not on the remote is allowed only with `allow_unpushed: true`, recorded in the job (the parcel card legs and the gates run on
-unpushed commits: READ, the wave-9 gate at 9255ab8 before the push).
+that is not on the remote is allowed only with `allow_unpushed: true`, recorded in the job (the lead's practice has been to run the gates and the card
+checks before a push, READ: the wave-9 gate at 9255ab8 ran before its push, and the card checks ran at branch tips).
 
 **Builds, and whether they are cached.** The driver's build step runs inside every driver run, `make -C host XRT=1 XRT_ROOT=...` for
 six named targets and ten `ldd` checks, and on a clone already built it took **0 s** (READ in the overnight run's `build` record: its
@@ -592,7 +637,7 @@ needs no key of the scheduler's.
 |---|---|---|---|
 | (a) **none** | the lead's list and directory name in a script | nothing | by hand, and the list empties in about a week (section 2.6) |
 | (b) **a fold of the runs' own records and a focus list** | a derived extract per run (intervals by item and class, from `metrics.jsonl`, with its sources' SHA-256 and the command that remakes it), the union by (item, class), the finding rule, the focus list, the directory rule | S4: 1,200 to 2,000 lines (BELIEVED) | yes, for the finite items, per tree |
-| (c) **rank 6 now** | the campaign, strata, enumeration, digests and the signed fold | weeks (the study) | yes, and for the 64-bit spaces; most of it for accumulation Logan placed after the math round |
+| (c) **rank 6 now** | the campaign, strata, enumeration, digests and the signed fold | weeks (the study) | yes, and for the 64-bit spaces; most of it for accumulation that the lead's reading puts after the math round (section 2.6) |
 | (d) **SQLite** | an index in a database | small | the same as (b), with a second truth to keep honest |
 
 **Recommended: (b)**, with the seam of section 2.6: the planner asks `unfinished(class)`. The extract is the pattern of
@@ -607,7 +652,7 @@ exists, `status` names the gap ("host class changed: N items not re-run").
 rotated by directory. **(b) SQLite**: queries by item, tree, image and time, writers and readers in one file, and a second truth
 whose rows must be rebuilt from the records anyway. **(c) Both**: the JSONL is the record, a database is a derived index that can be
 deleted and rebuilt. Recommended: **JSONL, with derived extracts**; add (c) the day a reader needs a query the extracts cannot answer,
-and not before: at a year of records (0.6 to 0.7 GB) a rebuild is a linear parse of about the report's speed, near 40 s (COMPUTED from
+and not before: at a year of records (0.5 to 0.7 GB) a rebuild is a linear parse of about the report's speed, near 40 s (COMPUTED from
 DR2's 0.49 s on 8 MB, BELIEVED linear).
 
 What is kept (R9), each as records in the job's directory: the job's events (`code`, `build`, `image`, `step`, `preempted`,
@@ -715,8 +760,8 @@ Timed from the lead's own preamble (READ, the two summaries) and the driver's ru
 | 18:00 | the window opens; the window job is claimed; the commit is cloned and asserted (seconds, BELIEVED); the tools are built by the first driver run in the clone, the smoke, and a later `make` on that clone takes 0 s (READ) | seconds, then inside the smoke |
 | preflight | `make vectors` and `sha256sum -c` 126 to 128 s; the driver's dry tests 290 s (481 checks) and 456 s (584); the driver's `--quick` smoke on the card 958 to 1,047 s | 1,376 and 1,629 s in the two nights recorded: 2.7 and 3.2 per cent of 14 hours (COMPUTED) |
 | ~18:25 | the driver resumes the class's run directory with `--until 08:00` and the focus list | 13 h 35 m |
-| 08:00 | the deadline; the driver ends 31 s (night 1) and 74 s (the 60-hour run) after it (READ, the reports); the card is idle; the scheduler refreshes the report, writes the extracts and the sums | about a minute |
-| any hour | a staged job arrives: `STOP`, a wait of 3.5 minutes on average and 8.7 at the 95th percentile (section 2.8), the job, the resume | the job, and the driver's restart |
+| 08:00 | the deadline; the driver ends 31 s (night 1), 181 s (night 2) and 74 s (the 60-hour run) after it (READ, the reports and the records); the card is idle; the scheduler refreshes the report, writes the extracts and the sums | about a minute |
+| any hour | a staged job arrives: `STOP`, a wait of 2.5 to 4.1 minutes on average and 8.0 to 9.0 at the 95th percentile (the three runs, section 2.8), the job, the resume | the job, and the driver's restart |
 
 ### 5.3 What it replaces first, line by line
 
@@ -829,30 +874,30 @@ Each with the study's recommendation and what the answer changes.
    configuration is yours). May a systemd user unit with linger, or cron `@reboot` with `flock`, be installed after two clean weeks?
    *Recommended: lead-launched now, ask again then.* It changes whether a reboot costs a night (visible in `status` and a
    `missed-window` record, but a night all the same) and whether anything persists on the box.
-5. **Priority.** May a staged run outrank the nightly sweep and stop it at a safe point (a wait of 3.5 minutes on average, 8.7 at the 95th
-   percentile and about 11 at the longest leg, and 36.5 minutes the one time, a first visit's `acceptance-rev8`), the window resuming at
+5. **Priority.** May a staged run outrank the nightly sweep and stop it at a safe point (a wait of 2.5 to 4.1 minutes on average and 8.0 to 9.0 at the 95th
+   percentile over the three runs measured, about 11 at the longest leg, and 36.5 minutes the one time, a first visit's `acceptance-rev8`), the window resuming at
    the same deadline? Or does the window win and a staged run wait for 08:00? And may a person using the card by hand take `cft-sched hold` and not
    start tools beside the scheduler? *Recommended: a staged run outranks, a job that cannot wait says `preempt: never`, and a person
    takes `hold`.* It changes what the lead can do by night, and costs the window the wait and the driver's restart each time.
-6. **When the finite items are done.** About 2026-10-27 the four `scaleb32-wide` items finish (BELIEVED, section 2.6) and the scripted list
+6. **When the finite items are done.** About 2026-10-27 the four `scaleb32-wide` items finish (COMPUTED from night 2's measured pace, BELIEVED steady, section 2.6) and the scripted list
    empties. What does the window do then: the battery cycles and the random items with new draws (the detection floor improves as 1 over the
    number of independent weekends, the sweep study's 5.1), the battery only, or nothing? And are new finite items (parcel DR3's) taken as they appear in the
    catalog? *Recommended: the battery and the random items, new finite items first as they appear, and everything again on a new rtl/ tree
-   (6 to 9 nights).* It changes the planner's fallback, and whether the card idles most nights from the end of the month.
+   (6 to 9 nights of 14 hours, 7 to 10 at the run hours a night gives).* It changes the planner's fallback, and whether the card idles most nights from the end of the month.
 7. **How much of the preamble, each night.** `make vectors`, the driver's dry tests and a `--quick` smoke take 23 to 27 minutes, 2.7 to 3.2
    per cent of the window. Keep all of it every night, or the vectors and the dry tests only when the commit changed and the smoke every
    night as the card's health check? *Recommended: the second* (it saves 416 to 584 s a night when nothing changed, COMPUTED from
    126 to 128 s and 290 to 456 s). It changes the window's length by 3 per cent at most.
 8. **Coverage, and what a host item is evidence about.** Build the minimal fold and focus list (S4) and the class-aware planner in the driver (DR4)
-   after DR3, and leave the rest of rank 6 until after the math round, as decided? And key a host item by the whole host/ tree and the
-   compiler, as the report does (15 commits changed host/ and none changed the library in the 24 hours between 881bbcb and 0b7c959;
+   after DR3, and leave the rest of rank 6 until after the math round (the lead's reading of Logan's answers, which do not place rank 6: does Logan confirm it)? And key a host item by the whole host/ tree and the
+   compiler, as the report does (15 commits changed host/ and none changed the library in about 24 hours (24 h 21 min, by the commits' dates) between 881bbcb and 0b7c959;
    re-covering the 18 host exhaustive items costs about 0.5 hours of the pool), or by the library's own source and the soak tool? *Recommended: yes to the first; keep the coarse key
    for now and change it if it churns, since it is cheap.* It decides DR4's key, how much CPU a host/ commit costs, and what "complete"
    means for a host item.
 9. **The code the box runs.** May the box fetch a pushed commit by its SHA from the public remote (it needs outbound access and no
    credential; whether it has the access is not in any record, and the lead can check), or stay on bundles the lead puts in a directory?
    And may a job run an unpushed commit when it says `allow_unpushed`, recorded in the job? *Recommended: both sources behind one field, and
-   unpushed allowed and recorded* (the gates and the parcels' card legs run on unpushed commits today). It changes the lead's launch
+   unpushed allowed and recorded* (the lead's practice, READ: the wave-9 gate ran at 9255ab8 before that commit was pushed, and the card checks ran at branch tips; main and origin/main are the same commit now, MEASURED, `git rev-parse`, so nothing on main is unpushed today). It changes the lead's launch
    step and the refusal `commit-unpushed`.
 10. **Who submits, and signing.** Only the box user over ssh, no listener (recommended). Reserve a `signature` field in the spec and
     build no verifier now, or sign every submission from the start with the key format the signed records already use? *Recommended:
@@ -874,12 +919,14 @@ Each with the study's recommendation and what the answer changes.
 
 ## 8. What this study does not establish
 
-1. **Nothing ran on the box or the card.** Every figure about them is from a record. The second night's records (to 08:00 on 2026-10-21)
-   are on the box and in no local copy; the driver's restart cost on a resume, and the box's outbound access, `flock(1)`, the zone's name and its daylight-saving rule are unrecorded.
-2. **The finite campaign's end is a projection.** It rests on one file's slot-seconds and the lead's two readings of the second night, and
-   assumes the pace holds (BELIEVED). The two paces differ by about 30 per cent (0.84 from the first night's slot-seconds, 1.10 read on the second),
-   which the first night's waves explain in part: they mixed fast and slow items and idled slots (the legs ran 70 per cent of the slot-seconds the waves held).
-3. **The waits for a safe point** are from two runs of the driver before the host pool and before the new finite items; the class items run
+1. **Nothing ran on the box or the card.** Every figure about them is from a record. The second night's records (to 08:03 on 2026-10-21)
+   are in the third copy; what a resume costs when its tools are not yet built, and the box's outbound access, `flock(1)`, the zone's name and its daylight-saving rule are unrecorded.
+2. **The finite campaign's end is a projection.** It rests on one night's measured pace (1.12 to 1.15 points an hour on night 2, over its
+   12.09 run hours) and assumes it holds (BELIEVED). Night 1's slot-second model (0.84 to 1.24) bracketed it, which is one out-of-sample
+   check and no more; night 2 differs from the nights to come in that only the four wide items ran, and a night with new items (DR3)
+   shares the card again.
+3. **The waits for a safe point** are from three runs of the driver before the host pool and before the new finite items, and they differ
+   with what the sweep had left (a wave averages 131.8, 272.8 and 539.7 s in the three); the class items run
    lane by lane (about 2.5 minutes an attribute for `rint64-class` on one tile, DR3's brief) and will change the waves' lengths.
 4. **The guard is not a lock** is read from the code; no two drivers were run. The scripts' guard is compared with the driver's on twelve
    synthetic command lines and a synthetic table, not on the box.
@@ -893,22 +940,24 @@ Each with the study's recommendation and what the answer changes.
    skew. A parser from the job's clone is the alternative (a later parcel).
 9. **Several cards** rest on `cft_open`'s index and the tools' constant 0 (READ); whether XRT keeps its device indices stable across a reboot
    is not known (BELIEVED not guaranteed).
-10. **Performance drift** has two runs to look at and no baseline; the scheduler records and reports, and this study sets no threshold.
+10. **Performance drift** has three runs to look at and no baseline; the scheduler records and reports, and this study sets no threshold.
 
 ## 9. The instruments and their captured runs
 
 All in `docs/studies/sched-a/`, each with its capture beside it. They read local copies or call the driver's own functions on synthetic
 input, change and build nothing under `host/`, `hw/`, `rtl/`, `python/` or `programs/`, print no path, exit nonzero if a check fails, and
-carry controls that must go red (the `CONTROL` lines). Every script runs as `python -B -I SCRIPT ARGS`; the inputs are the two
-`metrics.jsonl` files named in the header (a `LABEL=FILE` argument each), and for `script_census.py` the lead's directory of box scripts.
+carry controls that must go red (the `CONTROL` lines). Every script runs as `python -B -I SCRIPT ARGS`; the inputs are the
+`metrics.jsonl` files named in the header (a `LABEL=FILE` argument each, and `LABEL=FILE@N` for the N-th run of a file that holds several: the
+third copy is read as `@1` and `@2`), and for `script_census.py` the lead's directory of box scripts. They write LF line ends on every
+platform (Windows Python would write CRLF to a redirected stdout), so a capture equals a fresh run byte for byte.
 
 | script | measures | capture | run |
 |---|---|---|---|
-| `volumes.py` | a run's file by record type, per hour, per 14-hour night and per year; the compact telemetry record; the free disk and the host's load and memory as the driver sampled them; three damaged copies each turn a check red | `volumes.out` | `volumes.py LABEL=FILE ... --controls` (0.3 s) |
-| `latency.py` | the wait of a stop request for the end of the leg or wave running, exact and by a seeded Monte Carlo; waves held to the sum of 1/jobs; a wrong mean and a wrong grouping each caught | `latency.out` | `latency.py LABEL=FILE ... --controls` (11 s) |
+| `volumes.py` | a run's file by record type, per hour, per 14-hour night and per year; the compact telemetry record; the free disk and the host's load and memory as the driver sampled them; three damaged copies each turn a check red, the runs of a file are read one by one (`@N`) and a run it does not have is refused; the three runs side by side with their ranges | `volumes.out` | `volumes.py LABEL=FILE[@N] ... --controls` (0.6 s) |
+| `latency.py` | the wait of a stop request for the end of the leg or wave running, exact and by a seeded Monte Carlo; waves held to the sum of 1/jobs; a wrong mean, a wrong grouping and a host slice counted as a card activity each caught; the three runs side by side with their ranges | `latency.out` | `latency.py LABEL=FILE[@N] ... --controls` (42 s) |
 | `guard_probe.py` | the driver's `card_user` and `find_card_users` on twelve command lines and a table of processes, against the lead's `pgrep -fc` pattern, which fails six of the twelve | `guard_probe.out` | `guard_probe.py --controls` (0.2 s) |
 | `script_census.py` | what each of the lead's 17 scripts does, as columns, and the distinct guard patterns; a pattern that cannot match and a renamed `pgrep` are caught | `script_census.out` | `script_census.py DIR --controls` (0.1 s) |
-| `coverage_state.py` | each exhaustive item's coverage and first gap by the driver's `sweep_coverage` and `first_gap`; the trees derived with `git rev-parse`; the fold by class; the pace and the nights; the cost of covering the tile and host items again; the union held to an independent merge, a removed slice and a wrong sum caught | `coverage_state.out` | `coverage_state.py LABEL=FILE ... --controls` (0.4 s; needs `git` and this repository) |
+| `coverage_state.py` | each exhaustive item's coverage and first gap by the driver's `sweep_coverage` and `first_gap`; the trees derived with `git rev-parse`; the fold by class; the pace per run hour and the nights, and what a night gained against the earlier run's model; the cost of covering the tile and host items again; the union held to an independent merge, a removed slice, a wrong sum, idle hours counted as run hours, an item with no rate, a recorded tree that is not git's and a run the file does not have each caught or refused | `coverage_state.out` | `coverage_state.py LABEL=FILE[@N] ... --controls` (1.0 s; needs `git` and this repository) |
 
 ## 10. What was read
 

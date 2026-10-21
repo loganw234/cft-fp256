@@ -17,6 +17,9 @@ through the same twelve command lines as a classifier (`pgrep -f` model) and mus
 misses card users the driver names (the driver names them by the program's name or by an image argument,
 and the pattern lists only the soaks, the driver and the gate) and flags processes that use no card.
 
+The output is written with LF line ends on every platform (Windows Python would write CRLF to a redirected stdout), so the
+capture beside this script is LF and compares equal as it stands.
+
 Python 3.10 or later; standard library only. Prints no path.
 """
 import os
@@ -103,6 +106,10 @@ def soak_env_cases():
 
 
 def main(argv):
+    try:
+        sys.stdout.reconfigure(newline="\n")      # LF on every platform, so a capture is the same bytes everywhere
+    except (AttributeError, ValueError):
+        pass
     me = os.getpid()
     print("== card_user on single processes (the driver's own function)")
     bad, _, _ = run_cases(CS.card_user, "driver")

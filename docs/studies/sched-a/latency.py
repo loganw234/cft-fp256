@@ -3,7 +3,13 @@
 # SPDX-License-Identifier: Apache-2.0
 """How long a request to stop waits for a card stress run to reach a safe point.
 
-    python -B -I latency.py LABEL=METRICS.jsonl [LABEL=METRICS.jsonl ...] [--controls]
+    python -B -I latency.py LABEL=METRICS.jsonl[@N] [LABEL=METRICS.jsonl[@N] ...] [--controls]
+
+FILE@N is the N-th run of a file that holds several (a resumed run writes its own `run_start`): the records from that
+`run_start` to the next one's, analysed as a file of their own, so that a night is measured alone and not with the idle
+hours between two nights (a request is taken as arriving uniformly over the run's span, so idle hours would dilute it).
+The output is written with LF line ends on every platform (Windows Python would write CRLF to a redirected stdout), so
+the captures beside this script are LF and compare equal as they stand.
 
 hw/card_stress.py stops "after the leg running, never in the middle of one" (its docstring): a STOP file,
 a signal or the deadline is looked at between legs and between sweep waves, and a card leg in flight runs
@@ -22,7 +28,9 @@ For one activity of length d the wait is uniform on [0, d], so over the span S t
 sum(d^2) / (2 S) and P(wait > x) = sum(max(0, d - x)) / S, both exact. A Monte Carlo of the same
 definition, with a fixed seed, is run beside them as a check, and with --controls a wrong formula must be
 caught by it. Nothing here measures the host pool (no slice of it is in these runs): it adds at most the
---kill-after grace (60 s by default, READ in pool_end) after the last card leg.
+--kill-after grace (60 s by default, READ in pool_end) after the last card leg. A leg on the image `cpu` is a host
+slice, which runs beside the card's legs and holds no card, so it is counted and left out of the activities (none
+of the runs read so far has one).
 
 Read-only; prints no path. Python 3.10 or later; standard library only.
 """
@@ -30,22 +38,41 @@ import json
 import random
 import sys
 
-def load(path):
+def parse_arg(a):
+    """LABEL=PATH or LABEL=PATH@N -> (label, path, N or None); an `@` not followed by digits only is part of the path."""
+    label, _, path = a.partition("=")
+    head, sep, tail = path.rpartition("@")
+    if sep and head and tail.isdigit():
+        return label, head, int(tail)
+    return label, path, None
+
+
+def load(path, part=None):
+    """The records of the file; with part, only those of its part-th run (from a run_start to the next one's). None if there is no such run."""
     recs = []
     with open(path, "rb") as fh:
         for ln in fh.read().split(b"\n"):
             if ln.strip():
                 recs.append(json.loads(ln.decode("utf-8")))
-    return recs
+    if part is None:
+        return recs
+    starts = [i for i, r in enumerate(recs) if r.get("type") == "run_start"]
+    if not 1 <= part <= len(starts):
+        return None
+    end = starts[part] if part < len(starts) else len(recs)
+    return recs[starts[part - 1]:end]
 
 
-def activities(recs, one_wave_a_cycle=False):
-    """[(start, end, name)] of battery legs, recoveries and sweep waves, sorted; legs that did not run are left out.
-    one_wave_a_cycle is the planted slip of --controls: every sweep leg of a cycle called one wave."""
+def activities(recs, one_wave_a_cycle=False, keep_cpu=False):
+    """[(start, end, name)] of battery legs, recoveries and sweep waves, sorted; legs that did not run, and legs on the image
+    `cpu` (host slices, which hold no card), are left out. one_wave_a_cycle and keep_cpu are the planted slips of --controls:
+    every sweep leg of a cycle called one wave; a host slice counted as a card activity."""
     acts = []
     sweeps = {}
     for r in recs:
         if r.get("type") != "leg" or r.get("status") == "skipped":
+            continue
+        if r.get("image") == "cpu" and not keep_cpu:
             continue
         s, e = r.get("start_epoch"), r.get("end_epoch")
         if s is None or e is None or e < s:
@@ -106,12 +133,15 @@ def fmt(sec):
     return "%.1f s (%.1f min)" % (sec, sec / 60.0)
 
 
-def analyse(label, recs, wrong=False, one_wave_a_cycle=False):
-    acts = activities(recs, one_wave_a_cycle)
+def analyse(label, recs, wrong=False, one_wave_a_cycle=False, keep_cpu=False):
+    """(every check held, the figures a summary table reads)."""
+    acts = activities(recs, one_wave_a_cycle, keep_cpu)
     n_waves = sum(1 for a in acts if a[2] == "sweep wave")
+    cpu_legs = sum(1 for r in recs if r.get("type") == "leg" and r.get("image") == "cpu" and r.get("status") != "skipped")
     by_jobs = sum(1.0 / max(1, int((r.get("sweep") or {}).get("jobs") or 1)) for r in recs
                   if r.get("type") == "leg" and r.get("kind") == "sweep" and r.get("status") != "skipped"
-                  and r.get("start_epoch") is not None and r.get("end_epoch") is not None)
+                  and r.get("start_epoch") is not None and r.get("end_epoch") is not None
+                  and (keep_cpu or r.get("image") != "cpu"))
     t0 = min(a[0] for a in acts)
     t1 = max(a[1] for a in acts)
     span = t1 - t0
@@ -122,9 +152,16 @@ def analyse(label, recs, wrong=False, one_wave_a_cycle=False):
     if wrong:                          # the planted slip: d instead of d/2 in the mean
         mean *= 2.0
     print("== %s" % label)
-    print("activities: %d (%d battery or recovery legs, %d sweep waves); %d overlap each other" %
-          (len(acts), sum(1 for a in acts if a[2] != "sweep wave"), sum(1 for a in acts if a[2] == "sweep wave"), overlaps))
-    print("span      : %.0f s from the first activity's start to the last one's end; %.2f%% of it is inside an activity" % (span, 100.0 * inside / span))
+    print("activities: %d (%d battery or recovery legs, %d sweep waves); %d overlap each other; %d host-slice legs (image cpu) left out" %
+          (len(acts), sum(1 for a in acts if a[2] != "sweep wave"), sum(1 for a in acts if a[2] == "sweep wave"), overlaps, 0 if keep_cpu else cpu_legs))
+    print("span      : %.0f s (%.3f h) from the first activity's start to the last one's end; %.2f%% of it is inside an activity" % (span, span / 3600.0, 100.0 * inside / span))
+    rs_ep = next((r["epoch"] for r in recs if r.get("type") == "run_start" and isinstance(r.get("epoch"), (int, float))), None)
+    startup = (t0 - rs_ep) if rs_ep is not None else None
+    if startup is not None:
+        print("start-up  : the first activity starts %.1f s after the run's `run_start` record, which the driver writes as it starts: its tree facts, build step, probes, image hashes and a first telemetry sample all fall in that time" % startup)
+    wl = [e - s for s, e, n in acts if n == "sweep wave"]
+    if wl:
+        print("waves     : %d sweep waves, mean length %.1f s, longest %.1f s" % (len(wl), sum(wl) / len(wl), max(wl)))
     print("mean wait : %s" % fmt(mean))
     for p in (0.5, 0.9, 0.95, 0.99):
         print("p%-3d wait : %s" % (round(p * 100), fmt(q(p))))
@@ -158,37 +195,89 @@ def analyse(label, recs, wrong=False, one_wave_a_cycle=False):
     ok3 = abs(by_jobs - n_waves) < 1e-6
     print("CHECK %-4s %s: the %d sweep waves found equal the sum of 1/jobs over the sweep legs (%.3f), the wave size each leg records" %
           ("ok" if ok3 else "FAIL", label, n_waves, by_jobs))
-    return ok and ok2 and ok3
+    figs = {"label": label, "acts": len(acts), "waves": len(wl), "wave_mean": (sum(wl) / len(wl)) if wl else 0.0,
+            "span_h": span / 3600.0, "mean": mean, "p50": q(0.5), "p95": q(0.95), "p99": q(0.99),
+            "gt600": tail(600), "startup": startup}
+    return (ok and ok2 and ok3), figs
+
+
+def summary(figs):
+    """The runs side by side and the range they make."""
+    print("== the runs side by side (the wait of a stop request, a request arriving uniformly over each run's span)")
+    print("%-18s %7s %6s %9s %11s %11s %11s %9s %10s" % ("run", "hours", "waves", "wave s", "mean wait s", "p95 wait s", "p99 wait s", "P(>600s)", "start-up s"))
+    for f in figs:
+        print("%-18s %7.3f %6d %9.1f %11.1f %11.1f %11.1f %9.4f %10s" % (
+            f["label"], f["span_h"], f["waves"], f["wave_mean"], f["mean"], f["p95"], f["p99"], f["gt600"],
+            ("%.1f" % f["startup"]) if f["startup"] is not None else "-"))
+    m = [f["mean"] for f in figs]
+    p = [f["p95"] for f in figs]
+    w = [f["wave_mean"] for f in figs]
+    print("ranges    : mean wait %.1f to %.1f s (%.1f to %.1f min), p95 %.1f to %.1f s (%.1f to %.1f min), a wave's mean length %.1f to %.1f s (COMPUTED over %d runs)" %
+          (min(m), max(m), min(m) / 60.0, max(m) / 60.0, min(p), max(p), min(p) / 60.0, max(p) / 60.0, min(w), max(w), len(figs)))
+    ok = len(figs) >= 2 and all(min(m) <= x <= max(m) for x in m)
+    print("CHECK %-4s the ranges are the least and the greatest of the rows above" % ("ok" if ok else "FAIL"))
+    return ok
+
+
+def with_cpu_leg(recs):
+    """recs plus one host-slice leg that overlaps the first card activity: the stand-in for a run with a host pool."""
+    acts = activities(recs)
+    s, e = acts[0][0], acts[0][1]
+    ghost = {"type": "leg", "kind": "sweep", "image": "cpu", "status": "ok", "cycle": 1, "start_epoch": s + (e - s) / 4.0,
+             "end_epoch": e + (e - s) / 4.0, "sweep": {"jobs": 1}, "leg": "sweep-slice"}
+    return recs + [ghost]
 
 
 def main(argv):
+    try:
+        sys.stdout.reconfigure(newline="\n")      # LF on every platform, so a capture is the same bytes everywhere
+    except (AttributeError, ValueError):
+        pass
     args = [a for a in argv if not a.startswith("--")]
     if not args:
         print(__doc__)
         return 64
     allok = True
     first = None
+    figs = []
     for a in args:
-        label, _, path = a.partition("=")
-        recs = load(path)
+        label, path, part = parse_arg(a)
+        recs = load(path, part)
+        if recs is None:
+            print("== %s\nCHECK FAIL %s: the file has no run %d" % (label, label, part))
+            allok = False
+            print()
+            continue
         first = first or (label, recs)
-        allok = analyse(label, recs) and allok
+        ok, f = analyse(label, recs)
+        figs.append(f)
+        allok = ok and allok
         print()
-    if "--controls" in argv:
-        print("== control: the mean computed with d where d/2 belongs must be caught by the Monte Carlo check")
+    if len(figs) >= 2:
+        allok = summary(figs) and allok
+        print()
+    if "--controls" in argv and first is not None:
         import io
         import contextlib
+        print("== control: the mean computed with d where d/2 belongs must be caught by the Monte Carlo check")
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            caught = not analyse(first[0], first[1], wrong=True)
+            caught = not analyse(first[0], first[1], wrong=True)[0]
         print("CONTROL %-4s a wrong formula %s" % ("ok" if caught else "FAIL", "is caught by the check, as it must be" if caught else "PASSES THE CHECK"))
         allok = caught and allok
         print("== control: every sweep leg of a cycle called one wave must be caught by the wave-count check")
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            caught2 = not analyse(first[0], first[1], one_wave_a_cycle=True)
+            caught2 = not analyse(first[0], first[1], one_wave_a_cycle=True)[0]
         print("CONTROL %-4s a wrong grouping %s" % ("ok" if caught2 else "FAIL", "is caught by the check, as it must be" if caught2 else "PASSES THE CHECK"))
         allok = caught2 and allok
+        print("== control: a host-slice leg (image cpu) beside a card leg is left out; counted as a card activity it must be caught")
+        with contextlib.redirect_stdout(buf):
+            left_out = analyse(first[0], with_cpu_leg(first[1]))[0]
+            counted = not analyse(first[0], with_cpu_leg(first[1]), keep_cpu=True)[0]
+        print("CONTROL %-4s a host slice is %s" % ("ok" if left_out else "FAIL", "left out and every check stays green" if left_out else "NOT LEFT OUT"))
+        print("CONTROL %-4s a host slice counted as a card activity %s" % ("ok" if counted else "FAIL", "is caught by the no-overlap check, as it must be" if counted else "PASSES THE CHECKS"))
+        allok = left_out and counted and allok
     print("latency: %s" % ("every check held" if allok else "A CHECK FAILED"))
     return 0 if allok else 1
 

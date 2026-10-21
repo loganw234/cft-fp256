@@ -3,10 +3,15 @@
 # SPDX-License-Identifier: Apache-2.0
 """What a card stress run's metrics.jsonl holds, by record type, per hour, per nightly window and per year.
 
-    python -B -I volumes.py LABEL=METRICS.jsonl [LABEL=METRICS.jsonl ...] [LABEL=DIRECTORY ...] [--controls]
+    python -B -I volumes.py LABEL=METRICS.jsonl[@N] [LABEL=METRICS.jsonl[@N] ...] [LABEL=DIRECTORY ...] [--controls]
 
 Read-only. A LABEL=DIRECTORY argument lists the directory's files and bytes by name (the records the lead copied back from
-a batch). It reads each file once and prints: the file's size, line count and SHA-256; a table by
+a batch). A file that holds several runs (a resumed one: each resume writes its own `run_start`) can be read run by run:
+FILE@N is the N-th run, from its `run_start` line to the next one's, and is analysed as a file of its own, so that a
+night is measured alone and not with the idle hours between two nights. The output is written with LF line ends on
+every platform (Windows Python would write CRLF to a redirected stdout), so the captures beside this script are LF
+and compare equal as they stand. It reads each file once and prints: the size, line count and SHA-256 of what it
+analyses (and, for a run of a file, which lines and the whole file's SHA-256); a table by
 record type (count, bytes, share, mean bytes a record); the span the records cover; the rates a hour;
 the same figures for a nightly window of 14 hours (18:00 to 08:00, the window Logan named on 2026-10-21)
 and for 365 of them; and what the telemetry records say about the free disk. Nothing is printed of a
@@ -60,10 +65,32 @@ def analyse(raw):
     return by, recs, problems
 
 
-def report(label, raw):
+def split_runs(raw):
+    """[(first line, last line, bytes)] of each run of a file (1-based lines): from a `run_start` record's line to the line
+    before the next one's (the last run goes to the end). Lines before the first `run_start` belong to no run."""
+    parts = raw.split(b"\n")
+    last = parts.pop()
+    lines = [p + b"\n" for p in parts] + ([last] if last else [])
+    starts = []
+    for i, ln in enumerate(lines):
+        try:
+            if json.loads(ln.decode("utf-8")).get("type") == "run_start":
+                starts.append(i)
+        except ValueError:
+            pass
+    out = []
+    for k, s in enumerate(starts):
+        e = starts[k + 1] if k + 1 < len(starts) else len(lines)
+        out.append((s + 1, e, b"".join(lines[s:e])))
+    return out
+
+
+def report(label, raw, note=None):
     by, recs, problems = analyse(raw)
     total = len(raw)
     print("== %s" % label)
+    if note:
+        print("part     : %s" % note)
     print("file     : %s bytes, %d lines, sha256 %s" % (format(total, ","), raw.count(b"\n"), hashlib.sha256(raw).hexdigest()))
     print("%-12s %7s %10s %7s %9s" % ("type", "count", "bytes", "share", "B/record"))
     s_b = 0
@@ -128,7 +155,33 @@ def report(label, raw):
     named = sum(1 for r in recs if r.get("type") == "leg" and r.get("log"))
     print("logs     : %d legs name a log file (log_kept: %s); the records do not carry a log's size" %
           (named, ", ".join("%s %d" % (k, v) for k, v in sorted(kept.items(), key=lambda kv: str(kv[0])))))
-    return by, recs, problems
+    cpu = sum(1 for r in recs if r.get("type") == "leg" and r.get("image") == "cpu")
+    print("host pool: %d legs ran on the image `cpu` (the host pool's slices)" % cpu)
+    figs = {"label": label, "hours": hrs, "bytes": total, "per_h": total / hrs, "night_mb": night / 1e6,
+            "year_mb": night * NIGHTS / 1e6, "tel_share": (sum(tel) / total) if total else 0.0,
+            "tel_year_mb": sum(tel) / hrs * WINDOW_H * NIGHTS / 1e6, "load1_med": (l1[len(l1) // 2] if l1 else None),
+            "records": len(recs)}
+    return by, recs, problems, figs
+
+
+def summary(figs):
+    """The measured runs side by side, and the range they make."""
+    print("== the measured runs side by side (a 14-hour window at each one's own mix; 365 such nights)")
+    print("%-22s %8s %11s %10s %9s %9s %8s %7s" % ("run", "hours", "bytes", "bytes/h", "MB/night", "MB/year", "telem.", "load1"))
+    for f in figs:
+        print("%-22s %8.3f %11s %10.0f %9.2f %9.0f %7.1f%% %7s" % (
+            f["label"], f["hours"], format(f["bytes"], ","), f["per_h"], f["night_mb"], f["year_mb"], 100.0 * f["tel_share"],
+            ("%.2f" % f["load1_med"]) if f["load1_med"] is not None else "-"))
+    nm = [f["night_mb"] for f in figs]
+    ym = [f["year_mb"] for f in figs]
+    ts = [100.0 * f["tel_share"] for f in figs]
+    ld = [f["load1_med"] for f in figs if f["load1_med"] is not None]
+    print("ranges   : %.2f to %.2f MB a night, %.0f to %.0f MB a year, telemetry %.1f to %.1f per cent of the bytes%s (COMPUTED over %d runs)" %
+          (min(nm), max(nm), min(ym), max(ym), min(ts), max(ts),
+           (", load1 median %.2f to %.2f" % (min(ld), max(ld))) if ld else "", len(figs)))
+    ok = all(min(nm) <= x <= max(nm) for x in nm) and len(figs) >= 2
+    print("CHECK %-4s the ranges are the least and the greatest of the rows above" % ("ok" if ok else "FAIL"))
+    return ok
 
 
 def checks(label, raw, by, recs, problems):
@@ -182,27 +235,87 @@ def report_dir(label, path):
     return good
 
 
+def parse_arg(a):
+    """LABEL=PATH or LABEL=PATH@N -> (label, path, N or None); an `@` in a path that is not followed by digits only is part of it."""
+    label, _, path = a.partition("=")
+    head, sep, tail = path.rpartition("@")
+    if sep and head and tail.isdigit():
+        return label, head, int(tail)
+    return label, path, None
+
+
+def pick_run(whole, n):
+    """(first line, last line, bytes) of the n-th run (1-based) of a file, or None when the file has no n-th run."""
+    runs = split_runs(whole)
+    if 1 <= n <= len(runs):
+        return runs[n - 1]
+    return None
+
+
+def controls_runs(whole):
+    """The run selection must refuse a run the file does not have, and the runs must add up to the file."""
+    runs = split_runs(whole)
+    a = pick_run(whole, len(runs) + 1) is None and pick_run(whole, 0) is None
+    print("CONTROL %-4s a run the file does not have (%d and 0) is refused, not read as another" % ("ok" if a else "FAIL", len(runs) + 1))
+    joined = b"".join(r[2] for r in runs)
+    b = whole.endswith(joined)
+    damaged = whole[:-1] if whole else whole
+    c = not damaged.endswith(joined)
+    print("CONTROL %-4s a file one byte short is not the runs it was split into (the partition check can fail)" % ("ok" if c else "FAIL"))
+    return a and b and c
+
+
 def main(argv):
+    try:
+        sys.stdout.reconfigure(newline="\n")      # LF on every platform, so a capture is the same bytes everywhere
+    except (AttributeError, ValueError):
+        pass
     args = [a for a in argv if not a.startswith("--")]
     if not args:
         print(__doc__)
         return 64
     allok = True
     first = None
+    multi = None
+    figs = []
     for a in args:
-        label, _, path = a.partition("=")
+        label, path, part = parse_arg(a)
         if os.path.isdir(path):
             allok = report_dir(label, path) and allok
             print()
             continue
         with open(path, "rb") as fh:
-            raw = fh.read()
+            whole = fh.read()
+        raw, note = whole, None
+        if part is not None:
+            runs = split_runs(whole)
+            got = pick_run(whole, part)
+            if got is None:
+                print("== %s\nCHECK FAIL %s: the file has %d runs, so there is no run %d" % (label, label, len(runs), part))
+                allok = False
+                print()
+                continue
+            first_ln, last_ln, raw = got
+            joined = b"".join(r[2] for r in runs)
+            part_ok = whole.endswith(joined)
+            note = "run %d of %d in its file: lines %d to %d of %d; the whole file is %s bytes, sha256 %s" % (
+                part, len(runs), first_ln, last_ln, whole.count(b"\n"), format(len(whole), ","), hashlib.sha256(whole).hexdigest())
+            multi = multi or whole
         first = first or raw
-        by, recs, problems = report(label, raw)
+        by, recs, problems, f = report(label, raw, note)
+        figs.append(f)
         allok = checks(label, raw, by, recs, problems) and allok
+        if part is not None:
+            print("CHECK %-4s %s: the file's runs, in order, are the file from its first run_start to its end" % ("ok" if part_ok else "FAIL", label))
+            allok = allok and part_ok
+        print()
+    if len(figs) >= 2:
+        allok = summary(figs) and allok
         print()
     if "--controls" in argv and first is not None:
         allok = controls(first) and allok
+        if multi is not None:
+            allok = controls_runs(multi) and allok
     print("volumes: %s" % ("every check held" if allok else "A CHECK FAILED"))
     return 0 if allok else 1
 
