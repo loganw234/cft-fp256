@@ -4711,6 +4711,14 @@ def resume_unit_checks(src: str = HERE) -> list:
         t4 = evs(ro, "tree_changed")
         c("resume: tree_changed over an old run says that its tree is derived from its commit, and names the derived tree",
           len(t4) == 1 and t4[0][2].get("before") == "7" * 40 and "derived from its commit" in t4[0][1], str([(e[0], e[1][:160]) for e in ro["events"]]))
+        try:                                       # a record is data: junk in it must not stop a resume
+            rj = resume_case(src, [({"commit": 123, "dirty": False, "rtl": 5, "host_src": ["x"], "cc": {"a": 1}}, both)], T_NOW, rev, events=True)
+            ok, why = (rj["tile"] == (0, E) and rj["host"] == (0, E) and rj["not_counted"] == (0, 2) and len(evs(rj, "slices_not_counted")) == 1
+                       and not evs(rj, "tree_changed") and not evs(rj, "host_tree_changed")), str([(e[0], e[1][:100]) for e in rj["events"]])
+        except Exception as e:
+            ok, why = False, repr(e)
+        c("resume: junk in a run_start's tree (a number for a commit, a list for a tree) is an unknown class, said once by name, and does not stop "
+          "the resume", ok, why)
     except Exception as e:                         # a driver that cannot be driven this way is a red check, not a crash
         c("resume: the driver could be driven in-process", False, repr(e))
     return out
@@ -5512,7 +5520,7 @@ def plants(env: Env) -> None:
          ["resume: host_tree_changed names a host/ tree that changed", "resume: host_tree_changed also says the compiler changed"]),
         ("an old run's trees are not derived from its commit",
          [("card_stress_lib.py", "        got = rev(commit, rel) if (rev is not None and commit) else None\n", "        got = None\n")],
-         lambda env, src: resume_unit_checks(src), ["resume: a run before 2026-10-20 recorded no tree"]),
+         lambda env, src: resume_unit_checks(src) + resume_real_checks(env, src), ["resume: a run before 2026-10-20 recorded no tree"]),
         ("a tree is derived for an old run whose checkout was dirty",
          [("card_stress_lib.py", "        elif tr.get(\"dirty\") is not False:\n", "        elif False:\n")],
          lambda env, src: resume_unit_checks(src), ["resume: an old run recorded dirty is not derived"]),
@@ -5534,6 +5542,13 @@ def plants(env: Env) -> None:
         ("the rotation counts keep the slices of another class",
          [("card_stress.py", "        self.served = dict(served)\n        self.sums = {}\n", "        self.sums = {}\n")],
          lambda env, src: resume_unit_checks(src), ["resume: the rotation counts are this class's"]),
+        ("a junk value in a run_start's tree stops the resume (the events' reader trusts the record's types)",
+         [("card_stress.py", "            return (tr[key], tr.get(key + \"_dirty\") is True) if isinstance(tr.get(key), str) and tr[key] else None\n",
+           "            return (tr[key], tr.get(key + \"_dirty\") is True) if tr.get(key) else None\n")],
+         lambda env, src: resume_unit_checks(src), ["resume: junk in a run_start's tree"]),
+        ("a junk commit in a run_start's tree stops the resume (the tally keeps the commit as it was recorded)",
+         [("card_stress_lib.py", " if isinstance((tr or {}).get(\"commit\"), str) else None}", "}")],
+         lambda env, src: resume_unit_checks(src), ["resume: junk in a run_start's tree"]),
         ("the seeds are counted by class too",
          [("card_stress.py", "        self.served = dict(served)\n        self.sums = {}\n",
            "        self.served = dict(served)\n        self.seed_n = {k: v + 1 for k, v in _seeds.items()}\n        self.sums = {}\n")],

@@ -1371,7 +1371,7 @@ class Driver:
         was = self.prev_tree or {}
 
         def at(tr: Dict[str, Any], key: str) -> Optional[Tuple[str, bool]]:
-            return (tr[key], tr.get(key + "_dirty") is True) if tr.get(key) else None
+            return (tr[key], tr.get(key + "_dirty") is True) if isinstance(tr.get(key), str) and tr[key] else None
 
         def show(x: Tuple[str, bool]) -> str:
             return x[0][:12] + (" (modified)" if x[1] else "")
@@ -1394,7 +1394,7 @@ class Driver:
                        f"and are not counted)", before=b_host[0], now=n_host[0], cc_before=b_cc, cc_now=n_cc)
         other, unknown = self.not_counted
         if other or unknown:
-            named = "; ".join(f"{u['n']} {u['reach']} slice(s) of the run started {u['ts']} at commit {(u['commit'] or '?')[:12]}: {u['why']}"
+            named = "; ".join(f"{u['n']} {u['reach'] or 'unclassified'} slice(s) of the run started {u['ts']} at commit {(u['commit'] or '?')[:12]}: {u['why']}"
                               for u in t["unknown"][:6])
             self.event("slices_not_counted", f"of the file's {t['slices']} finished sweep slice(s) this run counts {sum(t['counted'].values())} "
                        f"(tile {t['counted'][L.TILE]}, host {t['counted'][L.HOST]}); {other} are of another tree class and {unknown} of an unknown "

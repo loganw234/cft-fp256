@@ -1032,8 +1032,8 @@ def resolve_tree(tr: Optional[Dict[str, Any]], rev: Optional[Callable[[str, str]
                 use[key] = None
                 why[rel] = f"it recorded {rel}/ tree {have[:12]}, which git does not give for its commit {commit[:12]} ({got[:12]})"
         elif got is None:
-            why[rel] = "no tree recorded" + ("" if rev is None else f" and its commit {commit[:12]} is not in this checkout" if commit
-                                             else " and no usable commit either")
+            why[rel] = "no tree recorded" + ("" if rev is None else f" and its commit {commit[:12]} is not in this checkout (or has no {rel}/)"
+                                             if commit else " and no usable commit either")
         elif tr.get("dirty") is not False:
             why[rel] = (f"no tree recorded, and its checkout was not recorded clean (dirty: {tr.get('dirty')}), so its commit "
                         f"{commit[:12]} is not what ran")
@@ -1071,7 +1071,7 @@ def count_slices(records: Iterable[Dict[str, Any]], now: Dict[str, Tuple[str, Op
         typ = r.get("type")
         if typ == "run_start":
             tr = r.get("tree") if isinstance(r.get("tree"), dict) else None
-            cur, start = run_classes(tr, rev), {"ts": r.get("ts"), "commit": (tr or {}).get("commit")}
+            cur, start = run_classes(tr, rev), {"ts": r.get("ts"), "commit": (tr or {}).get("commit") if isinstance((tr or {}).get("commit"), str) else None}
             continue
         if typ != "leg" or r.get("kind") != "sweep" or r.get("status") not in ("pass", "fail"):
             continue

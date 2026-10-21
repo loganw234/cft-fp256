@@ -1225,7 +1225,8 @@ both" - the class-aware planner in the driver, and the coarse key, the whole hos
   resume, and a resume whose file is all of this class, plan exactly as before.
 - **An old run.** A run before 2026-10-20 recorded its commit and no tree. Where the checkout the driver runs from holds
   that commit and the run recorded `dirty: false`, its trees are derived (`git rev-parse COMMIT:rtl` and `COMMIT:host`; the
-  study found the recorded and the derived trees equal where both exist, and the suite holds that too). A tree that was
+  study found the recorded and the derived trees equal where both exist, and a check holds that, with git's answer stood in
+  and, when CARD_STRESS_RESUME_RUN names the lead's two-night run, on that file). A tree that was
   not clean is not the commit's, and a commit this checkout does not hold gives none: those slices are of an unknown class.
   A run that recorded a tree whose commit is here is held to it: a recorded hash that is not git's for its commit is
   unknown too. **A compiler line is never derived**: the host slices of an old run are of an unknown host class, so a
