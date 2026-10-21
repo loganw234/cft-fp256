@@ -324,7 +324,7 @@ def group_queue():
                 bar.wait()
                 try:
                     res.append(S.claim(root, j))
-                except Exception as ex:                      # Windows may refuse a rename that races another's
+                except Exception as ex:                      # any error is recorded, and fails the check
                     res.append(repr(ex))
             ts = [threading.Thread(target=go) for _ in range(8)]
             [t.start() for t in ts]
@@ -514,10 +514,10 @@ def group_records():
     r2, c2 = mkroot("r-refuse")
     jid, ref = sub(r2, c2, spec(needs=[]))
     rs, d = recs(r2, "jobs", jid), os.path.join(r2, "jobs", jid)
-    check("records: a refused submit leaves jobs/ID: what was sent, a `refused` record naming the field, an end record with outcome refused, and sums",
+    check("records: a refused submit leaves jobs/ID: what was sent (spec.rejected, in place of spec.json), a `refused` record naming the field, an end record with outcome refused, and sums",
           ref and ref.name == "spec-form" and [r["type"] for r in rs] == ["submitted", "refused", "ended"] and rs[1]["name"] == "spec-form" and "needs" in rs[1]["why"]
           and rs[2]["outcome"] == "refused" and rs[2]["refusal"] == "spec-form" and open(os.path.join(d, "spec.rejected"), "rb").read() == json.dumps(spec(needs=[])).encode()
-          and verify_sums(d) == [])
+          and verify_sums(d) == [] and sorted(os.listdir(d)) == ["SHA256SUMS", "job.jsonl", "spec.rejected"])
     jid, ref = sub(r2, c2, b"{not json")
     check("records: a spec that is not JSON is a job too (outcome refused, signature `unreadable`), and its id is a new one",
           ref.name == "spec-form" and rec(r2, "jobs", jid, 0).get("signature") == "unreadable" and rec(r2, "jobs", jid).get("outcome") == "refused")
@@ -669,7 +669,7 @@ def group_locks():
 
 def group_cli():
     rc, out, err = cli(None, "list")
-    check("cli: with no --root and no $CFT_SCHED_ROOT the command is refused `root-unset`", rc == 2 and "root-unset" in err)
+    check("cli: with no --root and no $CFT_SCHED_ROOT the command is refused `root-unset`, printed as `refused: NAME: why` on stderr, exit 2", rc == 2 and err.startswith("refused: root-unset: "), err[:80])
     repo = os.path.join(TMP, "repo")
     os.makedirs(os.path.join(repo, ".git"))
     rc, out, err = cli(os.path.join(repo, "state"), "init")
@@ -795,9 +795,11 @@ def group_cli():
           rc == 0 and started and ended and "stop requested" in out2 and rec(live, "jobs", jid).get("outcome") == "cancelled" and st[:1] == ["pass"] and st[-1:] == ["skipped"], f"{out2!r} {st}")
     if os.name == "posix" and shutil.which("bash"):
         p = subprocess.run(["bash", os.path.join(SCHED, "cft-sched"), "--root", root, "status"], capture_output=True, text=True, env={**os.environ, "PYTHON": sys.executable})
-        check("cli: the cft-sched wrapper runs the command", p.returncode == 0 and "cft-sched status" in p.stdout, p.stderr[:200])
+        h = subprocess.run(["bash", os.path.join(SCHED, "cft-sched"), "--help"], capture_output=True, text=True, env={**os.environ, "PYTHON": sys.executable})
+        check("cli: `bash hw/sched/cft-sched` runs the command, and --help lists every verb",
+              p.returncode == 0 and "cft-sched status" in p.stdout and h.returncode == 0 and all(v in h.stdout for v in ("init", "submit", "list", "status", "cancel", "hold", "release", "serve")), p.stderr[:200] + h.stderr[:200])
     else:
-        skip("cli: the cft-sched wrapper runs the command", "needs POSIX bash")
+        skip("cli: `bash hw/sched/cft-sched` runs the command, and --help lists every verb", "needs POSIX bash")
 
 
 def table_checks():

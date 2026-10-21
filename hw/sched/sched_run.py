@@ -44,7 +44,8 @@ class FakeRunner:
     """S1's stand-in for the real runners. A step is atomic: it runs to its end, and a stop is looked at only at a safe
     point, the start of the job and the end of each step but one, as the driver looks between legs and never in the middle
     of one. `sleep` sleeps; `fail` fails (the steps after it are recorded `skipped`); `find` passes and reports a finding;
-    `ignore-stop` sleeps and is NOT a safe point: no stop is looked at after it, as the legs of one wave have none between them."""
+    `ignore-stop` sleeps and its end is NOT a safe point: no stop is looked at there, and the next step's end is the next one (the
+    legs of one wave have none between them)."""
     name = "fake"
     registry = FAKE_REGISTRY
 

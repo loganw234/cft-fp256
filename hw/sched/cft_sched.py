@@ -13,8 +13,10 @@
     cft-sched [--root DIR] serve [--drain] [--poll S] [--max-jobs N] [--no-locks]
 
 The root is --root or $CFT_SCHED_ROOT, outside every git checkout (on the box: /data/cft-sched). In this parcel `serve`
-runs the FAKE runner, which touches no card. A refusal prints `refused: NAME: why` on stderr and exits 2; docs/studies
-and hw/sched/sched_names.py hold the table. Only the box user submits, over ssh: there is no listener and no socket.
+runs the FAKE runner, which touches no card. Run it as `bash hw/sched/cft-sched ...` (no script in hw/ is executable in
+git) or `python3 hw/sched/cft_sched.py ...`. A refusal prints `refused: NAME: why` on stderr and exits 2; `submit` of a spec
+that is refused prints `refused JOBID: NAME: why` (the job exists, with its record) and exits 2; hw/sched/sched_names.py holds
+the table. Only the box user submits, over ssh: there is no listener and no socket.
 """
 from __future__ import annotations
 

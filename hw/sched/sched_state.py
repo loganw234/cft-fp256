@@ -315,7 +315,9 @@ def claim(root: str, jid: str) -> bool:
     except FileNotFoundError:
         return False
     except PermissionError:
-        if os.name == "nt":                      # Windows refuses a rename that races another's: not won, and it stays queued
+        # On Windows this would be a sharing violation (a handle open inside the directory). That was NOT measured here: what was
+        # measured is that racing renames of one directory all succeed (test_sched.py's rename_exclusive). Not a win; the job stays queued.
+        if os.name == "nt":
             return False
         raise
 
