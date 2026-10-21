@@ -1771,9 +1771,11 @@ routines the tile runs, since the math library round's M1 build
 operations and is left as it was; this section says what the six are,
 what they are not, and where the record is.
 
-- **Programs of the tile's existing instructions.** No RTL was built for
-  them (the rtl tree, 44b963dd, last changed on 2026-10-05); they need
-  revision 8's flag control. `python/cft_golden/mathlib.py` generates
+- **Programs of the tile's instructions, on revision 8.** M1's build
+  changed no RTL: the rtl tree, 44b963dd, is unchanged since 2026-10-05.
+  Revision 8 carried what M1 and M2 need of a tile (docs/ROADMAP.md,
+  "Revision 8: step 6's RTL revision": "M1 and M2 need R24's raise, with
+  its mark, and R23's byte"). `python/cft_golden/mathlib.py` generates
   each at each of the four formats and five attributes, 120 fragments of
   175 to 433 instructions (docs/VALIDATION.md, M1's build, item 4); the
   design is docs/studies/M1-exp-log.md.
@@ -1781,8 +1783,10 @@ what they are not, and where the record is.
   run-time `exp(a)` and the rest as a routine inlined where its node
   stands (language 1.1 and cftc's output version 6, 2026-10-15), for the
   software targets and revision 8's; revision 7's refuse such a program,
-  `target-feature`. `cft_exp` and the other host entry points do not call
-  one (docs/LANGUAGE.md, "The operations").
+  `target-feature`. The thirty-nine host operations (`cft_exp` and the
+  rest) call none: each is "HOST work: no cft_run pass is issued"
+  (`host/src/transcend.c`, its header), and a program reaches a routine
+  through the language (docs/LANGUAGE.md, "The operations").
 - **Decided in the lane, or marked.** Where the true value lies within a
   routine's error bound of a rounding boundary - for whole windows of
   arguments, exp near 0 and log near 1 among them - the routine marks

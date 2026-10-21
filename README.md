@@ -289,14 +289,14 @@ runs that failed stay in the record. The load-bearing ones:
   a program that revision 8's tiles run (the math library's M1 build,
   2026-10-13 to 2026-10-19). A routine decides its last bit in the
   lane; where it cannot, it marks the lane (bit 7 of the lane byte,
-  STATUS[6]) and the definition replays that lane, and the stages hold
-  every lane it does not mark to the golden model bit for bit. The card
-  ran the six routine references on the quad image on 2026-10-19: 6 of
-  6 passed, 118 checks, none failed (`docs/VALIDATION.md`, "M1's build,
-  seventh wave, closed"; `docs/LANGUAGE.md`, "The operations"). The
-  host operations are unchanged: `cft_exp` still issues no `cft_run`
-  pass, and a routine is reached by compiling a program, not by that
-  call.
+  STATUS[6]) and the definition replays that lane, and on the cases the
+  stages run they hold every lane it does not mark to the golden model
+  bit for bit. The card ran the six routine references on the quad
+  image on 2026-10-19: 6 of 6 passed, 118 checks, none failed
+  (`docs/VALIDATION.md`, "M1's build, seventh wave, closed";
+  `docs/LANGUAGE.md`, "The operations"). The host operations are
+  unchanged: `cft_exp` still issues no `cft_run` pass, and a routine is
+  reached by compiling a program, not by that call.
 - **A GPU agrees, bit for bit, on a real workload.** atlas-engine's
   deterministic camera around a plate, lowered to a sequencer program:
   a million samples a pass, five words a sample, and every pass's
@@ -419,9 +419,9 @@ throughput and what bounds each number.
 
 `docs/ROADMAP.md` has the detail and is the plan of record; this is its
 short form on 2026-10-21. The card has reproduced the vectors since
-2026-09-08. Since this section was last written (2026-09-15) the project
-has added the language for dynamical systems and its compiler
-(`docs/LANGUAGE.md`); certificates and an auditor
+2026-09-08. Since 2026-09-23, when the previous version of this section
+last changed, the project has added the language for dynamical systems
+and its compiler (`docs/LANGUAGE.md`); certificates and an auditor
 (`docs/CERTIFICATES.md`); revision 8 of the tile, closed at 135 MHz and
 proven on the card in three images; the first six functions of the math
 library as tile routines (above); a 61-hour stress run of the card with

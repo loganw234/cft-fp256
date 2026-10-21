@@ -218,8 +218,9 @@ compiles (M1's build, 2026-10-13 to 2026-10-19; docs/TRANSCENDENTALS.md,
 "The six on the tile"). That qualifies "in the library, not in the tile"
 for those six and no other function, and it carries the paragraph above
 out rather than contradicting it: a routine is a program of the tile's
-existing instructions, and the tile still has no transcendental
-datapath. The host operations are as described, `cft_exp` included.
+instructions, run with revision 8's flag control, and the tile still has
+no transcendental datapath. The host operations are as described,
+`cft_exp` included.
 
 ## The atlas-engine det_* library
 
