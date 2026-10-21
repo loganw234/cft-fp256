@@ -117,15 +117,22 @@ def lock_held(path: str):
 # ---------------------------------------------------------------------------------------- records
 
 class Log:
-    """An append-only JSON-lines file. Every record carries its type, its time, its job and its card, so a record
-    that names no card cannot be written. Each append is one write and an fsync; a torn last line (no newline) is
-    broken off before the next record goes after it."""
+    """An append-only JSON-lines file. Every record carries its type, its time, its job and its card. A record of a JOB
+    names its card (as asked until the job is placed, then the card that ran it) or says why none could be read: a log
+    opened for a job with no card and no `no_card` reason refuses to write (ValueError). `no_card` is for the one case
+    where none can be read, a submit whose spec is not an object or whose `card` is not a string; its records say
+    `card: null` and `card_unreadable: why`. A log that is no job's (refusals.jsonl) names a card only for a card verb.
+    Each append is one write and an fsync; a torn last line (no newline) is broken off before the next record."""
 
-    def __init__(self, path: str, job: str | None = None, card: str | None = None):
-        self.path, self.job, self.card = path, job, card
+    def __init__(self, path: str, job: str | None = None, card: str | None = None, no_card: str | None = None):
+        self.path, self.job, self.card, self.no_card = path, job, card, no_card
 
     def append(self, type_: str, **fields) -> dict:
+        if self.job is not None and self.card is None and not self.no_card:
+            raise ValueError(f"job {self.job}: a record must name its card, or say why none could be read")
         rec = {"type": type_, "t": round(time.time(), 3), "job": self.job, "card": self.card}
+        if self.card is None and self.no_card:
+            rec["card_unreadable"] = self.no_card
         rec.update(fields)
         line = (json.dumps(rec, sort_keys=True, separators=(",", ":")) + "\n").encode()
         try:
@@ -166,6 +173,15 @@ def read_records(path: str) -> list:
             except ValueError:
                 pass
     return out
+
+
+def job_card(d: str) -> tuple:
+    """(card, None) as the job's own `submitted` record has it, else (None, why): the card a job asked for when its
+    spec.json cannot be trusted (a queued spec that is damaged, a cancel, a restart)."""
+    for r in read_records(os.path.join(d, "job.jsonl")):
+        if r.get("type") == "submitted":
+            return (r["card"], None) if isinstance(r.get("card"), str) else (None, "the job's submitted record names no card")
+    return None, "the job has no submitted record"
 
 
 def sha256_file(path: str) -> str:
@@ -247,7 +263,9 @@ def submit(root: str, cfg: dict, raw: bytes, registry: dict) -> tuple:
     except Refusal as r:
         refusal = r
     shown = spec or (obj if isinstance(obj, dict) else {})
-    log = Log(os.path.join(tmp, "job.jsonl"), jid, _plain(shown.get("card")))
+    card = shown.get("card") if isinstance(shown.get("card"), str) and len(shown["card"]) <= 200 else None
+    why = None if card else ("the spec is not a JSON object" if not isinstance(obj, dict) else "the spec's card is missing or not a string")
+    log = Log(os.path.join(tmp, "job.jsonl"), jid, card, why)
     log.append("submitted", owner=user(), host=socket.gethostname(), raw_sha256=hashlib.sha256(raw).hexdigest(),
                signature=sig_status(obj), name=_plain(shown.get("name")), kind=_plain(shown.get("kind")),
                priority=_plain(shown.get("priority")), preempt=_plain(shown.get("preempt")))
@@ -311,7 +329,8 @@ def claim_next(root: str, cfg: dict, card_id: str, now_t: float, registry: dict)
         if not claim(root, jid):
             continue                                            # another claimant, or a cancel, won it
         d = os.path.join(root, "running", jid)
-        log = Log(os.path.join(d, "job.jsonl"), jid, spec.get("card") if spec else None)      # as asked, until it is placed
+        card0, why0 = job_card(d)                               # as asked (the job's own submitted record), until it is placed
+        log = Log(os.path.join(d, "job.jsonl"), jid, card0, why0)
         try:
             if spec is None:
                 raise Refusal("queue-corrupt", "spec.json cannot be read")
@@ -338,13 +357,8 @@ def cancel(root: str, jid: str, who: str) -> str:
     except FileNotFoundError:
         pass
     else:
-        spec = {}
-        try:
-            with open(os.path.join(j, "spec.json"), "rb") as fh:
-                spec = json.loads(fh.read().decode("utf-8"))
-        except (OSError, ValueError):
-            pass
-        log = Log(os.path.join(j, "job.jsonl"), jid, _plain(spec.get("card")) if isinstance(spec, dict) else None)
+        card0, why0 = job_card(j)
+        log = Log(os.path.join(j, "job.jsonl"), jid, card0, why0)
         log.append("cancel_requested", by=who, how="dequeued")
         seal(j, log, "cancelled", why="cancelled while queued")
         return "dequeued"
@@ -438,7 +452,8 @@ def recover(root: str, out=print) -> list:
             outcome = recs[-1].get("outcome")
         else:
             card = next((r.get("card") for r in recs if r.get("type") == "claimed"), None)
-            Log(os.path.join(d, "job.jsonl"), jid, card).end(
+            card, why = (card, None) if card else job_card(d)
+            Log(os.path.join(d, "job.jsonl"), jid, card, why).end(
                 "interrupted", why="found in running/ at a service start: the service that ran it is gone; recorded, not re-run")
             write_sums(d)
             outcome = "interrupted"

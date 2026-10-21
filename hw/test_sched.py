@@ -511,6 +511,26 @@ def group_records():
     jid, ref = sub(r2, c2, b"{not json")
     check("records: a spec that is not JSON is a job too (outcome refused, signature `unreadable`), and its id is a new one",
           ref.name == "spec-form" and rec(r2, "jobs", jid, 0).get("signature") == "unreadable" and rec(r2, "jobs", jid).get("outcome") == "refused")
+    r2, c2 = mkroot("r-nocard")
+    jn, jm, jr = sub(r2, c2, b"[]")[0], sub(r2, c2, spec(card=5))[0], sub(r2, c2, spec(needs=[]))[0]
+    cs = lambda j: [(x.get("card"), bool(x.get("card_unreadable"))) for x in recs(r2, "jobs", j)]
+    check("records: a submit whose card cannot be read (a spec that is not an object, a card that is not a string) says `card: null` and why in every record, and invents no card",
+          cs(jn) == [(None, True)] * 3 and cs(jm) == [(None, True)] * 3, f"{cs(jn)} {cs(jm)}")
+    check("records: a refused submit whose card is readable names it in every record, with no card_unreadable", cs(jr) == [("u50-0", False)] * 3, str(cs(jr)))
+    r2, c2 = mkroot("r-corrupt")
+    ja, jb = sub(r2, c2, spec(card="u50-0", priority=90))[0], sub(r2, c2, spec(card="any", priority=80))[0]
+    for j in (ja, jb):
+        open(os.path.join(r2, "queue", j, "spec.json"), "w").write("not json")
+    claim1(r2, c2)
+    cc = [[x.get("card") for x in recs(r2, "jobs", j)] for j in (ja, jb)]
+    check("records: a queued spec that cannot be read is refused `queue-corrupt` in records that name the card from the job's own submitted record (u50-0; any, as asked), not null",
+          cc == [["u50-0"] * 3, ["any"] * 3] and rec(r2, "jobs", ja, -2).get("name") == "queue-corrupt", str(cc))
+    pn = os.path.join(TMP, "nocard.jsonl")
+    refused_write = verdict_exc(lambda: S.Log(pn, "j000001", None).append("x"), ValueError) and not os.path.exists(pn)
+    said = S.Log(pn, "j000001", None, "no card in the spec").append("x")
+    no_job = S.Log(os.path.join(TMP, "no-job.jsonl"), None, None).append("x")
+    check("records: a job's log refuses to write a record that names no card and gives no reason; given a reason the record says so; a log that is no job's may name no card",
+          refused_write and said["card"] is None and said["card_unreadable"] == "no card in the spec" and no_job["card"] is None)
     d = os.path.join(root, "jobs", jd)
     open(os.path.join(d, "job.jsonl"), "ab").write(b"x")
     open(os.path.join(d, "extra"), "wb").write(b"y")
@@ -839,6 +859,12 @@ PLANTS = [  # (what is wrong, edits, the groups written for it, a fragment of th
      "queue", "a held card claims nothing", False),
     ("the queue ignores priority", [E("sched_state.py", '-(e[1] or {}).get("priority", 0), e[0]))', "e[0]))")], "queue", "order is priority, then submission", False),
     ("a cancel finds nothing to take out of the queue", [E("sched_state.py", "        os.rename(q, j)  ", "        raise FileNotFoundError(q)  ")], "queue", "a queued job is cancelled out of the queue", False),
+    ("a submit with no readable card invents one", [E("sched_state.py", 'log = Log(os.path.join(tmp, "job.jsonl"), jid, card, why)', 'log = Log(os.path.join(tmp, "job.jsonl"), jid, card or "any")')],
+     "records", "a submit whose card cannot be read (", None),
+    ("a queued spec that cannot be read is refused in records that name no card", [E("sched_state.py", "card0, why0 = job_card(d)  ", 'card0, why0 = None, "plant"  ')],
+     "records", "a queued spec that cannot be read is refused `queue-corrupt` in records that name the card", None),
+    ("a job's log writes a record that names no card and says nothing", [E("sched_state.py", "        if self.job is not None and self.card is None and not self.no_card:", "        if False:")],
+     "records", "a job's log refuses to write a record that names no card", None),
     ("a stop does not stop a running job", [E("sched_run.py", "            if not skip and at_safe_point and stop.requested():", "            if False:")], "records", "a stop asked during a step ends the job", False),
     ("the start of a job is not a safe point", [E("sched_run.py", "skip, at_safe_point = None, True ", "skip, at_safe_point = None, False")], "records", "a stop asked before the job starts is honoured at the start", False),
     ("a stop cuts the step it arrives in short", [E("sched_run.py", '                sleep(st.get("seconds", 0))', '                [sleep(0.01) for _ in range(int(st.get("seconds", 0) * 100)) if not stop.requested()]')],
