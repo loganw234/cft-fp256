@@ -10,8 +10,8 @@
  "sources": [
   {
    "path": "hw/gen_layouts.py",
-   "sha256": "17df9e8ca4f1efd7ff045ecf6e5f2d1857786cbb55e92ff6ebd176f89fbb1c87",
-   "bytes": 16074
+   "sha256": "1515176e8bd606319e9f3660055f7ea2e28ae0d8237df53fb7bd1dd061f00922",
+   "bytes": 16587
   }
  ],
  "extracts": [],

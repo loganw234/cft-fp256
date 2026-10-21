@@ -78,6 +78,45 @@ def test_gen_seq_flags_check_sees_a_crlf_header(tmp_path, monkeypatch, capsys):
     assert "drifted" in err and "CRLF" in err, err
 
 
+def test_gen_layouts_check_sees_a_crlf_cfg_and_a_crlf_doc(
+        tmp_path, monkeypatch, capsys):
+    gl = _load("hw/gen_layouts.py", "p6_gen_layouts")
+    hw = tmp_path / "hw"
+    hw.mkdir()
+    doc = tmp_path / "docs" / "LAYOUTS.md"
+    doc.parent.mkdir(parents=True)
+    doc.write_bytes(b"# Layouts\n\nprose\n<!-- layouts:begin -->\n"
+                    b"<!-- layouts:end -->\nmore prose\n")
+    monkeypatch.setattr(gl, "HW", hw)
+    monkeypatch.setattr(gl, "OUT", hw / "layouts")
+
+    assert gl.main([]) == 0                     # write: the cfgs and the table
+    cfgs = sorted((hw / "layouts").glob("u50-*.cfg"))
+    assert cfgs and b"layouts:begin" in doc.read_bytes()
+    assert b"\r" not in doc.read_bytes() + cfgs[0].read_bytes()
+    assert gl.main(["--check"]) == 0            # the control
+    capsys.readouterr()
+
+    lf_cfg = cfgs[0].read_bytes()               # one .cfg, CRLF
+    cfgs[0].write_bytes(_crlf(lf_cfg))
+    assert gl.main(["--check"]) == 1
+    out = capsys.readouterr().out
+    assert "STALE: " + cfgs[0].name in out, out
+    cfgs[0].write_bytes(lf_cfg)
+    assert gl.main(["--check"]) == 0
+    capsys.readouterr()
+
+    lf_doc = doc.read_bytes()                   # the doc, CRLF throughout
+    doc.write_bytes(_crlf(lf_doc))
+    assert gl.main(["--check"]) == 1
+    out = capsys.readouterr().out
+    assert "STALE: LAYOUTS.md" in out, out
+    # and the writer puts it right: LF again, the table as it was
+    assert gl.main([]) == 0
+    assert doc.read_bytes() == lf_doc
+    assert gl.main(["--check"]) == 0
+
+
 def test_make_seq_corpus_check_sees_a_crlf_corpus(tmp_path, monkeypatch, capsys):
     # The generator drives libcft through ctypes; its verdict on the file is
     # check_committed(), which needs the text and the file and no library.
