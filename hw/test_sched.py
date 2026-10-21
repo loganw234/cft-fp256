@@ -276,6 +276,14 @@ def group_queue():
             S.finish(root, c[0], c[2], "done")
     check("queue: order is priority, then submission: high1, high2 (same priority, submitted in that order), mid, low",
           got == ["high1", "high2", "mid", "low"], str(got))
+    root, cfg = mkroot("q-bigids")
+    open(os.path.join(root, "ids", "j999998"), "w").close()         # the next ids are j999999 and j1000000: as text, seven digits sort first
+    a, b = sub(root, cfg, spec(name="a", priority=50))[0], sub(root, cfg, spec(name="b", priority=50))[0]
+    order = [e[0] for e in S.queue_entries(root)]
+    check("queue: two jobs of one priority claim in submission order across the id 999999 to 1000000 boundary (ids are numbers, not text)",
+          (a, b) == ("j999999", "j1000000") and order == [a, b], f"{a} {b} {order}")
+    serve_here(root, cfg)
+    check("queue: `list` shows what ended in id order across the same boundary", [j["id"] for j in R.list_jobs(root)["finished"]] == [a, b])
     root, cfg = mkroot("q-ids")
     a = safely(lambda: sub(root, cfg, spec())[0])
     b = safely(lambda: sub(root, cfg, spec())[0])
@@ -857,7 +865,10 @@ PLANTS = [  # (what is wrong, edits, the groups written for it, a fragment of th
     ("a hold does not stop claims", [E("sched_run.py", "                if hold_info(root, cid) is not None:\n                    continue\n                lk", "                lk"),
                                      E("sched_run.py", "                    if hold_info(root, cid) is not None:\n                        continue", "                    if False:\n                        continue")],
      "queue", "a held card claims nothing", False),
-    ("the queue ignores priority", [E("sched_state.py", '-(e[1] or {}).get("priority", 0), e[0]))', "e[0]))")], "queue", "order is priority, then submission", False),
+    ("the queue ignores priority", [E("sched_state.py", '-(e[1] or {}).get("priority", 0), id_key(e[0])))', "id_key(e[0])))")], "queue", "order is priority, then submission", False),
+    ("ids are sorted as text in the queue", [E("sched_state.py", '-(e[1] or {}).get("priority", 0), id_key(e[0])))', '-(e[1] or {}).get("priority", 0), e[0]))')], "queue",
+     "two jobs of one priority claim in submission order across the id 999999", None),
+    ("ids are sorted as text in the lists", [E("sched_run.py", ", key=id_key)", ")")], "queue", "`list` shows what ended in id order across the same boundary", None),
     ("a cancel finds nothing to take out of the queue", [E("sched_state.py", "        os.rename(q, j)  ", "        raise FileNotFoundError(q)  ")], "queue", "a queued job is cancelled out of the queue", False),
     ("a submit with no readable card invents one", [E("sched_state.py", 'log = Log(os.path.join(tmp, "job.jsonl"), jid, card, why)', 'log = Log(os.path.join(tmp, "job.jsonl"), jid, card or "any")')],
      "records", "a submit whose card cannot be read (", None),
@@ -914,14 +925,14 @@ def plants(only_text: str | None):
             rc, n, fails, err = run_copy(d, g)
             ctl[g] = n
             check(f"plants: the CONTROL (an unmodified copy of the code and of this test) passes the {g} group, {n} checks", rc == 0 and not fails and n > 0, "; ".join(fails)[:300] or err[-200:])
-    for label, edits, g, want, posix in PLANTS:
+    for n, (label, edits, g, want, posix) in enumerate(PLANTS):
         if only_text and only_text not in label:
             continue
         if (posix == "flock" and not S.HAVE_FLOCK) or (posix == "noflock" and S.HAVE_FLOCK):
             skip(f"plant [{label}]", "needs POSIX (flock(2), file modes), which this platform lacks" if posix == "flock" else "needs a platform without flock(2)")
             continue
         try:
-            d = make_copy(re.sub(r"\W+", "-", label)[:30], edits)
+            d = make_copy(f"{n:02d}-" + re.sub(r"\W+", "-", label)[:24], edits)         # numbered: two labels may start alike
         except SystemExit as e:
             check(f"plant [{label}]: applies", False, str(e))
             continue

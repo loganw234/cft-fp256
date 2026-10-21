@@ -16,8 +16,8 @@ import socket
 import time
 
 from sched_names import Refusal
-from sched_state import (HAVE_FLOCK, ID_RE, Lock, Log, card_log, claim_next, finish, hold_info, lock_held, queue_entries, read_records,
-                         recover, stop_info)
+from sched_state import (HAVE_FLOCK, ID_RE, Lock, Log, card_log, claim_next, finish, hold_info, id_key, lock_held, queue_entries,
+                         read_records, recover, stop_info)
 
 VERSION = "1"
 FAKE_REGISTRY = {"sleep": {"seconds": "number"}, "ignore-stop": {"seconds": "number"},
@@ -141,7 +141,7 @@ def serve(root: str, cfg: dict, runner, poll: float = 1.0, drain: bool = False, 
 # ---------------------------------------------------------------------------------------- the views
 
 def _ids(root: str, where: str) -> list:
-    return sorted(n for n in os.listdir(os.path.join(root, where)) if ID_RE.match(n))
+    return sorted((n for n in os.listdir(os.path.join(root, where)) if ID_RE.match(n)), key=id_key)
 
 
 def job_view(root: str, where: str, jid: str) -> dict:

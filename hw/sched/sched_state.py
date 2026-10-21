@@ -10,7 +10,8 @@ A JOB IS A DIRECTORY THAT MOVES BY RENAME, and on POSIX a rename is atomic on on
   finish   the end record, SHA256SUMS, then running/ID -> jobs/ID: a job is in jobs/ complete or not at all.
 job.jsonl is born at submit, so a refusal has somewhere to leave its record. Ids come from markers
 (ids/jNNNNNN, created O_EXCL and never deleted), so an id is never reused and no lock is needed for it.
-Order is priority, then id: the id sequence is the scheduler's own clock of submissions and cannot step back.
+Order is priority, then id AS A NUMBER (j999999 before j1000000; as text it is the other way round): the id sequence is
+the scheduler's own clock of submissions and cannot step back.
 THE EXCLUSIVITY IS POSIX rename(2)'S, NOT THIS CODE'S: on the Windows this was written on, eight threads renaming one
 directory to one target all report success (measured, test_sched.py's rename_exclusive), so there a claim is exclusive
 only if one claimant is the only one, which `serve --no-locks` says by name. The service runs on Linux.
@@ -49,6 +50,11 @@ def parse_job_id(text: str) -> str:
     if not isinstance(text, str) or not ID_RE.match(text):
         raise Refusal("job-unknown", f"{text!r} is not a job id (j and six or more digits)")
     return text
+
+
+def id_key(name: str) -> int:
+    """An id as a number, to sort by: j999999 comes before j1000000 (as text it does not)."""
+    return int(name[1:])
 
 
 # ---------------------------------------------------------------------------------------- locks
@@ -297,7 +303,7 @@ def queue_entries(root: str) -> list:
         except (OSError, ValueError):
             spec = None
         out.append((name, spec))
-    out.sort(key=lambda e: (e[1] is not None, -(e[1] or {}).get("priority", 0), e[0]))
+    out.sort(key=lambda e: (e[1] is not None, -(e[1] or {}).get("priority", 0), id_key(e[0])))
     return out
 
 
@@ -444,7 +450,7 @@ def recover(root: str, out=print) -> list:
     was already written only had its move left."""
     done = []
     rd = os.path.join(root, "running")
-    for jid in sorted(n for n in os.listdir(rd) if ID_RE.match(n)):
+    for jid in sorted((n for n in os.listdir(rd) if ID_RE.match(n)), key=id_key):
         d = os.path.join(rd, jid)
         recs = read_records(os.path.join(d, "job.jsonl"))
         if recs and recs[-1].get("type") == "ended":
