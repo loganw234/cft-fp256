@@ -4720,6 +4720,14 @@ def resume_unit_checks(src: str = HERE) -> list:
             ok, why = False, repr(e)
         c("resume: junk in a run_start's tree (a number for a commit, a list for a tree) is an unknown class, said once by name, and does not stop "
           "the resume", ok, why)
+        # more unknown classes than any cap: four old runs, each of a commit this checkout does not hold, with a tile and a host slice, are eight
+        rm = resume_case(src, [({"commit": ch * 40, "dirty": False, "dirty_files": 0}, both) for ch in "5678"], T_NOW, rev, events=True)
+        em = evs(rm, "slices_not_counted")
+        c("resume: EVERY unknown class is named, not the first few: four old runs of commits this checkout does not hold are eight unknown classes "
+          "(a tile and a host each), and the one event's text names all eight by run and commit, and its unknown_by_run field lists all eight",
+          rm["not_counted"] == (0, 8) and len(em) == 1 and em[0][1].count("slice(s) of the run started") == 8
+          and all(ch * 12 in em[0][1] for ch in "5678") and len(em[0][2].get("unknown_by_run") or []) == 8,
+          str((rm["not_counted"], len(em), em[0][1].count("slice(s) of the run started") if em else None, len((em[0][2].get("unknown_by_run") or []) if em else []))))
     except Exception as e:                         # a driver that cannot be driven this way is a red check, not a crash
         c("resume: the driver could be driven in-process", False, repr(e))
     return out
@@ -4878,7 +4886,9 @@ def scn_resume(env: Env, src: str = HERE) -> list:
 def resume_real_checks(env: Env, src: str = HERE) -> list:
     """The planner over a copy of the REAL two-night file (the lead's resume of 2026-10-19 and 2026-10-20, from the box): a resume at the second
     run's commit, 0b7c959. CARD_STRESS_RESUME_RUN names the run's directory (the one holding metrics.jsonl); without it this is skipped by name.
-    The figures are READ from that file and from docs/studies/sched-a/coverage_state.out (the first gaps of the four wide items)."""
+    The first gaps of the four wide items are READ here, at run time, from the study's committed capture of this same file
+    (docs/studies/sched-a/coverage_state.out, the item's line in its last per-run table); the other figures (552 slices, 320 counted, 232
+    not, the 14 host items) are typed here, MEASURED on the real file by the planner and by that script."""
     run = os.environ.get("CARD_STRESS_RESUME_RUN")
     if not run or not os.path.isfile(os.path.join(run, "metrics.jsonl")):
         skip("resume real: the planner over the real two-night file", "CARD_STRESS_RESUME_RUN does not name a run directory holding a "
@@ -4914,7 +4924,15 @@ def resume_real_checks(env: Env, src: str = HERE) -> list:
             after = plan()
             t = d.class_tally
             host = [n for n in nightly if reach[n] == L2.HOST]
-            wide = {"scaleb32-wide-rne": 821035008, "scaleb32-wide-rtz": 843055104, "scaleb32-wide-rdn": 838860800, "scaleb32-wide-rup": 846200832}
+            # the four first gaps are READ from the study's committed capture of this file (the item's line in its LAST per-run table, night 2's)
+            try:
+                with open(os.path.join(ROOT, "docs", "studies", "sched-a", "coverage_state.out"), "r", encoding="utf-8") as fh:
+                    study = fh.read()
+            except OSError:
+                study = ""
+            wide = {n: int(g) for n, g in re.findall(r"^(scaleb32-wide-r\w\w)\s+tile\s+\d+\s+[0-9.]+% \((\d+), 4294967296\)", study, re.M)}
+            c("resume real: the study's capture (docs/studies/sched-a/coverage_state.out, read here) gives the four wide items' first gaps",
+              set(wide) == {f"scaleb32-wide-{m}" for m in ("rne", "rtz", "rdn", "rup")} and all(0 < g < L2.EXH for g in wide.values()), str(wide))
             c("resume real: the file is the lead's: two run_starts (the first with no tree, the second with its trees), 552 finished sweep slices",
               len(starts) == 2 and "rtl" not in starts[0]["tree"] and "rtl" in starts[1]["tree"] and t["slices"] == 552, str((len(starts), t["slices"])))
             c("resume real: the second run's recorded rtl/ and host/ trees are what git derives for its commit (equal where both exist)",
@@ -5560,6 +5578,12 @@ def plants(env: Env) -> None:
         ("a junk commit in a run_start's tree stops the resume (the tally keeps the commit as it was recorded)",
          [("card_stress_lib.py", " if isinstance((tr or {}).get(\"commit\"), str) else None}", "}")],
          lambda env, src: resume_unit_checks(src), ["resume: junk in a run_start's tree"]),
+        ("the slices_not_counted event names only the first six unknown classes",
+         [("card_stress.py", "                              for u in t[\"unknown\"])\n", "                              for u in t[\"unknown\"][:6])\n")],
+         lambda env, src: resume_unit_checks(src), ["resume: EVERY unknown class is named"]),
+        ("the slices_not_counted event has no structured list of the unknown classes",
+         [("card_stress.py", "unknown_class=unknown, unknown_by_run=t[\"unknown\"])", "unknown_class=unknown)")],
+         lambda env, src: resume_unit_checks(src), ["resume: EVERY unknown class is named"]),
         ("the file's own slice count becomes the class's (the records_partial event would say one slice of two)",
          [("card_stress.py", "        self.served = dict(served)\n        self.sums = {}\n",
            "        self.served = dict(served)\n        self.file_slices = sum(served.values())\n        self.sums = {}\n")],

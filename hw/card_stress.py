@@ -1395,11 +1395,11 @@ class Driver:
         other, unknown = self.not_counted
         if other or unknown:
             named = "; ".join(f"{u['n']} {u['reach'] or 'unclassified'} slice(s) of the run started {u['ts']} at commit {(u['commit'] or '?')[:12]}: {u['why']}"
-                              for u in t["unknown"][:6])
+                              for u in t["unknown"])
             self.event("slices_not_counted", f"of the file's {t['slices']} finished sweep slice(s) this run counts {sum(t['counted'].values())} "
                        f"(tile {t['counted'][L.TILE]}, host {t['counted'][L.HOST]}); {other} are of another tree class and {unknown} of an unknown "
                        f"class{': ' + named if named else ''}. They stay in metrics.jsonl and in the report and are not counted: a class is "
-                       f"never guessed", counted=sum(t["counted"].values()), other_class=other, unknown_class=unknown)
+                       f"never guessed", counted=sum(t["counted"].values()), other_class=other, unknown_class=unknown, unknown_by_run=t["unknown"])
 
     def load_earlier(self) -> None:
         """--earlier-runs: each random item's first n here is above the highest n any named run used (and above this

@@ -1239,7 +1239,8 @@ both" - the class-aware planner in the driver, and the coarse key, the whole hos
   them out.
 - **What is said**, once, at the resume (information; nothing stops on it): `tree_changed` (before, now), `host_tree_changed`
   (before, now, cc_before, cc_now) and `slices_not_counted` (the slices counted, those of another class and those of an
-  unknown one, each unknown class named by its run, commit and reason); `status.txt` has a `resume` line while slices are left out.
+  unknown one; EVERY unknown class is named in the text by its run, commit and reason, with no cap, and listed in the event's
+  `unknown_by_run` field); `status.txt` has a `resume` line while slices are left out.
 - **At 0b7c959** (MEASURED 2026-10-21, the driver's own `pick_item` over a copy of the lead's two-night file, 552
   finished sweep slices, with the second run's tree as the resuming run's): 320 tile slices counted (both runs: the first
   run's rtl/ tree derived from 881bbcb is 44b963dd, the second's recorded one) and 232 host slices not (the first run's,
