@@ -123,7 +123,7 @@ signature: its hash is its identity.
 | `tool`, `args` | `clause5-soak` or `divsqrt-soak`; the argument form, `op lo hi [mode]` or `op count seed [mode]` | `tool`, `argv` |
 | `oracle` | `host-fpu+glibc`: the soaks compare with the host FPU and libm (the study, 2.5) | |
 | `reach` | `tile` or `host`: whether the job's work runs on the card's tile at all | `reach` |
-| `space` | exhaustive only: the indices are `[0, space)`, 2^32 | `EXH` |
+| `space` | exhaustive only: the indices are `[0, space)`: 2^32 encodings for the fp32-operand items, the mode's own index count for a hard-case or class-level item (21,235,788 for `div32-hard`, 35,840 for `rint64-class`, ...) | `space` (`EXH`, 2^32, where an item has none) |
 | `exact`, `extra_cases`, `per_encoding` | exhaustive only: the count rule (below) | `exact`, `extra_cases`, `per_encoding` |
 
 The count rule is the driver's, not a second one: `parse_soak`'s. Where `exact`,

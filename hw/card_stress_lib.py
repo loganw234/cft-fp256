@@ -370,6 +370,9 @@ SOAK_DEVICE = re.compile(r"^soaking the DEVICE backend: (.+)$", M)
 SOAK_SOFTWARE = re.compile(r"^soaking the software backend$", M)
 SOAK_LIBFAIL = re.compile(r"^  library call failed(?: in .*)?$", M)
 SOAK_DISAGREE = re.compile(r"^  (?:MISMATCH|FLAGS) .*$", M)
+# The chunked tools' second stderr line (divsqrt_soak.c:1036, clause5_soak.c:2963, host/Makefile's soak-chunk): printed only when
+# BATCH or CFT_CHUNK is not 4096, after the backend line, which stays as it was. A tool built at 4096 prints nothing more.
+SOAK_CHUNK_LINE = re.compile(r"^soaking with BATCH (\d+) and CFT_CHUNK (\d+) \(the defaults are 4096\)$", M)
 
 
 class SoakResult(Verdict):
@@ -381,7 +384,8 @@ CPU_OPENED_CARD = "soak: a CPU job opened the card"     # a CPU job's log that n
 
 def parse_soak(text: str, rc: Optional[int], op: str, verdict_mode: str,
                artifact: Optional[str], expected_cases: Optional[int],
-               cover: Optional[Dict[str, int]] = None, cpu: bool = False) -> Verdict:
+               cover: Optional[Dict[str, int]] = None, cpu: bool = False,
+               chunk: Optional[int] = None) -> Verdict:
     """artifact: the xclbin the job was told to soak (None: the software backend, which
     only the dry run and the rate-free self checks use). expected_cases: exact, where
     the tool's counting is known (see Item.expected_cases), else None (then > 0).
@@ -392,7 +396,13 @@ def parse_soak(text: str, rc: Optional[int], op: str, verdict_mode: str,
     nothing because every pair was skipped (an all-NaN slice of cvtto32-all) is not.
     cpu: a job of the host pool, which is told no image and must say it soaked the software
     backend; a log that names a DEVICE is refused, by name (CPU_OPENED_CARD), because a CPU job
-    that opened the card has broken the one promise the pool makes."""
+    that opened the card has broken the one promise the pool makes.
+    chunk: the pass size the job was asked to run at (--sweep-chunk: the tool's -c<chunk> build), None for the default tool.
+    The log must then say what it ran at and agree: a chunked build (other than 4096, which prints nothing) carries the line
+    'soaking with BATCH n and CFT_CHUNK n (the defaults are 4096)' with both numbers the request's, and the verdict's extra
+    gives them as `batch` and `chunk`; a log that disagrees, or lacks the line, is refused by name. For the default tool
+    (None) a log that carries the line is refused too: that binary was not built as the default, and its slice would otherwise
+    be recorded as one compared over 4096 operands."""
     m = _one(SOAK_LINE, text, "soak verdict")
     if m.group(1) != op or m.group(2) != verdict_mode:
         raise VerdictError(f"soak: the verdict is for '{m.group(1)} {m.group(2)}', the job "
@@ -415,6 +425,25 @@ def parse_soak(text: str, rc: Optional[int], op: str, verdict_mode: str,
                                "not run on the card, so it proves nothing about it")
         if dev.group(1) != artifact:
             raise VerdictError(f"soak: it soaked {dev.group(1)!r}, not {artifact!r}")
+    pass_size: Dict[str, int] = {}
+    cl = _maybe_one(SOAK_CHUNK_LINE, text, "soak pass-size line")
+    if chunk is None:
+        if cl:
+            raise VerdictError(f"soak: a job of the default tool says it ran at BATCH {cl.group(1)} and CFT_CHUNK "
+                               f"{cl.group(2)}: that binary is not the default build, and nothing here would record it so")
+    elif chunk == DEFAULT_BATCH:
+        if cl:
+            raise VerdictError(f"soak: the job was asked to run at the default pass size {chunk} (a build that prints no "
+                               f"pass-size line) and says BATCH {cl.group(1)} and CFT_CHUNK {cl.group(2)}")
+        pass_size = {"batch": DEFAULT_BATCH, "chunk": DEFAULT_BATCH}
+    else:
+        if not cl:
+            raise VerdictError(f"soak: the job was asked to run at pass size {chunk} and its log has no 'soaking with BATCH n "
+                               f"and CFT_CHUNK n' line, so it is not known what it ran at")
+        if int(cl.group(1)) != chunk or int(cl.group(2)) != chunk:
+            raise VerdictError(f"soak: the job was asked to run at pass size {chunk} and the tool says BATCH {cl.group(1)} and "
+                               f"CFT_CHUNK {cl.group(2)}")
+        pass_size = {"batch": int(cl.group(1)), "chunk": int(cl.group(2))}
     libfail = SOAK_LIBFAIL.search(text) is not None
     disagreements = [x.group(0).strip() for x in SOAK_DISAGREE.finditer(text)][:16]
     counts = {"cases": cases, "value_mismatches": vm, "flag_mismatches": fm}
@@ -444,7 +473,7 @@ def parse_soak(text: str, rc: Optional[int], op: str, verdict_mode: str,
                            "degraded the job)")
     ok = vm == 0 and fm == 0
     _rc_agrees(rc, ok, "soak")
-    v = Verdict(ok, counts, extra={"disagreements": disagreements})
+    v = Verdict(ok, counts, extra=dict({"disagreements": disagreements}, **pass_size))
     return v
 
 
@@ -497,6 +526,34 @@ MODES4 = ("rne", "rtz", "rdn", "rup")
 PER_ENCODING = {"conv32to64-all": 1, "cvtto32-all": 4, "cvtfrom32-all": 2, "cvtfrom64-all": 2,
                 "scaleb32-all": 17, "scaleb32-wide": 556 + 12}
 
+# THE INDEX-BASED ITEMS OF THE COVERAGE WAVE (2026-10-20): modes whose "encodings" are the indices of a space that is NOT
+# 2^32, each a `<lo> <hi> <attribute>` job whose verdict line carries ", E encodings, S skipped" with E counting indices.
+# Parcel HC (host/tools/divsqrt_soak.c, "Hard cases"; python/hardcases.py): constructed operands, k slots an index
+# (division: the four sign combinations of one pair; square root: one), cases + S = k x E, and the cases of a slice are NOT
+# a function of its bounds (an index whose construction yields no pair skips all k slots). Parcel CL (host/tools/clause5_soak.c,
+# "Class-level (L2) modes"; python/c5_class_enum.py): one operand (a pair for scaleB) an index and k checks an index, a case a
+# target (cvtto64-class) or a case a tile lane (rint64-class, scaleb64-class); only cvtto64-class skips. `(indices, k)`:
+HARD_SPACE = {"div32-hard": (21_235_788, 4), "div64-hard": (289_685_696, 4), "sqrt64-hard": (4_456_448, 1)}
+CLASS_SPACE = {"conv64to32-class": (136_192, 1), "rint64-class": (35_840, 4), "cvtto64-class": (40_768, 4),
+               "cvtfrom64-class": (50_923, 1), "scaleb64-class": (72_648, 4)}
+# The cases and skipped slots of a mode over its WHOLE space, which the slices of a covered item must add up to. HC's, from
+# `divsqrt-soak hard-count MODE 0 N` (the builders alone, no library; the same for every attribute); CL's only for the one
+# mode that skips, cvtto64-class, by attribute (the tool's own counts, each equal to a count made in Python from the rounding rule
+# alone, docs/CARDDAY.md): every other class mode makes k x E cases and skips none, which its `exact` rule already holds.
+HARD_WHOLE = {"div32-hard": (64_346_592, 20_596_560), "div64-hard": (812_489_184, 346_253_600),
+              "sqrt64-hard": (1_745_752, 2_710_696)}
+CVTTO64_CLASS_WHOLE = {"rne": (91_005, 72_067), "rtz": (91_484, 71_588), "rdn": (85_141, 77_931),
+                       "rup": (91_478, 71_594), "rmm": (90_986, 72_086)}
+# The random ops whose OPERAND STREAM depends on BATCH (CK, 2026-10-20; READ in host/tools/clause5_soak.c drv_cvtfrom: a batch draws n
+# operands for each of four source types in turn, so another BATCH hands the same draws to other types), and the call size of the
+# tools as built by default (host/tools/*.c, `#define BATCH 4096`; the chunked tools say theirs on a stderr line).
+LAYOUT_OPS = ("cvtfrom32", "cvtfrom64")
+DEFAULT_BATCH = 4096
+# The exponent lists random scaleB runs every batch against (SCALEB_N32 and SCALEB_N64 in host/tools/clause5_soak.c): a batch of n
+# operands makes n x len cases and takes that many off the slice's count, so the cases of a slice are its count rounded UP by
+# whole batches - and which whole batches depends on BATCH (CK's finding i: `scaleb32 100000 5 rne` 139,264 cases at 4096, 278,528 at 16384).
+SCALEB_LIST = {"scaleb32": 17, "scaleb64": 27}
+
 # WHERE EACH SOAK'S WORK RUNS: on the tile or on the host. The campaign's items are not all tests of
 # the card. From the library's own classification, host/include/cft.h ("The remaining clause-5
 # operations") and the header of host/src/clause5.c (lines 13-25): COMPOSED operations - cft_rint,
@@ -530,6 +587,13 @@ OP_REACH = {
     "cvtto32": HOST, "cvtto64": HOST, "cvtto32-all": HOST,
     "cvtfrom32": HOST, "cvtfrom64": HOST, "cvtfrom32-all": HOST, "cvtfrom64-all": HOST,
     "rem32": HOST, "rem64": HOST,
+    # parcel HC, host/tools/divsqrt_soak.c: the hard-case modes call the same batch kernel as the random modes of the operation
+    # (cft_div, cft_sqrt: composed of tile passes), so they reach the tile as those do
+    "div32-hard": TILE, "div64-hard": TILE, "sqrt64-hard": TILE,
+    # parcel CL, host/tools/clause5_soak.c: the class-level modes call the random mode's kernels: roundToIntegral and scaleB are
+    # composed (cft_rint, cft_scaleb: tile), the three conversions are host operations
+    "rint64-class": TILE, "scaleb64-class": TILE,
+    "conv64to32-class": HOST, "cvtto64-class": HOST, "cvtfrom64-class": HOST,
 }
 
 
@@ -581,7 +645,9 @@ class Item:
 
     def __init__(self, name: str, tool: str, kind: str, op: str, mode: Optional[str],
                  base_seed: int = 0, verdict_mode: str = "-", extra_cases: int = 0,
-                 exact: bool = False, per_encoding: Optional[int] = None):
+                 exact: bool = False, per_encoding: Optional[int] = None,
+                 space: int = EXH, level: Optional[str] = None,
+                 whole: Optional[Tuple[int, int]] = None):
         self.name = name
         self.tool = tool              # 'divsqrt' | 'clause5'
         self.kind = kind              # 'exhaustive' | 'random'
@@ -597,6 +663,15 @@ class Item:
         self.per_encoding = per_encoding
         # 'tile' or 'host' (OP_REACH): whether the job's work runs on the card's tile at all
         self.reach = OP_REACH[op]
+        # an exhaustive item's indices are [0, space): 2^32 encodings for the fp32-operand items, the mode's index count for the
+        # hard-case and class-level items (HARD_SPACE, CLASS_SPACE); `level` says which kind of claim a pass is
+        # ("exhaustive", "hard", "class" - a class item is a claim at the class level, PLAUSIBLE, not a sweep - or "random");
+        # `whole` is the (cases, skipped) of a mode over its whole space where the tool's own counting gives it
+        self.space = space
+        self.level = level or ("exhaustive" if kind == "exhaustive" else "random")
+        self.whole = whole
+        # the op's random operand stream depends on BATCH (CK's finding ii): its stream identity includes the batch
+        self.layout_dependent = kind == "random" and op in LAYOUT_OPS
 
     def argv(self, binary: str, lo: int = 0, hi: int = 0, count: int = 0,
              seed: int = 0) -> List[str]:
@@ -615,6 +690,22 @@ class Item:
         if self.kind == "exhaustive" and self.exact:
             return (hi - lo) * (self.per_encoding or 1) + self.extra_cases
         return None
+
+    def random_cases(self, count: int, batch: int) -> Optional[int]:
+        """The cases a RANDOM slice of `count` prints where the tool's counting is known: random scaleB (scaleb32, scaleb64)
+        runs batches of n = min(remaining, BATCH) operands against its exponent list and takes n x len(list) off the count, so a
+        slice's cases are the count rounded up by whole batches, and which batches depends on BATCH. Exactly what drv_scaleb does
+        (host/tools/clause5_soak.c), held to the real tool's own lines in the suite (139,264 at 4096 and 278,528 at 16384 for
+        100,000). None for every other random op, whose cases are not held to a count here (the driver has never held them)."""
+        ln = SCALEB_LIST.get(self.op) if self.kind == "random" else None
+        if ln is None or count < 1 or batch < 1:
+            return None
+        total, left = 0, count
+        while left > 0:
+            n = min(left, batch)
+            total += n * ln
+            left = left - n * ln if left > n * ln else 0
+        return total
 
     def cover_spec(self, lo: int, hi: int) -> Optional[Dict[str, int]]:
         """What the verdict line of a slice must say it covered (parse_soak's `cover`), for the
@@ -720,6 +811,25 @@ def sweep_items(scaleb_modes: Iterable[str] = MODES4,
     for op in ("nextup64", "nextdown64", "logb64", "class64"):
         items.append(Item(op, "clause5", "random", op, None,
                           base_seed=0xC5000000 + s, verdict_mode="-")); s += 1
+    # The coverage wave's index-based items (2026-10-20), APPENDED so that no earlier item's place in the rotation moves, and
+    # exhaustive, so they take no seeds. Parcel HC: the hard-case modes of the divsqrt soak - div32-hard and div64-hard under the
+    # four attributes (rmm is refused by name for division), sqrt64-hard under five (rmm rides the RNE oracle) - a space
+    # of their own, k = 4, 4 and 1, cases not a function of the slice (a skipped index skips all k slots), held to the whole-space
+    # cases of `hard-count`. Parcel CL: the class-level modes of the clause-5 soak, in its order, each under the attributes of the
+    # random mode of the operation: conv64to32 four, rint64 and cvtto64 five, cvtfrom64 and scaleb64 the modes the probes
+    # allow (as their random modes' are). Every class mode but cvtto64-class makes exactly k cases an index and skips none.
+    for op, modes in (("div32-hard", MODES4), ("div64-hard", MODES4), ("sqrt64-hard", MODES5)):
+        space, k = HARD_SPACE[op]
+        for mode in modes:
+            items.append(Item(f"{op}-{mode}", "divsqrt", "exhaustive", op, mode, verdict_mode=mode, exact=False,
+                              per_encoding=k, space=space, level="hard", whole=HARD_WHOLE[op]))
+    for op, modes in (("conv64to32-class", MODES4), ("rint64-class", MODES5), ("cvtto64-class", MODES5),
+                      ("cvtfrom64-class", cvtfrom_modes), ("scaleb64-class", scaleb_modes)):
+        space, k = CLASS_SPACE[op]
+        for mode in modes:
+            whole = CVTTO64_CLASS_WHOLE[mode] if op == "cvtto64-class" else (k * space, 0)
+            items.append(Item(f"{op}-{mode}", "clause5", "exhaustive", op, mode, verdict_mode=mode,
+                              exact=op != "cvtto64-class", per_encoding=k, space=space, level="class", whole=whole))
     for it in items:
         if it.kind == "random":
             if it.name not in RANDOM_SEED_INDEX:
@@ -850,17 +960,33 @@ def sweep_coverage(records: Iterable[Dict[str, Any]]):
     return intervals, served, cases, seeds, disagree
 
 
-def seed_states(records: Iterable[Dict[str, Any]]) -> Dict[int, Tuple[str, int]]:
-    """{the state a slice's tool started from (seed | 1): (item, n)} for every random slice the records name, whatever
-    its status: a slice that timed out drew from its seed all the same. Under the schedule before 2026-10-20 two
-    items share a state on half the n, and the later record wins here; the new schedule never shares one."""
-    out: Dict[int, Tuple[str, int]] = {}
+def record_batch(sw: Dict[str, Any]) -> int:
+    """The BATCH a sweep slice's tool ran at: what its record says (`sweep.batch`, written when the run used the chunked
+    tools), else the default tools' 4096 - every record before 2026-10-21 and every default run's."""
+    b = sw.get("batch")
+    return b if isinstance(b, int) and not isinstance(b, bool) and b > 0 else DEFAULT_BATCH
+
+
+def stream_key(op: Optional[str], seed: int, batch: int):
+    """What identifies a random stream: the state the tool starts from (seed | 1) and, for the ops whose operand stream
+    depends on BATCH (LAYOUT_OPS), the batch as well. The rule of the pass size: a chunked cvtfrom slice at a state a default
+    one used is NOT a repeat of it (the draws go to other source types) and so does not collide with it; every other item's
+    operand sequence is the same at any BATCH, so a chunked slice at a state a default slice used IS a repeat, and does."""
+    return (seed | 1, batch) if op in LAYOUT_OPS else seed | 1
+
+
+def seed_states(records: Iterable[Dict[str, Any]]) -> Dict[Any, Tuple[str, int]]:
+    """{the stream a slice's tool started (stream_key): (item, n)} for every random slice the records name, whatever
+    its status: a slice that timed out drew from its seed all the same. The key is the state (seed | 1), or (state, batch) for
+    a LAYOUT_OPS item. Under the schedule before 2026-10-20 two items share a state on half the n, and the later record wins
+    here; the new schedule never shares one."""
+    out: Dict[Any, Tuple[str, int]] = {}
     for r in records:
         if r.get("type") != "leg" or r.get("kind") != "sweep":
             continue
         sw = r.get("sweep") or {}
         if isinstance(sw.get("item"), str) and isinstance(sw.get("seed"), int) and isinstance(sw.get("seed_n"), int):
-            out[sw["seed"] | 1] = (sw["item"], sw["seed_n"])
+            out[stream_key(sw.get("op"), sw["seed"], record_batch(sw))] = (sw["item"], sw["seed_n"])
     return out
 
 
@@ -868,15 +994,20 @@ class EarlierRunError(ValueError):
     """A directory named as an earlier run cannot be used as one; the message names it."""
 
 
-def earlier_runs(dirs: Iterable[str]) -> Tuple[Dict[str, int], Dict[int, Tuple[str, int]], List[Dict[str, Any]]]:
-    """(the first slice number n each random item may use, the states those runs started from, a note a directory):
+def earlier_runs(dirs: Iterable[str], batch: Optional[int] = None
+                 ) -> Tuple[Dict[str, int], Dict[Any, Tuple[str, int]], List[Dict[str, Any]]]:
+    """(the first slice number n each random item may use, the streams those runs started (stream_key), a note a directory):
     for each directory NAMED (never found by looking), its metrics.jsonl's highest seed_n of a completed slice
     (pass or fail) of an item, plus one - a slice that did not complete is served again by the run that left it, and
     is not a draw a later run must avoid. Refused by name: a name that is not a directory, a directory with no
     metrics.jsonl, and a file with lines that do not parse (they might be the slices with the highest n, and a floor
-    that is too low repeats draws without a word). A torn last line, the mark of a killed run, is allowed and noted."""
+    that is too low repeats draws without a word). A torn last line, the mark of a killed run, is allowed and noted.
+    batch: the BATCH the run that asks will use. A LAYOUT_OPS item (cvtfrom32, cvtfrom64: its operand stream depends on BATCH)
+    is floored only by the earlier slices that ran at that batch, since another batch's draws are not these; every other item
+    is floored by every earlier slice, whatever its batch, because its draws are the same at any (docs/CARDDAY.md, "The soak at
+    a larger pass size"). None: every slice counts for every item, as before the chunked tools."""
     floor: Dict[str, int] = {}
-    states: Dict[int, Tuple[str, int]] = {}
+    states: Dict[Any, Tuple[str, int]] = {}
     notes: List[Dict[str, Any]] = []
     for d in dirs:
         path = os.path.join(d, "metrics.jsonl")
@@ -890,6 +1021,18 @@ def earlier_runs(dirs: Iterable[str]) -> Tuple[Dict[str, int], Dict[int, Tuple[s
             raise EarlierRunError(f"--earlier-runs {d}: metrics.jsonl lines {bad[:10]} do not parse; a run whose "
                                   f"record is damaged cannot say which seeds it used")
         seeds = sweep_coverage(recs)[3]
+        if batch is not None:
+            # a layout-dependent item's highest n is taken over the slices of this batch alone
+            swp = [r["sweep"] for r in recs if r.get("type") == "leg" and r.get("kind") == "sweep"
+                   and isinstance(r.get("sweep"), dict) and r["sweep"].get("op") in LAYOUT_OPS
+                   and isinstance(r["sweep"].get("item"), str)]
+            layout_items = {sw["item"] for sw in swp}
+            seeds = {k: v for k, v in seeds.items() if k not in layout_items}
+            for r in recs:
+                sw = r.get("sweep") if r.get("type") == "leg" and r.get("kind") == "sweep" else None
+                if (isinstance(sw, dict) and sw.get("item") in layout_items and r.get("status") in ("pass", "fail")
+                        and "seed_n" in sw and record_batch(sw) == batch):
+                    seeds[sw["item"]] = max(seeds.get(sw["item"], -1), int(sw["seed_n"]))
         for item, n in seeds.items():
             floor[item] = max(floor.get(item, 0), n + 1)
         states.update(seed_states(recs))

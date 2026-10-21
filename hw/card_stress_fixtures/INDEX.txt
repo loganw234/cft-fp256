@@ -35,3 +35,27 @@ c5x-cvtfrom64-all-sab.txt	1	env CFT_SOAK_SABOTAGE=1 host/clause5-soak cvtfrom64-
 c5x-scaleb32-all-sab.txt	1	env CFT_SOAK_SABOTAGE=1 host/clause5-soak scaleb32-all 0x3F800000 0x3F801000 rne [0 s]
 c5x-scaleb32-wide-sab.txt	1	env CFT_SOAK_SABOTAGE=1 host/clause5-soak scaleb32-wide 0x3F800000 0x3F800010 rne [0 s]
 c5x-probe-scalebrange.txt	0	host/clause5-soak probe scalebrange [1 s]
+# hc-*, cl-*, chunk-*, count-*: the coverage wave's modes (parcels HC, CL and CK), made 2026-10-21 in WSL (Ubuntu 22.04, gcc 11.4) from the
+# tree of 827c3cf: make -C host divsqrt-soak clause5-soak (XRT=0) and make -C host SOAK_CHUNK=16384 soak-chunk, the software backend only.
+# No card, no amd-arc-box. Each log is verbatim, stderr and stdout together as the driver keeps them. hc-*: hard-case slices; cl-*: the
+# class-level modes over their WHOLE spaces; *-sab: the modes' own negative controls (CFT_SOAK_SABOTAGE=1), real failing runs; chunk-*:
+# the chunked tools' pass-size line, and random scaleB's cases rounded up by whole batches; count-*: `hard-count` over a hard-case mode's
+# whole space (a header line, then the tool's own output; div64-hard took about a minute).
+hc-div32-hard.txt	0	host/divsqrt-soak div32-hard 0 65536 rne [1 s]
+hc-div64-hard.txt	0	host/divsqrt-soak div64-hard 21250240 21270240 rtz [0 s]
+hc-sqrt64-hard.txt	0	host/divsqrt-soak sqrt64-hard 0 65536 rmm [0 s]
+hc-div32-hard-sab.txt	1	env CFT_SOAK_SABOTAGE=1 host/divsqrt-soak div32-hard 0 4096 rne [0 s]
+cl-conv64to32-class.txt	0	host/clause5-soak conv64to32-class 0 136192 rne [0 s]
+cl-rint64-class.txt	0	host/clause5-soak rint64-class 0 35840 rmm [1 s]
+cl-cvtto64-class.txt	0	host/clause5-soak cvtto64-class 0 40768 rup [0 s]
+cl-cvtfrom64-class.txt	0	host/clause5-soak cvtfrom64-class 0 50923 rtz [0 s]
+cl-scaleb64-class.txt	0	host/clause5-soak scaleb64-class 0 72648 rdn [0 s]
+cl-rint64-class-sab.txt	1	env CFT_SOAK_SABOTAGE=1 host/clause5-soak rint64-class 0 2048 rne [0 s]
+chunk-scaleb32-default.txt	0	host/clause5-soak scaleb32 100000 5 rne [0 s]
+chunk-scaleb32-c16384.txt	0	host/clause5-soak-c16384 scaleb32 100000 5 rne [0 s]
+chunk-scaleb64-c16384.txt	0	host/clause5-soak-c16384 scaleb64 100000 5 rne [0 s]
+chunk-rint64-class-c16384.txt	0	host/clause5-soak-c16384 rint64-class 0 2048 rne [0 s]
+chunk-sqrt64-hard-c16384.txt	0	host/divsqrt-soak-c16384 sqrt64-hard 0 65536 rne [1 s]
+count-div32-hard.txt	0	host/divsqrt-soak hard-count div32-hard 0 21235788 [2 s]
+count-div64-hard.txt	0	host/divsqrt-soak hard-count div64-hard 0 289685696 [60 s]
+count-sqrt64-hard.txt	0	host/divsqrt-soak hard-count sqrt64-hard 0 4456448 [1 s]

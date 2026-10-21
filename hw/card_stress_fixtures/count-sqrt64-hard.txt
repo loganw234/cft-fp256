@@ -1,0 +1,5 @@
+# host/divsqrt-soak hard-count sqrt64-hard 0 4456448
+S1 262144 262144 0
+S0 4194304 1483608 2710696
+total 4456448 1745752 2710696
+maxskip 5

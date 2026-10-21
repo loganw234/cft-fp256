@@ -440,6 +440,161 @@ def find_card_users(exclude_pids: Optional[set] = None) -> Tuple[List[Dict[str, 
 
 
 # ---------------------------------------------------------------------------
+# --records: the canonical records of hw/sweep_record.py, written as the legs finish
+# ---------------------------------------------------------------------------
+
+RECORDS_FILE = "sweep-records.jsonl"       # in --out, beside metrics.jsonl
+RECORD_EVENTS_MAX = 50                     # refusals named one by one; the rest are counted
+
+
+class RecordsError(Exception):
+    """--records cannot start: the message names why (a key refused by name, a file that is not this run's)."""
+
+
+def records_device_key(text: str) -> bytes:
+    """--device-key: a public key, 64 lowercase hex, a point of the curve not of small order - the form `sweep_record.py export
+    --device-key` takes. Refused by name here, before anything starts."""
+    import sweep_record as SR
+    if not re.fullmatch(r"[0-9a-f]{64}", text or "") or SR.cert2.key_problem(text):
+        raise RecordsError("--device-key is a public key: 64 lowercase hex, a point of the curve not of small order")
+    return bytes.fromhex(text)
+
+
+class RecordSink:
+    """The driver's records, written the way `sweep_record.py export` writes them, a leg at a time. Every record the driver
+    appends to metrics.jsonl is fed to it AFTER that append (Driver.rec); run_start, build and leg go to hw/sweep_record.py's
+    Exporter (docs/SWEEP-RECORDS.md, "From the driver"), and the lines it returns - the campaign's, the first time an item is
+    met, then the slice's - are appended to $OUT/sweep-records.jsonl in one write.
+
+    A leg the exporter REFUSES (a Refusal, by name: it cannot be a version-1 record) is an `event` named record_refused in
+    metrics.jsonl and driver.log, with the refusal's name and reason, and the run goes on: a record error never stops a long run.
+    A run_start it refuses (a run id with no version-1 spelling) disables the sink with one event, `records_disabled`, and every
+    leg after it is counted as not exported. A host-pool slice (image cpu) is not offered to it: version 1's subject is an image and
+    the SHA-256 of its xclbin, which a CPU job has none of (the exporter would refuse each by name); they are counted, and said
+    once, as `records_host_slices` - a limit of the format, which a later version can lift.
+    With --sign-key the exporter signs; with --device-key it names the device and leaves the signing to `sweep_record.py sign`.
+    The secret is held in the Signer for the run and is in no record, no setting and no log."""
+
+    def __init__(self, path: str, key_path: Optional[str] = None, device_key: Optional[str] = None,
+                 emit: Optional[Callable[..., None]] = None):
+        import sweep_record as SR
+        self.SR = SR
+        self.path = path
+        self.emit = emit or (lambda name, detail, **kw: None)
+        self.lock = threading.Lock()
+        if key_path:
+            try:
+                self.ex = SR.Exporter(signer=SR.Signer(SR.load_seed(key_path)))
+            except SR.Refusal as e:
+                raise RecordsError(f"--sign-key {key_path}: refused {e.name}: {e.why}")
+        elif device_key:
+            self.ex = SR.Exporter(public=records_device_key(device_key))
+        else:
+            raise RecordsError("--records needs a device: --sign-key KEYFILE (signs the records) or --device-key HEX "
+                               "(unsigned, for `sweep_record.py sign` later): version 1 puts the device in every record")
+        self.signed = key_path is not None
+        self.written = 0                   # slice and stream records
+        self.campaigns = 0
+        self.refused: Dict[str, int] = {}
+        self.host_slices = 0
+        self.disabled: Optional[str] = None
+        self.n_events = 0
+
+    def adopt(self, resumed_run_id: Optional[str]) -> List[str]:
+        """On --resume: the file left by the run's earlier part must be this run's and this device's, and its campaigns are
+        known (so none is written twice); a torn last line (a write cut short) is cut back to the last whole line. Returns notes
+        for the driver to say. A file that is not this run's, or this key's, is refused by name: appending to it would make a file
+        `verify` refuses as a splice."""
+        notes: List[str] = []
+        if not os.path.exists(self.path):
+            return notes
+        with open(self.path, "rb") as fh:
+            data = fh.read()
+        if data and not data.endswith(b"\n"):
+            cut = data.rfind(b"\n") + 1
+            with open(self.path, "r+b") as fh:
+                fh.truncate(cut)
+            notes.append(f"the last line of {os.path.basename(self.path)} was torn ({len(data) - cut} bytes): cut back to its last whole record")
+            data = data[:cut]
+        if not data:
+            return notes
+        try:
+            recs = self.SR.parse_file(data)
+        except self.SR.Refusal as e:
+            raise RecordsError(f"{self.path} cannot be continued: refused {e.name}: {e.why}")
+        for _n, r in recs:
+            if r["kind"] == "campaign":
+                self.ex.seen.add(r["id"])
+                self.campaigns += 1
+            else:
+                self.written += 1
+                if r["run"]["device"] != self.ex.device:
+                    raise RecordsError(f"{self.path} holds records of device {r['run']['device']}; this run's key makes device "
+                                       f"{self.ex.device} - a resumed run takes the key it started with")
+                if resumed_run_id is not None and r["run"]["id"] != resumed_run_id:
+                    raise RecordsError(f"{self.path} holds records of run {r['run']['id']}, not {resumed_run_id}")
+        notes.append(f"continuing {os.path.basename(self.path)}: {self.written} record(s) and {self.campaigns} campaign(s) already in it")
+        return notes
+
+    def feed(self, rec: Dict[str, Any]) -> None:
+        typ = rec.get("type")
+        if typ not in ("run_start", "build", "leg"):
+            return
+        events: List[Tuple[str, str]] = []
+        with self.lock:
+            try:
+                if typ == "run_start":
+                    self.disabled = None
+                    self.ex.run_start(rec)
+                elif typ == "build":
+                    self.ex.build(rec)
+                elif rec.get("kind") == "sweep":
+                    if rec.get("image") == L.CPU:
+                        if rec.get("status") in ("pass", "fail"):
+                            self.host_slices += 1
+                            if self.host_slices == 1:
+                                events.append(("records_host_slices", "a host-pool slice (image cpu) finished: version 1's record has "
+                                               "an image and its xclbin's SHA-256, which a CPU job has none of, so the host items' "
+                                               "slices are not in sweep-records.jsonl (metrics.jsonl has them); counted, said once"))
+                    elif self.disabled is not None:
+                        if rec.get("status") in ("pass", "fail"):
+                            self.refused["disabled"] = self.refused.get("disabled", 0) + 1
+                    else:
+                        lines = self.ex.leg(rec)
+                        if lines:
+                            fd = os.open(self.path, os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_BINARY", 0), 0o644)
+                            try:
+                                os.write(fd, b"".join(lines))
+                                os.fsync(fd)
+                            finally:
+                                os.close(fd)
+                            self.written += 1
+                            self.campaigns += len(lines) - 1
+            except self.SR.Refusal as e:
+                if typ == "run_start":
+                    self.disabled = f"{e.name}: {e.why}"[:300]
+                    events.append(("records_disabled", f"the exporter refused this run ({self.disabled}): no sweep slice of it "
+                                   f"is exported; the run goes on"))
+                else:
+                    self.refused[e.name] = self.refused.get(e.name, 0) + 1
+                    self.n_events += 1
+                    if self.n_events <= RECORD_EVENTS_MAX:
+                        events.append(("record_refused", f"{e.name}: {e.why}"[:600]))
+                    elif self.n_events == RECORD_EVENTS_MAX + 1:
+                        events.append(("record_refused", f"more than {RECORD_EVENTS_MAX} legs refused: the rest are counted, not "
+                                       f"named one by one (the summary at the end has the counts)"))
+        for name, detail in events:           # after the lock: an event is a record, and comes back through feed()
+            self.emit(name, detail)
+
+    def summary(self) -> str:
+        left = dict(self.ex.left)
+        return (f"{self.written} record(s) and {self.campaigns} campaign(s) in {os.path.basename(self.path)} "
+                f"({'signed by key ' + self.ex.public.hex() if self.signed else 'UNSIGNED, for key ' + self.ex.public.hex()}, "
+                f"device {self.ex.device}); {self.ex.findings} finding(s); refused: {self.refused or 'none'}; "
+                f"slices not finished: {left or 'none'}; host-pool slices not in it: {self.host_slices}")
+
+
+# ---------------------------------------------------------------------------
 # the driver
 # ---------------------------------------------------------------------------
 
@@ -496,8 +651,16 @@ class Driver:
         self.intervals: Dict[str, List[Tuple[int, int]]] = {}
         self.served: Dict[str, int] = {}
         self.seed_n: Dict[str, int] = {}
-        self.seed_states: Dict[int, Tuple[str, int]] = {}   # tool state (seed | 1) -> (item, n), this file and --earlier-runs
+        self.seed_states: Dict[Any, Tuple[str, int]] = {}   # stream (L.stream_key: the tool state seed | 1, plus the batch for a cvtfrom item) -> (item, n), this file and --earlier-runs
         self.seed_floor: Dict[str, int] = {}                # the first n --earlier-runs leaves each item
+        # --sweep-chunk N: the sweep's slices (the card's and the pool's) run the tools built at pass size N; the battery's legs
+        # keep the default tools. None: the default tools, and nothing below changes.
+        self.chunk: Optional[int] = getattr(a, "sweep_chunk", None) or None
+        self.batch = self.chunk or L.DEFAULT_BATCH          # the BATCH a sweep slice's tool will say it ran at
+        # cases and skipped slots of each item's completed slices, to hold a wholly covered item to its whole-space figures
+        self.sums: Dict[str, List[int]] = {}
+        self.whole_done: set = set()
+        self.sink: Optional["RecordSink"] = None            # --records: the canonical records, written as the legs finish
         self.earlier_notes: List[Dict[str, Any]] = []
         self.prev_rtl: Optional[str] = None                 # the RTL tree the last run_start of a resumed file recorded
         self.build_id: Optional[str] = None                 # the tools' build id, once the build step has asserted it
@@ -553,6 +716,8 @@ class Driver:
 
     def rec(self, rec: Dict[str, Any]) -> None:
         L.append_record(self.metrics, rec)
+        if self.sink is not None:
+            self.sink.feed(rec)       # AFTER the append: a record the exporter refuses is in metrics.jsonl all the same
 
     def event(self, name: str, detail: str = "", **kw: Any) -> None:
         self.say(f"event {name}: {detail}")
@@ -822,6 +987,12 @@ class Driver:
         counts = dict(v.counts) if v else None
         extra = dict(v.extra) if v else {}
         disagreements = extra.pop("disagreements", None) if v else None
+        if sweep is not None and v is not None:
+            # the pass size the tool said it ran at, read from its own stderr line and held to the request by the parser
+            # (L.parse_soak, chunk=): the slice's record carries it, the batch its flags were compared over (CK's finding iii)
+            for k in ("batch", "chunk"):
+                if k in extra:
+                    sweep[k] = extra.pop(k)
         if v is None and sweep is not None:
             # a slice that did not finish still shows what the tool printed, if anything
             disagreements = None
@@ -1112,6 +1283,10 @@ class Driver:
                         self.item_bad[nm_] = self.item_bad.get(nm_, 0) + 1
                     elif nm_ and st_ in ("pass", "fail"):
                         self.item_bad[nm_] = 0
+                        if "lo" in sw:
+                            sm = self.sums.setdefault(nm_, [0, 0])
+                            sm[0] += int((r.get("counts") or {}).get("cases", 0))
+                            sm[1] += int((r.get("counts") or {}).get("skipped", 0))
                     if r.get("status") in ("timeout", "no_device", "parse_error") and "lo" in sw:
                         k = (sw["item"], int(sw["lo"]), int(sw["hi"]))
                         self.fail_slices[k] = self.fail_slices.get(k, 0) + 1
@@ -1132,7 +1307,7 @@ class Driver:
         if not self.a.earlier_runs:
             return
         try:
-            floor, states, notes = L.earlier_runs(self.a.earlier_runs)
+            floor, states, notes = L.earlier_runs(self.a.earlier_runs, self.batch)   # a cvtfrom item's floor: this batch's slices
         except L.EarlierRunError as e:
             raise SystemExit(str(e))
         self.seed_floor, self.earlier_notes = floor, notes
@@ -1208,7 +1383,7 @@ class Driver:
             gap = None
             if it.kind == "exhaustive":
                 have = self.intervals.get(it.name, []) + self.quarantine.get(it.name, []) + reserved.get(it.name, [])
-                gap = L.first_gap(have)
+                gap = L.first_gap(have, it.space)         # the item's own space: 2^32 encodings, or a mode's indices
                 if gap is None:
                     continue
             w = self.sweep_weights.get(it.kind, 1) or 1
@@ -1234,7 +1409,10 @@ class Driver:
         return units - units % L.ATOM
 
     def soak_binary(self, it: L.Item) -> str:
-        return os.path.join(self.root, "host", "divsqrt-soak" if it.tool == "divsqrt" else "clause5-soak")
+        """The tool of a sweep slice: the default build, or with --sweep-chunk N the one `make soak-chunk` made at pass size N
+        (host/Makefile: divsqrt-soak-cN, clause5-soak-cN, each against a library of its own)."""
+        name = "divsqrt-soak" if it.tool == "divsqrt" else "clause5-soak"
+        return os.path.join(self.root, "host", f"{name}-c{self.chunk}" if self.chunk else name)
 
     def plan_wave(self, img: Image, remaining: float, jobs: int,
                   forced: Optional[List[str]] = None, reach: str = L.TILE,
@@ -1270,13 +1448,17 @@ class Driver:
                 n = self.seed_n.get(it.name, 0)
                 seed = it.seed_for(n)
                 # the tool starts from seed | 1: refuse, by name, a state a slice of ANOTHER (item, n) in this file or in
-                # an --earlier-runs directory already started from (the same item and n is a slice served again)
-                prior = self.seed_states.get(seed | 1)
+                # an --earlier-runs directory already started from (the same item and n is a slice served again). A cvtfrom
+                # item's stream is the state AND the batch (L.stream_key): its draws go to other source types at another BATCH
+                prior = self.seed_states.get(L.stream_key(it.op, seed, self.batch))
                 if prior is not None and prior != (it.name, n):
-                    raise RuntimeError(f"seed collision: {it.name} slice {n} would start from tool state {seed | 1:#x}, which "
+                    raise RuntimeError(f"seed collision: {it.name} slice {n} would start from tool state {seed | 1:#x}"
+                                       f"{f' at batch {self.batch}' if it.layout_dependent else ''}, which "
                                        f"{prior[0]} slice {prior[1]} already started from; its draws would repeat")
                 job.update(count=units, seed=seed, seed_n=n)
-                job["expected"] = None
+                # a chunked run holds a random scaleB slice to the cases its BATCH gives (CK's finding i: the count rounded up by
+                # whole batches); the default run has never held a random slice to a count, and does not now
+                job["expected"] = it.random_cases(units, self.batch) if self.chunk else None
                 job["cover"] = None
                 job["argv"] = it.argv(self.soak_binary(it), count=units, seed=seed)
                 job["sweep"] = {"item": it.name, "tool": it.tool, "op": it.op, "mode": it.mode,
@@ -1337,7 +1519,7 @@ class Driver:
             cover = job["cover"]
             cmd = Cmd(job["argv"], job["timeout"],
                       (lambda t, rc, it=it, exp=exp, cover=cover, img=img: L.parse_soak(
-                          t, rc, it.op, it.verdict_mode, img.path, exp, cover)))
+                          t, rc, it.op, it.verdict_mode, img.path, exp, cover, chunk=self.chunk)))
             sweep = dict(job["sweep"])
             sweep["jobs"] = len(wave)
             if exp is not None:
@@ -1361,7 +1543,7 @@ class Driver:
         with self.pool_lock:
             if it.kind == "random":
                 # started from this seed, whatever came of it: the guard in plan_wave refuses another (item, n) on it
-                self.seed_states[job["seed"] | 1] = (it.name, job["seed_n"])
+                self.seed_states[L.stream_key(it.op, job["seed"], self.batch)] = (it.name, job["seed_n"])
             if st in ("parse_error", "error"):
                 self.item_bad[it.name] = self.item_bad.get(it.name, 0) + 1
                 if self.item_bad[it.name] > self.a.quarantine_after:
@@ -1375,6 +1557,10 @@ class Driver:
                 self.served[it.name] = self.served.get(it.name, 0) + 1
                 if it.kind == "exhaustive":
                     self.intervals.setdefault(it.name, []).append((job["lo"], job["hi"]))
+                    sm = self.sums.setdefault(it.name, [0, 0])
+                    sm[0] += int((rec.get("counts") or {}).get("cases", 0))
+                    sm[1] += int((rec.get("counts") or {}).get("skipped", 0))
+                    ev += self.whole_space_events(it)
                 else:
                     self.seed_n[it.name] = job["seed_n"] + 1
                 self.note_rate(rec)
@@ -1388,6 +1574,23 @@ class Driver:
                     ev.append(("quarantine", f"{it.name} [{job['lo']}, {job['hi']}) failed to finish "
                                f"{self.fail_slices[k]} times; the sweep moves past it", {"item": it.name}))
         return ev
+
+    def whole_space_events(self, it: L.Item) -> List[Tuple[str, str, Dict[str, Any]]]:
+        """When an item with a whole-space figure (Item.whole: HC's `hard-count` totals, CL's cvtto64-class counts, k x E for the
+        other class modes) has just become wholly covered, hold the cases and skipped slots of its slices to it, once: the cover
+        rule of each slice (cases + skipped = k x E) cannot see a tool that skips the wrong indices, and the sum can. Called under
+        pool_lock; returns the event to emit, `whole_space_ok` or `whole_space_mismatch`, which the caller emits after it lets go."""
+        if it.whole is None or it.name in self.whole_done or L.first_gap(self.intervals.get(it.name, []), it.space) is not None:
+            return []
+        self.whole_done.add(it.name)
+        cases, skipped = self.sums.get(it.name, [0, 0])
+        wc, ws = it.whole
+        ok = (cases, skipped) == (wc, ws)
+        what = (f"{it.name}: its {self.served.get(it.name, 0)} slice(s) cover [0, {it.space:,}); their cases {cases:,} and skipped "
+                f"{skipped:,} " + ("equal the whole space's" if ok else f"are NOT the whole space's {wc:,} and {ws:,}")
+                + (" (hard-count's totals)" if it.level == "hard" else " (the mode's own whole-space counts)"))
+        return [("whole_space_ok" if ok else "whole_space_mismatch", what, {"item": it.name, "cases": cases, "skipped": skipped,
+                                                                        "want_cases": wc, "want_skipped": ws})]
 
     def _wait_job(self, proc, timeout_s, res, logf) -> None:
         try:
@@ -1485,9 +1688,9 @@ class Driver:
                 return "outside --sweep-items", n
             if n in self.disabled_items:
                 return "disabled", f"{n} ({self.disabled_items[n][:90]})"
-            if it.kind == "exhaustive" and L.first_gap(iv) is None:
+            if it.kind == "exhaustive" and L.first_gap(iv, it.space) is None:
                 return "covered", n
-            if it.kind == "exhaustive" and L.first_gap(iv + self.quarantine.get(n, [])) is None:
+            if it.kind == "exhaustive" and L.first_gap(iv + self.quarantine.get(n, []), it.space) is None:
                 return "moved past by the quarantine", n
             if it.reach == L.HOST:
                 return "a host item the CPU pool runs, not the card", n
@@ -1655,7 +1858,7 @@ class Driver:
         exp, cover = job["expected"], job["cover"]
         cmd = Cmd(job["argv"], job["timeout"],
                   (lambda t, rc, it=it, exp=exp, cover=cover: L.parse_soak(t, rc, it.op, it.verdict_mode, None, exp, cover,
-                                                                           cpu=True)), card=False)
+                                                                           cpu=True, chunk=self.chunk)), card=False)
         sweep = dict(job["sweep"])
         sweep["jobs"] = 1
         sweep["pool"] = {"worker": k, "host": self.node(), "build_id": self.build_id}
@@ -1863,11 +2066,11 @@ class Driver:
             for it in self.items:
                 if it.kind == "exhaustive":
                     cov_it = L.covered(intervals.get(it.name, []) or []) if intervals.get(it.name) else 0
-                    ex_total += L.EXH
+                    ex_total += it.space
                     ex_cov += cov_it
                     by_reach[it.reach][0] += 1
                     by_reach[it.reach][1] += cov_it
-                    by_reach[it.reach][2] += L.EXH
+                    by_reach[it.reach][2] += it.space
                 elif served.get(it.name):
                     by_reach[it.reach][3] += 1
             rnd = sum(1 for it in self.items if it.kind == "random" and served.get(it.name))
@@ -1883,6 +2086,8 @@ class Driver:
                          + "; the tile computes nothing for a host item")
             lines.append(f"hostpool   {self.pool_note}; {pool_served} slice(s) recorded; in flight: "
                          + ("; ".join(in_flight) if in_flight else "none"))
+            if self.sink is not None:
+                lines.append(f"records    {self.sink.summary()}")
             if disabled:
                 lines.append("disabled   sweep items: " + "; ".join(f"{k} ({v[:60]})" for k, v in disabled.items()))
             tmp = self.status_path + ".tmp"
@@ -2062,8 +2267,34 @@ class Driver:
         if len(warns) != 2:
             self.say("NOTE: CLAUDE.md says the XRT=1 host build carries exactly two known warnings; "
                      f"this one has {len(warns)}: " + " | ".join(w[:120] for w in warns[:4]))
+        if self.chunk:
+            # --sweep-chunk N: the sweep's slices run the tools built at pass size N (host/Makefile, `soak-chunk`: divsqrt-soak-cN
+            # and clause5-soak-cN against a library of their own). Built with the flags the default build took - the XRT ones and
+            # C5DEFS - so that an artifact can be opened, and by a make of its own: it is not a prerequisite of `all`, and the
+            # default tools are not touched.
+            cargv = ["make", "-C", host, f"-j{a.build_jobs}"] + xrt_flags
+            if c5defs:
+                cargv.append(f"C5DEFS={c5defs}")
+            cargv += [f"SOAK_CHUNK={self.chunk}", "soak-chunk"]
+            if self.a.nice and shutil.which("nice"):
+                cargv = ["nice", "-n", str(a.nice)] + cargv
+            clog = os.path.join(self.logs, "build-chunk.log")
+            t1 = time.time()
+            try:
+                with open(clog, "wb") as lf:
+                    cp = subprocess.run(cargv, stdout=lf, stderr=subprocess.STDOUT, timeout=a.build_timeout)
+                crc = cp.returncode
+            except (OSError, subprocess.TimeoutExpired) as e:
+                crc = 127
+                self.say(f"build (soak-chunk): {e}")
+            step("make soak-chunk", crc == 0, f"make -C host {' '.join(xrt_flags)}{' C5DEFS=' + c5defs if c5defs else ''} "
+                 f"SOAK_CHUNK={self.chunk} soak-chunk: rc {crc} in {time.time() - t1:.0f} s; log {os.path.relpath(clog, self.out)}")
+            if crc != 0:
+                return
         exes = ["device-test", "api-test", "remote-test", "cft-segrun", "cft-audit", "divsqrt-soak",
                 "clause5-soak", "cft-resident", "cft-selftest", "libcft.so"]
+        if self.chunk:
+            exes += [f"divsqrt-soak-c{self.chunk}", f"clause5-soak-c{self.chunk}"]
         if "XRT=1" not in xrt_flags:
             exes.remove("cft-resident")      # only an XRT=1 build makes it (the test's XRT=0 build has none)
         # cft-resident and cft-selftest serve optional legs: a missing or unlinked one disables its leg
@@ -2203,14 +2434,30 @@ class Driver:
             path = a.image.get(name) if a.image else None
             self.images[name] = Image(name, expand(path or dflt), tiles, target,
                                       (a.sha or {}).get(name, sha if not self.dry else None))
+        if getattr(a, "records", False):
+            rpath = os.path.join(self.out, RECORDS_FILE)
+            if not resumed and os.path.exists(rpath):
+                print(f"{rpath} exists in a new run's directory: it would be spliced into this run's records; give a new --out",
+                      file=sys.stderr)
+                return 2
+            try:
+                self.sink = RecordSink(rpath, a.sign_key, a.device_key, emit=self.event)
+                for note in (self.sink.adopt(self.run_id) if resumed else []):
+                    self.say(f"records: {note}")
+            except RecordsError as e:
+                print(f"--records: {e}", file=sys.stderr)
+                return 2
         self.items = L.sweep_items()
         exit_code = 0
         reason = "finished"
         try:
             self.load_state()
             self.load_earlier()
+            # settings.json is every argument; the three of the coverage wave's flags are left out while they are unset, so that
+            # a run without them writes the file it always wrote (a key's PATH is a setting; its secret is never read into one)
+            unset = {"sweep_chunk", "records", "sign_key", "device_key"}
             with open(os.path.join(self.out, "settings.json"), "w", encoding="utf-8") as fh:
-                json.dump({k: v for k, v in vars(a).items()}, fh, indent=1, default=str)
+                json.dump({k: v for k, v in vars(a).items() if not (k in unset and v in (None, False))}, fh, indent=1, default=str)
             self.say(f"card-stress: out {self.out}{' (resumed)' if resumed else ''}; "
                      f"{'QUICK ' if self.quick else ''}{'DRY RUN ' if self.dry else ''}"
                      f"until {L.iso(self.deadline) if self.deadline else 'no deadline'}")
@@ -2223,15 +2470,20 @@ class Driver:
             self.state = "GUARD"
             self.guard(False)
             self.pre_check()
+            settings = {"until": L.iso(self.deadline) if self.deadline else None,
+                        "quick": self.quick, "dry_run": self.dry, "weights": self.weights,
+                        "sweep_minutes": self.sweep_minutes, "legs": self.battery,
+                        "timeouts": self.timeouts, "every": self.every, "nice": a.nice,
+                        "soak_jobs": a.soak_jobs, "max_card_failures": a.max_card_failures,
+                        "disk_floor_gb": a.disk_floor_gb, "host_workers": a.host_workers,
+                        "seed_scheme": L.SEED_SCHEME}
+            if self.chunk:
+                settings["sweep_chunk"] = self.chunk       # the pass size of the sweep's tools; absent for the default tools
+            if self.sink is not None:
+                settings["records"] = {"file": RECORDS_FILE, "signed": self.sink.signed}
             self.rec({"type": "run_start", "run_id": self.run_id, "out": self.out,
                       "host": self.node(),
-                      "argv": sys.argv[1:], "settings": {"until": L.iso(self.deadline) if self.deadline else None,
-                      "quick": self.quick, "dry_run": self.dry, "weights": self.weights,
-                      "sweep_minutes": self.sweep_minutes, "legs": self.battery,
-                      "timeouts": self.timeouts, "every": self.every, "nice": a.nice,
-                      "soak_jobs": a.soak_jobs, "max_card_failures": a.max_card_failures,
-                      "disk_floor_gb": a.disk_floor_gb, "host_workers": a.host_workers,
-                      "seed_scheme": L.SEED_SCHEME},
+                      "argv": sys.argv[1:], "settings": settings,
                       "tree": getattr(self, "tree", None),
                       "earlier_runs": ({"dirs": self.earlier_notes, "first_n": self.seed_floor}
                                        if self.earlier_notes else None),
@@ -2241,6 +2493,10 @@ class Driver:
             self.started = True
             if self.torn_note:
                 self.event("torn_tail", self.torn_note)
+            if self.sink is not None and resumed and self.sink.written == 0 and sum(self.served.values()):
+                self.event("records_partial", f"resumed with --records on a run whose metrics.jsonl already holds "
+                           f"{sum(self.served.values())} finished sweep slice(s) and whose {RECORDS_FILE} holds none: the file "
+                           f"starts here, and `sweep_record.py export` of the whole run makes the complete one")
             if resumed and self.prev_rtl and self.tree.get("rtl") and self.prev_rtl != self.tree["rtl"]:
                 self.event("tree_changed", f"resumed on RTL tree {self.tree['rtl'][:12]}; the file's earlier run_start recorded "
                            f"{self.prev_rtl[:12]}. The report counts the slices before and after as different trees; this driver "
@@ -2305,6 +2561,10 @@ class Driver:
             self.pool_end(drain=reason == "quick_done")      # no host slice starts; the ones in flight get --kill-after
             self.terminate_children()
             self.pool_join()
+            if self.sink is not None and self.started:
+                self.event("records_summary", self.sink.summary(), records=self.sink.written)
+                self.say(f"verify them: python -B hw/sweep_record.py verify {self.sink.path}"
+                         + ("" if self.sink.signed else " --allow-unsigned") + "   (add --keyring RING to name whose key it is)")
             try:
                 if self.started:
                     self.telemetry("end")
@@ -2454,12 +2714,32 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
                    help="earlier runs' output directories, named: each random item's first slice number n here is above "
                    "the highest any of them used, so this run's draws are new (docs/CARDDAY.md, \"The long run\"). A "
                    "directory without a metrics.jsonl, or whose lines do not parse, is refused by name")
+    g.add_argument("--sweep-chunk", type=int, default=None, metavar="N",
+                   help="the sweep's pass size: the build step also runs `make -C host SOAK_CHUNK=N soak-chunk` (with the XRT "
+                   "flags and C5DEFS of the default build), and every sweep slice - the card's and the pool's - runs "
+                   "divsqrt-soak-cN or clause5-soak-cN (BATCH and CFT_CHUNK both N); the battery's legs keep the default tools. "
+                   "N is a positive multiple of 4096 up to 65536 (the Makefile's rule). Each sweep record then carries the "
+                   "`batch` and `chunk` its tool said (docs/CARDDAY.md, \"The soak at a larger pass size\" and \"The driver at "
+                   "a larger pass size\": flags are compared per batch, so a larger one compares them over more operands). "
+                   "Default: the default tools, and nothing changes")
     g.add_argument("--sweep-items", default="", help="comma-separated campaign items to sweep, e.g. sqrt32-rne,rint32-rne "
                    "(default: all; names are hw/card_stress_lib.py's sweep_items). A wave runs one job a distinct item, so "
                    "name four tile items to use the quad's four tiles; a host item named here is the host pool's, not "
                    "the card's. With --quick the smoke's waves are these tile items, in the order named, the least "
                    "served first (instead of its own four): the first four on the quad, one a wave on a single image; "
                    "and the pool serves each host item named once")
+    g = ap.add_argument_group("signed records (hw/sweep_record.py; docs/SWEEP-RECORDS.md, \"From the driver\")")
+    g.add_argument("--records", action="store_true",
+                   help="write the finished sweep slices as canonical records, version 1, to OUT/sweep-records.jsonl as the legs "
+                   "finish, through hw/sweep_record.py's Exporter; needs --sign-key or --device-key; refused with --dry-run (the "
+                   "exporter refuses a run whose legs came from stand-ins). A leg the exporter refuses is an event, named, and the "
+                   "run goes on. A host-pool slice (image cpu) has no xclbin to name and is not in the file. Default: no file")
+    g.add_argument("--sign-key", default=None, metavar="KEYFILE",
+                   help="sign the records with this Ed25519 key (python/cft_sign.py's key file; made once with `cft_sign.py keygen`, "
+                   "outside every git working tree: a key inside one is refused by name, key-in-tree)")
+    g.add_argument("--device-key", default=None, metavar="HEX",
+                   help="instead of --sign-key: the public key (64 hex) whose device the records name, unsigned, for "
+                   "`sweep_record.py sign` to sign later, as `sweep_record.py export --device-key` does")
     g = ap.add_argument_group("policy")
     g.add_argument("--retry-pause", type=float, default=120, help="seconds to wait after the card fails to answer")
     g.add_argument("--max-card-failures", type=int, default=6, help="consecutive failures after which the run stops")
@@ -2503,6 +2783,33 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         ap.error("--soak-jobs is auto or a number")
     if a.host_workers < 0:
         ap.error("--host-workers is 0 (the host items do not run) or a number of CPU-only soak processes")
+    if a.sweep_chunk is not None and not (4096 <= a.sweep_chunk <= 65536 and a.sweep_chunk % 4096 == 0):
+        ap.error(f"--sweep-chunk {a.sweep_chunk}: refused. The pass size is a positive multiple of 4096 up to 65536 "
+                 f"(host/Makefile's SOAK_CHUNK rule: a larger or odd one would build nothing)")
+    if (a.sign_key or a.device_key) and not a.records:
+        ap.error("--sign-key and --device-key name the key of the records --records writes: give --records too")
+    if a.records:
+        if a.dry_run:
+            ap.error("--records: refused with --dry-run. hw/sweep_record.py refuses a dry run (its legs come from stand-ins, "
+                     "not from the card, and are never exported: docs/SWEEP-RECORDS.md, \"From the driver\")")
+        if a.sign_key and a.device_key:
+            ap.error("--sign-key and --device-key are alternatives: the key that signs names the device")
+        if not (a.sign_key or a.device_key):
+            ap.error("--records needs a device: --sign-key KEYFILE (signs the records) or --device-key HEX (unsigned, for "
+                     "`sweep_record.py sign` later). Version 1 puts the device in every record")
+        try:
+            # refused by name, before anything starts: a key inside a git working tree (key-in-tree), a key file that cannot
+            # be read or that others may read (key-file), a public key that is no key. The secret is read to be checked and let go
+            import sweep_record as SR
+            if a.sign_key:
+                try:
+                    SR.load_seed(a.sign_key)
+                except SR.Refusal as e:
+                    ap.error(f"--sign-key {a.sign_key}: refused {e.name}: {e.why}")
+            else:
+                records_device_key(a.device_key)
+        except RecordsError as e:
+            ap.error(str(e))
     a.earlier_runs = [expand(x.strip()) for v in a.earlier_runs for x in v.split(",") if x.strip()]
     if a.earlier_runs:
         try:
