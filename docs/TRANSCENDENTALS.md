@@ -14,6 +14,15 @@ the transcendental set, landed 2026-09-02 as ABI 0.3. This is the
 design, the proofs it rests on, and the measurements that were actually
 taken.
 
+*Note of 2026-10-21. Everything below is about libcft's host operations
+(`cft_exp` and the rest), which the math library's M1 build left as they
+were. Since that build (2026-10-13 to 2026-10-19) six of these
+functions - exp, expm1, exp2, log, log1p and log2 - also run on the
+tile, as routines the language compiles; the last section, "The six on
+the tile", says what that is. A passage below that calls a
+tile-assisted path a plausible later optimisation is as written on its
+date, 2026-09-02 or 09-03.*
+
 ## The promise, and why it is the only one worth making
 
 **Correctly rounded, at all four formats, under all five rounding
@@ -63,6 +72,18 @@ optimisation - the tile's FMA could carry a polynomial evaluation, with
 the host deciding only the cases the polynomial cannot - but it would
 have to reproduce these bits exactly, and that makes it an optimisation
 rather than a different answer. It is not part of this contract.
+
+*Note of 2026-10-21. For six of these functions that tile path now
+exists, built differently from how this section pictured it. M1's build
+(2026-10-13 to 2026-10-19) made exp, expm1, exp2, log, log1p and log2
+into routines of the tile's own instructions, which the language's
+compiler writes into a program. A routine marks the lane it cannot
+decide (bit 7 of the lane byte, STATUS[6]) and the definition replays
+it, so the multiprecision evaluator decides only the cases the routine
+cannot, as this section guessed the host would. The argument above
+stands, and so do the host operations: `cft_exp` and the rest of the
+thirty-nine still issue no `cft_run` pass. The last section, "The six on
+the tile", has the details and the record.*
 
 ## Two implementations, one definition
 
@@ -578,6 +599,11 @@ by what came after.*
 - **Tile assistance.** Every one of these is host work today. A
   narrow-format fast path on the tile's FMA is a phase-2 optimisation
   and would have to reproduce these bits exactly.
+
+  *Status 2026-10-21: built for six of them, as routines of the
+  language and at all four formats, not as a narrow-format fast path
+  behind the host calls (the last section). The bullet stays as written
+  on 2026-09-02, and still holds of the thirty-nine host entry points.*
 - **The rest of clause 9.** sin, cos, tan and the inverse trigonometric
   and hyperbolic functions need one thing this set did not: an
   argument reduction against pi, which is a different and harder
@@ -1735,3 +1761,49 @@ the rule it breaks is one of the two this set added.
 - **Anything else from table 9.1.** There is nothing else: with these
   ten the binary half of the table is complete.
 
+---
+
+# The six on the tile
+
+exp, expm1, exp2, log, log1p and log2 - six of phase 1's nine - are also
+routines the tile runs, since the math library round's M1 build
+(2026-10-13 to 2026-10-19). Everything above is about libcft's host
+operations and is left as it was; this section says what the six are,
+what they are not, and where the record is.
+
+- **Programs of the tile's instructions, on revision 8.** M1's build
+  changed no RTL: the rtl tree, 44b963dd, is unchanged since 2026-10-05.
+  Revision 8 carried what M1 and M2 need of a tile (docs/ROADMAP.md,
+  "Revision 8: step 6's RTL revision": "M1 and M2 need R24's raise, with
+  its mark, and R23's byte"). `python/cft_golden/mathlib.py` generates
+  each at each of the four formats and five attributes, 120 fragments of
+  175 to 433 instructions (docs/VALIDATION.md, M1's build, item 4); the
+  design is docs/studies/M1-exp-log.md.
+- **Operations of the language, not of the ABI.** `cftc` compiles each
+  run-time `exp(a)` and the rest as a routine inlined where its node
+  stands (language 1.1 and cftc's output version 6, 2026-10-15), for the
+  software targets and revision 8's; revision 7's refuse such a program,
+  `target-feature`. The thirty-nine host operations (`cft_exp` and the
+  rest) call none: each is "HOST work: no cft_run pass is issued"
+  (`host/src/transcend.c`, its header), and a program reaches a routine
+  through the language (docs/LANGUAGE.md, "The operations").
+- **Decided in the lane, or marked.** Where the true value lies within a
+  routine's error bound of a rounding boundary - for whole windows of
+  arguments, exp near 0 and log near 1 among them - the routine marks
+  the lane, bit 7 of the lane byte and STATUS[6], and the definition
+  replays it (docs/LANGUAGE.md, "A marked lane"). `transcend.py` stays
+  the one definition.
+- **Held** golden-first, with a planted fault for every check
+  (`python/tests/test_mathlib.py`); through libcft's sequencer, 240
+  programs and 13,483 lanes at the gate's arguments, 0 mismatches
+  (`host/tests/seq_check.py`'s eighth corpus); by the `lang`,
+  `lang-routines` and `tangent` stages, an unmarked lane equal to the
+  definition bit for bit and a marked one replayed; and on the card,
+  rev8q, 2026-10-19: "6 of 6 PASS", "118 checks ok, 0 failed"
+  (docs/VALIDATION.md, "M1's build, seventh wave, closed").
+- **Not here:** the other thirty-three, which are host operations only.
+  The roadmap's next builds are sin, cos and tan (M2,
+  docs/studies/M2-trig.md), then atan, atan2, asin and acos (M4), and
+  the pow family (M3) last. No performance claim is made, as above:
+  docs/FIGURES.md's "What a correctly rounded function costs the tile"
+  counts instructions, not time.
