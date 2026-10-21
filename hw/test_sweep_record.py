@@ -546,7 +546,7 @@ def group_export(tmp):
           and "skipped" not in o["sqrt32-rne"] and "skipped" not in o["div32-rne"])
     check("nextup32's 8 edge cases are in its cases", o["nextup32"]["cases"] == (1 << 20) + 8)
     check("tile absent where the leg recorded none, present where it did", "tile" not in o["conv32to64-all"]["subject"] and
-          o["sqrt32-rne"]["subject"]["tile"] == 1 and o["sqrt32-rne"]["subject"]["tiles"] == 4)
+          o["sqrt32-rne"]["subject"].get("tile") == 1 and o["sqrt32-rne"]["subject"]["tiles"] == 4)
     check("a stream carries seed and count, no interval", {"seed", "count"} <= set(o["rem64"]) and "lo" not in o["rem64"]
           and o["rem64"]["seed"] == 0xC5000000 + 40)
     check("the three images are told apart", {o["sqrt32-rne"]["subject"]["image"], o["conv32to64-all"]["subject"]["image"],
@@ -1270,7 +1270,10 @@ def main():
                          ("domain", group_domain), ("plants", group_plants), ("host", group_host)):
             if want(name):
                 n0, f0 = CHECKS, len(FAILS)
-                fn(tmp)
+                try:
+                    fn(tmp)
+                except Exception as e:           # a group that raises is a failed check, named, and the groups after it still run
+                    check(f"{name}: the group raised {type(e).__name__}: {e}"[:300], False)
                 print(f"{name}: {CHECKS - n0} checks, {len(FAILS) - f0} failed")
         if want("real"):
             if metrics:

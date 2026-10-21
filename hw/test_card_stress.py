@@ -4107,12 +4107,16 @@ def records_args_checks(env: Env, src: str = HERE) -> list:
         rmtree_force(scratch)
     # without the flags: no file, no setting, no status line - the run is as it was
     R = run_driver(env, "norec", ["--quick", "--legs", "api-test", "--sweep-items", "rint64-class-rne"], src=src, cap=100)
-    st = open(os.path.join(R.out, "status.txt")).read()
+    # a run that never started (no status, no settings, no records: seen once in WSL, on 2026-10-21, and not again in the rerun) is a red check
+    # that says what the driver printed, not an IndexError that ends the group
+    st = open(os.path.join(R.out, "status.txt")).read() if os.path.exists(os.path.join(R.out, "status.txt")) else None
+    sj = os.path.join(R.out, "settings.json")
     c("records args: without --records no records file is written, run_start names no records, settings.json names no records, key or pass "
       "size, and status.txt has no records line",
-      not os.path.exists(os.path.join(R.out, "sweep-records.jsonl")) and "records" not in R.recs[0]["settings"]
-      and not (set(json.load(open(os.path.join(R.out, "settings.json")))) & {"records", "sign_key", "device_key", "sweep_chunk"})
-      and "records    " not in st and R.rc == 0, f"rc {R.rc}")
+      bool(R.recs) and st is not None and os.path.exists(sj)
+      and not os.path.exists(os.path.join(R.out, "sweep-records.jsonl")) and "records" not in R.recs[0]["settings"]
+      and not (set(json.load(open(sj))) & {"records", "sign_key", "device_key", "sweep_chunk"})
+      and "records    " not in st and R.rc == 0, f"rc {R.rc}: {R.text[-300:]}")
     return out
 
 
