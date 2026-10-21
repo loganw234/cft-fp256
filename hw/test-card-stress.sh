@@ -9,11 +9,13 @@
 # defect is put back into a copy of the code and the scenario written for it must go red
 # (the plants; hw/test-sweep-judge.sh's standard). Nothing here starts anything heavy.
 #
-#   bash hw/test-card-stress.sh                 # everything: about 22.5 minutes under WSL (2026-10-20, niced,
+#   bash hw/test-card-stress.sh                 # everything: about 27 minutes under WSL (2026-10-21, niced, 1,636 s,
 #                                               # on a desktop other sessions share; process starts are the cost)
-#   bash hw/test-card-stress.sh --no-plants     # the checks without the negative controls: about 7.5 minutes
-#                                               # under WSL, 9 under Git Bash
+#   bash hw/test-card-stress.sh --no-plants     # the checks without the negative controls: about 10 minutes
+#                                               # under WSL, 11 under Git Bash (2026-10-21)
 #   bash hw/test-card-stress.sh --only parsers,commands     # seconds
+#   CARD_STRESS_PLANT=<text> bash hw/test-card-stress.sh --only plants   # only the plants whose name has <text>, no control;
+#                                               # CARD_STRESS_PLANT_ALL=1 also prints every failing check of each plant
 #
 # Groups for --only: parsers commands standin normal fail timeout deaf nodevice cardlost stopfile deadline
 # rotation diskfloor guard sweep disagree telemetry build buildreal internal signal torn disable sweepall
