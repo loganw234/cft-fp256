@@ -125,19 +125,19 @@ def lock_held(path: str):
 class Log:
     """An append-only JSON-lines file. Every record carries its type, its time, its job and its card. A record of a JOB
     names its card (as asked until the job is placed, then the card that ran it) or says why none could be read: a log
-    opened for a job with no card and no `no_card` reason refuses to write (ValueError). `no_card` is for the one case
-    where none can be read, a submit whose spec is not an object or whose `card` is not a string; its records say
-    `card: null` and `card_unreadable: why`. A log that is no job's (refusals.jsonl) names a card only for a card verb.
+    opened for a job with no card (None or empty) and no `no_card` reason refuses to write (ValueError). `no_card` is for the
+    one case where none can be read, a submit whose spec is not an object or whose `card` is missing, not a string, empty or
+    longer than CARD_MAX characters; its records say `card: null` and `card_unreadable: why`, and the why says which. A log that is no job's (refusals.jsonl) names a card only for a card verb.
     Each append is one write and an fsync; a torn last line (no newline) is broken off before the next record."""
 
     def __init__(self, path: str, job: str | None = None, card: str | None = None, no_card: str | None = None):
         self.path, self.job, self.card, self.no_card = path, job, card, no_card
 
     def append(self, type_: str, **fields) -> dict:
-        if self.job is not None and self.card is None and not self.no_card:
+        if self.job is not None and not self.card and not self.no_card:
             raise ValueError(f"job {self.job}: a record must name its card, or say why none could be read")
-        rec = {"type": type_, "t": round(time.time(), 3), "job": self.job, "card": self.card}
-        if self.card is None and self.no_card:
+        rec = {"type": type_, "t": round(time.time(), 3), "job": self.job, "card": self.card or None}
+        if not self.card and self.no_card:
             rec["card_unreadable"] = self.no_card
         rec.update(fields)
         line = (json.dumps(rec, sort_keys=True, separators=(",", ":")) + "\n").encode()
@@ -181,12 +181,30 @@ def read_records(path: str) -> list:
     return out
 
 
+CARD_MAX = 200
+
+
+def card_text(c) -> tuple:
+    """(c, None) when c is a card that can be recorded as asked, a non-empty string of at most CARD_MAX characters, else
+    (None, why) with the reason for this case: is not a string, is empty, is longer than CARD_MAX characters."""
+    if not isinstance(c, str):
+        return None, "is not a string"
+    if not c:
+        return None, "is empty"
+    if len(c) > CARD_MAX:
+        return None, f"is longer than {CARD_MAX} characters"
+    return c, None
+
+
 def job_card(d: str) -> tuple:
     """(card, None) as the job's own `submitted` record has it, else (None, why): the card a job asked for when its
     spec.json cannot be trusted (a queued spec that is damaged, a cancel, a restart)."""
     for r in read_records(os.path.join(d, "job.jsonl")):
         if r.get("type") == "submitted":
-            return (r["card"], None) if isinstance(r.get("card"), str) else (None, "the job's submitted record names no card")
+            if r.get("card") is None:
+                return None, "the job's submitted record names no card"
+            card, why = card_text(r["card"])
+            return (card, None) if card else (None, f"the job's submitted record: its card {why}")
     return None, "the job has no submitted record"
 
 
@@ -269,8 +287,13 @@ def submit(root: str, cfg: dict, raw: bytes, registry: dict) -> tuple:
     except Refusal as r:
         refusal = r
     shown = spec or (obj if isinstance(obj, dict) else {})
-    card = shown.get("card") if isinstance(shown.get("card"), str) and len(shown["card"]) <= 200 else None
-    why = None if card else ("the spec is not a JSON object" if not isinstance(obj, dict) else "the spec's card is missing or not a string")
+    if not isinstance(obj, dict):
+        card, why = None, "the spec is not a JSON object"
+    elif "card" not in shown:
+        card, why = None, "the spec's card is missing"
+    else:
+        card, why = card_text(shown["card"])
+        why = f"the spec's card {why}" if why else None
     log = Log(os.path.join(tmp, "job.jsonl"), jid, card, why)
     log.append("submitted", owner=user(), host=socket.gethostname(), raw_sha256=hashlib.sha256(raw).hexdigest(),
                signature=sig_status(obj), name=_plain(shown.get("name")), kind=_plain(shown.get("kind")),

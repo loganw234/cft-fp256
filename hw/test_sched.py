@@ -522,10 +522,19 @@ def group_records():
     check("records: a spec that is not JSON is a job too (outcome refused, signature `unreadable`), and its id is a new one",
           ref.name == "spec-form" and rec(r2, "jobs", jid, 0).get("signature") == "unreadable" and rec(r2, "jobs", jid).get("outcome") == "refused")
     r2, c2 = mkroot("r-nocard")
-    jn, jm, jr = sub(r2, c2, b"[]")[0], sub(r2, c2, spec(card=5))[0], sub(r2, c2, spec(needs=[]))[0]
+    sid = lambda s: safely(lambda: sub(r2, c2, s)[0])              # a plant may make a submit raise: a check must fail, not the group
+    jn, jm, jx, jr, je, jl = sid(b"[]"), sid(spec(card=5)), sid({"v": 1}), sid(spec(needs=[])), sid(spec(card="")), sid(spec(card="x" * 201))
     cs = lambda j: [(x.get("card"), bool(x.get("card_unreadable"))) for x in recs(r2, "jobs", j)]
-    check("records: a submit whose card cannot be read (a spec that is not an object, a card that is not a string) says `card: null` and why in every record, and invents no card",
-          cs(jn) == [(None, True)] * 3 and cs(jm) == [(None, True)] * 3, f"{cs(jn)} {cs(jm)}")
+    why = lambda j: {x.get("card_unreadable") for x in recs(r2, "jobs", j)}
+    one = lambda j, phrase: len(why(j)) == 1 and phrase in next(iter(why(j)))
+    check("records: a submit whose card cannot be read (a spec that is not an object, a card that is missing, a card that is not a string) says `card: null` and why in every record, "
+          "with the reason for its case, and invents no card",
+          all(cs(j) == [(None, True)] * 3 for j in (jn, jm, jx)) and one(jn, "not a JSON object") and one(jx, "is missing") and one(jm, "is not a string"),
+          f"{cs(jn)} {cs(jm)} {cs(jx)} {why(jn)} {why(jx)} {why(jm)}")
+    check("records: an empty card is not a card: a spec whose card is the empty string is recorded `card: null` in every record, and card_unreadable says it is empty",
+          cs(je) == [(None, True)] * 3 and one(je, "is empty"), f"{cs(je)} {why(je)}")
+    check("records: a card longer than 200 characters is not recorded as a card either: `card: null`, and card_unreadable says it is longer than 200 characters (it is a string, so not missing or not a string)",
+          cs(jl) == [(None, True)] * 3 and one(jl, "is longer than 200 characters"), f"{cs(jl)} {why(jl)}")
     check("records: a refused submit whose card is readable names it in every record, with no card_unreadable", cs(jr) == [("u50-0", False)] * 3, str(cs(jr)))
     r2, c2 = mkroot("r-corrupt")
     ja, jb = sub(r2, c2, spec(card="u50-0", priority=90))[0], sub(r2, c2, spec(card="any", priority=80))[0]
@@ -892,9 +901,12 @@ PLANTS = [  # (what is wrong, edits, the groups written for it, a fragment of th
     ("a cancel finds nothing to take out of the queue", [E("sched_state.py", "        os.rename(q, j)  ", "        raise FileNotFoundError(q)  ")], "queue", "a queued job is cancelled out of the queue", False),
     ("a submit with no readable card invents one", [E("sched_state.py", 'log = Log(os.path.join(tmp, "job.jsonl"), jid, card, why)', 'log = Log(os.path.join(tmp, "job.jsonl"), jid, card or "any")')],
      "records", "a submit whose card cannot be read (", None),
+    ("an empty card is taken for a card", [E("sched_state.py", "    if not c:", "    if False:")], "records", "records: an empty card is not a card", None),
+    ("an over-long card is called missing or not a string", [E("sched_state.py", 'return None, f"is longer than {CARD_MAX} characters"', 'return None, "is not a string"')],
+     "records", "a card longer than 200 characters is not recorded as a card either", None),
     ("a queued spec that cannot be read is refused in records that name no card", [E("sched_state.py", "card0, why0 = job_card(d)  ", 'card0, why0 = None, "plant"  ')],
      "records", "a queued spec that cannot be read is refused `queue-corrupt` in records that name the card", None),
-    ("a job's log writes a record that names no card and says nothing", [E("sched_state.py", "        if self.job is not None and self.card is None and not self.no_card:", "        if False:")],
+    ("a job's log writes a record that names no card and says nothing", [E("sched_state.py", "        if self.job is not None and not self.card and not self.no_card:", "        if False:")],
      "records", "a job's log refuses to write a record that names no card", None),
     ("a stop does not stop a running job", [E("sched_run.py", "            if not skip and at_safe_point and stop.requested():", "            if False:")], "records", "a stop asked during a step ends the job", False),
     ("the start of a job is not a safe point", [E("sched_run.py", "skip, at_safe_point = None, True ", "skip, at_safe_point = None, False")], "records", "a stop asked before the job starts is honoured at the start", False),
@@ -907,7 +919,7 @@ PLANTS = [  # (what is wrong, edits, the groups written for it, a fragment of th
     ("a present signature is recorded verified", [E("sched_spec.py", 'return "present-unverified" if "signature" in obj else "absent"', 'return "verified" if "signature" in obj else "absent"')], "spec", "a signature is `present-unverified`", False),
     ("the retention defaults are the study's undoubled 7 days", [E("sched_config.py", '"clone_days": 14', '"clone_days": 7')], "cli", "the retention defaults are Logan's doubled figures", False),
     ("a job left in running/ is not recovered at a restart", [E("sched_run.py", "        recover(root, out)", "        pass")], "records", "a job found in running/ at a service start", False),
-    ("a record names no card", [E("sched_state.py", '"job": self.job, "card": self.card}', '"job": self.job}')], "records", "every record names its card", False),
+    ("a record names no card", [E("sched_state.py", '"job": self.job, "card": self.card or None}', '"job": self.job}')], "records", "every record names its card", False),
     ("`any` is not resolved to the card that claimed the job", [E("sched_state.py", "        log.card = card_id", "        pass  # log.card = card_id")], "records", "every record names its card", False),
     ("an outcome outside the set is accepted", [E("sched_state.py", "        if outcome not in OUTCOMES:", "        if False:")], "records", "an outcome that is not in the set cannot be written", False),
     ("a job past its deadline is run", [E("sched_state.py", "            if dl is not None and now_t > dl:", "            if False:")], "queue", "a job past its deadline is refused `deadline-passed`", False),
