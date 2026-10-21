@@ -12,7 +12,7 @@
 #   bash hw/test-sched.sh --only spec,queue    # some groups
 #   bash hw/test-sched.sh --only plants --plant "second service"    # the plants whose label has this text
 #
-# Groups for --only: spec queue records cli locks plants. `locks` needs flock(2): on a platform without it (Windows) its
+# Groups for --only: spec queue records cli locks table plants. `locks` needs flock(2): on a platform without it (Windows) its
 # checks are skipped by name and the one check of the path without flock runs instead; so are the plants of the locks.
 set -uo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)

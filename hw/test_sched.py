@@ -7,8 +7,9 @@
 
 Groups: spec (the job spec's table and refusals), queue (ids, atomic submit, order, claim, cancel, hold, deadlines),
 records (job.jsonl, the outcomes, the sums, restart), cli (the state root, the configuration, every verb), locks (the
-service's lock and the card's, with real processes), then plants. `locks` needs flock(2): where there is none (Windows) its
-checks are skipped by name, and the one check of the path without flock runs instead.
+service's lock and the card's, with real processes), table (one check, that every refusal the table gives to S1 was raised by a
+scenario of the groups before it, so it needs them in the same run), then plants. `locks` needs flock(2): where there is none
+(Windows) its checks are skipped by name, and the one check of the path without flock runs instead.
 
 A plant puts one defect back into a COPY of the code (and of this file), runs the groups written for it from the copy as a
 process, and requires three things: the copy is whole (it imports, and its run makes exactly as many checks as the unmodified
@@ -770,14 +771,17 @@ def group_cli():
 
 
 def every_s1_refusal_was_raised():
-    """The table names a refusal for S1 only if some scenario raised it (a job's refused record, refusals.jsonl, or the command's stderr)."""
-    names = set(SEEN)
+    """The table gives a name to S1 only if a scenario raised it: a name filed under `job` or `root` must be found in a record (a
+    job's `refused` record, or refusals.jsonl), and one filed `none` (no usable root to write in) on the command's stderr."""
+    recorded = set()
     for r in ROOTS:
-        names |= {x.get("name") for x in S.read_records(os.path.join(r, "refusals.jsonl"))}
+        recorded |= {x.get("name") for x in S.read_records(os.path.join(r, "refusals.jsonl"))}
         for j in os.listdir(os.path.join(r, "jobs")) if os.path.isdir(os.path.join(r, "jobs")) else []:
-            names |= {x.get("name") for x in recs(r, "jobs", j) if x["type"] == "refused"}
-    want = {n for n, (by, _w, _m) in N.REFUSALS.items() if by == "S1"} - ({"locks-unavailable"} if S.HAVE_FLOCK else {"lock-held", "locks-required"})
-    check("the table: every refusal it gives to S1 was raised by a scenario above, and each one left its record", want <= names, f"never raised: {sorted(want - names)}")
+            recorded |= {x.get("name") for x in recs(r, "jobs", j) if x["type"] == "refused"}
+    off = {"locks-unavailable"} if S.HAVE_FLOCK else {"lock-held", "locks-required"}      # what this platform cannot raise
+    s1 = {n: w for n, (by, w, _m) in N.REFUSALS.items() if by == "S1" and n not in off}
+    lost = sorted(n for n, w in s1.items() if (n not in SEEN if w == "none" else n not in recorded))
+    check("the table: every refusal it gives to S1 was raised by a scenario above, and left its record where its row says (none: on stderr)", not lost, f"missing: {lost}")
 
 
 # ---------------------------------------------------------------------------------------- plants
@@ -869,6 +873,8 @@ PLANTS = [  # (what is wrong, edits, the groups written for it, a fragment of th
      "queue", "a second hold is `card-held`", False),
     ("release of a card with no hold passes in silence", [E("sched_state.py", '        raise Refusal("card-not-held", f"{card} has no hold")', "        pass")], "queue", "release of a card that is not held is `card-not-held`", False),
     ("init makes the root readable by others", [E("sched_config.py", "os.makedirs(real, mode=0o700)", "os.makedirs(real); os.chmod(real, 0o755)")], "cli", "`init` makes the root private", "flock"),
+    ("a refusal the table gives to S1 that nothing raises", [E("sched_names.py", '    "card-held": ("S1", "root",', '    "never-raised": ("S1", "root", "x"), "card-held": ("S1", "root",')],
+     "spec,queue,records,cli,locks,table", "the table: every refusal it gives to S1", None),
     ("an unknown key in config.json is accepted", [E("sched_config.py", "        if k not in required + optional:", "        if False:")], "cli", "config.json with an unknown top-level key is refused", False),
     ("a card's worker takes another card's job", [E("sched_state.py", "            if want in cards and want != card_id:\n                continue", "            if False:\n                continue")], "queue", "a job runs on the card it names", False),
 ]
@@ -919,7 +925,7 @@ def main() -> int:
                     traceback.print_exc()
                     check(f"{name}: the group ran to its end", False, "it crashed (traceback above)")
                 print(f"{name}: {CHECKS - before} checks, {len(FAILS) - bad} failed")
-        if only is None and not plant_text:
+        if (only is None or "table" in only) and not plant_text:
             every_s1_refusal_was_raised()
         if (only is None or "plants" in only) and "--no-plants" not in sys.argv:
             plants(plant_text)
