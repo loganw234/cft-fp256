@@ -1,0 +1,67 @@
+== overnight-1019
+file     : 1,431,954 bytes, 751 lines, sha256 cd0aec75c8fa9abbb7bbaaa0eca09bbdf2eb43e0257d77fd539e62f7199f578b
+type           count      bytes   share  B/record
+run_start          1      1,984    0.1%      1984
+build              1      2,446    0.2%      2446
+cycle_start       14      5,217    0.4%       373
+telemetry        176    958,479   66.9%      5446
+leg              543    461,595   32.2%       850
+cycle_end         14      1,966    0.1%       140
+event              1        151    0.0%       151
+run_end            1        116    0.0%       116
+all              751  1,431,954
+span     : 2026-10-20 02:36:47Z to 2026-10-20 15:00:31Z, 12.395 hours (44624 s)
+per hour : 115522 bytes, 60.59 records
+           telemetry 77325 B/h (14.2 samples/h), legs 37239 B/h (43.8 legs/h)
+per night: 1.62 MB for a 14-hour window at this mix (COMPUTED: bytes/hour x 14)
+per year : 590 MB for 365 such nights (0.59 GB), of which telemetry 395 MB
+telemetry: 176 records with values; 176 carry all six keys the figures read; a compact record of those six plus the host's load and memory is 227 B on average against 5446 B (a 24.0x reduction, COMPUTED)
+disk free: the run directory  first 18.60 GB, last 18.60 GB, min 18.45, max 18.60 GB over 176 samples (net change 0.00 GB; samples are rounded to 0.01 GB)
+disk free: /data              first 18.60 GB, last 18.60 GB, min 18.45, max 18.60 GB over 176 samples (net change 0.00 GB; samples are rounded to 0.01 GB)
+host     : 176 samples; load1 median 2.88, max 5.75; memory total 48,061 MB, available at least 44,369 MB (the host's own, as the driver sampled it)
+logs     : 533 legs name a log file (log_kept: gz 533, none 10); the records do not carry a log's size
+CHECK ok   overnight-1019: every line parses and the file ends with a newline
+CHECK ok   overnight-1019: the bytes by type add up to the file's size
+CHECK ok   overnight-1019: the records counted equal the file's newline count
+
+== stress-1016
+file     : 7,982,931 bytes, 5108 lines, sha256 e7989f88efded691ea7461e921840d8de5d449e069980f6ba92e6a8f87e007cc
+type           count      bytes   share  B/record
+run_start          1      1,587    0.0%      1587
+event             20      5,520    0.1%       276
+build              1      2,409    0.0%      2409
+cycle_start       67     25,032    0.3%       374
+telemetry        865  4,712,543   59.0%      5448
+leg             4086  3,226,275   40.4%       790
+cycle_end         67      9,449    0.1%       141
+run_end            1        116    0.0%       116
+all             5108  7,982,931
+span     : 2026-10-17 01:58:23Z to 2026-10-19 15:01:13Z, 61.047 hours (219770 s)
+per hour : 130766 bytes, 83.67 records
+           telemetry 77195 B/h (14.2 samples/h), legs 52849 B/h (66.9 legs/h)
+per night: 1.83 MB for a 14-hour window at this mix (COMPUTED: bytes/hour x 14)
+per year : 668 MB for 365 such nights (0.67 GB), of which telemetry 394 MB
+telemetry: 865 records with values; 865 carry all six keys the figures read; a compact record of those six plus the host's load and memory is 227 B on average against 5448 B (a 24.0x reduction, COMPUTED)
+disk free: the run directory  first 20.69 GB, last 20.04 GB, min 19.91, max 20.69 GB over 865 samples (net change -0.65 GB; samples are rounded to 0.01 GB)
+disk free: /data              first 20.69 GB, last 20.04 GB, min 19.91, max 20.69 GB over 865 samples (net change -0.65 GB; samples are rounded to 0.01 GB)
+host     : 865 samples; load1 median 3.22, max 6.74; memory total 48,061 MB, available at least 43,420 MB (the host's own, as the driver sampled it)
+logs     : 4032 legs name a log file (log_kept: gz 4032, none 54); the records do not carry a log's size
+CHECK ok   stress-1016: every line parses and the file ends with a newline
+CHECK ok   stress-1016: the bytes by type add up to the file's size
+CHECK ok   stress-1016: the records counted equal the file's newline count
+
+== box-overnight-1019 (a directory of records copied back from a batch)
+files    : 5 files, 28,807 bytes in all; the largest: overnight-report-final.txt 23,464 B, box_overnight.sh 3,871 B, overnight-summary.txt 911 B
+           0 of them are jsonl records; a logs/ directory of a run: none
+CHECK ok   box-overnight-1019: the bytes by file add up to the directory's total
+
+== box-wave9 (a directory of records copied back from a batch)
+files    : 61 files, 223,805 bytes in all; the largest: card-stress.log 18,687 B, wave9chunk-runs.jsonl 16,190 B, gate-run.log 12,391 B
+           1 of them are jsonl records; a logs/ directory of a run: none
+CHECK ok   box-wave9: the bytes by file add up to the directory's total
+
+== controls
+CONTROL ok   a record torn in the middle: the checks go red, as they must
+CONTROL ok   a garbage line appended: the checks go red, as they must
+CONTROL ok   the final newline cut: the checks go red, as they must
+volumes: every check held

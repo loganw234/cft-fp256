@@ -1,0 +1,63 @@
+script                   lines  say     done    refuse  pgrep   status  clone   head    clean   rtl     content xrt1    ldd     xrtenv  nice    sums    sleep
+box_batch.sh                40  x       x       x       x       .       x       x       x       .       x       x       x       x       x       .       .
+box_br_ab.sh                55  x       x       x       .       .       x       x       x       .       x       .       .       .       x       .       .
+box_chunk.sh                36  x       x       x       x       .       x       x       x       .       x       x       x       x       x       .       .
+box_chunk_card.sh           34  x       x       x       x       .       x       x       x       .       x       x       x       x       x       .       .
+box_ma_card.sh              57  x       x       x       .       x       x       x       x       .       x       x       x       x       .       x       .
+box_ms_stages.sh            62  x       x       x       .       .       x       x       x       .       x       .       .       .       x       .       .
+box_nightly.sh              56  x       x       x       x       .       x       x       x       x       x       .       .       .       x       x       x
+box_overnight.sh            44  x       x       x       x       .       x       x       x       .       x       .       .       .       x       x       .
+box_resume_stress.sh        49  x       x       x       x       .       x       x       x       x       x       .       .       .       x       x       .
+box_rint_ab.sh              28  x       x       x       x       .       x       x       .       .       .       x       x       x       x       x       .
+box_smoke.sh                56  x       x       x       x       .       x       x       x       .       x       x       x       x       x       .       .
+box_wave7_gate.sh           30  x       x       x       .       .       x       x       x       x       x       .       .       .       x       .       .
+box_wave8_gate.sh           31  x       x       x       .       .       x       x       x       x       x       .       .       .       x       .       .
+box_wave8_tip.sh            31  x       x       x       .       .       x       x       x       x       x       .       .       .       x       .       .
+box_wave9_gate.sh           58  x       x       x       .       .       x       x       x       x       x       .       .       .       x       x       .
+box_wave9_tip.sh            43  x       x       x       x       .       x       x       x       x       x       .       .       .       x       .       .
+copy_wave9.sh               34  .       .       x       .       .       .       .       .       .       .       .       .       .       .       x       .
+scripts with it (of 17)    744  16      16      17      9       1       16      16      15      7       15      6       6       6       15      7       1
+
+  say      16 of 17  defines say() and writes a dated summary (mentions or does)
+  done     16 of 17  ends the summary with "=== done" (mentions or does)
+  refuse   17 of 17  refuses when its output already exists (mentions or does)
+  pgrep     9 of 17  guards with pgrep -f on a pattern (mentions or does)
+  status    1 of 17  guards on the run's status.txt and a PID (mentions or does)
+  clone    16 of 17  clones from a bundle (mentions or does)
+  head     16 of 17  asserts HEAD (mentions or does)
+  clean    15 of 17  asserts a clean status (mentions or does)
+  rtl       7 of 17  asserts the rtl/ tree hash (mentions or does)
+  content  15 of 17  greps the clone for a string of each change (mentions or does)
+  xrt1      6 of 17  builds with XRT=1 (mentions or does)
+  ldd       6 of 17  checks the tools' ldd for xrt (mentions or does)
+  xrtenv    6 of 17  sources XRT's environment (mentions or does)
+  nice     15 of 17  runs its work niced (mentions or does)
+  sums      7 of 17  records a sha256 (mentions or does)
+  sleep     1 of 17  waits for a start time (mentions or does)
+
+pgrep guards: 9 scripts have one, with 8 distinct patterns:
+  2 script(s): card_stress.py|card-stress.sh|divsqrt-soak|clause5-soak|chunk_card.py|verify/run.sh
+      box_nightly.sh, box_resume_stress.sh
+  1 script(s): card_stress.py|card-stress.sh
+      box_batch.sh
+  1 script(s): card_stress.py|card-stress.sh|batch_run.py
+      box_chunk.sh
+  1 script(s): card_stress.py|card-stress.sh|divsqrt-soak|clause5-soak|chunk_run.py|batch_run.py
+      box_chunk_card.sh
+  1 script(s): verify/run.sh|card-stress.sh|card_stress.py
+      box_overnight.sh
+  1 script(s): card_stress.py|card-stress.sh|divsqrt-soak|clause5-soak|chunk_card.py
+      box_rint_ab.sh
+  1 script(s): card_stress.py|card-stress.sh|divsqrt-soak|clause5-soak
+      box_smoke.sh
+  1 script(s): verify/run.sh
+      box_wave9_tip.sh
+the patterns' words together: 8; each guard lacks, of them: 6; 5; 4; 3; 2; 2; 7; 5
+no guard of either kind: 7 scripts: box_br_ab.sh, box_ms_stages.sh, box_wave7_gate.sh, box_wave8_gate.sh, box_wave8_tip.sh, box_wave9_gate.sh, copy_wave9.sh
+
+CHECK ok   17 scripts were read, none empty
+CHECK ok   every total equals the number of rows that have the feature
+CHECK ok   every feature's pattern matches its own positive line and not its negative line (16 patterns)
+CONTROL ok   a pattern that cannot match makes the positive-line check go red, as it must
+CONTROL ok   with every `pgrep` renamed the census finds none (it found 9): the count follows the text
+script_census: every check held

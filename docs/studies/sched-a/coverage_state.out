@@ -1,0 +1,85 @@
+catalog: 36 exhaustive items (18 tile, 18 host), each over 2^32 = 4,294,967,296 encodings
+
+== the trees at three commits (git rev-parse COMMIT:DIR)
+stress-1016                              f0693b2301ed rtl 44b963dd host 8a138d18 host/src 60685ae4 host/include 6b0dc232
+overnight-1019                           881bbcb676bb rtl 44b963dd host 276ed15a host/src 60685ae4 host/include 6b0dc232
+tonight's window and the second night    0b7c959      rtl 44b963dd host 4d9905f8 host/src 60685ae4 host/include 6b0dc232
+commits from 881bbcb to 0b7c959: 88 in all, 15 touched host/, 0 touched host/src or host/include, 0 touched rtl/
+CHECK ok   the library's own source (host/src and host/include) is byte-identical at the two commits, and no commit between them touched it
+
+== stress-1016: commit f0693b2301ed, rtl 44b963dd (derived with git: the run recorded none), host/ 8a138d18; 3287 finished sweep slices
+item               reach slices   covered first gap (lo, hi)          enc/s a job
+sqrt32-rne         tile      19  100.000% complete                        2104676
+sqrt32-rtz         tile      17  100.000% complete                        2112839
+sqrt32-rdn         tile      17  100.000% complete                        2125592
+sqrt32-rup         tile      17  100.000% complete                        2109485
+sqrt32-rmm         tile      17  100.000% complete                        2131993
+rint32-rne         tile      19  100.000% complete                        2191926
+rint32-rtz         tile      18  100.000% complete                        2116058
+rint32-rdn         tile      18  100.000% complete                        2128380
+rint32-rup         tile      17  100.000% complete                        2081049
+rint32-rmm         tile      16  100.000% complete                        2100158
+nextup32           host      19  100.000% complete                       19622475
+nextdown32         host      18  100.000% complete                       12618117
+logb32             host      18  100.000% complete                        8482010
+class32            host      19  100.000% complete                       33587495
+never served in this file: 22 of 36 exhaustive items (a --resume of this directory without --sweep-items would start each at encoding 0)
+CHECK ok   stress-1016: hw/card_stress_lib.covered equals an independent merge on all 14 items served
+
+== overnight-1019: commit 881bbcb676bb, rtl 44b963dd (derived with git: the run recorded none), host/ 276ed15a; 378 finished sweep slices
+item               reach slices   covered first gap (lo, hi)          enc/s a job
+conv32to64-all     host      17  100.000% complete                        7743814
+cvtto32-all-rne    host      17  100.000% complete                        3053098
+cvtto32-all-rtz    host      17  100.000% complete                        3156474
+cvtto32-all-rdn    host      17  100.000% complete                        3962918
+cvtto32-all-rup    host      16  100.000% complete                        3172272
+cvtto32-all-rmm    host      16  100.000% complete                        3138807
+cvtfrom32-all-rne  host      17  100.000% complete                        4748942
+cvtfrom32-all-rtz  host      17  100.000% complete                        4972379
+cvtfrom32-all-rdn  host      16  100.000% complete                        4848036
+cvtfrom32-all-rup  host      16  100.000% complete                        4697830
+cvtfrom64-all-rne  host      17  100.000% complete                        5065035
+cvtfrom64-all-rtz  host      17  100.000% complete                        4914100
+cvtfrom64-all-rdn  host      16  100.000% complete                        4890125
+cvtfrom64-all-rup  host      16  100.000% complete                        4809131
+scaleb32-all-rne   tile      18  100.000% complete                         961832
+scaleb32-all-rtz   tile      18  100.000% complete                         958050
+scaleb32-all-rdn   tile      18  100.000% complete                         948175
+scaleb32-all-rup   tile      18  100.000% complete                         952633
+scaleb32-wide-rne  tile      19    5.566% (239075328, 4294967296)           26093
+scaleb32-wide-rtz  tile      19    6.079% (261095424, 4294967296)           26277
+scaleb32-wide-rdn  tile      18    5.591% (240123904, 4294967296)           26026
+scaleb32-wide-rup  tile      18    5.762% (247463936, 4294967296)           25596
+never served in this file: 14 of 36 exhaustive items (a --resume of this directory without --sweep-items would start each at encoding 0)
+CHECK ok   overnight-1019: hw/card_stress_lib.covered equals an independent merge on all 22 items served
+
+== the files folded by tree class (the report's keys: a tile item by rtl/, a host item by host/ and the compiler)
+tile class rtl 44b963dd: 14 of 18 tile exhaustive items complete across stress-1016, overnight-1019; unfinished: scaleb32-wide-rdn 5.591%, scaleb32-wide-rne 5.566%, scaleb32-wide-rtz 6.079%, scaleb32-wide-rup 5.762%
+                   served by no file: none
+host class host/ 8a138d18 (file stress-1016): 4 of 18 host exhaustive items complete
+host class host/ 276ed15a (file overnight-1019): 14 of 18 host exhaustive items complete
+a commit whose host/ tree is in neither class has 0 of 18: the driver, resuming, counts the whole file's coverage and does not re-run them
+CHECK ok   no folded item exceeds 2^32 encodings
+
+CHECK ok   overnight-1019: the 105 waves found equal the sum of 1/jobs over the sweep legs (105.000), the size each leg records
+== pace of the unfinished tile items in overnight-1019, from its card slot-seconds
+waves: 91 of 4 jobs (6.67 h, 53.8% of the span), 14 of 1 jobs (1.29 h, 10.4% of the span); the slot-seconds the legs ran are 70170 of the 100676 the waves held (70%: a wave waits for its slowest job, and the fast items' slots then idle); 1.57 slots busy over the span
+the unfinished items shared the card with the others until 0.48 hours before the file's last record: no clean period to read a pace from
+scaleb32-wide-rne    5.566% done, 26093 enc/s a job; 0.86 to 1.23 points an hour alone (12.0 to 17.3 a 14-hour night): 5.5 to 7.8 more nights (COMPUTED, BELIEVED steady)
+scaleb32-wide-rtz    6.079% done, 26277 enc/s a job; 0.87 to 1.24 points an hour alone (12.1 to 17.4 a 14-hour night): 5.4 to 7.7 more nights (COMPUTED, BELIEVED steady)
+scaleb32-wide-rdn    5.591% done, 26026 enc/s a job; 0.86 to 1.23 points an hour alone (12.0 to 17.2 a 14-hour night): 5.5 to 7.9 more nights (COMPUTED, BELIEVED steady)
+scaleb32-wide-rup    5.762% done, 25596 enc/s a job; 0.84 to 1.21 points an hour alone (11.8 to 16.9 a 14-hour night): 5.6 to 8.0 more nights (COMPUTED, BELIEVED steady)
+CHECK ok   overnight-1019: each unfinished item's rate times its slot-seconds is its covered encodings, and equals the merged coverage (no overlap, no gap between slices counted)
+
+== what the 18 tile exhaustive items cost to cover again on one more rtl/ tree, at the rates these files show
+194 slot-hours in all (scaleb32-wide 184 of them, 94.5%); a 14-hour night holds 22.0 slot-hours at this file's use of the slots and 31.6 with every slot busy: 6.1 to 8.8 nights (COMPUTED, BELIEVED steady)
+
+== what the host items cost to cover again on one more host/ tree, at the rates these files show
+18 host exhaustive items have a rate in these files; one core covering all of them once: 4.3 hours; the longest alone: cvtto32-all-rne 0.39 hours
+on 8 workers, one item a worker at a time (the pool's rule): about 0.5 hours (COMPUTED; the rates are card-run rates of host code, the pool's own are unmeasured)
+
+== controls
+CONTROL ok   removing one slice of conv32to64-all (an item the file shows complete) makes it unfinished with a first gap at (1880096768, 2148532224)
+CONTROL ok   a sum that counts an overlap twice (250) differs from the merge (200), which the check would catch
+CONTROL ok   first_gap finds the hole at (10, 20) in [(0, 10), (20, 2^32)]
+coverage_state: every check held

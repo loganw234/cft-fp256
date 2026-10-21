@@ -1,6 +1,6 @@
 # The documents, by what you open them for
 
-Forty-nine files, 84,939 lines. Flat in one directory they look like one
+Fifty files, 85,890 lines. Flat in one directory they look like one
 undifferentiated pile; they are not, and the split is close to even:
 
 - **27,968 lines you consult while working** — the three under *Start here*,
@@ -8,12 +8,12 @@ undifferentiated pile; they are not, and the split is close to even:
 - **7,674 lines of tool manual**, one per shipped program;
 - **3,140 lines of operations**, read when you are about to do something to
   hardware;
-- **46,157 lines of record and argument** — the ledger, the roadmap and the
+- **47,108 lines of record and argument** — the ledger, the roadmap and the
   design studies. The history of how a decision was reached, worth keeping,
   and not what you open to get something done.
 
 Half is therefore history. That is deliberate, and it is also why a
-flat listing of forty-nine names feels heavier than the work actually is.
+flat listing of fifty names feels heavier than the work actually is.
 
 This index exists because the README linked eight of the thirty-four there
 were and nothing linked the other twenty-six. Nothing has moved: a file's
@@ -98,7 +98,7 @@ reading material for a working session.
 
 | document | lines | what it is for |
 |---|---|---|
-| [VALIDATION.md](VALIDATION.md) | 22,787 | The validation ledger, append-only. Every run, including the ones that failed and the mistakes that produced them. A figure here is a fact about the run on its date and is never edited to match a later one. |
+| [VALIDATION.md](VALIDATION.md) | 22,812 | The validation ledger, append-only. Every run, including the ones that failed and the mistakes that produced them. A figure here is a fact about the run on its date and is never edited to match a later one. |
 | [FIGURES.md](FIGURES.md) | 471 | Fifteen figures of the project - its history, its gate, the card's clocks and its long stress run, the benchmarks, the math library's costs - drawn by script from the record's own data, light and dark, each with a sidecar of its numbers and the digests of its sources, and held to the numbers the README and other documents state. The page is written by `python/project_figures.py`, the `generated` stage's seventh generator, not by hand. |
 | [ROADMAP.md](ROADMAP.md) | 6,422 | What is built, what is next, and what was decided against. |
 | [ROUND2.md](ROUND2.md) | 1,082 | The plan for the gather, the scatter, the lane mask and the broadcast as one parcel round, with its outcome at the top: the seam the lead lands first, a brief per parcel, the verifiers, the ledger, the merge order. |
@@ -116,7 +116,7 @@ for Logan to approve, one design of the certificate's version 2,
 two designs of correctly rounded routines, exp and log, and sin,
 cos and tan, each written before any of it is built, and one study of how the card's soak
 sweeps could reach the cases a sampler does not, add up from weekend to weekend, and one day add
-up across devices. History of reasoning,
+up across devices, and one design of a card scheduler. History of reasoning,
 not current reference — but the place to look before reopening one of these
 questions.
 
@@ -134,6 +134,7 @@ questions.
 | [studies/M1-exp-log.md](studies/M1-exp-log.md) | 1,917 | a design for the correctly rounded exp, expm1, exp2, log, log1p and log2 as tile routines, step 6's M1 before any of it is built: the reductions, an eight-entry table read by a SELECT tree, a polynomial with a double-word head and a single-word tail and no augadd, one rounding under the program's attribute, the in-lane test that marks an undecided lane, the bound written out and measured against mpmath, the mark rate's law, the specials and flags as transcend.py gives them, the cost against the surveyor's estimates and fp32's triple words, the language's nodes, refusals and derivative rules, and how phase 2 is to be held; revised the same day after verifier-VM1 found log1p's r = x path past the bound's rho, with fp64's margins stated by an error budget (thin in log1p's band and log2's cell at G = 46) and G = 44 proposed for fp64; verifier-VM1b's budget tool is committed in `studies/m1/vm1b/`; its model and captured runs are in `studies/m1/` |
 | [studies/M2-trig.md](studies/M2-trig.md) | 1,560 | a design for the correctly rounded sin, cos and tan as tile routines, the math library round's M2 before any of it is built: one Payne-Hanek reduction for every lane, against 2/pi in bank words picked from the exponent by a SELECT shifter and carried exactly through the cancellation, with an audit of every instruction it calls exact; fp64's whole range and fp128's and fp256's to 2^1024, the range's cost measured; Taylor heads in double words, tan by its own quotient, and the clamp |sin x|, |cos x| < 1; the bound by verifier-VM1b's budget ported, the mark rate's law lane by lane, the structured families and their windows, the specials and flags as transcend.py gives them; the cost (sin 406, 382 and 389 instructions at fp64, fp128 and fp256, sin and cos of one argument 434, 411 and 418), fp32's double word at G = 18 and the triple word's estimate; the language's nodes, refusals and derivative rules, fourteen plants, and twelve questions for Logan; its model and captured runs are in `studies/m2/`, and its larger samples are handed to the lead (`studies/m2/box_m2s.sh`) |
 | [studies/SWP-A-coverage.md](studies/SWP-A-coverage.md) | 959 | how the card's native-oracle soaks could cover more of what they sample, written after the 60-hour stress run of 2026-10-16 to 19: the lead's seed finding confirmed on the driver itself and refined (a rerun repeats at least about 96% of the random draws; both tools force the seed's low bit, so 96.2% of the run's random slices started from a state another item's slice also started from), which of the 68 sweep items use the tile (35) and which are libcft host code (33, and 52.5% of the sweep's job-seconds), a survey with what each method would find here and cost (FPgen's coverage models, TestFloat, IeeeCC754 and UCBTEST, hard cases and the Table Maker's Dilemma, reductions by symmetry, stratified sampling, enumeration by keyed permutation, BOINC-style verification, formal methods), the closest-approach cases of division and square root constructed and measured, the reductions proved on tiny formats and what they leave (fp32 division 22 quad-years instead of 3 x 10^5), a design for a store of immutable coverage records that merges across weekends and devices, device-years and rate bounds for every space, what a contributed result must carry to be trusted, a ranked plan and ten questions for Logan; its nineteen scripts and their captured runs are in `studies/swp-a/` |
+| [studies/SCHED-A-card-scheduler.md](studies/SCHED-A-card-scheduler.md) | 926 | a design for one scheduler per machine that owns the card's time, written before any of it is built, at Logan's word of 2026-10-21 (the nightly window of 18:00 to 08:00 on whatever the sweep has not reached, staged program runs, metrics on the card and its performance, the lead's box scripts replaced, several cards later): what exists, checked (the stress driver and what it does not do, among them that its guard is not a lock; the lead's seventeen box scripts, whose guards are written nine ways and whose `pgrep` pattern misses four card users the driver names; the card, the box and the remote backend; what reads the driver's output; the part of the sweep study's coverage ledger a nightly needs, and that the nightly's resume is blind to trees in its planner), the data volumes (a night's record is 1.6 to 1.8 MB), what a preemption costs (3.5 minutes on average to a safe point, 8.7 at the 95th percentile), the requirements, the options for architecture, jobs, code, cards, coverage, the metrics store, the interface, deployment and failure, a recommended first version (a scheduler around the unchanged driver, launched by the lead, a file queue, refusals by name), a build plan in parcels with their plants, and thirteen questions for Logan; its five scripts and their captured runs are in `studies/sched-a/` |
 
 ---
 
