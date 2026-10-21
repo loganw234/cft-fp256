@@ -3349,6 +3349,8 @@ def index_item_checks(src: str = HERE) -> list:
         c("index items: each has the documents' space, k, reach, tool, verdict word and whole-space figures, and is exact where "
           "its cases are k x E (the four class modes that skip nothing) and not for the hard-case modes and cvtto64-class",
           not bad, "; ".join(bad[:2]))
+        if any(f"{op}-{m}" not in by for op, spec in DOC_INDEX.items() for m in spec[2]):
+            return out              # a catalog without one of the 35 is red at the two checks above; the rest look an item up by name
         it = by["rint64-class-rne"]
         c("index items: the job line is `<tool> <op> <lo> <hi> <attribute>` over the item's own indices",
           it.argv("B", lo=3, hi=9) == ["B", "rint64-class", "3", "9", "rne"] and by["sqrt64-hard-rmm"].argv("B", lo=0, hi=7) ==
@@ -5042,6 +5044,27 @@ def plants(env: Env) -> None:
          lambda env, src: campaign_space_checks(src),
          ["campaign space: counts_problem refuses an interval one past a new item's real space",
           "campaign space: each of the 35 new items' campaign says its own space"]),
+        # what the brief says must not change without the flags, what the older campaigns' ids must stay, the attributes of an item, and
+        # the case total `verify` prints on the driver's own file
+        ("settings.json gains the coverage wave's flags when they are unset",
+         [("card_stress.py", "if not (k in unset and v in (None, False))", "if not (k in () and v in (None, False))")],
+         lambda env, src: records_args_checks(env, src), ["records args: without --records no records file is written"]),
+        ("run_start names a pass size when --sweep-chunk is not given",
+         [("card_stress.py", '            if self.chunk:\n                settings["sweep_chunk"] = self.chunk',
+           '            if True:\n                settings["sweep_chunk"] = self.chunk')],
+         lambda env, src: scn_chunk(env, src), ["no chunk: without the flag no sweep record has a batch or chunk"]),
+        ("a campaign record of an older item gains a field",
+         [("sweep_record.py", 'c["space"], c["exact"] = getattr(it, "space", L.EXH), bool(it.exact)',
+           'c["space"], c["exact"] = getattr(it, "space", L.EXH), bool(it.exact)\n        c["level"] = getattr(it, "level", None)')],
+         lambda env, src: campaign_space_checks(src),
+         ["campaign space: the campaign records of the scripts' 90 items hash to what they did at 827c3cf"]),
+        ("sqrt64-hard has four attributes, not five",
+         [("card_stress_lib.py", '("sqrt64-hard", MODES5)):', '("sqrt64-hard", MODES4)):')],
+         lambda env, src: index_item_checks(src), ["index items: the 35 follow the scripts' 90"]),
+        ("the record sink writes only the first line of a leg's lines",
+         [("card_stress.py", 'os.write(fd, b"".join(lines))', 'os.write(fd, b"".join(lines[:1]))')],
+         lambda env, src: scn_records_real(env, src),
+         ["records real (A): sweep_record.py verify of the file against its keyring says clean"]),
         # the verifiers' notes
         ("--quick with --sweep-items tries a second wave after an empty one",
          [("card_stress.py", "                if self.quick and not self.sweep_only and waves + 1 < self.quick_waves(img):",
