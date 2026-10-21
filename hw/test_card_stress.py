@@ -4594,7 +4594,7 @@ def resume_case(src: str, parts: list, now: dict, rev=None, events: bool = False
             pick = d.pick_item({}, set(), name, reach)
             return None if pick is None else pick[1]
         return {"tile": gap(RS_TILE, L2.TILE), "host": gap(RS_HOST, L2.HOST), "tally": d.class_tally, "not_counted": d.not_counted,
-                "served": dict(d.served), "sums": {k: list(v) for k, v in d.sums.items()}, "seed_n": dict(d.seed_n),
+                "served": dict(d.served), "file_slices": d.file_slices, "sums": {k: list(v) for k, v in d.sums.items()}, "seed_n": dict(d.seed_n),
                 "rate": dict(d.rate), "events": evs, "iv": {k: list(v) for k, v in d.intervals.items()}}
 
 
@@ -4625,7 +4625,8 @@ def resume_unit_checks(src: str = HERE) -> list:
         c("resume: a host slice of another host/ tree is not counted: the host item starts again at 0, while the tile item, on the same "
           "rtl/ tree, goes on", r["host"] == (0, E) and r["tile"] == (M3, E) and r["not_counted"] == (1, 0), str((r["tile"], r["host"], r["not_counted"])))
         c("resume: the rotation counts are this class's: an item whose slices are all of another class has served none here, one of this "
-          "class has served its slice", RS_HOST not in r["served"] and r["served"].get(RS_TILE) == 1, str(r["served"]))
+          "class has served its slice, while the file's own count of finished slices (which the records_partial event says) stays 2",
+          RS_HOST not in r["served"] and r["served"].get(RS_TILE) == 1 and r["file_slices"] == 2, str((r["served"], r["file_slices"])))
         r = resume_case(src, [(CC2, [sl_host(0, M3)])], T_NOW)
         c("resume: the same host/ tree under another compiler is another class: the host slice is not counted",
           r["host"] == (0, E) and r["not_counted"] == (1, 0), str((r["host"], r["not_counted"])))
@@ -5559,6 +5560,10 @@ def plants(env: Env) -> None:
         ("a junk commit in a run_start's tree stops the resume (the tally keeps the commit as it was recorded)",
          [("card_stress_lib.py", " if isinstance((tr or {}).get(\"commit\"), str) else None}", "}")],
          lambda env, src: resume_unit_checks(src), ["resume: junk in a run_start's tree"]),
+        ("the file's own slice count becomes the class's (the records_partial event would say one slice of two)",
+         [("card_stress.py", "        self.served = dict(served)\n        self.sums = {}\n",
+           "        self.served = dict(served)\n        self.file_slices = sum(served.values())\n        self.sums = {}\n")],
+         lambda env, src: resume_unit_checks(src), ["resume: the rotation counts are this class's"]),
         ("the seeds are counted by class too",
          [("card_stress.py", "        self.served = dict(served)\n        self.sums = {}\n",
            "        self.served = dict(served)\n        self.seed_n = {k: v + 1 for k, v in _seeds.items()}\n        self.sums = {}\n")],
