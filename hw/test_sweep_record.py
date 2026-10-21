@@ -1009,19 +1009,20 @@ def group_host(tmp):
           "campaign says reach host and the oracle kind host-fpu+glibc", flat[i_card]["cid"] == flat[i_host]["cid"] == conv_id and
           camps[conv_id]["reach"] == "host" and camps[conv_id]["oracle"] == "host-fpu+glibc"
           and all(c["reach"] == "host" for c in camps.values() if c["operation"] != "sqrt32"), str(sorted(camps.values(), key=lambda c: c["operation"])[0]))
-    alone = os.path.join(tmp, "host-alone.jsonl")
-    write_metrics(alone, raw[:2] + [raw[4]])
-    exa, la, _ = export(alone, signer=A)
-    camp_line = next(ln for ln in lines if json.loads(ln)["id"] == conv_id)
-    cards_only = export(metrics_file(tmp), signer=A)[1]
-    check("host: a host slice's cid and campaign line are the same exported alone as with the card slices of the run, and the same as the card-only "
-          "synthetic run's line for that item (no card campaign id moves)", len(la) == 2 and la[0] == camp_line and json.loads(la[1])["cid"] == conv_id and
-          camp_line == next(ln for ln in cards_only if json.loads(ln)["id"] == conv_id))
     dig = hashlib.sha256()
     for it in L.sweep_items():
         dig.update(f"{it.name} {S.record_id(S.campaign_body(it))}\n".encode())
     check("host: the campaign ids of all 125 catalog items are what they were at 77c5dbca (one digest over each name and id; the first 90 are DR3's)",
           dig.hexdigest() == BASE_CAMPAIGN_DIGEST and len(L.sweep_items()) == 125, dig.hexdigest())
+    alone = os.path.join(tmp, "host-alone.jsonl")
+    write_metrics(alone, raw[:2] + [raw[4]])
+    exa, la, _ = export(alone, signer=A)
+    camp_line = next((ln for ln in lines if json.loads(ln)["id"] == conv_id), None)
+    cards_only = export(metrics_file(tmp), signer=A)[1]
+    card_line = next((ln for ln in cards_only if json.loads(ln)["id"] == conv_id), None)
+    check("host: a host slice's cid and campaign line are the same exported alone as with the card slices of the run, and the same as the card-only "
+          "synthetic run's line for that item (no card campaign id moves)", len(la) == 2 and camp_line is not None and la[0] == camp_line
+          and json.loads(la[1])["cid"] == conv_id and camp_line == card_line)
     # verify: both versions in one file, the totals by subject kind equal to the raw legs'
     check("host: version 2 is known - the mixed file of version-1 and version-2 records verifies, signed, against the keyring", verdict(lines, RA) == "ok")
     rep = verify_lines(lines, RA)
