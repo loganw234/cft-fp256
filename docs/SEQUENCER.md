@@ -2744,7 +2744,8 @@ Revision 3's build put the scratch's 4,096-deep banks in one URAM each
 and moved a four-deep URAM cascade (the instruction memory at 16,384)
 into block RAM "due to insufficient pipeline registers". In block RAM a
 2,048-slot scratch does not fit the quad (about 1,657 tiles of 1,344);
-in UltraRAM it does, with the deposit buffer, at about 388 of 640. So
+in UltraRAM it does, with the deposit buffer, at about 388 of 640 (the
+estimate of the time; the build read 260, in the note below). So
 the scratch is not left to inference: at more than 256 slots each bank
 is built from 4,096 x 32 sub-arrays - revision 3's shape, one URAM
 apiece, pinned there by `(* ram_style = "ultra" *)` - and read through
@@ -2760,6 +2761,23 @@ same cycle and every simulator sees the same bits; at 256 slots a bank
 is one such array and nothing changed. Where Vivado puts the deposit
 buffer and the instruction memory (block RAM, bit-sliced, is expected)
 is the first number the revision-7 build should read.
+
+**Measured since (a note of 2026-10-21; the estimate above is left as it
+was written, for its history).** q135b, revision 7's quad of record (four
+tiles at 2,048 slots, closed at 135 MHz), used **260** UltraRAMs, 40.63%
+of the part's 640, not about 388: MEASURED from its routed report
+(`impl_1_full_util_routed.rpt`, the whole design with the shell), read on
+amd-arc-box for the step 6 plan and recorded in docs/VALIDATION.md on
+2026-10-02, in the entry for step 6's plan of record, as "q135b's
+utilization, MEASURED from its own routed report" (docs/ROADMAP.md's step
+6 plan gives it too). That
+is four scratches of 64 and the shell's four (COMPUTED: 4 x 64 + 4 = 260),
+so the 32 UltraRAMs a tile that the table gives the deposit buffer are not
+in it. BELIEVED: the deposit buffer and the instruction memory went to
+block RAM, as the paragraph above expected; the report totals the design
+and does not place each memory. Revision 8's quad at 4,096 slots, rev8q,
+used 516 (80.63%), which is 4 x 128 + 4 (COMPUTED) and fits the same
+reading (MEASURED, the entry for step 6's closing records, part two).
 
 In cycles, measured on `cft_seq` in simulation (fp32, four blocks of
 128 lanes, model RAM answering at once), before the fix below. Both
