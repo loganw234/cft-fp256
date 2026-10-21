@@ -450,8 +450,9 @@ What is planned:
   router did not converge on it when that was studied
   (`docs/studies/TOOL-A-dense-router.md`).
 
-The first outside workload's asks, six of seven built by 2026-09-15,
-are ranked in `docs/ROADMAP.md` and recorded in `docs/ROUND2.md`.
+What the first outside workload asked the library for is ranked in
+`docs/ROADMAP.md`, and `docs/ROUND2.md` records the round that built the
+device-side gather and the per-run lane mask, among others.
 
 ## Built on it
 
