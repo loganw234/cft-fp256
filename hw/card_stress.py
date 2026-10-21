@@ -58,6 +58,11 @@ conversion and scaleB modes (the -all and -wide items) also say what they covere
 verdict line, and a slice's encodings are held to it exactly. A random slice's seed is
 (item index << 40) | (n << 1) | 1 and n continues across runs (--earlier-runs); the run records
 the RTL tree it runs from, and the report counts coverage per tree.
+Since 2026-10-21 (parcel DR3, the coverage wave) the catalog has 35 more items, the hard-case and class-level modes
+(hw/card_stress_lib.py: Item.space, HARD_SPACE, CLASS_SPACE): each exhaustive over a space of its own, held to cases + S = k x E
+and, once wholly covered, to its whole-space figures. --records writes the finished sweep slices as canonical records through
+hw/sweep_record.py (RecordSink; --sign-key signs them) and --sweep-chunk N runs the sweep's slices with the tools built at
+pass size N, recording the batch and chunk each said. docs/CARDDAY.md, "The coverage wave in the driver", is the operator's page.
 
 RECORDS. $OUT/metrics.jsonl is append-only: one `leg` record a leg, one `telemetry` record a
 sample, with `run_start`, `build`, `cycle_start`, `cycle_end`, `event` and `run_end` between
@@ -2276,7 +2281,7 @@ class Driver:
             if c5defs:
                 cargv.append(f"C5DEFS={c5defs}")
             cargv += [f"SOAK_CHUNK={self.chunk}", "soak-chunk"]
-            if self.a.nice and shutil.which("nice"):
+            if a.nice and shutil.which("nice"):
                 cargv = ["nice", "-n", str(a.nice)] + cargv
             clog = os.path.join(self.logs, "build-chunk.log")
             t1 = time.time()

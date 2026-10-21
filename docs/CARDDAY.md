@@ -1725,8 +1725,8 @@ item, the mode's indices for these.
 13 hard-case items and 22 class-level ones; 22 tile (the card's rotation takes them with the other 43) and 13 host (the
 pool takes them with the other 47). A slice is `<tool> <mode> <lo> <hi> <attribute>`, sliced as every exhaustive item
 is (the probe of 2^20, then the measured rate times `--sweep-slice-seconds`, whole 2^20 atoms, at most 2^28 on the card and
-2^36 on the pool) over the item's own space, so a class item's first slice is its whole space and the last slice of a
-hard-case item is short and ends at the space's end. Each is held to what its verdict line says it covered
+2^36 on the pool) over the item's own space, so at the default probe size a class item's first slice is its whole space
+and the last slice of a hard-case item is short and ends at the space's end. Each is held to what its verdict line says it covered
 (`, E encodings, S skipped`, E counting indices): E the slice's indices and cases + S = k x E. The cases are a function
 of the slice only for the class modes but `cvtto64-class` (exactly k x E, `expected_cases` recorded); a hard-case slice's
 cases are not (an index with no construction skips all its slots), nor are `cvtto64-class`'s (it skips pairs). So each
@@ -1781,6 +1781,8 @@ writes the records unsigned, for `sweep_record.py sign` to sign later. `--record
 stand-ins, and so does the driver, at the command line). A leg the exporter refuses is an event `record_refused` naming the
 refusal and the leg, in the log and in metrics.jsonl, and the run goes on; a run the exporter refuses (a run id it cannot
 spell) is one event, `records_disabled`. The secret is held in the signer for the run and is in no record, setting or log.
+**What it costs:** a signed slice takes 3.0 ms to export (median) and 853 bytes of file on average, so a 60-hour run's 3,300 slices
+are about 2.8 MB (READ, SG's measurements on the desktop, docs/SWEEP-RECORDS.md); the driver writes and syncs one line a slice.
 Without the flags nothing is written or recorded that was not: no file, no `records` in `run_start`'s settings or in
 settings.json, no line in status.txt. `--resume` continues the file (the campaigns it holds are known, so none is written
 twice; a different key than the file's is refused, `device`; a torn last line is cut back and said). At the end:
@@ -1796,7 +1798,8 @@ lead's word: every older campaign's record and id is what it was, held in the su
 
 **The pass size.** `--sweep-chunk N` (N a positive multiple of 4096 up to 65536, the Makefile's rule, refused by name
 otherwise) makes the build step also run `make -C host SOAK_CHUNK=N soak-chunk` with the XRT flags and `C5DEFS` of the
-default build, assert the two tools XRT-linked like the others, and then run **every sweep slice - the card's and the pool's -
+default build, assert the two tools XRT-linked like the others (the build took 2 s in WSL at `-j4`, MEASURED, XRT=0, after the
+default build; the XRT=1 build on the box is not measured), and then run **every sweep slice - the card's and the pool's -
 with `divsqrt-soak-cN` and `clause5-soak-cN`**; the battery's legs keep the default tools. Each sweep record carries the
 `batch` and `chunk` its tool said on its stderr line (`soaking with BATCH n and CFT_CHUNK n (the defaults are 4096)`), parsed
 and held to the request: a log without the line, with another number, or (for a default job) with a line at all, is a

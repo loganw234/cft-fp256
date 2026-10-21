@@ -64,6 +64,16 @@ be computed is "-" or "n/a", never 0. Choices a reader could otherwise take anot
     checkout's tree. `--also DIR` adds other runs' directories to that section (and only to it):
     coverage accumulated over runs, each slice under its own run's tree, so two trees are never
     summed. The first sections are of RUN_DIR alone, as they were.
+  - SPACE (since 2026-10-21, parcel DR3). An exhaustive item's coverage is counted over ITS space, which the catalog gives
+    (`Item.space`): 2**32 encodings for every item the scripts' campaign has, the mode's indices for the coverage wave's hard-case
+    and class-level items (21,235,788 for div32-hard, 35,840 for rint64-class, ...). An item whose space is not 2**32 says so in the
+    tables ("rint64-class-rne [35,840 indices]") and its 100% is of its own indices; a class-level pass is a claim at the class level
+    (L2, PLAUSIBLE and not proved) and a hard-case pass a space of constructed operands, and the report says both under its table.
+    A record of an item the catalog does not name is counted over 2**32, as every item was.
+  - PASS SIZE (with `--sweep-chunk`). A sweep slice carries `sweep.batch`, the BATCH its tool ran at (a slice with none ran the default
+    tools' 4096); an item with a slice at another batch gets a line saying how many ran at each, since the tools compare flags per batch,
+    and random coverage by tree is a row per (item, batch): a chunked item's slices are never summed with the default tools'. A run with
+    no chunked slice is reported as it always was.
 """
 from __future__ import annotations
 
