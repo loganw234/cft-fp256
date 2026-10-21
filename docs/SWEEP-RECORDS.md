@@ -10,6 +10,15 @@ one device, a signing key; a second owner is a second line in a keyring and
 changes nothing in the format. The store, the fold, the replay verifier,
 honeypots and quorum are the study's ranks 6 and 10 and are not here.
 
+Two versions of the record are known. **Version 1** is the slice or stream a card
+image computed and the campaign they are slices of. **Version 2**, since
+2026-10-21 (parcel SR2), is one more form: the slice or stream the **host pool**
+computed, on the CPU, whose subject is the host build instead of a card image.
+Logan asked for it ("10. Yes, change now for DR3's issue", the card scheduler
+study's question 10, 2026-10-21); the section "Version 2" below says what it
+adds and why it is a version of its own, and every other section is version 1's,
+which version 2 leaves as it was.
+
 ```bash
 python hw/sweep_record.py export RUN --out FILE (--key KEY | --device-key HEX)
 python hw/sweep_record.py sign   FILE --key KEY --out FILE2
@@ -24,7 +33,7 @@ named), COMPUTED (arithmetic on those), BELIEVED (unverified).
 
 A run's `metrics.jsonl` (RUN is the directory, or the file). Three kinds of
 record matter: `run_start` (the run's id, the commit and whether the tree was
-clean, each image's SHA-256 and tile count), `build` (the tools were held to the
+clean, each image's SHA-256 and tile count and, since 2026-10-20, the `host/` tree and the compiler), `build` (the tools were held to the
 tree: a leg with no passing `build` since its `run_start` is refused) and the
 `leg` records of kind `sweep` that finished with a verdict, status `pass` or
 `fail` (the driver's own definition of a covered slice, `sweep_coverage` in
@@ -34,9 +43,16 @@ A sweep leg that did not finish (timeout, no device, parse error) is counted
 and named in what `export` prints, and is no record. A leg that says it finished
 (`pass` or `fail`) but has no sweep block or no counts is refused (`metrics`), not
 dropped. A run whose `run_start` says `dry_run` is refused: its legs came from
-stand-ins.
+stand-ins. A finished sweep leg of the host pool (image `cpu`) is read too: it is a
+version-2 record ("Version 2", below), and it is refused (`metrics`) where the run
+recorded no `host/` tree.
 
 ## The record, version 1
+
+This section, "The campaign record" and "Identity and signature" are version 1's
+and stay its contract; "Version 2" adds what version 2 adds and changes none of
+it. A version-1 record is a card slice or stream (the subject is a card image) or
+a campaign.
 
 One record is one JSON object on one line, in canonical form (below). There are
 three kinds. A **slice** is an exhaustive item's finished `[lo, hi)`; a
@@ -96,7 +112,9 @@ does not record it:
   repository from image SHA-256 to commit. Neither is done, and nothing here
   computes the hash from a checkout.
 - `tool.build_id`, `.cc`, `.flags`: the `build` record holds cft-segrun's build
-  id, not the soak tools', and no compiler or flags.
+  id, not the soak tools', and no compiler or flags. (A version-2 host record
+  carries the compiler's line, `subject.cc`, which `run_start` has recorded
+  since 2026-10-20.)
 
 Today's data for one real slice, the first of the 2026-10-19 run, unsigned,
 with the device of the test's throwaway key A (public key
@@ -107,6 +125,103 @@ it is written (`export RUN --out FILE --device-key` that key, MEASURED):
 ```
 {"cases":1048576,"cid":"c2aaacbea9016dc8da1472d1a71f15e161d49bdecdb2db6cadc4177a4fb3edc1","fm":0,"hi":1048576,"id":"1cfcf540935fc48234c7cb15ef0a3d9f07a23c36011ca3e012374ec9db701fd7","kind":"slice","lo":0,"run":{"device":"fcd1dfc0b3edff2d","end_ms":1792465491677,"id":"card-stress-1019","log":"logs/c0001-00013-sweep-conv32to64-all.log.gz","rate":1204647,"start_ms":1792465490807},"skipped":0,"subject":{"image":"quad","tile":1,"tiles":4,"xclbin":"4f9921a25af65444abc5c267fff1117a8e14abbc16a75de643e43c9dbf6ef53b"},"tool":{"commit":"881bbcb676bbede9da20858325b7a966c56a25bf","dirty":false},"v":1,"vm":0}
 ```
+
+## Version 2: the host-pool slice, and the version rule
+
+Since parcel DR2 (2026-10-20) the stress driver runs the host items on a pool of CPU
+workers, and each finished one is a `leg` record on the image `cpu`, which has no
+xclbin. Version 1's subject is a card image and the SHA-256 of its xclbin (`subject.image`,
+`.xclbin`, `.tiles`), so the exporter refused each host slice by name, and parcel DR3 (2026-10-21)
+counted them and said so once. The card scheduler study put it to Logan with the signing
+questions (question 10); his answer, 2026-10-21, verbatim: "10. Yes, change now for DR3's
+issue". His earlier word on signing still holds: one owner and one key, the box's.
+
+**The version rule.** A record's `v` is the version of the form it is written in, and a form
+changes only by getting a new version.
+
+- **Version 1** is the card slice, the card stream and the campaign, as they have always been
+  written. Nothing of them changed: a version-1 file written before this change verifies, and a run
+  exported now gives for every card slice the bytes it gave before (below, MEASURED).
+- **Version 2** is ONE more form: the slice and the stream of a host-pool job. It differs from
+  version 1's in `v` and in `subject`, and in nothing else. **A campaign has no version 2**: an item's campaign is
+  version 1's record, the same record whoever computed a slice of it, so no campaign id depends
+  on the version of the records that name it (and a host item's campaign says what it always said:
+  `reach` host, the oracle kind `host-fpu+glibc`).
+- **A record is the version its subject needs, never both.** The exporter writes version 2 for a leg on
+  the image `cpu` and version 1 for every other, and has no path that writes a version-2 record of a card
+  slice. The verifier refuses a card subject in a version-2 record and a host subject in a version-1 one
+  (`form`, saying which a card slice is, which a host-pool slice), and a host-pool record whose campaign's `reach`
+  is `tile` (`campaign`: a host build computes nothing the tile does, so its subject is no evidence about
+  that campaign). The other way is not refused: until the host pool existed the card swept the host items
+  too, and a card image's slice of a campaign whose reach is `host` is a valid version-1 record (MEASURED: 232 of the
+  2026-10-19 run's 552 slices are of its 14 host campaigns, 22 campaigns in all).
+- **`verify` takes every version it knows, versions 1 and 2, and refuses any other by name**,
+  `version`: "version 3; this verifier knows versions 1 and 2". A campaign record that says version 2 is
+  `form`. The signature's domain string, `cft-sweep-record 1`, is the domain's own number and not the
+  record's: the id covers `v`, so a version-2 record's id is no version-1 record's, and the signature is unchanged.
+
+**Why a version 2 for the host records only** (the brief left the choice open). *A version 2 for every
+slice, with the subject either form* would make a card slice exported from now on a version-2 record with
+another id, and the card slices DR3's driver writes, the real run's export and every fixture would be
+re-made for a change of format Logan has not asked for. *A second subject shape inside version 1* changes
+no byte, but a verifier of the old code reads the new line and says `form`: a record that looks broken, where it is a
+record it cannot read (MEASURED: the verifier of 77c5dbca, given a host subject under `v` 1, says "refused form: ... line 2.subject: the
+subject has no field 'image'"). With a new version the old verifier says what is true (MEASURED: given a file of both
+versions, "refused version: ... line 5: version 2; this verifier knows version 1"). So: a version 2 for the host records only. Nothing existing moves, the
+only new bytes are the host records', and a version-2 record of a card slice cannot appear by accident.
+
+**The subject of a host-pool record** says what computed the slice: the host library's source and how it was built.
+The key is DR2's, coverage by tree, which Logan kept on 2026-10-21 (the study's question 8, "keep the coarse key"): the
+`host/` tree hash and the compiler, as the report keys a host item. Every field is READ from `run_start.tree`, never
+defaulted; a field the run did not record is **absent**, not False and not null.
+
+| field | in | what it is | read from |
+|---|---|---|---|
+| `v` | slice, stream | 2 | |
+| `subject.src` | slice, stream | the git tree hash of `host/` at the checkout's HEAD, 40 hex (64 in a SHA-256 repository). **Required**: a host-pool slice whose run recorded none is refused | `run_start.tree.host_src` |
+| `subject.dirty` | slice, stream | whether `host/` differed from that tree, untracked files included. Absent where git could not say | `run_start.tree.host_src_dirty` |
+| `subject.cc` | slice, stream | the C compiler's first version line: text of 1 to 256 characters, no control character. Absent where the run could not read it | `run_start.tree.cc` |
+
+Every other field (`cid`, `lo` and `hi` or `seed` and `count`, `cases`, `vm`, `fm`, `skipped`, `tool`, `run`, `disagreements`,
+`sig`) is version 1's, read from the leg and `run_start` the same way: `tool.commit` and `.dirty` are the driver's checkout
+at the run's start, and `run.device` the key's pseudonym. The leg is stamped with the `run_start` in force for it, the last
+before it in the file (a resumed run writes one for each invocation). A leg on the image `cpu` has no image hash and no tile,
+and the exporter holds it to that: **a card slice dressed as a host-pool one** (an `image_sha256` or a tile on the image
+`cpu`) **and the reverse** (a card image's leg carrying the host pool's mark, `sweep.pool`) are refused, `metrics`, each
+saying what it is, as is a host-pool slice of an item whose reach is `tile`. Every refusal leaves the exporter as it was.
+
+What a host-pool record does **not** say, which the run does not record and which is therefore absent and not invented:
+
+- **The machine.** The campaign's `oracle` says the kind, `host-fpu+glibc`: the host's FPU and libm, on the machine that ran the
+  slice. `run_start.host` is a node name, which no record carries (the device pseudonym says which key, not which machine),
+  and `run_start` holds **no CPU model, no libm or glibc version and no operating system**. A host record says which source
+  was built with which compiler, not on which CPU or against which libm. The compiler's line often names the distribution's
+  package (the 2026-10-19 run's second `run_start` has `cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0`), which is a hint about the
+  system and says nothing of its libm.
+- **The flags.** The XRT flags and the roundeven probe's `C5DEFS` are text in the `build` record's steps; the tools' build id the
+  driver held equal to the tree's (`sweep.pool.build_id`: it asks cft-segrun for it, not the soak tools) is not in the record
+  either: the exporter requires a passing `build` record since the `run_start`, which is that assertion.
+- **What `cc` is.** What `$CC --version` (or `cc`) printed when the run started, which is what `host/Makefile`'s `CC ?= cc`
+  builds with unless the make was told otherwise; nothing asks the binary.
+
+A host-pool record, from the test's synthetic run (a real run has none: the 2026-10-19 run is the card's, and its second
+`run_start`, the only one that recorded a `host/` tree, ran no host slice), unsigned, for the test's throwaway key A, on one
+line as it is written. The tree hash and the commit are made up:
+
+```
+{"cases":1048576,"cid":"c2aaacbea9016dc8da1472d1a71f15e161d49bdecdb2db6cadc4177a4fb3edc1","fm":0,"hi":1048576,"id":"c8e2ef97a89ee55459cf2fb5fe3f505f2a96fb6018220eb72d8eb1151b2b9fde","kind":"slice","lo":0,"run":{"device":"fcd1dfc0b3edff2d","end_ms":1792300033000,"id":"card-stress-host-1","log":"logs/c0001-00003-sweep-conv32to64-all.log.gz","rate":524288,"start_ms":1792300031000},"skipped":0,"subject":{"cc":"cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0","dirty":false,"src":"a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1"},"tool":{"commit":"1111111111111111111111111111111111111111","dirty":false},"v":2,"vm":0}
+```
+
+Its `cid` is the campaign the card image's slice of `conv32to64-all` names, `c2aaacbe...`, the one below.
+
+**MEASURED, version 1 is byte for byte what it was.** The 2026-10-19 run's `metrics.jsonl` (the lead's copy, sha256
+`38f243c7...`; it is not in the repository), exported by the code of 77c5dbca and by this parcel's with the same key, the test's key A
+(its secret is derived from a label in `hw/test_sweep_record.py`, so anyone can make it with that file's `write_key`; the public key
+is `b93a34db...`, the one the example above was made for): `export --key` and `export --device-key` each give the same 574 lines (552
+records and 22 campaigns), equal under `cmp`, sha256 `403d3c7a...` signed and `8d4ce840...` unsigned: figures a reader who has that
+file can reproduce. The campaign ids of all 125 items of the catalog (the 90 of the scripts and the 35 of the coverage wave) are one
+digest, `2e8d9608...`, at both. The suite holds both: the synthetic card-only run's whole export hashes to what the code of 77c5dbca gave,
+and the 125 campaign ids to the digest (`hw/test_sweep_record.py`, `hw/test_card_stress.py`, group `records`).
 
 ## The campaign record
 
@@ -146,7 +261,14 @@ A campaign is built from the item and nothing else, so anyone can rebuild it.
 and `printf '%s' LINE | sha256sum` of exactly that line, with no newline, is
 `c2aaacbea9016dc8da1472d1a71f15e161d49bdecdb2db6cadc4177a4fb3edc1`, the `cid` of
 every slice of that item in the run (MEASURED). Section 5.2's stratum and
-enumeration are not in it. A later version adds them; that changes the hash, so
+enumeration are not in it.
+
+**A host item's campaign** says `reach` host and the oracle kind `host-fpu+glibc`, as every host item's has since
+version 1, and it is the same record for a slice a card image computed (before the host pool) and a slice the pool
+computed (version 2): the item is the same job, so the campaign, which is built from the item and nothing else, is the
+same bytes and the same `cid` whether a host slice is exported alone or with the card's. The test holds it
+(`conv32to64-all`'s `cid` is `c2aaacbe...` in a card-only run, in a file of both, and exported alone) and holds all
+125 items' campaign ids to one digest taken at 77c5dbca. A later version adds them; that changes the hash, so
 it is a new campaign, which is the rule ("coverage never merges across a change
 of definition"), and a run's `metrics.jsonl` is exported again under it.
 
@@ -274,8 +396,8 @@ the case total the sum of the raw legs' (computed by a separate script).
 | name | exit | what it refuses |
 |---|---|---|
 | `canonical` | 2 | a line whose bytes are not the record's canonical form: spaces, order, CRLF, non-ASCII, a missing final LF |
-| `version` | 2 | a record of a version this verifier does not know (checked as soon as the line parses, before its canonical bytes and its fields) |
-| `form` | 2 | not a version-1 record of its kind: a field missing or not in version 1, a float, a null, a path that is not relative |
+| `version` | 2 | a record of a version this verifier does not know: it knows 1 and 2 (checked as soon as the line parses, before its canonical bytes and its fields) |
+| `form` | 2 | not a record of its version and kind: a field missing or not in that version, a float, a null, a path that is not relative; a card subject in a version-2 record and a host subject in a version-1 one (a card slice dressed as a host-pool one, and the reverse), a version-2 campaign |
 | `id` | 2 | a record whose bytes do not hash to its id |
 | `signature` | 2 | no signature where one is required, or one that does not verify |
 | `signature-domain` | 2 | a signature that verifies under the certificate's domain `cft-signature 1` and not the record's |
@@ -283,11 +405,11 @@ the case total the sum of the raw legs' (computed by a separate script).
 | `key` | 2 | a key the keyring handed does not name |
 | `device` | 2 | `run.device` is not the pseudonym of the key; at `sign`, a record that names another key's device |
 | `splice` | 2 | a record of another run, or another device, in a file that is one run's |
-| `campaign` | 2 | a record naming a campaign that is not in the file (which is what a campaign record altered, its id fixed, becomes), or one of the other sweep kind |
+| `campaign` | 2 | a record naming a campaign that is not in the file (which is what a campaign record altered, its id fixed, becomes), or one of the other sweep kind; a host-pool record whose campaign's reach is `tile` (the subject kind does not match the item's reach) |
 | `counts` | 2 | counts that break the driver's rule for the campaign (`parse_soak`'s cover rule, `expected_cases`, 0 cases, an interval past the space) |
 | `run` | 2 | an end before the start, or a rate that is not the record's cases over its own time |
 | `signed` | 2 | `sign` was given a record that carries a signature |
-| `metrics` | 2 | at `export`: a run it cannot read as the driver wrote it (a dry run, a leg that disagrees with the catalog, counts the driver would not have passed) |
+| `metrics` | 2 | at `export`: a run it cannot read as the driver wrote it (a dry run, a leg that disagrees with the catalog, counts the driver would not have passed; a host-pool slice whose run recorded no `host/` tree, a card slice dressed as a host-pool one or the reverse, a host-pool slice of a tile item, a compiler line a record cannot hold) |
 | `empty` | 2 | no finished sweep slice to export; no slice or stream in the file to verify |
 | `key-in-tree` | 64 | a key file inside a git working tree |
 | `key-file` | 64 | a key file that cannot be read, is not `cft_sign.py`'s format, or that others may read (POSIX) |
@@ -321,7 +443,10 @@ the secret vouched for these bytes):
 - it is of one run and one device, with a campaign that hashes to its cid, and
   with counts that follow the driver's rule for that campaign, an interval inside
   the space, times in order and a rate that is its own cases over its own time;
-- whether it found a mismatch.
+- whether it found a mismatch;
+- for a **host-pool record** (version 2): that it says which `host/` source (`subject.src`, and `dirty`) and, where the run
+  recorded it, which compiler (`subject.cc`) the slice is about, that the campaign is one whose reach is the host, and that the
+  subject is no card image: a host build is not offered as evidence about a tile.
 
 **Does not prove**, which is section 6.6's "What a record can never prove"
 applied here:
@@ -342,10 +467,17 @@ applied here:
 - **that the image named was on the card**: the driver hashed the file it passed
   to XRT and held it to its `SHA256SUMS`; nothing in the record shows what the
   card ran, and the tree the image's RTL came from is not in the record.
-- **what the oracle was**: the CPU and libm are not recorded.
+- **what the oracle was**: the CPU and libm are not recorded. For a host-pool record this is the machine, the whole of it: the
+  campaign says the kind (`host-fpu+glibc`, the host's FPU and libm), the run records no CPU model, no libm or glibc version and no
+  operating system, and the record does not invent one. A host record can be a pass on one CPU and libm that another's would not
+  repeat, and says nothing to tell them apart but the key (`run.device`).
 - **that the tool is the commit's build**: `tool.commit` is the driver's
   checkout, which the driver's build check held to the commit cft-segrun was
-  stamped with; the soak binaries' own build ids and flags are not recorded.
+  stamped with; the soak binaries' own build ids and flags are not recorded. For a host-pool record, `subject.src` is the tree the
+  driver RUNS FROM (`git rev-parse HEAD:host`), and it is the source the soak tools were built from because the build step
+  held the tree to the tools' build id at the start, which is the only link the record has (a run whose HEAD moves is stopped,
+  `tree_moved`, READ in `should_stop`; an uncommitted edit to `host/` after the start is not seen, since `dirty` is read once, at
+  the start); `subject.cc` is what the compiler said when the run started, not what built the binary.
 - **when it was signed**: there is no time in a signature. `run.start_ms` and
   `end_ms` are the driver's clock. Records exported from `metrics.jsonl` after
   the run vouch for that file as it was when exported; one signed as the driver
@@ -377,24 +509,34 @@ the sink AFTER the append (`Driver.rec`, the one place every record passes): `ru
 never in the file without its campaign. The sink has a lock of its own (the card's thread and the host pool's workers finish
 legs at once). **A leg the exporter refuses** (`Refusal`, named `metrics`) is an `event` `record_refused` in `metrics.jsonl` and
 `driver.log`, with the refusal's name and reason, and the run goes on (the first 50 are named, the rest counted); a `run_start`
-it refuses disables the sink with one event, `records_disabled`. **A host-pool slice** (image `cpu`) is not offered to `leg()`:
-version 1's subject is an image and the SHA-256 of its xclbin, which a CPU job has none of, so `leg()` would refuse each by name;
-the sink counts them and says so once (`records_host_slices`), and `metrics.jsonl` has them. **A dry run is refused twice**: at the
+it refuses disables the sink with one event, `records_disabled`. **A host-pool slice** (image `cpu`) is offered to `leg()` like
+every other finished slice, and since version 2 (2026-10-21, parcel SR2) it is a record: a version-2 slice or stream whose subject is the
+host build `run_start.tree` recorded (`host_src`, `host_src_dirty`, `cc`: "Version 2", above), signed like a card slice. Where the
+run recorded no `host/` tree (night 1 of the 2026-10-19 run: its `run_start` has `commit`, `dirty` and `dirty_files` and nothing
+else) the exporter refuses it by name, `metrics`, and the sink says so as any refusal, an event `record_refused` (the first 50 are
+named, the rest counted, and the summary has the counts). **The event `records_host_slices` is retired**: DR3's sink said it once to
+say host slices were counted and not written, which is no longer true, so no driver after this one writes it (a `metrics.jsonl`
+written by DR3's may hold one, and every reader ignores an event it does not know). The sink counts what it wrote by what computed it,
+card and host: records, clean ones and their cases. **A dry run is refused twice**: at the
 command line (`--records` with `--dry-run` is an argument error), and, if it ever got through, by `run_start`. The key is checked
 at the command line too: `load_seed`'s `key-in-tree` and `key-file` refusals, by name, before anything starts; the secret is read
 there and let go, and again when the sink is made, and is in no setting, record or log. On `--resume` the sink reads the file, takes its campaigns into
 `ex.seen` (none is written twice), refuses a file of another device or run (`device`), and cuts back a torn last line. At the
-end an event `records_summary` gives the counts and `driver.log` the `verify` command. **The case total `verify` prints is the sum of
-the clean card slices' cases, which is the driver's own coverage of those slices**, and the tests hold it to that on a run that is
+end an event `records_summary` gives the counts, with the records, the clean ones and their cases by subject kind (`by subject: card N
+record(s), N clean (CASES cases); host ...`), and `driver.log` the `verify` command. **The case total `verify` prints is the sum of
+the clean slices' cases, the card's and the host pool's, which is the driver's own coverage of all the clean slices it recorded; it
+prints the total by subject kind on a line of its own** (`by subject: card N clean (CASES cases); host N clean (CASES cases)`, with the
+findings of a kind after it, and a kind a file does not hold as 0), and `records_summary` says the same figures. The tests hold the
+three - the raw legs' sums, the sink's counts and what the `verify` command prints - to one another on a run that is
 not a dry run (the tools of that run are test doubles in a scratch tree, which is the one way the exporter's refusal of a dry run
-can be met without weakening it). The pass size is not in a version-1 record: a `--sweep-chunk` run's streams are told from a
+can be met without weakening it). The pass size is not in a record of either version: a `--sweep-chunk` run's streams are told from a
 default run's by `metrics.jsonl` (`sweep.batch`, `sweep.chunk`) and not by the file.
 
 `run_start` and `leg` raise `SR.Refusal` (name `metrics`) for a run or a leg that
 cannot be records: a finished sweep leg (pass or fail) with no sweep block or no
 counts, a time or a rate that is not a finite number (Infinity or NaN), a leg the
 catalog disagrees with, counts the driver's rule would not have passed, a dry
-run. A sweep leg that did not finish returns no lines and is counted in `ex.left`,
+run, a host-pool slice of a run that recorded no `host/` tree. A sweep leg that did not finish returns no lines and is counted in `ex.left`,
 by status, whatever it lacks; a leg that is no sweep leg returns none. `leg`
 leaves the exporter as it was after a refusal: the driver should log an `event`
 and go on, since a record error must never stop a long run. After a
@@ -406,16 +548,23 @@ file to avoid it. Cost per slice on the desktop (MEASURED, the 2026-10-19 run's
 bytes on average (837 to 860), 619 unsigned, a campaign line 299; about 2.8 MB
 for a 60-hour run's 3,300 slices; `verify` 3.3 ms a slice.
 
-## Version 1's known limits
+## Known limits, version 1's and what version 2 changed
+
+Version 1's, as they were, restated where version 2 changes them:
 
 - The stream form has not been run on a real run's legs (the 2026-10-19 run is
-  all exhaustive); it is held to synthetic legs in the driver's format.
+  all exhaustive); it is held to synthetic legs in the driver's format. **Version 2 has not been run on a real
+  run's legs either**: a real run holds no host-pool slice that could be signed (the 2026-10-19 file has no leg on the image
+  `cpu` at all; its first `run_start` recorded no `host/` tree and its second ran no host slice), so the version-2 form is held to
+  synthetic legs and to the driver's own run over test doubles, and the first real host record will be the first real one.
 - The `build` record is required, and the item table is the exporting tree's:
   a run is exported from the tree it ran at, and `export` refuses a leg whose
   recorded expectations are not that catalog's.
-- The case total `verify` prints is the sum of the clean records' cases. Two
-  slices of one campaign that overlap count twice, and nothing refuses an
-  overlap or a gap: the fold (the study's rank 6) takes the union.
+- The case total `verify` prints is the sum of the clean records' cases, now of both subject kinds and told apart on its line by
+  subject. Two slices of one campaign that overlap count twice, and nothing refuses an
+  overlap or a gap: the fold (the study's rank 6) takes the union. A card image's slice and a host-pool slice of one host
+  campaign are one campaign's slices, and their cases are counted together in that total: **the fold, not this version, keeps the
+  two subjects apart** (a host item's key is `host/` tree and compiler, a tile item's the RTL tree).
 - A resumed run's file is one run, as the driver names it: the same run id and
   device. Two runs given one id by the same key are not told apart.
 - `splice` and `device` are the only protection of a file's membership; there is
@@ -429,19 +578,47 @@ for a 60-hour run's 3,300 slices; `verify` 3.3 ms a slice.
   must agree with the catalog). Only the 2026-10-19 run was to hand, so this is held
   to legs with those keys taken out, and that the 2026-10-16 run's legs lack them is
   BELIEVED.
+- **A host-pool slice whose `run_start` recorded no `host/` tree cannot be signed** (refused, by name; the drivers before
+  2026-10-20 recorded none). A slice is held to the `run_start` in force for it, so a resumed file whose `run_start`s differ in
+  whether they recorded the tree has records for some of its host slices and refusals for the others.
+- **The machine is not in a host-pool record**: no CPU model, no libm or glibc version, no operating system, no flags, no node
+  name (by design: the device pseudonym stands for the key); `subject.cc` is the compiler's line as the run read it at its start; `dirty`
+  is read once, at the start. The oracle's kind is in the campaign and its machine is not in the record ("Version 2").
+- A card image's slice of a host-reach campaign (the old runs') and a host-pool slice of it have different subjects and one
+  campaign; version 2 does not decide which counts for which tree, and does not merge them.
 - The tests need no card, no XRT and no compiler; `--metrics` takes the copy of a
   real run (the 2026-10-19 run's `metrics.jsonl` is not in the repository) and
   without it that group is skipped by name.
 
 ## The test
 
-`python hw/test_sweep_record.py [--metrics RUN_OR_FILE]` makes its own
+`python hw/test_sweep_record.py [--metrics RUN_OR_FILE] [--only GROUP,...]` makes its own
 temporary directory and removes it by that path, and its keys are derived from
 fixed labels or made by `cft_sign.py keygen` there: throwaways. Groups: forms
-(canonical form and shapes), rules (the driver's rules, item by item), export
+(canonical form and shapes, the version rule), rules (the driver's rules, item by item), export
 (a synthetic run in the driver's format, including records of types the
-exporter does not know), keys, domain, plants (each defect put into a signed
+exporter does not know, and the read-back below), keys, domain, plants (each defect put into a signed
 file, and the refusal it must draw; and the verifier without a check, which
-lets its plant through) and real. No runner stage runs it; one could
+lets its plant through), **host** (version 2: a synthetic run of card and host-pool slices, the
+subject's fields read back, the campaigns and their ids, the totals by subject kind, each export
+refusal with the exporter left as it was, each verifier refusal on a validly signed record so that only the check aimed at
+can fire, and the verifier without `subject_problem` and without `check_shape`) and real. No runner stage runs it; one could
 (the groups other than `real` need only Python and the repository, and take
 seconds), and the stage counts are the lead's.
+
+**The read-back reads the `run_start` in force.** A resumed run's file has one `run_start` for each invocation, and the
+exporter stamps each slice with the one in force for it (the images, the run id, the tool's commit and dirty flag, and a host
+record's tree can differ between them). `readback` re-derives every record from its raw leg and that `run_start`, by code
+whose source names no attribute of the module under test (a check reads its source for `S.<name>` references, and a plant of
+that check shows it can fail; the check does not see a getattr, an alias, an import or a module-level helper), writes out the device pseudonym from the key with hashlib and tests a finding as `vm + fm > 0`; the
+exporter's own `device_of` and `is_finding` are held on their own, against hashlib and against the synthetic runs' one failing leg.
+Before 2026-10-21 `real` took the file's first `run_start` for every leg, which failed
+the 174 legs of the 2026-10-19 file's second invocation (0b7c9599 after 881bbcb6: SG's test, not a regression); it now holds
+on the real file (`--metrics`), and in every run of the suite on a synthetic file of two `run_start`s of different commits, with its
+plant, the first-`run_start` expectation, which must be red there at exactly the legs after the resume and on the tool's commit
+alone (on the real file: the 174, MEASURED).
+
+The driver's test (`hw/test_card_stress.py`, group `records`) runs the records through `RecordSink`, on a real dry run's stream
+with the one flag that says dry changed, and on a real, not dry, run over test doubles; its plants for the format's version 2
+run this test's groups from a plant's copy of the code (`SWEEP_RECORD_TEST_ROOT` names the tree that has `docs/`, `certificates/` and
+`python/`).

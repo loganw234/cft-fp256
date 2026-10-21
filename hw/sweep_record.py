@@ -24,11 +24,20 @@ Design: docs/studies/SWP-A-coverage.md 5.3 and 6.6. The record, its keys and wha
 proves: docs/SWEEP-RECORDS.md. Version 1 holds what a leg record and run_start hold and no more:
 a field the data cannot fill is ABSENT, never a default.
 
+Two versions are known. Version 1 is the card slice and stream (the subject is a card image: its
+name, the SHA-256 of its xclbin, its tiles) and the campaign, as they have always been written.
+Version 2 adds ONE form: the slice and stream of a host-pool job (the image `cpu`), whose subject
+is the host build that computed it - src, the git tree hash of host/, whether host/ differed from
+it, and the compiler's version line, each read from run_start.tree. The exporter writes version 2
+for a host-pool leg and version 1 for every other; a record is the one or the other, never both,
+and `verify` takes both and refuses any other version by name (`version`).
+
 From the driver: Exporter(Signer(load_seed(KEY))) takes the run_start, build and leg records the
 driver writes (.run_start(rec), .build(rec), .leg(rec)) and returns the lines to append: none for
 a leg that is not a sweep leg, or that did not finish (a status other than pass or fail, counted
 in .left). A run_start or a leg that cannot be a record - a finished sweep leg with no sweep block
-or no counts, a time or rate that is not a finite number, a leg the catalog disagrees with - is a
+or no counts, a time or rate that is not a finite number, a leg the catalog disagrees with, a
+host-pool slice whose run recorded no host/ tree, a slice dressed as the other kind - is a
 Refusal named `metrics`, and the exporter stays as it was. It imports hw/card_stress_lib.py (the
 item table and the driver's rules), python/cft_sign.py (the key file format) and python/cft_golden
 (cert, cert2, ed25519); every other import is the standard library.
@@ -52,7 +61,9 @@ import card_stress_lib as L  # noqa: E402  the item table and the driver's count
 import cft_sign  # noqa: E402  the key file format
 from cft_golden import cert, cert2, ed25519  # noqa: E402
 
-VERSION = 1
+VERSION = 1                                 # the card slice and stream, and the campaign: as they have always been written
+HOST_VERSION = 2                            # the host-pool slice and stream: version 1's with a host build for its subject
+VERSIONS = (VERSION, HOST_VERSION)          # every version this verifier knows; any other is refused by name (`version`)
 TAG_RECORD = b"cft-sweep-record 1\x00"      # a record's signature signs this, then the 32-byte id
 TAG_DEVICE = b"cft-sweep-device 1\x00"      # a device pseudonym hashes this, then the 32-byte key
 ORACLE = "host-fpu+glibc"                  # SWP-A 2.5: the soaks compare with the host FPU and libm
@@ -64,11 +75,13 @@ REFUSALS = {                                # every refusal, by name
     "output": "the output file is there already (never overwritten) or cannot be created",
     "key-file": "a key file that cannot be read, is not cft_sign.py's format, or that others may read",
     "key-in-tree": "a key file inside a git working tree: a signing key lives outside every repository",
-    "metrics": "a run that cannot be exported as the driver wrote it (the message says how)",
+    "metrics": "a run that cannot be exported as the driver wrote it (the message says how: a host-pool slice whose "
+               "run recorded no host/ tree, a slice dressed as the other kind, ...)",
     "empty": "no finished sweep slice to export, or no slice or stream in the file to verify",
     "canonical": "a line whose bytes are not the record's canonical form",
-    "version": "a record of a version this verifier does not know",
-    "form": "not a version-1 record of its kind: a field missing, unknown or out of its form",
+    "version": "a record of a version this verifier does not know (it knows 1 and 2)",
+    "form": "not a record of its version and kind: a field missing, unknown or out of its form (a card subject in a "
+            "version-2 record, a host subject in a version-1 one, a version-2 campaign)",
     "id": "a record whose bytes do not hash to its id",
     "signature": "no signature where one is required, or one that does not verify",
     "signature-domain": "a signature that verifies under the certificate domain, not the record's",
@@ -77,7 +90,8 @@ REFUSALS = {                                # every refusal, by name
     "device": "a run.device that is not the pseudonym of the key (or of the signing key)",
     "signed": "sign was given a record that carries a signature already",
     "splice": "a record of another run, or another device, in a file that is one run's",
-    "campaign": "a record naming a campaign that is not in the file, or not of its kind",
+    "campaign": "a record naming a campaign that is not in the file, or not of its kind (a slice of a random campaign; "
+                "a host-pool record of a campaign whose reach is the tile)",
     "counts": "counts that break the driver's rules for the campaign",
     "run": "a run block whose times and rate disagree with each other",
 }
@@ -186,55 +200,86 @@ def _rx(pat): return lambda v: type(v) is str and pat.fullmatch(v) is not None
 def _one(*xs): return lambda v: type(v) is str and v in xs
 def _eq(x): return lambda v: type(v) is type(x) and v == x
 def _strs(n, m): return lambda v: type(v) is list and len(v) <= n and all(type(s) is str and len(s) <= m for s in v)
+def _text(n): return lambda v: type(v) is str and 1 <= len(v) <= n and all(ord(ch) >= 32 and ord(ch) != 127 for ch in v)
 
 
 NAME = re.compile(r"[a-z][a-z0-9-]{0,63}")
 RUNID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 RELPATH = re.compile(r"(?!/)(?!.*\.\.)[A-Za-z0-9._/-]{1,200}")      # relative, no `..`, no drive, no ~
-COMMIT = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
+COMMIT = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")                   # a git object name: SHA-1, or SHA-256 in a repository that uses it
 ARGS = re.compile(r"op (?:lo hi|count seed)(?: mode)?")
+CC_MAX = 256                                                        # the compiler's version line: text of at most this many characters
 H64, H128 = _rx(_h(64)), _rx(_h(128))
-SUBJECT = ({"image": _rx(NAME), "xclbin": H64, "tiles": _pos}, {"tile": _pos})
+SUBJECT = ({"image": _rx(NAME), "xclbin": H64, "tiles": _pos}, {"tile": _pos})              # version 1: a card image
+HOST_SUBJECT = ({"src": _rx(COMMIT)}, {"dirty": _bool, "cc": _text(CC_MAX)})                # version 2: a host build
 TOOL = ({"commit": _rx(COMMIT), "dirty": _bool}, {})
 RUN = ({"id": _rx(RUNID), "device": _rx(_h(16)), "start_ms": _uint, "end_ms": _uint},
        {"rate": _uint, "log": _rx(RELPATH)})
 SIG = ({"alg": _eq("ed25519"), "key": H64, "sig": H128}, {})
-_HEAD = {"id": H64, "v": _eq(VERSION)}
-_BOTH = {"cases": _uint, "vm": _uint, "fm": _uint, "subject": SUBJECT, "run": RUN}
-_OPT = {"tool": TOOL, "disagreements": _strs(16, 1000), "sig": SIG}
-SHAPES = {
-    "campaign": (dict(_HEAD, kind=_eq("campaign"), operation=_rx(NAME), sweep=_one("exhaustive", "random"),
-                      tool=_rx(NAME), args=_rx(ARGS), oracle=_rx(re.compile(r"[a-z][a-z0-9+-]{0,39}")),
-                      reach=_one("tile", "host")),
-                 {"attribute": _rx(NAME), "space": _pos, "exact": _bool, "extra_cases": _pos,
-                  "per_encoding": _pos}),
-    "slice": (dict(_HEAD, kind=_eq("slice"), cid=H64, lo=_uint, hi=_pos, **_BOTH), dict(_OPT, skipped=_uint)),
-    "stream": (dict(_HEAD, kind=_eq("stream"), cid=H64, seed=_uint, count=_pos, **_BOTH), _OPT),
+_CAMPAIGN_HEAD = {"id": H64, "v": _eq(VERSION)}
+
+
+def _forms(version, subject):
+    """The slice and the stream of one version: version 1's and version 2's differ in the subject and in `v`, and in nothing else."""
+    head = {"id": H64, "v": _eq(version)}
+    both = {"cases": _uint, "vm": _uint, "fm": _uint, "subject": subject, "run": RUN}
+    opt = {"tool": TOOL, "disagreements": _strs(16, 1000), "sig": SIG}
+    return {"slice": (dict(head, kind=_eq("slice"), cid=H64, lo=_uint, hi=_pos, **both), dict(opt, skipped=_uint)),
+            "stream": (dict(head, kind=_eq("stream"), cid=H64, seed=_uint, count=_pos, **both), opt)}
+
+
+SHAPES = {                                   # by version, then kind: a campaign is version 1's, whatever version the records naming it are
+    VERSION: dict(_forms(VERSION, SUBJECT), campaign=(
+        dict(_CAMPAIGN_HEAD, kind=_eq("campaign"), operation=_rx(NAME), sweep=_one("exhaustive", "random"),
+             tool=_rx(NAME), args=_rx(ARGS), oracle=_rx(re.compile(r"[a-z][a-z0-9+-]{0,39}")),
+             reach=_one("tile", "host")),
+        {"attribute": _rx(NAME), "space": _pos, "exact": _bool, "extra_cases": _pos, "per_encoding": _pos})),
+    HOST_VERSION: _forms(HOST_VERSION, HOST_SUBJECT),
 }
 
 
-def _shape(obj, spec, where, what):
+def _shape(obj, spec, where, what, v=VERSION):
     req, opt = spec
     for k in req:
         if k not in obj:
             raise Refusal("form", f"{where}: the {what} has no field '{k}'")
-    for k, v in obj.items():
+    for k, val in obj.items():
         chk = req.get(k) or opt.get(k)
         if chk is None:
-            raise Refusal("form", f"{where}: '{k}' is not a field of version {VERSION}'s {what}")
+            raise Refusal("form", f"{where}: '{k}' is not a field of version {v}'s {what}")
         if isinstance(chk, tuple):
-            if type(v) is not dict:
+            if type(val) is not dict:
                 raise Refusal("form", f"{where}: '{k}' is not an object")
-            _shape(v, chk, f"{where}.{k}", k)
-        elif not chk(v):
-            raise Refusal("form", f"{where}: '{k}' is not in version {VERSION}'s form for it")
+            _shape(val, chk, f"{where}.{k}", k, v)
+        elif not chk(val):
+            raise Refusal("form", f"{where}: '{k}' is not in version {v}'s form for it")
+
+
+def subject_kind(rec) -> str:
+    """What computed a slice or stream: 'host' (version 2: a host-pool job, on the CPU) or 'card' (version 1: a card image)."""
+    return "host" if rec["v"] == HOST_VERSION else "card"
 
 
 def check_shape(obj, where):
-    kind = obj.get("kind")
-    if type(kind) is not str or kind not in SHAPES:
+    kind, v = obj.get("kind"), obj.get("v")
+    if type(kind) is not str or kind not in ("campaign", "slice", "stream"):
         raise Refusal("form", f"{where}: kind {kind!r} is none of campaign, slice, stream")
-    _shape(obj, SHAPES[kind], where, kind)
+    if type(v) is not int:
+        raise Refusal("form", f"{where}: 'v', the version, is missing or not an integer")
+    if v not in SHAPES:
+        raise Refusal("version", f"{where}: version {v}; this verifier knows versions {' and '.join(map(str, VERSIONS))}")
+    if kind not in SHAPES[v]:
+        raise Refusal("form", f"{where}: version {v} has no {kind}: a campaign is version {VERSION}'s whatever the version of the "
+                              f"records that name it, so no campaign id depends on it")
+    sub = obj.get("subject")
+    if isinstance(sub, dict) and kind != "campaign":     # a card slice dressed as a host one and the reverse, said as what each is
+        if v == HOST_VERSION and ("image" in sub or "xclbin" in sub):
+            raise Refusal("form", f"{where}: a version-{v} {kind} has a host build for its subject (src), and this one has a card "
+                                  f"image's: a card slice is version {VERSION}")
+        if v == VERSION and "src" in sub:
+            raise Refusal("form", f"{where}: a version-{v} {kind} has a card image for its subject (image, xclbin, tiles), and this "
+                                  f"one has a host build's (src): a host-pool slice is version {HOST_VERSION}")
+    _shape(obj, SHAPES[v][kind], where, kind, v)
     if kind == "campaign":
         exh = obj["sweep"] == "exhaustive"
         have = {"space", "exact", "extra_cases", "per_encoding"} & set(obj)
@@ -248,7 +293,7 @@ def check_shape(obj, where):
         sub = obj["subject"]
         if kind == "slice" and obj["lo"] >= obj["hi"]:
             raise Refusal("form", f"{where}: the interval [{obj['lo']}, {obj['hi']}) is empty")
-        if sub.get("tile", 1) > sub["tiles"]:
+        if "tiles" in sub and sub.get("tile", 1) > sub["tiles"]:         # a host build has no tiles
             raise Refusal("form", f"{where}: tile {sub['tile']} of an image with {sub['tiles']} tiles")
 
 
@@ -280,8 +325,8 @@ def read_record_line(raw: bytes, n: int) -> dict:
         raise Refusal("form", f"{where} is not a JSON object")
     if type(obj.get("v")) is not int:
         raise Refusal("form", f"{where}: 'v', the version, is missing or not an integer")
-    if obj["v"] != VERSION:
-        raise Refusal("version", f"{where}: version {obj['v']}; this verifier knows version {VERSION}")
+    if obj["v"] not in VERSIONS:
+        raise Refusal("version", f"{where}: version {obj['v']}; this verifier knows versions {' and '.join(map(str, VERSIONS))}")
     try:
         same = canon(obj) == raw
     except ValueError as e:
@@ -385,6 +430,17 @@ def is_finding(rec) -> bool:
     return rec["vm"] + rec["fm"] > 0
 
 
+def subject_problem(camp, rec):
+    """Why a record's subject cannot be the evidence its campaign is about, or None. A host-pool record (version 2) is evidence about
+    the host library run on the CPU, and a campaign whose reach is the tile asks about the card's tile, which a host job does not
+    touch; the other way is not refused: until the host pool existed the card swept the host items too (a card image's slice of a
+    campaign whose reach is the host), and those version-1 records stay valid."""
+    if subject_kind(rec) == "host" and camp["reach"] != "host":
+        return (f"a host-pool {rec['kind']} (version {rec['v']}) of a campaign whose reach is {camp['reach']}: a host build computes "
+                f"nothing the tile does, so its subject is no evidence about this campaign")
+    return None
+
+
 def check_signature(rec, ring):
     """The signature, then its key against the keyring, then its device; a refusal by name."""
     sg, key = rec["sig"], bytes.fromhex(rec["sig"]["key"])
@@ -406,14 +462,16 @@ def check_signature(rec, ring):
 
 
 def verify_records(recs, ring=None, require_signed=True):
-    """Every record of a file held to the rules, for each in this order: splice, signature, campaign,
-    counts, run. Returns the report; raises the first refusal."""
+    """Every record of a file held to the rules, for each in this order: splice, signature, campaign
+    (its kind and its reach), counts, run. Returns the report, whose `kinds` totals the records by what
+    computed them (card, host); raises the first refusal."""
     for n, rec in recs:                     # a caller may hand records parse_file has not seen: no trust in a stored id
         if rec["id"] != record_id(rec):
             raise Refusal("id", f"line {n}: the bytes hash to {record_id(rec)[:16]}..., the id says {rec['id'][:16]}...")
     camps = {r["id"]: r for _, r in recs if r["kind"] == "campaign"}
     rep = {"run": None, "device": None, "campaigns": len(camps), "slices": 0, "streams": 0, "clean": 0,
-           "findings": [], "unsigned": 0, "keys": collections.Counter(), "cases": 0}
+           "findings": [], "unsigned": 0, "keys": collections.Counter(), "cases": 0,
+           "kinds": {k: {"records": 0, "clean": 0, "cases": 0} for k in ("card", "host")}}
     for n, rec in recs:
         if rec["kind"] == "campaign":
             continue
@@ -440,15 +498,19 @@ def verify_records(recs, ring=None, require_signed=True):
             raise Refusal("campaign", f"{who} names the campaign {rec['cid'][:16]}..., not in the file")
         if (rec["kind"] == "slice") != (camp["sweep"] == "exhaustive"):
             raise Refusal("campaign", f"{who} is a {rec['kind']} of a {camp['sweep']} campaign")
-        for name, why in (("counts", counts_problem(camp, rec)), ("run", run_problem(rec))):
+        for name, why in (("campaign", subject_problem(camp, rec)), ("counts", counts_problem(camp, rec)), ("run", run_problem(rec))):
             if why:
                 raise Refusal(name, f"{who}: {why}")
         rep[rec["kind"] + "s"] += 1
+        row = rep["kinds"][subject_kind(rec)]
+        row["records"] += 1
         if is_finding(rec):
             rep["findings"].append((n, rec, camp))
         else:
             rep["clean"] += 1
             rep["cases"] += rec["cases"]
+            row["clean"] += 1
+            row["cases"] += rec["cases"]
     if rep["run"] is None:
         raise Refusal("empty", "no slice or stream record in the file")
     return rep
@@ -498,6 +560,50 @@ class Exporter:
     def build(self, rec):
         self.built = rec.get("ok") is True
 
+    def _card_subject(self, rec, sw, where):
+        """Version 1's subject: the card image the job ran on (name, the SHA-256 of its xclbin held equal to run_start's, its tiles) and
+        the tile it ran on, where the leg recorded one. A leg that carries the host pool's mark (sweep.pool) is a host-pool slice
+        dressed as a card one: refused."""
+        if sw.get("pool") is not None:
+            raise Refusal("metrics", f"{where}: a host-pool slice dressed as a card one: it names the image {rec.get('image')!r} and "
+                                     f"carries the host pool's mark (sweep.pool), and the pool's jobs are on the image {L.CPU!r}")
+        img = self.start["images"].get(rec.get("image"))
+        if not isinstance(img, dict) or img.get("sha256") != rec.get("image_sha256"):
+            raise Refusal("metrics", f"{where}: image {rec.get('image')!r} with a hash that is not run_start's")
+        sub = {"image": rec["image"], "xclbin": rec["image_sha256"], "tiles": img.get("tiles")}
+        if sw.get("tile") is not None:
+            sub["tile"] = sw["tile"]
+        return sub
+
+    def _host_subject(self, rec, sw, it, where):
+        """Version 2's subject, for a leg of the host pool (the image cpu): the host build that computed it, each field READ from
+        run_start.tree - src (host_src, the git tree hash of host/, which the run must have recorded: required), dirty (host_src_dirty,
+        whether host/ differed from it, untracked files included) and cc (the compiler's version line) - and ABSENT where the run
+        recorded none, never a default. Nothing of the machine is in it (run_start.host is a node name, which no record carries; no CPU
+        model or libm version is recorded). A card slice dressed as a host one, and a host slice of a tile item, are refused."""
+        if rec.get("image_sha256") is not None or sw.get("tile") is not None:
+            raise Refusal("metrics", f"{where}: a card slice dressed as a host-pool one: image {L.CPU!r} (a CPU job has no xclbin and "
+                                     f"no tile) with " + ("an image hash" if rec.get("image_sha256") is not None else f"tile {sw['tile']}"))
+        if it.reach != L.HOST:
+            raise Refusal("metrics", f"{where}: a host-pool slice of {it.name}, an item whose reach is {it.reach}: a host build computes "
+                                     f"nothing the tile does, so its subject is no evidence about it")
+        tree = self.start.get("tree")
+        tree = tree if isinstance(tree, dict) else {}
+        src = tree.get("host_src")
+        if not isinstance(src, str) or not COMMIT.fullmatch(src):
+            raise Refusal("metrics", f"{where}: a host-pool slice whose run recorded no host/ tree (run_start.tree.host_src is "
+                                     f"{src!r}): a record of what a host job tested says which source it was, and this run does not")
+        sub = {"src": src}
+        if isinstance(tree.get("host_src_dirty"), bool):
+            sub["dirty"] = tree["host_src_dirty"]
+        cc = tree.get("cc")
+        if cc is not None:
+            if not HOST_SUBJECT[1]["cc"](cc):
+                raise Refusal("metrics", f"{where}: run_start.tree.cc is not a compiler version line a record can hold (text of 1 to "
+                                         f"{CC_MAX} characters, no control character): {str(cc)[:60]!r}")
+            sub["cc"] = cc
+        return sub
+
     def _body(self, rec, sw, counts, status, where):
         """-> (the campaign record with its id, the record's body without id and signature), or Refusal metrics."""
         it = self.items.get(sw.get("item")) if isinstance(sw.get("item"), str) else None
@@ -519,12 +625,12 @@ class Exporter:
                 raise Refusal("metrics", f"{where}: the tool ran {counts['encodings']} encodings of {hi - lo}")
         camp = campaign_body(it)
         camp["id"] = record_id(camp)
-        img = self.start["images"].get(rec.get("image"))
-        if not isinstance(img, dict) or img.get("sha256") != rec.get("image_sha256"):
-            raise Refusal("metrics", f"{where}: image {rec.get('image')!r} with a hash that is not run_start's")
-        body = {"v": VERSION, "cid": camp["id"], "cases": counts.get("cases"), "vm": counts.get("value_mismatches"),
-                "fm": counts.get("flag_mismatches"),
-                "subject": {"image": rec["image"], "xclbin": rec["image_sha256"], "tiles": img.get("tiles")},
+        if rec.get("image") == L.CPU:
+            version, subject = HOST_VERSION, self._host_subject(rec, sw, it, where)
+        else:
+            version, subject = VERSION, self._card_subject(rec, sw, where)
+        body = {"v": version, "cid": camp["id"], "cases": counts.get("cases"), "vm": counts.get("value_mismatches"),
+                "fm": counts.get("flag_mismatches"), "subject": subject,
                 "run": {"id": self.start["run_id"], "device": self.device,
                         "start_ms": _ms(rec.get("start_epoch"), "start_epoch"),
                         "end_ms": _ms(rec.get("end_epoch"), "end_epoch")}}
@@ -532,8 +638,6 @@ class Exporter:
             kind="stream", seed=sw.get("seed"), count=sw.get("count"))
         if exh and "skipped" in counts:
             body["skipped"] = counts["skipped"]
-        if sw.get("tile") is not None:
-            body["subject"]["tile"] = sw["tile"]
         rate = rec.get("rate")
         if isinstance(rate, dict) and rate.get("unit") == "cases/s" and isinstance(rate.get("value"), (int, float)):
             body["run"]["rate"] = _ms(rate["value"], "rate.value", 1)
@@ -568,17 +672,20 @@ class Exporter:
         if self.start is None or not self.built:
             raise Refusal("metrics", f"{where}: no run_start, or no passing build record since it: the tools "
                                      f"were not held to the tree")
+        ver = VERSION
         try:
             camp, body = self._body(rec, sw, counts, status, where)
+            ver = body["v"]
             out = self.signer.sign(body) if self.signer else dict(body, id=record_id(body))
             check_shape(out, where)                     # the output is held to the verifier's own rules
-            for name, why in (("counts", counts_problem(camp, out)), ("run", run_problem(out))):
+            for name, why in (("campaign", subject_problem(camp, out)), ("counts", counts_problem(camp, out)),
+                              ("run", run_problem(out))):
                 if why:
                     raise Refusal(name, why)
         except Refusal as e:
             if e.name == "metrics":
                 raise
-            raise Refusal("metrics", f"{where} is not a version-{VERSION} record: {e.name}: {e.why}") from None
+            raise Refusal("metrics", f"{where} is not a version-{ver} record: {e.name}: {e.why}") from None
         except (KeyError, TypeError, ValueError, OverflowError) as e:
             raise Refusal("metrics", f"{where}: {type(e).__name__}: {e}") from None
         lines = [] if camp["id"] in self.seen else [canon(camp) + b"\n"]
@@ -662,7 +769,7 @@ def cmd_sign(a):
     for n, rec in recs:
         if rec["kind"] != "campaign":
             if "sig" in rec:
-                raise Refusal("signed", f"line {n}: the record has a signature; a version-{VERSION} record has one")
+                raise Refusal("signed", f"line {n}: the record has a signature; a version-{rec['v']} record has one")
             if rec["run"]["device"] != signer.device:
                 raise Refusal("device", f"line {n}: it names device {rec['run']['device']}, not this key's "
                                         f"({signer.device}): export it for this key")
@@ -685,6 +792,8 @@ def cmd_verify(a):
         print(f"{path}: run {rep['run']}, device {rep['device']}: {rep['campaigns']} campaigns, {rep['slices']} "
               f"slices and {rep['streams']} streams; {rep['clean']} clean ({rep['cases']} cases), "
               f"{len(rep['findings'])} FINDINGS")
+        print("  by subject: " + "; ".join(f"{k} {v['clean']} clean ({v['cases']} cases)" + (
+            f", {v['records'] - v['clean']} findings" if v["records"] != v["clean"] else "") for k, v in rep["kinds"].items()))
         for key, k in sorted(rep["keys"].items()):
             holder = ring.get(key) if ring is not None else None
             print(f"  {k} signed by key {key}, " + (f"held by {cert2.text_token(holder)} by the keyring handed"

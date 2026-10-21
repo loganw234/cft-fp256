@@ -1822,9 +1822,10 @@ them first, name them: `--sweep-items` serves the named items only.
     bash hw/card-stress.sh --until "YYYY-MM-DD HH:MM" --out /data/card-stress-NNNN --earlier-runs /data/card-stress-1016 \
          --sweep-items div32-hard-rne,rint64-class-rne,scaleb64-class-rne,sqrt64-hard-rmm
 
-**Signed records.** `--records` writes each finished sweep slice as a canonical record, version 1
-(docs/SWEEP-RECORDS.md), to `OUT/sweep-records.jsonl` as the leg finishes, through `hw/sweep_record.py`'s `Exporter`.
-Version 1 puts the device in every record, so a key is needed: **`--sign-key KEYFILE`** signs with a `python/cft_sign.py` key
+**Signed records.** `--records` writes each finished sweep slice as a canonical record (docs/SWEEP-RECORDS.md) to
+`OUT/sweep-records.jsonl` as the leg finishes, through `hw/sweep_record.py`'s `Exporter`: **version 1 for a card slice, version 2 for a
+host-pool slice** (since 2026-10-21, parcel SR2; Logan's word, "10. Yes, change now for DR3's issue").
+Every record has the device in it, so a key is needed: **`--sign-key KEYFILE`** signs with a `python/cft_sign.py` key
 (Logan's, made once, by him, on the machine that signs, outside every git working tree: `keygen` writes where it is told, and
 the driver REFUSES a key inside a working tree, by name `key-in-tree`, and a key file that cannot be read or that others may
 read, `key-file`, at the command line, before anything starts), or **`--device-key HEX`** names the device of a public key and
@@ -1841,12 +1842,17 @@ twice; a different key than the file's is refused, `device`; a torn last line is
 
     python -B hw/sweep_record.py verify /data/card-stress-NNNN/sweep-records.jsonl --keyring RING
 
-says clean, with a case total equal to the driver's own coverage of the same slices (the suite shows it on a real - not dry - run
-of the driver over test doubles). **Host-pool slices are not in the file**: version 1's record names an image and its xclbin's
-SHA-256, which a CPU job has none of, so the exporter would refuse each; the driver counts them, says so once
-(`records_host_slices`) and `metrics.jsonl` has them. Signing a host item needs a subject without an image, a change of format,
-and it is Logan's to decide. The campaign record of an item says its own space (hw/sweep_record.py, one line, changed at the
-lead's word: every older campaign's record and id is what it was, held in the suite by one digest taken at 827c3cf).
+says clean, with a case total equal to the driver's own coverage of ALL the clean slices it recorded, the card's and the host pool's
+(the suite shows it on a real - not dry - run of the driver over test doubles), and a line `by subject: card N clean (CASES cases);
+host N clean (CASES cases)`; the `records_summary` event says the same figures. **Host-pool slices are in the file** (they were not
+in DR3's, which counted them and said so once, as `records_host_slices`: that event is RETIRED): a host-pool slice is a version-2
+record whose subject is the `host/` tree hash, the dirty flag and the compiler's line `run_start` recorded
+(`tree.host_src`, `host_src_dirty`, `cc`), signed like a card slice. **A host-pool slice of a run whose `run_start` recorded no
+`host/` tree** (every run before 2026-10-20's driver, among them the 2026-10-19 run's first night) **is refused by name** (an event
+`record_refused`, `metrics`: "a host-pool slice whose run recorded no host/ tree") and is in `metrics.jsonl` only. The record says
+nothing of the machine that computed it (no CPU model, libm version or OS is recorded; docs/SWEEP-RECORDS.md, "Version 2"). The
+campaign record of an item says its own space (hw/sweep_record.py, one line, changed at the lead's word on 2026-10-21: every
+older campaign's record and id is what it was, held in the suite by one digest over all 125 items taken at 77c5dbca).
 
 **The pass size.** `--sweep-chunk N` (N a positive multiple of 4096 up to 65536, the Makefile's rule, refused by name
 otherwise) makes the build step also run `make -C host SOAK_CHUNK=N soak-chunk` with the XRT flags and `C5DEFS` of the
@@ -1875,10 +1881,11 @@ says, per item, the slices that ran at each batch other than 4096 and each disag
 flags per operand call whatever the batch is (CLS_BATCH). A host item gains nothing from a larger chunk (the software backend
 has no passes to amortise; CK measured CL's class modes at 4.5 s with the default tools and 11.6 s with the chunked ones) and
 compares flags over more operands: `--sweep-chunk` is for the tile items, and applies to the pool's slices too, since the flag
-names the tools of the sweep. The signed record has no field for the pass size (version 1): a stream of a
+names the tools of the sweep. The signed record has no field for the pass size (in either version): a stream of a
 chunked run cannot be told from a default run's by its record, only by metrics.jsonl.
 
-**Known limits** (docs/VALIDATION.md, the entry for DR3): the host slices are not signable (above); python/figure_extracts.py's
+**Known limits** (docs/VALIDATION.md, the entries for DR3 and SR2): a host-pool slice of a run that recorded no `host/` tree is not
+signable (above), and the real 2026-10-19 file holds no host-pool slice at all; python/figure_extracts.py's
 `STRESS_TILE_OPS` does not list the five new tile modes, so the stress figures' extractor refuses, loudly, a run that served them,
 until FX's list gains them (its filter for cpu legs, which this parcel added, is the one change made there).
 

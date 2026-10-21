@@ -31,6 +31,11 @@ Three kinds of group, then the plants (the groups, by name, are in hw/test-card-
             sink on a real dry run's records (refused as they stand; written with the one field that says 'dry run' changed in a scratch
             directory) and a real, NOT dry run of the driver over test doubles (POSIX); notes: --quick --sweep-items after an empty wave,
             figure_extracts' cpu filter (needs CARD_STRESS_METRICS), and standin_alive (its own group, `standin`, which its plants run).
+            Since parcel SR2 (2026-10-21) the records group also holds the host pool's slices, which are version-2 records: the sink's totals by
+            subject kind equal to the raw legs' and to what `sweep_record.py verify` prints, a host slice of a run with no host/ tree refused by
+            name, and the campaign ids of all 125 items unchanged; its plants for the format run hw/test_sweep_record.py from a plant's copy.
+  Two suites of this file in one WSL distro at once collide: the card guard scans every process of the distro, and a stand-in with
+            CFT_SOAK_ARTIFACT in its environment makes the other suite's drivers refuse to start (guard_refused, rc 2, no records).
 
   resume   (parcel DR4, 2026-10-21) --resume counts coverage per tree class: the counting on synthetic files (each part of the report's key
             alone, an old run's trees derived from its commit, an unknown class never counted, the events), the planner held to the report's
@@ -3937,6 +3942,9 @@ def scn_chunk(env: Env, src: str = HERE) -> list:
 # what it was, byte for byte, so that every campaign id a run has already written stays valid.
 OLD_CAMPAIGN_DIGEST = "b8555f2f9edc1cf9ac4c097eb57e2553f4b7cbf3933831744ed653a5d415432d"
 CONV32TO64_CAMPAIGN_ID = "c2aaacbea9016dc8da1472d1a71f15e161d49bdecdb2db6cadc4177a4fb3edc1"      # docs/SWEEP-RECORDS.md's own figure
+# The same digest over all 125 items (the 90 and DR3's 35) - MEASURED at 77c5dbca, DR3's merge, before version 2 of the record (scratch campaign_ids.py,
+# run in a `git archive` of that commit and at the parcel's tree: equal): a host item's campaign is the one record whoever computed the slice.
+CAMPAIGN_DIGEST_125 = "2e8d96089a143918556275f5321c28f3fd9e78cae8b6044fe4dd88fbe52536b2"
 
 
 def campaign_digest(SR, items) -> str:
@@ -3962,6 +3970,10 @@ def campaign_space_checks(src: str = HERE) -> list:
           "id), and conv32to64-all's id is the one docs/SWEEP-RECORDS.md prints",
           dg_now == OLD_CAMPAIGN_DIGEST and SR.record_id(SR.campaign_body(next(i for i in items if i.name == "conv32to64-all"))) ==
           CONV32TO64_CAMPAIGN_ID, dg_now)
+        c("campaign space: the campaign ids of all 125 items, the 90 and the 35, are what they were at 77c5dbca, before version 2 (one digest over every "
+          "name and id): no campaign id moved when the host pool's slices became records, and a campaign is version 1 still",
+          campaign_digest(SR, items) == CAMPAIGN_DIGEST_125 and len(items) == 125 and all(SR.campaign_body(i)["v"] == 1 for i in items),
+          campaign_digest(SR, items))
         c("campaign space: every old exhaustive item's campaign says 2^32 and every random one's has no space",
           all((SR.campaign_body(i).get("space") == (1 << 32)) if i.kind == "exhaustive" else ("space" not in SR.campaign_body(i)) for i in items[:90]))
         bad = []
@@ -4105,22 +4117,32 @@ def records_args_checks(env: Env, src: str = HERE) -> list:
         rmtree_force(scratch)
     # without the flags: no file, no setting, no status line - the run is as it was
     R = run_driver(env, "norec", ["--quick", "--legs", "api-test", "--sweep-items", "rint64-class-rne"], src=src, cap=100)
-    st = open(os.path.join(R.out, "status.txt")).read()
+    # a run that never started (no status, no settings, no records: seen once in WSL, on 2026-10-21, and not again in the rerun) is a red check
+    # that says what the driver printed, not an IndexError that ends the group
+    st = open(os.path.join(R.out, "status.txt")).read() if os.path.exists(os.path.join(R.out, "status.txt")) else None
+    sj = os.path.join(R.out, "settings.json")
     c("records args: without --records no records file is written, run_start names no records, settings.json names no records, key or pass "
       "size, and status.txt has no records line",
-      not os.path.exists(os.path.join(R.out, "sweep-records.jsonl")) and "records" not in R.recs[0]["settings"]
-      and not (set(json.load(open(os.path.join(R.out, "settings.json")))) & {"records", "sign_key", "device_key", "sweep_chunk"})
-      and "records    " not in st and R.rc == 0, f"rc {R.rc}")
+      bool(R.recs) and st is not None and os.path.exists(sj)
+      and not os.path.exists(os.path.join(R.out, "sweep-records.jsonl")) and "records" not in R.recs[0]["settings"]
+      and not (set(json.load(open(sj))) & {"records", "sign_key", "device_key", "sweep_chunk"})
+      and "records    " not in st and R.rc == 0, f"rc {R.rc}: {R.text[-300:]}")
     return out
+
+
+# What a real run's run_start.tree says of host/ and the compiler (hw/card_stress.py tree_facts), fixed here so that the host slices' records do
+# not depend on whether git and a compiler are on the machine running the test.
+HOST_TREE = {"host_src": "ab" * 20, "host_src_dirty": False, "cc": "cc (a test compiler) 1.0"}
 
 
 def records_sink_checks(env: Env, src: str = HERE) -> list:
     """The driver's record sink on the records of a real dry run (the stand-in's slices of index-based items, host and card): REFUSED as
     they stand - the exporter refuses a dry run - and, with one flag of run_start set to say the run was real, written, held to the
-    verifier and to the driver's own coverage. This is how --records is exercised end to end on every platform without weakening that
-    refusal: the same stream gives records only when the one field that says 'a dry run' is changed, in a scratch directory, by the
-    test; nothing in the driver or the exporter offers such a switch. A leg the exporter refuses is named and the run goes on; a resumed
-    run continues its file."""
+    verifier and to the driver's own coverage, the host-pool slices (version 2) with the card's (version 1). This is how --records is
+    exercised end to end on every platform without weakening that refusal: the same stream gives records only when the one field that says
+    'a dry run' is changed, in a scratch directory, by the test; nothing in the driver or the exporter offers such a switch. A leg the
+    exporter refuses is named and the run goes on, a host slice of a run that recorded no host/ tree among them; a resumed run continues
+    its file and counts it by what computed each record."""
     out: list = []
 
     def c(n, ok, d=""):
@@ -4145,13 +4167,17 @@ def records_sink_checks(env: Env, src: str = HERE) -> list:
         c("records sink: the source run is a dry run with card slices on the quad, the single and the deep and host slices on the pool",
           dg(recs[0], "settings", "dry_run") is True and len(card) >= 8 and len(host) == 2 and {r["image"] for r in card} == {"quad", "single", "deep"},
           f"{len(card)} card, {len(host)} host")
-        want_cases = sum(r["counts"]["cases"] for r in card)
+        card_cases, host_cases = (sum(r["counts"]["cases"] for r in x) for x in (card, host))
+        want_cases = card_cases + host_cases                  # the driver's own coverage of every clean slice it recorded, card and host
 
-        def feed_all(mod, sink, stream, dry_flag, via=None):
+        def feed_all(mod, sink, stream, dry_flag, via=None, host_tree=HOST_TREE):
             for r in stream:
                 r = json.loads(json.dumps(r))
-                if r.get("type") == "run_start" and dry_flag is not None:
-                    r["settings"]["dry_run"] = dry_flag
+                if r.get("type") == "run_start":
+                    if dry_flag is not None:
+                        r["settings"]["dry_run"] = dry_flag
+                    if host_tree:
+                        r["tree"] = dict(r["tree"], **host_tree)
                 (via.rec if via is not None else sink.feed)(r)
 
         with driver_from(src) as (mod, d, L2):
@@ -4167,9 +4193,9 @@ def records_sink_checks(env: Env, src: str = HERE) -> list:
             except Exception as e:                 # a refusal that escapes the sink would end a long run: a red check, not a crash
                 crash1 = repr(e)
             c("records sink: the dry run's records fed as they stand are REFUSED by the exporter: one records_disabled event naming the dry run, "
-              "every finished card slice counted as not exported, and no file",
+              "every finished slice, card and host-pool, counted as not exported, and no file",
               crash1 is None and not os.path.exists(p1) and [n for n, _ in ev1].count("records_disabled") == 1 and "dry run" in ev1[0][1]
-              and s1.refused.get("disabled") == len(card) and s1.written == 0, str(crash1 or ev1[:2]))
+              and s1.refused.get("disabled") == len(card) + len(host) and s1.written == 0, str(crash1 or ev1[:2]))
             SR = s1.SR
             ex = SR.Exporter(public=bytes.fromhex(pub))
             try:
@@ -4195,19 +4221,39 @@ def records_sink_checks(env: Env, src: str = HERE) -> list:
                 vr = (rep["clean"], rep["cases"], len(rep["findings"]), rep["slices"], rep["campaigns"], rep["unsigned"])
             except SR.Refusal as e:
                 vr = ("refused", str(e))
+            all_items = {r["sweep"]["item"] for r in card + host}
             c("records sink: through Driver.rec the same stream, with only settings.dry_run said False, is written: the file verifies signed by "
-              "the throwaway key against its keyring, every finished CARD slice is one record, no finding, and the cases total is the driver's "
-              "own coverage of those slices",
-              vr == (len(card), want_cases, 0, len(card), len({r["sweep"]["item"] for r in card}), 0), str(vr))
+              "the throwaway key against its keyring, every finished slice - the card's AND the host pool's - is one record, no finding, and the "
+              "cases total is the driver's own coverage of all of them",
+              vr == (len(card) + len(host), want_cases, 0, len(card) + len(host), len(all_items), 0), str(vr))
+            kinds = {k: (v["records"], v["clean"], v["cases"]) for k, v in rep["kinds"].items()} if vr[0] != "refused" else None
+            want_kinds = {"card": (len(card), len(card), card_cases), "host": (len(host), len(host), host_cases)}
+            says = f"by subject: card {len(card)} record(s), {len(card)} clean ({card_cases} cases); host {len(host)} record(s), {len(host)} clean ({host_cases} cases)"
+            c("records sink: the totals by subject kind - what verify reports, what the sink counted (the figures its records_summary event says) "
+              "and the raw legs' own summed apart - are equal: card and host, records, clean and cases",
+              kinds == want_kinds and {k: tuple(v) for k, v in s2.kinds.items()} == want_kinds and s2.written == len(card) + len(host)
+              and says in s2.summary(), f"{kinds} {s2.kinds} {s2.summary()[-260:]}")
+            vc = subprocess.run([sys.executable, "-B", "-I", os.path.join(src, "sweep_record.py"), "verify", p2, "--keyring", ring], capture_output=True, text=True, timeout=120)
+            m1 = re.search(r"(\d+) slices and 0 streams; (\d+) clean \((\d+) cases\), 0 FINDINGS", vc.stdout)
+            m2 = re.search(r"by subject: card (\d+) clean \((\d+) cases\); host (\d+) clean \((\d+) cases\)\n", vc.stdout)
+            c("records sink: the case total `sweep_record.py verify` PRINTS (the command, not the library) is the driver's coverage of all the clean "
+              "slices it recorded, card and host, and its line by subject says each kind's: the three figures agree",
+              vc.returncode == 0 and m1 is not None and m2 is not None and int(m1.group(1)) == int(m1.group(2)) == len(card) + len(host)
+              and int(m1.group(3)) == want_cases and tuple(int(x) for x in m2.groups()) == (len(card), card_cases, len(host), host_cases),
+              (vc.stdout + vc.stderr)[-300:])
+            v2 = [r for _n, r in parsed if r["kind"] != "campaign" and r["v"] == 2]
+            c("records sink: the host-pool slices are in the file as version-2 records whose subject is run_start's host/ tree and compiler, nothing of "
+              "a card image, the card slices are version 1, no records_host_slices event is said (it is retired) and not one leg was refused",
+              len(v2) == len(host) and all(r["subject"] == {"src": HOST_TREE["host_src"], "dirty": False, "cc": HOST_TREE["cc"]} for r in v2)
+              and all(r["v"] == 1 and "image" in r["subject"] for _n, r in parsed if r["kind"] != "campaign" and r["v"] != 2)
+              and "records_host_slices" not in [n for n, _ in ev2] and not s2.refused and "record_refused" not in [n for n, _ in ev2],
+              str([(n, x[:60]) for n, x in ev2]))
             camps = {r["operation"] + "-" + r.get("attribute", ""): r for _n, r in parsed if r["kind"] == "campaign"}
-            c("records sink: the campaign records say each item's own space (div32-hard 21,235,788, rint64-class 35,840, cvtto64-class is a host "
-              "item and has none), and Driver.rec still wrote metrics.jsonl first, every record of it",
+            c("records sink: the campaign records say each item's own space (div32-hard 21,235,788, rint64-class 35,840, and the host items' own: "
+              "cvtto64-class 40,768) and, for a host item, reach host and the oracle kind; Driver.rec still wrote metrics.jsonl first, every record of it",
               camps.get("div32-hard-rne", {}).get("space") == 21_235_788 and camps.get("rint64-class-rne", {}).get("space") == 35_840
-              and "cvtto64-class-rne" not in camps and len(L.read_records(d.metrics)[0]) == len(recs), str(sorted(camps)))
-            c("records sink: the host-pool slices are counted, not offered to the exporter (version 1 has no form for a slice with no image): "
-              "2 counted, one records_host_slices event, and not one record_refused",
-              s2.host_slices == len(host) == 2 and [n for n, _ in ev2].count("records_host_slices") == 1 and not s2.refused
-              and "record_refused" not in [n for n, _ in ev2], str([(n, x[:60]) for n, x in ev2]))
+              and camps.get("cvtto64-class-rne", {}).get("space") == 40_768 and camps["cvtto64-class-rne"]["reach"] == "host"
+              and camps["cvtto64-class-rne"]["oracle"] == "host-fpu+glibc" and len(L.read_records(d.metrics)[0]) == len(recs), str(sorted(camps)))
             def slurp(pth):
                 return read_bytes(pth).decode("utf-8", "replace")
             secret_in = any(seed in slurp(pth) for pth in (p2, d.metrics))
@@ -4227,7 +4273,8 @@ def records_sink_checks(env: Env, src: str = HERE) -> list:
             except SR.Refusal as e:
                 un, sig_needed = ("refused", str(e)), False
             c("records sink: with --device-key the records are written unsigned (verify without --allow-unsigned refuses them: signature) and "
-              "name the key's device", un == (len(card), len(card)) and sig_needed and s3.ex.device == SR.device_of(bytes.fromhex(pub)), str(un))
+              "name the key's device (host-pool records included)", un == (len(card) + len(host), len(card) + len(host)) and sig_needed
+              and s3.ex.device == SR.device_of(bytes.fromhex(pub)), str(un))
             # 4. a leg the exporter refuses is named and the run goes on
             p4 = os.path.join(kd, "refused.jsonl")
             s4, ev4 = new_sink(p4, key)
@@ -4245,7 +4292,25 @@ def records_sink_checks(env: Env, src: str = HERE) -> list:
             c("records sink: a leg whose counts the exporter refuses is a record_refused event naming the refusal and the leg, the sink does not "
               "crash, and every other slice is still written",
               crashed is None and len(named) == 1 and named[0].startswith("metrics:") and "rint64-class-rne" in named[0] and "counts" in named[0]
-              and s4.refused == {"metrics": 1} and rep4["clean"] == len(card) - 1, f"{crashed} {named[:1]} {rep4['clean']}")
+              and s4.refused == {"metrics": 1} and rep4["clean"] == len(card) + len(host) - 1, f"{crashed} {named[:1]} {rep4['clean']}")
+            # 4b. a host-pool slice of a run that recorded no host/ tree is refused by name, never written with a tree it does not have; the card's are
+            p4b = os.path.join(kd, "notree.jsonl")
+            s4b, ev4b = new_sink(p4b, key)
+            try:
+                feed_all(mod, s4b, recs, False, host_tree={"host_src": None})
+                crashed_b = None
+            except Exception as e:
+                crashed_b = repr(e)
+            named_b = [x for n, x in ev4b if n == "record_refused"]
+            # a sink that wrote nothing (a refusal that escaped it, a plant) is a red check, not a crash on a file that is not there
+            rep4b = (SR.verify_records(SR.parse_file(read_bytes(p4b)), None, require_signed=True) if os.path.exists(p4b)
+                     else {"clean": -1, "kinds": {"card": {"records": -1, "cases": -1}, "host": {"records": -1, "cases": -1}}})
+            c("records sink: the host-pool slices of a run that recorded no host/ tree are each a record_refused event saying so (a refusal named "
+              "metrics), the sink does not crash, and the card's slices are written: the file's host total is 0 and the card's is the driver's",
+              crashed_b is None and len(named_b) == len(host) and all(x.startswith("metrics:") and "no host/ tree" in x for x in named_b)
+              and s4b.refused == {"metrics": len(host)} and rep4b["kinds"]["host"]["records"] == 0 and rep4b["kinds"]["card"]["cases"] == card_cases
+              and rep4b["clean"] == len(card) and s4b.kinds["host"] == [0, 0, 0] and "refused: {'metrics': 2}" in s4b.summary(),
+              f"{crashed_b} {named_b[:1]} {rep4b['kinds']}")
             # 5. a resumed run continues its file: campaigns not repeated, another key refused, a torn tail cut back
             p5 = os.path.join(kd, "resume.jsonl")
             s5, _ev5 = new_sink(p5, key)
@@ -4264,8 +4329,13 @@ def records_sink_checks(env: Env, src: str = HERE) -> list:
             except SR.Refusal as e:
                 v5 = ("refused", str(e))
             c("records sink: a resumed run's sink adopts the file (its campaigns are known: none is written twice) and the file, all of it, "
-              "verifies as one run's, every card slice once",
-              first_n > 0 and notes and v5 == (len(card), ncamp) and ncamp == len({r["sweep"]["item"] for r in card}), f"{v5} {ncamp} {notes}")
+              "verifies as one run's, every slice once, card and host-pool",
+              first_n > 0 and notes and v5 == (len(card) + len(host), ncamp) and ncamp == len(all_items), f"{v5} {ncamp} {notes}")
+            c("records sink: and the resumed sink's totals by subject kind are the whole file's - the records the first part wrote (counted again from "
+              "the file by adopt) and the deep image's it wrote itself - as the one-run sink's were",
+              {k: tuple(v) for k, v in s6.kinds.items()} == want_kinds and s6.written == len(card) + len(host)
+              and f"card {len(card)} record(s), {len(card)} clean ({card_cases} cases)" in s6.summary(),
+              f"{s6.kinds} want {want_kinds}")
             s7, _ev7 = new_sink(p5, key2)
             try:
                 s7.adopt(R.recs[0]["run_id"])
@@ -4290,7 +4360,8 @@ def scn_records_real(env: Env, src: str = HERE) -> list:
     sink) over a scratch checkout whose tools and `make` and `ldd` are TEST DOUBLES - shell scripts that run the stand-in. The exporter
     refuses a dry run's legs and cannot tell a double from a card, which is exactly why this lives in a throwaway tree under the test's
     temp directory and offers nothing a real run could reach. A: the default tools, signed with a throwaway key; the file verifies against
-    its keyring and its case total is the driver's coverage of the card slices; the secret is nowhere in the run; the host slice is counted.
+    its keyring and its case total is the driver's coverage of ALL the clean slices, the card's and the host pool's (the host slice is a
+    version-2 record whose subject is the host/ tree and compiler the run recorded); the secret is nowhere in the run.
     B: --sweep-chunk, unsigned with --device-key: the build step runs `make SOAK_CHUNK=n soak-chunk` with the default build's flags,
     every slice says its pass size, `sweep_record.py sign` signs the file, and it verifies."""
     out: list = []
@@ -4362,6 +4433,13 @@ def scn_records_real(env: Env, src: str = HERE) -> list:
         def cardslices(r):
             return [x for x in r.legs(kind="sweep", status="pass") if x["image"] != "cpu"]
 
+        def hostslices(r):
+            return [x for x in r.legs(kind="sweep", status="pass") if x["image"] == "cpu"]
+
+        def parse_records(path):
+            with sr_from(src) as (SRm, _LS):
+                return [r for _n, r in SRm.parse_file(read_bytes(path)) if r["kind"] != "campaign"]
+
         def sr(*args):
             return subprocess.run([sys.executable, "-B", "-I", os.path.join(src, "sweep_record.py")] + list(args),
                                   capture_output=True, text=True, timeout=120)
@@ -4376,30 +4454,49 @@ def scn_records_real(env: Env, src: str = HERE) -> list:
         # A: the default tools, signed
         A = drive("rec-real-a", ["--records", "--sign-key", key])
         rf = os.path.join(A.out, "sweep-records.jsonl")
-        cs = cardslices(A)
+        cs, hs_legs = cardslices(A), hostslices(A)
+        card_cases_a, host_cases_a = (sum(x["counts"]["cases"] for x in z) for z in (cs, hs_legs))
         v = sr("verify", rf, "--keyring", ring) if os.path.exists(rf) else None
         m = re.search(r"(\d+) slices and 0 streams; (\d+) clean \((\d+) cases\), 0 FINDINGS", v.stdout) if v else None
+        mk = re.search(r"by subject: card (\d+) clean \((\d+) cases\); host (\d+) clean \((\d+) cases\)\n", v.stdout) if v else None
         c("records real (A): a run that is not a dry run, with --records and --sign-key, exits 0 and its run_start says it was real and "
           "names the records file, signed",
           A.rc == 0 and dg(A.recs[0], "settings", "dry_run") is False and dg(A.recs[0], "settings", "records") == {"file": "sweep-records.jsonl", "signed": True}
-          and len(cs) >= 8, f"rc {A.rc}: {A.text[-300:]}")
-        c("records real (A): sweep_record.py verify of the file against its keyring says clean (exit 0), one record for every finished CARD "
-          "slice, and a case total equal to the driver's coverage of those slices (summed here from metrics.jsonl)",
-          v is not None and v.returncode == 0 and m is not None and int(m.group(1)) == int(m.group(2)) == len(cs)
-          and int(m.group(3)) == sum(x["counts"]["cases"] for x in cs), (v.stdout + v.stderr)[-300:] if v else "no file")
+          and len(cs) >= 8 and len(hs_legs) >= 1, f"rc {A.rc}: {A.text[-300:]}")
+        c("records real (A): sweep_record.py verify of the file against its keyring says clean (exit 0), one record for every finished slice - the "
+          "card's and the host pool's - and a case total equal to the driver's coverage of all of them (summed here from metrics.jsonl), "
+          "and its line by subject says the card's and the host's",
+          v is not None and v.returncode == 0 and m is not None and int(m.group(1)) == int(m.group(2)) == len(cs) + len(hs_legs)
+          and int(m.group(3)) == card_cases_a + host_cases_a and mk is not None
+          and tuple(int(x) for x in mk.groups()) == (len(cs), card_cases_a, len(hs_legs), host_cases_a), (v.stdout + v.stderr)[-300:] if v else "no file")
+        recs_a = parse_records(rf) if os.path.exists(rf) else []
+        tr_a = A.recs[0].get("tree") or {}
+        gh = subprocess.run(["git", "-C", root, "rev-parse", "HEAD:host"], capture_output=True, text=True, timeout=60).stdout.strip()
+        want_sub = {"src": tr_a.get("host_src")}
+        if isinstance(tr_a.get("host_src_dirty"), bool):
+            want_sub["dirty"] = tr_a["host_src_dirty"]
+        if isinstance(tr_a.get("cc"), str):
+            want_sub["cc"] = tr_a["cc"]
+        c("records real (A): the host-pool slice is a version-2 record whose subject is the host/ tree the run recorded (and git says it is: "
+          "`git rev-parse HEAD:host` of the run's checkout), its dirty flag and compiler as run_start has them, and the card slices are version 1",
+          len([r for r in recs_a if r["v"] == 2]) == len(hs_legs) and all(r["subject"] == want_sub for r in recs_a if r["v"] == 2)
+          and want_sub["src"] == gh and len(gh) in (40, 64) and all(r["v"] == 1 for r in recs_a if "image" in r["subject"]), f"{want_sub} {gh}")
         c("records real (A): signed by the throwaway key, the keyring's holder named; its secret is in no file of the run (settings, "
           "metrics, logs, records, driver.log)", v is not None and pub in v.stdout and "Throwaway%20Holder" in v.stdout
           and seed.encode() not in slurp_tree(A.out), v.stdout[-200:] if v else "")
         hs, sm = A.events("records_host_slices"), A.events("records_summary")
-        c("records real (A): the host-pool slice is counted and said once (records_host_slices), the summary event names the key and the "
-          "counts, and no leg was refused", len(hs) == 1 and len(sm) == 1 and f"signed by key {pub}" in sm[0]["detail"]
-          and "refused: none" in sm[0]["detail"] and not A.events("record_refused"), str([e["detail"][:120] for e in sm]))
+        say_a = (f"by subject: card {len(cs)} record(s), {len(cs)} clean ({card_cases_a} cases); "
+                 f"host {len(hs_legs)} record(s), {len(hs_legs)} clean ({host_cases_a} cases)")
+        c("records real (A): the host-pool slice is in the file, so no records_host_slices event is said (it is retired); the summary event names "
+          "the key and says, by subject kind, the same records, clean slices and cases as the raw legs and as verify, and no leg was refused",
+          not hs and len(sm) == 1 and f"signed by key {pub}" in sm[0]["detail"] and say_a in sm[0]["detail"]
+          and "refused: none" in sm[0]["detail"] and not A.events("record_refused"), str([e["detail"][:260] for e in sm]))
         c("records real (A): the default tools were built and run: no soak-chunk in the make log, no -c in any tool's name",
           bool(A.makelog) and not any("soak-chunk" in ln for ln in A.makelog) and all("sweep" not in x or "batch" not in x["sweep"] for x in cs), str(A.makelog[:2]))
         # B: --sweep-chunk, unsigned, signed afterwards by `sweep_record.py sign`
         B = drive("rec-real-b", ["--sweep-chunk", "16384", "--records", "--device-key", pub])
         bf = os.path.join(B.out, "sweep-records.jsonl")
-        cb = cardslices(B)
+        cb = cardslices(B) + hostslices(B)                  # every finished slice of the run, on the card's images and the pool
         mk_def = next((ln.split() for ln in B.makelog if " all " in ln + " " and "SOAK_CHUNK" not in ln), [])
         mk_chk = next((ln.split() for ln in B.makelog if "SOAK_CHUNK=16384" in ln and "soak-chunk" in ln), [])
 
@@ -5049,6 +5146,20 @@ def plant_standin(env: Env, src: str) -> list:
     return [(b, False, "") for b in bad] or [("the standin group passes under the plant", True, "")]
 
 
+def plant_sweep_record(env: Env, src: str, groups: str = "host,export,forms") -> list:
+    """hw/test_sweep_record.py's own groups, run as a subprocess from the plant's directory, so that it tests the plant's sweep_record.py (and
+    the plant's library); the real tree's docs/, certificates/ and python/ are named by SWEEP_RECORD_TEST_ROOT. Every FAIL line it prints is a
+    failing check, named by its text. The plants of the signed-record format's version 2 run through it."""
+    e = dict(os.environ)
+    e["SWEEP_RECORD_TEST_ROOT"] = ROOT
+    p = subprocess.run([sys.executable, "-B", "-I", os.path.join(src, "test_sweep_record.py"), "--only", groups], capture_output=True, text=True,
+                       env=e, timeout=300)
+    bad = [ln.strip()[6:].strip() for ln in p.stdout.splitlines() if ln.startswith("  FAIL  ")]
+    if p.returncode != 0 and not bad:
+        bad = [f"the sweep-record test crashed under the plant: {p.stderr[-200:]}"]
+    return [(b, False, "") for b in bad] or [("the sweep-record test passes under the plant", True, "")]
+
+
 def plant_report(env: Env, src: str) -> list:
     """The report's own test (hw/test_card_stress_report.py), run from the plant's directory so it tests the plant's
     report; every FAIL line it prints is a failing check, named by its text."""
@@ -5454,9 +5565,6 @@ def plants(env: Env) -> None:
          [("sweep_record.py", '            if isinstance(rec.get("settings"), dict) and rec["settings"].get("dry_run"):', "            if False:")],
          lambda env, src: records_sink_checks(env, src),
          ["records sink: the dry run's records fed as they stand are REFUSED by the exporter", "records sink: and the exporter itself still refuses that run_start"]),
-        ("the sink offers a host-pool slice to the exporter",
-         [("card_stress.py", '                    if rec.get("image") == L.CPU:', "                    if False:")],
-         lambda env, src: records_sink_checks(env, src), ["records sink: the host-pool slices are counted, not offered to the exporter"]),
         ("a refusal escapes the record sink",
          [("card_stress.py", '            except self.SR.Refusal as e:\n                if typ == "run_start":', '            except KeyError as e:\n                if typ == "run_start":')],
          lambda env, src: records_sink_checks(env, src),
@@ -5497,6 +5605,105 @@ def plants(env: Env) -> None:
          [("card_stress.py", 'os.write(fd, b"".join(lines))', 'os.write(fd, b"".join(lines[:1]))')],
          lambda env, src: scn_records_real(env, src),
          ["records real (A): sweep_record.py verify of the file against its keyring says clean"]),
+        # version 2 of the record: the host pool's slices, signed (parcel SR2). The sink's plants run through the records group's scenarios,
+        # the format's through hw/test_sweep_record.py run from the plant's copy of the code (plant_sweep_record); each is red at the check written
+        # for it, which `CARD_STRESS_PLANT_ALL=1` shows with every other failing check beside it
+        ("the sink leaves a host-pool slice out of the file",
+         [("card_stress.py", "                        lines = self.ex.leg(rec)\n                        if lines:",
+           '                        lines = self.ex.leg(rec) if rec.get("image") != L.CPU else []\n                        if lines:')],
+         lambda env, src: records_sink_checks(env, src) + scn_records_real(env, src),
+         ["records sink: through Driver.rec the same stream", "records sink: the host-pool slices are in the file as version-2 records",
+          "records real (A): sweep_record.py verify of the file against its keyring says clean"]),
+        ("the sink counts every record it wrote as a card one",
+         [("card_stress.py", "        row = self.kinds[self.SR.subject_kind(r)]", '        row = self.kinds["card"]')],
+         lambda env, src: records_sink_checks(env, src), ["records sink: the totals by subject kind"]),
+        ("the sink's summary says nothing by subject kind",
+         [("card_stress.py", "device {self.ex.device}); by subject: {by}; {self.ex.findings} finding(s)", "device {self.ex.device}); {self.ex.findings} finding(s)")],
+         lambda env, src: records_sink_checks(env, src), ["records sink: the totals by subject kind"]),
+        ("a host record's cases are left out of the sink's clean total",
+         [("card_stress.py", '            row[2] += r["cases"]', '            row[2] += r["cases"] if self.SR.subject_kind(r) == "card" else 0')],
+         lambda env, src: records_sink_checks(env, src), ["records sink: the totals by subject kind"]),
+        ("a resumed sink starts its totals by subject kind at zero",
+         [("card_stress.py", "                self.written += 1\n                self.count(r)\n", "                self.written += 1\n")],
+         lambda env, src: records_sink_checks(env, src), ["records sink: and the resumed sink's totals by subject kind are the whole file's"]),
+        ("the retired records_host_slices event is said again",
+         [("card_stress.py", "                            self.count(json.loads(lines[-1]))\n",
+           '                            self.count(json.loads(lines[-1]))\n                            if rec.get("image") == L.CPU:\n'
+           '                                events.append(("records_host_slices", "a host-pool slice finished"))\n')],
+         lambda env, src: records_sink_checks(env, src), ["records sink: the host-pool slices are in the file as version-2 records"]),
+        ("a host-pool slice of a run with no host/ tree is written anyway, with no tree",
+         [("sweep_record.py", "        if not isinstance(src, str) or not COMMIT.fullmatch(src):", "        if False:")],
+         lambda env, src: plant_sweep_record(env, src, "host") + records_sink_checks(env, src),
+         ["host export: a host slice whose run recorded no host/ tree", "records sink: the host-pool slices of a run that recorded no host/ tree"]),
+        ("a host-pool leg goes down the card's path",
+         [("sweep_record.py", "        if rec.get(\"image\") == L.CPU:\n            version, subject = HOST_VERSION,", "        if False:\n            version, subject = HOST_VERSION,")],
+         lambda env, src: plant_sweep_record(env, src, "host") + records_sink_checks(env, src),
+         ["host: the run exports 8 finished legs", "records sink: through Driver.rec the same stream"]),
+        ("a card slice dressed as a host one is exported (an image hash or a tile is not looked at)",
+         [("sweep_record.py", '        if rec.get("image_sha256") is not None or sw.get("tile") is not None:', "        if False:")],
+         lambda env, src: plant_sweep_record(env, src, "host"),
+         ["host export: a card slice dressed as a host one: the image cpu with an image hash", "host export: a card slice dressed as a host one: the image cpu with a tile"]),
+        ("a host slice dressed as a card one is exported (the pool's mark is not looked at)",
+         [("sweep_record.py", '        if sw.get("pool") is not None:', "        if False:")],
+         lambda env, src: plant_sweep_record(env, src, "host"), ["host export: a host slice dressed as a card one"]),
+        ("a host-pool slice of a tile item is exported (its reach is not looked at)",
+         [("sweep_record.py", "        if it.reach != L.HOST:", "        if False:")],
+         lambda env, src: plant_sweep_record(env, src, "host"), ["host export: a host-pool slice of a tile item"]),
+        ("the verifier does not hold a host-pool record to its campaign's reach",
+         [("sweep_record.py", '    if subject_kind(rec) == "host" and camp["reach"] != "host":', "    if False:")],
+         lambda env, src: plant_sweep_record(env, src, "host"), ["verify: a host-pool slice naming a campaign whose reach is the tile"]),
+        ("a version this verifier does not know (3) is accepted",
+         [("sweep_record.py", "VERSIONS = (VERSION, HOST_VERSION)", "VERSIONS = (VERSION, HOST_VERSION, 3)"),
+          ("sweep_record.py", "    HOST_VERSION: _forms(HOST_VERSION, HOST_SUBJECT),\n}", "    HOST_VERSION: _forms(HOST_VERSION, HOST_SUBJECT),\n    3: _forms(3, HOST_SUBJECT),\n}")],
+         lambda env, src: plant_sweep_record(env, src, "host,forms"), ["line: version 3", "host: an unknown version is refused by that name"]),
+        ("the exporter writes `dirty` False where the run recorded none",
+         [("sweep_record.py", '        if isinstance(tree.get("host_src_dirty"), bool):\n            sub["dirty"] = tree["host_src_dirty"]',
+           '        sub["dirty"] = bool(tree.get("host_src_dirty"))')],
+         lambda env, src: plant_sweep_record(env, src, "host"), ["host: after the resume, whose run_start recorded another host/ tree"]),
+        ("the exporter writes a compiler where the run recorded none",
+         [("sweep_record.py", '            sub["cc"] = cc\n        return sub', '            sub["cc"] = cc\n        else:\n            sub["cc"] = "unknown"\n        return sub')],
+         lambda env, src: plant_sweep_record(env, src, "host"), ["host: after the resume, whose run_start recorded another host/ tree"]),
+        ("verify counts a host-pool record as a card one in its totals by subject kind",
+         [("sweep_record.py", '        row = rep["kinds"][subject_kind(rec)]', '        row = rep["kinds"]["card"]')],
+         lambda env, src: plant_sweep_record(env, src, "host") + records_sink_checks(env, src),
+         ["host: the mixed file verifies signed against the keyring", "records sink: through Driver.rec the same stream",
+          "records sink: the case total `sweep_record.py verify` PRINTS"]),
+        ("the exporter reads a host record's src from the RTL tree, not host/'s",
+         [("sweep_record.py", '        src = tree.get("host_src")', '        src = tree.get("rtl")')],
+         lambda env, src: plant_sweep_record(env, src, "host"), ["host: the first host slice's subject is run_start.tree's host_src"]),
+        ("the exporter leaves the tile out of a card slice's subject",
+         [("sweep_record.py", '        if sw.get("tile") is not None:\n            sub["tile"] = sw["tile"]\n        return sub',
+           "        return sub")],
+         lambda env, src: plant_sweep_record(env, src, "export"),
+         ["version 1 is byte for byte what it was at 77c5dbca", "readback: every record equals its raw leg, field by field, each against the run_start in force for it"]),
+        ("a version-2 record is refused as an unknown version",
+         [("sweep_record.py", "VERSIONS = (VERSION, HOST_VERSION)", "VERSIONS = (VERSION,)")],
+         lambda env, src: plant_sweep_record(env, src, "host"), ["host: version 2 is known"]),
+        ("the oracle's kind in a campaign changes, and with it every campaign id",
+         [("sweep_record.py", 'ORACLE = "host-fpu+glibc"', 'ORACLE = "host-fpu+musl"')],
+         lambda env, src: plant_sweep_record(env, src, "host") + campaign_space_checks(src),
+         ["host: the campaign ids of all 125 catalog items", "host: a host-pool slice and a card image's slice of the same item name one campaign",
+          "campaign space: the campaign ids of all 125 items"]),
+        ("a compiler line of any length is held",
+         [("sweep_record.py", "CC_MAX = 256 ", "CC_MAX = 10 ** 6 ")],
+         lambda env, src: plant_sweep_record(env, src, "host"),
+         ["host export: a compiler line of 257 characters", "shape (version 2): a cc of 257 characters"]),
+        ("a control character in the compiler line is held",
+         [("sweep_record.py", "all(ord(ch) >= 32 and ord(ch) != 127 for ch in v)", "True")],
+         lambda env, src: plant_sweep_record(env, src, "host"),
+         ["host export: a compiler line with a control character", "shape (version 2): a cc with a control character"]),
+        ("the host subject's src is not held to a tree hash",
+         [("sweep_record.py", 'HOST_SUBJECT = ({"src": _rx(COMMIT)}', 'HOST_SUBJECT = ({"src": _rx(re.compile(r".+"))}')],
+         lambda env, src: plant_sweep_record(env, src, "host"),
+         ["shape (version 2): src in capitals", "shape (version 2): src of 39 characters"]),
+        ("the host subject's dirty is not held to a boolean",
+         [("sweep_record.py", '{"dirty": _bool, "cc": _text(CC_MAX)})', '{"dirty": lambda v: True, "cc": _text(CC_MAX)})')],
+         lambda env, src: plant_sweep_record(env, src, "host"),
+         ["shape (version 2): dirty that is 0"]),
+        ("the exporter stamps every slice with the file's first run_start",
+         [("sweep_record.py", "        self.start, self.built = rec, False", "        self.start, self.built = (self.start or rec), False")],
+         lambda env, src: plant_sweep_record(env, src, "export"),
+         ["readback: every record equals its raw leg, field by field, each against the run_start in force for it"]),
         # the verifiers' notes
         ("--quick with --sweep-items tries a second wave after an empty one",
          [("card_stress.py", "                if self.quick and not self.sweep_only and waves + 1 < self.quick_waves(img):",
