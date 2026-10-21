@@ -1752,12 +1752,12 @@ lead's ledger, "card smoke"): rint64-class 2,000 indices in 8.2 and 8.5 s, scale
 the first 2^20 indices in 2.6 and 2.5 s, div64-hard 700,000 indices of its F0K segment in 2.3 and 2.4 s, sqrt64-hard
 its whole space in 2.8 s each. **Scaled** (COMPUTED, linear in indices with the start-up left in the per-index figure, so
 each is an UPPER BOUND on the whole item and a slice that amortises the start-up is faster): rint64-class 4.1 to 4.25 ms an
-index, so 147 to 152 s, **about 2.5 minutes an attribute and 12.5 for the five**; scaleb64-class 0.63 to 0.70 ms, so 45 to
+index, so 147 to 152 s, **about 2.5 minutes an attribute and at most 12.7 for the five**; scaleb64-class 0.63 to 0.70 ms, so 45 to
 51 s an attribute and at most 3.4 minutes for the four; div32-hard 2.5 microseconds an index, so at most 53 s an attribute;
-div64-hard 3.3 microseconds an index, so at most 16 minutes an attribute (HC's COMPUTED figure from the stress run's rates
+div64-hard 3.3 to 3.4 microseconds an index, so at most 16.6 minutes an attribute (15.9 at the shorter of the two times; HC's COMPUTED figure from the stress run's rates
 is 132 to 137 s on a quad, 9 minutes of one tile: the segments differ in cost, and the F0K slice the smoke ran is not the
-average); sqrt64-hard 2.8 s an attribute. All 22 tile items, once: **at most about 83 minutes of tile time (COMPUTED upper
-bound: rint64-class 12.5, scaleb64-class 3.4, div32-hard 3.5, div64-hard 63.5, sqrt64-hard 0.2), about 21 minutes of the quad's
+average); sqrt64-hard 2.8 s an attribute. All 22 tile items, once: **at most about 86 minutes of tile time (COMPUTED upper
+bound, from the longer of each pair of smoke times: rint64-class 12.7, scaleb64-class 3.4, div32-hard 3.5, div64-hard 66.2, sqrt64-hard 0.2), about 21.5 minutes of the quad's
 four**; HC's COMPUTED figure for the thirteen hard-case items is 9.6 minutes of a quad, 38 tile-minutes. The 13 host items run on the pool in
 seconds (0.01 to 0.03 s each on the software backend, MEASURED by CL). **How a slow item fits:** its slice is its slice.
 A wave of four runs its jobs together and waits for the slowest, so a short job leaves its tile idle for the rest of the
