@@ -565,8 +565,8 @@ class Exporter:
         the tile it ran on, where the leg recorded one. A leg that carries the host pool's mark (sweep.pool) is a host-pool slice
         dressed as a card one: refused."""
         if sw.get("pool") is not None:
-            raise Refusal("metrics", f"{where}: a host-pool slice dressed as a card one: image {rec.get('image')!r} (not the image "
-                                     f"{L.CPU!r}) with the host pool's mark (sweep.pool)")
+            raise Refusal("metrics", f"{where}: a host-pool slice dressed as a card one: it names the image {rec.get('image')!r} and "
+                                     f"carries the host pool's mark (sweep.pool), and the pool's jobs are on the image {L.CPU!r}")
         img = self.start["images"].get(rec.get("image"))
         if not isinstance(img, dict) or img.get("sha256") != rec.get("image_sha256"):
             raise Refusal("metrics", f"{where}: image {rec.get('image')!r} with a hash that is not run_start's")

@@ -164,10 +164,10 @@ changes only by getting a new version.
 slice, with the subject either form* would make a card slice exported from now on a version-2 record with
 another id, and the card slices DR3's driver writes, the real run's export and every fixture would be
 re-made for a change of format Logan has not asked for. *A second subject shape inside version 1* changes
-no byte, but a verifier of the old code reads the new line and says `form`, "'src' is not a field of version 1's subject":
-a record that looks broken, where it is a record it cannot read. With a new version the old verifier says what
-is true. MEASURED: the verifier of 77c5dbca (DR3's merge), given a file of both versions, says "refused version: ...
-line 5: version 2; this verifier knows version 1". So: a version 2 for the host records only. Nothing existing moves, the
+no byte, but a verifier of the old code reads the new line and says `form`: a record that looks broken, where it is a
+record it cannot read (MEASURED: the verifier of 77c5dbca, given a host subject under `v` 1, says "refused form: ... line 2.subject: the
+subject has no field 'image'"). With a new version the old verifier says what is true (MEASURED: given a file of both
+versions, "refused version: ... line 5: version 2; this verifier knows version 1"). So: a version 2 for the host records only. Nothing existing moves, the
 only new bytes are the host records', and a version-2 record of a card slice cannot appear by accident.
 
 **The subject of a host-pool record** says what computed the slice: the host library's source and how it was built.

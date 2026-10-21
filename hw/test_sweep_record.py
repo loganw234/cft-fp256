@@ -19,8 +19,18 @@
            function call only, the committed signature over that hash given as an id is `signature-domain`
   plants   one defect each put into a signed file, and the refusal it must draw, by name; and the
            verifier without a check, which lets its plant through
+  host     version 2 (2026-10-21, parcel SR2), the host pool's slice and stream: a synthetic run of card and
+           host-pool slices exported, the subject read back field by field, the campaigns and their ids (the
+           same record whoever computed the slice, and unchanged since 77c5dbca), the totals by subject kind,
+           the version rule, each export refusal with the exporter left as it was, each verifier refusal on a
+           validly signed record, and the verifier without subject_problem and without check_shape
   real     (needs --metrics) the same on a copy of a real run's metrics.jsonl, every field read back
-           from the raw legs by code that does not share the exporter's
+           from the raw legs by code that does not share the exporter's, each against the run_start IN
+           FORCE for it (a resumed run's file has one for each invocation: `readback`, which `export` also runs
+           on a synthetic file of two, with its plant, the first run_start's expectation, red there)
+
+SWEEP_RECORD_TEST_ROOT names the tree that holds docs/, certificates/ and python/ when this file is run from a
+copy of the code (the driver's test runs it from each plant's copy of hw/).
 
 Every key here is derived from a fixed label or made by `cft_sign.py keygen` in a temporary directory
 this script makes and removes by that exact path: a throwaway, never anyone's. Prints a line a group and
@@ -1013,6 +1023,7 @@ def group_host(tmp):
     check("host: the campaign ids of all 125 catalog items are what they were at 77c5dbca (one digest over each name and id; the first 90 are DR3's)",
           dig.hexdigest() == BASE_CAMPAIGN_DIGEST and len(L.sweep_items()) == 125, dig.hexdigest())
     # verify: both versions in one file, the totals by subject kind equal to the raw legs'
+    check("host: version 2 is known - the mixed file of version-1 and version-2 records verifies, signed, against the keyring", verdict(lines, RA) == "ok")
     rep = verify_lines(lines, RA)
     done = [x for x in raw if x["type"] == "leg" and x["kind"] == "sweep" and x["status"] == "pass"]
     want = {k: (sum(1 for x in done if (x["image"] == "cpu") == (k == "host")),
