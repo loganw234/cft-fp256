@@ -40,7 +40,9 @@ Three kinds of group, then the plants (the groups, by name, are in hw/test-card-
   resume   (parcel DR4, 2026-10-21) --resume counts coverage per tree class: the counting on synthetic files (each part of the report's key
             alone, an old run's trees derived from its commit, an unknown class never counted, the events), the planner held to the report's
             figures, the driver itself resuming a file from another host/ tree and from another rtl/ tree, and - when CARD_STRESS_RESUME_RUN
-            names the lead's two-night run directory - the planner over that real file.
+            names a directory holding a real file of the lead's stress run (his two nights', his three nights', or a later night's) - the planner over
+            that real file, its expectations derived from the file itself (parcel P5, 2026-10-22) and the figures MEASURED on his two files held exactly
+            only for those files, by sha256.
 
   P5 additions (2026-10-22, KL-39, KL-42, KL-23, KL-44, KL-32, KL-13), each in a group above: telemetry - the status file's telemetry line carries the
             sample's time and up to twelve values, and the report counts an HBM temperature's zeros by name and leaves them out of its range; chunk - every
@@ -5072,16 +5074,45 @@ def scn_resume(env: Env, src: str = HERE) -> list:
     return out
 
 
+# The lead's two real files of the stress run, by the sha256 the box recorded for each (SHA256SUMS.box, copied with them): resume_real_checks holds the figures
+# MEASURED on each of them exactly when the file it is given IS that file, and derives what it expects from the file itself for any other (a later night's).
+RESUME_REAL_TWO_NIGHT = "38f243c792c7089c811156d51f17f9ccb58b2037b2336cf6d59d3a208a78fb2e"      # 1,308 lines: 2026-10-19 and the resume of 2026-10-20
+RESUME_REAL_THREE_NIGHT = "de4ee37900917762e4ba071d434eb28204f92fed6c5056e88a70ccce6516e986"    # 1,910 lines: and the nightly of 2026-10-21
+
+
+def coverage_state_gaps(path: str) -> "dict | None":
+    """{item: first uncovered encoding or None (complete)} for every item of the whole file `path`, as the study's script
+    docs/studies/sched-a/coverage_state.py prints them (its per-run table, run here on the file: it merges the intervals itself and holds its union to an
+    independent merge), or None where it cannot be run (a checkout without its commits, no script)."""
+    script = os.path.join(ROOT, "docs", "studies", "sched-a", "coverage_state.py")
+    if not os.path.isfile(script):
+        return None
+    try:
+        p = subprocess.run([sys.executable, "-B", "-I", script, f"FILE={path}"], capture_output=True, text=True, timeout=180)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if p.returncode != 0:
+        return None
+    out: dict = {}
+    for m in re.finditer(r"^([a-z0-9-]+)\s+(?:tile|host)\s+\d+\s+[0-9.]+%\s+(?:complete|\((\d+), \d+\))", p.stdout, re.M):
+        out.setdefault(m.group(1), int(m.group(2)) if m.group(2) is not None else None)      # the first table is the whole file's
+    return out or None
+
+
 def resume_real_checks(env: Env, src: str = HERE) -> list:
-    """The planner over a copy of the REAL two-night file (the lead's resume of 2026-10-19 and 2026-10-20, from the box): a resume at the second
-    run's commit, 0b7c959. CARD_STRESS_RESUME_RUN names the run's directory (the one holding metrics.jsonl); without it this is skipped by name.
-    The first gaps of the four wide items are READ here, at run time, from the study's committed capture of this same file
-    (docs/studies/sched-a/coverage_state.out, the item's line in its last per-run table); the other figures (552 slices, 320 counted, 232
-    not, the 14 host items) are typed here, MEASURED on the real file by the planner and by that script."""
+    """The planner over a copy of a REAL file of the lead's stress run (the two nights of 2026-10-19 and 2026-10-20, or those and the nightly of
+    2026-10-21, or any later night's: all from the box): a resume at the second run's commit, 0b7c959. CARD_STRESS_RESUME_RUN names the run's directory
+    (the one holding metrics.jsonl); without it this is skipped by name. **What it expects it derives from the file itself** (parcel P5, 2026-10-22: the
+    check used to hold the two-night file's own numbers, 552 slices and 320 counted and four first gaps, so it failed on every later night while the
+    driver was right): the run_starts and the finished sweep slices are counted here by a scan of the records; each run's rtl/ and host/ trees are what
+    it recorded or, for a run that recorded none, what git derives for its commit; the slices of a class are counted, and its coverage merged, here;
+    the whole file's first gaps are what the study's script docs/studies/sched-a/coverage_state.py prints for the same file; the unknown-class tally is
+    the host slices of the run_starts that recorded no compiler. The figures MEASURED on the lead's own two files (552 slices, 320 counted, 232 host
+    slices not counted; 756 on three nights; the four wide gaps of each) are held exactly, but only when the file's sha256 is that file's."""
     run = os.environ.get("CARD_STRESS_RESUME_RUN")
     if not run or not os.path.isfile(os.path.join(run, "metrics.jsonl")):
-        skip("resume real: the planner over the real two-night file", "CARD_STRESS_RESUME_RUN does not name a run directory holding a "
-             "metrics.jsonl (the lead's box/resume-1020/run)")
+        skip("resume real: the planner over a real file of the stress run", "CARD_STRESS_RESUME_RUN does not name a run directory holding a "
+             "metrics.jsonl (the lead's box/resume-1020/run or box/nightly-1021/run)")
         return []
     out: list = []
 
@@ -5090,15 +5121,19 @@ def resume_real_checks(env: Env, src: str = HERE) -> list:
 
     first_run, second_run = "881bbcb676bbede9da20858325b7a966c56a25bf", "0b7c95996c12c01027f6c4905faa597ec8e22ef0"
     if git_out("cat-file", "-e", first_run + "^{commit}") is None:
-        skip("resume real: the planner over the real two-night file", f"{first_run[:7]} is not in this checkout, so the first run's trees cannot be derived")
+        skip("resume real: the planner over a real file of the stress run", f"{first_run[:7]} is not in this checkout, so the first run's trees cannot be derived")
         return []
     nightly = ("conv32to64-all,cvtto32-all-rne,cvtto32-all-rtz,cvtto32-all-rdn,cvtto32-all-rup,cvtto32-all-rmm,cvtfrom32-all-rne,cvtfrom32-all-rtz,"
                "cvtfrom32-all-rdn,cvtfrom32-all-rup,cvtfrom64-all-rne,cvtfrom64-all-rtz,cvtfrom64-all-rdn,cvtfrom64-all-rup,scaleb32-all-rne,"
                "scaleb32-all-rtz,scaleb32-all-rdn,scaleb32-all-rup,scaleb32-wide-rne,scaleb32-wide-rtz,scaleb32-wide-rdn,scaleb32-wide-rup").split(",")
+    wide_names = [n for n in nightly if n.startswith("scaleb32-wide")]
+    metrics = os.path.join(run, "metrics.jsonl")
+    sha = hashlib.sha256(read_bytes(metrics)).hexdigest()
+    known = {RESUME_REAL_TWO_NIGHT: "two-night", RESUME_REAL_THREE_NIGHT: "three-night"}.get(sha)
     try:
         with driver_from(src) as (mod, d, L2):
             os.makedirs(d.out, exist_ok=True)
-            shutil.copyfile(os.path.join(run, "metrics.jsonl"), d.metrics)
+            shutil.copyfile(metrics, d.metrics)
             d.load_state()
             starts = [r for r in d.file_recs if r.get("type") == "run_start"]
             reach = {i.name: i.reach for i in d.items}
@@ -5107,44 +5142,136 @@ def resume_real_checks(env: Env, src: str = HERE) -> list:
                 """item -> where the driver's own pick_item starts it (None: covered)"""
                 picks = {n: d.pick_item({}, set(), n, reach[n]) for n in nightly}
                 return {n: (None if p is None else p[1][0]) for n, p in picks.items()}
-            before = plan()                                   # the whole file's coverage: what the planner counted before this parcel
+            before = plan()                                   # the whole file's coverage: what the planner counted before DR4
             d.tree = dict(starts[1]["tree"])                  # a resume at the second run's commit: its trees and its compiler
             d.count_by_class()
             after = plan()
             t = d.class_tally
-            host = [n for n in nightly if reach[n] == L2.HOST]
-            # the four first gaps are READ from the study's committed capture of this file (the item's line in its LAST per-run table, night 2's)
-            try:
-                with open(os.path.join(ROOT, "docs", "studies", "sched-a", "coverage_state.out"), "r", encoding="utf-8") as fh:
-                    study = fh.read()
-            except OSError:
-                study = ""
-            wide = {n: int(g) for n, g in re.findall(r"^(scaleb32-wide-r\w\w)\s+tile\s+\d+\s+[0-9.]+% \((\d+), 4294967296\)", study, re.M)}
-            c("resume real: the study's capture (docs/studies/sched-a/coverage_state.out, read here) gives the four wide items' first gaps",
-              set(wide) == {f"scaleb32-wide-{m}" for m in ("rne", "rtz", "rdn", "rup")} and all(0 < g < L2.EXH for g in wide.values()), str(wide))
-            c("resume real: the file is the lead's: two run_starts (the first with no tree, the second with its trees), 552 finished sweep slices",
-              len(starts) == 2 and "rtl" not in starts[0]["tree"] and "rtl" in starts[1]["tree"] and t["slices"] == 552, str((len(starts), t["slices"])))
+
+            # ---- what the file says, derived here (a scan of the records, git's trees, the library's merge: not the driver's counting)
+            scan = L2.read_records(d.metrics)[0]
+            n_starts, cur, fin = 0, -1, []
+            for r in scan:
+                if r.get("type") == "run_start":
+                    n_starts += 1
+                    cur += 1
+                elif r.get("type") == "leg" and r.get("kind") == "sweep" and r.get("status") in ("pass", "fail"):
+                    sw = r.get("sweep") if isinstance(r.get("sweep"), dict) else {}
+                    if sw.get("item"):
+                        fin.append((cur, sw["item"], L2.slice_reach(sw), sw.get("lo"), sw.get("hi")))
+
+            def tree_of(rs: dict, key: str, rel: str):
+                """a run's rtl or host/ tree as the class key takes it: what it recorded, else git's for its commit when its checkout was clean"""
+                tr = rs.get("tree") if isinstance(rs.get("tree"), dict) else {}
+                if isinstance(tr.get(key), str) and tr[key]:
+                    return tr[key], tr.get(key + "_dirty") is True
+                if tr.get("dirty") is False and isinstance(tr.get("commit"), str):
+                    return d.git_tree(tr["commit"], rel), False
+                return None, False
+            want_rtl, _w = tree_of(starts[1], "rtl", "rtl")
+            want_host, _w = tree_of(starts[1], "host_src", "host")
+            want_cc = starts[1]["tree"].get("cc")
+            counted, other, unknown_by = {"tile": 0, "host": 0}, {"tile": 0, "host": 0}, {}
+            kept = {n: [] for n in nightly}               # the intervals of the slices the resume counts, by item
+            for run_i, item, rch, lo, hi in fin:
+                rs = starts[run_i]
+                if rch not in (L2.TILE, L2.HOST):
+                    why, same = "reach unknown", False
+                elif rch == L2.TILE:
+                    rtl, dirty = tree_of(rs, "rtl", "rtl")
+                    why = None if rtl else "no rtl/ tree recorded"
+                    same = bool(rtl) and not dirty and rtl == want_rtl
+                else:
+                    host, hdirty = tree_of(rs, "host_src", "host")
+                    cc = (rs.get("tree") or {}).get("cc") or None
+                    why = "no host/ tree recorded" if not host else (None if cc else "compiler not recorded")
+                    same = why is None and not hdirty and host == want_host and cc == want_cc
+                if why is not None:
+                    unknown_by[(run_i, rch, why)] = unknown_by.get((run_i, rch, why), 0) + 1
+                elif same:
+                    counted[rch] += 1
+                    if item in kept and lo is not None:
+                        kept[item].append((lo, hi))
+                else:
+                    other[rch] += 1
+            whole = {n: [] for n in nightly}              # the whole file's intervals, every run, by item
+            for run_i, item, rch, lo, hi in fin:
+                if item in whole and lo is not None:
+                    whole[item].append((lo, hi))
+
+            def first(iv: list):
+                g = L2.first_gap(iv, L2.EXH)
+                return None if g is None else g[0]
+            want_before = {n: first(whole[n]) for n in nightly}
+            want_after = {n: first(kept[n]) for n in nightly}
+            study = coverage_state_gaps(d.metrics)
+            wide = {n: study[n] for n in wide_names} if study and all(n in study for n in wide_names) else {}
+            if known == "two-night":                      # the committed capture of THIS file, read at run time: the study's own record of the same four numbers
+                try:
+                    with open(os.path.join(ROOT, "docs", "studies", "sched-a", "coverage_state.out"), "r", encoding="utf-8") as fh:
+                        cap = fh.read()
+                except OSError:
+                    cap = ""
+                capture = {n: int(g) for n, g in re.findall(r"^(scaleb32-wide-r\w\w)\s+tile\s+\d+\s+[0-9.]+% \((\d+), 4294967296\)", cap, re.M)}
+                c("resume real: the study's committed capture of the two-night file (docs/studies/sched-a/coverage_state.out, read here) gives the four wide "
+                  "items' first gaps, and the study's script run here on the same file prints the same", set(capture) == set(wide_names) and capture == wide
+                  and all(0 < g < L2.EXH for g in capture.values()), f"{capture} / {wide}")
+            c("resume real: the study's script (docs/studies/sched-a/coverage_state.py, run here on this file) gives the four wide items' first gaps, "
+              "each inside the space", set(wide) == set(wide_names) and all(0 < g < L2.EXH for g in wide.values()), f"{wide}; {'the script could not be run' if not study else ''}")
+            c("resume real: the file is the lead's: its first run_start recorded no tree and is 881bbcb's, the second is 0b7c959's with its trees, "
+              "every later one recorded its trees and its compiler; and the driver counts the run_starts and the finished sweep slices the file has "
+              "(%d and %d, scanned here)" % (n_starts, len(fin)),
+              len(starts) == n_starts >= 2 and "rtl" not in starts[0]["tree"] and starts[0]["tree"].get("commit") == first_run
+              and starts[1]["tree"].get("commit") == second_run and all(all(k in r["tree"] for k in ("rtl", "host_src", "cc")) for r in starts[1:])
+              and t["slices"] == len(fin), str((len(starts), n_starts, t["slices"], len(fin))))
+            if known:
+                exact = {"two-night": (2, 552), "three-night": (3, 756)}[known]
+                c(f"resume real: the {known} file (sha256 {sha[:12]}), whose figures were MEASURED: {exact[0]} run_starts and {exact[1]} finished sweep slices",
+                  (n_starts, len(fin)) == exact, str((n_starts, len(fin))))
             c("resume real: the second run's recorded rtl/ and host/ trees are what git derives for its commit (equal where both exist)",
               d.git_tree(second_run, "rtl") == starts[1]["tree"]["rtl"] and d.git_tree(second_run, "host") == starts[1]["tree"]["host_src"],
               str((d.git_tree(second_run, "rtl"), starts[1]["tree"]["rtl"])))
-            c("resume real: before this parcel the resume planned no host item of the nightly's 22 (the whole file's coverage had all 14 covered) and the "
-              "four wide tile items at the first gaps coverage_state.py found",
-              all(before[n] is None for n in host) and all(before[n] == g for n, g in wide.items()), str({n: before[n] for n in wide}))
-            c("resume real: a resume at 0b7c959 plans the same four wide items at the same first gaps, the four scaleb32-all items stay covered (the first "
-              "run's rtl/ tree derived from its commit is the second's), and all 14 host items start at 0 again",
-              all(after[n] == g for n, g in wide.items()) and all(after[n] is None for n in nightly if n.startswith("scaleb32-all"))
-              and all(after[n] == 0 for n in host) and len(host) == 14, str({n: after[n] for n in list(wide) + host[:2]}))
-            c("resume real: the tally - 320 tile slices counted (both runs), the first run's 232 host slices not counted (no compiler recorded), none of "
-              "another class", t["counted"] == {"tile": 320, "host": 0} and t["other"] == {"tile": 0, "host": 0}
-              and [(u["reach"], u["n"], u["why"]) for u in t["unknown"]] == [("host", 232, "compiler not recorded")], str(t["unknown"]))
+            host = [n for n in nightly if reach[n] == L2.HOST]
+            gaps_ok = bool(study) and all(before[n] == study.get(n, "absent") for n in nightly)
+            c("resume real: the planner over the WHOLE file's coverage (what a resume planned before DR4) starts each of the nightly's 22 items where the study's "
+              "script finds its first gap, and where the intervals of every run merge to - a complete item is not planned at all (%d host items and %d tile "
+              "items are); the four wide items at the gaps above" % (sum(1 for n in host if before[n] is None),
+                                                                      sum(1 for n in nightly if reach[n] == L2.TILE and before[n] is None)),
+              gaps_ok and before == want_before and len(host) == 14 and all(before[n] == g for n, g in wide.items()),
+              str({n: (before[n], want_before[n], study.get(n, "absent") if study else None) for n in nightly if before[n] != want_before[n]
+                   or (study and before[n] != study.get(n, "absent"))} or {n: before[n] for n in wide_names}))
+            c("resume real: a resume at 0b7c959 plans each of the 22 where the intervals of the slices of ITS class merge to a gap - the tile slices of every run "
+              "whose rtl/ tree is its (the first run's derived from its commit), and the host slices of its class (host/ tree and compiler) alone - the first "
+              "run recorded no compiler, so its are not counted - and a tile item that the counted slices complete is not planned",
+              after == want_after and len(host) == 14,
+              str({n: (after[n], want_after[n]) for n in nightly if after[n] != want_after[n]} or {n: after[n] for n in list(wide_names) + host[:2]}))
+            exp_unknown = sorted(((rch, why, n) for (run_i, rch, why), n in unknown_by.items()), key=lambda x: (str(x[0]), x[1], x[2]))
+            c("resume real: the tally is the file's: the finished slices of the runs of its class counted (%d tile, %d host), of another class (%d, %d), "
+              "and the unknown ones named by run - %s - each derived here from the run_starts' trees and compilers"
+              % (counted["tile"], counted["host"], other["tile"], other["host"], ", ".join(f"{n} {rch} ({why})" for rch, why, n in exp_unknown) or "none"),
+              t["counted"] == counted and t["other"] == other and sorted(((u["reach"], u["why"], u["n"]) for u in t["unknown"]), key=lambda x: (str(x[0]), x[1], x[2])) == exp_unknown
+              and t["slices"] == len(fin) == sum(counted.values()) + sum(other.values()) + sum(n for _r, _w2, n in exp_unknown),
+              str((t["counted"], t["other"], [(u["reach"], u["n"], u["why"]) for u in t["unknown"]])))
+            if known == "two-night":
+                c("resume real: the two-night file's MEASURED figures: 320 tile slices counted (both runs), the first run's 232 host slices not counted (no compiler "
+                  "recorded), none of another class, and all 14 host items had been covered by the whole file", t["counted"] == {"tile": 320, "host": 0}
+                  and t["other"] == {"tile": 0, "host": 0} and [(u["reach"], u["n"], u["why"]) for u in t["unknown"]] == [("host", 232, "compiler not recorded")]
+                  and all(before[n] is None for n in host), str(t["unknown"]))
+            if known == "three-night":
+                c("resume real: the three-night file's MEASURED figures: the first run's 232 host slices still not counted (no compiler recorded) and the four "
+                  "wide gaps 0x5a900000, 0x5be00000, 0x5ba00000 and 0x5c100000 (the nightly's own report's first_uncovered), planned the same before and after the "
+                  "class counting", [(u["reach"], u["n"], u["why"]) for u in t["unknown"]] == [("host", 232, "compiler not recorded")]
+                  and [after[n] for n in wide_names] == [0x5a900000, 0x5be00000, 0x5ba00000, 0x5c100000] == [before[n] for n in wide_names],
+                  str(([after[n] for n in wide_names], t["unknown"])))
     except Exception as e:
-        c("resume real: the planner could be driven over the real file", False, repr(e))
+        import traceback
+        c("resume real: the planner could be driven over the real file", False, repr(e) + " " + traceback.format_exc()[-300:])
     return out
 
 
 def group_resume(env: Env, src: str = HERE) -> list:
     """Parcel DR4, --resume counts coverage per tree class: the counting on synthetic files (each part of the key, an old run's derived trees,
-    an unknown class, the events), the planner against the report, the driver resuming from another tree, and the real two-night file."""
+    an unknown class, the events), the planner against the report, the driver resuming from another tree, and a real file of the stress run."""
     return resume_unit_checks(src) + resume_report_checks(env, src) + scn_resume(env, src) + resume_real_checks(env, src)
 
 
@@ -6353,6 +6480,11 @@ def plants(env: Env) -> None:
         ("P5: the manifest check is left out of the build step",
          [("card_stress.py", "            self.check_manifest(im, step)\n", "            pass\n")],
          lambda env, src: scn_manifests(env, src), ["manifests B: the quad's manifest names a commit", "manifests A: ... a build step"]),
+        ("P5: the planner forgets the last interval of each item (a real-file resume plans the wrong gaps; needs CARD_STRESS_RESUME_RUN)",
+         [("card_stress.py", "                have = self.intervals.get(it.name, []) + self.quarantine.get(it.name, []) + reserved.get(it.name, [])\n",
+           "                have = self.intervals.get(it.name, [])[:-1] + self.quarantine.get(it.name, []) + reserved.get(it.name, [])\n")],
+         lambda env, src: resume_real_checks(env, src),
+         ["resume real: the planner over the WHOLE file's coverage", "resume real: a resume at 0b7c959 plans each of the 22"]),
         ("P5: the build step does not look at vectors/out",
          [("card_stress.py", "            problem = L.vectors_problem(self.root)\n", "            problem = None\n")],
          lambda env, src: vectors_checks(env, src), ["vectors: the build step looks at vectors/out only when"]),

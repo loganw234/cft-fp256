@@ -31,7 +31,8 @@
 # --records and the campaign's space, `notes` four verifiers' notes (`standin` is one of them, run alone by its
 # plants). `notes` skips its figure_extracts check, by name, unless CARD_STRESS_METRICS names a finished run's
 # metrics.jsonl (the stress copy the committed figures come from). `resume` (parcel DR4, 2026-10-21): --resume counts coverage per
-# tree class; its last check, the planner over the lead's real two-night file, is skipped by name unless CARD_STRESS_RESUME_RUN names
+# tree class; its last check, the planner over a real file of the lead's stress run (his two nights', his three nights', or a later night's: it derives
+# what it expects from the file, and holds the figures measured on his two files only for those, by sha256), is skipped by name unless CARD_STRESS_RESUME_RUN names
 # that run's directory (the one holding metrics.jsonl) and the checkout holds its first commit, 881bbcb.
 # Since 2026-10-22 (parcel P5, the driver before the nights run it): `build` also holds the images' manifests (what the driver reads beside
 # each xclbin: refused or flagged, by name) and vectors/out (refused at the start when the selftest leg would read it), `telemetry` the
