@@ -2062,13 +2062,13 @@ own. Each morning, once the night has ended (`COPY` is the copy's directory, the
 
 1. **Copy the night, as now:** the run's directory and the box's sha256s, checked against them. Everything below reads the copy.
 2. **Reduce it,** in a checkout with the whole history, the main checkout, **not a depth-1 clone**: `python -B hw/card_stress_progress.py COPY
-   --out site/nightly.json` (seconds now, and growing with the square of the nights; the file records the commit the checkout is at). The report reads a run's tree from git when the run did not
+   --out site/nightly.json` (seconds now, and growing with the square of the nights; the file's `made.commit` is the commit the checkout's tools are at, not the data file's own commit, and the page says "made with the tools at commit"). The report reads a run's tree from git when the run did not
    record it (parcel RG), which needs that run's commit in the checkout; in a shallow clone the run stays in a class of its own, with the reason.
    It writes nothing, and says why, for a `metrics.jsonl` with an unparsable line in the middle (the report
    goes on without it and says so; a public page must not), a dry-run night, a record before the first run_start, or a field that would
    carry a path, host name, user name or IP address (status 3). A torn last line is noted in the file, not refused.
 3. **Check it,** in the same checkout: `python -B hw/card_stress_progress.py --check site/nightly.json COPY` must say the file is what the copy
-   reduces to (status 0); a difference names the first fields that differ. Compare `source.metrics_sha256` in the file with the box's line for
+   reduces to (status 0); a difference names the first fields that differ (status 1), and a file that is not a data file is status 2. Compare `source.metrics_sha256` in the file with the box's line for
    `metrics.jsonl`, and read `git diff --stat site/nightly.json`: one more night, the current classes moved, the earlier nights untouched.
 4. **Commit the data file alone:** `git add site/nightly.json`, `git commit -m "nightly data: night N (DATE)"`. The `gates` workflow ignores
    a push that changes this file alone (`paths-ignore` in `.github/workflows/gates.yml`); `pages` redeploys on it.
