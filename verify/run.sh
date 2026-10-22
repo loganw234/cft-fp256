@@ -1575,7 +1575,7 @@ do_mpfr() {
     else
       echo "NOTE  mpfr: no verify/_mpfr-prefix, so built against the system's MPFR ${seen:-(version not reported by the compiler)}, NOT the pinned ${pin:-(unreadable: no MPFR_V in verify/build-mpfr-oracle.sh)}; bash verify/build-mpfr-oracle.sh builds the pin, static, without root"    # MPFR-SAYS-SYSTEM-DIFFERS
     fi
-    HOSTMAKE "mpfr-check$EXE" "mp-err-check$EXE" || return 1
+    HOSTMAKE "mpfr-check$EXE" "mp-err-check$EXE" || return 1    # MPFR-BUILD-SYSTEM
   fi
   (cd "$ROOT/host" && "./mpfr-check$EXE" 24 7) || return 1
   # The evaluator's error claims held exactly (host/tests/mp_err_check.c):

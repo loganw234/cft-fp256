@@ -49,8 +49,9 @@
 # of the same rule: a stage that built against an MPFR other than the pinned
 # one says so by name on a line that starts NOTE, and that is NOT an inner
 # skip - every comparison ran - so the runner's own scan is asked and must
-# count nothing. Five more controls: each of the four lines taken away, and
-# the system's put back starting SKIP.
+# count nothing. Six more controls: each of the four lines taken away, the
+# system's put back starting SKIP, and the system build's call deleted (a check
+# of "no flags" had passed when the build was never called: verifier VP3).
 # And CI's host job (.github/workflows/gates.yml) is held to the runner (KL-607,
 # KL-181): every name in its --only list is a stage, none is named twice, and
 # innerskips, ensurevectors and seq - the three it left out until 2026-10-22 -
@@ -526,7 +527,11 @@ skips_in () {  # <runner> <file>  ->  the lines that runner's own inner_scan cou
                  on && /^\}/ { on = 0 }' "$1")"
     inner_scan "$2" )
 }
-lacks () { ! grep -q "$@"; }
+# lacks <grep args... file>: true when the pattern is NOT in the file, and the
+# file IS there. A grep of a file that does not exist exits 2, which a bare
+# `! grep` reads as "absent": that is how a build that was never called passed
+# as "handed no prefix" (verifier VP3, the send-back of 2026-10-22).
+lacks () { [ -f "${@: -1}" ] && ! grep -q "$@"; }
 ran_both () { grep -qxF 'mpfr-check ran' "$1" && grep -qxF 'mp-err-check ran' "$1"; }
 mpfr_says () {  # <runner>  ->  returns the number of checks it got wrong
   local d="$T/m.$RANDOM$RANDOM" bad=0 pfx got W=0 cc=0
@@ -557,6 +562,8 @@ mpfr_says () {  # <runner>  ->  returns the number of checks it got wrong
         "$OUT" || bad=$((bad + 1))
   check "system 9.9.8: the NOTE says how to get the pinned one" \
         grep -qF 'bash verify/build-mpfr-oracle.sh builds the pin' "$OUT" || bad=$((bad + 1))
+  check "system 9.9.8: the build is called for both programs, with no flags" \
+        grep -qxF 'mpfr-check mp-err-check' "$d/hostmake.args" || bad=$((bad + 1))
   check "system 9.9.8: the build is handed no prefix" lacks 'CFLAGS' "$d/hostmake.args" || bad=$((bad + 1))
   same  "system 9.9.8: the NOTE is not an inner skip" "$(skips_in "$1" "$OUT" | grep -c .)" 0 || bad=$((bad + 1))
   check "system 9.9.8: both programs ran after it" ran_both "$OUT" || bad=$((bad + 1))
@@ -591,7 +598,7 @@ mpfr_says () {  # <runner>  ->  returns the number of checks it got wrong
   fi
   return "$bad"
 }
-NMPFR=19
+NMPFR=20
 
 # ...and the sources still print them so. A fixture line is a claim
 # about a program's output; these hold each claim to the line of source
@@ -806,13 +813,16 @@ control mpfr-stale-not-said MPFR-SAYS-STALE \
 control mpfr-system-pin-not-said MPFR-SAYS-SYSTEM-EQUALS \
   '      : # the control: nothing said when the system MPFR is the pinned one' \
   "system 9.9.9, the pin 9.9.9: it says the system's is the pinned version" mpfr_says
+control mpfr-build-not-called MPFR-BUILD-SYSTEM \
+  '    : # the control: the system build is never called' \
+  "system 9.9.8: the build is called for both programs, with no flags" mpfr_says
 
 if [ "$FAILS" -eq 0 ]; then
-  echo "PASS: $NCHECKS checks right, all ten controls caught by their own checks;" \
+  echo "PASS: $NCHECKS checks right, all eleven controls caught by their own checks;" \
        "$NFORMS checks of the programs' skip lines right, $NUNCOUNTED of their" \
        "not-on-this-device lines right, $NCARRIED of do_generated's carrying of" \
        "a passing tool's skip lines right, $NMPFR of the mpfr stage's first lines" \
-       "right (17 where there is no C compiler), $NPINS pins held, the one form" \
+       "right (18 where there is no C compiler), $NPINS pins held, the one form" \
        "held with its control caught, and CI's host list held to the runner with" \
        "its control caught"
   exit 0
