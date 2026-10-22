@@ -7,7 +7,7 @@ list of the state's encodings; `lane_params` the same; `tangents` a list of
 lanes, each a list of vectors, each a list of the state's encodings. A
 list where a lane belongs - `states=[0, 0, 0]`, `tangents=[[1, 0]]` for a
 system with two tangent vectors - made list() raise TypeError out of
-run(), where every other fault of an input is a Refusal by name
+run(), where the faults of an input that it checks are Refusals by name
 (docs/LANGUAGE.md, "Refusals of a run"). Each level of each argument is
 `lane-shape` now, naming the thing that was not a list.
 

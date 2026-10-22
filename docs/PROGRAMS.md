@@ -246,10 +246,11 @@ the limit, and a number too long for Python to print is named by its
 leading hex digits and their count (`max_deposits=0x111111111111...
 (3999 hex digits), cap 1048576`), where `cft-asm` prints a `0x` token as
 written - the one difference left, in the wording of a number past 4,300
-decimal digits. A refusal of a number carries the file and line, as
-every other refusal of `asm.py` does (KL-378). The line ends and
-characters this paragraph first listed are refused by both now, under
-the rule above;
+decimal digits. A refusal of a number that a directive or an operand
+reads carries the file and line (KL-378). The `.deposits` cap is checked
+once the whole image is read, so its refusal names the source and no
+line, as it did before 2026-10-21. The line ends and characters this
+paragraph first listed are refused by both now, under the rule above;
 a carriage return or form feed after a comment was silent then, not
 loud (verifier-VD1). (A negative
 `.scratch in` or `out` count is refused by both: until 2026-10-01

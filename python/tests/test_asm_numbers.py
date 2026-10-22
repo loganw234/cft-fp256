@@ -5,10 +5,14 @@ error (KL-378 and KL-377).
 
 KL-378. asm.py's two refusals of a number - "is not a number" and the digit
 bound - carried no file and no line, because the directives called
-_parse_uint directly; every other refusal of the assembler is
-`file:line: message`. They come through _Asm.uint now, at every site that
-reads a number: `.deposits`, `.scratch N`, `.scratch in`, `.scratch out`,
-`.slot`, a slot operand, `repeat` and a post-step.
+_parse_uint directly; a refusal of a line is `file:line: message`. They
+come through _Asm.uint now, at every site that reads a number: `.deposits`,
+`.scratch N`, `.scratch in`, `.scratch out`, `.slot`, a slot operand,
+`repeat` and a post-step. Not every refusal has a line: the `.deposits` cap
+is checked once the whole image is read, so it names the source alone
+(`prog.cfta: max_deposits=2000000, cap 1048576`), as before, and a source
+without a `.deposits` is refused at line 0;
+test_the_located_refusal_is_the_assemblers_own_and_one_line says so.
 
 KL-377. A `0x` number has any length (docs/PROGRAMS.md), and a refusal that
 printed one in decimal raised an uncaught ValueError once it was past
@@ -97,11 +101,18 @@ def test_a_decimal_past_the_digit_bound_is_refused_at_its_file_and_line(
 
 
 def test_the_located_refusal_is_the_assemblers_own_and_one_line():
-    """The file and line are the ones every other refusal carries: the same
-    `source:line: ` prefix, the line counted from 1 over the whole source."""
+    """The file and line are the ones a refusal of an opcode carries: the
+    same `source:line: ` prefix, the line counted from 1 over the whole
+    source. And what has no line, which docs/PROGRAMS.md says: the
+    `.deposits` cap is checked once the whole image is read, and a missing
+    `.deposits` is found at the end (line 0)."""
     other = refusal(HEAD + "\n\nnosuch r3, r0\nhalt\n", "prog.cfta")
     ours = refusal(HEAD + "\n\n.scratch abc\nhalt\n", "prog.cfta")
     assert other.startswith("prog.cfta:5: ") and ours.startswith("prog.cfta:5: ")
+    assert refusal(".format fp64\n.deposits 2000000\nhalt\n", "prog.cfta") == \
+        "prog.cfta: max_deposits=2000000, cap 1048576"
+    assert refusal(".format fp64\nhalt\n", "prog.cfta") == \
+        "prog.cfta:0: .deposits is required"
 
 
 # ---- KL-377: a refusal by name, whatever the length ---------------------

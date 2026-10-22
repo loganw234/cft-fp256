@@ -1,9 +1,9 @@
 # The documents, by what you open them for
 
-Fifty files, 86,486 lines. Flat in one directory they look like one
+Fifty files, 86,487 lines. Flat in one directory they look like one
 undifferentiated pile; they are not, and the split is close to even:
 
-- **28,055 lines you consult while working** — the three under *Start here*,
+- **28,056 lines you consult while working** — the three under *Start here*,
   the contract, and the reference you call into;
 - **7,695 lines of tool manual**, one per shipped program;
 - **3,271 lines of operations**, read when you are about to do something to
@@ -58,7 +58,7 @@ product, not the implementation.
 | [HOSTAPI.md](HOSTAPI.md) | 3,704 | The host API, function by function. The largest reference here and the one most often wanted. |
 | [TRANSCENDENTALS.md](TRANSCENDENTALS.md) | 1,809 | The thirty-nine correctly-rounded transcendentals, by ABI phase, with the evidence for each, and the six of them that also run on the tile. |
 | [REMOTE.md](REMOTE.md) | 1,433 | The remote backend: a tile behind a socket, the frame protocol and the WebSocket path. |
-| [PROGRAMS.md](PROGRAMS.md) | 652 | Programs as files: the assembler, the program library, the runner. |
+| [PROGRAMS.md](PROGRAMS.md) | 653 | Programs as files: the assembler, the program library, the runner. |
 | [EMBEDDED.md](EMBEDDED.md) | 709 | libcft on microcontrollers, and the profiles the embedded gate runs. |
 | [PLATFORMS.md](PLATFORMS.md) | 2,928 | Which FPGA to buy, borrow or rent next, measured against the tile this project builds; every figure carries a source and every price the date it was seen. |
 | [SCALING.md](SCALING.md) | 424 | What more tiles buy, and what they do not. |

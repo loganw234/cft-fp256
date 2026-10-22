@@ -1133,11 +1133,12 @@ class _Asm:
             self.fail(str(exc))
 
     def uint(self, tok, what):
-        """_parse_uint, its refusal located at this line: the file and line
-        every other refusal of this assembler carries. Until 2026-10-21 the
-        two refusals of a number - "is not a number" and the digit bound -
-        came out bare, because the directives called _parse_uint directly
-        (KL-378)."""
+        """_parse_uint, its refusal located at this line, `file:line: ` as
+        fail() writes it. Until 2026-10-21 the two refusals of a number -
+        "is not a number" and the digit bound - came out bare, because the
+        directives called _parse_uint directly (KL-378). Not every refusal
+        has a line: the `.deposits` cap is checked once the whole image is
+        read (Image.validate) and names the source alone."""
         try:
             return _parse_uint(tok, what)
         except AsmError as exc:
