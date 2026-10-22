@@ -3216,8 +3216,8 @@ of known limits (2026-10-21, KL-277) adds the fourth:*
   "step 6 begins"), and revision 8's rev8q closed at +0.048 ns (the
   2026-10-06 entry, "step 6's closing records, part two");*
 - *"a program takes tile 0", one of "three ad-hoc policies": the state
-  before step 2 (built on 2026-09-25, as the paragraph above says:
-  `run_job`).*
+  before step 2. Step 2 itself was built on 2026-09-25, as the paragraph
+  above says (`run_job`).*
 
 *The step-6 plan's list also names this plan's partitioner in
 `asm.py`. Whether a partitioner is built, and where, was put to Logan
