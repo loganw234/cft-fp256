@@ -172,9 +172,10 @@ jobs:
       #
       # `innerskips` and `ensurevectors` are the runner's own two self-tests
       # (verify/test-inner-skips.sh: how a skip inside a passing stage is
-      # counted, and how the mpfr stage names its MPFR; verify/test-ensure-
-      # vectors.sh: when vectors/out is reused and when it is regenerated,
-      # and that every stage that can regenerate it names what that needs),
+      # counted, how the mpfr stage names its MPFR, and that this very list
+      # names real stages and these three; verify/test-ensure-vectors.sh:
+      # when vectors/out is reused and when it is regenerated, and that every
+      # stage that can regenerate it names what that needs),
       # and `seq` is the sequencer differential (host/tests/seq_check.py: the
       # C sequencer against the model over fuzzed programs in eight corpora;
       # the routine corpus needs the mpmath and pytest this job installs, or

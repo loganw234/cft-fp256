@@ -51,6 +51,10 @@
 # skip - every comparison ran - so the runner's own scan is asked and must
 # count nothing. Five more controls: each of the four lines taken away, and
 # the system's put back starting SKIP.
+# And CI's host job (.github/workflows/gates.yml) is held to the runner (KL-607,
+# KL-181): every name in its --only list is a stage, none is named twice, and
+# innerskips, ensurevectors and seq - the three it left out until 2026-10-22 -
+# are in it; a copy without innerskips and with seq misspelt must be caught.
 # Then the skip lines the stages' programs print (cpp-api-test,
 # remote_check.py, tb/check_results.py), each as printed since 2026-09-24
 # and as printed before: the new one counts and fails --require-all
@@ -705,6 +709,55 @@ else
   echo "  caught: $(grep -c 'not on this device, skipped' "$T/stray.out") line(s) named"
 fi
 
+# CI's host job names the stages it runs with --only, and the runner refuses a
+# name it does not know (exit 2), so a typo there would be the job's first
+# failure, on a push. This reads the list out of the workflow's own text, holds
+# every name in it to the runner's stage list, and holds it to the three stages
+# it left out until 2026-10-22 (innerskips and ensurevectors, KL-607; seq,
+# KL-181), so that dropping one is a failure here and not a silent gap.
+ci_host () {  # <workflow> <runner>  ->  returns the number of problems it found
+  local names n bad=0 stages
+  names=$(sed -n 's/^ *- run: bash verify\/run\.sh --require-all --only \([a-z0-9,-]*\) *$/\1/p' "$1" | head -1 | tr ',' '\n')
+  if [ -z "$names" ]; then
+    echo "  FAIL  no 'bash verify/run.sh --require-all --only <list>' step in $1"; return 1
+  fi
+  stages=$(grep -E '^stage [a-z0-9-]+ "' "$2" | awk '{print $2}')
+  for n in $names; do
+    printf '%s\n' "$stages" | grep -qx -- "$n" \
+      || { echo "  FAIL  CI's host list names $n, which is no stage of the runner"; bad=$((bad + 1)); }
+  done
+  n=$(printf '%s\n' "$names" | sort | uniq -d | tr '\n' ' ')
+  [ -z "$n" ] || { echo "  FAIL  CI's host list names twice: $n"; bad=$((bad + 1)); }
+  for n in innerskips ensurevectors seq; do
+    printf '%s\n' "$names" | grep -qx -- "$n" \
+      || { echo "  FAIL  CI's host list lacks $n"; bad=$((bad + 1)); }
+  done
+  [ "$bad" -ne 0 ] || echo "  ok    CI's host list: $(printf '%s\n' "$names" | grep -c .) names, each a stage of the runner, none twice, innerskips, ensurevectors and seq among them"
+  return "$bad"
+}
+echo "== CI's host job list, as committed"
+ci_host "$ROOT/.github/workflows/gates.yml" "$ROOT/verify/run.sh"; n=$?
+[ "$n" -eq 0 ] || { echo "FAIL: $n problem(s) with CI's host job list"; FAILS=$((FAILS + 1)); }
+# ...and watched to fail: a copy of the workflow without innerskips, and with
+# seq spelled as a name that is no stage.
+sed -e 's/sweepjudge,innerskips,/sweepjudge,/' -e 's/,reduce,seq,programs,/,reduce,sequ,programs,/' \
+  "$ROOT/.github/workflows/gates.yml" > "$T/gates.control.yml"
+echo "== negative control, CI's host list"
+if cmp -s "$T/gates.control.yml" "$ROOT/.github/workflows/gates.yml"; then
+  echo "FAIL: control CI's host list - the sed changed nothing, so it proves nothing"; FAILS=$((FAILS + 1))
+elif ci_host "$T/gates.control.yml" "$ROOT/verify/run.sh" > "$T/ci.out" 2>&1; then
+  cat "$T/ci.out"
+  echo "FAIL: control CI's host list - innerskips was dropped and a name misspelt, and the check did not catch it"
+  FAILS=$((FAILS + 1))
+elif grep -qF "CI's host list lacks innerskips" "$T/ci.out" \
+     && grep -qF "CI's host list names sequ, which is no stage of the runner" "$T/ci.out"; then
+  sed 's/^/  caught: /' "$T/ci.out" | cut -c1-140
+else
+  cat "$T/ci.out"
+  echo "FAIL: control CI's host list - it failed, but not for the two defects put in"
+  FAILS=$((FAILS + 1))
+fi
+
 # Each control: the defect put back into a copy that still parses, and
 # the check written for it must be among those that catch it.
 control () {  # <name> <marker> <replacement line> <the check that must catch it> [<the function that runs the checks: cases>]
@@ -759,8 +812,9 @@ if [ "$FAILS" -eq 0 ]; then
        "$NFORMS checks of the programs' skip lines right, $NUNCOUNTED of their" \
        "not-on-this-device lines right, $NCARRIED of do_generated's carrying of" \
        "a passing tool's skip lines right, $NMPFR of the mpfr stage's first lines" \
-       "right (17 where there is no C compiler), $NPINS pins held, and the one form" \
-       "held with its control caught"
+       "right (17 where there is no C compiler), $NPINS pins held, the one form" \
+       "held with its control caught, and CI's host list held to the runner with" \
+       "its control caught"
   exit 0
 fi
 echo "FAIL: $FAILS problem(s)"
