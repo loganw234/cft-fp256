@@ -1865,13 +1865,12 @@ def rev8_remote_refusals(lib, R):
                 handle = ctypes.c_void_p()
                 rc = lib.cft_program_load(dev, image, len(image),
                                           ctypes.byref(handle))
-                # cft_last_error is only this call's after a refusal: a
-                # load that succeeds left the previous sentence there
-                # (verifier-R3), so it is read for a refusal alone. Since
-                # 2026-09-30 a load clears the library's own slot on entry,
-                # and a successful one leaves it empty - but a device
-                # backend's older message still shows through an empty
-                # slot, so the rule stands.
+                # cft_last_error is read for a refusal alone. Until
+                # 2026-09-30 a load that succeeded left the previous
+                # sentence there (verifier-R3); since 2026-10-22 (KL-490)
+                # every entry point clears the library's slot and both
+                # device backends', so a successful load leaves it empty,
+                # and the rule stands because an empty slot says nothing.
                 msg = (lib.cft_last_error().decode() if rc != CFT_OK
                        else "(loaded; no error)")
                 if rc == CFT_OK:

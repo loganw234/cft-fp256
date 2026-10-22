@@ -1141,10 +1141,10 @@ CFT_API void cft_close(cft_device *dev)
  * the XRT backend's. cft_clear_error() below empties all three, and it is
  * the first statement of every public entry point that returns a status
  * (2026-10-22, KL-490); backend_call() does the same before each cftx_/
- * cftr_ call that can write a sentence of its own, for a call that has
- * gone on to use a backend (the ones that cannot - cftx_buffer_create,
- * _destroy, _stat, _host_wrote and cftx_close - have none, and neither
- * has cftr_close, whose goodbye can leave one: cft.h says so). So a
+ * cftr_ call that can write a sentence of its own, except cftr_close,
+ * whose goodbye can leave one (cft.h says so), for a call that has gone
+ * on to use a backend (the ones that cannot write one - cftx_buffer_create,
+ * _destroy, _stat, _host_wrote and cftx_close - have none). So a
  * refusal writes its sentence here after the clear, and nothing an
  * earlier call wrote - or the other backend - can stand in front of it.
  * Until then only a call that reached a backend cleared this slot, and
@@ -1198,7 +1198,8 @@ void cft_clear_error(void)
 
 #if defined(CFT_ENABLE_XRT) || !defined(CFT_NO_REMOTE)
 /* Called immediately before handing a device backend a call that can write
- * a sentence (a build with none hands nothing to one). It empties every
+ * a sentence, cftr_close excepted, whose goodbye can leave one (cft.h); a
+ * build with no backend hands nothing to one. It empties every
  * slot: the backend about to be called clears its own at most, and the
  * OTHER's older sentence would stand beside the new call's. */
 static void backend_call(void)

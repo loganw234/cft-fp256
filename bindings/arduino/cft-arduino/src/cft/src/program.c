@@ -1493,18 +1493,16 @@ CFT_API cft_status cft_program_load(cft_device *dev, const void *image,
     uint64_t want;
     cft_status st;
 
-    /* Before anything can refuse. This entry point reaches no device
-     * backend, so nothing else clears the library's slot for it, and
-     * until 2026-09-30 a refusal here that wrote no sentence left
-     * cft_last_error() explaining an earlier call - P2 of the revision-7
-     * round measured one printing a cft_run_ex index refusal. Every
-     * refusal below now writes its own sentence, the NULL argument's
-     * included: the clear alone would not do for a refusal left without
-     * one, since cft_last_error() then falls through to a device
-     * backend's message, which may be older still. So the clear is for
-     * the exits that are not refusals: a load that succeeds, and the
-     * allocation failures, which carry no sentence here (nor do ten of
-     * the remote and XRT backends' fourteen out-of-memory returns). */
+    /* Before anything can refuse. Until 2026-09-30 a refusal here that
+     * wrote no sentence left cft_last_error() explaining an earlier call
+     * - P2 of the revision-7 round measured one printing a cft_run_ex
+     * index refusal. Since 2026-10-22 (KL-490) cft_clear_error() empties
+     * the library's slot and both device backends', and it comes first
+     * in every entry point that returns a status, so nothing an earlier
+     * call wrote can stand in front of this one's. Every refusal below
+     * writes its own sentence, the NULL argument's included; a load that
+     * succeeds, and the allocation failures, which carry no sentence
+     * here, leave the slot empty. */
     cft_clear_error();
     if (!dev || !image || !out) {
         cft_set_error("cft_program_load was given a NULL %s; it needs the "

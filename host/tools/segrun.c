@@ -714,9 +714,11 @@ static void internal(const char *what)
 
 /* cft_last_error() before the calls refuse_st reports on, once a call
  * whose failure the tool expects has left its sentence there (identify's
- * cft_get_image_id, on the software backend and through a remote one). A
- * sentence can outlive its call (cft.h): the one a failure reports must
- * be one it wrote, so the same sentence as before is not shown. */
+ * cft_get_image_id, on the software backend and through a remote one).
+ * Until 2026-10-22 a sentence could outlive its call; since KL-490 every
+ * entry point clears the slots first (cft.h), so this guard is redundant,
+ * and it is kept because it is still right: the same sentence as before
+ * is not shown as a new failure's. */
 static char LAST_BEFORE[512];
 
 static void refuse_st(const char *name, const char *what, cft_status st)

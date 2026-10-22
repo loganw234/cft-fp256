@@ -86,7 +86,7 @@
     {
       "source": "host/src/device.c",
       "dest": "src/cft/src/device.c",
-      "sha256": "68682f747db1f11ba9c346eb41927a74ebc0140100eaa0a9cc144bc5c1cb3bab"
+      "sha256": "641bfdc8e389a6c7f4f53028394cc27ba9e8124f849fd3aa73d394e04255477c"
     },
     {
       "source": "host/src/divfull_images.h",
@@ -136,7 +136,7 @@
     {
       "source": "host/src/program.c",
       "dest": "src/cft/src/program.c",
-      "sha256": "f18395d8128eae544fd3a773491c2ed10788428fdcf259492f9e1044f1fcc047"
+      "sha256": "887b7bcbcbb50d8f0a4d8977268f0aae83d7d545f97c90fbac338b8d03fab01c"
     },
     {
       "source": "host/src/reduce.c",

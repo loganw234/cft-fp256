@@ -1686,8 +1686,8 @@ a file the tool did not create. One made before the first segment
 leaves nothing behind. A run that fails part way, and an entry refused
 after the runs, leave the boundary files written, and say so. A `device` or `program-image` refusal
 adds the library's sentence (`cft_last_error()`), unless it is the one
-`cft_get_image_id` left before the runs: a sentence can outlive its
-call, and at eb2d1ae a segment's out-of-memory carried that one
+`cft_get_image_id` left before the runs: a sentence could outlive its
+call until 2026-10-22 (KL-490), and at eb2d1ae a segment's out-of-memory carried that one
 (verifier-C7). No backend in this tree reports
 flags it cannot read, leaves a flag word unwritten or reports one past
 31, so `CFT_SEGRUN_PLANT` is an instrument for the tests of those three

@@ -610,9 +610,11 @@ empty plants nothing; any other value is refused by name
 runs the sequence on every XRT device: a run fills a copy, the mirror is
 rewritten and published, the run is repeated with the fill planted to
 fail, and the run after that must give the software backend's bytes for
-the rewritten operand. A build with the fix reverted answers for the old
-bytes, which is what the leg is written to catch; docs/VALIDATION.md
-records where it has run. A software or remote handle keeps no device
+the rewritten operand. A build with the fix reverted gives other bytes
+on the retry - on a one-tile image the old operand's, on the quad a
+mixture the leg reports as differing from the software backend's - which
+is what the leg is written to catch; docs/VALIDATION.md records where it
+has run. A software or remote handle keeps no device
 copies, ignores the instrument, and the leg reports NOT TESTED there.
 
 **What is not resident.** `cft_reduce`'s partials are the library's
