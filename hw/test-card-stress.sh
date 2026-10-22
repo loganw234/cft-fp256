@@ -11,6 +11,9 @@
 #
 #   bash hw/test-card-stress.sh                 # everything: about 29 minutes under WSL (2026-10-21, niced, 1,761 s with 130 plants; 1,636 s with 115,
 #                                               # on a desktop other sessions share; process starts are the cost)
+#   bash hw/test-card-stress.sh --no-plants --skip-groups stopfile,guard,pool --skip-why "TEXT"
+#                                               # SKIP those groups, by name, with TEXT printed beside each (what verify/run.sh's cardstress stage
+#                                               # does on Windows, where the guard's process listing can stall for minutes on a loaded desktop)
 #   bash hw/test-card-stress.sh --no-plants     # the checks without the negative controls: about 10 minutes
 #                                               # under WSL, 11 under Git Bash (2026-10-21)
 #   bash hw/test-card-stress.sh --only parsers,commands     # seconds

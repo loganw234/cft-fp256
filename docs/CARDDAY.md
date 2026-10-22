@@ -910,7 +910,12 @@ python3 hw/card_stress_report.py /data/card-stress-1016     # the report, any ti
   Bash (2026-10-21, with the coverage wave's groups: 644 s under Git Bash and about 600 s under WSL, read off the clock; 2026-10-20, before them: 448 s and 553 s, and a busier desktop made a Git
   Bash run 636 s), on a desktop other sessions share, and it must be run alone on the host (two drivers at once see each other's
   stand-ins as card users: the guard scans every process of the WSL distro, or of the Windows desktop, it runs in, so two suites in
-  one distro make each other's drivers refuse to start, `guard_refused`, exit 2 - found by parcel SR2, 2026-10-21). `--no-plants` leaves out the negative controls, which take about
+  one distro make each other's drivers refuse to start, `guard_refused`, exit 2 - found by parcel SR2, 2026-10-21). **On Windows the
+  guard's process listing is a PowerShell call (`list_processes`, which `find_card_users` and the scheduler's runner import), and on a
+  loaded desktop it stalled for about two minutes at a time (MEASURED 2026-10-22, parcel P5: the suite's stopfile scenario failed in the
+  same way with the base's driver code, its log's gap before the next leg 117 s; the stage's Windows run lost 10 timing checks of
+  stopfile, guard and pool to it): a known limit of the driver on Windows, where the nights do not run it, and the reason the gate's
+  `cardstress` stage skips those three groups there, by name (`--skip-groups`).** `--no-plants` leaves out the negative controls, which take about
   one and a half to two times as long as everything else together (the whole suite is 29 minutes under WSL: 1,761 s on 2026-10-21 with 130 plants, parcel DR4's; 27 minutes, 1,636 s, with 115; 22.5 minutes before). The runner and the pythons
   the suite itself starts run with `-B` (`-I` ignores `PYTHONDONTWRITEBYTECODE`); the report script
   the driver starts for itself does not, so a run in the tree under WSL still leaves one git-ignored

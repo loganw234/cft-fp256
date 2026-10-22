@@ -1556,6 +1556,11 @@ stage soak-quick "native-oracle soak, QUICK depth + sabotage control" -- do_soak
 #     used to copy that host/ whole into its scratch repository (KL-13); it copies the files git tracks now.
 # Two of its checks need the lead's own run directories (CARD_STRESS_METRICS, CARD_STRESS_RESUME_RUN) and say SKIP, by name, without them; on
 # Windows the groups that need POSIX say it too. They are inner skips, counted and named in the verdict like any stage's.
+#   * On Windows the suite's timing groups - stopfile, guard and pool - are SKIPPED by name (the suite's --skip-groups, with the reason printed
+#     beside each): the guard's process listing is a PowerShell call there, and on a loaded desktop it stalled for about two minutes at a time
+#     (MEASURED 2026-10-22: the stopfile scenario failed identically with the base's driver code, the log's gap before the next leg 117 s), so
+#     those groups' timing windows fail by the load and not by a defect, and a gate must not fail for the desktop's weather. A named skip is
+#     counted, and --require-all fails it; the stage's home is Linux, WSL and the box, where nothing is skipped for this.
 cardstress_users() {  # -> "pid N why; ..." for each process the driver's own guard sees using the card, or nothing
   PY -B -I -c 'import sys; sys.path.insert(0, sys.argv[1]); import card_stress as m; print("; ".join("pid %d %s" % (u["pid"], u["why"]) for u in m.find_card_users()[0]))' "$ROOT/hw" 2>/dev/null
 }
@@ -1563,14 +1568,20 @@ do_cardstress() {
   # the runner's own interpreter, named for the suite's wrapper (it takes python3 first, which on Windows is often the store's shim)
   local py=python
   if [ "$WIN" != 1 ] && command -v python3 >/dev/null 2>&1; then py=python3; fi
-  PYTHON=$py bash "$ROOT/hw/test-card-stress.sh" --no-plants
+  if [ "$WIN" = 1 ]; then
+    local why="Windows: the guard's process listing is a PowerShell call that stalled for about two minutes at a time on a loaded desktop (MEASURED 2026-10-22: the same scenario fails the same way with the base's driver code), so these groups' timing windows fail by the load and not by a defect; they run under WSL and on the box"
+    PYTHON=$py bash "$ROOT/hw/test-card-stress.sh" --no-plants --skip-groups stopfile,guard,pool --skip-why "$why"
+  else
+    PYTHON=$py bash "$ROOT/hw/test-card-stress.sh" --no-plants
+  fi
 }
 need python
 if [ -z "$STAGE_SKIP_REASON" ] && { [ -z "$ONLY" ] || in_list cardstress "$ONLY"; } && ! in_list cardstress "$SKIP"; then
   _csu=$(cardstress_users)
   [ -n "$_csu" ] && STAGE_SKIP_REASON="another process uses the card on this system, so the driver's guard would refuse every driver the suite starts (guard_refused): $_csu"
 fi
-stage cardstress "the long-run stress driver's suite, hw/test-card-stress.sh --no-plants: the verdict parsers on real logs, the legs and the failure policy, the sweep and its resume, the host pool, the seeds, coverage per tree, the images' manifests and vectors/out, the report - the driver against its stand-ins, no card; skipped by name while another process uses the card" --   do_cardstress
+stage cardstress "the long-run stress driver's suite, hw/test-card-stress.sh --no-plants: the verdict parsers on real logs, the legs and the failure policy, the sweep and its resume, the host pool, the seeds, coverage per tree, the images' manifests and vectors/out, the report - the driver against its stand-ins, no card; skipped by name while another process uses the card, and on Windows its timing groups" -- \
+  do_cardstress
 
 do_images() {
   local rc=0 img

@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """The dry run's tests for hw/card_stress.py: no XRT, no card, no amd-arc-box.
 
-    python3 hw/test_card_stress.py [--only NAME,...] [--no-plants]      (bash hw/test-card-stress.sh)
+    python3 hw/test_card_stress.py [--only NAME,...] [--no-plants] [--skip-groups NAME,... --skip-why TEXT]      (bash hw/test-card-stress.sh)
 
 Three kinds of group, then the plants (the groups, by name, are in hw/test-card-stress.sh):
   parsers   the verdict parsers on REAL logs - the software backend's own runs of the same
@@ -6699,6 +6699,39 @@ def run_group(name: str, results: list) -> None:
     print(f"{name}: {len(results)} checks, {len(bad)} failed")
 
 
+# the groups of main()'s table (the scenarios), which --skip-groups may name; the groups that run in-process first (parsers, commands, standin), the
+# report and the plants are not skippable
+SKIPPABLE_GROUPS = ("normal", "fail", "timeout", "deaf", "nodevice", "cardlost", "stopfile", "deadline", "rotation", "diskfloor", "guard", "sweep",
+                    "disagree", "telemetry", "build", "buildreal", "internal", "signal", "torn", "disable", "sweepall", "pool", "seeds", "trees",
+                    "items", "chunk", "records", "notes", "resume")
+
+
+def skip_groups_checks(src: str = HERE) -> list:
+    """--skip-groups (2026-10-22): the stage's way of skipping, by name, the groups that cannot be trusted on a loaded Windows desktop. Run as a process on a
+    group that starts no driver: the skipped groups print a SKIP line with the reason and no group line, the exit status is 0, and a name that is not a group is
+    refused with exit 2 before anything runs."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    why = "a reason of the caller's: it is printed beside each name"
+    e = dict(os.environ, CARD_STRESS_TEST_ROOT=ROOT)
+    base = [sys.executable, "-B", "-I", os.path.join(src, "test_card_stress.py")]
+    p = subprocess.run(base + ["--only", "parsers,stopfile,guard,pool", "--skip-groups", "stopfile,guard,pool", "--skip-why", why, "--no-plants"],
+                       capture_output=True, text=True, env=e, timeout=300)
+    names = [ln.split("  SKIP  ", 1)[1].split(" - ", 1)[0] for ln in p.stdout.splitlines() if ln.startswith("  SKIP  ")]
+    c("skip groups: the groups named are SKIPPED, each by name with the caller's reason, in the form the runner counts (a line whose first word is SKIP), "
+      "and not run (no group line of theirs, no driver started); the group that was not named ran; the exit status is 0",
+      p.returncode == 0 and names == ["stopfile", "guard", "pool"] and all(f"  SKIP  {g} - {why}" in p.stdout for g in names)
+      and not re.search(r"^(stopfile|guard|pool): \d+ checks", p.stdout, re.M) and re.search(r"^parsers: \d+ checks, 0 failed", p.stdout, re.M)
+      and "3 skipped" in p.stdout, f"rc {p.returncode}: {p.stdout[-300:]}")
+    q = subprocess.run(base + ["--only", "parsers", "--skip-groups", "stopfile,nosuchgroup", "--no-plants"], capture_output=True, text=True, env=e, timeout=120)
+    c("skip groups: a name that is not a group is refused by name (exit 2) and nothing runs, so a typo cannot skip or run the wrong group",
+      q.returncode == 2 and "nosuchgroup" in q.stderr and "parsers:" not in q.stdout, f"rc {q.returncode}: {q.stderr[-200:]}")
+    return out
+
+
 def main() -> int:
     if os.environ.get("CARD_STRESS_NESTED_PROBE"):
         # stage_guard_checks asked the runner for the cardstress stage while a card user was alive: it must have skipped. If it did not, this
@@ -6709,6 +6742,17 @@ def main() -> int:
     if "--only" in sys.argv:
         only = set(sys.argv[sys.argv.index("--only") + 1].split(","))
     want = lambda g: only is None or g in only
+    # --skip-groups a,b --skip-why TEXT: groups that are SKIPPED, by name and with that reason, in the output the runner counts as inner skips. verify/run.sh's
+    # cardstress stage passes the timing groups on Windows (stopfile, guard, pool: see SKIPPABLE_GROUPS). A name that is not a group is refused, so a typo
+    # cannot leave a group running that was meant to be skipped, or skipped that was meant to run.
+    skipped_groups: set = set()
+    if "--skip-groups" in sys.argv:
+        skipped_groups = {g for g in sys.argv[sys.argv.index("--skip-groups") + 1].split(",") if g}
+        unknown = sorted(skipped_groups - set(SKIPPABLE_GROUPS))
+        if unknown:
+            print(f"card-stress test: --skip-groups names {', '.join(unknown)}, which is not one of {', '.join(SKIPPABLE_GROUPS)}", file=sys.stderr)
+            return 2
+    skip_why = sys.argv[sys.argv.index("--skip-why") + 1] if "--skip-why" in sys.argv else "named by --skip-groups"
     tmp = tempfile.mkdtemp(prefix="card-stress-test-")
     env = Env(tmp)
     t0 = time.time()
@@ -6716,7 +6760,7 @@ def main() -> int:
         if want("parsers"):
             run_group("parsers", group_parsers())
         if want("commands"):
-            run_group("commands", group_commands())
+            run_group("commands", group_commands() + skip_groups_checks())
         if want("standin"):
             run_group("standin", standin_alive_checks())
         for gname, fn, posix_only in (("normal", scn_normal, False), ("fail", scn_fail_and_parse, False),
@@ -6737,6 +6781,9 @@ def main() -> int:
                                       ("records", group_records, False), ("notes", group_notes, False),
                                       ("resume", group_resume, False)):
             if not want(gname):
+                continue
+            if gname in skipped_groups:
+                skip(gname, skip_why)
                 continue
             if posix_only and not POSIX:
                 skip(gname, "needs POSIX (SIGTERM can be ignored; Windows has no such signal)")
