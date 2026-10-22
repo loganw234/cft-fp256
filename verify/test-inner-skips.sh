@@ -473,7 +473,10 @@ NCARRIED=10
 # lines are held to the one form, and refuse the SKIPPED-first lines they
 # replaced. remote_test.mjs's missing vectors and verify_demos.mjs's
 # unbuilt page are host reasons the rule counts, reprinted with the
-# marker first at the merge; they refuse the forms they replaced.
+# marker first at the merge; they refuse the forms they replaced. The two
+# documents that say what the packager prints are pinned to the sentence
+# that is true of the two source lines above (they said it printed no SKIP
+# line, until 2026-10-21, after it began to print one on Windows).
 pins () {  # -> returns the number of pins that do not hold
   local row f new old bad=0 rows
   mapfile -t rows << 'PINS'
@@ -494,6 +497,8 @@ bindings/node/remote_test.mjs|console.log(`SKIP  remote_test.mjs REDUCE replay: 
 bindings/wasm/verify_demos.mjs|console.log("SKIP  verify_demos.mjs checks 1-2: the page is not built - run " +|note("skipped: run `bash bindings/wasm/build_demos.sh`
 python/packager_check.py|print("  SKIP  not run on this platform: %s" % item)|print("  not run on this platform: %s" % item)
 python/packager_check.py|NOT_RUN.append("archive plant, an entry with a backslash in its name: zipfile on Windows reads a backslash as a "|
+verify/README.md|prints one SKIP line where it cannot run a plant|prints no SKIP line (on Windows one plant cannot run
+docs/VERIFICATION.md|on the Windows desktop it prints|prints no SKIP line on the desktop or in a WSL clone
 PINS
   for row in "${rows[@]}"; do
     IFS='|' read -r f new old <<< "$row"
@@ -507,7 +512,7 @@ PINS
   done
   return "$bad"
 }
-NPINS=17
+NPINS=19
 
 # ...and no other shape survives in the two programs whose matrices adapt
 # to the device: no printf that starts SKIP, and none of the shapes the

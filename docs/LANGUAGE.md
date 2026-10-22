@@ -2555,8 +2555,10 @@ under `make golden`, with no change to either.
   function in the graph's evaluation and the test's reader, and within
   2^-1000 of the function; mpmath needed by a run of the six alone, its
   absence named; the language at 1.1, with cft.h's macros;
-- this document's refusal tables, template text and Lorenz-63 blocks
-  against the code.
+- this document's refusal tables (the names, and for `scratch-capacity`
+  the depth of every built-in target in python/cftc/targets.py, in the
+  table's row and in the catalogue's string, with plants), template text
+  and Lorenz-63 blocks against the code.
 
 **`python/tests/test_lang_tangent.py`: the variational equations.**
 - each rule of the table above, rendered on a one-operation system for
