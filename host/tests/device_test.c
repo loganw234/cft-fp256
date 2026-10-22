@@ -8715,8 +8715,13 @@ static void check_stale_copies(cft_device *sw, cft_device *hw,
     fill_finite(y, fmt, n);
     fill_finite(init, fmt, n);
     for (i = 0; i < n; i++) {
+        uint32_t hi;
         i64[i] = (int64_t)(rbyte() % 21) - 10;
-        i32[i] = (int32_t)((uint32_t)rbyte() << 24 | (uint32_t)rbyte() << 8);
+        /* Two draws, so two statements: C leaves the operands of one
+         * `|` open. The high byte first, as every gcc measured took
+         * them (docs/VALIDATION.md, 2026-10-22). */
+        hi = (uint32_t)rbyte() << 24;
+        i32[i] = (int32_t)(hi | (uint32_t)rbyte() << 8);
         if (i % 3)
             mask[i >> 3] |= (uint8_t)(1u << (i & 7u));
     }

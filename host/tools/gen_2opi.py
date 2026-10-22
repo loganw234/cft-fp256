@@ -203,16 +203,22 @@ def main():
         if not out.exists():
             print(f"{out}: missing", file=sys.stderr)
             return 1
-        if out.read_text() != text:
-            print(f"{out}: does NOT match what the generator emits - "
+        # BYTES, not read_text: a text-mode read folds CRLF to LF, so a
+        # header an editor had saved with CRLF compared equal to the
+        # generated text and this check could not see it (KL-609).
+        have, want = out.read_bytes(), text.encode("utf-8")
+        if have != want:
+            crlf = (" (CRLF line ends; the generator writes LF)"
+                    if have.replace(b"\r\n", b"\n") == want else "")
+            print(f"{out}: does NOT match what the generator emits{crlf} - "
                   "regenerate it (python3 host/tools/gen_2opi.py)",
                   file=sys.stderr)
             return 1
         print(f"{out}: matches the generator, 2/pi at {BITS} bits")
         return 0
     # LF on every host, as the committed header is: a bare write_text()
-    # writes CRLF on Windows, which --check (read_text, universal
-    # newlines) cannot see and bindings/arduino/sync.py would hash.
+    # writes CRLF on Windows, which bindings/arduino/sync.py would hash
+    # and which --check, comparing bytes, refuses.
     out.write_text(text, encoding="utf-8", newline="\n")
     print(f"{out}: 2/pi at {BITS} bits ({WORDS} words)")
     return 0

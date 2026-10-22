@@ -228,11 +228,23 @@ static size_t mutate(uint8_t *buf, size_t len, size_t cap)
     int rounds = 1 + (int)rnd_below(8);
     while (rounds--) {
         switch (rnd() % 12u) {
+        /* Cases 0 and 1 draw twice. As one expression - `buf[rnd_below(
+         * len)] = (uint8_t)rnd()` - C leaves the order of the two draws
+         * open, so two compilers could make two corpora from one seed.
+         * Two statements, in the order every gcc measured took (the
+         * right side first, then the subscript: docs/VALIDATION.md,
+         * 2026-10-22), so the stream a seed makes is the one it made. */
         case 0:                                  /* flip one bit */
-            if (len) buf[rnd_below(len)] ^= (uint8_t)(1u << (rnd() & 7u));
+            if (len) {
+                uint8_t bit = (uint8_t)(1u << (rnd() & 7u));
+                buf[rnd_below(len)] ^= bit;
+            }
             break;
         case 1:                                  /* set one byte */
-            if (len) buf[rnd_below(len)] = (uint8_t)rnd();
+            if (len) {
+                uint8_t val = (uint8_t)rnd();
+                buf[rnd_below(len)] = val;
+            }
             break;
         case 2:                                  /* small arithmetic */
             if (len) {

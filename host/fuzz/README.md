@@ -156,7 +156,15 @@ budget is still spent fuzzing; the corpus persists across restarts.
 It sets `allocator_may_return_null=1` on purpose - a BUF_ALLOC of two
 exabytes is a request `cft_alloc` is right to refuse with
 CFT_ERR_OUT_OF_MEMORY, and without that ASan aborts on the size and the
-fuzzer spends its budget re-finding a policy. `detect_leaks=0` for the
-same kind of reason: the engine's corpus is deliberately never freed,
-so LeakSanitizer at exit would be reporting the fuzzer rather than the
-target.
+fuzzer spends its budget re-finding a policy. `max_allocation_size_mb=4096`
+for the same reason: ASan refuses an allocation over 1 TiB at once but
+spends about 0.1 s a GiB on one up to that size, so a BUF_ALLOC of 1000 GiB
+(`crashes/serve/hang-0000000000000dcb`) stalled `fuzz-serve` past the
+engine's ten seconds; a native build answers it at once. The option
+refuses what is over 4 GiB, so the fuzzers no longer exercise
+allocations over that size. `detect_leaks=0` for the same kind of
+reason: the engine's corpus is deliberately never freed, so
+LeakSanitizer at exit would be reporting the fuzzer rather than the
+target. `repro.sh` bounds each of its replays - an input, a checkpoint,
+a loader verdict - by `timeout`, so a stall fails the gate instead of
+hanging it.

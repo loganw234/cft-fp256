@@ -307,7 +307,11 @@ static spec rnd_spec(int W)
     long k = 0;
     if (next() & 1)
         return spec_at((int)below(NSPEC), W);
-    c = (next() >> 1) >> below(63);
+    /* Two draws, so two statements: as `(next() >> 1) >> below(63)` C
+     * leaves their order open. The left operand first, as every gcc
+     * measured took it (docs/VALIDATION.md, 2026-10-22). */
+    c = next() >> 1;
+    c >>= below(63);
     if (below(4) == 0)
         k = (long)below((uint64_t)(2 * W + 64));
     return sp(c, k);
@@ -1682,7 +1686,11 @@ static spec log_count(long wv, int W)
         default: return sp_inf();
         }
     }
-    return sp(next() >> below(63), 0);
+    {
+        /* The left operand of the shift first, as in rnd_spec above. */
+        uint64_t c = next();
+        return sp(c >> below(63), 0);
+    }
 }
 
 /* Widths spanning those the evaluator takes a logarithm at (verifier-W5
@@ -1876,19 +1884,49 @@ static void sample(long per)
                 case_add(W, 0, 7, xa, ca, sb, 7 + d, xb, cb, sub);
             }
             rnd_sig(xb, wb);
-            case_mul(W, (int)(next() & 1), xa, rnd_spec(W), (int)(next() & 1),
-                     xb, rnd_spec(W), (long)below(40) - 20,
-                     (long)below(40) - 20);
-            case_div(W, (int)(next() & 1), xa, rnd_spec(W), (int)(next() & 1),
-                     xb, rnd_spec(W), (long)below(40) - 20,
-                     (long)below(40) - 20);
-            case_ui(W, (int)(next() & 1), (int)(next() & 1), xa, rnd_spec(W),
-                    (next() & 1) ? UIS[below(NUIS)]
-                                 : (uint32_t)(next() | 1u),
-                    (long)below(40) - 20);
-            case_sqrt(W, xa, rnd_spec(W), (long)below(40) - 20);
+            /* The calls below drew in their arguments, and C leaves the
+             * order of a call's arguments open. Each draw is a statement
+             * now, in the order every gcc measured evaluated them in: the
+             * last argument first (docs/VALIDATION.md, 2026-10-22), so
+             * the sample a seed makes is the one it made. */
+            {
+                long eb = (long)below(40) - 20;
+                long ea = (long)below(40) - 20;
+                spec cb = rnd_spec(W);
+                int sb = (int)(next() & 1);
+                spec ca = rnd_spec(W);
+                int sa = (int)(next() & 1);
+                case_mul(W, sa, xa, ca, sb, xb, cb, ea, eb);
+            }
+            {
+                long eb = (long)below(40) - 20;
+                long ea = (long)below(40) - 20;
+                spec cb = rnd_spec(W);
+                int sb = (int)(next() & 1);
+                spec ca = rnd_spec(W);
+                int sa = (int)(next() & 1);
+                case_div(W, sa, xa, ca, sb, xb, cb, ea, eb);
+            }
+            {
+                long ea = (long)below(40) - 20;
+                uint32_t u = (next() & 1) ? UIS[below(NUIS)]
+                                          : (uint32_t)(next() | 1u);
+                spec ca = rnd_spec(W);
+                int sa = (int)(next() & 1);
+                int dv = (int)(next() & 1);
+                case_ui(W, dv, sa, xa, ca, u, ea);
+            }
+            {
+                long ea = (long)below(40) - 20;
+                spec ca = rnd_spec(W);
+                case_sqrt(W, xa, ca, ea);
+            }
             rnd_sig(xb, (long)(1 + below((uint64_t)(W + 70))));
-            case_set(W, (int)(next() & 1), xb, (long)below(40) - 20);
+            {
+                long e = (long)below(40) - 20;
+                int s = (int)(next() & 1);
+                case_set(W, s, xb, e);
+            }
             {
                 /* a value between 1 and 2^20, against integers near it */
                 long e = 20 - wa - (long)below(21);
