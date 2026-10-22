@@ -160,26 +160,34 @@ def check_public():
     return problems
 
 
-if __name__ == "__main__":
-    checking = "--check" in sys.argv[1:]
+def main(argv=None):
+    """The exit status; `--check` compares, anything else writes."""
+    argv = sys.argv[1:] if argv is None else argv
+    checking = "--check" in argv
     text = render()
     problems = check_public()
 
     if checking:
-        on_disk = HEADER.read_text(encoding="utf-8") if HEADER.exists() else None
+        # BYTES, not read_text: a text-mode read folds CRLF to LF, so a
+        # header an editor had saved with CRLF compared equal to the
+        # generated text and this check could not see it (KL-609).
+        want = text.encode("utf-8")
+        on_disk = HEADER.read_bytes() if HEADER.exists() else None
         if on_disk is None:
             problems.append("%s does not exist; run python/gen_seq_flags.py"
                             % HEADER.name)
-        elif on_disk != text:
-            problems.append("%s has drifted from python/cft_golden/seqflags.py; "
-                            "run python/gen_seq_flags.py" % HEADER.name)
+        elif on_disk != want:
+            crlf = (" (CRLF line ends; the generator writes LF)"
+                    if on_disk.replace(b"\r\n", b"\n") == want else "")
+            problems.append("%s has drifted from python/cft_golden/seqflags.py%s; "
+                            "run python/gen_seq_flags.py" % (HEADER.name, crlf))
         if problems:
             for p in problems:
                 print("gen_seq_flags: %s" % p, file=sys.stderr)
-            sys.exit(1)
+            return 1
         print("gen_seq_flags: %s and cft.h agree with the golden model"
               % HEADER.name)
-        sys.exit(0)
+        return 0
 
     if problems:
         for p in problems:
@@ -187,3 +195,8 @@ if __name__ == "__main__":
         sys.exit("gen_seq_flags: cft.h disagrees with the model; not writing")
     io.open(HEADER, "w", encoding="utf-8", newline="\n").write(text)
     print("wrote %s (%d bytes)" % (HEADER, len(text)))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

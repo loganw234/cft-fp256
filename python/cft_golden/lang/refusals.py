@@ -133,7 +133,8 @@ CATALOGUE = {
     "constant-rounds-to-zero": "a nonzero constant whose one rounding "
                                "is zero",
     # -- the interpreter's inputs and the graph's bytes ----------------
-    "lane-shape": "a lane with the wrong number of values",
+    "lane-shape": "a lane with the wrong number of values, or a list of "
+                  "lanes, a lane or a tangent vector that is not a list",
     "lane-value": "a lane value that does not fit the format",
     "unknown-param": "a run value for a name that is not a param, or "
                      "an h for a system that has none",

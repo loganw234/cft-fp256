@@ -279,7 +279,10 @@ def main(argv=None) -> int:
         text = render_cfg(name, mix, note)
         dest = OUT / f"{name}.cfg"
         if args.check:
-            if not dest.exists() or dest.read_text(encoding="utf-8") != text:
+            # BYTES, not read_text: a text-mode read folds CRLF to LF, so a
+            # .cfg saved with CRLF compared equal and could not be seen
+            # (KL-609).
+            if not dest.exists() or dest.read_bytes() != text.encode("utf-8"):
                 stale.append(dest.name)
         else:
             dest.write_text(text, encoding="utf-8", newline="\n")
@@ -299,7 +302,12 @@ def main(argv=None) -> int:
     doc = HW.parent / "docs" / "LAYOUTS.md"
     begin, end = "<!-- layouts:begin -->\n", "<!-- layouts:end -->\n"
     if doc.exists():
-        d = doc.read_text(encoding="utf-8")
+        # BYTES (KL-609): the markers are found whatever the line ends, but
+        # the file is held to what a rewrite would write - LF - so a CRLF
+        # copy is stale, as a text-mode read (which folds CRLF to LF) could
+        # not see.
+        raw = doc.read_bytes()
+        d = raw.decode("utf-8").replace("\r\n", "\n")
         if d.count(begin) == 1 and d.count(end) == 1:
             i = d.index(begin) + len(begin)
             j = d.index(end)
@@ -307,11 +315,12 @@ def main(argv=None) -> int:
                      "*(this table is written by `python hw/gen_layouts.py`; the two "
                      "\"built\" rows are `hw/link_quad.cfg` and `hw/link.cfg` by another "
                      "name - identical connectivity)*\n\n")
-            if d[i:j] != block:
+            wanted_doc = d[:i] + block + d[j:]
+            if raw != wanted_doc.encode("utf-8"):
                 if args.check:
                     stale.append(doc.name)
                 else:
-                    doc.write_text(d[:i] + block + d[j:], encoding="utf-8", newline="\n")
+                    doc.write_text(wanted_doc, encoding="utf-8", newline="\n")
         else:
             print(f"note: {doc} has no layouts:begin/end markers; table not written")
     print(f"tile costs (hierarchy-preserved OOC): " + ", ".join(f"{SHORT[v]} {tile_lut(v):,}" for v in VARIANTS))

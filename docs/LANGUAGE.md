@@ -1360,7 +1360,8 @@ Each is rounded once under the program's attribute, and refused by the
 same constant refusals as a source's constant.
 
 **Refusals of a run.**
-- A lane of the wrong length is `lane-shape`.
+- A lane of the wrong length, or a list of lanes, a lane or a tangent
+  vector that is not a list, is `lane-shape`.
 - A value that is not an encoding is `lane-value`.
 - A run value for no param is `unknown-param`.
 - `param-value`: a Python float as a run value (it is binary64 already),
@@ -2402,7 +2403,7 @@ A run, and a step graph's bytes:
 
 | name | what it refuses |
 |---|---|
-| `lane-shape` | a lane with the wrong number of values |
+| `lane-shape` | a lane with the wrong number of values, or a list of lanes, a lane or a tangent vector that is not a list |
 | `lane-value` | a lane value that does not fit the format |
 | `unknown-param` | a run value for a name that is not a param, or an h for a system without one |
 | `param-value` | a run value that is not an exact rational (a float, or text that is not a constant), an encoding that does not fit, or a param given both ways |

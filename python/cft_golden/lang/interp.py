@@ -115,6 +115,19 @@ def _whole(n):
     return isinstance(n, int) and not isinstance(n, bool) and n >= 0
 
 
+def _listed(x, what):
+    """list(x) where x is a sequence, and otherwise `lane-shape` naming what
+    was not a list: a mis-nested list of states, lane params or tangents (a
+    lane that is a number, a vector that is None) used to raise TypeError
+    out of run()'s conversions (KL-334). Whatever list() takes still goes
+    through, and what is in the list is checked below, as before."""
+    try:
+        return list(x)
+    except TypeError:
+        raise Refusal("lane-shape", f"{what} is {C.shown(x)}, which is not "
+                      f"a list") from None
+
+
 def _exact_run_value(name, value):
     """A run value as an exact rational: an int, a Fraction, or text
     read by the language's own rules for a constant (constant_of)."""
@@ -203,7 +216,8 @@ def run(graph, states, steps, lane_params=None, params=None,
                           f"{C.shown(s)} is not")
         marks.append(s)
     n, m = graph.n_state, len(graph.lane)
-    states = [list(st) for st in states]
+    states = [_listed(st, f"lane {k} of states")
+              for k, st in enumerate(_listed(states, "states"))]
     for k, st in enumerate(states):
         if len(st) != n:
             raise Refusal("lane-shape", f"lane {k} holds {len(st)} state "
@@ -219,7 +233,9 @@ def run(graph, states, steps, lane_params=None, params=None,
             raise Refusal("lane-shape", f"lane param {missing[0]} has no "
                           f"default, so each lane gives it: lane_params")
         lane_params = [[b for _n, _d, b in graph.lane] for _ in states]
-    lane_params = [list(lp) for lp in lane_params]
+    lane_params = [_listed(lp, f"lane {k} of lane_params")
+                   for k, lp in enumerate(_listed(lane_params,
+                                                  "lane_params"))]
     if len(lane_params) != len(states):
         raise Refusal("lane-shape", f"{len(lane_params)} lanes of lane "
                       f"params for {len(states)} lanes of state")
@@ -243,7 +259,8 @@ def run(graph, states, steps, lane_params=None, params=None,
             raise Refusal("lane-shape", f"{graph.system} carries the tangent "
                           f"vector{'s' if T > 1 else ''} {vecs}, so each "
                           f"lane gives {'them' if T > 1 else 'it'}: tangents")
-        tangents = [[list(t) for t in lt] for lt in tangents]
+        tangents = [_listed(lt, f"lane {k} of tangents")
+                    for k, lt in enumerate(_listed(tangents, "tangents"))]
         if len(tangents) != len(states):
             raise Refusal("lane-shape", f"{len(tangents)} lanes of tangents "
                           f"for {len(states)} lanes of state")
@@ -252,7 +269,8 @@ def run(graph, states, steps, lane_params=None, params=None,
                 raise Refusal("lane-shape", f"lane {k} holds {len(lt)} "
                               f"tangent vectors; {graph.system} has {T} "
                               f"({vecs})")
-            for vec, t in zip(graph.tangent, lt):
+            for j, vec in enumerate(graph.tangent):
+                t = lt[j] = _listed(lt[j], f"lane {k}'s tangent {vec}")
                 if len(t) != n:
                     raise Refusal("lane-shape", f"lane {k}'s tangent {vec} "
                                   f"holds {len(t)} values; the state has {n}")

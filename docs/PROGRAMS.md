@@ -234,13 +234,22 @@ names, and more than 65,536 instructions - the C tool's fixed tables.
 Also: a raw `0x` literal with underscores, which `asm.py` reads
 (`.const K = 0x3ff0_0000_0000_0000` is 1.0 at fp64) and `cft-asm`
 refuses as wider than the format, a misleading reason; and revision
-8's forms, which only `asm.py` reads (below). Two are loud but not by
-name, in `asm.py` alone: a `.deposits 0x` number of 3,600 or more hex
-digits raises an uncaught ValueError, formatted in decimal for its
+8's forms, which only `asm.py` reads (below). Two were loud but not by
+name, in `asm.py` alone, and are refused by name since 2026-10-21
+(KL-377): a `.deposits 0x` number, or a post-step, of 3,600 or more hex
+digits raised an uncaught ValueError, formatted in decimal for its
 message, where `cft-asm` refuses it by name; and with Python's digit
 limit lowered below 4,300 (`-X int_max_str_digits`,
-`PYTHONINTMAXSTRDIGITS`), so does a decimal between that limit and
-4,300 digits (verifier-VD1). The line ends and characters this
+`PYTHONINTMAXSTRDIGITS`), so did a decimal between that limit and
+4,300 digits (verifier-VD1). `asm.py` reads such a decimal now whatever
+the limit, and a number too long for Python to print is named by its
+leading hex digits and their count (`max_deposits=0x111111111111...
+(3999 hex digits), cap 1048576`), where `cft-asm` prints a `0x` token as
+written - the one difference left, in the wording of a number past 4,300
+decimal digits. A refusal of a number that a directive or an operand
+reads carries the file and line (KL-378). The `.deposits` cap is checked
+once the whole image is read, so its refusal names the source and no
+line, as it did before 2026-10-21. The line ends and characters this
 paragraph first listed are refused by both now, under the rule above;
 a carriage return or form feed after a comment was silent then, not
 loud (verifier-VD1). (A negative
