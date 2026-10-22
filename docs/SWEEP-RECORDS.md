@@ -609,7 +609,7 @@ seconds), and the stage counts are the lead's.
 **The read-back reads the `run_start` in force.** A resumed run's file has one `run_start` for each invocation, and the
 exporter stamps each slice with the one in force for it (the images, the run id, the tool's commit and dirty flag, and a host
 record's tree can differ between them). `readback` re-derives every record from its raw leg and that `run_start`, by code
-whose source names no attribute of the module under test (a check reads its source for `S.<name>` references, and a plant of
+whose source names no `S.<attribute>` of the module under test (a check reads its source for `S.<name>` references, and a plant of
 that check shows it can fail; the check does not see a getattr, a second name for the module (`T = S`), an import, a module-level binding or helper, or `vars`), writes out the device pseudonym from the key with hashlib and tests a finding as `vm + fm > 0`; the
 exporter's own `device_of` and `is_finding` are held on their own, against hashlib and against the synthetic runs' one failing leg.
 Before 2026-10-21 `real` took the file's first `run_start` for every leg, which failed
