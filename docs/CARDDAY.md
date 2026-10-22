@@ -909,7 +909,8 @@ python3 hw/card_stress_report.py /data/card-stress-1016     # the report, any ti
   a scratch copy) on the box, with no card and no XRT: about 10 minutes under WSL and 11 under Git
   Bash (2026-10-21, with the coverage wave's groups: 644 s under Git Bash and about 600 s under WSL, read off the clock; 2026-10-20, before them: 448 s and 553 s, and a busier desktop made a Git
   Bash run 636 s; 2026-10-22, with parcel P5's checks, 929 checks in 583 s under WSL niced in a built clone, and 898 checks in 1,264 s under
-  Git Bash on a loaded desktop, 13 of them failed there, ten of those timing checks the PowerShell listing below stalled), on a desktop other sessions share, and it must be run alone on the host (two drivers at once see each other's
+  Git Bash on a loaded desktop, 13 of them failed there, ten of those timing checks the PowerShell listing below stalled; with those three groups
+  skipped, as the gate's stage does on Windows, 853 checks in 599 s and none failed), on a desktop other sessions share, and it must be run alone on the host (two drivers at once see each other's
   stand-ins as card users: the guard scans every process of the WSL distro, or of the Windows desktop, it runs in, so two suites in
   one distro make each other's drivers refuse to start, `guard_refused`, exit 2 - found by parcel SR2, 2026-10-21). **On Windows the
   guard's process listing is a PowerShell call (`list_processes`, which `find_card_users` and the scheduler's runner import), and on a
