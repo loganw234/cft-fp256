@@ -975,12 +975,15 @@ void check_format(cft::device &dev, cft_device *ref)
             std::vector<std::int64_t>  si64(n);
             std::vector<std::uint64_t> su64(n);
             for (std::size_t i = 0; i < n; i++) {
-                const std::uint64_t r =
-                    (static_cast<std::uint64_t>(rng_byte()) << 56) |
-                    (static_cast<std::uint64_t>(rng_byte()) << 40) |
-                    (static_cast<std::uint64_t>(rng_byte()) << 24) |
-                    (static_cast<std::uint64_t>(rng_byte()) << 8) |
-                    static_cast<std::uint64_t>(rng_byte());
+                /* Five draws, one statement each, the high byte first:
+                 * as one OR of five calls C++ leaves their order open
+                 * (g++ took them left to right: docs/VALIDATION.md,
+                 * 2026-10-22), and the operands are the same either way. */
+                std::uint64_t r = static_cast<std::uint64_t>(rng_byte()) << 56;
+                r |= static_cast<std::uint64_t>(rng_byte()) << 40;
+                r |= static_cast<std::uint64_t>(rng_byte()) << 24;
+                r |= static_cast<std::uint64_t>(rng_byte()) << 8;
+                r |= static_cast<std::uint64_t>(rng_byte());
                 su64[i] = r;
                 si64[i] = static_cast<std::int64_t>(r);
                 su32[i] = static_cast<std::uint32_t>(r >> 32);
