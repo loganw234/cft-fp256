@@ -117,6 +117,9 @@ KIND_BUILDS = {"xrt": build_xrt}              # what building a clone means depe
 
 
 def dry_record() -> dict:
-    """The build record of a dry job: nothing is built (the stand-ins replace every command), and it says so."""
-    return {"ok": True, "steps": [{"name": "tools", "ok": True, "detail": "dry job: no make, no ldd, no XRT (the stand-ins replace every command)"}],
+    """The build record of a dry job: the clone is not built (no make of the host tools, no ldd, no XRT), and it says so. It does not say
+    that every command is a stand-in's: a step with a stand-in leg runs against it, and `vectors`, `drytests` and `driver-quick`, which
+    have none, run their own commands (none of them touches a card)."""
+    return {"ok": True, "steps": [{"name": "tools", "ok": True, "detail": "dry job: the clone is not built (no make of the host tools, no ldd, no XRT); "
+            "a step with a stand-in leg runs against it, and vectors, drytests and driver-quick run their own commands"}],
             "disabled": {}, "build_id": None}

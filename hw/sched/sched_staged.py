@@ -14,8 +14,10 @@ job's SHA256SUMS covers it; a driver run's own directory (driver-quick) is a sub
 The outcome is S1's: `failed` when a step failed (the steps after it are recorded `skipped`), `cancelled` at a stop (looked for
 before every step, never in the middle of one), `done-with-findings` when a soak slice found a mismatch (the chain goes on,
 Logan's answer 13), else `done`; a refusal before any step ran is `refused`, after one `failed`, and the end record names it.
-A dry job (`dry_run`) wraps every step that has a stand-in leg as the driver's Driver.standin does, builds nothing, asks no guard,
-touches no card, and every leg it writes says `dry` and `standin`; a stand-in's log in a job that is not dry is `dry-run-as-card`.
+A dry job (`dry_run`) wraps every step that has a stand-in leg as the driver's Driver.standin does, builds nothing, asks no guard
+and touches no card. Every leg it writes says `dry`; a leg says `standin` only if its step ran against the stand-in. Three steps
+have no stand-in leg, and in a dry job they run their own commands: `vectors` and `drytests` use no card, and `driver-quick` runs the
+driver's own `--dry-run`; their legs say `dry` and not `standin`. A stand-in's log in a job that is not dry is `dry-run-as-card`.
 """
 from __future__ import annotations
 
@@ -86,7 +88,9 @@ class StagedRunner:
     def _run(self, spec, log, stop, S, dry):
         cfg = self.cfg
         rcfg = cfg["runner"]
-        card = next(c for c in cfg["cards"] if c["id"] == log.card)
+        card = next((c for c in cfg["cards"] if c["id"] == log.card), None)
+        if card is None:                                              # claimed against a configuration this runner no longer holds: a refusal by name, not a runner_error
+            raise Refusal("card-unknown", f"card {log.card!r} is not in the configuration this runner holds ({', '.join(c['id'] for c in cfg['cards'])})")
         if spec["kind"] != "staged":
             raise Refusal("window-unsupported", f"kind {spec['kind']!r}: the window job is parcel S3's; this runner runs staged jobs")
         steps = spec["steps"]
@@ -98,7 +102,10 @@ class StagedRunner:
         images = {i["name"]: dict(i, path=IM.expand(i["path"])) for i in cfg["images"]}
         image = None
         if spec.get("image"):
-            image = IM.check_image(next(i for i in cfg["images"] if i["name"] == spec["image"]), card)
+            entry = next((i for i in cfg["images"] if i["name"] == spec["image"]), None)
+            if entry is None:                                         # the claim held the registry to the spec; a registry that lost the image since is refused by name
+                raise Refusal("image-unknown", f"image {spec['image']!r} is not in the registry this runner holds (the job was claimed against one that had it)")
+            image = IM.check_image(entry, card)
             log.append("image", **image)
         if not dry and any(self.entries[s["type"]].is_card(s) for s in steps):
             GD.hold_until_clear(log, card["kind"], 0, rcfg["guard_poll_s"])

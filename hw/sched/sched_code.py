@@ -11,10 +11,13 @@ counted (`tree-dirty`), the rtl/ tree is the spec's (`rtl-mismatch`), each strin
 it (`commit-unpushed`, the one check that may need the network, so it comes last).
 
 The clone cache is clones/SHA/ in the state root, one per full SHA. A clone is made in a temporary directory and renamed, so
-a half-made one never looks finished. One that EXISTS is not touched and not repaired: it is asserted like a fresh one, so a
-cache that was edited, or moved to another commit, is refused by name. This stage writes only under clones/ of the state root, and
-git is asked with the environment's GIT_DIR and friends removed and no prompt for a credential; no git configuration is written,
-by this stage or by git on its behalf (the clone's own refs are all it adds: refs/pushed/ for the remote's branches).
+a half-made one never looks finished. One that EXISTS has its working tree and HEAD neither touched nor repaired: it is asserted
+like a fresh one, so a cache that was edited, or moved to another commit, is refused by name. Its refs/pushed/ is the exception,
+because the pushed check writes there on every job, cache or not: the fetch is `--prune`d, so a branch deleted on the remote
+after the clone was made is gone from the clone too, and a cache cannot answer `pushed` for a branch that no longer holds the
+commit. This stage writes only under clones/ of the state root, and git is asked with the environment's GIT_DIR and friends
+removed and no prompt for a credential; no git configuration is written, by this stage or by git on its behalf (what the clone
+gains is the remote's branch heads as refs/pushed/ and the objects they need, and it loses the refs/pushed/ the remote no longer has).
 
 A source is `bundle:FILE`, FILE in config.json's code.bundle_dir (a bundle made by `git bundle create FILE BRANCH` has no HEAD,
 so the clone is made with --no-checkout and the SHA is checked out), or `remote`, config.json's code.remote.
@@ -100,11 +103,12 @@ def make_clone(root: str, sha: str, kind: str, where: str, jid: str) -> str:
 
 def pushed_state(clone: str, sha: str, remote) -> tuple:
     """('pushed' | 'unpushed' | 'unknown', why): whether a branch of the remote holds the commit. The remote's branches are
-    fetched into refs/pushed/ of the clone (no configuration is written), and 'unknown' is a remote that is not configured or
-    cannot be read: the commit is then not SHOWN to be on it."""
+    fetched into refs/pushed/ of the clone (no configuration is written) with --prune, so a ref left by an earlier job for a branch
+    the remote has since deleted does not count: a cached clone answers as a fresh one does. 'unknown' is a remote that is not
+    configured or cannot be read: the commit is then not SHOWN to be on it."""
     if not remote:
         return "unknown", "config.json's code.remote names no remote"
-    rc, _, err = git(clone, "fetch", "-q", "--no-tags", remote, "+refs/heads/*:refs/pushed/*", timeout=1800)
+    rc, _, err = git(clone, "fetch", "-q", "--no-tags", "--prune", remote, "+refs/heads/*:refs/pushed/*", timeout=1800)
     if rc != 0:
         return "unknown", f"the remote could not be read: {first_line(err)}"
     rc, out, _ = git(clone, "for-each-ref", "--count=1", "--contains", sha, "refs/pushed/")

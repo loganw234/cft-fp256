@@ -1008,6 +1008,25 @@ def group_code():
     check("code: a remote that cannot be read (or none configured) does not SHOW the commit pushed: `commit-unpushed` saying so, and `allow_unpushed` records it `unknown`",
           refusal_of(ja[2]).startswith("commit-unpushed:") and "could not be read" in refusal_of(ja[2]) and jb[1].get("outcome") == "done" and cb.get("pushed") == "unknown"
           and refusal_of(jc[2]).startswith("commit-unpushed:") and "names no remote" in refusal_of(jc[2]), f"{refusal_of(ja[2])!r} {cb.get('pushed')} {refusal_of(jc[2])!r}")
+    rem = os.path.join(TMP, "c-prune-remote")                           # a remote of its own: the fixture's is shared, and a branch of this one is deleted
+    git_t(None, "init", "-q", "-b", "main", rem)
+    b0 = commit_all(rem, {"hw/x.py": "MARK one\n"}, "b0")
+    git_t(rem, "checkout", "-q", "-b", "feature")
+    f1 = commit_all(rem, {"hw/x.py": "MARK one\nFEATURE\n"}, "f1")
+    git_t(rem, "checkout", "-q", "main")
+    root, cfg = mkroot2("c-prune", code={"bundle_dir": fx["bundles"], "remote": rem})
+    first = job(root, cfg, code_of(commit=f1, source="remote"))        # f1 is held by `feature` alone: cloned, pushed
+    other = job(root, cfg, code_of(commit=b0, source="remote"))        # b0 by `main`
+    git_t(rem, "branch", "-q", "-D", "feature")                       # the branch is deleted on the remote; both clones are in the cache
+    again = job(root, cfg, code_of(commit=f1, source="bundle:not-there.bundle"))
+    still = job(root, cfg, code_of(commit=b0, source="bundle:not-there.bundle"))
+    cf, cs = (next((r for r in x[2] if r["type"] == "code"), {}) for x in (first, still))
+    held = git_t(os.path.join(root, "clones", f1), "for-each-ref", "--format=%(refname)", "refs/pushed/").stdout.split()
+    check("code: a cached clone does not go on answering `pushed` for a branch the remote has since deleted (the pushed check fetches with --prune): the commit only that branch held is "
+          "refused `commit-unpushed` at the next job, the cache reused (its source not asked for), while a commit `main` still holds stays pushed and the clone's refs/pushed/ is main's alone",
+          first[1].get("outcome") == "done" and cf.get("pushed") == "pushed" and other[1].get("outcome") == "done" and again[1].get("outcome") == "refused"
+          and refusal_of(again[2]).startswith("commit-unpushed:") and still[1].get("outcome") == "done" and cs.get("pushed") == "pushed" and cs.get("reused") is True
+          and held == ["refs/pushed/main"], f"{first[1].get('outcome')} {cf.get('pushed')} {again[1].get('outcome')} {refusal_of(again[2])!r} {still[1].get('outcome')} {cs.get('pushed')} {held}")
     root, cfg = mkroot2("c-head")
     prepop(root, fx["c2"], at=fx["c1"])
     j, end, rs = job(root, cfg, code_of())
@@ -1800,6 +1819,14 @@ def steps_real_tools():
               smoke[2].get("outcome") == "done" and "--quick --out " in log0 and "00-driver-quick --rev8-images " in log0 and f"--image quad={im['path']} --sha quad={im['sha256']}" in log0
               and "--sweep-items sqrt32-rne,rem32" in log0 and "--dry-run" not in log0 and "--dry-run" in logd and sdry[2].get("outcome") == "done" and sdry[4][0]["standin"] is False
               and qf[4][0]["status"] == "fail" and qs[4][0]["status"] == "fail" and qn[4][0]["status"] == "parse_error", f"{log0[:200]!r} {logd[:120]!r} {[q[4][0]['status'] for q in (qf, qs, qn)]}")
+        nv = one([{"type": "vectors"}, {"type": "drytests"}, {"type": "driver-quick"}], dry=True)
+        nlogs = {x["leg"]: open(os.path.join(nv[0], "jobs", nv[1], x["log"]), errors="replace").read() for x in nv[4] if x.get("log")}
+        check("steps: in a dry job the three steps with no stand-in leg (`vectors`, `drytests`, `driver-quick`) run their OWN commands, and their legs say `dry` and NOT `standin`: `vectors` made vectors/out in "
+              "the clone, the suite's log and the smoke's are theirs and not the stand-in's, no card was touched, and the end record says dry_run and card_touched false",
+              nv[2].get("outcome") == "done" and [x["leg"] for x in nv[4]] == ["vectors", "drytests", "driver-quick"] and all(x["dry"] is True and x["standin"] is False and x["card_touched"] is False for x in nv[4])
+              and os.path.isfile(os.path.join(nv[0], "clones", fixture()["c2"], "vectors", "out", "a.txt")) and len(nlogs) == 3 and not any(t.startswith("standin: would run:") for t in nlogs.values())
+              and "card-stress test: 600 checks" in nlogs.get("drytests", "") and "--dry-run" in nlogs.get("driver-quick", "") and nv[2].get("dry_run") is True and nv[2].get("card_touched") is False,
+              f"{nv[2].get('outcome')} {[(x['leg'], x['dry'], x['standin']) for x in nv[4]]} {sorted(nlogs)}")
 
 
 def steps_refusals():
@@ -1854,6 +1881,19 @@ def steps_refusals():
     jw = job(root, cfg, staged(kind="window"))
     check("steps: a job of kind window is refused `window-unsupported` by this runner (the window job is S3's), before anything runs: no clone, no leg, never run as a staged job",
           refusal_of(jw[2]).startswith("window-unsupported:") and jw[1].get("outcome") == "refused" and not legs_of(jw[2]) and not any(r["type"] == "code" for r in jw[2]), refusal_of(jw[2]))
+    def claimed_then_lost(name, **lose):
+        """A staged job claimed against the whole configuration and run by a runner whose configuration has since lost something: the job's records."""
+        rt, ct = mkroot2(name)
+        S.submit(rt, ct, json.dumps(staged(image="quad", steps=[{"type": "api-test"}])).encode(), ST.StepRegistry())
+        gid, gspec, glog = S.claim_next(rt, ct, "u50-0", time.time(), ST.StepRegistry())
+        R.run_claimed(rt, gid, gspec, glog, SG.StagedRunner(rt, {**ct, **lose}))
+        return recs(rt, "jobs", gid)
+    lost_image, lost_card = claimed_then_lost("r-lost-image", images=[]), claimed_then_lost("r-lost-card", cards=[])
+    check("steps: a registry that lost the job's image, or a configuration that lost its card, between the claim and the run is refused by name (`image-unknown`, `card-unknown`): the job ends refused "
+          "with the refusal recorded, no `runner_error`, nothing cloned, no leg",
+          all(x and x[-1].get("outcome") == "refused" and not legs_of(x) and not any(r["type"] in ("runner_error", "code") for r in x) for x in (lost_image, lost_card))
+          and refusal_of(lost_image).startswith("image-unknown:") and "quad" in refusal_of(lost_image) and refusal_of(lost_card).startswith("card-unknown:") and "u50-0" in refusal_of(lost_card),
+          f"{refusal_of(lost_image)!r} {refusal_of(lost_card)!r} {[r['type'] for r in lost_image]} {[r['type'] for r in lost_card]}")
     check("steps: the end record of a job that ran says whether it touched the card and whether it was dry, and a job the runner refused is `refused` with the refusal named",
           jb[1].get("refusal") == "parser-unknown" and jb[1].get("dry_run") is True and jb[1].get("card_touched") is False and jb[1].get("commit") == fx["c2"], str(jb[1]))
 
@@ -2027,8 +2067,7 @@ PLANTS = [  # (what is wrong, edits, the groups written for it, a fragment of th
     ("S2: the manifest's SHA-256 is not compared", [E("sched_images.py", '    if man.get("sha256") != digest:', "    if False:")], "images", "the manifest beside the image is a witness too", False),
     ("S2: the tile count is not compared", [E("sched_images.py", "    if found != want:", "    if False:")], "images", "the tile count is the manifest's number of compute units", False),
     ("S2: the platform is not compared", [E("sched_images.py", "    if not plat == rplat == cplat:", "    if False:")], "images", "the platform must be the manifest's", False),
-    ("S2: a job's image is not held to its files", [E("sched_staged.py", '            image = IM.check_image(next(i for i in cfg["images"] if i["name"] == spec["image"]), card)',
-                                                  '            image = dict(next(i for i in cfg["images"] if i["name"] == spec["image"]), path=IM.expand(next(i for i in cfg["images"] if i["name"] == spec["image"])["path"]))')],
+    ("S2: a job's image is not held to its files", [E("sched_staged.py", "            image = IM.check_image(entry, card)", '            image = dict(entry, path=IM.expand(entry["path"]))')],
      "images", "through a job the same refusals end it refused", False),
     ("S2: the guard is blind to an idle cft-serve", [E("sched_guard.py", "    return CS.find_card_users(exclude_pids=set(exclude_pids))",
                                                    '    users, beside = CS.find_card_users(exclude_pids=set(exclude_pids))\n    return [u for u in users if "cft-serve" not in u["args"]], beside')],
@@ -2107,6 +2146,16 @@ PLANTS = [  # (what is wrong, edits, the groups written for it, a fragment of th
     ("S2: a step's standard input is left open", [E("sched_proc.py", "stdin=subprocess.DEVNULL, env=env, cwd=cwd", "stdin=None, env=env, cwd=cwd")], "steps:run_step", "a step's standard input is closed", "posix"),
     ("S2: a refusal the table gives to S2 that nothing raises", [E("sched_names.py", '    "card-busy-foreign": ("S2", "job",', '    "never-raised-s2": ("S2", "job", "x"), "card-busy-foreign": ("S2", "job",')],
      "code,build,images,guard,steps,table", "the table: every refusal it gives to S2", None),
+    ("S2: a cached clone's pushed ref outlives the remote's branch", [E("sched_code.py", '"--no-tags", "--prune", remote', '"--no-tags", remote')], "code",
+     "a cached clone does not go on answering `pushed` for a branch the remote has since deleted", False),
+    ("S2: every leg of a dry job says standin", [E("sched_staged.py", "standin=wrapped or offered,", "standin=dry or offered,")], "steps:real",
+     "in a dry job the three steps with no stand-in leg", "posix"),
+    ("S2: a registry that lost the job's image is a runner_error", [E("sched_staged.py", 'entry = next((i for i in cfg["images"] if i["name"] == spec["image"]), None)',
+                                                                       'entry = next(i for i in cfg["images"] if i["name"] == spec["image"])')],
+     "steps:refusals", "a registry that lost the job's image, or a configuration that lost its card", False),
+    ("S2: a configuration that lost the job's card is a runner_error", [E("sched_staged.py", 'card = next((c for c in cfg["cards"] if c["id"] == log.card), None)',
+                                                                           'card = next(c for c in cfg["cards"] if c["id"] == log.card)')],
+     "steps:refusals", "a registry that lost the job's image, or a configuration that lost its card", False),
 ]
 
 
