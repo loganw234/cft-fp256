@@ -22,6 +22,7 @@ sys.dont_write_bytecode = True
 import calendar
 import datetime
 import hashlib
+import inspect
 import json
 import os
 import re
@@ -42,6 +43,15 @@ SCRIPT, REPORT = os.path.join(HW, "card_stress_progress.py"), os.path.join(HW, "
 PAGE, DATA = os.path.join(ROOT, "site", "nightly.html"), os.path.join(ROOT, "site", "nightly.json")
 FIXTURE = os.path.join(HW, "card_stress_fixtures", "progress-synthetic.jsonl")
 st = {"n": 0, "f": 0, "skips": 0}
+DERIVED = []
+_SUMMARIZE = R.summarize
+_HAS_REV = "rev" in inspect.signature(R.summarize).parameters      # the report derives an unrecorded tree from git when it takes `rev`
+
+
+def record_only(on):
+    """The fixture's commits are made up, so its groups need no git: where summarize() takes `rev` they pass rev=None (the record-only view,
+    the CLI's --no-git). The real copies use the defaults, which are what `card_stress_report.py --json` shows."""
+    R.summarize = (lambda *a, **k: _SUMMARIZE(*a, **dict(k, rev=k.get("rev")))) if (on and _HAS_REV) else _SUMMARIZE
 
 
 def check(ok, what, detail=None):
@@ -283,9 +293,10 @@ def against_oracle(out, spec, recs):
 # ---------------------------------------------------------------------------
 # the reducer against the report: every figure both state
 # ---------------------------------------------------------------------------
-def report_of(d):
+def report_of(d, git_free):
     j = os.path.join(TMP, "report-%s.json" % hashlib.sha256(d.encode()).hexdigest()[:8])
-    rc, text, err = cli(d, "--no-write", "--json", j, script=REPORT)
+    nogit = ["--no-git"] if git_free and "--no-git" in cli("--help", script=REPORT)[1] else []
+    rc, text, err = cli(d, "--no-write", "--json", j, *nogit, script=REPORT)
     with open(j, encoding="utf-8") as fh:
         return json.load(fh), text, rc
 
@@ -321,8 +332,8 @@ def shared(out, S, text):
     return f
 
 
-def against_report(out, d, label):
-    S, text, rc = report_of(d)
+def against_report(out, d, label, git_free=True):
+    S, text, rc = report_of(d, git_free)
     eq(rc, 0, f"{label}: the report ran")
     rows = shared(out, S, text)
     bad = [(n, a, b) for n, a, b in rows if a != b]
@@ -396,6 +407,11 @@ def group_page(out):
     row = next(r for c in near["now"]["classes"] for r in c["items"] if not r["complete"])
     row["covered"] = row["space"] - 1
     json.dump(near, open(dj, "w", encoding="utf-8"))
+    json.dump(DERIVED[0], open(dj, "w", encoding="utf-8"))
+    tn = page("ok", dj)["app"]["text"]
+    check("Read from git, not recorded by the run: rtl tree f7f7f7f7f7f7 of commit a1a1a1a1a1a1." in tn and "Read from git" not in text,
+          "page: a class the report read from git gets a note under it, and a data file without the field none")
+    json.dump(near, open(dj, "w", encoding="utf-8"))
     t2 = page("ok", dj)["app"]["text"]
     check(R._pct3(row["space"] - 1, row["space"]) == "99.999%" and "99.999%" in t2, "page: an item one index short of complete is never shown as 100%")
     for name, mode, body, say in [("a missing file", "404", None, ["could not be loaded", "HTTP 404"]), ("a refused request", "reject", None, ["could not be loaded", "Failed to fetch"]),
@@ -434,6 +450,38 @@ def group_fixture():
     eq(P.dump(reduce_dir(d, "e5" * 20)), text, "fixture: the same run reduces to the same bytes")
     leaks = [s for s in ("fixture-box", "/data/", "fixtureuser", "Users", "xclbin", "u50-quad", "\\\\") if s in text]
     check(not leaks, "fixture: no host name, path or user name in the output", leaks)
+    bare = [N1] + [n | {"slices": [x for x in n["slices"] if ITEMS[x[0]][3] != "host"]} for n in (N2, N3)]      # nothing swept on the host under the current tree
+    rb = build(bare)
+    pb = reduce_dir(write_run(rb, "nohost"))
+    against_oracle(pb, bare, rb)
+    h2 = next(c for c in pb["now"]["classes"] if c["id"] == "h2")
+    eq((h2["current"], h2["served"], h2["nights"], h2["total"]["covered"], h2["label"]), (True, False, [2, 3], 0, "host/ tree d4d4d4d4d4d4, compiler cc (Fixture) 1.0"),
+       "fixture: a current class nothing was swept under is still listed, as its night's tree names it (the report has no entry for it)")
+    one = [N1 | {"tree": dict(TREE_B, commit="a1" * 20, host_src="e6" * 20)}, N2, N3]       # one RTL tree on every night, the host tree changing at night 2
+    r1 = build(one)
+    d1 = write_run(r1, "one-rtl")
+    p1 = reduce_dir(d1)
+    against_oracle(p1, one, r1)
+    against_report(p1, d1, "one RTL tree over three nights")
+    eq(([(c["id"], c["nights"]) for c in p1["now"]["classes"] if c["kind"] == "tile"], p1["now"]["classes"][0]["total"]["complete"]), ([("t1", [1, 2, 3])], 3),
+       "fixture: a class that spans nights is one class, and an item complete on its first night is complete in it")
+    base_summarize = R.summarize
+
+    def derived(*a, **k):                              # a stand-in for the report after parcel RG: night 1's tile class says it was read from git
+        S = base_summarize(*a, **k)
+        for c in S["sweep"]["trees"]["classes"]:
+            if c["kind"] == "tile" and c["key"].startswith("unrecorded:"):
+                c["derived_from_git"] = [{"commit": c["key"][11:], "dir": "rtl", "tree": "f7" * 20}]
+        return S
+    R.summarize = derived
+    try:
+        pd = reduce_dir(d)
+    finally:
+        R.summarize = base_summarize
+    eq({c["id"]: c.get("derived_from_git") for c in pd["now"]["classes"]}, {"t1": [{"commit": "a1a1a1a1a1a1", "dir": "rtl", "tree": "f7f7f7f7f7f7"}], "h1": None, "t2": None, "h2": None},
+       "fixture: a class the report read from git carries its commits and trees, and the others carry no such field")
+    eq(sum("derived_from_git" in c for c in out["now"]["classes"]), 0, "fixture: with a report that has no such field the data file has none")
+    DERIVED.append(pd)
     two = reduce_dir(write_run(build(SPEC[:2]), "two"))
     eq(two["nights"], out["nights"][:2], "fixture: the reduction of the first two nights is the first two nights of the reduction (nights only append)")
     return recs, out, d, text
@@ -530,7 +578,7 @@ def group_real(runs):
         objs, info = P.load(d)
         out = json.loads(P.dump(P.reduce_records(objs, info, None)))
         tag = os.path.basename(os.path.dirname(os.path.normpath(d)))
-        rows = against_report(out, d, tag)
+        rows = against_report(out, d, tag, git_free=False)
         print(f"  {tag}: {out['totals']['nights']} nights, metrics sha256 {info['sha256'][:12]}, {len(rows)} figures compared with the report's")
         for name, a, b in rows[:13]:
             print(f"      {name:<62} reducer {a!s:<24.24} report {b!s:<24.24} {'=' if a == b else 'DIFFERS'}")
@@ -570,6 +618,7 @@ def main():
     global TMP, NODE
     NODE = shutil.which("node")
     TMP = tempfile.mkdtemp(prefix="np-test-")
+    record_only(True)
     try:
         print("== fixture: the oracle, the report, the bytes")
         got = guarded(group_fixture)
@@ -585,6 +634,7 @@ def main():
         guarded(group_committed)
         print("== the lead's real copies")
         runs = [x for x in os.environ.get("CARD_STRESS_PROGRESS_RUNS", "").split(os.pathsep) if x]
+        record_only(False)
         if runs and all(os.path.isfile(os.path.join(x, "metrics.jsonl")) for x in runs):
             guarded(group_real, runs)
         else:

@@ -23,7 +23,10 @@ CLASSES, as the report keys them: a tile item per RTL tree, a host item per host
 uncommitted changes its own class, a run that recorded no tree kept apart by its commit (labelled "commit X, tree not
 recorded in the run"; whether a commit could stand for its tree is a question for the report, not decided here). Nothing
 is summed across classes. The CURRENT class of each kind is the newest night's. It is listed even with no slice yet, and
-the campaign's items (the newest run_start's --sweep-items) are listed in it at zero, which the report cannot do.
+the campaign's items (the newest run_start's --sweep-items) are listed in it at zero, which the report cannot do. A class the
+report says it read from git (`derived_from_git`) is carried with that note. LIMIT: summarize() names a class only where a slice
+fell in it, so one with none (today's current host class) is placed by the report's private `_tree_class` (the record only, no
+derivation, the lib's tree_key if that helper changes); the summary would need the run_start's class per kind to say it itself.
 
 THE ESTIMATE (COMPUTED; the rule is in the file). For an open item of a current class: gain = covered now minus covered
 after the night before the window, the window being the class's last 3 nights (fewer if it has fewer); nights_left =
@@ -62,7 +65,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)            # python -I does not put the script's directory there
 import card_stress_report as R           # noqa: E402  (summarize() is the authority)
-from card_stress_lib import EXH, HOST, TILE, read_records, sweep_items   # noqa: E402
+from card_stress_lib import EXH, HOST, TILE, read_records, sweep_items, tree_key   # noqa: E402
 
 SCHEMA = 1
 WINDOW = 3                               # nights the estimate looks back over
@@ -74,8 +77,8 @@ RULES = {
              "date it started, on the clock of the card's host.",
     "classes": "Coverage is evidence about the thing that ran. A slice swept on one RTL tree says nothing about another, so a tile "
                "item is counted per RTL tree, and a host item per host tree and compiler, because no tile computes it. A changed "
-               "tree starts a new class from nothing, and nothing is summed across classes. A run that did not record its tree "
-               "is kept apart by its commit.",
+               "tree starts a new class from nothing, and nothing is summed across classes. How a run that did not record its tree "
+               "is placed is the report's rule, and the class's label says which.",
     "estimate": "ESTIMATE, not a measurement. For an item not yet fully covered in a current class: its gain over the class's last "
                 "3 nights (fewer if the class is younger), divided by the nights in that window, is its rate a night; the nights "
                 "left are the remaining indices over that rate, rounded up; the date counts that many days after the newest night, "
@@ -176,6 +179,16 @@ def campaign_items(objs: List[Dict[str, Any]], last_start: int) -> Optional[List
     return None
 
 
+def _empty_class(kind: str, rs: Dict[str, Any]) -> Tuple[str, str]:
+    """(key, label) of the class a night's tree gives a kind in which nothing was swept that night: the report's own helper while it
+    keeps this form, else the lib's key (its one definition) and a plain label."""
+    try:
+        return R._tree_class(kind, rs)
+    except Exception:
+        key = tree_key(kind, rs.get("tree"))[0]
+        return key, f"{kind} tree {key[:12]}"
+
+
 def _entry(summary: Dict[str, Any], kind: str, key: str) -> Optional[Dict[str, Any]]:
     for c in summary["sweep"]["trees"]["classes"]:
         if c["kind"] == kind and c["key"] == key:
@@ -196,7 +209,9 @@ def reduce_records(objs: List[Dict[str, Any]], info: Dict[str, Any], commit: Any
     if final["report_version"] != 1:
         raise Failed(f"the report's summary is version {final['report_version']}; this reducer reads version 1")
 
-    # -- classes: one per (kind, key) of the nights' trees, in the order they first appear; then any the slices name alone
+    # -- classes, as the report gives them: a night's own summary says which class its slices of each kind fell in, so a rule the report
+    #    changes (reading an unrecorded tree from git) is followed here, not copied; a kind with no slice that night is read off the
+    #    night's tree, so that a current class with nothing swept is still listed
     reg: Dict[Tuple[str, str], Dict[str, Any]] = {}
 
     def register(kind: str, key: str, label: str, night: Optional[int]) -> Dict[str, Any]:
@@ -211,14 +226,18 @@ def reduce_records(objs: List[Dict[str, Any]], info: Dict[str, Any], commit: Any
             c["nights"].append(night)
         return c
 
+    labels = {(e["kind"], e["key"]): e["label"] for e in final["sweep"]["trees"]["classes"]}       # the whole run's label of a class, as --json shows it
     night_class: List[Dict[str, str]] = []
-    for k, (a, _b) in enumerate(spans, 1):
+    for k, ((a, _b), own) in enumerate(zip(spans, owns), 1):
         ids = {}
         for kind in KINDS:
-            key, label = R._tree_class(kind, objs[a])
-            ids[kind] = register(kind, key, label, k)["id"]
+            got = [e for e in own["sweep"]["trees"]["classes"] if e["kind"] == kind]
+            if len(got) > 1:
+                raise Failed(f"night {k}: the report put its {kind} slices in {len(got)} classes, and a night has one tree")
+            key, label = (got[0]["key"], got[0]["label"]) if got else _empty_class(kind, objs[a])
+            ids[kind] = register(kind, key, labels.get((kind, key), label), k)["id"]
         night_class.append(ids)
-    for cum in cums:
+    for cum in cums:                                     # a class no night's tree names (slices of unknown reach)
         for e in cum["sweep"]["trees"]["classes"]:
             register(e["kind"], e["key"], e["label"], None)
     classes = list(reg.values())
@@ -337,6 +356,12 @@ def reduce_records(objs: List[Dict[str, Any]], info: Dict[str, Any], commit: Any
                       "pct": (100.0 * cov / space) if space else None},
             "items": items,
         })
+        # the report says a class holds a run whose tree it read from git (`derived_from_git`, a list of {commit, dir, tree}); carried as it
+        # comes, and absent when the report has none, which is the report before that field
+        dg = [{"commit": _short(x.get("commit")), "dir": x.get("dir"), "tree": _short(x.get("tree"))}
+              for x in ((ent or {}).get("derived_from_git") or []) if isinstance(x, dict)]
+        if dg:
+            now_classes[-1]["derived_from_git"] = dg
 
     complete_list = sorted(({"class": cid, "item": it, "night": k, "date": nights[k - 1]["date"]} for (cid, it), k in first_complete.items()),
                            key=lambda d: (d["night"], d["class"], d["item"]))

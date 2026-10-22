@@ -48,7 +48,7 @@ section { border: 1px solid var(--line); border-radius: 6px; margin: 1.2rem 0; p
 .card .kind { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--dim); }
 .card .big { font-size: 1.9rem; font-weight: 600; line-height: 1.2; margin: 0.2rem 0; }
 .bar { height: 9px; background: var(--code-bg); border: 1px solid var(--line); border-radius: 5px; overflow: hidden; margin: 0.35rem 0; }
-.bar > i { display: block; height: 100%; background: var(--accent); min-width: 2px; }
+.bar > i { display: block; height: 100%; background: var(--accent); }
 .bar.done > i { background: var(--pass-fg); }
 .item { padding: 0.55rem 0; border-top: 1px solid var(--line); }
 .item:first-of-type { border-top: 0; }
@@ -146,6 +146,7 @@ rebuilt after each night from the run's own record by <code>hw/card_stress_progr
   function bar(cov, space, label) {
     var done = space > 0 && cov >= space, w = space > 0 ? 100 * cov / space : 0, i = h("i");
     i.style.width = (done ? 100 : Math.min(w, 99.9)) + "%";
+    if (cov > 0) i.style.minWidth = "2px";           // a sliver is shown for any progress, and none for none
     return h("div", { "class": "bar" + (done ? " done" : ""), role: "progressbar", "aria-valuemin": "0", "aria-valuemax": "100",
                       "aria-valuenow": String(Math.round(w)), "aria-label": label }, i);
   }
@@ -156,6 +157,10 @@ rebuilt after each night from the run's own record by <code>hw/card_stress_progr
     if (!isnum(s)) return "-";
     var t = Math.round(s);
     return Math.floor(t / 3600) + " h " + Math.floor(t % 3600 / 60) + " m " + t % 60 + " s";
+  }
+  function derivedNote(c) {       // a class the report says holds a run whose tree it read from git; nothing where the field is absent
+    var l = (Array.isArray(c.derived_from_git) ? c.derived_from_git : []).filter(function (x) { return x && typeof x.commit === "string" && typeof x.tree === "string"; });
+    return l.length ? h("p", { "class": "small dim", text: "Read from git, not recorded by the run: " + l.map(function (x) { return (x.dir || "") + " tree " + x.tree + " of commit " + x.commit; }).join("; ") + "." }) : null;
   }
   function estimateText(e, note) {
     if (!e) return note ? "No estimate: " + note + "." : "";
@@ -247,6 +252,7 @@ rebuilt after each night from the run's own record by <code>hw/card_stress_progr
       return h("div", { "class": "card" },
         h("div", { "class": "kind", text: c.kind + " items - current " + (c.kind === "tile" ? "RTL tree" : "host tree") }),
         h("div", { "class": "mono small", text: c.label }),
+        derivedNote(c),
         h("div", { "class": "big", text: done }),
         h("div", { text: "items fully covered" }),
         bar(t.covered, t.space, c.kind + " items covered"),
@@ -303,6 +309,7 @@ rebuilt after each night from the run's own record by <code>hw/card_stress_progr
       });
       return h("div", null, h("h3", { "class": "mono", text: c.kind + " items - " + c.label }),
         h("p", { "class": "small dim", text: c.total.complete + " of " + c.total.items + " fully covered; night" + (c.nights.length === 1 ? " " : "s ") + c.nights.join(", ") }),
+        derivedNote(c),
         c.served ? items : h("details", null, h("summary", { text: "No slice has completed under this tree yet: its " + c.items.length + " items are all at zero" }), items));
     }
     var perItem = h("section", { id: "items" }, h("h2", { text: "Item by item" }),
@@ -361,7 +368,7 @@ rebuilt after each night from the run's own record by <code>hw/card_stress_progr
         box.textContent = "";
         box.appendChild(plot(W));
       }
-      cls.forEach(function (c) {
+      cls.slice().sort(function (a, b) { return (b.current ? 1 : 0) - (a.current ? 1 : 0); }).forEach(function (c) {      // the legend lists the current trees first
         var last = d.nights[N - 1].after.classes[c.id];
         legend.push(h("span", null, svg("svg", { viewBox: "0 0 29 11", "aria-hidden": "true" }, svg("line", { x1: 1, x2: 28, y1: 5.5, y2: 5.5, style: c.style })),
           c.kind + (c.current ? " (current): " : " (earlier): ") + c.label + " - " + pct1(last ? last.covered : 0, c.total.space)));
