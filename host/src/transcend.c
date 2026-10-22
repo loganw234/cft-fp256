@@ -49,8 +49,17 @@
  * bit. exp has no such residual. Nothing an FMA can compute tells you
  * which side of a rounding boundary e^x falls on; only more precision
  * does, and more precision means a multiprecision evaluator, which is
- * integer work. A tile-assisted fast path for the narrow formats is a
- * later optimisation and would have to reproduce these bits exactly.
+ * integer work. Six of the thirty-nine - exp, expm1, exp2, log, log1p
+ * and log2 - also run on the tile, as routines the language's compiler
+ * writes into a program that revision 8's tiles run (the math library's
+ * M1 build, 2026-10-13 to 2026-10-19; docs/TRANSCENDENTALS.md, "The six
+ * on the tile"). A routine decides its last bit in the lane or marks the
+ * lane (bit 7 of the lane byte, STATUS[6]) for the definition to replay,
+ * and on the cases the stages run every lane it does not mark is held to
+ * the golden model bit for bit. These entry points are unchanged: they
+ * are not that path, `cft_exp` still issues no cft_run pass, and a
+ * routine is reached by compiling a program, not by calling it. The
+ * other thirty-three are host operations only.
  *
  * Per element:
  *
