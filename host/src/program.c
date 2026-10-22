@@ -390,21 +390,24 @@ static cft_status seq_check_operands(const cft_program *p,
     const char *name = cft_op_name((cft_op)d->op);
     int which;
 
+    /* The order is seq.py's _check_operands, rule for rule (KL-438): an
+     * instruction with two faults is refused for the same one by both. */
+    if (d->kx && !(d->ka || d->kb || d->kc)) {
+        cft_set_error("instruction %lu (%s, opcode %d) sets kx and no "
+                      "operand names a constant, so the bit selects "
+                      "nothing and the instruction has a second "
+                      "encoding with kx clear", at, name, d->op);
+        return CFT_ERR_INVALID_ARGUMENT;
+    }
     if (d->imm & SEQ_IMM_RESERVED) {
         cft_set_error("instruction %lu (%s, opcode %d): imm[31] is "
                       "reserved and must be zero, and it is set",
                       at, name, d->op);
         return CFT_ERR_INVALID_ARGUMENT;
     }
-    if (d->kx) {
-        if (!(d->ka || d->kb || d->kc)) {
-            cft_set_error("instruction %lu (%s, opcode %d) sets kx and no "
-                          "operand names a constant, so the bit selects "
-                          "nothing and the instruction has a second "
-                          "encoding with kx clear", at, name, d->op);
-            return CFT_ERR_INVALID_ARGUMENT;
-        }
-    } else if (d->imm & SEQ_KX_INDICES) {
+    /* Without kx there is no immediate: seq.py says it once for the bits
+     * above the register high bits, and this says which bits it was. */
+    if (!d->kx && (d->imm & SEQ_KX_INDICES)) {
         cft_set_error("instruction %lu (%s, opcode %d) has no kx, so it "
                       "reads no immediate: imm[23:0] must be zero, and it "
                       "is 0x%06lx", at, name, d->op,
@@ -420,10 +423,9 @@ static cft_status seq_check_operands(const cft_program *p,
                                       SEQ_KX9_SHIFT));
         return CFT_ERR_INVALID_ARGUMENT;
     }
-
-    for (which = 0; which < 3; which++) {
-        uint32_t byte = (d->imm >> shift[which]) & 0xFFu;
-        uint32_t idx;
+    /* Every constant operand's register high bit, all three before any
+     * operand's index below: seq.py's loop over the three is its own. */
+    for (which = 0; which < 3; which++)
         if (kf[which] && hi[which]) {
             cft_set_error("instruction %lu (%s, opcode %d): %s names a "
                           "constant, so its register high bit imm[%d] is "
@@ -431,18 +433,10 @@ static cft_status seq_check_operands(const cft_program *p,
                           d->op, opnd[which], SEQ_REGHI_SHIFT + 1 + which);
             return CFT_ERR_INVALID_ARGUMENT;
         }
-        /* The ninth bit is read under `kx` for a constant operand and
-         * nowhere else, so everywhere else it must be zero. Without
-         * `kx` the test above has already refused it, so what reaches
-         * here is an operand under `kx` that names a register. */
-        if (!(d->kx && kf[which]) && k9[which]) {
-            cft_set_error("instruction %lu (%s, opcode %d): %s names a "
-                          "register, so its ninth constant-index bit "
-                          "imm[%d] is read by nothing and must be zero",
-                          at, name, d->op, opnd[which],
-                          SEQ_KX9_SHIFT + which);
-            return CFT_ERR_INVALID_ARGUMENT;
-        }
+
+    for (which = 0; which < 3; which++) {
+        uint32_t byte = (d->imm >> shift[which]) & 0xFFu;
+        uint32_t idx;
         if (d->kx && kf[which]) {
             idx = byte | ((uint32_t)k9[which] << 8);
             if (reg[which]) {
@@ -461,6 +455,18 @@ static cft_status seq_check_operands(const cft_program *p,
                               "zero, and it is 0x%02lx", at, name, d->op,
                               opnd[which], shift[which] + 7, shift[which],
                               (unsigned long)byte);
+                return CFT_ERR_INVALID_ARGUMENT;
+            }
+            /* The ninth bit is read under `kx` for a constant operand and
+             * nowhere else, so on a register operand it must be zero -
+             * after the byte, as seq.py takes them. (Without `kx` the
+             * refusal above has already taken it.) */
+            if (k9[which]) {
+                cft_set_error("instruction %lu (%s, opcode %d): %s names a "
+                              "register, so its ninth constant-index bit "
+                              "imm[%d] is read by nothing and must be zero",
+                              at, name, d->op, opnd[which],
+                              SEQ_KX9_SHIFT + which);
                 return CFT_ERR_INVALID_ARGUMENT;
             }
             continue;
@@ -737,11 +743,68 @@ static cft_status seq_ctrl_fields(const seq_insn *d, uint32_t pc)
  *
  * Every refusal names the instruction and the rule it broke, in the
  * meaning of the ProgramError seq.py's validate() raises for it (the
- * words differ); until 2026-09-30 none did. */
+ * words differ); until 2026-09-30 none did.
+ *
+ * The order of the checks is seq.py's (KL-438): an image with two faults
+ * is refused for the same one by both, at the same instruction. Per
+ * instruction: an ALU instruction's operands and then its rnd; a control
+ * instruction's code, its unread fields, its static scratch slot, the loop
+ * or region it opens or closes, and only then the bound on the worst case,
+ * which seq.py takes at the bottom of a control instruction and, once
+ * more, after the last instruction (an ALU instruction that takes the
+ * count past the bound is named by the next control instruction, or by
+ * the end). host/tests/loader_order_check.py holds it.
+ *
+ * The counts below are carried exactly to 2^62 and held there, so that
+ * the product of trip counts cannot wrap: seq.py's integers do not, and
+ * "past 2^40" is the same answer in both. Until 2026-10-22 a REPEAT
+ * whose product passed the bound was refused at the REPEAT, with a
+ * sentence of its own, and any other bound violation at the instruction
+ * that reached it; the model names neither. */
+#define SEQ_COUNT_CAP ((uint64_t)1 << 62)
+
+static uint64_t seq_count_add(uint64_t a, uint64_t b)
+{
+    uint64_t s = a + b;                 /* both <= 2^62: no wrap */
+    return s > SEQ_COUNT_CAP ? SEQ_COUNT_CAP : s;
+}
+
+static uint64_t seq_count_mul(uint64_t a, uint64_t b)
+{
+    if (a && b > SEQ_COUNT_CAP / a)
+        return SEQ_COUNT_CAP;
+    return a * b;
+}
+
+/* The bound's sentence, shared by the control instruction that reaches it
+ * and the end of the program (seq.py gives the end one its own, without an
+ * instruction; this one names the last, as the other end-of-program
+ * sentences do). A count held at the cap is "at least". */
+static cft_status seq_worst_refusal(uint64_t worst, int at_end, uint32_t pc)
+{
+    const char *least = worst >= SEQ_COUNT_CAP ? "at least " : "";
+    if (!at_end)
+        cft_set_error("instruction %lu takes the program's worst-case "
+                      "instruction count to %s%llu, past the bound of "
+                      "%llu (2^40): its loops are finite but not a "
+                      "bound", (unsigned long)pc, least,
+                      (unsigned long long)worst,
+                      (unsigned long long)SEQ_MAX_INSNS);
+    else
+        cft_set_error("the program ends, after instruction %lu, with a "
+                      "worst-case instruction count of %s%llu, past the "
+                      "bound of %llu (2^40): its loops are finite but not "
+                      "a bound", (unsigned long)pc, least,
+                      (unsigned long long)worst,
+                      (unsigned long long)SEQ_MAX_INSNS);
+    return CFT_ERR_INVALID_ARGUMENT;
+}
+
 static cft_status seq_validate(const cft_program *p)
 {
     uint32_t pc;
     int depth = 0;
+    cft_seq_caps caps;
     /* how many times an instruction at the current nesting level can
      * execute, so the worst case is known before the run rather than
      * discovered by waiting for it */
@@ -758,22 +821,17 @@ static cft_status seq_validate(const cft_program *p)
     uint32_t bpc[SEQ_MAX_DEPTH + SEQ_MAX_QUIET];
     int nb = 0, qdepth = 0;
 
+    /* The scratch depth a static STL or LDL slot is held to is the
+     * device's, where it published one (seq.py's scratch_depth). */
+    cft_device_seq_caps(p->dev, &caps);
+
     mult[0] = 1;
     for (pc = 0; pc < p->n_insns; pc++) {
         seq_insn d;
         cft_status ost;
         seq_decode(p->insns[pc], &d);
 
-        worst += mult[top];
-        if (worst > SEQ_MAX_INSNS) {
-            cft_set_error("instruction %lu takes the program's worst-case "
-                          "instruction count to %llu, past the bound of "
-                          "%llu (2^40): its loops are finite but not a "
-                          "bound", (unsigned long)pc,
-                          (unsigned long long)worst,
-                          (unsigned long long)SEQ_MAX_INSNS);
-            return CFT_ERR_INVALID_ARGUMENT;
-        }
+        worst = seq_count_add(worst, mult[top]);
 
         if (!d.ctrl) {
             ost = seq_check_operands(p, &d, pc);
@@ -804,6 +862,19 @@ static cft_status seq_validate(const cft_program *p)
         if (ost != CFT_OK)
             return ost;
 
+        /* A STATIC slot past the depth, by name, as a constant index past
+         * the bank is; an INDEXED one is not refused (docs/SEQUENCER.md
+         * makes the reduction modulo the depth part of the contract).
+         * Here and not in the device pass, because seq.py takes it here:
+         * before the loops and regions of this instruction and of every
+         * later one. A device that published no depth enforces nothing. */
+        if ((d.op == SEQ_STL || d.op == SEQ_LDL) && caps.max_scratch &&
+            (d.imm & SEQ_KX_INDICES) >= caps.max_scratch)
+            return (cft_status)cft_seq_cap_refusal(
+                "scratch slot", (unsigned long)(d.imm & SEQ_KX_INDICES),
+                (unsigned long)caps.max_scratch - 1u,
+                "scratch slots a lane, indexed from 0", "max_scratch");
+
         if (d.op == SEQ_REPEAT) {
             if (d.imm == 0) {
                 cft_set_error("instruction %lu is REPEAT 0, which is not a "
@@ -818,28 +889,14 @@ static cft_status seq_validate(const cft_program *p)
             }
             depth++;
             top++;
-            /* Checked BEFORE the product is taken, not after: mult and
-             * imm are both 64 bits, and a product past 2^64 wraps to a
-             * small number that passes an "> SEQ_MAX_INSNS" test. That
-             * let `repeat 2^16 / repeat 2^17 / repeat 2^31` - 2^64
-             * iterations - through this loader while seq.py, whose
-             * integers do not wrap, refused it (host/fuzz,
-             * 2026-09-07). mult[top - 1] is at least 1, so the
-             * division is safe, and imm > MAX / mult is exactly
-             * mult * imm > MAX - which is why the sentence names the
-             * two factors and not their product. */
-            if (d.imm > SEQ_MAX_INSNS / mult[top - 1]) {
-                cft_set_error("instruction %lu is REPEAT %lu inside loops "
-                              "that already run their body %llu times: the "
-                              "product is past %llu (2^40), the bound on a "
-                              "program's worst-case instruction count, so "
-                              "its loops are finite but not a bound",
-                              (unsigned long)pc, (unsigned long)d.imm,
-                              (unsigned long long)mult[top - 1],
-                              (unsigned long long)SEQ_MAX_INSNS);
-                return CFT_ERR_INVALID_ARGUMENT;
-            }
-            mult[top] = mult[top - 1] * d.imm;
+            /* A product past 2^64 wrapped to a small number that passed
+             * an "> SEQ_MAX_INSNS" test, and let `repeat 2^16 / repeat
+             * 2^17 / repeat 2^31` - 2^64 iterations - through this loader
+             * while seq.py, whose integers do not wrap, refused it
+             * (host/fuzz, 2026-09-07). The product is held at
+             * SEQ_COUNT_CAP now, so it cannot wrap and the bound is
+             * tested where seq.py tests it, below. */
+            mult[top] = seq_count_mul(mult[top - 1], d.imm);
             bkind[nb] = SEQ_REPEAT;
             bpc[nb++] = pc;
         } else if (d.op == SEQ_ENDREP) {
@@ -917,6 +974,11 @@ static cft_status seq_validate(const cft_program *p)
                           (unsigned long)bpc[nb - 1]);
             return CFT_ERR_INVALID_ARGUMENT;
         }
+        /* The bound on the worst case, last, as seq.py takes it: after
+         * this control instruction's own faults and its loop or region
+         * (an ALU instruction takes no part in it; see the head). */
+        if (worst > SEQ_MAX_INSNS)
+            return seq_worst_refusal(worst, 0, pc);
     }
     if (depth != 0) {
         /* depth > 0 needs a REPEAT, so there is a last instruction */
@@ -935,6 +997,10 @@ static cft_status seq_validate(const cft_program *p)
                       qdepth == 1 ? "" : "s", (unsigned long)bpc[nb - 1]);
         return CFT_ERR_INVALID_ARGUMENT;
     }
+    /* And once more after the last instruction, which no control
+     * instruction may have followed (seq.py's closing test). */
+    if (worst > SEQ_MAX_INSNS)
+        return seq_worst_refusal(worst, 1, p->n_insns - 1u);
     return CFT_OK;
 }
 
@@ -1010,16 +1076,50 @@ void cft_sw_seq_caps(cft_seq_caps *out)
  * of the three. Before this existed the tile answered a program past
  * its cap with STATUS[3] and no explanation, and the library
  * answered with nothing at all: it accepted every one of them
- * (docs/studies/OPT-D-contract.md 0.1). */
-static cft_status seq_check_caps(cft_device *dev, uint32_t n_insns,
-                                 uint32_t maxdep)
+ * (docs/studies/OPT-D-contract.md 0.1).
+ *
+ * Two functions since 2026-10-22 (KL-438): the deposit budget is seq.py's
+ * first validate() refusal and the instruction count is a device's matter
+ * alone, so they no longer come as a pair at one place in the load. */
+static cft_status seq_check_max_deposits(cft_device *dev, uint32_t maxdep)
 {
     cft_seq_caps c;
     cft_device_seq_caps(dev, &c);
+    /* BEFORE the absolute ceiling below, not after, so that every device
+     * gets the same explained refusal at its own cap. For a software
+     * handle the two boundaries are the same number, and whichever came
+     * first would be the one a caller ever saw; the one that names the
+     * cap is the better answer. */
     if (c.max_deposits && maxdep > c.max_deposits)
         return (cft_status)cft_seq_cap_refusal(
             "max_deposits", maxdep, c.max_deposits,
             "deposit slots a lane", "max_deposits");
+    /* The library's own absolute ceiling on a deposit budget, which is
+     * about what this process can represent rather than about any
+     * device. Only reachable when the device published no cap of its
+     * own - cft_caps documents zero as unknown, and a remote server
+     * older than those fields is the one thing that produces it - or
+     * one above this ceiling, which no device does. The sentence says
+     * which (2026-09-30; until then it said nothing). */
+    if (maxdep > SEQ_MAX_DEPOSITS) {
+        cft_set_error("this image's max_deposits is %lu, past %lu, this "
+                      "library's own ceiling on deposit slots a lane - a "
+                      "run's output is n times that many elements, so the "
+                      "ceiling bounds what one image can make a host "
+                      "allocate; this device's own cap, "
+                      "cft_caps.max_deposits, is %lu%s",
+                      (unsigned long)maxdep, (unsigned long)SEQ_MAX_DEPOSITS,
+                      (unsigned long)c.max_deposits,
+                      c.max_deposits ? "" : " (unknown)");
+        return CFT_ERR_INVALID_ARGUMENT;
+    }
+    return CFT_OK;
+}
+
+static cft_status seq_check_max_insns(cft_device *dev, uint32_t n_insns)
+{
+    cft_seq_caps c;
+    cft_device_seq_caps(dev, &c);
     if (c.max_insns && n_insns > c.max_insns)
         return (cft_status)cft_seq_cap_refusal(
             "instruction count", n_insns, c.max_insns,
@@ -1094,19 +1194,10 @@ static cft_status seq_check_against_device(cft_device *dev,
                                   (unsigned long)pc, nm[d.op - SEQ_STL]);
                     return CFT_ERR_UNSUPPORTED;
                 }
-                /* A STATIC slot is held to the device's depth, by name,
-                 * as a constant index past the bank is. An INDEXED one
-                 * is not: docs/SEQUENCER.md makes the reduction modulo
-                 * the depth part of the contract, so there is nothing
-                 * out of range for it to be. */
-                if ((d.op == SEQ_STL || d.op == SEQ_LDL) && c.max_scratch &&
-                    (d.imm & SEQ_KX_INDICES) >= c.max_scratch)
-                    return (cft_status)cft_seq_cap_refusal(
-                        "scratch slot",
-                        (unsigned long)(d.imm & SEQ_KX_INDICES),
-                        (unsigned long)c.max_scratch - 1u,
-                        "scratch slots a lane, indexed from 0",
-                        "max_scratch");
+                /* A STATIC slot past the device's depth is refused by
+                 * name too, but in seq_validate, where seq.py takes it
+                 * (KL-438): it is a property of the image against a depth
+                 * the caller states, not of the device's features. */
             }
             /* Revision 8: the pair names three registers, and either
              * form needs its own bit - after the scratch, so a device
@@ -1263,6 +1354,134 @@ static void seq_scratch_footprint(cft_device *dev, cft_program *p)
                         (p->flags & CFT_PROG_FLAG_SCRATCH_IO) != 0;
 }
 
+/* What only a DEVICE can refuse of an image's header: the format it is
+ * compiled for, its instruction count against the device's capacity, and
+ * the features its flags ask for. Made after every refusal the MODEL makes
+ * of the whole image, header and instruction stream (KL-438), so that an
+ * image with a fault of the model's and a fault of a device's is refused
+ * for the model's, which seq.py names and every loader of this image
+ * shares - a fault of the device's is a fact about this device, and a
+ * different device would have taken the image. (Not the device's deposit
+ * budget and scratch depth: those are refused in cft_program_load at the
+ * device's number, where the model refuses the same quantity.) (Until
+ * 2026-10-22 these
+ * came between the header's refusals and the stream's, and an image whose
+ * header a device could not take was refused for that however broken its
+ * instructions were.) */
+static cft_status seq_check_header_against_device(cft_device *dev,
+                                                  uint32_t prec,
+                                                  uint32_t flags,
+                                                  uint32_t n_insns,
+                                                  uint32_t n_consts,
+                                                  uint32_t n_sin,
+                                                  uint32_t n_sout)
+{
+    cft_status st;
+
+    /* A program is compiled for one format, because its constants are
+     * format-width values. Refuse it here rather than at the first
+     * instruction that would issue a precision this device does not
+     * carry. */
+    if (!cft_supports(dev, CFT_FMA, (cft_format)prec)) {
+        /* Name what the device DOES carry, which is the sentence a
+         * caller holding an image for the wrong rung actually needs. */
+        cft_caps pc;
+        memset(&pc, 0, sizeof pc);
+        pc.struct_size = sizeof pc;
+        if (cft_get_caps(dev, &pc) == CFT_OK)
+            return (cft_status)cft_device_format_refusal(
+                pc.format_mask, (int)prec,
+                "cft_program_load: a program is compiled for one format");
+        return (cft_status)cft_composed_refusal("cft_program_load",
+                                                "CFT_FMA", (int)prec);
+    }
+    /* And against the instruction capacity THIS device publishes, in
+     * the same breath and for the same reason: the alternative is a
+     * program that loads, runs on a laptop, and is refused by the tile
+     * at its header check with a status bit and no explanation.
+     *
+     * At LOAD rather than at run, because a program is built once and
+     * run many times - a tool that will not fit wants to know before
+     * it has staged operands - and because a handle that loaded and
+     * cannot run is a worse contract than a load that failed. */
+    st = seq_check_max_insns(dev, n_insns);
+    if (st != CFT_OK)
+        return st;
+
+    /* A BANK_EXT image on a device that cannot take a bank, refused
+     * BEFORE the map is ever touched.
+     *
+     * This is the one guard that protects an old bitstream, and it has
+     * to be here rather than in the tile: a 0x600 tile's FETCH reads
+     * n_consts constants from the image whatever the header's flags
+     * say, so it would read the first instructions as constants and
+     * then run whatever followed. There is no status bit for that,
+     * because the tile never notices. */
+    if (flags & CFT_PROG_FLAG_BANK_EXT) {
+        cft_seq_caps sc;
+        cft_device_seq_caps(dev, &sc);
+        if (!(sc.features & CFT_SEQ_FEAT_BANK_PTR)) {
+            cft_set_error("this image's header flags carry BANK_EXT, so its "
+                          "constants arrive per run, and this device does "
+                          "not publish the feature (CAPS[6] clear, "
+                          "cft_caps.seq_features bit 2 - "
+                          "CFT_SEQ_FEAT_BANK_PTR); its fetch would read "
+                          "%lu constants from an image that has none. Build "
+                          "the program with its constants in the image",
+                          (unsigned long)n_consts);
+            return CFT_ERR_UNSUPPORTED;
+        }
+    }
+
+    /* And the scratch block, on the same terms and for a sharper
+     * reason. A revision-2 tile refuses a non-zero reserved[1] at its
+     * header check, so this one WOULD be caught there - but with
+     * STATUS[3] and no explanation, after the image has crossed, and
+     * only on a tile new enough to check the word at all. The loader
+     * says it first, by name, and says which feature. */
+    if (flags & CFT_PROG_FLAG_SCRATCH_IO) {
+        cft_seq_caps sc;
+        cft_device_seq_caps(dev, &sc);
+        if (!(sc.features & CFT_SEQ_FEAT_SCRATCH_IO)) {
+            cft_set_error("this image's header flags carry SCRATCH_IO, so "
+                          "every run preloads %lu scratch slots a lane and "
+                          "reads %lu back, and this device does not publish "
+                          "the feature (CAPS2[5] clear, "
+                          "cft_caps.seq_features bit 9 - "
+                          "CFT_SEQ_FEAT_SCRATCH_IO)",
+                          (unsigned long)n_sin, (unsigned long)n_sout);
+            return CFT_ERR_UNSUPPORTED;
+        }
+    }
+
+    /* And revision 4's strict scratch range, on exactly the same terms.
+     * A tile that does not publish the feature refuses this image at its
+     * own header check - flags[2] sits inside the reserved range every
+     * revision before 4 enforces - but with STATUS[3] and no
+     * explanation, after the image has crossed. The loader says it
+     * first, by name, and says which feature.
+     *
+     * Clearing the flag would let the same program run, which is why
+     * this is a refusal and not a fallback: under the modulo it is a
+     * DIFFERENT contract, and answering a different question quietly is
+     * the one thing this library must not do. */
+    if (flags & CFT_PROG_FLAG_SCRATCH_STRICT) {
+        cft_seq_caps strict_caps;
+        cft_device_seq_caps(dev, &strict_caps);
+        if (!(strict_caps.features & CFT_SEQ_FEAT_SCRATCH_STRICT)) {
+            cft_set_error("this image's header flags carry SCRATCH_STRICT, "
+                          "so an indexed scratch access at or past the "
+                          "device's depth is reported rather than reduced "
+                          "modulo it, and this device does not publish the "
+                          "feature (CAPS2[6] clear, cft_caps.seq_features "
+                          "bit 10 - CFT_SEQ_FEAT_SCRATCH_STRICT)");
+            return CFT_ERR_UNSUPPORTED;
+        }
+    }
+
+    return CFT_OK;
+}
+
 CFT_API cft_status cft_program_load(cft_device *dev, const void *image,
                                     size_t bytes, cft_program **out)
 {
@@ -1339,18 +1558,15 @@ CFT_API cft_status cft_program_load(cft_device *dev, const void *image,
                       (unsigned long)SEQ_VERSION);
         return CFT_ERR_ARTIFACT;
     }
-    if (!(flags & CFT_PROG_FLAG_SCRATCH_IO) && scr_io) {
-        cft_set_error("this image's header word 7, scratch_io, is 0x%08lx "
-                      "and its flags do not carry SCRATCH_IO; with that bit "
-                      "clear the word is reserved and must be zero",
-                      (unsigned long)scr_io);
-        return CFT_ERR_ARTIFACT;
-    }
     /* A flag bit this library does not know is an image it cannot
      * read: the bit says something about the layout or the run, and
      * the honest answer to a sentence you cannot parse is not to
      * guess. This is the version guard for everything flags will ever
-     * carry, which is why the round needed no VERSION step. */
+     * carry, which is why the round needed no VERSION step.
+     *
+     * Before the scratch word, as seq.py's from_bytes takes them (KL-438;
+     * until 2026-10-22 this loader read the word first, so an image with
+     * both faults was refused for a different one). */
     if (flags & ~SEQ_FLAGS_KNOWN) {
         char known[CFT_SEQ_FLAG_NAMES_MAX];
         cft_set_error("this image's header flags are 0x%08lx, and 0x%08lx "
@@ -1363,6 +1579,13 @@ CFT_API cft_status cft_program_load(cft_device *dev, const void *image,
                       (unsigned long)SEQ_FLAGS_KNOWN);
         return CFT_ERR_ARTIFACT;
     }
+    if (!(flags & CFT_PROG_FLAG_SCRATCH_IO) && scr_io) {
+        cft_set_error("this image's header word 7, scratch_io, is 0x%08lx "
+                      "and its flags do not carry SCRATCH_IO; with that bit "
+                      "clear the word is reserved and must be zero",
+                      (unsigned long)scr_io);
+        return CFT_ERR_ARTIFACT;
+    }
     if (prec > 3) {
         cft_set_error("this image's precision code is %lu, which is not on "
                       "the ladder: 0 %s, 1 %s, 2 %s, 3 %s",
@@ -1371,39 +1594,61 @@ CFT_API cft_status cft_program_load(cft_device *dev, const void *image,
                       cft_format_name(CFT_FP256));
         return CFT_ERR_ARTIFACT;
     }
-    /* A program is compiled for one format, because its constants are
-     * format-width values. Refuse it here rather than at the first
-     * instruction that would issue a precision this device does not
-     * carry. */
-    if (!cft_supports(dev, CFT_FMA, (cft_format)prec)) {
-        /* Name what the device DOES carry, which is the sentence a
-         * caller holding an image for the wrong rung actually needs. */
-        cft_caps pc;
-        memset(&pc, 0, sizeof pc);
-        pc.struct_size = sizeof pc;
-        if (cft_get_caps(dev, &pc) == CFT_OK)
-            return (cft_status)cft_device_format_refusal(
-                pc.format_mask, (int)prec,
-                "cft_program_load: a program is compiled for one format");
-        return (cft_status)cft_composed_refusal("cft_program_load",
-                                                "CFT_FMA", (int)prec);
+
+    esz  = (size_t)cft_sf_formats[prec].width / 8;
+    /* A BANK_EXT image is a header and an instruction stream, full
+     * stop: n_consts says how many constants the program ADDRESSES,
+     * and none of them is in the file. */
+    n_stored = (flags & CFT_PROG_FLAG_BANK_EXT) ? 0u : n_consts;
+    /* In 64 bits, not in size_t. Two 32-bit header fields describe up
+     * to about 2^38 bytes, which a 32-bit size_t wraps: 8 * 0x20000001
+     * instructions came to 8, so a 40-byte image passed this check on
+     * such a host and failed later, at the allocation, as
+     * CFT_ERR_OUT_OF_MEMORY, where a 64-bit host answered
+     * CFT_ERR_ARTIFACT (measured on an i686 build, 2026-09-30; wasm32
+     * and the 32-bit boards are such hosts). The same image now gets the
+     * same answer on every host. Once the check has passed, every part
+     * of `want` is part of `bytes`, so kbytes below fits a size_t. */
+    want = (uint64_t)SEQ_HEADER_BYTES + (uint64_t)n_stored * esz +
+           (uint64_t)n_insns * SEQ_INSN_BYTES;
+    /* Exactly, not at least: a program is its header, its constants
+     * and its instructions, so anything else is a different program
+     * and should not load as this one.
+     *
+     * Here, with the header's own refusals, and ahead of every capacity
+     * and of the bank's depth: seq.py's from_bytes takes the length
+     * before validate() takes the deposit budget (KL-438). Until
+     * 2026-10-22 it came after them, so an image of the wrong length that
+     * also declared too many constants was refused for the constants. */
+    if ((uint64_t)bytes != want) {
+        cft_set_error("this image is %llu bytes and its header describes "
+                      "%llu: %d of header, %lu x %lu of constants%s and "
+                      "%lu x %d of instructions. A program image is exactly "
+                      "those, so this one is a different program",
+                      (unsigned long long)bytes, (unsigned long long)want,
+                      SEQ_HEADER_BYTES, (unsigned long)n_stored,
+                      (unsigned long)esz,
+                      (flags & CFT_PROG_FLAG_BANK_EXT)
+                          ? " (none in the image, under BANK_EXT)" : "",
+                      (unsigned long)n_insns, SEQ_INSN_BYTES);
+        return CFT_ERR_ARTIFACT;
     }
-    /* And against the capacities THIS device publishes, in the same
-     * breath and for the same reason: the alternative is a program
-     * that loads, runs on a laptop, and is refused by the tile at its
-     * header check with a status bit and no explanation.
-     *
-     * At LOAD rather than at run, because a program is built once and
-     * run many times - a tool that will not fit wants to know before
-     * it has staged operands - and because a handle that loaded and
-     * cannot run is a worse contract than a load that failed.
-     *
-     * BEFORE the absolute ceiling below, not after, so that every
-     * device gets the same explained refusal at its own cap. For a
-     * software handle the two boundaries are the same number, and
-     * whichever came first would be the one a caller ever saw; the
-     * one that names the cap is the better answer. */
-    st = seq_check_caps(dev, n_insns, maxdep);
+    kbytes = (size_t)n_stored * esz;
+
+    /* What seq.py's validate() refuses of the header next, in its order:
+     * the deposit budget, the bank's depth, and the scratch block's two
+     * halves. Then the instruction stream (seq_validate, below). What only
+     * a DEVICE can refuse - its format, its instruction capacity and the
+     * features an image's flags ask for (seq_check_header_against_device),
+     * and the features its instructions use (seq_check_against_device) -
+     * comes after all of the model's, so that an image with a fault of the
+     * model's and a fault of a device's is refused for the model's, which
+     * every loader of this image shares. The exception is a capacity a
+     * device publishes for a quantity the model also bounds - the deposit
+     * budget and the scratch block's halves, just below - which is
+     * refused here, at the device's number, where the model's own bound
+     * comes. */
+    st = seq_check_max_deposits(dev, maxdep);
     if (st != CFT_OK)
         return st;
     /* The bank's depth, on every device, before any backend sees the
@@ -1435,78 +1680,17 @@ CFT_API cft_status cft_program_load(cft_device *dev, const void *image,
                       (unsigned long)SEQ_ADDR_CONSTS);
         return CFT_ERR_UNSUPPORTED;
     }
-    /* The library's own absolute ceiling on a deposit budget, which is
-     * about what this process can represent rather than about any
-     * device. Only reachable when the device published no cap of its
-     * own - cft_caps documents zero as unknown, and a remote server
-     * older than those fields is the one thing that produces it - or
-     * one above this ceiling, which no device does. The sentence says
-     * which (2026-09-30; until then it said nothing). */
-    if (maxdep > SEQ_MAX_DEPOSITS) {
-        cft_seq_caps mc;
-        cft_device_seq_caps(dev, &mc);
-        cft_set_error("this image's max_deposits is %lu, past %lu, this "
-                      "library's own ceiling on deposit slots a lane - a "
-                      "run's output is n times that many elements, so the "
-                      "ceiling bounds what one image can make a host "
-                      "allocate; this device's own cap, "
-                      "cft_caps.max_deposits, is %lu%s",
-                      (unsigned long)maxdep, (unsigned long)SEQ_MAX_DEPOSITS,
-                      (unsigned long)mc.max_deposits,
-                      mc.max_deposits ? "" : " (unknown)");
-        return CFT_ERR_INVALID_ARGUMENT;
-    }
 
-    /* A BANK_EXT image on a device that cannot take a bank, refused
-     * BEFORE the map is ever touched.
-     *
-     * This is the one guard that protects an old bitstream, and it has
-     * to be here rather than in the tile: a 0x600 tile's FETCH reads
-     * n_consts constants from the image whatever the header's flags
-     * say, so it would read the first instructions as constants and
-     * then run whatever followed. There is no status bit for that,
-     * because the tile never notices. */
-    if (flags & CFT_PROG_FLAG_BANK_EXT) {
-        cft_seq_caps sc;
-        cft_device_seq_caps(dev, &sc);
-        if (!(sc.features & CFT_SEQ_FEAT_BANK_PTR)) {
-            cft_set_error("this image's header flags carry BANK_EXT, so its "
-                          "constants arrive per run, and this device does "
-                          "not publish the feature (CAPS[6] clear, "
-                          "cft_caps.seq_features bit 2 - "
-                          "CFT_SEQ_FEAT_BANK_PTR); its fetch would read "
-                          "%lu constants from an image that has none. Build "
-                          "the program with its constants in the image",
-                          (unsigned long)n_consts);
-            return CFT_ERR_UNSUPPORTED;
-        }
-    }
-
-    /* And the scratch block, on the same terms and for a sharper
-     * reason. A revision-2 tile refuses a non-zero reserved[1] at its
-     * header check, so this one WOULD be caught there - but with
-     * STATUS[3] and no explanation, after the image has crossed, and
-     * only on a tile new enough to check the word at all. The loader
-     * says it first, by name, and says which feature. */
+    /* The scratch block's two halves, each at most the device's depth -
+     * a block deeper than the memory it is loaded into names slots that
+     * do not exist. Zero is unknown, and an unknown depth is enforced
+     * against nothing, as everywhere else. (That the device HAS a scratch
+     * block to preload is its feature, tested below.) */
     if (flags & CFT_PROG_FLAG_SCRATCH_IO) {
         cft_seq_caps sc;
         cft_device_seq_caps(dev, &sc);
         n_sin  = scr_io & 0xFFFFu;
         n_sout = (scr_io >> 16) & 0xFFFFu;
-        if (!(sc.features & CFT_SEQ_FEAT_SCRATCH_IO)) {
-            cft_set_error("this image's header flags carry SCRATCH_IO, so "
-                          "every run preloads %lu scratch slots a lane and "
-                          "reads %lu back, and this device does not publish "
-                          "the feature (CAPS2[5] clear, "
-                          "cft_caps.seq_features bit 9 - "
-                          "CFT_SEQ_FEAT_SCRATCH_IO)",
-                          (unsigned long)n_sin, (unsigned long)n_sout);
-            return CFT_ERR_UNSUPPORTED;
-        }
-        /* Each half is at most the device's depth - a block deeper than
-         * the memory it is loaded into names slots that do not exist.
-         * Zero is unknown, and an unknown depth is enforced against
-         * nothing, as everywhere else. */
         if (sc.max_scratch && n_sin > sc.max_scratch)
             return (cft_status)cft_seq_cap_refusal(
                 "n_scratch_in", n_sin, sc.max_scratch,
@@ -1520,7 +1704,7 @@ CFT_API cft_status cft_program_load(cft_device *dev, const void *image,
          * seq_scratch_footprint gives such a program too. Only there - a
          * device that published a depth is held to its own number above
          * and to nothing else. Zero is unknown; past the feature test
-         * above it takes a device that publishes the block without a
+         * below it takes a device that publishes the block without a
          * depth, a tile whose CAPS2 sets bit 5 and not bit 4.
          *
          * Until 2026-09-29 this test ran whatever the device published,
@@ -1541,65 +1725,6 @@ CFT_API cft_status cft_program_load(cft_device *dev, const void *image,
             return CFT_ERR_INVALID_ARGUMENT;
         }
     }
-
-    /* And revision 4's strict scratch range, on exactly the same terms.
-     * A tile that does not publish the feature refuses this image at its
-     * own header check - flags[2] sits inside the reserved range every
-     * revision before 4 enforces - but with STATUS[3] and no
-     * explanation, after the image has crossed. The loader says it
-     * first, by name, and says which feature.
-     *
-     * Clearing the flag would let the same program run, which is why
-     * this is a refusal and not a fallback: under the modulo it is a
-     * DIFFERENT contract, and answering a different question quietly is
-     * the one thing this library must not do. */
-    if (flags & CFT_PROG_FLAG_SCRATCH_STRICT) {
-        cft_seq_caps strict_caps;
-        cft_device_seq_caps(dev, &strict_caps);
-        if (!(strict_caps.features & CFT_SEQ_FEAT_SCRATCH_STRICT)) {
-            cft_set_error("this image's header flags carry SCRATCH_STRICT, "
-                          "so an indexed scratch access at or past the "
-                          "device's depth is reported rather than reduced "
-                          "modulo it, and this device does not publish the "
-                          "feature (CAPS2[6] clear, cft_caps.seq_features "
-                          "bit 10 - CFT_SEQ_FEAT_SCRATCH_STRICT)");
-            return CFT_ERR_UNSUPPORTED;
-        }
-    }
-
-    esz  = (size_t)cft_sf_formats[prec].width / 8;
-    /* A BANK_EXT image is a header and an instruction stream, full
-     * stop: n_consts says how many constants the program ADDRESSES,
-     * and none of them is in the file. */
-    n_stored = (flags & CFT_PROG_FLAG_BANK_EXT) ? 0u : n_consts;
-    /* In 64 bits, not in size_t. Two 32-bit header fields describe up
-     * to about 2^38 bytes, which a 32-bit size_t wraps: 8 * 0x20000001
-     * instructions came to 8, so a 40-byte image passed this check on
-     * such a host and failed later, at the allocation, as
-     * CFT_ERR_OUT_OF_MEMORY, where a 64-bit host answered
-     * CFT_ERR_ARTIFACT (measured on an i686 build, 2026-09-30; wasm32
-     * and the 32-bit boards are such hosts). The same image now gets the
-     * same answer on every host. Once the check has passed, every part
-     * of `want` is part of `bytes`, so kbytes below fits a size_t. */
-    want = (uint64_t)SEQ_HEADER_BYTES + (uint64_t)n_stored * esz +
-           (uint64_t)n_insns * SEQ_INSN_BYTES;
-    /* Exactly, not at least: a program is its header, its constants
-     * and its instructions, so anything else is a different program
-     * and should not load as this one. */
-    if ((uint64_t)bytes != want) {
-        cft_set_error("this image is %llu bytes and its header describes "
-                      "%llu: %d of header, %lu x %lu of constants%s and "
-                      "%lu x %d of instructions. A program image is exactly "
-                      "those, so this one is a different program",
-                      (unsigned long long)bytes, (unsigned long long)want,
-                      SEQ_HEADER_BYTES, (unsigned long)n_stored,
-                      (unsigned long)esz,
-                      (flags & CFT_PROG_FLAG_BANK_EXT)
-                          ? " (none in the image, under BANK_EXT)" : "",
-                      (unsigned long)n_insns, SEQ_INSN_BYTES);
-        return CFT_ERR_ARTIFACT;
-    }
-    kbytes = (size_t)n_stored * esz;
 
     prog = (cft_program *)calloc(1, sizeof *prog);
     if (!prog)
@@ -1640,7 +1765,14 @@ CFT_API cft_status cft_program_load(cft_device *dev, const void *image,
         return st;
     }
     /* After seq_validate, so that a malformed instruction is reported
-     * as malformed rather than as a capacity the device lacks. */
+     * as malformed rather than as a capacity the device lacks - and the
+     * header's device refusals with them (seq_check_header_against_device). */
+    st = seq_check_header_against_device(dev, prec, flags, n_insns, n_consts,
+                                         n_sin, n_sout);
+    if (st != CFT_OK) {
+        cft_program_free(prog);
+        return st;
+    }
     st = seq_check_against_device(dev, prog);
     if (st != CFT_OK) {
         cft_program_free(prog);

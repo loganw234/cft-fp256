@@ -162,10 +162,11 @@
  * W, so the 1 is spare; it is kept from the old rule. That holds at
  * every W below 1088, and so at every W a caller asks for (none asks
  * past CFT_MP_PREC_MAX, 928); host/tests/mp_err_check.c holds it
- * against MPFR at each one. A known limit: the function also accepts
- * W = 1088, where nothing is truncated and the count is the 1 alone -
- * short for ln10, whose stored value is 1.06 units low relatively
- * (verifier-W5, 2026-09-30).
+ * against MPFR at each W from 2 to 1087. At W = 1088 nothing is
+ * truncated and the count would be the 1 alone - short for ln10, whose
+ * stored value is 1.06 units low relatively (verifier-W5, 2026-09-30) -
+ * so the function refuses W = 1088 and above, as it refuses any
+ * request it cannot bound (until 2026-10-22 it accepted 1088: KL-439).
  *
  * ---------------------------------------------------------------
  * The old count, and why this one decides only what the old one did,
@@ -901,7 +902,10 @@ int cft_mp_const(cft_mp *r, cft_mp_constant which, int W)
     case CFT_MP_C_INVPI:  limbs = cft_mp_invpi_limbs;  e = CFT_MP_INVPI_EXP; break;
     default: return 1;
     }
-    if (W > CFT_MP_CONST_BITS)
+    /* At or above the stored width, not above it: at W == 1088 nothing is
+     * truncated, and the count of 1 below would be a count that is not
+     * a bound for ln10 (the header). */
+    if (W >= CFT_MP_CONST_BITS)
         return 1;
     cft_bn_zero(&v);
     for (i = 0; i < CFT_MP_CONST_LIMBS; i++)
@@ -915,9 +919,10 @@ int cft_mp_const(cft_mp *r, cft_mp_constant which, int W)
      * bits, so it is already low by up to one unit there; truncating
      * further to W is the truncation mp_norm charges. The count of 1
      * going in is spare - a truncation of a truncation is one - and is
-     * kept from the old rule (the header): trunc(1), 4 units. At W =
-     * 1088 itself nothing is truncated and the 1 is the whole count,
-     * short for ln10: a known limit no caller reaches (the header). */
+     * kept from the old rule (the header): trunc(1), 4 units. W is below
+     * 1088 here, so something is always truncated; at 1088 itself the 1
+     * would be the whole count, short for ln10, and the test above
+     * refuses it (the header). */
     return mp_norm(r, W, 0, &v, e, cft_mp_err_u64(1));
 }
 

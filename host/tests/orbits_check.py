@@ -3040,7 +3040,42 @@ def check_certificates(tool, tmp, audit_exe):
             ("member 0's energy respelt with an uppercase E, the same value, "
              "its sum made again",
              lambda t: _resum(t, lambda b: _respelt(b, "inv 0 ", 2, "E")),
-             "member 0's invariant")):
+             "member 0's invariant"),
+            # a value that does not read is a damaged line, not another step
+            # size (KL-424: this was refused as "a different step size"),
+            # and an infinity is a state no run with readable flags leaves
+            # in a checkpoint - the software backend's are readable, so
+            # this is where the refusal holds (KL-481: this resumed, and the
+            # flag certificate stopped it at exit 3, or - an invariant - it
+            # resumed and finished at exit 0), with its qualifier in the
+            # sentence
+            ("its step size h with a second space after the key, the "
+             "value itself unchanged, its sum made again",
+             lambda t: _resum(t, lambda b: b.replace("\nh ", "\nh  ", 1)),
+             "is not one exact decimal this format reads"),
+            ("its step size h replaced by a word, its sum made again",
+             lambda t: _resum(t, lambda b: _retoken(b, "h ", 1, "x")),
+             "is not one exact decimal this format reads"),
+            # the other half of the split, so the old sentence is not dead:
+            # a value that reads, exactly, to another number is another
+            # step size
+            ("its step size h another number that reads exactly (1/8), "
+             "its sum made again",
+             lambda t: _resum(t, lambda b: _retoken(b, "h ", 1, "1.25e-1")),
+             "was written for a different step size"),
+            ("member 1's first state value inf, its sum made again",
+             lambda t: _resum(t, lambda b: _retoken(b, "state 1 ", 2, "inf")),
+             "member 1's state value `inf` is an infinity, which a run "
+             "with readable flags never writes"),
+            ("member 1's last state value -inf, its sum made again",
+             lambda t: _resum(t, lambda b: _retoken(b, "state 1 ", -1,
+                                                    "-inf")),
+             "member 1's state value `-inf` is an infinity, which a run "
+             "with readable flags never writes"),
+            ("member 0's energy inf, its sum made again",
+             lambda t: _resum(t, lambda b: _retoken(b, "inv 0 ", 2, "inf")),
+             "member 0's invariant `inf` is an infinity, which a run "
+             "with readable flags never writes")):
         serial[0] += 1
         tag = "rs-ck-%d" % serial[0]
         shutil.copytree(d_o, work / (tag + ".states"))
@@ -3122,6 +3157,17 @@ def _respelt(body, prefix, index, how):
         assert "e" in v, v
         v = v.replace("e", "E", 1)
     tok[index] = v
+    lines[i] = " ".join(tok)
+    return "\n".join(lines)
+
+
+def _retoken(body, prefix, index, value):
+    """`body` with token `index` (negative from the end) of its first line
+    that begins `prefix` replaced by `value`."""
+    lines = body.split("\n")
+    i = next(i for i, l in enumerate(lines) if l.startswith(prefix))
+    tok = lines[i].split(" ")
+    tok[index] = value
     lines[i] = " ".join(tok)
     return "\n".join(lines)
 
@@ -3514,30 +3560,60 @@ def main():
 
         # -------------------------------------------------------------
         print("\n[7] what --engine program must refuse")
-        for why, argv in (
+        for why, argv, needle, absent in (
             ("the outer solar system (30 state values, 3 input streams)",
              ["--engine", "program", "--problem", "outer", "--rsqrt",
-              "newton", "--years", 1]),
-            ("--rsqrt exact (host prep, program core, host finish)",
-             ["--engine", "program", "--rsqrt", "exact", "--periods", 1]),
+              "newton", "--years", 1], (), ()),
+            # the reason is the splice: the language compiler's fragment
+            # inliner (python/cftc) exists, these engines do not use it,
+            # and the spliced image needs revision 8's flag control (KL-610:
+            # this one gave the route as host prep, program core and host
+            # finish, and the first repair said the inliner "does not exist
+            # yet", which it has since step 6's parcel C4 - sent back)
+            ("--rsqrt exact (the divide and square root are whole programs; "
+             "the compiler's inliner exists, these engines do not use it, "
+             "and the splice needs FLAG_CONTROL)",
+             ["--engine", "program", "--rsqrt", "exact", "--periods", 1],
+             ("fragment inliner", "python/cftc", "which these engines do not "
+              "use", "FLAG_CONTROL, CAPS2[14]"),
+             ("host finish", "does not exist")),
             ("--resume (a restart state has four non-zero components)",
              ["--engine", "program", "--rsqrt", "newton", "--periods", 1,
-              "--checkpoint", Path(tmp) / "never.ckpt", "--resume"]),
+              "--checkpoint", Path(tmp) / "never.ckpt", "--resume"],
+             (), ()),
         ):
             proc = tool.run(*argv, expect_ok=False)
-            check(proc.returncode != 0 and "cft-orbits:" in proc.stderr,
+            check(proc.returncode != 0 and "cft-orbits:" in proc.stderr and
+                  all(n in proc.stderr for n in needle) and
+                  not any(a in proc.stderr for a in absent),
                   "refused: %s\n         (%s)"
                   % (why, (proc.stderr.strip().splitlines() or
                            [""])[0]),
-                  "not refused: %s" % why)
+                  "not refused as it should be: %s\n         (%s)"
+                  % (why, (proc.stderr.strip().splitlines() or [""])[0]))
+        # the two program engines give ONE reason, word for word: it is one
+        # string in the tool (RSQRT_EXACT_WHY), so they cannot give two
+        why_of = {}
+        for eng in ("program", "segments"):
+            proc = tool.run("--engine", eng, "--rsqrt", "exact", "--periods",
+                            1, expect_ok=False)
+            line = (proc.stderr.strip().splitlines() or [""])[0]
+            why_of[eng] = line.split("needs --rsqrt newton: ", 1)[-1]
+        check(why_of["program"] == why_of["segments"] and
+              "needs --rsqrt newton" not in why_of["program"],
+              "--engine program and --engine segments give the same reason "
+              "for refusing --rsqrt exact, word for word",
+              "the two refusals of --rsqrt exact differ: program says %r, "
+              "segments says %r" % (why_of["program"], why_of["segments"]))
 
         print("\n[7b] what --engine segments must refuse")
         env_nc = dict(os.environ, CFT_ORBITS_NEGATIVE_CONTROL="transpose")
         for why, argv, env, needle in (
-            ("--rsqrt exact (whole-program divide and square root, no "
-             "inliner to splice them)",
+            ("--rsqrt exact (the same reason, in the same words as "
+             "--engine program's: the compiler's inliner exists and these "
+             "engines do not use it)",
              ["--engine", "segments", "--rsqrt", "exact", "--periods", 1],
-             None, "fragment inliner"),
+             None, "which these engines do not use"),
             ("--segment-dump without --engine segments",
              ["--engine", "loop", "--periods", 1, "--segment-dump", tmp],
              None, "needs --engine segments"),

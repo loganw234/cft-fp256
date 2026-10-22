@@ -2343,9 +2343,27 @@ an earlier call had left. P2 of the revision-7 round measured one
 printing a `cft_run_ex` index refusal's words. Run against the library
 before the change, every refusal `api-test` now holds did the same. So
 after a refused load `cft_last_error()` is that load's reason, in the
-meaning of the golden model's `ProgramError` for the same image. For
-an image with two faults the two may each name a different one, since
-their checks ran in different orders before this change:
+meaning of the golden model's `ProgramError` for the same image - and
+for an image with two faults, the same fault, since 2026-10-22. libcft
+checks in the model's order, `seq.py`'s `from_bytes` and then
+`validate()`: the header's flags before its scratch word, its length
+before the capacities, an instruction's operands rule by rule, a control
+instruction's unread fields, its static scratch slot and its loop or
+region, and the bound on the worst case after those. The two name the
+same rule at the same instruction, each in its own words, and for an
+operand that names a constant through `kx` the same constant, its
+nine-bit index. What only a device can refuse (its format and its
+instruction capacity, the features an image's flags or instructions
+need, a constant index past the reach of its bank) comes after all of
+the model's; a capacity a device publishes for a quantity the model
+also bounds, the deposit budget and the scratch block, is refused at
+the device's number where the model's bound comes.
+`host/tests/loader_order_check.py` holds it, image by image, over every
+fault alone, every ordered pair of them, and up to four field faults in
+one instruction word. (Before that date the two could each name a
+different fault, their checks having run in different orders, and the
+model's sentence for such an operand gave the low byte of its index.) A
+sentence names the instruction and what it breaks:
 
     instruction 3 is DEPOSIT, which reads only imm & 0x02000000, so
     imm = 0x01000000 sets a bit it does not read

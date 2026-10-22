@@ -488,6 +488,7 @@ test: all $(TESTS) buildidtest
 	diff .out-c.txt .out-py.txt
 	@echo "C and Python reached the same library and got the same bits"
 	@rm -f .out-c.txt .out-py.txt
+	$(PYTHON) tests/loader_order_check.py
 
 # ====================================================================
 # profiles-check - the library compiled at every build profile and at

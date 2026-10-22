@@ -935,7 +935,17 @@ Every value is an exact decimal from `cft_to_decimal_char` with
 `digits = 0` - 5.12.2's exact conversion - and is read back by
 `cft_from_decimal_char`, which the tool requires to be exact. What the
 library writes, the library reads back, so a checkpoint round trip
-cannot lose a bit.
+cannot lose a bit. Where the flags are readable, no value in one is an
+infinity: a run stops (exit 3) at the flag that makes one, so none is
+written, and both readers refuse a checkpoint whose `state` or `inv`
+holds one, a sentence and exit 2 (until 2026-10-22 the resume ran its
+first step into the flag certificate and stopped at exit 3, and an
+infinity in an invariant resumed and finished). A run on a backend
+whose flags are not readable does not stop at them, may write one, and
+is resumed as before. A value that does not read at all is refused as a
+damaged line, which is not the same as another step size (`h` with a
+second space after its key is one in version 3; version 2 reads tokens
+and takes the space).
 
 **Version 2** (2026-09-25) added `recbytes`, the length of the record
 stream the chain covers: the bytes `--records` has written by then. It
@@ -1510,7 +1520,7 @@ checkpoint whose sum was made again:
   certificate removed, given a NaN at boundary 0 (lane 1 slot 0), with
   the checkpoint's two hashes of boundary 0 made again too. The resume
   reads boundary 0 back, held to that hash, and refuses the entry.
-Thirteen checkpoint cases are refused with their sentences, exit 2:
+Nineteen checkpoint cases are refused with their sentences, exit 2:
 - version 2 with `--cert`, and version 3 without;
 - a byte changed, and the file cut;
 - with the sum made again: a line repeated, a flag word out of range,
@@ -1518,6 +1528,12 @@ Thirteen checkpoint cases are refused with their sentences, exit 2:
 - with the sum made again, a value in another spelling of itself: `h`
   with a leading 0, and a state value and an energy each with an
   uppercase E;
+- with the sum made again, a value that does not read: `h` with a second
+  space after its key and `h` as a word, each "damaged", where it said
+  "a different step size"; `h` as another number that reads exactly is
+  still that, which is the control; and an infinity in a state value,
+  either sign, or in an energy, each refused where it is read, where the
+  flag certificate stopped the run at exit 3 or it finished at exit 0;
 - a run started with the entries resumed without them, and one started
   without resumed with them.
 The gate holds both ends of a stop at the run's end, too.
