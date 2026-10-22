@@ -720,7 +720,15 @@ do_vectors() {
   fi
   echo "vectors: $msg"
 }
-need python
+# python AND mpmath: every stage that can run the generator needs both - this
+# one, and libcft, cpp, node and wasm through ensure_vectors (remote already
+# did) - because the generator's transcendental sets are mpmath's, and a host
+# without it fails in the generator, where a skip would name the cause (a
+# generation that died that way left five sets on 2026-09-28). Until
+# 2026-10-22 (KL-213) vectors and libcft named python alone, and cpp, node and
+# wasm neither. verify/test-ensure-vectors.sh holds the list to the stages'
+# own text.
+need python mpmath
 stage vectors "regenerate the conformance sets from the model, all five attributes, and hold the generation's own SHA256SUMS to every set the profile names" -- \
   do_vectors
 
@@ -746,9 +754,13 @@ stage sim "cocotb RTL suite, all 29 targets, SIM_JOBS at a time (docker cft-sim)
 # where sim took 1 h 40 min at six (docs/VERIFICATION.md). Since
 # 2026-10-05 it also runs seq_corestr_full, the sequencer's bench whole
 # through the fetch at three read latencies, under Verilator: Icarus
-# cannot finish it inside the target's timeout (tb/Makefile).
+# cannot finish it inside the target's timeout (tb/Makefile). Since
+# 2026-10-22 (KL-472) it also runs seq_coreu50mc, the sequencer's bench at
+# the U50's capacities with the multiplier iterated, about as long as
+# seq_coreu50 under Icarus. CI runs no simmc, so that bench is held by this
+# stage and by hand and by nothing else.
 need docker
-stage simmc "cocotb suite at the multi-cycle pass budget MC, and the sequencer's bench whole through the fetch under Verilator (docker cft-sim)" -- do_simmc
+stage simmc "cocotb suite at the multi-cycle pass budget MC, the sequencer's bench at the U50's capacities with the multiplier iterated, and the sequencer's bench whole through the fetch under Verilator (docker cft-sim)" -- do_simmc
 
 need docker
 stage lint "yosys elaboration gate, every RTL file (docker cft-sim)" -- do_lint
@@ -835,7 +847,7 @@ do_libcft() {
   HOSTMAKE -k profiles-check || rc=1
   return $rc
 }
-need host-cc python
+need host-cc python mpmath
 stage libcft "host library: build + contract tests + the build id regenerated + conformance replay + every build profile compiles" -- do_libcft
 
 # Placed after `libcft` on purpose: make_seq_corpus.py's check loads
@@ -1443,7 +1455,7 @@ stage bindings "the cftmpfr drop-in vs gmpy2's IEEE emulation: encodings, flags,
 # first stage that replays them.
 
 do_cpp() { ensure_vectors && HOSTMAKE cpptest; }
-need host-cc cxx
+need host-cc cxx python mpmath
 stage cpp "cft.hpp vs cft.h at C++17 and C++20: every entry point, same bits and flags" -- do_cpp
 
 need host-cc cxx
@@ -1472,14 +1484,14 @@ do_node() {
   (cd "$ROOT/bindings/node" && node test.mjs && node program_test.mjs \
      && node conformance.mjs "$ROOT/vectors/out")
 }
-need node
+need node python mpmath
 stage node "Node binding: unit tests and program_test.mjs, then the vectors through cft_node.wasm" -- do_node
 
 do_wasm() {
   ensure_vectors || return 1
   node "$ROOT/bindings/wasm/verify.mjs" "$ROOT/vectors/out"
 }
-need node
+need node python mpmath
 stage wasm "the committed conformance page, verified without a browser" -- do_wasm
 
 # The five workloads written for the contract (docs/BENCHMARKS.md,
@@ -1506,15 +1518,62 @@ do_demos() {
 need host-cc node
 stage demos "the browser demos' compute core reproduces the C tools' chains, without a browser" -- do_demos
 
+# Which MPFR the stage below builds against, said by name (KL-212). A fresh
+# clone has no verify/_mpfr-prefix, so the stage used to build against the
+# host's own MPFR - 4.2.1 on amd-arc-box, where the repository pins 4.2.2 -
+# and said nothing. The one comparison the record has came out the same
+# against both (the audit round's 37 mismatches, docs/VALIDATION.md,
+# 2026-09-30), but a verdict reached against an oracle other than the pinned
+# one should name it. The pin is read from verify/build-mpfr-oracle.sh, so
+# the number exists once; the version a build sees is asked of the compiler,
+# with the include flags the build will use (a prefix header that lost to a
+# system one would be reported as the system's), as the MPFR_VERSION_STRING
+# of the mpfr.h it includes. host_cc is the compiler HOSTMAKE builds with:
+# the mingw64 gcc first on PATH on Windows, and make's own `cc`, or $CC,
+# elsewhere.
+host_cc() {
+  if [ "$WIN" = 1 ]; then PATH="/c/msys64/mingw64/bin:$PATH" gcc "$@"
+  else "${CC:-cc}" "$@"; fi
+}
+mpfr_pin() {
+  sed -n 's/^MPFR_V=//p' "$ROOT/verify/build-mpfr-oracle.sh" 2>/dev/null | head -1
+}
+mpfr_header_version() {  # [cc flags...]
+  printf '#include <mpfr.h>\n' | host_cc -E -dM -x c "$@" - 2>/dev/null \
+    | sed -n 's/^#define MPFR_VERSION_STRING "\(.*\)".*$/\1/p' | head -1
+}
+
 do_mpfr() {
   # A repo-local prefix (verify/build-mpfr-oracle.sh) outranks system
   # packages: it is version-pinned, SHA-verified, and static, so the
   # oracle is the same everywhere it runs.
-  local pfx="$ROOT/verify/_mpfr-prefix"
+  #
+  # The stage's first lines say which MPFR it is building against, and a
+  # line that starts NOTE says it is not the pinned one. That is not an
+  # inner skip: every comparison below runs, against a real GNU MPFR, and
+  # the record has the same 37 mismatches against the box's 4.2.1 and the
+  # pinned 4.2.2 (docs/VALIDATION.md, 2026-09-30). Counting it as one would
+  # fail every --require-all gate in a fresh clone on a host whose MPFR is
+  # not the pin, for no check that did not run. The mpfr-check binary then
+  # prints the library's own version as its first line.
+  local pfx="$ROOT/verify/_mpfr-prefix" pin seen
+  pin=$(mpfr_pin)
   if [ -f "$pfx/include/mpfr.h" ]; then
+    seen=$(mpfr_header_version "-I$pfx/include")
+    if [ -n "$pin" ] && [ "$seen" = "$pin" ]; then
+      echo "mpfr: built against the pinned MPFR $pin (verify/_mpfr-prefix: static, from verify/build-mpfr-oracle.sh)"    # MPFR-SAYS-PINNED
+    else
+      echo "NOTE  mpfr: NOT the pinned MPFR - verify/_mpfr-prefix holds ${seen:-(version not reported by the compiler)} and verify/build-mpfr-oracle.sh pins ${pin:-(unreadable: no MPFR_V in it)}; remove the prefix and rebuild it"    # MPFR-SAYS-STALE
+    fi
     HOSTMAKE "mpfr-check$EXE" "mp-err-check$EXE" \
       CFLAGS="-O2 -I$pfx/include" LDLIBS="-L$pfx/lib" || return 1
   else
+    seen=$(mpfr_header_version)
+    if [ -n "$pin" ] && [ "$seen" = "$pin" ]; then
+      echo "mpfr: no verify/_mpfr-prefix, so built against the system's MPFR $seen, which is the pinned version (not the SHA-256-verified static build that bash verify/build-mpfr-oracle.sh makes)"    # MPFR-SAYS-SYSTEM-EQUALS
+    else
+      echo "NOTE  mpfr: no verify/_mpfr-prefix, so built against the system's MPFR ${seen:-(version not reported by the compiler)}, NOT the pinned ${pin:-(unreadable: no MPFR_V in verify/build-mpfr-oracle.sh)}; bash verify/build-mpfr-oracle.sh builds the pin, static, without root"    # MPFR-SAYS-SYSTEM-DIFFERS
+    fi
     HOSTMAKE "mpfr-check$EXE" "mp-err-check$EXE" || return 1
   fi
   (cd "$ROOT/host" && "./mpfr-check$EXE" 24 7) || return 1
