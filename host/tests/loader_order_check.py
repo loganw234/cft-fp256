@@ -16,10 +16,21 @@ image's length after the capacities, took the register high bits operand by
 operand and a register operand's ninth bit before its byte, tested imm[31]
 before kx, left a static scratch slot to its device pass, and met the
 worst-case bound at the top of every instruction where the model meets it
-at the bottom of a control instruction (580 disagreements in 26,745 images
-at the base, in those seven classes). Both refused, with true sentences,
+at the bottom of a control instruction. Both refused, with true sentences,
 and named different faults; and the model's sentence for a constant under
 kx gave the low byte of a nine-bit index.
+
+Against the base's library (f707fa3b's cft.dll) THIS check, as committed,
+finds 653 disagreements over its 26,889 images with the committed seq.py
+and 726 with the base's own seq.py, the 73 more being that sentence. The
+653 are 398 + 70 + 7 + 134 + 34 + 3 + 7: the register high bits, the
+ninth bit before the byte, imm[31] before kx, the worst-case bound (115
+named at another instruction, 19 named ahead of an instruction's own
+fault), the static slot, the flags before the scratch word, the length
+before the capacities, in that order. The first version of this check,
+before its 2^64 and closing-test images and its comparison of the
+constant, found 580 over 26,745 with the base's seq.py (398 + 70 + 7 +
+64 + 31 + 3 + 7); those are that version's figures, not this one's.
 
 This feeds both loaders images with two faults, and compares the faults
 BY NAME: each sentence is read back to the rule it states and the

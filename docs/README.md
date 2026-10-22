@@ -1,14 +1,14 @@
 # The documents, by what you open them for
 
-Fifty files, 87,004 lines. Flat in one directory they look like one
+Fifty files, 87,009 lines. Flat in one directory they look like one
 undifferentiated pile; they are not, and the split is close to even:
 
 - **28,104 lines you consult while working** — the three under *Start here*,
   the contract, and the reference you call into;
-- **7,886 lines of tool manual**, one per shipped program;
+- **7,888 lines of tool manual**, one per shipped program;
 - **3,330 lines of operations**, read when you are about to do something to
   hardware;
-- **47,684 lines of record and argument** — the ledger, the roadmap and the
+- **47,687 lines of record and argument** — the ledger, the roadmap and the
   design studies. The history of how a decision was reached, worth keeping,
   and not what you open to get something done.
 
@@ -73,7 +73,7 @@ tool you are running.
 | document | lines | tool |
 |---|---|---|
 | [ZOOM.md](ZOOM.md) | 856 | `cft-zoom` — deep-zoom Mandelbrot reference orbits |
-| [ORBITS.md](ORBITS.md) | 2,068 | `cft-orbits` — symplectic few-body integration, and its certified runs |
+| [ORBITS.md](ORBITS.md) | 2,070 | `cft-orbits` — symplectic few-body integration, and its certified runs |
 | [MERSENNE.md](MERSENNE.md) | 882 | `cft-mersenne` — Lucas-Lehmer |
 | [ENCLOSE.md](ENCLOSE.md) | 845 | `cft-enclose` — directed-rounding interval enclosure |
 | [COLLATZ.md](COLLATZ.md) | 648 | `cft-collatz` — Collatz trajectories |
@@ -98,7 +98,7 @@ reading material for a working session.
 
 | document | lines | what it is for |
 |---|---|---|
-| [VALIDATION.md](VALIDATION.md) | 23,182 | The validation ledger, append-only. Every run, including the ones that failed and the mistakes that produced them. A figure here is a fact about the run on its date and is never edited to match a later one. |
+| [VALIDATION.md](VALIDATION.md) | 23,185 | The validation ledger, append-only. Every run, including the ones that failed and the mistakes that produced them. A figure here is a fact about the run on its date and is never edited to match a later one. |
 | [FIGURES.md](FIGURES.md) | 471 | Fifteen figures of the project - its history, its gate, the card's clocks and its long stress run, the benchmarks, the math library's costs - drawn by script from the record's own data, light and dark, each with a sidecar of its numbers and the digests of its sources, and held to the numbers the README and other documents state. The page is written by `python/project_figures.py`, the `generated` stage's seventh generator, not by hand. |
 | [ROADMAP.md](ROADMAP.md) | 6,578 | What is built, what is next, and what was decided against. |
 | [ROUND2.md](ROUND2.md) | 1,082 | The plan for the gather, the scatter, the lane mask and the broadcast as one parcel round, with its outcome at the top: the seam the lead lands first, a brief per parcel, the verifiers, the ledger, the merge order. |

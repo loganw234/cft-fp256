@@ -25,9 +25,11 @@ a silent resume from a state the file did not describe.
     no exit inside the timeout                   HANG
 
 One more, for cft-orbits (KL-481): a checkpoint whose `state` or `inv` line
-holds an infinity is refused where it is read, a sentence and exit 2. A
-flag-certificate stop (exit 3) over one is WRONG-CODE and an acceptance of
-one is ACCEPT-INFINITY, both findings: before 2026-10-22 the first was
+holds an infinity is refused where it is read, a sentence and exit 2, where
+the flags are readable (the software backend's are, and this lane runs it;
+on a backend whose flags are not readable the tool resumes one as before).
+A flag-certificate stop (exit 3) over one is WRONG-CODE and an acceptance
+of one is ACCEPT-INFINITY, both findings: before 2026-10-22 the first was
 counted a refusal and the second an ordinary acceptance.
 
 A CERTIFIED cft-orbits run (docs/ORBITS.md, "Certified runs",
@@ -341,10 +343,12 @@ INFINITY = re.compile(r"^[+-]?inf(inity)?$", re.I)
 def holds_infinity(text):
     """Whether a `state` or `inv` line of the checkpoint text holds an
     infinity. cft-orbits refuses such a checkpoint where it reads it, a
-    sentence and exit 2 (KL-481): a run stops at the flag that makes an
+    sentence and exit 2 (KL-481), where the flags are readable, as the
+    software backend's are: there a run stops at the flag that makes an
     infinity, so it never writes one, and a resume handed one used to run
     its first step into the flag certificate and stop at exit 3 - or, for
-    an invariant, finish at exit 0."""
+    an invariant, finish at exit 0. (Where the flags are not readable the
+    run does not stop at them, and its checkpoint may hold one.)"""
     for ln in (text or "").split("\n"):
         tok = ln.split(" ")
         if tok[0] in ("state", "inv") and \

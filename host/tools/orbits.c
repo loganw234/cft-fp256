@@ -224,8 +224,15 @@
  *       registers and their own constants - and putting one inside
  *       another program's loop body needs a fragment inliner that
  *       relocates their registers and constants and turns their
- *       deposits into moves. That does not exist yet, in this tool or
- *       anywhere in the tree, so --rsqrt exact is still a loop-engine
+ *       deposits into a result and a raise of their flags. The
+ *       language's compiler has one since step 6's parcel C4
+ *       (python/cftc, python/cft_golden/routines.py): divfull and
+ *       sqrtfull relocated and specialised at the program's
+ *       attribute, run in a quiet region, then raising exactly their
+ *       operation's flags, which takes revision 8's flag control
+ *       (FLAG_CONTROL, CAPS2[14]; no revision-7 tile has it). This
+ *       tool's engines do not use it: their programs come from the
+ *       tool's own builder. So --rsqrt exact is still a loop-engine
  *       route and both program engines refuse it by name. --rsqrt
  *       newton exists so that all three engines have a step they can
  *       run - which they must run bit for bit.
@@ -1047,14 +1054,15 @@ static int val_from_dec_ok(const fmt_info *fi, const char *s, void *out,
 }
 
 /* Whether the value is an infinity, either sign (KL-481). A checkpoint
- * whose state holds one is refused where it is read, by name: a run of
- * this tool stops (exit 3, note_flags) at the first overflow or
- * divide-by-zero, which is the only way a finite state makes an infinity,
- * so it never writes one - and a resume handed one would run its first
- * step into the flag certificate and stop with exit 3, a stop that
- * explains nothing about the file. Only where the flags are readable
- * (FLAGS_TRUSTED): without them the run does not stop at those flags, so
- * a checkpoint of such a run may hold an infinity and is resumed as
+ * whose state holds one is refused where it is read, by name - but only
+ * where the flags are readable (FLAGS_TRUSTED, from the backend's
+ * flags_readable). Where they are, a run of this tool stops (exit 3,
+ * note_flags) at the first overflow or divide-by-zero, which is the only
+ * way a finite state makes an infinity, so it never writes one - and a
+ * resume handed one would run its first step into the flag certificate
+ * and stop with exit 3, a stop that explains nothing about the file.
+ * Where they are not readable the run does not stop at those flags, so
+ * a checkpoint of such a run may hold an infinity, and is resumed as
  * before. A NaN is not refused here; it is not what the stop was about. */
 static int val_is_inf(const fmt_info *fi, const void *v)
 {
@@ -1067,11 +1075,13 @@ static int val_is_inf(const fmt_info *fi, const void *v)
 /* The version-2 reader's two sentences for it (ckpt_read3 names the member
  * and the value; this reader's lines are read a token at a time). */
 #define CKPT_INF_STATE \
-    "a checkpoint state value is an infinity, which this tool never writes " \
-    "into a checkpoint: a run stops (exit 3) at the flag that makes one"
+    "a checkpoint state value is an infinity, which a run with readable " \
+    "flags never writes into a checkpoint: it stops (exit 3) at the flag " \
+    "that makes one"
 #define CKPT_INF_INV \
-    "a checkpoint invariant is an infinity, which this tool never writes " \
-    "into a checkpoint: a run stops (exit 3) at the flag that makes one"
+    "a checkpoint invariant is an infinity, which a run with readable " \
+    "flags never writes into a checkpoint: it stops (exit 3) at the flag " \
+    "that makes one"
 
 /* An initial condition is a decimal literal from a published table.
  * It is converted once, correctly rounded, and the rounding is
@@ -3745,9 +3755,9 @@ static void ckpt_read3(runstate *R)
                         (unsigned long)m, t);
             if (val_is_inf(fi, dst))
                 ck3_die("member %lu's state value `%.60s` is an infinity, "
-                        "which this tool never writes into a checkpoint: a "
-                        "run stops (exit 3) at the flag that makes one",
-                        (unsigned long)m, t);
+                        "which a run with readable flags never writes into "
+                        "a checkpoint: it stops (exit 3) at the flag that "
+                        "makes one", (unsigned long)m, t);
         }
         if (*val)
             ck3_die("a state line longer than a member's state");
@@ -3774,9 +3784,9 @@ static void ckpt_read3(runstate *R)
                         (unsigned long)m, t);
             if (val_is_inf(fi, dst[i]))
                 ck3_die("member %lu's invariant `%.60s` is an infinity, "
-                        "which this tool never writes into a checkpoint: a "
-                        "run stops (exit 3) at the flag that makes one",
-                        (unsigned long)m, t);
+                        "which a run with readable flags never writes into "
+                        "a checkpoint: it stops (exit 3) at the flag that "
+                        "makes one", (unsigned long)m, t);
         }
         if (*val)
             ck3_die("an inv line longer than a member's invariants");
@@ -4909,14 +4919,21 @@ static void cert_options(const options *O, uint8_t **salt)
 /* Why both program engines refuse --rsqrt exact, in one place so that the
  * two refusals cannot give two reasons (KL-610: --engine program kept the
  * old route, host prep, program core and host finish, long after the
- * header's comment above said otherwise). Since 2026-09-14 the correctly
- * rounded divide and square root exist as WHOLE programs; what is missing
- * is the splice. */
+ * header's comment above said otherwise; and the first repair said the
+ * fragment inliner "does not exist yet", which it has, since step 6's
+ * parcel C4). The correctly rounded divide and square root exist as WHOLE
+ * programs since 2026-09-14; the language's compiler (python/cftc)
+ * splices them into a larger program, which takes revision 8's flag
+ * control; this tool's engines build their programs themselves and do
+ * not use it. */
 #define RSQRT_EXACT_WHY \
     "the correctly rounded divide and square root exist as WHOLE programs " \
     "(programs/divfull-*, sqrtfull-*), and splicing one into this " \
-    "program's loop body needs a fragment inliner that does not exist yet " \
-    "(docs/ORBITS.md, \"The step, and where it runs\")"
+    "program's loop body needs the language compiler's fragment inliner " \
+    "(python/cftc, parcel C4), which these engines do not use - their " \
+    "programs come from this tool's own builder - and a tile with " \
+    "revision 8's flag control (FLAG_CONTROL, CAPS2[14]) (docs/ORBITS.md, " \
+    "\"The step, and where it runs\")"
 
 int main(int argc, char **argv)
 {

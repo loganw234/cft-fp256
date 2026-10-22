@@ -4,10 +4,13 @@
 infinity (KL-481).
 
 cft-orbits refuses a checkpoint whose state or invariants hold an
-infinity where it reads it: a sentence, exit 2. A run stops at the flag
+infinity where it reads it: a sentence, exit 2, where the flags are
+readable (the software backend's are). There a run stops at the flag
 that makes an infinity, so it never writes one; before this the resume
 ran its first step into the flag certificate and stopped at exit 3, or,
-for an invariant, finished at exit 0. The fuzz lane called the first a
+for an invariant, finished at exit 0. (On a backend whose flags are not
+readable the run does not stop at them, and its checkpoint may hold
+one.) The fuzz lane called the first a
 refusal and the second an acceptance, so a reader that went back to
 either could not be seen. These hold the classifier to the contract
 without a build: it is a pure function of an exit code, a stderr and the

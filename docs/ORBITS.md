@@ -935,15 +935,17 @@ Every value is an exact decimal from `cft_to_decimal_char` with
 `digits = 0` - 5.12.2's exact conversion - and is read back by
 `cft_from_decimal_char`, which the tool requires to be exact. What the
 library writes, the library reads back, so a checkpoint round trip
-cannot lose a bit. No value in one is an infinity: a run stops (exit 3)
-at the flag that makes one, so none is ever written, and both readers
-refuse a checkpoint whose `state` or `inv` holds one, a sentence and
-exit 2, where the flags are readable (until 2026-10-22 the resume ran
-its first step into the flag certificate and stopped at exit 3, and an
-infinity in an invariant resumed and finished). A value that does not
-read at all is refused as a damaged line, which is not the same as
-another step size (`h` with a second space after its key is one in
-version 3; version 2 reads tokens and takes the space).
+cannot lose a bit. Where the flags are readable, no value in one is an
+infinity: a run stops (exit 3) at the flag that makes one, so none is
+written, and both readers refuse a checkpoint whose `state` or `inv`
+holds one, a sentence and exit 2 (until 2026-10-22 the resume ran its
+first step into the flag certificate and stopped at exit 3, and an
+infinity in an invariant resumed and finished). A run on a backend
+whose flags are not readable does not stop at them, may write one, and
+is resumed as before. A value that does not read at all is refused as a
+damaged line, which is not the same as another step size (`h` with a
+second space after its key is one in version 3; version 2 reads tokens
+and takes the space).
 
 **Version 2** (2026-09-25) added `recbytes`, the length of the record
 stream the chain covers: the bytes `--records` has written by then. It
