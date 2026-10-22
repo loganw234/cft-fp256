@@ -508,8 +508,10 @@ const char *cftx_last_error(void);
 /* Empties it (device.c's cft_clear_error calls this). Open, a run, a
  * program run and the image's identity cleared it themselves; a
  * reduction, a read-back and a publish never did. device.c clears it
- * before every call into this backend and at the top of every public
- * entry point, so that no longer depends on which call is which. */
+ * before each call into this backend that can write a sentence (the
+ * buffer create, destroy, stat and host-wrote seams and the close cannot)
+ * and at the top of every public entry point, so that no longer depends
+ * on which call is which. */
 void cftx_clear_error(void);
 
 /* ====================================================================

@@ -6464,6 +6464,69 @@ int main(void)
 #endif
         }
 
+        /* A refusal names the call that was made. cft_run_ex runs the same
+         * checks as cft_run through one function, and cft_open_ex opens
+         * through cft_open's body: their sentences say "cft_run_ex" and
+         * "cft_open_ex", not the name of the function they share. (The
+         * first pass said "cft_run" and "cft_open" for both; sent back
+         * once, verifier-VP2b.) */
+        {
+            cft_elem_args E3;
+            cft_open_args oa3;
+
+            memset(&E3, 0, sizeof E3);
+            E3.struct_size = sizeof E3;
+            E3.a = xa; E3.b = xb; E3.c = xb; E3.d = xd; E3.n = 1;
+            LE_LEG(le_plant_lib, "cft_run_ex, a format out of range",
+                   cft_run_ex(dev, CFT_ADD, (cft_format)9, CFT_RNE, &E3),
+                   CFT_ERR_INVALID_ARGUMENT, LE_OWN, "cft_run_ex: format 9");
+            LE_LEG(le_plant_lib, "cft_run_ex, an attribute out of range",
+                   cft_run_ex(dev, CFT_ADD, CFT_FP64, (cft_round)7, &E3),
+                   CFT_ERR_INVALID_ARGUMENT, LE_OWN,
+                   "cft_run_ex: rounding attribute 7");
+            LE_LEG(le_plant_lib, "cft_run_ex, an opcode that is no byte",
+                   cft_run_ex(dev, (cft_op)300, CFT_FP64, CFT_RNE, &E3),
+                   CFT_ERR_INVALID_ARGUMENT, LE_OWN, "cft_run_ex: opcode 300");
+            LE_LEG(le_plant_lib, "cft_run_ex, a reduction opcode",
+                   cft_run_ex(dev, CFT_SUM, CFT_FP64, CFT_RNE, &E3),
+                   CFT_ERR_INVALID_ARGUMENT, LE_OWN,
+                   "cft_run_ex: opcode 24 (sum) is a reduction");
+            E3.d = NULL;
+            LE_LEG(le_plant_lib, "cft_run_ex, a NULL output",
+                   cft_run_ex(dev, CFT_ADD, CFT_FP64, CFT_RNE, &E3),
+                   CFT_ERR_INVALID_ARGUMENT, LE_OWN, "cft_run_ex: d is NULL");
+            E3.d = xd;
+            E3.c = NULL;
+            LE_LEG(le_plant_lib, "cft_run_ex, a NULL operand the opcode reads",
+                   cft_run_ex(dev, CFT_ADD, CFT_FP64, CFT_RNE, &E3),
+                   CFT_ERR_INVALID_ARGUMENT, LE_OWN,
+                   "cft_run_ex: opcode 1 (add) reads operand c");
+            E3.c = xb;
+            E3.n = (size_t)-1;
+            LE_LEG(le_plant_lib, "cft_run_ex, an n whose bytes overflow",
+                   cft_run_ex(dev, CFT_ADD, CFT_FP64, CFT_RNE, &E3),
+                   CFT_ERR_INVALID_ARGUMENT, LE_OWN, "cft_run_ex: n = ");
+            memset(&oa3, 0, sizeof oa3);
+            oa3.struct_size = sizeof oa3;
+            oa3.index = -1;
+            LE_LEG(le_plant_lib, "cft_open_ex, a negative index",
+                   cft_open_ex(&oa3, &h),
+                   CFT_ERR_INVALID_ARGUMENT, LE_OWN,
+                   "cft_open_ex: index -1 is negative");
+            oa3.index = 1;
+            LE_LEG(le_plant_lib, "cft_open_ex, a second software device",
+                   cft_open_ex(&oa3, &h),
+                   CFT_ERR_NO_DEVICE, LE_OWN,
+                   "cft_open_ex: the software backend is device 0");
+#ifndef CFT_ENABLE_XRT
+            oa3.index = 0;
+            oa3.artifact = "p2b-no-such-image.xclbin";
+            LE_LEG(le_plant_lib, "cft_open_ex, an xclbin in a build with no XRT",
+                   cft_open_ex(&oa3, &h),
+                   CFT_ERR_NO_DEVICE, LE_OWN, "cft_open_ex: p2b-no-such-image");
+#endif
+        }
+
         /* the other source files: one entry point each, refused without a
          * sentence of its own (the slot may be empty, never the plant's),
          * and calls that succeed */

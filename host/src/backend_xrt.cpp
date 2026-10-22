@@ -1891,10 +1891,10 @@ extern "C" const char *cftx_last_error(void)
 }
 
 /* Empties it: device.c's cft_clear_error, from the top of every public
- * entry point and before every call into this backend. The calls below
- * that never cleared it themselves (a reduction, a read-back, a publish)
- * and calls that reach no backend at all can no longer show an older
- * sentence (KL-490). */
+ * entry point and before each call into this backend that can write a
+ * sentence. The calls below that never cleared it themselves (a
+ * reduction, a read-back, a publish) and calls that reach no backend at
+ * all can no longer show an older sentence (KL-490). */
 extern "C" void cftx_clear_error(void)
 {
     g_err.clear();

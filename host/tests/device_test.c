@@ -7886,8 +7886,15 @@ static void check_failed_fill_retry(cft_device *sw, cft_device *hw,
         }
         goto out;
     }
-    if (!cft_supports(hw, CFT_ADD, fmt))
+    if (!cft_supports(hw, CFT_ADD, fmt)) {
+        char label[96];
+        snprintf(label, sizeof label, "    %s a failed fill's retry",
+                 cft_format_name(fmt));
+        not_here(NH_OTHER, "TESTED", label,
+                 "this device does not implement CFT_ADD at %s, the "
+                 "operation the leg runs", cft_format_name(fmt));
         goto out;
+    }
     if (!rbuf_alloc(hw, &ra, bytes)) {
         printf("  FAIL: cft_alloc for the failed-fill leg\n");
         failures++;
