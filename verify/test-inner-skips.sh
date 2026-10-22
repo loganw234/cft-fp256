@@ -45,6 +45,17 @@
 # cached like a clean one, the colour left in, and do_generated's carrying
 # of a passing tool's skip lines removed - and the check written for each
 # must catch it.
+# The mpfr stage's first lines are held here too (KL-212), as the other side
+# of the same rule: a stage that built against an MPFR other than the pinned
+# one says so by name on a line that starts NOTE, and that is NOT an inner
+# skip - every comparison ran - so the runner's own scan is asked and must
+# count nothing. Six more controls: each of the four lines taken away, the
+# system's put back starting SKIP, and the system build's call deleted (a check
+# of "no flags" had passed when the build was never called: verifier VP3).
+# And CI's host job (.github/workflows/gates.yml) is held to the runner (KL-607,
+# KL-181): every name in its --only list is a stage, none is named twice, and
+# innerskips, ensurevectors and seq - the three it left out until 2026-10-22 -
+# are in it; a copy without innerskips and with seq misspelt must be caught.
 # Then the skip lines the stages' programs print (cpp-api-test,
 # remote_check.py, tb/check_results.py), each as printed since 2026-09-24
 # and as printed before: the new one counts and fails --require-all
@@ -460,6 +471,135 @@ carried () {  # <runner>  ->  returns the number of checks it got wrong
 }
 NCARRIED=10
 
+# ...and the mpfr stage's first lines (KL-212): which MPFR it is building
+# against, by name, and a line that starts NOTE when it is not the pinned one.
+# That line is deliberately not an inner skip - every comparison of the stage
+# runs, against a real GNU MPFR - and the runner's own scan is asked, so the
+# day the line starts with SKIP is the day this fails. do_mpfr is the
+# runner's own, over a planted tree: a verify/build-mpfr-oracle.sh that pins
+# 9.9.9 (the number is read from it, not remembered), a prefix whose mpfr.h
+# says what the case wants, stand-ins for the two programs the stage runs, a
+# HOSTMAKE that builds nothing and records its arguments, and a compiler that
+# is one function: it answers -I<dir> with that directory's mpfr.h, and
+# anything else with the version the case calls the system's. The probe the
+# runner really makes of a compiler is held where this host has one.
+mpfr_fns () {  # <runner>: the functions under test, as text
+  awk '/^(host_cc|mpfr_pin|mpfr_header_version|do_mpfr)\(\) \{/ { on = 1 }
+       on { print }
+       on && /^\}/ { on = 0 }' "$1"
+}
+mpfr_plant () {  # <dir> <the pin, or empty for no script> <the prefix header's version, or empty for no prefix>
+  local b
+  rm -rf "$1"; mkdir -p "$1/verify" "$1/host"
+  [ -z "$2" ] || printf '%s\n' 'M4_V=1.4.19' 'GMP_V=6.3.0' "MPFR_V=$2" > "$1/verify/build-mpfr-oracle.sh"
+  if [ -n "$3" ]; then
+    mkdir -p "$1/verify/_mpfr-prefix/include" "$1/verify/_mpfr-prefix/lib"
+    printf '%s\n' '#define MPFR_VERSION_MAJOR 9' "#define MPFR_VERSION_STRING \"$3\"" \
+      > "$1/verify/_mpfr-prefix/include/mpfr.h"
+  fi
+  for b in mpfr-check mp-err-check; do
+    printf '%s\n' '#!/bin/sh' "echo $b ran" > "$1/host/$b"; chmod +x "$1/host/$b"
+  done
+}
+mpfr_run () {  # <runner> <planted tree> <the system's version, or empty for none>  ->  OUT, RC
+  local fn
+  fn=$(mpfr_fns "$1")
+  OUT="$T/mpfr.$RANDOM$RANDOM.out"
+  ( ROOT=$2; WIN=0; EXE=""; SYSTEM_MPFR=$3
+    eval "$fn"
+    HOSTMAKE () { printf '%s\n' "$*" >> "$ROOT/hostmake.args"; }
+    host_cc () {
+      local a dir=""
+      for a in "$@"; do case "$a" in -I*) dir=${a#-I};; esac; done
+      cat > /dev/null
+      echo '#define __GNUC__ 13'
+      if [ -n "$dir" ] && [ -f "$dir/mpfr.h" ]; then grep '^#define MPFR_VERSION_STRING' "$dir/mpfr.h"
+      elif [ -n "$SYSTEM_MPFR" ]; then echo "#define MPFR_VERSION_STRING \"$SYSTEM_MPFR\""; fi
+      echo '#define __VERSION__ "13.2.0"'
+    }
+    do_mpfr ) > "$OUT" 2>&1
+  RC=$?
+}
+skips_in () {  # <runner> <file>  ->  the lines that runner's own inner_scan counts in it
+  ( eval "$(awk '/^(ANSI_STRIP|INNER_SKIP_RE|REPLAY_SKIP_RE)=/ { print }
+                 /^inner_scan\(\) \{/ { on = 1 }
+                 on { print }
+                 on && /^\}/ { on = 0 }' "$1")"
+    inner_scan "$2" )
+}
+# lacks <grep args... file>: true when the pattern is NOT in the file, and the
+# file IS there. A grep of a file that does not exist exits 2, which a bare
+# `! grep` reads as "absent": that is how a build that was never called passed
+# as "handed no prefix" (verifier VP3, the send-back of 2026-10-22).
+lacks () { [ -f "${@: -1}" ] && ! grep -q "$@"; }
+ran_both () { grep -qxF 'mpfr-check ran' "$1" && grep -qxF 'mp-err-check ran' "$1"; }
+mpfr_says () {  # <runner>  ->  returns the number of checks it got wrong
+  local d="$T/m.$RANDOM$RANDOM" bad=0 pfx got W=0 cc=0
+  pfx="$d/verify/_mpfr-prefix"
+
+  echo "-- mpfr: a prefix that holds the pinned MPFR"
+  mpfr_plant "$d" 9.9.9 9.9.9; mpfr_run "$1" "$d" 9.9.8
+  same  "pinned prefix: exits 0" "$RC" 0 || bad=$((bad + 1))
+  check "pinned prefix: it says it built against the pinned MPFR 9.9.9" \
+        grep -qF 'mpfr: built against the pinned MPFR 9.9.9 (verify/_mpfr-prefix' "$OUT" || bad=$((bad + 1))
+  check "pinned prefix: no NOTE" lacks '^NOTE' "$OUT" || bad=$((bad + 1))
+  check "pinned prefix: the build is handed the prefix" \
+        grep -qF "CFLAGS=-O2 -I$pfx/include LDLIBS=-L$pfx/lib" "$d/hostmake.args" || bad=$((bad + 1))
+  check "pinned prefix: both programs ran after it" ran_both "$OUT" || bad=$((bad + 1))
+
+  echo "-- mpfr: a prefix that holds another MPFR than the pin"
+  mpfr_plant "$d" 9.9.9 9.9.8; mpfr_run "$1" "$d" 9.9.7
+  check "stale prefix: a NOTE that names the prefix's 9.9.8 and the pin 9.9.9" \
+        grep -qE '^NOTE  mpfr: NOT the pinned MPFR - verify/_mpfr-prefix holds 9\.9\.8 and verify/build-mpfr-oracle\.sh pins 9\.9\.9' \
+        "$OUT" || bad=$((bad + 1))
+  same  "stale prefix: the NOTE is not an inner skip" "$(skips_in "$1" "$OUT" | grep -c .)" 0 || bad=$((bad + 1))
+
+  echo "-- mpfr: no prefix, and a system MPFR that is not the pin"
+  mpfr_plant "$d" 9.9.9 ""; mpfr_run "$1" "$d" 9.9.8
+  same  "system 9.9.8: exits 0" "$RC" 0 || bad=$((bad + 1))
+  check "system 9.9.8, the pin 9.9.9: the NOTE names both" \
+        grep -qE "^NOTE  mpfr: no verify/_mpfr-prefix, so built against the system's MPFR 9\.9\.8, NOT the pinned 9\.9\.9" \
+        "$OUT" || bad=$((bad + 1))
+  check "system 9.9.8: the NOTE says how to get the pinned one" \
+        grep -qF 'bash verify/build-mpfr-oracle.sh builds the pin' "$OUT" || bad=$((bad + 1))
+  check "system 9.9.8: the build is called for both programs, with no flags" \
+        grep -qxF 'mpfr-check mp-err-check' "$d/hostmake.args" || bad=$((bad + 1))
+  check "system 9.9.8: the build is handed no prefix" lacks 'CFLAGS' "$d/hostmake.args" || bad=$((bad + 1))
+  same  "system 9.9.8: the NOTE is not an inner skip" "$(skips_in "$1" "$OUT" | grep -c .)" 0 || bad=$((bad + 1))
+  check "system 9.9.8: both programs ran after it" ran_both "$OUT" || bad=$((bad + 1))
+
+  echo "-- mpfr: no prefix, and a system MPFR that is the pin"
+  mpfr_plant "$d" 9.9.9 ""; mpfr_run "$1" "$d" 9.9.9
+  check "system 9.9.9, the pin 9.9.9: it says the system's is the pinned version" \
+        grep -qF "so built against the system's MPFR 9.9.9, which is the pinned version" "$OUT" || bad=$((bad + 1))
+  check "system 9.9.9: no NOTE" lacks '^NOTE' "$OUT" || bad=$((bad + 1))
+
+  echo "-- mpfr: a compiler that reports no version, and a tree with no pin to read"
+  mpfr_plant "$d" 9.9.9 ""; mpfr_run "$1" "$d" ""
+  check "no version reported: a NOTE that says so, with the pin" \
+        grep -qE "^NOTE  mpfr: no verify/_mpfr-prefix, so built against the system's MPFR \(version not reported by the compiler\), NOT the pinned 9\.9\.9" \
+        "$OUT" || bad=$((bad + 1))
+  mpfr_plant "$d" "" ""; mpfr_run "$1" "$d" 9.9.8
+  check "no pin to read: a NOTE that says so" \
+        grep -qE "NOT the pinned \(unreadable: no MPFR_V in verify/build-mpfr-oracle\.sh\)" "$OUT" || bad=$((bad + 1))
+
+  echo "-- mpfr: the preprocessor probe the runner really makes, where this host has a compiler"
+  case "$(uname -s)" in MINGW*|MSYS*) W=1;; esac
+  if [ "$W" = 1 ]; then [ -x /c/msys64/mingw64/bin/gcc.exe ] && cc=1
+  else command -v "${CC:-cc}" >/dev/null 2>&1 && cc=1; fi
+  if [ "$cc" = 1 ]; then
+    mpfr_plant "$d" 9.9.9 9.9.9
+    got=$( ROOT=$d; WIN=$W; eval "$(mpfr_fns "$1")"; mpfr_header_version "-I$pfx/include" )
+    same  "the compiler, handed -I and a planted mpfr.h, gives that header's version" "$got" 9.9.9 || bad=$((bad + 1))
+    got=$( ROOT=$d; WIN=$W; eval "$(mpfr_fns "$1")"; mpfr_header_version -nostdinc )
+    same  "the compiler, finding no mpfr.h, gives nothing" "$got" "" || bad=$((bad + 1))
+  else
+    echo "  NOTE  no C compiler on this host: the probe's own -E -dM was not run here"
+  fi
+  return "$bad"
+}
+NMPFR=20
+
 # ...and the sources still print them so. A fixture line is a claim
 # about a program's output; these hold each claim to the line of source
 # that makes it, and refuse the form it replaced. A form that was never
@@ -552,6 +692,9 @@ uncounted "$ROOT/verify/run.sh"; n=$?
 echo "== do_generated, as committed: a passing tool's skip lines"
 carried "$ROOT/verify/run.sh"; n=$?
 [ "$n" -eq 0 ] || { echo "FAIL: $n of $NCARRIED check(s) wrong"; FAILS=$((FAILS + 1)); }
+echo "== the mpfr stage's first lines, as committed: which MPFR it built against"
+mpfr_says "$ROOT/verify/run.sh"; n=$?
+[ "$n" -eq 0 ] || { echo "FAIL: $n of $NMPFR check(s) wrong"; FAILS=$((FAILS + 1)); }
 echo "== the sources that print them"
 pins; n=$?
 [ "$n" -eq 0 ] || { echo "FAIL: $n of $NPINS pin(s) do not hold"; FAILS=$((FAILS + 1)); }
@@ -571,6 +714,55 @@ if strays "$T/stray" > "$T/stray.out" 2>&1; then
 else
   grep -F 'FAIL  host/tests/device_test.c' "$T/stray.out"
   echo "  caught: $(grep -c 'not on this device, skipped' "$T/stray.out") line(s) named"
+fi
+
+# CI's host job names the stages it runs with --only, and the runner refuses a
+# name it does not know (exit 2), so a typo there would be the job's first
+# failure, on a push. This reads the list out of the workflow's own text, holds
+# every name in it to the runner's stage list, and holds it to the three stages
+# it left out until 2026-10-22 (innerskips and ensurevectors, KL-607; seq,
+# KL-181), so that dropping one is a failure here and not a silent gap.
+ci_host () {  # <workflow> <runner>  ->  returns the number of problems it found
+  local names n bad=0 stages
+  names=$(sed -n 's/^ *- run: bash verify\/run\.sh --require-all --only \([a-z0-9,-]*\) *$/\1/p' "$1" | head -1 | tr ',' '\n')
+  if [ -z "$names" ]; then
+    echo "  FAIL  no 'bash verify/run.sh --require-all --only <list>' step in $1"; return 1
+  fi
+  stages=$(grep -E '^stage [a-z0-9-]+ "' "$2" | awk '{print $2}')
+  for n in $names; do
+    printf '%s\n' "$stages" | grep -qx -- "$n" \
+      || { echo "  FAIL  CI's host list names $n, which is no stage of the runner"; bad=$((bad + 1)); }
+  done
+  n=$(printf '%s\n' "$names" | sort | uniq -d | tr '\n' ' ')
+  [ -z "$n" ] || { echo "  FAIL  CI's host list names twice: $n"; bad=$((bad + 1)); }
+  for n in innerskips ensurevectors seq; do
+    printf '%s\n' "$names" | grep -qx -- "$n" \
+      || { echo "  FAIL  CI's host list lacks $n"; bad=$((bad + 1)); }
+  done
+  [ "$bad" -ne 0 ] || echo "  ok    CI's host list: $(printf '%s\n' "$names" | grep -c .) names, each a stage of the runner, none twice, innerskips, ensurevectors and seq among them"
+  return "$bad"
+}
+echo "== CI's host job list, as committed"
+ci_host "$ROOT/.github/workflows/gates.yml" "$ROOT/verify/run.sh"; n=$?
+[ "$n" -eq 0 ] || { echo "FAIL: $n problem(s) with CI's host job list"; FAILS=$((FAILS + 1)); }
+# ...and watched to fail: a copy of the workflow without innerskips, and with
+# seq spelled as a name that is no stage.
+sed -e 's/sweepjudge,innerskips,/sweepjudge,/' -e 's/,reduce,seq,programs,/,reduce,sequ,programs,/' \
+  "$ROOT/.github/workflows/gates.yml" > "$T/gates.control.yml"
+echo "== negative control, CI's host list"
+if cmp -s "$T/gates.control.yml" "$ROOT/.github/workflows/gates.yml"; then
+  echo "FAIL: control CI's host list - the sed changed nothing, so it proves nothing"; FAILS=$((FAILS + 1))
+elif ci_host "$T/gates.control.yml" "$ROOT/verify/run.sh" > "$T/ci.out" 2>&1; then
+  cat "$T/ci.out"
+  echo "FAIL: control CI's host list - innerskips was dropped and a name misspelt, and the check did not catch it"
+  FAILS=$((FAILS + 1))
+elif grep -qF "CI's host list lacks innerskips" "$T/ci.out" \
+     && grep -qF "CI's host list names sequ, which is no stage of the runner" "$T/ci.out"; then
+  sed 's/^/  caught: /' "$T/ci.out" | cut -c1-140
+else
+  cat "$T/ci.out"
+  echo "FAIL: control CI's host list - it failed, but not for the two defects put in"
+  FAILS=$((FAILS + 1))
 fi
 
 # Each control: the defect put back into a copy that still parses, and
@@ -606,13 +798,33 @@ control colour-left-in INNER-SKIP-ANSI \
 control carry-removed INNER-SKIP-CARRY \
   '      : # the control: the passing tool'"'"'s skip lines not carried into the log' \
   "generated: its row counts 2" carried
+control mpfr-not-said MPFR-SAYS-SYSTEM-DIFFERS \
+  '      : # the control: nothing said when the system MPFR is not the pinned one' \
+  "system 9.9.8, the pin 9.9.9: the NOTE names both" mpfr_says
+control mpfr-note-is-a-skip MPFR-SAYS-SYSTEM-DIFFERS \
+  '      echo "SKIP  mpfr: the control, the same line with the skip marker first"' \
+  "system 9.9.8: the NOTE is not an inner skip" mpfr_says
+control mpfr-pinned-not-said MPFR-SAYS-PINNED \
+  '      : # the control: nothing said when the prefix is the pinned one' \
+  "pinned prefix: it says it built against the pinned MPFR 9.9.9" mpfr_says
+control mpfr-stale-not-said MPFR-SAYS-STALE \
+  '      : # the control: nothing said when the prefix is not the pinned one' \
+  "stale prefix: a NOTE that names the prefix's 9.9.8 and the pin 9.9.9" mpfr_says
+control mpfr-system-pin-not-said MPFR-SAYS-SYSTEM-EQUALS \
+  '      : # the control: nothing said when the system MPFR is the pinned one' \
+  "system 9.9.9, the pin 9.9.9: it says the system's is the pinned version" mpfr_says
+control mpfr-build-not-called MPFR-BUILD-SYSTEM \
+  '    : # the control: the system build is never called' \
+  "system 9.9.8: the build is called for both programs, with no flags" mpfr_says
 
 if [ "$FAILS" -eq 0 ]; then
-  echo "PASS: $NCHECKS checks right, all five controls caught by their own checks;" \
+  echo "PASS: $NCHECKS checks right, all eleven controls caught by their own checks;" \
        "$NFORMS checks of the programs' skip lines right, $NUNCOUNTED of their" \
        "not-on-this-device lines right, $NCARRIED of do_generated's carrying of" \
-       "a passing tool's skip lines right, $NPINS pins held, and the one form" \
-       "held with its control caught"
+       "a passing tool's skip lines right, $NMPFR of the mpfr stage's first lines" \
+       "right (18 where there is no C compiler), $NPINS pins held, the one form" \
+       "held with its control caught, and CI's host list held to the runner with" \
+       "its control caught"
   exit 0
 fi
 echo "FAIL: $FAILS problem(s)"

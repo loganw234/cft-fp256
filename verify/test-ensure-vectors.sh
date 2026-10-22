@@ -36,6 +36,13 @@
 # non-empty test, the digest check skipped, the profile's names not
 # compared, the generator's first removal dropped - and the case written
 # for each must catch it.
+# It also holds the runner's stage table to what a regeneration needs
+# (KL-213): every stage that can run the generator, found in the runner's own
+# text as a do_* function that calls ensure_vectors or gen_vectors.py, names
+# python and mpmath in its `need`, so a host without them skips by name and
+# does not fail inside the generator. The six known on 2026-10-22 must be
+# found, and two more controls - mpmath out of every need, and a new stage
+# that replays through ensure_vectors needing no python - must be caught.
 set -uo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 T=$(mktemp -d)
@@ -238,12 +245,66 @@ ev_cases() {  # <run.sh>
   evcase "$r" crash  silent   fail "FAILED - regenerated, and still not a whole set: vectors/out has no SHA256SUMS"
 }
 
+# ---- the stages that can run the generator --------------------------
+# What a regeneration needs is python with mpmath, and a stage that can
+# trigger one must say so in its `need`, or a host without them fails inside
+# the generator where a skip would name the cause (KL-213). The stages that
+# can are found in the runner's own text, not listed here: a do_* function
+# whose body calls ensure_vectors or runs gen_vectors.py, the stage that
+# runs it, and the `need` line directly above that stage. The six that were
+# known on 2026-10-22 must be found, so that a detector gone blind is a
+# failure and not a pass over nothing.
+generator_stages() {  # <run.sh>: "<stage><TAB><its need line>" for each
+  awk '
+    FNR == NR {
+      if ($0 ~ /^do_[a-z0-9_]+\(\) \{/) {
+        fn = $1; sub(/\(\).*/, "", fn)
+        infn = ($0 !~ /\}[[:space:]]*$/)
+        if ($0 ~ /ensure_vectors|gen_vectors\.py/) runs[fn] = 1
+        next
+      }
+      if (infn && $0 !~ /^[[:space:]]*#/ && $0 ~ /ensure_vectors|gen_vectors\.py/) runs[fn] = 1
+      if (infn && $0 ~ /^\}/) infn = 0
+      next
+    }
+    /^need( |$)/ { lastneed = $0; next }
+    /^stage [a-z0-9-]+ "/ {
+      name = $2; rec = $0
+      while (rec ~ /\\$/ && (getline nxt) > 0) rec = rec "\n" nxt
+      cmd = rec; sub(/^.* -- /, "", cmd)
+      n = split(cmd, w, /[^a-z0-9_]+/)
+      for (i = 1; i <= n; i++) if (w[i] in runs) { print name "\t" lastneed; break }
+    }' "$1" "$1"
+}
+generator_needs() {  # <run.sh>: every such stage names python and mpmath
+  local stages name line t miss found=""
+  stages=$(generator_stages "$1")
+  while IFS=$'\t' read -r name line; do
+    [ -n "$name" ] || continue
+    found="$found $name"
+    miss=""
+    for t in python mpmath; do
+      case " ${line#need} " in *" $t "*) ;; *) miss="$miss $t";; esac
+    done
+    if [ -n "$miss" ]; then bad "stage $name can run the generator, and '$line' lacks:$miss"
+    else ok "stage $name can run the generator: $line"; fi
+  done <<< "$stages"
+  for name in vectors libcft cpp node wasm remote; do
+    case " $found " in
+      *" $name "*) ;;
+      *) bad "stage $name was not found among those that can run the generator, so this check is blind to it";;
+    esac
+  done
+}
+
 echo "== vectors/gen_vectors.py's record, as committed"
 rec_whole
 rec_cache "$R/vectors/gen_vectors.py"
 rec_crash "$R/vectors/gen_vectors.py"
 echo "== verify/run.sh's ensure_vectors, as committed"
 ev_cases "$ROOT/verify/run.sh"
+echo "== verify/run.sh's stages that can run the generator, as committed"
+generator_needs "$ROOT/verify/run.sh"
 
 # ---- negative controls ----------------------------------------------
 # control <name> <file> <marker> <replacement> <case...>: the case must
@@ -286,6 +347,36 @@ gen_control() {  # <gen_vectors.py>: the crash case, with that generator
 control "the generator's first removal dropped" "$ROOT/vectors/gen_vectors.py" \
   '    remove_record(outdir)' '' \
   gen_control
+
+# The need lists' controls. Both are made in a copy of the runner by sed, and
+# each must make generator_needs FAIL: mpmath taken out of every `need` that
+# has it (the state before KL-213 for vectors, libcft, cpp, node and wasm, and
+# a regression for remote), and a new stage that replays the vectors through
+# ensure_vectors with a bare `need host-cc`, which is the stage a future
+# author writes and the one this check exists for.
+need_control() {  # <name> <expected failure text> <a copy of the runner, made defective>
+  local name=$1 want=$2 c=$3 before=$FAILS
+  if cmp -s "$c" "$ROOT/verify/run.sh"; then bad "control $name: the copy is the runner as committed"; return; fi
+  generator_needs "$c" > "$T/control.log"
+  if [ "$FAILS" -gt "$before" ] && grep -q "^FAIL  .*$want" "$T/control.log"; then
+    FAILS=$before
+    ok "control $name: caught - $(grep -m1 "^FAIL  .*$want" "$T/control.log" | cut -c7-200)"
+  else
+    FAILS=$before
+    bad "control $name: the defect went unseen"
+  fi
+}
+sed -E 's/^(need .*) mpmath$/\1/' "$ROOT/verify/run.sh" > "$T/control-nomp.sh"
+need_control "mpmath out of every need" "lacks: mpmath" "$T/control-nomp.sh"
+awk '/^# ---- report/ {
+       print "do_newreplay() { ensure_vectors; }"
+       print "need host-cc"
+       print "stage newreplay \"a replay that needs no python\" -- do_newreplay"
+       print ""
+     }
+     { print }' "$ROOT/verify/run.sh" > "$T/control-newstage.sh"
+need_control "a new stage that replays, needing no python" "stage newreplay can run the generator" \
+  "$T/control-newstage.sh"
 
 echo
 if [ "$FAILS" -eq 0 ]; then

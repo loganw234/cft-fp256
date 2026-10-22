@@ -155,9 +155,13 @@ print-sim-groups:
 # 2026-10-05 it also carries seq_corestr_full, the sequencer's bench whole
 # through the fetch at three read latencies, under Verilator: not a
 # multi-cycle bench, but the long tier's, as the board group is
-# (seq_corestr, below, says why).
+# (seq_corestr, below, says why). Since 2026-10-22 it carries seq_coreu50mc
+# too (KL-472, below). CI runs no simmc: its rtl jobs run `make
+# sim-group-<n>` and nothing else of this file (.github/workflows/gates.yml
+# holds no simmc), so what is in simmc and in no group is run by the full
+# census and by hand.
 simmc: fp32mc fp64mc fp128mc fp256mc mulpass mulcycle reducemc krnlmc \
-       quartermc faultsmc seq_coremc krnlseqmc seqbanksmc \
+       quartermc faultsmc seq_coremc seq_coreu50mc krnlseqmc seqbanksmc \
        board boardkrnl boardseq boardseqode boardfp256 \
        seq_corestr_full
 
@@ -771,8 +775,19 @@ seq_coreu50:
 
 # ...and the same machine on the multi-pass tile (MC=10 unless MC= says
 # otherwise): the sub-arrays' read hold under issue_hold and the
-# broadcast wipe where the issue pipe holds. Not in simmc, whose
-# seq_coremc is the 256-slot machine; TESTCASE= runs a subset.
+# broadcast wipe where the issue pipe holds. In simmc since 2026-10-22
+# (KL-472), beside seq_coremc, the 256-slot machine; before that it was in
+# no runner stage, and only the lead's box lanes ran it. It is simmc's and
+# not a CI group's because no shipped build pairs the U50's capacities with
+# MC > 1 (the U50 is single-pass, and the multi-pass Kintex-7 board pins the
+# open-core capacities) and because of its length: under Icarus it is about
+# seq_coreu50's (5,360 s and about 5,350 s at 63 cases on amd-arc-box,
+# docs/VALIDATION.md; seq_coreu50 took 6,837 s at 99 cases in CI's run
+# 39702228205), so a group could take it only by becoming the longest by more
+# than an hour, and a group of its own is two more hours of runner on every
+# push. Under Verilator, by hand with `make SIM=verilator seq_coreu50mc`: 99
+# of 99, 575 s of test time and 734 s with the compile (cft-sim at four CPUs
+# on the Windows desktop, 2026-10-22). TESTCASE= runs a subset.
 seq_coreu50mc:
 	CFT_MUL_PASSES=$(MC) CFT_GENERICS="$(SEQ_U50_GENERICS)" timeout $(SEQ_U50_TIMEOUT) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_seq \
 		MODULE=test_seq_core SIM_BUILD=sim_build/seq_coreu50mc$(MC) \
