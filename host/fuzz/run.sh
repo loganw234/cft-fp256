@@ -34,7 +34,8 @@ TARGETS=${*:-"program serve client"}
 # BUF_ALLOC of that size (crashes/serve/hang-0000000000000dcb) stalled
 # fuzz-serve past the engine's ten seconds, which a native build does
 # not. Refused over 4 GiB as it is over 1 TiB, the request costs the
-# fuzzer nothing (docs/VALIDATION.md, 2026-10-22).
+# fuzzer no time; what it gives up is the allocations of 4 GiB and over,
+# which no fuzzer exercises any more (docs/VALIDATION.md, 2026-10-22).
 #
 # detect_leaks=0 because the engine's corpus is deliberately never
 # freed and LeakSanitizer at exit would report the fuzzer, not the
