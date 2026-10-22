@@ -2110,10 +2110,15 @@ PLANTS = [  # (what is wrong, edits, the groups written for it, a fragment of th
 ]
 
 
+def plant_skipped(posix) -> bool:
+    """True where a plant's scenario cannot run on this platform (it needs flock(2), a platform without it, or POSIX)."""
+    return (posix == "flock" and not S.HAVE_FLOCK) or (posix == "noflock" and S.HAVE_FLOCK) or (posix == "posix" and os.name != "posix")
+
+
 def plants(only_text: str | None):
     ctl = {}
     if not only_text:
-        for g in sorted({p[2] for p in PLANTS}):
+        for g in sorted({p[2] for p in PLANTS if not plant_skipped(p[4])}):               # a group whose every plant is skipped here makes 0 checks: no control
             d = make_copy("control-" + g, [])
             rc, n, fails, err = run_copy(d, g)
             ctl[g] = n
@@ -2121,7 +2126,7 @@ def plants(only_text: str | None):
     for n, (label, edits, g, want, posix) in enumerate(PLANTS):
         if only_text and only_text not in label:
             continue
-        if (posix == "flock" and not S.HAVE_FLOCK) or (posix == "noflock" and S.HAVE_FLOCK) or (posix == "posix" and os.name != "posix"):
+        if plant_skipped(posix):
             skip(f"plant [{label}]", "needs a platform without flock(2)" if posix == "noflock" else "needs POSIX (flock(2), make, nice, timeout, /proc), which this platform lacks")
             continue
         try:
