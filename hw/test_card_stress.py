@@ -5916,11 +5916,24 @@ def vectors_checks(env: Env, src: str = HERE) -> list:
                 fh.write("\n")
             pe = L2.vectors_problem(emptyrec)
             pn, pb = L2.vectors_problem(noout), L2.vectors_problem(bad)
+            # the tracked record CHANGED while vectors/out is whole: well formed, a wrong hash for out/b.jsonl. `make vectors` writes vectors/out only and cannot clear this
+            changed = tree("changedrec", files)
+            rec_path = os.path.join(changed, "vectors", "SHA256SUMS")
+            with open(rec_path, "r", encoding="utf-8") as fh:
+                rec_text = fh.read()
+            with open(rec_path, "w", newline="\n") as fh:
+                fh.write(rec_text.replace(hashlib.sha256(b"two\n").hexdigest(), "0" * 64))
+            pc = L2.vectors_problem(changed)
+            c("vectors: a CHANGED tracked record - well formed, a wrong hash for out/b.jsonl, vectors/out whole - is refused as a mismatch (the file named), and the refusal "
+              "names the remedy that clears it, `git checkout -- vectors/SHA256SUMS`, beside `make vectors`, which writes vectors/out only and cannot",
+              pc is not None and pc.startswith("vectors_out_mismatch:") and "out/b.jsonl (differs)" in pc and "git checkout -- vectors/SHA256SUMS" in pc
+              and "make vectors" in pc, str(pc))
             c("vectors: what each refusal says puts it right: the three vectors_out_unheld ones (the tracked record missing, malformed, empty) say `git checkout -- "
               "vectors/SHA256SUMS` and do not send the operator to `make vectors`, which writes vectors/out/SHA256SUMS, another file, and would not restore the tracked "
-              "one; the missing and the mismatch refusals say `make vectors` and not `git checkout`",
+              "one; the missing refusal says `make vectors` and not `git checkout`; the mismatch refusal, which cannot tell a differing vectors/out from a changed record, names both",
               all(q is not None and q.startswith("vectors_out_unheld:") and "git checkout -- vectors/SHA256SUMS" in q and "make vectors" not in q for q in (p1, pm, pe))
-              and all(q is not None and "make vectors" in q and "git checkout" not in q for q in (pn, pb)), str((p1, pm, pe, pn, pb)))
+              and pn is not None and "make vectors" in pn and "git checkout" not in pn
+              and all(q is not None and "make vectors" in q and "git checkout -- vectors/SHA256SUMS" in q for q in (pb, pc)), str((p1, pm, pe, pn, pb, pc)))
             esc = tree("esc", files)
             with open(os.path.join(esc, "vectors", "SHA256SUMS"), "a", newline="\n") as fh:
                 fh.write(f"{hashlib.sha256(b'x').hexdigest()}  ../outside.txt\n")

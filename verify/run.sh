@@ -1578,8 +1578,8 @@ do_cardstress() {
 }
 need python
 # The probe (about a second: a python and the process list) is asked only when stage() below will get as far as running or skipping the stage: --list
-# has exited long before this line, and the three early returns of stage() - not selected by --only or the budget, passed already in this run, named
-# by --skip - are the three conditions here.
+# has exited long before this line, and the first three decisions of stage() are the three conditions here - not selected by --only or the budget (its
+# first early return), passed already in this run (its second, the .ok marker), named by --skip (a SKIP verdict, its third).
 if [ -z "$STAGE_SKIP_REASON" ] && { [ -z "$ONLY" ] || in_list cardstress "$ONLY"; } && ! in_list cardstress "$SKIP" && [ ! -f "$RUNDIR/cardstress.ok" ]; then
   _csu=$(cardstress_users)
   [ -n "$_csu" ] && STAGE_SKIP_REASON="another process uses the card on this system, so the driver's guard would refuse every driver the suite starts (guard_refused): $_csu"

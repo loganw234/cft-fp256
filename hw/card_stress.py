@@ -75,8 +75,9 @@ a pattern cannot read is a `parse_error` leg, kept whole. Nothing is defaulted t
 
 THE START. Before any leg: the guard, then run_start (the checkout's tree, and each image's SHA-256 with what its manifest says, below), then
 the build step, which refuses by name and exits 3 - the tree and the tools (make, ldd, the build id), vectors/out when the selftest leg will read
-it (missing, or not holding to vectors/SHA256SUMS: `make vectors`; or with no readable tracked record to hold it to, vectors/SHA256SUMS:
-`git checkout -- vectors/SHA256SUMS`, which `make vectors` would not restore), each image's SHA-256 against its SHA256SUMS and the hash given, and each
+it (missing: `make vectors`; not holding to vectors/SHA256SUMS: `make vectors` if vectors/out is what differs, `git checkout -- vectors/SHA256SUMS`
+if the tracked record itself changed, which `make vectors` cannot clear because it writes vectors/out only; with no readable tracked record to
+hold it to: that checkout alone), each image's SHA-256 against its SHA256SUMS and the hash given, and each
 image's manifest, `<name>.manifest.txt` beside `<name>.xclbin`: one that is not the image's (its sha256 line), or whose commit's rtl tree is not
 this checkout's (or says rtl/ was modified), is REFUSED; one that is missing, or names a commit this checkout does not hold, is FLAGGED - named
 in the step, in an event (image_manifest_unchecked), in status.txt and in the report, and the run goes on, because a night is not lost to a

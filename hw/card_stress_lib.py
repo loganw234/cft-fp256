@@ -1529,14 +1529,18 @@ def file_sha256(path: str) -> str:
 
 def vectors_problem(root: str) -> Optional[str]:
     """None when `vectors/out` is there and every file `vectors/SHA256SUMS` lists holds to it (what `cd vectors && sha256sum -c --quiet
-    SHA256SUMS` says); else the refusal's text, which begins with its name and says what puts it right: `make vectors` for
-    vectors_out_missing and vectors_out_mismatch (vectors/out is generated), and for vectors_out_unheld - the TRACKED record
-    vectors/SHA256SUMS cannot be read, is malformed or lists nothing - `git checkout -- vectors/SHA256SUMS`, since `make vectors` writes
-    vectors/out/SHA256SUMS, a different file, and would not restore it. The selftest leg runs
+    SHA256SUMS` says); else the refusal's text, which begins with its name and says what puts it right. `make vectors` regenerates
+    vectors/out and nothing else (`make -n vectors` shows `--out vectors/out`), so it clears vectors_out_missing; it cannot clear a change to
+    the TRACKED record vectors/SHA256SUMS, which is restored by `git checkout -- vectors/SHA256SUMS`. vectors_out_unheld - that record
+    cannot be read, is malformed or lists nothing - says only the checkout (`make vectors` writes vectors/out/SHA256SUMS, a different file,
+    and would not restore it). vectors_out_mismatch cannot tell a differing vectors/out from a record someone changed, whose lines are
+    well formed and wrong, so it names both remedies, each with its condition. The selftest leg runs
     `cft-selftest vectors/out IMAGE` every third visit of each image; on a clean clone vectors/out is not there (it is generated, and
     untracked), and until 2026-10-22 the driver neither checked nor made it, so that leg failed at every one of those visits (KL-44)."""
     vec = os.path.join(root, "vectors")
     fix = "run `make vectors` (docs/CARDDAY.md)"
+    fix_mismatch = ("if vectors/out is what differs, run `make vectors` (docs/CARDDAY.md); if `git status` shows vectors/SHA256SUMS itself changed, "
+                    "restore it with `git checkout -- vectors/SHA256SUMS` (`make vectors` writes vectors/out only, so it cannot clear that)")
     restore = "vectors/SHA256SUMS is a tracked file: restore it with `git checkout -- vectors/SHA256SUMS`"
     if not os.path.isdir(os.path.join(vec, "out")):
         return (f"vectors_out_missing: vectors/out is not there, and the selftest leg (cft-selftest vectors/out IMAGE) would fail at "
@@ -1570,7 +1574,7 @@ def vectors_problem(root: str) -> Optional[str]:
             bad.append(f"{rel} (differs)")
     if bad:
         return (f"vectors_out_mismatch: {len(bad)} of the {len(entries)} files vectors/SHA256SUMS lists are missing or differ in "
-                f"vectors/out (first: {', '.join(bad[:3])}); {fix}")
+                f"vectors/out (first: {', '.join(bad[:3])}); {fix_mismatch}")
     return None
 
 

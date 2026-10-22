@@ -898,8 +898,11 @@ python3 hw/card_stress_report.py /data/card-stress-1016     # the report, any ti
   its tool was built, the build step refuses the run, by name, exit 3, before any leg - `vectors_out_missing`
   (no `vectors/out`), `vectors_out_mismatch` (a file `vectors/SHA256SUMS` lists is missing or differs; the files
   are named) or `vectors_out_unheld` (the tracked record `vectors/SHA256SUMS` cannot be read, is malformed or lists nothing, so there is
-  nothing to hold it to). The first two say `make vectors`, which regenerates `vectors/out`; the third does not, because `make vectors`
-  writes `vectors/out/SHA256SUMS`, a different file, and would not restore the tracked one: it says `git checkout -- vectors/SHA256SUMS`.
+  nothing to hold it to). The first says `make vectors`, which regenerates `vectors/out` and writes nothing else (`make -n vectors` shows
+  `--out vectors/out`). The second cannot tell a differing `vectors/out` from a tracked record that was changed (a well-formed line with a wrong
+  hash), and `make vectors` cannot clear a changed record, so it names both remedies, each with its condition: `make vectors` if `vectors/out`
+  is what differs, `git checkout -- vectors/SHA256SUMS` if `git status` shows the record changed. The third says the checkout alone, because
+  `make vectors` writes `vectors/out/SHA256SUMS`, a different file, and would not restore the tracked one.
   It makes nothing (the driver never writes into the checkout), and it hashes what `sha256sum -c --quiet
   SHA256SUMS` does, in Python, so the same check runs on the Windows desktop. A battery without the leg (`--quick`,
   `--legs` without it), a build that disabled it, and a dry run say in the build step why they did not look.
@@ -1952,7 +1955,7 @@ asked: a tool that stopped short counted as covered if it printed one case (only
 every random slice is, where the tool's counting is known (`Item.random_cases`, one rule for the card's slices and the host pool's;
 `expected_cases` is recorded in the slice's `sweep` block, as for a chunked scaleB), and a slice with another number of cases is a
 `parse_error` naming both, not covered, served again from the same seed. READ in host/tools/divsqrt_soak.c and clause5_soak.c and MEASURED
-with the tools as built at f707fa3b on the software backend (counts 1, 4095, 4096, 4097, 10,000 and 20,000; a real log of each op is in hw/card_stress_fixtures - `rnd-*.txt`, at 10,000 (three batches at
+with the tools as built at f707fa3b on the software backend (counts 1, 4095, 4096, 4097, 10,000 and 20,000; a real log of each op, scaleB's two (`chunk-scaleb32-c16384.txt` and `chunk-scaleb64-c16384.txt`, at 100,000) included, is in hw/card_stress_fixtures - `rnd-*.txt`, at 10,000 (three batches at
 4096) and the chunked tools' at 20,000, and for `div32` and `conv32to64` the older `soak-div32.txt` and `c5-conv32to64.txt`, at 200,000 - and the
 suite holds the table to them and the stand-in's own table to the same):
 
