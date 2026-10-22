@@ -251,7 +251,7 @@ def validate(obj, cfg: dict | None = None, registry: dict | None = None) -> dict
             bad = TYPES[params[k].rstrip("!")](v)
             if bad:
                 raise Refusal("spec-form", f"field {p}.{k} {bad}")
-        for k, tag in params.items():
+        for k, tag in (params or {}).items():
             if tag.endswith("!") and k not in st:
                 raise Refusal("spec-form", f"field {p}.{k} is missing for step type {st['type']!r}")
         err = getattr(registry, "check_step", lambda step, spec: None)(st, obj)

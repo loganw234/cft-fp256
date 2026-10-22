@@ -1682,7 +1682,7 @@ def steps_jobs():
     nolock = [] if S.HAVE_FLOCK else ["--no-locks"]
     rc1, out1, err1 = cli(r7, "submit", spec_file, runner=None)
     rc2, out2, err2 = cli(r7, "serve", "--drain", *nolock, runner=None)
-    rc3, out3, err3 = cli(r7, "status", out1.split()[-1], runner=None)
+    rc3, out3, err3 = cli(r7, "status", (out1.split() or ["j000000"])[-1], runner=None)
     rc4, out4, err4 = cli(r7, "submit", spec_file, runner="fake")
     check("steps: the command's default runner is the staged one: a dry staged spec is submitted, served (`serve --drain`) and ends done with no --runner, and `status JOB` lists its leg; "
           "with --runner fake the same spec is refused `step-unknown` (the fake runner holds four step types of its own)",
@@ -1714,8 +1714,8 @@ def steps_jobs():
         jid = S.submit(root, cfg, json.dumps(staged(image="quad", steps=[{"type": "dt-i"}, {"type": "dt-q8"}, {"type": "dt-full"}])).encode(), ST.StepRegistry())[0]
         th = threading.Thread(target=lambda: R.serve(root, cfg, SG.StagedRunner(root, cfg), drain=True, poll=0.02, skip_locks=not S.HAVE_FLOCK, out=lambda x: None))
         th.start()
-        wait_for(lambda: os.path.exists(os.path.join(root, "st", "n-dt-q8-any-any")), 60)      # the stand-in counts its invocation, then sleeps its two seconds
-        S.cancel(root, jid, "tester")
+        wait_for(lambda: os.path.exists(os.path.join(root, "st", "n-dt-q8-any-any")), 30)      # the stand-in counts its invocation, then sleeps its two seconds
+        safely(S.cancel, root, jid, "tester")            # a plant may have ended the job already
         th.join(120)
     l5 = legs_of(recs(root, "jobs", jid))
     check("steps: a stop asked while a step runs ends the job at that step's end (never in the middle of one): cancelled, the step passed whole, the later one skipped by name",
