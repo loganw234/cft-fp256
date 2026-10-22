@@ -188,9 +188,12 @@ differ or the stamp is missing or malformed; verify/run.sh's vectors_whole
 asks it, so ensure_vectors regenerates such a directory. A run removes the
 stamp before it writes a set, as it does the record, and writes it just
 before the record, which stays the last file. The record does not list it:
-the record is the sets alone, held line for line to vectors/SHA256SUMS
-(`sed 's#  #  out/#' SHA256SUMS | diff vectors/SHA256SUMS -`), and every
-reader in this tree takes a set by name or by `.jsonl`. What the stamp does not
+the record is the sets alone, held line for line, at the profile's counts
+(`make vectors`), to vectors/SHA256SUMS - from the repository root,
+    sed 's#  #  out/#' vectors/out/SHA256SUMS | diff vectors/SHA256SUMS -
+(CONFORMANCE.md) - and every reader in this tree takes a set by name or by
+`.jsonl`. At the runner's own counts the twenty opcode sets differ, a known
+limit CONFORMANCE.md records. What the stamp does not
 cover: the counts a run was given (KL-198), the interpreter and mpmath
 versions, and the two files the reduction pools read outside the model,
 host/tools/pi_worstcase.py and host/src/mp_2opi.h (model_digest, and so
