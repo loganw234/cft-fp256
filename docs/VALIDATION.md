@@ -5,7 +5,10 @@ which commit, and exactly what it proved. CARDDAY.md promises runs get
 recorded "the way atlas-darkroom records a census" - this file is that
 census. One entry per campaign, newest last, numbers verbatim from the
 run. An entry never edits history; a correction is a new entry naming
-the old one.
+the old one. History is what has been pushed: until then an entry is
+restated in place when a verifier sends its work back, keeping each
+pass's figures beside the new ones, so the ledger does not grow a
+correction entry for every pass (Logan, 2026-10-22).
 
 The standing inventory (what runs continuously or per-commit, as
 opposed to the campaigns below): the golden-model pytest suite and the
