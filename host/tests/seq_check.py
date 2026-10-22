@@ -166,9 +166,15 @@ touches holds an augadd, and on such a quad R24's regions and R23's block,
 which it carries, would otherwise go uncompared behind refusals that have
 nothing to do with them; the revision-8 corpus still holds those refusals
 by name. The draw stays deterministic: each corpus's generator is seeded
-from --seed and the format as always, and whether the arm is drawn is a
-function of the device's feature word alone, so one seed and one word give
-one corpus. Formats the device does not carry are not compared, by name.
+from --seed and the format as always, whether the arm is drawn is a
+function of the device's feature word alone, and the scratch depth moves
+the programs of every corpus whose generator draws scratch instructions
+(`scratch=True`: the third to the seventh), because `seq.random_program`
+names the depth's last slot among the slots it draws. So one seed, one
+feature word and one scratch depth give one corpus at a format and a trial
+count; the same seed and word at another depth give another (the first two
+corpora take no depth and do not move). Formats the device does not carry
+are not compared, by name.
 The remote legs' fake servers are the library's own and run as always.
 """
 
