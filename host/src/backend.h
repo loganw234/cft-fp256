@@ -20,6 +20,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "../include/cft_config.h"   /* CFT_ERRMSG_MAX, CFT_NO_REMOTE */
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -477,7 +479,17 @@ void cft_sw_seq_caps(cft_seq_caps *out);
  *                            (`needs`, named as its CFT_ opcode) that
  *                            this device lacks at `fmt` */
 void cft_set_error(const char *fmt, ...);
+/* Where no slot can hold a sentence - CFT_ERRMSG_MAX 1, no remote backend,
+ * no XRT: CFT_TINY's profile - there is nothing to empty, and a call here
+ * at the top of every entry point would cost a tail call and about 700
+ * bytes of an 8-bit part's flash (measured on i386). It is then nothing;
+ * device.c does not define the function (CFT_CLEAR_ERROR_IS_NOP). */
+#if CFT_ERRMSG_MAX <= 1 && defined(CFT_NO_REMOTE) && !defined(CFT_ENABLE_XRT)
+#  define CFT_CLEAR_ERROR_IS_NOP 1
+#  define cft_clear_error() ((void)0)
+#else
 void cft_clear_error(void);
+#endif
 int  cft_seq_cap_refusal(const char *field, unsigned long asked,
                          unsigned long cap, const char *units,
                          const char *caps_field);

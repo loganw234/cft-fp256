@@ -1027,6 +1027,9 @@ int cft_backend_program_run(struct cft_device *dev, int fmt,
                     continue;
                 tmp[r] = (uint8_t *)malloc(n * resz);
                 if (!tmp[r]) {
+                    CFT_SAY("cft_program_run_ex: out of memory gathering "
+                            "stream %c (%llu elements) for a remote device",
+                            'a' + r, (unsigned long long)n);
                     while (r-- > 0) free(tmp[r]);
                     return CFT_ERR_OUT_OF_MEMORY;
                 }
@@ -1043,6 +1046,9 @@ int cft_backend_program_run(struct cft_device *dev, int fmt,
                 tmp[3] = (uint8_t *)malloc(entries * resz);
                 if (!tmp[3]) {
                     free(tmp[2]); free(tmp[1]); free(tmp[0]);
+                    CFT_SAY("cft_program_run_ex: out of memory gathering the "
+                            "scratch-in block (%llu entries) for a remote "
+                            "device", (unsigned long long)entries);
                     return CFT_ERR_OUT_OF_MEMORY;
                 }
                 idx_gather(tmp[3], (const uint8_t *)io->scratch_in,
@@ -1071,6 +1077,8 @@ int cft_backend_program_run(struct cft_device *dev, int fmt,
     (void)io;
     (void)a; (void)b; (void)c; (void)deposits; (void)counts; (void)n;
     (void)flags; (void)bus;
+    CFT_SAY("cft_program_run_ex: this handle has no device backend to run "
+            "a program on - a defect in libcft, not in the call");
     return CFT_ERR_INTERNAL;
 }
 /* ==== end of the remote block ======================================= */
@@ -1161,7 +1169,9 @@ void cft_set_error(const char *fmt, ...)
 }
 
 /* backend.h says who calls it. It empties ALL the slots cft_last_error()
- * reads, not only this one, in every build and at every CFT_ERRMSG_MAX. */
+ * reads, not only this one; it is nothing where no slot can hold a
+ * sentence (backend.h, CFT_CLEAR_ERROR_IS_NOP). */
+#ifndef CFT_CLEAR_ERROR_IS_NOP
 void cft_clear_error(void)
 {
     g_msg[0] = '\0';
@@ -1172,6 +1182,7 @@ void cft_clear_error(void)
     cftx_clear_error();
 #endif
 }
+#endif
 
 #if defined(CFT_ENABLE_XRT) || !defined(CFT_NO_REMOTE)
 /* Called immediately before handing anything to a device backend (a build
