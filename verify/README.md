@@ -50,7 +50,7 @@ command in the `cft2204` distro.
 | buildargs | `hw/rebuild-2022.sh` hands v++ the clock constraint with VPP_PROPS set, CFT_GENERICS reaches vivado and the manifest, a lying wrapper read-back stops the build before v++ - each with its negative control (`hw/test-rebuild-argv.sh`, stub v++ and vivado) | bash; skipped by name where Vitis 2022.2 is installed under /data/Xilinx, /opt/Xilinx or /tools/Xilinx |
 | sweepjudge | `hw/sweep_freq.sh` judges a sweep point by the kernel clock's own WNS, never the shell's, and a staged image is not a closed one - thirteen verdicts on synthetic builds, both defects put back as negative controls (`hw/test-sweep-judge.sh`) | bash |
 | innerskips | the runner counts and names the checks skipped inside a passing stage, held to synthetic stages, each with its negative control; the mpfr stage's naming of the MPFR it built against; and CI's host job list held to the runner's stage names (`verify/test-inner-skips.sh`) | bash |
-| ensurevectors | the runner's ensure_vectors replays vectors/out only when its record is whole and held, otherwise regenerates it and says why, held to planted directories (`verify/test-ensure-vectors.sh`) | python with mpmath |
+| ensurevectors | the runner's ensure_vectors replays vectors/out only when its record is whole and held and the generator's model stamp is this tree's, otherwise regenerates it and says why, held to planted directories, among them a whole directory an older model made (`verify/test-ensure-vectors.sh`) | python with mpmath |
 | golden | the model's own invariants and oracles | python with pytest |
 | vectors | the conformance sets regenerate from the model, and the generation's own `SHA256SUMS` names every set the profile does, each whole (below, "When vectors/out is whole") | python with mpmath |
 | sim | RTL == model across all cocotb targets | docker (usable, not merely present) |
@@ -173,12 +173,20 @@ writes a set, and after the last one writes a new one: every set it
 wrote or served from `--cache`, `<sha256>  <set>`, sorted. So a run that
 stopped part way leaves no record, whatever it overwrote. Before any of
 the five replays, and after the `vectors` stage's own generation, the
-runner asks three things:
+runner asks four things:
 - is there a record;
 - does it name every set `vectors/SHA256SUMS`, the profile's record,
   names;
 - does `sha256sum -c` hold it (`shasum -c` where there is no
-  `sha256sum`).
+  `sha256sum`);
+- since 2026-10-22 (KL-196), was the directory made by this tree's
+  model: `vectors/out/MODEL`, which the generator writes just before the
+  record and removes with it, holds `model_digest()` as it stood when
+  the run began (one digest over `python/cft_golden/*.py` and
+  `vectors/gen_vectors.py`, the one `--cache` keys on), and
+  `gen_vectors.py --check-model vectors/out` says whether that is the
+  working tree's. A record says the sets are what a finished run wrote,
+  not which model wrote them.
 Anything else is regenerated with the `vectors` stage's arguments
 (`VECTOR_ARGS`). A stage whose directory cannot be made whole fails,
 saying why by name: the generator's exit, or the check that still does
@@ -199,12 +207,23 @@ What the check does and does not compare:
   Where the generator cannot run (no mpmath), a stage that meets such
   a set, which it replayed before, fails by name until the set is
   regenerated where it can.
-- Still not checked: that a whole set came from TODAY's model. An
-  --only run replays a whole set from an older model as it finds it,
-  and so does `make verify-quick`: its budget holds `remote` and not
-  `vectors`, and the WebSocket leg replays the directory it finds. So a
-  model change the library lacks can pass there. The gate and full
-  budgets regenerate before they replay.
+- It compares the model's source, not what the model makes. Any edit to
+  a file in `python/cft_golden/` (not its `lang/` package, which the
+  generator does not import) or to `vectors/gen_vectors.py` changes the
+  digest, a comment included, so the next replaying stage regenerates,
+  about the `vectors` stage's time. Until 2026-10-22 (KL-196) a whole
+  set from an older model was replayed as it was found, by an --only run
+  and by `make verify-quick` (its budget holds `remote` and not
+  `vectors`, and the WebSocket leg replays the directory it finds), so
+  a model change the library lacks could pass there; now it regenerates
+  from the model and fails there. A `vectors/out` that predates the stamp
+  has none, and is regenerated once, like the record-less one above.
+- Still not in the stamp: the counts a run was given (above), the
+  interpreter's and mpmath's versions, and the two files the reduction
+  pools read outside the model, `host/tools/pi_worstcase.py` and
+  `host/src/mp_2opi.h` (`model_digest()`, and so `--cache`, stops at
+  the same edge). Nor does it hold a stamp against forgery: `MODEL` is
+  a file, like the record.
 - Outside the runner nothing checks: a hand-run `make -C host test` or
   `cpptest`, `cft-selftest` on the card, `host/tools/serial_replay.py`,
   or `hw/sweep_freq.sh --card` (which still takes a non-empty
@@ -220,14 +239,21 @@ of its own:
 - the generator's record, after a finished run, a `--cache` run, and a
   crash over a whole set (mpmath shadowed, as 2026-09-28's PATH slip hid
   it);
-- `ensure_vectors` in nine cases: no directory, the crash's leftovers, a
+- the model stamp: one line of 64 hex digits that `--check-model`
+  accepts, the same bytes after a `--cache` run, and gone after a crash;
+- `ensure_vectors` in twelve cases: no directory, the crash's leftovers, a
   set cut at a line boundary, a set deleted, a finished narrower
   generation, a whole set with its record in each of sha256sum's two
-  line forms, and the crash's leftovers again with a generator that
-  fails and with one that exits 0 without writing a record;
-- four negative controls: the old non-empty test, the digest check
+  line forms, a whole set that an older model made (a real generation by
+  a copy of the generator whose seed differs, so that every test above
+  accepts it and its sets are not today's), a whole set whose stamp is
+  missing and one whose stamp is not a digest, and the crash's leftovers
+  again with a generator that fails and with one that exits 0 without
+  writing a record;
+- seven negative controls: the old non-empty test, the digest check
   skipped, the profile's names not compared, the generator's first
-  removal dropped. Each must be caught.
+  removal dropped, the model not compared, the stamp not written, the
+  stamp left standing by the first removal. Each must be caught.
 
 ## Resume semantics
 

@@ -3169,6 +3169,12 @@ case it holds:
 1. every file against its SHA-256, and no file under `certificates/` that
    the manifest does not name, so an edited or added file fails by its
    name;
+1b. every committed certificate's `build-id` (KL-355, 2026-10-22): one
+   cft-segrun wrote names a clean build (`commit=<hex> tracked=clean
+   untracked=none`), any other says `unknown` or names one, and every
+   commit named is one this repository has (`git cat-file`). Where the
+   clone cannot say (shallow, no git) that leg is a SKIP by name, and CI's
+   `host` job checks out the whole history for it;
 2. every image against its source, assembled again;
 3. the golden writer making the committed bytes again, byte for byte:
    - `run_chain` and `certify_run` at the case's depth;
@@ -3198,7 +3204,7 @@ case it holds:
    its seed printed;
 7. the case named `example` being this page's example certificate.
 
-For a version-2 case it holds 1 and 2 as above, and then:
+For a version-2 case it holds 1, 1b and 2 as above, and then:
 3. the golden writer making the committed bytes again: cert2's
    `run_chain` with each block, every marked lane replayed by the
    source's definition, and `certify_run`; each accuracy value derived
@@ -3255,7 +3261,9 @@ change is meant, its commit runs `corpus.py make` with a clean build of
 cft-segrun, and says so. `make` keeps a case's committed certificate,
 byte for byte, where the one it makes equals it but for `build-id` and
 the hash line, and every boundary file has the committed manifest's
-digest. So a case's bytes, and the commit its `build-id` names, move
+digest, and its own `build-id` passes 1b above (a committed one that does
+not is written over by the one made now, saying why; KL-355, 2026-10-22).
+So a case's bytes, and the commit its `build-id` names, move
 only when what it certifies does (the fixes round, 2026-09-30). `make
 --rewrite-all` writes every certificate the tool makes. `make
 --keep-version-1` keeps every version-1 case as committed, its files
