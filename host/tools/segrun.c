@@ -1524,7 +1524,8 @@ static const char *const ENV_NAMES[] = {
     "CFT_TIMEOUT_MS", "CFT_TRANSCEND_MINPREC", "CFT_XRT_BIND",
     "CFT_XRT_CAPS", "CFT_XRT_MASK_ADDR_OVERRIDE", "CFT_XRT_PROGRAM_CUTS",
     "CFT_XRT_REDUCE_BC", "CFT_XRT_TILES", "CFT_XRT_TILE_ORDER",
-    "CFT_XRT_TRACE", "CFT_XRT_WITNESS", "XCL_EMULATION_MODE" };
+    "CFT_XRT_TRACE", "CFT_XRT_UPLOAD", "CFT_XRT_WITNESS",
+    "XCL_EMULATION_MODE" };
 #define N_ENV_NAMES (sizeof ENV_NAMES / sizeof ENV_NAMES[0])
 
 /* ---- the hashes: cert_write.h's, refused by the name each returns ---- */
@@ -2467,7 +2468,7 @@ static void write_side(size_t r, uint64_t k, const char *tail,
  * that can replay; the source lines, under 1 KiB beside each param's,
  * whose literal is at most a bigint's decimal; the header's lines past
  * version 1's - the texts at 255 characters, sixteen generator arguments,
- * the environment's fifteen variables - under 16 KiB. */
+ * the environment's sixteen variables - under 16 KiB. */
 #define SEGMENT_LANES_TEXT 72
 #define REPLAY_TEXT        200
 #define SOURCE_TEXT        1024

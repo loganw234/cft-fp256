@@ -4040,8 +4040,9 @@ checked. Every provenance line but four is REPORTED:
 cft-segrun read: `CFT_DIVSQRT_FULL`, `CFT_DIVSQRT_SEQ`, `CFT_SEGRUN_PLANT`,
 `CFT_TIMEOUT_MS`, `CFT_TRANSCEND_MINPREC`, `CFT_XRT_BIND`, `CFT_XRT_CAPS`,
 `CFT_XRT_MASK_ADDR_OVERRIDE`, `CFT_XRT_PROGRAM_CUTS`, `CFT_XRT_REDUCE_BC`,
-`CFT_XRT_TILES`, `CFT_XRT_TILE_ORDER`, `CFT_XRT_TRACE`, `CFT_XRT_WITNESS`
-and `XCL_EMULATION_MODE`. A writer writes those that are set, by name, and
+`CFT_XRT_TILES`, `CFT_XRT_TILE_ORDER`, `CFT_XRT_TRACE`, `CFT_XRT_UPLOAD`,
+`CFT_XRT_WITNESS` and `XCL_EMULATION_MODE`. A writer writes those that are
+set, by name, and
 none carries a path. The reader holds `env` to the list: a name off it
 is refused `malformed`, so a certificate carries no variable but those -
 not a home directory, a user name or a path - and a variable joins the
