@@ -159,6 +159,18 @@ class StagedRunner:
             self._leg_skipped(log, S, ctx, i, st, self.entries[st["type"]], reason)
 
     def _step(self, log, S, ctx, jobdir, i, st, e, rcfg):
+        """One step. A step that wants a scratch directory (TMPDIR) has one made for it and removed AFTER its record is made: a failing
+        gate keeps its logs in a directory under it, and they are moved out (into the job's directory) before the scratch is removed."""
+        tmp = os.path.join(jobdir, f".tmp-{i:02d}") if e.tmpdir else None
+        if tmp:
+            os.makedirs(tmp)
+        try:
+            self._step_in(log, S, ctx, jobdir, i, st, e, rcfg, tmp)
+        finally:
+            if tmp:
+                CODE.remove_tree(tmp)
+
+    def _step_in(self, log, S, ctx, jobdir, i, st, e, rcfg, tmp):
         dry = ctx.dry
         wrapped = bool(dry and e.standin_leg)
         label = st["type"] + ("-" + st["item"] if st["type"] == "soak" else "")
@@ -174,15 +186,9 @@ class StagedRunner:
                     env["CFT_XRT_TILES"] = str(st["tile"])
             else:
                 drop = CS.HOST_JOB_DROPS                      # a host job must not be able to name the card
-        tmp = None
-        if e.tmpdir:
-            tmp = env["TMPDIR"] = os.path.join(jobdir, f".tmp-{i:02d}")
-            os.makedirs(tmp)
-        try:
-            run = run_step(argv, ctx.clone, env, logpath, ST.timeout_of(e, ctx, st), rcfg["kill_after_s"], rcfg["nice"], drop=drop)
-        finally:
-            if tmp:
-                CODE.remove_tree(tmp)
+        if tmp:
+            env["TMPDIR"] = tmp
+        run = run_step(argv, ctx.clone, env, logpath, ST.timeout_of(e, ctx, st), rcfg["kill_after_s"], rcfg["nice"], drop=drop)
         try:
             with open(logpath, encoding="utf-8", errors="replace") as fh:
                 text = fh.read()

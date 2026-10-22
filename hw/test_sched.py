@@ -897,6 +897,7 @@ def fixture():
     git_t(None, "clone", "-q", rem, work)
     c3 = commit_all(work, {"hw/x.py": "MARK one\nMARK two\nNEW_TAG\nUNPUSHED\n"}, "c3")
     git_t(work, "bundle", "create", os.path.join(base, "bundles", "u.bundle"), "main")
+    open(os.path.join(base, "bundles", "bad.bundle"), "w").write("this is not a bundle\n")
     FIX.update(base=base, remote=rem, work=work, bundles=os.path.join(base, "bundles"), c1=c1, c2=c2, c3=c3, t1=t1, t2=t2,
                image=write_image(os.path.join(base, "images")))
     return FIX
@@ -982,13 +983,15 @@ def group_code():
     why = refusal_of(rs)
     left = [n for n in os.listdir(os.path.join(root, "clones"))]
     gone = refusal_of(job(root, cfg, code_of(source="bundle:nope.bundle"))[2])
+    unreadable = refusal_of(job(root, cfg, code_of(source="bundle:bad.bundle"))[2])
     r2, c2 = mkroot2("c-nosrc", code={"bundle_dir": None, "remote": None})
     nb, nr = refusal_of(job(r2, c2, code_of())[2]), refusal_of(job(r2, c2, code_of(source="remote"))[2])
     check("code: a full commit the bundle does not hold is refused `commit-missing`, naming it, and leaves no clone and no half-made one behind",
           why.startswith("commit-missing:") and "f" * 40 in why and end.get("outcome") == "refused" and left == [], f"{why!r} {left}")
-    check("code: a bundle that is not in code.bundle_dir, and a source nobody configured (no bundle_dir, no remote), are `commit-missing` too, each saying what is not there",
+    check("code: a bundle that is not in code.bundle_dir, one that git cannot read, and a source nobody configured (no bundle_dir, no remote), are `commit-missing` too, each saying what is not there",
           gone.startswith("commit-missing:") and "nope.bundle" in gone and nb.startswith("commit-missing:") and "bundle_dir" in nb
-          and nr.startswith("commit-missing:") and "code.remote" in nr, f"{gone!r} {nb!r} {nr!r}")
+          and nr.startswith("commit-missing:") and "code.remote" in nr and unreadable.startswith("commit-missing:") and "could not clone" in unreadable
+          and not [n for n in os.listdir(os.path.join(root, "clones")) if n.startswith(".")], f"{gone!r} {nb!r} {nr!r} {unreadable!r}")
     root, cfg = mkroot2("c-unpushed")
     j, end, rs = job(root, cfg, code_of(commit=fx["c3"]))
     ju, endu, rsu = job(root, cfg, code_of(commit=fx["c3"], allow_unpushed=True))
@@ -1079,6 +1082,8 @@ FAKE_TREE = {
     **{f"host/fake/{n}.sh": "#!/bin/sh\nexit 0\n" for n in ("device-test", "remote-test", "divsqrt-soak", "clause5-soak", "cft-audit", "cft-resident", "cft-selftest")},
     "Makefile": ".PHONY: vectors\nvectors:\n\t@mkdir -p vectors/out && if [ -n \"$$FAKE_VEC_FAIL\" ]; then exit 2; elif [ -n \"$$FAKE_VEC_BAD\" ]; then echo bad > vectors/out/a.txt; else echo ok > vectors/out/a.txt; fi\n",
     "vectors/SHA256SUMS": hashlib.sha256(b"ok\n").hexdigest() + "  out/a.txt\n",
+    "hw/card-segrun.sh": "#!/bin/sh\nd=$(mktemp -d \"${TMPDIR:-/tmp}/card-segrun.XXXXXX\")\necho kept > \"$d/gate1.log\"\n"
+        "echo '  FAIL  the gate on this card exited 1'; echo '== card-segrun: 6 checks, 1 failed'; echo \"   logs kept in $d\"; exit 1\n",
     "hw/test-card-stress.sh": "#!/bin/sh\ncase \"$FAKE_DRY\" in\n"
         "  flakes) echo '  FAIL  telemetry hang: x  detail'; echo '  FAIL  stopfile: y  detail'; echo 'card-stress test: 600 checks, 2 failed, 0 skipped, 5 s'; exit 1;;\n"
         "  real) echo '  FAIL  something real  detail'; echo 'card-stress test: 600 checks, 1 failed, 0 skipped, 5 s'; exit 1;;\n"
@@ -1190,6 +1195,13 @@ def group_build():
     check("build: cft-selftest not linked is not the job's failure: as the driver has it, the `selftest` step is SKIPPED by name with the reason, the build record says it, and the others run",
           jo[1].get("outcome") == "done" and bo.get("disabled", {}).get("selftest", "").startswith("cft-selftest does not link XRT") and [x["status"] for x in lo] == ["skipped", "pass"]
           and "does not link XRT" in (lo[0]["reason"] or ""), f"{jo[1].get('outcome')} {refusal_of(jo[2])!r} {bo.get('disabled')} {[x['status'] for x in lo]}")
+    with no_users(), env(PATH=ok_path, FAKE_SKIP="cft-resident"):
+        r2, c2 = mkroot2("b-notbuilt")
+        jr = job(r2, c2, real(image="quad", steps=[{"type": "resident"}, {"type": "api-test"}]))
+    lr = legs_of(jr[2])
+    check("build: an optional tool that make did not make (cft-resident) skips ITS step by name with the reason, as the driver has it, and the job's other steps run",
+          jr[1].get("outcome") == "done" and [x["status"] for x in lr] == ["skipped", "pass"] and "cft-resident was not built" in ((lr or [{}])[0].get("reason") or ""),
+          f"{jr[1].get('outcome')} {refusal_of(jr[2])!r} {[x['status'] for x in lr]}")
     with no_users(), env(PATH=ok_path):
         r2, c2 = mkroot2("b-id1")
         with env(BIN_ID="commit=" + "d" * 40 + " tracked=clean untracked=none"):
@@ -1224,6 +1236,10 @@ def group_images():
     got = safely(IM.check_image, entry, card)
     check("images: an image whose file, registry, SHA256SUMS and manifest agree passes, with its tile count (the manifest's clock_cus) and its platform",
           isinstance(got, dict) and got["tiles"] == 4 and got["platform"] == PLAT and got["sha256"] == entry["sha256"] and got["witnesses"] == ["file", "registry", "SHA256SUMS", "manifest"], str(got))
+    with env(SCHED_TEST_IMGDIR=d):
+        viaenv = safely(IM.check_image, dict(entry, path="$SCHED_TEST_IMGDIR/cft_hw_quad.xclbin"), card)
+    check("images: a registry path may carry an environment variable ($HOME, as the driver's defaults do), which is expanded when the job runs",
+          isinstance(viaenv, dict) and os.path.normpath(viaenv["path"]) == os.path.normpath(entry["path"]) and viaenv["sha256"] == entry["sha256"], str(viaenv))
     one = lambda name, e=None, c=None: verdict(lambda: IM.check_image(e or entry, c or card)) or ""
     other = "1" * 64
     check("images: a registry whose SHA-256 is not the file's is refused `image-digest`, naming both",
@@ -1676,6 +1692,12 @@ def steps_jobs():
     l1 = legs_of(r1[3])
     check("steps: a failing step (the stand-in's own failure verdict) fails the job and the steps after it are recorded `skipped` with the reason, not run",
           r1[2].get("outcome") == "failed" and [x["status"] for x in l1] == ["pass", "fail", "skipped", "skipped"] and l1[2]["reason"] == "an earlier step failed" and r1[2].get("steps_ran") == 2, str([x["status"] for x in l1]))
+    rw = run_dry("s-wrongsha", [{"type": "dt-i"}], [{"leg": "dt-i", "nth": [1], "do": "wrongsha"}])
+    rt = run_dry("s-wrongtiles", [{"type": "dt-i"}], [{"leg": "dt-i", "nth": [1], "do": "wrongtiles"}])
+    lw, ltl = legs_of(rw[3]), legs_of(rt[3])
+    check("steps: dt-i holds the identity device-test prints to the image the job names, as the driver's own leg does: another SHA-256 or another tile count (the stand-in's wrongsha and wrongtiles) is a `fail` saying which",
+          [x["status"] for x in lw] == ["fail"] and "read the image as sha256" in (lw[0]["reason"] or "") and [x["status"] for x in ltl] == ["fail"] and "tiles" in (ltl[0]["reason"] or "")
+          and rw[2].get("outcome") == "failed", f"{[(x['status'], x['reason']) for x in lw]} {[(x['status'], x['reason']) for x in ltl]}")
     r2 = run_dry("s-garbage", [{"type": "api-test"}], [{"leg": "api-test", "nth": [1], "do": "garbage"}])
     l2 = legs_of(r2[3])
     check("steps: a tool whose output moved (the stand-in's garbage: exit 0 and no verdict line) is `parse_error`, never a pass, and the job fails",
@@ -1764,6 +1786,14 @@ def steps_real_tools():
         check("steps: the driver's own dry-run console, offered by a job that is not dry, is refused `dry-run-as-card` too (the leg is `error`); the same console in a dry job is a pass",
               refusal_of(offered[3]).startswith("dry-run-as-card:") and offered[4][0]["status"] == "error" and offered[2].get("outcome") == "failed" and dry_ok[2].get("outcome") == "done" and dry_ok[4][0]["status"] == "pass",
               f"{refusal_of(offered[3])!r} {[x['status'] for x in offered[4]]} {dry_ok[2].get('outcome')}")
+        seg = one([{"type": "card-segrun"}], image="quad")
+        sd, sl = os.path.join(seg[0], "jobs", seg[1]), (seg[4] or [{}])[0]
+        kept = (sl.get("extra") or {}).get("kept_dir")
+        check("steps: a failing gate's kept logs (card-segrun's `logs kept in DIR`, made under the step's TMPDIR) are moved into the job's directory beside the step's log, and the scratch directory is gone",
+              sl.get("status") == "fail" and bool(kept) and os.path.isfile(os.path.join(sd, kept or "x", "gate1.log")) and not [n for n in os.listdir(sd) if n.startswith(".tmp-")],
+              f"{sl.get('status')} {kept} {sorted(os.listdir(sd))}")
+        check("steps: a card step that ran in a job that is not dry says so: `card_touched` in its leg and in the end record (a dry job's say false)",
+              sl.get("card_touched") is True and seg[2].get("card_touched") is True and sdry[2].get("card_touched") is False, f"{sl.get('card_touched')} {seg[2].get('card_touched')} {sdry[2].get('card_touched')}")
         im = FIX["image"]
         check("steps: `driver-quick` runs hw/card-stress.sh --quick with an out directory in the job's own, the revision-8 cache and the registry's images the driver knows (--image quad=PATH --sha quad=SHA), "
               "and the driver's own --dry-run in a dry job; its verdict is the driver's end line (quick_done, exit 0): a failing smoke or a stopped one is a fail, a log with no end line parse_error",
@@ -2059,6 +2089,12 @@ PLANTS = [  # (what is wrong, edits, the groups written for it, a fragment of th
     ("S2: a host job inherits the card's environment", [E("sched_staged.py", "drop = CS.HOST_JOB_DROPS", "drop = ()")], "steps:jobs", "a host item's step never sees the card", False),
     ("S2: a stop is not looked for between steps", [E("sched_staged.py", "            if not S.skip and stop.requested():", "            if False:")], "steps:jobs",
      "a stop asked while a step runs ends the job at that step's end", False),
+    ("S2: a failing gate's kept logs are lost", [E("sched_staged.py", "            shutil.move(kd, dest)", "            pass")], "steps:real", "a failing gate's kept logs", "posix"),
+    ("S2: a card step that ran is not marked card_touched", [E("sched_staged.py", "card_touched=bool(e.is_card(st) and not dry and run.pid is not None)", "card_touched=False")], "steps:real",
+     "a card step that ran in a job that is not dry says so", "posix"),
+    ("S2: a registry path's environment variable is not expanded", [E("sched_images.py", "    return os.path.expandvars(os.path.expanduser(path))", "    return path")], "images",
+     "a registry path may carry an environment variable", False),
+    ("S2: dt-i's image identity is not held", [E("sched_steps.py", '    if e.get("image_sha256") != im["sha256"]:', "    if False:")], "steps:jobs", "dt-i holds the identity", False),
     ("S2: a window job is run as a staged one", [E("sched_staged.py", '        if spec["kind"] != "staged":', "        if False:")], "steps:refusals", "a job of kind window is refused `window-unsupported`", False),
     ("S2: a timeout is not enforced", [E("sched_proc.py", '        if shutil.which("timeout"):', "        if False:"),
                                    E("sched_proc.py", '        deadline = time.monotonic() + timeout_s + (kill_after_s + 30 if POSIX and shutil.which("timeout") else 0)', "        deadline = time.monotonic() + 10 ** 9")],
