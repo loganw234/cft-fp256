@@ -6409,6 +6409,15 @@ int main(void)
                               (size_t)-1, NULL, NULL),
                    CFT_ERR_INVALID_ARGUMENT, LE_OWN,
                    "more bytes than a size_t");
+            LE_LEG(le_plant_lib, "cft_reduce_seg, a NULL device",
+                   cft_reduce_seg(NULL, CFT_SUM, CFT_FP64, CFT_RNE, xa, NULL,
+                                  xd, 4, 2, NULL, NULL),
+                   CFT_ERR_INVALID_ARGUMENT, LE_OWN,
+                   "cft_reduce_seg: dev is NULL");
+            LE_LEG(le_plant_lib, "cft_reduce_seg, an attribute out of range",
+                   cft_reduce_seg(dev, CFT_SUM, CFT_FP64, (cft_round)7, xa,
+                                  NULL, xd, 4, 2, NULL, NULL),
+                   CFT_ERR_INVALID_ARGUMENT, LE_OWN, "rounding attribute 7");
             LE_LEG(le_plant_lib, "cft_reduce_seg, a format out of range",
                    cft_reduce_seg(dev, CFT_SUM, (cft_format)9, CFT_RNE, xa,
                                   NULL, xd, 4, 2, NULL, NULL),
