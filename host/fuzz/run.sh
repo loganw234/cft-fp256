@@ -27,11 +27,20 @@ TARGETS=${*:-"program serve client"}
 # size instead, and the fuzzer spends its budget re-finding a policy
 # rather than a fault.
 #
+# max_allocation_size_mb=4096 for the same reason at the other end:
+# ASan refuses an allocation over 1 TiB at once, but takes anything
+# below it and spends about 0.1 s a GiB on it (its shadow, an eighth
+# of the size), more memory than the machine has at 1000 GiB. A
+# BUF_ALLOC of that size (crashes/serve/hang-0000000000000dcb) stalled
+# fuzz-serve past the engine's ten seconds, which a native build does
+# not. Refused over 4 GiB as it is over 1 TiB, the request costs the
+# fuzzer nothing (docs/VALIDATION.md, 2026-10-22).
+#
 # detect_leaks=0 because the engine's corpus is deliberately never
 # freed and LeakSanitizer at exit would report the fuzzer, not the
 # target. leaks.sh replays the seed corpus with detection ON, which is
 # where a leak in the target actually shows up.
-ASAN_OPTIONS="abort_on_error=1:detect_leaks=0:allocator_may_return_null=1"
+ASAN_OPTIONS="abort_on_error=1:detect_leaks=0:allocator_may_return_null=1:max_allocation_size_mb=4096"
 UBSAN_OPTIONS="print_stacktrace=1:halt_on_error=1"
 export ASAN_OPTIONS UBSAN_OPTIONS
 

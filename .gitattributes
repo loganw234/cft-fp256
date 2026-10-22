@@ -45,3 +45,10 @@ certificates/*.salt binary
 certificates/**/*.flags binary
 certificates/**/*.sig -text
 certificates/**/keyring -text
+# The reproducers an in-process fuzz harness replays (host/fuzz/crashes/
+# program, serve and client, host/fuzz/repro.sh) are raw bytes, which can
+# hold 0d 0a and no zero byte: said so here rather than left to git's
+# sniffing, which would normalise such an input into another one.
+host/fuzz/crashes/program/* binary
+host/fuzz/crashes/serve/* binary
+host/fuzz/crashes/client/* binary

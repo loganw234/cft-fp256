@@ -21,7 +21,12 @@
 #                              is REFUSE
 set -u
 
-ASAN_OPTIONS="abort_on_error=0:detect_leaks=0:allocator_may_return_null=1"
+# The options of run.sh, whose comment says why of each (the allocation
+# cap is what crashes/serve/hang-0000000000000dcb is held by), and each
+# replay below is bounded by timeout: a replay that stalls is a failure
+# of this gate and not something for it to wait out. That input had not
+# finished after 150 s under ASan without the cap.
+ASAN_OPTIONS="abort_on_error=0:detect_leaks=0:allocator_may_return_null=1:max_allocation_size_mb=4096"
 UBSAN_OPTIONS="print_stacktrace=1:halt_on_error=1"
 export ASAN_OPTIONS UBSAN_OPTIONS
 
@@ -42,11 +47,11 @@ for t in program serve client; do
     fi
     for f in $files; do
         n=$((n + 1))
-        if "$bin" --run "$f" > /dev/null 2>&1; then
+        if timeout -k 2 20 "$bin" --run "$f" > /dev/null 2>&1; then
             echo "  ok    $f"
         else
             echo "  CRASH $f"
-            "$bin" --run "$f" 2>&1 | tail -20
+            timeout -k 2 20 "$bin" --run "$f" 2>&1 | tail -20
             rc=1
         fi
     done
