@@ -1,15 +1,25 @@
 #!/usr/bin/env python3
 # Copyright 2026 Logan W.
 # SPDX-License-Identifier: Apache-2.0
-"""The card scheduler's tests (parcel S1): no card, no XRT, no amd-arc-box, no driver, no network.
+"""The card scheduler's tests (parcels S1 and S2): no card, no XRT, no amd-arc-box, no network.
 
     python3 hw/test_sched.py [--only NAME,...] [--no-plants] [--plant TEXT]        (bash hw/test-sched.sh)
 
-Groups: spec (the job spec's table and refusals), queue (ids, atomic submit, order, claim, cancel, hold, deadlines),
+Groups of S1: spec (the job spec's table and refusals), queue (ids, atomic submit, order, claim, cancel, hold, deadlines),
 records (job.jsonl, the outcomes, the sums, restart), cli (the state root, the configuration, every verb), locks (the
-service's lock and the card's, with real processes), table (one check, that every refusal the table gives to S1 was raised by a
-scenario of the groups before it, so it needs them in the same run), then plants. `locks` needs flock(2): where there is none
-(Windows) its checks are skipped by name, and the one check of the path without flock runs instead.
+service's lock and the card's, with real processes), table (the checks that every refusal the table gives to S1, and to S2, was raised
+by a scenario and left its record where its row says; each needs the groups of its parcel in the same run), then plants.
+`locks` needs flock(2): where there is none (Windows) its checks are skipped by name, and the one check of the path without flock runs instead.
+
+Groups of S2, the staged runner (hw/sched/sched_staged.py), run against the DRIVER's own stand-in and parsers, a scratch repository
+for the remote and for the bundle, and a fake host tree (a Makefile that makes shell-script tools) for the build: code (the clone and its
+assertions), build (make, ldd, the build id, `clone-built`; POSIX), images (the registry against the files), guard (the driver's
+own find_card_users behind the card's lock, on synthetic tables and, on /proc, on real processes), steps (the registry of step types,
+the parsers, run_step, dry jobs through the whole runner, the real-tool steps, the refusals; `--only steps:PART` runs one of its parts:
+registry parsers run_step jobs real refusals). Windows skips by name what needs make, sh, nice, timeout or /proc. A run that starts the
+driver's stand-in or the guard's real-process scenario collides with another suite doing the same on the machine (the driver's guard
+sees every process): run one at a time. SCHED_TEST_MANIFESTS may name a directory of the three real cft_hw_*.manifest.txt files, which one
+check of `images` reads (skipped by name otherwise).
 
 A plant puts one defect back into a COPY of the code (and of this file), runs the groups written for it from the copy as a
 process, and requires three things: the copy is whole (it imports, and its run makes exactly as many checks as the unmodified
@@ -35,14 +45,23 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.environ.get("SCHED_TEST_ROOT") or os.path.dirname(HERE)       # a plant's copy reads the real tree's docs, not its own parent
 SCHED = os.path.join(HERE, "sched")
 sys.path.insert(0, SCHED)
+import sched_build as BD      # noqa: E402
+import sched_code as CODE     # noqa: E402
 import sched_config as C     # noqa: E402
+import sched_driver as DR     # noqa: E402
+import sched_guard as GD      # noqa: E402
+import sched_images as IM     # noqa: E402
 import sched_names as N      # noqa: E402
+import sched_proc as PR       # noqa: E402
 import sched_run as R        # noqa: E402
 import sched_spec as P       # noqa: E402
+import sched_staged as SG     # noqa: E402
 import sched_state as S      # noqa: E402
+import sched_steps as ST      # noqa: E402
 
 CHECKS, FAILS, SKIPS = 0, [], []
 TMP = ""
+ONLY = None                    # the groups --only names, for a group that has parts
 ROOTS: list = []               # every root a scenario made, read at the end for the refusals each one left
 SEEN: set = set()              # refusal names the command printed
 DEL = object()
@@ -129,10 +148,11 @@ def verdict(fn):
         return f"{r.name}: {r.why}"
 
 
-def cli(root, *args, stdin=None, env=None):
+def cli(root, *args, stdin=None, env=None, runner="fake"):
+    """The command as a process. S1's groups ask for --runner fake (the step types they submit are the fake runner's); runner=None leaves the default."""
     e = {k: v for k, v in os.environ.items() if k != C.ENV_ROOT}
     e.update(env or {})
-    p = subprocess.run([sys.executable, "-B", "-I", os.path.join(SCHED, "cft_sched.py")] + (["--root", root] if root else []) + list(args),
+    p = subprocess.run([sys.executable, "-B", "-I", os.path.join(SCHED, "cft_sched.py")] + (["--root", root] if root else []) + (["--runner", runner] if runner else []) + list(args),
                        input=stdin, capture_output=True, text=True, timeout=120, env=e)
     SEEN.update(re.findall(r"^refused(?: j\d+)?: ([a-z0-9-]+):", p.stderr, re.M))
     return p.returncode, p.stdout, p.stderr
@@ -170,17 +190,20 @@ def group_spec():
           ok["preempt"] == "ok" and ok["priority"] == 50 and ok["card"] == "u50-0")
     check("spec: a window job's default priority is 10, below a staged job's 50 (a staged job outranks the sweep)",
           P.validate(spec(kind="window"), cfg, R.FAKE_REGISTRY)["priority"] == 10 and P.DEFAULT_PRIORITY["staged"] > P.DEFAULT_PRIORITY["window"])
-    full = spec(kind="window", priority=7, preempt="never", image="quad", card="any", signature="x",
+    full = spec(kind="window", priority=7, preempt="never", image="quad", card="any", signature="x", dry_run=True,
+                code={"commit": "a" * 40, "source": "remote", "allow_unpushed": True,
+                      "assert": {"rtl_tree": "b" * 40, "content": [["hw/x.py", "s", 1]], "ancestors": ["c" * 40]}},
                 when={"not_before": 100, "deadline": 200}, steps=[{"type": "sleep", "seconds": 1.5}, {"type": "fail", "reason": "r"},
                                                                    {"type": "find", "count": 2}, {"type": "ignore-stop", "seconds": 0}])
     kids = lambda parent: {p.split(".")[1] for p in P.SPEC_FIELDS if p.startswith(parent + ".")}
     check("spec: every field of the table, set at once (when.window apart, which S3 honours), is accepted: the table and the validator agree",
           verdict(lambda: P.validate(full, cfg, R.FAKE_REGISTRY)) is None and set(full) == {p for p in P.SPEC_FIELDS if "." not in p}
-          and set(full["code"]) == kids("code") and set(full["when"]) == kids("when") - {"window"})
+          and set(full["code"]) == kids("code") and set(full["when"]) == kids("when") - {"window"}
+          and set(full["code"]["assert"]) == {p.split(".")[2] for p in P.SPEC_FIELDS if p.startswith("code.assert.")})
     cases = [
         ("an unknown field", spec(needs=[]), "spec-form", "needs"),
         ("owner (the scheduler fills it, a spec cannot)", spec(owner="x"), "spec-form", "owner"),
-        ("an unknown field inside code", spec(code={"commit": "a" * 40, "source": "remote", "assert": {}}), "spec-form", "code.assert"),
+        ("an unknown field inside code", spec(code={"commit": "a" * 40, "source": "remote", "mirror": "x"}), "spec-form", "code.mirror"),
         ("an unknown field inside when", spec(when={"zone": "x"}), "spec-form", "when.zone"),
         ("an unknown field of a step", spec(steps=[{"type": "sleep", "colour": "red"}]), "spec-form", "steps[0].colour"),
         ("a missing required field", spec(kind=DEL), "spec-form", "kind"),
@@ -594,7 +617,7 @@ def verdict_exc(fn, exc):
 # ---------------------------------------------------------------------------------------- locks (real processes)
 
 def spawn(root, *args):
-    return subprocess.Popen([sys.executable, "-B", "-I", os.path.join(SCHED, "cft_sched.py"), "--root", root, "serve", "--poll", "0.05"] + list(args),
+    return subprocess.Popen([sys.executable, "-B", "-I", os.path.join(SCHED, "cft_sched.py"), "--root", root, "--runner", "fake", "serve", "--poll", "0.05"] + list(args),
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
@@ -813,7 +836,1070 @@ def group_cli():
         skip("cli: `bash hw/sched/cft-sched` runs the command, and --help lists every verb", "needs POSIX bash")
 
 
-def table_checks():
+# ---------------------------------------------------------------------------------------- the runner's fixtures (parcel S2)
+# A scratch repository stands in for the remote and for the bundle, as hw/test_card_stress.py's scn_pool_tree does for the driver:
+# no test of this file touches the network, a card, XRT or amd-arc-box. git is given its identity on the command line, so that
+# nobody's configuration is read for it or changed.
+
+PLAT = "xilinx_u50_gen3x16_xdma_5_202210_1"
+FIX: dict = {}
+GIT_ID = ["-c", "user.name=sched-test", "-c", "user.email=sched-test@example.invalid", "-c", "commit.gpgsign=false"]
+GITIGNORE = ("host/*.o\nhost/*.so\nhost/gen/\nhost/device-test\nhost/api-test\nhost/remote-test\nhost/divsqrt-soak\nhost/clause5-soak\n"
+             "host/cft-segrun\nhost/cft-audit\nhost/cft-resident\nhost/cft-selftest\nvectors/out/\n")
+MANIFEST = ("artifact:      cft_hw.xclbin\nsha256:        {sha}\nbytes:         {n}\nhost:          amd-arc-box\ntarget:        hw\nplatform:      {plat}\n"
+            "kernel_freq:   135000000\ngenerics:      EN_AUGADD=0 SEQ_SCRATCH_D=4096\n  hdlparam:    EN_FP32 = \"1\"\n  hdlparam:    BEAT_BITS = 256\n"
+            "clock_cus:     {cus}\nroute_directive: AggressiveExplore\nrouted_wns_ns: 0.018   # whole design, shell included\n")
+
+
+def git_t(repo, *args):
+    return subprocess.run(["git"] + GIT_ID + (["-C", repo] if repo else []) + list(args), capture_output=True, text=True, timeout=120)
+
+
+def commit_all(repo, files, msg):
+    for rel, text in files.items():
+        p = os.path.join(repo, rel)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "w", newline="") as fh:
+            fh.write(text)
+    git_t(repo, "add", "-A")
+    git_t(repo, "commit", "-q", "-m", msg)
+    return git_t(repo, "rev-parse", "HEAD").stdout.strip()
+
+
+def write_image(d, cus=4, name="cft_hw_quad", sums=True, manifest=True, plat=PLAT):
+    """An image directory as the box has one: the xclbin, its SHA256SUMS and its manifest (hw/rebuild-2022.sh's format). Returns the registry entry."""
+    os.makedirs(d, exist_ok=True)
+    data = b"XCLBIN-TEST " + name.encode() + b"\n" * 3
+    sha = hashlib.sha256(data).hexdigest()
+    open(os.path.join(d, name + ".xclbin"), "wb").write(data)
+    if sums:
+        open(os.path.join(d, "SHA256SUMS"), "w", newline="").write(f"{sha}  {name}.xclbin\n")
+    if manifest:
+        open(os.path.join(d, name + ".manifest.txt"), "w", newline="").write(
+            MANIFEST.format(sha=sha, n=len(data), plat=plat, cus=".".join(f"cft_krnl_{i + 1}" for i in range(cus))))
+    return {"name": "quad", "path": os.path.join(d, name + ".xclbin"), "sha256": sha, "tiles": cus, "platform": plat}
+
+
+def fixture():
+    """Built once: the remote (c1, c2 on main), a clone of it holding one commit more (c3, never pushed) and a bundle of that
+    clone's main made as `git bundle create FILE BRANCH` (no HEAD, the trap the lead's ledger names), the rtl/ tree of c1 and c2,
+    and an image directory."""
+    if FIX:
+        return FIX
+    base = os.path.join(TMP, "fx")
+    rem, work = os.path.join(base, "remote"), os.path.join(base, "work")
+    os.makedirs(os.path.join(base, "bundles"))
+    git_t(None, "init", "-q", "-b", "main", rem)
+    c1 = commit_all(rem, {"rtl/a.sv": "module a;\n", "hw/x.py": "MARK one\nMARK two\n", "host/y.c": "int y;\n", ".gitignore": GITIGNORE, **FAKE_TREE}, "c1")
+    t1 = git_t(rem, "rev-parse", "HEAD:rtl").stdout.strip()
+    c2 = commit_all(rem, {"rtl/a.sv": "module a2;\n", "hw/x.py": "MARK one\nMARK two\nNEW_TAG\n"}, "c2")
+    t2 = git_t(rem, "rev-parse", "HEAD:rtl").stdout.strip()
+    git_t(None, "clone", "-q", rem, work)
+    c3 = commit_all(work, {"hw/x.py": "MARK one\nMARK two\nNEW_TAG\nUNPUSHED\n"}, "c3")
+    git_t(work, "bundle", "create", os.path.join(base, "bundles", "u.bundle"), "main")
+    open(os.path.join(base, "bundles", "bad.bundle"), "w").write("this is not a bundle\n")
+    FIX.update(base=base, remote=rem, work=work, bundles=os.path.join(base, "bundles"), c1=c1, c2=c2, c3=c3, t1=t1, t2=t2,
+               image=write_image(os.path.join(base, "images")))
+    return FIX
+
+
+def mkroot2(name, **over):
+    """A root for the staged runner: the fixture's bundles and remote, the quad image registered, a card with its platform, short waits.
+    `over` replaces a section of config.json."""
+    fx = fixture()
+    raw = {"cards": [{"id": "u50-0", "kind": "xrt", "platform": PLAT}], "images": [fx["image"]], "code": {"bundle_dir": fx["bundles"], "remote": fx["remote"]},
+           "runner": {"kill_after_s": 2, "guard_poll_s": 0.05, "guard_wait_max_s": 1, "build_timeout_s": 120}}
+    raw.update(over)
+    root = os.path.join(TMP, name)
+    os.makedirs(root)
+    with open(os.path.join(root, "config.json"), "w") as fh:
+        json.dump(raw, fh)
+    cfg = C.load_config(root)
+    C.ensure_layout(root, cfg)
+    ROOTS.append(root)
+    return root, cfg
+
+
+def staged(**kw):
+    """A staged spec: a dry job (the stand-in), the fixture's c2 from its bundle, one step. Keyword arguments replace its top-level fields."""
+    s = {"v": 1, "kind": "staged", "name": "t", "card": "u50-0", "dry_run": True, "code": {"commit": fixture()["c2"], "source": "bundle:u.bundle"},
+         "steps": [{"type": "api-test"}]}
+    for k, v in kw.items():
+        s.pop(k, None) if v is DEL else s.__setitem__(k, v)
+    return s
+
+
+def code_of(commit=None, source="bundle:u.bundle", **extra):
+    return staged(code={"commit": commit or fixture()["c2"], "source": source, **extra})
+
+
+def job(root, cfg, s, runner=None):
+    """Submit s against the staged registry and serve it: (id, the end record, every record of the job)."""
+    jid, ref = S.submit(root, cfg, s if isinstance(s, bytes) else json.dumps(s).encode(), (runner.registry if runner else ST.StepRegistry()))
+    if not ref:
+        R.serve(root, cfg, runner or SG.StagedRunner(root, cfg), drain=True, poll=0.02, skip_locks=not S.HAVE_FLOCK, out=lambda x: None)
+    rs = recs(root, "jobs", jid)
+    return jid, (rs[-1] if rs else {}), rs
+
+
+def refusal_of(rs):
+    r = next((x for x in rs if x["type"] == "refused"), None)
+    return f"{r['name']}: {r['why']}" if r else ""
+
+
+def legs_of(rs):
+    return [r for r in rs if r["type"] == "leg"]
+
+
+def prepop(root, sha, at=None):
+    """A clone already in the cache at clones/SHA, checked out at `at` (default SHA): the way a cache gets edited, or left behind."""
+    d = os.path.join(root, "clones", sha)
+    git_t(None, "clone", "-q", "--no-checkout", FIX["work"], d)
+    git_t(d, "checkout", "-q", "--detach", at or sha)
+    return d
+
+
+# ---------------------------------------------------------------------------------------- code
+
+def group_code():
+    fx = fixture()
+    root, cfg = mkroot2("c-main")
+    j, end, rs = job(root, cfg, code_of())
+    cr = next((r for r in rs if r["type"] == "code"), {})
+    check("code: a commit in a bundle (made as `git bundle create FILE BRANCH`, so it has no HEAD) is cloned, checked out detached and asserted: "
+          "HEAD, a clean status, the rtl/ tree, pushed; the job ends done",
+          end.get("outcome") == "done" and cr.get("head") == fx["c2"] and cr.get("status_lines") == 0 and cr.get("rtl_tree") == fx["t2"] and cr.get("pushed") == "pushed"
+          and cr.get("origin") == "bundle" and cr.get("reused") is False and os.path.isdir(os.path.join(root, "clones", fx["c2"], ".git")), str(cr)[:300])
+    j2, end2, rs2 = job(root, cfg, code_of(source="bundle:not-there.bundle"))
+    cr2 = next((r for r in rs2 if r["type"] == "code"), {})
+    check("code: a second job at the same commit finds the clone in the cache and asserts it (reused; its source is not asked for: a bundle that is gone does not matter)",
+          end2.get("outcome") == "done" and cr2.get("reused") is True and cr2.get("head") == fx["c2"], refusal_of(rs2))
+    j3, end3, rs3 = job(root, cfg, code_of(commit=fx["c1"], source="remote"))
+    cr3 = next((r for r in rs3 if r["type"] == "code"), {})
+    check("code: the same from the remote (config.json's code.remote): cloned, asserted, pushed",
+          end3.get("outcome") == "done" and cr3.get("origin") == "remote" and cr3.get("head") == fx["c1"] and cr3.get("pushed") == "pushed", refusal_of(rs3))
+    root, cfg = mkroot2("c-missing")
+    j, end, rs = job(root, cfg, code_of(commit="f" * 40))
+    why = refusal_of(rs)
+    left = [n for n in os.listdir(os.path.join(root, "clones"))]
+    gone = refusal_of(job(root, cfg, code_of(source="bundle:nope.bundle"))[2])
+    unreadable = refusal_of(job(root, cfg, code_of(source="bundle:bad.bundle"))[2])
+    r2, c2 = mkroot2("c-nosrc", code={"bundle_dir": None, "remote": None})
+    nb, nr = refusal_of(job(r2, c2, code_of())[2]), refusal_of(job(r2, c2, code_of(source="remote"))[2])
+    check("code: a full commit the bundle does not hold is refused `commit-missing`, naming it, and leaves no clone and no half-made one behind",
+          why.startswith("commit-missing:") and "f" * 40 in why and end.get("outcome") == "refused" and left == [], f"{why!r} {left}")
+    check("code: a bundle that is not in code.bundle_dir, one that git cannot read, and a source nobody configured (no bundle_dir, no remote), are `commit-missing` too, each saying what is not there",
+          gone.startswith("commit-missing:") and "nope.bundle" in gone and nb.startswith("commit-missing:") and "bundle_dir" in nb
+          and nr.startswith("commit-missing:") and "code.remote" in nr and unreadable.startswith("commit-missing:") and "could not clone" in unreadable
+          and not [n for n in os.listdir(os.path.join(root, "clones")) if n.startswith(".")], f"{gone!r} {nb!r} {nr!r} {unreadable!r}")
+    root, cfg = mkroot2("c-unpushed")
+    j, end, rs = job(root, cfg, code_of(commit=fx["c3"]))
+    ju, endu, rsu = job(root, cfg, code_of(commit=fx["c3"], allow_unpushed=True))
+    cu = next((r for r in rsu if r["type"] == "code"), {})
+    check("code: a commit no branch of the remote holds is refused `commit-unpushed` unless the spec says `allow_unpushed`, and then the job runs and its code record SAYS it was not pushed",
+          refusal_of(rs).startswith("commit-unpushed:") and "allow_unpushed" in refusal_of(rs) and endu.get("outcome") == "done" and cu.get("pushed") == "unpushed" and cu.get("allow_unpushed") is True,
+          f"{refusal_of(rs)!r} {endu.get('outcome')} {cu.get('pushed')}")
+    ru, cu_ = mkroot2("c-noremote", code={"bundle_dir": fx["bundles"], "remote": os.path.join(fx["base"], "no-such-remote")})
+    ja = job(ru, cu_, code_of())
+    jb = job(ru, cu_, code_of(allow_unpushed=True))
+    cb = next((r for r in jb[2] if r["type"] == "code"), {})
+    rn, cn = mkroot2("c-noremote2", code={"bundle_dir": fx["bundles"], "remote": None})
+    jc = job(rn, cn, code_of())
+    check("code: a remote that cannot be read (or none configured) does not SHOW the commit pushed: `commit-unpushed` saying so, and `allow_unpushed` records it `unknown`",
+          refusal_of(ja[2]).startswith("commit-unpushed:") and "could not be read" in refusal_of(ja[2]) and jb[1].get("outcome") == "done" and cb.get("pushed") == "unknown"
+          and refusal_of(jc[2]).startswith("commit-unpushed:") and "names no remote" in refusal_of(jc[2]), f"{refusal_of(ja[2])!r} {cb.get('pushed')} {refusal_of(jc[2])!r}")
+    rem = os.path.join(TMP, "c-prune-remote")                           # a remote of its own: the fixture's is shared, and a branch of this one is deleted
+    git_t(None, "init", "-q", "-b", "main", rem)
+    b0 = commit_all(rem, {"hw/x.py": "MARK one\n"}, "b0")
+    git_t(rem, "checkout", "-q", "-b", "feature")
+    f1 = commit_all(rem, {"hw/x.py": "MARK one\nFEATURE\n"}, "f1")
+    git_t(rem, "checkout", "-q", "main")
+    root, cfg = mkroot2("c-prune", code={"bundle_dir": fx["bundles"], "remote": rem})
+    first = job(root, cfg, code_of(commit=f1, source="remote"))        # f1 is held by `feature` alone: cloned, pushed
+    other = job(root, cfg, code_of(commit=b0, source="remote"))        # b0 by `main`
+    git_t(rem, "branch", "-q", "-D", "feature")                       # the branch is deleted on the remote; both clones are in the cache
+    again = job(root, cfg, code_of(commit=f1, source="bundle:not-there.bundle"))
+    still = job(root, cfg, code_of(commit=b0, source="bundle:not-there.bundle"))
+    cf, cs = (next((r for r in x[2] if r["type"] == "code"), {}) for x in (first, still))
+    held = git_t(os.path.join(root, "clones", f1), "for-each-ref", "--format=%(refname)", "refs/pushed/").stdout.split()
+    check("code: a cached clone does not go on answering `pushed` for a branch the remote has since deleted (the pushed check fetches with --prune): the commit only that branch held is "
+          "refused `commit-unpushed` at the next job, the cache reused (its source not asked for), while a commit `main` still holds stays pushed and the clone's refs/pushed/ is main's alone",
+          first[1].get("outcome") == "done" and cf.get("pushed") == "pushed" and other[1].get("outcome") == "done" and again[1].get("outcome") == "refused"
+          and refusal_of(again[2]).startswith("commit-unpushed:") and still[1].get("outcome") == "done" and cs.get("pushed") == "pushed" and cs.get("reused") is True
+          and held == ["refs/pushed/main"], f"{first[1].get('outcome')} {cf.get('pushed')} {again[1].get('outcome')} {refusal_of(again[2])!r} {still[1].get('outcome')} {cs.get('pushed')} {held}")
+    root, cfg = mkroot2("c-head")
+    prepop(root, fx["c2"], at=fx["c1"])
+    j, end, rs = job(root, cfg, code_of())
+    check("code: a clone in the cache whose HEAD is not the spec's commit is refused `head-mismatch`, naming both, and is not repaired",
+          refusal_of(rs).startswith("head-mismatch:") and fx["c1"] in refusal_of(rs) and git_t(os.path.join(root, "clones", fx["c2"]), "rev-parse", "HEAD").stdout.strip() == fx["c1"], refusal_of(rs))
+    root, cfg = mkroot2("c-dirty")
+    d = prepop(root, fx["c2"])
+    open(os.path.join(d, "hw", "x.py"), "a").write("an edit\n")
+    a = refusal_of(job(root, cfg, code_of())[2])
+    git_t(d, "checkout", "--", "hw/x.py")
+    open(os.path.join(d, "stray.txt"), "w").write("untracked\n")
+    b = refusal_of(job(root, cfg, code_of())[2])
+    os.remove(os.path.join(d, "stray.txt"))
+    git_t(d, "checkout", "-q", fx["c1"], "--", "hw/x.py")                # HEAD still c2, the working tree and index are c1's: a stale tree whose HEAD is right
+    c = refusal_of(job(root, cfg, code_of())[2])
+    check("code: a clone whose HEAD is right and whose status is not clean is refused `tree-dirty`: a changed tracked file, an untracked file, and a tree left at an older commit's content",
+          a.startswith("tree-dirty:") and "hw/x.py" in a and b.startswith("tree-dirty:") and "stray.txt" in b and c.startswith("tree-dirty:") and "hw/x.py" in c, f"{a!r} {b!r} {c!r}")
+    root, cfg = mkroot2("c-rtl")
+    ok = job(root, cfg, code_of(**{"assert": {"rtl_tree": fx["t2"]}}))
+    bad = refusal_of(job(root, cfg, code_of(**{"assert": {"rtl_tree": fx["t1"]}}))[2])
+    check("code: the rtl/ tree the spec names is compared: c2's passes, c1's tree is refused `rtl-mismatch` naming both",
+          ok[1].get("outcome") == "done" and bad.startswith("rtl-mismatch:") and fx["t1"] in bad and fx["t2"] in bad, f"{ok[1].get('outcome')} {bad!r}")
+    root, cfg = mkroot2("c-content")
+    fine = job(root, cfg, code_of(**{"assert": {"content": [["hw/x.py", "MARK", 2], ["hw/x.py", "NEW_TAG", 1], ["hw/x.py", "ABSENT", 0]]}}))
+    many = refusal_of(job(root, cfg, code_of(**{"assert": {"content": [["hw/x.py", "MARK", 1]]}}))[2])
+    none = refusal_of(job(root, cfg, code_of(**{"assert": {"content": [["hw/x.py", "ABSENT", 1]]}}))[2])
+    nofile = refusal_of(job(root, cfg, code_of(**{"assert": {"content": [["hw/nope.py", "MARK", 0]]}}))[2])
+    old = refusal_of(job(root, cfg, code_of(commit=fx["c1"], **{"assert": {"content": [["hw/x.py", "NEW_TAG", 1]]}}))[2])
+    check("code: each string is found exactly the stated number of times (2, 1 and 0 pass); one found twice for one, one that is not there, a file that is not there (even for 0) and "
+          "a string only the NEWER commit has, asked of the older one, are `content-missing`, each saying what was found",
+          fine[1].get("outcome") == "done" and many.startswith("content-missing:") and "2 time" in many and none.startswith("content-missing:") and "0 time" in none
+          and nofile.startswith("content-missing:") and "not a file" in nofile and old.startswith("content-missing:") and "NEW_TAG" in old, f"{many!r} {none!r} {nofile!r} {old!r}")
+    root, cfg = mkroot2("c-anc")
+    fine = job(root, cfg, code_of(**{"assert": {"ancestors": [fx["c1"]]}}))
+    notanc = refusal_of(job(root, cfg, code_of(**{"assert": {"ancestors": [fx["c3"]]}}))[2])
+    absent = refusal_of(job(root, cfg, code_of(**{"assert": {"ancestors": ["e" * 40]}}))[2])
+    check("code: a named ancestor is checked: c1 is one of c2; c3 (a descendant that IS in the clone) is `ancestor-missing` as not an ancestor, and a commit the clone does not hold is too",
+          fine[1].get("outcome") == "done" and notanc.startswith("ancestor-missing:") and "not an ancestor" in notanc and absent.startswith("ancestor-missing:") and "not in the clone" in absent,
+          f"{notanc!r} {absent!r}")
+    spec_bad = [verdict(lambda o=o: P.validate(code_of(**{"assert": o}), None, ST.StepRegistry())) or "" for o in
+                ({"rtl_tree": "abc"}, {"content": [["../x", "a", 1]]}, {"content": [["/etc/passwd", "a", 1]]}, {"content": [["a", "", 1]]}, {"ancestors": ["abc"]}, {"colour": 1})]
+    check("code: the spec's assertions are validated whole: a short rtl tree, a path that leaves the clone (`..`, absolute), an empty string, a short ancestor and an unknown field are refused by name",
+          [x.split(":")[0] for x in spec_bad] == ["spec-form", "spec-form", "spec-form", "spec-form", "commit-not-full", "spec-form"], str(spec_bad))
+    before = {d: sorted(os.listdir(os.path.join(root, d))) for d in ("queue", "running", "cards", "ids", "extracts")}
+    job(root, cfg, code_of(commit=fx["c1"]))
+    after = {d: sorted(os.listdir(os.path.join(root, d))) for d in ("queue", "running", "cards", "extracts")}
+    check("code: a clone is made in a temporary directory and renamed, none is left behind by any scenario above, and the stage leaves the root's queue/, running/, cards/ and extracts/ as they were",
+          not [n for r in ROOTS if os.path.isdir(os.path.join(r, "clones")) for n in os.listdir(os.path.join(r, "clones")) if n.startswith(".tmp-")]
+          and all(after[d] == before[d] for d in after), str(after))
+    bc = {"bundle_dir": "x", "remote": None}
+    check("code: config.json's `code` section is validated: a path or URL, or null; an unknown key and a number are `config-form`",
+          verdict(lambda: C.validate_config({**GOOD, "code": bc})) is None and (verdict(lambda: C.validate_config({**GOOD, "code": {"mirror": "x"}})) or "").startswith("config-form:")
+          and (verdict(lambda: C.validate_config({**GOOD, "code": {"remote": 5}})) or "").startswith("config-form:"))
+
+
+# ---------------------------------------------------------------------------------------- build
+
+# The fake host tree every clone of the fixture carries: a Makefile that makes shell-script "tools" (ignored products, as the real
+# ones are), a `vectors` target, and the two scripts a dry-test and a smoke step run. The environment steers them:
+# FAKE_FAIL (make fails), FAKE_SKIP (a tool is not made), TREE_ID and BIN_ID (the two build ids), FAKE_VEC_BAD / FAKE_VEC_FAIL,
+# FAKE_DRY (the suite's output), FAKE_QUICK (the driver's).
+FAKE_MAKEFILE = (
+    "SHA := $(shell git rev-parse HEAD)\nTREE_ID ?= commit=$(SHA) tracked=clean untracked=none\nBIN_ID ?= $(TREE_ID)\n"
+    "TOOLS := device-test api-test remote-test divsqrt-soak clause5-soak cft-segrun cft-audit cft-resident cft-selftest\n.PHONY: all print-build-id\n"
+    "all: $(TOOLS) libcft.so\n\t@test -z \"$$FAKE_FAIL\" || { echo fake make failure; exit 2; }\n"
+    "$(TOOLS):\n\t@test -n \"$$FAKE_FAIL\" && exit 0; case \" $$FAKE_SKIP \" in *\" $@ \"*) exit 0;; esac; sed 's/@BIN_ID@/$(BIN_ID)/' fake/$@.sh > $@ && chmod +x $@\n"
+    "libcft.so:\n\t@test -n \"$$FAKE_FAIL\" && exit 0; echo lib > $@\nprint-build-id:\n\t@echo \"$(TREE_ID)\"\n")
+FAKE_TREE = {
+    "host/Makefile": FAKE_MAKEFILE,
+    "host/fake/api-test.sh": "#!/bin/sh\necho 'api-test: all contract checks passed'\n",
+    "host/fake/cft-segrun.sh": "#!/bin/sh\n[ \"$1\" = --build-id ] && echo '@BIN_ID@'\nexit 0\n",
+    **{f"host/fake/{n}.sh": "#!/bin/sh\nexit 0\n" for n in ("device-test", "remote-test", "divsqrt-soak", "clause5-soak", "cft-audit", "cft-resident", "cft-selftest")},
+    "Makefile": ".PHONY: vectors\nvectors:\n\t@mkdir -p vectors/out && if [ -n \"$$FAKE_VEC_FAIL\" ]; then exit 2; elif [ -n \"$$FAKE_VEC_BAD\" ]; then echo bad > vectors/out/a.txt; else echo ok > vectors/out/a.txt; fi\n",
+    "vectors/SHA256SUMS": hashlib.sha256(b"ok\n").hexdigest() + "  out/a.txt\n",
+    "hw/card-segrun.sh": "#!/bin/sh\nd=$(mktemp -d \"${TMPDIR:-/tmp}/card-segrun.XXXXXX\")\necho kept > \"$d/gate1.log\"\n"
+        "echo '  FAIL  the gate on this card exited 1'; echo '== card-segrun: 6 checks, 1 failed'; echo \"   logs kept in $d\"; exit 1\n",
+    "hw/test-card-stress.sh": "#!/bin/sh\ncase \"$FAKE_DRY\" in\n"
+        "  flakes) echo '  FAIL  telemetry hang: x  detail'; echo '  FAIL  stopfile: y  detail'; echo 'card-stress test: 600 checks, 2 failed, 0 skipped, 5 s'; exit 1;;\n"
+        "  real) echo '  FAIL  something real  detail'; echo 'card-stress test: 600 checks, 1 failed, 0 skipped, 5 s'; exit 1;;\n"
+        "  lie) echo 'card-stress test: 600 checks, 0 failed, 0 skipped, 5 s'; exit 1;;\n"
+        "  *) echo 'card-stress test: 600 checks, 0 failed, 0 skipped, 5 s'; exit 0;;\nesac\n",
+    "hw/card-stress.sh": "#!/bin/sh\necho \"args: $*\"\ncase \"$FAKE_QUICK\" in\n"
+        "  fail) echo \"quick: not every leg passed: {'fail': 1}\"; echo 'card-stress ends: quick_done (exit 1); the card is left idle (no process of this run is alive)'; exit 1;;\n"
+        "  dryrun) echo '[2026-10-22 07:00:00] card-stress: out /x; QUICK DRY RUN until no deadline'; echo 'card-stress ends: quick_done (exit 0); the card is left idle (no process of this run is alive)'; exit 0;;\n"
+        "  stopped) echo 'card-stress ends: guard_refused (exit 2); the card is left idle (no process of this run is alive)'; exit 2;;\n"
+        "  noend) echo 'something else'; exit 0;;\n"
+        "  *) echo 'card-stress ends: quick_done (exit 0); the card is left idle (no process of this run is alive)'; exit 0;;\nesac\n",
+}
+
+
+class env:
+    """Set environment variables for a block, and put them back."""
+
+    def __init__(self, **kw):
+        self.kw, self.old = kw, {}
+
+    def __enter__(self):
+        for k, v in self.kw.items():
+            self.old[k] = os.environ.get(k)
+            os.environ[k] = v
+        return self
+
+    def __exit__(self, *a):
+        for k, v in self.old.items():
+            os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+
+
+def fake_ldd(kind):
+    """A directory with an `ldd` that says what XRT-linked tools say (ok), that nothing is (no), or that only cft-selftest is not (opt)."""
+    d = os.path.join(TMP, "fakebin-" + kind)
+    if not os.path.isdir(d):
+        os.makedirs(d)
+        body = {"ok": "echo '\tlibxrt_coreutil.so.2 => /fake/libxrt_coreutil.so.2 (0x0)'", "no": "echo '\tnot a dynamic executable'; exit 1",
+                "opt": 'case "$1" in *cft-selftest) echo "\tnot a dynamic executable"; exit 1;; *) echo "\tlibxrt_coreutil.so.2 => /fake/libxrt_coreutil.so.2 (0x0)";; esac'}[kind]
+        open(os.path.join(d, "ldd"), "w", newline="").write("#!/bin/sh\n" + body + "\n")
+        os.chmod(os.path.join(d, "ldd"), 0o755)
+    return d
+
+
+class no_users:
+    """The guard finds nobody: for the scenarios that test something else with a job that is not dry."""
+
+    def __enter__(self):
+        self.old = GD.KIND_SCANS["xrt"]
+        GD.KIND_SCANS["xrt"] = lambda exclude: ([], [])
+
+    def __exit__(self, *a):
+        GD.KIND_SCANS["xrt"] = self.old
+
+
+def real(**kw):
+    """A staged spec that is NOT dry: the real tools of the fixture's fake tree."""
+    return staged(dry_run=False, **kw)
+
+
+def group_build():
+    fx = fixture()
+    src = open(os.path.join(HERE, "card_stress.py"), encoding="utf-8").read()
+    import ast
+    drv = {k: ast.literal_eval(re.search(k + r" = (\[.*?\]|\{.*?\})", src, re.S).group(1)) for k in ("targets", "exes", "optional")}
+    check("build: the targets, the tools and the optional tools are the driver's own: hw/card_stress.py build_tools's lists, read from its source",
+          drv["targets"] == BD.TARGETS and drv["exes"] == BD.TOOLS and drv["optional"] == BD.OPTIONAL, f"{drv} {BD.TARGETS} {BD.TOOLS}")
+    if os.name != "posix" or not all(shutil.which(x) for x in ("make", "sh", "git", "sed")):
+        for n in ("a clean build is made, XRT=1 and every tool checked", "make failing, and a tool not made", "a tool that does not link XRT", "a build id that is not the tree's",
+                  "the dry tests in a built clone", "the vectors, the dry tests and the smoke as steps"):
+            skip(f"build: {n}", "needs POSIX with make, sh, sed and git")
+        return
+    ok_path = fake_ldd("ok") + os.pathsep + os.environ["PATH"]
+    with no_users(), env(PATH=ok_path):
+        root, cfg = mkroot2("b-ok")
+        j, end, rs = job(root, cfg, real())
+        bd = next((r for r in rs if r["type"] == "build"), {})
+        lg = legs_of(rs)
+        check("build: a clean build is made on the clone with XRT=1 and the driver's targets, ldd names xrt_coreutil for each of the ten tools, the build id is the tree's and names the commit, "
+              "and the step then runs the real (fake-tree) tool",
+              end.get("outcome") == "done" and bd.get("ok") is True and any("XRT=1" in s["detail"] and "clause5-soak" in s["detail"] for s in bd.get("steps", []))
+              and sum(1 for s in bd.get("steps", []) if s["name"].startswith("xrt ")) == 10 and bd.get("build_id") == f"commit={fx['c2']} tracked=clean untracked=none"
+              and len(lg) == 1 and lg[0]["status"] == "pass" and lg[0]["standin"] is False and lg[0]["dry"] is False, f"{end.get('outcome')} {refusal_of(rs)!r} {bd}"[:400])
+        with env(CC="false"):
+            r2, c2 = mkroot2("b-probe")
+            bp = next((r for r in job(r2, c2, real())[2] if r["type"] == "build"), {})
+        check("build: the roundeven probe is the driver's: a compiler that cannot build it is recorded `absent`, and the build goes on",
+              bp.get("ok") is True and any(s["name"] == "roundeven probe" and s["detail"].startswith("absent") for s in bp.get("steps", [])), str(bp)[:300])
+        with env(FAKE_FAIL="1"):
+            rf, cf = mkroot2("b-fail")
+            jf = job(rf, cf, real())
+        with env(FAKE_SKIP="cft-audit"):
+            r2, c2 = mkroot2("b-skip")
+            js = job(r2, c2, real())
+        check("build: a make that fails is refused `build-failed` saying its exit status, with the build record not ok and the make output kept; the job ends refused, nothing run",
+              refusal_of(jf[2]).startswith("build-failed:") and "make exited 2" in refusal_of(jf[2]) and jf[1].get("outcome") == "refused" and not legs_of(jf[2])
+              and any(r["type"] == "build" and r["ok"] is False for r in jf[2]) and os.path.isfile(os.path.join(rf, "jobs", jf[0], "build.log")), refusal_of(jf[2]))
+        check("build: a make that succeeds without making a tool is `build-failed` naming the tool",
+              refusal_of(js[2]).startswith("build-failed:") and "cft-audit was not built" in refusal_of(js[2]), refusal_of(js[2]))
+    with no_users(), env(PATH=fake_ldd("no") + os.pathsep + os.environ["PATH"]):
+        r2, c2 = mkroot2("b-nolink")
+        jn = job(r2, c2, real())
+    check("build: a tool whose ldd does not name xrt_coreutil is refused `xrt-not-linked`, naming it and why (built without XRT=1 it answers every xclbin 'no such device')",
+          refusal_of(jn[2]).startswith("xrt-not-linked:") and "device-test" in refusal_of(jn[2]) and "no such device" in refusal_of(jn[2]) and jn[1].get("outcome") == "refused", refusal_of(jn[2]))
+    with no_users(), env(PATH=fake_ldd("opt") + os.pathsep + os.environ["PATH"]):
+        r2, c2 = mkroot2("b-opt")
+        jo = job(r2, c2, real(image="quad", steps=[{"type": "selftest"}, {"type": "api-test"}]))
+    bo = next((r for r in jo[2] if r["type"] == "build"), {})
+    lo = legs_of(jo[2])
+    check("build: cft-selftest not linked is not the job's failure: as the driver has it, the `selftest` step is SKIPPED by name with the reason, the build record says it, and the others run",
+          jo[1].get("outcome") == "done" and bo.get("disabled", {}).get("selftest", "").startswith("cft-selftest does not link XRT") and [x["status"] for x in lo] == ["skipped", "pass"]
+          and "does not link XRT" in (lo[0]["reason"] or ""), f"{jo[1].get('outcome')} {refusal_of(jo[2])!r} {bo.get('disabled')} {[x['status'] for x in lo]}")
+    with no_users(), env(PATH=ok_path, FAKE_SKIP="cft-resident"):
+        r2, c2 = mkroot2("b-notbuilt")
+        jr = job(r2, c2, real(image="quad", steps=[{"type": "resident"}, {"type": "api-test"}]))
+    lr = legs_of(jr[2])
+    check("build: an optional tool that make did not make (cft-resident) skips ITS step by name with the reason, as the driver has it, and the job's other steps run",
+          jr[1].get("outcome") == "done" and [x["status"] for x in lr] == ["skipped", "pass"] and "cft-resident was not built" in ((lr or [{}])[0].get("reason") or ""),
+          f"{jr[1].get('outcome')} {refusal_of(jr[2])!r} {[x['status'] for x in lr]}")
+    with no_users(), env(PATH=ok_path):
+        r2, c2 = mkroot2("b-id1")
+        with env(BIN_ID="commit=" + "d" * 40 + " tracked=clean untracked=none"):
+            ja = job(r2, c2, real())
+        r3, c3 = mkroot2("b-id2")
+        with env(TREE_ID="unknown", BIN_ID="unknown"):
+            jb = job(r3, c3, real())
+    check("build: the tools' build id is held to the tree's: cft-segrun carrying another id is refused `build-id-mismatch`, naming both",
+          refusal_of(ja[2]).startswith("build-id-mismatch:") and "d" * 40 in refusal_of(ja[2]) and fx["c2"] in refusal_of(ja[2]), refusal_of(ja[2]))
+    check("build: and the tree's id must name the job's commit on a clean tree: two ids that agree on `unknown` are refused `build-id-mismatch` too",
+          refusal_of(jb[2]).startswith("build-id-mismatch:") and "does not name the job's commit" in refusal_of(jb[2]), refusal_of(jb[2]))
+    with no_users(), env(PATH=ok_path):
+        r2, c2 = mkroot2("b-built")
+        job(r2, c2, real())                                              # builds the clone
+        jd = job(r2, c2, real(steps=[{"type": "drytests"}]))
+        r3, c3 = mkroot2("b-fresh")
+        jv = job(r3, c3, real(steps=[{"type": "vectors"}, {"type": "drytests", "known_flakes": ["telemetry hang: "]}, {"type": "api-test"}]))
+    check("build: the dry tests are refused `clone-built` in a clone that has been built (ignored products under host/), before anything runs",
+          refusal_of(jd[2]).startswith("clone-built:") and "host/" in refusal_of(jd[2]) and jd[1].get("outcome") == "refused" and not legs_of(jd[2]), refusal_of(jd[2]))
+    lv = legs_of(jv[2])
+    check("build: and in a clone nothing has built they run after `make vectors` (its ignored vectors/out is not a build product), and the build comes after them, once, before api-test",
+          jv[1].get("outcome") == "done" and [x["leg"] for x in lv] == ["vectors", "drytests", "api-test"] and [x["status"] for x in lv] == ["pass"] * 3
+          and [r["type"] for r in jv[2] if r["type"] in ("leg", "build")] == ["leg", "leg", "build", "leg"], f"{jv[1].get('outcome')} {refusal_of(jv[2])!r} {[(x['leg'], x['status']) for x in lv]}")
+
+
+# ---------------------------------------------------------------------------------------- images
+
+def group_images():
+    d = os.path.join(TMP, "im-ok")
+    entry = write_image(d)
+    card = {"id": "u50-0", "kind": "xrt", "platform": PLAT}
+    got = safely(IM.check_image, entry, card)
+    check("images: an image whose file, registry, SHA256SUMS and manifest agree passes, with its tile count (the manifest's clock_cus) and its platform",
+          isinstance(got, dict) and got["tiles"] == 4 and got["platform"] == PLAT and got["sha256"] == entry["sha256"] and got["witnesses"] == ["file", "registry", "SHA256SUMS", "manifest"], str(got))
+    with env(SCHED_TEST_IMGDIR=d):
+        viaenv = safely(IM.check_image, dict(entry, path="$SCHED_TEST_IMGDIR/cft_hw_quad.xclbin"), card)
+    check("images: a registry path may carry an environment variable ($HOME, as the driver's defaults do), which is expanded when the job runs",
+          isinstance(viaenv, dict) and os.path.normpath(viaenv["path"]) == os.path.normpath(entry["path"]) and viaenv["sha256"] == entry["sha256"], str(viaenv))
+    one = lambda name, e=None, c=None: verdict(lambda: IM.check_image(e or entry, c or card)) or ""
+    other = "1" * 64
+    check("images: a registry whose SHA-256 is not the file's is refused `image-digest`, naming both",
+          one("reg", dict(entry, sha256=other)).startswith("image-digest:") and "registry says 1111111111111111" in one("reg", dict(entry, sha256=other)), one("reg", dict(entry, sha256=other)))
+    d2 = os.path.join(TMP, "im-sums")
+    e2 = write_image(d2)
+    open(os.path.join(d2, "SHA256SUMS"), "w").write(other + "  cft_hw_quad.xclbin\n")
+    a = one("sums", e2)
+    open(os.path.join(d2, "SHA256SUMS"), "w").write(other + "  some_other.xclbin\n")
+    b = one("sums", e2)
+    os.remove(os.path.join(d2, "SHA256SUMS"))
+    c = one("sums", e2)
+    check("images: the directory's SHA256SUMS is compared: a line that differs, no line for the file, and no SHA256SUMS at all are each `image-digest`",
+          a.startswith("image-digest:") and "SHA256SUMS says 1111111111111111" in a and b.startswith("image-digest:") and "no line for cft_hw_quad.xclbin" in b
+          and c.startswith("image-digest:") and "no SHA256SUMS" in c, f"{a!r} {b!r} {c!r}")
+    d3 = os.path.join(TMP, "im-man")
+    e3 = write_image(d3)
+    mp = os.path.join(d3, "cft_hw_quad.manifest.txt")
+    text = open(mp).read().replace(e3["sha256"], other)
+    open(mp, "w", newline="").write(text)
+    m = one("man", e3)
+    check("images: the manifest beside the image is a witness too: one that describes another file (its `sha256:`) is `image-digest`",
+          m.startswith("image-digest:") and "manifest says sha256 1111111111111111" in m, m)
+    e4 = write_image(os.path.join(TMP, "im-gone"))
+    os.remove(e4["path"])
+    gone = one("gone", e4)
+    check("images: a file that cannot be read is `image-digest` as well (its digest cannot be held to anything)", gone.startswith("image-digest:") and "cannot be read" in gone, gone)
+    t1, t2 = one("tiles", dict(entry, tiles=1)), one("tiles", {k: v for k, v in entry.items() if k != "tiles"})
+    d5 = os.path.join(TMP, "im-nomanifest")
+    t3 = one("tiles", write_image(d5, manifest=False))
+    check("images: the tile count is the manifest's number of compute units: a registry that says 1 for four is refused `image-tiles`, so is a registry that gives none and an image with no manifest",
+          t1.startswith("image-tiles:") and "lists 4 compute unit(s)" in t1 and t2.startswith("image-tiles:") and "gives no tile count" in t2 and t3.startswith("image-tiles:") and "no cft_hw_quad.manifest.txt" in t3, f"{t1!r} {t2!r} {t3!r}")
+    p1, p2, p3 = one("plat", dict(entry, platform="xilinx_u50_other"), None), one("plat", None, dict(card, platform="xilinx_u50_other")), one("plat", None, {"id": "u50-0", "kind": "xrt"})
+    check("images: the platform must be the manifest's, the registry's and the card's alike: a registry or a card that differs, and a card that gives none, are `image-platform`",
+          all(x.startswith("image-platform:") for x in (p1, p2, p3)) and "xilinx_u50_other" in p1 and "xilinx_u50_other" in p2 and "None" in p3, f"{p1!r} {p2!r} {p3!r}")
+    root, cfg = mkroot2("i-run", images=[dict(entry, tiles=1)])
+    jr = job(root, cfg, staged(image="quad", steps=[{"type": "dt-i"}]))
+    root, cfg = mkroot2("i-run2", images=[dict(entry, sha256=other)])
+    jr2 = job(root, cfg, staged(image="quad", steps=[{"type": "dt-i"}]))
+    root, cfg = mkroot2("i-run3", cards=[{"id": "u50-0", "kind": "xrt", "platform": "xilinx_u50_other"}])
+    jr3 = job(root, cfg, staged(image="quad", steps=[{"type": "dt-i"}]))
+    check("images: through a job the same refusals end it refused, before the code is cloned and with no leg (digest, tiles, platform)",
+          [refusal_of(x[2]).split(":")[0] for x in (jr, jr2, jr3)] == ["image-tiles", "image-digest", "image-platform"] and all(x[1].get("outcome") == "refused" and not legs_of(x[2]) for x in (jr, jr2, jr3))
+          and not os.path.isdir(os.path.join(root, "clones", FIX["c2"])), [refusal_of(x[2])[:60] for x in (jr, jr2, jr3)])
+    mdir = os.environ.get("SCHED_TEST_MANIFESTS")
+    if mdir and all(os.path.isfile(os.path.join(mdir, f"cft_hw_{n}.manifest.txt")) for n in ("quad", "single", "deep")):
+        facts = {n: IM.read_manifest(os.path.join(mdir, f"cft_hw_{n}.manifest.txt")) for n in ("quad", "single", "deep")}
+        check("images: the lead's three real manifests (SCHED_TEST_MANIFESTS) read as the driver's own table has them: tiles, SHA-256 and the platform",
+              all(IM.tiles_of(facts[n]) == DR.CS.IMAGES[n][1] and facts[n]["sha256"] == DR.CS.IMAGES[n][3] and facts[n]["platform"] == PLAT for n in facts), str({n: (IM.tiles_of(f), f.get("platform")) for n, f in facts.items()}))
+    else:
+        skip("images: the lead's three real manifests read as the driver's table has them", "SCHED_TEST_MANIFESTS names no directory of cft_hw_{quad,single,deep}.manifest.txt")
+    cm = {"images": [{"name": "q", "path": "p", "sha256": "0" * 64, "tiles": 4, "platform": PLAT}], "cards": [{"id": "a", "kind": "xrt", "platform": PLAT}]}
+    bad = [("an image with tiles 0", {"images": [dict(cm["images"][0], tiles=0)]}, "images[0].tiles"), ("an image with a platform that has a space", {"images": [dict(cm["images"][0], platform="a b")]}, "images[0].platform"),
+           ("a card with a platform that has a space", {"cards": [{"id": "a", "kind": "xrt", "platform": "a b"}]}, "cards[0].platform"),
+           ("a runner section with an unknown key", {"runner": {"speed": 1}}, "runner.speed"), ("a runner nice of 20", {"runner": {"nice": 20}}, "runner.nice"),
+           ("a runner guard_poll_s of 0", {"runner": {"guard_poll_s": 0}}, "runner.guard_poll_s")]
+    got = [verdict(lambda o=o: C.validate_config({**GOOD, **o})) or "" for _, o, _ in bad]
+    check("images: the registry's tiles and platform, a card's platform and the runner section are validated, each refusal naming its key",
+          all(g.startswith("config-form:") and f in g for g, (_, _, f) in zip(got, bad)) and verdict(lambda: C.validate_config({**GOOD, **cm, "runner": {"guard_wait_max_s": 0, "nice": 0}})) is None, str(got))
+    check("images: every kind of card the configuration admits has its image check, its guard and its build",
+          set(C.CARD_KINDS) == set(IM.IMAGE_CHECKS) == set(GD.KIND_SCANS) == set(BD.KIND_BUILDS), f"{set(C.CARD_KINDS)} {set(IM.IMAGE_CHECKS)} {set(GD.KIND_SCANS)} {set(BD.KIND_BUILDS)}")
+
+
+# ---------------------------------------------------------------------------------------- guard
+
+IMG = "/images/cft_hw_quad.xclbin"
+
+
+class table_of:
+    """The driver's process listing replaced by a table, as docs/studies/sched-a/guard_probe.py does: no real process is read."""
+
+    def __init__(self, table):
+        self.table = table
+
+    def __enter__(self):
+        self.old = DR.CS.list_processes
+        DR.CS.list_processes = lambda: [dict(p) for p in self.table]
+
+    def __exit__(self, *a):
+        DR.CS.list_processes = self.old
+
+
+class MemLog:
+    """Where a guard writes its records, in memory."""
+
+    def __init__(self):
+        self.recs = []
+
+    def append(self, type_, **kw):
+        self.recs.append(dict(kw, type=type_))
+
+    def of(self, type_):
+        return [r for r in self.recs if r["type"] == type_]
+
+
+def group_guard():
+    me = os.getpid()
+    table = [
+        {"pid": 1, "ppid": 0, "args": ["init"]},
+        {"pid": 200, "ppid": 1, "args": ["bash", "-c", "pgrep -fc 'card_stress.py|divsqrt-soak'; device-test " + IMG]},    # the shell that launched the service
+        {"pid": me, "ppid": 200, "args": ["python3", "cft_sched.py", "serve", "device-test", IMG]},                       # the service: its own command line looks like a card user
+        {"pid": 300, "ppid": me, "args": ["bash", "hw/run-device-test.sh", IMG, "-i"]},                                    # a step it started
+        {"pid": 400, "ppid": 1, "args": ["bash", "verify/run.sh", "--budget", "gate"]},                                    # a gate: it uses no card
+    ]
+    plain = [dict(p, args=["python3", "cft_sched.py", "serve"]) if p["pid"] in (200, me) else p for p in table]               # the same, its two command lines innocent
+    lg = MemLog()
+    with table_of(table):
+        users, beside = GD.scan("xrt")
+        got = safely(GD.hold_until_clear, lg, "xrt", 0, 0.01)
+    check("guard: the process that asks, what it started and the shell that launched it are not foreign users, though their command lines name a card tool and an image; a gate "
+          "(verify/run.sh) is allowed and recorded `beside`, once",
+          users == [] and [b["pid"] for b in beside] == [400] and got is None and len(lg.of("beside")) == 1 and not lg.of("guard_refused"), f"{users} {got} {lg.recs}")
+    lg = MemLog()
+    with table_of(plain + [{"pid": 600, "ppid": 1, "args": ["cft-serve", "--artifact", IMG, "--port", "7754"]}]):
+        err = verdict(lambda: GD.hold_until_clear(lg, "xrt", 0, 0.01))
+    with table_of(plain + [{"pid": 601, "ppid": 1, "args": ["cft-serve", "--port", "7754"]}, {"pid": 602, "ppid": 1, "args": ["xbutil", "examine", "-d", "0000:02:00.1"]}]):
+        soft = safely(GD.hold_until_clear, MemLog(), "xrt", 0, 0.01)
+    check("guard: an idle `cft-serve --artifact IMAGE` is a card user (it holds the card whether or not a client is connected) and a job at its start is refused `card-busy-foreign` "
+          "naming it, with a `guard_refused` record; the same server on the software backend, and `xbutil examine`, are not users",
+          (err or "").startswith("card-busy-foreign:") and "pid 600" in err and "an xclbin argument" in err and lg.of("guard_refused")[0]["users"][0]["pid"] == 600 and soft is None, f"{err!r} {soft}")
+    seq = iter([[{"pid": 9, "why": "an xclbin argument (x.xclbin)", "args": "device-test x.xclbin"}]] * 2 + [[]])
+    old, sleeps, lg = GD.KIND_SCANS["xrt"], [], MemLog()
+    GD.KIND_SCANS["xrt"] = lambda exclude: (next(seq), [])
+    try:
+        got = safely(GD.hold_until_clear, lg, "xrt", 100, 5, None, sleeps.append)
+    finally:
+        GD.KIND_SCANS["xrt"] = old
+    check("guard: between steps a foreign user is waited for, polling, and the wait is recorded: `guard_wait` once, then `guard_clear` when the card is free; the job goes on",
+          got is None and sleeps == [5, 5] and len(lg.of("guard_wait")) == 1 and len(lg.of("guard_clear")) == 1 and not lg.of("guard_refused"), f"{got} {sleeps} {lg.recs}")
+    ticks, lg = iter(range(0, 100)), MemLog()
+    GD.KIND_SCANS["xrt"] = lambda exclude: ([{"pid": 9, "why": "x", "args": "x"}], [])
+    try:
+        err = verdict(lambda: GD.hold_until_clear(lg, "xrt", 3, 1, None, lambda s: None, lambda: next(ticks)))
+        stopped = safely(GD.hold_until_clear, MemLog(), "xrt", 100, 1, lambda: True, lambda s: None)
+    finally:
+        GD.KIND_SCANS["xrt"] = old
+    check("guard: a user that does not go is refused `card-busy-foreign` after the limit, saying how long it waited; a stop asked while waiting ends the wait as a stop, not a refusal",
+          (err or "").startswith("card-busy-foreign:") and "still in use after 3 s" in err and len(lg.of("guard_wait")) == 1 and len(lg.of("guard_refused")) == 1 and "Stopped" in str(stopped),
+          f"{err!r} {stopped}")
+    if os.name != "posix" or not os.path.isdir("/proc/self"):
+        skip("guard: real processes: an idle cft-serve is found, the asker and a bystander are not", "needs /proc (POSIX)")
+        return
+    tok = f"{me}-{int(time.time())}"
+    sleeper = "import time; time.sleep(120)"
+    serve = subprocess.Popen([sys.executable, "-c", sleeper, "cft-serve", "--artifact", f"/x/SERVE-{tok}.xclbin", "--port", "7754"])
+    by = subprocess.Popen([sys.executable, "-c", sleeper, f"bystander-{tok}"])
+    try:
+        time.sleep(0.5)
+        code = f"import sys, json, os; sys.path.insert(0, {SCHED!r}); import sched_guard as G; u, b = G.scan('xrt'); print(json.dumps({{'me': os.getpid(), 'users': [x['pid'] for x in u]}}))"
+        p = subprocess.run([sys.executable, "-B", "-I", "-c", code, "device-test", f"/x/ASK-{tok}.xclbin"], capture_output=True, text=True, timeout=120)
+        res = json.loads(p.stdout.strip().splitlines()[-1]) if p.returncode == 0 else {"me": 0, "users": []}
+    finally:
+        for x in (serve, by):
+            x.kill()
+            x.wait()
+    check("guard: with real processes (/proc), an idle `cft-serve --artifact` started by someone else is found, and the asker (whose own command line names device-test and an image) "
+          "and a bystander are not", serve.pid in res["users"] and res["me"] not in res["users"] and by.pid not in res["users"], f"{res} serve {serve.pid} bystander {by.pid} {p.stderr[-200:]}")
+
+
+# ---------------------------------------------------------------------------------------- steps
+
+def pick_items():
+    """(a tile item that is exhaustive, a host item that is exhaustive, a tile item that is random), the first of each in the driver's catalog."""
+    cat = ST.catalog()
+    return tuple(next(n for n, i in cat.items() if i.reach == r and i.kind == k) for r, k in ((DR.L.TILE, "exhaustive"), (DR.L.HOST, "exhaustive"), (DR.L.TILE, "random")))
+
+
+def driver_for(*args):
+    """The driver's own Driver object for these options (never run: its leg_cmd, wrap and standin are asked)."""
+    return DR.CS.Driver(DR.CS.parse_args(list(args) + ["--until", "2099-01-01 00:00"]))
+
+
+def group_steps():
+    """All six parts, or the ones `--only steps:PART` names (registry, parsers, run_step, jobs, real, refusals): a plant runs the part written for it."""
+    parts = {"registry": steps_registry, "parsers": steps_parsers, "run_step": steps_run_step, "jobs": steps_jobs, "real": steps_real_tools, "refusals": steps_refusals}
+    want = {o.split(":", 1)[1] for o in (ONLY or ()) if o.startswith("steps:")} if ONLY and "steps" not in ONLY else set(parts)
+    for name, fn in parts.items():
+        if name in want:
+            fn()
+
+
+def steps_registry():
+    py = sys.executable
+    check("steps: the registry holds every leg of the driver's battery, each with its parser or the rc_only label, and its fields' type tags are known",
+          set(DR.CS.BATTERY) <= set(ST.ENTRIES) and all(e.parse is not None or e.rc_only for e in ST.ENTRIES.values())
+          and all(t.rstrip("!") in P.TYPES for e in ST.ENTRIES.values() for t in e.fields.values()) and ST.ENTRIES["vectors"].rc_only and not any(e.rc_only for n, e in ST.ENTRIES.items() if n != "vectors"),
+          str(sorted(set(DR.CS.BATTERY) - set(ST.ENTRIES))))
+    for dry in (False, True):
+        for quick in (False, True):
+            d = os.path.join(TMP, f"drv-{int(dry)}{int(quick)}")
+            os.makedirs(d, exist_ok=True)
+            drv = driver_for("--root", d, "--out", os.path.join(d, "out"), "--python", py, "--rev8-images", os.path.join(d, "rev8"), "--seq-trials", "7",
+                             *(["--dry-run"] if dry else []), *(["--quick"] if quick else []))
+            bad = []
+            for name, (path, tiles, target, sha) in DR.CS.IMAGES.items():
+                img = DR.CS.Image(name, os.path.join(d, name + ".xclbin"), tiles, target, sha)
+                image = {"name": name, "path": img.path, "sha256": sha, "tiles": tiles}
+                ctx = SG.Ctx(d, image, {name: image}, py, os.path.join(d, "rev8"), dry)
+                for leg in DR.CS.BATTERY:
+                    want = drv.leg_cmd(leg, img, 1)
+                    if not isinstance(want, DR.CS.Cmd):
+                        continue                                            # the driver skips it here (no revision-8 entry for the single)
+                    st = {"type": leg}
+                    if leg == "seq-check":
+                        st["trials"] = 7
+                    if leg == "acceptance" and quick:
+                        st["only"] = DR.CS.QUICK_ACCEPT_ONLY.split(",")
+                    if leg == "acceptance-rev8":
+                        st.update(only=want.argv[want.argv.index("--only") + 1].split(","), target=target)
+                    e = ST.ENTRIES[leg]
+                    real_argv = e.argv(ctx, st)
+                    got = DR.standin(e.standin_leg, real_argv) if dry else real_argv
+                    if got != want.argv or ST.timeout_of(e, ctx, st) != want.timeout:
+                        bad.append(f"{leg}/{name}")
+            check(f"steps: the registry's command for each of the driver's legs, on each image, is Driver.leg_cmd's own argv and timeout (dry {dry}, quick {quick})", not bad, str(bad[:6]))
+    drv = driver_for("--root", TMP, "--out", os.path.join(TMP, "w"), "--dry-run")
+    check("steps: the stand-in's wrapping and run_step's (timeout --kill-after, then nice) are Driver.standin's and Driver.wrap's own for the same options",
+          DR.standin("dt-i", ["a", "b"]) == drv.standin("dt-i", ["a", "b"]) and PR.wrap(["a", "b"], 100.4, 60, 10) == drv.wrap(["a", "b"], 100.4) and PR.wrap(["a"], 0.2, 5, 0) == driver_for(
+              "--root", TMP, "--out", os.path.join(TMP, "w"), "--nice", "0", "--kill-after", "5").wrap(["a"], 0.2))
+    item_tile, item_host, item_rnd = pick_items()
+    cases = [("a soak step for an item the catalog does not hold", {"type": "soak", "item": "nope", "lo": 0, "hi": 1}, "item 'nope'"),
+             ("an exhaustive soak with a count", {"type": "soak", "item": item_tile, "lo": 0, "hi": 1 << 20, "count": 5}, "exhaustive"),
+             ("an exhaustive soak slice past its space", {"type": "soak", "item": item_tile, "lo": 0, "hi": 1 << 40}, "0 <= lo < hi"),
+             ("a random soak with a slice", {"type": "soak", "item": item_rnd, "lo": 0, "hi": 5}, "random"),
+             ("a step with no image where its type needs one", {"type": "dt-i"}, "needs the job's `image`"),
+             ("acceptance-rev8 without `only`", {"type": "acceptance-rev8", "target": "u50-rev8-quad"}, "only is missing"),
+             ("acceptance-rev8 for a target nobody has", {"type": "acceptance-rev8", "only": ["x"], "target": "u50-nope"}, "u50-nope"),
+             ("a timeout of 0", {"type": "api-test", "timeout_s": 0}, "timeout_s"), ("a field a step type does not have", {"type": "vectors", "item": "x"}, "item")]
+    cases.append(("a tile on a host item", {"type": "soak", "item": item_host, "lo": 0, "hi": 1 << 20, "tile": 2}, "host item"))
+    got = [verdict(lambda st=st: P.validate(staged(steps=[st]) if st["type"] == "dt-i" else staged(image="quad", steps=[st]), None, ST.StepRegistry())) or "" for _, st, _ in cases]
+    check("steps: the registry's rules between a step's fields and the spec are `spec-form` refusals naming the step: " + "; ".join(c[0] for c in cases[:4]) + "...",
+          all(g.startswith("spec-form:") and f in g and "steps[0]" in g for g, (_, _, f) in zip(got, cases)), str(got))
+    check("steps: a window job is not this runner's, and is refused by name when claimed (S3 builds it); an unknown step type is `step-unknown` at submit",
+          verdict(lambda: P.validate(staged(steps=[{"type": "acceptance-rev9"}]), None, ST.StepRegistry())).startswith("step-unknown:"))
+
+
+def parse_cases():
+    ok = "card-stress test: 600 checks, 0 failed, 0 skipped, 5 s\n"
+    two = "  FAIL  telemetry hang: x  detail\n  FAIL  stopfile: y  detail\ncard-stress test: 600 checks, 2 failed, 0 skipped, 5 s\n"
+    return ok, two
+
+
+def steps_parsers():
+    ok, two = parse_cases()
+    flake = ("telemetry hang: ", "stopfile: ")
+    v0 = safely(ST.parse_drytests, ok, 0, flake)
+    vf = safely(ST.parse_drytests, two, 1, flake)
+    vn = safely(ST.parse_drytests, two, 1, ())
+    vm = safely(ST.parse_drytests, "  FAIL  telemetry hang: x  d\n  FAIL  real one  d\ncard-stress test: 600 checks, 2 failed, 0 skipped, 5 s\n", 1, flake)
+    check("steps: parse_drytests reads the suite's last line: 0 failed is a pass; failures all allowed BY NAME in the spec are a pass that says so (known_flakes, in counts and notes); "
+          "the same failures not allowed, or one not allowed among them, are a fail",
+          v0.ok and v0.counts == {"checks": 600, "failed": 0, "skipped": 0} and vf.ok and vf.counts["known_flakes"] == 2 and "known flakes" in vf.notes[0] and not vn.ok and not vm.ok
+          and "something" not in str(vm.notes) and "real one" in vm.notes[0], f"{v0} {vf} {vn} {vm}")
+    bad = {"a pass with the exit status 1": safely(ST.parse_drytests, ok, 1, flake), "a failure with the exit status 0": safely(ST.parse_drytests, two, 0, flake),
+           "a totals line that disagrees with the FAIL lines": safely(ST.parse_drytests, "  FAIL  a  d\ncard-stress test: 5 checks, 2 failed, 0 skipped, 1 s\n", 1, flake),
+           "no totals line": safely(ST.parse_drytests, "nothing\n", 0, flake), "two totals lines": safely(ST.parse_drytests, ok + ok, 0, flake),
+           "0 checks": safely(ST.parse_drytests, "card-stress test: 0 checks, 0 failed, 0 skipped, 1 s\n", 0, flake)}
+    check("steps: parse_drytests refuses (VerdictError, so the leg is parse_error) a pass the exit status contradicts, a failure it contradicts, a count that disagrees with the log, "
+          "a log with no totals line, two, and 0 checks: " + ", ".join(bad), all(isinstance(v, str) and v.startswith("crashed: VerdictError") for v in bad.values()), str(bad))
+    end = "card-stress ends: {} (exit {}); the card is left idle (no process of this run is alive)\n"
+    q0 = safely(ST.parse_driver_quick, "noise\n" + end.format("quick_done", 0), 0)
+    q1 = safely(ST.parse_driver_quick, "quick: not every leg passed: {'fail': 1}\n" + end.format("quick_done", 1), 1)
+    q2 = safely(ST.parse_driver_quick, end.format("guard_refused", 2), 2)
+    q3 = safely(ST.parse_driver_quick, end.format("deadline", 0), 0)
+    check("steps: parse_driver_quick reads the driver's end line: quick_done with exit 0 is the only pass; a failing leg, a refused guard and a deadline are fails that say why",
+          q0.ok and not q1.ok and "legs not passing" in q1.notes[0] and not q2.ok and "guard_refused" in q2.notes[0] and not q3.ok and "deadline" in q3.notes[0], f"{q0} {q1} {q2} {q3}")
+    bad = {"an end line and another exit status": safely(ST.parse_driver_quick, end.format("quick_done", 0), 1), "no end line": safely(ST.parse_driver_quick, "something else\n", 0),
+           "two end lines": safely(ST.parse_driver_quick, end.format("quick_done", 0) * 2, 0), "no exit status": safely(ST.parse_driver_quick, end.format("quick_done", 0), None)}
+    check("steps: parse_driver_quick refuses a log with no end line, two, and an exit status that is not the line's: " + ", ".join(bad),
+          all(isinstance(v, str) and v.startswith("crashed: VerdictError") for v in bad.values()), str(bad))
+
+    class Run:
+        def __init__(self, rc=0, timed_out=False, error=None, killed=None):
+            self.rc, self.timed_out, self.error, self.killed = rc, timed_out, error, killed
+
+    ctx = SG.Ctx("/c", None, {}, "py", "/r", False)
+    api, vec = ST.ENTRIES["api-test"], ST.ENTRIES["vectors"]
+    passing = "api-test: all contract checks passed\n"
+    j = lambda e, text, **kw: ST.judge(e, ctx, {"type": e.name}, Run(**kw), text)
+    blank, rcpass, rcfail, contradict, garbage = j(api, "  \n", rc=0), j(vec, "", rc=0), j(vec, "make: stuff\n", rc=3), j(api, passing, rc=1), j(api, "(stand-in) a log with no verdict line\n", rc=0)
+    check("steps: a log with nothing in it is `parse_error` flagged no-verdict (never a pass); a log the parser cannot read is parse_error; a pass the exit status contradicts is parse_error",
+          blank[0] == "parse_error" and blank[3] is True and "no-verdict" in blank[2] and garbage[0] == "parse_error" and garbage[3] is False and contradict[0] == "parse_error" and "exit status is 1" in contradict[2], f"{blank} {garbage} {contradict}")
+    check("steps: a step with no parser is judged by its exit status ALONE, and says so (rc_only in the notes): 0 passes, 3 fails",
+          rcpass[0] == "pass" and rcfail[0] == "fail" and "rc_only" in rcfail[1].notes[0], f"{rcpass} {rcfail}")
+    nd = j(ST.ENTRIES["dt-i"], "device /x.xclbin: no such device\n", rc=2)
+    nd2 = j(api, "device /x.xclbin: no such device\n", rc=2)
+    check("steps: a timeout is `timeout` and an unstartable command `error`, whatever the log says; a card step whose log says the card did not answer is `no_device`, and a step that uses no card never is",
+          j(api, passing, rc=124, timed_out=True, killed="TERM")[0] == "timeout" and j(api, passing, rc=None, error="could not start")[0] == "error" and nd[0] == "no_device" and nd2[0] == "parse_error", f"{nd} {nd2}")
+
+
+def watched(fn, secs):
+    """fn() in a thread: (result, finished). A defect that makes a step hang must fail a check, not the whole run."""
+    out = []
+    th = threading.Thread(target=lambda: out.append(fn()), daemon=True)
+    th.start()
+    th.join(secs)
+    return (out[0] if out else None), bool(out)
+
+
+def steps_run_step():
+    if os.name != "posix" or not all(shutil.which(x) for x in ("nice", "timeout")):
+        for n in ("a step runs niced, in a process group of its own, with standard input closed", "the timeout wrapper ends a hung step, and KILLs one that ignores TERM",
+                  "the loop ends a hung step by the PID of its group when the wrapper is absent, and a bystander of the same name lives"):
+            skip(f"steps: {n}", "needs POSIX with nice and timeout")
+        return
+    d = os.path.join(TMP, "proc")
+    os.makedirs(d)
+    probe, hang = os.path.join(d, "probe.py"), os.path.join(d, "hang.py")
+    open(probe, "w").write("import os, sys\nprint('nice', os.nice(0), 'pgid', os.getpgid(0), 'pid', os.getpid(), 'stdin', repr(sys.stdin.read()))\n")
+    open(hang, "w").write("import os, signal, sys, time\nif 'deaf' in sys.argv:\n    signal.signal(signal.SIGTERM, signal.SIG_IGN)\nprint('hanging', flush=True)\ntime.sleep(10 ** 6)\n")
+    n = [0]
+
+    def go(script, *args, timeout_s=2, kill_after_s=2, nice=10, pids=None):
+        n[0] += 1
+        return PR.run_step([sys.executable, script, *args], d, {}, os.path.join(d, f"s{n[0]}.log"), timeout_s, kill_after_s, nice, on_start=(pids.append if pids is not None else None))
+
+    run = go(probe, timeout_s=10)
+    text = open(os.path.join(d, "s1.log")).read()
+    m = re.search(r"nice (\d+) pgid (\d+) pid (\d+) stdin (.*)", text)
+    want_nice = str(min(19, os.nice(0) + 10))                               # nice -n 10 adds to this process's own niceness
+    check("steps: a step runs niced: nice -n 10, on top of this process's own niceness", run.rc == 0 and m and m.group(1) == want_nice and run.argv[:3] == ["nice", "-n", "10"], f"{run.rc} {text!r} {run.argv[:4]}")
+    old_which = PR.shutil.which
+    PR.shutil.which = lambda name, *a, **k: None if name == "timeout" else old_which(name, *a, **k)       # GNU timeout makes a process group of its own; the step's own is what is asked
+    try:
+        run_g = go(probe, timeout_s=10)
+    finally:
+        PR.shutil.which = old_which
+    mg = re.search(r"pgid (\d+) pid (\d+)", open(os.path.join(d, "s2.log")).read())
+    check("steps: a step runs in a process group of its own (start_new_session): its pid is the group's leader, not this process's group, with no timeout wrapper to make one",
+          bool(mg) and int(mg.group(1)) == run_g.pid != os.getpgid(0), f"{mg and mg.groups()} {run_g.pid} {os.getpgid(0)}")
+    r_fd, w_fd = os.pipe()                                                  # an open pipe nobody writes to, as this process's standard input
+    try:
+        saved = os.dup(0)
+    except OSError:                                                         # a harness that closed standard input
+        saved = None
+    os.dup2(r_fd, 0)
+    try:
+        run2 = go(probe, timeout_s=5)
+    finally:
+        if saved is None:
+            os.close(0)
+        else:
+            os.dup2(saved, 0)
+            os.close(saved)
+        os.close(r_fd)
+        os.close(w_fd)
+    check("steps: a step's standard input is closed: with an open pipe as this process's own, a step that reads it still gets end-of-file at once (an ssh that leaves a pipe open would hang it)",
+          run2.rc == 0 and not run2.timed_out and "stdin ''" in open(os.path.join(d, "s3.log")).read(), f"{run2.rc} {run2.timed_out}")
+    t0, pids = time.time(), []
+    r, fin = watched(lambda: go(hang, pids=pids), 40)
+    if not fin:
+        PR.kill_group(type("P", (), {"pid": pids[0]})(), "KILL")
+    t1 = time.time()
+    r2, fin2 = watched(lambda: go(hang, "deaf", pids=pids), 40)
+    if not fin2:
+        PR.kill_group(type("P", (), {"pid": pids[-1]})(), "KILL")
+    check("steps: the timeout is ENFORCED: a step that hangs is ended at its limit by the timeout wrapper (TERM, rc 124, timed_out) and one that ignores TERM is KILLed after kill_after (rc 137), "
+          "each within seconds, not at the end of its sleep",
+          fin and fin2 and r.timed_out and r.killed == "TERM" and r.rc == 124 and t1 - t0 < 15 and r2.timed_out and r2.killed == "KILL" and r2.rc in (137, -9) and time.time() - t1 < 20,
+          f"{fin} {fin2} {r and (r.rc, r.killed)} {r2 and (r2.rc, r2.killed)} {t1 - t0:.1f} s")
+    tok = f"bystander-{os.getpid()}"
+    by = subprocess.Popen([sys.executable, hang, tok], stdout=subprocess.DEVNULL)      # a process that carries the same script name and the same words
+    old = PR.shutil.which
+    PR.shutil.which = lambda name, *a, **k: None if name == "timeout" else old(name, *a, **k)
+    try:
+        t0, pids = time.time(), []
+        r, fin = watched(lambda: go(hang, tok, pids=pids), 40)
+        if not fin:
+            PR.kill_group(type("P", (), {"pid": pids[0]})(), "KILL")
+        r2, fin2 = watched(lambda: go(hang, tok, "deaf", pids=pids), 40)
+        if not fin2:
+            PR.kill_group(type("P", (), {"pid": pids[-1]})(), "KILL")
+    finally:
+        PR.shutil.which = old
+    alive = by.poll() is None
+    by.kill()
+    by.wait()
+    check("steps: with no timeout wrapper the loop ends a hung step at its limit by the PID of the process group it started (TERM; KILL for one that ignores TERM), and a bystander process "
+          "whose command line carries the same script name and words is NOT touched (a stop by pattern would have ended it)",
+          fin and fin2 and r.timed_out and r.killed == "TERM" and r2.timed_out and r2.killed == "KILL" and alive and r.argv[0] != "timeout", f"{fin} {fin2} {r and (r.rc, r.killed, r.argv[:2])} {r2 and (r2.rc, r2.killed)} bystander alive {alive}")
+
+
+def run_dry(name, steps, scenario=None, image="quad", cfg_over=None, **kw):
+    """A dry job in a root of its own, its steps against the stand-in; scenario is the stand-in's rule list. (root, id, end, records)."""
+    root, cfg = mkroot2(name, **(cfg_over or {}))
+    state = os.path.join(root, "standin-state")
+    sc = os.path.join(root, "scenario.json")
+    json.dump(scenario or [], open(sc, "w"))
+    with env(CFT_STANDIN_SCENARIO=sc, CFT_STANDIN_STATE=state):
+        j, end, rs = job(root, cfg, staged(image=image, steps=steps, **kw))
+    return root, j, end, rs
+
+
+def steps_jobs():
+    fx = fixture()
+    cat = ST.catalog()
+    tile_ex, host_ex, tile_rnd = pick_items()
+    legs = [{"type": t} for t in ("api-test", "dt-i", "dt-q8", "dt-full", "dt-r", "dt-b", "card-segrun", "seq-check", "acceptance", "resident", "selftest")]
+    steps = legs + [{"type": "acceptance-rev8", "only": ["gray_scott_hard_fp64"], "target": "u50-rev8-quad"},
+                    {"type": "soak", "item": tile_ex, "lo": 0, "hi": 1 << 20, "tile": 2}, {"type": "soak", "item": host_ex, "lo": 0, "hi": 1 << 20},
+                    {"type": "soak", "item": tile_rnd, "count": 1000, "seed": 5}]
+    calls = []
+    old = GD.KIND_SCANS["xrt"]
+    GD.KIND_SCANS["xrt"] = lambda exclude: (calls.append(1), ([], []))[1]
+    try:
+        with env(CFT_SOAK_ARTIFACT="/leaked/other.xclbin"):
+            root, j, end, rs = run_dry("s-dry", steps)
+    finally:
+        GD.KIND_SCANS["xrt"] = old
+    lg = legs_of(rs)
+    at = lambda i: lg[i] if -len(lg) <= i < len(lg) else {}               # a plant may leave the job short of legs: a check must fail, not the group
+    d = os.path.join(root, "jobs", j)
+    logs = {x["step"]: open(os.path.join(d, x["log"]), errors="replace").read() for x in lg if x.get("log")}
+    check("steps: a dry job runs every step of the registry that has a stand-in leg (the driver's twelve and the soak slices) through the DRIVER's parsers, all pass; every leg says `dry` and "
+          "`standin`, none touched a card, the end record says dry_run and card_touched false, and the job ended done",
+          end.get("outcome") == "done" and len(lg) == len(steps) and [x["status"] for x in lg] == ["pass"] * len(steps) and all(x["dry"] and x["standin"] and not x["card_touched"] for x in lg)
+          and end.get("dry_run") is True and end.get("card_touched") is False and end.get("steps_ran") == len(steps), f"{end.get('outcome')} {refusal_of(rs)!r} {[(x['leg'], x['status'], x['reason']) for x in lg if x['status'] != 'pass']}")
+    check("steps: a dry job asks no guard: nothing touches the card, so nobody else's use of it matters to it", not calls, f"{len(calls)} guard calls")
+    check("steps: a dry job builds nothing (its build record says so) and the clone it asserted is still unbuilt",
+          [s["detail"][:9] for r in rs if r["type"] == "build" for s in r["steps"]] == ["dry job: "] and os.path.isdir(os.path.join(root, "clones", fx["c2"])), str([r for r in rs if r["type"] == "build"])[:200])
+    check("steps: each leg is in the driver's leg schema and names its card (u50-0): image, image_sha256, leg, kind, start, end, duration, rc, status, counts, rate, sweep, log; "
+          "the soak legs say which slice (item, lo, hi, tile) and which kind of job they were (a host item runs on image `cpu`)",
+          all(x["card"] == "u50-0" and {"image", "image_sha256", "leg", "kind", "start_epoch", "end_epoch", "duration_s", "rc", "status", "timed_out", "killed", "counts", "rate", "sweep", "log", "log_kept", "reason", "tile", "extra"} <= set(x)
+              for x in lg) and len(lg) == len(steps) and at(0).get("image_sha256") == fx["image"]["sha256"] and at(0).get("image") == "quad" and (at(-3).get("sweep") or {}).get("item") == tile_ex
+          and (at(-3).get("sweep") or {}).get("hi") == 1 << 20 and at(-3).get("tile") == 2 and at(-2).get("image") == "cpu" and at(-2).get("image_sha256") is None
+          and (at(-3).get("rate") or {}).get("unit") in ("cases/s", "checks/s"), str(at(-3))[:300])
+    check("steps: a host item's step never sees the card: the stand-in prints the variables it was handed and a CFT_SOAK_ARTIFACT in this process's environment did not reach it, while the card "
+          "item's step gets its image and its tile",
+          "CFT_SOAK_ARTIFACT=<unset> CFT_XRT_TILES=<unset>" in logs.get(len(steps) - 2, "") and f"CFT_SOAK_ARTIFACT={fx['image']['path']} CFT_XRT_TILES=2" in logs.get(len(steps) - 3, ""),
+          logs.get(len(steps) - 2, "")[:200])
+    check("steps: every step's raw output is a file of the job's directory, named NN-STEP.log, whole, and the job's SHA256SUMS lists them (an independent sha256sum -c agrees); "
+          "no scratch directory is left behind",
+          verify_sums(d) == [] and all(f"{i:02d}-" in "".join(os.listdir(d)) for i in (0, 5, 11)) and "SHA256SUMS" in os.listdir(d) and not [n for n in os.listdir(d) if n.startswith(".")]
+          and logs and all(l.splitlines()[:1] and l.splitlines()[0].startswith("standin: would run:") for l in logs.values()), str(sorted(os.listdir(d))[:8]))
+    rc, out, err = cli(root, "status", j)
+    check("steps: `status JOB` lists the legs, each marked dry: stand-in", rc == 0 and out.count("[dry: stand-in]") == len(steps) and "step 0 api-test: pass" in out, out[:300])
+    r7, c7 = mkroot2("s-cli")
+    spec_file = os.path.join(TMP, "s-cli-spec.json")
+    json.dump(staged(steps=[{"type": "api-test"}]), open(spec_file, "w"))
+    nolock = [] if S.HAVE_FLOCK else ["--no-locks"]
+    rc1, out1, err1 = cli(r7, "submit", spec_file, runner=None)
+    rc2, out2, err2 = cli(r7, "serve", "--drain", *nolock, runner=None)
+    rc3, out3, err3 = cli(r7, "status", (out1.split() or ["j000000"])[-1], runner=None)
+    rc4, out4, err4 = cli(r7, "submit", spec_file, runner="fake")
+    check("steps: the command's default runner is the staged one: a dry staged spec is submitted, served (`serve --drain`) and ends done with no --runner, and `status JOB` lists its leg; "
+          "with --runner fake the same spec is refused `step-unknown` (the fake runner holds four step types of its own)",
+          rc1 == 0 and rc2 == 0 and "ended: done" in out2 and rc3 == 0 and "step 0 api-test: pass [dry: stand-in]" in out3 and rc4 == 2 and "step-unknown" in err4, f"{rc1} {err1[-100:]!r} {rc2} {out2!r} {err2[-100:]!r} {out3!r} {rc4} {err4[-100:]!r}")
+    fail = [{"leg": "dt-full", "nth": [1], "do": "fail"}]
+    r1 = run_dry("s-fail", [{"type": "api-test"}, {"type": "dt-full"}, {"type": "dt-r"}, {"type": "dt-b"}], fail)
+    l1 = legs_of(r1[3])
+    check("steps: a failing step (the stand-in's own failure verdict) fails the job and the steps after it are recorded `skipped` with the reason, not run",
+          r1[2].get("outcome") == "failed" and [x["status"] for x in l1] == ["pass", "fail", "skipped", "skipped"] and l1[2]["reason"] == "an earlier step failed" and r1[2].get("steps_ran") == 2, str([x["status"] for x in l1]))
+    rw = run_dry("s-wrongsha", [{"type": "dt-i"}], [{"leg": "dt-i", "nth": [1], "do": "wrongsha"}])
+    rt = run_dry("s-wrongtiles", [{"type": "dt-i"}], [{"leg": "dt-i", "nth": [1], "do": "wrongtiles"}])
+    lw, ltl = legs_of(rw[3]), legs_of(rt[3])
+    check("steps: dt-i holds the identity device-test prints to the image the job names, as the driver's own leg does: another SHA-256 or another tile count (the stand-in's wrongsha and wrongtiles) is a `fail` saying which",
+          [x["status"] for x in lw] == ["fail"] and "read the image as sha256" in (lw[0]["reason"] or "") and [x["status"] for x in ltl] == ["fail"] and "tiles" in (ltl[0]["reason"] or "")
+          and rw[2].get("outcome") == "failed", f"{[(x['status'], x['reason']) for x in lw]} {[(x['status'], x['reason']) for x in ltl]}")
+    r2 = run_dry("s-garbage", [{"type": "api-test"}], [{"leg": "api-test", "nth": [1], "do": "garbage"}])
+    l2 = legs_of(r2[3])
+    check("steps: a tool whose output moved (the stand-in's garbage: exit 0 and no verdict line) is `parse_error`, never a pass, and the job fails",
+          r2[2].get("outcome") == "failed" and [x["status"] for x in l2] == ["parse_error"] and "expected one verdict line" in (l2[0]["reason"] or ""), str(l2 and l2[0]["reason"]))
+    r3 = run_dry("s-find", [{"type": "soak", "item": tile_ex, "lo": 0, "hi": 1 << 20}, {"type": "soak", "item": tile_ex, "lo": 1 << 20, "hi": 2 << 20}, {"type": "api-test"}],
+                 [{"leg": "soak", "op": cat[tile_ex].op, "nth": [1], "do": "mismatch"}])
+    l3 = legs_of(r3[3])
+    check("steps: a soak slice that finds a mismatch is a recorded `fail` with its operands, a FINDING and not a failure: the chain goes on and the job ends done-with-findings (answer 13)",
+          r3[2].get("outcome") == "done-with-findings" and [x["status"] for x in l3] == ["fail", "pass", "pass"] and l3[0]["disagreements"] and r3[2].get("findings") == 1, f"{r3[2].get('outcome')} {[x['status'] for x in l3]}")
+    root, cfg = mkroot2("s-stop")
+    sc = os.path.join(root, "scenario.json")
+    json.dump([{"leg": "dt-q8", "nth": [1], "do": "slow:2"}], open(sc, "w"))
+    with env(CFT_STANDIN_SCENARIO=sc, CFT_STANDIN_STATE=os.path.join(root, "st")):
+        jid = S.submit(root, cfg, json.dumps(staged(image="quad", steps=[{"type": "dt-i"}, {"type": "dt-q8"}, {"type": "dt-full"}])).encode(), ST.StepRegistry())[0]
+        th = threading.Thread(target=lambda: R.serve(root, cfg, SG.StagedRunner(root, cfg), drain=True, poll=0.02, skip_locks=not S.HAVE_FLOCK, out=lambda x: None))
+        th.start()
+        wait_for(lambda: os.path.exists(os.path.join(root, "st", "n-dt-q8-any-any")), 30)      # the stand-in counts its invocation, then sleeps its two seconds
+        safely(S.cancel, root, jid, "tester")            # a plant may have ended the job already
+        th.join(120)
+    l5 = legs_of(recs(root, "jobs", jid))
+    check("steps: a stop asked while a step runs ends the job at that step's end (never in the middle of one): cancelled, the step passed whole, the later one skipped by name",
+          rec(root, "jobs", jid).get("outcome") == "cancelled" and [x["status"] for x in l5] == ["pass", "pass", "skipped"] and l5[2]["reason"] == "a stop was requested", str([(x["leg"], x["status"]) for x in l5]))
+    if os.name == "posix" and shutil.which("timeout"):
+        r6 = run_dry("s-hang", [{"type": "dt-q8", "timeout_s": 2}, {"type": "api-test"}], [{"leg": "dt-q8", "nth": [1], "do": "hang"}])
+        l6 = legs_of(r6[3])
+        check("steps: a step that hangs is a recorded `timeout` (killed TERM by the wrapper, within seconds) and the job fails, the rest skipped",
+              r6[2].get("outcome") == "failed" and [x["status"] for x in l6] == ["timeout", "skipped"] and l6[0]["timed_out"] is True and l6[0]["killed"] == "TERM" and l6[0]["duration_s"] < 15, str([(x["status"], x["duration_s"]) for x in l6]))
+    else:
+        skip("steps: a step that hangs is a recorded `timeout`", "needs the timeout wrapper (POSIX)")
+
+
+def steps_real_tools():
+    need = ("make", "sh", "git", "sha256sum", "bash", "sed")
+    if os.name != "posix" or not all(shutil.which(x) for x in need):
+        for n in ("vectors, labelled rc_only", "the exit status is never ignored", "the dry tests with their known flakes allowed by name", "the driver's smoke",
+                  "in a dry job the steps with no stand-in leg run their own commands"):
+            skip(f"steps: {n}", "needs POSIX with " + ", ".join(need))
+        return
+    path = fake_ldd("ok") + os.pathsep + os.environ["PATH"]
+    fresh = [0]
+
+    def one(steps, dry=False, **kw):
+        fresh[0] += 1
+        root, cfg = mkroot2(f"t-real{fresh[0]}")
+        j, end, rs = job(root, cfg, staged(dry_run=dry, steps=steps, **kw))
+        return root, j, end, rs, legs_of(rs)
+    with no_users(), env(PATH=path):
+        root, j, end, rs, lg = one([{"type": "vectors"}])
+        rc, out, _ = cli(root, "status", j)
+        check("steps: `vectors` (make vectors, then sha256sum -c) has no parser, so its verdict is its exit status ALONE, and it is LABELLED rc_only in its leg, in the end record and in `status JOB`",
+              end.get("outcome") == "done" and lg[0]["status"] == "pass" and lg[0]["verdict_kind"] == "rc_only" and end.get("rc_only_steps") == 1 and "step 0 vectors: pass [rc_only]" in out
+              and "rc_only" in lg[0]["notes"][0], f"{end.get('outcome')} {lg} {out}"[:300])
+        with env(FAKE_VEC_BAD="1"):
+            bad = one([{"type": "vectors"}, {"type": "api-test"}])
+        with env(FAKE_VEC_FAIL="1"):
+            failing = one([{"type": "vectors"}])
+        check("steps: the exit status is never ignored: a vectors step whose sha256sum -c fails (exit 1) or whose make fails (exit 2) is a `fail`, the job fails, and the step after it is skipped",
+              bad[2].get("outcome") == "failed" and [x["status"] for x in bad[4]] == ["fail", "skipped"] and bad[4][0]["rc"] == 1 and failing[2].get("outcome") == "failed"
+              and failing[4][0]["status"] == "fail" and failing[4][0]["rc"] == 2, f"{[(x['status'], x['rc']) for x in bad[4]]} {[(x['status'], x['rc']) for x in failing[4]]}")
+        flakes = ["telemetry hang: ", "stopfile: "]
+        with env(FAKE_DRY="flakes"):
+            allowed = one([{"type": "drytests", "known_flakes": flakes}])
+            plain = one([{"type": "drytests"}])
+        with env(FAKE_DRY="real"):
+            realf = one([{"type": "drytests", "known_flakes": flakes}])
+        with env(FAKE_DRY="lie"):
+            lie = one([{"type": "drytests", "known_flakes": flakes}])
+        check("steps: the dry tests' known flakes are allowed BY NAME in the spec, as box_nightly.sh allows two: two failures with those names pass and say so (counts, notes); the same without the "
+              "spec's allowance fail; a failure that is no flake fails; a log that says 0 failed while the suite exited 1 is parse_error",
+              allowed[2].get("outcome") == "done" and allowed[4][0]["counts"]["known_flakes"] == 2 and "known flakes" in allowed[4][0]["notes"][0] and plain[4][0]["status"] == "fail"
+              and realf[4][0]["status"] == "fail" and lie[4][0]["status"] == "parse_error" and "exit status is 1" in lie[4][0]["reason"],
+              f"{allowed[4][0]['status']} {plain[4][0]['status']} {realf[4][0]['status']} {lie[4][0]['status']}")
+        smoke = one([{"type": "driver-quick", "sweep_items": ["sqrt32-rne", "rem32"]}])
+        sdry = one([{"type": "driver-quick"}], dry=True)
+        d0 = os.path.join(smoke[0], "jobs", smoke[1])
+        log0 = open(os.path.join(d0, smoke[4][0]["log"])).read()
+        logd = open(os.path.join(sdry[0], "jobs", sdry[1], sdry[4][0]["log"])).read()
+        with env(FAKE_QUICK="fail"):
+            qf = one([{"type": "driver-quick"}])
+        with env(FAKE_QUICK="stopped"):
+            qs = one([{"type": "driver-quick"}])
+        with env(FAKE_QUICK="noend"):
+            qn = one([{"type": "driver-quick"}])
+        with env(FAKE_QUICK="dryrun"):
+            offered = one([{"type": "driver-quick"}])
+            dry_ok = one([{"type": "driver-quick"}], dry=True)
+        check("steps: the driver's own dry-run console, offered by a job that is not dry, is refused `dry-run-as-card` too (the leg is `error`); the same console in a dry job is a pass",
+              refusal_of(offered[3]).startswith("dry-run-as-card:") and offered[4][0]["status"] == "error" and offered[2].get("outcome") == "failed" and dry_ok[2].get("outcome") == "done" and dry_ok[4][0]["status"] == "pass",
+              f"{refusal_of(offered[3])!r} {[x['status'] for x in offered[4]]} {dry_ok[2].get('outcome')}")
+        seg = one([{"type": "card-segrun"}], image="quad")
+        sd, sl = os.path.join(seg[0], "jobs", seg[1]), (seg[4] or [{}])[0]
+        kept = (sl.get("extra") or {}).get("kept_dir")
+        check("steps: a failing gate's kept logs (card-segrun's `logs kept in DIR`, made under the step's TMPDIR) are moved into the job's directory beside the step's log, and the scratch directory is gone",
+              sl.get("status") == "fail" and bool(kept) and os.path.isfile(os.path.join(sd, kept or "x", "gate1.log")) and not [n for n in os.listdir(sd) if n.startswith(".tmp-")],
+              f"{sl.get('status')} {kept} {sorted(os.listdir(sd))}")
+        check("steps: a card step that ran in a job that is not dry says so: `card_touched` in its leg and in the end record (a dry job's say false)",
+              sl.get("card_touched") is True and seg[2].get("card_touched") is True and sdry[2].get("card_touched") is False, f"{sl.get('card_touched')} {seg[2].get('card_touched')} {sdry[2].get('card_touched')}")
+        im = FIX["image"]
+        check("steps: `driver-quick` runs hw/card-stress.sh --quick with an out directory in the job's own, the revision-8 cache and the registry's images the driver knows (--image quad=PATH --sha quad=SHA), "
+              "and the driver's own --dry-run in a dry job; its verdict is the driver's end line (quick_done, exit 0): a failing smoke or a stopped one is a fail, a log with no end line parse_error",
+              smoke[2].get("outcome") == "done" and "--quick --out " in log0 and "00-driver-quick --rev8-images " in log0 and f"--image quad={im['path']} --sha quad={im['sha256']}" in log0
+              and "--sweep-items sqrt32-rne,rem32" in log0 and "--dry-run" not in log0 and "--dry-run" in logd and sdry[2].get("outcome") == "done" and sdry[4][0]["standin"] is False
+              and qf[4][0]["status"] == "fail" and qs[4][0]["status"] == "fail" and qn[4][0]["status"] == "parse_error", f"{log0[:200]!r} {logd[:120]!r} {[q[4][0]['status'] for q in (qf, qs, qn)]}")
+        nv = one([{"type": "vectors"}, {"type": "drytests"}, {"type": "driver-quick"}], dry=True)
+        nlogs = {x["leg"]: open(os.path.join(nv[0], "jobs", nv[1], x["log"]), errors="replace").read() for x in nv[4] if x.get("log")}
+        check("steps: in a dry job the three steps with no stand-in leg (`vectors`, `drytests`, `driver-quick`) run their OWN commands, and their legs say `dry` and NOT `standin`: `vectors` made vectors/out in "
+              "the clone, the suite's log and the smoke's are theirs and not the stand-in's, no card was touched, and the end record says dry_run and card_touched false",
+              nv[2].get("outcome") == "done" and [x["leg"] for x in nv[4]] == ["vectors", "drytests", "driver-quick"] and all(x["dry"] is True and x["standin"] is False and x["card_touched"] is False for x in nv[4])
+              and os.path.isfile(os.path.join(nv[0], "clones", fixture()["c2"], "vectors", "out", "a.txt")) and len(nlogs) == 3 and not any(t.startswith("standin: would run:") for t in nlogs.values())
+              and "card-stress test: 600 checks" in nlogs.get("drytests", "") and "--dry-run" in nlogs.get("driver-quick", "") and nv[2].get("dry_run") is True and nv[2].get("card_touched") is False,
+              f"{nv[2].get('outcome')} {[(x['leg'], x['dry'], x['standin']) for x in nv[4]]} {sorted(nlogs)}")
+
+
+def steps_refusals():
+    fx = fixture()
+    root, cfg = mkroot2("r-inject")
+    blank = ST.Entry("blank", {}, lambda c, st: [sys.executable, "-c", "pass"], lambda c, st, t, rc: DR.L.parse_api_test(t, rc), None, card=False, build="none")
+    broken = ST.Entry("broken", {}, lambda c, st: ["x"], None, None, card=False, build="none")
+    disguised = ST.Entry("disguised", {}, lambda c, st: DR.standin("api-test", ["api-test"]), lambda c, st, t, rc: DR.L.parse_api_test(t, rc), None, card=False, build="none")
+    collide = ST.Entry("collide", {}, lambda c, st: (open(os.path.join(os.path.dirname(c.step_dir), "00-collide.log"), "w").close(), [sys.executable, "-c", "pass"])[1],
+                       lambda c, st, t, rc: DR.L.parse_api_test(t, rc), None, card=False, build="none")
+    def boom_argv(c, st):
+        raise RuntimeError("a template that raises")
+    boom = ST.Entry("boom", {}, boom_argv, lambda c, st, t, rc: DR.L.parse_api_test(t, rc), None, card=False, build="none")
+    runner = SG.StagedRunner(root, cfg, entries={**ST.ENTRIES, "blank": blank, "broken": broken, "disguised": disguised, "collide": collide, "boom": boom})
+    jb = job(root, cfg, staged(steps=[{"type": "api-test"}, {"type": "broken"}]), runner)
+    check("steps: a step type with neither a parser nor the rc_only label is refused `parser-unknown` before anything runs (no clone, no leg): its output could not be judged",
+          refusal_of(jb[2]).startswith("parser-unknown:") and "broken" in refusal_of(jb[2]) and jb[1].get("outcome") == "refused" and not legs_of(jb[2]) and not any(r["type"] == "code" for r in jb[2]), refusal_of(jb[2]))
+    jn = job(root, cfg, staged(steps=[{"type": "blank"}, {"type": "api-test"}]), runner)
+    ln = legs_of(jn[2])
+    check("steps: a step that prints nothing is recorded `parse_error` (reason no-verdict), the job is refused `no-verdict`, ends failed naming it, and the step after is skipped",
+          [x["status"] for x in ln] == ["parse_error", "skipped"] and "no-verdict" in ln[0]["reason"] and refusal_of(jn[2]).startswith("no-verdict:") and jn[1].get("outcome") == "failed"
+          and jn[1].get("refusal") == "no-verdict", f"{[x['status'] for x in ln]} {refusal_of(jn[2])!r} {jn[1].get('outcome')}")
+    jd = job(root, cfg, staged(dry_run=False, steps=[{"type": "disguised"}, {"type": "api-test"}]), runner)
+    ld = legs_of(jd[2])
+    check("steps: a stand-in's output in a job that is not dry is never recorded as a card's: the leg is `error` and says standin, the job is refused `dry-run-as-card` and fails",
+          [x["status"] for x in ld] == ["error", "skipped"] and ld[0]["standin"] is True and "dry-run-as-card" in ld[0]["reason"] and refusal_of(jd[2]).startswith("dry-run-as-card:")
+          and jd[1].get("outcome") == "failed" and jd[1].get("card_touched") is False, f"{[(x['status'], x['standin']) for x in ld]} {refusal_of(jd[2])!r}")
+    jc = job(root, cfg, staged(steps=[{"type": "collide"}]), runner)
+    check("steps: a file the job would write that exists is `job-exists`: refused, not written over, before the step runs",
+          refusal_of(jc[2]).startswith("job-exists:") and "00-collide.log" in refusal_of(jc[2]) and jc[1].get("outcome") == "refused", refusal_of(jc[2]))
+    old = GD.KIND_SCANS["xrt"]
+    GD.KIND_SCANS["xrt"] = lambda exclude: ([{"pid": 777, "why": "an xclbin argument (cft_hw_quad.xclbin)", "args": "cft-serve --artifact cft_hw_quad.xclbin"}], [])
+    try:
+        r2, c2 = mkroot2("r-busy")
+        jg = job(r2, c2, staged(dry_run=False, image="quad", steps=[{"type": "dt-i"}]))
+        jg_dry = job(r2, c2, staged(image="quad", steps=[{"type": "dt-i"}]))
+    finally:
+        GD.KIND_SCANS["xrt"] = old
+    check("steps: a job with a card step that is not dry asks the guard BEFORE it clones anything: a foreign user is `card-busy-foreign` (naming the pid), a `guard_refused` record, no clone, no leg, "
+          "the card untouched; the same job as a dry run does not ask",
+          refusal_of(jg[2]).startswith("card-busy-foreign:") and "pid 777" in refusal_of(jg[2]) and jg[1].get("outcome") == "refused" and any(r["type"] == "guard_refused" for r in jg[2])
+          and not any(r["type"] == "code" for r in jg[2]) and not legs_of(jg[2]) and jg[1].get("card_touched") is False and jg_dry[1].get("outcome") == "done", f"{refusal_of(jg[2])!r} {jg_dry[1].get('outcome')}")
+    r3, c3 = mkroot2("r-boom")
+    boom1 = S.submit(r3, c3, json.dumps(staged(steps=[{"type": "api-test"}, {"type": "boom"}, {"type": "api-test"}])).encode(), runner.registry)[0]
+    boom2 = S.submit(r3, c3, json.dumps(staged()).encode(), runner.registry)[0]
+    served = safely(lambda: R.serve(r3, c3, SG.StagedRunner(r3, c3, entries=runner.entries), drain=True, poll=0.02, skip_locks=not S.HAVE_FLOCK, out=lambda x: None))
+    boom_rs = recs(r3, "jobs", boom1)
+    check("steps: an unexpected error while a job runs (here a command template that raises) ends THAT job, recorded (`runner_error` with the error, the later steps skipped, outcome failed) and "
+          "never the service: the next job in the queue still runs",
+          served == 2 and rec(r3, "jobs", boom1).get("outcome") == "failed" and any(r["type"] == "runner_error" and "RuntimeError" in r["error"] for r in boom_rs)
+          and [x["status"] for x in legs_of(boom_rs)] == ["pass", "skipped", "skipped"] and rec(r3, "jobs", boom2).get("outcome") == "done", f"{served} {rec(r3, 'jobs', boom1).get('outcome')} {[r['type'] for r in boom_rs]}")
+    jw = job(root, cfg, staged(kind="window"))
+    check("steps: a job of kind window is refused `window-unsupported` by this runner (the window job is S3's), before anything runs: no clone, no leg, never run as a staged job",
+          refusal_of(jw[2]).startswith("window-unsupported:") and jw[1].get("outcome") == "refused" and not legs_of(jw[2]) and not any(r["type"] == "code" for r in jw[2]), refusal_of(jw[2]))
+    def claimed_then_lost(name, **lose):
+        """A staged job claimed against the whole configuration and run by a runner whose configuration has since lost something: the job's records."""
+        rt, ct = mkroot2(name)
+        S.submit(rt, ct, json.dumps(staged(image="quad", steps=[{"type": "api-test"}])).encode(), ST.StepRegistry())
+        gid, gspec, glog = S.claim_next(rt, ct, "u50-0", time.time(), ST.StepRegistry())
+        R.run_claimed(rt, gid, gspec, glog, SG.StagedRunner(rt, {**ct, **lose}))
+        return recs(rt, "jobs", gid)
+    lost_image, lost_card = claimed_then_lost("r-lost-image", images=[]), claimed_then_lost("r-lost-card", cards=[])
+    check("steps: a registry that lost the job's image, or a configuration that lost its card, between the claim and the run is refused by name (`image-unknown`, `card-unknown`): the job ends refused "
+          "with the refusal recorded, no `runner_error`, nothing cloned, no leg",
+          all(x and x[-1].get("outcome") == "refused" and not legs_of(x) and not any(r["type"] in ("runner_error", "code") for r in x) for x in (lost_image, lost_card))
+          and refusal_of(lost_image).startswith("image-unknown:") and "quad" in refusal_of(lost_image) and refusal_of(lost_card).startswith("card-unknown:") and "u50-0" in refusal_of(lost_card),
+          f"{refusal_of(lost_image)!r} {refusal_of(lost_card)!r} {[r['type'] for r in lost_image]} {[r['type'] for r in lost_card]}")
+    check("steps: the end record of a job that ran says whether it touched the card and whether it was dry, and a job the runner refused is `refused` with the refusal named",
+          jb[1].get("refusal") == "parser-unknown" and jb[1].get("dry_run") is True and jb[1].get("card_touched") is False and jb[1].get("commit") == fx["c2"], str(jb[1]))
+
+
+def table_checks(only=None):
     """Two checks on the refusals' table. (1) It holds every name of the study's section 5.4, read from the study. (2) Each name it
     gives to S1 was raised by a scenario and left a record exactly where its row says: `job` a job's `refused` record and nowhere
     else, `root` a line of refusals.jsonl and nowhere else, `job, root` both, `none` (no usable root to write in) stderr only."""
@@ -826,6 +1912,8 @@ def table_checks():
         study = set(re.findall(r"`([a-z]+(?:-[a-z]+)+)`", text[text.index("### 5.4 Refusals, by name"):text.index("### 5.5")]))
         missing = sorted(study - set(N.REFUSALS))
         check("the table: it holds every refusal name of the study's section 5.4 (read from the study, not copied)", len(study) >= 30 and not missing, f"{len(study)} names read, missing {missing}")
+    s1_ran = only is None or {"spec", "queue", "records", "cli", "locks"} <= only         # a location check needs the scenarios it reads the records of
+    s2_ran = only is None or {"code", "build", "images", "guard", "steps"} <= only
     in_jobs, in_root = set(), set()
     for r in ROOTS:
         in_root |= {x.get("name") for x in S.read_records(os.path.join(r, "refusals.jsonl"))}
@@ -835,25 +1923,37 @@ def table_checks():
     off = {"locks-unavailable"} if S.HAVE_FLOCK else {"lock-held", "locks-required"}        # what this platform cannot raise
     wrong = []
     for n, (by, where, _m) in N.REFUSALS.items():
-        if by == "S1" and n not in off:
+        if s1_ran and by == "S1" and n not in off:
             want = ("job" in where.split(", "), "root" in where.split(", "))
             if (n in in_jobs, n in in_root) != want or (where == "none" and n not in SEEN):
                 wrong.append(f"{n} (row says {where}; jobs {n in in_jobs}, refusals.jsonl {n in in_root}, stderr {n in SEEN})")
-    check("the table: every refusal it gives to S1 was raised by a scenario and left a record exactly where its row says", not wrong, f"wrong: {wrong}")
+    if s1_ran:
+        check("the table: every refusal it gives to S1 was raised by a scenario and left a record exactly where its row says", not wrong, f"wrong: {wrong}")
+    if not s2_ran:
+        return
+    off2 = set() if os.name == "posix" else {"clone-built", "build-failed", "xrt-not-linked", "build-id-mismatch"}         # the build's scenarios need POSIX
+    wrong2 = [n for n, (by, where, _m) in N.REFUSALS.items() if by == "S2" and where != "label" and n not in off2 and (n not in in_jobs or n in in_root)]
+    labels = [n for n, (by, where, _m) in N.REFUSALS.items() if where == "label"]
+    check("the table: every refusal it gives to S2 was raised by a scenario THROUGH THE RUNNER and left its `refused` record in the job and nowhere else; "
+          "the one label (`rc-only`) is raised by nothing, and its scenario is the vectors step's leg",
+          not wrong2 and labels == ["rc-only"] and not (set(labels) & (in_jobs | in_root)), f"not raised, or filed wrong: {wrong2}; labels {labels}")
 
 
 # ---------------------------------------------------------------------------------------- plants
 
-GROUPS = {"spec": group_spec, "queue": group_queue, "records": group_records, "cli": group_cli, "locks": group_locks}
+GROUPS = {"spec": group_spec, "queue": group_queue, "records": group_records, "cli": group_cli, "locks": group_locks,
+          "code": group_code, "build": group_build, "images": group_images, "guard": group_guard, "steps": group_steps}
 
 
 def make_copy(name: str, edits: list) -> str:
-    d = os.path.join(TMP, "plant-" + name)
+    d = os.path.join(TMP, "plant-" + re.sub(r"[^A-Za-z0-9_.,-]+", "-", name))             # a part of a group (steps:jobs) names a directory: no colon on Windows
     os.makedirs(os.path.join(d, "sched"))
     shutil.copy(os.path.join(HERE, "test_sched.py"), d)
     for f in os.listdir(SCHED):
         if f.endswith(".py") or f == "cft-sched":
             shutil.copy(os.path.join(SCHED, f), os.path.join(d, "sched"))
+    for f in ("card_stress.py", "card_stress_lib.py", "card_stress_standin.py"):          # the driver, beside the copy, unchanged: the scheduler imports it (sched_driver.py)
+        shutil.copy(os.path.join(HERE, f), d)
     for fname, old, new in edits:
         p = os.path.join(d, "sched", fname)
         text = open(p, "r", encoding="utf-8", newline="").read()
@@ -871,7 +1971,8 @@ def run_copy(d: str, groups: str):
 
 
 def whole(d: str) -> bool:
-    imp = "import sys; sys.path.insert(0, sys.argv[1]); import sched_names, sched_spec, sched_config, sched_state, sched_run, cft_sched"
+    imp = ("import sys; sys.path.insert(0, sys.argv[1]); import sched_names, sched_spec, sched_config, sched_state, sched_run, cft_sched, sched_driver, sched_proc, "
+           "sched_guard, sched_code, sched_images, sched_build, sched_steps, sched_staged")
     return subprocess.run([sys.executable, "-B", "-I", "-c", imp, os.path.join(d, "sched")], capture_output=True).returncode == 0
 
 
@@ -952,13 +2053,122 @@ PLANTS = [  # (what is wrong, edits, the groups written for it, a fragment of th
      "spec,queue,records,cli,locks,table", "left a record exactly where its row says", None),
     ("an unknown key in config.json is accepted", [E("sched_config.py", "        if k not in required + optional:", "        if False:")], "cli", "config.json with an unknown top-level key is refused", False),
     ("a card's worker takes another card's job", [E("sched_state.py", "            if want in cards and want != card_id:\n                continue", "            if False:\n                continue")], "queue", "a job runs on the card it names", False),
+    # ---- parcel S2: the code stage, the images, the guard, the build, the steps. `posix` is "posix" where the scenario needs POSIX (make, sh, nice, timeout, /proc).
+    ("S2: HEAD is not asserted", [E("sched_code.py", "    if rc != 0 or head != sha:", "    if False:")], "code", "a clone in the cache whose HEAD is not the spec's commit is refused", False),
+    ("S2: a clone in the cache is repaired, not asserted", [E("sched_code.py", '    facts = assert_clone(clone, sha, code.get("assert") or {})',
+                                                          '    git(clone, "checkout", "-q", "--detach", sha)\n    facts = assert_clone(clone, sha, code.get("assert") or {})')],
+     "code", "a clone in the cache whose HEAD is not the spec's commit is refused", False),
+    ("S2: a dirty status is not asserted", [E("sched_code.py", "    if rc != 0 or changed:", "    if False:")], "code", "a clone whose HEAD is right and whose status is not clean is refused", False),
+    ("S2: a string's count is ignored", [E("sched_code.py", "        if found != count:", "        if False:")], "code", "each string is found exactly the stated number of times", False),
+    ("S2: the rtl/ tree is not compared", [E("sched_code.py", '    if want is not None and facts["rtl_tree"] != want:', "    if False:")], "code", "the rtl/ tree the spec names is compared", False),
+    ("S2: a commit that is no ancestor is accepted", [E("sched_code.py", '        if git(clone, "merge-base", "--is-ancestor", anc, "HEAD")[0] != 0:', "        if False:")], "code", "a named ancestor is checked", False),
+    ("S2: an unpushed commit runs without the spec's word", [E("sched_code.py", '    if state != "pushed" and not allowed:', "    if False:")], "code", "a commit no branch of the remote holds is refused `commit-unpushed`", False),
+    ("S2: the registry's SHA-256 is not compared to the file's", [E("sched_images.py", '    if digest != entry["sha256"]:', "    if False:")], "images", "a registry whose SHA-256 is not the file's is refused", False),
+    ("S2: SHA256SUMS is not compared", [E("sched_images.py", "    if listed != digest:", "    if False:")], "images", "the directory's SHA256SUMS is compared", False),
+    ("S2: the manifest's SHA-256 is not compared", [E("sched_images.py", '    if man.get("sha256") != digest:', "    if False:")], "images", "the manifest beside the image is a witness too", False),
+    ("S2: the tile count is not compared", [E("sched_images.py", "    if found != want:", "    if False:")], "images", "the tile count is the manifest's number of compute units", False),
+    ("S2: the platform is not compared", [E("sched_images.py", "    if not plat == rplat == cplat:", "    if False:")], "images", "the platform must be the manifest's", False),
+    ("S2: a job's image is not held to its files", [E("sched_staged.py", "            image = IM.check_image(entry, card)", '            image = dict(entry, path=IM.expand(entry["path"]))')],
+     "images", "through a job the same refusals end it refused", False),
+    ("S2: the guard is blind to an idle cft-serve", [E("sched_guard.py", "    return CS.find_card_users(exclude_pids=set(exclude_pids))",
+                                                   '    users, beside = CS.find_card_users(exclude_pids=set(exclude_pids))\n    return [u for u in users if "cft-serve" not in u["args"]], beside')],
+     "guard", "an idle `cft-serve --artifact IMAGE` is a card user", False),
+    ("S2: the guard counts its own process and the shell above it", [E("sched_guard.py", "    return CS.find_card_users(exclude_pids=set(exclude_pids))",
+                                                                  '    users, beside = CS.find_card_users(exclude_pids=set(exclude_pids))\n    procs, mine, cur = {p["pid"]: p for p in CS.list_processes()}, [], __import__("os").getpid()\n'
+                                                                  '    while cur in procs and cur not in [m["pid"] for m in mine]:\n'
+                                                                  '        mine.append({"pid": cur, "why": CS.card_user(procs[cur]), "args": " ".join(procs[cur]["args"])})\n        cur = procs[cur]["ppid"]\n'
+                                                                  '    return users + [m for m in mine if m["why"]], beside')],
+     "guard", "the process that asks, what it started and the shell that launched it are not foreign users", False),
+    ("S2: the ldd check is dropped", [E("sched_build.py", "        elif not linked:", "        elif False:")], "build", "a tool whose ldd does not name xrt_coreutil is refused", "posix"),
+    ("S2: the build id is not compared", [E("sched_build.py", "    if trc != 0 or brc != 0 or not bin_id or bin_id != tree_id:", "    if False:")], "build", "the tools' build id is held to the tree's", "posix"),
+    ("S2: the tree's build id is not held to the commit", [E("sched_build.py", "    if tree_id != want:", "    if False:")], "build", "and the tree's id must name the job's commit", "posix"),
+    ("S2: a failing make is not refused", [E("sched_build.py", '    if rc != 0:\n        raise Refusal("build-failed", f"make exited', '    if False:\n        raise Refusal("build-failed", f"make exited')],
+     "build", "a make that fails is refused `build-failed`", "posix"),
+    ("S2: the dry tests are allowed in a built clone", [E("sched_build.py", "    if products:", "    if False:")], "build", "the dry tests are refused `clone-built` in a clone that has been built", "posix"),
+    ("S2: a step that forbids the build is not asked", [E("sched_staged.py", '            if e.build == "forbids":', "            if False:")], "build", "the dry tests are refused `clone-built` in a clone that has been built", "posix"),
+    ("S2: a parser passes a log with no verdict", [E("sched_steps.py", '    m = _one(DRIVER_END, text, "driver end line")\n',
+                                                '    m = DRIVER_END.search(text)\n    if m is None:\n        return L.Verdict(True, {"exit": 0})\n')],
+     "steps:parsers", "parse_driver_quick refuses a log with no end line", False),
+    ("S2: a parsed step's exit status is ignored", [E("sched_steps.py", '        _rc_agrees(rc, True, "drytests")', "        pass")], "steps:parsers", "parse_drytests refuses (VerdictError", False),
+    ("S2: a step with no parser ignores its exit status", [E("sched_steps.py", '        return ("pass" if run.rc == 0 else "fail"), L.Verdict(run.rc == 0, {}, [f"rc_only:',
+                                                         '        return "pass", L.Verdict(True, {}, [f"rc_only:')], "steps:parsers", "a step with no parser is judged by its exit status ALONE", False),
+    ("S2: known flakes are allowed without the spec's word", [E("sched_steps.py", "    flakes = [f for f in fails if any(f.startswith(k) for k in known_flakes)]", "    flakes = list(fails)")],
+     "steps:parsers", "parse_drytests reads the suite's last line", False),
+    ("S2: an rc_only verdict is not labelled", [E("sched_staged.py", '"verdict_kind": "rc_only" if e.rc_only else "parsed"', '"verdict_kind": "parsed"')], "steps:real",
+     "`vectors` (make vectors, then sha256sum -c) has no parser", "posix"),
+    ("S2: a stand-in's output is recorded as a card's", [E("sched_staged.py", "        offered = is_dry_text(text) and not dry", "        offered = False")], "steps:refusals",
+     "a stand-in's output in a job that is not dry is never recorded as a card's", False),
+    ("S2: a dry job's legs do not say standin", [E("sched_staged.py", "standin=wrapped or offered,", "standin=False,")], "steps:jobs", "a dry job runs every step of the registry that has a stand-in leg", False),
+    ("S2: a dry job asks the guard", [E("sched_staged.py", "        if not dry and any(self.entries[s[\"type\"]].is_card(s) for s in steps):", "        if any(self.entries[s[\"type\"]].is_card(s) for s in steps):")],
+     "steps:jobs", "a dry job asks no guard", False),
+    ("S2: a dry job builds", [E("sched_staged.py", "        if dry:\n            rec = BD.dry_record()", "        if False:\n            rec = BD.dry_record()")], "steps:jobs", "a dry job builds nothing", False),
+    ("S2: a job with a card step does not ask the guard at its start", [E("sched_staged.py", '            GD.hold_until_clear(log, card["kind"], 0, rcfg["guard_poll_s"])', "            pass")],
+     "steps:refusals", "a job with a card step that is not dry asks the guard BEFORE it clones anything", False),
+    ("S2: a failed step does not skip the rest", [E("sched_staged.py", '            S.failed, S.skip = True, "an earlier step failed"', "            S.failed = True")], "steps:jobs",
+     "a failing step (the stand-in's own failure verdict) fails the job", False),
+    ("S2: a soak mismatch fails the chain", [E("sched_staged.py", '        if status == "fail" and e.finding:', "        if False:")], "steps:jobs", "a soak slice that finds a mismatch is a recorded `fail`", False),
+    ("S2: a step type with no parser runs", [E("sched_staged.py", "            if e.parse is None and not e.rc_only:", "            if False:")], "steps:refusals", "a step type with neither a parser nor the rc_only label is refused", False),
+    ("S2: a blank log is not no-verdict", [E("sched_staged.py", "        if no_verdict:", "        if False:")], "steps:refusals", "a step that prints nothing is recorded `parse_error`", False),
+    ("S2: a file the job would write is written over", [E("sched_proc.py", '        return open(path, "xb")', '        return open(path, "wb")')], "steps:refusals", "a file the job would write that exists is `job-exists`", False),
+    ("S2: an unexpected error ends the service", [E("sched_staged.py", "        except Exception as e:                                        # a defect here", "        except KeyboardInterrupt as e:                                # a defect here")],
+     "steps:refusals", "an unexpected error while a job runs", False),
+    ("S2: the command's default runner is the fake one", [E("cft_sched.py", 'choices=("staged", "fake"), default="staged"', 'choices=("staged", "fake"), default="fake"')],
+     "steps:jobs", "the command's default runner is the staged one", False),
+    ("S2: a driver's own dry run is recorded as a card's", [E("sched_driver.py", " or any(DRY_RUN_LINE.search(ln) for ln in head)", " or False")], "steps:real",
+     "the driver's own dry-run console, offered by a job that is not dry", "posix"),
+    ("S2: a failed clone is left behind", [E("sched_code.py", "        if os.path.isdir(tmp):\n            remove_tree(tmp)", "        if False:\n            remove_tree(tmp)")], "code",
+     "a full commit the bundle does not hold is refused `commit-missing`", False),
+    ("S2: a card kind has no image check", [E("sched_config.py", 'CARD_KINDS = {"xrt": "an Alveo card driven through XRT over PCIe (the U50)"}', 'CARD_KINDS = {"xrt": "an Alveo card driven through XRT over PCIe (the U50)", "serial": "x"}')],
+     "images", "every kind of card the configuration admits has its image check, its guard and its build", False),
+    ("S2: the build's targets are not the driver's", [E("sched_build.py", '"api-test", "remote-test", "divsqrt-soak", "clause5-soak"]\nTOOLS', '"api-test", "divsqrt-soak", "clause5-soak"]\nTOOLS')], "build",
+     "the targets, the tools and the optional tools are the driver's own", False),
+    ("S2: the build is made without XRT=1", [E("sched_build.py", "    flags = [\"XRT=1\", f\"XRT_ROOT={rcfg['xrt_root']}\"]", "    flags = [f\"XRT_ROOT={rcfg['xrt_root']}\"]")], "build",
+     "a clean build is made on the clone with XRT=1", "posix"),
+    ("S2: a leg's command is not the driver's", [E("sched_steps.py", '**_dt(["-n", "4096"], "full")', '**_dt(["-n", "4097"], "full")')], "steps:registry",
+     "the registry's command for each of the driver's legs, on each image", False),
+    ("S2: a host job inherits the card's environment", [E("sched_staged.py", "drop = CS.HOST_JOB_DROPS", "drop = ()")], "steps:jobs", "a host item's step never sees the card", False),
+    ("S2: a stop is not looked for between steps", [E("sched_staged.py", "            if not S.skip and stop.requested():", "            if False:")], "steps:jobs",
+     "a stop asked while a step runs ends the job at that step's end", False),
+    ("S2: a failing gate's kept logs are lost", [E("sched_staged.py", "            shutil.move(kd, dest)", "            pass")], "steps:real", "a failing gate's kept logs", "posix"),
+    ("S2: a card step that ran is not marked card_touched", [E("sched_staged.py", "card_touched=bool(e.is_card(st) and not dry and run.pid is not None)", "card_touched=False")], "steps:real",
+     "a card step that ran in a job that is not dry says so", "posix"),
+    ("S2: a registry path's environment variable is not expanded", [E("sched_images.py", "    return os.path.expandvars(os.path.expanduser(path))", "    return path")], "images",
+     "a registry path may carry an environment variable", False),
+    ("S2: dt-i's image identity is not held", [E("sched_steps.py", '    if e.get("image_sha256") != im["sha256"]:', "    if False:")], "steps:jobs", "dt-i holds the identity", False),
+    ("S2: a window job is run as a staged one", [E("sched_staged.py", '        if spec["kind"] != "staged":', "        if False:")], "steps:refusals", "a job of kind window is refused `window-unsupported`", False),
+    ("S2: a timeout is not enforced", [E("sched_proc.py", '        if shutil.which("timeout"):', "        if False:"),
+                                   E("sched_proc.py", '        deadline = time.monotonic() + timeout_s + (kill_after_s + 30 if POSIX and shutil.which("timeout") else 0)', "        deadline = time.monotonic() + 10 ** 9")],
+     "steps:run_step", "the timeout is ENFORCED", "posix"),
+    ("S2: a process is stopped by pattern and not by PID", [E("sched_proc.py", '            os.killpg(proc.pid, signal.SIGTERM if sig == "TERM" else signal.SIGKILL)',
+                                                           '            subprocess.run(["pkill", "-" + ("TERM" if sig == "TERM" else "KILL"), "-f", next(a for a in map(str, proc.args) if a.startswith("bystander-"))])')],
+     "steps:run_step", "with no timeout wrapper the loop ends a hung step", "posix"),
+    ("S2: a step is not niced", [E("sched_proc.py", '        if nice and shutil.which("nice"):', "        if False:")], "steps:run_step", "a step runs niced", "posix"),
+    ("S2: a step stays in the scheduler's process group", [E("sched_proc.py", 'kw = {"start_new_session": True} if POSIX else', "kw = {} if POSIX else")], "steps:run_step", "a step runs in a process group of its own", "posix"),
+    ("S2: a step's standard input is left open", [E("sched_proc.py", "stdin=subprocess.DEVNULL, env=env, cwd=cwd", "stdin=None, env=env, cwd=cwd")], "steps:run_step", "a step's standard input is closed", "posix"),
+    ("S2: a refusal the table gives to S2 that nothing raises", [E("sched_names.py", '    "card-busy-foreign": ("S2", "job",', '    "never-raised-s2": ("S2", "job", "x"), "card-busy-foreign": ("S2", "job",')],
+     "code,build,images,guard,steps,table", "the table: every refusal it gives to S2", None),
+    ("S2: a cached clone's pushed ref outlives the remote's branch", [E("sched_code.py", '"--no-tags", "--prune", remote', '"--no-tags", remote')], "code",
+     "a cached clone does not go on answering `pushed` for a branch the remote has since deleted", False),
+    ("S2: every leg of a dry job says standin", [E("sched_staged.py", "standin=wrapped or offered,", "standin=dry or offered,")], "steps:real",
+     "in a dry job the three steps with no stand-in leg", "posix"),
+    ("S2: a registry that lost the job's image is a runner_error", [E("sched_staged.py", 'entry = next((i for i in cfg["images"] if i["name"] == spec["image"]), None)',
+                                                                       'entry = next(i for i in cfg["images"] if i["name"] == spec["image"])')],
+     "steps:refusals", "a registry that lost the job's image, or a configuration that lost its card", False),
+    ("S2: a configuration that lost the job's card is a runner_error", [E("sched_staged.py", 'card = next((c for c in cfg["cards"] if c["id"] == log.card), None)',
+                                                                           'card = next(c for c in cfg["cards"] if c["id"] == log.card)')],
+     "steps:refusals", "a registry that lost the job's image, or a configuration that lost its card", False),
 ]
+
+
+def plant_skipped(posix) -> bool:
+    """True where a plant's scenario cannot run on this platform (it needs flock(2), a platform without it, or POSIX)."""
+    return (posix == "flock" and not S.HAVE_FLOCK) or (posix == "noflock" and S.HAVE_FLOCK) or (posix == "posix" and os.name != "posix")
 
 
 def plants(only_text: str | None):
     ctl = {}
     if not only_text:
-        for g in sorted({p[2] for p in PLANTS}):
+        for g in sorted({p[2] for p in PLANTS if not plant_skipped(p[4])}):               # a group whose every plant is skipped here makes 0 checks: no control
             d = make_copy("control-" + g, [])
             rc, n, fails, err = run_copy(d, g)
             ctl[g] = n
@@ -966,8 +2176,8 @@ def plants(only_text: str | None):
     for n, (label, edits, g, want, posix) in enumerate(PLANTS):
         if only_text and only_text not in label:
             continue
-        if (posix == "flock" and not S.HAVE_FLOCK) or (posix == "noflock" and S.HAVE_FLOCK):
-            skip(f"plant [{label}]", "needs POSIX (flock(2), file modes), which this platform lacks" if posix == "flock" else "needs a platform without flock(2)")
+        if plant_skipped(posix):
+            skip(f"plant [{label}]", "needs a platform without flock(2)" if posix == "noflock" else "needs POSIX (flock(2), make, nice, timeout, /proc), which this platform lacks")
             continue
         try:
             d = make_copy(f"{n:02d}-" + re.sub(r"\W+", "-", label)[:24], edits)         # numbered: two labels may start alike
@@ -986,13 +2196,14 @@ def plants(only_text: str | None):
 
 def main() -> int:
     global TMP
-    only = set(sys.argv[sys.argv.index("--only") + 1].split(",")) if "--only" in sys.argv else None
+    global ONLY
+    only = ONLY = set(sys.argv[sys.argv.index("--only") + 1].split(",")) if "--only" in sys.argv else None
     plant_text = sys.argv[sys.argv.index("--plant") + 1] if "--plant" in sys.argv else None
     TMP = tempfile.mkdtemp(prefix="sched-test-")
     t0 = time.time()
     try:
         for name, fn in GROUPS.items():
-            if (only is None or name in only) and not plant_text:
+            if (only is None or name in only or any(o.startswith(name + ":") for o in only)) and not plant_text:
                 before, bad = CHECKS, len(FAILS)
                 try:
                     fn()
@@ -1001,11 +2212,14 @@ def main() -> int:
                     check(f"{name}: the group ran to its end", False, "it crashed (traceback above)")
                 print(f"{name}: {CHECKS - before} checks, {len(FAILS) - bad} failed")
         if (only is None or "table" in only) and not plant_text:
-            table_checks()
+            table_checks(only)
         if (only is None or "plants" in only) and "--no-plants" not in sys.argv:
             plants(plant_text)
     finally:
-        shutil.rmtree(TMP, ignore_errors=True)
+        try:
+            CODE.remove_tree(TMP)            # git's object files are read-only, and Windows will not delete those without a chmod first
+        except OSError:
+            shutil.rmtree(TMP, ignore_errors=True)
     print(f"sched test: {CHECKS} checks, {len(FAILS)} failed, {len(SKIPS)} skipped, {time.time() - t0:.0f} s")
     for f in FAILS:
         print("  FAILED:", f[:300])

@@ -7,6 +7,7 @@ A refusal is raised by name (`Refusal`) and leaves a record where its row says:
   root  a line in <root>/refusals.jsonl (a name filed "job, root" leaves its record in the job when a job raised it, and in
         refusals.jsonl when a command did, such as a hold naming a card that is not there);
   none  nowhere: there is no usable state root to write in, so the name is printed and nothing else is.
+  label not a refusal: a word the records carry (`rc-only`), kept in the table because the study lists it among the names.
 `by` is the parcel that raises it (docs/studies/SCHED-A-card-scheduler.md, section 6): a name whose parcel
 has not landed is here so that the vocabulary is whole, and the test holds every S1 name to a scenario
 that raises it. An outcome is the last word of a job's last record.
@@ -40,30 +41,30 @@ REFUSALS = {
     "card-not-held": ("S1", "root", "release of a card that has no hold"),
     "job-unknown": ("S1", "root", "no job has this id (or it is not an id: j and six or more digits)"),
     "job-ended": ("S1", "root", "cancel of a job that already has an outcome"),
-    # -- the code and the build (S2)
-    "commit-missing": ("S2", "job", "the commit is not in the source"),
-    "commit-unpushed": ("S2", "job", "the commit is not on the remote and the spec does not allow it"),
+    # -- the code, the build, the images, the guard and the steps (S2)
+    "commit-missing": ("S2", "job", "the commit is not in the source: the bundle or the remote is not configured or cannot be read, or does not hold it"),
+    "commit-unpushed": ("S2", "job", "the commit is not shown to be on the remote (no branch of it holds it, or the remote cannot be read) and the spec does not allow it"),
     "head-mismatch": ("S2", "job", "the clone's HEAD is not the spec's commit"),
-    "tree-dirty": ("S2", "job", "the clone's status is not clean"),
+    "tree-dirty": ("S2", "job", "the clone's status is not clean: a changed tracked file, or an untracked one"),
     "rtl-mismatch": ("S2", "job", "the rtl/ tree is not the one the spec names"),
-    "content-missing": ("S2", "job", "a string the spec names was not found the stated number of times"),
-    "ancestor-missing": ("S2", "job", "a commit the spec names is not an ancestor"),
-    "clone-built": ("S2", "job", "the dry tests were asked of a clone holding products this job did not make"),
-    "build-failed": ("S2", "job", "the build did not succeed"),
-    "xrt-not-linked": ("S2", "job", "a built tool does not link XRT"),
-    "build-id-mismatch": ("S2", "job", "the tools' build id is not the tree's"),
-    "image-digest": ("S2", "job", "an image's SHA-256 differs from the registry's or the SHA256SUMS"),
-    "image-tiles": ("S2", "job", "an image's tile count differs from the registry's"),
-    "image-platform": ("S2", "job", "an image's platform is not the card's"),
-    "parser-unknown": ("S2", "job", "a step has no parser for its output"),
-    "no-verdict": ("S2", "job", "a step's output holds no verdict line"),
-    "rc-only": ("S2", "job", "a verdict that is only an exit status, labelled so wherever it appears"),
+    "content-missing": ("S2", "job", "a string the spec names was not found the stated number of times in its file, or the file is not there"),
+    "ancestor-missing": ("S2", "job", "a commit the spec names is not in the clone, or is not an ancestor of the job's commit"),
+    "clone-built": ("S2", "job", "the dry tests were asked of a clone holding ignored build products under host/ (parcel P5, KL-13, removes the cause; this one check can then be retired)"),
+    "build-failed": ("S2", "job", "the build did not succeed: make failed, or a tool it was to make is not there"),
+    "xrt-not-linked": ("S2", "job", "a built tool does not link XRT (ldd)"),
+    "build-id-mismatch": ("S2", "job", "the tools' build id is not the tree's, or the tree's does not name the job's commit on a clean tree"),
+    "image-digest": ("S2", "job", "an image's SHA-256 differs between the file, the registry, its directory's SHA256SUMS and its manifest, or the file or its sums cannot be read"),
+    "image-tiles": ("S2", "job", "an image's tile count (its manifest's clock_cus) differs from the registry's, or the manifest or the registry's count is not there"),
+    "image-platform": ("S2", "job", "an image's platform (its manifest's) is not the registry's and the card's, or one of them is not given"),
+    "parser-unknown": ("S2", "job", "a step type has neither a parser nor the rc_only label: its output could not be judged"),
+    "no-verdict": ("S2", "job", "a step's log holds nothing at all, so no verdict can be read from it (the leg is recorded parse_error)"),
+    "rc-only": ("S2", "label", "a LABEL, never raised: a verdict that is only an exit status is recorded `verdict_kind: rc_only` wherever it appears"),
     "dry-run-as-card": ("S2", "job", "a stand-in's output was offered as a card's"),
-    "job-exists": ("S2", "job", "a path the job would write (a step's log, a clone or run directory) already exists: refused rather than written over (the study's 5.3: 'refuse if the outputs exist')"),
+    "job-exists": ("S2", "job", "a path the job would write (a step's log) already exists: refused rather than written over (the study's 5.3: 'refuse if the outputs exist')"),
+    "card-busy-foreign": ("S2", "job", "a process the scheduler does not own uses the card, by the driver's own rule (find_card_users): refused at once at a job's start, waited for between steps up to the configured limit"),
     # -- the cards and the windows (S3)
     "card-unavailable": ("S3", "job", "the card did not answer its start-up look"),
     "card-quarantined": ("S3", "job", "the card is quarantined"),
-    "card-busy-foreign": ("S3", "job", "a process the scheduler does not own uses the card"),
     "window-closed": ("S3", "job", "the named window is not open"),
     "window-bad": ("S3", "job", "the spec names a window the configuration does not hold"),
     "window-too-short": ("S3", "job", "the estimate exceeds the window"),
