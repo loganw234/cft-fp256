@@ -2,7 +2,7 @@
  "figure": "verify-stages",
  "title": "The runner's stages, and which budget runs each",
  "group": "verification",
- "alt": "The 52 stages of the verification runner in eight groups, each shaded by the smallest budget that runs it: 31 in quick, 13 more in gate, 8 only in the full census.",
+ "alt": "The 53 stages of the verification runner in eight groups, each shaded by the smallest budget that runs it: 31 in quick, 14 more in gate, 8 only in the full census.",
  "files": ["docs/img/figures/verify-stages-light.svg", "docs/img/figures/verify-stages-dark.svg"],
  "maker": "python/project_figures.py: build_verify_stages, draw_verify_stages",
  "commit": "0b77387ea1266f4d4a5e30c8798f57e8b6dc6ef8",
@@ -10,8 +10,8 @@
  "sources": [
   {
    "path": "verify/run.sh",
-   "sha256": "a4c8852cebb12cef6c9a9edefa0be946a63b14a3e120593c14d828041b9ec3a1",
-   "bytes": 1398,
+   "sha256": "be944262d8fdd48ce2cc2f86317c8ed377c67d9735a1a6c77ade369c7d5a706a",
+   "bytes": 1424,
    "reads": "the stage names and the two budget lists"
   }
  ],
@@ -29,17 +29,17 @@
    "id": "total-of-quick",
    "claim": "the stage count the quick line is of",
    "document": "CLAUDE.md",
-   "drawn": "52",
+   "drawn": "53",
    "stated": "52",
-   "verdict": "agrees"
+   "verdict": "disagrees"
   },
   {
    "id": "gate-of-total",
    "claim": "the gate budget's size, of the stages",
    "document": "CLAUDE.md",
-   "drawn": "44",
+   "drawn": "45",
    "stated": "44",
-   "verdict": "agrees"
+   "verdict": "disagrees"
   },
   {
    "id": "readme-quick",
@@ -53,8 +53,8 @@
    "id": "readme-gate",
    "claim": "README: the gate budget's size",
    "document": "README.md",
-   "drawn": "44",
-   "stated": "44",
+   "drawn": "45",
+   "stated": "45",
    "verdict": "agrees"
   }
  ],
@@ -99,7 +99,7 @@
    },
    {
     "name": "hardware and remote",
-    "stages": ["soak-quick", "images", "remote"]
+    "stages": ["soak-quick", "cardstress", "images", "remote"]
    }
   ],
   "tier": {
@@ -153,14 +153,15 @@
    "demos": "quick",
    "mpfr": "gate",
    "soak-quick": "quick",
+   "cardstress": "gate",
    "images": "full",
    "remote": "quick"
   },
-  "total": 52,
+  "total": 53,
   "n_quick": 31,
-  "n_gate_only": 13,
+  "n_gate_only": 14,
   "n_full_only": 8,
-  "budget_gate": 44,
+  "budget_gate": 45,
   "full_only": ["sim", "simmc", "acceptance-far", "acceptance-rev8", "estimates-full", "node", "wasm", "images"]
  }
 }
