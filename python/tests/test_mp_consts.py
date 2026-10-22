@@ -253,3 +253,55 @@ def test_2opi_checksum_and_window_bound():
     # may be that much plus CFT_TR_PH_WINDOW_MAX wide.
     deepest = (262143 - 236 - 1) + window
     assert bits >= deepest, (bits, deepest)
+
+
+# =====================================================================
+# --check compares BYTES: a header with CRLF line ends is a mismatch
+# =====================================================================
+#
+# Both generators used to read the committed header with `read_text`,
+# which folds CRLF to LF, so a header an editor had saved with CRLF
+# compared equal to the generated text and the check passed it (KL-609,
+# which parcel P6 fixed in five other generators on 2026-10-21). Each
+# test is the same steps on a scratch header, never on the tree.
+
+def _check_sees_crlf(script, tmp_path):
+    header = tmp_path / "header.h"
+
+    def run(*flags):
+        return subprocess.run(
+            [sys.executable, "-B", str(script), *flags, "--out", str(header)],
+            capture_output=True, text=True)
+
+    r = run()                                  # write a fresh header: LF
+    assert r.returncode == 0, r.stdout + r.stderr
+    lf = header.read_bytes()
+    assert lf and b"\r" not in lf
+
+    r = run("--check")                         # the control: LF passes, so
+    assert r.returncode == 0, r.stdout + r.stderr   # the failure below is
+                                                    # the line ends alone
+
+    header.write_bytes(lf.replace(b"\n", b"\r\n"))  # the same text, CRLF
+    r = run("--check")
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "CRLF line ends" in r.stderr, r.stderr
+
+    # a header that differs by more than its line ends fails and does not
+    # say CRLF, whether or not its line ends are also CRLF
+    changed = lf.replace(b"0x", b"0X", 1)
+    assert changed != lf
+    for body in (changed, changed.replace(b"\n", b"\r\n")):
+        header.write_bytes(body)
+        r = run("--check")
+        assert r.returncode == 1, r.stdout + r.stderr
+        assert "does NOT match" in r.stderr and "CRLF" not in r.stderr, \
+            r.stderr
+
+
+def test_gen_mp_consts_check_sees_a_crlf_header(tmp_path):
+    _check_sees_crlf(SCRIPT, tmp_path)
+
+
+def test_gen_2opi_check_sees_a_crlf_header(tmp_path):
+    _check_sees_crlf(GEN_2OPI, tmp_path)
