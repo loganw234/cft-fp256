@@ -3198,9 +3198,11 @@ decides whether a cut pays, and the order. **Step 2 was built on
 asks after a first cut, 617b753, put a loop over tiles inside
 `cftx_program_run`; docs/VALIDATION.md); the rest is not.
 
-*Note of 2026-10-21 (the lead; the step-6 plan below lists these as
-superseded and owed a restatement). Four statements in this section
-are as of 2026-09-18 and are left as written on that date:*
+*Note of 2026-10-21 (the lead). Four statements in this section are as
+of 2026-09-18 and are left as written on that date. The step-6 plan
+below lists three of them as superseded and owed a restatement (the
+256-slot lane, the pre-R18 cut prices, the +0.040 ns quad); the census
+of known limits (2026-10-21, KL-277) adds the fourth:*
 - *"256 private scratch slots" a lane: since then 2,048 on revision
   7's U50, and on revision 8's 4,096 for the single and the quad and
   8,192 for the deep single (docs/LANGUAGE.md, `scratch-capacity`);*
@@ -3214,13 +3216,14 @@ are as of 2026-09-18 and are left as written on that date:*
   "step 6 begins"), and revision 8's rev8q closed at +0.048 ns (the
   2026-10-06 entry, "step 6's closing records, part two");*
 - *"a program takes tile 0", one of "three ad-hoc policies": the state
-  before step 2, which the paragraph above says was built on 2026-09-25
-  (`run_job`).*
+  before step 2 (built on 2026-09-25, as the paragraph above says:
+  `run_job`).*
 
 *The step-6 plan's list also names this plan's partitioner in
 `asm.py`. Whether a partitioner is built, and where, was put to Logan
-on 2026-10-21 (the polish week's census of known limits, its design
-questions on this plan's steps 3 to 5).*
+on 2026-10-21 as two of the census's design questions (KL-446, this
+plan's steps 3 to 5; KL-447, the partitioner), open when this note
+was written.*
 
 **What a program is, for this purpose.** One instruction stream
 executed over a block of lanes at once - 128 lanes at fp32, 16 at
