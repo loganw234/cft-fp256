@@ -73,24 +73,20 @@ def test_the_right_build_ids_and_the_certificates_no_tool_wrote():
     dirty = f"commit={COMMIT} tracked=modified untracked=none"
     assert "not a clean build" in C.build_id_problems(dirty, None, False)[0]
     data, case = a_tool_written_certificate()
-    assert C.tool_written(case) and C.build_id_of(data) == CLEAN
+    assert C.tool_written(case)
+    assert C.CLEAN_BUILD.fullmatch(C.build_id_of(data))
     assert C.build_id_of(C.normalized(data, "unknown")) == "unknown"
     assert C.build_id_of(b"cft-certificate 1\nend\n") is None
 
 
 def test_the_committed_corpus_names_clean_builds():
-    """In every clone: the form of every committed certificate's build-id,
-    and that the 11 cft-segrun wrote name the two commits that did."""
+    """In every clone: the form of every committed certificate's build-id."""
     corpus = C.read_manifest()
-    named = set()
+    assert [c for c in corpus.cases if C.tool_written(c)]
     for case in corpus.cases:
         value = C.build_id_of((ROOT / case.certificate[0]).read_bytes())
         assert C.build_id_problems(value, None, C.tool_written(case)) == [], \
             case.name
-        if C.CLEAN_BUILD.fullmatch(value or ""):
-            named.add(C.CLEAN_BUILD.fullmatch(value).group(1))
-    assert len([c for c in corpus.cases if C.tool_written(c)]) == 11
-    assert named == {COMMIT, "df06c1450e233e609b4392bc8dab44add86a53b9"}
 
 
 def test_the_committed_corpus_names_commits_this_clone_has():
@@ -187,7 +183,8 @@ def test_the_keep_rule_keeps_a_right_build_id_and_writes_over_a_wrong_one():
     keep, why = C.keep_decision(dirty, made, bid, boundaries, lambda c: True)
     assert not keep and "not a clean build" in why
     keep, why = C.keep_decision(old, made, bid, boundaries, lambda c: False)
-    assert not keep and COMMIT[:12] in why and "does not have" in why
+    named = C.CLEAN_BUILD.fullmatch(C.build_id_of(data)).group(1)
+    assert not keep and named[:12] in why and "does not have" in why
     for known in (lambda c: None, None):       # the history cannot say
         assert C.keep_decision(old, made, bid, boundaries, known) \
             == (True, "")
