@@ -147,7 +147,16 @@ jobs:
   host:
     runs-on: ubuntu-24.04
     steps:
+      # The whole history, where every other job takes the default depth of
+      # 1: the `programs` stage's corpus check (certificates/corpus.py, its
+      # section 1b) looks up the commits the golden certificates' build-ids
+      # name, and a depth-1 clone cannot answer. Without the history that leg
+      # is a SKIP by name, an inner skip, and the --require-all below fails it
+      # (KL-355, the lead's word 2026-10-22). What this costs is the history's
+      # download on every run of this job, which no run has measured yet.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"

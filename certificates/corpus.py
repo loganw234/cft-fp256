@@ -32,6 +32,18 @@ WHAT `check` HOLDS, for every case certificates/MANIFEST lists:
   1. every file the manifest names against its SHA-256, and no file under
      certificates/ that it does not name, so an edited or added file
      fails by its name;
+  1b. (KL-355, 2026-10-22) every committed certificate's build-id, read
+     from the certificate and not as the remake in 5 normalizes it: a
+     certificate cft-segrun wrote (version 1's, but `example`) names a
+     clean build, `commit=<hex> tracked=clean untracked=none`, so that it
+     names a commit anyone can check out; any other says `unknown` or names
+     a clean one. And every commit named is one this repository has (git
+     cat-file). A shallow clone, no git, or a tree that is not a
+     repository of its own cannot say a commit it lacks does not exist:
+     there the leg is a SKIP by name, an inner skip that the runner counts
+     and --require-all fails, and the form is still held. CI's host job
+     checks out with fetch-depth 0 so that the leg runs there. Controls on
+     the first such certificate with its build-id replaced follow it;
   2. every committed image against its source assembled or compiled again,
      byte for byte, and a library image against programs/MANIFEST's digest
      too;
@@ -86,8 +98,12 @@ It KEEPS a case's committed certificate, byte for byte, where the one it
 makes equals it but for build-id and the hash line and every boundary
 file has the committed manifest's digest: a case's bytes, and the commit
 its build-id names, move only when what it certifies does (the fixes
-round, 2026-09-30). `--rewrite-all` writes every certificate the tool
-makes, as `make` did before.
+round, 2026-09-30). Since KL-355 (2026-10-22) it keeps only a certificate
+whose own build-id is one a tool-written certificate may name (keep_decision;
+`check`'s 1b holds the same): a committed build-id that is not a clean
+build, or whose commit this repository lacks, is written over by the one
+made now, and the line says so. `--rewrite-all` writes every certificate
+the tool makes, as `make` did before.
 
 The manifest's grammar is read strictly by read_manifest(), which another
 gate may import (programs/estimates.py does): printable ASCII and LF, one
@@ -1463,6 +1479,149 @@ def normalized(data, build_id):
     return cert.rehash("\n".join(lines) + "\n")
 
 
+# ---- the build-id of a committed certificate (KL-355, parcel P4) -----------
+#
+# `make` keeps a committed certificate where the one it makes equals it but
+# for build-id and the hash line, so the committed build-id outlives the
+# build that wrote it, and `check` compares a tool's certificate with the
+# committed one NORMALIZED (above): the build-id line is the one thing it
+# never reads. A certificate a tool wrote must name a clean build, a commit
+# anyone can check out (docs/CERTIFICATES.md, "Its producer"), and until
+# KL-355 nothing held that: a `--force-dirty` trial's certificate, or one
+# naming a commit that is not in the history, was kept by `make` and passed
+# `check`. Two legs, and they are different in kind:
+#   FORM, needing nothing: `commit=<hex> tracked=clean untracked=none`, in
+#   every clone, CI's shallow one included;
+#   HISTORY, needing the history: the commit is one this repository has
+#   (git cat-file). A shallow clone cannot say whether a commit that is
+#   not there never was or was not fetched, so there nothing is asked and
+#   the leg is a SKIP by name - an inner skip, which the runner counts and
+#   names on its VERDICT line and --require-all fails: a check that did not
+#   run is not a pass. No git, or no repository of this tree's own, is the
+#   same. CI's host job checks out with fetch-depth 0 for this (the lead's
+#   word, 2026-10-22), so that the leg runs there.
+
+CLEAN_BUILD = re.compile(
+    r"commit=([0-9a-f]{40}|[0-9a-f]{64}) tracked=clean untracked=none")
+GIT_TIMEOUT = 30
+
+
+def build_id_of(data):
+    """The `build-id` line's value in a certificate's bytes, read from the
+    text and not through the golden reader (a refused control has one too);
+    None where there is no such line."""
+    try:
+        lines = cert.body_of(data).decode("ascii").split("\n")
+    except UnicodeDecodeError:
+        return None
+    for ln in lines:
+        if ln.startswith("build-id "):
+            return ln[len("build-id "):]
+    return None
+
+
+def build_id_problems(value, known=None, tool_written=True):
+    """What is wrong with the build-id a committed certificate names, each
+    a sentence. A certificate a tool wrote (cft-segrun: version 1's, but
+    `example`, which is the golden writer's) must name a clean build;
+    any other may say `unknown`, and if it names a build it must be clean.
+    `known(commit)` answers whether the history has the commit - True,
+    False, or None where it cannot say - and only False is a problem."""
+    if value == "unknown" and not tool_written:
+        return []
+    m = CLEAN_BUILD.fullmatch(value or "")
+    if not m:
+        return [f"its build-id is {value!r}, not a clean build "
+                f"(commit=<hex> tracked=clean untracked=none): `make` writes "
+                f"only those, so that each certificate names a commit anyone "
+                f"can check out"]
+    if known is not None and known(m.group(1)) is False:
+        return [f"its build-id names commit {m.group(1)[:12]}, which this "
+                f"repository's history does not have"]
+    return []
+
+
+def _git(args, run=subprocess.run):
+    """`git -C <this tree> args` -> (returncode, stdout, stderr), or
+    (None, "", why) where git cannot be run. Reads only; it asks nothing of
+    a network (a partial clone would otherwise fetch what it lacks)."""
+    env = dict(os.environ, GIT_NO_LAZY_FETCH="1", GIT_TERMINAL_PROMPT="0")
+    try:
+        p = run(["git", "-C", str(ROOT)] + args, capture_output=True,
+                text=True, timeout=GIT_TIMEOUT, env=env)
+    except (OSError, subprocess.SubprocessError) as e:
+        return None, "", f"{type(e).__name__}: {e}"
+    return p.returncode, p.stdout.strip(), p.stderr.strip()
+
+
+def history(run=subprocess.run):
+    """What git can say about this tree's history -> (state, why): "full" (a
+    repository of this tree's own that is not shallow: a commit it lacks is
+    a commit it does not have), or "shallow" or "none" with the reason, in
+    which nothing is decided from a commit's absence."""
+    rc, top, err = _git(["rev-parse", "--show-toplevel"], run)
+    if rc is None:
+        return "none", f"git cannot be run here ({err})"
+    if rc != 0:
+        return "none", ("this tree is not a git repository"
+                        + (f" ({err.splitlines()[0]})" if err else ""))
+    try:
+        mine = os.path.samefile(top, ROOT)
+    except OSError:
+        mine = False
+    if not mine:
+        return "none", (f"this tree is not a repository of its own (git "
+                        f"answers for {top})")
+    rc, out, _err = _git(["rev-parse", "--is-shallow-repository"], run)
+    if rc == 0 and out == "false":
+        return "full", ""
+    if rc == 0 and out == "true":
+        return "shallow", "this clone is shallow"
+    return "none", "git cannot say whether this clone is shallow"
+
+
+def commit_known(commit, run=subprocess.run):
+    """Whether this repository has `commit` as a commit (git cat-file). Only
+    asked of a repository history() calls full."""
+    rc, _out, _err = _git(["cat-file", "-e", f"{commit}^{{commit}}"], run)
+    return rc == 0
+
+
+def history_lookup(run=subprocess.run):
+    """-> (known, state, why): `known(commit)` for build_id_problems, True or
+    False in a full clone and None otherwise, each answer asked once."""
+    state, why = history(run)
+    seen = {}
+
+    def known(commit):
+        if state != "full":
+            return None
+        if commit not in seen:
+            seen[commit] = commit_known(commit, run)
+        return seen[commit]
+    return known, state, why
+
+
+def keep_decision(old, data, bid, boundaries, known=None, tool_written=True):
+    """The keep rule, as one function. `old` is what the committed manifest
+    gave for the case (its certificate's bytes, each run's boundary digests)
+    or None; `data` the certificate made now, `bid` the tool's build id,
+    `boundaries` the made case's. -> (keep, why not): the committed
+    certificate is kept where the one made now equals it but for build-id
+    and the hash line, and every boundary file is the committed one - and,
+    since KL-355, where its own build-id passes build_id_problems. A wrong
+    committed build-id is written over, saying why, where until then it was
+    kept."""
+    if old is None or old[1] != boundaries:
+        return False, ""
+    if not (old[0] == data or normalized(old[0], bid) == data):
+        return False, ""
+    probs = build_id_problems(build_id_of(old[0]), known, tool_written)
+    if probs:
+        return False, probs[0]
+    return True, ""
+
+
 # ---- the golden writer ------------------------------------------------------
 
 def golden_runs(case, images, salt):
@@ -1922,6 +2081,10 @@ def make_version_1(C, committed):
     rp(salt_path).write_bytes(salt)
     work = Path(tempfile.mkdtemp(prefix="corpus-make-"))
     cases, kept = [], 0
+    known, state, why = history_lookup()
+    if state != "full":
+        print(f"  note  {why}, so a committed build-id is kept or not by its "
+              f"form alone: no commit is looked up", flush=True)
     try:
         for c in C:
             t0 = time.perf_counter()
@@ -1982,14 +2145,20 @@ def make_version_1(C, committed):
                 r.boundaries = [sha256(rp(r.state_path(case, b)).read_bytes())
                                 for b in range(r.segments + 1)]
             # the committed certificate is kept where this one equals it
-            # but for build-id and the hash line, and so are its states
+            # but for build-id and the hash line, and so are its states,
+            # and its own build-id is one a tool-written certificate may
+            # name (KL-355); otherwise this one is written, and the line
+            # says why where the build-id was the reason
             old = committed.get(c.name)
             how = "made"
-            if old is not None and \
-                    old[1] == [r.boundaries for r in case.runs] and \
-                    (old[0] == data or normalized(old[0], bid) == data):
+            keep, why_not = keep_decision(
+                old, data, bid, [r.boundaries for r in case.runs], known,
+                tool_written=c.name != "example")
+            if keep:
                 data, how = old[0], "kept"
                 kept += 1
+            elif why_not:
+                how = f"made, the committed build-id not kept ({why_not})"
             rp(case.certificate[0]).write_bytes(data)
             case.certificate = (case.certificate[0], sha256(data))
             cases.append(case)
@@ -2162,6 +2331,136 @@ def hold_files(corpus):
                       {f"certificates/{m}" for m in MACHINERY})
     check_that(not unlisted, "no file under certificates/ that the manifest "
                "does not name", f"unlisted: {unlisted[:8]}")
+
+
+def tool_written(case):
+    """cft-segrun wrote it: version 1's cases, but `example`, which is the
+    golden writer's with the identity the page prints."""
+    return case.version == 1 and case.name != "example"
+
+
+def hold_build_ids(corpus):
+    """1b. (KL-355, parcel P4) The build-id of every committed certificate,
+    read from its text, not as the tool's remake normalizes it: a
+    certificate a tool wrote names a clean build, any other `unknown` or a
+    clean one, and where the clone has its history every commit named is a
+    commit it has. Where git cannot say (a shallow clone, no git, a tree
+    that is not a repository of its own) the form is still held and the
+    history leg is a SKIP by name, counted as an inner skip by the runner
+    and failed by --require-all: a leg that did not run is not a pass."""
+    print("== 1b. every committed certificate's build-id: a clean build, "
+          "and a commit this repository has", flush=True)
+    known, state, why = history_lookup()
+    n_tool, n_bad, commits = 0, 0, set()
+    for c in corpus.cases:
+        f = rp(c.certificate[0])
+        if not f.is_file():
+            continue                    # hold_files names it
+        value = build_id_of(f.read_bytes())
+        tool = tool_written(c)
+        n_tool += tool
+        probs = build_id_problems(value, known, tool)
+        for p in probs:
+            bad(f"{c.name}: {p}")
+        n_bad += bool(probs)
+        m = CLEAN_BUILD.fullmatch(value or "")
+        if m:
+            commits.add(m.group(1))
+    if check_that(n_tool > 0, "the corpus has certificates a tool wrote, "
+                  "which this section holds to a clean build") and not n_bad:
+        ok(f"the {n_tool} certificates a tool wrote each name a clean build "
+           f"(commit=<hex> tracked=clean untracked=none), and the others "
+           f"`unknown` or a clean one; {len(commits)} "
+           f"commit{'s' if len(commits) != 1 else ''} named: "
+           + ", ".join(sorted(x[:10] for x in commits))
+           + (", each one this repository has (git cat-file)"
+              if state == "full" else ""))
+    if state != "full":
+        SKIPS.append("the commits the build-ids name (git cat-file)")
+        print(f"SKIP  1b's history leg: the {len(commits)} "
+              f"commit{'s' if len(commits) != 1 else ''} the build-ids name "
+              f"{'are' if len(commits) != 1 else 'is'} not looked up, "
+              f"{why}; the form of each build-id was held above",
+              flush=True)
+
+
+def build_id_controls(corpus):
+    """The section above watched failing, on the first tool-written case's
+    own certificate: its build-id line replaced as `make` and the remake
+    both replace it (normalized, so the hash line is right and the
+    certificate is one nothing else refuses), and the keep rule on the same
+    bytes. The history is a stand-in here, so that the controls are the same
+    in every clone."""
+    print("== 1b controls: a wrong build-id is caught", flush=True)
+    # the first tool-written certificate that names a clean build: one that
+    # does not is 1b's failure above, and is no ground to plant in
+    case = data = real = m = None
+    for c in corpus.cases:
+        f = rp(c.certificate[0])
+        if tool_written(c) and f.is_file():
+            data = f.read_bytes()
+            real = build_id_of(data)
+            m = CLEAN_BUILD.fullmatch(real or "")
+            if m:
+                case = c
+                break
+    if not check_that(case is not None, "the controls have a certificate a "
+                      "tool wrote that names a clean build to plant in"):
+        return
+    commit = m.group(1)
+    boundaries = [r.boundaries for r in case.runs]
+
+    def planted(value):
+        return normalized(data, value)
+    named = {
+        "modified": f"commit={commit} tracked=modified untracked=none",
+        "untracked": f"commit={commit} tracked=clean untracked=present",
+        "unknown": "unknown",
+        "cut": f"commit={commit[:20]} tracked=clean untracked=none"}
+    for what, value in named.items():
+        probs = build_id_problems(build_id_of(planted(value)), None, True)
+        check_that(len(probs) == 1 and "not a clean build" in probs[0],
+                   f"control: a tool-written certificate whose build-id is "
+                   f"{value!r} ({what}) is refused by name", f"{probs}")
+    check_that(build_id_problems("unknown", None, False) == [],
+               "control: `unknown` is the other certificates' build-id, not "
+               "refused")
+    check_that(build_id_problems(real, lambda c: True) == [],
+               "control: the committed build-id passes when the history has "
+               "its commit")
+    probs = build_id_problems(real, lambda c: False)
+    check_that(len(probs) == 1 and commit[:12] in probs[0] and
+               "does not have" in probs[0],
+               "control: a well-formed build-id whose commit the history "
+               "lacks is refused, naming the commit", f"{probs}")
+    check_that(build_id_problems(real, lambda c: None) == [],
+               "control: where the history cannot say (a shallow clone), a "
+               "commit is not a problem")
+    # the keep rule: the committed bytes, and the same with a wrong build-id
+    # that the rule before KL-355 kept
+    keep, why = keep_decision((data, boundaries), data, real, boundaries,
+                              lambda c: True)
+    check_that(keep and not why, "control: the keep rule keeps the committed "
+               "certificate whose build-id is right", why)
+    for what, value in named.items():
+        old = (planted(value), boundaries)
+        before = normalized(old[0], real) == data
+        keep, why = keep_decision(old, data, real, boundaries, lambda c: True)
+        check_that(before and not keep and why,
+                   f"control: the keep rule writes over a committed "
+                   f"certificate whose build-id is {value!r} ({what}), which "
+                   f"the rule before KL-355 kept (its remake equalled it but "
+                   f"for build-id and the hash line)", f"kept: {keep}, "
+                   f"before: {before}, why: {why!r}")
+    keep, why = keep_decision((planted(real), boundaries), data, real,
+                              boundaries, lambda c: False)
+    check_that(not keep and "history does not have" in why,
+               "control: the keep rule writes over a committed certificate "
+               "whose commit the history lacks", f"{keep}, {why!r}")
+    keep, why = keep_decision((planted("unknown"), boundaries), data, real,
+                              boundaries, None, tool_written=False)
+    check_that(keep, "control: the keep rule keeps an `unknown` build-id of a "
+               "certificate no tool wrote (`example`'s)", why)
 
 
 def hold_images(corpus):
@@ -2653,6 +2952,8 @@ def check(seed, keep):
         bad(f"certificates/MANIFEST does not read: {e}")
         return finish(t_all)
     hold_files(corpus)
+    hold_build_ids(corpus)
+    build_id_controls(corpus)
     images = hold_images(corpus)
     build_id = None
     if TOOL is not None:
