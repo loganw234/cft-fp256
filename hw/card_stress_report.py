@@ -65,12 +65,17 @@ be computed is "-" or "n/a", never 0. Choices a reader could otherwise take anot
     own (tree.rtl_dirty, tree.host_src_dirty); a run that recorded none of it (every run before
     2026-10-20) has it READ FROM GIT where git can say (above): the class of the tree a run that recorded
     it would be in, its label saying "read from git" and its `derived_from_git` (in --json) listing
-    {commit, dir, tree} for each run whose tree in that class was read, [] when none was. What git cannot
+    {commit, dir, tree} for each run whose tree in that class was read, [] when none was. (A `rev` that is
+    not git - a function a caller gave to summarize() - is used as given and not called git: the label says
+    "taken from the given rev, not git", `sweep.trees.git.read` is false and `source` is "given rev", and
+    `derived_from_git` lists what the function answered.) What git cannot
     say - a commit the checkout lacks, a run not recorded clean, a recorded tree that git does not give
-    for its commit, no git - is kept apart by its commit, as "not recorded" or "unknown", with
-    resolve_tree's reason in the label. A compiler line is never read: such a run's host class says
-    "compiler not recorded". `sweep.trees.git` says whether git was read and what stopped it (git
-    is asked at most 10 s a lookup and 40 s in all, once for a commit and directory). A slice belongs to the LAST run_start
+    for its commit, no git - is kept apart by its commit, as "not recorded" or "unknown" ("not recorded or
+    unknown" for a class that gathers both, whatever their order), with resolve_tree's reason in the
+    label. A compiler line is never read: such a run's host class says "compiler not recorded".
+    `sweep.trees.git` ({read, source, problem}) says whether git was read, where the trees came from and
+    what stopped git (git is asked at most 10 s a lookup and 40 s in all, once for a commit and directory).
+    A slice belongs to the LAST run_start
     before it in its file, so a run resumed from another checkout counts what follows under that
     checkout's tree. `--also DIR` adds other runs' directories to that section (and only to it):
     coverage accumulated over runs, each slice under its own run's tree, so two trees are never
@@ -848,13 +853,15 @@ def _run_trees(rs: Optional[Dict[str, Any]], rev: Optional[Callable[[str, str], 
 def _tree_class(kind: str, info: Dict[str, Any], git_read: bool = True) -> Dict[str, Any]:
     """The class a slice of this reach falls in, under the run_start whose _run_trees is `info`: its `key`, the `head` and `tail` of its label
     (_tree_label puts them round what the class gathers), `why` (the reason this run's tree is not known, resolve_tree's own, or None) and
-    `derived` (the {commit, dir, tree} that git gave this run, or None). A TILE item is keyed by the RTL tree; a HOST item by the library's
+    `derived` (the {commit, dir, tree} that rev gave this run, or None). A TILE item is keyed by the RTL tree; a HOST item by the library's
     source (host/'s tree hash) and the compiler's version line; a tree with uncommitted changes is its own key ('+modified'); a tree that
-    is not known is kept apart by its commit. Two runs share a class only when every part of the key is equal. The KEY is card_stress_lib.
+    is not known is kept apart by its commit, and its head is not made here: the entry has `said` ('unknown': the run recorded one, which
+    git contradicts; 'not recorded'), the `prefix` and the commit, and _tree_label chooses the word from every run the class gathers, so
+    that no run's order decides it. Two runs share a class only when every part of the key is equal. The KEY is card_stress_lib.
     tree_key's, through run_classes, the one the driver's --resume counts by (parcel DR4); the label is this report's."""
     tr, use = info["tr"], info["use"]
     if kind not in (TILE, HOST):
-        return {"key": tree_key(kind, tr)[0], "tail": "", "why": None, "derived": None,
+        return {"key": tree_key(kind, tr)[0], "tail": "", "why": None, "derived": None, "said": None,
                 "head": "reach unknown (no key: neither the records nor the catalog's table say whether the tile is involved)"}
     key, why = info["classes"][kind]
     k, dk, rel, name = ("rtl", "rtl_dirty", "rtl", "RTL tree") if kind == TILE else ("host_src", "host_src_dirty", "host", "host/ tree")
@@ -862,25 +869,30 @@ def _tree_class(kind: str, info: Dict[str, Any], git_read: bool = True) -> Dict[
     commit = _str(tr.get("commit"))
     if not h:
         said = "unknown" if _str(tr.get(k)) else "not recorded"          # unknown: it recorded one, which git contradicts
-        return {"key": key, "tail": "", "derived": None,
-                "head": ("RTL tree " if kind == TILE else "library source and compiler ") + f"{said} (commit {commit[:12] if commit else 'unknown'})",
+        return {"key": key, "tail": "", "derived": None, "head": None, "said": said,
+                "prefix": "RTL tree " if kind == TILE else "library source and compiler ", "commit12": commit[:12] if commit else "unknown",
                 "why": (why or "") + ("" if git_read else "; git was not read (--no-git)")}
-    return {"key": key, "why": None,
+    return {"key": key, "why": None, "said": None,
             "head": f"{name} {h[:12]}" + (f" MODIFIED (uncommitted changes under {rel}/)" if mod else ""),
             "tail": (f", compiler {_line(cc, 80) if cc else 'not recorded'}" if kind == HOST
                      else "" if mod is not None else " (whether it was modified is not recorded)"),
             "derived": {"commit": commit, "dir": rel, "tree": h} if rel in info["derived"] else None}
 
 
-def _tree_label(c: Dict[str, Any], problem: Optional[str]) -> str:
-    """A class's label: its head, '(read from git at commit ...)' where a run's tree in it was read from git, its tail, and, for a class kept
-    apart, why - with what stopped git where something did, since a commit git was not asked about is "not in this checkout" to
-    resolve_tree and the reader must be able to tell that from an absent one."""
+def _tree_label(c: Dict[str, Any], problem: Optional[str], via: str = "git") -> str:
+    """A class's label, the same whatever the order of the runs it gathers: its head - for a class whose tree is not known the word is the
+    runs' common one ('unknown', 'not recorded'), and 'not recorded or unknown' where they differ -, '(read from git at commit ...)' where a
+    run's tree in it was read from git ('(taken from the given rev, not git, at commit ...)' where `via` says a function the caller gave
+    answered), its tail, and, for a class kept apart, why (the reasons sorted) - with what stopped git where something did, since a commit
+    git was not asked about is "not in this checkout" to resolve_tree and the reader must be able to tell that from an absent one."""
     cms = list(dict.fromkeys(d["commit"][:12] for d in c["derived"]))
-    read = (f" (read from git at commit{'s' if len(cms) > 1 else ''} {', '.join(cms[:LABEL_COMMITS])}"
+    how = "read from git" if via == "git" else "taken from the given rev, not git,"
+    read = (f" ({how} at commit{'s' if len(cms) > 1 else ''} {', '.join(cms[:LABEL_COMMITS])}"
             + (f" and {len(cms) - LABEL_COMMITS} more" if len(cms) > LABEL_COMMITS else "") + ")") if cms else ""
-    why = "; ".join(c["why"]) + (f" [git: {problem}]" if problem else "") if c["why"] else ""
-    return c["head"] + read + c["tail"] + (f": {why}" if why else "")
+    why = "; ".join(sorted(c["why"])) + (f" [git: {problem}]" if problem else "") if c["why"] else ""
+    word = c["said"][0] if len(c["said"]) == 1 else "not recorded or unknown"
+    head = f"{c['prefix']}{word} (commit {c['commit12']})" if c["said"] else c["head"]
+    return head + read + c["tail"] + (f": {why}" if why else "")
 
 
 def _trees(sources: List[Dict[str, Any]], rev: Optional[Callable[[str, str], Optional[str]]] = None) -> Dict[str, Any]:
@@ -888,10 +900,14 @@ def _trees(sources: List[Dict[str, Any]], rev: Optional[Callable[[str, str], Opt
     last run_start before it, and counted in the class its reach and that run's tree give (_tree_class). The coverage
     of an exhaustive item in a class is the union of its slices' intervals over every image; each image's own is
     beside it. Nothing here is summed across classes. A run_start's tree is what it recorded with what it did not taken from its commit
-    through `rev` (resolve_tree: git of the checkout; None reads the records alone). A class entry has `label` (which says "read from git"
-    where a run's tree in it was) and `derived_from_git`: [{commit, dir ('rtl'|'host'), tree}] for each run whose tree in the class was
-    read, [] when none was; the result has `git`: {read, problem}, whether git was read and what, if anything, stopped it."""
+    through `rev` (resolve_tree: git of the checkout; None reads the records alone; a function the caller gave is used as given). A class
+    entry has `label` (which says "read from git" where a run's tree in it was, and "taken from the given rev, not git" where a function the
+    caller gave supplied it) and `derived_from_git`: [{commit, dir ('rtl'|'host'), tree}] for each run whose tree in the class `rev` supplied
+    - what git gave when rev is a GitTrees, what the function answered when it is not -, [] when none was; the result has `git`: {read,
+    source, problem}: whether git was read (only a GitTrees reads it), where the trees came from ('git', 'given rev', 'records') and what,
+    if anything, stopped git."""
     classes: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    via = "git" if isinstance(rev, GitTrees) else "given rev" if rev is not None else "records"
     for src in sources:
         rs: Optional[Dict[str, Any]] = None
         info = _run_trees(None, rev)
@@ -912,8 +928,13 @@ def _trees(sources: List[Dict[str, Any]], rev: Optional[Callable[[str, str], Opt
                 info["cl"][kind] = _tree_class(kind, info, rev is not None)
             cl = info["cl"][kind]
             key = cl["key"]
-            c = classes.setdefault((kind, key), {"kind": kind, "key": key, "head": cl["head"], "tail": cl["tail"], "why": [],
+            c = classes.setdefault((kind, key), {"kind": kind, "key": key, "head": cl["head"], "tail": cl["tail"], "why": [], "said": [],
+                                                 "prefix": cl.get("prefix"), "commit12": cl.get("commit12"),
                                                  "derived": [], "runs": [], "commits": [], "iv": {}, "rnd": {}})
+            if cl["tail"] and not c["tail"]:
+                c["tail"] = cl["tail"]                  # a note (a tile tree's 'whether it was modified is not recorded') is the class's if any run's is
+            if cl["said"] and cl["said"] not in c["said"]:
+                c["said"].append(cl["said"])
             if cl["why"] and cl["why"] not in c["why"]:
                 c["why"].append(cl["why"])
             if cl["derived"] and cl["derived"] not in c["derived"]:
@@ -975,14 +996,14 @@ def _trees(sources: List[Dict[str, Any]], rev: Optional[Callable[[str, str], Opt
             tot_cov = sum(e["covered"] for e in exh)
             tot_sp = sum(e["total"] for e in exh)
             out.append({
-                "kind": kind, "key": key, "label": _tree_label(c, problem), "derived_from_git": c["derived"], "runs": c["runs"],
+                "kind": kind, "key": key, "label": _tree_label(c, problem, via), "derived_from_git": c["derived"], "runs": c["runs"],
                 "commits": c["commits"], "images": imgs, "exhaustive": exh, "random": rnd,
                 "total": {"items": len(exh), "covered": tot_cov, "total": tot_sp,
                           "pct": (100.0 * tot_cov / tot_sp) if exh else None,
                           "complete_items": sum(1 for e in exh if e["complete"]),
                           "by_image": {i: sum(e["by_image"].get(i, 0) for e in exh) for i in imgs if any(i in e["by_image"] for e in exh)}},
             })
-    return {"classes": out, "git": {"read": rev is not None, "problem": problem},
+    return {"classes": out, "git": {"read": via == "git", "source": via, "problem": problem},
             "sources": [{"source": s["source"], "records": len(s["objs"]), "bad_lines": sorted(s.get("bad_lines") or []),
                          "partial_tail": bool(s.get("partial_tail"))} for s in sources]}
 
@@ -1074,7 +1095,9 @@ def summarize(records: List[Any], now: Optional[float] = None, gap_seconds: floa
     `rev` (parcel RG): how a run_start's tree that the run did not record is read from its commit, for that section alone - the `rev`
     of card_stress_lib.resolve_tree, `rev(commit, rel) -> tree hash or None`. The default is git of the repository that holds this
     file's hw/ (checkout_git(): bounded, and shared by every call in the process), so every caller that passes nothing gets what the
-    command line shows; None reads the records alone (`--no-git`); a callable is used as given."""
+    command line shows; None reads the records alone (`--no-git`); a callable is used as given, and then only a GitTrees is called git:
+    for any other the labels say "taken from the given rev, not git", `sweep.trees.git` is {read: false, source: "given rev"}, and
+    each `derived_from_git` entry is what the callable answered."""
     if rev is _REPO_GIT:
         rev = checkout_git()
     records = list(records)
@@ -1570,7 +1593,10 @@ def _r_trees(S: Dict[str, Any]) -> List[str]:
         L.append(f"read: {_line(s['source'], 120)} ({s['records']} records{extra})")
     g = T.get("git")
     if isinstance(g, dict):
-        L.append("git: " + ("read for each run_start that recorded no tree" if g.get("read") else "not read (--no-git): a run that recorded no tree is kept apart by its commit")
+        src = g.get("source") or ("git" if g.get("read") else "records")          # a summary from before `source` has only `read`
+        L.append("git: " + {"git": "read for each run_start that recorded no tree",
+                            "given rev": "NOT read: a function the caller gave supplied the trees a run_start did not record"}.get(
+                                src, "not read (--no-git): a run that recorded no tree is kept apart by its commit")
                  + (f"; !!! {_line(g['problem'], 200)}: what git was not asked is unread, not absent" if g.get("problem") else ""))
     if not T["classes"]:
         L.append("no completed sweep slice in the runs read")
@@ -1695,7 +1721,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--json", metavar="FILE", default=None,
                     help="also write the same figures as JSON to FILE (sweep.trees.classes[]: key, label - which says \"read from git\" "
                          "where a run's tree was - and derived_from_git, the {commit, dir, tree} of each run whose tree in the class was "
-                         "read from git, [] when none was; sweep.trees.git: whether git was read and what stopped it)")
+                         "read from git, [] when none was; for a rev that is not git, which only a caller of summarize() can give, the label "
+                         "says \"taken from the given rev, not git\" and derived_from_git is what that function answered; "
+                         "sweep.trees.git: {read, source, problem}, whether git was read, where the trees came from and what stopped it)")
     ap.add_argument("--no-git", action="store_true",
                     help="read the records alone: a run_start that recorded no tree stays kept apart by its commit (the default reads "
                          "that tree from git, `git rev-parse COMMIT:rtl`, in the checkout this report is in)")

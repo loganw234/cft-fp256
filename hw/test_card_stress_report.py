@@ -2218,7 +2218,7 @@ def ck_stops(ck, cls):
     ck(len(fake.calls) == 1 and again is None, "git stops: the lookup git does not answer in time is the only one run; the next is not", len(fake.calls))
     ck("did not answer within" in (g.problem or ""), "git stops: and `problem` says so by name", g.problem)
     lab = (kclasses(S, "tile") or [NO_CLASS])[0]["label"]
-    ck(g.problem and g.problem in lab and S["sweep"]["trees"]["git"] == {"read": True, "problem": g.problem},
+    ck(g.problem and g.problem in lab and S["sweep"]["trees"]["git"] == {"read": True, "source": "git", "problem": g.problem},
        "git stops: the class's label and the summary carry it (unread, not absent)", lab)
 
 
@@ -2271,7 +2271,7 @@ def cli_checks(fx, tmp):
         ck(p.returncode == 0 and [c["key"] for c in tk] == [fx.A] and tk[0]["derived_from_git"] == [{"commit": fx.c[0], "dir": "rtl", "tree": fx.A}],
            "cli: by default the report reads git of the repository that holds ITS hw/ (a scratch one, run from elsewhere): the tree is derived",
            (p.returncode, [c["key"][:12] for c in tk], p.stderr[-120:]))
-        ck(f"(read from git at commit {fx.c[0][:12]})" in p.stdout and T["git"] == {"read": True, "problem": None},
+        ck(f"(read from git at commit {fx.c[0][:12]})" in p.stdout and T["git"] == {"read": True, "source": "git", "problem": None},
            "cli: and the text says 'read from git' at that commit, and sweep.trees.git says git was read and nothing stopped it")
 
     def apart(ck, pj):
@@ -2293,7 +2293,7 @@ def cli_checks(fx, tmp):
         plant(reads, "the report reading no checkout", "cli: by default the report reads git", outside)
     nog = go(fx.repo, "--no-git")
     hold(apart, nog)
-    check(nog[0].returncode == 0 and "git was not read (--no-git)" in nog[0].stdout and nog[1]["git"] == {"read": False, "problem": None}
+    check(nog[0].returncode == 0 and "git was not read (--no-git)" in nog[0].stdout and nog[1]["git"] == {"read": False, "source": "records", "problem": None}
           and all(c["derived_from_git"] == [] for c in nog[1]["classes"]), "cli: --no-git is today's record-only view; the text and the summary say git was not read")
     plant(apart, "the flag ignored", "cli: --no-git keeps it apart", here)
 
@@ -2361,9 +2361,27 @@ def group_git(tmp):
     with patched(_checkout_git=rev):
         dflt = R.summarize(fx.runs(fx.old))
     fn = R.summarize(fx.runs(fx.old), rev=lambda c, r: fx.t.get((c, r)))
-    check(kclasses(dflt, "tile") == kclasses(S, "tile") == kclasses(fn, "tile") and kclasses(dflt, "host") == kclasses(S, "host") == kclasses(fn, "host"),
-          "default and callable: summarize() with no rev, and with a function that answers as git does, give the classes an explicit GitTrees gives")
-    many = fx.runs(fx.old) + [g_start(fx.old), g_leg(TI, 2 * GM, 3 * GM, "tile", "quad"), g_start(dict(fx.old, commit=c2)), g_leg(TI, 3 * GM, 4 * GM, "tile", "quad")]
+
+    def nolabel(s, kind):
+        return [{k: v for k, v in c.items() if k != "label"} for c in kclasses(s, kind)]
+    check(all(kclasses(dflt, k) == kclasses(S, k) and nolabel(fn, k) == nolabel(S, k) for k in ("tile", "host")),
+          "default and callable: summarize() with no rev gives the classes an explicit GitTrees gives, and a function that answers as git does gives them but for the label")
+
+    def ck_rev_words(ck, s, via_git):                   # a function the caller gave is used as given, and is not called git
+        ta, g = kkey(kclasses(s, "tile"), A) or NO_CLASS, s["sweep"]["trees"]["git"]
+        if via_git:
+            ck("read from git" in ta["label"] and g == {"read": True, "source": "git", "problem": None},
+               "rev words: a GitTrees - the label says 'read from git' and sweep.trees.git says git was read", (ta["label"], g))
+        else:
+            ck("read from git" not in ta["label"] and f"(taken from the given rev, not git, at commit {c1[:12]})" in ta["label"]
+               and g == {"read": False, "source": "given rev", "problem": None},
+               "rev words: a function the caller gave - the label says it was taken from the given rev, not git, and sweep.trees.git says git was not read", (ta["label"], g))
+        ck.eq(ta["derived_from_git"], [{"commit": c1, "dir": "rtl", "tree": A}], "rev words: and derived_from_git has the same entry, whoever supplied the tree")
+    hold(ck_rev_words, S, True)
+    hold(ck_rev_words, fn, False)
+    plant(ck_rev_words, "a function called git", "rev words: a function", S, False)
+    plant(ck_rev_words, "git called a function", "rev words: a GitTrees", fn, True)
+    many =fx.runs(fx.old) + [g_start(fx.old), g_leg(TI, 2 * GM, 3 * GM, "tile", "quad"), g_start(dict(fx.old, commit=c2)), g_leg(TI, 3 * GM, 4 * GM, "tile", "quad")]
     Sm = R.summarize(many, rev=rev)
     hold(ck_many, Sm, fx, rev, many)
     twice = copy.deepcopy(Sm)
@@ -2371,6 +2389,42 @@ def group_git(tmp):
         if cl["key"] == A:
             cl["derived_from_git"].append({"commit": c1, "dir": "rtl", "tree": A})
     plant(ck_many, "a run's tree listed twice", "many: two run_starts", twice, fx, rev, many)
+    # what a class says does not depend on the order of the runs it gathers: a recorded tree git contradicts and a run not recorded clean share
+    # the class of their commit, and two runs of one tree, one of which did not record whether rtl/ was modified, share a note
+    contra_run = dict(fx.old, rtl="e" * 40, rtl_dirty=False, host_src=fx.H1, host_src_dirty=False, cc="gcc 11.4")      # git does not give that rtl/ for c1
+    unclean = dict(fx.old, dirty=True, dirty_files=3)
+
+    def two(a, b):
+        return R.summarize([g_start(a), g_leg(TI, 0, GM, "tile", "quad"), g_start(b), g_leg(TI, GM, 2 * GM, "tile", "single")], rev=rev)
+
+    def ck_mixed(ck, s1, s2):
+        k = "unrecorded:" + c1
+        cs = [kclasses(s, "tile") for s in (s1, s2)]
+        ck.eq([[c["key"] for c in x] for x in cs], [[k], [k]], "mixed: ONE tile class in either order, keyed by the commit as the resume keys it")
+        l1, l2 = (x[0]["label"] if x else "" for x in cs)
+        ck(l1 == l2 and l1 != "", "mixed: and its label is the same in either order", (l1, l2))
+        ck(l1.startswith("RTL tree not recorded or unknown (commit ") and "which git does not give for its commit" in l1 and "was not recorded clean" in l1,
+           "mixed: it says 'not recorded or unknown' and gives both reasons", l1)
+
+    def ck_note(ck, s1, s2):
+        l1, l2 = ((kkey(kclasses(s, "tile"), A) or NO_CLASS)["label"] for s in (s1, s2))
+        ck(l1 == l2 and l1.endswith("(whether it was modified is not recorded)"), "note: one note in either order, when any run of the class did not record whether rtl/ was modified", (l1, l2))
+    S_ab, S_ba = two(contra_run, unclean), two(unclean, contra_run)
+    hold(ck_mixed, S_ab, S_ba)
+    bad = copy.deepcopy(S_ba)
+    for cl in kclasses(bad, "tile"):
+        cl["label"] = cl["label"].replace("not recorded or unknown", "unknown")            # the first run's word, as it was
+    plant(ck_mixed, "the head word of the class's first run", "mixed: and its label is the same", S_ab, bad)
+    for t, word in ((contra_run, "unknown"), (unclean, "not recorded")):
+        lab = (kkey(kclasses(R.summarize(fx.runs(t), rev=rev), "tile"), "unrecorded:" + c1) or NO_CLASS)["label"]
+        check(lab.startswith(f"RTL tree {word} (commit "), f"mixed: a class of one kind keeps its word, '{word}'", lab)
+    flagged, unflagged = dict(fx.old, rtl=A, rtl_dirty=False), dict(fx.old, rtl=A)
+    N_ab, N_ba = two(flagged, unflagged), two(unflagged, flagged)
+    hold(ck_note, N_ab, N_ba)
+    bad = copy.deepcopy(N_ba)
+    for cl in kclasses(bad, "tile"):
+        cl["label"] = cl["label"].replace(" (whether it was modified is not recorded)", "")  # the first run's tail, as it was
+    plant(ck_note, "the tail of the class's first run", "note: one note in either order", N_ab, bad)
     # 2. what git cannot say is kept apart, by commit, with the reason
 
     def dirty_blind(t):               # a report that takes every checkout for a clean one
@@ -2378,7 +2432,7 @@ def group_git(tmp):
         with patched(resolve_tree=lambda tr, rv=None: res(dict(tr or {}, dirty=False), rv),
                      run_classes=lambda tr, rv=None: cls(dict(tr or {}, dirty=False), rv)):
             return R.summarize(fx.runs(t), rev=rev)
-    absent, contra = "d" * 40, dict(fx.old, rtl="e" * 40, rtl_dirty=False, host_src=fx.H1, host_src_dirty=False, cc="gcc 11.4")
+    absent, contra = "d" * 40, contra_run
     for what, tree, commit, why, defect, bad in (
             ("absent", dict(fx.old, commit=absent), absent, "is not in this checkout", "a git that finds every commit",
              lambda t: R.summarize(fx.runs(t), rev=lambda c, r: fx.t[(c1, r)])),
@@ -2388,7 +2442,7 @@ def group_git(tmp):
         Sx = R.summarize(fx.runs(tree), rev=rev)
         hold(ck_apart, Sx, fx, commit, why, what)
         plant(ck_apart, defect, f"{what}: the second run is a class of its own", bad(tree), fx, commit, why, what)
-        check(Sx["sweep"]["trees"]["git"] == {"read": True, "problem": None}, f"{what}: git itself had no problem (an absent commit or a refusal is an answer)")
+        check(Sx["sweep"]["trees"]["git"] == {"read": True, "source": "git", "problem": None}, f"{what}: git itself had no problem (an absent commit or a refusal is an answer)")
     Sc = R.summarize(fx.runs(contra), rev=rev)
     check("RTL tree unknown" in (kkey(kclasses(Sc, "tile"), "unrecorded:" + c1) or NO_CLASS)["label"]
           and (kkey(kclasses(Sc, "host"), f"{fx.H1}|gcc 11.4") or NO_CLASS)["derived_from_git"] == [],
@@ -2398,7 +2452,7 @@ def group_git(tmp):
     why = "git was not read (--no-git)"
     hold(ck_apart, Sn, fx, c1, why, "no-git")
     plant(ck_apart, "git read although told not to", "no-git: the second run is a class of its own", S, fx, c1, why, "no-git")
-    check(Sn["sweep"]["trees"]["git"] == {"read": False, "problem": None} and "not read (--no-git)" in R.render(Sn), "no-git: the summary and the text say git was not read")
+    check(Sn["sweep"]["trees"]["git"] == {"read": False, "source": "records", "problem": None} and "not read (--no-git)" in R.render(Sn), "no-git: the summary and the text say git was not read")
     # 3. git is bounded and kept
     hold(ck_kept, R.GitTrees)
     plant(ck_kept, "no cache", "git: kept per (commit, directory)", Uncached)
