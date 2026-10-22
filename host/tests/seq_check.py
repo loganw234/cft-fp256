@@ -1868,9 +1868,10 @@ def rev8_remote_refusals(lib, R):
                 # cft_last_error is read for a refusal alone. Until
                 # 2026-09-30 a load that succeeded left the previous
                 # sentence there (verifier-R3); since 2026-10-22 (KL-490)
-                # every entry point clears the library's slot and both
-                # device backends', so a successful load leaves it empty,
-                # and the rule stands because an empty slot says nothing.
+                # every call that returns a status empties the library's
+                # slot and both device backends' first, so a successful
+                # load leaves it empty, and the rule stands because an
+                # empty slot says nothing.
                 msg = (lib.cft_last_error().decode() if rc != CFT_OK
                        else "(loaded; no error)")
                 if rc == CFT_OK:

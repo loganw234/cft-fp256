@@ -715,10 +715,12 @@ static void internal(const char *what)
 /* cft_last_error() before the calls refuse_st reports on, once a call
  * whose failure the tool expects has left its sentence there (identify's
  * cft_get_image_id, on the software backend and through a remote one).
- * Until 2026-10-22 a sentence could outlive its call; since KL-490 every
- * entry point clears the slots first (cft.h), so this guard is redundant,
- * and it is kept because it is still right: the same sentence as before
- * is not shown as a new failure's. */
+ * Until 2026-10-22 a sentence could outlive its call, and this kept the
+ * old one from being shown as a new failure's. Since KL-490 every call
+ * that returns a status empties the slots first (cft.h), so there is no
+ * old sentence left to stop: the guard is redundant, and left in place.
+ * All it can still do is leave out a new failure's sentence that repeats
+ * identify's word for word. */
 static char LAST_BEFORE[512];
 
 static void refuse_st(const char *name, const char *what, cft_status st)
