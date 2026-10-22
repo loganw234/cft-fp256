@@ -36,7 +36,10 @@ Drop a vector file on it and it scores itself.
 A second page,
 [demos.html](https://loganw234.github.io/cft-fp256/demos.html), runs five
 real workloads in the browser, each one's checksum chain matched against
-the command-line tool's.
+the command-line tool's. A third,
+[nightly.html](https://loganw234.github.io/cft-fp256/nightly.html), shows
+how far the card's nightly stress run has come: the items fully covered,
+night by night, and the hours on the card.
 
 ## Why this exists
 

@@ -413,6 +413,12 @@ def group_page(out):
           "page: a class the report read from git gets a note under it, and a data file without the field none")
     json.dump(near, open(dj, "w", encoding="utf-8"))
     t2 = page("ok", dj)["app"]["text"]
+    bad = json.loads(json.dumps(out))
+    bad["nights"][1]["legs"]["timeout"] = 2
+    bad["totals"]["legs"]["by_status"]["timeout"] = 2
+    json.dump(bad, open(dj, "w", encoding="utf-8"))
+    tt = page("ok", dj)["app"]["text"]
+    check("2 timeout" in tt and ", timeout 2)" in tt and "2 timeout" not in text, "page: a leg that timed out is shown on its night and in the totals, not hidden behind 'failed'")
     check(R._pct3(row["space"] - 1, row["space"]) == "99.999%" and "99.999%" in t2, "page: an item one index short of complete is never shown as 100%")
     for name, mode, body, say in [("a missing file", "404", None, ["could not be loaded", "HTTP 404"]), ("a refused request", "reject", None, ["could not be loaded", "Failed to fetch"]),
                                   ("truncated JSON", "ok", json.dumps(out)[:900], ["is not valid JSON"]), ("an empty file", "ok", "", ["is not valid JSON"]),
@@ -597,7 +603,7 @@ def group_committed():
     j = json.loads(text)
     eq(j["schema"], P.SCHEMA, "committed data: its schema is the reducer's")
     check(j["made"]["commit"] is None or re.fullmatch(r"[0-9a-f]{40}", j["made"]["commit"]), "committed data: made at a commit, or says none")
-    check(not P._PATHY.search(text) and not P._IPV4.search(text) and not re.search(r"amd-arc|logan|/data|/ho" + "me|Users", text), "committed data: no path, IP, host name or user name")
+    check(not P._PATHY.search(text) and not P._IPV4.search(text) and not re.search(r"amd" r"-arc|logan|/data|/ho" r"me|Users", text), "committed data: no path, IP, host name or user name")
     eq(sum(x["slices"] for x in j["nights"]), j["totals"]["slices"], "committed data: the nights' slices add to the total")
     if NODE:
         r = page("ok", DATA)

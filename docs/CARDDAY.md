@@ -2052,6 +2052,35 @@ was written); or that a sweep disagrees only when the tile is wrong (the oracle 
 a disagreement is kept with its operands, and re-running the slice on the software backend,
 which the driver does not do, is the next step).
 
+### The morning after: the nightly progress page (added 2026-10-22, parcel NP)
+
+<https://loganw234.github.io/cft-fp256/nightly.html> shows how far the nightly run has come: per tree class the items fully covered
+and the night each completed, every item's progress, first uncovered index and an ESTIMATE of its finish, the hours on the card and
+the disagreements (none, with the count of completed slices it is none in). It reads `site/nightly.json`, which
+`hw/card_stress_progress.py` makes from the run's `metrics.jsonl` by calling the report's `summarize()`; the page holds no figure of its
+own. Each morning, once the night has ended (`COPY` is the copy's directory, the one holding `metrics.jsonl`):
+
+1. **Copy the night, as now:** the run's directory and the box's sha256s, checked against them. Everything below reads the copy.
+2. **Reduce it,** in a checkout with the whole history, the main checkout, **not a depth-1 clone**: `python -B hw/card_stress_progress.py COPY
+   --out site/nightly.json` (seconds now, and growing with the square of the nights; the file records the commit the checkout is at). The report reads a run's tree from git when the run did not
+   record it (parcel RG), which needs that run's commit in the checkout; in a shallow clone the run stays in a class of its own, with the reason.
+   It writes nothing, and says why, for a `metrics.jsonl` with an unparsable line in the middle (the report
+   goes on without it and says so; a public page must not), a dry-run night, a record before the first run_start, or a field that would
+   carry a path, host name, user name or IP address (status 3). A torn last line is noted in the file, not refused.
+3. **Check it,** in the same checkout: `python -B hw/card_stress_progress.py --check site/nightly.json COPY` must say the file is what the copy
+   reduces to (status 0); a difference names the first fields that differ. Compare `source.metrics_sha256` in the file with the box's line for
+   `metrics.jsonl`, and read `git diff --stat site/nightly.json`: one more night, the current classes moved, the earlier nights untouched.
+4. **Commit the data file alone:** `git add site/nightly.json`, `git commit -m "nightly data: night N (DATE)"`. The `gates` workflow ignores
+   a push that changes this file alone (`paths-ignore` in `.github/workflows/gates.yml`); `pages` redeploys on it.
+5. **Push when no CI run is in progress** (`gh run list --workflow gates --limit 3`): gates cancels a superseded run of its branch, and the
+   filter's first data-only push had not been seen when this was written. Then see `pages` go green and the page's "Newest night" show the date.
+
+A changed tree is a new class (a tile item is counted per RTL tree, a host item per host tree and compiler), so the page's current class
+starts from nothing and the earlier one stays as history; a run that recorded no tree is read from git where it can be (the class's label says so) and else is labelled "commit X, tree not recorded in the run".
+`hw/test_card_stress_progress.py` holds all of this (the page in node, against a stub DOM, in its three failure states; SKIP, by name,
+without node), and, when `CARD_STRESS_PROGRESS_RUNS` names the copies' directories (separated as PATH is), every shared figure against
+`hw/card_stress_report.py --json` on them.
+
 ## The math library's routine entries in the revision-8 set (added 2026-10-19; the card leg ran on rev8q on 2026-10-19)
 
 M1's build, item 6 (docs/ROADMAP.md, "The math library: experiment E1, then M1's build and M2 to

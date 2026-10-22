@@ -1,7 +1,7 @@
 # Publish the browser pages to GitHub Pages.
 #
-# Both pages are COMMITTED build products, byte-reproducible from the
-# pinned emsdk container (see bindings/wasm/README.md), so this
+# The first two pages are COMMITTED build products, byte-reproducible
+# from the pinned emsdk container (see bindings/wasm/README.md), so this
 # workflow builds nothing: it serves the files the repo already
 # vouches for.
 #
@@ -14,6 +14,11 @@
 #                     (zoom's and orbits' of the program engine too),
 #                     each chain printed beside the chain the native
 #                     tool produced (docs/DEMOS.md).
+#   nightly.html      how far the card's nightly stress run has come:
+#                     hand-written, not a build product, and reading
+#                     nightly.json beside it, which hw/card_stress_progress.py
+#                     makes from the run's record and which is committed
+#                     each morning (docs/CARDDAY.md). Both live in site/.
 #
 # conformance.html is staged TWICE, as index.html and under its own
 # name, because demos.html links to it by that name and a relative link
@@ -25,6 +30,8 @@ on:
     paths:
       - bindings/wasm/conformance.html
       - bindings/wasm/demos.html
+      - site/nightly.html
+      - site/nightly.json
       - .github/workflows/pages.yml
   workflow_dispatch:
 
@@ -51,6 +58,8 @@ jobs:
           cp bindings/wasm/conformance.html _site/index.html
           cp bindings/wasm/conformance.html _site/conformance.html
           cp bindings/wasm/demos.html _site/demos.html
+          cp site/nightly.html _site/nightly.html
+          cp site/nightly.json _site/nightly.json
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site

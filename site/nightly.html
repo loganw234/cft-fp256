@@ -323,6 +323,7 @@ rebuilt after each night from the run's own record by <code>hw/card_stress_progr
       var note = [];
       if (!n.closed) note.push("no run_end"); else if (n.reason && n.reason !== "deadline") note.push("ended: " + n.reason); else if (n.reason_withheld) note.push("reason not published");
       if (n.quick) note.push("quick"); if (n.dry_run) note.push("dry run");
+      Object.keys(n.legs).forEach(function (k) { if (k !== "pass" && k !== "fail" && k !== "skipped" && n.legs[k] > 0) note.push(fmt(n.legs[k]) + " " + k); });
       return h("tr", null, h("td", { "class": "l", "data-label": "Night" }, n.n + " (" + (n.date || "-") + ")"), h("td", { "data-label": "On the card" }, hours(n.card_s)),
         h("td", { "data-label": "Slices" }, fmt(n.slices)), h("td", { "data-label": "Cases" }, fmt(n.cases)), h("td", { "data-label": "Legs passed" }, fmt(n.legs.pass)),
         h("td", { "data-label": "Failed" }, fmt(n.legs.fail)), h("td", { "data-label": "Skipped" }, fmt(n.legs.skipped)), h("td", { "class": "l", "data-label": "Note" }, note.join("; ") || "-"));
@@ -390,9 +391,10 @@ rebuilt after each night from the run's own record by <code>hw/card_stress_progr
       kv("Nights", fmt(T.nights) + (T.closed_nights !== T.nights ? " (" + T.closed_nights + " closed)" : "")),
       kv("Time on the card", hours(T.card_s) + " (" + hm(T.card_s) + ", " + fmt(Math.round(T.card_s)) + " s)"),
       kv("Wall span", dur(T.wall_s) + " (from " + (T.first || "-") + "; includes the days between nights)"),
-      kv("Slices completed", fmt(T.slices)), kv("Cases verified", fmt(T.cases)),
+      kv("Slices completed", fmt(T.slices)), kv("Cases compared by the sweeps", fmt(T.cases)),
       kv("Disagreements", T.disagreements + " in " + fmt(T.completed_slices) + " completed slices"),
-      kv("Legs", fmt(T.legs.total) + " (pass " + fmt(by.pass) + ", fail " + fmt(by.fail) + ", skipped " + fmt(by.skipped) + ")"), kv("Cycles", fmt(T.cycles)))));
+      kv("Legs", fmt(T.legs.total) + " (pass " + fmt(by.pass) + ", fail " + fmt(by.fail) + ", skipped " + fmt(by.skipped) + Object.keys(by).filter(function (k) { return k !== "pass" && k !== "fail" && k !== "skipped" && by[k] > 0; }).map(function (k) { return ", " + k + " " + fmt(by[k]); }).join("") + ")"),
+      kv("Cycles", fmt(T.cycles)))));
     if (T.disagreement_list && T.disagreement_list.length) {
       frag.lastChild.appendChild(h("div", { "class": "banner" }, h("strong", { text: "Disagreements recorded: " }),
         T.disagreement_list.map(function (x) { return x.item + " on " + (x.image || "?") + " at " + (x.start || "?"); }).join("; ")));
