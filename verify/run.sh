@@ -1521,16 +1521,17 @@ stage demos "the browser demos' compute core reproduces the C tools' chains, wit
 # Which MPFR the stage below builds against, said by name (KL-212). A fresh
 # clone has no verify/_mpfr-prefix, so the stage used to build against the
 # host's own MPFR - 4.2.1 on amd-arc-box, where the repository pins 4.2.2 -
-# and said nothing. The one comparison the record has came out the same
-# against both (the audit round's 37 mismatches, docs/VALIDATION.md,
-# 2026-09-30), but a verdict reached against an oracle other than the pinned
-# one should name it. The pin is read from verify/build-mpfr-oracle.sh, so
-# the number exists once; the version a build sees is asked of the compiler,
-# with the include flags the build will use (a prefix header that lost to a
-# system one would be reported as the system's), as the MPFR_VERSION_STRING
-# of the mpfr.h it includes. host_cc is the compiler HOSTMAKE builds with:
-# the mingw64 gcc first on PATH on Windows, and make's own `cc`, or $CC,
-# elsewhere.
+# and said nothing of it (the binary prints the library's version as its
+# first line, and never says whether that is the pin). The one comparison the
+# record has, the audit round's 37 mismatches (docs/VALIDATION.md,
+# 2026-09-30), came out the same against both, but a verdict reached against
+# an oracle other than the pinned one should name it. The pin is read from
+# verify/build-mpfr-oracle.sh, so the number exists once; the version a
+# build sees is asked of the compiler, with the include flags the build will
+# use (a prefix header that lost to a system one would be reported as the
+# system's), as the MPFR_VERSION_STRING of the mpfr.h it includes. host_cc is
+# the compiler HOSTMAKE builds with: the mingw64 gcc first on PATH on
+# Windows, and make's own `cc`, or $CC, elsewhere.
 host_cc() {
   if [ "$WIN" = 1 ]; then PATH="/c/msys64/mingw64/bin:$PATH" gcc "$@"
   else "${CC:-cc}" "$@"; fi
