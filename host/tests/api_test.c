@@ -722,7 +722,9 @@ static void ld_expect(cft_device *live, cft_device *dev, const char *what,
  *     build with XRT (a build without says so in the library's own slot,
  *     and the leg is the library's again).
  * Every leg is red against the library before the change, where the plant
- * is still there afterwards. */
+ * is still there afterwards; and in an XRT build the xrt plant's own check
+ * is the first to go red, because the remote plant's older sentence stands
+ * in front of the XRT backend's newer one (verifier-V10's order). */
 enum { LE_EMPTY, LE_OWN, LE_NOT_PLANT };
 
 #define LE_LIB_WORDS    "idx_a_src says operand a holds"
@@ -800,8 +802,9 @@ static void le_hold(const char *what, cft_status st, cft_status want,
 #define LE_LEG(plant, what, call, want, mode, says)                        \
     do {                                                                   \
         cft_status st_;                                                    \
-        CHECK((plant)(dev), "%s: the plant left no sentence to leak",      \
-              what);                                                       \
+        CHECK((plant)(dev), "%s: the plant did not leave its own sentence " \
+              "first: cft_last_error() shows '%s'", what,                  \
+              cft_last_error());                                           \
         st_ = (call);                                                      \
         le_hold(what, st_, want, mode, says);                              \
     } while (0)

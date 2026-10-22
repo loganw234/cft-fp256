@@ -1890,13 +1890,11 @@ extern "C" const char *cftx_last_error(void)
     return g_err.c_str();
 }
 
-/* Empties it. The calls below clear it themselves at their start where
- * they began to (open, a run, a program run, the image's identity); this
- * is device.c's cft_clear_error reaching it from the top of every public
- * entry point and before every backend call, so a reduction, a read-back
- * or a publish - which never cleared it - cannot show an older call's
- * sentence either, and neither can a call that reaches no backend at all
- * (KL-490). */
+/* Empties it: device.c's cft_clear_error, from the top of every public
+ * entry point and before every call into this backend. The calls below
+ * that never cleared it themselves (a reduction, a read-back, a publish)
+ * and calls that reach no backend at all can no longer show an older
+ * sentence (KL-490). */
 extern "C" void cftx_clear_error(void)
 {
     g_err.clear();

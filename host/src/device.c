@@ -31,24 +31,19 @@
 #define CFT_BACKEND_SW  0
 #define CFT_BACKEND_XRT 1
 
-/* Empties every last-error slot (the library's, the remote backend's and
- * the XRT backend's); called at every point where a call is about to
- * reach a device backend, so that a message libcft or the OTHER backend
- * wrote never goes on explaining a failure that is not its. The top of
- * every public entry point does the same, through cft_clear_error().
- * Defined with the slot, below. */
+/* Called at every point where a call is about to reach a device backend:
+ * empties every last-error slot, like the top of every public entry point
+ * (cft_clear_error). Defined with the slot, below. */
 #if defined(CFT_ENABLE_XRT) || !defined(CFT_NO_REMOTE)
 static void backend_call(void);
 #endif
 
-/* A sentence added by the last-error round (2026-10-22, KL-490) for a
- * refusal that had none. Where the slot cannot hold one - CFT_ERRMSG_MAX
- * 1, CFT_TINY's - cft_set_error ignores its text, and the text would
- * still sit in flash: so these are written only where the slot can hold
- * them, and a tiny build gains no byte and changes nothing it does
- * (whether it should carry a short name per refusal is Logan's open
- * question, KL-603). The older sentences below keep calling
- * cft_set_error, as they always did. */
+/* The sentences KL-490 added for refusals that had none. Where the slot
+ * cannot hold one (CFT_ERRMSG_MAX 1, CFT_TINY's) cft_set_error ignores its
+ * text and the text would still sit in flash, so these are written only
+ * where the slot can hold them: a tiny build gains no byte and changes
+ * nothing it does (a short name per refusal there is Logan's open
+ * question, KL-603). The older sentences keep calling cft_set_error. */
 #if CFT_ERRMSG_MAX > 1
 #  define CFT_SAY(...) cft_set_error(__VA_ARGS__)
 #else
@@ -1126,29 +1121,16 @@ CFT_API void cft_close(cft_device *dev)
 /* ---- the library's own last-error slot ------------------------------
  *
  * cft_last_error() reads three slots: this one, the remote backend's and
- * the XRT backend's. One call's sentence is the only thing any of them
- * may hold after it, because cft_clear_error() below empties all three
- * and the first statement of every public entry point that returns a
- * status is a call to it (2026-10-22, KL-490); backend_call(), immediately
- * before each cftx_/cftr_ call, does the same for a call that has gone on
- * to use a backend, and this file holds all of them. So anything in
- * libcft that refuses writes its sentence here, after the clear, and
- * nothing it wrote - or a backend wrote - for an earlier call can stand
- * in front of it.
- *
- * Two steps came before it, and each was a bug. Until 2026-09-30 only a
- * call that reached a backend cleared this slot, and a refusal made
- * without a sentence by one that did not - cft_program_load - printed
- * the last call's: "cft_run_ex: idx_a[128] = 4294967294 is at or past
- * the 256 elements ...", measured by P2 of the revision-7 round. And
- * from then until 2026-10-22 only that one entry point cleared on
- * entry: a bare argument error, a refused format, attribute or
- * reduction opcode, a NULL output or cft_conformance over a directory
- * with no sets left the previous failure's sentence standing; the XRT
- * backend cleared its own slot at open and at an elementwise or program
- * run but not at a reduction, a read-back or a publish; and with two
- * device backends in one process a remote handle's older sentence came
- * before an XRT handle's newer one (verifier-V2, V9 and V10).
+ * the XRT backend's. cft_clear_error() below empties all three, and it is
+ * the first statement of every public entry point that returns a status
+ * (2026-10-22, KL-490); backend_call(), before each cftx_/cftr_ call,
+ * does the same for a call that has gone on to use a backend. So a
+ * refusal writes its sentence here after the clear, and nothing an
+ * earlier call wrote - or the other backend - can stand in front of it.
+ * Until then only a call that reached a backend cleared this slot, and
+ * from 2026-09-30 cft_program_load too: a refusal without a sentence
+ * showed the last call's, and a remote handle's older sentence came
+ * before an XRT handle's newer one (verifier-V2, V9, V10).
  *
  * Its producers are the library's refusals by name - this file's,
  * program.c's, and the other modules' through the helpers backend.h
@@ -1178,11 +1160,8 @@ void cft_set_error(const char *fmt, ...)
 #endif
 }
 
-/* backend.h says who calls it: the first statement of every public entry
- * point that returns a status, in every source file. It empties ALL the
- * slots cft_last_error() reads, not only this one, in every build and at
- * every CFT_ERRMSG_MAX (at 1 this library's slot is that one byte,
- * already empty, and the backends' are compiled out or untouched). */
+/* backend.h says who calls it. It empties ALL the slots cft_last_error()
+ * reads, not only this one, in every build and at every CFT_ERRMSG_MAX. */
 void cft_clear_error(void)
 {
     g_msg[0] = '\0';
@@ -1195,11 +1174,10 @@ void cft_clear_error(void)
 }
 
 #if defined(CFT_ENABLE_XRT) || !defined(CFT_NO_REMOTE)
-/* Called immediately before handing anything to a device backend. A
- * build with no device backend hands nothing to one. It empties every
- * slot and not only this library's: the backend about to be called
- * clears its own at most, and the OTHER backend's older sentence would
- * otherwise stand beside the new call's (KL-490). */
+/* Called immediately before handing anything to a device backend (a build
+ * with none hands nothing to one). It empties every slot: the backend
+ * about to be called clears its own at most, and the OTHER's older
+ * sentence would stand beside the new call's. */
 static void backend_call(void)
 {
     cft_clear_error();

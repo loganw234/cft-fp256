@@ -271,39 +271,31 @@ CFT_API const char *cft_strerror(cft_status s);
  * only explanation anybody is going to get.
  *
  * THE SENTENCE BELONGS TO THE CALL THAT JUST RETURNED. Every public
- * function that returns a cft_status empties it before it does anything
- * else - the library's own slot and both device backends' (the remote
- * one's and the XRT one's), all three at once - so after such a call this
- * is that call's own detail, or "" when it has none to add: never an
- * older call's, and never one backend's older sentence in front of
- * another's newer. A call that SUCCEEDS leaves it "". (KL-490, 2026-10-22.
- * Until then only cft_program_load emptied it: a refusal without a
- * sentence - a bare argument error, a format out of range,
+ * function that returns a cft_status empties it - the library's own slot
+ * and both device backends' - before it does anything else, so after such
+ * a call this is that call's own detail, or "" when it has none to add:
+ * never an older call's, never one backend's older sentence in front of
+ * another's newer, and "" after a call that SUCCEEDED. (KL-490,
+ * 2026-10-22. Until then only cft_program_load emptied it, and a refusal
+ * without a sentence - a bare argument error, a format out of range,
  * cft_conformance over a directory with no sets - showed whatever had
- * failed before it, and in a process with two device backends a remote
- * handle's older sentence came before an XRT handle's newer one;
- * verifier-V2, V9 and V10.)
+ * failed before; verifier-V2, V9 and V10.)
  *
- * Read it straight after the call: the next call that returns a status
- * empties it again. What does not empty it is every function that
- * returns no status or answers in its return value - the *_free calls,
- * the flag operations, cft_supports, cft_buffer_data, cft_format_size,
- * cft_op_name, cft_strerror and this function - so those may sit between
- * a failure and the read. (cft_close is the one to watch: it empties
- * nothing, but closing a remote handle that has lost its server can
- * leave a sentence of its own.) A caller that keeps the sentence copies
- * it (cft::error does).
+ * Read it straight after the call. Functions that return no status or
+ * answer in their return value - the *_free calls, the flag operations,
+ * cft_supports, cft_buffer_data, cft_format_size, cft_op_name,
+ * cft_strerror and this function - do not empty it, so they may sit
+ * between a failure and the read; cft_close is the one to watch, since
+ * closing a remote handle that has lost its server can leave a sentence
+ * of its own. A caller that keeps the sentence copies it (cft::error does).
  *
- * ONE slot for the whole process, not one a handle and not one a thread:
- * static storage shared by every cft_device, and not thread-safe -
- * consistent with cft_device, which is not either. Two threads, or two
- * handles' calls interleaved in one thread (a server multiplexing
- * connections), each empty and fill the same slot in turn, so a reader
- * sees the most recent call's sentence in the process, whoever made it:
- * keep the sentence with its call, as host/tools/cft-serve.c does for a
- * device that would not open. A build with CFT_ERRMSG_MAX 1 (CFT_TINY's)
- * keeps no library sentences at all, and its slot is always "" (CFT_TINY
- * has no device backend whose sentence could show through). Never NULL. */
+ * ONE slot for the whole process, not one a handle or a thread: static
+ * storage, not thread-safe, consistent with cft_device. Two threads, or
+ * two handles' calls interleaved (a server multiplexing connections),
+ * each empty and fill it in turn, so keep the sentence with its call, as
+ * host/tools/cft-serve.c does for a device that would not open. A build
+ * with CFT_ERRMSG_MAX 1 keeps no library sentences (CFT_TINY's slot is
+ * always ""; it has no device backend). Never NULL. */
 CFT_API const char *cft_last_error(void);
 
 /* ---------------------------------------------------------------

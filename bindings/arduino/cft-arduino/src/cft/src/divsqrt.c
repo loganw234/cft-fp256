@@ -1614,6 +1614,7 @@ CFT_API cft_status cft_div(cft_device *dev, cft_format fmt, cft_round rnd,
     size_t off = 0, esz;
     cft_status st;
 
+    cft_clear_error();
     if (bus_out)
         *bus_out = 0;
     st = divsqrt_validate(dev, fmt, rnd, a, d, n, CFT_RECIP_SEED);
@@ -1692,6 +1693,7 @@ CFT_API cft_status cft_sqrt(cft_device *dev, cft_format fmt, cft_round rnd,
     size_t off = 0, esz;
     cft_status st;
 
+    cft_clear_error();
     if (bus_out)
         *bus_out = 0;
     st = divsqrt_validate(dev, fmt, rnd, a, d, n, CFT_RSQRT_SEED);

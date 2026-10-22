@@ -595,6 +595,26 @@ and holds every one of those refusals, the report, and the recovery -
 read back before anything runs over it, so a publish that kept the
 failed run's bytes could not hide.
 
+**A fill that failed is not a fill.** A device copy is current only once
+its upload has succeeded. Until 2026-09-26 it was marked current before
+the upload, so a fill whose upload threw - a staging failure, which the
+caller may retry - left the copy "current" with the bytes it held before,
+and the retry bound it resident: 64 of 64 results wrong with `CFT_OK`
+(verifier-V8, N1). `CFT_XRT_UPLOAD=fail-fill`, a card instrument read at
+the start of each run like `CFT_XRT_BIND` and `CFT_XRT_WITNESS`, makes
+every fill of a resident copy in that run throw where XRT's upload would;
+the run is refused with a sentence naming the instrument, nothing
+started, the caller's output untouched and the handle usable. Unset or
+empty plants nothing; any other value is refused by name
+(`CFT_ERR_INVALID_ARGUMENT`). `device-test -b`'s "a failed fill's retry"
+runs the sequence on every XRT device: a run fills a copy, the mirror is
+rewritten and published, the run is repeated with the fill planted to
+fail, and the run after that must give the software backend's bytes for
+the rewritten operand. A build with the fix reverted answers for the old
+bytes, which is what the leg is written to catch; docs/VALIDATION.md
+records where it has run. A software or remote handle keeps no device
+copies, ignores the instrument, and the leg reports NOT TESTED there.
+
 **What is not resident.** `cft_reduce`'s partials are the library's
 own array; the composed reductions (`CFT_DOT`, `CFT_SUMSQ`,
 `CFT_SUMABS`) pass through an internal scratch array, so those spend
@@ -2315,19 +2335,48 @@ in advance:
     itself, with a status bit and no explanation
 
 That message is the library's own, not a backend's: `cft_last_error()`
-now has a third source, cleared the moment anything reaches a device
-backend, so a refusal libcft made never goes on explaining someone
-else's failure. The other way round it does not hold: a refusal that
-adds no sentence (a bare argument error, `cft_conformance` over a
-directory with no sets) clears nothing, and neither does every call that
-succeeds; and in a process with two device backends, a remote handle's
-older sentence comes before an XRT handle's newer one (verifier-V10). So
-an older failure's sentence can outlive its call. Read
-`cft_last_error()` straight after the call that failed, and take it as
-detail for that call when it names it (verifier-V9 and the lead,
-2026-09-28).
+has three sources, this one and the two device backends'.
 
-**`cft_program_load` is an exception to that, since 2026-09-30.**
+**The sentence belongs to the call that just returned (2026-10-22).**
+Every public entry point that returns a status empties all three
+sources before it does anything else, and a refusal then writes its own
+sentence. So after such a call `cft_last_error()` is that call's
+sentence, or `""` when it has none to add: never an older call's, never
+one backend's older sentence in front of another's newer, and `""` after
+a call that succeeded. Until then only `cft_program_load` cleared on
+entry (below), and a refusal that added no sentence - a bare argument
+error, a format out of range, `cft_conformance` over a directory with no
+sets - showed whatever had failed before it, and a remote handle's older
+sentence came before an XRT handle's newer one (verifier-V2, V9, V10).
+The calls that return no status or answer in their return value - the
+`*_free` calls, the flag operations, `cft_supports`, `cft_buffer_data`,
+the name and size queries - do not empty it, so they may sit between a
+failure and the read; `cft_close` is the one to watch, since closing a
+remote handle that has lost its server can leave a sentence of its own.
+Read it straight after the call.
+
+It is one slot for the whole process: not per handle and not per thread,
+and not thread-safe, like `cft_device`. Two handles' calls interleaved -
+a server's connections - empty it in turn, so a caller that needs the
+sentence later keeps it with its call: `cft-serve` copies a failed
+open's into the connection, which a later request on that connection
+would otherwise read after another connection's call had emptied it.
+
+The dense path's refusals that had no sentence now say what they refuse,
+and name the call: a format, attribute or opcode that is no value, a
+reduction opcode through `cft_run` or an elementwise one through
+`cft_reduce`, a NULL output or operand, an `n` whose bytes overflow, in
+`cft_run`, `cft_reduce` and `cft_reduce_seg`; and likewise
+`cft_run_ex`'s, `cft_open`'s, `cft_get_caps`', `cft_get_image_id`'s,
+`cft_alloc`'s and the buffer calls'. So do their out-of-memory and
+internal-error returns, which no test reaches. The other modules'
+refusals of an argument (the clause-5 operations, the conversions, the
+transcendentals, the formatOf and augmented operations and the rest)
+still add none: their `cft_last_error()` is `""`, and the status says
+what kind. A build with `CFT_ERRMSG_MAX` 1 keeps none of the library's
+sentences, new or old.
+
+**`cft_program_load` cleared on entry first, since 2026-09-30.**
 It clears the library's slot on entry, and every refusal it makes
 writes a sentence of its own:
 - the header's, `CFT_ERR_ARTIFACT`: a short image, the magic, the
@@ -2350,18 +2399,14 @@ their checks ran in different orders before this change:
     instruction 3 is DEPOSIT, which reads only imm & 0x02000000, so
     imm = 0x01000000 sets a bit it does not read
 
-After a load that succeeds, the library's slot is empty. A device
-backend's older message can still show through an empty slot, so the
-guarantee rests on the sentences, not on the clear: `seq_check.py`
+After a load that succeeds, every slot is empty: the clear covers the
+device backends' too since 2026-10-22, so a backend's older message no
+longer shows through an empty library slot, and `seq_check.py` still
 holds a refusal on a `cft://` handle after the remote backend's own
 failure. The loader's four allocation failures carry no sentence, and
-ten of the remote and XRT backends' fourteen carry none either. Two
-exceptions remain:
-- a build with `CFT_ERRMSG_MAX` 1 drops sentences by design, so its
-  slot shows a remote handle's older message;
-- on XRT, a load that `cft_host_in` refuses (a lost resident buffer)
-  can show a remote handle's older sentence first, in a process that
-  holds both, the order verifier-V10 recorded.
+ten of the remote and XRT backends' fourteen carry none either. One
+exception remains: a build with `CFT_ERRMSG_MAX` 1 drops the library's
+sentences by design, and a device backend in it keeps its own.
 
 No status changed on a 64-bit host. On a 32-bit one (wasm32, the
 32-bit boards), an image whose header describes more bytes than a
