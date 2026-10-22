@@ -457,8 +457,8 @@ def group_page(out):
     for c in out["now"]["classes"]:
         want += [f"{c['total']['complete']} of {c['total']['items']}", c["label"]] + [R._pct3(r["covered"], r["space"]) for r in c["items"]]
         want += [e for r in c["items"] if r["estimate"] for e in (r["estimate"]["date"],)]
-    check("Made with the tools at commit" in text and "Data made at" not in text and "which is not this file's own commit" in text,
-          "page: the commit line says the commit is the tools', not the data file's own")
+    check("Made with the tools at commit" in text and "Data made at" not in text and "own commit" not in text,
+          "page: the commit line says the file was made with the tools at that commit, and claims nothing of whether it is the file's own")
     miss = [w for w in want if w not in text]
     check(not miss, f"page: shows {len(want)} figures of the data file, each as the report's _pct3 and thousands separators write it", miss[:4])
     near = json.loads(json.dumps(out))
@@ -599,7 +599,8 @@ def group_check(d, text, out):
     j["made"]["commit"] = "9" * 40
     open(f, "w", encoding="utf-8").write(P.dump(j))
     eq(cli("--check", f, d)[0], 0, "control: a different commit in `made` is not a difference (it cannot be re-derived)")
-    for name, edit in [("no made block", lambda j: j.pop("made")), ("a made.commit that is not a commit", lambda j: j["made"].__setitem__("commit", "xyz"))]:
+    for name, edit in [("no made block", lambda j: j.pop("made")), ("a made.commit that is not a commit", lambda j: j["made"].__setitem__("commit", "xyz")),
+                       ("an uppercase made.commit", lambda j: j["made"].__setitem__("commit", "A" * 40)), ("a short made.commit", lambda j: j["made"].__setitem__("commit", "a" * 39))]:
         j = json.loads(text)
         edit(j)
         open(f, "w", encoding="utf-8").write(P.dump(j))

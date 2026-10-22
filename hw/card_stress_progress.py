@@ -39,13 +39,15 @@ against the shapes of a path and an IP address: a hit refuses the file (status 3
 its slices ran against stand-ins. So is a damaged file (an unparsable line in the middle): the report goes on with the
 lines that parse, and says so loudly, and a public page must not.
 
---check FILE RUN_DIR re-derives FILE from RUN_DIR and compares every field but `made` (`made.commit` is the commit the TOOLS were
-at when the file was made, git's HEAD of the checkout that ran them, never the data file's own commit, and cannot be re-derived); a difference names the first fields that differ. It is the morning check.
+--check FILE RUN_DIR re-derives FILE from RUN_DIR and compares every field but `made`. `made.commit` is the commit the TOOLS were at
+when the file was made: git's HEAD of the checkout that ran them, which is normally the commit before the data file's own, since the
+routine makes the file before committing it; `--commit SHA` records another, which may be the file's own. It cannot be re-derived. A
+difference names the first fields that differ. It is the morning check.
 
-Exit status, the report's: 0 made (or --check: equal); 2 nothing to reduce or check (RUN_DIR or metrics.jsonl missing,
-unreadable, empty or damaged, no run_start, a record before the first, a dry run, a --check FILE missing, not JSON or not a
-data file (no `made.commit` of 40 digits or null), a usage error); 1 made but not written, or --check found a difference; 3 the reducer failed or refused its own check (a bug,
-or private text in a published field; the message is on stderr).
+Exit status, the report's: 0 made (or --check: equal); 2 nothing to reduce or check (RUN_DIR or metrics.jsonl missing, unreadable,
+empty or damaged, no run_start, a record before the first, a dry run, a --check FILE missing, not JSON or not a data file (no
+`made.commit` of 40 lowercase hex digits or null), a usage error); 1 made but not written, or --check found a difference; 3 the
+reducer failed or refused its own check (a bug, or private text in a published field; the message is on stderr).
 """
 from __future__ import annotations
 
@@ -526,7 +528,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 raise Refused(f"{a.check} is JSON but not an object")
             made = have.get("made")
             if not (isinstance(made, dict) and (made.get("commit") is None or re.fullmatch(r"[0-9a-f]{40}", str(made.get("commit"))))):
-                raise Refused(f"{a.check} is not a data file: its made.commit is not a 40-digit commit or null")
+                raise Refused(f"{a.check} is not a data file: its made.commit is not 40 lowercase hex digits or null")
             have["made"] = got["made"] = None
             diff = differences(have, got)
             if diff:
@@ -539,7 +541,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             return 0
         commit = repo_commit() if a.commit is None else (None if a.commit == "none" else a.commit)
         if commit is not None and not re.fullmatch(r"[0-9a-f]{40}", commit):
-            ap.error("--commit is a 40-digit commit or none")
+            ap.error("--commit is 40 lowercase hex digits or none")
         text = dump(reduce_records(objs, info, commit))
     except Refused as e:
         print(f"{me}: {e}", file=sys.stderr)
