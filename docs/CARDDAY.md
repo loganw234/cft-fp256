@@ -1233,8 +1233,11 @@ study is per RTL tree, with the three images reported separately beneath it.
   the checkout lacks (a shallow clone, a bundle without history: derived "in a checkout that holds the commit", and
   otherwise the commit's own class), a run not recorded clean, a recorded tree that git does not give for its
   commit, a place that is no repository, no git - is kept apart by its commit as before ("not recorded", or
-  "unknown" for the contradicted tree), with `resolve_tree`'s reason in the label. `--no-git` (or `summarize(rev=None)`) is
-  the record-only view. git is asked once for each commit and directory, 10 s a lookup and 40 s in all (the driver
+  "unknown" for the contradicted tree, "not recorded or unknown" for a class that gathers both, whatever the order of its
+  runs), with `resolve_tree`'s reason in the label. `--no-git` (or `summarize(rev=None)`) is the record-only view. A function
+  given as `rev` to `summarize()` is used as given and is not called git: the label says "taken from the given rev, not git",
+  `sweep.trees.git` is `{read: false, source: "given rev"}`, and `derived_from_git` lists what the function answered.
+  git is asked once for each commit and directory, 10 s a lookup and 40 s in all (the driver
   refreshes the report after every cycle with a two-minute limit); a git that does not answer, is not there or finds
   no repository stops the rest and is named in `sweep.trees.git.problem` and the section's `git:` line. `summarize()`
   derives by default, so a reducer that calls it gets the classes the command line shows. A slice is counted under the **last `run_start`
