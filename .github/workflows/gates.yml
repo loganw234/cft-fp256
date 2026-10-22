@@ -12,6 +12,26 @@
 # through verify/run.sh, each binding and example a named stage that
 # is required to run rather than allowed to skip.
 #
+# What the jobs run on, and why mpmath and gmpy2 are pinned. READ from run
+# 39702228205 at f707fa3 (2026-10-22, every job green): golden on CPython
+# 3.13.16 with mpmath 1.4.1, gmpy2 2.2.1 and pytest 9.1.1; host on 3.12.15
+# with mpmath 1.4.1, gmpy2 2.3.2, numpy 2.5.4 and pytest 9.1.1; each rtl job
+# on 3.12.15 with mpmath 1.4.1, cocotb 1.9.2 and cocotbext-axi 0.1.28. mpmath
+# and gmpy2 are pinned below to exactly those, in every job that installs
+# them, so that a new release reaches CI when someone moves a pin and not
+# unannounced; until 2026-10-22 only golden's gmpy2 was pinned, and CI ran
+# mpmath 1.4.1 where the desktop runs 1.3.0. Both satisfy python/pyproject.toml's
+# floors (mpmath>=1.3, gmpy2>=2.2.1). The two jobs that install gmpy2 pin
+# different versions because each keeps what it last ran; moving host to
+# golden's 2.2.1, the desktop's, is a change for a run to confirm.
+#
+# The golden job's CPython is not the desktop's - 3.13 where the desktop and
+# the other jobs run 3.12 - and stays so on purpose. math.fma, one of the
+# arbiters named above, exists from 3.13; python/tests/test_softfloat.py's
+# test_fp64_fma_matches_math_fma skips below that, as it does on the
+# desktop's 3.12.9. Moving this job to 3.12 would take that arbiter out of CI
+# without turning anything red.
+#
 # What a green tick does NOT cover: synthesis, timing, package_xo,
 # v++ linking, and behaviour on a physical card. Those gates live in
 # docs/BRINGUP.md and need licensed tools and hardware.
@@ -50,10 +70,16 @@ jobs:
       # itself whole, so none of its 884 tests ran here. 2.2.1 is the
       # desktop's. The import step fails the job if gmpy2 is absent, where
       # test_mpfr_parity would only skip; a gmpy2 that is there and will
-      # not load fails collection too.
-      - run: pip install pytest mpmath gmpy2==2.2.1
+      # not load fails collection too. mpmath 1.4.1 is what the job took
+      # unpinned until 2026-10-22.
+      - run: pip install pytest mpmath==1.4.1 gmpy2==2.2.1
       - run: python -c "import gmpy2; print('gmpy2', gmpy2.version(), gmpy2.mpfr_version(), gmpy2.mp_version())"
-      - run: python -m pytest python/tests -q
+      # -rs: the log names each test it skipped and why. It said "5453 passed,
+      # 2 skipped" and no more (run 39702228205), and a skip that CI hides is
+      # a test nobody knows is not running. Those two are believed to be
+      # test_serial_replay.py's, skipped for want of the loopback binary this
+      # job does not build; the next run's log says.
+      - run: python -m pytest python/tests -q -rs
 
   # The RTL suite runs as one job a group (tb/Makefile's SIM_GROUPS, since
   # 2026-10-19). As one job it took 4 h 28 min to 5 h 39 min of the hosted
@@ -68,10 +94,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       # assigned first, so that a refusal fails this step (bash -e) rather
-      # than handing the matrix an empty list
+      # than handing the matrix an empty list; printed, so that the log shows
+      # the list the matrix was handed and not only the jobs it made
+      # (until 2026-10-22 it went to the output file alone)
       - id: groups
         run: |
           groups=$(make -C tb -s --no-print-directory print-sim-groups)
+          echo "rtl groups: $groups"
           echo "groups=$groups" >> "$GITHUB_OUTPUT"
 
   rtl:
@@ -95,7 +124,9 @@ jobs:
       # Icarus, which keeps the default simulator the one the rest of
       # the suite is written for.
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends iverilog verilator
-      - run: pip install -r tb/requirements.txt
+      # tb/requirements.txt holds mpmath's floor (>=1.3); the pin is CI's,
+      # the version these jobs took (1.4.1) until it was written
+      - run: pip install -r tb/requirements.txt mpmath==1.4.1
       - run: make -C tb sim-group-${{ matrix.group }}
 
   portability:
@@ -124,7 +155,9 @@ jobs:
         with:
           node-version: "22"
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gfortran
-      - run: pip install pytest mpmath gmpy2 numpy
+      # pinned to what this job last ran (the header says why); numpy and
+      # pytest are not
+      - run: pip install pytest mpmath==1.4.1 gmpy2==2.3.2 numpy
       # `docs` and `generated` lead because they are the two that catch
       # drift rather than breakage, and are cheap: about a minute each
       # (on the maintainer's desktop on 2026-10-19, docs took 29 to 39 s
@@ -136,4 +169,22 @@ jobs:
       # counts and two stale generated artifacts reached main: the stages
       # existed, sat in the quick budget, and nothing on push selected
       # them. A gate that CI does not name is a gate that does not run.
-      - run: bash verify/run.sh --require-all --only docs,generated,buildargs,sweepjudge,vectors,libcft,augmented,reduce,programs,character,formatof,status96,bindings,cpp,lang-cpp,lang-rust,lang-go,lang-csharp,lang-fortran,node,wasm,workloads,demos
+      #
+      # `innerskips` and `ensurevectors` are the runner's own two self-tests
+      # (verify/test-inner-skips.sh: how a skip inside a passing stage is
+      # counted, and how the mpfr stage names its MPFR; verify/test-ensure-
+      # vectors.sh: when vectors/out is reused and when it is regenerated,
+      # and that every stage that can regenerate it names what that needs),
+      # and `seq` is the sequencer differential (host/tests/seq_check.py: the
+      # C sequencer against the model over fuzzed programs in eight corpora;
+      # the routine corpus needs the mpmath and pytest this job installs, or
+      # it prints a SKIP that --require-all fails). All three are in the
+      # quick budget and were left out of this list until 2026-10-22
+      # (KL-607, KL-181), so a push that broke the runner's counting, or the
+      # C sequencer alone, passed here. On the maintainer's desktop that day,
+      # through the runner and niced, seq took 36 s, innerskips 90 s and
+      # ensurevectors 49 s; four stages this job already runs took 26 s here
+      # (augmented, formatof, reduce, status96, run 39702228205) against 28 s
+      # there, so the three are believed to add a few minutes to this job's
+      # 6,319 s. The next run's log has the figure.
+      - run: bash verify/run.sh --require-all --only docs,generated,buildargs,sweepjudge,innerskips,ensurevectors,vectors,libcft,augmented,reduce,seq,programs,character,formatof,status96,bindings,cpp,lang-cpp,lang-rust,lang-go,lang-csharp,lang-fortran,node,wasm,workloads,demos
