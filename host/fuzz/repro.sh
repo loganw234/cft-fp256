@@ -32,9 +32,13 @@ ASAN_OPTIONS="abort_on_error=0:detect_leaks=0:allocator_may_return_null=1:max_al
 UBSAN_OPTIONS="print_stacktrace=1:halt_on_error=1"
 export ASAN_OPTIONS UBSAN_OPTIONS
 
+# The bound of every replay below, in seconds; the reports that name a
+# stall say it too.
+REPLAY_SECS=20
+
 # timeout's own statuses: 124 when the bound ended the replay, 137 when
-# it had to be killed. Named in the report, so a stall is not read as a
-# crash or as a wrong answer.
+# it had to be killed. Such a replay is reported as CRASH or WRONG all
+# the same, with the stall named under that line.
 stalled() { [ "$1" -eq 124 ] || [ "$1" -eq 137 ]; }
 
 rc=0
@@ -54,13 +58,13 @@ for t in program serve client; do
     fi
     for f in $files; do
         n=$((n + 1))
-        if timeout -k 2 20 "$bin" --run "$f" > /dev/null 2>&1; then
+        if timeout -k 2 "$REPLAY_SECS" "$bin" --run "$f" > /dev/null 2>&1; then
             echo "  ok    $f"
         else
             st=$?
             echo "  CRASH $f"
-            stalled "$st" && echo "        (exit $st: no answer in 20 s, a stall)"
-            timeout -k 2 20 "$bin" --run "$f" 2>&1 | tail -20
+            stalled "$st" && echo "        (exit $st: no answer in $REPLAY_SECS s, a stall)"
+            timeout -k 2 "$REPLAY_SECS" "$bin" --run "$f" 2>&1 | tail -20
             rc=1
         fi
     done
@@ -94,13 +98,13 @@ for f in $(find crashes/ckpt -name '*.ckpt' 2>/dev/null | sort); do
     fi
     n=$((n + 1))
     # shellcheck disable=SC2046
-    err=$(timeout -k 2 20 "$bin" --resume --checkpoint "$f" $(ckpt_args "$tool") 2>&1 >/dev/null)
+    err=$(timeout -k 2 "$REPLAY_SECS" "$bin" --resume --checkpoint "$f" $(ckpt_args "$tool") 2>&1 >/dev/null)
     st=$?
     if [ "$st" -eq 2 ] && [ -n "$err" ]; then
         echo "  ok    $f -> $(echo "$err" | head -1)"
     else
         echo "  WRONG $f exited $st rather than refusing by name"
-        stalled "$st" && echo "        (no answer in 20 s: a stall)"
+        stalled "$st" && echo "        (no answer in $REPLAY_SECS s: a stall)"
         echo "$err" | head -6
         rc=1
     fi
@@ -114,12 +118,12 @@ for f in $(find crashes/program-differential -type f 2>/dev/null | sort); do
         continue
     fi
     n=$((n + 1))
-    v=$(timeout -k 2 20 ./fuzz-program --verdict "$f" 2>&1)
+    v=$(timeout -k 2 "$REPLAY_SECS" ./fuzz-program --verdict "$f" 2>&1)
     vst=$?
     case "$v" in
     *REFUSE*) echo "  ok    $f -> $(echo "$v" | sed 's/^[^ ]* //')" ;;
     *)        echo "  WRONG $f -> $v (the golden model refuses this image)"
-              stalled "$vst" && echo "        (exit $vst: no verdict in 20 s, a stall)"
+              stalled "$vst" && echo "        (exit $vst: no verdict in $REPLAY_SECS s, a stall)"
               rc=1 ;;
     esac
 done
