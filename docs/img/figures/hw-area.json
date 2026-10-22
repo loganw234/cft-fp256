@@ -5,7 +5,7 @@
  "alt": "One tile's logic cells by bank, and the 12 layouts the layout generator derives for the U50, each as a share of the part: four full tiles fit at 78.9%.",
  "files": ["docs/img/figures/hw-area-light.svg", "docs/img/figures/hw-area-dark.svg"],
  "maker": "python/project_figures.py: build_hw_area, draw_hw_area",
- "commit": "0b77387ea1266f4d4a5e30c8798f57e8b6dc6ef8",
+ "commit": "15f96c8aea0279af26437e5a89c2bd7e40cf3e1e",
  "commit_means": "the commit the extracts below were read at; a file read from the tree is identified by its SHA-256 instead",
  "sources": [
   {

@@ -924,14 +924,44 @@ def build_history_size(src, claims):
 
 @build_history_size.drawer
 def draw_history_size(theme, d, meta):
-    W, H = 900, 814
+    W = 900
+    days, n = d["days"], len(d["days"])
+    Lk = d["ledger"]
+    ed = Lk["edits"]
+    # THE SCALES AND THE CANVAS ARE THE DATA'S. The repository and the ledger only grow, and a fixed axis that the data
+    # outgrew was a defect that came back on each remake: at 930,424 lines the stack rose out of a 900,000-line panel;
+    # at 23,532 lines the ledger's end label stood over its own heading (the check's "drawn over") on a 22,000-line axis;
+    # and with six distances in the deleted lines' histogram, where there had been three, the closing paragraph ran
+    # over the footer and off a 814 px canvas. So each top comes from its maximum, with room above for a label, and
+    # the canvas is as tall as the lower half needs, with the footer's room below it.
+    top = 200000.0 * math.ceil(1.04 * max(sum(d["lines"][a][i] for a in d["areas"]) for i in range(n)) / 200000.0)
+    ytop = 10000.0 * math.ceil(1.12 * max(Lk["lines"]) / 10000.0)          # 12% over the ledger's end: its label's room
+    rx0 = 500.0
+    by0, by1 = 520.0, 700.0
+    intro = K.wrap("%s lines were added to the ledger over its life; %d were later deleted (%.1f%%). Distance from the "
+                   "newest entry, in entries, when the line was deleted:"
+                   % (K.with_commas(Lk["added"]), Lk["deleted"], 100.0 * Lk["deleted"] / Lk["added"]), W - rx0 - 24, 10.5)
+    top_bars = by0 + 6 + 15 * len(intro) + 12
+    rows = []
+    for k, v in sorted(ed["by_distance"].items(), key=lambda kv: int(kv[0])):
+        lab = "the newest entry" if k == "0" else "%s entr%s back" % (k, "y" if k == "1" else "ies")
+        rows.append((lab, v))
+    closing = K.wrap("The ledger's own rule is that an entry never edits history. %d of the %d lines taken out "
+                     "were in the newest entry when they went; %d were in older ones. These are positions in "
+                     "the file, not whether the text had been pushed. %d commits took lines out, and the "
+                     "subjects of %d of them say restated, corrected, fixed or a verifier's finding." % (
+                         ed["by_distance"].get("0", 0), ed["deleted"],
+                         sum(v for kk, v in ed["by_distance"].items() if kk != "0"),
+                         ed["commits_deleting"], ed["subjects_restating"]),
+                     W - rx0 - 24, 10.5)
+    last = max(by1 + 14, top_bars + len(rows) * 34 + 12 + 15 * (len(closing) - 1))     # the lowest baseline above the footer
+    H = int(math.ceil(last + 56 + 13 * (len(K.footer_lines([source_line(meta)], W)) - 1)))
     p = K.Plot(theme, W, H, meta["title"],
                "Top: the text lines of every tracked file, by area, at the end of each day on main's own line. Two "
                "slices are kept apart: the hard-workload pack, written by another model and kept as delivered, and "
                "the Arduino library's vendored copy of host/, which counts that code a second time. Bottom: "
                "the ledger, and what was ever taken out of it.", meta["alt"])
     T = p.T
-    days, n = d["days"], len(d["days"])
     cols = {a: T["cats"][i] for i, a in enumerate(d["areas"][:7])}
     cols["pack"] = K.mix(T["muted"], T["bg"], 0.35)
     cols["vendored"] = K.mix(T["muted"], T["bg"], 0.65)
@@ -940,10 +970,9 @@ def draw_history_size(theme, d, meta):
     ay0, ay1 = 160.0, 400.0
     d0, d1 = K.day_number(days[0]), K.day_number(days[-1])
     X1 = K.Lin(d0, d1, x0, x1)
-    top = 900000.0
     Y = K.Lin(0, top, ay1, ay0)
     p.panel(x0, ay0, x1, ay1)
-    for v in (0, 200000, 400000, 600000, 800000):
+    for v in range(0, int(top) + 1, 200000):
         p.line(x0, Y(v), x1, Y(v), T["grid"], 1)
         p.text(x0 - 7, Y(v) + 3.5, K.kmg(v), size=10.5, fill=T["muted"], anchor="end", mono=True)
     stack = [0.0] * n
@@ -961,13 +990,12 @@ def draw_history_size(theme, d, meta):
     p.text(x1 + 6, Y(stack[-1]) + 4, K.with_commas(stack[-1]), size=10.5, weight="600", mono=True)
     p.legend([(cols[a], short[a]) for a in order], 24, ay1 + 40, W - 48, size=10.5)
     # bottom left: the ledger over time
-    bx0, bx1, by0, by1 = 90.0, 440.0, 520.0, 700.0
-    Lk = d["ledger"]
-    Y2 = K.Lin(0, 22000, by1, by0)
+    bx0, bx1 = 90.0, 440.0
+    Y2 = K.Lin(0, ytop, by1, by0)
     X2 = K.Lin(d0, d1, bx0, bx1)
     p.text(24, by0 - 22, "The ledger, docs/VALIDATION.md: lines, by day", size=12, weight="600")
     p.panel(bx0, by0, bx1, by1)
-    for v in (0, 10000, 20000):
+    for v in range(0, int(ytop) + 1, 10000):
         p.line(bx0, Y2(v), bx1, Y2(v), T["grid"], 1)
         p.text(bx0 - 7, Y2(v) + 3.5, K.kmg(v), size=10.5, fill=T["muted"], anchor="end", mono=True)
     pts = [(X2(d0 + i), Y2(Lk["lines"][i])) for i in range(n)]
@@ -978,19 +1006,9 @@ def draw_history_size(theme, d, meta):
     p.text(bx1 - 4, Y2(Lk["lines"][-1]) - 8, "%s lines, %d entries" % (K.with_commas(Lk["lines"][-1]), Lk["entries"][-1]),
            size=10.5, anchor="end", weight="600")
     # bottom right: what was deleted
-    rx0 = 500.0
     p.text(rx0, by0 - 22, "Where the lines taken out of it were", size=12, weight="600")
-    ed = Lk["edits"]
-    intro = K.wrap("%s lines were added to the ledger over its life; %d were later deleted (%.1f%%). Distance from the "
-                   "newest entry, in entries, when the line was deleted:"
-                   % (K.with_commas(Lk["added"]), Lk["deleted"], 100.0 * Lk["deleted"] / Lk["added"]), W - rx0 - 24, 10.5)
     for k, line in enumerate(intro):
         p.text(rx0, by0 + 6 + 15 * k, line, size=10.5, fill=T["muted"])
-    top_bars = by0 + 6 + 15 * len(intro) + 12
-    rows = []
-    for k, v in sorted(ed["by_distance"].items(), key=lambda kv: int(kv[0])):
-        lab = "the newest entry" if k == "0" else "%s entr%s back" % (k, "y" if k == "1" else "ies")
-        rows.append((lab, v))
     mx = max(v for _l, v in rows)
     for i, (lab, v) in enumerate(rows):
         y = top_bars + i * 34
@@ -998,14 +1016,7 @@ def draw_history_size(theme, d, meta):
         bw = max(3.0, 150.0 * v / mx)
         p.rect(rx0 + 130, y, bw, 18, T["cats"][3])
         p.text(rx0 + 130 + bw + 6, y + 13, "%d  (%.1f%%)" % (v, 100.0 * v / ed["deleted"]), size=10.5, mono=True)
-    for k, line in enumerate(K.wrap("The ledger's own rule is that an entry never edits history. %d of the %d lines taken out "
-                                    "were in the newest entry when they went; %d were in older ones. These are positions in "
-                                    "the file, not whether the text had been pushed. %d commits took lines out, and the "
-                                    "subjects of %d of them say restated, corrected, fixed or a verifier's finding." % (
-                                        ed["by_distance"].get("0", 0), ed["deleted"],
-                                        sum(v for kk, v in ed["by_distance"].items() if kk != "0"),
-                                        ed["commits_deleting"], ed["subjects_restating"]),
-                                    W - rx0 - 24, 10.5)):
+    for k, line in enumerate(closing):
         p.text(rx0, top_bars + len(rows) * 34 + 12 + 15 * k, line, size=10.5, fill=T["muted"])
     p.footer([source_line(meta)])
     return p.render()

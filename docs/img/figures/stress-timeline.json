@@ -5,7 +5,7 @@
  "alt": "A timeline of the 67 cycles of the card's stress run on three images, and a table of the legs run on each: 4,086 legs, 4,032 passed, 54 skipped by design, none failed.",
  "files": ["docs/img/figures/stress-timeline-light.svg", "docs/img/figures/stress-timeline-dark.svg"],
  "maker": "python/project_figures.py: build_stress_timeline, draw_stress_timeline",
- "commit": "0b77387ea1266f4d4a5e30c8798f57e8b6dc6ef8",
+ "commit": "15f96c8aea0279af26437e5a89c2bd7e40cf3e1e",
  "commit_means": "the commit the extracts below were read at; a file read from the tree is identified by its SHA-256 instead",
  "sources": [],
  "extracts": [

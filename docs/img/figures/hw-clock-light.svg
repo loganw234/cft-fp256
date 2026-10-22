@@ -185,5 +185,5 @@
 <text x="24.0" y="613.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#656d76">with slack from +0.003 to +0.143 ns. Not drawn: the ledger's other slacks, listed in the sidecar - among them three misses at 135 MHz that</text>
 <text x="24.0" y="628.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#656d76">the ledger records with the whole design's slack only (one tile at 135 MHz, 1 Sep, -0.577 ns; four tiles at 135 MHz, 2 Sep, -0.141 ns; four</text>
 <text x="24.0" y="643.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#656d76">tiles at 135 MHz, 2 Sep, -0.113 ns).</text>
-<text x="24.0" y="692.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#656d76">source: docs/figures/ledger.json (extract; ledger, first 1,891,030 bytes)</text>
+<text x="24.0" y="692.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#656d76">source: docs/figures/ledger.json (extract; ledger, first 2,772,018 bytes)</text>
 </svg>

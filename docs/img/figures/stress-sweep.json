@@ -5,7 +5,7 @@
  "alt": "The native-oracle sweep of the stress run: all 14 exhaustive items complete, and 1,356,316,228,303 cases in all, of which 30.6% exercised the tile and the rest ran in libcft's host code on the box's CPU; no case disagreed.",
  "files": ["docs/img/figures/stress-sweep-light.svg", "docs/img/figures/stress-sweep-dark.svg"],
  "maker": "python/project_figures.py: build_stress_sweep, draw_stress_sweep",
- "commit": "0b77387ea1266f4d4a5e30c8798f57e8b6dc6ef8",
+ "commit": "15f96c8aea0279af26437e5a89c2bd7e40cf3e1e",
  "commit_means": "the commit the extracts below were read at; a file read from the tree is identified by its SHA-256 instead",
  "sources": [],
  "extracts": [
