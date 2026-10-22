@@ -132,10 +132,10 @@ verify-growth --write`; the numbers and digests are in `docs/img/figures/verify-
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="img/figures/verify-stages-dark.svg">
-  <img alt="The 52 stages of the verification runner in eight groups, each shaded by the smallest budget that runs it: 31 in quick, 13 more in gate, 8 only in the full census." src="img/figures/verify-stages-light.svg">
+  <img alt="The 53 stages of the verification runner in eight groups, each shaded by the smallest budget that runs it: 31 in quick, 14 more in gate, 8 only in the full census." src="img/figures/verify-stages-light.svg">
 </picture>
 
-**Shows.** What the gate is made of: 52 stages in 8 groups, 31 in the quick budget, 13 more in the
+**Shows.** What the gate is made of: 53 stages in 8 groups, 31 in the quick budget, 14 more in the
 gate budget and 8 only in the full census (sim, simmc, acceptance-far, acceptance-rev8,
 estimates-full, node, wasm, images).
 

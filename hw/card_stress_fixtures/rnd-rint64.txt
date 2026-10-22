@@ -1,0 +1,2 @@
+soaking the software backend
+rint64 rne: 10000 cases, 0 value mismatches, 0 flag mismatches

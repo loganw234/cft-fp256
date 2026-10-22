@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """The dry run's tests for hw/card_stress.py: no XRT, no card, no amd-arc-box.
 
-    python3 hw/test_card_stress.py [--only NAME,...] [--no-plants]      (bash hw/test-card-stress.sh)
+    python3 hw/test_card_stress.py [--only NAME,...] [--no-plants] [--skip-groups NAME,... --skip-why TEXT]      (bash hw/test-card-stress.sh)
 
 Three kinds of group, then the plants (the groups, by name, are in hw/test-card-stress.sh):
   parsers   the verdict parsers on REAL logs - the software backend's own runs of the same
@@ -40,7 +40,16 @@ Three kinds of group, then the plants (the groups, by name, are in hw/test-card-
   resume   (parcel DR4, 2026-10-21) --resume counts coverage per tree class: the counting on synthetic files (each part of the report's key
             alone, an old run's trees derived from its commit, an unknown class never counted, the events), the planner held to the report's
             figures, the driver itself resuming a file from another host/ tree and from another rtl/ tree, and - when CARD_STRESS_RESUME_RUN
-            names the lead's two-night run directory - the planner over that real file.
+            names a directory holding a real file of the lead's stress run (his two nights', his three nights', or a later night's) - the planner over
+            that real file, its expectations derived from the file itself (parcel P5, 2026-10-22) and the figures MEASURED on his two files held exactly
+            only for those files, by sha256.
+
+  P5 additions (2026-10-22, KL-39, KL-42, KL-23, KL-44, KL-32, KL-13), each in a group above: telemetry - the status file's telemetry line carries the
+            sample's time and up to twelve values, and the report counts an HBM temperature's zeros by name and leaves them out of its range; chunk - every
+            random slice of a DEFAULT run is held to the cases its tool prints (the real tools' logs, rnd-*.txt in hw/card_stress_fixtures, and the
+            stand-in's own table), a short one is parse_error; build - the images' manifests (the lead's three real ones, as fixtures; refused or flagged,
+            in-process and as dry runs over a scratch repository) and vectors/out (refused at the start); buildreal - the scratch tree is the files git
+            tracks, so a built host/ does not fail the group, and a run with the selftest leg and no vectors/out is refused.
 
 POSIX-only checks (the `nice` and `timeout` wrappers, a process that ignores SIGTERM) are
 SKIPped by name on Windows and run under WSL or on the box. Everything runs niced by the
@@ -637,8 +646,15 @@ def catalog_checks(c, mod, d, q) -> None:
     c("nextup32 still expects its 8 edge cases beyond the slice, reach host",
       j["expected"] == j["units"] + 8 and j["cover"] is None and j["sweep"]["reach"] == "host")
     j = d.plan_wave(d.cpu, 3600, 1, ["cvtfrom64-rne"], H)[0]
-    c("a random item's job records its reach and has no coverage to check",
-      j["cover"] is None and j["expected"] is None and j["sweep"]["reach"] == "host" and "count" in j["sweep"])
+    c("a random item's job records its reach, has no coverage clause to check, and is held to the cases its tool prints for the count asked "
+      "(KL-23: four a count for cvtfrom64; a default run held no random slice to anything before 2026-10-22)",
+      j["cover"] is None and j["expected"] == 4 * j["sweep"]["count"] and j["sweep"]["reach"] == "host" and "count" in j["sweep"])
+    j = d.plan_wave(d.cpu, 3600, 1, ["nextup64"], H)[0]
+    c("... nextup64's is the count and its eight edge cases; cvtto32's is None, by name (its cases are the draws'); random scaleB's is the count "
+      "rounded up by whole batches of 4096 operands against its 17 exponents, the default tools' batch",
+      j["expected"] == j["sweep"]["count"] + 8 and d.plan_wave(d.cpu, 3600, 1, ["cvtto32-rne"], H)[0]["expected"] is None
+      and (lambda js: js["expected"] == (lambda n: sum(min(n - 69632 * k, 4096) * 17 for k in range(-(-n // 69632))))(js["sweep"]["count"]))
+      (d.plan_wave(q, 3600, 1, ["scaleb32-rne"])[0]))
     # the campaign script's own job lines are the catalog's, item for item, in order, with its seeds and slices
     def compare_script(label, env_vars, probe_limited):
         rows = script_job_lines(env_vars)
@@ -1470,6 +1486,59 @@ def scn_guard(env: Env, src: str = HERE) -> list:
         with open(os.path.join(r.out, "STOP"), "w") as fh:
             fh.write("x")
         r.finish(120)
+    return out + stage_guard_checks(env)
+
+
+def stage_guard_checks(env: Env) -> list:
+    """KL-28 (2026-10-22): verify/run.sh's `cardstress` stage runs this suite, and the suite's drivers cannot start while another process uses
+    the card (the guard refuses: guard_refused). So the stage is SKIPPED, by name, with the pids the driver's own guard sees, and never passes
+    or fails for it: here a process that looks like device-test with an xclbin is alive, and the real runner is asked for the stage. If the
+    stage ran anyway the suite would start inside it: CARD_STRESS_NESTED_PROBE makes that suite end at once (main), so a defect is a red
+    check in seconds, not a second suite. The runner's run directory (verify/state/<id>, ignored by git) is removed by the exact path it printed."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    runner = os.path.join(ROOT, "verify", "run.sh")
+    bash = shutil.which("bash")           # by PATH order: on Windows a bare "bash" is found in System32 first, which is the WSL launcher
+    if not os.path.isfile(runner) or not bash:
+        skip("stage guard", "needs verify/run.sh and bash")
+        return out
+    if os.environ.get("CARD_STRESS_NESTED_PROBE"):
+        return out
+    posix_runner = runner.replace("\\", "/")
+    sl = spawn_sleeper(["device-test", env.imgs["quad"]])
+    made = []
+    try:
+        time.sleep(1.5)
+        e = dict(os.environ, CARD_STRESS_NESTED_PROBE="1")
+        runs = []
+        for extra in ([], ["--require-all"]):
+            p = subprocess.run([bash, posix_runner, "--only", "cardstress", "--fresh"] + extra, capture_output=True, text=True, env=e,
+                               timeout=240, cwd=ROOT)
+            runs.append(p)
+            m = re.search(r"^== run (\S+)$", p.stdout, re.M)
+            if m:
+                made.append(os.path.join(ROOT, "verify", "state", m.group(1)))
+        a, b = runs
+        row = re.search(r"^cardstress\s+SKIP\s+(.*)$", a.stdout, re.M)
+        c("stage guard: while another process uses the card the `cardstress` stage is SKIPPED, by name, and says why - the driver's guard would "
+          "refuse every driver the suite starts (guard_refused) - and names the pid the guard sees (the exit status is 0: a skip is not a failure)",
+          a.returncode == 0 and row is not None and "guard_refused" in row.group(1) and f"pid {sl.pid}" in row.group(1),
+          f"rc {a.returncode}: {a.stdout[-400:]}")
+        c("stage guard: ... the verdict counts the skip (VERDICT line) and --require-all FAILS the run for it (exit 1)",
+          "VERDICT" in a.stdout and "skip" in a.stdout.lower() and b.returncode != 0 and re.search(r"^cardstress\s+SKIP", b.stdout, re.M) is not None,
+          f"rc {b.returncode}: {b.stdout[-300:]}")
+        c("stage guard: ... and the suite did not start inside the stage (no nested probe's refusal in either log)",
+          "refusing to run inside a stage probe" not in a.stdout + b.stdout + a.stderr + b.stderr, a.stderr[-200:])
+    except subprocess.TimeoutExpired as ex:
+        c("stage guard: the runner answered within four minutes", False, f"timed out: {ex}")
+    finally:
+        sl.kill()
+        sl.wait()
+        for d in made:
+            rmtree_force(d)
     return out
 
 
@@ -1892,7 +1961,15 @@ def scn_telemetry(env: Env, src: str = HERE) -> list:
     c("telemetry parser: as-is text rows", L.parse_telemetry("  FPGA Temperature   : 31 C\n  Power   15.5 W\nnot a row\n") ==
       {"FPGA Temperature": 31.0, "Power": 15.5})
     c("telemetry parser: nothing readable is {} (never a reading of 0)", L.parse_telemetry("ERROR: no device\n") == {})
-    return out + telemetry_order_checks(src) + scn_telemetry_hang(env, src)
+    # KL-39: the status file's telemetry line, from a run, carries the time of the last sample (its record's ts), not None
+    try:
+        with open(os.path.join(R.out, "status.txt"), "r", encoding="utf-8") as fh:
+            tl = next((ln for ln in fh.read().splitlines() if ln.startswith("telemetry  ")), "")
+    except OSError:
+        tl = ""
+    c("telemetry: status.txt's telemetry line, from a run against the stand-in, begins with the time of the run's last sample - the ts of its "
+      "record - and says what took it, never None", bool(tel) and tl.startswith(f"telemetry  {tel[-1]['ts']} (") and "None" not in tl, tl[:200])
+    return out + telemetry_order_checks(src) + scn_telemetry_hang(env, src) + telemetry_status_checks(src) + hbm_report_checks(src)
 
 
 def scn_telemetry_hang(env: Env, src: str = HERE) -> list:
@@ -2001,14 +2078,15 @@ def scn_build_refusals(env: Env, src: str = HERE) -> list:
     finally:
         sys.path.remove(src)
         sys.modules.pop("card_stress", None)
-    return out
+    # parcel P5 (2026-10-22): the images' manifests (KL-42) and vectors/out (KL-44), refused or flagged at the start
+    return out + manifest_judge_checks(src) + manifest_driver_checks(env, src) + scn_manifests(env, src) + vectors_checks(env, src)
 
 
 def scn_buildreal(env: Env, src: str = HERE) -> list:
     """The driver's build step and the real api-test, not dry: a scratch copy of the tree, the real make
     (XRT=0, the one thing this host can build), a fake ldd that says what the XRT-linked tools would say,
     a second fake that says they are not linked, and a make that cannot find XRT."""
-    out: list = []
+    out: list = copy_tracked_checks()
 
     def c(n, ok, d=""):
         out.append((n, bool(ok), d))
@@ -2020,9 +2098,14 @@ def scn_buildreal(env: Env, src: str = HERE) -> list:
     root = os.path.join(env.tmp, "tree")
     if not os.path.isdir(root):
         os.makedirs(os.path.join(root, "programs"))
-        ign = shutil.ignore_patterns("__pycache__", "*.o", "*.lo", "*.a", "*.so")
-        shutil.copytree(os.path.join(ROOT, "host"), os.path.join(root, "host"), ignore=ign)
-        shutil.copytree(os.path.join(ROOT, "hw"), os.path.join(root, "hw"), ignore=ign)
+        # the files git tracks under host/ and hw/ and nothing else (KL-13): in a checkout where host/ is built, a copy that took the
+        # executables and the generated build id (all but objects and libraries, until 2026-10-22) made `make` find the tools up to
+        # date, and cft-segrun reported the checkout's build id, not this tree's
+        try:
+            copy_tracked(ROOT, root)
+        except RuntimeError as e:
+            skip("buildreal", f"git cannot list the tracked files of this tree ({e})")
+            return out
         shutil.copy(os.path.join(ROOT, "programs", "acceptance.py"), os.path.join(root, "programs", "acceptance.py"))
         for git in (["init", "-q"], ["add", "-A"], ["-c", "user.email=t@example.invalid", "-c", "user.name=t", "commit", "-qm", "t"]):
             subprocess.run(["git", "-C", root] + git, capture_output=True, timeout=120)
@@ -2080,6 +2163,13 @@ def scn_buildreal(env: Env, src: str = HERE) -> list:
     c("buildreal: an optional tool (cft-selftest) that ldd says is not linked disables ITS leg, by name, and the run goes on",
       O.rc == 0 and ob is not None and ob["ok"] and len(sel) == 3 and all(x["status"] == "skipped" and "does not link XRT" in (x["reason"] or "") for x in sel)
       and len(O.legs("api-test", status="pass")) == 3, f"rc {O.rc}: {O.text[-300:]}")
+    V = drive("real-novectors", fake_ok, ["--make-xrt-flags", "XRT=0", "--legs", "api-test,selftest"])
+    vb = V.last("build")
+    c("buildreal: a run whose battery has the selftest leg, on a tree with no vectors/out, stops before any leg (exit 3), the vectors step "
+      "failed and names `make vectors` (KL-44); the same run with the leg not in its battery was the first one above",
+      V.rc == 3 and not V.legs() and vb is not None and not vb["ok"]
+      and any(s["name"] == "vectors" and not s["ok"] and s["detail"].startswith("vectors_out_missing:") and "make vectors" in s["detail"]
+              for s in vb["steps"]), f"rc {V.rc}: {V.text[-300:]}")
     X = drive("real-noxrt", fake_ok, ["--xrt-root", "/nonexistent-xrt-root"])
     xb = X.last("build")
     c("buildreal: a make that cannot find XRT stops the run before any leg (exit 3), the make step failed",
@@ -3751,9 +3841,8 @@ def chunk_unit_checks(src: str = HERE) -> list:
           and s64.random_cases(100000, 16384) == cases_in(fixture("chunk-scaleb64-c16384.txt")) == 442368,
           f"{s32.random_cases(100000, 4096)} {s32.random_cases(100000, 16384)} {s64.random_cases(100000, 16384)}")
         c("chunk: ... a count that is a whole number of batches is its own (17 x 4096 x 4 at 4096), a count below one batch's cases is "
-          "rounded up to the batch, and no other random op, count 0 or batch 0 has a figure",
+          "rounded up to the batch, and count 0, batch 0 and an exhaustive item have no figure (the other random ops' are held below)",
           s32.random_cases(17 * 4096 * 4, 4096) == 17 * 4096 * 4 and s32.random_cases(5, 16384) == 5 * 17
-          and by["cvtfrom64-rne"].random_cases(100000, 4096) is None and by["conv64to32-rne"].random_cases(1000, 4096) is None
           and s32.random_cases(0, 4096) is None and s32.random_cases(10, 0) is None
           and by["rint64-class-rne"].random_cases(10, 4096) is None)
         # the stand-in prints what the chunked tool prints
@@ -4985,16 +5074,45 @@ def scn_resume(env: Env, src: str = HERE) -> list:
     return out
 
 
+# The lead's two real files of the stress run, by the sha256 the box recorded for each (SHA256SUMS.box, copied with them): resume_real_checks holds the figures
+# MEASURED on each of them exactly when the file it is given IS that file, and derives what it expects from the file itself for any other (a later night's).
+RESUME_REAL_TWO_NIGHT = "38f243c792c7089c811156d51f17f9ccb58b2037b2336cf6d59d3a208a78fb2e"      # 1,308 lines: 2026-10-19 and the resume of 2026-10-20
+RESUME_REAL_THREE_NIGHT = "de4ee37900917762e4ba071d434eb28204f92fed6c5056e88a70ccce6516e986"    # 1,910 lines: and the nightly of 2026-10-21
+
+
+def coverage_state_gaps(path: str) -> "dict | None":
+    """{item: first uncovered encoding or None (complete)} for every item of the whole file `path`, as the study's script
+    docs/studies/sched-a/coverage_state.py prints them (its per-run table, run here on the file: it merges the intervals itself and holds its union to an
+    independent merge), or None where it cannot be run (a checkout without its commits, no script)."""
+    script = os.path.join(ROOT, "docs", "studies", "sched-a", "coverage_state.py")
+    if not os.path.isfile(script):
+        return None
+    try:
+        p = subprocess.run([sys.executable, "-B", "-I", script, f"FILE={path}"], capture_output=True, text=True, timeout=180)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if p.returncode != 0:
+        return None
+    out: dict = {}
+    for m in re.finditer(r"^([a-z0-9-]+)\s+(?:tile|host)\s+\d+\s+[0-9.]+%\s+(?:complete|\((\d+), \d+\))", p.stdout, re.M):
+        out.setdefault(m.group(1), int(m.group(2)) if m.group(2) is not None else None)      # the first table is the whole file's
+    return out or None
+
+
 def resume_real_checks(env: Env, src: str = HERE) -> list:
-    """The planner over a copy of the REAL two-night file (the lead's resume of 2026-10-19 and 2026-10-20, from the box): a resume at the second
-    run's commit, 0b7c959. CARD_STRESS_RESUME_RUN names the run's directory (the one holding metrics.jsonl); without it this is skipped by name.
-    The first gaps of the four wide items are READ here, at run time, from the study's committed capture of this same file
-    (docs/studies/sched-a/coverage_state.out, the item's line in its last per-run table); the other figures (552 slices, 320 counted, 232
-    not, the 14 host items) are typed here, MEASURED on the real file by the planner and by that script."""
+    """The planner over a copy of a REAL file of the lead's stress run (the two nights of 2026-10-19 and 2026-10-20, or those and the nightly of
+    2026-10-21, or any later night's: all from the box): a resume at the second run's commit, 0b7c959. CARD_STRESS_RESUME_RUN names the run's directory
+    (the one holding metrics.jsonl); without it this is skipped by name. **What it expects it derives from the file itself** (parcel P5, 2026-10-22: the
+    check used to hold the two-night file's own numbers, 552 slices and 320 counted and four first gaps, so it failed on every later night while the
+    driver was right): the run_starts and the finished sweep slices are counted here by a scan of the records; each run's rtl/ and host/ trees are what
+    it recorded or, for a run that recorded none, what git derives for its commit; the slices of a class are counted, and its coverage merged, here;
+    the whole file's first gaps are what the study's script docs/studies/sched-a/coverage_state.py prints for the same file; the unknown-class tally is
+    the host slices of the run_starts that recorded no compiler. The figures MEASURED on the lead's own two files (552 slices, 320 counted, 232 host
+    slices not counted; 756 on three nights; the four wide gaps of each) are held exactly, but only when the file's sha256 is that file's."""
     run = os.environ.get("CARD_STRESS_RESUME_RUN")
     if not run or not os.path.isfile(os.path.join(run, "metrics.jsonl")):
-        skip("resume real: the planner over the real two-night file", "CARD_STRESS_RESUME_RUN does not name a run directory holding a "
-             "metrics.jsonl (the lead's box/resume-1020/run)")
+        skip("resume real: the planner over a real file of the stress run", "CARD_STRESS_RESUME_RUN does not name a run directory holding a "
+             "metrics.jsonl (the lead's box/resume-1020/run or box/nightly-1021/run)")
         return []
     out: list = []
 
@@ -5003,15 +5121,19 @@ def resume_real_checks(env: Env, src: str = HERE) -> list:
 
     first_run, second_run = "881bbcb676bbede9da20858325b7a966c56a25bf", "0b7c95996c12c01027f6c4905faa597ec8e22ef0"
     if git_out("cat-file", "-e", first_run + "^{commit}") is None:
-        skip("resume real: the planner over the real two-night file", f"{first_run[:7]} is not in this checkout, so the first run's trees cannot be derived")
+        skip("resume real: the planner over a real file of the stress run", f"{first_run[:7]} is not in this checkout, so the first run's trees cannot be derived")
         return []
     nightly = ("conv32to64-all,cvtto32-all-rne,cvtto32-all-rtz,cvtto32-all-rdn,cvtto32-all-rup,cvtto32-all-rmm,cvtfrom32-all-rne,cvtfrom32-all-rtz,"
                "cvtfrom32-all-rdn,cvtfrom32-all-rup,cvtfrom64-all-rne,cvtfrom64-all-rtz,cvtfrom64-all-rdn,cvtfrom64-all-rup,scaleb32-all-rne,"
                "scaleb32-all-rtz,scaleb32-all-rdn,scaleb32-all-rup,scaleb32-wide-rne,scaleb32-wide-rtz,scaleb32-wide-rdn,scaleb32-wide-rup").split(",")
+    wide_names = [n for n in nightly if n.startswith("scaleb32-wide")]
+    metrics = os.path.join(run, "metrics.jsonl")
+    sha = hashlib.sha256(read_bytes(metrics)).hexdigest()
+    known = {RESUME_REAL_TWO_NIGHT: "two-night", RESUME_REAL_THREE_NIGHT: "three-night"}.get(sha)
     try:
         with driver_from(src) as (mod, d, L2):
             os.makedirs(d.out, exist_ok=True)
-            shutil.copyfile(os.path.join(run, "metrics.jsonl"), d.metrics)
+            shutil.copyfile(metrics, d.metrics)
             d.load_state()
             starts = [r for r in d.file_recs if r.get("type") == "run_start"]
             reach = {i.name: i.reach for i in d.items}
@@ -5020,44 +5142,136 @@ def resume_real_checks(env: Env, src: str = HERE) -> list:
                 """item -> where the driver's own pick_item starts it (None: covered)"""
                 picks = {n: d.pick_item({}, set(), n, reach[n]) for n in nightly}
                 return {n: (None if p is None else p[1][0]) for n, p in picks.items()}
-            before = plan()                                   # the whole file's coverage: what the planner counted before this parcel
+            before = plan()                                   # the whole file's coverage: what the planner counted before DR4
             d.tree = dict(starts[1]["tree"])                  # a resume at the second run's commit: its trees and its compiler
             d.count_by_class()
             after = plan()
             t = d.class_tally
-            host = [n for n in nightly if reach[n] == L2.HOST]
-            # the four first gaps are READ from the study's committed capture of this file (the item's line in its LAST per-run table, night 2's)
-            try:
-                with open(os.path.join(ROOT, "docs", "studies", "sched-a", "coverage_state.out"), "r", encoding="utf-8") as fh:
-                    study = fh.read()
-            except OSError:
-                study = ""
-            wide = {n: int(g) for n, g in re.findall(r"^(scaleb32-wide-r\w\w)\s+tile\s+\d+\s+[0-9.]+% \((\d+), 4294967296\)", study, re.M)}
-            c("resume real: the study's capture (docs/studies/sched-a/coverage_state.out, read here) gives the four wide items' first gaps",
-              set(wide) == {f"scaleb32-wide-{m}" for m in ("rne", "rtz", "rdn", "rup")} and all(0 < g < L2.EXH for g in wide.values()), str(wide))
-            c("resume real: the file is the lead's: two run_starts (the first with no tree, the second with its trees), 552 finished sweep slices",
-              len(starts) == 2 and "rtl" not in starts[0]["tree"] and "rtl" in starts[1]["tree"] and t["slices"] == 552, str((len(starts), t["slices"])))
+
+            # ---- what the file says, derived here (a scan of the records, git's trees, the library's merge: not the driver's counting)
+            scan = L2.read_records(d.metrics)[0]
+            n_starts, cur, fin = 0, -1, []
+            for r in scan:
+                if r.get("type") == "run_start":
+                    n_starts += 1
+                    cur += 1
+                elif r.get("type") == "leg" and r.get("kind") == "sweep" and r.get("status") in ("pass", "fail"):
+                    sw = r.get("sweep") if isinstance(r.get("sweep"), dict) else {}
+                    if sw.get("item"):
+                        fin.append((cur, sw["item"], L2.slice_reach(sw), sw.get("lo"), sw.get("hi")))
+
+            def tree_of(rs: dict, key: str, rel: str):
+                """a run's rtl or host/ tree as the class key takes it: what it recorded, else git's for its commit when its checkout was clean"""
+                tr = rs.get("tree") if isinstance(rs.get("tree"), dict) else {}
+                if isinstance(tr.get(key), str) and tr[key]:
+                    return tr[key], tr.get(key + "_dirty") is True
+                if tr.get("dirty") is False and isinstance(tr.get("commit"), str):
+                    return d.git_tree(tr["commit"], rel), False
+                return None, False
+            want_rtl, _w = tree_of(starts[1], "rtl", "rtl")
+            want_host, _w = tree_of(starts[1], "host_src", "host")
+            want_cc = starts[1]["tree"].get("cc")
+            counted, other, unknown_by = {"tile": 0, "host": 0}, {"tile": 0, "host": 0}, {}
+            kept = {n: [] for n in nightly}               # the intervals of the slices the resume counts, by item
+            for run_i, item, rch, lo, hi in fin:
+                rs = starts[run_i]
+                if rch not in (L2.TILE, L2.HOST):
+                    why, same = "reach unknown", False
+                elif rch == L2.TILE:
+                    rtl, dirty = tree_of(rs, "rtl", "rtl")
+                    why = None if rtl else "no rtl/ tree recorded"
+                    same = bool(rtl) and not dirty and rtl == want_rtl
+                else:
+                    host, hdirty = tree_of(rs, "host_src", "host")
+                    cc = (rs.get("tree") or {}).get("cc") or None
+                    why = "no host/ tree recorded" if not host else (None if cc else "compiler not recorded")
+                    same = why is None and not hdirty and host == want_host and cc == want_cc
+                if why is not None:
+                    unknown_by[(run_i, rch, why)] = unknown_by.get((run_i, rch, why), 0) + 1
+                elif same:
+                    counted[rch] += 1
+                    if item in kept and lo is not None:
+                        kept[item].append((lo, hi))
+                else:
+                    other[rch] += 1
+            whole = {n: [] for n in nightly}              # the whole file's intervals, every run, by item
+            for run_i, item, rch, lo, hi in fin:
+                if item in whole and lo is not None:
+                    whole[item].append((lo, hi))
+
+            def first(iv: list):
+                g = L2.first_gap(iv, L2.EXH)
+                return None if g is None else g[0]
+            want_before = {n: first(whole[n]) for n in nightly}
+            want_after = {n: first(kept[n]) for n in nightly}
+            study = coverage_state_gaps(d.metrics)
+            wide = {n: study[n] for n in wide_names} if study and all(n in study for n in wide_names) else {}
+            if known == "two-night":                      # the committed capture of THIS file, read at run time: the study's own record of the same four numbers
+                try:
+                    with open(os.path.join(ROOT, "docs", "studies", "sched-a", "coverage_state.out"), "r", encoding="utf-8") as fh:
+                        cap = fh.read()
+                except OSError:
+                    cap = ""
+                capture = {n: int(g) for n, g in re.findall(r"^(scaleb32-wide-r\w\w)\s+tile\s+\d+\s+[0-9.]+% \((\d+), 4294967296\)", cap, re.M)}
+                c("resume real: the study's committed capture of the two-night file (docs/studies/sched-a/coverage_state.out, read here) gives the four wide "
+                  "items' first gaps, and the study's script run here on the same file prints the same", set(capture) == set(wide_names) and capture == wide
+                  and all(0 < g < L2.EXH for g in capture.values()), f"{capture} / {wide}")
+            c("resume real: the study's script (docs/studies/sched-a/coverage_state.py, run here on this file) gives the four wide items' first gaps, "
+              "each inside the space", set(wide) == set(wide_names) and all(0 < g < L2.EXH for g in wide.values()), f"{wide}; {'the script could not be run' if not study else ''}")
+            c("resume real: the file is the lead's: its first run_start recorded no tree and is 881bbcb's, the second is 0b7c959's with its trees, "
+              "every later one recorded its trees and its compiler; and the driver counts the run_starts and the finished sweep slices the file has "
+              "(%d and %d, scanned here)" % (n_starts, len(fin)),
+              len(starts) == n_starts >= 2 and "rtl" not in starts[0]["tree"] and starts[0]["tree"].get("commit") == first_run
+              and starts[1]["tree"].get("commit") == second_run and all(all(k in r["tree"] for k in ("rtl", "host_src", "cc")) for r in starts[1:])
+              and t["slices"] == len(fin), str((len(starts), n_starts, t["slices"], len(fin))))
+            if known:
+                exact = {"two-night": (2, 552), "three-night": (3, 756)}[known]
+                c(f"resume real: the {known} file (sha256 {sha[:12]}), whose figures were MEASURED: {exact[0]} run_starts and {exact[1]} finished sweep slices",
+                  (n_starts, len(fin)) == exact, str((n_starts, len(fin))))
             c("resume real: the second run's recorded rtl/ and host/ trees are what git derives for its commit (equal where both exist)",
               d.git_tree(second_run, "rtl") == starts[1]["tree"]["rtl"] and d.git_tree(second_run, "host") == starts[1]["tree"]["host_src"],
               str((d.git_tree(second_run, "rtl"), starts[1]["tree"]["rtl"])))
-            c("resume real: before this parcel the resume planned no host item of the nightly's 22 (the whole file's coverage had all 14 covered) and the "
-              "four wide tile items at the first gaps coverage_state.py found",
-              all(before[n] is None for n in host) and all(before[n] == g for n, g in wide.items()), str({n: before[n] for n in wide}))
-            c("resume real: a resume at 0b7c959 plans the same four wide items at the same first gaps, the four scaleb32-all items stay covered (the first "
-              "run's rtl/ tree derived from its commit is the second's), and all 14 host items start at 0 again",
-              all(after[n] == g for n, g in wide.items()) and all(after[n] is None for n in nightly if n.startswith("scaleb32-all"))
-              and all(after[n] == 0 for n in host) and len(host) == 14, str({n: after[n] for n in list(wide) + host[:2]}))
-            c("resume real: the tally - 320 tile slices counted (both runs), the first run's 232 host slices not counted (no compiler recorded), none of "
-              "another class", t["counted"] == {"tile": 320, "host": 0} and t["other"] == {"tile": 0, "host": 0}
-              and [(u["reach"], u["n"], u["why"]) for u in t["unknown"]] == [("host", 232, "compiler not recorded")], str(t["unknown"]))
+            host = [n for n in nightly if reach[n] == L2.HOST]
+            gaps_ok = bool(study) and all(before[n] == study.get(n, "absent") for n in nightly)
+            c("resume real: the planner over the WHOLE file's coverage (what a resume planned before DR4) starts each of the nightly's 22 items where the study's "
+              "script finds its first gap, and where the intervals of every run merge to - a complete item is not planned at all (%d host items and %d tile "
+              "items are); the four wide items at the gaps above" % (sum(1 for n in host if before[n] is None),
+                                                                      sum(1 for n in nightly if reach[n] == L2.TILE and before[n] is None)),
+              gaps_ok and before == want_before and len(host) == 14 and all(before[n] == g for n, g in wide.items()),
+              str({n: (before[n], want_before[n], study.get(n, "absent") if study else None) for n in nightly if before[n] != want_before[n]
+                   or (study and before[n] != study.get(n, "absent"))} or {n: before[n] for n in wide_names}))
+            c("resume real: a resume at 0b7c959 plans each of the 22 where the intervals of the slices of ITS class merge to a gap - the tile slices of every run "
+              "whose rtl/ tree is its (the first run's derived from its commit), and the host slices of its class (host/ tree and compiler) alone - the first "
+              "run recorded no compiler, so its are not counted - and a tile item that the counted slices complete is not planned",
+              after == want_after and len(host) == 14,
+              str({n: (after[n], want_after[n]) for n in nightly if after[n] != want_after[n]} or {n: after[n] for n in list(wide_names) + host[:2]}))
+            exp_unknown = sorted(((rch, why, n) for (run_i, rch, why), n in unknown_by.items()), key=lambda x: (str(x[0]), x[1], x[2]))
+            c("resume real: the tally is the file's: the finished slices of the runs of its class counted (%d tile, %d host), of another class (%d, %d), "
+              "and the unknown ones named by run - %s - each derived here from the run_starts' trees and compilers"
+              % (counted["tile"], counted["host"], other["tile"], other["host"], ", ".join(f"{n} {rch} ({why})" for rch, why, n in exp_unknown) or "none"),
+              t["counted"] == counted and t["other"] == other and sorted(((u["reach"], u["why"], u["n"]) for u in t["unknown"]), key=lambda x: (str(x[0]), x[1], x[2])) == exp_unknown
+              and t["slices"] == len(fin) == sum(counted.values()) + sum(other.values()) + sum(n for _r, _w2, n in exp_unknown),
+              str((t["counted"], t["other"], [(u["reach"], u["n"], u["why"]) for u in t["unknown"]])))
+            if known == "two-night":
+                c("resume real: the two-night file's MEASURED figures: 320 tile slices counted (both runs), the first run's 232 host slices not counted (no compiler "
+                  "recorded), none of another class, and all 14 host items had been covered by the whole file", t["counted"] == {"tile": 320, "host": 0}
+                  and t["other"] == {"tile": 0, "host": 0} and [(u["reach"], u["n"], u["why"]) for u in t["unknown"]] == [("host", 232, "compiler not recorded")]
+                  and all(before[n] is None for n in host), str(t["unknown"]))
+            if known == "three-night":
+                c("resume real: the three-night file's MEASURED figures: the first run's 232 host slices still not counted (no compiler recorded) and the four "
+                  "wide gaps 0x5a900000, 0x5be00000, 0x5ba00000 and 0x5c100000 (the nightly's own report's first_uncovered), planned the same before and after the "
+                  "class counting", [(u["reach"], u["n"], u["why"]) for u in t["unknown"]] == [("host", 232, "compiler not recorded")]
+                  and [after[n] for n in wide_names] == [0x5a900000, 0x5be00000, 0x5ba00000, 0x5c100000] == [before[n] for n in wide_names],
+                  str(([after[n] for n in wide_names], t["unknown"])))
     except Exception as e:
-        c("resume real: the planner could be driven over the real file", False, repr(e))
+        import traceback
+        c("resume real: the planner could be driven over the real file", False, repr(e) + " " + traceback.format_exc()[-300:])
     return out
 
 
 def group_resume(env: Env, src: str = HERE) -> list:
     """Parcel DR4, --resume counts coverage per tree class: the counting on synthetic files (each part of the key, an old run's derived trees,
-    an unknown class, the events), the planner against the report, the driver resuming from another tree, and the real two-night file."""
+    an unknown class, the events), the planner against the report, the driver resuming from another tree, and a real file of the stress run."""
     return resume_unit_checks(src) + resume_report_checks(env, src) + scn_resume(env, src) + resume_real_checks(env, src)
 
 
@@ -5068,7 +5282,8 @@ def group_items(env: Env, src: str = HERE) -> list:
 
 def group_chunk(env: Env, src: str = HERE) -> list:
     """Parcel DR3, the pass size: the tool's line read and held to the request, the rule for what is a repeat of what, the report, the run."""
-    return chunk_unit_checks(src) + chunk_report_checks(env, src) + scn_chunk(env, src)
+    return (chunk_unit_checks(src) + chunk_report_checks(env, src) + scn_chunk(env, src) + random_count_checks(src)
+            + scn_random_short(env, src))
 
 
 def group_records(env: Env, src: str = HERE) -> list:
@@ -5080,6 +5295,757 @@ def group_records(env: Env, src: str = HERE) -> list:
 def group_notes(env: Env, src: str = HERE) -> list:
     """Parcel DR3, four verifiers' notes: --quick --sweep-items stops after one empty wave, the Windows stand-in check, figure_extracts' filter."""
     return quick_empty_wave_checks(env, src) + standin_alive_checks() + fx_cpu_filter_checks(env, src)
+
+
+# ---------------------------------------------------------------------------------------
+# parcel P5 (2026-10-22): the driver before the nights run it. KL-39 the status file's telemetry line, KL-32 the HBM temperature's zeros in
+# the report, KL-23 a random slice held to its count in a default run, KL-42 the images' manifests, KL-44 vectors/out, KL-13 buildreal's copy
+# ---------------------------------------------------------------------------------------
+
+def red_not_crash(fn):
+    """P5's checks call what the fixes added (a library function, a driver method): run against code that lacks it - the base's, which is how this branch
+    shows its checks red - an AttributeError is one RED CHECK naming what is missing, not a crash of the whole suite that hides the other groups."""
+    def wrapper(*a, **k):
+        try:
+            return fn(*a, **k)
+        except Exception as e:
+            import traceback
+            return [(f"{fn.__name__}: the code under test has what this check needs", False, repr(e) + " " + traceback.format_exc()[-240:])]
+    wrapper.__name__ = fn.__name__
+    wrapper.__doc__ = fn.__doc__
+    return wrapper
+
+
+# a sample as xbutil's JSON gives it, by report: five temperatures (the HBM one at 0, as it reads in most samples), the power the card draws
+# and thirty rails (take_sample prefixes each label with its report)
+TEL_THERMAL = {"devices[0].thermals.FPGA HBM.temp_C": 0.0, "devices[0].thermals.FPGA.temp_C": 36.0, "devices[0].thermals.Int Vcc.temp_C": 41.0,
+               "devices[0].thermals.PCB Top Front.temp_C": 32.0, "devices[0].thermals.PCB Top Rear.temp_C": 35.0}
+TEL_ELECTRICAL = dict({"devices[0].electrical.power_consumption_max_watts": 150.0, "devices[0].electrical.power_consumption_watts": 20.5},
+                      **{f"devices[0].electrical.power_rails.Rail {i}.current.amps": float(i) for i in range(30)})
+
+
+def telemetry_status_checks(src: str = HERE) -> list:
+    """KL-39 (2026-10-22): status.txt's telemetry line carried None for the sample's time and the first six values of the record, because
+    the driver kept the sample it had built and append_record stamped the time on its own copy. In-process: a sample is taken (the vendor
+    tool's answers are given), status.txt is written, and its line is read; and the line's builder on the cases it has words for."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    try:
+        with driver_from(src, ["--telemetry-reports", "thermal,electrical"]) as (mod, d, L2):
+            os.makedirs(d.out, exist_ok=True)
+            d.run_id = "p5"
+            d.examine = lambda tool, rep, mode: (dict({"thermal": TEL_THERMAL, "electrical": TEL_ELECTRICAL}[rep]), "", None)
+            d.telemetry("timer")
+            d.write_status()
+            recs = [r for r in L2.read_records(d.metrics)[0] if r.get("type") == "telemetry"]
+            ts = recs[-1].get("ts") if recs else None
+            with open(d.status_path, "r", encoding="utf-8") as fh:
+                line = next((ln for ln in fh.read().splitlines() if ln.startswith("telemetry  ")), "")
+            shown = [p for p in line.split("): ", 1)[1].split("; ")] if "): " in line else []
+            vals = [p for p in shown if "=" in p]
+            c("telemetry status: the line begins with the sample's own time, the ts of its record in metrics.jsonl, and says what took it "
+              "- never None", isinstance(ts, str) and bool(ts) and line.startswith(f"telemetry  {ts} (timer): ") and "None" not in line
+              and (d.last_tel or {}).get("ts") == ts, f"ts {ts!r}: {line[:160]}")
+            c("telemetry status: it names more than six values (12 of this sample's 37), the temperatures first, then the power the card "
+              "draws, then the rest in the record's order, and counts what it leaves out",
+              len(vals) == 12 and all(v.startswith("thermal.") for v in vals[:5]) and all("power_consumption" in v for v in vals[5:7])
+              and vals[7].startswith("electrical.") and shown[-1] == "25 more value(s) in metrics.jsonl", f"{len(vals)}: {shown[-3:]}")
+            c("telemetry status: the HBM temperature's 0 is marked as no reading, and only that value is",
+              sum("(no reading)" in v for v in vals) == 1 and "FPGA HBM.temp_C=0.0 (no reading)" in line, line[:300])
+            c("telemetry status: the line is the library's telemetry_line of the kept record (one builder, no copy in the driver)",
+              line == L2.telemetry_line(d.last_tel), "")
+            nov = L2.telemetry_line({"ts": "2026-10-22 06:00:00", "when": "end", "image": None, "values": None, "error": "thermal: no values"})
+            c("telemetry status: a sample with no values says so and why, as before; one with no time says that, not None",
+              nov == "telemetry  2026-10-22 06:00:00 (end): no values parsed (thermal: no values)"
+              and L2.telemetry_line({"values": {"electrical.x": 1.0}}) == "telemetry  time not recorded: electrical.x=1.0", nov)
+    except Exception as e:                     # a driver that cannot be driven this way is a red check, not a crash
+        c("telemetry status: the driver could be driven in-process", False, repr(e))
+    return out
+
+
+def run_report(src: str, run_dir: str, json_path: str):
+    """The report script of the code under test on a run directory: (text, the summary as data)."""
+    p = subprocess.run([sys.executable, "-B", "-I", os.path.join(src, "card_stress_report.py"), run_dir, "--json", json_path, "--no-write"],
+                       capture_output=True, text=True, timeout=120)
+    try:
+        with open(json_path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        data = {}
+    return p.stdout, data
+
+
+@red_not_crash
+def hbm_report_checks(src: str = HERE) -> list:
+    """KL-32 (2026-10-22): the card's FPGA HBM temperature reads 0 in most samples (670 of 865 in the long run), and the report's range for it
+    was that artifact. Synthetic runs of ten samples: the zeros are counted by name and left out of the label's statistics; a rail that reads a
+    flat 0 in every sample is not touched; a label that read 0 in every sample has no range; a run with no zero says nothing."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    hbm = "thermal.devices[0].thermals.FPGA HBM.temp_C"
+    fpga = "thermal.devices[0].thermals.FPGA.temp_C"
+    rail = "electrical.devices[0].electrical.power_rails.1.2 Volts HBM.current.amps"
+    tmp = tempfile.mkdtemp(prefix="cs-hbm-")
+
+    def make(name: str, hbm_values: list):
+        d = os.path.join(tmp, name)
+        os.makedirs(d)
+        t = 1_800_000_000.0
+        recs = [{"type": "run_start", "v": 1, "ts": L.iso(t), "epoch": t, "run_id": "hbm-0", "host": "fixture", "out": d, "argv": [],
+                 "settings": {"until": None, "quick": False, "dry_run": True}, "tree": {"commit": "a" * 40}, "images": {},
+                 "deadline": None, "resumed": False}]
+        for i, x in enumerate(hbm_values):
+            t += 60
+            recs.append({"type": "telemetry", "v": 1, "ts": L.iso(t), "epoch": t, "cycle": 1, "image": "quad", "when": "timer", "ok": True,
+                         "values": {hbm: x, fpga: 36.0 + i % 3, rail: 0.0}, "host": None, "raw": None, "error": None})
+        with open(os.path.join(d, "metrics.jsonl"), "w", encoding="utf-8", newline="\n") as fh:
+            for r in recs:
+                fh.write(json.dumps(r) + "\n")
+        text, data = run_report(src, d, os.path.join(tmp, name + ".json"))
+        T = data.get("telemetry", {})
+        return text, T, {x["label"]: x for x in T.get("labels", [])}
+
+    try:
+        mixed = [0.0, 0.0, 0.0, 35.0, 0.0, 33.0, 32.0, 0.0, 0.0, 31.0]
+        text, T, lab = make("mixed", mixed)
+        c("hbm report: the zeros are counted by name (6 of 10 samples) in the summary and in the text",
+          T.get("no_reading") == [{"label": hbm, "zero": 6, "of": 10, "kept": 4}]
+          and re.search(r"^  NO READING: %s read 0 in 6 of 10 samples\." % re.escape(hbm), text, re.M) is not None, str(T.get("no_reading")))
+        c("hbm report: and left out of the label's range: its samples are the 4 that read, 31 to 35 (not 0 to 35)",
+          hbm in lab and (lab[hbm]["n"], lab[hbm]["min"], lab[hbm]["max"]) == (4, 31.0, 35.0), str(lab.get(hbm)))
+        c("hbm report: nothing else is touched: the FPGA temperature keeps its 10 samples, and a rail that reads a flat 0 in every sample "
+          "keeps its 10 and its range 0 to 0 and is not called a missing reading",
+          lab.get(fpga, {}).get("n") == 10 and lab.get(rail, {}).get("n") == 10 and (lab[rail]["min"], lab[rail]["max"]) == (0.0, 0.0)
+          and all(x["label"] != rail for x in T.get("no_reading", [])), str((lab.get(fpga), lab.get(rail))))
+        text, T, lab = make("allzero", [0.0] * 10)
+        c("hbm report: a label that read 0 in every sample has no range at all, and the text says every sample read 0",
+          hbm not in lab and T.get("no_reading") == [{"label": hbm, "zero": 10, "of": 10, "kept": 0}]
+          and "every sample read 0" in text and lab.get(fpga, {}).get("n") == 10, str(T.get("no_reading")))
+        text, T, lab = make("nozero", [35.0, 34.0, 33.0, 32.0, 31.0, 30.0, 31.0, 32.0, 33.0, 34.0])
+        c("hbm report: a run whose HBM temperature never reads 0 has no such line, no entry, and the full range",
+          T.get("no_reading") == [] and "NO READING" not in text and (lab[hbm]["n"], lab[hbm]["min"], lab[hbm]["max"]) == (10, 30.0, 35.0), str(lab.get(hbm)))
+        try:
+            with lib_from(src) as L2:
+                c("hbm report: the rule is the library's one (the status line uses it too): the HBM temperature at exactly 0, nothing else",
+                  L2.no_reading(hbm, 0.0) and L2.no_reading(hbm, 0) and not L2.no_reading(hbm, 31.0) and not L2.no_reading(fpga, 0.0)
+                  and not L2.no_reading(rail, 0.0) and not L2.is_hbm_temperature(rail) and not L2.no_reading(hbm, False))
+        except AttributeError as e:
+            c("hbm report: the rule is the library's one (the status line uses it too): the HBM temperature at exactly 0, nothing else", False, repr(e))
+    finally:
+        rmtree_force(tmp)
+    return out
+
+
+# -- KL-23: a random slice held to its count ---------------------------------------------
+
+def soak_command(index: dict, nm: str):
+    """(tool, op, count, mode) of a RANDOM soak a fixture was made with, read from INDEX.txt: `[env ...] host/<tool> OP COUNT SEED [MODE]`."""
+    cmd = re.sub(r" \[\d+ s\]$", "", index[nm][1]).split()
+    while cmd and (cmd[0] == "env" or "=" in cmd[0]):
+        cmd.pop(0)
+    return cmd[0], cmd[1], int(cmd[2], 0), (cmd[4] if len(cmd) > 4 else None)
+
+
+@red_not_crash
+def random_count_checks(src: str = HERE) -> list:
+    """KL-23 (2026-10-22): a default run held no random slice to the count it asked, so a random tool that stopped short counted as covered if it
+    printed one case. Item.random_cases now gives the cases of every random op whose tool's counting is known, and the suite holds that to the
+    REAL tools' logs - 10,000 cases (three batches at 4096) for twelve ops, 200,000 from older logs for div32 and conv32to64, and the chunked tools' at
+    20,000 - to the stand-in's own table, and to the catalog."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    with lib_from(src) as L2:
+        raises = lambda fn: raises_in(L2, fn)               # noqa: E731
+        by = {it.name: it for it in L2.sweep_items()}
+        index = fixture_index()
+        rows = [("div32-rne", "soak-div32.txt", 4096), ("div64-rne", "rnd-div64.txt", 4096), ("sqrt64-rne", "rnd-sqrt64.txt", 4096),
+                ("rint64-rne", "rnd-rint64.txt", 4096), ("conv64to32-rne", "rnd-conv64to32.txt", 4096),
+                ("conv32to64", "c5-conv32to64.txt", 4096), ("rem32", "rnd-rem32.txt", 4096), ("rem64", "rnd-rem64.txt", 4096),
+                ("logb64", "rnd-logb64.txt", 4096), ("class64", "rnd-class64.txt", 4096),
+                ("cvtfrom32-rne", "rnd-cvtfrom32.txt", 4096), ("cvtfrom64-rne", "rnd-cvtfrom64.txt", 4096),
+                ("nextup64", "rnd-nextup64.txt", 4096), ("nextdown64", "rnd-nextdown64.txt", 4096),
+                ("cvtfrom64-rne", "rnd-cvtfrom64-c16384.txt", 16384), ("nextup64", "rnd-nextup64-c16384.txt", 16384),
+                ("div64-rne", "rnd-div64-c16384.txt", 16384)]
+        bad = []
+        for iname, nm, batch in rows:
+            it, t = by[iname], fixture(nm)
+            _tool, op, count, mode = soak_command(index, nm)
+            want = it.random_cases(count, batch)
+            try:
+                v = L2.parse_soak(t, index[nm][0], it.op, it.verdict_mode, None, want, None, chunk=None if batch == 4096 else batch)
+                held = v.ok and v.counts["cases"] == want
+                short = raises(lambda: L2.parse_soak(t, index[nm][0], it.op, it.verdict_mode, None, want + 1, None, chunk=None if batch == 4096 else batch))
+            except (L2.VerdictError, TypeError) as e:          # a TypeError: random_cases gave no figure (None + 1), as the base's does for these ops
+                held, short = False, str(e)
+            if not (op == it.op and held and short is True and want == cases_in(t)):
+                bad.append((nm, want, cases_in(t), held, short))
+        c("random counts: for every random op but four (cvtto32 and cvtto64, drawn; the two scaleBs, held in the chunk checks), "
+          "Item.random_cases is what the REAL tool printed for the count it was asked - at 10,000 "
+          "(three batches at 4096) for 12 ops, at 200,000 (older logs) for div32 and conv32to64, at 20,000 through the chunked tools' 16384 for 3 - the log passes with that figure, "
+          "and is refused when the slice is asked one case more", not bad and len(rows) == 17, str(bad[:3]))
+        c("random counts: the multiples are what the tools do, not the count: four a count for cvtfrom32 and cvtfrom64, the count and eight "
+          "for nextup64 and nextdown64, the count for the rest",
+          by["cvtfrom32-rne"].random_cases(10000, 4096) == 40000 == cases_in(fixture("rnd-cvtfrom32.txt"))
+          and by["nextdown64"].random_cases(10000, 4096) == 10008 == cases_in(fixture("rnd-nextdown64.txt"))
+          and by["rem64"].random_cases(10000, 4096) == 10000 == cases_in(fixture("rnd-rem64.txt"))
+          and by["cvtfrom64-rne"].random_cases(20000, 16384) == by["cvtfrom64-rne"].random_cases(20000, 4096) == 80000)
+        c("random counts: cvtto32 and cvtto64 are NOT held to a count, by name: their cases are the in-range lanes of four targets (the draws'), "
+          "so Item.random_cases is None for all ten of their items; the REAL logs show why, and that cases + skipped is four a count "
+          "(22,865 + 17,135 and 20,150 + 19,850 at 10,000), which parse_soak does not read - a known limit",
+          all(by[f"{op}-{m}"].random_cases(10000, 4096) is None for op in ("cvtto32", "cvtto64") for m in L2.MODES5)
+          and list(L2.RANDOM_CASES_DRAWN) == ["cvtto32", "cvtto64"]
+          and cases_in(fixture("rnd-cvtto32.txt")) + int(re.search(r"skipped (\d+) lane-target", fixture("rnd-cvtto32.txt")).group(1)) == 40000
+          and cases_in(fixture("rnd-cvtto64.txt")) + int(re.search(r"skipped (\d+) lane-target", fixture("rnd-cvtto64.txt")).group(1)) == 40000
+          and 0 < cases_in(fixture("rnd-cvtto32.txt")) < 40000)
+        gaps = sorted({it.op for it in by.values() if it.kind == "random"
+                       and it.op not in L2.SCALEB_LIST and it.op not in L2.RANDOM_CASES and it.op not in L2.RANDOM_CASES_DRAWN})
+        c("random counts: every random op in the catalog has a figure or is named as drawn - a new random op with neither is red here, "
+          "not unheld without a word", not gaps and len({it.op for it in by.values() if it.kind == "random"}) == 18, str(gaps))
+        # the stand-in prints what the tools print, from a table of its own
+        sys.path.insert(0, src)
+        try:
+            si = importlib.import_module("card_stress_standin")
+            diff = [(it.op, n, b) for it in by.values() if it.kind == "random" and it.random_cases(1, 4096) is not None
+                    for n in (1, 4095, 4096, 4097, 10000, 100000) for b in (4096, 16384)
+                    if si.random_cases(it.op, n, b) != it.random_cases(n, b)]
+        finally:
+            sys.path.remove(src)
+            sys.modules.pop("card_stress_standin", None)
+        c("random counts: the stand-in's own table gives the library's figure for every op that has one, at six counts and two batches "
+          "(two tables read from the tools, neither the other's source)", not diff, str(diff[:3]))
+    return out
+
+
+@red_not_crash
+def scn_random_short(env: Env, src: str = HERE) -> list:
+    """KL-23 as a process: a DEFAULT run (no --sweep-chunk) whose tool printed one case too few for a random slice. Two card items (div32,
+    cvtfrom32 is a host item) and three host ones; the first slice of each came back short. It is parse_error, by the rule, not covered, and
+    the item's next slice (the same seed number) passes with its expected_cases recorded."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    ops = {"div32": "div32-rne", "cvtfrom32": "cvtfrom32-rne", "rem32": "rem32", "nextup64": "nextup64"}
+    sc = [{"leg": "soak", "op": op, "nth": [1], "do": "shortcase"} for op in ops]
+    r = start_driver(env, "randshort", ["--until", until(120), "--sweep-items", ",".join(ops.values())] + SWEEP_ALL_BASE, sc, src=src, to_file=True)
+
+    def served():
+        return all(any(x["status"] == "pass" and x["sweep"]["item"] == n for x in r.legs(kind="sweep")) for n in ops.values())
+
+    got = wait_for(served, 90, 0.4)
+    stop_run(r)
+    r.finish(60)
+    for op, name in ops.items():
+        mine = sorted((x for x in r.legs(kind="sweep") if x["sweep"]["item"] == name), key=lambda x: x["start_epoch"])
+        first, second = (mine + [None, None])[:2]
+        c(f"random short {name}: the first slice came back one case short and was refused as parse_error, by the rule "
+          f"('cases where the slice has'), with no counts recorded",
+          got and first is not None and first["status"] == "parse_error" and first["counts"] is None
+          and "cases where the slice has" in (first["reason"] or ""), str(first and (first["status"], first["reason"])))
+        c(f"random short {name}: the next slice began from the same seed number and passed, with the figure it was held to recorded as "
+          f"expected_cases and printed in full",
+          got and second is not None and second["status"] == "pass" and second["sweep"]["seed_n"] == first["sweep"]["seed_n"]
+          and second["sweep"].get("expected_cases") == second["counts"]["cases"] and second["counts"]["cases"] > 0, str(second and second["sweep"]))
+        iv, served_n, _cases, seeds, _dis = L.sweep_coverage(r.recs)
+        c(f"random short {name}: the refused slice is not covered: the item has been served once by the passing slice alone",
+          served_n.get(name) == sum(1 for x in mine if x["status"] == "pass") and seeds.get(name, -1) >= 0)
+    return out
+
+
+# -- KL-42: the images' manifests ----------------------------------------------------
+
+def manifest_text(sha: str, commit: str, sources: "str | None" = None, tree: str = "clean", drop: tuple = ()) -> str:
+    """A manifest in the real format: the quad's, as hw/rebuild-2022.sh wrote it, with the fields given put in its place."""
+    t = fixture("manifest-quad.txt")
+    t = re.sub(r"^sha256:.*$", lambda m: f"sha256:        {sha}", t, flags=re.M)
+    t = re.sub(r"^commit:.*$", lambda m: f"commit:        {commit}", t, flags=re.M)
+    t = re.sub(r"^tree:.*$", lambda m: f"tree:          {tree}", t, flags=re.M)
+    t = re.sub(r"^bitstream_sources:.*$", lambda m: f"bitstream_sources: {sources or 'rtl/ and hw/ identical to ' + commit}", t, flags=re.M)
+    return "".join(ln for ln in t.splitlines(True) if not any(ln.startswith(k + ":") for k in drop))
+
+
+@red_not_crash
+def manifest_judge_checks(src: str = HERE) -> list:
+    """KL-42: the library's judgement of a manifest, on the REAL ones (the three images', as hw/rebuild-2022.sh wrote them and the lead copied
+    them from the build host on 2026-10-22) and on those with one field changed. Pure: no git, no driver."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    with lib_from(src) as L2:
+        real = {n: fixture(f"manifest-{n}.txt") for n in ("quad", "single", "deep")}
+        parsed = {n: L2.parse_manifest(t) for n, t in real.items()}
+        shas = {n: parsed[n].get("sha256", "") for n in real}                # (the cross-check against the IMAGES table follows)
+        commit = "688b6530e3af18f1de1d82888a8fc8875b1787f4"
+        rtl = "44b963dd6ba2fcf99e002c5face5ca94aad4515c"
+        c("manifest: the three real manifests parse: sha256, commit, tree and bitstream_sources are read, an indented hdlparam line is not a key, "
+          "and `artifact:` names the build's file (cft_hw.xclbin), not the staged one",
+          all(parsed[n].get("sha256") == shas[n] and parsed[n].get("commit") == commit and parsed[n].get("tree") == "clean"
+              and parsed[n].get("bitstream_sources") == f"rtl/ and hw/ identical to {commit}" and parsed[n].get("artifact") == "cft_hw.xclbin"
+              and "hdlparam" in "".join(real[n].splitlines()) and "EN_FP32" not in parsed[n] and "hdlparam" not in parsed[n] for n in real),
+          str({n: parsed[n].get("sha256", "")[:12] for n in parsed}))
+        # (the driver's own table of the images' hashes was read from VALIDATION.md at 582953c; the manifests are the build host's, 2026-10-22)
+        sys.path.insert(0, src)
+        try:
+            mod = importlib.import_module("card_stress")
+            tbl = {n: v[3] for n, v in mod.IMAGES.items()}
+        finally:
+            sys.path.remove(src)
+            sys.modules.pop("card_stress", None)
+        c("manifest: each real manifest's sha256 is the hash the driver's IMAGES table holds for that image (two records, made apart, agree)",
+          all(tbl.get(n) == parsed[n].get("sha256") for n in real), str(tbl))
+        c("manifest: the manifest sits beside its xclbin under the pair of names the staging keeps: cft_hw_quad.xclbin -> cft_hw_quad.manifest.txt",
+          L2.manifest_path("/x/cardday-rev8q/cft_hw_quad.xclbin") == "/x/cardday-rev8q/cft_hw_quad.manifest.txt"
+          and L2.manifest_path("/x/odd") == "/x/odd.manifest.txt")
+
+        def judge(text, sha, checkout=rtl, rtl_of=lambda cm: rtl, dry=False, dirty=False):
+            return L2.judge_manifest(text, sha, checkout, rtl_of, dry=dry, checkout_dirty=dirty)
+        # state, refused?, a word the why must carry
+        table = [
+            ("the real quad manifest, the right image, this checkout's rtl tree", judge(real["quad"], shas["quad"]), "ok", False, "44b963dd6ba2"),
+            ("a manifest that is another image's (the single's sha256 on the quad)", judge(real["single"], shas["quad"]), "sha256_mismatch", True, "another image's"),
+            ("a manifest with no sha256 line", judge(manifest_text("", commit, drop=("sha256",)), shas["quad"]), "sha256_mismatch", True, "no sha256"),
+            ("a manifest whose sha256 is not 64 hex digits", judge(manifest_text("4f99", commit), shas["quad"]), "sha256_mismatch", True, "64 hex"),
+            ("a commit whose rtl tree is not this checkout's", judge(real["quad"], shas["quad"], checkout="1" * 40), "rtl_differs", True, "111111111111"),
+            ("rtl/ modified when it was built", judge(manifest_text(shas["quad"], commit, f"MODIFIED - rtl/ or hw/ differs from {commit}, this "
+                                                                    "bitstream is not reproducible: rtl/cft_x.sv hw/link.cfg "), shas["quad"]),
+             "rtl_modified", True, "modified"),
+            ("only hw/ modified: the rtl tree is the commit's, and is judged on the trees", judge(manifest_text(shas["quad"], commit, f"MODIFIED - rtl/ or hw/ differs from {commit}, this "
+                                                                                                "bitstream is not reproducible: hw/link.cfg "), shas["quad"]), "ok", False, "hw/ differed"),
+            ("MODIFIED with no file named", judge(manifest_text(shas["quad"], commit, f"MODIFIED - rtl/ or hw/ differs from {commit}"), shas["quad"]),
+             "rtl_modified", True, "modified"),
+            ("a DIRTY tree and no bitstream_sources line (a manifest from before the scoped line)", judge(manifest_text(shas["quad"], commit, tree="DIRTY - this artifact does "
+                                                                                                                "not correspond to any commit", drop=("bitstream_sources",)), shas["quad"]),
+             "rtl_modified", True, "DIRTY"),
+            ("a clean tree and no bitstream_sources line: the whole tree was the commit's, so rtl/ was", judge(manifest_text(shas["quad"], commit, drop=("bitstream_sources",)), shas["quad"]),
+             "ok", False, "44b963dd6ba2"),
+            ("no sources line and no tree line", judge(manifest_text(shas["quad"], commit, drop=("bitstream_sources", "tree")), shas["quad"]),
+             "unverified", False, "does not say"),
+            ("a commit this checkout does not hold: FLAGGED, not refused", judge(real["quad"], shas["quad"], rtl_of=lambda cm: None), "commit_unknown", False, "688b6530e3af"),
+            ("no whole commit named (unknown, as hw/rebuild-2022.sh writes it when git failed)", judge(manifest_text(shas["quad"], "unknown", "rtl/ and hw/ identical to unknown"), shas["quad"]),
+             "commit_unknown", False, "no whole commit"),
+            ("this checkout's own rtl tree unreadable", judge(real["quad"], shas["quad"], checkout=None), "unverified", False, "cannot be read"),
+            ("a manifest whose bitstream_sources names another commit than its commit: line is not read at its word: FLAGGED",
+             judge(manifest_text(shas["quad"], commit, "rtl/ and hw/ identical to " + "1" * 40), shas["quad"]), "unverified", False, "not one build's"),
+            ("this checkout's rtl/ has uncommitted changes: HEAD's tree is the image's but is not what runs from here: FLAGGED",
+             judge(real["quad"], shas["quad"], dirty=True), "unverified", False, "uncommitted"),
+            ("... but a commit whose tree differs is refused whether or not the checkout is dirty", judge(real["quad"], shas["quad"], checkout="1" * 40, dirty=True),
+             "rtl_differs", True, "111111111111"),
+            ("no manifest: FLAGGED, not refused", judge(None, shas["quad"]), "missing", False, "no manifest"),
+            ("no manifest in a dry run: neutral", judge(None, shas["quad"], dry=True), "dry_run", False, "stand-in"),
+            ("an empty manifest", judge("", shas["quad"]), "sha256_mismatch", True, "no sha256"),
+            ("a manifest that is not text at all", judge("\x00\x01 binary\n", shas["quad"]), "sha256_mismatch", True, "no sha256"),
+        ]
+        bad = []
+        for what, r, state, refuse, word in table:
+            if not (r["state"] == state and r["refuse"] is refuse and word.lower() in r["why"].lower()):
+                bad.append((what, r["state"], r["refuse"], r["why"][:80]))
+        every = all(judge(real[n], shas[n])["state"] == "ok" and judge(real[n], shas[n])["commit"] == commit for n in real)
+        c("manifest: the judgement, case by case (%d): ok, the refusals, the flags, the dry run's neutral state, and an empty or "
+          "binary manifest - each with its own state, whether it refuses, and a reason that names it; and all three real ones are ok" % len(table),
+          not bad and every, str(bad[:3]))
+        r = judge(real["quad"], shas["quad"])
+        c("manifest: an ok verdict carries what run_start records beside the image's SHA-256: the manifest's sha256, commit, tree and "
+          "bitstream_sources, and the commit's rtl tree", r["sha256"] == shas["quad"] and r["commit"] == commit and r["rtl"] == rtl
+          and r["tree"] == "clean" and r["sources"] == f"rtl/ and hw/ identical to {commit}", str(r))
+        ok_s, det_s = L2.manifest_step("quad", r)
+        ref = judge(real["quad"], shas["quad"], checkout="1" * 40)
+        fl = judge(None, shas["quad"])
+        c("manifest: the build step: ok for ok; NOT ok for a refusal, which says REFUSED and the file; ok for a flag, which says NOT CHECKED, by state",
+          ok_s and det_s.startswith("ok: ") and not L2.manifest_step("quad", dict(ref, file="cft_hw_quad.manifest.txt"))[0]
+          and "REFUSED" in L2.manifest_step("quad", dict(ref, file="cft_hw_quad.manifest.txt"))[1]
+          and "cft_hw_quad.manifest.txt" in L2.manifest_step("quad", dict(ref, file="cft_hw_quad.manifest.txt"))[1]
+          and L2.manifest_step("quad", fl)[0] and "NOT CHECKED" in L2.manifest_step("quad", fl)[1] and "missing" in L2.manifest_step("quad", fl)[1])
+    return out
+
+
+def manifest_repo(path: str):
+    """A scratch repository whose HEAD has two commits that differ in rtl/ (and the files the driver's build step looks for): (path,
+    [commit1, commit2], [rtl tree 1, rtl tree 2]), or None where git cannot make one."""
+    repo = make_scratch_repo(path, MARKER_FILES)
+    if repo is None:
+        return None
+    os.makedirs(os.path.join(repo, "rtl"), exist_ok=True)
+    cs, trees = [], []
+    for k in (1, 2):
+        with open(os.path.join(repo, "rtl", "a.sv"), "w", newline="\n") as fh:
+            fh.write(f"// revision {k}\n")
+        if git_in(repo, "add", "-A").returncode != 0 or git_in(repo, "commit", "-q", "-m", f"rtl {k}").returncode != 0:
+            return None
+        cs.append(git_in(repo, "rev-parse", "HEAD").stdout.strip())
+        trees.append(git_in(repo, "rev-parse", "HEAD:rtl").stdout.strip())
+    return repo, cs, trees
+
+
+def stage_images(env: Env, tag: str, manifests: dict) -> dict:
+    """Copies of the test's three images (each file with its SHA256SUMS) in a directory of their own, each with the manifest text given for
+    it beside it under the staged pair of names (none for a name not in `manifests`): {name: path}."""
+    out = {}
+    for n, p in env.imgs.items():
+        d = os.path.join(env.tmp, f"mf-{tag}", n)
+        os.makedirs(d, exist_ok=True)
+        q = os.path.join(d, os.path.basename(p))
+        shutil.copy(p, q)
+        shutil.copy(os.path.join(os.path.dirname(p), "SHA256SUMS"), os.path.join(d, "SHA256SUMS"))
+        if manifests.get(n) is not None:
+            with open(q[:-len(".xclbin")] + ".manifest.txt", "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(manifests[n])
+        out[n] = q
+    return out
+
+
+def manifest_driver_checks(env: Env, src: str = HERE) -> list:
+    """KL-42, in-process, on a Driver rooted in a scratch repository (two commits, rtl/ differing): pre_check reads each image's manifest
+    and holds it to the image and to HEAD's rtl tree, and the build step's manifest check refuses or flags - exactly as a real (not dry)
+    run does, which a dry run's process cannot show for a missing manifest (its stand-ins have none, by design)."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    mr = manifest_repo(os.path.join(env.tmp, "mfrepo-unit"))
+    if mr is None:
+        skip("manifest driver", "git cannot make a scratch repository on this host")
+        return out
+    repo, (c1, c2), (t1, t2) = mr
+    sha = env.shas["quad"]
+    other = "0123456789abcdef0123456789abcdef01234567"
+    cases = {"ok": manifest_text(sha, c2), "differs": manifest_text(sha, c1), "sha": manifest_text(env.shas["single"], c2),
+             "unknown": manifest_text(sha, other), "modified": manifest_text(sha, c2, f"MODIFIED - rtl/ or hw/ differs from {c2}, this "
+                                                                                   f"bitstream is not reproducible: rtl/a.sv "), "none": None}
+    want = {"ok": ("ok", False), "differs": ("rtl_differs", True), "sha": ("sha256_mismatch", True), "unknown": ("commit_unknown", False),
+            "modified": ("rtl_modified", True), "none": ("missing", False)}
+    got: dict = {}
+    try:
+        for dry in (False, True):
+            for key, text in cases.items():
+                if dry and key not in ("none", "ok"):
+                    continue
+                imgs = stage_images(env, f"unit-{key}-{int(dry)}", {"quad": text})
+                with driver_from(src, ["--root", repo]) as (mod, d, L2):
+                    d.dry = dry
+                    os.makedirs(d.out, exist_ok=True)
+                    d.started = True
+                    d.images["quad"] = mod.Image("quad", imgs["quad"], 4, "u50-rev8-quad", None)
+                    d.pre_check()
+                    steps: list = []
+                    d.check_manifest(d.images["quad"], lambda n, ok, det: steps.append((n, ok, det)))
+                    evs = [r for r in (L2.read_records(d.metrics)[0] if os.path.exists(d.metrics) else []) if r.get("type") == "event"]
+                    got[(key, dry)] = (dict(d.images["quad"].manifest or {}), steps, evs, dict(d.tree))
+    except Exception as e:                     # a driver that cannot be driven this way is a red check, not a crash
+        import traceback
+        c("manifest driver: the driver could be driven in-process", False, repr(e) + " " + traceback.format_exc()[-400:])
+        return out
+    bad = []
+    for key, (state, refuse) in want.items():
+        m, steps, evs, _tree = got[(key, False)]
+        flagged = state in ("commit_unknown", "missing")
+        step_ok = (len(steps) == 1 and steps[0][0] == "manifest quad" and steps[0][1] is (not refuse)
+                   and (state in steps[0][2]) and (("NOT CHECKED" in steps[0][2]) is flagged))
+        ev_ok = (len(evs) == 1 and evs[0]["event"] == "image_manifest_unchecked" and evs[0]["state"] == state) if flagged else not evs
+        if not (m.get("state") == state and m.get("refuse") is refuse and step_ok and ev_ok and m.get("file") == "cft_hw_quad.manifest.txt"):
+            bad.append((key, m.get("state"), m.get("refuse"), steps, [e["event"] for e in evs]))
+    c("manifest driver: a real run judges the manifest beside the image: ok; the sha256 of another image, a commit whose rtl tree is not "
+      "HEAD's, and rtl/ modified are REFUSED (the step is not ok); a commit the checkout lacks and a missing manifest are FLAGGED (the step "
+      "is ok, says NOT CHECKED, and an event image_manifest_unchecked names the state); only a flag has the event", not bad, str(bad[:2]))
+    m = got[("ok", False)][0]
+    c("manifest driver: what run_start records for it: the manifest's commit (HEAD's), that commit's rtl tree, its sha256 equal to the "
+      "image's, its tree and bitstream_sources, and the file's name - and the tree the run is keyed by is still the checkout's rtl",
+      m.get("commit") == c2 and m.get("rtl") == t2 and m.get("sha256") == sha and m.get("tree") == "clean"
+      and m.get("sources") == f"rtl/ and hw/ identical to {c2}" and got[("ok", False)][3].get("rtl") == t2, str(m))
+    m = got[("differs", False)][0]
+    c("manifest driver: the commit with another rtl tree is recorded as what it is (its commit and its tree), and the coverage key stays "
+      "the checkout's: tree.rtl is HEAD's, not the manifest's", m.get("commit") == c1 and m.get("rtl") == t1 != t2
+      and got[("differs", False)][3].get("rtl") == t2, str(m))
+    md, ms = got[("none", True)][0], got[("none", True)][1]
+    c("manifest driver: a DRY run with no manifest (the stand-ins' images have none) is neutral: state dry_run, a step that is ok, no event "
+      "- and one WITH a manifest is judged as a real run judges it", md.get("state") == "dry_run" and ms and ms[0][1] and not got[("none", True)][2]
+      and got[("ok", True)][0].get("state") == "ok", str((md.get("state"), ms)))
+    return out
+
+
+@red_not_crash
+def scn_manifests(env: Env, src: str = HERE) -> list:
+    """KL-42 as processes: dry runs rooted in the scratch repository, with a manifest beside each stand-in image. A: all three name HEAD:
+    ok, recorded in run_start, shown in status.txt and the report. B: the quad's names the other commit (rtl differs): the run does not
+    start - exit 3, no leg, the failing step named. C: the single's is the quad's. D: rtl/ modified. E: a commit the checkout lacks:
+    flagged, the run goes on. F: no manifests (the dry run's own case): the run is as it always was."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    mr = manifest_repo(os.path.join(env.tmp, "mfrepo"))
+    if mr is None:
+        skip("manifests", "git cannot make a scratch repository on this host")
+        return out
+    repo, (c1, c2), (t1, t2) = mr
+    base = ["--root", repo, "--quick", "--legs", "api-test", "--no-sweep"]
+
+    def drive(tag, manifests):
+        imgs = stage_images(env, tag, manifests)
+        args = list(base)
+        for n, p in imgs.items():
+            args += ["--image", f"{n}={p}"]
+        return run_driver(env, "mf-" + tag, args, src=src, cap=120)
+
+    def steps(R, name):
+        b = R.last("build")
+        return [s for s in (b["steps"] if b else []) if s["name"] == name]
+
+    sh = env.shas
+    A = drive("ok", {n: manifest_text(sh[n], c2) for n in sh})
+    rs = A.recs[0]
+    mfs = {n: rs["images"][n].get("manifest") or {} for n in sh}
+    c("manifests A: three manifests that name HEAD and the images' hashes: the run goes (exit 0, every leg passes) and run_start records, "
+      "beside each SHA-256, the manifest's commit and its rtl tree (state ok, HEAD's, tree.rtl unchanged)",
+      A.rc == 0 and bool(A.legs()) and all(m.get("state") == "ok" and m.get("commit") == c2 and m.get("rtl") == t2 and m.get("sha256") == sh[n]
+                                             for n, m in mfs.items()) and rs["tree"]["rtl"] == t2, f"rc {A.rc}: {A.text[-200:]}")
+    c("manifests A: ... a build step `manifest <image>` for each, ok", all(len(steps(A, f"manifest {n}")) == 1 and steps(A, f"manifest {n}")[0]["ok"] for n in sh))
+    st = open(os.path.join(A.out, "status.txt"), encoding="utf-8").read()
+    c("manifests A: status.txt has an `images` line that says each was built at HEAD's commit with its rtl tree",
+      re.search(r"^images     quad built at %s, rtl %s \(this checkout's\); single .*; deep " % (c2[:12], t2[:12]), st, re.M) is not None, st[:600])
+    p = subprocess.run([sys.executable, "-B", "-I", os.path.join(src, "card_stress_report.py"), A.out, "--no-write"], capture_output=True, text=True, timeout=120)
+    c("manifests A: and the report's header says it of each image", p.returncode == 0 and f"built at {c2[:12]}, rtl {t2[:12]} (this checkout's)" in p.stdout, p.stdout[:300])
+    B = drive("differs", dict({n: manifest_text(sh[n], c2) for n in sh}, quad=manifest_text(sh["quad"], c1)))
+    fb = steps(B, "manifest quad")
+    c("manifests B: the quad's manifest names a commit whose rtl tree is not HEAD's: the run does not start (exit 3), no leg, the build record "
+      "is not ok and the step `manifest quad` is the one that failed and says rtl_differs, REFUSED; STOPPED.txt says so",
+      B.rc == 3 and not B.legs() and B.last("build") is not None and not B.last("build")["ok"] and len(fb) == 1 and not fb[0]["ok"]
+      and "rtl_differs" in fb[0]["detail"] and "REFUSED" in fb[0]["detail"] and all(steps(B, f"manifest {n}")[0]["ok"] for n in ("single", "deep"))
+      and os.path.exists(os.path.join(B.out, "STOPPED.txt")) and "rtl_differs" in open(os.path.join(B.out, "STOPPED.txt"), encoding="utf-8").read(),
+      f"rc {B.rc}: {B.text[-300:]}")
+    c("manifests B: ... run_start had recorded it before the refusal (state rtl_differs, the manifest's commit and rtl tree, tree.rtl HEAD's)",
+      (B.recs[0]["images"]["quad"].get("manifest") or {}).get("state") == "rtl_differs"
+      and (B.recs[0]["images"]["quad"]["manifest"] or {}).get("rtl") == t1 and B.recs[0]["tree"]["rtl"] == t2)
+    C = drive("sha", dict({n: manifest_text(sh[n], c2) for n in sh}, single=manifest_text(sh["quad"], c2)))
+    fc = steps(C, "manifest single")
+    c("manifests C: a manifest that is another image's (the single's carries the quad's sha256): refused, exit 3, no leg, by name",
+      C.rc == 3 and not C.legs() and len(fc) == 1 and not fc[0]["ok"] and "sha256_mismatch" in fc[0]["detail"], f"rc {C.rc}: {C.text[-200:]}")
+    D = drive("modified", dict({n: manifest_text(sh[n], c2) for n in sh},
+                               deep=manifest_text(sh["deep"], c2, f"MODIFIED - rtl/ or hw/ differs from {c2}, this bitstream is not reproducible: rtl/a.sv ")))
+    fd = steps(D, "manifest deep")
+    c("manifests D: a manifest that says rtl/ was modified when the image was built: refused, exit 3, no leg, by name",
+      D.rc == 3 and not D.legs() and len(fd) == 1 and not fd[0]["ok"] and "rtl_modified" in fd[0]["detail"], f"rc {D.rc}: {D.text[-200:]}")
+    E = drive("unknown", dict({n: manifest_text(sh[n], c2) for n in sh}, deep=manifest_text(sh["deep"], "0123456789abcdef0123456789abcdef01234567")))
+    fe = steps(E, "manifest deep")
+    ev = E.events("image_manifest_unchecked")
+    c("manifests E: a manifest that names a commit this checkout does not hold is FLAGGED: the step is ok and says NOT CHECKED, an event "
+      "image_manifest_unchecked names the image and the state, run_start records commit_unknown, and the run goes on (exit 0, legs pass)",
+      E.rc == 0 and bool(E.legs()) and len(fe) == 1 and fe[0]["ok"] and "NOT CHECKED" in fe[0]["detail"] and "commit_unknown" in fe[0]["detail"]
+      and len(ev) == 1 and ev[0]["image"] == "deep" and ev[0]["state"] == "commit_unknown"
+      and (E.recs[0]["images"]["deep"].get("manifest") or {}).get("state") == "commit_unknown", f"rc {E.rc}: {E.text[-200:]}")
+    F = drive("none", {})
+    c("manifests F: no manifests, as a dry run's stand-in images have none: the run is as it always was (exit 0, legs pass, every build step ok), "
+      "each image's manifest is recorded as state dry_run, and there is no event and no step to say otherwise",
+      F.rc == 0 and bool(F.legs()) and F.last("build")["ok"] and not F.events("image_manifest_unchecked")
+      and all((F.recs[0]["images"][n].get("manifest") or {}).get("state") == "dry_run" for n in sh)
+      and not [s for s in F.last("build")["steps"] if s["name"].startswith("manifest ") and not s["ok"]], f"rc {F.rc}: {F.text[-200:]}")
+    return out
+
+
+# -- KL-44: vectors/out --------------------------------------------------------------
+
+@red_not_crash
+def vectors_checks(env: Env, src: str = HERE) -> list:
+    """KL-44 (2026-10-22): the driver neither checked nor made vectors/out, so on a clean clone the selftest leg failed at every third visit of
+    each image. The library's check (what `cd vectors && sha256sum -c --quiet SHA256SUMS` says) on planted directories, and the driver's
+    build step in-process on a Driver that is not dry."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    tmp = tempfile.mkdtemp(prefix="cs-vec-")
+    try:
+        with lib_from(src) as L2:
+            def tree(name, files, sums=True, extra=None):
+                root = os.path.join(tmp, name)
+                os.makedirs(os.path.join(root, "vectors", "out"))
+                lines = []
+                for fn, data in files.items():
+                    with open(os.path.join(root, "vectors", "out", fn), "wb") as fh:
+                        fh.write(data)
+                    lines.append(f"{hashlib.sha256(data).hexdigest()}  out/{fn}")
+                if sums:
+                    with open(os.path.join(root, "vectors", "SHA256SUMS"), "w", newline="\n") as fh:
+                        fh.write("\n".join(lines) + "\n")
+                for fn, data in (extra or {}).items():
+                    with open(os.path.join(root, "vectors", "out", fn), "wb") as fh:
+                        fh.write(data)
+                return root
+            files = {"a.jsonl": b"one\n", "b.jsonl": b"two\n"}
+            whole = tree("whole", files, extra={"unlisted.jsonl": b"not in the record\n"})
+            c("vectors: out/ whole and holding to SHA256SUMS passes (an unlisted file does not matter, as for sha256sum -c)",
+              L2.vectors_problem(whole) is None, str(L2.vectors_problem(whole)))
+            noout = os.path.join(tmp, "noout")
+            os.makedirs(os.path.join(noout, "vectors"))
+            p = L2.vectors_problem(noout)
+            c("vectors: no vectors/out is refused by name (vectors_out_missing) and says `make vectors`",
+              p is not None and p.startswith("vectors_out_missing:") and "make vectors" in p, str(p))
+            bad = tree("bad", files)
+            with open(os.path.join(bad, "vectors", "out", "b.jsonl"), "wb") as fh:
+                fh.write(b"tw0\n")
+            p = L2.vectors_problem(bad)
+            c("vectors: a file that differs from SHA256SUMS is refused by name (vectors_out_mismatch), the file and `make vectors` named",
+              p is not None and p.startswith("vectors_out_mismatch:") and "out/b.jsonl (differs)" in p and "make vectors" in p, str(p))
+            gone = tree("gone", files)
+            os.remove(os.path.join(gone, "vectors", "out", "a.jsonl"))
+            p = L2.vectors_problem(gone)
+            c("vectors: a listed file that is missing is refused the same way", p is not None and p.startswith("vectors_out_mismatch:")
+              and "out/a.jsonl (missing)" in p, str(p))
+            p1 = L2.vectors_problem(tree("nosums", files, sums=False))
+            c("vectors: out/ with no SHA256SUMS to hold it to is refused by name (vectors_out_unheld)", p1 is not None and p1.startswith("vectors_out_unheld:"), str(p1))
+            malformed = tree("malformed", files)
+            with open(os.path.join(malformed, "vectors", "SHA256SUMS"), "w", newline="\n") as fh:
+                fh.write("not a sha256 line\n")
+            pm = L2.vectors_problem(malformed)
+            emptyrec = tree("emptyrec", files)
+            with open(os.path.join(emptyrec, "vectors", "SHA256SUMS"), "w", newline="\n") as fh:
+                fh.write("\n")
+            pe = L2.vectors_problem(emptyrec)
+            pn, pb = L2.vectors_problem(noout), L2.vectors_problem(bad)
+            # the tracked record CHANGED while vectors/out is whole: well formed, a wrong hash for out/b.jsonl. `make vectors` writes vectors/out only and cannot clear this
+            changed = tree("changedrec", files)
+            rec_path = os.path.join(changed, "vectors", "SHA256SUMS")
+            with open(rec_path, "r", encoding="utf-8") as fh:
+                rec_text = fh.read()
+            with open(rec_path, "w", newline="\n") as fh:
+                fh.write(rec_text.replace(hashlib.sha256(b"two\n").hexdigest(), "0" * 64))
+            pc = L2.vectors_problem(changed)
+            c("vectors: a CHANGED tracked record - well formed, a wrong hash for out/b.jsonl, vectors/out whole - is refused as a mismatch (the file named), and the refusal "
+              "names the remedy that clears it, `git checkout -- vectors/SHA256SUMS`, beside `make vectors`, which writes vectors/out only and cannot",
+              pc is not None and pc.startswith("vectors_out_mismatch:") and "out/b.jsonl (differs)" in pc and "git checkout -- vectors/SHA256SUMS" in pc
+              and "make vectors" in pc, str(pc))
+            c("vectors: what each refusal says puts it right: the three vectors_out_unheld ones (the tracked record missing, malformed, empty) say `git checkout -- "
+              "vectors/SHA256SUMS` and do not send the operator to `make vectors`, which writes vectors/out/SHA256SUMS, another file, and would not restore the tracked "
+              "one; the missing refusal says `make vectors` and not `git checkout`; the mismatch refusal, which cannot tell a differing vectors/out from a changed record, names both",
+              all(q is not None and q.startswith("vectors_out_unheld:") and "git checkout -- vectors/SHA256SUMS" in q and "make vectors" not in q for q in (p1, pm, pe))
+              and pn is not None and "make vectors" in pn and "git checkout" not in pn
+              and all(q is not None and "make vectors" in q and "git checkout -- vectors/SHA256SUMS" in q for q in (pb, pc)), str((p1, pm, pe, pn, pb, pc)))
+            esc = tree("esc", files)
+            with open(os.path.join(esc, "vectors", "SHA256SUMS"), "a", newline="\n") as fh:
+                fh.write(f"{hashlib.sha256(b'x').hexdigest()}  ../outside.txt\n")
+            p2 = L2.vectors_problem(esc)
+            c("vectors: a SHA256SUMS line that points outside vectors/ is refused, not followed", p2 is not None and "outside vectors/" in p2, str(p2))
+            # the repository's own record has the shape this reads
+            with open(os.path.join(ROOT, "vectors", "SHA256SUMS"), "r", encoding="utf-8") as fh:
+                lines = [ln for ln in fh.read().splitlines() if ln.strip()]
+            c("vectors: the repository's vectors/SHA256SUMS is read by this check's own line pattern: every line is '<sha256>  out/<file>'",
+              len(lines) >= 100 and all(re.fullmatch(r"[0-9a-f]{64}  out/\S+", ln) for ln in lines), f"{len(lines)} lines")
+        # the driver's build step, not dry: which runs look, and which say why not
+        rows = []
+        for label, extra, dry, disabled, root, want_ok, want_text in (
+                ("selftest in the battery, vectors/out missing", ["--legs", "api-test,selftest"], False, None, noout, False, "vectors_out_missing"),
+                ("selftest in the battery, vectors/out whole", ["--legs", "api-test,selftest"], False, None, whole, True, "holds to it"),
+                ("the default battery (selftest in it), vectors/out missing", [], False, None, noout, False, "vectors_out_missing"),
+                ("selftest not in the battery", ["--legs", "api-test"], False, None, noout, True, "not in this run's battery"),
+                ("--quick (no selftest)", ["--quick"], False, None, noout, True, "not in this run's battery"),
+                ("selftest disabled by the build (tool not built)", ["--legs", "api-test,selftest"], False, "cft-selftest was not built", noout, True, "disabled"),
+                ("a dry run", ["--legs", "api-test,selftest"], True, None, noout, True, "dry run")):
+            with driver_from(src, ["--root", root] + extra) as (mod, d, L2):
+                d.dry = dry
+                if disabled:
+                    d.disabled_legs["selftest"] = disabled
+                steps: list = []
+                d.check_vectors(lambda n, ok, det: steps.append((n, ok, det)))
+                if not (len(steps) == 1 and steps[0][0] == "vectors" and steps[0][1] is want_ok and want_text in steps[0][2]):
+                    rows.append((label, steps))
+        c("vectors: the build step looks at vectors/out only when the selftest leg will read it (it is in the battery, was built, and the run is "
+          "not dry) and then refuses a missing one; every other case passes the step and says why it did not look", not rows, str(rows[:2]))
+    finally:
+        rmtree_force(tmp)
+    return out
+
+
+# -- KL-13: buildreal's scratch copy ------------------------------------------------------
+
+def copy_tracked(src_root: str, dst_root: str, rels=("host", "hw")) -> list:
+    """Copy into dst_root the files git TRACKS under `rels` of src_root, and nothing else: the list of what was copied. buildreal's scratch
+    repository was made with shutil.copytree and an ignore list of __pycache__, *.o, *.lo, *.a and *.so, which in a checkout where host/ is
+    built also took the executables and the generated build id, so `make` there found the tools up to date and cft-segrun's build id was
+    the checkout's, not the scratch repository's: two of its checks failed in every built tree, the gate's fresh clone after its earlier
+    stages among them (KL-13). A file git lists that is gone from the working tree is skipped."""
+    p = subprocess.run(["git", "-C", src_root, "ls-files", "-z", "--"] + list(rels), capture_output=True, timeout=120)
+    if p.returncode != 0:
+        raise RuntimeError("git ls-files: " + p.stderr.decode("utf-8", "replace")[-200:])
+    copied = []
+    for rel in (x.decode("utf-8", "surrogateescape") for x in p.stdout.split(b"\0") if x):
+        s = os.path.join(src_root, rel)
+        if not os.path.isfile(s):
+            continue
+        d = os.path.join(dst_root, rel)
+        os.makedirs(os.path.dirname(d), exist_ok=True)
+        shutil.copy2(s, d)
+        copied.append(rel)
+    return copied
+
+
+def copy_tracked_checks() -> list:
+    """KL-13: copy_tracked on a scratch repository that looks like a built checkout (built products, a generated header, objects and a
+    cache beside the tracked files, and a tracked file that is gone), and on this tree."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    tmp = tempfile.mkdtemp(prefix="cs-trk-")
+    try:
+        repo = make_scratch_repo(os.path.join(tmp, "repo"))
+        if repo is None:
+            skip("copy tracked", "git cannot make a scratch repository on this host")
+            return []
+        tracked = {"host/Makefile": b"all:\n", "host/src/a.c": b"int a;\n", "hw/run.sh": b"#!/bin/sh\n", "hw/sub/b.py": b"b = 1\n", "host/gone.c": b"x\n"}
+        for rel, data in tracked.items():
+            os.makedirs(os.path.dirname(os.path.join(repo, rel)), exist_ok=True)
+            with open(os.path.join(repo, rel), "wb") as fh:
+                fh.write(data)
+        os.chmod(os.path.join(repo, "hw/run.sh"), 0o755)
+        git_in(repo, "add", "-A")
+        git_in(repo, "commit", "-q", "-m", "tracked")
+        os.remove(os.path.join(repo, "host/gone.c"))
+        built = ["host/api-test", "host/cft-segrun", "host/gen/build_id.h", "host/libcft.a", "host/src/a.o", "hw/__pycache__/x.pyc", "hw/untracked.sh"]
+        for rel in built:
+            os.makedirs(os.path.dirname(os.path.join(repo, rel)), exist_ok=True)
+            with open(os.path.join(repo, rel), "wb") as fh:
+                fh.write(b"built\n")
+        dst = os.path.join(tmp, "dst")
+        copied = copy_tracked(repo, dst)
+        got = sorted(os.path.relpath(os.path.join(dp, f), dst).replace("\\", "/") for dp, _d, fs in os.walk(dst) for f in fs)
+        want = sorted(r for r in tracked if r != "host/gone.c")
+        c("copy tracked: of a scratch repository that looks built, only the files git tracks are copied - not the executables, the generated "
+          "build id, the objects and libraries, the cache or an untracked script - and a tracked file gone from the tree is skipped",
+          got == want and sorted(copied) == want, f"got {got}")
+        c("copy tracked: contents are the working tree's, and a tracked script keeps its execute bit",
+          all(open(os.path.join(dst, r), "rb").read() == tracked[r] for r in want)
+          and (not POSIX or os.access(os.path.join(dst, "hw/run.sh"), os.X_OK)), "")
+        dst2 = os.path.join(tmp, "dst2")
+        copied2 = copy_tracked(ROOT, dst2)
+        ls = git_out("ls-files", "--", "host", "hw")
+        listed = sorted(x for x in (ls or "").splitlines() if x and os.path.isfile(os.path.join(ROOT, x)))
+        got2 = sorted(os.path.relpath(os.path.join(dp, f), dst2).replace("\\", "/") for dp, _d, fs in os.walk(dst2) for f in fs)
+        old = os.path.join(tmp, "old")
+        shutil.copytree(os.path.join(repo, "host"), os.path.join(old, "host"), ignore=shutil.ignore_patterns("__pycache__", "*.o", "*.lo", "*.a", "*.so"))
+        took = sorted(os.path.relpath(os.path.join(dp, f), old).replace("\\", "/") for dp, _d, fs in os.walk(old) for f in fs)
+        c("copy tracked: the copy it replaces (copytree leaving out only __pycache__, *.o, *.lo, *.a and *.so) takes the built executables and the "
+          "generated build id of this same scratch repository - so the check above can fail", "host/api-test" in took and "host/gen/build_id.h" in took
+          and "host/libcft.a" not in took and "host/src/a.o" not in took, str(took))
+        c("copy tracked: of this tree, exactly what `git ls-files host hw` lists (%d files), built or not" % len(listed),
+          ls is not None and len(listed) > 100 and got2 == listed and sorted(copied2) == listed, f"{len(got2)} copied, {len(listed)} listed")
+    finally:
+        rmtree_force(tmp)
+    return out
 
 
 # ---------------------------------------------------------------------------------------
@@ -5331,7 +6297,7 @@ def plants(env: Env) -> None:
          lambda env, src: telemetry_order_checks(src),
          ["telemetry: a timer sample the run's stop reaches while it is in flight is dropped"]),
         ("the driver appends telemetry records in swapped pairs",
-         [("card_stress.py", "        self.rec(rec)\n        self.last_tel = rec\n",
+         [("card_stress.py", "        self.last_tel = self.rec(rec)      # the record as written: it carries the ts append_record stamped (the status line reads it)\n",
            "        held = getattr(self, '_held', None)\n        if held is None:\n            self._held = rec\n"
            "        else:\n            self.rec(rec)\n            self.rec(held)\n            self._held = None\n"
            "        self.last_tel = rec\n")],
@@ -5524,8 +6490,58 @@ def plants(env: Env) -> None:
          lambda env, src: scn_chunk(env, src),
          ["chunk run: every slice that passed carries the batch and chunk its tool said", "chunk run: the tools the sweep ran are the -c16384 ones"]),
         ("random scaleB is not held to the cases its BATCH gives",
-         [("card_stress.py", 'job["expected"] = it.random_cases(units, self.batch) if self.chunk else None', 'job["expected"] = None')],
+         [("card_stress.py", 'job["expected"] = it.random_cases(units, self.batch)\n', 'job["expected"] = None\n')],
          lambda env, src: scn_chunk(env, src), ["chunk run: a random scaleB slice is held to the cases its BATCH gives"]),
+        # -- parcel P5 (2026-10-22): the plants of KL-39, KL-32, KL-23, KL-42 and KL-44 (CARD_STRESS_PLANT='P5:' runs just these)
+        ("P5: the status file's telemetry line has no time (the kept record is the unstamped one)",
+         [("card_stress_lib.py", "            os.close(fd)\n    return rec\n",
+           "            os.close(fd)\n    return {k: v for k, v in rec.items() if k not in (\"ts\", \"epoch\")}\n")],
+         lambda env, src: telemetry_status_checks(src), ["telemetry status: the line begins with the sample's own time"]),
+        ("P5: the status file's telemetry line names six values again",
+         [("card_stress_lib.py", "TELEMETRY_SHOWN = 12 ", "TELEMETRY_SHOWN = 6 ")],
+         lambda env, src: telemetry_status_checks(src), ["telemetry status: it names more than six values"]),
+        ("P5: the report leaves the HBM temperature's zeros in its range",
+         [("card_stress_report.py", "                        zc[0] += 1\n                        continue\n", "                        zc[0] += 1\n")],
+         lambda env, src: hbm_report_checks(src), ["hbm report: and left out of the label's range"]),
+        ("P5: the report counts no zero as no reading",
+         [("card_stress_lib.py", "    return (is_hbm_temperature(label) and isinstance(value, (int, float)) and not isinstance(value, bool) and value == 0)",
+           "    return False")],
+         lambda env, src: hbm_report_checks(src), ["hbm report: the zeros are counted by name"]),
+        ("P5: a default run holds no random slice to its count",
+         [("card_stress.py", 'job["expected"] = it.random_cases(units, self.batch)\n', 'job["expected"] = it.random_cases(units, self.batch) if self.chunk else None\n')],
+         scn_random_short, ["random short div32-rne: the first slice came back one case short"]),
+        ("P5: cvtfrom is held to three cases a count, not four",
+         [("card_stress_lib.py", '"cvtfrom32": (4, 0), "cvtfrom64": (4, 0),', '"cvtfrom32": (3, 0), "cvtfrom64": (3, 0),')],
+         lambda env, src: random_count_checks(src), ["random counts: for every random op but four"]),
+        ("P5: the stand-in prints the count for every random op, as it did",
+         [("card_stress_standin.py", "    per = RANDOM_PER.get(op)\n    return count if per is None else count * per[0] + per[1]\n", "    return count\n")],
+         lambda env, src: random_count_checks(src), ["random counts: the stand-in's own table gives the library's figure"]),
+        ("P5: a manifest whose commit has another rtl tree is accepted",
+         [("card_stress_lib.py", "    if rtl != checkout_rtl:\n", "    if False:\n")],
+         lambda env, src: manifest_judge_checks(src) + manifest_driver_checks(env, src) + scn_manifests(env, src),
+         ["manifest: the judgement, case by case", "manifest driver: a real run judges", "manifests B: the quad's manifest names a commit"]),
+        ("P5: a manifest that is another image's is accepted",
+         [("card_stress_lib.py", "    if sha != image_sha:\n", "    if False:\n")],
+         lambda env, src: manifest_judge_checks(src) + manifest_driver_checks(env, src),
+         ["manifest: the judgement, case by case", "manifest driver: a real run judges"]),
+        ("P5: a missing manifest stops the run (refused where it is flagged)",
+         [("card_stress_lib.py", 'MANIFEST_REFUSED = ("sha256_mismatch", "rtl_modified", "rtl_differs")',
+           'MANIFEST_REFUSED = ("sha256_mismatch", "rtl_modified", "rtl_differs", "missing")')],
+         lambda env, src: manifest_driver_checks(env, src), ["manifest driver: a real run judges", "manifest driver: a DRY run with no manifest"]),
+        ("P5: the manifest check is left out of the build step",
+         [("card_stress.py", "            self.check_manifest(im, step)\n", "            pass\n")],
+         lambda env, src: scn_manifests(env, src), ["manifests B: the quad's manifest names a commit", "manifests A: ... a build step"]),
+        ("P5: the planner forgets the last interval of each item (a real-file resume plans the wrong gaps; needs CARD_STRESS_RESUME_RUN)",
+         [("card_stress.py", "                have = self.intervals.get(it.name, []) + self.quarantine.get(it.name, []) + reserved.get(it.name, [])\n",
+           "                have = self.intervals.get(it.name, [])[:-1] + self.quarantine.get(it.name, []) + reserved.get(it.name, [])\n")],
+         lambda env, src: resume_real_checks(env, src),
+         ["resume real: the planner over the WHOLE file's coverage", "resume real: a resume at 0b7c959 plans each of the 22"]),
+        ("P5: the build step does not look at vectors/out",
+         [("card_stress.py", "            problem = L.vectors_problem(self.root)\n", "            problem = None\n")],
+         lambda env, src: vectors_checks(env, src), ["vectors: the build step looks at vectors/out only when"]),
+        ("P5: a file of vectors/out that differs from SHA256SUMS passes",
+         [("card_stress_lib.py", '        if got != want:\n            bad.append(f"{rel} (differs)")\n', '        if False:\n            bad.append(f"{rel} (differs)")\n')],
+         lambda env, src: vectors_checks(env, src), ["vectors: a file that differs from SHA256SUMS is refused by name"]),
         ("the build step does not build the chunked tools",
          [("card_stress.py", "        if self.chunk:\n            # --sweep-chunk N: the sweep's slices run the tools built at pass size N",
            "        if False:\n            # --sweep-chunk N: the sweep's slices run the tools built at pass size N")],
@@ -5866,11 +6882,60 @@ def run_group(name: str, results: list) -> None:
     print(f"{name}: {len(results)} checks, {len(bad)} failed")
 
 
+# the groups of main()'s table (the scenarios), which --skip-groups may name; the groups that run in-process first (parsers, commands, standin), the
+# report and the plants are not skippable
+SKIPPABLE_GROUPS = ("normal", "fail", "timeout", "deaf", "nodevice", "cardlost", "stopfile", "deadline", "rotation", "diskfloor", "guard", "sweep",
+                    "disagree", "telemetry", "build", "buildreal", "internal", "signal", "torn", "disable", "sweepall", "pool", "seeds", "trees",
+                    "items", "chunk", "records", "notes", "resume")
+
+
+def skip_groups_checks(src: str = HERE) -> list:
+    """--skip-groups (2026-10-22): the stage's way of skipping, by name, the groups that cannot be trusted on a loaded Windows desktop. Run as a process on a
+    group that starts no driver: the skipped groups print a SKIP line with the reason and no group line, the exit status is 0, and a name that is not a group is
+    refused with exit 2 before anything runs."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    why = "a reason of the caller's: it is printed beside each name"
+    e = dict(os.environ, CARD_STRESS_TEST_ROOT=ROOT)
+    base = [sys.executable, "-B", "-I", os.path.join(src, "test_card_stress.py")]
+    p = subprocess.run(base + ["--only", "parsers,stopfile,guard,pool", "--skip-groups", "stopfile,guard,pool", "--skip-why", why, "--no-plants"],
+                       capture_output=True, text=True, env=e, timeout=300)
+    names = [ln.split("  SKIP  ", 1)[1].split(" - ", 1)[0] for ln in p.stdout.splitlines() if ln.startswith("  SKIP  ")]
+    c("skip groups: the groups named are SKIPPED, each by name with the caller's reason, in the form the runner counts (a line whose first word is SKIP), "
+      "and not run (no group line of theirs, no driver started); the group that was not named ran; the exit status is 0",
+      p.returncode == 0 and names == ["stopfile", "guard", "pool"] and all(f"  SKIP  {g} - {why}" in p.stdout for g in names)
+      and not re.search(r"^(stopfile|guard|pool): \d+ checks", p.stdout, re.M) and re.search(r"^parsers: \d+ checks, 0 failed", p.stdout, re.M)
+      and "3 skipped" in p.stdout, f"rc {p.returncode}: {p.stdout[-300:]}")
+    q = subprocess.run(base + ["--only", "parsers", "--skip-groups", "stopfile,nosuchgroup", "--no-plants"], capture_output=True, text=True, env=e, timeout=120)
+    c("skip groups: a name that is not a group is refused by name (exit 2) and nothing runs, so a typo cannot skip or run the wrong group",
+      q.returncode == 2 and "nosuchgroup" in q.stderr and "parsers:" not in q.stdout, f"rc {q.returncode}: {q.stderr[-200:]}")
+    return out
+
+
 def main() -> int:
+    if os.environ.get("CARD_STRESS_NESTED_PROBE"):
+        # stage_guard_checks asked the runner for the cardstress stage while a card user was alive: it must have skipped. If it did not, this
+        # suite is the stage's, started inside a suite - it ends here, at once, and the probe goes red
+        print("card-stress test: refusing to run inside a stage probe (CARD_STRESS_NESTED_PROBE)")
+        return 3
     only = None
     if "--only" in sys.argv:
         only = set(sys.argv[sys.argv.index("--only") + 1].split(","))
     want = lambda g: only is None or g in only
+    # --skip-groups a,b --skip-why TEXT: groups that are SKIPPED, by name and with that reason, in the output the runner counts as inner skips. verify/run.sh's
+    # cardstress stage passes the timing groups on Windows (stopfile, guard, pool: see SKIPPABLE_GROUPS). A name that is not a group is refused, so a typo
+    # cannot leave a group running that was meant to be skipped, or skipped that was meant to run.
+    skipped_groups: set = set()
+    if "--skip-groups" in sys.argv:
+        skipped_groups = {g for g in sys.argv[sys.argv.index("--skip-groups") + 1].split(",") if g}
+        unknown = sorted(skipped_groups - set(SKIPPABLE_GROUPS))
+        if unknown:
+            print(f"card-stress test: --skip-groups names {', '.join(unknown)}, which is not one of {', '.join(SKIPPABLE_GROUPS)}", file=sys.stderr)
+            return 2
+    skip_why = sys.argv[sys.argv.index("--skip-why") + 1] if "--skip-why" in sys.argv else "named by --skip-groups"
     tmp = tempfile.mkdtemp(prefix="card-stress-test-")
     env = Env(tmp)
     t0 = time.time()
@@ -5878,7 +6943,7 @@ def main() -> int:
         if want("parsers"):
             run_group("parsers", group_parsers())
         if want("commands"):
-            run_group("commands", group_commands())
+            run_group("commands", group_commands() + skip_groups_checks())
         if want("standin"):
             run_group("standin", standin_alive_checks())
         for gname, fn, posix_only in (("normal", scn_normal, False), ("fail", scn_fail_and_parse, False),
@@ -5899,6 +6964,9 @@ def main() -> int:
                                       ("records", group_records, False), ("notes", group_notes, False),
                                       ("resume", group_resume, False)):
             if not want(gname):
+                continue
+            if gname in skipped_groups:
+                skip(gname, skip_why)
                 continue
             if posix_only and not POSIX:
                 skip(gname, "needs POSIX (SIGTERM can be ignored; Windows has no such signal)")

@@ -893,15 +893,36 @@ python3 hw/card_stress_report.py /data/card-stress-1016     # the report, any ti
   '0 cases checked' and 'CONFORMANCE FAILED: ...' and exits 1) at every third visit of each
   image: a loud failure, never a false pass. `make vectors` writes only ignored paths, so the
   tree's build id stays clean; check it with `sha256sum -c SHA256SUMS` run in `vectors/`. The
-  first long run's clone had it made by the lead before its first `selftest` leg.
-- **Pre-flight, optional**: `bash hw/test-card-stress.sh --no-plants` runs the driver's dry-run
+  first long run's clone had it made by the lead before its first `selftest` leg. **Since
+  2026-10-22 the driver checks it itself** (KL-44): when the selftest leg is in the battery and
+  its tool was built, the build step refuses the run, by name, exit 3, before any leg - `vectors_out_missing`
+  (no `vectors/out`), `vectors_out_mismatch` (a file `vectors/SHA256SUMS` lists is missing or differs; the files
+  are named) or `vectors_out_unheld` (the tracked record `vectors/SHA256SUMS` cannot be read, is malformed or lists nothing, so there is
+  nothing to hold it to). The first says `make vectors`, which regenerates `vectors/out` and writes nothing else (`make -n vectors` shows
+  `--out vectors/out`). The second cannot tell a differing `vectors/out` from a tracked record that was changed (a well-formed line with a wrong
+  hash), and `make vectors` cannot clear a changed record, so it names both remedies, each with its condition: `make vectors` if `vectors/out`
+  is what differs, `git checkout -- vectors/SHA256SUMS` if `git status` shows the record changed. The third says the checkout alone, because
+  `make vectors` writes `vectors/out/SHA256SUMS`, a different file, and would not restore the tracked one.
+  It makes nothing (the driver never writes into the checkout), and it hashes what `sha256sum -c --quiet
+  SHA256SUMS` does, in Python, so the same check runs on the Windows desktop. A battery without the leg (`--quick`,
+  `--legs` without it), a build that disabled it, and a dry run say in the build step why they did not look.
+- **Pre-flight, optional** (and, since 2026-10-22, a stage of the gate: `bash verify/run.sh --only cardstress`, in
+  `--budget gate` and the full census, not in `quick`; it is SKIPPED by name, with the pids, while another process
+  on the system uses the card, which is what the guard refuses on): `bash hw/test-card-stress.sh --no-plants` runs the driver's dry-run
   tests (the verdict parsers on real logs, the scheduler, the failure policy, the guard, the
   sweep's resume, the host pool, the seeds, the trees, the resume per tree class, the items, the pass size, the records, the report, and under POSIX the real `make` in
   a scratch copy) on the box, with no card and no XRT: about 10 minutes under WSL and 11 under Git
   Bash (2026-10-21, with the coverage wave's groups: 644 s under Git Bash and about 600 s under WSL, read off the clock; 2026-10-20, before them: 448 s and 553 s, and a busier desktop made a Git
-  Bash run 636 s), on a desktop other sessions share, and it must be run alone on the host (two drivers at once see each other's
+  Bash run 636 s; 2026-10-22, with parcel P5's checks, 929 checks in 583 s under WSL niced in a built clone (at `542adb53`), and 898 checks in 1,264 s
+  under Git Bash on a loaded desktop (the stage's first run there, at `df20ba19`), 13 of them failed there, ten of those timing checks the PowerShell
+  listing below stalled; with those three groups skipped, as the gate's stage does on Windows, 853 checks in 599 s and none failed (at `a8de4401`)), on a desktop other sessions share, and it must be run alone on the host (two drivers at once see each other's
   stand-ins as card users: the guard scans every process of the WSL distro, or of the Windows desktop, it runs in, so two suites in
-  one distro make each other's drivers refuse to start, `guard_refused`, exit 2 - found by parcel SR2, 2026-10-21). `--no-plants` leaves out the negative controls, which take about
+  one distro make each other's drivers refuse to start, `guard_refused`, exit 2 - found by parcel SR2, 2026-10-21). **On Windows the
+  guard's process listing is a PowerShell call (`list_processes`, which `find_card_users` and the scheduler's runner import), and on a
+  loaded desktop it stalled for about two minutes at a time (MEASURED 2026-10-22, parcel P5: the suite's stopfile scenario failed in the
+  same way with the base's driver code, its log's gap before the next leg 117 s; the stage's Windows run lost 10 timing checks of
+  stopfile, guard and pool to it): a known limit of the driver on Windows, where the nights do not run it, and the reason the gate's
+  `cardstress` stage skips those three groups there, by name (`--skip-groups`).** `--no-plants` leaves out the negative controls, which take about
   one and a half to two times as long as everything else together (the whole suite is 29 minutes under WSL: 1,761 s on 2026-10-21 with 130 plants, parcel DR4's; 27 minutes, 1,636 s, with 115; 22.5 minutes before). The runner and the pythons
   the suite itself starts run with `-B` (`-I` ignores `PYTHONDONTWRITEBYTECODE`); the report script
   the driver starts for itself does not, so a run in the tree under WSL still leaves one git-ignored
@@ -940,14 +961,19 @@ python3 hw/card_stress_report.py /data/card-stress-1016     # the report, any ti
   a sweep wave in flight finishes. A second signal terminates the legs running. Closing the
   terminal does not stop it (SIGHUP is ignored). A stale `STOP` at the start is refused.
 - **Read**: `status.txt` (rewritten after every leg: time, cycle, image, totals by image,
-  consecutive card failures, the last telemetry and the host's load, the sweep's coverage and
+  consecutive card failures, an `images` line (since 2026-10-22: what each image's manifest said, below), the last telemetry
+  and the host's load, the sweep's coverage and
   rates, the host pool's line, a `resume` line when a resume left slices out of its counts, the deadline), `driver.log` (what the driver said), `metrics.jsonl` (the record),
   `logs/` (each leg's log: a passing leg's gzipped, a failing leg's whole), `STOPPED.txt` (why,
   when the policy stopped it), and the report. **What the smoke should print**: for each image
   `leg dt-i on <image>: pass`, and `build step image <name>: ok - ... equal to SHA256SUMS`; at the
   end `card-stress ends: quick_done (exit 0)`. Read `status.txt`'s `telemetry` line (values, or
   "no values parsed" with the error) and its `sweep` rates: those are the two things the
-  dry run could not test against the real tools.
+  dry run could not test against the real tools. **The telemetry line, since 2026-10-22** (KL-39; it printed `None`
+  for the time and the first six values of the sample, which were the first report's rails): `telemetry  <the
+  sample's time> (<what took it>[, <image>]): <up to twelve values>; N more value(s) in metrics.jsonl` - the
+  temperatures first, then the power the card draws, then the rest in the record's order - and an HBM temperature of
+  0 is marked `(no reading)` (below, "The report").
 
 ### The legs, the sweep, the records
 
@@ -980,7 +1006,7 @@ printf it matches.
   images and it runs fifteen on the quad and one on the deep. The eight workloads that compile in
   minutes compile once, on the first visit of the quad, and are read back after.
   **The six routine entries** (the Lotka-Volterra, diode and culture references at fp64 and
-  fp256: `REV8_ROUTINES` in programs/acceptance.py, the section "Owed to the next card day" below)
+  fp256: `REV8_ROUTINES` in programs/acceptance.py, the section "The math library's routine entries in the revision-8 set" below)
   have nothing to compile or to cache: their image and bank are committed files under
   programs/systems/compiled-tangent/, which `--images` does not touch, so they never add the
   compile allowance to the leg's timeout. They need libcft's shared library for the mark probe,
@@ -1196,15 +1222,43 @@ study is per RTL tree, with the three images reported separately beneath it.
   uncommitted changes is a class of its own ("modified"). A run that recorded no tree (every run before
   2026-10-20) is kept apart by its commit, as "not recorded". A slice is counted under the **last `run_start`
   before it** in its file, so a run resumed from another checkout counts what follows under that checkout's tree.
+- **The telemetry section's HBM temperature** (since 2026-10-22, KL-32): the card's FPGA HBM temperature reads 0 in most
+  samples - 670 of the 865 of the 2026-10-19 run, in 23 runs of 14 to 45 consecutive samples between 23 runs of readings (the first one
+  sample long, the others 7 to 11), the readings from 27 to 35 (MEASURED in that run's metrics.jsonl) - and the report's range for it was
+  that mixture, 0 to 35. A 0 from an HBM temperature is now taken as no reading
+  (BELIEVED: a powered card's HBM is not at 0 degrees C, the cause is not known and the reading is undocumented), counted by name
+  (`NO READING: <label> read 0 in N of M samples`) and left out of the label's samples, range and mean; the summary has
+  `telemetry.no_reading`. Only that label: the rails that read a flat 0 in every sample are not a mixture and are reported as they were.
 - **Several runs:** `python3 hw/card_stress_report.py RUN_DIR --also DIR [--also DIR ...]` adds other runs'
   directories to that section **alone** (the sections before it are RUN_DIR's): coverage accumulated over runs,
   each slice under its own run's tree, so two trees are never summed. A directory with no `metrics.jsonl` is
   refused by name.
-- **What it cannot know.** The tree is the one the driver RUNS FROM. It is the tree the images were built from
+- **What it cannot know, and what it checks.** The tree is the one the driver RUNS FROM. It is the tree the images were built from
   only if they were: the three rev8 images were, from rtl 44b963dd (READ, docs/VALIDATION.md), and the stress
   run's commit f0693b2 has that rtl tree (MEASURED, `git rev-parse f0693b2:rtl`). Run from a checkout whose rtl/
   is the images' (the manifest's `commit:` line gives the images': `git rev-parse <commit>:rtl`); the images' own
-  identity is their SHA-256, in every leg and in `run_start`. The tree hash covers rtl/ alone, and the three images
+  identity is their SHA-256, in every leg and in `run_start`. **Since 2026-10-22 the driver reads the manifests** (KL-42): at the
+  start it reads `<name>.manifest.txt` beside each `<name>.xclbin` (what `hw/rebuild-2022.sh` writes; a staged pair keeps its
+  pair of names; the manifest's `artifact:` line names the build's own file, `cft_hw.xclbin`, so the `sha256:` line is what ties the
+  two) and records, in `run_start` beside each image's SHA-256, `manifest`: its `state`, the manifest's `sha256`, `commit`, `tree`
+  and `bitstream_sources`, the file's name, and `rtl`, the rtl tree of that commit in this checkout (`git rev-parse <commit>:rtl`).
+  **Refused**, by name, at the build step, exit 3, before any leg: `sha256_mismatch` (the manifest's `sha256:` is not the image's: it
+  is another image's manifest, or has none), `rtl_differs` (the commit's rtl tree is not the checkout's: every tile slice would be
+  filed under a tree the image is not) and `rtl_modified` (the manifest says rtl/ was modified when the image was built -
+  `bitstream_sources: MODIFIED` naming a file under rtl/, or a DIRTY tree with no scoped line; MODIFIED naming only hw/ files
+  leaves the rtl tree the commit's and is judged on the trees). **Flagged**, not refused - named in the build step (`NOT CHECKED`), in
+  an event `image_manifest_unchecked`, in `status.txt`'s `images` line and in the report's header, and the run goes on:
+  `missing` (no manifest beside the image), `commit_unknown` (a commit this checkout does not hold, or no whole commit: a shallow
+  clone cannot show a difference, and a difference it cannot show is not one) and `unverified` (the manifest does not say whether rtl/
+  was its commit's, its `bitstream_sources:` and `commit:` lines name different commits, this checkout's own tree cannot be read, or
+  its rtl/ has uncommitted changes, so that HEAD's tree is not what runs from it - coverage from such a checkout is already kept apart
+  as `+modified`). Why a flag and not a refusal: those are an absence, not a
+  contradiction, and a night is not lost to a file left behind in a copy; the state before this check was the same absence. A dry run's
+  stand-in images have none: state `dry_run`, no flag, no event. **What coverage is keyed by does not change**: `tree.rtl`, the
+  checkout's, as before; the manifest is what says whether that is true of the images. The three rev8 manifests (copied from the
+  build host by the lead, 2026-10-22; `hw/card_stress_fixtures/manifest-quad.txt` and its two siblings, which the suite reads) all say commit
+  688b6530e3af, `tree: clean`, `bitstream_sources: rtl/ and hw/ identical to` it, and each `sha256:` is the hash the driver's table holds
+  for that image (the suite holds them equal); that commit's rtl tree is 44b963dd, main's (READ by the lead, 2026-10-22). The tree hash covers rtl/ alone, and the three images
   were built with different generics (the quad's EN_AUGADD=0, the deep's SEQ_SCRATCH_D=8192), which the images
   beneath the tree keep apart. Until 2026-10-21 the driver did not track trees when it resumed (`--resume` went on
   from the whole file's coverage, so a resume on a new host/ tree planned no host item: night 2 of the stress run,
@@ -1227,7 +1281,10 @@ both" - the class-aware planner in the driver, and the coarse key, the whole hos
 - **An old run.** A run before 2026-10-20 recorded its commit and no tree. Where the checkout the driver runs from holds
   that commit and the run recorded `dirty: false`, its trees are derived (`git rev-parse COMMIT:rtl` and `COMMIT:host`; the
   study found the recorded and the derived trees equal where both exist, and a check holds that, with git's answer stood in
-  and, when CARD_STRESS_RESUME_RUN names the lead's two-night run, on that file). A tree that was
+  and, when CARD_STRESS_RESUME_RUN names a directory holding a real file of the lead's stress run, on that file: since
+  2026-10-22 the check derives what it expects from the file itself - the run_starts, the finished slices, the classes' counts and
+  first gaps, the unknown-class tally - and holds the figures measured on his two nights' and three nights' files exactly only for
+  those files, by sha256; until then it held the two-night file's own numbers and failed on every later night). A tree that was
   not clean is not the commit's, and a commit this checkout does not hold gives none: those slices are of an unknown class.
   A run that recorded a tree whose commit is here is held to it: a recorded hash that is not git's for its commit is
   unknown too. **A compiler line is never derived**: the host slices of an old run are of an unknown host class, so a
@@ -1377,7 +1434,8 @@ tree's (`git archive REV host | tar -x -C DIR`). The driver's side is `hw/test-c
 
 ### The class-level items for the 64-bit rounding operations: what to run, what it costs, what it must print
 
-(Parcel CL, 2026-10-20. This section is CL's alone; parcel HC may add one of its own, for division and square root.)
+(Parcel CL, 2026-10-20. This section is CL's alone: the hard-case division and square-root items, parcel HC's, have the section after it,
+"The hard-case division and square-root items", and the driver's side of both, parcel DR3's, is "The coverage wave in the driver", below.)
 
 The 64-bit operand spaces (2^64 encodings, 2^128 pairs) are not swept; what a sweep can reach is every
 **class** of operand, under the structure `docs/studies/SWP-A-coverage.md` section 4.3 calls the second
@@ -1448,17 +1506,24 @@ not cases (the software backend has no lanes, so there it is only work). Build w
 | item (per attribute) | cases a attribute | reaches the tile | software backend, one process, the whole item (MEASURED) | on the card, one tile (COMPUTED) |
 |---|---|---|---|---|
 | `conv64to32-class` (rne rtz rdn rup) | 136,192 | no (host) | 0.03 s | the stress run's rates, 5.6 to 6.2 M cases/s: 0.022 to 0.024 s |
-| `rint64-class` (rne rtz rdn rup rmm) | 143,360 | yes | 0.5 s | lane-exact, 8 passes of about 260 microseconds a call and 4 calls an index: **about 5 min**; in batches (`-DCLS_BATCH=4092`) at 1.87 to 1.97 M cases/s: 0.073 to 0.077 s |
+| `rint64-class` (rne rtz rdn rup rmm) | 143,360 | yes | 0.5 s | lane-exact, 8 passes of about 260 microseconds a call and 4 calls an index: **about 5 min** was the estimate, and the card smoke below measured about 4 ms an index, so **about 2.5 min**; in batches (`-DCLS_BATCH=4092`) at 1.87 to 1.97 M cases/s: 0.073 to 0.077 s |
 | `cvtto64-class` (rne rtz rdn rup rmm) | 91,005 / 91,484 / 85,141 / 91,478 / 90,986 compared, with 72,067 / 71,588 / 77,931 / 71,594 / 72,086 skipped | no (host) | 0.02 s | the stress run's rates, 4.7 to 5.0 M cases/s: 0.018 to 0.019 s |
 | `cvtfrom64-class` (rne rtz rdn rup) | 50,923 | no (host) | 0.01 s | 7.4 to 7.6 M cases/s: 0.007 s |
-| `scaleb64-class` (rne rtz rdn rup) | 290,592 | yes | 0.14 s | lane-exact, about one pass of 280 microseconds a call and 4 calls an index: **about 1.4 min**; in batches at 13.5 to 13.8 M cases/s: 0.021 to 0.022 s |
+| `scaleb64-class` (rne rtz rdn rup) | 290,592 | yes | 0.14 s | lane-exact, about one pass of 280 microseconds a call and 4 calls an index: **about 1.4 min** was the estimate, and the card smoke below measured 0.63 to 0.70 ms an index, so **45 to 51 s**; in batches at 13.5 to 13.8 M cases/s: 0.021 to 0.022 s |
 
 The host rates are the 2026-10-16 to 19 run's per-job medians on the quad (`docs/studies/swp-a/stress-final-item-rates.txt`);
 a host item is a CPU job, so the software column is the same test as the card's. The tile
 items' lane-exact figures use the study's per-pass cost (`tile_counts.out` T5, BELIEVED: a pass is
-dominated by the call, not the 1 to 4 elements) and are the right order, not a prediction: on all five
-attributes `rint64-class` is about 25 minutes of one tile and `scaleb64-class` about 6, no single item over about five
-minutes, and none has run on a card yet. `cvtto64-class`'s compared cases are
+dominated by the call, not the 1 to 4 elements) and were the right order, not a prediction: about twice what the card gave. The
+lead's card smoke ran slices of both (docs/VALIDATION.md, 2026-10-20, "the coverage wave, closed": MEASURED, amd-arc-box, tile 1 of
+the quad, rev8, main aa62f14): `rint64-class` [0, 2000) in 8.2 and 8.5 s and `scaleb64-class` [0, 4000) in 2.5 and 2.8 s, each with
+0 value and 0 flag mismatches and the card's counts the software backend's. Scaled to the whole item (COMPUTED, linear in indices with
+the start-up left in the per-index figure, so an UPPER BOUND; the scaling is done under "The coverage wave in the driver", below, with
+the hard-case items') that is 4.1 to 4.25 ms an index for `rint64-class`, 147 to 152 s, **about 2.5 minutes an attribute and at most
+12.7 for the five**, and 0.63 to 0.70 ms an index for `scaleb64-class`, 45 to 51 s an attribute and at most 3.4 minutes for the
+four: no class item takes more than about 2.5 minutes of a tile, and the 25 and 6 minutes this paragraph gave were about twice
+too high. What the record has of the card, up to docs/VALIDATION.md's entries of 2026-10-21 (READ), is those slices, run by hand; it holds no
+whole class item on a card. `cvtto64-class`'s compared cases are
 the tool's counts on the software backend, each equal to an independent count made in Python from the
 rounding rule alone, so a driver can hold the whole item to them.
 
@@ -1866,7 +1931,8 @@ nothing changes: no `batch` or `chunk` in any record, none in `run_start` or set
 holds them:** (i) random `scaleb32` and `scaleb64` round their cases up by whole batches (a batch of n operands makes n x 17 or
 x 27 cases and takes that many off the count; 100,000 gives 139,264 at 4096 and 278,528 at 16384, MEASURED, the real tool, and
 442,368 for scaleb64), so with `--sweep-chunk` a random scaleB slice is held to the cases its BATCH gives
-(`expected_cases`, recorded; the default run has never held a random slice to a count and still does not); (ii) random
+(`expected_cases`, recorded; a default run did not hold any random slice to a count until 2026-10-22: "A random slice is held to its
+count", below); (ii) random
 `cvtfrom32` and `cvtfrom64` draw n operands for each of four source types in turn inside a batch, so the same draw goes to another
 type at another BATCH (MEASURED by the sabotage control's operand list: 0xce824531 is an i32 operand at 4096 and a u32 operand at 16384);
 CK's reading of every other random driver is CHECKED (READ, drv_*: each draws an element at a time in order, so its operand
@@ -1883,6 +1949,29 @@ has no passes to amortise; CK measured CL's class modes at 4.5 s with the defaul
 compares flags over more operands: `--sweep-chunk` is for the tile items, and applies to the pool's slices too, since the flag
 names the tools of the sweep. The signed record has no field for the pass size (in either version): a stream of a
 chunked run cannot be told from a default run's by its record, only by metrics.jsonl.
+
+**A random slice is held to its count (since 2026-10-22, KL-23).** In a default run no random slice was held to the count it was
+asked: a tool that stopped short counted as covered if it printed one case (only random scaleB under `--sweep-chunk` was held). Now
+every random slice is, where the tool's counting is known (`Item.random_cases`, one rule for the card's slices and the host pool's;
+`expected_cases` is recorded in the slice's `sweep` block, as for a chunked scaleB), and a slice with another number of cases is a
+`parse_error` naming both, not covered, served again from the same seed. READ in host/tools/divsqrt_soak.c and clause5_soak.c and MEASURED
+with the tools as built at f707fa3b on the software backend (counts 1, 4095, 4096, 4097, 10,000 and 20,000; a real log of each op, scaleB's two (`chunk-scaleb32-c16384.txt` and `chunk-scaleb64-c16384.txt`, at 100,000) included, is in hw/card_stress_fixtures - `rnd-*.txt`, at 10,000 (three batches at
+4096) and the chunked tools' at 20,000, and for `div32` and `conv32to64` the older `soak-div32.txt` and `c5-conv32to64.txt`, at 200,000 - and the
+suite holds the table to them and the stand-in's own table to the same):
+
+| the tool's cases for a count | ops |
+|---|---|
+| the count | `div32 div64 sqrt64 rint64 conv64to32 conv32to64 rem32 rem64 logb64 class64` |
+| four times the count (a batch draws it for each of four source types) | `cvtfrom32 cvtfrom64` |
+| the count and eight (`next_edges64`'s eight cases, once a slice) | `nextup64 nextdown64` |
+| the count rounded up by whole batches of 17 or 27 exponents each, which depends on BATCH (4096 in a default run) | `scaleb32 scaleb64` |
+| **not held**: the in-range lanes of four targets, a function of the draws (about 2.3 a count for `cvtto32` and 2.0 for `cvtto64`) | `cvtto32 cvtto64` |
+
+**A known limit:** the two `cvtto` ops keep the rule they had, more than zero cases. Their log also says `skipped N lane-target pairs
+outside the target range`, and cases + skipped is four times the count (MEASURED: 22,865 + 17,135 and 20,150 + 19,850 at 10,000), which
+would hold them; `parse_soak` does not read that line (it is an import of the scheduler's runner, and reading it takes a new parameter), so
+it is left. Counts are independent of BATCH for every op but scaleB (a chunked `cvtfrom64` at 16384 and a `nextup64` and a `div64` were
+run too). A new random op is red in the suite until it is given a figure or named as drawn.
 
 **Known limits** (docs/VALIDATION.md, the entries for DR3 and SR2): a host-pool slice of a run that recorded no `host/` tree is not
 signable (above), and the real 2026-10-19 file holds no host-pool slice at all; python/figure_extracts.py's
@@ -1963,7 +2052,7 @@ was written); or that a sweep disagrees only when the tile is wrong (the oracle 
 a disagreement is kept with its operands, and re-running the slice on the software backend,
 which the driver does not do, is the next step).
 
-## Owed to the next card day (added 2026-10-19): the math library's routine entries in the revision-8 set
+## The math library's routine entries in the revision-8 set (added 2026-10-19; the card leg ran on rev8q on 2026-10-19)
 
 M1's build, item 6 (docs/ROADMAP.md, "The math library: experiment E1, then M1's build and M2 to
 M4"): STATUS[6] and the lane byte on a structured argument, and a routine case in the acceptance
@@ -1971,7 +2060,14 @@ sets. Parcel MA built the software side (docs/VALIDATION.md, 2026-10-19): `progr
 --set rev8` holds six routine entries after its ten workloads - the committed Lotka-Volterra
 (exp), diode (expm1, log1p) and culture (exp2, log, log2) references at fp64 and fp256, each with
 a structured lane on every tile that the routine marks. The driver's docstring ("The routine
-entries") is the definition. **Nothing here has touched the card or amd-arc-box.**
+entries") is the definition. **The card leg has run: on rev8q on amd-arc-box, 2026-10-19** (the
+lead's; docs/VALIDATION.md, "M1's build, seventh wave, closed ... item 6's card leg passed on rev8q",
+built at b665ca5): the set leg printed `acceptance rev8: 6 of 6 PASS ... 118 checks ok, 0 failed, 57
+s`, the mark probe opened the card (`xrt, 4 tiles, 4096 slots a lane`), on every entry the structured
+lanes carry bit 7 (byte 0x90) in segment 0 with STATUS 0x40 and no other lane or segment does, and with
+`--golden all` it printed `6 of 6 PASS ... 124 checks ok, 0 failed, 530 s` (MEASURED, READ in that
+entry). What follows is what ran and what it printed, kept so that it can be run again - on another
+image, or after a change to the tile, the library or the six.
 
 Four facts that shape the commands:
 - **Quad only.** The rule puts all six on `u50-rev8-quad`, read from each image's own words
@@ -2063,7 +2159,7 @@ a segment (256 lanes, ten steps) is BELIEVED well under a second.
   it): `python3 programs/acceptance.py --set rev8 --write --images /data/card-stress-rev8images`
   on the software backend (no `--device`), then `git diff --stat programs/acceptance-rev8.json`
   must print nothing. All sixteen entries; the desktop took 558 s, the box BELIEVED 10 to 15 minutes.
-- **Not on this day:** rev8d (the command above selects no entry there).
+- **Not run, and not runnable:** rev8d (the command above selects no entry there).
 
 ## What to record
 

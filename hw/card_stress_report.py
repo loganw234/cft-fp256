@@ -70,6 +70,14 @@ be computed is "-" or "n/a", never 0. Choices a reader could otherwise take anot
     tables ("rint64-class-rne [35,840 indices]") and its 100% is of its own indices; a class-level pass is a claim at the class level
     (L2, PLAUSIBLE and not proved) and a hard-case pass a space of constructed operands, and the report says both under its table.
     A record of an item the catalog does not name is counted over 2**32, as every item was.
+  - NO READING (since 2026-10-22, KL-32). The U50's FPGA HBM temperature reads 0 in most samples of a long run (670 of 865 on 2026-10-19,
+    between runs of readings from 27 to 35). A 0 from an HBM temperature is taken as no reading (card_stress_lib.no_reading), counted by
+    name in the telemetry section ("NO READING: ... read 0 in N of M samples") and left out of that label's samples and range; every other
+    label, a rail that reads a flat 0 included, is reported as it always was. The summary's `telemetry.no_reading` has the counts.
+  - THE IMAGES' MANIFESTS (since 2026-10-22, KL-42). The header's images line says, for a run_start that recorded it, what each image's
+    manifest gave: the commit it was built at and that commit's rtl tree when it is this checkout's, that it was NOT CHECKED (no
+    manifest, a commit the checkout lacks), or that the driver REFUSED it (run_start is written before the build step that refuses, so a
+    run that stopped there has its reason in this line). A run_start from before records none, and its line is what it was.
   - PASS SIZE (with `--sweep-chunk`). A sweep slice carries `sweep.batch`, the BATCH its tool ran at (a slice with none ran the default
     tools' 4096); an item with a slice at another batch gets a line saying how many ran at each, since the tools compare flags per batch,
     and random coverage by tree is a row per (item, batch): a chunked item's slices are never summed with the default tools'. A run with
@@ -95,9 +103,9 @@ from typing import Any, Dict, List, Optional, Tuple
 _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)            # python -I does not put the script's directory there
-from card_stress_lib import (CPU, DEFAULT_BATCH, EXH, HOST, TILE, covered, first_gap, iso,  # noqa: E402
-                             merge_intervals, read_records, reach_of, record_batch, slice_reach, sweep_coverage, sweep_items,
-                             tree_key)
+from card_stress_lib import (CPU, DEFAULT_BATCH, EXH, HOST, TILE, covered, first_gap, is_hbm_temperature, iso,  # noqa: E402
+                             manifest_brief, merge_intervals, no_reading, read_records, reach_of, record_batch, slice_reach,
+                             sweep_coverage, sweep_items, tree_key)
 
 # What the catalog says of each item: the space its coverage is counted over (2^32 encodings for the fp32-operand items, the
 # indices of a mode's own space for the hard-case and class-level items) and what a pass claims ("exhaustive", "hard", "class",
@@ -358,8 +366,11 @@ def _header(objs: List[Dict[str, Any]], by_type: Dict[str, List[Tuple[int, Dict[
             images = {}
             for name, d in s["images"].items():
                 d = d if isinstance(d, dict) else {}
+                mf = d.get("manifest") if isinstance(d.get("manifest"), dict) else None
                 images[str(name)] = {"sha256": _str(d.get("sha256")), "bytes": _int(d.get("bytes")),
-                                     "tiles": _int(d.get("tiles"))}
+                                     "tiles": _int(d.get("tiles")),
+                                     "manifest": ({"state": _str(mf.get("state")), "commit": _str(mf.get("commit")),
+                                                   "rtl": _str(mf.get("rtl")), "file": _str(mf.get("file"))} if mf else None)}
             break
 
     return {
@@ -511,6 +522,7 @@ def _telemetry(by_type: Dict[str, List[Tuple[int, Dict[str, Any]]]]) -> Dict[str
     tel = by_type.get("telemetry", [])
     dev: Dict[str, List[Tuple[Any, int, Any]]] = {}
     host: Dict[str, List[Tuple[Any, int, Any]]] = {}
+    zeros: Dict[str, List[int]] = {}       # an HBM temperature's label -> [samples that read 0, samples that read at all]
     with_values = 0
     errors: Counter = Counter()
     failed = 0
@@ -523,6 +535,14 @@ def _telemetry(by_type: Dict[str, List[Tuple[int, Dict[str, Any]]]]) -> Dict[str
             n = _num(x)
             if n is not None:
                 got = True
+                if is_hbm_temperature(label):
+                    # KL-32: this sensor reads 0 for no reading (card_stress_lib.no_reading): counted by name, and left out of the
+                    # label's statistics, whose range was that artifact (0 to 35 over a run whose readings were 27 to 35)
+                    zc = zeros.setdefault(str(label), [0, 0])
+                    zc[1] += 1
+                    if no_reading(label, n):
+                        zc[0] += 1
+                        continue
                 if ep is not None:
                     dev.setdefault(str(label), []).append((ep, i, n))
         with_values += got
@@ -557,6 +577,7 @@ def _telemetry(by_type: Dict[str, List[Tuple[int, Dict[str, Any]]]]) -> Dict[str
         "by_when": dict(Counter(_str(r.get("when")) or "-" for _, r in tel)),
         "errors": [{"message": m, "count": c} for m, c in sorted(errors.items(), key=lambda kv: (-kv[1], kv[0]))],
         "labels": labels, "labels_total": len(labels),
+        "no_reading": [{"label": k, "zero": z, "of": t, "kept": t - z} for k, (z, t) in sorted(zeros.items()) if z],
         "host": [_label_stats(k, host[k]) for k in sorted(host, key=host_key)],
         "first_raw": first_raw[:RAW_CHARS] if first_raw is not None else None,
         "first_raw_chars": len(first_raw) if first_raw is not None else None,
@@ -1144,7 +1165,8 @@ def _r_header(S: Dict[str, Any]) -> List[str]:
                               + (" (differs between run_start records)" if f["differs"] else "")))
     if h["images"]:
         L.append(_kv("images", "; ".join(
-            f"{n} {_g(i['tiles'])} tiles sha256 {(i['sha256'] or '-')[:12]}" for n, i in h["images"].items())))
+            f"{n} {_g(i['tiles'])} tiles sha256 {(i['sha256'] or '-')[:12]}"
+            + (f", {manifest_brief(i['manifest'])}" if i.get("manifest") else "") for n, i in h["images"].items())))
     return L
 
 
@@ -1239,6 +1261,11 @@ def _r_telemetry(S: Dict[str, Any]) -> List[str]:
         L.append(f"telemetry: {n} samples, {T['with_values']} with values, {T['without_values']} without, "
                  f"{T['failed']} marked ok=false")
     L.append("  by when: " + ", ".join(f"{k} {c}" for k, c in T["by_when"].items()))
+    for nr in T.get("no_reading", []):
+        L.append(f"  NO READING: {nr['label']} read 0 in {nr['zero']} of {nr['of']} samples. A 0 from this sensor is taken as no "
+                 f"reading, not 0 degrees (BELIEVED: a powered card's HBM is not at 0, and the zeros come in runs between runs of "
+                 f"readings), so the zeros are left out of its range below, "
+                 + (f"which is of the other {nr['kept']} sample(s)" if nr["kept"] else "and it has no range: every sample read 0"))
     if T["failed"]:
         L.append(f"  samples with ok=false: {T['failed']}; errors:")
         for e in T["errors"]:

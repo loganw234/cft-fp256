@@ -27,7 +27,8 @@ failure policy meets each kind of failure:
           mismatch    (soak) a disagreement with its operands, exit 1
           short       (soak, the -all and -wide modes) a slice one ENCODING short: the tool ran
                       [lo, hi - 1) and says so, its counts consistent, exit 0
-          shortcase   (soak, the same modes) the right encodings and ONE CASE too few, exit 0
+          shortcase   (soak, the same modes) the right encodings and ONE CASE too few, exit 0; (soak, a random op) ONE CASE fewer
+                      than the real tool prints for the count asked, exit 0
           badenc      (soak, the same modes) the right cases, and an encodings clause ONE TOO FEW: the tool's own account of
                       what it covered contradicts the job, though its case count is the job's, exit 0
           skipoff     (soak, the hard-case and class-level modes) one skipped slot more and one case fewer than the mode's
@@ -126,6 +127,26 @@ def scaleb_cases(count: int, batch: int, ln: int) -> int:
         total += n * ln
         left = left - n * ln if left > n * ln else 0
     return total
+
+
+# What each other RANDOM op's tool prints as `cases` for a count: (cases a count, cases added to every slice). The tools' own counting, READ
+# in host/tools/divsqrt_soak.c (run_batch: cases += n) and host/tools/clause5_soak.c (each drv_*; drv_cvtfrom's four source types; drv_next64's
+# eight edge cases), and MEASURED with them as built at f707fa3b on the software backend at counts 1 to 20000 (hw/card_stress_fixtures/rnd-*.txt).
+# This table is the stand-in's OWN, as scaleb_cases is: hw/card_stress_lib.py's RANDOM_CASES says the same, and the suite holds both to the
+# real logs, so neither is the other's source. cvtto32 and cvtto64 are not here: the real tools print about 2.3 and 2.0 cases a count (the in-range
+# lanes of four targets), the driver holds them to more than zero, and this prints the count.
+RANDOM_PER = {"div32": (1, 0), "div64": (1, 0), "sqrt64": (1, 0), "rint64": (1, 0), "conv64to32": (1, 0), "conv32to64": (1, 0),
+              "rem32": (1, 0), "rem64": (1, 0), "logb64": (1, 0), "class64": (1, 0), "cvtfrom32": (4, 0), "cvtfrom64": (4, 0),
+              "nextup64": (1, 8), "nextdown64": (1, 8)}
+
+
+def random_cases(op: str, count: int, batch: int) -> int:
+    """A random slice's cases as the real tool prints them: random scaleB's at its BATCH (scaleb_cases), the table above for the rest, the
+    count for an op that has no figure (cvtto32, cvtto64)."""
+    if op in SCALEB_LIST:
+        return scaleb_cases(count, batch, SCALEB_LIST[op])
+    per = RANDOM_PER.get(op)
+    return count if per is None else count * per[0] + per[1]
 
 
 def chunk_of(argv0: str) -> int:
@@ -414,9 +435,9 @@ def main() -> int:
                         f"(invalid table is model-pinned)")
                 tail = f", {enc - (1 if do == 'badenc' else 0)} encodings, {skipped} skipped"
         else:
-            cases = int(real[2], 0)
-            if op in SCALEB_LIST and chunk:
-                cases = scaleb_cases(cases, chunk, SCALEB_LIST[op])      # the chunked tools' BATCH, which sets the rounding
+            # a random op: the cases the real tool prints for the count (random_cases above); the chunked tools' BATCH sets scaleB's rounding,
+            # and the default tools' is 4096 (before 2026-10-22 a default tool's scaleB printed the count here, which no tool does)
+            cases = random_cases(op, int(real[2], 0), chunk or 4096) - (1 if do == "shortcase" else 0)      # shortcase: ONE CASE too few
             mode = real[4] if len(real) > 4 else ("rne" if op == "conv32to64" else "-")
         art = os.environ.get("CFT_SOAK_ARTIFACT")
         if do == "software":

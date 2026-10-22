@@ -11,6 +11,9 @@
 #
 #   bash hw/test-card-stress.sh                 # everything: about 29 minutes under WSL (2026-10-21, niced, 1,761 s with 130 plants; 1,636 s with 115,
 #                                               # on a desktop other sessions share; process starts are the cost)
+#   bash hw/test-card-stress.sh --no-plants --skip-groups stopfile,guard,pool --skip-why "TEXT"
+#                                               # SKIP those groups, by name, with TEXT printed beside each (what verify/run.sh's cardstress stage
+#                                               # does on Windows, where the guard's process listing can stall for minutes on a loaded desktop)
 #   bash hw/test-card-stress.sh --no-plants     # the checks without the negative controls: about 10 minutes
 #                                               # under WSL, 11 under Git Bash (2026-10-21)
 #   bash hw/test-card-stress.sh --only parsers,commands     # seconds
@@ -28,8 +31,14 @@
 # --records and the campaign's space, `notes` four verifiers' notes (`standin` is one of them, run alone by its
 # plants). `notes` skips its figure_extracts check, by name, unless CARD_STRESS_METRICS names a finished run's
 # metrics.jsonl (the stress copy the committed figures come from). `resume` (parcel DR4, 2026-10-21): --resume counts coverage per
-# tree class; its last check, the planner over the lead's real two-night file, is skipped by name unless CARD_STRESS_RESUME_RUN names
+# tree class; its last check, the planner over a real file of the lead's stress run (his two nights', his three nights', or a later night's: it derives
+# what it expects from the file, and holds the figures measured on his two files only for those, by sha256), is skipped by name unless CARD_STRESS_RESUME_RUN names
 # that run's directory (the one holding metrics.jsonl) and the checkout holds its first commit, 881bbcb.
+# Since 2026-10-22 (parcel P5, the driver before the nights run it): `build` also holds the images' manifests (what the driver reads beside
+# each xclbin: refused or flagged, by name) and vectors/out (refused at the start when the selftest leg would read it), `telemetry` the
+# status file's telemetry line and the report's HBM zeros, `chunk` every random slice held to its count in a default run, and `buildreal`
+# copies only the files git tracks (a built host/ no longer fails it). `bash verify/run.sh --only cardstress` runs this with --no-plants as a
+# stage of the gate; it is skipped by name there while another process on the system uses the card (the guard's refusal, guard_refused).
 set -uo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 PY=${PYTHON:-}

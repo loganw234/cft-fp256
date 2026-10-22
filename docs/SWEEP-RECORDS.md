@@ -110,7 +110,13 @@ does not record it:
   writes beside the xclbin (`sha256:`, `commit:`, `bitstream_sources:`, READ),
   and recording `git rev-parse <commit>:rtl` of a full clone; or a table in the
   repository from image SHA-256 to commit. Neither is done, and nothing here
-  computes the hash from a checkout.
+  computes the hash from a checkout. (The driver's own `run_start` does the
+  first since 2026-10-22, parcel P5, KL-42: it reads each image's manifest and
+  records, in `images.<name>.manifest`, the manifest's `commit` and that
+  commit's rtl tree in the checkout, and refuses an image whose tree is not
+  the checkout's - hw/card_stress.py, docs/CARDDAY.md, "The host pool, the
+  seeds, and coverage per tree". The signed record still carries none of it,
+  so `subject.rtl` is still absent.)
 - `tool.build_id`, `.cc`, `.flags`: the `build` record holds cft-segrun's build
   id, not the soak tools', and no compiler or flags. (A version-2 host record
   carries the compiler's line, `subject.cc`, which `run_start` has recorded
