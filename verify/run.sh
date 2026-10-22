@@ -657,6 +657,12 @@ stage golden "golden-model pytest suite (the definition of correct)" -- \
 # on what that crash leaves: reproduced in scratch on 2026-09-29, it
 # printed "5 sets, 3200 cases, all matching" and exited 0, and so did
 # cpp-api-test and remote's WebSocket leg; only node and wasm refused it.
+# Since 2026-10-22 (KL-196) it asks a fourth thing: was the directory made
+# by this tree's model (vectors/out/MODEL, the generator's stamp: the
+# digest of python/cft_golden/*.py and vectors/gen_vectors.py), because a
+# whole directory of the old model's sets is replayed against a library
+# that lacks a model change, and passes. Not whole in that sense is
+# regenerated, like the rest.
 VECTOR_ARGS=(--rounding rne rtz rdn rup rmm)
 
 sha256_holds() {  # in the directory: check its SHA256SUMS, every line
@@ -705,7 +711,19 @@ vectors_whole() {  # <dir>: prints what it found; returns 1 unless whole
     echo "$lbl/SHA256SUMS does not hold: $(printf '%s\n' "$out" | sed -n '1,6p' | tr '\n' ';')"
     return 1
   fi
-  echo "$lbl/SHA256SUMS names all $nwant sets vectors/SHA256SUMS names, and all $(grep -c . "$d/SHA256SUMS") it names hold"
+  # Whole is not current (KL-196): a directory the generator finished holds
+  # its own sets and passes the three tests above after the model it was
+  # made by has changed, and a replay of it checks the library against the
+  # old model. The generator stamps each directory with the digest of the
+  # model's source it ran under (vectors/out/MODEL) and says whether that
+  # is this tree's; the tracked vectors/SHA256SUMS cannot be the comparison,
+  # which holds `make vectors`' counts where the runner generates at the
+  # generator's own (KL-198).
+  if ! out=$(PY "$ROOT/vectors/gen_vectors.py" --check-model "$d" 2>&1); then    # VECTORS-WHOLE-MODEL
+    echo "$lbl is whole but was not made by this tree's model: $(printf '%s\n' "$out" | tail -n 1)"
+    return 1
+  fi
+  echo "$lbl/SHA256SUMS names all $nwant sets vectors/SHA256SUMS names, and all $(grep -c . "$d/SHA256SUMS") it names hold; $(printf '%s\n' "$out" | tail -n 1)"
 }
 
 do_vectors() {
@@ -818,7 +836,7 @@ ensure_vectors() {
     echo "ensure_vectors: $msg"
     return 0
   fi
-  echo "ensure_vectors: not a whole set, so it is regenerated - $msg"
+  echo "ensure_vectors: not reusable as it is, so it is regenerated - $msg"
   if ! PY "$ROOT/vectors/gen_vectors.py" --out "$d" "${VECTOR_ARGS[@]}"; then
     echo "ensure_vectors: FAILED - the generator exited nonzero, so vectors/out is still not a whole set and nothing here replays it"
     return 1

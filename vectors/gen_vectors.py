@@ -175,6 +175,26 @@ sets and no sign that it had stopped, and verify/run.sh reused them as
 though they were the whole census; the runner now replays no directory
 whose record is missing, leaves out a set the profile names, or does not
 hold.
+
+Beside the record a run writes a second, `MODEL` (KL-196, 2026-10-22): the
+digest of the model's and this generator's source bytes (model_digest, the
+one `--cache` keys on) as it stood when the run began, one line of 64 hex
+digits. A record says the sets are the bytes a finished run wrote; it
+cannot say which model wrote them, and a directory made before a change to
+python/cft_golden/*.py or to this file holds the old model's sets and
+passes every test of the record. `--check-model DIR` compares DIR's stamp
+with the tree's digest, changing nothing, and exits 1 saying why when they
+differ or the stamp is missing or malformed; verify/run.sh's vectors_whole
+asks it, so ensure_vectors regenerates such a directory. A run removes the
+stamp before it writes a set, as it does the record, and writes it just
+before the record, which stays the last file. The record does not list it:
+the record is the sets alone, held line for line to vectors/SHA256SUMS
+(`sed 's#  #  out/#' SHA256SUMS | diff vectors/SHA256SUMS -`), and every
+reader in this tree takes a set by name or by `.jsonl`. What the stamp does not
+cover: the counts a run was given (KL-198), the interpreter and mpmath
+versions, and the two files the reduction pools read outside the model,
+host/tools/pi_worstcase.py and host/src/mp_2opi.h (model_digest, and so
+`--cache`, has the same edge).
 """
 
 import argparse
@@ -545,11 +565,18 @@ def sha256_file(path):
 RECORD = "SHA256SUMS"
 RECORD_TMP = RECORD + ".tmp"
 
+#: The model stamp, written just before the record (the module docstring
+#: says what it promises): model_digest() as it stood when the run began.
+STAMP = "MODEL"
+STAMP_TMP = STAMP + ".tmp"
+
 
 def remove_record(outdir):
     """Before any set is written: a run that stops part way must not
-    leave an earlier run's record vouching for what it overwrote."""
-    for name in (RECORD, RECORD_TMP):
+    leave an earlier run's record vouching for what it overwrote - nor an
+    earlier run's stamp naming a model the sets it overwrote were not
+    made by."""
+    for name in (RECORD, RECORD_TMP, STAMP, STAMP_TMP):
         try:
             os.remove(Path(outdir) / name)
         except FileNotFoundError:
@@ -565,6 +592,38 @@ def write_record(outdir, digests):
         for name in sorted(digests):
             f.write(f"{digests[name]}  {name}\n")
     os.replace(tmp, Path(outdir) / RECORD)
+
+
+def write_stamp(outdir, model):
+    """After every set is written and hashed, and just before the record:
+    `model`, the digest the run began under, as one line. Written under a
+    temporary name and renamed, like the record."""
+    tmp = Path(outdir) / STAMP_TMP
+    with open(tmp, "w", newline="\n") as f:
+        f.write(model + "\n")
+    os.replace(tmp, Path(outdir) / STAMP)
+
+
+def stamp_problem(outdir, now):
+    """None when outdir's stamp is `now`, this tree's model digest; else
+    why not, in a sentence verify/run.sh quotes: no stamp (a directory
+    made before it existed, or one whose stamp was removed), a stamp that
+    cannot be read or is not 64 hex digits, or another model's."""
+    try:
+        raw = (Path(outdir) / STAMP).read_bytes()
+    except FileNotFoundError:
+        return (f"{STAMP} is missing: the directory was made before the "
+                f"stamp existed (2026-10-22), or the stamp was removed")
+    except OSError as e:
+        return f"{STAMP} cannot be read: {e}"
+    got = raw.decode("ascii", "replace").strip()
+    if len(got) != 64 or set(got) - set("0123456789abcdef"):
+        return f"{STAMP} is not one line of 64 hex digits"
+    if got != now:
+        return (f"{STAMP} names model {got[:12]} and this tree's is "
+                f"{now[:12]}: the sets were made before "
+                f"python/cft_golden/*.py or vectors/gen_vectors.py changed")
+    return None
 
 
 def run_group(args):
@@ -825,7 +884,23 @@ def main():
                          "on disk are all unchanged, recording what was "
                          "written in DIR/manifest.json (default: no "
                          "cache, everything regenerated)")
+    ap.add_argument("--check-model", metavar="DIR", default=None,
+                    help="write nothing: compare DIR's MODEL stamp with "
+                         "this tree's model digest and exit 0 if they are "
+                         "the same, else print why not and exit 1")
     args = ap.parse_args()
+
+    # The model this run runs under, taken before anything is written: the
+    # stamp, and the cache's key.
+    model = model_digest()
+
+    if args.check_model:
+        why = stamp_problem(args.check_model, model)
+        if why:
+            print(why)
+            sys.exit(1)
+        print(f"{STAMP} names this tree's model, {model[:12]}")
+        return
 
     outdir = Path(args.out)
     outdir.mkdir(parents=True, exist_ok=True)
@@ -834,10 +909,9 @@ def main():
     jobs = build_jobs(args)
 
     manifest = {}
-    model = pyver = None
+    pyver = None
     cached = {}
     if args.cache:
-        model = model_digest()
         pyver = platform.python_version()
         manifest = dict(load_manifest(args.cache))
         for job in jobs:
@@ -922,9 +996,11 @@ def main():
         tail, dig, _size = results[job["idx"]]
         if tail is not None:
             digests[job["file"]] = dig
+    write_stamp(outdir, model)
     write_record(outdir, digests)
     print(f"{outdir / RECORD}: the record of {len(digests)} sets, "
-          f"written last", flush=True)
+          f"written last (after {outdir / STAMP}: model {model[:12]})",
+          flush=True)
 
 
 if __name__ == "__main__":

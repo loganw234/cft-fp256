@@ -32,9 +32,27 @@
 #    REUSES a whole set without running the generator;
 #  - it fails by name when the generator cannot run, and when the
 #    generator exits 0 but writes no record.
-# Four negative controls put a defect back into a copy - the old
+# Since 2026-10-22 (KL-196) a whole directory is also held to the model that
+# made it. A record says the sets are the bytes a finished run wrote, not
+# which model wrote them, and a directory made before a change to the model
+# passed all of the above and was replayed against a library that lacks
+# the change (make verify-quick, and every --only run, replay whatever is on
+# disk). The generator now writes <out>/MODEL beside the record, the digest of
+# the model's and its own source as the run began, and `gen_vectors.py
+# --check-model DIR` says whether that is the tree's; vectors_whole asks it.
+# So, against the same small profile:
+#  - the stamp: one line of 64 hex digits that --check-model accepts; the
+#    same bytes after a --cache run that served every set; and GONE after a
+#    run that crashed part way over a whole set, with its temporary name;
+#  - ensure_vectors regenerates, saying why by name, a WHOLE directory that
+#    an older model made (the plant is a real generation by a copy of the
+#    generator whose seed differs: a directory every test above accepts and
+#    whose sets are not today's), one whose stamp is missing, and one whose
+#    stamp is not 64 hex digits; and reuses a whole one of this tree's model.
+# Seven negative controls put a defect back into a copy - the old
 # non-empty test, the digest check skipped, the profile's names not
-# compared, the generator's first removal dropped - and the case written
+# compared, the generator's first removal dropped, the model not compared,
+# the stamp not written, the stamp not removed first - and the case written
 # for each must catch it.
 # It also holds the runner's stage table to what a regeneration needs
 # (KL-213): every stage that can run the generator, found in the runner's own
@@ -83,6 +101,17 @@ gen "$R/vectors/gen_vectors.py" "$T/whole" "${SMALL[@]}" \
   || { echo "CANNOT RUN: the small generation failed:"; tail -5 "$T/gen.log"; exit 2; }
 sed 's#  #  out/#' "$T/whole/SHA256SUMS" > "$R/vectors/SHA256SUMS"
 NSETS=$(grep -c . "$R/vectors/SHA256SUMS")
+# The older model's generation, for KL-196's plant: a copy of this scratch
+# root whose generator has another default seed, so its sets are not today's
+# and its stamp - the digest includes the generator's own bytes - is not this
+# root's. By every test of the record it is a whole directory.
+OLD=$T/oldroot
+cp -r "$R" "$OLD"
+sed -i 's/\(add_argument("--seed", type=int, default=\)3)/\14)/' "$OLD/vectors/gen_vectors.py"
+grep -q 'add_argument("--seed", type=int, default=4)' "$OLD/vectors/gen_vectors.py" \
+  || { echo "CANNOT RUN: the older generator's seed was not changed"; exit 2; }
+gen "$OLD/vectors/gen_vectors.py" "$T/older" "${SMALL[@]}" \
+  || { echo "CANNOT RUN: the older generation failed:"; tail -5 "$T/gen.log"; exit 2; }
 # mpmath shadowed, for the crash 2026-09-28's PATH slip produced.
 mkdir -p "$T/nompmath"
 echo 'raise ImportError("no mpmath: planted by verify/test-ensure-vectors.sh")' \
@@ -135,13 +164,50 @@ rec_crash() {  # <gen_vectors.py>
   local g=$1
   rm -rf "$T/over"; cp -r "$T/whole" "$T/over"
   : > "$T/over/SHA256SUMS.tmp"
+  : > "$T/over/MODEL.tmp"
   if PYTHONPATH="$NOMP" gen "$g" "$T/over" "${SMALL[@]}"; then
     bad "a run without mpmath exited 0, so the crash was not planted"
   elif ! grep -q "no mpmath: planted" "$T/gen.log"; then
     bad "a run without mpmath failed, but not for the planted reason: $(tail -1 "$T/gen.log")"
   elif [ -e "$T/over/SHA256SUMS" ] || [ -e "$T/over/SHA256SUMS.tmp" ]; then
     bad "a run that crashed over a whole set left a record behind ($(cd "$T/over" && ls SHA256SUMS* | tr '\n' ' '))"
-  else ok "a run that crashed over a whole set leaves no record, and no temporary one"; fi
+  elif [ -e "$T/over/MODEL" ] || [ -e "$T/over/MODEL.tmp" ]; then
+    bad "a run that crashed over a whole set left a model stamp behind ($(cd "$T/over" && ls MODEL* | tr '\n' ' '))"
+  else ok "a run that crashed over a whole set leaves no record and no model stamp, and no temporary ones"; fi
+}
+# KL-196: the stamp a finished run writes. <gen_vectors.py> is the generator
+# under test; its own --check-model must accept what it wrote.
+rec_stamp() {  # <gen_vectors.py>
+  local g=$1 s why
+  rm -rf "$T/stamped"
+  if ! gen "$g" "$T/stamped" "${SMALL[@]}"; then
+    bad "a finished run's model stamp: the generation failed: $(tail -1 "$T/gen.log")"; return
+  fi
+  s=$T/stamped/MODEL
+  if [ ! -f "$s" ]; then bad "a finished run wrote no model stamp"
+  elif [ "$(grep -c . "$s")" -ne 1 ] || ! grep -qE '^[0-9a-f]{64}$' "$s"; then
+    bad "a finished run's model stamp is not one line of 64 hex digits: $(head -c 120 "$s")"
+  elif ! why=$("$PYBIN" "$g" --check-model "$(native "$T/stamped")" 2>&1); then
+    bad "a finished run's model stamp is refused by the generator's own --check-model: $why"
+  else ok "a finished run's model stamp: one line of 64 hex digits, accepted by --check-model ($why)"; fi
+}
+rec_stamp_cache() {  # a --cache run that served every set writes the stamp again, byte for byte
+  if cmp -s "$T/cached/MODEL" "$T/whole/MODEL"; then
+    ok "a --cache run that served all $NSETS sets writes the same model stamp, byte for byte"
+  else bad "a --cache run that served every set: its model stamp differs from a plain run's"; fi
+}
+# The plant for ensure_vectors below is a real generation by a generator whose
+# seed differs, so it must be what the old tests could not see: a directory
+# they all accept, whose sets are not today's and whose stamp is not today's.
+rec_older() {
+  local why
+  if ! why=$(holds "$T/older"); then
+    bad "the older model's generation is not a whole directory by the record's tests, so it plants nothing: $why"
+  elif cmp -s "$T/older/SHA256SUMS" "$T/whole/SHA256SUMS"; then
+    bad "the older model's generation has today's sets, so it plants nothing"
+  elif cmp -s "$T/older/MODEL" "$T/whole/MODEL"; then
+    bad "the older model's generation has today's model stamp, so it plants nothing"
+  else ok "the older model's generation is whole by the record's tests (names, digests) and is not today's: other sets, another stamp"; fi
 }
 
 # ---- ensure_vectors -------------------------------------------------
@@ -190,9 +256,15 @@ plant() {  # <state>: vectors/out in $R as that state
               --directed 20 --random 20 --simple 2 --transcend 1 --reduce 0 \
               --augmented 2 --character 1 --minmaxmag 2 --formatof 1 \
               || echo "the narrow plant did not generate";;
+    # KL-196: whole by every test of the record, and not this tree's model
+    older)  cp -r "$T/older" "$o";;
+    nostamp) cp -r "$T/whole" "$o"; rm "$o/MODEL";;
+    badstamp) cp -r "$T/whole" "$o"; echo "not a digest" > "$o/MODEL";;
   esac
 }
-calls() { grep -c . "$T/py-calls"; }
+# The generator's runs, not its --check-model asks (vectors_whole makes those
+# too, and they write nothing).
+calls() { grep -vc -e '--check-model' "$T/py-calls"; }
 # evcase <run.sh> <state> <py> <expect> <regex>: expect is "reuse" (exit
 # 0, no generator run, vectors/out untouched), "regen" (the generator
 # run, exit 0, vectors/out whole afterwards) or "fail" (exit nonzero);
@@ -239,8 +311,11 @@ ev_cases() {  # <run.sh>
   evcase "$r" cut    good regen "fp32-rtz\.jsonl: FAILED"
   evcase "$r" gone   good regen "fp32-augmented\.jsonl: FAILED open or read"
   evcase "$r" narrow good regen "leaves out 5 of the $NSETS sets vectors/SHA256SUMS names"
-  evcase "$r" whole  good reuse "names all $NSETS sets vectors/SHA256SUMS names, and all $NSETS it names hold"
-  evcase "$r" star   good reuse "names all $NSETS sets vectors/SHA256SUMS names, and all $NSETS it names hold"
+  evcase "$r" whole  good reuse "names all $NSETS sets vectors/SHA256SUMS names, and all $NSETS it names hold; MODEL names this tree's model, [0-9a-f]{12}"
+  evcase "$r" star   good reuse "names all $NSETS sets vectors/SHA256SUMS names, and all $NSETS it names hold; MODEL names this tree's model, [0-9a-f]{12}"
+  evcase "$r" older  good regen "is whole but was not made by this tree's model: MODEL names model [0-9a-f]{12} and this tree's is [0-9a-f]{12}"
+  evcase "$r" nostamp good regen "is whole but was not made by this tree's model: MODEL is missing"
+  evcase "$r" badstamp good regen "is whole but was not made by this tree's model: MODEL is not one line of 64 hex digits"
   evcase "$r" crash  nompmath fail "FAILED - the generator exited nonzero"
   evcase "$r" crash  silent   fail "FAILED - regenerated, and still not a whole set: vectors/out has no SHA256SUMS"
 }
@@ -301,6 +376,9 @@ echo "== vectors/gen_vectors.py's record, as committed"
 rec_whole
 rec_cache "$R/vectors/gen_vectors.py"
 rec_crash "$R/vectors/gen_vectors.py"
+rec_stamp "$R/vectors/gen_vectors.py"
+rec_stamp_cache
+rec_older
 echo "== verify/run.sh's ensure_vectors, as committed"
 ev_cases "$ROOT/verify/run.sh"
 echo "== verify/run.sh's stages that can run the generator, as committed"
@@ -346,6 +424,22 @@ gen_control() {  # <gen_vectors.py>: the crash case, with that generator
 }
 control "the generator's first removal dropped" "$ROOT/vectors/gen_vectors.py" \
   '    remove_record(outdir)' '' \
+  gen_control
+# KL-196's three: the model not compared, the stamp not written, and the stamp
+# left standing by the removal at the start of a run
+control "the model not compared" "$ROOT/verify/run.sh" \
+  '# VECTORS-WHOLE-MODEL' '  if false; then' \
+  one_ev older regen "is whole but was not made by this tree's model"
+stamp_control() {  # <gen_vectors.py>: the stamp case, with that generator
+  cp "$1" "$R/vectors/gen_vectors.control.py"
+  rec_stamp "$R/vectors/gen_vectors.control.py"
+}
+control "the generator's stamp not written" "$ROOT/vectors/gen_vectors.py" \
+  '    write_stamp(outdir, model)' '' \
+  stamp_control
+control "the stamp not removed by the first removal" "$ROOT/vectors/gen_vectors.py" \
+  '    for name in (RECORD, RECORD_TMP, STAMP, STAMP_TMP):' \
+  '    for name in (RECORD, RECORD_TMP):' \
   gen_control
 
 # The need lists' controls. Both are made in a copy of the runner by sed, and
