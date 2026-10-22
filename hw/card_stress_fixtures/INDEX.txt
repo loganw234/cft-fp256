@@ -84,4 +84,7 @@ rnd-nextup64-c16384.txt	0	host/clause5-soak-c16384 nextup64 20000 12345 [0 s]
 rnd-div64-c16384.txt	0	host/divsqrt-soak-c16384 div64 20000 12345 rne [0 s]
 # manifest-*: the three revision-8 images' manifests (hw/rebuild-2022.sh's, which the driver reads beside each xclbin), copied verbatim by the lead from
 # the build host on 2026-10-22 (they name the staged files' build, cft_hw.xclbin, in `artifact:`). All three: commit 688b6530e3af18f1de1d82888a8fc8875b1787f4,
-# tree: clean, bitstream_sources: rtl/ and hw/ identical to that commit. Not logs, so they have no row: the suite reads them by name.
+# tree: clean, bitstream_sources: rtl/ and hw/ identical to that commit. Not logs, so they have no row: the suite reads them by name. Each is the lead's copy
+# (sha256 9f19643bb3f1b94f7f4e37c6e116f64f5a14749d67898f71625f4754478fd20b quad, 32cf970fa20249e708bb4d541e0f0b999dc063084cb4414efd65d17e0a5fc6a5 single,
+# b048bc270c01a6b251ca6be04c355d5a34a136eabcc35add84c4b7241ddc7d96 deep, the box's) with ONE byte removed: the space that ends the last line, `final_clocks:`,
+# which `git diff --check` refuses; no field the driver reads is touched, and restoring that space gives the box's bytes.

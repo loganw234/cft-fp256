@@ -47,4 +47,4 @@ routed_wns_ns: 0.018   # whole design, shell included
 kernel_clock:  clk_out1_ulp_clk_wiz_0
 kernel_wns_ns: 0.048   # THIS is the design's margin
 kernel_failing_endpoints: 0 of 649690
-final_clocks:  kernel:1:ulp_ucs/aclk_kernel_01:500.0 kernel:0:ulp_ucs/aclk_kernel_00:300.0 system::hbm_aclk:450.0 
+final_clocks:  kernel:1:ulp_ucs/aclk_kernel_01:500.0 kernel:0:ulp_ucs/aclk_kernel_00:300.0 system::hbm_aclk:450.0
