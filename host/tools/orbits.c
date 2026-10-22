@@ -1046,6 +1046,33 @@ static int val_from_dec_ok(const fmt_info *fi, const char *s, void *out,
     return 1;
 }
 
+/* Whether the value is an infinity, either sign (KL-481). A checkpoint
+ * whose state holds one is refused where it is read, by name: a run of
+ * this tool stops (exit 3, note_flags) at the first overflow or
+ * divide-by-zero, which is the only way a finite state makes an infinity,
+ * so it never writes one - and a resume handed one would run its first
+ * step into the flag certificate and stop with exit 3, a stop that
+ * explains nothing about the file. Only where the flags are readable
+ * (FLAGS_TRUSTED): without them the run does not stop at those flags, so
+ * a checkpoint of such a run may hold an infinity and is resumed as
+ * before. A NaN is not refused here; it is not what the stop was about. */
+static int val_is_inf(const fmt_info *fi, const void *v)
+{
+    uint8_t cls = 0;
+    if (!FLAGS_TRUSTED || cft_class(DEV, fi->fmt, v, &cls, 1) != CFT_OK)
+        return 0;
+    return cls == CFT_CLASS_NEG_INF || cls == CFT_CLASS_POS_INF;
+}
+
+/* The version-2 reader's two sentences for it (ckpt_read3 names the member
+ * and the value; this reader's lines are read a token at a time). */
+#define CKPT_INF_STATE \
+    "a checkpoint state value is an infinity, which this tool never writes " \
+    "into a checkpoint: a run stops (exit 3) at the flag that makes one"
+#define CKPT_INF_INV \
+    "a checkpoint invariant is an infinity, which this tool never writes " \
+    "into a checkpoint: a run stops (exit 3) at the flag that makes one"
+
 /* An initial condition is a decimal literal from a published table.
  * It is converted once, correctly rounded, and the rounding is
  * expected - the table is a measurement, not a binary value. */
@@ -3665,7 +3692,16 @@ static void ckpt_read3(runstate *R)
     {
         uint8_t got[MAX_ESZ];
         val = ck3_key(&cur, stop, "h", 0);
-        if (!val_from_dec_ok(fi, val, got, 1) || memcmp(got, R->s_h, esz))
+        /* Two refusals, each its own reason (KL-424): a value that does
+         * not read at all - an extra space after the key, a letter, an
+         * inexact decimal - is a parse failure, and only a value that
+         * reads to another number is another step size. */
+        if (!val_from_dec_ok(fi, val, got, 1))
+            ck3_die("`h %.60s` is not one exact decimal this format reads "
+                    "(an extra space after `h`, a stray character, or a "
+                    "value that is not exact): the line is damaged, which "
+                    "is not the same as a different step size", val);
+        if (memcmp(got, R->s_h, esz))
             die("the checkpoint was written for a different step size");
         if (!ck3_spelt(fi, val, got))
             ck3_die("`h %.60s` is this run's step size, not in its one "
@@ -3707,6 +3743,11 @@ static void ckpt_read3(runstate *R)
                 ck3_die("member %lu's state value `%.60s` is not in its one "
                         "spelling, the exact decimal this tool writes",
                         (unsigned long)m, t);
+            if (val_is_inf(fi, dst))
+                ck3_die("member %lu's state value `%.60s` is an infinity, "
+                        "which this tool never writes into a checkpoint: a "
+                        "run stops (exit 3) at the flag that makes one",
+                        (unsigned long)m, t);
         }
         if (*val)
             ck3_die("a state line longer than a member's state");
@@ -3730,6 +3771,11 @@ static void ckpt_read3(runstate *R)
             if (!ck3_spelt(fi, t, dst[i]))
                 ck3_die("member %lu's invariant `%.60s` is not in its one "
                         "spelling, the exact decimal this tool writes",
+                        (unsigned long)m, t);
+            if (val_is_inf(fi, dst[i]))
+                ck3_die("member %lu's invariant `%.60s` is an infinity, "
+                        "which this tool never writes into a checkpoint: a "
+                        "run stops (exit 3) at the flag that makes one",
                         (unsigned long)m, t);
         }
         if (*val)
@@ -3909,9 +3955,14 @@ static void ckpt_read(runstate *R)
                     "interval");
         } else if (!strcmp(tok, "h")) {
             uint8_t got[MAX_ESZ];
+            /* a value that does not read is a damaged line, not another
+             * step size (KL-424; ckpt_read3 gives the same two reasons) */
             if (!next_tok(&p, tok, sizeof tok) ||
-                !val_from_dec_ok(fi, tok, got, 1) ||
-                memcmp(got, R->s_h, esz) != 0)
+                !val_from_dec_ok(fi, tok, got, 1))
+                die("the checkpoint's `h` line is not one exact decimal "
+                    "this format reads: the line is damaged, which is not "
+                    "the same as a different step size");
+            if (memcmp(got, R->s_h, esz) != 0)
                 die("the checkpoint was written for a different step size");
         } else if (!strcmp(tok, "at")) {
             if (!next_tok(&p, tok, sizeof tok))
@@ -3935,14 +3986,20 @@ static void ckpt_read(runstate *R)
             m = (size_t)strtoull(tok, NULL, 10);
             if (m >= O->members)
                 die("a checkpoint state line names a member out of range");
-            for (c = 0; c < R->ncomp; c++)
+            for (c = 0; c < R->ncomp; c++) {
                 if (!next_tok(&p, tok, sizeof tok) ||
                     !val_from_dec_ok(fi, tok, CQ(R, c) + m * esz, 1))
                     die("bad checkpoint position");
-            for (c = 0; c < R->ncomp; c++)
+                if (val_is_inf(fi, CQ(R, c) + m * esz))
+                    die(CKPT_INF_STATE);
+            }
+            for (c = 0; c < R->ncomp; c++) {
                 if (!next_tok(&p, tok, sizeof tok) ||
                     !val_from_dec_ok(fi, tok, CV(R, c) + m * esz, 1))
                     die("bad checkpoint velocity");
+                if (val_is_inf(fi, CV(R, c) + m * esz))
+                    die(CKPT_INF_STATE);
+            }
         } else if (!strcmp(tok, "inv")) {
             size_t m;
             if (!next_tok(&p, tok, sizeof tok))
@@ -3955,12 +4012,19 @@ static void ckpt_read(runstate *R)
                 !next_tok(&p, tok, sizeof tok) ||
                 !val_from_dec_ok(fi, tok, R->dHmax + m * esz, 1))
                 die("bad checkpoint invariant");
-            for (k = 0; k < R->nL; k++)
+            if (val_is_inf(fi, R->H0 + m * esz) ||
+                val_is_inf(fi, R->dHmax + m * esz))
+                die(CKPT_INF_INV);
+            for (k = 0; k < R->nL; k++) {
                 if (!next_tok(&p, tok, sizeof tok) ||
                     !val_from_dec_ok(fi, tok, R->L0[k] + m * esz, 1) ||
                     !next_tok(&p, tok, sizeof tok) ||
                     !val_from_dec_ok(fi, tok, R->dLmax[k] + m * esz, 1))
                     die("bad checkpoint invariant");
+                if (val_is_inf(fi, R->L0[k] + m * esz) ||
+                    val_is_inf(fi, R->dLmax[k] + m * esz))
+                    die(CKPT_INF_INV);
+            }
         } else if (!strcmp(tok, "end")) {
             break;
         }
@@ -4842,6 +4906,18 @@ static void cert_options(const options *O, uint8_t **salt)
     }
 }
 
+/* Why both program engines refuse --rsqrt exact, in one place so that the
+ * two refusals cannot give two reasons (KL-610: --engine program kept the
+ * old route, host prep, program core and host finish, long after the
+ * header's comment above said otherwise). Since 2026-09-14 the correctly
+ * rounded divide and square root exist as WHOLE programs; what is missing
+ * is the splice. */
+#define RSQRT_EXACT_WHY \
+    "the correctly rounded divide and square root exist as WHOLE programs " \
+    "(programs/divfull-*, sqrtfull-*), and splicing one into this " \
+    "program's loop body needs a fragment inliner that does not exist yet " \
+    "(docs/ORBITS.md, \"The step, and where it runs\")"
+
 int main(int argc, char **argv)
 {
     options O;
@@ -5199,12 +5275,7 @@ int main(int argc, char **argv)
 
     if (O.engine == ENG_SEGMENTS) {
         if (O.rsqrt != RSQRT_NEWTON)
-            die("--engine segments needs --rsqrt newton: the correctly "
-                "rounded divide and square root exist as WHOLE programs "
-                "(programs/divfull-*, sqrtfull-*), and splicing one into "
-                "this program's loop body needs a fragment inliner that "
-                "does not exist yet (docs/ORBITS.md, \"The step, and "
-                "where it runs\")");
+            die("--engine segments needs --rsqrt newton: " RSQRT_EXACT_WHY);
     }
     if (O.engine == ENG_PROGRAM) {
         if (O.problem != PROB_KEPLER)
@@ -5214,10 +5285,7 @@ int main(int argc, char **argv)
                 "runs\"); "
                 "--engine segments runs it");
         if (O.rsqrt != RSQRT_NEWTON)
-            die("--engine program needs --rsqrt newton: the correctly "
-                "rounded route is host-prep, program core, host finish "
-                "(python/cft_golden/seqprogs.py) and cannot sit inside "
-                "another program's loop body");
+            die("--engine program needs --rsqrt newton: " RSQRT_EXACT_WHY);
         if (O.resume)
             die("--engine program cannot resume into the middle of a run: "
                 "a restart state has four non-zero components and only "

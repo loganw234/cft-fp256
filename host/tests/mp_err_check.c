@@ -37,8 +37,12 @@
  * them):
  *
  *   cft_mp_const   the true constant lies in the enclosure of the value
- *                  it returns, for all six, at every W from 2 to
- *                  CFT_MP_PREC_MAX - the widest any caller asks for
+ *                  it returns, for all six, at every W it accepts - 2
+ *                  to CFT_MP_CONST_BITS - 1, 1087, though no caller
+ *                  asks past CFT_MP_PREC_MAX - and a request at W =
+ *                  1088 or above is REFUSED (KL-439: the count there
+ *                  would be the stored value's 1, short for ln10, and
+ *                  a control builds that enclosure and shows it fails)
  *   mp_log_of_mp   src/transcend.c's conversion of an argument's error
  *                  into its logarithm's: for every V in the argument's
  *                  enclosure, log V lies in the result's - log is
@@ -128,6 +132,9 @@
 #endif
 
 #include "../src/mpfloat.h"
+/* The stored constants themselves (KL-439's control builds the enclosure
+ * cft_mp_const gave at W = 1088 from them) and their width. */
+#include "../src/mp_consts.h"
 
 #ifndef MP_ERR_CHECK_BASE
 /* src/transcend.c's probe, compiled into this tool alone by its make
@@ -1416,18 +1423,36 @@ static int ok_bracket(const cft_mp *r, const mpz_t E, int rinf,
     return mpfr_cmp(fr_a, lo) <= 0 && mpfr_cmp(hi, fr_b) <= 0;
 }
 
-/* Every constant at every width a caller can ask for. 1,400 bits put
+/* Every constant at every width cft_mp_const accepts, W = 2 to 1087 (a
+ * caller asks for at most CFT_MP_PREC_MAX, 928). 1,400 bits put
  * the bracket far inside the smallest margin a correct count leaves:
  * the true error of a truncation of the stored 1088-bit value is under
  * two units at every W below 1088, against a count of four. */
 #define CONST_PREC 1400
 
+/* KL-439. At W = 1088 nothing is truncated, so the count would be the
+ * stored value's own 1, which is short for ln10 (its stored value is 1.06
+ * units low relatively). cft_mp_const must refuse that width and every
+ * one above it; const_refused counts the refusals, and const_short counts
+ * the constants whose stored value, with the count of 1, the control
+ * shows outside the enclosure at 1088. */
+static unsigned long long const_refused, const_short;
+
 static void const_leg(void)
 {
     static const char *nm[6] = { "ln2", "log2e", "ln10", "log10e", "pi",
                                  "1/pi" };
+    /* the stored limbs and exponents, in cft_mp_constant's order */
+    static const uint32_t *const stored[6] = {
+        cft_mp_ln2_limbs, cft_mp_log2e_limbs, cft_mp_ln10_limbs,
+        cft_mp_log10e_limbs, cft_mp_pi_limbs, cft_mp_invpi_limbs };
+    static const long stored_exp[6] = {
+        CFT_MP_LN2_EXP, CFT_MP_LOG2E_EXP, CFT_MP_LN10_EXP,
+        CFT_MP_LOG10E_EXP, CFT_MP_PI_EXP, CFT_MP_INVPI_EXP };
+    static const int past[3] = { CFT_MP_CONST_BITS, CFT_MP_CONST_BITS + 1,
+                                 2 * CFT_MP_CONST_BITS };
     mpfr_t lo[6], hi[6], ten;
-    int c, W, rinf;
+    int c, W, rinf, k;
     for (c = 0; c < 6; c++) {
         mpfr_init2(lo[c], CONST_PREC);
         mpfr_init2(hi[c], CONST_PREC);
@@ -1448,7 +1473,7 @@ static void const_leg(void)
     mpfr_ui_div(lo[CFT_MP_C_INVPI], 1, hi[CFT_MP_C_PI], MPFR_RNDD);
     mpfr_ui_div(hi[CFT_MP_C_INVPI], 1, lo[CFT_MP_C_PI], MPFR_RNDU);
     for (c = 0; c < 6; c++)
-        for (W = 2; W <= CFT_MP_PREC_MAX; W++) {
+        for (W = 2; W < CFT_MP_CONST_BITS; W++) {
             cft_mp r;
             if (cft_mp_const(&r, (cft_mp_constant)c, W)) {
                 fail(&T_const, "refused", "%s at W %d", nm[c], W);
@@ -1468,6 +1493,39 @@ static void const_leg(void)
             if (!ok_bracket(&r, Eo, 0, lo[c], hi[c]))
                 const_ctl++;
         }
+    /* KL-439: the widths it cannot bound are refused... */
+    for (c = 0; c < 6; c++)
+        for (k = 0; k < 3; k++) {
+            cft_mp r;
+            if (cft_mp_const(&r, (cft_mp_constant)c, past[k]) == 0)
+                fail(&T_const, "accepted a width it cannot bound",
+                     "%s at W %d", nm[c], past[k]);
+            else
+                const_refused++;
+        }
+    /* ... and the reason is shown, where it can fail: the stored value at
+     * its own 1088 bits with the count of 1 the function used to give at
+     * W = 1088. ln10 must fall outside it. */
+    for (c = 0; c < 6; c++) {
+        cft_mp s;
+        memset(&s, 0, sizeof s);
+        cft_bn_zero(&s.m);
+        for (k = 0; k < CFT_MP_CONST_LIMBS; k++)
+            s.m.v[k] = stored[c][k];
+        s.m.n = CFT_MP_CONST_LIMBS;
+        while (s.m.n > 0 && s.m.v[s.m.n - 1] == 0)
+            s.m.n--;
+        s.exp = stored_exp[c];
+        s.err = cft_mp_err_u64(1);
+        mpz_set_ui(Eo, 1);
+        if (!ok_bracket(&s, Eo, 0, lo[c], hi[c]))
+            const_short++;
+        else if (c == CFT_MP_C_LN10)
+            fail(&T_const, "the control did not fail",
+                 "ln10's stored value with a count of 1 at W = %d held, so "
+                 "the refusal of that width is not shown to be needed",
+                 CFT_MP_CONST_BITS);
+    }
     for (c = 0; c < 6; c++) {
         mpfr_clear(lo[c]);
         mpfr_clear(hi[c]);
@@ -1873,8 +1931,11 @@ static void report(const tally *T)
 #ifndef MP_ERR_CHECK_BASE
     if (T == &T_const) {
         printf("           all six constants at every W from 2 to %d, "
-               "against MPFR; a count of one unit fails on %llu of them\n",
-               CFT_MP_PREC_MAX, const_ctl);
+               "against MPFR; a count of one unit fails on %llu of them; "
+               "W = %d and above refused (%llu of 18 requests), where the "
+               "stored value's count of 1 fails on %llu of the six\n",
+               CFT_MP_CONST_BITS - 1, const_ctl, CFT_MP_CONST_BITS,
+               const_refused, const_short);
         return;
     }
     if (T == &T_log) {
@@ -1959,8 +2020,9 @@ int main(int argc, char **argv)
         mpfr_init2(fr_a, 2); mpfr_init2(fr_b, 2); mpfr_init2(fr_v, 2);
         mpfr_init2(fr_lo, 2); mpfr_init2(fr_hi, 2); mpfr_init2(fr_t, 2);
         mpfr_init2(fr_y, 2);
-        printf("mp-err-check: the six constants against MPFR, W = 2 to %d\n",
-               CFT_MP_PREC_MAX);
+        printf("mp-err-check: the six constants against MPFR, W = 2 to %d, "
+               "and W = %d refused\n", CFT_MP_CONST_BITS - 1,
+               CFT_MP_CONST_BITS);
         const_leg();
         printf("mp-err-check: the logarithm's conversion against MPFR's "
                "log, %ld arguments\n", nlog);

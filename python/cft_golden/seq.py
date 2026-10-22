@@ -836,12 +836,15 @@ class Program:
             byte = (d["imm"] >> shift) & 0xFF
             hi9 = (d["imm"] >> KX9_SHIFT[key]) & 1
             if d["kx"] and d[flag]:
+                # The constant named is the nine-bit index, byte and
+                # ninth bit; the message used to give the byte alone, so
+                # `ra names constant 1` for constant 257 (KL-438).
+                idx = byte | (hi9 << 8)
                 if d[key]:
                     raise ProgramError(
-                        f"[{pc}] {key} names constant {byte} through imm "
+                        f"[{pc}] {key} names constant {idx} through imm "
                         f"under kx, so the {key} field must be zero and "
                         f"it is {d[key]}")
-                idx = byte | (hi9 << 8)
             elif d["kx"]:
                 if byte:
                     raise ProgramError(

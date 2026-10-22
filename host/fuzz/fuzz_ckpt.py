@@ -310,7 +310,7 @@ FLAGSTOP = re.compile(r"raised 0x[0-9a-f]+ - this workload can only ever "
 # not the contract's named refusal, a named refusal off its page, and a
 # certified resume accepted wrongly (accepted_certificate).
 FINDINGS = ("HANG", "SANITIZER", "SILENT-WRONG", "ACCEPT-NO-CERTIFICATE",
-            "WRONG-CODE", "UNKNOWN-NAME")
+            "WRONG-CODE", "UNKNOWN-NAME", "ACCEPT-INFINITY")
 
 
 def is_finding(verdict):
@@ -329,7 +329,29 @@ def refusal_name(proc):
     return "sentence"
 
 
-def classify(proc, timed_out):
+INFINITY = re.compile(r"^[+-]?inf(inity)?$", re.I)
+
+
+def holds_infinity(text):
+    """Whether a `state` or `inv` line of the checkpoint text holds an
+    infinity. cft-orbits refuses such a checkpoint where it reads it, a
+    sentence and exit 2 (KL-481): a run stops at the flag that makes an
+    infinity, so it never writes one, and a resume handed one used to run
+    its first step into the flag certificate and stop at exit 3 - or, for
+    an invariant, finish at exit 0."""
+    for ln in (text or "").split("\n"):
+        tok = ln.split(" ")
+        if tok[0] in ("state", "inv") and \
+                any(INFINITY.match(t) for t in tok[2:]):
+            return True
+    return False
+
+
+def classify(proc, timed_out, text=None):
+    """The verdict on one resume. `text` is the checkpoint it was given,
+    when the caller has it: an infinity in a state or an invariant is
+    refused where it is read (exit 2), so a flag-certificate stop (exit 3)
+    or an acceptance (exit 0) over one is a finding, not a refusal."""
     if timed_out:
         return "HANG"
     err = proc.stderr or ""
@@ -339,7 +361,7 @@ def classify(proc, timed_out):
     if proc.returncode < 0:
         return "SIGNAL%d" % (-proc.returncode)
     if proc.returncode == 0:
-        return "ACCEPT"
+        return "ACCEPT-INFINITY" if holds_infinity(text) else "ACCEPT"
     m = NAMED.search(err)
     if m:
         # a named refusal, held to its name's code: first, so that a name
@@ -351,7 +373,9 @@ def classify(proc, timed_out):
     if proc.returncode == 2 and err.strip():
         return "REFUSE"
     if proc.returncode == 3 and FLAGSTOP.search(err):
-        return "REFUSE"
+        # the arithmetic left the domain: a named stop for a finite state
+        # that does; for an infinity the reader should have refused first
+        return "WRONG-CODE" if holds_infinity(text) else "REFUSE"
     return "EXIT%d" % proc.returncode
 
 
@@ -461,7 +485,7 @@ def one_tool(name, bindir, outdir, seconds, seed, timeout):
                 returncode = 0
                 stderr = ""
             proc = P()
-        verdict = classify(proc, timed_out)
+        verdict = classify(proc, timed_out, text)
         if verdict == "REFUSE":
             nm = refusal_name(proc)
             names[nm] = names.get(nm, 0) + 1

@@ -5733,19 +5733,46 @@ int main(void)
               .want = CFT_ERR_ARTIFACT, .prec = 4u,
               .n = 1, .ins = { LD_HALT },
               .say = { "precision code is 4", "3 fp256" } },
-            /* seq_validate: the bound, the loops, the codes */
+            /* seq_validate: the bound, the loops, the codes. The bound is
+             * named where seq.py names it (KL-438): at the first CONTROL
+             * instruction whose running count is past it, so an ALU
+             * instruction that takes the count over is named by the
+             * ENDREP after it, and a REPEAT whose trip count does is
+             * named by the instruction that closes or follows it. Until
+             * 2026-10-22 these two said "instruction 2" and "instruction 1
+             * is REPEAT 2097152 ... 1048576 times". */
             { .what = "a worst case past 2^40 instructions",
               .want = CFT_ERR_INVALID_ARGUMENT, .n = 6,
               .ins = { LD_REPEAT(1u << 20), LD_REPEAT(1u << 20), LD_ADD,
                        LD_ENDREP, LD_ENDREP, LD_HALT },
-              .say = { "instruction 2", "1099512676353",
+              .say = { "instruction 3 takes", "2199024304129",
                        "1099511627776 (2^40)" } },
             { .what = "a trip-count product past 2^40",
               .want = CFT_ERR_INVALID_ARGUMENT, .n = 5,
               .ins = { LD_REPEAT(1u << 20), LD_REPEAT(1u << 21), LD_ENDREP,
                        LD_ENDREP, LD_HALT },
-              .say = { "instruction 1 is REPEAT 2097152", "1048576 times",
-                       "1099511627776" } },
+              .say = { "instruction 2 takes", "2199024304129",
+                       "1099511627776 (2^40)" } },
+            /* and past 2^64, which wrapped to a small number in this
+             * loader until 2026-09-07 (host/fuzz) and is held at 2^62 now:
+             * the sentence says "at least" */
+            { .what = "a trip-count product past 2^64",
+              .want = CFT_ERR_INVALID_ARGUMENT, .n = 7,
+              .ins = { LD_REPEAT(1u << 16), LD_REPEAT(1u << 17),
+                       LD_REPEAT(1u << 31), LD_ENDREP, LD_ENDREP, LD_ENDREP,
+                       LD_HALT },
+              .say = { "instruction 3 takes", "at least 4611686018427387904",
+                       "1099511627776 (2^40)" } },
+            /* and the closing test, seq.py's: 2^40 - 3 at the last ENDREP
+             * (1 + 2a + ab, a = 2097148, b = 524287), then four ALU
+             * instructions take it to 2^40 + 1 with no control instruction
+             * after them to name it */
+            { .what = "a worst case passed only after the last loop",
+              .want = CFT_ERR_INVALID_ARGUMENT, .n = 8,
+              .ins = { LD_REPEAT(2097148u), LD_REPEAT(524287u), LD_ENDREP,
+                       LD_ENDREP, LD_ADD, LD_ADD, LD_ADD, LD_ADD },
+              .say = { "the program ends, after instruction 7",
+                       "count of 1099511627777", "1099511627776 (2^40)" } },
             { .what = "REPEAT 0",
               .want = CFT_ERR_INVALID_ARGUMENT, .n = 3,
               .ins = { LD_REPEAT(0), LD_ENDREP, LD_HALT },

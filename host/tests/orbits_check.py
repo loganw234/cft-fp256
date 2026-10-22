@@ -3040,7 +3040,37 @@ def check_certificates(tool, tmp, audit_exe):
             ("member 0's energy respelt with an uppercase E, the same value, "
              "its sum made again",
              lambda t: _resum(t, lambda b: _respelt(b, "inv 0 ", 2, "E")),
-             "member 0's invariant")):
+             "member 0's invariant"),
+            # a value that does not read is a damaged line, not another step
+            # size (KL-424: this was refused as "a different step size"),
+            # and an infinity is a state no run of this tool leaves in a
+            # checkpoint (KL-481: this resumed, and the flag certificate
+            # stopped it at exit 3, or - an invariant - it resumed and
+            # finished at exit 0)
+            ("its step size h with a second space after the key, the "
+             "value itself unchanged, its sum made again",
+             lambda t: _resum(t, lambda b: b.replace("\nh ", "\nh  ", 1)),
+             "is not one exact decimal this format reads"),
+            ("its step size h replaced by a word, its sum made again",
+             lambda t: _resum(t, lambda b: _retoken(b, "h ", 1, "x")),
+             "is not one exact decimal this format reads"),
+            # the other half of the split, so the old sentence is not dead:
+            # a value that reads, exactly, to another number is another
+            # step size
+            ("its step size h another number that reads exactly (1/8), "
+             "its sum made again",
+             lambda t: _resum(t, lambda b: _retoken(b, "h ", 1, "1.25e-1")),
+             "was written for a different step size"),
+            ("member 1's first state value inf, its sum made again",
+             lambda t: _resum(t, lambda b: _retoken(b, "state 1 ", 2, "inf")),
+             "member 1's state value `inf` is an infinity"),
+            ("member 1's last state value -inf, its sum made again",
+             lambda t: _resum(t, lambda b: _retoken(b, "state 1 ", -1,
+                                                    "-inf")),
+             "member 1's state value `-inf` is an infinity"),
+            ("member 0's energy inf, its sum made again",
+             lambda t: _resum(t, lambda b: _retoken(b, "inv 0 ", 2, "inf")),
+             "member 0's invariant `inf` is an infinity")):
         serial[0] += 1
         tag = "rs-ck-%d" % serial[0]
         shutil.copytree(d_o, work / (tag + ".states"))
@@ -3122,6 +3152,17 @@ def _respelt(body, prefix, index, how):
         assert "e" in v, v
         v = v.replace("e", "E", 1)
     tok[index] = v
+    lines[i] = " ".join(tok)
+    return "\n".join(lines)
+
+
+def _retoken(body, prefix, index, value):
+    """`body` with token `index` (negative from the end) of its first line
+    that begins `prefix` replaced by `value`."""
+    lines = body.split("\n")
+    i = next(i for i, l in enumerate(lines) if l.startswith(prefix))
+    tok = lines[i].split(" ")
+    tok[index] = value
     lines[i] = " ".join(tok)
     return "\n".join(lines)
 
@@ -3514,22 +3555,32 @@ def main():
 
         # -------------------------------------------------------------
         print("\n[7] what --engine program must refuse")
-        for why, argv in (
+        for why, argv, needle, absent in (
             ("the outer solar system (30 state values, 3 input streams)",
              ["--engine", "program", "--problem", "outer", "--rsqrt",
-              "newton", "--years", 1]),
-            ("--rsqrt exact (host prep, program core, host finish)",
-             ["--engine", "program", "--rsqrt", "exact", "--periods", 1]),
+              "newton", "--years", 1], None, None),
+            # the reason is the splice that does not exist, as the header's
+            # comment and --engine segments' refusal say (KL-610: this one
+            # still gave the route as host prep, program core and host
+            # finish, which has not been the obstacle since 2026-09-14)
+            ("--rsqrt exact (whole-program divide and square root, no "
+             "inliner to splice them)",
+             ["--engine", "program", "--rsqrt", "exact", "--periods", 1],
+             "fragment inliner", "host finish"),
             ("--resume (a restart state has four non-zero components)",
              ["--engine", "program", "--rsqrt", "newton", "--periods", 1,
-              "--checkpoint", Path(tmp) / "never.ckpt", "--resume"]),
+              "--checkpoint", Path(tmp) / "never.ckpt", "--resume"],
+             None, None),
         ):
             proc = tool.run(*argv, expect_ok=False)
-            check(proc.returncode != 0 and "cft-orbits:" in proc.stderr,
+            check(proc.returncode != 0 and "cft-orbits:" in proc.stderr and
+                  (needle is None or needle in proc.stderr) and
+                  (absent is None or absent not in proc.stderr),
                   "refused: %s\n         (%s)"
                   % (why, (proc.stderr.strip().splitlines() or
                            [""])[0]),
-                  "not refused: %s" % why)
+                  "not refused as it should be: %s\n         (%s)"
+                  % (why, (proc.stderr.strip().splitlines() or [""])[0]))
 
         print("\n[7b] what --engine segments must refuse")
         env_nc = dict(os.environ, CFT_ORBITS_NEGATIVE_CONTROL="transpose")
