@@ -278,9 +278,10 @@ def _check_sees_crlf(script, tmp_path):
     lf = header.read_bytes()
     assert lf and b"\r" not in lf
 
-    r = run("--check")                         # the control: LF passes, so
-    assert r.returncode == 0, r.stdout + r.stderr   # the failure below is
-                                                    # the line ends alone
+    # the control: the LF header passes, so the failure below is the line
+    # ends alone
+    r = run("--check")
+    assert r.returncode == 0, r.stdout + r.stderr
 
     header.write_bytes(lf.replace(b"\n", b"\r\n"))  # the same text, CRLF
     r = run("--check")
