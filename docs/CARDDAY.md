@@ -1220,7 +1220,24 @@ study is per RTL tree, with the three images reported separately beneath it.
   host/'s tree hash, and the compiler** (the same host/ tree under two compilers is two classes) - whether it ran
   on the pool or, in a run before 2026-10-20, on the card. The section says which key it uses. A tree with
   uncommitted changes is a class of its own ("modified"). A run that recorded no tree (every run before
-  2026-10-20) is kept apart by its commit, as "not recorded". A slice is counted under the **last `run_start`
+  2026-10-20) has it **read from git** (parcel RG, 2026-10-22; Logan: "Resolve from git"), by the rule the resume
+  counts by, `card_stress_lib.resolve_tree` through `run_classes`, not a second one: `git rev-parse COMMIT:rtl` and
+  `COMMIT:host` in the checkout the report is in (the repository that holds its own `hw/`), for a commit that
+  checkout holds and a run that recorded `dirty: false`. Its tile slices are then in the class of that rtl/ tree
+  with the runs that recorded it (night 1 of the long run, 881bbcb, is in rtl 44b963dd's class: its four
+  `scaleb32-all` items count as complete there), the class's label says "read from git at commit ...", and
+  `--json` lists what was read in the class's `derived_from_git`: `{commit, dir, tree}` for each run whose tree in
+  the class was read, `[]` when none was (one entry for a commit and directory, however many `run_start`s name it).
+  A host item's class is the host/ tree read and "compiler not recorded", since **a compiler line is never read**
+  (night 1's host slices stay in 276ed15a's class, which is not the current host/ tree). What git cannot say - a commit
+  the checkout lacks (a shallow clone, a bundle without history: derived "in a checkout that holds the commit", and
+  otherwise the commit's own class), a run not recorded clean, a recorded tree that git does not give for its
+  commit, a place that is no repository, no git - is kept apart by its commit as before ("not recorded", or
+  "unknown" for the contradicted tree), with `resolve_tree`'s reason in the label. `--no-git` (or `summarize(rev=None)`) is
+  the record-only view. git is asked once for each commit and directory, 10 s a lookup and 40 s in all (the driver
+  refreshes the report after every cycle with a two-minute limit); a git that does not answer, is not there or finds
+  no repository stops the rest and is named in `sweep.trees.git.problem` and the section's `git:` line. `summarize()`
+  derives by default, so a reducer that calls it gets the classes the command line shows. A slice is counted under the **last `run_start`
   before it** in its file, so a run resumed from another checkout counts what follows under that checkout's tree.
 - **The telemetry section's HBM temperature** (since 2026-10-22, KL-32): the card's FPGA HBM temperature reads 0 in most
   samples - 670 of the 865 of the 2026-10-19 run, in 23 runs of 14 to 45 consecutive samples between 23 runs of readings (the first one
@@ -1308,9 +1325,12 @@ both" - the class-aware planner in the driver, and the coarse key, the whole hos
   parcel DR3's 13; 17 before this change: the 4 never served in that file and DR3's 13).
 - **What it does not do.** A quarantined range (a slice that did not finish `--quarantine-after` times) and a disabled
   item stay the whole file's: a resume on a new tree still skips a range that hung the card on an old one. A modified
-  tree is one class per base hash, as the report keys it (the change itself is not recorded). The report keeps an old run
-  apart by its commit and does not derive, so for such a run the report's class ("not recorded") and the planner's (the
-  derived rtl/ tree) differ by design. A resume that cannot read its own tree or compiler counts nothing of that reach,
+  tree is one class per base hash, as the report keys it (the change itself is not recorded). The report derives an old
+  run's trees as the planner does (since 2026-10-22, parcel RG; until then it kept such a run apart by its commit, and its
+  class "not recorded" and the planner's derived rtl/ tree differed), so where git can say the report's class and the planner's
+  are the same; `hw/test_card_stress_report.py` holds the report's per-class coverage to what `count_slices` counts from the
+  same records with the same git - on a scratch repository always, and on a real file when CARD_STRESS_RESUME_RUN names
+  one. A resume that cannot read its own tree or compiler counts nothing of that reach,
   said by name. The key is the whole host/ tree and the compiler (Logan kept it): any commit that touches host/
   re-covers the host items, 15 of the 88 commits between 881bbcb and 0b7c959 did and none of them touched the library's
   source (`host/src`, `host/include`; READ in the study).
