@@ -1539,6 +1539,7 @@ CFT_API cft_status cft_from_decimal_char(cft_device *dev, cft_format fmt,
                                          size_t n, size_t *bad_index,
                                          uint32_t *flags_out)
 {
+    cft_clear_error();
     return from_char_batch(dev, fmt, rnd, in, d, n, bad_index, flags_out, 0);
 }
 
@@ -1547,6 +1548,7 @@ CFT_API cft_status cft_from_hex_char(cft_device *dev, cft_format fmt,
                                      void *d, size_t n, size_t *bad_index,
                                      uint32_t *flags_out)
 {
+    cft_clear_error();
     return from_char_batch(dev, fmt, rnd, in, d, n, bad_index, flags_out, 1);
 }
 
@@ -1561,6 +1563,7 @@ CFT_API cft_status cft_to_decimal_char(cft_device *dev, cft_format fmt,
     uint32_t fl = 0;
     cft_status st;
 
+    cft_clear_error();
     if (len)
         *len = 0;
     cft_flags_emit(dev, 0, flags_out);
@@ -1606,6 +1609,7 @@ CFT_API cft_status cft_to_hex_char(cft_device *dev, cft_format fmt,
     sbuf b;
     cft_status st;
 
+    cft_clear_error();
     if (len)
         *len = 0;
     if (!dev)
@@ -1668,7 +1672,10 @@ CFT_API cft_status cft_get_payload(cft_device *dev, cft_format fmt,
 {
     const cft_fmt_desc *f;
     size_t i;
-    cft_status st = payload_validate(dev, fmt, a, d, n);
+    cft_status st;
+
+    cft_clear_error();
+    st = payload_validate(dev, fmt, a, d, n);
     if (st != CFT_OK || n == 0)
         return st;
     f = &cft_sf_formats[(int)fmt];
@@ -1777,12 +1784,14 @@ static cft_status set_payload_core(cft_device *dev, cft_format fmt,
 CFT_API cft_status cft_set_payload(cft_device *dev, cft_format fmt,
                                    const void *a, void *d, size_t n)
 {
+    cft_clear_error();
     return set_payload_core(dev, fmt, a, d, n, 0);
 }
 
 CFT_API cft_status cft_set_payload_signaling(cft_device *dev, cft_format fmt,
                                              const void *a, void *d, size_t n)
 {
+    cft_clear_error();
     return set_payload_core(dev, fmt, a, d, n, 1);
 }
 

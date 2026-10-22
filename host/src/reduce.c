@@ -360,6 +360,7 @@ CFT_API cft_status cft_scaled_prod(cft_device *dev, cft_format fmt,
                                    void *pr, int64_t *scale_out,
                                    size_t n, uint32_t *flags_out)
 {
+    cft_clear_error();
     return scaled_prod_impl(dev, fmt, rnd, a, NULL, 0, pr, scale_out, n,
                             flags_out);
 }
@@ -370,6 +371,7 @@ CFT_API cft_status cft_scaled_prod_sum(cft_device *dev, cft_format fmt,
                                        int64_t *scale_out, size_t n,
                                        uint32_t *flags_out)
 {
+    cft_clear_error();
     return scaled_prod_impl(dev, fmt, rnd, a, b, 1, pr, scale_out, n,
                             flags_out);
 }
@@ -380,6 +382,7 @@ CFT_API cft_status cft_scaled_prod_diff(cft_device *dev, cft_format fmt,
                                         int64_t *scale_out, size_t n,
                                         uint32_t *flags_out)
 {
+    cft_clear_error();
     return scaled_prod_impl(dev, fmt, rnd, a, b, 2, pr, scale_out, n,
                             flags_out);
 }

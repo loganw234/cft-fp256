@@ -433,14 +433,26 @@ void cft_sw_seq_caps(cft_seq_caps *out);
  * something was unsupported. Cleared the moment anything reaches a
  * backend, so it never explains someone else's failure.
  *
- * cft_clear_error empties it for an entry point that reaches no backend
- * and must still never show an earlier call's sentence: cft_program_load
- * clears it on entry (2026-09-30), and every refusal it makes then
- * writes a sentence of its own, so what a refused load leaves in
- * cft_last_error() is that load's reason and nobody else's. Its own
- * function rather than cft_set_error(""), which is -Wformat-zero-length,
- * and rather than device.c's backend_call(), which is static and is
- * compiled only where a device backend is.
+ * cft_clear_error empties EVERY slot cft_last_error() reads - this one,
+ * the remote backend's (cftr_clear_error) and the XRT backend's
+ * (cftx_clear_error) - and it is the first statement of every public
+ * entry point that returns a status, in every source file (2026-10-22;
+ * before it, only cft_program_load did, from 2026-09-30). So what
+ * cft_last_error() holds after such a call is that call's sentence or
+ * nothing: never an older call's, and never one backend's older
+ * sentence ahead of another's newer. A refusal then writes a sentence
+ * of its own, so the sentence a refused call leaves is that call's
+ * reason and nobody else's. Its own function rather than
+ * cft_set_error(""), which is -Wformat-zero-length, and rather than
+ * device.c's backend_call(), which is static and is compiled only where
+ * a device backend is - and which now only calls this.
+ *
+ * Entry points that return no status (cft_close, the *_free calls, the
+ * flag operations) and the queries that answer in the return value
+ * (cft_supports, cft_buffer_data, cft_format_size and the like) do NOT
+ * clear: they cannot fail with a status, so a caller who asks one
+ * between a failure and cft_last_error() still reads the failure's
+ * sentence.
  *
  * Every CFT_ERR_UNSUPPORTED this library returns goes through one of
  * these, because a refusal without a sentence leaves cft_last_error()
@@ -486,6 +498,14 @@ int  cft_composed_refusal(const char *entry, const char *needs, int fmt);
  * throwing that away to return a bare enum would make a bad night on
  * the bench considerably worse. */
 const char *cftx_last_error(void);
+
+/* Empties it (device.c's cft_clear_error calls this). Some of this
+ * backend's own calls clear it as their first act - open, a run, a
+ * program run, the image's identity - and some never did: a reduction, a
+ * read-back, a publish. device.c now clears it before every one of them
+ * and at the top of every public entry point, so none of that depends on
+ * which call is which. */
+void cftx_clear_error(void);
 
 /* ====================================================================
  * The remote backend (docs/REMOTE.md), beside the XRT one.

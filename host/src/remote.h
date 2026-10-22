@@ -285,6 +285,14 @@ int  cftr_program_run(void *hw, int fmt, const void *image,
                       uint32_t *flags, uint32_t *bus);
 const char *cftr_last_error(void);
 
+/* Empties what cftr_last_error() holds. Every call this backend makes
+ * already empties it as its first act; this is for device.c's
+ * cft_clear_error, which must empty it too when a call reaches no
+ * remote backend at all - or cft_last_error() would show a remote
+ * handle's older sentence in front of a newer failure that has none
+ * (KL-490). */
+void cftr_clear_error(void);
+
 /* One raw request on an open remote handle, for the tests and for the
  * operations libcft's own client never issues (the buffer and status-
  * word operations, STATS). Returns the transport verdict: 0 when a

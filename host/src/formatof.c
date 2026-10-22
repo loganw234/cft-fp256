@@ -840,6 +840,7 @@ CFT_API cft_status cft_formatof_add(cft_device *dev, cft_format sfmt,
                                     size_t n, uint32_t *flags_out,
                                     uint32_t *bus_out)
 {
+    cft_clear_error();
     return fo_batch(dev, FO_ADD, sfmt, dfmt, rnd, a, b, NULL, d, n,
                     flags_out, bus_out);
 }
@@ -850,6 +851,7 @@ CFT_API cft_status cft_formatof_sub(cft_device *dev, cft_format sfmt,
                                     size_t n, uint32_t *flags_out,
                                     uint32_t *bus_out)
 {
+    cft_clear_error();
     return fo_batch(dev, FO_SUB, sfmt, dfmt, rnd, a, b, NULL, d, n,
                     flags_out, bus_out);
 }
@@ -860,6 +862,7 @@ CFT_API cft_status cft_formatof_mul(cft_device *dev, cft_format sfmt,
                                     size_t n, uint32_t *flags_out,
                                     uint32_t *bus_out)
 {
+    cft_clear_error();
     return fo_batch(dev, FO_MUL, sfmt, dfmt, rnd, a, b, NULL, d, n,
                     flags_out, bus_out);
 }
@@ -870,6 +873,7 @@ CFT_API cft_status cft_formatof_div(cft_device *dev, cft_format sfmt,
                                     size_t n, uint32_t *flags_out,
                                     uint32_t *bus_out)
 {
+    cft_clear_error();
     return fo_batch(dev, FO_DIV, sfmt, dfmt, rnd, a, b, NULL, d, n,
                     flags_out, bus_out);
 }
@@ -880,6 +884,7 @@ CFT_API cft_status cft_formatof_sqrt(cft_device *dev, cft_format sfmt,
                                      size_t n, uint32_t *flags_out,
                                      uint32_t *bus_out)
 {
+    cft_clear_error();
     return fo_batch(dev, FO_SQRT, sfmt, dfmt, rnd, a, NULL, NULL, d, n,
                     flags_out, bus_out);
 }
@@ -891,6 +896,7 @@ CFT_API cft_status cft_formatof_fma(cft_device *dev, cft_format sfmt,
                                     size_t n, uint32_t *flags_out,
                                     uint32_t *bus_out)
 {
+    cft_clear_error();
     return fo_batch(dev, FO_FMA, sfmt, dfmt, rnd, a, b, c, d, n,
                     flags_out, bus_out);
 }
