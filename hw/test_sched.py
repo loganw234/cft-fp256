@@ -1905,7 +1905,7 @@ GROUPS = {"spec": group_spec, "queue": group_queue, "records": group_records, "c
 
 
 def make_copy(name: str, edits: list) -> str:
-    d = os.path.join(TMP, "plant-" + name)
+    d = os.path.join(TMP, "plant-" + re.sub(r"[^A-Za-z0-9_.,-]+", "-", name))             # a part of a group (steps:jobs) names a directory: no colon on Windows
     os.makedirs(os.path.join(d, "sched"))
     shutil.copy(os.path.join(HERE, "test_sched.py"), d)
     for f in os.listdir(SCHED):
