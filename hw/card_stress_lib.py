@@ -1003,7 +1003,9 @@ def record_batch(sw: Dict[str, Any]) -> int:
 def tree_key(kind: str, tr: Optional[Dict[str, Any]]) -> Tuple[str, Optional[str]]:
     """(key, unknown): the class a sweep slice of this reach falls in, given the `tree` of the run_start it ran after (None: it had none).
     THE definition of the key: the report's coverage by tree (card_stress_report.py) and the driver's --resume (Driver.count_by_class)
-    both call it, so what the report puts in a class is what a resume counts. A TILE item is evidence about the RTL tree it ran on
+    both call it - through run_classes, over the tree resolve_tree gives, which is the run's own with what it did not record read from
+    its commit by git (the report since 2026-10-22, parcel RG; the resume since DR4) - so what the report puts in a class is what a
+    resume counts, given the same git. A TILE item is evidence about the RTL tree it ran on
     (tree.rtl, `git rev-parse HEAD:rtl`); a HOST item about the library's source and the compiler (tree.host_src, the tree hash of host/,
     and tree.cc, the compiler's first version line). A tree with uncommitted changes is a key of its own ('+modified'); a run that
     recorded none of it is kept apart by its commit ('unrecorded:<commit>'). `unknown` is None when every part of the key was recorded,

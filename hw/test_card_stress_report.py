@@ -21,6 +21,15 @@ changed and nothing else. A second control tampers the finished summary and requ
 summary check and the text check to name the figure. Files are truncated mid-line, corrupted
 in the middle, emptied and removed; the command is run as a subprocess.
 
+THE TREES READ FROM GIT (group git-trees, parcel RG, 2026-10-22). A scratch git repository of three real commits stands in for the
+checkout, and runs are built whose first run_start recorded its tree and whose second did not. The report must give the second the
+class of a run that recorded that tree (and say "read from git", and list what it read in derived_from_git), and keep it apart, with
+the reason, where git cannot say: a commit the repository lacks, a run not recorded clean, a recorded tree git does not give for its
+commit, --no-git, no repository, git too slow or not there. Each check family is then run again on a summary made with the defect it
+guards against put in (git ignored, a git that finds every commit, a dirty tree taken for clean, ...) and must fail at the check named for
+it. The report's coverage in the classes of a resuming run is held to what card_stress_lib.count_slices - the driver's resume - counts
+from the same records with the same git, on the synthetic runs and, when CARD_STRESS_RESUME_RUN names a copy of the lead's run, on it.
+
 The last line is "report test: N checks, F failed"; the exit status is 0 only if F is 0.
 """
 import sys
@@ -29,12 +38,14 @@ sys.dont_write_bytecode = True
 import calendar
 import contextlib
 import copy
+import hashlib
 import io
 import json
 import math
 import os
 import re
 import shutil
+import stat
 import subprocess
 import tempfile
 import time
@@ -44,6 +55,7 @@ from fractions import Fraction
 HW = os.path.dirname(os.path.abspath(__file__))
 if HW not in sys.path:
     sys.path.insert(0, HW)
+import card_stress_lib as LIB       # noqa: E402  (what the driver's resume counts by)
 import card_stress_report as R      # noqa: E402  (the unit under test)
 
 SCRIPT = os.path.join(HW, "card_stress_report.py")
@@ -1980,6 +1992,452 @@ def group_cli(base, marks, tmp):
     check("STALE" not in t and "the report itself failed" in t, "and report.txt no longer shows a stale account")
 
 
+# ---------------------------------------------------------------------------
+# parcel RG (2026-10-22): a tree the run did not record, read from its commit
+# ---------------------------------------------------------------------------
+
+GM = 1 << 20
+TI, HI = "scaleb32-all-rne", "conv32to64-all"          # a tile item and a host item of the catalog
+REAL_THREE_NIGHT = "de4ee37900917762e4ba071d434eb28204f92fed6c5056e88a70ccce6516e986"       # the lead's three nights (1,910 records), by sha256
+
+
+def skip(what, why):
+    print(f"  SKIP  [{_st['g']}] {what} - {why}")
+    sys.stdout.flush()
+
+
+def rmtree_force(path):
+    """shutil.rmtree that also removes read-only files: a git repository's objects are, and ignore_errors=True leaves them on Windows."""
+    def fix(func, p, _exc):
+        try:
+            os.chmod(p, stat.S_IWRITE)
+            func(p)
+        except OSError:
+            pass
+    try:
+        shutil.rmtree(path, **({"onexc": fix} if sys.version_info >= (3, 12) else {"onerror": fix}))
+    except OSError:
+        pass
+
+
+class Ck:
+    """Checks collected, not yet counted: a family runs on the real summary (hold) and again on one made with a defect put in (plant),
+    where the check named for the defect must fail - a check that cannot fail is worth nothing."""
+
+    def __init__(self):
+        self.res = []
+
+    def __call__(self, ok, what, detail=None):
+        self.res.append((bool(ok), what, detail))
+
+    def eq(self, got, want, what):
+        self(got == want, what, f"got {_short(got)}, want {_short(want)}")
+
+
+def hold(fn, *a):
+    ck = Ck()
+    fn(ck, *a)
+    for ok, what, detail in ck.res:
+        check(ok, what, detail)
+
+
+def plant(fn, defect, named, *a):
+    """fn(ck, *a), `a` made with `defect` put in: the check that begins `named` must fail."""
+    ck = Ck()
+    fn(ck, *a)
+    red = [w for ok, w, _ in ck.res if not ok]
+    check(any(w.startswith(named) for w in red), f"plant, {defect}: the check '{named}...' fails", red[:2])
+
+
+@contextlib.contextmanager
+def patched(**kw):
+    old = {k: getattr(R, k) for k in kw}
+    for k, v in kw.items():
+        setattr(R, k, v)
+    try:
+        yield
+    finally:
+        for k, v in old.items():
+            setattr(R, k, v)
+
+
+def g_start(tree):
+    return {"type": "run_start", "v": 1, "epoch": T0, "ts": box_ts(T0), "run_id": "git-run", "tree": tree}
+
+
+def g_leg(item, lo, hi, reach, image):
+    return {"type": "leg", "v": 1, "epoch": T0, "kind": "sweep", "status": "pass", "image": image, "leg": "sweep-" + item,
+            "counts": {"cases": hi - lo}, "sweep": {"item": item, "op": item.split("-")[0], "reach": reach, "lo": lo, "hi": hi}}
+
+
+class GitFx:
+    """A scratch git repository of three real commits: c1 and c2 share rtl/ and differ in host/ (as 881bbcb and 0b7c959 do), c3 changes rtl/."""
+
+    def __init__(self, tmp):
+        self.repo = os.path.join(tmp, "git-repo")
+        os.makedirs(self.repo)
+        self.git("init", "-q")
+        self.c = []
+        for k, (rtl, host) in enumerate((("v1", "h1"), ("v1", "h2"), ("v2", "h2"))):
+            for rel, txt in (("rtl/a.sv", rtl), ("host/h.c", host)):
+                os.makedirs(os.path.join(self.repo, os.path.dirname(rel)), exist_ok=True)
+                write_bytes(os.path.join(self.repo, rel), (txt + "\n").encode())
+            self.git("add", "-A")
+            self.git("commit", "-qm", f"c{k + 1}")
+            self.c.append(self.git("rev-parse", "HEAD"))
+        self.t = {(c, d): self.git("rev-parse", f"{c}:{d}") for c in self.c for d in ("rtl", "host")}
+        self.A, self.B, self.H1, self.H2 = self.t[(self.c[0], "rtl")], self.t[(self.c[2], "rtl")], self.t[(self.c[0], "host")], self.t[(self.c[1], "host")]
+        # a run that recorded all of its tree, at c2; and one from before 2026-10-20, at c1, that recorded none
+        self.rec = {"commit": self.c[1], "dirty": False, "dirty_files": 0, "rtl": self.A, "rtl_dirty": False, "host_src": self.H2,
+                    "host_src_dirty": False, "cc": "gcc 11.4"}
+        self.old = {"commit": self.c[0], "dirty": False, "dirty_files": 0}
+
+    def git(self, *a):
+        p = subprocess.run(["git", "-c", "user.name=report-test", "-c", "user.email=report-test@example.invalid", "-c", "commit.gpgsign=false",
+                            "-C", self.repo] + list(a), capture_output=True, text=True, timeout=60)
+        if p.returncode != 0:
+            raise RuntimeError(f"git {' '.join(a)}: {p.stderr.strip()[:200]}")
+        return p.stdout.strip()
+
+    def runs(self, second):
+        """The first run recorded its tree, the second is `second`; each did one slice of a tile item and one of a host item, side by side."""
+        return [g_start(self.rec), g_leg(TI, 0, GM, "tile", "quad"), g_leg(HI, 0, GM, "host", "cpu"),
+                g_start(second), g_leg(TI, GM, 2 * GM, "tile", "single"), g_leg(HI, GM, 2 * GM, "host", "cpu")]
+
+
+NO_CLASS = {"exhaustive": [{}], "derived_from_git": None, "label": ""}
+
+
+def kclasses(S, kind):
+    return [c for c in S["sweep"]["trees"]["classes"] if c["kind"] == kind]
+
+
+def kkey(cs, key):
+    return next((c for c in cs if c["key"] == key), None)
+
+
+def ck_derived(ck, S, fx, twin):
+    """The second run recorded no tree and its clean commit is in the checkout: it is in the class of the tree, and says so."""
+    A, c1 = fx.A, fx.c[0]
+    tc, hc = kclasses(S, "tile"), kclasses(S, "host")
+    ck.eq([c["key"] for c in tc], [A], "derived: one tile class, the tree the first run recorded and the second did not")
+    ta = kkey(tc, A) or NO_CLASS
+    e = ta["exhaustive"][0]
+    ck((e.get("covered"), e.get("slices"), e.get("by_image")) == (2 * GM, 2, {"quad": GM, "single": GM}),
+       "derived: the second run's slice is counted in it, beside the first run's", e)
+
+    def strip(c):
+        return {k: v for k, v in (c or {}).items() if k not in ("label", "derived_from_git")}
+    ck(strip(kkey(kclasses(twin, "tile"), A)) == strip(kkey(tc, A)) != {},
+       "derived: it is the very class a run that RECORDED that tree is in (every field but label and derived_from_git)")
+    ck.eq(ta["derived_from_git"], [{"commit": c1, "dir": "rtl", "tree": A}], "derived: derived_from_git gives the commit, the directory and the tree read")
+    ck("read from git" in ta["label"] and c1[:12] in ta["label"] and A[:12] in ta["label"],
+       "derived: the label says 'read from git', at which commit, for which tree", ta["label"])
+    hk = f"{fx.H1}|compiler not recorded"
+    ck.eq(sorted(c["key"] for c in hc), sorted([f"{fx.H2}|gcc 11.4", hk]),
+          "derived: the host items are two classes: the second run's host/ tree is read from git, its compiler never")
+    hb = kkey(hc, hk) or NO_CLASS
+    ck.eq(hb["derived_from_git"], [{"commit": c1, "dir": "host", "tree": fx.H1}], "derived: the host class's derived_from_git gives its commit and tree")
+    ck("read from git" in hb["label"] and "compiler not recorded" in hb["label"], "derived: and its label says both", hb["label"])
+    ck.eq((kkey(hc, f"{fx.H2}|gcc 11.4") or NO_CLASS)["derived_from_git"], [], "derived: a class of a run that recorded its tree has an empty derived_from_git")
+
+
+def ck_many(ck, S, fx, rev, many):
+    """A resumed run (a second run_start at one commit) is ONE entry of derived_from_git, a run at another commit a second."""
+    ta = kkey(kclasses(S, "tile"), fx.A) or NO_CLASS
+    c1, c2 = fx.c[0][:12], fx.c[1][:12]
+    ck.eq([(d["commit"][:12], d["dir"]) for d in ta["derived_from_git"]], [(c1, "rtl"), (c2, "rtl")],
+          "many: two run_starts at one commit and one at another give two derived_from_git entries, in the order first used")
+    ck("commits" in ta["label"] and c1 in ta["label"] and c2 in ta["label"], "many: and the label names both commits", ta["label"])
+    with patched(LABEL_COMMITS=1):
+        lab = R.summarize(many, rev=rev)["sweep"]["trees"]["classes"][0]["label"]
+    ck(c1 in lab and "and 1 more" in lab and c2 not in lab, "many: and names at most LABEL_COMMITS of them, the rest as a count", lab)
+
+
+def ck_apart(ck, S, fx, commit, why, what):
+    """The second run's tree cannot be had from git: its slice is a class of its own, by its commit, and the label says why."""
+    tc = kclasses(S, "tile")
+    ka = kkey(tc, "unrecorded:" + commit)
+    ck(ka is not None, f"{what}: the second run is a class of its own, kept apart by its commit", [c["key"][:20] for c in tc])
+    ka = ka or NO_CLASS
+    ck(why in ka["label"] and commit[:12] in ka["label"], f"{what}: its label gives the reason ({why})", ka["label"])
+    ck("read from git" not in ka["label"] and ka["derived_from_git"] == [], f"{what}: and nothing is read from git for it", ka["derived_from_git"])
+    ta = kkey(tc, fx.A) or NO_CLASS
+    ck(ta["exhaustive"][0].get("covered") == GM, f"{what}: the first run's class holds the first run's slice alone", ta["exhaustive"][0])
+
+
+class FakeProc:
+    """Stands in for the subprocess module inside the report: counts what it is asked, and answers, fails or is slow as told."""
+    TimeoutExpired = subprocess.TimeoutExpired
+
+    def __init__(self, out="a" * 40, rc=0, exc=None, delay=0.0):
+        self.out, self.rc, self.exc, self.delay, self.calls = out, rc, exc, delay, []
+
+    def run(self, argv, **kw):
+        self.calls.append((list(argv), kw))
+        if self.delay:
+            time.sleep(self.delay)
+        if self.exc:
+            raise self.exc
+        return type("P", (), {"returncode": self.rc, "stdout": self.out + "\n", "stderr": ""})()
+
+
+class Uncached(R.GitTrees):
+    def __call__(self, commit, rel):
+        self.seen.clear()
+        return super().__call__(commit, rel)
+
+
+class Persistent(R.GitTrees):
+    def _git(self, *args):
+        self.problem = None
+        return super()._git(*args)
+
+
+def ck_kept(ck, cls):
+    """git is asked once for each (commit, directory), by the driver's own command, with a timeout."""
+    b, fake = "b" * 40, FakeProc()
+    with patched(subprocess=fake):
+        g = cls("/x")
+        got = [g(b, "rtl"), g(b, "rtl"), g(b, "host"), g(b, "rtl"), g("c" * 40, "rtl"), g("abc", "rtl")]
+    ck.eq(got, ["a" * 40] * 5 + [None], "git: the answer is the tree git printed; a commit that is not a whole hash is None")
+    ck.eq(len(fake.calls), 3, "git: kept per (commit, directory): six asks for three pairs run git three times, a non-hash never")
+    ck.eq(fake.calls[0][0], ["git", "-C", "/x", "rev-parse", f"{b}:rtl"], "git: the command is `git -C ROOT rev-parse COMMIT:REL`, the driver's own")
+    ck(all(0 < kw.get("timeout", 0) <= R.GIT_TIMEOUT_S for _, kw in fake.calls), "git: every lookup carries a timeout of at most GIT_TIMEOUT_S",
+       [kw.get("timeout") for _, kw in fake.calls])
+
+
+def ck_stops(ck, cls):
+    """A git that does not answer in time stops them: it is asked once, and the label and the summary say it was not asked, not that the commit is absent."""
+    b, fake = "b" * 40, FakeProc(exc=subprocess.TimeoutExpired("git", 10))
+    recs = [g_start({"commit": b, "dirty": False, "dirty_files": 0}), g_leg(TI, 0, GM, "tile", "quad")]
+    with patched(subprocess=fake):
+        g = cls("/x")
+        S = R.summarize(recs, rev=g)
+        again = g("e" * 40, "host")
+    ck(len(fake.calls) == 1 and again is None, "git stops: the lookup git does not answer in time is the only one run; the next is not", len(fake.calls))
+    ck("did not answer within" in (g.problem or ""), "git stops: and `problem` says so by name", g.problem)
+    lab = (kclasses(S, "tile") or [NO_CLASS])[0]["label"]
+    ck(g.problem and g.problem in lab and S["sweep"]["trees"]["git"] == {"read": True, "problem": g.problem},
+       "git stops: the class's label and the summary carry it (unread, not absent)", lab)
+
+
+def ck_agree(ck, recs, tree_now, rev, S, what):
+    """The report's coverage in the classes a resuming run at `tree_now` is in equals what card_stress_lib.count_slices - the driver's resume -
+    counts from the same records with the same rev: per item, the slices, the cases, and the covered encodings (exhaustive) or highest seed_n."""
+    now = LIB.run_classes(tree_now)
+    counted, tally = LIB.count_slices(recs, now, rev)
+    iv, served, cases, seeds, _dis = LIB.sweep_coverage(counted)
+    bad = []
+    for reach in (LIB.TILE, LIB.HOST):
+        key, unknown = now[reach]
+        want = {r["sweep"]["item"]: (served[r["sweep"]["item"]], cases[r["sweep"]["item"]],
+                                     LIB.covered(iv[r["sweep"]["item"]]) if r["sweep"]["item"] in iv else seeds.get(r["sweep"]["item"]))
+                for r in counted if LIB.slice_reach(r["sweep"]) == reach}
+        c = kkey(kclasses(S, reach), key) or {}
+        got = {e["item"]: (e["slices"], e["cases"], e["covered"]) for e in c.get("exhaustive", [])}
+        got.update({e["item"]: (e["slices"], e["cases"], e["max_seed_n"]) for e in c.get("random", [])})
+        if unknown is not None or got != want:
+            bad.append(f"{reach} {key[:24]}: unknown {unknown}; the report has {sorted(got.items())[:2]}, the resume counts {sorted(want.items())[:2]}")
+    ck(not bad, f"{what}: the report's coverage in the resuming run's classes equals what the resume counts, item by item", bad[:2])
+    ck(tally["counted"][LIB.TILE] > 0, f"{what}: and the resume counted tile slices there (the comparison is not empty)", tally["counted"])
+    return tally
+
+
+def cli_checks(fx, tmp):
+    """The command line, from a copy of the report placed in hw/ of the scratch repository (its own checkout) and in a directory that is none."""
+    run = os.path.join(tmp, "git-cli-run")
+    os.makedirs(run)
+    write_metrics(os.path.join(run, "metrics.jsonl"), fx.runs(fx.old))
+    jp = os.path.join(tmp, "git-cli.json")
+
+    def go(root, *extra):
+        os.makedirs(os.path.join(root, "hw"), exist_ok=True)
+        for f in ("card_stress_report.py", "card_stress_lib.py"):
+            shutil.copyfile(os.path.join(HW, f), os.path.join(root, "hw", f))
+        p = subprocess.run([sys.executable, "-B", "-I", os.path.join(root, "hw", "card_stress_report.py"), run, "--no-write", "--json", jp]
+                           + list(extra), capture_output=True, text=True, timeout=120, cwd=tmp)
+        try:
+            with open(jp, encoding="utf-8") as fh:
+                js = json.load(fh)
+            os.remove(jp)
+        except (OSError, ValueError):
+            js = {"sweep": {"trees": {"classes": [], "git": {}}}}
+        return p, js["sweep"]["trees"]
+
+    def reads(ck, pj):
+        p, T = pj
+        tk = [c for c in T["classes"] if c["kind"] == "tile"]
+        ck(p.returncode == 0 and [c["key"] for c in tk] == [fx.A] and tk[0]["derived_from_git"] == [{"commit": fx.c[0], "dir": "rtl", "tree": fx.A}],
+           "cli: by default the report reads git of the repository that holds ITS hw/ (a scratch one, run from elsewhere): the tree is derived",
+           (p.returncode, [c["key"][:12] for c in tk], p.stderr[-120:]))
+        ck(f"(read from git at commit {fx.c[0][:12]})" in p.stdout and T["git"] == {"read": True, "problem": None},
+           "cli: and the text says 'read from git' at that commit, and sweep.trees.git says git was read and nothing stopped it")
+
+    def apart(ck, pj):
+        ck(f"unrecorded:{fx.c[0]}" in [c["key"] for c in pj[1]["classes"] if c["kind"] == "tile"], "cli: --no-git keeps it apart")
+
+    here = go(fx.repo)
+    hold(reads, here)
+    plain = os.path.join(tmp, "git-plain")
+    os.makedirs(plain)
+    if subprocess.run(["git", "-C", plain, "rev-parse", "--git-dir"], capture_output=True, text=True, timeout=60).returncode == 0:
+        skip("cli: the report in a directory that is no repository", "the temporary directory is inside a repository")
+    else:
+        outside = go(plain)
+        tk = [c for c in outside[1]["classes"] if c["kind"] == "tile"]
+        check(f"unrecorded:{fx.c[0]}" in [c["key"] for c in tk] and all(c["derived_from_git"] == [] for c in tk)
+              and "not a git repository" in (outside[1]["git"].get("problem") or "") and "not a git repository" in outside[0].stdout,
+              "cli: a copy in a directory that is no repository derives nothing, and says so by name (sweep.trees.git.problem and the text)",
+              [c["key"][:12] for c in tk])
+        plant(reads, "the report reading no checkout", "cli: by default the report reads git", outside)
+    nog = go(fx.repo, "--no-git")
+    hold(apart, nog)
+    check(nog[0].returncode == 0 and "git was not read (--no-git)" in nog[0].stdout and nog[1]["git"] == {"read": False, "problem": None}
+          and all(c["derived_from_git"] == [] for c in nog[1]["classes"]), "cli: --no-git is today's record-only view; the text and the summary say git was not read")
+    plant(apart, "the flag ignored", "cli: --no-git keeps it apart", here)
+
+
+def real_copy_checks():
+    """The agreement on a real file: CARD_STRESS_RESUME_RUN names a directory holding a copy of the lead's stress run (metrics.jsonl)."""
+    run = os.environ.get("CARD_STRESS_RESUME_RUN")
+    mp = os.path.join(run or "", "metrics.jsonl")
+    what = "the report against the resume's count on a real file"
+    if not run or not os.path.isfile(mp):
+        skip(what, "CARD_STRESS_RESUME_RUN does not name a run directory holding a metrics.jsonl (the lead's box/nightly-1021/run)")
+        return
+    recs = LIB.read_records(mp)[0]
+    checkout = os.path.dirname(HW)
+    head = subprocess.run(["git", "-C", checkout, "rev-parse", "HEAD"], capture_output=True, text=True, timeout=60).stdout.strip()
+    if not LIB.GIT_HASH.fullmatch(head):
+        skip(what, "this checkout is not a git repository")
+        return
+    rev = R.GitTrees(checkout)
+    S = R.summarize(recs, rev=rev)
+    starts = [r["tree"] for r in recs if r.get("type") == "run_start" and isinstance(r.get("tree"), dict)]
+    here = {"commit": head, "dirty": False, "rtl": rev(head, "rtl"), "rtl_dirty": False, "host_src": rev(head, "host"), "host_src_dirty": False,
+            "cc": starts[-1].get("cc")}
+    hold(lambda ck: (ck_agree(ck, recs, starts[-1], rev, S, "real file, at the file's last run_start"),
+                     ck_agree(ck, recs, here, rev, S, "real file, at this checkout's HEAD")))
+    plant(lambda ck, s: ck_agree(ck, recs, starts[-1], rev, s, "real file, at the file's last run_start"), "the report not reading git while the resume does",
+          "real file, at the file's last run_start: the report's coverage", R.summarize(recs, rev=None))
+    first = starts[0].get("commit")
+    with open(mp, "rb") as fh:
+        sha = hashlib.sha256(fh.read()).hexdigest()
+    if sha != REAL_THREE_NIGHT or not rev(first, "rtl"):
+        skip("the lead's three nights: night 1's slices in the current trees' classes", "the file is not the lead's three-night copy (sha256), or "
+             "this checkout does not hold night 1's commit")
+        return
+    cur = rev(first, "rtl")
+
+    def done(summary):
+        return sorted(e["item"] for e in (kkey(kclasses(summary, "tile"), cur) or {}).get("exhaustive", []) if e["item"].startswith("scaleb32-all-") and e["complete"])
+    eq(done(S), ["scaleb32-all-" + m for m in ("rdn", "rne", "rtz", "rup")], "real file: the four scaleb32-all items are complete in the current RTL tree's class")
+    eq(done(R.summarize(recs, rev=None)), [], "real file: and without git they are not (night 1's slices are in a class of their own)")
+    hk = [c for c in kclasses(S, "host") if c["key"].startswith(rev(first, "host"))]
+    check(len(hk) == 1 and "read from git" in hk[0]["label"] and rev(head, "host") != rev(first, "host"),
+          "real file: night 1's host slices are in the class of ITS host/ tree, which is not this checkout's", [c["label"][:60] for c in hk])
+
+
+def group_git(tmp):
+    group("git-trees")
+    try:
+        fx = GitFx(tmp)
+    except (OSError, RuntimeError) as e:
+        skip("the trees read from git", f"no scratch git repository can be made here ({e})")
+        return
+    c1, c2, c3, A = fx.c[0], fx.c[1], fx.c[2], fx.A
+    check(fx.t[(c2, "rtl")] == A != fx.B == fx.t[(c3, "rtl")] and fx.H1 != fx.H2 == fx.t[(c3, "host")],
+          "the scratch repository has the shape the tests assume: c1 and c2 share rtl/, host/ differs between them, c3 changes rtl/")
+    rev = R.GitTrees(fx.repo)
+    # 1. no tree recorded, a clean commit that is in the checkout: the class of a run that recorded that tree
+    twin = R.summarize(fx.runs(dict(fx.old, rtl=A, rtl_dirty=False)), rev=rev)
+    S = R.summarize(fx.runs(fx.old), rev=rev)
+    hold(ck_derived, S, fx, twin)
+    plant(ck_derived, "git not read (the report before parcel RG)", "derived: one tile class", R.summarize(fx.runs(fx.old), rev=None), fx, twin)
+    # every caller that passes nothing gets what the command line shows; a callable is used as given
+    check(R.checkout_git() is R.checkout_git() and R.checkout_git().root == os.path.dirname(HW),
+          "default: the rev summarize() takes when given none is ONE GitTrees on the repository that holds hw/, shared by every call")
+    with patched(_checkout_git=rev):
+        dflt = R.summarize(fx.runs(fx.old))
+    fn = R.summarize(fx.runs(fx.old), rev=lambda c, r: fx.t.get((c, r)))
+    check(kclasses(dflt, "tile") == kclasses(S, "tile") == kclasses(fn, "tile") and kclasses(dflt, "host") == kclasses(S, "host") == kclasses(fn, "host"),
+          "default and callable: summarize() with no rev, and with a function that answers as git does, give the classes an explicit GitTrees gives")
+    many = fx.runs(fx.old) + [g_start(fx.old), g_leg(TI, 2 * GM, 3 * GM, "tile", "quad"), g_start(dict(fx.old, commit=c2)), g_leg(TI, 3 * GM, 4 * GM, "tile", "quad")]
+    Sm = R.summarize(many, rev=rev)
+    hold(ck_many, Sm, fx, rev, many)
+    twice = copy.deepcopy(Sm)
+    for cl in kclasses(twice, "tile"):
+        if cl["key"] == A:
+            cl["derived_from_git"].append({"commit": c1, "dir": "rtl", "tree": A})
+    plant(ck_many, "a run's tree listed twice", "many: two run_starts", twice, fx, rev, many)
+    # 2. what git cannot say is kept apart, by commit, with the reason
+
+    def dirty_blind(t):               # a report that takes every checkout for a clean one
+        res, cls = R.resolve_tree, R.run_classes
+        with patched(resolve_tree=lambda tr, rv=None: res(dict(tr or {}, dirty=False), rv),
+                     run_classes=lambda tr, rv=None: cls(dict(tr or {}, dirty=False), rv)):
+            return R.summarize(fx.runs(t), rev=rev)
+    absent, contra = "d" * 40, dict(fx.old, rtl="e" * 40, rtl_dirty=False, host_src=fx.H1, host_src_dirty=False, cc="gcc 11.4")
+    for what, tree, commit, why, defect, bad in (
+            ("absent", dict(fx.old, commit=absent), absent, "is not in this checkout", "a git that finds every commit",
+             lambda t: R.summarize(fx.runs(t), rev=lambda c, r: fx.t[(c1, r)])),
+            ("dirty", dict(fx.old, dirty=True, dirty_files=3), c1, "was not recorded clean", "a dirty checkout taken for clean", dirty_blind),
+            ("contradicted", contra, c1, "which git does not give for its commit", "a git that never answers, so the recorded tree is trusted",
+             lambda t: R.summarize(fx.runs(t), rev=lambda c, r: None))):
+        Sx = R.summarize(fx.runs(tree), rev=rev)
+        hold(ck_apart, Sx, fx, commit, why, what)
+        plant(ck_apart, defect, f"{what}: the second run is a class of its own", bad(tree), fx, commit, why, what)
+        check(Sx["sweep"]["trees"]["git"] == {"read": True, "problem": None}, f"{what}: git itself had no problem (an absent commit or a refusal is an answer)")
+    Sc = R.summarize(fx.runs(contra), rev=rev)
+    check("RTL tree unknown" in (kkey(kclasses(Sc, "tile"), "unrecorded:" + c1) or NO_CLASS)["label"]
+          and (kkey(kclasses(Sc, "host"), f"{fx.H1}|gcc 11.4") or NO_CLASS)["derived_from_git"] == [],
+          "contradicted: a recorded tree git contradicts is 'unknown', not 'not recorded'; the directory git agrees on keeps its recorded tree")
+    # --no-git (rev=None): today's record-only view
+    Sn = R.summarize(fx.runs(fx.old), rev=None)
+    why = "git was not read (--no-git)"
+    hold(ck_apart, Sn, fx, c1, why, "no-git")
+    plant(ck_apart, "git read although told not to", "no-git: the second run is a class of its own", S, fx, c1, why, "no-git")
+    check(Sn["sweep"]["trees"]["git"] == {"read": False, "problem": None} and "not read (--no-git)" in R.render(Sn), "no-git: the summary and the text say git was not read")
+    # 3. git is bounded and kept
+    hold(ck_kept, R.GitTrees)
+    plant(ck_kept, "no cache", "git: kept per (commit, directory)", Uncached)
+    hold(ck_stops, R.GitTrees)
+    plant(ck_stops, "git asked again after it failed", "git stops: the lookup", Persistent)
+    with patched(subprocess=FakeProc(exc=FileNotFoundError())):
+        g = R.GitTrees("/x")
+        check(g("b" * 40, "rtl") is None and "could not be run" in (g.problem or ""), "git missing: no tree, and `problem` says git could not be run", g.problem)
+    fake = FakeProc(delay=0.2)               # four times the budget (a Windows clock ticks in 16 ms)
+    with patched(subprocess=fake):
+        g = R.GitTrees("/x", budget=0.05)
+        first, second = g("b" * 40, "rtl"), g("b" * 40, "host")
+    check(first == "a" * 40 and second is None and len(fake.calls) == 1 and "asked for" in (g.problem or ""),
+          "git budget: when all the lookups together have taken the budget, the answer is kept and git is not asked again, by name", (first, second, g.problem))
+    fake = FakeProc(rc=128, out="")
+    with patched(subprocess=fake):
+        g = R.GitTrees("/x")
+        none, more = g("b" * 40, "rtl"), g("b" * 40, "host")
+    check(none is None and more is None and len(fake.calls) == 2 and "not a git repository" in (g.problem or ""),
+          "no repository: a refusal followed by a refused `rev-parse --git-dir` is named, and git is not asked again", (len(fake.calls), g.problem))
+    drv = os.path.join(HW, "card_stress.py")
+    lim = re.search(r"def refresh_report.*?timeout=(\d+)", open(drv, encoding="utf-8").read(), re.S) if os.path.exists(drv) else None
+    if lim:
+        check(R.GIT_BUDGET_S < int(lim.group(1)) / 2, f"git bound: all of git's time ({R.GIT_BUDGET_S:g} s) is under half the driver's refresh limit ({lim.group(1)} s)")
+    else:
+        skip("git bound against the driver's refresh limit", "hw/card_stress.py is not beside the test")
+    # 4. the command line, and the agreement with the resume's count
+    cli_checks(fx, tmp)
+    recs = fx.runs(fx.old) + [{"type": "leg", "v": 1, "epoch": T0, "kind": "sweep", "status": "pass", "image": "quad", "leg": "sweep-div32-rne",
+                               "counts": {"cases": 1000}, "sweep": {"item": "div32-rne", "op": "div32", "reach": "tile", "count": 1000, "seed": 3, "seed_n": 1}}]
+
+    def synthetic(ck, s):
+        t = ck_agree(ck, recs, fx.rec, rev, s, "synthetic")
+        ck.eq(t["counted"], {"tile": 3, "host": 1}, "synthetic: the resume counts the derived run's tile slice as the report does (3 tile and 1 host slice counted)")
+    hold(synthetic, R.summarize(recs, rev=rev))
+    plant(synthetic, "the report not reading git while the resume does", "synthetic: the report's coverage", R.summarize(recs, rev=None))
+    real_copy_checks()
+
+
 def main():
     tmp = tempfile.mkdtemp(prefix="cft-report-test-")
     try:
@@ -1997,9 +2455,10 @@ def main():
         group_files(base, marks, tmp)
         group_weird(base)
         group_cli(base, marks, tmp)
+        group_git(tmp)
     finally:
         _close_group()
-        shutil.rmtree(tmp, ignore_errors=True)
+        rmtree_force(tmp)
     print(f"report test: {_st['n']} checks, {_st['failed']} failed")
     return 0 if _st["failed"] == 0 else 1
 
