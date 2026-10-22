@@ -798,7 +798,7 @@ class GitTrees:
             return None
         t0, got = time.monotonic(), None
         try:
-            p = subprocess.run(["git", "-C", self.root] + list(args), capture_output=True, text=True, timeout=limit)
+            p = subprocess.run(["git", "-C", self.root] + list(args), capture_output=True, text=True, errors="replace", timeout=limit)
             got = (p.returncode, p.stdout.strip())
         except subprocess.TimeoutExpired:
             self.problem = f"git did not answer within {limit:g} s"
