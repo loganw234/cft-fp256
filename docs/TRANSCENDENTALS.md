@@ -270,7 +270,9 @@ costs the truncation's two units and their cross term with X.
 GMP: every significand pair, alignment and sign pair at W = 6 against
 fourteen counts from zero past 2^W to infinity, and a fixed-seed sample
 to 928 bits. Against MPFR it also holds two claims outside the table:
-the count each stored constant carries, at every W from 2 to 928, and
+the count each stored constant carries, at every W from 2 to 1087 (1088
+and above is refused: nothing is truncated there, and the count would be
+short for ln10), and
 the logarithm's conversion of an argument's error into its own
 (`mp_log_of_mp`, phase 3's "Two reductions, two derivations"). The
 runner's `mpfr` stage runs it.

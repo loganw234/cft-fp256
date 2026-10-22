@@ -2355,12 +2355,15 @@ operand that names a constant through `kx` the same constant, its
 nine-bit index. What only a device can refuse (its format and its
 instruction capacity, the features an image's flags or instructions
 need, a constant index past the reach of its bank) comes after all of
-the model's. `host/tests/loader_order_check.py` holds it, image by
-image, over every fault alone, every ordered pair of them, and up to four
-field faults in one instruction word. (Before that date the two could
-each name a different fault, their checks having run in different
-orders, and the model's sentence for such an operand gave the low byte
-of its index.) A sentence names the instruction and what it breaks:
+the model's; a capacity a device publishes for a quantity the model
+also bounds, the deposit budget and the scratch block, is refused at
+the device's number where the model's bound comes.
+`host/tests/loader_order_check.py` holds it, image by image, over every
+fault alone, every ordered pair of them, and up to four field faults in
+one instruction word. (Before that date the two could each name a
+different fault, their checks having run in different orders, and the
+model's sentence for such an operand gave the low byte of its index.) A
+sentence names the instruction and what it breaks:
 
     instruction 3 is DEPOSIT, which reads only imm & 0x02000000, so
     imm = 0x01000000 sets a bit it does not read

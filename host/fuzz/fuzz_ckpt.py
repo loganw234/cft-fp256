@@ -24,6 +24,12 @@ a silent resume from a state the file did not describe.
     a signal, or a sanitiser report on stderr    CRASH
     no exit inside the timeout                   HANG
 
+One more, for cft-orbits (KL-481): a checkpoint whose `state` or `inv` line
+holds an infinity is refused where it is read, a sentence and exit 2. A
+flag-certificate stop (exit 3) over one is WRONG-CODE and an acceptance of
+one is ACCEPT-INFINITY, both findings: before 2026-10-22 the first was
+counted a refusal and the second an ordinary acceptance.
+
 A CERTIFIED cft-orbits run (docs/ORBITS.md, "Certified runs",
 2026-09-30) writes checkpoint version 3: version 2's lines, the
 certificate so far, and a `sum` line over the file. Two entries seed

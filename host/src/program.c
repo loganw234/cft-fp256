@@ -1361,7 +1361,10 @@ static void seq_scratch_footprint(cft_device *dev, cft_program *p)
  * image with a fault of the model's and a fault of a device's is refused
  * for the model's, which seq.py names and every loader of this image
  * shares - a fault of the device's is a fact about this device, and a
- * different device would have taken the image. (Until 2026-10-22 these
+ * different device would have taken the image. (Not the device's deposit
+ * budget and scratch depth: those are refused in cft_program_load at the
+ * device's number, where the model refuses the same quantity.) (Until
+ * 2026-10-22 these
  * came between the header's refusals and the stream's, and an image whose
  * header a device could not take was refused for that however broken its
  * instructions were.) */
@@ -1640,7 +1643,11 @@ CFT_API cft_status cft_program_load(cft_device *dev, const void *image,
      * and the features its instructions use (seq_check_against_device) -
      * comes after all of the model's, so that an image with a fault of the
      * model's and a fault of a device's is refused for the model's, which
-     * every loader of this image shares. */
+     * every loader of this image shares. The exception is a capacity a
+     * device publishes for a quantity the model also bounds - the deposit
+     * budget and the scratch block's halves, just below - which is
+     * refused here, at the device's number, where the model's own bound
+     * comes. */
     st = seq_check_max_deposits(dev, maxdep);
     if (st != CFT_OK)
         return st;

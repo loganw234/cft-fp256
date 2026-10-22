@@ -13,21 +13,36 @@ image with TWO is refused for whichever fault a loader reaches first, and
 until 2026-10-22 (KL-438) the two reached them in different orders: the
 C loader read the header's flags after its scratch word, checked the
 image's length after the capacities, took the register high bits operand by
-operand, tested imm[31] before kx, left a static scratch slot to its
-device pass, and met the worst-case bound at the top of every instruction
-where the model meets it at the bottom of a control instruction. Both
-refused, with true sentences, and named different faults; and the model's
-sentence for a constant under kx gave the low byte of a nine-bit index.
+operand and a register operand's ninth bit before its byte, tested imm[31]
+before kx, left a static scratch slot to its device pass, and met the
+worst-case bound at the top of every instruction where the model meets it
+at the bottom of a control instruction (580 disagreements in 26,745 images
+at the base, in those seven classes). Both refused, with true sentences,
+and named different faults; and the model's sentence for a constant under
+kx gave the low byte of a nine-bit index.
 
 This feeds both loaders images with two faults, and compares the faults
 BY NAME: each sentence is read back to the rule it states and the
 instruction it names (RULES below, one row per refusal the model can make,
 in the words of each side), and the two must give the same rule at the
-same instruction. The words differ by design - libcft's sentences name
-the opcode and the field in its own style, the model's are shorter - so
-what is compared is the fault, not the string; but a sentence this file
-cannot place is a failure too, so a refusal added to either loader without
-a row here is seen.
+same instruction - and, for a constant under kx or past the bank, the same
+operand and the same constant (FACTS: the nine-bit index). The words differ
+by design - libcft's sentences name the opcode and the field in its own
+style, the model's are shorter - so what is compared is the fault, not the
+string; but a sentence this file cannot place is a failure too, so a
+refusal added to either loader without a row here is seen.
+
+It runs the software device, which accepts every format and feature, so
+what only a device can refuse is not here: libcft makes those refusals
+after all of the model's (seq_check_header_against_device and
+seq_check_against_device in program.c), which this file cannot see. (A
+capacity a device publishes for a quantity the model also bounds, the
+deposit budget and the scratch block, is refused at the device's number
+where the model's bound comes; on this device the two are one number.)
+
+Where the library cannot be loaded, or has no sequencer, it prints
+"SKIP loader-order check: ..." (the form verify/run.sh counts) and exits 0;
+where the file is not there it fails.
 
 The images:
   * every fault alone, which both loaders must name as the rule it is
@@ -35,8 +50,10 @@ The images:
   * every ordered pair of the faults that stand alone - a header fault and
     a stream fault, two header faults, two stream faults, each stream
     fault before and after the other;
-  * every pair and triple of the field faults of one ALU instruction, and
-    of one control instruction at each control code, set in the one word.
+  * every pair, triple and quadruple of the field faults of one ALU
+    instruction, and every one, pair, triple and quadruple of those of one
+    control instruction at each of the sixteen codes (15 is no control
+    code), set in the one word.
 """
 
 import argparse

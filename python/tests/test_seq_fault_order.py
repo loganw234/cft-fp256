@@ -87,7 +87,7 @@ ORDER = [
     ("an ALU instruction takes the count past 2^40, then an ENDREP",
      image([REPEAT(1 << 20), REPEAT(1 << 20), ADD, ENDREP, ENDREP]),
      "worst_case", 3),
-    ("a trip count whose product passes 2^40 and no instruction after it",
+    ("a trip count whose product passes 2^40, named at the ENDREP after it",
      image([REPEAT(1 << 20), REPEAT(1 << 21), ENDREP, ENDREP]),
      "worst_case", 2),
     ("the bound passed only by the ALU instructions after the last loop",
