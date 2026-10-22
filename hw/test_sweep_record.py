@@ -25,8 +25,8 @@
            the version rule, each export refusal with the exporter left as it was, each verifier refusal on a
            validly signed record, and the verifier without subject_problem and without check_shape
   real     (needs --metrics) the same on a copy of a real run's metrics.jsonl, every field read back
-           from the raw legs by `readback`, whose source names no attribute of the module under test (a check
-           reads its source for `S.<name>` references, and does not see a getattr, an alias, an import or a module-level helper; the device pseudonym is written out from the key with hashlib, a finding is
+           from the raw legs by `readback`, whose source names no `S.<attribute>` of the module under test (a check
+           reads its source for `S.<name>` references, and does not see a getattr, a second name for the module (`T = S`), an import, a module-level binding or helper, or `vars`; the device pseudonym is written out from the key with hashlib, a finding is
            vm + fm > 0), each against the run_start IN FORCE for it (a resumed run's file has one for each
            invocation: `readback` also runs in `export`, on a synthetic file of two, with its plant, the
            first run_start's expectation, red there)
@@ -299,8 +299,8 @@ def names_in_source(src):
 
 def readback(raw, flat, pub, first_only=False):
     """Every finished sweep leg of `raw` (a run's records, in file order) against its record in `flat` (the exported slices and streams,
-    in the same order), field by field, by code whose source names no attribute of the module under test (a check reads this function's
-    source for `S.<name>` references, and does not see a getattr, an alias, an import or a module-level helper), the device pseudonym is written out here from the public key `pub` (16 hex of SHA-256 over
+    in the same order), field by field, by code whose source names no `S.<attribute>` of the module under test (a check reads this function's
+    source for `S.<name>` references, and does not see a getattr, a second name for the module (`T = S`), an import, a module-level binding or helper, or `vars`), the device pseudonym is written out here from the public key `pub` (16 hex of SHA-256 over
     `cft-sweep-device 1`, a NUL and the 32-byte key, docs/SWEEP-RECORDS.md) and a finding is vm + fm > 0. The exporter's own
     `device_of` and `is_finding`, which the first version of this took (sent back for it, 2026-10-21), are held on their own:
     `device_of` against hashlib in `keys` and `export`, `is_finding` against the one failing leg of each synthetic run in `export`
@@ -583,8 +583,8 @@ def group_export(tmp):
     check("readback: a wrong tile count on the first record and the first run_start's commit on the last are each found, and nothing else",
           readback(raw0, wrong, pub) == [(names[0], ["subject"]), (names[-1], ["tool"])], str(readback(raw0, wrong, pub)))
     import inspect
-    check("readback's source (and moved_legs') names no S.<attribute> of the module under test - the device "
-          "pseudonym is written out with hashlib from the key, a finding is vm + fm > 0", names_in_source(inspect.getsource(readback)) == [] and
+    check("readback's source (and moved_legs') names no S.<attribute> of the module under test",
+          names_in_source(inspect.getsource(readback)) == [] and
           names_in_source(inspect.getsource(moved_legs)) == [], str(names_in_source(inspect.getsource(readback))))
     check("readback's source scan, the plant: that check reads a source that calls the exporter's is_finding or device_of as naming exactly those",
           names_in_source("def f(r):\n    return S.is_finding(r)\n") == ["is_finding"] and
