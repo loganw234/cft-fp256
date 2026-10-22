@@ -1280,8 +1280,9 @@ def parse_telemetry(text: str) -> Dict[str, float]:
 
 
 # A reading that means "no reading" (KL-32, 2026-10-22). The U50's FPGA HBM temperature, in xbutil's thermal report
-# (`thermal.devices[0].thermals.FPGA HBM.temp_C`), reads 0 in most samples: 670 of the 865 of the 2026-10-19 long run, in runs of
-# 7 to 45 samples at a time between runs of readings from 27 to 35 (MEASURED in that run's metrics.jsonl). A stack of HBM at 0 degrees
+# (`thermal.devices[0].thermals.FPGA HBM.temp_C`), reads 0 in most samples: 670 of the 865 of the 2026-10-19 long run, in 23 runs of 14 to
+# 45 consecutive samples between 23 runs of readings (the first one sample, the others 7 to 11), the readings from 27 to 35 (MEASURED in
+# that run's metrics.jsonl). A stack of HBM at 0 degrees
 # on a powered card is not a temperature, so a 0 here is taken as the sensor giving none (BELIEVED: the cause is not known, and the
 # reading is not documented); it is left out of the report's range for the label and the status file says so beside it. Only this
 # label: the rails that read a flat 0 in EVERY sample of a run (19 of the 40 labels that run's report showed) are not a mixture of
@@ -1528,11 +1529,15 @@ def file_sha256(path: str) -> str:
 
 def vectors_problem(root: str) -> Optional[str]:
     """None when `vectors/out` is there and every file `vectors/SHA256SUMS` lists holds to it (what `cd vectors && sha256sum -c --quiet
-    SHA256SUMS` says); else the refusal's text, which begins with its name and says `make vectors`. The selftest leg runs
+    SHA256SUMS` says); else the refusal's text, which begins with its name and says what puts it right: `make vectors` for
+    vectors_out_missing and vectors_out_mismatch (vectors/out is generated), and for vectors_out_unheld - the TRACKED record
+    vectors/SHA256SUMS cannot be read, is malformed or lists nothing - `git checkout -- vectors/SHA256SUMS`, since `make vectors` writes
+    vectors/out/SHA256SUMS, a different file, and would not restore it. The selftest leg runs
     `cft-selftest vectors/out IMAGE` every third visit of each image; on a clean clone vectors/out is not there (it is generated, and
     untracked), and until 2026-10-22 the driver neither checked nor made it, so that leg failed at every one of those visits (KL-44)."""
     vec = os.path.join(root, "vectors")
     fix = "run `make vectors` (docs/CARDDAY.md)"
+    restore = "vectors/SHA256SUMS is a tracked file: restore it with `git checkout -- vectors/SHA256SUMS`"
     if not os.path.isdir(os.path.join(vec, "out")):
         return (f"vectors_out_missing: vectors/out is not there, and the selftest leg (cft-selftest vectors/out IMAGE) would fail at "
                 f"every third visit of each image; {fix}")
@@ -1540,15 +1545,15 @@ def vectors_problem(root: str) -> Optional[str]:
         with open(os.path.join(vec, "SHA256SUMS"), "r", encoding="utf-8", errors="replace") as fh:
             lines = [ln for ln in fh.read().splitlines() if ln.strip()]
     except OSError as e:
-        return f"vectors_out_unheld: vectors/SHA256SUMS cannot be read ({e}), so vectors/out cannot be held to it; it is a tracked file"
+        return f"vectors_out_unheld: vectors/SHA256SUMS cannot be read ({e}), so vectors/out cannot be held to it; {restore}"
     entries: List[Tuple[str, str]] = []
     for ln in lines:
         m = _VECTOR_LINE.match(ln)
         if not m:
-            return f"vectors_out_unheld: vectors/SHA256SUMS has a line that is not '<sha256>  <path>': {ln[:60]!r}"
+            return f"vectors_out_unheld: vectors/SHA256SUMS has a line that is not '<sha256>  <path>': {ln[:60]!r}; {restore}"
         entries.append((m.group(1).lower(), m.group(2)))
     if not entries:
-        return "vectors_out_unheld: vectors/SHA256SUMS lists no file, so vectors/out is held to nothing"
+        return f"vectors_out_unheld: vectors/SHA256SUMS lists no file, so vectors/out is held to nothing; {restore}"
     bad: List[str] = []
     top = os.path.normpath(vec) + os.sep
     for want, rel in entries:

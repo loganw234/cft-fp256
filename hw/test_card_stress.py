@@ -5456,7 +5456,8 @@ def soak_command(index: dict, nm: str):
 def random_count_checks(src: str = HERE) -> list:
     """KL-23 (2026-10-22): a default run held no random slice to the count it asked, so a random tool that stopped short counted as covered if it
     printed one case. Item.random_cases now gives the cases of every random op whose tool's counting is known, and the suite holds that to the
-    REAL tools' logs at counts of three batches (and to the chunked tools' at 20,000), to the stand-in's own table, and to the catalog."""
+    REAL tools' logs - 10,000 cases (three batches at 4096) for twelve ops, 200,000 from older logs for div32 and conv32to64, and the chunked tools' at
+    20,000 - to the stand-in's own table, and to the catalog."""
     out: list = []
 
     def c(n, ok, d=""):
@@ -5488,8 +5489,8 @@ def random_count_checks(src: str = HERE) -> list:
             if not (op == it.op and held and short is True and want == cases_in(t)):
                 bad.append((nm, want, cases_in(t), held, short))
         c("random counts: for every random op but four (cvtto32 and cvtto64, drawn; the two scaleBs, held in the chunk checks), "
-          "Item.random_cases is what the REAL tool printed for the count it was asked - at a "
-          "count of three batches at 4096 for 14 ops, at 20,000 through the chunked tools' 16384 for 3 - the log passes with that figure, "
+          "Item.random_cases is what the REAL tool printed for the count it was asked - at 10,000 "
+          "(three batches at 4096) for 12 ops, at 200,000 (older logs) for div32 and conv32to64, at 20,000 through the chunked tools' 16384 for 3 - the log passes with that figure, "
           "and is refused when the slice is asked one case more", not bad and len(rows) == 17, str(bad[:3]))
         c("random counts: the multiples are what the tools do, not the count: four a count for cvtfrom32 and cvtfrom64, the count and eight "
           "for nextup64 and nextdown64, the count for the rest",
@@ -5906,6 +5907,20 @@ def vectors_checks(env: Env, src: str = HERE) -> list:
               and "out/a.jsonl (missing)" in p, str(p))
             p1 = L2.vectors_problem(tree("nosums", files, sums=False))
             c("vectors: out/ with no SHA256SUMS to hold it to is refused by name (vectors_out_unheld)", p1 is not None and p1.startswith("vectors_out_unheld:"), str(p1))
+            malformed = tree("malformed", files)
+            with open(os.path.join(malformed, "vectors", "SHA256SUMS"), "w", newline="\n") as fh:
+                fh.write("not a sha256 line\n")
+            pm = L2.vectors_problem(malformed)
+            emptyrec = tree("emptyrec", files)
+            with open(os.path.join(emptyrec, "vectors", "SHA256SUMS"), "w", newline="\n") as fh:
+                fh.write("\n")
+            pe = L2.vectors_problem(emptyrec)
+            pn, pb = L2.vectors_problem(noout), L2.vectors_problem(bad)
+            c("vectors: what each refusal says puts it right: the three vectors_out_unheld ones (the tracked record missing, malformed, empty) say `git checkout -- "
+              "vectors/SHA256SUMS` and do not send the operator to `make vectors`, which writes vectors/out/SHA256SUMS, another file, and would not restore the tracked "
+              "one; the missing and the mismatch refusals say `make vectors` and not `git checkout`",
+              all(q is not None and q.startswith("vectors_out_unheld:") and "git checkout -- vectors/SHA256SUMS" in q and "make vectors" not in q for q in (p1, pm, pe))
+              and all(q is not None and "make vectors" in q and "git checkout" not in q for q in (pn, pb)), str((p1, pm, pe, pn, pb)))
             esc = tree("esc", files)
             with open(os.path.join(esc, "vectors", "SHA256SUMS"), "a", newline="\n") as fh:
                 fh.write(f"{hashlib.sha256(b'x').hexdigest()}  ../outside.txt\n")

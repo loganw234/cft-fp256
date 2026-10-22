@@ -1545,7 +1545,8 @@ stage soak-quick "native-oracle soak, QUICK depth + sabotage control" -- do_soak
 # The long-run stress driver's own suite (hw/test-card-stress.sh), which the card runs every night (hw/card_stress.py): no stage, workflow or
 # Makefile target ran it until 2026-10-22 (KL-28). It starts the driver and its stand-in dozens of times, dry - no XRT, no card - and reads the
 # verdict parsers against real logs of the tools; `--no-plants` leaves out its negative controls (a defect put back into a copy of the code,
-# which the scenario written for it must catch), which take about as long again and are run by hand when the driver's code changes. What it
+# which the scenario written for it must catch), which take about twice as long as everything else together (docs/CARDDAY.md has the figures: one and a half to two times; 1,761 s
+# whole on 2026-10-21 against about 600 s without them, under WSL) and are run by hand when the driver's code changes. What it
 # asks of its host that no other stage does:
 #   * No other process on this system may use the card. The driver's guard refuses to start while one does (guard_refused), and its stand-ins
 #     carry an xclbin argument or CFT_SOAK_ARTIFACT, the marks that guard looks for: the nights' own run of the driver, another copy of this
@@ -1576,7 +1577,10 @@ do_cardstress() {
   fi
 }
 need python
-if [ -z "$STAGE_SKIP_REASON" ] && { [ -z "$ONLY" ] || in_list cardstress "$ONLY"; } && ! in_list cardstress "$SKIP"; then
+# The probe (about a second: a python and the process list) is asked only when stage() below will get as far as running or skipping the stage: --list
+# has exited long before this line, and the three early returns of stage() - not selected by --only or the budget, passed already in this run, named
+# by --skip - are the three conditions here.
+if [ -z "$STAGE_SKIP_REASON" ] && { [ -z "$ONLY" ] || in_list cardstress "$ONLY"; } && ! in_list cardstress "$SKIP" && [ ! -f "$RUNDIR/cardstress.ok" ]; then
   _csu=$(cardstress_users)
   [ -n "$_csu" ] && STAGE_SKIP_REASON="another process uses the card on this system, so the driver's guard would refuse every driver the suite starts (guard_refused): $_csu"
 fi

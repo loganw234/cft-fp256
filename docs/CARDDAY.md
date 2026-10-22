@@ -897,7 +897,9 @@ python3 hw/card_stress_report.py /data/card-stress-1016     # the report, any ti
   2026-10-22 the driver checks it itself** (KL-44): when the selftest leg is in the battery and
   its tool was built, the build step refuses the run, by name, exit 3, before any leg - `vectors_out_missing`
   (no `vectors/out`), `vectors_out_mismatch` (a file `vectors/SHA256SUMS` lists is missing or differs; the files
-  are named) or `vectors_out_unheld` (no readable `SHA256SUMS` to hold it to) - each saying `make vectors`.
+  are named) or `vectors_out_unheld` (the tracked record `vectors/SHA256SUMS` cannot be read, is malformed or lists nothing, so there is
+  nothing to hold it to). The first two say `make vectors`, which regenerates `vectors/out`; the third does not, because `make vectors`
+  writes `vectors/out/SHA256SUMS`, a different file, and would not restore the tracked one: it says `git checkout -- vectors/SHA256SUMS`.
   It makes nothing (the driver never writes into the checkout), and it hashes what `sha256sum -c --quiet
   SHA256SUMS` does, in Python, so the same check runs on the Windows desktop. A battery without the leg (`--quick`,
   `--legs` without it), a build that disabled it, and a dry run say in the build step why they did not look.
@@ -908,9 +910,9 @@ python3 hw/card_stress_report.py /data/card-stress-1016     # the report, any ti
   sweep's resume, the host pool, the seeds, the trees, the resume per tree class, the items, the pass size, the records, the report, and under POSIX the real `make` in
   a scratch copy) on the box, with no card and no XRT: about 10 minutes under WSL and 11 under Git
   Bash (2026-10-21, with the coverage wave's groups: 644 s under Git Bash and about 600 s under WSL, read off the clock; 2026-10-20, before them: 448 s and 553 s, and a busier desktop made a Git
-  Bash run 636 s; 2026-10-22, with parcel P5's checks, 929 checks in 583 s under WSL niced in a built clone, and 898 checks in 1,264 s under
-  Git Bash on a loaded desktop, 13 of them failed there, ten of those timing checks the PowerShell listing below stalled; with those three groups
-  skipped, as the gate's stage does on Windows, 853 checks in 599 s and none failed), on a desktop other sessions share, and it must be run alone on the host (two drivers at once see each other's
+  Bash run 636 s; 2026-10-22, with parcel P5's checks, 929 checks in 583 s under WSL niced in a built clone (at `542adb53`), and 898 checks in 1,264 s
+  under Git Bash on a loaded desktop (the stage's first run there, at `df20ba19`), 13 of them failed there, ten of those timing checks the PowerShell
+  listing below stalled; with those three groups skipped, as the gate's stage does on Windows, 853 checks in 599 s and none failed (at `a8de4401`)), on a desktop other sessions share, and it must be run alone on the host (two drivers at once see each other's
   stand-ins as card users: the guard scans every process of the WSL distro, or of the Windows desktop, it runs in, so two suites in
   one distro make each other's drivers refuse to start, `guard_refused`, exit 2 - found by parcel SR2, 2026-10-21). **On Windows the
   guard's process listing is a PowerShell call (`list_processes`, which `find_card_users` and the scheduler's runner import), and on a
@@ -1218,8 +1220,9 @@ study is per RTL tree, with the three images reported separately beneath it.
   2026-10-20) is kept apart by its commit, as "not recorded". A slice is counted under the **last `run_start`
   before it** in its file, so a run resumed from another checkout counts what follows under that checkout's tree.
 - **The telemetry section's HBM temperature** (since 2026-10-22, KL-32): the card's FPGA HBM temperature reads 0 in most
-  samples - 670 of the 865 of the 2026-10-19 run, in runs of 7 to 45 samples between runs of readings from 27 to 35 (MEASURED in that
-  run's metrics.jsonl) - and the report's range for it was that mixture, 0 to 35. A 0 from an HBM temperature is now taken as no reading
+  samples - 670 of the 865 of the 2026-10-19 run, in 23 runs of 14 to 45 consecutive samples between 23 runs of readings (the first one
+  sample long, the others 7 to 11), the readings from 27 to 35 (MEASURED in that run's metrics.jsonl) - and the report's range for it was
+  that mixture, 0 to 35. A 0 from an HBM temperature is now taken as no reading
   (BELIEVED: a powered card's HBM is not at 0 degrees C, the cause is not known and the reading is undocumented), counted by name
   (`NO READING: <label> read 0 in N of M samples`) and left out of the label's samples, range and mean; the summary has
   `telemetry.no_reading`. Only that label: the rails that read a flat 0 in every sample are not a mixture and are reported as they were.
@@ -1949,8 +1952,9 @@ asked: a tool that stopped short counted as covered if it printed one case (only
 every random slice is, where the tool's counting is known (`Item.random_cases`, one rule for the card's slices and the host pool's;
 `expected_cases` is recorded in the slice's `sweep` block, as for a chunked scaleB), and a slice with another number of cases is a
 `parse_error` naming both, not covered, served again from the same seed. READ in host/tools/divsqrt_soak.c and clause5_soak.c and MEASURED
-with the tools as built at f707fa3b on the software backend (counts 1, 4095, 4096, 4097, 10,000 and 20,000; one real log of each, three
-batches long, is in hw/card_stress_fixtures as `rnd-*.txt`, and the suite holds the table to them and the stand-in's own table to the same):
+with the tools as built at f707fa3b on the software backend (counts 1, 4095, 4096, 4097, 10,000 and 20,000; a real log of each op is in hw/card_stress_fixtures - `rnd-*.txt`, at 10,000 (three batches at
+4096) and the chunked tools' at 20,000, and for `div32` and `conv32to64` the older `soak-div32.txt` and `c5-conv32to64.txt`, at 200,000 - and the
+suite holds the table to them and the stand-in's own table to the same):
 
 | the tool's cases for a count | ops |
 |---|---|
