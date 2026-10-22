@@ -5302,6 +5302,20 @@ def group_notes(env: Env, src: str = HERE) -> list:
 # the report, KL-23 a random slice held to its count in a default run, KL-42 the images' manifests, KL-44 vectors/out, KL-13 buildreal's copy
 # ---------------------------------------------------------------------------------------
 
+def red_not_crash(fn):
+    """P5's checks call what the fixes added (a library function, a driver method): run against code that lacks it - the base's, which is how this branch
+    shows its checks red - an AttributeError is one RED CHECK naming what is missing, not a crash of the whole suite that hides the other groups."""
+    def wrapper(*a, **k):
+        try:
+            return fn(*a, **k)
+        except Exception as e:
+            import traceback
+            return [(f"{fn.__name__}: the code under test has what this check needs", False, repr(e) + " " + traceback.format_exc()[-240:])]
+    wrapper.__name__ = fn.__name__
+    wrapper.__doc__ = fn.__doc__
+    return wrapper
+
+
 # a sample as xbutil's JSON gives it, by report: five temperatures (the HBM one at 0, as it reads in most samples), the power the card draws
 # and thirty rails (take_sample prefixes each label with its report)
 TEL_THERMAL = {"devices[0].thermals.FPGA HBM.temp_C": 0.0, "devices[0].thermals.FPGA.temp_C": 36.0, "devices[0].thermals.Int Vcc.temp_C": 41.0,
@@ -5364,6 +5378,7 @@ def run_report(src: str, run_dir: str, json_path: str):
     return p.stdout, data
 
 
+@red_not_crash
 def hbm_report_checks(src: str = HERE) -> list:
     """KL-32 (2026-10-22): the card's FPGA HBM temperature reads 0 in most samples (670 of 865 in the long run), and the report's range for it
     was that artifact. Synthetic runs of ten samples: the zeros are counted by name and left out of the label's statistics; a rail that reads a
@@ -5415,10 +5430,13 @@ def hbm_report_checks(src: str = HERE) -> list:
         text, T, lab = make("nozero", [35.0, 34.0, 33.0, 32.0, 31.0, 30.0, 31.0, 32.0, 33.0, 34.0])
         c("hbm report: a run whose HBM temperature never reads 0 has no such line, no entry, and the full range",
           T.get("no_reading") == [] and "NO READING" not in text and (lab[hbm]["n"], lab[hbm]["min"], lab[hbm]["max"]) == (10, 30.0, 35.0), str(lab.get(hbm)))
-        with lib_from(src) as L2:
-            c("hbm report: the rule is the library's one (the status line uses it too): the HBM temperature at exactly 0, nothing else",
-              L2.no_reading(hbm, 0.0) and L2.no_reading(hbm, 0) and not L2.no_reading(hbm, 31.0) and not L2.no_reading(fpga, 0.0)
-              and not L2.no_reading(rail, 0.0) and not L2.is_hbm_temperature(rail) and not L2.no_reading(hbm, False))
+        try:
+            with lib_from(src) as L2:
+                c("hbm report: the rule is the library's one (the status line uses it too): the HBM temperature at exactly 0, nothing else",
+                  L2.no_reading(hbm, 0.0) and L2.no_reading(hbm, 0) and not L2.no_reading(hbm, 31.0) and not L2.no_reading(fpga, 0.0)
+                  and not L2.no_reading(rail, 0.0) and not L2.is_hbm_temperature(rail) and not L2.no_reading(hbm, False))
+        except AttributeError as e:
+            c("hbm report: the rule is the library's one (the status line uses it too): the HBM temperature at exactly 0, nothing else", False, repr(e))
     finally:
         rmtree_force(tmp)
     return out
@@ -5434,6 +5452,7 @@ def soak_command(index: dict, nm: str):
     return cmd[0], cmd[1], int(cmd[2], 0), (cmd[4] if len(cmd) > 4 else None)
 
 
+@red_not_crash
 def random_count_checks(src: str = HERE) -> list:
     """KL-23 (2026-10-22): a default run held no random slice to the count it asked, so a random tool that stopped short counted as covered if it
     printed one case. Item.random_cases now gives the cases of every random op whose tool's counting is known, and the suite holds that to the
@@ -5464,7 +5483,7 @@ def random_count_checks(src: str = HERE) -> list:
                 v = L2.parse_soak(t, index[nm][0], it.op, it.verdict_mode, None, want, None, chunk=None if batch == 4096 else batch)
                 held = v.ok and v.counts["cases"] == want
                 short = raises(lambda: L2.parse_soak(t, index[nm][0], it.op, it.verdict_mode, None, want + 1, None, chunk=None if batch == 4096 else batch))
-            except L2.VerdictError as e:
+            except (L2.VerdictError, TypeError) as e:          # a TypeError: random_cases gave no figure (None + 1), as the base's does for these ops
                 held, short = False, str(e)
             if not (op == it.op and held and short is True and want == cases_in(t)):
                 bad.append((nm, want, cases_in(t), held, short))
@@ -5505,6 +5524,7 @@ def random_count_checks(src: str = HERE) -> list:
     return out
 
 
+@red_not_crash
 def scn_random_short(env: Env, src: str = HERE) -> list:
     """KL-23 as a process: a DEFAULT run (no --sweep-chunk) whose tool printed one case too few for a random slice. Two card items (div32,
     cvtfrom32 is a host item) and three host ones; the first slice of each came back short. It is parse_error, by the rule, not covered, and
@@ -5553,6 +5573,7 @@ def manifest_text(sha: str, commit: str, sources: "str | None" = None, tree: str
     return "".join(ln for ln in t.splitlines(True) if not any(ln.startswith(k + ":") for k in drop))
 
 
+@red_not_crash
 def manifest_judge_checks(src: str = HERE) -> list:
     """KL-42: the library's judgement of a manifest, on the REAL ones (the three images', as hw/rebuild-2022.sh wrote them and the lead copied
     them from the build host on 2026-10-22) and on those with one field changed. Pure: no git, no driver."""
@@ -5753,6 +5774,7 @@ def manifest_driver_checks(env: Env, src: str = HERE) -> list:
     return out
 
 
+@red_not_crash
 def scn_manifests(env: Env, src: str = HERE) -> list:
     """KL-42 as processes: dry runs rooted in the scratch repository, with a manifest beside each stand-in image. A: all three name HEAD:
     ok, recorded in run_start, shown in status.txt and the report. B: the quad's names the other commit (rtl differs): the run does not
@@ -5834,6 +5856,7 @@ def scn_manifests(env: Env, src: str = HERE) -> list:
 
 # -- KL-44: vectors/out --------------------------------------------------------------
 
+@red_not_crash
 def vectors_checks(env: Env, src: str = HERE) -> list:
     """KL-44 (2026-10-22): the driver neither checked nor made vectors/out, so on a clean clone the selftest leg failed at every third visit of
     each image. The library's check (what `cd vectors && sha256sum -c --quiet SHA256SUMS` says) on planted directories, and the driver's
