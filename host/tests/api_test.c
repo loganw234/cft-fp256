@@ -702,6 +702,113 @@ static void ld_expect(cft_device *live, cft_device *dev, const char *what,
         cft_program_free(prog);
 }
 
+/* ---- cft_last_error() belongs to the call that just returned ---------
+ *
+ * KL-490, 2026-10-22. Every public entry point that returns a status
+ * empties every slot cft_last_error() reads (the library's, the remote
+ * backend's, the XRT backend's) before it does anything, so after it the
+ * slot holds that call's own sentence or nothing: never an older call's,
+ * and a call that succeeded leaves it empty. Until then only
+ * cft_program_load did, and a refusal that wrote no sentence - a format
+ * out of range, a NULL output, cft_conformance over a directory with no
+ * sets - showed whatever had failed before it.
+ *
+ * Each leg plants a sentence, makes ONE call, and holds the slot to what
+ * that call may leave. The plants are the three slots' own:
+ *   the library's - ld_plant's cft_run_ex index refusal;
+ *   the remote backend's - cft_open of a cft:// URL that names no port,
+ *     refused by the backend before any socket exists;
+ *   the XRT backend's - cft_open of an xclbin that does not exist, in a
+ *     build with XRT (a build without says so in the library's own slot,
+ *     and the leg is the library's again).
+ * Every leg is red against the library before the change, where the plant
+ * is still there afterwards; and in an XRT build the xrt plant's own check
+ * is the first to go red, because the remote plant's older sentence stands
+ * in front of the XRT backend's newer one (verifier-V10's order). */
+enum { LE_EMPTY, LE_OWN, LE_NOT_PLANT };
+
+#define LE_LIB_WORDS    "idx_a_src says operand a holds"
+#define LE_REMOTE_WORDS "is not of the form cft://host:port"
+
+static int le_legs;
+
+static int le_plant_lib(cft_device *dev)
+{
+    return ld_plant(dev) &&
+           strstr(cft_last_error(), LE_LIB_WORDS) != NULL;
+}
+
+static int le_plant_remote(cft_device *dev)
+{
+#ifndef CFT_NO_REMOTE
+    cft_device *h = NULL;
+    (void)dev;
+    return cft_open("cft://noport", 0, &h) == CFT_ERR_INVALID_ARGUMENT &&
+           h == NULL &&
+           strstr(cftr_last_error(), LE_REMOTE_WORDS) != NULL &&
+           strstr(cft_last_error(), LE_REMOTE_WORDS) != NULL;
+#else
+    (void)dev;
+    return 1;           /* no remote backend here: nothing to plant */
+#endif
+}
+
+#ifdef CFT_ENABLE_XRT
+static int le_plant_xrt(cft_device *dev)
+{
+    cft_device *h = NULL;
+    (void)dev;
+    return cft_open("no-such-p2b.xclbin", 0, &h) != CFT_OK && h == NULL &&
+           *cftx_last_error() != '\0' &&
+           strcmp(cft_last_error(), cftx_last_error()) == 0;
+}
+#endif
+
+/* The call has returned `st`; hold what it left. LE_EMPTY: it succeeded
+ * and the slot is empty. LE_OWN: it refused and the slot says `says`.
+ * LE_NOT_PLANT: it refused without a sentence of its own, or with one,
+ * and neither is a plant's. Every leg also holds that none of the three
+ * plants' words is in the slot. */
+static void le_hold(const char *what, cft_status st, cft_status want,
+                    int mode, const char *says)
+{
+    const char *msg = cft_last_error();
+
+    le_legs++;
+    CHECK(st == want, "%s: status %s, wanted %s (%s)", what,
+          cft_strerror(st), cft_strerror(want), msg);
+    CHECK(strstr(msg, LE_LIB_WORDS) == NULL &&
+          strstr(msg, LE_REMOTE_WORDS) == NULL,
+          "%s: cft_last_error() is an earlier call's sentence: '%s'", what,
+          msg);
+#ifdef CFT_ENABLE_XRT
+    CHECK(strstr(msg, "no-such-p2b.xclbin") == NULL,
+          "%s: cft_last_error() is an earlier call's sentence: '%s'", what,
+          msg);
+#endif
+    /* cft_last_error() is empty only when all three slots are */
+    if (mode == LE_EMPTY)
+        CHECK(*msg == '\0',
+              "%s: a call that succeeded must leave every slot empty, "
+              "and cft_last_error() shows '%s'", what, msg);
+    if (mode == LE_OWN)
+        CHECK(says && strstr(msg, says) != NULL,
+              "%s: the sentence must say \"%s\", and it is '%s'", what,
+              says ? says : "(nothing)", msg);
+}
+
+/* A plant, one call, its hold. `call` is any expression of type
+ * cft_status; it runs exactly once, after the plant. */
+#define LE_LEG(plant, what, call, want, mode, says)                        \
+    do {                                                                   \
+        cft_status st_;                                                    \
+        CHECK((plant)(dev), "%s: the plant did not leave its own sentence " \
+              "first: cft_last_error() shows '%s'", what,                  \
+              cft_last_error());                                           \
+        st_ = (call);                                                      \
+        le_hold(what, st_, want, mode, says);                              \
+    } while (0)
+
 /* ------------------------------------------------------------------ */
 
 int main(void)
@@ -6133,6 +6240,443 @@ int main(void)
                "sentence of its own after an earlier call's; a good "
                "load clears the library's slot\n",
                (unsigned long)(sizeof L / sizeof L[0] + 11u));
+    }
+
+    /* --- cft_last_error() belongs to the call that just returned -------
+     *
+     * KL-490, 2026-10-22: the helpers above say what each leg holds. One
+     * or more entry points of every source file that has any, each after a
+     * planted sentence; then the same refusals and successes after the
+     * other two slots' plants. */
+    {
+        uint8_t xa[32], xb[32], xd[32], xe[32], dig[32];
+        cft_elem_args E;
+        cft_run_args RA;
+        cft_caps cp;
+        cft_program_info pinfo;
+        cft_buffer *bf = NULL;
+        cft_device *h = NULL;
+        char rep[128];
+        uint64_t cc = 0;
+        int64_t sc = 0;
+        uint32_t fl = 0;
+        int p;
+        int (*const plants[])(cft_device *) = {
+            le_plant_lib, le_plant_remote
+#ifdef CFT_ENABLE_XRT
+            , le_plant_xrt
+#endif
+        };
+        const char *const pname[] = { "library", "remote"
+#ifdef CFT_ENABLE_XRT
+                                      , "xrt"
+#endif
+        };
+        char w[96];
+
+        memset(xa, 0, sizeof xa); memset(xb, 0, sizeof xb);
+        memset(xd, 0, sizeof xd); memset(xe, 0, sizeof xe);
+        memset(&E, 0, sizeof E);
+        memset(&RA, 0, sizeof RA);
+        RA.struct_size = sizeof RA;
+
+        /* device.c: every entry point, refusals that now speak and calls
+         * that succeed */
+        LE_LEG(le_plant_lib, "cft_run, a format out of range",
+               cft_run(dev, CFT_ADD, (cft_format)9, CFT_RNE, xa, xb, NULL,
+                       xd, 1, NULL, NULL),
+               CFT_ERR_INVALID_ARGUMENT, LE_OWN, "format 9");
+        LE_LEG(le_plant_lib, "cft_run, an attribute out of range",
+               cft_run(dev, CFT_ADD, CFT_FP64, (cft_round)7, xa, xb, NULL,
+                       xd, 1, NULL, NULL),
+               CFT_ERR_INVALID_ARGUMENT, LE_OWN, "rounding attribute 7");
+        LE_LEG(le_plant_lib, "cft_run, an opcode that is no byte",
+               cft_run(dev, (cft_op)300, CFT_FP64, CFT_RNE, xa, xb, NULL,
+                       xd, 1, NULL, NULL),
+               CFT_ERR_INVALID_ARGUMENT, LE_OWN, "opcode 300");
+        LE_LEG(le_plant_lib, "cft_run, a reduction opcode",
+               cft_run(dev, CFT_SUM, CFT_FP64, CFT_RNE, xa, NULL, NULL, xd,
+                       1, NULL, NULL),
+               CFT_ERR_INVALID_ARGUMENT, LE_OWN, "issued through cft_reduce");
+        LE_LEG(le_plant_lib, "cft_run, a NULL output",
+               cft_run(dev, CFT_ADD, CFT_FP64, CFT_RNE, xa, NULL, xb, NULL,
+                       1, NULL, NULL),
+               CFT_ERR_INVALID_ARGUMENT, LE_OWN, "d is NULL");
+        LE_LEG(le_plant_lib, "cft_run, a NULL operand the opcode reads",
+               cft_run(dev, CFT_ADD, CFT_FP64, CFT_RNE, NULL, NULL, xb, xd,
+                       1, NULL, NULL),
+               CFT_ERR_INVALID_ARGUMENT, LE_OWN, "reads operand a");
+        LE_LEG(le_plant_lib, "cft_run, a NULL device",
+               cft_run(NULL, CFT_ADD, CFT_FP64, CFT_RNE, xa, NULL, xb, xd,
+                       1, NULL, NULL),
+               CFT_ERR_INVALID_ARGUMENT, LE_OWN, "dev is NULL");
+        LE_LEG(le_plant_lib, "cft_run, a call that succeeds",
+               cft_run(dev, CFT_ADD, CFT_FP64, CFT_RNE, xa, NULL, xb, xd, 1,
+                       &fl, NULL),
+               CFT_OK, LE_EMPTY, NULL);
+        LE_LEG(le_plant_lib, "cft_run, no elements",
+               cft_run(dev, CFT_ADD, CFT_FP64, CFT_RNE, NULL, NULL, NULL,
+                       NULL, 0, &fl, NULL),
+               CFT_OK, LE_EMPTY, NULL);
+        LE_LEG(le_plant_lib, "cft_run_ex, a struct of the wrong size",
+               cft_run_ex(dev, CFT_ADD, CFT_FP64, CFT_RNE, &E),
+               CFT_ERR_INVALID_ARGUMENT, LE_OWN, "cft_elem_args");
+        LE_LEG(le_plant_lib, "cft_run_ex, no args",
+               cft_run_ex(dev, CFT_ADD, CFT_FP64, CFT_RNE, NULL),
+               CFT_ERR_INVALID_ARGUMENT, LE_OWN, "args is NULL");
+        LE_LEG(le_plant_lib, "cft_reduce, a NULL output",
+               cft_reduce(dev, CFT_SUM, CFT_FP64, CFT_RNE, xa, NULL, NULL, 4,
+                          NULL, NULL),
+               CFT_ERR_INVALID_ARGUMENT, LE_OWN, "cft_reduce: d is NULL");
+        LE_LEG(le_plant_lib, "cft_reduce, an elementwise opcode",
+               cft_reduce(dev, CFT_ADD, CFT_FP64, CFT_RNE, xa, xb, xd, 4,
+                          NULL, NULL),
+               CFT_ERR_INVALID_ARGUMENT, LE_OWN, "is not a reduction");
+        LE_LEG(le_plant_lib, "cft_reduce, a call that succeeds",
+               cft_reduce(dev, CFT_SUM, CFT_FP64, CFT_RNE, xa, NULL, xd, 4,
+                          &fl, NULL),
+               CFT_OK, LE_EMPTY, NULL);
+        LE_LEG(le_plant_lib, "cft_reduce_seg, a NULL output",
+               cft_reduce_seg(dev, CFT_SUM, CFT_FP64, CFT_RNE, xa, NULL,
+                              NULL, 4, 2, NULL, NULL),
+               CFT_ERR_INVALID_ARGUMENT, LE_OWN, "cft_reduce_seg: d is NULL");
+        LE_LEG(le_plant_lib, "cft_reduce_seg, a call that succeeds",
+               cft_reduce_seg(dev, CFT_SUM, CFT_FP64, CFT_RNE, xa, NULL, xd,
+                              4, 2, &fl, NULL),
+               CFT_OK, LE_EMPTY, NULL);
+        memset(&cp, 0, sizeof cp);
+        LE_LEG(le_plant_lib, "cft_get_caps, a struct with no size",
+               cft_get_caps(dev, &cp),
+               CFT_ERR_INVALID_ARGUMENT, LE_OWN, "cft_get_caps");
+        cp.struct_size = sizeof cp;
+        LE_LEG(le_plant_lib, "cft_get_caps, a call that succeeds",
+               cft_get_caps(dev, &cp), CFT_OK, LE_EMPTY, NULL);
+        LE_LEG(le_plant_lib, "cft_get_image_id, no out",
+               cft_get_image_id(dev, NULL),
+               CFT_ERR_INVALID_ARGUMENT, LE_OWN, "cft_get_image_id");
+        LE_LEG(le_plant_lib, "cft_alloc, no bytes",
+               cft_alloc(dev, 0, &bf),
+               CFT_ERR_INVALID_ARGUMENT, LE_OWN, "at least one byte");
+        LE_LEG(le_plant_lib, "cft_alloc, a call that succeeds",
+               cft_alloc(dev, 64, &bf), CFT_OK, LE_EMPTY, NULL);
+        LE_LEG(le_plant_lib, "cft_buffer_to_device, a call that succeeds",
+               cft_buffer_to_device(bf), CFT_OK, LE_EMPTY, NULL);
+        LE_LEG(le_plant_lib, "cft_buffer_from_device, a call that succeeds",
+               cft_buffer_from_device(bf), CFT_OK, LE_EMPTY, NULL);
+        cft_buffer_free(bf);
+        LE_LEG(le_plant_lib, "cft_buffer_to_device, no buffer",
+               cft_buffer_to_device(NULL),
+               CFT_ERR_INVALID_ARGUMENT, LE_OWN, "buf is NULL");
+        LE_LEG(le_plant_lib, "cft_buffer_from_device, no buffer",
+               cft_buffer_from_device(NULL),
+               CFT_ERR_INVALID_ARGUMENT, LE_OWN, "buf is NULL");
+        LE_LEG(le_plant_lib, "cft_buffer_get_info, no buffer",
+               cft_buffer_get_info(NULL, NULL),
+               CFT_ERR_INVALID_ARGUMENT, LE_OWN, "buf is NULL");
+        LE_LEG(le_plant_lib, "cft_open, a negative index",
+               cft_open(NULL, -1, &h),
+               CFT_ERR_INVALID_ARGUMENT, LE_OWN, "negative");
+        LE_LEG(le_plant_lib, "cft_open, no out",
+               cft_open(NULL, 0, NULL),
+               CFT_ERR_INVALID_ARGUMENT, LE_OWN, "out is NULL");
+        LE_LEG(le_plant_lib, "cft_open, a second software device",
+               cft_open(NULL, 1, &h),
+               CFT_ERR_NO_DEVICE, LE_OWN, "device 0");
+        LE_LEG(le_plant_lib, "cft_open_ex, no args",
+               cft_open_ex(NULL, &h),
+               CFT_ERR_INVALID_ARGUMENT, LE_OWN, "args is NULL");
+        LE_LEG(le_plant_lib, "cft_open, a call that succeeds",
+               cft_open(NULL, 0, &h), CFT_OK, LE_EMPTY, NULL);
+        cft_close(h);
+
+        /* the rest of device.c's refusals that now speak: the shapes the
+         * legs above leave out */
+        {
+            cft_elem_args E2;
+            cft_open_args oa2;
+            cft_image_id id2;
+            cft_buffer_info bi2;
+            cft_buffer *bf2 = NULL;
+
+            memset(&E2, 0, sizeof E2);
+            E2.struct_size = sizeof E2;
+            E2.a = xa; E2.d = xd; E2.n = 1;
+            E2.scalar_mask = 8u;
+            LE_LEG(le_plant_lib, "cft_run_ex, a reserved scalar_mask bit",
+                   cft_run_ex(dev, CFT_ADD, CFT_FP64, CFT_RNE, &E2),
+                   CFT_ERR_INVALID_ARGUMENT, LE_OWN, "reserved");
+            E2.scalar_mask = 1u;
+            E2.a = NULL;
+            LE_LEG(le_plant_lib, "cft_run_ex, a scalar operand that is NULL",
+                   cft_run_ex(dev, CFT_ADD, CFT_FP64, CFT_RNE, &E2),
+                   CFT_ERR_INVALID_ARGUMENT, LE_OWN, "names operand a");
+            LE_LEG(le_plant_lib, "cft_run, an n whose bytes overflow",
+                   cft_run(dev, CFT_ADD, CFT_FP64, CFT_RNE, xa, NULL, xb, xd,
+                           (size_t)-1, NULL, NULL),
+                   CFT_ERR_INVALID_ARGUMENT, LE_OWN,
+                   "more bytes than a size_t");
+            LE_LEG(le_plant_lib, "cft_reduce, a NULL device",
+                   cft_reduce(NULL, CFT_SUM, CFT_FP64, CFT_RNE, xa, NULL, xd,
+                              4, NULL, NULL),
+                   CFT_ERR_INVALID_ARGUMENT, LE_OWN, "cft_reduce: dev is NULL");
+            LE_LEG(le_plant_lib, "cft_reduce, a format out of range",
+                   cft_reduce(dev, CFT_SUM, (cft_format)9, CFT_RNE, xa, NULL,
+                              xd, 4, NULL, NULL),
+                   CFT_ERR_INVALID_ARGUMENT, LE_OWN, "cft_reduce: format 9");
+            LE_LEG(le_plant_lib, "cft_reduce, an attribute out of range",
+                   cft_reduce(dev, CFT_SUM, CFT_FP64, (cft_round)7, xa, NULL,
+                              xd, 4, NULL, NULL),
+                   CFT_ERR_INVALID_ARGUMENT, LE_OWN, "rounding attribute 7");
+            LE_LEG(le_plant_lib, "cft_reduce, a NULL operand",
+                   cft_reduce(dev, CFT_SUM, CFT_FP64, CFT_RNE, NULL, NULL, xd,
+                              4, NULL, NULL),
+                   CFT_ERR_INVALID_ARGUMENT, LE_OWN, "reads operand a");
+            LE_LEG(le_plant_lib, "cft_reduce, an n whose bytes overflow",
+                   cft_reduce(dev, CFT_SUM, CFT_FP64, CFT_RNE, xa, NULL, xd,
+                              (size_t)-1, NULL, NULL),
+                   CFT_ERR_INVALID_ARGUMENT, LE_OWN,
+                   "more bytes than a size_t");
+            LE_LEG(le_plant_lib, "cft_reduce_seg, a NULL device",
+                   cft_reduce_seg(NULL, CFT_SUM, CFT_FP64, CFT_RNE, xa, NULL,
+                                  xd, 4, 2, NULL, NULL),
+                   CFT_ERR_INVALID_ARGUMENT, LE_OWN,
+                   "cft_reduce_seg: dev is NULL");
+            LE_LEG(le_plant_lib, "cft_reduce_seg, an attribute out of range",
+                   cft_reduce_seg(dev, CFT_SUM, CFT_FP64, (cft_round)7, xa,
+                                  NULL, xd, 4, 2, NULL, NULL),
+                   CFT_ERR_INVALID_ARGUMENT, LE_OWN, "rounding attribute 7");
+            LE_LEG(le_plant_lib, "cft_reduce_seg, a format out of range",
+                   cft_reduce_seg(dev, CFT_SUM, (cft_format)9, CFT_RNE, xa,
+                                  NULL, xd, 4, 2, NULL, NULL),
+                   CFT_ERR_INVALID_ARGUMENT, LE_OWN,
+                   "cft_reduce_seg: format 9");
+            LE_LEG(le_plant_lib, "cft_reduce_seg, an elementwise opcode",
+                   cft_reduce_seg(dev, CFT_ADD, CFT_FP64, CFT_RNE, xa, xb, xd,
+                                  4, 2, NULL, NULL),
+                   CFT_ERR_INVALID_ARGUMENT, LE_OWN, "is not a reduction");
+            LE_LEG(le_plant_lib, "cft_reduce_seg, a NULL operand",
+                   cft_reduce_seg(dev, CFT_SUM, CFT_FP64, CFT_RNE, NULL, NULL,
+                                  xd, 4, 2, NULL, NULL),
+                   CFT_ERR_INVALID_ARGUMENT, LE_OWN, "reads operand a");
+            LE_LEG(le_plant_lib, "cft_reduce_seg, an n whose bytes overflow",
+                   cft_reduce_seg(dev, CFT_SUM, CFT_FP64, CFT_RNE, xa, NULL,
+                                  xd, (size_t)-1, 1, NULL, NULL),
+                   CFT_ERR_INVALID_ARGUMENT, LE_OWN,
+                   "more bytes than a size_t");
+            LE_LEG(le_plant_lib, "cft_get_caps, no out",
+                   cft_get_caps(dev, NULL),
+                   CFT_ERR_INVALID_ARGUMENT, LE_OWN, "cft_get_caps: out is NULL");
+            memset(&id2, 0, sizeof id2);
+            LE_LEG(le_plant_lib, "cft_get_image_id, a struct with no size",
+                   cft_get_image_id(dev, &id2),
+                   CFT_ERR_INVALID_ARGUMENT, LE_OWN, "struct_size");
+            LE_LEG(le_plant_lib, "cft_alloc, no out",
+                   cft_alloc(dev, 64, NULL),
+                   CFT_ERR_INVALID_ARGUMENT, LE_OWN, "cft_alloc: out is NULL");
+            CHECK(cft_alloc(dev, 64, &bf2) == CFT_OK, "a buffer for the legs");
+            memset(&bi2, 0, sizeof bi2);
+            LE_LEG(le_plant_lib, "cft_buffer_get_info, a struct with no size",
+                   cft_buffer_get_info(bf2, &bi2),
+                   CFT_ERR_INVALID_ARGUMENT, LE_OWN, "struct_size");
+            cft_buffer_free(bf2);
+            memset(&oa2, 0, sizeof oa2);
+            oa2.struct_size = sizeof oa2;
+            LE_LEG(le_plant_lib, "cft_open_ex, no out",
+                   cft_open_ex(&oa2, NULL),
+                   CFT_ERR_INVALID_ARGUMENT, LE_OWN, "cft_open_ex: out is NULL");
+#ifndef CFT_ENABLE_XRT
+            LE_LEG(le_plant_lib, "cft_open, an xclbin in a build with no XRT",
+                   cft_open("p2b-no-such-image.xclbin", 0, &h),
+                   CFT_ERR_NO_DEVICE, LE_OWN, "no XRT backend");
+#endif
+        }
+
+        /* A refusal names the call that was made. cft_run_ex runs the same
+         * checks as cft_run through one function, and cft_open_ex opens
+         * through cft_open's body: their sentences say "cft_run_ex" and
+         * "cft_open_ex", not the name of the function they share. (The
+         * first pass said "cft_run" and "cft_open" for both; sent back
+         * once, verifier-VP2b.) */
+        {
+            cft_elem_args E3;
+            cft_open_args oa3;
+
+            memset(&E3, 0, sizeof E3);
+            E3.struct_size = sizeof E3;
+            E3.a = xa; E3.b = xb; E3.c = xb; E3.d = xd; E3.n = 1;
+            LE_LEG(le_plant_lib, "cft_run_ex, a format out of range",
+                   cft_run_ex(dev, CFT_ADD, (cft_format)9, CFT_RNE, &E3),
+                   CFT_ERR_INVALID_ARGUMENT, LE_OWN, "cft_run_ex: format 9");
+            LE_LEG(le_plant_lib, "cft_run_ex, an attribute out of range",
+                   cft_run_ex(dev, CFT_ADD, CFT_FP64, (cft_round)7, &E3),
+                   CFT_ERR_INVALID_ARGUMENT, LE_OWN,
+                   "cft_run_ex: rounding attribute 7");
+            LE_LEG(le_plant_lib, "cft_run_ex, an opcode that is no byte",
+                   cft_run_ex(dev, (cft_op)300, CFT_FP64, CFT_RNE, &E3),
+                   CFT_ERR_INVALID_ARGUMENT, LE_OWN, "cft_run_ex: opcode 300");
+            LE_LEG(le_plant_lib, "cft_run_ex, a reduction opcode",
+                   cft_run_ex(dev, CFT_SUM, CFT_FP64, CFT_RNE, &E3),
+                   CFT_ERR_INVALID_ARGUMENT, LE_OWN,
+                   "cft_run_ex: opcode 24 (sum) is a reduction");
+            E3.d = NULL;
+            LE_LEG(le_plant_lib, "cft_run_ex, a NULL output",
+                   cft_run_ex(dev, CFT_ADD, CFT_FP64, CFT_RNE, &E3),
+                   CFT_ERR_INVALID_ARGUMENT, LE_OWN, "cft_run_ex: d is NULL");
+            E3.d = xd;
+            E3.c = NULL;
+            LE_LEG(le_plant_lib, "cft_run_ex, a NULL operand the opcode reads",
+                   cft_run_ex(dev, CFT_ADD, CFT_FP64, CFT_RNE, &E3),
+                   CFT_ERR_INVALID_ARGUMENT, LE_OWN,
+                   "cft_run_ex: opcode 1 (add) reads operand c");
+            E3.c = xb;
+            E3.n = (size_t)-1;
+            LE_LEG(le_plant_lib, "cft_run_ex, an n whose bytes overflow",
+                   cft_run_ex(dev, CFT_ADD, CFT_FP64, CFT_RNE, &E3),
+                   CFT_ERR_INVALID_ARGUMENT, LE_OWN, "cft_run_ex: n = ");
+            memset(&oa3, 0, sizeof oa3);
+            oa3.struct_size = sizeof oa3;
+            oa3.index = -1;
+            LE_LEG(le_plant_lib, "cft_open_ex, a negative index",
+                   cft_open_ex(&oa3, &h),
+                   CFT_ERR_INVALID_ARGUMENT, LE_OWN,
+                   "cft_open_ex: index -1 is negative");
+            oa3.index = 1;
+            LE_LEG(le_plant_lib, "cft_open_ex, a second software device",
+                   cft_open_ex(&oa3, &h),
+                   CFT_ERR_NO_DEVICE, LE_OWN,
+                   "cft_open_ex: the software backend is device 0");
+#ifndef CFT_ENABLE_XRT
+            oa3.index = 0;
+            oa3.artifact = "p2b-no-such-image.xclbin";
+            LE_LEG(le_plant_lib, "cft_open_ex, an xclbin in a build with no XRT",
+                   cft_open_ex(&oa3, &h),
+                   CFT_ERR_NO_DEVICE, LE_OWN, "cft_open_ex: p2b-no-such-image");
+#endif
+        }
+
+        /* the other source files: one entry point each, refused without a
+         * sentence of its own (the slot may be empty, never the plant's),
+         * and calls that succeed */
+        LE_LEG(le_plant_lib, "clause5.c cft_logb, a format out of range",
+               cft_logb(dev, (cft_format)9, xa, xd, 1, NULL),
+               CFT_ERR_INVALID_ARGUMENT, LE_NOT_PLANT, NULL);
+        LE_LEG(le_plant_lib, "clause5.c cft_logb, a call that succeeds",
+               cft_logb(dev, CFT_FP64, xa, xd, 1, &fl),
+               CFT_OK, LE_EMPTY, NULL);
+        LE_LEG(le_plant_lib, "clause5.c cft_cvt_to_i32, a NULL device",
+               cft_cvt_to_i32(NULL, CFT_FP64, CFT_RNE, 0, xa, (int32_t *)xd,
+                              1, NULL),
+               CFT_ERR_INVALID_ARGUMENT, LE_NOT_PLANT, NULL);
+        LE_LEG(le_plant_lib, "chars.c cft_get_payload, a format out of range",
+               cft_get_payload(dev, (cft_format)9, xa, xd, 1),
+               CFT_ERR_INVALID_ARGUMENT, LE_NOT_PLANT, NULL);
+        LE_LEG(le_plant_lib, "chars.c cft_set_payload, a NULL device",
+               cft_set_payload(NULL, CFT_FP64, xa, xd, 1),
+               CFT_ERR_INVALID_ARGUMENT, LE_NOT_PLANT, NULL);
+        LE_LEG(le_plant_lib, "formatof.c cft_formatof_add, a format out of "
+               "range",
+               cft_formatof_add(dev, (cft_format)9, CFT_FP64, CFT_RNE, xa,
+                                xb, xd, 1, NULL, NULL),
+               CFT_ERR_INVALID_ARGUMENT, LE_NOT_PLANT, NULL);
+        LE_LEG(le_plant_lib, "reduce.c cft_scaled_prod, a format out of "
+               "range",
+               cft_scaled_prod(dev, (cft_format)9, CFT_RNE, xa, xd, &sc, 1,
+                               NULL),
+               CFT_ERR_INVALID_ARGUMENT, LE_NOT_PLANT, NULL);
+        LE_LEG(le_plant_lib, "augmented.c cft_augmented_add, a format out "
+               "of range",
+               cft_augmented_add(dev, (cft_format)9, xa, xb, xd, xe, 1, NULL),
+               CFT_ERR_INVALID_ARGUMENT, LE_NOT_PLANT, NULL);
+        LE_LEG(le_plant_lib, "divsqrt.c cft_div, a format out of range",
+               cft_div(dev, (cft_format)9, CFT_RNE, xa, xb, xd, 1, NULL,
+                       NULL),
+               CFT_ERR_INVALID_ARGUMENT, LE_NOT_PLANT, NULL);
+        LE_LEG(le_plant_lib, "divsqrt.c cft_sqrt, a call that succeeds",
+               cft_sqrt(dev, CFT_FP64, CFT_RNE, xa, xd, 1, &fl, NULL),
+               CFT_OK, LE_EMPTY, NULL);
+        LE_LEG(le_plant_lib, "transcend.c cft_exp, a format out of range",
+               cft_exp(dev, (cft_format)9, CFT_RNE, xa, xd, 1, NULL),
+               CFT_ERR_INVALID_ARGUMENT, LE_NOT_PLANT, NULL);
+        LE_LEG(le_plant_lib, "transcend.c cft_exp, a call that succeeds",
+               cft_exp(dev, CFT_FP64, CFT_RNE, xa, xd, 1, &fl),
+               CFT_OK, LE_EMPTY, NULL);
+        LE_LEG(le_plant_lib, "conformance.c cft_conformance, a directory "
+               "with no sets",
+               cft_conformance(dev, "p2b-no-such-vector-dir", rep,
+                               sizeof rep, &cc),
+               CFT_ERR_ARTIFACT, LE_NOT_PLANT, NULL);
+        LE_LEG(le_plant_lib, "sha256.c cft_sha256, a NULL digest",
+               cft_sha256(xa, 3, NULL),
+               CFT_ERR_INVALID_ARGUMENT, LE_NOT_PLANT, NULL);
+        LE_LEG(le_plant_lib, "sha256.c cft_sha256, a call that succeeds",
+               cft_sha256(xa, 3, dig), CFT_OK, LE_EMPTY, NULL);
+        LE_LEG(le_plant_lib, "program.c cft_program_get_info, no program",
+               cft_program_get_info(NULL, &pinfo),
+               CFT_ERR_INVALID_ARGUMENT, LE_NOT_PLANT, NULL);
+        LE_LEG(le_plant_lib, "program.c cft_program_run_ex, no program",
+               cft_program_run_ex(NULL, &RA),
+               CFT_ERR_INVALID_ARGUMENT, LE_NOT_PLANT, NULL);
+        LE_LEG(le_plant_lib, "program.c cft_program_run, no program",
+               cft_program_run(NULL, xa, NULL, NULL, xd, NULL, 1, NULL,
+                               NULL),
+               CFT_ERR_INVALID_ARGUMENT, LE_NOT_PLANT, NULL);
+        LE_LEG(le_plant_lib, "program.c cft_program_run_bank, no program",
+               cft_program_run_bank(NULL, NULL, 0, xa, NULL, NULL, xd, NULL,
+                                    1, NULL, NULL),
+               CFT_ERR_INVALID_ARGUMENT, LE_NOT_PLANT, NULL);
+        LE_LEG(le_plant_lib, "program.c cft_program_digest, no program",
+               cft_program_digest(NULL, NULL, 0, dig),
+               CFT_ERR_INVALID_ARGUMENT, LE_NOT_PLANT, NULL);
+
+        /* the remote backend's slot and the XRT backend's, planted first:
+         * a call that reaches no backend used to show their older
+         * sentence once the library's own slot was empty, and in a
+         * process with both, the remote's before the XRT's */
+        for (p = 1; p < (int)(sizeof plants / sizeof plants[0]); p++) {
+            int (*const plant)(cft_device *) = plants[p];
+            snprintf(w, sizeof w, "after the %s backend's sentence, ",
+                     pname[p]);
+            {
+                char s1[160], s2[160], s3[160], s4[160], s5[160];
+                snprintf(s1, sizeof s1, "%scft_run, a format out of range",
+                         w);
+                snprintf(s2, sizeof s2, "%scft_run, a call that succeeds", w);
+                snprintf(s3, sizeof s3, "%scft_reduce, a NULL output", w);
+                snprintf(s4, sizeof s4, "%sclause5.c cft_logb, a format out "
+                         "of range", w);
+                snprintf(s5, sizeof s5, "%stranscend.c cft_exp, a call that "
+                         "succeeds", w);
+                LE_LEG(plant, s1,
+                       cft_run(dev, CFT_ADD, (cft_format)9, CFT_RNE, xa, xb,
+                               NULL, xd, 1, NULL, NULL),
+                       CFT_ERR_INVALID_ARGUMENT, LE_OWN, "format 9");
+                LE_LEG(plant, s2,
+                       cft_run(dev, CFT_ADD, CFT_FP64, CFT_RNE, xa, NULL, xb,
+                               xd, 1, &fl, NULL),
+                       CFT_OK, LE_EMPTY, NULL);
+                LE_LEG(plant, s3,
+                       cft_reduce(dev, CFT_SUM, CFT_FP64, CFT_RNE, xa, NULL,
+                                  NULL, 4, NULL, NULL),
+                       CFT_ERR_INVALID_ARGUMENT, LE_OWN, "d is NULL");
+                LE_LEG(plant, s4,
+                       cft_logb(dev, (cft_format)9, xa, xd, 1, NULL),
+                       CFT_ERR_INVALID_ARGUMENT, LE_NOT_PLANT, NULL);
+                LE_LEG(plant, s5,
+                       cft_exp(dev, CFT_FP64, CFT_RNE, xa, xd, 1, &fl),
+                       CFT_OK, LE_EMPTY, NULL);
+            }
+        }
+        printf("  last-error: %d legs - every source file's entry points, "
+               "each after an older sentence in the library's slot, and "
+               "five after the remote%s backend's: the sentence is the "
+               "call's own or none, and a call that succeeds leaves "
+               "none\n", le_legs,
+#ifdef CFT_ENABLE_XRT
+               " and the XRT"
+#else
+               ""
+#endif
+               );
     }
 
     cft_close(dev);

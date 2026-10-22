@@ -1799,6 +1799,7 @@ CFT_API cft_status cft_program_get_info(cft_program *prog,
     cft_program_info info;
     size_t want;
 
+    cft_clear_error();
     if (!prog || !out)
         return CFT_ERR_INVALID_ARGUMENT;
     want = out->struct_size;
@@ -2998,6 +2999,7 @@ CFT_API cft_status cft_program_run_ex(cft_program *prog,
     cft_run_args A;
     cft_status st;
 
+    cft_clear_error();
     if (!prog || !args)
         return CFT_ERR_INVALID_ARGUMENT;
     if (args->struct_size != sizeof(cft_run_args)) {
@@ -3124,6 +3126,7 @@ CFT_API cft_status cft_program_run(cft_program *prog,
     cft_run_args A;
     cft_status st;
 
+    cft_clear_error();
     if (bus)
         *bus = 0;
     if (!prog)
@@ -3158,6 +3161,7 @@ CFT_API cft_status cft_program_run_bank(cft_program *prog,
     cft_run_args A;
     cft_status st;
 
+    cft_clear_error();
     if (bus_out)
         *bus_out = 0;
     if (!prog)
@@ -3183,6 +3187,7 @@ CFT_API cft_status cft_program_digest(cft_program *prog,
     cft_sha256_ctx s;
     cft_status st;
 
+    cft_clear_error();
     if (!prog || !out)
         return CFT_ERR_INVALID_ARGUMENT;
     /* The same bank rule as the run, deliberately: a digest over a

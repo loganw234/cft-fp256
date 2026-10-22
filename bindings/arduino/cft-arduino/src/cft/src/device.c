@@ -31,12 +31,23 @@
 #define CFT_BACKEND_SW  0
 #define CFT_BACKEND_XRT 1
 
-/* Clears this library's own last-error slot; called at every point
- * where a call is about to reach a device backend, so that a message
- * libcft wrote never goes on explaining a failure that is not its.
- * Defined with the slot, below. */
+/* Called at every point where a call is about to reach a device backend:
+ * empties every last-error slot, like the top of every public entry point
+ * (cft_clear_error). Defined with the slot, below. */
 #if defined(CFT_ENABLE_XRT) || !defined(CFT_NO_REMOTE)
 static void backend_call(void);
+#endif
+
+/* The sentences KL-490 added for refusals that had none. Where the slot
+ * cannot hold one (CFT_ERRMSG_MAX 1, CFT_TINY's) cft_set_error ignores its
+ * text and the text would still sit in flash, so these are written only
+ * where the slot can hold them: a tiny build gains no sentence and changes
+ * nothing it does (a short name per refusal there is Logan's open
+ * question, KL-603). The older sentences keep calling cft_set_error. */
+#if CFT_ERRMSG_MAX > 1
+#  define CFT_SAY(...) cft_set_error(__VA_ARGS__)
+#else
+#  define CFT_SAY(...) ((void)0)
 #endif
 
 /* ==== the remote backend (docs/REMOTE.md) ============================
@@ -427,15 +438,24 @@ CFT_API const char *cft_op_name(cft_op op)
  * Devices
  * --------------------------------------------------------------- */
 
-CFT_API cft_status cft_open(const char *artifact, int index, cft_device **out)
+/* cft_open's body, given the entry's name for its sentences: cft_open_ex
+ * opens through it too, and a refusal names the call that was made. */
+static cft_status open_impl(const char *who, const char *artifact, int index,
+                            cft_device **out)
 {
     cft_device *dev;
 
-    if (!out)
+    (void)who;          /* named only in sentences, which CFT_TINY drops */
+    if (!out) {
+        CFT_SAY("%s: out is NULL - it receives the handle", who);
         return CFT_ERR_INVALID_ARGUMENT;
+    }
     *out = NULL;
-    if (index < 0)
+    if (index < 0) {
+        CFT_SAY("%s: index %d is negative; devices are numbered "
+                "from 0", who, index);
         return CFT_ERR_INVALID_ARGUMENT;
+    }
 
     /* ==== the remote backend: "cft://host:port" (docs/REMOTE.md) ====
      * One additive spelling of the artifact argument; every other
@@ -459,6 +479,8 @@ CFT_API cft_status cft_open(const char *artifact, int index, cft_device **out)
         dev = (cft_device *)calloc(1, sizeof *dev);
         if (!dev) {
             cftr_close(hw);
+            CFT_SAY("%s: out of memory allocating the handle for %s",
+                    who, artifact);
             return CFT_ERR_OUT_OF_MEMORY;
         }
         dev->backend        = CFT_BACKEND_REMOTE;
@@ -490,6 +512,8 @@ CFT_API cft_status cft_open(const char *artifact, int index, cft_device **out)
         *out = dev;
         return CFT_OK;
 #else
+        CFT_SAY("%s: %s is a remote device, and this libcft build has "
+                "no remote backend (-DCFT_NO_REMOTE)", who, artifact);
         return CFT_ERR_NO_DEVICE;
 #endif
     }
@@ -511,6 +535,8 @@ CFT_API cft_status cft_open(const char *artifact, int index, cft_device **out)
         dev = (cft_device *)calloc(1, sizeof *dev);
         if (!dev) {
             cftx_close(hw);
+            CFT_SAY("%s: out of memory allocating the handle for %s",
+                    who, artifact);
             return CFT_ERR_OUT_OF_MEMORY;
         }
         dev->backend        = CFT_BACKEND_XRT;
@@ -529,16 +555,26 @@ CFT_API cft_status cft_open(const char *artifact, int index, cft_device **out)
         /* No device backend is compiled into this build, so there is
          * genuinely no such device here - not a bad artifact, and not
          * an unsupported operation. */
+        CFT_SAY("%s: %s names a device, and this libcft build has no "
+                "XRT backend (CFT_ENABLE_XRT is not defined; host/Makefile "
+                "builds it with XRT=1)", who, artifact);
         return CFT_ERR_NO_DEVICE;
 #endif
     }
 
-    if (index != 0)
-        return CFT_ERR_NO_DEVICE;   /* one software backend, and it is 0 */
+    if (index != 0) {
+        /* one software backend, and it is 0 */
+        CFT_SAY("%s: the software backend is device 0, and index %d "
+                "names no other; an artifact names a device behind it",
+                who, index);
+        return CFT_ERR_NO_DEVICE;
+    }
 
     dev = (cft_device *)calloc(1, sizeof *dev);
-    if (!dev)
+    if (!dev) {
+        CFT_SAY("%s: out of memory allocating the software handle", who);
         return CFT_ERR_OUT_OF_MEMORY;
+    }
     dev->backend        = CFT_BACKEND_SW;
     dev->index          = index;
     /* Every format this build carries. That is all four unless
@@ -606,6 +642,12 @@ CFT_API cft_status cft_open(const char *artifact, int index, cft_device **out)
     return CFT_OK;
 }
 
+CFT_API cft_status cft_open(const char *artifact, int index, cft_device **out)
+{
+    cft_clear_error();
+    return open_impl("cft_open", artifact, index, out);
+}
+
 /* The deepest scratch a tile can publish: CAPS2[3:0] is a four-bit log2
  * (rtl/cft_seq.sv refuses to elaborate a deeper one). */
 #define CFT_OPEN_SCRATCH_MAX 32768u
@@ -621,11 +663,17 @@ CFT_API cft_status cft_open_ex(const cft_open_args *args, cft_device **out)
     uint32_t depth;
     cft_status st;
 
-    if (!out)
+    cft_clear_error();
+    if (!out) {
+        CFT_SAY("cft_open_ex: out is NULL - it receives the handle");
         return CFT_ERR_INVALID_ARGUMENT;
+    }
     *out = NULL;
-    if (!args)
+    if (!args) {
+        CFT_SAY("cft_open_ex: args is NULL - pass a zeroed cft_open_args "
+                "with struct_size set to sizeof(cft_open_args)");
         return CFT_ERR_INVALID_ARGUMENT;
+    }
     if (args->struct_size != sizeof(cft_open_args)) {
         cft_set_error("cft_open_ex was given a %lu-byte cft_open_args and "
                       "this library's is %lu bytes. Zero the struct and "
@@ -661,7 +709,7 @@ CFT_API cft_status cft_open_ex(const cft_open_args *args, cft_device **out)
         return CFT_ERR_UNSUPPORTED;
 #endif
     }
-    st = cft_open(args->artifact, args->index, out);
+    st = open_impl("cft_open_ex", args->artifact, args->index, out);
     if (st != CFT_OK || !depth)
         return st;
     (*out)->seq.max_scratch = depth;
@@ -988,6 +1036,9 @@ int cft_backend_program_run(struct cft_device *dev, int fmt,
                     continue;
                 tmp[r] = (uint8_t *)malloc(n * resz);
                 if (!tmp[r]) {
+                    CFT_SAY("cft_program_run_ex: out of memory gathering "
+                            "stream %c (%llu elements) for a remote device",
+                            'a' + r, (unsigned long long)n);
                     while (r-- > 0) free(tmp[r]);
                     return CFT_ERR_OUT_OF_MEMORY;
                 }
@@ -1004,6 +1055,9 @@ int cft_backend_program_run(struct cft_device *dev, int fmt,
                 tmp[3] = (uint8_t *)malloc(entries * resz);
                 if (!tmp[3]) {
                     free(tmp[2]); free(tmp[1]); free(tmp[0]);
+                    CFT_SAY("cft_program_run_ex: out of memory gathering the "
+                            "scratch-in block (%llu entries) for a remote "
+                            "device", (unsigned long long)entries);
                     return CFT_ERR_OUT_OF_MEMORY;
                 }
                 idx_gather(tmp[3], (const uint8_t *)io->scratch_in,
@@ -1032,6 +1086,8 @@ int cft_backend_program_run(struct cft_device *dev, int fmt,
     (void)io;
     (void)a; (void)b; (void)c; (void)deposits; (void)counts; (void)n;
     (void)flags; (void)bus;
+    CFT_SAY("cft_program_run_ex: this handle has no device backend to run "
+            "a program on - a defect in libcft, not in the call");
     return CFT_ERR_INTERNAL;
 }
 /* ==== end of the remote block ======================================= */
@@ -1081,24 +1137,20 @@ CFT_API void cft_close(cft_device *dev)
 
 /* ---- the library's own last-error slot ------------------------------
  *
- * The two device backends keep a message each and clear it at the
- * start of every call they make, so each is non-empty only while its
- * own most recent call is the one that failed. This is the third
- * source and it follows the same discipline from the other side:
- * anything in libcft that refuses without reaching a backend writes
- * here, and every call that DOES reach a backend clears it first -
- * backend_call() below, immediately before each cftx_/cftr_ call, and
- * this file holds all of them. Without that, a program refused at
- * load would go on explaining a run that failed for another reason
- * ten calls later.
- *
- * The other direction needed the same rule, and until 2026-09-30 a
- * load did not have it: cft_program_load reaches no backend, so nothing
- * cleared the slot, and a refusal it made without a sentence printed
- * the last call's - "cft_run_ex: idx_a[128] = 4294967294 is at or past
- * the 256 elements ...", measured by P2 of the revision-7 round. It now
- * calls cft_clear_error() on entry and writes a sentence at every
- * refusal it makes.
+ * cft_last_error() reads three slots: this one, the remote backend's and
+ * the XRT backend's. cft_clear_error() below empties all three, and it is
+ * the first statement of every public entry point that returns a status
+ * (2026-10-22, KL-490); backend_call() does the same before each cftx_/
+ * cftr_ call that can write a sentence of its own, for a call that has
+ * gone on to use a backend (the ones that cannot - cftx_buffer_create,
+ * _destroy, _stat, _host_wrote and cftx_close - have none, and neither
+ * has cftr_close, whose goodbye can leave one: cft.h says so). So a
+ * refusal writes its sentence here after the clear, and nothing an
+ * earlier call wrote - or the other backend - can stand in front of it.
+ * Until then only a call that reached a backend cleared this slot, and
+ * from 2026-09-30 cft_program_load too: a refusal without a sentence
+ * showed the last call's, and a remote handle's older sentence came
+ * before an XRT handle's newer one (verifier-V2, V9, V10).
  *
  * Its producers are the library's refusals by name - this file's,
  * program.c's, and the other modules' through the helpers backend.h
@@ -1128,19 +1180,30 @@ void cft_set_error(const char *fmt, ...)
 #endif
 }
 
-/* backend.h says who calls it. In every build, and at every
- * CFT_ERRMSG_MAX: at 1 the slot is that one byte, already empty. */
+/* backend.h says who calls it. It empties ALL the slots cft_last_error()
+ * reads, not only this one; it is nothing where no slot can hold a
+ * sentence (backend.h, CFT_CLEAR_ERROR_IS_NOP). */
+#ifndef CFT_CLEAR_ERROR_IS_NOP
 void cft_clear_error(void)
 {
     g_msg[0] = '\0';
+#ifndef CFT_NO_REMOTE
+    cftr_clear_error();
+#endif
+#ifdef CFT_ENABLE_XRT
+    cftx_clear_error();
+#endif
 }
+#endif
 
 #if defined(CFT_ENABLE_XRT) || !defined(CFT_NO_REMOTE)
-/* Called immediately before handing anything to a device backend. A
- * build with no device backend hands nothing to one. */
+/* Called immediately before handing a device backend a call that can write
+ * a sentence (a build with none hands nothing to one). It empties every
+ * slot: the backend about to be called clears its own at most, and the
+ * OTHER's older sentence would stand beside the new call's. */
 static void backend_call(void)
 {
-    g_msg[0] = '\0';
+    cft_clear_error();
 }
 #endif
 
@@ -1275,11 +1338,19 @@ CFT_API cft_status cft_get_caps(cft_device *dev, cft_caps *out)
     cft_caps c;
     size_t want;
 
-    if (!dev || !out)
+    cft_clear_error();
+    if (!dev || !out) {
+        CFT_SAY("cft_get_caps: %s is NULL", dev ? "out" : "dev");
         return CFT_ERR_INVALID_ARGUMENT;
+    }
     want = out->struct_size;
-    if (want < sizeof(size_t))
+    if (want < sizeof(size_t)) {
+        CFT_SAY("cft_get_caps: out->struct_size is %lu; set it to "
+                "sizeof(cft_caps) before the call - it is how many bytes "
+                "of the struct the caller has",
+                (unsigned long)want);
         return CFT_ERR_INVALID_ARGUMENT;
+    }
 
     memset(&c, 0, sizeof c);
     c.format_mask    = dev->format_mask;
@@ -1333,11 +1404,19 @@ CFT_API cft_status cft_get_image_id(cft_device *dev, cft_image_id *out)
 {
     size_t want;
 
-    if (!dev || !out)
+    cft_clear_error();
+    if (!dev || !out) {
+        CFT_SAY("cft_get_image_id: %s is NULL", dev ? "out" : "dev");
         return CFT_ERR_INVALID_ARGUMENT;
+    }
     want = out->struct_size;
-    if (want < sizeof(size_t))
+    if (want < sizeof(size_t)) {
+        CFT_SAY("cft_get_image_id: out->struct_size is %lu; set it to "
+                "sizeof(cft_image_id) before the call - it is how many "
+                "bytes of the struct the caller has",
+                (unsigned long)want);
         return CFT_ERR_INVALID_ARGUMENT;
+    }
 
 #ifdef CFT_ENABLE_XRT
     if (dev->backend == CFT_BACKEND_XRT) {
@@ -1486,8 +1565,13 @@ static void put_le32_img(uint8_t *p, uint32_t v)
  * and this is the function every backend dispatch lives in.
  *
  * scalar_mask: bit 0 a, bit 1 b, bit 2 c. A set bit makes that operand
- * one element that applies to the whole run. */
-static cft_status run_impl(cft_device *dev,
+ * one element that applies to the whole run.
+ *
+ * `who` is the entry point's name, "cft_run" or "cft_run_ex": the
+ * sentences of the refusals this function makes name the call that was
+ * made, which is the one a caller reads them for. */
+static cft_status run_impl(const char *who,
+                           cft_device *dev,
                            cft_op      op,
                            cft_format  fmt,
                            cft_round   rnd,
@@ -1507,7 +1591,8 @@ static cft_status run_impl(cft_device *dev,
  * that an indexed run is refused for a bad format, a bad attribute, a
  * reduction opcode or an opcode group this device lacks in exactly the
  * words and exactly the order a dense one is. */
-static cft_status run_gathered(cft_device *dev, cft_op op, cft_format fmt,
+static cft_status run_gathered(const char *who,
+                               cft_device *dev, cft_op op, cft_format fmt,
                                cft_round rnd, const void *a, const void *b,
                                const void *c, void *d, size_t n,
                                uint32_t scalar_mask, const run_tables *tab,
@@ -1528,7 +1613,8 @@ static cft_status run_composed(cft_device *dev, cft_op op, cft_format fmt,
                                uint32_t *bus_out);
 #endif
 
-static cft_status run_impl(cft_device *dev,
+static cft_status run_impl(const char *who,
+                           cft_device *dev,
                            cft_op      op,
                            cft_format  fmt,
                            cft_round   rnd,
@@ -1552,22 +1638,33 @@ static cft_status run_impl(cft_device *dev,
 
     if (bus_out)
         *bus_out = 0;
-    if (!dev)
+    if (!dev) {
+        CFT_SAY("%s: dev is NULL", who);
         return CFT_ERR_INVALID_ARGUMENT;
+    }
     if (CFT_FMT_ABSENT(fmt))
         return (cft_status)cft_absent_format_refusal((int)fmt);
-    if (CFT_FMT_OUT_OF_RANGE(fmt))
+    if (CFT_FMT_OUT_OF_RANGE(fmt)) {
+        CFT_SAY("%s: format %d is not a cft_format (CFT_FP32 to "
+                "CFT_FP256, 0 to 3)", who, (int)fmt);
         return CFT_ERR_INVALID_ARGUMENT;
-    if ((int)rnd < 0 || (int)rnd > 4)
+    }
+    if ((int)rnd < 0 || (int)rnd > 4) {
+        CFT_SAY("%s: rounding attribute %d is not a cft_round "
+                "(CFT_RNE to CFT_RMM, 0 to 4)", who, (int)rnd);
         return CFT_ERR_INVALID_ARGUMENT;
+    }
     /* The device carries the opcode in a byte. Anything wider is a
      * caller mistake; anything inside it that is unassigned is not -
      * it has a defined answer, produced below. */
-    if ((int)op < 0 || (int)op > 255)
+    if ((int)op < 0 || (int)op > 255) {
+        CFT_SAY("%s: opcode %d does not fit the device's opcode "
+                "byte (0 to 255)", who, (int)op);
         return CFT_ERR_INVALID_ARGUMENT;
+    }
     if (!(dev->format_mask & (1u << (int)fmt)))
         return (cft_status)cft_device_format_refusal(dev->format_mask,
-                                                     (int)fmt, "cft_run");
+                                                     (int)fmt, who);
     /* A reduction cannot be evaluated elementwise, so this is not the
      * call for it. Refused BEFORE the backend dispatch below, so the
      * software and device paths give the same answer - the alternative
@@ -1575,8 +1672,12 @@ static cft_status run_impl(cft_device *dev,
      * heard of opcode 24 returns the unassigned-opcode result, and two
      * backends disagreeing is the one outcome this project cannot
      * ship. */
-    if (cft_sf_is_reduction((int)op))
+    if (cft_sf_is_reduction((int)op)) {
+        CFT_SAY("%s: opcode %d (%s) is a reduction - n inputs, one "
+                "output - and is issued through cft_reduce, which "
+                "%s does not take", who, (int)op, cft_op_name(op), who);
         return CFT_ERR_INVALID_ARGUMENT;
+    }
     /* An assigned opcode whose group this device lacks is refused
      * here, not issued and hoped for. A trimmed bitstream does not
      * fault on an opcode it does not implement - it returns whatever
@@ -1588,7 +1689,7 @@ static cft_status run_impl(cft_device *dev,
     {
         int group = op_group_bit((int)op);
         if (group >= 0 && !(dev->op_groups & (1u << group)))
-            return (cft_status)cft_op_group_refusal((int)op, "cft_run");
+            return (cft_status)cft_op_group_refusal((int)op, who);
         if ((int)op == (int)CFT_IMUL &&
             !(dev->seq.features & CFT_ALU_EXT_IMUL)) {
             cft_set_error("opcode 30 (imul) is not implemented by this "
@@ -1602,17 +1703,28 @@ static cft_status run_impl(cft_device *dev,
         cft_flags_emit(dev, 0, flags_out);
         return CFT_OK;
     }
-    if (!d)
+    if (!d) {
+        CFT_SAY("%s: d is NULL, and %llu elements are to be written "
+                "to it", who, (unsigned long long)n);
         return CFT_ERR_INVALID_ARGUMENT;
+    }
 
     need = cft_sf_op_operands((int)op);
-    if (((need & 1u) && !a) || ((need & 2u) && !b) || ((need & 4u) && !c))
+    if (((need & 1u) && !a) || ((need & 2u) && !b) || ((need & 4u) && !c)) {
+        CFT_SAY("%s: opcode %d (%s) reads operand %c, which is NULL",
+                who, (int)op, cft_op_name(op),
+                ((need & 1u) && !a) ? 'a' : ((need & 2u) && !b) ? 'b' : 'c');
         return CFT_ERR_INVALID_ARGUMENT;
+    }
 
     f   = &cft_sf_formats[(int)fmt];
     esz = (size_t)f->width / 8;
-    if (n > ((size_t)-1) / esz)
+    if (n > ((size_t)-1) / esz) {
+        CFT_SAY("%s: n = %llu elements of %lu bytes are more bytes "
+                "than a size_t counts", who, (unsigned long long)n,
+                (unsigned long)esz);
         return CFT_ERR_INVALID_ARGUMENT;
+    }
 
     /* ==== R16's two MEMORY-TOUCHING argument rules ===================
      *
@@ -1776,7 +1888,7 @@ static cft_status run_impl(cft_device *dev,
          * on an operand the opcode does not read. The host gather is
          * here so that "unreachable" does not have to be load
          * bearing. */
-        return run_gathered(dev, op, fmt, rnd, a, b, c, d, n,
+        return run_gathered(who, dev, op, fmt, rnd, a, b, c, d, n,
                             scalar_mask, tab, esz, flags_out, bus_out);
     }
     /* ==== end of R16 ================================================= */
@@ -1913,6 +2025,9 @@ static cft_status run_impl(cft_device *dev,
                     continue;
                 exp[r] = malloc(n * esz);
                 if (!exp[r]) {
+                    CFT_SAY("%s: out of memory expanding scalar "
+                            "operand %c to %llu elements for a remote "
+                            "device", who, 'a' + r, (unsigned long long)n);
                     while (r-- > 0) free(exp[r]);
                     return CFT_ERR_OUT_OF_MEMORY;
                 }
@@ -1959,8 +2074,13 @@ static cft_status run_impl(cft_device *dev,
         if (pa) cft_bn_load(&ba, pa + sa * i * esz, (int)esz);
         if (pb) cft_bn_load(&bb, pb + sb * i * esz, (int)esz);
         if (pc) cft_bn_load(&bc, pc + sc * i * esz, (int)esz);
-        if (cft_sf_compute(f, (int)op, (int)rnd, &ba, &bb, &bc, &bo, &fl))
+        if (cft_sf_compute(f, (int)op, (int)rnd, &ba, &bb, &bc, &bo, &fl)) {
+            CFT_SAY("%s: the software backend's compute step refused "
+                    "opcode %d (%s) at element %llu - a defect in libcft, "
+                    "not in the call", who, (int)op, cft_op_name(op),
+                    (unsigned long long)i);
             return CFT_ERR_INTERNAL;
+        }
         acc |= fl;
         cft_bn_store(&bo, pd + i * esz, (int)esz);
     }
@@ -1982,7 +2102,8 @@ static cft_status run_impl(cft_device *dev,
  * one level deep: the dense run over the gathered block is not LIKE
  * the answer, it IS the answer, so the honest way to write it is to
  * call the dense path rather than to copy it. */
-static cft_status run_gathered(cft_device *dev, cft_op op, cft_format fmt,
+static cft_status run_gathered(const char *who,
+                               cft_device *dev, cft_op op, cft_format fmt,
                                cft_round rnd, const void *a, const void *b,
                                const void *c, void *d, size_t n,
                                uint32_t scalar_mask, const run_tables *tab,
@@ -2002,6 +2123,9 @@ static cft_status run_gathered(cft_device *dev, cft_op op, cft_format fmt,
             continue;
         tmp[r] = (uint8_t *)malloc(n * esz);
         if (!tmp[r]) {
+            CFT_SAY("cft_run_ex: out of memory gathering operand %c (%llu "
+                    "elements) on the host", 'a' + r,
+                    (unsigned long long)n);
             while (r-- > 0)
                 free(tmp[r]);
             return CFT_ERR_OUT_OF_MEMORY;
@@ -2009,7 +2133,7 @@ static cft_status run_gathered(cft_device *dev, cft_op op, cft_format fmt,
         idx_gather(tmp[r], (const uint8_t *)opnd[r], tab->idx[r], n, esz);
         opnd[r] = tmp[r];
     }
-    st = run_impl(dev, op, fmt, rnd, opnd[0], opnd[1], opnd[2], d, n,
+    st = run_impl(who, dev, op, fmt, rnd, opnd[0], opnd[1], opnd[2], d, n,
                   scalar_mask, NULL, flags_out, bus_out);
     free(tmp[2]); free(tmp[1]); free(tmp[0]);
     return st;
@@ -2090,8 +2214,13 @@ static cft_status run_composed(cft_device *dev, cft_op op, cft_format fmt,
      * from the same ceiling `esz` comes from - but the run that would
      * find out is one that wrote past a stack array, so it is checked
      * rather than argued. */
-    if (32u + 3u * esz + 3u * 8u > sizeof img)
+    if (32u + 3u * esz + 3u * 8u > sizeof img) {
+        CFT_SAY("cft_run_ex: the composed image for a %lu-byte format "
+                "would not fit its %lu-byte buffer - a defect in libcft, "
+                "not in the call", (unsigned long)esz,
+                (unsigned long)sizeof img);
         return CFT_ERR_INTERNAL;
+    }
 
     /* The two capability refusals, BY NAME and in this order.
      *
@@ -2270,7 +2399,8 @@ CFT_API cft_status cft_run(cft_device *dev,
                            uint32_t   *flags_out,
                            uint32_t   *bus_out)
 {
-    return run_impl(dev, op, fmt, rnd, a, b, c, d, n, 0u, NULL,
+    cft_clear_error();
+    return run_impl("cft_run", dev, op, fmt, rnd, a, b, c, d, n, 0u, NULL,
                     flags_out, bus_out);
 }
 
@@ -2280,26 +2410,44 @@ CFT_API cft_status cft_run_ex(cft_device *dev,
                               cft_round   rnd,
                               const cft_elem_args *args)
 {
-    if (!dev || !args)
+    cft_clear_error();
+    if (!dev || !args) {
+        CFT_SAY("cft_run_ex: %s is NULL", dev ? "args" : "dev");
         return CFT_ERR_INVALID_ARGUMENT;
+    }
     /* An INPUT struct, so an unrecognised size is REFUSED rather than
      * truncated - the same reversal cft_run_args documents. A newer
      * caller's scalar_mask silently ignored is exactly the run that
      * would return an array's worth of the wrong answer. */
-    if (args->struct_size != sizeof(cft_elem_args))
+    if (args->struct_size != sizeof(cft_elem_args)) {
+        CFT_SAY("cft_run_ex was given a %lu-byte cft_elem_args and this "
+                "library's is %lu bytes. Zero the struct and set "
+                "struct_size to sizeof(cft_elem_args)",
+                (unsigned long)args->struct_size,
+                (unsigned long)sizeof(cft_elem_args));
         return CFT_ERR_INVALID_ARGUMENT;
+    }
     /* Bits above the three operands are reserved, and refused rather
      * than masked off: a caller setting bit 3 means something this
      * library does not implement. */
-    if (args->scalar_mask & ~7u)
+    if (args->scalar_mask & ~7u) {
+        CFT_SAY("cft_run_ex: scalar_mask 0x%lx sets bits above the three "
+                "operands (a is bit 0, b bit 1, c bit 2); the rest are "
+                "reserved", (unsigned long)args->scalar_mask);
         return CFT_ERR_INVALID_ARGUMENT;
+    }
     /* An operand that is not supplied cannot be scalar. Caught here
      * because a NULL pointer with its bit set would otherwise read
      * element 0 of nothing. */
     if (((args->scalar_mask & 1u) && !args->a) ||
         ((args->scalar_mask & 2u) && !args->b) ||
-        ((args->scalar_mask & 4u) && !args->c))
+        ((args->scalar_mask & 4u) && !args->c)) {
+        CFT_SAY("cft_run_ex: scalar_mask names operand %c as one element "
+                "every lane reads, and it is NULL",
+                ((args->scalar_mask & 1u) && !args->a) ? 'a'
+                : ((args->scalar_mask & 2u) && !args->b) ? 'b' : 'c');
         return CFT_ERR_INVALID_ARGUMENT;
+    }
     /* ABI 0.14's index tables (docs/ROUND2.md, P2). The SHAPE rules are
      * the seam's and final: a table on an operand that is NULL, or that
      * is also scalar, or with a source length of zero, and a source
@@ -2408,8 +2556,8 @@ CFT_API cft_status cft_run_ex(cft_device *dev,
         tab.idx[2] = args->idx_c;
         tab.src[0] = args->idx_a_src; tab.src[1] = args->idx_b_src;
         tab.src[2] = args->idx_c_src;
-        return run_impl(dev, op, fmt, rnd, args->a, args->b, args->c,
-                        args->d, args->n, args->scalar_mask, &tab,
+        return run_impl("cft_run_ex", dev, op, fmt, rnd, args->a, args->b,
+                        args->c, args->d, args->n, args->scalar_mask, &tab,
                         args->flags_out, args->bus_out);
     }
 }
@@ -2508,9 +2656,11 @@ CFT_API cft_status cft_reduce(cft_device *dev,
                               uint32_t   *flags_out,
                               uint32_t   *bus_out)
 {
-    const size_t dbytes = cft_format_size(fmt);
+    size_t dbytes;
     cft_status st;
 
+    cft_clear_error();
+    dbytes = cft_format_size(fmt);
     if (bus_out)
         *bus_out = 0;
     st = (cft_status)cft_host_out(dev, d, dbytes);
@@ -2536,19 +2686,31 @@ static cft_status reduce_body(cft_device *dev, cft_op op, cft_format fmt,
 
     if (bus_out)
         *bus_out = 0;
-    if (!dev)
+    if (!dev) {
+        CFT_SAY("cft_reduce: dev is NULL");
         return CFT_ERR_INVALID_ARGUMENT;
+    }
     if (CFT_FMT_ABSENT(fmt))
         return (cft_status)cft_absent_format_refusal((int)fmt);
-    if (CFT_FMT_OUT_OF_RANGE(fmt))
+    if (CFT_FMT_OUT_OF_RANGE(fmt)) {
+        CFT_SAY("cft_reduce: format %d is not a cft_format (CFT_FP32 to "
+                "CFT_FP256, 0 to 3)", (int)fmt);
         return CFT_ERR_INVALID_ARGUMENT;
-    if ((int)rnd < 0 || (int)rnd > 4)
+    }
+    if ((int)rnd < 0 || (int)rnd > 4) {
+        CFT_SAY("cft_reduce: rounding attribute %d is not a cft_round "
+                "(CFT_RNE to CFT_RMM, 0 to 4)", (int)rnd);
         return CFT_ERR_INVALID_ARGUMENT;
+    }
     /* The mirror of cft_run's refusal: this entry point is for
      * reductions, and handing it an elementwise opcode would otherwise
      * quietly compute something nobody asked for. */
-    if (!cft_sf_is_reduction((int)op))
+    if (!cft_sf_is_reduction((int)op)) {
+        CFT_SAY("cft_reduce: opcode %d (%s) is not a reduction, and "
+                "elementwise opcodes are issued through cft_run",
+                (int)op, cft_op_name(op));
         return CFT_ERR_INVALID_ARGUMENT;
+    }
     if (!(dev->format_mask & (1u << (int)fmt)))
         return (cft_status)cft_device_format_refusal(dev->format_mask,
                                                      (int)fmt, "cft_reduce");
@@ -2571,8 +2733,11 @@ static cft_status reduce_body(cft_device *dev, cft_op op, cft_format fmt,
             return CFT_ERR_UNSUPPORTED;
         }
     }
-    if (!d)
+    if (!d) {
+        CFT_SAY("cft_reduce: d is NULL, and the result is one element "
+                "written there");
         return CFT_ERR_INVALID_ARGUMENT;
+    }
 
     f   = &cft_sf_formats[(int)fmt];
     esz = (size_t)f->width / 8;
@@ -2600,10 +2765,18 @@ static cft_status reduce_body(cft_device *dev, cft_op op, cft_format fmt,
     }
 
     need = cft_sf_op_operands((int)op);
-    if (((need & 1u) && !a) || ((need & 2u) && !b))
+    if (((need & 1u) && !a) || ((need & 2u) && !b)) {
+        CFT_SAY("cft_reduce: opcode %d (%s) reads operand %c, which is "
+                "NULL", (int)op, cft_op_name(op),
+                ((need & 1u) && !a) ? 'a' : 'b');
         return CFT_ERR_INVALID_ARGUMENT;
-    if (n > ((size_t)-1) / esz)
+    }
+    if (n > ((size_t)-1) / esz) {
+        CFT_SAY("cft_reduce: n = %llu elements of %lu bytes are more "
+                "bytes than a size_t counts", (unsigned long long)n,
+                (unsigned long)esz);
         return CFT_ERR_INVALID_ARGUMENT;
+    }
 
     /* Before ANY path below, because two of them read the caller's
      * array on the host: the composed sumSquare and sumAbs walk it
@@ -2717,6 +2890,9 @@ static cft_status reduce_body(cft_device *dev, cft_op op, cft_format fmt,
             if (!buf[0] || !buf[1]) {
                 free(buf[1]); free(buf[0]);
                 (void)cft_flags_mute(dev, muted);
+                CFT_SAY("cft_reduce: out of memory for maxall's two "
+                        "halving buffers (%llu bytes each)",
+                        (unsigned long long)cap);
                 return CFT_ERR_OUT_OF_MEMORY;
             }
         }
@@ -2774,6 +2950,8 @@ static cft_status reduce_body(cft_device *dev, cft_op op, cft_format fmt,
                  * status word - cft_test_flags answered 0 after an
                  * overflow (verifier-V9). */
                 (void)cft_flags_mute(dev, muted);
+                CFT_SAY("cft_reduce: out of memory for sumAbs's %llu-byte "
+                        "magnitude buffer", (unsigned long long)(n * esz));
                 return CFT_ERR_OUT_OF_MEMORY;
             }
             st = cft_run(dev, CFT_ABS, fmt, rnd, a, NULL, NULL, tmp, n,
@@ -2812,8 +2990,11 @@ static cft_status reduce_body(cft_device *dev, cft_op op, cft_format fmt,
             uint32_t mf = 0, sf = 0;
             cft_status st;
             int muted;
-            if (!tmp)
+            if (!tmp) {
+                CFT_SAY("cft_reduce: out of memory for dot's %llu-byte "
+                        "product buffer", (unsigned long long)(n * esz));
                 return CFT_ERR_OUT_OF_MEMORY;
+            }
             muted = cft_flags_mute(dev, 1);   /* internal passes */
             st = cft_run(dev, CFT_MUL, fmt, rnd, a, b, NULL, tmp, n,
                          &mf, bus_out);
@@ -2847,12 +3028,20 @@ static cft_status reduce_body(cft_device *dev, cft_op op, cft_format fmt,
 
             nr = cft_sf_canonical_ranges(n, parts, lo, hi,
                                          CFT_MAX_REDUCE_PARTS);
-            if (nr == 0)
+            if (nr == 0) {
+                CFT_SAY("cft_reduce: the reduction tree has no canonical "
+                        "cut of n = %llu into %lu parts - a defect in "
+                        "libcft, not in the call", (unsigned long long)n,
+                        (unsigned long)parts);
                 return CFT_ERR_INTERNAL;
+            }
 
             partials = (uint8_t *)malloc(nr * esz);
-            if (!partials)
+            if (!partials) {
+                CFT_SAY("cft_reduce: out of memory for %lu partial "
+                        "results", (unsigned long)nr);
                 return CFT_ERR_OUT_OF_MEMORY;
+            }
 
             /* One operand and one role: a reduction reads `a` and
              * writes one element per range into `partials`, which is
@@ -2880,8 +3069,12 @@ static cft_status reduce_body(cft_device *dev, cft_op op, cft_format fmt,
                 int bad = cft_sf_reduce(f, CFT_SF_SUM, (int)rnd, partials,
                                         NULL, esz, 0, nr, &bo, &cf);
                 free(partials);
-                if (bad)
+                if (bad) {
+                    CFT_SAY("cft_reduce: the fold of the tiles' partial "
+                            "results was refused - a defect in libcft, "
+                            "not in the call");
                     return CFT_ERR_INTERNAL;
+                }
                 fl |= cf;
             }
             cft_bn_store(&bo, (uint8_t *)d, (int)esz);
@@ -2911,8 +3104,12 @@ static cft_status reduce_body(cft_device *dev, cft_op op, cft_format fmt,
 #endif
     /* ==== end of the remote block =================================== */
 
-    if (cft_sf_reduce(f, (int)op, (int)rnd, a, b, esz, 0, n, &bo, &fl))
+    if (cft_sf_reduce(f, (int)op, (int)rnd, a, b, esz, 0, n, &bo, &fl)) {
+        CFT_SAY("cft_reduce: the software backend's reduction refused "
+                "opcode %d (%s) - a defect in libcft, not in the call",
+                (int)op, cft_op_name(op));
         return CFT_ERR_INTERNAL;
+    }
     cft_bn_store(&bo, (uint8_t *)d, (int)esz);
     cft_flags_emit(dev, fl, flags_out);
     return CFT_OK;
@@ -2948,10 +3145,11 @@ CFT_API cft_status cft_reduce_seg(cft_device *dev,
                                   uint32_t   *flags_out,
                                   uint32_t   *bus_out)
 {
-    const size_t esz = cft_format_size(fmt);
-    size_t dbytes = 0;
+    size_t esz, dbytes = 0;
     cft_status st;
 
+    cft_clear_error();
+    esz = cft_format_size(fmt);
     if (bus_out)
         *bus_out = 0;
     if (seg && esz)
@@ -2981,16 +3179,28 @@ static cft_status reduce_seg_body(cft_device *dev, cft_op op,
 
     if (bus_out)
         *bus_out = 0;
-    if (!dev)
+    if (!dev) {
+        CFT_SAY("cft_reduce_seg: dev is NULL");
         return CFT_ERR_INVALID_ARGUMENT;
+    }
     if (CFT_FMT_ABSENT(fmt))
         return (cft_status)cft_absent_format_refusal((int)fmt);
-    if (CFT_FMT_OUT_OF_RANGE(fmt))
+    if (CFT_FMT_OUT_OF_RANGE(fmt)) {
+        CFT_SAY("cft_reduce_seg: format %d is not a cft_format (CFT_FP32 "
+                "to CFT_FP256, 0 to 3)", (int)fmt);
         return CFT_ERR_INVALID_ARGUMENT;
-    if ((int)rnd < 0 || (int)rnd > 4)
+    }
+    if ((int)rnd < 0 || (int)rnd > 4) {
+        CFT_SAY("cft_reduce_seg: rounding attribute %d is not a cft_round "
+                "(CFT_RNE to CFT_RMM, 0 to 4)", (int)rnd);
         return CFT_ERR_INVALID_ARGUMENT;
-    if (!cft_sf_is_reduction((int)op))
+    }
+    if (!cft_sf_is_reduction((int)op)) {
+        CFT_SAY("cft_reduce_seg: opcode %d (%s) is not a reduction, and "
+                "elementwise opcodes are issued through cft_run",
+                (int)op, cft_op_name(op));
         return CFT_ERR_INVALID_ARGUMENT;
+    }
     if (!(dev->format_mask & (1u << (int)fmt)))
         return (cft_status)cft_device_format_refusal(dev->format_mask,
                                                      (int)fmt,
@@ -3010,8 +3220,11 @@ static cft_status reduce_seg_body(cft_device *dev, cft_op op,
             return CFT_ERR_UNSUPPORTED;
         }
     }
-    if (!d)
+    if (!d) {
+        CFT_SAY("cft_reduce_seg: d is NULL, and one result per segment is "
+                "written there");
         return CFT_ERR_INVALID_ARGUMENT;
+    }
     if (seg == 0) {
         cft_set_error("cft_reduce_seg: a segment is at least one element");
         return CFT_ERR_INVALID_ARGUMENT;
@@ -3032,10 +3245,18 @@ static cft_status reduce_seg_body(cft_device *dev, cft_op op,
         return CFT_OK;
     }
     need = cft_sf_op_operands((int)op);
-    if (((need & 1u) && !a) || ((need & 2u) && !b))
+    if (((need & 1u) && !a) || ((need & 2u) && !b)) {
+        CFT_SAY("cft_reduce_seg: opcode %d (%s) reads operand %c, which "
+                "is NULL", (int)op, cft_op_name(op),
+                ((need & 1u) && !a) ? 'a' : 'b');
         return CFT_ERR_INVALID_ARGUMENT;
-    if (n > ((size_t)-1) / esz)
+    }
+    if (n > ((size_t)-1) / esz) {
+        CFT_SAY("cft_reduce_seg: n = %llu elements of %lu bytes are more "
+                "bytes than a size_t counts", (unsigned long long)n,
+                (unsigned long)esz);
         return CFT_ERR_INVALID_ARGUMENT;
+    }
     if (seg == n)
         return cft_reduce(dev, op, fmt, rnd, a, b, d, n, flags_out, bus_out);
 
@@ -3072,6 +3293,9 @@ static cft_status reduce_seg_body(cft_device *dev, cft_op op,
             const int muted = cft_flags_mute(dev, 1);
             if (!tmp) {
                 (void)cft_flags_mute(dev, muted);
+                CFT_SAY("cft_reduce_seg: out of memory for the composed "
+                        "reduction's %llu-byte intermediate buffer",
+                        (unsigned long long)(n * esz));
                 return CFT_ERR_OUT_OF_MEMORY;
             }
             if (op == CFT_SUMABS)
@@ -3199,18 +3423,27 @@ CFT_API cft_status cft_alloc(cft_device *dev, size_t bytes, cft_buffer **out)
 {
     cft_buffer *buf;
 
-    if (!dev || !out)
+    cft_clear_error();
+    if (!dev || !out) {
+        CFT_SAY("cft_alloc: %s is NULL", dev ? "out" : "dev");
         return CFT_ERR_INVALID_ARGUMENT;
+    }
     *out = NULL;
-    if (bytes == 0)
+    if (bytes == 0) {
+        CFT_SAY("cft_alloc: a buffer is at least one byte");
         return CFT_ERR_INVALID_ARGUMENT;
+    }
 
     buf = (cft_buffer *)calloc(1, sizeof *buf);
-    if (!buf)
+    if (!buf) {
+        CFT_SAY("cft_alloc: out of memory allocating the buffer's record");
         return CFT_ERR_OUT_OF_MEMORY;
+    }
     buf->data = calloc(1, bytes);
     if (!buf->data) {
         free(buf);
+        CFT_SAY("cft_alloc: out of memory allocating %llu bytes",
+                (unsigned long long)bytes);
         return CFT_ERR_OUT_OF_MEMORY;
     }
     buf->dev   = dev;
@@ -3254,8 +3487,11 @@ CFT_API void *cft_buffer_data(cft_buffer *buf)
  * accepts. */
 CFT_API cft_status cft_buffer_to_device(cft_buffer *buf)
 {
-    if (!buf)
+    cft_clear_error();
+    if (!buf) {
+        CFT_SAY("cft_buffer_to_device: buf is NULL");
         return CFT_ERR_INVALID_ARGUMENT;
+    }
 #ifdef CFT_ENABLE_XRT
     /* backend_call() first, as before every call into a backend: until
      * 2026-09-27 neither this nor cft_buffer_from_device cleared this
@@ -3274,8 +3510,11 @@ CFT_API cft_status cft_buffer_to_device(cft_buffer *buf)
  * no run has written it, so it is safe to call unconditionally. */
 CFT_API cft_status cft_buffer_from_device(cft_buffer *buf)
 {
-    if (!buf)
+    cft_clear_error();
+    if (!buf) {
+        CFT_SAY("cft_buffer_from_device: buf is NULL");
         return CFT_ERR_INVALID_ARGUMENT;
+    }
 #ifdef CFT_ENABLE_XRT
     if (buf->dbuf) {
         backend_call();                 /* see cft_buffer_to_device */
@@ -3299,11 +3538,18 @@ CFT_API cft_status cft_buffer_get_info(cft_buffer *buf,
     cft_buffer_info info;
     size_t want;
 
-    if (!buf || !out)
+    cft_clear_error();
+    if (!buf || !out) {
+        CFT_SAY("cft_buffer_get_info: %s is NULL", buf ? "out" : "buf");
         return CFT_ERR_INVALID_ARGUMENT;
+    }
     want = out->struct_size;
-    if (want < sizeof(size_t))
+    if (want < sizeof(size_t)) {
+        CFT_SAY("cft_buffer_get_info: out->struct_size is %lu; set it to "
+                "sizeof(cft_buffer_info) before the call - it is how many "
+                "bytes of the struct the caller has", (unsigned long)want);
         return CFT_ERR_INVALID_ARGUMENT;
+    }
 
     memset(&info, 0, sizeof info);
     info.bytes = buf->bytes;

@@ -121,6 +121,7 @@ int cftr_program_run(void *hw, int fmt, const void *image,
     return CFT_ERR_INTERNAL;
 }
 const char *cftr_last_error(void) { return ""; }
+void cftr_clear_error(void) {}
 
 #else  /* the real thing */
 
@@ -163,6 +164,11 @@ static void set_err(const char *fmt, ...)
 const char *cftr_last_error(void)
 {
     return g_err;
+}
+
+void cftr_clear_error(void)
+{
+    g_err[0] = '\0';
 }
 
 const char *cftr_sock_error(void)

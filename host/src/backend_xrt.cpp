@@ -702,6 +702,15 @@ struct Dev {
      * (verifier-V9); device-test's pass runs each sequence into a fresh
      * buffer, where there is none. */
     bool              decline_outputs = false;
+    /* CFT_XRT_UPLOAD=fail-fill, read by run_job at the start of each job
+     * like the one above: every FILL of a resident device copy from its
+     * mirror (buf_bind's upload) throws, as XRT's sync would if the
+     * transfer failed, so a leg can plant the failure the fix of 2026-09-26
+     * (verifier-V8's N1) is about and a build with that fix reverted turns
+     * red on a card. Nothing else is touched: an output copy that is
+     * allocated and never filled, and a plain staged operand, do not
+     * upload through buf_bind. */
+    bool              fail_fill = false;
     /* The image's identity, for cftx_image_id (cft.h, cft_get_image_id):
      * the SHA-256 of the bytes cftx_open read and then loaded, how many
      * there were, and the raw capability words - n_caps of them, CAPS2
@@ -1211,7 +1220,10 @@ xrt::bo *buf_bind(Buf &B, size_t tile, int role, size_t off,
      * fill until 2026-09-26, so a fill whose upload threw left the copy
      * "current" with the bytes it held before, and the retry that a
      * staging failure allows bound it resident - 64 of 64 wrong with
-     * CFT_OK, pre-existing (verifier-V8, N1). */
+     * CFT_OK, pre-existing (verifier-V8, N1). Held on a card by
+     * device-test -b's "a failed fill's retry": CFT_XRT_UPLOAD=fail-fill
+     * plants the failure below, and a build with these two lines moved
+     * below the fill turns that leg red. */
     c.gen = 0;
     c.filled = false;
 
@@ -1220,6 +1232,15 @@ xrt::bo *buf_bind(Buf &B, size_t tile, int role, size_t off,
         std::memcpy(p, B.host + off, real);
         if (padded > real)
             std::memset(p + real, 0, padded - real);
+        /* The planted failure, where XRT's would be: after the host copy
+         * is staged and before it reaches the device, so the device copy
+         * still holds what it did. The words are the instrument's name,
+         * which the caller's sentence then carries (and no word run_job's
+         * handler reads as an out-of-memory). */
+        if (B.D->fail_fill)
+            throw std::runtime_error(
+                "the upload of this resident copy was failed on purpose by "
+                "CFT_XRT_UPLOAD=fail-fill");
         c.bo.sync(XCL_BO_SYNC_BO_TO_DEVICE, padded, 0);
         c.gen = B.gen;
         c.filled = true;
@@ -1494,6 +1515,20 @@ int run_job(Dev &D, Job &J, uint32_t *status, uint32_t *flags,
         else if (*b) {
             set_err(std::string("CFT_XRT_BIND=\"") + b + "\": expected "
                     "decline-outputs; unset it for none");
+            return ST_INVALID_ARGUMENT;
+        }
+    }
+    /* CFT_XRT_UPLOAD, a card instrument read per job: "fail-fill" makes
+     * every fill of a resident copy fail (buf_bind). Anything else set is
+     * refused by name - an instrument that read a typo as "off" would be a
+     * gate that could not fail. Unset or empty plants nothing. */
+    D.fail_fill = false;
+    if (const char *u = std::getenv("CFT_XRT_UPLOAD")) {
+        if (!std::strcmp(u, "fail-fill"))
+            D.fail_fill = true;
+        else if (*u) {
+            set_err(std::string("CFT_XRT_UPLOAD=\"") + u + "\": expected "
+                    "fail-fill; unset it for none");
             return ST_INVALID_ARGUMENT;
         }
     }
@@ -1853,6 +1888,16 @@ int run_job(Dev &D, Job &J, uint32_t *status, uint32_t *flags,
 extern "C" const char *cftx_last_error(void)
 {
     return g_err.c_str();
+}
+
+/* Empties it: device.c's cft_clear_error, from the top of every public
+ * entry point and before each call into this backend that can write a
+ * sentence. The calls below that never cleared it themselves (a
+ * reduction, a read-back, a publish) and calls that reach no backend at
+ * all can no longer show an older sentence (KL-490). */
+extern "C" void cftx_clear_error(void)
+{
+    g_err.clear();
 }
 
 static int cftx_open_impl(const char *artifact, int index, void **out,

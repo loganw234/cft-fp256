@@ -20,6 +20,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "../include/cft_config.h"   /* CFT_ERRMSG_MAX, CFT_NO_REMOTE */
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -433,14 +435,20 @@ void cft_sw_seq_caps(cft_seq_caps *out);
  * something was unsupported. Cleared the moment anything reaches a
  * backend, so it never explains someone else's failure.
  *
- * cft_clear_error empties it for an entry point that reaches no backend
- * and must still never show an earlier call's sentence: cft_program_load
- * clears it on entry (2026-09-30), and every refusal it makes then
- * writes a sentence of its own, so what a refused load leaves in
- * cft_last_error() is that load's reason and nobody else's. Its own
- * function rather than cft_set_error(""), which is -Wformat-zero-length,
- * and rather than device.c's backend_call(), which is static and is
- * compiled only where a device backend is.
+ * cft_clear_error empties EVERY slot cft_last_error() reads - this one,
+ * the remote backend's (cftr_clear_error) and the XRT backend's
+ * (cftx_clear_error) - and it is the first statement of every public
+ * entry point that returns a status, in every source file (2026-10-22,
+ * KL-490; cft_program_load alone did from 2026-09-30). So what
+ * cft_last_error() holds after such a call is that call's sentence or
+ * nothing. Its own function rather than cft_set_error(""), which is
+ * -Wformat-zero-length, and rather than device.c's backend_call(), which
+ * is static and compiled only where a device backend is.
+ *
+ * Entry points that return no status, and queries that answer in the
+ * return value (cft_supports, cft_buffer_data, ...), do NOT clear: they
+ * cannot fail with a status, so a caller may ask one between a failure
+ * and cft_last_error().
  *
  * Every CFT_ERR_UNSUPPORTED this library returns goes through one of
  * these, because a refusal without a sentence leaves cft_last_error()
@@ -471,7 +479,17 @@ void cft_sw_seq_caps(cft_seq_caps *out);
  *                            (`needs`, named as its CFT_ opcode) that
  *                            this device lacks at `fmt` */
 void cft_set_error(const char *fmt, ...);
+/* Where no slot can hold a sentence - CFT_ERRMSG_MAX 1, no remote backend,
+ * no XRT: CFT_TINY's profile - there is nothing to empty, and a call here
+ * at the top of every entry point would cost a tail call and about 700
+ * bytes of an 8-bit part's flash (measured on i386). It is then nothing;
+ * device.c does not define the function (CFT_CLEAR_ERROR_IS_NOP). */
+#if CFT_ERRMSG_MAX <= 1 && defined(CFT_NO_REMOTE) && !defined(CFT_ENABLE_XRT)
+#  define CFT_CLEAR_ERROR_IS_NOP 1
+#  define cft_clear_error() ((void)0)
+#else
 void cft_clear_error(void);
+#endif
 int  cft_seq_cap_refusal(const char *field, unsigned long asked,
                          unsigned long cap, const char *units,
                          const char *caps_field);
@@ -486,6 +504,15 @@ int  cft_composed_refusal(const char *entry, const char *needs, int fmt);
  * throwing that away to return a bare enum would make a bad night on
  * the bench considerably worse. */
 const char *cftx_last_error(void);
+
+/* Empties it (device.c's cft_clear_error calls this). Open, a run, a
+ * program run and the image's identity cleared it themselves; a
+ * reduction, a read-back and a publish never did. device.c clears it
+ * before each call into this backend that can write a sentence (the
+ * buffer create, destroy, stat and host-wrote seams and the close cannot)
+ * and at the top of every public entry point, so that no longer depends
+ * on which call is which. */
+void cftx_clear_error(void);
 
 /* ====================================================================
  * The remote backend (docs/REMOTE.md), beside the XRT one.

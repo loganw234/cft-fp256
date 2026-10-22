@@ -234,6 +234,7 @@ CFT_API cft_status cft_rint(cft_device *dev, cft_format fmt, cft_round rnd,
     size_t off = 0, esz;
     cft_status st;
 
+    cft_clear_error();
     if (bus_out)
         *bus_out = 0;
     if (!rnd_ok(rnd))
@@ -378,6 +379,7 @@ CFT_API cft_status cft_scaleb(cft_device *dev, cft_format fmt, cft_round rnd,
     size_t esz;
     cft_status st;
 
+    cft_clear_error();
     if (bus_out)
         *bus_out = 0;
     if (!rnd_ok(rnd))
@@ -513,6 +515,7 @@ CFT_API cft_status cft_cmp_sig(cft_device *dev, cft_op cmp, cft_format fmt,
     size_t i;
     cft_status st;
 
+    cft_clear_error();
     if (bus_out)
         *bus_out = 0;
     if (cmp != CFT_CMPLT && cmp != CFT_CMPLE && cmp != CFT_CMPEQ)
@@ -574,6 +577,7 @@ CFT_API cft_status cft_convert(cft_device *dev, cft_format sfmt,
     size_t i;
     cft_status st;
 
+    cft_clear_error();
     if (CFT_FMT_ABSENT(dfmt))
         return (cft_status)cft_absent_format_refusal((int)dfmt);
     if (CFT_FMT_OUT_OF_RANGE(dfmt))
@@ -719,6 +723,7 @@ CFT_API cft_status cft_cvt_from_i32(cft_device *dev, cft_format fmt,
                                     cft_round rnd, const int32_t *src,
                                     void *d, size_t n, uint32_t *flags_out)
 {
+    cft_clear_error();
     return cvt_from_core(dev, fmt, rnd, src, 4, 1, d, n, flags_out);
 }
 
@@ -726,6 +731,7 @@ CFT_API cft_status cft_cvt_from_u32(cft_device *dev, cft_format fmt,
                                     cft_round rnd, const uint32_t *src,
                                     void *d, size_t n, uint32_t *flags_out)
 {
+    cft_clear_error();
     return cvt_from_core(dev, fmt, rnd, src, 4, 0, d, n, flags_out);
 }
 
@@ -733,6 +739,7 @@ CFT_API cft_status cft_cvt_from_i64(cft_device *dev, cft_format fmt,
                                     cft_round rnd, const int64_t *src,
                                     void *d, size_t n, uint32_t *flags_out)
 {
+    cft_clear_error();
     return cvt_from_core(dev, fmt, rnd, src, 8, 1, d, n, flags_out);
 }
 
@@ -740,6 +747,7 @@ CFT_API cft_status cft_cvt_from_u64(cft_device *dev, cft_format fmt,
                                     cft_round rnd, const uint64_t *src,
                                     void *d, size_t n, uint32_t *flags_out)
 {
+    cft_clear_error();
     return cvt_from_core(dev, fmt, rnd, src, 8, 0, d, n, flags_out);
 }
 
@@ -893,6 +901,7 @@ CFT_API cft_status cft_cvt_to_i32(cft_device *dev, cft_format fmt,
                                   int32_t *dst, size_t n,
                                   uint32_t *flags_out)
 {
+    cft_clear_error();
     return cvt_to_core(dev, fmt, rnd, exact, a, dst, 4, 1, n, flags_out);
 }
 
@@ -901,6 +910,7 @@ CFT_API cft_status cft_cvt_to_u32(cft_device *dev, cft_format fmt,
                                   uint32_t *dst, size_t n,
                                   uint32_t *flags_out)
 {
+    cft_clear_error();
     return cvt_to_core(dev, fmt, rnd, exact, a, dst, 4, 0, n, flags_out);
 }
 
@@ -909,6 +919,7 @@ CFT_API cft_status cft_cvt_to_i64(cft_device *dev, cft_format fmt,
                                   int64_t *dst, size_t n,
                                   uint32_t *flags_out)
 {
+    cft_clear_error();
     return cvt_to_core(dev, fmt, rnd, exact, a, dst, 8, 1, n, flags_out);
 }
 
@@ -917,6 +928,7 @@ CFT_API cft_status cft_cvt_to_u64(cft_device *dev, cft_format fmt,
                                   uint64_t *dst, size_t n,
                                   uint32_t *flags_out)
 {
+    cft_clear_error();
     return cvt_to_core(dev, fmt, rnd, exact, a, dst, 8, 0, n, flags_out);
 }
 
@@ -930,6 +942,7 @@ CFT_API cft_status cft_logb(cft_device *dev, cft_format fmt, const void *a,
     size_t i;
     cft_status st;
 
+    cft_clear_error();
     st = c5_validate(dev, fmt, a, d, n);
     if (st != CFT_OK)
         return st;
@@ -1031,6 +1044,7 @@ CFT_API cft_status cft_next_up(cft_device *dev, cft_format fmt,
     size_t i;
     cft_status st;
 
+    cft_clear_error();
     st = c5_validate(dev, fmt, a, d, n);
     if (st != CFT_OK)
         return st;
@@ -1065,6 +1079,7 @@ CFT_API cft_status cft_next_down(cft_device *dev, cft_format fmt,
     size_t i;
     cft_status st;
 
+    cft_clear_error();
     st = c5_validate(dev, fmt, a, d, n);
     if (st != CFT_OK)
         return st;
@@ -1119,6 +1134,7 @@ CFT_API cft_status cft_class(cft_device *dev, cft_format fmt, const void *a,
     size_t i;
     cft_status st;
 
+    cft_clear_error();
     st = c5_validate(dev, fmt, a, cls, n);
     if (st != CFT_OK || n == 0)
         return st;
@@ -1216,6 +1232,7 @@ CFT_API cft_status cft_total_order(cft_device *dev, cft_format fmt,
                                    const void *a, const void *b, void *d,
                                    size_t n)
 {
+    cft_clear_error();
     return torder_run(dev, fmt, a, b, d, n, 0);
 }
 
@@ -1223,6 +1240,7 @@ CFT_API cft_status cft_total_order_mag(cft_device *dev, cft_format fmt,
                                        const void *a, const void *b, void *d,
                                        size_t n)
 {
+    cft_clear_error();
     return torder_run(dev, fmt, a, b, d, n, 1);
 }
 
@@ -1360,6 +1378,7 @@ CFT_API cft_status cft_rem(cft_device *dev, cft_format fmt, const void *a,
     size_t i;
     cft_status st;
 
+    cft_clear_error();
     st = c5_validate(dev, fmt, a, d, n);
     if (st != CFT_OK)
         return st;
@@ -1550,6 +1569,7 @@ CFT_API cft_status cft_min_mag(cft_device *dev, cft_format fmt,
                                const void *a, const void *b, void *d,
                                size_t n, uint32_t *flags_out)
 {
+    cft_clear_error();
     return minmax_mag_batch(dev, fmt, a, b, d, n, flags_out, 0, 0);
 }
 
@@ -1557,6 +1577,7 @@ CFT_API cft_status cft_max_mag(cft_device *dev, cft_format fmt,
                                const void *a, const void *b, void *d,
                                size_t n, uint32_t *flags_out)
 {
+    cft_clear_error();
     return minmax_mag_batch(dev, fmt, a, b, d, n, flags_out, 1, 0);
 }
 
@@ -1564,6 +1585,7 @@ CFT_API cft_status cft_minnum_mag(cft_device *dev, cft_format fmt,
                                   const void *a, const void *b, void *d,
                                   size_t n, uint32_t *flags_out)
 {
+    cft_clear_error();
     return minmax_mag_batch(dev, fmt, a, b, d, n, flags_out, 0, 1);
 }
 
@@ -1571,6 +1593,7 @@ CFT_API cft_status cft_maxnum_mag(cft_device *dev, cft_format fmt,
                                   const void *a, const void *b, void *d,
                                   size_t n, uint32_t *flags_out)
 {
+    cft_clear_error();
     return minmax_mag_batch(dev, fmt, a, b, d, n, flags_out, 1, 1);
 }
 

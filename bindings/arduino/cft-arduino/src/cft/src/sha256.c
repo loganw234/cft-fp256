@@ -37,6 +37,9 @@
 
 #include "sha256.h"
 #include "../include/cft.h"
+/* cft_clear_error: the first statement of every public entry point that
+ * returns a status */
+#include "backend.h"
 
 typedef struct { uint64_t hi, lo; } u128;
 
@@ -275,6 +278,7 @@ CFT_API cft_status cft_sha256(const void *data, size_t bytes,
                               uint8_t out[32])
 {
     cft_sha256_ctx s;
+    cft_clear_error();
     if (!out || (!data && bytes))
         return CFT_ERR_INVALID_ARGUMENT;
     cft_sha256_init(&s);

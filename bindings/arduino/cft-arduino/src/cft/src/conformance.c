@@ -34,6 +34,9 @@
 
 #include "../include/cft.h"
 #include "softfloat.h"
+/* cft_clear_error: the first statement of every public entry point that
+ * returns a status */
+#include "backend.h"
 #include "transcend.h"
 
 #define MAX_ELEM   32       /* fp256 */
@@ -2255,6 +2258,7 @@ CFT_API cft_status cft_conformance(cft_device *dev, const char *dir,
     uint64_t total = 0;
     int sets = 0, fi, ri;
 
+    cft_clear_error();
     if (cases_checked)
         *cases_checked = 0;
     r.buf = report;

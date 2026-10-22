@@ -189,7 +189,7 @@ else
 endif
 
 TOOLS := cft-selftest$(EXE) cft-bench$(EXE) cft-collatz$(EXE)
-TESTS := api-test$(EXE) reduce-parts$(EXE)
+TESTS := api-test$(EXE) reduce-parts$(EXE) serve-open-test$(EXE)
 EXAMPLES := vector-fma$(EXE)
 
 # One `TOOLS +=` line per added tool, ABOVE the `all` rule because make
@@ -482,6 +482,7 @@ test: all $(TESTS) buildidtest
 	CFT_EXPECT_BUILD_ID="$$(GIT="$(GIT)" $(SHELL) tools/gen_build_id.sh --print)" \
 		./api-test$(EXE)
 	./reduce-parts$(EXE)
+	./serve-open-test$(EXE)
 	./cft-selftest$(EXE) ../vectors/out
 	./vector-fma$(EXE) > .out-c.txt
 	$(PYTHON) examples/vector_fma_ctypes.py > .out-py.txt
@@ -1291,8 +1292,21 @@ remotetest: cft-serve$(EXE) remote-test$(EXE) device-test$(EXE) \
             cft-selftest$(EXE) cft-collatz$(EXE)
 	$(PYTHON) tests/remote_check.py
 
+# cft-serve's answer on a connection whose device would not open is that
+# open's own reason, whatever the other connections called in between
+# (KL-490): tests/serve_open_test.c includes the server whole, main
+# renamed, as fuzz/fuzz_serve.c does, and calls its handlers. A member of
+# $(TESTS), so `make test` - the libcft stage - runs it. Not $^ in the
+# recipe: cft-serve.c is a prerequisite so that editing it rebuilds this,
+# and compiling it would define every handler twice.
+serve-open-test$(EXE): tests/serve_open_test.c tools/cft-serve.c tools/ws.c \
+                       libcft.a
+	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) -Isrc tests/serve_open_test.c \
+	  tools/ws.c libcft.a -o $@ $(XRTLIBS)
+
 clean-remote:
-	rm -f cft-serve cft-serve.exe remote-test remote-test.exe
+	rm -f cft-serve cft-serve.exe remote-test remote-test.exe \
+	  serve-open-test serve-open-test.exe
 # ==================== end of the cft-serve block ===================
 
 # ===================================================================

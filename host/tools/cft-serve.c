@@ -84,6 +84,15 @@ typedef struct {
     ws_conn       w;
     cft_device   *dev;
     cft_status    open_status;      /* why dev is NULL, if it is */
+    /* ...and the sentence cft_last_error() gave for it, copied at the
+     * failed open. That slot belongs to the most recent status-returning
+     * call in the PROCESS (cft.h), and this server runs every connection's
+     * calls in turn: by the time a later request on this connection says
+     * "no device", another connection's call has emptied or refilled it,
+     * so the reason is kept here, with the connection. 383 characters
+     * and a terminator: an answer's message is 511 at most (answer.msg),
+     * and the sentence follows the call's name and the status's words. */
+    char          open_why[384];
     const char   *artifact;         /* opened at HELLO, not at accept */
     int           open_tried;       /* asked the driver once already */
     cft_program **progs;
@@ -223,19 +232,34 @@ typedef struct {
     char     why[512];
 } answer;
 
-static void fail(answer *A, cft_status st, const char *what)
+static void fail_with(answer *A, cft_status st, const char *what,
+                      const char *detail)
 {
-    const char *detail = cft_last_error();
     A->status = (int)st;
     snprintf(A->msg, sizeof A->msg, "%s: %s%s%s", what, cft_strerror(st),
              *detail ? " - " : "", *detail ? detail : "");
+}
+
+/* The status of the call that just returned, with its sentence: read
+ * straight away, because the next status-returning call (any
+ * connection's) replaces it. */
+static void fail(answer *A, cft_status st, const char *what)
+{
+    fail_with(A, st, what, cft_last_error());
+}
+
+/* The same for a connection whose device would not open: the sentence is
+ * the open's, kept in the connection when it failed. */
+static void fail_open(conn *C, answer *A, const char *what)
+{
+    fail_with(A, C->open_status, what, C->open_why);
 }
 
 static int no_device(conn *C, answer *A, const char *what)
 {
     if (C->dev)
         return 0;
-    fail(A, C->open_status, what);
+    fail_open(C, A, what);
     return 1;
 }
 
@@ -971,6 +995,8 @@ static cft_device *conn_device(conn *C)
         return C->dev;
     C->open_tried = 1;
     C->open_status = cft_open(C->artifact, 0, &C->dev);
+    if (!C->dev)
+        snprintf(C->open_why, sizeof C->open_why, "%s", cft_last_error());
     memset(&caps, 0, sizeof caps);
     caps.struct_size = sizeof caps;
     if (C->dev) {
@@ -979,7 +1005,7 @@ static cft_device *conn_device(conn *C)
                 caps.backend);
     } else {
         logline("connection %lu: its device did not open: %s (%s)",
-                C->id, cft_strerror(C->open_status), cft_last_error());
+                C->id, cft_strerror(C->open_status), C->open_why);
     }
     return C->dev;
 }
@@ -1097,7 +1123,7 @@ static int serve_one(conn *C, uint32_t my_abi)
                 break;
             }
             if (!conn_device(C)) {
-                fail(&A, C->open_status, "opening this connection's device");
+                fail_open(C, &A, "opening this connection's device");
                 break;
             }
             A.resp = (uint8_t *)malloc(CFTR_CAPS_BYTES);

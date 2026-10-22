@@ -457,6 +457,7 @@ CFT_API cft_status cft_augmented_add(cft_device *dev, cft_format fmt,
                                      void *r, void *e, size_t n,
                                      uint32_t *flags_out)
 {
+    cft_clear_error();
     return aug_batch(dev, fmt, 0, a, b, r, e, n, flags_out);
 }
 
@@ -472,8 +473,10 @@ CFT_API cft_status cft_augmented_sub(cft_device *dev, cft_format fmt,
     const cft_fmt_desc *f;
     uint32_t acc = 0;
     size_t i, esz;
-    cft_status st = aug_validate(dev, fmt, a, b, r, e, n);
+    cft_status st;
 
+    cft_clear_error();
+    st = aug_validate(dev, fmt, a, b, r, e, n);
     if (st != CFT_OK)
         return st;
     if (n == 0) {
@@ -513,6 +516,7 @@ CFT_API cft_status cft_augmented_mul(cft_device *dev, cft_format fmt,
                                      void *r, void *e, size_t n,
                                      uint32_t *flags_out)
 {
+    cft_clear_error();
     return aug_batch(dev, fmt, 1, a, b, r, e, n, flags_out);
 }
 

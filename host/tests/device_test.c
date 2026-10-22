@@ -7823,6 +7823,172 @@ static void check_publish_takes_effect(cft_device *sw, cft_device *hw,
     free(a1); free(a2); free(want); free(got);
 }
 
+/* A fill whose upload FAILED must not leave its copy current.
+ *
+ * KL-464. A device copy of a resident buffer is current only once its
+ * bytes are the mirror's, and buf_bind (backend_xrt.cpp) marked it
+ * current BEFORE the upload until 2026-09-26: a fill whose upload threw
+ * (a staging failure, which the caller may retry) left the copy "current"
+ * with the bytes it held before, and the retry bound it resident - 64 of
+ * 64 results wrong, with CFT_OK (verifier-V8, N1). The fix was held only
+ * by a mock of XRT the tree did not keep, and no card could plant a
+ * failing upload. CFT_XRT_UPLOAD=fail-fill (backend_xrt.cpp, a card
+ * instrument read per call like CFT_XRT_WITNESS) plants it, and this is
+ * the sequence that needs it:
+ *   1. a run whose resident operand a holds a1: the fill puts a1 on the
+ *      device (held to the software backend's answer for a1);
+ *   2. the mirror rewritten to a2 and published: the copy is stale;
+ *   3. the same run with the fill planted to fail: refused with the
+ *      instrument's name in the sentence, the caller's output untouched;
+ *   4. the same run again, unplanted: it must give the software backend's
+ *      answer for a2, bit for bit. A build with N1 reverted binds the copy
+ *      step 1 filled and answers for a1.
+ * Step 3's sentence is held too: a plant that did nothing would pass step
+ * 4 for any build, which is why the leg then fails rather than passes.
+ * An instrument that read a typo as "off" would be a gate that could not
+ * fail, so a malformed value is refused by name.
+ *
+ * The software and remote backends keep no device copies and ignore the
+ * instrument: the leg is NOT TESTED there, named once. It runs at every
+ * format of an XRT device. */
+static void check_failed_fill_retry(cft_device *sw, cft_device *hw,
+                                    cft_format fmt, size_t n, uint32_t seed)
+{
+    static int said;
+    const size_t esz = cft_format_size(fmt), bytes = n * esz;
+    uint8_t *a1 = (uint8_t *)malloc(bytes), *a2 = (uint8_t *)malloc(bytes);
+    uint8_t *c = (uint8_t *)malloc(bytes), *want1 = (uint8_t *)malloc(bytes);
+    uint8_t *want2 = (uint8_t *)malloc(bytes), *got = (uint8_t *)malloc(bytes);
+    uint32_t f = 0;
+    struct rbuf ra;
+    cft_caps caps;
+    cft_status st;
+    size_t i;
+    int untouched, planted, right = 0, asked = 0;
+
+    ra.b = NULL;
+    ra.p = NULL;
+    if (!a1 || !a2 || !c || !want1 || !want2 || !got) {
+        printf("  FAIL: out of memory for the failed-fill leg\n");
+        failures++;
+        goto out;
+    }
+    memset(&caps, 0, sizeof caps);
+    caps.struct_size = sizeof caps;
+    if (cft_get_caps(hw, &caps) != CFT_OK || strcmp(caps.backend, "xrt") != 0 ||
+        !caps.buffers_resident) {
+        if (!said) {
+            said = 1;
+            not_here(NH_OTHER, "TESTED", "    a failed fill's retry",
+                     "the %s backend keeps no device copies of a resident "
+                     "buffer, so no upload can fail",
+                     caps.backend[0] ? caps.backend : "this");
+        }
+        goto out;
+    }
+    if (!cft_supports(hw, CFT_ADD, fmt)) {
+        char label[96];
+        snprintf(label, sizeof label, "    %s a failed fill's retry",
+                 cft_format_name(fmt));
+        not_here(NH_OTHER, "TESTED", label,
+                 "this device does not implement CFT_ADD at %s, the "
+                 "operation the leg runs", cft_format_name(fmt));
+        goto out;
+    }
+    if (!rbuf_alloc(hw, &ra, bytes)) {
+        printf("  FAIL: cft_alloc for the failed-fill leg\n");
+        failures++;
+        goto out;
+    }
+
+    rs = seed ? seed : 1;
+    fill_finite(a1, fmt, n);
+    fill_finite(a2, fmt, n);
+    fill_finite(c, fmt, n);
+    /* the two operands must give different sums, or the leg cannot tell
+     * the old bytes from the new */
+    if (CFT_OK != cft_run(sw, CFT_ADD, fmt, CFT_RNE, a1, NULL, c, want1, n,
+                          NULL, NULL) ||
+        CFT_OK != cft_run(sw, CFT_ADD, fmt, CFT_RNE, a2, NULL, c, want2, n,
+                          NULL, NULL)) {
+        printf("  FAIL: the software answers for the failed-fill leg\n");
+        failures++;
+        goto out;
+    }
+    CHECK(memcmp(want1, want2, bytes) != 0,
+          "%s: the failed-fill leg's two operands give the same sums",
+          cft_format_name(fmt));
+
+    /* 1. the fill that works */
+    CHECK(rbuf_put(&ra, a1, bytes), "publishing the first operand");
+    memset(got, 0x11, bytes);
+    st = cft_run(hw, CFT_ADD, fmt, CFT_RNE, ra.p, NULL, c, got, n, &f, NULL);
+    asked++;
+    CHECK(st == CFT_OK && !memcmp(got, want1, bytes),
+          "%s: the failed-fill leg's first run (a resident operand, "
+          "unplanted): %s (%s)%s", cft_format_name(fmt), cft_strerror(st),
+          cft_last_error(), st == CFT_OK ? " - bytes differ from the "
+                                           "software backend's" : "");
+    right += st == CFT_OK && !memcmp(got, want1, bytes);
+
+    /* 2. rewritten and published: the copy is stale */
+    CHECK(rbuf_put(&ra, a2, bytes), "republishing with new bytes");
+
+    /* 3. the same run, its fill planted to fail */
+    memset(got, 0x5a, bytes);
+    put_env("CFT_XRT_UPLOAD", "fail-fill");
+    st = cft_run(hw, CFT_ADD, fmt, CFT_RNE, ra.p, NULL, c, got, n, &f, NULL);
+    put_env("CFT_XRT_UPLOAD", NULL);
+    planted = st != CFT_OK && strstr(cft_last_error(), "CFT_XRT_UPLOAD") != NULL;
+    for (untouched = 1, i = 0; i < bytes; i++)
+        untouched &= got[i] == 0x5a;
+    asked++;
+    CHECK(planted,
+          "%s: CFT_XRT_UPLOAD=fail-fill: %s (%s) - the planted upload "
+          "failure did not refuse the run, so this leg proves nothing",
+          cft_format_name(fmt), cft_strerror(st), cft_last_error());
+    CHECK(untouched, "%s: a run refused at its fill wrote the caller's "
+          "output", cft_format_name(fmt));
+    right += planted && untouched;
+
+    /* 4. the retry */
+    memset(got, 0x5a, bytes);
+    st = cft_run(hw, CFT_ADD, fmt, CFT_RNE, ra.p, NULL, c, got, n, &f, NULL);
+    asked++;
+    CHECK(st == CFT_OK && !memcmp(got, want2, bytes),
+          "%s: the retry after a failed fill: %s (%s)%s", cft_format_name(fmt),
+          cft_strerror(st), cft_last_error(),
+          st == CFT_OK
+              ? (!memcmp(got, want1, bytes)
+                     ? " - it answered for the OLD bytes the copy held "
+                       "(verifier-V8, N1): a failed fill left its copy current"
+                     : " - bytes differ from the software backend's")
+              : "");
+    right += st == CFT_OK && !memcmp(got, want2, bytes);
+
+    /* the instrument refuses what it does not know */
+    put_env("CFT_XRT_UPLOAD", "fill");
+    st = cft_run(hw, CFT_ADD, fmt, CFT_RNE, ra.p, NULL, c, got, n, &f, NULL);
+    put_env("CFT_XRT_UPLOAD", NULL);
+    asked++;
+    CHECK(st == CFT_ERR_INVALID_ARGUMENT &&
+              strstr(cft_last_error(), "CFT_XRT_UPLOAD") != NULL,
+          "CFT_XRT_UPLOAD=fill: %s (%s) - a malformed value must be refused "
+          "by name", cft_strerror(st), cft_last_error());
+    right += st == CFT_ERR_INVALID_ARGUMENT &&
+             strstr(cft_last_error(), "CFT_XRT_UPLOAD") != NULL;
+
+    printf("    %-5s a failed fill's retry: a stale copy's fill failed on "
+           "purpose (CFT_XRT_UPLOAD=fail-fill), the run refused with the "
+           "output untouched, and the retry gave the software backend's bytes "
+           "for the rewritten operand - %d of %d right\n",
+           cft_format_name(fmt), right, asked);
+    note_binds(&ra);
+out:
+    rbuf_free(&ra);
+    free(a1); free(a2); free(c); free(want1); free(want2); free(got);
+}
+
 /* ---------------------------------------------------------------
  * The stale-copy class (verifier-V7, 2026-09-25).
  *
@@ -10131,6 +10297,15 @@ int main(int argc, char **argv)
             check_publish_takes_effect(sw, hw, fmt, n, 0xbfaa000u +
                                        (uint32_t)f);
             printf("  buffers, publish takes effect: %d checks, %d "
+                   "failed\n", checks, failures);
+            fflush(stdout);
+
+            /* A fill whose upload failed leaves no current copy behind
+             * (verifier-V8's N1, KL-464): the failure planted by
+             * CFT_XRT_UPLOAD, an XRT device only. */
+            check_failed_fill_retry(sw, hw, (cft_format)fmt, n,
+                                    0xbfbb000u + (uint32_t)f);
+            printf("  buffers, a failed fill's retry: %d checks, %d "
                    "failed\n", checks, failures);
             fflush(stdout);
 

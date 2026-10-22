@@ -4847,6 +4847,7 @@ static cft_status tr_batch(cft_device *dev, int fn, cft_format fmt,
     size_t i;
     cft_status st;
 
+    cft_clear_error();
     if (!rnd_ok(rnd))
         return CFT_ERR_INVALID_ARGUMENT;
     st = tr_validate(dev, fmt, a, d, n);
