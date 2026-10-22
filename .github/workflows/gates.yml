@@ -182,9 +182,10 @@ jobs:
       # quick budget and were left out of this list until 2026-10-22
       # (KL-607, KL-181), so a push that broke the runner's counting, or the
       # C sequencer alone, passed here. On the maintainer's desktop that day,
-      # through the runner and niced, seq took 36 s, innerskips 90 s and
-      # ensurevectors 49 s; four stages this job already runs took 26 s here
-      # (augmented, formatof, reduce, status96, run 39702228205) against 28 s
-      # there, so the three are believed to add a few minutes to this job's
-      # 6,319 s. The next run's log has the figure.
+      # niced and under --require-all, in a Linux clone (WSL, Ubuntu 22.04)
+      # innerskips took 3 s, ensurevectors 40 s and seq 44 s, and 90 s, 49 s
+      # and 36 s through the Windows runner; four stages this job already runs
+      # took 26 s here (augmented, formatof, reduce, status96, run
+      # 39702228205) against 28 s there. The three are believed to add about
+      # two minutes to this job's 6,319 s; the next run's log has the figure.
       - run: bash verify/run.sh --require-all --only docs,generated,buildargs,sweepjudge,innerskips,ensurevectors,vectors,libcft,augmented,reduce,seq,programs,character,formatof,status96,bindings,cpp,lang-cpp,lang-rust,lang-go,lang-csharp,lang-fortran,node,wasm,workloads,demos

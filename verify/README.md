@@ -52,12 +52,12 @@ command in the `cft2204` distro.
 | innerskips | the runner counts and names the checks skipped inside a passing stage, held to synthetic stages, each with its negative control (`verify/test-inner-skips.sh`) | bash |
 | ensurevectors | the runner's ensure_vectors replays vectors/out only when its record is whole and held, otherwise regenerates it and says why, held to planted directories (`verify/test-ensure-vectors.sh`) | python with mpmath |
 | golden | the model's own invariants and oracles | python with pytest |
-| vectors | the conformance sets regenerate from the model, and the generation's own `SHA256SUMS` names every set the profile does, each whole (below, "When vectors/out is whole") | python |
+| vectors | the conformance sets regenerate from the model, and the generation's own `SHA256SUMS` names every set the profile does, each whole (below, "When vectors/out is whole") | python with mpmath |
 | sim | RTL == model across all cocotb targets | docker (usable, not merely present) |
-| simmc | the same suite at the multi-cycle pass budget MC, plus the open-core board configuration and the sequencer's bench whole through the fetch under Verilator (`seq_corestr_full`) - in `full` only, never in `quick` or `gate` | docker |
+| simmc | the same suite at the multi-cycle pass budget MC, plus the open-core board configuration, the sequencer's bench at the U50's capacities with the multiplier iterated (`seq_coreu50mc`, since 2026-10-22; no shipped build pairs them, and CI runs no `simmc`, so only this stage and a hand run hold it), and the sequencer's bench whole through the fetch under Verilator (`seq_corestr_full`) - in `full` only, never in `quick` or `gate` | docker |
 | lint | every RTL file elaborates in Yosys, no latches | docker |
 | formal | the FIFO, seedop and simpleops theorems, the leading-zero cone's equivalence at every window width, the multi-cycle multiplier's exactness at the real chunk for every pass geometry, the instruction fetch's eight tasks since 2026-10-03 (its control, words, delivery bound, ends and covers, and its control, words and covers again at a FIFO of four bursts), and the negative control - 39 tasks, about 10 to 11 minutes on amd-arc-box (629 s and 645 s at 3a2b2d0, 2026-10-05; docs/VERIFICATION.md); 31 tasks and about 7 minutes before the fetch's eight (420 s of solver time on the merged tree, docs/VALIDATION.md 2026-09-07; formal/README.md) | docker |
-| libcft | C library contract + the conformance replay: 168 sets, 1.2M cases at the runner's generator counts - opcodes, transcendentals, character sequences, augmented pairs, reductions, magnitude forms, formatOf | cc, python |
+| libcft | C library contract + the conformance replay: 168 sets, 1.2M cases at the runner's generator counts - opcodes, transcendentals, character sequences, augmented pairs, reductions, magnitude forms, formatOf | cc, python with mpmath |
 | generated | the committed output of seven generators still matches a fresh generation, by each one's `--check` (`hw/gen_layouts.py`, `host/tools/gen_2opi.py`, `host/tools/gen_mp_consts.py`, `bindings/node/make_seq_corpus.py`, `python/gen_divfull.py`, `bindings/arduino/sync.py`, `python/project_figures.py`: the figures, their sidecars and `docs/FIGURES.md`), and that the status archive's packager can still package the tree, by its own `--check` (`python/project_packager.py`: it owns no committed file and needs no converter) | python; cc to build the library `make_seq_corpus.py` loads, and with neither a compiler nor a built library that one check is an inner skip; git for the packager's scratch repository (no history and no network: it commits a copy of the files it reads in a temporary directory). The packager's check prints one SKIP line where it cannot run a plant (on Windows, an archive entry named with a backslash, which zipfile there reads as a slash) and none where it can (on Linux), and the runner carries a passing tool's SKIP lines into this stage's log, so on Windows the stage has one inner skip and `--require-all --only generated` fails there |
 | selfcheck | device-test harness can detect, full sw matrix | cc |
 | divsqrt | composed div/sqrt + seeds vs model, per-element flags | cc, python |
@@ -72,11 +72,11 @@ command in the `cft2204` distro.
 | reduce | canonical reduction ranges vs the model | cc, python |
 | photograph | a GPU's record of a real workload, bit for bit: atlas-engine's hopf photograph, four passes of 1,048,576 samples, each deposit buffer held to the SHA-256 an NVIDIA GPU wrote | cc, python |
 | bindings | the cftmpfr drop-in vs gmpy2's IEEE emulation | cc, python with pytest |
-| cpp | `cft.hpp` vs `cft.h` at C++17 and C++20: every entry point, same bits and flags, plus the conformance replay through the wrapper | cc, g++ |
+| cpp | `cft.hpp` vs `cft.h` at C++17 and C++20: every entry point, same bits and flags, plus the conformance replay through the wrapper | cc, g++, python with mpmath |
 | lang-cpp, lang-rust, lang-julia, lang-go, lang-csharp, lang-r | that language's example vs the C example, same bits (`make -C host examples-lang`, one leg at a time) | cc + that toolchain |
 | lang-fortran | the Fortran example builds and runs through iso_c_binding; it prints no checksum line | cc, gfortran |
-| node | the Node binding: its unit tests and `program_test.mjs`, then the vectors through `cft_node.wasm` | node |
-| wasm | the committed conformance page, verified without a browser | node |
+| node | the Node binding: its unit tests and `program_test.mjs`, then the vectors through `cft_node.wasm` | node, python with mpmath |
+| wasm | the committed conformance page, verified without a browser | node, python with mpmath |
 | workloads | the five contract workloads vs their oracles and their own determinism properties - `collatztest`, `enclosetest`, `mersennetest`, `orbitstest`, `zoomtest` in host/ | cc, python with mpmath |
 | demos | the browser demos' compute core reproduces the C tools' chains, without a browser (`bindings/wasm/verify_demos.mjs`) | cc, node |
 | mpfr | GNU MPFR parity, every rung and mode (third oracle); then the transcendental evaluator's error claims held exactly - mpfloat.c's rules in GMP, the constants' count and the logarithm's conversion against MPFR (`host/tests/mp_err_check.c`, `mp-err-check`) | cc, libmpfr/libgmp (below) |
@@ -90,7 +90,9 @@ SKIPped by name where the toolchain is absent and FAILed where the
 bits differ, so a change to the library or to a binding says which
 language it broke. `.github/workflows/gates.yml`'s `host` job runs
 them on every push (ubuntu, `--require-all`, everything but Julia
-and R); a full census runs them wherever the toolchains are, and
+and R), and since 2026-10-22 the runner's own two self-tests
+(`innerskips`, `ensurevectors`) and the sequencer differential (`seq`)
+with them; a full census runs them wherever the toolchains are, and
 docs/COMPATIBILITY.md keeps the dated per-language rows, and the
 recipe for giving a Windows host every toolchain the stages want.
 
@@ -409,6 +411,19 @@ running the upstream test suites on the way (`CHECK=0` skips them).
 Static libraries, no root, nothing outside the prefix. The `mpfr`
 stage prefers this prefix over system packages when it exists,
 because a version-pinned oracle is the same oracle on every host.
+
+A fresh clone has no prefix, and then the stage builds against the
+host's own MPFR - 4.2.1 on amd-arc-box, 4.2.2 on the Windows desktop -
+and since 2026-10-22 says so: its log opens with a line naming the MPFR
+it built against, and the line starts `NOTE` where that is not the
+pinned version (the pin is `MPFR_V` in `verify/build-mpfr-oracle.sh`;
+a prefix that holds another version is named the same way). That is
+not an inner skip, and `--require-all` does not fail it: every
+comparison the stage makes runs, against a real GNU MPFR, and the
+record has the same 37 mismatches against 4.2.1 and 4.2.2
+(docs/VALIDATION.md, 2026-09-30). A verdict that must be against the
+pin is one run after `bash verify/build-mpfr-oracle.sh`; the log
+line says which it was. `verify/test-inner-skips.sh` holds the lines.
 
 ## The census
 
