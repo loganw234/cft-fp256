@@ -1751,7 +1751,8 @@ def steps_jobs():
 def steps_real_tools():
     need = ("make", "sh", "git", "sha256sum", "bash", "sed")
     if os.name != "posix" or not all(shutil.which(x) for x in need):
-        for n in ("vectors, labelled rc_only", "the exit status is never ignored", "the dry tests with their known flakes allowed by name", "the driver's smoke"):
+        for n in ("vectors, labelled rc_only", "the exit status is never ignored", "the dry tests with their known flakes allowed by name", "the driver's smoke",
+                  "in a dry job the steps with no stand-in leg run their own commands"):
             skip(f"steps: {n}", "needs POSIX with " + ", ".join(need))
         return
     path = fake_ldd("ok") + os.pathsep + os.environ["PATH"]
