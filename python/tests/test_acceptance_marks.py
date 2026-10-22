@@ -27,6 +27,13 @@ docstring is the definition):
               is not the certificate's, a probe on another backend, tile
               count, image or depth, and a record whose marks or block
               hashes were edited
+  record      (KL-345, parcel P4) the committed record
+              programs/acceptance-rev8.json carries `marked` and
+              `lane_flags_sha256` for each of the six routine entries and
+              neither for the ten workloads; a record that lacks one of the
+              two keys for a routine entry fails outcome_problems, naming
+              the entry and the key, for each key in turn and for both; the
+              verdict line names only the comparisons that were made
 
 The driver's own run (python programs/acceptance.py --set rev8 --only
 <routine entries>) is the end-to-end check, with its own controls.
@@ -287,3 +294,93 @@ def test_the_record_keeps_the_marks_and_holds_them():
     bad = {k: v for k, v in rec.items() if k != "marked"}
     assert any("were not read" in p
                for p in A.outcome_problems(bad, dict(rec)))
+
+
+# ---- the record's two keys, required of every routine entry (KL-345) -------
+
+# the two keys, spelled out here and not read from acceptance.py, so that the
+# plants below are the same plants against a tree that lacks the fix
+KEYS = ("marked", "lane_flags_sha256")
+
+
+def committed_entries():
+    doc = json.loads((ROOT / "programs" / "acceptance-rev8.json")
+                     .read_bytes())
+    return {e["name"]: e for e in doc["entries"]}
+
+
+def test_the_committed_record_carries_both_keys_of_each_routine_entry():
+    """The record itself, read here: a routine entry without one of the two
+    keys is the damage KL-345 named, and the acceptance-rev8 stage (hours)
+    is not the only place to see it."""
+    entries = committed_entries()
+    assert set(ROUTINES) <= set(entries)
+    for name in ROUTINES:
+        for key in KEYS:
+            assert key in entries[name], (name, key)
+            assert len(entries[name][key]) == entries[name]["segments"]
+    for name in TEN:
+        for key in KEYS:
+            assert key not in entries[name], (name, key)
+
+
+def test_plant_a_routine_entrys_record_without_one_of_its_keys():
+    """Until KL-345 the comparison was skipped when the record lacked the
+    key, and every one of these passed."""
+    entries = committed_entries()
+    for name in ROUTINES:
+        rec = entries[name]
+        assert A.outcome_problems(rec, json.loads(json.dumps(rec))) == []
+        for key in KEYS:
+            want = {k: v for k, v in rec.items() if k != key}
+            probs = A.outcome_problems(rec, want)
+            assert len(probs) == 1, (name, key, probs)
+            assert name in probs[0] and f"`{key}`" in probs[0], probs
+        want = {k: v for k, v in rec.items() if k not in KEYS}
+        probs = A.outcome_problems(rec, want)
+        assert len(probs) == 2, (name, probs)
+        assert all(name in p for p in probs)
+        assert {k for k in KEYS if any(f"`{k}`" in p for p in probs)} \
+            == set(KEYS)
+
+
+def test_the_other_entries_are_not_asked_for_the_keys():
+    """The ten workloads carry neither key and are held to neither."""
+    entries = committed_entries()
+    for name in TEN:
+        rec = entries[name]
+        assert A.outcome_problems(rec, json.loads(json.dumps(rec))) == []
+    # nor the acceptance set's (revision 7's record, whose entries never
+    # carried them): none of its names is a routine's
+    assert not {e["name"] for e in A.entries()} & A.ROUTINE_NAMES
+
+
+def test_the_requirement_is_the_entrys_by_name_not_the_records_shape():
+    """A record entry that has lost a key is refused for a routine's name
+    only: a synthetic record with no name (the test above) and a workload's
+    are not asked for the keys."""
+    entries = committed_entries()
+    rec = entries[ROUTINES[0]]
+    want = {k: v for k, v in rec.items() if k != "marked"}
+    assert A.outcome_problems(dict(rec, name=TEN[0]),
+                              dict(want, name=TEN[0])) == []
+    nameless = {k: v for k, v in want.items() if k != "name"}
+    assert A.outcome_problems({k: v for k, v in rec.items() if k != "name"},
+                              nameless) == []
+
+
+def test_the_verdict_line_names_only_what_was_compared():
+    rec = committed_entries()[ROUTINES[0]]
+    both = A.marks_compared(rec, rec)
+    assert "marked lanes" in both and "per-lane blocks" in both
+    assert f"the {rec['segments']} per-lane blocks' hashes" in both
+    no_marks = {k: v for k, v in rec.items() if k != "marked"}
+    only = A.marks_compared(rec, no_marks)
+    assert "marked lanes" not in only and "per-lane blocks" in only
+    no_hashes = {k: v for k, v in rec.items() if k != "lane_flags_sha256"}
+    only = A.marks_compared(rec, no_hashes)
+    assert "marked lanes" in only and "per-lane blocks" not in only
+    neither = {k: v for k, v in rec.items() if k not in KEYS}
+    assert A.marks_compared(rec, neither) == ""
+    assert tuple(k for k, _w in A.ROUTINE_KEYS) == KEYS
+    assert A.ROUTINE_NAMES == set(ROUTINES)

@@ -223,15 +223,21 @@ build of the six needs.
   - The record keeps the recipe (`structured`), the marked lanes with their
     bytes (`marked`, a segment each) and each segment's block hash
     (`lane_flags_sha256`, certificate version 2's open hash of the block),
-    and holds a device to them as to the digests.
+    and holds a device to them as to the digests. It REQUIRES both keys of
+    every entry in REV8_ROUTINES, by name (KL-345, parcel P4): a record that
+    lacks one fails, naming the entry and the key, where until then the
+    comparison was skipped for want of the key and the verdict line still
+    said the marks and hashes were the set's. The line names only what was
+    compared (marks_compared).
   - The controls, on the first routine entry: the marked lane's byte with
     bit 7 cleared, STATUS[6] cleared, a lane marked that the recipe does not
     mark, STATUS[6] in a segment with no marked lane, a flag word the lanes
     do not OR to, a probe whose end state or STATUS is not the
     certificate's, a probe on another backend, tile count, image or depth,
-    the record's marks, hashes and recipe edited, a committed image with a
-    word changed and a bank with a bit flipped (their digests), and the
-    structured lane moved off its centre, which no longer marks.
+    the record's marks, hashes and recipe edited, each of the record's two
+    keys deleted in turn, a committed image with a word changed and a bank
+    with a bit flipped (their digests), and the structured lane moved off
+    its centre, which no longer marks.
 
 One verdict line an entry and a program, and a total. Every check prints
 `ok` or `FAIL`, and none is skipped: without cft-segrun or cft-audit the
@@ -807,6 +813,13 @@ PARAMS = ("name", "kind", "image", "bank", "source", "target", "format",
 # the revision-8 set's: its image's scratch depth and tiles besides, and
 # the routine entries' structured lanes (the other entries have none)
 PARAMS_REV8 = PARAMS + ("depth", "tiles", "structured")
+# the two keys the record holds of a routine entry, and what each is: the
+# marked lanes with their bytes, and each segment's per-lane block hash
+# (KL-345, parcel P4: outcome_problems requires both of every entry in
+# REV8_ROUTINES, by name; the other entries carry neither)
+ROUTINE_KEYS = (("marked", "marks"), ("lane_flags_sha256",
+                                      "lane block hashes"))
+ROUTINE_NAMES = frozenset(n for n, _s, _t in REV8_ROUTINES)
 
 
 def committed_problems(rec, want, params=PARAMS, which="rev7"):
@@ -848,10 +861,17 @@ def outcome_problems(rec, want):
                    f"{len(want['boundaries'])}")
     # the routine entries' marks (parcel MA): the lanes that carry bit 7 of
     # their byte in each segment, with the byte, and each segment's per-lane
-    # block, hashed as certificate version 2's open certificate hashes it
-    for key, what in (("marked", "marks"), ("lane_flags_sha256",
-                                            "lane block hashes")):
+    # block, hashed as certificate version 2's open certificate hashes it.
+    # Both keys are REQUIRED of an entry in REV8_ROUTINES (KL-345, parcel
+    # P4): until then a record without one skipped its comparison, and a
+    # record with both deleted passed.
+    name = rec.get("name", want.get("name"))
+    for key, what in ROUTINE_KEYS:
         if key not in want:
+            if name in ROUTINE_NAMES:
+                out.append(f"{name}: the record lacks `{key}` (the {what}), "
+                           f"which every routine entry carries and a run is "
+                           f"held to")
             continue
         got = rec.get(key)
         if got is None:
@@ -870,6 +890,20 @@ def outcome_problems(rec, want):
                 out.append(f"segment {k}'s lane block hashes to {g[:16]} "
                            f"where the set has {w[:16]}")
     return out
+
+
+def marks_compared(rec, want):
+    """What outcome_problems compared of a routine entry's marks, in words
+    for the verdict line, and nothing it did not: the marked lanes with
+    their bytes where the set has `marked`, the per-lane blocks' hashes
+    where it has `lane_flags_sha256`. "" where it has neither, so that a
+    record whose keys are missing (a failure outcome_problems names) never
+    has its line say they were compared (KL-345)."""
+    said = {"marked": "the marked lanes with their bytes",
+            "lane_flags_sha256":
+                f"the {rec['segments']} per-lane blocks' hashes"}
+    got = [said[key] for key, _what in ROUTINE_KEYS if key in want]
+    return f", and so are {' and '.join(got)}" if got else ""
 
 
 # ---- the marks (parcel MA), each a list of problems by name ---------------
@@ -1605,9 +1639,7 @@ def run_entry(entry, want, args, work):
         if not check(not probs, f"{name}: every boundary hash, flag word and "
                      f"STATUS is the set's ({rec['segments'] + 1} "
                      f"boundaries, flags {rec['flags']})"
-                     + ("" if probe is None else
-                        f", and so are the marked lanes with their bytes and "
-                        f"the {rec['segments']} per-lane blocks' hashes"),
+                     + ("" if probe is None else marks_compared(rec, want)),
                      "; ".join(probs)):
             failed.append("the committed digests")
     # 2. cft-audit, in full
@@ -1879,8 +1911,8 @@ def mark_controls(args, kept):
     recipe marks none, a segment with STATUS[6] and no lane, a probe whose
     end state or STATUS is not the certificate's, a probe on another tile
     or depth, the marks and the blocks' hashes and the recipe edited in the
-    record, and the structured lane moved off its centre, which no longer
-    marks on seq.py."""
+    record, each of the record's two keys deleted in turn (KL-345), and the
+    structured lane moved off its centre, which no longer marks on seq.py."""
     name, rec, want, image, bank, init, files, data, d, run0, depth, probe \
         = kept
     base = want if want is not None else rec
@@ -1963,6 +1995,20 @@ def mark_controls(args, kept):
     check(any("segment 1's lane block" in p
               for p in outcome_problems(rec, w)),
           "control: a lane block's hash changed in the record is caught")
+    # KL-345: each key deleted from the record in turn - the comparison was
+    # skipped for want of the key, and the record still passed
+    for key, _what in ROUTINE_KEYS:
+        w = copy.deepcopy(rec)
+        del w[key]
+        check(any(name in p and f"`{key}`" in p
+                  for p in outcome_problems(rec, w)),
+              f"control: `{key}` deleted from the record is caught, naming "
+              f"{name} and the key")
+        part = marks_compared(rec, w)
+        check(("marked lanes" in part) == (key != "marked") and
+              ("per-lane blocks" in part) == (key != "lane_flags_sha256"),
+              f"control: with `{key}` deleted the verdict line names only "
+              f"the other key's comparison")
     w = copy.deepcopy(rec)
     w["structured"][0]["centre"] = [s0["centre"][0], s0["centre"][1] + 1]
     check(any("other parameters (structured)" in p for p in
