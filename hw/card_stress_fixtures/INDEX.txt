@@ -59,3 +59,29 @@ chunk-sqrt64-hard-c16384.txt	0	host/divsqrt-soak-c16384 sqrt64-hard 0 65536 rne 
 count-div32-hard.txt	0	host/divsqrt-soak hard-count div32-hard 0 21235788 [2 s]
 count-div64-hard.txt	0	host/divsqrt-soak hard-count div64-hard 0 289685696 [60 s]
 count-sqrt64-hard.txt	0	host/divsqrt-soak hard-count sqrt64-hard 0 4456448 [1 s]
+# rnd-*: every RANDOM op's tool as the driver holds it to a count (parcel P5, KL-23), made 2026-10-22 in WSL (Ubuntu 22.04, gcc 11.4) from the
+# tools of f707fa3b, make -C host (XRT=0): the software backend only. Each log is verbatim (stdout and stderr in the order written). count 10000
+# (three batches at 4096), seed 12345; the -c16384 logs are the chunked tools (make soak-chunk SOAK_CHUNK=16384) at 20000. The cases: the count for
+# div64 sqrt64 rint64 conv64to32 rem32 rem64 logb64 class64; four a count for cvtfrom32 and cvtfrom64; the count and eight for nextup64 and
+# nextdown64, at any BATCH; the draws' for cvtto32 and cvtto64 (with a "skipped" line: cases + skipped is four a count). div32, conv32to64 and
+# scaleB's two are the logs above and the chunk-* ones.
+rnd-div64.txt	0	host/divsqrt-soak div64 10000 12345 rne [0 s]
+rnd-sqrt64.txt	0	host/divsqrt-soak sqrt64 10000 12345 rne [0 s]
+rnd-rint64.txt	0	host/clause5-soak rint64 10000 12345 rne [1 s]
+rnd-cvtto32.txt	0	host/clause5-soak cvtto32 10000 12345 rne [0 s]
+rnd-cvtto64.txt	0	host/clause5-soak cvtto64 10000 12345 rne [0 s]
+rnd-conv64to32.txt	0	host/clause5-soak conv64to32 10000 12345 rne [0 s]
+rnd-cvtfrom32.txt	0	host/clause5-soak cvtfrom32 10000 12345 rne [0 s]
+rnd-cvtfrom64.txt	0	host/clause5-soak cvtfrom64 10000 12345 rne [0 s]
+rnd-rem32.txt	0	host/clause5-soak rem32 10000 12345 [0 s]
+rnd-rem64.txt	0	host/clause5-soak rem64 10000 12345 [0 s]
+rnd-nextup64.txt	0	host/clause5-soak nextup64 10000 12345 [0 s]
+rnd-nextdown64.txt	0	host/clause5-soak nextdown64 10000 12345 [0 s]
+rnd-logb64.txt	0	host/clause5-soak logb64 10000 12345 [0 s]
+rnd-class64.txt	0	host/clause5-soak class64 10000 12345 [0 s]
+rnd-cvtfrom64-c16384.txt	0	host/clause5-soak-c16384 cvtfrom64 20000 12345 rne [0 s]
+rnd-nextup64-c16384.txt	0	host/clause5-soak-c16384 nextup64 20000 12345 [0 s]
+rnd-div64-c16384.txt	0	host/divsqrt-soak-c16384 div64 20000 12345 rne [0 s]
+# manifest-*: the three revision-8 images' manifests (hw/rebuild-2022.sh's, which the driver reads beside each xclbin), copied verbatim by the lead from
+# the build host on 2026-10-22 (they name the staged files' build, cft_hw.xclbin, in `artifact:`). All three: commit 688b6530e3af18f1de1d82888a8fc8875b1787f4,
+# tree: clean, bitstream_sources: rtl/ and hw/ identical to that commit. Not logs, so they have no row: the suite reads them by name.

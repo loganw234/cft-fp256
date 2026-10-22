@@ -1892,7 +1892,15 @@ def scn_telemetry(env: Env, src: str = HERE) -> list:
     c("telemetry parser: as-is text rows", L.parse_telemetry("  FPGA Temperature   : 31 C\n  Power   15.5 W\nnot a row\n") ==
       {"FPGA Temperature": 31.0, "Power": 15.5})
     c("telemetry parser: nothing readable is {} (never a reading of 0)", L.parse_telemetry("ERROR: no device\n") == {})
-    return out + telemetry_order_checks(src) + scn_telemetry_hang(env, src)
+    # KL-39: the status file's telemetry line, from a run, carries the time of the last sample (its record's ts), not None
+    try:
+        with open(os.path.join(R.out, "status.txt"), "r", encoding="utf-8") as fh:
+            tl = next((ln for ln in fh.read().splitlines() if ln.startswith("telemetry  ")), "")
+    except OSError:
+        tl = ""
+    c("telemetry: status.txt's telemetry line, from a run against the stand-in, begins with the time of the run's last sample - the ts of its "
+      "record - and says what took it, never None", bool(tel) and tl.startswith(f"telemetry  {tel[-1]['ts']} (") and "None" not in tl, tl[:200])
+    return out + telemetry_order_checks(src) + scn_telemetry_hang(env, src) + telemetry_status_checks(src) + hbm_report_checks(src)
 
 
 def scn_telemetry_hang(env: Env, src: str = HERE) -> list:
@@ -2001,14 +2009,15 @@ def scn_build_refusals(env: Env, src: str = HERE) -> list:
     finally:
         sys.path.remove(src)
         sys.modules.pop("card_stress", None)
-    return out
+    # parcel P5 (2026-10-22): the images' manifests (KL-42) and vectors/out (KL-44), refused or flagged at the start
+    return out + manifest_judge_checks(src) + manifest_driver_checks(env, src) + scn_manifests(env, src) + vectors_checks(env, src)
 
 
 def scn_buildreal(env: Env, src: str = HERE) -> list:
     """The driver's build step and the real api-test, not dry: a scratch copy of the tree, the real make
     (XRT=0, the one thing this host can build), a fake ldd that says what the XRT-linked tools would say,
     a second fake that says they are not linked, and a make that cannot find XRT."""
-    out: list = []
+    out: list = copy_tracked_checks()
 
     def c(n, ok, d=""):
         out.append((n, bool(ok), d))
@@ -2020,9 +2029,14 @@ def scn_buildreal(env: Env, src: str = HERE) -> list:
     root = os.path.join(env.tmp, "tree")
     if not os.path.isdir(root):
         os.makedirs(os.path.join(root, "programs"))
-        ign = shutil.ignore_patterns("__pycache__", "*.o", "*.lo", "*.a", "*.so")
-        shutil.copytree(os.path.join(ROOT, "host"), os.path.join(root, "host"), ignore=ign)
-        shutil.copytree(os.path.join(ROOT, "hw"), os.path.join(root, "hw"), ignore=ign)
+        # the files git tracks under host/ and hw/ and nothing else (KL-13): in a checkout where host/ is built, a copy that took the
+        # executables and the generated build id (all but objects and libraries, until 2026-10-22) made `make` find the tools up to
+        # date, and cft-segrun reported the checkout's build id, not this tree's
+        try:
+            copy_tracked(ROOT, root)
+        except RuntimeError as e:
+            skip("buildreal", f"git cannot list the tracked files of this tree ({e})")
+            return out
         shutil.copy(os.path.join(ROOT, "programs", "acceptance.py"), os.path.join(root, "programs", "acceptance.py"))
         for git in (["init", "-q"], ["add", "-A"], ["-c", "user.email=t@example.invalid", "-c", "user.name=t", "commit", "-qm", "t"]):
             subprocess.run(["git", "-C", root] + git, capture_output=True, timeout=120)
@@ -2080,6 +2094,13 @@ def scn_buildreal(env: Env, src: str = HERE) -> list:
     c("buildreal: an optional tool (cft-selftest) that ldd says is not linked disables ITS leg, by name, and the run goes on",
       O.rc == 0 and ob is not None and ob["ok"] and len(sel) == 3 and all(x["status"] == "skipped" and "does not link XRT" in (x["reason"] or "") for x in sel)
       and len(O.legs("api-test", status="pass")) == 3, f"rc {O.rc}: {O.text[-300:]}")
+    V = drive("real-novectors", fake_ok, ["--make-xrt-flags", "XRT=0", "--legs", "api-test,selftest"])
+    vb = V.last("build")
+    c("buildreal: a run whose battery has the selftest leg, on a tree with no vectors/out, stops before any leg (exit 3), the vectors step "
+      "failed and names `make vectors` (KL-44); the same run with the leg not in its battery was the first one above",
+      V.rc == 3 and not V.legs() and vb is not None and not vb["ok"]
+      and any(s["name"] == "vectors" and not s["ok"] and s["detail"].startswith("vectors_out_missing:") and "make vectors" in s["detail"]
+              for s in vb["steps"]), f"rc {V.rc}: {V.text[-300:]}")
     X = drive("real-noxrt", fake_ok, ["--xrt-root", "/nonexistent-xrt-root"])
     xb = X.last("build")
     c("buildreal: a make that cannot find XRT stops the run before any leg (exit 3), the make step failed",
@@ -3751,9 +3772,8 @@ def chunk_unit_checks(src: str = HERE) -> list:
           and s64.random_cases(100000, 16384) == cases_in(fixture("chunk-scaleb64-c16384.txt")) == 442368,
           f"{s32.random_cases(100000, 4096)} {s32.random_cases(100000, 16384)} {s64.random_cases(100000, 16384)}")
         c("chunk: ... a count that is a whole number of batches is its own (17 x 4096 x 4 at 4096), a count below one batch's cases is "
-          "rounded up to the batch, and no other random op, count 0 or batch 0 has a figure",
+          "rounded up to the batch, and count 0, batch 0 and an exhaustive item have no figure (the other random ops' are held below)",
           s32.random_cases(17 * 4096 * 4, 4096) == 17 * 4096 * 4 and s32.random_cases(5, 16384) == 5 * 17
-          and by["cvtfrom64-rne"].random_cases(100000, 4096) is None and by["conv64to32-rne"].random_cases(1000, 4096) is None
           and s32.random_cases(0, 4096) is None and s32.random_cases(10, 0) is None
           and by["rint64-class-rne"].random_cases(10, 4096) is None)
         # the stand-in prints what the chunked tool prints
@@ -5068,7 +5088,8 @@ def group_items(env: Env, src: str = HERE) -> list:
 
 def group_chunk(env: Env, src: str = HERE) -> list:
     """Parcel DR3, the pass size: the tool's line read and held to the request, the rule for what is a repeat of what, the report, the run."""
-    return chunk_unit_checks(src) + chunk_report_checks(env, src) + scn_chunk(env, src)
+    return (chunk_unit_checks(src) + chunk_report_checks(env, src) + scn_chunk(env, src) + random_count_checks(src)
+            + scn_random_short(env, src))
 
 
 def group_records(env: Env, src: str = HERE) -> list:
@@ -5080,6 +5101,700 @@ def group_records(env: Env, src: str = HERE) -> list:
 def group_notes(env: Env, src: str = HERE) -> list:
     """Parcel DR3, four verifiers' notes: --quick --sweep-items stops after one empty wave, the Windows stand-in check, figure_extracts' filter."""
     return quick_empty_wave_checks(env, src) + standin_alive_checks() + fx_cpu_filter_checks(env, src)
+
+
+# ---------------------------------------------------------------------------------------
+# parcel P5 (2026-10-22): the driver before the nights run it. KL-39 the status file's telemetry line, KL-32 the HBM temperature's zeros in
+# the report, KL-23 a random slice held to its count in a default run, KL-42 the images' manifests, KL-44 vectors/out, KL-13 buildreal's copy
+# ---------------------------------------------------------------------------------------
+
+# a sample as xbutil's JSON gives it, by report: five temperatures (the HBM one at 0, as it reads in most samples), the power the card draws
+# and thirty rails (take_sample prefixes each label with its report)
+TEL_THERMAL = {"devices[0].thermals.FPGA HBM.temp_C": 0.0, "devices[0].thermals.FPGA.temp_C": 36.0, "devices[0].thermals.Int Vcc.temp_C": 41.0,
+               "devices[0].thermals.PCB Top Front.temp_C": 32.0, "devices[0].thermals.PCB Top Rear.temp_C": 35.0}
+TEL_ELECTRICAL = dict({"devices[0].electrical.power_consumption_max_watts": 150.0, "devices[0].electrical.power_consumption_watts": 20.5},
+                      **{f"devices[0].electrical.power_rails.Rail {i}.current.amps": float(i) for i in range(30)})
+
+
+def telemetry_status_checks(src: str = HERE) -> list:
+    """KL-39 (2026-10-22): status.txt's telemetry line carried None for the sample's time and the first six values of the record, because
+    the driver kept the sample it had built and append_record stamped the time on its own copy. In-process: a sample is taken (the vendor
+    tool's answers are given), status.txt is written, and its line is read; and the line's builder on the cases it has words for."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    try:
+        with driver_from(src, ["--telemetry-reports", "thermal,electrical"]) as (mod, d, L2):
+            os.makedirs(d.out, exist_ok=True)
+            d.run_id = "p5"
+            d.examine = lambda tool, rep, mode: (dict({"thermal": TEL_THERMAL, "electrical": TEL_ELECTRICAL}[rep]), "", None)
+            d.telemetry("timer")
+            d.write_status()
+            recs = [r for r in L2.read_records(d.metrics)[0] if r.get("type") == "telemetry"]
+            ts = recs[-1].get("ts") if recs else None
+            with open(d.status_path, "r", encoding="utf-8") as fh:
+                line = next((ln for ln in fh.read().splitlines() if ln.startswith("telemetry  ")), "")
+            shown = [p for p in line.split("): ", 1)[1].split("; ")] if "): " in line else []
+            vals = [p for p in shown if "=" in p]
+            c("telemetry status: the line begins with the sample's own time, the ts of its record in metrics.jsonl, and says what took it "
+              "- never None", isinstance(ts, str) and bool(ts) and line.startswith(f"telemetry  {ts} (timer): ") and "None" not in line
+              and (d.last_tel or {}).get("ts") == ts, f"ts {ts!r}: {line[:160]}")
+            c("telemetry status: it names more than six values (12 of this sample's 37), the temperatures first, then the power the card "
+              "draws, then the rest in the record's order, and counts what it leaves out",
+              len(vals) == 12 and all(v.startswith("thermal.") for v in vals[:5]) and all("power_consumption" in v for v in vals[5:7])
+              and vals[7].startswith("electrical.") and shown[-1] == "25 more value(s) in metrics.jsonl", f"{len(vals)}: {shown[-3:]}")
+            c("telemetry status: the HBM temperature's 0 is marked as no reading, and only that value is",
+              sum("(no reading)" in v for v in vals) == 1 and "FPGA HBM.temp_C=0.0 (no reading)" in line, line[:300])
+            c("telemetry status: the line is the library's telemetry_line of the kept record (one builder, no copy in the driver)",
+              line == L2.telemetry_line(d.last_tel), "")
+            nov = L2.telemetry_line({"ts": "2026-10-22 06:00:00", "when": "end", "image": None, "values": None, "error": "thermal: no values"})
+            c("telemetry status: a sample with no values says so and why, as before; one with no time says that, not None",
+              nov == "telemetry  2026-10-22 06:00:00 (end): no values parsed (thermal: no values)"
+              and L2.telemetry_line({"values": {"electrical.x": 1.0}}) == "telemetry  time not recorded: electrical.x=1.0", nov)
+    except Exception as e:                     # a driver that cannot be driven this way is a red check, not a crash
+        c("telemetry status: the driver could be driven in-process", False, repr(e))
+    return out
+
+
+def run_report(src: str, run_dir: str, json_path: str):
+    """The report script of the code under test on a run directory: (text, the summary as data)."""
+    p = subprocess.run([sys.executable, "-B", "-I", os.path.join(src, "card_stress_report.py"), run_dir, "--json", json_path, "--no-write"],
+                       capture_output=True, text=True, timeout=120)
+    try:
+        with open(json_path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        data = {}
+    return p.stdout, data
+
+
+def hbm_report_checks(src: str = HERE) -> list:
+    """KL-32 (2026-10-22): the card's FPGA HBM temperature reads 0 in most samples (670 of 865 in the long run), and the report's range for it
+    was that artifact. Synthetic runs of ten samples: the zeros are counted by name and left out of the label's statistics; a rail that reads a
+    flat 0 in every sample is not touched; a label that read 0 in every sample has no range; a run with no zero says nothing."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    hbm = "thermal.devices[0].thermals.FPGA HBM.temp_C"
+    fpga = "thermal.devices[0].thermals.FPGA.temp_C"
+    rail = "electrical.devices[0].electrical.power_rails.1.2 Volts HBM.current.amps"
+    tmp = tempfile.mkdtemp(prefix="cs-hbm-")
+
+    def make(name: str, hbm_values: list):
+        d = os.path.join(tmp, name)
+        os.makedirs(d)
+        t = 1_800_000_000.0
+        recs = [{"type": "run_start", "v": 1, "ts": L.iso(t), "epoch": t, "run_id": "hbm-0", "host": "fixture", "out": d, "argv": [],
+                 "settings": {"until": None, "quick": False, "dry_run": True}, "tree": {"commit": "a" * 40}, "images": {},
+                 "deadline": None, "resumed": False}]
+        for i, x in enumerate(hbm_values):
+            t += 60
+            recs.append({"type": "telemetry", "v": 1, "ts": L.iso(t), "epoch": t, "cycle": 1, "image": "quad", "when": "timer", "ok": True,
+                         "values": {hbm: x, fpga: 36.0 + i % 3, rail: 0.0}, "host": None, "raw": None, "error": None})
+        with open(os.path.join(d, "metrics.jsonl"), "w", encoding="utf-8", newline="\n") as fh:
+            for r in recs:
+                fh.write(json.dumps(r) + "\n")
+        text, data = run_report(src, d, os.path.join(tmp, name + ".json"))
+        T = data.get("telemetry", {})
+        return text, T, {x["label"]: x for x in T.get("labels", [])}
+
+    try:
+        mixed = [0.0, 0.0, 0.0, 35.0, 0.0, 33.0, 32.0, 0.0, 0.0, 31.0]
+        text, T, lab = make("mixed", mixed)
+        c("hbm report: the zeros are counted by name (6 of 10 samples) in the summary and in the text",
+          T.get("no_reading") == [{"label": hbm, "zero": 6, "of": 10, "kept": 4}]
+          and re.search(r"^  NO READING: %s read 0 in 6 of 10 samples\." % re.escape(hbm), text, re.M) is not None, str(T.get("no_reading")))
+        c("hbm report: and left out of the label's range: its samples are the 4 that read, 31 to 35 (not 0 to 35)",
+          hbm in lab and (lab[hbm]["n"], lab[hbm]["min"], lab[hbm]["max"]) == (4, 31.0, 35.0), str(lab.get(hbm)))
+        c("hbm report: nothing else is touched: the FPGA temperature keeps its 10 samples, and a rail that reads a flat 0 in every sample "
+          "keeps its 10 and its range 0 to 0 and is not called a missing reading",
+          lab.get(fpga, {}).get("n") == 10 and lab.get(rail, {}).get("n") == 10 and (lab[rail]["min"], lab[rail]["max"]) == (0.0, 0.0)
+          and all(x["label"] != rail for x in T.get("no_reading", [])), str((lab.get(fpga), lab.get(rail))))
+        text, T, lab = make("allzero", [0.0] * 10)
+        c("hbm report: a label that read 0 in every sample has no range at all, and the text says every sample read 0",
+          hbm not in lab and T.get("no_reading") == [{"label": hbm, "zero": 10, "of": 10, "kept": 0}]
+          and "every sample read 0" in text and lab.get(fpga, {}).get("n") == 10, str(T.get("no_reading")))
+        text, T, lab = make("nozero", [35.0, 34.0, 33.0, 32.0, 31.0, 30.0, 31.0, 32.0, 33.0, 34.0])
+        c("hbm report: a run whose HBM temperature never reads 0 has no such line, no entry, and the full range",
+          T.get("no_reading") == [] and "NO READING" not in text and (lab[hbm]["n"], lab[hbm]["min"], lab[hbm]["max"]) == (10, 30.0, 35.0), str(lab.get(hbm)))
+        with lib_from(src) as L2:
+            c("hbm report: the rule is the library's one (the status line uses it too): the HBM temperature at exactly 0, nothing else",
+              L2.no_reading(hbm, 0.0) and L2.no_reading(hbm, 0) and not L2.no_reading(hbm, 31.0) and not L2.no_reading(fpga, 0.0)
+              and not L2.no_reading(rail, 0.0) and not L2.is_hbm_temperature(rail) and not L2.no_reading(hbm, False))
+    finally:
+        rmtree_force(tmp)
+    return out
+
+
+# -- KL-23: a random slice held to its count ---------------------------------------------
+
+def soak_command(index: dict, nm: str):
+    """(tool, op, count, mode) of a RANDOM soak a fixture was made with, read from INDEX.txt: `[env ...] host/<tool> OP COUNT SEED [MODE]`."""
+    cmd = re.sub(r" \[\d+ s\]$", "", index[nm][1]).split()
+    while cmd and (cmd[0] == "env" or "=" in cmd[0]):
+        cmd.pop(0)
+    return cmd[0], cmd[1], int(cmd[2], 0), (cmd[4] if len(cmd) > 4 else None)
+
+
+def random_count_checks(src: str = HERE) -> list:
+    """KL-23 (2026-10-22): a default run held no random slice to the count it asked, so a random tool that stopped short counted as covered if it
+    printed one case. Item.random_cases now gives the cases of every random op whose tool's counting is known, and the suite holds that to the
+    REAL tools' logs at counts of three batches (and to the chunked tools' at 20,000), to the stand-in's own table, and to the catalog."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    with lib_from(src) as L2:
+        raises = lambda fn: raises_in(L2, fn)               # noqa: E731
+        by = {it.name: it for it in L2.sweep_items()}
+        index = fixture_index()
+        rows = [("div32-rne", "soak-div32.txt", 4096), ("div64-rne", "rnd-div64.txt", 4096), ("sqrt64-rne", "rnd-sqrt64.txt", 4096),
+                ("rint64-rne", "rnd-rint64.txt", 4096), ("conv64to32-rne", "rnd-conv64to32.txt", 4096),
+                ("conv32to64", "c5-conv32to64.txt", 4096), ("rem32", "rnd-rem32.txt", 4096), ("rem64", "rnd-rem64.txt", 4096),
+                ("logb64", "rnd-logb64.txt", 4096), ("class64", "rnd-class64.txt", 4096),
+                ("cvtfrom32-rne", "rnd-cvtfrom32.txt", 4096), ("cvtfrom64-rne", "rnd-cvtfrom64.txt", 4096),
+                ("nextup64", "rnd-nextup64.txt", 4096), ("nextdown64", "rnd-nextdown64.txt", 4096),
+                ("cvtfrom64-rne", "rnd-cvtfrom64-c16384.txt", 16384), ("nextup64", "rnd-nextup64-c16384.txt", 16384),
+                ("div64-rne", "rnd-div64-c16384.txt", 16384)]
+        bad = []
+        for iname, nm, batch in rows:
+            it, t = by[iname], fixture(nm)
+            _tool, op, count, mode = soak_command(index, nm)
+            want = it.random_cases(count, batch)
+            try:
+                v = L2.parse_soak(t, index[nm][0], it.op, it.verdict_mode, None, want, None, chunk=None if batch == 4096 else batch)
+                held = v.ok and v.counts["cases"] == want
+                short = raises(lambda: L2.parse_soak(t, index[nm][0], it.op, it.verdict_mode, None, want + 1, None, chunk=None if batch == 4096 else batch))
+            except L2.VerdictError as e:
+                held, short = False, str(e)
+            if not (op == it.op and held and short is True and want == cases_in(t)):
+                bad.append((nm, want, cases_in(t), held, short))
+        c("random counts: for every random op but four (cvtto32 and cvtto64, drawn; the two scaleBs, held in the chunk checks), "
+          "Item.random_cases is what the REAL tool printed for the count it was asked - at a "
+          "count of three batches at 4096 for 14 ops, at 20,000 through the chunked tools' 16384 for 3 - the log passes with that figure, "
+          "and is refused when the slice is asked one case more", not bad and len(rows) == 17, str(bad[:3]))
+        c("random counts: the multiples are what the tools do, not the count: four a count for cvtfrom32 and cvtfrom64, the count and eight "
+          "for nextup64 and nextdown64, the count for the rest",
+          by["cvtfrom32-rne"].random_cases(10000, 4096) == 40000 == cases_in(fixture("rnd-cvtfrom32.txt"))
+          and by["nextdown64"].random_cases(10000, 4096) == 10008 == cases_in(fixture("rnd-nextdown64.txt"))
+          and by["rem64"].random_cases(10000, 4096) == 10000 == cases_in(fixture("rnd-rem64.txt"))
+          and by["cvtfrom64-rne"].random_cases(20000, 16384) == by["cvtfrom64-rne"].random_cases(20000, 4096) == 80000)
+        c("random counts: cvtto32 and cvtto64 are NOT held to a count, by name: their cases are the in-range lanes of four targets (the draws'), "
+          "so Item.random_cases is None for all ten of their items; the REAL logs show why, and that cases + skipped is four a count "
+          "(22,865 + 17,135 and 20,150 + 19,850 at 10,000), which parse_soak does not read - a known limit",
+          all(by[f"{op}-{m}"].random_cases(10000, 4096) is None for op in ("cvtto32", "cvtto64") for m in L2.MODES5)
+          and list(L2.RANDOM_CASES_DRAWN) == ["cvtto32", "cvtto64"]
+          and cases_in(fixture("rnd-cvtto32.txt")) + int(re.search(r"skipped (\d+) lane-target", fixture("rnd-cvtto32.txt")).group(1)) == 40000
+          and cases_in(fixture("rnd-cvtto64.txt")) + int(re.search(r"skipped (\d+) lane-target", fixture("rnd-cvtto64.txt")).group(1)) == 40000
+          and 0 < cases_in(fixture("rnd-cvtto32.txt")) < 40000)
+        gaps = sorted({it.op for it in by.values() if it.kind == "random"
+                       and it.op not in L2.SCALEB_LIST and it.op not in L2.RANDOM_CASES and it.op not in L2.RANDOM_CASES_DRAWN})
+        c("random counts: every random op in the catalog has a figure or is named as drawn - a new random op with neither is red here, "
+          "not unheld without a word", not gaps and len({it.op for it in by.values() if it.kind == "random"}) == 18, str(gaps))
+        # the stand-in prints what the tools print, from a table of its own
+        sys.path.insert(0, src)
+        try:
+            si = importlib.import_module("card_stress_standin")
+            diff = [(it.op, n, b) for it in by.values() if it.kind == "random" and it.random_cases(1, 4096) is not None
+                    for n in (1, 4095, 4096, 4097, 10000, 100000) for b in (4096, 16384)
+                    if si.random_cases(it.op, n, b) != it.random_cases(n, b)]
+        finally:
+            sys.path.remove(src)
+            sys.modules.pop("card_stress_standin", None)
+        c("random counts: the stand-in's own table gives the library's figure for every op that has one, at six counts and two batches "
+          "(two tables read from the tools, neither the other's source)", not diff, str(diff[:3]))
+    return out
+
+
+def scn_random_short(env: Env, src: str = HERE) -> list:
+    """KL-23 as a process: a DEFAULT run (no --sweep-chunk) whose tool printed one case too few for a random slice. Two card items (div32,
+    cvtfrom32 is a host item) and three host ones; the first slice of each came back short. It is parse_error, by the rule, not covered, and
+    the item's next slice (the same seed number) passes with its expected_cases recorded."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    ops = {"div32": "div32-rne", "cvtfrom32": "cvtfrom32-rne", "rem32": "rem32", "nextup64": "nextup64"}
+    sc = [{"leg": "soak", "op": op, "nth": [1], "do": "shortcase"} for op in ops]
+    r = start_driver(env, "randshort", ["--until", until(120), "--sweep-items", ",".join(ops.values())] + SWEEP_ALL_BASE, sc, src=src, to_file=True)
+
+    def served():
+        return all(any(x["status"] == "pass" and x["sweep"]["item"] == n for x in r.legs(kind="sweep")) for n in ops.values())
+
+    got = wait_for(served, 90, 0.4)
+    stop_run(r)
+    r.finish(60)
+    for op, name in ops.items():
+        mine = sorted((x for x in r.legs(kind="sweep") if x["sweep"]["item"] == name), key=lambda x: x["start_epoch"])
+        first, second = (mine + [None, None])[:2]
+        c(f"random short {name}: the first slice came back one case short and was refused as parse_error, by the rule "
+          f"('cases where the slice has'), with no counts recorded",
+          got and first is not None and first["status"] == "parse_error" and first["counts"] is None
+          and "cases where the slice has" in (first["reason"] or ""), str(first and (first["status"], first["reason"])))
+        c(f"random short {name}: the next slice began from the same seed number and passed, with the figure it was held to recorded as "
+          f"expected_cases and printed in full",
+          got and second is not None and second["status"] == "pass" and second["sweep"]["seed_n"] == first["sweep"]["seed_n"]
+          and second["sweep"].get("expected_cases") == second["counts"]["cases"] and second["counts"]["cases"] > 0, str(second and second["sweep"]))
+        iv, served_n, _cases, seeds, _dis = L.sweep_coverage(r.recs)
+        c(f"random short {name}: the refused slice is not covered: the item has been served once by the passing slice alone",
+          served_n.get(name) == sum(1 for x in mine if x["status"] == "pass") and seeds.get(name, -1) >= 0)
+    return out
+
+
+# -- KL-42: the images' manifests ----------------------------------------------------
+
+def manifest_text(sha: str, commit: str, sources: "str | None" = None, tree: str = "clean", drop: tuple = ()) -> str:
+    """A manifest in the real format: the quad's, as hw/rebuild-2022.sh wrote it, with the fields given put in its place."""
+    t = fixture("manifest-quad.txt")
+    t = re.sub(r"^sha256:.*$", lambda m: f"sha256:        {sha}", t, flags=re.M)
+    t = re.sub(r"^commit:.*$", lambda m: f"commit:        {commit}", t, flags=re.M)
+    t = re.sub(r"^tree:.*$", lambda m: f"tree:          {tree}", t, flags=re.M)
+    t = re.sub(r"^bitstream_sources:.*$", lambda m: f"bitstream_sources: {sources or 'rtl/ and hw/ identical to ' + commit}", t, flags=re.M)
+    return "".join(ln for ln in t.splitlines(True) if not any(ln.startswith(k + ":") for k in drop))
+
+
+def manifest_judge_checks(src: str = HERE) -> list:
+    """KL-42: the library's judgement of a manifest, on the REAL ones (the three images', as hw/rebuild-2022.sh wrote them and the lead copied
+    them from the build host on 2026-10-22) and on those with one field changed. Pure: no git, no driver."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    with lib_from(src) as L2:
+        real = {n: fixture(f"manifest-{n}.txt") for n in ("quad", "single", "deep")}
+        parsed = {n: L2.parse_manifest(t) for n, t in real.items()}
+        shas = {n: parsed[n].get("sha256", "") for n in real}                # (the cross-check against the IMAGES table follows)
+        commit = "688b6530e3af18f1de1d82888a8fc8875b1787f4"
+        rtl = "44b963dd6ba2fcf99e002c5face5ca94aad4515c"
+        c("manifest: the three real manifests parse: sha256, commit, tree and bitstream_sources are read, an indented hdlparam line is not a key, "
+          "and `artifact:` names the build's file (cft_hw.xclbin), not the staged one",
+          all(parsed[n].get("sha256") == shas[n] and parsed[n].get("commit") == commit and parsed[n].get("tree") == "clean"
+              and parsed[n].get("bitstream_sources") == f"rtl/ and hw/ identical to {commit}" and parsed[n].get("artifact") == "cft_hw.xclbin"
+              and "hdlparam" in "".join(real[n].splitlines()) and "EN_FP32" not in parsed[n] and "hdlparam" not in parsed[n] for n in real),
+          str({n: parsed[n].get("sha256", "")[:12] for n in parsed}))
+        # (the driver's own table of the images' hashes was read from VALIDATION.md at 582953c; the manifests are the build host's, 2026-10-22)
+        sys.path.insert(0, src)
+        try:
+            mod = importlib.import_module("card_stress")
+            tbl = {n: v[3] for n, v in mod.IMAGES.items()}
+        finally:
+            sys.path.remove(src)
+            sys.modules.pop("card_stress", None)
+        c("manifest: each real manifest's sha256 is the hash the driver's IMAGES table holds for that image (two records, made apart, agree)",
+          all(tbl.get(n) == parsed[n].get("sha256") for n in real), str(tbl))
+        c("manifest: the manifest sits beside its xclbin under the pair of names the staging keeps: cft_hw_quad.xclbin -> cft_hw_quad.manifest.txt",
+          L2.manifest_path("/x/cardday-rev8q/cft_hw_quad.xclbin") == "/x/cardday-rev8q/cft_hw_quad.manifest.txt"
+          and L2.manifest_path("/x/odd") == "/x/odd.manifest.txt")
+
+        def judge(text, sha, checkout=rtl, rtl_of=lambda cm: rtl, dry=False):
+            return L2.judge_manifest(text, sha, checkout, rtl_of, dry=dry)
+        # state, refused?, a word the why must carry
+        table = [
+            ("the real quad manifest, the right image, this checkout's rtl tree", judge(real["quad"], shas["quad"]), "ok", False, "44b963dd6ba2"),
+            ("a manifest that is another image's (the single's sha256 on the quad)", judge(real["single"], shas["quad"]), "sha256_mismatch", True, "another image's"),
+            ("a manifest with no sha256 line", judge(manifest_text("", commit, drop=("sha256",)), shas["quad"]), "sha256_mismatch", True, "no sha256"),
+            ("a manifest whose sha256 is not 64 hex digits", judge(manifest_text("4f99", commit), shas["quad"]), "sha256_mismatch", True, "64 hex"),
+            ("a commit whose rtl tree is not this checkout's", judge(real["quad"], shas["quad"], checkout="1" * 40), "rtl_differs", True, "111111111111"),
+            ("rtl/ modified when it was built", judge(manifest_text(shas["quad"], commit, f"MODIFIED - rtl/ or hw/ differs from {commit}, this "
+                                                                    "bitstream is not reproducible: rtl/cft_x.sv hw/link.cfg "), shas["quad"]),
+             "rtl_modified", True, "modified"),
+            ("only hw/ modified: the rtl tree is the commit's, and is judged on the trees", judge(manifest_text(shas["quad"], commit, f"MODIFIED - rtl/ or hw/ differs from {commit}, this "
+                                                                                                "bitstream is not reproducible: hw/link.cfg "), shas["quad"]), "ok", False, "hw/ differed"),
+            ("MODIFIED with no file named", judge(manifest_text(shas["quad"], commit, f"MODIFIED - rtl/ or hw/ differs from {commit}"), shas["quad"]),
+             "rtl_modified", True, "modified"),
+            ("a DIRTY tree and no bitstream_sources line (a manifest from before the scoped line)", judge(manifest_text(shas["quad"], commit, tree="DIRTY - this artifact does "
+                                                                                                                "not correspond to any commit", drop=("bitstream_sources",)), shas["quad"]),
+             "rtl_modified", True, "DIRTY"),
+            ("a clean tree and no bitstream_sources line: the whole tree was the commit's, so rtl/ was", judge(manifest_text(shas["quad"], commit, drop=("bitstream_sources",)), shas["quad"]),
+             "ok", False, "44b963dd6ba2"),
+            ("no sources line and no tree line", judge(manifest_text(shas["quad"], commit, drop=("bitstream_sources", "tree")), shas["quad"]),
+             "unverified", False, "does not say"),
+            ("a commit this checkout does not hold: FLAGGED, not refused", judge(real["quad"], shas["quad"], rtl_of=lambda cm: None), "commit_unknown", False, "688b6530e3af"),
+            ("no whole commit named (unknown, as hw/rebuild-2022.sh writes it when git failed)", judge(manifest_text(shas["quad"], "unknown", "rtl/ and hw/ identical to unknown"), shas["quad"]),
+             "commit_unknown", False, "no whole commit"),
+            ("this checkout's own rtl tree unreadable", judge(real["quad"], shas["quad"], checkout=None), "unverified", False, "cannot be read"),
+            ("no manifest: FLAGGED, not refused", judge(None, shas["quad"]), "missing", False, "no manifest"),
+            ("no manifest in a dry run: neutral", judge(None, shas["quad"], dry=True), "dry_run", False, "stand-in"),
+            ("an empty manifest", judge("", shas["quad"]), "sha256_mismatch", True, "no sha256"),
+            ("a manifest that is not text at all", judge("\x00\x01 binary\n", shas["quad"]), "sha256_mismatch", True, "no sha256"),
+        ]
+        bad = []
+        for what, r, state, refuse, word in table:
+            if not (r["state"] == state and r["refuse"] is refuse and word.lower() in r["why"].lower()):
+                bad.append((what, r["state"], r["refuse"], r["why"][:80]))
+        every = all(judge(real[n], shas[n])["state"] == "ok" and judge(real[n], shas[n])["commit"] == commit for n in real)
+        c("manifest: the judgement, case by case (%d): ok, the four refusals, the three flags, the dry run's neutral state, and an empty or "
+          "binary manifest - each with its own state, whether it refuses, and a reason that names it; and all three real ones are ok" % len(table),
+          not bad and every, str(bad[:3]))
+        r = judge(real["quad"], shas["quad"])
+        c("manifest: an ok verdict carries what run_start records beside the image's SHA-256: the manifest's sha256, commit, tree and "
+          "bitstream_sources, and the commit's rtl tree", r["sha256"] == shas["quad"] and r["commit"] == commit and r["rtl"] == rtl
+          and r["tree"] == "clean" and r["sources"] == f"rtl/ and hw/ identical to {commit}", str(r))
+        ok_s, det_s = L2.manifest_step("quad", r)
+        ref = judge(real["quad"], shas["quad"], checkout="1" * 40)
+        fl = judge(None, shas["quad"])
+        c("manifest: the build step: ok for ok; NOT ok for a refusal, which says REFUSED and the file; ok for a flag, which says NOT CHECKED, by state",
+          ok_s and det_s.startswith("ok: ") and not L2.manifest_step("quad", dict(ref, file="cft_hw_quad.manifest.txt"))[0]
+          and "REFUSED" in L2.manifest_step("quad", dict(ref, file="cft_hw_quad.manifest.txt"))[1]
+          and "cft_hw_quad.manifest.txt" in L2.manifest_step("quad", dict(ref, file="cft_hw_quad.manifest.txt"))[1]
+          and L2.manifest_step("quad", fl)[0] and "NOT CHECKED" in L2.manifest_step("quad", fl)[1] and "missing" in L2.manifest_step("quad", fl)[1])
+    return out
+
+
+def manifest_repo(path: str):
+    """A scratch repository whose HEAD has two commits that differ in rtl/ (and the files the driver's build step looks for): (path,
+    [commit1, commit2], [rtl tree 1, rtl tree 2]), or None where git cannot make one."""
+    repo = make_scratch_repo(path, MARKER_FILES)
+    if repo is None:
+        return None
+    os.makedirs(os.path.join(repo, "rtl"), exist_ok=True)
+    cs, trees = [], []
+    for k in (1, 2):
+        with open(os.path.join(repo, "rtl", "a.sv"), "w", newline="\n") as fh:
+            fh.write(f"// revision {k}\n")
+        if git_in(repo, "add", "-A").returncode != 0 or git_in(repo, "commit", "-q", "-m", f"rtl {k}").returncode != 0:
+            return None
+        cs.append(git_in(repo, "rev-parse", "HEAD").stdout.strip())
+        trees.append(git_in(repo, "rev-parse", "HEAD:rtl").stdout.strip())
+    return repo, cs, trees
+
+
+def stage_images(env: Env, tag: str, manifests: dict) -> dict:
+    """Copies of the test's three images (each file with its SHA256SUMS) in a directory of their own, each with the manifest text given for
+    it beside it under the staged pair of names (none for a name not in `manifests`): {name: path}."""
+    out = {}
+    for n, p in env.imgs.items():
+        d = os.path.join(env.tmp, f"mf-{tag}", n)
+        os.makedirs(d, exist_ok=True)
+        q = os.path.join(d, os.path.basename(p))
+        shutil.copy(p, q)
+        shutil.copy(os.path.join(os.path.dirname(p), "SHA256SUMS"), os.path.join(d, "SHA256SUMS"))
+        if manifests.get(n) is not None:
+            with open(q[:-len(".xclbin")] + ".manifest.txt", "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(manifests[n])
+        out[n] = q
+    return out
+
+
+def manifest_driver_checks(env: Env, src: str = HERE) -> list:
+    """KL-42, in-process, on a Driver rooted in a scratch repository (two commits, rtl/ differing): pre_check reads each image's manifest
+    and holds it to the image and to HEAD's rtl tree, and the build step's manifest check refuses or flags - exactly as a real (not dry)
+    run does, which a dry run's process cannot show for a missing manifest (its stand-ins have none, by design)."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    mr = manifest_repo(os.path.join(env.tmp, "mfrepo-unit"))
+    if mr is None:
+        skip("manifest driver", "git cannot make a scratch repository on this host")
+        return out
+    repo, (c1, c2), (t1, t2) = mr
+    sha = env.shas["quad"]
+    other = "0123456789abcdef0123456789abcdef01234567"
+    cases = {"ok": manifest_text(sha, c2), "differs": manifest_text(sha, c1), "sha": manifest_text(env.shas["single"], c2),
+             "unknown": manifest_text(sha, other), "modified": manifest_text(sha, c2, f"MODIFIED - rtl/ or hw/ differs from {c2}, this "
+                                                                                   f"bitstream is not reproducible: rtl/a.sv "), "none": None}
+    want = {"ok": ("ok", False), "differs": ("rtl_differs", True), "sha": ("sha256_mismatch", True), "unknown": ("commit_unknown", False),
+            "modified": ("rtl_modified", True), "none": ("missing", False)}
+    got: dict = {}
+    try:
+        for dry in (False, True):
+            for key, text in cases.items():
+                if dry and key not in ("none", "ok"):
+                    continue
+                imgs = stage_images(env, f"unit-{key}-{int(dry)}", {"quad": text})
+                with driver_from(src, ["--root", repo]) as (mod, d, L2):
+                    d.dry = dry
+                    os.makedirs(d.out, exist_ok=True)
+                    d.started = True
+                    d.images["quad"] = mod.Image("quad", imgs["quad"], 4, "u50-rev8-quad", None)
+                    d.pre_check()
+                    steps: list = []
+                    d.check_manifest(d.images["quad"], lambda n, ok, det: steps.append((n, ok, det)))
+                    evs = [r for r in (L2.read_records(d.metrics)[0] if os.path.exists(d.metrics) else []) if r.get("type") == "event"]
+                    got[(key, dry)] = (dict(d.images["quad"].manifest or {}), steps, evs, dict(d.tree))
+    except Exception as e:                     # a driver that cannot be driven this way is a red check, not a crash
+        import traceback
+        c("manifest driver: the driver could be driven in-process", False, repr(e) + " " + traceback.format_exc()[-400:])
+        return out
+    bad = []
+    for key, (state, refuse) in want.items():
+        m, steps, evs, _tree = got[(key, False)]
+        flagged = state in ("commit_unknown", "missing")
+        step_ok = (len(steps) == 1 and steps[0][0] == "manifest quad" and steps[0][1] is (not refuse)
+                   and (state in steps[0][2]) and (("NOT CHECKED" in steps[0][2]) is flagged))
+        ev_ok = (len(evs) == 1 and evs[0]["event"] == "image_manifest_unchecked" and evs[0]["state"] == state) if flagged else not evs
+        if not (m.get("state") == state and m.get("refuse") is refuse and step_ok and ev_ok and m.get("file") == "cft_hw_quad.manifest.txt"):
+            bad.append((key, m.get("state"), m.get("refuse"), steps, [e["event"] for e in evs]))
+    c("manifest driver: a real run judges the manifest beside the image: ok; the sha256 of another image, a commit whose rtl tree is not "
+      "HEAD's, and rtl/ modified are REFUSED (the step is not ok); a commit the checkout lacks and a missing manifest are FLAGGED (the step "
+      "is ok, says NOT CHECKED, and an event image_manifest_unchecked names the state); only a flag has the event", not bad, str(bad[:2]))
+    m = got[("ok", False)][0]
+    c("manifest driver: what run_start records for it: the manifest's commit (HEAD's), that commit's rtl tree, its sha256 equal to the "
+      "image's, its tree and bitstream_sources, and the file's name - and the tree the run is keyed by is still the checkout's rtl",
+      m.get("commit") == c2 and m.get("rtl") == t2 and m.get("sha256") == sha and m.get("tree") == "clean"
+      and m.get("sources") == f"rtl/ and hw/ identical to {c2}" and got[("ok", False)][3].get("rtl") == t2, str(m))
+    m = got[("differs", False)][0]
+    c("manifest driver: the commit with another rtl tree is recorded as what it is (its commit and its tree), and the coverage key stays "
+      "the checkout's: tree.rtl is HEAD's, not the manifest's", m.get("commit") == c1 and m.get("rtl") == t1 != t2
+      and got[("differs", False)][3].get("rtl") == t2, str(m))
+    md, ms = got[("none", True)][0], got[("none", True)][1]
+    c("manifest driver: a DRY run with no manifest (the stand-ins' images have none) is neutral: state dry_run, a step that is ok, no event "
+      "- and one WITH a manifest is judged as a real run judges it", md.get("state") == "dry_run" and ms and ms[0][1] and not got[("none", True)][2]
+      and got[("ok", True)][0].get("state") == "ok", str((md.get("state"), ms)))
+    return out
+
+
+def scn_manifests(env: Env, src: str = HERE) -> list:
+    """KL-42 as processes: dry runs rooted in the scratch repository, with a manifest beside each stand-in image. A: all three name HEAD:
+    ok, recorded in run_start, shown in status.txt and the report. B: the quad's names the other commit (rtl differs): the run does not
+    start - exit 3, no leg, the failing step named. C: the single's is the quad's. D: rtl/ modified. E: a commit the checkout lacks:
+    flagged, the run goes on. F: no manifests (the dry run's own case): the run is as it always was."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    mr = manifest_repo(os.path.join(env.tmp, "mfrepo"))
+    if mr is None:
+        skip("manifests", "git cannot make a scratch repository on this host")
+        return out
+    repo, (c1, c2), (t1, t2) = mr
+    base = ["--root", repo, "--quick", "--legs", "api-test", "--no-sweep"]
+
+    def drive(tag, manifests):
+        imgs = stage_images(env, tag, manifests)
+        args = list(base)
+        for n, p in imgs.items():
+            args += ["--image", f"{n}={p}"]
+        return run_driver(env, "mf-" + tag, args, src=src, cap=120)
+
+    def steps(R, name):
+        b = R.last("build")
+        return [s for s in (b["steps"] if b else []) if s["name"] == name]
+
+    sh = env.shas
+    A = drive("ok", {n: manifest_text(sh[n], c2) for n in sh})
+    rs = A.recs[0]
+    mfs = {n: rs["images"][n].get("manifest") or {} for n in sh}
+    c("manifests A: three manifests that name HEAD and the images' hashes: the run goes (exit 0, every leg passes) and run_start records, "
+      "beside each SHA-256, the manifest's commit and its rtl tree (state ok, HEAD's, tree.rtl unchanged)",
+      A.rc == 0 and bool(A.legs()) and all(m.get("state") == "ok" and m.get("commit") == c2 and m.get("rtl") == t2 and m.get("sha256") == sh[n]
+                                             for n, m in mfs.items()) and rs["tree"]["rtl"] == t2, f"rc {A.rc}: {A.text[-200:]}")
+    c("manifests A: ... a build step `manifest <image>` for each, ok", all(len(steps(A, f"manifest {n}")) == 1 and steps(A, f"manifest {n}")[0]["ok"] for n in sh))
+    st = open(os.path.join(A.out, "status.txt"), encoding="utf-8").read()
+    c("manifests A: status.txt has an `images` line that says each was built at HEAD's commit with its rtl tree",
+      re.search(r"^images     quad built at %s, rtl %s \(this checkout's\); single .*; deep " % (c2[:12], t2[:12]), st, re.M) is not None, st[:600])
+    p = subprocess.run([sys.executable, "-B", "-I", os.path.join(src, "card_stress_report.py"), A.out, "--no-write"], capture_output=True, text=True, timeout=120)
+    c("manifests A: and the report's header says it of each image", p.returncode == 0 and f"built at {c2[:12]}, rtl {t2[:12]} (this checkout's)" in p.stdout, p.stdout[:300])
+    B = drive("differs", dict({n: manifest_text(sh[n], c2) for n in sh}, quad=manifest_text(sh["quad"], c1)))
+    fb = steps(B, "manifest quad")
+    c("manifests B: the quad's manifest names a commit whose rtl tree is not HEAD's: the run does not start (exit 3), no leg, the build record "
+      "is not ok and the step `manifest quad` is the one that failed and says rtl_differs, REFUSED; STOPPED.txt says so",
+      B.rc == 3 and not B.legs() and B.last("build") is not None and not B.last("build")["ok"] and len(fb) == 1 and not fb[0]["ok"]
+      and "rtl_differs" in fb[0]["detail"] and "REFUSED" in fb[0]["detail"] and all(steps(B, f"manifest {n}")[0]["ok"] for n in ("single", "deep"))
+      and os.path.exists(os.path.join(B.out, "STOPPED.txt")) and "rtl_differs" in open(os.path.join(B.out, "STOPPED.txt"), encoding="utf-8").read(),
+      f"rc {B.rc}: {B.text[-300:]}")
+    c("manifests B: ... run_start had recorded it before the refusal (state rtl_differs, the manifest's commit and rtl tree, tree.rtl HEAD's)",
+      (B.recs[0]["images"]["quad"].get("manifest") or {}).get("state") == "rtl_differs"
+      and (B.recs[0]["images"]["quad"]["manifest"] or {}).get("rtl") == t1 and B.recs[0]["tree"]["rtl"] == t2)
+    C = drive("sha", dict({n: manifest_text(sh[n], c2) for n in sh}, single=manifest_text(sh["quad"], c2)))
+    fc = steps(C, "manifest single")
+    c("manifests C: a manifest that is another image's (the single's carries the quad's sha256): refused, exit 3, no leg, by name",
+      C.rc == 3 and not C.legs() and len(fc) == 1 and not fc[0]["ok"] and "sha256_mismatch" in fc[0]["detail"], f"rc {C.rc}: {C.text[-200:]}")
+    D = drive("modified", dict({n: manifest_text(sh[n], c2) for n in sh},
+                               deep=manifest_text(sh["deep"], c2, f"MODIFIED - rtl/ or hw/ differs from {c2}, this bitstream is not reproducible: rtl/a.sv ")))
+    fd = steps(D, "manifest deep")
+    c("manifests D: a manifest that says rtl/ was modified when the image was built: refused, exit 3, no leg, by name",
+      D.rc == 3 and not D.legs() and len(fd) == 1 and not fd[0]["ok"] and "rtl_modified" in fd[0]["detail"], f"rc {D.rc}: {D.text[-200:]}")
+    E = drive("unknown", dict({n: manifest_text(sh[n], c2) for n in sh}, deep=manifest_text(sh["deep"], "0123456789abcdef0123456789abcdef01234567")))
+    fe = steps(E, "manifest deep")
+    ev = E.events("image_manifest_unchecked")
+    c("manifests E: a manifest that names a commit this checkout does not hold is FLAGGED: the step is ok and says NOT CHECKED, an event "
+      "image_manifest_unchecked names the image and the state, run_start records commit_unknown, and the run goes on (exit 0, legs pass)",
+      E.rc == 0 and bool(E.legs()) and len(fe) == 1 and fe[0]["ok"] and "NOT CHECKED" in fe[0]["detail"] and "commit_unknown" in fe[0]["detail"]
+      and len(ev) == 1 and ev[0]["image"] == "deep" and ev[0]["state"] == "commit_unknown"
+      and (E.recs[0]["images"]["deep"].get("manifest") or {}).get("state") == "commit_unknown", f"rc {E.rc}: {E.text[-200:]}")
+    F = drive("none", {})
+    c("manifests F: no manifests, as a dry run's stand-in images have none: the run is as it always was (exit 0, legs pass, every build step ok), "
+      "each image's manifest is recorded as state dry_run, and there is no event and no step to say otherwise",
+      F.rc == 0 and bool(F.legs()) and F.last("build")["ok"] and not F.events("image_manifest_unchecked")
+      and all((F.recs[0]["images"][n].get("manifest") or {}).get("state") == "dry_run" for n in sh)
+      and not [s for s in F.last("build")["steps"] if s["name"].startswith("manifest ") and not s["ok"]], f"rc {F.rc}: {F.text[-200:]}")
+    return out
+
+
+# -- KL-44: vectors/out --------------------------------------------------------------
+
+def vectors_checks(env: Env, src: str = HERE) -> list:
+    """KL-44 (2026-10-22): the driver neither checked nor made vectors/out, so on a clean clone the selftest leg failed at every third visit of
+    each image. The library's check (what `cd vectors && sha256sum -c --quiet SHA256SUMS` says) on planted directories, and the driver's
+    build step in-process on a Driver that is not dry."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    tmp = tempfile.mkdtemp(prefix="cs-vec-")
+    try:
+        with lib_from(src) as L2:
+            def tree(name, files, sums=True, extra=None):
+                root = os.path.join(tmp, name)
+                os.makedirs(os.path.join(root, "vectors", "out"))
+                lines = []
+                for fn, data in files.items():
+                    with open(os.path.join(root, "vectors", "out", fn), "wb") as fh:
+                        fh.write(data)
+                    lines.append(f"{hashlib.sha256(data).hexdigest()}  out/{fn}")
+                if sums:
+                    with open(os.path.join(root, "vectors", "SHA256SUMS"), "w", newline="\n") as fh:
+                        fh.write("\n".join(lines) + "\n")
+                for fn, data in (extra or {}).items():
+                    with open(os.path.join(root, "vectors", "out", fn), "wb") as fh:
+                        fh.write(data)
+                return root
+            files = {"a.jsonl": b"one\n", "b.jsonl": b"two\n"}
+            whole = tree("whole", files, extra={"unlisted.jsonl": b"not in the record\n"})
+            c("vectors: out/ whole and holding to SHA256SUMS passes (an unlisted file does not matter, as for sha256sum -c)",
+              L2.vectors_problem(whole) is None, str(L2.vectors_problem(whole)))
+            noout = os.path.join(tmp, "noout")
+            os.makedirs(os.path.join(noout, "vectors"))
+            p = L2.vectors_problem(noout)
+            c("vectors: no vectors/out is refused by name (vectors_out_missing) and says `make vectors`",
+              p is not None and p.startswith("vectors_out_missing:") and "make vectors" in p, str(p))
+            bad = tree("bad", files)
+            with open(os.path.join(bad, "vectors", "out", "b.jsonl"), "wb") as fh:
+                fh.write(b"tw0\n")
+            p = L2.vectors_problem(bad)
+            c("vectors: a file that differs from SHA256SUMS is refused by name (vectors_out_mismatch), the file and `make vectors` named",
+              p is not None and p.startswith("vectors_out_mismatch:") and "out/b.jsonl (differs)" in p and "make vectors" in p, str(p))
+            gone = tree("gone", files)
+            os.remove(os.path.join(gone, "vectors", "out", "a.jsonl"))
+            p = L2.vectors_problem(gone)
+            c("vectors: a listed file that is missing is refused the same way", p is not None and p.startswith("vectors_out_mismatch:")
+              and "out/a.jsonl (missing)" in p, str(p))
+            p1 = L2.vectors_problem(tree("nosums", files, sums=False))
+            c("vectors: out/ with no SHA256SUMS to hold it to is refused by name (vectors_out_unheld)", p1 is not None and p1.startswith("vectors_out_unheld:"), str(p1))
+            esc = tree("esc", files)
+            with open(os.path.join(esc, "vectors", "SHA256SUMS"), "a", newline="\n") as fh:
+                fh.write(f"{hashlib.sha256(b'x').hexdigest()}  ../outside.txt\n")
+            p2 = L2.vectors_problem(esc)
+            c("vectors: a SHA256SUMS line that points outside vectors/ is refused, not followed", p2 is not None and "outside vectors/" in p2, str(p2))
+            # the repository's own record has the shape this reads
+            with open(os.path.join(ROOT, "vectors", "SHA256SUMS"), "r", encoding="utf-8") as fh:
+                lines = [ln for ln in fh.read().splitlines() if ln.strip()]
+            c("vectors: the repository's vectors/SHA256SUMS is read by this check's own line pattern: every line is '<sha256>  out/<file>'",
+              len(lines) >= 100 and all(re.fullmatch(r"[0-9a-f]{64}  out/\S+", ln) for ln in lines), f"{len(lines)} lines")
+        # the driver's build step, not dry: which runs look, and which say why not
+        rows = []
+        for label, extra, dry, disabled, root, want_ok, want_text in (
+                ("selftest in the battery, vectors/out missing", ["--legs", "api-test,selftest"], False, None, noout, False, "vectors_out_missing"),
+                ("selftest in the battery, vectors/out whole", ["--legs", "api-test,selftest"], False, None, whole, True, "holds to it"),
+                ("the default battery (selftest in it), vectors/out missing", [], False, None, noout, False, "vectors_out_missing"),
+                ("selftest not in the battery", ["--legs", "api-test"], False, None, noout, True, "not in this run's battery"),
+                ("--quick (no selftest)", ["--quick"], False, None, noout, True, "not in this run's battery"),
+                ("selftest disabled by the build (tool not built)", ["--legs", "api-test,selftest"], False, "cft-selftest was not built", noout, True, "disabled"),
+                ("a dry run", ["--legs", "api-test,selftest"], True, None, noout, True, "dry run")):
+            with driver_from(src, ["--root", root] + extra) as (mod, d, L2):
+                d.dry = dry
+                if disabled:
+                    d.disabled_legs["selftest"] = disabled
+                steps: list = []
+                d.check_vectors(lambda n, ok, det: steps.append((n, ok, det)))
+                if not (len(steps) == 1 and steps[0][0] == "vectors" and steps[0][1] is want_ok and want_text in steps[0][2]):
+                    rows.append((label, steps))
+        c("vectors: the build step looks at vectors/out only when the selftest leg will read it (it is in the battery, was built, and the run is "
+          "not dry) and then refuses a missing one; every other case passes the step and says why it did not look", not rows, str(rows[:2]))
+    finally:
+        rmtree_force(tmp)
+    return out
+
+
+# -- KL-13: buildreal's scratch copy ------------------------------------------------------
+
+def copy_tracked(src_root: str, dst_root: str, rels=("host", "hw")) -> list:
+    """Copy into dst_root the files git TRACKS under `rels` of src_root, and nothing else: the list of what was copied. buildreal's scratch
+    repository was made with shutil.copytree and an ignore list of __pycache__, *.o, *.lo, *.a and *.so, which in a checkout where host/ is
+    built also took the executables and the generated build id, so `make` there found the tools up to date and cft-segrun's build id was
+    the checkout's, not the scratch repository's: two of its checks failed in every built tree, the gate's fresh clone after its earlier
+    stages among them (KL-13). A file git lists that is gone from the working tree is skipped."""
+    p = subprocess.run(["git", "-C", src_root, "ls-files", "-z", "--"] + list(rels), capture_output=True, timeout=120)
+    if p.returncode != 0:
+        raise RuntimeError("git ls-files: " + p.stderr.decode("utf-8", "replace")[-200:])
+    copied = []
+    for rel in (x.decode("utf-8", "surrogateescape") for x in p.stdout.split(b"\0") if x):
+        s = os.path.join(src_root, rel)
+        if not os.path.isfile(s):
+            continue
+        d = os.path.join(dst_root, rel)
+        os.makedirs(os.path.dirname(d), exist_ok=True)
+        shutil.copy2(s, d)
+        copied.append(rel)
+    return copied
+
+
+def copy_tracked_checks() -> list:
+    """KL-13: copy_tracked on a scratch repository that looks like a built checkout (built products, a generated header, objects and a
+    cache beside the tracked files, and a tracked file that is gone), and on this tree."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    tmp = tempfile.mkdtemp(prefix="cs-trk-")
+    try:
+        repo = make_scratch_repo(os.path.join(tmp, "repo"))
+        if repo is None:
+            skip("copy tracked", "git cannot make a scratch repository on this host")
+            return []
+        tracked = {"host/Makefile": b"all:\n", "host/src/a.c": b"int a;\n", "hw/run.sh": b"#!/bin/sh\n", "hw/sub/b.py": b"b = 1\n", "host/gone.c": b"x\n"}
+        for rel, data in tracked.items():
+            os.makedirs(os.path.dirname(os.path.join(repo, rel)), exist_ok=True)
+            with open(os.path.join(repo, rel), "wb") as fh:
+                fh.write(data)
+        os.chmod(os.path.join(repo, "hw/run.sh"), 0o755)
+        git_in(repo, "add", "-A")
+        git_in(repo, "commit", "-q", "-m", "tracked")
+        os.remove(os.path.join(repo, "host/gone.c"))
+        built = ["host/api-test", "host/cft-segrun", "host/gen/build_id.h", "host/libcft.a", "host/src/a.o", "hw/__pycache__/x.pyc", "hw/untracked.sh"]
+        for rel in built:
+            os.makedirs(os.path.dirname(os.path.join(repo, rel)), exist_ok=True)
+            with open(os.path.join(repo, rel), "wb") as fh:
+                fh.write(b"built\n")
+        dst = os.path.join(tmp, "dst")
+        copied = copy_tracked(repo, dst)
+        got = sorted(os.path.relpath(os.path.join(dp, f), dst).replace("\\", "/") for dp, _d, fs in os.walk(dst) for f in fs)
+        want = sorted(r for r in tracked if r != "host/gone.c")
+        c("copy tracked: of a scratch repository that looks built, only the files git tracks are copied - not the executables, the generated "
+          "build id, the objects and libraries, the cache or an untracked script - and a tracked file gone from the tree is skipped",
+          got == want and sorted(copied) == want, f"got {got}")
+        c("copy tracked: contents are the working tree's, and a tracked script keeps its execute bit",
+          all(open(os.path.join(dst, r), "rb").read() == tracked[r] for r in want)
+          and (not POSIX or os.access(os.path.join(dst, "hw/run.sh"), os.X_OK)), "")
+        dst2 = os.path.join(tmp, "dst2")
+        copied2 = copy_tracked(ROOT, dst2)
+        ls = git_out("ls-files", "--", "host", "hw")
+        listed = sorted(x for x in (ls or "").splitlines() if x and os.path.isfile(os.path.join(ROOT, x)))
+        got2 = sorted(os.path.relpath(os.path.join(dp, f), dst2).replace("\\", "/") for dp, _d, fs in os.walk(dst2) for f in fs)
+        old = os.path.join(tmp, "old")
+        shutil.copytree(os.path.join(repo, "host"), os.path.join(old, "host"), ignore=shutil.ignore_patterns("__pycache__", "*.o", "*.lo", "*.a", "*.so"))
+        took = sorted(os.path.relpath(os.path.join(dp, f), old).replace("\\", "/") for dp, _d, fs in os.walk(old) for f in fs)
+        c("copy tracked: the copy it replaces (copytree leaving out only __pycache__, *.o, *.lo, *.a and *.so) takes the built executables and the "
+          "generated build id of this same scratch repository - so the check above can fail", "host/api-test" in took and "host/gen/build_id.h" in took
+          and "host/libcft.a" not in took and "host/src/a.o" not in took, str(took))
+        c("copy tracked: of this tree, exactly what `git ls-files host hw` lists (%d files), built or not" % len(listed),
+          ls is not None and len(listed) > 100 and got2 == listed and sorted(copied2) == listed, f"{len(got2)} copied, {len(listed)} listed")
+    finally:
+        rmtree_force(tmp)
+    return out
 
 
 # ---------------------------------------------------------------------------------------
@@ -5331,7 +6046,7 @@ def plants(env: Env) -> None:
          lambda env, src: telemetry_order_checks(src),
          ["telemetry: a timer sample the run's stop reaches while it is in flight is dropped"]),
         ("the driver appends telemetry records in swapped pairs",
-         [("card_stress.py", "        self.rec(rec)\n        self.last_tel = rec\n",
+         [("card_stress.py", "        self.last_tel = self.rec(rec)      # the record as written: it carries the ts append_record stamped (the status line reads it)\n",
            "        held = getattr(self, '_held', None)\n        if held is None:\n            self._held = rec\n"
            "        else:\n            self.rec(rec)\n            self.rec(held)\n            self._held = None\n"
            "        self.last_tel = rec\n")],
@@ -5524,8 +6239,53 @@ def plants(env: Env) -> None:
          lambda env, src: scn_chunk(env, src),
          ["chunk run: every slice that passed carries the batch and chunk its tool said", "chunk run: the tools the sweep ran are the -c16384 ones"]),
         ("random scaleB is not held to the cases its BATCH gives",
-         [("card_stress.py", 'job["expected"] = it.random_cases(units, self.batch) if self.chunk else None', 'job["expected"] = None')],
+         [("card_stress.py", 'job["expected"] = it.random_cases(units, self.batch)\n', 'job["expected"] = None\n')],
          lambda env, src: scn_chunk(env, src), ["chunk run: a random scaleB slice is held to the cases its BATCH gives"]),
+        # -- parcel P5 (2026-10-22): the plants of KL-39, KL-32, KL-23, KL-42 and KL-44
+        ("the status file's telemetry line has no time (the kept record is the unstamped one)",
+         [("card_stress_lib.py", "            os.close(fd)\n    return rec\n",
+           "            os.close(fd)\n    return {k: v for k, v in rec.items() if k not in (\"ts\", \"epoch\")}\n")],
+         lambda env, src: telemetry_status_checks(src), ["telemetry status: the line begins with the sample's own time"]),
+        ("the status file's telemetry line names six values again",
+         [("card_stress_lib.py", "TELEMETRY_SHOWN = 12 ", "TELEMETRY_SHOWN = 6 ")],
+         lambda env, src: telemetry_status_checks(src), ["telemetry status: it names more than six values"]),
+        ("the report leaves the HBM temperature's zeros in its range",
+         [("card_stress_report.py", "                        zc[0] += 1\n                        continue\n", "                        zc[0] += 1\n")],
+         lambda env, src: hbm_report_checks(src), ["hbm report: and left out of the label's range"]),
+        ("the report counts no zero as no reading",
+         [("card_stress_lib.py", "    return (is_hbm_temperature(label) and isinstance(value, (int, float)) and not isinstance(value, bool) and value == 0)",
+           "    return False")],
+         lambda env, src: hbm_report_checks(src), ["hbm report: the zeros are counted by name"]),
+        ("a default run holds no random slice to its count",
+         [("card_stress.py", 'job["expected"] = it.random_cases(units, self.batch)\n', 'job["expected"] = it.random_cases(units, self.batch) if self.chunk else None\n')],
+         scn_random_short, ["random short div32-rne: the first slice came back one case short"]),
+        ("cvtfrom is held to three cases a count, not four",
+         [("card_stress_lib.py", '"cvtfrom32": (4, 0), "cvtfrom64": (4, 0),', '"cvtfrom32": (3, 0), "cvtfrom64": (3, 0),')],
+         lambda env, src: random_count_checks(src), ["random counts: for every random op but four"]),
+        ("the stand-in prints the count for every random op, as it did",
+         [("card_stress_standin.py", "    per = RANDOM_PER.get(op)\n    return count if per is None else count * per[0] + per[1]\n", "    return count\n")],
+         lambda env, src: random_count_checks(src), ["random counts: the stand-in's own table gives the library's figure"]),
+        ("a manifest whose commit has another rtl tree is accepted",
+         [("card_stress_lib.py", "    if rtl != checkout_rtl:\n", "    if False:\n")],
+         lambda env, src: manifest_judge_checks(src) + manifest_driver_checks(env, src) + scn_manifests(env, src),
+         ["manifest: the judgement, case by case", "manifest driver: a real run judges", "manifests B: the quad's manifest names a commit"]),
+        ("a manifest that is another image's is accepted",
+         [("card_stress_lib.py", "    if sha != image_sha:\n", "    if False:\n")],
+         lambda env, src: manifest_judge_checks(src) + manifest_driver_checks(env, src),
+         ["manifest: the judgement, case by case", "manifest driver: a real run judges"]),
+        ("a missing manifest stops the run (refused where it is flagged)",
+         [("card_stress_lib.py", 'MANIFEST_REFUSED = ("sha256_mismatch", "rtl_modified", "rtl_differs")',
+           'MANIFEST_REFUSED = ("sha256_mismatch", "rtl_modified", "rtl_differs", "missing")')],
+         lambda env, src: manifest_driver_checks(env, src), ["manifest driver: a real run judges", "manifest driver: a DRY run with no manifest"]),
+        ("the manifest check is left out of the build step",
+         [("card_stress.py", "            self.check_manifest(im, step)\n", "            pass\n")],
+         lambda env, src: scn_manifests(env, src), ["manifests B: the quad's manifest names a commit", "manifests A: ... a build step"]),
+        ("the build step does not look at vectors/out",
+         [("card_stress.py", "            problem = L.vectors_problem(self.root)\n", "            problem = None\n")],
+         lambda env, src: vectors_checks(env, src), ["vectors: the build step looks at vectors/out only when"]),
+        ("a file of vectors/out that differs from SHA256SUMS passes",
+         [("card_stress_lib.py", '        if got != want:\n            bad.append(f"{rel} (differs)")\n', '        if False:\n            bad.append(f"{rel} (differs)")\n')],
+         lambda env, src: vectors_checks(env, src), ["vectors: a file that differs from SHA256SUMS is refused by name"]),
         ("the build step does not build the chunked tools",
          [("card_stress.py", "        if self.chunk:\n            # --sweep-chunk N: the sweep's slices run the tools built at pass size N",
            "        if False:\n            # --sweep-chunk N: the sweep's slices run the tools built at pass size N")],

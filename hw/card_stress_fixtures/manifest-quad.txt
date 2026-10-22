@@ -1,0 +1,50 @@
+artifact:      cft_hw.xclbin
+sha256:        4f9921a25af65444abc5c267fff1117a8e14abbc16a75de643e43c9dbf6ef53b
+bytes:         51714554
+built:         2026-10-06T07:53:26-07:00
+started:       2026-10-06T01:13:31-07:00
+host:          amd-arc-box
+commit:        688b6530e3af18f1de1d82888a8fc8875b1787f4
+describe:      688b653
+tree:          clean
+bitstream_sources: rtl/ and hw/ identical to 688b6530e3af18f1de1d82888a8fc8875b1787f4
+target:        hw
+platform:      xilinx_u50_gen3x16_xdma_5_202210_1
+part:          xcu50-fsvh2104-2-e
+link_cfg:      hw/link_quad.cfg
+kernel_freq:   135000000
+retiming:      1
+retimed_runs:  cft_krnl_1 cft_krnl_2 cft_krnl_3 cft_krnl_4
+place_directive: ExtraTimingOpt
+route_directive: AggressiveExplore
+phys_opt:      1
+vpp_props:     run.ulp_cft_krnl_2_0_synth_1.{STEPS.SYNTH_DESIGN.ARGS.RETIMING}=true run.ulp_cft_krnl_3_0_synth_1.{STEPS.SYNTH_DESIGN.ARGS.RETIMING}=true run.ulp_cft_krnl_4_0_synth_1.{STEPS.SYNTH_DESIGN.ARGS.RETIMING}=true
+generics:      EN_AUGADD=0 SEQ_SCRATCH_D=4096
+  hdlparam:    EN_FP32 = "1"
+  hdlparam:    EN_FP64 = "1"
+  hdlparam:    EN_FP128 = "1"
+  hdlparam:    EN_FP256 = "1"
+  hdlparam:    EN_WIDE = "1"
+  hdlparam:    BEAT_BITS = 256
+  hdlparam:    FUSE_MUL = "0"
+  hdlparam:    FUSE_NORM = "0"
+  hdlparam:    FUSE_ALIGN = "0"
+  hdlparam:    MUL_PASSES = 1
+  hdlparam:    BURST_LOG2 = 4
+  hdlparam:    AR_DEPTH = 16
+  hdlparam:    AW_DEPTH = 16
+  hdlparam:    FIFO_LOG2 = 9
+  hdlparam:    SEQ_MAXD = 1024
+  hdlparam:    SEQ_IMEM_D = 4096
+  hdlparam:    SEQ_SCRATCH_D = 4096
+  hdlparam:    SEQ_STREAM_D = 16777216
+  hdlparam:    EN_AUGADD = "0"
+clock_cus:     cft_krnl_1.cft_krnl_2.cft_krnl_3.cft_krnl_4
+clock_arg:     135000000:cft_krnl_1.ap_clk,cft_krnl_2.ap_clk,cft_krnl_3.ap_clk,cft_krnl_4.ap_clk
+vivado:        Vivado v2022.2 (64-bit)
+timing_report:  hw_bb_locked_timing_summary_postroute_physopted.rpt
+routed_wns_ns: 0.018   # whole design, shell included
+kernel_clock:  clk_out1_ulp_clk_wiz_0
+kernel_wns_ns: 0.048   # THIS is the design's margin
+kernel_failing_endpoints: 0 of 649690
+final_clocks:  kernel:1:ulp_ucs/aclk_kernel_01:500.0 kernel:0:ulp_ucs/aclk_kernel_00:300.0 system::hbm_aclk:450.0 

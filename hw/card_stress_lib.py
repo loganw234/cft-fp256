@@ -553,6 +553,26 @@ DEFAULT_BATCH = 4096
 # operands makes n x len cases and takes that many off the slice's count, so the cases of a slice are its count rounded UP by
 # whole batches - and which whole batches depends on BATCH (CK's finding i: `scaleb32 100000 5 rne` 139,264 cases at 4096, 278,528 at 16384).
 SCALEB_LIST = {"scaleb32": 17, "scaleb64": 27}
+# The cases every OTHER random op's tool prints for a slice of `count`: (cases a count, cases added to every slice), so that a random slice
+# is held to what it was asked for (KL-23, 2026-10-22; before it, only random scaleB under --sweep-chunk was, and a tool that stopped short
+# still counted as covered if it printed one case). READ in host/tools/divsqrt_soak.c (soak_random and run_batch: `cases += n` a batch of n
+# operands) and host/tools/clause5_soak.c (each drv_* and its batch function: `cases += n`; drv_cvtfrom runs cvtfrom_check, which adds n,
+# for each of four source types, so 4 a count; drv_next64 runs next_edges64 first, eight cases), and MEASURED with those tools as built at
+# f707fa3b on the software backend, at counts 1, 4095, 4096, 4097, 10000 and 20000 (hw/card_stress_fixtures/rnd-*.txt keeps one log of each,
+# and the suite holds this table to them). None of these depends on BATCH (scaleB's does, above).
+RANDOM_CASES = {
+    "div32": (1, 0), "div64": (1, 0), "sqrt64": (1, 0),
+    "rint64": (1, 0), "conv64to32": (1, 0), "conv32to64": (1, 0), "rem32": (1, 0), "rem64": (1, 0), "logb64": (1, 0), "class64": (1, 0),
+    "cvtfrom32": (4, 0), "cvtfrom64": (4, 0),
+    "nextup64": (1, 8), "nextdown64": (1, 8),
+}
+# The random ops whose cases are NOT held to a count, by name: drv_cvtto adds, for each of four integer targets, the lanes of the batch that
+# are in the target's range (`cases += m`), so the cases are a function of the draws - 2.3 a count for cvtto32 and 2.0 for cvtto64 in the
+# measurement above, 4 for a count of 1. The tool also prints "  skipped N lane-target pairs outside the target range" for the other lanes, and
+# cases + skipped is 4 x count (MEASURED: 22,865 + 17,135 and 20,150 + 19,850 at a count of 10,000: hw/card_stress_fixtures/rnd-cvtto*.txt), which
+# would hold them. parse_soak does not read that line (it is an import of the scheduler's runner, and reading it takes a new parameter), so
+# they keep the rule they had - more than zero cases - and this is a known limit, not a figure. See docs/CARDDAY.md.
+RANDOM_CASES_DRAWN = ("cvtto32", "cvtto64")
 
 # WHERE EACH SOAK'S WORK RUNS: on the tile or on the host. The campaign's items are not all tests of
 # the card. From the library's own classification, host/include/cft.h ("The remaining clause-5
@@ -692,14 +712,19 @@ class Item:
         return None
 
     def random_cases(self, count: int, batch: int) -> Optional[int]:
-        """The cases a RANDOM slice of `count` prints where the tool's counting is known: random scaleB (scaleb32, scaleb64)
+        """The cases a RANDOM slice of `count` prints where the tool's counting is known. Random scaleB (scaleb32, scaleb64)
         runs batches of n = min(remaining, BATCH) operands against its exponent list and takes n x len(list) off the count, so a
         slice's cases are the count rounded up by whole batches, and which batches depends on BATCH. Exactly what drv_scaleb does
         (host/tools/clause5_soak.c), held to the real tool's own lines in the suite (139,264 at 4096 and 278,528 at 16384 for
-        100,000). None for every other random op, whose cases are not held to a count here (the driver has never held them)."""
-        ln = SCALEB_LIST.get(self.op) if self.kind == "random" else None
-        if ln is None or count < 1 or batch < 1:
+        100,000). Every other random op but two is a multiple of the count, plus a constant (RANDOM_CASES above: the count itself for
+        most, 4 x count for cvtfrom32 and cvtfrom64, count + 8 for nextup64 and nextdown64), the same at any BATCH. None for cvtto32
+        and cvtto64 (RANDOM_CASES_DRAWN: the draws set their cases), for an exhaustive item, and for a count or a batch below 1."""
+        if self.kind != "random" or count < 1 or batch < 1:
             return None
+        ln = SCALEB_LIST.get(self.op)
+        if ln is None:
+            per = RANDOM_CASES.get(self.op)
+            return None if per is None else count * per[0] + per[1]
         total, left = 0, count
         while left > 0:
             n = min(left, batch)
@@ -884,9 +909,12 @@ def first_gap(iv: Iterable[Tuple[int, int]], total: int = EXH) -> Optional[Tuple
 _APPEND_LOCK = threading.Lock()
 
 
-def append_record(path: str, rec: Dict[str, Any]) -> None:
+def append_record(path: str, rec: Dict[str, Any]) -> Dict[str, Any]:
     """One whole line in one write on an O_APPEND descriptor, so a reader sees a
-    record or none; then fsync (a few records a minute at most)."""
+    record or none; then fsync (a few records a minute at most). Returns the record AS WRITTEN: the
+    caller's `rec` is copied and the copy is stamped (v, ts, epoch), so a caller that keeps what it
+    appended and reads its time back from it (the status file's telemetry line did, and printed
+    None, until 2026-10-22: KL-39) keeps this one."""
     rec = dict(rec)
     rec.setdefault("v", 1)
     with _APPEND_LOCK:
@@ -900,6 +928,7 @@ def append_record(path: str, rec: Dict[str, Any]) -> None:
             os.fsync(fd)
         finally:
             os.close(fd)
+    return rec
 
 
 def read_records(path: str) -> Tuple[List[Dict[str, Any]], bool, List[int]]:
@@ -1250,6 +1279,51 @@ def parse_telemetry(text: str) -> Dict[str, float]:
     return out
 
 
+# A reading that means "no reading" (KL-32, 2026-10-22). The U50's FPGA HBM temperature, in xbutil's thermal report
+# (`thermal.devices[0].thermals.FPGA HBM.temp_C`), reads 0 in most samples: 670 of the 865 of the 2026-10-19 long run, in runs of
+# 7 to 45 samples at a time between runs of readings from 27 to 35 (MEASURED in that run's metrics.jsonl). A stack of HBM at 0 degrees
+# on a powered card is not a temperature, so a 0 here is taken as the sensor giving none (BELIEVED: the cause is not known, and the
+# reading is not documented); it is left out of the report's range for the label and the status file says so beside it. Only this
+# label: the rails that read a flat 0 in EVERY sample of a run (19 of the 40 labels that run's report showed) are not a mixture of
+# readings and none, and stay in as they were.
+def is_hbm_temperature(label: Any) -> bool:
+    """The label of an HBM temperature in the thermal report, as parse_telemetry keys it: `thermal.` + the sensor's path, with
+    `HBM` and `temp` in it (not the HBM rail's voltage and current, which are `electrical.`)."""
+    return isinstance(label, str) and label.startswith("thermal.") and "HBM" in label and "temp" in label.lower()
+
+
+def no_reading(label: Any, value: Any) -> bool:
+    """True for a reading that is the sensor's 'none': an HBM temperature of exactly 0."""
+    return (is_hbm_temperature(label) and isinstance(value, (int, float)) and not isinstance(value, bool) and value == 0)
+
+
+TELEMETRY_SHOWN = 12        # values the status file's telemetry line names; the rest are counted
+
+
+def telemetry_line(rec: Dict[str, Any]) -> str:
+    """The status file's telemetry line for a sample's record (KL-39, 2026-10-22; Logan reads it each morning). It carried None for the
+    time and the first six values of the record, which were the first report's rails; it now has the sample's own time (the record is the
+    one append_record stamped), what took it (`when`, the image), and up to TELEMETRY_SHOWN values - the thermal report's first (the
+    temperatures), then the power the card draws, then the rest in the record's order - with the count of those left out, and an HBM
+    temperature of 0 marked as no reading. A sample with no values says so and why, as before."""
+    vals = rec.get("values") if isinstance(rec.get("values"), dict) else {}
+    ts = rec.get("ts") if isinstance(rec.get("ts"), str) and rec.get("ts") else "time not recorded"
+    how = ", ".join(str(x) for x in (rec.get("when"), rec.get("image")) if isinstance(x, str) and x)
+    head = f"telemetry  {ts}{' (' + how + ')' if how else ''}: "
+    if not vals:
+        err = rec.get("error")
+        return head + "no values parsed" + (f" ({err})" if err else "")
+
+    def rank(kv: Tuple[int, Tuple[str, Any]]) -> Tuple[int, int]:
+        label = kv[1][0]
+        return (0 if label.startswith("thermal.") else 1 if "power_consumption" in label else 2, kv[0])
+
+    chosen = [kv for _i, kv in sorted(enumerate(vals.items()), key=rank)][:TELEMETRY_SHOWN]
+    parts = [f"{k}={x}" + (" (no reading)" if no_reading(k, x) else "") for k, x in chosen]
+    left = len(vals) - len(chosen)
+    return head + "; ".join(parts) + (f"; {left} more value(s) in metrics.jsonl" if left else "")
+
+
 def host_sample(paths: Iterable[str]) -> Dict[str, Any]:
     """Load, memory and free disk, where the host reports them (Linux's /proc; elsewhere
     those fields are simply absent, never zero)."""
@@ -1278,6 +1352,208 @@ def host_sample(paths: Iterable[str]) -> Dict[str, Any]:
     if free:
         h["disk_free_gb"] = free
     return h
+
+
+# ---------------------------------------------------------------------------
+# an image's manifest, held to the image and to the checkout (KL-42, 2026-10-22)
+# ---------------------------------------------------------------------------
+# Coverage is filed under the RTL tree of the checkout the driver runs from (tree.rtl = `git rev-parse HEAD:rtl`), which is the tree
+# the images were built from only if the operator ran from the checkout they were built from; the driver never read the manifest
+# hw/rebuild-2022.sh writes beside each xclbin, so nothing said when that was wrong. judge_manifest reads it: what the manifest says
+# (its sha256, its commit, whether rtl/ was that commit's) is held to the image's own SHA-256 and to the checkout's rtl tree, and
+# the verdict is a state, recorded in run_start beside the image's SHA-256. The key coverage is filed by does not change.
+#
+#   ok               the manifest is the image's, its commit is in this checkout, rtl/ was that commit's when the image was built, and the
+#                    commit's rtl tree is this checkout's: per-tree coverage is true of this image
+#   dry_run          no manifest, in a dry run: its stand-in images are built from nothing. Neutral, and not looked for again
+#   missing          NO manifest beside the image: FLAGGED, not refused - nothing is wrong that the driver can see, only unchecked, and
+#                    a night's run is not lost to a file left behind in a copy (the image's SHA-256 is still held to SHA256SUMS)
+#   commit_unknown   the manifest names no whole commit, or one this checkout does not hold (or which has no rtl/): FLAGGED for the
+#                    same reason - a shallow clone cannot show a difference, and a difference it cannot show is not one
+#   unverified       FLAGGED: the manifest does not say whether rtl/ was its commit's (no bitstream_sources: and no tree: line), or
+#                    this checkout's own rtl tree cannot be read
+#   sha256_mismatch  REFUSED: the manifest has no sha256 of 64 hex digits, or another image's: it is not this image's manifest
+#   rtl_modified     REFUSED: the manifest says rtl/ was not its commit's when it was built (bitstream_sources: MODIFIED, naming a file
+#                    under rtl/; or a DIRTY tree with no scoped line): the image is of no tree any checkout has
+#   rtl_differs      REFUSED: the commit's rtl tree is not this checkout's: every tile slice would be filed under a tree the image is not
+# A refusal is a certain wrong answer; a flag is an absence. hw/rebuild-2022.sh's `bitstream_sources:` is scoped to rtl/ and hw/, so
+# MODIFIED naming only hw/ files leaves the rtl tree the commit's: that is judged on the trees (state ok, the files said in `why`).
+MANIFEST_SUFFIX = ".manifest.txt"
+MANIFEST_REFUSED = ("sha256_mismatch", "rtl_modified", "rtl_differs")
+MANIFEST_FLAGGED = ("missing", "commit_unknown", "unverified")
+SHA256_HEX = re.compile(r"[0-9a-f]{64}")
+_MANIFEST_KEY = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*):[ \t]*(.*?)[ \t]*$")
+MANIFEST_SOURCES_MAX = 300           # characters of `bitstream_sources:` kept in a record (a MODIFIED line lists files)
+
+
+def manifest_path(image_path: str) -> str:
+    """The manifest beside an image: `<name>.manifest.txt` for `<name>.xclbin` (hw/rebuild-2022.sh writes cft_<target>.manifest.txt
+    beside cft_<target>.xclbin, and a staged pair keeps the pair of names). Its `artifact:` line names the build's own file name
+    (cft_hw.xclbin), not the staged one, so the name is not what ties the two: the `sha256:` line is."""
+    base, ext = os.path.splitext(image_path)
+    return (base if ext.lower() == ".xclbin" else image_path) + MANIFEST_SUFFIX
+
+
+def parse_manifest(text: str) -> Dict[str, str]:
+    """The top-level `key: value` lines of a manifest, the first of a key winning. An indented line (a `hdlparam:` under `generics:`)
+    belongs to the key above it and is not read."""
+    out: Dict[str, str] = {}
+    for ln in text.splitlines():
+        m = _MANIFEST_KEY.match(ln)
+        if m and m.group(1) not in out:
+            out[m.group(1)] = m.group(2)
+    return out
+
+
+def judge_manifest(text: Optional[str], image_sha: str, checkout_rtl: Optional[str],
+                   rtl_of: Callable[[str], Optional[str]], dry: bool = False) -> Dict[str, Any]:
+    """The verdict on one image's manifest (the states are above). text: the manifest's text, None when there is none; image_sha: the
+    image's own SHA-256; checkout_rtl: this checkout's `HEAD:rtl` tree (None where git cannot say); rtl_of(commit): the rtl tree of a
+    commit in this checkout, None where it does not hold the commit. Returns the dict run_start records as the image's `manifest` (the
+    caller adds `file`): state, refuse (a refusal), why (one sentence naming the state), and what the manifest said - sha256, commit,
+    tree, sources - and rtl, the commit's rtl tree where it was found. Never raises on a manifest's content."""
+    r: Dict[str, Any] = {"state": "", "refuse": False, "why": "", "sha256": None, "commit": None, "rtl": None,
+                         "tree": None, "sources": None}
+
+    def done(state: str, why: str) -> Dict[str, Any]:
+        r["state"], r["why"], r["refuse"] = state, why, state in MANIFEST_REFUSED
+        return r
+
+    if text is None:
+        return (done("dry_run", "a dry run's stand-in image is built from no commit, so it has no manifest")
+                if dry else done("missing", "no manifest beside the image, so the tree it was built from is not checked: per-tree coverage "
+                                            "is true of this image only if this checkout's rtl/ is the one it was built from"))
+    f = parse_manifest(text)
+    sha = (f.get("sha256") or "").lower()
+    r["sha256"] = sha or None
+    r["commit"] = f.get("commit") or None
+    r["tree"] = f.get("tree") or None
+    src = f.get("bitstream_sources") or ""
+    r["sources"] = src[:MANIFEST_SOURCES_MAX] or None
+    if not SHA256_HEX.fullmatch(sha):
+        return done("sha256_mismatch", f"its manifest has no sha256 of 64 hex digits (it says {sha[:20]!r}), so it cannot be shown to be this image's")
+    if sha != image_sha:
+        return done("sha256_mismatch", f"its manifest says sha256 {sha[:16]}..., the image hashes to {image_sha[:16]}...: "
+                                       f"it is another image's manifest")
+    # did the build see this commit's rtl/? hw/rebuild-2022.sh's bitstream_sources is scoped to rtl/ and hw/; an older manifest has only
+    # the whole tree's flag. True: yes; False: no; None: the manifest does not say.
+    hw_note = ""
+    same: Optional[bool] = None
+    if src.startswith("rtl/ and hw/ identical to"):
+        same = True
+    elif src.startswith("MODIFIED"):
+        files = src.rsplit(":", 1)[1].split() if ":" in src else []
+        under_rtl = [x for x in files if x.startswith("rtl/")]
+        same = bool(files) and not under_rtl
+        if same:
+            hw_note = f" (its hw/ differed from the commit's in {len(files)} file(s), which the rtl tree does not see)"
+        else:
+            return done("rtl_modified", "its manifest says rtl/ was modified when the image was built (" + (src[:160] or "no detail")
+                        + "): the image is of no tree any checkout has")
+    elif not src:
+        tr = (f.get("tree") or "").strip().lower()
+        if tr == "clean":
+            same = True                          # a manifest from before the scoped line: a clean whole tree has a clean rtl/
+        elif tr.startswith("dirty"):
+            return done("rtl_modified", "its manifest says the tree was DIRTY and has no bitstream_sources: line to say rtl/ was not "
+                                        "what changed: the image is of no tree any checkout has")
+    if same is None:
+        return done("unverified", "its manifest does not say whether rtl/ was its commit's (no bitstream_sources: line, and a tree: "
+                                  "line that is neither clean nor DIRTY), so its commit's rtl tree is not known to be the image's")
+    commit = r["commit"] or ""
+    if not GIT_HASH.fullmatch(commit):
+        return done("commit_unknown", f"its manifest names no whole commit (commit: {commit[:20]!r}), so its rtl tree cannot be read")
+    rtl = rtl_of(commit)
+    if rtl is None:
+        return done("commit_unknown", f"its manifest names commit {commit[:12]}, which this checkout does not hold (or which has no rtl/): "
+                                      f"a shallow clone cannot show whether rtl/ differs")
+    r["rtl"] = rtl
+    if not checkout_rtl:
+        return done("unverified", "this checkout's own rtl tree cannot be read (git), so it cannot be compared with the image's")
+    if rtl != checkout_rtl:
+        return done("rtl_differs", f"the image was built at commit {commit[:12]} whose rtl tree is {rtl[:12]}; this checkout's is "
+                                   f"{checkout_rtl[:12]}: tile slices would be filed under a tree the image is not")
+    return done("ok", f"built at commit {commit[:12]}, whose rtl tree {rtl[:12]} is this checkout's" + hw_note)
+
+
+def manifest_step(name: str, mf: Dict[str, Any]) -> Tuple[bool, str]:
+    """(ok, detail) of an image's `manifest` build step: a refusal is not ok; a flag is ok and says it was NOT CHECKED, by state."""
+    st = mf.get("state") or "?"
+    if mf.get("refuse"):
+        return False, f"{st}: {mf.get('why')}. REFUSED: the run does not start (the manifest is {mf.get('file')})"
+    if st in MANIFEST_FLAGGED:
+        return True, f"{st}: NOT CHECKED, flagged and the run goes on: {mf.get('why')}"
+    return True, f"{st}: {mf.get('why')}"
+
+
+def manifest_brief(mf: Dict[str, Any]) -> str:
+    """One image's manifest in a few words, for the status file and the report's header."""
+    st = mf.get("state") or "?"
+    if st == "ok":
+        return f"built at {str(mf.get('commit'))[:12]}, rtl {str(mf.get('rtl'))[:12]} (this checkout's)"
+    if st == "dry_run":
+        return "no manifest (dry run)"
+    if st in MANIFEST_FLAGGED:
+        return f"NOT CHECKED ({st})"
+    return f"REFUSED ({st})"
+
+
+# ---------------------------------------------------------------------------
+# vectors/out, which the selftest leg reads (KL-44, 2026-10-22)
+# ---------------------------------------------------------------------------
+_VECTOR_LINE = re.compile(r"^([0-9a-fA-F]{64})[ \t]+\*?(.+?)[ \t]*$")
+
+
+def file_sha256(path: str) -> str:
+    import hashlib
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for b in iter(lambda: fh.read(1 << 20), b""):
+            h.update(b)
+    return h.hexdigest()
+
+
+def vectors_problem(root: str) -> Optional[str]:
+    """None when `vectors/out` is there and every file `vectors/SHA256SUMS` lists holds to it (what `cd vectors && sha256sum -c --quiet
+    SHA256SUMS` says); else the refusal's text, which begins with its name and says `make vectors`. The selftest leg runs
+    `cft-selftest vectors/out IMAGE` every third visit of each image; on a clean clone vectors/out is not there (it is generated, and
+    untracked), and until 2026-10-22 the driver neither checked nor made it, so that leg failed at every one of those visits (KL-44)."""
+    vec = os.path.join(root, "vectors")
+    fix = "run `make vectors` (docs/CARDDAY.md)"
+    if not os.path.isdir(os.path.join(vec, "out")):
+        return (f"vectors_out_missing: vectors/out is not there, and the selftest leg (cft-selftest vectors/out IMAGE) would fail at "
+                f"every third visit of each image; {fix}")
+    try:
+        with open(os.path.join(vec, "SHA256SUMS"), "r", encoding="utf-8", errors="replace") as fh:
+            lines = [ln for ln in fh.read().splitlines() if ln.strip()]
+    except OSError as e:
+        return f"vectors_out_unheld: vectors/SHA256SUMS cannot be read ({e}), so vectors/out cannot be held to it; it is a tracked file"
+    entries: List[Tuple[str, str]] = []
+    for ln in lines:
+        m = _VECTOR_LINE.match(ln)
+        if not m:
+            return f"vectors_out_unheld: vectors/SHA256SUMS has a line that is not '<sha256>  <path>': {ln[:60]!r}"
+        entries.append((m.group(1).lower(), m.group(2)))
+    if not entries:
+        return "vectors_out_unheld: vectors/SHA256SUMS lists no file, so vectors/out is held to nothing"
+    bad: List[str] = []
+    top = os.path.normpath(vec) + os.sep
+    for want, rel in entries:
+        p = os.path.normpath(os.path.join(vec, rel))
+        if not p.startswith(top):
+            bad.append(f"{rel} (outside vectors/)")
+            continue
+        try:
+            got = file_sha256(p)
+        except OSError:
+            bad.append(f"{rel} (missing)")
+            continue
+        if got != want:
+            bad.append(f"{rel} (differs)")
+    if bad:
+        return (f"vectors_out_mismatch: {len(bad)} of the {len(entries)} files vectors/SHA256SUMS lists are missing or differ in "
+                f"vectors/out (first: {', '.join(bad[:3])}); {fix}")
+    return None
 
 
 # ---------------------------------------------------------------------------

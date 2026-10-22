@@ -73,6 +73,15 @@ sample, with `run_start`, `build`, `cycle_start`, `cycle_end`, `event` and `run_
 leg. A count in a record is a captured group of a line a pattern matched, or it is absent; a log
 a pattern cannot read is a `parse_error` leg, kept whole. Nothing is defaulted to 0.
 
+THE START. Before any leg: the guard, then run_start (the checkout's tree, and each image's SHA-256 with what its manifest says, below), then
+the build step, which refuses by name and exits 3 - the tree and the tools (make, ldd, the build id), vectors/out when the selftest leg will read
+it (missing, or not holding to vectors/SHA256SUMS: `make vectors`), each image's SHA-256 against its SHA256SUMS and the hash given, and each
+image's manifest, `<name>.manifest.txt` beside `<name>.xclbin`: one that is not the image's (its sha256 line), or whose commit's rtl tree is not
+this checkout's (or says rtl/ was modified), is REFUSED; one that is missing, or names a commit this checkout does not hold, is FLAGGED - named
+in the step, in an event (image_manifest_unchecked), in status.txt and in the report, and the run goes on, because a night is not lost to a
+file left behind in a copy and a difference that cannot be shown is not one. What coverage is keyed by does not change (tree.rtl, the checkout's):
+the manifest is what says whether that is true of the images. A dry run's stand-in images have no manifest and say so, quietly.
+
 FAILURE POLICY. A failing leg keeps its whole log and the run goes on. The card not answering
 (a no-device open, a tile left poisoned, or a hang past the leg's timeout) is retried after a
 pause; the second consecutive time the driver opens another image and comes back; after
@@ -243,6 +252,7 @@ class Image:
         self.want_sha = want_sha
         self.sha = ""
         self.bytes = 0
+        self.manifest: Optional[Dict[str, Any]] = None     # the verdict on the manifest beside it (L.judge_manifest), read at the start
 
 
 class ProcResult:
@@ -740,10 +750,12 @@ class Driver:
             except OSError:
                 pass
 
-    def rec(self, rec: Dict[str, Any]) -> None:
-        L.append_record(self.metrics, rec)
+    def rec(self, rec: Dict[str, Any]) -> Dict[str, Any]:
+        """Append a record; returns it as written (stamped with v, ts and epoch), for a caller that keeps it."""
+        written = L.append_record(self.metrics, rec)
         if self.sink is not None:
             self.sink.feed(rec)       # AFTER the append: a record the exporter refuses is in metrics.jsonl all the same
+        return written
 
     def event(self, name: str, detail: str = "", **kw: Any) -> None:
         self.say(f"event {name}: {detail}")
@@ -1568,9 +1580,11 @@ class Driver:
                                        f"{f' at batch {self.batch}' if it.layout_dependent else ''}, which "
                                        f"{prior[0]} slice {prior[1]} already started from; its draws would repeat")
                 job.update(count=units, seed=seed, seed_n=n)
-                # a chunked run holds a random scaleB slice to the cases its BATCH gives (CK's finding i: the count rounded up by
-                # whole batches); the default run has never held a random slice to a count, and does not now
-                job["expected"] = it.random_cases(units, self.batch) if self.chunk else None
+                # a random slice is held to the cases its tool prints for the count asked (Item.random_cases): the count rounded up by
+                # whole batches for random scaleB (CK's finding i, which depends on BATCH: self.batch is the chunked tools' pass size,
+                # or the default tools' 4096), a multiple of the count for the others, None for the two whose cases the draws set.
+                # Until 2026-10-22 (KL-23) only a chunked run's scaleB was held, and a tool that stopped short counted as covered
+                job["expected"] = it.random_cases(units, self.batch)
                 job["cover"] = None
                 job["argv"] = it.argv(self.soak_binary(it), count=units, seed=seed)
                 job["sweep"] = {"item": it.name, "tool": it.tool, "op": it.op, "mode": it.mode,
@@ -2100,8 +2114,7 @@ class Driver:
                "when": when, "ok": bool(values), "values": values or None, "host": host or None,
                "raw": (" | ".join(raws)[:1200] if not values else None),
                "error": ("; ".join(errors)[:500] if errors else None)}
-        self.rec(rec)
-        self.last_tel = rec
+        self.last_tel = self.rec(rec)      # the record as written: it carries the ts append_record stamped (the status line reads it)
 
     def tel_tool(self) -> str:
         t = self.a.telemetry_tool
@@ -2164,11 +2177,11 @@ class Driver:
             lines.append(f"card       consecutive failures {self.streak} of {self.a.max_card_failures}")
             if self.beside:
                 lines.append("beside     " + "; ".join(f"verify/run.sh pid {b['pid']}" for b in self.beside))
+            judged = [f"{n} {L.manifest_brief(im.manifest)}" for n, im in self.images.items() if im.manifest]
+            if judged:
+                lines.append("images     " + "; ".join(judged))
             if self.last_tel:
-                v = self.last_tel.get("values") or {}
-                key = [f"{k}={x}" for k, x in list(v.items())[:6]]
-                lines.append(f"telemetry  {self.last_tel.get('ts')}: " + ("; ".join(key) if key else
-                             "no values parsed" + (f" ({self.last_tel.get('error')})" if self.last_tel.get("error") else "")))
+                lines.append(L.telemetry_line(self.last_tel))
                 h = self.last_tel.get("host") or {}
                 if h:
                     lines.append(f"host       {h}")
@@ -2231,6 +2244,29 @@ class Driver:
                 im.sha, im.bytes = sha256_file(im.path)
             except OSError as e:
                 self.say(f"image {im.name}: cannot read {im.path}: {e}")
+                continue
+            im.manifest = self.read_manifest(im)
+
+    def read_manifest(self, im: Image) -> Dict[str, Any]:
+        """The manifest beside an image, held to the image and to this checkout (L.judge_manifest; KL-42): recorded in run_start beside the
+        image's SHA-256 as `manifest` - its state, what it said (sha256, commit, tree, bitstream_sources), the rtl tree of its commit in
+        this checkout, and the file's name. The build step turns a refusal into a stop and a flag into a named 'NOT CHECKED'. The
+        coverage key is not touched: it stays tree.rtl, the checkout's."""
+        path = L.manifest_path(im.path)
+        text: Optional[str] = None
+        unreadable = ""
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as fh:
+                text = fh.read()
+        except FileNotFoundError:
+            pass
+        except OSError as e:
+            unreadable = f"{os.path.basename(path)} cannot be read ({e}); "
+        mf = L.judge_manifest(text, im.sha, self.tree.get("rtl") or None, lambda c: self.git_tree(c, "rtl"), dry=self.dry)
+        mf["file"] = os.path.basename(path)
+        if unreadable:
+            mf["why"] = unreadable + mf["why"]
+        return mf
 
     def tree_facts(self) -> Dict[str, Any]:
         """What the report keys a slice's coverage by, recorded in run_start (docs/CARDDAY.md, "The long run"):
@@ -2292,6 +2328,7 @@ class Driver:
             step("tools", True, "dry run: no make, no ldd, no XRT (the stand-ins replace every command)")
         else:
             self.build_tools(step)
+        self.check_vectors(step)
         # 5. the images, held to SHA256SUMS beside each and to the hash this driver was given
         for im in self.images.values():
             if not im.sha:
@@ -2319,9 +2356,36 @@ class Driver:
             elif good and im.want_sha:
                 why += ", equal to the hash given"
             step(f"image {im.name}", good, why)
+            self.check_manifest(im, step)
         self.rec({"type": "build", "ok": ok, "steps": steps})
         if not ok:
             raise Stop("build_failed", 3, "; ".join(f"{s['name']}: {s['detail']}" for s in steps if not s["ok"]))
+
+    def check_manifest(self, im: Image, step: Callable[[str, bool, str], None]) -> None:
+        """The build step of an image's manifest (KL-42; read_manifest judged it at the start and run_start recorded it): a refusal fails
+        the step, which stops the run before any leg (build_failed, exit 3); a flag is a step that is ok and says NOT CHECKED, by state,
+        and an event image_manifest_unchecked, and the run goes on. A dry run's stand-in image has none, and nothing is said."""
+        if not im.manifest:
+            return
+        mok, mdetail = L.manifest_step(im.name, im.manifest)
+        step(f"manifest {im.name}", mok, mdetail)
+        if im.manifest.get("state") in L.MANIFEST_FLAGGED:
+            self.event("image_manifest_unchecked", f"{im.name}: {mdetail}", image=im.name, state=im.manifest.get("state"))
+
+    def check_vectors(self, step: Callable[[str, bool, str], None]) -> None:
+        """vectors/out, which the selftest leg reads (KL-44): refused at the start, by name, when it is missing or does not hold to
+        vectors/SHA256SUMS (L.vectors_problem), instead of failing that leg at every third visit of each image on a clean clone. Not
+        looked at, and the step says why, when nothing of this run reads it: the leg is not in the battery, its tool was not built
+        or does not link XRT (disabled_legs, set by build_tools, which has run), or this is a dry run (the stand-ins read no files)."""
+        if "selftest" not in self.battery:
+            step("vectors", True, "not checked: the selftest leg is not in this run's battery")
+        elif "selftest" in self.disabled_legs:
+            step("vectors", True, f"not checked: the selftest leg is disabled ({self.disabled_legs['selftest']})")
+        elif self.dry:
+            step("vectors", True, "not checked: a dry run's stand-ins read no vectors/out")
+        else:
+            problem = L.vectors_problem(self.root)
+            step("vectors", problem is None, problem or "vectors/out is there and every file vectors/SHA256SUMS lists holds to it")
 
     def run_quiet(self, argv: List[str], timeout: float, cwd: Optional[str] = None,
                   env: Optional[Dict[str, str]] = None) -> Tuple[int, str]:
@@ -2604,7 +2668,7 @@ class Driver:
                       "earlier_runs": ({"dirs": self.earlier_notes, "first_n": self.seed_floor}
                                        if self.earlier_notes else None),
                       "images": {n: {"sha256": i.sha, "bytes": i.bytes, "tiles": i.tiles, "path": i.path,
-                                     "target": i.target} for n, i in self.images.items()},
+                                     "target": i.target, "manifest": i.manifest} for n, i in self.images.items()},
                       "deadline": L.iso(self.deadline) if self.deadline else None, "resumed": resumed})
             self.started = True
             if self.torn_note:

@@ -162,7 +162,7 @@ BUDGET=""
 # and the two browser replays; on the WSL distro the replay stages take
 # seconds.
 BUDGET_QUICK=docs,generated,buildargs,sweepjudge,innerskips,ensurevectors,selfcheck,divsqrt,clause5,character,augmented,status96,formatof,diff,seq,programs,lang,reduce,photograph,bindings,lang-cpp,lang-rust,lang-julia,lang-go,lang-csharp,lang-r,lang-fortran,workloads,demos,soak-quick,remote
-BUDGET_GATE=golden,vectors,lint,formal,libcft,$BUDGET_QUICK,transcend,mpfr,cpp,audit,estimates,lang-routines,tangent,acceptance
+BUDGET_GATE=golden,vectors,lint,formal,libcft,$BUDGET_QUICK,transcend,mpfr,cpp,audit,estimates,lang-routines,tangent,acceptance,cardstress
 RESUME=""
 FRESH=0
 REQUIRE_ALL=0
@@ -1541,6 +1541,36 @@ stage mpfr "MPFR parity, all rungs and modes, flags - the only external oracle r
 
 need host-cc
 stage soak-quick "native-oracle soak, QUICK depth + sabotage control" -- do_soakquick
+
+# The long-run stress driver's own suite (hw/test-card-stress.sh), which the card runs every night (hw/card_stress.py): no stage, workflow or
+# Makefile target ran it until 2026-10-22 (KL-28). It starts the driver and its stand-in dozens of times, dry - no XRT, no card - and reads the
+# verdict parsers against real logs of the tools; `--no-plants` leaves out its negative controls (a defect put back into a copy of the code,
+# which the scenario written for it must catch), which take about as long again and are run by hand when the driver's code changes. What it
+# asks of its host that no other stage does:
+#   * No other process on this system may use the card. The driver's guard refuses to start while one does (guard_refused), and its stand-ins
+#     carry an xclbin argument or CFT_SOAK_ARTIFACT, the marks that guard looks for: the nights' own run of the driver, another copy of this
+#     suite, a card tool someone has open. Then the stage is SKIPPED, by name, with the pids the driver's own guard sees (card_stress.find_card_users,
+#     asked here with the guard's own rules and none of ours) - never a suite that could not start its drivers reported as a pass, and
+#     --require-all fails the skip.
+#   * The checkout may be built. In a gate's fresh clone host/ has been built by the stages before this one, and the suite's `buildreal` group
+#     used to copy that host/ whole into its scratch repository (KL-13); it copies the files git tracks now.
+# Two of its checks need the lead's own run directories (CARD_STRESS_METRICS, CARD_STRESS_RESUME_RUN) and say SKIP, by name, without them; on
+# Windows the groups that need POSIX say it too. They are inner skips, counted and named in the verdict like any stage's.
+cardstress_users() {  # -> "pid N why; ..." for each process the driver's own guard sees using the card, or nothing
+  PY -B -I -c 'import sys; sys.path.insert(0, sys.argv[1]); import card_stress as m; print("; ".join("pid %d %s" % (u["pid"], u["why"]) for u in m.find_card_users()[0]))' "$ROOT/hw" 2>/dev/null
+}
+do_cardstress() {
+  # the runner's own interpreter, named for the suite's wrapper (it takes python3 first, which on Windows is often the store's shim)
+  local py=python
+  if [ "$WIN" != 1 ] && command -v python3 >/dev/null 2>&1; then py=python3; fi
+  PYTHON=$py bash "$ROOT/hw/test-card-stress.sh" --no-plants
+}
+need python
+if [ -z "$STAGE_SKIP_REASON" ] && { [ -z "$ONLY" ] || in_list cardstress "$ONLY"; } && ! in_list cardstress "$SKIP"; then
+  _csu=$(cardstress_users)
+  [ -n "$_csu" ] && STAGE_SKIP_REASON="another process uses the card on this system, so the driver's guard would refuse every driver the suite starts (guard_refused): $_csu"
+fi
+stage cardstress "the long-run stress driver's suite, hw/test-card-stress.sh --no-plants: the verdict parsers on real logs, the legs and the failure policy, the sweep and its resume, the host pool, the seeds, coverage per tree, the images' manifests and vectors/out, the report - the driver against its stand-ins, no card; skipped by name while another process uses the card" --   do_cardstress
 
 do_images() {
   local rc=0 img
