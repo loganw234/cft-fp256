@@ -1,20 +1,24 @@
 #!/usr/bin/env python3
 # Copyright 2026 Logan W.
 # SPDX-License-Identifier: Apache-2.0
-"""cft-sched: the card scheduler's command (docs/studies/SCHED-A-card-scheduler.md; this is its first parcel, S1).
+"""cft-sched: the card scheduler's command (docs/studies/SCHED-A-card-scheduler.md; S1 built the core, S2 the staged runner).
+
+    cft-sched [--root DIR] [--runner staged|fake] VERB ...   the step types `submit` validates against and the runner `serve` uses (default staged)
 
     cft-sched [--root DIR] init                  write config.json (the defaults) and the layout; the only verb that makes a root
     cft-sched [--root DIR] submit FILE|-         a job spec (JSON): queued, or refused by name; either way it has an id and a record
     cft-sched [--root DIR] list [--all] [--json] the queue, what runs, and the last ten that ended (all of them with --all)
-    cft-sched [--root DIR] status [ID] [--json]  each card's state, the running job, the queue, the last outcome; one job with ID
+    cft-sched [--root DIR] status [ID] [--json]  each card's state, the running job, the queue, the last outcome; one job with ID, and its legs
     cft-sched [--root DIR] cancel ID             a queued job leaves the queue; a running one stops at its next safe point
     cft-sched [--root DIR] hold CARD [--why T]   no new claims on the card; what runs is not touched
     cft-sched [--root DIR] release CARD
     cft-sched [--root DIR] serve [--drain] [--poll S] [--max-jobs N] [--no-locks]
 
-The root is --root or $CFT_SCHED_ROOT, outside every git checkout (on the box: /data/cft-sched). In this parcel `serve`
-runs the FAKE runner, which touches no card. Run it as `bash hw/sched/cft-sched ...` (no script in hw/ is executable in
-git) or `python3 hw/sched/cft_sched.py ...`. A refusal prints `refused: NAME: why` on stderr and exits 2; `submit` of a spec
+The root is --root or $CFT_SCHED_ROOT, outside every git checkout (on the box: /data/cft-sched). `serve` runs staged jobs for
+real (sched_staged.py: clone and assert, build, the guard, the steps), unless --runner fake, which is S1's test runner and touches no
+card; `submit` validates against the step types of the runner it is given, so give both verbs the same --runner (the default, staged).
+A card step of a job that is not dry runs on the card: a first run on the box is a `dry_run` job. Run it as `bash hw/sched/cft-sched ...`
+(no script in hw/ is executable in git) or `python3 hw/sched/cft_sched.py ...`. A refusal prints `refused: NAME: why` on stderr and exits 2; `submit` of a spec
 that is refused prints `refused JOBID: NAME: why` (the job exists, with its record) and exits 2; hw/sched/sched_names.py holds
 the table. Only the box user submits, over ssh: there is no listener and no socket.
 """
@@ -28,7 +32,9 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import sched_config as C          # noqa: E402
 import sched_run as R             # noqa: E402
+import sched_staged as SG         # noqa: E402
 import sched_state as S           # noqa: E402
+import sched_steps as ST          # noqa: E402
 from sched_names import Refusal   # noqa: E402
 
 
@@ -61,7 +67,7 @@ def cmd_submit(a, root):
                 raw = fh.read()
     except OSError as e:
         raise SystemExit(f"cft-sched: cannot read {a.file}: {e}")
-    jid, refusal = S.submit(root, cfg, raw, R.FAKE_REGISTRY)
+    jid, refusal = S.submit(root, cfg, raw, R.FAKE_REGISTRY if a.runner == "fake" else ST.StepRegistry())
     if refusal:
         print(f"refused {jid}: {refusal.name}: {refusal.why}", file=sys.stderr)
         return 2
@@ -84,9 +90,13 @@ def cmd_status(a, root):
             if os.path.isdir(os.path.join(root, where, jid)):
                 v = R.job_view(root, where, jid)
                 v["sums_problems"] = S.check_sums(os.path.join(root, where, jid)) if where == "jobs" else None
+                v["legs"] = [{k: r.get(k) for k in ("step", "leg", "status", "verdict_kind", "dry", "standin", "reason")}
+                             for r in S.read_records(os.path.join(root, where, jid, "job.jsonl")) if r.get("type") == "leg"]
                 print(json.dumps(v, sort_keys=True) if a.json else
                       f"{jid}: {where}, {v['name']!r} on {v['card']}, {v['records']} records, outcome {v['outcome']}"
-                      + (f" ({v['refusal']})" if v["refusal"] else "") + (f", stop requested by {v['stop'].get('by')}" if v["stop"] else ""))
+                      + (f" ({v['refusal']})" if v["refusal"] else "") + (f", stop requested by {v['stop'].get('by')}" if v["stop"] else "")
+                      + "".join(f"\n  step {x['step']} {x['leg']}: {x['status']}" + (" [rc_only]" if x["verdict_kind"] == "rc_only" else "")
+                                + (" [dry: stand-in]" if x["standin"] else " [dry]" if x["dry"] else "") for x in v["legs"]))
                 return 0
         raise Refusal("job-unknown", f"no job {jid}")
     st = R.gather_status(root, cfg)
@@ -117,13 +127,15 @@ def cmd_release(a, root):
 
 def cmd_serve(a, root):
     cfg = open_root(root)
-    R.serve(root, cfg, R.FakeRunner(), poll=a.poll, drain=a.drain, max_jobs=a.max_jobs, skip_locks=a.no_locks)
+    R.serve(root, cfg, R.FakeRunner() if a.runner == "fake" else SG.StagedRunner(root, cfg), poll=a.poll, drain=a.drain, max_jobs=a.max_jobs,
+            skip_locks=a.no_locks)
     return 0
 
 
 def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="cft-sched", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--root", help=f"the state root (default ${C.ENV_ROOT})")
+    ap.add_argument("--runner", choices=("staged", "fake"), default="staged", help="the step types a spec is validated against, and the runner `serve` uses (default staged)")
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name, fn in (("init", cmd_init), ("submit", cmd_submit), ("list", cmd_list), ("status", cmd_status), ("cancel", cmd_cancel),
                      ("hold", cmd_hold), ("release", cmd_release), ("serve", cmd_serve)):

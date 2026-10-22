@@ -9,6 +9,8 @@ config.json is read at start and an invalid one is refused `config-form`, by nam
 over DEFAULTS, so a file may state only what it changes; `cards` has no default, because inventing a card
 would be a claim about the machine. The retention is Logan's, 2026-10-21, doubled from the study's numbers.
 This parcel carries the retention, the floors and the windows and acts on none of them (S3 and S4 do).
+Parcel S2 added a card's optional `platform`, an image's optional `tiles` and `platform`, and the sections `code` (where a
+job's bundles and remote are) and `runner` (the driver's own defaults for how a step runs).
 """
 from __future__ import annotations
 
@@ -25,15 +27,22 @@ ENV_ROOT = "CFT_SCHED_ROOT"
 LAYOUT = ("queue", "running", "jobs", "cards", "clones", "extracts", "ids")
 CARD_KINDS = {"xrt": "an Alveo card driven through XRT over PCIe (the U50)"}   # nothing else reads a card's kind
 HEX64 = re.compile(r"[0-9a-f]{64}\Z")
+PLATFORM = re.compile(r"[A-Za-z0-9_.-]{1,100}\Z")
 CLOCK = re.compile(r"(?:[01]\d|2[0-3]):[0-5]\d\Z")
 ZONE = re.compile(r"[A-Za-z0-9_+./-]{1,64}\Z")
 
 DEFAULTS = {
     "cards": None,                       # required
-    "images": [],                        # [{name, path, sha256}]: validated for shape only
+    "images": [],                        # [{name, path, sha256[, tiles, platform]}]: held to the files when a job runs (sched_images.py)
     "windows": {"zone": "local", "list": [{"name": "nightly", "start": "18:00", "end": "08:00"}]},
     "floors": {"disk_free_gb": 5},       # the driver's own floor, unchanged
     "retention": {"idle_sample_minutes": 7.5, "clone_days": 14, "passing_log_days": 360, "record_days": None},
+    # where a job's code comes from (parcel S2): `bundle:FILE` is FILE in bundle_dir, `remote` clones this URL, and a commit is
+    # "pushed" when a branch of this remote holds it. Null: not configured, and a job that needs it is refused by name.
+    "code": {"bundle_dir": None, "remote": None},
+    # how a staged job runs (parcel S2): the driver's own defaults for its options of the same names
+    "runner": {"nice": 10, "kill_after_s": 60, "xrt_root": "/opt/xilinx/xrt", "build_jobs": 4, "build_timeout_s": 2400,
+               "guard_wait_max_s": 14400, "guard_poll_s": 30, "rev8_images": None, "python": "python3"},
 }                                        # record_days null: every record is kept
 
 
@@ -103,7 +112,7 @@ def validate_config(raw) -> dict:
         raise _form("cards", "must be a non-empty list")
     seen = set()
     for i, c in enumerate(cards):
-        _keys(c, f"cards[{i}]", ("id", "kind"))
+        _keys(c, f"cards[{i}]", ("id", "kind"), ("platform",))
         if not isinstance(c["id"], str) or not IDENT_RE.match(c["id"]) or c["id"] == "any":
             raise _form(f"cards[{i}].id", "must be 1 to 32 characters of a-z 0-9 . _ -, and not `any`")
         if c["id"] in seen:
@@ -111,13 +120,15 @@ def validate_config(raw) -> dict:
         seen.add(c["id"])
         if c["kind"] not in CARD_KINDS:
             raise _form(f"cards[{i}].kind", f"{c['kind']!r} is not one of {', '.join(CARD_KINDS)}")
+        if "platform" in c and not (isinstance(c["platform"], str) and PLATFORM.match(c["platform"])):
+            raise _form(f"cards[{i}].platform", "must be the platform name an image manifest's `platform:` line carries, e.g. xilinx_u50_gen3x16_xdma_5_202210_1")
     cfg["cards"] = cards
     if "images" in raw:
         if not isinstance(raw["images"], list):
             raise _form("images", "must be a list")
         names = set()
         for i, im in enumerate(raw["images"]):
-            _keys(im, f"images[{i}]", ("name", "path", "sha256"))
+            _keys(im, f"images[{i}]", ("name", "path", "sha256"), ("tiles", "platform"))
             if not isinstance(im["name"], str) or not IDENT_RE.match(im["name"]) or im["name"] in names:
                 raise _form(f"images[{i}].name", "must be a unique identifier of a-z 0-9 . _ -")
             names.add(im["name"])
@@ -125,6 +136,10 @@ def validate_config(raw) -> dict:
                 raise _form(f"images[{i}].path", "must be a non-empty string")
             if not isinstance(im["sha256"], str) or not HEX64.match(im["sha256"]):
                 raise _form(f"images[{i}].sha256", "must be 64 lowercase hex digits")
+            if "tiles" in im and (not isinstance(im["tiles"], int) or isinstance(im["tiles"], bool) or im["tiles"] < 1):
+                raise _form(f"images[{i}].tiles", "must be a whole number, 1 or more")
+            if "platform" in im and not (isinstance(im["platform"], str) and PLATFORM.match(im["platform"])):
+                raise _form(f"images[{i}].platform", "must be the platform name an image manifest's `platform:` line carries")
         cfg["images"] = raw["images"]
     if "windows" in raw:
         w = raw["windows"]
@@ -159,6 +174,28 @@ def validate_config(raw) -> dict:
             if not (k == "record_days" and v is None):
                 _number(v, f"retention.{k}")
             cfg["retention"][k] = v
+    if "code" in raw:
+        _keys(raw["code"], "code", (), tuple(DEFAULTS["code"]))
+        for k, v in raw["code"].items():
+            if v is not None and not (isinstance(v, str) and v and len(v) <= 1000):
+                raise _form(f"code.{k}", "must be a path or URL of 1 to 1000 characters, or null (not configured)")
+            cfg["code"][k] = v
+    if "runner" in raw:
+        _keys(raw["runner"], "runner", (), tuple(DEFAULTS["runner"]))
+        for k, v in raw["runner"].items():
+            if k in ("xrt_root", "python"):
+                if not (isinstance(v, str) and v):
+                    raise _form(f"runner.{k}", "must be a non-empty string")
+            elif k == "rev8_images":
+                if v is not None and not (isinstance(v, str) and v):
+                    raise _form(f"runner.{k}", "must be a directory, or null (the state root's rev8-images)")
+            elif k in ("nice", "build_jobs"):
+                lo, hi = (0, 19) if k == "nice" else (1, 4096)
+                if not isinstance(v, int) or isinstance(v, bool) or not lo <= v <= hi:
+                    raise _form(f"runner.{k}", f"must be a whole number, {lo} to {hi}")
+            else:
+                _number(v, f"runner.{k}", zero_ok=k == "guard_wait_max_s")
+            cfg["runner"][k] = v
     return cfg
 
 

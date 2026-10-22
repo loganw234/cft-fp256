@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """The service loop, the fake runner, and the views `status` and `list` print.
 
-The real runners are parcels S2 (staged steps) and S3 (windows); this parcel's loop runs the FAKE runner, which
-touches no card and says so in every record it writes. The loop's one rule about the card is the order of
+The real runners are parcels S2 (staged steps: sched_staged.py) and S3 (windows); S1's loop was written against the FAKE runner, which
+touches no card and says so in every record it writes. A real runner's end record may say otherwise (`card_touched`). The loop's one rule about the card is the order of
 three things: the service holds the root's lock for its life; for each card it takes the card's lock BEFORE it
 claims a job and drops it AFTER the job's record is sealed and moved, so the lock is held for exactly a job's run;
 and a hold is looked at before and again under that lock.
@@ -85,7 +85,7 @@ def run_claimed(root: str, jid: str, spec: dict, log: Log, runner) -> str:
     stop = StopWatch(root, jid, log)
     outcome, fields = runner.run(spec, log, stop)
     stop.requested()                              # a stop that came after the last safe point is still recorded
-    finish(root, jid, log, outcome, runner=runner.name, card_touched=False, **fields)
+    finish(root, jid, log, outcome, **{"runner": runner.name, "card_touched": False, **fields})      # a real runner says whether it touched the card
     return outcome
 
 
