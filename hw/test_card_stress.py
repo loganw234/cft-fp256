@@ -42,6 +42,13 @@ Three kinds of group, then the plants (the groups, by name, are in hw/test-card-
             figures, the driver itself resuming a file from another host/ tree and from another rtl/ tree, and - when CARD_STRESS_RESUME_RUN
             names the lead's two-night run directory - the planner over that real file.
 
+  P5 additions (2026-10-22, KL-39, KL-42, KL-23, KL-44, KL-32, KL-13), each in a group above: telemetry - the status file's telemetry line carries the
+            sample's time and up to twelve values, and the report counts an HBM temperature's zeros by name and leaves them out of its range; chunk - every
+            random slice of a DEFAULT run is held to the cases its tool prints (the real tools' logs, rnd-*.txt in hw/card_stress_fixtures, and the
+            stand-in's own table), a short one is parse_error; build - the images' manifests (the lead's three real ones, as fixtures; refused or flagged,
+            in-process and as dry runs over a scratch repository) and vectors/out (refused at the start); buildreal - the scratch tree is the files git
+            tracks, so a built host/ does not fail the group, and a run with the selftest leg and no vectors/out is refused.
+
 POSIX-only checks (the `nice` and `timeout` wrappers, a process that ignores SIGTERM) are
 SKIPped by name on Windows and run under WSL or on the box. Everything runs niced by the
 caller's choice; nothing here starts anything heavy. Prints one line a group and a last line
@@ -1470,6 +1477,58 @@ def scn_guard(env: Env, src: str = HERE) -> list:
         with open(os.path.join(r.out, "STOP"), "w") as fh:
             fh.write("x")
         r.finish(120)
+    return out + stage_guard_checks(env)
+
+
+def stage_guard_checks(env: Env) -> list:
+    """KL-28 (2026-10-22): verify/run.sh's `cardstress` stage runs this suite, and the suite's drivers cannot start while another process uses
+    the card (the guard refuses: guard_refused). So the stage is SKIPPED, by name, with the pids the driver's own guard sees, and never passes
+    or fails for it: here a process that looks like device-test with an xclbin is alive, and the real runner is asked for the stage. If the
+    stage ran anyway the suite would start inside it: CARD_STRESS_NESTED_PROBE makes that suite end at once (main), so a defect is a red
+    check in seconds, not a second suite. The runner's run directory (verify/state/<id>, ignored by git) is removed by the exact path it printed."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    runner = os.path.join(ROOT, "verify", "run.sh")
+    if not os.path.isfile(runner) or not shutil.which("bash"):
+        skip("stage guard", "needs verify/run.sh and bash")
+        return out
+    if os.environ.get("CARD_STRESS_NESTED_PROBE"):
+        return out
+    posix_runner = runner.replace("\\", "/")
+    sl = spawn_sleeper(["device-test", env.imgs["quad"]])
+    made = []
+    try:
+        time.sleep(1.5)
+        e = dict(os.environ, CARD_STRESS_NESTED_PROBE="1")
+        runs = []
+        for extra in ([], ["--require-all"]):
+            p = subprocess.run(["bash", posix_runner, "--only", "cardstress", "--fresh"] + extra, capture_output=True, text=True, env=e,
+                               timeout=240, cwd=ROOT)
+            runs.append(p)
+            m = re.search(r"^== run (\S+)$", p.stdout, re.M)
+            if m:
+                made.append(os.path.join(ROOT, "verify", "state", m.group(1)))
+        a, b = runs
+        row = re.search(r"^cardstress\s+SKIP\s+(.*)$", a.stdout, re.M)
+        c("stage guard: while another process uses the card the `cardstress` stage is SKIPPED, by name, and says why - the driver's guard would "
+          "refuse every driver the suite starts (guard_refused) - and names the pid the guard sees (the exit status is 0: a skip is not a failure)",
+          a.returncode == 0 and row is not None and "guard_refused" in row.group(1) and f"pid {sl.pid}" in row.group(1),
+          f"rc {a.returncode}: {a.stdout[-400:]}")
+        c("stage guard: ... the verdict counts the skip (VERDICT line) and --require-all FAILS the run for it (exit 1)",
+          "VERDICT" in a.stdout and "skip" in a.stdout.lower() and b.returncode != 0 and re.search(r"^cardstress\s+SKIP", b.stdout, re.M) is not None,
+          f"rc {b.returncode}: {b.stdout[-300:]}")
+        c("stage guard: ... and the suite did not start inside the stage (no nested probe's refusal in either log)",
+          "refusing to run inside a stage probe" not in a.stdout + b.stdout + a.stderr + b.stderr, a.stderr[-200:])
+    except subprocess.TimeoutExpired as ex:
+        c("stage guard: the runner answered within four minutes", False, f"timed out: {ex}")
+    finally:
+        sl.kill()
+        sl.wait()
+        for d in made:
+            rmtree_force(d)
     return out
 
 
@@ -5393,8 +5452,8 @@ def manifest_judge_checks(src: str = HERE) -> list:
           L2.manifest_path("/x/cardday-rev8q/cft_hw_quad.xclbin") == "/x/cardday-rev8q/cft_hw_quad.manifest.txt"
           and L2.manifest_path("/x/odd") == "/x/odd.manifest.txt")
 
-        def judge(text, sha, checkout=rtl, rtl_of=lambda cm: rtl, dry=False):
-            return L2.judge_manifest(text, sha, checkout, rtl_of, dry=dry)
+        def judge(text, sha, checkout=rtl, rtl_of=lambda cm: rtl, dry=False, dirty=False):
+            return L2.judge_manifest(text, sha, checkout, rtl_of, dry=dry, checkout_dirty=dirty)
         # state, refused?, a word the why must carry
         table = [
             ("the real quad manifest, the right image, this checkout's rtl tree", judge(real["quad"], shas["quad"]), "ok", False, "44b963dd6ba2"),
@@ -5420,6 +5479,12 @@ def manifest_judge_checks(src: str = HERE) -> list:
             ("no whole commit named (unknown, as hw/rebuild-2022.sh writes it when git failed)", judge(manifest_text(shas["quad"], "unknown", "rtl/ and hw/ identical to unknown"), shas["quad"]),
              "commit_unknown", False, "no whole commit"),
             ("this checkout's own rtl tree unreadable", judge(real["quad"], shas["quad"], checkout=None), "unverified", False, "cannot be read"),
+            ("a manifest whose bitstream_sources names another commit than its commit: line is not read at its word: FLAGGED",
+             judge(manifest_text(shas["quad"], commit, "rtl/ and hw/ identical to " + "1" * 40), shas["quad"]), "unverified", False, "not one build's"),
+            ("this checkout's rtl/ has uncommitted changes: HEAD's tree is the image's but is not what runs from here: FLAGGED",
+             judge(real["quad"], shas["quad"], dirty=True), "unverified", False, "uncommitted"),
+            ("... but a commit whose tree differs is refused whether or not the checkout is dirty", judge(real["quad"], shas["quad"], checkout="1" * 40, dirty=True),
+             "rtl_differs", True, "111111111111"),
             ("no manifest: FLAGGED, not refused", judge(None, shas["quad"]), "missing", False, "no manifest"),
             ("no manifest in a dry run: neutral", judge(None, shas["quad"], dry=True), "dry_run", False, "stand-in"),
             ("an empty manifest", judge("", shas["quad"]), "sha256_mismatch", True, "no sha256"),
@@ -5430,7 +5495,7 @@ def manifest_judge_checks(src: str = HERE) -> list:
             if not (r["state"] == state and r["refuse"] is refuse and word.lower() in r["why"].lower()):
                 bad.append((what, r["state"], r["refuse"], r["why"][:80]))
         every = all(judge(real[n], shas[n])["state"] == "ok" and judge(real[n], shas[n])["commit"] == commit for n in real)
-        c("manifest: the judgement, case by case (%d): ok, the four refusals, the three flags, the dry run's neutral state, and an empty or "
+        c("manifest: the judgement, case by case (%d): ok, the refusals, the flags, the dry run's neutral state, and an empty or "
           "binary manifest - each with its own state, whether it refuses, and a reason that names it; and all three real ones are ok" % len(table),
           not bad and every, str(bad[:3]))
         r = judge(real["quad"], shas["quad"])
@@ -6627,6 +6692,11 @@ def run_group(name: str, results: list) -> None:
 
 
 def main() -> int:
+    if os.environ.get("CARD_STRESS_NESTED_PROBE"):
+        # stage_guard_checks asked the runner for the cardstress stage while a card user was alive: it must have skipped. If it did not, this
+        # suite is the stage's, started inside a suite - it ends here, at once, and the probe goes red
+        print("card-stress test: refusing to run inside a stage probe (CARD_STRESS_NESTED_PROBE)")
+        return 3
     only = None
     if "--only" in sys.argv:
         only = set(sys.argv[sys.argv.index("--only") + 1].split(","))

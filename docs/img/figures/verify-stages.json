@@ -30,16 +30,16 @@
    "claim": "the stage count the quick line is of",
    "document": "CLAUDE.md",
    "drawn": "53",
-   "stated": "52",
-   "verdict": "disagrees"
+   "stated": "53",
+   "verdict": "agrees"
   },
   {
    "id": "gate-of-total",
    "claim": "the gate budget's size, of the stages",
    "document": "CLAUDE.md",
    "drawn": "45",
-   "stated": "44",
-   "verdict": "disagrees"
+   "stated": "45",
+   "verdict": "agrees"
   },
   {
    "id": "readme-quick",

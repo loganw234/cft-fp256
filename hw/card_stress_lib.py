@@ -1370,8 +1370,10 @@ def host_sample(paths: Iterable[str]) -> Dict[str, Any]:
 #                    a night's run is not lost to a file left behind in a copy (the image's SHA-256 is still held to SHA256SUMS)
 #   commit_unknown   the manifest names no whole commit, or one this checkout does not hold (or which has no rtl/): FLAGGED for the
 #                    same reason - a shallow clone cannot show a difference, and a difference it cannot show is not one
-#   unverified       FLAGGED: the manifest does not say whether rtl/ was its commit's (no bitstream_sources: and no tree: line), or
-#                    this checkout's own rtl tree cannot be read
+#   unverified       FLAGGED: the manifest does not say whether rtl/ was its commit's (no bitstream_sources: and no tree: line), its
+#                    bitstream_sources: and commit: lines name different commits, this checkout's own rtl tree cannot be read, or its rtl/
+#                    has uncommitted changes (HEAD's tree, which the commit's equals, is then not what runs from it; coverage from it is
+#                    already kept apart as '+modified')
 #   sha256_mismatch  REFUSED: the manifest has no sha256 of 64 hex digits, or another image's: it is not this image's manifest
 #   rtl_modified     REFUSED: the manifest says rtl/ was not its commit's when it was built (bitstream_sources: MODIFIED, naming a file
 #                    under rtl/; or a DIRTY tree with no scoped line): the image is of no tree any checkout has
@@ -1406,10 +1408,10 @@ def parse_manifest(text: str) -> Dict[str, str]:
 
 
 def judge_manifest(text: Optional[str], image_sha: str, checkout_rtl: Optional[str],
-                   rtl_of: Callable[[str], Optional[str]], dry: bool = False) -> Dict[str, Any]:
+                   rtl_of: Callable[[str], Optional[str]], dry: bool = False, checkout_dirty: bool = False) -> Dict[str, Any]:
     """The verdict on one image's manifest (the states are above). text: the manifest's text, None when there is none; image_sha: the
     image's own SHA-256; checkout_rtl: this checkout's `HEAD:rtl` tree (None where git cannot say); rtl_of(commit): the rtl tree of a
-    commit in this checkout, None where it does not hold the commit. Returns the dict run_start records as the image's `manifest` (the
+    commit in this checkout, None where it does not hold the commit; checkout_dirty: this checkout's rtl/ has uncommitted changes. Returns the dict run_start records as the image's `manifest` (the
     caller adds `file`): state, refuse (a refusal), why (one sentence naming the state), and what the manifest said - sha256, commit,
     tree, sources - and rtl, the commit's rtl tree where it was found. Never raises on a manifest's content."""
     r: Dict[str, Any] = {"state": "", "refuse": False, "why": "", "sha256": None, "commit": None, "rtl": None,
@@ -1436,7 +1438,13 @@ def judge_manifest(text: Optional[str], image_sha: str, checkout_rtl: Optional[s
         return done("sha256_mismatch", f"its manifest says sha256 {sha[:16]}..., the image hashes to {image_sha[:16]}...: "
                                        f"it is another image's manifest")
     # did the build see this commit's rtl/? hw/rebuild-2022.sh's bitstream_sources is scoped to rtl/ and hw/; an older manifest has only
-    # the whole tree's flag. True: yes; False: no; None: the manifest does not say.
+    # the whole tree's flag. True: yes; False: no; None: the manifest does not say. The script writes the same commit in both lines; a
+    # manifest whose two disagree (edited, or joined from two) is not read at its word.
+    named = re.search(r"(?:identical to|differs from) ([0-9a-fA-F]{7,40})", src)
+    if named and (r["commit"] or "") and not ((r["commit"] or "").lower().startswith(named.group(1).lower())
+                                              or named.group(1).lower().startswith((r["commit"] or "").lower())):
+        return done("unverified", f"its manifest's bitstream_sources: names commit {named.group(1)[:12]} and its commit: line says "
+                                  f"{(r['commit'] or '')[:12]}: they are not one build's, so neither is trusted")
     hw_note = ""
     same: Optional[bool] = None
     if src.startswith("rtl/ and hw/ identical to"):
@@ -1473,6 +1481,9 @@ def judge_manifest(text: Optional[str], image_sha: str, checkout_rtl: Optional[s
     if rtl != checkout_rtl:
         return done("rtl_differs", f"the image was built at commit {commit[:12]} whose rtl tree is {rtl[:12]}; this checkout's is "
                                    f"{checkout_rtl[:12]}: tile slices would be filed under a tree the image is not")
+    if checkout_dirty:
+        return done("unverified", f"the image's rtl tree {rtl[:12]} is this checkout's HEAD, but rtl/ has uncommitted changes here, so HEAD's tree "
+                                  f"is not what runs from it (its coverage is kept apart, as modified)")
     return done("ok", f"built at commit {commit[:12]}, whose rtl tree {rtl[:12]} is this checkout's" + hw_note)
 
 
@@ -1495,7 +1506,9 @@ def manifest_brief(mf: Dict[str, Any]) -> str:
         return "no manifest (dry run)"
     if st in MANIFEST_FLAGGED:
         return f"NOT CHECKED ({st})"
-    return f"REFUSED ({st})"
+    if st in MANIFEST_REFUSED:
+        return f"REFUSED ({st})"
+    return f"manifest state {st!r} not understood"        # a record this code did not write
 
 
 # ---------------------------------------------------------------------------

@@ -2262,7 +2262,8 @@ class Driver:
             pass
         except OSError as e:
             unreadable = f"{os.path.basename(path)} cannot be read ({e}); "
-        mf = L.judge_manifest(text, im.sha, self.tree.get("rtl") or None, lambda c: self.git_tree(c, "rtl"), dry=self.dry)
+        mf = L.judge_manifest(text, im.sha, self.tree.get("rtl") or None, lambda c: self.git_tree(c, "rtl"), dry=self.dry,
+                              checkout_dirty=self.tree.get("rtl_dirty") is True)
         mf["file"] = os.path.basename(path)
         if unreadable:
             mf["why"] = unreadable + mf["why"]

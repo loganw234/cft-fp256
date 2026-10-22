@@ -1237,7 +1237,9 @@ study is per RTL tree, with the three images reported separately beneath it.
   an event `image_manifest_unchecked`, in `status.txt`'s `images` line and in the report's header, and the run goes on:
   `missing` (no manifest beside the image), `commit_unknown` (a commit this checkout does not hold, or no whole commit: a shallow
   clone cannot show a difference, and a difference it cannot show is not one) and `unverified` (the manifest does not say whether rtl/
-  was its commit's, or this checkout's own tree cannot be read). Why a flag and not a refusal: those are an absence, not a
+  was its commit's, its `bitstream_sources:` and `commit:` lines name different commits, this checkout's own tree cannot be read, or
+  its rtl/ has uncommitted changes, so that HEAD's tree is not what runs from it - coverage from such a checkout is already kept apart
+  as `+modified`). Why a flag and not a refusal: those are an absence, not a
   contradiction, and a night is not lost to a file left behind in a copy; the state before this check was the same absence. A dry run's
   stand-in images have none: state `dry_run`, no flag, no event. **What coverage is keyed by does not change**: `tree.rtl`, the
   checkout's, as before; the manifest is what says whether that is true of the images. The three rev8 manifests (copied from the

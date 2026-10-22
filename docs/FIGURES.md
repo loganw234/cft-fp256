@@ -147,9 +147,8 @@ not place is drawn in a group of its own, named, so a new stage shows up instead
 python/project_figures.py --only verify-stages --write`; the numbers and digests are in
 `docs/img/figures/verify-stages.json`.
 
-**Held to the record.** 5 statements are checked against this figure on every run, 3 agree:
-`CLAUDE.md` (3), `README.md` (2). **2 do not**, and are reported: CLAUDE.md says 52 where the data
-gives 53 (not found); CLAUDE.md says 44 where the data gives 45 (not found).
+**Held to the record.** 5 statements are checked against this figure on every run, 5 agree:
+`CLAUDE.md` (3), `README.md` (2).
 
 ## Hardware
 
