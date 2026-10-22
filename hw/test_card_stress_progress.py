@@ -293,6 +293,62 @@ def against_oracle(out, spec, recs):
 # ---------------------------------------------------------------------------
 # the reducer against the report: every figure both state
 # ---------------------------------------------------------------------------
+def raw_slices(d):
+    """Every completed sweep slice of a run's metrics.jsonl as (item, lo, hi, cases), by night (the run_start before it), read as plain JSON
+    lines: for the checks that must not lean on summarize()."""
+    nights, cur = [], None
+    with open(os.path.join(d, "metrics.jsonl"), encoding="utf-8") as fh:
+        for line in fh:
+            try:
+                r = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(r, dict):
+                continue
+            if r.get("type") == "run_start":
+                cur = []
+                nights.append(cur)
+            elif cur is not None and r.get("type") == "leg" and r.get("kind") == "sweep" and r.get("status") in ("pass", "fail"):
+                sw, c = r.get("sweep"), r.get("counts")
+                if isinstance(sw, dict) and sw.get("item") and isinstance(sw.get("lo"), int) and isinstance(sw.get("hi"), int):
+                    cur.append((sw["item"], sw["lo"], sw["hi"], c["cases"] if isinstance(c, dict) and isinstance(c.get("cases"), int) else 0))
+    return nights
+
+
+def against_raw(out, d):
+    """Every (class, item) row of a data file - covered, slices, cases and the first uncovered index, the figures the page shows - recomputed
+    from the raw records over the nights the file says the class ran under, with this file's own interval code: (rows compared, mismatches).
+    The classes are the file's, which `shared` holds to the report's; what is held here is what is counted in them, whatever the classes are."""
+    nights = raw_slices(d)
+    rows, bad = 0, []
+    for c in out["now"]["classes"]:
+        for r in c["items"]:
+            sl = [(lo, hi, cs) for k in c["nights"] for (it, lo, hi, cs) in nights[k - 1] if it == r["item"]]
+            iv = [(lo, hi) for lo, hi, _ in sl]
+            want = (sum(h - lo for lo, h in union(iv)), len(sl), sum(cs for _, _, cs in sl), first_gap(iv, r["space"]))
+            rows += 1
+            if (r["covered"], r["slices"], r["cases"], r["first_gap"]) != want:
+                bad.append((c["id"], r["item"], (r["covered"], r["slices"], r["cases"], r["first_gap"]), want))
+    return rows, bad
+
+
+def raw_check(out, d, label, plants=True):
+    """against_raw must find rows and no mismatch; and a first gap, a covered figure and a slice count each bent in a copy must be named,
+    so that it is a check that can fail on this very data."""
+    rows, bad = against_raw(out, d)
+    check(rows > 0 and not bad, f"{label}: {rows} class-level rows (covered, slices, cases, first uncovered index) recomputed from the raw records agree with the data file", bad[:2])
+    if plants:
+        where = next((ci, ri) for ci, c in enumerate(out["now"]["classes"]) for ri, r in enumerate(c["items"]) if r["first_gap"] and r["covered"] > 0)
+        item = out["now"]["classes"][where[0]]["items"][where[1]]["item"]
+        for what, edit in (("first uncovered index", lambda r: r.__setitem__("first_gap", [r["first_gap"][0] + 1, r["first_gap"][1]])),
+                           ("covered figure", lambda r: r.__setitem__("covered", r["covered"] + 1)), ("slice count", lambda r: r.__setitem__("slices", r["slices"] + 1))):
+            bent = json.loads(json.dumps(out))
+            edit(bent["now"]["classes"][where[0]]["items"][where[1]])
+            _, bad2 = against_raw(bent, d)
+            check(len(bad2) == 1 and bad2[0][1] == item, f"{label}: a planted {what} of {item} is named by the raw-record check", bad2[:2])
+    return rows
+
+
 def report_of(d, git_free):
     j = os.path.join(TMP, "report-%s.json" % hashlib.sha256(d.encode()).hexdigest()[:8])
     nogit = ["--no-git"] if git_free and "--no-git" in cli("--help", script=REPORT)[1] else []
@@ -401,6 +457,8 @@ def group_page(out):
     for c in out["now"]["classes"]:
         want += [f"{c['total']['complete']} of {c['total']['items']}", c["label"]] + [R._pct3(r["covered"], r["space"]) for r in c["items"]]
         want += [e for r in c["items"] if r["estimate"] for e in (r["estimate"]["date"],)]
+    check("Made with the tools at commit" in text and "Data made at" not in text and "which is not this file's own commit" in text,
+          "page: the commit line says the commit is the tools', not the data file's own")
     miss = [w for w in want if w not in text]
     check(not miss, f"page: shows {len(want)} figures of the data file, each as the report's _pct3 and thousands separators write it", miss[:4])
     near = json.loads(json.dumps(out))
@@ -446,6 +504,7 @@ def group_fixture():
     out = reduce_dir(d, "e5" * 20)
     against_oracle(out, SPEC, recs)
     against_report(out, d, "fixture")
+    raw_check(out, d, "fixture")
     eq(out["totals"]["disagreements"], 0, "fixture: no disagreement in 18 completed slices")
     eq([c["label"] for c in out["now"]["classes"] if c["kind"] == "tile"], ["commit a1a1a1a, tree not recorded in the run", "RTL tree c3c3c3c3c3c3"], "fixture: an unrecorded tree is said plainly, by its commit")
     wide = next(r for c in out["now"]["classes"] if c["id"] == "t2" for r in c["items"] if r["item"] == "scaleb32-wide-rne")
@@ -458,8 +517,10 @@ def group_fixture():
     check(not leaks, "fixture: no host name, path or user name in the output", leaks)
     bare = [N1] + [n | {"slices": [x for x in n["slices"] if ITEMS[x[0]][3] != "host"]} for n in (N2, N3)]      # nothing swept on the host under the current tree
     rb = build(bare)
-    pb = reduce_dir(write_run(rb, "nohost"))
+    db = write_run(rb, "nohost")
+    pb = reduce_dir(db)
     against_oracle(pb, bare, rb)
+    raw_check(pb, db, "nothing swept on the host under the current tree", plants=False)
     h2 = next(c for c in pb["now"]["classes"] if c["id"] == "h2")
     eq((h2["current"], h2["served"], h2["nights"], h2["total"]["covered"], h2["label"]), (True, False, [2, 3], 0, "host/ tree d4d4d4d4d4d4, compiler cc (Fixture) 1.0"),
        "fixture: a current class nothing was swept under is still listed, as its night's tree names it (the report has no entry for it)")
@@ -469,6 +530,7 @@ def group_fixture():
     p1 = reduce_dir(d1)
     against_oracle(p1, one, r1)
     against_report(p1, d1, "one RTL tree over three nights")
+    raw_check(p1, d1, "one RTL tree over three nights", plants=False)
     eq(([(c["id"], c["nights"]) for c in p1["now"]["classes"] if c["kind"] == "tile"], p1["now"]["classes"][0]["total"]["complete"]), ([("t1", [1, 2, 3])], 3),
        "fixture: a class that spans nights is one class, and an item complete on its first night is complete in it")
     base_summarize = R.summarize
@@ -537,6 +599,11 @@ def group_check(d, text, out):
     j["made"]["commit"] = "9" * 40
     open(f, "w", encoding="utf-8").write(P.dump(j))
     eq(cli("--check", f, d)[0], 0, "control: a different commit in `made` is not a difference (it cannot be re-derived)")
+    for name, edit in [("no made block", lambda j: j.pop("made")), ("a made.commit that is not a commit", lambda j: j["made"].__setitem__("commit", "xyz"))]:
+        j = json.loads(text)
+        edit(j)
+        open(f, "w", encoding="utf-8").write(P.dump(j))
+        eq(cli("--check", f, d)[0], 2, f"check: a file with {name} is not a data file: status 2, as the exit table says, not 1")
     for name, body in [("missing", None), ("not JSON", "{"), ("a list", "[]")]:
         if body is None:
             os.remove(f)
@@ -589,6 +656,11 @@ def group_real(runs):
         for name, a, b in rows[:13]:
             print(f"      {name:<62} reducer {a!s:<24.24} report {b!s:<24.24} {'=' if a == b else 'DIFFERS'}")
         eq(sum(x["slices"] for x in out["nights"]), out["totals"]["slices"], "real: the nights' slices add to the total")
+        n_raw = raw_check(out, d, tag)
+        print(f"  {tag}: {n_raw} class-level rows (covered, slices, cases, first uncovered index) recomputed from the raw records, independently of summarize(): all agree")
+        if os.path.exists(DATA) and json.load(open(DATA, encoding="utf-8"))["source"]["metrics_sha256"] == info["sha256"]:
+            n_file = raw_check(json.load(open(DATA, encoding="utf-8")), d, tag + ", the committed data file", plants=False)
+            print(f"  {tag}: and the {n_file} rows of the committed data file (site/nightly.json), which is this copy's reduction")
         done.append((out, info))
     if len(done) == 2:
         (a, ia), (b, ib) = sorted(done, key=lambda x: x[0]["totals"]["nights"])

@@ -241,8 +241,8 @@ rebuilt after each night from the run's own record by <code>hw/card_stress_progr
       h("p", null, h("strong", { text: "Newest night: " + (d.newest.date || "-") }),
         d.newest.closed ? " (night " + d.newest.night + " of " + N + "; ended " + d.newest.end + " by the card host's clock" + (age !== null ? ", " + ago(age) : "") + ")"
                         : " (night " + d.newest.night + " of " + N + "; it has NO run_end in the record: the run was still going when the copy was made, or it died. Its last record is " + d.newest.end + ")"),
-      h("p", { "class": "small dim" }, "Data made at ",
-        hex ? [h("a", { href: REPO + commit }, h("code", { text: commit.slice(0, 12) })), "."] : commit ? [h("code", { text: commit.slice(0, 40) }), " (not a commit hash)."] : "a commit that was not recorded.",
+      h("p", { "class": "small dim" }, "Made with the tools at commit ",
+        hex ? [h("a", { href: REPO + commit }, h("code", { text: commit.slice(0, 12) })), ", which is not this file's own commit."] : commit ? [h("code", { text: commit.slice(0, 40) }), " (not a commit hash)."] : "(not recorded).",
         " The figures come from the run's record of " + fmt(d.source.records) + " lines (metrics sha256 ", h("code", { text: d.source.metrics_sha256.slice(0, 12) }), ")."),
       (age !== null && age > 3 * 86400) ? h("p", { "class": "banner", text: "The newest night is more than 3 days old: the nightly update has not been made since." }) : null));
 
