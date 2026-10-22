@@ -644,8 +644,15 @@ def catalog_checks(c, mod, d, q) -> None:
     c("nextup32 still expects its 8 edge cases beyond the slice, reach host",
       j["expected"] == j["units"] + 8 and j["cover"] is None and j["sweep"]["reach"] == "host")
     j = d.plan_wave(d.cpu, 3600, 1, ["cvtfrom64-rne"], H)[0]
-    c("a random item's job records its reach and has no coverage to check",
-      j["cover"] is None and j["expected"] is None and j["sweep"]["reach"] == "host" and "count" in j["sweep"])
+    c("a random item's job records its reach, has no coverage clause to check, and is held to the cases its tool prints for the count asked "
+      "(KL-23: four a count for cvtfrom64; a default run held no random slice to anything before 2026-10-22)",
+      j["cover"] is None and j["expected"] == 4 * j["sweep"]["count"] and j["sweep"]["reach"] == "host" and "count" in j["sweep"])
+    j = d.plan_wave(d.cpu, 3600, 1, ["nextup64"], H)[0]
+    c("... nextup64's is the count and its eight edge cases; cvtto32's is None, by name (its cases are the draws'); random scaleB's is the count "
+      "rounded up by whole batches of 4096 operands against its 17 exponents, the default tools' batch",
+      j["expected"] == j["sweep"]["count"] + 8 and d.plan_wave(d.cpu, 3600, 1, ["cvtto32-rne"], H)[0]["expected"] is None
+      and (lambda js: js["expected"] == (lambda n: sum(min(n - 69632 * k, 4096) * 17 for k in range(-(-n // 69632))))(js["sweep"]["count"]))
+      (d.plan_wave(q, 3600, 1, ["scaleb32-rne"])[0]))
     # the campaign script's own job lines are the catalog's, item for item, in order, with its seeds and slices
     def compare_script(label, env_vars, probe_limited):
         rows = script_job_lines(env_vars)
@@ -1492,7 +1499,8 @@ def stage_guard_checks(env: Env) -> list:
         out.append((n, bool(ok), d))
 
     runner = os.path.join(ROOT, "verify", "run.sh")
-    if not os.path.isfile(runner) or not shutil.which("bash"):
+    bash = shutil.which("bash")           # by PATH order: on Windows a bare "bash" is found in System32 first, which is the WSL launcher
+    if not os.path.isfile(runner) or not bash:
         skip("stage guard", "needs verify/run.sh and bash")
         return out
     if os.environ.get("CARD_STRESS_NESTED_PROBE"):
@@ -1505,7 +1513,7 @@ def stage_guard_checks(env: Env) -> list:
         e = dict(os.environ, CARD_STRESS_NESTED_PROBE="1")
         runs = []
         for extra in ([], ["--require-all"]):
-            p = subprocess.run(["bash", posix_runner, "--only", "cardstress", "--fresh"] + extra, capture_output=True, text=True, env=e,
+            p = subprocess.run([bash, posix_runner, "--only", "cardstress", "--fresh"] + extra, capture_output=True, text=True, env=e,
                                timeout=240, cwd=ROOT)
             runs.append(p)
             m = re.search(r"^== run (\S+)$", p.stdout, re.M)
@@ -6306,49 +6314,49 @@ def plants(env: Env) -> None:
         ("random scaleB is not held to the cases its BATCH gives",
          [("card_stress.py", 'job["expected"] = it.random_cases(units, self.batch)\n', 'job["expected"] = None\n')],
          lambda env, src: scn_chunk(env, src), ["chunk run: a random scaleB slice is held to the cases its BATCH gives"]),
-        # -- parcel P5 (2026-10-22): the plants of KL-39, KL-32, KL-23, KL-42 and KL-44
-        ("the status file's telemetry line has no time (the kept record is the unstamped one)",
+        # -- parcel P5 (2026-10-22): the plants of KL-39, KL-32, KL-23, KL-42 and KL-44 (CARD_STRESS_PLANT='P5:' runs just these)
+        ("P5: the status file's telemetry line has no time (the kept record is the unstamped one)",
          [("card_stress_lib.py", "            os.close(fd)\n    return rec\n",
            "            os.close(fd)\n    return {k: v for k, v in rec.items() if k not in (\"ts\", \"epoch\")}\n")],
          lambda env, src: telemetry_status_checks(src), ["telemetry status: the line begins with the sample's own time"]),
-        ("the status file's telemetry line names six values again",
+        ("P5: the status file's telemetry line names six values again",
          [("card_stress_lib.py", "TELEMETRY_SHOWN = 12 ", "TELEMETRY_SHOWN = 6 ")],
          lambda env, src: telemetry_status_checks(src), ["telemetry status: it names more than six values"]),
-        ("the report leaves the HBM temperature's zeros in its range",
+        ("P5: the report leaves the HBM temperature's zeros in its range",
          [("card_stress_report.py", "                        zc[0] += 1\n                        continue\n", "                        zc[0] += 1\n")],
          lambda env, src: hbm_report_checks(src), ["hbm report: and left out of the label's range"]),
-        ("the report counts no zero as no reading",
+        ("P5: the report counts no zero as no reading",
          [("card_stress_lib.py", "    return (is_hbm_temperature(label) and isinstance(value, (int, float)) and not isinstance(value, bool) and value == 0)",
            "    return False")],
          lambda env, src: hbm_report_checks(src), ["hbm report: the zeros are counted by name"]),
-        ("a default run holds no random slice to its count",
+        ("P5: a default run holds no random slice to its count",
          [("card_stress.py", 'job["expected"] = it.random_cases(units, self.batch)\n', 'job["expected"] = it.random_cases(units, self.batch) if self.chunk else None\n')],
          scn_random_short, ["random short div32-rne: the first slice came back one case short"]),
-        ("cvtfrom is held to three cases a count, not four",
+        ("P5: cvtfrom is held to three cases a count, not four",
          [("card_stress_lib.py", '"cvtfrom32": (4, 0), "cvtfrom64": (4, 0),', '"cvtfrom32": (3, 0), "cvtfrom64": (3, 0),')],
          lambda env, src: random_count_checks(src), ["random counts: for every random op but four"]),
-        ("the stand-in prints the count for every random op, as it did",
+        ("P5: the stand-in prints the count for every random op, as it did",
          [("card_stress_standin.py", "    per = RANDOM_PER.get(op)\n    return count if per is None else count * per[0] + per[1]\n", "    return count\n")],
          lambda env, src: random_count_checks(src), ["random counts: the stand-in's own table gives the library's figure"]),
-        ("a manifest whose commit has another rtl tree is accepted",
+        ("P5: a manifest whose commit has another rtl tree is accepted",
          [("card_stress_lib.py", "    if rtl != checkout_rtl:\n", "    if False:\n")],
          lambda env, src: manifest_judge_checks(src) + manifest_driver_checks(env, src) + scn_manifests(env, src),
          ["manifest: the judgement, case by case", "manifest driver: a real run judges", "manifests B: the quad's manifest names a commit"]),
-        ("a manifest that is another image's is accepted",
+        ("P5: a manifest that is another image's is accepted",
          [("card_stress_lib.py", "    if sha != image_sha:\n", "    if False:\n")],
          lambda env, src: manifest_judge_checks(src) + manifest_driver_checks(env, src),
          ["manifest: the judgement, case by case", "manifest driver: a real run judges"]),
-        ("a missing manifest stops the run (refused where it is flagged)",
+        ("P5: a missing manifest stops the run (refused where it is flagged)",
          [("card_stress_lib.py", 'MANIFEST_REFUSED = ("sha256_mismatch", "rtl_modified", "rtl_differs")',
            'MANIFEST_REFUSED = ("sha256_mismatch", "rtl_modified", "rtl_differs", "missing")')],
          lambda env, src: manifest_driver_checks(env, src), ["manifest driver: a real run judges", "manifest driver: a DRY run with no manifest"]),
-        ("the manifest check is left out of the build step",
+        ("P5: the manifest check is left out of the build step",
          [("card_stress.py", "            self.check_manifest(im, step)\n", "            pass\n")],
          lambda env, src: scn_manifests(env, src), ["manifests B: the quad's manifest names a commit", "manifests A: ... a build step"]),
-        ("the build step does not look at vectors/out",
+        ("P5: the build step does not look at vectors/out",
          [("card_stress.py", "            problem = L.vectors_problem(self.root)\n", "            problem = None\n")],
          lambda env, src: vectors_checks(env, src), ["vectors: the build step looks at vectors/out only when"]),
-        ("a file of vectors/out that differs from SHA256SUMS passes",
+        ("P5: a file of vectors/out that differs from SHA256SUMS passes",
          [("card_stress_lib.py", '        if got != want:\n            bad.append(f"{rel} (differs)")\n', '        if False:\n            bad.append(f"{rel} (differs)")\n')],
          lambda env, src: vectors_checks(env, src), ["vectors: a file that differs from SHA256SUMS is refused by name"]),
         ("the build step does not build the chunked tools",
