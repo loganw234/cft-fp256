@@ -2486,6 +2486,25 @@ def group_git(tmp):
     hold(ck_apart, Sn, fx, c1, why, "no-git")
     plant(ck_apart, "git read although told not to", "no-git: the second run is a class of its own", S, fx, c1, why, "no-git")
     check(Sn["sweep"]["trees"]["git"] == {"read": False, "source": "records", "problem": None} and "not read (--no-git)" in R.render(Sn), "no-git: the summary and the text say git was not read")
+    # tree_class(kind, run_start, rev), which the nightly page's reducer calls for a class nothing was swept under, is the (key, label) that summarize gives a
+    # run_start with one completed slice of that kind under it - for each family and each kind
+    leg_of = {"tile": g_leg(TI, 0, GM, "tile", "quad"), "host": g_leg(HI, 0, GM, "host", "cpu"), "unknown": g_leg("futureop-x", 0, GM, None, "quad")}
+
+    def fnrev(c, r):
+        return fx.t.get((c, r))
+
+    def ck_tree_class(ck, fam, tree, rev_sum, rev_cls):
+        for kind, lg in leg_of.items():
+            rs = None if tree is None else g_start(tree)
+            cs = kclasses(R.summarize(([rs] if rs else []) + [lg], rev=rev_sum), kind)
+            want, got = (cs[0]["key"], cs[0]["label"]) if len(cs) == 1 else None, R.tree_class(kind, rs, rev_cls)
+            ck(want is not None and got == want, f"tree_class: {fam}, {kind}: the (key, label) summarize gives a run_start with one slice of that kind under it", (got, want))
+    for fam, tree, rv in (("derived", fx.old, rev), ("recorded", fx.rec, rev), ("absent commit", dict(fx.old, commit=absent), rev),
+                          ("not recorded clean", unclean, rev), ("contradicted", contra, rev), ("--no-git", fx.old, None),
+                          ("given function", fx.old, fnrev), ("before any run_start", None, rev)):
+        hold(ck_tree_class, fam, tree, rv, rv)
+    plant(ck_tree_class, "tree_class reading no git where summarize reads it", "tree_class: derived, tile", "derived", fx.old, rev, None)
+    plant(ck_tree_class, "tree_class calling a function git", "tree_class: derived, tile", "derived", fx.old, fnrev, rev)
     # 3. git is bounded and kept
     hold(ck_kept, R.GitTrees)
     plant(ck_kept, "no cache", "git: kept per (commit, directory)", Uncached)

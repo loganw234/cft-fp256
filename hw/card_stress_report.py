@@ -897,6 +897,40 @@ def _tree_label(c: Dict[str, Any], problem: Optional[str], via: str = "git") -> 
     return head + read + c["tail"] + (f": {why}" if why else "")
 
 
+def _via(rev: Any) -> str:
+    """Where a rev's trees come from, for the label and for sweep.trees.git: 'git' only for a GitTrees, 'given rev' for any other function, 'records'."""
+    return "git" if isinstance(rev, GitTrees) else "given rev" if rev is not None else "records"
+
+
+def _gather(classes: Dict[Tuple[str, str], Dict[str, Any]], kind: str, cl: Dict[str, Any]) -> Dict[str, Any]:
+    """The entry for the class (kind, cl['key']) in `classes`, opened if need be and with what the slice's _tree_class `cl` says added to it. _trees
+    gathers every slice of a run through this, and tree_class gathers one: the label of a class a run fills alone is the same by construction."""
+    c = classes.setdefault((kind, cl["key"]), {"kind": kind, "key": cl["key"], "head": cl["head"], "tail": cl["tail"], "why": [], "said": [],
+                                               "prefix": cl.get("prefix"), "commit12": cl.get("commit12"),
+                                               "derived": [], "runs": [], "commits": [], "iv": {}, "rnd": {}})
+    if cl["tail"] and not c["tail"]:
+        c["tail"] = cl["tail"]                  # a note (a tile tree's 'whether it was modified is not recorded') is the class's if any run's is
+    if cl["said"] and cl["said"] not in c["said"]:
+        c["said"].append(cl["said"])
+    if cl["why"] and cl["why"] not in c["why"]:
+        c["why"].append(cl["why"])
+    if cl["derived"] and cl["derived"] not in c["derived"]:
+        c["derived"].append(cl["derived"])
+    return c
+
+
+def tree_class(kind: str, run_start: Optional[Dict[str, Any]], rev: Any = _REPO_GIT) -> Tuple[str, str]:
+    """(key, label) of the class a slice of reach `kind` ('tile', 'host', else 'unknown') falls in under `run_start` (None: a slice before any run_start), by
+    this report's own rule and with the label --json gives a class that this run alone fills - the same pieces _trees uses: _run_trees, _tree_class,
+    _gather and _tree_label, with the problem and `via` read as _trees reads them. `rev` is summarize()'s: the default reads git through checkout_git(),
+    None reads the records alone, a callable is used as given. Public because a reducer needs the class of a run nothing was swept under: the nightly
+    page's (hw/card_stress_progress.py, _empty_class) is its caller."""
+    if rev is _REPO_GIT:
+        rev = checkout_git()
+    cl = _tree_class(kind, _run_trees(run_start, rev), rev is not None)
+    return cl["key"], _tree_label(_gather({}, kind, cl), _str(getattr(rev, "problem", None)), _via(rev))
+
+
 def _trees(sources: List[Dict[str, Any]], rev: Optional[Callable[[str, str], Optional[str]]] = None) -> Dict[str, Any]:
     """Coverage by tree: every completed sweep slice of every source (a run's records, in file order), attributed to the
     last run_start before it, and counted in the class its reach and that run's tree give (_tree_class). The coverage
@@ -910,7 +944,7 @@ def _trees(sources: List[Dict[str, Any]], rev: Optional[Callable[[str, str], Opt
     source, problem}: whether git was read (only a GitTrees reads it), where the trees came from ('git', 'given rev', 'records') and what,
     if anything, stopped git."""
     classes: Dict[Tuple[str, str], Dict[str, Any]] = {}
-    via = "git" if isinstance(rev, GitTrees) else "given rev" if rev is not None else "records"
+    via = _via(rev)
     for src in sources:
         rs: Optional[Dict[str, Any]] = None
         info = _run_trees(None, rev)
@@ -929,20 +963,8 @@ def _trees(sources: List[Dict[str, Any]], rev: Optional[Callable[[str, str], Opt
             kind = slice_reach(sw) or "unknown"
             if kind not in info["cl"]:
                 info["cl"][kind] = _tree_class(kind, info, rev is not None)
-            cl = info["cl"][kind]
-            key = cl["key"]
-            c = classes.setdefault((kind, key), {"kind": kind, "key": key, "head": cl["head"], "tail": cl["tail"], "why": [], "said": [],
-                                                 "prefix": cl.get("prefix"), "commit12": cl.get("commit12"),
-                                                 "derived": [], "runs": [], "commits": [], "iv": {}, "rnd": {}})
-            if cl["tail"] and not c["tail"]:
-                c["tail"] = cl["tail"]                  # a note (a tile tree's 'whether it was modified is not recorded') is the class's if any run's is
-            if cl["said"] and cl["said"] not in c["said"]:
-                c["said"].append(cl["said"])
-            if cl["why"] and cl["why"] not in c["why"]:
-                c["why"].append(cl["why"])
-            if cl["derived"] and cl["derived"] not in c["derived"]:
-                c["derived"].append(cl["derived"])
-            rid = _str(rs.get("run_id")) if isinstance(rs, dict) else None
+            c = _gather(classes, kind, info["cl"][kind])
+            rid =_str(rs.get("run_id")) if isinstance(rs, dict) else None
             cm = _str((rs.get("tree") or {}).get("commit")) if isinstance(rs, dict) and isinstance(rs.get("tree"), dict) else None
             if rid and rid not in c["runs"]:
                 c["runs"].append(rid)
