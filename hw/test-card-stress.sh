@@ -22,7 +22,7 @@
 #
 # Groups for --only: parsers commands standin normal fail timeout deaf nodevice cardlost stopfile deadline
 # rotation diskfloor guard sweep disagree telemetry build buildreal internal signal torn disable sweepall
-# pool seeds trees items chunk records notes resume report plants. `deaf` (a process that ignores SIGTERM),
+# pool seeds trees items chunk records notes resume testfiles report plants. `deaf` (a process that ignores SIGTERM),
 # `signal` and `buildreal` need POSIX, and so does the pool group's niceness check and the records group's
 # real (not dry) run over test doubles: each is skipped by name elsewhere. `trees` skips its
 # one check of the recorded tree, by name, where git cannot read this tree (a worktree whose .git file
@@ -34,6 +34,13 @@
 # tree class; its last check, the planner over a real file of the lead's stress run (his two nights', his three nights', or a later night's: it derives
 # what it expects from the file, and holds the figures measured on his two files only for those, by sha256), is skipped by name unless CARD_STRESS_RESUME_RUN names
 # that run's directory (the one holding metrics.jsonl) and the checkout holds its first commit, 881bbcb.
+# `testfiles` (parcel TG, 2026-10-23): hw/test_card_stress_report.py and hw/test_card_stress_progress.py, the report's own test and the nightly page's, each run
+# as a process (about 5 s and 16 s) and made this suite's checks: a crash, a hang, a missing summary line, an exit status or a failed count above 0 is a failed
+# check naming the file, each FAIL line of a file is one, and its SKIP lines are passed on as this suite's own SKIPs, by name and with the file's reason, so
+# the runner counts them as inner skips. Eleven controls on stand-in files come first and show those checks able to fail. The files' real-copy checks read
+# CARD_STRESS_RESUME_RUN (the report's, which is also the `resume` group's) and CARD_STRESS_PROGRESS_RUNS (the page's: the lead's run directories, separated as
+# PATH is) and are skipped by name without them. The group cannot be named in --skip-groups. The card scheduler's `drytests` step runs this suite, and
+# tolerates a failure only by its spec's known_flakes: a failure here is not one unless the spec lists the prefix "report test: " or "progress test: ".
 # Since 2026-10-22 (parcel P5, the driver before the nights run it): `build` also holds the images' manifests (what the driver reads beside
 # each xclbin: refused or flagged, by name) and vectors/out (refused at the start when the selftest leg would read it), `telemetry` the
 # status file's telemetry line and the report's HBM zeros, `chunk` every random slice held to its count in a default run, and `buildreal`

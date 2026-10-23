@@ -910,7 +910,7 @@ python3 hw/card_stress_report.py /data/card-stress-1016     # the report, any ti
   `--budget gate` and the full census, not in `quick`; it is SKIPPED by name, with the pids, while another process
   on the system uses the card, which is what the guard refuses on): `bash hw/test-card-stress.sh --no-plants` runs the driver's dry-run
   tests (the verdict parsers on real logs, the scheduler, the failure policy, the guard, the
-  sweep's resume, the host pool, the seeds, the trees, the resume per tree class, the items, the pass size, the records, the report, and under POSIX the real `make` in
+  sweep's resume, the host pool, the seeds, the trees, the resume per tree class, the items, the pass size, the records, the report, the report's own test and the nightly page's (`hw/test_card_stress_report.py` and `hw/test_card_stress_progress.py`, the `testfiles` group since 2026-10-23: each file's skips are passed on by name, and their real-copy checks need `CARD_STRESS_RESUME_RUN` and `CARD_STRESS_PROGRESS_RUNS`), and under POSIX the real `make` in
   a scratch copy) on the box, with no card and no XRT: about 10 minutes under WSL and 11 under Git
   Bash (2026-10-21, with the coverage wave's groups: 644 s under Git Bash and about 600 s under WSL, read off the clock; 2026-10-20, before them: 448 s and 553 s, and a busier desktop made a Git
   Bash run 636 s; 2026-10-22, with parcel P5's checks, 929 checks in 583 s under WSL niced in a built clone (at `542adb53`), and 898 checks in 1,264 s
@@ -2103,7 +2103,7 @@ A changed tree is a new class (a tile item is counted per RTL tree, a host item 
 starts from nothing and the earlier one stays as history; a run that recorded no tree is read from git where it can be (the class's label says "read from git at commit X") and else is kept apart by its commit, the label giving the report's reason.
 `hw/test_card_stress_progress.py` holds all of this (the page in node, against a stub DOM, in its three failure states; SKIP, by name,
 without node), and, when `CARD_STRESS_PROGRESS_RUNS` names the copies' directories (separated as PATH is), every shared figure against
-`hw/card_stress_report.py --json` on them.
+`hw/card_stress_report.py --json` on them. Since 2026-10-23 the gate's `cardstress` stage runs it too (the suite's `testfiles` group), and with it its checks of the committed `site/nightly.json` (well-formed, no path or host name, shown by the page); the page says once, by the class's label, that a tree was read from git.
 
 ## The math library's routine entries in the revision-8 set (added 2026-10-19; the card leg ran on rev8q on 2026-10-19)
 

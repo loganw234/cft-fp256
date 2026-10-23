@@ -1633,7 +1633,8 @@ stage soak-quick "native-oracle soak, QUICK depth + sabotage control" -- do_soak
 #     --require-all fails the skip.
 #   * The checkout may be built. In a gate's fresh clone host/ has been built by the stages before this one, and the suite's `buildreal` group
 #     used to copy that host/ whole into its scratch repository (KL-13); it copies the files git tracks now.
-# Two of its checks need the lead's own run directories (CARD_STRESS_METRICS, CARD_STRESS_RESUME_RUN) and say SKIP, by name, without them; on
+# Four of its checks need the lead's own run directories and say SKIP, by name, without them: CARD_STRESS_METRICS (the `notes` group's), CARD_STRESS_RESUME_RUN
+# (the `resume` group's, and the report's test, which its `testfiles` group runs) and CARD_STRESS_PROGRESS_RUNS (the nightly page's test, the same group); on
 # Windows the groups that need POSIX say it too. They are inner skips, counted and named in the verdict like any stage's.
 #   * On Windows the suite's timing groups - stopfile, guard and pool - are SKIPPED by name (the suite's --skip-groups, with the reason printed
 #     beside each): the guard's process listing is a PowerShell call there, and on a loaded desktop it stalled for about two minutes at a time

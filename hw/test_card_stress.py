@@ -44,6 +44,10 @@ Three kinds of group, then the plants (the groups, by name, are in hw/test-card-
             that real file, its expectations derived from the file itself (parcel P5, 2026-10-22) and the figures MEASURED on his two files held exactly
             only for those files, by sha256.
 
+  testfiles   (parcel TG, 2026-10-23) hw/test_card_stress_report.py and hw/test_card_stress_progress.py, each run as a process and made checks of this suite: a crash,
+            a hang, a missing summary line, an exit status or a failed count above 0, each FAIL line; their SKIP lines are passed on as this suite's, by name and with the
+            file's reason; eleven controls on stand-in files, run first, show those checks able to fail.
+
   P5 additions (2026-10-22, KL-39, KL-42, KL-23, KL-44, KL-32, KL-13), each in a group above: telemetry - the status file's telemetry line carries the
             sample's time and up to twelve values, and the report counts an HBM temperature's zeros by name and leaves them out of its range; chunk - every
             random slice of a DEFAULT run is held to the cases its tool prints (the real tools' logs, rnd-*.txt in hw/card_stress_fixtures, and the
@@ -6875,6 +6879,123 @@ def group_seeds(env: Env, src: str = HERE) -> list:
     return seed_checks(src) + scn_seeds(env, src)
 
 
+# ---------------------------------------------------------------------------------------
+# parcel TG (2026-10-23): the report's own test and the nightly page's, run by this suite
+# ---------------------------------------------------------------------------------------
+
+FILE_FAILS_SHOWN = 20          # the FAIL lines of a test file that become checks of their own; the count it printed is checked as a whole
+
+
+def test_file_checks(label: str, script: str, prefix: str, timeout: int = 600, on_skip=skip, say=print) -> list:
+    """A test file of its own, run as a process and turned into this suite's checks. `prefix` is the first words of its last line, which reads
+    `<prefix>: N checks, F failed` and may end `, K skipped` ("report test", "progress test"). Each of these is a check that fails by name, the file and
+    its message in it: that last line missing, unreadable or counting no check (a crash, a hang, a file that printed nothing); an exit status or a failed
+    count that is not 0; a count of failures that is not the number of FAIL lines the file printed; a count of skips that is not the number of its SKIP
+    lines; and each FAIL line is a failed check of its own. Each SKIP line the file printed is passed on as a SKIP of this suite (`on_skip`), by name and
+    with the file's reason, so the runner counts it as an inner skip and --require-all fails it: a skip of the file is never a pass here. The check
+    names are fixed text (the counts are in the detail), and a failure is only ever printed by check(), as the scheduler's dry-test parser reads it."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    name = "hw/" + os.path.basename(script)
+    t0 = time.time()
+    try:
+        p = subprocess.run([sys.executable, "-B", "-I", script], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
+    except subprocess.TimeoutExpired:
+        c(f"{label}: {name} finishes within its time limit", False, f"it did not finish in {timeout} s and was stopped")
+        return out
+    except OSError as e:
+        c(f"{label}: {name} can be started", False, f"{type(e).__name__}: {e}")
+        return out
+    lines = p.stdout.splitlines()
+    last = next((ln.strip() for ln in reversed(lines) if ln.strip()), "")
+    m = re.fullmatch(re.escape(prefix) + r": (\d+) checks, (\d+) failed(?:, (\d+) skipped)?", last)
+    fails = [ln.strip() for ln in lines if re.match(r"\s*FAIL\b", ln)]
+    skips = [re.sub(r"^\s*SKIP(?:PED)?\s+", "", ln) for ln in lines if re.match(r"\s*SKIP(?:PED)?\s", ln)]
+    tail = f"exit status {p.returncode}; its last line is {last[:160]!r}; its stderr ends {p.stderr.strip()[-160:]!r}"
+    c(f"{label}: {name} ends with its summary line '{prefix}: N checks, F failed' and ran checks (a crash, a hang or a silent exit has no such line)",
+      m is not None and int(m.group(1)) > 0, tail)
+    if m:
+        say(f"  {last} ({name}, {time.time() - t0:.0f} s)")
+        c(f"{label}: {name} passes: exit status 0 and no failed check", p.returncode == 0 and int(m.group(2)) == 0, f"{m.group(2)} failed counted; {tail}")
+        c(f"{label}: {name} counted the failures it printed", len(fails) == int(m.group(2)), f"{len(fails)} FAIL lines printed, {m.group(2)} counted")
+        if m.group(3) is not None:
+            c(f"{label}: {name} counted the skips it printed", len(skips) == int(m.group(3)), f"{len(skips)} SKIP lines printed, {m.group(3)} counted")
+    for ln in fails[:FILE_FAILS_SHOWN]:
+        c(f"{label}: {name}: {ln}", False)
+    if len(fails) > FILE_FAILS_SHOWN:
+        c(f"{label}: {name}: more failures than are listed here", False, f"{len(fails) - FILE_FAILS_SHOWN} more FAIL lines; run the file for them")
+    for s in skips:
+        what, _, why = s.partition(" - ")
+        on_skip(f"{label}: {what}", why or "the file printed no reason")
+    return out
+
+
+def test_file_controls() -> list:
+    """The checks of test_file_checks, each shown able to fail. Stand-in test files that pass, fail, crash, hang, exit 0 in silence, exit 1 with a clean
+    summary, count a failure with exit 0, print a failure they did not count, run no check, miscount their skips or print more failures than are listed
+    are run through it, and its checks must come out as written, each red at the check named for it and at no other."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    d = tempfile.mkdtemp(prefix="card-stress-testfiles-")
+
+    def go(body: str, timeout: int = 120, label: str = "demo"):
+        path = os.path.join(d, f"stand_in_{len(os.listdir(d))}.py")
+        with open(path, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(body)
+        kept: list = []
+        res = test_file_checks(label, path, "demo test", timeout, on_skip=lambda n, w: kept.append((n, w)), say=lambda s: None)
+        return [n for n, ok, _ in res if not ok], kept
+
+    def red_at(red, *frags):
+        return len(red) == len(frags) and all(any(f in n for n in red) for f in frags)
+    try:
+        red, kept = go('print("  SKIP  [g] a thing - for a reason")\nprint("g: 3 checks, 0 failed")\nprint("demo test: 3 checks, 0 failed, 1 skipped")\n')
+        c("testfiles control: a file that passes, with one skip, has no failed check, and its SKIP is passed on by name with its reason",
+          red == [] and kept == [("demo: [g] a thing", "for a reason")], str((red, kept)))
+        red, _ = go('print("  FAIL [g] the thing: got 1, want 2")\nprint("demo test: 3 checks, 1 failed")\nraise SystemExit(1)\n')
+        c("testfiles control: a file that fails is red at its pass check and at its own message, which the check names",
+          red_at(red, "passes: exit status 0", "FAIL [g] the thing: got 1, want 2"), str(red))
+        red, _ = go('raise RuntimeError("boom")\n')
+        c("testfiles control: a file that crashes has no summary line, and is red there alone", red_at(red, "ends with its summary line"), str(red))
+        red, _ = go('print("it ran")\n')
+        c("testfiles control: a file that exits 0 and prints no summary line is red there, not passed", red_at(red, "ends with its summary line"), str(red))
+        red, _ = go('print("demo test: 0 checks, 0 failed")\n')
+        c("testfiles control: a file that ran no check is red at its summary line", red_at(red, "ends with its summary line"), str(red))
+        red, _ = go('print("demo test: 3 checks, 0 failed")\nraise SystemExit(1)\n')
+        c("testfiles control: a clean summary with exit status 1 is red at the pass check alone", red_at(red, "passes: exit status 0"), str(red))
+        red, _ = go('print("demo test: 3 checks, 1 failed")\n')
+        c("testfiles control: a failed count with exit status 0 is red at the pass check and at the failures it did not print",
+          red_at(red, "passes: exit status 0", "counted the failures it printed"), str(red))
+        red, _ = go('print("  FAIL [g] hidden: x")\nprint("demo test: 3 checks, 0 failed")\n')
+        c("testfiles control: a failure printed and not counted is red at the failure count and at its own message, though the summary and the exit status are clean",
+          red_at(red, "counted the failures it printed", "FAIL [g] hidden: x"), str(red))
+        red, kept = go('print("  SKIP  x - y")\nprint("demo test: 1 checks, 0 failed, 0 skipped")\n')
+        c("testfiles control: a skip printed and not counted is red at the skip count, and still passed on", red_at(red, "counted the skips it printed")
+          and kept == [("demo: x", "y")], str((red, kept)))
+        red, _ = go('import time\ntime.sleep(60)\n', timeout=2)
+        c("testfiles control: a file that does not finish in its time is stopped and red by name", red_at(red, "finishes within its time limit"), str(red))
+        red, _ = go('print("  FAIL x")\n' * (FILE_FAILS_SHOWN + 3) + f'print("demo test: 99 checks, {FILE_FAILS_SHOWN + 3} failed")\nraise SystemExit(1)\n')
+        c("testfiles control: many failures are listed up to a limit, the rest named as a count, and the pass check is red",
+          len(red) == FILE_FAILS_SHOWN + 2 and any("more failures than are listed" in n for n in red) and any("passes: exit status 0" in n for n in red), str(len(red)))
+    finally:
+        rmtree_force(d)
+    return out
+
+
+def group_testfiles(env: Env, src: str = HERE) -> list:
+    """Parcel TG (2026-10-23): the report's own test (hw/test_card_stress_report.py) and the nightly page's (hw/test_card_stress_progress.py) are run
+    as processes of their own and their results made this suite's checks, after the controls that show the checks able to fail. Their real-file checks
+    read CARD_STRESS_RESUME_RUN (the report's) and CARD_STRESS_PROGRESS_RUNS (the page's), skip by name without them, and the skips are this suite's."""
+    return (test_file_controls() + test_file_checks("report test", os.path.join(src, "test_card_stress_report.py"), "report test")
+            + test_file_checks("progress test", os.path.join(src, "test_card_stress_progress.py"), "progress test"))
+
+
 def run_group(name: str, results: list) -> None:
     bad = [(n, d) for n, ok, d in results if not ok]
     for n, ok, d in results:
@@ -6962,7 +7083,7 @@ def main() -> int:
                                       ("trees", scn_trees, False),
                                       ("items", group_items, False), ("chunk", group_chunk, False),
                                       ("records", group_records, False), ("notes", group_notes, False),
-                                      ("resume", group_resume, False)):
+                                      ("resume", group_resume, False), ("testfiles", group_testfiles, False)):
             if not want(gname):
                 continue
             if gname in skipped_groups:

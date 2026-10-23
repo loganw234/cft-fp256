@@ -475,8 +475,14 @@ def group_page(out):
     json.dump(near, open(dj, "w", encoding="utf-8"))
     json.dump(DERIVED[0], open(dj, "w", encoding="utf-8"))
     tn = page("ok", dj)["app"]["text"]
-    check("Read from git, not recorded by the run: rtl tree c3c3c3c3c3c3 of commit a1a1a1a1a1a1." in tn and "Read from git" not in text,
-          "page: a class the report read from git gets a note under it, and a data file without the field none")
+    lab = next(c["label"] for c in DERIVED[0]["now"]["classes"] if c["id"] == "t1")
+    plain = json.loads(json.dumps(DERIVED[0]))
+    for c in plain["now"]["classes"]:
+        c.pop("derived_from_git", None)
+    json.dump(plain, open(dj, "w", encoding="utf-8"))
+    check(tn == page("ok", dj)["app"]["text"] and lab in tn and "Read from git" not in tn,
+          "page: a class the report read from git is said so once, by its label, wherever the label is shown: the page's text is the same with and without the data file's "
+          "derived_from_git, and no note under the label repeats the commit and the tree")
     json.dump(near, open(dj, "w", encoding="utf-8"))
     t2 = page("ok", dj)["app"]["text"]
     bad = json.loads(json.dumps(out))
