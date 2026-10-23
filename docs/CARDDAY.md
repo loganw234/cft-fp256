@@ -1227,7 +1227,8 @@ study is per RTL tree, with the three images reported separately beneath it.
   with the runs that recorded it (night 1 of the long run, 881bbcb, is in rtl 44b963dd's class: its four
   `scaleb32-all` items count as complete there), the class's label says "read from git at commit ...", and
   `--json` lists what was read in the class's `derived_from_git`: `{commit, dir, tree}` for each run whose tree in
-  the class was read, `[]` when none was (one entry for a commit and directory, however many `run_start`s name it).
+  the class was read, sorted by commit, dir and tree, `[]` when none was (one entry for a commit and directory, however many
+  `run_start`s name it); the label names the commits in the same sorted order, so nothing a class says depends on the order of its runs.
   A host item's class is the host/ tree read and "compiler not recorded", since **a compiler line is never read**
   (night 1's host slices stay in 276ed15a's class, which is not the current host/ tree). What git cannot say - a commit
   the checkout lacks (a shallow clone, a bundle without history: derived "in a checkout that holds the commit", and
