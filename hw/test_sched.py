@@ -2957,6 +2957,66 @@ def group_retention():
     rec3 = RT.run(dup[0], dup[1], RT_T, "j000099")
     check("retention: a clone whose archive cannot be made is KEPT, with the reason (here the archive directory exists already and is not written over), and the others still go",
           os.path.isdir(dup[2]["A"]) and any("exists already" in k["why"] for k in rec3["clones"]["kept"]) and rec3["clones"]["removed_n"] == 2, str(rec3["clones"]["kept"])[:300])
+    # remove_tree, S2's helper, and what retention does with a removal that fails. The helper retried WHATEVER function failed; on Python 3.12's fd-based rmtree that is `os.open` for some paths, and
+    # `os.open(path)` is a TypeError, so the real OSError was lost and a plant of this group crashed on the box (2026-10-23). A path that is not a directory must raise the OSError and be left alone.
+    rtd = os.path.join(TMP, "rm-tree")
+    os.makedirs(os.path.join(rtd, "d", "sub"))
+    os.makedirs(os.path.join(rtd, "target"))
+    f_, ro_, tgt, link = os.path.join(rtd, "afile"), os.path.join(rtd, "d", "sub", "ro.txt"), os.path.join(rtd, "target"), os.path.join(rtd, "alink")
+    for p_, text_ in ((f_, "x\n"), (ro_, "a git object\n"), (os.path.join(tgt, "keep.txt"), "k\n")):
+        open(p_, "w", newline="").write(text_)
+    os.chmod(ro_, 0o444)
+    mode = lambda p_: os.stat(p_).st_mode & 0o777
+    mode_f, mode_t = mode(f_), mode(tgt)
+    try:
+        os.symlink(tgt, link)
+    except (OSError, NotImplementedError):
+        link = None                                                                                   # a platform or a user that cannot make links: the link half is skipped, not passed
+
+    def raised(fn):
+        try:
+            return fn()
+        except Exception as e:                                                                        # a plant that brings the old helper back must make a check red, not end the group
+            return e
+
+    def restore(*pairs):
+        for p_, m_ in pairs:                                                                          # a red check must not leave the scratch unremovable: the old helper chmod'ed a file and a link's target to
+            try:                                                                                      # write-only, and a user who is not root cannot then open them (the run would end in a traceback)
+                os.chmod(p_, m_)
+            except OSError:
+                pass
+    e_file = raised(lambda: CODE.remove_tree(f_))
+    e_link = raised(lambda: CODE.remove_tree(link)) if link else None
+    calls = []
+    e_stub = raised(lambda: CODE._writable(lambda p_: calls.append(p_), f_, (OSError, OSError("the real error"), None)))
+    check("retention: remove_tree of a path that is NOT a directory raises the OSError rmtree gave (not a TypeError) and leaves the path and its mode as they were: a file, and where links can be made a link, "
+          "whose target keeps its mode and its content; the handler retries ONLY an unlink, remove or rmdir, so a stub standing for any other failing function is not called and the real error is raised",
+          isinstance(e_file, OSError) and os.path.isfile(f_) and mode(f_) == mode_f and (link is None or (isinstance(e_link, OSError) and os.path.islink(link) and mode(tgt) == mode_t
+          and os.path.isfile(os.path.join(tgt, "keep.txt")))) and isinstance(e_stub, OSError) and str(e_stub) == "the real error" and calls == [], f"{e_file!r} {e_link!r} {e_stub!r} {calls}")
+    restore((f_, mode_f), (tgt, mode_t))
+    ro2 = os.path.join(rtd, "ro2.txt")
+    open(ro2, "w", newline="").write("x\n")
+    os.chmod(ro2, 0o444)
+    ok_tree, ok_retry = raised(lambda: CODE.remove_tree(os.path.join(rtd, "d"))), raised(lambda: CODE._writable(os.unlink, ro2, (OSError, OSError("x"), None)))
+    check("retention: remove_tree of a directory holding a read-only file (git's object files, which Windows will not delete without clearing the bit) still removes it, and the handler's retry of an unlink "
+          "after clearing the bit removes a read-only file", ok_tree is None and not os.path.exists(os.path.join(rtd, "d")) and ok_retry is None and not os.path.exists(ro2), f"{ok_tree!r} {ok_retry!r}")
+    r3, c3 = mkroot2("rt-fail")
+    sf, sl = "4" * 40, "5" * 40
+    pf, pl, t3 = os.path.join(r3, "clones", sf), os.path.join(r3, "clones", sl), os.path.join(r3, "outside")
+    os.makedirs(t3)
+    open(pf, "w", newline="").write("not a directory\n")
+    try:
+        os.symlink(t3, pl)
+    except (OSError, NotImplementedError):
+        pl = None
+    mode_t3 = mode(t3)
+    told = lambda sha_: raised(lambda: RT.remove_clone(r3, {"path": f"clones/{sha_}", "sha": sha_, "age_days": 99.0}, RT_T, "j000099"))
+    res_f, res_l = told(sf), told(sl) if pl else None
+    check("retention: a path it is told to remove that cannot be removed (a file, a link: its guards keep it from being told so in a real run) is KEPT, with the reason `could not be removed` and the OSError's text, "
+          "not crashed on and not called removed; it is a per-clone reason in the record (clones.kept), not a named refusal, the link's target is untouched, and the archive made for it stays",
+          isinstance(res_f, dict) and res_f["removed"] is False and "could not be removed" in res_f["why"] and os.path.isfile(pf) and os.path.isfile(os.path.join(r3, "archive", "clones", f"{sf}.{int(RT_T)}", "facts.json"))
+          and (pl is None or (isinstance(res_l, dict) and res_l["removed"] is False and "could not be removed" in res_l["why"] and os.path.islink(pl) and mode(t3) == mode_t3)), f"{res_f!r} {res_l!r}")
+    restore((t3, mode_t3))
 
 
 # ---------------------------------------------------------------------------------------- closeout
@@ -3574,6 +3634,8 @@ PLANTS = [  # (what is wrong, edits, the groups written for it, a fragment of th
      "publish", "publish: a `--check` that REFUSES", False),
     ("S4a: a fetch_host with a leading dash is accepted", [E("sched_config.py", 'HOST = re.compile(r"(?:[A-Za-z0-9_][A-Za-z0-9._-]{0,63}@)?[A-Za-z0-9][A-Za-z0-9._:-]{0,254}\\Z")', 'HOST = re.compile(r"(?:[A-Za-z0-9._-]{1,64}@)?[A-Za-z0-9._:-]{1,255}\\Z")')],
      "publish", "publish: config.json's publish.fetch_host", False),
+    ("S4a: remove_tree's handler retries every function that failed", [E("sched_code.py", "    if fn in (os.unlink, os.remove, os.rmdir):", "    if True:")],
+     "retention", "retention: remove_tree of a path that is NOT a directory", False),
     ("S4a: a refusal the table gives to S4a that nothing raises", [E("sched_names.py", '    "report-failed": ("S4a",', '    "never-raised-s4a": ("S4a", "closeout", "x"), "report-failed": ("S4a",')],
      "closeout,publish,table", "the table: every refusal the table gives to S4a", None),
 ]
