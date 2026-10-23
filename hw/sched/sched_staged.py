@@ -61,7 +61,7 @@ class StagedRunner:
 
     # ------------------------------------------------------------------------------------ the job
     def run(self, spec: dict, log, stop) -> tuple:
-        S = _State(len(spec["steps"]))
+        S = _State(len(spec.get("steps", ())))                       # a job of kind window has none: it is refused `window-unsupported` below, by name
         dry = bool(spec.get("dry_run"))
         try:
             self._run(spec, log, stop, S, dry)
@@ -85,20 +85,29 @@ class StagedRunner:
             fields["refusal"] = S.refusal
         return outcome, fields
 
-    def _run(self, spec, log, stop, S, dry):
+    def _card(self, log) -> dict:
         cfg = self.cfg
-        rcfg = cfg["runner"]
         card = next((c for c in cfg["cards"] if c["id"] == log.card), None)
         if card is None:                                              # claimed against a configuration this runner no longer holds: a refusal by name, not a runner_error
             raise Refusal("card-unknown", f"card {log.card!r} is not in the configuration this runner holds ({', '.join(c['id'] for c in cfg['cards'])})")
+        return card
+
+    def _run(self, spec, log, stop, S, dry):
+        card = self._card(log)
         if spec["kind"] != "staged":
-            raise Refusal("window-unsupported", f"kind {spec['kind']!r}: the window job is parcel S3's; this runner runs staged jobs")
-        steps = spec["steps"]
+            raise Refusal("window-unsupported", f"kind {spec['kind']!r}: the window job is the window runner's (sched_window.py); this runner runs staged jobs")
+        ctx = self._open(spec, log, S, dry, card, spec["steps"])
+        self._chain(spec, log, stop, S, ctx, spec["steps"], card)
+
+    def _open(self, spec, log, S, dry, card, steps):
+        """Everything before the first step: the steps judgeable, the job's image held to its files, the guard asked once if a step uses the card,
+        the commit cloned and asserted. Returns the context the steps read (the window runner calls this once for each commit it tries)."""
+        cfg = self.cfg
+        rcfg = cfg["runner"]
         for i, st in enumerate(steps):
             e = self.entries[st["type"]]
             if e.parse is None and not e.rc_only:
                 raise Refusal("parser-unknown", f"steps[{i}] {st['type']!r} has neither a parser nor the rc_only label: its output could not be judged")
-        jobdir = os.path.dirname(log.path)
         images = {i["name"]: dict(i, path=IM.expand(i["path"])) for i in cfg["images"]}
         image = None
         if spec.get("image"):
@@ -113,8 +122,13 @@ class StagedRunner:
         log.append("code", **facts)
         rev8 = IM.expand(rcfg["rev8_images"]) if rcfg["rev8_images"] else os.path.join(self.root, "rev8-images")
         ctx = S.ctx = Ctx(clone, image, images, rcfg["python"], rev8, dry)
-        built = None
-        for i, st in enumerate(steps):
+        return ctx
+
+    def _chain(self, spec, log, stop, S, ctx, steps, card, first=0, built=None):
+        """The steps in order, numbered from `first`. Returns the build record (None while nothing has needed a build)."""
+        rcfg, jobdir, clone, dry = self.cfg["runner"], os.path.dirname(log.path), ctx.clone, ctx.dry
+        for n, st in enumerate(steps):
+            i = first + n
             e = self.entries[st["type"]]
             if not S.skip and stop.requested():
                 S.skip, S.stopped = "a stop was requested", True
@@ -131,14 +145,15 @@ class StagedRunner:
             if e.is_card(st) and not dry:
                 GD.hold_until_clear(log, card["kind"], rcfg["guard_wait_max_s"], rcfg["guard_poll_s"], stop=stop.requested)
             self._step(log, S, ctx, jobdir, i, st, e, rcfg)
+        return built
 
-    def _build(self, log, spec, clone, jobdir, dry, rcfg, kind) -> dict:
+    def _build(self, log, spec, clone, jobdir, dry, rcfg, kind, logname="build.log") -> dict:
         if dry:
             rec = BD.dry_record()
         else:
             done: list = []
             try:
-                rec = BD.KIND_BUILDS[kind](clone, spec["code"]["commit"], rcfg, jobdir, os.path.join(jobdir, "build.log"), done)
+                rec = BD.KIND_BUILDS[kind](clone, spec["code"]["commit"], rcfg, jobdir, os.path.join(jobdir, logname), done)
             except Refusal:
                 log.append("build", ok=False, steps=done, disabled={}, build_id=None)
                 raise

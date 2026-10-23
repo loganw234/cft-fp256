@@ -15,6 +15,7 @@ import os
 import socket
 import time
 
+import sched_window as WD
 from sched_names import Refusal
 from sched_state import (HAVE_FLOCK, ID_RE, Lock, Log, card_log, claim_next, finish, hold_info, id_key, lock_held, queue_entries,
                          read_records, recover, stop_info)
@@ -185,8 +186,9 @@ def gather_status(root: str, cfg: dict) -> dict:
     recent = [job_view(root, "jobs", j) for j in _ids(root, "jobs")[-20:]]
     last = max(recent, key=lambda j: j["t"] or 0, default=None)
     ref = read_records(os.path.join(root, "refusals.jsonl"))
+    wins = [dict(WD.window_info(root, w, j["id"], cfg), id=j["id"], where=w) for w, js in (("running", jobs["running"]), ("queue", jobs["queued"])) for j in js if j["kind"] == "window"]
     return {"root": root, "service": {"running": held, "info": info}, "locks": "flock" if held is not None else "unavailable",
-            "cards": cards, "queue": jobs["queued"], "last": last, "last_refusal": ref[-1] if ref else None}
+            "cards": cards, "queue": jobs["queued"], "windows": wins, "last": last, "last_refusal": ref[-1] if ref else None}
 
 
 def _when(t) -> str:
@@ -208,6 +210,8 @@ def format_status(st: dict) -> str:
             lines.append(f"    held by {c['hold'].get('by')} since {_when(c['hold'].get('t'))}: {c['hold'].get('why')}")
     lines.append(f"queue   : {len(st['queue'])} queued")
     lines += [f"    {j['id']}  priority {j['priority']}  {j['card']}  {j['name']!r}" for j in st["queue"]]
+    for w in st.get("windows", []):
+        lines += [f"window  : {w['id']} ({w['where']})"] + WD.format_window(w)
     la = st["last"]
     lines.append("last    : " + (f"{la['id']} {la['outcome']}" + (f" ({la['refusal']})" if la["refusal"] else "") + f" on {la['card']} at {_when(la['t'])}"
                                  if la else "no job has ended"))

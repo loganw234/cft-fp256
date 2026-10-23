@@ -8,18 +8,22 @@ extracts/ (clones/ and extracts/ are S2's and S4's), and ids/ (the markers that 
 config.json is read at start and an invalid one is refused `config-form`, by name. Each section is merged
 over DEFAULTS, so a file may state only what it changes; `cards` has no default, because inventing a card
 would be a claim about the machine. The retention is Logan's, 2026-10-21, doubled from the study's numbers.
-This parcel carries the retention, the floors and the windows and acts on none of them (S3 and S4 do).
+This parcel carries the retention and the floors and acts on neither (S4 does); the windows are acted on since parcel S3a (sched_calendar.py,
+sched_window.py).
 Parcel S2 added a card's optional `platform`, an image's optional `tiles` and `platform`, and the sections `code` (where a
-job's bundles and remote are) and `runner` (the driver's own defaults for how a step runs).
+job's bundles and remote are) and `runner` (the driver's own defaults for how a step runs). Parcel S3a added a window's optional
+`dates` and seconds in its times, a zone that must be one this machine knows, and the runner's `window_grace_s` and `window_poll_s`.
 """
 from __future__ import annotations
 
 import copy
+import datetime
 import json
 import math
 import os
 import re
 
+import sched_calendar as CAL
 from sched_names import Refusal
 from sched_spec import IDENT_RE, parse_text      # one JSON reader: a repeated key and NaN are refused the same way
 
@@ -28,7 +32,8 @@ LAYOUT = ("queue", "running", "jobs", "cards", "clones", "extracts", "ids")
 CARD_KINDS = {"xrt": "an Alveo card driven through XRT over PCIe (the U50)"}   # nothing else reads a card's kind
 HEX64 = re.compile(r"[0-9a-f]{64}\Z")
 PLATFORM = re.compile(r"[A-Za-z0-9_.-]{1,100}\Z")
-CLOCK = re.compile(r"(?:[01]\d|2[0-3]):[0-5]\d\Z")
+CLOCK = re.compile(r"(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?\Z")
+DATE = re.compile(r"\d{4}-\d{2}-\d{2}\Z")
 ZONE = re.compile(r"[A-Za-z0-9_+./-]{1,64}\Z")
 
 DEFAULTS = {
@@ -41,8 +46,12 @@ DEFAULTS = {
     # "pushed" when a branch of this remote holds it. Null: not configured, and a job that needs it is refused by name.
     "code": {"bundle_dir": None, "remote": None},
     # how a staged job runs (parcel S2): the driver's own defaults for its options of the same names
+    # window_grace_s: how long past its window's end the driver may run before the scheduler asks it to stop (its STOP file); the driver's
+    # own overshoot was 31, 74 and 181 s in the three runs measured and its longest leg is about 11 minutes. window_poll_s: how often
+    # the scheduler looks while the driver runs (for the grace, and for a cancel).
     "runner": {"nice": 10, "kill_after_s": 60, "xrt_root": "/opt/xilinx/xrt", "build_jobs": 4, "build_timeout_s": 2400,
-               "guard_wait_max_s": 14400, "guard_poll_s": 30, "rev8_images": None, "python": "python3"},
+               "guard_wait_max_s": 14400, "guard_poll_s": 30, "rev8_images": None, "python": "python3",
+               "window_grace_s": 900, "window_poll_s": 5},
 }                                        # record_days null: every record is kept
 
 
@@ -147,21 +156,32 @@ def validate_config(raw) -> dict:
         if "zone" in w:
             if not isinstance(w["zone"], str) or not ZONE.match(w["zone"]):
                 raise _form("windows.zone", "must be `local` or a zone name such as Area/City")
+            if CAL.zone_problem(w["zone"]):
+                raise _form("windows.zone", CAL.zone_problem(w["zone"]))
             cfg["windows"]["zone"] = w["zone"]
         if "list" in w:
             if not isinstance(w["list"], list):
                 raise _form("windows.list", "must be a list")
             names = set()
             for i, x in enumerate(w["list"]):
-                _keys(x, f"windows.list[{i}]", ("name", "start", "end"))
+                _keys(x, f"windows.list[{i}]", ("name", "start", "end"), ("dates",))
                 if not isinstance(x["name"], str) or not IDENT_RE.match(x["name"]) or x["name"] in names:
                     raise _form(f"windows.list[{i}].name", "must be a unique identifier of a-z 0-9 . _ -")
                 names.add(x["name"])
                 for k in ("start", "end"):
                     if not isinstance(x[k], str) or not CLOCK.match(x[k]):
-                        raise _form(f"windows.list[{i}].{k}", "must be a time of day, HH:MM")
+                        raise _form(f"windows.list[{i}].{k}", "must be a time of day, HH:MM or HH:MM:SS")
                 if x["start"] == x["end"]:
                     raise _form(f"windows.list[{i}]", "start and end are the same time")
+                if "dates" in x:
+                    ds = x["dates"]
+                    if not (isinstance(ds, list) and 1 <= len(ds) <= 400 and all(isinstance(d, str) and DATE.match(d) for d in ds)):
+                        raise _form(f"windows.list[{i}].dates", "must be a list of 1 to 400 dates, YYYY-MM-DD (the dates the window starts on)")
+                    for d in ds:
+                        try:
+                            datetime.date.fromisoformat(d)
+                        except ValueError:
+                            raise _form(f"windows.list[{i}].dates", f"{d!r} is not a date")
             cfg["windows"]["list"] = w["list"]
     if "floors" in raw:
         _keys(raw["floors"], "floors", (), tuple(DEFAULTS["floors"]))
