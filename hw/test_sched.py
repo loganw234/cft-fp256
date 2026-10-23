@@ -2583,7 +2583,7 @@ PLANTS = [  # (what is wrong, edits, the groups written for it, a fragment of th
     ("S2: a registry path's environment variable is not expanded", [E("sched_images.py", "    return os.path.expandvars(os.path.expanduser(path))", "    return path")], "images",
      "a registry path may carry an environment variable", False),
     ("S2: dt-i's image identity is not held", [E("sched_steps.py", '    if e.get("image_sha256") != im["sha256"]:', "    if False:")], "steps:jobs", "dt-i holds the identity", False),
-    ("S2: a window job is run as a staged one", [E("sched_staged.py", '        if spec["kind"] != "staged":', "        if False:")], "steps:refusals", "a job of kind window is refused `window-unsupported`", False),
+    ("S2: a window job is run as a staged one", [E("sched_staged.py", '        if spec["kind"] != "staged":', "        if False:")], "steps:refusals", "a job of kind window handed to the STAGED runner", False),
     ("S2: a timeout is not enforced", [E("sched_proc.py", '        if shutil.which("timeout"):', "        if False:"),
                                    E("sched_proc.py", '        deadline = time.monotonic() + timeout_s + (kill_after_s + 30 if POSIX and shutil.which("timeout") else 0)', "        deadline = time.monotonic() + 10 ** 9")],
      "steps:run_step", "the timeout is ENFORCED", "posix"),
