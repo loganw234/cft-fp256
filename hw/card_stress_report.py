@@ -964,7 +964,7 @@ def _trees(sources: List[Dict[str, Any]], rev: Optional[Callable[[str, str], Opt
             if kind not in info["cl"]:
                 info["cl"][kind] = _tree_class(kind, info, rev is not None)
             c = _gather(classes, kind, info["cl"][kind])
-            rid =_str(rs.get("run_id")) if isinstance(rs, dict) else None
+            rid = _str(rs.get("run_id")) if isinstance(rs, dict) else None
             cm = _str((rs.get("tree") or {}).get("commit")) if isinstance(rs, dict) and isinstance(rs.get("tree"), dict) else None
             if rid and rid not in c["runs"]:
                 c["runs"].append(rid)

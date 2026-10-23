@@ -158,10 +158,8 @@ rebuilt after each night from the run's own record by <code>hw/card_stress_progr
     var t = Math.round(s);
     return Math.floor(t / 3600) + " h " + Math.floor(t % 3600 / 60) + " m " + t % 60 + " s";
   }
-  function derivedNote(c) {       // a class the report says holds a run whose tree it read from git; nothing where the field is absent
-    var l = (Array.isArray(c.derived_from_git) ? c.derived_from_git : []).filter(function (x) { return x && typeof x.commit === "string" && typeof x.tree === "string"; });
-    return l.length ? h("p", { "class": "small dim", text: "Read from git, not recorded by the run: " + l.map(function (x) { return (x.dir || "") + " tree " + x.tree + " of commit " + x.commit; }).join("; ") + "." }) : null;
-  }
+  // A class whose tree the report read from git says so in its label ("read from git at commit ..."), which the page shows as it comes;
+  // the data file's `derived_from_git` (commit, directory and tree of each) is the same statement as data, and the page does not repeat it.
   function estimateText(e, note) {
     if (!e) return note ? "No estimate: " + note + "." : "";
     var when = e.date ? e.date : "in about " + e.nights_left + " night(s)";
@@ -252,7 +250,6 @@ rebuilt after each night from the run's own record by <code>hw/card_stress_progr
       return h("div", { "class": "card" },
         h("div", { "class": "kind", text: c.kind + " items - current " + (c.kind === "tile" ? "RTL tree" : "host tree") }),
         h("div", { "class": "mono small", text: c.label }),
-        derivedNote(c),
         h("div", { "class": "big", text: done }),
         h("div", { text: "items fully covered" }),
         bar(t.covered, t.space, c.kind + " items covered"),
@@ -309,7 +306,6 @@ rebuilt after each night from the run's own record by <code>hw/card_stress_progr
       });
       return h("div", null, h("h3", { "class": "mono", text: c.kind + " items - " + c.label }),
         h("p", { "class": "small dim", text: c.total.complete + " of " + c.total.items + " fully covered; night" + (c.nights.length === 1 ? " " : "s ") + c.nights.join(", ") }),
-        derivedNote(c),
         c.served ? items : h("details", null, h("summary", { text: "No slice has completed under this tree yet: its " + c.items.length + " items are all at zero" }), items));
     }
     var perItem = h("section", { id: "items" }, h("h2", { text: "Item by item" }),

@@ -2195,6 +2195,12 @@ class Persistent(R.GitTrees):
         return super()._git(*args)
 
 
+class Blind(R.GitTrees):
+    """A GitTrees that never says what stopped it, so the label tree_class gives for it is the one a tree_class that left the problem out of the
+    label would give (VRG, 2026-10-23: that defect, planted in a copy of the report, went uncaught: 5,075 checks, 0 failed)."""
+    problem = property(lambda self: None, lambda self, v: None)
+
+
 def ck_kept(ck, cls):
     """git is asked once for each (commit, directory), by the driver's own command, with a timeout."""
     b, fake = "b" * 40, FakeProc()
@@ -2499,12 +2505,25 @@ def group_git(tmp):
             cs = kclasses(R.summarize(([rs] if rs else []) + [lg], rev=rev_sum), kind)
             want, got = (cs[0]["key"], cs[0]["label"]) if len(cs) == 1 else None, R.tree_class(kind, rs, rev_cls)
             ck(want is not None and got == want, f"tree_class: {fam}, {kind}: the (key, label) summarize gives a run_start with one slice of that kind under it", (got, want))
+            prob = getattr(rev_sum, "problem", None)           # git was stopped: the class kept apart says what stopped it, in summarize's label as in tree_class's
+            if prob and kind != "unknown":
+                ck(want is not None and f" [git: {prob}]" in want[1], f"tree_class: {fam}, {kind}: summarize's label for the class kept apart says what stopped git ([git: ...])", want)
     for fam, tree, rv in (("derived", fx.old, rev), ("recorded", fx.rec, rev), ("absent commit", dict(fx.old, commit=absent), rev),
                           ("not recorded clean", unclean, rev), ("contradicted", contra, rev), ("--no-git", fx.old, None),
                           ("given function", fx.old, fnrev), ("before any run_start", None, rev)):
         hold(ck_tree_class, fam, tree, rv, rv)
     plant(ck_tree_class, "tree_class reading no git where summarize reads it", "tree_class: derived, tile", "derived", fx.old, rev, None)
     plant(ck_tree_class, "tree_class calling a function git", "tree_class: derived, tile", "derived", fx.old, fnrev, rev)
+    # git stopped (parcel TG, VRG's b1): the run_start recorded no tree and git was not asked, or could not answer, so its class is kept apart, and the label of a
+    # class kept apart says what stopped git. Each side gets a fresh GitTrees, so that what stopped it is read after the lookups in both - a tree_class that
+    # read it before them, or left it out, is a label without the [git: ...] that summarize's has
+    stops = (("git did not answer", lambda: FakeProc(exc=subprocess.TimeoutExpired("git", 10))), ("git could not be run", lambda: FakeProc(exc=FileNotFoundError())),
+             ("no repository", lambda: FakeProc(rc=128, out="")))
+    for fam, fake in stops:
+        with patched(subprocess=fake()):
+            hold(ck_tree_class, fam, fx.old, R.GitTrees("/x"), R.GitTrees("/x"))
+    with patched(subprocess=stops[0][1]()):
+        plant(ck_tree_class, "tree_class not saying what stopped git", "tree_class: git did not answer, tile", "git did not answer", fx.old, R.GitTrees("/x"), Blind("/x"))
     # 3. git is bounded and kept
     hold(ck_kept, R.GitTrees)
     plant(ck_kept, "no cache", "git: kept per (commit, directory)", Uncached)
