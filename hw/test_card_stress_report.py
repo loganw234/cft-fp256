@@ -2143,15 +2143,16 @@ def ck_derived(ck, S, fx, twin):
 
 
 def ck_many(ck, S, fx, rev, many):
-    """A resumed run (a second run_start at one commit) is ONE entry of derived_from_git, a run at another commit a second."""
+    """A resumed run (a second run_start at one commit) is ONE entry of derived_from_git, a run at another commit a second; the entries and
+    the commits a label names are sorted, not in the order the runs came."""
     ta = kkey(kclasses(S, "tile"), fx.A) or NO_CLASS
-    c1, c2 = fx.c[0][:12], fx.c[1][:12]
-    ck.eq([(d["commit"][:12], d["dir"]) for d in ta["derived_from_git"]], [(c1, "rtl"), (c2, "rtl")],
-          "many: two run_starts at one commit and one at another give two derived_from_git entries, in the order first used")
-    ck("commits" in ta["label"] and c1 in ta["label"] and c2 in ta["label"], "many: and the label names both commits", ta["label"])
+    lo, hi = sorted((fx.c[0][:12], fx.c[1][:12]))
+    ck.eq([(d["commit"][:12], d["dir"]) for d in ta["derived_from_git"]], [(lo, "rtl"), (hi, "rtl")],
+          "many: two run_starts at one commit and one at another give two derived_from_git entries, sorted by commit")
+    ck("commits" in ta["label"] and lo in ta["label"] and hi in ta["label"], "many: and the label names both commits", ta["label"])
     with patched(LABEL_COMMITS=1):
         lab = R.summarize(many, rev=rev)["sweep"]["trees"]["classes"][0]["label"]
-    ck(c1 in lab and "and 1 more" in lab and c2 not in lab, "many: and names at most LABEL_COMMITS of them, the rest as a count", lab)
+    ck(lo in lab and "and 1 more" in lab and hi not in lab, "many: and names at most LABEL_COMMITS of them (the first in sorted order), the rest as a count", lab)
 
 
 def ck_apart(ck, S, fx, commit, why, what):
@@ -2425,6 +2426,19 @@ def group_git(tmp):
     for cl in kclasses(bad, "tile"):
         cl["label"] = cl["label"].replace(" (whether it was modified is not recorded)", "")  # the first run's tail, as it was
     plant(ck_note, "the tail of the class's first run", "note: one note in either order", N_ab, bad)
+    lo, hi = sorted((c1[:12], c2[:12]))
+
+    def ck_commits(ck, s1, s2):                         # two runs with no tree, at c1 and at c2, both deriving rtl A
+        (l1, d1), (l2, d2) = (((kkey(kclasses(s, "tile"), A) or NO_CLASS)[f] for f in ("label", "derived_from_git")) for s in (s1, s2))
+        ck(l1 == l2 and f"(read from git at commits {lo}, {hi})" in l1, "commits: the label names the derived commits in sorted order whatever the order of the runs", (l1, l2))
+        ck(d1 == d2 and [d["commit"] for d in (d1 or [])] == sorted([c1, c2]), "commits: and derived_from_git is sorted by commit, so the JSON is the same in either order", (d1, d2))
+    C_ab, C_ba = two(fx.old, dict(fx.old, commit=c2)), two(dict(fx.old, commit=c2), fx.old)
+    hold(ck_commits, C_ab, C_ba)
+    bad = copy.deepcopy(C_ba)
+    for cl in kclasses(bad, "tile"):
+        cl["label"] = cl["label"].replace(f"commits {lo}, {hi}", f"commits {hi}, {lo}")      # the order the runs came in, as it was
+        cl["derived_from_git"].reverse()
+    plant(ck_commits, "the commits in the order the runs came", "commits: the label names", C_ab, bad)
     # 2. what git cannot say is kept apart, by commit, with the reason
 
     def dirty_blind(t):               # a report that takes every checkout for a clean one

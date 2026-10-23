@@ -64,8 +64,9 @@ be computed is "-" or "n/a", never 0. Choices a reader could otherwise take anot
     with tree.cc, the C compiler's version line. A tree with uncommitted changes is a class of its
     own (tree.rtl_dirty, tree.host_src_dirty); a run that recorded none of it (every run before
     2026-10-20) has it READ FROM GIT where git can say (above): the class of the tree a run that recorded
-    it would be in, its label saying "read from git" and its `derived_from_git` (in --json) listing
-    {commit, dir, tree} for each run whose tree in that class was read, [] when none was. (A `rev` that is
+    it would be in, its label saying "read from git" at commits it names sorted and its `derived_from_git`
+    (in --json) listing {commit, dir, tree} for each run whose tree in that class was read, sorted by
+    commit, dir and tree whatever the order of the runs, [] when none was. (A `rev` that is
     not git - a function a caller gave to summarize() - is used as given and not called git: the label says
     "taken from the given rev, not git", `sweep.trees.git.read` is false and `source` is "given rev", and
     `derived_from_git` lists what the function answered.) What git cannot
@@ -882,10 +883,11 @@ def _tree_class(kind: str, info: Dict[str, Any], git_read: bool = True) -> Dict[
 def _tree_label(c: Dict[str, Any], problem: Optional[str], via: str = "git") -> str:
     """A class's label, the same whatever the order of the runs it gathers: its head - for a class whose tree is not known the word is the
     runs' common one ('unknown', 'not recorded'), and 'not recorded or unknown' where they differ -, '(read from git at commit ...)' where a
-    run's tree in it was read from git ('(taken from the given rev, not git, at commit ...)' where `via` says a function the caller gave
-    answered), its tail, and, for a class kept apart, why (the reasons sorted) - with what stopped git where something did, since a commit
-    git was not asked about is "not in this checkout" to resolve_tree and the reader must be able to tell that from an absent one."""
-    cms = list(dict.fromkeys(d["commit"][:12] for d in c["derived"]))
+    run's tree in it was read from git, the commits sorted ('(taken from the given rev, not git, at commit ...)' where `via` says a
+    function the caller gave answered), its tail, and, for a class kept apart, why (the reasons sorted) - with what stopped git where
+    something did, since a commit git was not asked about is "not in this checkout" to resolve_tree and the reader must be able to tell
+    that from an absent one."""
+    cms = sorted({d["commit"][:12] for d in c["derived"]})
     how = "read from git" if via == "git" else "taken from the given rev, not git,"
     read = (f" ({how} at commit{'s' if len(cms) > 1 else ''} {', '.join(cms[:LABEL_COMMITS])}"
             + (f" and {len(cms) - LABEL_COMMITS} more" if len(cms) > LABEL_COMMITS else "") + ")") if cms else ""
@@ -902,8 +904,9 @@ def _trees(sources: List[Dict[str, Any]], rev: Optional[Callable[[str, str], Opt
     beside it. Nothing here is summed across classes. A run_start's tree is what it recorded with what it did not taken from its commit
     through `rev` (resolve_tree: git of the checkout; None reads the records alone; a function the caller gave is used as given). A class
     entry has `label` (which says "read from git" where a run's tree in it was, and "taken from the given rev, not git" where a function the
-    caller gave supplied it) and `derived_from_git`: [{commit, dir ('rtl'|'host'), tree}] for each run whose tree in the class `rev` supplied
-    - what git gave when rev is a GitTrees, what the function answered when it is not -, [] when none was; the result has `git`: {read,
+    caller gave supplied it) and `derived_from_git`: [{commit, dir ('rtl'|'host'), tree}], sorted by those three, for each run whose tree in
+    the class `rev` supplied - what git gave when rev is a GitTrees, what the function answered when it is not -, [] when none was; the
+    label names the commits sorted too, so that nothing a class says depends on the order of its runs; the result has `git`: {read,
     source, problem}: whether git was read (only a GitTrees reads it), where the trees came from ('git', 'given rev', 'records') and what,
     if anything, stopped git."""
     classes: Dict[Tuple[str, str], Dict[str, Any]] = {}
@@ -996,7 +999,8 @@ def _trees(sources: List[Dict[str, Any]], rev: Optional[Callable[[str, str], Opt
             tot_cov = sum(e["covered"] for e in exh)
             tot_sp = sum(e["total"] for e in exh)
             out.append({
-                "kind": kind, "key": key, "label": _tree_label(c, problem, via), "derived_from_git": c["derived"], "runs": c["runs"],
+                "kind": kind, "key": key, "label": _tree_label(c, problem, via),
+                "derived_from_git": sorted(c["derived"], key=lambda d: (d["commit"], d["dir"], d["tree"])), "runs": c["runs"],
                 "commits": c["commits"], "images": imgs, "exhaustive": exh, "random": rnd,
                 "total": {"items": len(exh), "covered": tot_cov, "total": tot_sp,
                           "pct": (100.0 * tot_cov / tot_sp) if exh else None,
@@ -1721,7 +1725,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--json", metavar="FILE", default=None,
                     help="also write the same figures as JSON to FILE (sweep.trees.classes[]: key, label - which says \"read from git\" "
                          "where a run's tree was - and derived_from_git, the {commit, dir, tree} of each run whose tree in the class was "
-                         "read from git, [] when none was; for a rev that is not git, which only a caller of summarize() can give, the label "
+                         "read from git, sorted by commit, dir and tree, [] when none was; for a rev that is not git, which only a caller of summarize() can give, the label "
                          "says \"taken from the given rev, not git\" and derived_from_git is what that function answered; "
                          "sweep.trees.git: {read, source, problem}, whether git was read, where the trees came from and what stopped it)")
     ap.add_argument("--no-git", action="store_true",
