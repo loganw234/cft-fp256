@@ -22,7 +22,6 @@ sys.dont_write_bytecode = True
 import calendar
 import datetime
 import hashlib
-import inspect
 import json
 import os
 import re
@@ -44,14 +43,22 @@ PAGE, DATA = os.path.join(ROOT, "site", "nightly.html"), os.path.join(ROOT, "sit
 FIXTURE = os.path.join(HW, "card_stress_fixtures", "progress-synthetic.jsonl")
 st = {"n": 0, "f": 0, "skips": 0}
 DERIVED = []
-_SUMMARIZE = R.summarize
-_HAS_REV = "rev" in inspect.signature(R.summarize).parameters      # the report derives an unrecorded tree from git when it takes `rev`
+_SUMMARIZE, _TREE_CLASS = R.summarize, R.tree_class
+
+
+def with_rev(rev):
+    """The reducer's calls to summarize() and to tree_class() with `rev` given: None is the record-only view (the CLI's --no-git), a function the
+    report's "given rev" view. The fixture's commits are made up, so its groups use None and need no git; the real copies use the defaults (git of
+    the checkout), which are what `card_stress_report.py --json` shows."""
+    R.summarize = lambda *a, **k: _SUMMARIZE(*a, **dict(k, rev=k.get("rev", rev)))
+    R.tree_class = lambda kind, rs, rev=rev: _TREE_CLASS(kind, rs, rev)
 
 
 def record_only(on):
-    """The fixture's commits are made up, so its groups need no git: where summarize() takes `rev` they pass rev=None (the record-only view,
-    the CLI's --no-git). The real copies use the defaults, which are what `card_stress_report.py --json` shows."""
-    R.summarize = (lambda *a, **k: _SUMMARIZE(*a, **dict(k, rev=k.get("rev")))) if (on and _HAS_REV) else _SUMMARIZE
+    if on:
+        with_rev(None)
+    else:
+        R.summarize, R.tree_class = _SUMMARIZE, _TREE_CLASS
 
 
 def check(ok, what, detail=None):
@@ -351,7 +358,7 @@ def raw_check(out, d, label, plants=True):
 
 def report_of(d, git_free):
     j = os.path.join(TMP, "report-%s.json" % hashlib.sha256(d.encode()).hexdigest()[:8])
-    nogit = ["--no-git"] if git_free and "--no-git" in cli("--help", script=REPORT)[1] else []
+    nogit = ["--no-git"] if git_free else []
     rc, text, err = cli(d, "--no-write", "--json", j, *nogit, script=REPORT)
     with open(j, encoding="utf-8") as fh:
         return json.load(fh), text, rc
@@ -377,6 +384,7 @@ def shared(out, S, text):
         c = mine.get(key)
         if c is None:
             continue
+        f.append((f"class {c['id']}: label", c["label"], rc["label"]))
         f.append((f"class {rc['label'][:40]}: covered", c["total"]["covered"], rc["total"]["covered"]))
         rows = {r["item"]: r for r in c["items"]}
         for e in rc["exhaustive"]:
@@ -467,7 +475,7 @@ def group_page(out):
     json.dump(near, open(dj, "w", encoding="utf-8"))
     json.dump(DERIVED[0], open(dj, "w", encoding="utf-8"))
     tn = page("ok", dj)["app"]["text"]
-    check("Read from git, not recorded by the run: rtl tree f7f7f7f7f7f7 of commit a1a1a1a1a1a1." in tn and "Read from git" not in text,
+    check("Read from git, not recorded by the run: rtl tree c3c3c3c3c3c3 of commit a1a1a1a1a1a1." in tn and "Read from git" not in text,
           "page: a class the report read from git gets a note under it, and a data file without the field none")
     json.dump(near, open(dj, "w", encoding="utf-8"))
     t2 = page("ok", dj)["app"]["text"]
@@ -506,7 +514,10 @@ def group_fixture():
     against_report(out, d, "fixture")
     raw_check(out, d, "fixture")
     eq(out["totals"]["disagreements"], 0, "fixture: no disagreement in 18 completed slices")
-    eq([c["label"] for c in out["now"]["classes"] if c["kind"] == "tile"], ["commit a1a1a1a, tree not recorded in the run", "RTL tree c3c3c3c3c3c3"], "fixture: an unrecorded tree is said plainly, by its commit")
+    rs = [r for r in recs if r["type"] == "run_start"]
+    lab = [c["label"] for c in out["now"]["classes"] if c["kind"] == "tile"]
+    eq(lab, [R.tree_class("tile", rs[0], rev=None)[1], R.tree_class("tile", rs[1], rev=None)[1]], "fixture: a class's label is the report's own (tree_class, the label --json gives), not reworded")
+    check("not recorded" in lab[0] and "a1a1a1a1a1a1" in lab[0] and "RTL tree c3c3c3c3c3c3" in lab[1], "fixture: an unrecorded tree's label names the commit, as the report writes it", lab)
     wide = next(r for c in out["now"]["classes"] if c["id"] == "t2" for r in c["items"] if r["item"] == "scaleb32-wide-rne")
     eq((wide["first_gap"], wide["covered"]), ([0, A], 3 * A), "fixture: the current class's first gap is its own ([0, A)), though the whole run has covered every index")
     zero = next(r for c in out["now"]["classes"] if c["id"] == "t2" for r in c["items"] if r["item"] == "scaleb32-all-rne")
@@ -522,8 +533,23 @@ def group_fixture():
     against_oracle(pb, bare, rb)
     raw_check(pb, db, "nothing swept on the host under the current tree", plants=False)
     h2 = next(c for c in pb["now"]["classes"] if c["id"] == "h2")
-    eq((h2["current"], h2["served"], h2["nights"], h2["total"]["covered"], h2["label"]), (True, False, [2, 3], 0, "host/ tree d4d4d4d4d4d4, compiler cc (Fixture) 1.0"),
-       "fixture: a current class nothing was swept under is still listed, as its night's tree names it (the report has no entry for it)")
+    eq((h2["current"], h2["served"], h2["nights"], h2["total"]["covered"], h2["label"]),
+       (True, False, [2, 3], 0, R.tree_class("host", [r for r in rb if r["type"] == "run_start"][1], rev=None)[1]),
+       "fixture: a current class nothing was swept under is still listed, with the label the report's tree_class gives its night's tree (the summary has no entry for it)")
+    check("d4d4d4d4d4d4" in h2["label"] and "compiler cc (Fixture) 1.0" in h2["label"], "fixture: and that label names the host tree and its compiler", h2["label"])
+
+    def broken(kind, rs, rev=None):
+        raise RuntimeError("tree_class is broken")
+    real_tc, R.tree_class = R.tree_class, broken
+    try:
+        try:
+            reduce_dir(db)
+            raised = False
+        except RuntimeError as e:
+            raised = "tree_class is broken" in str(e)
+    finally:
+        R.tree_class = real_tc
+    check(raised, "plant: a report whose tree_class raises fails the reduction, and nothing falls back to another label")
     one = [N1 | {"tree": dict(TREE_B, commit="a1" * 20, host_src="e6" * 20)}, N2, N3]       # one RTL tree on every night, the host tree changing at night 2
     r1 = build(one)
     d1 = write_run(r1, "one-rtl")
@@ -533,22 +559,20 @@ def group_fixture():
     raw_check(p1, d1, "one RTL tree over three nights", plants=False)
     eq(([(c["id"], c["nights"]) for c in p1["now"]["classes"] if c["kind"] == "tile"], p1["now"]["classes"][0]["total"]["complete"]), ([("t1", [1, 2, 3])], 3),
        "fixture: a class that spans nights is one class, and an item complete on its first night is complete in it")
-    base_summarize = R.summarize
+    N1d = N1 | {"tree": {"commit": "a1" * 20, "dirty": False, "dirty_files": 0, "rtl": "c3" * 20, "rtl_dirty": False}}      # night 1 as the report then takes it
 
-    def derived(*a, **k):                              # a stand-in for the report after parcel RG: night 1's tile class says it was read from git
-        S = base_summarize(*a, **k)
-        for c in S["sweep"]["trees"]["classes"]:
-            if c["kind"] == "tile" and c["key"].startswith("unrecorded:"):
-                c["derived_from_git"] = [{"commit": c["key"][11:], "dir": "rtl", "tree": "f7" * 20}]
-        return S
-    R.summarize = derived
+    def rev_a1(commit, rel):                           # a rev that knows night 1's commit: its RTL tree is the one nights 2 and 3 recorded
+        return "c3" * 20 if (commit, rel) == ("a1" * 20, "rtl") else None
+    with_rev(rev_a1)
     try:
         pd = reduce_dir(d)
     finally:
-        R.summarize = base_summarize
-    eq({c["id"]: c.get("derived_from_git") for c in pd["now"]["classes"]}, {"t1": [{"commit": "a1a1a1a1a1a1", "dir": "rtl", "tree": "f7f7f7f7f7f7"}], "h1": None, "t2": None, "h2": None},
-       "fixture: a class the report read from git carries its commits and trees, and the others carry no such field")
-    eq(sum("derived_from_git" in c for c in out["now"]["classes"]), 0, "fixture: with a report that has no such field the data file has none")
+        record_only(True)
+    against_oracle(pd, [N1d, N2, N3], recs)
+    eq({c["id"]: c.get("derived_from_git") for c in pd["now"]["classes"]}, {"t1": [{"commit": "a1a1a1a1a1a1", "dir": "rtl", "tree": "c3c3c3c3c3c3"}], "h1": None, "h2": None},
+       "fixture: with the real report reading night 1's tree (through a rev), the tile class spans the three nights and carries the commit and tree it was read at; the others carry no such field")
+    check("taken from the given rev" in next(c["label"] for c in pd["now"]["classes"] if c["id"] == "t1"), "fixture: and its label says where the tree came from")
+    eq(sum("derived_from_git" in c for c in out["now"]["classes"]), 0, "fixture: with the record-only view the data file has no such field")
     DERIVED.append(pd)
     two = reduce_dir(write_run(build(SPEC[:2]), "two"))
     eq(two["nights"], out["nights"][:2], "fixture: the reduction of the first two nights is the first two nights of the reduction (nights only append)")
@@ -556,8 +580,11 @@ def group_fixture():
 
 
 def group_check(d, text, out):
+    # the data file is made by the command itself, so that --check re-derives it in the view it was made in: the command's default reads git of the
+    # checkout, whose reasons the labels of a class with a made-up commit carry (the in-process fixture groups read the records alone)
     f = os.path.join(TMP, "data.json")
-    open(f, "w", encoding="utf-8", newline="\n").write(text)
+    eq(cli(d, "--out", f, "--commit", "none")[0], 0, "check: the command makes the data file from the fixture run (control)")
+    text = open(f, encoding="utf-8").read()
     rc, so, se = cli("--check", f, d)
     eq(rc, 0, f"check: the file made from the run is the run's reduction (control)")
     # plants in the run: each must change the reduction, and --check of the old file must name what changed

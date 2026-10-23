@@ -2100,7 +2100,7 @@ own. Each morning, once the night has ended (`COPY` is the copy's directory, the
    filter's first data-only push had not been seen when this was written. Then see `pages` go green and the page's "Newest night" show the date.
 
 A changed tree is a new class (a tile item is counted per RTL tree, a host item per host tree and compiler), so the page's current class
-starts from nothing and the earlier one stays as history; a run that recorded no tree is read from git where it can be (the class's label says so) and else is labelled "commit X, tree not recorded in the run".
+starts from nothing and the earlier one stays as history; a run that recorded no tree is read from git where it can be (the class's label says "read from git at commit X") and else is kept apart by its commit, the label giving the report's reason.
 `hw/test_card_stress_progress.py` holds all of this (the page in node, against a stub DOM, in its three failure states; SKIP, by name,
 without node), and, when `CARD_STRESS_PROGRESS_RUNS` names the copies' directories (separated as PATH is), every shared figure against
 `hw/card_stress_report.py --json` on them.
