@@ -30,7 +30,9 @@
 # jobs at a time (the box has 36 threads) about 25 to 35 minutes, bounded
 # by the fp64 rate jobs. Outputs go to ./box-out/, the committed *.out.txt
 # untouched. On a nightly day it fits before 17:50 if started by 17:10;
-# otherwise it waits for 08:00.
+# otherwise it waits for 08:00. Each job's end line carries its own exit
+# code (taken before $(date) runs, which would reset $? to date's: the
+# study's 3.6, item 8).
 set -u
 cd "$(dirname "$0")" || exit 1
 export PYTHONDONTWRITEBYTECODE=1
@@ -57,7 +59,7 @@ mkdir -p box-out
   for m in random edge big small diag; do
     echo "tw-measure-$m twrun.py measure 20000 $m"
   done
-} | xargs -P "$JOBS" -L 1 bash -c 'name=$0; echo "== $(date "+%F %T") start: $name"; '"$PY"' "$@" > "box-out/$name.out.txt" 2>&1; echo "== $(date "+%F %T") end ($?): $name"' | tee box-out/box_m4s.log
+} | xargs -P "$JOBS" -L 1 bash -c 'name=$0; echo "== $(date "+%F %T") start: $name"; '"$PY"' "$@" > "box-out/$name.out.txt" 2>&1; rc=$?; echo "== $(date "+%F %T") end ($rc): $name"' | tee box-out/box_m4s.log
 echo "== the budgets' bounds"
 grep -H "THE BUDGET'S BOUND" box-out/budget-*.out.txt
 echo "== the rate law"

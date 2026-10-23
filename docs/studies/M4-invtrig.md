@@ -118,7 +118,7 @@ Every statement is one of five kinds, and says which:
   version passed the pools while missing its bound by 2^17 (3.6, item 5).
   The double word at G = 18, the fallback, is measured beside it: 143 to
   184 instructions, about one bit by its budget.
-- **The model found seven things wrong in itself** (3.6), four of them
+- **The model found eight things wrong in itself** (3.6), four of them
   worth the build's attention: a budget that froze its roundings (a
   residual of exactly 0 the tell); fp32's first triple word, which passed
   every pool while missing its bound by 2^17; 1 - x^2 formed directly,
@@ -1033,6 +1033,19 @@ after the fix it needed:
    the difference inexact on 24, 23 answers wrong). A plant red in nothing
    is either no fault or a hole in the checks; this one was a hole, and the
    pools' 0 wrong said nothing about it.
+8. **The batch logs' exit codes are date's.** `queue.sh` wrote each end
+   line as `"$(date ...) end $out rc=$?"`, and the command substitution
+   runs first and resets `$?` to date's 0 (MEASURED in bash and sh: after
+   `false`, that string gives rc=0, and rc=1 with `$?` before `$(date)`).
+   So every job in `queue1.log` to `queue9.log` reads rc=0, the two
+   triple-word plants runs that crashed included (their tracebacks are in
+   the outputs set aside). No figure here was read from an rc: every one
+   is from its output, and every output cited was read. Fixed after queue
+   9 (the rc taken before the date; a failing job then logs rc=2), the
+   logs kept as captured, and `box_m4s.sh`'s end line fixed the same way
+   before it is run. M2's `box_m2s.sh` has the same line, so its log's
+   "end (0)" for all 49 jobs carries no information; its 49 outputs hold
+   no traceback or error (READ), and the case is the lead's.
 
 ## 4. The specials and the flags
 
@@ -1621,7 +1634,7 @@ name.
 | `uform.py`, `gcheck.py` | asin's and acos's 1 - x^2 in three forms (2.4); fp64's fragments at G = 46 against 44 (question 4) |
 | `fingerprint.py` | one hash of the 100 default fragments, to show which runs measured the same model |
 | `box_m4s.sh` | the handed-back larger runs for amd-arc-box (not run here): the budgets at 12,000 and 3,000 lanes, the rate law at 50,000 and 20,000, fp128's and fp256's tiny census, the triple word over 20,000 a region |
-| `queue.sh`, `jobs*.txt`, `queue*.log` | the batches: the runner, its job lists, each run's start and end |
+| `queue.sh`, `jobs*.txt`, `queue*.log` | the batches: the runner, its job lists, each run's start and end (the logs' rc is date's, not the job's: 3.6, item 8) |
 | `*.out.txt` | each run's output as captured, named for its script, its format (fp32's double word as `fp32-dw18`, its triple word as `fp32-tw`) and its region, family or seed |
 
 **Which model the runs measured.** `fingerprint.py` hashes the 100

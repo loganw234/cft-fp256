@@ -5,6 +5,11 @@
 #
 #   sh queue.sh LOG "out-name|script args" ...
 #   sh queue.sh LOG -f JOBFILE        (one "out-name|script args" a line)
+#
+# The rc in queue1.log to queue9.log is date's, not the job's: the end line
+# expanded $(date) before $?, so every job there reads rc=0, the two that
+# crashed included (the study's 3.6, item 8). Fixed after queue 9; read
+# those runs' outputs, not their rc.
 PY=${PY:-python}
 LOG=$1
 shift
@@ -13,7 +18,8 @@ run() {
     cmd=${1#*|}
     echo "$(date '+%F %T') start $out: $cmd" >> "$LOG"
     nice -n 10 "$PY" -B $cmd > "$out.out.txt" 2>&1
-    echo "$(date '+%F %T') end $out rc=$?" >> "$LOG"
+    rc=$?
+    echo "$(date '+%F %T') end $out rc=$rc" >> "$LOG"
 }
 if [ "$1" = "-f" ]; then
     while IFS= read -r job; do
