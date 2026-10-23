@@ -9,8 +9,9 @@ templates here are the driver's, re-stated, and hw/test_sched.py holds each equa
 lead's box_nightly.sh preamble as steps.
 
 THE VERDICT. Every parser is the driver's (hw/card_stress_lib.py `parse_*`, imported), except the two small ones below:
-`parse_drytests` (the suite's `card-stress test: N checks, F failed` line, and the failures a spec allows by name, as
-box_nightly.sh allows two) and `parse_driver_quick` (the driver's own end line). A tool whose output moved is a `parse_error`,
+`parse_drytests` (the suite's `card-stress test: N checks, F failed` line, and the failures a spec allows by name in two lists kept
+apart: `known_flakes`, as box_nightly.sh allows two, and `noted_failures`, failures that are recorded and do not stop a night) and
+`parse_driver_quick` (the driver's own end line). A tool whose output moved is a `parse_error`,
 never a pass; a log with nothing in it is `no-verdict`; a timeout is a `timeout`. The one step with no parser is `vectors`
 (`make vectors`, then `sha256sum -c`): its verdict IS the exit status, and it is labelled `verdict_kind: rc_only` in its leg, in
 the job's end record (`rc_only_steps`) and in `status JOB`. The exit status is never ignored: a parser holds it to the log's
@@ -27,7 +28,8 @@ import functools
 import os
 import re
 
-from sched_driver import CS, L, standin
+from sched_driver import CS, L, parser_problem, standin
+from sched_spec import option_args
 
 M = re.MULTILINE
 DRY_TOTAL = re.compile(r"^card-stress test: (\d+) checks, (\d+) failed, (\d+) skipped, (\d+) s$", M)
@@ -56,10 +58,13 @@ def _rc_agrees(rc, ok: bool, what: str) -> None:
         raise VERDICT_ERROR(f"{what}: the log says it failed and the exit status is 0")
 
 
-def parse_drytests(text: str, rc, known_flakes=()) -> "L.Verdict":
+def parse_drytests(text: str, rc, known_flakes=(), noted_failures=()) -> "L.Verdict":
     """hw/test_card_stress.py main prints `  FAIL  name  detail` for each failed check and ends `card-stress test: N checks, F failed,
-    S skipped, T s`. Passes with F 0; with F above 0 passes only if EVERY failure's name begins with a string the spec allows
-    (the known load flakes box_nightly.sh tolerates: `telemetry hang: `, `stopfile: `), and then says so in its notes."""
+    S skipped, T s`. Passes with F 0; with F above 0 passes only if EVERY failure's name begins with a string the spec allows, in one of
+    two lists kept apart: `known_flakes` (the load flakes box_nightly.sh tolerates: `telemetry hang: `, `stopfile: `) and `noted_failures`
+    (failures of tests that do not test what the card runs, which by Logan's answer 6 must not stop a night: the lead names their
+    prefixes in the spec; parcel S3a). Each class has its own count (`known_flakes`, `noted_failures`) and its own note, naming the lines.
+    A failure whose name begins with neither is a fail, as it was."""
     m = _one(DRY_TOTAL, text, "drytests totals")
     checks, failed, skipped = int(m.group(1)), int(m.group(2)), int(m.group(3))
     fails = [x.group(1) for x in DRY_FAIL.finditer(text)]
@@ -73,10 +78,17 @@ def parse_drytests(text: str, rc, known_flakes=()) -> "L.Verdict":
         return L.Verdict(True, counts)
     _rc_agrees(rc, False, "drytests")
     flakes = [f for f in fails if any(f.startswith(k) for k in known_flakes)]
-    if len(flakes) == failed:
-        counts["known_flakes"] = failed
-        return L.Verdict(True, counts, [f"{failed} failed check(s), all known flakes the spec allows by name: " + "; ".join(f[:60] for f in flakes)])
-    return L.Verdict(False, counts, [f"{failed - len(flakes)} failed check(s) not allowed by name: " + "; ".join(f[:60] for f in fails if f not in flakes)[:300]])
+    noted = [f for f in fails if f not in flakes and any(f.startswith(k) for k in noted_failures)]
+    if len(flakes) + len(noted) == failed:
+        notes = []
+        if flakes:
+            counts["known_flakes"] = len(flakes)
+            notes.append(f"{len(flakes)} failed check(s), all known flakes the spec allows by name: " + "; ".join(f[:60] for f in flakes))
+        if noted:
+            counts["noted_failures"] = len(noted)
+            notes.append(f"{len(noted)} failed check(s) NOTED, not stopping the night (the spec's noted_failures): " + "; ".join(f[:60] for f in noted))
+        return L.Verdict(True, counts, notes)
+    return L.Verdict(False, counts, [f"{failed - len(flakes) - len(noted)} failed check(s) not allowed by name: " + "; ".join(f[:60] for f in fails if f not in flakes and f not in noted)[:300]])
 
 
 def parse_driver_quick(text: str, rc) -> "L.Verdict":
@@ -223,8 +235,8 @@ ENTRIES = {e.name: e for e in (
           _soak_parse, "soak", card=_is_card_soak, image=_is_card_soak, timeout=1800, finding=True),
     Entry("vectors", {}, lambda c, st: ["bash", "-c", "make vectors && cd vectors && sha256sum -c --quiet SHA256SUMS"], None, None, card=False,
           build="none", timeout=1800, rc_only=True),
-    Entry("drytests", {"known_flakes": "strs"}, lambda c, st: ["bash", _join(c, "hw", "test-card-stress.sh"), "--no-plants"],
-          lambda c, st, t, rc: parse_drytests(t, rc, st.get("known_flakes", ())), None, card=False, build="forbids", timeout=3600),
+    Entry("drytests", {"known_flakes": "strs", "noted_failures": "strs"}, lambda c, st: ["bash", _join(c, "hw", "test-card-stress.sh"), "--no-plants"],
+          lambda c, st, t, rc: parse_drytests(t, rc, st.get("known_flakes", ()), st.get("noted_failures", ())), None, card=False, build="forbids", timeout=3600),
     Entry("driver-quick", {"sweep_items": "strs"}, _quick_argv, lambda c, st, t, rc: parse_driver_quick(t, rc), None, timeout=5400),
 )}
 TARGETS_OF_REV8 = {v[2] for v in CS.IMAGES.values()}
@@ -246,6 +258,14 @@ class StepRegistry(dict):
         if st["type"] == "acceptance-rev8" and st["target"] not in TARGETS_OF_REV8:
             return f"target {st['target']!r} is not one of {', '.join(sorted(TARGETS_OF_REV8))}"
         return None
+
+    def check_window(self, spec):
+        """The rules of a window job's `driver` that are the driver's (parcel S3a): each sweep item is in its catalog, and its own parser accepts the options."""
+        bad = [n for n in spec["driver"].get("sweep_items", []) if n not in catalog()]
+        if bad:
+            return f".sweep_items {bad[0]!r} is not in the sweep catalog (hw/card_stress_lib.py sweep_items)"
+        why = parser_problem(option_args(spec["driver"].get("options"))) if spec["driver"].get("options") else None
+        return f".options are refused by the driver's own parser: {why}" if why else None
 
 
 def timeout_of(e: Entry, c, st) -> float:

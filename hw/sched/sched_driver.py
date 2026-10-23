@@ -26,6 +26,21 @@ STANDIN_MARK = "standin: would run:"          # the first line the stand-in prin
 DRY_RUN_LINE = re.compile(r"card-stress: out .*; (?:QUICK )?DRY RUN ")       # the driver's own start line of a --dry-run (card_stress.py, run)
 
 
+def parser_problem(args: list):
+    """None when the driver's OWN parser (card_stress.parse_args) accepts `args`, else its error message: argparse prints the message and exits 2, and
+    the exit is caught here. A stand-in --until and --out are added, so nothing is looked up. The scheduler holds a spec's driver options to the driver's
+    rules with this and keeps no copy of them."""
+    import contextlib
+    import io
+    err = io.StringIO()
+    try:
+        with contextlib.redirect_stderr(err):
+            CS.parse_args(["--until", "2099-01-01 00:00", "--out", os.devnull] + list(args))
+    except SystemExit:
+        return (err.getvalue().strip().splitlines() or ["the driver's parser refused the options"])[-1]
+    return None
+
+
 def standin(leg: str, real: list) -> list:
     """A command as the driver's own Driver.standin wraps it: the stand-in, the leg's name, `--`, the real argv. A test holds
     this equal to the driver's."""

@@ -27,6 +27,7 @@ import re
 import socket
 import time
 
+import sched_calendar as CAL
 from sched_names import OUTCOMES, REFUSALS, Refusal
 from sched_spec import parse_text, sig_status, validate
 
@@ -357,6 +358,11 @@ def claim_next(root: str, cfg: dict, card_id: str, now_t: float, registry: dict)
             nb = (spec.get("when") or {}).get("not_before")
             if isinstance(nb, (int, float)) and now_t < nb:
                 continue                                        # not yet
+            wn, dl0 = (spec.get("when") or {}).get("window"), (spec.get("when") or {}).get("deadline")
+            if isinstance(wn, str) and not (isinstance(dl0, (int, float)) and now_t > dl0):
+                ws = CAL.state(cfg, wn, now_t)
+                if ws and ws["state"] == "waiting":
+                    continue                                    # its window is not open yet (a deadline already past is refused below, not waited out)
         if not claim(root, jid):
             continue                                            # another claimant, or a cancel, won it
         d = os.path.join(root, "running", jid)
@@ -369,6 +375,11 @@ def claim_next(root: str, cfg: dict, card_id: str, now_t: float, registry: dict)
             dl = (spec.get("when") or {}).get("deadline")
             if dl is not None and now_t > dl:
                 raise Refusal("deadline-passed", f"the deadline {dl} had passed at {now_t}")
+            ws = CAL.state(cfg, spec["when"]["window"], now_t) if "window" in spec.get("when", {}) else None
+            if ws and ws["state"] != "open":
+                raise Refusal("window-closed", f"window {ws['name']!r} is not open ({ws['state']}; its occurrence nearest {CAL.fmt(ws['opens'])} to {CAL.fmt(ws['closes'])})")
+            if ws and spec.get("estimate_s") and spec["estimate_s"] > ws["closes"] - now_t:
+                raise Refusal("window-too-short", f"estimate_s {spec['estimate_s']} exceeds the {ws['closes'] - now_t:.0f} s the window {ws['name']!r} has left (it closes {CAL.fmt(ws['closes'])})")
         except Refusal as r:
             log.append("refused", name=r.name, why=r.why)
             finish(root, jid, log, "refused", refusal=r.name)
@@ -379,8 +390,15 @@ def claim_next(root: str, cfg: dict, card_id: str, now_t: float, registry: dict)
     return None
 
 
+def stop_asked(d: str) -> bool:
+    """True when the job's own record shows its runner has already asked what it runs to stop (a window's driver: `scheduler_stop`, or `driver_overrun`): a cancel then adds
+    nothing but its own record, and the answer says so."""
+    return any(r.get("type") in ("scheduler_stop", "driver_overrun") for r in read_records(os.path.join(d, "job.jsonl")))
+
+
 def cancel(root: str, jid: str, who: str) -> str:
-    """'dequeued' (it never ran), 'stop-requested' or 'stop-already-requested' (it ends at its next safe point)."""
+    """'dequeued' (it never ran), 'stop-requested' or 'stop-already-requested' (it ends at its next safe point; the latter too when the job's record shows the
+    runner had already asked its work to stop)."""
     parse_job_id(jid)
     q, r, j = (os.path.join(root, s, jid) for s in ("queue", "running", "jobs"))
     try:
@@ -403,7 +421,7 @@ def cancel(root: str, jid: str, who: str) -> str:
         else:
             os.write(fd, (json.dumps({"by": who, "t": round(time.time(), 3)}) + "\n").encode())
             os.close(fd)
-            return "stop-requested"
+            return "stop-already-requested" if stop_asked(r) else "stop-requested"
     if os.path.isdir(j):
         done = read_records(os.path.join(j, "job.jsonl"))
         raise Refusal("job-ended", f"{jid} already ended: {done[-1].get('outcome') if done else 'no record'}")

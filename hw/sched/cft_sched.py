@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright 2026 Logan W.
 # SPDX-License-Identifier: Apache-2.0
-"""cft-sched: the card scheduler's command (docs/studies/SCHED-A-card-scheduler.md; S1 built the core, S2 the staged runner).
+"""cft-sched: the card scheduler's command (docs/studies/SCHED-A-card-scheduler.md; S1 built the core, S2 the staged runner, S3a the window).
 
     cft-sched [--root DIR] [--runner staged|fake] VERB ...   the step types `submit` validates against and the runner `serve` uses (default staged)
 
@@ -15,8 +15,10 @@
     cft-sched [--root DIR] serve [--drain] [--poll S] [--max-jobs N] [--no-locks]
 
 The root is --root or $CFT_SCHED_ROOT, outside every git checkout (on the box: /data/cft-sched). `serve` runs staged jobs for
-real (sched_staged.py: clone and assert, build, the guard, the steps), unless --runner fake, which is S1's test runner and touches no
-card; `submit` validates against the step types of the runner it is given, so give both verbs the same --runner (the default, staged).
+real (sched_staged.py: clone and assert, build, the guard, the steps) and window jobs (sched_window.py: the nightly window's preflight
+and the driver's long run; a window job waits in the queue until its window, in config.json, is open), unless --runner fake, which is
+S1's test runner and touches no card; `submit` validates against the step types of the runner it is given, so give both verbs the same
+--runner (the default, staged). `status` shows a window job's window, what it runs and its preflight's results.
 A card step of a job that is not dry runs on the card: a first run on the box is a `dry_run` job. Run it as `bash hw/sched/cft-sched ...`
 (no script in hw/ is executable in git) or `python3 hw/sched/cft_sched.py ...`. A refusal prints `refused: NAME: why` on stderr and exits 2; `submit` of a spec
 that is refused prints `refused JOBID: NAME: why` (the job exists, with its record) and exits 2; hw/sched/sched_names.py holds
@@ -35,6 +37,7 @@ import sched_run as R             # noqa: E402
 import sched_staged as SG         # noqa: E402
 import sched_state as S           # noqa: E402
 import sched_steps as ST          # noqa: E402
+import sched_window as WD         # noqa: E402
 from sched_names import Refusal   # noqa: E402
 
 
@@ -90,13 +93,17 @@ def cmd_status(a, root):
             if os.path.isdir(os.path.join(root, where, jid)):
                 v = R.job_view(root, where, jid)
                 v["sums_problems"] = S.check_sums(os.path.join(root, where, jid)) if where == "jobs" else None
-                v["legs"] = [{k: r.get(k) for k in ("step", "leg", "status", "verdict_kind", "dry", "standin", "reason")}
+                v["legs"] = [{k: r.get(k) for k in ("step", "leg", "status", "verdict_kind", "dry", "standin", "reason", "counts")}
                              for r in S.read_records(os.path.join(root, where, jid, "job.jsonl")) if r.get("type") == "leg"]
+                if v["kind"] == "window":
+                    v["window"] = WD.window_info(root, where, jid, cfg)        # when it opens and closes, what it runs, and the preflight's results
                 print(json.dumps(v, sort_keys=True) if a.json else
                       f"{jid}: {where}, {v['name']!r} on {v['card']}, {v['records']} records, outcome {v['outcome']}"
                       + (f" ({v['refusal']})" if v["refusal"] else "") + (f", stop requested by {v['stop'].get('by')}" if v["stop"] else "")
+                      + "".join(f"\n{ln}" for ln in (WD.format_window(v["window"]) if v["kind"] == "window" else []))
                       + "".join(f"\n  step {x['step']} {x['leg']}: {x['status']}" + (" [rc_only]" if x["verdict_kind"] == "rc_only" else "")
-                                + (" [dry: stand-in]" if x["standin"] else " [dry]" if x["dry"] else "") for x in v["legs"]))
+                                + (" [dry: stand-in]" if x["standin"] else " [dry]" if x["dry"] else "")
+                                + (f" [{x['counts']['noted_failures']} noted failure(s)]" if (x.get("counts") or {}).get("noted_failures") else "") for x in v["legs"]))
                 return 0
         raise Refusal("job-unknown", f"no job {jid}")
     st = R.gather_status(root, cfg)
@@ -107,9 +114,11 @@ def cmd_status(a, root):
 def cmd_cancel(a, root):
     open_root(root)
     how = S.cancel(root, a.id, S.user())
+    pid = next((r.get("pid") for r in reversed(S.read_records(os.path.join(root, "running", a.id, "job.jsonl"))) if r.get("type") in ("driver_overrun", "driver_started")), None)
     print({"dequeued": f"{a.id}: removed from the queue; outcome cancelled",
            "stop-requested": f"{a.id}: stop requested; it ends at its next safe point",
-           "stop-already-requested": f"{a.id}: a stop was already requested"}[how])
+           "stop-already-requested": f"{a.id}: a stop was already requested"
+           + (f"; the driver, pid {pid}, has been asked to stop and the scheduler sends it no signal: the job ends when it does, or end it by hand, by that pid" if pid else "")}[how])
     return 0
 
 
@@ -127,7 +136,7 @@ def cmd_release(a, root):
 
 def cmd_serve(a, root):
     cfg = open_root(root)
-    R.serve(root, cfg, R.FakeRunner() if a.runner == "fake" else SG.StagedRunner(root, cfg), poll=a.poll, drain=a.drain, max_jobs=a.max_jobs,
+    R.serve(root, cfg, R.FakeRunner() if a.runner == "fake" else WD.WindowRunner(root, cfg), poll=a.poll, drain=a.drain, max_jobs=a.max_jobs,
             skip_locks=a.no_locks)
     return 0
 
