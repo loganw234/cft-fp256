@@ -20,9 +20,13 @@ commit's), and clones from the spec's own source.
 
 THE END. The driver is given the window's end as `--until` and ends itself there, after the leg running. If it has run on more than
 `runner.window_grace_s` past the end, the scheduler creates the driver's own STOP file (never a signal, never a pattern), and removes
-it, if it made it, once the driver has ended; a cancel of the job does the same at once. A card leg is never ended in the middle: the hard
-limit of the step (end + grace + the longest leg's timeout with a cold revision-8 cache's allowance + ten minutes, about 5.2 hours) is the last
-resort for a driver that is itself hung, and the wrapper's TERM, then KILL, a stop and a kill.
+it, if it made it, once the driver has ended; a cancel of the job does the same at once. THE LONG RUN IS NEVER SIGNALLED (Logan, 2026-10-23, on the
+study's R4, "a card process is never ended by the scheduler in the middle of a leg": "Warn only for now"): run_step is given a limit it cannot reach
+(NEVER_S), so no TERM and no KILL comes from it or from anything else here. A driver still running HARD_EXTRA_S (the longest leg's timeout with a cold
+revision-8 cache's allowance, plus ten minutes: about 5.2 hours) past the window's end and its grace is NAMED, once, by `Watch`: a `driver_overrun`
+record, `status` while it lasts, and the end record; the job ends only when the driver does, and the card stays held under the job's lock until then or
+until the lead acts. Revisit the kill when S3b adds the image reload after an unclean end (a kill could leave the tile unusable, and the next night
+would idle anyway). The next night's job waits meanwhile, as it does for any job: the service runs one job at a time on a card.
 The driver itself runs at nice 0, as the launcher's did (its legs are niced by it). The outcome: `done` when `run_end` is `deadline`
 with exit 0 (or `stop_file` after the scheduler's own end check), `cancelled` when the night was cut short by a cancel or a STOP or
 signal that is not the scheduler's, else `failed` (a `run_end` that says otherwise, none, or an exit status it contradicts). The
@@ -50,6 +54,8 @@ from sched_spec import option_args
 GATED = ("vectors", "drytests")                        # run only when the commit differs from the last passed window's; driver-quick runs every night
 PASSED = ("done", "done-with-findings")
 BUILD_REFUSALS = ("build-failed", "xrt-not-linked", "build-id-mismatch", "clone-built")        # a preflight failure of the commit, not of the spec
+# run_step takes a limit in seconds and has no "none", so the long run is given NEVER_S (about 31 years), a limit it cannot reach: no timeout wrapper's TERM, no loop's KILL.
+NEVER_S = 10 ** 9
 HARD_EXTRA_S = max(CS.DEFAULT_TIMEOUTS.values()) + CS.REV8_FIRST_COMPILE_ALLOWANCE + 600       # past the window's end and its grace: the longest leg the driver may be in (a cold revision-8 cache adds its allowance), and its stop
 
 
@@ -96,9 +102,10 @@ class Watch:
     on past the window's end by more than the grace. The file is the scheduler's own, removed after the driver has ended; one that was
     there already is a person's, and is left alone."""
 
-    def __init__(self, out, stop, log, closes, grace, poll):
+    def __init__(self, out, stop, log, closes, grace, poll, overrun_at=None):
         self.path, self.stop, self.log, self.closes, self.grace, self.poll = os.path.join(out, "STOP"), stop, log, closes, grace, poll
-        self.sent = self.made = self.pid = self.th = None
+        self.sent = self.made = self.pid = self.th = self.overrun = None
+        self.overrun_at = overrun_at                   # an epoch: the driver still running then is an overrun, named once and never signalled
         self.done = threading.Event()
 
     def start(self, pid):
@@ -124,6 +131,8 @@ class Watch:
                 why = "cancel" if self.stop.requested() else "window" if time.time() >= self.closes + self.grace else None
                 if why:
                     self._ask(why)
+            if self.overrun is None and self.overrun_at is not None and time.time() >= self.overrun_at and self._alive():
+                self._note_overrun()
 
     def _ask(self, why):
         self.sent = why
@@ -137,6 +146,12 @@ class Watch:
         os.close(fd)
         self.made = True
         self.log.append("scheduler_stop", why=why, detail=text, file=self.path, made=True)
+
+    def _note_overrun(self):
+        self.overrun = {"past_end_s": round(time.time() - self.closes), "pid": self.pid, "stop_asked": self.sent, "t": round(time.time(), 3),
+                        "after_end_and_grace_s": round(self.overrun_at - self.closes - self.grace),
+                        "note": "the scheduler sends the driver no signal (Logan, 2026-10-23: warn only for now); the card stays held under this job's lock until the driver ends or the lead acts"}
+        self.log.append("driver_overrun", **self.overrun)
 
     def finish(self):
         self.done.set()
@@ -288,18 +303,16 @@ class WindowRunner(SG.StagedRunner):
             GD.hold_until_clear(log, card["kind"], rcfg["guard_wait_max_s"], rcfg["guard_poll_s"], stop=stop.requested)
             if time.time() >= ws["closes"]:
                 raise Refusal("window-closed", f"the window closed at {CAL.fmt(ws['closes'])}, while the job waited {time.time() - t0:.0f} s for the card")
-        now = time.time()                                          # after the wait: the driver's limit is counted from when it starts
-        st = {"type": "driver-long", "out": d["out"], "resume": d["resume"], "until": CAL.fmt(ws["closes"]), "sweep_items": d.get("sweep_items"), "options": d.get("options"),
-              "timeout_s": ws["closes"] - now + rcfg["window_grace_s"] + HARD_EXTRA_S}
+        st = {"type": "driver-long", "out": d["out"], "resume": d["resume"], "until": CAL.fmt(ws["closes"]), "sweep_items": d.get("sweep_items"), "options": d.get("options")}
         _, n_start, n_end = metrics(d["out"])
         argv, logpath = e.argv(ctx, st), os.path.join(os.path.dirname(log.path), f"{i:02d}-driver-long.log")
-        watch = Watch(d["out"], stop, log, ws["closes"], rcfg["window_grace_s"], rcfg["window_poll_s"])
+        watch = Watch(d["out"], stop, log, ws["closes"], rcfg["window_grace_s"], rcfg["window_poll_s"], ws["closes"] + rcfg["window_grace_s"] + HARD_EXTRA_S)
 
         def started(pid):
             log.append("driver_started", pid=pid, out=d["out"], until=st["until"], resume=d["resume"])
             watch.start(pid)
         try:
-            run = run_step(argv, ctx.clone, {}, logpath, st["timeout_s"], rcfg["kill_after_s"], 0, on_start=started)
+            run = run_step(argv, ctx.clone, {}, logpath, NEVER_S, rcfg["kill_after_s"], 0, on_start=started)
         finally:
             watch.finish()
         try:
@@ -312,8 +325,8 @@ class WindowRunner(SG.StagedRunner):
         reason, code = (end.get("reason"), end.get("exit")) if end else (None, None)
         if run.error:
             status, why = "error", run.error
-        elif run.timed_out:
-            status, why = "timeout", f"the driver was still running {time.time() - ws['closes']:.0f} s after the window's end and its grace; signalled {run.killed or 'TERM'}"
+        elif run.timed_out:                                        # run_step's flag for a process ended by a TERM or KILL (exit status 124 or 137): not the scheduler's, which sends the long run none
+            status, why = "fail", f"the driver was ended from outside by a signal (exit status {run.rc}); the scheduler sends the long run none"
         elif end is None:
             status, why = "fail", f"the driver wrote {'a run_start but' if s1 > n_start else 'no run_start and'} no run_end (exit status {run.rc}): no_run_end, never a pass"
         elif code != run.rc:
@@ -334,10 +347,12 @@ class WindowRunner(SG.StagedRunner):
         rec = dict(self._base(S, ctx, i, st, e, run.start), kind="window", status=status, reason=why or None, rc=run.rc, end=L.iso(run.end), end_epoch=round(run.end, 3),
                    duration_s=round(max(0.0, run.end - run.start), 3), timed_out=bool(run.timed_out), killed=run.killed, counts={"cycles": end.get("cycles"), "cycles_this_night": cycles} if end else None,
                    log=os.path.basename(logpath), log_kept="whole", card_touched=bool(not ctx.dry and run.pid is not None), argv=run.argv[:12] if status != "pass" else None,
-                   extra={"out": d["out"], "until": st["until"], "run_end": end, "scheduler_stop": watch.sent})
+                   extra={"out": d["out"], "until": st["until"], "run_end": end, "scheduler_stop": watch.sent, "overrun": watch.overrun})
         log.append("leg", **rec)
         S.next, S.ran, S.card_touched = i + 1, S.ran + 1, S.card_touched or rec["card_touched"]
         F.update(driver_reason=reason, driver_exit=code, driver_cycles=cycles)
+        if watch.overrun:
+            F["overrun"] = watch.overrun                              # the end record carries it
         if status != "pass":
             S.failed = True
         if status == "error" and why.startswith("dry-run-as-card"):
@@ -365,7 +380,8 @@ def window_info(root: str, where: str, jid: str, cfg: dict | None = None) -> dic
             "fallback": next((r for r in rs if r.get("type") == "fallback"), None),
             "preflight": [{k: r.get(k) for k in ("step", "leg", "status", "reason", "counts", "notes")} for r in rs if r.get("type") == "leg" and r.get("kind") != "window"],
             "driver": next(({"reason": r["extra"].get("run_end", {}) and r["extra"]["run_end"].get("reason"), "status": r["status"], "scheduler_stop": r["extra"].get("scheduler_stop")}
-                            for r in rs if r.get("type") == "leg" and r.get("kind") == "window"), None)}
+                            for r in rs if r.get("type") == "leg" and r.get("kind") == "window"), None),
+            "overrun": next((r for r in rs if r.get("type") == "driver_overrun"), None), "ended": bool(end)}
 
 
 def format_window(info: dict) -> list:
@@ -380,4 +396,8 @@ def format_window(info: dict) -> list:
         lines += [f"  noted, did not stop the night: {n}" for x in info["preflight"] for n in (x.get("notes") or []) if "NOTED" in n]
     if info["driver"]:
         lines.append(f"  driver: {info['driver']['status']}, run_end {info['driver']['reason']}" + (f" (the scheduler asked it to stop: {info['driver']['scheduler_stop']})" if info["driver"]["scheduler_stop"] else ""))
+    o = info.get("overrun")
+    if o:
+        lines.append(f"  DRIVER OVERRUN: {'ran on' if info.get('ended') else 'still running'} {o['past_end_s']} s past the window's end (pid {o['pid']}; named {o['after_end_and_grace_s']} s after the end and the grace): "
+                     "the scheduler sends it no signal, and the card stays held under this job's lock until the driver ends or the lead acts")
     return lines

@@ -1993,12 +1993,12 @@ def table_checks(only=None):
 # ---------------------------------------------------------------------------------------- window (parcel S3a)
 # The window runner against the driver's own dry run and a fake python. A scratch repository holds the REAL driver and wrapper (hw/card_stress*.py, hw/card-stress.sh,
 # copied unchanged) beside the fake host tree; the wrapper execs the python PYTHON names, and the fixture names a script that answers the smoke as FAKE_QUICK says and a long run
-# as FAKE_LONG says (end: at once, one cycle; idle: ends at once with no cycle; stubborn: ignores --until, ends at its STOP file or by itself after FAKE_MAX s; fail; crash; real: the clone's real driver, --dry-run).
+# as FAKE_LONG says (end: at once, one cycle; idle: ends at once with no cycle; deaf: ignores --until AND its STOP file, runs FAKE_MAX s; stubborn: ignores --until, ends at its STOP file or by itself after FAKE_MAX s; fail; crash; real: the clone's real driver, --dry-run).
 # Parts (`--only window:PART`): calendar spec claim long (everywhere), chain driver end (POSIX: bash, make, a clone). The card is never involved.
 
 WFIX: dict = {}
 FAKE_INTERP = r'''#!@PY@
-import json, os, sys, time
+import json, os, signal, sys, time
 args = sys.argv[2:]
 arg = lambda k: args[args.index(k) + 1] if k in args else None
 END = "card-stress ends: {} (exit {}); the card is left idle (no process of this run is alive)"
@@ -2013,6 +2013,11 @@ if mode == "real":
     os.execv(sys.executable, [sys.executable, sys.argv[1]] + args)
 out = arg("--out")
 os.makedirs(out, exist_ok=True)
+def note_signal(n, frame):
+    with open(os.path.join(out, "signals.txt"), "a") as fh:
+        fh.write("signal %d\n" % n)
+for s in (signal.SIGTERM, signal.SIGINT):
+    signal.signal(s, note_signal)
 def rec(r):
     with open(os.path.join(out, "metrics.jsonl"), "a") as fh:
         fh.write(json.dumps(r) + "\n")
@@ -2034,6 +2039,8 @@ if mode == "stubborn":
         if os.path.exists(os.path.join(out, "STOP")):
             end("stop_file", 0)
         time.sleep(0.05)
+if mode == "deaf":
+    time.sleep(float(os.environ.get("FAKE_MAX", "25")))
 end("deadline", 0)
 '''
 
@@ -2292,11 +2299,9 @@ def window_long():
     v1, types1, _ = long_(time.time() + 1.0, 1.6)
     check("window long: a window that closes while the job waits for the card (the guard stubbed to wait 1.6 s, the window to close in 1) is refused `window-closed`, naming the wait, and the driver "
           "is never started: no driver_started and no leg in the record", (v1 or "").startswith("window-closed:") and "while the job waited" in v1 and "driver_started" not in types1 and "leg" not in types1, f"{v1!r} {types1}")
-    t1 = time.time()
-    v2, _, lim = long_(t1 + 100, 1.5)
-    bound = 100 - 1.4 + cfg["runner"]["window_grace_s"] + WD.HARD_EXTRA_S
-    check("window long: the driver's limit is counted from when it STARTS, after the guard's wait (stubbed to 1.5 s), not before it: about the time left + the grace + the hard extra, less the wait",
-          v2 is None and lim and lim[0] <= bound, f"{v2!r} {lim} against {bound}")
+    v2, _, lim = long_(time.time() + 100, 0.2)
+    check("window long: the long run is given NO limit the scheduler can reach (Logan on N-5, 2026-10-23: warn only): run_step's limit is NEVER_S, about 31 years, whatever the window has left, "
+          "so run_step's timeout can never send the driver a TERM or a KILL", v2 is None and lim and lim[0] >= 10 ** 8, f"{v2!r} {lim}")
 
     def direct(window, **kw):
         n[0] += 1
@@ -2495,6 +2500,41 @@ def window_end():
           "the record says the scheduler asked because of the cancel, the driver ended at its stop file, and the file is gone",
           started and how == "stop-requested" and took < 8 and rec(root, "jobs", jid).get("outcome") == "cancelled" and first(rs, "scheduler_stop").get("why") == "cancel"
           and (lg.get("extra") or {}).get("run_end", {}).get("reason") == "stop_file" and not os.path.exists(os.path.join(out, "STOP")), f"{started} {how} {took:.1f} s {rec(root, 'jobs', jid).get('outcome')} {lg.get('extra')}")
+    ro, co = mkrootw("we-over")
+    out_o = os.path.join(TMP, "wout-over")
+    raw = json.load(open(os.path.join(ro, "config.json")))
+    raw["windows"]["list"] = [clock_window("w", -2, 5)]                     # closes in about 3 s, the grace is 1 s
+    json.dump(raw, open(os.path.join(ro, "config.json"), "w"))
+    co = C.load_config(ro)
+    runner = WD.WindowRunner(ro, co)
+    ja = S.submit(ro, co, json.dumps(wspec(w["w1"], out_o, resume=False, preflight=pre)).encode(), runner.registry)[0]
+    jb = S.submit(ro, co, json.dumps(wspec(w["w1"], out_o, preflight=pre)).encode(), runner.registry)[0]      # the next window's job, queued behind the first
+    old_extra = WD.HARD_EXTRA_S
+    WD.HARD_EXTRA_S = 2                                                    # the old limit, shortened: the end + the grace + 2 s
+    try:
+        with env(PYTHON=w["interp"], FAKE_LONG="deaf", FAKE_MAX="10"), no_users():
+            th = threading.Thread(target=lambda: R.serve(ro, co, runner, drain=True, poll=0.02, skip_locks=not S.HAVE_FLOCK, out=lambda x: None))
+            th.start()
+            wait_for(lambda: not th.is_alive() or any(r["type"] == "driver_overrun" for r in recs(ro, "running", ja)), 40)
+            mid = [r for r in recs(ro, "running", ja) if r["type"] == "driver_overrun"]
+            b_mid = [r["type"] for r in recs(ro, "queue", jb)] if os.path.isdir(os.path.join(ro, "queue", jb)) else None
+            st_mid = cli(ro, "status", runner=None)[1]
+            th.join(60)
+    finally:
+        WD.HARD_EXTRA_S = old_extra
+    rs = recs(ro, "jobs", ja)
+    ov = [r for r in rs if r["type"] == "driver_overrun"]
+    lg = next((x for x in legs_of(rs) if x["leg"] == "driver-long"), {})
+    endr = rec(ro, "jobs", ja)
+    check("window end: a driver that runs on past the old limit (the end + the grace + the extra, shortened to 2 s here) is NAMED once, `driver_overrun`, with the time past the end and its pid, and is NEVER signalled "
+          "(the driver's own note of the signals it got does not exist; the leg is not timed out or killed); the job ends only when the driver does, and its end record carries the overrun",
+          len(ov) == 1 and ov[0]["pid"] == first(rs, "driver_started").get("pid") and ov[0]["past_end_s"] >= 3 and not os.path.exists(os.path.join(out_o, "signals.txt")) and lg.get("status") == "pass"
+          and not lg.get("timed_out") and lg.get("killed") is None and lg.get("end_epoch", 0) - ov[0]["t"] >= 2.5 and endr.get("outcome") == "done" and (endr.get("overrun") or {}).get("pid") == ov[0]["pid"],
+          f"{len(ov)} {ov[:1]} {lg.get('status')} {lg.get('killed')} {endr.get('outcome')} {sorted(os.listdir(out_o))}")
+    check("window end: while the driver overruns `status` names it (still running, how far past the end, its pid), and the NEXT window's job waits behind it: neither claimed nor refused (its record is its submit alone, "
+          "then and after the first job ends, its window being closed by then: it waits for the next occurrence)",
+          len(mid) == 1 and "DRIVER OVERRUN: still running" in st_mid and str(mid[0]["pid"]) in st_mid and b_mid == ["submitted"] and [r["type"] for r in recs(ro, "queue", jb)] == ["submitted"]
+          and not os.path.isdir(os.path.join(ro, "jobs", jb)), f"{len(mid)} {b_mid} {st_mid[-300:]!r} {[r['type'] for r in recs(ro, 'queue', jb)]}")
 
 
 # ---------------------------------------------------------------------------------------- plants
@@ -2757,8 +2797,12 @@ PLANTS = [  # (what is wrong, edits, the groups written for it, a fragment of th
     ("S3a: the window's end is not looked at again after the guard's wait", [E("sched_window.py", "            if time.time() >= ws[\"closes\"]:\n                raise Refusal(\"window-closed\", f\"the window closed at {CAL.fmt(ws['closes'])}, while the job waited",
                                                                                 "            if False:\n                raise Refusal(\"window-closed\", f\"the window closed at {CAL.fmt(ws['closes'])}, while the job waited")],
      "window:long", "window long: a window that closes while the job waits for the card", False),
-    ("S3a: the driver's limit is counted from before the guard's wait", [E("sched_window.py", "        now = time.time()                                          # after the wait", "        now = t0                                                   # after the wait")],
-     "window:long", "window long: the driver's limit is counted from when it STARTS", False),
+    ("S3a: the kill is put back (the long run is given a limit it can reach), seen without a process", [E("sched_window.py", 'logpath, NEVER_S, rcfg["kill_after_s"]',
+                                                                                                         'logpath, ws["closes"] - time.time() + rcfg["window_grace_s"] + HARD_EXTRA_S, rcfg["kill_after_s"]')],
+     "window:long", "window long: the long run is given NO limit the scheduler can reach", False),
+    ("S3a: the kill is put back, seen against a driver that runs on", [E("sched_window.py", 'logpath, NEVER_S, rcfg["kill_after_s"]', 'logpath, ws["closes"] - time.time() + rcfg["window_grace_s"] + HARD_EXTRA_S, rcfg["kill_after_s"]')],
+     "window:end", "window end: a driver that runs on past the old limit", "posix"),
+    ("S3a: an overrun is not named", [E("sched_window.py", "                self._note_overrun()", "                pass")], "window:end", "window end: a driver that runs on past the old limit", "posix"),
     ("S3a: a night in which the driver started no cycle is a passed window", [E("sched_window.py", '        if status == "pass" and not S.stopped and not cycles:', "        if False:")], "window:chain",
      "window chain: a night in which the driver ended at its deadline having started NO cycle", "posix"),
     ("S3a: the history counts a done night in which the driver started no cycle", [E("sched_window.py", 'and end.get("commit") and end.get("driver_cycles"):', 'and end.get("commit"):')], "window:long",
