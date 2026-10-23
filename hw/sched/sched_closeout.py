@@ -152,7 +152,7 @@ def lines(parts: dict) -> list:
         if r is None:
             continue
         what = {"report": lambda: f"{r.get('file')}, {r.get('lines')} lines, rc {r.get('rc')}, by the tool of clone {str(r.get('clone'))[:12]}", "summary": lambda: f"{r.get('file')}, report_version {r.get('report_version')}, DISAGREEMENTS {r.get('disagreements_this_night')} this night ({r.get('disagreements_in_run')} in the run)",
-                "sums": lambda: f"{r.get('listed')} files listed for the lead's copy (the run's, the smoke's), metrics.jsonl {str(r.get('metrics_sha256'))[:12]}",
+                "sums": lambda: f"{r.get('listed')} files of the run and the smoke listed (the job's own are listed when it is sealed), metrics.jsonl {str(r.get('metrics_sha256'))[:12]}",
                 "publish": lambda: f"night {r.get('night')} ({r.get('date')}), commit {str(r.get('commit'))[:12]} on {r.get('branch')}, parent {str(r.get('parent'))[:12]}",
                 "retention": lambda: f"{r.get('clones', {}).get('removed_n')} clone(s) and {r.get('logs', {}).get('removed_n')} log(s) removed, would remove {r.get('clones', {}).get('would_remove_n')} and "
                                      f"{r.get('logs', {}).get('would_remove_n')}, kept {len(r.get('clones', {}).get('kept', []))} clone(s) ({r.get('mode')})"}[name]
