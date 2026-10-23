@@ -221,10 +221,30 @@ def _files(d: str) -> list:
     return sorted(n for n in os.listdir(d) if n != "SHA256SUMS" and os.path.isfile(os.path.join(d, n)))
 
 
+EXTRA = "sums-extra.json"        # parcel S4a: the files a window's sums list BESIDES its directory's top level: {"files": [{"name", "sha256"}]}
+
+
+def _extra(d: str) -> list:
+    """[(name, sha256)] of the job's EXTRA list, or [] (none, or a damaged one: the files it should have named are then not in the sums)."""
+    try:
+        with open(os.path.join(d, EXTRA), "rb") as fh:
+            return [(e["name"], e["sha256"]) for e in json.loads(fh.read().decode())["files"]]
+    except (OSError, ValueError, KeyError, TypeError):
+        return []
+
+
 def write_sums(d: str) -> None:
-    text = "".join(f"{sha256_file(os.path.join(d, n))}  {n}\n" for n in _files(d))
+    """The job's SHA256SUMS: a line for every file of its top level and for each name of its EXTRA list. A name inside the directory (the smoke's files, one level down) is
+    hashed now. An ABSOLUTE name (the run's own files, outside the job, which the next night resumes) keeps the hash taken when the night ended, and `check_sums` leaves
+    it be: it holds for the lead's copy of that night, not for the file after the next night."""
+    rows = [(sha256_file(os.path.join(d, n)), n) for n in _files(d)]
+    for n, h in _extra(d):
+        if os.path.isabs(n):
+            rows.append((h, n))
+        elif os.path.isfile(os.path.join(d, n)):
+            rows.append((sha256_file(os.path.join(d, n)), n))
     with open(os.path.join(d, "SHA256SUMS"), "wb") as fh:
-        fh.write(text.encode())
+        fh.write("".join(f"{h}  {n}\n" for h, n in rows).encode())
 
 
 def check_sums(d: str) -> list:
@@ -238,6 +258,8 @@ def check_sums(d: str) -> list:
     bad = [f"{n} is not listed" for n in _files(d) if n not in listed]
     for n, h in sorted(listed.items()):
         p = os.path.join(d, n)
+        if os.path.isabs(n):
+            continue                                            # a file of the run, outside the job (see write_sums)
         if not os.path.isfile(p):
             bad.append(f"{n} is listed and missing")
         elif sha256_file(p) != h:
