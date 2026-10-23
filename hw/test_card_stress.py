@@ -5213,6 +5213,8 @@ def resume_real_checks(env: Env, src: str = HERE) -> list:
             wide = {n: study[n] for n in wide_names} if study and all(n in study for n in wide_names) else {}
             if study and not wide:
                 study_why = "the script's table has no row for " + ", ".join(n for n in wide_names if n not in study)
+            elif any(g is None for g in wide.values()):
+                study_why = "the script finds complete (no first gap): " + ", ".join(n for n, g in wide.items() if g is None)
             if known == "two-night":                      # the committed capture of THIS file, read at run time: the study's own record of the same four numbers
                 try:
                     with open(os.path.join(ROOT, "docs", "studies", "sched-a", "coverage_state.out"), "r", encoding="utf-8") as fh:
@@ -5245,8 +5247,8 @@ def resume_real_checks(env: Env, src: str = HERE) -> list:
               "items are); the four wide items at the gaps above" % (sum(1 for n in host if before[n] is None),
                                                                       sum(1 for n in nightly if reach[n] == L2.TILE and before[n] is None)),
               gaps_ok and before == want_before and len(host) == 14 and all(before[n] == g for n, g in wide.items()),
-              str({n: (before[n], want_before[n], study.get(n, "absent") if study else None) for n in nightly if before[n] != want_before[n]
-                   or (study and before[n] != study.get(n, "absent"))} or {n: before[n] for n in wide_names}) + (f"; {study_why}" if study_why else ""))
+              (f"{study_why}; " if study_why else "") + str({n: (before[n], want_before[n], study.get(n, "absent") if study else None) for n in nightly if before[n] != want_before[n]
+                   or (study and before[n] != study.get(n, "absent"))} or {n: before[n] for n in wide_names}))
             c("resume real: a resume at 0b7c959 plans each of the 22 where the intervals of the slices of ITS class merge to a gap - the tile slices of every run "
               "whose rtl/ tree is its (the first run's derived from its commit), and the host slices of its class (host/ tree and compiler) alone - the first "
               "run recorded no compiler, so its are not counted - and a tile item that the counted slices complete is not planned",

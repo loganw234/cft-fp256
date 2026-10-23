@@ -498,7 +498,7 @@ def main(argv):
           (nrates, tot / 3600.0, longest[0], longest[1] / 3600.0))
     for w in (8,):
         wall = max(tot / w, longest[1])
-        print("on %d workers, one item a worker at a time (the pool's rule): about %.1f hours (COMPUTED; the rates are those of every leg these runs recorded, the card's and, from 2026-10-22, the host pool's, not set apart)" % (w, wall / 3600.0))
+        print("on %d workers, one item a worker at a time (the pool's rule): about %.1f hours (COMPUTED; the rates are those of every sweep leg these runs recorded, the card's and, from 2026-10-22, the host pool's, not set apart)" % (w, wall / 3600.0))
 
     if "--controls" in argv:
         print()
