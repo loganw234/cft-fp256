@@ -45,22 +45,22 @@ The README's own two charts (`docs/img/bench/`) are not repeated here.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="img/figures/history-commits-dark.svg">
-  <img alt="Commits per day over 53 days, with merges apart, and under them a grid of the repository's 7 areas showing how many commits touched each one on each day, with the ABI steps and 6 milestones marked." src="img/figures/history-commits-light.svg">
+  <img alt="Commits per day over 56 days, with merges apart, and under them a grid of the repository's 7 areas showing how many commits touched each one on each day, with the ABI steps and 6 milestones marked." src="img/figures/history-commits-light.svg">
 </picture>
 
-**Shows.** 1,562 commits in 53 days, 229 of them merges; the busiest day was 3 Sep, with 106. Each
-area's busiest week, by commits touching it: FPGA builds, card the week of 24 Aug (32); gates,
-plumbing the week of 31 Aug (54); host and bindings the week of 31 Aug (154); RTL and proofs the
-week of 31 Aug (39); documents the week of 28 Sep (216); golden model the week of 28 Sep (78);
-programs, certificates the week of 28 Sep (55). The ABI steps, 0.2 to 0.18, are on the days
+**Shows.** 1,882 commits in 56 days, 264 of them merges; the busiest day was 3 Sep, with 106. Each
+area's busiest week, by commits touching it: gates, plumbing the week of 31 Aug (54); host and
+bindings the week of 31 Aug (154); RTL and proofs the week of 31 Aug (39); documents the week of 28
+Sep (216); golden model the week of 28 Sep (78); programs, certificates the week of 28 Sep (55);
+FPGA builds, card the week of 19 Oct (82). The ABI steps, 0.2 to 0.18, are on the days
 docs/COMPATIBILITY.md dates them.
 
 **Does not show.** How big the commits were, or who wrote what: a commit counts once whatever it
 changed. A day is the author's local day (every commit is dated at UTC-7), not UTC's. History is
-read at 0b77387 and ends there; commits made after it are in the next remake.
+read at 15f96c8 and ends there; commits made after it are in the next remake.
 
-**Source.** `docs/figures/history.json` (0b77387), `docs/figures/ledger.json` (ledger, first
-1,891,030 bytes). Remade by `python python/project_figures.py --only history-commits --write`; the
+**Source.** `docs/figures/history.json` (15f96c8), `docs/figures/ledger.json` (ledger, first
+2,772,018 bytes). Remade by `python python/project_figures.py --only history-commits --write`; the
 numbers and digests are in `docs/img/figures/history-commits.json`.
 
 **Held to the record.** 2 statements are checked against this figure on every run, 2 agree:
@@ -71,23 +71,23 @@ numbers and digests are in `docs/img/figures/history-commits.json`.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="img/figures/history-size-dark.svg">
-  <img alt="Text lines in the repository by area at the end of each day, and the validation ledger's size, with the lines ever deleted from it: 518 of 21,561, 515 of them in the newest entry." src="img/figures/history-size-light.svg">
+  <img alt="Text lines in the repository by area at the end of each day, and the validation ledger's size, with the lines ever deleted from it: 993 of 24,523, 981 of them in the newest entry." src="img/figures/history-size-light.svg">
 </picture>
 
-**Shows.** 844,665 text lines in 1,251 tracked text files at 0b77387: the largest slice is the
+**Shows.** 930,424 text lines in 1,470 tracked text files at 15f96c8: the largest slice is the
 hard-workload pack (251,757 lines, written by another model and kept as delivered), then host
-library and bindings (190,879), documents (127,058), programs and certificates (96,615) and golden
-model and compiler (76,476). The Arduino library's vendored copy of host/'s sources adds 36,060
-lines, a second copy. Beside it, the ledger (21,037 lines in 192 entries) and a measurement of its
-rule that it is append-only: 518 of the 21,561 lines ever added to it were later deleted, 515 of
+library and bindings (197,342), documents (168,164), programs and certificates (100,390) and golden
+model and compiler (91,935). The Arduino library's vendored copy of host/'s sources adds 36,569
+lines, a second copy. Beside it, the ledger (23,532 lines in 227 entries) and a measurement of its
+rule that it is append-only: 993 of the 24,523 lines ever added to it were later deleted, 981 of
 those in the newest entry at the time.
 
 **Does not show.** Lines of working code: data files, captured outputs and compiled programs are
 lines too, and a line is a line however long. Nor the ledger's content: it counts lines, not whether
 a sentence that was changed in place mattered.
 
-**Source.** `docs/figures/ledger.json` (ledger, first 1,891,030 bytes), `docs/figures/tree.json`
-(0b77387). Remade by `python python/project_figures.py --only history-size --write`; the numbers and
+**Source.** `docs/figures/ledger.json` (ledger, first 2,772,018 bytes), `docs/figures/tree.json`
+(15f96c8). Remade by `python python/project_figures.py --only history-size --write`; the numbers and
 digests are in `docs/img/figures/history-size.json`.
 
 **Held to the record.** 5 statements are checked against this figure on every run, 5 agree:
@@ -95,13 +95,16 @@ digests are in `docs/img/figures/history-size.json`.
 `programs/workloads/README.md` (2).
 
 **Data and prose.** docs/VALIDATION.md says it is append-only and that "an entry never edits
-history". Git says 518 of the 21,561 lines ever added to it were later deleted, by 82 commits (54 of
-whose subjects say restated, corrected, fixed or a verifier's finding: a count of those words, not a
-reading of each): 515 (99.4%) from the newest entry at the time and 3 from older entries (1 line 19
-entries back, in d9b5ac4 on 4 Sep; 1 line 1 entry back, in e3fe2ca on 6 Oct; 1 line 1 entry back, in
-3947c44 on 6 Oct). These are positions in the file: whether the text had been pushed when it was
-edited is not in the repository's history, so it is not counted here. This is reported as measured,
-and nothing here corrects it.
+history". Git says 993 of the 24,523 lines ever added to it were later deleted, by 189 commits (118
+of whose subjects say restated, corrected, fixed or a verifier's finding: a count of those words,
+not a reading of each): 981 (98.8%) from the newest entry at the time and 12 from older entries (1
+line 19 entries back, in d9b5ac4 on 4 Sep; 1 line 1 entry back, in e3fe2ca on 6 Oct; 1 line 1 entry
+back, in 3947c44 on 6 Oct; 1 line 2 entries back, in 9d3c3f7 on 19 Oct; 1 line 2 entries back, in
+927d45b on 22 Oct; 1 line 1 entry back, in faaf29e on 22 Oct; 1 line 225 entries back, in 9af92ce on
+22 Oct; 4 lines 225 entries back, in dc033cf on 22 Oct; 1 line 227 entries back, in 15f96c8 on 22
+Oct). These are positions in the file: whether the text had been pushed when it was edited is not in
+the repository's history, so it is not counted here. This is reported as measured, and nothing here
+corrects it.
 
 ## Verification
 
@@ -110,21 +113,21 @@ and nothing here corrects it.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="img/figures/verify-growth-dark.svg">
-  <img alt="Four small charts over time: the verification runner's stages (52, of which 44 in the gate budget and 31 in the quick one), the RTL benches (29), the formal proofs (38) and the golden-model test functions (1,027)." src="img/figures/verify-growth-light.svg">
+  <img alt="Four small charts over time: the verification runner's stages (53, of which 45 in the gate budget and 31 in the quick one), the RTL benches (29), the formal proofs (38) and the golden-model test functions (1,166)." src="img/figures/verify-growth-light.svg">
 </picture>
 
-**Shows.** How much the project asks of itself before it believes a change: at 0b77387 the runner
-has 52 stages (31 in the quick budget, 44 in the gate budget), 29 RTL benches run under `make sim`,
-38 formal proofs run, and python/tests defines 1,027 test functions. On the first day each was
+**Shows.** How much the project asks of itself before it believes a change: at 15f96c8 the runner
+has 53 stages (31 in the quick budget, 45 in the gate budget), 29 RTL benches run under `make sim`,
+38 formal proofs run, and python/tests defines 1,166 test functions. On the first day each was
 counted there were 14 stages, 3 benches, 6 proofs and 13 test functions.
 
 **Does not show.** How long any of it takes, or whether it passes: these are sizes, counted from the
 files at each day's last commit on main (the runner's stage lines and its two budget lists;
 tb/Makefile's bench list in each of the three forms it has had; formal/run.sh's run_proof lines; the
-def test_ lines). The figure ends at 0b77387; `--check` prints a note, and does not fail, when the
+def test_ lines). The figure ends at 15f96c8; `--check` prints a note, and does not fail, when the
 tree has moved on.
 
-**Source.** `docs/figures/tree.json` (0b77387). Remade by `python python/project_figures.py --only
+**Source.** `docs/figures/tree.json` (15f96c8). Remade by `python python/project_figures.py --only
 verify-growth --write`; the numbers and digests are in `docs/img/figures/verify-growth.json`.
 
 <a id="verify-stages"></a>
@@ -213,22 +216,22 @@ build for 260 MHz missed by -3.163 ns and is off the chart.
 **Does not show.** Other slacks the ledger gives. The entries that record three misses at 135 MHz
 give the whole design's slack and no kernel slack of their own: one tile at 135 MHz, 1 Sep, -0.577
 ns; four tiles at 135 MHz, 2 Sep, -0.141 ns; four tiles at 135 MHz, 2 Sep, -0.113 ns. The extract
-lists 42 other figures of slack, each with why it is not drawn: 8 repeats of a drawn build's slack,
-3 mentions of one, 6 other numbers of drawn builds (an earlier stage of a run, the whole design's,
+lists 43 other figures of slack, each with why it is not drawn: 8 repeats of a drawn build's slack,
+4 mentions of one, 6 other numbers of drawn builds (an earlier stage of a run, the whole design's,
 another clock), 3 misses recorded only with the whole design's slack, 9 out-of-context probes, 5
 figures of other designs and parts, 8 builds named only in running text. The builds named only in
 running text are: rev7a probe single +0.065; first sweep, 115 MHz +0.409; first sweep, 145 MHz
 +0.084; first sweep, 175 MHz -0.562; build-seq135s -0.286; single one commit earlier, 135 MHz
 +0.045; single, retiming on, 135 MHz +0.045; build-diet-quad -0.113. The check accounts for every
-statement of the two forms its patterns read in the ledger's pinned prefix (50 kernel-slack
-statements, 34 of them a drawn build's; 17 negative-WNS statements, 5 of them a drawn build's; the
+statement of the two forms its patterns read in the ledger's pinned prefix (51 kernel-slack
+statements, 34 of them a drawn build's; 18 negative-WNS statements, 5 of them a drawn build's; the
 rest are listed), so a new one fails until it is drawn or listed. It finds what its patterns read:
 the 9 items listed by hand are what a reader found, and this page does not say there are no others.
-A small positive slack is not a margin to build on: the ledger's own lesson (2026-09-01, line 340)
+A small positive slack is not a margin to build on: the ledger's own lesson (2026-09-01, line 343)
 is that an achieved-period reading from a hopelessly over-constrained run understates what the
 router does for an achievable target.
 
-**Source.** `docs/figures/ledger.json` (ledger, first 1,891,030 bytes). Remade by `python
+**Source.** `docs/figures/ledger.json` (ledger, first 2,772,018 bytes). Remade by `python
 python/project_figures.py --only hw-clock --write`; the numbers and digests are in
 `docs/img/figures/hw-clock.json`.
 
@@ -446,10 +449,10 @@ python/project_figures.py --only stress-sweep --write`; the numbers and digests 
 
 | extract | what it is | read at | remake |
 |---|---|---|---|
-| `docs/figures/history.json` | commits per day and the areas each touched, the merges apart, and the ABI steps' dates | 0b77387 | `python python/figure_extracts.py history --as-of 0b77387ea1266f4d4a5e30c8798f57e8b6dc6ef8` |
-| `docs/figures/ledger.json` | the U50 builds whose kernel slack the figures read from the ledger (kernel WNS by image, tiles and clock), the other slacks it gives and why each is not drawn, the scan that accounts for every statement its two patterns find, and the ledger's milestones, read out of docs/VALIDATION.md by patterns that name the entry | ledger, first 1,891,030 bytes | `python python/figure_extracts.py ledger` |
+| `docs/figures/history.json` | commits per day and the areas each touched, the merges apart, and the ABI steps' dates | 15f96c8 | `python python/figure_extracts.py history --as-of 15f96c8aea0279af26437e5a89c2bd7e40cf3e1e` |
+| `docs/figures/ledger.json` | the U50 builds whose kernel slack the figures read from the ledger (kernel WNS by image, tiles and clock), the other slacks it gives and why each is not drawn, the scan that accounts for every statement its two patterns find, and the ledger's milestones, read out of docs/VALIDATION.md by patterns that name the entry | ledger, first 2,772,018 bytes | `python python/figure_extracts.py ledger` |
 | `docs/figures/stress.json` | the card's long stress run (card-stress-1016), reduced from its metrics.jsonl: the legs, the cycles, the telemetry, and the sweep with its tile items and host items apart | run ended 2026-10-19 08:01:13 | `python python/figure_extracts.py stress PATH/metrics.jsonl --report PATH/report.txt` |
-| `docs/figures/tree.json` | the tree at the end of each day on main's own line: text lines by area, the ledger's size and line traffic, and the size of the gate | 0b77387 | `python python/figure_extracts.py tree --as-of 0b77387ea1266f4d4a5e30c8798f57e8b6dc6ef8` |
+| `docs/figures/tree.json` | the tree at the end of each day on main's own line: text lines by area, the ledger's size and line traffic, and the size of the gate | 15f96c8 | `python python/figure_extracts.py tree --as-of 15f96c8aea0279af26437e5a89c2bd7e40cf3e1e` |
 
 ## What the check does and does not do
 

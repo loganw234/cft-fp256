@@ -63,11 +63,12 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 EXTRACT_DIR = "docs/figures"
-# The commit the history extracts were read at: main when this parcel was cut.
-# Moving it is a decision (the figures then show the project as of that
+# The commit the history extracts were read at: the one that put Logan's sentence into docs/VALIDATION.md's header
+# (parcel FR, 2026-10-22), and the ledger extract's prefix is that commit's whole file. It was 0b77387 (2026-10-19)
+# before. Moving it is a decision (the figures then show the project as of that
 # commit), so it is a constant here and an argument there, never a default
 # that follows HEAD.
-BASE_COMMIT = "0b77387ea1266f4d4a5e30c8798f57e8b6dc6ef8"
+BASE_COMMIT = "15f96c8aea0279af26437e5a89c2bd7e40cf3e1e"
 FORMAT = 1
 
 
@@ -751,6 +752,11 @@ LEFT_OUT = (
         "the entry's comparison with the case-ROM single, whose own entry is drawn", same_as="caserom-single"),
     _lo("round2-single-in-quad-entry", "mention", "2026-09-16 - round 2's quad", r"\(kernel ([+-]\d+\.\d+) ns, routed",
         "the round's single, named in the failing quad's entry as unaffected; its own row is drawn", same_as="round2-single"),
+    _lo("round2-quad-first-in-figures-entry", "mention", "2026-10-19 - the project's figures: fifteen, made by script",
+        r"missed it once with a kernel slack stated \(([+-]\d+\.\d+)\)",
+        "the figures parcel's own entry, in its account of what hw-clock draws, names round 2's first quad (listed there "
+        "among the five misses drawn): the build is drawn from its own entry of 16 Sep, and this entry states no build of "
+        "its own", same_as="round2-quad-first"),
     # another number of a drawn build
     _lo("round2-quad-system-clock", "other-number", "2026-09-16 - round 2's quad", r"system-clock slack ([+-]\d+\.\d+) ns",
         "the failing quad's slack on the system clock, beside its kernel slack (-0.363, drawn)"),

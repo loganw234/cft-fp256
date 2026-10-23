@@ -5,7 +5,7 @@
  "alt": "Board power and four temperatures at 865 samples over 61.0 hours: 22.2 W on the quad image, 15.7 W on the single and 16.1 W on the deep one at the median, with one sample at 34.4 W.",
  "files": ["docs/img/figures/stress-telemetry-light.svg", "docs/img/figures/stress-telemetry-dark.svg"],
  "maker": "python/project_figures.py: build_stress_telemetry, draw_stress_telemetry",
- "commit": "0b77387ea1266f4d4a5e30c8798f57e8b6dc6ef8",
+ "commit": "15f96c8aea0279af26437e5a89c2bd7e40cf3e1e",
  "commit_means": "the commit the extracts below were read at; a file read from the tree is identified by its SHA-256 instead",
  "sources": [],
  "extracts": [
