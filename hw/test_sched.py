@@ -3112,6 +3112,12 @@ def closeout_jobs(remote):
     j3, e3, r3 = night(rootf, wspec(w["w1"], outf), secs=60, FAKE_LONG="fail")
     check("closeout: WHATEVER the outcome: a night the driver ended `card_lost` is failed, as it was, and is closed out all the same (all five parts have a record, the end record carries them)",
           e3.get("outcome") == "failed" and {r["part"] for r in r3 if r["type"] == "closeout_part"} == set(CO.PARTS) and set(e3.get("closeout", {}).get("parts", {})) == set(CO.PARTS), f"{e3.get('outcome')} {e3.get('closeout')}")
+    outb, rootb = prepared("fb")
+    night(rootb, wspec(w["w2"], outb), secs=60, FAKE_LONG="end")
+    jb, eb, rb = night(rootb, wspec(w["w3"], outb), secs=60, FAKE_LONG="end")
+    repb = {r["part"]: r for r in rb if r["type"] == "closeout_part"}.get("report", {})
+    check("closeout: a night that FELL BACK (w3's vectors fail, so it ran on w2, the last commit whose window passed) is closed out by the clone that RAN it: the report part names w2's clone, not w3's, "
+          "and the end record says it ran w2 having been asked for w3", eb.get("commit") == w["w2"] and eb.get("requested_commit") == w["w3"] and repb.get("clone") == w["w2"], f"{eb.get('commit')} {eb.get('requested_commit')} {repb.get('clone')}")
     outp, rootp = prepared("pub", remote_=remote)
     refs0 = git_t(remote, "for-each-ref").stdout
     tip = git_t(remote, "rev-parse", "main").stdout.strip()
@@ -3460,6 +3466,9 @@ PLANTS = [  # (what is wrong, edits, the groups written for it, a fragment of th
      "retention", "retention: a PASSING step's log", False),
     ("S4a: check_sums verifies the run's files, which the next night changes", [E("sched_state.py", "        if os.path.isabs(n):\n            continue ", "        if False:\n            continue ")],
      "closeout", "closeout: the run's lines hold for the night they were taken", False),
+    ("S4a: a fallback night is closed out by the clone it was asked for, not the one that ran it", [E("sched_closeout.py", 'python, clone = cfg["runner"]["python"], S.ctx.clone if S.ctx else None',
+                                                                                                    'python, clone = cfg["runner"]["python"], os.path.join(root, "clones", spec["code"]["commit"]) if "code" in spec else S.ctx.clone if S.ctx else None')],
+     "closeout", "closeout: a night that FELL BACK", "posix"),
     ("S4a: a refusal the table gives to S4a that nothing raises", [E("sched_names.py", '    "report-failed": ("S4a",', '    "never-raised-s4a": ("S4a", "closeout", "x"), "report-failed": ("S4a",')],
      "closeout,publish,table", "the table: every refusal the table gives to S4a", None),
 ]

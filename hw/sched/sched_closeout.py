@@ -41,7 +41,7 @@ def do_report(clone, python, run, jobdir, rec):
     if not os.path.isfile(tool):
         raise Refusal("report-failed", "hw/card_stress_report.py is not in the clone that ran the night")
     rc, out, err = PUB.run([python, "-B", tool, run, "--json", os.path.join(jobdir, SUMMARY)], clone, 900)
-    rec.update(rc=rc, lines=len(out.splitlines()), tool="hw/card_stress_report.py of the clone that ran the night")
+    rec.update(rc=rc, lines=len(out.splitlines()), tool="hw/card_stress_report.py of the clone that ran the night", clone=os.path.basename(os.path.normpath(clone)))
     if out:
         with open(os.path.join(jobdir, REPORT), "w", encoding="utf-8", newline="\n") as fh:
             fh.write(out)
@@ -151,7 +151,7 @@ def lines(parts: dict) -> list:
         r = parts.get(name)
         if r is None:
             continue
-        what = {"report": lambda: f"{r.get('file')}, {r.get('lines')} lines, rc {r.get('rc')}", "summary": lambda: f"{r.get('file')}, report_version {r.get('report_version')}, DISAGREEMENTS {r.get('disagreements_this_night')} this night ({r.get('disagreements_in_run')} in the run)",
+        what = {"report": lambda: f"{r.get('file')}, {r.get('lines')} lines, rc {r.get('rc')}, by the tool of clone {str(r.get('clone'))[:12]}", "summary": lambda: f"{r.get('file')}, report_version {r.get('report_version')}, DISAGREEMENTS {r.get('disagreements_this_night')} this night ({r.get('disagreements_in_run')} in the run)",
                 "sums": lambda: f"{r.get('listed')} files listed for the lead's copy (the run's, the smoke's), metrics.jsonl {str(r.get('metrics_sha256'))[:12]}",
                 "publish": lambda: f"night {r.get('night')} ({r.get('date')}), commit {str(r.get('commit'))[:12]} on {r.get('branch')}, parent {str(r.get('parent'))[:12]}",
                 "retention": lambda: f"{r.get('clones', {}).get('removed_n')} clone(s) and {r.get('logs', {}).get('removed_n')} log(s) removed, would remove {r.get('clones', {}).get('would_remove_n')} and "
