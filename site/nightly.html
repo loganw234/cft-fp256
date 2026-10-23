@@ -1,0 +1,420 @@
+<!doctype html>
+<!-- Copyright 2026 Logan W.
+     SPDX-License-Identifier: Apache-2.0
+
+     The nightly card run, as a page. One file, no server of its own, no CDN, no external request: it reads
+     nightly.json, which sits beside it and which hw/card_stress_progress.py makes from the run's metrics.jsonl
+     (docs/CARDDAY.md, "The morning after"). The page holds no figure itself. If the data file is missing, is not
+     JSON or is not the shape it reads, the page says which, and shows nothing else: it never shows figures it
+     could not read as current. Every string from the file is put on the page as text, never as markup. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>libcft: the nightly card run</title>
+<style>
+:root {
+  --bg: #ffffff; --fg: #1a1a1a; --dim: #666666; --line: #d8d8d8; --accent: #0a5cad;
+  --pass-bg: #e8f5e9; --pass-fg: #1b5e20; --fail-bg: #fdecea; --fail-fg: #b71c1c;
+  --warn-bg: #fff8e1; --warn-fg: #8d6e00; --code-bg: #f5f5f5; --panel: #fbfbfb;
+  --s1: #0a5cad; --s2: #c1440e; --s3: #6a1b9a; --s4: #00695c;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14161a; --fg: #e4e4e4; --dim: #9a9a9a; --line: #33373d; --accent: #5ea2e0;
+    --pass-bg: #12310f; --pass-fg: #a3e0a0; --fail-bg: #3d1210; --fail-fg: #ffb3ab;
+    --warn-bg: #3a2f0a; --warn-fg: #ffd970; --code-bg: #1d2025; --panel: #181b20;
+    --s1: #5ea2e0; --s2: #ff8a5c; --s3: #c08ae0; --s4: #4db6a5;
+  }
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0 auto; padding: 1.2rem 1rem 4rem; max-width: 64rem; background: var(--bg); color: var(--fg);
+       font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; overflow-wrap: anywhere; }
+h1 { font-size: 1.5rem; margin: 0.2rem 0 0.4rem; }
+h2 { font-size: 1.15rem; margin: 0 0 0.5rem; }
+h3 { font-size: 0.95rem; margin: 1rem 0 0.3rem; }
+p { margin: 0.4rem 0; }
+a { color: var(--accent); }
+code, .mono { font-family: ui-monospace, Consolas, "Cascadia Mono", Menlo, monospace; font-size: 0.92em; }
+.dim { color: var(--dim); }
+.small { font-size: 0.85rem; }
+section { border: 1px solid var(--line); border-radius: 6px; margin: 1.2rem 0; padding: 0.9rem 1rem; background: var(--panel); }
+#status { padding: 0.8rem 1rem; border: 1px solid var(--line); border-radius: 6px; background: var(--code-bg); }
+#status.error { background: var(--fail-bg); color: var(--fail-fg); border-color: var(--fail-fg); }
+.banner { padding: 0.5rem 0.8rem; border-radius: 4px; margin: 0.6rem 0; background: var(--warn-bg); color: var(--warn-fg); }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 19rem), 1fr)); gap: 0.9rem; }
+.card { border: 1px solid var(--line); border-radius: 6px; padding: 0.8rem 0.9rem; background: var(--bg); min-width: 0; }
+.card .kind { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--dim); }
+.card .big { font-size: 1.9rem; font-weight: 600; line-height: 1.2; margin: 0.2rem 0; }
+.bar { height: 9px; background: var(--code-bg); border: 1px solid var(--line); border-radius: 5px; overflow: hidden; margin: 0.35rem 0; }
+.bar > i { display: block; height: 100%; background: var(--accent); }
+.bar.done > i { background: var(--pass-fg); }
+.item { padding: 0.55rem 0; border-top: 1px solid var(--line); }
+.item:first-of-type { border-top: 0; }
+.item .head { display: flex; flex-wrap: wrap; gap: 0.2rem 0.8rem; justify-content: space-between; align-items: baseline; }
+.item .name { font-weight: 600; min-width: 0; }
+.tag { display: inline-block; font-size: 0.72rem; padding: 0 0.4rem; border-radius: 3px; border: 1px solid var(--line); color: var(--dim);
+       margin-left: 0.3rem; vertical-align: 1px; }
+.tag.ok { background: var(--pass-bg); color: var(--pass-fg); border-color: transparent; }
+.est { font-variant: small-caps; letter-spacing: 0.03em; font-weight: 600; }
+table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+th, td { padding: 0.3rem 0.5rem; border-bottom: 1px solid var(--line); text-align: right; vertical-align: top; }
+th:first-child, td:first-child, th.l, td.l { text-align: left; }
+th { font-weight: 600; color: var(--dim); }
+details { margin: 0.5rem 0; }
+summary { cursor: pointer; font-weight: 600; }
+dl.totals { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); gap: 0.7rem 1.2rem; margin: 0; }
+dl.totals div { min-width: 0; }
+dl.totals dt { font-size: 0.8rem; color: var(--dim); }
+dl.totals dd { margin: 0; font-size: 1.1rem; font-weight: 600; }
+figure { margin: 0.6rem 0; }
+figure svg { width: 100%; max-width: 42rem; height: auto; display: block; }
+figcaption { font-size: 0.85rem; color: var(--dim); }
+.legend { display: flex; flex-wrap: wrap; gap: 0.2rem 1rem; font-size: 0.85rem; margin: 0.3rem 0; }
+.legend span { display: inline-flex; align-items: center; gap: 0.35rem; min-width: 0; }
+.legend svg { width: 1.8rem; height: 0.7rem; flex: none; }
+@media (max-width: 40rem) {
+  body { padding: 0.8rem 0.7rem 3rem; }
+  section { padding: 0.7rem 0.7rem; }
+  table.stack thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  table.stack tr { display: block; border-bottom: 1px solid var(--line); padding: 0.3rem 0; }
+  table.stack td { display: flex; justify-content: space-between; gap: 1rem; border: 0; padding: 0.1rem 0.2rem; text-align: right; }
+  table.stack td::before { content: attr(data-label); color: var(--dim); text-align: left; }
+}
+</style>
+</head>
+<body>
+<h1>The nightly card run</h1>
+<p>Every night the project's FPGA card runs one resumed stress run: a battery of checks, then slices of exhaustive sweeps in which the
+library's answers are compared, bit for bit, with an oracle on the host's CPU. This page shows how far those sweeps have come. It is
+rebuilt after each night from the run's own record by <code>hw/card_stress_progress.py</code>, and holds no figure of its own.</p>
+<div id="status" role="status">Loading <code>nightly.json</code>...</div>
+<div id="app" hidden></div>
+<noscript><p class="banner">This page needs JavaScript to read its data file, <code>nightly.json</code>. Nothing is shown without it.</p></noscript>
+<script>
+"use strict";
+(function () {
+  var DATA = "nightly.json", SCHEMA = 1, REPO = "https://github.com/loganw234/cft-fp256/commit/";
+  var NS = "http://www.w3.org/2000/svg";
+
+  // ---- small helpers: elements by text, never by markup ----
+  function h(tag, attrs) {
+    var e = document.createElement(tag), i, k;
+    for (k in (attrs || {})) { if (k === "text") e.textContent = attrs[k]; else e.setAttribute(k, attrs[k]); }
+    for (i = 2; i < arguments.length; i++) { add(e, arguments[i]); }
+    return e;
+  }
+  function add(e, c) {
+    if (c === null || c === undefined || c === false) return;
+    if (Array.isArray(c)) { c.forEach(function (x) { add(e, x); }); return; }
+    e.appendChild(typeof c === "object" ? c : document.createTextNode(String(c)));
+  }
+  function svg(tag, attrs) {
+    var e = document.createElementNS(NS, tag), k;
+    for (k in (attrs || {})) { if (k === "text") e.textContent = attrs[k]; else e.setAttribute(k, attrs[k]); }
+    for (var i = 2; i < arguments.length; i++) add(e, arguments[i]);
+    return e;
+  }
+  function Shape(m) { this.message = m; }
+  function need(ok, m) { if (!ok) throw new Shape(m); }
+  function isnum(x) { return typeof x === "number" && isFinite(x); }
+  function fmt(n) { return isnum(n) ? n.toLocaleString("en-US") : "-"; }
+  function pct3(cov, space) {                      // the report's rule: an incomplete figure is never rounded up to 100
+    if (!isnum(cov) || !isnum(space) || space <= 0) return "-";
+    var s = (100 * cov / space).toFixed(3);
+    if (cov < space && s === "100.000") s = "99.999";
+    return s + "%";
+  }
+  function pct1(cov, space) {
+    if (!isnum(cov) || !isnum(space) || space <= 0) return "-";
+    var s = (100 * cov / space).toFixed(1);
+    if (cov < space && s === "100.0") s = "99.9";
+    return s + "%";
+  }
+  function dur(s) {
+    if (!isnum(s)) return "-";
+    var t = Math.round(s), d = Math.floor(t / 86400), hh = Math.floor(t % 86400 / 3600), m = Math.floor(t % 3600 / 60), x = t % 60;
+    return d ? d + " d " + hh + " h " + m + " m" : hh ? hh + " h " + m + " m " + x + " s" : m ? m + " m " + x + " s" : x + " s";
+  }
+  function hours(s) { return isnum(s) ? (s / 3600).toFixed(1) + " h" : "-"; }
+  function ago(sec) {
+    if (sec < 0) return "in the future by this clock";
+    var m = Math.round(sec / 60);
+    return (m < 90 ? m + " min" : sec < 172800 ? Math.round(sec / 3600) + " h" : Math.round(sec / 86400) + " d") + " ago";
+  }
+  function bar(cov, space, label) {
+    var done = space > 0 && cov >= space, w = space > 0 ? 100 * cov / space : 0, i = h("i");
+    i.style.width = (done ? 100 : Math.min(w, 99.9)) + "%";
+    if (cov > 0) i.style.minWidth = "2px";           // a sliver is shown for any progress, and none for none
+    return h("div", { "class": "bar" + (done ? " done" : ""), role: "progressbar", "aria-valuemin": "0", "aria-valuemax": "100",
+                      "aria-valuenow": String(Math.round(w)), "aria-label": label }, i);
+  }
+  function index(n, space) {
+    return space === 4294967296 ? "0x" + n.toString(16).padStart(8, "0") : fmt(n);
+  }
+  function hm(s) {
+    if (!isnum(s)) return "-";
+    var t = Math.round(s);
+    return Math.floor(t / 3600) + " h " + Math.floor(t % 3600 / 60) + " m " + t % 60 + " s";
+  }
+  function derivedNote(c) {       // a class the report says holds a run whose tree it read from git; nothing where the field is absent
+    var l = (Array.isArray(c.derived_from_git) ? c.derived_from_git : []).filter(function (x) { return x && typeof x.commit === "string" && typeof x.tree === "string"; });
+    return l.length ? h("p", { "class": "small dim", text: "Read from git, not recorded by the run: " + l.map(function (x) { return (x.dir || "") + " tree " + x.tree + " of commit " + x.commit; }).join("; ") + "." }) : null;
+  }
+  function estimateText(e, note) {
+    if (!e) return note ? "No estimate: " + note + "." : "";
+    var when = e.date ? e.date : "in about " + e.nights_left + " night(s)";
+    return [h("span", { "class": "est", text: "estimate" }), " about " + e.nights_left + " more night" + (e.nights_left === 1 ? "" : "s") + ", by " + when +
+            " (the last " + e.window_nights + " night" + (e.window_nights === 1 ? "" : "s") + "' pace: " + fmt(e.per_night) + " a night)"];
+  }
+
+  // ---- loading, and the three ways it can fail ----
+  function say(text, error, detail) {
+    var s = document.getElementById("status");
+    s.className = error ? "error" : "";
+    s.textContent = "";
+    add(s, text);
+    if (detail) add(s, h("p", { "class": "small", text: detail }));
+    s.hidden = false;
+    document.getElementById("app").hidden = true;
+  }
+  function fail(kind, why) {
+    say([h("strong", { text: "The data file " }), h("code", { text: DATA }), h("strong", { text: " " + kind + "." })], true,
+        why + " No figures are shown, so none can be taken for current.");
+  }
+  fetch(DATA, { cache: "no-cache" }).then(function (r) {
+    if (!r.ok) { var e = new Error("HTTP " + r.status + (r.statusText ? " " + r.statusText : "")); e.load = true; throw e; }
+    return r.text();
+  }, function (e) { e.load = true; throw e; }).then(function (text) {
+    var d;
+    try { d = JSON.parse(text); } catch (e) { e.json = true; throw e; }
+    var frag = render(d);
+    var app = document.getElementById("app");
+    app.textContent = "";
+    app.appendChild(frag);
+    app.hidden = false;
+    document.getElementById("status").hidden = true;
+  }).catch(function (e) {
+    if (e && e.load) fail("could not be loaded", "The request failed: " + e.message + "." + (/^HTTP /.test(e.message) ? "" : " (Opened from a file? Serve the folder over HTTP.)"));
+    else if (e && e.json) fail("is not valid JSON", e.name + ": " + e.message + ".");
+    else if (e instanceof Shape) fail("is not the shape this page reads", e.message + ".");
+    else fail("could not be shown", (e && e.name ? e.name + ": " : "") + (e && e.message ? e.message : String(e)) + ".");
+  });
+
+  // ---- the shape this page reads ----
+  function validate(d) {
+    need(d && typeof d === "object" && !Array.isArray(d), "the top level is not an object");
+    need(d.schema === SCHEMA, "its schema is " + JSON.stringify(d.schema) + " where this page reads " + SCHEMA);
+    ["made", "source", "newest", "rules", "now", "totals"].forEach(function (k) { need(d[k] && typeof d[k] === "object", "the field " + k + " is missing"); });
+    need(Array.isArray(d.nights) && d.nights.length > 0, "nights is not a list with a night in it");
+    need(Array.isArray(d.now.classes), "now.classes is not a list");
+    need(Array.isArray(d.totals.fully_covered), "totals.fully_covered is not a list");
+    d.nights.forEach(function (n, i) {
+      need(n && typeof n === "object" && n.n === i + 1, "night " + (i + 1) + " is not numbered " + (i + 1));
+      need(n.legs && n.after && n.after.classes && typeof n.after.classes === "object", "night " + (i + 1) + " has no legs or no state after it");
+      ["slices", "cases"].forEach(function (k) { need(isnum(n[k]), "night " + (i + 1) + " has no number " + k); });
+    });
+    d.now.classes.forEach(function (c) {
+      need(c && typeof c.id === "string" && typeof c.kind === "string" && typeof c.label === "string", "a class lacks its id, kind or label");
+      need(Array.isArray(c.items) && Array.isArray(c.nights) && c.total && isnum(c.total.space), "class " + c.id + " lacks its items, nights or total");
+      c.items.forEach(function (r) {
+        need(typeof r.item === "string" && isnum(r.space) && isnum(r.covered), "an item of class " + c.id + " lacks its name, space or covered");
+      });
+    });
+    need(isnum(d.totals.nights) && isnum(d.totals.slices) && isnum(d.totals.cases) && isnum(d.totals.disagreements), "totals lacks a count");
+  }
+
+  // ---- the page ----
+  function render(d) {
+    validate(d);
+    var frag = document.createDocumentFragment(), N = d.nights.length, newest = d.nights[N - 1];
+    var cur = d.now.classes.filter(function (c) { return c.current; });
+    var old = d.now.classes.filter(function (c) { return !c.current && c.nights.length; });
+    var byId = {};
+    d.now.classes.forEach(function (c) { byId[c.id] = c; });
+
+    // freshness
+    var age = isnum(d.newest.end_epoch) ? Date.now() / 1000 - d.newest.end_epoch : null;
+    var commit = typeof d.made.commit === "string" ? d.made.commit : null, hex = commit && /^[0-9a-f]{40}$/.test(commit);
+    frag.appendChild(h("section", { id: "fresh" },
+      h("p", null, h("strong", { text: "Newest night: " + (d.newest.date || "-") }),
+        d.newest.closed ? " (night " + d.newest.night + " of " + N + "; ended " + d.newest.end + " by the card host's clock" + (age !== null ? ", " + ago(age) : "") + ")"
+                        : " (night " + d.newest.night + " of " + N + "; it has NO run_end in the record: the run was still going when the copy was made, or it died. Its last record is " + d.newest.end + ")"),
+      h("p", { "class": "small dim" }, "Made with the tools at commit ",
+        hex ? [h("a", { href: REPO + commit }, h("code", { text: commit.slice(0, 12) })), "."] : commit ? [h("code", { text: commit.slice(0, 40) }), " (not a commit hash)."] : "(not recorded).",
+        " The figures come from the run's record of " + fmt(d.source.records) + " lines (metrics sha256 ", h("code", { text: d.source.metrics_sha256.slice(0, 12) }), ")."),
+      (age !== null && age > 3 * 86400) ? h("p", { "class": "banner", text: "The newest night is more than 3 days old: the nightly update has not been made since." }) : null));
+
+    // headline
+    var cards = cur.map(function (c) {
+      var t = c.total, first = c.nights[0], done = t.complete + " of " + t.items;
+      return h("div", { "class": "card" },
+        h("div", { "class": "kind", text: c.kind + " items - current " + (c.kind === "tile" ? "RTL tree" : "host tree") }),
+        h("div", { "class": "mono small", text: c.label }),
+        derivedNote(c),
+        h("div", { "class": "big", text: done }),
+        h("div", { text: "items fully covered" }),
+        bar(t.covered, t.space, c.kind + " items covered"),
+        h("div", null, h("strong", { text: pct1(t.covered, t.space) }), " of the campaign's " + fmt(t.space) + " encodings or indices (" + fmt(t.covered) + " covered)"),
+        h("div", { "class": "small dim", text: "Under this tree since night " + first + " (" + (d.nights[first - 1].date || "-") + "), " + c.nights.length +
+          " night" + (c.nights.length === 1 ? "" : "s") + (c.served ? "." : ". No slice has completed under it yet.") }));
+    });
+    var earlier = old.map(function (c) {
+      var t = c.total;
+      return h("li", null, h("span", { "class": "mono", text: c.kind + ": " + c.label }), ": " + t.complete + " of " + t.items + " items fully covered, " +
+        pct1(t.covered, t.space) + " (" + fmt(t.covered) + " of " + fmt(t.space) + "), night" + (c.nights.length === 1 ? " " : "s ") + c.nights.join(", "));
+    });
+    frag.appendChild(h("section", { id: "headline" }, h("h2", { text: "How far along" }),
+      cards.length ? h("div", { "class": "cards" }, cards) : h("p", { text: "No class is current: the newest night ran under no recorded tree." }),
+      h("p", { "class": "small" }, h("strong", { text: "Why a changed tree starts again. " }), d.rules.classes),
+      earlier.length ? h("details", { open: "" }, h("summary", { text: "Earlier trees (" + earlier.length + "), kept as history" }), h("ul", null, earlier)) : null));
+
+    // the growing list: grouped by the tree each item completed on, the current trees first
+    function levelTag(level) {
+      return level === "hard" ? h("span", { "class": "tag", title: "a deterministic space of constructed operands, not the operand space", text: "hard-case" }) :
+             level === "class" ? h("span", { "class": "tag", title: "a claim at the class level, plausible and not proved", text: "class level" }) : null;
+    }
+    var fc = d.totals.fully_covered, inCur = fc.filter(function (x) { return byId[x["class"]] && byId[x["class"]].current; }).length;
+    var groups = cur.concat(old).map(function (c) {
+      var mine = fc.filter(function (x) { return x["class"] === c.id; }).sort(function (a, b) { return b.night - a.night || (a.item < b.item ? -1 : 1); });
+      if (!mine.length && !c.current) return null;
+      var rows = mine.map(function (x) {
+        var it = c.items.filter(function (r) { return r.item === x.item; })[0] || {};
+        return h("tr", null, h("td", { "class": "l mono" }, x.item, levelTag(it.level)), h("td", null, x.night + (x.date ? " (" + x.date + ")" : "")));
+      });
+      return h("div", null, h("h3", { "class": "mono", text: (c.current ? "current " : "earlier ") + c.kind + " tree: " + c.label }),
+        mine.length ? h("table", null, h("thead", null, h("tr", null, h("th", { text: "Item" }), h("th", { text: "Night completed" }))), h("tbody", null, rows))
+                    : h("p", { "class": "dim", text: "None yet under this tree." }));
+    });
+    frag.appendChild(h("section", { id: "covered" }, h("h2", { text: "Fully covered items" }),
+      h("p", { text: fc.length + " in all, " + inCur + " under the current trees. The list only grows: each item is listed with the night it completed, under the tree it completed on." }),
+      groups));
+
+    // per item
+    function classBlock(c) {
+      var open = c.items.filter(function (r) { return !r.complete; }), done = c.items.filter(function (r) { return r.complete; });
+      var items = open.concat(done).map(function (r) {
+        var gap = r.first_gap, sub = [fmt(r.covered) + " of " + fmt(r.space) + (r.space !== 4294967296 ? " indices" : " encodings"), fmt(r.slices) + " slices"];
+        if (r.complete) sub.push("completed night " + r.complete_night + (r.complete_night ? " (" + (d.nights[r.complete_night - 1].date || "-") + ")" : ""));
+        else if (gap) sub.push("first uncovered " + index(gap[0], r.space));
+        return h("div", { "class": "item" },
+          h("div", { "class": "head" }, h("span", { "class": "name mono" }, r.item, levelTag(r.level),
+            r.in_campaign === false ? h("span", { "class": "tag", title: "not in the newest run's item list", text: "not in the run's list" }) : null,
+            r.complete ? h("span", { "class": "tag ok", text: "complete" }) : null),
+            h("span", null, h("strong", { text: pct3(r.covered, r.space) }))),
+          bar(r.covered, r.space, r.item),
+          h("div", { "class": "small dim", text: sub.join(" - ") }),
+          (!r.complete && c.current) ? h("div", { "class": "small" }, estimateText(r.estimate, r.estimate_note)) : null);
+      });
+      return h("div", null, h("h3", { "class": "mono", text: c.kind + " items - " + c.label }),
+        h("p", { "class": "small dim", text: c.total.complete + " of " + c.total.items + " fully covered; night" + (c.nights.length === 1 ? " " : "s ") + c.nights.join(", ") }),
+        derivedNote(c),
+        c.served ? items : h("details", null, h("summary", { text: "No slice has completed under this tree yet: its " + c.items.length + " items are all at zero" }), items));
+    }
+    var perItem = h("section", { id: "items" }, h("h2", { text: "Item by item" }),
+      h("p", { "class": "small dim", text: "Current trees first. An item that nothing has been swept for under a tree is listed there at zero: its coverage under an earlier tree is in the history, and does not count here. For the same reason a range swept only under an earlier tree is still open under this one, so an item's first uncovered index can be low while its percentage is high." }),
+      cur.map(classBlock),
+      old.length ? h("details", null, h("summary", { text: "Earlier trees, item by item" }), old.map(classBlock)) : null);
+    frag.appendChild(perItem);
+
+    // per night
+    var nrows = d.nights.slice().reverse().map(function (n) {
+      var note = [];
+      if (!n.closed) note.push("no run_end"); else if (n.reason && n.reason !== "deadline") note.push("ended: " + n.reason); else if (n.reason_withheld) note.push("reason not published");
+      if (n.quick) note.push("quick"); if (n.dry_run) note.push("dry run");
+      Object.keys(n.legs).forEach(function (k) { if (k !== "pass" && k !== "fail" && k !== "skipped" && n.legs[k] > 0) note.push(fmt(n.legs[k]) + " " + k); });
+      return h("tr", null, h("td", { "class": "l", "data-label": "Night" }, n.n + " (" + (n.date || "-") + ")"), h("td", { "data-label": "On the card" }, hours(n.card_s)),
+        h("td", { "data-label": "Slices" }, fmt(n.slices)), h("td", { "data-label": "Cases" }, fmt(n.cases)), h("td", { "data-label": "Legs passed" }, fmt(n.legs.pass)),
+        h("td", { "data-label": "Failed" }, fmt(n.legs.fail)), h("td", { "data-label": "Skipped" }, fmt(n.legs.skipped)), h("td", { "class": "l", "data-label": "Note" }, note.join("; ") || "-"));
+    });
+    var redraws = [];
+    function chart() {
+      var cls = d.now.classes.filter(function (c) { return c.nights.length; });
+      if (!cls.length) return null;
+      var colors = { tile: "--s1", host: "--s4" }, dashes = ["", "6 4", "2 3", "9 3 2 3"], box = h("div"), legend = [], drawn = 0, seen = { tile: 0, host: 0 };
+      cls.forEach(function (c) {         // current: solid; each earlier tree of a kind gets its own dash
+        c.style = "stroke:var(" + (colors[c.kind] || "--s2") + ");stroke-width:2.2" + (c.current ? "" : ";stroke-dasharray:" + dashes[1 + (seen[c.kind]++ % 3)]);
+      });
+      function plot(W) {
+        var H = Math.max(170, Math.min(250, Math.round(W * 0.42))), L = W < 400 ? 36 : 46, R = 14, T = 14, B = 32;
+        var x = function (n) { return N === 1 ? L + (W - L - R) / 2 : L + (n - 1) * (W - L - R) / (N - 1); };
+        var y = function (p) { return T + (100 - p) * (H - T - B) / 100; };
+        var g = svg("svg", { viewBox: "0 0 " + W + " " + H, role: "img", "aria-label": "Share of each tree's campaign covered after each night" });
+        [0, 25, 50, 75, 100].forEach(function (p) {
+          g.appendChild(svg("line", { x1: L, x2: W - R, y1: y(p), y2: y(p), style: "stroke:var(--line);stroke-width:1" }));
+          g.appendChild(svg("text", { x: L - 6, y: y(p) + 4, "text-anchor": "end", style: "fill:var(--dim);font-size:11px", text: p + "%" }));
+        });
+        var step = Math.max(1, Math.ceil(N / Math.max(2, Math.floor((W - L - R) / 30))));
+        for (var n = 1; n <= N; n += step) g.appendChild(svg("text", { x: x(n), y: H - 16, "text-anchor": "middle", style: "fill:var(--dim);font-size:11px", text: String(n) }));
+        g.appendChild(svg("text", { x: (L + W - R) / 2, y: H - 3, "text-anchor": "middle", style: "fill:var(--dim);font-size:11px", text: "night" }));
+        cls.forEach(function (c) {
+          var pts = [];
+          for (var n = c.nights[0]; n <= N; n++) {
+            var s = d.nights[n - 1].after.classes[c.id];
+            pts.push([x(n), y(s && c.total.space ? 100 * s.covered / c.total.space : 0), n, s ? s.covered : 0]);
+          }
+          g.appendChild(svg("polyline", { points: pts.map(function (p) { return p[0].toFixed(1) + "," + p[1].toFixed(1); }).join(" "), fill: "none", style: c.style }));
+          pts.forEach(function (p) {
+            g.appendChild(svg("circle", { cx: p[0].toFixed(1), cy: p[1].toFixed(1), r: 3.2, style: c.style.replace("stroke:", "fill:").replace(/;stroke-.*$/, "") },
+              svg("title", { text: c.kind + " " + c.label + ": night " + p[2] + ", " + pct1(p[3], c.total.space) + " (" + fmt(p[3]) + " of " + fmt(c.total.space) + ")" })));
+          });
+        });
+        return g;
+      }
+      function draw() {
+        var W = Math.max(240, Math.min(640, document.documentElement.clientWidth - 72));
+        if (drawn && Math.abs(W - drawn) < 24) return;
+        drawn = W;
+        box.textContent = "";
+        box.appendChild(plot(W));
+      }
+      cls.slice().sort(function (a, b) { return (b.current ? 1 : 0) - (a.current ? 1 : 0); }).forEach(function (c) {      // the legend lists the current trees first
+        var last = d.nights[N - 1].after.classes[c.id];
+        legend.push(h("span", null, svg("svg", { viewBox: "0 0 29 11", "aria-hidden": "true" }, svg("line", { x1: 1, x2: 28, y1: 5.5, y2: 5.5, style: c.style })),
+          c.kind + (c.current ? " (current): " : " (earlier): ") + c.label + " - " + pct1(last ? last.covered : 0, c.total.space)));
+      });
+      redraws.push(draw);
+      draw();
+      return h("figure", null, box, h("div", { "class": "legend" }, legend));
+    }
+    frag.appendChild(h("section", { id: "nights" }, h("h2", { text: "Night by night" }),
+      h("table", { "class": "stack" }, h("thead", null, h("tr", null, ["Night", "On the card", "Slices", "Cases", "Legs passed", "Failed", "Skipped", "Note"].map(function (t, i) { return h("th", { "class": i === 0 || i === 7 ? "l" : "", text: t }); }))), h("tbody", null, nrows)),
+      h("p", { "class": "small dim", text: "A slice is one range of an item's space swept and compared; a case is one result compared. Legs are the battery's checks and the sweep's slices. Times are the card host's." }),
+      h("h3", { text: "Coverage after each night, by tree" }),
+      h("p", { "class": "small dim", text: "Each line is one tree class: the share of that class's campaign covered, cumulatively. Blue is tile items, green host items; a dashed line is an earlier tree, which no longer gains." }),
+      chart()));
+
+    // totals
+    var T = d.totals, by = T.legs.by_status || {};
+    frag.appendChild(h("section", { id: "totals" }, h("h2", { text: "Totals" }), h("dl", { "class": "totals" },
+      kv("Nights", fmt(T.nights) + (T.closed_nights !== T.nights ? " (" + T.closed_nights + " closed)" : "")),
+      kv("Time on the card", hours(T.card_s) + " (" + hm(T.card_s) + ", " + fmt(Math.round(T.card_s)) + " s)"),
+      kv("Wall span", dur(T.wall_s) + " (from " + (T.first || "-") + "; includes the days between nights)"),
+      kv("Slices completed", fmt(T.slices)), kv("Cases compared by the sweeps", fmt(T.cases)),
+      kv("Disagreements", T.disagreements + " in " + fmt(T.completed_slices) + " completed slices"),
+      kv("Legs", fmt(T.legs.total) + " (pass " + fmt(by.pass) + ", fail " + fmt(by.fail) + ", skipped " + fmt(by.skipped) + Object.keys(by).filter(function (k) { return k !== "pass" && k !== "fail" && k !== "skipped" && by[k] > 0; }).map(function (k) { return ", " + k + " " + fmt(by[k]); }).join("") + ")"),
+      kv("Cycles", fmt(T.cycles)))));
+    if (T.disagreement_list && T.disagreement_list.length) {
+      frag.lastChild.appendChild(h("div", { "class": "banner" }, h("strong", { text: "Disagreements recorded: " }),
+        T.disagreement_list.map(function (x) { return x.item + " on " + (x.image || "?") + " at " + (x.start || "?"); }).join("; ")));
+    }
+    function kv(k, v) { return h("div", null, h("dt", { text: k }), h("dd", { text: v })); }
+
+    // how to read it
+    frag.appendChild(h("section", { id: "notes" }, h("h2", { text: "How to read it" }),
+      h("p", { "class": "small" }, h("strong", { text: "Nights. " }), d.rules.night),
+      h("p", { "class": "small" }, h("strong", { text: "Time. " }), d.rules.card_time),
+      h("p", { "class": "small" }, h("strong", { text: "Estimates. " }), d.rules.estimate),
+      h("p", { "class": "small" }, h("strong", { text: "Kinds of figure. " }), "Counts, times and the coverage of each item are READ from the run's record by the project's report. Sums, percentages and the differences between nights are COMPUTED from those. The finish dates are ESTIMATES. A tile item is one the card's tile computes; a host item is the library's host code run against the CPU, in which the tile computes nothing."),
+      h("p", { "class": "small dim" }, "Campaign: " + (d.now.campaign.items ? d.now.campaign.items.length + " items, named by " + d.now.campaign.named_by + "." : d.now.campaign.named_by + ".") +
+        (d.now.campaign.unknown_to_the_catalog && d.now.campaign.unknown_to_the_catalog.length ? " Not in the catalog: " + d.now.campaign.unknown_to_the_catalog.join(", ") + "." : "")),
+      h("p", { "class": "small dim" }, h("a", { href: "index.html", text: "The conformance page" }), " - ", h("a", { href: "demos.html", text: "the five workloads" }))));
+    var timer = null;
+    window.addEventListener("resize", function () { clearTimeout(timer); timer = setTimeout(function () { redraws.forEach(function (f) { f(); }); }, 150); });
+    return frag;
+  }
+})();
+</script>
+</body>
+</html>

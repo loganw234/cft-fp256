@@ -37,7 +37,15 @@
 # docs/BRINGUP.md and need licensed tools and hardware.
 
 name: gates
-on: [push, pull_request]
+# A push that changes only site/nightly.json, the nightly progress page's data file (committed each morning by
+# docs/CARDDAY.md's routine), does not start the gates: it changes no code and the suite takes about two hours.
+# Any push that changes another file as well still runs everything, and a pull request has no filter. What this
+# filter does on GitHub is read from the next push (docs/VALIDATION.md, the nightly page's entry).
+on:
+  push:
+    paths-ignore:
+      - site/nightly.json
+  pull_request:
 
 # Only the tip of a branch is worth a runner. The `host` job alone takes
 # about an hour and a half, so a run of four commits pushed over twenty
