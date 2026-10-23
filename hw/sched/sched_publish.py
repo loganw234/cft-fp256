@@ -68,11 +68,11 @@ def sync(repo: str, remote: str) -> str:
         tmp = repo + ".tmp"
         if os.path.isdir(tmp):
             CODE.remove_tree(tmp)                                      # a half-made clone of an earlier night: the scheduler's, by its exact name
-        rc, _, err = git(None, "clone", "-q", "--no-checkout", remote, tmp, timeout=3600)
+        rc, _, err = git(None, "clone", "-q", "--no-checkout", "--", remote, tmp, timeout=3600)
         if rc != 0:
             raise Refusal("remote-unreachable", f"git could not clone the remote: {lines(err)}")
         os.rename(tmp, repo)
-    rc, _, err = git(repo, "fetch", "-q", "--no-tags", remote, f"+refs/heads/main:{REF}", timeout=1800)
+    rc, _, err = git(repo, "fetch", "-q", "--no-tags", "--", remote, f"+refs/heads/main:{REF}", timeout=1800)
     if rc != 0:
         raise Refusal("remote-unreachable", f"git could not fetch the remote's main: {lines(err)}")
     rc, out, err = git(repo, "rev-parse", "--verify", "-q", REF + "^{commit}")

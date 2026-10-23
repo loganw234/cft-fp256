@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright 2026 Logan W.
 # SPDX-License-Identifier: Apache-2.0
-"""cft-sched: the card scheduler's command (docs/studies/SCHED-A-card-scheduler.md; S1 built the core, S2 the staged runner, S3a the window).
+"""cft-sched: the card scheduler's command (docs/studies/SCHED-A-card-scheduler.md; S1 built the core, S2 the staged runner, S3a the window, S4a its close-out).
 
     cft-sched [--root DIR] [--runner staged|fake] VERB ...   the step types `submit` validates against and the runner `serve` uses (default staged)
 
@@ -18,7 +18,8 @@ The root is --root or $CFT_SCHED_ROOT, outside every git checkout (on the box: /
 real (sched_staged.py: clone and assert, build, the guard, the steps) and window jobs (sched_window.py: the nightly window's preflight
 and the driver's long run; a window job waits in the queue until its window, in config.json, is open), unless --runner fake, which is
 S1's test runner and touches no card; `submit` validates against the step types of the runner it is given, so give both verbs the same
---runner (the default, staged). `status` shows a window job's window, what it runs and its preflight's results.
+--runner (the default, staged). `status` shows a window job's window, what it runs and its preflight's results, and (parcel S4a) its close-out: the final report, the summary, the sums,
+the page's data commit prepared on the box with the one command that fetches it (nothing is pushed), and the retention; `status` alone shows the newest ended window job's.
 A card step of a job that is not dry runs on the card: a first run on the box is a `dry_run` job. Run it as `bash hw/sched/cft-sched ...`
 (no script in hw/ is executable in git) or `python3 hw/sched/cft_sched.py ...`. A refusal prints `refused: NAME: why` on stderr and exits 2; `submit` of a spec
 that is refused prints `refused JOBID: NAME: why` (the job exists, with its record) and exits 2; hw/sched/sched_names.py holds

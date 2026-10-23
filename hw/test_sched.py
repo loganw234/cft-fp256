@@ -2801,6 +2801,10 @@ def group_publish():
     v3 = refuses(lambda: PUB.prepare(r2, c2, run3, sha3, py, rec3))
     check("publish: the next night starts clean: the clone is brought back to main and cleaned (a stray file an earlier night left is gone), and a commit is made again", v3 is None and rec3.get("parent") == tip
           and not os.path.exists(os.path.join(r2, "publish", "repo", "junk.txt")), f"{v3} {rec3.get('parent')}")
+    cfgs = [verdict(lambda v=v: C.validate_config({**GOOD, "publish": v})) for v in ({"fetch_host": "a b"}, {"fetch_host": 5}, {"colour": 1})]
+    check("publish: config.json's publish.fetch_host is `[user@]host` or null (the default): a host with a space, a number and an unknown key are each `config-form`, naming publish",
+          all((c or "").startswith("config-form:") and "publish" in c for c in cfgs) and C.validate_config({**GOOD, "publish": {"fetch_host": "user@box.example"}})["publish"]["fetch_host"] == "user@box.example"
+          and C.validate_config(GOOD)["publish"] == {"fetch_host": None}, str(cfgs))
 
 
 # ---------------------------------------------------------------------------------------- retention
@@ -2878,20 +2882,23 @@ def group_retention():
     rec = RT.run(root, cfg, RT_T, "j000099")
     removed = sorted(r["path"] for r in rec["clones"]["removed"])
     kept = {k["path"]: k["why"] for k in rec["clones"]["kept"]}
+    why_of = lambda sha_or_name: kept.get("clones/" + sha_or_name, "")                      # a plant that removes what it should keep leaves no entry: the check goes red, the group does not crash
     check("retention: clones the scheduler made that no job has used for 14 days are removed, by exact path, and ONLY those: the one used 400 days ago, the one used 14.1 days ago, and the one no job names that was untouched 30 days; "
           "the ones used 13.9 and 3 days ago, the one a queued job names, and every other path in the root are still there",
           removed == sorted(f"clones/{c * 40}" for c in "abd") and all(gone(k) for k in "ABZ") and not any(gone(k) for k in "YCHGEF") and os.path.isfile(os.path.join(root, "sentinel.txt"))
           and rec["clones"]["removed_n"] == 3 and rec["mode"] == "applied", str(removed))
     check("retention: what it kept it says why, by the path: used 13.9 days ago and 3.0 days ago, named by a queued job, and `not a clone the scheduler made` for a directory called notes, a file named like a SHA, a directory "
           "with no .git (and, on POSIX, a link to a directory that looks like a clone, whose target is untouched)",
-          "used 13.9 days ago" in kept["clones/" + "c" * 40] and "used 3.0 days ago" in kept["clones/" + "e" * 40] and "queued or running" in kept["clones/" + "f" * 40]
-          and all("not a clone the scheduler made" in kept[x] for x in ("clones/notes", "clones/" + "2" * 40, "clones/" + "1" * 40)) and (P["L"] is None or ("not a clone the scheduler made" in kept["clones/" + "3" * 40]
+          "used 13.9 days ago" in why_of("c" * 40) and "used 3.0 days ago" in why_of("e" * 40) and "queued or running" in why_of("f" * 40)
+          and all("not a clone the scheduler made" in why_of(x) for x in ("notes", "2" * 40, "1" * 40)) and (P["L"] is None or ("not a clone the scheduler made" in why_of("3" * 40)
           and os.path.isdir(os.path.join(P["target"], ".git")))), str(kept)[:400])
     arch = os.path.join(root, "archive", "clones", f"{'a' * 40}.{int(RT_T)}")
-    facts = json.load(open(os.path.join(arch, "facts.json"))) if os.path.isfile(os.path.join(arch, "facts.json")) else {}
+    rd = lambda *p: open(os.path.join(arch, *p)).read() if os.path.isfile(os.path.join(arch, *p)) else None
+    facts = json.loads(rd("facts.json") or "{}")
+    facts_b = os.path.join(root, "archive", "clones", f"{'b' * 40}.{int(RT_T)}", "facts.json")
     check("retention: a clone's verify/state is ARCHIVED before the clone goes (copied under archive/clones/SHA.TIME/verify-state, counted, with a facts.json), and a clone with none gets its facts alone",
-          open(os.path.join(arch, "verify-state", "r1", "stage.log")).read() == "a stage log\n" and facts.get("verify_state") is True and facts.get("files") == 1 and facts.get("by") == "j000099"
-          and not os.path.exists(os.path.join(root, "archive", "clones", "c" * 40 + f".{int(RT_T)}")) and json.load(open(os.path.join(root, "archive", "clones", f"{'b' * 40}.{int(RT_T)}", "facts.json")))["verify_state"] is False, str(facts))
+          rd("verify-state", "r1", "stage.log") == "a stage log\n" and facts.get("verify_state") is True and facts.get("files") == 1 and facts.get("by") == "j000099"
+          and not os.path.exists(os.path.join(root, "archive", "clones", "c" * 40 + f".{int(RT_T)}")) and json.load(open(facts_b)).get("verify_state") is False if os.path.isfile(facts_b) else False, str(facts))
     j1, note = P["job1"], os.path.join(P["job1"], "00-vectors.log.removed")
     nj = json.load(open(note)) if os.path.isfile(note) else {}
     check("retention: a PASSING step's log in a job that ended over 360 days ago is replaced by a `.removed` note (its sha256 and size), a failed step's log and a younger job's are kept, the job's sums are written again so "
@@ -3447,6 +3454,12 @@ PLANTS = [  # (what is wrong, edits, the groups written for it, a fragment of th
      "closeout", "closeout: a part that refuses does not stop the others", False),
     ("S4a: a night refused before the driver is closed out as if it had run", [E("sched_closeout.py", "            if needs_night and why_not:", "            if False:")],
      "closeout", "closeout: a night refused before the driver started", "posix"),
+    ("S4a: the scheduler's clone is not cleaned for the next night", [E("sched_publish.py", '("clean", ("clean", "-fdq"))', '("clean", ("rev-parse", "HEAD"))')],
+     "publish", "publish: the next night starts clean", False),
+    ("S4a: a passing log of a young job is removed", [E("sched_retention.py", '        old = (now - float(rs[-1].get("t") or now)) / DAY >= days', "        old = True")],
+     "retention", "retention: a PASSING step's log", False),
+    ("S4a: check_sums verifies the run's files, which the next night changes", [E("sched_state.py", "        if os.path.isabs(n):\n            continue ", "        if False:\n            continue ")],
+     "closeout", "closeout: the run's lines hold for the night they were taken", False),
     ("S4a: a refusal the table gives to S4a that nothing raises", [E("sched_names.py", '    "report-failed": ("S4a",', '    "never-raised-s4a": ("S4a", "closeout", "x"), "report-failed": ("S4a",')],
      "closeout,publish,table", "the table: every refusal the table gives to S4a", None),
 ]
