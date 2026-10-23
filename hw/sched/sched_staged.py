@@ -16,7 +16,10 @@ job's SHA256SUMS covers it; a driver run's own directory (driver-quick) is a sub
 The outcome is S1's: `failed` when a step failed (the steps after it are recorded `skipped`), `cancelled` at a stop (looked for
 before every step, never in the middle of one), `done-with-findings` when a soak slice found a mismatch (the chain goes on,
 Logan's answer 13), else `done`; a refusal before any step ran is `refused`, after one `failed`, and the end record names it.
-A dry job (`dry_run`) wraps every step that has a stand-in leg as the driver's Driver.standin does, builds nothing, asks no guard
+XRT's ENVIRONMENT (parcel S3c): a job that is not dry sources `runner.xrt_root`/setup.sh once (sched_build.xrt_env), after the guard and before the
+clone, records it (`xrt_env`: the variables set, XILINX_XRT), and gives it to the build's make, ldd and build-id checks and to every step, since a tool linked
+against XRT finds its libraries only through it (`xrt-setup-failed` when it cannot be had). Every step also gets PYTHONDONTWRITEBYTECODE=1 (sched_proc.run_step).
+A dry job (`dry_run`) wraps every step that has a stand-in leg as the driver's Driver.standin does, builds nothing, asks no guard, has no XRT environment
 and touches no card. Every leg it writes says `dry`; a leg says `standin` only if its step ran against the stand-in. Three steps
 have no stand-in leg, and in a dry job they run their own commands: `vectors` and `drytests` use no card, and `driver-quick` runs the
 driver's own `--dry-run`; their legs say `dry` and not `standin`. A stand-in's log in a job that is not dry is `dry-run-as-card`.
@@ -44,6 +47,7 @@ class Ctx:
     def __init__(self, clone, image, images, python, rev8_images, dry):
         self.clone, self.image, self.images, self.python, self.rev8_images, self.dry = clone, image, images, python, rev8_images, dry
         self.step_dir = None
+        self.env = {}                   # XRT's environment (sched_build.xrt_env), every step's env_extra; empty for a dry job
 
 
 class _State:
@@ -60,6 +64,7 @@ class StagedRunner:
         self.root, self.cfg = root, cfg
         self.registry = ST.StepRegistry(entries)
         self.entries = self.registry.entries
+        self._xenv = (None, {})         # (the job's log path, its XRT environment): one job at a time, so one slot
 
     # ------------------------------------------------------------------------------------ the job
     def run(self, spec: dict, log, stop) -> tuple:
@@ -120,11 +125,25 @@ class StagedRunner:
             log.append("image", **image)
         if not dry and any(self.entries[s["type"]].is_card(s) for s in steps):
             GD.hold_until_clear(log, card["kind"], 0, rcfg["guard_poll_s"])
+        xenv = self._env(log, card["kind"], dry)                      # before the clone: a machine that cannot source XRT's setup is refused before anything is fetched
         clone, facts = CODE.prepare(self.root, cfg, spec["code"], log.job)
         log.append("code", **facts)
         rev8 = IM.expand(rcfg["rev8_images"]) if rcfg["rev8_images"] else os.path.join(self.root, "rev8-images")
         ctx = S.ctx = Ctx(clone, image, images, rcfg["python"], rev8, dry)
+        ctx.env = xenv
         return ctx
+
+    def _env(self, log, kind, dry) -> dict:
+        """XRT's environment for the job's card kind, made ONCE per job (the window runner's `_open` runs again for the fallback commit, and its own build is outside `_chain`; both find it made)
+        and recorded in the job's log: `xrt_env`, with the variables it set, XILINX_XRT and LD_LIBRARY_PATH. {} for a dry job, which builds nothing and touches no card. A refusal
+        (`xrt-setup-failed`) is the machine's, not the commit's: it is not one of the window's BUILD_REFUSALS, so the night is refused and does not fall back."""
+        if dry or kind not in BD.KIND_ENVS:
+            return {}
+        if self._xenv[0] != log.path:
+            rec = BD.KIND_ENVS[kind](self.cfg["runner"])
+            log.append("xrt_env", **{k: v for k, v in rec.items() if k != "env"})
+            self._xenv = (log.path, rec["env"])
+        return self._xenv[1]
 
     def _chain(self, spec, log, stop, S, ctx, steps, card, first=0, built=None, buildlog="build.log"):
         """The steps in order, numbered from `first`. Returns the build record (None while nothing has needed a build)."""
@@ -155,7 +174,7 @@ class StagedRunner:
         else:
             done: list = []
             try:
-                rec = BD.KIND_BUILDS[kind](clone, spec["code"]["commit"], rcfg, jobdir, os.path.join(jobdir, logname), done)
+                rec = BD.KIND_BUILDS[kind](clone, spec["code"]["commit"], rcfg, jobdir, os.path.join(jobdir, logname), done, self._env(log, kind, dry))
             except Refusal:
                 log.append("build", ok=False, steps=done, disabled={}, build_id=None)
                 raise
@@ -202,7 +221,7 @@ class StagedRunner:
         ctx.step_dir = os.path.join(jobdir, f"{i:02d}-{st['type']}")
         real = e.argv(ctx, st)
         argv = standin(e.standin_leg, real) if wrapped else real
-        env, drop = {}, ()
+        env, drop = dict(ctx.env), ()
         if st["type"] == "soak":
             if e.is_card(st):
                 env["CFT_SOAK_ARTIFACT"] = ctx.image["path"]

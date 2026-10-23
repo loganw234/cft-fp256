@@ -12,6 +12,10 @@ never by a pattern in a command line: `pkill -f` would stop whatever else carrie
 The GNU `timeout` wrapper does the stopping on POSIX (TERM at the limit, KILL after `kill_after_s`); the loop here is the
 backstop for a wrapper that has died, a little later. Windows has neither `nice` nor `timeout`, so there the loop alone ends the
 process (`terminate()`, then `taskkill /F /T` of its PID); hw/test_sched.py skips those checks by name on Windows: not run there.
+
+Every step is given PYTHONDONTWRITEBYTECODE=1, SET and not defaulted (parcel S3c): the first window job on the box (2026-10-23) ran `make vectors`, whose python
+imported host/tools/pi_worstcase.py and left host/tools/__pycache__ in the job's clone, and the next step, the dry tests, was refused `clone-built` for that ignored
+product. A scheduler clone is a checkout nobody builds by hand: nothing a step runs writes bytecode into it.
 """
 from __future__ import annotations
 
@@ -79,6 +83,7 @@ def run_step(argv: list, cwd: str, env_extra: dict, log_path: str, timeout_s: fl
     env = {k: v for k, v in os.environ.items() if k not in drop}
     env.update(env_extra)
     env.setdefault("PYTHONUNBUFFERED", "1")
+    env["PYTHONDONTWRITEBYTECODE"] = "1"      # SET, never defaulted (an empty value in the service's environment must not turn it off): a python a step runs would leave host/tools/__pycache__ in the clone, and `clone-built` refuses the dry tests there
     run.argv = wrap(argv, timeout_s, kill_after_s, nice)
     logf = create_new(log_path)
     kw = {"start_new_session": True} if POSIX else ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP") else {})

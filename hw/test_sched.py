@@ -877,7 +877,7 @@ PLAT = "xilinx_u50_gen3x16_xdma_5_202210_1"
 FIX: dict = {}
 GIT_ID = ["-c", "user.name=sched-test", "-c", "user.email=sched-test@example.invalid", "-c", "commit.gpgsign=false"]
 GITIGNORE = ("host/*.o\nhost/*.so\nhost/gen/\nhost/device-test\nhost/api-test\nhost/remote-test\nhost/divsqrt-soak\nhost/clause5-soak\n"
-             "host/cft-segrun\nhost/cft-audit\nhost/cft-resident\nhost/cft-selftest\nvectors/out/\n")
+             "host/cft-segrun\nhost/cft-audit\nhost/cft-resident\nhost/cft-selftest\nvectors/out/\n__pycache__/\n*.pyc\n")        # the last two are the real .gitignore's
 MANIFEST = ("artifact:      cft_hw.xclbin\nsha256:        {sha}\nbytes:         {n}\nhost:          amd-arc-box\ntarget:        hw\nplatform:      {plat}\n"
             "kernel_freq:   135000000\ngenerics:      EN_AUGADD=0 SEQ_SCRATCH_D=4096\n  hdlparam:    EN_FP32 = \"1\"\n  hdlparam:    BEAT_BITS = 256\n"
             "clock_cus:     {cus}\nroute_directive: AggressiveExplore\nrouted_wns_ns: 0.018   # whole design, shell included\n")
@@ -940,7 +940,7 @@ def mkroot2(name, **over):
     `over` replaces a section of config.json."""
     fx = fixture()
     raw = {"cards": [{"id": "u50-0", "kind": "xrt", "platform": PLAT}], "images": [fx["image"]], "code": {"bundle_dir": fx["bundles"], "remote": fx["remote"]},
-           "runner": {"kill_after_s": 2, "guard_poll_s": 0.05, "guard_wait_max_s": 1, "build_timeout_s": 120}}
+           "runner": runner2()}
     raw.update(over)
     root = os.path.join(TMP, name)
     os.makedirs(root)
@@ -1126,12 +1126,33 @@ FAKE_MAKEFILE = (
     "all: $(TOOLS) libcft.so\n\t@test -z \"$$FAKE_FAIL\" || { echo fake make failure; exit 2; }\n"
     "$(TOOLS):\n\t@test -n \"$$FAKE_FAIL\" && exit 0; case \" $$FAKE_SKIP \" in *\" $@ \"*) exit 0;; esac; sed 's/@BIN_ID@/$(BIN_ID)/' fake/$@.sh > $@ && chmod +x $@\n"
     "libcft.so:\n\t@test -n \"$$FAKE_FAIL\" && exit 0; echo lib > $@\nprint-build-id:\n\t@echo \"$(TREE_ID)\"\n")
+# Parcel S3c, from the box (2026-10-23): the tools are XRT-linked, so each one, like the dynamic loader, finds libxrt_coreutil.so.2 through LD_LIBRARY_PATH or says so and exits 127 (FAKE_SEGRUN
+# steers cft-segrun's other ways of not running); and `make vectors` imports a module under host/tools with the suite's own python, as vectors/gen_vectors.py does through cft_golden.vectors
+# (it puts host/tools on sys.path and imports pi_worstcase): python then writes host/tools/__pycache__, an ignored product under host/, unless PYTHONDONTWRITEBYTECODE is set for it.
+os.environ.pop("PYTHONDONTWRITEBYTECODE", None)             # a service environment that already had it would hide what run_step does about it
+LOADER_SH = ('found=; IFS=:; for d in $LD_LIBRARY_PATH; do [ -f "$d/libxrt_coreutil.so.2" ] && found=1; done; unset IFS\n'
+             '[ -n "$found" ] || { echo "$0: error while loading shared libraries: libxrt_coreutil.so.2: cannot open shared object file: No such file or directory" >&2; exit 127; }\n')
+
+
+def tool_sh(body="exit 0\n"):
+    return "#!/bin/sh\n" + LOADER_SH + body
+
+
+def sh_quote(s):
+    import shlex
+    return shlex.quote(s)
+
+
 FAKE_TREE = {
     "host/Makefile": FAKE_MAKEFILE,
-    "host/fake/api-test.sh": "#!/bin/sh\necho 'api-test: all contract checks passed'\n",
-    "host/fake/cft-segrun.sh": "#!/bin/sh\n[ \"$1\" = --build-id ] && echo '@BIN_ID@'\nexit 0\n",
-    **{f"host/fake/{n}.sh": "#!/bin/sh\nexit 0\n" for n in ("device-test", "remote-test", "divsqrt-soak", "clause5-soak", "cft-audit", "cft-resident", "cft-selftest")},
-    "Makefile": ".PHONY: vectors\nvectors:\n\t@mkdir -p vectors/out && if [ -n \"$$FAKE_VEC_FAIL\" ]; then exit 2; elif [ -n \"$$FAKE_VEC_BAD\" ]; then echo bad > vectors/out/a.txt; else echo ok > vectors/out/a.txt; fi\n",
+    "host/fake/api-test.sh": tool_sh("echo 'api-test: all contract checks passed'\necho \"env: XILINX_XRT=${XILINX_XRT:-unset} PYTHONDONTWRITEBYTECODE=${PYTHONDONTWRITEBYTECODE:-unset}\"\n"),
+    "host/fake/cft-segrun.sh": tool_sh("case \"$FAKE_SEGRUN\" in\n  exit3) echo '@BIN_ID@'; exit 3;;\n"
+                                      "  loader0) echo \"$0: error while loading shared libraries: libxrt_coreutil.so.2: cannot open shared object file: No such file or directory\"; exit 0;;\nesac\n"
+                                      "[ \"$1\" = --build-id ] && echo '@BIN_ID@'\nexit 0\n"),
+    **{f"host/fake/{n}.sh": tool_sh() for n in ("device-test", "remote-test", "divsqrt-soak", "clause5-soak", "cft-audit", "cft-resident", "cft-selftest")},
+    "host/tools/fake_worstcase.py": "WORST = (1, 2)\n",
+    "Makefile": ".PHONY: vectors\nvectors:\n\t@mkdir -p vectors/out && " + sh_quote(sys.executable) + " -c \"import sys; sys.path.insert(0, 'host/tools'); import fake_worstcase\" && "
+                "if [ -n \"$$FAKE_VEC_FAIL\" ]; then exit 2; elif [ -n \"$$FAKE_VEC_BAD\" ]; then echo bad > vectors/out/a.txt; else echo ok > vectors/out/a.txt; fi\n",
     "vectors/SHA256SUMS": hashlib.sha256(b"ok\n").hexdigest() + "  out/a.txt\n",
     "hw/card-segrun.sh": "#!/bin/sh\nd=$(mktemp -d \"${TMPDIR:-/tmp}/card-segrun.XXXXXX\")\necho kept > \"$d/gate1.log\"\n"
         "echo '  FAIL  the gate on this card exited 1'; echo '== card-segrun: 6 checks, 1 failed'; echo \"   logs kept in $d\"; exit 1\n",
@@ -1168,15 +1189,42 @@ class env:
 
 
 def fake_ldd(kind):
-    """A directory with an `ldd` that says what XRT-linked tools say (ok), that nothing is (no), or that only cft-selftest is not (opt)."""
+    """A directory with an `ldd` that says what XRT-linked tools say (ok), that nothing is (no), that only cft-selftest is not (opt), or, as the box's does (parcel S3c),
+    finds the library only through LD_LIBRARY_PATH and otherwise says `not found` (env), or says `not found` for cft-selftest alone: of libxrt_coreutil (optlost), or of
+    another library, naming no XRT at all (optother)."""
     d = os.path.join(TMP, "fakebin-" + kind)
     if not os.path.isdir(d):
         os.makedirs(d)
         body = {"ok": "echo '\tlibxrt_coreutil.so.2 => /fake/libxrt_coreutil.so.2 (0x0)'", "no": "echo '\tnot a dynamic executable'; exit 1",
-                "opt": 'case "$1" in *cft-selftest) echo "\tnot a dynamic executable"; exit 1;; *) echo "\tlibxrt_coreutil.so.2 => /fake/libxrt_coreutil.so.2 (0x0)";; esac'}[kind]
+                "opt": 'case "$1" in *cft-selftest) echo "\tnot a dynamic executable"; exit 1;; *) echo "\tlibxrt_coreutil.so.2 => /fake/libxrt_coreutil.so.2 (0x0)";; esac',
+                "optother": 'case "$1" in *cft-selftest) echo "\tlibother.so.1 => not found";; *) echo "\tlibxrt_coreutil.so.2 => /fake/libxrt_coreutil.so.2 (0x0)";; esac',
+                "optlost": 'case "$1" in *cft-selftest) echo "\tlibxrt_coreutil.so.2 => not found";; *) echo "\tlibxrt_coreutil.so.2 => /fake/libxrt_coreutil.so.2 (0x0)";; esac',
+                "env": 'found=; IFS=:; for d in $LD_LIBRARY_PATH; do [ -f "$d/libxrt_coreutil.so.2" ] && found="$d/libxrt_coreutil.so.2"; done\n'
+                       'if [ -n "$found" ]; then echo "\tlibxrt_coreutil.so.2 => $found (0x0)"; else echo "\tlibxrt_coreutil.so.2 => not found"; fi'}[kind]
         open(os.path.join(d, "ldd"), "w", newline="").write("#!/bin/sh\n" + body + "\n")
         os.chmod(os.path.join(d, "ldd"), 0o755)
     return d
+
+
+def fake_xrt(kind="ok"):
+    """XRT's install directory as the box has it (parcel S3c): a setup.sh that exports XILINX_XRT, LD_LIBRARY_PATH and PATH and prints a banner, as the real one does, and lib/libxrt_coreutil.so.2.
+    `nolib` is the same without the library, `failing` a setup.sh that returns 3, `exiting` one that calls `exit 5`, `missing` a directory with no setup.sh. Returns the directory (config.json's runner.xrt_root)."""
+    d = os.path.join(TMP, "xrt-" + kind)
+    if not os.path.isdir(d):
+        os.makedirs(os.path.join(d, "lib"))
+        os.makedirs(os.path.join(d, "bin"))
+        if kind in ("ok", "failing", "exiting"):
+            open(os.path.join(d, "lib", "libxrt_coreutil.so.2"), "w").write("lib\n")
+        if kind != "missing":
+            open(os.path.join(d, "setup.sh"), "w", newline="").write(
+                f'XILINX_XRT={d.replace(os.sep, "/")}\nexport XILINX_XRT\nexport LD_LIBRARY_PATH=$XILINX_XRT/lib${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}\n'
+                'export PATH=$XILINX_XRT/bin${PATH:+:$PATH}\necho "XILINX_XRT        : $XILINX_XRT"\n' + {"failing": "return 3\n", "exiting": "exit 5\n"}.get(kind, ""))
+    return d
+
+
+def runner2(**kw):
+    """config.json's `runner` section for the staged runner's roots: short waits, and XRT's install directory the fake one."""
+    return {"kill_after_s": 2, "guard_poll_s": 0.05, "guard_wait_max_s": 1, "build_timeout_s": 120, "xrt_root": fake_xrt(), **kw}
 
 
 class no_users:
@@ -1204,7 +1252,12 @@ def group_build():
           drv["targets"] == BD.TARGETS and drv["exes"] == BD.TOOLS and drv["optional"] == BD.OPTIONAL, f"{drv} {BD.TARGETS} {BD.TOOLS}")
     if os.name != "posix" or not all(shutil.which(x) for x in ("make", "sh", "git", "sed")):
         for n in ("a clean build is made, XRT=1 and every tool checked", "make failing, and a tool not made", "a tool that does not link XRT", "a build id that is not the tree's",
-                  "the dry tests in a built clone", "the vectors, the dry tests and the smoke as steps"):
+                  "the dry tests in a built clone", "the vectors, the dry tests and the smoke as steps",
+                  # parcel S3c: one name for each check below the build's old ones
+                  "XRT's setup.sh is sourced once, before the clone, and the build's make and ldd checks run in it", "cft-segrun --build-id runs in XRT's environment too",
+                  "every step runs in XRT's environment, with PYTHONDONTWRITEBYTECODE=1", "a tool that cannot run (cft-segrun exits non-zero) is not a build-id mismatch",
+                  "a tool that exits 0 printing the loader's error is refused tool-not-runnable", "a library ldd lists as not found is refused tool-not-runnable",
+                  "an optional tool that names XRT and whose library is not found is refused", "an optional tool that does not name XRT and whose other library is not found is refused"):
             skip(f"build: {n}", "needs POSIX with make, sh, sed and git")
         return
     ok_path = fake_ldd("ok") + os.pathsep + os.environ["PATH"]
@@ -1277,6 +1330,58 @@ def group_build():
     check("build: and in a clone nothing has built they run after `make vectors` (its ignored vectors/out is not a build product), and the build comes after them, once, before api-test",
           jv[1].get("outcome") == "done" and [x["leg"] for x in lv] == ["vectors", "drytests", "api-test"] and [x["status"] for x in lv] == ["pass"] * 3
           and [r["type"] for r in jv[2] if r["type"] in ("leg", "build")] == ["leg", "leg", "build", "leg"], f"{jv[1].get('outcome')} {refusal_of(jv[2])!r} {[(x['leg'], x['status']) for x in lv]}")
+    # ---- parcel S3c: XRT's environment, and a tool that cannot run (the box, 2026-10-23: cft-segrun's loader error was refused as a build-id mismatch). The fake tools and the `env` ldd find
+    # libxrt_coreutil.so.2 through LD_LIBRARY_PATH only, as the loader does; fake_xrt's setup.sh puts its lib/ there.
+    xroot = fake_xrt().replace(os.sep, "/")
+    with no_users(), env(PATH=fake_ldd("env") + os.pathsep + os.environ["PATH"]):
+        rx, cx = mkroot2("b-xrt")
+        jx = job(rx, cx, real(steps=[{"type": "api-test"}]))
+        rl, cl = mkroot2("b-xrt-lost", runner=runner2(xrt_root=fake_xrt("nolib")))
+        jl = job(rl, cl, real())                                                         # ldd finds nothing on LD_LIBRARY_PATH: `not found`
+    xr, bx, kinds = [r for r in jx[2] if r["type"] == "xrt_env"], next((r for r in jx[2] if r["type"] == "build"), {}), [r["type"] for r in jx[2]]
+    xlog = os.path.join(rx, "jobs", jx[0], "00-api-test.log")
+    xtext = open(xlog, errors="replace").read() if os.path.isfile(xlog) else ""
+    check("build: a job that is not dry sources XRT's setup.sh ONCE, before the clone, and records the variables it set and XILINX_XRT; the build's make and its `ldd` checks run in that environment "
+          "(the ldd finds libxrt_coreutil through LD_LIBRARY_PATH, as the box's does): all ten tools resolve", len(xr) == 1 and xr[0].get("XILINX_XRT") == xroot
+          and {"XILINX_XRT", "LD_LIBRARY_PATH", "PATH"} <= set(xr[0].get("set", ())) and "xrt_env" in kinds and "code" in kinds and kinds.index("xrt_env") < kinds.index("code")
+          and sum(1 for s in bx.get("steps", []) if s["name"].startswith("xrt ") and s["ok"]) == 10, f"{xr} {kinds} {bx.get('steps', [])[-3:]}"[:400])
+    check("build: and `cft-segrun --build-id` runs in it too: the id is read, it is the tree's and names the commit, the build is ok and the job ends done",
+          bx.get("ok") is True and bx.get("build_id") == f"commit={fx['c2']} tracked=clean untracked=none" and jx[1].get("outcome") == "done", f"{jx[1].get('outcome')} {refusal_of(jx[2])!r}"[:400])
+    check("build: every step of the job runs in XRT's environment too, and with PYTHONDONTWRITEBYTECODE=1: the real api-test (a fake tool that needs LD_LIBRARY_PATH, as the loader does) passes "
+          "and prints XILINX_XRT as setup.sh set it", [x["status"] for x in legs_of(jx[2])] == ["pass"] and f"XILINX_XRT={xroot}" in xtext and "PYTHONDONTWRITEBYTECODE=1" in xtext, f"{[x['status'] for x in legs_of(jx[2])]} {xtext!r}"[:400])
+    with no_users(), env(PATH=ok_path):                                                  # ldd says the library is there; the tool itself cannot load it
+        rn, cn = mkroot2("b-nolib", runner=runner2(xrt_root=fake_xrt("nolib")))
+        j127 = job(rn, cn, real())
+        r3_, c3_ = mkroot2("b-exit3")
+        with env(FAKE_SEGRUN="exit3"):
+            j3 = job(r3_, c3_, real())
+        r0_, c0_ = mkroot2("b-loader0")
+        with env(FAKE_SEGRUN="loader0"):
+            j0 = job(r0_, c0_, real())
+    alone = lambda r, j: not S.read_records(os.path.join(r, "refusals.jsonl")) and not any(x["type"] == "refused" and x["name"] == "build-id-mismatch" for x in j[2])
+    check("build: a tool that cannot run is not a build-id mismatch: `cft-segrun --build-id` that exits non-zero (127 with the loader's error, XRT's directory without its library; 3 with the right id) "
+          "is refused `tool-not-runnable`, naming the tool, its exit status and its first line; the job ends refused, the build-id step is recorded not ok, and the refusal is filed in the job and nowhere else",
+          refusal_of(j127[2]).startswith("tool-not-runnable:") and "cft-segrun --build-id exited 127: " in refusal_of(j127[2]) and "error while loading shared libraries" in refusal_of(j127[2])
+          and refusal_of(j3[2]).startswith("tool-not-runnable:") and "cft-segrun --build-id exited 3: " in refusal_of(j3[2]) and j127[1].get("outcome") == j3[1].get("outcome") == "refused"
+          and alone(rn, j127) and alone(r3_, j3) and any(s["name"] == "build id" and s["ok"] is False for r in j127[2] if r["type"] == "build" for s in r["steps"]),
+          f"{refusal_of(j127[2])!r} {refusal_of(j3[2])!r}"[:400])
+    check("build: and one that exits 0 and prints the loader's error is refused `tool-not-runnable` too, never read as an id that differs",
+          refusal_of(j0[2]).startswith("tool-not-runnable:") and "exited 0: " in refusal_of(j0[2]) and "error while loading shared libraries" in refusal_of(j0[2]) and alone(r0_, j0), refusal_of(j0[2])[:300])
+    check("build: a library ldd lists as `not found` is a tool that will not start: refused `tool-not-runnable` naming the tool and ldd's line, never `xrt-not-linked` (ldd names libxrt_coreutil there) "
+          "or a build-id mismatch", refusal_of(jl[2]).startswith("tool-not-runnable:") and "device-test" in refusal_of(jl[2]) and "libxrt_coreutil.so.2 => not found" in refusal_of(jl[2])
+          and jl[1].get("outcome") == "refused" and alone(rl, jl), refusal_of(jl[2])[:300])
+    with no_users(), env(PATH=fake_ldd("optlost") + os.pathsep + os.environ["PATH"]):
+        rq, cq = mkroot2("b-optlost")
+        jq = job(rq, cq, real(image="quad", steps=[{"type": "selftest"}, {"type": "api-test"}]))
+    check("build: and so is an OPTIONAL tool (cft-selftest) whose library is `not found`: it names XRT, so it is not one that does not link it (whose step is skipped by name), and it cannot start; "
+          "the job is refused naming it, and no step ran", refusal_of(jq[2]).startswith("tool-not-runnable:") and "cft-selftest" in refusal_of(jq[2]) and jq[1].get("outcome") == "refused"
+          and not legs_of(jq[2]) and alone(rq, jq), refusal_of(jq[2])[:300])
+    with no_users(), env(PATH=fake_ldd("optother") + os.pathsep + os.environ["PATH"]):
+        rz, cz = mkroot2("b-optother")
+        jz = job(rz, cz, real(image="quad", steps=[{"type": "selftest"}, {"type": "api-test"}]))
+    check("build: and an OPTIONAL tool that does not name XRT at all, but whose ldd lists another library as `not found`, is refused too, and not skipped by name as one that merely lacks XRT is "
+          "(send-back 1): `tool-not-runnable` naming cft-selftest and the library, no step run", refusal_of(jz[2]).startswith("tool-not-runnable:") and "cft-selftest" in refusal_of(jz[2])
+          and "libother.so.1 => not found" in refusal_of(jz[2]) and jz[1].get("outcome") == "refused" and not legs_of(jz[2]) and alone(rz, jz), f"{jz[1].get('outcome')} {refusal_of(jz[2])[:200]!r}")
 
 
 # ---------------------------------------------------------------------------------------- images
@@ -1351,8 +1456,8 @@ def group_images():
     got = [verdict(lambda o=o: C.validate_config({**GOOD, **o})) or "" for _, o, _ in bad]
     check("images: the registry's tiles and platform, a card's platform and the runner section are validated, each refusal naming its key",
           all(g.startswith("config-form:") and f in g for g, (_, _, f) in zip(got, bad)) and verdict(lambda: C.validate_config({**GOOD, **cm, "runner": {"guard_wait_max_s": 0, "nice": 0}})) is None, str(got))
-    check("images: every kind of card the configuration admits has its image check, its guard and its build",
-          set(C.CARD_KINDS) == set(IM.IMAGE_CHECKS) == set(GD.KIND_SCANS) == set(BD.KIND_BUILDS), f"{set(C.CARD_KINDS)} {set(IM.IMAGE_CHECKS)} {set(GD.KIND_SCANS)} {set(BD.KIND_BUILDS)}")
+    check("images: every kind of card the configuration admits has its image check, its guard and its build (and, since S3c, its environment)",
+          set(C.CARD_KINDS) == set(IM.IMAGE_CHECKS) == set(GD.KIND_SCANS) == set(BD.KIND_BUILDS) == set(BD.KIND_ENVS), f"{set(C.CARD_KINDS)} {set(IM.IMAGE_CHECKS)} {set(GD.KIND_SCANS)} {set(BD.KIND_BUILDS)} {set(BD.KIND_ENVS)}")
 
 
 # ---------------------------------------------------------------------------------------- guard
@@ -1601,6 +1706,13 @@ def watched(fn, secs):
 
 
 def steps_run_step():
+    pe = os.path.join(TMP, "proc-bytecode")
+    os.makedirs(pe)
+    with env(PYTHONDONTWRITEBYTECODE=""):          # the service's own value EMPTY: python reads that as "write bytecode", and a default (setdefault) would leave it so
+        r_pe = PR.run_step([sys.executable, "-c", "import os; print('PDWB=' + os.environ.get('PYTHONDONTWRITEBYTECODE', 'unset'))"], pe, {}, os.path.join(pe, "s.log"), 30, 5, 0)
+    got_pe = open(os.path.join(pe, "s.log"), errors="replace").read() if os.path.isfile(os.path.join(pe, "s.log")) else ""
+    check("steps: a step is run with PYTHONDONTWRITEBYTECODE=1, SET and not defaulted: with an EMPTY value in the service's own environment the step still sees 1 (python would write __pycache__ into "
+          "the clone's host/tools, and `clone-built` refuses the dry tests there: the box, 2026-10-23)", r_pe.rc == 0 and "PDWB=1" in got_pe, f"{r_pe.rc} {got_pe!r}")
     if os.name != "posix" or not all(shutil.which(x) for x in ("nice", "timeout")):
         for n in ("a step runs niced, in a process group of its own, with standard input closed", "the timeout wrapper ends a hung step, and KILLs one that ignores TERM",
                   "the loop ends a hung step by the PID of its group when the wrapper is absent, and a bystander of the same name lives"):
@@ -1940,6 +2052,39 @@ def steps_refusals():
           f"{refusal_of(lost_image)!r} {refusal_of(lost_card)!r} {[r['type'] for r in lost_image]} {[r['type'] for r in lost_card]}")
     check("steps: the end record of a job that ran says whether it touched the card and whether it was dry, and a job the runner refused is `refused` with the refusal named",
           jb[1].get("refusal") == "parser-unknown" and jb[1].get("dry_run") is True and jb[1].get("card_touched") is False and jb[1].get("commit") == fx["c2"], str(jb[1]))
+    # ---- parcel S3c: XRT's setup.sh is the machine's. A job that is not dry sources it before anything is cloned and is refused by name when it cannot; a dry job needs none of it.
+    def xrt_job(name, kind, dry=False):
+        r, c = mkroot2(name, runner=runner2(xrt_root=fake_xrt(kind)))
+        j, end, rs = job(r, c, staged(dry_run=dry, steps=[{"type": "api-test"}]))
+        return r, j, end, rs
+    xm, xd = xrt_job("r-xrt-missing", "missing"), xrt_job("r-xrt-dry", "missing", dry=True)
+    xf = xrt_job("r-xrt-failing", "failing") if shutil.which("bash") else None
+    xe = xrt_job("r-xrt-exiting", "exiting") if shutil.which("bash") else None
+    stopped = lambda x: x[2].get("outcome") == "refused" and not any(r["type"] in ("code", "xrt_env") for r in x[3]) and not legs_of(x[3]) and x[2].get("card_touched") is False \
+        and not S.read_records(os.path.join(x[0], "refusals.jsonl"))
+    check("steps: a job that is not dry whose XRT setup.sh is not there is refused `xrt-setup-failed` by name, saying which file, before anything is cloned: it ends refused, with no clone, no leg and "
+          "the card untouched, and the refusal is filed in the job and nowhere else", refusal_of(xm[3]).startswith("xrt-setup-failed:") and "is not a file" in refusal_of(xm[3])
+          and fake_xrt("missing") in refusal_of(xm[3]) and stopped(xm), f"{refusal_of(xm[3])!r} {xm[2].get('outcome')}")
+    if xf:
+        check("steps: and a setup.sh that exits non-zero when sourced is refused the same way, naming its exit status (3), before anything is cloned; one that calls `exit` and ends the shell, "
+              "saying so", refusal_of(xf[3]).startswith("xrt-setup-failed:") and "exited 3 when sourced" in refusal_of(xf[3]) and stopped(xf) and refusal_of(xe[3]).startswith("xrt-setup-failed:")
+              and "ended the shell when sourced (bash exited 5" in refusal_of(xe[3]) and stopped(xe), f"{refusal_of(xf[3])!r} {refusal_of(xe[3])!r} {xf[2].get('outcome')}")
+    else:
+        skip("steps: a setup.sh that exits non-zero is refused xrt-setup-failed", "needs bash")
+    check("steps: a dry job needs none of it: with the same missing setup.sh it ends done, with no `xrt_env` record and no refusal (it builds nothing and touches no card)",
+          xd[2].get("outcome") == "done" and not any(r["type"] in ("xrt_env", "refused") for r in xd[3]), f"{xd[2].get('outcome')} {refusal_of(xd[3])!r}")
+    if os.name == "posix" and shutil.which("bash"):
+        deaf_dir, real_bash = os.path.join(TMP, "deaf-bash"), shutil.which("bash")
+        os.makedirs(deaf_dir)
+        open(os.path.join(deaf_dir, "bash"), "w", newline="").write(f'#!/bin/sh\nunset CFT_SCHED_XRT_SETUP\nexec {real_bash} "$@"\n')      # what Windows' bare `bash` (the WSL launcher) does to the environment
+        os.chmod(os.path.join(deaf_dir, "bash"), 0o755)
+        with env(PATH=deaf_dir + os.pathsep + os.environ["PATH"]):
+            deaf = verdict(lambda: BD.xrt_env({"xrt_root": fake_xrt()}))
+        check("steps: a bash that is deaf to the environment (the WSL launcher a bare `bash` is on Windows) is not a bash that sourced nothing: the file it cannot see is `xrt-setup-failed`, not an empty "
+              "environment taken for success; the refusal says what the status means (its standard error is empty), not only that bash exited",
+              (deaf or "").startswith("xrt-setup-failed:") and "could not read it (exit 66, the scheduler's own" in deaf and BD.UNSEEN == 66, str(deaf)[:300])
+    else:
+        skip("steps: a bash that is deaf to the environment is not a bash that sourced nothing", "needs POSIX with bash")
 
 
 def table_checks(only=None):
@@ -2056,7 +2201,7 @@ def wfixture():
     git_t(None, "init", "-q", "-b", "main", repo)
     for f in ("card-stress.sh", "card_stress.py", "card_stress_lib.py", "card_stress_standin.py", "card_stress_report.py"):
         shutil.copy(os.path.join(HERE, f), os.path.join(repo, "hw", f))
-    tree = {**FAKE_TREE, ".gitignore": GITIGNORE + "__pycache__/\n*.pyc\n", "host/tests/seq_check.py": "THE ROUTINE CORPUS DID NOT REACH EVERY FORM\n", "programs/acceptance.py": "REV8_ORDER = ()\n"}
+    tree = {**FAKE_TREE, ".gitignore": GITIGNORE, "host/tests/seq_check.py": "THE ROUTINE CORPUS DID NOT REACH EVERY FORM\n", "programs/acceptance.py": "REV8_ORDER = ()\n"}
     tree.pop("hw/card-stress.sh")                                             # the real wrapper stands in its place
     w1 = commit_all(repo, {**tree, "docs/w.txt": "one\n"}, "w1")
     w2 = commit_all(repo, {"docs/w.txt": "two\n"}, "w2")
@@ -2078,7 +2223,7 @@ def wfixture():
 def mkrootw(name, **runner):
     w = wfixture()
     raw = {"cards": [{"id": "u50-0", "kind": "xrt", "platform": PLAT}], "images": w["images"], "code": {"bundle_dir": w["bundles"], "remote": w["repo"]},
-           "runner": {"kill_after_s": 2, "guard_poll_s": 0.05, "guard_wait_max_s": 1, "build_timeout_s": 120, "window_grace_s": 1, "window_poll_s": 0.2, **runner},
+           "runner": {"kill_after_s": 2, "guard_poll_s": 0.05, "guard_wait_max_s": 1, "build_timeout_s": 120, "window_grace_s": 1, "window_poll_s": 0.2, "xrt_root": fake_xrt(), **runner},
            "windows": {"zone": "local", "list": [clock_window("w", -2, 60)]}}
     root = os.path.join(TMP, name)
     os.makedirs(root)
@@ -2461,6 +2606,25 @@ def window_chain():
           ei1.get("outcome") == "failed" and ll.get("status") == "fail" and "no cycle" in (ll.get("reason") or "") and ei1.get("driver_cycles") == 0 and h1 == []
           and [x["status"] for x in legs_of(ri2)][:2] == ["pass", "pass"] and first(ri2, "preflight").get("changed") is True and ei2.get("outcome") == "done" and ei2.get("driver_cycles") == 1,
           f"{ei1.get('outcome')} {ll.get('status')} {ll.get('reason')} {h1} {legsum(ri2)}")
+    # ---- parcel S3c: XRT's setup is sourced once a night, and its refusals are the night's own. Root wc-build holds real nights that passed (w2, and w2 again as the fallback of w4's).
+    def set_xrt(root, path):
+        p = os.path.join(root, "config.json")
+        raw = json.load(open(p))
+        raw["runner"]["xrt_root"] = path
+        json.dump(raw, open(p, "w"))
+    check("window chain: a night that falls back (w4's build fails, the fallback runs w2) still sources XRT's setup ONCE: one `xrt_env` record in its job, as in the night that had no fallback, "
+          "recorded before the first clone", [sum(r["type"] == "xrt_env" for r in x) for x in (rb1, rb2)] == [1, 1] and first(rb2, "xrt_env").get("XILINX_XRT") == fake_xrt().replace(os.sep, "/")
+          and [r["type"] for r in rb2].index("xrt_env") < [r["type"] for r in rb2].index("code"), f"{[sum(r['type'] == 'xrt_env' for r in x) for x in (rb1, rb2)]}")
+    with env(PATH=fake_ldd("ok") + os.pathsep + os.environ["PATH"]):
+        set_xrt(rb, fake_xrt("nolib"))
+        jt, et, rt = night(rb, wspec(w["w1"], out_b, dry_run=False), FAKE_LONG="end")
+        set_xrt(rb, fake_xrt("missing"))
+        jm, em, rm = night(rb, wspec(w["w1"], out_b, dry_run=False), FAKE_LONG="end")
+    check("window chain: the machine's refusals are the night's own and no commit's preflight failure: with a passed window to fall back to (w2), a tool that cannot run (XRT's directory without its "
+          "library: `tool-not-runnable`, after vectors and the dry tests ran) and a setup.sh that is not there (`xrt-setup-failed`, before any step) end the night by their names, with no `fallback` and "
+          "no `preflight_refused` record, the clone built or not", et.get("refusal") == "tool-not-runnable" and refusal_of(rt).startswith("tool-not-runnable:") and sw(rt)[:2] == [("vectors", "pass"), ("drytests", "pass")]
+          and em.get("refusal") == "xrt-setup-failed" and em.get("outcome") == "refused" and not legs_of(rm) and not any(first(x, t) for x in (rt, rm) for t in ("fallback", "preflight_refused", "driver_started")),
+          f"{et.get('outcome')} {et.get('refusal')} {sw(rt)} {em.get('outcome')} {em.get('refusal')} {[r['type'] for r in rt]}"[:400])
 
 
 def window_driver():
@@ -2799,6 +2963,41 @@ PLANTS = [  # (what is wrong, edits, the groups written for it, a fragment of th
     ("S2: a configuration that lost the job's card is a runner_error", [E("sched_staged.py", 'card = next((c for c in cfg["cards"] if c["id"] == log.card), None)',
                                                                            'card = next(c for c in cfg["cards"] if c["id"] == log.card)')],
      "steps:refusals", "a registry that lost the job's image, or a configuration that lost its card", False),
+    # ---- parcel S3c: no bytecode in a clone, XRT's environment for the scheduler's own checks and steps, and a tool that cannot run (the box, 2026-10-23). build and window:chain need POSIX.
+    ("S3c: a step is run without PYTHONDONTWRITEBYTECODE", [E("sched_proc.py", '    env["PYTHONDONTWRITEBYTECODE"] = "1"', "    pass")], "steps:run_step,build,window:chain",
+     "steps: a step is run with PYTHONDONTWRITEBYTECODE=1", False),
+    ("S3c: bytecode is turned off by a default, which the service's empty value defeats", [E("sched_proc.py", '    env["PYTHONDONTWRITEBYTECODE"] = "1"', '    env.setdefault("PYTHONDONTWRITEBYTECODE", "1")')], "steps:run_step",
+     "steps: a step is run with PYTHONDONTWRITEBYTECODE=1", False),
+    ("S3c: XRT's environment is made and given to nobody", [E("sched_build.py", '    return {"env": delta, ', '    return {"env": {}, ')], "build",
+     "build: a job that is not dry sources XRT's setup.sh ONCE", "posix"),
+    ("S3c: cft-segrun --build-id runs without XRT's environment", [E("sched_build.py", '"--build-id"], 60, env=xenv)', '"--build-id"], 60)')], "build",
+     "build: and `cft-segrun --build-id` runs in it too", "posix"),
+    ("S3c: a step is run without XRT's environment", [E("sched_staged.py", "        env, drop = dict(ctx.env), ()", "        env, drop = {}, ()")], "build",
+     "build: every step of the job runs in XRT's environment too", "posix"),
+    ("S3c: a tool that cannot run is reported as a build-id mismatch", [E("sched_build.py", 'raise Refusal("tool-not-runnable", f"cft-segrun --build-id exited', 'raise Refusal("build-id-mismatch", f"cft-segrun --build-id exited')],
+     "build", "build: a tool that cannot run is not a build-id mismatch", "posix"),
+    ("S3c: a loader error printed by a tool that exits 0 is not a tool that cannot run", [E("sched_build.py", "    if brc != 0 or LOADER_ERROR in bin_id:", "    if brc != 0:")], "build",
+     "build: and one that exits 0 and prints the loader's error", "posix"),
+    ("S3c: a library ldd cannot find is not refused", [E("sched_build.py", "        if lost and (linked or exe in OPTIONAL):", "        if False:")], "build",
+     "build: a library ldd lists as `not found`", "posix"),
+    ("S3c: an optional tool whose other library is not found is skipped, as one that merely lacks XRT is", [E("sched_build.py", "        if lost and (linked or exe in OPTIONAL):", "        if linked and lost:")], "build",
+     "build: and an OPTIONAL tool that does not name XRT at all", "posix"),
+    ("S3c: a missing setup.sh is not refused (neither by python, nor by bash's own look, nor by the status of sourcing it)",
+     [E("sched_build.py", '    if not os.path.isfile(setup):\n        raise fail("is not a file")', '    if False:\n        raise fail("is not a file")'),
+      E("sched_build.py", '[ -f "$CFT_SCHED_XRT_SETUP" ] || exit {UNSEEN}; ', ""), E("sched_build.py", '    if rc != "0":', "    if False:")], "steps:refusals", "steps: a job that is not dry whose XRT setup.sh is not there", False),
+    ("S3c: a setup.sh that exits non-zero is not refused", [E("sched_build.py", '    if rc != "0":', "    if False:")], "steps:refusals", "steps: and a setup.sh that exits non-zero", "posix"),
+    ("S3c: a bash that cannot see the file sourced nothing, and that is taken for success", [E("sched_build.py", '[ -f "$CFT_SCHED_XRT_SETUP" ] || exit {UNSEEN}; ', "")], "steps:refusals",
+     "steps: a bash that is deaf to the environment", "posix"),
+    ("S3c: a dry job is refused for XRT's setup", [E("sched_staged.py", "        if dry or kind not in BD.KIND_ENVS:", "        if kind not in BD.KIND_ENVS:")], "steps:refusals",
+     "steps: a dry job needs none of it", False),
+    ("S3c: XRT's setup is sourced after the clone is made", [E("sched_staged.py", '        xenv = self._env(log, card["kind"], dry)', "        xenv = {}"),
+                                                            E("sched_staged.py", '        log.append("code", **facts)\n', '        log.append("code", **facts)\n        xenv = self._env(log, card["kind"], dry)\n')],
+     "steps:refusals", "steps: a job that is not dry whose XRT setup.sh is not there", False),
+    ("S3c: XRT's setup is sourced again for every commit a night tries", [E("sched_staged.py", "        if self._xenv[0] != log.path:", "        if True:")], "window:chain",
+     "window chain: a night that falls back", "posix"),
+    ("S3c: a tool that cannot run is a preflight failure of the commit, which the night falls back from", [E("sched_window.py", 'BUILD_REFUSALS = ("build-failed", "xrt-not-linked", "build-id-mismatch", "clone-built")',
+                                                                                                          'BUILD_REFUSALS = ("build-failed", "xrt-not-linked", "build-id-mismatch", "clone-built", "tool-not-runnable")')],
+     "window:chain", "window chain: the machine's refusals are the night's own", "posix"),
     # ---- parcel S3a: the window. The groups are parts of `window` (and one of `steps`); chain, driver and end need POSIX.
     ("S3a: the window's end is not enforced", [E("sched_window.py", 'else "window" if time.time() >= self.closes + self.grace else None', "else None")], "window:end",
      "window end: a driver that ignores the window's end", "posix"),

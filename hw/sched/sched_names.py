@@ -53,6 +53,8 @@ REFUSALS = {
     "build-failed": ("S2", "job", "the build did not succeed: make failed, or a tool it was to make is not there"),
     "xrt-not-linked": ("S2", "job", "a built tool does not link XRT (ldd)"),
     "build-id-mismatch": ("S2", "job", "the tools' build id is not the tree's, or the tree's does not name the job's commit on a clean tree"),
+    "xrt-setup-failed": ("S3c", "job", "the job is not dry and XRT's setup.sh (runner.xrt_root) is not there, or sourcing it in bash failed: the tools it runs would not find XRT's libraries (the machine's, not the commit's: no fallback)"),
+    "tool-not-runnable": ("S3c", "job", "a tool the build made cannot run here: `cft-segrun --build-id` exited non-zero or printed the loader's error, or `ldd` lists a library as not found for a tool that names XRT or is optional; the message names the tool, its exit status and its first line (the machine's, not the commit's: no fallback)"),
     "image-digest": ("S2", "job", "an image's SHA-256 differs between the file, the registry, its directory's SHA256SUMS and its manifest, or the file or its sums cannot be read"),
     "image-tiles": ("S2", "job", "an image's tile count (its manifest's clock_cus) differs from the registry's, or the manifest or the registry's count is not there"),
     "image-platform": ("S2", "job", "an image's platform (its manifest's) is not the registry's and the card's, or one of them is not given"),
