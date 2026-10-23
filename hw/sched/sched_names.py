@@ -60,7 +60,7 @@ REFUSALS = {
     "no-verdict": ("S2", "job", "a step's log holds nothing at all, so no verdict can be read from it (the leg is recorded parse_error)"),
     "rc-only": ("S2", "label", "a LABEL, never raised: a verdict that is only an exit status is recorded `verdict_kind: rc_only` wherever it appears"),
     "dry-run-as-card": ("S2", "job", "a stand-in's output was offered as a card's"),
-    "job-exists": ("S2", "job", "a path the job would write (a step's log) already exists: refused rather than written over (the study's 5.3: 'refuse if the outputs exist')"),
+    "job-exists": ("S2", "job", "a path the job would write (a step's log) already exists: refused rather than written over (the study's 5.3: 'refuse if the outputs exist'); a window that is to START a new run (driver.resume false) finds a metrics.jsonl in driver.out"),
     "card-busy-foreign": ("S2", "job", "a process the scheduler does not own uses the card, by the driver's own rule (find_card_users): refused at once at a job's start, waited for between steps up to the configured limit"),
     # -- the cards and the windows (S3)
     "card-unavailable": ("S3", "job", "the card did not answer its start-up look"),
@@ -69,6 +69,7 @@ REFUSALS = {
     "window-bad": ("S3", "job", "the spec names a window the configuration does not hold"),
     "window-too-short": ("S3", "job", "the job's `estimate_s` exceeds what is left of the window when the job is claimed"),
     "stop-file-present": ("S3", "job", "a window's driver directory holds a STOP file (the driver itself would refuse to start)"),
+    "out-in-checkout": ("S3", "job", "a window's driver.out is inside a git working tree (it or an ancestor holds a .git): the driver's files there would make the tree untracked and change the build id the tools carry"),
     "resume-missing": ("S3", "job", "a window that resumes its driver directory finds no metrics.jsonl there (the launcher's refusal; `driver.resume: false` starts a new run)"),
     "preflight-failed": ("S3", "job", "a preflight step failed on a commit whose window has passed before, or on the commit the night fell back to: the night's failure, and no fall back from it"),
     "no-fallback": ("S3", "job", "the preflight failed on a commit whose window never passed and no commit's window has passed (or the last one cannot be run): nothing can run tonight"),

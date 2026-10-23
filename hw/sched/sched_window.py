@@ -45,7 +45,7 @@ import sched_steps as ST
 from sched_driver import CS, L, is_dry_text
 from sched_names import Refusal
 from sched_proc import run_step
-from sched_spec import DRIVER_OPTIONS
+from sched_spec import option_args
 
 GATED = ("vectors", "drytests")                        # run only when the commit differs from the last passed window's; driver-quick runs every night
 PASSED = ("done", "done-with-findings")
@@ -66,23 +66,21 @@ def _long_argv(c, st):
             argv += ["--image", f"{n}={im['path']}", "--sha", f"{n}={im['sha256']}"]
     if st.get("sweep_items"):
         argv += ["--sweep-items", ",".join(st["sweep_items"])]
-    for k, (_t, flag) in DRIVER_OPTIONS.items():
-        if k in (st.get("options") or {}):
-            argv += [flag, str(st["options"][k])]
-    return argv + (["--dry-run"] if c.dry else [])
+    return argv + option_args(st.get("options")) + (["--dry-run"] if c.dry else [])
 
 
 LONG = ST.Entry("driver-long", {}, _long_argv, _never, None, card=True, image=False, build="needs", timeout=0)
 
 
 def history(root: str, card: str, dry: bool) -> list:
-    """[(job id, commit)] of the window jobs that ended passed on this card, oldest first: a dry job's history is the dry jobs', a real one's the real ones'."""
+    """[(job id, commit)] of the window jobs that ended passed on this card, oldest first: a dry job's history is the dry jobs', a real one's the real ones'.
+    A night in which the driver started no cycle (`driver_cycles` 0 or absent in the end record) did no work and is not a passed window, whatever its outcome says."""
     jd, out = os.path.join(root, "jobs"), []
     for jid in sorted((n for n in os.listdir(jd) if STATE.ID_RE.match(n)), key=STATE.id_key):
         rs = STATE.read_records(os.path.join(jd, jid, "job.jsonl"))
         sub = next((r for r in rs if r.get("type") == "submitted"), {})
         end = rs[-1] if rs and rs[-1].get("type") == "ended" else {}
-        if sub.get("kind") == "window" and end.get("outcome") in PASSED and end.get("card") == card and bool(end.get("dry_run")) == dry and end.get("commit"):
+        if sub.get("kind") == "window" and end.get("outcome") in PASSED and end.get("card") == card and bool(end.get("dry_run")) == dry and end.get("commit") and end.get("driver_cycles"):
             out.append((jid, end["commit"]))
     return out
 
@@ -231,12 +229,15 @@ class WindowRunner(SG.StagedRunner):
         self._long(spec, log, stop, S, F, ctx, nxt, ws, card)
 
     def _out_ok(self, d):
-        """The launcher's two refusals about the driver's directory: a STOP file in it, and no metrics.jsonl to resume (or one where a new run starts)."""
+        """The launcher's refusals about the driver's directory: a STOP file in it, no metrics.jsonl to resume, and (the launcher's "outputs exist") a metrics.jsonl
+        where a new run is to start, which would be written over (`job-exists`)."""
         if os.path.exists(os.path.join(d["out"], "STOP")):
             raise Refusal("stop-file-present", f"{os.path.join(d['out'], 'STOP')} exists: remove it to start (the driver would end after its first leg, or refuse)")
         have = os.path.isfile(os.path.join(d["out"], "metrics.jsonl"))
         if d["resume"] and not have:
             raise Refusal("resume-missing", f"{d['out']} has no metrics.jsonl to resume (`driver.resume: false` starts a new run)")
+        if not d["resume"] and have:
+            raise Refusal("job-exists", f"{os.path.join(d['out'], 'metrics.jsonl')} exists and driver.resume is false: a new run would be written over the record of an earlier one (resume it, or name a new driver.out)")
 
     def _attempt(self, spec, log, stop, S, card, code, changed, last, first, wanted):
         """Clone and assert `code`, run its preflight and its build. Returns (ctx, the next step's number, the build record, the first thing that failed as text or None).
@@ -275,15 +276,19 @@ class WindowRunner(SG.StagedRunner):
 
     def _long(self, spec, log, stop, S, F, ctx, i, ws, card):
         """The driver's long run, resumed, until the window's end: started, watched (cancel, the grace), and its end read from run_end."""
-        d, rcfg, e, now = spec["driver"], self.cfg["runner"], self.entries["driver-long"], time.time()
+        d, rcfg, e = spec["driver"], self.cfg["runner"], self.entries["driver-long"]
         if S.stopped or stop.requested():
             S.stopped = True
             return self._leg_skipped(log, S, ctx, i, {"type": "driver-long"}, e, "a stop was requested")
-        if now >= ws["closes"]:
+        if time.time() >= ws["closes"]:
             raise Refusal("window-closed", f"the window closed at {CAL.fmt(ws['closes'])}, during the preflight")
         self._out_ok(d)
+        t0 = time.time()
         if not ctx.dry:
             GD.hold_until_clear(log, card["kind"], rcfg["guard_wait_max_s"], rcfg["guard_poll_s"], stop=stop.requested)
+            if time.time() >= ws["closes"]:
+                raise Refusal("window-closed", f"the window closed at {CAL.fmt(ws['closes'])}, while the job waited {time.time() - t0:.0f} s for the card")
+        now = time.time()                                          # after the wait: the driver's limit is counted from when it starts
         st = {"type": "driver-long", "out": d["out"], "resume": d["resume"], "until": CAL.fmt(ws["closes"]), "sweep_items": d.get("sweep_items"), "options": d.get("options"),
               "timeout_s": ws["closes"] - now + rcfg["window_grace_s"] + HARD_EXTRA_S}
         _, n_start, n_end = metrics(d["out"])
@@ -322,13 +327,17 @@ class WindowRunner(SG.StagedRunner):
             S.stopped = S.stopped or watch.sent != "window"                  # a cancel, or a person's STOP or signal: the night was cut short
         else:
             status, why = "fail", f"the driver stopped: {reason} (exit {code})"
+        starts = [k for k, r in enumerate(recs) if r.get("type") == "run_start"]
+        cycles = sum(r.get("type") == "cycle_start" for r in recs[starts[-1]:]) if s1 > n_start else 0         # this night's work: its cycle_start records (run_end's `cycles` counts the file's)
+        if status == "pass" and not S.stopped and not cycles:
+            status, why = "fail", f"the driver ended {reason} (exit {code}) having started no cycle this night: no driver work was done, so this is not a passed window"
         rec = dict(self._base(S, ctx, i, st, e, run.start), kind="window", status=status, reason=why or None, rc=run.rc, end=L.iso(run.end), end_epoch=round(run.end, 3),
-                   duration_s=round(max(0.0, run.end - run.start), 3), timed_out=bool(run.timed_out), killed=run.killed, counts={"cycles": end.get("cycles")} if end else None,
+                   duration_s=round(max(0.0, run.end - run.start), 3), timed_out=bool(run.timed_out), killed=run.killed, counts={"cycles": end.get("cycles"), "cycles_this_night": cycles} if end else None,
                    log=os.path.basename(logpath), log_kept="whole", card_touched=bool(not ctx.dry and run.pid is not None), argv=run.argv[:12] if status != "pass" else None,
                    extra={"out": d["out"], "until": st["until"], "run_end": end, "scheduler_stop": watch.sent})
         log.append("leg", **rec)
         S.next, S.ran, S.card_touched = i + 1, S.ran + 1, S.card_touched or rec["card_touched"]
-        F.update(driver_reason=reason, driver_exit=code)
+        F.update(driver_reason=reason, driver_exit=code, driver_cycles=cycles)
         if status != "pass":
             S.failed = True
         if status == "error" and why.startswith("dry-run-as-card"):

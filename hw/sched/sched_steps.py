@@ -28,7 +28,8 @@ import functools
 import os
 import re
 
-from sched_driver import CS, L, standin
+from sched_driver import CS, L, parser_problem, standin
+from sched_spec import option_args
 
 M = re.MULTILINE
 DRY_TOTAL = re.compile(r"^card-stress test: (\d+) checks, (\d+) failed, (\d+) skipped, (\d+) s$", M)
@@ -259,9 +260,12 @@ class StepRegistry(dict):
         return None
 
     def check_window(self, spec):
-        """The rule of a window job's `driver` that needs the driver's catalog (parcel S3a): each sweep item is one of its."""
+        """The rules of a window job's `driver` that are the driver's (parcel S3a): each sweep item is in its catalog, and its own parser accepts the options."""
         bad = [n for n in spec["driver"].get("sweep_items", []) if n not in catalog()]
-        return f".sweep_items {bad[0]!r} is not in the sweep catalog (hw/card_stress_lib.py sweep_items)" if bad else None
+        if bad:
+            return f".sweep_items {bad[0]!r} is not in the sweep catalog (hw/card_stress_lib.py sweep_items)"
+        why = parser_problem(option_args(spec["driver"].get("options"))) if spec["driver"].get("options") else None
+        return f".options are refused by the driver's own parser: {why}" if why else None
 
 
 def timeout_of(e: Entry, c, st) -> float:

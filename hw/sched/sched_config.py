@@ -62,17 +62,25 @@ def resolve_root(flag: str | None, environ=os.environ) -> str:
     return os.path.abspath(os.path.expanduser(root))
 
 
+def checkout_of(path: str):
+    """The directory, `path` itself or the nearest above it, that holds a .git (git's sign of a working tree), else None. The state root and a
+    window's driver.out (sched_spec.validate) are both held to it."""
+    d = os.path.realpath(path)
+    while True:
+        if os.path.lexists(os.path.join(d, ".git")):
+            return d
+        up = os.path.dirname(d)
+        if up == d:
+            return None
+        d = up
+
+
 def check_root(root: str, create: bool = False) -> str:
     """The root, or a refusal. The checkout test comes before anything is created."""
     real = os.path.realpath(root)
-    d = real
-    while True:
-        if os.path.lexists(os.path.join(d, ".git")):
-            raise Refusal("root-in-checkout", f"{root} is inside the git working tree at {d}")
-        up = os.path.dirname(d)
-        if up == d:
-            break
-        d = up
+    d = checkout_of(real)
+    if d:
+        raise Refusal("root-in-checkout", f"{root} is inside the git working tree at {d}")
     if os.path.exists(real) and not os.path.isdir(real):
         raise Refusal("root-missing", f"{root} is not a directory")
     if not os.path.isdir(real):

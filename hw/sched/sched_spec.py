@@ -32,6 +32,11 @@ PREEMPT = ("ok", "never")
 PREFLIGHT_ORDER = ("vectors", "drytests", "driver-quick")      # the only steps a window runs before its long run, and the order they run in
 DRIVER_OPTIONS = {"host_workers": ("nonneg", "--host-workers"), "sweep_chunk": ("pos", "--sweep-chunk"),
                   "telemetry_seconds": ("number", "--telemetry-seconds"), "deadline_grace": ("number", "--deadline-grace")}   # driver.options: the closed set
+def option_args(options) -> list:
+    """A window's `driver.options` as the driver's flags: the one place a name becomes a flag (the long run's command and the check that the driver's own parser accepts them)."""
+    return [x for k, v in (options or {}).items() for x in (DRIVER_OPTIONS[k][1], str(v))]
+
+
 DEFAULT_PRIORITY = {"window": 10, "staged": 50}   # a staged job outranks the sweep (Logan, question 5)
 COMMIT_RE = re.compile(r"[0-9a-f]{40}\Z")
 SOURCE_RE = re.compile(r"(?:bundle:(?!\.+\Z)[A-Za-z0-9._-]+|remote)\Z")
@@ -153,8 +158,8 @@ SPEC_FIELDS = {
     "preflight": ("list", False, None, "window: 1 to 3 steps from vectors, drytests, driver-quick, in that order, each as a staged step; absent: all three. vectors and drytests run only when the commit "
                   "differs from the last passed window's, driver-quick every night"),
     "driver": ("object", False, None, "window (required): the driver's long run, resumed, until the window's end"),
-    "driver.out": ("str", False, None, "the driver's run directory (--out), an absolute path outside every checkout (required)"),
-    "driver.resume": ("bool", False, True, "true: --resume, and the directory must hold a metrics.jsonl (else `resume-missing`); false: no --resume, a new run (the driver itself refuses a directory that holds one, exit 2)"),
+    "driver.out": ("str", False, None, "the driver's run directory (--out), an absolute path outside every git working tree, else `out-in-checkout` (required)"),
+    "driver.resume": ("bool", False, True, "true: --resume, and the directory must hold a metrics.jsonl (else `resume-missing`); false: no --resume, a new run, refused `job-exists` if the directory already holds one"),
     "driver.images": ("strs", False, None, "registry names handed to the driver (--image, --sha) and held to their files; absent: the registry's quad, single and deep"),
     "driver.sweep_items": ("strs", False, None, "campaign items of the sweep catalog (--sweep-items), given to the smoke and the long run alike"),
     "driver.options": ("object", False, None, "a closed set of driver options: host_workers (--host-workers), sweep_chunk, telemetry_seconds, deadline_grace"),
@@ -259,6 +264,10 @@ def validate(obj, cfg: dict | None = None, registry: dict | None = None) -> dict
                 raise Refusal("spec-form", f"field {k} is missing: a job of kind window needs it")
         if not os.path.isabs(obj["driver"]["out"]):
             raise Refusal("spec-form", "field driver.out must be an absolute path")
+        import sched_config                                           # at call time: sched_config imports this module
+        above = sched_config.checkout_of(obj["driver"]["out"])
+        if above:
+            raise Refusal("out-in-checkout", f"driver.out {obj['driver']['out']!r} is inside the git working tree at {above}: the driver's files there would make the tree untracked")
     else:
         for k in ("preflight", "driver"):
             if k in obj:

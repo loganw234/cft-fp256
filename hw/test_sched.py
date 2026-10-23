@@ -1993,8 +1993,8 @@ def table_checks(only=None):
 # ---------------------------------------------------------------------------------------- window (parcel S3a)
 # The window runner against the driver's own dry run and a fake python. A scratch repository holds the REAL driver and wrapper (hw/card_stress*.py, hw/card-stress.sh,
 # copied unchanged) beside the fake host tree; the wrapper execs the python PYTHON names, and the fixture names a script that answers the smoke as FAKE_QUICK says and a long run
-# as FAKE_LONG says (end: at once; stubborn: ignores --until, ends at its STOP file or by itself after FAKE_MAX s; fail; crash; real: the clone's real driver, --dry-run).
-# Parts (`--only window:PART`): calendar spec claim (everywhere), chain driver end (POSIX: bash, make, a clone). The card is never involved.
+# as FAKE_LONG says (end: at once, one cycle; idle: ends at once with no cycle; stubborn: ignores --until, ends at its STOP file or by itself after FAKE_MAX s; fail; crash; real: the clone's real driver, --dry-run).
+# Parts (`--only window:PART`): calendar spec claim long (everywhere), chain driver end (POSIX: bash, make, a clone). The card is never involved.
 
 WFIX: dict = {}
 FAKE_INTERP = r'''#!@PY@
@@ -2024,6 +2024,8 @@ print("fake driver: cwd " + os.getcwd() + " args " + " ".join(args), flush=True)
 if mode == "crash":
     sys.exit(3)
 rec({"type": "run_start", "run_id": "fake", "argv": args})
+if mode != "idle":
+    rec({"type": "cycle_start", "cycle": 1})
 if mode == "fail":
     end("card_lost", 3)
 if mode == "stubborn":
@@ -2128,7 +2130,7 @@ def window_posix(label):
 
 
 def group_window():
-    parts = {"calendar": window_calendar, "spec": window_spec, "claim": window_claim, "chain": window_chain, "driver": window_driver, "end": window_end}
+    parts = {"calendar": window_calendar, "spec": window_spec, "claim": window_claim, "long": window_long, "chain": window_chain, "driver": window_driver, "end": window_end}
     want = {o.split(":", 1)[1] for o in (ONLY or ()) if o.startswith("window:")} if ONLY and "window" not in ONLY else set(parts)
     for name, fn in parts.items():
         if name in want:
@@ -2178,6 +2180,7 @@ def window_calendar():
 
 
 def window_spec():
+    os.makedirs(os.path.join(TMP, "co", ".git"))                    # a directory that holds a .git: git's sign of a working tree
     root, cfg = mkroot2("ws-main", windows={"zone": "local", "list": [clock_window("w", -60, 7200), {"name": "past", "start": "18:00", "end": "08:00", "dates": ["2020-01-01"]}]})
     reg = ST.StepRegistry()
     od = wvalid()["driver"]["out"]
@@ -2186,6 +2189,8 @@ def window_spec():
              ("a driver with no out", wvalid(driver={"resume": True}, when={"window": "w"}), "spec-form", "driver.out"), ("a driver out that is not absolute", wvalid(driver={"out": "x/y"}, when={"window": "w"}), "spec-form", "driver.out"),
              ("an unknown driver field", wvalid(driver={"out": od, "colour": 1}, when={"window": "w"}), "spec-form", "driver.colour"),
              ("an unknown driver option", wvalid(driver={"out": od, "options": {"colour": 1}}, when={"window": "w"}), "spec-form", "driver.options.colour"),
+             ("a driver out inside a git working tree", wvalid(driver={"out": os.path.join(TMP, "co", "run")}, when={"window": "w"}), "out-in-checkout", "working tree"),
+             ("a sweep_chunk the driver's own parser refuses", wvalid(driver={"out": od, "options": {"sweep_chunk": 4097}}, when={"window": "w"}), "spec-form", "--sweep-chunk 4097"),
              ("a negative host_workers", wvalid(driver={"out": od, "options": {"host_workers": -1}}, when={"window": "w"}), "spec-form", "host_workers"),
              ("a sweep item the catalog does not hold", wvalid(driver={"out": od, "sweep_items": ["nope-rne"]}, when={"window": "w"}), "spec-form", "nope-rne"),
              ("a driver image the registry does not hold", wvalid(driver={"out": od, "images": ["nope"]}, when={"window": "w"}), "image-unknown", "nope"),
@@ -2198,6 +2203,18 @@ def window_spec():
         jid, r = S.submit(root, cfg, json.dumps(obj).encode(), reg)
         got = f"{r.name}: {r.why}" if r else None
         check(f"window spec: {label} is refused {name}, naming {frag!r}, and the job's record says so", got is not None and got.startswith(name + ":") and frag in got and rec(root, "jobs", jid, -2).get("name") == name, str(got))
+    import contextlib
+    import io
+    buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf):
+            DR.CS.parse_args(["--help"])
+    except SystemExit:
+        pass
+    flags = [f for _, f in P.DRIVER_OPTIONS.values()]
+    check("window spec: every flag DRIVER_OPTIONS maps a name to is a WHOLE option of the driver's own parser (its --help lists it: argparse alone would take an abbreviation), and the options of the fullest spec pass the parser",
+          all(re.search(r"(?<![-\w])" + re.escape(f) + r"(?![-\w])", buf.getvalue()) for f in flags) and DR.parser_problem(P.option_args({"host_workers": 2, "sweep_chunk": 8192, "telemetry_seconds": 0, "deadline_grace": 1.5})) is None
+          and DR.parser_problem(["--sweep-chunk", "4097"]) is not None, str(flags))
     jf, rf = S.submit(root, cfg, json.dumps(wvalid(when={"window": "w"})).encode(), R.FAKE_REGISTRY)
     check("window spec: a window job submitted against the FAKE runner's registry (S1's, which has no steps to give it) is refused `window-unsupported` at the submit, so it never reaches a runner that would crash on it",
           rf is not None and rf.name == "window-unsupported" and rec(root, "jobs", jf, -2).get("name") == "window-unsupported", str(rf))
@@ -2244,6 +2261,86 @@ def window_claim():
     lost = sw(when={"window": "wopen"})                 # submitted after the call above, which would have claimed it: the window is open at that time of day, five days on
     cl(t0, dict(cfg, windows={"zone": "local", "list": []}))
     check("window claim: a job whose window the configuration has lost since the submit is refused `window-bad` at the claim", rec(root, "jobs", lost, -2).get("name") == "window-bad", str(rec(root, "jobs", lost, -2)))
+
+
+def window_long():
+    """Pieces of the long run that need no process, so they run everywhere: the window's end looked at again after the guard's wait and the driver's limit counted from its
+    start (the guard and run_step stubbed), the refusals of the run's own start, those about the driver's directory, a person's STOP file, and what the history counts."""
+    root, cfg = mkroot2("wl-main", windows={"zone": "local", "list": [clock_window("w", -60, 3600), clock_window("wlater", 3600, 3600)]})
+    runner, card, out = WD.WindowRunner(root, cfg), cfg["cards"][0], os.path.join(TMP, "wl-out")
+    os.makedirs(out)
+    spec_ = P.validate(wvalid(when={"window": "w"}, driver={"out": out, "resume": False}), cfg, runner.registry)
+    ctx = SG.Ctx(os.path.join(TMP, "wl-no-clone"), None, {}, "python3", os.path.join(TMP, "wl-rev8"), False)
+    n, old_guard, old_run = [0], GD.hold_until_clear, WD.run_step
+
+    def long_(closes, wait):
+        """runner._long with the guard stubbed to wait `wait` seconds and run_step stubbed to read its limit and run nothing: (the Refusal's text or None, the log's record types, the limits)."""
+        n[0] += 1
+        lg, got = S.Log(os.path.join(TMP, f"wl-{n[0]}.jsonl"), f"j{n[0]:06d}", "u50-0"), []
+
+        def fake_run(argv, cwd, env_, logpath, timeout_s, *a, **k):
+            got.append(timeout_s)
+            r = PR.StepRun()
+            r.error, r.start, r.end = "stub: the check reads the limit and runs nothing", time.time(), time.time()
+            return r
+        GD.hold_until_clear, WD.run_step = (lambda *a, **k: time.sleep(wait)), fake_run
+        try:
+            v = verdict(lambda: runner._long(spec_, lg, R.StopWatch(root, lg.job, lg), SG._State(0), {}, ctx, 0, {"name": "w", "closes": closes}, card))
+        finally:
+            GD.hold_until_clear, WD.run_step = old_guard, old_run
+        return v, [r["type"] for r in S.read_records(lg.path)], got
+    v1, types1, _ = long_(time.time() + 1.0, 1.6)
+    check("window long: a window that closes while the job waits for the card (the guard stubbed to wait 1.6 s, the window to close in 1) is refused `window-closed`, naming the wait, and the driver "
+          "is never started: no driver_started and no leg in the record", (v1 or "").startswith("window-closed:") and "while the job waited" in v1 and "driver_started" not in types1 and "leg" not in types1, f"{v1!r} {types1}")
+    t1 = time.time()
+    v2, _, lim = long_(t1 + 100, 1.5)
+    bound = 100 - 1.4 + cfg["runner"]["window_grace_s"] + WD.HARD_EXTRA_S
+    check("window long: the driver's limit is counted from when it STARTS, after the guard's wait (stubbed to 1.5 s), not before it: about the time left + the grace + the hard extra, less the wait",
+          v2 is None and lim and lim[0] <= bound, f"{v2!r} {lim} against {bound}")
+
+    def direct(window, **kw):
+        n[0] += 1
+        lg = S.Log(os.path.join(TMP, f"wl-{n[0]}.jsonl"), f"j{n[0]:06d}", "u50-0")
+        sp = P.validate(wvalid(when={"window": window}, driver={"out": out, "resume": False}, **kw), cfg, runner.registry)
+        outcome, fields = runner.run(sp, lg, R.StopWatch(root, lg.job, lg))
+        return outcome, fields.get("refusal"), [r["type"] for r in S.read_records(lg.path)]
+    short, closed = direct("w", estimate_s=7000), direct("wlater")
+    check("window long: the run's own start refuses what the claim let by (the clock moves between them): an estimate_s of 7000 against the 3,500 s left is `window-too-short` and a window that is not open is "
+          "`window-closed`, each outcome refused before a window record, an image or a clone", short[:2] == ("refused", "window-too-short") and closed[:2] == ("refused", "window-closed")
+          and not ({"window", "image", "code", "leg"} & set(short[2] + closed[2])), f"{short} {closed}")
+    d0 = os.path.join(TMP, "wl-dir")
+    os.makedirs(d0)
+    chk = lambda **kw: (verdict(lambda: runner._out_ok({"out": d0, "resume": True, **kw})) or "ok").split(":")[0]
+    got_ = [chk()]
+    open(os.path.join(d0, "metrics.jsonl"), "w").close()
+    got_ += [chk(resume=False), chk()]
+    open(os.path.join(d0, "STOP"), "w").close()
+    got_ += [chk()]
+    os.remove(os.path.join(d0, "STOP"))
+    os.remove(os.path.join(d0, "metrics.jsonl"))
+    got_ += [chk(resume=False)]
+    check("window long: the driver directory's refusals are the launcher's, all three: a resume with no metrics.jsonl is `resume-missing`, a NEW run over one is `job-exists` (the launcher's \"outputs exist\"), "
+          "a STOP file is `stop-file-present`, and the two good cases pass", got_ == ["resume-missing", "job-exists", "ok", "stop-file-present", "ok"], str(got_))
+    dp = os.path.join(TMP, "wl-person")
+    os.makedirs(dp)
+    open(os.path.join(dp, "STOP"), "w").write("a person's\n")
+    mem = MemLog()
+    mem.job = "j000009"
+    wt = WD.Watch(dp, type("Asked", (), {"requested": lambda self: True})(), mem, time.time() + 3600, 900, 0.05)
+    wt.start(os.getpid())
+    wait_for(lambda: wt.sent is not None, 10)
+    wt.finish()
+    check("window long: a STOP file the scheduler did not make (a person's, there before the cancel) is left alone: the driver is asked by it, the record says `made` false, and it is still there when the watch ends",
+          wt.sent == "cancel" and wt.made is None and os.path.exists(os.path.join(dp, "STOP")) and [r.get("made") for r in mem.of("scheduler_stop")] == [False] and not mem.of("scheduler_stop_removed"), str(mem.recs))
+    rh, _ch = mkroot2("wl-hist")
+    for k, cyc in ((1, 0), (2, 3)):
+        jid = f"j{k:06d}"
+        os.makedirs(os.path.join(rh, "jobs", jid))
+        lg = S.Log(os.path.join(rh, "jobs", jid, "job.jsonl"), jid, "u50-0")
+        lg.append("submitted", kind="window", name="n")
+        lg.end("done", commit=str(k) * 40, dry_run=True, driver_cycles=cyc)
+    check("window long: a window that ended `done` in which the driver started no cycle is not history, whatever its outcome says: of two done jobs only the one with cycles is a passed window",
+          WD.history(rh, "u50-0", True) == [("j000002", "2" * 40)], str(WD.history(rh, "u50-0", True)))
 
 
 def window_chain():
@@ -2312,6 +2409,18 @@ def window_chain():
           eb1.get("outcome") == "done" and eb2.get("outcome") == "done" and eb2.get("dry_run") is False and pr.get("name") == "build-failed" and fbb.get("to_commit") == w["w2"]
           and fbb.get("reason", "").startswith("build-failed:") and [x[1] for x in sw(rb2)][:3] == ["pass", "pass", "skipped"] and eb2.get("commit") == w["w2"] and eb2.get("requested_commit") == w["w4"]
           and {"build.log", "build-03.log"} <= set(os.listdir(os.path.join(rb, "jobs", jb2))), f"{eb1.get('outcome')} {eb2.get('outcome')} {refusal_of(rb2)!r} {sw(rb2)} {pr} {fbb} {sorted(os.listdir(os.path.join(rb, 'jobs', jb2)))}")
+
+    ri, ci = mkrootw("wc-idle")
+    out_i = os.path.join(TMP, "wout-idle")
+    ji1, ei1, ri1 = night(ri, wspec(w["w1"], out_i, resume=False), FAKE_LONG="idle")
+    h1 = WD.history(ri, "u50-0", True)
+    ji2, ei2, ri2 = night(ri, wspec(w["w1"], out_i), FAKE_LONG="end")
+    ll = next((x for x in legs_of(ri1) if x["leg"] == "driver-long"), {})
+    check("window chain: a night in which the driver ended at its deadline having started NO cycle did no work and is not a passed window: the long leg is `fail` and says so, the job ends failed, "
+          "it is no history, and the next night runs vectors and the dry tests again (the commit never passed) and ends done",
+          ei1.get("outcome") == "failed" and ll.get("status") == "fail" and "no cycle" in (ll.get("reason") or "") and ei1.get("driver_cycles") == 0 and h1 == []
+          and [x["status"] for x in legs_of(ri2)][:2] == ["pass", "pass"] and first(ri2, "preflight").get("changed") is True and ei2.get("outcome") == "done" and ei2.get("driver_cycles") == 1,
+          f"{ei1.get('outcome')} {ll.get('status')} {ll.get('reason')} {h1} {legsum(ri2)}")
 
 
 def window_driver():
@@ -2645,6 +2754,30 @@ PLANTS = [  # (what is wrong, edits, the groups written for it, a fragment of th
     ("S3a: noted failures are allowed without the spec's word", [E("sched_steps.py", "    noted = [f for f in fails if f not in flakes and any(f.startswith(k) for k in noted_failures)]",
                                                                "    noted = [f for f in fails if f not in flakes]")],
      "steps:parsers", "steps: parse_drytests keeps the spec's `noted_failures` APART", False),
+    ("S3a: the window's end is not looked at again after the guard's wait", [E("sched_window.py", "            if time.time() >= ws[\"closes\"]:\n                raise Refusal(\"window-closed\", f\"the window closed at {CAL.fmt(ws['closes'])}, while the job waited",
+                                                                                "            if False:\n                raise Refusal(\"window-closed\", f\"the window closed at {CAL.fmt(ws['closes'])}, while the job waited")],
+     "window:long", "window long: a window that closes while the job waits for the card", False),
+    ("S3a: the driver's limit is counted from before the guard's wait", [E("sched_window.py", "        now = time.time()                                          # after the wait", "        now = t0                                                   # after the wait")],
+     "window:long", "window long: the driver's limit is counted from when it STARTS", False),
+    ("S3a: a night in which the driver started no cycle is a passed window", [E("sched_window.py", '        if status == "pass" and not S.stopped and not cycles:', "        if False:")], "window:chain",
+     "window chain: a night in which the driver ended at its deadline having started NO cycle", "posix"),
+    ("S3a: the history counts a done night in which the driver started no cycle", [E("sched_window.py", 'and end.get("commit") and end.get("driver_cycles"):', 'and end.get("commit"):')], "window:long",
+     "window long: a window that ended `done` in which the driver started no cycle is not history", False),
+    ("S3a: a driver out inside a git working tree is accepted", [E("sched_spec.py", "        if above:\n            raise Refusal(\"out-in-checkout\"", "        if False:\n            raise Refusal(\"out-in-checkout\"")], "window:spec",
+     "window spec: a driver out inside a git working tree is refused out-in-checkout", False),
+    ("S3a: the driver's options are not held to the driver's own parser", [E("sched_steps.py", '        why = parser_problem(option_args(spec["driver"].get("options"))) if spec["driver"].get("options") else None', "        why = None")],
+     "window:spec", "window spec: a sweep_chunk the driver's own parser refuses is refused spec-form", False),
+    ("S3a: an option's flag is not the driver's", [E("sched_spec.py", '"host_workers": ("nonneg", "--host-workers")', '"host_workers": ("nonneg", "--host-worker")')], "window:spec",
+     "window spec: every flag DRIVER_OPTIONS maps a name to is a WHOLE option", False),
+    ("S3a: a new run over an earlier run's metrics.jsonl is allowed", [E("sched_window.py", '        if not d["resume"] and have:', "        if False:")], "window:long",
+     "window long: the driver directory's refusals are the launcher's, all three", False),
+    ("S3a: a STOP file the scheduler did not make is removed", [E("sched_window.py", "        if self.made:\n            try:\n                os.unlink(self.path)", "        if self.sent:\n            try:\n                os.unlink(self.path)")],
+     "window:long", "window long: a STOP file the scheduler did not make", False),
+    ("S3a: the run's own start does not hold the estimate to the window", [E("sched_window.py", '        if spec.get("estimate_s", 0) > ws["closes"] - now:', "        if False:")], "window:long",
+     "window long: the run's own start refuses what the claim let by", False),
+    ("S3a: the run's own start does not look at the window's state", [E("sched_window.py", "        if ws[\"state\"] != \"open\":\n            raise Refusal(\"window-closed\", f\"window {ws['name']!r} is not open when the job starts",
+                                                                      "        if False:\n            raise Refusal(\"window-closed\", f\"window {ws['name']!r} is not open when the job starts")],
+     "window:long", "window long: the run's own start refuses what the claim let by", False),
     ("S3a: a refusal the table gives to S3 that nothing raises", [E("sched_names.py", '    "no-fallback": ("S3", "job",', '    "never-raised-s3": ("S3", "job", "x"), "no-fallback": ("S3", "job",')],
      "window,table", "the table: every refusal the table gives to S3 but S3b's", None),
 ]
