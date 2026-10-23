@@ -1241,7 +1241,7 @@ study is per RTL tree, with the three images reported separately beneath it.
   git is asked once for each commit and directory, 10 s a lookup and 40 s in all (the driver
   refreshes the report after every cycle with a two-minute limit); a git that does not answer, is not there or finds
   no repository stops the rest and is named in `sweep.trees.git.problem` and the section's `git:` line. `summarize()`
-  derives by default, so a reducer that calls it gets the classes the command line shows. A slice is counted under the **last `run_start`
+  derives by default, so a reducer that calls it gets the classes the command line shows; `tree_class(kind, run_start, rev)` is the class a slice would fall in under a run_start, by the same rule and with the label `--json` gives (the nightly page's reducer names a class nothing was swept under with it). A slice is counted under the **last `run_start`
   before it** in its file, so a run resumed from another checkout counts what follows under that checkout's tree.
 - **The telemetry section's HBM temperature** (since 2026-10-22, KL-32): the card's FPGA HBM temperature reads 0 in most
   samples - 670 of the 865 of the 2026-10-19 run, in 23 runs of 14 to 45 consecutive samples between 23 runs of readings (the first one
