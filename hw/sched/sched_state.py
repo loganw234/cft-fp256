@@ -224,13 +224,29 @@ def _files(d: str) -> list:
 EXTRA = "sums-extra.json"        # parcel S4a: the files a window's sums list BESIDES its directory's top level: {"files": [{"name", "sha256"}]}
 
 
+def _read_extra(d: str) -> list:
+    with open(os.path.join(d, EXTRA), "rb") as fh:
+        return [(e["name"], e["sha256"]) for e in json.loads(fh.read().decode())["files"]]
+
+
 def _extra(d: str) -> list:
-    """[(name, sha256)] of the job's EXTRA list, or [] (none, or a damaged one: the files it should have named are then not in the sums)."""
+    """[(name, sha256)] of the job's EXTRA list, or [] (none, or a damaged one: the files it should have named are then not in the sums, and `extra_problem` says so)."""
     try:
-        with open(os.path.join(d, EXTRA), "rb") as fh:
-            return [(e["name"], e["sha256"]) for e in json.loads(fh.read().decode())["files"]]
+        return _read_extra(d)
     except (OSError, ValueError, KeyError, TypeError):
         return []
+
+
+def extra_problem(d: str):
+    """None when the job has no EXTRA list or it reads; else why it does not. A damaged list drops the run's and the smoke's lines from the sums, which must not happen silently:
+    `check_sums` reports it and `seal` puts it in the end record (and `status` shows it)."""
+    if not os.path.isfile(os.path.join(d, EXTRA)):
+        return None
+    try:
+        _read_extra(d)
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        return f"{EXTRA} cannot be read ({type(e).__name__}): the run's and the smoke's files are NOT in this job's SHA256SUMS"
+    return None
 
 
 def write_sums(d: str) -> None:
@@ -248,7 +264,8 @@ def write_sums(d: str) -> None:
 
 
 def check_sums(d: str) -> list:
-    """What is wrong with a job directory's SHA256SUMS (what `sha256sum -c` would say), as a list of texts."""
+    """What is wrong with a job directory's SHA256SUMS, as a list of texts: what `sha256sum -c` would say of the names INSIDE the directory (a listed file missing, one that differs, one not
+    listed) and a damaged EXTRA list. A name that is ABSOLUTE, the run's own files, is NOT looked at (see write_sums): `sha256sum -c` in the directory would also check those."""
     try:
         with open(os.path.join(d, "SHA256SUMS"), "rb") as fh:
             lines = fh.read().decode().splitlines()
@@ -264,11 +281,13 @@ def check_sums(d: str) -> list:
             bad.append(f"{n} is listed and missing")
         elif sha256_file(p) != h:
             bad.append(f"{n} differs from its sum")
-    return bad
+    return bad + ([extra_problem(d)] if extra_problem(d) else [])
 
 
 def seal(d: str, log: Log, outcome: str, **fields) -> None:
-    """The end record, whose last word is the outcome, and then the sums over every file, the end record included."""
+    """The end record, whose last word is the outcome, and then the sums over every file, the end record included. A damaged EXTRA list is named in the end record (`sums_problem`)."""
+    if extra_problem(d):
+        fields["sums_problem"] = extra_problem(d)
     log.end(outcome, **fields)
     write_sums(d)
 

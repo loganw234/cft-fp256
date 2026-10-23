@@ -74,7 +74,9 @@ def sync(repo: str, remote: str) -> str:
         os.rename(tmp, repo)
     rc, _, err = git(repo, "fetch", "-q", "--no-tags", "--", remote, f"+refs/heads/main:{REF}", timeout=1800)
     if rc != 0:
-        raise Refusal("remote-unreachable", f"git could not fetch the remote's main: {lines(err)}")
+        if git(repo, "rev-parse", "--git-dir")[0] != 0:                    # the fault is the scheduler's own clone, not the remote
+            raise Refusal("publish-failed", f"the scheduler's own clone ({os.path.join('publish', 'repo')}) is damaged, so the remote was not asked: {lines(err)}")
+        raise Refusal("remote-unreachable", f"git could not fetch the remote's main (the clone itself is sound): {lines(err)}")
     rc, out, err = git(repo, "rev-parse", "--verify", "-q", REF + "^{commit}")
     if rc != 0 or not out.strip():
         raise Refusal("remote-unreachable", f"the remote has no main ({lines(err)})")
@@ -123,8 +125,10 @@ def prepare(root: str, cfg: dict, run_dir: str, metrics_sha256, python: str, rec
     if rc != 0:
         raise Refusal("reducer-refused", f"main's reducer exited with status {rc}: {lines(err)}")
     rc, _, err = run([python, "-B", reducer, "--check", DATA, run_dir], repo, 900)
+    if rc == 1:                                                           # the reducer's own word for a difference; 2 and 3 are refusals, as they are of its run
+        raise Refusal("check-differs", f"main's --check found the file NOT to be what the run reduces to (status 1): {lines(err)}")
     if rc != 0:
-        raise Refusal("check-differs", f"main's --check exited with status {rc}: {lines(err)}")
+        raise Refusal("reducer-refused", f"main's reducer REFUSED its --check (status {rc}; not a difference): {lines(err)}")
     new = read_json(os.path.join(repo, DATA))
     if not isinstance(new, dict) or new.get("source", {}).get("metrics_sha256") != metrics_sha256:
         raise Refusal("metrics-sha-differs", f"the data file says metrics.jsonl is {str((new or {}).get('source', {}).get('metrics_sha256'))[:16]}, the sums' line says {str(metrics_sha256)[:16]}")

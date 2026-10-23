@@ -60,7 +60,8 @@ def epoch(ts) -> float:
 
 def do_summary(jobdir, t0, rec):
     """The summary kept, and the driver's FINDINGS read out of it (S3a left the outcome as the driver's `run_end` and said this close-out reads them): the sweep's disagreements, this night's
-    (those of legs that started after the driver did) and the run's, and the run's failed legs. The outcome is not changed by them."""
+    (those of legs that started no more than 60 s before the driver did, or after: the driver's stamps are to the second, and a leg of this night never starts before it) and the run's,
+    and the run's failed legs. The outcome is not changed by them."""
     try:
         with open(os.path.join(jobdir, SUMMARY), "rb") as fh:
             data = fh.read()
@@ -90,14 +91,16 @@ def do_sums(run, jobdir, share, rec):
             missing.append(n)
     smoke = [d for d in sorted(os.listdir(jobdir)) if SMOKE_RE.match(d) and os.path.isdir(os.path.join(jobdir, d))]
     smoke_files = [d + "/" + n for d in smoke for n in RUN_FILES if add(d + "/" + n, os.path.join(jobdir, d, n))]
+    lost = [d + "/" + n for d in smoke for n in RUN_FILES if d + "/" + n not in smoke_files]                # a smoke the job ran that left one of its five unreadable or missing
     with open(os.path.join(jobdir, STATE.EXTRA), "w", encoding="utf-8", newline="\n") as fh:
         json.dump({"v": 1, "files": rows}, fh, indent=1)
         fh.write("\n")
     share["metrics_sha256"] = next((r["sha256"] for r in rows if r["name"] == os.path.join(run, "metrics.jsonl")), None)
     rec.update(file="SHA256SUMS", extra=STATE.EXTRA, run_dir=run, run_files=[r["name"] for r in rows if os.path.isabs(r["name"])], smoke_files=smoke_files, listed=len(rows),
                metrics_sha256=share["metrics_sha256"], note="the lines naming the run's files hold for the lead's copy of this night: the next night resumes that directory, and `check_sums` leaves them be")
-    if missing:
-        raise Refusal("sums-incomplete", f"{', '.join(missing)} cannot be read in {run}: the list is written without {'it' if len(missing) == 1 else 'them'}")
+    if missing or lost:
+        what = [f"{', '.join(missing)} of the run in {run}"] * bool(missing) + [f"{', '.join(lost)} of the smoke in the job's directory"] * bool(lost)
+        raise Refusal("sums-incomplete", f"cannot be read: {'; '.join(what)}: the list is written without {'it' if len(missing) + len(lost) == 1 else 'them'}")
 
 
 def closeout(runner, spec, log, S, dry) -> dict:

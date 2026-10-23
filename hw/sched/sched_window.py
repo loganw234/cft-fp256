@@ -401,7 +401,7 @@ def window_info(root: str, where: str, jid: str, cfg: dict | None = None) -> dic
             "driver": next(({"reason": r["extra"].get("run_end", {}) and r["extra"]["run_end"].get("reason"), "status": r["status"], "scheduler_stop": r["extra"].get("scheduler_stop")}
                             for r in rs if r.get("type") == "leg" and r.get("kind") == "window"), None),
             "overrun": next((r for r in rs if r.get("type") == "driver_overrun"), None), "cancel_late": next((r for r in rs if r.get("type") == "cancel_after_stop"), None), "ended": bool(end),
-            "closeout": CO.info(rs)}
+            "closeout": CO.info(rs), "sums_problem": end.get("sums_problem")}
 
 
 def format_window(info: dict) -> list:
@@ -423,4 +423,6 @@ def format_window(info: dict) -> list:
     c = info.get("cancel_late")
     if c:
         lines.append(f"  cancel received after the driver (pid {c['pid']}) had been asked to stop: the scheduler sends it no signal, and the job ends cancelled when the driver does")
+    if info.get("sums_problem"):
+        lines.append(f"  SUMS PROBLEM: {info['sums_problem']}")
     return lines + CO.lines(info.get("closeout"))

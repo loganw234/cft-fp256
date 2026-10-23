@@ -2618,6 +2618,9 @@ here = os.path.dirname(os.path.abspath(__file__))
 mode = os.environ.get("S4A_MODE", "")
 real = os.path.join(here, "card_stress_progress_real.py")
 sys.argv[0] = real
+if mode == "checkrefuse" and "--check" in sys.argv:
+    sys.stderr.write("card_stress_progress: the reducer failed or refused its own check: simulated\\n")
+    sys.exit(3)
 try:
     runpy.run_path(real, run_name="__main__")
 except SystemExit as e:
@@ -2750,15 +2753,35 @@ def group_publish():
           "with publish.fetch_host unset it says the host is the machine's own name",
           fetched.returncode == 0 and git_t(desk, "rev-parse", "FETCH_HEAD").stdout.strip() == rec.get("commit") and re.fullmatch(r"git fetch ssh://[^/ ]+/\S+ nightly-data", cmd) and repo.replace(os.sep, "/").lstrip("/") in cmd
           and "own name" in (rec.get("fetch_note") or "") and "host.example" in PUB.fetch_command(dict(cfg, publish={"fetch_host": "u@host.example"}), repo)[0], f"{fetched.stderr[:100]} {cmd}")
-    try:
-        PUB.git(repo, "push", rem, "nightly-data")
-        guarded = False
-    except ValueError:
-        guarded = True
+    guards = []
+    for verb in ("push", "send-pack", "receive-pack", "remote", "config", "credential"):                # all six, by name here: a verb dropped from the module's list must turn this red
+        for pre in ((), ("-c", "a=b")):
+            try:
+                PUB.git(repo, *pre, verb, "x")
+                guards.append(False)
+            except ValueError:
+                guards.append(True)
+    guarded = len(guards) == 12 and all(guards)
     check("publish: NOTHING IS PUSHED or written to the remote: its refs are as they were, none of the commands the scheduler ran (all noted through subprocess.run; on POSIX also through a `git` that logs its "
-          "arguments) was a push, both ways of looking saw the clone, fetch and commit (so the check is not empty), and the module refuses the verb in code",
+          "arguments) was a push, both ways of looking saw the clone, fetch and commit (so the check is not empty), and the module refuses in code each of the six verbs that would (push, send-pack, "
+          "receive-pack, remote, config, credential), with or without leading -c options",
           git_t(rem, "for-each-ref").stdout == refs0 and len(calls) >= 8 and (os.name != "posix" or len(logged) >= 8) and not pushes and guarded and any("clone" in c for c in calls) and any("commit" in c for c in calls),
           f"{len(calls)} noted, {len(logged)} logged, pushes {pushes[:2]}")
+    remm = mkremote("moving")
+    rm_root, rm_cfg = pub_root("pr-moving", remm)
+    rec_m1, rec_m2 = {}, {}
+    vm1 = refuses(lambda: PUB.prepare(rm_root, rm_cfg, run3, sha3, py, rec_m1))
+    tip_m1, work_m = git_t(remm, "rev-parse", "main").stdout.strip(), os.path.join(TMP, "pub-moving", "work")
+    commit_all(work_m, {"docs/later.txt": "work that landed on main after the first night\n"}, "c3: later work")
+    git_t(remm, "fetch", "-q", work_m, "+main:main")                                                    # the remote's main moves by a commit between two nights
+    tip_m2 = git_t(remm, "rev-parse", "main").stdout.strip()
+    vm2 = refuses(lambda: PUB.prepare(rm_root, rm_cfg, run3, sha3, py, rec_m2))
+    repo_m = os.path.join(rm_root, "publish", "repo")
+    files_m = git_t(repo_m, "diff-tree", "--no-commit-id", "--name-only", "-r", rec_m2.get("commit", "HEAD")).stdout.split()
+    check("publish: a LATER night on the same clone starts from the remote's main AS IT IS THEN: after a first night the remote's main moves by a commit (other work landing on it) and the second night's record "
+          "names the NEW main as `main` and as the commit's parent, the commit holds site/nightly.json alone and the branch points at it",
+          vm1 is None and vm2 is None and tip_m2 != tip_m1 and rec_m1.get("parent") == tip_m1 and rec_m2.get("main") == rec_m2.get("parent") == tip_m2 and files_m == ["site/nightly.json"]
+          and git_t(repo_m, "rev-parse", "nightly-data").stdout.strip() == rec_m2.get("commit") and git_t(repo_m, "log", "--format=%P", "-1", "nightly-data").stdout.split() == [tip_m2], f"{vm1} {vm2} {rec_m2}")
     missing = os.path.join(TMP, "no-such-remote.git")
     empty = os.path.join(TMP, "pub-empty.git")
     git_t(None, "init", "-q", "--bare", "-b", "main", empty)
@@ -2769,8 +2792,9 @@ def group_publish():
         with env(**envv):
             return refuses(lambda: PUB.prepare(r, c, run, sha, py, rc_)), rc_, os.path.join(r, "publish", "repo")
     nocommit = lambda repo_: git_t(repo_, "rev-parse", "--verify", "-q", "nightly-data").returncode != 0
+    wrap = mkremote("wrap", real=False)
     got = {k: attempt(k, *a, **kw) for k, a, kw in (("no-remote", (None,), {}), ("unreachable", (missing,), {}), ("no-main", (empty,), {}), ("sha", (rem,), {"sha": "0" * 64}), ("sha-none", (rem,), {"sha": None}),
-                                                     ("tamper", (mkremote("wrap", real=False),), {"S4A_MODE": "tamper"}), ("stray", (mkremote("wrap2", real=False),), {"S4A_MODE": "stray"}),
+                                                     ("tamper", (wrap,), {"S4A_MODE": "tamper"}), ("checkrefuse", (wrap,), {"S4A_MODE": "checkrefuse"}), ("stray", (mkremote("wrap2", real=False),), {"S4A_MODE": "stray"}),
                                                      ("earlier", (mkremote("tampered", published="tampered"),), {}), ("same", (mkremote("same", published="same"),), {}))}
     leak = mkrun("pubrun-leak", text=syn(3)[0].replace("cc (Fixture) 1.0", "cc (/opt/leak/bin/gcc) 1.0"))
     got["leak"] = attempt("leak", rem, run=leak, sha=sha_of(leak))
@@ -2778,9 +2802,11 @@ def group_publish():
     check("publish: no remote configured is `publish-no-remote`; a remote that cannot be cloned, and one with no main, are `remote-unreachable` with git's own message; none makes a commit",
           is_("no-remote", "publish-no-remote", "code.remote") and is_("unreachable", "remote-unreachable", "clone") and is_("no-main", "remote-unreachable", "main"), str([got[k][0] for k in ("no-remote", "unreachable", "no-main")]))
     check("publish: a run the reducer REFUSES (a compiler line carrying a path: its status 3, the message kept) is `reducer-refused` and no commit is made, and the file is not left published",
-          is_("leak", "reducer-refused", "status 3", "path") and git_t(got["leak"][2], "status", "--porcelain").stdout.strip() == "", str(got["leak"][0]))
+          is_("leak", "reducer-refused", "reducer exited with status 3", "path") and git_t(got["leak"][2], "status", "--porcelain").stdout.strip() == "", str(got["leak"][0]))
     check("publish: a file `--check` does not find to be what the run reduces to (a reducer that writes a figure it does not derive) is `check-differs`, naming the field, and no commit is made",
           is_("tamper", "check-differs", "status 1") and "totals.cycles" in got["tamper"][0], str(got["tamper"][0]))
+    check("publish: a `--check` that REFUSES (its status 3, as the reducer's own run does for private text in a published string) is `reducer-refused`, saying it was the --check and not a difference "
+          "(a difference, above, is `check-differs`); no commit is made", is_("checkrefuse", "reducer-refused", "--check", "status 3", "not a difference"), str(got["checkrefuse"][0]))
     check("publish: a data file whose metrics.jsonl sha256 is not the sums' line (or when the sums have none) is `metrics-sha-differs`, and no commit is made",
           is_("sha", "metrics-sha-differs", "0000000000000000") and is_("sha-none", "metrics-sha-differs", "None"), str([got["sha"][0], got["sha-none"][0]]))
     check("publish: a night the published file already holds that the new file does not have as published (night 1's cycles) is `earlier-night-changed`, naming the night and the field; no commit is made",
@@ -2801,8 +2827,20 @@ def group_publish():
     v3 = refuses(lambda: PUB.prepare(r2, c2, run3, sha3, py, rec3))
     check("publish: the next night starts clean: the clone is brought back to main and cleaned (a stray file an earlier night left is gone), and a commit is made again", v3 is None and rec3.get("parent") == tip
           and not os.path.exists(os.path.join(r2, "publish", "repo", "junk.txt")), f"{v3} {rec3.get('parent')}")
-    cfgs = [verdict(lambda v=v: C.validate_config({**GOOD, "publish": v})) for v in ({"fetch_host": "a b"}, {"fetch_host": 5}, {"colour": 1})]
-    check("publish: config.json's publish.fetch_host is `[user@]host` or null (the default): a host with a space, a number and an unknown key are each `config-form`, naming publish",
+    r_d, c_d = pub_root("pr-damaged", rem)
+    PUB.prepare(r_d, c_d, run3, sha3, py, {})
+    os.unlink(os.path.join(r_d, "publish", "repo", ".git", "HEAD"))                                      # the scheduler's own clone damaged
+    vd = refuses(lambda: PUB.prepare(r_d, c_d, run3, sha3, py, {}))
+    r_s, c_s = pub_root("pr-sound", rem)
+    PUB.prepare(r_s, c_s, run3, sha3, py, {})
+    vs = refuses(lambda: PUB.prepare(r_s, dict(c_s, code=dict(c_s["code"], remote=missing)), run3, sha3, py, {}))      # a sound clone, a remote that is gone
+    check("publish: a fetch that fails because the scheduler's OWN clone is damaged (its HEAD gone) is `publish-failed`, saying the clone is damaged and the remote was not asked; one that fails with a sound "
+          "clone because the remote is gone is `remote-unreachable`, saying the clone is sound", (vd or "").startswith("publish-failed:") and "damaged" in vd and (vs or "").startswith("remote-unreachable:")
+          and "the clone itself is sound" in vs, f"{vd!r} {vs!r}")
+    cfgs = [verdict(lambda v=v: C.validate_config({**GOOD, "publish": v})) for v in ({"fetch_host": "a b"}, {"fetch_host": 5}, {"colour": 1}, {"fetch_host": "-oProxyCommand=x"}, {"fetch_host": "user@-host"},
+                                                                                       {"fetch_host": "a;b"}, {"fetch_host": "a$(b)"}, {"fetch_host": "a\nb"})]
+    check("publish: config.json's publish.fetch_host is `[user@]host` or null (the default): a host with a space, a number, an unknown key, a leading dash (also after the `@`: ssh would read it as an option, "
+          "and the command is printed for a person to run), a `;`, a `$(` and a newline are each `config-form`, naming publish",
           all((c or "").startswith("config-form:") and "publish" in c for c in cfgs) and C.validate_config({**GOOD, "publish": {"fetch_host": "user@box.example"}})["publish"]["fetch_host"] == "user@box.example"
           and C.validate_config(GOOD)["publish"] == {"fetch_host": None}, str(cfgs))
 
@@ -2942,6 +2980,35 @@ def parts_of(log):
     return {r["part"]: r for r in S.read_records(log.path) if r["type"] == "closeout_part"}
 
 
+def closeout_status():
+    """`status` finds the newest ended window job among ALL of jobs/, newest first (the first version looked at the newest 20 jobs only and lost the night behind 20 later ones)."""
+    def make(root, n, kind, parts=()):
+        jid = f"j{n:06d}"
+        os.makedirs(os.path.join(root, "jobs", jid))
+        lg = S.Log(os.path.join(root, "jobs", jid, "job.jsonl"), jid, "u50-0")
+        lg.append("submitted", kind=kind, name=f"{kind}-{n}")
+        for p in parts:
+            lg.append("closeout_part", part=p, status="done", file=None)
+        lg.end("done")
+    root, cfg = mkroot2("co-status")
+    make(root, 1, "window", ("report", "retention"))
+    for n in range(2, 27):
+        make(root, n, "staged")                                                                    # 25 staged jobs after the window night
+    st, rc1, out1 = R.gather_status(root, cfg), *cli(root, "status", runner=None)[:2]
+    make(root, 27, "window", ("summary",))                                                         # a newer window night: it, not the older one
+    for n in range(28, 33):
+        make(root, n, "staged")
+    st_new = R.gather_status(root, cfg)
+    r2, c2 = mkroot2("co-status2")
+    for n in range(1, 4):
+        make(r2, n, "staged")
+    st2, rc2, out2 = R.gather_status(r2, c2), *cli(r2, "status", runner=None)[:2]
+    check("closeout: plain `status` shows the newest ended window job's close-out whatever came after it: with 25 staged jobs after a window night the night is still there, named, with its parts, by the function and by "
+          "the command; a newer window night is the one shown; a root with no window job at all has no such line and no error",
+          (st["last_window"] or {}).get("id") == "j000001" and rc1 == 0 and "window  : j000001 (ended done)" in out1 and "    report: done" in out1 and "    retention: done" in out1
+          and (st_new["last_window"] or {}).get("id") == "j000027" and st2["last_window"] is None and rc2 == 0 and "window  :" not in out2, f"{st['last_window']} {out1[-250:]!r} {st2['last_window']}")
+
+
 def group_closeout():
     clone, remote = mkclone("co-clone"), mkremote("co")
     run = mkrun("co-run")
@@ -2992,8 +3059,9 @@ def group_closeout():
     sums = dict((n, h) for h, _, n in (ln.partition("  ") for ln in open(os.path.join(jd3, "SHA256SUMS")).read().splitlines()))
     mj = os.path.join(run, "metrics.jsonl")
     check("closeout: the ONE SHA256SUMS lists the job's own files, the smoke's files (a directory down, each smoke the job ran) and the run's five files by absolute path, each with the hash of the file as the night ended; "
-          "its metrics.jsonl line is the file's sha256 (the line the data commit is held to)",
-          v3 is None and sums.get(mj) == sha_of(run) == shr.get("metrics_sha256") and all(sums.get(os.path.join(run, n)) == sha_of(run, n) for n in CO.RUN_FILES) and sums.get("job.jsonl") == sha_of(jd3, "job.jsonl")
+          "its metrics.jsonl line is the file's sha256 (the line the data commit is held to); a smoke the job ran that left files unreadable (here 05, with only metrics.jsonl) is `sums-incomplete`, naming them "
+          "and not the complete smoke 02, and the list is still written with every file that could be read",
+          (v3 or "").startswith("sums-incomplete:") and "05-driver-quick/settings.json" in v3 and "02-driver-quick" not in v3 and sums.get(mj) == sha_of(run) == shr.get("metrics_sha256") and all(sums.get(os.path.join(run, n)) == sha_of(run, n) for n in CO.RUN_FILES) and sums.get("job.jsonl") == sha_of(jd3, "job.jsonl")
           and sums.get("sums-extra.json") == sha_of(jd3, "sums-extra.json") and all(sums.get("02-driver-quick/" + n) == sha_of(smoke, n) for n in CO.RUN_FILES) and "05-driver-quick/metrics.jsonl" in sums
           and len(sums) == 2 + 5 + 5 + 1, f"{v3} {len(sums)} {sorted(sums)[:6]}")
     open(mj, "a").write('{"type": "event", "note": "the next night"}\n')
@@ -3002,6 +3070,23 @@ def group_closeout():
     check("closeout: the run's lines hold for the night they were taken (the next night appends to metrics.jsonl and `check_sums` does not call that a difference), a smoke's file that DOES change is one: "
           "driver.log differs",
           len(bad_) == 1 and "02-driver-quick/driver.log differs" in bad_[0], str(bad_))
+    root5, cfg5 = mkroot2("co-damaged")
+    ends5, d5s = {}, {}
+    for jid5, damage in (("j000001", True), ("j000002", False)):
+        d5 = d5s[jid5] = os.path.join(root5, "jobs", jid5)
+        os.makedirs(d5)
+        lg5 = S.Log(os.path.join(d5, "job.jsonl"), jid5, "u50-0")
+        lg5.append("submitted", kind="window", name="n")
+        CO.do_sums(mkrun("co-run-" + jid5), d5, {}, {})
+        if damage:
+            open(os.path.join(d5, S.EXTRA), "w").write("{ this is not json")                          # the list damaged between the close-out and the seal
+        S.seal(d5, lg5, "done")
+        ends5[jid5] = S.read_records(lg5.path)[-1]
+    shown5 = "\n".join(WD.format_window(WD.window_info(root5, "jobs", "j000001", cfg5))) + cli(root5, "status", "j000001", runner=None)[1]
+    check("closeout: a damaged sums-extra.json, which would drop the run's and the smoke's lines from the SHA256SUMS, is NOT silent: the end record says `sums_problem`, `check_sums` reports it, and `status JOB` shows "
+          "SUMS PROBLEM; a sound list leaves all three quiet (no sums_problem, check_sums empty, no such line)",
+          "sums-extra.json cannot be read" in ends5["j000001"].get("sums_problem", "") and any("sums-extra.json cannot be read" in b for b in S.check_sums(d5s["j000001"])) and "SUMS PROBLEM" in shown5
+          and "sums_problem" not in ends5["j000002"] and S.check_sums(d5s["j000002"]) == [] and "SUMS PROBLEM" not in "\n".join(WD.format_window(WD.window_info(root5, "jobs", "j000002", cfg5))), f"{ends5} {shown5[-200:]}")
     jd4 = os.path.join(TMP, "co-job4")
     os.makedirs(jd4)
     partial = mkrun("co-partial", files=("driver.log", "status.txt", "report.txt"))
@@ -3066,6 +3151,7 @@ def group_closeout():
     check("closeout: a job that never started the driver has no night to close out: report, summary, sums and publish are each `skipped` saying so (no file made, no clone), and the retention still runs",
           [resn["parts"][p] for p in ("report", "summary", "sums", "publish")] == ["skipped"] * 4 and "no driver was started" in parts_of(ln_)["report"]["why"] and resn["parts"]["retention"] == "done"
           and sorted(os.listdir(jdn)) == ["job.jsonl"] and not os.path.exists(os.path.join(rn_, "publish", "repo")), str(resn))
+    closeout_status()
     if window_posix("the close-out of a window job"):
         closeout_jobs(remote)
 
@@ -3433,9 +3519,10 @@ PLANTS = [  # (what is wrong, edits, the groups written for it, a fragment of th
      "window,table", "the table: every refusal the table gives to S3 but S3b's", None),
     ("S4a: a commit that touches a second file", [E("sched_publish.py", "    if rc != 0 or paths != [DATA]:", "    if False:"), E("sched_publish.py", '("add", ("add", "--", DATA))', '("add", ("add", "-A"))')],
      "publish", "publish: a tool that leaves a second file in the clone", False),
-    ("S4a: the reducer's refusal is ignored", [E("sched_publish.py", '    if rc != 0:\n        raise Refusal("reducer-refused"', '    if False:\n        raise Refusal("reducer-refused"')],
+    ("S4a: the reducer's refusal is ignored", [E("sched_publish.py", '    if rc != 0:\n        raise Refusal("reducer-refused", f"main\'s reducer exited', '    if False:\n        raise Refusal("reducer-refused", f"main\'s reducer exited')],
      "publish", "publish: a run the reducer REFUSES", False),
-    ("S4a: --check's difference is ignored", [E("sched_publish.py", '    if rc != 0:\n        raise Refusal("check-differs"', '    if False:\n        raise Refusal("check-differs"')],
+    ("S4a: --check's difference is ignored", [E("sched_publish.py", '    if rc == 1:  ', '    if False:  '),
+                                              E("sched_publish.py", '    if rc != 0:\n        raise Refusal("reducer-refused", f"main\'s reducer REFUSED its --check', '    if rc not in (0, 1):\n        raise Refusal("reducer-refused", f"main\'s reducer REFUSED its --check')],
      "publish", "publish: a file `--check` does not find to be what the run reduces to", False),
     ("S4a: the metrics sha is not compared", [E("sched_publish.py", '    if not isinstance(new, dict) or new.get("source", {}).get("metrics_sha256") != metrics_sha256:', "    if not isinstance(new, dict):")],
      "publish", "publish: a data file whose metrics.jsonl sha256", False),
@@ -3469,6 +3556,24 @@ PLANTS = [  # (what is wrong, edits, the groups written for it, a fragment of th
     ("S4a: a fallback night is closed out by the clone it was asked for, not the one that ran it", [E("sched_closeout.py", 'python, clone = cfg["runner"]["python"], S.ctx.clone if S.ctx else None',
                                                                                                     'python, clone = cfg["runner"]["python"], os.path.join(root, "clones", spec["code"]["commit"]) if "code" in spec else S.ctx.clone if S.ctx else None')],
      "closeout", "closeout: a night that FELL BACK", "posix"),
+    ("S4a: a later night does not fetch the remote's main", [E("sched_publish.py", '    rc, _, err = git(repo, "fetch", "-q", "--no-tags", "--", remote, f"+refs/heads/main:{REF}", timeout=1800)',
+                                                              '    rc, _, err = git(repo, "fetch", "-q", "--no-tags", "--", remote, f"+refs/heads/main:{REF}", timeout=1800) if git(repo, "rev-parse", "--verify", "-q", REF)[0] != 0 else (0, "", "")')],
+     "publish", "publish: a LATER night on the same clone", False),
+    ("S4a: status looks at the newest 20 jobs only for the last window night", [E("sched_run.py", 'for j in reversed(_ids(root, "jobs")) if _kind(root, j) == "window"', 'for j in reversed(_ids(root, "jobs")[-20:]) if _kind(root, j) == "window"')],
+     "closeout", "closeout: plain `status` shows the newest ended window job's close-out", False),
+    ("S4a: a smoke file that cannot be read is dropped without a word", [E("sched_closeout.py", "    if missing or lost:", "    if missing:")],
+     "closeout", "closeout: the ONE SHA256SUMS lists the job's own files", False),
+    ("S4a: a damaged sums-extra.json is dropped without a word", [E("sched_state.py", '    if extra_problem(d):\n        fields["sums_problem"] = extra_problem(d)\n', ""),
+                                                                  E("sched_state.py", "    return bad + ([extra_problem(d)] if extra_problem(d) else [])", "    return bad")],
+     "closeout", "closeout: a damaged sums-extra.json", False),
+    ("S4a: a git verb is left off the refused list", [E("sched_publish.py", 'NEVER = ("push", "send-pack", "receive-pack", "remote", "config", "credential")', 'NEVER = ("push", "send-pack", "receive-pack", "config", "credential")')],
+     "publish", "publish: NOTHING IS PUSHED", False),
+    ("S4a: a damaged clone is named as the remote's fault", [E("sched_publish.py", '        if git(repo, "rev-parse", "--git-dir")[0] != 0:', "        if False:")],
+     "publish", "publish: a fetch that fails because the scheduler's OWN clone is damaged", False),
+    ("S4a: --check's refusal is named a difference", [E("sched_publish.py", "    if rc == 1:  ", "    if rc != 0:  ")],
+     "publish", "publish: a `--check` that REFUSES", False),
+    ("S4a: a fetch_host with a leading dash is accepted", [E("sched_config.py", 'HOST = re.compile(r"(?:[A-Za-z0-9_][A-Za-z0-9._-]{0,63}@)?[A-Za-z0-9][A-Za-z0-9._:-]{0,254}\\Z")', 'HOST = re.compile(r"(?:[A-Za-z0-9._-]{1,64}@)?[A-Za-z0-9._:-]{1,255}\\Z")')],
+     "publish", "publish: config.json's publish.fetch_host", False),
     ("S4a: a refusal the table gives to S4a that nothing raises", [E("sched_names.py", '    "report-failed": ("S4a",', '    "never-raised-s4a": ("S4a", "closeout", "x"), "report-failed": ("S4a",')],
      "closeout,publish,table", "the table: every refusal the table gives to S4a", None),
 ]

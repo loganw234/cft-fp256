@@ -37,7 +37,7 @@ PLATFORM = re.compile(r"[A-Za-z0-9_.-]{1,100}\Z")
 CLOCK = re.compile(r"(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?\Z")
 DATE = re.compile(r"\d{4}-\d{2}-\d{2}\Z")
 ZONE = re.compile(r"[A-Za-z0-9_+./-]{1,64}\Z")
-HOST = re.compile(r"(?:[A-Za-z0-9._-]{1,64}@)?[A-Za-z0-9._:-]{1,255}\Z")
+HOST = re.compile(r"(?:[A-Za-z0-9_][A-Za-z0-9._-]{0,63}@)?[A-Za-z0-9][A-Za-z0-9._:-]{0,254}\Z")           # never a leading dash (ssh would read it as an option), no space, no shell metacharacter
 
 DEFAULTS = {
     "cards": None,                       # required
@@ -217,7 +217,7 @@ def validate_config(raw) -> dict:
         _keys(raw["publish"], "publish", (), tuple(DEFAULTS["publish"]))
         fh = raw["publish"].get("fetch_host")
         if fh is not None and not (isinstance(fh, str) and HOST.match(fh)):
-            raise _form("publish.fetch_host", "must be [user@]host (letters, digits and . _ - : only), or null")
+            raise _form("publish.fetch_host", "must be [user@]host (letters, digits and . _ - : only, starting with a letter or digit: the command is printed for a person to run, and ssh reads a leading dash as an option), or null")
         cfg["publish"].update(raw["publish"])
     if "runner" in raw:
         _keys(raw["runner"], "runner", (), tuple(DEFAULTS["runner"]))
