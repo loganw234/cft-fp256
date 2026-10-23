@@ -1,6 +1,6 @@
 {
  "schema": 1,
- "made": {"by": "hw/card_stress_progress.py", "report_version": 1, "commit": "0678d738023c553d778ddff865c371f7805d59f7"},
+ "made": {"by": "hw/card_stress_progress.py", "report_version": 1, "commit": "0a0f22b06b1a0bbc760e6da7b9eb2c4a92ccc92d"},
  "source": {"run_ids": ["card-stress-1019"], "records": 1910, "metrics_sha256": "de4ee37900917762e4ba071d434eb28204f92fed6c5056e88a70ccce6516e986", "metrics_bytes": 4029900, "partial_tail": false},
  "newest": {"night": 3, "date": "2026-10-21", "start": "2026-10-21 18:27:23", "end": "2026-10-22 07:47:09", "end_epoch": 1792680429.411, "closed": true},
  "rules": {
@@ -57,8 +57,8 @@
    "dry_run": false,
    "tree": {"commit": "0b7c95996c12", "dirty": false, "rtl": "44b963dd6ba2", "rtl_dirty": false, "host_src": "4d9905f82759", "host_src_dirty": false, "cc": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0"},
    "images": [{"name": "quad", "tiles": 4, "sha256": "4f9921a25af6"}, {"name": "single", "tiles": 1, "sha256": "0639248e9c66"}, {"name": "deep", "tiles": 1, "sha256": "bbf08fb3feb6"}],
-   "classes": {"tile": "t2", "host": "h2"},
-   "after": {"card_s": 88086.251, "slices": 552, "cases": 2319752101902, "classes": {"t1": {"covered": 18167627776, "complete": 4}, "h1": {"covered": 60129542144, "complete": 14}, "t2": {"covered": 2361393152, "complete": 0}, "h2": {"covered": 0, "complete": 0}}}
+   "classes": {"tile": "t1", "host": "h2"},
+   "after": {"card_s": 88086.251, "slices": 552, "cases": 2319752101902, "classes": {"t1": {"covered": 20529020928, "complete": 4}, "h1": {"covered": 60129542144, "complete": 14}, "h2": {"covered": 0, "complete": 0}}}
   },
   {
    "n": 3,
@@ -82,8 +82,8 @@
    "dry_run": false,
    "tree": {"commit": "0b7c95996c12", "dirty": false, "rtl": "44b963dd6ba2", "rtl_dirty": false, "host_src": "4d9905f82759", "host_src_dirty": false, "cc": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0"},
    "images": [{"name": "quad", "tiles": 4, "sha256": "4f9921a25af6"}, {"name": "single", "tiles": 1, "sha256": "0639248e9c66"}, {"name": "deep", "tiles": 1, "sha256": "bbf08fb3feb6"}],
-   "classes": {"tile": "t2", "host": "h2"},
-   "after": {"card_s": 136035.872, "slices": 756, "cases": 3906406973454, "classes": {"t1": {"covered": 18167627776, "complete": 4}, "h1": {"covered": 60129542144, "complete": 14}, "t2": {"covered": 5154799616, "complete": 0}, "h2": {"covered": 0, "complete": 0}}}
+   "classes": {"tile": "t1", "host": "h2"},
+   "after": {"card_s": 136035.872, "slices": 756, "cases": 3906406973454, "classes": {"t1": {"covered": 23322427392, "complete": 4}, "h1": {"covered": 60129542144, "complete": 14}, "h2": {"covered": 0, "complete": 0}}}
   }
  ],
  "now": {
@@ -96,28 +96,29 @@
    {
     "id": "t1",
     "kind": "tile",
-    "key": "unrecorded:881bbcb676bbede9da20858325b7a966c56a25bf",
-    "label": "commit 881bbcb, tree not recorded in the run",
-    "current": false,
+    "key": "44b963dd6ba2fcf99e002c5face5ca94aad4515c",
+    "label": "RTL tree 44b963dd6ba2 (read from git at commit 881bbcb676bb)",
+    "current": true,
     "served": true,
-    "nights": [1],
-    "total": {"items": 8, "complete": 4, "covered": 18167627776, "space": 34359738368, "pct": 52.874755859375},
+    "nights": [1, 2, 3],
+    "total": {"items": 8, "complete": 4, "covered": 23322427392, "space": 34359738368, "pct": 67.877197265625},
     "items": [
      {"item": "scaleb32-all-rdn", "space": 4294967296, "covered": 4294967296, "pct": 100.0, "slices": 18, "cases": 73014444032, "complete": true, "level": "exhaustive", "in_campaign": true, "complete_night": 1, "first_gap": null, "estimate": null, "estimate_note": null},
      {"item": "scaleb32-all-rne", "space": 4294967296, "covered": 4294967296, "pct": 100.0, "slices": 18, "cases": 73014444032, "complete": true, "level": "exhaustive", "in_campaign": true, "complete_night": 1, "first_gap": null, "estimate": null, "estimate_note": null},
      {"item": "scaleb32-all-rtz", "space": 4294967296, "covered": 4294967296, "pct": 100.0, "slices": 18, "cases": 73014444032, "complete": true, "level": "exhaustive", "in_campaign": true, "complete_night": 1, "first_gap": null, "estimate": null, "estimate_note": null},
      {"item": "scaleb32-all-rup", "space": 4294967296, "covered": 4294967296, "pct": 100.0, "slices": 18, "cases": 73014444032, "complete": true, "level": "exhaustive", "in_campaign": true, "complete_night": 1, "first_gap": null, "estimate": null, "estimate_note": null},
-     {"item": "scaleb32-wide-rdn", "space": 4294967296, "covered": 240123904, "pct": 5.5908203125, "slices": 18, "cases": 136390377472, "complete": false, "level": "exhaustive", "in_campaign": true, "complete_night": null, "first_gap": [240123904, 4294967296], "estimate": null, "estimate_note": null},
-     {"item": "scaleb32-wide-rne", "space": 4294967296, "covered": 239075328, "pct": 5.56640625, "slices": 19, "cases": 135794786304, "complete": false, "level": "exhaustive", "in_campaign": true, "complete_night": null, "first_gap": [239075328, 4294967296], "estimate": null, "estimate_note": null},
-     {"item": "scaleb32-wide-rtz", "space": 4294967296, "covered": 261095424, "pct": 6.0791015625, "slices": 19, "cases": 148302200832, "complete": false, "level": "exhaustive", "in_campaign": true, "complete_night": null, "first_gap": [261095424, 4294967296], "estimate": null, "estimate_note": null},
-     {"item": "scaleb32-wide-rup", "space": 4294967296, "covered": 247463936, "pct": 5.76171875, "slices": 18, "cases": 140559515648, "complete": false, "level": "exhaustive", "in_campaign": true, "complete_night": null, "first_gap": [247463936, 4294967296], "estimate": null, "estimate_note": null}
-    ]
+     {"item": "scaleb32-wide-rdn", "space": 4294967296, "covered": 1537212416, "pct": 35.791015625, "slices": 113, "cases": 873136652288, "complete": false, "level": "exhaustive", "in_campaign": true, "complete_night": null, "first_gap": [1537212416, 4294967296], "estimate": {"window_nights": 3, "per_night": 512404138, "nights_left": 6, "date": "2026-10-27"}, "estimate_note": null},
+     {"item": "scaleb32-wide-rne", "space": 4294967296, "covered": 1519386624, "pct": 35.3759765625, "slices": 113, "cases": 863011602432, "complete": false, "level": "exhaustive", "in_campaign": true, "complete_night": null, "first_gap": [1519386624, 4294967296], "estimate": {"window_nights": 3, "per_night": 506462208, "nights_left": 6, "date": "2026-10-27"}, "estimate_note": null},
+     {"item": "scaleb32-wide-rtz", "space": 4294967296, "covered": 1541406720, "pct": 35.888671875, "slices": 113, "cases": 875519016960, "complete": false, "level": "exhaustive", "in_campaign": true, "complete_night": null, "first_gap": [1541406720, 4294967296], "estimate": {"window_nights": 3, "per_night": 513802240, "nights_left": 6, "date": "2026-10-27"}, "estimate_note": null},
+     {"item": "scaleb32-wide-rup", "space": 4294967296, "covered": 1544552448, "pct": 35.9619140625, "slices": 113, "cases": 877305790464, "complete": false, "level": "exhaustive", "in_campaign": true, "complete_night": null, "first_gap": [1544552448, 4294967296], "estimate": {"window_nights": 3, "per_night": 514850816, "nights_left": 6, "date": "2026-10-27"}, "estimate_note": null}
+    ],
+    "derived_from_git": [{"commit": "881bbcb676bb", "dir": "rtl", "tree": "44b963dd6ba2"}]
    },
    {
     "id": "h1",
     "kind": "host",
-    "key": "unrecorded:881bbcb676bbede9da20858325b7a966c56a25bf",
-    "label": "commit 881bbcb, tree not recorded in the run",
+    "key": "276ed15a301962a03730b53bccbcebce783ab327|compiler not recorded",
+    "label": "host/ tree 276ed15a3019 (read from git at commit 881bbcb676bb), compiler not recorded",
     "current": false,
     "served": true,
     "nights": [1],
@@ -137,27 +138,8 @@
      {"item": "cvtto32-all-rne", "space": 4294967296, "covered": 4294967296, "pct": 100.0, "slices": 17, "cases": 10888413188, "complete": true, "level": "exhaustive", "in_campaign": true, "complete_night": 1, "first_gap": null, "estimate": null, "estimate_note": null},
      {"item": "cvtto32-all-rtz", "space": 4294967296, "covered": 4294967296, "pct": 100.0, "slices": 17, "cases": 10905190402, "complete": true, "level": "exhaustive", "in_campaign": true, "complete_night": 1, "first_gap": null, "estimate": null, "estimate_note": null},
      {"item": "cvtto32-all-rup", "space": 4294967296, "covered": 4294967296, "pct": 100.0, "slices": 16, "cases": 10905190402, "complete": true, "level": "exhaustive", "in_campaign": true, "complete_night": 1, "first_gap": null, "estimate": null, "estimate_note": null}
-    ]
-   },
-   {
-    "id": "t2",
-    "kind": "tile",
-    "key": "44b963dd6ba2fcf99e002c5face5ca94aad4515c",
-    "label": "RTL tree 44b963dd6ba2",
-    "current": true,
-    "served": true,
-    "nights": [2, 3],
-    "total": {"items": 8, "complete": 0, "covered": 5154799616, "space": 34359738368, "pct": 15.00244140625},
-    "items": [
-     {"item": "scaleb32-all-rdn", "space": 4294967296, "covered": 0, "pct": 0.0, "slices": 0, "cases": 0, "complete": false, "level": "exhaustive", "in_campaign": true, "complete_night": null, "first_gap": [0, 4294967296], "estimate": null, "estimate_note": "no gain in the last 2 night(s) of this class"},
-     {"item": "scaleb32-all-rne", "space": 4294967296, "covered": 0, "pct": 0.0, "slices": 0, "cases": 0, "complete": false, "level": "exhaustive", "in_campaign": true, "complete_night": null, "first_gap": [0, 4294967296], "estimate": null, "estimate_note": "no gain in the last 2 night(s) of this class"},
-     {"item": "scaleb32-all-rtz", "space": 4294967296, "covered": 0, "pct": 0.0, "slices": 0, "cases": 0, "complete": false, "level": "exhaustive", "in_campaign": true, "complete_night": null, "first_gap": [0, 4294967296], "estimate": null, "estimate_note": "no gain in the last 2 night(s) of this class"},
-     {"item": "scaleb32-all-rup", "space": 4294967296, "covered": 0, "pct": 0.0, "slices": 0, "cases": 0, "complete": false, "level": "exhaustive", "in_campaign": true, "complete_night": null, "first_gap": [0, 4294967296], "estimate": null, "estimate_note": "no gain in the last 2 night(s) of this class"},
-     {"item": "scaleb32-wide-rdn", "space": 4294967296, "covered": 1297088512, "pct": 30.2001953125, "slices": 95, "cases": 736746274816, "complete": false, "level": "exhaustive", "in_campaign": true, "complete_night": null, "first_gap": [0, 240123904], "estimate": {"window_nights": 2, "per_night": 648544256, "nights_left": 5, "date": "2026-10-26"}, "estimate_note": null},
-     {"item": "scaleb32-wide-rne", "space": 4294967296, "covered": 1280311296, "pct": 29.8095703125, "slices": 94, "cases": 727216816128, "complete": false, "level": "exhaustive", "in_campaign": true, "complete_night": null, "first_gap": [0, 239075328], "estimate": {"window_nights": 2, "per_night": 640155648, "nights_left": 5, "date": "2026-10-26"}, "estimate_note": null},
-     {"item": "scaleb32-wide-rtz", "space": 4294967296, "covered": 1280311296, "pct": 29.8095703125, "slices": 94, "cases": 727216816128, "complete": false, "level": "exhaustive", "in_campaign": true, "complete_night": null, "first_gap": [0, 261095424], "estimate": {"window_nights": 2, "per_night": 640155648, "nights_left": 5, "date": "2026-10-26"}, "estimate_note": null},
-     {"item": "scaleb32-wide-rup", "space": 4294967296, "covered": 1297088512, "pct": 30.2001953125, "slices": 95, "cases": 736746274816, "complete": false, "level": "exhaustive", "in_campaign": true, "complete_night": null, "first_gap": [0, 247463936], "estimate": {"window_nights": 2, "per_night": 648544256, "nights_left": 5, "date": "2026-10-26"}, "estimate_note": null}
-    ]
+    ],
+    "derived_from_git": [{"commit": "881bbcb676bb", "dir": "host", "tree": "276ed15a3019"}]
    },
    {
     "id": "h2",

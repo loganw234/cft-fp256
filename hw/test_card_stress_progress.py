@@ -550,6 +550,20 @@ def group_fixture():
     finally:
         R.tree_class = real_tc
     check(raised, "plant: a report whose tree_class raises fails the reduction, and nothing falls back to another label")
+
+    def rev_stopped(commit, rel):                      # a rev whose git stopped with a message that names a directory: the report puts it in the label of a class kept apart
+        return None
+    rev_stopped.problem = "fatal: not a git repository: '/srv/elsewhere/checkout'"
+    with_rev(rev_stopped)
+    try:
+        try:
+            reduce_dir(d)
+            why = None
+        except P.Failed as e:
+            why = str(e)
+    finally:
+        record_only(True)
+    check(why is not None and "path" in why, "plant: a git problem that carries a path, in a class's label, is refused by name and not published", why)
     one = [N1 | {"tree": dict(TREE_B, commit="a1" * 20, host_src="e6" * 20)}, N2, N3]       # one RTL tree on every night, the host tree changing at night 2
     r1 = build(one)
     d1 = write_run(r1, "one-rtl")
