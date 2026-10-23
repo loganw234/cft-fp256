@@ -2337,6 +2337,41 @@ def window_long():
     wt.finish()
     check("window long: a STOP file the scheduler did not make (a person's, there before the cancel) is left alone: the driver is asked by it, the record says `made` false, and it is still there when the watch ends",
           wt.sent == "cancel" and wt.made is None and os.path.exists(os.path.join(dp, "STOP")) and [r.get("made") for r in mem.of("scheduler_stop")] == [False] and not mem.of("scheduler_stop_removed"), str(mem.recs))
+    class Late:                                      # a stub Stop: a cancel is asked only once the flag is set
+        flag = False
+
+        def requested(self):
+            return self.flag
+    late, dl, mem2 = Late(), os.path.join(TMP, "wl-late"), MemLog()
+    os.makedirs(dl)
+    mem2.job = "j000010"
+    wl = WD.Watch(dl, late, mem2, time.time() - 5, 0.1, 0.05)           # the window closed 5 s ago and the grace is 0.1 s: the scheduler asks the driver to stop at once
+    wl.start(os.getpid())
+    wait_for(lambda: wl.sent == "window", 10)
+    late.flag = True                                                    # and now a cancel comes
+    wait_for(lambda: wl.cancel_late is not None, 10)
+    wl.finish()
+    check("window long: a cancel that arrives AFTER the scheduler has asked the driver to stop (the state an overrun creates) reaches the watch: one `cancel_after_stop` record with the pid, the first ask stands "
+          "(`sent` stays `window`, one scheduler_stop), and the STOP file the scheduler made is still removed at the end",
+          wl.sent == "window" and [r.get("pid") for r in mem2.of("cancel_after_stop")] == [os.getpid()] and len(mem2.of("scheduler_stop")) == 1 and bool(mem2.of("scheduler_stop_removed"))
+          and not os.path.exists(os.path.join(dl, "STOP")), str(mem2.recs))
+    rcx = mkroot2("wl-cancel")[0]
+
+    def running_job(jid, *records):
+        os.makedirs(os.path.join(rcx, "running", jid))
+        lg_ = S.Log(os.path.join(rcx, "running", jid, "job.jsonl"), jid, "u50-0")
+        lg_.append("submitted", kind="window", name="n")
+        for typ, kw in records:
+            lg_.append(typ, **kw)
+    running_job("j000001", ("driver_started", {"pid": 4242}))
+    running_job("j000002", ("driver_started", {"pid": 4242}), ("scheduler_stop", {"why": "window", "made": True}))
+    running_job("j000003", ("driver_started", {"pid": 4243}), ("driver_overrun", {"pid": 4243}))
+    running_job("j000004", ("driver_started", {"pid": 4244}), ("driver_overrun", {"pid": 4244}))
+    answers = [safely(S.cancel, rcx, j, "tester") for j in ("j000001", "j000002", "j000003")]
+    rc4, out4, _ = cli(rcx, "cancel", "j000004", runner=None)
+    check("window long: a cancel of a job whose driver the scheduler has already asked to stop (`scheduler_stop`) or that overruns (`driver_overrun`) is answered `stop-already-requested`, and one of a job whose driver "
+          "was not asked is `stop-requested`; the command names the driver's pid and says the scheduler sends it no signal", answers == ["stop-requested", "stop-already-requested", "stop-already-requested"]
+          and rc4 == 0 and "a stop was already requested" in out4 and "pid 4244" in out4 and "no signal" in out4, f"{answers} {rc4} {out4!r}")
     rh, _ch = mkroot2("wl-hist")
     for k, cyc in ((1, 0), (2, 3)):
         jid = f"j{k:06d}"
@@ -2503,12 +2538,12 @@ def window_end():
     ro, co = mkrootw("we-over")
     out_o = os.path.join(TMP, "wout-over")
     raw = json.load(open(os.path.join(ro, "config.json")))
-    raw["windows"]["list"] = [clock_window("w", -2, 5)]                     # closes in about 3 s, the grace is 1 s
+    raw["windows"]["list"] = [clock_window("w", -2, 5), clock_window("w2", -1, 600)]           # w closes in about 3 s (the grace is 1 s); w2, the next job's window, is OPEN throughout
     json.dump(raw, open(os.path.join(ro, "config.json"), "w"))
     co = C.load_config(ro)
     runner = WD.WindowRunner(ro, co)
     ja = S.submit(ro, co, json.dumps(wspec(w["w1"], out_o, resume=False, preflight=pre)).encode(), runner.registry)[0]
-    jb = S.submit(ro, co, json.dumps(wspec(w["w1"], out_o, preflight=pre)).encode(), runner.registry)[0]      # the next window's job, queued behind the first
+    jb = S.submit(ro, co, json.dumps(wspec(w["w1"], out_o, preflight=pre, when={"window": "w2"})).encode(), runner.registry)[0]      # the next job, whose window is open all the while
     old_extra = WD.HARD_EXTRA_S
     WD.HARD_EXTRA_S = 2                                                    # the old limit, shortened: the end + the grace + 2 s
     try:
@@ -2518,23 +2553,33 @@ def window_end():
             wait_for(lambda: not th.is_alive() or any(r["type"] == "driver_overrun" for r in recs(ro, "running", ja)), 40)
             mid = [r for r in recs(ro, "running", ja) if r["type"] == "driver_overrun"]
             b_mid = [r["type"] for r in recs(ro, "queue", jb)] if os.path.isdir(os.path.join(ro, "queue", jb)) else None
+            w2_open = (CAL.state(co, "w2", time.time()) or {}).get("state")
             st_mid = cli(ro, "status", runner=None)[1]
-            th.join(60)
+            os.environ["FAKE_LONG"] = "end"                                # the next job's driver (not started yet) does its cycle and ends
+            how = safely(S.cancel, ro, ja, "tester")                       # a cancel AFTER the scheduler's own stop, while the driver overruns
+            th.join(90)
+            wait_for(lambda: threading.active_count() <= 1, 40)
     finally:
         WD.HARD_EXTRA_S = old_extra
-    rs = recs(ro, "jobs", ja)
+    rs, rsb = recs(ro, "jobs", ja), recs(ro, "jobs", jb)
     ov = [r for r in rs if r["type"] == "driver_overrun"]
     lg = next((x for x in legs_of(rs) if x["leg"] == "driver-long"), {})
-    endr = rec(ro, "jobs", ja)
+    endr, endb = rec(ro, "jobs", ja), rec(ro, "jobs", jb)
+    claimed_b = next((r for r in rsb if r["type"] == "claimed"), {})
     check("window end: a driver that runs on past the old limit (the end + the grace + the extra, shortened to 2 s here) is NAMED once, `driver_overrun`, with the time past the end and its pid, and is NEVER signalled "
           "(the driver's own note of the signals it got does not exist; the leg is not timed out or killed); the job ends only when the driver does, and its end record carries the overrun",
           len(ov) == 1 and ov[0]["pid"] == first(rs, "driver_started").get("pid") and ov[0]["past_end_s"] >= 3 and not os.path.exists(os.path.join(out_o, "signals.txt")) and lg.get("status") == "pass"
-          and not lg.get("timed_out") and lg.get("killed") is None and lg.get("end_epoch", 0) - ov[0]["t"] >= 2.5 and endr.get("outcome") == "done" and (endr.get("overrun") or {}).get("pid") == ov[0]["pid"],
+          and not lg.get("timed_out") and lg.get("killed") is None and lg.get("end_epoch", 0) - ov[0]["t"] >= 2.5 and (endr.get("overrun") or {}).get("pid") == ov[0]["pid"],
           f"{len(ov)} {ov[:1]} {lg.get('status')} {lg.get('killed')} {endr.get('outcome')} {sorted(os.listdir(out_o))}")
-    check("window end: while the driver overruns `status` names it (still running, how far past the end, its pid), and the NEXT window's job waits behind it: neither claimed nor refused (its record is its submit alone, "
-          "then and after the first job ends, its window being closed by then: it waits for the next occurrence)",
-          len(mid) == 1 and "DRIVER OVERRUN: still running" in st_mid and str(mid[0]["pid"]) in st_mid and b_mid == ["submitted"] and [r["type"] for r in recs(ro, "queue", jb)] == ["submitted"]
-          and not os.path.isdir(os.path.join(ro, "jobs", jb)), f"{len(mid)} {b_mid} {st_mid[-300:]!r} {[r['type'] for r in recs(ro, 'queue', jb)]}")
+    check("window end: while the driver overruns `status` names it (still running, how far past the end, its pid), and the NEXT job, whose window is OPEN all the while (so the calendar does not hold it), is not claimed: "
+          "it waits in the queue with its submit alone, and is claimed only after the first job has ended, then runs and is done",
+          len(mid) == 1 and "DRIVER OVERRUN: still running" in st_mid and str(mid[0]["pid"]) in st_mid and w2_open == "open" and b_mid == ["submitted"]
+          and claimed_b.get("t", 0) >= endr.get("t", 1e18) and endb.get("outcome") == "done", f"{len(mid)} open {w2_open} queued {b_mid} claimed {claimed_b.get('t')} after {endr.get('t')} {endb.get('outcome')} {st_mid[-250:]!r}")
+    check("window end: a cancel AFTER the scheduler's own stop, while the driver overruns, is answered `stop-already-requested` (not `stop-requested`), reaches the watch (one `cancel_after_stop` record with the pid, "
+          "in the job and its end record), the first ask stands, and the job ends `cancelled` when the driver does, with the scheduler's STOP file removed and still no signal sent",
+          how == "stop-already-requested" and [r.get("pid") for r in rs if r["type"] == "cancel_after_stop"] == [ov[0]["pid"]] and (endr.get("cancel_after_stop") or {}).get("pid") == ov[0]["pid"]
+          and endr.get("outcome") == "cancelled" and (lg.get("extra") or {}).get("scheduler_stop") == "window" and not os.path.exists(os.path.join(out_o, "STOP"))
+          and not os.path.exists(os.path.join(out_o, "signals.txt")), f"{how} {[r['type'] for r in rs if r['type'] in ('cancel_after_stop', 'scheduler_stop')]} {endr.get('outcome')}")
 
 
 # ---------------------------------------------------------------------------------------- plants
@@ -2822,6 +2867,14 @@ PLANTS = [  # (what is wrong, edits, the groups written for it, a fragment of th
     ("S3a: the run's own start does not look at the window's state", [E("sched_window.py", "        if ws[\"state\"] != \"open\":\n            raise Refusal(\"window-closed\", f\"window {ws['name']!r} is not open when the job starts",
                                                                       "        if False:\n            raise Refusal(\"window-closed\", f\"window {ws['name']!r} is not open when the job starts")],
      "window:long", "window long: the run's own start refuses what the claim let by", False),
+    ("S3a: a second job is claimed while the first holds the card", [E("sched_run.py", 'out(f"serve: {jid} ended: {run_claimed(root, jid, spec, log, runner)}")',
+                                                                       'second = claim_next(root, cfg, cid, time.time(), runner.registry)\n                        out(f"serve: {jid} ended: {run_claimed(root, jid, spec, log, runner)}")\n'
+                                                                       '                        if second:\n                            run_claimed(root, second[0], second[1], second[2], runner)')],
+     "window:end", "window end: while the driver overruns `status` names it", "posix"),
+    ("S3a: a cancel after the scheduler's own stop never reaches the watch", [E("sched_window.py", '            elif self.sent == "window" and self.cancel_late is None and self.stop.requested():', "            elif False:")],
+     "window:long", "window long: a cancel that arrives AFTER the scheduler has asked the driver to stop", False),
+    ("S3a: a cancel is answered stop-requested while the driver's stop is already asked", [E("sched_state.py", '            return "stop-already-requested" if stop_asked(r) else "stop-requested"', '            return "stop-requested"')],
+     "window:long", "window long: a cancel of a job whose driver the scheduler has already asked to stop", False),
     ("S3a: a refusal the table gives to S3 that nothing raises", [E("sched_names.py", '    "no-fallback": ("S3", "job",', '    "never-raised-s3": ("S3", "job", "x"), "no-fallback": ("S3", "job",')],
      "window,table", "the table: every refusal the table gives to S3 but S3b's", None),
 ]

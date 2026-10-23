@@ -104,7 +104,7 @@ class Watch:
 
     def __init__(self, out, stop, log, closes, grace, poll, overrun_at=None):
         self.path, self.stop, self.log, self.closes, self.grace, self.poll = os.path.join(out, "STOP"), stop, log, closes, grace, poll
-        self.sent = self.made = self.pid = self.th = self.overrun = None
+        self.sent = self.made = self.pid = self.th = self.overrun = self.cancel_late = None
         self.overrun_at = overrun_at                   # an epoch: the driver still running then is an overrun, named once and never signalled
         self.done = threading.Event()
 
@@ -131,6 +131,8 @@ class Watch:
                 why = "cancel" if self.stop.requested() else "window" if time.time() >= self.closes + self.grace else None
                 if why:
                     self._ask(why)
+            elif self.sent == "window" and self.cancel_late is None and self.stop.requested():
+                self._note_late_cancel()                   # a cancel after the scheduler's own stop: the state an overrun creates
             if self.overrun is None and self.overrun_at is not None and time.time() >= self.overrun_at and self._alive():
                 self._note_overrun()
 
@@ -146,6 +148,11 @@ class Watch:
         os.close(fd)
         self.made = True
         self.log.append("scheduler_stop", why=why, detail=text, file=self.path, made=True)
+
+    def _note_late_cancel(self):
+        self.cancel_late = {"pid": self.pid, "t": round(time.time(), 3), "after": self.sent,
+                            "note": "a cancel arrived after the scheduler had asked the driver to stop; nothing more is sent (no signal: Logan, 2026-10-23): the job ends cancelled when the driver does"}
+        self.log.append("cancel_after_stop", **self.cancel_late)
 
     def _note_overrun(self):
         self.overrun = {"past_end_s": round(time.time() - self.closes), "pid": self.pid, "stop_asked": self.sent, "t": round(time.time(), 3),
@@ -340,6 +347,8 @@ class WindowRunner(SG.StagedRunner):
             S.stopped = S.stopped or watch.sent != "window"                  # a cancel, or a person's STOP or signal: the night was cut short
         else:
             status, why = "fail", f"the driver stopped: {reason} (exit {code})"
+        if watch.cancel_late:
+            S.stopped = True                                       # a cancel that came after the scheduler's own stop: the job ends cancelled, when the driver does
         starts = [k for k, r in enumerate(recs) if r.get("type") == "run_start"]
         cycles = sum(r.get("type") == "cycle_start" for r in recs[starts[-1]:]) if s1 > n_start else 0         # this night's work: its cycle_start records (run_end's `cycles` counts the file's)
         if status == "pass" and not S.stopped and not cycles:
@@ -347,12 +356,14 @@ class WindowRunner(SG.StagedRunner):
         rec = dict(self._base(S, ctx, i, st, e, run.start), kind="window", status=status, reason=why or None, rc=run.rc, end=L.iso(run.end), end_epoch=round(run.end, 3),
                    duration_s=round(max(0.0, run.end - run.start), 3), timed_out=bool(run.timed_out), killed=run.killed, counts={"cycles": end.get("cycles"), "cycles_this_night": cycles} if end else None,
                    log=os.path.basename(logpath), log_kept="whole", card_touched=bool(not ctx.dry and run.pid is not None), argv=run.argv[:12] if status != "pass" else None,
-                   extra={"out": d["out"], "until": st["until"], "run_end": end, "scheduler_stop": watch.sent, "overrun": watch.overrun})
+                   extra={"out": d["out"], "until": st["until"], "run_end": end, "scheduler_stop": watch.sent, "overrun": watch.overrun, "cancel_after_stop": watch.cancel_late})
         log.append("leg", **rec)
         S.next, S.ran, S.card_touched = i + 1, S.ran + 1, S.card_touched or rec["card_touched"]
         F.update(driver_reason=reason, driver_exit=code, driver_cycles=cycles)
         if watch.overrun:
             F["overrun"] = watch.overrun                              # the end record carries it
+        if watch.cancel_late:
+            F["cancel_after_stop"] = watch.cancel_late
         if status != "pass":
             S.failed = True
         if status == "error" and why.startswith("dry-run-as-card"):
@@ -381,7 +392,7 @@ def window_info(root: str, where: str, jid: str, cfg: dict | None = None) -> dic
             "preflight": [{k: r.get(k) for k in ("step", "leg", "status", "reason", "counts", "notes")} for r in rs if r.get("type") == "leg" and r.get("kind") != "window"],
             "driver": next(({"reason": r["extra"].get("run_end", {}) and r["extra"]["run_end"].get("reason"), "status": r["status"], "scheduler_stop": r["extra"].get("scheduler_stop")}
                             for r in rs if r.get("type") == "leg" and r.get("kind") == "window"), None),
-            "overrun": next((r for r in rs if r.get("type") == "driver_overrun"), None), "ended": bool(end)}
+            "overrun": next((r for r in rs if r.get("type") == "driver_overrun"), None), "cancel_late": next((r for r in rs if r.get("type") == "cancel_after_stop"), None), "ended": bool(end)}
 
 
 def format_window(info: dict) -> list:
@@ -400,4 +411,7 @@ def format_window(info: dict) -> list:
     if o:
         lines.append(f"  DRIVER OVERRUN: {'ran on' if info.get('ended') else 'still running'} {o['past_end_s']} s past the window's end (pid {o['pid']}; named {o['after_end_and_grace_s']} s after the end and the grace): "
                      "the scheduler sends it no signal, and the card stays held under this job's lock until the driver ends or the lead acts")
+    c = info.get("cancel_late")
+    if c:
+        lines.append(f"  cancel received after the driver (pid {c['pid']}) had been asked to stop: the scheduler sends it no signal, and the job ends cancelled when the driver does")
     return lines

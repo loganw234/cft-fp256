@@ -114,9 +114,11 @@ def cmd_status(a, root):
 def cmd_cancel(a, root):
     open_root(root)
     how = S.cancel(root, a.id, S.user())
+    pid = next((r.get("pid") for r in reversed(S.read_records(os.path.join(root, "running", a.id, "job.jsonl"))) if r.get("type") in ("driver_overrun", "driver_started")), None)
     print({"dequeued": f"{a.id}: removed from the queue; outcome cancelled",
            "stop-requested": f"{a.id}: stop requested; it ends at its next safe point",
-           "stop-already-requested": f"{a.id}: a stop was already requested"}[how])
+           "stop-already-requested": f"{a.id}: a stop was already requested"
+           + (f"; the driver, pid {pid}, has been asked to stop and the scheduler sends it no signal: the job ends when it does, or end it by hand, by that pid" if pid else "")}[how])
     return 0
 
 

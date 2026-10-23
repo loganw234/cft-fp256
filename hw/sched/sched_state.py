@@ -390,8 +390,15 @@ def claim_next(root: str, cfg: dict, card_id: str, now_t: float, registry: dict)
     return None
 
 
+def stop_asked(d: str) -> bool:
+    """True when the job's own record shows its runner has already asked what it runs to stop (a window's driver: `scheduler_stop`, or `driver_overrun`): a cancel then adds
+    nothing but its own record, and the answer says so."""
+    return any(r.get("type") in ("scheduler_stop", "driver_overrun") for r in read_records(os.path.join(d, "job.jsonl")))
+
+
 def cancel(root: str, jid: str, who: str) -> str:
-    """'dequeued' (it never ran), 'stop-requested' or 'stop-already-requested' (it ends at its next safe point)."""
+    """'dequeued' (it never ran), 'stop-requested' or 'stop-already-requested' (it ends at its next safe point; the latter too when the job's record shows the
+    runner had already asked its work to stop)."""
     parse_job_id(jid)
     q, r, j = (os.path.join(root, s, jid) for s in ("queue", "running", "jobs"))
     try:
@@ -414,7 +421,7 @@ def cancel(root: str, jid: str, who: str) -> str:
         else:
             os.write(fd, (json.dumps({"by": who, "t": round(time.time(), 3)}) + "\n").encode())
             os.close(fd)
-            return "stop-requested"
+            return "stop-already-requested" if stop_asked(r) else "stop-requested"
     if os.path.isdir(j):
         done = read_records(os.path.join(j, "job.jsonl"))
         raise Refusal("job-ended", f"{jid} already ended: {done[-1].get('outcome') if done else 'no record'}")
