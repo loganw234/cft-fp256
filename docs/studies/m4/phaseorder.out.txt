@@ -1,0 +1,16 @@
+fp32-dw18 atan: live 15 in the design's order, 15 by mathlib's ranked order with M4's phases added, 16 depth-first; schedule_order then takes 15
+fp32-dw18 asin: live 16 in the design's order, 16 by mathlib's ranked order with M4's phases added, 20 depth-first; schedule_order then takes 16
+fp32-dw18 acos: live 16 in the design's order, 16 by mathlib's ranked order with M4's phases added, 20 depth-first; schedule_order then takes 16
+fp32-dw18 atan2: live 21 in the design's order, 21 by mathlib's ranked order with M4's phases added, 19 depth-first; schedule_order then takes 19
+fp64 atan: live 15 in the design's order, 15 by mathlib's ranked order with M4's phases added, 16 depth-first; schedule_order then takes 15
+fp64 asin: live 16 in the design's order, 16 by mathlib's ranked order with M4's phases added, 20 depth-first; schedule_order then takes 16
+fp64 acos: live 16 in the design's order, 16 by mathlib's ranked order with M4's phases added, 20 depth-first; schedule_order then takes 16
+fp64 atan2: live 21 in the design's order, 21 by mathlib's ranked order with M4's phases added, 19 depth-first; schedule_order then takes 19
+fp128 atan: live 15 in the design's order, 15 by mathlib's ranked order with M4's phases added, 16 depth-first; schedule_order then takes 15
+fp128 asin: live 16 in the design's order, 16 by mathlib's ranked order with M4's phases added, 20 depth-first; schedule_order then takes 16
+fp128 acos: live 16 in the design's order, 16 by mathlib's ranked order with M4's phases added, 20 depth-first; schedule_order then takes 16
+fp128 atan2: live 21 in the design's order, 21 by mathlib's ranked order with M4's phases added, 19 depth-first; schedule_order then takes 19
+fp256 atan: live 15 in the design's order, 15 by mathlib's ranked order with M4's phases added, 16 depth-first; schedule_order then takes 15
+fp256 asin: live 16 in the design's order, 16 by mathlib's ranked order with M4's phases added, 20 depth-first; schedule_order then takes 16
+fp256 acos: live 16 in the design's order, 16 by mathlib's ranked order with M4's phases added, 20 depth-first; schedule_order then takes 16
+fp256 atan2: live 21 in the design's order, 21 by mathlib's ranked order with M4's phases added, 19 depth-first; schedule_order then takes 19

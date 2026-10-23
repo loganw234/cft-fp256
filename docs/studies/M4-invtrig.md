@@ -77,30 +77,47 @@ Every statement is one of five kinds, and says which:
     in-lane by one FMA; its tiny-quotient range (x > 0, |y/x| below
     2^(emin+p+2), where the double word loses its low word) is marked.
 - **The cost** (MEASURED, 5.1): atan 176, 186 and 203 instructions at
-  fp64, fp128 and fp256; asin 221, 235 and 256; acos 4 fewer; atan2 216,
-  226 and 243. **asin and acos of one argument cost 255, 269 and 290
+  fp64, fp128 and fp256; asin 221, 235 and 256; acos 4 fewer; atan2 218,
+  228 and 245 (2 more since send-back 1's prescale). **asin and acos of one
+  argument cost 255, 269 and 290
   together** in a compiled step, 34 instructions more than asin alone,
   since cftc's inliner shares everything up to the quadrant's constant.
-  Bank words 66, 74 and 89 for all four functions under all five
+  Bank words 67, 75 and 90 for all four functions under all five
   attributes; no scratch slot; 15 to 21 values live. Against M2's sin
   (406, 382, 389) the inverse functions cost about half: their reduction
   is algebraic.
 - **The bound** (MEASURED, verifier-VM1b's first-order budget as M2
-  ported it, changed for two inputs, 3.2): every region keeps more than
-  four bits at Logan's G, at most 0.058 Bv at fp64 (asin's random region;
-  0.064 with its second-order residual), 0.030 at fp128 and 0.023 at
-  fp256; fp32's double word at G = 18 keeps about one bit (0.42 Bv). The
-  largest budget at each format bounds every error measured there, though
-  13 of 76 regions' own budgets, from 300 lanes at fp128 and fp256, are
-  passed by another sample's worst (3.3): the box's larger budgets are
-  handed to the lead.
+  ported it, changed for two inputs, 3.2), each region's figure the
+  largest of its budgets (the desktop's and the box's, each with its
+  second-order residual) and its measured worst: **about four bits at
+  fp64** (the least 3.78 bits, asin's random region, the box's budget
+  0.0669 Bv with its residual 0.0061), about five at fp128 (5.04) and
+  fp256 (5.45); fp32's double word at G = 18 keeps about one bit (1.13).
+  The first text said every region kept more than four bits, which was
+  false even by its own 0.064 with the residual (send-back 1).
 - **Held in the model against transcend.py** (MEASURED): the pools
   (transcend_check's trig pool and atan2 pairs with the vector sets'), all
   four formats, functions and attributes, 0 wrong unmarked lanes, on the
   model and as programs on seq.py; the specials row by row, the whole 9.2.1
   table included; five regions of placed arguments a function, 0 wrong.
+  **That "0 wrong" was true of what was run and false of the design:**
+  atan2 with a subnormal or tiny |y| against a larger |x| was wrong and
+  unmarked (verifier-VM4S, 3.6, item 9), in a corner no pool or region
+  reached. Fixed by keying atan2's prescale on n (2.5), and held by a
+  region that reaches the corner, on the model and on seq.py, with the
+  first design as a plant. MEASURED by the lead on amd-arc-box
+  (`box-out2/corner*.out.txt`, 2,000 lanes at fp64 and fp32's double
+  word, 500 at fp128, 300 at fp256, 1,000 for the triple word, every
+  attribute): the fix 0 wrong at every format, on the model and on
+  seq.py, 0 lanes differing; the first design 92 to 186 wrong of 2,000 at
+  fp64, 29 to 75 at fp32's double word, 20 to 46 of 500 at fp128, 12 to
+  29 of 300 at fp256 and 1 of 1,000 in the triple word, past the bound by
+  2^18.8 to 2^46.6.
 - **The marks** (3.4, 3.5): random lanes at about 2^-G sig(V) where the
-  values spread, fewer where they crowd next to pi/2 and pi; structured
+  values spread, fewer where they crowd next to pi/2 and pi (atan's large
+  arguments, acos's small ones and atan2's dominant operands: at the box's
+  50,000 lanes the law over-predicts there by 9 to 32 sigma, a
+  conservative error); structured
   families: the tiny family (atan's x^3/3, asin's x^3/6, and atan2's exact
   quotients, which are atan's), the windows next to pi/2 and pi (atan of a
   large x, acos of a small x, atan2 beside its axes), about 2^(p - G + 2)
@@ -110,16 +127,22 @@ Every statement is one of five kinds, and says which:
   number), none at the diagonals. Every marked guess counted; every
   unmarked lane right.
 - **fp32** (2.8, question 3): **the triple word at G = 40 is built and
-  measured**, not estimated: atan 472, asin 637, acos 633 and atan2 516
-  instructions, 75 words for all four; 25 values live scheduled, 31 for
-  atan2, so every fragment fits the 32 registers and runs on seq.py; 0
-  wrong over the pools on the model and on seq.py; errors at most 2^-4.4
-  Bv over five regions (measured, with no budget, as M1's fp32). Its first
+  measured**, not estimated: atan 472, asin 637, acos 633 and atan2 518
+  instructions, 76 words for all four; 25 values live scheduled, 31 for
+  atan2 (33 in the design's order, which would not fit), so every
+  fragment fits the 32 registers scheduled and runs on seq.py; 0 wrong
+  over the pools on the model and on seq.py; errors at most 2^-3.66 Bv by
+  the box's 20,000 lanes a region (2^-4.4 by the desktop's 2,000;
+  measured, with no budget, as M1's fp32); its tiny quotients marked
+  below 2^(emin+2p+2) since send-back 1 (3.6, item 10). Its first
   version passed the pools while missing its bound by 2^17 (3.6, item 5).
   The double word at G = 18, the fallback, is measured beside it: 143 to
   184 instructions, about one bit by its budget.
-- **The model found eight things wrong in itself** (3.6), four of them
-  worth the build's attention: a budget that froze its roundings (a
+- **The model found eight things wrong in itself, and verifier-VM4S a
+  ninth and the fix a tenth** (3.6): atan2's corner above, and fp32's
+  triple word, whose tiny quotients were marked at the double word's edge
+  so that its Bv underflowed to 0 on unmarked lanes. Of the model's eight,
+  four are worth the build's attention: a budget that froze its roundings (a
   residual of exactly 0 the tell); fp32's first triple word, which passed
   every pool while missing its bound by 2^17; 1 - x^2 formed directly,
   which I had argued exact and therefore no fault, and which passes every
@@ -374,7 +397,7 @@ the same counts):
 
 | part | atan, fp64 | asin, fp64 | atan2, fp64 | atan, fp256 |
 |---|---|---|---|---|
-| front (and asin's sqrt) | 5 | 8 + 36 | 17 | 5 |
+| front (and asin's sqrt) | 5 | 8 + 36 | 19 | 5 |
 | index | 7 | 7 | 7 | 7 |
 | numerator, denominator | 6 + 6 | 11 + 8 | 6 + 6 | 6 + 6 |
 | quotient | 17 | 17 | 17 | 21 |
@@ -384,7 +407,7 @@ the same counts):
 | reconstruction | 23 | 20 | 35 | 23 |
 | final rounding and test | 9 | 9 | 9 | 9 |
 | classify, specials, atan2's rules | 4 + 12 | 4 + 14 | 32 | 4 + 12 |
-| in all | 176 | 221 | 216 | 203 |
+| in all | 176 | 221 | 218 | 203 |
 
 The double-word head is the largest part, as in M1 and M2, and does not
 grow with p: K = 6 at every format, since the head covers the terms above
@@ -398,10 +421,10 @@ MEASURED (`costs.py`, the four functions built at each N; rne):
 
 | N | rho | head K, degree D (fp64; fp128; fp256) | atan fp64, fp128, fp256 | atan2 fp64 | asin fp64 |
 |---|---|---|---|---|---|
-| 2 | 1/3 | 14, 29; 14, 49; 14, 87 | 243, 265, 305 | 283 | 288 |
-| 4 | 1/7 | 8, 16; 8, 27; 8, 49 | 187, 200, 224 | 227 | 232 |
-| **8** | **1/15** | **6, 12; 6, 20; 6, 35** | **176, 186, 203** | **216** | **221** |
-| 16 | 0.0341 | 5, 9; 5, 16; 5, 28 | 182, 191, 205 | 222 | 227 |
+| 2 | 1/3 | 14, 29; 14, 49; 14, 87 | 243, 265, 305 | 285 | 288 |
+| 4 | 1/7 | 8, 16; 8, 27; 8, 49 | 187, 200, 224 | 229 | 232 |
+| **8** | **1/15** | **6, 12; 6, 20; 6, 35** | **176, 186, 203** | **218** | **221** |
+| 16 | 0.0341 | 5, 9; 5, 16; 5, 28 | 182, 191, 205 | 224 | 227 |
 
 - **N = 8 is the cheapest at every format** (fp32's double word too:
   160, 144, 143, 151 for atan). Each doubling of N saves about two head
@@ -500,11 +523,19 @@ alternatives the brief names, measured or argued:
 PROPOSED.
 
 **Scaling.** n = min(|y|, |x|), d = max: both are multiplied by 2^3p where
-d < 2^(emin + 3p) (RECIP_SEED flushes a subnormal d, and the TwoProds'
-errors must stay normal), and by 2^-2 where d >= 2^(emax - 1) (d + c n
-would overflow), by three SELECTs each; the quotient is unchanged, and an
-n lost to the downward scaling sits below every bit V keeps. 10
-instructions.
+n < 2^(emin + 3p) and d < 2^(emax - 3p - 2), and by 2^-2 where
+d >= 2^(emax - 1) (d + c n would overflow), by three SELECTs each; the
+quotient is unchanged, and an n lost to the downward scaling sits below
+every bit V keeps. 12 instructions. **The upward scaling is keyed on n**
+(send-back 1; first designed on d, 3.6, item 9): the quotient's FMA
+remainder N_h - s_h D_h is about 2^-p n, so it is exact only while
+n >= about 2^(emin+p+1), whatever d is, and RECIP_SEED's flush of a
+subnormal d and the TwoProds' errors are covered too, since d >= n. The
+guard on d keeps d 2^3p below 2^(emax-2); where it refuses, t is below
+2^(emin - emax + 6p + 2), deep inside the marked range at every format
+(2^-1725 at fp64, 2^-107 at fp32). The alternative, marking every lane
+with n_h < 2^(emin+p+2), costs the same two instructions and marks lanes
+the prescale decides, so it is not proposed.
 
 **The quadrant** is the table of 2.1: C = pi/2 where |y| > |x|, else 0 or
 pi by x's sign bit (so x = -0 counts as negative, which is 9.2.1's row);
@@ -528,15 +559,32 @@ diagonal rows equal transcend.py under every attribute).
 
 **The exact-quotient rule, in-lane.** For x > 0, |y| < |x| and k = 0, the
 core's s is t = y/x itself, and its remainder N_h - s_h D_h (exact by
-FMA) is zero exactly when the quotient is exact; below atan's gate
+FMA) is zero exactly when s_h IS the quotient; below atan's gate
 (s_h < 2^(floor(-(p+3)/2)+1), the definition's 2qv + p + 3 <= 0) the
 answer is decided toward zero by one FMA under the attribute, s_h
 (1 - 2^-(p+2)), the tiny path's form (M2's sin). Seven instructions.
 Above the gate the main path decides an exact quotient like any other
 argument: there t^3/3 is more than 2^-(p+G) t, so atan(t) lies farther
 than the bound from the boundary t itself, and V resolves it unless
-t - t^3/3 is a boundary, which is the tiny family (3.5). Without the rule (the side-rule-off plant) every exact
-quotient below the gate whose t^3/3 is under the bound would mark:
+t - t^3/3 is a boundary, which is the tiny family (3.5). **s_h can be an
+ulp off an exact quotient** (send-back 1, item 2; the first text said the
+remainder is zero exactly when the quotient is exact, which is false):
+s_h = N_h y with y's p + 8 bits can land beside y/x, and then the
+remainder is not zero and the rule does not fire. Such a lane is decided
+by the main path under rne and rmm (an exact quotient is a grid point, far
+from those attributes' midpoint boundaries) and marked under the directed
+three, its guess right. MEASURED (`exactq.py`, exact quotients c 2^-e,
+c in {1, 3, 5, 7}, where the main path cannot decide alone): at fp64,
+s_h is exact and the rule fires in 169 of 200 lanes; of the other 31, 30
+are marked under rtz, rdn and rup, one is decided by the main path, and
+none is wrong; at the box's sizes (`box-out2/exactq.*.out.txt`) s_h is
+exact in 1,738 of 2,000 at fp64, 435 of 500 at fp128, 269 of 300 at
+fp256 and 1,703 of 2,000 at fp32's double word (85 to 90%), the rest
+marked under the directed three but for 9 at fp64 and 28 at fp32 that
+the main path decides, and 0 wrong. So the rule decides
+the exact quotients whose s_h comes out exact, and leaves the rest to the
+mark. Without the rule (the side-rule-off plant) every exact quotient
+below the gate whose t^3/3 is under the bound would mark:
 atan2(2^-60, 1), atan2(9 2^-60, 3), and every atan2(y, 2^k) with y below
 about 2^(k - (p+G)/2).
 
@@ -544,10 +592,13 @@ about 2^(k - (p+G)/2).
 t~ < 2^(emin + p + 2), the double word s loses its low word to underflow
 (its remainder and low word fall below 2^emin), and the result is
 subnormal or within a factor 2^(p+2) of it. The routine marks those lanes
-(4 instructions) and the definition decides them. The subnormal MIDPOINT
-of 1.3 is one of them: atan2(minSubnormal, 2) is marked, its guess 0 under
-every attribute but rup. Deciding them in-lane would take M1's fixed grid
-(mathlib.py's `_fixed_grid`): the quotient computed with n and d scaled
+(4 instructions) and the definition decides them. (fp32's triple word
+marks below 2^(emin+2p+2): 2.8 and 3.6, item 10.) The subnormal MIDPOINT
+of 1.3 is one of them: atan2(minSubnormal, 2) is marked, and its guess is
+0 under every attribute, rup included, where the definition gives
+minSubnormal: a marked lane's guess may be wrong, and the replay decides.
+Deciding them in-lane would take M1's fixed grid (mathlib.py's
+`_fixed_grid`): the quotient computed with n and d scaled
 apart, the final rounding on the result's own grid, the screen below half
 the smallest subnormal (ESTIMATE: about 40 instructions more, a sixth of
 atan2's). These lanes are rare: |y/x| below 2^-967 at fp64, below
@@ -639,8 +690,8 @@ MEASURED (`twrun.py`):
 
 | fp32, triple word, G = 40 | atan | asin | acos | atan2 |
 |---|---|---|---|---|
-| instructions | 472 | 637 | 633 | 516 |
-| bank words (all four, five attributes: 75) | 60 | 62 | 61 | 69 |
+| instructions | 472 | 637 | 633 | 518 |
+| bank words (all four, five attributes: 76) | 60 | 62 | 61 | 70 |
 | values live, the design's order | 26 | 26 | 26 | 33 |
 | values live, scheduled (mathlib's depth-first order) | 25 | 25 | 25 | 31 |
 | TwoSums, Fast2Sums | 22, 31 | 32, 42 | 32, 42 | 22, 31 |
@@ -662,10 +713,15 @@ The triple word has no budget: the budget's port seeds its reverse sweep
 from V_h and V_l, two words, and a third would need its own probe (M1's
 fp32 had none either, its 2.5: "fp32 has no budget, so that is a
 measurement, a lower bound on the worst, not a bound"). The largest error
-found is 2^-4.4 Bv, about four bits under the bound; the box's larger
-samples (`box_m4s.sh`, 20,000 a region) are the next lower bound, and an
+the desktop found is 2^-4.4 Bv; **the box's 20,000 lanes a region**
+(MEASURED by the lead, `box-out/tw-measure-*.out.txt`, every lane against
+transcend.py, 0 wrong) **found 2^-3.66 Bv**, asin in the random and small
+regions (2^-4.42 in asin's edge region, the desktop's figure exactly), so
+by sample the triple word keeps about 3.7 bits, and the larger sample
+moved the worst by 0.8 bit: a sampled worst is only a lower bound. An
 exhaustive sweep of fp32's 2^32 arguments a function, a box job, would
-count every lane.
+count every lane. Its tiny quotients are marked below 2^(emin+2p+2)
+since send-back 1 (3.6, item 10), not at the double word's edge.
 
 - **It fits the 32 registers, atan2 by one:** 25 values live scheduled,
   31 for atan2 (whose two inputs, scaling and wider quadrant add six), and
@@ -675,7 +731,7 @@ count every lane.
   it, so the compiler spills around every call (C4's allocator does so
   around any routine); a hand schedule should win back a few.
 - **Its cost is 2.4 to 2.9 times the double word's at fp64** (atan 472
-  against 176, asin 637 against 221, atan2 516 against 216; COMPUTED), and
+  against 176, asin 637 against 221, atan2 518 against 218; COMPUTED), and
   2.8 to 3.5 times fp32's own double word's, more than M1's triple-word
   exp's 2.1:
   the model is generic, as M1's exp32 model was (expansions summed by
@@ -785,11 +841,15 @@ At fp128 and fp256 every residual is below 4 x 10^-20 Bv and is not shown;
 a 0.0000 is under 5 x 10^-5 Bv (the region's V is pi/2 or a small t, where
 nothing but the constants' last words is left).
 
-- **Every region keeps more than four bits** at G = 44 at fp64 and G = 46
-  at fp128 and fp256 (a bound under 1/16 of Bv): at most 0.058 Bv at fp64
-  (asin, random; 0.064 with its residual), 0.030 at fp128 and 0.023 at
-  fp256 (the edge regions). M1's planners' line is two bits; M2's sin kept
-  0.096 at fp64.
+- **Every region keeps about four bits or more** at G = 44 at fp64 and
+  G = 46 at fp128 and fp256, by each cell's figure, the largest of its
+  budgets and its measured worst (the table in 3.3): the least is 0.0730
+  Bv at fp64 (3.78 bits: asin's random region, the box's budget 0.0669
+  with its residual 0.0061; the desktop's 1,000 lanes gave 0.058 and
+  0.064), 0.0304 at fp128 (5.04 bits) and 0.0228 at fp256 (5.45 bits).
+  The first text said "more than four bits", false even by its own 0.064
+  (send-back 1). M1's planners' line is two bits; M2's sin kept 0.096 at
+  fp64.
 - **What makes the bound.** At fp64 the quotient's roundings lead (the
   remainder's low-word additions and s_l's product, about u^2 relative of
   s, 0.018 Bv in asin's random region), then the reconstruction (0.011),
@@ -829,25 +889,58 @@ run.
 - **atan's random and big regions at fp128 and fp256** sit at 2^-69 and
   2^-191: V is pi/2 - 1/x with 1/x below every bit the double word keeps,
   so V's only error is pi/2's representation in two words.
-- **Thirteen of the 76 cells with a budget of their own pass it**
-  (COMPUTED from the outputs: the measured worst, seed 1, against the
-  budget's bound, seed 2, on other lanes): eleven at fp256 and two at
-  fp128, none at fp64 or fp32's double word, all in the random, small and
-  big regions, whose exponents range widely, so that the budget's 300
-  lanes did not reach the arguments where the polynomial and the quotient
-  bind (fp256's acos small: a budget of 1.6 x 10^-26 Bv from lanes whose V
-  is pi/2 less nothing, against 3.4 x 10^-5 measured). The largest is
-  fp128's atan2 small, 0.0156 Bv against 0.0024; at fp256, 0.0052. M2's
-  study found three such cells; M1's planners' "a sampled worst is only a
-  lower bound" runs the other way too: a sampled budget is only a budget
-  of its sample.
-- **The largest budget at each format bounds every error measured at that
-  format** (0.058, 0.030 and 0.023 Bv against 0.0128, 0.0279 and 0.0215 at
-  fp64, fp128 and fp256; 0.42 against 0.097 for fp32's double word),
-  since the edge regions are where both bind. The box's larger budgets
-  (3,000 lanes at fp128 and fp256, `box_m4s.sh`) are the region-by-region
-  bound; the study's are not, and section 8, item 3, asks the build for
-  end-weighted samples, as M1's were.
+- **Thirteen of the 76 cells with a budget of their own were passed by
+  another sample's worst** (COMPUTED from the outputs: the measured worst,
+  seed 1, against the budget's bound, seed 2, on other lanes): eleven at
+  fp256 and two at fp128, none at fp64 or fp32's double word, all in the
+  random, small and big regions, whose exponents range widely, so that the
+  budget's 300 lanes did not reach the arguments where the polynomial and
+  the quotient bind (fp256's acos small: a budget of 1.6 x 10^-26 Bv from
+  lanes whose V is pi/2 less nothing, against 3.4 x 10^-5 measured). The
+  largest is fp128's atan2 small, 0.0156 Bv against 0.0024; at fp256,
+  0.0052. M2's study found three such cells; M1's planners' "a sampled
+  worst is only a lower bound" runs the other way too: a sampled budget is
+  only a budget of its sample. **The box's budgets** (12,000 lanes at
+  fp64, 3,000 at fp128 and fp256, other seeds: `box-out/budget-*.out.txt`)
+  **cover twelve
+  of the thirteen; fp128's atan2 random does not:** the box's 0.00115 Bv
+  is below the desktop's measured 0.00326 (the first text called the box's
+  budgets the region-by-region bound, which this cell contradicts). So
+  each cell's figure below is the largest of every budget (with its
+  residual) and every worst kept, and section 8, item 3, asks the build
+  for end-weighted samples, as M1's were.
+- **The largest figure at each format bounds every error measured at that
+  format** (0.073, 0.030 and 0.023 Bv against 0.0128, 0.0279 and 0.0215 at
+  fp64, fp128 and fp256; 0.46 against 0.097 for fp32's double word),
+  since the edge and random regions are where both bind.
+- **Each cell's figure** (`bound_table.py`, reading every budget and
+  worst kept; atan2's from box-out2/, after send-back 1's prescale), in
+  bits, log2 of 1 over the figure in Bv:
+
+| bits kept (the cell's figure) | random | edge | big | small | diag |
+|---|---|---|---|---|---|
+| fp64 atan | 5.27 | 4.91 | 8.57 | 6.71 | - |
+| fp64 asin | 3.78 | 3.84 | 6.27 | 4.57 | 6.43 |
+| fp64 acos | 5.05 | 3.93 | 4.06 | 7.97 | 6.22 |
+| fp64 atan2 | 4.78 | 4.73 | 5.79 | 4.92 | 6.71 |
+| fp128 atan | 8.55 | 5.05 | 67 | 5.36 | - |
+| fp128 asin | 5.04 | 5.05 | 9.86 | 5.33 | 7.72 |
+| fp128 acos | 8.23 | 5.05 | 5.26 | 9.94 | 7.72 |
+| fp128 atan2 | 8.26 | 5.05 | 65 | 5.05 | 7.72 |
+| fp256 atan | 86 | 5.45 | 190 | 6.07 | - |
+| fp256 asin | 6.07 | 5.45 | 10.30 | 6.03 | 7.13 |
+| fp256 acos | 12.17 | 5.46 | 5.71 | 11.25 | 7.13 |
+| fp256 atan2 | 6.92 | 5.46 | 189 | 5.89 | 7.13 |
+| fp32 double word atan | 3.11 | 2.39 | 5.34 | 5.16 | - |
+| fp32 double word asin | 1.13 | 1.15 | 3.48 | 1.89 | 3.49 |
+| fp32 double word acos | 3.03 | 1.33 | 1.34 | 4.97 | 3.16 |
+| fp32 double word atan2 | 2.53 | 2.48 | 3.26 | 2.83 | 3.56 |
+
+Every atan2 cell is unchanged by send-back 1's prescale (MEASURED: the
+box's reruns at both sizes give the same bounds; no region's operand
+reaches the prescale). fp32's double word has no box budget. A figure
+past 20 bits is a region whose V is a constant less a hair below every
+bit (3.3).
 
 ### 3.4 How often a lane is marked
 
@@ -864,18 +957,57 @@ each lane's own 2^-G' sig(V)):
 | fp32, double word | 11 / 14 (48.7) | 56 / 44 (46.4) | 39 / 30 (48.8) | 25 / 14 (38.9) |
 
 - Every marked guess was right and no unmarked lane was wrong, in all 32
-  cells.
-- **Where the values spread, the law holds:** asin's and acos's cells lie
-  within 2.7 sigma of their own prediction (fp256's acos +1.9, fp32's acos
-  rtz -2.7, fp64's asin rtz -2.5).
-- **Where they crowd beside a constant, the law over-predicts.** atan's
-  random arguments are mostly huge (the exponent uniform over the range),
-  so V is pi/2 less a hair below every bit, and pi/2 lies 5 x 10^12 Bv from
-  a boundary (1.4): at G' = 6 that is still 2^4 inflated bounds, so those
-  lanes cannot mark, and atan marks 0 to 14 against 49 predicted (-5 to
-  -7 sigma). atan2's random pairs crowd the same way next to pi/2 and pi
-  where one operand dominates: -2.8 sigma at fp64. The law assumes the
-  true value spread evenly in its cell; these are not.
+  cells. (These are the desktop's runs at seed 3; atan2's rows are from
+  before send-back 1's prescale, which adds no mark on this region:
+  the box's rerun at b13e3e38, `box-out2/rate.*-seed3.out.txt`, gives
+  the same marks.)
+- **At this size, asin and acos lie within 2.7 sigma of their own
+  prediction** (fp256's acos +1.9, fp32's acos rtz -2.7, fp64's asin rtz
+  -2.5); **atan2 does not:** -2.8 at fp64 under both attributes and -4.0
+  at fp32's double word under rtz (the first text, and the ledger entry,
+  said atan2 lay within 2.7 sigma too, which these outputs contradict).
+- **At the box's size the law over-predicts wherever the values crowd
+  beside a constant, acos's included** (MEASURED, the lead's run of
+  `box_m4s.sh`, `box-out/rate-*.out.txt`: seed 7, 50,000 lanes at fp64 and
+  20,000 at fp128 and fp256, rne and rtz; sigma against each lane's own
+  prediction, as the table above; M1's constant gives the smaller figures
+  the lead first quoted):
+
+| random region, marked rne / rtz (own prediction; own sigma) | atan | asin | acos | atan2 |
+|---|---|---|---|---|
+| fp64 | 113 / 105 (1225; -32) | 1082 / 1140 (1168; -2.5, -0.8) | 883 / 927 (1223; -9.9, -8.6) | 562 / 616 (997; -14.0, -12.2) |
+| fp128 | 4 / 4 (491; -22) | 467 / 475 (467; -0.0, +0.4) | 417 / 432 (490; -3.3, -2.7) | 313 / 317 (408; -4.8, -4.6) |
+| fp256 | 0 / 0 (491; -22) | 472 / 487 (467; +0.2, +0.9) | 428 / 463 (490; -2.9, -1.2) | 367 / 352 (416; -2.4, -3.2) |
+
+  In the edge region (values spread over the cells' ends) the 24 cells
+  lie within 2.3 sigma but one: fp64's atan under rtz, +4.6 (1,213 marks
+  against 1,065), more marks than predicted. **Why the random region
+  departs:** its arguments crowd beside pi/2 and pi. acos's random |x| has
+  its exponent uniform from -(p + 20) to -1, so at fp64 about a quarter of
+  the lanes have |x| below 2^-54 and V within an ulp of pi/2, which lies
+  2^4 inflated bounds from a boundary (1.4): those lanes cannot mark, as
+  atan's huge arguments cannot. atan2's random pairs crowd the same way
+  where one operand dominates (V within an ulp of pi/2, or of pi with
+  x < 0). MEASURED with `rate.py`'s split (box_m4s2.sh, the same seed and
+  sizes, `box-out2/rate-box-*.out.txt`): the lanes whose V lies within an
+  ulp of pi/4, pi/2, 3pi/4 or pi are 29% of acos's random lanes at fp64
+  (14,336 of 50,000; 16% at fp128, 8% at fp256), 41% of atan2's (16,750
+  of 41,031) and 93% of atan's, and they mark far fewer than the law
+  predicts (0 to 57 against 40 to 1,137), but for fp256's acos under rne
+  (39 against 39.6), where pi/2 lies only about 4 inflated bounds from a
+  midpoint; **the rest follow the law:** acos -1.6 and +0.8
+  sigma at fp64, -0.0 and +0.2 at fp128, -2.9 and +0.3 at fp256; atan2
+  -2.1 and -0.6, -0.0 and -0.3, -0.5 and -0.6; atan +2.2 and +0.7 on its
+  3,696 uncrowded lanes at fp64. The departure is conservative: the law
+  over-predicts, so the marks a workload sees are fewer, not more.
+- **Where the values spread, the law holds at the box's size:** asin's
+  random cells within 2.5 sigma at every format; the edge cells as
+  above. fp64's atan rtz edge cell (+4.6) is open: the edge region
+  repeats its arguments (26,900 distinct of 50,000 at fp64, 15,366 of
+  20,000 at fp128), so its marks are not independent and the binomial
+  sigma understates the spread (by about 1.36 at fp64 if repeats mark
+  alike, +3.4 then), and its values cluster at the cells' ends; no
+  crowding explains it, and rne's cell beside it is +1.1.
 - **At the proposed G** (COMPUTED): about 2^-G x 1.2 to 2^-G x 1.6 a call
   where the values spread (sig(V) averages 1.17 to 1.23 for asin's and
   acos's predictions, (46.6 to 49.1)/2,000 x 64), about 1.3 x 10^-13 at
@@ -908,9 +1040,9 @@ attributes, every marked guess counted:
   family with the other sign: at fp64 one centre, +-3 2^-26 under rne and
   rmm (M2's tan centre), counted three times in the census as 3 2^-26,
   6 2^-27 and 12 2^-28; asin(x) = x + x^3/6 + 3x^5/40 gives one centre,
-  +-3 2^-25 under the directed three (MEASURED, the marked lanes listed in
-  the ledger). At fp128 and fp256 the census, c <= 16, is a sample of a
-  family whose centres run to c of about 2^12 and 2^33 (M2's 3.5's
+  +-3 2^-25 under the directed three (MEASURED, `tinyc.py`, its output
+  `box-out2/tinyc.out.txt`). At fp128 and fp256 the census, c <= 16, is a
+  sample of a family whose centres run to c of about 2^12 and 2^33 (M2's 3.5's
   counting, COMPUTED for x^3/3 in the same way), as M1's and M2's were.
 - **atan2's exact quotients are the tiny family again:** atan2(c 2^-e x, x)
   has t = c 2^-e exactly, so it marks where atan(c 2^-e) marks, at every x
@@ -939,8 +1071,10 @@ attributes, every marked guess counted:
   lies j^2 u^2 above the grid point 2^k (1 - j u). Where t^3/3 is under
   the bound too (k = -(p + 10) here) the lane marks under the directed
   three while j^2 u^2 < 2^-(p+G), j < 2^((p - G - 2)/2): 11.3 at fp64
-  (11 measured), past 40 at fp128 and fp256, 2 at fp32's G = 18 (3 to 4
-  measured, rup one more: its boundary is the grid point above). Where
+  (11 measured), past 40 at fp128 and fp256, 4 at fp32's G = 18
+  (2^((24 - 18 - 2)/2); 3, 3 and 4 measured under rtz, rdn and rup, rup
+  one more since its boundary is the grid point above; the first text said
+  2, which the formula does not give). Where
   t^3/3 is past the bound (k = -10, -40 at fp64) the cubic moves the true
   value off the boundary and nothing marks. These inherit division's hard
   cases, as the brief said they would: the family is two-parameter (any
@@ -971,9 +1105,11 @@ after the fix it needed:
    exactly 0 in every region and zero capacity in every phase but the
    reconstruction (the first outputs, set aside, not cited). M2's sign
    words were built by integer shifts and never met this. Fixed: a SELECT
-   between two sign words is a sign carrier. After the fix asin's fp64
-   edge budget went from "0.0143 Bv" (a sampled M) to 0.047 Bv with a
-   residual of 0.007 (300 lanes). M4's build ports the budget with this
+   between two sign words is a sign carrier. asin's fp64 edge budget was
+   0.01428 Bv before the fix (1,000 lanes, seed 2: a sampled M) and
+   0.0473 Bv after it, with a residual of 0.0073 (300 lanes, seed 2); both
+   outputs are kept in `set-aside/` (they were in scratch until verifier-
+   VM4S found them cited and not kept). M4's build ports the budget with this
    rule, and its test is a region whose capacity in the head is nonzero.
 4. **The model's path put M2's directory first.** `m4core.py` inserted
    `docs/studies/m2/` at the head of Python's path, and M2 has scripts
@@ -1046,6 +1182,51 @@ after the fix it needed:
    before it is run. M2's `box_m2s.sh` has the same line, so its log's
    "end (0)" for all 49 jobs carries no information; its 49 outputs hold
    no traceback or error (READ), and the case is the lead's.
+9. **atan2 with a tiny numerator was wrong and unmarked** (verifier-
+   VM4S's b1, send-back 1; the model did not find this one). The
+   quotient's FMA remainder N_h - s_h D_h is about 2^-p n, exact only
+   while n >= about 2^(emin+p+1), and the 2^3p prescale fired on d alone:
+   with a subnormal or tiny |y| and |x| >= 2^(emin+3p), t above the marked
+   range, s's low word was wrong. VM4S's cases (fp64): atan2(0x003871ec
+   348e50c8, 0x2b8d56babd2a3847) under rne and rmm gives ...169d1 where
+   transcend.py gives ...169d0, 2^40.8 Bv, unmarked; random subnormal
+   numerators against d from 2^-861 to 2^100 were wrong in 55 to 95 of
+   200 at fp64, and fp32's double word and fp128 the same way. **Why the
+   study's runs missed it:** the pools and the regions keep the operands'
+   exponents within p + 40 of each other, and `m4measure.in_main` left
+   every quotient below atan's gate out of the error measurement, so
+   neither a pool nor the bound reached the corner; "0 wrong" was true of
+   what was run and false of the design. Fixed (2.5: the prescale keyed
+   on n, 2 instructions, no new mark) and held: the region `tinyn`
+   (`m4measure.py`, `corner.py`: tiny and subnormal |y| against |x| over
+   the range above it, on the model and on seq.py), the plant prescale-d
+   (the first design, red in the plants' new corner check and nowhere
+   else), and the box's corner runs: the fix 0 wrong at every format
+   on the model and on seq.py, the first design wrong in up to 186 of
+   2,000 lanes at fp64 (0.2 above).
+10. **fp32's triple word marked its tiny quotients at the double word's
+    edge** (found while fixing item 9). Between 2^(emin+p+2) and
+    2^(emin+2p+2) its third words fall under the subnormal grid, and below
+    2^(emin+G) (2^-86) its Bv = 2^-(p+G) |V_h| rounds to 0 (COMPUTED: under
+    half of minSubnormal), so the test certified those lanes with no
+    margin at all. MEASURED with the
+    plant range-low (the first edge, 2^(emin+p+2)): 12 of 60 unmarked
+    corner lanes had Bv = 0, and none with the edge at 2^(emin+2p+2).
+    Wrong answers there are rare (the lanes keep about 2^-48 of the value
+    against an ulp of 2^-24), but a lane certified without a bound is the
+    defect. Fixed: the triple word marks below 2^(emin+2p+2) (2^-74),
+    which adds marks only for |y/x| below that.
+
+**Statements found false, each corrected in place** (send-back 1, the
+lead and verifier-VM4S): the remainder's (2.5); "every region keeps more
+than four bits" (0 and 3.2, false even by the desktop's own 0.064 with its
+residual, and by the box's 0.0669); the rate law "within 2.7 sigma" for
+atan2 (3.4 and the ledger entry; atan2 was -2.8 at fp64 and -4.0 at fp32's
+double word under rtz in the study's own outputs); "2 at fp32's G = 18"
+(3.5, 4 by its own formula); the L3 rule's "+0" at a = +-1 (7, -0 under
+rdn); question 4's "still two bits"; question 9's caps, which need M4's
+phase names in PHASE_ORDER; atan2(minSubnormal, 2)'s guess (2.5); and
+two budget figures cited and not kept (item 3).
 
 ## 4. The specials and the flags
 
@@ -1141,17 +1322,17 @@ ENDQUIET and RAISE, 3 more; every attribute gives the same counts):
 | atan | 143 | 176 | 186 | 203 |
 | asin | 184 | 221 | 235 | 256 |
 | acos | 180 | 217 | 231 | 252 |
-| atan2 | 183 | 216 | 226 | 243 |
+| atan2 | 185 | 218 | 228 | 245 |
 | asin and acos of one argument, shared | - | 255 | 269 | 290 |
-| bank words, a function | 44-51 | 54-61 | 62-69 | 77-84 |
-| bank words, all four, five attributes | 57 | 66 | 74 | 89 |
+| bank words, a function | 44-52 | 54-62 | 62-70 | 77-85 |
+| bank words, all four, five attributes | 58 | 67 | 75 | 90 |
 | most values live, the design's order | 15, 16, 16, 21 | 15, 16, 16, 21 | the same | the same |
 | most values live, the better of it and mathlib's depth-first order | 15, 16, 16, 19 | 15, 16, 16, 19 | the same | the same |
 | scratch slots | 0 | 0 | 0 | 0 |
 
 **fp32's triple word at G = 40** (2.8; MEASURED, `twrun.py costs`): atan
-472, asin 637, acos 633 and atan2 516 instructions; 60 to 69 words a
-function, 75 for all four under all five attributes; 26, 26, 26 and 33
+472, asin 637, acos 633 and atan2 518 instructions; 60 to 70 words a
+function, 76 for all four under all five attributes; 26, 26, 26 and 33
 values live in the design's order and 25, 25, 25 and 31 scheduled; no
 scratch slot. asin and acos of one argument share their core here too
 (not measured at fp32; the same keying applies).
@@ -1268,7 +1449,7 @@ applied; PROPOSED):
   and atan2 (arity 2), each carried by its fragment from the golden
   generator (question 11), bound to the node's operands, QUIET to
   ENDQUIET, then RAISE;
-- the words are routine bank slots by bit pattern: 66, 74 and 89 for all
+- the words are routine bank slots by bit pattern: 67, 75 and 90 for all
   four functions at fp64, fp128 and fp256 (5.1);
 - **sharing:** the inliner's hash-consing already makes asin and acos of
   one operand share everything up to the quadrant's constant (2.1);
@@ -1308,7 +1489,7 @@ every point where the operation is not differentiable given its value.
 | operation | its tangent | where a tangent is zero | where it is not differentiable |
 |---|---|---|---|
 | `atan(a)` | `da / fma(a, a, 1)` | zero | - (at +-inf, fma(a, a, 1) is +inf and the tangent +-0, the limit) |
-| `asin(a)` | `da / sqrt(fma(-a, a, 1))` | zero | at a = +-1, da / +0: an infinity with divideByZero, or a NaN with invalid where da is +-0; past +-1 the root is a NaN, and so is the tangent |
+| `asin(a)` | `da / sqrt(fma(-a, a, 1))` | zero | at a = +-1, da / +-0, the zero's sign fma's: +0, but -0 under rdn (IEEE 754 6.3, an exact zero sum), so an infinity with divideByZero whose sign is da's under four attributes and the other under rdn, or a NaN with invalid where da is +-0; past +-1 the root is a NaN, and so is the tangent |
 | `acos(a)` | `da / (-sqrt(fma(-a, a, 1)))` | zero | as asin's, with the other sign |
 | `atan2(a, b)` | `fma(b, da, -(a * db)) / fma(b, b, a * a)` | `(b * da) / fma(b, b, a * a)`; or `(-(a * db)) / fma(b, b, a * a)` | at the origin, 0/0: a NaN with invalid; see "magnitudes" |
 
@@ -1378,7 +1559,15 @@ run the quick tests and the long runs are the lead's.
    replayed and its guess counted. MEASURED as a probe (`onseq.py`): all
    80 configurations at fp32's double word, fp64, fp128 and fp256, 0 lanes
    differing from the model and 0 unmarked lanes differing from
-   transcend.py.
+   transcend.py. **And the corner the pools do not reach** (send-back 1):
+   atan2 with a subnormal or tiny |y| against |x| over the whole range
+   above it (`m4measure`'s region `tinyn`, `corner.py`), every attribute,
+   on the model and on seq.py; the build's tests take it as a committed
+   set, since the stage's pools keep the operands' exponents close.
+   MEASURED by the lead (`box-out2/corner-seq.*.out.txt`): 0 wrong and
+   0 lanes differing from the model at every format and attribute, 2,000
+   lanes at fp64 and fp32's double word, 500 at fp128, 300 at fp256,
+   1,000 in the triple word, scheduled.
 2. **The index's exactness,** per lane: n_h/P in [1/2, 2], Sterbenz's
    premise, and n_h - P equal to its exact value (an audit of the one
    instruction the design calls exact by Sterbenz, as M2 audits its
@@ -1395,9 +1584,14 @@ run the quick tests and the long runs are the lead's.
 3. **The bound, against an independent reference,** mpmath at 4p + 200
    bits (MPFR where the stage has it), at each region's own worst points
    (3.2's five); |V - f| / Bv under 1, the margins stated by the budget's
-   bound, the sampled worst only as the lower bound it is. Budgets over
-   larger samples, end-weighted as M1's were, are the lead's on
-   amd-arc-box.
+   bound, the sampled worst only as the lower bound it is, and each
+   cell's figure the largest of every budget and worst there is (3.2: a
+   budget bounds its own sample). Budgets over larger samples,
+   end-weighted as M1's were, are the lead's on amd-arc-box. The corner
+   (item 1) is measured, not budgeted: the budget's sampler keeps every
+   quotient below atan's gate out, so its bound there is mpmath's error
+   on the unmarked lanes, and a lane whose Bv underflows counts as broken
+   (3.6, item 10).
 4. **The mark-rate law** with the bound inflated, by each lane's own
    2^-G' sig(V), over arguments whose values spread (asin, acos; atan2 and
    atan below their constants), every unmarked lane right and every
@@ -1435,21 +1629,26 @@ red where one is left unmarked; **bound**, |V - f| / Bv past 1 over
 placed points (the edge, small and big regions, 48 a function each),
 mpmath at 4p + 200 bits; **specials**, every row of 4 under all five
 attributes, red on a wrong unmarked lane; **audit**, item 2's 214 lanes,
-red on a broken premise, an inexact n_h - P or a wrong unmarked answer.
+red on a broken premise, an inexact n_h - P or a wrong unmarked answer;
+**corner** (send-back 1), 100 lanes of the region `tinyn` under rne and
+rtz, red on a wrong unmarked lane, or under rne on an unmarked lane past
+its bound or with its Bv underflowed.
 The control (no plant) is red in nothing, its largest placed error
 2^-6.7 Bv; it marks 38 pool lanes (atan2's range) and 35 of 820
-structured candidates.
+structured candidates. The table is the lead's run on amd-arc-box at
+b13e3e38 (`box-out2/plants.fp64.out.txt`), with the corner check; the
+earlier desktop run, without it, is `plants.fp64.out.txt`.
 
 | plant | the fault | red in | the first named case of each (fp64) |
 |---|---|---|---|
 | table-entry | atan(3/8)'s high word one ulp off | pools, bound, specials, audit | atan rne 3/8 - ulp (0x3fd7ffffffffffff) wrong; 2^42.7 Bv; atan2 "subnormal both, minSub / 3 minSub" wrong; 10 audit lanes wrong |
-| coef | the z^1 coefficient without its low word | bound | atan 2^28.2 Bv (largest 2^33.5) |
-| newton-short | the quotient's reciprocal one Newton step short | structured, bound, specials | asin rtz 3 2^-25 unmarked and wrong; atan 2^3.3 Bv; atan2 rtz "one ulp off, divisor 1 + ulp" wrong |
+| coef | the z^1 coefficient without its low word | bound, corner | atan 2^28.2 Bv (largest 2^33.5); atan2 2^31.9 Bv |
+| newton-short | the quotient's reciprocal one Newton step short | structured, bound, specials, corner | asin rtz 3 2^-25 unmarked and wrong; atan 2^3.3 Bv; atan2 rtz "one ulp off, divisor 1 + ulp" wrong; corner atan2 2^11.6 Bv |
 | sterbenz-bias | k chosen without the 63/64 bias | audit | of 214 lanes the premise broken on 86, n_h - P inexact on 24, 23 answers wrong |
-| zl-dropped | z's low word left out of the head | bound | atan 2^27.1 Bv (largest 2^35.2) |
-| sl-dropped | s's low word left out of atan(s) = s P | pools, structured, bound, specials, audit | atan rtz 5 + ulp wrong; asin rtz 3 2^-25 unmarked and wrong; 2^36.3 Bv; asin rtz "gate 2^-27" wrong |
-| pio2-low | pi/2's low word dropped | pools, structured, bound, specials | atan rne 1.25 + ulp wrong; atan rtz two ulps from a window's centre next to pi/2 unmarked; 2^42.8 Bv; atan rtz "2^55" wrong |
-| bound-loose | the in-lane bound 2^40 too small | structured, bound | asin rtz 3 2^-25 unmarked; 2^28.9 Bv |
+| zl-dropped | z's low word left out of the head | bound, corner | atan 2^27.1 Bv (largest 2^35.2); atan2 2^31.4 Bv |
+| sl-dropped | s's low word left out of atan(s) = s P | pools, structured, bound, specials, audit, corner | atan rtz 5 + ulp wrong; asin rtz 3 2^-25 unmarked and wrong; 2^36.3 Bv; asin rtz "gate 2^-27" wrong; corner atan2 2^42.4 Bv |
+| pio2-low | pi/2's low word dropped | pools, structured, bound, specials, corner | atan rne 1.25 + ulp wrong; atan rtz two ulps from a window's centre next to pi/2 unmarked; 2^42.8 Bv; atan rtz "2^55" wrong; corner atan2 2^42.5 Bv |
+| bound-loose | the in-lane bound 2^40 too small | structured, bound, corner | asin rtz 3 2^-25 unmarked; 2^28.9 Bv; corner: a Bv underflowed to 0 |
 | mark-silenced | the flag word never carries the mark | structured | asin rtz 3 2^-25 unmarked |
 | tiny-gate-off | no tiny path | pools, specials | atan rne minSub wrong; "+minSub" wrong |
 | tiny-side | the tiny path on the wrong side | pools, specials | atan rtz minSub wrong; "+minSub" wrong |
@@ -1457,10 +1656,11 @@ structured candidates.
 | signed-zero | atan2(+-0, -0) answered +-0, not +-pi | pools, specials | atan2 rne (+0, -0) wrong; "9.2.1 y +0, x -0" wrong |
 | side-rule-off | the exact-quotient rule not applied | pools | atan2 rtz (2^-60, 1) marked off the list |
 | side-rule-sign | the rule's FMA rounded away from zero | pools, specials | atan2 rtz (2^-60, 1) wrong; "exact quotient 2^-60 / 1" wrong |
-| range-off | the tiny-quotient range not marked | pools, specials | atan2 rne (1, maxN) wrong; "9.2.1 y +1, x +maxN" wrong |
+| range-off | the tiny-quotient range not marked | pools, specials, corner | atan2 rne (1, maxN) wrong; "9.2.1 y +1, x +maxN" wrong; a corner lane wrong |
 | u-low-dropped | u's low word left out of the root's residual | pools, bound, specials | asin rne 3 2^-27 wrong; 2^40.1 Bv; asin rtz "gate 2^-27" wrong |
 | sqrt-product | 1 - x^2 formed directly (2.4) | bound | asin 2^1.8 Bv (largest 2^24.0) |
-| quadrant | sigma from the swap alone, x's sign ignored | pools, bound, specials | atan2 rne (1, -1) wrong; 2^93.4 Bv; "9.2.1 y +1, x -1" wrong |
+| quadrant | sigma from the swap alone, x's sign ignored | pools, bound, specials, corner | atan2 rne (1, -1) wrong; 2^93.4 Bv; "9.2.1 y +1, x -1" wrong; corner atan2 2^9.9 Bv |
+| prescale-d | atan2's 2^3p prescale keyed on d, the first design (3.6, item 9) | corner | atan2 rne (0x812d63ff0271ce60, 0x3c3053b19c7200ec): 2^26.0 Bv |
 
 The brief's five: the 9.2.1 signed zeros (signed-zero), the exact-quotient
 rule (side-rule-off, side-rule-sign), the tiny gates (tiny-gate-off,
@@ -1470,20 +1670,28 @@ tiny-side), the domain edge at +-1 (domain-edge) and the mark
 
 - **Every check is the only one to see some plant:** the pools alone see
   side-rule-off (a mark off the list, every answer right); the structured
-  lanes alone see mark-silenced; the bound alone sees coef, zl-dropped and
-  sqrt-product, accuracy faults far under the last bit that no pool lane
-  reached; the audit alone sees sterbenz-bias. The specials are never alone
-  at fp64 but name the 9.2.1 and gate rows by label.
+  lanes alone see mark-silenced; the bound alone sees sqrt-product, an
+  accuracy fault far under the last bit that no pool lane reached (coef and
+  zl-dropped, the same kind, the corner's bound check sees too); the audit
+  alone sees sterbenz-bias; the corner alone sees prescale-d, the fault the
+  verifier found and no other check reached. The
+  specials are never alone at fp64 but name the 9.2.1 and gate rows by
+  label.
 - **fp32's triple word** (`twrun.py plants`; the pools under rne and the
   bound over the edge region, 200 lanes a function): the control is red in
   nothing (largest 2^-6.11 Bv); q2-dropped (the quotient's third word) red
   in the bound, 2^17.6 Bv; w2-dropped (the root's third word) 2^17.3;
   z2-dropped (2 s_0 s_2 left out of z's third word) 2^6.3; head3-two (two
-  of the three planned triple-word head steps in two words) 2^6.7.
-  **head3-short, one step, is red in nothing:** its largest error, 2^-3.32
-  Bv, is inside the bound, so that step is margin and not need (`plan_tw`
-  keeps two bits a word, M1's planner's rule). It is kept in the run as a
-  measurement of that margin and is not counted as a plant; the build's
+  of the three planned triple-word head steps in two words) 2^6.7;
+  prescale-d and range-low (3.6, items 9 and 10) red in the corner check
+  alone (7 corner lanes past the bound; 15 with Bv underflowed), and
+  head3-short, below, is a variant, not a plant.
+  **head3-short, one step, is a variant measure, not a plant** (send-back
+  1: a plant that cannot go red is a check that cannot fail): its largest
+  error, 2^-3.32 Bv, is inside the bound, so that step is margin and not
+  need (`plan_tw` keeps two bits a word, M1's planner's rule). `m4tw.py`
+  lists it apart (VARIANTS_TW) and `twrun.py plants` labels it so (the
+  box's run, before the label, printed it among the plants); the build's
   planner may take the step back after a budget (MEASURED: 47
   instructions a function, atan 472 to 425; the error is a sample's, not a
   budget's, so the step is not proposed away here).
@@ -1505,7 +1713,7 @@ tiny-side), the domain edge at +-1 (domain-edge) and the mark
    question 3 chose for exp's table.*
 3. **fp32.** Logan's answer on M1's study binds the triple word at
    G = 40, and it is built and measured here (2.8): atan 472, asin 637,
-   acos 633 and atan2 516 instructions, 75 words for all four; 25 values
+   acos 633 and atan2 518 instructions, 76 words for all four; 25 values
    live scheduled, 31 for atan2, **whose 33 in the design's order do not
    fit the 32 registers**, so atan2 needs the depth-first schedule and
    leaves one register across a call; 0 wrong over the pools on the model
@@ -1524,23 +1732,33 @@ tiny-side), the domain edge at +-1 (domain-edge) and the mark
    (`gcheck.py`): at G = 46 fp64's four fragments are the same
    instructions with one word changed, the bound's (the head's K = 6 and
    the tail's degree 12 are unchanged), so the budget's 0.058 Bv at G = 44
-   is 0.23 Bv at 46 (COMPUTED, times 4): still two bits, and a mark four
-   times rarer, for nothing. fp128 and fp256 keep about five bits at 46
-   (0.030 and 0.023 Bv). Raising fp64 to 46 for these four functions alone
-   would give the library two guards at one format; whether M1's and M2's
-   fp64 routines can take 46 is theirs to measure, so this is offered, not
-   recommended.
+   is 0.233 Bv at 46 (COMPUTED, times 4), and the box's 0.0669 is 0.268 at
+   46, 1.9 bits, 0.292 and 1.8 bits with its residual: under the planners'
+   two-bit line (the first text said "still two bits", from the desktop's
+   budget alone); a mark four times rarer. fp128 and fp256 keep about five
+   bits at 46 (0.030 and 0.023 Bv). Raising fp64 to 46 for these four
+   functions alone would give the library two guards at one format;
+   whether M1's and M2's fp64 routines can take 46 is theirs to measure,
+   so this is offered, not recommended.
 5. **atan2's tiny quotients** (x > 0, |y/x| below 2^(emin+p+2), where the
    result is subnormal or nearly so): marked and replayed (4
    instructions), or decided in-lane by M1's fixed grid (ESTIMATE about
    40 instructions more, a sixth of atan2). The subnormal midpoint
    atan2(minSubnormal, 2) is one of them. *Recommended: mark them.* They
-   need |y/x| below 2^-967 at fp64; a workload that lives there can take
-   the fixed grid later, as M2's question 2 left LDX.
+   need |y/x| below 2^-967 at fp64 (below 2^-74 for fp32's triple word,
+   whose third words need the larger margin: 3.6, item 10); a workload
+   that lives there can take the fixed grid later, as M2's question 2 left
+   LDX. A tiny |y| with |y/x| above the range is not one of them: since
+   send-back 1 the prescale keyed on n decides it (2.5).
 6. **atan2's exact-quotient rule in-lane** (x > 0, k = 0, the remainder
    zero, below atan's gate: one FMA toward zero, 7 instructions).
    Without it every atan2(y, 2^k) with y below about 2^(k - (p+G)/2), and
-   every y a scaled copy of x, would mark. *Recommended: keep it.*
+   every y a scaled copy of x, would mark. It decides the exact quotients
+   whose s_h comes out exact (169 of 200 at fp64, 2.5) and leaves the rest
+   to the mark under the directed attributes. *Recommended: keep it;* a
+   second remainder after one correction of s_h would catch the rest
+   (ESTIMATE: about 3 instructions), left to the build if their marks
+   matter to a workload.
 7. **The structured families** (3.5) mark and are replayed: the tiny
    family (atan's x^3/3, asin's x^3/6, atan2's exact quotients above the
    gate), whole windows next to pi/2 and pi (atan of a large x, acos of a
@@ -1558,7 +1776,19 @@ tiny-side), the domain edge at +-1 (domain-edge) and the mark
    routines.LIVE_CAP* (5.2): 15, 16, 16 and 19 for atan, asin, acos and
    atan2 at fp64, fp128 and fp256, and 25, 25, 25 and 31 at fp32 (the
    triple word, scheduled), each the better of the design's order and
-   mathlib's depth-first one.
+   mathlib's depth-first one, **with M4's phase names added to mathlib's
+   PHASE_ORDER**, in the design's order (front, sqrt, index, num, den,
+   quotient, z, then M1's tail and head, atan_s, table, then recon onward).
+   `schedule_order` chooses between its ranked order, which ranks by
+   PHASE_ORDER and holds none of these names, and the depth-first order;
+   as PHASE_ORDER stands only the depth-first order can run, and it gives
+   16, 20, 20 and 19. MEASURED (`phaseorder.py`, mathlib's own
+   `_ranked_order` and `schedule_order` with the names added, at all four
+   double-word formats and five attributes): the ranked order then gives
+   the design's 15, 16, 16 and 21, and `schedule_order` takes 15, 16, 16
+   and 19. The triple word's 25, 25, 25 and 31 are depth-first values. If
+   the build does not add the names, the caps it reaches are 16, 20, 20
+   and 19 (send-back 1, verifier-VM4S's note).
 10. **The derivative rules** (7). *Recommended:* `da / fma(a, a, 1)`;
     `da / sqrt(fma(-a, a, 1))` and `da / (-sqrt(fma(-a, a, 1)))`, 1 - a^2
     by one FMA rather than (1 - a)(1 + a); `fma(b, da, -(a * db)) /
@@ -1633,7 +1863,11 @@ name.
 | `plants.py` | the plants and the checks they must turn red, the index's audit (8, item 2) among them |
 | `uform.py`, `gcheck.py` | asin's and acos's 1 - x^2 in three forms (2.4); fp64's fragments at G = 46 against 44 (question 4) |
 | `fingerprint.py` | one hash of the 100 default fragments, to show which runs measured the same model |
-| `box_m4s.sh` | the handed-back larger runs for amd-arc-box (not run here): the budgets at 12,000 and 3,000 lanes, the rate law at 50,000 and 20,000, fp128's and fp256's tiny census, the triple word over 20,000 a region |
+| `box_m4s.sh`, `box-out/` | the first handed-back runs for amd-arc-box: the budgets at 12,000 and 3,000 lanes, the rate law at 50,000 and 20,000, fp128's and fp256's tiny census, the triple word over 20,000 a region; run by the lead at ade0cd7e on amd-arc-box (python 3.12.3, mpmath 1.4.1, 70 jobs, every exit code 0, 939 s), its outputs as copied, 71 files |
+| `box_m4s2.sh`, `box-out2/` | send-back 1's re-measurement for the box: everything atan2's two fixes touch (the pools on the model and on seq.py, the specials, the costs, the corner and its plants, atan2's budgets at both sizes, the census, the rate law with its crowding split, the plants, the triple word, the exact-quotient rule, the probes below); run by the lead at b13e3e38 on amd-arc-box (144 jobs, every exit code 0, 932 s), its outputs as copied, 145 files |
+| `corner.py`, `exactq.py` | atan2's tiny-numerator corner on the model and on seq.py, with a plant in place (3.6, item 9); what the exact-quotient rule decides (2.5) |
+| `rate.py`'s split, `bound_table.py`, `phaseorder.py` | the rate law by crowding (3.4); the bound cell by cell from every budget and worst kept (3.2); mathlib's ranked order with M4's phase names (question 9) |
+| `tinyc.py`, `sbias_probe.py`, `set-aside/` | the tiny family's centres (3.5); the unbiased index's failing lane (3.6, item 7); the two budget outputs 3.6, item 3 cites |
 | `queue.sh`, `jobs*.txt`, `queue*.log` | the batches: the runner, its job lists, each run's start and end (the logs' rc is date's, not the job's: 3.6, item 8) |
 | `*.out.txt` | each run's output as captured, named for its script, its format (fp32's double word as `fp32-dw18`, its triple word as `fp32-tw`) and its region, family or seed |
 
@@ -1653,6 +1887,22 @@ costs outputs are queue 6's (13:31 to 13:32); every triple-word output is
 queue 7's or 9's, after the triple word's fixes (3.6, item 5) and equal to
 queue 6's where both ran; the plants and u forms are queues 8 and 9's.
 `m4budget.py`'s fix (3.6, item 3) came before every budget cited.
+
+**After send-back 1** atan2's fragments changed (the prescale keyed on n,
+and the triple word's range edge), and the hashes with them: the double
+word's is 0723d7ff33be34bc... and the triple word's 33fe202ac76bb409...,
+in the lead's run of `box_m4s2.sh` at b13e3e38 (`box-out2/fingerprint.out.txt`;
+the later relabelling of head3-short as a variant moves no default
+fragment). Every figure the study gives for the model after the fix is
+from `box-out2/` (run at b13e3e38) or from a desktop probe named where it
+is cited; the top-level outputs are the desktop's runs before the fix,
+kept as captured. For atan, asin and acos, whose fragments the fix did not
+touch, both hold: `box-out2/`'s costs, pools, specials, census and regions
+give the same figures for them, and for atan2 every region's budget and
+worst is unchanged too (3.3), since no region's operand reaches the
+prescale. `twrun-plants.fp32-tw.out.txt` at the top level is a desktop
+rerun after the relabelling (`box-out2/`'s copy printed head3-short among
+the plants).
 
 The runs, their times and the desktop's load are in the round's ledger,
 `Data/runs/2026-10-12-math-round/ledger/M4S.md`, which is outside the

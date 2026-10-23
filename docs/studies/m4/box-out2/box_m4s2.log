@@ -1,0 +1,288 @@
+== 2026-10-23 15:33:59 start: rate-box-fp64-random
+== 2026-10-23 15:33:59 start: rate-box-fp128-random
+== 2026-10-23 15:33:59 start: rate-box-fp256-random
+== 2026-10-23 15:33:59 start: rate-box-fp64-edge
+== 2026-10-23 15:33:59 start: rate-box-fp128-edge
+== 2026-10-23 15:33:59 start: tw-measure-box-random
+== 2026-10-23 15:33:59 start: rate-box-fp256-edge
+== 2026-10-23 15:33:59 start: tw-measure-box-edge
+== 2026-10-23 15:33:59 start: tw-measure-box-big
+== 2026-10-23 15:33:59 start: tw-measure-box-small
+== 2026-10-23 15:33:59 start: tw-measure-box-diag
+== 2026-10-23 15:33:59 start: budget-box-fp64-atan2-random
+== 2026-10-23 15:33:59 start: budget-box-fp128-atan2-random
+== 2026-10-23 15:33:59 start: budget-box-fp256-atan2-random
+== 2026-10-23 15:33:59 start: budget-box-fp128-atan2-edge
+== 2026-10-23 15:33:59 start: budget-box-fp64-atan2-edge
+== 2026-10-23 15:33:59 start: budget-box-fp256-atan2-edge
+== 2026-10-23 15:33:59 start: budget-box-fp64-atan2-big
+== 2026-10-23 15:33:59 start: budget-box-fp128-atan2-big
+== 2026-10-23 15:33:59 start: budget-box-fp256-atan2-big
+== 2026-10-23 15:33:59 start: budget-box-fp128-atan2-small
+== 2026-10-23 15:33:59 start: budget-box-fp64-atan2-small
+== 2026-10-23 15:33:59 start: budget-box-fp256-atan2-small
+== 2026-10-23 15:33:59 start: budget-box-fp64-atan2-diag
+== 2026-10-23 15:34:25 end (0): budget-box-fp128-atan2-small
+== 2026-10-23 15:34:25 start: budget-box-fp128-atan2-diag
+== 2026-10-23 15:34:56 end (0): budget-box-fp128-atan2-random
+== 2026-10-23 15:34:56 start: budget-box-fp256-atan2-diag
+== 2026-10-23 15:35:19 end (0): budget-box-fp64-atan2-small
+== 2026-10-23 15:35:19 start: plants.fp64
+== 2026-10-23 15:35:25 end (0): budget-box-fp128-atan2-big
+== 2026-10-23 15:35:25 start: twrun-plants.fp32-tw
+== 2026-10-23 15:35:41 end (0): budget-box-fp128-atan2-diag
+== 2026-10-23 15:35:41 start: corner.fp64
+== 2026-10-23 15:35:59 end (0): budget-box-fp128-atan2-edge
+== 2026-10-23 15:35:59 start: corner-seq.fp64
+== 2026-10-23 15:36:13 end (0): corner.fp64
+== 2026-10-23 15:36:13 start: corner-prescale-d.fp64
+== 2026-10-23 15:36:43 end (0): corner-prescale-d.fp64
+== 2026-10-23 15:36:43 start: corner.fp32-dw18
+== 2026-10-23 15:36:45 end (0): budget-box-fp64-atan2-random
+== 2026-10-23 15:36:45 start: corner-seq.fp32-dw18
+== 2026-10-23 15:36:48 end (0): budget-box-fp64-atan2-big
+== 2026-10-23 15:36:48 start: corner-prescale-d.fp32-dw18
+== 2026-10-23 15:36:53 end (0): corner-seq.fp64
+== 2026-10-23 15:36:53 start: corner.fp128
+== 2026-10-23 15:37:00 end (0): corner.fp32-dw18
+== 2026-10-23 15:37:00 start: corner-seq.fp128
+== 2026-10-23 15:37:01 end (0): corner-prescale-d.fp32-dw18
+== 2026-10-23 15:37:01 start: corner-prescale-d.fp128
+== 2026-10-23 15:37:02 end (0): corner.fp128
+== 2026-10-23 15:37:02 start: corner.fp256
+== 2026-10-23 15:37:07 end (0): corner-prescale-d.fp128
+== 2026-10-23 15:37:07 start: corner-seq.fp256
+== 2026-10-23 15:37:08 end (0): corner-seq.fp32-dw18
+== 2026-10-23 15:37:08 start: corner-prescale-d.fp256
+== 2026-10-23 15:37:08 end (0): corner-seq.fp128
+== 2026-10-23 15:37:08 start: corner.fp32-tw
+== 2026-10-23 15:37:13 end (0): corner.fp256
+== 2026-10-23 15:37:13 start: corner-seq.fp32-tw
+== 2026-10-23 15:37:14 end (0): corner-prescale-d.fp256
+== 2026-10-23 15:37:14 start: corner-prescale-d.fp32-tw
+== 2026-10-23 15:37:19 end (0): budget-box-fp256-atan2-small
+== 2026-10-23 15:37:19 start: corner-range-low.fp32-tw
+== 2026-10-23 15:37:23 end (0): twrun-plants.fp32-tw
+== 2026-10-23 15:37:23 start: pools_run.fp64
+== 2026-10-23 15:37:24 end (0): corner-seq.fp256
+== 2026-10-23 15:37:24 start: onseq.fp64
+== 2026-10-23 15:37:28 end (0): corner.fp32-tw
+== 2026-10-23 15:37:28 start: specials.fp64
+== 2026-10-23 15:37:30 end (0): specials.fp64
+== 2026-10-23 15:37:30 start: costs.fp64
+== 2026-10-23 15:37:30 end (0): costs.fp64
+== 2026-10-23 15:37:30 start: pools_run.fp128
+== 2026-10-23 15:37:33 end (0): corner-prescale-d.fp32-tw
+== 2026-10-23 15:37:33 start: onseq.fp128
+== 2026-10-23 15:37:33 end (0): plants.fp64
+== 2026-10-23 15:37:33 start: specials.fp128
+== 2026-10-23 15:37:34 end (0): pools_run.fp64
+== 2026-10-23 15:37:34 start: costs.fp128
+== 2026-10-23 15:37:35 end (0): costs.fp128
+== 2026-10-23 15:37:35 start: pools_run.fp256
+== 2026-10-23 15:37:35 end (0): specials.fp128
+== 2026-10-23 15:37:35 start: onseq.fp256
+== 2026-10-23 15:37:39 end (0): budget-box-fp256-atan2-random
+== 2026-10-23 15:37:39 start: specials.fp256
+== 2026-10-23 15:37:41 end (0): specials.fp256
+== 2026-10-23 15:37:41 start: costs.fp256
+== 2026-10-23 15:37:42 end (0): pools_run.fp128
+== 2026-10-23 15:37:42 start: pools_run.fp32-dw18
+== 2026-10-23 15:37:42 end (0): costs.fp256
+== 2026-10-23 15:37:42 start: onseq.fp32-dw18
+== 2026-10-23 15:37:49 end (0): pools_run.fp256
+== 2026-10-23 15:37:49 start: specials.fp32-dw18
+== 2026-10-23 15:37:50 end (0): specials.fp32-dw18
+== 2026-10-23 15:37:50 start: costs.fp32-dw18
+== 2026-10-23 15:37:50 end (0): costs.fp32-dw18
+== 2026-10-23 15:37:50 start: share.fp64
+== 2026-10-23 15:37:51 end (0): share.fp64
+== 2026-10-23 15:37:51 start: share.fp128
+== 2026-10-23 15:37:51 end (0): pools_run.fp32-dw18
+== 2026-10-23 15:37:51 start: share.fp256
+== 2026-10-23 15:37:51 end (0): share.fp128
+== 2026-10-23 15:37:51 start: sched
+== 2026-10-23 15:37:51 end (0): share.fp256
+== 2026-10-23 15:37:51 start: fingerprint
+== 2026-10-23 15:37:52 end (0): fingerprint
+== 2026-10-23 15:37:52 start: gcheck
+== 2026-10-23 15:37:52 end (0): gcheck
+== 2026-10-23 15:37:52 start: budget.fp64-atan2-random
+== 2026-10-23 15:37:52 end (0): sched
+== 2026-10-23 15:37:52 start: budget.fp64-atan2-edge
+== 2026-10-23 15:37:54 end (0): corner-range-low.fp32-tw
+== 2026-10-23 15:37:54 start: budget.fp64-atan2-big
+== 2026-10-23 15:37:56 end (0): onseq.fp128
+== 2026-10-23 15:37:56 start: budget.fp64-atan2-small
+== 2026-10-23 15:37:56 end (0): budget-box-fp64-atan2-diag
+== 2026-10-23 15:37:56 start: budget.fp64-atan2-diag
+== 2026-10-23 15:38:00 end (0): budget.fp64-atan2-small
+== 2026-10-23 15:38:00 start: budget.fp128-atan2-random
+== 2026-10-23 15:38:01 end (0): onseq.fp256
+== 2026-10-23 15:38:01 start: budget.fp128-atan2-edge
+== 2026-10-23 15:38:04 end (0): onseq.fp64
+== 2026-10-23 15:38:04 start: budget.fp128-atan2-big
+== 2026-10-23 15:38:06 end (0): budget.fp64-atan2-random
+== 2026-10-23 15:38:06 start: budget.fp128-atan2-small
+== 2026-10-23 15:38:07 end (0): budget.fp128-atan2-random
+== 2026-10-23 15:38:07 start: budget.fp128-atan2-diag
+== 2026-10-23 15:38:08 end (0): budget.fp128-atan2-edge
+== 2026-10-23 15:38:08 start: budget.fp256-atan2-random
+== 2026-10-23 15:38:09 end (0): budget.fp128-atan2-small
+== 2026-10-23 15:38:09 start: budget.fp256-atan2-edge
+== 2026-10-23 15:38:11 end (0): onseq.fp32-dw18
+== 2026-10-23 15:38:11 start: budget.fp256-atan2-big
+== 2026-10-23 15:38:13 end (0): budget.fp64-atan2-diag
+== 2026-10-23 15:38:13 start: budget.fp256-atan2-small
+== 2026-10-23 15:38:13 end (0): budget.fp128-atan2-big
+== 2026-10-23 15:38:13 start: budget.fp256-atan2-diag
+== 2026-10-23 15:38:14 end (0): budget.fp128-atan2-diag
+== 2026-10-23 15:38:14 start: budget.fp32-dw18-atan2-random
+== 2026-10-23 15:38:15 end (0): budget.fp64-atan2-edge
+== 2026-10-23 15:38:15 start: budget.fp32-dw18-atan2-edge
+== 2026-10-23 15:38:17 end (0): budget.fp64-atan2-big
+== 2026-10-23 15:38:17 start: budget.fp32-dw18-atan2-big
+== 2026-10-23 15:38:19 end (0): corner-seq.fp32-tw
+== 2026-10-23 15:38:19 start: budget.fp32-dw18-atan2-small
+== 2026-10-23 15:38:23 end (0): budget.fp32-dw18-atan2-small
+== 2026-10-23 15:38:23 start: budget.fp32-dw18-atan2-diag
+== 2026-10-23 15:38:25 end (0): budget.fp256-atan2-small
+== 2026-10-23 15:38:25 start: census.fp64-tiny
+== 2026-10-23 15:38:28 end (0): budget.fp256-atan2-random
+== 2026-10-23 15:38:28 start: census.fp64-near
+== 2026-10-23 15:38:29 end (0): budget.fp32-dw18-atan2-edge
+== 2026-10-23 15:38:29 start: census.fp64-acos1
+== 2026-10-23 15:38:31 end (0): budget.fp32-dw18-atan2-random
+== 2026-10-23 15:38:31 start: census.fp64-ratio
+== 2026-10-23 15:38:31 end (0): census.fp64-acos1
+== 2026-10-23 15:38:31 start: census.fp64-diag
+== 2026-10-23 15:38:33 end (0): budget.fp32-dw18-atan2-big
+== 2026-10-23 15:38:33 start: census.fp128-tiny
+== 2026-10-23 15:38:33 end (0): census.fp64-ratio
+== 2026-10-23 15:38:33 start: census.fp128-near
+== 2026-10-23 15:38:36 end (0): budget.fp256-atan2-big
+== 2026-10-23 15:38:36 start: census.fp128-acos1
+== 2026-10-23 15:38:39 end (0): census.fp128-acos1
+== 2026-10-23 15:38:39 start: census.fp128-ratio
+== 2026-10-23 15:38:40 end (0): census.fp128-ratio
+== 2026-10-23 15:38:40 start: census.fp128-diag
+== 2026-10-23 15:38:41 end (0): budget.fp256-atan2-edge
+== 2026-10-23 15:38:41 start: census.fp256-tiny
+== 2026-10-23 15:38:43 end (0): census.fp64-near
+== 2026-10-23 15:38:43 start: census.fp256-near
+== 2026-10-23 15:38:44 end (0): budget.fp32-dw18-atan2-diag
+== 2026-10-23 15:38:44 start: census.fp256-acos1
+== 2026-10-23 15:38:45 end (0): census.fp64-tiny
+== 2026-10-23 15:38:45 start: census.fp256-ratio
+== 2026-10-23 15:38:47 end (0): census.fp256-ratio
+== 2026-10-23 15:38:47 start: census.fp256-diag
+== 2026-10-23 15:38:50 end (0): census.fp256-acos1
+== 2026-10-23 15:38:50 start: census.fp32-dw18-tiny
+== 2026-10-23 15:38:55 end (0): census.fp64-diag
+== 2026-10-23 15:38:55 start: census.fp32-dw18-near
+== 2026-10-23 15:38:59 end (0): census.fp128-near
+== 2026-10-23 15:38:59 start: census.fp32-dw18-acos1
+== 2026-10-23 15:39:02 end (0): census.fp32-dw18-acos1
+== 2026-10-23 15:39:02 start: census.fp32-dw18-ratio
+== 2026-10-23 15:39:04 end (0): census.fp32-dw18-ratio
+== 2026-10-23 15:39:04 start: census.fp32-dw18-diag
+== 2026-10-23 15:39:05 end (0): census.fp256-diag
+== 2026-10-23 15:39:05 start: rate.fp64-seed3
+== 2026-10-23 15:39:05 end (0): census.fp256-near
+== 2026-10-23 15:39:05 start: rate.fp128-seed3
+== 2026-10-23 15:39:05 end (0): budget-box-fp64-atan2-edge
+== 2026-10-23 15:39:05 start: rate.fp256-seed3
+== 2026-10-23 15:39:07 end (0): census.fp128-diag
+== 2026-10-23 15:39:07 start: rate.fp32-dw18-seed3
+== 2026-10-23 15:39:08 end (0): budget-box-fp256-atan2-big
+== 2026-10-23 15:39:08 start: twrun-pools.fp32-tw
+== 2026-10-23 15:39:08 end (0): budget-box-fp256-atan2-edge
+== 2026-10-23 15:39:08 start: twrun-costs.fp32-tw
+== 2026-10-23 15:39:08 end (0): budget.fp256-atan2-diag
+== 2026-10-23 15:39:08 start: twrun-onseq.fp32-tw
+== 2026-10-23 15:39:08 end (0): census.fp32-dw18-tiny
+== 2026-10-23 15:39:08 start: twrun-measure.fp32-tw-random
+== 2026-10-23 15:39:09 end (0): twrun-costs.fp32-tw
+== 2026-10-23 15:39:09 start: twrun-measure.fp32-tw-edge
+== 2026-10-23 15:39:11 end (0): census.fp32-dw18-near
+== 2026-10-23 15:39:11 start: twrun-measure.fp32-tw-big
+== 2026-10-23 15:39:22 end (0): census.fp32-dw18-diag
+== 2026-10-23 15:39:22 start: twrun-measure.fp32-tw-small
+== 2026-10-23 15:39:42 end (0): twrun-pools.fp32-tw
+== 2026-10-23 15:39:42 start: twrun-measure.fp32-tw-diag
+== 2026-10-23 15:39:46 end (0): rate.fp32-dw18-seed3
+== 2026-10-23 15:39:46 start: exactq.fp64
+== 2026-10-23 15:39:50 end (0): twrun-measure.fp32-tw-random
+== 2026-10-23 15:39:50 start: exactq.fp32-dw18
+== 2026-10-23 15:39:52 end (0): census.fp128-tiny
+== 2026-10-23 15:39:52 start: exactq.fp128
+== 2026-10-23 15:39:53 end (0): twrun-measure.fp32-tw-edge
+== 2026-10-23 15:39:53 start: exactq.fp256
+== 2026-10-23 15:39:55 end (0): rate.fp256-seed3
+== 2026-10-23 15:39:55 start: tinyc
+== 2026-10-23 15:39:57 end (0): exactq.fp256
+== 2026-10-23 15:39:57 start: sbias_probe
+== 2026-10-23 15:39:57 end (0): sbias_probe
+== 2026-10-23 15:39:57 start: measure.fp64-random
+== 2026-10-23 15:39:59 end (0): tinyc
+== 2026-10-23 15:39:59 start: measure.fp64-edge
+== 2026-10-23 15:40:00 end (0): rate.fp64-seed3
+== 2026-10-23 15:40:00 start: measure.fp64-big
+== 2026-10-23 15:40:01 end (0): exactq.fp128
+== 2026-10-23 15:40:01 start: measure.fp64-small
+== 2026-10-23 15:40:04 end (0): rate.fp128-seed3
+== 2026-10-23 15:40:04 start: measure.fp64-diag
+== 2026-10-23 15:40:04 end (0): exactq.fp32-dw18
+== 2026-10-23 15:40:04 start: measure.fp128-random
+== 2026-10-23 15:40:09 end (0): twrun-onseq.fp32-tw
+== 2026-10-23 15:40:09 start: measure.fp128-edge
+== 2026-10-23 15:40:13 end (0): measure.fp128-random
+== 2026-10-23 15:40:13 start: measure.fp128-big
+== 2026-10-23 15:40:15 end (0): measure.fp64-random
+== 2026-10-23 15:40:15 start: measure.fp128-small
+== 2026-10-23 15:40:15 end (0): measure.fp128-edge
+== 2026-10-23 15:40:15 start: measure.fp128-diag
+== 2026-10-23 15:40:16 end (0): exactq.fp64
+== 2026-10-23 15:40:16 start: measure.fp256-random
+== 2026-10-23 15:40:17 end (0): measure.fp64-edge
+== 2026-10-23 15:40:17 start: measure.fp256-edge
+== 2026-10-23 15:40:18 end (0): measure.fp64-big
+== 2026-10-23 15:40:18 start: measure.fp256-big
+== 2026-10-23 15:40:20 end (0): measure.fp128-small
+== 2026-10-23 15:40:20 start: measure.fp256-small
+== 2026-10-23 15:40:20 end (0): twrun-measure.fp32-tw-diag
+== 2026-10-23 15:40:20 start: measure.fp256-diag
+== 2026-10-23 15:40:20 end (0): measure.fp128-diag
+== 2026-10-23 15:40:20 start: measure.fp32-dw18-random
+== 2026-10-23 15:40:22 end (0): measure.fp128-big
+== 2026-10-23 15:40:22 start: measure.fp32-dw18-edge
+== 2026-10-23 15:40:23 end (0): twrun-measure.fp32-tw-big
+== 2026-10-23 15:40:23 start: measure.fp32-dw18-big
+== 2026-10-23 15:40:24 end (0): measure.fp256-edge
+== 2026-10-23 15:40:24 start: measure.fp32-dw18-small
+== 2026-10-23 15:40:25 end (0): measure.fp64-diag
+== 2026-10-23 15:40:25 start: measure.fp32-dw18-diag
+== 2026-10-23 15:40:25 end (0): rate-box-fp128-random
+== 2026-10-23 15:40:27 end (0): measure.fp256-small
+== 2026-10-23 15:40:28 end (0): measure.fp256-diag
+== 2026-10-23 15:40:29 end (0): measure.fp256-big
+== 2026-10-23 15:40:29 end (0): measure.fp256-random
+== 2026-10-23 15:40:30 end (0): measure.fp64-small
+== 2026-10-23 15:40:32 end (0): twrun-measure.fp32-tw-small
+== 2026-10-23 15:40:32 end (0): measure.fp32-dw18-random
+== 2026-10-23 15:40:36 end (0): census.fp256-tiny
+== 2026-10-23 15:40:36 end (0): measure.fp32-dw18-small
+== 2026-10-23 15:40:37 end (0): measure.fp32-dw18-big
+== 2026-10-23 15:40:37 end (0): measure.fp32-dw18-edge
+== 2026-10-23 15:40:38 end (0): measure.fp32-dw18-diag
+== 2026-10-23 15:41:05 end (0): tw-measure-box-diag
+== 2026-10-23 15:41:11 end (0): tw-measure-box-small
+== 2026-10-23 15:41:22 end (0): tw-measure-box-random
+== 2026-10-23 15:41:35 end (0): tw-measure-box-big
+== 2026-10-23 15:42:03 end (0): rate-box-fp128-edge
+== 2026-10-23 15:42:37 end (0): budget-box-fp256-atan2-diag
+== 2026-10-23 15:42:50 end (0): tw-measure-box-edge
+== 2026-10-23 15:42:52 end (0): rate-box-fp256-edge
+== 2026-10-23 15:43:03 end (0): rate-box-fp256-random
+== 2026-10-23 15:47:12 end (0): rate-box-fp64-random
+== 2026-10-23 15:49:31 end (0): rate-box-fp64-edge

@@ -1,0 +1,25 @@
+fp32 atan2 diag seed 2 G default: 1000 main lanes of 1000; 185 instructions (unpruned), 47 ever round; 21s
+  max |E|/Bv 0.03877 (2^-4.69); max |M|/Bv 0.0124 (2^-6.33); second-order residual at most 0.00496 Bv
+  observed maxima summed 0.06675 (2^-3.91); capacities summed 0.06738 (2^-3.89)
+  THE BUDGET'S BOUND: M_max + capacities = 0.07978 Bv (2^-3.65)
+  by phase (observed, capacity), in Bv:
+     recon          5.968e-02  5.968e-02
+     quotient       4.866e-03  5.487e-03
+     atan_s         1.861e-03  1.865e-03
+     tail           2.441e-04  2.447e-04
+     head           8.913e-05  9.012e-05
+     z              5.100e-06  5.138e-06
+     den            3.810e-08  4.901e-08
+     index          0.000e+00  0.000e+00
+     num            0.000e+00  0.000e+00
+     final          0.000e+00  0.000e+00
+     special        0.000e+00  0.000e+00
+  the 8 largest capacities:
+     # 138 add   recon          capacity 2.653e-02  observed 2.653e-02
+     # 137 add   recon          capacity 1.326e-02  observed 1.326e-02
+     # 112 add   recon          capacity 9.947e-03  observed 9.947e-03
+     # 113 add   recon          capacity 9.947e-03  observed 9.947e-03
+     #  48 fma   quotient       capacity 3.006e-03  observed 2.396e-03
+     #  49 mul   quotient       capacity 2.476e-03  observed 2.465e-03
+     #  90 fma   atan_s         capacity 1.243e-03  observed 1.241e-03
+     #  88 fma   atan_s         capacity 6.217e-04  observed 6.204e-04

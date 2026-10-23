@@ -1,0 +1,4 @@
+fp256 atan rne random seed 1: 500 main of 500, wrong 0, marked 0; largest |V - f|/Bv 2^-191.06 at 0x4006c6db465086e23fb0b3d9d78adacd692eb1bfe29d4b6109cad331f7ec950b; 3s
+fp256 asin rne random seed 1: 500 main of 500, wrong 0, marked 0; largest |V - f|/Bv 2^-7.60 at 0xbfffad3db3ca0acfd1e11ca6489e050844c1130ea6448008e6484b60593d19e0; 6s
+fp256 acos rne random seed 1: 500 main of 500, wrong 0, marked 0; largest |V - f|/Bv 2^-12.31 at 0x3fffb15d04f8f7b0b324532eda178c7dae947b0b0e9139b8c9a55955abbeaba3; 9s
+fp256 atan2 rne random seed 1: 425 main of 500, wrong 0, marked 0; largest |V - f|/Bv 2^-7.62 at ('0xcee40d9ea180844e3cc60c18108ddab6660e399a56fbc5e77730cac56672c03d', '0x4ee44f2d9d496b30020eaabe21ca00bc287f6b89ee16946444bab9f4cbc19c63'); 12s

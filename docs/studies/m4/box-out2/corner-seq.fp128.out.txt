@@ -1,0 +1,5 @@
+fp128 atan2 rne corner tinyn seed 101 on seq.py: 500 lanes, 228 instructions: wrong unmarked 0, marked 15, differ from the model 0; largest |V - f|/Bv over the unmarked lanes 2^-66.01 (at (1227848782404715490711640714223260969, 9853530063101735712888880456241201259)); unmarked lanes whose Bv underflowed to 0: 0; 2s
+fp128 atan2 rtz corner tinyn seed 101 on seq.py: 500 lanes, 228 instructions: wrong unmarked 0, marked 15, differ from the model 0; 3s
+fp128 atan2 rdn corner tinyn seed 101 on seq.py: 500 lanes, 228 instructions: wrong unmarked 0, marked 15, differ from the model 0; 5s
+fp128 atan2 rup corner tinyn seed 101 on seq.py: 500 lanes, 228 instructions: wrong unmarked 0, marked 15, differ from the model 0; 6s
+fp128 atan2 rmm corner tinyn seed 101 on seq.py: 500 lanes, 228 instructions: wrong unmarked 0, marked 15, differ from the model 0; 8s

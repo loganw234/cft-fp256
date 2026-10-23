@@ -1,0 +1,13 @@
+fp64 near pi/2 atan, grid boundary 0, x0 = 1/(pi/2 - b) 0x434d02967c31cdb5: 129 arguments; marked rne 0, rtz 129, rdn 129, rup 129, rmm 0; guesses right 387 of 387; wrong 0
+fp64 near pi/2 acos, grid boundary 0, x0 = pi/2 - b 0x3c91a62633145c07: 129 arguments; marked rne 0, rtz 129, rdn 129, rup 129, rmm 0; guesses right 387 of 387; wrong 0
+fp64 near pi/2 atan, grid boundary 1, x0 = 1/(pi/2 - b) 0x4329153d9443ed0b: 129 arguments; marked rne 0, rtz 129, rdn 129, rup 129, rmm 0; guesses right 387 of 387; wrong 0
+fp64 near pi/2 acos, grid boundary 1, x0 = pi/2 - b 0x3cb469898cc51702: 129 arguments; marked rne 0, rtz 129, rdn 129, rup 129, rmm 0; guesses right 387 of 387; wrong 0
+fp64 near pi atan2(y, -1), grid boundary 0, y0 = pi - b 0x3ca1a62633145c07: 129 arguments; marked rne 0, rtz 129, rdn 129, rup 129, rmm 0; guesses right 384 of 387; wrong 0
+fp64 near pi atan2(y, -1), grid boundary 1, y0 = pi - b 0x3cc469898cc51702: 129 arguments; marked rne 0, rtz 129, rdn 129, rup 129, rmm 0; guesses right 387 of 387; wrong 0
+fp64 near pi/2 atan, midpoint boundary 0, x0 = 1/(pi/2 - b) 0x43349ff16b9c1e3e: 129 arguments; marked rne 129, rtz 0, rdn 0, rup 0, rmm 129; guesses right 256 of 258; wrong 0
+fp64 near pi/2 acos, midpoint boundary 0, x0 = pi/2 - b 0x3ca8d313198a2e03: 129 arguments; marked rne 129, rtz 0, rdn 0, rup 0, rmm 129; guesses right 258 of 258; wrong 0
+fp64 near pi/2 atan, midpoint boundary 1, x0 = 1/(pi/2 - b) 0x43220538781986c3: 129 arguments; marked rne 129, rtz 0, rdn 0, rup 0, rmm 129; guesses right 258 of 258; wrong 0
+fp64 near pi/2 acos, midpoint boundary 1, x0 = pi/2 - b 0x3cbc69898cc51702: 129 arguments; marked rne 129, rtz 0, rdn 0, rup 0, rmm 129; guesses right 258 of 258; wrong 0
+fp64 near pi atan2(y, -1), midpoint boundary 0, y0 = pi - b 0x3cb8d313198a2e03: 129 arguments; marked rne 129, rtz 0, rdn 0, rup 0, rmm 129; guesses right 258 of 258; wrong 0
+fp64 near pi atan2(y, -1), midpoint boundary 1, y0 = pi - b 0x3ccc69898cc51702: 129 arguments; marked rne 129, rtz 0, rdn 0, rup 0, rmm 129; guesses right 258 of 258; wrong 0
+fp64 near pi/2 atan rtz, the window's extent: +1:M -1:M +2:M -2:M +4:M -4:M +8:M -8:M +16:M -16:M +32:M -32:M +64:M -64:M +128:M -128:M +256:M -256:M +512:M -512:M +1024:M -1024:M +2048:. -2048:. +4096:. -4096:. +8192:. -8192:.

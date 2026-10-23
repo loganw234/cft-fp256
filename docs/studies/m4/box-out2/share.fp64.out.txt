@@ -1,0 +1,5 @@
+fp64 rne asin + acos: 255 instructions together, against 438 apart; 34 beyond asin's 221
+fp64 rtz asin + acos: 255 instructions together, against 438 apart; 34 beyond asin's 221
+fp64 rdn asin + acos: 255 instructions together, against 438 apart; 34 beyond asin's 221
+fp64 rup asin + acos: 255 instructions together, against 438 apart; 34 beyond asin's 221
+fp64 rmm asin + acos: 255 instructions together, against 438 apart; 34 beyond asin's 221

@@ -1,0 +1,4 @@
+fp64 atan rne edge seed 1: 2000 main of 2000, wrong 0, marked 0; largest |V - f|/Bv 2^-6.93 at 0xbfb038d109f350ad; 4s
+fp64 asin rne edge seed 1: 2000 main of 2000, wrong 0, marked 0; largest |V - f|/Bv 2^-6.91 at 0xbfb02cca73cb0f77; 8s
+fp64 acos rne edge seed 1: 2000 main of 2000, wrong 0, marked 0; largest |V - f|/Bv 2^-6.81 at 0x3fefef7733abd978; 13s
+fp64 atan2 rne edge seed 1: 2000 main of 2000, wrong 0, marked 0; largest |V - f|/Bv 2^-6.80 at ('0xef9f450b0566b2ed', '0x6fdedde8572757ac'); 17s

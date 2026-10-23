@@ -1,0 +1,145 @@
+fp32 atan +0: rne 0x0 flags 0x0; equal 5, marked 0, wrong 0
+fp32 atan -0: rne 0x80000000 flags 0x0; equal 5, marked 0, wrong 0
+fp32 atan +inf: rne 0x3fc90fdb flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan -inf: rne 0xbfc90fdb flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan qNaN: rne 0x7fc00000 flags 0x0; equal 5, marked 0, wrong 0
+fp32 atan sNaN: rne 0x7fc00000 flags 0x1; equal 5, marked 0, wrong 0
+fp32 atan +minSub: rne 0x1 flags 0x18; equal 5, marked 0, wrong 0
+fp32 atan -minSub: rne 0x80000001 flags 0x18; equal 5, marked 0, wrong 0
+fp32 atan +maxSub: rne 0x7fffff flags 0x18; equal 5, marked 0, wrong 0
+fp32 atan +minNormal: rne 0x800000 flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan -minNormal: rne 0x80800000 flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan gate - ulp (2^-13 - ulp): rne 0x38ffffff flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan gate 2^-13: rne 0x39000000 flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan +1: rne 0x3f490fdb flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan -1: rne 0xbf490fdb flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan +maxN: rne 0x3fc90fdb flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan -maxN: rne 0xbfc90fdb flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan 2^24: rne 0x3fc90fda flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan 2^26: rne 0x3fc90fdb flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan: all rows, attributes equal 95, marked 0, wrong 0
+fp32 asin +0: rne 0x0 flags 0x0; equal 5, marked 0, wrong 0
+fp32 asin -0: rne 0x80000000 flags 0x0; equal 5, marked 0, wrong 0
+fp32 asin +inf: rne 0x7fc00000 flags 0x1; equal 5, marked 0, wrong 0
+fp32 asin -inf: rne 0x7fc00000 flags 0x1; equal 5, marked 0, wrong 0
+fp32 asin qNaN: rne 0x7fc00000 flags 0x0; equal 5, marked 0, wrong 0
+fp32 asin sNaN: rne 0x7fc00000 flags 0x1; equal 5, marked 0, wrong 0
+fp32 asin +minSub: rne 0x1 flags 0x18; equal 5, marked 0, wrong 0
+fp32 asin -minSub: rne 0x80000001 flags 0x18; equal 5, marked 0, wrong 0
+fp32 asin +maxSub: rne 0x7fffff flags 0x18; equal 5, marked 0, wrong 0
+fp32 asin +minNormal: rne 0x800000 flags 0x10; equal 5, marked 0, wrong 0
+fp32 asin -minNormal: rne 0x80800000 flags 0x10; equal 5, marked 0, wrong 0
+fp32 asin gate - ulp (2^-12 - ulp): rne 0x397fffff flags 0x10; equal 5, marked 0, wrong 0
+fp32 asin gate 2^-12: rne 0x39800000 flags 0x10; equal 5, marked 0, wrong 0
+fp32 asin +1: rne 0x3fc90fdb flags 0x10; equal 5, marked 0, wrong 0
+fp32 asin -1: rne 0xbfc90fdb flags 0x10; equal 5, marked 0, wrong 0
+fp32 asin 1 - ulp: rne 0x3fc9048a flags 0x10; equal 5, marked 0, wrong 0
+fp32 asin -(1 - ulp): rne 0xbfc9048a flags 0x10; equal 5, marked 0, wrong 0
+fp32 asin 1 + ulp: rne 0x7fc00000 flags 0x1; equal 5, marked 0, wrong 0
+fp32 asin -(1 + ulp): rne 0x7fc00000 flags 0x1; equal 5, marked 0, wrong 0
+fp32 asin +maxN: rne 0x7fc00000 flags 0x1; equal 5, marked 0, wrong 0
+fp32 asin +1/2: rne 0x3f060a92 flags 0x10; equal 5, marked 0, wrong 0
+fp32 asin -1/2: rne 0xbf060a92 flags 0x10; equal 5, marked 0, wrong 0
+fp32 asin nearest 1/sqrt2: rne 0x3f490fda flags 0x10; equal 5, marked 0, wrong 0
+fp32 asin: all rows, attributes equal 115, marked 0, wrong 0
+fp32 acos +0: rne 0x3fc90fdb flags 0x10; equal 5, marked 0, wrong 0
+fp32 acos -0: rne 0x3fc90fdb flags 0x10; equal 5, marked 0, wrong 0
+fp32 acos +inf: rne 0x7fc00000 flags 0x1; equal 5, marked 0, wrong 0
+fp32 acos -inf: rne 0x7fc00000 flags 0x1; equal 5, marked 0, wrong 0
+fp32 acos qNaN: rne 0x7fc00000 flags 0x0; equal 5, marked 0, wrong 0
+fp32 acos sNaN: rne 0x7fc00000 flags 0x1; equal 5, marked 0, wrong 0
+fp32 acos +minSub: rne 0x3fc90fdb flags 0x10; equal 5, marked 0, wrong 0
+fp32 acos -minSub: rne 0x3fc90fdb flags 0x10; equal 5, marked 0, wrong 0
+fp32 acos +maxSub: rne 0x3fc90fdb flags 0x10; equal 5, marked 0, wrong 0
+fp32 acos +minNormal: rne 0x3fc90fdb flags 0x10; equal 5, marked 0, wrong 0
+fp32 acos -minNormal: rne 0x3fc90fdb flags 0x10; equal 5, marked 0, wrong 0
+fp32 acos gate - ulp (2^-12 - ulp): rne 0x3fc907db flags 0x10; equal 5, marked 0, wrong 0
+fp32 acos gate 2^-12: rne 0x3fc907db flags 0x10; equal 5, marked 0, wrong 0
+fp32 acos +1: rne 0x0 flags 0x0; equal 5, marked 0, wrong 0
+fp32 acos -1: rne 0x40490fdb flags 0x10; equal 5, marked 0, wrong 0
+fp32 acos 1 - ulp: rne 0x39b504f3 flags 0x10; equal 5, marked 0, wrong 0
+fp32 acos -(1 - ulp): rne 0x40490a32 flags 0x10; equal 5, marked 0, wrong 0
+fp32 acos 1 + ulp: rne 0x7fc00000 flags 0x1; equal 5, marked 0, wrong 0
+fp32 acos -(1 + ulp): rne 0x7fc00000 flags 0x1; equal 5, marked 0, wrong 0
+fp32 acos +maxN: rne 0x7fc00000 flags 0x1; equal 5, marked 0, wrong 0
+fp32 acos +1/2: rne 0x3f860a92 flags 0x10; equal 5, marked 0, wrong 0
+fp32 acos -1/2: rne 0x40060a92 flags 0x10; equal 5, marked 0, wrong 0
+fp32 acos nearest 1/sqrt2: rne 0x3f490fdb flags 0x10; equal 5, marked 0, wrong 0
+fp32 acos: all rows, attributes equal 115, marked 0, wrong 0
+fp32 atan2 9.2.1 y +0, x +0: rne 0x0 flags 0x0; equal 5, marked 0, wrong 0
+fp32 atan2 9.2.1 y +0, x -0: rne 0x40490fdb flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan2 9.2.1 y +0, x +1: rne 0x0 flags 0x0; equal 5, marked 0, wrong 0
+fp32 atan2 9.2.1 y +0, x -1: rne 0x40490fdb flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan2 9.2.1 y +0, x +inf: rne 0x0 flags 0x0; equal 5, marked 0, wrong 0
+fp32 atan2 9.2.1 y +0, x -inf: rne 0x40490fdb flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan2 9.2.1 y +0, x +maxN: rne 0x0 flags 0x0; equal 5, marked 0, wrong 0
+fp32 atan2 9.2.1 y -0, x +0: rne 0x80000000 flags 0x0; equal 5, marked 0, wrong 0
+fp32 atan2 9.2.1 y -0, x -0: rne 0xc0490fdb flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan2 9.2.1 y -0, x +1: rne 0x80000000 flags 0x0; equal 5, marked 0, wrong 0
+fp32 atan2 9.2.1 y -0, x -1: rne 0xc0490fdb flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan2 9.2.1 y -0, x +inf: rne 0x80000000 flags 0x0; equal 5, marked 0, wrong 0
+fp32 atan2 9.2.1 y -0, x -inf: rne 0xc0490fdb flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan2 9.2.1 y -0, x +maxN: rne 0x80000000 flags 0x0; equal 5, marked 0, wrong 0
+fp32 atan2 9.2.1 y +1, x +0: rne 0x3fc90fdb flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan2 9.2.1 y +1, x -0: rne 0x3fc90fdb flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan2 9.2.1 y +1, x +1: rne 0x3f490fdb flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan2 9.2.1 y +1, x -1: rne 0x4016cbe4 flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan2 9.2.1 y +1, x +inf: rne 0x0 flags 0x0; equal 5, marked 0, wrong 0
+fp32 atan2 9.2.1 y +1, x -inf: rne 0x40490fdb flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan2 9.2.1 y +1, x +maxN: rne 0x200000 flags 0x90; equal 0, marked 5, wrong 0
+fp32 atan2 9.2.1 y -1, x +0: rne 0xbfc90fdb flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan2 9.2.1 y -1, x -0: rne 0xbfc90fdb flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan2 9.2.1 y -1, x +1: rne 0xbf490fdb flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan2 9.2.1 y -1, x -1: rne 0xc016cbe4 flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan2 9.2.1 y -1, x +inf: rne 0x80000000 flags 0x0; equal 5, marked 0, wrong 0
+fp32 atan2 9.2.1 y -1, x -inf: rne 0xc0490fdb flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan2 9.2.1 y -1, x +maxN: rne 0x80200000 flags 0x90; equal 0, marked 5, wrong 0
+fp32 atan2 9.2.1 y +inf, x +0: rne 0x3fc90fdb flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan2 9.2.1 y +inf, x -0: rne 0x3fc90fdb flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan2 9.2.1 y +inf, x +1: rne 0x3fc90fdb flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan2 9.2.1 y +inf, x -1: rne 0x3fc90fdb flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan2 9.2.1 y +inf, x +inf: rne 0x3f490fdb flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan2 9.2.1 y +inf, x -inf: rne 0x4016cbe4 flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan2 9.2.1 y +inf, x +maxN: rne 0x3fc90fdb flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan2 9.2.1 y -inf, x +0: rne 0xbfc90fdb flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan2 9.2.1 y -inf, x -0: rne 0xbfc90fdb flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan2 9.2.1 y -inf, x +1: rne 0xbfc90fdb flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan2 9.2.1 y -inf, x -1: rne 0xbfc90fdb flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan2 9.2.1 y -inf, x +inf: rne 0xbf490fdb flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan2 9.2.1 y -inf, x -inf: rne 0xc016cbe4 flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan2 9.2.1 y -inf, x +maxN: rne 0xbfc90fdb flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan2 9.2.1 y +minSub, x +0: rne 0x3fc90fdb flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan2 9.2.1 y +minSub, x -0: rne 0x3fc90fdb flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan2 9.2.1 y +minSub, x +1: rne 0x1 flags 0x90; equal 0, marked 5, wrong 0
+fp32 atan2 9.2.1 y +minSub, x -1: rne 0x40490fdb flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan2 9.2.1 y +minSub, x +inf: rne 0x0 flags 0x0; equal 5, marked 0, wrong 0
+fp32 atan2 9.2.1 y +minSub, x -inf: rne 0x40490fdb flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan2 9.2.1 y +minSub, x +maxN: rne 0x0 flags 0x90; equal 0, marked 5, wrong 0
+fp32 atan2 NaN y: rne 0x7fc00000 flags 0x0; equal 5, marked 0, wrong 0
+fp32 atan2 NaN x: rne 0x7fc00000 flags 0x0; equal 5, marked 0, wrong 0
+fp32 atan2 sNaN y: rne 0x7fc00000 flags 0x1; equal 5, marked 0, wrong 0
+fp32 atan2 sNaN x: rne 0x7fc00000 flags 0x1; equal 5, marked 0, wrong 0
+fp32 atan2 NaN, sNaN: rne 0x7fc00000 flags 0x1; equal 5, marked 0, wrong 0
+fp32 atan2 diagonal +1, +1: rne 0x3f490fdb flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan2 diagonal +1, -1: rne 0x4016cbe4 flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan2 diagonal -1, -1: rne 0xc016cbe4 flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan2 diagonal minSub, -minSub: rne 0x4016cbe4 flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan2 diagonal maxN, maxN: rne 0x3f490fdb flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan2 diagonal one off: 1+ulp, 1: rne 0x3f490fdc flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan2 exact quotient minSub/2 (a subnormal midpoint): rne 0x0 flags 0x90; equal 0, marked 5, wrong 0
+fp32 atan2 exact quotient -minSub/2: rne 0x80000000 flags 0x90; equal 0, marked 5, wrong 0
+fp32 atan2 exact quotient minSub/1: rne 0x1 flags 0x90; equal 0, marked 5, wrong 0
+fp32 atan2 exact quotient 2^(emin)/2^p: rne 0x0 flags 0x90; equal 0, marked 5, wrong 0
+fp32 atan2 exact quotient 2^-60 / 1: rne 0x21800000 flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan2 exact quotient 3 2^-60 / 3: rne 0x22400000 flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan2 exact quotient -2^-40 / 2: rne 0xab000000 flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan2 exact quotient at the gate 2^-14: rne 0x38800000 flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan2 exact quotient past the gate 2^-13: rne 0x39000000 flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan2 exact quotient 2^-60 against x < 0: rne 0x40490fdb flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan2 one ulp off exact 2^-60 / 1: rne 0x21800001 flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan2 one ulp off, divisor 1 + ulp: rne 0x217ffffe flags 0x10; equal 2, marked 3, wrong 0
+fp32 atan2 |y| dominant, 1 / 2^-60: rne 0x3fc90fdb flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan2 subnormal both, 3 minSub / minSub: rne 0x3f9fe0bb flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan2 subnormal both, minSub / 3 minSub: rne 0x3ea4bc7d flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan2 maxN / (0.9 maxN), d + c n past maxN unscaled: rne 0x3f5685f0 flags 0x10; equal 5, marked 0, wrong 0
+fp32 atan2: all rows, attributes equal 337, marked 43, wrong 0

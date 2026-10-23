@@ -1,0 +1,4 @@
+fp64 atan: G 44 K 6 D 12 176 instructions; G 46 K 6 D 12 176 instructions; the same opcodes in order: True; words that differ: ['BREL']
+fp64 asin: G 44 K 6 D 12 221 instructions; G 46 K 6 D 12 221 instructions; the same opcodes in order: True; words that differ: ['BREL']
+fp64 acos: G 44 K 6 D 12 217 instructions; G 46 K 6 D 12 217 instructions; the same opcodes in order: True; words that differ: ['BREL']
+fp64 atan2: G 44 K 6 D 12 218 instructions; G 46 K 6 D 12 218 instructions; the same opcodes in order: True; words that differ: ['BREL']

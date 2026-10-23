@@ -1,0 +1,29 @@
+fp32-tw atan rne: 472 instructions, 60 words, live 26 in the design's order, 25 scheduled; TwoSum 22, Fast2Sum 31; invariants (scheduled) hold; flag words ['0x0', '0x1', '0x10', '0x18', '0x90']
+   by phase {'front': 5, 'index': 7, 'num': 6, 'den': 12, 'quotient': 52, 'z': 29, 'tail': 2, 'head2': 26, 'head3': 158, 'atan_s': 40, 'table': 24, 'recon': 68, 'final': 27, 'classify': 4, 'special': 12}
+   plan: K3 3 K2 3 D 8 rho 0.066667
+fp32-tw atan rtz: 472 instructions, 60 words, live 26 in the design's order, 25 scheduled; TwoSum 22, Fast2Sum 31; invariants (scheduled) hold; flag words ['0x0', '0x1', '0x10', '0x18', '0x90']
+fp32-tw atan rdn: 472 instructions, 60 words, live 26 in the design's order, 25 scheduled; TwoSum 22, Fast2Sum 31; invariants (scheduled) hold; flag words ['0x0', '0x1', '0x10', '0x18', '0x90']
+fp32-tw atan rup: 472 instructions, 60 words, live 26 in the design's order, 25 scheduled; TwoSum 22, Fast2Sum 31; invariants (scheduled) hold; flag words ['0x0', '0x1', '0x10', '0x18', '0x90']
+fp32-tw atan rmm: 472 instructions, 60 words, live 26 in the design's order, 25 scheduled; TwoSum 22, Fast2Sum 31; invariants (scheduled) hold; flag words ['0x0', '0x1', '0x10', '0x18', '0x90']
+fp32-tw asin rne: 637 instructions, 62 words, live 26 in the design's order, 25 scheduled; TwoSum 32, Fast2Sum 42; invariants (scheduled) hold; flag words ['0x0', '0x1', '0x10', '0x18', '0x90']
+   by phase {'front': 10, 'sqrt': 97, 'index': 7, 'num': 40, 'den': 42, 'quotient': 53, 'z': 29, 'tail': 2, 'head2': 26, 'head3': 158, 'atan_s': 40, 'table': 24, 'recon': 64, 'final': 27, 'classify': 4, 'special': 14}
+   plan: K3 3 K2 3 D 8 rho 0.066667
+fp32-tw asin rtz: 637 instructions, 62 words, live 26 in the design's order, 25 scheduled; TwoSum 32, Fast2Sum 42; invariants (scheduled) hold; flag words ['0x0', '0x1', '0x10', '0x18', '0x90']
+fp32-tw asin rdn: 637 instructions, 62 words, live 26 in the design's order, 25 scheduled; TwoSum 32, Fast2Sum 42; invariants (scheduled) hold; flag words ['0x0', '0x1', '0x10', '0x18', '0x90']
+fp32-tw asin rup: 637 instructions, 62 words, live 26 in the design's order, 25 scheduled; TwoSum 32, Fast2Sum 42; invariants (scheduled) hold; flag words ['0x0', '0x1', '0x10', '0x18', '0x90']
+fp32-tw asin rmm: 637 instructions, 62 words, live 26 in the design's order, 25 scheduled; TwoSum 32, Fast2Sum 42; invariants (scheduled) hold; flag words ['0x0', '0x1', '0x10', '0x18', '0x90']
+fp32-tw acos rne: 633 instructions, 61 words, live 26 in the design's order, 25 scheduled; TwoSum 32, Fast2Sum 42; invariants (scheduled) hold; flag words ['0x0', '0x1', '0x10', '0x90']
+   by phase {'front': 10, 'sqrt': 97, 'index': 7, 'num': 40, 'den': 42, 'quotient': 53, 'z': 29, 'tail': 2, 'head2': 26, 'head3': 158, 'atan_s': 40, 'table': 24, 'recon': 66, 'final': 27, 'classify': 3, 'special': 9}
+   plan: K3 3 K2 3 D 8 rho 0.066667
+fp32-tw acos rtz: 633 instructions, 61 words, live 26 in the design's order, 25 scheduled; TwoSum 32, Fast2Sum 42; invariants (scheduled) hold; flag words ['0x0', '0x1', '0x10', '0x90']
+fp32-tw acos rdn: 633 instructions, 61 words, live 26 in the design's order, 25 scheduled; TwoSum 32, Fast2Sum 42; invariants (scheduled) hold; flag words ['0x0', '0x1', '0x10', '0x90']
+fp32-tw acos rup: 633 instructions, 61 words, live 26 in the design's order, 25 scheduled; TwoSum 32, Fast2Sum 42; invariants (scheduled) hold; flag words ['0x0', '0x1', '0x10', '0x90']
+fp32-tw acos rmm: 633 instructions, 61 words, live 26 in the design's order, 25 scheduled; TwoSum 32, Fast2Sum 42; invariants (scheduled) hold; flag words ['0x0', '0x1', '0x10', '0x90']
+fp32-tw atan2 rne: 518 instructions, 70 words, live 33 in the design's order, 31 scheduled; TwoSum 22, Fast2Sum 31; invariants (scheduled) hold; flag words ['0x0', '0x1', '0x10', '0x90']
+   by phase {'front': 19, 'index': 7, 'num': 6, 'den': 12, 'quotient': 52, 'z': 29, 'tail': 2, 'head2': 26, 'head3': 158, 'atan_s': 40, 'table': 24, 'recon': 82, 'final': 27, 'special': 34}
+   plan: K3 3 K2 3 D 8 rho 0.066667
+fp32-tw atan2 rtz: 518 instructions, 70 words, live 33 in the design's order, 31 scheduled; TwoSum 22, Fast2Sum 31; invariants (scheduled) hold; flag words ['0x0', '0x1', '0x10', '0x90']
+fp32-tw atan2 rdn: 518 instructions, 70 words, live 33 in the design's order, 31 scheduled; TwoSum 22, Fast2Sum 31; invariants (scheduled) hold; flag words ['0x0', '0x1', '0x10', '0x90']
+fp32-tw atan2 rup: 518 instructions, 70 words, live 33 in the design's order, 31 scheduled; TwoSum 22, Fast2Sum 31; invariants (scheduled) hold; flag words ['0x0', '0x1', '0x10', '0x90']
+fp32-tw atan2 rmm: 518 instructions, 70 words, live 33 in the design's order, 31 scheduled; TwoSum 22, Fast2Sum 31; invariants (scheduled) hold; flag words ['0x0', '0x1', '0x10', '0x90']
+fp32-tw bank words, all four functions and five attributes: 76

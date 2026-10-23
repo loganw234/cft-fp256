@@ -1,0 +1,32 @@
+fp128 atan rne G'=6 random seed 3: 2000 lanes, marked 1 = 0.05%; M1's law 2.26% (-6.6 sigma); each lane's own 2^-G' sig(V) sums to 49.1 = 2.45% (-6.9 sigma); guesses right 1 of 1; wrong unmarked 0; 6s
+    within an ulp of pi/4, pi/2, 3pi/4 or pi: 1982 lanes, marked 0, each lane's own law 48.6 (-7.1 sigma)
+    the rest: 18 lanes, marked 1, each lane's own law 0.4 (+0.9 sigma)
+    distinct arguments: 2000 of 2000
+fp128 atan rtz G'=6 random seed 3: 2000 lanes, marked 0 = 0.00%; M1's law 2.26% (-6.8 sigma); each lane's own 2^-G' sig(V) sums to 49.1 = 2.45% (-7.1 sigma); guesses right 0 of 0; wrong unmarked 0; 13s
+    within an ulp of pi/4, pi/2, 3pi/4 or pi: 1982 lanes, marked 0, each lane's own law 48.6 (-7.1 sigma)
+    the rest: 18 lanes, marked 0, each lane's own law 0.4 (-0.7 sigma)
+    distinct arguments: 2000 of 2000
+fp128 asin rne G'=6 random seed 3: 2000 lanes, marked 47 = 2.35%; M1's law 2.26% (+0.3 sigma); each lane's own 2^-G' sig(V) sums to 46.9 = 2.35% (+0.0 sigma); guesses right 47 of 47; wrong unmarked 0; 22s
+    within an ulp of pi/4, pi/2, 3pi/4 or pi: 0 lanes, marked 0, each lane's own law 0.0 (+0.0 sigma)
+    the rest: 2000 lanes, marked 47, each lane's own law 46.9 (+0.0 sigma)
+    distinct arguments: 2000 of 2000
+fp128 asin rtz G'=6 random seed 3: 2000 lanes, marked 43 = 2.15%; M1's law 2.26% (-0.3 sigma); each lane's own 2^-G' sig(V) sums to 46.9 = 2.35% (-0.6 sigma); guesses right 43 of 43; wrong unmarked 0; 31s
+    within an ulp of pi/4, pi/2, 3pi/4 or pi: 0 lanes, marked 0, each lane's own law 0.0 (+0.0 sigma)
+    the rest: 2000 lanes, marked 43, each lane's own law 46.9 (-0.6 sigma)
+    distinct arguments: 2000 of 2000
+fp128 acos rne G'=6 random seed 3: 2000 lanes, marked 49 = 2.45%; M1's law 2.26% (+0.6 sigma); each lane's own 2^-G' sig(V) sums to 49.0 = 2.45% (+0.0 sigma); guesses right 49 of 49; wrong unmarked 0; 39s
+    within an ulp of pi/4, pi/2, 3pi/4 or pi: 337 lanes, marked 0, each lane's own law 8.3 (-2.9 sigma)
+    the rest: 1663 lanes, marked 49, each lane's own law 40.7 (+1.3 sigma)
+    distinct arguments: 2000 of 2000
+fp128 acos rtz G'=6 random seed 3: 2000 lanes, marked 46 = 2.30%; M1's law 2.26% (+0.1 sigma); each lane's own 2^-G' sig(V) sums to 49.0 = 2.45% (-0.4 sigma); guesses right 46 of 46; wrong unmarked 0; 48s
+    within an ulp of pi/4, pi/2, 3pi/4 or pi: 337 lanes, marked 1, each lane's own law 8.3 (-2.6 sigma)
+    the rest: 1663 lanes, marked 45, each lane's own law 40.7 (+0.7 sigma)
+    distinct arguments: 2000 of 2000
+fp128 atan2 rne G'=6 random seed 3: 1718 lanes, marked 40 = 2.33%; M1's law 2.26% (+0.2 sigma); each lane's own 2^-G' sig(V) sums to 41.7 = 2.43% (-0.3 sigma); guesses right 40 of 40; wrong unmarked 0; 55s
+    within an ulp of pi/4, pi/2, 3pi/4 or pi: 402 lanes, marked 0, each lane's own law 9.9 (-3.2 sigma)
+    the rest: 1316 lanes, marked 40, each lane's own law 31.8 (+1.5 sigma)
+    distinct arguments: 1718 of 1718
+fp128 atan2 rtz G'=6 random seed 3: 1718 lanes, marked 26 = 1.51%; M1's law 2.26% (-2.1 sigma); each lane's own 2^-G' sig(V) sums to 41.7 = 2.43% (-2.5 sigma); guesses right 26 of 26; wrong unmarked 0; 59s
+    within an ulp of pi/4, pi/2, 3pi/4 or pi: 402 lanes, marked 1, each lane's own law 9.9 (-2.9 sigma)
+    the rest: 1316 lanes, marked 25, each lane's own law 31.8 (-1.2 sigma)
+    distinct arguments: 1718 of 1718

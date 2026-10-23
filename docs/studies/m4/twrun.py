@@ -140,7 +140,7 @@ def measure(n, mode):
 
 
 def plants():
-    for plant in (None,) + m4tw.PLANTS_TW:
+    for plant in (None,) + m4tw.PLANTS_TW + m4tw.VARIANTS_TW:
         red = []
         for fn in FNS:
             f = m4tw.build(FMT, RNE, fn, plant=plant)
@@ -189,7 +189,8 @@ def plants():
         if cw or cb or cz:
             red.append(f"corner: {cw} wrong unmarked, {cb} past the bound, "
                        f"{cz} with Bv underflowed")
-        print(f"fp32-tw plant {plant or 'none'}: red in "
+        kind = "variant (not a plant)" if plant in m4tw.VARIANTS_TW else "plant"
+        print(f"fp32-tw {kind} {plant or 'none'}: red in "
               f"{'; '.join(red) if red else 'NOTHING'} (largest edge error "
               f"2^{float(mpmath.log(worst, 2)) if worst else -999:.2f} Bv)", flush=True)
 

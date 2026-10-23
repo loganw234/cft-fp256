@@ -62,13 +62,18 @@ def plan_tw(fmt, G, rho):
     return K3, K23 - K3, D
 
 
-PLANTS_TW = ("q2-dropped", "head3-short", "head3-two", "w2-dropped", "z2-dropped",
+PLANTS_TW = ("q2-dropped", "head3-two", "w2-dropped", "z2-dropped",
              "prescale-d", "range-low")
+# a variant is measured beside the plants and is not one: head3-short, one
+# triple-word head step in two words, the cheaper variant the study
+# measured and did not propose (its error stays inside the bound, so it
+# cannot turn a check red; send-back 1)
+VARIANTS_TW = ("head3-short",)
 
 
 def build(fmt, rnd, fn, G=None, N=NTAB, bound_shift=0, plant=None):
     assert fn in FNS, fn
-    assert plant is None or plant in PLANTS_TW, plant
+    assert plant is None or plant in PLANTS_TW + VARIANTS_TW, plant
     p, W, mw = fmt.prec, fmt.width, fmt.man_w
     G = GUARD_TW if G is None else G
     inputs = ("a", "b") if fn == "atan2" else ("a",)
@@ -78,7 +83,7 @@ def build(fmt, rnd, fn, G=None, N=NTAB, bound_shift=0, plant=None):
     if plant in ("head3-short", "head3-two"):
         # one (two) of the planned triple-word head steps in two words; the
         # planner keeps two bits a word, so one step is margin (the study's
-        # 8: head3-short is red in nothing, a measurement of that margin)
+        # 8: head3-short is a variant, a measurement of that margin)
         mv = 1 if plant == "head3-short" else 2
         K3, K2 = K3 - mv, K2 + mv
     f.meta.update(G=G, N=N, K3=K3, K2=K2, D=D, rho=float(rho), data=set(),

@@ -1,0 +1,26 @@
+fp64 asin edge seed 2 G default: 300 main lanes of 300; 221 instructions (unpruned), 96 ever round; 3s
+  max |E|/Bv 0.008157 (2^-6.94); max |M|/Bv 0.003165 (2^-8.30); second-order residual at most 0.00732 Bv
+  observed maxima summed 0.03462 (2^-4.85); capacities summed 0.04414 (2^-4.50)
+  THE BUDGET'S BOUND: M_max + capacities = 0.0473 Bv (2^-4.40)
+  by phase (observed, capacity), in Bv:
+     sqrt           8.712e-03  9.803e-03
+     recon          7.360e-03  8.462e-03
+     quotient       6.308e-03  8.256e-03
+     den            2.149e-03  5.568e-03
+     tail           4.609e-03  4.639e-03
+     num            2.381e-03  3.989e-03
+     atan_s         2.732e-03  2.898e-03
+     head           3.423e-04  4.976e-04
+     z              2.252e-05  2.546e-05
+     index          0.000e+00  0.000e+00
+     final          0.000e+00  0.000e+00
+     special        0.000e+00  0.000e+00
+  the 8 largest capacities:
+     #  98 fma   tail           capacity 4.621e-03  observed 4.593e-03
+     # 178 add   recon          capacity 2.341e-03  observed 1.918e-03
+     # 188 add   recon          capacity 2.341e-03  observed 1.696e-03
+     #  31 fma   sqrt           capacity 2.151e-03  observed 1.452e-03
+     #  32 add   sqrt           capacity 2.076e-03  observed 2.017e-03
+     #  34 mul   sqrt           capacity 1.952e-03  observed 1.864e-03
+     # 153 fma   atan_s         capacity 1.932e-03  observed 1.773e-03
+     #  81 add   quotient       capacity 1.928e-03  observed 9.514e-04
