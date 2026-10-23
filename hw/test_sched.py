@@ -1190,12 +1190,14 @@ class env:
 
 def fake_ldd(kind):
     """A directory with an `ldd` that says what XRT-linked tools say (ok), that nothing is (no), that only cft-selftest is not (opt), or, as the box's does (parcel S3c),
-    finds the library only through LD_LIBRARY_PATH and otherwise says `not found` (env), or says `not found` for cft-selftest alone (optlost)."""
+    finds the library only through LD_LIBRARY_PATH and otherwise says `not found` (env), or says `not found` for cft-selftest alone: of libxrt_coreutil (optlost), or of
+    another library, naming no XRT at all (optother)."""
     d = os.path.join(TMP, "fakebin-" + kind)
     if not os.path.isdir(d):
         os.makedirs(d)
         body = {"ok": "echo '\tlibxrt_coreutil.so.2 => /fake/libxrt_coreutil.so.2 (0x0)'", "no": "echo '\tnot a dynamic executable'; exit 1",
                 "opt": 'case "$1" in *cft-selftest) echo "\tnot a dynamic executable"; exit 1;; *) echo "\tlibxrt_coreutil.so.2 => /fake/libxrt_coreutil.so.2 (0x0)";; esac',
+                "optother": 'case "$1" in *cft-selftest) echo "\tlibother.so.1 => not found";; *) echo "\tlibxrt_coreutil.so.2 => /fake/libxrt_coreutil.so.2 (0x0)";; esac',
                 "optlost": 'case "$1" in *cft-selftest) echo "\tlibxrt_coreutil.so.2 => not found";; *) echo "\tlibxrt_coreutil.so.2 => /fake/libxrt_coreutil.so.2 (0x0)";; esac',
                 "env": 'found=; IFS=:; for d in $LD_LIBRARY_PATH; do [ -f "$d/libxrt_coreutil.so.2" ] && found="$d/libxrt_coreutil.so.2"; done\n'
                        'if [ -n "$found" ]; then echo "\tlibxrt_coreutil.so.2 => $found (0x0)"; else echo "\tlibxrt_coreutil.so.2 => not found"; fi'}[kind]
@@ -1250,7 +1252,12 @@ def group_build():
           drv["targets"] == BD.TARGETS and drv["exes"] == BD.TOOLS and drv["optional"] == BD.OPTIONAL, f"{drv} {BD.TARGETS} {BD.TOOLS}")
     if os.name != "posix" or not all(shutil.which(x) for x in ("make", "sh", "git", "sed")):
         for n in ("a clean build is made, XRT=1 and every tool checked", "make failing, and a tool not made", "a tool that does not link XRT", "a build id that is not the tree's",
-                  "the dry tests in a built clone", "the vectors, the dry tests and the smoke as steps"):
+                  "the dry tests in a built clone", "the vectors, the dry tests and the smoke as steps",
+                  # parcel S3c: one name for each check below the build's old ones
+                  "XRT's setup.sh is sourced once, before the clone, and the build's make and ldd checks run in it", "cft-segrun --build-id runs in XRT's environment too",
+                  "every step runs in XRT's environment, with PYTHONDONTWRITEBYTECODE=1", "a tool that cannot run (cft-segrun exits non-zero) is not a build-id mismatch",
+                  "a tool that exits 0 printing the loader's error is refused tool-not-runnable", "a library ldd lists as not found is refused tool-not-runnable",
+                  "an optional tool that names XRT and whose library is not found is refused", "an optional tool that does not name XRT and whose other library is not found is refused"):
             skip(f"build: {n}", "needs POSIX with make, sh, sed and git")
         return
     ok_path = fake_ldd("ok") + os.pathsep + os.environ["PATH"]
@@ -1369,6 +1376,12 @@ def group_build():
     check("build: and so is an OPTIONAL tool (cft-selftest) whose library is `not found`: it names XRT, so it is not one that does not link it (whose step is skipped by name), and it cannot start; "
           "the job is refused naming it, and no step ran", refusal_of(jq[2]).startswith("tool-not-runnable:") and "cft-selftest" in refusal_of(jq[2]) and jq[1].get("outcome") == "refused"
           and not legs_of(jq[2]) and alone(rq, jq), refusal_of(jq[2])[:300])
+    with no_users(), env(PATH=fake_ldd("optother") + os.pathsep + os.environ["PATH"]):
+        rz, cz = mkroot2("b-optother")
+        jz = job(rz, cz, real(image="quad", steps=[{"type": "selftest"}, {"type": "api-test"}]))
+    check("build: and an OPTIONAL tool that does not name XRT at all, but whose ldd lists another library as `not found`, is refused too, and not skipped by name as one that merely lacks XRT is "
+          "(send-back 1): `tool-not-runnable` naming cft-selftest and the library, no step run", refusal_of(jz[2]).startswith("tool-not-runnable:") and "cft-selftest" in refusal_of(jz[2])
+          and "libother.so.1 => not found" in refusal_of(jz[2]) and jz[1].get("outcome") == "refused" and not legs_of(jz[2]) and alone(rz, jz), f"{jz[1].get('outcome')} {refusal_of(jz[2])[:200]!r}")
 
 
 # ---------------------------------------------------------------------------------------- images
@@ -2068,7 +2081,8 @@ def steps_refusals():
         with env(PATH=deaf_dir + os.pathsep + os.environ["PATH"]):
             deaf = verdict(lambda: BD.xrt_env({"xrt_root": fake_xrt()}))
         check("steps: a bash that is deaf to the environment (the WSL launcher a bare `bash` is on Windows) is not a bash that sourced nothing: the file it cannot see is `xrt-setup-failed`, not an empty "
-              "environment taken for success", (deaf or "").startswith("xrt-setup-failed:") and "bash exited 66" in deaf, str(deaf)[:300])
+              "environment taken for success; the refusal says what the status means (its standard error is empty), not only that bash exited",
+              (deaf or "").startswith("xrt-setup-failed:") and "could not read it (exit 66, the scheduler's own" in deaf and BD.UNSEEN == 66, str(deaf)[:300])
     else:
         skip("steps: a bash that is deaf to the environment is not a bash that sourced nothing", "needs POSIX with bash")
 
@@ -2964,13 +2978,15 @@ PLANTS = [  # (what is wrong, edits, the groups written for it, a fragment of th
      "build", "build: a tool that cannot run is not a build-id mismatch", "posix"),
     ("S3c: a loader error printed by a tool that exits 0 is not a tool that cannot run", [E("sched_build.py", "    if brc != 0 or LOADER_ERROR in bin_id:", "    if brc != 0:")], "build",
      "build: and one that exits 0 and prints the loader's error", "posix"),
-    ("S3c: a library ldd cannot find is not refused", [E("sched_build.py", "        if linked and lost:", "        if False:")], "build",
+    ("S3c: a library ldd cannot find is not refused", [E("sched_build.py", "        if lost and (linked or exe in OPTIONAL):", "        if False:")], "build",
      "build: a library ldd lists as `not found`", "posix"),
+    ("S3c: an optional tool whose other library is not found is skipped, as one that merely lacks XRT is", [E("sched_build.py", "        if lost and (linked or exe in OPTIONAL):", "        if linked and lost:")], "build",
+     "build: and an OPTIONAL tool that does not name XRT at all", "posix"),
     ("S3c: a missing setup.sh is not refused (neither by python, nor by bash's own look, nor by the status of sourcing it)",
      [E("sched_build.py", '    if not os.path.isfile(setup):\n        raise fail("is not a file")', '    if False:\n        raise fail("is not a file")'),
-      E("sched_build.py", '[ -f "$CFT_SCHED_XRT_SETUP" ] || exit 66; ', ""), E("sched_build.py", '    if rc != "0":', "    if False:")], "steps:refusals", "steps: a job that is not dry whose XRT setup.sh is not there", False),
+      E("sched_build.py", '[ -f "$CFT_SCHED_XRT_SETUP" ] || exit {UNSEEN}; ', ""), E("sched_build.py", '    if rc != "0":', "    if False:")], "steps:refusals", "steps: a job that is not dry whose XRT setup.sh is not there", False),
     ("S3c: a setup.sh that exits non-zero is not refused", [E("sched_build.py", '    if rc != "0":', "    if False:")], "steps:refusals", "steps: and a setup.sh that exits non-zero", "posix"),
-    ("S3c: a bash that cannot see the file sourced nothing, and that is taken for success", [E("sched_build.py", '[ -f "$CFT_SCHED_XRT_SETUP" ] || exit 66; ', "")], "steps:refusals",
+    ("S3c: a bash that cannot see the file sourced nothing, and that is taken for success", [E("sched_build.py", '[ -f "$CFT_SCHED_XRT_SETUP" ] || exit {UNSEEN}; ', "")], "steps:refusals",
      "steps: a bash that is deaf to the environment", "posix"),
     ("S3c: a dry job is refused for XRT's setup", [E("sched_staged.py", "        if dry or kind not in BD.KIND_ENVS:", "        if kind not in BD.KIND_ENVS:")], "steps:refusals",
      "steps: a dry job needs none of it", False),

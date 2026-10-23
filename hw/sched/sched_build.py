@@ -13,8 +13,10 @@ defaulted away (CLAUDE.md: without it backend_xrt.cpp is silently left out and e
                      (`cft-segrun --build-id`), as hw/card-segrun.sh asserts; or the tree's does not name the job's commit on a
                      clean tree (`commit=SHA tracked=clean untracked=none`), which also refuses the id `unknown`.
   tool-not-runnable  (parcel S3c) a tool cannot run here, which says nothing about its id: `cft-segrun --build-id` exited non-zero or
-                     printed the loader's error, or `ldd` lists a library of a tool as `not found`. The box's first card job (2026-10-23)
-                     was refused `build-id-mismatch` for `libxrt_coreutil.so.2: cannot open shared object file`.
+                     printed the loader's error, or `ldd` lists a library as `not found` for a tool that names XRT or is optional (a
+                     required tool that does not name XRT is `xrt-not-linked`; an optional one that merely lacks XRT is skipped by name,
+                     but not one that cannot load a library). The box's first card job (2026-10-23) was refused `build-id-mismatch` for
+                     `libxrt_coreutil.so.2: cannot open shared object file`.
   xrt-setup-failed   (parcel S3c, raised before the clone, by xrt_env) XRT's setup.sh is not there or cannot be sourced.
 XRT's ENVIRONMENT (parcel S3c). A tool linked against XRT finds libxrt_coreutil through LD_LIBRARY_PATH, which XRT's setup.sh sets, and
 the box's shells do not source it: hw/card-stress.sh does (its lines 25 to 31), which is why the driver ran and the scheduler's own
@@ -47,7 +49,8 @@ LOADER_ERROR = "error while loading shared libraries"                          #
 # One bash: the shell's own environment (`env -0`, NUL-separated so a value may hold a newline), a marker, the exit status of sourcing the file, and the environment after it. The
 # file's own words go to /dev/null (XRT's prints a banner), its errors to standard error. What it ADDS AND CHANGES is the difference between the two environments of the SAME shell,
 # so what bash itself sets cancels out (but for SHELL_OWN). hw/card-stress.sh sources it the same way (`set +u; source ...`).
-SOURCE_SH = r"""set +u; [ -f "$CFT_SCHED_XRT_SETUP" ] || exit 66; env -0; printf '%s\0' @@sourced@@; . "$CFT_SCHED_XRT_SETUP" >/dev/null; printf '%s\0' "$?"; env -0"""
+UNSEEN = 66       # the shell's own exit status when it cannot see the setup file that python found: sysexits.h's EX_NOINPUT, "cannot open input". Nothing else in the script exits before its marker.
+SOURCE_SH = rf"""set +u; [ -f "$CFT_SCHED_XRT_SETUP" ] || exit {UNSEEN}; env -0; printf '%s\0' @@sourced@@; . "$CFT_SCHED_XRT_SETUP" >/dev/null; printf '%s\0' "$?"; env -0"""
 NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 SHELL_OWN = ("_", "SHLVL", "PWD", "OLDPWD")            # bash's own, which differ between the two listings by how it runs the last command (-c execs it, and SHLVL falls by one)
 
@@ -83,6 +86,8 @@ def xrt_env(rcfg: dict) -> dict:
         raise fail(f"could not be sourced ({type(e).__name__}: {e})")
     parts, err = p.stdout.split(b"\0"), first_line(p.stderr.decode("utf-8", "replace"))
     if b"@@sourced@@" not in parts:
+        if p.returncode == UNSEEN:                # its standard error is empty: the script said nothing, so this says what the status means
+            raise fail(f"is there for python, and the shell the scheduler started could not read it (exit {UNSEEN}, the scheduler's own: sysexits' EX_NOINPUT)")
         raise fail(f"could not be sourced (bash exited {p.returncode}): {err}")
     i = parts.index(b"@@sourced@@")
     rc = parts[i + 1].decode("ascii", "replace") if i + 1 < len(parts) else ""
@@ -159,8 +164,8 @@ def build_xrt(clone: str, sha: str, rcfg: dict, jobdir: str, log_path: str, step
         lrc, lout = run_quiet(["ldd", path], 60, env=xenv)
         linked = lrc == 0 and "xrt_coreutil" in lout
         lost = next((ln.strip() for ln in lout.splitlines() if "not found" in ln), None)      # `libxrt_coreutil.so.2 => not found`: named by ldd, and the tool will not start
-        if linked and lost:
-            step(f"xrt {exe}", False, f"names libxrt_coreutil, and cannot load: {lost}")
+        if lost and (linked or exe in OPTIONAL):     # a tool that cannot load a library is not one that merely lacks XRT, an optional one included (a required tool that does not name XRT is `xrt-not-linked` below)
+            step(f"xrt {exe}", False, f"cannot load a library ({'names' if linked else 'does not name'} libxrt_coreutil): {lost}")
             raise Refusal("tool-not-runnable", f"{exe} cannot run here: ldd, in the environment the scheduler runs it in, says '{lost}'")
         if exe in OPTIONAL and not linked:
             disabled[OPTIONAL[exe]] = f"{exe} does not link XRT (ldd)"
