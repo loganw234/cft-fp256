@@ -602,7 +602,7 @@ Deciding them in-lane would take M1's fixed grid (mathlib.py's
 apart, the final rounding on the result's own grid, the screen below half
 the smallest subnormal (ESTIMATE: about 40 instructions more, a sixth of
 atan2's). These lanes are rare: |y/x| below 2^-967 at fp64, below
-2^-16268 at fp128 (question 5).
+2^-16267 at fp128 (question 5).
 
 ### 2.6 The polynomial
 
@@ -695,8 +695,8 @@ MEASURED (`twrun.py`):
 | values live, the design's order | 26 | 26 | 26 | 33 |
 | values live, scheduled (mathlib's depth-first order) | 25 | 25 | 25 | 31 |
 | TwoSums, Fast2Sums | 22, 31 | 32, 42 | 32, 42 | 22, 31 |
-| the pools, five attributes: wrong unmarked | 0 | 0 | 0 | 0 (22 marked, the tiny-quotient range) |
-| on seq.py (scheduled), five attributes: differing from the model, from transcend.py | 0, 0 | 0, 0 | 0, 0 | 0, 0 (22 marked) |
+| the pools, five attributes: wrong unmarked | 0 | 0 | 0 | 0 (31 marked, the tiny-quotient range, raised to 2^-76; 22 before) |
+| on seq.py (scheduled), five attributes: differing from the model, from transcend.py | 0, 0 | 0, 0 | 0, 0 | 0, 0 (31 marked, the tiny-quotient range, raised to 2^-76; 22 before) |
 
 **Its error against mpmath** (MEASURED, `twrun.py measure`, rne, 2,000
 lanes a region, 3.2's regions; every lane also against transcend.py, 0
@@ -995,19 +995,27 @@ each lane's own 2^-G' sig(V)):
   of 41,031) and 93% of atan's, and they mark far fewer than the law
   predicts (0 to 57 against 40 to 1,137), but for fp256's acos under rne
   (39 against 39.6), where pi/2 lies only about 4 inflated bounds from a
-  midpoint; **the rest follow the law:** acos -1.6 and +0.8
-  sigma at fp64, -0.0 and +0.2 at fp128, -2.9 and +0.3 at fp256; atan2
-  -2.1 and -0.6, -0.0 and -0.3, -0.5 and -0.6; atan +2.2 and +0.7 on its
-  3,696 uncrowded lanes at fp64. The departure is conservative: the law
+  midpoint; **the rest follow the law in 11 of these 12 cells:** acos
+  -1.6 and +0.8 sigma at fp64, -0.0 and +0.2 at fp128, +0.3 at fp256
+  under rtz; atan2 -2.1 and -0.6, -0.0 and -0.3, -0.5 and -0.6; atan +2.2
+  and +0.7 on its 3,696 uncrowded lanes at fp64. **fp256's acos under rne
+  is outside the band, and open:** its rest is -2.9 sigma (389 marks
+  against 450.7), while its crowded lanes obey the law (39 against
+  39.6), so crowding does not explain it (the first restatement listed it
+  among the cells that follow the law). The departure is conservative: the law
   over-predicts, so the marks a workload sees are fewer, not more.
 - **Where the values spread, the law holds at the box's size:** asin's
   random cells within 2.5 sigma at every format; the edge cells as
   above. fp64's atan rtz edge cell (+4.6) is open: the edge region
   repeats its arguments (26,900 distinct of 50,000 at fp64, 15,366 of
   20,000 at fp128), so its marks are not independent and the binomial
-  sigma understates the spread (by about 1.36 at fp64 if repeats mark
-  alike, +3.4 then), and its values cluster at the cells' ends; no
-  crowding explains it, and rne's cell beside it is +1.1.
+  sigma understates the spread: if repeats mark alike, by the square
+  root of the sum of k^2 over n for multiplicities k, 1 to 10 here, 2.40,
+  so by 1.55, and the cell is +3.0 then (verifier-VM4S's count, which I
+  repeated; the first restatement took sqrt(50,000/26,900) = 1.36, which
+  assumes equal repeats, and said +3.4); its values also cluster at the
+  cells' ends. No crowding explains it, and rne's cell beside it is
+  +1.1.
 - **At the proposed G** (COMPUTED): about 2^-G x 1.2 to 2^-G x 1.6 a call
   where the values spread (sig(V) averages 1.17 to 1.23 for asin's and
   acos's predictions, (46.6 to 49.1)/2,000 x 64), about 1.3 x 10^-13 at
@@ -1214,8 +1222,10 @@ after the fix it needed:
     corner lanes had Bv = 0, and none with the edge at 2^(emin+2p+2).
     Wrong answers there are rare (the lanes keep about 2^-48 of the value
     against an ulp of 2^-24), but a lane certified without a bound is the
-    defect. Fixed: the triple word marks below 2^(emin+2p+2) (2^-74),
-    which adds marks only for |y/x| below that.
+    defect. Fixed: the triple word marks below 2^(emin+2p+2) (2^-76:
+    -126 + 48 + 2), which adds marks only for |y/x| below that
+    (verifier-VM4S: atan2(2^-75, 1) unmarked, atan2(2^-76, 1) marked; the
+    first restatement said 2^-74).
 
 **Statements found false, each corrected in place** (send-back 1, the
 lead and verifier-VM4S): the remainder's (2.5); "every region keeps more
@@ -1745,7 +1755,7 @@ tiny-side), the domain edge at +-1 (domain-edge) and the mark
    instructions), or decided in-lane by M1's fixed grid (ESTIMATE about
    40 instructions more, a sixth of atan2). The subnormal midpoint
    atan2(minSubnormal, 2) is one of them. *Recommended: mark them.* They
-   need |y/x| below 2^-967 at fp64 (below 2^-74 for fp32's triple word,
+   need |y/x| below 2^-967 at fp64 (below 2^-76 for fp32's triple word,
    whose third words need the larger margin: 3.6, item 10); a workload
    that lives there can take the fixed grid later, as M2's question 2 left
    LDX. A tiny |y| with |y/x| above the range is not one of them: since
