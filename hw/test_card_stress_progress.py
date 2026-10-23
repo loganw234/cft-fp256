@@ -481,8 +481,8 @@ def group_page(out):
         c.pop("derived_from_git", None)
     json.dump(plain, open(dj, "w", encoding="utf-8"))
     check(tn == page("ok", dj)["app"]["text"] and lab in tn and "Read from git" not in tn,
-          "page: a class the report read from git is said so once, by its label, wherever the label is shown: the page's text is the same with and without the data file's "
-          "derived_from_git, and no note under the label repeats the commit and the tree")
+          "page: a class the report read from git adds no text under its label: the page's text is the same with and without the data file's "
+          "derived_from_git, the label is in it, and no note under the label repeats the commit and the tree")
     json.dump(near, open(dj, "w", encoding="utf-8"))
     t2 = page("ok", dj)["app"]["text"]
     bad = json.loads(json.dumps(out))
