@@ -23762,3 +23762,58 @@ Each parcel's own entry is above, in the order of the merges: CL's, HC's, SG's, 
 **Sent back again (VS3a's confirmation of cbd2df99).** VS3a held again: no regression (the whole suite with every plant 614 checks, 0 failed, 4 skipped, 1,215 s, all 32 plants red; (b)-1, (b)-2, N-4, N-5's no-signal path, N-6, N-2 and N-3 hold), and found two more (b)s, 25 minutes. **(b)-3, a check that could not fail for what it named:** the overrun's check said the NEXT job waits behind the overrun, but that job had the first job's window, closed and waiting for tomorrow, so the calendar held it and not the card. The next job now has a window of its own (`w2`, which opens a second before the scenario begins and stays open for ten minutes); the check asserts that its window is open while the driver overruns, that the job is still in the queue with its submit alone, and that it is claimed only after the first job's end record and then runs and is done. A plant claims a second job before the first runs (a second `claim_next` in the service loop) and is red at that check; its first version made `run_claimed` a thread, which broke every scenario that serves one job and so was not a whole copy, and it was replaced by this one. **(b)-4, a wrong answer from `cancel`:** once the scheduler's window STOP was asked, a later cancel was never read (the watch looked for one only while nothing had been asked), `cancel` answered `stop-requested`, and the job's record got nothing (the job's own `STOP` marker was written and never read again): exactly the state an overrun creates. Now the watch records a cancel it receives after its own stop (`cancel_after_stop`, with the pid; the first ask stands and nothing more is sent), the job ends `cancelled` when the driver then stops cleanly (`failed` if it fails: `run()` reads a failure before a stop; verifier VS3a's note, worded by the lead at the merge), and `cancel` answers `stop-already-requested` when the job's record holds `scheduler_stop` or `driver_overrun`, the command naming the driver's pid and saying the scheduler sends it no signal. Checks on Windows (a watch with a stub Stop; `cancel` on hand-made running jobs and through the command) and in the overrun's scenario (a cancel while the driver overruns: answered, recorded, the job cancelled, the scheduler's STOP file removed, still no signal), and a plant for the watch and one for the answer. **A phrase corrected:** "the limit is counted after the wait", which the lead used and this entry's first restatement repeated in part, was loose: what was counted after the wait was a duration given to `run_step`, and Logan's decision on N-5 removed it; the overrun point that replaced it is ABSOLUTE (the end + the grace + `HARD_EXTRA_S`), so the wait does not move it. The figures are in section 2.
 
 **Records.** `docs/CARDDAY.md` has one paragraph under "The morning after" ("The nightly window in the scheduler"): the window exists, how the lead submits it, and that the script stays until the switch (S5). `docs/README.md` has its counts recounted for this entry and that paragraph, and `python -B python/check_docs_index.py` is rc 0. `docs/SCHEDULER.md` is S5's and is not written. The ledger is `Data/runs/2026-10-12-math-round/ledger/S3a.md`. No git or system configuration was changed (the commits use the configured identity), no git command was run in the main checkout, no process but my own runs was stopped (by task id), and the temporary directories my runs made (the suite's own, and my debugging script's) were removed by their makers: `/tmp` in WSL held only the running suite's own directories when I looked.
+
+## 2026-10-23 - the lead's day: night 4 on the page by the first data-only push; host items in the nightly; the 14 catalog items no campaign had named; P4's stages and the driver suite on the box; the study script's card model (the lead; verifier VCS)
+
+**The page, night 4** (the morning routine, docs/CARDDAY.md's "The morning after", in the main checkout at 49d7c3b7). Night 1022b ended at 07:47:58 ("card-stress ends: deadline (exit 0)").
+- **The night was copied** by the box's sums: 18 files, every one equal.
+- **Reduced:** rc 0 in 1 s.
+- **`--check`:** rc 0, and `source.metrics_sha256` b737e714... equals the box's line.
+- **Nights 1 to 3** are byte-equal to the published file's (MEASURED).
+- **The classes:**
+  - the current tile tree 44b963dd: 26 of 30 items complete (75.742%);
+  - the host tree a162f59b: 27 of 27;
+  - an earlier host tree, 4d9905f8, with nothing finished under it: 0 of 0, which the page shows as "-" and charts flat at 0 (READ, pct1 and the chart's guard).
+- **Totals:** 4 nights, 1,034 slices, 5,395,632,485,934 cases, 0 disagreements.
+
+**The first push that changed the data file alone**, 39f98018, started `pages` (run 39973018041, success) and not `gates` (MEASURED, `gh run list`). That is the `paths-ignore` filter the nightly page's entry said only a push would show. The live `nightly.json` equals the commit's (sha256 ac7acc3c..., HTTP 200). CARDDAY's routine now says such a push need not wait for a CI run.
+
+**Host items in the nightly** (Logan, 2026-10-23: "Host items can also make progress during the nightly runs"). They do. Night 4 swept all 27 on the driver's CPU pool (8 workers) in about its first three hours, 62 slices.
+- **Nights 2 and 3 swept none.** Their driver, at 0b7c959, predates DR4's resume per tree class, so it counted night 1's host coverage, under host tree 276ed15a, as done (READ, the records: no host leg in either night).
+- **The pushed main, 49d7c3b7, has the same host tree as night 4's commit,** so a night launched at it keeps that coverage.
+
+**The 14 exhaustive catalog items no campaign had named** (READ, `card_stress_lib.sweep_items`, 125 items):
+- **The items:** sqrt32 and rint32 in five modes each, on the tile; nextup32, nextdown32, logb32 and class32, on the host pool.
+- **The smoke:** a `--quick` run on the card at 49d7c3b7 gave rc 0 in 956 s. Sweep legs: 12 passed. Battery legs: 29 passed, 1 skipped. The quick run served no slice of rint32-rup or rint32-rmm.
+- **Tonight's campaign** is the 57 items before and these 14: 71.
+
+**On amd-arc-box, at 49d7c3b7** (box_day_1023.sh, fresh clones from a bundle, every step niced and cut at 17:50):
+- **P4's stages that the 22nd's deadline cut:** `verify/run.sh --require-all --only programs,acceptance-rev8,libcft`, "VERDICT: PASS, nothing skipped", 11,409 s.
+  - The corpus check: 329 checks, 0 failed, 0 skipped.
+  - acceptance-rev8: "26 of 26 PASS on sw (oracle, set); 263 checks ok, 0 failed, 10097 s".
+- **The driver suite whole, with its plants:** 1,118 checks, 2 failed, 3 skipped, 2,214 s, with `CARD_STRESS_RESUME_RUN` naming a copy of the four-night metrics.
+  - **Both failures are resume real's.** The study script `docs/studies/sched-a/coverage_state.py`, which that check reads as an independent reference, failed its own check: "the 275 waves found equal the sum of 1/jobs over the sweep legs (341.000)". The suite reported this as "the script could not be run".
+  - **The cause:** night 4 was the first night whose host-pool legs (image "cpu", 62 of them) ran beside the card's sweep waves. The script counted them as card slots.
+  - **The planner is not at fault:** its check failed only through the script's empty answer. The three-night file had passed both checks at acfd6d15 on the 22nd (298 checks, 0 failed).
+- **The report's test** on the copy: 5,081 checks, 0 failed.
+- **The page's test** on the copy: 364 checks, 0 failed, 2 skipped by name (no node on the box).
+
+**The fix, the lead's, with verifier VCS (Haiku), commits 17e51404, 264ce242 and 3d45cda1:**
+- **The script:** `card_legs()` keeps the pool's legs out of the card's pace model. Its output on the two-night and three-night files differs from before only in two reworded lines. On the four-night file every check holds (279 waves, 279.000).
+- **The suite** names why the script gave no gaps: no script, not run, the script's own first `CHECK FAIL` line, its exit status, no table row, or a wide item it finds complete.
+- **The resume group:** 38 checks, 0 failed with the four-night copy; 40 and 0 with the three-night copy.
+- **The plant** (the old card model) is red, with the reason on the study check's line.
+- **VCS's three looks:**
+  - no regression;
+  - one wrong statement the fix made ("no finished sweep slice" for a file whose slices are all the pool's);
+  - two older ones the four-night file showed ("card-run rates" of host code, where the rates read every sweep leg; a missing table row with no reason);
+  - one word ("every leg").
+  - Each was corrected.
+- **Its limits:**
+  - the planner check's name is 336 characters, so its FAIL line, cut at 400, shows only the start of the reason, and its FAILED summary, cut at 310, none of it. The study check's line comes first and shows the whole reason. The lead first wrote that the planner line ends before its reason, reading it through his own display's 330-character cut. VCS measured it, and the commit's message was restated before the merge;
+  - the script measures every item against 2^32, so its projections for the hard-case and class items, whose spaces are smaller (since DR3), are not theirs. The suite reads only the four wide items' first gaps.
+
+**Decisions of the day, recorded where they bind** (the lead's ledger, and the scheduler's parcels' entries above):
+- the nightly's automation goes into the scheduler: "Build it into the scheduler", and "Box prepares, lead pushes" for the page's data commit;
+- a hung driver is warned of, not killed: "Warn only for now";
+- TG's three FAIL-line prefixes are noted failures, which do not stop a night.

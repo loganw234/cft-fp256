@@ -2096,8 +2096,10 @@ own. Each morning, once the night has ended (`COPY` is the copy's directory, the
    `metrics.jsonl`, and read `git diff --stat site/nightly.json`: one more night, the current classes moved, the earlier nights untouched.
 4. **Commit the data file alone:** `git add site/nightly.json`, `git commit -m "nightly data: night N (DATE)"`. The `gates` workflow ignores
    a push that changes this file alone (`paths-ignore` in `.github/workflows/gates.yml`); `pages` redeploys on it.
-5. **Push when no CI run is in progress** (`gh run list --workflow gates --limit 3`): gates cancels a superseded run of its branch, and the
-   filter's first data-only push had not been seen when this was written. Then see `pages` go green and the page's "Newest night" show the date.
+5. **Push.** A push that changes the data file alone starts `pages` and not `gates` (seen on 2026-10-23: 39f98018, the first such push,
+   started `pages` alone), so it cancels no gates run and need not wait for one; a push that changes anything else still waits until no CI
+   run is in progress (`gh run list --workflow gates --limit 3`), since gates cancels a superseded run of its branch. Then see `pages` go
+   green and the page's "Newest night" show the date.
 
 A changed tree is a new class (a tile item is counted per RTL tree, a host item per host tree and compiler), so the page's current class
 starts from nothing and the earlier one stays as history; a run that recorded no tree is read from git where it can be (the class's label says "read from git at commit X") and else is kept apart by its commit, the label giving the report's reason.
