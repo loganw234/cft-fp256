@@ -1,0 +1,112 @@
+costs.fp64|costs.py fp64
+specials.fp64|specials.py fp64
+costs.fp128|costs.py fp128
+specials.fp128|specials.py fp128
+costs.fp256|costs.py fp256
+specials.fp256|specials.py fp256
+costs.fp32-dw18|costs.py fp32
+specials.fp32-dw18|specials.py fp32
+share.fp64|share.py fp64
+share.fp128|share.py fp128
+share.fp256|share.py fp256
+census.fp64-tiny|census.py fp64 tiny
+census.fp64-near|census.py fp64 near
+census.fp64-acos1|census.py fp64 acos1
+census.fp64-ratio|census.py fp64 ratio
+census.fp64-diag|census.py fp64 diag
+census.fp128-tiny|census.py fp128 tiny
+census.fp128-near|census.py fp128 near
+census.fp128-acos1|census.py fp128 acos1
+census.fp128-ratio|census.py fp128 ratio
+census.fp128-diag|census.py fp128 diag
+census.fp256-tiny|census.py fp256 tiny
+census.fp256-near|census.py fp256 near
+census.fp256-acos1|census.py fp256 acos1
+census.fp256-ratio|census.py fp256 ratio
+census.fp256-diag|census.py fp256 diag
+census.fp32-dw18-tiny|census.py fp32 tiny
+census.fp32-dw18-near|census.py fp32 near
+census.fp32-dw18-acos1|census.py fp32 acos1
+census.fp32-dw18-ratio|census.py fp32 ratio
+census.fp32-dw18-diag|census.py fp32 diag
+rate.fp64-seed3|rate.py fp64 atan,asin,acos,atan2 2000 0,1 6 3
+rate.fp128-seed3|rate.py fp128 atan,asin,acos,atan2 2000 0,1 6 3
+rate.fp256-seed3|rate.py fp256 atan,asin,acos,atan2 2000 0,1 6 3
+rate.fp32-dw18-seed3|rate.py fp32 atan,asin,acos,atan2 2000 0,1 6 3
+budget.fp64-atan-random|m4budget.py fp64 atan random 1000 2
+budget.fp64-atan-edge|m4budget.py fp64 atan edge 1000 2
+budget.fp64-atan-big|m4budget.py fp64 atan big 1000 2
+budget.fp64-atan-small|m4budget.py fp64 atan small 1000 2
+budget.fp64-asin-random|m4budget.py fp64 asin random 1000 2
+budget.fp64-asin-edge|m4budget.py fp64 asin edge 1000 2
+budget.fp64-asin-big|m4budget.py fp64 asin big 1000 2
+budget.fp64-asin-small|m4budget.py fp64 asin small 1000 2
+budget.fp64-asin-diag|m4budget.py fp64 asin diag 1000 2
+budget.fp64-acos-random|m4budget.py fp64 acos random 1000 2
+budget.fp64-acos-edge|m4budget.py fp64 acos edge 1000 2
+budget.fp64-acos-big|m4budget.py fp64 acos big 1000 2
+budget.fp64-acos-small|m4budget.py fp64 acos small 1000 2
+budget.fp64-acos-diag|m4budget.py fp64 acos diag 1000 2
+budget.fp64-atan2-random|m4budget.py fp64 atan2 random 1000 2
+budget.fp64-atan2-edge|m4budget.py fp64 atan2 edge 1000 2
+budget.fp64-atan2-big|m4budget.py fp64 atan2 big 1000 2
+budget.fp64-atan2-small|m4budget.py fp64 atan2 small 1000 2
+budget.fp64-atan2-diag|m4budget.py fp64 atan2 diag 1000 2
+budget.fp128-atan-random|m4budget.py fp128 atan random 300 2
+budget.fp128-atan-edge|m4budget.py fp128 atan edge 300 2
+budget.fp128-atan-big|m4budget.py fp128 atan big 300 2
+budget.fp128-atan-small|m4budget.py fp128 atan small 300 2
+budget.fp128-asin-random|m4budget.py fp128 asin random 300 2
+budget.fp128-asin-edge|m4budget.py fp128 asin edge 300 2
+budget.fp128-asin-big|m4budget.py fp128 asin big 300 2
+budget.fp128-asin-small|m4budget.py fp128 asin small 300 2
+budget.fp128-asin-diag|m4budget.py fp128 asin diag 300 2
+budget.fp128-acos-random|m4budget.py fp128 acos random 300 2
+budget.fp128-acos-edge|m4budget.py fp128 acos edge 300 2
+budget.fp128-acos-big|m4budget.py fp128 acos big 300 2
+budget.fp128-acos-small|m4budget.py fp128 acos small 300 2
+budget.fp128-acos-diag|m4budget.py fp128 acos diag 300 2
+budget.fp128-atan2-random|m4budget.py fp128 atan2 random 300 2
+budget.fp128-atan2-edge|m4budget.py fp128 atan2 edge 300 2
+budget.fp128-atan2-big|m4budget.py fp128 atan2 big 300 2
+budget.fp128-atan2-small|m4budget.py fp128 atan2 small 300 2
+budget.fp128-atan2-diag|m4budget.py fp128 atan2 diag 300 2
+budget.fp256-atan-random|m4budget.py fp256 atan random 300 2
+budget.fp256-atan-edge|m4budget.py fp256 atan edge 300 2
+budget.fp256-atan-big|m4budget.py fp256 atan big 300 2
+budget.fp256-atan-small|m4budget.py fp256 atan small 300 2
+budget.fp256-asin-random|m4budget.py fp256 asin random 300 2
+budget.fp256-asin-edge|m4budget.py fp256 asin edge 300 2
+budget.fp256-asin-big|m4budget.py fp256 asin big 300 2
+budget.fp256-asin-small|m4budget.py fp256 asin small 300 2
+budget.fp256-asin-diag|m4budget.py fp256 asin diag 300 2
+budget.fp256-acos-random|m4budget.py fp256 acos random 300 2
+budget.fp256-acos-edge|m4budget.py fp256 acos edge 300 2
+budget.fp256-acos-big|m4budget.py fp256 acos big 300 2
+budget.fp256-acos-small|m4budget.py fp256 acos small 300 2
+budget.fp256-acos-diag|m4budget.py fp256 acos diag 300 2
+budget.fp256-atan2-random|m4budget.py fp256 atan2 random 300 2
+budget.fp256-atan2-edge|m4budget.py fp256 atan2 edge 300 2
+budget.fp256-atan2-big|m4budget.py fp256 atan2 big 300 2
+budget.fp256-atan2-small|m4budget.py fp256 atan2 small 300 2
+budget.fp256-atan2-diag|m4budget.py fp256 atan2 diag 300 2
+budget.fp32-dw18-atan-random|m4budget.py fp32 atan random 1000 2
+budget.fp32-dw18-atan-edge|m4budget.py fp32 atan edge 1000 2
+budget.fp32-dw18-atan-big|m4budget.py fp32 atan big 1000 2
+budget.fp32-dw18-atan-small|m4budget.py fp32 atan small 1000 2
+budget.fp32-dw18-asin-random|m4budget.py fp32 asin random 1000 2
+budget.fp32-dw18-asin-edge|m4budget.py fp32 asin edge 1000 2
+budget.fp32-dw18-asin-big|m4budget.py fp32 asin big 1000 2
+budget.fp32-dw18-asin-small|m4budget.py fp32 asin small 1000 2
+budget.fp32-dw18-asin-diag|m4budget.py fp32 asin diag 1000 2
+budget.fp32-dw18-acos-random|m4budget.py fp32 acos random 1000 2
+budget.fp32-dw18-acos-edge|m4budget.py fp32 acos edge 1000 2
+budget.fp32-dw18-acos-big|m4budget.py fp32 acos big 1000 2
+budget.fp32-dw18-acos-small|m4budget.py fp32 acos small 1000 2
+budget.fp32-dw18-acos-diag|m4budget.py fp32 acos diag 1000 2
+budget.fp32-dw18-atan2-random|m4budget.py fp32 atan2 random 1000 2
+budget.fp32-dw18-atan2-edge|m4budget.py fp32 atan2 edge 1000 2
+budget.fp32-dw18-atan2-big|m4budget.py fp32 atan2 big 1000 2
+budget.fp32-dw18-atan2-small|m4budget.py fp32 atan2 small 1000 2
+budget.fp32-dw18-atan2-diag|m4budget.py fp32 atan2 diag 1000 2
+plants.fp64|plants.py fp64

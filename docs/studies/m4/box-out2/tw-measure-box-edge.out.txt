@@ -1,0 +1,4 @@
+fp32-tw atan rne edge: 20000 main of 20000, wrong 0, marked 0; largest |V - f|/Bv 2^-5.59 at 3179436120; 103s
+fp32-tw asin rne edge: 20000 main of 20000, wrong 0, marked 0; largest |V - f|/Bv 2^-4.42 at 1031886521; 297s
+fp32-tw acos rne edge: 20000 main of 20000, wrong 0, marked 0; largest |V - f|/Bv 2^-4.83 at 1065319331; 447s
+fp32-tw atan2 rne edge: 20000 main of 20000, wrong 0, marked 0; largest |V - f|/Bv 2^-5.06 at (2943265082, 829062668); 531s

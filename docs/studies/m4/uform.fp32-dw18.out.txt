@@ -1,0 +1,6 @@
+fp32 asin u product: 184 instructions; pools, five attributes: wrong 0, marked 0; largest |V - f|/Bv over edge, big, diag (300 each): 0.0499
+fp32 asin u direct: 179 instructions; pools, five attributes: wrong 0, marked 0; largest |V - f|/Bv over edge, big, diag (300 each): 48.07
+fp32 asin u renorm: 182 instructions; pools, five attributes: wrong 0, marked 0; largest |V - f|/Bv over edge, big, diag (300 each): 0.0499
+fp32 acos u product: 180 instructions; pools, five attributes: wrong 0, marked 0; largest |V - f|/Bv over edge, big, diag (300 each): 0.06963
+fp32 acos u direct: 175 instructions; pools, five attributes: wrong 0, marked 0; largest |V - f|/Bv over edge, big, diag (300 each): 3983
+fp32 acos u renorm: 178 instructions; pools, five attributes: wrong 0, marked 0; largest |V - f|/Bv over edge, big, diag (300 each): 0.06963

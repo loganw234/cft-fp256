@@ -1,0 +1,140 @@
+== 2026-10-23 14:10:09 start: rate-fp64-random
+== 2026-10-23 14:10:09 start: rate-fp128-random
+== 2026-10-23 14:10:09 start: rate-fp64-edge
+== 2026-10-23 14:10:09 start: rate-fp256-random
+== 2026-10-23 14:10:09 start: rate-fp256-edge
+== 2026-10-23 14:10:09 start: rate-fp128-edge
+== 2026-10-23 14:10:09 start: budget-fp64-atan-random
+== 2026-10-23 14:10:09 start: budget-fp128-atan-random
+== 2026-10-23 14:10:09 start: budget-fp256-atan-random
+== 2026-10-23 14:10:09 start: budget-fp64-atan-edge
+== 2026-10-23 14:10:09 start: budget-fp128-atan-edge
+== 2026-10-23 14:10:09 start: budget-fp256-atan-edge
+== 2026-10-23 14:10:09 start: budget-fp64-atan-big
+== 2026-10-23 14:10:09 start: budget-fp256-atan-big
+== 2026-10-23 14:10:09 start: budget-fp128-atan-big
+== 2026-10-23 14:10:09 start: budget-fp64-atan-small
+== 2026-10-23 14:10:09 start: budget-fp128-atan-small
+== 2026-10-23 14:10:09 start: budget-fp256-atan-small
+== 2026-10-23 14:10:09 start: budget-fp64-asin-random
+== 2026-10-23 14:10:09 start: budget-fp128-asin-random
+== 2026-10-23 14:10:09 start: budget-fp64-asin-edge
+== 2026-10-23 14:10:09 start: budget-fp256-asin-random
+== 2026-10-23 14:10:09 start: budget-fp128-asin-edge
+== 2026-10-23 14:10:09 start: budget-fp256-asin-edge
+== 2026-10-23 14:11:00 end (0): budget-fp128-atan-small
+== 2026-10-23 14:11:00 start: budget-fp64-asin-big
+== 2026-10-23 14:11:00 end (0): budget-fp128-atan-edge
+== 2026-10-23 14:11:00 start: budget-fp128-asin-big
+== 2026-10-23 14:11:15 end (0): budget-fp128-atan-big
+== 2026-10-23 14:11:15 start: budget-fp256-asin-big
+== 2026-10-23 14:11:15 end (0): budget-fp128-atan-random
+== 2026-10-23 14:11:15 start: budget-fp64-asin-small
+== 2026-10-23 14:11:26 end (0): budget-fp256-atan-edge
+== 2026-10-23 14:11:26 start: budget-fp128-asin-small
+== 2026-10-23 14:12:03 end (0): budget-fp128-asin-big
+== 2026-10-23 14:12:03 start: budget-fp256-asin-small
+== 2026-10-23 14:12:16 end (0): budget-fp128-asin-random
+== 2026-10-23 14:12:16 start: budget-fp64-asin-diag
+== 2026-10-23 14:12:19 end (0): budget-fp128-asin-edge
+== 2026-10-23 14:12:19 start: budget-fp128-asin-diag
+== 2026-10-23 14:12:19 end (0): budget-fp256-atan-small
+== 2026-10-23 14:12:19 start: budget-fp256-asin-diag
+== 2026-10-23 14:12:29 end (0): budget-fp128-asin-small
+== 2026-10-23 14:12:29 start: budget-fp64-acos-random
+== 2026-10-23 14:12:40 end (0): budget-fp256-asin-random
+== 2026-10-23 14:12:40 start: budget-fp128-acos-random
+== 2026-10-23 14:12:44 end (0): budget-fp256-asin-big
+== 2026-10-23 14:12:44 start: budget-fp256-acos-random
+== 2026-10-23 14:13:01 end (0): budget-fp64-atan-random
+== 2026-10-23 14:13:01 start: budget-fp64-acos-edge
+== 2026-10-23 14:13:08 end (0): budget-fp64-atan-edge
+== 2026-10-23 14:13:08 start: budget-fp128-acos-edge
+== 2026-10-23 14:13:17 end (0): budget-fp256-asin-edge
+== 2026-10-23 14:13:17 start: budget-fp256-acos-edge
+== 2026-10-23 14:13:29 end (0): budget-fp64-atan-small
+== 2026-10-23 14:13:29 start: budget-fp64-acos-big
+== 2026-10-23 14:13:44 end (0): budget-fp128-asin-diag
+== 2026-10-23 14:13:44 start: budget-fp128-acos-big
+== 2026-10-23 14:13:49 end (0): budget-fp64-asin-edge
+== 2026-10-23 14:13:49 start: budget-fp256-acos-big
+== 2026-10-23 14:14:05 end (0): budget-fp256-asin-small
+== 2026-10-23 14:14:05 start: budget-fp64-acos-small
+== 2026-10-23 14:14:08 end (0): budget-fp256-acos-random
+== 2026-10-23 14:14:08 start: budget-fp128-acos-small
+== 2026-10-23 14:14:38 end (0): budget-fp64-asin-big
+== 2026-10-23 14:14:38 start: budget-fp256-acos-small
+== 2026-10-23 14:14:38 end (0): budget-fp128-acos-random
+== 2026-10-23 14:14:38 start: budget-fp64-acos-diag
+== 2026-10-23 14:14:42 end (0): budget-fp64-atan-big
+== 2026-10-23 14:14:42 start: budget-fp128-acos-diag
+== 2026-10-23 14:14:47 end (0): budget-fp128-acos-edge
+== 2026-10-23 14:14:47 start: budget-fp256-acos-diag
+== 2026-10-23 14:14:49 end (0): budget-fp128-acos-big
+== 2026-10-23 14:14:49 start: budget-fp64-atan2-random
+== 2026-10-23 14:14:56 end (0): budget-fp64-asin-small
+== 2026-10-23 14:14:56 start: budget-fp128-atan2-random
+== 2026-10-23 14:15:19 end (0): budget-fp256-acos-big
+== 2026-10-23 14:15:19 start: budget-fp256-atan2-random
+== 2026-10-23 14:15:27 end (0): rate-fp128-random
+== 2026-10-23 14:15:27 start: budget-fp64-atan2-edge
+== 2026-10-23 14:15:28 end (0): budget-fp128-acos-small
+== 2026-10-23 14:15:28 start: budget-fp128-atan2-edge
+== 2026-10-23 14:15:36 end (0): budget-fp256-asin-diag
+== 2026-10-23 14:15:36 start: budget-fp256-atan2-edge
+== 2026-10-23 14:15:50 end (0): budget-fp128-acos-diag
+== 2026-10-23 14:15:50 start: budget-fp64-atan2-big
+== 2026-10-23 14:15:51 end (0): budget-fp128-atan2-random
+== 2026-10-23 14:15:51 start: budget-fp128-atan2-big
+== 2026-10-23 14:15:55 end (0): budget-fp64-acos-random
+== 2026-10-23 14:15:55 start: budget-fp256-atan2-big
+== 2026-10-23 14:16:08 end (0): budget-fp256-acos-small
+== 2026-10-23 14:16:08 start: budget-fp64-atan2-small
+== 2026-10-23 14:16:17 end (0): budget-fp256-acos-edge
+== 2026-10-23 14:16:17 start: budget-fp128-atan2-small
+== 2026-10-23 14:16:54 end (0): budget-fp128-atan2-big
+== 2026-10-23 14:16:54 start: budget-fp256-atan2-small
+== 2026-10-23 14:16:56 end (0): budget-fp128-atan2-small
+== 2026-10-23 14:16:56 start: budget-fp64-atan2-diag
+== 2026-10-23 14:17:03 end (0): rate-fp128-edge
+== 2026-10-23 14:17:03 start: budget-fp128-atan2-diag
+== 2026-10-23 14:17:06 end (0): budget-fp64-atan2-small
+== 2026-10-23 14:17:06 start: budget-fp256-atan2-diag
+== 2026-10-23 14:17:08 end (0): budget-fp64-asin-random
+== 2026-10-23 14:17:08 start: census-fp128-tiny
+== 2026-10-23 14:17:20 end (0): budget-fp128-atan2-edge
+== 2026-10-23 14:17:20 start: census-fp256-tiny
+== 2026-10-23 14:17:26 end (0): budget-fp64-atan2-random
+== 2026-10-23 14:17:26 start: tw-measure-random
+== 2026-10-23 14:17:29 end (0): budget-fp256-acos-diag
+== 2026-10-23 14:17:29 start: tw-measure-edge
+== 2026-10-23 14:18:13 end (0): budget-fp128-atan2-diag
+== 2026-10-23 14:18:13 start: tw-measure-big
+== 2026-10-23 14:18:16 end (0): budget-fp64-atan2-big
+== 2026-10-23 14:18:16 start: tw-measure-small
+== 2026-10-23 14:18:20 end (0): census-fp128-tiny
+== 2026-10-23 14:18:20 start: tw-measure-diag
+== 2026-10-23 14:18:30 end (0): rate-fp256-random
+== 2026-10-23 14:18:31 end (0): budget-fp256-atan-random
+== 2026-10-23 14:18:38 end (0): budget-fp256-atan2-small
+== 2026-10-23 14:18:44 end (0): budget-fp64-atan2-edge
+== 2026-10-23 14:18:47 end (0): budget-fp256-atan2-random
+== 2026-10-23 14:18:53 end (0): budget-fp256-atan2-big
+== 2026-10-23 14:18:56 end (0): budget-fp64-asin-diag
+== 2026-10-23 14:19:04 end (0): budget-fp256-atan-big
+== 2026-10-23 14:19:06 end (0): budget-fp64-acos-edge
+== 2026-10-23 14:19:08 end (0): budget-fp64-acos-diag
+== 2026-10-23 14:19:28 end (0): budget-fp64-acos-big
+== 2026-10-23 14:19:35 end (0): census-fp256-tiny
+== 2026-10-23 14:19:50 end (0): budget-fp64-acos-small
+== 2026-10-23 14:20:56 end (0): budget-fp64-atan2-diag
+== 2026-10-23 14:21:02 end (0): budget-fp256-atan2-edge
+== 2026-10-23 14:21:11 end (0): rate-fp256-edge
+== 2026-10-23 14:22:04 end (0): budget-fp256-atan2-diag
+== 2026-10-23 14:23:34 end (0): tw-measure-diag
+== 2026-10-23 14:24:02 end (0): tw-measure-random
+== 2026-10-23 14:24:26 end (0): tw-measure-big
+== 2026-10-23 14:24:27 end (0): tw-measure-edge
+== 2026-10-23 14:24:34 end (0): tw-measure-small
+== 2026-10-23 14:25:08 end (0): rate-fp64-random
+== 2026-10-23 14:25:48 end (0): rate-fp64-edge

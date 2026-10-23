@@ -1,0 +1,4 @@
+fp32-tw atan rne random: 20000 main of 20000, wrong 0, marked 0; largest |V - f|/Bv 2^-7.18 at 3214398020; 109s
+fp32-tw asin rne random: 20000 main of 20000, wrong 0, marked 0; largest |V - f|/Bv 2^-3.66 at 977324732; 214s
+fp32-tw acos rne random: 20000 main of 20000, wrong 0, marked 0; largest |V - f|/Bv 2^-6.26 at 1065254866; 316s
+fp32-tw atan2 rne random: 15874 main of 20000, wrong 0, marked 0; largest |V - f|/Bv 2^-5.77 at (3472655282, 1355455880); 395s

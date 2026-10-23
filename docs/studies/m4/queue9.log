@@ -1,0 +1,6 @@
+2026-10-23 13:48:18 start twrun-plants.fp32-tw: twrun.py plants
+2026-10-23 13:48:56 end twrun-plants.fp32-tw rc=0
+2026-10-23 13:48:56 start fingerprint: fingerprint.py
+2026-10-23 13:48:56 end fingerprint rc=0
+2026-10-23 13:48:56 start gcheck: gcheck.py
+2026-10-23 13:48:57 end gcheck rc=0

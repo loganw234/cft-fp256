@@ -1,0 +1,1 @@
+fp256 diag atan2(x + j, x), 40 x, j -4..4, four quadrants: 1440 arguments; marked rne 0, rtz 0, rdn 0, rup 0, rmm 0; guesses right 0 of 0; wrong 0

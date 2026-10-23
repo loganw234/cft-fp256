@@ -1,0 +1,3 @@
+fp64 tiny atan, c 1..16, e 20..33: 448 arguments; marked rne 6, rtz 0, rdn 0, rup 0, rmm 6; guesses right 12 of 12; wrong 0
+fp64 tiny asin, c 1..16, e 20..33: 448 arguments; marked rne 0, rtz 6, rdn 6, rup 6, rmm 0; guesses right 18 of 18; wrong 0
+fp64 tiny atan2(c 2^-e x, x), x = 1, 3, 5 2^7: 1344 arguments; marked rne 18, rtz 0, rdn 0, rup 0, rmm 18; guesses right 36 of 36; wrong 0

@@ -1,0 +1,77 @@
+cell: desktop budget (+residual); box budget (+residual); worst measured; the cell's bound = the largest, budgets with residuals
+fp64 atan random: 0.00874 (+1.7e-05); 0.02344 (+0.0026); 0.00367; bound 0.02599 Bv, 5.27 bits
+fp64 asin random: 0.05816 (+0.0053); 0.06693 (+0.006); 0.011; bound 0.07298 Bv, 3.78 bits
+fp64 acos random: 0.01224 (+0.0022); 0.02797 (+0.0022); 0.00399; bound 0.0302 Bv, 5.05 bits
+fp64 atan2 random: 0.02117 (+0.0023); 0.0333 (+0.0031); 0.00439; bound 0.03639 Bv, 4.78 bits
+fp64 atan edge: 0.02503 (+0.0024); 0.02856 (+0.0047); 0.0082; bound 0.03324 Bv, 4.91 bits
+fp64 asin edge: 0.05779 (+0.0073); 0.06204 (+0.0079); 0.00832; bound 0.06996 Bv, 3.84 bits
+fp64 acos edge: 0.04671 (+0.0049); 0.05876 (+0.0068); 0.00891; bound 0.06558 Bv, 3.93 bits
+fp64 atan2 edge: 0.03141 (+0.0026); 0.03287 (+0.0047); 0.00897; bound 0.03761 Bv, 4.73 bits
+fp64 atan big: 0.002638 (+7e-12); 0.002638 (+6.9e-12); 0.00212; bound 0.002638 Bv, 8.57 bits
+fp64 asin big: 0.01114 (+0.0018); 0.01114 (+0.0018); 0.00263; bound 0.01292 Bv, 6.27 bits
+fp64 acos big: 0.04624 (+0.007); 0.05097 (+0.0089); 0.0128; bound 0.0599 Bv, 4.06 bits
+fp64 atan2 big: 0.008103 (+0.0011); 0.0159 (+0.0021); 0.00263; bound 0.01802 Bv, 5.79 bits
+fp64 atan small: 0.00827 (+6.5e-07); 0.009556 (+8.8e-07); 0.00491; bound 0.009557 Bv, 6.71 bits
+fp64 asin small: 0.03569 (+0.0053); 0.03725 (+0.0048); 0.011; bound 0.04203 Bv, 4.57 bits
+fp64 acos small: 0.00332 (+5.7e-05); 0.00384 (+0.00014); 0.00271; bound 0.003975 Bv, 7.97 bits
+fp64 atan2 small: 0.01793 (+0.0029); 0.02959 (+0.0034); 0.00545; bound 0.03296 Bv, 4.92 bits
+fp64 asin diag: 0.01077 (+0.00086); 0.01077 (+0.00086); 0.00202; bound 0.01163 Bv, 6.43 bits
+fp64 acos diag: 0.01255 (+0.00086); 0.01255 (+0.00086); 0.00388; bound 0.01341 Bv, 6.22 bits
+fp64 atan2 diag: 0.008691 (+0.00058); 0.008701 (+0.00084); 0.0056; bound 0.009539 Bv, 6.71 bits
+fp128 atan random: 1.625e-20 (+2.7e-42); 0.00266 (+4.3e-22); 1.47e-21; bound 0.00266 Bv, 8.55 bits
+fp128 asin random: 0.0116 (+2e-20); 0.03038 (+2.1e-20); 0.0122; bound 0.03038 Bv, 5.04 bits
+fp128 acos random: 0.003325 (+1.4e-21); 0.001042 (+7.1e-21); 5.77e-05; bound 0.003325 Bv, 8.23 bits
+fp128 atan2 random: 0.000303 (+5.6e-21); 0.001153 (+8.2e-21); 0.00326; bound 0.003262 Bv, 8.26 bits
+fp128 atan edge: 0.03025 (+9.1e-21); 0.03027 (+1.4e-20); 0.0232; bound 0.03027 Bv, 5.05 bits
+fp128 asin edge: 0.03025 (+3.1e-20); 0.03027 (+2.8e-20); 0.028; bound 0.03027 Bv, 5.05 bits
+fp128 acos edge: 0.03001 (+1.5e-20); 0.03026 (+2.5e-20); 0.0268; bound 0.03026 Bv, 5.05 bits
+fp128 atan2 edge: 0.02995 (+9.6e-21); 0.03027 (+9.8e-21); 0.0261; bound 0.03027 Bv, 5.05 bits
+fp128 atan big: 9.292e-21 (+2.2e-44); 9.292e-21 (+2.6e-40); 2.01e-21; bound 9.292e-21 Bv, 66.54 bits
+fp128 asin big: 0.001079 (+1.4e-21); 0.001079 (+1.4e-21); 7.36e-05; bound 0.001079 Bv, 9.86 bits
+fp128 acos big: 0.0005286 (+3.2e-20); 0.02604 (+2.9e-20); 5.35e-05; bound 0.02604 Bv, 5.26 bits
+fp128 atan2 big: 2.805e-20 (+3.8e-22); 2.39e-20 (+1.4e-21); 4.63e-21; bound 2.843e-20 Bv, 64.93 bits
+fp128 atan small: 0.008821 (+1.7e-24); 0.0243 (+2.5e-24); 0.00537; bound 0.0243 Bv, 5.36 bits
+fp128 asin small: 0.009017 (+1.2e-20); 0.02494 (+2.4e-20); 0.00347; bound 0.02494 Bv, 5.33 bits
+fp128 acos small: 0.0001185 (+2e-22); 0.001017 (+5.6e-22); 5.77e-05; bound 0.001017 Bv, 9.94 bits
+fp128 atan2 small: 0.002365 (+8.6e-21); 0.03027 (+9.5e-21); 0.0156; bound 0.03027 Bv, 5.05 bits
+fp128 asin diag: 0.004757 (+2.6e-21); 0.004757 (+2.6e-21); 0.00455; bound 0.004757 Bv, 7.72 bits
+fp128 acos diag: 0.004757 (+2.6e-21); 0.004757 (+2.6e-21); 0.00455; bound 0.004757 Bv, 7.72 bits
+fp128 atan2 diag: 0.004757 (+1.7e-21); 0.004757 (+2.7e-21); 0.000943; bound 0.004757 Bv, 7.72 bits
+fp256 atan random: 2.879e-58 (+1.3e-134); 1.708e-26 (+7.4e-66); 3.06e-58; bound 1.708e-26 Bv, 85.60 bits
+fp256 asin random: 0.002083 (+9e-58); 0.01485 (+9.2e-58); 0.00515; bound 0.01485 Bv, 6.07 bits
+fp256 acos random: 7.337e-07 (+5e-59); 0.0002163 (+5.2e-58); 0.000197; bound 0.0002163 Bv, 12.17 bits
+fp256 atan2 random: 0.0002244 (+3.5e-58); 0.008277 (+5.1e-58); 0.00508; bound 0.008277 Bv, 6.92 bits
+fp256 atan edge: 0.02278 (+2.8e-58); 0.0228 (+6.4e-58); 0.0213; bound 0.0228 Bv, 5.45 bits
+fp256 asin edge: 0.02278 (+9.4e-58); 0.0228 (+1.3e-57); 0.0215; bound 0.0228 Bv, 5.45 bits
+fp256 acos edge: 0.02278 (+6e-58); 0.02279 (+1.4e-57); 0.0154; bound 0.02279 Bv, 5.46 bits
+fp256 atan2 edge: 0.02278 (+5.7e-58); 0.02274 (+5.7e-58); 0.0208; bound 0.02278 Bv, 5.46 bits
+fp256 atan big: 4.908e-58 (+2.3e-97); 4.908e-58 (+3.7e-117); 1.62e-58; bound 4.908e-58 Bv, 190.38 bits
+fp256 asin big: 5.765e-07 (+3.3e-59); 0.0007916 (+1.4e-58); 2.04e-05; bound 0.0007916 Bv, 10.30 bits
+fp256 acos big: 9.665e-06 (+9.4e-58); 0.0191 (+1.2e-57); 0.000161; bound 0.0191 Bv, 5.71 bits
+fp256 atan2 big: 4.908e-58 (+3.9e-95); 1.336e-57 (+2.4e-59); 3.44e-58; bound 1.36e-57 Bv, 188.91 bits
+fp256 atan small: 3.85e-06 (+1.8e-62); 0.01493 (+1.2e-61); 0.00138; bound 0.01493 Bv, 6.07 bits
+fp256 asin small: 3.876e-06 (+9.6e-58); 0.01534 (+1.2e-57); 0.00114; bound 0.01534 Bv, 6.03 bits
+fp256 acos small: 1.589e-26 (+1.4e-61); 0.0004092 (+8.6e-60); 3.36e-05; bound 0.0004092 Bv, 11.25 bits
+fp256 atan2 small: 3.066e-09 (+3.4e-58); 0.01692 (+4.5e-58); 0.00158; bound 0.01692 Bv, 5.89 bits
+fp256 asin diag: 0.00714 (+1.1e-58); 0.00714 (+1.1e-58); 0.00699; bound 0.00714 Bv, 7.13 bits
+fp256 acos diag: 0.00714 (+1.1e-58); 0.00714 (+1.1e-58); 0.00699; bound 0.00714 Bv, 7.13 bits
+fp256 atan2 diag: 0.00714 (+8.4e-59); 0.00714 (+1.3e-58); 0.00699; bound 0.00714 Bv, 7.13 bits
+fp32 double word atan random: 0.1081 (+0.0077); -; 0.0268; bound 0.1158 Bv, 3.11 bits
+fp32 double word asin random: 0.4177 (+0.041); -; 0.0967; bound 0.4584 Bv, 1.13 bits
+fp32 double word acos random: 0.1116 (+0.011); -; 0.0312; bound 0.1227 Bv, 3.03 bits
+fp32 double word atan2 random: 0.1539 (+0.019); -; 0.047; bound 0.1731 Bv, 2.53 bits
+fp32 double word atan edge: 0.1627 (+0.029); -; 0.0533; bound 0.1912 Bv, 2.39 bits
+fp32 double word asin edge: 0.3992 (+0.05); -; 0.0791; bound 0.4495 Bv, 1.15 bits
+fp32 double word acos edge: 0.3561 (+0.041); -; 0.0548; bound 0.3973 Bv, 1.33 bits
+fp32 double word atan2 edge: 0.1604 (+0.019); -; 0.0494; bound 0.1791 Bv, 2.48 bits
+fp32 double word atan big: 0.0247 (+5.1e-07); -; 0.0173; bound 0.0247 Bv, 5.34 bits
+fp32 double word asin big: 0.08749 (+0.0022); -; 0.0247; bound 0.08967 Bv, 3.48 bits
+fp32 double word acos big: 0.3221 (+0.073); -; 0.0915; bound 0.3948 Bv, 1.34 bits
+fp32 double word atan2 big: 0.08208 (+0.022); -; 0.0167; bound 0.1046 Bv, 3.26 bits
+fp32 double word atan small: 0.02797 (+7.4e-06); -; 0.0162; bound 0.02798 Bv, 5.16 bits
+fp32 double word asin small: 0.2415 (+0.028); -; 0.0967; bound 0.2691 Bv, 1.89 bits
+fp32 double word acos small: 0.03128 (+0.00061); -; 0.0148; bound 0.03189 Bv, 4.97 bits
+fp32 double word atan2 small: 0.1174 (+0.023); -; 0.0433; bound 0.1406 Bv, 2.83 bits
+fp32 double word asin diag: 0.08429 (+0.0047); -; 0.0247; bound 0.08898 Bv, 3.49 bits
+fp32 double word acos diag: 0.1072 (+0.0047); -; 0.0247; bound 0.1119 Bv, 3.16 bits
+fp32 double word atan2 diag: 0.07978 (+0.005); -; 0.039; bound 0.08474 Bv, 3.56 bits

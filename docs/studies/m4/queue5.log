@@ -1,0 +1,20 @@
+2026-10-23 13:20:25 start plants.fp64: plants.py fp64
+2026-10-23 13:20:35 end plants.fp64 rc=0
+2026-10-23 13:20:35 start twrun-pools.fp32-tw: twrun.py pools
+2026-10-23 13:20:56 end twrun-pools.fp32-tw rc=0
+2026-10-23 13:20:56 start twrun-costs.fp32-tw: twrun.py costs
+2026-10-23 13:20:56 end twrun-costs.fp32-tw rc=0
+2026-10-23 13:20:56 start twrun-onseq.fp32-tw: twrun.py onseq
+2026-10-23 13:21:36 end twrun-onseq.fp32-tw rc=0
+2026-10-23 13:21:36 start twrun-measure.fp32-tw-random: twrun.py measure 2000 random
+2026-10-23 13:22:06 end twrun-measure.fp32-tw-random rc=0
+2026-10-23 13:22:06 start twrun-measure.fp32-tw-edge: twrun.py measure 2000 edge
+2026-10-23 13:22:36 end twrun-measure.fp32-tw-edge rc=0
+2026-10-23 13:22:36 start twrun-measure.fp32-tw-big: twrun.py measure 2000 big
+2026-10-23 13:23:04 end twrun-measure.fp32-tw-big rc=0
+2026-10-23 13:23:04 start twrun-measure.fp32-tw-small: twrun.py measure 2000 small
+2026-10-23 13:23:31 end twrun-measure.fp32-tw-small rc=0
+2026-10-23 13:23:31 start twrun-measure.fp32-tw-diag: twrun.py measure 2000 diag
+2026-10-23 13:23:53 end twrun-measure.fp32-tw-diag rc=0
+2026-10-23 13:23:53 start twrun-plants.fp32-tw: twrun.py plants
+2026-10-23 13:24:00 end twrun-plants.fp32-tw rc=0

@@ -1,0 +1,3 @@
+fp64 ratio atan2(2^-10, 1 + j ulp), j 1..40: 40 arguments; marked rne 0, rtz 0, rdn 0, rup 0, rmm 0; guesses right 0 of 0; wrong 0
+fp64 ratio atan2(2^-40, 1 + j ulp), j 1..40: 40 arguments; marked rne 0, rtz 0, rdn 0, rup 0, rmm 0; guesses right 0 of 0; wrong 0
+fp64 ratio atan2(2^-63, 1 + j ulp), j 1..40: 40 arguments; marked rne 0, rtz 11, rdn 11, rup 11, rmm 0; guesses right 33 of 33; wrong 0

@@ -1,0 +1,115 @@
+2026-10-23 12:58:41 start measure.fp64-random: m4measure.py fp64 atan,asin,acos,atan2 2000 random 0 1
+2026-10-23 12:58:51 end measure.fp64-random rc=0
+2026-10-23 12:58:51 start measure.fp64-edge: m4measure.py fp64 atan,asin,acos,atan2 2000 edge 0 1
+2026-10-23 12:59:03 end measure.fp64-edge rc=0
+2026-10-23 12:59:03 start measure.fp64-big: m4measure.py fp64 atan,asin,acos,atan2 2000 big 0 1
+2026-10-23 12:59:14 end measure.fp64-big rc=0
+2026-10-23 12:59:14 start measure.fp64-small: m4measure.py fp64 atan,asin,acos,atan2 2000 small 0 1
+2026-10-23 12:59:25 end measure.fp64-small rc=0
+2026-10-23 12:59:25 start measure.fp64-diag: m4measure.py fp64 asin,acos,atan2 2000 diag 0 1
+2026-10-23 12:59:34 end measure.fp64-diag rc=0
+2026-10-23 12:59:34 start measure.fp128-random: m4measure.py fp128 atan,asin,acos,atan2 500 random 0 1
+2026-10-23 12:59:38 end measure.fp128-random rc=0
+2026-10-23 12:59:38 start measure.fp128-edge: m4measure.py fp128 atan,asin,acos,atan2 500 edge 0 1
+2026-10-23 12:59:41 end measure.fp128-edge rc=0
+2026-10-23 12:59:41 start measure.fp128-big: m4measure.py fp128 atan,asin,acos,atan2 500 big 0 1
+2026-10-23 12:59:45 end measure.fp128-big rc=0
+2026-10-23 12:59:45 start measure.fp128-small: m4measure.py fp128 atan,asin,acos,atan2 500 small 0 1
+2026-10-23 12:59:48 end measure.fp128-small rc=0
+2026-10-23 12:59:48 start measure.fp128-diag: m4measure.py fp128 asin,acos,atan2 500 diag 0 1
+2026-10-23 12:59:51 end measure.fp128-diag rc=0
+2026-10-23 12:59:51 start measure.fp256-random: m4measure.py fp256 atan,asin,acos,atan2 500 random 0 1
+2026-10-23 12:59:56 end measure.fp256-random rc=0
+2026-10-23 12:59:56 start measure.fp256-edge: m4measure.py fp256 atan,asin,acos,atan2 500 edge 0 1
+2026-10-23 13:00:02 end measure.fp256-edge rc=0
+2026-10-23 13:00:02 start measure.fp256-big: m4measure.py fp256 atan,asin,acos,atan2 500 big 0 1
+2026-10-23 13:00:07 end measure.fp256-big rc=0
+2026-10-23 13:00:07 start measure.fp256-small: m4measure.py fp256 atan,asin,acos,atan2 500 small 0 1
+2026-10-23 13:00:12 end measure.fp256-small rc=0
+2026-10-23 13:00:12 start measure.fp256-diag: m4measure.py fp256 asin,acos,atan2 500 diag 0 1
+2026-10-23 13:00:17 end measure.fp256-diag rc=0
+2026-10-23 13:00:17 start measure.fp32-dw18-random: m4measure.py fp32 atan,asin,acos,atan2 2000 random 0 1
+2026-10-23 13:00:25 end measure.fp32-dw18-random rc=0
+2026-10-23 13:00:25 start measure.fp32-dw18-edge: m4measure.py fp32 atan,asin,acos,atan2 2000 edge 0 1
+2026-10-23 13:00:33 end measure.fp32-dw18-edge rc=0
+2026-10-23 13:00:33 start measure.fp32-dw18-big: m4measure.py fp32 atan,asin,acos,atan2 2000 big 0 1
+2026-10-23 13:00:41 end measure.fp32-dw18-big rc=0
+2026-10-23 13:00:41 start measure.fp32-dw18-small: m4measure.py fp32 atan,asin,acos,atan2 2000 small 0 1
+2026-10-23 13:00:49 end measure.fp32-dw18-small rc=0
+2026-10-23 13:00:49 start measure.fp32-dw18-diag: m4measure.py fp32 asin,acos,atan2 2000 diag 0 1
+2026-10-23 13:00:56 end measure.fp32-dw18-diag rc=0
+2026-10-23 13:00:56 start budget.fp64-atan-random: m4budget.py fp64 atan random 1000 2
+2026-10-23 13:01:02 end budget.fp64-atan-random rc=0
+2026-10-23 13:01:02 start budget.fp64-atan-edge: m4budget.py fp64 atan edge 1000 2
+2026-10-23 13:01:09 end budget.fp64-atan-edge rc=0
+2026-10-23 13:01:09 start budget.fp64-atan-big: m4budget.py fp64 atan big 1000 2
+2026-10-23 13:01:16 end budget.fp64-atan-big rc=0
+2026-10-23 13:01:16 start budget.fp64-atan-small: m4budget.py fp64 atan small 1000 2
+2026-10-23 13:01:24 end budget.fp64-atan-small rc=0
+2026-10-23 13:01:24 start budget.fp64-asin-random: m4budget.py fp64 asin random 1000 2
+2026-10-23 13:01:33 end budget.fp64-asin-random rc=0
+2026-10-23 13:01:33 start budget.fp64-asin-edge: m4budget.py fp64 asin edge 1000 2
+2026-10-23 13:01:42 end budget.fp64-asin-edge rc=0
+2026-10-23 13:01:42 start budget.fp64-asin-big: m4budget.py fp64 asin big 1000 2
+2026-10-23 13:01:51 end budget.fp64-asin-big rc=0
+2026-10-23 13:01:51 start budget.fp64-asin-small: m4budget.py fp64 asin small 1000 2
+2026-10-23 13:02:00 end budget.fp64-asin-small rc=0
+2026-10-23 13:02:00 start budget.fp64-asin-diag: m4budget.py fp64 asin diag 1000 2
+2026-10-23 13:02:09 end budget.fp64-asin-diag rc=0
+2026-10-23 13:02:09 start budget.fp64-acos-random: m4budget.py fp64 acos random 1000 2
+2026-10-23 13:02:18 end budget.fp64-acos-random rc=0
+2026-10-23 13:02:18 start budget.fp64-acos-edge: m4budget.py fp64 acos edge 1000 2
+2026-10-23 13:02:27 end budget.fp64-acos-edge rc=0
+2026-10-23 13:02:27 start budget.fp64-acos-big: m4budget.py fp64 acos big 1000 2
+2026-10-23 13:02:36 end budget.fp64-acos-big rc=0
+2026-10-23 13:02:36 start budget.fp64-acos-small: m4budget.py fp64 acos small 1000 2
+2026-10-23 13:02:45 end budget.fp64-acos-small rc=0
+2026-10-23 13:02:45 start budget.fp64-acos-diag: m4budget.py fp64 acos diag 1000 2
+2026-10-23 13:02:54 end budget.fp64-acos-diag rc=0
+2026-10-23 13:02:54 start budget.fp64-atan2-random: m4budget.py fp64 atan2 random 1000 2
+2026-10-23 13:03:00 end budget.fp64-atan2-random rc=0
+2026-10-23 13:03:00 start budget.fp64-atan2-edge: m4budget.py fp64 atan2 edge 1000 2
+2026-10-23 13:03:08 end budget.fp64-atan2-edge rc=0
+2026-10-23 13:03:08 start budget.fp64-atan2-big: m4budget.py fp64 atan2 big 1000 2
+2026-10-23 13:03:14 end budget.fp64-atan2-big rc=0
+2026-10-23 13:03:14 start budget.fp64-atan2-small: m4budget.py fp64 atan2 small 1000 2
+2026-10-23 13:03:16 end budget.fp64-atan2-small rc=0
+2026-10-23 13:03:16 start budget.fp64-atan2-diag: m4budget.py fp64 atan2 diag 1000 2
+2026-10-23 13:03:24 end budget.fp64-atan2-diag rc=0
+2026-10-23 13:03:24 start budget.fp128-atan-random: m4budget.py fp128 atan random 300 2
+2026-10-23 13:03:29 end budget.fp128-atan-random rc=0
+2026-10-23 13:03:29 start budget.fp128-atan-edge: m4budget.py fp128 atan edge 300 2
+2026-10-23 13:03:31 end budget.fp128-atan-edge rc=0
+2026-10-23 13:03:31 start budget.fp128-atan-big: m4budget.py fp128 atan big 300 2
+2026-10-23 13:03:35 end budget.fp128-atan-big rc=0
+2026-10-23 13:03:35 start budget.fp128-atan-small: m4budget.py fp128 atan small 300 2
+2026-10-23 13:03:38 end budget.fp128-atan-small rc=0
+2026-10-23 13:03:38 start budget.fp128-asin-random: m4budget.py fp128 asin random 300 2
+2026-10-23 13:03:41 end budget.fp128-asin-random rc=0
+2026-10-23 13:03:41 start budget.fp128-asin-edge: m4budget.py fp128 asin edge 300 2
+2026-10-23 13:03:44 end budget.fp128-asin-edge rc=0
+2026-10-23 13:03:45 start budget.fp128-asin-big: m4budget.py fp128 asin big 300 2
+2026-10-23 13:03:48 end budget.fp128-asin-big rc=0
+2026-10-23 13:03:48 start budget.fp128-asin-small: m4budget.py fp128 asin small 300 2
+2026-10-23 13:03:51 end budget.fp128-asin-small rc=0
+2026-10-23 13:03:51 start budget.fp128-asin-diag: m4budget.py fp128 asin diag 300 2
+2026-10-23 13:03:55 end budget.fp128-asin-diag rc=0
+2026-10-23 13:03:55 start budget.fp128-acos-random: m4budget.py fp128 acos random 300 2
+2026-10-23 13:03:58 end budget.fp128-acos-random rc=0
+2026-10-23 13:03:58 start budget.fp128-acos-edge: m4budget.py fp128 acos edge 300 2
+2026-10-23 13:04:02 end budget.fp128-acos-edge rc=0
+2026-10-23 13:04:02 start budget.fp128-acos-big: m4budget.py fp128 acos big 300 2
+2026-10-23 13:04:06 end budget.fp128-acos-big rc=0
+2026-10-23 13:04:06 start budget.fp128-acos-small: m4budget.py fp128 acos small 300 2
+2026-10-23 13:04:09 end budget.fp128-acos-small rc=0
+2026-10-23 13:04:09 start budget.fp128-acos-diag: m4budget.py fp128 acos diag 300 2
+2026-10-23 13:04:13 end budget.fp128-acos-diag rc=0
+2026-10-23 13:04:13 start budget.fp128-atan2-random: m4budget.py fp128 atan2 random 300 2
+2026-10-23 13:04:16 end budget.fp128-atan2-random rc=0
+2026-10-23 13:04:16 start budget.fp128-atan2-edge: m4budget.py fp128 atan2 edge 300 2
+2026-10-23 13:04:20 end budget.fp128-atan2-edge rc=0
+2026-10-23 13:04:20 start budget.fp128-atan2-big: m4budget.py fp128 atan2 big 300 2
+2026-10-23 13:04:22 end budget.fp128-atan2-big rc=0
+2026-10-23 13:04:22 start budget.fp128-atan2-small: m4budget.py fp128 atan2 small 300 2
+2026-10-23 13:04:23 end budget.fp128-atan2-small rc=0
+2026-10-23 13:04:23 start budget.fp128-atan2-diag: m4budget.py fp128 atan2 diag 300 2

@@ -1,0 +1,22 @@
+2026-10-23 12:55:48 start costs.fp64: costs.py fp64
+2026-10-23 12:55:49 end costs.fp64 rc=0
+2026-10-23 12:55:49 start costs.fp128: costs.py fp128
+2026-10-23 12:55:49 end costs.fp128 rc=0
+2026-10-23 12:55:49 start costs.fp256: costs.py fp256
+2026-10-23 12:55:50 end costs.fp256 rc=0
+2026-10-23 12:55:50 start costs.fp32-dw18: costs.py fp32
+2026-10-23 12:55:50 end costs.fp32-dw18 rc=0
+2026-10-23 12:55:50 start share.fp64: share.py fp64
+2026-10-23 12:55:51 end share.fp64 rc=0
+2026-10-23 12:55:51 start share.fp128: share.py fp128
+2026-10-23 12:55:51 end share.fp128 rc=0
+2026-10-23 12:55:51 start share.fp256: share.py fp256
+2026-10-23 12:55:51 end share.fp256 rc=0
+2026-10-23 12:55:51 start onseq.fp64: onseq.py fp64
+2026-10-23 12:56:06 end onseq.fp64 rc=0
+2026-10-23 12:56:06 start onseq.fp128: onseq.py fp128
+2026-10-23 12:56:21 end onseq.fp128 rc=0
+2026-10-23 12:56:21 start onseq.fp256: onseq.py fp256
+2026-10-23 12:56:38 end onseq.fp256 rc=0
+2026-10-23 12:56:38 start onseq.fp32-dw18: onseq.py fp32
+2026-10-23 12:56:49 end onseq.fp32-dw18 rc=0

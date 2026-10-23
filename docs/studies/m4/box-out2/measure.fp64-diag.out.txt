@@ -1,0 +1,4 @@
+fp64 atan rne diag seed 1: 2000 main of 2000, wrong 0, marked 0; largest |V - f|/Bv 2^-9.99 at 0x3fe6a09e667f3bd1; 7s
+fp64 asin rne diag seed 1: 2000 main of 2000, wrong 0, marked 0; largest |V - f|/Bv 2^-8.95 at 0xbfe6a09e667f3bcb; 12s
+fp64 acos rne diag seed 1: 2000 main of 2000, wrong 0, marked 0; largest |V - f|/Bv 2^-8.01 at 0x3fe6a09e667f3bc9; 16s
+fp64 atan2 rne diag seed 1: 2000 main of 2000, wrong 0, marked 0; largest |V - f|/Bv 2^-7.48 at ('0x27e103a1562defc6', '0x27e103a1562defc4'); 21s

@@ -1,0 +1,8 @@
+fp32-tw plant none: red in NOTHING (largest edge error 2^-6.11 Bv)
+fp32-tw plant q2-dropped: red in bound: 2^17.6 Bv over the edge region; corner: 0 wrong unmarked, 43 past the bound, 0 with Bv underflowed (largest edge error 2^17.61 Bv)
+fp32-tw plant head3-short: red in NOTHING (largest edge error 2^-3.32 Bv)
+fp32-tw plant head3-two: red in bound: 2^6.7 Bv over the edge region; corner: 0 wrong unmarked, 3 past the bound, 0 with Bv underflowed (largest edge error 2^6.66 Bv)
+fp32-tw plant w2-dropped: red in bound: 2^17.3 Bv over the edge region (largest edge error 2^17.30 Bv)
+fp32-tw plant z2-dropped: red in bound: 2^6.3 Bv over the edge region; corner: 0 wrong unmarked, 4 past the bound, 0 with Bv underflowed (largest edge error 2^6.32 Bv)
+fp32-tw plant prescale-d: red in corner: 0 wrong unmarked, 7 past the bound, 0 with Bv underflowed (largest edge error 2^-6.11 Bv)
+fp32-tw plant range-low: red in corner: 0 wrong unmarked, 0 past the bound, 15 with Bv underflowed (largest edge error 2^-6.11 Bv)

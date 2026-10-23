@@ -1,0 +1,27 @@
+fp128 acos diag seed 125 G default: 3000 main lanes of 3000; 233 instructions (unpruned), 98 ever round; 68s
+  max |E|/Bv 0.004565 (2^-7.78); max |M|/Bv 0.00183 (2^-9.09); second-order residual at most 2.56e-21 Bv
+  observed maxima summed 0.002779 (2^-8.49); capacities summed 0.002927 (2^-8.42)
+  THE BUDGET'S BOUND: M_max + capacities = 0.004757 Bv (2^-7.72)
+  by phase (observed, capacity), in Bv:
+     tail           2.744e-03  2.890e-03
+     quotient       2.347e-05  2.538e-05
+     z              1.150e-05  1.190e-05
+     recon          1.110e-20  1.438e-20
+     sqrt           2.896e-21  5.013e-21
+     atan_s         6.785e-22  8.089e-22
+     den            7.177e-22  7.177e-22
+     head           1.294e-22  1.470e-22
+     num            5.831e-23  8.931e-23
+     index          0.000e+00  0.000e+00
+     final          0.000e+00  0.000e+00
+  the 10 largest capacities:
+     # 113 fma   tail           capacity 2.877e-03  observed 2.732e-03
+     #  91 add   quotient       capacity 2.538e-05  observed 2.347e-05
+     # 112 fma   tail           capacity 1.279e-05  observed 1.255e-05
+     #  95 mul   z              capacity 1.190e-05  observed 1.150e-05
+     # 111 fma   tail           capacity 2.842e-08  observed 2.764e-08
+     # 110 fma   tail           capacity 1.263e-10  observed 1.228e-10
+     # 109 fma   tail           capacity 5.613e-13  observed 5.486e-13
+     # 108 fma   tail           capacity 2.495e-15  observed 2.452e-15
+     # 107 fma   tail           capacity 1.109e-17  observed 1.039e-17
+     # 106 fma   tail           capacity 4.928e-20  observed 4.761e-20

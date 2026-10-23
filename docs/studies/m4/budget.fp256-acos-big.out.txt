@@ -1,0 +1,25 @@
+fp256 acos big seed 2 G default: 300 main lanes of 300; 254 instructions (unpruned), 121 ever round; 5s
+  max |E|/Bv 7.179e-06 (2^-17.09); max |M|/Bv 1.282e-06 (2^-19.57); second-order residual at most 9.39e-58 Bv
+  observed maxima summed 5.947e-06 (2^-17.36); capacities summed 8.383e-06 (2^-16.86)
+  THE BUDGET'S BOUND: M_max + capacities = 9.665e-06 Bv (2^-16.66)
+  by phase (observed, capacity), in Bv:
+     tail           5.931e-06  8.354e-06
+     quotient       9.143e-09  1.995e-08
+     z              6.992e-09  8.671e-09
+     sqrt           1.132e-57  1.412e-57
+     recon          6.313e-58  1.105e-57
+     atan_s         5.339e-58  7.692e-58
+     head           7.764e-59  8.017e-59
+     den            6.121e-59  6.526e-59
+     num            4.172e-61  4.251e-61
+     index          0.000e+00  0.000e+00
+     final          0.000e+00  0.000e+00
+  the 8 largest capacities:
+     # 134 fma   tail           capacity 8.343e-06  observed 5.922e-06
+     #  97 add   quotient       capacity 1.995e-08  observed 9.143e-09
+     # 133 fma   tail           capacity 1.078e-08  observed 8.896e-09
+     # 101 mul   z              capacity 8.671e-09  observed 6.992e-09
+     # 132 fma   tail           capacity 6.970e-12  observed 4.485e-12
+     # 131 fma   tail           capacity 9.010e-15  observed 4.311e-16
+     # 130 fma   tail           capacity 1.165e-17  observed 1.093e-17
+     # 129 fma   tail           capacity 1.506e-20  observed 7.331e-21

@@ -1,0 +1,60 @@
+2026-10-23 13:26:18 start twrun-pools.fp32-tw: twrun.py pools
+2026-10-23 13:26:38 end twrun-pools.fp32-tw rc=0
+2026-10-23 13:26:38 start twrun-costs.fp32-tw: twrun.py costs
+2026-10-23 13:26:38 end twrun-costs.fp32-tw rc=0
+2026-10-23 13:26:38 start twrun-onseq.fp32-tw: twrun.py onseq
+2026-10-23 13:27:17 end twrun-onseq.fp32-tw rc=0
+2026-10-23 13:27:17 start twrun-measure.fp32-tw-random: twrun.py measure 2000 random
+2026-10-23 13:27:45 end twrun-measure.fp32-tw-random rc=0
+2026-10-23 13:27:45 start twrun-measure.fp32-tw-edge: twrun.py measure 2000 edge
+2026-10-23 13:28:13 end twrun-measure.fp32-tw-edge rc=0
+2026-10-23 13:28:13 start twrun-measure.fp32-tw-big: twrun.py measure 2000 big
+2026-10-23 13:28:40 end twrun-measure.fp32-tw-big rc=0
+2026-10-23 13:28:40 start twrun-measure.fp32-tw-small: twrun.py measure 2000 small
+2026-10-23 13:29:07 end twrun-measure.fp32-tw-small rc=0
+2026-10-23 13:29:07 start twrun-measure.fp32-tw-diag: twrun.py measure 2000 diag
+2026-10-23 13:29:29 end twrun-measure.fp32-tw-diag rc=0
+2026-10-23 13:29:29 start twrun-plants.fp32-tw: twrun.py plants
+2026-10-23 13:29:36 end twrun-plants.fp32-tw rc=0
+2026-10-23 13:29:36 start plants.fp64: plants.py fp64
+2026-10-23 13:30:45 end plants.fp64 rc=0
+2026-10-23 13:30:45 start uform.fp64: uform.py fp64 300
+2026-10-23 13:30:57 end uform.fp64 rc=0
+2026-10-23 13:30:57 start uform.fp128: uform.py fp128 100
+2026-10-23 13:31:06 end uform.fp128 rc=0
+2026-10-23 13:31:07 start pools_run.fp64: pools_run.py fp64
+2026-10-23 13:31:15 end pools_run.fp64 rc=0
+2026-10-23 13:31:15 start onseq.fp64: onseq.py fp64
+2026-10-23 13:31:29 end onseq.fp64 rc=0
+2026-10-23 13:31:29 start specials.fp64: specials.py fp64
+2026-10-23 13:31:30 end specials.fp64 rc=0
+2026-10-23 13:31:30 start costs.fp64: costs.py fp64
+2026-10-23 13:31:31 end costs.fp64 rc=0
+2026-10-23 13:31:31 start pools_run.fp128: pools_run.py fp128
+2026-10-23 13:31:39 end pools_run.fp128 rc=0
+2026-10-23 13:31:39 start onseq.fp128: onseq.py fp128
+2026-10-23 13:31:52 end onseq.fp128 rc=0
+2026-10-23 13:31:52 start specials.fp128: specials.py fp128
+2026-10-23 13:31:54 end specials.fp128 rc=0
+2026-10-23 13:31:54 start costs.fp128: costs.py fp128
+2026-10-23 13:31:54 end costs.fp128 rc=0
+2026-10-23 13:31:54 start pools_run.fp256: pools_run.py fp256
+2026-10-23 13:32:04 end pools_run.fp256 rc=0
+2026-10-23 13:32:04 start onseq.fp256: onseq.py fp256
+2026-10-23 13:32:21 end onseq.fp256 rc=0
+2026-10-23 13:32:21 start specials.fp256: specials.py fp256
+2026-10-23 13:32:23 end specials.fp256 rc=0
+2026-10-23 13:32:23 start costs.fp256: costs.py fp256
+2026-10-23 13:32:24 end costs.fp256 rc=0
+2026-10-23 13:32:24 start pools_run.fp32-dw18: pools_run.py fp32
+2026-10-23 13:32:30 end pools_run.fp32-dw18 rc=0
+2026-10-23 13:32:30 start onseq.fp32-dw18: onseq.py fp32
+2026-10-23 13:32:40 end onseq.fp32-dw18 rc=0
+2026-10-23 13:32:40 start specials.fp32-dw18: specials.py fp32
+2026-10-23 13:32:41 end specials.fp32-dw18 rc=0
+2026-10-23 13:32:42 start costs.fp32-dw18: costs.py fp32
+2026-10-23 13:32:42 end costs.fp32-dw18 rc=0
+2026-10-23 13:32:42 start fingerprint: fingerprint.py
+2026-10-23 13:32:43 end fingerprint rc=0
+2026-10-23 13:32:43 start sched: sched.py
+2026-10-23 13:32:43 end sched rc=0

@@ -1,0 +1,4 @@
+fp128 atan rne edge seed 1: 500 main of 500, wrong 0, marked 0; largest |V - f|/Bv 2^-5.43 at 0xbffb03482daea97e4012918cc29cfc93; 1s
+fp128 asin rne edge seed 1: 500 main of 500, wrong 0, marked 0; largest |V - f|/Bv 2^-5.16 at 0xbffb02f9f78e5f904000000000000000; 2s
+fp128 acos rne edge seed 1: 500 main of 500, wrong 0, marked 0; largest |V - f|/Bv 2^-5.22 at 0x3ffefef9f10783d11fffffffffffffff; 2s
+fp128 atan2 rne edge seed 1: 500 main of 500, wrong 0, marked 0; largest |V - f|/Bv 2^-5.26 at ('0x5735ba63ad3374a55f0a5f8c1661a95f', '0x5739b5102b5a027ba04ca4024e7c9371'); 3s

@@ -1,0 +1,16 @@
+fp64 none rne: n_h/P 0.000000; n_h - P exact: True; |V - f|/Bv 2^-7.8; flag 0x10; equal to transcend.py: True
+fp64 none rtz: n_h/P 0.000000; n_h - P exact: True; |V - f|/Bv 2^-7.8; flag 0x10; equal to transcend.py: True
+fp64 sterbenz-bias rne: n_h/P 0.499939; n_h - P exact: False; |V - f|/Bv 2^44.0; flag 0x10; equal to transcend.py: False
+fp64 sterbenz-bias rtz: n_h/P 0.499939; n_h - P exact: False; |V - f|/Bv 2^44.0; flag 0x10; equal to transcend.py: False
+fp128 none rne: n_h/P 0.000000; n_h - P exact: True; |V - f|/Bv 2^-7.5; flag 0x10; equal to transcend.py: True
+fp128 none rtz: n_h/P 0.000000; n_h - P exact: True; |V - f|/Bv 2^-7.5; flag 0x10; equal to transcend.py: True
+fp128 sterbenz-bias rne: n_h/P 0.499939; n_h - P exact: False; |V - f|/Bv 2^46.0; flag 0x10; equal to transcend.py: False
+fp128 sterbenz-bias rtz: n_h/P 0.499939; n_h - P exact: False; |V - f|/Bv 2^46.0; flag 0x10; equal to transcend.py: False
+fp256 none rne: n_h/P 0.000000; n_h - P exact: True; |V - f|/Bv 2^-6.6; flag 0x10; equal to transcend.py: True
+fp256 none rtz: n_h/P 0.000000; n_h - P exact: True; |V - f|/Bv 2^-6.6; flag 0x10; equal to transcend.py: True
+fp256 sterbenz-bias rne: n_h/P 0.499939; n_h - P exact: False; |V - f|/Bv 2^46.0; flag 0x10; equal to transcend.py: False
+fp256 sterbenz-bias rtz: n_h/P 0.499939; n_h - P exact: False; |V - f|/Bv 2^46.0; flag 0x10; equal to transcend.py: False
+fp32 none rne: n_h/P 0.000000; n_h - P exact: True; |V - f|/Bv 2^-6.5; flag 0x10; equal to transcend.py: True
+fp32 none rtz: n_h/P 0.000000; n_h - P exact: True; |V - f|/Bv 2^-6.5; flag 0x10; equal to transcend.py: True
+fp32 sterbenz-bias rne: n_h/P 0.499939; n_h - P exact: False; |V - f|/Bv 2^18.0; flag 0x10; equal to transcend.py: False
+fp32 sterbenz-bias rtz: n_h/P 0.499939; n_h - P exact: False; |V - f|/Bv 2^18.0; flag 0x10; equal to transcend.py: False

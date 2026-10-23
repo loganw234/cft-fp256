@@ -1,0 +1,5 @@
+fp128 rne asin + acos: 269 instructions together, against 466 apart; 34 beyond asin's 235
+fp128 rtz asin + acos: 269 instructions together, against 466 apart; 34 beyond asin's 235
+fp128 rdn asin + acos: 269 instructions together, against 466 apart; 34 beyond asin's 235
+fp128 rup asin + acos: 269 instructions together, against 466 apart; 34 beyond asin's 235
+fp128 rmm asin + acos: 269 instructions together, against 466 apart; 34 beyond asin's 235

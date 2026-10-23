@@ -1,0 +1,13 @@
+fp32 near pi/2 atan, grid boundary 0, x0 = 1/(pi/2 - b) 0x4b4a1bda: 129 arguments; marked rne 0, rtz 125, rdn 125, rup 125, rmm 0; guesses right 375 of 375; wrong 0
+fp32 near pi/2 acos, grid boundary 0, x0 = pi/2 - b 0x33a22169: 129 arguments; marked rne 0, rtz 101, rdn 101, rup 101, rmm 0; guesses right 303 of 303; wrong 0
+fp32 near pi/2 atan, grid boundary 1, x0 = 1/(pi/2 - b) 0x4a9cbc5a: 129 arguments; marked rne 0, rtz 38, rdn 38, rup 38, rmm 0; guesses right 114 of 114; wrong 0
+fp32 near pi/2 acos, grid boundary 1, x0 = pi/2 - b 0x345110b4: 129 arguments; marked rne 0, rtz 50, rdn 50, rup 50, rmm 0; guesses right 150 of 150; wrong 0
+fp32 near pi atan2(y, -1), grid boundary 0, y0 = pi - b 0x34222169: 129 arguments; marked rne 0, rtz 101, rdn 101, rup 101, rmm 0; guesses right 300 of 303; wrong 0
+fp32 near pi atan2(y, -1), grid boundary 1, y0 = pi - b 0x34d110b4: 129 arguments; marked rne 0, rtz 50, rdn 50, rup 50, rmm 0; guesses right 150 of 150; wrong 0
+fp32 near pi/2 atan, midpoint boundary 0, x0 = 1/(pi/2 - b) 0x4c700518: 129 arguments; marked rne 129, rtz 0, rdn 0, rup 0, rmm 129; guesses right 251 of 258; wrong 0
+fp32 near pi/2 acos, midpoint boundary 0, x0 = pi/2 - b 0x328885a3: 129 arguments; marked rne 129, rtz 0, rdn 0, rup 0, rmm 129; guesses right 254 of 258; wrong 0
+fp32 near pi/2 atan, midpoint boundary 1, x0 = 1/(pi/2 - b) 0x4ae1e272: 129 arguments; marked rne 79, rtz 0, rdn 0, rup 0, rmm 79; guesses right 156 of 158; wrong 0
+fp32 near pi/2 acos, midpoint boundary 1, x0 = pi/2 - b 0x341110b4: 129 arguments; marked rne 50, rtz 0, rdn 0, rup 0, rmm 50; guesses right 100 of 100; wrong 0
+fp32 near pi atan2(y, -1), midpoint boundary 0, y0 = pi - b 0x330885a3: 129 arguments; marked rne 129, rtz 0, rdn 0, rup 0, rmm 129; guesses right 254 of 258; wrong 0
+fp32 near pi atan2(y, -1), midpoint boundary 1, y0 = pi - b 0x349110b4: 129 arguments; marked rne 50, rtz 0, rdn 0, rup 0, rmm 50; guesses right 100 of 100; wrong 0
+fp32 near pi/2 atan rtz, the window's extent: +1:M -1:M +2:M -2:M +4:M -4:M +8:M -8:M +16:M -16:M +32:M -32:M +64:. -64:. +128:. -128:. +256:. -256:. +512:. -512:. +1024:. -1024:. +2048:. -2048:. +4096:. -4096:. +8192:. -8192:.

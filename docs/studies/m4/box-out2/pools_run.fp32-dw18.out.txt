@@ -1,0 +1,29 @@
+fp32 atan: 332 pool arguments, G default
+  atan rne: 143 instructions, 44 words, live 15: 332 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 0s
+  atan rtz: 143 instructions, 44 words, live 15: 332 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 1s
+  atan rdn: 143 instructions, 44 words, live 15: 332 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 1s
+  atan rup: 143 instructions, 44 words, live 15: 332 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 1s
+  atan rmm: 143 instructions, 44 words, live 15: 332 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 2s
+fp32 asin: 332 pool arguments, G default
+  asin rne: 184 instructions, 46 words, live 16: 332 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 2s
+  asin rtz: 184 instructions, 46 words, live 16: 332 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 3s
+  asin rdn: 184 instructions, 46 words, live 16: 332 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 3s
+  asin rup: 184 instructions, 46 words, live 16: 332 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 3s
+  asin rmm: 184 instructions, 46 words, live 16: 332 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 4s
+fp32 acos: 332 pool arguments, G default
+  acos rne: 180 instructions, 44 words, live 16: 332 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10']; 4s
+  acos rtz: 180 instructions, 44 words, live 16: 332 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10']; 5s
+  acos rdn: 180 instructions, 44 words, live 16: 332 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10']; 5s
+  acos rup: 180 instructions, 44 words, live 16: 332 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10']; 6s
+  acos rmm: 180 instructions, 44 words, live 16: 332 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10']; 6s
+fp32 atan2: 472 pool arguments, G default
+  atan2 rne: 185 instructions, 52 words, live 21: 472 lanes, marked 22 (guess right 4), wrong 0, flag words ['0x0', '0x1', '0x10', '0x90']; 6s
+     marks: ('0x3f800000', '0x7f7fffff') ('0xbf800000', '0x7f7fffff') ('0x40000000', '0x7f7fffff') ('0xc0000000', '0x7f7fffff') ('0x40400000', '0x7f7fffff') ('0xc0400000', '0x7f7fffff') ('0x1', '0x3f800000') ('0x1', '0x40000000') ('0x1', '0x40400000') ('0x1', '0x7f7fffff') ...
+  atan2 rtz: 185 instructions, 52 words, live 21: 472 lanes, marked 22 (guess right 4), wrong 0, flag words ['0x0', '0x1', '0x10', '0x90']; 7s
+     marks: ('0x3f800000', '0x7f7fffff') ('0xbf800000', '0x7f7fffff') ('0x40000000', '0x7f7fffff') ('0xc0000000', '0x7f7fffff') ('0x40400000', '0x7f7fffff') ('0xc0400000', '0x7f7fffff') ('0x1', '0x3f800000') ('0x1', '0x40000000') ('0x1', '0x40400000') ('0x1', '0x7f7fffff') ...
+  atan2 rdn: 185 instructions, 52 words, live 21: 472 lanes, marked 22 (guess right 4), wrong 0, flag words ['0x0', '0x1', '0x10', '0x90']; 8s
+     marks: ('0x3f800000', '0x7f7fffff') ('0xbf800000', '0x7f7fffff') ('0x40000000', '0x7f7fffff') ('0xc0000000', '0x7f7fffff') ('0x40400000', '0x7f7fffff') ('0xc0400000', '0x7f7fffff') ('0x1', '0x3f800000') ('0x1', '0x40000000') ('0x1', '0x40400000') ('0x1', '0x7f7fffff') ...
+  atan2 rup: 185 instructions, 52 words, live 21: 472 lanes, marked 22 (guess right 4), wrong 0, flag words ['0x0', '0x1', '0x10', '0x90']; 8s
+     marks: ('0x3f800000', '0x7f7fffff') ('0xbf800000', '0x7f7fffff') ('0x40000000', '0x7f7fffff') ('0xc0000000', '0x7f7fffff') ('0x40400000', '0x7f7fffff') ('0xc0400000', '0x7f7fffff') ('0x1', '0x3f800000') ('0x1', '0x40000000') ('0x1', '0x40400000') ('0x1', '0x7f7fffff') ...
+  atan2 rmm: 185 instructions, 52 words, live 21: 472 lanes, marked 22 (guess right 4), wrong 0, flag words ['0x0', '0x1', '0x10', '0x90']; 9s
+     marks: ('0x3f800000', '0x7f7fffff') ('0xbf800000', '0x7f7fffff') ('0x40000000', '0x7f7fffff') ('0xc0000000', '0x7f7fffff') ('0x40400000', '0x7f7fffff') ('0xc0400000', '0x7f7fffff') ('0x1', '0x3f800000') ('0x1', '0x40000000') ('0x1', '0x40400000') ('0x1', '0x7f7fffff') ...

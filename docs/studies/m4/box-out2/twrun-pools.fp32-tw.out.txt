@@ -1,0 +1,20 @@
+fp32-tw atan rne: 472 instructions, 332 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 1s
+fp32-tw atan rtz: 472 instructions, 332 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 3s
+fp32-tw atan rdn: 472 instructions, 332 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 4s
+fp32-tw atan rup: 472 instructions, 332 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 6s
+fp32-tw atan rmm: 472 instructions, 332 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 7s
+fp32-tw asin rne: 637 instructions, 332 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 9s
+fp32-tw asin rtz: 637 instructions, 332 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 11s
+fp32-tw asin rdn: 637 instructions, 332 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 13s
+fp32-tw asin rup: 637 instructions, 332 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 14s
+fp32-tw asin rmm: 637 instructions, 332 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 16s
+fp32-tw acos rne: 633 instructions, 332 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10']; 17s
+fp32-tw acos rtz: 633 instructions, 332 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10']; 19s
+fp32-tw acos rdn: 633 instructions, 332 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10']; 21s
+fp32-tw acos rup: 633 instructions, 332 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10']; 22s
+fp32-tw acos rmm: 633 instructions, 332 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10']; 24s
+fp32-tw atan2 rne: 518 instructions, 472 lanes, marked 31 (guess right 13), wrong 0, flag words ['0x0', '0x1', '0x10', '0x90']; 26s
+fp32-tw atan2 rtz: 518 instructions, 472 lanes, marked 31 (guess right 13), wrong 0, flag words ['0x0', '0x1', '0x10', '0x90']; 28s
+fp32-tw atan2 rdn: 518 instructions, 472 lanes, marked 31 (guess right 13), wrong 0, flag words ['0x0', '0x1', '0x10', '0x90']; 30s
+fp32-tw atan2 rup: 518 instructions, 472 lanes, marked 31 (guess right 13), wrong 0, flag words ['0x0', '0x1', '0x10', '0x90']; 32s
+fp32-tw atan2 rmm: 518 instructions, 472 lanes, marked 31 (guess right 13), wrong 0, flag words ['0x0', '0x1', '0x10', '0x90']; 33s

@@ -1,0 +1,30 @@
+twrun-pools.fp32-tw|twrun.py pools
+twrun-costs.fp32-tw|twrun.py costs
+twrun-onseq.fp32-tw|twrun.py onseq
+twrun-measure.fp32-tw-random|twrun.py measure 2000 random
+twrun-measure.fp32-tw-edge|twrun.py measure 2000 edge
+twrun-measure.fp32-tw-big|twrun.py measure 2000 big
+twrun-measure.fp32-tw-small|twrun.py measure 2000 small
+twrun-measure.fp32-tw-diag|twrun.py measure 2000 diag
+twrun-plants.fp32-tw|twrun.py plants
+plants.fp64|plants.py fp64
+uform.fp64|uform.py fp64 300
+uform.fp128|uform.py fp128 100
+pools_run.fp64|pools_run.py fp64
+onseq.fp64|onseq.py fp64
+specials.fp64|specials.py fp64
+costs.fp64|costs.py fp64
+pools_run.fp128|pools_run.py fp128
+onseq.fp128|onseq.py fp128
+specials.fp128|specials.py fp128
+costs.fp128|costs.py fp128
+pools_run.fp256|pools_run.py fp256
+onseq.fp256|onseq.py fp256
+specials.fp256|specials.py fp256
+costs.fp256|costs.py fp256
+pools_run.fp32-dw18|pools_run.py fp32
+onseq.fp32-dw18|onseq.py fp32
+specials.fp32-dw18|specials.py fp32
+costs.fp32-dw18|costs.py fp32
+fingerprint|fingerprint.py
+sched|sched.py

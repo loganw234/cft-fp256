@@ -1,0 +1,5 @@
+fp64 atan2 rne exact quotients below the main path's reach, seed 1: 2000 lanes; remainder zero (the rule fires) 1738; s_h off the exact quotient 262, of them marked 0; marked in all 0; wrong unmarked 0; 6s
+fp64 atan2 rtz exact quotients below the main path's reach, seed 1: 2000 lanes; remainder zero (the rule fires) 1738; s_h off the exact quotient 262, of them marked 253; marked in all 253; wrong unmarked 0; 12s
+fp64 atan2 rdn exact quotients below the main path's reach, seed 1: 2000 lanes; remainder zero (the rule fires) 1738; s_h off the exact quotient 262, of them marked 253; marked in all 253; wrong unmarked 0; 18s
+fp64 atan2 rup exact quotients below the main path's reach, seed 1: 2000 lanes; remainder zero (the rule fires) 1738; s_h off the exact quotient 262, of them marked 253; marked in all 253; wrong unmarked 0; 24s
+fp64 atan2 rmm exact quotients below the main path's reach, seed 1: 2000 lanes; remainder zero (the rule fires) 1738; s_h off the exact quotient 262, of them marked 0; marked in all 0; wrong unmarked 0; 30s

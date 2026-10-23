@@ -1,0 +1,37 @@
+fp128 atan rne: 186 instructions, 62 words, live 15; TwoSum 0, Fast2Sum 12, TwoProd 0; invariants hold; flag words (C4's walk) ['0x0', '0x1', '0x10', '0x18', '0x90']
+   by phase {'front': 5, 'index': 7, 'num': 6, 'den': 6, 'quotient': 19, 'z': 6, 'tail': 14, 'head': 52, 'atan_s': 6, 'table': 17, 'recon': 23, 'final': 9, 'classify': 4, 'special': 12}
+   by opcode {'fma': 50, 'sub': 34, 'select': 31, 'add': 27, 'mul': 15, 'ixor': 12, 'iand': 7, 'icmplt': 5, 'recip_seed': 2, 'min': 1, 'cmpeq': 1, 'abs': 1}
+   plan: G 46 N 8 rho 0.066667 K 6 D 20
+fp128 atan rtz: 186 instructions, 62 words, live 15; TwoSum 0, Fast2Sum 12, TwoProd 0; invariants hold; flag words (C4's walk) ['0x0', '0x1', '0x10', '0x18', '0x90']
+fp128 atan rdn: 186 instructions, 62 words, live 15; TwoSum 0, Fast2Sum 12, TwoProd 0; invariants hold; flag words (C4's walk) ['0x0', '0x1', '0x10', '0x18', '0x90']
+fp128 atan rup: 186 instructions, 62 words, live 15; TwoSum 0, Fast2Sum 12, TwoProd 0; invariants hold; flag words (C4's walk) ['0x0', '0x1', '0x10', '0x18', '0x90']
+fp128 atan rmm: 186 instructions, 62 words, live 15; TwoSum 0, Fast2Sum 12, TwoProd 0; invariants hold; flag words (C4's walk) ['0x0', '0x1', '0x10', '0x18', '0x90']
+fp128 asin rne: 235 instructions, 64 words, live 16; TwoSum 1, Fast2Sum 14, TwoProd 0; invariants hold; flag words (C4's walk) ['0x0', '0x1', '0x10', '0x18', '0x90']
+   by phase {'front': 8, 'sqrt': 40, 'index': 7, 'num': 11, 'den': 8, 'quotient': 19, 'z': 6, 'tail': 14, 'head': 52, 'atan_s': 6, 'table': 17, 'recon': 20, 'final': 9, 'classify': 4, 'special': 14}
+   by opcode {'fma': 64, 'sub': 42, 'add': 34, 'select': 33, 'mul': 27, 'ixor': 17, 'iand': 6, 'icmplt': 6, 'recip_seed': 2, 'max': 1, 'rsqrt_seed': 1, 'min': 1, 'abs': 1}
+   plan: G 46 N 8 rho 0.066667 K 6 D 20
+fp128 asin rtz: 235 instructions, 64 words, live 16; TwoSum 1, Fast2Sum 14, TwoProd 0; invariants hold; flag words (C4's walk) ['0x0', '0x1', '0x10', '0x18', '0x90']
+fp128 asin rdn: 235 instructions, 64 words, live 16; TwoSum 1, Fast2Sum 14, TwoProd 0; invariants hold; flag words (C4's walk) ['0x0', '0x1', '0x10', '0x18', '0x90']
+fp128 asin rup: 235 instructions, 64 words, live 16; TwoSum 1, Fast2Sum 14, TwoProd 0; invariants hold; flag words (C4's walk) ['0x0', '0x1', '0x10', '0x18', '0x90']
+fp128 asin rmm: 235 instructions, 64 words, live 16; TwoSum 1, Fast2Sum 14, TwoProd 0; invariants hold; flag words (C4's walk) ['0x0', '0x1', '0x10', '0x18', '0x90']
+fp128 acos rne: 231 instructions, 62 words, live 16; TwoSum 1, Fast2Sum 14, TwoProd 0; invariants hold; flag words (C4's walk) ['0x0', '0x1', '0x10', '0x90']
+   by phase {'front': 8, 'sqrt': 40, 'index': 7, 'num': 11, 'den': 8, 'quotient': 19, 'z': 6, 'tail': 14, 'head': 52, 'atan_s': 6, 'table': 17, 'recon': 22, 'final': 9, 'classify': 3, 'special': 9}
+   by opcode {'fma': 63, 'sub': 42, 'add': 34, 'select': 33, 'mul': 27, 'ixor': 16, 'iand': 5, 'icmplt': 4, 'recip_seed': 2, 'max': 1, 'rsqrt_seed': 1, 'min': 1, 'abs': 1, 'cmpeq': 1}
+   plan: G 46 N 8 rho 0.066667 K 6 D 20
+fp128 acos rtz: 231 instructions, 62 words, live 16; TwoSum 1, Fast2Sum 14, TwoProd 0; invariants hold; flag words (C4's walk) ['0x0', '0x1', '0x10', '0x90']
+fp128 acos rdn: 231 instructions, 62 words, live 16; TwoSum 1, Fast2Sum 14, TwoProd 0; invariants hold; flag words (C4's walk) ['0x0', '0x1', '0x10', '0x90']
+fp128 acos rup: 231 instructions, 62 words, live 16; TwoSum 1, Fast2Sum 14, TwoProd 0; invariants hold; flag words (C4's walk) ['0x0', '0x1', '0x10', '0x90']
+fp128 acos rmm: 231 instructions, 62 words, live 16; TwoSum 1, Fast2Sum 14, TwoProd 0; invariants hold; flag words (C4's walk) ['0x0', '0x1', '0x10', '0x90']
+fp128 atan2 rne: 228 instructions, 70 words, live 21; TwoSum 0, Fast2Sum 12, TwoProd 0; invariants hold; flag words (C4's walk) ['0x0', '0x1', '0x10', '0x90']
+   by phase {'front': 19, 'index': 7, 'num': 6, 'den': 6, 'quotient': 19, 'z': 6, 'tail': 14, 'head': 52, 'atan_s': 6, 'table': 17, 'recon': 35, 'final': 9, 'special': 32}
+   by opcode {'select': 57, 'fma': 50, 'sub': 34, 'add': 27, 'mul': 19, 'ixor': 14, 'icmplt': 11, 'iand': 8, 'cmpeq': 4, 'recip_seed': 2, 'min': 1, 'abs': 1}
+   plan: G 46 N 8 rho 0.066667 K 6 D 20
+fp128 atan2 rtz: 228 instructions, 70 words, live 21; TwoSum 0, Fast2Sum 12, TwoProd 0; invariants hold; flag words (C4's walk) ['0x0', '0x1', '0x10', '0x90']
+fp128 atan2 rdn: 228 instructions, 70 words, live 21; TwoSum 0, Fast2Sum 12, TwoProd 0; invariants hold; flag words (C4's walk) ['0x0', '0x1', '0x10', '0x90']
+fp128 atan2 rup: 228 instructions, 70 words, live 21; TwoSum 0, Fast2Sum 12, TwoProd 0; invariants hold; flag words (C4's walk) ['0x0', '0x1', '0x10', '0x90']
+fp128 atan2 rmm: 228 instructions, 70 words, live 21; TwoSum 0, Fast2Sum 12, TwoProd 0; invariants hold; flag words (C4's walk) ['0x0', '0x1', '0x10', '0x90']
+fp128 bank words, union over the five attributes: atan 62, asin 64, acos 62, atan2 70; all four 75
+fp128 table N = 2: rho 0.333334, t/c in [0.5065, 2.0000], head K 14, degree D 49; atan 265, asin 314, acos 310, atan2 307
+fp128 table N = 4: rho 0.142858, t/c in [0.5065, 1.5281], head K 8, degree D 27; atan 200, asin 249, acos 245, atan2 242
+fp128 table N = 8: rho 0.066667, t/c in [0.5065, 1.5281], head K 6, degree D 20; atan 186, asin 235, acos 231, atan2 228
+fp128 table N = 16: rho 0.034076, t/c in [0.5065, 1.5281], head K 5, degree D 16; atan 191, asin 240, acos 236, atan2 233

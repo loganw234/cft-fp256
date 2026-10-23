@@ -1,0 +1,4 @@
+fp32-tw atan rne small: 2000 main of 2000, wrong 0, marked 0; largest |V - f|/Bv 2^-7.25 at 3142970754; 5s
+fp32-tw asin rne small: 2000 main of 2000, wrong 0, marked 0; largest |V - f|/Bv 2^-4.43 at 995421560; 12s
+fp32-tw acos rne small: 2000 main of 2000, wrong 0, marked 0; largest |V - f|/Bv 2^-8.16 at 3165652975; 20s
+fp32-tw atan2 rne small: 415 main of 2000, wrong 0, marked 0; largest |V - f|/Bv 2^-5.45 at (1583581570, 1618751719); 25s
