@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """The service loop, the fake runner, and the views `status` and `list` print.
 
-The real runners are parcels S2 (staged steps: sched_staged.py) and S3 (windows); S1's loop was written against the FAKE runner, which
+The real runners are parcels S2 (staged steps: sched_staged.py) and S3a (windows: sched_window.py, which also runs staged jobs); S1's loop was written against the FAKE runner, which
 touches no card and says so in every record it writes. A real runner's end record may say otherwise (`card_touched`). The loop's one rule about the card is the order of
 three things: the service holds the root's lock for its life; for each card it takes the card's lock BEFORE it
 claims a job and drops it AFTER the job's record is sealed and moved, so the lock is held for exactly a job's run;

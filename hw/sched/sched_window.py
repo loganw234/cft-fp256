@@ -21,7 +21,8 @@ commit's), and clones from the spec's own source.
 THE END. The driver is given the window's end as `--until` and ends itself there, after the leg running. If it has run on more than
 `runner.window_grace_s` past the end, the scheduler creates the driver's own STOP file (never a signal, never a pattern), and removes
 it, if it made it, once the driver has ended; a cancel of the job does the same at once. A card leg is never ended in the middle: the hard
-limit of the step (end + grace + the longest leg + ten minutes) is the last resort, and the wrapper's TERM, then KILL, a stop and a kill.
+limit of the step (end + grace + the longest leg's timeout with a cold revision-8 cache's allowance + ten minutes, about 5.2 hours) is the last
+resort for a driver that is itself hung, and the wrapper's TERM, then KILL, a stop and a kill.
 The driver itself runs at nice 0, as the launcher's did (its legs are niced by it). The outcome: `done` when `run_end` is `deadline`
 with exit 0 (or `stop_file` after the scheduler's own end check), `cancelled` when the night was cut short by a cancel or a STOP or
 signal that is not the scheduler's, else `failed` (a `run_end` that says otherwise, none, or an exit status it contradicts). The
@@ -49,7 +50,7 @@ from sched_spec import DRIVER_OPTIONS
 GATED = ("vectors", "drytests")                        # run only when the commit differs from the last passed window's; driver-quick runs every night
 PASSED = ("done", "done-with-findings")
 BUILD_REFUSALS = ("build-failed", "xrt-not-linked", "build-id-mismatch", "clone-built")        # a preflight failure of the commit, not of the spec
-HARD_EXTRA_S = max(CS.DEFAULT_TIMEOUTS.values()) + 600
+HARD_EXTRA_S = max(CS.DEFAULT_TIMEOUTS.values()) + CS.REV8_FIRST_COMPILE_ALLOWANCE + 600       # past the window's end and its grace: the longest leg the driver may be in (a cold revision-8 cache adds its allowance), and its stop
 
 
 def _never(c, st, text, rc):
@@ -108,11 +109,14 @@ class Watch:
         self.th.start()
 
     def _alive(self) -> bool:
+        """Is the driver's process (the leader of its group) still there? POSIX only: on Windows os.kill(pid, 0) would END the process."""
+        if os.name != "posix":
+            return True
         try:
             os.kill(self.pid, 0)
         except ProcessLookupError:
             return False
-        except (OSError, AttributeError, ValueError):
+        except OSError:
             pass
         return True
 
@@ -252,10 +256,11 @@ class WindowRunner(SG.StagedRunner):
         for k, s in enumerate(gated):
             self._leg_skipped(log, S, ctx, first + k, s, self.entries[s["type"]], why)
         i, problem, built = first + len(gated), None, None
+        blog = "build.log" if first == 0 else f"build-{first:02d}.log"            # a file the job makes: the fallback's build must not write over the first
         try:
-            built = self._chain(sp, log, stop, S, ctx, todo, card, i)
+            built = self._chain(sp, log, stop, S, ctx, todo, card, i, None, blog)
             if built is None and not S.failed and not S.skip:
-                built = self._build(log, sp, ctx.clone, os.path.dirname(log.path), ctx.dry, self.cfg["runner"], card["kind"], f"build-{i:02d}.log")
+                built = self._build(log, sp, ctx.clone, os.path.dirname(log.path), ctx.dry, self.cfg["runner"], card["kind"], blog)
         except Refusal as r:
             if r.name not in BUILD_REFUSALS:
                 raise

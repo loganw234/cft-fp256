@@ -1,7 +1,9 @@
 # Copyright 2026 Logan W.
 # SPDX-License-Identifier: Apache-2.0
 """The staged runner (parcel S2): a job of kind `staged`, run for real, step by step. It replaces the fake runner (sched_run.py)
-for staged jobs; the window job is parcel S3's and is refused here by name (`window-unsupported`).
+for staged jobs; the window job is the window runner's (parcel S3a, sched_window.py, a subclass of this runner that `serve` uses), and
+this runner used by itself refuses it by name (`window-unsupported`). Parcel S3a split `_run` into `_card`, `_open` (everything before the
+first step) and `_chain` (the steps, numbered from any index) so that the window runner can use each, once for every commit it tries.
 
 The order, which the lead's box_nightly.sh taught: the spec's image is held to its files; a job with a card step asks the guard
 (refused at once, the driver's start); the code is cloned and asserted; then the steps, in order. A step that needs the build
@@ -124,7 +126,7 @@ class StagedRunner:
         ctx = S.ctx = Ctx(clone, image, images, rcfg["python"], rev8, dry)
         return ctx
 
-    def _chain(self, spec, log, stop, S, ctx, steps, card, first=0, built=None):
+    def _chain(self, spec, log, stop, S, ctx, steps, card, first=0, built=None, buildlog="build.log"):
         """The steps in order, numbered from `first`. Returns the build record (None while nothing has needed a build)."""
         rcfg, jobdir, clone, dry = self.cfg["runner"], os.path.dirname(log.path), ctx.clone, ctx.dry
         for n, st in enumerate(steps):
@@ -138,7 +140,7 @@ class StagedRunner:
             if e.build == "forbids":
                 BD.check_clone_not_built(clone)
             if e.build == "needs" and built is None:
-                built = self._build(log, spec, clone, jobdir, dry, rcfg, card["kind"])
+                built = self._build(log, spec, clone, jobdir, dry, rcfg, card["kind"], buildlog)
             if built and st["type"] in built["disabled"]:
                 self._leg_skipped(log, S, ctx, i, st, e, built["disabled"][st["type"]])
                 continue

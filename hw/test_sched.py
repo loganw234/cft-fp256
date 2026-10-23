@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright 2026 Logan W.
 # SPDX-License-Identifier: Apache-2.0
-"""The card scheduler's tests (parcels S1 and S2): no card, no XRT, no amd-arc-box, no network.
+"""The card scheduler's tests (parcels S1, S2 and S3a): no card, no XRT, no amd-arc-box, no network.
 
     python3 hw/test_sched.py [--only NAME,...] [--no-plants] [--plant TEXT]        (bash hw/test-sched.sh)
 
@@ -20,6 +20,13 @@ registry parsers run_step jobs real refusals). Windows skips by name what needs 
 driver's stand-in or the guard's real-process scenario collides with another suite doing the same on the machine (the driver's guard
 sees every process): run one at a time. SCHED_TEST_MANIFESTS may name a directory of the three real cft_hw_*.manifest.txt files, which one
 check of `images` reads (skipped by name otherwise).
+
+Group of S3a, the nightly window (hw/sched/sched_calendar.py, sched_window.py), in parts (`--only window:PART`): calendar (the zone, the
+changed-clock nights, stated dates), spec (the new fields and their refusals), claim (the queue holds a job for its window; the refusals at
+the claim; `status` of a queued job), and, where bash, make, git and sha256sum are (skipped by name elsewhere), chain (nights of a window
+job through a scratch repository holding the REAL driver and wrapper, with a fake python for the long run: the preflight rule, the fallback,
+the noted failures, a refused build), driver (two nights against the driver's own `--dry-run`, the second resumed) and end (the end check, a
+cancel, the STOP file, the launcher's refusals). The card is never involved; the plants of S3a are labelled "S3a: ".
 
 A plant puts one defect back into a COPY of the code (and of this file), runs the groups written for it from the copy as a
 process, and requires three things: the copy is whole (it imports, and its run makes exactly as many checks as the unmodified
@@ -1967,11 +1974,12 @@ def table_checks(only=None):
     if s1_ran:
         check("the table: every refusal it gives to S1 was raised by a scenario and left a record exactly where its row says", not wrong, f"wrong: {wrong}")
     if s3_ran:
-        s3a = ("window-bad", "window-closed", "window-too-short", "stop-file-present", "resume-missing", "preflight-failed", "no-fallback")      # S3b's names (cards, quarantine, records) are not S3a's to raise
-        posix_only = () if os.name == "posix" else ("stop-file-present", "resume-missing", "preflight-failed", "no-fallback")
-        bad3 = [n for n in s3a if n not in posix_only and (n not in in_jobs or n in in_root or N.REFUSALS[n][0] != "S3")]
-        check("the table: every refusal parcel S3a raises (" + ", ".join(s3a) + ") is a row of the table, was raised by a scenario of the window group and left its `refused` record in the job and nowhere else",
-              not bad3, f"not raised, or filed wrong: {bad3}")
+        s3b = ("card-unavailable", "card-quarantined", "record-write-failed")                 # the cards' and the records' names are parcel S3b's to raise
+        s3a = [n for n, (by, where, _m) in N.REFUSALS.items() if by == "S3" and n not in s3b]
+        posix_only = () if os.name == "posix" else ("stop-file-present", "resume-missing", "preflight-failed", "no-fallback")      # raised by the parts that need POSIX
+        bad3 = [n for n in s3a if n not in posix_only and (n not in in_jobs or n in in_root)]
+        check("the table: every refusal the table gives to S3 but S3b's (" + ", ".join(s3a) + ") was raised by a scenario of the window group and left its `refused` record in the job and nowhere else",
+              len(s3a) >= 7 and not bad3, f"not raised, or filed wrong: {bad3}")
     if not s2_ran:
         return
     off2 = set() if os.name == "posix" else {"clone-built", "build-failed", "xrt-not-linked", "build-id-mismatch"}         # the build's scenarios need POSIX
@@ -2029,7 +2037,7 @@ end("deadline", 0)
 
 
 def wfixture():
-    """Built once: the scratch repository (w1, w2 on main; w3 on bad-vec, whose `make vectors` fails), a bundle of all three, three images, and the fake python."""
+    """Built once: the scratch repository (w1, w2 on main; w3 on bad-vec, whose `make vectors` fails; w4 on bad-build, whose `make` fails), a bundle of them, three images, and the fake python."""
     if WFIX:
         return WFIX
     base = os.path.join(TMP, "wfx")
@@ -2046,12 +2054,15 @@ def wfixture():
     git_t(repo, "checkout", "-q", "-b", "bad-vec")
     w3 = commit_all(repo, {"Makefile": ".PHONY: vectors\nvectors:\n\t@exit 2\n"}, "w3")
     git_t(repo, "checkout", "-q", "main")
-    git_t(repo, "bundle", "create", os.path.join(base, "bundles", "w.bundle"), "main", "bad-vec")
+    git_t(repo, "checkout", "-q", "-b", "bad-build")
+    w4 = commit_all(repo, {"host/Makefile": FAKE_MAKEFILE.replace('@test -z "$$FAKE_FAIL" ||', "@false ||")}, "w4")
+    git_t(repo, "checkout", "-q", "main")
+    git_t(repo, "bundle", "create", os.path.join(base, "bundles", "w.bundle"), "main", "bad-vec", "bad-build")
     interp = os.path.join(base, "fake-python")
     open(interp, "w", newline="").write(FAKE_INTERP.replace("@PY@", sys.executable))
     os.chmod(interp, 0o755)
     imgs = [dict(write_image(os.path.join(base, "img-" + n), cus=c, name="cft_hw_" + n), name=n) for n, c in (("quad", 4), ("single", 1), ("deep", 1))]
-    WFIX.update(base=base, repo=repo, bundles=os.path.join(base, "bundles"), w1=w1, w2=w2, w3=w3, interp=interp, images=imgs)
+    WFIX.update(base=base, repo=repo, bundles=os.path.join(base, "bundles"), w1=w1, w2=w2, w3=w3, w4=w4, interp=interp, images=imgs)
     return WFIX
 
 
@@ -2203,6 +2214,12 @@ def window_claim():
     sw = lambda **kw: S.submit(root, cfg, json.dumps(wvalid(**kw)).encode(), reg)[0]
     cl = lambda now=t0, c=None: S.claim_next(root, c or cfg, "u50-0", now, reg)
     later = sw(when={"window": "wlater"})
+    rc_s, out_s, _ = cli(root, "status", later, runner=None)
+    rc_g, out_g, _ = cli(root, "status", runner=None)
+    wl = CAL.state(cfg, "wlater", t0)
+    check("window status: a window job still in the queue shows its window (the calendar's answer: when it opens and closes, and that it is waiting) in `status JOB` and in `status`",
+          rc_s == 0 and f"window: wlater, waiting: {CAL.fmt(wl['opens'])} to {CAL.fmt(wl['closes'])} (1.00 h)" in out_s and rc_g == 0 and f"window  : {later} (queue)" in out_g and "waiting:" in out_g,
+          f"{rc_s} {out_s[:250]!r} {out_g[:300]!r}")
     before = cl()
     waiting = os.path.isdir(os.path.join(root, "queue", later)) and S.read_records(os.path.join(root, "queue", later, "job.jsonl"))[-1]["type"] == "submitted"
     after = cl(t0 + 3601)
@@ -2282,6 +2299,16 @@ def window_chain():
     check("window chain: a preflight failure on a new commit with no passed window to fall back to is `no-fallback` (outcome failed, the later steps skipped, no long run): nothing can run, and the record says why",
           e6.get("outcome") == "failed" and e6.get("refusal") == "no-fallback" and refusal_of(rr6).startswith("no-fallback:") and [x[1] for x in sw(rr6)] == ["fail", "skipped", "skipped"]
           and not first(rr6, "fallback") and not first(rr6, "driver_started"), f"{e6.get('outcome')} {sw(rr6)} {refusal_of(rr6)!r}")
+    out_b, (rb, cb) = os.path.join(TMP, "wout-build"), mkrootw("wc-build")
+    with env(PATH=fake_ldd("ok") + os.pathsep + os.environ["PATH"]):                # the fake host tree builds, ldd says XRT is linked: the jobs are not dry (fake tools, no card)
+        jb1, eb1, rb1 = night(rb, wspec(w["w2"], out_b, resume=False, dry_run=False), FAKE_LONG="end")
+        jb2, eb2, rb2 = night(rb, wspec(w["w4"], out_b, dry_run=False), FAKE_LONG="end")
+    pr, fbb = first(rb2, "preflight_refused"), first(rb2, "fallback")
+    check("window chain: a build the preflight cannot make (w4's `make` fails, in a job that is not dry) is a preflight failure like a failed step: `preflight_refused` names `build-failed`, the steps it cut off "
+          "are recorded skipped, and the night falls back to the last passed commit (w2, its clone already built) and runs there; each build has a log of its own in the job's directory",
+          eb1.get("outcome") == "done" and eb2.get("outcome") == "done" and eb2.get("dry_run") is False and pr.get("name") == "build-failed" and fbb.get("to_commit") == w["w2"]
+          and fbb.get("reason", "").startswith("build-failed:") and [x[1] for x in sw(rb2)][:3] == ["pass", "pass", "skipped"] and eb2.get("commit") == w["w2"] and eb2.get("requested_commit") == w["w4"]
+          and {"build.log", "build-03.log"} <= set(os.listdir(os.path.join(rb, "jobs", jb2))), f"{eb1.get('outcome')} {eb2.get('outcome')} {refusal_of(rb2)!r} {sw(rb2)} {pr} {fbb} {sorted(os.listdir(os.path.join(rb, 'jobs', jb2)))}")
 
 
 def window_driver():
@@ -2345,7 +2372,8 @@ def window_end():
     with env(PYTHON=w["interp"], FAKE_LONG="stubborn", FAKE_MAX="30"), no_users():
         th = threading.Thread(target=lambda: R.serve(root, cfg, runner, drain=True, poll=0.02, skip_locks=not S.HAVE_FLOCK, out=lambda x: None))
         th.start()
-        started = wait_for(lambda: any(r["type"] == "driver_started" for r in recs(root, "running", jid)), 40)
+        wait_for(lambda: not th.is_alive() or any(r["type"] == "driver_started" for r in recs(root, "running", jid)), 40)
+        started = th.is_alive()                          # the driver is running: the job is still in running/ (a job refused at its start has gone before the cancel)
         t0 = time.time()
         how = safely(S.cancel, root, jid, "tester")
         th.join(60)
@@ -2574,6 +2602,46 @@ PLANTS = [  # (what is wrong, edits, the groups written for it, a fragment of th
     ("S2: a configuration that lost the job's card is a runner_error", [E("sched_staged.py", 'card = next((c for c in cfg["cards"] if c["id"] == log.card), None)',
                                                                            'card = next(c for c in cfg["cards"] if c["id"] == log.card)')],
      "steps:refusals", "a registry that lost the job's image, or a configuration that lost its card", False),
+    # ---- parcel S3a: the window. The groups are parts of `window` (and one of `steps`); chain, driver and end need POSIX.
+    ("S3a: the window's end is not enforced", [E("sched_window.py", 'else "window" if time.time() >= self.closes + self.grace else None', "else None")], "window:end",
+     "window end: a driver that ignores the window's end", "posix"),
+    ("S3a: the changed-clock night is taken as 14 hours", [E("sched_calendar.py", "    return wall(zone, day, a), wall(zone, day if b > a else day + dt.timedelta(days=1), b)",
+                                                           "    o = wall(zone, day, a)\n    return o, o + ((b[0] - a[0]) * 3600 + (b[1] - a[1]) * 60 + b[2] - a[2]) % 86400")],
+     "window:calendar", "window: the night the clocks change is 15 hours", False),
+    ("S3a: vectors and the dry tests run when the commit did not change", [E("sched_window.py", '        gated = [s for s in steps if s["type"] in GATED and not changed]', "        gated = []")],
+     "window:chain", "window chain: the same commit the next night does NOT run vectors", "posix"),
+    ("S3a: the smoke is skipped when the commit did not change", [E("sched_window.py", 'GATED = ("vectors", "drytests")', 'GATED = ("vectors", "drytests", "driver-quick")')],
+     "window:chain", "window chain: the smoke runs EVERY night", "posix"),
+    ("S3a: a failed preflight on a new commit leaves the card idle when a passed commit exists", [E("sched_window.py", "            if last is None:\n                raise Refusal(\"no-fallback\"",
+                                                                                                      "            if True:\n                raise Refusal(\"no-fallback\"")],
+     "window:chain", "falls back, by name", "posix"),
+    ("S3a: a fallback from a commit that has passed before", [E("sched_window.py", "            if want in [c for _, c in hist]:", "            if False:")], "window:chain",
+     "window chain: a preflight failure on a commit that HAS passed before", "posix"),
+    ("S3a: a failed preflight does not stop the night", [E("sched_window.py", "        if problem:\n            if want in", "        if False:\n            if want in")], "window:chain",
+     "window chain: a preflight failure on a commit that HAS passed before", "posix"),
+    ("S3a: a cancel does not stop the driver", [E("sched_window.py", 'why = "cancel" if self.stop.requested() else "window" if', 'why = "window" if')], "window:end",
+     "window end: a CANCEL of a running window job stops the driver", "posix"),
+    ("S3a: the scheduler's own STOP file is left behind", [E("sched_window.py", "        if self.made:\n            try:\n                os.unlink(self.path)", "        if False:\n            try:\n                os.unlink(self.path)")],
+     "window:end", "window end: the STOP file the scheduler made is removed", "posix"),
+    ("S3a: a STOP file in the driver's directory is not refused", [E("sched_window.py", '        if os.path.exists(os.path.join(d["out"], "STOP")):', "        if False:")], "window:end",
+     "window end: the launcher's refusals about the driver's directory", "posix"),
+    ("S3a: a job is claimed before its window opens", [E("sched_state.py", '                if ws and ws["state"] == "waiting":', "                if False:")], "window:claim",
+     "window claim: a job whose window has not opened WAITS", False),
+    ("S3a: the estimate is not held to the window", [E("sched_state.py", '            if ws and spec.get("estimate_s") and spec["estimate_s"] > ws["closes"] - now_t:', "            if False:")], "window:claim",
+     "window claim: a job whose estimate_s fits", False),
+    ("S3a: a deadline already past is waited out with the window", [E("sched_state.py", "            if isinstance(wn, str) and not (isinstance(dl0, (int, float)) and now_t > dl0):", "            if isinstance(wn, str):")],
+     "window:claim", "window claim: a job whose deadline has passed is refused", False),
+    ("S3a: a window the configuration does not hold is accepted", [E("sched_spec.py", "        if ws is None:\n            raise Refusal(\"window-bad\"", "        if ws is None:\n            ws = {\"state\": \"open\"}\n        if False:\n            raise Refusal(\"window-bad\"")],
+     "window:spec", "window spec: a window the configuration does not hold is refused window-bad", False),
+    ("S3a: a refused build is not a preflight failure", [E("sched_window.py", 'BUILD_REFUSALS = ("build-failed", "xrt-not-linked", "build-id-mismatch", "clone-built")', "BUILD_REFUSALS = ()")], "window:chain",
+     "window chain: a build the preflight cannot make", "posix"),
+    ("S3a: the fallback's build writes over the first build's log", [E("sched_window.py", 'blog = "build.log" if first == 0 else f"build-{first:02d}.log"', 'blog = "build.log"')], "window:chain",
+     "window chain: a build the preflight cannot make", "posix"),
+    ("S3a: noted failures are allowed without the spec's word", [E("sched_steps.py", "    noted = [f for f in fails if f not in flakes and any(f.startswith(k) for k in noted_failures)]",
+                                                               "    noted = [f for f in fails if f not in flakes]")],
+     "steps:parsers", "steps: parse_drytests keeps the spec's `noted_failures` APART", False),
+    ("S3a: a refusal the table gives to S3 that nothing raises", [E("sched_names.py", '    "no-fallback": ("S3", "job",', '    "never-raised-s3": ("S3", "job", "x"), "no-fallback": ("S3", "job",')],
+     "window,table", "the table: every refusal the table gives to S3 but S3b's", None),
 ]
 
 

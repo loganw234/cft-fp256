@@ -154,7 +154,7 @@ SPEC_FIELDS = {
                   "differs from the last passed window's, driver-quick every night"),
     "driver": ("object", False, None, "window (required): the driver's long run, resumed, until the window's end"),
     "driver.out": ("str", False, None, "the driver's run directory (--out), an absolute path outside every checkout (required)"),
-    "driver.resume": ("bool", False, True, "true: --resume, and the directory must hold a metrics.jsonl (else `resume-missing`); false: a new run, and it must not"),
+    "driver.resume": ("bool", False, True, "true: --resume, and the directory must hold a metrics.jsonl (else `resume-missing`); false: no --resume, a new run (the driver itself refuses a directory that holds one, exit 2)"),
     "driver.images": ("strs", False, None, "registry names handed to the driver (--image, --sha) and held to their files; absent: the registry's quad, single and deep"),
     "driver.sweep_items": ("strs", False, None, "campaign items of the sweep catalog (--sweep-items), given to the smoke and the long run alike"),
     "driver.options": ("object", False, None, "a closed set of driver options: host_workers (--host-workers), sweep_chunk, telemetry_seconds, deadline_grace"),
