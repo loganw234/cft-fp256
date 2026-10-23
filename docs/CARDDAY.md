@@ -2103,7 +2103,7 @@ A changed tree is a new class (a tile item is counted per RTL tree, a host item 
 starts from nothing and the earlier one stays as history; a run that recorded no tree is read from git where it can be (the class's label says "read from git at commit X") and else is kept apart by its commit, the label giving the report's reason.
 `hw/test_card_stress_progress.py` holds all of this (the page in node, against a stub DOM, in its three failure states; SKIP, by name,
 without node), and, when `CARD_STRESS_PROGRESS_RUNS` names the copies' directories (separated as PATH is), every shared figure against
-`hw/card_stress_report.py --json` on them. Since 2026-10-23 the gate's `cardstress` stage runs it too (the suite's `testfiles` group), and with it its checks of the committed `site/nightly.json` (well-formed, no path or host name, shown by the page); the page says once, by the class's label, that a tree was read from git.
+`hw/card_stress_report.py --json` on them. Since 2026-10-23 the gate's `cardstress` stage runs it too (the suite's `testfiles` group), and with it its checks of the committed `site/nightly.json` (well-formed, no path or host name, shown by the page); the page's derived note under the label is gone, and the class label alone says that a tree was read from git, wherever the label is shown.
 
 ## The math library's routine entries in the revision-8 set (added 2026-10-19; the card leg ran on rev8q on 2026-10-19)
 
