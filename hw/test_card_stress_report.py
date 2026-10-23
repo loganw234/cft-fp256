@@ -2382,7 +2382,10 @@ def group_git(tmp):
     hold(ck_rev_words, fn, False)
     plant(ck_rev_words, "a function called git", "rev words: a function", S, False)
     plant(ck_rev_words, "git called a function", "rev words: a GitTrees", fn, True)
-    many =fx.runs(fx.old) + [g_start(fx.old), g_leg(TI, 2 * GM, 3 * GM, "tile", "quad"), g_start(dict(fx.old, commit=c2)), g_leg(TI, 3 * GM, 4 * GM, "tile", "quad")]
+    # the commit that sorts last is used first, so that the order of first use is never the sorted order whichever hashes the scratch repository made
+    big, small = sorted((c1, c2), reverse=True)
+    many = fx.runs(dict(fx.old, commit=big)) + [g_start(dict(fx.old, commit=big)), g_leg(TI, 2 * GM, 3 * GM, "tile", "quad"),
+                                                  g_start(dict(fx.old, commit=small)), g_leg(TI, 3 * GM, 4 * GM, "tile", "quad")]
     Sm = R.summarize(many, rev=rev)
     hold(ck_many, Sm, fx, rev, many)
     twice = copy.deepcopy(Sm)
@@ -2415,7 +2418,11 @@ def group_git(tmp):
     bad = copy.deepcopy(S_ba)
     for cl in kclasses(bad, "tile"):
         cl["label"] = cl["label"].replace("not recorded or unknown", "unknown")            # the first run's word, as it was
-    plant(ck_mixed, "the head word of the class's first run", "mixed: and its label is the same", S_ab, bad)
+    plant(ck_mixed, "the head word of the class's first run, in the second summary", "mixed: and its label is the same", S_ab, bad)
+    bad1 = copy.deepcopy(S_ab)
+    for cl in kclasses(bad1, "tile"):
+        cl["label"] = cl["label"].replace("not recorded or unknown", "unknown")
+    plant(ck_mixed, "the head word of the class's first run, in the first summary", "mixed: and its label is the same", bad1, S_ba)
     for t, word in ((contra_run, "unknown"), (unclean, "not recorded")):
         lab = (kkey(kclasses(R.summarize(fx.runs(t), rev=rev), "tile"), "unrecorded:" + c1) or NO_CLASS)["label"]
         check(lab.startswith(f"RTL tree {word} (commit "), f"mixed: a class of one kind keeps its word, '{word}'", lab)
@@ -2425,20 +2432,32 @@ def group_git(tmp):
     bad = copy.deepcopy(N_ba)
     for cl in kclasses(bad, "tile"):
         cl["label"] = cl["label"].replace(" (whether it was modified is not recorded)", "")  # the first run's tail, as it was
-    plant(ck_note, "the tail of the class's first run", "note: one note in either order", N_ab, bad)
+    plant(ck_note, "the tail of the class's first run, in the second summary", "note: one note in either order", N_ab, bad)
+    bad1 = copy.deepcopy(N_ab)
+    for cl in kclasses(bad1, "tile"):
+        cl["label"] = cl["label"].replace(" (whether it was modified is not recorded)", "")
+    plant(ck_note, "the tail of the class's first run, in the first summary", "note: one note in either order", bad1, N_ba)
     lo, hi = sorted((c1[:12], c2[:12]))
 
+    def pick(s):                                        # a function, so that each summary is read when it is asked for (a pair of nested generators
+        c = kkey(kclasses(s, "tile"), A) or NO_CLASS    # unpacked at once reads the second summary twice: the b6 defect)
+        return c["label"], c["derived_from_git"]
+
     def ck_commits(ck, s1, s2):                         # two runs with no tree, at c1 and at c2, both deriving rtl A
-        (l1, d1), (l2, d2) = (((kkey(kclasses(s, "tile"), A) or NO_CLASS)[f] for f in ("label", "derived_from_git")) for s in (s1, s2))
+        (l1, d1), (l2, d2) = pick(s1), pick(s2)
         ck(l1 == l2 and f"(read from git at commits {lo}, {hi})" in l1, "commits: the label names the derived commits in sorted order whatever the order of the runs", (l1, l2))
         ck(d1 == d2 and [d["commit"] for d in (d1 or [])] == sorted([c1, c2]), "commits: and derived_from_git is sorted by commit, so the JSON is the same in either order", (d1, d2))
     C_ab, C_ba = two(fx.old, dict(fx.old, commit=c2)), two(dict(fx.old, commit=c2), fx.old)
     hold(ck_commits, C_ab, C_ba)
-    bad = copy.deepcopy(C_ba)
-    for cl in kclasses(bad, "tile"):
-        cl["label"] = cl["label"].replace(f"commits {lo}, {hi}", f"commits {hi}, {lo}")      # the order the runs came in, as it was
-        cl["derived_from_git"].reverse()
-    plant(ck_commits, "the commits in the order the runs came", "commits: the label names", C_ab, bad)
+
+    def unsorted_commits(s):                            # the order the runs came in, as it was
+        s = copy.deepcopy(s)
+        for cl in kclasses(s, "tile"):
+            cl["label"] = cl["label"].replace(f"commits {lo}, {hi}", f"commits {hi}, {lo}")
+            cl["derived_from_git"].reverse()
+        return s
+    plant(ck_commits, "the commits in the order the runs came, in the second summary", "commits: the label names", C_ab, unsorted_commits(C_ba))
+    plant(ck_commits, "the commits in the order the runs came, in the first summary", "commits: the label names", unsorted_commits(C_ab), C_ba)
     # 2. what git cannot say is kept apart, by commit, with the reason
 
     def dirty_blind(t):               # a report that takes every checkout for a clean one
