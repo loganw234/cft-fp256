@@ -126,6 +126,37 @@ def sample(fmt, fn, mode, n, seed):
             elif mode == "small":
                 Ey = Ex - rng.randint(4, min(p + 40, Ex - fmt.emin - p - 6))
                 out.append((_rand_sig(rng, fmt, Ey, sy), _rand_sig(rng, fmt, Ex, 0)))
+            elif mode == "tinyn":
+                # send-back 1's corner: a subnormal or tiny |y| (exponent from
+                # the subnormal grid to emin + 3p + 4) against a larger |x|.
+                # 50% x > 0 with t = |y/x| from the tiny-quotient range's
+                # edge to 1/4 (where V is t itself: the lanes the first
+                # prescale left with an inexact remainder); 20% x > 0 with t
+                # in the band from that edge to 2^(emin+2p+4), where three
+                # words keep only two; 10% x > 0 with |x| over the whole
+                # range above |y| (most of them marked); 10% x < 0 and 10%
+                # swapped (|y| > |x|), t as the first
+                Ey = rng.randint(fmt.emin - p + 1, fmt.emin + 3 * p + 4)
+                if Ey < fmt.emin:
+                    k = Ey - fmt.emin + p - 1
+                    nb = (1 << k) | rng.getrandbits(k)
+                else:
+                    nb = _rand_sig(rng, fmt, Ey, 0)
+                u = rng.random()
+                if 0.70 <= u < 0.80:
+                    Ex = rng.randint(Ey + 1, fmt.emax)
+                elif 0.50 <= u < 0.70:
+                    Ex = Ey - rng.randint(fmt.emin + p + 2, fmt.emin + 2 * p + 4)
+                else:
+                    Ex = Ey - rng.randint(fmt.emin + p + 2, -2)
+                db = _rand_sig(rng, fmt, Ex, 0)
+                ys = fmt.sign_mask if sy else 0
+                if u < 0.80:
+                    out.append((nb | ys, db))
+                elif u < 0.90:
+                    out.append((nb | ys, db | fmt.sign_mask))
+                else:
+                    out.append((db | ys, nb | (fmt.sign_mask if sx else 0)))
             continue
         if mode == "random":
             if fn == "atan":

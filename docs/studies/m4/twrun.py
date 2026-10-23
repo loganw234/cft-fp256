@@ -20,7 +20,7 @@ import time
 
 import mpmath
 
-from m4core import FORMATS, sf, dec, evaluate2, ATTRS, RNE
+from m4core import FORMATS, sf, dec, evaluate2, ATTRS, RNE, RTZ
 from m4harness import pool, compare, golden
 from m4measure import sample, in_main, true_value
 import m4tw
@@ -164,6 +164,31 @@ def plants():
                 worst = max(worst, r)
         if worst > 1:
             red.append(f"bound: 2^{float(mpmath.log(worst, 2)):.1f} Bv over the edge region")
+        # send-back 1's corner (m4measure "tinyn", 100 lanes, rne and rtz):
+        # a wrong unmarked lane, or under rne a bound past 1 or underflowed
+        cw = cb = cz = 0
+        for rnd in (RNE, RTZ):
+            f = m4tw.build(FMT, rnd, "atan2", plant=plant)
+            for xa in sample(FMT, "atan2", "tinyn", 100, 17):
+                b, fw, pr = evaluate2(f, xa, want=["Vh", "Vl", "V2", "Bv"], full=True)
+                if fw & 0x80:
+                    continue
+                if (b, fw) != tuple(golden(FMT, "atan2", xa, rnd)):
+                    cw += 1
+                    continue
+                if rnd != RNE or fw != 0x10 or not (xa[0] & ~FMT.sign_mask):
+                    continue
+                Bv = abs(dec(FMT, pr["Bv"]))
+                if Bv == 0:
+                    cz += 1
+                    continue
+                Vv = dec(FMT, pr["Vh"]) + dec(FMT, pr["Vl"]) + dec(FMT, pr["V2"])
+                if abs(mpmath.mpf(Vv.numerator) / Vv.denominator
+                       - true_value("atan2", xa, FMT)) > mpmath.mpf(Bv.numerator) / Bv.denominator:
+                    cb += 1
+        if cw or cb or cz:
+            red.append(f"corner: {cw} wrong unmarked, {cb} past the bound, "
+                       f"{cz} with Bv underflowed")
         print(f"fp32-tw plant {plant or 'none'}: red in "
               f"{'; '.join(red) if red else 'NOTHING'} (largest edge error "
               f"2^{float(mpmath.log(worst, 2)) if worst else -999:.2f} Bv)", flush=True)

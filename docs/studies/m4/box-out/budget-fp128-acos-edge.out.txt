@@ -1,0 +1,27 @@
+fp128 acos edge seed 122 G default: 3000 main lanes of 3000; 233 instructions (unpruned), 106 ever round; 98s
+  max |E|/Bv 0.02922 (2^-5.10); max |M|/Bv 0.01147 (2^-6.45); second-order residual at most 2.54e-20 Bv
+  observed maxima summed 0.01823 (2^-5.78); capacities summed 0.01879 (2^-5.73)
+  THE BUDGET'S BOUND: M_max + capacities = 0.03026 Bv (2^-5.05)
+  by phase (observed, capacity), in Bv:
+     tail           1.800e-02  1.856e-02
+     quotient       1.511e-04  1.551e-04
+     z              7.368e-05  7.649e-05
+     recon          2.738e-20  3.995e-20
+     sqrt           2.981e-20  3.531e-20
+     atan_s         1.202e-20  2.010e-20
+     num            8.745e-21  1.120e-20
+     den            3.681e-21  6.810e-21
+     head           1.732e-21  1.746e-21
+     index          0.000e+00  0.000e+00
+     final          0.000e+00  0.000e+00
+  the 10 largest capacities:
+     # 113 fma   tail           capacity 1.849e-02  observed 1.793e-02
+     #  91 add   quotient       capacity 1.551e-04  observed 1.511e-04
+     #  95 mul   z              capacity 7.649e-05  observed 7.368e-05
+     # 112 fma   tail           capacity 7.426e-05  observed 7.201e-05
+     # 111 fma   tail           capacity 1.491e-07  observed 1.451e-07
+     # 110 fma   tail           capacity 5.990e-10  observed 5.706e-10
+     # 109 fma   tail           capacity 2.406e-12  observed 2.271e-12
+     # 108 fma   tail           capacity 9.663e-15  observed 9.319e-15
+     # 107 fma   tail           capacity 3.881e-17  observed 3.672e-17
+     # 106 fma   tail           capacity 1.559e-19  observed 1.521e-19

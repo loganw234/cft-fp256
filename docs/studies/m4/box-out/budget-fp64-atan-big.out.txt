@@ -1,0 +1,24 @@
+fp64 atan big seed 123 G default: 12000 main lanes of 12000; 176 instructions (unpruned), 70 ever round; 272s
+  max |E|/Bv 0.002606 (2^-8.58); max |M|/Bv 0.0001511 (2^-12.69); second-order residual at most 6.91e-12 Bv
+  observed maxima summed 0.002455 (2^-8.67); capacities summed 0.002487 (2^-8.65)
+  THE BUDGET'S BOUND: M_max + capacities = 0.002638 Bv (2^-8.57)
+  by phase (observed, capacity), in Bv:
+     recon          2.455e-03  2.487e-03
+     atan_s         1.155e-11  1.390e-11
+     quotient       3.285e-12  4.632e-12
+     head           2.949e-12  4.365e-12
+     z              1.129e-27  1.938e-27
+     tail           8.426e-92  5.774e-91
+     final          0.000e+00  0.000e+00
+     special        0.000e+00  0.000e+00
+  the 10 largest capacities:
+     # 144 add   recon          capacity 1.243e-03  observed 1.243e-03
+     # 145 add   recon          capacity 1.243e-03  observed 1.212e-03
+     # 109 fma   atan_s         capacity 9.264e-12  observed 9.264e-12
+     # 107 fma   atan_s         capacity 4.632e-12  observed 2.283e-12
+     #  37 mul   quotient       capacity 4.632e-12  observed 3.285e-12
+     # 104 sub   head           capacity 4.365e-12  observed 2.949e-12
+     #  31 fma   quotient       capacity 4.897e-21  observed 2.472e-21
+     #  45 fma   z              capacity 1.292e-27  observed 8.129e-28
+     #  99 fma   head           capacity 9.411e-28  observed 6.558e-28
+     # 100 fma   head           capacity 9.411e-28  observed 8.608e-28

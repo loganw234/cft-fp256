@@ -11,6 +11,10 @@
 #               points (m4measure's edge, small and big, 48 each)
 #   specials    specials.py's rows under all five attributes: red on a
 #               wrong unmarked lane
+#   audit       the index's exactness, lane by lane (the study's 8, item 2)
+#   corner      send-back 1's region, atan2 with a tiny |y| (100 lanes,
+#               rne and rtz): red on a wrong unmarked lane, a bound past 1
+#               or a Bv that underflowed
 #   control     the unplanted fragments: red in nothing
 #
 #   python plants.py FMT [PLANT ...]
@@ -70,7 +74,7 @@ def lanes(fmt, frags, cases):
     return out
 
 
-def check(fmt, plant, ctrl_marks, must_mark, placed):
+def check(fmt, plant, ctrl_marks, must_mark, placed, corner):
     red, cases = [], {}
     frags = {(fn, rnd): build(fmt, rnd, fn, plant=plant)
              for fn in FNS for rnd in ATTRS}
@@ -154,8 +158,36 @@ def check(fmt, plant, ctrl_marks, must_mark, placed):
                           f"broken on {broken}, n_h - P inexact on {inexact}, "
                           f"wrong unmarked {wrong}; first: " + "; ".join(
                               f"{k} {v}" for k, v in first.items()))
-    red = [k for k in ("pools", "structured", "bound", "specials", "audit")
-           if k in cases]
+    # corner: send-back 1's region (m4measure's "tinyn": atan2 with a tiny
+    # |y| against |x| over the range above it) under rne and rtz: red on a
+    # wrong unmarked lane, or, under rne, on an unmarked main-path lane
+    # whose |V - f| passes Bv or whose Bv underflowed to 0
+    for rnd in CHECK_RNDS:
+        f = frags[("atan2", rnd)]
+        for xa in corner:
+            b, fw, pr = evaluate2(f, xa, want=["Vh", "Vl", "Bv"], full=True)
+            if fw & 0x80:
+                continue
+            if (b, fw) != tuple(golden(fmt, "atan2", xa, rnd)):
+                cases.setdefault("corner", f"atan2 {sf.RND_NAMES[rnd]} {xa} wrong")
+                break
+            if rnd != RNE or fw != 0x10 or not (xa[0] & ~fmt.sign_mask):
+                continue
+            Bv = abs(dec(fmt, pr["Bv"]))
+            if Bv == 0:
+                cases.setdefault("corner", f"atan2 rne {xa}: Bv underflowed to 0")
+                break
+            Vv = dec(fmt, pr["Vh"]) + dec(fmt, pr["Vl"])
+            r = abs(mpmath.mpf(Vv.numerator) / Vv.denominator
+                    - true_value("atan2", xa, fmt)) / (mpmath.mpf(Bv.numerator) / Bv.denominator)
+            if r > 1:
+                cases.setdefault("corner", f"atan2 rne {xa}: "
+                                 f"2^{float(mpmath.log(r, 2)):.1f} Bv")
+                break
+        if "corner" in cases:
+            break
+    red = [k for k in ("pools", "structured", "bound", "specials", "audit",
+                       "corner") if k in cases]
     return red, cases, worst
 
 
@@ -213,13 +245,14 @@ def main():
         for mode in ("edge", "small", "big"):
             xs += [x for x in sample(fmt, fn, mode, 48, 11) if in_main(fmt, fn, x)]
         placed[fn] = xs
+    corner = sample(fmt, "atan2", "tinyn", 100, 17)
     print(f"{name}: the control marks {len(ctrl_marks)} pool lanes (rne, rtz) "
           f"and {len(must_mark)} structured lanes of {len(cl)}; "
           f"{sum(len(v) for v in placed.values())} placed points; "
           f"{time.perf_counter() - t0:.0f}s", flush=True)
     for plant in which:
         red, cases, worst = check(fmt, None if plant == "none" else plant,
-                                  ctrl_marks, must_mark, placed)
+                                  ctrl_marks, must_mark, placed, corner)
         print(f"{name} plant {plant}: red in {', '.join(red) if red else 'NOTHING'}; "
               f"largest placed error 2^{float(mpmath.log(worst, 2)) if worst else -999:.1f} Bv; "
               f"{time.perf_counter() - t0:.0f}s", flush=True)

@@ -1,0 +1,27 @@
+fp64 acos random seed 121 G default: 12000 main lanes of 12000; 219 instructions (unpruned), 96 ever round; 205s
+  max |E|/Bv 0.003855 (2^-8.02); max |M|/Bv 0.001458 (2^-9.42); second-order residual at most 0.00223 Bv
+  observed maxima summed 0.01815 (2^-5.78); capacities summed 0.02651 (2^-5.24)
+  THE BUDGET'S BOUND: M_max + capacities = 0.02797 Bv (2^-5.16)
+  by phase (observed, capacity), in Bv:
+     recon          7.550e-03  9.424e-03
+     sqrt           5.396e-03  7.561e-03
+     num            2.410e-03  3.011e-03
+     tail           4.329e-04  2.212e-03
+     quotient       9.327e-04  1.953e-03
+     atan_s         7.354e-04  1.268e-03
+     den            4.756e-04  8.210e-04
+     head           2.156e-04  2.528e-04
+     z              3.951e-06  7.738e-06
+     index          0.000e+00  0.000e+00
+     final          0.000e+00  0.000e+00
+  the 10 largest capacities:
+     # 193 add   recon          capacity 3.728e-03  observed 2.404e-03
+     #  99 fma   tail           capacity 2.204e-03  observed 4.275e-04
+     #  32 add   sqrt           capacity 1.995e-03  observed 1.336e-03
+     #  34 mul   sqrt           capacity 1.972e-03  observed 1.341e-03
+     # 192 add   recon          capacity 1.923e-03  observed 1.871e-03
+     # 178 add   recon          capacity 1.887e-03  observed 1.887e-03
+     # 179 add   recon          capacity 1.887e-03  observed 1.389e-03
+     #  55 add   num            capacity 1.488e-03  observed 1.488e-03
+     #  56 fma   num            capacity 1.488e-03  observed 9.003e-04
+     #  31 fma   sqrt           capacity 1.470e-03  observed 1.470e-03

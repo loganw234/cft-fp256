@@ -62,7 +62,8 @@ def plan_tw(fmt, G, rho):
     return K3, K23 - K3, D
 
 
-PLANTS_TW = ("q2-dropped", "head3-short", "head3-two", "w2-dropped", "z2-dropped")
+PLANTS_TW = ("q2-dropped", "head3-short", "head3-two", "w2-dropped", "z2-dropped",
+             "prescale-d", "range-low")
 
 
 def build(fmt, rnd, fn, G=None, N=NTAB, bound_shift=0, plant=None):
@@ -142,7 +143,14 @@ def build(fmt, rnd, fn, G=None, N=NTAB, bound_shift=0, plant=None):
         ay, ax = f.iand(y, ABSM), f.iand(x, ABSM)
         swap = f.icmplt(ax, ay)
         n0, d0 = f.sel(ax, ay, swap), f.sel(ay, ax, swap)
-        dsub = f.icmplt(d0, w(pow2_bits(fmt, fmt.emin + 3 * p), "DSUB"))
+        # keyed on n, as m4inv.py (send-back 1): the remainders are about
+        # 2^-p n and 2^-2p n, exact only while n >= 2^(emin+2p+1)
+        if plant == "prescale-d":
+            dsub = f.icmplt(d0, w(pow2_bits(fmt, fmt.emin + 3 * p), "DSUB"))
+        else:
+            nsub = f.icmplt(n0, w(pow2_bits(fmt, fmt.emin + 3 * p), "DSUB"))
+            dok = f.icmplt(d0, wi(pow2_bits(fmt, fmt.emax - 3 * p - 2), "DOK"))
+            dsub = f.sel(dok, ZERO, nsub)
         S3P = w(pow2_bits(fmt, 3 * p), "S3P")
         n1, d1 = f.sel(f.mul(n0, S3P), n0, dsub), f.sel(f.mul(d0, S3P), d0, dsub)
         dbig = f.icmplt(wi(pow2_bits(fmt, fmt.emax - 1) - 1, "DBIG"), d0)
@@ -460,8 +468,12 @@ def build(fmt, rnd, fn, G=None, N=NTAB, bound_shift=0, plant=None):
         tb = f.fma(ss, f.wv(-Fraction(1, 2 ** (p + 2))), ss, rnd)
         bits_ = f.sel(tb, bits_, side)
         fl = f.sel(INX, fl, side)
-        rmk = f.sel(f.icmplt(tt, w(pow2_bits(fmt, fmt.emin + p + 2), "TQR")),
-                    ZERO, c0)
+        # the tiny-quotient range, marked: below 2^(emin+2p+2) the third
+        # words of s and V fall under the subnormal grid and Bv under
+        # minSub's neighbourhood, so three words keep only two (send-back
+        # 1; the double word's 2^(emin+p+2) is the plant range-low)
+        tqr = fmt.emin + (p if plant == "range-low" else 2 * p) + 2
+        rmk = f.sel(f.icmplt(tt, w(pow2_bits(fmt, tqr), "TQR")), ZERO, c0)
         fl = f.sel(INXM, fl, rmk)
         zres = f.sel(ZERO, f.sel(ONE, f.sel(f.sel(ZERO, ONE, yinf), ZERO,
                                             xinf), yzero), xneg)

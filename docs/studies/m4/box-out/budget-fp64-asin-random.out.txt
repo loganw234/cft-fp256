@@ -1,0 +1,28 @@
+fp64 asin random seed 121 G default: 12000 main lanes of 12000; 221 instructions (unpruned), 97 ever round; 419s
+  max |E|/Bv 0.01205 (2^-6.37); max |M|/Bv 0.002994 (2^-8.38); second-order residual at most 0.00605 Bv
+  observed maxima summed 0.04968 (2^-4.33); capacities summed 0.06394 (2^-3.97)
+  THE BUDGET'S BOUND: M_max + capacities = 0.06693 Bv (2^-3.90)
+  by phase (observed, capacity), in Bv:
+     quotient       1.421e-02  1.789e-02
+     sqrt           9.246e-03  1.382e-02
+     recon          1.011e-02  1.157e-02
+     atan_s         5.617e-03  5.723e-03
+     den            3.619e-03  5.706e-03
+     tail           3.704e-03  4.589e-03
+     num            2.651e-03  4.120e-03
+     head           4.976e-04  4.995e-04
+     z              1.907e-05  2.273e-05
+     index          0.000e+00  0.000e+00
+     final          0.000e+00  0.000e+00
+     special        0.000e+00  0.000e+00
+  the 10 largest capacities:
+     #  98 fma   tail           capacity 4.570e-03  observed 3.688e-03
+     #  32 add   sqrt           capacity 3.910e-03  observed 2.151e-03
+     #  34 mul   sqrt           capacity 3.904e-03  observed 1.952e-03
+     #  82 fma   quotient       capacity 3.894e-03  observed 3.418e-03
+     #  83 mul   quotient       capacity 3.894e-03  observed 3.523e-03
+     # 178 add   recon          capacity 3.846e-03  observed 3.846e-03
+     # 188 add   recon          capacity 3.846e-03  observed 2.430e-03
+     # 155 fma   atan_s         capacity 3.771e-03  observed 3.724e-03
+     #  80 fma   quotient       capacity 3.568e-03  observed 3.558e-03
+     #  81 add   quotient       capacity 3.568e-03  observed 8.392e-04

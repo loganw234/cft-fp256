@@ -12,7 +12,9 @@ import sys
 import math
 import time
 
-from m4core import FORMATS, sf, dec, evaluate2, RNE, RTZ
+from fractions import Fraction
+
+from m4core import FORMATS, sf, dec, evaluate2, RNE, RTZ, pi_frac
 from m4inv import build, GUARD
 from m4measure import sample, in_main
 from m4harness import golden
@@ -31,6 +33,23 @@ def main():
     G = GUARD[name]
     t0 = time.perf_counter()
     pred = 2 ** (0.53 - Gp)
+    # crowding (send-back 1): a lane whose V lies within one ulp of pi/4,
+    # pi/2, 3pi/4 or pi cannot mark unless that constant lies within the
+    # inflated bound of a boundary, which none does (the study's 1.4), so
+    # the law, which assumes V spread over its cell, is tallied apart for
+    # those lanes and for the rest
+    PI = pi_frac()
+    consts = [PI * k / 4 for k in (1, 2, 3, 4)]
+
+    def ulp(c):
+        e = c.numerator.bit_length() - c.denominator.bit_length()
+        if Fraction(2) ** e > c:
+            e -= 1
+        return Fraction(2) ** (e - fmt.prec + 1)
+    ulps = [ulp(c) for c in consts]
+
+    def crowded(v):
+        return any(abs(v - c) < u for c, u in zip(consts, ulps))
     for fn in fns:
         xs = sample(fmt, fn, mode, n, seed)
         main_xs = [x for x in xs if in_main(fmt, fn, x)]
@@ -38,6 +57,7 @@ def main():
             f = build(fmt, rnd, fn, bound_shift=G - Gp)
             k = right = wrong = 0
             exp_sum = var_sum = 0.0
+            cls = {True: [0, 0, 0.0, 0.0], False: [0, 0, 0.0, 0.0]}
             for xa in main_xs:
                 bits, fw, pr = evaluate2(f, xa, want=["Vh"])
                 v = abs(dec(fmt, pr["Vh"]))
@@ -45,6 +65,12 @@ def main():
                 pi_ = min(1.0, 2.0 ** -Gp * sig)
                 exp_sum += pi_
                 var_sum += pi_ * (1 - pi_)
+                c = cls[crowded(v)]
+                c[0] += 1
+                c[2] += pi_
+                c[3] += pi_ * (1 - pi_)
+                if fw & 0x80:
+                    c[1] += 1
                 gb, gf = golden(fmt, fn, xa, rnd)
                 if fw & 0x80:
                     k += 1
@@ -62,6 +88,13 @@ def main():
                   f"{100 * exp_sum / N:.2f}% ({(k - exp_sum) / sig2:+.1f} sigma); "
                   f"guesses right {right} of {k}; wrong unmarked {wrong}; "
                   f"{time.perf_counter() - t0:.0f}s", flush=True)
+            for key, label in ((True, "within an ulp of pi/4, pi/2, 3pi/4 or pi"),
+                               (False, "the rest")):
+                nl, mk, es, vs = cls[key]
+                sg = (mk - es) / math.sqrt(vs) if vs else 0.0
+                print(f"    {label}: {nl} lanes, marked {mk}, each lane's own "
+                      f"law {es:.1f} ({sg:+.1f} sigma)", flush=True)
+            print(f"    distinct arguments: {len(set(main_xs))} of {N}", flush=True)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,28 @@
+fp128 asin big seed 123 G default: 3000 main lanes of 3000; 235 instructions (unpruned), 103 ever round; 63s
+  max |E|/Bv 7.365e-05 (2^-13.73); max |M|/Bv 0.0004085 (2^-11.26); second-order residual at most 1.44e-21 Bv
+  observed maxima summed 0.0004848 (2^-11.01); capacities summed 0.0006707 (2^-10.54)
+  THE BUDGET'S BOUND: M_max + capacities = 0.001079 Bv (2^-9.86)
+  by phase (observed, capacity), in Bv:
+     tail           4.834e-04  6.625e-04
+     quotient       1.318e-06  5.470e-06
+     z              1.478e-07  2.731e-06
+     recon          1.482e-20  1.941e-20
+     sqrt           9.610e-22  3.184e-21
+     num            3.868e-22  1.439e-21
+     atan_s         3.879e-22  5.448e-22
+     den            4.202e-23  2.375e-22
+     head           2.119e-23  5.746e-23
+     index          0.000e+00  0.000e+00
+     final          0.000e+00  0.000e+00
+     special        0.000e+00  0.000e+00
+  the 10 largest capacities:
+     # 112 fma   tail           capacity 6.599e-04  observed 4.809e-04
+     #  90 add   quotient       capacity 5.470e-06  observed 1.318e-06
+     #  94 mul   z              capacity 2.731e-06  observed 1.478e-07
+     # 111 fma   tail           capacity 2.585e-06  observed 2.495e-06
+     # 110 fma   tail           capacity 5.064e-09  observed 1.177e-09
+     # 109 fma   tail           capacity 1.984e-11  observed 1.423e-11
+     # 108 fma   tail           capacity 7.773e-14  observed 1.275e-14
+     # 107 fma   tail           capacity 3.045e-16  observed 9.935e-17
+     # 106 fma   tail           capacity 1.193e-18  observed 8.190e-19
+     # 191 add   recon          capacity 6.471e-21  observed 6.471e-21

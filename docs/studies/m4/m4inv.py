@@ -118,7 +118,7 @@ PLANTS = ("table-entry", "coef", "newton-short", "sterbenz-bias",
           "zl-dropped", "sl-dropped", "pio2-low", "bound-loose",
           "mark-silenced", "tiny-gate-off", "tiny-side", "domain-edge",
           "signed-zero", "side-rule-off", "side-rule-sign", "range-off",
-          "u-low-dropped", "sqrt-product", "quadrant")
+          "u-low-dropped", "sqrt-product", "quadrant", "prescale-d")
 
 
 def build(fmt, rnd, fn, G=None, N=NTAB, bound_shift=0, plant=None,
@@ -154,7 +154,10 @@ def build(fmt, rnd, fn, G=None, N=NTAB, bound_shift=0, plant=None,
                       root's residual
       sqrt-product    asin, acos: 1 - x^2 formed directly (u_form
                       "direct"): passes the pools, breaks the bound
-      quadrant        atan2: sigma from the swap alone (x's sign ignored)"""
+      quadrant        atan2: sigma from the swap alone (x's sign ignored)
+      prescale-d      atan2: the 2^3p prescale keyed on d, as first
+                      designed (send-back 1: a tiny n under a large d keeps
+                      an inexact remainder; the corner region sees it)"""
     assert fn in FNS, fn
     assert plant is None or plant in PLANTS, plant
     if plant == "sqrt-product":
@@ -199,7 +202,16 @@ def build(fmt, rnd, fn, G=None, N=NTAB, bound_shift=0, plant=None,
         ay, ax = f.iand(y, ABSM), f.iand(x, ABSM)
         swap = f.icmplt(ax, ay)                          # |y| > |x|
         n0, d0 = f.sel(ax, ay, swap), f.sel(ay, ax, swap)
-        dsub = f.icmplt(d0, w(pow2_bits(fmt, fmt.emin + 3 * p), "DSUB"))
+        # the prescale by 2^3p, keyed on n (send-back 1): the quotient's
+        # FMA remainder N_h - s_h D_h is about 2^-p n, so it is exact only
+        # while n >= 2^(emin+p+1); n < 2^(emin+3p) scales both, unless d
+        # would pass 2^(emax-2), where t is far inside the marked range
+        if plant == "prescale-d":
+            dsub = f.icmplt(d0, w(pow2_bits(fmt, fmt.emin + 3 * p), "DSUB"))
+        else:
+            nsub = f.icmplt(n0, w(pow2_bits(fmt, fmt.emin + 3 * p), "DSUB"))
+            dok = f.icmplt(d0, wi(pow2_bits(fmt, fmt.emax - 3 * p - 2), "DOK"))
+            dsub = f.sel(dok, ZERO, nsub)
         S3P = w(pow2_bits(fmt, 3 * p), "S3P")
         n1, d1 = f.sel(f.mul(n0, S3P), n0, dsub), f.sel(f.mul(d0, S3P), d0, dsub)
         dbig = f.icmplt(wi(pow2_bits(fmt, fmt.emax - 1) - 1, "DBIG"), d0)
