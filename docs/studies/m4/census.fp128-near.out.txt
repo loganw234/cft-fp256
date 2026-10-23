@@ -1,0 +1,12 @@
+fp128 near pi/2 atan, grid boundary 0, x0 = 1/(pi/2 - b) 0x40711c46bd57277993a2ee60193c957b: 129 arguments; marked rne 0, rtz 129, rdn 129, rup 129, rmm 0; guesses right 387 of 387; wrong 0
+fp128 near pi/2 acos, grid boundary 0, x0 = pi/2 - b 0x3f8ccd129024e088a67cc74020bbea64: 129 arguments; marked rne 0, rtz 129, rdn 129, rup 129, rmm 0; guesses right 384 of 387; wrong 0
+fp128 near pi/2 atan, grid boundary 1, x0 = 1/(pi/2 - b) 0x406ea1e9ee11167e1150e6b5952efc21: 129 arguments; marked rne 0, rtz 129, rdn 129, rup 129, rmm 0; guesses right 387 of 387; wrong 0
+fp128 near pi/2 acos, grid boundary 1, x0 = pi/2 - b 0x3f8f39a252049c1114cf98e804177d4c: 129 arguments; marked rne 0, rtz 129, rdn 129, rup 129, rmm 0; guesses right 387 of 387; wrong 0
+fp128 near pi atan2(y, -1), grid boundary 0, y0 = pi - b 0x3f8dcd129024e088a67cc74020bbea64: 129 arguments; marked rne 0, rtz 129, rdn 129, rup 129, rmm 0; guesses right 384 of 387; wrong 0
+fp128 near pi atan2(y, -1), grid boundary 1, y0 = pi - b 0x3f9039a252049c1114cf98e804177d4c: 129 arguments; marked rne 0, rtz 129, rdn 129, rup 129, rmm 0; guesses right 387 of 387; wrong 0
+fp128 near pi/2 atan, midpoint boundary 0, x0 = 1/(pi/2 - b) 0x406f6109e5326af7afff76b6dfd05005: 129 arguments; marked rne 129, rtz 0, rdn 0, rup 0, rmm 129; guesses right 258 of 258; wrong 0
+fp128 near pi/2 acos, midpoint boundary 0, x0 = pi/2 - b 0x3f8e7344a4093822299f31d0082efa99: 129 arguments; marked rne 129, rtz 0, rdn 0, rup 0, rmm 129; guesses right 256 of 258; wrong 0
+fp128 near pi/2 atan, midpoint boundary 1, x0 = 1/(pi/2 - b) 0x406e28c9e8488e912a864177f0ecc450: 129 arguments; marked rne 129, rtz 0, rdn 0, rup 0, rmm 129; guesses right 258 of 258; wrong 0
+fp128 near pi/2 acos, midpoint boundary 1, x0 = pi/2 - b 0x3f8fb9a252049c1114cf98e804177d4c: 129 arguments; marked rne 129, rtz 0, rdn 0, rup 0, rmm 129; guesses right 258 of 258; wrong 0
+fp128 near pi atan2(y, -1), midpoint boundary 0, y0 = pi - b 0x3f8f7344a4093822299f31d0082efa99: 129 arguments; marked rne 129, rtz 0, rdn 0, rup 0, rmm 129; guesses right 256 of 258; wrong 0
+fp128 near pi atan2(y, -1), midpoint boundary 1, y0 = pi - b 0x3f90b9a252049c1114cf98e804177d4c: 129 arguments; marked rne 129, rtz 0, rdn 0, rup 0, rmm 129; guesses right 258 of 258; wrong 0

@@ -1,0 +1,4 @@
+fp32 atan rne random seed 1: 2000 main of 2000, wrong 0, marked 0; largest |V - f|/Bv 2^-5.22 at 0xbdd5db21; 2s
+fp32 asin rne random seed 1: 2000 main of 2000, wrong 0, marked 0; largest |V - f|/Bv 2^-3.37 at 0xbb23f536; 4s
+fp32 acos rne random seed 1: 2000 main of 2000, wrong 0, marked 0; largest |V - f|/Bv 2^-5.00 at 0x3f307b4e; 6s
+fp32 atan2 rne random seed 1: 1606 main of 2000, wrong 0, marked 0; largest |V - f|/Bv 2^-4.41 at ('0xdd9c9b9d', '0x5f8aafcc'); 8s

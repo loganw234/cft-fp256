@@ -1,0 +1,14 @@
+2026-10-23 13:44:13 start plants.fp64: plants.py fp64
+2026-10-23 13:45:32 end plants.fp64 rc=0
+2026-10-23 13:45:32 start twrun-plants.fp32-tw: twrun.py plants
+2026-10-23 13:46:07 end twrun-plants.fp32-tw rc=0
+2026-10-23 13:46:07 start uform.fp64: uform.py fp64 300
+2026-10-23 13:46:26 end uform.fp64 rc=0
+2026-10-23 13:46:26 start uform.fp128: uform.py fp128 100
+2026-10-23 13:46:40 end uform.fp128 rc=0
+2026-10-23 13:46:40 start uform.fp256: uform.py fp256 100
+2026-10-23 13:46:58 end uform.fp256 rc=0
+2026-10-23 13:46:58 start uform.fp32-dw18: uform.py fp32 300
+2026-10-23 13:47:14 end uform.fp32-dw18 rc=0
+2026-10-23 13:47:14 start fingerprint: fingerprint.py
+2026-10-23 13:47:15 end fingerprint rc=0

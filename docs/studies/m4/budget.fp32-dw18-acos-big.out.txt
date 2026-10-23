@@ -1,0 +1,25 @@
+fp32 acos big seed 2 G default: 1000 main lanes of 1000; 182 instructions (unpruned), 63 ever round; 7s
+  max |E|/Bv 0.09147 (2^-3.45); max |M|/Bv 0.009018 (2^-6.79); second-order residual at most 0.0727 Bv
+  observed maxima summed 0.2236 (2^-2.16); capacities summed 0.3131 (2^-1.68)
+  THE BUDGET'S BOUND: M_max + capacities = 0.3221 Bv (2^-1.63)
+  by phase (observed, capacity), in Bv:
+     quotient       8.385e-02  1.163e-01
+     sqrt           6.776e-02  7.559e-02
+     recon          3.057e-02  6.270e-02
+     atan_s         3.342e-02  4.128e-02
+     num            1.649e-03  7.860e-03
+     head           3.918e-03  3.928e-03
+     den            2.222e-03  3.436e-03
+     tail           2.116e-04  1.977e-03
+     z              1.124e-05  2.713e-05
+     index          0.000e+00  0.000e+00
+     final          0.000e+00  0.000e+00
+  the 8 largest capacities:
+     #  76 add   quotient       capacity 3.068e-02  observed 3.068e-02
+     #  77 fma   quotient       capacity 3.068e-02  observed 1.097e-03
+     #  78 mul   quotient       capacity 3.068e-02  observed 2.804e-02
+     # 119 fma   atan_s         capacity 2.585e-02  observed 2.254e-02
+     # 142 add   recon          capacity 2.585e-02  observed 7.730e-03
+     # 156 add   recon          capacity 2.585e-02  observed 1.185e-02
+     #  27 fma   sqrt           capacity 2.465e-02  observed 2.465e-02
+     #  75 fma   quotient       capacity 2.393e-02  observed 2.393e-02

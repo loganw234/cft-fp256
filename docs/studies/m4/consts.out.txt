@@ -1,0 +1,45 @@
+fp32: p = 24, G = 18
+  pi/4   below it 0.633322 ulp; to the grid 1.224e+05 Bv (2^-25.10 of K), to a midpoint 4.45e+04 Bv (2^-26.56)
+  pi/2   below it 0.633322 ulp; to the grid 1.224e+05 Bv (2^-25.10 of K), to a midpoint 4.45e+04 Bv (2^-26.56)
+  3pi/4  below it 0.974992 ulp; to the grid 1.113e+04 Bv (2^-28.56 of K), to a midpoint 2.114e+05 Bv (2^-24.31)
+  pi     below it 0.633322 ulp; to the grid 1.224e+05 Bv (2^-25.10 of K), to a midpoint 4.45e+04 Bv (2^-26.56)
+  windows next to pi/2 (atan of a large x; acos of a small x):
+    grid (rtz, rdn, rup): pi/2 - b = 2^-23.659; atan centre x0 = 2^23.659, about 2^7.0 arguments within Bv; acos centre +-2^-23.659, about 2^6.7
+    grid (rtz, rdn, rup): pi/2 - b = 2^-22.292; atan centre x0 = 2^22.292, about 2^5.2 arguments within Bv; acos centre +-2^-22.292, about 2^5.7
+    grid (rtz, rdn, rup): pi/2 - b = 2^-21.603; atan centre x0 = 2^21.603, about 2^4.9 arguments within Bv; acos centre +-2^-21.603, about 2^4.7
+    midpoint (rne, rmm): pi/2 - b = 2^-25.907; atan centre x0 = 2^25.907, about 2^9.5 arguments within Bv; acos centre +-2^-25.907, about 2^8.7
+    midpoint (rne, rmm): pi/2 - b = 2^-22.819; atan centre x0 = 2^22.819, about 2^6.3 arguments within Bv; acos centre +-2^-22.819, about 2^5.7
+    midpoint (rne, rmm): pi/2 - b = 2^-21.907; atan centre x0 = 2^21.907, about 2^5.5 arguments within Bv; acos centre +-2^-21.907, about 2^4.7
+fp64: p = 53, G = 44
+  pi/4   below it 0.275766 ulp; to the grid 6.177e+12 Bv (2^-54.51 of K), to a midpoint 5.023e+12 Bv (2^-54.81)
+  pi/2   below it 0.275766 ulp; to the grid 6.177e+12 Bv (2^-54.51 of K), to a midpoint 5.023e+12 Bv (2^-54.81)
+  3pi/4  below it 0.206824 ulp; to the grid 6.177e+12 Bv (2^-54.51 of K), to a midpoint 8.756e+12 Bv (2^-54.01)
+  pi     below it 0.275766 ulp; to the grid 6.177e+12 Bv (2^-54.51 of K), to a midpoint 5.023e+12 Bv (2^-54.81)
+  windows next to pi/2 (atan of a large x; acos of a small x):
+    grid (rtz, rdn, rup): pi/2 - b = 2^-53.858; atan centre x0 = 2^53.858, about 2^11.4 arguments within Bv; acos centre +-2^-53.858, about 2^10.7
+    grid (rtz, rdn, rup): pi/2 - b = 2^-51.649; atan centre x0 = 2^51.649, about 2^8.9 arguments within Bv; acos centre +-2^-51.649, about 2^8.7
+    grid (rtz, rdn, rup): pi/2 - b = 2^-50.814; atan centre x0 = 2^50.814, about 2^8.3 arguments within Bv; acos centre +-2^-50.814, about 2^7.7
+    midpoint (rne, rmm): pi/2 - b = 2^-52.366; atan centre x0 = 2^52.366, about 2^9.4 arguments within Bv; acos centre +-2^-52.366, about 2^9.7
+    midpoint (rne, rmm): pi/2 - b = 2^-51.172; atan centre x0 = 2^51.172, about 2^8.0 arguments within Bv; acos centre +-2^-51.172, about 2^8.7
+fp128: p = 113, G = 46
+  pi/4   below it 0.225133 ulp; to the grid 2.017e+13 Bv (2^-114.80 of K), to a midpoint 2.463e+13 Bv (2^-114.51)
+  pi/2   below it 0.225133 ulp; to the grid 2.017e+13 Bv (2^-114.80 of K), to a midpoint 2.463e+13 Bv (2^-114.51)
+  3pi/4  below it 0.168850 ulp; to the grid 2.017e+13 Bv (2^-114.80 of K), to a midpoint 3.956e+13 Bv (2^-113.83)
+  pi     below it 0.225133 ulp; to the grid 2.017e+13 Bv (2^-114.80 of K), to a midpoint 2.463e+13 Bv (2^-114.51)
+  windows next to pi/2 (atan of a large x; acos of a small x):
+    grid (rtz, rdn, rup): pi/2 - b = 2^-114.151; atan centre x0 = 2^114.151, about 2^69.0 arguments within Bv; acos centre +-2^-114.151, about 2^69.7
+    grid (rtz, rdn, rup): pi/2 - b = 2^-111.707; atan centre x0 = 2^111.707, about 2^67.1 arguments within Bv; acos centre +-2^-111.707, about 2^66.7
+    grid (rtz, rdn, rup): pi/2 - b = 2^-110.846; atan centre x0 = 2^110.846, about 2^66.3 arguments within Bv; acos centre +-2^-110.846, about 2^65.7
+    midpoint (rne, rmm): pi/2 - b = 2^-112.464; atan centre x0 = 2^112.464, about 2^67.6 arguments within Bv; acos centre +-2^-112.464, about 2^67.7
+    midpoint (rne, rmm): pi/2 - b = 2^-111.213; atan centre x0 = 2^111.213, about 2^66.1 arguments within Bv; acos centre +-2^-111.213, about 2^66.7
+fp256: p = 237, G = 46
+  pi/4   below it 0.450749 ulp; to the grid 4.039e+13 Bv (2^-237.80 of K), to a midpoint 4.413e+12 Bv (2^-241.00)
+  pi/2   below it 0.450749 ulp; to the grid 4.039e+13 Bv (2^-237.80 of K), to a midpoint 4.413e+12 Bv (2^-241.00)
+  3pi/4  below it 0.838062 ulp; to the grid 1.935e+13 Bv (2^-238.86 of K), to a midpoint 4.039e+13 Bv (2^-237.80)
+  pi     below it 0.450749 ulp; to the grid 4.039e+13 Bv (2^-237.80 of K), to a midpoint 4.413e+12 Bv (2^-241.00)
+  windows next to pi/2 (atan of a large x; acos of a small x):
+    grid (rtz, rdn, rup): pi/2 - b = 2^-237.150; atan centre x0 = 2^237.150, about 2^192.0 arguments within Bv; acos centre +-2^-237.150, about 2^192.7
+    grid (rtz, rdn, rup): pi/2 - b = 2^-235.463; atan centre x0 = 2^235.463, about 2^190.6 arguments within Bv; acos centre +-2^-235.463, about 2^190.7
+    grid (rtz, rdn, rup): pi/2 - b = 2^-234.707; atan centre x0 = 2^234.707, about 2^190.1 arguments within Bv; acos centre +-2^-234.707, about 2^189.7
+    midpoint (rne, rmm): pi/2 - b = 2^-236.073; atan centre x0 = 2^236.073, about 2^190.8 arguments within Bv; acos centre +-2^-236.073, about 2^191.7
+    midpoint (rne, rmm): pi/2 - b = 2^-235.036; atan centre x0 = 2^235.036, about 2^189.7 arguments within Bv; acos centre +-2^-235.036, about 2^190.7

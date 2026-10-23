@@ -1,0 +1,8 @@
+fp64 atan rne G'=6 random seed 3: 2000 lanes, marked 5 = 0.25%; M1's law 2.26% (-6.0 sigma); each lane's own 2^-G' sig(V) sums to 49.1 = 2.45% (-6.4 sigma); guesses right 5 of 5; wrong unmarked 0; 2s
+fp64 atan rtz G'=6 random seed 3: 2000 lanes, marked 7 = 0.35%; M1's law 2.26% (-5.7 sigma); each lane's own 2^-G' sig(V) sums to 49.1 = 2.45% (-6.1 sigma); guesses right 7 of 7; wrong unmarked 0; 4s
+fp64 asin rne G'=6 random seed 3: 2000 lanes, marked 35 = 1.75%; M1's law 2.26% (-1.5 sigma); each lane's own 2^-G' sig(V) sums to 47.1 = 2.35% (-1.8 sigma); guesses right 35 of 35; wrong unmarked 0; 7s
+fp64 asin rtz G'=6 random seed 3: 2000 lanes, marked 30 = 1.50%; M1's law 2.26% (-2.3 sigma); each lane's own 2^-G' sig(V) sums to 47.1 = 2.35% (-2.5 sigma); guesses right 30 of 30; wrong unmarked 0; 10s
+fp64 acos rne G'=6 random seed 3: 2000 lanes, marked 41 = 2.05%; M1's law 2.26% (-0.6 sigma); each lane's own 2^-G' sig(V) sums to 49.0 = 2.45% (-1.2 sigma); guesses right 41 of 41; wrong unmarked 0; 13s
+fp64 acos rtz G'=6 random seed 3: 2000 lanes, marked 36 = 1.80%; M1's law 2.26% (-1.4 sigma); each lane's own 2^-G' sig(V) sums to 49.0 = 2.45% (-1.9 sigma); guesses right 36 of 36; wrong unmarked 0; 16s
+fp64 atan2 rne G'=6 random seed 3: 1660 lanes, marked 23 = 1.39%; M1's law 2.26% (-2.4 sigma); each lane's own 2^-G' sig(V) sums to 40.3 = 2.43% (-2.8 sigma); guesses right 23 of 23; wrong unmarked 0; 18s
+fp64 atan2 rtz G'=6 random seed 3: 1660 lanes, marked 23 = 1.39%; M1's law 2.26% (-2.4 sigma); each lane's own 2^-G' sig(V) sums to 40.3 = 2.43% (-2.8 sigma); guesses right 23 of 23; wrong unmarked 0; 21s

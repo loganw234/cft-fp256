@@ -1,0 +1,3 @@
+fp32 ratio atan2(2^-10, 1 + j ulp), j 1..40: 40 arguments; marked rne 0, rtz 0, rdn 0, rup 0, rmm 0; guesses right 0 of 0; wrong 0
+fp32 ratio atan2(2^-40, 1 + j ulp), j 1..40: 40 arguments; marked rne 0, rtz 3, rdn 3, rup 4, rmm 0; guesses right 10 of 10; wrong 0
+fp32 ratio atan2(2^-34, 1 + j ulp), j 1..40: 40 arguments; marked rne 0, rtz 3, rdn 3, rup 4, rmm 0; guesses right 10 of 10; wrong 0

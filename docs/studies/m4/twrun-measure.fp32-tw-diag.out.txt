@@ -1,0 +1,3 @@
+fp32-tw asin rne diag: 2000 main of 2000, wrong 0, marked 0; largest |V - f|/Bv 2^-8.13 at 1060439277; 8s
+fp32-tw acos rne diag: 2000 main of 2000, wrong 0, marked 0; largest |V - f|/Bv 2^-8.12 at 3207922929; 15s
+fp32-tw atan2 rne diag: 2000 main of 2000, wrong 0, marked 0; largest |V - f|/Bv 2^-7.05 at (422521465, 422521462); 21s

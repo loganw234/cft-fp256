@@ -1,0 +1,22 @@
+2026-10-23 13:38:56 start fingerprint: fingerprint.py
+2026-10-23 13:38:56 end fingerprint rc=0
+2026-10-23 13:38:56 start plants.fp64: plants.py fp64
+2026-10-23 13:40:11 end plants.fp64 rc=0
+2026-10-23 13:40:11 start twrun-plants.fp32-tw: twrun.py plants
+2026-10-23 13:40:25 end twrun-plants.fp32-tw rc=0
+2026-10-23 13:40:25 start twrun-pools.fp32-tw: twrun.py pools
+2026-10-23 13:40:46 end twrun-pools.fp32-tw rc=0
+2026-10-23 13:40:46 start twrun-costs.fp32-tw: twrun.py costs
+2026-10-23 13:40:46 end twrun-costs.fp32-tw rc=0
+2026-10-23 13:40:46 start twrun-onseq.fp32-tw: twrun.py onseq
+2026-10-23 13:41:25 end twrun-onseq.fp32-tw rc=0
+2026-10-23 13:41:25 start twrun-measure.fp32-tw-random: twrun.py measure 2000 random
+2026-10-23 13:41:51 end twrun-measure.fp32-tw-random rc=0
+2026-10-23 13:41:51 start twrun-measure.fp32-tw-edge: twrun.py measure 2000 edge
+2026-10-23 13:42:18 end twrun-measure.fp32-tw-edge rc=0
+2026-10-23 13:42:18 start twrun-measure.fp32-tw-big: twrun.py measure 2000 big
+2026-10-23 13:42:45 end twrun-measure.fp32-tw-big rc=0
+2026-10-23 13:42:45 start twrun-measure.fp32-tw-small: twrun.py measure 2000 small
+2026-10-23 13:43:11 end twrun-measure.fp32-tw-small rc=0
+2026-10-23 13:43:11 start twrun-measure.fp32-tw-diag: twrun.py measure 2000 diag
+2026-10-23 13:43:32 end twrun-measure.fp32-tw-diag rc=0

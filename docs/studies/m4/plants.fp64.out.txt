@@ -1,0 +1,63 @@
+fp64: the control marks 38 pool lanes (rne, rtz) and 35 structured lanes of 820; 526 placed points; 4s
+fp64 plant none: red in NOTHING; largest placed error 2^-6.7 Bv; 9s
+fp64 plant table-entry: red in pools, bound, specials, audit; largest placed error 2^44.3 Bv; 11s
+     pools: atan rne 4600427019358961663 wrong
+     bound: atan rne 13837623557422168584: 2^42.7 Bv
+     specials: atan2 rne 'subnormal both, minSub / 3 minSub' wrong
+     audit: of 214 lanes, the premise broken on 0, n_h - P inexact on 0, wrong unmarked 10; first: wrong (4599406534347986965, 4607182418800017408)
+fp64 plant coef: red in bound; largest placed error 2^33.5 Bv; 16s
+     bound: atan rne 13837623557422168584: 2^28.2 Bv
+fp64 plant newton-short: red in structured, bound, specials; largest placed error 2^17.0 Bv; 21s
+     structured: asin rtz 4501347827556810752 unmarked and wrong
+     bound: atan rne 4605632200947244135: 2^3.3 Bv
+     specials: atan2 rtz 'one ulp off, divisor 1 + ulp' wrong
+fp64 plant sterbenz-bias: red in audit; largest placed error 2^-7.2 Bv; 26s
+     audit: of 214 lanes, the premise broken on 86, n_h - P inexact on 24, wrong unmarked 23; first: premise ((4589174548540162048, 4607189015869784064), 0.49999237060546875); wrong (4593669420894650367, 4611684918915760128); inexact (4593669420894650367, 4611684918915760128)
+fp64 plant zl-dropped: red in bound; largest placed error 2^35.2 Bv; 31s
+     bound: atan rne 13837623557422168584: 2^27.1 Bv
+fp64 plant sl-dropped: red in pools, structured, bound, specials, audit; largest placed error 2^43.7 Bv; 33s
+     pools: atan rtz 4617315517961601025 wrong
+     structured: asin rtz 4501347827556810752 unmarked and wrong
+     bound: atan rne 13837623557422168584: 2^36.3 Bv
+     specials: asin rtz 'gate 2^-27' wrong
+     audit: of 214 lanes, the premise broken on 0, n_h - P inexact on 0, wrong unmarked 2; first: wrong (4596049917606632682, 4607182418800017408)
+fp64 plant pio2-low: red in pools, structured, bound, specials; largest placed error 2^43.4 Bv; 35s
+     pools: atan rne 4608308318706860033 wrong
+     structured: atan rtz 4849535219099880883 unmarked
+     bound: atan rne 13837623557422168584: 2^42.8 Bv
+     specials: atan rtz '2^55' wrong
+fp64 plant bound-loose: red in structured, bound; largest placed error 2^33.3 Bv; 40s
+     structured: asin rtz 4501347827556810752 unmarked
+     bound: atan rne 13837623557422168584: 2^28.9 Bv
+fp64 plant mark-silenced: red in structured; largest placed error 2^-6.7 Bv; 44s
+     structured: asin rtz 4501347827556810752 unmarked
+fp64 plant tiny-gate-off: red in pools, specials; largest placed error 2^-6.7 Bv; 46s
+     pools: atan rne 1 wrong
+     specials: atan rne '+minSub' wrong
+fp64 plant tiny-side: red in pools, specials; largest placed error 2^-6.7 Bv; 48s
+     pools: atan rtz 1 wrong
+     specials: atan rtz '+minSub' wrong
+fp64 plant domain-edge: red in pools, specials; largest placed error 2^-6.7 Bv; 51s
+     pools: asin rne 4607182418800017408 wrong
+     specials: asin rne '+1' wrong
+fp64 plant signed-zero: red in pools, specials; largest placed error 2^-6.7 Bv; 55s
+     pools: atan2 rne (0, 9223372036854775808) wrong
+     specials: atan2 rne '9.2.1 y +0, x -0' wrong
+fp64 plant side-rule-off: red in pools; largest placed error 2^-6.7 Bv; 59s
+     pools: atan2 rtz (4368491638549381120, 4607182418800017408) marked off the list
+fp64 plant side-rule-sign: red in pools, specials; largest placed error 2^-6.7 Bv; 64s
+     pools: atan2 rtz (4368491638549381120, 4607182418800017408) wrong
+     specials: atan2 rtz 'exact quotient 2^-60 / 1' wrong
+fp64 plant range-off: red in pools, specials; largest placed error 2^-6.7 Bv; 68s
+     pools: atan2 rne (4607182418800017408, 9218868437227405311) wrong
+     specials: atan2 rne '9.2.1 y +1, x +maxN' wrong
+fp64 plant u-low-dropped: red in pools, bound, specials; largest placed error 2^43.6 Bv; 71s
+     pools: asin rne 4492340628302069760 wrong
+     bound: asin rne 13830129557285013856: 2^40.1 Bv
+     specials: asin rtz 'gate 2^-27' wrong
+fp64 plant sqrt-product: red in bound; largest placed error 2^24.0 Bv; 76s
+     bound: asin rne 13830554455654662144: 2^1.8 Bv
+fp64 plant quadrant: red in pools, bound, specials; largest placed error 2^97.7 Bv; 79s
+     pools: atan2 rne (4607182418800017408, 13830554455654793216) wrong
+     bound: atan2 rne (17956926723766490657, 17938985395800278361): 2^93.4 Bv
+     specials: atan2 rne '9.2.1 y +1, x -1' wrong

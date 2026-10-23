@@ -1,0 +1,25 @@
+fp64 acos edge seed 2 G default: 1000 main lanes of 1000; 219 instructions (unpruned), 95 ever round; 11s
+  max |E|/Bv 0.009245 (2^-6.76); max |M|/Bv 0.003426 (2^-8.19); second-order residual at most 0.00493 Bv
+  observed maxima summed 0.03403 (2^-4.88); capacities summed 0.04328 (2^-4.53)
+  THE BUDGET'S BOUND: M_max + capacities = 0.04671 Bv (2^-4.42)
+  by phase (observed, capacity), in Bv:
+     sqrt           8.513e-03  1.169e-02
+     recon          9.807e-03  1.147e-02
+     quotient       4.987e-03  5.945e-03
+     tail           4.261e-03  4.614e-03
+     atan_s         2.591e-03  3.862e-03
+     num            2.336e-03  3.228e-03
+     den            1.064e-03  1.958e-03
+     head           4.438e-04  4.976e-04
+     z              2.294e-05  2.536e-05
+     index          0.000e+00  0.000e+00
+     final          0.000e+00  0.000e+00
+  the 8 largest capacities:
+     #  99 fma   tail           capacity 4.595e-03  observed 4.242e-03
+     # 179 add   recon          capacity 3.839e-03  observed 3.839e-03
+     # 193 add   recon          capacity 3.839e-03  observed 2.222e-03
+     #  34 mul   sqrt           capacity 3.019e-03  observed 2.835e-03
+     #  32 add   sqrt           capacity 2.643e-03  observed 2.308e-03
+     #  31 fma   sqrt           capacity 2.611e-03  observed 1.721e-03
+     # 156 fma   atan_s         capacity 1.931e-03  observed 9.936e-04
+     # 154 fma   atan_s         capacity 1.931e-03  observed 1.597e-03

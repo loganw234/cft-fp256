@@ -1,0 +1,11 @@
+fingerprint|fingerprint.py
+plants.fp64|plants.py fp64
+twrun-plants.fp32-tw|twrun.py plants
+twrun-pools.fp32-tw|twrun.py pools
+twrun-costs.fp32-tw|twrun.py costs
+twrun-onseq.fp32-tw|twrun.py onseq
+twrun-measure.fp32-tw-random|twrun.py measure 2000 random
+twrun-measure.fp32-tw-edge|twrun.py measure 2000 edge
+twrun-measure.fp32-tw-big|twrun.py measure 2000 big
+twrun-measure.fp32-tw-small|twrun.py measure 2000 small
+twrun-measure.fp32-tw-diag|twrun.py measure 2000 diag

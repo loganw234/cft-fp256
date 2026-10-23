@@ -1,0 +1,26 @@
+fp256 asin diag seed 2 G default: 300 main lanes of 300; 256 instructions (unpruned), 118 ever round; 5s
+  max |E|/Bv 0.006969 (2^-7.16); max |M|/Bv 0.004213 (2^-7.89); second-order residual at most 1.15e-58 Bv
+  observed maxima summed 0.002809 (2^-8.48); capacities summed 0.002927 (2^-8.42)
+  THE BUDGET'S BOUND: M_max + capacities = 0.00714 Bv (2^-7.13)
+  by phase (observed, capacity), in Bv:
+     tail           2.774e-03  2.890e-03
+     quotient       2.340e-05  2.538e-05
+     z              1.157e-05  1.190e-05
+     recon          3.930e-58  6.085e-58
+     num            1.530e-58  1.534e-58
+     sqrt           9.103e-59  1.102e-58
+     atan_s         3.634e-59  7.606e-59
+     den            2.240e-59  2.367e-59
+     head           5.998e-60  6.965e-60
+     index          0.000e+00  0.000e+00
+     final          0.000e+00  0.000e+00
+     special        0.000e+00  0.000e+00
+  the 8 largest capacities:
+     # 133 fma   tail           capacity 2.877e-03  observed 2.762e-03
+     #  96 add   quotient       capacity 2.538e-05  observed 2.340e-05
+     # 132 fma   tail           capacity 1.279e-05  observed 1.247e-05
+     # 100 mul   z              capacity 1.190e-05  observed 1.157e-05
+     # 131 fma   tail           capacity 2.842e-08  observed 2.781e-08
+     # 130 fma   tail           capacity 1.263e-10  observed 1.155e-10
+     # 129 fma   tail           capacity 5.613e-13  observed 5.241e-13
+     # 128 fma   tail           capacity 2.495e-15  observed 2.421e-15

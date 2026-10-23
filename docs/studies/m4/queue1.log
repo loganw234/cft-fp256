@@ -1,0 +1,8 @@
+2026-10-23 12:52:56 start pools_run.fp64: pools_run.py fp64
+2026-10-23 12:53:05 end pools_run.fp64 rc=0
+2026-10-23 12:53:05 start pools_run.fp128: pools_run.py fp128
+2026-10-23 12:53:14 end pools_run.fp128 rc=0
+2026-10-23 12:53:14 start pools_run.fp256: pools_run.py fp256
+2026-10-23 12:53:25 end pools_run.fp256 rc=0
+2026-10-23 12:53:25 start pools_run.fp32-dw18: pools_run.py fp32
+2026-10-23 12:53:31 end pools_run.fp32-dw18 rc=0

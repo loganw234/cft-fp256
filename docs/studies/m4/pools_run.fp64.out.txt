@@ -1,0 +1,29 @@
+fp64 atan: 332 pool arguments, G default
+  atan rne: 176 instructions, 54 words, live 15: 332 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 0s
+  atan rtz: 176 instructions, 54 words, live 15: 332 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 1s
+  atan rdn: 176 instructions, 54 words, live 15: 332 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 1s
+  atan rup: 176 instructions, 54 words, live 15: 332 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 1s
+  atan rmm: 176 instructions, 54 words, live 15: 332 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 2s
+fp64 asin: 332 pool arguments, G default
+  asin rne: 221 instructions, 56 words, live 16: 332 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 2s
+  asin rtz: 221 instructions, 56 words, live 16: 332 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 2s
+  asin rdn: 221 instructions, 56 words, live 16: 332 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 3s
+  asin rup: 221 instructions, 56 words, live 16: 332 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 3s
+  asin rmm: 221 instructions, 56 words, live 16: 332 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 4s
+fp64 acos: 332 pool arguments, G default
+  acos rne: 217 instructions, 54 words, live 16: 332 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10']; 4s
+  acos rtz: 217 instructions, 54 words, live 16: 332 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10']; 4s
+  acos rdn: 217 instructions, 54 words, live 16: 332 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10']; 5s
+  acos rup: 217 instructions, 54 words, live 16: 332 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10']; 5s
+  acos rmm: 217 instructions, 54 words, live 16: 332 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10']; 5s
+fp64 atan2: 472 pool arguments, G default
+  atan2 rne: 216 instructions, 61 words, live 21: 472 lanes, marked 19 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x90']; 6s
+     marks: ('0x3ff0000000000000', '0x7fefffffffffffff') ('0xbff0000000000000', '0x7fefffffffffffff') ('0x4000000000000000', '0x7fefffffffffffff') ('0xc000000000000000', '0x7fefffffffffffff') ('0x4008000000000000', '0x7fefffffffffffff') ('0xc008000000000000', '0x7fefffffffffffff') ('0x1', '0x3ff0000000000000') ('0x1', '0x4000000000000000') ('0x1', '0x4008000000000000') ('0x1', '0x7fefffffffffffff') ...
+  atan2 rtz: 216 instructions, 61 words, live 21: 472 lanes, marked 19 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x90']; 6s
+     marks: ('0x3ff0000000000000', '0x7fefffffffffffff') ('0xbff0000000000000', '0x7fefffffffffffff') ('0x4000000000000000', '0x7fefffffffffffff') ('0xc000000000000000', '0x7fefffffffffffff') ('0x4008000000000000', '0x7fefffffffffffff') ('0xc008000000000000', '0x7fefffffffffffff') ('0x1', '0x3ff0000000000000') ('0x1', '0x4000000000000000') ('0x1', '0x4008000000000000') ('0x1', '0x7fefffffffffffff') ...
+  atan2 rdn: 216 instructions, 61 words, live 21: 472 lanes, marked 19 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x90']; 7s
+     marks: ('0x3ff0000000000000', '0x7fefffffffffffff') ('0xbff0000000000000', '0x7fefffffffffffff') ('0x4000000000000000', '0x7fefffffffffffff') ('0xc000000000000000', '0x7fefffffffffffff') ('0x4008000000000000', '0x7fefffffffffffff') ('0xc008000000000000', '0x7fefffffffffffff') ('0x1', '0x3ff0000000000000') ('0x1', '0x4000000000000000') ('0x1', '0x4008000000000000') ('0x1', '0x7fefffffffffffff') ...
+  atan2 rup: 216 instructions, 61 words, live 21: 472 lanes, marked 19 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x90']; 7s
+     marks: ('0x3ff0000000000000', '0x7fefffffffffffff') ('0xbff0000000000000', '0x7fefffffffffffff') ('0x4000000000000000', '0x7fefffffffffffff') ('0xc000000000000000', '0x7fefffffffffffff') ('0x4008000000000000', '0x7fefffffffffffff') ('0xc008000000000000', '0x7fefffffffffffff') ('0x1', '0x3ff0000000000000') ('0x1', '0x4000000000000000') ('0x1', '0x4008000000000000') ('0x1', '0x7fefffffffffffff') ...
+  atan2 rmm: 216 instructions, 61 words, live 21: 472 lanes, marked 19 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x90']; 8s
+     marks: ('0x3ff0000000000000', '0x7fefffffffffffff') ('0xbff0000000000000', '0x7fefffffffffffff') ('0x4000000000000000', '0x7fefffffffffffff') ('0xc000000000000000', '0x7fefffffffffffff') ('0x4008000000000000', '0x7fefffffffffffff') ('0xc008000000000000', '0x7fefffffffffffff') ('0x1', '0x3ff0000000000000') ('0x1', '0x4000000000000000') ('0x1', '0x4008000000000000') ('0x1', '0x7fefffffffffffff') ...

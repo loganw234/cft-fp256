@@ -1,0 +1,3 @@
+fp256 acos(1 - j 2^-p), j 1..64: 64 arguments; marked rne 0, rtz 0, rdn 0, rup 0, rmm 0; guesses right 0 of 0; wrong 0
+fp256 acos(-1 + j 2^-p), j 1..64: 64 arguments; marked rne 0, rtz 0, rdn 0, rup 0, rmm 0; guesses right 0 of 0; wrong 0
+fp256 asin(1 - j 2^-p), j 1..64: 64 arguments; marked rne 0, rtz 0, rdn 0, rup 0, rmm 0; guesses right 0 of 0; wrong 0

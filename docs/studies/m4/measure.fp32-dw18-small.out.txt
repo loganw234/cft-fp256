@@ -1,0 +1,4 @@
+fp32 atan rne small seed 1: 2000 main of 2000, wrong 0, marked 0; largest |V - f|/Bv 2^-5.95 at 0x3b81a999; 2s
+fp32 asin rne small seed 1: 2000 main of 2000, wrong 0, marked 0; largest |V - f|/Bv 2^-3.37 at 0x3b23f536; 4s
+fp32 acos rne small seed 1: 2000 main of 2000, wrong 0, marked 0; largest |V - f|/Bv 2^-6.08 at 0x33704de7; 6s
+fp32 atan2 rne small seed 1: 415 main of 2000, wrong 0, marked 0; largest |V - f|/Bv 2^-4.53 at ('0x5e638982', '0x607c30e7'); 8s

@@ -1,0 +1,6 @@
+fp32-tw plant none: red in NOTHING (largest edge error 2^-6.11 Bv)
+fp32-tw plant q2-dropped: red in bound: 2^17.6 Bv over the edge region (largest edge error 2^17.61 Bv)
+fp32-tw plant head3-short: red in NOTHING (largest edge error 2^-3.32 Bv)
+fp32-tw plant head3-two: red in bound: 2^6.7 Bv over the edge region (largest edge error 2^6.66 Bv)
+fp32-tw plant w2-dropped: red in bound: 2^17.3 Bv over the edge region (largest edge error 2^17.30 Bv)
+fp32-tw plant z2-dropped: red in bound: 2^6.3 Bv over the edge region (largest edge error 2^6.32 Bv)

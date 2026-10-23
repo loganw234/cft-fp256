@@ -1,0 +1,26 @@
+fp32 asin diag seed 2 G default: 1000 main lanes of 1000; 184 instructions (unpruned), 59 ever round; 7s
+  max |E|/Bv 0.0247 (2^-5.34); max |M|/Bv 0.01248 (2^-6.32); second-order residual at most 0.00469 Bv
+  observed maxima summed 0.06074 (2^-4.04); capacities summed 0.0718 (2^-3.80)
+  THE BUDGET'S BOUND: M_max + capacities = 0.08429 Bv (2^-3.57)
+  by phase (observed, capacity), in Bv:
+     recon          3.730e-02  3.979e-02
+     sqrt           1.218e-02  1.518e-02
+     num            3.859e-03  7.755e-03
+     quotient       2.302e-03  3.091e-03
+     den            2.409e-03  2.907e-03
+     atan_s         2.138e-03  2.487e-03
+     head           3.019e-04  3.416e-04
+     tail           2.357e-04  2.447e-04
+     z              4.237e-06  5.138e-06
+     index          0.000e+00  0.000e+00
+     final          0.000e+00  0.000e+00
+     special        0.000e+00  0.000e+00
+  the 8 largest capacities:
+     # 151 add   recon          capacity 1.989e-02  observed 1.989e-02
+     # 140 add   recon          capacity 9.947e-03  observed 9.947e-03
+     # 141 add   recon          capacity 9.947e-03  observed 7.460e-03
+     #  51 fma   num            capacity 7.469e-03  observed 3.735e-03
+     #  30 mul   sqrt           capacity 7.034e-03  observed 6.880e-03
+     #  24 fma   sqrt           capacity 5.433e-03  observed 3.227e-03
+     #  21 mul   sqrt           capacity 2.716e-03  observed 2.077e-03
+     # 116 fma   atan_s         capacity 1.243e-03  observed 1.026e-03

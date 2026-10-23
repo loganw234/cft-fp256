@@ -1,0 +1,26 @@
+fp128 asin edge seed 2 G default: 300 main lanes of 300; 235 instructions (unpruned), 106 ever round; 4s
+  max |E|/Bv 0.02611 (2^-5.26); max |M|/Bv 0.01146 (2^-6.45); second-order residual at most 3.05e-20 Bv
+  observed maxima summed 0.01484 (2^-6.07); capacities summed 0.01878 (2^-5.73)
+  THE BUDGET'S BOUND: M_max + capacities = 0.03025 Bv (2^-5.05)
+  by phase (observed, capacity), in Bv:
+     tail           1.464e-02  1.855e-02
+     quotient       1.466e-04  1.550e-04
+     z              6.033e-05  7.645e-05
+     sqrt           1.712e-20  2.573e-20
+     recon          2.089e-20  2.107e-20
+     den            1.170e-20  1.825e-20
+     num            7.708e-21  1.423e-20
+     atan_s         1.107e-20  1.340e-20
+     head           1.716e-21  1.740e-21
+     index          0.000e+00  0.000e+00
+     final          0.000e+00  0.000e+00
+     special        0.000e+00  0.000e+00
+  the 8 largest capacities:
+     # 112 fma   tail           capacity 1.848e-02  observed 1.457e-02
+     #  90 add   quotient       capacity 1.550e-04  observed 1.466e-04
+     #  94 mul   z              capacity 7.645e-05  observed 6.033e-05
+     # 111 fma   tail           capacity 7.421e-05  observed 6.621e-05
+     # 110 fma   tail           capacity 1.490e-07  observed 1.369e-07
+     # 109 fma   tail           capacity 5.985e-10  observed 5.176e-10
+     # 108 fma   tail           capacity 2.404e-12  observed 2.234e-12
+     # 107 fma   tail           capacity 9.653e-15  observed 8.099e-15
