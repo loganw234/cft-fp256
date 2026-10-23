@@ -215,7 +215,7 @@ def group_spec():
     check("spec: a good staged spec validates, its defaults filled (preempt ok, priority 50, card kept)",
           ok["preempt"] == "ok" and ok["priority"] == 50 and ok["card"] == "u50-0")
     check("spec: a window job's default priority is 10, below a staged job's 50 (a staged job outranks the sweep)",
-          P.validate(wvalid(), cfg, R.FAKE_REGISTRY)["priority"] == 10 and P.DEFAULT_PRIORITY["staged"] > P.DEFAULT_PRIORITY["window"])
+          P.validate(wvalid(), cfg, ST.StepRegistry())["priority"] == 10 and P.DEFAULT_PRIORITY["staged"] > P.DEFAULT_PRIORITY["window"])
     full = spec(priority=7, preempt="never", image="quad", card="any", signature="x", dry_run=True, estimate_s=60,
                 code={"commit": "a" * 40, "source": "remote", "allow_unpushed": True,
                       "assert": {"rtl_tree": "b" * 40, "content": [["hw/x.py", "s", 1]], "ancestors": ["c" * 40]}},
@@ -2198,6 +2198,9 @@ def window_spec():
         jid, r = S.submit(root, cfg, json.dumps(obj).encode(), reg)
         got = f"{r.name}: {r.why}" if r else None
         check(f"window spec: {label} is refused {name}, naming {frag!r}, and the job's record says so", got is not None and got.startswith(name + ":") and frag in got and rec(root, "jobs", jid, -2).get("name") == name, str(got))
+    jf, rf = S.submit(root, cfg, json.dumps(wvalid(when={"window": "w"})).encode(), R.FAKE_REGISTRY)
+    check("window spec: a window job submitted against the FAKE runner's registry (S1's, which has no steps to give it) is refused `window-unsupported` at the submit, so it never reaches a runner that would crash on it",
+          rf is not None and rf.name == "window-unsupported" and rec(root, "jobs", jf, -2).get("name") == "window-unsupported", str(rf))
     ok = [S.submit(root, cfg, json.dumps(s_).encode(), reg)[1] for s_ in (wvalid(when={"window": "w"}), spec(when={"window": "w"}, steps=[{"type": "api-test"}]),
                                                                           wvalid(when={"window": "w"}, preflight=[{"type": "driver-quick"}], driver={"out": od, "resume": False, "options": {}}))]
     j = S.submit(root, cfg, json.dumps(wvalid(when={"window": "w"})).encode(), reg)[0]
@@ -2633,6 +2636,8 @@ PLANTS = [  # (what is wrong, edits, the groups written for it, a fragment of th
      "window:claim", "window claim: a job whose deadline has passed is refused", False),
     ("S3a: a window the configuration does not hold is accepted", [E("sched_spec.py", "        if ws is None:\n            raise Refusal(\"window-bad\"", "        if ws is None:\n            ws = {\"state\": \"open\"}\n        if False:\n            raise Refusal(\"window-bad\"")],
      "window:spec", "window spec: a window the configuration does not hold is refused window-bad", False),
+    ("S3a: a window job is accepted against the fake runner's registry", [E("sched_spec.py", '        if not hasattr(registry, "check_window"):', "        if False:")], "window:spec",
+     "window spec: a window job submitted against the FAKE runner's registry", False),
     ("S3a: a refused build is not a preflight failure", [E("sched_window.py", 'BUILD_REFUSALS = ("build-failed", "xrt-not-linked", "build-id-mismatch", "clone-built")', "BUILD_REFUSALS = ()")], "window:chain",
      "window chain: a build the preflight cannot make", "posix"),
     ("S3a: the fallback's build writes over the first build's log", [E("sched_window.py", 'blog = "build.log" if first == 0 else f"build-{first:02d}.log"', 'blog = "build.log"')], "window:chain",

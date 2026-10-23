@@ -248,6 +248,9 @@ def validate(obj, cfg: dict | None = None, registry: dict | None = None) -> dict
     if "not_before" in when and "deadline" in when and when["deadline"] <= when["not_before"]:
         raise Refusal("spec-form", "field when.deadline must be after when.not_before")
     if obj["kind"] == "window":
+        if not hasattr(registry, "check_window"):
+            raise Refusal("window-unsupported", "the runner this spec is checked against runs no job of kind window (S1's fake runner has no steps to give it); "
+                                                "`serve` and `submit` use the window runner unless --runner fake")
         for k in ("steps", "image"):
             if k in obj:
                 raise Refusal("spec-form", f"field {k} is not for a window job (its work is `preflight` and `driver`; its images are driver.images)")
