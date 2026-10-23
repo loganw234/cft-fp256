@@ -5084,23 +5084,24 @@ RESUME_REAL_TWO_NIGHT = "38f243c792c7089c811156d51f17f9ccb58b2037b2336cf6d59d3a2
 RESUME_REAL_THREE_NIGHT = "de4ee37900917762e4ba071d434eb28204f92fed6c5056e88a70ccce6516e986"    # 1,910 lines: and the nightly of 2026-10-21
 
 
-def coverage_state_gaps(path: str) -> "dict | None":
+def coverage_state_gaps(path: str) -> "tuple":
     """{item: first uncovered encoding or None (complete)} for every item of the whole file `path`, as the study's script
     docs/studies/sched-a/coverage_state.py prints them (its per-run table, run here on the file: it merges the intervals itself and holds its union to an
-    independent merge), or None where it cannot be run (a checkout without its commits, no script)."""
+    independent merge), or None where it gives none, with why by name: no script, not run, its own check failed (its first CHECK FAIL line)."""
     script = os.path.join(ROOT, "docs", "studies", "sched-a", "coverage_state.py")
     if not os.path.isfile(script):
-        return None
+        return None, "the script is not in this checkout"
     try:
         p = subprocess.run([sys.executable, "-B", "-I", script, f"FILE={path}"], capture_output=True, text=True, timeout=180)
-    except (OSError, subprocess.TimeoutExpired):
-        return None
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return None, f"the script could not be run ({e.__class__.__name__})"
     if p.returncode != 0:
-        return None
+        fails = [ln for ln in p.stdout.splitlines() if ln.startswith("CHECK FAIL")]
+        return None, f"the script's own check failed: {fails[0][:200]}" if fails else f"the script exited {p.returncode}"
     out: dict = {}
     for m in re.finditer(r"^([a-z0-9-]+)\s+(?:tile|host)\s+\d+\s+[0-9.]+%\s+(?:complete|\((\d+), \d+\))", p.stdout, re.M):
         out.setdefault(m.group(1), int(m.group(2)) if m.group(2) is not None else None)      # the first table is the whole file's
-    return out or None
+    return (out, "") if out else (None, "the script printed no coverage table")
 
 
 def resume_real_checks(env: Env, src: str = HERE) -> list:
@@ -5208,8 +5209,12 @@ def resume_real_checks(env: Env, src: str = HERE) -> list:
                 return None if g is None else g[0]
             want_before = {n: first(whole[n]) for n in nightly}
             want_after = {n: first(kept[n]) for n in nightly}
-            study = coverage_state_gaps(d.metrics)
+            study, study_why = coverage_state_gaps(d.metrics)
             wide = {n: study[n] for n in wide_names} if study and all(n in study for n in wide_names) else {}
+            if study and not wide:
+                study_why = "the script's table has no row for " + ", ".join(n for n in wide_names if n not in study)
+            elif any(g is None for g in wide.values()):
+                study_why = "the script finds complete (no first gap): " + ", ".join(n for n, g in wide.items() if g is None)
             if known == "two-night":                      # the committed capture of THIS file, read at run time: the study's own record of the same four numbers
                 try:
                     with open(os.path.join(ROOT, "docs", "studies", "sched-a", "coverage_state.out"), "r", encoding="utf-8") as fh:
@@ -5221,7 +5226,7 @@ def resume_real_checks(env: Env, src: str = HERE) -> list:
                   "items' first gaps, and the study's script run here on the same file prints the same", set(capture) == set(wide_names) and capture == wide
                   and all(0 < g < L2.EXH for g in capture.values()), f"{capture} / {wide}")
             c("resume real: the study's script (docs/studies/sched-a/coverage_state.py, run here on this file) gives the four wide items' first gaps, "
-              "each inside the space", set(wide) == set(wide_names) and all(0 < g < L2.EXH for g in wide.values()), f"{wide}; {'the script could not be run' if not study else ''}")
+              "each inside the space", set(wide) == set(wide_names) and all(g is not None and 0 < g < L2.EXH for g in wide.values()), f"{wide}; {study_why}")
             c("resume real: the file is the lead's: its first run_start recorded no tree and is 881bbcb's, the second is 0b7c959's with its trees, "
               "every later one recorded its trees and its compiler; and the driver counts the run_starts and the finished sweep slices the file has "
               "(%d and %d, scanned here)" % (n_starts, len(fin)),
@@ -5242,7 +5247,7 @@ def resume_real_checks(env: Env, src: str = HERE) -> list:
               "items are); the four wide items at the gaps above" % (sum(1 for n in host if before[n] is None),
                                                                       sum(1 for n in nightly if reach[n] == L2.TILE and before[n] is None)),
               gaps_ok and before == want_before and len(host) == 14 and all(before[n] == g for n, g in wide.items()),
-              str({n: (before[n], want_before[n], study.get(n, "absent") if study else None) for n in nightly if before[n] != want_before[n]
+              (f"{study_why}; " if study_why else "") + str({n: (before[n], want_before[n], study.get(n, "absent") if study else None) for n in nightly if before[n] != want_before[n]
                    or (study and before[n] != study.get(n, "absent"))} or {n: before[n] for n in wide_names}))
             c("resume real: a resume at 0b7c959 plans each of the 22 where the intervals of the slices of ITS class merge to a gap - the tile slices of every run "
               "whose rtl/ tree is its (the first run's derived from its commit), and the host slices of its class (host/ tree and compiler) alone - the first "

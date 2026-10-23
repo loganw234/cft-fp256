@@ -171,11 +171,18 @@ def catalog_exhaustive():
     return [it for it in L.sweep_items() if it.kind == "exhaustive"]
 
 
-def waves_of(r):
-    """[(start, end, jobs)] of the run's sweep waves: the sweep legs of a cycle whose intervals overlap, each with the size it records."""
+def card_legs(r):
+    """The run's sweep legs on the card. The host pool's (image "cpu", the driver's CPU pool since 2026-10-20) run beside the card's waves
+    and hold no card slot, so the card's pace model leaves them out (first seen in the night of 2026-10-22, whose 62 pool legs broke
+    the waves' check below; the files before it have none, and what this script prints for them is unchanged)."""
+    return [x for x in r.legs if x.get("image") != "cpu"]
+
+
+def waves_of(legs):
+    """[(start, end, jobs)] of the run's sweep waves: the card legs (card_legs) of a cycle whose intervals overlap, each with the size it records."""
     waves = []
     by_cycle = {}
-    for x in r.legs:
+    for x in legs:
         by_cycle.setdefault(x.get("cycle"), []).append(x)
     for cyc, ls in by_cycle.items():
         ls.sort(key=lambda x: x["start_epoch"])
@@ -195,18 +202,19 @@ def pace_model(r, tile):
     Each unfinished tile item (unfinished at the end of the run, by the coverage through its end) gets
     low = the slots this run kept busy, shared by the unfinished items alone;
     high = every slot of every wave busy to its end, shared the same way."""
-    if not r.legs:
+    legs = card_legs(r)
+    if not legs:
         return None
     span = r.run_s
-    slot_s = sum(float(x.get("duration_s") or 0) for x in r.legs)
-    waves = waves_of(r)
+    slot_s = sum(float(x.get("duration_s") or 0) for x in legs)
+    waves = waves_of(legs)
     t_wave = {}
     for s, e, j in waves:
         t_wave[j] = t_wave.get(j, 0.0) + (e - s)
     full_slots = sum(t * j for j, t in t_wave.items())
-    by_jobs = sum(1.0 / max(1, int(x["sweep"].get("jobs") or 1)) for x in r.legs)
+    by_jobs = sum(1.0 / max(1, int(x["sweep"].get("jobs") or 1)) for x in legs)
     first_last = {}
-    for x in r.legs:
+    for x in legs:
         n = x["sweep"]["item"]
         a, b = first_last.get(n, (1e18, 0.0))
         first_last[n] = (min(a, x["start_epoch"]), max(b, x["end_epoch"]))
@@ -394,12 +402,12 @@ def main(argv):
     last = max(runs, key=lambda r: r.t1)
     model = pace_model(last, tile)
     if model is None:
-        print("== pace: %s has no finished sweep slice, so no pace is read from it" % last.label)
+        print("== pace: %s has no finished card sweep slice%s, so no pace is read from it" % (last.label, " (its finished sweep slices are the host pool's)" if last.legs else ""))
     else:
         good_w = abs(model["by_jobs"] - len(model["waves"])) < 1e-6
         span = model["span"]
         print("== pace of the unfinished tile items in %s, from its card slot-seconds, per run hour (%.2f run hours)" % (last.label, span / 3600.0))
-        print("CHECK %-4s %s: the %d waves found equal the sum of 1/jobs over the sweep legs (%.3f), the size each leg records" % ("ok" if good_w else "FAIL", last.label, len(model["waves"]), model["by_jobs"]))
+        print("CHECK %-4s %s: the %d waves found equal the sum of 1/jobs over the card's sweep legs (%.3f), the size each leg records" % ("ok" if good_w else "FAIL", last.label, len(model["waves"]), model["by_jobs"]))
         ok = ok and good_w
         print("waves: %s; the slot-seconds the legs ran are %.0f of the %.0f the waves held (%.0f%%: a wave waits for its slowest job, and the fast items' slots then idle); %.2f slots busy over the run" %
               (", ".join("%d of %d jobs (%.2f h, %.1f%% of the run)" % (sum(1 for w in model["waves"] if w[2] == j), j, t / 3600.0, 100.0 * t / span) for j, t in sorted(model["t_wave"].items(), reverse=True)),
@@ -469,7 +477,7 @@ def main(argv):
         print("%.0f slot-hours in all for the %d tile items with a rate (scaleb32-wide %.0f of them, %.1f%%); a night of %.0f hours, or of %.1f run hours (the mean of the nights read), holds, by the run's use of the slots:" %
               (jobsec / 3600.0, have, wide / 3600.0, 100.0 * wide / jobsec, WINDOW_H, nh))
         for r in runs:
-            m = pace_model(r, tile) if r.legs else None
+            m = pace_model(r, tile) if card_legs(r) else None
             if m is None:
                 continue
             night_lo = m["busy"] * WINDOW_H * 3600.0
@@ -490,7 +498,7 @@ def main(argv):
           (nrates, tot / 3600.0, longest[0], longest[1] / 3600.0))
     for w in (8,):
         wall = max(tot / w, longest[1])
-        print("on %d workers, one item a worker at a time (the pool's rule): about %.1f hours (COMPUTED; the rates are card-run rates of host code, the pool's own are unmeasured)" % (w, wall / 3600.0))
+        print("on %d workers, one item a worker at a time (the pool's rule): about %.1f hours (COMPUTED; the rates are those of every sweep leg these runs recorded, the card's and, from 2026-10-22, the host pool's, not set apart)" % (w, wall / 3600.0))
 
     if "--controls" in argv:
         print()
