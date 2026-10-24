@@ -6275,6 +6275,49 @@ settled as recommended. In substance as put to him:
 
 M2's build is a round of its own (his word of 2026-10-12, above).
 
+**Logan's answers on M4's study** (2026-10-23, by AskUserQuestion).
+- **The question:** "How do you want to answer M4's thirteen design
+  questions? The recommendations are in the study's section 9
+  (docs/studies/M4-invtrig.md)."
+- **His answer:** "Approve all as recommended (Recommended)".
+
+So each of the study's thirteen (docs/studies/M4-invtrig.md, section 9)
+is settled as recommended:
+1. **One core:** the four functions as front ends of
+   sign(C + sigma atan(n/d)), 0 <= n <= d.
+2. **The reduction:** a table of N = 8 read by a SELECT tree, its index
+   from RECIP_SEED with the 63/64 bias, and one double-word quotient.
+3. **fp32:** the triple word at G = 40. It has no budget, so the
+   evidence for its bound is the box's samples and an exhaustive sweep
+   of fp32's 2^32 arguments a function.
+4. **G:** M1's, 44 at fp64 and 46 at fp128 and fp256.
+5. **atan2's tiny quotients:** marked and replayed (4 instructions),
+   not decided by M1's fixed grid.
+6. **The exact-quotient rule:** kept in-lane (one FMA, 7 instructions).
+7. **The structured families:** their marks kept, with the windows'
+   centres and the hard-case family's threshold listed in the build's
+   tests.
+8. **Constants:** atan(0), asin(0), acos(1) and atan2(0, c) for a
+   constant c >= 0 fold to 0; every other constant argument is refused
+   `irrational-constant`, saying "not a real number" for asin and acos
+   outside [-1, 1].
+9. **Live caps** per function and format: 15, 16, 16 and 19 for atan,
+   asin, acos and atan2 at fp64 to fp256, and 25, 25, 25 and 31 at fp32.
+   This needs M4's phase names added to mathlib's PHASE_ORDER; without
+   them the caps reached are 16, 20, 20 and 19.
+10. **The derivative rules:** `da / fma(a, a, 1)`;
+    `da / sqrt(fma(-a, a, 1))` and its negation;
+    `fma(b, da, -(a * db)) / fma(b, b, a * a)`; the phase follower as
+    the reference.
+11. **The generator:** in mathlib.py.
+12. **Versions:** M4's build after M2's, stepping cftc's output version
+    7 to 8 and the language 1.2 to 1.3, unless the two builds land
+    together and share one step.
+13. **The Pi-variants and the inverse hyperbolics:** not in M4's build;
+    a parcel of their own after it, if a workload asks.
+
+M4's build is a round of its own, after M2's.
+
 **The order.**
 1. Logan's answers.
 2. E1: the two exp parcels, their verifiers, the blind comparison, and
