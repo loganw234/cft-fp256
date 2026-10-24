@@ -81,16 +81,16 @@ REFUSALS = {
     # -- the close-out of a window: the night's report, sums and summary, and the page's data commit prepared (S4a)
     "report-failed": ("S4a", "closeout", "the report tool of the clone that ran the night is not there, did not start, ran past its limit or exited with a status other than 0 (the text it printed is kept)"),
     "summary-unreadable": ("S4a", "closeout", "the report's --json file is not there, is not JSON, or is not a summary with a report_version"),
-    "sums-incomplete": ("S4a", "closeout", "one of the run's five files (metrics.jsonl, driver.log, status.txt, settings.json, report.txt) cannot be read to be summed; the list is written without it"),
+    "sums-incomplete": ("S4a", "closeout", "a file that cannot be read to be summed: one of the run's five (metrics.jsonl, driver.log, status.txt, settings.json, report.txt) or one of the same five of a smoke the job ran (`NN-driver-quick/NAME`); the message names it, and the list is written without it"),
     "publish-no-remote": ("S4a", "closeout", "config.json's code.remote names no URL: there is nowhere to fetch the repository's main from"),
-    "remote-unreachable": ("S4a", "closeout", "the remote could not be cloned or fetched, or has no main: the message is kept. Nothing is ever pushed or written to the remote"),
-    "reducer-refused": ("S4a", "closeout", "main's reducer refused the run or failed (its status 2 or 3, its message kept): no data file is made"),
+    "remote-unreachable": ("S4a", "closeout", "the remote could not be cloned or fetched (a fetch that fails with the scheduler's own clone sound; with a damaged clone it is `publish-failed`), or has no main: the message is kept. Nothing is ever pushed or written to the remote"),
+    "reducer-refused": ("S4a", "closeout", "main's reducer failed or refused the run (a status other than 0, or no start or no answer within its limit; its message kept; at status 1, 2 or 3 it writes nothing), or failed or refused its own `--check` (a status other than 0 or 1, which is not a difference: 1 is `check-differs`; the file the run wrote stays in the scheduler's clone, uncommitted, until the next night's checkout resets it): no commit is made"),
     "check-differs": ("S4a", "closeout", "main's `--check` does not find the data file to be what the run reduces to"),
     "metrics-sha-differs": ("S4a", "closeout", "the data file's source.metrics_sha256 is not the sums' line for the run's metrics.jsonl (or the sums have none)"),
     "earlier-night-changed": ("S4a", "closeout", "a night the published data file already holds is not the same in the new one, or is missing from it"),
     "nothing-to-publish": ("S4a", "closeout", "the new data file is the published one but for its `made`: there is no night to add, and an empty commit is not made"),
     "publish-touches-more": ("S4a", "closeout", "the clone shows a change to a file other than site/nightly.json, or the commit would hold one: no commit is made"),
-    "publish-failed": ("S4a", "closeout", "a git step of the data commit failed in the scheduler's own clone (checkout, add, commit, the branch); the message is kept"),
+    "publish-failed": ("S4a", "closeout", "a git step of the data commit failed in the scheduler's own clone (the checkout of the remote's main, the clean, the branch, add or commit), or the fetch failed because that clone is damaged (git cannot read it, so the remote was not asked); the message is kept"),
 }
 
 # name: (by, what it says). The last word of a job's last record; `ended` carries it.

@@ -239,7 +239,7 @@ def _extra(d: str) -> list:
 
 def extra_problem(d: str):
     """None when the job has no EXTRA list or it reads; else why it does not. A damaged list drops the run's and the smoke's lines from the sums, which must not happen silently:
-    `check_sums` reports it and `seal` puts it in the end record (and `status` shows it)."""
+    `check_sums` reports it and `seal` puts it in the end record, and `status JOB` shows it (SUMS PROBLEM; plain `status` does not show this line for the newest window job)."""
     if not os.path.isfile(os.path.join(d, EXTRA)):
         return None
     try:
