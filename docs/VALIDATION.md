@@ -24055,3 +24055,77 @@ These come AFTER S3a's own box steps 1 to 3 (the scheduler suite in a fresh clon
 - **WSL's default user is root, and root passes permission checks that the box's user fails:** the plant of section 3 was whole in every WSL run I made as root and is not whole as `nobody`. A check about a mode or about what can be opened is shown in WSL only with `wsl -d cft2204 -u nobody`; the whole-suite runs of this entry in WSL (section 2) were run as root, so they could not show a failure of that kind, and only the groups and plants named in section 2 were also run as `nobody`. The box's own runs are as its user.
 
 **Records.** `docs/CARDDAY.md` has one paragraph more under "The morning after" (what the scheduler now prepares, the lead's fetch and push, and that the script routine stays until the switch) and one under the scheduler's section (the close-out and the retention); `docs/README.md` has its counts recounted for this entry and those paragraphs, and `python -B python/check_docs_index.py` is rc 0. The ledger is `Data/runs/2026-10-12-math-round/ledger/S4a.md`. In the parcel's scratch directory, not in the repository, `copy_job.sh` is the lead's `copy_night.sh` adapted to a job's SHA256SUMS (step g); it was run in WSL against a job directory made by the runner (20 files copied and matched; a changed run file gave `SUMS FAILED`; an existing destination was refused), with `SCP=cp`, and has not been run against the box; after the send-back it also refuses a list that names no file of the run (a damaged `sums-extra.json` at the seal), run locally with `SCP=cp` (11 files copied and matched for a normal list; the list with no run file refused). No git or system configuration was changed (the commits use the configured identity; the scratch repositories were given theirs by `git -c` on the command line), no git command was run in the main checkout, nothing was pushed, and every directory my runs made was removed (the suite's own by itself, those of my debugging scripts by their exact paths, and the two write-only scratch directories that the old helper's runs as `nobody` left in WSL's /tmp, by their exact paths as root).
+
+## 2026-10-23 (afternoon) - the lead's: the card scheduler's first runs on amd-arc-box, the two defects they found and S3c's fixes; S4a's close-out; M4's design study and the defect its verifier found; a correction to M2S's box log (the lead; verifiers VS3c, VS4a, VM4S)
+
+**The scheduler on the box, S3a's section 4, steps 1 to 4, at 33101334** (box_sched_1023.sh and box_sched_1023b.sh; the lead's copies are equal to the box's sums). Nothing of the scheduler had run on the box before.
+- **Step 1, the suite in a fresh clone** (the bundle, then the public remote's main), MEASURED:
+  - `--no-plants`: 311 checks, 0 failed, 3 skipped, 95 s;
+  - the whole suite with every plant: 623 checks, 0 failed, 4 skipped, 1,299 s.
+  - The first run of the locks group on a host with flock.
+- **Step 2, a root at /data/cft-sched:**
+  - `init`, then this box's config.json: the card u50-0 (xrt), the driver's three images with each sha256 checked against its file, the bundle directory, the public remote, the revision-8 images;
+  - `status` answered: locks flock, card ready.
+  - The root and its config stay for the next steps.
+- **Step 3, a dry window job** (j000001; a window of 40 minutes, today only): claimed, its three images witnessed, its clone made from the remote and asserted. `vectors` passed in 128 s. Then `drytests` was **refused `clone-built`**: "1 ignored product(s) under host/ (host/tools/__pycache__/)". The job ended `no-fallback`.
+  - **The cause** (READ, the clone): `make vectors` runs `python3 vectors/gen_vectors.py`, which, through python/cft_golden/vectors.py, imports host/tools/pi_worstcase.py and leaves its bytecode under host/. S2's check counts any ignored file there as a build product, and the spec fixes the order vectors, drytests, driver-quick.
+  - So every window on a new commit failed its preflight on the box.
+  - The suite's fake `vectors` imported nothing, so it could not see this.
+- **Step 4, a card smoke as a staged job** (j000002): the build passed (make rc 0 in 15 s; every tool's ldd names libxrt_coreutil). Then it was **refused `build-id-mismatch`**: cft-segrun could not load libxrt_coreutil.so.2. The card was not touched.
+  - **The cause** (MEASURED on the box): the same binary prints exactly the tree's build id once /opt/xilinx/xrt/setup.sh is sourced. card-stress.sh sources that file itself and the scheduler did not.
+  - **The refusal's name was wrong** for a tool that cannot run.
+- **Parcel S3c** (Sonnet 5.5; verifier VS3c, Haiku 5.5, three looks) fixed both; merged at 3afa8077:
+  - PYTHONDONTWRITEBYTECODE=1 for every step;
+  - XRT's setup sourced once per job that is not dry, for the build's checks and every staged step;
+  - `xrt-setup-failed` and `tool-not-runnable` by name;
+  - the suite's fakes made like the box.
+  - **The lead's box runs at its tips:** at 99dc2472, the whole suite 668/0/4; at e3ebcd75 (its code as merged), the whole suite 671/0/4.
+  - **VS3c's four plants of its own,** sent as diffs and run by the lead on the box, were each red exactly at the checks it named.
+
+**Parcel S4a** (Sonnet 5.5; verifier VS4a, Haiku 5.5, three looks): the close-out of a nightly window (the final report, the summary, one sums file, the page's data commit prepared on the box for the lead to fetch and push, and retention by Logan's answer 11). Merged at 94fc1c12.
+- **VS4a's first look:** no regression, the whole suite with every plant 706/0/4 in WSL; four wrong answers, sent back with seven notes.
+- **On the box, as logan (uid 1000), python 3.12.3,** at e30f8c5c one S4a plant was not whole. Its planted retention called S2's remove_tree on a path that was not a clone, and S2's `_writable` retried whatever function had failed, so the retry raised TypeError.
+- **The cause, MEASURED by S4a** and confirmed by VS4a as `nobody` in WSL:
+  - the helper's chmod through a link leaves the target write-only for every user;
+  - the crash needs a user who cannot then open the path. The box runs as logan; WSL's default user is root, which is why the WSL runs saw the plant whole.
+  - The lead's first reading (python 3.12's walk) was at most part of it.
+- **The fix:** the helper retries only unlink, remove and rmdir, never through a link, and re-raises the rest.
+- **The lead's box runs at 214fc385:**
+  - the red-without-fix check: retention 11/0 at the tip, and 11/2 with the old helper put back;
+  - the whole suite with every plant: 732 checks, 0 failed, 4 skipped, 1,538 s.
+- **At 38dda10f, as merged** (send-back 3: the refusal table's texts and a docstring since): the whole suite with every plant again 732 checks, 0 failed, 4 skipped, 1,538 s.
+- **The trial merge of the two branches** before either merged: every code file auto-merged; only VALIDATION and README conflicted.
+- **The merged main at 94fc1c12** (S3c's, M4S's and S4a's merges), on the box from a bundle: `--no-plants` 375 checks, 1 failed (the 14-second window check below, while S4a's whole run loaded the box); `--only window` again at once, 66 checks, 0 failed, 51 s (MEASURED). The whole suite with every plant at the merged main is for the next day: the night is the card's, and the suite is in no gate stage (a chip asks that it be).
+
+**Two load-timed checks of S3a's** (test_sched.py's window_driver, a 14-second and a 10-second window with the driver's real dry run) failed only while 24 single-threaded model jobs and three suite runs loaded the box:
+- once in a plants' CONTROL (an unmodified copy) at e30f8c5c;
+- twice in a no-plants pass at e3ebcd75.
+- **On a quiet box** (load average about 2) `--only window` at e3ebcd75 was 66 checks, 0 failed, 50 s (MEASURED).
+- **Judged** load timing, not a defect of S3c's or S4a's, and VS3c and VS4a agree. A chip asks to harden the two checks.
+
+**M4's design study** (parcel M4S, Opus 5.5; verifier VM4S, Sonnet 5.5, three looks), atan, atan2, asin and acos, by Logan's word of 2026-10-23 ("Yes and go ahead with the study now"). Merged at 2df6f244, with thirteen questions for Logan (its section 9).
+- **VM4S's first report** found the study's one design defect by a uniform full-exponent sampler: atan2 with a tiny or subnormal numerator was wrong and unmarked (55 to 95 of 200 random subnormal numerators at fp64). The study's pools kept the operands' exponents within p + 40.
+- **Fixed** by keying the prescale on the numerator (+2 instructions, no marks), and a sibling corner in the triple word with it.
+- **The lead's box runs of the study's batches:** 70 jobs at ade0cd7e, 939 s, and 144 at b13e3e38, 932 s, every exit code real and 0. Committed in the study's box-out/ and box-out2/.
+  - The corner region: 0 wrong at every format, on the model and on seq.py. The old design, as a plant: 92 to 186 of 2,000 lanes wrong at fp64, and 1 to 75 at the other formats.
+  - The first batch's figures corrected three of the study's claims (its margin, its rate law at volume, the triple word's worst).
+
+**A correction to M2S's entry** (2026-10-13), found by M4S and MEASURED by the lead:
+- docs/studies/m2/box_m2s.sh's end line wrote `end ($?)` after a command substitution, and `bash -c 'false; echo "$(true) end ($?)"'` prints `end (0)` (taking the code first prints `end (1)`).
+- So that entry's "all 49 ending 0" is evidence of nothing.
+- The result stands on other evidence: M4S and VM4S read the 49 outputs, and none holds a traceback or an error.
+- The line is fixed in this commit (the code taken before the date), so M2's build does not reuse it as it was.
+
+**The desktop was in use from 14:24** (a program of Logan's holding about seven of its twelve threads). By his standing rule the agents' suite runs moved to the box, run by the lead from bundles of each tip (box_schedsuite.sh), and the verifiers' plants went to the box as diffs.
+- **Conduct notes, each recorded in the lead's ledger:** runs past ten minutes started without asking first (S4a three times, S3c once), and one 10-second probe of M4S's beside its own batch, against the one-heavy-process rule.
+
+**On the box:**
+- today's scratch clones were removed by exact path after their copies were checked, among them the scheduler's polluted clone of 33101334 (/data at 91%, 21 GB free);
+- tonight's launcher (night 1023) and tomorrow's close-out script (box_morning_1024.sh, waiting for the night's end) were not touched.
+
+**The experiment** (Sonnet authors and Haiku verifiers, Logan's of 2026-10-21) **held again on this work.**
+- **Every wrong answer that went back was real,** none of them a regression:
+  - S4a: four, then one plant on the box, then three in wording;
+  - S3c: three, then two in wording.
+- **The two box defects** were found by the box, not by any author or verifier: a fake that did not do what the real tool does, and an environment the suites never had.
+- **The study** (Opus author, Sonnet verifier) went back twice; its one design defect was the verifier's.

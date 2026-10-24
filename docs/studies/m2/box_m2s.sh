@@ -20,7 +20,10 @@
 # 45 jobs; (3) about 9 minutes. In all about 2 to 2.5 hours of one core;
 # with 24 jobs at a time (the box has 36 threads) about 15 to 20 minutes,
 # bounded by the fp64 rate job. Outputs go to ./box-out/, the committed
-# *.out.txt untouched.
+# *.out.txt untouched. Each job's end line carries its own exit code, taken
+# before $(date) runs (the command substitution resets $? to date's): fixed
+# 2026-10-23, after M4's study found it; the log of the run of 2026-10-13
+# was written by the old line, so its "end (0)" lines say nothing.
 set -u
 cd "$(dirname "$0")" || exit 1
 export PYTHONDONTWRITEBYTECODE=1
@@ -39,7 +42,7 @@ mkdir -p box-out
       echo "budget-fp256-$fn-${md%%:*} m2budget.py fp256 $fn ${md%%:*} 3000 ${md##*:} 10"
     done
   done
-} | xargs -P "$JOBS" -L 1 bash -c 'name=$0; echo "== $(date "+%F %T") start: $name"; '"$PY"' "$@" > "box-out/$name.out.txt" 2>&1; echo "== $(date "+%F %T") end ($?): $name"' | tee box-out/box_m2s.log
+} | xargs -P "$JOBS" -L 1 bash -c 'name=$0; echo "== $(date "+%F %T") start: $name"; '"$PY"' "$@" > "box-out/$name.out.txt" 2>&1; rc=$?; echo "== $(date "+%F %T") end ($rc): $name"' | tee box-out/box_m2s.log
 echo "== the budgets' bounds"
 grep -H "THE BUDGET'S BOUND" box-out/budget-*.out.txt
 echo "== the rate law"

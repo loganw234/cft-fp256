@@ -6189,6 +6189,14 @@ function gains an L3 rule.
     by LDX above (its question 1).
 - **M3, the pow family:** its structured cases need 2p to 3p bits.
 - **M4, atan, atan2, asin and acos.**
+  - **Its study is done** (2026-10-23, ahead of M2's build, by Logan's
+    word that day: "Yes and go ahead with the study now"):
+    docs/studies/M4-invtrig.md, merged at 2df6f244, with thirteen
+    questions for Logan (its section 9), each with a recommendation.
+    One core serves all four functions: a table of eight entries and
+    one double-word quotient. Its verifier found one design defect,
+    atan2 with a tiny numerator wrong and unmarked, fixed before the
+    merge.
 - **Their order:** M2's study can run beside M1's build; M4 follows
   M2 (step 6's plan asked only that it follow L4, which step 6
   built); M3 comes last, as step 6's plan has it.
