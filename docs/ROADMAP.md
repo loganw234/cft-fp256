@@ -6521,6 +6521,26 @@ the driver may start a leg whose estimate ends up to its deadline grace
 (`--deadline-grace`, 900 s) past the deadline, and night two ran to
 08:03 against 08:00.
 
+**The weekend window (decided 2026-10-24).** Logan, verbatim: "As I
+dont typically work on these projects over weekends, are we able to
+adjust the timing so that weekend runs begin Friday at 6pm then stop
+Monday at 8am? Using the otherwise idle day time", and then "If the
+system is limited to 24 hour segments, thats acceptable". From Friday
+18:00 to Monday 08:00 the card runs one window: the lead launches
+Friday's night with Monday 07:45 as its deadline, and that night's
+morning after is Monday's. The driver has run that long before (the
+weekend of 2026-10-16 started at 18:58 on the Friday and ended at
+08:01:13 on the Monday, reason deadline, exit 0). The word came on the
+Saturday morning of the first such weekend, while night 1023, Friday's,
+ran to its deadline of 07:45. So the lead launched a script that, once
+that night's close-out has taken its sums, carries the card on to
+Monday 07:45 as night 1024, at night 1023's commit and with its items.
+The scheduler's calendar (`hw/sched/sched_calendar.py`) holds a window
+of at most a day, every night or on stated dates, with no weekday, so it
+cannot yet say this. Before it takes the nights (the switch, parcel S5)
+it learns weekdays and a window that ends days later, or, by Logan's
+second sentence, runs the weekend as segments of a day.
+
 **The scheduler.** The design study is
 `docs/studies/SCHED-A-card-scheduler.md` (parcel SD, 374ff4e6). Logan
 answered its thirteen questions (its section 7) the same day, verbatim:
