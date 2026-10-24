@@ -30,7 +30,10 @@ would idle anyway). The next night's job waits meanwhile, as it does for any job
 The driver itself runs at nice 0, as the launcher's did (its legs are niced by it). The outcome: `done` when `run_end` is `deadline`
 with exit 0 (or `stop_file` after the scheduler's own end check), `cancelled` when the night was cut short by a cancel or a STOP or
 signal that is not the scheduler's, else `failed` (a `run_end` that says otherwise, none, or an exit status it contradicts). The
-driver's findings are in its own records; this outcome does not count them (S4a's close-out does).
+driver's findings are in its own records; this outcome does not count them (S4a's close-out reads them: its `summary` part names the disagreements, and the outcome stays the driver's).
+THE CLOSE-OUT (parcel S4a, sched_closeout.py) is the last thing `run` does, before the end record: when the job started the driver, whatever the outcome, the final report, the
+report's summary, the lead's list of sums, the page's data commit prepared on the box and (always) the retention, each a part of its own that may refuse by name without
+hiding the others or changing the outcome.
 """
 from __future__ import annotations
 
@@ -41,6 +44,7 @@ import time
 import traceback
 
 import sched_calendar as CAL
+import sched_closeout as CO
 import sched_guard as GD
 import sched_images as IM
 import sched_staged as SG
@@ -202,6 +206,10 @@ class WindowRunner(SG.StagedRunner):
         noted = sum((r.get("counts") or {}).get("noted_failures", 0) for r in STATE.read_records(log.path) if r.get("type") == "leg")
         if noted:
             fields["noted_failures"] = noted                      # failures the spec names as noted, which did not stop the night (the legs' notes name them)
+        try:
+            fields["closeout"] = CO.closeout(self, spec, log, S, dry)
+        except Exception as e:                                    # a defect of the close-out ends the close-out, recorded; the night's outcome is the driver's and stands
+            log.append("runner_error", error=f"close-out: {type(e).__name__}: {e}", traceback=traceback.format_exc()[-1500:])
         return outcome, fields
 
     # ------------------------------------------------------------------------------------ the night
@@ -392,7 +400,8 @@ def window_info(root: str, where: str, jid: str, cfg: dict | None = None) -> dic
             "preflight": [{k: r.get(k) for k in ("step", "leg", "status", "reason", "counts", "notes")} for r in rs if r.get("type") == "leg" and r.get("kind") != "window"],
             "driver": next(({"reason": r["extra"].get("run_end", {}) and r["extra"]["run_end"].get("reason"), "status": r["status"], "scheduler_stop": r["extra"].get("scheduler_stop")}
                             for r in rs if r.get("type") == "leg" and r.get("kind") == "window"), None),
-            "overrun": next((r for r in rs if r.get("type") == "driver_overrun"), None), "cancel_late": next((r for r in rs if r.get("type") == "cancel_after_stop"), None), "ended": bool(end)}
+            "overrun": next((r for r in rs if r.get("type") == "driver_overrun"), None), "cancel_late": next((r for r in rs if r.get("type") == "cancel_after_stop"), None), "ended": bool(end),
+            "closeout": CO.info(rs), "sums_problem": end.get("sums_problem")}
 
 
 def format_window(info: dict) -> list:
@@ -414,4 +423,6 @@ def format_window(info: dict) -> list:
     c = info.get("cancel_late")
     if c:
         lines.append(f"  cancel received after the driver (pid {c['pid']}) had been asked to stop: the scheduler sends it no signal, and the job ends cancelled when the driver does")
-    return lines
+    if info.get("sums_problem"):
+        lines.append(f"  SUMS PROBLEM: {info['sums_problem']}")
+    return lines + CO.lines(info.get("closeout"))

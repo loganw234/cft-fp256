@@ -8,11 +8,13 @@ extracts/ (clones/ and extracts/ are S2's and S4's), and ids/ (the markers that 
 config.json is read at start and an invalid one is refused `config-form`, by name. Each section is merged
 over DEFAULTS, so a file may state only what it changes; `cards` has no default, because inventing a card
 would be a claim about the machine. The retention is Logan's, 2026-10-21, doubled from the study's numbers.
-This parcel carries the retention and the floors and acts on neither (S4 does); the windows are acted on since parcel S3a (sched_calendar.py,
-sched_window.py).
+The windows are acted on since parcel S3a (sched_calendar.py, sched_window.py); the retention since parcel S4a (sched_retention.py), at the end of every window job;
+the floors are not acted on yet.
 Parcel S2 added a card's optional `platform`, an image's optional `tiles` and `platform`, and the sections `code` (where a
 job's bundles and remote are) and `runner` (the driver's own defaults for how a step runs). Parcel S3a added a window's optional
-`dates` and seconds in its times, a zone that must be one this machine knows, and the runner's `window_grace_s` and `window_poll_s`.
+`dates` and seconds in its times, a zone that must be one this machine knows, and the runner's `window_grace_s` and `window_poll_s`. Parcel S4a added the
+root's `publish/` (the scheduler's own clone of the repository, where a night's data commit is made) and `archive/` (what the retention keeps of a clone it removes),
+and the section `publish`: `fetch_host`, how the desktop reaches this machine (the command that fetches a prepared commit is built with it).
 """
 from __future__ import annotations
 
@@ -28,23 +30,26 @@ from sched_names import Refusal
 from sched_spec import IDENT_RE, parse_text      # one JSON reader: a repeated key and NaN are refused the same way
 
 ENV_ROOT = "CFT_SCHED_ROOT"
-LAYOUT = ("queue", "running", "jobs", "cards", "clones", "extracts", "ids")
+LAYOUT = ("queue", "running", "jobs", "cards", "clones", "extracts", "ids", "publish", "archive")
 CARD_KINDS = {"xrt": "an Alveo card driven through XRT over PCIe (the U50)"}   # nothing else reads a card's kind
 HEX64 = re.compile(r"[0-9a-f]{64}\Z")
 PLATFORM = re.compile(r"[A-Za-z0-9_.-]{1,100}\Z")
 CLOCK = re.compile(r"(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?\Z")
 DATE = re.compile(r"\d{4}-\d{2}-\d{2}\Z")
 ZONE = re.compile(r"[A-Za-z0-9_+./-]{1,64}\Z")
+HOST = re.compile(r"(?:[A-Za-z0-9_][A-Za-z0-9._-]{0,63}@)?[A-Za-z0-9][A-Za-z0-9._:-]{0,254}\Z")           # never a leading dash (ssh would read it as an option), no space, no shell metacharacter
 
 DEFAULTS = {
     "cards": None,                       # required
     "images": [],                        # [{name, path, sha256[, tiles, platform]}]: held to the files when a job runs (sched_images.py)
     "windows": {"zone": "local", "list": [{"name": "nightly", "start": "18:00", "end": "08:00"}]},
-    "floors": {"disk_free_gb": 5},       # the driver's own floor, unchanged
+    "floors": {"disk_free_gb": 5},       # the driver's own floor, unchanged; nothing acts on it yet, and the retention never touches it
     "retention": {"idle_sample_minutes": 7.5, "clone_days": 14, "passing_log_days": 360, "record_days": None},
     # where a job's code comes from (parcel S2): `bundle:FILE` is FILE in bundle_dir, `remote` clones this URL, and a commit is
     # "pushed" when a branch of this remote holds it. Null: not configured, and a job that needs it is refused by name.
     "code": {"bundle_dir": None, "remote": None},
+    # the data commit a window prepares (parcel S4a): fetch_host is `[user@]host` as the DESKTOP reaches this machine; null: this user at this machine's own name, which the desktop may not resolve
+    "publish": {"fetch_host": None},
     # how a staged job runs (parcel S2): the driver's own defaults for its options of the same names
     # window_grace_s: how long past its window's end the driver may run before the scheduler asks it to stop (its STOP file); the driver's
     # own overshoot was 31, 74 and 181 s in the three runs measured and its longest leg is about 11 minutes. window_poll_s: how often
@@ -208,6 +213,12 @@ def validate_config(raw) -> dict:
             if v is not None and not (isinstance(v, str) and v and len(v) <= 1000):
                 raise _form(f"code.{k}", "must be a path or URL of 1 to 1000 characters, or null (not configured)")
             cfg["code"][k] = v
+    if "publish" in raw:
+        _keys(raw["publish"], "publish", (), tuple(DEFAULTS["publish"]))
+        fh = raw["publish"].get("fetch_host")
+        if fh is not None and not (isinstance(fh, str) and HOST.match(fh)):
+            raise _form("publish.fetch_host", "must be [user@]host (letters, digits and . _ - : only, starting with a letter or digit: the command is printed for a person to run, and ssh reads a leading dash as an option), or null")
+        cfg["publish"].update(raw["publish"])
     if "runner" in raw:
         _keys(raw["runner"], "runner", (), tuple(DEFAULTS["runner"]))
         for k, v in raw["runner"].items():

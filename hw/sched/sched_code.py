@@ -50,13 +50,21 @@ def first_line(text: str, n: int = 200) -> str:
     return next((ln.strip() for ln in text.splitlines() if ln.strip()), "")[:n]
 
 
-def _writable(fn, path, _exc):
-    os.chmod(path, stat.S_IWRITE)         # git's object files are read-only, and Windows will not delete those
-    fn(path)
+def _writable(fn, path, exc):
+    """rmtree's error handler. It retries ONLY an unlink, remove or rmdir that failed, after clearing the read-only bit: git's object files are read-only, and Windows will not delete those.
+    Any other failing function is re-raised as the real error (`exc` is rmtree's `sys.exc_info()` for `onerror`, the exception itself for `onexc`). It used to retry whatever function failed: a path
+    it had made write-only could not then be opened by a user who is not root, rmtree reported `os.open`, and the retry `os.open(path)`, with no flags, is a TypeError that hid the real OSError
+    (found by parcel S4a's plant on the box, 2026-10-23, and reproduced on Python 3.10 as a user who is not root). It never clears a bit through a link."""
+    if fn in (os.unlink, os.remove, os.rmdir):
+        if not os.path.islink(path):
+            os.chmod(path, stat.S_IWRITE)
+        fn(path)
+    else:
+        raise exc[1] if isinstance(exc, tuple) else exc
 
 
 def remove_tree(path: str) -> None:
-    """Remove a directory THIS stage made, by its exact path."""
+    """Remove a directory THIS stage made, by its exact path. A path that is not a directory (a file, a link) raises the OSError rmtree gives and is left as it was."""
     shutil.rmtree(path, onerror=_writable)
 
 
