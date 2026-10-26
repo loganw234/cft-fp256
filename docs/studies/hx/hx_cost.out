@@ -1,0 +1,74 @@
+== C1. the card's rates, M elements a second a tile (one call of 4,096, RNE; MEASURED by the probe)
+  op      format tile alone four at once (min-max)    quad, sum
+  div     fp64        1.586        1.576 - 1.617          6.380
+  div     fp128       0.947        0.962 - 1.024          3.929
+  div     fp256       0.542        0.545 - 0.559          2.199
+  sqrt    fp64        1.458        1.438 - 1.520          5.968
+  sqrt    fp128       0.901        0.898 - 0.966          3.691
+  sqrt    fp256       0.505        0.505 - 0.515          2.035
+  rint    fp64        4.793        4.427 - 5.504         20.411
+  rint    fp128       3.629        3.152 - 3.310         12.988
+  rint    fp256       1.808        1.943 - 2.096          8.108
+  scaleb  fp64       15.983       16.665 - 22.505        77.897
+  scaleb  fp128      10.396        9.538 - 11.603        43.863
+  scaleb  fp256       7.037        6.839 - 6.876         27.430
+  fma     fp64       22.656       21.483 - 23.190        88.948
+  fma     fp128      18.843       17.117 - 19.028        72.436
+  fma     fp256      10.698       11.205 - 11.634        45.891
+  mul     fp64       22.631       20.382 - 20.742        82.231
+  mul     fp128      17.662       16.813 - 18.909        71.133
+  mul     fp256       9.922       11.907 - 12.945        48.865
+  add     fp64       22.188       20.762 - 21.204        83.686
+  add     fp128      17.294       16.780 - 16.948        67.342
+  add     fp256      11.648       11.918 - 12.137        48.115
+  four tiles at once: each tile at 0.87 to 1.41 times tile 1 alone's rate
+CHECK C1: no tile of the four-at-once run is below 85% of tile 1 alone (the quad scales by four) ok
+
+== C2. t = h + L T64 (ns an element), fitted on fp64 and fp128, held to fp256
+  div   fp64   630.5  fp128  1055.7  fp256  1844.0  ->  h  205.3, T64  425.2; fp256 predicted  1906.2 (+3.4%)
+CHECK C2: div's fp256 time within 5% of h + 4 T64 (the tile part scales with the beat's lanes) ok
+  sqrt  fp64   686.0  fp128  1109.9  fp256  1978.2  ->  h  262.1, T64  423.9; fp256 predicted  1957.7 (-1.0%)
+CHECK C2: sqrt's fp256 time within 5% of h + 4 T64 (the tile part scales with the beat's lanes) ok
+  rint  fp64   208.7  fp128   275.5  fp256   553.0  ->  h  141.8, T64   66.9; fp256 predicted   409.3 (-26.0%)
+
+== C3. a night's sweep (COMPUTED from nightly-1024's record; constants in this file)
+  sweep tile-seconds a card-second: 1.840 (quad 699441, single 20763, deep 18874 job-seconds over 401752 s on the card)
+  a weekday night: 12.85 h on the card (the mean of five) = 23.6 sweep tile-hours
+  a weekend (Friday 18:00 to Monday 08:00, 61.4 h on the card, ESTIMATE): 113.0 sweep tile-hours
+  two weeks (8 weekday nights and 2 weekends): 415 sweep tile-hours; at the exhaustive weight 0.75: 311
+
+== C4. the candidate items: tile-hours a run of every attribute listed (rates from C1, tile 1 alone)
+  the fp64 hard modes against the bare call (nightly-1024 status.txt rates): div 0.78, sqrt 0.24
+  item              level       indices      k        M/s attrs     tile-h  what
+  sqrt64-f32        L1       4294967296  1.000      1.458     5       4.09  every fp32 input, widened
+  recip64-f32       L1       4294967296  1.000      1.586     5       3.76  1/x, every fp32 x
+  sqrt128-f32       L1       4294967296  1.000      0.901     5       6.62  every fp32 input, widened
+  recip128-f32      L1       4294967296  1.000      0.947     5       6.30  1/x, every fp32 x
+  sqrt256-f32       L1       4294967296  1.000      0.505     5      11.80  every fp32 input, widened
+  recip256-f32      L1       4294967296  1.000      0.542     5      11.00  1/x, every fp32 x
+  rint128-f32       L1       4294967296  2.000      3.629     5       3.29  both variants; exact identity
+  rint256-f32       L1       4294967296  2.000      1.808     5       6.60  both variants; exact identity
+  div128-hard       hard      289931696  2.805      0.737     5       1.53  F3a..F0K as div64-hard
+  sqrt128-hard      hard        4456448  0.392      0.217     5       0.01  S1, S0 as sqrt64-hard
+  div256-hard       hard      293864352  2.805      0.422     5       2.71  F3a..F0K as div64-hard
+  sqrt256-hard      hard        4456448  0.392      0.122     5       0.02  S1, S0 as sqrt64-hard
+  div64-hard-w128   hard      289685696  2.805      0.737     5       1.53  div64-hard's operands at fp128
+  div64-hard-w256   hard      289685696  2.805      0.422     5       2.67  div64-hard's operands at fp256
+  rint128-class     L2           137344  2.000      0.001     5       0.40  one call a case (ESTIMATE rate)
+  rint256-class     L2           537600  1.000      0.001     5       0.78  one call a case (ESTIMATE rate)
+  scaleb128-class   L2           317448  2.000      0.011     4       0.06  one call a case (ESTIMATE rate)
+  scaleb256-class   L2          1370952  1.000      0.011     4       0.13  one call a case (ESTIMATE rate)
+  sqrt128-win       L1       4294967296  1.000      0.901     2       2.65  one low-32-bit window, rne and rup
+  recip128-win      L1       4294967296  1.000      0.947     2       2.52  one low-32-bit window, rne and rup
+  sqrt128-f64top    L1       4294967296  1.000      0.901     5       6.62  fp64 inputs, low 32 fraction bits zero
+  sqrt256-win       L1       4294967296  1.000      0.505     2       4.72  one low-32-bit window, rne and rup
+  recip256-win      L1       4294967296  1.000      0.542     2       4.40  one low-32-bit window, rne and rup
+  sqrt256-f64top    L1       4294967296  1.000      0.505     5      11.80  fp64 inputs, low 32 fraction bits zero
+
+== C5. phase 1 (section 7): the items, their tile-hours, and nights
+  hard, class and the fp32 slice (18 items): 63.3 tile-h; four windows of each of four modes: 57.2 tile-h
+  with the oracle in line (+10%, ESTIMATE): 132.5 tile-hours
+  = 5.6 weekday nights of the whole sweep, 7.5 at the exhaustive weight (0.75); two weeks hold 311
+CHECK C5: phase 1 fits in two weeks of nights at the exhaustive weight                     ok
+
+hx_cost: 0 check(s) failed

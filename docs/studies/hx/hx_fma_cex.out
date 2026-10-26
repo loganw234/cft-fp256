@@ -1,0 +1,17 @@
+rne, c = 2^-149: fp32 directly (2^24 + 2) 2^76
+  through fp64 : the wide result is a*b exactly (c lost); narrowed to fp32 2^100: DIFFERS from fp32 directly
+  through fp128: the wide result is a*b exactly (c lost); narrowed to fp32 2^100: DIFFERS from fp32 directly
+  through fp256: the wide result is a*b exactly (c lost); narrowed to fp32 2^100: DIFFERS from fp32 directly
+rmm, c = 2^-149: fp32 directly (2^24 + 2) 2^76
+  through fp64 : the wide result is a*b exactly (c lost); narrowed to fp32 (2^24 + 2) 2^76: equal
+  through fp128: the wide result is a*b exactly (c lost); narrowed to fp32 (2^24 + 2) 2^76: equal
+  through fp256: the wide result is a*b exactly (c lost); narrowed to fp32 (2^24 + 2) 2^76: equal
+rne, c = -2^-149: fp32 directly 2^100
+  through fp64 : the wide result is a*b exactly (c lost); narrowed to fp32 2^100: equal
+  through fp128: the wide result is a*b exactly (c lost); narrowed to fp32 2^100: equal
+  through fp256: the wide result is a*b exactly (c lost); narrowed to fp32 2^100: equal
+rmm, c = -2^-149: fp32 directly 2^100
+  through fp64 : the wide result is a*b exactly (c lost); narrowed to fp32 (2^24 + 2) 2^76: DIFFERS from fp32 directly
+  through fp128: the wide result is a*b exactly (c lost); narrowed to fp32 (2^24 + 2) 2^76: DIFFERS from fp32 directly
+  through fp256: the wide result is a*b exactly (c lost); narrowed to fp32 (2^24 + 2) 2^76: DIFFERS from fp32 directly
+hx_fma_cex: c = 2^-149 under RNE and c = -2^-149 under RMM fail at every rung, each agrees under the other, as stated

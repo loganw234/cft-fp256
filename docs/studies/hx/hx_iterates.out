@@ -1,0 +1,17 @@
+fp128, 400 fp32 inputs widened (p = 113): significant bits, min / median / max
+  the inputs                 11 /   23.0 /   24
+  sqrt: the root s1         105 /  113.0 /  113
+  sqrt: the residual r       92 /  111.0 /  113
+  1/x: the quotient q2       98 /  112.0 /  113
+  1/x: the remainder r2       1 /   21.0 /   24
+CHECK fp128: the median root and quotient carry at least p - 8 significant bits: ok
+CHECK fp128: no input carries more than 24 (the slice is what it claims): ok
+fp256, 400 fp32 inputs widened (p = 237): significant bits, min / median / max
+  the inputs                 11 /   23.0 /   24
+  sqrt: the root s1         228 /  236.0 /  237
+  sqrt: the residual r      219 /  235.0 /  237
+  1/x: the quotient q2      218 /  237.0 /  237
+  1/x: the remainder r2       1 /   21.0 /   24
+CHECK fp256: the median root and quotient carry at least p - 8 significant bits: ok
+CHECK fp256: no input carries more than 24 (the slice is what it claims): ok
+hx_iterates: 0 check(s) failed

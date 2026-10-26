@@ -1,0 +1,59 @@
+== S1. class-level (L2) spaces at the wide formats, from python/c5_class_enum.py's generic enumerators
+  space                              reach      indices    k     cases/attr  formula
+  rint64-class (as built)            tile         35840    4         143360  80 positions x 2 signs x 4 classes x 56 patterns = 35840
+  rint, fp128                        tile        137344    2         274688  148 positions x 2 signs x 4 classes x 116 patterns = 137344
+  rint, fp256                        tile        537600    1         537600  280 positions x 2 signs x 4 classes x 240 patterns = 537600
+  scaleb64-class (as built)          tile         72648    4         290592  3 routes x 54 strips x 2 signs x 4 classes x 56 patterns = 72576, + 36 overflow + 36 deep = 72648
+  scaleb, fp128                      tile        317448    2         634896  3 routes x 114 strips x 2 signs x 4 classes x 116 patterns = 317376, + 36 overflow + 36 deep = 317448
+  scaleb, fp256                      tile       1370952    1        1370952  3 routes x 238 strips x 2 signs x 4 classes x 240 patterns = 1370880, + 36 overflow + 36 deep = 1370952
+  conv64to32-class (as built)        host        136192    1         136192  304 positions x 2 signs x 4 classes x 56 patterns = 136192
+  conv, fp128 -> fp64                host       1979424    1        1979424  2133 positions x 2 signs x 4 classes x 116 patterns = 1979424
+  conv, fp256 -> fp128               host      63208320    1       63208320  32921 positions x 2 signs x 4 classes x 240 patterns = 63208320
+  cvtto, fp128 -> 64-bit integers    host         91872    4         367488  99 positions x 2 signs x 4 classes x 116 patterns = 91872
+  cvtto, fp256 -> 64-bit integers    host        205440    4         821760  107 positions x 2 signs x 4 classes x 240 patterns = 205440
+  cvtfrom, 64-bit integers -> fp128  host         50923    1          50923  190 cells (i64+ L=1..63, i64- L=1..63, u64 L=1..64) x 4 classes x 67 patterns + 3 (-2^63, 0 as i64, 0 as u64) = 50923
+  cvtfrom, 64-bit integers -> fp256  host         50923    1          50923  190 cells (i64+ L=1..63, i64- L=1..63, u64 L=1..64) x 4 classes x 67 patterns + 3 (-2^63, 0 as i64, 0 as u64) = 50923
+CHECK S1: the generators reproduce the built spaces' sizes (rint64 35,840, scaleb64 72,648, conv64to32 136,192) ok
+
+== S2. hard-case spaces at p = 113 and 237, from python/hardcases.py's constructor and builders
+  div64-hard (as built)  p  53  k 4  indices     289685696  segments: F3a 212, F3b 16364, F2 262144, F1 4194304, F0A 8388608, F0D 8388608, F0K 268435456
+  div128-hard            p 113  k 4  indices     289931696  segments: F3a 452, F3b 262124, F2 262144, F1 4194304, F0A 8388608, F0D 8388608, F0K 268435456
+  div256-hard            p 237  k 4  indices     293864352  segments: F3a 948, F3b 4194284, F2 262144, F1 4194304, F0A 8388608, F0D 8388608, F0K 268435456
+  sqrt128-hard           p 113  k 1  indices       4456448  segments: S1 262144, S0 4194304
+  sqrt256-hard           p 237  k 1  indices       4456448  segments: S1 262144, S0 4194304
+  div128-hard  verified   2100 indices (every one of the small segments, 300 of each large one): 7392 cases, 1008 skipped slots (12.0%), 68 us an index (build and exact check)
+CHECK S2: div128-hard - every sampled index's construction verified exactly          ok
+CHECK S2: div128-hard - every segment can be built                                   ok
+  div256-hard  verified   1800 indices (every one of the small segments, 300 of each large one): 6212 cases, 988 skipped slots (13.7%), 4028 us an index (build and exact check)
+  div256-hard  segment F1 CANNOT BE BUILT at p = 237: ValueError: negative shift count
+CHECK S2: div256-hard - every sampled index's construction verified exactly          ok
+CHECK S2: div256-hard - the one segment that cannot be built is F1 (64-bit odd-part draw; p <= 131) ok
+  sqrt128-hard verified    600 indices (every one of the small segments, 300 of each large one): 422 cases, 178 skipped slots (29.7%), 101 us an index (build and exact check)
+CHECK S2: sqrt128-hard - every sampled index's construction verified exactly         ok
+CHECK S2: sqrt128-hard - every segment can be built                                  ok
+  sqrt256-hard verified    600 indices (every one of the small segments, 300 of each large one): 413 cases, 187 skipped slots (31.2%), 324 us an index (build and exact check)
+CHECK S2: sqrt256-hard - every sampled index's construction verified exactly         ok
+CHECK S2: sqrt256-hard - every segment can be built                                  ok
+  div128-hard  F0A builder alone: 3999 of 4000 indices yield a pair, 3.2 us an index
+  div256-hard  F0A builder alone: 3999 of 4000 indices yield a pair, 3.6 us an index
+
+== S3. the oracles, one desktop core (WSL cft2204, niced): ns a case
+  gmpy2 2.1.2, MPFR MPFR 4.1.0; a Python loop around each call, so an upper bound on MPFR's own cost
+  binary128 context: precision 113, emin -16493, emax 16384, subnormalize True
+  gmpy2 binary128 rne: add 164, mul 164, fma 459, div 208, sqrt 372
+  gmpy2 binary128 rdn: add 151, mul 155, fma 305, div 184, sqrt 321
+  binary256 context: precision 237, emin -262377, emax 262144, subnormalize True
+  gmpy2 binary256 rne: add 147, mul 165, fma 455, div 276, sqrt 277
+  gmpy2 binary256 rdn: add 114, mul 244, fma 321, div 268, sqrt 649
+  golden model (python/cft_golden/softfloat.py) fp128: add 8.7 us, mul 8.3 us, fma 11.6 us, div 9.8 us, sqrt 6.9 us
+  golden model (python/cft_golden/softfloat.py) fp256: add 9.6 us, mul 9.0 us, fma 7.1 us, div 12.3 us, sqrt 9.1 us
+  exact residual check, 113-bit root of an fp32 input, the correct claims: 0.87 us a case in Python, 20000 of 20000 pass
+CHECK S3: the residual check passes every correct 113-bit root                       ok
+  exact residual check, 113-bit root of an fp32 input, CONTROL, every claim one ulp high: 0.42 us a case in Python, 0 of 20000 pass
+CHECK S3: the residual check refuses every root one ulp high (113-bit)               ok
+  exact residual check, 237-bit root of an fp32 input, the correct claims: 1.11 us a case in Python, 20000 of 20000 pass
+CHECK S3: the residual check passes every correct 237-bit root                       ok
+  exact residual check, 237-bit root of an fp32 input, CONTROL, every claim one ulp high: 0.70 us a case in Python, 0 of 20000 pass
+CHECK S3: the residual check refuses every root one ulp high (237-bit)               ok
+
+hx_spaces: 0 check(s) failed; 9 s
