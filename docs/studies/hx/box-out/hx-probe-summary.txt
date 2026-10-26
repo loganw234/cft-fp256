@@ -1,0 +1,9 @@
+2026-10-26 11:17:29 hx-probe: start; load 1.34 1.31 1.28; sha 49d7c3b761a1587ab768355e69d2d3b315f4d2b7, bundle push3-49d7c3b.bundle, probe 021737ceabceee6590e26d68fc45cd64f45b853338d03f0b0f09d7c0672b308e, image 4f9921a25af65444abc5c267fff1117a8e14abbc16a75de643e43c9dbf6ef53b
+2026-10-26 11:17:32 hx-probe: HEAD 49d7c3b761a1587ab768355e69d2d3b315f4d2b7 status 0 rtl 44b963dd6ba2fcf99e002c5face5ca94aad4515c sqrt64-hard-in-soak x11
+2026-10-26 11:17:45 hx-probe: build rc=0 probe rc=0, 13 s; ldd xrt lines: probe 1, soak 1
+2026-10-26 11:18:28 hx-probe: phase A (tile 1 alone) rc=0, 43 s: hx-probe: every check equal
+2026-10-26 11:19:11 hx-probe: phase B (four tiles at once), 43 s: hx-probe: every check equal|hx-probe: every check equal|hx-probe: every check equal|hx-probe: every check equal|
+2026-10-26 11:19:15 hx-probe: phase C soak div64 4194304 rne rc=0, 3.63 s: div64 rne: 4194304 cases, 0 value mismatches, 0 flag mismatches
+2026-10-26 11:19:19 hx-probe: phase C soak sqrt64 4194304 rne rc=0, 3.88 s: sqrt64 rne: 4194304 cases, 0 value mismatches, 0 flag mismatches
+2026-10-26 11:19:19 hx-probe: sums of 10 files in /data/m1e1/hx-probe-SHA256SUMS
+=== done

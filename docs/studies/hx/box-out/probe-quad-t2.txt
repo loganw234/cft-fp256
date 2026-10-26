@@ -1,0 +1,23 @@
+hx-probe: DEVICE backend: $HOME/cardday-rev8q/cft_hw_quad.xclbin, N 4096, 2.0 s an operation
+hx-probe fp64 div: N 4096, calls 770, 634.5 ns an element, 1.5760 M/s, check 4096 of 4096 equal, flags device 0x10 software 0x10
+hx-probe fp64 sqrt: N 4096, calls 735, 664.6 ns an element, 1.5048 M/s, check 4096 of 4096 equal, flags device 0x10 software 0x10
+hx-probe fp64 rint: N 4096, calls 2672, 182.8 ns an element, 5.4717 M/s, check 4096 of 4096 equal, flags device 0x00 software 0x00
+hx-probe fp64 scaleb: N 4096, calls 10989, 44.4 ns an element, 22.5053 M/s, check 4096 of 4096 equal, flags device 0x00 software 0x00
+hx-probe fp64 fma: N 4096, calls 10611, 46.0 ns an element, 21.7300 M/s, check 4096 of 4096 equal, flags device 0x10 software 0x10
+hx-probe fp64 mul: N 4096, calls 10041, 48.6 ns an element, 20.5626 M/s, check 4096 of 4096 equal, flags device 0x10 software 0x10
+hx-probe fp64 add: N 4096, calls 10156, 48.1 ns an element, 20.7992 M/s, check 4096 of 4096 equal, flags device 0x10 software 0x10
+hx-probe fp128 div: N 4096, calls 476, 1026.7 ns an element, 0.9740 M/s, check 4096 of 4096 equal, flags device 0x10 software 0x10
+hx-probe fp128 sqrt: N 4096, calls 452, 1081.1 ns an element, 0.9250 M/s, check 4096 of 4096 equal, flags device 0x10 software 0x10
+hx-probe fp128 rint: N 4096, calls 1575, 310.2 ns an element, 3.2240 M/s, check 4096 of 4096 equal, flags device 0x00 software 0x00
+hx-probe fp128 scaleb: N 4096, calls 5666, 86.2 ns an element, 11.6026 M/s, check 4096 of 4096 equal, flags device 0x00 software 0x00
+hx-probe fp128 fma: N 4096, calls 8359, 58.4 ns an element, 17.1175 M/s, check 4096 of 4096 equal, flags device 0x10 software 0x10
+hx-probe fp128 mul: N 4096, calls 8210, 59.5 ns an element, 16.8126 M/s, check 4096 of 4096 equal, flags device 0x10 software 0x10
+hx-probe fp128 add: N 4096, calls 8201, 59.5 ns an element, 16.7954 M/s, check 4096 of 4096 equal, flags device 0x10 software 0x10
+hx-probe fp256 div: N 4096, calls 268, 1822.7 ns an element, 0.5486 M/s, check 4096 of 4096 equal, flags device 0x10 software 0x10
+hx-probe fp256 sqrt: N 4096, calls 249, 1967.5 ns an element, 0.5083 M/s, check 4096 of 4096 equal, flags device 0x10 software 0x10
+hx-probe fp256 rint: N 4096, calls 1024, 477.1 ns an element, 2.0961 M/s, check 4096 of 4096 equal, flags device 0x00 software 0x00
+hx-probe fp256 scaleb: N 4096, calls 3358, 145.4 ns an element, 6.8761 M/s, check 4096 of 4096 equal, flags device 0x00 software 0x00
+hx-probe fp256 fma: N 4096, calls 5578, 87.5 ns an element, 11.4236 M/s, check 4096 of 4096 equal, flags device 0x10 software 0x10
+hx-probe fp256 mul: N 4096, calls 5841, 83.6 ns an element, 11.9615 M/s, check 4096 of 4096 equal, flags device 0x10 software 0x10
+hx-probe fp256 add: N 4096, calls 5927, 82.4 ns an element, 12.1375 M/s, check 4096 of 4096 equal, flags device 0x10 software 0x10
+hx-probe: every check equal
