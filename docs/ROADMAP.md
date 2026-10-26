@@ -6639,6 +6639,50 @@ verified (`hw/sched/`, `hw/test-sched.sh`; docs/VALIDATION.md, its entry). SR2
 and DR4 are built and in verification (DR4 sent back once). S2 to S5
 are not started.*
 
+### Decided 2026-10-26: the wide-format sweeps (plan of record)
+
+Logan, verbatim, on 2026-10-26, the morning after the nightly covered
+the last of its 71 exhaustive items: "Would we be able to run the same
+sweep on higher precision to gain anything? Obviously it wouldnt be an
+exhaustive sweep as the fp32 was capable of, but could we sweep the same
+and compare against the fp32 to test? Mostly just looking for more of
+the exhaustive type work without having to commit to the multi year
+runs". Then: "Go ahead with the study, hold off on M2 for now".
+
+**The study** is `docs/studies/HX-wide-sweeps.md` (parcel HX, merged at
+0192ab11), with its scripts and outputs in `docs/studies/hx/`. It
+proposes a first phase of about 133 tile-hours, about a week of nights:
+hard cases at p = 113 and 237, the widened fp64 hard operands, the class
+items, the fp32 slice of square root, reciprocal and rint at the wide
+formats, and sixteen low-bit windows, with MPFR as the oracle. It
+measured the card's first fp128 and fp256 rates (division 0.947 and
+0.542, square root 0.901 and 0.505 million elements a second a tile).
+
+**Logan's answers** (2026-10-26, by AskUserQuestion): "Approve all as
+recommended". The study's section 8, each now settled:
+1. Phase 1 as ranked, after parcels HXa and HXc.
+2. MPFR is the oracle at fp128 and fp256 (mpfr_check.c's emulation, the
+   box's pinned MPFR), the narrow native result a free second check, a
+   hard case its own oracle; the golden model stays the arbiter of any
+   disagreement.
+3. Each pass is named with its space and level ("every fp32 input,
+   widened ... (L1 over the fp32 slice)"), never "swept".
+4. quadmath joins the oracles only for the operations that pass against
+   the box's library (HXa runs the test); phase 1 does not wait for it.
+5. The driver's weights stay: 3 to 1, exhaustive to random, per item.
+6. No golden second lineage on the slices in phase 1.
+7. The FMA, add and mul, which no sweep item covers at any format, are
+   phase 2, with parcel HXe.
+8. Parcels HXa (the wide division and square-root soak, with the MPFR
+   oracle and the wider hard-case draws) and HXc (the catalog entries)
+   come before M2 resumes; HXb (the wide class modes) and HXd (the
+   report and the nightly page) beside M2.
+9. The transcendentals get a study of their own after M2's build.
+
+M2's build waits for HXa and HXc (Logan, 2026-10-26: "hold off on M2
+for now"). Until the wide items exist, the nights run the catalog's
+random items with new draws.
+
 ## The adoption story these serve
 
 Two tiers, one contract: a software library anyone can run on
