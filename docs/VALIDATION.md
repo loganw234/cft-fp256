@@ -24252,6 +24252,44 @@ whether it was MEASURED here (with the run named), READ or COMPUTED.
 - **Not run: the mpfr stage**, by the lead's word: the direct before-and-after comparison of `mpfr-check 24 7` above is the stronger evidence for the move of its emulation, and the stage would be a third run of about 9 to 18 minutes on the desktop.
 - **The runner's stages the change touches** (MEASURED, desktop, niced, beside the lead's gate run): `docs` ok in 452 s (run 20261026-152020, the tree of 1ff07f6c, whose documents 3c0adb71 does not change); `soak-quick` ok in 647 s (run 20261026-154845; the default tool, the same object at both commits); `divsqrt` ok (run 20261026-160336-3c0adb71: 34,384 cases, the library matching the model exactly), after a first attempt failed in 1 s for want of host/cft.dll, which the `libcft` stage builds and `--only divsqrt` skips in a fresh worktree. `golden` ran serially in one process at about a tenth of the suite in 14 minutes and was stopped by PID at the lead's word; it runs in a fresh clone on amd-arc-box instead. The suite's own new tests, `python/tests/test_hardcases.py`, passed directly (above).
 - **A regression of the first commit, found and fixed before merge.** hw/test_divsqrt_hard.py's pre-existing `plants` group anchors two plants on soak_hard's `hencodings++;` and on its all-skipped refusal test, each of which must occur exactly once in divsqrt_soak.c; the wide run loop at 1ff07f6c repeated both text for text, so the plants refused and the test exited 1 (MEASURED, WSL, after `build`, `agree`, `special`, `spread`, `refuse` and `sabotage` had passed: 7, 9, 3, 1, 38 and 13 checks). 3c0adb71 writes the two statements apart, inside `#ifdef CFT_SOAK_MPFR` (two lines; neither `hard-count` nor any builder), and `plants` passes, 25 checks (MEASURED, WSL, 204 s, from a copy of the tree with host/ cleaned). A scan of both soak tests' string literals against the source finds every plant anchor once now.
+- **A second regression of the same kind, in the Makefile; found by reading, fixed before merge.**
+  host/tests/soak_chunk_check.py's `plants` group anchors its `batch` and `link` plants on the soak-chunk tool's recipe
+  text, which must occur exactly once in host/Makefile; from 1ff07f6c to 234ce1eb an `ifeq ($(MPFR),1)` / `else` pair
+  held that recipe, and divsqrt-soak's, twice, so those two plants would have refused and the test exited 1. The run
+  of that test above (`refuse`, `recipe`, `tools`, `unchanged`) does not touch it, and `plants` had not been run.
+  667d13d0 makes one recipe of each, the MPFR words spliced in by three variables that are empty unless `MPFR=1`. The
+  exact text each of the group's twelve plants changes occurs once in 667d13d0's host/Makefile and
+  tools/divsqrt_soak.c, as at 0192ab11 (at 3c0adb71, `batch`'s and `link`'s twice; MEASURED, a count of each plant's
+  text in the three trees). `make -n -B` (MEASURED, WSL, GNU make 4.3; the round's records, hxa/mkn_compare.py and its
+  output, 28 comparisons, all as expected) of `divsqrt-soak`, `SOAK_CHUNK=16384 divsqrt-soak-c16384`, `all` and
+  `mpfr-check`: with MPFR unset, `MPFR=0` and `XRT=1 XRT_ROOT=...`, the same text at 0192ab11, 3c0adb71 and 667d13d0;
+  with `MPFR=1 MPFR_PREFIX=...`, alone and with the box script's `XRT=1 XRT_ROOT=...`, the same text at 3c0adb71 and
+  667d13d0 - so the box's results below hold for this build line - while 0192ab11's lacks the MPFR words (the
+  control); with `MPFR=1` and no prefix the same words, two spaces fewer; `MPFR=2` refused by name at 3c0adb71 and
+  667d13d0.
+- **Both soak tests at 667d13d0, every group but one** (MEASURED, WSL cft2204, niced, each run from a clean copy of
+  the tree, the two `unchanged` groups against 0192ab11's host/; the round's records, hxa/final-667d13d0/):
+  soak_chunk_check `--only refuse,recipe,tools,unchanged,plants`, 41 checks, 0 failed, 0 skipped, 122 s (refuse 3,
+  recipe 1, build 7, tools 3, unchanged 11, and plants 16: its CONTROL, and every plant applied and red at the check
+  written for it, `batch` and `link` among them); hw/test_divsqrt_hard.py `--only wide-agree,wide-refuse,unchanged`,
+  16 checks, 0 failed, 0 skipped, 220 s (wide-agree 11, wide-refuse 3, and unchanged 2: the 155 invocations the same
+  bytes as 0192ab11's tool from the default build and from the `MPFR=1` build); then, at the lead's word, the rest of
+  both: hw/test_divsqrt_hard.py's other ten groups, 102 checks, 0 failed, 0 skipped, 203 s (build 7; agree 9, the
+  three whole spaces counted in 68 s; special 3; spread 1; refuse 38; sabotage 13; plants 25; wide-run 1, 1,010 wide
+  slices in 16 s; wide-sabotage 2; wide-plants 3), and soak_chunk_check `--only passes,clean`, 12 checks, 0 failed,
+  15 s (build 7, passes 4, clean 1). Not run: soak_chunk_check's `ignore`, which needs git (WSL cft2204 has none).
+- **Which commit each result is from.** The branch: 1ff07f6c (the build), 3c0adb71 (the two lines above), 5c96ce9e and
+  234ce1eb (documents, and comments in divsqrt_soak.c), 667d13d0 (the Makefile), then this entry's documents.
+  python/, hw/, host/src, host/include, mpfr_ieee.h and mpfr_check.c are the same at every one of them (git tree
+  hashes). At 667d13d0: the `make -n` comparisons and both soak tests, above, and the two golden-suite files that read
+  what changed after 3c0adb71 - python/tests/test_figure_extracts.py, which reads divsqrt_soak.c, and
+  test_external_gens.py, which scans host/Makefile - 59 passed in 0.9 s (MEASURED, desktop). Earlier, and not
+  repeated at 667d13d0: python/tests/test_hardcases.py with test_divsqrt.py (81 passed in 99 s, at 16:09; python/ is
+  the same at every commit); the stages `docs` (1ff07f6c's tree), `soak-quick` (1ff07f6c) and `divsqrt` (3c0adb71);
+  the desktop's MPFR build and its 490 runs, the whole square-root counts in WSL and `mpfr-check 24 7`'s comparison
+  (its copy's mpfr_ieee.h and mpfr_check.c are the committed files, `cmp`), all before the first commit. Never run in
+  this parcel: soak_chunk_check's `ignore`, the mpfr stage (by the lead's word, above), and every other stage of the
+  runner. On amd-arc-box: `counts` at 1ff07f6c, `card`, `quadmath` and `golden` at 3c0adb71 (below).
 
 **On amd-arc-box** (MEASURED by the lead with the parcel's box script, the round's records box/hxa/box_hxa.sh, each
 part a fresh clone of a bundle, the SHA and the content asserted apart, built `XRT=1 MPFR=1` against the pinned MPFR
@@ -24282,7 +24320,14 @@ checked against the box's sums: box/hxa/out-3c0adb71/):
   desktop's 12.3.0 (the study's 4.3) was one ulp off in a quarter of rne cases. The planted flip is caught in all 48
   cells. Under Logan's answer 4 quadmath joins the oracles for add, sub, mul, div and fma on this library, and not
   for the square root, whose flags fail.
-- **`golden`** at 3c0adb71 in a fresh clone: run by the lead after the parts above.
+- **`golden`** at 3c0adb71 (`verify/run.sh --only golden` in a fresh clone of the bundle, HEAD 3c0adb71, status
+  clean; run 20261026-160851-3c0adb71, 16:08:51 to 16:48:39; Python 3.12.3, pytest 9.1.1, mpmath 1.4.1): VERDICT
+  PASS, 5,507 passed and 3 skipped - the tree's known three, test_serial_replay.py:192 and :271 with no loopback
+  binary and test_softfloat.py:81, whose `math.fma` needs Python 3.13 - in 2,386.55 s; its four outputs checked
+  against the box's final sums (box/hxa/out-3c0adb71/golden/). At 16:42 the lead stopped the script's timeout wrapper
+  by PID, believing the run would pass its 2,700 s limit; the run ended inside it, so the script logged rc 137 and its
+  first sums hold a partial console, which the final sums supersede (the summary's LEAD lines say so). The suite
+  collects 5,510 tests, as on the desktop.
 
 **Known limits, recorded rather than fixed** (Logan's rule).
 - The card has run each mode for one to four seconds and one segment at length: the slice and window modes' steady
@@ -24300,3 +24345,5 @@ checked against the box's sums: box/hxa/out-3c0adb71/):
   build is the 0192ab11 object.
 - WSL's system MPFR is 4.1.0, below mpfr-check's floor of 4.2.0, so the mpfr stage does not build there; the soak's
   wide modes need only division and square root and build against it.
+- `MPFR` is a make variable, so an environment variable of that name set to anything but 0 or 1 makes every make of
+  host/ refuse by name, as the same value on the command line does; nothing in the repository sets one (`git grep`).
