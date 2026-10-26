@@ -77,8 +77,9 @@ the 155.9 billion encodings swept so far reached them (2).
 3. **Other finite spaces: HELD, with one addition.** Hard cases at fp128 and fp256 cost minutes an attribute and
    the tree's generator builds and verifies them at p = 113 (every family) and p = 237 (every family but F1, whose
    64-bit draw stops at p = 132; MEASURED); class items cost minutes; windows hours. Hard cases are the most valuable
-   per card-hour (BELIEVED, ranked in 5.4). Added: the fp32 slice exercises only exact paths for product, near sums,
-   rint's integer and scaleB; and **the FMA, add and mul have no sweep item at any format** (3.6).
+   per card-hour (BELIEVED, ranked in 5.4). Added: the fp32 slice exercises only exact paths for products, near
+   sums and scaleB (for rint the wide result is exact, but the adder rounds on the way to it, 3.1); and **the FMA,
+   add and mul have no sweep item at any format** (3.6).
 4. **The cost: AMENDED by measurement.** A 2^32 item takes 1.26 to 1.32 tile-hours an attribute at fp128 and 2.2
    to 2.4 at fp256 for division and root (COMPUTED from the probe's MEASURED rates); a quad runs four. Phase 1 is
    about a week with its weekend, not "a few weeks".
