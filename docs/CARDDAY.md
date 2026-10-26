@@ -1715,7 +1715,9 @@ not built. The fp64 keyed stream is 2^26 of 2^51 odd divisors. The oracle is the
 division under rmm is not checked.
 
 The tool's side is tested by `python3 hw/test_divsqrt_hard.py --baseline-tree DIR` (POSIX with
-make and a C compiler, about four minutes, a minute of it the three whole spaces counted): the
+make and a C compiler; about four minutes when it was written, a minute of it the three whole spaces
+counted, and on 2026-10-26 in WSL on the desktop about 6.5 minutes for these groups, 1 more for the
+wide modes' groups below and 3.7 for `unchanged`, which since then compares two builds): the
 segment tables and 53,104 operand lines against `python/hardcases.py`, the whole-space figures
 above, every mode and attribute over 173 slices of the segments' starts, ends and boundaries and
 312 across the spaces (each also accepted by the driver's own `parse_soak`), the refusals, a
