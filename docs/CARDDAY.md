@@ -1793,17 +1793,24 @@ holds the tool line for line (`hard-space`, `hard-dump` and `hard-count` take ev
 slice and window spaces as one segment, `fp32` and `L`, none skipped; the f64hard names as their fp64
 spaces). The whole spaces, counted by `hard-count` (the builders alone; MEASURED in WSL): sqrt128-hard
 1,745,011 cases and 2,711,437 skipped slots, sqrt256-hard 1,745,800 and 2,710,648, the longest run of
-skipped indices 5 in each, as at fp64. div128-hard and div256-hard take about 7.4 and 16 minutes of
-one core (COMPUTED from 2^20-index slices of each family, F0K nearly all of it) and are counted on
-amd-arc-box by the parcel's box script, its part `counts`, for the driver's whole-space rule. In those
-slices F0K skips 30.7 per cent of its slots at both precisions (1 - ln 2), F0D's first 2^20 indices
-exactly half and F0A's one index (MEASURED), as the fp64 space's do.
+skipped indices 5 in each, as at fp64; div128-hard 813,470,188 cases and 346,256,596 skipped slots,
+div256-hard 829,207,176 and 346,250,232, the longest run 2 in each, within the slices and across
+their boundaries (MEASURED on amd-arc-box by the lead with the parcel's box script, its part
+`counts`: 16 jobs at once, 99 s, at the parcel's first commit, whose builders are its last's; about
+7.4 and 16 minutes of one core each, COMPUTED from 2^20-index slices of each family, F0K nearly all of
+it). F0K skips 30.7 per cent of its slots at both precisions (1 - ln 2), F0D exactly half and F0A one
+index of its 8,388,608, as the fp64 space's do.
 
 **The controls.** `CFT_SOAK_SABOTAGE=1` flips the first library result of every batch, as in every
-mode here: the primary oracle names it. `CFT_SOAK_SABOTAGE=2` flips the first CPU narrow result of
-every batch instead: the ladder names it and the primary check passes. Refused by name: a range that
-is empty, reversed, past the space or not a number; an F0 or S0 case that fails its exact check
-(exit 2, no verdict).
+mode here: the primary oracle names it, and the batch's element-by-element re-check flips each
+element's result again (each is the first of a call of one), so every case of the batch is named
+and counted - `65536 value mismatches` for 65,536 cases. `CFT_SOAK_SABOTAGE=2` flips the first CPU
+narrow result of every batch instead, and its re-check each element's: the ladder names them
+(`MISMATCH <attribute> ladder ...`) and no primary `MISMATCH` line is printed, while the verdict's
+value mismatches, which carry both checks, are the ladder's - on the card, `sqrt256-f32 rne: 65536
+cases, 65536 value mismatches, ...` beside `ladder: ... 65536 value ... disagreements`. Refused by
+name: a range that is empty, reversed, past the space or not a number; an F0 or S0 case that fails
+its exact check (exit 2, no verdict).
 
 By hand, on a CPU's software backend or on the card:
 
@@ -1815,17 +1822,26 @@ By hand, on a CPU's software backend or on the card:
 **Tested** (hw/test_divsqrt_hard.py's groups `wide-agree`, `wide-run`, `wide-sabotage`, `wide-refuse`
 and `wide-plants`, in a second copy of host/ built with `MPFR=1`; and its `unchanged` group, which
 holds both builds' random, exhaustive and hard-case modes and the hard-case sub-commands to another
-tree's tool byte for byte). The card rates of these modes are not measured yet: the lead runs the
-parcel's box script (docs/VALIDATION.md, 2026-10-26, parcel HXa), and the stress driver does not name
-the items until parcel HXc.
+tree's tool byte for byte). **On the card** (MEASURED, the lead on amd-arc-box, the parcel's box
+script, part `card`, tile 1 of the quad image 4f9921a2, 2026-10-26): all 30 modes under rne for one to
+four seconds each, and sqrt128-f32 and div256-hard's F3b segment under the other four attributes, 0
+value and 0 flag mismatches in all 39 runs, and the three sabotage runs failed as they must. With the
+oracle in line the soak ran F3b, 16,777,136 cases, in 63 to 67 s an attribute: 0.26 M cases a second,
+about half the bare call's 0.542 M at fp256 (the study's 5.1), where the study's model gave about 0.7
+of it (the fp64 hard modes' 0.78, less 9 to 20 per cent for the oracle: ESTIMATE). The stress driver
+names the items from parcel HXc on.
 
 Known limits. The ladder sees the top bits of the wide result only, and nothing of the windows or
 the wide hard spaces, whose inputs are not narrow values. Flags are compared per batch, as
 everywhere here. The windows are at one exponent (x in [1, 2), the even parity), sixteen H of the
 2^80 and 2^204 there are. The wide hard cases are the fp64 families carried to p = 113 and 237 (F0
 at one exponent pair, the keyed stream 2^26 divisors). The oracle runs in line, one case after
-another, beside the call, so a soak waits for it (the study estimated about a tenth of the card time
-for division and root: ESTIMATE). A tool built without MPFR refuses the wide modes as an unknown op
+another, beside the call, so a soak waits for it: on the card the one long run measured, div256-hard's
+F3b, went at about half the bare call's rate (above), so phase 1's hours, which the study COMPUTED from
+the bare call (the hard modes at 0.78 of it) with a tenth more for the oracle, are likely too low
+until the oracle runs beside the call (the study's phase-2 build item); the slice and window modes'
+steady rates on the card are not measured (their runs were one to four seconds, the start-up in
+them). A tool built without MPFR refuses the wide modes as an unknown op
 rather than by a sentence of its own, because that build is the 0192ab11 object.
 
 ### The soak at a larger pass size (added 2026-10-20): how to build it, what it prints, what it gives up

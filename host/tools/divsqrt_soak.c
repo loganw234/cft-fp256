@@ -1045,10 +1045,15 @@ static int hard_count_cmd(const char *mode, const char *slo, const char *shi)
  *
  * THE CONTROLS. CFT_SOAK_SABOTAGE=1 flips the low bit of the first
  * library result of every batch, as in every mode here: the primary
- * oracle must name it. CFT_SOAK_SABOTAGE=2 flips the low bit of the
- * first CPU narrow result of every batch instead: the ladder must name
- * it (lines "MISMATCH <attribute> ladder ...") while the primary
- * check passes.
+ * oracle must name it, and the element-by-element re-check of a batch
+ * so flipped flips each element's result again (each is the first of
+ * a call of one), so every case of that batch is named and counted, as
+ * in recheck_batch above. CFT_SOAK_SABOTAGE=2 flips the low bit of the
+ * CPU's first narrow result of every batch instead, and its re-check
+ * each element's the same way: the ladder names them (lines "MISMATCH
+ * <attribute> ladder ...") and no primary MISMATCH line is printed. The
+ * verdict's value mismatches carry both checks, so under it they are
+ * the ladder's: every case of every batch it flipped.
  * ================================================================ */
 
 #ifndef __SIZEOF_INT128__

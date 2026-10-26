@@ -24253,14 +24253,42 @@ whether it was MEASURED here (with the run named), READ or COMPUTED.
 - **The runner's stages the change touches** (MEASURED, desktop, niced, beside the lead's gate run): `docs` ok in 452 s (run 20261026-152020, the tree of 1ff07f6c, whose documents 3c0adb71 does not change); `soak-quick` ok in 647 s (run 20261026-154845; the default tool, the same object at both commits); `divsqrt` ok (run 20261026-160336-3c0adb71: 34,384 cases, the library matching the model exactly), after a first attempt failed in 1 s for want of host/cft.dll, which the `libcft` stage builds and `--only divsqrt` skips in a fresh worktree. `golden` ran serially in one process at about a tenth of the suite in 14 minutes and was stopped by PID at the lead's word; it runs in a fresh clone on amd-arc-box instead. The suite's own new tests, `python/tests/test_hardcases.py`, passed directly (above).
 - **A regression of the first commit, found and fixed before merge.** hw/test_divsqrt_hard.py's pre-existing `plants` group anchors two plants on soak_hard's `hencodings++;` and on its all-skipped refusal test, each of which must occur exactly once in divsqrt_soak.c; the wide run loop at 1ff07f6c repeated both text for text, so the plants refused and the test exited 1 (MEASURED, WSL, after `build`, `agree`, `special`, `spread`, `refuse` and `sabotage` had passed: 7, 9, 3, 1, 38 and 13 checks). 3c0adb71 writes the two statements apart, inside `#ifdef CFT_SOAK_MPFR` (two lines; neither `hard-count` nor any builder), and `plants` passes, 25 checks (MEASURED, WSL, 204 s, from a copy of the tree with host/ cleaned). A scan of both soak tests' string literals against the source finds every plant anchor once now.
 
+**On amd-arc-box** (MEASURED by the lead with the parcel's box script, the round's records box/hxa/box_hxa.sh, each
+part a fresh clone of a bundle, the SHA and the content asserted apart, built `XRT=1 MPFR=1` against the pinned MPFR
+4.2.2 in 7 s with one warning line, the pre-existing `#pragma STDC FENV_ACCESS` at divsqrt_soak.c:79; every output
+checked against the box's sums: box/hxa/out-3c0adb71/):
+- **`counts`** (at 1ff07f6c, whose builders and `hard-count` are 3c0adb71's: the two commits differ in two lines of
+  the wide run loop; 16 jobs at once, 99 s): div128-hard 289,931,696 indices, 813,470,188 cases and 346,256,596 skipped
+  slots; div256-hard 293,864,352 indices, 829,207,176 cases and 346,250,232 skipped; in each, cases + skipped = 4 x the
+  indices, and the longest run of skipped indices 2, within the eight slices and across their seven boundaries.
+  These and the WSL figures above are parcel HXc's whole-space figures.
+- **`card`** (3c0adb71, tile 1 of the quad image 4f9921a2, 16:00:38 to 16:08:37): all 30 modes under rne (2^20 or
+  2^19 indices of the slices and windows, 2^18 of the division spaces' F0K and 2^20 of the square-root spaces' S0),
+  sqrt128-f32 under the other four attributes and div256-hard's whole F3b segment under all five: 39 runs, 0 value
+  and 0 flag mismatches, the ladder line with 0 disagreements wherever there is one; div256-hard's F3b, 16,777,136
+  cases an attribute, took 63.5 to 66.7 s, about 0.26 M cases a second against the bare call's 0.542 M (the study's
+  5.1). The three sabotage runs failed as they must: `CFT_SOAK_SABOTAGE=1` on sqrt256-f32 and on div128-hard under
+  rmm, every case of each flipped batch named (65,536 of 65,536 and 16,384 of 16,384, the element-by-element re-check
+  flipping each element's result again); `=2` on sqrt256-f32, "65536 value mismatches" on the verdict line beside
+  the ladder's "65536 value ... disagreements" and no primary MISMATCH line: the verdict's value mismatches carry
+  both checks, and the ladder's re-check flips each element's CPU result as the first control's re-check flips each
+  library result. (The tool's comment and docs/CARDDAY.md said "the primary check passes" until this was asked;
+  they now say exactly this.)
+- **`quadmath`** (the box's libquadmath 14.2.0-4ubuntu2~24.04.1, gcc 13.3.0, the pinned MPFR; `hx_quadmath.c`,
+  100,000 cases a cell): add, sub, mul, div and fmaq agree with MPFR in all 40 of their cells, values and inexact.
+  sqrtq's **values** agree in all 8 of its cells (0 value mismatches under each of the four attributes, random and
+  widened-fp32 operands alike), but its **inexact flag** disagrees in every inexact case (100,000 of 100,000 random,
+  99,987 to 99,991 of the widened ones): this library's sqrtq rounds correctly and raises no inexact - where the
+  desktop's 12.3.0 (the study's 4.3) was one ulp off in a quarter of rne cases. The planted flip is caught in all 48
+  cells. Under Logan's answer 4 quadmath joins the oracles for add, sub, mul, div and fma on this library, and not
+  for the square root, whose flags fail.
+- **`golden`** at 3c0adb71 in a fresh clone: run by the lead after the parts above.
+
 **Known limits, recorded rather than fixed** (Logan's rule).
-- No box run yet: the parcel wrote a box script for the lead (the round's records, box/hxa/box_hxa.sh), in three
-  parts each run alone - `counts`, the whole of div128-hard and div256-hard counted by 16 CPU jobs; `card`, every new
-  mode for a few seconds on tile 1 of the quad image and three sabotage controls on the card; `quadmath`,
-  docs/studies/hx/hx_quadmath.c against the box's libquadmath - each from a fresh clone of a bundle at the parcel's
-  commit, the SHA and the content asserted apart, built with `MPFR=1` against the pinned 4.2.2. Until it runs, the
-  two division spaces' whole counts, the modes' card rates with the oracle in line (the study's ESTIMATE, about a
-  tenth of the card time, stands) and the box's quadmath are not measured.
+- The card has run each mode for one to four seconds and one segment at length: the slice and window modes' steady
+  rates on the card, with the oracle in line, are not measured, and the one long run (div256-hard's F3b, below) went
+  at about half the bare call's rate where the study's model gave about 0.7 of it, so phase 1's COMPUTED hours are
+  likely too low until the oracle runs beside the call (the study's phase-2 build item).
 - The ladder sees the top bits of the wide result only (about 56 of fp128's 113 and of fp256's 237 over the whole
   slice, the study's 4.1), and nothing of the windows or the wide hard spaces, whose inputs are not narrow values.
 - Flags are compared per batch, as in every mode of the soak.
