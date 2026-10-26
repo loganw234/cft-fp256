@@ -54,7 +54,8 @@ the 155.9 billion encodings swept so far reached them (2).
 1. **The ladder: AMENDED.** By exhaustion at toy precisions, with exact arithmetic, the narrowed wide result equals
    the narrow one for the product and quotient from p' = 2p, the sum from 2p + 1 and the square root from 2p + 2,
    under all five attributes, the subnormal and overflow ranges included; one bit less fails under RNE and RMM,
-   while the directed attributes hold at every width (MEASURED, `hx_ladder.py`). At p = 24 on python/hardcases.py's hardest cases the same thresholds hold exactly: the quotient
+   while the directed attributes hold at every width (MEASURED, `hx_ladder.py`). At p = 24 on python/hardcases.py's
+   hardest cases the same thresholds hold exactly: the quotient
    fails at 47 and holds from 48, the root fails at 49 and holds from 50 (MEASURED). Every IEEE rung clears them.
    The flags need the right rule: the narrowing's own flags suffice for quotient and root; the sum needs the wide
    call's inexact OR-ed in (4.1). **It fails for the FMA** under RNE and RMM at every rung, fp256 included (one
@@ -73,7 +74,7 @@ the 155.9 billion encodings swept so far reached them (2).
    exact identities, the constructions themselves, and a residual check for root and quotient (MEASURED in Python).
 3. **Other finite spaces: HELD, with one addition.** Hard cases at fp128 and fp256 cost minutes an attribute and
    the tree's generator builds and verifies them at p = 113 (every family) and p = 237 (every family but F1, whose
-   64-bit draw stops at p = 131; MEASURED); class items cost minutes; windows hours. Hard cases are the most valuable
+   64-bit draw stops at p = 132; MEASURED); class items cost minutes; windows hours. Hard cases are the most valuable
    per card-hour (BELIEVED, ranked in 5.4). Added: the fp32 slice exercises only exact paths for product, near sums,
    rint's integer and scaleB; and **the FMA, add and mul have no sweep item at any format** (3.6).
 4. **The cost: AMENDED by measurement.** A 2^32 item takes 1.26 to 1.32 tile-hours an attribute at fp128 and 2.2
@@ -120,7 +121,8 @@ with the default generics but revision 8's own (READ, docs/BITSTREAM-BUILDS.md; 
 `FUSE_MUL`). So the two fp128 lanes and the fp256 unit have their own alignment shifter, per-64 leading-zero
 count, rounding increment and exponent logic, and their own multiplier columns (24-bit chunks, `MUL_PASSES=1`),
 and **none of the 155.9 billion swept encodings reached them** (COMPUTED from the catalog,
-`hw/card_stress_lib.py`'s `sweep_items()`: every tile item is an fp32 or fp64 operation). What the card has run at fp128 and fp256 is the battery: the selftest's replay of
+`hw/card_stress_lib.py`'s `sweep_items()`: every tile item is an fp32 or fp64 operation). What the card has run at
+fp128 and fp256 is the battery: the selftest's replay of
 the published vectors (1,072,415 cases a replay at all four formats, 536,765 of them transcendental; READ,
 docs/DETERMINISM.md and docs/COMPATIBILITY.md), the device-test matrices, the acceptance programs, the hard
 workloads at fp256 (READ, docs/VALIDATION.md, 2026-10-01) and the probe of this study.
@@ -251,11 +253,16 @@ A sample of every segment (all of the small ones, 300 of each large one) was bui
 `hardcases.verify`, the module's builder-independent check, at both precisions (MEASURED: 2,100 indices at fp128,
 7,392 cases, 12.0% of the sampled slots skipped; 1,800 at fp256, 6,212 cases, 13.7%; 600 a square-root space,
 29.7% and 31.2% skipped, S1 never and S0 about three in five, as the fp64 space's S0 does: 2,710,696 of its
-4,456,448 slots are skipped, READ `HARD_WHOLE`). **One family does not reach fp256** (MEASURED): `build_f1` draws its odd parts from one
-64-bit mix, `mix64(...) >> (64 - (h - 1))` with h = (p - 1) / 2, which is a negative shift for p > 131
-(`ValueError: negative shift count` at p = 237; READ python/hardcases.py). That is outside the module's stated
-domain (p = 24 and 53), so it is a build item (section 6), not a defect. The F0 builder alone takes 3.2 us an
-index at p = 113 and 3.6 at p = 237 in Python (MEASURED).
+4,456,448 slots are skipped, READ `HARD_WHOLE`). **Every space was built with the tree's generator as it is**
+(new `Space` objects from its own constructor, registered in the process's copy of its table, nothing in the
+module changed), **except one family at fp256** (MEASURED): `build_f1` draws its odd parts from one 64-bit mix,
+`mix64(...) >> (64 - (h - 1))` with h = (p - 1) // 2, which is a negative shift for p > 132 (`ValueError: negative
+shift count` at p = 237; READ python/hardcases.py). F1 at p = 237 was therefore not built and not worked around:
+its sample is absent from the 1,800 indices above, and its 4,194,304 indices are counted in the space's size as the
+fp64 layout gives them. That is outside the module's stated domain (division at p = 24 and 53, square root at
+53), so it is a build item (section 6), not a defect: the odd parts drawn from enough 64-bit words for p, and the
+module refusing an unsupported p by name instead of failing on a shift. The F0 builder alone takes about 3.5 us
+an index at both precisions in Python (MEASURED: 3.2 to 3.6 over two runs).
 
 **What a pass proves: the hard level.** The quotient or root is at the least distance its operands allow from a
 midpoint or a representable number (F0, S0), exact (F1), a tie in a subnormal strip (F3a: 113 and 237 strips
@@ -284,7 +291,8 @@ python/c5_class_enum.py's enumerators take the source format as a parameter; at 
 | 64-bit integers -> fp128, -> fp256 | host | 50,923 each | 1 | 50,923 |
 
 (k for the wide tile modes is taken here as the format's lanes, 2 and 1 (READ, docs/ARCHITECTURE.md), where the
-built fp64 modes' is 4: each operand is run in each lane, as `c5_class_enum.py`'s docstring explains.) **A pass proves L2, PLAUSIBLE**, resting on the structural
+built fp64 modes' is 4: each operand is run in each lane, as `c5_class_enum.py`'s docstring explains.) **A pass
+proves L2, PLAUSIBLE**, resting on the structural
 assumption SWP-A 4.3 states. **New against the covered items:** the wide adder's rounding at every integer
 position (rint), with walking ones over the kept and dropped bits; and **scaleB's 114 and 238 subnormal strips and
 the overflow block, the only tile items in this study that reach the wide formats' subnormal range for a
@@ -301,8 +309,9 @@ structural positions, and 39 witnesses) and host code: the host pool's.
   all five attributes, RMM included, since MPFR answers RMM (4.2) where the native oracle could not.
 - **The FMA's own structure**: the alignment shift of c against a b, the cancellation depth, the rounding
   position after normalisation, signed zeros of an exact cancellation. No sweep item covers the FMA at ANY
-  format; the published vectors' generator aims at exactly these strategies at all four formats, and the
-  selftest replays them on the card (READ, SWP-A 3.2). A class-level FMA enumeration over (shift, effective
+  format; the published vectors' generator aims at most of these (an alignment sweep of c across 2p + 8 either
+  side of the product, near-total cancellation, signed zeros and exact ties) at all four formats, and the selftest
+  replays them on the card (READ, SWP-A 3.2). A class-level FMA enumeration over (shift, effective
   operation, cancellation depth, dropped class, sign, walking one) would be about 6 x 10^5 cases an attribute at
   fp128 and 2.7 x 10^6 at fp256 (ESTIMATE: 3p shifts x 2 x 4 x 2 x (4 + p)); it needs a new generator and an
   oracle off the card's critical path (4.2), so it is phase 2.
@@ -312,7 +321,8 @@ structural positions, and 39 witnesses) and host code: the host pool's.
   compares are the quiet predicate plus the host's invalid; the two seeds sit inside every division and root
   program, whose fp32 slice reaches every cell. An fp32 slice through any of them is an exact identity at about
   4 tile-minutes an operation at fp128 and 6 to 7 at fp256 (ESTIMATE: the MEASURED elementwise rates of FMA, mul
-  and add, 17 to 19 and 10 to 12 M/s), cheap and of little value; the reductions' tree is the contract's own shape, not a space (READ, `mpfr_check.c`'s
+  and add, 17 to 19 and 10 to 12 M/s), cheap and of little value; the reductions' tree is the contract's own shape,
+  not a space (READ, `mpfr_check.c`'s
   header). None is in phase 1.
 
 ### 3.7 The spaces at a glance
@@ -470,10 +480,12 @@ it is BELIEVED (libgcc's soft-fp reads the SSE control word) and is a question f
 
 ### 4.4 The golden model
 
-python/cft_golden at fp128 and fp256, one call a case, on random normal operands: 6.9 to 12.3 us an operation
-(MEASURED, S3: fp128 add 8.7, mul 8.3, fma 11.6, div 9.8, sqrt 6.9 us; fp256 9.6, 9.0, 7.1, 12.3, 9.1). A 2^32 item
-is then about 12 core-hours, or under half an hour of the box's idle threads (COMPUTED, and the box's core and
-Python 3.12 differ from this desktop's: ESTIMATE). So the model is fast enough to arbitrate every disagreement and
+python/cft_golden at fp128 and fp256, one call a case, on random normal operands: 6 to 23 us an operation
+(MEASURED, S3, two runs 27 minutes apart: fp128 add 8.7 and 11.1, mul 8.3 and 20.0, fma 11.6 and 13.6, div 9.8 and
+9.3, sqrt 6.9 and 22.7 us; fp256 add 9.6 and 8.1, mul 9.0 and 6.0, fma 7.1 and 11.1, div 12.3 and 11.5, sqrt 9.1
+and 9.2; the desktop's load moved single figures by up to three times). A 2^32 item is then 7 to 27 core-hours, or
+under an hour of the box's idle threads (COMPUTED, and the box's core and Python 3.12 differ from this desktop's:
+ESTIMATE). So the model is fast enough to arbitrate every disagreement and
 to re-check a whole slice item in the host pool, but it is the contract's own lineage; by SWP-A's Q8 ("Yes") it
 stays the arbiter, not the oracle.
 
@@ -486,8 +498,9 @@ stays the arbiter, not the oracle.
   The hard case is its own oracle, as the brief says.
 - **The residual check.** A claimed root y is the RNE root of x exactly when (2y - 1)^2 < 4x < (2y + 1)^2 in scaled
   integers; a quotient q is checked the same way through a - q b. Verifying is cheaper than computing and shares no
-  code with MPFR or the model. MEASURED in Python (S3): 0.87 us a case at 113 bits and 1.11 at 237, every correct
-  root of 20,000 passing and every root one ulp high refused. In C it is a few limb multiplies (BELIEVED tens of ns).
+  code with MPFR or the model. MEASURED in Python (S3, two runs): 0.87 to 0.97 us a case at 113 bits and 1.11 to
+  1.29 at 237, every correct root of 20,000 passing and every root one ulp high refused. In C it is a few limb
+  multiplies (BELIEVED tens of ns).
 
 ---
 
@@ -585,7 +598,7 @@ the fp64 class modes' CPU rates (READ, nightly-1024 `status.txt`: conv64to32-cla
 0.62 M/s, cvtfrom64-class@cpu 1.50 M/s), and with an MPFR oracle in place of the native one at perhaps half that
 (ESTIMATE), the largest (fp256 -> fp128) is about a core-minute an attribute and all of them together a few
 core-minutes for five attributes (COMPUTED from the ESTIMATE): the pool's 8 workers finish them inside any night.
-The pool is also where the golden model could re-check a whole slice item, about 12 core-hours each (4.4), if
+The pool is also where the golden model could re-check a whole slice item, 7 to 27 core-hours each (4.4), if
 Logan wants a second lineage on the card's claims (question 6).
 
 ---
@@ -595,12 +608,13 @@ Logan wants a second lineage on the card's claims (question 6).
 Within the driver's design as it stands: new work is new tool modes and new catalog items, each an exhaustive
 `<lo> <hi> <attribute>` job with the ", E encodings, S skipped" verdict clause the coverage wave's modes print, so
 the driver, its rates per `op@image`, its reach and the scheduler that wraps it
-(docs/studies/SCHED-A-card-scheduler.md) need entries, not changes of design. Sizes are ESTIMATE, from the coverage wave's parcels of the same
+(docs/studies/SCHED-A-card-scheduler.md) need entries, not changes of design. Sizes are ESTIMATE, from the coverage
+wave's parcels of the same
 shape (HC, CL; READ, docs/VALIDATION.md).
 
 | order | parcel | what | size (ESTIMATE) |
 |---|---|---|---|
-| 1 | HXa, the wide division and root soak | `host/tools/divsqrt_soak.c`: an MPFR oracle taken from `host/tools/mpfr_check.c`'s emulation (format range and unbounded, RMM by construction), linked as `mpfr-check` is (`-lmpfr -lgmp`; the box's pinned MPFR, READ docs/VALIDATION.md); 16- and 32-byte operands; modes `sqrt{64,128,256}-f32` and `recip{64,128,256}-f32` over 2^32 with the native narrow result as a second check (R1, 4.1); `div{128,256}-hard` and `sqrt{128,256}-hard` with GMP builders, F1's odd parts drawn wider for p > 131 (3.4); the fp64 hard operands at fp128 and fp256; the four window modes, H by name; `hard-count` and `hard-dump` for every new space; python/hardcases.py given the wide spaces and held to the C tool line for line, as today | 1,000 to 1,400 lines of C, 150 of Python, a day or two |
+| 1 | HXa, the wide division and root soak | `host/tools/divsqrt_soak.c`: an MPFR oracle taken from `host/tools/mpfr_check.c`'s emulation (format range and unbounded, RMM by construction), linked as `mpfr-check` is (`-lmpfr -lgmp`; the box's pinned MPFR, READ docs/VALIDATION.md); 16- and 32-byte operands; modes `sqrt{64,128,256}-f32` and `recip{64,128,256}-f32` over 2^32 with the native narrow result as a second check (R1, 4.1); `div{128,256}-hard` and `sqrt{128,256}-hard` with GMP builders, F1's odd parts drawn from enough 64-bit words for p > 132 and python/hardcases.py refusing an unsupported p by name (3.4); the fp64 hard operands at fp128 and fp256; the four window modes, H by name; `hard-count` and `hard-dump` for every new space; python/hardcases.py given the wide spaces and held to the C tool line for line, as today | 1,000 to 1,400 lines of C, 150 of Python, a day or two |
 | 2 | HXc, the catalog | `hw/card_stress_lib.py`: an `Item` a mode and attribute, `OP_REACH` (tile), `PER_ENCODING`, `HARD_SPACE` and `HARD_WHOLE` from `hard-count`, `level`; the soak's build line with MPFR; the dry run's stand-ins and `hw/test_card_stress.py`'s cases | 200 to 400 lines with tests, a day |
 | 3 | HXb, the wide class modes | `host/tools/clause5_soak.c` and `python/c5_class_enum.py`: `rint{128,256}-class` and `scaleb{128,256}-class` (k = 2 and 1 lanes), the conversions' wide class modes (host), `rint{128,256}-f32` against the native fp32 rint (an exact identity), the MPFR oracle of `mpfr_check.c`'s clause-5 section; then its catalog entries | 700 to 1,000 lines of C, 100 of Python, a day or two |
 | 4 | HXd, the report and the page | a format named in each item's line and the page's class per tree (Logan's Q4: "Per tree"); the wide items reported beside the 71 | 50 to 150 lines, half a day |
@@ -643,7 +657,8 @@ decade; READ, SWP-A 6.4), which nothing here brings closer.
    reciprocal and rint at the wide formats, and sixteen windows: about 133 tile-hours, a week of nights with its
    weekend, after parcels HXa and HXc. *Recommended: yes, as ranked.*
 2. **The oracle at fp128 and fp256** (4.2). Neither the box's Xeon nor this desktop's CPU computes fp128 or fp256
-   in hardware, so the host-FPU rule (SWP-A Q8) cannot reach them. MPFR, by `mpfr_check.c`'s emulation against the box's pinned 4.2.2, would be the wide
+   in hardware, so the host-FPU rule (SWP-A Q8) cannot reach them. MPFR, by `mpfr_check.c`'s emulation against the
+   box's pinned 4.2.2, would be the wide
    items' oracle; the narrow native result a free second check on the slices (4.1, R1); a hard case its own
    oracle. *Recommended: yes; the golden model stays the arbiter of any disagreement.*
 3. **Naming the claims** (3, 4.1). Each item's pass stated with its space and level, for example "fp128 square
@@ -655,7 +670,7 @@ decade; READ, SWP-A 6.4), which nothing here brings closer.
 5. **Share against the random items** (5.2). As exhaustive items, the wide items take the existing 3-to-1 weight,
    which finishes phase 1 in about a week. *Recommended: no change to the driver's weights.*
 6. **A second lineage on the slices** (4.4, 5.5). The golden model could re-check a whole slice item in the host pool
-   in about 12 core-hours. *Recommended: not in phase 1: MPFR is the independent check, the model the arbiter.*
+   in 7 to 27 core-hours. *Recommended: not in phase 1: MPFR is the independent check, the model the arbiter.*
 7. **The FMA** (3.6, 4.2). The FMA, add and mul have no sweep item at any format, and at the wide formats their
    oracle needs threads of its own. *Recommended: phase 2, with HXe.*
 8. **Order against M2** (6). *Recommended: HXa and HXc before M2 resumes, since they are what the nights need; HXb
@@ -707,14 +722,15 @@ checks anything exits nonzero when a CHECK fails, and each has a control that mu
 |---|---|---|---|
 | `hx_ladder.py` | the ladder by exhaustion (A), conversions, rint and scaleB (B), detection (C), controls (D), p = 24 on hardcases' F0 and S0 (E) | `hx_ladder.out` | `python3 hx_ladder.py TREE` (264 s) |
 | `hx_fma_cex.py` | the FMA counterexample at fp64, fp128, fp256 | `hx_fma_cex.out` | `python hx_fma_cex.py` (under 1 s) |
-| `hx_spaces.py` | the class spaces (S1), the hard spaces built and verified at p = 113 and 237 (S2), the oracles' speeds (S3) | `hx_spaces.out` | `python3 hx_spaces.py TREE` (9 s) |
+| `hx_spaces.py` | the class spaces (S1), the hard spaces built and verified at p = 113 and 237 (S2), the oracles' speeds (S3) | `hx_spaces.out` (12:10), `hx_spaces.run1.out` (11:43, before its F1 check named the bound 132) | `python3 hx_spaces.py TREE` (10 s) |
 | `hx_iterates.py` | the significant bits of the division and root programs' deposits on widened fp32 inputs | `hx_iterates.out` | `python3 hx_iterates.py TREE` (1 s) |
 | `hx_probe.c`, `hx_probe_test.sh` | the card probe; its test on the software backend, with a sabotage control | `hx_probe_test.out` | `bash hx_probe_test.sh TREE WORK` (21 s, WSL) |
 | `box_hx_probe.sh` | the lead's box run of the probe (a fresh clone, SHA and content asserted, sums) | `box-out/` | the lead, 2026-10-26 11:17 box time (about 2 min) |
 | `hx_cost.py` | the rates, the model, a night's capacity, each item's hours, phase 1 | `hx_cost.out` | `python hx_cost.py` (under 1 s) |
 
-`box-out/` holds the box's summary, the five probe outputs, the two soak outputs and the box's sums, as the lead
-copied them, with one change: the home directory in the image's path is written `$HOME`, so that no personal path
-enters the tree. The sums (`box-out/SHA256SUMS.box`) are of the originals, which the round's records keep with the
-build log and the binary, neither committed; the probe's source on the box is `hx_probe.c` itself (sha256
+`box-out/` holds the box's outputs as the lead copied them (the summary, the five probe outputs, the two soak
+outputs and the box's sums), so edited: the home directory in the image's path is written `$HOME`, so that no
+personal path enters the tree, and nothing else is changed. The box's sums (`box-out/SHA256SUMS.box`, and
+box/hx-probe/SHA256SUMS.box in the round's records) are of the originals, which those records keep with the
+build log and the binary, neither committed here; the probe's source on the box is `hx_probe.c` itself (sha256
 021737ce...).

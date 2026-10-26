@@ -107,7 +107,7 @@ def s2(tree):
             print("  %-12s segment %s CANNOT BE BUILT at p = %d: %s" % (name, segname, sp.p, err))
         check("S2: %s - every sampled index's construction verified exactly" % name, bad is None, bad or "")
         if name == "div256-hard":
-            check("S2: div256-hard - the one segment that cannot be built is F1 (64-bit odd-part draw; p <= 131)",
+            check("S2: div256-hard - the one segment that cannot be built is F1 (64-bit odd-part draw; p <= 132)",
                   list(cannot) == ["F1"] and "negative shift count" in cannot["F1"])
         else:
             check("S2: %s - every segment can be built" % name, not cannot, "; ".join(cannot) if cannot else "")
