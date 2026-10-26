@@ -1891,7 +1891,7 @@ static int wide_soak(const wmode *wm, uint64_t lo, uint64_t hi, int mi)
             if (rc)
                 break;
         }
-        hencodings++;
+        hencodings += 1;          /* (not "++": hw/test_divsqrt_hard.py plants on soak_hard's line, which must stay unique) */
         ok = wide_base(wm, idx, a, b, na, nb);
         if (herr) {
             fprintf(stderr, "%s: the exact check of index %llu failed, or it built an operand "
@@ -1919,7 +1919,7 @@ static int wide_soak(const wmode *wm, uint64_t lo, uint64_t hi, int mi)
     }
     if (!rc && n)
         rc = wide_batch(wm, mi, n);
-    if (!rc && !cases && hi - lo >= HMIN_REFUSE) {
+    if (rc == 0 && cases == 0 && hi - lo >= HMIN_REFUSE) {     /* soak_hard's test, written apart: a plant's anchor */
         fprintf(stderr, "%s: every one of the %llu indices of [%llu, %llu) skipped - a run of skips "
                 "that long is a broken construction, not an empty region; refused\n", wm->mode,
                 (unsigned long long)(hi - lo), (unsigned long long)lo, (unsigned long long)hi);
