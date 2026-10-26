@@ -24160,3 +24160,113 @@ These come AFTER S3a's own box steps 1 to 3 (the scheduler suite in a fresh clon
 - The value ranking of the campaign is a judgement; nothing plants a defect at fp128 or fp256.
 - quadmath was measured on the desktop's libquadmath 12.3.0 only (`hx_quadmath.c`: add, sub, mul, div and fmaq agree with MPFR in all 40 cells, values and inexact, under four attributes; sqrtq is one ulp off in 24,944 and 25,241 of 100,000 RNE cases and agrees under the directed three; a planted flip caught in all 48 cells), not on the box's; the residual check in C is not measured.
 - The round's ledger corrects one of its own headings (typed before `date` ran), and the study's first commit on its branch (5951b566) gave F1's bound as p <= 131 where it is p <= 132 (corrected in b986b2ab).
+
+## 2026-10-26 - the wide division and square-root soak: thirty modes of divsqrt-soak at fp64, fp128 and fp256 against MPFR, built only with `MPFR=1`, the fp32 slice's ladder as a second check, the hard-case spaces at p = 113 and 237 in GMP; mpfr-check's emulation shared through one header; the default build the 0192ab11 object byte for byte (parcel HXa)
+
+The first build of the wide-format sweeps (docs/studies/HX-wide-sweeps.md, section 6, row 1; Logan's answers of
+2026-10-26 in docs/ROADMAP.md, "Decided 2026-10-26: the wide-format sweeps"). docs/CARDDAY.md, "The wide division and
+square-root modes", says what each mode is and the claim its pass makes, by space and level. Every figure below says
+whether it was MEASURED here (with the run named), READ or COMPUTED.
+
+**What was built.**
+- **The oracle, shared.** `host/tools/mpfr_ieee.h` now holds mpfr-check's IEEE emulation - the format descriptor, the
+  classifier, the exact conversion to MPFR, the RMM build from a truncation to p + 1 bits, the oracle (format range
+  and unbounded at the same precision, the flags by the oracle's own arithmetic), the agreement test and the rounding
+  of an exact value - moved out of `host/tools/mpfr_check.c` unchanged but for one thing: the attribute is two
+  parameters (the MPFR rounding, and whether it is RMM) where it was an index into mpfr_check.c's table. mpfr_check.c
+  keeps `oracle()` and `c5_round_into()` as one-line wrappers that pass that table's entries. A `diff` of the moved
+  text against 0192ab11's file shows only those parameter lines and comments (MEASURED). Run as the mpfr stage runs
+  it, `mpfr-check 24 7`, the tool built from 0192ab11's host/ and the tool built from this tree's print the same 157
+  lines byte for byte, sha256 28547638c4266bc5... (MEASURED, desktop, MSYS2 MPFR 4.2.2, niced: 739,234 cases and 0
+  value and 0 flag mismatches each, in 530 s and 1,113 s, the second beside the lead's own mpfr stage; both outputs in
+  the round's records, hxa/).
+- **The modes** (`host/tools/divsqrt_soak.c`, all inside `#ifdef CFT_SOAK_MPFR`): the fp32 slice widened exactly
+  through fp64, fp128 and fp256 square root and reciprocal (`sqrt{64,128,256}-f32`, `recip{64,128,256}-f32`, 2^32
+  encodings, k = 1); the low-bit windows (`{sqrt,recip}{128,256}-win-{ones,zeros,alt,key}`, x = 1.H L in [1, 2), the
+  low 32 fraction bits every pattern); div64-hard's and sqrt64-hard's own operands widened to fp128 and fp256
+  (`{div,sqrt}{128,256}-f64hard`, their spaces and skips); and the hard-case families at p = 113 and 237
+  (`{div,sqrt}{128,256}-hard`). Every one is `<lo> <hi> <attribute>` under all five attributes with the verdict
+  clause ", E encodings, S skipped", and `hard-space`, `hard-dump` and `hard-count` take every new mode word. The
+  oracle is MPFR at fp128 and fp256 and the CPU's double at fp64 (rmm riding its rne result: a square root or a
+  reciprocal of a widened fp32 value is never a tie). The slice and f64hard modes add the **ladder** (the study's
+  4.1, rule R1): the library's wide result rounded back to fp32 or fp64 under the same attribute and compared with
+  the CPU's own narrow operation, value and flags; not run under rmm for the division of fp64 operands, which has real
+  ties at fp64 and no native rmm (said on the run's stderr). `CFT_SOAK_SABOTAGE=1` flips the library's first result
+  of each batch, as in every mode; `CFT_SOAK_SABOTAGE=2` flips the CPU's first narrow result instead, for the ladder.
+- **The wide hard-case builders, in GMP**, the C tool's and `python/hardcases.py`'s alike. Three draws were one
+  64-bit word: F1's odd parts (which stopped at p = 132), F0K's keyed low bits (bits 64 to p - 14 of every divisor
+  zero past p = 77) and, found in this build, F3a's alternating tie pattern (masked to 64 bits by
+  `0x5555555555555555 & full` in both). Each is now as many words of splitmix64's stream from the old seed as p needs,
+  the first word the old draw, so the fp32 and fp64 spaces are unchanged operand for operand. python/hardcases.py
+  gains the four wide spaces, the slice's widening and the windows (the references the tool's dumps are held to), and
+  refuses by name a p (or bias) at which a family is not defined (F1 needs p >= 5, F0K p >= 14, S1 a bias of 510 or
+  more) where it used to fail on a shift.
+- **The build, option (b).** `make -C host divsqrt-soak MPFR=1` (with `MPFR_PREFIX=DIR` for the pinned MPFR of
+  `verify/build-mpfr-oracle.sh`; the system's without it) compiles the wide modes in and links MPFR and GMP, and
+  relinks every time so that a binary built without MPFR is never taken for one built with it; MPFR set to anything
+  but 0 or 1 is refused. Without it the recipe text is the one it was, and **the tool is the one it was: the object
+  compiled with the Makefile's flags is 0192ab11's byte for byte** (MEASURED: mingw64 gcc on the desktop, 19,419
+  bytes, `cmp`, both compiled under one file name), so tonight's driver build (`make -C host XRT=1 ... divsqrt-soak`)
+  is untouched and a wide mode word is refused by that build as an unknown op, exit 2. (a), a soak that needs MPFR to
+  build, was not chosen: every host and stage that builds the soak today would have needed MPFR, and on amd-arc-box
+  it would have linked the system's 4.2.1 silently rather than the pinned 4.2.2 (READ: polish/KL-known-limits.md,
+  KL-212), so the driver's line changes for the pin either way. Parcel HXc adds `MPFR=1` and the prefix to the
+  driver's line.
+
+**What was tested.**
+- **The existing modes are unchanged, byte for byte** (MEASURED, WSL cft2204, `python3 hw/test_divsqrt_hard.py
+  --only unchanged --baseline-tree DIR` with DIR = `git archive 0192ab11 host`, 223 s): 155 invocations - the random
+  modes on fixed seeds, sqrt32 over fixed ranges under all five attributes, div32-hard, div64-hard and sqrt64-hard at
+  every segment's start under every attribute each takes and across their spaces, the refusals, `CFT_SOAK_SABOTAGE=1`
+  and `=2`, the usage errors, and `hard-space`, `hard-dump` and `hard-count` of the three spaces - print the same
+  stdout and stderr and exit the same from 0192ab11's tool and this tree's, for its default build and again for its
+  `MPFR=1` build. The group gained the hard-case modes, the sub-commands, the second sabotage setting and the MPFR
+  build in this parcel.
+- **The new modes** (MEASURED, WSL cft2204, Ubuntu 22.04's libmpfr-dev, MPFR 4.1.0; hw/test_divsqrt_hard.py's new
+  groups, in a second copy of host/ built with `MPFR=1`): `wide-agree`, the tool's `hard-space` of all 30 mode words
+  and its `hard-dump` and `hard-count` of the four wide spaces (every segment's ends and boundaries, indices from a
+  fixed seed), of the slice and window spaces (zeros, subnormals, infinities and NaNs of both signs among them) and of
+  the f64hard names, equal to python/hardcases.py's line for line; `wide-run`, all 30 modes under all five attributes
+  over 202 slices, 1,010 runs in 22 s, each passing with every count as promised, its skips equal to the generator's
+  count, the ladder through every case where there is one, and the stress driver's own `parse_soak` accepting it
+  under its cover rule; `wide-sabotage`, `CFT_SOAK_SABOTAGE=1` failing all 30 under rne and rmm with operands named,
+  and `=2` failing every slice and f64hard mode by ladder lines alone; `wide-refuse`, a bad range refused by name for
+  each mode, and the default build refusing a wide mode word as an unknown op; `wide-plants`, a wide F0 construction
+  off by two refused by the tool's own exact check, a widening that drops a subnormal's last bit passing MPFR (the
+  library and MPFR see the same wrong input) and caught by the ladder and by the dump agreement, and an oracle that
+  rounds rtz as rne caught. 0 failed.
+- **On the desktop** (MEASURED, MSYS2 mingw64, MPFR 4.2.2, a scratch copy of host/, niced, 2 min 24 s with the build):
+  the `MPFR=1` build carries one warning line, the `#pragma STDC FENV_ACCESS` the default build has too; 490 short
+  runs, all 30 modes under all five attributes, pass; the first sabotage is caught in 36 of 36 runs and the second by
+  the ladder alone in 18 of 18. Software-backend rates, 65,536 cases with start-up: sqrt64-f32 0.56 s, sqrt128-f32
+  1.21 s, sqrt256-f32 1.74 s, recip128-f32 0.82 s, recip256-f32 1.21 s.
+- **The generator** (MEASURED, desktop): `python/tests/test_hardcases.py` 31 passed in 12.4 s, 12 of them new: the
+  wide spaces' tables, `verify` over a sample of every segment of the four, the widened draws equal to the one-word
+  draws for every width up to 64 bits on 306 seeds, every bit of the wide draws reached (F1's odd parts at p = 237 at
+  their full 118 bits, F0K's divisors carrying keyed bits above bit 63), the refusals by name, the slice's widening
+  against the values and, at fp64, against the host FPU's own widening, and the golden model's division and square
+  root at fp128 and fp256 against the exact arbiter on every family, all five attributes. The golden suite collects
+  5,510 tests (5,498 at 0192ab11).
+- **The whole spaces** (MEASURED, WSL, `hard-count`, the builders alone): sqrt128-hard 1,745,011 cases and 2,711,437 skipped slots in 25 s, sqrt256-hard 1,745,800 and 2,710,648 in 61 s, the longest run of skipped indices 5 in each, as at fp64 (1,745,752 and 2,710,696). div128-hard and div256-hard were not counted whole on the desktop: about 7.4 and 16 minutes of one core (COMPUTED from a 2^20-index slice of each family, F0K nearly all of it), so by the lead's word they are the box script's part `counts`, 16 jobs at once on amd-arc-box; its counting block was tested in WSL on [0, 8,000,000) of each space, the eight slices' sums equal to one count and a slice one case short caught (MEASURED). In the slices F0K skips 30.7 per cent of its slots at both precisions (1 - ln 2), F0D's first 2^20 indices exactly half and F0A's one index.
+- **The build's own checks** (MEASURED, WSL, `python3 host/tests/soak_chunk_check.py --only refuse,recipe,tools,unchanged --baseline-tree DIR`, DIR 0192ab11's host/, 236 s): 25 checks, 0 failed - make's refusals and the soak-chunk recipe as they were, the chunked tools as they were, and against 0192ab11 the default tools' 40 invocations the same bytes, the default goals' dry runs the same text, and both tools' objects compiled with the Makefile's flags byte for byte the baseline's (Linux gcc 11.4; the desktop's mingw gcc gave the same for divsqrt_soak.c).
+- **Not run: the mpfr stage**, by the lead's word: the direct before-and-after comparison of `mpfr-check 24 7` above is the stronger evidence for the move of its emulation, and the stage would be a third run of about 9 to 18 minutes on the desktop.
+
+**Known limits, recorded rather than fixed** (Logan's rule).
+- No box run yet: the parcel wrote a box script for the lead (the round's records, box/hxa/box_hxa.sh), in three
+  parts each run alone - `counts`, the whole of div128-hard and div256-hard counted by 16 CPU jobs; `card`, every new
+  mode for a few seconds on tile 1 of the quad image and three sabotage controls on the card; `quadmath`,
+  docs/studies/hx/hx_quadmath.c against the box's libquadmath - each from a fresh clone of a bundle at the parcel's
+  commit, the SHA and the content asserted apart, built with `MPFR=1` against the pinned 4.2.2. Until it runs, the
+  two division spaces' whole counts, the modes' card rates with the oracle in line (the study's ESTIMATE, about a
+  tenth of the card time, stands) and the box's quadmath are not measured.
+- The ladder sees the top bits of the wide result only (about 56 of fp128's 113 and of fp256's 237 over the whole
+  slice, the study's 4.1), and nothing of the windows or the wide hard spaces, whose inputs are not narrow values.
+- Flags are compared per batch, as in every mode of the soak.
+- The windows are at one exponent (x in [1, 2)), sixteen H in all; the wide hard cases are the fp64 families carried
+  to p = 113 and 237, F0 at one exponent pair and the keyed stream 2^26 divisors.
+- A hard case is its own oracle only as far as its exact self-check goes (every F0 and S0 case verified as built); its
+  predicted rounding is not compared as a third oracle beside MPFR.
+- A build without MPFR refuses the wide modes as an unknown op rather than by a sentence of its own, because that
+  build is the 0192ab11 object.
+- WSL's system MPFR is 4.1.0, below mpfr-check's floor of 4.2.0, so the mpfr stage does not build there; the soak's
+  wide modes need only division and square root and build against it.

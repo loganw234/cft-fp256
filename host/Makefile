@@ -847,10 +847,40 @@ formatoftest: all
 # both matter for the oracle to BE the hardware. Driven at scale by
 # hw/run-soak.sh; see the tool's header for what it can and cannot
 # validate.
+#
+# MPFR=1 (parcel HXa, 2026-10-26) compiles in the wide modes - fp64,
+# fp128 and fp256 division and square root against MPFR, through
+# tools/mpfr_ieee.h, mpfr-check's own emulation - and links MPFR and GMP:
+#
+#   make divsqrt-soak MPFR=1                       the system's MPFR
+#   make divsqrt-soak MPFR=1 MPFR_PREFIX=DIR       DIR/include, DIR/lib
+#                                                  (verify/_mpfr-prefix,
+#                                                  the pinned 4.2.2)
+#
+# Unset (or 0), the recipe is the one it was and the tool is the one it
+# was, object for object: a wide mode word is then an unknown op (exit 2).
+# Anything else is refused. Under MPFR=1 the tool is relinked every time,
+# so that a binary built without MPFR is never taken for one built with it
+# (the XRT=1 trap of CLAUDE.md); `divsqrt-soak hard-space div128-hard`
+# exits 0 only from a build with the wide modes.
+ifneq ($(filter-out 0 1,$(MPFR)),)
+  $(error MPFR=$(MPFR) is refused: MPFR=1 builds divsqrt-soak's wide modes against MPFR and GMP, MPFR=0 or unset builds the tool without them)
+endif
+SOAK_MPFR_DEFS := -DCFT_SOAK_MPFR $(if $(MPFR_PREFIX),-I$(MPFR_PREFIX)/include)
+SOAK_MPFR_LIBS := $(if $(MPFR_PREFIX),-L$(MPFR_PREFIX)/lib) -lmpfr -lgmp
+.PHONY: soak-mpfr-always
+soak-mpfr-always:
+ifeq ($(MPFR),1)
+divsqrt-soak$(EXE): tools/divsqrt_soak.c tools/mpfr_ieee.h libcft.a soak-mpfr-always
+	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) $(SOAK_MPFR_DEFS) -fno-math-errno \
+	  -frounding-math tools/divsqrt_soak.c libcft.a -o $@ \
+	  $(XRTLIBS) $(LDLIBS) $(SOAK_MPFR_LIBS) -lm
+else
 divsqrt-soak$(EXE): tools/divsqrt_soak.c libcft.a
 	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) -fno-math-errno \
 	  -frounding-math tools/divsqrt_soak.c libcft.a -o $@ \
 	  $(XRTLIBS) $(LDLIBS) -lm
+endif
 
 # The same oracle, aimed at the clause-5 completion set: rint, scaleb,
 # the conversions, logb, next, class and remainder against libm and
@@ -970,11 +1000,19 @@ $(SOAK_LIB): $(SOAK_OBJ)
 	rm -f $@
 	$(AR) rcs $@ $^
 
+ifeq ($(MPFR),1)
+$(SOAK_DIV): tools/divsqrt_soak.c tools/mpfr_ieee.h $(SOAK_LIB) soak-mpfr-always
+	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) $(SOAK_MPFR_DEFS) -fno-math-errno \
+	  -frounding-math -DCFT_CHUNK=$(SOAK_CHUNK) -DBATCH=$(SOAK_CHUNK) \
+	  tools/divsqrt_soak.c $(SOAK_LIB) -o $@ \
+	  $(XRTLIBS) $(LDLIBS) $(SOAK_MPFR_LIBS) -lm
+else
 $(SOAK_DIV): tools/divsqrt_soak.c $(SOAK_LIB)
 	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) -fno-math-errno \
 	  -frounding-math -DCFT_CHUNK=$(SOAK_CHUNK) -DBATCH=$(SOAK_CHUNK) \
 	  tools/divsqrt_soak.c $(SOAK_LIB) -o $@ \
 	  $(XRTLIBS) $(LDLIBS) -lm
+endif
 
 $(SOAK_C5): tools/clause5_soak.c $(SOAK_LIB)
 	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) -fno-math-errno \
@@ -1021,7 +1059,7 @@ clean-soak-chunk:
 # reaches fp128/fp256. Needs libmpfr/libgmp (mingw64 carries them as
 # gcc dependencies; Linux wants libmpfr-dev). See the tool's header
 # for the RMM construction and the flag-derivation policy.
-mpfr-check$(EXE): tools/mpfr_check.c libcft.a
+mpfr-check$(EXE): tools/mpfr_check.c tools/mpfr_ieee.h libcft.a
 	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) tools/mpfr_check.c libcft.a \
 	  -o $@ $(XRTLIBS) $(LDLIBS) -lmpfr -lgmp -lm
 

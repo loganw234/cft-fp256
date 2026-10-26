@@ -32,8 +32,29 @@ It builds the tool in a scratch copy of host/ (make divsqrt-soak, XRT=0) and run
              128-bit integer; and the prototype's division that computes 40 extra bits and rounds ties-to-even on
              them, found by the constructed set and not by as many of the soak's own random draws
   unchanged  (with --baseline-tree DIR, a directory holding the baseline's host/ - `git archive REV host | tar -x -C DIR`)
-             the random and exhaustive modes of that tree's tool and of this tree's, over the same invocations,
-             print the same bytes and exit with the same status
+             the random, exhaustive and hard-case modes of that tree's tool and of this tree's - its default build and
+             its MPFR=1 build both - over the same invocations, print the same bytes and exit with the same status;
+             so do `hard-space`, `hard-dump` and `hard-count` of the three fp32 and fp64 spaces
+
+The wide modes (parcel HXa: `make divsqrt-soak MPFR=1`, the fp64, fp128 and fp256 division and square root against
+MPFR), in a second copy of host/ built with MPFR=1; skipped by name where MPFR does not build:
+  wide-agree    `hard-space` of all 30 new mode words equals the generator's; `hard-dump` and `hard-count` of the four
+                wide hard spaces equal python/hardcases.py's line for line (every segment's ends, its boundaries,
+                indices from a fixed seed), and of the slice and window spaces the generator's widening and windows
+                (zeros, subnormals, infinities, NaNs and both signs among them); the f64hard names dump div64-hard's and
+                sqrt64-hard's own lines
+  wide-run      every new mode under all five attributes over short slices (the slice's specials, the windows' ends,
+                every hard segment's ends and boundaries): each passes, E = the slice, cases + S = k x E, S equal to
+                the generator's own count of skipped indices, the stress driver's parse_soak accepts it under its
+                cover rule, and the slice and f64hard modes print their ladder line with no disagreement
+  wide-sabotage CFT_SOAK_SABOTAGE=1 fails every new mode, naming operands of the slice (the primary oracle);
+                CFT_SOAK_SABOTAGE=2 fails every slice and f64hard mode by "MISMATCH <attribute> ladder" lines alone
+                (the second check), and the same slices pass without it
+  wide-refuse   a bad range refused by name for each new mode, and the default build (no MPFR) refusing a wide mode
+                word as an unknown op, exit 2, nothing run
+  wide-plants   a construction off by one in the wide F0 builder, refused by the tool's own exact check by name; a
+                widening that drops a subnormal's last bit, caught by the ladder and by the dump agreement; and an
+                oracle given the wrong attribute, caught
 
 Prints one line a group and a last line "divsqrt-hard test: N checks, F failed, S skipped".
 """
@@ -651,11 +672,286 @@ def group_plants(tool: Tool, built_tree: str, work: str) -> None:
           "(the set does not simply fail everything)", fail80 == 0, f"{fail80}")
 
 
+# --- the wide modes (parcel HXa) -------------------------------------------------------------------
+
+WIDE_HARD = [("div128-hard", 4), ("div256-hard", 4), ("sqrt128-hard", 1), ("sqrt256-hard", 1)]
+F64HARD = [("div128-f64hard", "div64-hard", 4), ("div256-f64hard", "div64-hard", 4),
+           ("sqrt128-f64hard", "sqrt64-hard", 1), ("sqrt256-f64hard", "sqrt64-hard", 1)]
+SLICE = [f"{op}{w}-f32" for op in ("sqrt", "recip") for w in (64, 128, 256)]
+WINDOWS = [f"{op}{w}-win-{h}" for op in ("sqrt", "recip") for w in (128, 256) for h in H.WIN_H]
+ATTRS5 = ["rne", "rtz", "rdn", "rup", "rmm"]
+# the fp32 slice's specials: zeros and subnormals of both signs, the subnormal/normal boundary, 1.0, the largest
+# finite and the infinities, the sNaN/qNaN boundary, the top of the negative NaNs
+SLICE_RANGES = [(0, 0x800), (0x007FFC00, 0x00800400), (0x3F7FFC00, 0x3F800400), (0x7F7FFC00, 0x7F800400),
+                (0x7FBFFC00, 0x7FC00400), (0x80000000, 0x80000800), (0xBF7FFC00, 0xBF800400),
+                (0xFF7FFC00, 0xFF800400), ((1 << 32) - 0x800, 1 << 32)]
+WINDOW_RANGES = [(0, 0x800), (0x7FFFFC00, 0x80000400), ((1 << 32) - 0x800, 1 << 32)]
+LADDER = re.compile(r"^  ladder: (\d+) of the (\d+) cases rounded to (fp32|fp64) and checked against the CPU's own, "
+                    r"(\d+) value and (\d+) flag disagreements$", re.M)
+
+
+def wide_space_k(mode: str) -> int:
+    for m, k in WIDE_HARD:
+        if m == mode:
+            return k
+    for m, _base, k in F64HARD:
+        if m == mode:
+            return k
+    return 1
+
+
+def wide_ref_space(mode: str):
+    """The generator's space a wide mode runs over (None for the slice and window modes, which skip nothing)."""
+    for m, _k in WIDE_HARD:
+        if m == mode:
+            return m
+    for m, base, _k in F64HARD:
+        if m == mode:
+            return base
+    return None
+
+
+def hard_slices(space: str, n: int = 160):
+    """(what, lo, hi): every segment's start and end and every boundary, n indices each, in a generator space."""
+    sp = H.SPACES[space]
+    out = []
+    for name, start, count in sp.segs:
+        m = min(count, n)
+        out.append((f"the start of {name}", start, start + m))
+        out.append((f"the end of {name}", start + count - m, start + count))
+    for (n1, s1, c1), (n2, s2, c2) in zip(sp.segs, sp.segs[1:]):
+        out.append((f"across {n1} / {n2}", s2 - min(n // 2, c1), s2 + min(n // 2, c2)))
+    return out
+
+
+def wide_slices(mode: str):
+    space = wide_ref_space(mode)
+    if space:
+        return hard_slices(space)
+    return [(f"[{lo:#x}, {hi:#x})", lo, hi) for lo, hi in (SLICE_RANGES if mode.endswith("-f32") else WINDOW_RANGES)]
+
+
+def wide_judge(mode, attr, lo, hi, rc, out, m):
+    """judge() for a wide mode: the skips against the generator's space where there is one, none elsewhere; and the
+    ladder line, where the mode has one, with every case of the slice through it and no disagreement."""
+    k = wide_space_k(mode)
+    space = wide_ref_space(mode)
+    if m is None:
+        return False, f"no verdict line: rc {rc}: {out[-300:]}"
+    cases, vm, fm, enc, skp = int(m.group(3)), int(m.group(4)), int(m.group(5)), int(m.group(6)), int(m.group(7))
+    if (m.group(1), m.group(2)) != (mode, attr):
+        return False, f"the verdict is for {m.group(1)} {m.group(2)}"
+    if rc != 0 or vm or fm:
+        return False, f"rc {rc}, {vm} value and {fm} flag mismatches: {out[:400]}"
+    if enc != hi - lo or cases + skp != k * enc:
+        return False, f"{cases} cases + {skp} skipped, {enc} encodings, for a slice of {hi - lo} at k = {k}"
+    want = k * (skipped_indices(space, lo, hi) if space else 0)
+    if skp != want:
+        return False, f"{skp} slots skipped where the generator's count is {want}"
+    ladder = mode.endswith("-f32") or mode.endswith("-f64hard")
+    lm = LADDER.search(out)
+    if ladder and not (mode.startswith("div") and attr == "rmm"):
+        if not lm or int(lm.group(1)) != cases or int(lm.group(2)) != cases or lm.group(4) != "0" or lm.group(5) != "0":
+            return False, f"the ladder line is missing or wrong: {lm.group(0) if lm else None!r}"
+    elif lm and int(lm.group(1)) != 0:
+        return False, f"a ladder ran where none should: {lm.group(0)!r}"
+    return True, ""
+
+
+def group_wide_agree(wtool: Tool) -> None:
+    bad = []
+    for mode in SLICE + WINDOWS + [m for m, _k in WIDE_HARD] + [m for m, _b, _k in F64HARD]:
+        rc, out, err = wtool.raw("hard-space", mode)
+        space = wide_ref_space(mode)
+        if space:
+            want = H.space_lines(space)
+            want[0] = want[0].replace(space, mode, 1)
+        else:
+            want = H.plain_lines("space", mode)
+        if rc != 0 or out != "\n".join(want) + "\n":
+            bad.append((mode, rc, out[:120]))
+    check("wide-agree: `hard-space` of all 30 new mode words is the generator's table (the f64hard names their fp64 "
+          "space's under their own name)", not bad and len(SLICE + WINDOWS) == 22, str(bad[:3]))
+    for mode, _k in WIDE_HARD:
+        sp = H.SPACES[mode]
+        rnd = random.Random(20261026)
+        ranges = []
+        for name, start, count in sp.segs:
+            n = min(count, 40)
+            ranges += [(start, start + n), (start + count - n, start + count)]
+            for _ in range(3):
+                lo = start + rnd.randrange(0, max(count - 12, 1))
+                ranges.append((lo, min(lo + 12, start + count)))
+        for (n1, s1, c1), (n2, s2, c2) in zip(sp.segs, sp.segs[1:]):
+            ranges.append((s2 - min(8, c1), s2 + min(8, c2)))
+        bad_d = bad_c = lines = 0
+        first = ""
+        for lo, hi in ranges:
+            rc, out, err = wtool.raw("hard-dump", mode, lo, hi)
+            want = "\n".join(H.dump_lines(mode, lo, hi)) + "\n"
+            lines += want.count("\n")
+            if rc != 0 or out != want:
+                bad_d += 1
+                if not first:
+                    a, b = out.splitlines(), want.splitlines()
+                    d = next((i for i in range(min(len(a), len(b))) if a[i] != b[i]), None)
+                    first = f"[{lo}, {hi}): rc {rc} {err[-100:]!r}, C {a[d] if d is not None else '-'!r} " \
+                            f"against Python {b[d] if d is not None else '-'!r}"
+            rc, out, err = wtool.raw("hard-count", mode, lo, hi)
+            if rc != 0 or out != "\n".join(H.count_lines(mode, lo, hi)) + "\n":
+                bad_c += 1
+        check(f"wide-agree: {mode}: `hard-dump` equals python/hardcases.py's dump line for line over {len(ranges)} ranges "
+              f"({lines:,} lines: every segment's ends and boundaries, indices from a fixed seed)", bad_d == 0,
+              f"{bad_d} ranges differ; first {first}")
+        check(f"wide-agree: {mode}: `hard-count` equals the generator's count over the same ranges", bad_c == 0,
+              f"{bad_c} ranges differ")
+    bad_p = []
+    for mode in SLICE + WINDOWS:
+        for lo, hi in (SLICE_RANGES if mode.endswith("-f32") else WINDOW_RANGES):
+            lo2, hi2 = lo, min(hi, lo + 300)
+            rc, out, err = wtool.raw("hard-dump", mode, lo2, hi2)
+            if rc != 0 or out != "\n".join(H.plain_lines("dump", mode, lo2, hi2)) + "\n":
+                bad_p.append((mode, lo2, rc))
+            rc, out, err = wtool.raw("hard-count", mode, lo2, hi2)
+            if rc != 0 or out != "\n".join(H.plain_lines("count", mode, lo2, hi2)) + "\n":
+                bad_p.append((mode, lo2, "count", rc))
+    check(f"wide-agree: the {len(SLICE + WINDOWS)} slice and window modes: `hard-dump` (the widened fp32 encodings - "
+          f"zeros, subnormals, infinities and NaNs of both signs among them - and the windows' x) and `hard-count` equal "
+          f"the generator's over {len(SLICE_RANGES)} or {len(WINDOW_RANGES)} ranges each", not bad_p, str(bad_p[:4]))
+    bad_f = []
+    for mode, base, _k in F64HARD:
+        for lo, hi in ((0, 50), (H.SPACES[base].total - 50, H.SPACES[base].total)):
+            for sub in ("hard-dump", "hard-count"):
+                a = wtool.raw(sub, mode, lo, hi)
+                b = wtool.raw(sub, base, lo, hi)
+                if a[0] != 0 or a[1] != b[1]:
+                    bad_f.append((mode, sub, lo))
+    check("wide-agree: the f64hard names' `hard-dump` and `hard-count` are div64-hard's and sqrt64-hard's own lines",
+          not bad_f, str(bad_f[:3]))
+
+
+def group_wide_run(wtool: Tool) -> None:
+    t0 = time.time()
+    n = bad = 0
+    for mode in SLICE + WINDOWS + [m for m, _k in WIDE_HARD] + [m for m, _b, _k in F64HARD]:
+        for what, lo, hi in wide_slices(mode):
+            for attr in ATTRS5:
+                rc, out, m = wtool.run(mode, lo, hi, attr)
+                ok, why = wide_judge(mode, attr, lo, hi, rc, out, m)
+                if ok:
+                    ok, why = driver_view(mode, attr, wide_space_k(mode), lo, hi, rc, out)
+                n += 1
+                if not ok:
+                    bad += 1
+                    check(f"wide-run: {mode} {attr} over {what} [{lo}, {hi})", False, why)
+    check(f"wide-run: all 30 new modes under all five attributes over their slices ({n} runs: the fp32 slice's specials, "
+          f"the windows' ends and middle, every hard segment's ends and boundaries): each passes, every count as promised, "
+          f"skips equal to the generator's, the ladder through every case where there is one, and the stress driver's "
+          f"parse_soak accepts each under its cover rule", bad == 0, f"{bad} of {n} failed")
+    print(f"      ({n} wide slices in {time.time() - t0:.0f} s)")
+
+
+def group_wide_sabotage(wtool: Tool) -> None:
+    bad1, bad2 = [], []
+    for mode in SLICE + WINDOWS + [m for m, _k in WIDE_HARD] + [m for m, _b, _k in F64HARD]:
+        what, lo, hi = wide_slices(mode)[-1] if mode.endswith("hard") else wide_slices(mode)[2 if mode.endswith("-f32")
+                                                                                              else 1]
+        for attr in ("rne", "rmm"):
+            rc0, out0, m0 = wtool.run(mode, lo, hi, attr)
+            rc, out, m = wtool.run(mode, lo, hi, attr, env={"CFT_SOAK_SABOTAGE": "1"})
+            vm = int(m.group(4)) if m else 0
+            named = re.findall(r"^  MISMATCH " + attr + r" a=0x([0-9a-f]+)", out, re.M)
+            if not (rc0 == 0 and rc == 1 and vm > 0 and named):
+                bad1.append((mode, attr, rc0, rc, vm, len(named)))
+            if mode.endswith("-f32") or mode.endswith("-f64hard"):
+                if mode.startswith("div") and attr == "rmm":
+                    continue
+                rc, out, m = wtool.run(mode, lo, hi, attr, env={"CFT_SOAK_SABOTAGE": "2"})
+                lad = re.findall(r"^  MISMATCH " + attr + r" ladder a=0x", out, re.M)
+                prim = re.findall(r"^  MISMATCH " + attr + r" a=0x", out, re.M)
+                lm = LADDER.search(out)
+                if not (rc == 1 and lad and not prim and lm and int(lm.group(4)) > 0 and m and
+                        int(m.group(4)) == int(lm.group(4))):
+                    bad2.append((mode, attr, rc, len(lad), len(prim)))
+    check("wide-sabotage: CFT_SOAK_SABOTAGE=1 (the library's first result of each batch flipped) fails all 30 new modes "
+          "under rne and rmm - exit 1, value mismatches, operands named - and the same slices pass without it", not bad1,
+          str(bad1[:4]))
+    check("wide-sabotage: CFT_SOAK_SABOTAGE=2 (the CPU's first narrow result of each batch flipped) fails every slice and "
+          "f64hard mode by the ladder alone - exit 1, 'MISMATCH <attribute> ladder' lines and no other, the verdict's "
+          "value mismatches the ladder's own count - so the second check can fail", not bad2, str(bad2[:4]))
+
+
+def group_wide_refuse(wtool: Tool, tool: Tool) -> None:
+    bad = []
+    for mode in SLICE + WINDOWS + [m for m, _k in WIDE_HARD] + [m for m, _b, _k in F64HARD]:
+        space = wide_ref_space(mode)
+        total = H.SPACES[space].total if space else 1 << 32
+        for args in ((5, 5), (9, 5), (0, total + 1), ("abc", 5), (-1, 5)):
+            rc, out, err = wtool.raw(mode, *args, "rne")
+            if not (rc == 2 and f"need 0 <= lo < hi <= {total} (the indices of {mode})" in err and " cases," not in out):
+                bad.append((mode, args, rc, err[-80:]))
+    check("wide-refuse: an empty, reversed, too long, garbage or negative range is refused by name for every new mode, "
+          "exit 2, nothing run", not bad, str(bad[:3]))
+    bad = []
+    for mode in ("sqrt128-f32", "div256-hard", "recip128-win-key", "div128-f64hard"):
+        rc, out, err = tool.raw(mode, 0, 64, "rne")
+        if not (rc == 2 and f"unknown op {mode}" in err and " cases," not in out):
+            bad.append((mode, rc, err[-80:]))
+        rc, out, err = tool.raw("hard-space", mode)
+        if not (rc == 2 and f"unknown hard-case mode {mode}" in err):
+            bad.append(("hard-space", mode, rc))
+    check("wide-refuse: the default build (no MPFR=1) refuses a wide mode word by name as an unknown op, and its "
+          "hard-space as an unknown hard-case mode, exit 2, nothing run", not bad, str(bad[:3]))
+    rc, out, err = wtool.raw("div128-hard", 0, 64)
+    check("wide-refuse: the MPFR build's usage names the wide modes after every line the default prints",
+          rc == 2 and "div32-hard|div64-hard <lo> <hi>" in err and "-win-{ones,zeros,alt,key}" in err
+          and "built with MPFR" in err, err[-300:])
+
+
+def group_wide_plants(wtree: str, work: str) -> None:
+    # (1) the wide F0 builder's dividend two too high: the tool's own exact check refuses by name
+    wp = plant_tool(wtree, work, "wide-f0", [("        mpz_add(wz_x, wz_r, wz_my);\n",
+                                               "        mpz_add(wz_x, wz_r, wz_my);\n        mpz_add_ui(wz_x, wz_x, 2);\n")],
+                    extra=["MPFR=1"])
+    if wp is None:
+        check("wide-plants: the wide F0 plant builds", False, "make failed")
+    else:
+        f0a = [s for n_, s, c in H.SPACES["div128-hard"].segs if n_ == "F0A"][0]
+        rc, out, m = wp.run("div128-hard", f0a, f0a + 64, "rne")
+        check("wide-plants: a wide F0 construction off by two is refused by the tool's own exact check, by name, exit 2, "
+              "no verdict", rc == 2 and "the exact check of index" in out and m is None, f"rc {rc}: {out[:240]}")
+    # (2) a widening that drops a subnormal's last bit: the ladder and the dump agreement both see it
+    wl = plant_tool(wtree, work, "wide-widen", [("        uint64_t m = ex ? frac | ((uint64_t)1 << N->man_w) : frac;\n",
+                                                 "        uint64_t m = ex ? frac | ((uint64_t)1 << N->man_w) : (frac > 1 ? frac & ~(uint64_t)1 : frac);\n")],
+                    extra=["MPFR=1"])
+    if wl is None:
+        check("wide-plants: the widening plant builds", False, "make failed")
+    else:
+        rc, out, m = wl.run("sqrt128-f32", 0, 0x800, "rne")
+        lm = LADDER.search(out)
+        rc2, dump, err = wl.raw("hard-dump", "sqrt128-f32", 0, 300)
+        check("wide-plants: a widening that drops a subnormal's last bit passes the MPFR check (the library and MPFR see "
+              "the same wrong input) and is caught by the ladder against the CPU's own fp32 root, and by the dump "
+              "agreement with the generator",
+              rc == 1 and lm is not None and int(lm.group(4)) > 0 and "MISMATCH rne ladder" in out
+              and dump != "\n".join(H.plain_lines("dump", "sqrt128-f32", 0, 300)) + "\n", f"rc {rc}: {out[:300]}")
+    # (3) the oracle under the wrong attribute (rtz asked, rne given): caught
+    wo = plant_tool(wtree, work, "wide-oracle", [("static const mpfr_rnd_t WMR[5] = { MPFR_RNDN, MPFR_RNDZ,",
+                                                  "static const mpfr_rnd_t WMR[5] = { MPFR_RNDN, MPFR_RNDN,")],
+                    extra=["MPFR=1"])
+    if wo is None:
+        check("wide-plants: the oracle plant builds", False, "make failed")
+    else:
+        rc, out, m = wo.run("recip128-win-key", 0, 2048, "rtz")
+        check("wide-plants: an oracle that rounds rtz as rne fails recip128-win-key under rtz, value mismatches named",
+              rc == 1 and m is not None and int(m.group(4)) > 0, f"rc {rc}: {out[:200]}")
+
+
 # --- the baseline ----------------------------------------------------------------------------------
 
-def group_unchanged(tool: Tool, base_dir: str, work: str) -> None:
+def group_unchanged(tool: Tool, base_dir: str, work: str, label: str = "") -> None:
     rev = os.path.basename(os.path.normpath(base_dir))
-    base = copy_tree(base_dir, os.path.join(work, "baseline"))
+    base = copy_tree(base_dir, os.path.join(work, "baseline" + label.replace(" ", "-")))
     old = build(base, f"the baseline {rev}")
     if old is None:
         check(f"unchanged: the baseline {rev} builds", False, "make failed")
@@ -669,9 +965,36 @@ def group_unchanged(tool: Tool, base_dir: str, work: str) -> None:
     for m in ("rne", "rtz", "rdn", "rup", "rmm"):
         cases += [("sqrt32", 0, 200000, m), ("sqrt32", 0x3F800000, 0x3F800000 + 100000, m),
                   ("sqrt32", 0x7F7FFF00, 0x7F800100, m)]
+    # the hard-case modes (parcel HXa added them here): every segment's start under every attribute each takes, and
+    # slices across the spaces
+    for mode, attrs, _k in MODES:
+        for name, start, count in H.SPACES[mode].segs:
+            for m in attrs:
+                cases.append((mode, start, start + min(count, 2000), m))
+        total = H.SPACES[mode].total
+        cases += [(mode, total // 3, total // 3 + 20000, "rne"), (mode, total - 5000, total, attrs[-1])]
     refusals = [("div32", 100, 1, "rmm"), ("div64", 100, 1, "rmm"), ("sqrt64", 100, 1, "rmm"), ("div32", 100, 1, "rtx"),
-                ("nosuchop", 100, 1, "rne")]
+                ("nosuchop", 100, 1, "rne"), ("div64-hard", 0, 64, "rmm"), ("div32-hard", 5, 5, "rne"),
+                ("sqrt64-hard", 0, 4456449, "rne")]
+    subs = []
+    for mode, _attrs, _k in MODES:
+        total = H.SPACES[mode].total
+        subs += [("hard-space", mode), ("hard-dump", mode, 0, 3000), ("hard-dump", mode, total - 3000, total),
+                 ("hard-count", mode, 0, 20000), ("hard-count", mode, total - 20000, total)]
+    subs += [("hard-space", "nosuch"), ("hard-dump", "div64-hard", 5, 5)]
     n = same = 0
+    for args in subs:
+        a = [str(x) for x in args]
+        outs = []
+        for t in (old, tool):
+            pr = subprocess.run(NICE + [t.path] + a, capture_output=True, text=True, timeout=600)
+            outs.append((pr.returncode, pr.stdout, pr.stderr))
+        n += 1
+        if outs[0] == outs[1]:
+            same += 1
+        else:
+            check(f"unchanged{label}: {' '.join(a)} prints the same bytes and exits the same", False,
+                  f"{outs[0][0]} vs {outs[1][0]}")
     for job, a1, a2, attr in cases + refusals:
         a = [job, str(a1), str(a2), attr]
         outs = []
@@ -682,10 +1005,12 @@ def group_unchanged(tool: Tool, base_dir: str, work: str) -> None:
         if outs[0] == outs[1]:
             same += 1
         else:
-            check(f"unchanged: {' '.join(a)} prints the same bytes and exits the same", False, f"{outs[0][0]} vs {outs[1][0]}")
-    for env in ({"CFT_SOAK_SABOTAGE": "1"},):
+            check(f"unchanged{label}: {' '.join(a)} prints the same bytes and exits the same", False,
+                  f"{outs[0][0]} vs {outs[1][0]}")
+    for env in ({"CFT_SOAK_SABOTAGE": "1"}, {"CFT_SOAK_SABOTAGE": "2"}):
         for job, a1, a2, attr in (("div32", 100000, 3, "rne"), ("div64", 100000, 3, "rup"), ("sqrt64", 100000, 3, "rdn"),
-                                  ("sqrt32", 0, 100000, "rmm")):
+                                  ("sqrt32", 0, 100000, "rmm"), ("div64-hard", 21250240, 21252240, "rne"),
+                                  ("sqrt64-hard", 262144, 266240, "rmm")):
             a = [job, str(a1), str(a2), attr]
             outs = []
             for t in (old, tool):
@@ -696,7 +1021,7 @@ def group_unchanged(tool: Tool, base_dir: str, work: str) -> None:
             n += 1
             same += outs[0] == outs[1]
             if outs[0] != outs[1]:
-                check(f"unchanged (sabotaged): {' '.join(a)}", False, "differs")
+                check(f"unchanged{label} (sabotaged {env['CFT_SOAK_SABOTAGE']}): {' '.join(a)}", False, "differs")
     # the argument errors print the usage, which is longer now by design: stdout and the exit status are the same and every
     # line the old usage printed is printed by the new
     for a in (["div32"], ["sqrt32", "0", "10"], ["div32", "100", "1"], []):
@@ -707,11 +1032,11 @@ def group_unchanged(tool: Tool, base_dir: str, work: str) -> None:
         n += 1
         same += ok
         if not ok:
-            check(f"unchanged (usage): {' '.join(a)}", False, f"{o.returncode} vs {nw.returncode}")
-    check(f"unchanged: {n} invocations of the random and exhaustive modes ({rev}'s tool and this tree's): the same stdout, "
-          f"stderr and exit status for all {same} that agree (the usage errors: the old lines all printed)", same == n,
-          f"{n - same} differ")
-    print(f"      ({n} invocations compared, {same} identical)")
+            check(f"unchanged{label} (usage): {' '.join(a)}", False, f"{o.returncode} vs {nw.returncode}")
+    check(f"unchanged{label}: {n} invocations of the random, exhaustive and hard-case modes and the hard-case "
+          f"sub-commands ({rev}'s tool and this tree's{label}): the same stdout, stderr and exit status for all {same} "
+          f"that agree (the usage errors: the old lines all printed)", same == n, f"{n - same} differ")
+    print(f"      ({n} invocations compared, {same} identical{label})")
 
 
 # ---------------------------------------------------------------------------------------------------
@@ -745,9 +1070,31 @@ def main() -> int:
                     n0, f0 = CHECKS, len(FAILS)
                     fn()
                     print(f"{name}: {CHECKS - n0} checks, {len(FAILS) - f0} failed")
+            wide = [g for g in ("wide-agree", "wide-run", "wide-sabotage", "wide-refuse", "wide-plants") if want(g)]
+            wtool = wtree = None
+            if wide or (rev and want("unchanged")):
+                # the wide modes' build (parcel HXa): MPFR=1, the system's MPFR (or CFLAGS/LDLIBS from the caller's make)
+                wtree = copy_tree(ROOT, os.path.join(work, "tree-mpfr"))
+                wtool = build(wtree, "this tree with MPFR=1", ["MPFR=1"])
+                if wtool is None:
+                    for g in wide:
+                        skip(g, "divsqrt-soak does not build with MPFR=1 here (no MPFR or GMP to link)")
+                    wide = []
+            for name in wide:
+                fn = {"wide-agree": lambda: group_wide_agree(wtool), "wide-run": lambda: group_wide_run(wtool),
+                      "wide-sabotage": lambda: group_wide_sabotage(wtool),
+                      "wide-refuse": lambda: group_wide_refuse(wtool, tool),
+                      "wide-plants": lambda: group_wide_plants(wtree, work)}[name]
+                n0, f0 = CHECKS, len(FAILS)
+                fn()
+                print(f"{name}: {CHECKS - n0} checks, {len(FAILS) - f0} failed")
             if rev and want("unchanged"):
                 n0, f0 = CHECKS, len(FAILS)
                 group_unchanged(tool, rev, work)
+                if wtool is not None:
+                    group_unchanged(wtool, rev, work, " (MPFR=1)")
+                else:
+                    skip("unchanged (MPFR=1)", "divsqrt-soak does not build with MPFR=1 here")
                 print(f"unchanged: {CHECKS - n0} checks, {len(FAILS) - f0} failed")
             elif want("unchanged") and only is not None:
                 skip("unchanged", "needs --baseline-tree DIR")
