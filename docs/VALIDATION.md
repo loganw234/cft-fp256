@@ -24158,5 +24158,5 @@ These come AFTER S3a's own box steps 1 to 3 (the scheduler suite in a fresh clon
 - The card rates are one probe of 2 s a row on one image, random normal operands, RNE; the soak's own wide rates are COMPUTED from the fp64 hard modes' efficiency (0.78 and 0.24), and the class modes' wide rates are ESTIMATE.
 - MPFR's cost in a soak is ESTIMATE (twice the READ figures, 1.4 for the box's core); gmpy2's MEASURED figures bound it from above only.
 - The value ranking of the campaign is a judgement; nothing plants a defect at fp128 or fp256.
-- quadmath's attributes and flags, and the residual check in C, are not measured.
+- quadmath was measured on the desktop's libquadmath 12.3.0 only (`hx_quadmath.c`: add, sub, mul, div and fmaq agree with MPFR in all 40 cells, values and inexact, under four attributes; sqrtq is one ulp off in 24,944 and 25,241 of 100,000 RNE cases and agrees under the directed three; a planted flip caught in all 48 cells), not on the box's; the residual check in C is not measured.
 - The round's ledger corrects one of its own headings (typed before `date` ran).

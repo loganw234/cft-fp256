@@ -71,7 +71,9 @@ the 155.9 billion encodings swept so far reached them (2).
    1.98 us an element a tile (MEASURED) against about 0.09 to 0.39 us of MPFR on a box core (ESTIMATE from READ
    figures), so one core a tile carries the oracle. For the FMA, mul and add MPFR is the bottleneck, at 1 to 3.3 box
    cores a tile (ESTIMATE): it needs threads of its own, a phase-2 build item. Cheap independent checks exist:
-   exact identities, the constructions themselves, and a residual check for root and quotient (MEASURED in Python).
+   exact identities, the constructions themselves, and a residual check for root and quotient (MEASURED in Python);
+   gcc's `__float128` agrees with MPFR for add, sub, mul, div and fma but its `sqrtq` is wrong in a quarter of RNE
+   cases on this desktop's libquadmath (MEASURED), so it is an oracle only per tested build.
 3. **Other finite spaces: HELD, with one addition.** Hard cases at fp128 and fp256 cost minutes an attribute and
    the tree's generator builds and verifies them at p = 113 (every family) and p = 237 (every family but F1, whose
    64-bit draw stops at p = 132; MEASURED); class items cost minutes; windows hours. Hard cases are the most valuable
@@ -474,9 +476,17 @@ full-precision oracle at about a nanosecond (READ, BENCHMARKS: 1.08 ns div, 1.70
 riding the RNE oracle (no ties) and RMM for division left to MPFR.
 
 At fp128 gcc's `__float128` is a second implementation of another lineage: add, mul and div at 15.4 to 21.9 ns,
-square root 466 ns and fma 811 ns, bit-identical to libcft on the benchmark's 4,096 RNE elements (READ, BENCHMARKS).
-Whether it honours the four native attributes through fesetround and raises the five flags was not measured here:
-it is BELIEVED (libgcc's soft-fp reads the SSE control word) and is a question for the build (8, question 4).
+square root 466 ns and fma 811 ns, bit-identical to libcft on the benchmark's 4,096 RNE elements in the sim
+container, Ubuntu 24.04 and gcc 13.3 (READ, BENCHMARKS). **Measured here against MPFR** (`hx_quadmath.c`, WSL
+cft2204, libquadmath 12.3.0 and gcc 11.4; 100,000 cases a cell, random normal operands and widened fp32 ones, each
+of the four attributes set by fesetround): add, sub, mul and div (libgcc's soft-fp) and `fmaq` agree with MPFR in
+all 40 cells, values and the inexact flag; **`sqrtq` is not correctly rounded under RNE**, 24,944 and 25,241 of
+100,000 results one ulp off (the first: sqrtq(0x1.f8f202p-16) gives ...75c4p-8 where MPFR gives ...75c3p-8), and
+agrees under RTZ, RDN and RUP (MEASURED; a planted one-bit flip in every 1,000th result is caught in all 48 cells).
+So the oracle is a property of a build: this library's square root is not one, the sim container's agreed on its
+4,096 elements, and the box's was not tested. A soak that used quadmath would pin the box's library and repeat this
+test first (8, question 4). The tool's own timings (42 to 52 ns for add, mul and div, 184 for sqrtq, 745 for
+`fmaq`) carry two more additions a call and are upper bounds only.
 
 ### 4.4 The golden model
 
@@ -664,9 +674,11 @@ decade; READ, SWP-A 6.4), which nothing here brings closer.
 3. **Naming the claims** (3, 4.1). Each item's pass stated with its space and level, for example "fp128 square
    root: every fp32 input, widened, all five attributes, bits and flags (L1 over the fp32 slice)", and never as
    "fp128 square root swept". *Recommended: yes, as SWP-A's Q5 answer already asks of L1 and L2.*
-4. **quadmath** (4.3). gcc's `__float128` is a second fp128 lineage at 15 to 22 ns for add, mul and div; whether it
-   honours the four attributes and raises the flags was not measured. *Recommended: HXa measures it; it joins the
-   oracles only if it does, and phase 1 does not wait for it.*
+4. **quadmath** (4.3). gcc's `__float128` is a second fp128 lineage at 15 to 22 ns for add, mul and div; on this
+   desktop's library (12.3.0) add, sub, mul, div and `fmaq` agree with MPFR under all four attributes, values and
+   inexact, and `sqrtq` is wrong in a quarter of RNE cases. *Recommended: HXa runs `hx_quadmath.c` against the box's
+   pinned library; quadmath joins the oracles for the operations that pass, never by default, and phase 1 does
+   not wait for it.*
 5. **Share against the random items** (5.2). As exhaustive items, the wide items take the existing 3-to-1 weight,
    which finishes phase 1 in about a week. *Recommended: no change to the driver's weights.*
 6. **A second lineage on the slices** (4.4, 5.5). The golden model could re-check a whole slice item in the host pool
@@ -704,7 +716,8 @@ decade; READ, SWP-A 6.4), which nothing here brings closer.
    formats (deeper strips, a keyed F0 beyond 2^26 divisors) is not studied; F1 cannot be built at p = 237 today (3.4).
 8. **The full-width values** (3.1) are measured on the golden model's program route on 400 inputs a format, which
    the tile computes bit for bit by the contract; which multiplier columns they toggle in the RTL is not measured.
-9. **quadmath's attributes and flags, and the residual check in C**, are not measured.
+9. **quadmath** was measured on this desktop's library only (12.3.0, 100,000 cases a cell; overflow and underflow
+   flags not compared), not on the box's; **the residual check in C** is not measured.
 10. **Nothing was built**, and the probe is scratch: a soak mode written to the design of section 6 may run slower
     than the bare call by more than the fp64 hard modes do.
 
@@ -726,6 +739,7 @@ checks anything exits nonzero when a CHECK fails, and each has a control that mu
 | `hx_iterates.py` | the significant bits of the division and root programs' deposits on widened fp32 inputs | `hx_iterates.out` | `python3 hx_iterates.py TREE` (1 s) |
 | `hx_probe.c`, `hx_probe_test.sh` | the card probe; its test on the software backend, with a sabotage control | `hx_probe_test.out` | `bash hx_probe_test.sh TREE WORK` (21 s, WSL) |
 | `box_hx_probe.sh` | the lead's box run of the probe (a fresh clone, SHA and content asserted, sums) | `box-out/` | the lead, 2026-10-26 11:17 box time (about 2 min) |
+| `hx_quadmath.c`, `hx_quadmath.sh` | gcc's `__float128` and libquadmath against MPFR, four attributes, values and inexact, with a sabotage control | `hx_quadmath.out` | `bash hx_quadmath.sh TREE WORK` (7 s, WSL) |
 | `hx_cost.py` | the rates, the model, a night's capacity, each item's hours, phase 1 | `hx_cost.out` | `python hx_cost.py` (under 1 s) |
 
 `box-out/` holds the box's outputs as the lead copied them (the summary, the five probe outputs, the two soak
