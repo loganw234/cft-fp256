@@ -46,9 +46,10 @@ Every figure is one of five kinds, and says which:
 
 **Yes: there is exhaustive-type work at the wide formats that finishes in about a week of nights.** Its first phase
 is about 133 tile-hours (COMPUTED from rates the card MEASURED today), against 311 tile-hours the sweep gives
-exhaustive items in two weeks (COMPUTED from nightly-1024's record). It matters more than its size: the tile's two
-fp128 lanes and its fp256 unit are their own instances of the FMA pipe (READ, docs/ARCHITECTURE.md), and none of
-the 155.9 billion encodings swept so far reached them (2).
+exhaustive items in two weeks (COMPUTED from nightly-1024's record, at a flat three-quarter share that is an
+assumption, 5.2). It matters more than its size: the tile's two fp128 lanes and its fp256 unit are their own
+instances of the FMA pipe (READ, docs/ARCHITECTURE.md), and none of the 155.9 billion encodings swept so far
+reached them (2).
 
 **The lead's four hypotheses:**
 1. **The ladder: AMENDED.** By exhaustion at toy precisions, with exact arithmetic, the narrowed wide result equals
@@ -58,15 +59,16 @@ the 155.9 billion encodings swept so far reached them (2).
    hardest cases the same thresholds hold exactly: the quotient
    fails at 47 and holds from 48, the root fails at 49 and holds from 50 (MEASURED). Every IEEE rung clears them.
    The flags need the right rule: the narrowing's own flags suffice for quotient and root; the sum needs the wide
-   call's inexact OR-ed in (4.1). **It fails for the FMA** under RNE and RMM at every rung, fp256 included (one
-   fp32 triple shows it, MEASURED), and for integer-to-float through a format narrower than the integer. For
-   roundToIntegral and scaleB it is an exact identity, so a full-precision check for free. **Its power is as the
-   lead said, sharper**: an error of 2^j wide ulps is seen with probability 2^(j - (p' - p)) a case (MEASURED at toy
-   size), so over all 2^32 inputs it sees an error only in the top 56 bits of fp128's 113 or fp256's 237. The other
-   limit is half right: the slice's inputs have zero low bits, but the programs' roots and quotients come out
-   full-width (105 to 113 significant bits at fp128, 218 to 237 at fp256, MEASURED), so the wide multiplier and
-   rounding unit are exercised; what the zero bits starve is the input's own path and, for division, the short
-   remainder that decides the rounding, which the windows and the hard cases cover.
+   call's inexact OR-ed in (4.1). **It fails for the FMA** under RNE and RMM at every rung, fp256 included (an
+   fp32 triple under RNE and its mirror under RMM show it, MEASURED), and for integer-to-float through a format
+   narrower than the integer. For roundToIntegral and scaleB it is an exact identity, so a full-precision check for
+   free. **Its power is as the lead said, sharper**: an error of 2^j wide ulps is seen with probability
+   2^(j - (p' - p)) a case (MEASURED at toy size), so over all 2^32 inputs it sees an error only in the top 56 bits
+   of fp128's 113 or fp256's 237. The other limit is half right: the slice's inputs have zero low bits, but the
+   programs' roots and quotients come out full-width (98 to 113 significant bits at fp128 and 218 to 237 at fp256,
+   the roots 105 to 113 and 228 to 237; MEASURED), so the wide multiplier and rounding unit are exercised; what the
+   zero bits starve is the input's own path and, for division, the short remainder that decides the rounding,
+   which the windows and the hard cases cover.
 2. **Full precision: HELD.** For division and square root the card is the bottleneck by five to twelve times: 1.06 to
    1.98 us an element a tile (MEASURED) against about 0.09 to 0.39 us of MPFR on a box core (ESTIMATE from READ
    figures), so one core a tile carries the oracle. For the FMA, mul and add MPFR is the bottleneck, at 1 to 3.3 box
@@ -76,10 +78,12 @@ the 155.9 billion encodings swept so far reached them (2).
    cases on this desktop's libquadmath (MEASURED), so it is an oracle only per tested build.
 3. **Other finite spaces: HELD, with one addition.** Hard cases at fp128 and fp256 cost minutes an attribute and
    the tree's generator builds and verifies them at p = 113 (every family) and p = 237 (every family but F1, whose
-   64-bit draw stops at p = 132; MEASURED); class items cost minutes; windows hours. Hard cases are the most valuable
-   per card-hour (BELIEVED, ranked in 5.4). Added: the fp32 slice exercises only exact paths for products, near
-   sums and scaleB (for rint the wide result is exact, but the adder rounds on the way to it, 3.1); and **the FMA,
-   add and mul have no sweep item at any format** (3.6).
+   64-bit draw stops at p = 132; MEASURED), though F0K, over nine tenths of each wide division space, draws its
+   keyed divisors' low bits from one 64-bit word, so above p = 77 they share a run of zero bits (READ, 3.4); class
+   items cost minutes; windows hours. Hard cases are the most valuable per card-hour (BELIEVED, ranked in 5.4).
+   Added: the fp32 slice exercises only exact paths for products, near sums and scaleB (for rint the wide result is
+   exact, but the adder rounds on the way to it, 3.1); and **the FMA, add and mul have no sweep item at any
+   format** (3.6).
 4. **The cost: AMENDED by measurement.** A 2^32 item takes 1.26 to 1.32 tile-hours an attribute at fp128 and 2.2
    to 2.4 at fp256 for division and root (COMPUTED from the probe's MEASURED rates); a quad runs four. Phase 1 is
    about a week with its weekend, not "a few weeks".
@@ -264,8 +268,14 @@ shift count` at p = 237; READ python/hardcases.py). F1 at p = 237 was therefore 
 its sample is absent from the 1,800 indices above, and its 4,194,304 indices are counted in the space's size as the
 fp64 layout gives them. That is outside the module's stated domain (division at p = 24 and 53, square root at
 53), so it is a build item (section 6), not a defect: the odd parts drawn from enough 64-bit words for p, and the
-module refusing an unsupported p by name instead of failing on a shift. The F0 builder alone takes about 3.5 us
-an index at both precisions in Python (MEASURED: 3.2 to 3.6 over two runs).
+module refusing an unsupported p by name instead of failing on a shift. **F0K is built at both precisions, but
+is thinner than its name** (found by the study's verifier; READ, `f0_divisor` in python/hardcases.py): the bits
+of its keyed divisor below the 12 cell bits are one 64-bit mix masked to p - 13 bits, so for p > 77 bits 64 to
+p - 14 of every F0K divisor are zero, 36 bits at p = 113 and 160 at p = 237 (COMPUTED from the code), silently:
+`verify` still passes, each case being a true closest approach for the divisor it has. F0K is 92.6% of
+div128-hard and 91.3% of div256-hard (COMPUTED from the table). A build item beside F1: the keyed draw widened to
+enough 64-bit words. The F0 builder alone takes about 3.5 us an index at both precisions in Python (MEASURED: 3.2
+to 3.6 over two runs).
 
 **What a pass proves: the hard level.** The quotient or root is at the least distance its operands allow from a
 midpoint or a representable number (F0, S0), exact (F1), a tie in a subnormal strip (F3a: 113 and 237 strips
@@ -373,10 +383,11 @@ overflow table. The least p' from which the value ladder holds at every larger p
 
 Under RTZ, RDN and RUP the **value** holds at every p' tried for every operation, the FMA included: a directed
 rounding to a finer grid and then to the coarser one in the same direction is the direct rounding (MEASURED, and
-the reason is one line: RD_N(RD_W(x)) = RD_N(x) because RD_N(x) is itself a W number at or below x). These are
-Figueroa's conditions for +, x, / and sqrt (BELIEVED: the literature's statement, recalled, not read here), and the
-toy tables meet them exactly: at p' = 2p + 1 the square root fails on 7 inputs under RNE and 14 under RMM at every
-p from 3 to 10, and on none at 2p + 2.
+the reason is one line: RD_N(RD_W(x)) = RD_N(x) because RD_N(x) is itself a W number at or below x). The
+per-operation thresholds are what the exhaustion measured: at p' = 2p + 1 the square root fails on 7 inputs under
+RNE and 14 under RMM at every p from 3 to 10, and on none at 2p + 2. To Figueroa I attribute only the classical
+sufficient condition, p' >= 2p + 2 for +, x, / and sqrt (BELIEVED: recalled, not read here), within which every
+threshold measured here lies.
 
 **At the real precision, on the hardest inputs** (MEASURED, part E): python/hardcases.py's closest-approach
 quotients (F0, 8,999 cases at p = 24) and the inputs nearest the squares of midpoints (S0, 5,833 cases), through W:
@@ -400,10 +411,13 @@ are the narrow operation's flags exactly.
 
 **Where it fails, and why it cannot be repaired by width.**
 - **FMA under RNE and RMM, at every rung** (MEASURED). a b can be an exact narrow midpoint and c smaller than half
-  an ulp of W at a b; W then returns the midpoint and the narrowing breaks the tie the wrong way. One fp32
-  triple does it at every rung: fma(97 x 2^40, 172961 x 2^36, 2^-149), where 97 x 172961 = 2^24 + 1; fp32 directly
-  gives (2^24 + 2) 2^76, and through fp64, fp128 or fp256 the wide result is a b exactly and narrows to 2^100
-  (`hx_fma_cex.py`). The directed attributes hold.
+  an ulp of W at a b; W then returns the midpoint and the narrowing breaks the tie by its rule, whichever side c
+  was on. Under RNE one fp32 triple does it at every rung: fma(97 x 2^40, 172961 x 2^36, 2^-149), where
+  97 x 172961 = 2^24 + 1; fp32 directly gives (2^24 + 2) 2^76, and through fp64, fp128 or fp256 the wide result
+  is a b exactly and narrows to 2^100, the even neighbour. Under RMM that triple agrees at every rung (the tie goes
+  away from zero, the side c put the exact value on), and its mirror, c = -2^-149, fails instead: fp32 directly
+  gives 2^100, and through every rung the tie narrows away to (2^24 + 2) 2^76 (`hx_fma_cex.py`, all four cells).
+  The directed attributes hold.
 - **Integer -> float through a W narrower than the integer** (MEASURED, part B, the 32,767 integers of magnitude
   below 2^14, at p = 4): 240, 48 and 16 mismatches under each of RNE and RMM at p' = 10, 12 and 13, none at 14,
   none under the directed attributes. At the real formats: int64 -> fp32
@@ -556,8 +570,13 @@ the card over six runs, sweep job-seconds quad 699,441, single 20,763, deep 18,8
 battery legs 176,699. **The sweep gets 1.84 tile-seconds a card-second.** A weekday night was 12.85 hours on the
 card (the mean of the five, 12.09 to 13.33), so **23.6 sweep tile-hours**; a weekend window (Friday 18:00 to Monday
 08:00, 61.4 hours on the card, ESTIMATE) gives **113**; two weeks (eight weekday nights and two weekends) **415**.
-The driver weights exhaustive items 3 to 1 over random ones (READ, docs/CARDDAY.md, `--sweep-weights`), so while any
-exhaustive item is uncovered the wide items would get about 311 of those 415.
+The driver weights exhaustive items 3 to 1 over random ones (READ, docs/CARDDAY.md, `--sweep-weights`), **per
+item**: `pick_item` in hw/card_stress.py takes the eligible item with the fewest slices served per unit of weight
+(READ), so the exhaustive items' share depends on how many of each kind are eligible. This study's flat three
+quarters is an **assumption** (ESTIMATE): under it, while any exhaustive item is uncovered the wide items would get
+about 311 of those 415. The study's verifier simulated the rule with the catalog section 6 designs (an item a mode
+and attribute, about 120 tile items) and found phase 1 worth 6.9 weekday nights against the flat share's 7.5 (READ,
+the round's records, ledger/verifier-VHX.md; not rerun here).
 
 ### 5.3 Each item's card time
 
@@ -583,9 +602,9 @@ oracle in line, about +10% (4.2, ESTIMATE), and the slices' native ladder check,
 
 The lead's guess (hypothesis 4) is **amended by measurement**: a 2^32 item at fp128 is 1.26 to 1.32 tile-hours an
 attribute for division and root, and 2.2 to 2.4 at fp256; the hard and class items are minutes; the whole of phase 1
-(section 7) is about 133 tile-hours, 7.5 weekday nights' worth at the exhaustive weight (a weekend is worth 4.8 of
-them), so about one week with its weekend, not "a few weeks" (COMPUTED from 5.2 and 5.3). The fp64 slice whole
-remains out (3.2).
+(section 7) is about 133 tile-hours, 7.5 weekday nights' worth at the flat exhaustive share assumed in 5.2 (6.9 in
+the verifier's simulation of the per-item rule; a weekend is worth 4.8 of them), so about one week with its weekend,
+not "a few weeks" (COMPUTED from 5.2 and 5.3). The fp64 slice whole remains out (3.2).
 
 ### 5.4 The campaign, ranked by value per card-hour
 
@@ -625,7 +644,7 @@ shape (HC, CL; READ, docs/VALIDATION.md).
 
 | order | parcel | what | size (ESTIMATE) |
 |---|---|---|---|
-| 1 | HXa, the wide division and root soak | `host/tools/divsqrt_soak.c`: an MPFR oracle taken from `host/tools/mpfr_check.c`'s emulation (format range and unbounded, RMM by construction), linked as `mpfr-check` is (`-lmpfr -lgmp`; the box's pinned MPFR, READ docs/VALIDATION.md); 16- and 32-byte operands; modes `sqrt{64,128,256}-f32` and `recip{64,128,256}-f32` over 2^32 with the native narrow result as a second check (R1, 4.1); `div{128,256}-hard` and `sqrt{128,256}-hard` with GMP builders, F1's odd parts drawn from enough 64-bit words for p > 132 and python/hardcases.py refusing an unsupported p by name (3.4); the fp64 hard operands at fp128 and fp256; the four window modes, H by name; `hard-count` and `hard-dump` for every new space; python/hardcases.py given the wide spaces and held to the C tool line for line, as today | 1,000 to 1,400 lines of C, 150 of Python, a day or two |
+| 1 | HXa, the wide division and root soak | `host/tools/divsqrt_soak.c`: an MPFR oracle taken from `host/tools/mpfr_check.c`'s emulation (format range and unbounded, RMM by construction), linked as `mpfr-check` is (`-lmpfr -lgmp`; the box's pinned MPFR, READ docs/VALIDATION.md); 16- and 32-byte operands; modes `sqrt{64,128,256}-f32` and `recip{64,128,256}-f32` over 2^32 with the native narrow result as a second check (R1, 4.1); `div{128,256}-hard` and `sqrt{128,256}-hard` with GMP builders, F1's odd parts drawn from enough 64-bit words for p > 132, F0K's keyed draw widened likewise for p > 77, and python/hardcases.py refusing an unsupported p by name (3.4); the fp64 hard operands at fp128 and fp256; the four window modes, H by name; `hard-count` and `hard-dump` for every new space; python/hardcases.py given the wide spaces and held to the C tool line for line, as today | 1,000 to 1,400 lines of C, 150 of Python, a day or two |
 | 2 | HXc, the catalog | `hw/card_stress_lib.py`: an `Item` a mode and attribute, `OP_REACH` (tile), `PER_ENCODING`, `HARD_SPACE` and `HARD_WHOLE` from `hard-count`, `level`; the soak's build line with MPFR; the dry run's stand-ins and `hw/test_card_stress.py`'s cases | 200 to 400 lines with tests, a day |
 | 3 | HXb, the wide class modes | `host/tools/clause5_soak.c` and `python/c5_class_enum.py`: `rint{128,256}-class` and `scaleb{128,256}-class` (k = 2 and 1 lanes), the conversions' wide class modes (host), `rint{128,256}-f32` against the native fp32 rint (an exact identity), the MPFR oracle of `mpfr_check.c`'s clause-5 section; then its catalog entries | 700 to 1,000 lines of C, 100 of Python, a day or two |
 | 4 | HXd, the report and the page | a format named in each item's line and the page's class per tree (Logan's Q4: "Per tree"); the wide items reported beside the 71 | 50 to 150 lines, half a day |
@@ -639,8 +658,8 @@ HXd the report. Every parcel keeps the soaks' sabotage control: a planted flip m
 ## 7. The plan
 
 **Phase 1, about 133 tile-hours** (COMPUTED from 5.3 with the oracle's +10%, ESTIMATE): 120.5 tile-hours of items,
-7.5 weekday nights' worth of the sweep at the exhaustive weight, so about one week with its weekend once HXa and
-HXc are merged, and well inside two weeks of nights (311 tile-hours at that weight, 5.2):
+7.5 weekday nights' worth of the sweep at the flat exhaustive share assumed in 5.2, so about one week with its
+weekend once HXa and HXc are merged, and well inside two weeks of nights (311 tile-hours at that share, 5.2):
 1. the hard cases at fp128 and fp256, division and square root, five attributes (4.3 tile-hours);
 2. div64-hard's and sqrt64-hard's operands through fp128 and fp256 (4.2);
 3. the class items of rint and scaleB at fp128 and fp256 (1.4), and the wide conversions' class items in the host
@@ -681,7 +700,7 @@ decade; READ, SWP-A 6.4), which nothing here brings closer.
    pinned library; quadmath joins the oracles for the operations that pass, never by default, and phase 1 does
    not wait for it.*
 5. **Share against the random items** (5.2). As exhaustive items, the wide items take the existing 3-to-1 weight,
-   which finishes phase 1 in about a week. *Recommended: no change to the driver's weights.*
+   applied per item, which finishes phase 1 in about a week. *Recommended: no change to the driver's weights.*
 6. **A second lineage on the slices** (4.4, 5.5). The golden model could re-check a whole slice item in the host pool
    in 7 to 27 core-hours. *Recommended: not in phase 1: MPFR is the independent check, the model the arbiter.*
 7. **The FMA** (3.6, 4.2). The FMA, add and mul have no sweep item at any format, and at the wide formats their
@@ -714,7 +733,8 @@ decade; READ, SWP-A 6.4), which nothing here brings closer.
 6. **The value ranking is a judgement** (BELIEVED). SWP-A's planted-defect measurement supports hard cases at fp64;
    nothing here plants a defect at fp128 or fp256.
 7. **The hard-case families are carried to p = 113 and 237 unchanged.** Whether other families matter more at the wide
-   formats (deeper strips, a keyed F0 beyond 2^26 divisors) is not studied; F1 cannot be built at p = 237 today (3.4).
+   formats (deeper strips, a keyed F0 beyond 2^26 divisors) is not studied; F1 cannot be built at p = 237 today,
+   and F0K's keyed divisors share a run of zero bits above p = 77 (3.4).
 8. **The full-width values** (3.1) are measured on the golden model's program route on 400 inputs a format, which
    the tile computes bit for bit by the contract; which multiplier columns they toggle in the RTL is not measured.
 9. **quadmath** was measured on this desktop's library only (12.3.0, 100,000 cases a cell; overflow and underflow
@@ -735,7 +755,7 @@ checks anything exits nonzero when a CHECK fails, and each has a control that mu
 | file | what | output | run |
 |---|---|---|---|
 | `hx_ladder.py` | the ladder by exhaustion (A), conversions, rint and scaleB (B), detection (C), controls (D), p = 24 on hardcases' F0 and S0 (E) | `hx_ladder.out` | `python3 hx_ladder.py TREE` (264 s) |
-| `hx_fma_cex.py` | the FMA counterexample at fp64, fp128, fp256 | `hx_fma_cex.out` | `python hx_fma_cex.py` (under 1 s) |
+| `hx_fma_cex.py` | the FMA counterexamples at fp64, fp128, fp256: a triple under RNE, its mirror under RMM | `hx_fma_cex.out` | `python hx_fma_cex.py` (under 1 s) |
 | `hx_spaces.py` | the class spaces (S1), the hard spaces built and verified at p = 113 and 237 (S2), the oracles' speeds (S3) | `hx_spaces.out` (12:10), `hx_spaces.run1.out` (11:43, before its F1 check named the bound 132) | `python3 hx_spaces.py TREE` (10 s) |
 | `hx_iterates.py` | the significant bits of the division and root programs' deposits on widened fp32 inputs | `hx_iterates.out` | `python3 hx_iterates.py TREE` (1 s) |
 | `hx_probe.c`, `hx_probe_test.sh` | the card probe; its test on the software backend, with a sabotage control | `hx_probe_test.out` | `bash hx_probe_test.sh TREE WORK` (21 s, WSL) |
