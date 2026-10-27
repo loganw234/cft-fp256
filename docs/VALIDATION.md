@@ -24347,3 +24347,31 @@ checked against the box's sums: box/hxa/out-3c0adb71/):
   wide modes need only division and square root and build against it.
 - `MPFR` is a make variable, so an environment variable of that name set to anything but 0 or 1 makes every make of
   host/ refuse by name, as the same value on the command line does; nothing in the repository sets one (`git grep`).
+
+## 2026-10-26 (afternoon) - the lead's: the desktop's gate after its toolchains were reinstalled; the audit stage's one failure traced to the interpreter and its control fixed; cardstress failing only by the desktop's load; lang-rust's known limit; parcel HXa's box runs (the lead; verifiers VHXa, VHL)
+
+**Why the gate ran.** A deletion in the desktop's home folder on 2026-10-26 took several toolchains and the lead's scratch scripts; the repository was not touched. The lead restored them to the versions the round's ledgers recorded (Miniconda's Python 3.12 with mpmath 1.3.0, gmpy2 2.2.1, numpy 2.2.6 and pytest; Python 3.13.5 repaired; rustup's stable toolchain, Julia and R at their old places, the PATH unchanged). Then, at Logan's "get all the tests passing again", the gate.
+
+**The gate** (`verify/run.sh --budget gate` at 78d5b526, run 20261026-112931-78d5b526, from 11:29 at the desktop's own load): 45 stages, 42 ok, 3 failed, with the known inner skips (golden 3, generated 1, programs 1).
+- **lang-rust:** the known limit recorded here since 2026-09-06. MSVC rustc cannot link the MinGW-built libcft.a (`___chkstk_ms`); the stage passes on Linux and in CI. Rust's GNU host toolchain is Logan's decision, and nothing was installed for it.
+- **cardstress, by the desktop's load** (MEASURED). It failed twice, in different short-window checks each time: deadline, rotation, telemetry and internal from 15:17 to 15:38, while a parcel's builds and tests ran beside it; then chunk's random-short scenario from 16:27 to 16:39. Each group passed alone on a quieter desktop (33 checks, 0 failed; 44 checks, 0 failed). The whole stage passed on the run's resume: ok, 656 s, 12 inner skips (17:02 to 17:13).
+- **audit, by the interpreter.** It failed twice on one figure of test_cert.py's test_a_huge_lanes_costs_nothing_and_is_refused_by_name, the same case and nearly the same bytes ("three, full, states: 1993087 bytes at lanes 1000000000000, 70892 at 10"; the first run's log, read before a resume overwrote it, gave 1992936 against 70572). It was deterministic in the stage's whole process, and the shadowed section run alone passed.
+  - **The cause, MEASURED:** a probe of the stage's own process (audit_check's main, tracemalloc at 25 frames from the test's first measured call). One call peaked at 2,014,765 bytes against 66 to 86 KB for the other 23. Its extra 1,923,480 bytes were allocated at audit_check.py:478, the shadow's own file write, inside pathlib's sys.intern of each path part.
+  - **The mechanism (verifier VHL, MEASURED in the gate's CPython 3.12.15):** interned strings die with their paths, but a dict gives no slot back for a deleted entry. So the table of interned strings is rebuilt when its slots run out, the new table allocated before the old is freed: 1,922,416 bytes at 2^17 slots. The audit itself is flat in every call.
+  - **The control fixed** (the lead's very small fix, branch fix-huge-lanes-flat, merged at 7d987bf8). The four tests that measure this way take each figure as the least of three audits at counts of their own: 10, 20, 40; 10^12, 2 x 10^12, 4 x 10^12; 2^63 - 1, 2^62 - 1, 2^61 - 1. Every audit is still held to its refusal and its place.
+  - **The fix's limit:** a cost paid at every count, cached per count or per power of two, is in all three audits. A cost at one exact count, or a cache keyed coarser than a power of two, is not. docs/CERTIFICATES.md's description of the controls says so.
+  - **VHL's send-back:** VHL (Sonnet) found the fix's first account of the mechanism false ("3.12 keeps them all"), a wrong answer with the logic standing. Corrected in 6b07c5ac, with the counts made to double; its re-check found no regression and no wrong answer. Its plants and the lead's: a cost by lanes, 4 of 4 tests failed; the real rebuild forced into one audit at five places, 4 passed at each.
+  - **At 6b07c5ac:** libcft ok 688 s; audit ok 415 s, 17,990 checks, 0 failed (run 20261026-181813-6b07c5ac).
+- **Outside the budget, for the other toolchains:** node ok 1,496 s; wasm ok 1,195 s, nothing skipped.
+- **So the desktop stands restored but for lang-rust.**
+
+**Two slips of the lead's, recorded:**
+- **A resume reran golden.** `verify/run.sh --resume` reruns any stage that passed with inner skips: such a stage writes no .ok, so that a resume never serves its skips from cache. The lead's first resume therefore started golden again, which takes about 50 minutes on this desktop. The lead stopped it by PID after 48 s. It had overwritten the run's golden.log and generated.log, whose verdicts stand in the run's report.txt (golden ok 2,970 s, generated ok 117 s). The later resumes named their stages with --only.
+- **A timeout killed for nothing.** On the box, the golden stage at HXa's commit now takes about 40 minutes: 2,387 s, 5,507 passed and the known 3 skipped. It took about 13 minutes on 2026-10-06 and 10-12. Reading pytest's percentage, the lead believed the run would pass its script's 45-minute limit, and killed the timeout wrapper by PID at 33.5 minutes. The run ended 5 minutes inside the limit, so the kill changed nothing but the script's logged rc (137) and a first sums file, superseded by the final sums.
+
+**Parcel HXa's box runs** (box_hxa.sh and box_hxa_golden.sh, the lead's copies equal to the box's sums, in the round's records). HXa's entry above gives the results:
+- counts at 1ff07f6c;
+- card, quadmath and golden at 3c0adb71;
+- a first golden run at 1ff07f6c stopped by PID after about 50 s, when HXa reported a regression at that commit.
+
+**Night 1026** began at 18:00 from 49d7c3b7's bundle, over the whole 125-item catalog with `--earlier-runs /data/card-stress-1016`. HXa's modes join the nights after parcel HXc, which began at 18:42 from 7d987bf8.
