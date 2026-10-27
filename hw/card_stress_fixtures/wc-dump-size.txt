@@ -1,0 +1,13 @@
+# for m in <the 12 wide clause-5 modes>; do echo "$m $(host/clause5-soak dump $m size)"; done
+rint128-class 137344
+rint256-class 537600
+scaleb128-class 317448
+scaleb256-class 1370952
+rint128-f32 4294967296
+rint256-f32 4294967296
+conv128to64-class 1979424
+conv256to128-class 63208320
+cvtto128-class 91872
+cvtto256-class 205440
+cvtfrom128-class 50923
+cvtfrom256-class 50923

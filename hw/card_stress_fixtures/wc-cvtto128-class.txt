@@ -1,0 +1,3 @@
+soaking the software backend
+oracle: MPFR 4.1.0 with GMP 6.2.1, mpfr_ieee.h's emulation; mpfr_c5.h's clause-5 rules
+cvtto128-class rmm: 367488 cases, 0 value mismatches, 0 flag mismatches, 91872 encodings, 0 skipped

@@ -76,7 +76,10 @@ pass size N, recording the batch and chunk each said. docs/CARDDAY.md, "The cove
 Since 2026-10-26 (parcel HXc, the wide-format sweeps' phase 1) --mpfr-prefix DIR, the pinned MPFR, builds divsqrt-soak with MPFR=1 against
 it, checks that the tool has the wide modes and that its oracle line names the pin, and appends the 102 wide-format items (fp64, fp128 and
 fp256 division and square root: hw/card_stress_lib.py, WIDE_OPS, each item's claim named by space and level); without it nothing of this
-changes, and a wide item named by --sweep-items is a skipped leg, by name (docs/CARDDAY.md, "The wide items in the driver").
+changes, and a wide item named by --sweep-items is a skipped leg, by name (docs/CARDDAY.md, "The wide items in the driver"). Since
+2026-10-27 (parcel HXb) the same prefix builds clause5-soak's wide modes too, checks them the same way, and appends 60 more items (rint,
+scaleB and the conversions at fp128 and fp256 against MPFR, and the fp32 slice through the wide rint: WIDE_C5_OPS; docs/CARDDAY.md,
+"The wide clause-5 items in the driver").
 
 RECORDS. $OUT/metrics.jsonl is append-only: one `leg` record a leg, one `telemetry` record a
 sample, with `run_start`, `build`, `cycle_start`, `cycle_end`, `event` and `run_end` between
@@ -330,6 +333,9 @@ _MPFR_V = re.compile(r"^MPFR_V=(\S+)\s*$", re.M)
 _MPFR_HEADER_V = re.compile(r'^#\s*define MPFR_VERSION_STRING "([^"]*)"', re.M)
 MPFR_CHECK_MODE = "div128-hard"             # `divsqrt-soak hard-space div128-hard` exits 0 only from a build with the wide modes
 MPFR_ORACLE_JOB = ("sqrt128-f32", "0", "1", "rne")      # one case on the software backend: its stderr names the MPFR it linked
+# parcel HXb: the clause-5 soak's wide modes (hw/card_stress_lib.py WIDE_C5_OPS) exist only in a clause5-soak built with MPFR=1 too, where
+# `clause5-soak dump <mode> size` exits 0 and prints the mode's space; one index of rint128-class (two cases, one a lane) names the MPFR
+MPFR_C5_ORACLE_JOB = ("rint128-class", "0", "1", "rne")
 
 
 def mpfr_pin(root: str) -> Optional[str]:
@@ -788,6 +794,7 @@ class Driver:
         self.batch = self.chunk or L.DEFAULT_BATCH          # the BATCH a sweep slice's tool will say it ran at
         # --mpfr-prefix DIR (parcel HXc): the pinned MPFR that divsqrt-soak's wide modes are built against (MPFR=1 MPFR_PREFIX=DIR on the
         # build's make lines) and the catalog's 102 wide items with it; parse_args has held DIR to the pin. None: neither, as before.
+        # Since parcel HXb clause5-soak's wide modes too, and their 60 items after the 102.
         self.mpfr_prefix: Optional[str] = getattr(a, "mpfr_prefix", None) or None
         self.mpfr_pin = mpfr_pin(self.root) if self.mpfr_prefix else None
         self.mpfr_seen: Optional[str] = None                # the MPFR version the built tool's oracle line named
@@ -850,7 +857,8 @@ class Driver:
 
     def mpfr_flags(self) -> List[str]:
         """What --mpfr-prefix adds to the build's make lines: MPFR=1 MPFR_PREFIX=DIR (host/Makefile builds divsqrt-soak, and
-        divsqrt-soak-cN, with the wide modes against DIR's MPFR, relinked every time); nothing without it."""
+        divsqrt-soak-cN, with the wide modes against DIR's MPFR, relinked every time; since parcel HXb clause5-soak and clause5-soak-cN
+        too); nothing without it."""
         return ["MPFR=1", f"MPFR_PREFIX={self.mpfr_prefix}"] if self.mpfr_prefix else []
 
     def refuse_wide(self) -> None:
@@ -2587,7 +2595,9 @@ class Driver:
         catalog's space; and one case of sqrt128-f32 on the software backend - no image, CFT_SOAK_ARTIFACT and CFT_XRT_TILES taken out of
         its environment, so it cannot open the card - must pass and print an oracle line naming MPFR at the pin's version: what
         mpfr_get_version says, the library LINKED, which a header can disagree with. A failure fails the step, by name, and the run does
-        not start (build_failed, exit 3): a wide item never runs against an MPFR that is not the pin."""
+        not start (build_failed, exit 3): a wide item never runs against an MPFR that is not the pin. Since parcel HXb the same of
+        clause5-soak (and clause5-soak-cN): `dump <mode> size` of each wide clause-5 mode with the catalog's space, and one index of
+        rint128-class on the software backend naming MPFR at the pin - its step `mpfr clause5-soak`."""
         env = {k: v for k, v in os.environ.items() if k not in HOST_JOB_DROPS}
         n, k = L.HARD_SPACE[MPFR_CHECK_MODE]
         for name, chunk in [("divsqrt-soak", None)] + ([(f"divsqrt-soak-c{self.chunk}", self.chunk)] if self.chunk else []):
@@ -2628,6 +2638,53 @@ class Driver:
             self.mpfr_seen = seen
             step(f"mpfr {name}", True, f"`{name} hard-space {MPFR_CHECK_MODE}` rc 0, {n:,} indices k={k} (the catalog's); one case of "
                  f"{op} on the software backend passed, and its oracle line names MPFR {seen} with GMP {gmp}: the pin")
+        # parcel HXb: clause5-soak (and clause5-soak-cN under --sweep-chunk), built with the same MPFR words, holds the wide clause-5
+        # modes: `dump <mode> size` of each of the twelve exits 0 with the catalog's space (no build without MPFR=1 knows the words: it
+        # prints its usage, exit 2), and one index of rint128-class on the software backend - two cases, one a lane, held to the cover
+        # rule - passes with an oracle line naming MPFR at the pin. A failure fails the step, by name, as for divsqrt-soak (build_failed).
+        for name, chunk in [("clause5-soak", None)] + ([(f"clause5-soak-c{self.chunk}", self.chunk)] if self.chunk else []):
+            tool = os.path.join(host, name)
+
+            def run5(args: List[str]) -> Tuple[int, str]:
+                try:
+                    p = subprocess.run([tool] + args, capture_output=True, text=True, timeout=120, cwd=self.root, env=env)
+                    return p.returncode, (p.stderr or "") + (p.stdout or "")
+                except (OSError, subprocess.TimeoutExpired) as ex:
+                    return 127, f"{ex}"
+            bad: List[str] = []
+            for op5 in L.WIDE_C5_OPS:
+                space = L.EXH if op5 in L.WIDE_C5_F32 else L.CLASS_SPACE[op5][0]
+                rc, out = run5(["dump", op5, "size"])
+                if rc != 0:
+                    bad.append(f"`{name} dump {op5} size` exited {rc} ({out.strip()[-80:]!r}): this tool has no wide clause-5 modes, so "
+                               f"it was not built with MPFR=1, and no wide clause-5 item can run")
+                    break
+                if out.strip() != str(space):
+                    bad.append(f"`{name} dump {op5} size` printed {out.strip()[-40:]!r}, not the catalog's {space} "
+                               f"(hw/card_stress_lib.py {'EXH' if op5 in L.WIDE_C5_F32 else 'CLASS_SPACE'})")
+            if bad:
+                step(f"mpfr {name}", False, "; ".join(bad[:3]) + (f"; and {len(bad) - 3} more" if len(bad) > 3 else ""))
+                continue
+            op5, lo, hi, mode = MPFR_C5_ORACLE_JOB
+            k5 = L.CLASS_SPACE[op5][1]
+            rc, out = run5(list(MPFR_C5_ORACLE_JOB))
+            try:
+                L.parse_soak(out, rc, op5, mode, None, (int(hi) - int(lo)) * k5, {"encodings": int(hi) - int(lo), "per_encoding": k5},
+                             cpu=True, chunk=chunk)
+                ora = list(L.SOAK_ORACLE_MPFR.finditer(out))
+                if len(ora) != 1:
+                    raise L.VerdictError(f"{len(ora)} lines 'oracle: MPFR <version> with GMP <version>, ...', where there is one")
+            except L.VerdictError as e:
+                step(f"mpfr {name}", False, f"one index of `{name} {' '.join(MPFR_C5_ORACLE_JOB)}` on the software backend: {e}")
+                continue
+            seen, gmp = ora[0].group(1), ora[0].group(2)
+            if self.mpfr_pin != seen:     # (written apart from divsqrt-soak's test above: a plant's anchor is that text, once)
+                step(f"mpfr {name}", False, f"its oracle line names MPFR {seen} (with GMP {gmp}), and the pin is {self.mpfr_pin} "
+                     f"({MPFR_PIN_SCRIPT}): the tool linked another MPFR than the pinned one in {self.mpfr_prefix}")
+                continue
+            step(f"mpfr {name}", True, f"`{name} dump <mode> size` rc 0 for the {len(L.WIDE_C5_OPS)} wide clause-5 modes, each the catalog's "
+                 f"space; one index of {op5} ({k5} cases) on the software backend passed, and its oracle line names MPFR {seen} with GMP "
+                 f"{gmp}: the pin")
 
     def build_tools(self, step: Callable[[str, bool, str], None]) -> None:
         a = self.a
@@ -2652,7 +2709,7 @@ class Driver:
         argv = ["make", "-C", host, f"-j{a.build_jobs}"] + xrt_flags
         if c5defs:
             argv.append(f"C5DEFS={c5defs}")
-        argv += self.mpfr_flags()           # --mpfr-prefix: divsqrt-soak with the wide modes, against the pinned MPFR; nothing without it
+        argv += self.mpfr_flags()           # --mpfr-prefix: both soaks with the wide modes, against the pinned MPFR; nothing without it
         argv += targets
         if self.a.nice and shutil.which("nice"):
             argv = ["nice", "-n", str(a.nice)] + argv
@@ -3135,9 +3192,10 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     g.add_argument("--mpfr-prefix", default=None, metavar="DIR",
                    help="the pinned MPFR (verify/build-mpfr-oracle.sh's prefix: DIR/include/mpfr.h of the version that script pins, and "
                    "its static DIR/lib/libmpfr.a and libgmp.a; on the box ~/cft-fp256/verify/_mpfr-prefix). The build step then makes "
-                   "divsqrt-soak (and divsqrt-soak-cN under --sweep-chunk) with MPFR=1 MPFR_PREFIX=DIR, checks that the tool has the wide "
-                   "modes and that its oracle line names the pin, and the catalog gains the 102 wide-format items of phase 1 (parcel "
-                   "HXc; docs/CARDDAY.md, \"The wide items in the driver\"). A DIR that is not that MPFR is refused here, by name. "
+                   "divsqrt-soak and clause5-soak (and their -cN under --sweep-chunk) with MPFR=1 MPFR_PREFIX=DIR, checks that the tools "
+                   "have the wide modes and that their oracle lines name the pin, and the catalog gains the 102 wide-format items of "
+                   "phase 1 (parcel HXc; docs/CARDDAY.md, \"The wide items in the driver\") and the 60 wide clause-5 items (parcel HXb). "
+                   "A DIR that is not that MPFR is refused here, by name. "
                    "Default: no wide item runs, the build is the one it was, and a wide item named by --sweep-items is a named skip")
     g.add_argument("--sweep-items", default="", help="comma-separated campaign items to sweep, e.g. sqrt32-rne,rint32-rne "
                    "(default: all; names are hw/card_stress_lib.py's sweep_items). A wave runs one job a distinct item, so "

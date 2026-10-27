@@ -47,6 +47,9 @@ WIDE_TILE_OPS = ("sqrt64-f32", "sqrt128-f32", "sqrt256-f32", "recip64-f32", "rec
                  "recip256-win-ones", "recip256-win-zeros", "recip256-win-alt", "recip256-win-key",
                  "div128-f64hard", "div256-f64hard", "sqrt128-f64hard", "sqrt256-f64hard",
                  "div128-hard", "div256-hard", "sqrt128-hard", "sqrt256-hard")
+# parcel HXb's six wide clause-5 tile modes (rint and scaleB at fp128 and fp256, and the fp32 slice through the wide rint), which the
+# catalog has with --mpfr-prefix (2026-10-27), written out here; its six wide conversions are host operations
+WIDE_C5_TILE_OPS = ("rint128-class", "rint256-class", "scaleb128-class", "scaleb256-class", "rint128-f32", "rint256-f32")
 
 
 @pytest.fixture(scope="module")
@@ -59,9 +62,9 @@ def csl():
     return mod
 
 
-def test_the_table_is_the_old_eight_the_new_seven_then_the_wide_thirty():
-    assert FE.STRESS_TILE_OPS == OLD_TILE_OPS + NEW_TILE_OPS + WIDE_TILE_OPS
-    assert len(set(FE.STRESS_TILE_OPS)) == len(FE.STRESS_TILE_OPS) == 45
+def test_the_table_is_the_old_eight_the_new_seven_the_wide_thirty_then_the_wide_clause5_six():
+    assert FE.STRESS_TILE_OPS == OLD_TILE_OPS + NEW_TILE_OPS + WIDE_TILE_OPS + WIDE_C5_TILE_OPS
+    assert len(set(FE.STRESS_TILE_OPS)) == len(FE.STRESS_TILE_OPS) == 51
 
 
 def test_the_table_and_the_drivers_op_reach_say_the_same_of_every_op(csl):
@@ -75,7 +78,7 @@ def test_the_table_and_the_drivers_op_reach_say_the_same_of_every_op(csl):
 def test_a_run_that_served_every_item_of_the_catalog_passes_the_reach_check(
         csl, monkeypatch):
     served = {it.op for it in csl.sweep_items(mpfr=True)}     # the wide items too (parcel HXc)
-    assert set(NEW_TILE_OPS) <= served and set(WIDE_TILE_OPS) <= served
+    assert set(NEW_TILE_OPS) <= served and set(WIDE_TILE_OPS) <= served and set(WIDE_C5_TILE_OPS) <= served
     FE._check_reach(served, csl.OP_REACH)                 # must not raise
     # and the check can fail, by name: under the table of card-stress-1016
     monkeypatch.setattr(FE, "STRESS_TILE_OPS", OLD_TILE_OPS)

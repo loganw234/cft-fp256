@@ -37,7 +37,7 @@ niced, one process at a time:
              drops a significand's last bit (the dump agreement and rint128-f32 catch it); a wide mode counting one index
              short (parse_soak's cover rule refuses it)
   unchanged  (with --baseline-tree DIR, a directory holding the baseline's host/) the MPFR=1 tool's OLDER modes print the same
-             bytes and exit the same as the baseline's default tool, over 66 invocations
+             bytes and exit the same as the baseline's default tool, over 55 invocations
 
 Prints one line a group and a last line "c5-wide test: N checks, F failed, S skipped".
 """
@@ -550,8 +550,11 @@ def group_unchanged(tool, base_dir: str, work: str) -> None:
             same += 1
         else:
             check(f"unchanged: {' '.join(args)} {env or ''}", False, f"{outs[0][0]} vs {outs[1][0]}")
+    # 55: the list above (18 class-mode slices, 15 random runs, 10 exhaustive slices, 4 probes, 3 dumps, 5 sabotaged runs);
+    # a list that shrank would prove less than this line says
     check(f"unchanged: {n} invocations of the older modes, probes and dumps ({rev}'s default tool and this tree's MPFR=1 tool): the "
-          f"same stdout, stderr and exit status for all {same} that agree", same == n and n >= 60, f"{n - same} differ")
+          f"same stdout, stderr and exit status for all {same} that agree", same == n == 55,
+          f"{n - same} differ of {n} (the list is 55 long)")
     print(f"      ({n} invocations compared, {same} identical)")
 
 

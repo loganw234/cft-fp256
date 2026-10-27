@@ -600,6 +600,62 @@ def wide_claim(op: str) -> str:
                 f"to {fmt}, through the {fmt} {what}, bits and flags (hard)")
     return (f"the {fmt} {what}'s own hard cases (python/hardcases.py's families at p = {113 if fmt == 'fp128' else 237}, {n:,} "
             f"indices), bits and flags (hard)")
+
+
+# THE WIDE CLAUSE-5 ITEMS (parcel HXb, 2026-10-27): the clause-5 soak's wide modes (host/tools/clause5_soak.c, "The wide formats"), which
+# exist only in a tool built with `make clause5-soak MPFR=1` (and MPFR_PREFIX=DIR, the pinned MPFR), so the catalog has them only with
+# mpfr=True, as HXc's. The study's 5.4 rank 3 (the class items of rint and scaleB at fp128 and fp256: the tile modes, k = the format's
+# lanes, 2 and 1) and rank 5 (the fp32 slice through the wide rint, against the CPU's fp32 rint: an exact identity), and its 5.5 (the wide
+# conversions' class items: host operations, the pool's). Each is an exhaustive `<lo> <hi> <attribute>` job under all five attributes whose
+# verdict line carries ", E encodings, S skipped", E counting indices, cases = k x E and S = 0 (every wide mode compares every case: cvtto's
+# lanes a target cannot hold are compared against the contract's FCVT table, where cvtto64-class skips them). The spaces and k are the
+# tool's (`clause5-soak dump <job> size` of an MPFR=1 build, and the k its verdict lines count), MEASURED in WSL by this parcel and equal to
+# python/c5_class_enum.py's and to docs/studies/hx/hx_spaces.out's; the suite holds them to the real tool's output (hw/card_stress_fixtures/
+# wc-*). The whole-space figures are k x the indices and none skipped: MEASURED as such by whole runs of every class mode under every
+# attribute but conv256to128-class's (32 slices of it a run; whole under five attributes in the parcel's records), COMPUTED for the two
+# rint-f32 modes from their rule (one case an encoding of 2^32, none skipped), whose whole runs are hours of a CPU.
+WIDE_C5_CLASS = ("rint128-class", "rint256-class", "scaleb128-class", "scaleb256-class")            # rank 3: tile
+WIDE_C5_F32 = ("rint128-f32", "rint256-f32")                                                       # rank 5: tile
+WIDE_C5_HOST = ("conv128to64-class", "conv256to128-class", "cvtto128-class", "cvtto256-class", "cvtfrom128-class",
+                "cvtfrom256-class")                                                                # 5.5: host
+WIDE_C5_OPS = WIDE_C5_CLASS + WIDE_C5_F32 + WIDE_C5_HOST                                           # the twelve mode words
+CLASS_SPACE.update({"rint128-class": (137_344, 2), "rint256-class": (537_600, 1), "scaleb128-class": (317_448, 2),
+                    "scaleb256-class": (1_370_952, 1), "conv128to64-class": (1_979_424, 1), "conv256to128-class": (63_208_320, 1),
+                    "cvtto128-class": (91_872, 4), "cvtto256-class": (205_440, 4), "cvtfrom128-class": (50_923, 1),
+                    "cvtfrom256-class": (50_923, 1)})
+PER_ENCODING.update({op: 1 for op in WIDE_C5_F32})                      # one case an encoding (both variants in it), none skipped
+_WIDE_C5_FMT = {"128": ("fp128", 113, 2), "256": ("fp256", 237, 1)}       # the format, its p and its lanes (docs/ARCHITECTURE.md)
+
+
+def wide_c5_claim(op: str) -> str:
+    """What a pass over the whole space of a wide clause-5 mode claims, by space and level, its oracle named."""
+    m = re.fullmatch(r"(rint|scaleb|cvtto|cvtfrom)(128|256)-(class|f32)|conv(128|256)to(64|128)-class", op)
+    if m is None or op not in WIDE_C5_OPS:
+        raise ValueError(f"{op!r} is not one of the wide clause-5 modes")
+    fmt, p, lanes = _WIDE_C5_FMT[m.group(2) or m.group(4)]
+    if m.group(3) == "f32":
+        return (f"every fp32 input, widened exactly to {fmt}, through the {fmt} roundToIntegral, both variants, bits and flags equal to the "
+                f"CPU's fp32 rint widened (an exact identity; L1 over the fp32 slice)")
+    n = CLASS_SPACE[op][0]
+    mpfr = "bits and flags against MPFR (mpfr-check's clause-5 rules), at the class level (L2, PLAUSIBLE)"
+    lane = f"each case in each of {fmt}'s {lanes} lane{'s' if lanes > 1 else ''}"
+    if m.group(1) == "rint":
+        return (f"every class of dropped bits, with a walking one over the kept and dropped bits, at every rounding position of {fmt} and its "
+                f"exponent witnesses ({op}'s {n:,} indices), {lane}, through the {fmt} roundToIntegral, both variants, {mpfr}")
+    if m.group(1) == "scaleb":
+        return (f"x 2^n landing in every one of {fmt}'s {p + 1} subnormal strips by three routes, with every class of dropped bits and a "
+                f"walking one, and the overflow and deeper-than-the-last-strip blocks ({op}'s {n:,} indices), {lane}, through the {fmt} "
+                f"scaleB, {mpfr}")
+    if m.group(1) == "cvtto":
+        return (f"every class of dropped bits, with a walking one, at every rounding position of {fmt} against the four integer targets i32, "
+                f"u32, i64 and u64, every operand-target pair, those a target cannot hold against the contract's FCVT table ({op}'s {n:,} "
+                f"indices), both variants, {mpfr}")
+    if m.group(1) == "cvtfrom":
+        return (f"every bit length and pattern of the i64 and u64 sources ({op}'s {n:,} indices), converted to {fmt}: an exact conversion, "
+                f"no bit of a 64-bit source dropped, {mpfr}")
+    dst = "fp64" if m.group(5) == "64" else "fp128"
+    return (f"every class of dropped bits, with a walking one, at every rounding position of the {fmt} -> {dst} narrowing ({dst}'s normal "
+            f"and subnormal positions and its overflow) and {fmt}'s exponent witnesses ({op}'s {n:,} indices), through convertFormat, {mpfr}")
 # The random ops whose OPERAND STREAM depends on BATCH (CK, 2026-10-20; READ in host/tools/clause5_soak.c drv_cvtfrom: a batch draws n
 # operands for each of four source types in turn, so another BATCH hands the same draws to other types), and the call size of the
 # tools as built by default (host/tools/*.c, `#define BATCH 4096`; the chunked tools say theirs on a stderr line).
@@ -675,6 +731,10 @@ OP_REACH = {
 # wide_lib), the composed operations of host/src/divsqrt.c, so each reaches the tile as the fp32 and fp64 modes do; the reciprocal is
 # cft_div with the dividend 1. python/figure_extracts.py's STRESS_TILE_OPS states the same of them, read apart.
 OP_REACH.update({op: TILE for op in WIDE_OPS})
+# parcel HXb, the wide clause-5 modes: rint and scaleB at fp128 and fp256 call cft_rint and cft_scaleb (composed: tile), as the fp64 class
+# modes do; the three conversions are host operations at every format (host/src/clause5.c), so their class items are the host pool's.
+OP_REACH.update({op: TILE for op in WIDE_C5_CLASS + WIDE_C5_F32})
+OP_REACH.update({op: HOST for op in WIDE_C5_HOST})
 
 
 def reach_of(op: Optional[str]) -> Optional[str]:
@@ -824,7 +884,8 @@ def sweep_items(scaleb_modes: Iterable[str] = MODES4,
     of scaleb32-wide: the scaleb modes, unless `probe scalebrange` found the derived exponent
     range does not hold on this libm, and then none (the script drops those jobs the same way).
     mpfr: also the 102 wide-format items of phase 1 (parcel HXc), appended after the rest, whose tool
-    is built with MPFR=1; without it the catalog is the one it was, item for item."""
+    is built with MPFR=1, and after them parcel HXb's 60 wide clause-5 items (clause5-soak built the
+    same way); without it the catalog is the one it was, item for item."""
     scaleb_modes, cvtfrom_modes = tuple(scaleb_modes), tuple(cvtfrom_modes)
     wide_modes = scaleb_modes if wide_modes is None else tuple(wide_modes)
     items: List[Item] = []
@@ -938,6 +999,17 @@ def sweep_items(scaleb_modes: Iterable[str] = MODES4,
                                       per_encoding=k, space=space, level="hard" if hard else "exhaustive",
                                       whole=HARD_WHOLE[op] if hard else (EXH, 0), mpfr=True,
                                       claim=f"{wide_claim(op)}, under {mode}"))
+        # Parcel HXb: the wide clause-5 items, APPENDED after HXc's 102 so that none of the 227 moves, in the study's order (5.4's rank 3,
+        # the class modes of rint and scaleB; rank 5, the fp32 slice through the wide rint; then 5.5's host conversions), all five
+        # attributes each (MPFR answers rmm; rint-f32's native fp32 rint has roundf for it, as rint32's). Each makes exactly k cases an
+        # index and skips none, so each is exact and its whole space is (k x indices, 0).
+        for op in WIDE_C5_OPS:
+            f32 = op in WIDE_C5_F32
+            space, k = (EXH, PER_ENCODING[op]) if f32 else CLASS_SPACE[op]
+            for mode in MODES5:
+                items.append(Item(f"{op}-{mode}", "clause5", "exhaustive", op, mode, verdict_mode=mode, exact=True,
+                                  per_encoding=k, space=space, level="exhaustive" if f32 else "class", whole=(k * space, 0),
+                                  mpfr=True, claim=f"{wide_c5_claim(op)}, under {mode}"))
     for it in items:
         if it.kind == "random":
             if it.name not in RANDOM_SEED_INDEX:

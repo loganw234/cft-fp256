@@ -54,7 +54,9 @@ Three kinds of group, then the plants (the groups, by name, are in hw/test-card-
             the real tool's output (hw/card_stress_fixtures/wx-*, the box's eight-slice counts of div128-hard and div256-hard among them), each kind's
             real log through parse_soak and the stand-in's lines held to it, --mpfr-prefix refused by name at the command line, the warnings' sorting,
             the plans, the items served and covered (dry), refused by name without --mpfr-prefix (dry), and the build line with MPFR=1 and its
-            checks on the driver's real path over test doubles (POSIX: skipped by name elsewhere).
+            checks on the driver's real path over test doubles (POSIX: skipped by name elsewhere). Since 2026-10-27 (parcel HXb) also the 60
+            wide clause-5 items after the 102: their catalog entries held to the real tool's output (hw/card_stress_fixtures/wc-*), each mode's
+            real log through parse_soak and the stand-in's lines held to it, and clause5-soak's checks in the build scenario.
 
   testfiles   (parcel TG, 2026-10-23) hw/test_card_stress_report.py and hw/test_card_stress_progress.py, each run as a process and made checks of this suite: a crash,
             a hang, a missing summary line, an exit status or a failed count above 0, each FAIL line; their SKIP lines are passed on as this suite's, by name and with the
@@ -5474,6 +5476,24 @@ WIDE_LOGS = (("wx-sqrt128-f32.txt", "sqrt128-f32-rne"), ("wx-recip64-f32.txt", "
              ("wx-div128-f64hard.txt", "div128-f64hard-rtz"), ("wx-div256-f64hard-rmm.txt", "div256-f64hard-rmm"),
              ("wx-sqrt128-f64hard.txt", "sqrt128-f64hard-rdn"), ("wx-div256-hard.txt", "div256-hard-rne"),
              ("wx-div128-hard.txt", "div128-hard-rup"), ("wx-sqrt256-hard.txt", "sqrt256-hard-rmm"))
+# parcel HXb (2026-10-27): the wide clause-5 modes' documents' figures (docs/CARDDAY.md; docs/studies/hx/hx_spaces.out's spaces), written out
+# here and not read from the library: op -> (indices, k, the whole space's (cases, skipped), level, reach). The real tool's outputs
+# (hw/card_stress_fixtures/wc-*) hold them; they hold the library. k differs by format as the tile's lanes do (2 at fp128, 1 at fp256).
+DOC_WIDE_C5 = {"rint128-class": (137_344, 2, (274_688, 0), "class", "tile"), "rint256-class": (537_600, 1, (537_600, 0), "class", "tile"),
+               "scaleb128-class": (317_448, 2, (634_896, 0), "class", "tile"),
+               "scaleb256-class": (1_370_952, 1, (1_370_952, 0), "class", "tile"),
+               "rint128-f32": (1 << 32, 1, (1 << 32, 0), "exhaustive", "tile"), "rint256-f32": (1 << 32, 1, (1 << 32, 0), "exhaustive", "tile"),
+               "conv128to64-class": (1_979_424, 1, (1_979_424, 0), "class", "host"),
+               "conv256to128-class": (63_208_320, 1, (63_208_320, 0), "class", "host"),
+               "cvtto128-class": (91_872, 4, (367_488, 0), "class", "host"), "cvtto256-class": (205_440, 4, (821_760, 0), "class", "host"),
+               "cvtfrom128-class": (50_923, 1, (50_923, 0), "class", "host"), "cvtfrom256-class": (50_923, 1, (50_923, 0), "class", "host")}
+DOC_WIDE_C5_NAMES = [f"{op}-{m}" for op in DOC_WIDE_C5 for m in M5]
+WIDE_C5_LOGS = (("wc-rint128-class.txt", "rint128-class-rne"), ("wc-rint256-class.txt", "rint256-class-rmm"),
+                ("wc-scaleb128-class.txt", "scaleb128-class-rup"), ("wc-scaleb256-class.txt", "scaleb256-class-rdn"),
+                ("wc-rint128-f32.txt", "rint128-f32-rne"), ("wc-rint256-f32.txt", "rint256-f32-rmm"),
+                ("wc-conv128to64-class.txt", "conv128to64-class-rtz"), ("wc-conv256to128-class.txt", "conv256to128-class-rne"),
+                ("wc-cvtto128-class.txt", "cvtto128-class-rmm"), ("wc-cvtto256-class.txt", "cvtto256-class-rdn"),
+                ("wc-cvtfrom128-class.txt", "cvtfrom128-class-rup"), ("wc-cvtfrom256-class.txt", "cvtfrom256-class-rtz"))
 
 
 def fake_mpfr_prefix(path: str, version: str = "4.2.2", libs=("libmpfr.a", "libgmp.a")) -> str:
@@ -5506,7 +5526,7 @@ def wide_catalog_checks(src: str = HERE) -> list:
         c("wide catalog: without mpfr the catalog is the 125 items it was, none of them wide or making a claim, and with it those 125 come "
           "first, every attribute the same", len(old) == 125 and [vars(a) for a in old] == [vars(b) for b in full[:125]]
           and not any(a.mpfr or a.claim for a in old), f"{len(old)}, {len(full)}")
-        wide = full[125:]
+        wide = full[125:227]                    # HXc's 102; parcel HXb's 60 follow them (wide_c5_catalog_checks)
         by = {it.name: it for it in wide}
         c("wide catalog: the 102 wide items follow, in the study's rank order (the wide hard cases, the fp64 hard cases widened, the fp32 "
           "slice at fp128 and fp256, then at fp64, the sixteen windows), the windows under rne and rup alone",
@@ -5641,6 +5661,142 @@ def wide_catalog_checks(src: str = HERE) -> list:
     return out
 
 
+def wide_c5_catalog_checks(src: str = HERE) -> list:
+    """Parcel HXb's 60 wide clause-5 items: after the 227 (HXc's 102 still the divsqrt items after the 125), the documents' figures held to the
+    real tool's output (`dump <mode> size`, whole-space runs), each real log of the twelve modes through parse_soak with its item's rule and
+    damaged every way the rule must refuse, the sabotage logs failures, the chunked tool's log, the oracle lines, the claims, the stand-in's
+    tables and lines, the build's warning lines all known, and the nightly page's catalog."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    index = fixture_index()
+    standin = os.path.join(src, "card_stress_standin.py")
+    with lib_from(src) as L2:
+        raises = lambda fn: raises_in(L2, fn)               # noqa: E731
+        parse_ok = lambda fn: parse_ok_in(L2, fn)           # noqa: E731
+        full = L2.sweep_items(mpfr=True)
+        c5 = full[227:]
+        by = {it.name: it for it in c5}
+        c("wide c5 catalog: the 60 wide clause-5 items follow the 227 - the 125 and HXc's 102, every one a divsqrt item - in the study's order "
+          "(rank 3: the class modes of rint and scaleB; rank 5: the fp32 slice through the wide rint; then the wide conversions), each under "
+          "all five attributes", len(full) == 287 and [it.name for it in c5] == DOC_WIDE_C5_NAMES and [it.name for it in full[125:227]] ==
+          DOC_WIDE_NAMES and all(it.tool == "divsqrt" for it in full[125:227]), f"{len(full)}: {[it.name for it in c5][:3]}")
+        bad = []
+        for it in c5:
+            sp, k, whole, level, reach = DOC_WIDE_C5[it.op]
+            got = (it.kind, it.tool, it.verdict_mode, it.space, it.per_encoding, it.whole, it.level, it.reach, it.exact, it.mpfr, it.seed_index)
+            want = ("exhaustive", "clause5", it.mode, sp, k, whole, level, reach, True, True, None)
+            if got != want:
+                bad.append(f"{it.name}: {got} vs {want}")
+        c("wide c5 catalog: each item has the documents' space, k, whole-space figures (k x the indices, none skipped) and level, the reach of "
+          "its operation (rint and scaleB tile, the conversions host), runs clause5-soak, is exact and takes no seed", not bad and len(c5) == 60,
+          "; ".join(bad[:2]))
+        r64 = next(it for it in full if it.name == "rint64-class-rne")
+        c("wide c5 catalog: k is the tile's lanes at each format - rint128-class 2, rint256-class 1, scaleb128-class 2, scaleb256-class 1 - "
+          "where rint64-class's is fp64's 4, and cvtto's the four targets",
+          (by["rint128-class-rne"].per_encoding, by["rint256-class-rne"].per_encoding, by["scaleb128-class-rne"].per_encoding,
+           by["scaleb256-class-rne"].per_encoding, r64.per_encoding, by["cvtto256-class-rmm"].per_encoding) == (2, 1, 2, 1, 4, 4))
+        c("wide c5 catalog: OP_REACH says tile of rint and scaleB's six modes and host of the six conversions; PER_ENCODING is 1 for the two "
+          "-f32 modes", all(L2.OP_REACH.get(op) == v[4] for op, v in DOC_WIDE_C5.items())
+          and all(L2.PER_ENCODING.get(op) == 1 for op in ("rint128-f32", "rint256-f32")))
+        badc = []
+        for it in c5:
+            fmt = "fp" + re.search(r"(128|256)", it.op).group(1)
+            want = ([f"every fp32 input, widened exactly to {fmt}", "the CPU's fp32 rint", "(an exact identity; L1 over the fp32 slice)"]
+                    if it.op.endswith("-f32") else [f"({it.op}'s {it.space:,} indices)", "against MPFR", "(L2, PLAUSIBLE)"]
+                    + (["an exact conversion"] if it.op.startswith("cvtfrom") else ["every class of dropped bits"] if not
+                       it.op.startswith("scaleb") else ["subnormal strips"])
+                    + ([f"each case in each of {fmt}'s {it.per_encoding} lane"] if it.reach == "tile" else []))
+            if not (isinstance(it.claim, str) and all(w in it.claim for w in want) and it.claim.endswith(f", under {it.mode}")
+                    and "swept" not in it.claim):
+                badc.append(f"{it.name}: {it.claim!r}")
+        c("wide c5 catalog: each item's claim names its space, its level and its oracle, under its attribute, never 'swept'; a cvtfrom claim "
+          "says an exact conversion, not every class of dropped bits", not badc, "; ".join(badc[:2]))
+        sizes = {m.group(1): int(m.group(2)) for m in re.finditer(r"^(\S+) (\d+)$", fixture("wc-dump-size.txt"), re.M)}
+        c("wide c5 catalog: `dump <mode> size` of each of the twelve modes (the real tool's log) gives the documents' indices, and they are "
+          "the catalog's", sizes == {op: v[0] for op, v in DOC_WIDE_C5.items()} and all(it.space == sizes.get(it.op) for it in c5),
+          str(sorted(set(sizes) ^ set(DOC_WIDE_C5))[:4]))
+
+        def norm(text):
+            return re.sub(r"MPFR \S+ with GMP \S+", "MPFR V with GMP G", text)
+        for nm, iname in WIDE_C5_LOGS:
+            it, t = by[iname], fixture(nm)
+            op, lo, hi, mode = fixture_job(index, nm)
+            m = SOAK_EXH_LINE.search(t)
+            exp, cover = it.expected_cases(lo, hi), it.cover_spec(lo, hi)
+            if m is None or cover is None:
+                c(f"wide c5 {nm}: a verdict line with its encodings clause, and a cover rule for {iname}", False)
+                continue
+            cases, enc, skp = int(m.group(3)), int(m.group(6)), int(m.group(7))
+            v, why = parse_ok(lambda: L2.parse_soak(t, index[nm][0], it.op, it.verdict_mode, None, exp, cover, cpu=True))
+            c(f"wide c5 {nm}: made by {iname}'s command line; passes with exactly {it.per_encoding} case(s) an index, E the slice's {hi - lo:,} "
+              f"indices, none skipped" + (" - the whole space" if (lo, hi) == (0, it.space) else ""),
+              (op, mode) == (it.op, it.mode) and v is not None and v.ok and enc == hi - lo and cases == it.per_encoding * enc == exp
+              and skp == 0, why)
+            line = m.group(0)
+            for what, dmg in (("its encodings clause removed", line.replace(f", {enc} encodings, {skp} skipped", "")),
+                              ("one index fewer printed", line.replace(f", {enc} encodings,", f", {enc - 1} encodings,")),
+                              ("one case fewer printed", line.replace(f": {cases} cases,", f": {cases - 1} cases,"))):
+                c(f"wide c5 {nm}: the log with {what} is refused",
+                  raises(lambda dmg=dmg: L2.parse_soak(t.replace(line, dmg), 0, it.op, it.verdict_mode, None, exp, cover, cpu=True)))
+            p = subprocess.run([sys.executable, standin, "soak", "--", "host/clause5-soak", op, str(lo), str(hi), mode],
+                               capture_output=True, text=True, timeout=60)
+            sm = SOAK_EXH_LINE.search(p.stdout)
+            ora = [ln for ln in t.splitlines() if ln.startswith("oracle: ")]
+            c(f"wide c5 {nm}: the dry-run stand-in prints the real tool's verdict line and its oracle line (but the versions)",
+              sm is not None and sm.group(0) == line and len(ora) == 1
+              and [norm(x) for x in p.stderr.splitlines() if x.startswith("oracle: ")] == [norm(x) for x in ora],
+              f"{sm.group(0) if sm else p.stdout[-160:]} | {line} | {p.stderr[-160:]}")
+        for nm, iname in (("wc-rint128-class-sab.txt", "rint128-class-rne"), ("wc-cvtto256-class-sab.txt", "cvtto256-class-rmm"),
+                          ("wc-rint256-f32-sab.txt", "rint256-f32-rne")):
+            it, t = by[iname], fixture(nm)
+            op, lo, hi, mode = fixture_job(index, nm)
+            exp, cover = it.expected_cases(lo, hi), it.cover_spec(lo, hi)
+            v, why = parse_ok(lambda: L2.parse_soak(t, index[nm][0], it.op, it.verdict_mode, None, exp, cover, cpu=True))
+            dis = v.extra["disagreements"] if v is not None else []
+            c(f"wide c5 {nm}: the mode's own negative control (the library's first result of a call flipped), a real failing log, is a failure "
+              f"with its counts and operands named, and with exit status 0 it is refused",
+              v is not None and not v.ok and v.counts["value_mismatches"] > 0 and v.counts["encodings"] == hi - lo and len(dis) >= 2
+              and all(re.search(r"a=0x[0-9a-f]+", x) for x in dis)
+              and raises(lambda: L2.parse_soak(t, 0, it.op, it.verdict_mode, None, exp, cover, cpu=True)), why)
+        nm = "wc-chunk-rint128-class-c16384.txt"
+        it, t = by["rint128-class-rne"], fixture(nm)
+        op, lo, hi, mode = fixture_job(index, nm)
+        v, why = parse_ok(lambda: L2.parse_soak(t, 0, op, mode, None, it.expected_cases(lo, hi), it.cover_spec(lo, hi), cpu=True, chunk=16384))
+        c("wide c5: the chunked MPFR=1 clause5-soak's real log passes at its pass size (16384, said on its stderr line; a class case still alone "
+          "in each lane) and is refused as a default job's", v is not None and v.ok and v.extra.get("batch") == v.extra.get("chunk") == 16384
+          and raises(lambda: L2.parse_soak(t, 0, op, mode, None, it.expected_cases(lo, hi), it.cover_spec(lo, hi), cpu=True)), why)
+        cls_logs = [n for n, _i in WIDE_C5_LOGS if "-f32" not in n]
+        c("wide c5: the oracle line of every class log reads MPFR and GMP's versions (4.1.0 and 6.2.1: WSL's system MPFR, which made these "
+          "logs), and a -f32 log names the CPU's fp32 rint and no MPFR",
+          all((L2.SOAK_ORACLE_MPFR.search(fixture(n)) or re.match("", "")).groups() == ("4.1.0", "6.2.1") for n in cls_logs)
+          and all(L2.SOAK_ORACLE_MPFR.search(fixture(n)) is None and "oracle: the CPU's float, rint32's" in fixture(n)
+                  for n in ("wc-rint128-f32.txt", "wc-rint256-f32.txt")))
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("card_stress_standin_wide_c5", standin)
+        st = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(st)
+        c("wide c5: the stand-in's tables are the library's (the ten class spaces' indices and k, none skipped; one case an encoding for the "
+          "two -f32 modes) and it names the twelve modes as the clause-5 soak's wide ones",
+          set(st.WIDE_C5) == set(DOC_WIDE_C5) and all(st.IDX[op] == (v[0], v[1], 0) for op, v in DOC_WIDE_C5.items() if v[3] == "class")
+          and all(st.EXH_PER.get(op) == 1 for op, v in DOC_WIDE_C5.items() if v[3] == "exhaustive"))
+    with driver_from(src) as (mod, d0, L3):
+        lines = [ln for ln in fixture("wc-build-warnings.txt").splitlines() if not ln.startswith("#")]
+        makes = [lines[:2], lines[2:]]
+        sorted_ = [mod.sort_warnings(x) for x in makes]
+        c("wide c5: the warning lines of the driver's make line under MPFR=1 and of its soak-chunk make (the real logs) are the two soaks' "
+          "FENV_ACCESS pragma lines, known, none new: the wide clause-5 modes add no warning line",
+          len(lines) == 4 and all(len(x) == 2 for x in makes) and all(new == [] and len(known) == 2 for known, new in sorted_), str(sorted_))
+    q = subprocess.run([sys.executable, "-B", "-I", "-c", "import sys; sys.path.insert(0, sys.argv[1]); import card_stress_progress as P; "
+                        "print(len([n for n in sys.argv[2].split(',') if n in P._CAT]))", src, ",".join(DOC_WIDE_C5_NAMES)],
+                       capture_output=True, text=True, timeout=120)
+    c("wide c5: the nightly page's catalog knows every wide clause-5 item", q.returncode == 0 and q.stdout.strip() == "60",
+      (q.stdout + q.stderr)[-200:])
+    return out
+
+
 def wide_driver_checks(env: Env, src: str = HERE) -> list:
     """The driver's side, in-process: --mpfr-prefix held to the pin at the command line (each refusal by name), a wide item named without
     it accepted for the run to refuse, the make words, the warnings' sorting on the box's real lines, and the plans for the wide items."""
@@ -5688,9 +5844,10 @@ def wide_driver_checks(env: Env, src: str = HERE) -> list:
         with driver_from(src, ["--mpfr-prefix", good]) as (mod, d, L2):
             d.items = d.catalog()
             q = mod.Image("quad", "/box/quad.xclbin", 4, "u50-rev8-quad", None)
-            c("wide driver: with it the make lines gain MPFR=1 MPFR_PREFIX=<the prefix> and the catalog the 102 wide items after the 125",
-              d.mpfr_flags() == ["MPFR=1", f"MPFR_PREFIX={os.path.abspath(good)}"] and len(d.items) == 227
-              and [it.name for it in d.items[125:]] == DOC_WIDE_NAMES)
+            c("wide driver: with it the make lines gain MPFR=1 MPFR_PREFIX=<the prefix> and the catalog the 102 wide items after the 125, "
+              "and parcel HXb's 60 wide clause-5 items after those",
+              d.mpfr_flags() == ["MPFR=1", f"MPFR_PREFIX={os.path.abspath(good)}"] and len(d.items) == 287
+              and [it.name for it in d.items[125:227]] == DOC_WIDE_NAMES and [it.name for it in d.items[227:]] == DOC_WIDE_C5_NAMES)
             j = d.plan_wave(q, 3600, 1, ["div256-hard-rtz"])[0]
             b = d.soak_binary(j["item"])
             c("wide plan: div256-hard-rtz's first slice is `divsqrt-soak div256-hard 0 2^20 rtz`, four checks an index, no fixed case count, "
@@ -5812,6 +5969,105 @@ def scn_wide_refused(env: Env, src: str = HERE) -> list:
     return out
 
 
+# Parcel HXb: one item of each kind of the wide clause-5 modes - the two tile class modes, the fp32 slice, and the three host conversions
+# (conv256to128-class's 63 M indices left out: its slices are the same code as conv128to64-class's, sixty times over)
+WIDE_C5_SERVED = ["rint128-class-rne", "scaleb256-class-rmm", "rint256-f32-rup", "conv128to64-class-rtz", "cvtto256-class-rdn",
+                  "cvtfrom128-class-rup"]
+
+
+def scn_wide_c5_items(env: Env, src: str = HERE) -> list:
+    """Parcel HXb's wide clause-5 items served by the driver against the stand-in, with --mpfr-prefix: three tile items on the quad's tiles and
+    three host items on the pool, each to the end of its own space, every slice held to its indices and to k x E with nothing skipped and
+    its cases expected, the whole-space check once each, and the report counting each over its own space and stating its claim."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    pfx = fake_mpfr_prefix(os.path.join(env.tmp, "wide-c5-pin"))
+    op_of = {n: n.rsplit("-", 1)[0] for n in WIDE_C5_SERVED}
+    sp = {n: DOC_WIDE_C5[op_of[n]][0] for n in WIDE_C5_SERVED}
+    r = start_driver(env, "widec5items", ["--until", until(300), "--mpfr-prefix", pfx, "--sweep-items", ",".join(WIDE_C5_SERVED)]
+                     + SWEEP_ALL_BASE, src=src, to_file=True)
+
+    def complete():
+        iv = L.sweep_coverage(r.recs)[0]
+        return all(iv.get(n) and L.first_gap(iv[n], sp[n]) is None for n in WIDE_C5_SERVED)
+
+    done = wait_for(complete, 240, 0.5)
+    stop_run(r)
+    r.finish(90)
+    legs = r.legs(kind="sweep")
+    c("wide c5 items: the six were each served to the end of their own space, every slice passed, and the run stopped on STOP",
+      done and r.rc == 0 and bool(legs) and all(x["status"] == "pass" for x in legs), f"done {done}, rc {r.rc}, {sorted({x['status'] for x in legs})}")
+    for n in WIDE_C5_SERVED:
+        mine = sorted((x for x in legs if x["sweep"]["item"] == n), key=lambda x: x["sweep"]["lo"])
+        _sp, k, _whole, _level, reach = DOC_WIDE_C5[op_of[n]]
+        where = ("quad", "tile") if reach == "tile" else ("cpu", "host")
+        c(f"wide c5 items {n}: its slices tile [0, {sp[n]:,}) once, each slice's verdict covering its indices with exactly {k} case(s) an "
+          f"index, its expected cases recorded, nothing skipped, on {where[0]} (reach {where[1]})",
+          bool(mine) and mine[0]["sweep"]["lo"] == 0 and mine[-1]["sweep"]["hi"] == sp[n]
+          and all(a["sweep"]["hi"] == b["sweep"]["lo"] for a, b in zip(mine, mine[1:]))
+          and all(dg(x, "counts", "encodings") == x["sweep"]["hi"] - x["sweep"]["lo"] == dg(x, "sweep", "expected_encodings")
+                  and dg(x, "counts", "cases") == k * dg(x, "counts", "encodings") == dg(x, "sweep", "expected_cases")
+                  and dg(x, "counts", "skipped") == 0 and (x["image"], x["sweep"]["reach"]) == where for x in mine),
+          f"{len(mine)} slices, {sorted({(x['image'], x['sweep']['reach']) for x in mine})}")
+    ev = r.events("whole_space_ok")
+    c("wide c5 items: the whole-space check ran once for each and found its slices adding up to the whole space's cases and skipped slots",
+      sorted(e["item"] for e in ev) == sorted(WIDE_C5_SERVED) and not r.events("whole_space_mismatch"), str([e["item"] for e in ev]))
+    st = r.recs[0] if r.recs else {}
+    c("wide c5 items: run_start's settings name the prefix and the pin (4.2.2)",
+      dg(st, "settings", "mpfr") == {"prefix": os.path.abspath(pfx), "pin": "4.2.2"}, str(dg(st, "settings", "mpfr")))
+    p = subprocess.run([sys.executable, "-B", "-I", os.path.join(src, "card_stress_report.py"), r.out, "--no-write"], capture_output=True,
+                       text=True, timeout=120)
+    t = p.stdout
+    claims = ["    rint128-class (rne): every class of dropped bits, with a walking one over the kept and dropped bits, at every rounding "
+              "position of fp128", "    scaleb256-class (rmm): x 2^n landing in every one of fp256's 238 subnormal strips by three routes",
+              "    rint256-f32 (rup): every fp32 input, widened exactly to fp256, through the fp256 roundToIntegral",
+              "    conv128to64-class (rtz): every class of dropped bits, with a walking one, at every rounding position of the fp128 -> fp64",
+              "    cvtto256-class (rdn): every class of dropped bits, with a walking one, at every rounding position of fp256 against the four",
+              "    cvtfrom128-class (rup): every bit length and pattern of the i64 and u64 sources"]
+    tile = [n for n in WIDE_C5_SERVED if DOC_WIDE_C5[op_of[n]][4] == "tile"]
+    host = [n for n in WIDE_C5_SERVED if n not in tile]
+    tot = {w: sum(sp[n] for n in ns) for w, ns in (("tile", tile), ("host", host))}
+    want = [("exit 0", p.returncode == 0),
+            ("rint128-class-rne's row", re.search(r"^  rint128-class-rne \[137,344 indices\]\s+\d+\s+274688\s+137344\s+100\.000%", t, re.M)),
+            ("rint256-f32-rup's row", re.search(r"^  rint256-f32-rup\s+\d+\s+4294967296\s+4294967296\s+100\.000%", t, re.M))]
+    want += [(f"reach {w}'s total", f"reach {w}: 3 exhaustive item(s) seen; covered {tot[w]} of {tot[w]} encodings (100.000%)" in t)
+             for w in ("tile", "host")]
+    want += [(x.strip()[:24], x in t) for x in claims + ["(L2, PLAUSIBLE)", "(an exact identity; L1 over the fp32 slice)"]]
+    miss = [w for w, ok in want if not ok]
+    c("wide c5 items: the report counts each over its own space (rint128-class-rne [137,344 indices] at 100%), each reach's total from "
+      "those spaces, and states each mode's claim by space and level under the sweep table",
+      not miss, f"not found: {miss}; rc {p.returncode}; {t[t.find('exhaustive items'):][:600]!r}")
+    return out
+
+
+def scn_wide_c5_refused(env: Env, src: str = HERE) -> list:
+    """Parcel HXb: a run WITHOUT --mpfr-prefix whose --sweep-items names wide clause-5 items: each is refused by name, one skipped sweep leg
+    at the start, never served nor covered, and the older item named beside them served as it always was."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    names = ["cvtto128-class-rne", "rint128-f32-rmm", "rint64-class-rne"]
+    r = start_driver(env, "widec5refused", ["--until", until(300), "--sweep-items", ",".join(names)] + SWEEP_ALL_BASE, src=src, to_file=True)
+    done = wait_for(lambda: bool(L.sweep_coverage(r.recs)[0].get("rint64-class-rne")), 120, 0.5)
+    stop_run(r)
+    r.finish(90)
+    sk = r.legs(kind="sweep", status="skipped")
+    iv, served = L.sweep_coverage(r.recs)[:2]
+    c("wide c5 refused: each wide clause-5 item named is ONE skipped sweep leg naming it and the reason (no --mpfr-prefix), image '-'; "
+      "neither ran or is covered, the older item beside them was served and covered, and the run exits 0",
+      done and r.rc == 0 and sorted(x["sweep"]["item"] for x in sk) == ["cvtto128-class-rne", "rint128-f32-rmm"]
+      and all(x["image"] == "-" and "no --mpfr-prefix" in (x["reason"] or "") and dg(x, "sweep", "refused") == "no-mpfr-prefix" for x in sk)
+      and not any(x["sweep"]["item"] in names[:2] for x in r.legs(kind="sweep") if x["status"] != "skipped")
+      and not any(n in iv or n in served for n in names[:2]) and L.first_gap(iv.get("rint64-class-rne", []), 35_840) is None,
+      f"done {done}, rc {r.rc}: {[(x['leg'], x['image']) for x in sk]}")
+    return out
+
+
 def scn_wide_build(env: Env, src: str = HERE) -> list:
     """The build with --mpfr-prefix on the driver's REAL path (not a dry run) over a scratch checkout whose tools and `make` and `ldd` are
     test doubles (scn_records_real's): MPFR=1 MPFR_PREFIX=<prefix> on the default make line and on `soak-chunk`'s, nothing else changed;
@@ -5925,14 +6181,30 @@ def scn_wide_build(env: Env, src: str = HERE) -> list:
     c("wide build E: a tool built without MPFR=1 (hard-space div128-hard exits 2) fails the step, by name, and the run stops (exit 3)",
       s.get("ok") is False and "exited 2" in s.get("detail", "") and "MPFR=1" in s.get("detail", "") and E.rc == 3 and not E.legs(kind="sweep"),
       f"rc {E.rc}: {s}")
+    # parcel HXb: clause5-soak's wide modes, checked beside divsqrt-soak's in the same runs
+    s5 = A.steps.get("mpfr clause5-soak") or {}
+    c("wide build A (clause5): the build step checks clause5-soak too: `dump <mode> size` of the twelve wide clause-5 modes rc 0 with the "
+      "catalog's spaces, and one index of rint128-class (2 cases) whose oracle line names MPFR 4.2.2, the pin",
+      s5.get("ok") is True and "for the 12 wide clause-5 modes" in s5.get("detail", "") and "rint128-class (2 cases)" in s5.get("detail", "")
+      and "names MPFR 4.2.2 with GMP 6.3.0" in s5.get("detail", ""), f"{s5}")
+    c("wide build C (clause5): under --sweep-chunk both clause-5 tools are checked, clause5-soak and clause5-soak-c16384, the chunked one at "
+      "its pass size", (C.steps.get("mpfr clause5-soak") or {}).get("ok") is True
+      and (C.steps.get("mpfr clause5-soak-c16384") or {}).get("ok") is True, f"{sorted(n for n in C.steps if n.startswith('mpfr'))}")
+    s5 = D.steps.get("mpfr clause5-soak") or {}
+    c("wide build D (clause5): a clause5-soak whose oracle line names MPFR 4.1.0 fails its step, by name",
+      s5.get("ok") is False and "names MPFR 4.1.0" in s5.get("detail", "") and "the pin is 4.2.2" in s5.get("detail", ""), f"{s5}")
+    s5 = E.steps.get("mpfr clause5-soak") or {}
+    c("wide build E (clause5): a clause5-soak built without MPFR=1 (`dump rint128-class size` exits 2, the usage text) fails its step, by "
+      "name", s5.get("ok") is False and "dump rint128-class size` exited 2" in s5.get("detail", "") and "MPFR=1" in s5.get("detail", ""),
+      f"{s5}")
     return out
 
 
 def group_wide(env: Env, src: str = HERE) -> list:
     """Parcel HXc, the wide-format items: the catalog and its real logs, the driver's command line and plans, the items served and covered,
     refused without --mpfr-prefix, and the build line with MPFR on the driver's real path over test doubles (POSIX)."""
-    return (wide_catalog_checks(src) + wide_driver_checks(env, src) + scn_wide_items(env, src) + scn_wide_refused(env, src)
-            + scn_wide_build(env, src))
+    return (wide_catalog_checks(src) + wide_c5_catalog_checks(src) + wide_driver_checks(env, src) + scn_wide_items(env, src)
+            + scn_wide_refused(env, src) + scn_wide_c5_items(env, src) + scn_wide_c5_refused(env, src) + scn_wide_build(env, src))
 
 
 # ---------------------------------------------------------------------------------------
@@ -7520,6 +7792,42 @@ def plants(env: Env) -> None:
         ("HXc: the report counts a wide item over 2^32 (its catalog without the wide items)",
          [("card_stress_report.py", "_CATALOG = {it.name: it for it in sweep_items(mpfr=True)}", "_CATALOG = {it.name: it for it in sweep_items()}")],
          lambda env, src: scn_wide_items(env, src), ["wide items: the report counts each over its own space"]),
+        # -- parcel HXb (2026-10-27): the wide clause-5 items and the driver's check of clause5-soak (CARD_STRESS_PLANT='HXb:' runs just these)
+        ("HXb: a wide clause-5 space is one index off the tool's",
+         [("card_stress_lib.py", '"rint128-class": (137_344, 2)', '"rint128-class": (137_345, 2)')],
+         lambda env, src: wide_c5_catalog_checks(src), ["wide c5 catalog: `dump <mode> size` of each of the twelve modes"]),
+        ("HXb: k at fp128 is fp64's four lanes",
+         [("card_stress_lib.py", '"rint128-class": (137_344, 2)', '"rint128-class": (137_344, 4)')],
+         lambda env, src: wide_c5_catalog_checks(src), ["wide c5 catalog: k is the tile's lanes at each format"]),
+        ("HXb: the wide conversions are marked as tile items",
+         [("card_stress_lib.py", "OP_REACH.update({op: HOST for op in WIDE_C5_HOST})", "OP_REACH.update({op: TILE for op in WIDE_C5_HOST})")],
+         lambda env, src: wide_c5_catalog_checks(src), ["wide c5 catalog: OP_REACH says tile of rint and scaleB's six modes"]),
+        ("HXb: a wide class item's claim says swept",
+         [("card_stress_lib.py", '        return (f"every class of dropped bits, with a walking one over the kept and dropped bits, at every rounding',
+           '        return (f"swept: every class of dropped bits, with a walking one over the kept and dropped bits, at every rounding')],
+         lambda env, src: wide_c5_catalog_checks(src), ["wide c5 catalog: each item's claim names its space, its level and its oracle"]),
+        ("HXb: the stand-in's scaleb256-class space is one off the library's",
+         [("card_stress_standin.py", '"scaleb256-class": (1370952, 1, 0)', '"scaleb256-class": (1370953, 1, 0)')],
+         lambda env, src: wide_c5_catalog_checks(src), ["wide c5: the stand-in's tables are the library's"]),
+        ("HXb: the stand-in names no oracle for the clause-5 soak's wide modes",
+         [("card_stress_standin.py", "            err(wide_c5_oracle(op))             # so do the clause-5 soak's",
+           "            pass             # so do the clause-5 soak's")],
+         lambda env, src: wide_c5_catalog_checks(src), ["wide c5 wc-rint128-class.txt: the dry-run stand-in prints the real tool's verdict"]),
+        ("HXb: the driver's table no longer knows clause5_soak.c's pragma line",
+         [("card_stress.py", '(re.compile(r"tools/clause5_soak\\.c:\\d+: warning: ignoring .#pragma STDC FENV_ACCESS. \\[-Wunknown-pragmas\\]"), 1,',
+           '(re.compile(r"tools/clause5_soak\\.c:\\d+: warning: ignoring .#pragma STDC FENV_ACCESS. \\[-Wunknown-pragmas\\]"), 0,')],
+         lambda env, src: wide_c5_catalog_checks(src), ["wide c5: the warning lines of the driver's make line under MPFR=1"]),
+        ("HXb: the build step checks no clause5-soak (POSIX)",
+         [("card_stress.py", '        for name, chunk in [("clause5-soak", None)] + ([(f"clause5-soak-c{self.chunk}", self.chunk)] if self.chunk else []):',
+           "        for name, chunk in []:")],
+         lambda env, src: scn_wide_build(env, src), ["wide build A (clause5)", "wide build C (clause5)"]),
+        ("HXb: the clause-5 oracle's MPFR is not held to the pin (POSIX)",
+         [("card_stress.py", "            if self.mpfr_pin != seen:     # (written apart", "            if False:     # (written apart")],
+         lambda env, src: scn_wide_build(env, src), ["wide build D (clause5)"]),
+        ("HXb: a clause5-soak without the wide modes is not named so (POSIX)",
+         [("card_stress.py", "                if rc != 0:\n                    bad.append(f\"`{name} dump {op5} size` exited {rc}",
+           "                if False:\n                    bad.append(f\"`{name} dump {op5} size` exited {rc}")],
+         lambda env, src: scn_wide_build(env, src), ["wide build E (clause5)"]),
         # -- parcel BC (2026-10-27): a cycle's battery is planned for its image and visit; what it leaves out is no skipped leg (CARD_STRESS_PLANT='BC: ' runs just these)
         ("BC: a cycle plans its whole battery, so an off-cadence selftest is a skipped leg again",
          [("card_stress.py", "battery, left_out = self.plan_battery(img, visit)", "battery, left_out = list(self.battery), {}")],
