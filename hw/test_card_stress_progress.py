@@ -778,7 +778,7 @@ def group_format_guard(wide_dir):
     """The reducer holds every string it publishes against the shape of a path. Every format of the table passes it, a format that has one is refused
     by name, and the check is on the strings of the data, not on the table."""
     bad = sorted(f for f in set(R.OP_FORMAT.values()) if P._PATHY.search(f) or P._IPV4.search(f))
-    eq(bad, [], "format guard: none of the table's formats, nor the groups' rule text, has the shape of a path or an IP address (a slash between words may be read as one)")
+    eq(bad, [], "format guard: none of the table's formats, nor the groups' rule text, has the shape of a path or an IP address (the reducer's own screen, _PATHY and _IPV4)")
     check(not P._PATHY.search(P.RULES["groups"]) and not P._IPV4.search(P.RULES["groups"]), "format guard: the rule text of the groups passes it too")
     for f in ("fp32 /srv/data/x", "fp32 -> /usr/lib", "D:/data/fp64", "fp32 10.0.0.7"):
         check(bool(P._PATHY.search(f) or P._IPV4.search(f)), f"format guard: the screen sees {f!r} (a control: it can fail)")
@@ -857,6 +857,16 @@ def group_wide_page(base, wide, golden):
         r = page("ok", wj)
         check(r.get("status", {}).get("hidden") is False and "not the shape" in r["status"]["text"] and say in r["status"]["text"] and r["app"]["text"] == "",
               f"wide page: {name} is named as not the shape this page reads, and no figure is shown", r.get("status"))
+    # a tree that is no longer current but has wide items (the RTL tree changed after they ran): the list of earlier trees states both groups, not the class's total
+    j = json.loads(json.dumps(wide))
+    for c in j["now"]["classes"]:
+        c["current"] = False
+    with open(wj, "w", encoding="utf-8") as fh:
+        json.dump(j, fh)
+    te = page("ok", wj).get("app", {}).get("text", "")
+    stated = (f"{t2['label']} : {bg['complete']} of {bg['items']} items fully covered, {js_pct1(bg['covered'], bg['space'])} ({n(bg['covered'])} of {n(bg['space'])}); "
+              f"wide-format items: {wg['complete']} of {wg['items']} items fully covered, {js_pct1(wg['covered'], wg['space'])} ({n(wg['covered'])} of {n(wg['space'])}), nights 2, 3, 4")
+    check(stated in te, "wide page: an earlier tree with wide items is listed with both groups' figures, not the class's total", stated)
 
 
 def group_check(d, text, out):
