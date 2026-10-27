@@ -24205,8 +24205,8 @@ whether it was MEASURED here (with the run named), READ or COMPUTED.
   `verify/build-mpfr-oracle.sh`; the system's without it) compiles the wide modes in and links MPFR and GMP, and
   relinks every time so that a binary built without MPFR is never taken for one built with it; MPFR set to anything
   but 0 or 1 is refused. Without it the recipe text is the one it was, and **the tool is the one it was: the object
-  compiled with the Makefile's flags is 0192ab11's byte for byte** (MEASURED: mingw64 gcc on the desktop, 19,419
-  bytes, `cmp`, both compiled under one file name), so tonight's driver build (`make -C host XRT=1 ... divsqrt-soak`)
+  compiled with the Makefile's flags is 0192ab11's byte for byte** (MEASURED: mingw64 gcc on the desktop, `cmp`,
+  both compiled under one file name), so tonight's driver build (`make -C host XRT=1 ... divsqrt-soak`)
   is untouched and a wide mode word is refused by that build as an unknown op, exit 2. (a), a soak that needs MPFR to
   build, was not chosen: every host and stage that builds the soak today would have needed MPFR, and on amd-arc-box
   it would have linked the system's 4.2.1 silently rather than the pinned 4.2.2 (READ: polish/KL-known-limits.md,
@@ -24330,10 +24330,10 @@ checked against the box's sums: box/hxa/out-3c0adb71/):
   collects 5,510 tests, as on the desktop.
 
 **Known limits, recorded rather than fixed** (Logan's rule).
-- The card has run each mode for one to four seconds and one segment at length: the slice and window modes' steady
-  rates on the card, with the oracle in line, are not measured, and the one long run (div256-hard's F3b, below) went
-  at about half the bare call's rate where the study's model gave about 0.7 of it, so phase 1's COMPUTED hours are
-  likely too low until the oracle runs beside the call (the study's phase-2 build item).
+- The card has run each mode for two to ten seconds (its clean runs, 2.00 to 9.88 s) and one segment at length: the
+  slice and window modes' steady rates on the card, with the oracle in line, are not measured, and the one long run
+  (div256-hard's F3b, below) went at about half the bare call's rate where the study's model gave about 0.7 of it, so
+  phase 1's COMPUTED hours are likely too low until the oracle runs beside the call (the study's phase-2 build item).
 - The ladder sees the top bits of the wide result only (about 56 of fp128's 113 and of fp256's 237 over the whole
   slice, the study's 4.1), and nothing of the windows or the wide hard spaces, whose inputs are not narrow values.
 - Flags are compared per batch, as in every mode of the soak.

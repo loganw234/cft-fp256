@@ -1823,13 +1823,13 @@ By hand, on a CPU's software backend or on the card:
 and `wide-plants`, in a second copy of host/ built with `MPFR=1`; and its `unchanged` group, which
 holds both builds' random, exhaustive and hard-case modes and the hard-case sub-commands to another
 tree's tool byte for byte). **On the card** (MEASURED, the lead on amd-arc-box, the parcel's box
-script, part `card`, tile 1 of the quad image 4f9921a2, 2026-10-26): all 30 modes under rne for one to
-four seconds each, and sqrt128-f32 and div256-hard's F3b segment under the other four attributes, 0
-value and 0 flag mismatches in all 39 runs, and the three sabotage runs failed as they must. With the
-oracle in line the soak ran F3b, 16,777,136 cases, in 63 to 67 s an attribute: 0.26 M cases a second,
-about half the bare call's 0.542 M at fp256 (the study's 5.1), where the study's model gave about 0.7
-of it (the fp64 hard modes' 0.78, less 9 to 20 per cent for the oracle: ESTIMATE). The stress driver
-names the items from parcel HXc on.
+script, part `card`, tile 1 of the quad image 4f9921a2, 2026-10-26): all 30 modes under rne for two to
+ten seconds each (2.00 to 9.88 s), sqrt128-f32 under the other four attributes and div256-hard's whole
+F3b segment under all five, 0 value and 0 flag mismatches in all 39 runs, and the three sabotage runs
+failed as they must. With the oracle in line the soak ran F3b, 16,777,136 cases, in 63 to 67 s an
+attribute: 0.26 M cases a second, about half the bare call's 0.542 M at fp256 (the study's 5.1), where
+the study's model gave about 0.7 of it (the fp64 hard modes' 0.78, less 9 to 20 per cent for the
+oracle: ESTIMATE). The stress driver names the items from parcel HXc on.
 
 Known limits. The ladder sees the top bits of the wide result only, and nothing of the windows or
 the wide hard spaces, whose inputs are not narrow values. Flags are compared per batch, as
@@ -1840,7 +1840,7 @@ another, beside the call, so a soak waits for it: on the card the one long run m
 F3b, went at about half the bare call's rate (above), so phase 1's hours, which the study COMPUTED from
 the bare call (the hard modes at 0.78 of it) with a tenth more for the oracle, are likely too low
 until the oracle runs beside the call (the study's phase-2 build item); the slice and window modes'
-steady rates on the card are not measured (their runs were one to four seconds, the start-up in
+steady rates on the card are not measured (their clean runs were 2.00 to 4.12 s, the start-up in
 them). A tool built without MPFR refuses the wide modes as an unknown op
 rather than by a sentence of its own, because that build is the 0192ab11 object.
 
