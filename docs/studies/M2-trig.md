@@ -43,12 +43,16 @@ that date). What the measurement makes of the study's statements:
   34": **23 values live**, in the design's order and scheduled, all 15
   fragments accepted by `routines.program`; past the tree's cap of 21 at
   fp32 for the six, so these three want a cap of 23 (question 9).
-- 3.2's budget, ported once more for a triple word: the bound is **at most
-  0.3675 Bv in all 18 regions** (a margin of 1.44 bits), against 0.33 to
-  0.61 (0.73 at the edge) for the double word at G = 18; the pools are 0
-  wrong on the model and on seq.py (11,400 lanes each). The structured
-  families that marked at G = 18 (cos at 2^-12 and its neighbours) do not
-  mark at G = 40 inside the tiny gates.
+- 3.2's budget, ported once more for a triple word, under rne (the study's
+  budgets are rne; the directed attributes' budgets are not measured): the
+  bound is **at most 0.3675 Bv in all 18 regions at 1,500 lanes** (a margin
+  of 1.44 bits) and **at most 0.4296 Bv at 12,000 lanes on the box** (the
+  lead's run of tw32_box.sh, 2026-10-27; a margin of 1.22 bits), against 0.33
+  to 0.61 (0.73 at the edge) for the double word at G = 18 (1,500 lanes);
+  the pools are 0 wrong on the model and on seq.py (11,400 lanes each), and
+  the rate law holds in all 6 cells at 50,000 lanes on the box. The
+  structured families that marked at G = 18 (cos at 2^-12 and its
+  neighbours) do not mark at G = 40 inside the tiny gates.
 - Question 3: all five of the brief's conditions hold, so by its rule the
   triple word at G = 40 is recommended, the double word at G = 18 staying
   the measured fallback; the choice is Logan's. G = 40 is the last G the

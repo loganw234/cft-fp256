@@ -15,6 +15,7 @@
 #   python tw32_run.py anchors                  the budget on the lanes the lead named (0x3f490fdb, 0x44264edd, ...)
 #   python tw32_run.py variant SLACK            a cheaper variant: the polynomials planned with less slack
 #   python tw32_run.py share                    what sin, cos and tan of one argument share in a compiled step
+#   python tw32_run.py attrs                    where the program's attribute reaches; V and the budget under each
 
 import sys
 import time
@@ -687,6 +688,46 @@ def mode_share():
                 f"{n - len(frs[0].body)} beyond sin's {len(frs[0].body)}")
 
 
+# ---- attrs: where the program's attribute reaches -----------------------------
+
+def mode_attrs():
+    """The five attributes are the 15 fragments' only difference. Where does the program's attribute
+    reach? The instructions that are not RNE, by phase, in each fragment; V0, V1 and V2 compared
+    across the five attributes on lanes; and the budget (the tool's, whose original run takes the
+    fragment's own attributes) on tan, near, under each of the five."""
+    orig = {}
+    say("fp32 triple word, where the program's attribute reaches (the budget's capacities are the "
+        "arithmetic's own roundings before V; the brief's attributes are rne, rtz, rdn, rup, rmm)")
+    for fn in FNS:
+        fr = {rnd: tw32.build(FMT, rnd, fn) for rnd in ATTRS}
+        for rnd in ATTRS:
+            non = {}
+            for (_op, r, _srcs), ph in zip(fr[rnd].body, fr[rnd].phase_of):
+                if r is not None and r != RNE:
+                    d = non.setdefault(ph, {})
+                    d[sf.RND_NAMES[r]] = d.get(sf.RND_NAMES[r], 0) + 1
+            say(f"  {fn} {sf.RND_NAMES[rnd]}: instructions whose attribute is not RNE, by phase: {non}")
+        xs = sorted(set(sample(FMT, "random", 300, 9) + sample(FMT, "edge", 100, 9)
+                        + sample(FMT, "small", 100, 9) + sample(FMT, "near", 100, 9)))
+        diff = 0
+        for xa in xs:
+            vs = set()
+            for rnd in ATTRS:
+                pr = evaluate(fr[rnd], xa, want=["V0", "V1", "V2"])[2]
+                vs.add((pr["V0"], pr["V1"], pr["V2"]))
+            diff += len(vs) != 1
+        say(f"  {fn}: {len(xs)} lanes, V0, V1 and V2 not identical across the five attributes: {diff}")
+    xs = sample(FMT, "near", 300, 22)
+    bounds = {}
+    for rnd in ATTRS:
+        b = tw32_budget.budget(lambda fm, r, fnn: tw32.build(fm, r, fnn), FMT, "tan", xs, rnd=rnd, top=3)
+        bounds[rnd] = (b["bound"], b["Emax"], b["Mmax"], b["resid"])
+        say(f"  budget tan near (300 lanes, seed 22) under {sf.RND_NAMES[rnd]}: {b['lanes']} main lanes; "
+            f"THE BUDGET'S BOUND {b['bound']:.6g} Bv; max |E|/Bv {b['Emax']:.6g}; max |M|/Bv "
+            f"{b['Mmax']:.6g}; residual {b['resid']:.4g} Bv")
+    say(f"  the five budgets identical to every digit printed: {len(set(bounds.values())) == 1}")
+
+
 # ---- main --------------------------------------------------------------------
 
 def main():
@@ -726,6 +767,8 @@ def main():
         mode_variant(int(arg[0]))
     elif mode == "share":
         mode_share()
+    elif mode == "attrs":
+        mode_attrs()
     else:
         raise SystemExit(f"unknown mode {mode}")
     say(f"-- {mode} {' '.join(arg)}: {time.perf_counter() - t0:.0f}s")
