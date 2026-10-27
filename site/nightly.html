@@ -46,6 +46,7 @@ section { border: 1px solid var(--line); border-radius: 6px; margin: 1.2rem 0; p
 .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 19rem), 1fr)); gap: 0.9rem; }
 .card { border: 1px solid var(--line); border-radius: 6px; padding: 0.8rem 0.9rem; background: var(--bg); min-width: 0; }
 .card .kind { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--dim); }
+.card .kind:not(:first-child) { margin-top: 0.9rem; }
 .card .big { font-size: 1.9rem; font-weight: 600; line-height: 1.2; margin: 0.2rem 0; }
 .bar { height: 9px; background: var(--code-bg); border: 1px solid var(--line); border-radius: 5px; overflow: hidden; margin: 0.35rem 0; }
 .bar > i { display: block; height: 100%; background: var(--accent); }
