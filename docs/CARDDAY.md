@@ -1114,8 +1114,8 @@ printf it matches.
   the tile (25 of the 54 random, 18 of the 36 exhaustive) and 47 do not (the coverage wave's 35: 22 tile, 13 host). **Since 2026-10-20 the
   host items run on the host pool, beside the card, and the card's sweep takes tile items only.**
   Every sweep record carries `sweep.reach`, status.txt has a `reach` line (how much of the
-  exhaustive space each kind has covered), and the report a `reach` column (its last) and totals
-  by reach.
+  exhaustive space each kind has covered), and the report a `reach` column (its last until 2026-10-27, when the
+  `format` column joined it at the table's end) and totals by reach.
 - **Records.** `metrics.jsonl` is append-only: a `leg` record each (the cycle, the image and its
   SHA-256, the leg, its start and end, exit status and class - pass, fail, timeout, no_device,
   parse_error, skipped, error -, the counts its verdict line gave, cases or checks a second,
@@ -1264,6 +1264,18 @@ study is per RTL tree, with the three images reported separately beneath it.
   no repository stops the rest and is named in `sweep.trees.git.problem` and the section's `git:` line. `summarize()`
   derives by default, so a reducer that calls it gets the classes the command line shows; `tree_class(kind, run_start, rev)` is the class a slice would fall in under a run_start, by the same rule and with the label `--json` gives (the nightly page's reducer names a class nothing was swept under with it). A slice is counted under the **last `run_start`
   before it** in its file, so a run resumed from another checkout counts what follows under that checkout's tree.
+- **A format on every item, and the wide items as a group of their own** (since 2026-10-27, parcel HXd). Logan's "Per tree" stands: the split is
+  *within* a class, and nothing is summed across classes. `card_stress_lib.OP_FORMAT` names, for each of the 68 ops of the full catalog, the format it computes
+  in, or both ends of a conversion (`fp32 -> fp64`, `fp32 -> the integer targets`, `the integer sources -> fp64`); a slice, f64hard or window item names the format
+  it computes in, and its claim says the slice. Read from the C tools' headers, not from the names (which say it unevenly: `cvtfrom64-all` is 32-bit integers
+  converted to fp64), it reaches the report as `Item.format`, an op with no entry is refused by name where the catalog is built, and the report and the page parse no
+  op name. **The tables** (the sweep section's, and each class's in the coverage by tree) gain a LAST column, `format`, so every column that was is where it was;
+  `--json` gains `format` on every item entry and `group` on every exhaustive one. **The groups** are the catalog's `mpfr` flag: `wide`, the wide-format sweeps' items
+  (parcel HXc: those that exist only in a tool built with MPFR=1), and `base`, every other item, one the catalog does not name included. When a wide item is among
+  the items, the sweep section and each class that has one print a line for each group (`group base:`, `group wide:`) beneath their total, which stays over every item,
+  and `--json` has the same figures in `sweep.total_exhaustive.by_group` and in each class's `total.by_group` (with each image's figure); a run with no wide item prints
+  no group line, and its text differs from the earlier report's in its table rows and headers alone. An item whose op neither the catalog nor the table names has
+  the format `unknown`, as an unknown reach is.
 - **The telemetry section's HBM temperature** (since 2026-10-22, KL-32): the card's FPGA HBM temperature reads 0 in most
   samples - 670 of the 865 of the 2026-10-19 run, in 23 runs of 14 to 45 consecutive samples between 23 runs of readings (the first one
   sample long, the others 7 to 11), the readings from 27 to 35 (MEASURED in that run's metrics.jsonl) - and the report's range for it was
@@ -2324,6 +2336,24 @@ The page's "Skipped" column is the report's count of skipped legs: for the night
 `hw/test_card_stress_progress.py` holds all of this (the page in node, against a stub DOM, in its three failure states; SKIP, by name,
 without node), and, when `CARD_STRESS_PROGRESS_RUNS` names the copies' directories (separated as PATH is), every shared figure against
 `hw/card_stress_report.py --json` on them. Since 2026-10-23 the gate's `cardstress` stage runs it too (the suite's `testfiles` group), and with it its checks of the committed `site/nightly.json` (well-formed, no path or host name, shown by the page); the page's derived note under the label is gone, and the class label alone says that a tree was read from git, wherever the label is shown.
+
+**The wide items on the page (added 2026-10-27, parcel HXd).** Night 1027 is the first to serve the wide items (parcel HXc). Added to a tile class's campaign, they would
+have made its card read "40 of 142, 22.4%" (COMPUTED from the data file's 40 items and 78,575,849,296 indices and the 102 items' 272,192,938,512) and redrawn every
+earlier night's point at that share, since the chart divides each night's coverage by the class's current space. So **within a class the items are two groups, counted
+apart**: the base items (the 71 of 2026-10-25: 40 tile items and 31 host items, as the data file stands; a group is a flag of the catalog, not a number) and the
+wide-format items. Each class's **card** keeps the base block as it reads (`40 of 40`, `100.0% of the campaign's 78,575,849,296 encodings or indices`) and has a block of
+the wide group beside it; **Item by item** lists the wide items after the base items under a heading of their own, and every item row, and the fully covered list, names
+the item's format in a tag; the **chart** has a line for each class and group (the wide group's purple, over its own space, starting the first night it has anything), so
+an older group's line is the line it was. A class with no wide item is drawn as it was. The data file gains, with `SCHEMA` still 1: `format` and `group` on every row; a
+class's `groups` (items, complete, covered, space and share of each group it has rows of), beside `total`, which stays over every row; `rules.groups`; and a night's
+`after.groups`, written only for a class that has a wide row served, so **the earlier nights of the file are the nights they were** (the scheduler's publish step compares
+every field of them). **A data file without the new fields renders exactly as before** (MEASURED: the committed night-7 file, the whole tree the page builds in node, old
+page and new, byte for byte; `hw/test_card_stress_progress.py` keeps the check). Morning step 2 remakes the whole file, so the first file made by these tools has the new
+fields throughout; step 3's `git diff --stat` then shows `now` changed (rows and classes gain fields) and the nights untouched until a wide row is served, and `--check`
+of night 7's committed file against its run with these tools names the new fields as missing from the file, which is the difference between the tools, not a defect of
+either. Known limits: the status file's coverage lines (`hw/card_stress.py`) still sum the groups, so a morning that quotes them mixes the 71 with the wide items; an item
+added to a class mid-life gets the estimate's rule over the class's last three nights, which understates its pace by that much until it has run three nights;
+the soak's signed records do not cover the wide items (above).
 
 **With the scheduler, steps 1 to 4 are prepared on the box (added 2026-10-23, parcel S4a; nothing of it has run on the box yet).** When a window job's driver has ended, whatever its outcome and as long as the job started it, the job closes the night out before it ends (`hw/sched/sched_closeout.py`), in five parts that each refuse by name without hiding the others and never change the night's outcome. `report`: the report tool of the clone that ran the night, run on the run directory, its text kept in the job's directory as `report-final.txt` (the run's own `report.txt` is written again by it, as the routine does). `summary`: the same run's `--json` as `window-summary.json`, with this night's disagreements and the run's failed legs read out of it. `sums`: the job's one `SHA256SUMS` lists the job's own records and logs, the smoke's five files (a directory down) and the run's five files by absolute path as the night ended; step 1's copy is checked against it (the run's lines hold for that night only: the next night resumes the directory). `publish`, which is steps 2 to 4: in the scheduler's own clone of the repository (`publish/repo` in the state root), fetched from `code.remote`'s main and checked out detached, so that the tools are main's, the reducer writes `site/nightly.json`, `--check` must be rc 0, `source.metrics_sha256` must equal the sums' line for `metrics.jsonl`, every night the published file holds must be unchanged, and the clone must differ in that file alone; then `nightly data: night N (DATE)` is committed on the local branch `nightly-data`, whose parent is the fetched main (a dry job prepares none). `retention`, below. Nothing pushes, adds a remote or writes to the remote, and no credential is on the box ("Box prepares, lead pushes", Logan, 2026-10-23). The lead reads `python3 hw/sched/cft_sched.py --root DIR status` (the close-out of the newest ended window job; `status JOB` for another), which gives the commit, its parent and the one command that fetches it, then, in the main checkout, `git fetch ssh://USER@HOST/DIR/publish/repo nightly-data` (the host is `publish.fetch_host` in the scheduler's `config.json`, else the box's own name, which the desktop may not resolve), reads `git diff --stat HEAD FETCH_HEAD`, and pushes it as step 5 says (`git push origin FETCH_HEAD:main`; if main has moved since the box fetched it, `git cherry-pick FETCH_HEAD` first, for the commit holds one file). A part that refused is in `status` with its name and the tool's message (`report-failed`, `summary-unreadable`, `sums-incomplete`; for the data commit `publish-no-remote`, `remote-unreachable`, `reducer-refused`, `check-differs`, `metrics-sha-differs`, `earlier-night-changed`, `nothing-to-publish`, `publish-touches-more`, `publish-failed`), and the lead does that step by hand as above. **The routine above stays the way the morning is done, and the box's script the way the night is launched, until the switch (parcel S5).**
 

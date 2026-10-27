@@ -52,9 +52,20 @@ be computed is "-" or "n/a", never 0. Choices a reader could otherwise take anot
     full-space test of the library in which the tile computes nothing). It is what the item's
     first record says (`sweep.reach`, written by the driver from card_stress_lib.OP_REACH), or,
     for a record from before the driver wrote it, what that table says of the record's op;
-    "unknown" when neither does. It is the LAST column of the sweep tables, so the tables read as
-    they did and a reader that takes columns by position still does. The coverage is totalled by
-    reach, so the report says how much of the exhaustive space the tile itself has seen.
+    "unknown" when neither does. LAYOUT of the sweep tables: every column that was is where it was, so that the tables read as
+    they did and a reader that takes columns by position still does. `reach` was the LAST column until 2026-10-27 (parcel
+    HXd); it is now the one BEFORE the last, and `format` (below) is the last, added at the end for the same reason. A reader
+    that takes a column from the right ([-1], the last field) takes the format now, and must take the reach as the one before it.
+    The coverage is totalled by reach, so the report says how much of the exhaustive space the tile itself has seen.
+  - FORMAT AND GROUP (since 2026-10-27, parcel HXd). Every item has the format it computes in, or both ends of a conversion ("fp128",
+    "fp32 -> the integer targets"): the catalog's (`Item.format`, from card_stress_lib.OP_FORMAT), never parsed from a name; an item the
+    catalog does not name has that of the op its records name, and else `unknown`. It is the LAST column of every item table, the
+    sweep section's and each tree class's, and `format` in --json. Every exhaustive item is in one of two GROUPS, the catalog's `mpfr`
+    flag: "wide", the items of the wide-format sweeps (parcel HXc), which exist only in a tool built with MPFR=1, and "base", every
+    other item (one the catalog does not name too). When a wide item is among the items, the sweep section and each tree class print a
+    line for each group under their `total`, which stays over every item; `total_exhaustive.by_group` and each class's `total.by_group`
+    are the same in --json. A run with no wide item prints no group line, so its text differs from the earlier report's in the table
+    rows and headers that carry the format alone. Nothing is summed across tree classes: a group is counted inside a class.
   - COVERAGE BY TREE (the section after the sweep's; since 2026-10-20). What a slice is evidence
     about depends on what it ran: a TILE item, on the RTL it ran on; a HOST item, on the library's
     source and the compiler. So that section counts a tile item's coverage per RTL tree - the git
@@ -130,7 +141,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)            # python -I does not put the script's directory there
-from card_stress_lib import (CPU, DEFAULT_BATCH, EXH, GIT_HASH, HOST, TILE, cadence_reason, covered, first_gap, is_hbm_temperature,  # noqa: E402
+from card_stress_lib import (CPU, DEFAULT_BATCH, EXH, GIT_HASH, HOST, OP_FORMAT, TILE, cadence_reason, covered, first_gap, is_hbm_temperature,  # noqa: E402
                              iso, manifest_brief, merge_intervals, no_reading, read_records, reach_of, record_batch, resolve_tree,
                              run_classes, slice_reach, sweep_coverage, sweep_items, tree_key)
 
@@ -144,6 +155,35 @@ _CATALOG = {it.name: it for it in sweep_items(mpfr=True)}
 ITEM_SPACE = {n: it.space for n, it in _CATALOG.items()}
 ITEM_LEVEL = {n: it.level for n, it in _CATALOG.items()}
 ITEM_CLAIM = {n: it.claim for n, it in _CATALOG.items() if it.claim}
+# FORMAT AND GROUP (parcel HXd, 2026-10-27). The format an item computes in, or both ends of a conversion, is the catalog's (Item.format, from
+# card_stress_lib.OP_FORMAT): the report parses no op name. The two GROUPS are the catalog's `mpfr` flag: "wide", the items of the wide-format sweeps
+# (parcel HXc), which exist only in a tool built with MPFR=1, and "base", every other item, including one the catalog does not name. A group is
+# totalled apart, so that the wide items join a class beside the others and do not move their figures.
+ITEM_FORMAT = {n: it.format for n, it in _CATALOG.items()}
+ITEM_GROUP = {n: ("wide" if it.mpfr else "base") for n, it in _CATALOG.items()}
+GROUPS = ("base", "wide")
+
+
+def _format_of(item: str, op: Any) -> Optional[str]:
+    """The format of an item: the catalog's for a name it holds, else the table's for the op a record of it names, else None (the text says unknown)."""
+    return ITEM_FORMAT.get(item) or (OP_FORMAT.get(op) if isinstance(op, str) else None)
+
+
+def _by_group(rows: List[Dict[str, Any]], images: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+    """The totals of a list of exhaustive entries (each with `covered`, `total` and `group`) by group, base then wide, only the groups present:
+    the items, what they cover, their space, the share and the items fully covered; with `images`, each image's covered figure summed too."""
+    out = []
+    for g in GROUPS:
+        mine = [e for e in rows if e["group"] == g]
+        if mine:
+            cov, tot = sum(e["covered"] for e in mine), sum(e["total"] for e in mine)
+            d = {"group": g, "items": len(mine), "covered": cov, "total": tot, "pct": 100.0 * cov / tot,
+                 "complete_items": sum(1 for e in mine if e["covered"] == e["total"])}
+            if images is not None:
+                d["by_image"] = {i: sum(e["by_image"].get(i, 0) for e in mine) for i in images if any(i in e["by_image"] for e in mine)}
+            out.append(d)
+    return out
+
 
 KNOWN = ("pass", "fail", "timeout", "no_device", "parse_error", "skipped", "error")
 SWEEP_ROW = "sweep (all items)"
@@ -744,6 +784,7 @@ def _sweep(objs: List[Dict[str, Any]], views: List[Dict[str, Any]]) -> Dict[str,
     incomplete: Counter = Counter()
     seen_kind: Dict[str, str] = {}
     seen_reach: Dict[str, Optional[str]] = {}
+    seen_op: Dict[str, Any] = {}
     for v in sviews:
         st, sw = v["status"], v["r"].get("sweep")
         sw = sw if isinstance(sw, dict) else {}
@@ -765,6 +806,7 @@ def _sweep(objs: List[Dict[str, Any]], views: List[Dict[str, Any]]) -> Dict[str,
             # neither knows - never a guess
             rch = sw.get("reach")
             seen_reach[item] = rch if rch in (TILE, HOST) else reach_of(sw.get("op"))
+            seen_op[item] = sw.get("op")
     nc = {k: not_completed.get(k, 0) for k in ("timeout", "no_device", "parse_error")}
     for k, n in not_completed.items():
         if k not in nc:
@@ -781,13 +823,14 @@ def _sweep(objs: List[Dict[str, Any]], views: List[Dict[str, Any]]) -> Dict[str,
             gap = first_gap(iv, space)
             cov = covered(iv)
             base.update(covered=cov, total=space, pct=100.0 * cov / space, intervals=len(merge_intervals(iv)),
-                        first_gap=list(gap) if gap else None, level=ITEM_LEVEL.get(it))
+                        first_gap=list(gap) if gap else None, level=ITEM_LEVEL.get(it), group=ITEM_GROUP.get(it, "base"))
             exh.append(base)
         elif it in seeds or seen_kind.get(it) == "random":
             base["max_seed_n"] = seeds.get(it)
             rnd.append(base)
         else:
             other.append(base)
+        base["format"] = _format_of(it, seen_op.get(it))
     n_exh = len(exh)
     tot_cov = sum(e["covered"] for e in exh)
     # by reach: which of the items exercise the tile at all (tile first, then host, then the ones
@@ -820,7 +863,7 @@ def _sweep(objs: List[Dict[str, Any]], views: List[Dict[str, Any]]) -> Dict[str,
         "total_exhaustive": {"items": n_exh, "covered": tot_cov, "total": tot_all,
                              "pct": (100.0 * tot_cov / tot_all) if n_exh else None,
                              "complete_items": sum(1 for e in exh if e["covered"] == e["total"]),
-                             "by_reach": by_reach},
+                             "by_reach": by_reach, "by_group": _by_group(exh)},
         "random_by_reach": rnd_reach,
         "completed": completed, "failed": failed_slices, "not_completed": nc, "skipped": skipped,
         "outside_coverage": completed - sum(served.values()), "malformed": malformed,
@@ -971,7 +1014,7 @@ def _gather(classes: Dict[Tuple[str, str], Dict[str, Any]], kind: str, cl: Dict[
     gathers every slice of a run through this, and tree_class gathers one: the label of a class a run fills alone is the same by construction."""
     c = classes.setdefault((kind, cl["key"]), {"kind": kind, "key": cl["key"], "head": cl["head"], "tail": cl["tail"], "why": [], "said": [],
                                                "prefix": cl.get("prefix"), "commit12": cl.get("commit12"),
-                                               "derived": [], "runs": [], "commits": [], "iv": {}, "rnd": {}})
+                                               "derived": [], "runs": [], "commits": [], "iv": {}, "rnd": {}, "fmt": {}})
     if cl["tail"] and not c["tail"]:
         c["tail"] = cl["tail"]                  # a note (a tile tree's 'whether it was modified is not recorded') is the class's if any run's is
     if cl["said"] and cl["said"] not in c["said"]:
@@ -1037,6 +1080,7 @@ def _trees(sources: List[Dict[str, Any]], rev: Optional[Callable[[str, str], Opt
             image = _str(r.get("image")) or "-"
             cases = _int((r.get("counts") or {}).get("cases")) if isinstance(r.get("counts"), dict) else None
             if "lo" in sw or "hi" in sw:
+                c["fmt"].setdefault(item, _format_of(item, sw.get("op")))
                 d = c["iv"].setdefault(item, {})
                 d.setdefault(image, {"iv": [], "slices": 0, "cases": 0})
                 d[image]["iv"].append((int(sw["lo"]), int(sw["hi"])))
@@ -1048,6 +1092,7 @@ def _trees(sources: List[Dict[str, Any]], rev: Optional[Callable[[str, str], Opt
                 # stream does too, so a chunked item's slices are a row of their own and never summed with the default tools'
                 bt = record_batch(sw)
                 rk = item if bt == DEFAULT_BATCH else f"{item} @batch {bt}"
+                c["fmt"].setdefault(rk, _format_of(item, sw.get("op")))
                 d = c["rnd"].setdefault(rk, {})
                 d.setdefault(image, {"slices": 0, "cases": 0, "max_seed_n": None})
                 d[image]["slices"] += 1
@@ -1074,14 +1119,15 @@ def _trees(sources: List[Dict[str, Any]], rev: Optional[Callable[[str, str], Opt
                 exh.append({"item": item, "slices": sum(v["slices"] for v in per.values()),
                             "cases": sum(v["cases"] for v in per.values()), "covered": cov, "total": sp,
                             "pct": 100.0 * cov / sp, "complete": cov == sp,
-                            "by_image": {i: covered(per[i]["iv"]) for i in sorted(per, key=img_key)}})
+                            "by_image": {i: covered(per[i]["iv"]) for i in sorted(per, key=img_key)},
+                            "format": c["fmt"].get(item), "group": ITEM_GROUP.get(item, "base")})
             rnd = []
             for item in sorted(c["rnd"]):
                 per = c["rnd"][item]
                 seeds = [v["max_seed_n"] for v in per.values() if v["max_seed_n"] is not None]
                 rnd.append({"item": item, "slices": sum(v["slices"] for v in per.values()),
                             "cases": sum(v["cases"] for v in per.values()), "max_seed_n": max(seeds) if seeds else None,
-                            "by_image": {i: per[i]["cases"] for i in sorted(per, key=img_key)}})
+                            "by_image": {i: per[i]["cases"] for i in sorted(per, key=img_key)}, "format": c["fmt"].get(item)})
             tot_cov = sum(e["covered"] for e in exh)
             tot_sp = sum(e["total"] for e in exh)
             out.append({
@@ -1091,7 +1137,8 @@ def _trees(sources: List[Dict[str, Any]], rev: Optional[Callable[[str, str], Opt
                 "total": {"items": len(exh), "covered": tot_cov, "total": tot_sp,
                           "pct": (100.0 * tot_cov / tot_sp) if exh else None,
                           "complete_items": sum(1 for e in exh if e["complete"]),
-                          "by_image": {i: sum(e["by_image"].get(i, 0) for e in exh) for i in imgs if any(i in e["by_image"] for e in exh)}},
+                          "by_image": {i: sum(e["by_image"].get(i, 0) for e in exh) for i in imgs if any(i in e["by_image"] for e in exh)},
+                          "by_group": _by_group(exh, imgs)},
             })
     return {"classes": out, "git": {"read": via == "git", "source": via, "problem": problem},
             "sources": [{"source": s["source"], "records": len(s["objs"]), "bad_lines": sorted(s.get("bad_lines") or []),
@@ -1600,6 +1647,24 @@ def _reach_text(r: Optional[str]) -> str:
     return r if r in (TILE, HOST) else "unknown"
 
 
+def _format_text(f: Optional[str]) -> str:
+    """An item's format as the tables show it, or 'unknown' for an item neither the catalog nor the op of its records names."""
+    return f if isinstance(f, str) and f else "unknown"
+
+
+def _group_lines(groups: Any, verb: str, tail: Any = None) -> List[str]:
+    """The totals by group, one line a group (base, then wide) and a line saying what a group is - and only when a wide item is among the items, so
+    that a run without one is reported as it always was. `verb` is the word of the total line they stand beside ('covered' in the sweep, 'covers' in a
+    class); `tail`, given a group, adds to its line (the class's 'by image')."""
+    if not (isinstance(groups, list) and any(g.get("group") == "wide" for g in groups)):
+        return []
+    L = [f"  group {g['group']}: {g['items']} exhaustive item(s) seen; {verb} {g['covered']} of {g['total']} encodings "
+         f"({_pct3(g['covered'], g['total'])}); fully covered {g['complete_items']} of {g['items']}" + (tail(g) if tail else "") for g in groups]
+    L.append("  group wide is the wide-format sweeps' items (parcel HXc), which exist only in a tool built with MPFR=1; group base is every other "
+             "item; the total above is over both")
+    return L
+
+
 def _reach_note(rows: List[Dict[str, Any]]) -> List[str]:
     """One sentence, when any item is a host item, on what that means (hw/card_stress_lib.py, OP_REACH)."""
     L: List[str] = []
@@ -1619,12 +1684,12 @@ def _r_sweep(S: Dict[str, Any]) -> List[str]:
         L.append(f"exhaustive items (encodings of 2**32 = {EXH}"
                  + ("; an item marked [N indices] counts the indices of its own space, the hard-case and class-level modes'" if own else "")
                  + "):")
-        # `reach` is the last column: the table is the one it was, plus one column at its end
-        L += _table(["item", "slices", "cases", "covered", "pct", "intervals", "first_uncovered", "incomplete", "reach"],
+        # `reach` was the last column and `format` (parcel HXd) is: the table is the one it was, plus one column at its end
+        L += _table(["item", "slices", "cases", "covered", "pct", "intervals", "first_uncovered", "incomplete", "reach", "format"],
                     [[e["item"] + (f" [{e['total']:,} indices]" if e["total"] != EXH else ""), str(e["slices"]), str(e["cases"]),
                       str(e["covered"]), _pct3(e["covered"], e["total"]), str(e["intervals"]),
                       _hex_range(*e["first_gap"]) if e["first_gap"] else "none", str(e["incomplete"]),
-                      _reach_text(e["reach"])]
+                      _reach_text(e["reach"]), _format_text(e.get("format"))]
                      for e in W["exhaustive"]])
         t = W["total_exhaustive"]
         L.append(f"  total: {t['items']} exhaustive item(s) seen; covered {t['covered']} of {t['total']} "
@@ -1633,6 +1698,7 @@ def _r_sweep(S: Dict[str, Any]) -> List[str]:
             L.append(f"  reach {_reach_text(r['reach'])}: {r['items']} exhaustive item(s) seen; covered {r['covered']} "
                      f"of {r['total']} encodings ({_pct3(r['covered'], r['total'])}); fully covered "
                      f"{r['complete_items']} of {r['items']}")
+        L += _group_lines(t.get("by_group"), "covered")
         L += _reach_note(t["by_reach"])
         if any(e.get("level") == "class" for e in W["exhaustive"]):
             L.append("  a class-level item (an op ending -class) is a claim at the class level (L2), PLAUSIBLE and not proved: a "
@@ -1655,9 +1721,9 @@ def _r_sweep(S: Dict[str, Any]) -> List[str]:
     L.append("")
     if W["random"]:
         L.append("random items (highest seed_n among completed slices):")
-        L += _table(["item", "slices", "cases", "highest_seed_n", "incomplete", "reach"],
+        L += _table(["item", "slices", "cases", "highest_seed_n", "incomplete", "reach", "format"],
                     [[e["item"], str(e["slices"]), str(e["cases"]), _g(e["max_seed_n"]),
-                      str(e["incomplete"]), _reach_text(e["reach"])] for e in W["random"]])
+                      str(e["incomplete"]), _reach_text(e["reach"]), _format_text(e.get("format"))] for e in W["random"]])
         L.append("  random reach: " + ", ".join(f"{_reach_text(r['reach'])} {r['items']} item(s)"
                                                 for r in W["random_by_reach"]))
         L += _reach_note(W["random_by_reach"])
@@ -1666,8 +1732,8 @@ def _r_sweep(S: Dict[str, Any]) -> List[str]:
     if W["other"]:
         L.append("")
         L.append("items with neither a range nor a seed in their records:")
-        L += _table(["item", "slices", "cases", "incomplete"],
-                    [[e["item"], str(e["slices"]), str(e["cases"]), str(e["incomplete"])] for e in W["other"]])
+        L += _table(["item", "slices", "cases", "incomplete", "format"],
+                    [[e["item"], str(e["slices"]), str(e["cases"]), str(e["incomplete"]), _format_text(e.get("format"))] for e in W["other"]])
     L.append("")
     nc = ", ".join(f"{k} {n}" for k, n in W["not_completed"].items())
     L.append(f"slices: {W['completed']} completed (pass {W['completed'] - W['failed']}, fail {W['failed']}); "
@@ -1744,21 +1810,24 @@ def _r_trees(S: Dict[str, Any]) -> List[str]:
             L.append("  exhaustive items (encodings of 2**32"
                      + ("; an item marked [N indices] counts the indices of its own space" if any(e["total"] != EXH for e in c["exhaustive"]) else "")
                      + "; an image's column is what that image covered alone):")
-            L += _table(["item", "covered", "pct", "slices"] + imgs,
+            L += _table(["item", "covered", "pct", "slices"] + imgs + ["format"],
                         [[e["item"] + (f" [{e['total']:,} indices]" if e["total"] != EXH else ""), str(e["covered"]),
                           _pct3(e["covered"], e["total"]), str(e["slices"])]
-                         + [str(e["by_image"][i]) if i in e["by_image"] else "-" for i in imgs] for e in c["exhaustive"]])
+                         + [str(e["by_image"][i]) if i in e["by_image"] else "-" for i in imgs] + [_format_text(e.get("format"))]
+                         for e in c["exhaustive"]])
             t = c["total"]
             L.append(f"  total: {t['items']} exhaustive item(s) seen; covers {t['covered']} of {t['total']} encodings "
                      f"({_pct3(t['covered'], t['total'])}); fully covered {t['complete_items']} of {t['items']}; by image: "
                      + (", ".join(f"{i} {n}" for i, n in t["by_image"].items()) or "none"))
+            L += _group_lines(t.get("by_group"), "covers", lambda g: "; by image: " + (", ".join(f"{i} {n}" for i, n in g.get("by_image", {}).items()) or "none"))
         else:
             L.append("  exhaustive items: none seen")
         if c["random"]:
             L.append("  random items (cases by image; highest seed_n among completed slices):")
-            L += _table(["item", "slices", "cases", "highest_seed_n"] + [f"cases_{i}" for i in imgs],
+            L += _table(["item", "slices", "cases", "highest_seed_n"] + [f"cases_{i}" for i in imgs] + ["format"],
                         [[e["item"], str(e["slices"]), str(e["cases"]), _g(e["max_seed_n"])]
-                         + [str(e["by_image"][i]) if i in e["by_image"] else "-" for i in imgs] for e in c["random"]])
+                         + [str(e["by_image"][i]) if i in e["by_image"] else "-" for i in imgs] + [_format_text(e.get("format"))]
+                         for e in c["random"]])
         else:
             L.append("  random items: none seen")
     return L
