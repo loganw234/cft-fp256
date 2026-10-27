@@ -25332,3 +25332,38 @@ above names its commit. This entry's commit changes docs alone
 (this entry, docs/CARDDAY.md's measured times and one sentence, docs/VERIFICATION.md's cardstress row, docs/README.md's
 counts), which none of the runs above reads (READ: the suites quote docs/VALIDATION.md's card lines as literals and open
 docs/studies/ alone); python/check_docs_index.py, run after the commit, reads them.
+
+**Main taken in (e52c48a7), and the twelve formats.** At the lead's word, after HXd's merge on main (5f60318c: M2G1, M2X and HXd
+on 3ec0081c), the branch took main by its SHA (merge commit e52c48a7, parents 67b810fe and 5f60318c). docs/VALIDATION.md is main's
+whole file, then this block (boxbatch/val_merge4.py, `--check` equal); docs/CARDDAY.md and docs/VERIFICATION.md keep both sides
+(HXd's paragraph where main put it, then this parcel's section; the golden row's head this parcel's, 5,581 after the merge,
+MEASURED by `pytest --collect-only`, then M2G1's; the cardstress row HXd's sentence, then this parcel's); docs/README.md is
+recounted from the files; hw/test_card_stress.py keeps both groups' checks and both plants lists (274 plants: main's 264 and
+this parcel's 10); hw/card_stress_lib.py and hw/card_stress_report.py merged without a conflict. The twelve ops have the formats
+HXd proposed, each READ against clause5_soak.c's table of its wide modes (`WJOBS`: the wide format, and a conversion's
+destination), with no difference: rint128-class, scaleb128-class and rint128-f32 "fp128"; rint256-class, scaleb256-class and
+rint256-f32 "fp256"; conv128to64-class "fp128 -> fp64"; conv256to128-class "fp256 -> fp128"; cvtto128-class and cvtto256-class
+"fp128 -> the integer targets" and "fp256 -> the integer targets"; cvtfrom128-class and cvtfrom256-class "the integer sources ->
+fp128" and "the integer sources -> fp256" (64-bit sources, as cvtfrom64-class's). HXd's `format_table_checks` reads them from
+that table as it reads divsqrt_soak.c's: the table is over the catalog's 80 ops (68 before these twelve) and the catalog uses
+sixteen distinct strings (ten before), with a check of the twelve and one of six items' formats; one HXd check name changed with
+its count, "(68 ops)" to "(80 ops)", and HXd's plant that expects it with it. With cvtfrom256-class left out of `OP_FORMAT` in a
+scratch copy, the copy's catalog refuses it by name ("op 'cvtfrom256-class' has no format: give it one in OP_FORMAT
+(hw/card_stress_lib.py)") and `format_table_checks` stops on that refusal (MEASURED; the copy then removed): an op without a
+format stops the group with an exception that names it, rather than reddening one check line - a refusal by name, which the
+lead accepted as it stands. MEASURED on the
+desktop at the merged tree: `hw/test_card_stress.py --only wide,items --no-plants` 363 checks, 0 failed, 1 skipped (`wide
+build`, POSIX), 77 s; hw/test_card_stress_report.py 5,193 checks, 0 failed; hw/test_card_stress_progress.py 659 checks, 0
+failed, 1 skipped (the lead's real copies); HXd's seven plants of the format table, each caught at its check, and this parcel's
+seven, 0 failed, 6 skipped (POSIX); pytest test_figure_extracts.py and test_c5_class_enum.py 97 passed; check_docs_index and
+project_figures `--check` rc 0. Plant anchors at e52c48a7: 274 plants, 280 edits, each exactly once in the file its plant
+edits, and none of main's expected check names gone (counted with no run). From a fresh clone of e52c48a7 in WSL, in the lead's slot (the lead's go after VHXb left WSL at 14:49:31), one at a time,
+niced: the whole suite without its plants **1,178 checks, 0 failed, 4 skipped** (the named four that need the lead's run
+directories), 613 s (14:52:52 to 15:03:05), its 36 groups each 0 failed and the group `wide` 208 checks; **every plant of the
+suite** (`bash hw/test-card-stress.sh --only plants`, the control included) **277 checks, 0 failed, 5 skipped**, 2,070 s (15:06:32
+to 15:41:02): the control's five and 272 of the 274 plants, each caught at the check written for it - HXd's, HXc's, this
+parcel's and the older ones - the other two skipped by name for want of the lead's run files (P5's real-file resume planner,
+`CARD_STRESS_RESUME_RUN`; figure_extracts' host-pool activity, `CARD_STRESS_METRICS`), with three SKIP lines of the same; and
+the scheduler's suite without its plants **375 checks, 0 failed, 3 skipped**, 110 s (15:45:00 to 15:46:50), the same named skips
+as before. The clone's status was clean after each, and it was then removed by its path. This paragraph's commit changes docs
+alone (this paragraph, docs/VERIFICATION.md's cardstress row and docs/README.md's counts), which none of those runs reads.
