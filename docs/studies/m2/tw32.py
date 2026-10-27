@@ -474,6 +474,35 @@ def reduce_tw(f, x, P, magic_ref, plant=None):
     return {"r0": r0, "r1": r1, "r2": r2, "q": q, "small": small}
 
 
+# ---- an argument family for the cushion and the budget ------------------------
+
+def quad_family(fmt=FMT, K=64, J=3, extra=128, seed=41):
+    """The floats within J ulps of (k + 1/2) pi/2 - the odd multiples of pi/4,
+    the quadrant boundaries, where |r| is next to pi/4 and the rho of the
+    polynomials' domain acts - for every k from 0 to K - 1 (so 0x3f490fdb,
+    the float just above pi/4, is k = 0, j = 0), and for `extra` more k of
+    random size (random_bits: 1 to 127, both parities), both signs. The
+    study's `edge` region takes odd k only and never k = 0. -> sorted list."""
+    import random
+    rng = random.Random(seed)
+    pio2 = pi_frac() / 2
+    ks = list(range(K)) + [rng.getrandbits(rng.randint(1, fmt.emax)) for _ in range(extra)]
+    out = set()
+    for k in ks:
+        b = enc(fmt, (Fraction(k) + Fraction(1, 2)) * pio2)
+        for j in range(-J, J + 1):
+            out.add(b + j)
+            out.add((b + j) | fmt.sign_mask)
+    return sorted(x for x in out if sf.unpack(fmt, x).kind not in (sf.INF, sf.NAN))
+
+
+def quad_sample(fmt, n, seed):
+    """n of quad_family's arguments, drawn by `seed` (all of them if fewer)."""
+    import random
+    fam = quad_family(fmt)
+    return sorted(random.Random(seed).sample(fam, n)) if n < len(fam) else fam
+
+
 # ---- the polynomials' plan ---------------------------------------------------
 
 def plan_tw_poly(fmt, G, rho, slack=2):

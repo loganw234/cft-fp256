@@ -115,6 +115,17 @@ def mode_costs():
         unions[fn] = words_fn
     say(f"fp32 bank words, union over the five attributes: sin {len(unions['sin'])}, "
         f"cos {len(unions['cos'])}, tan {len(unions['tan'])}; all three {len(union_all)}")
+    # the polynomials' domain: rho = pi/4 (1 + e) for the study's 2^-30, this build's 2^-16 and
+    # the largest overshoot the reduce mode measured (2^-21.61), and what the plan makes of each
+    base = pi_frac() / 4
+    plans = {}
+    for lab, e in (("2^-30 (the study's)", Fraction(1, 2 ** 30)),
+                   ("2^-21.61 (measured, reduce mode)", Fraction(3117, 10 ** 10)),
+                   ("2^-16 (this build's rho)", tw32.CUSHION), ("2^-10", Fraction(1, 2 ** 10))):
+        plans[lab] = tw32.plan_tw_poly(FMT, G, tw32._upper(base * (1 + e)))
+    say("the polynomials' plan (K3, K2, D) for S and C at rho = pi/4 (1 + e): "
+        + "; ".join(f"e = {lab}: {pl}" for lab, pl in plans.items())
+        + f"; the same plan at every e: {len({str(v) for v in plans.values()}) == 1}")
     # the study's 2.2 table by part, and 2.7's three parts
     for fn in FNS:
         f = tw32.build(FMT, RNE, fn)
@@ -231,13 +242,15 @@ def mode_reduce(plant=None, n=1000, seed=7):
     B = Fraction(1, 2 ** (P_BITS + G))
     rho = pi_frac() / 4 * (1 + tw32.CUSHION)
     magic = enc_exact(FMT, Fraction(3, 2) * 2 ** (P_BITS - 1))
-    totals = {"quadrant off": 0, "audit failures": 0, "arguments": 0}
+    totals = {"quadrant off": 0, "audit failures": 0, "arguments": 0, "overshoot": 0.0}
     for label, xs in (("random, bucket edges, powers of two, the pools "
                        "(redcheck.args)", redcheck.args(FMT, P, n, seed)),
                       ("the products' binade edges (m2edges.edges)", edges(FMT, P)),
                       ("x within 3 ulps of (k + 1/2) pi/2, where |r| is next to pi/4 "
                        "and the cushion acts (m2measure.sample edge, seed 31, 2,000)",
-                       [x for x in sample(FMT, "edge", 2000, 31) if in_main(FMT, "sin", x)])):
+                       [x for x in sample(FMT, "edge", 2000, 31) if in_main(FMT, "sin", x)]),
+                      ("the quadrant boundaries, every k from 0 (0x3f490fdb) and 128 random k, "
+                       "within 3 ulps, both signs (tw32.quad_family)", tw32.quad_family(FMT))):
         t0 = time.perf_counter()
         worst, wx, bad_q, bad_audit, cnt, maxex = -1e9, None, 0, 0, 0, -1.0
         firsts = []
@@ -270,10 +283,25 @@ def mode_reduce(plant=None, n=1000, seed=7):
             f"audit failures {bad_audit}; largest |r|/(pi/4) - 1 seen {maxex:.3e}; "
             f"{time.perf_counter() - t0:.0f}s")
         totals["quadrant off"] += bad_q
+        totals["overshoot"] = max(totals["overshoot"], maxex)
         totals["audit failures"] += bad_audit
         totals["arguments"] += cnt
+    # the float just above pi/4 and its neighbours (M2G1's finding at G = 18: the double
+    # word's reduction takes n = 0 at 0x3f490fdb, |r| past pi/4 by 2^-25.10)
+    row = []
+    for j in range(-3, 4):
+        xa = 0x3f490fdb + j
+        _r, _q, pr = evaluate(f, xa, want=["r0", "r1", "r2", "q"])
+        nq = (pr["q"] - magic) % 4
+        rm = dec(FMT, pr["r0"]) + dec(FMT, pr["r1"]) + dec(FMT, pr["r2"])
+        ex = float(abs(rm) / (pi_frac() / 4) - 1)
+        row.append(f"{hex(xa)}: n {nq}, |r|/(pi/4) - 1 = {ex:+.3e} (2^{math.log2(abs(ex)) if ex else -999:.2f})")
+    say("  the float just above pi/4 and its neighbours (positive; n and the overshoot of the "
+        "model's own r): " + "; ".join(row))
     say(f"TOTAL {totals['arguments']} arguments: quadrant off {totals['quadrant off']}, "
-        f"audit failures {totals['audit failures']}")
+        f"audit failures {totals['audit failures']}; largest overshoot over every family "
+        f"{totals['overshoot']:.3e} (2^{math.log2(totals['overshoot']) if totals['overshoot'] > 0 else -999:.2f}); "
+        f"rho used 2^-16 = {float(tw32.CUSHION):.3e}")
     return totals
 
 
@@ -502,7 +530,7 @@ def main():
         fn, region = arg[0], arg[1]
         N = arg[2] if len(arg) > 2 else "1500"
         seed = arg[3] if len(arg) > 3 else str({"edge": 21, "near": 22, "small": 23,
-                                               "random": 24, "zero": 25}[region])
+                                               "random": 24, "zero": 25, "quad": 26}[region])
         plant = arg[4] if len(arg) > 4 else "-"
         tw32_budget.main(["fp32", fn, region, N, seed, "10", "-", plant])
     elif mode == "rate":

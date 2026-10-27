@@ -16,7 +16,9 @@
 #
 #   python tw32_budget.py FMT FN MODE N [seed] [top] [G] [plant]
 # FMT fp32: tw32.build (G = 40, a `plant` of tw32.PLANTS); any other format:
-# m2trig.build (the control). MODE as m2measure.py's.
+# m2trig.build (the control). MODE as m2measure.py's, and `quad` (fp32 only):
+# tw32.quad_sample, the floats next to the quadrant boundaries (k + 1/2) pi/2,
+# k = 0 included, where |r| is next to pi/4.
 
 import sys
 import time
@@ -203,7 +205,7 @@ def main(argv=None):
     plant = argv[7] if len(argv) > 7 and argv[7] != "-" else None
     fmt = FORMATS[name]
     t0 = time.perf_counter()
-    xs = sample(fmt, mode, N, seed)
+    xs = tw32.quad_sample(fmt, N, seed) if mode == "quad" else sample(fmt, mode, N, seed)
     if name == "fp32":
         def build_fn(fm, rnd, fnn):
             return tw32.build(fm, rnd, fnn, G=G or tw32.G_TW, plant=plant)
