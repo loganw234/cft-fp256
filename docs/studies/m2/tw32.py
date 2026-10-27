@@ -48,7 +48,14 @@ G_TW = 40                     # the guard: Logan's for M1's fp32 library
 B_TW = 16                     # chunk width: the widest whose coarse sum is exact
 BMID_TW = -20                 # the boundary between the upper and the lower group
 PLANTS = ("r2-dropped", "carry-dropped", "mark-silenced")
-CUSHION = Fraction(1, 2 ** 16)  # |r| <= pi/4 (1 + CUSHION): see tw_plan
+# |r| <= pi/4 (1 + CUSHION). Derived (S-hat units, f = t U, U >= 1/2): the last
+# quadrant step centres xh0, the exact upper part's high word, so |xh| <= U/2;
+# what follows it is xl (|xl| <= ulp(xh0)/2 <= 2^-24 (U + 2^-10)), the lower
+# group (<= 2^-21 once the carry has moved its multiple of 2^-20 up, plus
+# 2^-43 for its low word) and the lows (< 2^-54): in all |f| <= U/2 (1 + 2^-18.9)
+# at U = 1/2, the worst. MEASURED beside it in the driver's reduce mode: the
+# arguments next to (k + 1/2) pi/2 reach pi/4 (1 + 3.1e-7).
+CUSHION = Fraction(1, 2 ** 16)
 
 
 def proof(f, cond, name, detail=""):

@@ -234,7 +234,10 @@ def mode_reduce(plant=None, n=1000, seed=7):
     totals = {"quadrant off": 0, "audit failures": 0, "arguments": 0}
     for label, xs in (("random, bucket edges, powers of two, the pools "
                        "(redcheck.args)", redcheck.args(FMT, P, n, seed)),
-                      ("the products' binade edges (m2edges.edges)", edges(FMT, P))):
+                      ("the products' binade edges (m2edges.edges)", edges(FMT, P)),
+                      ("x within 3 ulps of (k + 1/2) pi/2, where |r| is next to pi/4 "
+                       "and the cushion acts (m2measure.sample edge, seed 31, 2,000)",
+                       [x for x in sample(FMT, "edge", 2000, 31) if in_main(FMT, "sin", x)])):
         t0 = time.perf_counter()
         worst, wx, bad_q, bad_audit, cnt, maxex = -1e9, None, 0, 0, 0, -1.0
         firsts = []
