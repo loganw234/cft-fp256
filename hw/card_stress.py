@@ -2659,8 +2659,11 @@ class Driver:
                     bad.append(f"`{name} dump {op5} size` exited {rc} ({out.strip()[-80:]!r}): this tool has no wide clause-5 modes, so "
                                f"it was not built with MPFR=1, and no wide clause-5 item can run")
                     break
-                if out.strip() != str(space):
-                    bad.append(f"`{name} dump {op5} size` printed {out.strip()[-40:]!r}, not the catalog's {space} "
+                # the size is the one line of digits it prints; any other line (stderr's, or the dry run's stand-in naming its
+                # environment) is not the answer, as hard-space's line is read above by its pattern
+                got5 = re.findall(r"^(\d+)$", out, re.M)
+                if got5 != [str(space)]:
+                    bad.append(f"`{name} dump {op5} size` printed {got5 or out.strip()[-40:]!r}, not the catalog's {space} "
                                f"(hw/card_stress_lib.py {'EXH' if op5 in L.WIDE_C5_F32 else 'CLASS_SPACE'})")
             if bad:
                 step(f"mpfr {name}", False, "; ".join(bad[:3]) + (f"; and {len(bad) - 3} more" if len(bad) > 3 else ""))
