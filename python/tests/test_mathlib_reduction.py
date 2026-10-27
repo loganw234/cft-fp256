@@ -413,8 +413,13 @@ def check_reference(run, stats=None):
             worst = max(worst, _log2(abs(rm - r) / abs(r)) + p + G)
         if ml._enc(fmt, rm) != rh:
             note("r_h not RN(r_h + r_l)", x)
-        if (q - magic) % 4 != q & 3:
-            note("q not MAGIC + n", x)
+        try:
+            n = ml._dec(fmt, q) - Fraction(3, 2) * 2 ** (p - 1)
+        except ValueError:
+            n = None
+        if n is None or n.denominator != 1 or n % 4 != q & 3:
+            note("q not MAGIC + n, n an integer, with n mod 4 as q's low bits",
+                 x)
         X = abs(ml._dec(fmt, x))
         if 2 * X * T < 1:
             up = ml._dec(fmt, sf.next_up(fmt, x & ~fmt.sign_mask)[0])
@@ -1097,6 +1102,20 @@ def test_a_missing_header_is_a_difference_by_name(tmp_path):
                ml.check_reduction_constants(formats=(FP64,), header=short)[1])
 
 
+def test_a_header_with_a_flipped_bit_is_a_difference_by_name(tmp_path):
+    """The header leg alone: one bit of the stream flipped, in a word the
+    fp64 table reads, and the chunk that holds it is named."""
+    text = (ROOT / "host" / "src" / "mp_2opi.h").read_text()
+    head, sep, rest = text.partition("cft_two_over_pi[CFT_TWO_OVER_PI_WORDS] = {")
+    i = rest.index("0x") + 2 + 5                      # a digit of the 1st word
+    flipped = rest[:i] + "%x" % (int(rest[i], 16) ^ 1) + rest[i + 1:]
+    bad = tmp_path / "mp_2opi.h"
+    bad.write_text(head + sep + flipped)
+    found = ml.check_reduction_constants(formats=(FP64,), header=bad)[1]
+    assert any("CHUNK0" in f and "header's bits" in f for f in found), found
+    assert not any("Machin" in f for f in found)       # the derivation agrees
+
+
 def test_an_enclosure_that_straddles_a_chunks_last_bit_is_refused(monkeypatch):
     """The undecidable case: pi known only to 60 bits cannot decide chunks
     of 1,232 bits, and the check says so rather than pass."""
@@ -1106,21 +1125,6 @@ def test_an_enclosure_that_straddles_a_chunks_last_bit_is_refused(monkeypatch):
                         lambda bits: (lo - wide, hi + wide))
     _lines, findings = ml.check_reduction_constants(formats=(FP64,))
     assert any("undecidable" in f and "CHUNK" in f for f in findings), findings
-
-
-def test_the_header_and_the_derivation_agree_on_the_chunks():
-    """The three sources of 2/pi's bits - mpmath at the table's bits + 64,
-    Machin's formula in integers and the header - equal on the chunks the
-    three tables hold (what --check asks of the built words)."""
-    for name in ("fp64", "fp128", "fp256"):
-        P = plan_of(name)
-        v, bits = header()
-        head = v >> (bits - P.bits)
-        lo, hi = ml._check_pi(ml._PI_CHECK_BITS)
-        n_lo = math.floor((2 / hi) * 2 ** P.bits)
-        assert n_lo == math.floor((2 / lo) * 2 ** P.bits) == head
-        assert [(head >> (P.bits - (k + 1) * P.b)) & ((1 << P.b) - 1)
-                for k in range(P.nchunks)] == P.chunks
 
 
 # =====================================================================
@@ -1245,6 +1249,45 @@ def test_each_plant_is_red_in_its_checks_and_green_in_the_others(
         assert all(s.startswith(c + ": ") for s in found[c]), found[c][:2]
     for c in green:
         assert found[c] == [], f"{plant} at {name}: {c} is red: {found[c][:2]}"
+
+
+def test_each_leg_of_the_reference_can_fail():
+    """The reference's legs, each on a lane doctored to break it alone: the
+    normal form (r_h moved an ulp, r_l by the same, the sum kept), `small`
+    either way, a small lane's shape, q's meaning, a non-finite word."""
+    b = build_of("fp64")
+    fmt = FP64
+    two, half = 0x4000000000000000, 0x3fe0000000000000     # 2.0; 0.5 is small
+    run = run_lanes(b, [two, half], audit=False)
+    assert check_reference(run) == []
+    (x, rh, rl, q, sm, inr), (x2, rh2, rl2, q2, sm2, inr2) = run.rows
+    assert not sm and sm2
+    ulp = ml._dec(fmt, rh + 1) - ml._dec(fmt, rh)
+    one = sf.one_bits(fmt)
+    cases = {
+        "r_h not RN(r_h + r_l)": [(x, rh + 1, ml._enc(fmt, ml._dec(fmt, rl)
+                                                      - ulp), q, sm, inr)],
+        "`small` not where": [(x, rh, rl, q, one, inr),
+                              (x2, rh2, rl2, q2, 0, inr2)],
+        "a small lane not r = |x|": [(x2, rh2, ml._enc(fmt, Fraction(1, 2 ** 60)),
+                                      q2, sm2, inr2)],
+        "q not MAGIC + n": [(x, rh, rl, q + (1 << fmt.man_w), sm, inr)],
+        "a non-finite": [(x, sf.qnan_bits(fmt), rl, q, sm, inr)],
+    }
+    for kind, rows in cases.items():
+        found = check_reference(types.SimpleNamespace(b=b, rows=rows))
+        assert any(kind in f and f.startswith("reference: ") for f in found),             (kind, found)
+
+
+def test_the_proofs_check_fails_on_a_wrong_plan_alone(monkeypatch):
+    """Its plan legs without its refusals: fp128 planned with the docs'
+    sampled 121 bits of cancellation, not the range's 123 (the study's 3.6,
+    item 3), moves the budget, the bottom and L, and the check says so."""
+    monkeypatch.setitem(ml.TRIG_LOST, "fp128", 121)
+    found = check_proofs()
+    assert any("proofs: fp128: budget is -284, pinned -286" in f for f in found)
+    assert not any(f.startswith("proofs: fp64") or f.startswith("proofs: fp256")
+                   for f in found)
 
 
 def test_the_cushion_check_fails_on_the_lanes_alone_and_on_the_pin_alone(
