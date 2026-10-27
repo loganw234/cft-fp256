@@ -1897,8 +1897,8 @@ RULE_TEXT = SKIP_A + " (programs/acceptance.py, REV8)"       # what the driver s
 SKIP_E = "its estimate (1200 s) would end past the deadline by more than the 900 s grace"
 
 
-def cad_text(visit):
-    return f"every 3 visits of an image; this is visit {visit}"       # the driver's text for the selftest's cadence, written out here
+def cad_text(visit, n=3):
+    return f"every {n} visits of an image; this is visit {visit}"       # the driver's text for a cadence of N (the selftest's 3), written out here
 
 
 def lo_cycle(fx, t, image, visit, estimate_skip=False):
@@ -1935,6 +1935,29 @@ def build_left_out_run():
     return fx.records()
 
 
+def build_two_cadence_run():
+    """The quad's six visits under two cadences at once, planned by arithmetic on the visit and not by the driver's code: acceptance every 2nd
+    visit (`--every acceptance=2`) and the selftest every 3rd. A report that took a cadence's N from a constant, or the same N for every leg, is wrong
+    on one of them."""
+    fx = Fx()
+    run_start_rec(fx, T0)
+    t = T0 + 97
+    for v in range(1, 7):
+        due2, due3 = (v - 1) % 2 == 0, (v - 1) % 3 == 0
+        battery = ["api-test"] + (["acceptance"] if due2 else []) + (["selftest"] if due3 else [])
+        left = dict(([] if due2 else [("acceptance", cad_text(v, 2))]) + ([] if due3 else [("selftest", cad_text(v, 3))]))
+        t = fx.begin_cycle(t, "quad", v, 3, battery=battery, left_out=left, every={"acceptance": 2, "selftest": 3})
+        specs = [dict(name="api-test", dur=10, counts={"failed": 0})]
+        if due2:
+            specs.append(dict(name="acceptance", dur=300, counts={"entries": 20, "failed": 0}))
+        if due3:
+            specs.append(dict(name="selftest", dur=770, counts={"cases": 1000}))
+        t = fx.battery(t, "quad", specs)
+        fx.end_cycle(t)
+    fx.add("run_end", t + 10, reason="deadline", exit=0, cycles=6)
+    return fx.records()
+
+
 def build_mixed_run():
     """A run resumed across the change: two quad cycles as the driver wrote them before (the whole battery planned, the selftest's off-visit a skipped
     leg of its own), then three as it writes them now."""
@@ -1959,6 +1982,7 @@ def group_left_out(base):
     group("left-out")
     # the contract between the driver's text and the fixture's, and the old run: no field, no section, the skipped legs as they were
     eq([cad_text(v) for v in range(1, 12)], [LIB.cadence_reason(3, v) for v in range(1, 12)], "the fixture's cadence text is card_stress_lib.cadence_reason's")
+    eq([cad_text(v, 2) for v in range(1, 12)], [LIB.cadence_reason(2, v) for v in range(1, 12)], "... for a cadence of 2 as well")
     eq((base.S["left_out"]["cycles"], base.S["left_out"]["earlier_cycles"]), (0, 15), "a run none of whose cycle_start records says what it left out: 15 earlier cycles")
     check("LEGS LEFT OUT" not in base.T, "and it has no such section: its report is the report it always was")
     eq(base.FS["skip.count"], 9, "and its skipped legs, which include the cadence's and the rule's, are grouped as always")
@@ -1988,6 +2012,17 @@ def group_left_out(base):
     eq({r["image"]: r["runs"] for r in S["rows"] if r["leg"] == "selftest"}, {"quad": 3, "single": 1, "deep": 2}, "the selftest's rows count the visits it was due in")
     check(f"{S['totals']['legs']['total']} recorded; pass 43" in T and "skipped legs: 5 in 2 group(s)" in T, "the text says the same")
     json.dumps(S, allow_nan=False)
+    # two cadences at once, one of them not 3 (send-back 1 of the verifier VBC: every check above uses N = 3, so a report, or a driver, that took every
+    # leg's N as 3 passed them). Hand-counted: acceptance is due on visits 1, 3 and 5 of six (ran in 3, not due in 3), the selftest on 1 and 4 (ran in 2,
+    # not due in 4)
+    S2 = R.summarize(build_two_cadence_run(), now=T0 + 10 ** 6)
+    X2 = S2["left_out"]
+    eq([(g["leg"], g["every"], g["due"], g["ran"], g["not_due"]) for g in X2["cadence"]], [("acceptance", 2, 3, 3, 3), ("selftest", 3, 2, 2, 4)],
+       "two cadences in one run: acceptance every 2nd visit (due in 3 cycles, ran in 3, not due in 3) and the selftest every 3rd (due in 2, ran in 2, not due in 4)")
+    L2 = R.render(S2).split("\n")
+    check("acceptance: every 2nd visit of an image - ran in 3 cycles, not due in 3" in L2 and "selftest: every 3rd visit of an image - ran in 2 cycles, not due in 4" in L2,
+          "and each line states its own cadence: every 2nd visit, every 3rd visit", [ln for ln in L2 if ln.startswith(("acceptance", "selftest"))])
+    eq(X2["cannot_apply"], [], "and neither leg is said to be one that cannot apply")
     # a text that is not the cadence's text for the cycle's visit is not a leg that was not due
     odd = mutate(recs, lambda rr: find_all(rr, type="cycle_start", cycle=2)[0]["left_out"].update(selftest=cad_text(99)))
     Xo = R.summarize(odd, now=T0 + 10 ** 6)["left_out"]
