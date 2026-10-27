@@ -687,8 +687,11 @@ def reach_of(op: Optional[str]) -> Optional[str]:
 # to the integer targets, "sqrt64-f32" the fp64 square root over the fp32 slice). One string an op, over every op of the full catalog
 # (sweep_items(mpfr=True), the same set as OP_REACH): the format the operation computes in, or both ends of a conversion; a slice, f64hard or window
 # item names the format it computes in (its `claim` names the slice). Read from the C tools' own headers (host/tools/clause5_soak.c, divsqrt_soak.c),
-# never from the names, and no string has a slash in it: the nightly page's reducer refuses a published string shaped like a path. An op with no entry
-# is refused BY NAME where the catalog is built (Item calls format_of), so a new op cannot enter the catalog without one.
+# never from the names. No string has a slash in it. The nightly page's reducer refuses to publish a string that its own screen matches
+# (card_stress_progress._PATHY and _IPV4): a drive letter, a UNC path, "~/" or a /word/word path, each at the start of a string or after whitespace, a
+# quote, a bracket, "=", ":", "," or ";", and a dotted IPv4 address. It does not match a slash inside a word ("fp32/fp64" passes it), so the screen
+# does not itself keep a slash out of this table; hw/test_card_stress.py holds that none of the strings is matched by it. An op with no entry is
+# refused BY NAME where the catalog is built (Item calls format_of), so a new op cannot enter the catalog without one.
 OP_FORMAT = {
     # fp32 operations: the operand, and the result
     "sqrt32": "fp32", "div32": "fp32", "rint32": "fp32", "scaleb32": "fp32", "scaleb32-all": "fp32", "scaleb32-wide": "fp32",

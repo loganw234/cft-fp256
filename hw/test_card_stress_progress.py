@@ -999,9 +999,16 @@ def group_committed():
         r = page("ok", DATA)
         check(r.get("app", {}).get("hidden") is False and r["status"]["hidden"] is True, "committed data: the page shows it", r.get("error"))
         # parcel HXd: night 7's file, as 3ec0081c committed it (it has none of the new fields), is drawn as it was drawn. The check stands for as long as the
-        # committed file is that one; the morning routine replaces it with a file made by these tools, and the legacy check of the page's group covers the rest
-        if hashlib.sha256(open(DATA, "rb").read()).hexdigest() == NIGHT7_SHA256:
+        # committed file is that one; the morning routine replaces it with a file made by these tools, and then the check is SKIPPED BY NAME (send-back 1,
+        # N1: it used to vanish without a word), while the legacy check of the page's group covers a data file without the new fields
+        have = hashlib.sha256(open(DATA, "rb").read()).hexdigest()
+        if have == NIGHT7_SHA256:
             eq(page("ok", DATA, clock=NIGHT7_CLOCK).get("dom"), NIGHT7_DOM, "committed data: while the file is night 7's, as 3ec0081c committed it, the page draws the tree it drew then, node for node")
+        else:
+            skip("committed data: the page's tree over night 7's file",
+                 f"{os.path.relpath(DATA, ROOT).replace(os.sep, '/')} is no longer the night-7 file 3ec0081c committed (its sha256 begins {have[:12]}, night 7's {NIGHT7_SHA256[:12]}), so "
+                 "NIGHT7_DOM, the digest of the tree the old page drew over that file, does not apply to it; expected once the morning routine has replaced it (the check and the "
+                 "three NIGHT7_ constants can then be retired)")
     else:
         skip("committed data in the page", "node is not on PATH")
 

@@ -5521,9 +5521,10 @@ def wide_formats_from_c() -> dict:
 
 def format_table_checks(src: str = HERE) -> list:
     """Parcel HXd, the format of every op (hw/card_stress_lib.py, OP_FORMAT, Item.format): the table names every op of the full catalog and no other, each
-    op's format is the one the C tools' headers give (the 38 older ops written out in this file, the 30 wide ones read from the tool's table of modes), a
-    conversion names both ends, an op with no format is refused by name where an item is made of it, and none of the strings has the shape of a path - the
-    nightly page's reducer refuses a published string that has one, and is asked here, not copied."""
+    op's format is the one this file's own table gives for the 38 older ops (DOC_FORMAT, typed from the C tools' headers, not read from them) and the one
+    divsqrt_soak.c's table of modes gives for the 30 wide ops (read from the file), a conversion names both ends, an op with no format is refused by name
+    where an item is made of it, and none of the strings is matched by the screen the nightly page's reducer holds a published string to (_PATHY and
+    _IPV4: what they match is in the last check's name), which is asked here, not copied."""
     from collections import Counter
     out: list = []
 
@@ -5541,7 +5542,8 @@ def format_table_checks(src: str = HERE) -> list:
         c("format: the table names every op of the full catalog (68 ops) and no other, and the documents' table is over the same 68",
           set(L2.OP_FORMAT) == ops and len(ops) == 68 and set(want) == ops, f"{sorted(set(L2.OP_FORMAT) ^ ops)} {sorted(set(want) ^ ops)}")
         bad = {op: (L2.OP_FORMAT.get(op), f) for op, f in want.items() if L2.OP_FORMAT.get(op) != f}
-        c("format: each op's format is the one the C tools' headers give; a conversion names both ends (cvtto: fp32 or fp64 to the integer targets; "
+        c("format: each op's format is the one this file's own table gives for the 38 older ops (DOC_FORMAT, typed from the C tools' headers) and the one the C "
+          "tool's table of modes gives for the 30 wide ops (read from divsqrt_soak.c); a conversion names both ends (cvtto: fp32 or fp64 to the integer targets; "
           "cvtfrom: the integer sources to fp32 or fp64), a slice, f64hard or window item the format it computes in", not bad, str(list(bad.items())[:3]))
         c("format: every item of the full catalog carries its op's format (Item.format), and the catalog uses ten distinct strings, so a table that said fp32 "
           "of everything would be red here", all(it.format == want[it.op] for it in full) and len({it.format for it in full}) == 10,
@@ -5577,8 +5579,10 @@ def format_table_checks(src: str = HERE) -> list:
         offenders, controls = json.loads(q.stdout)
     except ValueError:
         offenders, controls = ["(the reducer could not be imported: %s)" % (q.stderr[-160:],)], []
-    c("format: none of the formats has the shape of a path or an IP address, which the page's reducer (card_stress_progress._PATHY, _IPV4) refuses in "
-      "any published string - and that screen sees a slash between words and an address (it can fail)", offenders == [] and controls == [True, True, True], f"{offenders} {controls}")
+    c("format: none of the formats is matched by the screen the page's reducer holds a published string to (card_stress_progress._PATHY and _IPV4: a drive "
+      "letter, a UNC path, ~/ or a /word/word path, each at the start of a string or after whitespace, a quote, a bracket, = : , or ;, and a dotted IPv4 "
+      "address - not a slash inside a word: 'fp32/fp64' passes it); the screen is asked here, not copied, and its controls are a /word/word path twice "
+      "and an address (it can fail)", offenders == [] and controls == [True, True, True], f"{offenders} {controls}")
     return out
 
 
@@ -7752,7 +7756,8 @@ def plants(env: Env) -> None:
         # -- parcel HXd (2026-10-27): a format on every item and the wide items beside the others (CARD_STRESS_PLANT='HXd: ' runs just these)
         ("HXd: every op is given the format fp32",
          [("card_stress_lib.py", "def format_of(op: str) -> str:", 'OP_FORMAT.update({op: "fp32" for op in OP_FORMAT})\n\n\ndef format_of(op: str) -> str:')],
-         lambda env, src: format_table_checks(src), ["format: each op's format is the one the C tools' headers give"]),
+         lambda env, src: format_table_checks(src), ["format: each op's format is the one this file's own table gives for the 38 older ops (DOC_FORMAT, typed from the C tools' headers) "
+                                                     "and the one the C tool's table of modes gives for the 30 wide ops"]),
         ("HXd: an item carries the format fp32 whatever its op",
          [("card_stress_lib.py", "        self.format = format_of(op)", '        self.format = "fp32"')],
          lambda env, src: format_table_checks(src), ["format: every item of the full catalog carries its op's format"]),
@@ -7764,13 +7769,15 @@ def plants(env: Env) -> None:
          lambda env, src: format_table_checks(src), ["format: the table names every op of the full catalog (68 ops) and no other"]),
         ("HXd: a conversion names one end",
          [("card_stress_lib.py", '"cvtfrom64-all": "the integer sources -> fp64"', '"cvtfrom64-all": "fp64"')],
-         lambda env, src: format_table_checks(src), ["format: each op's format is the one the C tools' headers give"]),
+         lambda env, src: format_table_checks(src), ["format: each op's format is the one this file's own table gives for the 38 older ops (DOC_FORMAT, typed from the C tools' headers) "
+                                                     "and the one the C tool's table of modes gives for the 30 wide ops"]),
         ("HXd: a format has the shape of a path",
          [("card_stress_lib.py", '"conv64to32": "fp64 -> fp32", "conv64to32-class"', '"conv64to32": "fp64 -> fp32 /srv/data/x", "conv64to32-class"')],
-         lambda env, src: format_table_checks(src), ["format: none of the formats has the shape of a path"]),
+         lambda env, src: format_table_checks(src), ["format: none of the formats is matched by the screen the page's reducer holds a published string to"]),
         ("HXd: the report names every item fp32",
          [("card_stress_report.py", "    return ITEM_FORMAT.get(item) or (OP_FORMAT.get(op) if isinstance(op, str) else None)", '    return "fp32"')],
-         plant_report, ["wide: each exhaustive item's coverage, its space, its format and its group", ".format"]),
+         plant_report, ["wide: each exhaustive item's coverage, its space, its format and its group", "summary sweep.exh[conv32to64-all].format",
+                        "text sweep.exh[conv32to64-all].format"]),
         ("HXd: the report gives an item no catalog names no format, whatever its op",
          [("card_stress_report.py", "    return ITEM_FORMAT.get(item) or (OP_FORMAT.get(op) if isinstance(op, str) else None)", "    return ITEM_FORMAT.get(item)")],
          plant_report, ["wide: each exhaustive item's coverage, its space, its format and its group"]),
@@ -7798,10 +7805,10 @@ def plants(env: Env) -> None:
          plant_report, ["wide: the sweep table's last column names each item's format"]),
         ("HXd: the reducer puts every row in the base group",
          [("card_stress_progress.py", '"complete": e["complete"], "format": e["format"], "group": e["group"]}', '"complete": e["complete"], "format": e["format"], "group": "base"}')],
-         plant_progress, ["its format and its group"]),
+         plant_progress, ["its format and its group (the test's own table, not the catalog's)"]),
         ("HXd: the reducer gives a row at zero the format fp32",
          [("card_stress_progress.py", 'R.ITEM_FORMAT.get(name), "group"', '"fp32", "group"')],
-         plant_progress, ["its format and its group"]),
+         plant_progress, ["its format and its group (the test's own table, not the catalog's)"]),
         ("HXd: the reducer's totals by group leave the wide group out",
          [("card_stress_progress.py", '            "groups": by_group,\n', '            "groups": by_group[:1],\n')],
          plant_progress, ["its totals by group, base then wide"]),
@@ -7829,7 +7836,9 @@ def plants(env: Env) -> None:
          plant_progress, ["every item row of every class shows the format"]),
         ("HXd: the page draws a heading the legacy shape did not have",
          [("nightly.html", ': figures(t, c.kind + " items covered"),', ': [h("div", { "class": "kind", text: "base items" }), figures(t, c.kind + " items covered")],')],
-         plant_progress, ["node for node"]),
+         plant_progress, ["wide page: over a data file without the new fields (the run without wide items as 3ec0081c's reducer made it) the tree the page draws is "
+                          "the page of 3ec0081c's, node for node",
+                          "committed data: while the file is night 7's, as 3ec0081c committed it, the page draws the tree it drew then, node for node"]),
         ("HXd: the page takes a group's figures from the class's total",
          [("nightly.html", 'wide ? [base ? figures(base, c.kind + " items covered") : null,', 'wide ? [base ? figures(t, c.kind + " items covered") : null,')],
          plant_progress, ["the base group's block of the headline states"]),
