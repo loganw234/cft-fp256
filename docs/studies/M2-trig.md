@@ -44,7 +44,8 @@ that date). What the measurement makes of the study's statements:
   fragments accepted by `routines.program`; past the tree's cap of 21 at
   fp32 for the six, so these three want a cap of 23 (question 9).
 - 3.2's budget, ported once more for a triple word, under rne (the study's
-  budgets are rne; the directed attributes' budgets are not measured): the
+  budgets are rne; the directed attributes' budgets were not run, and a
+  sample under all five, tan near, is identical): the
   bound is **at most 0.3675 Bv in all 18 regions at 1,500 lanes** (a margin
   of 1.44 bits) and **at most 0.4296 Bv at 12,000 lanes on the box** (the
   lead's run of tw32_box.sh, 2026-10-27; a margin of 1.22 bits), against 0.33
