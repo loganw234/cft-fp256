@@ -2230,6 +2230,10 @@ record is written as before. The card scheduler (hw/sched/) does not pass `--mpf
 (docs/VALIDATION.md, HXc's entry, says what it needs). The driver has not run these items on the card; HXa's box runs ran the modes by
 hand. Phase 1's hours, above.
 
+**In the report and on the page (added 2026-10-27, parcel HXd).** Every item line of the report names the item's format (the last column of its tables), and the
+wide items are totalled as a group of their own beside the others, inside each tree class ("Coverage per tree", above); the nightly page shows them the same way
+("The morning after", below), so that they join a class without moving the figures of the items that were in it.
+
 ### Failure policy, processes, and what it guarantees
 
 - **A failing leg** keeps its whole log, says so in its record, and the run goes on. So does an
