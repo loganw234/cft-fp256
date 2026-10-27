@@ -26,6 +26,25 @@ cap; with `live_cap=None`, as costs.py passes it, they hold). Question
 9's recommendation, a cap by function and format, stands; its premise
 that only fp64 is past the cap does not.
 
+**A note of 2026-10-27, at parcel M2G1** (the reduction built; the study's
+text stays as written at 1337a13). The reduction of 2.2 and 2.3, design A:
+the plan with its static proofs, the SELECT window, the exact sum, the audit
+and the constants' `--check`, is built in python/cft_golden/mathlib.py
+(`plan_reduction`, `trig_reduction`, `reduction_audit`, `build_reduction`)
+and held by python/tests/test_mathlib_reduction.py; it equals section 11's
+model on every argument of `redcheck.py` and `m2edges.py`, and r's largest
+errors are 2.2's table (docs/VALIDATION.md, the entry for parcel M2G1).
+**Nothing else of M2 is built:** no sin, cos or tan routine, no polynomial,
+no tiny path, no fp32 triple word. One finding: 2.4's rho = pi/4 (1 + 2^-30)
+does not hold at fp32 with G = 18, where the quadrant count, taken from the
+high word of the exact sum alone, leaves |r| past pi/4 by 2^-17.09 (MEASURED,
+x = 0x44264edd, n = 424 where 423 is the nearest integer) and by up to
+2^-11.66 (COMPUTED from the generator's static bounds), so the bound there is
+pi/4 (1 + 2^-11); at fp64, fp128 and fp256 the bounds are 2^-33.04, 2^-64.0
+and 2^-62.0, inside the study's. And 2.2's "the quadrant count is MAGIC + n" is MAGIC + n' with n' congruent
+to n mod 4 (MEASURED on fp64's 3,853 lanes: equal to n on 121; BELIEVED because the reductions modulo m = 4U take out
+multiples of 4 that n' does not count).
+
 M1's study (docs/studies/M1-exp-log.md) is its model of form, section for
 section, and M1's design is its starting point: the in-lane test, the
 double word with TwoSum and no augmented addition, the fragment in C4's
