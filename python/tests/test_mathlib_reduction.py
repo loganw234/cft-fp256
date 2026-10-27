@@ -386,7 +386,7 @@ def run_lanes(b, xs, audit=True):
 def check_reference(run, stats=None):
     """(r, n mod 4) of every lane against |x| 2/pi in exact rationals, 2/pi
     from the header: |r - (|x| - n pi/2)| <= 2^-(p+G+3) |r|, |r| <= pi/4
-    (1 + 2^-30) - at fp32, G = 18, (1 + 2^-22): CUSHION - rh = RN(rh + rl),
+    (1 + 2^-30) - at fp32, G = 18, (1 + 2^-11): CUSHION - rh = RN(rh + rl),
     and `small` nonzero exactly where |x| < RD(pi/4). `stats`, a dict, gains
     "worst" (log2 of the largest error in units of 2^-(p+G)), "over" (the
     largest 2|t| - 1, as a rational: how far past pi/4 |r| went) and
