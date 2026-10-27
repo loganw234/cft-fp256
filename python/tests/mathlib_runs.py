@@ -22,6 +22,8 @@ log2 and log1p.
         --lo -0.3 --hi 0.3 --stride 1 --shard 0/36
     python python/tests/mathlib_runs.py family  --write | --check
     python python/tests/mathlib_runs.py live
+    python python/tests/mathlib_runs.py reduction [--formats fp64,fp128,fp256]
+        [--n 100000] [--seed 1] [--edge-width 8] [--halves-step 1]
     python python/tests/mathlib_runs.py all     [--scale 1]
 
 --fn is a list of exp, exp2, expm1, log, log2 and log1p (all six by default).
@@ -82,6 +84,20 @@ sample is a function of --seed, so a run can be repeated.
   live     the live-value count of each fragment in the design's order and
            scheduled, that the reorder is a permutation (the digest of the
            dataflow graph), the lanes equal, and each fragment on seq.py
+  reduction  the trigonometric reduction of parcel M2G1
+           (mathlib.build_reduction, python/tests/test_mathlib_reduction.py's
+           checks) at fp64, fp128 and fp256 by default: --n random arguments a
+           format (exponent uniform over the range, every significand bit
+           random, both signs), every power of two of the range, the products'
+           binade edges widened to --edge-width significands either side, the
+           floats next to the odd multiples of pi/4 in every --halves-step-th
+           binade, the pools and the deepest cancellations; each lane against
+           |x| 2/pi in exact rationals from host/src/mp_2opi.h (r's relative
+           error under 2^-(p+G+3), the quadrant, the cushion past pi/4) and
+           every claim of the build audited. Prints, a format, the lanes, r's
+           largest error in units of 2^-(p+G), the largest overshoot past
+           pi/4 against the computed bound, and the audit's tally. Not part of
+           `all`
   all      a standard run of each, at modest sizes (--scale multiplies them)
 """
 
@@ -441,6 +457,58 @@ def cmd_live(a):
                 say(line)
 
 
+def cmd_reduction(a):
+    import math
+    import random
+    import test_mathlib_reduction as R
+    batch = 4000
+    for name in (a.formats.split(",") if a.formats else
+                 ["fp64", "fp128", "fp256"]):
+        if name not in ("fp64", "fp128", "fp256", "fp32"):
+            raise SystemExit(f"--formats {name!r}: fp64, fp128, fp256 or fp32")
+        fmt, G = R.BY_NAME[name], R.G_OF[name]
+        b = R.build_of(name)
+        P = b.meta["reduction"]
+        fam = R.families(name)
+        rng = random.Random(a.seed * 1000 + fmt.width)
+        rand = []
+        for _ in range(a.n):
+            E = rng.randint(P.Egate, P.Emax)
+            m = rng.getrandbits(fmt.prec - 1) | (1 << (fmt.prec - 1))
+            rand.append(R._enc(fmt, rng.getrandbits(1), m, E - fmt.prec + 1))
+        pows = [R._enc(fmt, 0, 1 << (fmt.prec - 1), E - fmt.prec + 1)
+                for E in range(P.Egate, P.Emax + 1)]
+        sets = [("random", rand), ("every power of two", pows),
+                ("binade edges", R.edge_args(
+                    fmt, P, ms_around=tuple(range(-a.edge_width,
+                                                  a.edge_width + 1)))),
+                ("odd multiples of pi/4", R.half_args(fmt, P, a.halves_step)),
+                ("the study's families", list(R.main_args(name))
+                 + list(fam["edges"]) + list(fam["deep"]) + list(fam["pio4"]))]
+        stats, tally, lanes = {}, {}, 0
+        for label, xs in sets:
+            before = len(FINDINGS)
+            for i in range(0, len(xs), batch):
+                run = R.run_lanes(b, xs[i:i + batch])
+                note(R.check_reference(run, stats))
+                note(R.check_audit(run, pin=R.CLAIMS[name]))
+                note(R.check_cushion(run))
+                for k, v in run.tally.items():
+                    tally[k] = tally.get(k, 0) + v
+                lanes += len(run.rows)
+            say(f"reduction {name} {label}: {len(xs)} lanes, "
+                f"{len(FINDINGS) - before} findings")
+        bound = R.quadrant_slack(b)
+        over = stats["over"]
+        say(f"reduction {name}: G = {G}, b = {P.b}: {lanes} lanes; r's "
+            f"largest relative error 2^{stats['worst']:.2f} of 2^-(p+G); "
+            f"largest overshoot past pi/4 "
+            f"{'none' if over <= 0 else '2^%.2f' % R._log2(over)} against the "
+            f"computed bound 2^{bound:.2f}; audit: {tally['claims']} claims "
+            f"examined, {tally['nonfinite']} non-finite, {tally['skipped']} "
+            f"skipped")
+
+
 def cmd_all(a):
     s = a.scale
     ns = argparse.Namespace
@@ -544,6 +612,19 @@ def main(argv=None):
     p.add_argument("--attrs")
     p.add_argument("--lanes", type=int, default=200)
     p.set_defaults(fn_=cmd_live)
+    p = sub.add_parser("reduction")
+    p.add_argument("--formats", help="fp64,fp128,fp256 (default); fp32 is "
+                                     "the double word at G = 18")
+    p.add_argument("--n", type=int, default=100000,
+                   help="random arguments a format")
+    p.add_argument("--seed", type=int, default=1)
+    p.add_argument("--edge-width", type=int, default=8,
+                   help="significands either side of each binade edge "
+                        "(the golden stage uses 2 below and 1 above)")
+    p.add_argument("--halves-step", type=int, default=1,
+                   help="every this many binades for the odd multiples of "
+                        "pi/4")
+    p.set_defaults(fn_=cmd_reduction)
     p = sub.add_parser("all")
     p.add_argument("--scale", type=float, default=1.0)
     p.set_defaults(fn_=cmd_all)

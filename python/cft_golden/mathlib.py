@@ -152,6 +152,17 @@ tests must see (PLANTS).
 Marks, as the study's: every figure in a comment is READ, COMPUTED or
 stated as a design; what was MEASURED is in docs/VALIDATION.md's entries for
 parcels E1, MB1 and MB2, with their commands.
+
+The trigonometric reduction (parcel M2G1, M2's build, wave 1) is beside the
+six and is not one of them: the argument reduction that sin, cos and tan will
+share, Payne-Hanek against 2/pi's bits in bank words, ported from the study's
+model (docs/studies/M2-trig.md, 2.2 and 2.3; its section below). Its names
+are public, and the later waves are briefed against them: TRIG_RANGE,
+TRIG_LOST, trig_gates, plan_reduction, ReductionValue, reduction_front,
+trig_reduction, reduction_audit, build_reduction, REDUCTION_PLANTS and
+check_reduction_constants (`--check`, and `--only reduction`). It adds no
+routine to NAMES and moves none of the six: their fragments are the ones they
+were.
 """
 
 import argparse
@@ -159,6 +170,7 @@ import functools
 import hashlib
 import heapq
 import math
+import pathlib
 import sys
 import types
 from fractions import Fraction
@@ -174,7 +186,11 @@ __all__ = ["fragment", "evaluate", "invariants", "flag_words", "build",
            "build_log2", "build_log1p", "Build", "plan_exp", "plan_exp32",
            "plan_log", "plan_log32", "GUARD", "LIVE_CAP", "PLANTS", "FORMATS",
            "NAMES", "EXP_NAMES", "LOG_NAMES", "PHASE_ORDER", "dag_digest",
-           "schedule_order", "check_constants", "main"]
+           "schedule_order", "check_constants", "main",
+           "TRIG_RANGE", "TRIG_LOST", "trig_gates", "plan_reduction",
+           "ReductionValue", "reduction_front", "trig_reduction",
+           "reduction_audit", "build_reduction", "REDUCTION_PLANTS",
+           "check_reduction_constants"]
 
 EXP_NAMES = ("exp", "exp2", "expm1")   # the exp family (parcels E1 and MB1)
 LOG_NAMES = ("log", "log2", "log1p")   # the log family (parcel MB2)
@@ -942,9 +958,10 @@ def _values(fmt, body, words, x, over=None):
 # Neither is optimal and none is claimed to be: the live count is measured and
 # pinned per fragment (test_mathlib.py's SHAPE), and LIVE_CAP is its maximum.
 
-PHASE_ORDER = ("setup", "reduce", "lowword", "tail", "head", "head2", "head3",
-               "Z", "lookup", "recon", "scale", "fixed-grid", "final",
-               "classify", "special")
+PHASE_ORDER = ("setup", "reduce", "red-setup", "red-window", "red-products",
+               "red-coarse", "red-mid", "red-lower", "red-scale", "red-small",
+               "lowword", "tail", "head", "head2", "head3", "Z", "lookup",
+               "recon", "scale", "fixed-grid", "final", "classify", "special")
 
 
 def permuted(f, order):
@@ -2623,6 +2640,885 @@ def build_expm1(fmt: FpFormat, rnd: int, **kw) -> Build:
     return build("expm1", fmt, rnd, **kw)
 
 
+# ---- the trigonometric reduction (parcel M2G1) --------------------------------
+#
+# The argument reduction that sin, cos and tan share: |x| = n pi/2 + r, with
+# r = r_h + r_l, |r| <= pi/4 (1 + 2^-30) (2^-11 at fp32, G = 18: see
+# trig_reduction) and n mod 4 in the low bits of q's encoding.
+# Payne-Hanek against 2/pi's bits, design A of the study's 2.2 and 2.3
+# (docs/studies/M2-trig.md; Logan's answers of 2026-10-14: 2/pi in bank words
+# read by a SELECT shifter, 2^1024 at fp128 and fp256, fp64's whole range,
+# G = 44, 46, 46). The construction below IS the study's model
+# (docs/studies/m2/, m2plan.py and m2red.py), ported; nothing here imports
+# it, and the port is held to it in the parcel's entry. M2G2's routines build
+# on this interface; a change to a public name below is the lead's to approve.
+#
+# x = M 2^e, M the p-bit integer significand, e = E - (p-1). 2/pi =
+# sum_k c_k 2^-((k+1) b), each chunk c_k a b-bit integer held exactly as a
+# float. The bucket g - 1 = floor((E - p - 1) / b) picks the window c_(g-1) ..
+# c_(g-2+L); sigma = e - g b is in [2 - b, 1]; x 2/pi = 2^sigma S (mod 4),
+# S = sum_(j<L) M c_(g-1+j) 2^-(jb), and S is reduced modulo m = 2^(2-sigma)
+# in S-hat units, where every product has a fixed grid and fixed bounds
+# whatever sigma is. So every piece is bounded once, at generation, over the
+# chunks that can stand at its position (_analyse), and the generator emits
+# only the operations the bounds need.
+#
+# The phases: red-setup (E, the bucket, sigma's powers of two, M), red-window
+# (the SELECT shifter), red-products, red-coarse, red-mid (the exact sum, where
+# the cancellation happens), red-lower, red-scale (t V, r = t pi/2 as a double
+# word, n) and red-small (|x| < RD(pi/4) takes r = |x|).
+#
+# The claims. An instruction the generator calls EXACT (its rounding loses
+# nothing, by the static bounds) is recorded in Build.meta["exact"], and a
+# rounding that SELECTS an integer (a quotient, a split's high part, a
+# bucket) in Build.meta["data"]. reduction_audit() checks every exact claim on
+# a lane against the exact operation. Each static proof of the generator that
+# fails is a ValueError that names it.
+#
+# Marks. Figures here are READ from the study, COMPUTED from the generator's
+# own static bounds (the cushion past pi/4) or stated as design; what was
+# MEASURED is in docs/VALIDATION.md's entry for parcel M2G1.
+
+# |x| < 2^R, None the whole range (the study's 2.3; Logan's answer 2 of
+# 2026-10-14).
+TRIG_RANGE = {"fp32": None, "fp64": None, "fp128": 1024, "fp256": 1024}
+
+# The deepest cancellation the reduction must carry, |t| >= 2^-(lost+1)
+# (the study's 1.4). fp32, fp64: READ from docs/TRANSCENDENTALS.md, every
+# binade searched by host/tools/pi_worstcase.py. fp128, fp256: the study's
+# MEASURED figures over the stated range [1, 2^1024): 123 at value exponent
+# 909, which is past the docs' sampled 121, and 244, for which 245 is kept.
+TRIG_LOST = {"fp32": 29, "fp64": 61, "fp128": 123, "fp256": 245}
+
+_TRIG_DELTA = 3                  # the reduction's share of the bound: 2^-delta
+_TRIG_LOW_CAP = 4                # the lower pieces' bound, in units of 2^bottom
+_TRIG_PLAN_B_MIN = 2             # no plan for a chunk narrower than this
+# the header the library reduces with, which --check holds the chunks to
+_TWO_OPI_HEADER = (pathlib.Path(__file__).resolve().parents[2] / "host" / "src"
+                   / "mp_2opi.h")
+
+# Faults of the reduction, for the tests: build_reduction(..., plant=name),
+# trig_reduction(..., plant=name). Each is the defect named; the value is its
+# description. A plant that could not act (the fault is not reached at that
+# format) is refused by name, so that none passes by doing nothing.
+REDUCTION_PLANTS = {
+    "chunk": "one bit flipped in a stored chunk of 2/pi, the middle one",
+    "window": "the window read one word late: the shift one too large",
+    "mid_inexact": "the mid pieces rounded, design B's sum, while design A's "
+                   "claims stand",
+    "exact_add": "the mid sum's first TwoSum a plain add, still claimed exact",
+    "quadrant_dropped": "the last quadrant count left out of n",
+    "bucket_nearest": "the bucket's floor rounded to nearest, not down",
+    "pio2_low": "pi/2's low word dropped",
+    "claims_lost": "no claim recorded: Build.meta has no exact or data",
+    "range_short": "the range word 2^(R-1), not 2^R",
+    "split_unproved": "the split's range proof not enforced: a configuration "
+                      "refused by it is built",
+    "fast_as_two_sum": "every Fast2Sum of the reduction built as a TwoSum: "
+                       "the same values, 3 more instructions each",
+    "lw_understated": "the static bound of the mid sum's low word, kept in "
+                      "Build.meta['reduction_mid'], 8 bits too small: no "
+                      "value changes, the computed cushion bound falls below "
+                      "a measured overshoot",
+}
+
+_AUDITED = (sf.OP_ADD, sf.OP_SUB, sf.OP_MUL, sf.OP_FMA)
+
+
+def trig_gates(fmt):
+    """(gs, gc): the definition's tiny gates at `fmt` as exponents. sin's
+    tiny path takes |x| < 2^gs and cos's and tan's |x| < 2^gc; below them
+    transcend.py answers by the neighbour rules (2 e + p + 2 <= 0 for sin,
+    2 e + p + 3 <= 0 for cos and tan, e = floor(log2 |x|)), so a reduction
+    is wanted from 2^(min(gs, gc) - 1) up (plan_reduction's Egate): -27,
+    -57, -119 for both at fp64, fp128 and fp256; -12 and -13 at fp32."""
+    p = fmt.prec
+    return -((p + 3) // 2) + 1, -((p + 4) // 2) + 1
+
+
+@functools.lru_cache(maxsize=None)
+def _two_over_pi_int(nbits):
+    """floor(2/pi 2^nbits), from mpmath at nbits + 64 bits (--check holds it
+    to host/src/mp_2opi.h and to an integer derivation of pi)."""
+    with mpmath.workprec(nbits + 64):
+        v = _frac(mpmath.mpf(2) / mpmath.pi * (mpmath.mpf(2) ** nbits))
+    return v.numerator // v.denominator
+
+
+def _reduction_chunks(b, count):
+    """c_0 .. c_(count-1): 2/pi = sum c_k 2^-((k+1) b), each a b-bit integer
+    (the bits [k b, (k+1) b) after the binary point)."""
+    nb = b * count
+    t = _two_over_pi_int(nb)
+    return [(t >> (nb - (k + 1) * b)) & ((1 << b) - 1) for k in range(count)]
+
+
+@functools.lru_cache(maxsize=None)
+def _pi():
+    """pi to 3,000 bits, as the exact rational it is."""
+    with mpmath.workprec(LN2_BITS):
+        return _frac(+mpmath.pi)
+
+
+def _ulp_exp(v, p):
+    """floor(log2 v) - p + 1 for a rational v > 0: the exponent of v's ulp."""
+    e0 = v.numerator.bit_length() - v.denominator.bit_length()
+    return e0 - (1 if Fraction(2) ** e0 > v else 0) - p + 1
+
+
+def _plan_b(fmt, G, lost, Emax, Egate, delta, b, L=None, bottom=None):
+    """The reduction's parameters at fmt for guard G, a cancellation `lost`
+    (|t| >= 2^-(lost+1)), arguments |x| < 2^(Emax+1) down to 2^Egate, and the
+    chunk width b (m2plan.plan_b):
+      budget   t's absolute error allowed: 2^-(p+G+delta+lost+1)
+      L        chunks a lane: the tail 2^(1+p-(L-1)b) within budget/4
+      bottom   the S-hat exponent below which a piece may round: the lower
+               pieces' double-word sum within budget/4."""
+    p = fmt.prec
+    P = types.SimpleNamespace(fmt=fmt, G=G, lost=lost, delta=delta)
+    P.budget = -(p + G + delta + lost + 1)
+    if bottom is None:
+        babs = math.floor(P.budget - 2 + 2 * p - math.log2(3 * _TRIG_LOW_CAP))
+        bottom = babs - 1
+    P.bottom = bottom
+    P.b = b
+    P.L = L if L is not None else 1 + math.ceil((1 + p - (P.budget - 2)) / b)
+    P.Emax, P.Egate = Emax, Egate
+    G0min, G0max = Egate - p - 1, Emax - p - 1
+    P.gm1_min, P.gm1_max = G0min // b, G0max // b
+    P.Z = max(0, -P.gm1_min)
+    P.nchunks = P.gm1_max + P.L          # c_0 .. c_(nchunks-1)
+    P.K = P.Z + P.nchunks                # the stored words
+    P.bits = P.nchunks * b
+    P.chunks = _reduction_chunks(b, P.nchunks)
+    P.words = [0] * P.Z + P.chunks       # the table the window reads
+    P.shifts = P.gm1_max - P.gm1_min + 1
+    P.rows = _analyse(P)
+    return P
+
+
+def _positions(P):
+    """[(j, smallest nonzero chunk, largest chunk, any chunk zero)] over the
+    chunks that can stand at position j, for every bucket the range has."""
+    out = []
+    for j in range(P.L):
+        cs = [P.chunks[gm1 + j] if gm1 + j >= 0 else 0
+              for gm1 in range(P.gm1_min, P.gm1_max + 1)]
+        nz = [c for c in cs if c]
+        out.append((j, min(nz) if nz else 0, max(cs), 0 in cs))
+    return out
+
+
+def _analyse(P):
+    """Static bounds of every piece in S-hat units: for position j, T_j in
+    [2^(p-1) cmin, (2^p - 1) cmax] 2^-(jb) on grid 2^-(jb); the TwoProd pieces
+    P_j = RN(T_j) (grid >= max(2^-(jb), ulp(Tmin))) and rho_j = T_j - P_j
+    (|rho_j| <= ulp(Tmax), grid 2^-(jb)). Rows (j, log2 Tmin, log2 Tmax, P's
+    grid exponent, rho's bound exponent, rho's grid exponent), None for a
+    position no bucket gives a chunk."""
+    p = P.fmt.prec
+    rows = []
+    for j, cmin, cmax, _zero in _positions(P):
+        if cmax == 0:
+            rows.append((j, None, None, None, None, None))
+            continue
+        tmin = Fraction((1 << (p - 1)) * cmin, 1 << (j * P.b))
+        tmax = Fraction(((1 << p) - 1) * cmax, 1 << (j * P.b))
+        pgrid = max(-j * P.b, _ulp_exp(tmin, p))
+        rows.append((j, math.log2(tmin), math.log2(tmax), pgrid,
+                     _ulp_exp(tmax, p), -j * P.b))
+    return rows
+
+
+def plan_reduction(fmt, G, *, R="default", b=None):
+    """The trigonometric reduction's plan at `fmt` for guard G, a
+    types.SimpleNamespace, for every argument 2^Egate <= |x| < 2^R (the whole
+    range where R is None). `R` is TRIG_RANGE's by default; a smaller R is
+    planned with the same TRIG_LOST, which covers it. A larger one, and R =
+    None where TRIG_RANGE is 1024 (fp128, fp256), is refused naming 2^1024,
+    the range the cancellation was measured over; so is an R of 0 or less
+    and a 2^R the format does not hold (fp64 at 1024).
+
+    Fields: b (the chunk width, the widest for which the coarse sum is
+    provably exact: searched downward from the exact combination's, unless
+    `b` is given), L (chunks a lane), Z (leading zero words), K (words
+    stored), nchunks, bits (of 2/pi), bottom, budget (log2 of t's error
+    allowed), delta, gm1_min, gm1_max (the buckets g - 1), shifts, chunks
+    (c_0 ..), words (Z zeros, then the chunks: the table), rows (the static
+    bounds, _analyse), Emax and Egate (the exponents of the range's ends),
+    and fmt, G, lost, R.
+
+    Where no plan exists the answer is a ValueError that names the proof:
+    "no plan: the exact combination needs b <= 2p + 1 + bottom = -7 ..." (fp32
+    at G = 40), or "b = 109: the coarse sum is not exact" (fp128, a b given)."""
+    if fmt.name not in TRIG_LOST:
+        raise ValueError(f"{fmt.name}: no cancellation figure (TRIG_LOST)")
+    if R == "default":
+        R = TRIG_RANGE[fmt.name]
+    if R is not None and (not isinstance(R, int) or isinstance(R, bool)
+                          or R < 1):
+        raise ValueError(f"R = {R!r}: the range is None or an exponent of "
+                         f"at least 1")
+    if R is not None and R > fmt.emax:
+        raise ValueError(f"R = {R}: 2^R is not a finite {fmt.name} number "
+                         f"(the largest power of two is 2^{fmt.emax}); the "
+                         f"whole range is R = None")
+    top = TRIG_RANGE[fmt.name]
+    if top is not None and (R is None or R > top):
+        raise ValueError(
+            f"R = {R}: past 2^{top}, the range TRIG_LOST[{fmt.name!r}] = "
+            f"{TRIG_LOST[fmt.name]} was measured over (pi_worstcase's search "
+            f"of every binade of [1, 2^{top}), the study's 1.4)")
+    p = fmt.prec
+    lost = TRIG_LOST[fmt.name]
+    gs, gc = trig_gates(fmt)
+    Emax = (R - 1) if R is not None else fmt.emax
+    Egate = min(gs, gc) - 1
+    if b is not None and b < _TRIG_PLAN_B_MIN:
+        raise ValueError(f"b = {b}: no plan for a chunk under "
+                         f"{_TRIG_PLAN_B_MIN} bits")
+    if b is None:
+        budget = -(p + G + _TRIG_DELTA + lost + 1)
+        bottom = math.floor(budget - 2 + 2 * p
+                            - math.log2(3 * _TRIG_LOW_CAP)) - 1
+        if 2 * p + 1 + bottom < _TRIG_PLAN_B_MIN:
+            raise ValueError(
+                f"no plan: the exact combination needs b <= 2p + 1 + bottom "
+                f"= {2 * p + 1 + bottom} (budget {budget}, bottom {bottom})")
+        if p - 4 < _TRIG_PLAN_B_MIN:
+            raise ValueError(f"no plan: the coarse sum needs b <= p - 4 = "
+                             f"{p - 4}")
+    cand = b
+    while True:
+        P = _plan_b(fmt, G, lost, Emax, Egate, _TRIG_DELTA,
+                    cand if cand is not None
+                    else min(p - 4, 2 * p + 1 + bottom))
+        # the coarse sum: three terms of at most m <= 2^b on the grid of P_1's
+        # ulp, which a chunk with leading zeros makes finer
+        pgrid1 = P.rows[1][3] if len(P.rows) > 1 else None
+        if math.log2(3) + P.b - min(0, pgrid1 or 0) < p:
+            P.R = R
+            return P
+        if b is not None:
+            raise ValueError(
+                f"b = {b}: the coarse sum is not exact (three terms of at "
+                f"most 2^{b} on the grid 2^{pgrid1} of P_1's ulp need "
+                f"log2(3) + b - min(0, {pgrid1}) < p = {p})")
+        cand = P.b - 1
+        if cand < _TRIG_PLAN_B_MIN:
+            raise ValueError("no plan: the coarse sum is exact for no chunk "
+                             f"of {_TRIG_PLAN_B_MIN} bits or more")
+
+
+class ReductionValue:
+    """A value of the reduction with static bounds: |v| <= 2^mag (mag a
+    float, log2) and v a multiple of 2^grid (grid an int, the exponent). The
+    generator's proofs of exactness read these two numbers and no lane's
+    value: `ref` is the instruction (or word) holding it."""
+    __slots__ = ("ref", "mag", "grid")
+
+    def __init__(self, ref, mag, grid):
+        self.ref, self.mag, self.grid = ref, mag, grid
+
+    def __repr__(self):
+        return (f"ReductionValue({self.ref}, mag {self.mag:.2f}, "
+                f"grid {self.grid})")
+
+
+def _lg(x):
+    return math.log2(x) if x > 0 else -1e9
+
+
+class _Red:
+    """The reduction under construction: the Build, the plan, the plant and
+    the claims. Not public: reduction_front() and trig_reduction() make one."""
+
+    def __init__(self, b, P, plant):
+        self.b, self.P, self.plant = b, P, plant
+        self.fmt = fmt = b.fmt
+        if P.fmt != fmt:
+            raise ValueError(f"the plan is for {P.fmt.name}, the build for "
+                             f"{fmt.name}")
+        self.p, self.mw, self.bias = fmt.prec, fmt.man_w, fmt.bias
+        self.bb = P.b
+        self.full = (1 << fmt.width) - 1
+        self.fired = set()
+        if plant == "claims_lost":
+            self.fired.add(plant)
+        else:
+            b.meta.setdefault("exact", set())
+            b.meta.setdefault("data", set())
+        b.meta["reduction"] = P
+        b.meta.setdefault("two_prod", 0)
+        self.ZERO = b.word(0, "ZERO")
+        self.magic_val = Fraction(3, 2) * 2 ** (self.p - 1)
+        self.magic_bits = _enc_exact(fmt, self.magic_val)
+        self.magic = b.const("MAGIC", self.magic_bits)
+
+    # words
+    def wi(self, v):
+        return self.b.word(v & self.full)
+
+    def wx(self, v):
+        return self.b.word(_enc_exact(self.fmt, v))
+
+    def wv(self, v):
+        return self.b.word(_enc(self.fmt, v))
+
+    # claims
+    def exact(self, ref):
+        if self.plant != "claims_lost":
+            self.b.meta["exact"].add(ref)
+        return ref
+
+    def data(self, ref):
+        if self.plant != "claims_lost":
+            self.b.meta["data"].add(ref)
+        return ref
+
+    def two_prod(self):
+        self.b.meta["two_prod"] += 1
+
+    def fast(self, a, c):
+        if self.plant == "fast_as_two_sum":
+            self.fired.add(self.plant)
+            return self.b.two_sum(a, c)
+        return self.b.fast_two_sum(a, c)
+
+    def add_exact(self, a, c):
+        """a + c claimed exact: both on known grids and the sum fits p bits
+        by their bounds, else None (the static proof fails)."""
+        g = min(a.grid, c.grid)
+        mag = _lg(2 ** a.mag + 2 ** c.mag)
+        if mag - g >= self.p:
+            return None
+        return ReductionValue(self.exact(self.b.add(a.ref, c.ref)), mag, g)
+
+    def mod_m(self, fr, v, guard=False):
+        """v reduced modulo m: q = MAGIC + round(v/m), r = v - q m, exact;
+        with `guard`, 0 where |v| >= 2^(p-1) m (v's ulp is then a multiple of
+        m)."""
+        b = self.b
+        q = self.data(b.fma(v.ref, fr.inv_m, self.magic))
+        nq = self.exact(b.sub(self.magic, q))
+        r = self.exact(b.fma(nq, fr.m, v.ref))
+        if guard:
+            thr = b.iadd(fr.m, self.wi((self.p - 1) << self.mw))
+            small = b.cmplt(b.fabs(v.ref), thr)
+            r = b.sel(r, self.ZERO, small)
+        # |r| <= m <= 2^b, and r = v - q m is a multiple of min(grid, 2)
+        return ReductionValue(r, min(v.mag, self.bb + 0.0), min(v.grid, 1))
+
+    def check_fired(self):
+        if self.plant is not None and self.plant not in self.fired:
+            raise ValueError(f"plant {self.plant!r} does not apply at "
+                             f"{self.fmt.name} (G = {self.P.G}, R = "
+                             f"{self.P.R}): the fault is not reached")
+
+
+def _window(R, shift):
+    """The L words words[s + j], j < L, s the shift (an integer in the low
+    bits of `shift`'s encoding), by a SELECT log-shifter: at the level of bit
+    i an array of L + 2^i - 1 values, each the SELECT of two of the level
+    above. Bank words only. -> [refs]."""
+    b, P = R.b, R.P
+    words = list(P.words)
+    if R.plant == "chunk":
+        words[P.Z + P.nchunks // 2] ^= 1 << (P.b // 2)
+        R.fired.add("chunk")
+    arr = [R.ZERO if k < P.Z else
+           b.const(f"CHUNK{k - P.Z}", _enc_exact(R.fmt, c))
+           for k, c in enumerate(words)]
+    nbits = max(1, (P.shifts - 1).bit_length())
+    for i in range(nbits - 1, -1, -1):
+        bit = b.iand(shift, R.wi(1 << i))
+        need = P.L + (1 << i) - 1
+        nxt = []
+        for k in range(need):
+            lo = arr[k] if k < len(arr) else arr[-1]
+            hi = arr[k + (1 << i)] if k + (1 << i) < len(arr) else arr[-1]
+            nxt.append(b.sel(hi, lo, bit))
+        arr = nxt
+    return arr[:P.L]
+
+
+def _front(R, x):
+    b, P, fmt = R.b, R.P, R.fmt
+    p, mw, bias, bb, L = R.p, R.mw, R.bias, R.bb, P.L
+    wi, wx, wv, ZERO, MAGIC = R.wi, R.wx, R.wv, R.ZERO, R.magic
+    fr = types.SimpleNamespace(plan=P, magic=MAGIC)
+    b.phase = "red-setup"
+    # E from the encoding; the bucket first, since the window needs it
+    Eb = b.ishr(b.iand(x, wi(fmt.exp_mask << mw)), wi(mw))
+    Ebm = b.ior(Eb, MAGIC)                              # MAGIC + Eb
+    # G0p = G0 + 2 - b, G0 = Eb - bias - p - 1
+    G0p = R.exact(b.sub(Ebm, wx(R.magic_val + bias + p + 1 - 2 + bb)))
+    # g - 1 = floor((G0 + 1/2)/b) = floor((G0p + b - 3/2)/b)
+    INVB = b.const("INVB", _enc(fmt, Fraction(1, bb)))
+    FLOOROFF = b.const("FLOOROFF", _enc(fmt, Fraction(2 * bb - 3, 2 * bb)))
+    y = b.fma(G0p, INVB, FLOOROFF)
+    # the floor: RDN (the plant rounds to nearest)
+    nearest = R.plant == "bucket_nearest"
+    if nearest:
+        R.fired.add("bucket_nearest")
+    gm1m = R.data(b.add(y, MAGIC, RNE if nearest else RDN))   # MAGIC + (g-1)
+    late = R.plant == "window"
+    if late:
+        R.fired.add("window")
+    shift = b.iadd(gm1m, wi(P.Z + (1 if late else 0)))
+
+    b.phase = "red-window"
+    win = _window(R, shift)
+
+    b.phase = "red-setup"
+    # sigma, its powers of two (built on the encoding), and M: after the
+    # window, so that they are not live across it
+    gm1 = R.exact(b.sub(gm1m, MAGIC))
+    sig = R.exact(b.fma(gm1, wx(-bb), G0p))             # sigma
+    sigm = R.exact(b.add(sig, MAGIC))                   # MAGIC + sigma
+    V = b.ishl(b.isub(sigm, wi(R.magic_bits - bias)), wi(mw))   # 2^sigma
+    U = b.isub(wi((2 * bias) << mw), V)                         # 2^-sigma
+    m = b.iadd(U, wi(2 << mw))                                  # 4U
+    inv_m = b.isub(V, wi(2 << mw))                              # V/4
+    b.probes.update(sig=sig, V=V, U=U, gm1=gm1, m=m, inv_m=inv_m)
+    M = b.ior(b.iand(x, wi(fmt.man_mask)), wi((bias + p - 1) << mw))
+    nM = b.ixor(M, wi(fmt.sign_mask))                   # -M, for TwoProd
+    b.probes.update(M=M)
+    fr.M, fr.nM, fr.U, fr.V, fr.m, fr.inv_m = M, nM, U, V, m, inv_m
+    fr.sig, fr.gm1, fr.win = sig, gm1, win
+
+    b.phase = "red-products"
+    rows = {r[0]: r for r in P.rows}
+    need = P.budget - 3                                 # S-hat accuracy
+    prods = []
+    for j in range(L):
+        # the chunk scaled by 2^-(jb), exactly: one MUL, shared by the
+        # product and its error
+        Wj = win[j] if j == 0 else R.exact(
+            b.mul(win[j], wx(Fraction(1, 2 ** (j * bb)))))
+        _j, _lmin, lmax, pgrid, rhomag, rhogrid = rows[j]
+        if lmax is None:
+            prods.append(None)
+            continue
+        Pj = b.mul(M, Wj)
+        if rhomag > need:                               # the low word counts
+            R.two_prod()
+            nrho = R.exact(b.fma(nM, Wj, Pj))           # = P - T = -rho
+            rho = b.neg(nrho)
+            prods.append((ReductionValue(Pj, lmax + 1e-9, pgrid),
+                          ReductionValue(rho, rhomag, rhogrid)))
+        else:
+            prods.append((ReductionValue(Pj, lmax + 1e-9, pgrid), None))
+    if prods[0] is not None:
+        b.probes.update(P0=prods[0][0].ref)
+    fr.prods = prods
+
+    b.phase = "red-coarse"
+    nqs = []                    # -k for every quadrant count taken out
+    # A position whose chunk is zero in every bucket the range has (a range
+    # below 2^p leaves position 0, and below 2^(p-b) position 1, without
+    # one) contributes nothing: its pieces are left out.
+    P0, rho0 = prods[0] if prods[0] is not None else (None, None)
+    P1, _rho1 = prods[1] if len(prods) > 1 and prods[1] is not None \
+        else (None, None)
+    coarse = []
+    if P0 is not None:
+        coarse.append(R.mod_m(fr, P0, guard=True))
+    if rho0 is not None:
+        coarse.append(R.mod_m(fr, rho0))
+    if P1 is not None:
+        coarse.append(R.mod_m(fr, P1))
+    if not coarse:
+        raise ValueError("no coarse piece: the range leaves positions 0 and "
+                         "1 without a chunk, and nothing fixes the quadrant")
+    VI = coarse[0]
+    for c in coarse[1:]:
+        nxt = R.add_exact(VI, c)
+        if nxt is None:
+            raise ValueError(
+                f"the coarse sum is not exact: 2^{VI.mag:.2f} on grid "
+                f"2^{VI.grid} and 2^{c.mag:.2f} on grid 2^{c.grid} do not "
+                f"fit {p} bits (b = {bb})")
+        VI = nxt
+    q1 = R.data(b.fma(VI.ref, V, MAGIC))                # MAGIC + round(VI/U)
+    nk1 = R.exact(b.sub(MAGIC, q1))
+    fI = R.exact(b.fma(nk1, U, VI.ref))                 # |fI| <= U/2
+    nqs.append(nk1)
+    b.probes.update(fI=fI)
+    fr.coarse, fr.fI, fr.nqs = coarse, fI, nqs
+    return fr
+
+
+def reduction_front(b, x, P, *, plant=None):
+    """The reduction's front, appended to the Build `b` for the argument ref
+    `x`: the setup (red-setup), the window (red-window), the products
+    (red-products) and the coarse sum (red-coarse). The reduction is of |x|.
+    A types.SimpleNamespace of refs and bounds:
+      M, nM        the integer significand of |x| as a float, and -M
+      U, V, m, inv_m   2^-sigma, 2^sigma, 4 U and V/4 (powers of two built on
+                   the encoding), the quadrant unit and the modulus
+      sig, gm1     sigma and g - 1, exact floats; magic, the word MAGIC
+      prods        for j < L: None where no bucket gives position j a chunk,
+                   else (P_j, rho_j), ReductionValues, T_j = M c 2^-(jb) =
+                   P_j - rho_j exactly; rho_j None where it is below the
+                   accuracy needed
+      coarse, fI   the pieces mod m and f_I, |f_I| <= U/2, exact, which is
+                   (P_0 + rho_0 + P_1) mod U
+      nqs          the negated quadrant counts taken out so far, [-k_1]
+    What follows (trig_reduction's mid, lower, scale and small parts) is what
+    a triple word would replace. A static proof that fails is a ValueError
+    naming it. `plant`: one of REDUCTION_PLANTS (the front's act)."""
+    if plant is not None and plant not in REDUCTION_PLANTS:
+        raise ValueError(f"unknown plant {plant!r}: "
+                         f"{', '.join(REDUCTION_PLANTS)}")
+    return _front(_Red(b, P, plant), x)
+
+
+def _tail(R, x, fr):
+    b, P, fmt = R.b, R.P, R.fmt
+    p, mw, bias, bb, L = R.p, R.mw, R.bias, R.bb, P.L
+    wi, wx, ZERO, MAGIC = R.wi, R.wx, R.ZERO, R.magic
+    U, V = fr.U, fr.V
+    prods, fI, nqs = fr.prods, fr.fI, fr.nqs
+    variant = "B" if R.plant == "mid_inexact" else "A"
+    if variant == "B":
+        R.fired.add("mid_inexact")
+
+    b.phase = "red-mid"
+    bottom = P.bottom
+    MQ = b.const("MQ", _enc_exact(
+        fmt, Fraction(3, 2) * Fraction(2) ** (p - 1 + bottom)))
+    mids, lows = [], []
+
+    def place(v):
+        """Classify a piece against the bottom: mid, split, or lower."""
+        if v is None:
+            return
+        if v.grid >= bottom:
+            mids.append(v)
+        elif v.mag < bottom:
+            lows.append(v)
+        else:
+            if v.mag >= p - 2 + bottom:
+                if R.plant != "split_unproved":
+                    raise ValueError(
+                        f"the split's magic is out of range: a piece of "
+                        f"2^{v.mag:.2f} on grid 2^{v.grid} reaches the "
+                        f"magic's 2^{p - 2 + bottom} (p - 2 + bottom) at "
+                        f"the bottom 2^{bottom}")
+                R.fired.add("split_unproved")
+            hi = R.exact(b.sub(R.data(b.add(v.ref, MQ)), MQ))
+            lo = R.exact(b.sub(v.ref, hi))
+            mids.append(ReductionValue(hi, v.mag + 1e-9, bottom))
+            lows.append(ReductionValue(lo, bottom, v.grid))
+
+    rho1 = prods[1][1] if len(prods) > 1 and prods[1] is not None else None
+    place(rho1)
+    for j in range(2, L):
+        if prods[j] is None:
+            continue
+        Pj, rhoj = prods[j]
+        if Pj.mag >= -1:                            # may carry quadrant bits
+            Pj = R.mod_m(fr, Pj)
+            Pj.mag = min(Pj.mag, prods[j][0].mag)
+        place(Pj)
+        place(rhoj)
+    # the mid pieces, summed exactly: largest first, TwoSum where a plain
+    # add is not provably exact, the low words added exactly
+    mids.sort(key=lambda v: -v.mag)
+    if not mids:
+        raise ValueError("the mid sum has no piece: nothing lies above the "
+                         "bottom")
+    if variant == "A":
+        # largest first into (h, lw), the double word h + lw exact
+        # throughout: a piece goes into the low word where that sum is
+        # provably exact, else into h where that is, else by TwoSum
+        h = mids[0]
+        lw = None
+        planted = R.plant != "exact_add"
+        for v in mids[1:]:
+            if lw is not None:
+                s = R.add_exact(lw, v)
+                if s is not None:
+                    lw = s
+                    continue
+            s = R.add_exact(h, v)
+            if s is not None:
+                h = s
+                continue
+            if not planted:
+                # the plant: a plain add where a TwoSum is needed, claimed
+                planted = True
+                R.fired.add("exact_add")
+                h = ReductionValue(R.exact(b.add(h.ref, v.ref)),
+                                   _lg(2 ** h.mag + 2 ** v.mag),
+                                   min(h.grid, v.grid))
+                continue
+            ss, ee = b.two_sum(h.ref, v.ref)
+            g = min(h.grid, v.grid)
+            nh = ReductionValue(ss, _lg(2 ** h.mag + 2 ** v.mag), g)
+            ev = ReductionValue(ee, nh.mag - p, g)
+            h = nh
+            if lw is None:
+                lw = ev
+            else:
+                nlw = R.add_exact(lw, ev)
+                if nlw is None:
+                    raise ValueError(
+                        f"the mid sum's low word is not exact: 2^{lw.mag:.2f}"
+                        f" on grid 2^{lw.grid} and 2^{ev.mag:.2f} on grid "
+                        f"2^{ev.grid} do not fit {p} bits")
+                lw = nlw
+        b.probes.update(mid_h=h.ref)
+        mid = {"h": (h.mag, h.grid), "lw": None}
+        if lw is not None:
+            under = R.plant == "lw_understated"
+            if under:
+                R.fired.add(R.plant)
+            mid["lw"] = (lw.mag - (8 if under else 0), lw.grid)
+        b.meta["reduction_mid"] = mid
+        # the mid sum modulo U, exactly
+        q2 = R.data(b.fma(h.ref, V, MAGIC))
+        nk2 = R.exact(b.sub(MAGIC, q2))
+        h2 = ReductionValue(R.exact(b.fma(nk2, U, h.ref)), h.mag, h.grid)
+        nqs.append(nk2)
+        # fI + mid, exactly, as a double word: TwoSum, then the low words
+        s, e = b.two_sum(fI, h2.ref)
+        if lw is not None:
+            e = R.exact(b.add(e, lw.ref))
+        # the quadrant once more: |s| <= U
+        q3 = R.data(b.fma(s, V, MAGIC))
+        nk3 = R.exact(b.sub(MAGIC, q3))
+        s3 = R.exact(b.fma(nk3, U, s))
+        nqs.append(nk3)
+        xh, xl = b.two_sum(s3, e)                       # exact, renormalised
+    else:
+        # design B (the plant mid_inexact, and only that): the mid pieces
+        # join the lower ones, summed with the double-word accuracy only;
+        # fI is exact
+        lows = mids + lows
+        xh, xl = fI, None
+    b.probes.update(xh=xh)
+
+    b.phase = "red-lower"
+    lows.sort(key=lambda v: -v.mag)
+    b.meta.setdefault("reduction_mid", {})["lows"] = _lg(
+        sum(2 ** v.mag for v in lows))
+    lh = ll = None
+    need = P.budget - 3
+    acc_need = need + p                     # below this a plain add is fine
+    for v in lows:
+        if lh is None:
+            lh = v.ref
+            continue
+        if v.mag > acc_need:
+            lh, e = b.two_sum(lh, v.ref)
+            ll = e if ll is None else b.add(ll, e)
+        else:
+            ll = v.ref if ll is None else b.add(ll, v.ref)
+    if lh is None:
+        lh = ZERO
+    if variant == "B":
+        # B: the coarse fraction and everything else; the lower sum is a
+        # double word, its quadrant bits taken out once
+        s, e = b.two_sum(xh, lh)
+        if ll is not None:
+            e = b.add(e, ll)
+        q3 = R.data(b.fma(s, V, MAGIC))
+        nk3 = R.exact(b.sub(MAGIC, q3))
+        s3 = R.exact(b.fma(nk3, U, s))
+        nqs.append(nk3)
+        th, tl = b.two_sum(s3, e)
+    else:
+        # A: the exact part plus the lower double word (TwoSum of the
+        # highs, the lows added, Fast2Sum); the lower part is below the
+        # bottom, so no cancellation it causes reaches past u^2 |t|
+        s, e = b.two_sum(xh, lh)
+        lo = xl if ll is None else b.add(xl, ll)
+        e = b.add(e, lo)
+        th, tl = R.fast(s, e)
+    b.probes.update(th=th, tl=tl)
+
+    b.phase = "red-scale"
+    th = R.exact(b.mul(th, V))
+    tl = R.exact(b.mul(tl, V))
+    ph, pl = _words(fmt, _pi() / 2, 2)
+    if R.plant == "pio2_low":
+        pl = 0
+        R.fired.add("pio2_low")
+    PH = b.const("PIO2H", ph)
+    PL = b.const("PIO2L", pl)
+    rh = b.mul(th, PH)
+    nre = b.fma(b.neg(th), PH, rh)                      # rh - th PH
+    rl = b.fma(th, PL, b.fma(tl, PH, b.neg(nre)))
+    rh, rl = R.fast(rh, rl)
+    # the quadrant: n = -(sum of the -k), as MAGIC + n
+    counts = nqs[:-1] if R.plant == "quadrant_dropped" else nqs
+    if R.plant == "quadrant_dropped":
+        R.fired.add("quadrant_dropped")
+    nsum = counts[0]
+    for v in counts[1:]:
+        nsum = R.exact(b.add(nsum, v))
+    q = R.exact(b.sub(MAGIC, nsum))                     # MAGIC + n
+
+    b.phase = "red-small"
+    # the reduction is of |x|: M carries no sign. sin and tan are odd and
+    # cos even, so the routine applies x's sign with the quadrant's, to
+    # the double word before its one rounding (rounding is not symmetric
+    # under rdn and rup)
+    ax = b.iand(x, wi(fmt.sign_mask ^ R.full))
+    small = b.cmplt(ax, b.const("PIO4D", _enc(fmt, _pi() / 4, RDN)))
+    rh = b.sel(ax, rh, small)
+    rl = b.sel(ZERO, rl, small)
+    q = b.sel(MAGIC, q, small)
+    b.probes.update(rh=rh, rl=rl, q=q, small=small)
+    inrange = None
+    if P.R is not None:
+        b.phase = "classify"
+        Rbits = _pow2(fmt, P.R - 1 if R.plant == "range_short" else P.R)
+        if R.plant == "range_short":
+            R.fired.add("range_short")
+        inrange = b.icmplt(ax, b.const("RANGE", Rbits))
+        b.probes.update(inrange=inrange)
+    return types.SimpleNamespace(rh=rh, rl=rl, q=q, small=small,
+                                 inrange=inrange)
+
+
+def trig_reduction(b, x, P, *, plant=None):
+    """The trigonometric reduction appended to the Build `b` for the
+    argument ref `x` (straight-line ALU instructions, bank words only, no
+    scratch slot; RNE, and RDN for the bucket's floor), under the plan P of
+    plan_reduction(). -> types.SimpleNamespace(rh, rl, q, small, inrange).
+    For every x with 2^Egate <= |x| < 2^R (P.Egate, P.R):
+      * r = rh + rl with |r - (|x| - n pi/2)| <= 2^-(p+G+3) |r| and
+        rh = RN(rh + rl);
+      * |r| <= pi/4 (1 + 2^-30) at fp64, fp128 and fp256, but only
+        pi/4 (1 + 2^-11) at fp32 (G = 18). The third quadrant count rounds
+        the high word of the exact sum alone, and what it does not see - that
+        sum's rounding error (2^-p of U), the mid sum's low word lw and the
+        pieces below the bottom - can carry |r| past pi/4: with U >= 1/2,
+        2 |t| - 1 <= 2^(1-p) + 4 (|lw| + |lower|), COMPUTED from the static
+        bounds in Build.meta["reduction_mid"]: 2^-11.66 at fp32, 2^-33.04 at
+        fp64, 2^-64.0 at fp128 and 2^-62.0 at fp256 (fp128 and fp256 have no
+        lw);
+      * n mod 4 is q's encoding & 3, q = MAGIC + n;
+      * `small` is nonzero where |x| < RD(pi/4); there rh = |x|, rl = +0 and
+        q = MAGIC;
+      * `inrange` is None where R is None, else nonzero exactly where
+        |x| < 2^R (one ICMPLT, in the phase "classify", which PHASE_ORDER
+        has between "final" and "special"); the caller marks the lane where
+        it is zero;
+      * the reduction is of |x|: the caller applies x's sign.
+    Below 2^Egate, at zero, infinities and NaNs, and past 2^R, the values mean
+    nothing: the caller's paths take those lanes.
+    Phases red-setup, red-window, red-products, red-coarse, red-mid,
+    red-lower, red-scale and red-small (b.phase is restored at the end).
+    Probes: rh, rl, q, small, sig, U, V, fI, xh, th, tl, and gm1, m, inv_m,
+    M, P0, mid_h, inrange. Build.meta gains "exact" and "data" (the claims),
+    "two_prod", "reduction" (the plan) and "reduction_mid" (the bounds
+    above). A static proof that fails is a ValueError naming it. `plant`:
+    one of REDUCTION_PLANTS; one that could not act is refused."""
+    if plant is not None and plant not in REDUCTION_PLANTS:
+        raise ValueError(f"unknown plant {plant!r}: "
+                         f"{', '.join(REDUCTION_PLANTS)}")
+    R = _Red(b, P, plant)
+    entry = b.phase
+    out = _tail(R, x, _front(R, x))
+    b.phase = entry
+    R.check_fired()
+    return out
+
+
+def _main_lane(fmt, P, x):
+    """x is a finite normal argument with 2^Egate <= |x| < 2^R."""
+    ef = (x >> fmt.man_w) & fmt.exp_mask
+    if ef == 0 or ef == fmt.exp_mask:
+        return False
+    return P.Egate <= ef - fmt.bias <= P.Emax
+
+
+def reduction_audit(b, x, *, tally=None):
+    """[(index, opcode name, phase)]: every instruction the build `b` of
+    trig_reduction() claims exact (Build.meta["exact"]) whose result is not
+    the exact operation on its operands' exact values, on the lane x (the
+    argument's bits); empty when every claim holds. Stricter than the
+    model's, which skipped a lane with a non-finite operand and every opcode
+    but ADD, SUB, MUL and FMA without a word: a claim on any other opcode is
+    REPORTED (it cannot be audited), as is, on a main lane (a finite x with
+    2^Egate <= |x| < 2^R), a claimed instruction with a non-finite operand
+    or result. On a lane that is not main (zero, an infinity or NaN, below
+    2^Egate, 2^R and above) the claims are not asserted, since the values mean
+    nothing there; they are counted. `tally`, a dict, gains "claims" (examined,
+    skipped ones included), "nonfinite" (reported on a main lane) and
+    "skipped" (not asserted, the lane not being main)."""
+    if b.meta.get("reduction") is None:
+        raise ValueError("the build holds no trig_reduction()")
+    return _audit_values(b, x, _values(b.fmt, b.body, b.words, x), tally)
+
+
+def _audit_values(b, x, vals, tally):
+    """reduction_audit() on the lane whose instruction values are `vals`
+    (_values of the unpruned body), so that a test that has them runs the
+    lane once."""
+    fmt, P = b.fmt, b.meta["reduction"]
+    get = _getter(vals, b.words, x)
+    main = _main_lane(fmt, P, x)
+    t = tally if tally is not None else {}
+    for k in ("claims", "nonfinite", "skipped"):
+        t.setdefault(k, 0)
+    bad = []
+    for ref in sorted(b.meta.get("exact", ())):
+        i = ref[1]
+        op, _r, srcs = b.body[i]
+        t["claims"] += 1
+        if op not in _AUDITED:
+            bad.append((i, sf.OP_NAMES[op], b.phase_of[i]))
+            continue
+        if not main:
+            t["skipped"] += 1
+            continue
+        try:
+            a = [_dec(fmt, get(s)) for s in srcs]
+            got = _dec(fmt, vals[i])
+        except ValueError:
+            t["nonfinite"] += 1
+            bad.append((i, sf.OP_NAMES[op], b.phase_of[i]))
+            continue
+        if op == sf.OP_ADD:
+            want = a[0] + a[1]
+        elif op == sf.OP_SUB:
+            want = a[0] - a[1]
+        elif op == sf.OP_MUL:
+            want = a[0] * a[1]
+        else:
+            want = a[0] * a[1] + a[2]
+        if got != want:
+            bad.append((i, sf.OP_NAMES[op], b.phase_of[i]))
+    return bad
+
+
+def build_reduction(fmt, rnd=RNE, *, G=None, R="default", plant=None):
+    """The reduction alone, for tests: a Build whose result is r_h and whose
+    flags are q (not a flag word: Build.run() reads them, nothing compiles
+    it). `fmt` is one of the four, `G` the guard (GUARD's, 40 at fp32, which
+    is refused by name: fp32 must be given G = 18, the double word's), `R`
+    as plan_reduction()'s, `plant` one of REDUCTION_PLANTS. The probes are
+    trig_reduction()'s; the lane's other values are in the unpruned body."""
+    if fmt not in FORMATS:
+        raise ValueError(f"{fmt!r} is not one of the four formats")
+    if rnd not in sf.RND_NAMES:
+        raise ValueError(f"rounding attribute {rnd!r} is not one of the five")
+    if plant is not None and plant not in REDUCTION_PLANTS:
+        raise ValueError(f"unknown plant {plant!r}: "
+                         f"{', '.join(REDUCTION_PLANTS)}")
+    G = GUARD[fmt.name] if G is None else G
+    P = plan_reduction(fmt, G, R=R)
+    b = Build(fmt, rnd, f"reduction-{fmt.name}-{sf.RND_NAMES[rnd]}")
+    b.meta.update(fn="reduction", G=G, R=P.R, reduction_plant=plant)
+    out = trig_reduction(b, ("in", "a"), P, plant=plant)
+    return b.finish(out.rh, out.q)
+
+
 # ---- what is proved of every fragment ---------------------------------------
 #
 # C4's routines.invariants() held a division's and a root's fragments; the
@@ -2817,6 +3713,15 @@ def _check_two_to_eighth(j):
     return Fraction(r, 1 << bits), Fraction(r + 1, 1 << bits)
 
 
+def _show(v):
+    """A rational for a message: 17 digits, or 2^k where it is too large for
+    a float (a power of two of fp128 or fp256, as the range word is)."""
+    try:
+        return f"{float(v):.17g}"
+    except OverflowError:
+        return f"~2^{v.numerator.bit_length() - v.denominator.bit_length()}"
+
+
 def _why_not(fmt, rule, bits, lo, hi, nbits=None):
     """None where `bits` is what `rule` gives for EVERY value of [lo, hi],
     else why not. rules: "rn" nearest, "ru" up, "rd" down, "trunc" toward
@@ -2850,8 +3755,8 @@ def _why_not(fmt, rule, bits, lo, hi, nbits=None):
         raise ValueError(rule)
     if ok:
         return None
-    return (f"{bits:#x} = {float(w):.17g} is not the {rule} rounding of "
-            f"[{float(lo):.17g}, {float(hi):.17g}]")
+    return (f"{bits:#x} = {_show(w)} is not the {rule} rounding of "
+            f"[{_show(lo)}, {_show(hi)}]")
 
 
 def _check_scale(b: Build, findings):
@@ -3531,36 +4436,222 @@ def check_constants(builder=None, formats=FORMATS, attrs=sf.RND_MODES,
     return lines, findings
 
 
+# ---- the reduction's constants, checked ---------------------------------------
+#
+# The reduction's derived words - 2/pi's chunks, pi/2 in two words, RD(pi/4),
+# MAGIC and the split's magic, 1/b and the floor's offset, 2^R - are asked of
+# the BUILT reduction by role, as the six's are, against derivations that share
+# nothing with the generator or with mpmath:
+#
+#   pi            Machin's formula, pi = 16 atan(1/5) - 4 atan(1/239), the series
+#                 in integers (floors of 2^bits over each term, the loss
+#                 counted: width 2^-(bits - 8) or so)
+#   2/pi's chunks floor(2/pi 2^((k+1) b)) mod 2^b of the enclosure of 2/pi from
+#                 that pi; an enclosure that straddles the last bit of a chunk
+#                 is REFUSED as undecidable, never passed
+#   the header    host/src/mp_2opi.h's first bits (the file the library reduces
+#                 with: a bit stream, most significant word and bit first,
+#                 parsed as python/tests/test_mp_consts.py's _parse_2opi does,
+#                 copied here since the golden model imports no test); a missing
+#                 or unreadable header is a difference by name
+#   the rest      the rounding rules of the six's check (_why_not), exact
+#                 fractions: pi/2 nearest, then nearest to what is left; RD(pi/4)
+#                 down; 1/b and (2b - 3)/(2b) nearest; MAGIC, the split's magic
+#                 and 2^R exact
+#
+# The words that are not rounded reals - the bucket offset, the shift counts -
+# are checked where they act, by python/tests/test_mathlib_reduction.py's
+# `setup`, on every exponent of the range.
+
+_PI_CHECK_BITS = 3200
+
+
+@functools.lru_cache(maxsize=None)
+def _check_pi(bits):
+    """(lo, hi): pi enclosed, from Machin's formula in integers. Each series
+    term is a floor of 2^bits over it (the loss under one unit), the series
+    alternates (its tail is under the first term dropped, under one unit):
+    16 and 4 times a count of terms plus one of units either way."""
+    one = 1 << bits
+
+    def atan_inv(n):
+        total, k, pw, sign = 0, 0, n, 1
+        while True:
+            t = one // ((2 * k + 1) * pw)
+            if t == 0:
+                return total, k
+            total += sign * t
+            sign, k, pw = -sign, k + 1, pw * n * n
+    a5, k5 = atan_inv(5)
+    a239, k239 = atan_inv(239)
+    centre = 16 * a5 - 4 * a239
+    slack = 16 * (k5 + 1) + 4 * (k239 + 1)
+    return Fraction(centre - slack, one), Fraction(centre + slack, one)
+
+
+def _read_two_opi(path, nbits):
+    """floor(2/pi 2^nbits) as the header at `path` holds it (its first
+    `nbits` bits), or a ValueError saying why not: the header is a bit stream
+    of 32-bit words, most significant first (test_mp_consts._parse_2opi)."""
+    try:
+        text = pathlib.Path(path).read_text()
+    except OSError as e:
+        raise ValueError(f"{path} cannot be read ({e.__class__.__name__})")
+    try:
+        bits = int(text.split("#define CFT_TWO_OVER_PI_BITS")[1].split()[0])
+        words = int(text.split("#define CFT_TWO_OVER_PI_WORDS")[1].split()[0])
+        body = text.split("cft_two_over_pi[CFT_TWO_OVER_PI_WORDS] = {")[1]
+        vals = [int(tok[2:10], 16) for tok in
+                body.split("};")[0].replace(",", " ").split()
+                if tok.startswith("0x")]
+    except (IndexError, ValueError):
+        raise ValueError(f"{path} is not the 2/pi header (CFT_TWO_OVER_PI_* "
+                         f"and the array)")
+    if len(vals) != words or bits != 32 * words:
+        raise ValueError(f"{path}: {len(vals)} words read, {words} stated "
+                         f"({bits} bits)")
+    if nbits > bits:
+        raise ValueError(f"{path} holds {bits} bits of 2/pi, {nbits} wanted")
+    nw = -(-nbits // 32)
+    v = 0
+    for w in vals[:nw]:
+        v = (v << 32) | w
+    return v >> (32 * nw - nbits)
+
+
+def _check_reduction_build(b, findings, header):
+    """Every derived constant of one built reduction against its independent
+    derivation, and the chunks against the header. -> constants checked."""
+    fmt, p = b.fmt, b.fmt.prec
+    P = b.meta["reduction"]
+    tag, verify, point, seen, count = _verifier(b, findings)
+    lo_pi, hi_pi = _check_pi(max(_PI_CHECK_BITS,
+                                 -(-(P.bits + 256) // 64) * 64))
+    point("MAGIC", Fraction(3, 2) * Fraction(2) ** (p - 1))
+    point("MQ", Fraction(3, 2) * Fraction(2) ** (p - 1 + P.bottom))
+    verify("INVB", "rn", Fraction(1, P.b), Fraction(1, P.b))
+    off = Fraction(2 * P.b - 3, 2 * P.b)
+    verify("FLOOROFF", "rn", off, off)
+    w0 = verify("PIO2H", "rn", lo_pi / 2, hi_pi / 2)
+    verify("PIO2L", "rn", lo_pi / 2 - w0, hi_pi / 2 - w0)
+    verify("PIO4D", "rd", lo_pi / 4, hi_pi / 4)
+    if P.R is not None:
+        point("RANGE", Fraction(2) ** P.R)
+    elif "RANGE" in b.roles:
+        findings.append(f"{tag}: the range word RANGE is held where the "
+                        f"range is the whole")
+    # 2/pi's chunks: the integer derivation, and the header
+    lo2, hi2 = 2 / hi_pi, 2 / lo_pi
+    try:
+        head = _read_two_opi(header, P.bits)
+        head_why = None
+    except ValueError as e:
+        head, head_why = None, str(e)
+        findings.append(f"{tag}: the header of 2/pi is missing or unusable: "
+                        f"{head_why}")
+    mask = (1 << P.b) - 1
+    for k in range(P.nchunks):
+        role, n = f"CHUNK{k}", (k + 1) * P.b
+        seen.add(role)
+        if role not in b.roles:
+            findings.append(f"{tag}: the fragment has no constant {role}")
+            continue
+        count[0] += 1
+        got = _dec(fmt, b.words[b.roles[role][1]])
+        n_lo, n_hi = math.floor(lo2 * 2 ** n), math.floor(hi2 * 2 ** n)
+        if n_lo != n_hi:
+            findings.append(f"{tag} {role}: undecidable: the enclosure of "
+                            f"2/pi straddles a chunk's last bit, bit {n}")
+        elif got != n_lo & mask:
+            findings.append(f"{tag} {role}: {_hexfrac(got)} is not bits "
+                            f"[{k * P.b}, {n}) of 2/pi, 0x{n_lo & mask:x} "
+                            f"(Machin's formula)")
+        if head is not None:
+            want = (head >> (P.bits - n)) & mask
+            if got != want:
+                findings.append(f"{tag} {role}: {_hexfrac(got)} is not the "
+                                f"header's bits [{k * P.b}, {n}), "
+                                f"0x{want:x}")
+    unchecked = sorted(set(b.roles) - seen)
+    if unchecked:
+        findings.append(f"{tag}: derived but not checked: {unchecked}")
+    return count[0]
+
+
+def _hexfrac(v):
+    return f"0x{int(v):x}" if v.denominator == 1 else f"{float(v):.17g}"
+
+
+def check_reduction_constants(builder=None, formats=(FP64, FP128, FP256),
+                              header=None):
+    """(lines, findings): re-derive every derived constant of the built
+    reduction at each of `formats` (the section's comment above) and compare,
+    by role. `lines` say what was checked; `findings` are the differences,
+    empty when none. `builder(fmt)` is build_reduction, or a faulted one for
+    a test; `header` the path of 2/pi's header (host/src/mp_2opi.h)."""
+    builder = builder or build_reduction
+    header = header or _TWO_OPI_HEADER
+    lines, findings = [], []
+    for fmt in formats:
+        b = builder(fmt)
+        P = b.meta["reduction"]
+        n = _check_reduction_build(b, findings, header)
+        lines.append(
+            f"reduction {fmt.name}: G = {P.G}, b = {P.b}, L = {P.L}, "
+            f"{P.nchunks} chunks of {P.b} bits ({P.bits} bits of 2/pi): {n} "
+            f"derived constants, each the rounding its rule gives for every "
+            f"value of an enclosure of the true number (Machin's formula in "
+            f"integers), the chunks also the bits of host/src/mp_2opi.h")
+    return lines, findings
+
+
 # ---- the module as a program ------------------------------------------------
 
 def main(argv=None):
     ap = argparse.ArgumentParser(
         prog="python -m cft_golden.mathlib",
         description="The math library's golden generator: the fragments of "
-                    + ", ".join(NAMES) + ".")
+                    + ", ".join(NAMES) + ", and the trigonometric reduction "
+                    "(reduction).")
     ap.add_argument("--check", action="store_true",
                     help="re-derive every constant the built fragments "
                          "hold, in integer arithmetic of its own, and exit "
                          "1 on a difference")
     ap.add_argument("--only", default="",
-                    help="a comma-separated list of routines to check or "
-                         "list (default: all)")
+                    help="a comma-separated list of routines, and the word "
+                         "reduction, to check or list (default: all, the "
+                         "reduction checked but not listed)")
     args = ap.parse_args(argv)
-    names = tuple(n for n in args.only.split(",") if n) or NAMES
-    for n in names:
-        if n not in NAMES:
-            ap.error(f"--only {n!r}: one of {', '.join(NAMES)}")
+    only = tuple(n for n in args.only.split(",") if n)
+    for n in only:
+        if n not in NAMES and n != "reduction":
+            ap.error(f"--only {n!r}: one of {', '.join(NAMES)}, reduction")
+    names = tuple(n for n in only if n in NAMES) or (() if only else NAMES)
+    reduction = not only or "reduction" in only
     if args.check:
-        lines, findings = check_constants(formats=FORMATS, names=names)
-        for ln in lines:
-            print(ln)
-        for fd in findings:
-            print("DIFFERENCE:", fd)
-        print(f"mathlib --check: {len(names)} routines, {len(FORMATS)} "
-              f"formats, {len(findings)} differences")
-        return 1 if findings else 0
-    print(f"{'routine':8s} {'format':6s} {'rnd':4s} {'insns':>6s} "
-          f"{'words':>6s} {'live':>5s}  cap")
+        failed = False
+        if names:
+            lines, findings = check_constants(formats=FORMATS, names=names)
+            for ln in lines:
+                print(ln)
+            for fd in findings:
+                print("DIFFERENCE:", fd)
+            print(f"mathlib --check: {len(names)} routines, {len(FORMATS)} "
+                  f"formats, {len(findings)} differences")
+            failed = bool(findings)
+        if reduction:
+            lines, findings = check_reduction_constants()
+            for ln in lines:
+                print(ln)
+            for fd in findings:
+                print("DIFFERENCE:", fd)
+            print(f"mathlib --check (reduction): {len(lines)} formats, "
+                  f"{len(findings)} differences")
+            failed = failed or bool(findings)
+        return 1 if failed else 0
+    if names:
+        print(f"{'routine':8s} {'format':6s} {'rnd':4s} {'insns':>6s} "
+              f"{'words':>6s} {'live':>5s}  cap")
     for name in names:
         for fmt in FORMATS:
             for rnd in sf.RND_MODES:
@@ -3568,6 +4659,15 @@ def main(argv=None):
                 print(f"{name:8s} {fmt.name:6s} {sf.RND_NAMES[rnd]:4s} "
                       f"{len(f):6d} {len(f.words):6d} {f.live_max():5d}  "
                       f"{LIVE_CAP[fmt.name]}")
+    if "reduction" in only:
+        for fmt in (FP64, FP128, FP256):
+            b = build_reduction(fmt)
+            P = b.meta["reduction"]
+            by = {}
+            for ph in b.phase_of:
+                by[ph] = by.get(ph, 0) + 1
+            print(f"reduction {fmt.name}: G = {P.G}, b = {P.b}, L = {P.L}, "
+                  f"{P.K} words, {len(b.body)} instructions by phase {by}")
     return 0
 
 
