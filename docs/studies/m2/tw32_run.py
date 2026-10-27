@@ -158,7 +158,7 @@ def mode_costs():
         say(f"   against 2.7's ESTIMATE (reduction about 320, heads about 490, "
             f"the rest about 120, sin about 930): reduction {red} ({red - 320:+d}), "
             f"heads {heads} ({heads - 490:+d}), rest {rest} ({rest - 120:+d}), "
-            f"total {len(f.body)} ({len(f.body) - 930:+d} for sin; "
+            f"total {len(f.body)} ({len(f.body) - 930:+d} against the sin estimate of 930; "
             f"{len(f.body) / 930:.3f} of the estimate; the decision's cap is 1,395)")
         detail = {p_: n for p_, n in ph.items()}
         say(f"   every phase: {detail}")
