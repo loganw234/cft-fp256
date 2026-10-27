@@ -331,8 +331,9 @@ def mode_reduce(plant=None, n=1000, seed=7, full=True):
     say(f"  the check can fail: of the {len(top)} lanes, {n30} are past pi/4 (1 + 2^-30), the "
         f"study's rho (it does not hold at fp32), {n11} past pi/4 (1 + 2^-11.66), M2G1's bound for "
         f"the double word's reduction, and {nb} past this build's COMPUTED bound")
-    say("  the five largest overshoots over every family: " + "; ".join(
-        f"{hex(xa)} n {nq} {ex:+.3e} (2^{math.log2(ex):.2f})" for ex, xa, nq in top[:5] if ex > 0))
+    say("  the five largest overshoots over every family: " + ("; ".join(
+        f"{hex(xa)} n {nq} {ex:+.3e} (2^{math.log2(ex):.2f})" for ex, xa, nq in top[:5] if ex > 0)
+        or "none, no lane is past pi/4 in these families"))
     say(f"TOTAL {totals['arguments']} arguments: quadrant off {totals['quadrant off']}, "
         f"audit failures {totals['audit failures']}; largest overshoot MEASURED "
         f"{totals['overshoot']:.3e} (2^{math.log2(totals['overshoot']) if totals['overshoot'] > 0 else -999:.2f}) "
