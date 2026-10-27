@@ -5526,7 +5526,9 @@ def wide_catalog_checks(src: str = HERE) -> list:
         c("wide catalog: without mpfr the catalog is the 125 items it was, none of them wide or making a claim, and with it those 125 come "
           "first, every attribute the same", len(old) == 125 and [vars(a) for a in old] == [vars(b) for b in full[:125]]
           and not any(a.mpfr or a.claim for a in old), f"{len(old)}, {len(full)}")
-        wide = full[125:227]                    # HXc's 102; parcel HXb's 60 follow them (wide_c5_catalog_checks)
+        # HXc's 102, the divsqrt items after the 125 - chosen by tool, not by a slice, so that a plant that changes their number is
+        # caught here by the count, as before parcel HXb, and not by a KeyError; parcel HXb's 60 clause5 items follow (wide_c5_catalog_checks)
+        wide = [it for it in full[125:] if it.tool == "divsqrt"]
         by = {it.name: it for it in wide}
         c("wide catalog: the 102 wide items follow, in the study's rank order (the wide hard cases, the fp64 hard cases widened, the fp32 "
           "slice at fp128 and fp256, then at fp64, the sixteen windows), the windows under rne and rup alone",
@@ -5677,15 +5679,15 @@ def wide_c5_catalog_checks(src: str = HERE) -> list:
         raises = lambda fn: raises_in(L2, fn)               # noqa: E731
         parse_ok = lambda fn: parse_ok_in(L2, fn)           # noqa: E731
         full = L2.sweep_items(mpfr=True)
-        c5 = full[227:]
+        c5 = [it for it in full[125:] if it.tool == "clause5"]          # chosen by tool; their place is the next check's
         by = {it.name: it for it in c5}
         c("wide c5 catalog: the 60 wide clause-5 items follow the 227 - the 125 and HXc's 102, every one a divsqrt item - in the study's order "
           "(rank 3: the class modes of rint and scaleB; rank 5: the fp32 slice through the wide rint; then the wide conversions), each under "
-          "all five attributes", len(full) == 287 and [it.name for it in c5] == DOC_WIDE_C5_NAMES and [it.name for it in full[125:227]] ==
-          DOC_WIDE_NAMES and all(it.tool == "divsqrt" for it in full[125:227]), f"{len(full)}: {[it.name for it in c5][:3]}")
+          "all five attributes", len(full) == 287 and [it.name for it in full[227:]] == DOC_WIDE_C5_NAMES and [it.name for it in full[125:227]]
+          == DOC_WIDE_NAMES and all(it.tool == "divsqrt" for it in full[125:227]), f"{len(full)}: {[it.name for it in full[227:]][:3]}")
         bad = []
         for it in c5:
-            sp, k, whole, level, reach = DOC_WIDE_C5[it.op]
+            sp, k, whole, level, reach = DOC_WIDE_C5.get(it.op, (None,) * 5)
             got = (it.kind, it.tool, it.verdict_mode, it.space, it.per_encoding, it.whole, it.level, it.reach, it.exact, it.mpfr, it.seed_index)
             want = ("exhaustive", "clause5", it.mode, sp, k, whole, level, reach, True, True, None)
             if got != want:
