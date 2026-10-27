@@ -3095,9 +3095,45 @@ HUGE_LANES = (10 ** 12, (1 << 63) - 1)
 # call alone. Flat means under SPEND_LIMIT, and within FLAT_SLACK of the
 # same audit's at 10 lanes, which is refused on the same path: the stated
 # number moves by eleven orders of magnitude and the memory does not.
+# Each figure is the least of TRIES audits, each stating a lanes count of
+# its own (counts()), and every one of them is still held to its refusal
+# and its place. A measured call can hold a transient of the interpreter's
+# that no audit spent: on 2026-10-26, under host/tests/audit_check.py's
+# shadow, a rebuild of the table of interned strings in the gate's CPython
+# 3.12.15 fell inside one audit's window (its pathlib interns every path
+# part; the strings die with their paths, but the dict gives no slot back
+# for a deleted entry, so the table is rebuilt when its slots run out, the
+# new table allocated before the old is freed: 1,922,416 bytes at 2^17
+# slots), and this file failed on that alone. Rebuilds come thousands of
+# interns apart, so one lands in one call of three at most. A cost by lanes
+# paid at every count - cached per count, or per power of two, since the
+# counts double - is paid in all three, so the least of the TRIES still
+# carries it; a cost paid in fewer than all three of a size's audits (a
+# cache keyed coarser than that, a cost at one exact count) is not.
 SPEND_SECONDS = 1.0
 SPEND_LIMIT = 4 << 20
 FLAT_SLACK = 64 << 10
+TRIES = 3
+
+
+def counts():
+    """(L, a lanes count to state) for L = 10 and each of HUGE_LANES: TRIES
+    counts of L's size, each of a bit length of its own - doubling from L,
+    or halving from the largest, 2^63 - 1 (10, 20, 40; 10^12, 2 x 10^12,
+    4 x 10^12; 2^63 - 1, 2^62 - 1, 2^61 - 1)."""
+    out = []
+    for L in (10,) + HUGE_LANES:
+        if L << (TRIES - 1) > (1 << 63) - 1:
+            out += [(L, L >> t) for t in range(TRIES)]
+        else:
+            out += [(L, L << t) for t in range(TRIES)]
+    return out
+
+
+def least(got, key, dt, peak):
+    """Keep under key the least seconds and the least peak of its audits."""
+    t, p = got.get(key, (dt, peak))
+    got[key] = (min(t, dt), min(p, peak))
 
 
 def _vm_bytes():
@@ -3199,8 +3235,8 @@ def test_a_huge_lanes_costs_nothing_and_is_refused_by_name(lor):
     sampled3 = {r: ("sample", 1) for r in range(3)}
     got = {}
     with no_runaway():
-        for L in (10,) + HUGE_LANES:
-            one, three = _one_run(lor, L), _three_runs(lor, L)
+        for L, n in counts():
+            one, three = _one_run(lor, n), _three_runs(lor, n)
             cases = [
                 ("one, full, states", one, P0, {"states": {0: lor.states[0]}},
                  "state-shape", (0, 0)),
@@ -3223,16 +3259,16 @@ def test_a_huge_lanes_costs_nothing_and_is_refused_by_name(lor):
             ]
             for what, data, progs, kw, name, where in cases:
                 e, dt, peak = spent(name, cert.audit, data, SALT, progs, **kw)
-                assert (e.run, e.segment) == where, (L, what, e.message)
+                assert (e.run, e.segment) == where, (n, what, e.message)
                 if what.startswith("three") and name == "state-missing":
                     # step 8's: the wider run's start, not a re-run's
                     assert "exactly widened" in e.message, e.message
-                assert dt < SPEND_SECONDS, (L, what, dt)
-                assert peak < SPEND_LIMIT, (L, what, peak)
-                got[(L, what)] = peak
-    for (L, what), peak in got.items():
-        assert abs(peak - got[(10, what)]) <= FLAT_SLACK, (
-            f"{what}: {peak} bytes at lanes {L}, {got[(10, what)]} at 10")
+                least(got, (L, what), dt, peak)
+    for (L, what), (dt, peak) in got.items():
+        assert dt < SPEND_SECONDS, (L, what, dt)
+        assert peak < SPEND_LIMIT, (L, what, peak)
+        assert abs(peak - got[(10, what)][1]) <= FLAT_SLACK, (
+            f"{what}: {peak} bytes at lanes {L}, {got[(10, what)][1]} at 10")
 
 
 def test_the_rules_place_in_the_order(lor):
@@ -3307,19 +3343,19 @@ def test_a_stream_handed_bounds_its_own_run_only(lor):
     zero = [0] * LANES
     got = {}
     with no_runaway():
-        for L in (10,) + HUGE_LANES:
+        for L, n in counts():
             data = cert.encode(keyed(
-                (r0, dataclasses.replace(r1, lanes=L), r2), ()))
+                (r0, dataclasses.replace(r1, lanes=n), r2), ()))
             e, dt, peak = spent("aux-lanes", cert.audit, data, SALT,
                                 lor.progs,
                                 states={0: lor.states[0], 2: lor.states[2]},
                                 streams={0: (zero, zero, zero)})
-            assert (e.run, e.segment) == (1, None), (L, e.message)
-            assert dt < SPEND_SECONDS, (L, dt)
-            assert peak < SPEND_LIMIT, (L, peak)
-            got[L] = peak
-    for L in HUGE_LANES:
-        assert abs(got[L] - got[10]) <= FLAT_SLACK, (L, got[L], got[10])
+            assert (e.run, e.segment) == (1, None), (n, e.message)
+            least(got, L, dt, peak)
+    for L, (dt, peak) in got.items():
+        assert dt < SPEND_SECONDS, (L, dt)
+        assert peak < SPEND_LIMIT, (L, peak)
+        assert abs(peak - got[10][1]) <= FLAT_SLACK, (L, peak, got[10][1])
 
 
 def test_three_nones_are_no_stream_handed(lor):
@@ -3334,18 +3370,18 @@ def test_three_nones_are_no_stream_handed(lor):
     nones = {0: (None, None, None)}
     got = {}
     with no_runaway():
-        for L in (10,) + HUGE_LANES:
-            one = _one_run(lor, L)
+        for L, n in counts():
+            one = _one_run(lor, n)
             for name, kw in (("state-missing", {}),
                              ("state-shape", {"states": {0: lor.states[0]}})):
                 e, dt, peak = spent(name, cert.audit, one, SALT,
                                     {0: lor.progs[0]}, streams=nones, **kw)
-                assert (e.run, e.segment) == (0, 0), (L, name, e.message)
-                assert dt < SPEND_SECONDS, (L, name, dt)
-                assert peak < SPEND_LIMIT, (L, name, peak)
-                got[(L, name)] = peak
-    for (L, name), peak in got.items():
-        assert abs(peak - got[(10, name)]) <= FLAT_SLACK, (L, name, peak)
+                assert (e.run, e.segment) == (0, 0), (n, name, e.message)
+                least(got, (L, name), dt, peak)
+    for (L, name), (dt, peak) in got.items():
+        assert dt < SPEND_SECONDS, (L, name, dt)
+        assert peak < SPEND_LIMIT, (L, name, peak)
+        assert abs(peak - got[(10, name)][1]) <= FLAT_SLACK, (L, name, peak)
 
 
 def test_a_run_is_bounded_by_a_state_for_one_of_its_own_boundaries(lor):
@@ -3383,17 +3419,17 @@ def test_a_run_is_bounded_against_its_own_lanes(lor):
     r0, r1, r2 = lor.runs
     got = {}
     with no_runaway():
-        for L in (10,) + HUGE_LANES:
+        for L, n in counts():
             data = cert.encode(keyed(
-                (r0, dataclasses.replace(r1, lanes=L), r2), ()))
+                (r0, dataclasses.replace(r1, lanes=n), r2), ()))
             e, dt, peak = spent("state-shape", cert.audit, data, SALT,
                                 lor.progs, states=lor.states)
-            assert (e.run, e.segment) == (1, 0), (L, e.message)
-            assert dt < SPEND_SECONDS, (L, dt)
-            assert peak < SPEND_LIMIT, (L, peak)
-            got[L] = peak
-    for L in HUGE_LANES:
-        assert abs(got[L] - got[10]) <= FLAT_SLACK, (L, got[L], got[10])
+            assert (e.run, e.segment) == (1, 0), (n, e.message)
+            least(got, L, dt, peak)
+    for L, (dt, peak) in got.items():
+        assert dt < SPEND_SECONDS, (L, dt)
+        assert peak < SPEND_LIMIT, (L, peak)
+        assert abs(peak - got[10][1]) <= FLAT_SLACK, (L, peak, got[10][1])
 
 
 def test_a_bounded_wider_run_beside_an_unbounded_main_run(lor):
