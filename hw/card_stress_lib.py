@@ -1043,12 +1043,9 @@ def read_records(path: str) -> Tuple[List[Dict[str, Any]], bool, List[int]]:
 
 def cadence_reason(every: int, visit: int) -> str:
     """Why a cycle leaves a leg out of its battery by cadence (--every LEG=N; since 2026-10-27, parcel BC): the text the driver writes beside the
-    leg in cycle_start's `left_out`, and the text it wrote as a skipped leg's `reason` before. CADENCE_REASON is how the report reads it back;
-    both live here so that neither side can reword it alone."""
+    leg in cycle_start's `left_out`, and the text it wrote as a skipped leg's `reason` before. The report takes a left-out entry for the cadence's
+    only if it equals this function's text for the cycle's `every` and `visit`; the text lives here so that neither side can reword it alone."""
     return f"every {every} visits of an image; this is visit {visit}"
-
-
-CADENCE_REASON = re.compile(r"^every (\d+) visits of an image; this is visit (\d+)$")
 
 
 def sweep_coverage(records: Iterable[Dict[str, Any]]):
