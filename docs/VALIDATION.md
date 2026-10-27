@@ -24582,7 +24582,7 @@ hw/card_stress_report.py, their tests (hw/test_card_stress.py, hw/test_card_stre
   5,116 checks, 0 failed, 5 s; hw/test_card_stress_progress.py 372 checks, 0 failed, 1 skipped, 19 s, and with
   `CARD_STRESS_PROGRESS_RUNS` naming the lead's nightly-1021 and resume-1020 copies 387 checks, 0 failed, 0 skipped, 21 s;
   `--only commands` from Git Bash 83 checks, 0 failed, 4 s (from PowerShell `bash` is WSL's launcher and the group's job-list
-  block fails there, at the baseline too); `--only normal,cadence,report` 22 + 10 + 8 checks, 0 failed, 49 s; the group
+  block fails there; that code is not this parcel's); `--only normal,cadence,report` 22 + 10 + 8 checks, 0 failed, 49 s; the group
   `cadence` alone 16 to 18 s; hw/test_sched.py `--only steps:registry` 8 checks, 0 failed; `python/project_figures.py --check` rc
   0, 17 s; `python/check_docs_index.py` rc 0; `git diff --check` clean. All 21 plants were also run there, one process each,
   each caught at the check written for it.
