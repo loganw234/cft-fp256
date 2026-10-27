@@ -128,6 +128,14 @@ CUSHION = {"fp32": 11}
 N_RANDOM = {"fp64": 400, "fp128": 400, "fp256": 200, "fp32": 100}
 HALVES_STEP = {"fp32": 1, "fp64": 16, "fp128": 64, "fp256": 64}
 N_ARGS = {"fp64": (3853, 1844), "fp128": (676, 632), "fp256": (434, 302)}
+# What a stated range costs (the study's 2.3 tables, READ): R -> (words stored,
+# chunks, b, the shifter's levels) at fp128 and fp256.
+RANGES = {
+    "fp128": {128: (7, 5, 109, 2), 256: (8, 6, 109, 2), 512: (10, 8, 108, 3),
+              1024: (15, 13, 108, 4)},
+    "fp256": {128: (6, 4, 233, 1), 256: (7, 5, 233, 2), 512: (8, 6, 233, 2),
+              1024: (10, 8, 233, 3)},
+}
 # The static bounds of every position (the model's analyse(), rounded to 1e-6):
 # (j, log2 Tmin, log2 Tmax, P's grid, rho's bound, rho's grid).
 ROWS = {
@@ -646,10 +654,15 @@ def check_proofs(planner=None, builder=None):
     fields(P, PLAN32, "fp32 at G = 18")
     if rows_of(P) != ROWS["fp32"]:
         out.append("proofs: fp32 at G = 18: the static bounds differ")
-    # a range below the default is planned (its table shrinks); past it, refused
-    P = planner(FP256, 46, R=128)
-    if (P.Emax, P.R) != (127, 128) or P.nchunks >= PLAN["fp256"]["nchunks"]:
-        out.append("proofs: fp256 to 2^128: the plan does not shrink")
+    # a range below the default is planned, and its table is the study's 2.3
+    # (words, chunks, b, shifter levels); past it, refused
+    for name, table in RANGES.items():
+        for Rv, want in table.items():
+            P = planner(BY_NAME[name], ml.GUARD[name], R=Rv)
+            got = (P.K, P.nchunks, P.b, max(1, (P.shifts - 1).bit_length()))
+            if got != want or P.Emax != Rv - 1:
+                out.append(f"proofs: {name} to 2^{Rv}: (words, chunks, b, "
+                           f"levels) {got}, the study's {want}")
     refuses(lambda: planner(FP128, 46, R=2048), "past 2^1024, the range",
             "fp128, R = 2048")
     refuses(lambda: planner(FP256, 46, R=None), "past 2^1024, the range",
@@ -913,6 +926,36 @@ def test_the_range_is_the_stated_one():
         assert b.meta["reduction"].R == R
         assert ("inrange" in b.probes) == (R is not None)
         assert ("RANGE" in b.roles) == (R is not None)
+
+
+@pytest.mark.parametrize("name,R,empty", [("fp256", 128, True),
+                                          ("fp128", 128, False),
+                                          ("fp128", 512, False)])
+def test_a_smaller_range_is_reduced_right_and_position_0_may_have_no_chunk(
+        name, R, empty):
+    """The study's 3.6, item 4: a range below 2^(p+1+b) leaves the window's
+    first position without a chunk in every bucket (fp256 to 2^128), and the
+    position contributes nothing. Built at smaller stated ranges and held to
+    the checks on lanes inside them (the claims' pin is the default plan's,
+    so the build's own counts stand in for it)."""
+    fmt = BY_NAME[name]
+    b = ml.build_reduction(fmt, R=R)
+    P = b.meta["reduction"]
+    assert (P.R, P.Emax) == (R, R - 1)
+    fr = ml.reduction_front(ml.Build(fmt, RNE, "front"), ("in", "a"), P)
+    assert (fr.prods[0] is None) == empty
+    rng = random.Random(5)
+    p = fmt.prec
+    xs = []
+    for _ in range(150):
+        E = rng.randint(P.Egate, P.Emax)
+        xs.append(_enc(fmt, rng.getrandbits(1),
+                       rng.getrandbits(p - 1) | (1 << (p - 1)), E - p + 1))
+    xs += edge_args(fmt, P)[:150] + half_args(fmt, P, 8)
+    run = run_lanes(b, xs)
+    pin = (len(b.meta["exact"]), len(b.meta["data"]))
+    assert check_reference(run) == [] and check_audit(run, pin=pin) == []
+    assert check_range(b) == []
 
 
 def test_the_front_is_what_trig_reduction_calls():
@@ -1316,7 +1359,7 @@ def test_the_runs_command_runs_at_small_sizes():
         [sys.executable, "-B", str(pathlib.Path(__file__).parent
                                    / "mathlib_runs.py"), "reduction",
          "--formats", "fp128", "--n", "30", "--edge-width", "0",
-         "--halves-step", "256"], capture_output=True, text=True)
+         "--halves-step", "256", "--quick"], capture_output=True, text=True)
     assert done.returncode == 0, done.stdout + done.stderr
     assert "RESULT: ok" in done.stdout
     assert "reduction fp128: G = 46, b = 108" in done.stdout

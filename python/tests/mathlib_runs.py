@@ -23,7 +23,7 @@ log2 and log1p.
     python python/tests/mathlib_runs.py family  --write | --check
     python python/tests/mathlib_runs.py live
     python python/tests/mathlib_runs.py reduction [--formats fp64,fp128,fp256]
-        [--n 100000] [--seed 1] [--edge-width 8] [--halves-step 1]
+        [--n 100000] [--seed 1] [--edge-width 8] [--halves-step 1] [--quick]
     python python/tests/mathlib_runs.py all     [--scale 1]
 
 --fn is a list of exp, exp2, expm1, log, log2 and log1p (all six by default).
@@ -96,8 +96,9 @@ sample is a function of --seed, so a run can be repeated.
            error under 2^-(p+G+3), the quadrant, the cushion past pi/4) and
            every claim of the build audited. Prints, a format, the lanes, r's
            largest error in units of 2^-(p+G), the largest overshoot past
-           pi/4 against the computed bound, and the audit's tally. Not part of
-           `all`
+           pi/4 against the computed bound, and the audit's tally. --quick
+           takes every 16th power of two and leaves out the study's own
+           families (the golden stage's smoke run). Not part of `all`
   all      a standard run of each, at modest sizes (--scale multiplies them)
 """
 
@@ -477,14 +478,15 @@ def cmd_reduction(a):
             m = rng.getrandbits(fmt.prec - 1) | (1 << (fmt.prec - 1))
             rand.append(R._enc(fmt, rng.getrandbits(1), m, E - fmt.prec + 1))
         pows = [R._enc(fmt, 0, 1 << (fmt.prec - 1), E - fmt.prec + 1)
-                for E in range(P.Egate, P.Emax + 1)]
+                for E in range(P.Egate, P.Emax + 1, 16 if a.quick else 1)]
         sets = [("random", rand), ("every power of two", pows),
                 ("binade edges", R.edge_args(
                     fmt, P, ms_around=tuple(range(-a.edge_width,
                                                   a.edge_width + 1)))),
                 ("odd multiples of pi/4", R.half_args(fmt, P, a.halves_step)),
-                ("the study's families", list(R.main_args(name))
-                 + list(fam["edges"]) + list(fam["deep"]) + list(fam["pio4"]))]
+                ("the study's families", [] if a.quick else
+                 list(R.main_args(name)) + list(fam["edges"])
+                 + list(fam["deep"]) + list(fam["pio4"]))]
         stats, tally, lanes = {}, {}, 0
         for label, xs in sets:
             before = len(FINDINGS)
@@ -624,6 +626,9 @@ def main(argv=None):
     p.add_argument("--halves-step", type=int, default=1,
                    help="every this many binades for the odd multiples of "
                         "pi/4")
+    p.add_argument("--quick", action="store_true",
+                   help="every 16th power of two, and not the study's own "
+                        "families")
     p.set_defaults(fn_=cmd_reduction)
     p = sub.add_parser("all")
     p.add_argument("--scale", type=float, default=1.0)

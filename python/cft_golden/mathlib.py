@@ -3500,10 +3500,13 @@ def _audit_values(b, x, vals, tally):
 def build_reduction(fmt, rnd=RNE, *, G=None, R="default", plant=None):
     """The reduction alone, for tests: a Build whose result is r_h and whose
     flags are q (not a flag word: Build.run() reads them, nothing compiles
-    it). `fmt` is one of the four, `G` the guard (GUARD's, 40 at fp32, which
-    is refused by name: fp32 must be given G = 18, the double word's), `R`
-    as plan_reduction()'s, `plant` one of REDUCTION_PLANTS. The probes are
-    trig_reduction()'s; the lane's other values are in the unpruned body."""
+    it). `fmt` is one of the four, `rnd` the program's attribute (recorded and
+    used by nothing here: the reduction is RNE, and RDN for the bucket's
+    floor), `G` the guard (GUARD's, 40 at fp32, which is refused by name: fp32
+    must be given G = 18, the double word's), `R` as plan_reduction()'s,
+    `plant` one of REDUCTION_PLANTS. The probes are trig_reduction()'s; the
+    lane's other values are in the unpruned body; Build.meta is
+    trig_reduction()'s, with fn "reduction", G and R."""
     if fmt not in FORMATS:
         raise ValueError(f"{fmt!r} is not one of the four formats")
     if rnd not in sf.RND_NAMES:
