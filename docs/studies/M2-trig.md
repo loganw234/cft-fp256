@@ -41,7 +41,8 @@ high word of the exact sum alone, leaves |r| past pi/4 by 2^-17.09 (MEASURED,
 x = 0x44264edd, n = 424 where 423 is the nearest integer) and by up to
 2^-11.66 (COMPUTED from the generator's static bounds), so the bound there is
 pi/4 (1 + 2^-11); at fp64, fp128 and fp256 the bounds are 2^-33.04, 2^-64.0
-and 2^-62.0, inside the study's.
+and 2^-62.0, inside the study's. And 2.2's "the quadrant count is MAGIC + n" is MAGIC + n' with n' congruent
+to n mod 4, the reductions modulo m = 4U dropping multiples of 4 (MEASURED, equal on 121 of fp64's 3,853 lanes).
 
 M1's study (docs/studies/M1-exp-log.md) is its model of form, section for
 section, and M1's design is its starting point: the in-lane test, the
