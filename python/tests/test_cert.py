@@ -3097,14 +3097,19 @@ HUGE_LANES = (10 ** 12, (1 << 63) - 1)
 # number moves by eleven orders of magnitude and the memory does not.
 # Each figure is the least of TRIES audits, each stating a lanes count of
 # its own (counts()), and every one of them is still held to its refusal
-# and its place. A measured call can hold a one-off of the interpreter's
+# and its place. A measured call can hold a transient of the interpreter's
 # that no audit spent: on 2026-10-26, under host/tests/audit_check.py's
-# shadow, CPython 3.12's table of interned strings (its pathlib interns
-# every path part, and 3.12 keeps them all) outgrew 2^16 slots inside one
-# audit's window, 1,922,384 bytes for the new table, and this file failed
-# on that alone. Such a one-off lands in one call at most; a cost by
-# lanes is paid at every count, cached per count or not, so the least of
-# the TRIES still carries it.
+# shadow, a rebuild of the table of interned strings in the gate's CPython
+# 3.12.15 fell inside one audit's window (its pathlib interns every path
+# part; the strings die with their paths, but the dict gives no slot back
+# for a deleted entry, so the table is rebuilt when its slots run out, the
+# new table allocated before the old is freed: 1,922,416 bytes at 2^17
+# slots), and this file failed on that alone. Rebuilds come thousands of
+# interns apart, so one lands in one call of three at most. A cost by lanes
+# paid at every count - cached per count, or per power of two, since the
+# counts double - is paid in all three, so the least of the TRIES still
+# carries it; a cost paid in fewer than all three of a size's audits (a
+# cache keyed coarser than that, a cost at one exact count) is not.
 SPEND_SECONDS = 1.0
 SPEND_LIMIT = 4 << 20
 FLAT_SLACK = 64 << 10
@@ -3113,12 +3118,15 @@ TRIES = 3
 
 def counts():
     """(L, a lanes count to state) for L = 10 and each of HUGE_LANES: TRIES
-    counts of L's size, none the same - upwards from L, or downwards from
-    the largest, 2^63 - 1."""
+    counts of L's size, each of a bit length of its own - doubling from L,
+    or halving from the largest, 2^63 - 1 (10, 20, 40; 10^12, 2 x 10^12,
+    4 x 10^12; 2^63 - 1, 2^62 - 1, 2^61 - 1)."""
     out = []
     for L in (10,) + HUGE_LANES:
-        step = -1 if L + TRIES > (1 << 63) - 1 else 1
-        out += [(L, L + step * t) for t in range(TRIES)]
+        if L << (TRIES - 1) > (1 << 63) - 1:
+            out += [(L, L >> t) for t in range(TRIES)]
+        else:
+            out += [(L, L << t) for t in range(TRIES)]
     return out
 
 

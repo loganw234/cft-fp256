@@ -1301,10 +1301,16 @@ The controls cover:
   - `lanes` 10^12 and 2^63 - 1, on the main run alone and on all three
     runs, in full and sampled audits, with states handed and without.
     Each is refused by name at its place (`state-shape` at step 7, or
-    `state-missing` at step 9, or at step 8 for a wider run). Each takes
+    `state-missing` at step 9, or at step 8 for a wider run). Each size
+    is audited at three counts (10, 20, 40; 10^12, 2 x 10^12, 4 x 10^12;
+    2^63 - 1, 2^62 - 1, 2^61 - 1), and the least of the three takes
     under a second, with its memory flat: the peak of tracemalloc's
     traced memory over the audit call is within 64 KiB of the same
-    audit's at 10 lanes, and under 4 MiB. Measured on the desktop
+    audit's at 10 lanes, and under 4 MiB. The least of three since
+    2026-10-26, when a rebuild of the interpreter's table of interned
+    strings fell inside one audit's window and failed the control with
+    no audit at fault; a cost paid at every count is in all three, a
+    cost at one exact count is not. Measured on the desktop
     (2026-09-29): at most 9.5 ms and 31.8 KiB traced for each of the
     24, flat within 0.3 KiB, and the process's peak commit moved by
     nothing;
