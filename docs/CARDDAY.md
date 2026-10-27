@@ -1646,9 +1646,8 @@ or `oracle: the CPU's float, rint32's: ...`).
 Each is `<lo> <hi> <attribute>` with the verdict clause `, E encodings, S skipped`, and **S is 0 in every one**: cases = k x E. The
 tile modes run each case alone and in each lane of its format behind benign operands (1.0, +0), as the fp64 tile modes do: two fp128
 lanes and one fp256 unit (docs/ARCHITECTURE.md), so k = 2 and 1 (`-DCLS_LANES_128=1` builds a tool that does not rotate;
-`CLS_LANES_256` is the other knob). cvtto
-compares **every** lane-target pair, the ones a target cannot hold against the FCVT table, so it skips nothing (cvtto64-class, whose
-native oracle cannot answer them, skips them). cvtfrom's class axis repeats operands at these formats: its claim is an exact
+`CLS_LANES_256` is the other knob). cvtto compares **every** lane-target pair, the ones a target cannot hold against the FCVT
+table, so it skips nothing (cvtto64-class, whose native oracle cannot answer them, skips them). cvtfrom's class axis repeats operands at these formats: its claim is an exact
 conversion of every bit length and pattern of the sources, not every class of dropped bits. `dump <mode> size | <lo> <hi>` prints
 the operands (32 or 64 hex digits; a cvtfrom source's 16), held line for line to `python python/c5_class_enum.py --dump` (and the
 -f32 modes' to python/hardcases.py's widening).
@@ -1663,27 +1662,29 @@ and flags equal to the CPU's fp32 rint widened (an exact identity; L1 over the f
 the structural assumption above.
 
 **What it costs** (MEASURED, WSL cft2204 on the desktop, the software backend, one process, beside other parcels' work): the nine
-smaller class spaces whole under five attributes in 97 s together; `conv256to128-class`'s 32 slices of 65,536 under five attributes
-in 13 s, about 1.2 microseconds an index, so about 80 s a whole attribute (COMPUTED); the two -f32 modes' 2^22 encodings under five
-attributes each in 129 s, about 3 microseconds an encoding (two calls of the composed rint), so about 3.7 hours of a CPU for a whole
-attribute (COMPUTED). On a tile the class modes are call-bound, a call a case and lane as the fp64 class modes are (the nearest record
+smaller class spaces whole under five attributes in 97 s together; `conv256to128-class` whole, 63,208,320 cases an attribute, in
+69 to 81 s an attribute, 370 s for the five (by hand, at 527f2777; 0 value and 0 flag mismatches, 0 skipped); the two -f32 modes'
+2^22 encodings under five attributes each in 126 to 129 s, about 3 microseconds an encoding (two calls of the composed rint), so
+about 3.7 hours of a CPU for a whole attribute (COMPUTED). On a tile the class modes are call-bound, a call a case and lane as the fp64 class modes are (the nearest record
 is theirs, above: at most 4.1 to 4.25 ms an index of `rint64-class`, four lanes). The study's 5.3 gives 0.40 and 0.78 tile-hours for
 the two rint modes over five attributes, 0.06 and 0.13 for the two scaleB modes over four (so about 0.08 and 0.16 over the five here),
 and 3.29 and 6.60 for the two -f32 modes over five (ESTIMATE: the fp64 class modes' cases a second, and the probe's rint rates).
-None of them has run on a card.
+**On the card** (the lead's box run of 2026-10-27, the quad, one item a tile; COMPUTED from its slices' seconds): rint128-class
+whole in 280 s (about 2.0 ms an index, as the study had it), scaleb128-class whole in 63 s, scaleb256-class whole in 130 s, and
+rint256-f32 at 0.51 M encodings a second, so about 2.4 tile-hours an attribute, about 1.8 times the study's figure.
 
 By hand (on the card with `CFT_SOAK_ARTIFACT` and `CFT_XRT_TILES`, as above):
 
     make -C host clause5-soak MPFR=1
     host/clause5-soak rint128-class 0 137344 rne
 
-The tool's side is tested by `python3 hw/test_c5_wide.py --baseline-tree DIR`
-(POSIX with MPFR's headers; about six and a half minutes in WSL): the build's one warning line and its control, the dumps against the
-Python reference (6.5 million lines), every class space whole under every attribute but conv256to128-class (32 slices of 65,536 of
-it under each; whole with `--thorough`), the refusals, the sabotage control of every mode and attribute, seven plants each red at its
-check (a class selector, the shared rule given the wrong attribute, a fault in one fp128 lane caught only by the rotating build, a
-sticky tree without its lowest bit, the FCVT table's u32 maximum off by one, a widening that drops a bit, a slice one index short),
-and the older modes of the MPFR=1 build byte for byte with another tree's default tool, over 55 invocations.
+The tool's side is tested by `python3 hw/test_c5_wide.py --baseline-tree DIR` (POSIX with MPFR's headers; six to six and a half
+minutes in WSL): the build's one warning line and its control, the dumps against the Python reference (6.5 million lines), every
+class space whole under every attribute but conv256to128-class (32 slices of 65,536 of it under each; whole with `--thorough`, about
+seven minutes more), the refusals, the sabotage control of every mode and attribute, seven plants each red at its check (a class
+selector, the shared rule given the wrong attribute, a fault in one fp128 lane caught only by the rotating build, a sticky tree
+without its lowest bit, the FCVT table's u32 maximum off by one, a widening that drops a bit, a slice one index short), and the
+older modes of the MPFR=1 build byte for byte with another tree's default tool, over 55 invocations.
 
 ### The hard-case division and square-root items: what they are, what a skip is, how to run one
 
@@ -2290,9 +2291,9 @@ hand. Phase 1's hours, above.
 
 ### The wide clause-5 items in the driver (added 2026-10-27, parcel HXb): the study's ranks 3 and 5, and the host's conversions
 
-Parcel HXb built the twelve wide clause-5 modes ("The wide class modes", above); this is the driver running them. **Neither the box nor
-a card has run this code**: docs/VALIDATION.md's entry for HXb says what was run, and where, and the box script for it is in the
-round's records.
+Parcel HXb built the twelve wide clause-5 modes ("The wide class modes", above); this is the driver running them. The lead's box run
+of 2026-10-27 (the parcel's script, at 527f2777) served seven of the items for twelve minutes, four on the quad's tiles and three on
+the host pool, and every slice passed; docs/VALIDATION.md's entry for HXb says what was run, and where.
 
 **The items.** With `--mpfr-prefix`, `sweep_items(mpfr=True)` appends **60 more items after HXc's 102** (287 in all, the 227 before
 them in their places): the twelve modes under all five attributes, in the study's order (5.4's rank 3, the class modes of rint and
@@ -2334,7 +2335,9 @@ quad's tiles, three on the pool) and refuse two by name without the prefix. The 
 
 **What it costs.** The study's 5.3 (ESTIMATE): the four tile class modes about 1.4 tile-hours (rint's for five attributes, scaleB's
 for four), the two -f32 modes 3.29 and 6.60 for five; the host items at most about a core-minute an attribute (5.5; MEASURED here on
-WSL's software backend: conv256to128-class about 80 s an attribute, the others seconds).
+WSL's software backend: conv256to128-class 69 to 81 s an attribute, whole, the others seconds). The box run's slices (COMPUTED from
+their seconds; "The wide class modes", above) agree for the class modes, rint128-class 280 s an attribute, and put rint256-f32 at
+about 2.4 tile-hours an attribute, 12 for its five, nearly twice the study's; the box's pool did conv128to64-class in 3 s.
 
 By hand, on the box (the smoke; the host items need the pool, so `--host-workers` must not be 0):
 
