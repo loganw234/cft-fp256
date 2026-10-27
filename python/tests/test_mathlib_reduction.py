@@ -11,8 +11,12 @@ name and a colon, empty when it holds (mathlib_harness's convention). Eight:
   reference   (r, n mod 4) of every lane against |x| 2/pi in exact rationals,
               with 2/pi read from host/src/mp_2opi.h, not from the generator:
               r's relative error at most 2^-(p+G+3), |r| <= pi/4 (1 + 2^-30)
-              (2^-11 at fp32), rh = RN(rh + rl), and `small` exactly where
-              |x| < RD(pi/4)
+              (2^-11 at fp32), rh = RN(rh + rl), `small` exactly where
+              |x| < RD(pi/4), and q on MAGIC's integer grid. The CLASS
+              (n mod 4 = q & 3) rests on the r-leg alone: r is reduced against
+              the class q claims, and a wrong class leaves |r| past the
+              cushion. The grid leg says nothing of the class (for any q on
+              the grid, (q - MAGIC) mod 4 is q & 3)
   cushion     that cushion past pi/4 proven from the build's static bounds
               (the third quadrant count does not see the mid sum's low word),
               pinned, and held to the lanes: none overshoots the bound
@@ -387,7 +391,10 @@ def check_reference(run, stats=None):
     """(r, n mod 4) of every lane against |x| 2/pi in exact rationals, 2/pi
     from the header: |r - (|x| - n pi/2)| <= 2^-(p+G+3) |r|, |r| <= pi/4
     (1 + 2^-30) - at fp32, G = 18, (1 + 2^-11): CUSHION - rh = RN(rh + rl),
-    and `small` nonzero exactly where |x| < RD(pi/4). `stats`, a dict, gains
+    `small` nonzero exactly where |x| < RD(pi/4), and q on MAGIC's integer
+    grid (the same sign and exponent as MAGIC: its ulp is 1). n is taken in
+    the class q & 3 claims, so the class is checked by the r-leg alone: a
+    wrong class is "a quadrant off". `stats`, a dict, gains
     "worst" (log2 of the largest error in units of 2^-(p+G)), "over" (the
     largest 2|t| - 1, as a rational: how far past pi/4 |r| went) and
     "lanes"."""
@@ -409,6 +416,9 @@ def check_reference(run, stats=None):
         except ValueError:
             note("a non-finite r_h or r_l", x)
             continue
+        if q >> fmt.man_w != magic >> fmt.man_w:
+            note("q not on MAGIC's integer grid (another binade: its ulp is "
+                 "not 1)", x)
         t, r, T = reference(fmt, x, q & 3)
         over = max(over, 2 * abs(t) - 1)
         if abs(t) > size:
@@ -421,13 +431,6 @@ def check_reference(run, stats=None):
             worst = max(worst, _log2(abs(rm - r) / abs(r)) + p + G)
         if ml._enc(fmt, rm) != rh:
             note("r_h not RN(r_h + r_l)", x)
-        try:
-            n = ml._dec(fmt, q) - Fraction(3, 2) * 2 ** (p - 1)
-        except ValueError:
-            n = None
-        if n is None or n.denominator != 1 or n % 4 != q & 3:
-            note("q not MAGIC + n, n an integer, with n mod 4 as q's low bits",
-                 x)
         X = abs(ml._dec(fmt, x))
         if 2 * X * T < 1:
             up = ml._dec(fmt, sf.next_up(fmt, x & ~fmt.sign_mask)[0])
@@ -1294,10 +1297,23 @@ def test_each_plant_is_red_in_its_checks_and_green_in_the_others(
         assert found[c] == [], f"{plant} at {name}: {c} is red: {found[c][:2]}"
 
 
+def nearest_count(fmt, x):
+    """The integer |x| 2/pi is nearest, from the header."""
+    X = abs(ml._dec(fmt, x))
+    e = max(0, X.numerator.bit_length() - X.denominator.bit_length())
+    Pv = X * _two_opi(e + 2 * fmt.prec + 400)
+    k = Pv.numerator // Pv.denominator
+    return k + 1 if Pv - k > Fraction(1, 2) else k
+
+
 def test_each_leg_of_the_reference_can_fail():
     """The reference's legs, each on a lane doctored to break it alone: the
     normal form (r_h moved an ulp, r_l by the same, the sum kept), `small`
-    either way, a small lane's shape, q's meaning, a non-finite word."""
+    either way, a small lane's shape, q's grid, a non-finite word - and the
+    CLASS, which rests on the r-leg: a wrong class on the grid (q + 1) leaves
+    the grid leg green and turns the r-leg red, a q off the grid with the
+    class's bits kept is the grid leg alone, and q + 4, the same class, turns
+    nothing red."""
     b = build_of("fp64")
     fmt = FP64
     two, half = 0x4000000000000000, 0x3fe0000000000000     # 2.0; 0.5 is small
@@ -1314,12 +1330,47 @@ def test_each_leg_of_the_reference_can_fail():
                               (x2, rh2, rl2, q2, 0, inr2)],
         "a small lane not r = |x|": [(x2, rh2, ml._enc(fmt, Fraction(1, 2 ** 60)),
                                       q2, sm2, inr2)],
-        "q not MAGIC + n": [(x, rh, rl, q + (1 << fmt.man_w), sm, inr)],
+        "q not on MAGIC's integer grid": [(x, rh, rl, q + (1 << fmt.man_w),
+                                           sm, inr)],
+        "a quadrant off": [(x, rh, rl, q + 1, sm, inr)],   # a wrong class
         "a non-finite": [(x, sf.qnan_bits(fmt), rl, q, sm, inr)],
     }
+    found = {}
     for kind, rows in cases.items():
-        found = check_reference(types.SimpleNamespace(b=b, rows=rows))
-        assert any(kind in f and f.startswith("reference: ") for f in found),             (kind, found)
+        found[kind] = check_reference(types.SimpleNamespace(b=b, rows=rows))
+        assert any(kind in f and f.startswith("reference: ")
+                   for f in found[kind]), (kind, found[kind])
+    # the legs are different: a wrong class is the r-leg alone, an off-grid q
+    # with the class's bits kept is the grid leg alone
+    assert [f for f in found["a quadrant off"] if "grid" in f] == []
+    assert [f for f in found["q not on MAGIC's integer grid"]
+            if "quadrant" in f] == []
+    # and the same class, a multiple of four away, is not a finding
+    assert check_reference(types.SimpleNamespace(
+        b=b, rows=[(x, rh, rl, q + 4, sm, inr)])) == []
+
+
+def test_q_holds_the_class_of_the_count_and_not_the_count():
+    """The contract's q = MAGIC + n' with n' congruent to n (mod 4): n' is
+    the sum of the quadrant counts taken out, and the chunks before the window
+    and the reductions modulo m = 4 U drop multiples of 4, so it is not the
+    full count. The lanes the record gives (fp64: x = 4.0, n = 3, n' = -1;
+    x = 8.0, n = 5, n' = 1; x = 1.0 where they agree), and the class right on
+    each by the r-leg; and fp32's 0x44264edd, whose class is 424's where 423
+    is the nearest integer (n' = 0)."""
+    b = build_of("fp64")
+    for x, n, nprime in ((0x4010000000000000, 3, -1),
+                         (0x4020000000000000, 5, 1),
+                         (0x3ff0000000000000, 1, 1)):
+        assert nearest_count(FP64, x) == n
+        row = run_lanes(b, [x], audit=False).rows[0]
+        got = ml._dec(FP64, row[3]) - Fraction(3, 2) * 2 ** 52
+        assert got == nprime and (got - n) % 4 == 0, (hex(x), got)
+        assert check_reference(types.SimpleNamespace(b=b, rows=[row])) == []
+    b32 = build_of("fp32")
+    row = run_lanes(b32, [0x44264edd], audit=False).rows[0]
+    assert nearest_count(FP32, 0x44264edd) == 423
+    assert ml._dec(FP32, row[3]) - Fraction(3, 2) * 2 ** 23 == 0   # 424 mod 4
 
 
 def test_the_proofs_check_fails_on_a_wrong_plan_alone(monkeypatch):

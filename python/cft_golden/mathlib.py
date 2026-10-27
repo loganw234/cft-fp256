@@ -2707,7 +2707,7 @@ REDUCTION_PLANTS = {
     "mid_inexact": "the mid pieces rounded, design B's sum, while design A's "
                    "claims stand",
     "exact_add": "the mid sum's first TwoSum a plain add, still claimed exact",
-    "quadrant_dropped": "the last quadrant count left out of n",
+    "quadrant_dropped": "the last quadrant count left out of the sum q holds",
     "bucket_nearest": "the bucket's floor rounded to nearest, not down",
     "pio2_low": "pi/2's low word dropped",
     "claims_lost": "no claim recorded: Build.meta has no exact or data",
@@ -3352,14 +3352,15 @@ def _tail(R, x, fr):
     nre = b.fma(b.neg(th), PH, rh)                      # rh - th PH
     rl = b.fma(th, PL, b.fma(tl, PH, b.neg(nre)))
     rh, rl = R.fast(rh, rl)
-    # the quadrant: n = -(sum of the -k), as MAGIC + n
+    # the quadrant: n' = -(sum of the -k), as MAGIC + n'; n' is congruent to
+    # n mod 4 and is not n (the reductions modulo m = 4U drop multiples of 4)
     counts = nqs[:-1] if R.plant == "quadrant_dropped" else nqs
     if R.plant == "quadrant_dropped":
         R.fired.add("quadrant_dropped")
     nsum = counts[0]
     for v in counts[1:]:
         nsum = R.exact(b.add(nsum, v))
-    q = R.exact(b.sub(MAGIC, nsum))                     # MAGIC + n
+    q = R.exact(b.sub(MAGIC, nsum))                     # MAGIC + n'
 
     b.phase = "red-small"
     # the reduction is of |x|: M carries no sign. sin and tan are odd and
@@ -3391,7 +3392,8 @@ def trig_reduction(b, x, P, *, plant=None):
     plan_reduction(). -> types.SimpleNamespace(rh, rl, q, small, inrange).
     For every x with 2^Egate <= |x| < 2^R (P.Egate, P.R):
       * r = rh + rl with |r - (|x| - n pi/2)| <= 2^-(p+G+3) |r| and
-        rh = RN(rh + rl);
+        rh = RN(rh + rl), n the integer of q's class (below) that |x| 2/pi
+        is nearest;
       * |r| <= pi/4 (1 + 2^-30) at fp64, fp128 and fp256, but only
         pi/4 (1 + 2^-11) at fp32 (G = 18). The third quadrant count rounds
         the high word of the exact sum alone, and what it does not see - that
@@ -3401,7 +3403,14 @@ def trig_reduction(b, x, P, *, plant=None):
         bounds in Build.meta["reduction_mid"]: 2^-11.66 at fp32, 2^-33.04 at
         fp64, 2^-64.0 at fp128 and 2^-62.0 at fp256 (fp128 and fp256 have no
         lw);
-      * n mod 4 is q's encoding & 3, q = MAGIC + n;
+      * q = MAGIC + n' on MAGIC's integer grid (its ulp is 1), with n'
+        congruent to n (mod 4): n mod 4 is q's encoding & 3. n' is the sum of
+        the quadrant counts taken out, NOT the full count n: the chunks before
+        the window and the reductions modulo m = 4 U drop multiples of 4, so
+        n' - n is a multiple of 4, and not always 0. MEASURED, fp64's 3,853
+        main-family lanes: n' runs from -4 to 6 and equals n on 121 (x = 4.0:
+        n = 3, n' = -1; x = 8.0: n = 5, n' = 1). A caller uses n mod 4 and
+        nothing more;
       * `small` is nonzero where |x| < RD(pi/4); there rh = |x|, rl = +0 and
         q = MAGIC;
       * `inrange` is None where R is None, else nonzero exactly where
