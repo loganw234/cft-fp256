@@ -140,6 +140,12 @@ remainder). Every one of those is called DIRECTLY."
  * than a second one. oracle() and c5_round_into() below are its two
  * entry points with the attribute read from MODES, as before. */
 #include "mpfr_ieee.h"
+/* The clause-5 rules - what each of rint, scaleB, convert, cvt_from and
+ * cvt_to expects of one case - live in mpfr_c5.h since parcel HXb
+ * (2026-10-27), so that clause5-soak's fp128 and fp256 class modes take
+ * these rules rather than a second set. The check_* functions below call
+ * them where their bodies stood, with the attribute MODES[mi].cr. */
+#include "mpfr_c5.h"
 
 static const fdesc FMTS[4] = {
     { "fp32",  CFT_FP32,   8,  23,  24,    127,    -126,  4 },
@@ -548,20 +554,8 @@ static void c5_round_into(const fdesc *f, const mpfr_t x, int mi,
                     flags);
 }
 
-/* roundToIntegral by attribute. RNDN under mpfr_rint is ties-to-even;
- * mpfr_round is ties-to-away; the directed three are their names. The
- * target's p+2 bits always hold the integer exactly, so there is no
- * second rounding hiding in the call. */
-static int rint_by_mode(mpfr_t r, const mpfr_t v, int mi)
-{
-    switch (MODES[mi].cr) {
-    case CFT_RNE: return mpfr_rint(r, v, MPFR_RNDN);
-    case CFT_RTZ: return mpfr_trunc(r, v);
-    case CFT_RDN: return mpfr_floor(r, v);
-    case CFT_RUP: return mpfr_ceil(r, v);
-    default:      return mpfr_round(r, v);
-    }
-}
+/* roundToIntegral by attribute (rint_by_mode here until parcel HXb) is
+ * mpfr_c5.h's c5_rint_value(). */
 
 /* An expected value, printed WITHOUT mpfr_out_str.
  *
@@ -674,26 +668,12 @@ static void check_rint(int fj, uint8_t pool[][32], int pn)
             for (i = 0; i < pn + ne; i++) {
                 const uint8_t *a = i < pn ? pool[i] : extra[i - pn];
                 uint32_t gf = 0, wf = 0;
-                mpfr_t av, want;
-                cls ca;
+                mpfr_t want;
                 cft_status st;
                 char note[24];
 
-                classify(f, a, &ca);
-                mpfr_init2(av, f->p);
                 mpfr_init2(want, f->p);
-                enc_to_mpfr(f, a, av);
-                if (ca.is_nan) {
-                    mpfr_set_nan(want);
-                    if (ca.is_snan)
-                        wf |= CFT_FLAG_INVALID;
-                } else {
-                    int tern = rint_by_mode(want, av, mi);
-                    if (mpfr_zero_p(want))
-                        mpfr_setsign(want, want, ca.sign, MPFR_RNDN);
-                    if (exact && tern != 0)
-                        wf |= CFT_FLAG_INEXACT;
-                }
+                c5_rint_expect(f, a, MODES[mi].cr, exact, want, &wf);
                 memset(d, 0, sizeof d);
                 st = cft_rint(dev, f->fmt, MODES[mi].cr, exact, a, d, 1,
                               &gf, NULL);
@@ -701,7 +681,6 @@ static void check_rint(int fj, uint8_t pool[][32], int pn)
                 c5_judge(exact ? T_RINTX : T_RINT, fj, "rint",
                          MODES[mi].name, f, a, NULL, f, d, want, gf, wf,
                          st, note);
-                mpfr_clear(av);
                 mpfr_clear(want);
             }
 }
@@ -741,36 +720,18 @@ static void check_scaleb(int fj, uint8_t pool[][32], int pn)
             for (i = 0; i < pn; i++) {
                 const uint8_t *a = pool[i];
                 uint32_t gf = 0, wf = 0;
-                mpfr_t av, want;
-                cls ca;
+                mpfr_t want;
                 cft_status st;
                 char note[40];
 
-                classify(f, a, &ca);
-                mpfr_init2(av, f->p);
                 mpfr_init2(want, f->p);
-                enc_to_mpfr(f, a, av);
-                if (ca.is_nan) {
-                    mpfr_set_nan(want);
-                    if (ca.is_snan)
-                        wf |= CFT_FLAG_INVALID;
-                } else if (ca.is_inf || ca.is_zero) {
-                    mpfr_set(want, av, MPFR_RNDN);
-                } else {
-                    int64_t nc = ns[k];
-                    int64_t lim = 4 * emax + 2 * p + 64;
-                    if (nc > lim) nc = lim;
-                    if (nc < -lim) nc = -lim;
-                    mpfr_mul_2si(av, av, (long)nc, MPFR_RNDN); /* exact */
-                    c5_round_into(f, av, mi, want, &wf);
-                }
+                c5_scaleb_expect(f, a, ns[k], MODES[mi].cr, want, &wf);
                 memset(d, 0, sizeof d);
                 st = cft_scaleb(dev, f->fmt, MODES[mi].cr, a, ns[k], d, 1,
                                 &gf, NULL);
                 snprintf(note, sizeof note, "n=%lld", (long long)ns[k]);
                 c5_judge(T_SCALEB, fj, "scaleb", MODES[mi].name, f, a,
                          NULL, f, d, want, gf, wf, st, note);
-                mpfr_clear(av);
                 mpfr_clear(want);
             }
 }
@@ -819,29 +780,16 @@ static void check_convert(int sfi, int dfi, uint8_t pool[][32], int pn)
         for (i = 0; i < pn + ne; i++) {
             const uint8_t *a = i < pn ? pool[i] : extra[i - pn];
             uint32_t gf = 0, wf = 0;
-            mpfr_t av, want;
-            cls ca;
+            mpfr_t want;
             cft_status st;
 
-            classify(fs, a, &ca);
-            mpfr_init2(av, fs->p);
             mpfr_init2(want, fd->p);
-            enc_to_mpfr(fs, a, av);
-            if (ca.is_nan) {
-                mpfr_set_nan(want);
-                if (ca.is_snan)
-                    wf |= CFT_FLAG_INVALID;
-            } else if (ca.is_inf) {
-                mpfr_set_inf(want, ca.sign ? -1 : 1);
-            } else {
-                c5_round_into(fd, av, mi, want, &wf);
-            }
+            c5_convert_expect(fs, fd, a, MODES[mi].cr, want, &wf);
             memset(d, 0, sizeof d);
             st = cft_convert(dev, fs->fmt, fd->fmt, MODES[mi].cr, a, d, 1,
                              &gf);
             c5_judge(T_CONVERT, sfi, "convert", MODES[mi].name, fs, a,
                      NULL, fd, d, want, gf, wf, st, note);
-            mpfr_clear(av);
             mpfr_clear(want);
         }
 }
@@ -881,49 +829,23 @@ static void check_cvt_from(int fj, int nrand)
     for (ty = 0; ty < 4; ty++)
         for (mi = 0; mi < 5; mi++)
             for (i = 0; i < nv; i++) {
-                uint64_t raw = vals[i], mag = 0;
-                int neg = 0, ti = 0;
+                uint64_t raw = vals[i];
+                int ti = 0;
                 const char *opn = "?";
                 uint32_t gf = 0, wf = 0;
-                mpfr_t ex, want;
-                mpz_t z;
+                mpfr_t want;
                 cft_status st = CFT_ERR_INTERNAL;
                 char note[32];
 
                 switch (ty) {
-                case 0: {
-                    int32_t x = (int32_t)(uint32_t)raw;
-                    neg = x < 0;
-                    mag = neg ? ~(uint64_t)(uint32_t)x + 1 : (uint64_t)x;
-                    mag &= 0xffffffffull;
-                    ti = T_FROM_I32; opn = "from_i32";
-                    break;
-                }
-                case 1:
-                    mag = (uint32_t)raw;
-                    ti = T_FROM_U32; opn = "from_u32";
-                    break;
-                case 2: {
-                    int64_t x = (int64_t)raw;
-                    neg = x < 0;
-                    mag = neg ? ~(uint64_t)x + 1 : (uint64_t)x;
-                    ti = T_FROM_I64; opn = "from_i64";
-                    break;
-                }
-                default:
-                    mag = raw;
-                    ti = T_FROM_U64; opn = "from_u64";
-                    break;
+                case 0:  ti = T_FROM_I32; opn = "from_i32"; break;
+                case 1:  ti = T_FROM_U32; opn = "from_u32"; break;
+                case 2:  ti = T_FROM_I64; opn = "from_i64"; break;
+                default: ti = T_FROM_U64; opn = "from_u64"; break;
                 }
 
-                mpz_init(z);
-                mpz_import(z, 1, -1, 8, 0, 0, &mag);
-                if (neg)
-                    mpz_neg(z, z);
-                mpfr_init2(ex, 70);
                 mpfr_init2(want, f->p);
-                mpfr_set_z(ex, z, MPFR_RNDN);      /* <= 64 bits: exact */
-                c5_round_into(f, ex, mi, want, &wf);
+                c5_cvtfrom_expect(f, ty, raw, MODES[mi].cr, want, &wf);
 
                 memset(d, 0, sizeof d);
                 switch (ty) {
@@ -956,8 +878,6 @@ static void check_cvt_from(int fj, int nrand)
                          (unsigned long long)raw);
                 c5_judge(ti, fj, opn, MODES[mi].name, f, NULL, NULL, f, d,
                          want, gf, wf, st, note);
-                mpz_clear(z);
-                mpfr_clear(ex);
                 mpfr_clear(want);
             }
 }
@@ -968,21 +888,9 @@ static void check_cvt_to(int fj, uint8_t pool[][32], int pn, int nrand)
 {
     const fdesc *f = &FMTS[fj];
     /* The delivered values of the invalid cases are the CONTRACT's
-     * RISC-V FCVT table, hardcoded from cft.h's doc - NaN and +inf to
-     * the type's maximum, -inf and negative overflow to its minimum,
-     * a negative rounded below zero to unsigned 0. 754 leaves these
-     * open; the contract does not, and MPFR cannot derive a choice. */
-    static const struct {
-        const char *name;
-        int ti, width, is_signed;
-        uint64_t maxv, minv;
-    } TY[4] = {
-        { "to_i32", T_TO_I32, 32, 1, 0x7fffffffull, 0x80000000ull },
-        { "to_u32", T_TO_U32, 32, 0, 0xffffffffull, 0 },
-        { "to_i64", T_TO_I64, 64, 1, 0x7fffffffffffffffull,
-          0x8000000000000000ull },
-        { "to_u64", T_TO_U64, 64, 0, 0xffffffffffffffffull, 0 },
-    };
+     * RISC-V FCVT table, hardcoded from cft.h's doc: mpfr_c5.h's C5_TO,
+     * the targets in the order i32, u32, i64, u64 (the tally's T_TO_I32
+     * onward, in the same order). */
     uint8_t extra[112][32];
     int ne = 0, ty, mi, exact, i, s;
 
@@ -1033,68 +941,17 @@ static void check_cvt_to(int fj, uint8_t pool[][32], int pn, int nrand)
     }
 
     for (ty = 0; ty < 4; ty++) {
-        mpz_t zmax, zmin, zr, zt;
-        mpz_init(zmax); mpz_init(zmin); mpz_init(zr); mpz_init(zt);
-        mpz_import(zmax, 1, -1, 8, 0, 0, &TY[ty].maxv);
-        if (TY[ty].is_signed) {
-            mpz_import(zmin, 1, -1, 8, 0, 0, &TY[ty].minv);
-            mpz_neg(zmin, zmin);
-        }
-
         for (mi = 0; mi < 5; mi++)
             for (exact = 0; exact <= 1; exact++)
                 for (i = 0; i < pn + ne; i++) {
                     const uint8_t *a = i < pn ? pool[i] : extra[i - pn];
                     uint32_t gf = 0, wf = 0;
                     uint64_t want64 = 0, got64 = 0, mask;
-                    mpfr_t av, R;
-                    cls ca;
                     cft_status st = CFT_ERR_INTERNAL;
 
-                    mask = TY[ty].width == 32 ? 0xffffffffull : ~0ull;
-                    classify(f, a, &ca);
-                    mpfr_init2(av, f->p);
-                    mpfr_init2(R, f->p + 2);
-                    enc_to_mpfr(f, a, av);
-
-                    if (ca.is_nan) {
-                        want64 = TY[ty].maxv;
-                        wf = CFT_FLAG_INVALID;
-                    } else if (ca.is_inf) {
-                        want64 = ca.sign ? TY[ty].minv : TY[ty].maxv;
-                        wf = CFT_FLAG_INVALID;
-                    } else {
-                        int tern = rint_by_mode(R, av, mi);
-                        int oor = 0;
-                        if (mpfr_zero_p(R)) {
-                            mpz_set_ui(zr, 0);
-                        } else if (mpfr_get_exp(R) > 70) {
-                            oor = mpfr_sgn(R) < 0 ? -1 : 1;
-                        } else {
-                            mpfr_get_z(zr, R, MPFR_RNDZ); /* R integral */
-                            if (mpz_cmp(zr, zmin) < 0)
-                                oor = -1;
-                            else if (mpz_cmp(zr, zmax) > 0)
-                                oor = 1;
-                        }
-                        if (oor) {
-                            want64 = oor < 0 ? TY[ty].minv : TY[ty].maxv;
-                            wf = CFT_FLAG_INVALID;  /* pre-empts inexact */
-                        } else {
-                            if (mpz_sgn(zr) >= 0) {
-                                uint64_t wv = 0;
-                                mpz_export(&wv, NULL, -1, 8, 0, 0, zr);
-                                want64 = wv;
-                            } else {
-                                uint64_t wv = 0;
-                                mpz_neg(zt, zr);
-                                mpz_export(&wv, NULL, -1, 8, 0, 0, zt);
-                                want64 = ~wv + 1;
-                            }
-                            if (exact && tern != 0)
-                                wf = CFT_FLAG_INEXACT;
-                        }
-                    }
+                    mask = C5_TO[ty].width == 32 ? 0xffffffffull : ~0ull;
+                    c5_cvtto_expect(f, a, ty, MODES[mi].cr, exact, &want64,
+                                    &wf);
 
                     switch (ty) {
                     case 0: {
@@ -1141,7 +998,7 @@ static void check_cvt_to(int fj, uint8_t pool[][32], int pn, int nrand)
                             hexdump(a, f->esz, ha);
                             printf("  %s %s %s %s exact=%d a=0x%s\n",
                                    vbad ? "MISMATCH" : "FLAGS", f->name,
-                                   TY[ty].name, MODES[mi].name, exact,
+                                   C5_TO[ty].name, MODES[mi].name, exact,
                                    ha);
                             printf("    lib=0x%llx flags=0x%02x  "
                                    "want=0x%llx flags=0x%02x\n",
@@ -1151,12 +1008,9 @@ static void check_cvt_to(int fj, uint8_t pool[][32], int pn, int nrand)
                                    (unsigned)wf);
                         }
                         cases++;
-                        tally[TY[ty].ti][fj]++;
+                        tally[T_TO_I32 + ty][fj]++;
                     }
-                    mpfr_clear(av);
-                    mpfr_clear(R);
                 }
-        mpz_clear(zmax); mpz_clear(zmin); mpz_clear(zr); mpz_clear(zt);
     }
 }
 

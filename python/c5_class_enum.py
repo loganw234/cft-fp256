@@ -41,12 +41,19 @@ reach a tile (rint64-class, scaleb64-class), in each of the tile's LANES = 4 fp6
 place in a pass gives it, so each operand is run behind 0 to 3 benign operands (1.0 for rint, +0 for scaleB), which are not
 cases. That is why k is 4 for those two modes (a case a lane), as it is 4 for cvtto64-class (a case a target).
 
+THE WIDE MODES (parcel HXb, 2026-10-27): the same enumerators at fp128 and fp256, which the soak built with `make clause5-soak
+MPFR=1` runs against MPFR (enums_wide(), by the soak's job words): rint128-class, rint256-class, scaleb128-class and
+scaleb256-class, whose k is the tile's lanes AT THE FORMAT (LANES_BY_FORMAT: two fp128 lanes and one fp256 unit, so k = 2 and
+1); conv128to64-class and conv256to128-class (k = 1); cvtto128-class and cvtto256-class (the four targets, k = 4); and
+cvtfrom128-class and cvtfrom256-class (k = 1), where no bit of a 64-bit source is dropped (d = max(0, L - p) = 0), so their
+class axis repeats operands and a pass is about an exact conversion. Their dump lines carry the operand's 32 or 64 hex digits.
+
 Per-attribute: the operands do not depend on the attribute, so each attribute's job runs the same N indices;
 the study's 377,664 for conv64to32 counts THREE magnitude functions (nearest, truncate, away) and so leaves out
 the duplicated (attribute, sign) pairs; running each attribute covers every mode code and sign path separately
 (the study's own edge note, 4.3 (d)).
 
-    python python/c5_class_enum.py --sizes        the five spaces, their formulas and distinct operands
+    python python/c5_class_enum.py --sizes        the five spaces (and the ten wide ones), their formulas and distinct operands
     python python/c5_class_enum.py --dump JOB LO HI    the lines the C tool's `dump` prints, for a diff
     python python/c5_class_enum.py --check        the coverage check at e4m3 and e5m6, and its plants
 """
@@ -59,13 +66,32 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 from cft_golden import softfloat as sf  # noqa: E402
-from cft_golden.formats import FP32, FP64, FpFormat  # noqa: E402
+from cft_golden.formats import FP32, FP64, FP128, FP256, FpFormat  # noqa: E402
 
 E4M3 = FpFormat("e4m3", 4, 3)
 E5M6 = FpFormat("e5m6", 5, 6)
 
 NCLS = 4
-LANES = 4                  # fp64 lanes of a tile (docs/ARCHITECTURE.md): the tile modes run each operand in each lane
+# The lanes of a tile at each format (docs/ARCHITECTURE.md: "eight fp32 / four fp64 / two fp128 lanes or one fp256 unit"): the
+# tile modes run each operand in each lane of its format, so their k is this. e4m3 and e5m6, the coverage check's formats, are no
+# tile's, and their tile modes have no k (None): nothing runs them.
+LANES_BY_FORMAT = {"fp32": 8, "fp64": 4, "fp128": 2, "fp256": 1}
+LANES = LANES_BY_FORMAT["fp64"]   # fp64's, the built fp64 tile modes' k
+# The soak's job words of the wide spaces (host/tools/clause5_soak.c, built with MPFR=1); every other format's space is named
+# generically (rint-e5m6-class and so on).
+WIDE_JOB = {("rint", "fp128"): "rint128-class", ("rint", "fp256"): "rint256-class",
+            ("scaleb", "fp128"): "scaleb128-class", ("scaleb", "fp256"): "scaleb256-class",
+            ("conv", "fp128", "fp64"): "conv128to64-class", ("conv", "fp256", "fp128"): "conv256to128-class",
+            ("cvtto", "fp128", 64): "cvtto128-class", ("cvtto", "fp256", 64): "cvtto256-class",
+            ("cvtfrom", "fp128", 64): "cvtfrom128-class", ("cvtfrom", "fp256", 64): "cvtfrom256-class"}
+
+
+WIDE_FORMATS = ("fp128", "fp256")   # the wide modes' formats: MPFR is their oracle, and it answers all five attributes
+
+
+def lanes_of(fmt: FpFormat):
+    """The k of a tile mode at the format: its lanes (LANES_BY_FORMAT), or None at a format that is no tile's."""
+    return LANES_BY_FORMAT.get(fmt.name)
 CLS_NAMES = ("zero", "below-half", "half", "above-half")
 INT64_MAX = (1 << 63) - 1
 INT64_MIN = -(1 << 63)
@@ -141,21 +167,27 @@ class RoundEnum(_Base):
         if kind == "conv":
             self.lo_e = dst.emin - dst.prec - 2
             self.hi_e = dst.emax + 1
-            self.name = "conv64to32-class" if (src, dst) == (FP64, FP32) else f"conv-{src.name}-{dst.name}-class"
+            self.name = "conv64to32-class" if (src, dst) == (FP64, FP32) else \
+                WIDE_JOB.get(("conv", src.name, dst.name), f"conv-{src.name}-{dst.name}-class")
+            if src.name in WIDE_FORMATS:                 # MPFR answers rmm (the soak's wide modes)
+                self.attrs = ("rne", "rtz", "rdn", "rup", "rmm")
         elif kind == "rint":
             self.lo_e, self.hi_e = -3, self.P
-            self.name = "rint64-class" if src == FP64 else f"rint-{src.name}-class"
+            self.name = "rint64-class" if src == FP64 else WIDE_JOB.get(("rint", src.name), f"rint-{src.name}-class")
             self.attrs = ("rne", "rtz", "rdn", "rup", "rmm")
-            self.k = LANES                               # a tile mode: each operand is run once in each lane
+            self.k = lanes_of(src)                       # a tile mode: each operand is run once in each lane of its format
         elif kind == "cvtto":
             self.lo_e, self.hi_e = -3, B
             self.B = B
-            self.name = "cvtto64-class" if (src == FP64 and B == 64) else f"cvtto-{src.name}-{B}-class"
+            self.name = "cvtto64-class" if (src == FP64 and B == 64) else \
+                WIDE_JOB.get(("cvtto", src.name, B), f"cvtto-{src.name}-{B}-class")
             self.attrs = ("rne", "rtz", "rdn", "rup", "rmm")
-            self.k = 4                                   # the four integer targets, each in-range lane
+            self.k = 4                                   # the four integer targets (fp64: each in-range lane; wide: every lane)
         else:
-            raise ValueError(kind)
-        assert self.hi_e + src.bias <= (1 << self.E) - 2, "the structural range must stay inside the finite exponents"
+            raise ValueError(f"{kind!r} is not a rounding job (conv, rint or cvtto)")
+        if self.hi_e + src.bias > (1 << self.E) - 2:
+            raise ValueError(f"{self.name}: {src.name} cannot be enumerated for {kind}: its structural exponents reach "
+                             f"{self.hi_e}, past the format's largest finite exponent {src.emax}")
         self.nstruct = self.hi_e - self.lo_e + 1
         self.wit = exp_witnesses(self.E)
         self.npos = self.nstruct + len(self.wit)
@@ -183,7 +215,7 @@ class RoundEnum(_Base):
         return fp_encode(self.src, sign, b, sig(self.P, d, c, t))
 
     def dump_line(self, i: int) -> str:
-        return "%d 0x%016x" % (i, self.operand(i))
+        return "%d 0x%0*x" % (i, self.src.width // 4, self.operand(i))   # 16 hex digits at fp64, 32 and 64 at fp128 and fp256
 
     def operands(self, i: int):
         return (self.operand(i), None)
@@ -197,7 +229,10 @@ class CvtfromEnum(_Base):
 
     def __init__(self, dst: FpFormat, Wi: int = 64):
         self.dst, self.Wi = dst, Wi
-        self.name = "cvtfrom64-class" if (dst == FP64 and Wi == 64) else f"cvtfrom-{dst.name}-i{Wi}-class"
+        self.name = "cvtfrom64-class" if (dst == FP64 and Wi == 64) else \
+            WIDE_JOB.get(("cvtfrom", dst.name, Wi), f"cvtfrom-{dst.name}-i{Wi}-class")
+        if dst.name in WIDE_FORMATS:                     # MPFR answers rmm; the conversion is exact (no bit dropped)
+            self.attrs = ("rne", "rtz", "rdn", "rup", "rmm")
         self.npat = 4 + (Wi - 1)
         self.cells = [(0, L) for L in range(1, Wi)] + [(1, L) for L in range(1, Wi)] + [(2, L) for L in range(1, Wi + 1)]
         self.npos = len(self.cells)
@@ -240,8 +275,10 @@ class ScalebEnum(_Base):
     def __init__(self, fmt: FpFormat):
         self.fmt = fmt
         self.P, self.W, self.E = fmt.prec, fmt.man_w, fmt.exp_w
-        self.name = "scaleb64-class" if fmt == FP64 else f"scaleb-{fmt.name}-class"
-        self.k = LANES                                   # a tile mode: each operand is run once in each lane
+        self.name = "scaleb64-class" if fmt == FP64 else WIDE_JOB.get(("scaleb", fmt.name), f"scaleb-{fmt.name}-class")
+        self.k = lanes_of(fmt)                           # a tile mode: each operand is run once in each lane of its format
+        if fmt.name in WIDE_FORMATS:                     # MPFR answers rmm
+            self.attrs = ("rne", "rtz", "rdn", "rup", "rmm")
         self.nstrip = self.P + 1
         self.npat = 4 + self.W
         self.npos = 3 * self.nstrip                      # (route, strip) cells
@@ -290,7 +327,7 @@ class ScalebEnum(_Base):
 
     def dump_line(self, i: int) -> str:
         a, n = self.operands(i)
-        return "%d 0x%016x %d" % (i, a, n)
+        return "%d 0x%0*x %d" % (i, self.fmt.width // 4, a, n)
 
     def size_formula(self) -> str:
         return (f"3 routes x {self.nstrip} strips x 2 signs x {NCLS} classes x {self.npat} patterns = {self.nstripidx}, "
@@ -302,6 +339,24 @@ def enums64() -> dict:
     es = [RoundEnum("conv", FP64, FP32), RoundEnum("rint", FP64), RoundEnum("cvtto", FP64, B=64),
           CvtfromEnum(FP64), ScalebEnum(FP64)]
     return {e.name: e for e in es}
+
+
+def enums_wide() -> dict:
+    """The ten spaces of the soak's wide class modes (built with MPFR=1), by its job words, in its order: the tile modes
+    (rint, scaleB) and the host conversions at fp128 and fp256."""
+    es = [RoundEnum("rint", FP128), RoundEnum("rint", FP256), ScalebEnum(FP128), ScalebEnum(FP256),
+          RoundEnum("conv", FP128, FP64), RoundEnum("conv", FP256, FP128),
+          RoundEnum("cvtto", FP128, B=64), RoundEnum("cvtto", FP256, B=64), CvtfromEnum(FP128), CvtfromEnum(FP256)]
+    return {e.name: e for e in es}
+
+
+def enum_of(job: str):
+    """The enumerator of a class job word of the soak (the five fp64 ones and the ten wide ones); a word that is none of
+    them is refused by name."""
+    every = dict(enums64(), **enums_wide())
+    if job not in every:
+        raise ValueError(f"{job!r} is not a class job of the soak: the class jobs are {', '.join(every)}")
+    return every[job]
 
 
 def distinct(e) -> int:
@@ -561,6 +616,13 @@ def wide_enums() -> dict:
     }
 
 
+def wide_format_enums() -> dict:
+    """The soak's wide spaces where `constructive` runs in seconds (MEASURED 2026-10-27 on the desktop: 0.1 to 3.1 s each), by job
+    word: every one but conv256to128-class (63,208,320 indices) and the two cvtfrom spaces, in which no bit of a source is
+    dropped (d = 0 at p = 113 and 237), so no index has a class to check: their conversions are exact."""
+    return {n: e for n, e in enums_wide().items() if n != "conv256to128-class" and not isinstance(e, CvtfromEnum)}
+
+
 def small_enums() -> dict:
     """The five enumerators built at e4m3 and e5m6 (widths where the study's exhaustion works). cvtto's widest
     target B stays below the format's emax, so its structural exponents are all finite."""
@@ -795,6 +857,10 @@ def _encode(fmt: FpFormat, sign: int, R: int, u: int):
 def _sizes() -> None:
     for name, e in enums64().items():
         print(f"{name}: N = {e.size_formula()}; k = {e.k}; distinct operands {distinct(e)}; attributes {','.join(e.attrs)}")
+    # the wide spaces (the soak's MPFR=1 build): the formula, k at the format, the attributes; their distinct operands are not
+    # counted here (conv256to128-class alone is 63,208,320 indices)
+    for name, e in enums_wide().items():
+        print(f"{name}: N = {e.size_formula()}; k = {e.k}; attributes {','.join(e.attrs)}")
 
 
 def _check() -> int:
@@ -812,7 +878,7 @@ def _check() -> int:
             bad += not miss_c
             _, _, miss_s, _ = coverage(e, drop_class=c, drop_by="slot")
             print(f"   plant, class slot {CLS_NAMES[c]} mis-selected: {len(miss_s)} keys missing")
-    for label, e in wide_enums().items():
+    for label, e in list(wide_enums().items()) + list(wide_format_enums().items()):
         n, nbad, firsts = constructive(e)
         print(f"constructive {label}: {e.N} indices, {n} non-degenerate indices whose built key is checked against the key "
               f"the index names, {nbad} differ" + (f", e.g. {firsts[0]}" if firsts else ""))
@@ -825,8 +891,16 @@ def main(argv) -> int:
         _sizes()
         return 0
     if len(argv) == 5 and argv[1] == "--dump":
-        e = enums64()[argv[2]]
+        try:
+            e = enum_of(argv[2])
+        except ValueError as ex:
+            print(f"c5_class_enum: refused: {ex}", file=sys.stderr)
+            return 2
         lo, hi = int(argv[3], 0), int(argv[4], 0)
+        if not 0 <= lo < hi <= e.N:
+            print(f"c5_class_enum: refused: need 0 <= lo < hi <= {e.N} (the indices of the {e.name} space), got "
+                  f"[{argv[3]}, {argv[4]})", file=sys.stderr)
+            return 2
         out = sys.stdout
         for i in range(lo, hi):
             out.write(e.dump_line(i) + "\n")
