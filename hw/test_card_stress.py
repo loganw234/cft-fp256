@@ -55,6 +55,11 @@ Three kinds of group, then the plants (the groups, by name, are in hw/test-card-
             real log through parse_soak and the stand-in's lines held to it, --mpfr-prefix refused by name at the command line, the warnings' sorting,
             the plans, the items served and covered (dry), refused by name without --mpfr-prefix (dry), and the build line with MPFR=1 and its
             checks on the driver's real path over test doubles (POSIX: skipped by name elsewhere).
+            Since parcel HXd (2026-10-27) the group also holds the format table (OP_FORMAT, Item.format: the table is the catalog's 68 ops and no other, each
+            op's format is the C tools' - the 30 wide ops' READ from divsqrt_soak.c's table of modes - and an op with no format is refused by name) and, in the dry
+            run of the wide items, the report's format column and group line and the page's reducer (it refuses the dry run by design, and reads its wide records
+            with the flag turned off in a copy). The plants of HXd (CARD_STRESS_PLANT='HXd: ') also run the report's test (`plant_report`) and the page's
+            (`plant_progress`, which lays out hw/ and site/ side by side so that a plant of site/nightly.html has its own page) on a plant's copy of the code.
 
   testfiles   (parcel TG, 2026-10-23) hw/test_card_stress_report.py and hw/test_card_stress_progress.py, each run as a process and made checks of this suite: a crash,
             a hang, a missing summary line, an exit status or a failed count above 0, each FAIL line; their SKIP lines are passed on as this suite's, by name and with the
@@ -1860,7 +1865,7 @@ def scn_sweep_all(env: Env, src: str = HERE) -> list:
     p = subprocess.run([sys.executable, "-B", "-I", rp, r.out, "--no-write"], capture_output=True, text=True, timeout=120)
     t = p.stdout
     c("sweep all: the report gives each item's reach and totals the coverage by reach",
-      p.returncode == 0 and re.search(r"^  conv32to64-all\s.*\shost$", t, re.M) and re.search(r"^  scaleb32-wide-rdn\s.*\stile$", t, re.M)
+      p.returncode == 0 and re.search(r"^  conv32to64-all\s.*\shost\s+fp32 -> fp64$", t, re.M) and re.search(r"^  scaleb32-wide-rdn\s.*\stile\s+fp32$", t, re.M)
       and re.search(r"^  reach tile: 1 exhaustive item\(s\) seen; covered %d of %d encodings \(100\.000%%\); fully covered 1 of 1$" % (EXH_T, EXH_T), t, re.M)
       and re.search(r"^  reach host: 3 exhaustive item\(s\) seen; covered %d of %d encodings \(100\.000%%\); fully covered 3 of 3$" % (3 * EXH_T, 3 * EXH_T), t, re.M)
       is not None, t[t.find("exhaustive items"):][:900])
@@ -2530,10 +2535,10 @@ def scn_report(env: Env, src: str = HERE) -> list:
     c("report: sqrt32-rne's covered encodings and percentage are the ones counted from the records",
       bool(m) and int(m.group(3)) == cov and abs(float(m.group(4)) - 100.0 * cov / 2 ** 32) < 0.0006,
       f"records say {cov}; report line {m.group(0) if m else None}")
-    # parcel EX: the table's last column is the item's reach
-    mr = re.search(r"^\s*sqrt32-rne\s.*\s(\w+)$", txt, re.M)
+    # parcel EX: the table's last column was the item's reach; since parcel HXd (2026-10-27) the column before the last is, and the last is its format
+    mr = re.search(r"^\s*sqrt32-rne\s.*\s(\w+)\s+fp32$", txt, re.M)
     recs_reach = {r["sweep"].get("reach") for r in legs if r["kind"] == "sweep" and r["sweep"]["item"] == "sqrt32-rne"}
-    c("report: and its reach column (the last) is what the driver wrote into every one of its records (sqrt32 reaches the tile)",
+    c("report: and its reach column (the one before the last, the format's) is what the driver wrote into every one of its records (sqrt32 reaches the tile)",
       bool(mr) and recs_reach == {"tile"} and mr.group(1) == "tile",
       f"records say {sorted(map(str, recs_reach))}; report line {mr.group(0) if mr else None}")
     # a copy with one record changed must change the report, to the new truth
@@ -5488,6 +5493,99 @@ def fake_mpfr_prefix(path: str, version: str = "4.2.2", libs=("libmpfr.a", "libg
     return path
 
 
+# The format of each of the 38 ops the coverage waves had before the wide modes, as host/tools/clause5_soak.c's and divsqrt_soak.c's headers say it
+# (parcel HXd), written out here and not read from the library: the operand's format, or both ends of a conversion - the number in cvtto and cvtfrom is the floating
+# format, the integers the other end. The 30 wide ops' formats are READ below from divsqrt_soak.c's own table of modes (WMODES), not from their names.
+DOC_FORMAT = {
+    "sqrt32": "fp32", "div32": "fp32", "rint32": "fp32", "scaleb32": "fp32", "scaleb32-all": "fp32", "scaleb32-wide": "fp32", "nextup32": "fp32",
+    "nextdown32": "fp32", "logb32": "fp32", "class32": "fp32", "rem32": "fp32", "div32-hard": "fp32",
+    "sqrt64": "fp64", "div64": "fp64", "rint64": "fp64", "scaleb64": "fp64", "nextup64": "fp64", "nextdown64": "fp64", "logb64": "fp64", "class64": "fp64",
+    "rem64": "fp64", "div64-hard": "fp64", "sqrt64-hard": "fp64", "rint64-class": "fp64", "scaleb64-class": "fp64",
+    "conv32to64": "fp32 -> fp64", "conv32to64-all": "fp32 -> fp64", "conv64to32": "fp64 -> fp32", "conv64to32-class": "fp64 -> fp32",
+    "cvtto32": "fp32 -> the integer targets", "cvtto32-all": "fp32 -> the integer targets", "cvtto64": "fp64 -> the integer targets",
+    "cvtto64-class": "fp64 -> the integer targets",
+    "cvtfrom32": "the integer sources -> fp32", "cvtfrom32-all": "the integer sources -> fp32", "cvtfrom64": "the integer sources -> fp64",
+    "cvtfrom64-all": "the integer sources -> fp64", "cvtfrom64-class": "the integer sources -> fp64",
+}
+
+
+def wide_formats_from_c() -> dict:
+    """mode -> 'fp64' | 'fp128' | 'fp256' for the wide modes, read from divsqrt_soak.c's WMODES table, in which each mode names the format it computes in
+    (WF64, WF128, WF256) as its fourth field."""
+    with open(os.path.join(ROOT, "host", "tools", "divsqrt_soak.c"), "r", encoding="utf-8", errors="replace") as fh:
+        text = fh.read()
+    body = text[text.index("static const wmode WMODES[] = {"):]
+    body = body[:body.index("};")]
+    return {m.group(1): "fp" + m.group(2) for m in re.finditer(r'\{\s*"([a-z0-9-]+)",\s*WK_\w+,\s*\d+,\s*WF(\d+),\s*\d+\s*\}', body)}
+
+
+def format_table_checks(src: str = HERE) -> list:
+    """Parcel HXd, the format of every op (hw/card_stress_lib.py, OP_FORMAT, Item.format): the table names every op of the full catalog and no other, each
+    op's format is the one this file's own table gives for the 38 older ops (DOC_FORMAT, typed from the C tools' headers, not read from them) and the one
+    divsqrt_soak.c's table of modes gives for the 30 wide ops (read from the file), a conversion names both ends, an op with no format is refused by name
+    where an item is made of it, and none of the strings is matched by the screen the nightly page's reducer holds a published string to (_PATHY and
+    _IPV4: what they match is in the last check's name), which is asked here, not copied."""
+    from collections import Counter
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    wide_c = wide_formats_from_c()
+    want = dict(DOC_FORMAT)
+    want.update(wide_c)
+    with lib_from(src) as L2:
+        full = L2.sweep_items(mpfr=True)
+        ops = {it.op for it in full}
+        c("format: the C tool's table of modes gives the 30 wide ops their formats (fp64 x 2, fp128 x 14, fp256 x 14), and they are the library's wide ops",
+          set(wide_c) == set(L2.WIDE_OPS) and sorted(Counter(wide_c.values()).items()) == [("fp128", 14), ("fp256", 14), ("fp64", 2)], str(sorted(Counter(wide_c.values()).items())))
+        c("format: the table names every op of the full catalog (68 ops) and no other, and the documents' table is over the same 68",
+          set(L2.OP_FORMAT) == ops and len(ops) == 68 and set(want) == ops, f"{sorted(set(L2.OP_FORMAT) ^ ops)} {sorted(set(want) ^ ops)}")
+        bad = {op: (L2.OP_FORMAT.get(op), f) for op, f in want.items() if L2.OP_FORMAT.get(op) != f}
+        c("format: each op's format is the one this file's own table gives for the 38 older ops (DOC_FORMAT, typed from the C tools' headers) and the one the C "
+          "tool's table of modes gives for the 30 wide ops (read from divsqrt_soak.c); a conversion names both ends (cvtto: fp32 or fp64 to the integer targets; "
+          "cvtfrom: the integer sources to fp32 or fp64), a slice, f64hard or window item the format it computes in", not bad, str(list(bad.items())[:3]))
+        c("format: every item of the full catalog carries its op's format (Item.format), and the catalog uses ten distinct strings, so a table that said fp32 "
+          "of everything would be red here", all(it.format == want[it.op] for it in full) and len({it.format for it in full}) == 10,
+          f"{len({it.format for it in full})} distinct")
+        c("format: the wide items' formats follow their ops: div128-hard fp128, sqrt256-f64hard fp256, sqrt64-f32 fp64, recip128-f32 fp128, "
+          "recip256-win-key fp256 (an f64hard or slice item computes in the wide format, the slice named by its claim)",
+          {n: it.format for n, it in {i.name: i for i in full}.items() if n in ("div128-hard-rne", "sqrt256-f64hard-rtz", "sqrt64-f32-rup", "recip128-f32-rne", "recip256-win-key-rup")}
+          == {"div128-hard-rne": "fp128", "sqrt256-f64hard-rtz": "fp256", "sqrt64-f32-rup": "fp64", "recip128-f32-rne": "fp128", "recip256-win-key-rup": "fp256"})
+        # an op with no format is refused by name: the reach table gets the op (an item needs a reach first), the format table does not
+        L2.OP_REACH["nosuch-op"] = L2.TILE
+        try:
+            try:
+                L2.Item("nosuch-op-rne", "divsqrt", "exhaustive", "nosuch-op", "rne")
+                made = None
+            except ValueError as e:
+                made = str(e)
+            try:
+                L2.format_of("nosuch-op")
+                direct = None
+            except ValueError as e:
+                direct = str(e)
+        finally:
+            del L2.OP_REACH["nosuch-op"]
+        c("format: an op with no format is refused BY NAME where an item is made of it, and by format_of, naming OP_FORMAT",
+          made is not None and "'nosuch-op'" in made and "OP_FORMAT" in made and direct == made, f"{made}; {direct}")
+        c("format: the refusal is of the op alone: every op of the catalog still makes its items", all(L2.format_of(op) == want[op] for op in ops))
+    q = subprocess.run([sys.executable, "-B", "-I", "-c",
+                        "import sys, json; sys.path.insert(0, sys.argv[1]); import card_stress_lib as L, card_stress_progress as P; "
+                        "print(json.dumps([sorted(f for f in set(L.OP_FORMAT.values()) if P._PATHY.search(f) or P._IPV4.search(f)), "
+                        "[bool(P._PATHY.search(x) or P._IPV4.search(x)) for x in ('fp32 /srv/data/x', 'fp32 -> /usr/lib', 'fp32 10.0.0.7')]]))", src],
+                       capture_output=True, text=True, timeout=120)
+    try:
+        offenders, controls = json.loads(q.stdout)
+    except ValueError:
+        offenders, controls = ["(the reducer could not be imported: %s)" % (q.stderr[-160:],)], []
+    c("format: none of the formats is matched by the screen the page's reducer holds a published string to (card_stress_progress._PATHY and _IPV4: a drive "
+      "letter, a UNC path, ~/ or a /word/word path, each at the start of a string or after whitespace, a quote, a bracket, = : , or ;, and a dotted IPv4 "
+      "address - not a slash inside a word: 'fp32/fp64' passes it); the screen is asked here, not copied, and its controls are a /word/word path twice "
+      "and an address (it can fail)", offenders == [] and controls == [True, True, True], f"{offenders} {controls}")
+    return out
+
+
 def wide_catalog_checks(src: str = HERE) -> list:
     """The 102 wide items in the catalog (parcel HXc): only with mpfr=True and after the 125, the documents' figures held to the real tool's
     output (hard-space, hard-count, the box's eight-slice counts), each real log of the five kinds through parse_soak with its item's rule and
@@ -5767,12 +5865,45 @@ def scn_wide_items(env: Env, src: str = HERE) -> list:
     claims = ["    div128-f64hard (rtz): the fp64 hard cases of the division (div64-hard's 289,685,696 indices), widened exactly to fp128",
               "    sqrt128-hard (rmm): the fp128 square root's own hard cases", "    sqrt64-f32 (rup): every fp32 input, widened exactly to fp64",
               "    recip256-win-key (rne): every pattern of the low 32 fraction bits of x = 1.H L in [1, 2) under H = a keyed draw"]
+    wf = {"div128-f64hard-rtz": "fp128", "sqrt128-hard-rmm": "fp128", "sqrt64-f32-rup": "fp64", "recip256-win-key-rne": "fp256"}
+    c("wide items: the report names each item's format in the last column of its row (div128-f64hard fp128, sqrt64-f32 fp64, recip256-win-key fp256) and totals "
+      "the wide group on a line of its own, the run having served wide items alone",
+      p.returncode == 0 and all(re.search(rf"^  {re.escape(n)}(?: \[[\d,]+ indices\])?\s+\d+.*\s+tile\s+{f}$", p.stdout, re.M) for n, f in wf.items())
+      and f"  group wide: 4 exhaustive item(s) seen; covered {sum(sp.values())} of {sum(sp.values())} encodings (100.000%); fully covered 4 of 4" in p.stdout
+      and "  group base" not in p.stdout, p.stdout[p.stdout.find("exhaustive items"):][:1200])
     c("wide items: the report counts each over its own space (div128-f64hard-rtz [289,685,696 indices] at 100%), the tile's total from "
       "those spaces, and states each mode's claim by space and level under the sweep table",
       p.returncode == 0 and re.search(r"^  div128-f64hard-rtz \[289,685,696 indices\]\s+\d+\s+812489184\s+289685696\s+100\.000%", t, re.M)
       and re.search(r"^  sqrt64-f32-rup\s+\d+\s+4294967296\s+4294967296\s+100\.000%", t, re.M)
       and f"reach tile: 4 exhaustive item(s) seen; covered {sum(sp.values())} of {sum(sp.values())} encodings (100.000%)" in t
       and all(x in t for x in claims) and "(L1 over the window)" in t and "(L1 over the fp32 slice)" in t, t[t.find("exhaustive items"):][:1500])
+    # parcel HXd: the nightly page's reducer on the same run. It refuses a dry run by design (its slices ran against stand-ins); with the flag turned off in a
+    # COPY of the records - the driver's own wide records, nothing else changed - it reads them: the wide group alone, each row's format and group.
+    rp = os.path.join(src, "card_stress_progress.py")
+    q = subprocess.run([sys.executable, "-B", "-I", rp, r.out, "--commit", "none"], capture_output=True, text=True, timeout=120)
+    c("wide items: the page's reducer refuses the dry run by design, naming it (status 2, nothing written), whatever the wide items in it",
+      q.returncode == 2 and "dry run" in q.stderr and q.stdout == "", f"rc {q.returncode}: {q.stderr[-200:]}")
+    cp = os.path.join(env.tmp, "wide-reduce")
+    os.makedirs(cp, exist_ok=True)
+    with open(os.path.join(r.out, "metrics.jsonl"), encoding="utf-8") as fh:
+        recs = [json.loads(x) for x in fh if x.strip()]
+    for x in recs:
+        if x.get("type") == "run_start":
+            x["settings"]["dry_run"] = False
+    with open(os.path.join(cp, "metrics.jsonl"), "w", encoding="utf-8", newline="\n") as fh:
+        fh.write("".join(json.dumps(x, separators=(",", ":")) + "\n" for x in recs))
+    q = subprocess.run([sys.executable, "-B", "-I", rp, cp, "--commit", "none"], capture_output=True, text=True, timeout=120)
+    try:
+        dj = json.loads(q.stdout)
+    except ValueError:
+        dj = {}
+    served = [k for k in (dj.get("now") or {}).get("classes", []) if k["served"]]
+    c("wide items: with the flag turned off in a copy, the reducer reads the driver's own wide records: one served class (the tile's), its four rows each with the "
+      "format and the group of its item, and the wide group alone in its totals, over the four items and what they cover",
+      q.returncode == 0 and len(served) == 1 and served[0]["kind"] == "tile"
+      and {x["item"]: (x["format"], x["group"]) for x in served[0]["items"]} == {n: (f, "wide") for n, f in wf.items()}
+      and [(g["group"], g["items"], g["complete"], g["covered"], g["space"]) for g in served[0]["groups"]]
+      == [("wide", 4, 4, sum(sp.values()), sum(sp.values()))], f"rc {q.returncode}: {q.stderr[-200:]} {str(served)[:300]}")
     return out
 
 
@@ -5931,7 +6062,7 @@ def scn_wide_build(env: Env, src: str = HERE) -> list:
 def group_wide(env: Env, src: str = HERE) -> list:
     """Parcel HXc, the wide-format items: the catalog and its real logs, the driver's command line and plans, the items served and covered,
     refused without --mpfr-prefix, and the build line with MPFR on the driver's real path over test doubles (POSIX)."""
-    return (wide_catalog_checks(src) + wide_driver_checks(env, src) + scn_wide_items(env, src) + scn_wide_refused(env, src)
+    return (format_table_checks(src) + wide_catalog_checks(src) + wide_driver_checks(env, src) + scn_wide_items(env, src) + scn_wide_refused(env, src)
             + scn_wide_build(env, src))
 
 
@@ -6712,6 +6843,8 @@ def make_plant_copy(env: Env, name: str, edits: list) -> str:
         shutil.copytree(FIX, os.path.join(d, "card_stress_fixtures"))
     if any(e[0] == "figure_extracts.py" for e in edits):          # lives in python/, not hw/: a plant of it gets its own copy
         shutil.copy(os.path.join(ROOT, "python", "figure_extracts.py"), os.path.join(d, "figure_extracts.py"))
+    if any(e[0] == "nightly.html" for e in edits):                # lives in site/: a plant of the page gets its own copy (plant_progress lays out a tree for it)
+        shutil.copy(os.path.join(ROOT, "site", "nightly.html"), os.path.join(d, "nightly.html"))
     for fname, old, new in edits:
         p = os.path.join(d, fname)
         with open(p, "r", encoding="utf-8", newline="") as fh:
@@ -6773,6 +6906,26 @@ def plant_report(env: Env, src: str) -> list:
     if p.returncode != 0 and not bad:
         bad = [f"the report test crashed under the plant: {p.stderr[-200:]}"]
     return [(b, False, "") for b in bad] or [("the report test passes under the plant", True, "")]
+
+
+def plant_progress(env: Env, src: str) -> list:
+    """The nightly page's own test (hw/test_card_stress_progress.py), run on the plant's copy of the code and, for a plant of the page, on its copy of
+    site/nightly.html, in a tree laid out as the repository is - hw/ and site/ side by side, where the test finds its page and its data file; every FAIL
+    line it prints is a failing check, named by its text."""
+    root = src + "-tree"
+    shutil.rmtree(root, ignore_errors=True)
+    hw, site = os.path.join(root, "hw"), os.path.join(root, "site")
+    os.makedirs(site)
+    shutil.copytree(src, hw, ignore=shutil.ignore_patterns("nightly.html", "__pycache__"))
+    page = os.path.join(src, "nightly.html")
+    shutil.copy(page if os.path.exists(page) else os.path.join(ROOT, "site", "nightly.html"), os.path.join(site, "nightly.html"))
+    shutil.copy(os.path.join(ROOT, "site", "nightly.json"), os.path.join(site, "nightly.json"))
+    p = subprocess.run([sys.executable, "-B", "-I", os.path.join(hw, "test_card_stress_progress.py")], capture_output=True, text=True, encoding="utf-8",
+                       errors="replace", timeout=600)
+    bad = [re.sub(r"^\s*FAIL\s+", "", ln).strip() for ln in p.stdout.splitlines() if ln.lstrip().startswith("FAIL ")]
+    if p.returncode != 0 and not bad:
+        bad = [f"the progress test crashed under the plant: {p.stderr[-200:]}"]
+    return [(b, False, "") for b in bad] or [("the progress test passes under the plant", True, "")]
 
 
 def plants(env: Env) -> None:
@@ -6912,17 +7065,17 @@ def plants(env: Env) -> None:
          [("card_stress.py", '            lines.append("reach      " + "; ".join(', '            lines.append("xreach     " + "; ".join(')],
          lambda env, src: scn_sweep_all(env, src), ["sweep all: status.txt says what the tile has seen"]),
         ("the report prints every item as reaching the tile",
-         [("card_stress_report.py", '                      _reach_text(e["reach"])]\n                     for e in W["exhaustive"]])',
-           '                      "tile"]\n                     for e in W["exhaustive"]])')],
+         [("card_stress_report.py", '                      _reach_text(e["reach"]), _format_text(e.get("format"))]\n                     for e in W["exhaustive"]])',
+           '                      "tile", _format_text(e.get("format"))]\n                     for e in W["exhaustive"]])')],
          plant_report, ["sweep.exh[logb32].reach", "sweep.exh[conv32to64-all].reach", "sweep.exh[cvtfrom32-all-rne].reach"]),
         ("the report totals the coverage by reach wrongly (every item counted as a tile item)",
          [("card_stress_report.py", '        mine = [e for e in exh if e["reach"] == key]\n',
            '        mine = [e for e in exh if (e["reach"] == key or key == TILE)]\n')],
          plant_report, ["sweep.total.reach"]),
         ("the report prints every exhaustive item as a host item, whatever the records say",
-         [("card_stress_report.py", '                      _reach_text(e["reach"])]\n                     for e in W["exhaustive"]])',
-           '                      "host"]\n                     for e in W["exhaustive"]])')],
-         lambda env, src: scn_report(env, src), ["report: and its reach column (the last) is what the driver wrote into every one of its records"]),
+         [("card_stress_report.py", '                      _reach_text(e["reach"]), _format_text(e.get("format"))]\n                     for e in W["exhaustive"]])',
+           '                      "host", _format_text(e.get("format"))]\n                     for e in W["exhaustive"]])')],
+         lambda env, src: scn_report(env, src), ["report: and its reach column (the one before the last, the format's) is what the driver wrote into every one of its records"]),
         # parcel DR1 (2026-10-20): the telemetry sampler's order, the revision-8 table, --quick with --sweep-items
         ("the telemetry sampler is not serialised",
          [("card_stress.py", "        with self.tel_lock:\n            self.take_sample(when, img)\n", "        self.take_sample(when, img)\n")],
@@ -7600,6 +7753,165 @@ def plants(env: Env) -> None:
          [("card_stress_report.py", '"cannot_apply": [{"leg": k[0], "image": k[1], "reason": k[2], "cycles": n} for k, n in sorted(cannot.items())],',
            '"cannot_apply": [],')],
          plant_report, ["acceptance-rev8 cannot apply to the single: 3 cycles", "the line for a leg that cannot apply names the image and the reason"]),
+        # -- parcel HXd (2026-10-27): a format on every item and the wide items beside the others (CARD_STRESS_PLANT='HXd: ' runs just these)
+        ("HXd: every op is given the format fp32",
+         [("card_stress_lib.py", "def format_of(op: str) -> str:", 'OP_FORMAT.update({op: "fp32" for op in OP_FORMAT})\n\n\ndef format_of(op: str) -> str:')],
+         lambda env, src: format_table_checks(src), ["format: each op's format is the one this file's own table gives for the 38 older ops (DOC_FORMAT, typed from the C tools' headers) "
+                                                     "and the one the C tool's table of modes gives for the 30 wide ops"]),
+        ("HXd: an item carries the format fp32 whatever its op",
+         [("card_stress_lib.py", "        self.format = format_of(op)", '        self.format = "fp32"')],
+         lambda env, src: format_table_checks(src), ["format: every item of the full catalog carries its op's format"]),
+        ("HXd: an op with no format is given fp32 instead of being refused",
+         [("card_stress_lib.py", '    except KeyError:\n        raise ValueError(f"op {op!r} has no format:', '    except KeyError:\n        return "fp32"\n        raise ValueError(f"op {op!r} has no format:')],
+         lambda env, src: format_table_checks(src), ["format: an op with no format is refused BY NAME"]),
+        ("HXd: the format table names an op the catalog does not use",
+         [("card_stress_lib.py", '    "sqrt64-f32": "fp64", "recip64-f32": "fp64",\n}', '    "sqrt64-f32": "fp64", "recip64-f32": "fp64", "zzz-class": "fp64",\n}')],
+         lambda env, src: format_table_checks(src), ["format: the table names every op of the full catalog (68 ops) and no other"]),
+        ("HXd: a conversion names one end",
+         [("card_stress_lib.py", '"cvtfrom64-all": "the integer sources -> fp64"', '"cvtfrom64-all": "fp64"')],
+         lambda env, src: format_table_checks(src), ["format: each op's format is the one this file's own table gives for the 38 older ops (DOC_FORMAT, typed from the C tools' headers) "
+                                                     "and the one the C tool's table of modes gives for the 30 wide ops"]),
+        ("HXd: a format has the shape of a path",
+         [("card_stress_lib.py", '"conv64to32": "fp64 -> fp32", "conv64to32-class"', '"conv64to32": "fp64 -> fp32 /srv/data/x", "conv64to32-class"')],
+         lambda env, src: format_table_checks(src), ["format: none of the formats is matched by the screen the page's reducer holds a published string to"]),
+        ("HXd: the report names every item fp32",
+         [("card_stress_report.py", "    return ITEM_FORMAT.get(item) or (OP_FORMAT.get(op) if isinstance(op, str) else None)", '    return "fp32"')],
+         plant_report, ["wide: each exhaustive item's coverage, its space, its format and its group", "summary sweep.exh[conv32to64-all].format",
+                        "text sweep.exh[conv32to64-all].format"]),
+        ("HXd: the report gives an item no catalog names no format, whatever its op",
+         [("card_stress_report.py", "    return ITEM_FORMAT.get(item) or (OP_FORMAT.get(op) if isinstance(op, str) else None)", "    return ITEM_FORMAT.get(item)")],
+         plant_report, ["wide: each exhaustive item's coverage, its space, its format and its group"]),
+        ("HXd: the report puts every item in the base group",
+         [("card_stress_report.py", 'ITEM_GROUP = {n: ("wide" if it.mpfr else "base") for n, it in _CATALOG.items()}', 'ITEM_GROUP = {n: "base" for n, it in _CATALOG.items()}')],
+         plant_report, ["wide: each exhaustive item's coverage, its space, its format and its group", "wide: the totals by group are the oracle's"]),
+        ("HXd: the report puts every item in the base group (the dry run's wide items)",
+         [("card_stress_report.py", 'ITEM_GROUP = {n: ("wide" if it.mpfr else "base") for n, it in _CATALOG.items()}', 'ITEM_GROUP = {n: "base" for n, it in _CATALOG.items()}')],
+         lambda env, src: scn_wide_items(env, src), ["wide items: the report names each item's format in the last column of its row"]),
+        ("HXd: a class's totals by group count each item twice",
+         [("card_stress_report.py", '"by_group": _by_group(exh, imgs)},', '"by_group": _by_group(exh + exh, imgs)},')],
+         plant_report, ["totals by group are over that class's items alone"]),
+        ("HXd: a run with no wide item prints the group lines",
+         [("card_stress_report.py", '    if not (isinstance(groups, list) and any(g.get("group") == "wide" for g in groups)):', "    if not isinstance(groups, list):")],
+         plant_report, ["wide: and the text of a run with no wide item prints no group line at all"]),
+        ("HXd: the coverage by tree leaves the format off its tables",
+         [("card_stress_report.py", '+ [_format_text(e.get("format"))]\n                         for e in c["exhaustive"]])', '+ []\n                         for e in c["exhaustive"]])')],
+         plant_report, ["wide: the tile class's table names each item's format"]),
+        ("HXd: the sweep table prints the reach where it should print the format",
+         [("card_stress_report.py", '_reach_text(e["reach"]), _format_text(e.get("format"))]\n                     for e in W["exhaustive"]])',
+           '_reach_text(e["reach"]), _reach_text(e["reach"])]\n                     for e in W["exhaustive"]])')],
+         plant_report, ["wide: the sweep table's last column names each item's format"]),
+        ("HXd: an unknown format is printed as nothing",
+         [("card_stress_report.py", '    return f if isinstance(f, str) and f else "unknown"', '    return f if isinstance(f, str) else ""')],
+         plant_report, ["wide: the sweep table's last column names each item's format"]),
+        ("HXd: the reducer puts every row in the base group",
+         [("card_stress_progress.py", '"complete": e["complete"], "format": e["format"], "group": e["group"]}', '"complete": e["complete"], "format": e["format"], "group": "base"}')],
+         plant_progress, ["its format and its group (the test's own table, not the catalog's)"]),
+        ("HXd: the reducer gives a row at zero the format fp32",
+         [("card_stress_progress.py", 'R.ITEM_FORMAT.get(name), "group"', '"fp32", "group"')],
+         plant_progress, ["its format and its group (the test's own table, not the catalog's)"]),
+        ("HXd: the reducer's totals by group leave the wide group out",
+         [("card_stress_progress.py", '            "groups": by_group,\n', '            "groups": by_group[:1],\n')],
+         plant_progress, ["its totals by group, base then wide"]),
+        ("HXd: the reducer's base group counts the wide rows too",
+         [("card_stress_progress.py", 'mine = [r for r in items if r["group"] == g]', 'mine = [r for r in items if r["group"] == g or g == "base"]')],
+         plant_progress, ["its totals by group, base then wide"]),
+        ("HXd: a night's state by group is written for every class",
+         [("card_stress_progress.py", '            if any(e["group"] == "wide" for e in seen):\n', "            if True:\n")],
+         plant_progress, ["the state after it by group, written for a class only once"]),
+        ("HXd: the reducer lets a format with the shape of a path through",
+         [("card_stress_progress.py", "        if _PATHY.search(s) or _IPV4.search(s):", "        if False:")],
+         plant_progress, ["plant: an item whose format has the shape of a path fails the reduction by name"]),
+        ("HXd: the page draws the base group's line over the class's whole space",
+         [("nightly.html", "return { c: c, style: style, tag: tag, space: g ? g.space : c.total.space, at:", "return { c: c, style: style, tag: tag, space: c.total.space, at:")],
+         plant_progress, ["an older group's history is not redrawn"]),
+        ("HXd: the page starts the wide group's line on the class's first night",
+         [("nightly.html", '            return g.group === "base" ? (s ? s.covered : 0) : null;', "            return 0;")],
+         plant_progress, ["starts on the first night it had anything covered"]),
+        ("HXd: the page lists the wide items among the others",
+         [("nightly.html", 'var items = wide ? [base ? [head("Base items", base), part(false)] : null, head("Wide-format items", wide), part(true)] : open.concat(done).map(row);',
+           "var items = open.concat(done).map(row);")],
+         plant_progress, ["in the class's item list the base items come first"]),
+        ("HXd: the page leaves the format off the item rows",
+         [("nightly.html", "r.item, levelTag(r.level), formatTag(r.format),", "r.item, levelTag(r.level),")],
+         plant_progress, ["every item row of every class shows the format"]),
+        ("HXd: the page draws a heading the legacy shape did not have",
+         [("nightly.html", ': figures(t, c.kind + " items covered"),', ': [h("div", { "class": "kind", text: "base items" }), figures(t, c.kind + " items covered")],')],
+         plant_progress, ["wide page: over a data file without the new fields (the run without wide items as 3ec0081c's reducer made it) the tree the page draws is "
+                          "the page of 3ec0081c's, node for node",
+                          "committed data: while the file is night 7's, as 3ec0081c committed it, the page draws the tree it drew then, node for node"]),
+        ("HXd: the page takes a group's figures from the class's total",
+         [("nightly.html", 'wide ? [base ? figures(base, c.kind + " items covered") : null,', 'wide ? [base ? figures(t, c.kind + " items covered") : null,')],
+         plant_progress, ["the base group's block of the headline states"]),
+        ("HXd: the total over every exhaustive item leaves the wide items out",
+         [("card_stress_report.py", '    n_exh = len(exh)\n    tot_cov = sum(e["covered"] for e in exh)', '    n_exh = len(exh)\n    tot_cov = sum(e["covered"] for e in exh if e["group"] == "base")')],
+         plant_report, ["wide: the total over every exhaustive item is what it was"]),
+        ("HXd: the base group counts the wide items too",
+         [("card_stress_report.py", 'mine = [e for e in rows if e["group"] == g]', 'mine = [e for e in rows if e["group"] == g or g == "base"]')],
+         plant_report, ["wide: the totals by group are the oracle's"]),
+        ("HXd: the format is put before the reach column",
+         [("card_stress_report.py", '"first_uncovered", "incomplete", "reach", "format"],', '"first_uncovered", "incomplete", "format", "reach"],'),
+          ("card_stress_report.py", '_reach_text(e["reach"]), _format_text(e.get("format"))]\n                     for e in W["exhaustive"]])',
+           '_format_text(e.get("format")), _reach_text(e["reach"])]\n                     for e in W["exhaustive"]])')],
+         plant_report, ["wide: reach is still the column before the last, the format is the last"]),
+        ("HXd: the report cannot render a summary from before the format",
+         [("card_stress_report.py", '_reach_text(e["reach"]), _format_text(e.get("format"))]\n                     for e in W["exhaustive"]])',
+           '_reach_text(e["reach"]), _format_text(e["format"])]\n                     for e in W["exhaustive"]])')],
+         plant_report, ["wide: a summary from before the fields renders"]),
+        ("HXd: the reducer publishes no format for a row it served",
+         [("card_stress_progress.py", '"complete": e["complete"], "format": e["format"], "group": e["group"]}', '"complete": e["complete"], "format": None, "group": e["group"]}')],
+         lambda env, src: scn_wide_items(env, src), ["wide items: with the flag turned off in a copy, the reducer reads the driver's own wide records"]),
+        ("HXd: the reducer reads a dry run",
+         [("card_stress_progress.py", '        if isinstance(st, dict) and st.get("dry_run") is True:', "        if False:")],
+         lambda env, src: scn_wide_items(env, src), ["wide items: the page's reducer refuses the dry run by design"]),
+        ("HXd: the page reads a groups field of any shape",
+         [("nightly.html", "need(c.groups === undefined || (", "need(true || (")],
+         plant_progress, ["wide page: a groups field that is not a list"]),
+        ("HXd: the page reads a format of any type",
+         [("nightly.html", 'need(r.format === undefined || r.format === null || typeof r.format === "string",', "need(true,")],
+         plant_progress, ["wide page: a format that is a number"]),
+        # eleven more, added after the first WSL run of the others (CARD_STRESS_PLANT='HXd: [2]' runs just these): a plant for each new check that the first thirty-five left to another's
+        ("HXd: [2] a group's share is over the wrong space",
+         [("card_stress_report.py", '"covered": cov, "total": tot, "pct": 100.0 * cov / tot,', '"covered": cov, "total": tot, "pct": 100.0 * cov / (tot + 1),')],
+         plant_report, ["wide: and each group's share is its covered over its own space"]),
+        ("HXd: [2] the sweep table's item cell loses its [N indices]",
+         [("card_stress_report.py", '[[e["item"] + (f" [{e[\'total\']:,} indices]" if e["total"] != EXH else ""), str(e["slices"]), str(e["cases"]),',
+           '[[e["item"], str(e["slices"]), str(e["cases"]),')],
+         plant_report, ["wide: and its item cells are what they were"]),
+        ("HXd: [2] a group's line states its space as what it covers",
+         [("card_stress_report.py", "{verb} {g['covered']} of {g['total']} encodings \"", "{verb} {g['total']} of {g['total']} encodings \"")],
+         plant_report, ["wide: the sweep section has a total line of its own for each group"]),
+        ("HXd: [2] the report does not say what a group is",
+         [("card_stress_report.py", "\"  group wide is the wide-format sweeps' items (parcel HXc), which exist only in a tool built with MPFR=1; group base is every other \"",
+           "\"  a group is one of the catalog's two kinds of item; \"")],
+         plant_report, ["wide: and one line saying what a group is"]),
+        ("HXd: [2] the coverage by tree leaves the format off its random items' tables",
+         [("card_stress_report.py", '+ [str(e["by_image"][i]) if i in e["by_image"] else "-" for i in imgs] + [_format_text(e.get("format"))]\n                         for e in c["random"]])',
+           '+ [str(e["by_image"][i]) if i in e["by_image"] else "-" for i in imgs] + []\n                         for e in c["random"]])')],
+         plant_report, ["wide: and its random items' table"]),
+        ("HXd: [2] the reducer's group share is over the class's whole space",
+         [("card_stress_progress.py", '"pct": (100.0 * gc / gs) if gs else None})', '"pct": (100.0 * gc / space) if gs else None})')],
+         plant_progress, ["its totals by group, base then wide"]),
+        ("HXd: [2] the reducer's class total leaves the wide rows out",
+         [("card_stress_progress.py", 'cov, space = sum(r["covered"] for r in items), sum(r["space"] for r in items)',
+           'cov, space = sum(r["covered"] for r in items if r["group"] == "base"), sum(r["space"] for r in items if r["group"] == "base")')],
+         plant_progress, ["and the class's total stays over both groups"]),
+        ("HXd: [2] the page shows the wide group's block with the base group's figures",
+         [("nightly.html", 'h("div", { "class": "kind", text: "wide-format items" }), figures(wide, c.kind + " wide-format items covered")]',
+           'h("div", { "class": "kind", text: "wide-format items" }), figures(base || t, c.kind + " wide-format items covered")]')],
+         plant_progress, ["wide page: the wide group's block is in the card beside it"]),
+        ("HXd: [2] the page draws one line for a class with wide items",
+         [("nightly.html", 'if (!wide) { lines.push(line(null, c.style, "")); return; }', 'if (true) { lines.push(line(null, c.style, "")); return; }')],
+         plant_progress, ["wide page: the chart has a line for each of the four classes, and one more"]),
+        ("HXd: [2] the page draws the wide group's line in the class's colour",
+         [("nightly.html", '"stroke:var(--s3)"), "wide-format items"));', '"stroke:var(--s1)"), "wide-format items"));')],
+         plant_progress, ["wide page: in its own colour"]),
+        ("HXd: [2] the page lists an earlier tree with wide items by its total",
+         [("nightly.html", '(wide ? (base ? line(base) + "; " : "") + "wide-format items: " + line(wide) : line(c.total))', "line(c.total)")],
+         plant_progress, ["wide page: an earlier tree with wide items is listed with both groups' figures"]),
+        ("HXd: [2] a wide op is given the wrong width in the table",
+         [("card_stress_lib.py", '"div128-hard": "fp128", "sqrt128-hard": "fp128", "div128-f64hard": "fp128", "sqrt128-f64hard": "fp128",',
+           '"div128-hard": "fp256", "sqrt128-hard": "fp128", "div128-f64hard": "fp128", "sqrt128-f64hard": "fp128",')],
+         lambda env, src: format_table_checks(src), ["format: the wide items' formats follow their ops"]),
     ]
     for name, edits, fn, expects in P:
         if pick and pick not in name:

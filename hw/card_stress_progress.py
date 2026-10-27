@@ -32,6 +32,12 @@ THE ESTIMATE (COMPUTED; the rule is in the file). For an open item of a current 
 after the night before the window, the window being the class's last 3 nights (fewer if it has fewer); nights_left =
 ceil(remaining x window nights / gain); the date is the newest night's date plus that many days. No gain: no estimate.
 
+GROUPS (parcel HXd). Within a class the items are in two groups, the report's: "base", and "wide" (the wide-format items, Item.mpfr). Each row
+carries its `format` (the catalog's: what it computes in, a conversion's both ends) and its `group`; each class carries `groups`, its totals by
+group (only the groups it has rows of) beside `total`, which stays over every row; and a night's `after.groups` (class -> group -> covered and
+complete) is written only once the class has a wide row served, so that the nights before it are the nights they were. Fields are added, none
+changed: SCHEMA stays 1, and a data file without them is read as the page has always read it.
+
 NOTHING PRIVATE. Only counts, item names, short tree hashes, the compiler's version line, a run_end reason that is a plain
 snake_case word, and the images' names, tile counts and short sha256 are passed through. Every string of the result is then
 held against the private text the records themselves carry (host, directory, image paths, the user names in them) and
@@ -81,6 +87,9 @@ RULES = {
                "item is counted per RTL tree, and a host item per host tree and compiler, because no tile computes it. A changed "
                "tree starts a new class from nothing, and nothing is summed across classes. How a run that did not record its tree "
                "is placed is the report's rule, and the class's label says which.",
+    "groups": "Within a class the items are in two groups, each counted over its own items and spaces so that a group joining a class does not "
+              "move the other's figures: the base items, and the wide-format items (fp64, fp128 and fp256), which exist only in a tool built "
+              "against the pinned MPFR. A class's total is over both. Each item names the format it computes in; a conversion names both ends.",
     "estimate": "ESTIMATE, not a measurement. For an item not yet fully covered in a current class: its gain over the class's last "
                 "3 nights (fewer if the class is younger), divided by the nights in that window, is its rate a night; the nights "
                 "left are the remaining indices over that rate, rounded up; the date counts that many days after the newest night, "
@@ -267,6 +276,7 @@ def reduce_records(objs: List[Dict[str, Any]], info: Dict[str, Any], commit: Any
         cases_now = sum(e["cases"] for g in ("exhaustive", "random", "other") for e in cum["sweep"][g])
         cases_prev = sum(e["cases"] for g in ("exhaustive", "random", "other") for e in prev["sweep"][g]) if prev else 0
         after_classes: Dict[str, Any] = {}
+        after_groups: Dict[str, Any] = {}
         for c in classes:
             if not c["nights"] or c["nights"][0] > k:
                 continue
@@ -276,6 +286,9 @@ def reduce_records(objs: List[Dict[str, Any]], info: Dict[str, Any], commit: Any
                 if e["complete"]:
                     first_complete.setdefault((c["id"], e["item"]), k)
             after_classes[c["id"]] = {"covered": sum(e["covered"] for e in seen), "complete": sum(1 for e in seen if e["complete"])}
+            if any(e["group"] == "wide" for e in seen):
+                after_groups[c["id"]] = {g: {"covered": sum(e["covered"] for e in mine), "complete": sum(1 for e in mine if e["complete"])}
+                                         for g in R.GROUPS if (mine := [e for e in seen if e["group"] == g])}
         nights.append({
             "n": k, "date": st["ts"][:10] if isinstance(st.get("ts"), str) and re.match(r"\d{4}-\d\d-\d\d", st["ts"]) else None,
             "start": st["ts"], "start_epoch": st["epoch"], "end": end.get("ts"), "end_epoch": end.get("epoch"),
@@ -293,7 +306,8 @@ def reduce_records(objs: List[Dict[str, Any]], info: Dict[str, Any], commit: Any
                      "host_src_dirty": tr.get("host_src_dirty"), "cc": tr.get("cc")},
             "images": [{"name": nm, "tiles": i["tiles"], "sha256": _short(i["sha256"])} for nm, i in (cum["header"]["images"] or {}).items()],
             "classes": night_class[k - 1],
-            "after": {"card_s": _r3(cum["uptime"]["card_union_s"]), "slices": cum["sweep"]["completed"], "cases": cases_now, "classes": after_classes},
+            "after": dict({"card_s": _r3(cum["uptime"]["card_union_s"]), "slices": cum["sweep"]["completed"], "cases": cases_now, "classes": after_classes},
+                          **({"groups": after_groups} if after_groups else {})),
         })
         prev = cum
 
@@ -306,12 +320,12 @@ def reduce_records(objs: List[Dict[str, Any]], info: Dict[str, Any], commit: Any
         rows: Dict[str, Dict[str, Any]] = {}
         for e in (ent["exhaustive"] if ent else []):
             rows[e["item"]] = {"item": e["item"], "space": e["total"], "covered": e["covered"], "pct": e["pct"], "slices": e["slices"],
-                               "cases": e["cases"], "complete": e["complete"]}
+                               "cases": e["cases"], "complete": e["complete"], "format": e["format"], "group": e["group"]}
         for name in (named or []):
             it = _CAT.get(name)
             if current and name not in rows and it is not None and it.kind == "exhaustive" and it.reach == c["kind"]:
                 rows[name] = {"item": name, "space": R.ITEM_SPACE.get(name, EXH), "covered": 0, "pct": 0.0, "slices": 0, "cases": 0,
-                              "complete": False}
+                              "complete": False, "format": R.ITEM_FORMAT.get(name), "group": R.ITEM_GROUP.get(name, "base")}
         window = c["nights"][-WINDOW:] if current else []
         for name, row in sorted(rows.items()):
             row.update(level=R.ITEM_LEVEL.get(name), in_campaign=bool(named is None or name in named),
@@ -338,11 +352,19 @@ def reduce_records(objs: List[Dict[str, Any]], info: Dict[str, Any], commit: Any
                                         if date_new else None)}
         items = [rows[n] for n in sorted(rows)]
         cov, space = sum(r["covered"] for r in items), sum(r["space"] for r in items)
+        by_group = []
+        for g in R.GROUPS:
+            mine = [r for r in items if r["group"] == g]
+            if mine:
+                gc, gs = sum(r["covered"] for r in mine), sum(r["space"] for r in mine)
+                by_group.append({"group": g, "items": len(mine), "complete": sum(1 for r in mine if r["complete"]), "covered": gc, "space": gs,
+                                 "pct": (100.0 * gc / gs) if gs else None})
         now_classes.append({
             "id": c["id"], "kind": c["kind"], "key": c["key"], "label": c["label"], "current": current, "served": ent is not None,
             "nights": c["nights"],
             "total": {"items": len(items), "complete": sum(1 for r in items if r["complete"]), "covered": cov, "space": space,
                       "pct": (100.0 * cov / space) if space else None},
+            "groups": by_group,
             "items": items,
         })
         # the report says a class holds a run whose tree it read from git (`derived_from_git`, a list of {commit, dir, tree}); carried as it
@@ -461,7 +483,9 @@ def dump(obj: Dict[str, Any]) -> str:
     return _emit(obj) + "\n"
 
 
-def differences(a: Any, b: Any, path: str = "", out: Optional[List[str]] = None, limit: int = 30) -> List[str]:
+def differences(a: Any, b: Any, path: str = "", out: Optional[List[str]] = None, limit: int = 60) -> List[str]:
+    # the first `limit` differences, in the file's order (60 since parcel HXd: the groups of each class are fields a night moves, and a fourth night
+    # made 43 differences, `totals.nights` the 33rd, where it had been inside the first 30)
     out = [] if out is None else out
     if len(out) >= limit:
         return out

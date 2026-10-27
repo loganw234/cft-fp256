@@ -46,6 +46,7 @@ section { border: 1px solid var(--line); border-radius: 6px; margin: 1.2rem 0; p
 .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 19rem), 1fr)); gap: 0.9rem; }
 .card { border: 1px solid var(--line); border-radius: 6px; padding: 0.8rem 0.9rem; background: var(--bg); min-width: 0; }
 .card .kind { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--dim); }
+.card .kind:not(:first-child) { margin-top: 0.9rem; }
 .card .big { font-size: 1.9rem; font-weight: 600; line-height: 1.2; margin: 0.2rem 0; }
 .bar { height: 9px; background: var(--code-bg); border: 1px solid var(--line); border-radius: 5px; overflow: hidden; margin: 0.35rem 0; }
 .bar > i { display: block; height: 100%; background: var(--accent); }
@@ -57,6 +58,7 @@ section { border: 1px solid var(--line); border-radius: 6px; margin: 1.2rem 0; p
 .tag { display: inline-block; font-size: 0.72rem; padding: 0 0.4rem; border-radius: 3px; border: 1px solid var(--line); color: var(--dim);
        margin-left: 0.3rem; vertical-align: 1px; }
 .tag.ok { background: var(--pass-bg); color: var(--pass-fg); border-color: transparent; }
+.grouphead { font-size: 0.85rem; font-weight: 600; margin: 1rem 0 0.2rem; color: var(--dim); text-transform: uppercase; letter-spacing: 0.04em; }
 .est { font-variant: small-caps; letter-spacing: 0.03em; font-weight: 600; }
 table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
 th, td { padding: 0.3rem 0.5rem; border-bottom: 1px solid var(--line); text-align: right; vertical-align: top; }
@@ -158,6 +160,10 @@ rebuilt after each night from the run's own record by <code>hw/card_stress_progr
     var t = Math.round(s);
     return Math.floor(t / 3600) + " h " + Math.floor(t % 3600 / 60) + " m " + t % 60 + " s";
   }
+  // Groups (parcel HXd). A class holds the base items and, where the night served them, the wide-format items; the data file's `groups` says which
+  // groups a class has, each with its own totals, and an item row says its `group` and its `format`. A file without them is drawn as it always was.
+  function group(c, g) { return (c.groups || []).filter(function (x) { return x.group === g; })[0] || null; }
+  function formatTag(f) { return typeof f === "string" && f ? h("span", { "class": "tag", title: "the format this item computes in (a conversion: both ends)", text: f }) : null; }
   // A class whose tree the report read from git says so in its label ("read from git at commit ..."), which the page shows as it comes;
   // the data file's `derived_from_git` (commit, directory and tree of each) is the same statement as data, and the page does not repeat it.
   function estimateText(e, note) {
@@ -218,7 +224,12 @@ rebuilt after each night from the run's own record by <code>hw/card_stress_progr
       need(Array.isArray(c.items) && Array.isArray(c.nights) && c.total && isnum(c.total.space), "class " + c.id + " lacks its items, nights or total");
       c.items.forEach(function (r) {
         need(typeof r.item === "string" && isnum(r.space) && isnum(r.covered), "an item of class " + c.id + " lacks its name, space or covered");
+        need(r.format === undefined || r.format === null || typeof r.format === "string", "the format of an item of class " + c.id + " is not text");
       });
+      // the groups (parcel HXd) are in a data file made by the tools that know them; a file without them is read as it always was
+      need(c.groups === undefined || (Array.isArray(c.groups) && c.groups.every(function (g) {
+        return g && typeof g.group === "string" && isnum(g.items) && isnum(g.complete) && isnum(g.covered) && isnum(g.space);
+      })), "the groups of class " + c.id + " are not a list of group, items, complete, covered and space");
     });
     need(isnum(d.totals.nights) && isnum(d.totals.slices) && isnum(d.totals.cases) && isnum(d.totals.disagreements), "totals lacks a count");
   }
@@ -245,26 +256,34 @@ rebuilt after each night from the run's own record by <code>hw/card_stress_progr
       (age !== null && age > 3 * 86400) ? h("p", { "class": "banner", text: "The newest night is more than 3 days old: the nightly update has not been made since." }) : null));
 
     // headline
+    // a class's headline figures over `t` (the class's total, or one group's): the share of the campaign it covers
+    function figures(t, label) {
+      return [h("div", { "class": "big", text: t.complete + " of " + t.items }),
+              h("div", { text: "items fully covered" }),
+              bar(t.covered, t.space, label),
+              h("div", null, h("strong", { text: pct1(t.covered, t.space) }), " of the campaign's " + fmt(t.space) + " encodings or indices (" + fmt(t.covered) + " covered)")];
+    }
     var cards = cur.map(function (c) {
-      var t = c.total, first = c.nights[0], done = t.complete + " of " + t.items;
+      var t = c.total, first = c.nights[0], base = group(c, "base"), wide = group(c, "wide");
       return h("div", { "class": "card" },
         h("div", { "class": "kind", text: c.kind + " items - current " + (c.kind === "tile" ? "RTL tree" : "host tree") }),
         h("div", { "class": "mono small", text: c.label }),
-        h("div", { "class": "big", text: done }),
-        h("div", { text: "items fully covered" }),
-        bar(t.covered, t.space, c.kind + " items covered"),
-        h("div", null, h("strong", { text: pct1(t.covered, t.space) }), " of the campaign's " + fmt(t.space) + " encodings or indices (" + fmt(t.covered) + " covered)"),
+        wide ? [base ? figures(base, c.kind + " items covered") : null,
+                h("div", { "class": "kind", text: "wide-format items" }), figures(wide, c.kind + " wide-format items covered")]
+             : figures(t, c.kind + " items covered"),
         h("div", { "class": "small dim", text: "Under this tree since night " + first + " (" + (d.nights[first - 1].date || "-") + "), " + c.nights.length +
           " night" + (c.nights.length === 1 ? "" : "s") + (c.served ? "." : ". No slice has completed under it yet.") }));
     });
     var earlier = old.map(function (c) {
-      var t = c.total;
-      return h("li", null, h("span", { "class": "mono", text: c.kind + ": " + c.label }), ": " + t.complete + " of " + t.items + " items fully covered, " +
-        pct1(t.covered, t.space) + " (" + fmt(t.covered) + " of " + fmt(t.space) + "), night" + (c.nights.length === 1 ? " " : "s ") + c.nights.join(", "));
+      var base = group(c, "base"), wide = group(c, "wide");
+      function line(t) { return t.complete + " of " + t.items + " items fully covered, " + pct1(t.covered, t.space) + " (" + fmt(t.covered) + " of " + fmt(t.space) + ")"; }
+      return h("li", null, h("span", { "class": "mono", text: c.kind + ": " + c.label }), ": " +
+        (wide ? (base ? line(base) + "; " : "") + "wide-format items: " + line(wide) : line(c.total)) + ", night" + (c.nights.length === 1 ? " " : "s ") + c.nights.join(", "));
     });
     frag.appendChild(h("section", { id: "headline" }, h("h2", { text: "How far along" }),
       cards.length ? h("div", { "class": "cards" }, cards) : h("p", { text: "No class is current: the newest night ran under no recorded tree." }),
       h("p", { "class": "small" }, h("strong", { text: "Why a changed tree starts again. " }), d.rules.classes),
+      (d.rules.groups && d.now.classes.some(function (c) { return group(c, "wide"); })) ? h("p", { "class": "small" }, h("strong", { text: "Groups. " }), d.rules.groups) : null,
       earlier.length ? h("details", { open: "" }, h("summary", { text: "Earlier trees (" + earlier.length + "), kept as history" }), h("ul", null, earlier)) : null));
 
     // the growing list: grouped by the tree each item completed on, the current trees first
@@ -278,7 +297,7 @@ rebuilt after each night from the run's own record by <code>hw/card_stress_progr
       if (!mine.length && !c.current) return null;
       var rows = mine.map(function (x) {
         var it = c.items.filter(function (r) { return r.item === x.item; })[0] || {};
-        return h("tr", null, h("td", { "class": "l mono" }, x.item, levelTag(it.level)), h("td", null, x.night + (x.date ? " (" + x.date + ")" : "")));
+        return h("tr", null, h("td", { "class": "l mono" }, x.item, levelTag(it.level), formatTag(it.format)), h("td", null, x.night + (x.date ? " (" + x.date + ")" : "")));
       });
       return h("div", null, h("h3", { "class": "mono", text: (c.current ? "current " : "earlier ") + c.kind + " tree: " + c.label }),
         mine.length ? h("table", null, h("thead", null, h("tr", null, h("th", { text: "Item" }), h("th", { text: "Night completed" }))), h("tbody", null, rows))
@@ -291,21 +310,29 @@ rebuilt after each night from the run's own record by <code>hw/card_stress_progr
     // per item
     function classBlock(c) {
       var open = c.items.filter(function (r) { return !r.complete; }), done = c.items.filter(function (r) { return r.complete; });
-      var items = open.concat(done).map(function (r) {
+      function row(r) {
         var gap = r.first_gap, sub = [fmt(r.covered) + " of " + fmt(r.space) + (r.space !== 4294967296 ? " indices" : " encodings"), fmt(r.slices) + " slices"];
         if (r.complete) sub.push("completed night " + r.complete_night + (r.complete_night ? " (" + (d.nights[r.complete_night - 1].date || "-") + ")" : ""));
         else if (gap) sub.push("first uncovered " + index(gap[0], r.space));
         return h("div", { "class": "item" },
-          h("div", { "class": "head" }, h("span", { "class": "name mono" }, r.item, levelTag(r.level),
+          h("div", { "class": "head" }, h("span", { "class": "name mono" }, r.item, levelTag(r.level), formatTag(r.format),
             r.in_campaign === false ? h("span", { "class": "tag", title: "not in the newest run's item list", text: "not in the run's list" }) : null,
             r.complete ? h("span", { "class": "tag ok", text: "complete" }) : null),
             h("span", null, h("strong", { text: pct3(r.covered, r.space) }))),
           bar(r.covered, r.space, r.item),
           h("div", { "class": "small dim", text: sub.join(" - ") }),
           (!r.complete && c.current) ? h("div", { "class": "small" }, estimateText(r.estimate, r.estimate_note)) : null);
-      });
+      }
+      // a class with wide-format items lists them as a group of their own after the base items, each group open items first
+      var base = group(c, "base"), wide = group(c, "wide");
+      function part(isWide) {
+        return open.filter(function (r) { return (r.group === "wide") === isWide; }).concat(done.filter(function (r) { return (r.group === "wide") === isWide; })).map(row);
+      }
+      function head(what, g) { return h("div", { "class": "grouphead", text: what + ": " + g.complete + " of " + g.items + " fully covered" }); }
+      var items = wide ? [base ? [head("Base items", base), part(false)] : null, head("Wide-format items", wide), part(true)] : open.concat(done).map(row);
       return h("div", null, h("h3", { "class": "mono", text: c.kind + " items - " + c.label }),
-        h("p", { "class": "small dim", text: c.total.complete + " of " + c.total.items + " fully covered; night" + (c.nights.length === 1 ? " " : "s ") + c.nights.join(", ") }),
+        h("p", { "class": "small dim", text: (wide ? (base ? "base items: " + base.complete + " of " + base.items + " fully covered; " : "") + "wide-format items: " + wide.complete + " of " + wide.items + " fully covered; night"
+                                                    : c.total.complete + " of " + c.total.items + " fully covered; night") + (c.nights.length === 1 ? " " : "s ") + c.nights.join(", ") }),
         c.served ? items : h("details", null, h("summary", { text: "No slice has completed under this tree yet: its " + c.items.length + " items are all at zero" }), items));
     }
     var perItem = h("section", { id: "items" }, h("h2", { text: "Item by item" }),
@@ -332,6 +359,25 @@ rebuilt after each night from the run's own record by <code>hw/card_stress_progr
       cls.forEach(function (c) {         // current: solid; each earlier tree of a kind gets its own dash
         c.style = "stroke:var(" + (colors[c.kind] || "--s2") + ");stroke-width:2.2" + (c.current ? "" : ";stroke-dasharray:" + dashes[1 + (seen[c.kind]++ % 3)]);
       });
+      // The lines: one a class, as always - or, for a class with wide-format items, one a group (the wide group in its own colour and the class's
+      // dash), each over ITS OWN space, so that a group joining a class redraws nothing of the other's history. A line has `at(n)`, what its
+      // group covered after night n, or null before the group had anything: a night whose state has no `groups` is one with no wide item served,
+      // so all it covered was the base items'.
+      var lines = [];
+      cls.forEach(function (c) {
+        var wide = group(c, "wide");
+        function line(g, style, tag) {
+          return { c: c, style: style, tag: tag, space: g ? g.space : c.total.space, at: function (n) {
+            var a = d.nights[n - 1].after, s = a.classes[c.id], gs = a.groups && a.groups[c.id];
+            if (!g) return s ? s.covered : 0;
+            if (gs) return gs[g.group] ? gs[g.group].covered : (g.group === "base" ? 0 : null);
+            return g.group === "base" ? (s ? s.covered : 0) : null;
+          } };
+        }
+        if (!wide) { lines.push(line(null, c.style, "")); return; }
+        if (group(c, "base")) lines.push(line(group(c, "base"), c.style, "base items"));
+        lines.push(line(wide, c.style.replace(/stroke:var\([^)]*\)/, "stroke:var(--s3)"), "wide-format items"));
+      });
       function plot(W) {
         var H = Math.max(170, Math.min(250, Math.round(W * 0.42))), L = W < 400 ? 36 : 46, R = 14, T = 14, B = 32;
         var x = function (n) { return N === 1 ? L + (W - L - R) / 2 : L + (n - 1) * (W - L - R) / (N - 1); };
@@ -344,16 +390,18 @@ rebuilt after each night from the run's own record by <code>hw/card_stress_progr
         var step = Math.max(1, Math.ceil(N / Math.max(2, Math.floor((W - L - R) / 30))));
         for (var n = 1; n <= N; n += step) g.appendChild(svg("text", { x: x(n), y: H - 16, "text-anchor": "middle", style: "fill:var(--dim);font-size:11px", text: String(n) }));
         g.appendChild(svg("text", { x: (L + W - R) / 2, y: H - 3, "text-anchor": "middle", style: "fill:var(--dim);font-size:11px", text: "night" }));
-        cls.forEach(function (c) {
-          var pts = [];
+        lines.forEach(function (ln) {
+          var pts = [], c = ln.c;
           for (var n = c.nights[0]; n <= N; n++) {
-            var s = d.nights[n - 1].after.classes[c.id];
-            pts.push([x(n), y(s && c.total.space ? 100 * s.covered / c.total.space : 0), n, s ? s.covered : 0]);
+            var v = ln.at(n);
+            if (v === null) continue;
+            pts.push([x(n), y(ln.space ? 100 * v / ln.space : 0), n, v]);
           }
-          g.appendChild(svg("polyline", { points: pts.map(function (p) { return p[0].toFixed(1) + "," + p[1].toFixed(1); }).join(" "), fill: "none", style: c.style }));
+          if (!pts.length) return;
+          g.appendChild(svg("polyline", { points: pts.map(function (p) { return p[0].toFixed(1) + "," + p[1].toFixed(1); }).join(" "), fill: "none", style: ln.style }));
           pts.forEach(function (p) {
-            g.appendChild(svg("circle", { cx: p[0].toFixed(1), cy: p[1].toFixed(1), r: 3.2, style: c.style.replace("stroke:", "fill:").replace(/;stroke-.*$/, "") },
-              svg("title", { text: c.kind + " " + c.label + ": night " + p[2] + ", " + pct1(p[3], c.total.space) + " (" + fmt(p[3]) + " of " + fmt(c.total.space) + ")" })));
+            g.appendChild(svg("circle", { cx: p[0].toFixed(1), cy: p[1].toFixed(1), r: 3.2, style: ln.style.replace("stroke:", "fill:").replace(/;stroke-.*$/, "") },
+              svg("title", { text: c.kind + " " + c.label + (ln.tag ? " (" + ln.tag + ")" : "") + ": night " + p[2] + ", " + pct1(p[3], ln.space) + " (" + fmt(p[3]) + " of " + fmt(ln.space) + ")" })));
           });
         });
         return g;
@@ -365,10 +413,10 @@ rebuilt after each night from the run's own record by <code>hw/card_stress_progr
         box.textContent = "";
         box.appendChild(plot(W));
       }
-      cls.slice().sort(function (a, b) { return (b.current ? 1 : 0) - (a.current ? 1 : 0); }).forEach(function (c) {      // the legend lists the current trees first
-        var last = d.nights[N - 1].after.classes[c.id];
-        legend.push(h("span", null, svg("svg", { viewBox: "0 0 29 11", "aria-hidden": "true" }, svg("line", { x1: 1, x2: 28, y1: 5.5, y2: 5.5, style: c.style })),
-          c.kind + (c.current ? " (current): " : " (earlier): ") + c.label + " - " + pct1(last ? last.covered : 0, c.total.space)));
+      lines.slice().sort(function (a, b) { return (b.c.current ? 1 : 0) - (a.c.current ? 1 : 0); }).forEach(function (ln) {      // the legend lists the current trees first
+        var last = ln.at(N), c = ln.c;
+        legend.push(h("span", null, svg("svg", { viewBox: "0 0 29 11", "aria-hidden": "true" }, svg("line", { x1: 1, x2: 28, y1: 5.5, y2: 5.5, style: ln.style })),
+          c.kind + (c.current ? " (current): " : " (earlier): ") + c.label + " - " + (ln.tag ? ln.tag + " " : "") + pct1(last || 0, ln.space)));
       });
       redraws.push(draw);
       draw();
@@ -378,7 +426,8 @@ rebuilt after each night from the run's own record by <code>hw/card_stress_progr
       h("table", { "class": "stack" }, h("thead", null, h("tr", null, ["Night", "On the card", "Slices", "Cases", "Legs passed", "Failed", "Skipped", "Note"].map(function (t, i) { return h("th", { "class": i === 0 || i === 7 ? "l" : "", text: t }); }))), h("tbody", null, nrows)),
       h("p", { "class": "small dim", text: "A slice is one range of an item's space swept and compared; a case is one result compared. Legs are the battery's checks and the sweep's slices. Times are the card host's." }),
       h("h3", { text: "Coverage after each night, by tree" }),
-      h("p", { "class": "small dim", text: "Each line is one tree class: the share of that class's campaign covered, cumulatively. Blue is tile items, green host items; a dashed line is an earlier tree, which no longer gains." }),
+      h("p", { "class": "small dim", text: "Each line is one tree class: the share of that class's campaign covered, cumulatively. Blue is tile items, green host items; a dashed line is an earlier tree, which no longer gains." +
+        (d.now.classes.some(function (c) { return group(c, "wide"); }) ? " A class with wide-format items has a line for each group, purple for the wide-format items, each over its own items and spaces, so that a group joining a class does not redraw the other's history; a group's line starts on the first night it had anything covered." : "") }),
       chart()));
 
     // totals
