@@ -11,6 +11,10 @@
 #   python tw32_run.py budget FN MODE [N] [seed] [PLANT]   tw32_budget.py, one region
 #   python tw32_run.py rate [N [seed [PLANT|- [FNS]]]]   the mark-rate law, bound inflated
 #   python tw32_run.py plant NAME               a plant, red in its named mode, beside the control
+#   python tw32_run.py guard                    the plan at other G, b, bmid, or the proof that fails, by name
+#   python tw32_run.py anchors                  the budget on the lanes the lead named (0x3f490fdb, 0x44264edd, ...)
+#   python tw32_run.py variant SLACK            a cheaper variant: the polynomials planned with less slack
+#   python tw32_run.py share                    what sin, cos and tan of one argument share in a compiled step
 
 import sys
 import time
@@ -84,11 +88,13 @@ REST = ("sincos", "select", "quotient", "final", "classify", "special")
 def mode_costs():
     union_all = set()
     unions = {}
+    digs = []
     for fn in FNS:
         words_fn = set()
         for rnd in ATTRS:
             f = tw32.build(FMT, rnd, fn)
             frag = f.to_fragment()
+            digs.append(mathlib.dag_digest(frag))
             inv = mathlib.invariants(frag, live_cap=None)
             fw = routines.flag_words(frag)
             words_fn |= set(f.words.values())
@@ -115,6 +121,9 @@ def mode_costs():
         unions[fn] = words_fn
     say(f"fp32 bank words, union over the five attributes: sin {len(unions['sin'])}, "
         f"cos {len(unions['cos'])}, tan {len(unions['tan'])}; all three {len(union_all)}")
+    import hashlib
+    say(f"the {len(digs)} fragments' fingerprint (sha256 of their dag digests, sorted, one a line): "
+        f"{hashlib.sha256(chr(10).join(sorted(digs)).encode()).hexdigest()}")
     # the polynomials' domain: rho = pi/4 (1 + e): the study's 2^-30, this build's COMPUTED
     # bound (reduce_tw: 2^(1-p) + 4 |lower terms|), M2G1's bound for the double word's reduction
     # at fp32 (2^-11.66, the lead's message), and 2^-10; and what the plan makes of each
@@ -316,13 +325,21 @@ def mode_reduce(plant=None, n=1000, seed=7, full=True):
     say("  the float just above pi/4 and 0x44264edd, with neighbours (positive; n, and the exact "
         "overshoot of the reduced value in the model's own quadrant): " + "; ".join(row))
     top.sort(reverse=True)
+    n30 = sum(1 for ex, _x, _n in top if ex > 2.0 ** -30)
+    n11 = sum(1 for ex, _x, _n in top if ex > 2.0 ** -11.66)
+    nb = sum(1 for ex, _x, _n in top if ex > float(over))
+    say(f"  the check can fail: of the {len(top)} lanes, {n30} are past pi/4 (1 + 2^-30), the "
+        f"study's rho (it does not hold at fp32), {n11} past pi/4 (1 + 2^-11.66), M2G1's bound for "
+        f"the double word's reduction, and {nb} past this build's COMPUTED bound")
     say("  the five largest overshoots over every family: " + "; ".join(
         f"{hex(xa)} n {nq} {ex:+.3e} (2^{math.log2(ex):.2f})" for ex, xa, nq in top[:5] if ex > 0))
     say(f"TOTAL {totals['arguments']} arguments: quadrant off {totals['quadrant off']}, "
         f"audit failures {totals['audit failures']}; largest overshoot MEASURED "
         f"{totals['overshoot']:.3e} (2^{math.log2(totals['overshoot']) if totals['overshoot'] > 0 else -999:.2f}) "
         f"against the COMPUTED bound {float(over):.3e} (2^{math.log2(over):.2f}), "
-        f"{float(over) / max(totals['overshoot'], 1e-300):.1f} times it; rho used = pi/4 (1 + the bound)")
+        + (f"{float(over) / totals['overshoot']:.1f} times it" if totals['overshoot'] > 0
+           else "no lane past pi/4 in these families")
+        + "; rho used = pi/4 (1 + the bound)")
     return totals
 
 
@@ -556,6 +573,119 @@ def mode_plant(name):
             f"-> {'RED' if red else 'NOT RED'} in rate")
 
 
+# ---- guard: fp32_guard.py's question for the triple word ------------------------
+
+GUARD_CASES = [
+    # (G, b, bmid): the build's own, then each parameter moved on its own
+    (40, 16, -20), (40, 15, -20), (40, 14, -20), (40, 17, -20), (40, 18, -20), (40, 20, -20),
+    (40, 16, -12), (40, 16, -16), (40, 16, -24), (40, 16, -28), (40, 16, -36),
+    (34, 16, -20), (35, 16, -20), (36, 16, -20), (37, 16, -20), (38, 16, -20), (39, 16, -20),
+    (41, 16, -20), (42, 16, -20), (43, 16, -20), (44, 16, -20), (48, 16, -20), (52, 16, -20), (60, 16, -20),
+]
+
+
+def mode_guard():
+    """The plan and sin's fragment at other G, b and bmid, or the static proof that fails, by
+    NAME (fp32_guard.out.txt's lines 3 and 4 say AssertionError() and no more)."""
+    orig = tw32.tw_plan
+    say("fp32 triple word, how far the plan goes: sin rne built at each (G, b, bmid), or the "
+        "static proof that fails (tw32.proof / tw32.stated, asserted at build time, before any lane)")
+    try:
+        for G_, b_, bm_ in GUARD_CASES:
+            def wrapped(fmt=FMT, G=G_, _b=b_, _bm=bm_):
+                return orig(fmt, G, _b, _bm)
+            tw32.tw_plan = wrapped
+            tag = f"G {G_:2d} b {b_:2d} bmid {bm_:3d}"
+            try:
+                f = tw32.build(FMT, RNE, "sin", G=G_)
+                m = f.meta
+                say(f"  {tag}: built, {len(f.body)} instructions, {len(f.words)} words, live "
+                    f"{f.live_max()}; L {m['L']} bottom {m['bottom']} words of 2/pi {m['K_words']}; "
+                    f"S {m['poly']['S']} C {m['poly']['C']} (K3, K2, D); {len(m['proofs'])} proofs held")
+            except AssertionError as e:
+                say(f"  {tag}: {e}")
+            except (ValueError, IndexError, KeyError, TypeError) as e:
+                say(f"  {tag}: {type(e).__name__}: {e}")
+    finally:
+        tw32.tw_plan = orig
+
+
+# ---- anchors: the budget on the lanes the lead named ----------------------------
+
+ANCHORS = ([0x3f490fdb + j for j in range(-3, 4)] + [0x44264edd + j for j in range(-2, 3)]
+           + [0x4bb9109b, 0x7bdd447c, 0x63d8c0f2, 0x73fa22b3, 0x5b90c020])
+
+
+def mode_anchors():
+    """The budget (rne) over the lanes the lead's messages name, both signs: the float just above
+    pi/4 and its neighbours (M2G1: the tie, n = 0, 2^-25.10 over), 0x44264edd and its neighbours
+    (the double word's quadrant count misses by 2^-17.09), and the five largest overshoots the
+    reduce mode found. The `quad` region draws 1,500 of 24,000 and need not hold them."""
+    xs = sorted({x for a in ANCHORS for x in (a, a | FMT.sign_mask)})
+    say(f"fp32 triple word, the budget over {len(xs)} anchor lanes (both signs): "
+        f"{', '.join(hex(a) for a in ANCHORS[:12])} and the five largest overshoots")
+    for fn in FNS:
+        def bf(fm, rnd, fnn):
+            return tw32.build(fm, rnd, fnn)
+        b = tw32_budget.budget(bf, FMT, fn, xs, top=3)
+        say(f"  {fn}: {b['lanes']} main lanes of {len(xs)}; max |E|/Bv {b['Emax']:.4g} "
+            f"(2^{math.log2(b['Emax']):+.2f}); max |M|/Bv {b['Mmax']:.4g}; second-order residual at "
+            f"most {b['resid']:.3g} Bv; THE BUDGET'S BOUND {b['bound']:.4g} Bv "
+            f"(2^{math.log2(b['bound']):+.2f})")
+
+
+# ---- variant: the polynomials planned with less slack -------------------------
+
+def mode_variant(slack):
+    """A cheaper variant measured beside the build: plan_tw_poly's slack (the bits of margin in
+    need(k) = (p + G + slack) + log2 w_k; the build's is 2, plan_exp32's rule) moved, which moves
+    the triple-word / double-word / single-word steps' boundaries, and nothing else. Instructions
+    for the three functions under rne, the pools on the model for sin and tan under rne, and the
+    budget over 500 edge lanes for sin and tan. The decision is made on the build, not on this."""
+    orig = tw32.plan_tw_poly
+
+    def planned(fmt, G, rho, sl=slack):
+        return orig(fmt, G, rho, sl)
+    tw32.plan_tw_poly = planned
+    try:
+        say(f"fp32 triple word, VARIANT: the polynomials planned with slack {slack} (the build's is 2)")
+        for fn in FNS:
+            f = tw32.build(FMT, RNE, fn)
+            say(f"  {fn} rne: {len(f.body)} instructions, {len(f.words)} words, live {f.live_max()}; "
+                f"S (K3, K2, D) {f.meta['poly']['S']}, C {f.meta['poly']['C']}")
+        pxs = pools(FMT)
+        for fn in ("sin", "tan"):
+            f = tw32.build(FMT, RNE, fn)
+            st = compare(f, fn, pxs, RNE)
+            say(f"  pools {fn} rne: {st['n']} lanes, marked {st['marked']}, wrong unmarked {len(st['wrong'])}")
+        xs = sample(FMT, "edge", 500, 21)
+        for fn in ("sin", "tan"):
+            b = tw32_budget.budget(lambda fm, rnd, fnn: tw32.build(fm, rnd, fnn), FMT, fn, xs, top=3)
+            say(f"  budget {fn} edge (500 lanes, seed 21): max |E|/Bv {b['Emax']:.4g}; "
+                f"max |M|/Bv {b['Mmax']:.4g}; THE BUDGET'S BOUND {b['bound']:.4g} Bv "
+                f"(2^{math.log2(b['bound']):+.2f}, margin {-math.log2(b['bound']):.2f} bits)")
+    finally:
+        tw32.plan_tw_poly = orig
+
+
+# ---- share: sin, cos and tan of one argument in a compiled step -------------------
+
+def mode_share():
+    """share.py's replay of cftc's inliner keying (python/cftc/inline.py: each instruction keyed by
+    opcode, attribute and resolved operands across the instances of a step) over this build's
+    fragments: the instructions that remain when sin, cos and tan of one argument share."""
+    import share
+    say("fp32 triple word, what sin, cos and tan of one argument share in a compiled step "
+        "(share.expand, the study's 2.1)")
+    for rnd in ATTRS:
+        s_, c_, t_ = [tw32.build(FMT, rnd, fn) for fn in FNS]
+        for label, frs in (("sin + cos", [s_, c_]), ("sin + cos + tan", [s_, c_, t_]),
+                           ("sin + tan", [s_, t_])):
+            n, tot = share.expand(frs)
+            say(f"  {sf.RND_NAMES[rnd]} {label}: {n} instructions together, against {tot} apart; "
+                f"{n - len(frs[0].body)} beyond sin's {len(frs[0].body)}")
+
+
 # ---- main --------------------------------------------------------------------
 
 def main():
@@ -587,6 +717,14 @@ def main():
                   tuple(arg[3].split(",")) if len(arg) > 3 else FNS)
     elif mode == "plant":
         mode_plant(arg[0])
+    elif mode == "guard":
+        mode_guard()
+    elif mode == "anchors":
+        mode_anchors()
+    elif mode == "variant":
+        mode_variant(int(arg[0]))
+    elif mode == "share":
+        mode_share()
     else:
         raise SystemExit(f"unknown mode {mode}")
     say(f"-- {mode} {' '.join(arg)}: {time.perf_counter() - t0:.0f}s")

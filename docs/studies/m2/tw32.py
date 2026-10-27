@@ -84,8 +84,9 @@ def tw_plan(fmt=FMT, G=G_TW, b=B_TW, bmid=BMID_TW):
     """The reduction's parameters at fp32 for the triple word: m2plan.plan_b
     at an explicit b, with the coarse sum's exactness asserted by name (the
     double word's plan() searches b downward for it; here the widest b that
-    holds is b = 16: b = 17 puts P_1's grid at 2^-6, MEASURED in the
-    driver's costs mode), and the boundary between the two exact groups."""
+    holds is b = 16: b = 17 puts P_1's grid at 2^-6 and the proof below fails,
+    shown by name in the driver's guard mode), and the boundary between the
+    two exact groups."""
     p = fmt.prec
     gs, gc = gates(fmt)
     P = plan_b(fmt, G, LOST[fmt.name], fmt.emax, min(gs, gc) - 1, b=b)
