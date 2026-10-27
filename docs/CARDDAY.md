@@ -909,7 +909,7 @@ python3 hw/card_stress_report.py /data/card-stress-1016     # the report, any ti
 - **Pre-flight, optional** (and, since 2026-10-22, a stage of the gate: `bash verify/run.sh --only cardstress`, in
   `--budget gate` and the full census, not in `quick`; it is SKIPPED by name, with the pids, while another process
   on the system uses the card, which is what the guard refuses on): `bash hw/test-card-stress.sh --no-plants` runs the driver's dry-run
-  tests (the verdict parsers on real logs, the scheduler, the failure policy, the guard, the
+  tests (the verdict parsers on real logs, the scheduler, the battery's cadence and the legs it leaves out (since 2026-10-27), the failure policy, the guard, the
   sweep's resume, the host pool, the seeds, the trees, the resume per tree class, the items, the pass size, the records, the report, the report's own test and the nightly page's (`hw/test_card_stress_report.py` and `hw/test_card_stress_progress.py`, the `testfiles` group since 2026-10-23: each file's skips are passed on by name, and their real-copy checks need `CARD_STRESS_RESUME_RUN` and `CARD_STRESS_PROGRESS_RUNS`), and under POSIX the real `make` in
   a scratch copy) on the box, with no card and no XRT: about 10 minutes under WSL and 11 under Git
   Bash (2026-10-21, with the coverage wave's groups: 644 s under Git Bash and about 600 s under WSL, read off the clock; 2026-10-20, before them: 448 s and 553 s, and a busier desktop made a Git
@@ -986,7 +986,7 @@ python3 hw/card_stress_report.py /data/card-stress-1016     # the report, any ti
 | `seq-check` | `host/tests/seq_check.py --trials 250 --formats fp32 fp64 fp128 fp256 --device IMAGE` | the device's "agree on every program" line, the program counts | 2400 |
 | `acceptance` | `programs/acceptance.py --device IMAGE` | `acceptance: N of M PASS ...; K checks ok, F failed` | 2400 |
 | `acceptance-rev8` | `... --set rev8 --legs set --device IMAGE --target T --images DIR --only ENTRIES` (+ `--lib`, naming this tree's host/libcft.so, when ENTRIES has a routine entry, as on the quad) | the same, as `acceptance rev8` | 2400 (+14400 until the workloads' images are cached) |
-| `resident`, `selftest` | `cft-resident IMAGE`; `cft-selftest vectors/out IMAGE` (every 3rd visit) | `every row: status clean ...`; `N cases checked` | 600; 3600 |
+| `resident`, `selftest` | `cft-resident IMAGE`; `cft-selftest vectors/out IMAGE` (every 3rd visit of an image; the other visits leave it out of the battery, below) | `every row: status clean ...`; `N cases checked` | 600; 3600 |
 
 The timeouts are several times the card times of 2026-10-06 (docs/VALIDATION.md), with a floor.
 **A count in a record is a captured group of a line a pattern matched, or it is absent**; a log
@@ -994,10 +994,30 @@ no pattern reads is a `parse_error` leg, kept whole, and a log whose exit status
 verdict is refused the same way. `hw/card_stress_lib.py` holds every pattern, each citing the
 printf it matches.
 
+- **Legs left out, and legs skipped** (since 2026-10-27, parcel BC; Logan: "0 skips looks better"). A cycle's battery is **planned for its image
+  and visit** (`Driver.plan_battery`), and a leg is **left out** of it - not planned, no leg record, no skip - when its **cadence** (`--every
+  LEG=N`; the default is `selftest=3`: it is in the battery of visits 1, 4, 7 ... of an image) says it is not due on this visit, or it **cannot
+  apply** to the image (`acceptance-rev8` on the single, where `REV8_ENTRIES` has no entry for its target). The selftest's cadence stays at 3 by
+  Logan's word, asked with the lead's figure from the night of 2026-10-26: about 770 s a run, the battery's longest leg, so a run on every visit
+  would add about an hour and a half of card time a night. **Nothing left out is silent:** `cycle_start` keeps `battery` (the legs planned) and
+  gains `left_out` (each leg left out, with the reason: `every 3 visits of an image; this is visit 2`, or the revision-8 rule's text) and
+  `every` (the cadences in force, leg to N); the cycle line of driver.log names them (`..., battery [...], left out: selftest (every 3 visits of
+  an image; this is visit 2), sweep ...`); and the report has a section **LEGS LEFT OUT**, built from those records: per leg left out by cadence,
+  `selftest: every 3rd visit of an image - ran in 5 cycles, not due in 7`, with the cycles it was due in and did not run in (the deadline's
+  estimate skipped it, or the run ended first) said when there are any, and per leg that cannot apply, the image and the reason. "Ran" is read off
+  the leg records of the cycles that planned the leg, not off the plan. **Every other skip stays a skipped leg**, named as before, in the legs,
+  the totals, the rows and the report's skipped groups: a disabled leg (an optional tool not built or not XRT-linked: planned, and skipped by
+  name on every visit), the deadline's estimate, `--quick`'s uncached compile (the deep's), and every entry of an image being an uncached long
+  compile. The status file's leg counts are legs alone. A run's `metrics.jsonl` from before the change (a resumed run keeps it) has the old
+  records: a `cycle_start` with no `left_out`, and the cadence's and the rule's skips as skipped legs, one group a visit number; the report
+  reads them as it always did (MEASURED 2026-10-27: the same text, byte for byte, as 901d067d's report gives, on the lead's five run copies,
+  resume-1020 to nightly-1024), says how many cycles did not say what they left out when a file has both kinds, and has no such section for a
+  file that has only the old.
 - **The revision-8 leg** runs the entries the image is (`--target`): programs/acceptance.py's
   rule puts fifteen on the quad - nine workloads and the six routine entries the math library
   added on 2026-10-19 - one on the deep and **none on the single** (where R21 alone keeps a
-  workload off the quad, which none does), so the single's leg is recorded as skipped, by name.
+  workload off the quad, which none does), so the single's battery **leaves the leg out** (since 2026-10-27; before, it was recorded as a skipped
+  leg on every visit): `cycle_start` names it in `left_out` with the rule's text, and the report's LEGS LEFT OUT section says so.
   Two entries compile for 40 minutes and 2.2 hours (Gray-Scott extended, the deep's only entry,
   and Riccati extended): **they are left out unless their image and bank are already in
   `--rev8-images`** (default `$OUT/rev8-images`), so by default the quad runs fourteen (eight
@@ -1099,7 +1119,8 @@ printf it matches.
 - **Records.** `metrics.jsonl` is append-only: a `leg` record each (the cycle, the image and its
   SHA-256, the leg, its start and end, exit status and class - pass, fail, timeout, no_device,
   parse_error, skipped, error -, the counts its verdict line gave, cases or checks a second,
-  the log), a `telemetry` record a sample, and `run_start`, `build`, `cycle_start`, `cycle_end`,
+  the log), a `telemetry` record a sample, and `run_start`, `build`, `cycle_start` (the image, the visit, `battery`, the legs planned,
+  and since 2026-10-27 `left_out` and `every`: "Legs left out, and legs skipped", above), `cycle_end`,
   `event` and `run_end` between. The report (`hw/card_stress_report.py`) reads it at any time:
   runs, passes, failures, cases and rates over time by image and leg, the telemetry's range and
   trend, every failure with its log, the sweep's coverage (and, since 2026-10-20, by tree) and
@@ -2299,6 +2320,7 @@ that morning is Monday's; `COPY` is the copy's directory, the one holding `metri
 
 A changed tree is a new class (a tile item is counted per RTL tree, a host item per host tree and compiler), so the page's current class
 starts from nothing and the earlier one stays as history; a run that recorded no tree is read from git where it can be (the class's label says "read from git at commit X") and else is kept apart by its commit, the label giving the report's reason.
+The page's "Skipped" column is the report's count of skipped legs: for the nights before 2026-10-27 it holds the selftest's off-visits and the single's revision-8 leg, which were skipped legs then; from that date a leg a cycle leaves out is no leg ("Legs left out, and legs skipped", above) and the column counts only legs that were due and did not run. The reducer reads nothing of `left_out`, and the data file has no field for it.
 `hw/test_card_stress_progress.py` holds all of this (the page in node, against a stub DOM, in its three failure states; SKIP, by name,
 without node), and, when `CARD_STRESS_PROGRESS_RUNS` names the copies' directories (separated as PATH is), every shared figure against
 `hw/card_stress_report.py --json` on them. Since 2026-10-23 the gate's `cardstress` stage runs it too (the suite's `testfiles` group), and with it its checks of the committed `site/nightly.json` (well-formed, no path or host name, shown by the page); the page's derived note under the label is gone, and the class label alone says that a tree was read from git, wherever the label is shown.

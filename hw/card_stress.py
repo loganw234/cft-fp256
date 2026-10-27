@@ -38,6 +38,13 @@ THE LEGS (each a command the 2026-10-06 and 2026-10-12 card runs used; docs/VALI
                    entries read committed files and --lib host/libcft.so), the deep's one
   resident, selftest  (beyond the brief) cft-resident IMAGE; cft-selftest vectors/out IMAGE,
                    every third visit
+A CYCLE'S BATTERY IS PLANNED FOR ITS IMAGE AND VISIT (Driver.plan_battery; since 2026-10-27, parcel BC, Logan: "0 skips looks better"). A
+leg is LEFT OUT of a cycle, and is not recorded as a leg, when its cadence (--every, DEFAULT_EVERY: the selftest runs on visits 1, 4, 7 ... of
+an image) says it is not due on this visit, or when it cannot apply to the image (acceptance-rev8 where REV8_ENTRIES has no entry for the
+image's target: the single). The cycle_start record keeps `battery`, the legs planned, and names each leg left out in `left_out` with its
+reason; the cycle line of driver.log says the same; the report states the cadence and its counts. Every other skip stays a SKIPPED leg, named
+as before: a disabled leg (an optional tool not built or not XRT-linked), the deadline's estimate, --quick's uncached compile, and every
+entry being an uncached long compile.
 and the SWEEP: hw/run-soak.sh's and hw/run-c5-soak.sh's own campaigns (their job lines,
 hw/card_stress_lib.py's sweep_items), run slice by slice, resumed across cycles from
 metrics.jsonl alone. The scripts themselves cannot be sliced or resumed (each wipes its own
@@ -215,6 +222,9 @@ DEFAULT_TIMEOUTS = {"api-test": 300, "dt-i": 300, "dt-q8": 600, "dt-full": 900, 
                     "acceptance": 2400, "acceptance-rev8": 2400, "resident": 600,
                     "selftest": 3600}
 REV8_FIRST_COMPILE_ALLOWANCE = 4 * 3600   # added when a workload's cached image is missing (never for a routine entry)
+# A leg's cadence: it is in the battery of the visits 1, N + 1, 2N + 1 ... of an image and LEFT OUT of the others (Driver.left_out). The selftest's
+# stays at 3 by Logan's word of 2026-10-27, asked with the lead's figure from the night of 2026-10-26: about 770 s a run, the battery's longest
+# leg, so a run on every visit would add about an hour and a half of card time a night.
 DEFAULT_EVERY = {"selftest": 3}
 # api-test opens no image (it may open device 0 for an instant and passes without a card), so
 # its result neither ends nor extends the run of consecutive card failures.
@@ -1234,6 +1244,8 @@ class Driver:
             d[status] = d.get(status, 0) + 1
 
     def skipped(self, leg: str, img: Image, reason: str, kind: str = "battery") -> None:
+        """A leg that was in the battery - due, and applicable to the image - and did not run: recorded as a leg of status `skipped`, with its
+        reason, and counted in status.txt. A leg that was never in the battery (not due this visit, or it cannot apply) is left_out(), not this."""
         now = time.time()
         self.rec({"type": "leg", "cycle": self.cycle, "image": img.name, "image_sha256": img.sha,
                   "leg": leg, "kind": kind, "attempt": 1, "start": L.iso(now), "end": L.iso(now),
@@ -1248,15 +1260,45 @@ class Driver:
     def standin(self, leg: str, real: List[str]) -> List[str]:
         return [sys.executable, os.path.join(HERE, "card_stress_standin.py"), leg, "--"] + real
 
+    def left_out(self, leg: str, img: Image, visit: int) -> Optional[str]:
+        """Why `leg` is not in the battery of this visit of this image, so that no leg of it is recorded: its reason, or None. There are two
+        reasons and no other (Logan, 2026-10-27, parcel BC): the leg's cadence (--every LEG=N, DEFAULT_EVERY) says it is not due on this visit,
+        or it cannot apply to the image (acceptance-rev8 where REV8_ENTRIES has no entry for the image's target). A SKIP is another thing: a
+        leg that was due and could apply, and was not run - a disabled leg, the deadline's estimate, --quick's uncached compile - and it stays
+        a skipped leg (skipped()). So a disabled leg is never left out: it stays in the battery and leg_cmd skips it, by name, on every visit
+        as before. run_cycle records what this says, leg by leg, in cycle_start's `left_out`, and says it on its line of driver.log."""
+        if leg in self.disabled_legs:
+            return None
+        every = int(self.every.get(leg, 1))
+        if every > 1 and (visit - 1) % every != 0:
+            return L.cadence_reason(every, visit)
+        if leg == "acceptance-rev8" and not REV8_ENTRIES.get(img.target):
+            return (f"the revision-8 set has no entry for {img.target}: its rule puts a workload "
+                    f"on the single only where R21 alone keeps it off the quad, which none does "
+                    f"(programs/acceptance.py, REV8)")
+        return None
+
+    def plan_battery(self, img: Image, visit: int) -> Tuple[List[str], Dict[str, str]]:
+        """This visit's battery: (the legs it runs, in the run's order; {each leg left out: its reason})."""
+        battery: List[str] = []
+        out: Dict[str, str] = {}
+        for leg in self.battery:
+            why = self.left_out(leg, img, visit)
+            if why is None:
+                battery.append(leg)
+            else:
+                out[leg] = why
+        return battery, out
+
     def leg_cmd(self, leg: str, img: Image, visit: int) -> "Cmd | Skip":
         R = self.root
         x = img.path
         T = float(self.timeouts[leg])
         if leg in self.disabled_legs:
             return Skip(self.disabled_legs[leg])
-        every = int(self.every.get(leg, 1))
-        if every > 1 and (visit - 1) % every != 0:
-            return Skip(f"every {every} visits of an image; this is visit {visit}")
+        why = self.left_out(leg, img, visit)
+        if why is not None:
+            return Skip(why)          # run_cycle never asks for a leg its plan left out (plan_battery); a caller that did not plan is told why
         py = self.python
         dt = ["bash", os.path.join(R, "hw", "run-device-test.sh"), x]
 
@@ -1300,16 +1342,12 @@ class Driver:
                 argv += ["--only", QUICK_ACCEPT_ONLY]
             return Cmd(wrap(argv), T, lambda t, rc: L.parse_acceptance(t, rc, device=x), tmpdir=True)
         if leg == "acceptance-rev8":
-            entries = REV8_ENTRIES.get(img.target, [])
-            if not entries:
-                return Skip(f"the revision-8 set has no entry for {img.target}: its rule puts a workload "
-                            f"on the single only where R21 alone keeps it off the quad, which none does "
-                            f"(programs/acceptance.py, REV8)")
-            chosen, left_out = [], []
+            entries = REV8_ENTRIES.get(img.target, [])       # not empty: left_out() above answered a target with none
+            chosen, uncached = [], []
             for e in entries:
                 cached = all(os.path.isfile(os.path.join(self.rev8_images, e + ext)) for ext in (".cftp", ".bank"))
                 if e in REV8_LONG_COMPILES and not cached:
-                    left_out.append(e)
+                    uncached.append(e)
                 else:
                     chosen.append(e)
             if self.quick:
@@ -1320,7 +1358,7 @@ class Driver:
                 chosen = [q] + [r for r in [QUICK_REV8_ROUTINE.get(img.target)] if r in chosen]
             if not chosen:
                 return Skip(f"every {img.target} entry is a 40-minute-or-longer compile with no cached image "
-                            f"in {self.rev8_images}: {', '.join(left_out)}")
+                            f"in {self.rev8_images}: {', '.join(uncached)}")
             os.makedirs(self.rev8_images, exist_ok=True)
             # a routine entry reads committed files and has nothing to compile or to cache: never "missing"
             # (counted so, it would add the 4-hour compile allowance to every quad leg for ever)
@@ -2735,12 +2773,14 @@ class Driver:
                 raise Stop("image_missing", 3, f"{img.path}: {e}")
             if sha != img.sha:
                 raise Stop("image_changed", 3, f"{img.path} hashes to {sha[:16]}..., was {img.sha[:16]}...")
-        battery = [leg for leg in self.battery]
+        battery, left_out = self.plan_battery(img, visit)       # the legs this visit runs; the others are named, with why, and not recorded as legs
+        every = {leg: int(self.every[leg]) for leg in self.battery if int(self.every.get(leg, 1)) > 1}   # the cadences in force, for the report
         sweep_min = float(self.sweep_minutes.get(img.name, 0))
         self.rec({"type": "cycle_start", "cycle": self.cycle, "image": img.name, "image_sha256": img.sha,
-                  "visit": visit, "battery": battery, "sweep_minutes": sweep_min, "quick": self.quick})
+                  "visit": visit, "battery": battery, "left_out": left_out, "every": every, "sweep_minutes": sweep_min, "quick": self.quick})
         sweep_txt = f"{self.a.quick_sweep_seconds:.0f} s (quick)" if self.quick else f"{sweep_min:g} min"
-        self.say(f"cycle {self.cycle}: {img.name} (visit {visit}), battery {battery}, sweep {sweep_txt}")
+        out_txt = (", left out: " + "; ".join(f"{k} ({v})" for k, v in left_out.items())) if left_out else ""
+        self.say(f"cycle {self.cycle}: {img.name} (visit {visit}), battery {battery}{out_txt}, sweep {sweep_txt}")
         t_cycle = time.time()
         self.guard(True)
         self.telemetry("before-cycle", img)
@@ -3056,7 +3096,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     g.add_argument("--weights", default="quad=4,single=1,deep=1", help="rotation weights (default %(default)s)")
     g = ap.add_argument_group("the legs")
     g.add_argument("--legs", default="", help="the battery, comma-separated, in order (default: all; --quick: the brief's)")
-    g.add_argument("--every", default="", help="LEG=N: run LEG on every Nth visit of an image (default selftest=3)")
+    g.add_argument("--every", default="", help="LEG=N: run LEG on every Nth visit of an image (visits 1, N + 1, ...) and leave it out of the battery, not skipped, on the others (default selftest=3)")
     g.add_argument("--timeout", default="", help="LEG=SECONDS overrides of the per-leg timeouts")
     g.add_argument("--seq-trials", type=int, default=250, help="seq_check --trials (default %(default)s)")
     g.add_argument("--rev8-images", help="acceptance.py --images for the revision-8 set (default OUT/rev8-images); "

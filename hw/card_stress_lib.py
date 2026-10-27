@@ -1041,6 +1041,13 @@ def read_records(path: str) -> Tuple[List[Dict[str, Any]], bool, List[int]]:
     return recs, partial, bad
 
 
+def cadence_reason(every: int, visit: int) -> str:
+    """Why a cycle leaves a leg out of its battery by cadence (--every LEG=N; since 2026-10-27, parcel BC): the text the driver writes beside the
+    leg in cycle_start's `left_out`, and the text it wrote as a skipped leg's `reason` before. The report takes a left-out entry for the cadence's
+    only if it equals this function's text for the cycle's `every` and `visit`; the text lives here so that neither side can reword it alone."""
+    return f"every {every} visits of an image; this is visit {visit}"
+
+
 def sweep_coverage(records: Iterable[Dict[str, Any]]):
     """Rebuild the sweep's state from the leg records alone: (intervals by item, the
     count of cases and slices served by item, every disagreement). A slice is COVERED

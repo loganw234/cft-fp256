@@ -21,7 +21,7 @@
 #   CARD_STRESS_PLANT=<text> bash hw/test-card-stress.sh --only plants   # only the plants whose name has <text>, no control;
 #                                               # CARD_STRESS_PLANT_ALL=1 also prints every failing check of each plant
 #
-# Groups for --only: parsers commands standin normal fail timeout deaf nodevice cardlost stopfile deadline
+# Groups for --only: parsers commands standin normal cadence fail timeout deaf nodevice cardlost stopfile deadline
 # rotation diskfloor guard sweep disagree telemetry build buildreal internal signal torn disable sweepall
 # pool seeds trees items chunk records notes resume wide testfiles report plants. `deaf` (a process that ignores SIGTERM),
 # `signal` and `buildreal` need POSIX, and so does the pool group's niceness check and the records and wide groups'

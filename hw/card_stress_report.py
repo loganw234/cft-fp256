@@ -95,6 +95,15 @@ be computed is "-" or "n/a", never 0. Choices a reader could otherwise take anot
     manifest gave: the commit it was built at and that commit's rtl tree when it is this checkout's, that it was NOT CHECKED (no
     manifest, a commit the checkout lacks), or that the driver REFUSED it (run_start is written before the build step that refuses, so a
     run that stopped there has its reason in this line). A run_start from before records none, and its line is what it was.
+  - LEGS LEFT OUT (since 2026-10-27, parcel BC; `left_out` in the summary, the section "LEGS LEFT OUT"). The driver plans a cycle's battery for its
+    image and visit: a leg that is not due on this visit (its cadence, `--every`; the selftest's is 3) or cannot apply to the image (acceptance-rev8
+    on the single) is left out and gets no leg record, so it is in no count of legs and no skipped group. The section is built from the cycle_start
+    records that carry `left_out` (with `battery`, the legs planned, and `every`, the cadences in force): per leg left out by cadence, its cadence, the
+    cycles it ran in, those it was due in and did not run in (the deadline's estimate skipped it, or the run ended first), and those it was not due in;
+    per leg that cannot apply, the image and the reason. "Ran" is read off the leg records of the cycles the leg was planned in, not off the plan. A
+    cycle_start from before the field is counted and said, and the skipped legs of its cycle are grouped as always. A run none of whose cycle_start
+    records carries the field has no such section. Every other skip - a disabled leg, the deadline's estimate, `--quick`'s uncached compile - is still a
+    skipped leg, in the totals, the rows and the skipped groups.
   - PASS SIZE (with `--sweep-chunk`). A sweep slice carries `sweep.batch`, the BATCH its tool ran at (a slice with none ran the default
     tools' 4096); an item with a slice at another batch gets a line saying how many ran at each, since the tools compare flags per batch,
     and random coverage by tree is a row per (item, batch): a chunked item's slices are never summed with the default tools'. A run with
@@ -121,8 +130,8 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)            # python -I does not put the script's directory there
-from card_stress_lib import (CPU, DEFAULT_BATCH, EXH, GIT_HASH, HOST, TILE, covered, first_gap, is_hbm_temperature, iso,  # noqa: E402
-                             manifest_brief, merge_intervals, no_reading, read_records, reach_of, record_batch, resolve_tree,
+from card_stress_lib import (CPU, DEFAULT_BATCH, EXH, GIT_HASH, HOST, TILE, cadence_reason, covered, first_gap, is_hbm_temperature,  # noqa: E402
+                             iso, manifest_brief, merge_intervals, no_reading, read_records, reach_of, record_batch, resolve_tree,
                              run_classes, slice_reach, sweep_coverage, sweep_items, tree_key)
 
 # What the catalog says of each item: the space its coverage is counted over (2^32 encodings for the fp32-operand items, the
@@ -634,6 +643,57 @@ def _failures(views: List[Dict[str, Any]]) -> Dict[str, Any]:
     return {
         "count": len(bad), "by_status": dict(Counter(b["status"] for b in bad)), "legs": bad,
         "skipped": {"count": sum(g["count"] for g in groups.values()), "groups": list(groups.values())},
+    }
+
+
+def _left_out(by_type: Dict[str, List[Tuple[int, Dict[str, Any]]]], views: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """The legs a cycle's battery LEFT OUT (since 2026-10-27, parcel BC), from the cycle_start records that say so: those with a `left_out` (leg ->
+    reason), with the `battery` they planned and the `every` (leg -> N) in force. Not a skipped leg, which was planned and did not run, and not a
+    leg at all: no leg record is made of it. Two kinds. A leg left out by CADENCE (--every, the selftest's 3): per (leg, N) the cycles it was due in
+    (in the battery), of those the cycles it RAN in (a battery leg record in that cycle whose status is not skipped or error: the plan alone would
+    say a cycle ran it that the deadline's estimate skipped, or that the run ended before), and the cycles it was not due in. A leg that CANNOT APPLY
+    (acceptance-rev8 on the single): per (leg, image, reason) the cycles it was left out of. A cycle_start without `left_out` is from before the
+    field: counted, its skipped legs are legs and are grouped as they always were. The cadence is recognised by the driver's own text for the visit
+    (card_stress_lib.cadence_reason), so a left-out entry with another reason is never taken for a cadence's."""
+    ran = {(v["name"], c) for v in views if v["kind"] == "battery" and v["status"] not in (None, "skipped", "error") and v["name"] is not None
+           and (c := _int(v["r"].get("cycle"))) is not None}
+    new = old = 0
+    cad: Dict[Tuple[str, int], Dict[str, Any]] = {}
+    cannot: Dict[Tuple[str, str, str], int] = {}
+    for _, r in by_type.get("cycle_start", []):
+        out = r.get("left_out")
+        if not isinstance(out, dict):
+            old += 1
+            continue
+        new += 1
+        cyc, img, visit = _int(r.get("cycle")), _str(r.get("image")) or "-", _int(r.get("visit"))
+        planned = {x for x in r["battery"] if isinstance(x, str)} if isinstance(r.get("battery"), list) else set()
+        every = r["every"] if isinstance(r.get("every"), dict) else {}
+        by_cadence = set()
+        for leg, n in every.items():
+            n = _int(n)
+            if not isinstance(leg, str) or n is None or n < 2:
+                continue
+            g = cad.setdefault((leg, n), {"leg": leg, "every": n, "due": 0, "ran": 0, "not_due": 0, "by_image": {}})
+            gi = g["by_image"].setdefault(img, {"due": 0, "ran": 0, "not_due": 0})
+            if leg in planned:
+                g["due"] += 1
+                gi["due"] += 1
+                if (leg, cyc) in ran:
+                    g["ran"] += 1
+                    gi["ran"] += 1
+            elif visit is not None and out.get(leg) == cadence_reason(n, visit):
+                g["not_due"] += 1
+                gi["not_due"] += 1
+                by_cadence.add(leg)
+        for leg, why in out.items():
+            if leg not in by_cadence:
+                key = (str(leg), img, _str(why) or "(no reason recorded)")
+                cannot[key] = cannot.get(key, 0) + 1
+    return {
+        "cycles": new, "earlier_cycles": old,
+        "cadence": [g for _k, g in sorted(cad.items()) if g["not_due"]],
+        "cannot_apply": [{"leg": k[0], "image": k[1], "reason": k[2], "cycles": n} for k, n in sorted(cannot.items())],
     }
 
 
@@ -1159,6 +1219,7 @@ def summarize(records: List[Any], now: Optional[float] = None, gap_seconds: floa
         "rows": _rows(views),
         "telemetry": _telemetry(by_type),
         "failures": _failures(views),
+        "left_out": _left_out(by_type, views),
         "sweep": sweep,
         "uptime": _uptime(objs, by_type, views, now, not header["running"], gap_seconds),
     }
@@ -1503,6 +1564,37 @@ def _r_failures(S: Dict[str, Any]) -> List[str]:
     return L
 
 
+def _ordinal(n: int) -> str:
+    suffix = "th" if 10 <= n % 100 <= 20 else {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{suffix}"
+
+
+def _plural(n: int, word: str) -> str:
+    return f"{n} {word}{'' if n == 1 else 's'}"
+
+
+def _r_left_out(S: Dict[str, Any]) -> List[str]:
+    """The section for the legs a cycle left out of its battery (parcel BC): absent for a run none of whose cycle_start records says what it
+    left out, which is then reported as it always was."""
+    X = S["left_out"]
+    if not X["cycles"]:
+        return []
+    L = ["== LEGS LEFT OUT =="]
+    L.append("a leg left out of a cycle's battery has no leg record and is not a skipped leg: it was not due on that visit of the image (its cadence),")
+    L.append("or it cannot apply to the image; each cycle_start record names what it left out and why. A skipped leg was due and did not run: see FAILURES.")
+    old = f"; {_plural(X['earlier_cycles'], 'earlier cycle')} did not say, and their skipped legs are listed as they always were" if X["earlier_cycles"] else ""
+    L.append(f"cycles read: {X['cycles']} that say what they left out{old}")
+    for g in X["cadence"]:
+        due, ran = g["due"], g["ran"]
+        miss = f", due and not run in {_plural(due - ran, 'cycle')} (skipped, or the run ended first)" if due != ran else ""
+        L.append(f"{_line(g['leg'], 60)}: every {_ordinal(g['every'])} visit of an image - ran in {_plural(ran, 'cycle')}{miss}, not due in {g['not_due']}")
+    for c in X["cannot_apply"]:
+        L.append(f"{_line(c['leg'], 60)}: cannot apply to {_line(c['image'], 40)} - left out of {_plural(c['cycles'], 'cycle')}: {_line(c['reason'], 400)}")
+    if not X["cadence"] and not X["cannot_apply"]:
+        L.append("no leg was left out of any of them")
+    return L
+
+
 def _reach_text(r: Optional[str]) -> str:
     """'tile', 'host', or 'unknown' for an item whose records and the catalog's table both say nothing."""
     return r if r in (TILE, HOST) else "unknown"
@@ -1728,9 +1820,11 @@ def render(summary: Dict[str, Any]) -> str:
     out.append("card stress report: derived from metrics.jsonl, which is the record; this text is "
                "rewritten whole at each run of the report")
     out.append("")
-    for part in (_r_header, _r_totals, _r_rows, _r_telemetry, _r_failures, _r_sweep, _r_trees, _r_uptime):
-        out += part(summary)
-        out.append("")
+    for part in (_r_header, _r_totals, _r_rows, _r_left_out, _r_telemetry, _r_failures, _r_sweep, _r_trees, _r_uptime):
+        lines = part(summary)
+        if lines:                                  # _r_left_out has nothing to say of a run from before the field
+            out += lines
+            out.append("")
     return "\n".join(out).rstrip("\n") + "\n"
 
 
