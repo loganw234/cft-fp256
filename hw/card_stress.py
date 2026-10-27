@@ -3096,7 +3096,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     g.add_argument("--weights", default="quad=4,single=1,deep=1", help="rotation weights (default %(default)s)")
     g = ap.add_argument_group("the legs")
     g.add_argument("--legs", default="", help="the battery, comma-separated, in order (default: all; --quick: the brief's)")
-    g.add_argument("--every", default="", help="LEG=N: run LEG on every Nth visit of an image (default selftest=3)")
+    g.add_argument("--every", default="", help="LEG=N: run LEG on every Nth visit of an image (visits 1, N + 1, ...) and leave it out of the battery, not skipped, on the others (default selftest=3)")
     g.add_argument("--timeout", default="", help="LEG=SECONDS overrides of the per-leg timeouts")
     g.add_argument("--seq-trials", type=int, default=250, help="seq_check --trials (default %(default)s)")
     g.add_argument("--rev8-images", help="acceptance.py --images for the revision-8 set (default OUT/rev8-images); "
