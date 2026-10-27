@@ -1040,9 +1040,16 @@ def make_ledger(root=ROOT, existing=None):
 # "Class-level (L2) modes"), whose operations, rint and scaleb, are the COMPOSED ones above. div32-hard,
 # div64-hard and sqrt64-hard run soak_hard -> run_batch -> lib_call, which calls cft_div and cft_sqrt
 # (host/tools/divsqrt_soak.c, lines 762, 357, 253), the calls the first four ops were read from.
+# Forty-five since 2026-10-26: the thirty wide modes of parcel HXa, which the catalog has with --mpfr-prefix (parcel HXc), READ at
+# 7d987bf8: each runs wide_run -> wide_soak -> wide_batch -> wide_lib, which calls cft_div or cft_sqrt at fp64, fp128 or fp256
+# (host/tools/divsqrt_soak.c, wide_lib, line 1576: "wm->div ? cft_div(...) : cft_sqrt(...)"; the reciprocal is a division by it).
+WIDE_TILE_OPS = tuple([f"{op}{w}-f32" for op in ("sqrt", "recip") for w in (64, 128, 256)]
+                      + [f"{op}{w}-win-{h}" for op in ("sqrt", "recip") for w in (128, 256) for h in ("ones", "zeros", "alt", "key")]
+                      + ["div128-f64hard", "div256-f64hard", "sqrt128-f64hard", "sqrt256-f64hard",
+                         "div128-hard", "div256-hard", "sqrt128-hard", "sqrt256-hard"])
 STRESS_TILE_OPS = ("sqrt32", "div32", "div64", "sqrt64", "rint32", "rint64", "scaleb32", "scaleb64",
                    "div32-hard", "div64-hard", "sqrt64-hard", "rint64-class", "scaleb64-class",
-                   "scaleb32-all", "scaleb32-wide")
+                   "scaleb32-all", "scaleb32-wide") + WIDE_TILE_OPS
 STRESS_TEL = {
     "power_w": "electrical.devices[0].electrical.power_consumption_watts",
     "fpga_c": "thermal.devices[0].thermals.FPGA.temp_C",
@@ -1160,7 +1167,7 @@ def make_stress(metrics, root=ROOT, report=None, decoys=False):
 
     def off(e):
         return int(round(float(e) - t0))
-    catalog = list(L.sweep_items())
+    catalog = list(L.sweep_items(mpfr=True))      # with the wide items (parcel HXc): a run that served one has it reduced
     if decoys:
         catalog += _decoys(catalog)
     items = served_items(catalog, by["leg"])

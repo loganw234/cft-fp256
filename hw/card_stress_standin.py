@@ -41,6 +41,9 @@ failure policy meets each kind of failure:
     CFT_STANDIN_STATE=<dir>            where the counts are kept (required with a scenario)
     CFT_STANDIN_SOAK_RATE=<cases/s>    a soak takes cases / rate seconds (default 0: at once)
     CFT_STANDIN_TILES=<n>              tiles the identity says (default: 4 for a path with "quad")
+    CFT_STANDIN_MPFR=<version>         the MPFR the wide modes' oracle line names (default 4.2.2, the pin)
+    CFT_STANDIN_NO_WIDE=1              a divsqrt soak built without MPFR=1: it refuses every wide mode (`unknown op`, and hard-space's
+                                       `unknown hard-case mode`), exit 2
   Every soak job also prints "standin: env CFT_SOAK_ARTIFACT=... CFT_XRT_TILES=..." (the two variables as the job was handed
   them, "<unset>" for none): the tests hold a host-pool job to neither, and a card job to its image and tile.
 
@@ -107,13 +110,46 @@ IDX = {"div32-hard": (21235788, 4, 20596560), "div64-hard": (289685696, 4, 34625
        "cvtfrom64-class": (50923, 1, 0), "scaleb64-class": (72648, 4, 0)}
 CVTTO64_SKIPPED = {"rne": 72067, "rtz": 71588, "rdn": 77931, "rup": 71594, "rmm": 72086}
 SCALEB_LIST = {"scaleb32": 17, "scaleb64": 27}       # the exponent lists random scaleB runs a batch against (clause5_soak.c)
+# The wide modes of the divsqrt soak (parcel HXa; their catalog entries, parcel HXc): the eight hard spaces join IDX, the f64hard ones
+# with div64-hard's and sqrt64-hard's figures (the tool's hard-space and hard-count name them so); the six fp32 slices and sixteen
+# low-bit windows make one case an index over 2^32 indices and skip none (EXH_PER's 1). The suite holds both to the library's.
+IDX.update({"div128-hard": (289931696, 4, 346256596), "div256-hard": (293864352, 4, 346250232),
+            "sqrt128-hard": (4456448, 1, 2711437), "sqrt256-hard": (4456448, 1, 2710648),
+            "div128-f64hard": IDX["div64-hard"], "div256-f64hard": IDX["div64-hard"],
+            "sqrt128-f64hard": IDX["sqrt64-hard"], "sqrt256-f64hard": IDX["sqrt64-hard"]})
+WIDE_FLAT = tuple([f"{op}{w}-f32" for op in ("sqrt", "recip") for w in (64, 128, 256)]
+                  + [f"{op}{w}-win-{h}" for op in ("sqrt", "recip") for w in (128, 256) for h in ("ones", "zeros", "alt", "key")])
+EXH_PER.update({op: 1 for op in WIDE_FLAT})
+WIDE = WIDE_FLAT + ("div128-f64hard", "div256-f64hard", "sqrt128-f64hard", "sqrt256-f64hard",
+                    "div128-hard", "div256-hard", "sqrt128-hard", "sqrt256-hard")
+
+
+def wide_oracle(op: str, mode: str) -> str:
+    """The wide mode's stderr line naming its oracle, divsqrt_soak.c's wide_run (line 1944 on): the CPU's double at fp64, MPFR at fp128
+    and fp256 - the version the stand-in says is CFT_STANDIN_MPFR's, the pin's 4.2.2 by default - and the ladder where there is one."""
+    if op.startswith(("sqrt64", "recip64")):
+        return f"oracle: the CPU's double{' (rmm rides its rne result: no ties)' if mode == 'rmm' else ''}; the ladder: the CPU's float"
+    ladder = ("; the ladder: the CPU's float" if op.endswith("-f32")
+              else "; the ladder: not under rmm for division (fp64 has ties, the CPU no rmm)" if op.startswith("div") and op.endswith("f64hard")
+              and mode == "rmm" else "; the ladder: the CPU's double" if op.endswith("f64hard") else "")
+    return f"oracle: MPFR {os.environ.get('CFT_STANDIN_MPFR') or '4.2.2'} with GMP 6.3.0, mpfr_ieee.h's emulation{ladder}"
+
+
+def wide_ladder(op: str, mode: str, cases: int) -> str:
+    """The ladder's own line (stdout, before the verdict) of a slice or f64hard mode, '' for the others: every case rounded back to the
+    narrow format, none under rmm for an f64hard division."""
+    if not (op.endswith("-f32") or op.endswith("f64hard")):
+        return ""
+    n = 0 if (op.startswith("div") and op.endswith("f64hard") and mode == "rmm") else cases
+    return (f"  ladder: {n} of the {cases} cases rounded to {'fp32' if op.endswith('-f32') else 'fp64'} and checked against the "
+            f"CPU's own, 0 value and 0 flag disagreements")
 
 
 def idx_skipped(op: str, mode: str, lo: int, hi: int) -> int:
     space, k, whole = IDX[op]
     if whole is None:
         whole = CVTTO64_SKIPPED[mode]
-    g = k if op.endswith("-hard") else 1
+    g = k if op.endswith("hard") else 1
     per = whole // g
     return g * ((hi * per) // space - (lo * per) // space)
 
@@ -405,10 +441,28 @@ def main() -> int:
 
     if leg == "soak":
         op = real[1]
+        if op == "hard-space" and len(real) == 3:
+            # the tool's hard-space line for an index mode (divsqrt_soak.c, hard_space_cmd and whard_space_cmd: its first line; the
+            # segments are not here), which the driver's build step asks of an MPFR=1 build; CFT_STANDIN_NO_WIDE=1 is a tool built
+            # without MPFR, which knows no wide mode and refuses it as the default build refuses any mode it does not have, exit 2
+            m = real[2]
+            if m in IDX and m.endswith("hard") and not (m in WIDE and os.environ.get("CFT_STANDIN_NO_WIDE")):
+                out(f"{m} k={IDX[m][1]} total={IDX[m][0]}")
+                return 0
+            if m in WIDE_FLAT and not os.environ.get("CFT_STANDIN_NO_WIDE"):
+                out(f"{m} k=1 total={1 << 32}\n{'fp32' if m.endswith('-f32') else 'L'} 0 {1 << 32}")
+                return 0
+            err(f"unknown hard-case mode {m}")
+            return 2
         tail = ""                 # the exhaustive modes' ", E encodings, S skipped" clause
         refuse = None             # a range the tool refuses by name, after its backend line, exit 2
         chunk = chunk_of(real[0])
-        if op in IDX:
+        if op in WIDE and os.environ.get("CFT_STANDIN_NO_WIDE"):
+            refuse, cases, mode = f"unknown op {op}", 0, real[4]    # a tool built without MPFR=1 (divsqrt_soak.c's main): exit 2, no verdict
+        elif op in WIDE_FLAT and not 0 <= int(real[2], 0) < int(real[3], 0) <= 1 << 32:
+            refuse = f"need 0 <= lo < hi <= {1 << 32} (the indices of {op}), got [{real[2]}, {real[3]})"
+            cases, mode = 0, real[4]
+        elif op in IDX:
             lo, hi = int(real[2], 0), int(real[3], 0)
             space, k, _w = IDX[op]
             mode = real[4]
@@ -453,14 +507,21 @@ def main() -> int:
         if refuse:
             err(refuse)
             return 2
+        if op in WIDE:
+            err(wide_oracle(op, mode))          # the wide modes name their oracle on stderr before they run (wide_run)
         rate = float(os.environ.get("CFT_STANDIN_SOAK_RATE") or 0)
         if rate > 0:
             time.sleep(cases / rate)
+        ladder = wide_ladder(op, mode, cases) if op in WIDE else ""
         if do == "mismatch":
             out(f"  MISMATCH {mode if mode != '-' else op} a=0x3f800001 lib=0x3f800000 cpu=0x3f800001")
             out(f"  FLAGS {mode if mode != '-' else op} a=0x3f800002 lib=0x01 cpu=0x00")
+            if ladder:
+                out(ladder)
             out(f"{op} {mode}: {cases} cases, 1 value mismatches, 1 flag mismatches{tail}")
             return 1
+        if ladder:
+            out(ladder)                         # the ladder's line, before the verdict (wide_run)
         out(f"{op} {mode}: {cases} cases, 0 value mismatches, 0 flag mismatches{tail}")
         return 0
 

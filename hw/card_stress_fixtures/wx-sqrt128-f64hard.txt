@@ -1,0 +1,4 @@
+soaking the software backend
+oracle: MPFR 4.1.0 with GMP 6.2.1, mpfr_ieee.h's emulation; the ladder: the CPU's double
+  ladder: 1458 of the 1458 cases rounded to fp64 and checked against the CPU's own, 0 value and 0 flag disagreements
+sqrt128-f64hard rdn: 1458 cases, 0 value mismatches, 0 flag mismatches, 4096 encodings, 2638 skipped

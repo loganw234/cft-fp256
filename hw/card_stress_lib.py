@@ -370,9 +370,13 @@ SOAK_DEVICE = re.compile(r"^soaking the DEVICE backend: (.+)$", M)
 SOAK_SOFTWARE = re.compile(r"^soaking the software backend$", M)
 SOAK_LIBFAIL = re.compile(r"^  library call failed(?: in .*)?$", M)
 SOAK_DISAGREE = re.compile(r"^  (?:MISMATCH|FLAGS) .*$", M)
-# The chunked tools' second stderr line (divsqrt_soak.c:1036, clause5_soak.c:2963, host/Makefile's soak-chunk): printed only when
+# The chunked tools' second stderr line (divsqrt_soak.c:2211, clause5_soak.c:2963, host/Makefile's soak-chunk): printed only when
 # BATCH or CFT_CHUNK is not 4096, after the backend line, which stays as it was. A tool built at 4096 prints nothing more.
 SOAK_CHUNK_LINE = re.compile(r"^soaking with BATCH (\d+) and CFT_CHUNK (\d+) \(the defaults are 4096\)$", M)
+# The wide modes' oracle line on stderr (divsqrt_soak.c:1947, parcel HXa): at fp128 and fp256 "oracle: MPFR %s with GMP %s, mpfr_ieee.h's
+# emulation" and what the ladder is, so the MPFR the tool LINKED (mpfr_get_version), which the driver's build step holds to the pin; at fp64
+# "oracle: the CPU's double; ..." (no MPFR). A soak's verdict does not depend on it, and parse_soak does not read it.
+SOAK_ORACLE_MPFR = re.compile(r"^oracle: MPFR (\S+) with GMP (\S+), mpfr_ieee\.h's emulation(?:;.*)?$", M)
 
 
 class SoakResult(Verdict):
@@ -544,6 +548,58 @@ HARD_WHOLE = {"div32-hard": (64_346_592, 20_596_560), "div64-hard": (812_489_184
               "sqrt64-hard": (1_745_752, 2_710_696)}
 CVTTO64_CLASS_WHOLE = {"rne": (91_005, 72_067), "rtz": (91_484, 71_588), "rdn": (85_141, 77_931),
                        "rup": (91_478, 71_594), "rmm": (90_986, 72_086)}
+# THE WIDE-FORMAT ITEMS (parcel HXc, 2026-10-26): parcel HXa's modes of the divsqrt soak (host/tools/divsqrt_soak.c, "The wide formats"),
+# fp64, fp128 and fp256 division and square root, which exist only in a tool built with `make divsqrt-soak MPFR=1` (and MPFR_PREFIX=DIR,
+# the pinned MPFR 4.2.2: docs/CARDDAY.md, "The wide division and square-root modes"), so the catalog has them only when it is asked for
+# them (sweep_items(mpfr=True); the driver asks when it is given --mpfr-prefix). Phase 1 of the wide-format sweeps, Logan's plan of record
+# of 2026-10-26 (docs/ROADMAP.md; docs/studies/HX-wide-sweeps.md, 5.4's ranks 1, 2, 4, 6 and 7 and section 7), in the study's rank order:
+# the wide hard cases, the fp64 hard cases widened, the fp32 slice at fp128 and fp256, the fp32 slice at fp64, and sixteen low-bit windows
+# under rne and rup only. Each is an exhaustive `<lo> <hi> <attribute>` job whose verdict line carries ", E encodings, S skipped", E counting
+# indices and cases + S = k x E. The figures are the tool's own, never typed from a report: `divsqrt-soak hard-space MODE` for (indices, k)
+# and `divsqrt-soak hard-count MODE 0 N` for the whole space's (cases, skipped), MEASURED in WSL by this parcel for every mode but two and,
+# for div128-hard and div256-hard, on amd-arc-box by the lead (the parcel HXa box script's part `counts`, eight slices each, summed; its
+# builders are the merged tool's). The f64hard modes' spaces ARE div64-hard's and sqrt64-hard's (the tool's hard-space and hard-count name
+# them so), and the slice and window spaces are one segment of 2^32 indices, k = 1, none skipped. The suite holds every figure to the real
+# tool's output (hw/card_stress_fixtures).
+WIDE_HARD = ("div128-hard", "div256-hard", "sqrt128-hard", "sqrt256-hard")
+WIDE_F64HARD = ("div128-f64hard", "div256-f64hard", "sqrt128-f64hard", "sqrt256-f64hard")
+WIDE_SLICE = ("sqrt128-f32", "recip128-f32", "sqrt256-f32", "recip256-f32", "sqrt64-f32", "recip64-f32")
+WIDE_WINDOWS = tuple(f"{op}{w}-win-{h}" for op in ("sqrt", "recip") for w in (128, 256) for h in ("ones", "zeros", "alt", "key"))
+WIDE_OPS = WIDE_HARD + WIDE_F64HARD + WIDE_SLICE + WIDE_WINDOWS            # the 30 mode words of HXa's soak, every one in phase 1
+WIDE_WINDOW_MODES = ("rne", "rup")                                          # the study's phase 1: the windows under these two only
+PER_ENCODING.update({op: 1 for op in WIDE_SLICE + WIDE_WINDOWS})            # one case an index, never skipped
+HARD_SPACE.update({"div128-hard": (289_931_696, 4), "div256-hard": (293_864_352, 4), "sqrt128-hard": (4_456_448, 1),
+                   "sqrt256-hard": (4_456_448, 1),
+                   "div128-f64hard": HARD_SPACE["div64-hard"], "div256-f64hard": HARD_SPACE["div64-hard"],
+                   "sqrt128-f64hard": HARD_SPACE["sqrt64-hard"], "sqrt256-f64hard": HARD_SPACE["sqrt64-hard"]})
+HARD_WHOLE.update({"div128-hard": (813_470_188, 346_256_596), "div256-hard": (829_207_176, 346_250_232),
+                   "sqrt128-hard": (1_745_011, 2_711_437), "sqrt256-hard": (1_745_800, 2_710_648),
+                   "div128-f64hard": HARD_WHOLE["div64-hard"], "div256-f64hard": HARD_WHOLE["div64-hard"],
+                   "sqrt128-f64hard": HARD_WHOLE["sqrt64-hard"], "sqrt256-f64hard": HARD_WHOLE["sqrt64-hard"]})
+# The claim a pass over each wide mode's whole space makes, named by its space and its level (the study's question 3, which Logan approved
+# on 2026-10-26: each pass so named, never as "swept"); an item's claim is its mode's under its attribute (Item.claim). The words follow
+# docs/CARDDAY.md's table of HXa's modes.
+_WIDE_WINDOW_H = {"ones": "all ones", "zeros": "all zeros", "alt": "alternating from the top (1.0101...)", "key": "a keyed draw"}
+
+
+def wide_claim(op: str) -> str:
+    """What a pass over the whole space of a wide mode claims, bits and flags of every case, by space and level."""
+    m = re.fullmatch(r"(sqrt|recip|div)(64|128|256)-(f32|f64hard|hard|win-(ones|zeros|alt|key))", op)
+    if m is None or op not in WIDE_OPS:
+        raise ValueError(f"{op!r} is not one of the wide modes")
+    fmt = f"fp{m.group(2)}"
+    what = {"sqrt": "square root", "recip": "reciprocal 1/x", "div": "division"}[m.group(1)]
+    if m.group(3) == "f32":
+        return f"every fp32 input, widened exactly to {fmt}, through the {fmt} {what}, bits and flags (L1 over the fp32 slice)"
+    if m.group(4):
+        return (f"every pattern of the low 32 fraction bits of x = 1.H L in [1, 2) under H = {_WIDE_WINDOW_H[m.group(4)]}, through the "
+                f"{fmt} {what}, bits and flags (L1 over the window)")
+    n = HARD_SPACE[op][0]
+    if m.group(3) == "f64hard":
+        return (f"the fp64 hard cases of the {what} ({'div' if m.group(1) == 'div' else 'sqrt'}64-hard's {n:,} indices), widened exactly "
+                f"to {fmt}, through the {fmt} {what}, bits and flags (hard)")
+    return (f"the {fmt} {what}'s own hard cases (python/hardcases.py's families at p = {113 if fmt == 'fp128' else 237}, {n:,} "
+            f"indices), bits and flags (hard)")
 # The random ops whose OPERAND STREAM depends on BATCH (CK, 2026-10-20; READ in host/tools/clause5_soak.c drv_cvtfrom: a batch draws n
 # operands for each of four source types in turn, so another BATCH hands the same draws to other types), and the call size of the
 # tools as built by default (host/tools/*.c, `#define BATCH 4096`; the chunked tools say theirs on a stderr line).
@@ -615,6 +671,10 @@ OP_REACH = {
     "rint64-class": TILE, "scaleb64-class": TILE,
     "conv64to32-class": HOST, "cvtto64-class": HOST, "cvtfrom64-class": HOST,
 }
+# parcel HXc, the wide modes (parcel HXa's): every one calls cft_div or cft_sqrt at fp64, fp128 or fp256 (host/tools/divsqrt_soak.c,
+# wide_lib), the composed operations of host/src/divsqrt.c, so each reaches the tile as the fp32 and fp64 modes do; the reciprocal is
+# cft_div with the dividend 1. python/figure_extracts.py's STRESS_TILE_OPS states the same of them, read apart.
+OP_REACH.update({op: TILE for op in WIDE_OPS})
 
 
 def reach_of(op: Optional[str]) -> Optional[str]:
@@ -667,7 +727,8 @@ class Item:
                  base_seed: int = 0, verdict_mode: str = "-", extra_cases: int = 0,
                  exact: bool = False, per_encoding: Optional[int] = None,
                  space: int = EXH, level: Optional[str] = None,
-                 whole: Optional[Tuple[int, int]] = None):
+                 whole: Optional[Tuple[int, int]] = None, mpfr: bool = False,
+                 claim: Optional[str] = None):
         self.name = name
         self.tool = tool              # 'divsqrt' | 'clause5'
         self.kind = kind              # 'exhaustive' | 'random'
@@ -690,6 +751,11 @@ class Item:
         self.space = space
         self.level = level or ("exhaustive" if kind == "exhaustive" else "random")
         self.whole = whole
+        # a wide-format item (parcel HXc): its mode exists only in a divsqrt-soak built with MPFR=1 against the pinned MPFR, and the
+        # driver runs it only when it is given that MPFR's prefix (--mpfr-prefix); `claim` names what a pass over its whole space
+        # claims, by space and level (wide_claim, under its attribute); None for every older item
+        self.mpfr = mpfr
+        self.claim = claim
         # the op's random operand stream depends on BATCH (CK's finding ii): its stream identity includes the batch
         self.layout_dependent = kind == "random" and op in LAYOUT_OPS
 
@@ -751,12 +817,14 @@ class Item:
 
 def sweep_items(scaleb_modes: Iterable[str] = MODES4,
                 cvtfrom_modes: Iterable[str] = MODES4,
-                wide_modes: Optional[Iterable[str]] = None) -> List[Item]:
+                wide_modes: Optional[Iterable[str]] = None, mpfr: bool = False) -> List[Item]:
     """The campaign, in run-soak.sh's and run-c5-soak.sh's own order and with their seeds.
     scaleb_modes and cvtfrom_modes are what run-c5-soak.sh's probes decide ('rne' alone
     when a probe fails); hw/card_stress.py runs the same probes. wide_modes are the modes
     of scaleb32-wide: the scaleb modes, unless `probe scalebrange` found the derived exponent
-    range does not hold on this libm, and then none (the script drops those jobs the same way)."""
+    range does not hold on this libm, and then none (the script drops those jobs the same way).
+    mpfr: also the 102 wide-format items of phase 1 (parcel HXc), appended after the rest, whose tool
+    is built with MPFR=1; without it the catalog is the one it was, item for item."""
     scaleb_modes, cvtfrom_modes = tuple(scaleb_modes), tuple(cvtfrom_modes)
     wide_modes = scaleb_modes if wide_modes is None else tuple(wide_modes)
     items: List[Item] = []
@@ -855,6 +923,21 @@ def sweep_items(scaleb_modes: Iterable[str] = MODES4,
             whole = CVTTO64_CLASS_WHOLE[mode] if op == "cvtto64-class" else (k * space, 0)
             items.append(Item(f"{op}-{mode}", "clause5", "exhaustive", op, mode, verdict_mode=mode,
                               exact=op != "cvtto64-class", per_encoding=k, space=space, level="class", whole=whole))
+    # Parcel HXc: the wide-format items, only when asked for (their tool is built with MPFR=1), APPENDED after every older item so that
+    # none of those moves, in the study's rank order (5.4: 1, 2, 4, 6, 7) - a tie in the rotation goes to the catalog's order, so a run
+    # that starts them serves the hard cases first - and exhaustive, so they take no seeds. A hard or f64hard item's cases are not a
+    # function of its slice (a skipped index skips its k slots) and are held to the whole space's; a slice or window item makes exactly
+    # one case an index and skips none. All five attributes are the tool's for every mode; the windows run rne and rup alone (phase 1).
+    if mpfr:
+        for group, modes in ((WIDE_HARD + WIDE_F64HARD, MODES5), (WIDE_SLICE, MODES5), (WIDE_WINDOWS, WIDE_WINDOW_MODES)):
+            for op in group:
+                hard = op in HARD_SPACE
+                space, k = HARD_SPACE[op] if hard else (EXH, PER_ENCODING[op])
+                for mode in modes:
+                    items.append(Item(f"{op}-{mode}", "divsqrt", "exhaustive", op, mode, verdict_mode=mode, exact=not hard,
+                                      per_encoding=k, space=space, level="hard" if hard else "exhaustive",
+                                      whole=HARD_WHOLE[op] if hard else (EXH, 0), mpfr=True,
+                                      claim=f"{wide_claim(op)}, under {mode}"))
     for it in items:
         if it.kind == "random":
             if it.name not in RANDOM_SEED_INDEX:

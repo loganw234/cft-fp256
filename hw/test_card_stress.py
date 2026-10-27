@@ -44,6 +44,12 @@ Three kinds of group, then the plants (the groups, by name, are in hw/test-card-
             that real file, its expectations derived from the file itself (parcel P5, 2026-10-22) and the figures MEASURED on his two files held exactly
             only for those files, by sha256.
 
+  wide     (parcel HXc, 2026-10-26) the 102 wide-format items of phase 1: the catalog (only with mpfr=True, after the 125) and its figures held to
+            the real tool's output (hw/card_stress_fixtures/wx-*, the box's eight-slice counts of div128-hard and div256-hard among them), each kind's
+            real log through parse_soak and the stand-in's lines held to it, --mpfr-prefix refused by name at the command line, the warnings' sorting,
+            the plans, the items served and covered (dry), refused by name without --mpfr-prefix (dry), and the build line with MPFR=1 and its
+            checks on the driver's real path over test doubles (POSIX: skipped by name elsewhere).
+
   testfiles   (parcel TG, 2026-10-23) hw/test_card_stress_report.py and hw/test_card_stress_progress.py, each run as a process and made checks of this suite: a crash,
             a hang, a missing summary line, an exit status or a failed count above 0, each FAIL line; their SKIP lines are passed on as this suite's, by name and with the
             file's reason; eleven controls on stand-in files, run first, show those checks able to fail.
@@ -604,11 +610,11 @@ def catalog_checks(c, mod, d, q) -> None:
       "next, logb, class, rem: host)", not bad, str(bad[:4]))
     c("reach: the table has no operation the catalog does not use; of the scripts' 90 items 43 reach the tile and 47 do not, and "
       "of the coverage wave's 35, 22 do (13 hard-case, 9 class-level: rint64-class and scaleb64-class) and 13 do not",
-      set(L.OP_REACH) == {it.op for it in items} and sum(it.reach == L.TILE for it in camp) == 43
+      set(L.OP_REACH) == {it.op for it in L.sweep_items(mpfr=True)} and sum(it.reach == L.TILE for it in camp) == 43
       and sum(it.reach == L.HOST for it in camp) == 47
       and sum(it.reach == L.TILE for it in items[90:]) == 22 and sum(it.reach == L.HOST for it in items[90:]) == 13
       and sum(it.reach == L.TILE for it in items) == 65,
-      f"{sorted(set(L.OP_REACH) ^ {it.op for it in items})}")
+      f"{sorted(set(L.OP_REACH) ^ {it.op for it in L.sweep_items(mpfr=True)})}")
     c("reach: of the 54 random items 25 reach the tile (div32, div64, sqrt64 x4 each; rint64 x5; scaleb32, scaleb64 x4 "
       "each) and 29 are host; of the 36 exhaustive items of the scripts' campaign 18 and 18",
       [(k, r, sum(it.kind == k and it.reach == r for it in camp))
@@ -5307,6 +5313,497 @@ def group_notes(env: Env, src: str = HERE) -> list:
 
 
 # ---------------------------------------------------------------------------------------
+# parcel HXc (2026-10-26): the wide-format items of phase 1 in the catalog, the soak's build line with MPFR, the refusal without it
+# ---------------------------------------------------------------------------------------
+
+_W_F32 = (1 << 32, 1, (1 << 32, 0), "exhaustive")
+# The documents' figures for the 30 wide modes (parcel HXa's report, section 4; docs/CARDDAY.md's table of its modes), written out here and
+# not read from the library: op -> (indices, k, the whole space's (cases, skipped), level). The real tool's outputs (hw/card_stress_fixtures/
+# wx-*, the box's two eight-slice counts among them) hold them; they hold the library. In the study's rank order (5.4: 1, 2, 4, 6, 7).
+DOC_WIDE = {"div128-hard": (289_931_696, 4, (813_470_188, 346_256_596), "hard"),
+            "div256-hard": (293_864_352, 4, (829_207_176, 346_250_232), "hard"),
+            "sqrt128-hard": (4_456_448, 1, (1_745_011, 2_711_437), "hard"), "sqrt256-hard": (4_456_448, 1, (1_745_800, 2_710_648), "hard"),
+            "div128-f64hard": (289_685_696, 4, (812_489_184, 346_253_600), "hard"),
+            "div256-f64hard": (289_685_696, 4, (812_489_184, 346_253_600), "hard"),
+            "sqrt128-f64hard": (4_456_448, 1, (1_745_752, 2_710_696), "hard"), "sqrt256-f64hard": (4_456_448, 1, (1_745_752, 2_710_696), "hard")}
+DOC_WIDE.update({op: _W_F32 for op in ("sqrt128-f32", "recip128-f32", "sqrt256-f32", "recip256-f32", "sqrt64-f32", "recip64-f32")})
+DOC_WIDE.update({f"{o}{w}-win-{h}": _W_F32 for o in ("sqrt", "recip") for w in (128, 256) for h in ("ones", "zeros", "alt", "key")})
+DOC_WIDE_NAMES = ([f"{op}-{m}" for op in list(DOC_WIDE)[:14] for m in M5]           # the hard, f64hard and slice modes: five attributes
+                  + [f"{op}-{m}" for op in list(DOC_WIDE)[14:] for m in ("rne", "rup")])   # the sixteen windows: rne and rup (phase 1)
+# The build's warning lines as amd-arc-box printed them (box/day-1023/smoke-new/driver.log, 2026-10-24: the smoke's fresh build), and the
+# MPFR=1 builds' in WSL (this parcel: make divsqrt-soak MPFR=1, and SOAK_CHUNK=16384 MPFR=1 soak-chunk)
+BOX_WARNINGS = ["tools/cft_resident.cpp:264:46: warning: \u2018uint32_t xrt::kernel::read_register(uint32_t) const\u2019 is deprecated: It is not r",
+                "tools/cft_resident.cpp:265:48: warning: \u2018uint32_t xrt::kernel::read_register(uint32_t) const\u2019 is deprecated: It is not r",
+                "tools/divsqrt_soak.c:73: warning: ignoring \u2018#pragma STDC FENV_ACCESS\u2019 [-Wunknown-pragmas]",
+                "tools/clause5_soak.c:167: warning: ignoring \u2018#pragma STDC FENV_ACCESS\u2019 [-Wunknown-pragmas]"]
+MPFR_BUILD_WARNING = "tools/divsqrt_soak.c:79: warning: ignoring \u2018#pragma STDC FENV_ACCESS\u2019 [-Wunknown-pragmas]"
+WIDE_LOGS = (("wx-sqrt128-f32.txt", "sqrt128-f32-rne"), ("wx-recip64-f32.txt", "recip64-f32-rup"), ("wx-sqrt256-f32.txt", "sqrt256-f32-rmm"),
+             ("wx-recip256-win-key.txt", "recip256-win-key-rup"), ("wx-sqrt128-win-ones.txt", "sqrt128-win-ones-rne"),
+             ("wx-div128-f64hard.txt", "div128-f64hard-rtz"), ("wx-div256-f64hard-rmm.txt", "div256-f64hard-rmm"),
+             ("wx-sqrt128-f64hard.txt", "sqrt128-f64hard-rdn"), ("wx-div256-hard.txt", "div256-hard-rne"),
+             ("wx-div128-hard.txt", "div128-hard-rup"), ("wx-sqrt256-hard.txt", "sqrt256-hard-rmm"))
+
+
+def fake_mpfr_prefix(path: str, version: str = "4.2.2", libs=("libmpfr.a", "libgmp.a")) -> str:
+    """A directory shaped as verify/build-mpfr-oracle.sh's prefix: include/mpfr.h saying `version`, and empty static libraries. Nothing
+    links against it here (the dry run builds nothing, and the build test's make is a double); the driver reads its shape."""
+    os.makedirs(os.path.join(path, "include"), exist_ok=True)
+    os.makedirs(os.path.join(path, "lib"), exist_ok=True)
+    with open(os.path.join(path, "include", "mpfr.h"), "w") as fh:
+        fh.write(f'/* a stand-in */\n#define MPFR_VERSION_STRING "{version}"\n')
+    for x in libs:
+        open(os.path.join(path, "lib", x), "w").close()
+    return path
+
+
+def wide_catalog_checks(src: str = HERE) -> list:
+    """The 102 wide items in the catalog (parcel HXc): only with mpfr=True and after the 125, the documents' figures held to the real tool's
+    output (hard-space, hard-count, the box's eight-slice counts), each real log of the five kinds through parse_soak with its item's rule and
+    damaged every way the rule must refuse, the sabotage logs failures, the chunked tool's log, the oracle line, the claims, and the stand-in
+    printing the real tool's lines from tables equal to the library's."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    index = fixture_index()
+    with lib_from(src) as L2:
+        raises = lambda fn: raises_in(L2, fn)               # noqa: E731
+        parse_ok = lambda fn: parse_ok_in(L2, fn)           # noqa: E731
+        old, full = L2.sweep_items(), L2.sweep_items(mpfr=True)
+        c("wide catalog: without mpfr the catalog is the 125 items it was, none of them wide or making a claim, and with it those 125 come "
+          "first, every attribute the same", len(old) == 125 and [vars(a) for a in old] == [vars(b) for b in full[:125]]
+          and not any(a.mpfr or a.claim for a in old), f"{len(old)}, {len(full)}")
+        wide = full[125:]
+        by = {it.name: it for it in wide}
+        c("wide catalog: the 102 wide items follow, in the study's rank order (the wide hard cases, the fp64 hard cases widened, the fp32 "
+          "slice at fp128 and fp256, then at fp64, the sixteen windows), the windows under rne and rup alone",
+          [it.name for it in wide] == DOC_WIDE_NAMES and len(wide) == 102, str([it.name for it in wide][:4]))
+        bad = []
+        for it in wide:
+            sp, k, whole, level = DOC_WIDE.get(it.op, (None, None, None, None))
+            got = (it.kind, it.tool, it.verdict_mode, it.space, it.per_encoding, it.whole, it.level, it.reach, it.exact, it.mpfr, it.seed_index)
+            want = ("exhaustive", "divsqrt", it.mode, sp, k, whole, level, "tile", level == "exhaustive", True, None)
+            if got != want:
+                bad.append(f"{it.name}: {got} vs {want}")
+        c("wide catalog: each item has the documents' space, k, whole-space figures and level, reaches the tile, runs divsqrt-soak, is exact "
+          "for the slices and windows alone (one case an index, none skipped) and takes no seed", not bad and len(wide) == 102, "; ".join(bad[:2]))
+        c("wide catalog: OP_REACH says tile of each of the 30 modes and names no op the MPFR catalog does not use; PER_ENCODING is 1 for the "
+          "22 slice and window modes", all(L2.OP_REACH.get(op) == L2.TILE for op in DOC_WIDE) and set(L2.OP_REACH) == {i.op for i in full}
+          and all(L2.PER_ENCODING.get(op) == 1 for op, v in DOC_WIDE.items() if v[3] == "exhaustive"))
+        badc = []
+        for it in wide:
+            fmt = "fp" + re.match(r"[a-z]+(\d+)-", it.op).group(1)
+            want = ([f"every fp32 input, widened exactly to {fmt}", "(L1 over the fp32 slice)"] if it.op.endswith("-f32") else
+                    ["low 32 fraction bits", f"through the {fmt}", "(L1 over the window)"] if "-win-" in it.op else
+                    ["the fp64 hard cases", f"widened exactly to {fmt}", "(hard)"] if it.op.endswith("f64hard") else
+                    [f"the {fmt}", "own hard cases", f"{it.space:,} indices", "(hard)"])
+            if not (isinstance(it.claim, str) and all(w in it.claim for w in want) and it.claim.endswith(f", under {it.mode}")
+                    and "swept" not in it.claim):
+                badc.append(f"{it.name}: {it.claim!r}")
+        c("wide catalog: each item's claim names its space and its level, under its attribute, and never says 'swept' (Logan's answer 3)",
+          not badc, "; ".join(badc[:2]))
+        # the documents' figures, held to the real tool's own output
+        spaces = {m.group(1): (int(m.group(3)), int(m.group(2)))
+                  for m in re.finditer(r"^(\S+) k=(\d+) total=(\d+)$", fixture("wx-hard-space.txt"), re.M)}
+        c("wide catalog: `hard-space` of every wide mode (the real tool's log) gives the documents' indices and k, and they are the catalog's",
+          spaces == {op: v[:2] for op, v in DOC_WIDE.items()} and all((it.space, it.per_encoding) == spaces.get(it.op) for it in wide),
+          str(sorted(set(spaces) ^ set(DOC_WIDE))[:4]))
+        for nm, op in (("wx-count-sqrt128-hard.txt", "sqrt128-hard"), ("wx-count-sqrt256-hard.txt", "sqrt256-hard"),
+                       ("wx-count-sqrt128-f64hard.txt", "sqrt128-f64hard"), ("wx-count-div128-f64hard.txt", "div128-f64hard"),
+                       ("wx-count-sqrt128-f32.txt", "sqrt128-f32"), ("wx-count-recip256-win-alt.txt", "recip256-win-alt")):
+            tot = re.search(r"^total (\d+) (\d+) (\d+)$", fixture(nm), re.M)
+            got = tuple(int(x) for x in tot.groups()) if tot else None
+            c(f"wide catalog: `hard-count` of {op}'s whole space (the real tool's log, {index.get(nm, (0, '?'))[1][-60:]}) is the documents' "
+              f"and the catalog's whole-space figures", got == (DOC_WIDE[op][0],) + DOC_WIDE[op][2]
+              and all(it.whole == got[1:] for it in wide if it.op == op), f"{got}")
+        for m in ("div128-hard", "div256-hard"):
+            t = fixture(f"wx-box-count-{m}.txt")
+            cuts = [(int(a), int(b)) for a, b in re.findall(rf"^# host/divsqrt-soak hard-count {m} (\d+) (\d+)$", t, re.M)]
+            tots = [tuple(int(x) for x in g) for g in re.findall(r"^total (\d+) (\d+) (\d+)$", t, re.M)]
+            n = DOC_WIDE[m][0]
+            c(f"wide catalog: the box's `hard-count` of {m} over eight slices (the lead's run, held to the box's sums) tiles [0, {n:,}) and adds "
+              f"up to the documents' and the catalog's whole-space cases and skipped slots, each slice's indices its own",
+              len(cuts) == len(tots) == 8 and cuts[0][0] == 0 and cuts[-1][1] == n and all(a[1] == b[0] for a, b in zip(cuts, cuts[1:]))
+              and all(t3[0] == b - a for t3, (a, b) in zip(tots, cuts)) and (sum(x[0] for x in tots),) + tuple(sum(x[i] for x in tots) for i in (1, 2))
+              == (n,) + DOC_WIDE[m][2] and by[f"{m}-rne"].whole == DOC_WIDE[m][2], f"{len(cuts)} slices, {tots[:1]}")
+        # the real logs, each through its item's own rule
+        standin = os.path.join(src, "card_stress_standin.py")
+
+        def norm(text):
+            return re.sub(r"MPFR \S+ with GMP \S+", "MPFR V with GMP G", text)
+        for nm, iname in WIDE_LOGS:
+            it, t = by[iname], fixture(nm)
+            op, lo, hi, mode = fixture_job(index, nm)
+            m = SOAK_EXH_LINE.search(t)
+            exp, cover = it.expected_cases(lo, hi), it.cover_spec(lo, hi)
+            if m is None or cover is None:
+                c(f"wide {nm}: a verdict line with its encodings clause, and a cover rule for {iname}", False)
+                continue
+            cases, enc, skp = int(m.group(3)), int(m.group(6)), int(m.group(7))
+            v, why = parse_ok(lambda: L2.parse_soak(t, index[nm][0], it.op, it.verdict_mode, None, exp, cover, cpu=True))
+            c(f"wide {nm}: made by {iname}'s command line; passes with the log's own counts, E the slice's {hi - lo:,} indices and cases + "
+              f"skipped k x E (k = {it.per_encoding})" + ("; exactly one case an index, none skipped" if it.exact else "; no fixed case count"),
+              (op, mode) == (it.op, it.mode) and v is not None and v.ok and enc == hi - lo and cases + skp == it.per_encoding * enc
+              and v.counts == {"cases": cases, "value_mismatches": 0, "flag_mismatches": 0, "encodings": enc, "skipped": skp}
+              and ((exp == cases and skp == 0) if it.exact else exp is None), why)
+            line = m.group(0)
+            for what, dmg in (("its encodings clause removed", line.replace(f", {enc} encodings, {skp} skipped", "")),
+                              ("one index fewer printed", line.replace(f", {enc} encodings,", f", {enc - 1} encodings,")),
+                              ("one case more printed", line.replace(f": {cases} cases,", f": {cases + 1} cases,"))):
+                c(f"wide {nm}: the log with {what} is refused",
+                  raises(lambda dmg=dmg: L2.parse_soak(t.replace(line, dmg), 0, it.op, it.verdict_mode, None, exp, cover, cpu=True)))
+            p = subprocess.run([sys.executable, standin, "soak", "--", "host/divsqrt-soak", op, str(lo), str(hi), mode],
+                               capture_output=True, text=True, timeout=60)
+            sm = SOAK_EXH_LINE.search(p.stdout)
+            lad = [ln for ln in t.splitlines() if ln.startswith("  ladder: ")]
+            ora = [ln for ln in t.splitlines() if ln.startswith("oracle: ")]
+            c(f"wide {nm}: the dry-run stand-in prints the real tool's oracle line (but the versions) and ladder line, and its verdict line "
+              + ("whole" if it.exact else "for these indices, with cases + skipped the real tool's"),
+              sm is not None and sm.group(1, 2, 4, 5, 6) == m.group(1, 2, 4, 5, 6)
+              and (sm.group(0) == line if it.exact else int(sm.group(3)) + int(sm.group(7)) == cases + skp)
+              and [norm(x) for x in p.stderr.splitlines() if x.startswith("oracle: ")] == [norm(x) for x in ora] and len(ora) == 1
+              and ([x for x in p.stdout.splitlines() if x.startswith("  ladder: ")] == lad if it.exact else
+                   len([x for x in p.stdout.splitlines() if x.startswith("  ladder: ")]) == len(lad)),
+              f"{sm.group(0) if sm else p.stdout[-160:]} | {line}")
+        for nm, iname, ladder in (("wx-sqrt128-f32-sab.txt", "sqrt128-f32-rne", False), ("wx-sqrt128-f32-sab2.txt", "sqrt128-f32-rne", True),
+                                  ("wx-div128-hard-sab.txt", "div128-hard-rmm", False)):
+            it, t = by[iname], fixture(nm)
+            op, lo, hi, mode = fixture_job(index, nm)
+            exp, cover = it.expected_cases(lo, hi), it.cover_spec(lo, hi)
+            v, why = parse_ok(lambda: L2.parse_soak(t, index[nm][0], it.op, it.verdict_mode, None, exp, cover, cpu=True))
+            dis = v.extra["disagreements"] if v is not None else []
+            c(f"wide {nm}: the mode's own negative control ({'the CPU narrow result flipped: the ladder' if ladder else 'the library result flipped'}"
+              f" names it), a real failing log, is a failure with its counts and operands, and with exit status 0 it is refused",
+              v is not None and not v.ok and v.counts["value_mismatches"] > 0 and v.counts["encodings"] == hi - lo and len(dis) >= 3
+              and all(re.search(r"a=0x[0-9a-f]+", x) for x in dis) and all((" ladder " in x) == ladder for x in dis)
+              and raises(lambda: L2.parse_soak(t, 0, it.op, it.verdict_mode, None, exp, cover, cpu=True)), why)
+        nm = "wx-chunk-sqrt128-f32-c16384.txt"
+        it, t = by["sqrt128-f32-rne"], fixture(nm)
+        op, lo, hi, mode = fixture_job(index, nm)
+        v, why = parse_ok(lambda: L2.parse_soak(t, 0, op, mode, None, it.expected_cases(lo, hi), it.cover_spec(lo, hi), cpu=True, chunk=16384))
+        c("wide: the chunked MPFR=1 tool's real log passes at its pass size (16384, said on its stderr line) and is refused as a default job's",
+          v is not None and v.ok and v.extra.get("batch") == v.extra.get("chunk") == 16384
+          and raises(lambda: L2.parse_soak(t, 0, op, mode, None, it.expected_cases(lo, hi), it.cover_spec(lo, hi), cpu=True)), why)
+        mp = [n for n, _i in WIDE_LOGS if not n.startswith(("wx-recip64", "wx-sqrt64"))]
+        c("wide: the oracle line of every fp128 and fp256 log reads MPFR and GMP's versions (4.1.0 and 6.2.1: WSL's system MPFR, which made "
+          "these logs), and an fp64 log has none (its oracle is the CPU's double)",
+          all((L2.SOAK_ORACLE_MPFR.search(fixture(n)) or re.match("", "")).groups() == ("4.1.0", "6.2.1") for n in mp)
+          and L2.SOAK_ORACLE_MPFR.search(fixture("wx-recip64-f32.txt")) is None)
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("card_stress_standin_wide", standin)
+        st = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(st)
+        cuts = [0, 1, 777, 65536, 1 << 20, 3_000_001, 4_456_447, 21_496_240, 200_000_001]
+        c("wide: the stand-in's tables are the library's (the eight hard spaces' indices, k and skipped slots; one case an index for the "
+          "other 22), and its skips spread over any partition of a hard space add up to the whole space's exactly",
+          set(st.WIDE) == set(DOC_WIDE) and all(st.IDX[op] == (v[0], v[1], v[2][1]) for op, v in DOC_WIDE.items() if v[3] == "hard")
+          and all(st.EXH_PER.get(op) == 1 for op, v in DOC_WIDE.items() if v[3] == "exhaustive")
+          and all(sum(st.idx_skipped(op, "rne", a, b) for a, b in zip(cs, cs[1:])) == v[2][1]
+                  for op, v in DOC_WIDE.items() if v[3] == "hard" for cs in [[x for x in cuts if x < v[0]] + [v[0]]]))
+    q = subprocess.run([sys.executable, "-B", "-I", "-c", "import sys; sys.path.insert(0, sys.argv[1]); import card_stress_progress as P; "
+                        "print(len([n for n in sys.argv[2].split(',') if n in P._CAT]))", src, ",".join(DOC_WIDE_NAMES)],
+                       capture_output=True, text=True, timeout=120)
+    c("wide: the nightly page's catalog knows every wide item, so a night that names one does not list it as unknown to the catalog",
+      q.returncode == 0 and q.stdout.strip() == str(len(DOC_WIDE_NAMES)), (q.stdout + q.stderr)[-200:])
+    return out
+
+
+def wide_driver_checks(env: Env, src: str = HERE) -> list:
+    """The driver's side, in-process: --mpfr-prefix held to the pin at the command line (each refusal by name), a wide item named without
+    it accepted for the run to refuse, the make words, the warnings' sorting on the box's real lines, and the plans for the wide items."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    tmp = tempfile.mkdtemp(prefix="cs-hxc-")
+    try:
+        good = fake_mpfr_prefix(os.path.join(tmp, "pin"))
+        with driver_from(src) as (mod, d0, L2):
+            base = ["--dry-run", "--out", os.path.join(tmp, "o"), "--root", ROOT]
+            pin = re.search(r"^MPFR_V=(\S+)$", open(os.path.join(ROOT, "verify", "build-mpfr-oracle.sh"), encoding="utf-8").read(), re.M)
+            c("wide driver: the pin is verify/build-mpfr-oracle.sh's MPFR_V, read from the checkout (4.2.2)",
+              pin is not None and mod.mpfr_pin(ROOT) == pin.group(1) == "4.2.2", str(mod.mpfr_pin(ROOT)))
+            refusals = {}
+            for what, path in (("not a directory", os.path.join(tmp, "nosuch")),
+                               ("no include/mpfr.h", fake_mpfr_prefix(os.path.join(tmp, "nohdr"))),
+                               ("another version", fake_mpfr_prefix(os.path.join(tmp, "v421"), "4.2.1")),
+                               ("no static libgmp.a", fake_mpfr_prefix(os.path.join(tmp, "nogmp"), libs=("libmpfr.a",)))):
+                if what == "no include/mpfr.h":
+                    os.remove(os.path.join(path, "include", "mpfr.h"))
+                refusals[what] = parse_refusal(mod, base + ["--mpfr-prefix", path])
+            words = {"not a directory": "is not a directory", "no include/mpfr.h": "cannot be read", "another version": "is MPFR 4.2.1, and the pin is 4.2.2",
+                     "no static libgmp.a": "no libgmp.a"}
+            c("wide driver: --mpfr-prefix is refused at the command line, by name, for a directory that is not there, one with no mpfr.h, one "
+              "whose mpfr.h is another version than the pin, and one without the pin's static libgmp.a",
+              all(r is not None and "--mpfr-prefix" in r and "refused" in r and words[w] in r for w, r in refusals.items()),
+              "; ".join(f"{w}: {(r or 'ACCEPTED')[-100:]}" for w, r in refusals.items()))
+            a = mod.parse_args(base + ["--mpfr-prefix", good, "--sweep-items", "div128-hard-rne,sqrt32-rne"])
+            c("wide driver: the pinned prefix is accepted and made absolute; a wide item named by --sweep-items is accepted with it and without "
+              "it (the run refuses it, by name), and a name that is no item is still refused",
+              a.mpfr_prefix == os.path.abspath(good) and parse_refusal(mod, base + ["--sweep-items", "div128-hard-rne,recip64-f32-rup"]) is None
+              and "not an item" in (parse_refusal(mod, base + ["--sweep-items", "div128-hard-rnf"]) or ""))
+            known, new = mod.sort_warnings(BOX_WARNINGS)
+            k2, n2 = mod.sort_warnings(BOX_WARNINGS + [MPFR_BUILD_WARNING, "tools/x.c:9:1: warning: unused variable 'y'", BOX_WARNINGS[0]])
+            c("wide driver: the build's warnings are sorted - the box's four of a fresh build (the two deprecated read_register calls, the two "
+              "soaks' FENV_ACCESS pragma) and the MPFR=1 build's pragma line known; a line no pattern takes, and a pattern past its count (a "
+              "third read_register, a second divsqrt pragma), new",
+              known == BOX_WARNINGS and new == [] and mod.sort_warnings([MPFR_BUILD_WARNING]) == ([MPFR_BUILD_WARNING], [])
+              and k2 == BOX_WARNINGS and n2 == [MPFR_BUILD_WARNING, "tools/x.c:9:1: warning: unused variable 'y'", BOX_WARNINGS[0]], str(n2))
+            c("wide driver: without --mpfr-prefix the make lines gain nothing and the catalog has no wide item",
+              d0.mpfr_flags() == [] and not any(it.mpfr for it in d0.catalog()) and len(d0.catalog()) == 125)
+        with driver_from(src, ["--mpfr-prefix", good]) as (mod, d, L2):
+            d.items = d.catalog()
+            q = mod.Image("quad", "/box/quad.xclbin", 4, "u50-rev8-quad", None)
+            c("wide driver: with it the make lines gain MPFR=1 MPFR_PREFIX=<the prefix> and the catalog the 102 wide items after the 125",
+              d.mpfr_flags() == ["MPFR=1", f"MPFR_PREFIX={os.path.abspath(good)}"] and len(d.items) == 227
+              and [it.name for it in d.items[125:]] == DOC_WIDE_NAMES)
+            j = d.plan_wave(q, 3600, 1, ["div256-hard-rtz"])[0]
+            b = d.soak_binary(j["item"])
+            c("wide plan: div256-hard-rtz's first slice is `divsqrt-soak div256-hard 0 2^20 rtz`, four checks an index, no fixed case count, "
+              "reach tile", j["argv"] == [b, "div256-hard", "0", str(1 << 20), "rtz"] and j["cover"] == {"encodings": 1 << 20, "per_encoding": 4}
+              and j["expected"] is None and j["sweep"]["reach"] == "tile" and b.replace("\\", "/").endswith("host/divsqrt-soak"), str(j["argv"]))
+            d.intervals["div256-hard-rtz"] = [(0, 293_864_352 - 77)]
+            j = d.plan_wave(q, 3600, 1, ["div256-hard-rtz"])[0]
+            c("wide plan: its last slice ends exactly at its space's end, 293,864,352", (j["lo"], j["hi"]) == (293_864_352 - 77, 293_864_352))
+            j = d.plan_wave(q, 3600, 1, ["sqrt128-win-ones-rup"])[0]
+            c("wide plan: a window item's slice expects exactly its indices as cases, one check an index",
+              j["expected"] == j["units"] == j["hi"] - j["lo"] and j["cover"] == {"encodings": j["units"], "per_encoding": 1})
+            c("wide plan: the host pool never plans a wide item (they all reach the tile)",
+              d.plan_wave(d.cpu, 3600, 1, ["sqrt64-f32-rne"], L2.HOST) == [])
+        with driver_from(src) as (mod, d, L2):
+            d.items = d.catalog()
+            q = mod.Image("quad", "/box/quad.xclbin", 4, "u50-rev8-quad", None)
+            c("wide plan: without --mpfr-prefix a wide item is never planned (it is not in the run's catalog)",
+              d.plan_wave(q, 3600, 1, ["div256-hard-rtz"]) == [] and d.pick_item({}, set(), "sqrt64-f32-rne", L2.TILE) is None)
+    except Exception as e:                      # a driver that cannot be driven this way is a red check, not a crash
+        c("wide driver: the driver could be driven in-process", False, repr(e))
+    finally:
+        rmtree_force(tmp)
+    return out
+
+
+WIDE_SERVED = ["div128-f64hard-rtz", "sqrt128-hard-rmm", "sqrt64-f32-rup", "recip256-win-key-rne"]
+
+
+def scn_wide_items(env: Env, src: str = HERE) -> list:
+    """The wide items served by the driver against the stand-in, with --mpfr-prefix: one of each kind on the quad's four tiles, each to the
+    end of its own space, every slice held to its indices and k x E, the whole-space check once each, run_start and settings.json naming
+    the prefix and the pin, and the report counting each over its own space and stating its claim by space and level."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    pfx = fake_mpfr_prefix(os.path.join(env.tmp, "wide-pin"))
+    sp = {n: DOC_WIDE[n.rsplit("-", 1)[0]][0] for n in WIDE_SERVED}
+    r = start_driver(env, "wideitems", ["--until", until(300), "--mpfr-prefix", pfx, "--sweep-items", ",".join(WIDE_SERVED)] + SWEEP_ALL_BASE,
+                     src=src, to_file=True)
+
+    def complete():
+        iv = L.sweep_coverage(r.recs)[0]
+        return all(iv.get(n) and L.first_gap(iv[n], sp[n]) is None for n in WIDE_SERVED)
+
+    done = wait_for(complete, 240, 0.5)
+    stop_run(r)
+    r.finish(90)
+    legs = r.legs(kind="sweep")
+    c("wide items: the four were each served to the end of their own space, every slice passed, and the run stopped on STOP",
+      done and r.rc == 0 and bool(legs) and all(x["status"] == "pass" for x in legs), f"done {done}, rc {r.rc}, {sorted({x['status'] for x in legs})}")
+    for n in WIDE_SERVED:
+        mine = sorted((x for x in legs if x["sweep"]["item"] == n), key=lambda x: x["sweep"]["lo"])
+        k = DOC_WIDE[n.rsplit("-", 1)[0]][1]
+        c(f"wide items {n}: its slices tile [0, {sp[n]:,}) once, each slice's verdict covering its indices with {k} check(s) an index, on the "
+          f"quad (reach tile), held to what the record says",
+          bool(mine) and mine[0]["sweep"]["lo"] == 0 and mine[-1]["sweep"]["hi"] == sp[n]
+          and all(a["sweep"]["hi"] == b["sweep"]["lo"] for a, b in zip(mine, mine[1:]))
+          and all(dg(x, "counts", "encodings") == x["sweep"]["hi"] - x["sweep"]["lo"] == dg(x, "sweep", "expected_encodings")
+                  and (dg(x, "counts", "cases") or 0) + (dg(x, "counts", "skipped") or 0) == k * dg(x, "counts", "encodings")
+                  and (x["image"], x["sweep"]["reach"]) == ("quad", "tile") for x in mine), f"{len(mine)} slices")
+    ev = r.events("whole_space_ok")
+    c("wide items: the whole-space check ran once for each and found its slices adding up to the whole space's cases and skipped slots",
+      sorted(e["item"] for e in ev) == sorted(WIDE_SERVED) and not r.events("whole_space_mismatch"), str([e["item"] for e in ev]))
+    st = r.recs[0] if r.recs else {}
+    sj = json.loads(read_bytes(os.path.join(r.out, "settings.json")) or b"{}")
+    c("wide items: run_start's settings name the prefix and the pin (4.2.2), and settings.json the prefix",
+      dg(st, "settings", "mpfr") == {"prefix": os.path.abspath(pfx), "pin": "4.2.2"} and sj.get("mpfr_prefix") == os.path.abspath(pfx),
+      str(dg(st, "settings", "mpfr")))
+    p = subprocess.run([sys.executable, "-B", "-I", os.path.join(src, "card_stress_report.py"), r.out, "--no-write"], capture_output=True,
+                       text=True, timeout=120)
+    t = p.stdout
+    claims = ["    div128-f64hard (rtz): the fp64 hard cases of the division (div64-hard's 289,685,696 indices), widened exactly to fp128",
+              "    sqrt128-hard (rmm): the fp128 square root's own hard cases", "    sqrt64-f32 (rup): every fp32 input, widened exactly to fp64",
+              "    recip256-win-key (rne): every pattern of the low 32 fraction bits of x = 1.H L in [1, 2) under H = a keyed draw"]
+    c("wide items: the report counts each over its own space (div128-f64hard-rtz [289,685,696 indices] at 100%), the tile's total from "
+      "those spaces, and states each mode's claim by space and level under the sweep table",
+      p.returncode == 0 and re.search(r"^  div128-f64hard-rtz \[289,685,696 indices\]\s+\d+\s+812489184\s+289685696\s+100\.000%", t, re.M)
+      and re.search(r"^  sqrt64-f32-rup\s+\d+\s+4294967296\s+4294967296\s+100\.000%", t, re.M)
+      and f"reach tile: 4 exhaustive item(s) seen; covered {sum(sp.values())} of {sum(sp.values())} encodings (100.000%)" in t
+      and all(x in t for x in claims) and "(L1 over the window)" in t and "(L1 over the fp32 slice)" in t, t[t.find("exhaustive items"):][:1500])
+    return out
+
+
+def scn_wide_refused(env: Env, src: str = HERE) -> list:
+    """A run WITHOUT --mpfr-prefix whose --sweep-items names wide items: each is refused by name - one skipped sweep leg, image '-', at the
+    start - and never served nor covered, the report lists them under its skipped legs, and the older item named beside them is served as
+    it always was; nothing in run_start or settings.json speaks of an MPFR."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    names = ["div256-hard-rne", "sqrt128-win-alt-rup", "rint64-class-rne"]
+    r = start_driver(env, "widerefused", ["--until", until(300), "--sweep-items", ",".join(names)] + SWEEP_ALL_BASE, src=src, to_file=True)
+    done = wait_for(lambda: bool(L.sweep_coverage(r.recs)[0].get("rint64-class-rne")), 120, 0.5)
+    stop_run(r)
+    r.finish(90)
+    sk = r.legs(kind="sweep", status="skipped")
+    c("wide refused: each wide item named is ONE skipped sweep leg naming it and the reason (no --mpfr-prefix), image '-', and the run exits 0",
+      r.rc == 0 and sorted(x["sweep"]["item"] for x in sk) == ["div256-hard-rne", "sqrt128-win-alt-rup"]
+      and all(x["image"] == "-" and "no --mpfr-prefix" in (x["reason"] or "") and x["leg"] == f"sweep-{x['sweep']['item']}"
+              and dg(x, "sweep", "refused") == "no-mpfr-prefix" for x in sk), f"rc {r.rc}: {[(x['leg'], x['image']) for x in sk]}")
+    iv, served = L.sweep_coverage(r.recs)[:2]
+    c("wide refused: neither wide item ran, passed or is covered, and the older item named beside them was served and covered",
+      done and not any(x["sweep"]["item"] in names[:2] for x in r.legs(kind="sweep") if x["status"] != "skipped")
+      and not any(n in iv or n in served for n in names[:2]) and L.first_gap(iv.get("rint64-class-rne", []), 35_840) is None)
+    st = r.recs[0] if r.recs else {}
+    sj = json.loads(read_bytes(os.path.join(r.out, "settings.json")) or b"{}")
+    c("wide refused: run_start's settings and settings.json say nothing of an MPFR (the keys absent, as before the wide items)",
+      bool(st) and "mpfr" not in (st.get("settings") or {}) and bool(sj) and "mpfr_prefix" not in sj)
+    p = subprocess.run([sys.executable, "-B", "-I", os.path.join(src, "card_stress_report.py"), r.out, "--no-write"], capture_output=True,
+                       text=True, timeout=120)
+    c("wide refused: the report lists each under its skipped legs with the reason, and neither in its coverage table",
+      p.returncode == 0 and re.search(r'^  sweep-div256-hard-rne: 1 x "a wide item, REFUSED: no --mpfr-prefix', p.stdout, re.M)
+      and re.search(r'^  sweep-sqrt128-win-alt-rup: 1 x "a wide item, REFUSED: no --mpfr-prefix', p.stdout, re.M)
+      and not re.search(r"^  (div256-hard-rne|sqrt128-win-alt-rup) ", p.stdout, re.M), p.stdout[p.stdout.find("skipped legs"):][:400])
+    return out
+
+
+def scn_wide_build(env: Env, src: str = HERE) -> list:
+    """The build with --mpfr-prefix on the driver's REAL path (not a dry run) over a scratch checkout whose tools and `make` and `ldd` are
+    test doubles (scn_records_real's): MPFR=1 MPFR_PREFIX=<prefix> on the default make line and on `soak-chunk`'s, nothing else changed;
+    the check that the tool has the wide modes (hard-space div128-hard) and that its oracle line names the pin, run on divsqrt-soak and
+    on divsqrt-soak-cN; a tool whose oracle names another MPFR, or one built without MPFR=1, stops the run (build_failed); and the
+    warnings: the known ones said as known, a new one as new, in a NOTE."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    need = [x for x in ("git", "sh", "nice", "timeout") if not shutil.which(x)]
+    if not POSIX or need:
+        skip("wide build", "needs POSIX with git, sh, nice and timeout" + (f" (missing: {', '.join(need)})" if need else ""))
+        return out
+    root = os.path.join(env.tmp, "faketree-wide")
+    for rel in ("host/tests/seq_check.py", "programs/acceptance.py", "hw/card-segrun.sh", "verify/build-mpfr-oracle.sh"):
+        os.makedirs(os.path.dirname(os.path.join(root, rel)), exist_ok=True)
+        shutil.copy(os.path.join(ROOT, rel), os.path.join(root, rel))
+    shutil.copy(os.path.join(src, "card_stress.py"), os.path.join(root, "hw", "card_stress.py"))
+    standin = os.path.join(src, "card_stress_standin.py")
+
+    def script(path, body):
+        with open(path, "w") as fh:
+            fh.write("#!/bin/sh\n" + body + "\n")
+        os.chmod(path, 0o755)
+    run_standin = f"exec '{sys.executable}' '{standin}'"
+    for name in ("divsqrt-soak", "clause5-soak"):
+        script(os.path.join(root, "host", name), f'case "$1" in probe) exit 0;; esac\n{run_standin} soak -- "$0" "$@"')
+    script(os.path.join(root, "host", "api-test"), f'{run_standin} api-test -- "$0" "$@"')
+    script(os.path.join(root, "host", "cft-segrun"), "echo FAKEBUILDID")
+    for name in ("device-test", "remote-test", "cft-audit", "cft-selftest"):
+        script(os.path.join(root, "host", name), "exit 0")
+    open(os.path.join(root, "host", "libcft.so"), "w").close()
+    for git in (["init", "-q"], ["add", "-A"], ["-c", "user.email=t@example.invalid", "-c", "user.name=t", "commit", "-qm", "t"]):
+        subprocess.run(["git", "-C", root] + git, capture_output=True, timeout=120)
+    fb = os.path.join(env.tmp, "fakebin-wide")
+    os.makedirs(fb, exist_ok=True)
+    script(os.path.join(fb, "ldd"), "echo '\tlibxrt_coreutil.so.2 => /fake/libxrt_coreutil.so.2 (0x0)'")
+    # the make double: logs its words, prints FAKE_MAKE_WARN's lines (separated by '|') as a build's output (not print-build-id's), and makes
+    # the chunked tools
+    script(os.path.join(fb, "make"),
+           'echo "$@" >> "$FAKE_MAKE_LOG"\ndir=.; prev=; n=\nfor a in "$@"; do\n  case "$prev" in -C) dir="$a";; esac\n'
+           '  case "$a" in print-build-id) echo FAKEBUILDID; exit 0;; SOAK_CHUNK=*) n="${a#SOAK_CHUNK=}";; esac\n  prev="$a"\ndone\n'
+           'if [ -n "$FAKE_MAKE_WARN" ]; then printf "%s\\n" "$FAKE_MAKE_WARN" | tr "|" "\\n"; fi\n'
+           'if [ -n "$n" ]; then for t in divsqrt-soak clause5-soak; do cp "$dir/$t" "$dir/$t-c$n"; done; fi\nexit 0')
+    pfx = fake_mpfr_prefix(os.path.join(env.tmp, "wide-build-pin"))
+
+    def drive(name, extra, env_extra=None):
+        env.n += 1
+        o = os.path.join(env.tmp, f"{env.n:02d}-{name}")
+        makelog = os.path.join(env.tmp, f"{env.n:02d}-{name}-make.log")
+        cmd = [sys.executable, "-B", "-I", os.path.join(src, "card_stress.py"), "--root", root, "--out", o, "--quick", "--legs", "api-test",
+               "--telemetry-seconds", "0", "--disk-extra", "", "--retry-pause", "1", "--kill-after", "2", "--guard-poll", "1",
+               "--build-jobs", "2", "--make-xrt-flags", "XRT=0", "--sweep-items", "sqrt128-f32-rne,div128-hard-rtz,rint64-class-rne"]
+        for n, pth in env.imgs.items():
+            cmd += ["--image", f"{n}={pth}", "--sha", f"{n}={env.shas[n]}"]
+        e = dict(os.environ, PATH=fb + os.pathsep + os.environ["PATH"], FAKE_MAKE_LOG=makelog, **(env_extra or {}))
+        p = subprocess.run(cmd + extra, capture_output=True, text=True, env=e, cwd=ROOT, timeout=300)
+        r = Run(o)
+        r.rc, r.text = p.returncode, p.stdout + p.stderr
+        r.makelog = open(makelog).read().splitlines() if os.path.exists(makelog) else []
+        r.steps = {s["name"]: s for s in (r.last("build") or {}).get("steps", [])}
+        return r
+    def mpfr_words(tokens):
+        """The two words from MPFR=1 on, in a make line's words; [] where it has none (a red check, not a crash)."""
+        return tokens[tokens.index("MPFR=1"):tokens.index("MPFR=1") + 2] if "MPFR=1" in tokens else []
+    known4 = "|".join(BOX_WARNINGS)
+    newline = "tools/divsqrt_soak.c:812:9: warning: unused variable 'q' [-Wunused-variable]"
+    A = drive("wide-build-a", ["--mpfr-prefix", pfx], {"FAKE_MAKE_WARN": known4 + "|" + newline})
+    B = drive("wide-build-b", [], {"FAKE_MAKE_WARN": known4})
+    mk_a = next((ln.split() for ln in A.makelog if " all " in ln + " "), [])
+    mk_b = next((ln.split() for ln in B.makelog if " all " in ln + " "), [])
+    want = ["MPFR=1", f"MPFR_PREFIX={os.path.abspath(pfx)}"]
+    c("wide build A: with --mpfr-prefix the default make line carries MPFR=1 MPFR_PREFIX=<the prefix> after the XRT flags and C5DEFS, "
+      "before the targets, and is otherwise the line a run without it makes (B)",
+      bool(mk_a) and bool(mk_b) and [x for x in mk_a if x not in want] == mk_b and mpfr_words(mk_a) == want
+      and "all" in mk_a and mk_a.index("MPFR=1") < mk_a.index("all") and not any(x.startswith("MPFR") for x in mk_b), f"{mk_a} | {mk_b}")
+    s = A.steps.get("mpfr divsqrt-soak") or {}
+    c("wide build A: the build step checks the tool: hard-space div128-hard rc 0 with the catalog's space, and one case of sqrt128-f32 whose "
+      "oracle line names MPFR 4.2.2, the pin; the wide items were then served and passed, and the run exited 0",
+      s.get("ok") is True and "289,931,696 indices k=4" in s.get("detail", "") and "names MPFR 4.2.2 with GMP 6.3.0" in s.get("detail", "")
+      and A.rc == 0 and {x["sweep"]["item"] for x in A.legs(kind="sweep", status="pass")} >= {"sqrt128-f32-rne", "div128-hard-rtz", "rint64-class-rne"},
+      f"rc {A.rc}: {s} {A.text[-300:]}")
+    dlog_a = read_bytes(os.path.join(A.out, "driver.log")).decode("utf-8", "replace")
+    dlog_b = read_bytes(os.path.join(B.out, "driver.log")).decode("utf-8", "replace")
+    c("wide build: the box's four known warnings are said as known and bring no NOTE (B); a fifth, new line is said as new in the step and "
+      "named in a NOTE (A)",
+      "5 warning line(s), 4 known and 1 new" in (A.steps.get("make") or {}).get("detail", "") and "NOTE: make printed 1 warning line(s)" in dlog_a
+      and newline[:60] in dlog_a and "4 warning line(s), 4 known and 0 new" in (B.steps.get("make") or {}).get("detail", "")
+      and "warning line(s) that are not its known ones" not in dlog_b, f"{(A.steps.get('make') or {}).get('detail', '')[-160:]} | {(B.steps.get('make') or {}).get('detail', '')[-160:]}")
+    c("wide build B: without --mpfr-prefix no mpfr step is made, the wide items named are skipped by name, and the older one is served",
+      B.rc == 0 and not any(n.startswith("mpfr") for n in B.steps) and len(B.legs(kind="sweep", status="skipped")) == 2
+      and any(x["sweep"]["item"] == "rint64-class-rne" for x in B.legs(kind="sweep", status="pass")), f"rc {B.rc}: {sorted(B.steps)[:6]}")
+    C = drive("wide-build-c", ["--mpfr-prefix", pfx, "--sweep-chunk", "16384"])
+    mk_c = next((ln.split() for ln in C.makelog if " all " in ln + " "), [])
+    mk_k = next((ln.split() for ln in C.makelog if "soak-chunk" in ln), [])
+    c("wide build C: under --sweep-chunk the soak-chunk make line carries the same MPFR words as the default make line, and both tools are "
+      "checked, divsqrt-soak and divsqrt-soak-c16384, the chunked one at its pass size",
+      bool(mk_k) and mpfr_words(mk_k) == want and mpfr_words(mk_c) == want
+      and (C.steps.get("mpfr divsqrt-soak") or {}).get("ok") is True and (C.steps.get("mpfr divsqrt-soak-c16384") or {}).get("ok") is True
+      and C.rc == 0, f"rc {C.rc}: {mk_k}")
+    D = drive("wide-build-d", ["--mpfr-prefix", pfx], {"CFT_STANDIN_MPFR": "4.1.0"})
+    s = D.steps.get("mpfr divsqrt-soak") or {}
+    c("wide build D: a tool whose oracle line names MPFR 4.1.0 (a header that said the pin, a library that is not) fails the step, by name, "
+      "and the run stops before any leg (build_failed, exit 3)",
+      s.get("ok") is False and "names MPFR 4.1.0" in s.get("detail", "") and "the pin is 4.2.2" in s.get("detail", "") and D.rc == 3
+      and not D.legs(kind="sweep") and any(e.get("reason") == "build_failed" for e in D.events()), f"rc {D.rc}: {s}")
+    E = drive("wide-build-e", ["--mpfr-prefix", pfx], {"CFT_STANDIN_NO_WIDE": "1"})
+    s = E.steps.get("mpfr divsqrt-soak") or {}
+    c("wide build E: a tool built without MPFR=1 (hard-space div128-hard exits 2) fails the step, by name, and the run stops (exit 3)",
+      s.get("ok") is False and "exited 2" in s.get("detail", "") and "MPFR=1" in s.get("detail", "") and E.rc == 3 and not E.legs(kind="sweep"),
+      f"rc {E.rc}: {s}")
+    return out
+
+
+def group_wide(env: Env, src: str = HERE) -> list:
+    """Parcel HXc, the wide-format items: the catalog and its real logs, the driver's command line and plans, the items served and covered,
+    refused without --mpfr-prefix, and the build line with MPFR on the driver's real path over test doubles (POSIX)."""
+    return (wide_catalog_checks(src) + wide_driver_checks(env, src) + scn_wide_items(env, src) + scn_wide_refused(env, src)
+            + scn_wide_build(env, src))
+
+
+# ---------------------------------------------------------------------------------------
 # parcel P5 (2026-10-22): the driver before the nights run it. KL-39 the status file's telemetry line, KL-32 the HBM temperature's zeros in
 # the report, KL-23 a random slice held to its count in a default run, KL-42 the images' manifests, KL-44 vectors/out, KL-13 buildreal's copy
 # ---------------------------------------------------------------------------------------
@@ -6833,6 +7330,64 @@ def plants(env: Env) -> None:
          [("card_stress.py", "        self.served = dict(served)\n        self.sums = {}\n",
            "        self.served = dict(served)\n        self.seed_n = {k: v + 1 for k, v in _seeds.items()}\n        self.sums = {}\n")],
          lambda env, src: resume_unit_checks(src), ["resume: the seeds and the rates stay the whole file's"]),
+        # -- parcel HXc (2026-10-26): the wide-format items, --mpfr-prefix, the build line with MPFR (CARD_STRESS_PLANT='HXc:' runs just these)
+        ("HXc: the catalog has the wide items without being asked for them",
+         [("card_stress_lib.py", "    if mpfr:\n        for group, modes in ", "    if True:\n        for group, modes in ")],
+         lambda env, src: wide_catalog_checks(src), ["wide catalog: without mpfr the catalog is the 125 items it was"]),
+        ("HXc: a wide hard space's whole-space figure is one skipped slot off",
+         [("card_stress_lib.py", '"sqrt128-hard": (1_745_011, 2_711_437)', '"sqrt128-hard": (1_745_011, 2_711_438)')],
+         lambda env, src: wide_catalog_checks(src), ["wide catalog: `hard-count` of sqrt128-hard's whole space"]),
+        ("HXc: the windows run under all five attributes",
+         [("card_stress_lib.py", 'WIDE_WINDOW_MODES = ("rne", "rup")', "WIDE_WINDOW_MODES = MODES5")],
+         lambda env, src: wide_catalog_checks(src), ["wide catalog: the 102 wide items follow"]),
+        ("HXc: a wide mode is marked as a host item",
+         [("card_stress_lib.py", "OP_REACH.update({op: TILE for op in WIDE_OPS})", 'OP_REACH.update({op: HOST if op == "recip64-f32" else TILE for op in WIDE_OPS})')],
+         lambda env, src: wide_catalog_checks(src), ["wide catalog: OP_REACH says tile"]),
+        ("HXc: a slice item's claim says swept, and names no space or level",
+         [("card_stress_lib.py", 'return f"every fp32 input, widened exactly to {fmt}, through the {fmt} {what}, bits and flags (L1 over the fp32 slice)"',
+           'return f"the fp32 slice at {fmt}, swept"')],
+         lambda env, src: wide_catalog_checks(src), ["wide catalog: each item's claim names its space and its level"]),
+        ("HXc: the stand-in leaves out the ladder's line",
+         [("card_stress_standin.py", "        if ladder:\n            out(ladder)                         # the ladder's line",
+           "        if False:\n            out(ladder)                         # the ladder's line")],
+         lambda env, src: wide_catalog_checks(src), ["wide wx-sqrt128-f32.txt: the dry-run stand-in prints the real tool's oracle line"]),
+        ("HXc: the stand-in's skipped slots for div128-hard are one off the whole space's",
+         [("card_stress_standin.py", '"div128-hard": (289931696, 4, 346256596)', '"div128-hard": (289931696, 4, 346256597)')],
+         lambda env, src: wide_catalog_checks(src), ["wide: the stand-in's tables are the library's"]),
+        ("HXc: the page calls a wide item unknown to the catalog",
+         [("card_stress_progress.py", "_CAT = {it.name: it for it in sweep_items(mpfr=True)}", "_CAT = {it.name: it for it in sweep_items()}")],
+         lambda env, src: wide_catalog_checks(src), ["wide: the nightly page's catalog knows every wide item"]),
+        ("HXc: --mpfr-prefix is accepted whatever it holds",
+         [("card_stress.py", "        why = mpfr_prefix_problem(a.mpfr_prefix, mpfr_pin(a.root))\n", "        why = None\n")],
+         lambda env, src: wide_driver_checks(env, src), ["wide driver: --mpfr-prefix is refused at the command line"]),
+        ("HXc: every warning line counts as known",
+         [("card_stress.py", "            if used[i] < n and rx.search(ln):", "            if True:")],
+         lambda env, src: wide_driver_checks(env, src), ["wide driver: the build's warnings are sorted"]),
+        ("HXc: a wide item named without --mpfr-prefix is not refused (no skipped leg)",
+         [("card_stress.py", "        if self.mpfr_prefix:\n            return\n        wide = {it.name: it", "        if True:\n            return\n        wide = {it.name: it")],
+         lambda env, src: scn_wide_refused(env, src), ["wide refused: each wide item named is ONE skipped sweep leg"]),
+        ("HXc: the make lines gain no MPFR words",
+         [("card_stress.py", '        return ["MPFR=1", f"MPFR_PREFIX={self.mpfr_prefix}"] if self.mpfr_prefix else []', "        return []")],
+         lambda env, src: wide_driver_checks(env, src), ["wide driver: with it the make lines gain MPFR=1"]),
+        ("HXc: the soak-chunk make line leaves out the MPFR words (POSIX)",
+         [("card_stress.py", "            cargv += self.mpfr_flags()      # the same MPFR words", "            cargv += []      # the same MPFR words")],
+         lambda env, src: scn_wide_build(env, src), ["wide build C: under --sweep-chunk the soak-chunk make line carries the same MPFR words"]),
+        ("HXc: the build step makes no MPFR check (POSIX)",
+         [("card_stress.py", "        if self.mpfr_prefix:\n            self.check_mpfr(step, host)", "        if False:\n            self.check_mpfr(step, host)")],
+         lambda env, src: scn_wide_build(env, src), ["wide build A: the build step checks the tool", "wide build D:"]),
+        ("HXc: the oracle's MPFR is not held to the pin (POSIX)",
+         [("card_stress.py", "            if seen != self.mpfr_pin:", "            if False:")],
+         lambda env, src: scn_wide_build(env, src), ["wide build D: a tool whose oracle line names MPFR 4.1.0"]),
+        ("HXc: a tool without the wide modes passes the hard-space check (POSIX)",
+         [("card_stress.py", "            if rc != 0:\n                step(f\"mpfr {name}\", False, f\"`{name} hard-space",
+           "            if False:\n                step(f\"mpfr {name}\", False, f\"`{name} hard-space")],
+         lambda env, src: scn_wide_build(env, src), ["wide build E: a tool built without MPFR=1"]),
+        ("HXc: the report states no claim for the wide items",
+         [("card_stress_report.py", "        if wide:\n            L.append(\"  a wide item (parcel HXc", "        if False:\n            L.append(\"  a wide item (parcel HXc")],
+         lambda env, src: scn_wide_items(env, src), ["wide items: the report counts each over its own space"]),
+        ("HXc: the report counts a wide item over 2^32 (its catalog without the wide items)",
+         [("card_stress_report.py", "_CATALOG = {it.name: it for it in sweep_items(mpfr=True)}", "_CATALOG = {it.name: it for it in sweep_items()}")],
+         lambda env, src: scn_wide_items(env, src), ["wide items: the report counts each over its own space"]),
     ]
     for name, edits, fn, expects in P:
         if pick and pick not in name:
@@ -7012,7 +7567,7 @@ def run_group(name: str, results: list) -> None:
 # report and the plants are not skippable
 SKIPPABLE_GROUPS = ("normal", "fail", "timeout", "deaf", "nodevice", "cardlost", "stopfile", "deadline", "rotation", "diskfloor", "guard", "sweep",
                     "disagree", "telemetry", "build", "buildreal", "internal", "signal", "torn", "disable", "sweepall", "pool", "seeds", "trees",
-                    "items", "chunk", "records", "notes", "resume")
+                    "items", "chunk", "records", "notes", "resume", "wide")
 
 
 def skip_groups_checks(src: str = HERE) -> list:
@@ -7088,7 +7643,8 @@ def main() -> int:
                                       ("trees", scn_trees, False),
                                       ("items", group_items, False), ("chunk", group_chunk, False),
                                       ("records", group_records, False), ("notes", group_notes, False),
-                                      ("resume", group_resume, False), ("testfiles", group_testfiles, False)):
+                                      ("resume", group_resume, False), ("wide", group_wide, False),
+                                      ("testfiles", group_testfiles, False)):
             if not want(gname):
                 continue
             if gname in skipped_groups:

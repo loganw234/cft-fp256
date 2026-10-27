@@ -39,6 +39,14 @@ NEW_TILE_OPS = ("div32-hard", "div64-hard", "sqrt64-hard", "rint64-class",
                 "scaleb64-class", "scaleb32-all", "scaleb32-wide")
 OLD_TILE_OPS = ("sqrt32", "div32", "div64", "sqrt64", "rint32", "rint64",
                 "scaleb32", "scaleb64")      # card-stress-1016's, the table's first
+# parcel HXa's thirty wide modes, which the catalog has with --mpfr-prefix (parcel HXc, 2026-10-26), written out here
+WIDE_TILE_OPS = ("sqrt64-f32", "sqrt128-f32", "sqrt256-f32", "recip64-f32", "recip128-f32", "recip256-f32",
+                 "sqrt128-win-ones", "sqrt128-win-zeros", "sqrt128-win-alt", "sqrt128-win-key",
+                 "sqrt256-win-ones", "sqrt256-win-zeros", "sqrt256-win-alt", "sqrt256-win-key",
+                 "recip128-win-ones", "recip128-win-zeros", "recip128-win-alt", "recip128-win-key",
+                 "recip256-win-ones", "recip256-win-zeros", "recip256-win-alt", "recip256-win-key",
+                 "div128-f64hard", "div256-f64hard", "sqrt128-f64hard", "sqrt256-f64hard",
+                 "div128-hard", "div256-hard", "sqrt128-hard", "sqrt256-hard")
 
 
 @pytest.fixture(scope="module")
@@ -51,9 +59,9 @@ def csl():
     return mod
 
 
-def test_the_table_is_the_old_eight_then_the_new_seven():
-    assert FE.STRESS_TILE_OPS == OLD_TILE_OPS + NEW_TILE_OPS
-    assert len(set(FE.STRESS_TILE_OPS)) == len(FE.STRESS_TILE_OPS)
+def test_the_table_is_the_old_eight_the_new_seven_then_the_wide_thirty():
+    assert FE.STRESS_TILE_OPS == OLD_TILE_OPS + NEW_TILE_OPS + WIDE_TILE_OPS
+    assert len(set(FE.STRESS_TILE_OPS)) == len(FE.STRESS_TILE_OPS) == 45
 
 
 def test_the_table_and_the_drivers_op_reach_say_the_same_of_every_op(csl):
@@ -66,8 +74,8 @@ def test_the_table_and_the_drivers_op_reach_say_the_same_of_every_op(csl):
 
 def test_a_run_that_served_every_item_of_the_catalog_passes_the_reach_check(
         csl, monkeypatch):
-    served = {it.op for it in csl.sweep_items()}
-    assert set(NEW_TILE_OPS) <= served
+    served = {it.op for it in csl.sweep_items(mpfr=True)}     # the wide items too (parcel HXc)
+    assert set(NEW_TILE_OPS) <= served and set(WIDE_TILE_OPS) <= served
     FE._check_reach(served, csl.OP_REACH)                 # must not raise
     # and the check can fail, by name: under the table of card-stress-1016
     monkeypatch.setattr(FE, "STRESS_TILE_OPS", OLD_TILE_OPS)

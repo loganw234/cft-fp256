@@ -88,3 +88,34 @@ rnd-div64-c16384.txt	0	host/divsqrt-soak-c16384 div64 20000 12345 rne [0 s]
 # quad, 32cf970fa20249e708bb4d541e0f0b999dc063084cb4414efd65d17e0a5fc6a5 single, b048bc270c01a6b251ca6be04c355d5a34a136eabcc35add84c4b7241ddc7d96 deep). They name the staged
 # files' build, cft_hw.xclbin, in `artifact:`. All three: commit 688b6530e3af18f1de1d82888a8fc8875b1787f4, tree: clean, bitstream_sources: rtl/ and hw/ identical to that
 # commit. Not logs, so they have no row: the suite reads them by name.
+# wx-*: the wide modes of the divsqrt soak (parcel HXa; their catalog entries, parcel HXc), made 2026-10-26 in WSL (Ubuntu 22.04, gcc 11.4, the
+# system's MPFR 4.1.0 and GMP 6.2.1, which their oracle line names) from the tree of 7d987bf8: make -C host divsqrt-soak MPFR=1 (XRT=0) and
+# make -C host SOAK_CHUNK=16384 MPFR=1 soak-chunk, the software backend only. No card. Each log is verbatim, stderr and stdout together as the
+# driver keeps them; *-sab: CFT_SOAK_SABOTAGE=1 (the library's result flipped) and =2 (the CPU's narrow result flipped, the ladder names it).
+# wx-hard-space: every wide mode's hard-space; wx-count-*: hard-count over a whole space (a header line, then the tool's own output).
+# wx-box-count-div128-hard and -div256-hard: amd-arc-box, the lead's run of parcel HXa's box script (part counts) at 1ff07f6c, whose builders
+# are 7d987bf8's: eight slices each, verbatim, held to the box's SHA256SUMS; the two whole spaces take 7 and 16 minutes of one core here.
+wx-hard-space.txt	0	for m in sqrt64-f32 sqrt128-f32 sqrt256-f32 recip64-f32 recip128-f32 recip256-f32 sqrt128-win-ones sqrt128-win-zeros sqrt128-win-alt sqrt128-win-key sqrt256-win-ones sqrt256-win-zeros sqrt256-win-alt sqrt256-win-key recip128-win-ones recip128-win-zeros recip128-win-alt recip128-win-key recip256-win-ones recip256-win-zeros recip256-win-alt recip256-win-key div128-f64hard div256-f64hard sqrt128-f64hard sqrt256-f64hard div128-hard div256-hard sqrt128-hard sqrt256-hard; do host/divsqrt-soak hard-space $m; done [0 s]
+wx-count-sqrt128-hard.txt	0	host/divsqrt-soak hard-count sqrt128-hard 0 4456448
+wx-count-sqrt256-hard.txt	0	host/divsqrt-soak hard-count sqrt256-hard 0 4456448
+wx-count-sqrt128-f64hard.txt	0	host/divsqrt-soak hard-count sqrt128-f64hard 0 4456448
+wx-count-div128-f64hard.txt	0	host/divsqrt-soak hard-count div128-f64hard 0 289685696
+wx-count-sqrt128-f32.txt	0	host/divsqrt-soak hard-count sqrt128-f32 0 4294967296
+wx-count-recip256-win-alt.txt	0	host/divsqrt-soak hard-count recip256-win-alt 0 4294967296
+wx-sqrt128-f32.txt	0	host/divsqrt-soak sqrt128-f32 0x3F800000 0x3F801000 rne [0 s]
+wx-recip64-f32.txt	0	host/divsqrt-soak recip64-f32 0x3F800000 0x3F801000 rup [0 s]
+wx-sqrt256-f32.txt	0	host/divsqrt-soak sqrt256-f32 0 4096 rmm [1 s]
+wx-recip256-win-key.txt	0	host/divsqrt-soak recip256-win-key 0 4096 rup [0 s]
+wx-sqrt128-win-ones.txt	0	host/divsqrt-soak sqrt128-win-ones 4294963200 4294967296 rne [0 s]
+wx-div128-f64hard.txt	0	host/divsqrt-soak div128-f64hard 21250240 21251264 rtz [0 s]
+wx-div256-f64hard-rmm.txt	0	host/divsqrt-soak div256-f64hard 21250240 21251264 rmm [0 s]
+wx-sqrt128-f64hard.txt	0	host/divsqrt-soak sqrt128-f64hard 262144 266240 rdn [0 s]
+wx-div256-hard.txt	0	host/divsqrt-soak div256-hard 0 1024 rne [0 s]
+wx-div128-hard.txt	0	host/divsqrt-soak div128-hard 21496240 21497264 rup [0 s]
+wx-sqrt256-hard.txt	0	host/divsqrt-soak sqrt256-hard 262144 266240 rmm [0 s]
+wx-sqrt128-f32-sab.txt	1	env CFT_SOAK_SABOTAGE=1 host/divsqrt-soak sqrt128-f32 0x3F800000 0x3F800400 rne [0 s]
+wx-sqrt128-f32-sab2.txt	1	env CFT_SOAK_SABOTAGE=2 host/divsqrt-soak sqrt128-f32 0x3F800000 0x3F800400 rne [0 s]
+wx-div128-hard-sab.txt	1	env CFT_SOAK_SABOTAGE=1 host/divsqrt-soak div128-hard 0 1024 rmm [0 s]
+wx-chunk-sqrt128-f32-c16384.txt	0	host/divsqrt-soak-c16384 sqrt128-f32 0x3F800000 0x3F804000 rne [1 s]
+wx-box-count-div128-hard.txt	0	host/divsqrt-soak hard-count div128-hard <eight slices, each named in the file>
+wx-box-count-div256-hard.txt	0	host/divsqrt-soak hard-count div256-hard <eight slices, each named in the file>

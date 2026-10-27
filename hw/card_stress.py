@@ -66,6 +66,10 @@ Since 2026-10-21 (parcel DR3, the coverage wave) the catalog has 35 more items, 
 and, once wholly covered, to its whole-space figures. --records writes the finished sweep slices as canonical records through
 hw/sweep_record.py (RecordSink; --sign-key signs them) and --sweep-chunk N runs the sweep's slices with the tools built at
 pass size N, recording the batch and chunk each said. docs/CARDDAY.md, "The coverage wave in the driver", is the operator's page.
+Since 2026-10-26 (parcel HXc, the wide-format sweeps' phase 1) --mpfr-prefix DIR, the pinned MPFR, builds divsqrt-soak with MPFR=1 against
+it, checks that the tool has the wide modes and that its oracle line names the pin, and appends the 102 wide-format items (fp64, fp128 and
+fp256 division and square root: hw/card_stress_lib.py, WIDE_OPS, each item's claim named by space and level); without it nothing of this
+changes, and a wide item named by --sweep-items is a skipped leg, by name (docs/CARDDAY.md, "The wide items in the driver").
 
 RECORDS. $OUT/metrics.jsonl is append-only: one `leg` record a leg, one `telemetry` record a
 sample, with `run_start`, `build`, `cycle_start`, `cycle_end`, `event` and `run_end` between
@@ -189,6 +193,8 @@ QUICK_SINGLE_ITEMS = ("sqrt32-rne", "rint32-rne")
 QUICK_HOST_ITEMS = ("nextup32", "conv32to64-all", "rem32")
 # What a host job must not see, whatever the environment the driver was started in: it names the card (and a tile of it)
 HOST_JOB_DROPS = ("CFT_SOAK_ARTIFACT", "CFT_XRT_TILES")
+# The image of a record that is of the run, not of an image: a wide item refused for want of --mpfr-prefix (Driver.refuse_wide)
+NO_IMAGE = "-"
 
 BATTERY = ["api-test", "dt-i", "dt-q8", "dt-full", "dt-r", "dt-b", "card-segrun",
            "seq-check", "acceptance", "acceptance-rev8", "resident", "selftest"]
@@ -299,6 +305,89 @@ def kv_ints(text: str, what: str, names: Optional[List[str]] = None) -> Dict[str
 
 def expand(path: str) -> str:
     return os.path.expandvars(os.path.expanduser(path))
+
+
+# ---------------------------------------------------------------------------
+# the pinned MPFR of the wide items (parcel HXc, 2026-10-26)
+# ---------------------------------------------------------------------------
+# The wide modes of the divsqrt soak exist only in a tool built with MPFR=1 (host/Makefile), and their oracle at fp128 and fp256 is
+# the pinned MPFR (Logan, 2026-10-26: "MPFR at fp128 and fp256 (the box's pinned 4.2.2)"). The pin is read from
+# verify/build-mpfr-oracle.sh's MPFR_V, as verify/run.sh's mpfr stage reads it, so the number exists once. --mpfr-prefix DIR names the
+# prefix that script builds (DIR/include/mpfr.h, and DIR/lib/libmpfr.a and libgmp.a: its libraries are static); without it the driver
+# builds and runs exactly what it did before the wide items, and a wide item named by --sweep-items is a named skip, never run.
+MPFR_PIN_SCRIPT = "verify/build-mpfr-oracle.sh"
+_MPFR_V = re.compile(r"^MPFR_V=(\S+)\s*$", re.M)
+_MPFR_HEADER_V = re.compile(r'^#\s*define MPFR_VERSION_STRING "([^"]*)"', re.M)
+MPFR_CHECK_MODE = "div128-hard"             # `divsqrt-soak hard-space div128-hard` exits 0 only from a build with the wide modes
+MPFR_ORACLE_JOB = ("sqrt128-f32", "0", "1", "rne")      # one case on the software backend: its stderr names the MPFR it linked
+
+
+def mpfr_pin(root: str) -> Optional[str]:
+    """The pinned MPFR version, verify/build-mpfr-oracle.sh's MPFR_V in the checkout `root`, or None where it cannot be read."""
+    try:
+        with open(os.path.join(root, *MPFR_PIN_SCRIPT.split("/")), "r", encoding="utf-8", errors="replace") as fh:
+            m = _MPFR_V.search(fh.read())
+    except OSError:
+        return None
+    return m.group(1) if m else None
+
+
+def mpfr_prefix_problem(prefix: str, pin: Optional[str]) -> Optional[str]:
+    """None when `prefix` holds the pinned MPFR as verify/build-mpfr-oracle.sh builds it - include/mpfr.h of the pin's version, and the
+    static lib/libmpfr.a and lib/libgmp.a - else why not, in a sentence. The build's own check comes later: the oracle line of the tool
+    it links must name the pin too (a header and a library can disagree)."""
+    if not pin:
+        return f"the pin cannot be read: {MPFR_PIN_SCRIPT} has no MPFR_V line in this checkout"
+    if not os.path.isdir(prefix):
+        return f"{prefix} is not a directory"
+    hdr = os.path.join(prefix, "include", "mpfr.h")
+    try:
+        with open(hdr, "r", encoding="utf-8", errors="replace") as fh:
+            m = _MPFR_HEADER_V.search(fh.read())
+    except OSError:
+        return f"{hdr} cannot be read: not an MPFR prefix (bash {MPFR_PIN_SCRIPT} builds the pinned one)"
+    if m is None:
+        return f"{hdr} has no MPFR_VERSION_STRING line"
+    if m.group(1) != pin:
+        return f"{hdr} is MPFR {m.group(1)}, and the pin is {pin} ({MPFR_PIN_SCRIPT})"
+    missing = [x for x in ("libmpfr.a", "libgmp.a") if not os.path.isfile(os.path.join(prefix, "lib", x))]
+    if missing:
+        return f"{os.path.join(prefix, 'lib')} has no {' and no '.join(missing)}: the pin's libraries are static ({MPFR_PIN_SCRIPT})"
+    return None
+
+
+# The build's KNOWN warning lines, each pattern at most `n` times in one make's log (parcel HXc, 2026-10-26). CLAUDE.md's two
+# (cft_resident.cpp:264 and :265, a deprecated read_register), and the two soaks' `#pragma STDC FENV_ACCESS`, which gcc ignores
+# (tools/divsqrt_soak.c:79 and tools/clause5_soak.c:167 at 7d987bf8), printed whenever a soak is compiled: in a fresh clone's build
+# (the smokes of 2026-10-23 and 24 printed all four, READ in their driver.log) and, under MPFR=1, at every build, since that tool is
+# relinked each time. Before, the step counted every line and said NOTE for any count but two, so it said it every night - four on a
+# fresh clone, none when nothing was rebuilt - and a new warning looked like the others. Now a line no pattern takes, or one past its
+# pattern's count, is NEW: the step names it and the NOTE says it, and nothing else does.
+KNOWN_WARNINGS = (
+    (re.compile(r"tools/cft_resident\.cpp:\d+:\d+: warning: .*read_register.* is deprecated"), 2,
+     "cft_resident.cpp's two deprecated read_register calls"),
+    (re.compile(r"tools/divsqrt_soak\.c:\d+: warning: ignoring .#pragma STDC FENV_ACCESS. \[-Wunknown-pragmas\]"), 1,
+     "divsqrt_soak.c's FENV_ACCESS pragma"),
+    (re.compile(r"tools/clause5_soak\.c:\d+: warning: ignoring .#pragma STDC FENV_ACCESS. \[-Wunknown-pragmas\]"), 1,
+     "clause5_soak.c's FENV_ACCESS pragma"),
+)
+
+
+def sort_warnings(lines: List[str]) -> Tuple[List[str], List[str]]:
+    """(known, new) of one make log's warning lines (KNOWN_WARNINGS): a line a pattern takes, while that pattern is under its count,
+    is known; every other line is new."""
+    used = [0] * len(KNOWN_WARNINGS)
+    known: List[str] = []
+    new: List[str] = []
+    for ln in lines:
+        for i, (rx, n, _what) in enumerate(KNOWN_WARNINGS):
+            if used[i] < n and rx.search(ln):
+                used[i] += 1
+                known.append(ln)
+                break
+        else:
+            new.append(ln)
+    return known, new
 
 
 # ---------------------------------------------------------------------------
@@ -687,6 +776,12 @@ class Driver:
         # keep the default tools. None: the default tools, and nothing below changes.
         self.chunk: Optional[int] = getattr(a, "sweep_chunk", None) or None
         self.batch = self.chunk or L.DEFAULT_BATCH          # the BATCH a sweep slice's tool will say it ran at
+        # --mpfr-prefix DIR (parcel HXc): the pinned MPFR that divsqrt-soak's wide modes are built against (MPFR=1 MPFR_PREFIX=DIR on the
+        # build's make lines) and the catalog's 102 wide items with it; parse_args has held DIR to the pin. None: neither, as before.
+        self.mpfr_prefix: Optional[str] = getattr(a, "mpfr_prefix", None) or None
+        self.mpfr_pin = mpfr_pin(self.root) if self.mpfr_prefix else None
+        self.mpfr_seen: Optional[str] = None                # the MPFR version the built tool's oracle line named
+        self.wide_names = frozenset(it.name for it in L.sweep_items(mpfr=True) if it.mpfr)
         # cases and skipped slots of each item's completed slices, to hold a wholly covered item to its whole-space figures
         self.sums: Dict[str, List[int]] = {}
         self.whole_done: set = set()
@@ -737,6 +832,38 @@ class Driver:
                 raise SystemExit(f"--legs: {leg!r} is not one of {', '.join(BATTERY)}")
         self.sweep_only = [x for x in a.sweep_items.split(",") if x]
         self.rev8_images = expand(a.rev8_images) if a.rev8_images else os.path.join(self.out, "rev8-images")
+
+    def catalog(self, *probes: Any) -> List[L.Item]:
+        """The sweep's catalog for this run: hw/card_stress_lib.py's sweep_items, with the probes' modes where the build has run them, and
+        the wide items only when --mpfr-prefix is given (their tool is built with MPFR=1 against it)."""
+        return L.sweep_items(*probes, mpfr=bool(self.mpfr_prefix))
+
+    def mpfr_flags(self) -> List[str]:
+        """What --mpfr-prefix adds to the build's make lines: MPFR=1 MPFR_PREFIX=DIR (host/Makefile builds divsqrt-soak, and
+        divsqrt-soak-cN, with the wide modes against DIR's MPFR, relinked every time); nothing without it."""
+        return ["MPFR=1", f"MPFR_PREFIX={self.mpfr_prefix}"] if self.mpfr_prefix else []
+
+    def refuse_wide(self) -> None:
+        """A wide item named by --sweep-items in a run without --mpfr-prefix is not in this run's catalog, and is never run: it is
+        REFUSED, by name, once a run start - a skipped sweep leg naming the item and the reason, which the report lists under its
+        skipped legs and no coverage counts (parcel HXc). The image is '-': the refusal is of the run, not of any image."""
+        if self.mpfr_prefix:
+            return
+        wide = {it.name: it for it in L.sweep_items(mpfr=True) if it.name in self.wide_names}
+        for n in dict.fromkeys(self.sweep_only):
+            it = wide.get(n)
+            if it is None:
+                continue
+            now = time.time()
+            why = (f"a wide item, REFUSED: no --mpfr-prefix, so its tool is not built with MPFR=1 against the pinned MPFR "
+                   f"({MPFR_PIN_SCRIPT}) and it does not run; it is not covered and nothing of it passed")
+            self.rec({"type": "leg", "cycle": self.cycle, "image": NO_IMAGE, "image_sha256": None, "leg": f"sweep-{n}", "kind": "sweep",
+                      "attempt": 1, "start": L.iso(now), "end": L.iso(now), "start_epoch": round(now, 3), "end_epoch": round(now, 3),
+                      "duration_s": 0.0, "rc": None, "status": "skipped", "timed_out": False, "killed": None, "counts": None,
+                      "rate": None, "disagreements": None, "log": None, "log_kept": "none", "reason": why, "tile": None, "extra": None,
+                      "sweep": {"item": n, "tool": it.tool, "op": it.op, "mode": it.mode, "reach": it.reach, "refused": "no-mpfr-prefix"}})
+            self.tally(NO_IMAGE, "skipped")
+            self.say(f"sweep item {n}: SKIPPED ({why})")
 
     # -- small things -------------------------------------------------------
     def say(self, msg: str) -> None:
@@ -1810,6 +1937,8 @@ class Driver:
             """(what stops the item, how it is listed); "" for an item that can run."""
             it = have.get(n)
             iv = self.intervals.get(n, [])
+            if it is None and n in self.wide_names and not self.mpfr_prefix:
+                return "a wide item refused for want of --mpfr-prefix (the skipped leg at the start names it)", n
             if it is None:
                 return "not in this run's catalog (a probe at the build ruled it out)", n
             if self.sweep_only and n not in self.sweep_only:
@@ -2400,6 +2529,68 @@ class Driver:
         except (OSError, subprocess.TimeoutExpired) as ex:
             return 127, f"{ex}"
 
+    def warnings_said(self, what: str, log: str) -> str:
+        """The warning lines of one make's log, as its step says them - how many, how many known (KNOWN_WARNINGS) and how many new -
+        and a NOTE naming each new one, which is the only time a NOTE is said: a new warning is seen, and the known ones are not news."""
+        try:
+            with open(log, "r", encoding="utf-8", errors="replace") as fh:
+                warns = [ln.strip() for ln in fh if "warning:" in ln]
+        except OSError:
+            warns = []
+        known, new = sort_warnings(warns)
+        if new:
+            self.say(f"NOTE: {what} printed {len(new)} warning line(s) that are not its known ones (" + "; ".join(w for _r, _n, w in KNOWN_WARNINGS)
+                     + "): " + " | ".join(w[:160] for w in new[:6]) + (f" | ... {len(new) - 6} more in {log}" if len(new) > 6 else ""))
+        return f"{len(warns)} warning line(s), {len(known)} known and {len(new)} new" + (f" (NEW: {new[0][:120]})" if new else "")
+
+    def check_mpfr(self, step: Callable[[str, bool, str], None], host: str) -> None:
+        """--mpfr-prefix (parcel HXc): the built tool has the wide modes and links the pinned MPFR - divsqrt-soak, and divsqrt-soak-cN
+        under --sweep-chunk. `hard-space div128-hard` must exit 0 (only a build with the wide modes knows the mode) and print the
+        catalog's space; and one case of sqrt128-f32 on the software backend - no image, CFT_SOAK_ARTIFACT and CFT_XRT_TILES taken out of
+        its environment, so it cannot open the card - must pass and print an oracle line naming MPFR at the pin's version: what
+        mpfr_get_version says, the library LINKED, which a header can disagree with. A failure fails the step, by name, and the run does
+        not start (build_failed, exit 3): a wide item never runs against an MPFR that is not the pin."""
+        env = {k: v for k, v in os.environ.items() if k not in HOST_JOB_DROPS}
+        n, k = L.HARD_SPACE[MPFR_CHECK_MODE]
+        for name, chunk in [("divsqrt-soak", None)] + ([(f"divsqrt-soak-c{self.chunk}", self.chunk)] if self.chunk else []):
+            tool = os.path.join(host, name)
+
+            def run(args: List[str]) -> Tuple[int, str]:
+                try:
+                    p = subprocess.run([tool] + args, capture_output=True, text=True, timeout=120, cwd=self.root, env=env)
+                    return p.returncode, (p.stderr or "") + (p.stdout or "")
+                except (OSError, subprocess.TimeoutExpired) as ex:
+                    return 127, f"{ex}"
+            rc, out = run(["hard-space", MPFR_CHECK_MODE])
+            if rc != 0:
+                step(f"mpfr {name}", False, f"`{name} hard-space {MPFR_CHECK_MODE}` exited {rc} ({out.strip()[-100:]!r}): this tool has no "
+                     f"wide modes, so it was not built with MPFR=1, and no wide item can run")
+                continue
+            got = re.findall(rf"^{re.escape(MPFR_CHECK_MODE)} k=(\d+) total=(\d+)$", out, re.M)
+            if got != [(str(k), str(n))]:
+                step(f"mpfr {name}", False, f"`{name} hard-space {MPFR_CHECK_MODE}` printed {got or 'no space line'}, not the catalog's "
+                     f"one line '{MPFR_CHECK_MODE} k={k} total={n}' (hw/card_stress_lib.py HARD_SPACE)")
+                continue
+            rc, out = run(list(MPFR_ORACLE_JOB))
+            op, lo, hi, mode = MPFR_ORACLE_JOB
+            try:
+                L.parse_soak(out, rc, op, mode, None, int(hi) - int(lo), {"encodings": int(hi) - int(lo), "per_encoding": 1}, cpu=True,
+                             chunk=chunk)
+                ora = list(L.SOAK_ORACLE_MPFR.finditer(out))
+                if len(ora) != 1:
+                    raise L.VerdictError(f"{len(ora)} lines 'oracle: MPFR <version> with GMP <version>, ...', where there is one")
+            except L.VerdictError as e:
+                step(f"mpfr {name}", False, f"one case of `{name} {' '.join(MPFR_ORACLE_JOB)}` on the software backend: {e}")
+                continue
+            seen, gmp = ora[0].group(1), ora[0].group(2)
+            if seen != self.mpfr_pin:
+                step(f"mpfr {name}", False, f"its oracle line names MPFR {seen} (with GMP {gmp}), and the pin is {self.mpfr_pin} "
+                     f"({MPFR_PIN_SCRIPT}): the tool linked another MPFR than the pinned one in {self.mpfr_prefix}")
+                continue
+            self.mpfr_seen = seen
+            step(f"mpfr {name}", True, f"`{name} hard-space {MPFR_CHECK_MODE}` rc 0, {n:,} indices k={k} (the catalog's); one case of "
+                 f"{op} on the software backend passed, and its oracle line names MPFR {seen} with GMP {gmp}: the pin")
+
     def build_tools(self, step: Callable[[str, bool, str], None]) -> None:
         a = self.a
         host = os.path.join(self.root, "host")
@@ -2423,6 +2614,7 @@ class Driver:
         argv = ["make", "-C", host, f"-j{a.build_jobs}"] + xrt_flags
         if c5defs:
             argv.append(f"C5DEFS={c5defs}")
+        argv += self.mpfr_flags()           # --mpfr-prefix: divsqrt-soak with the wide modes, against the pinned MPFR; nothing without it
         argv += targets
         if self.a.nice and shutil.which("nice"):
             argv = ["nice", "-n", str(a.nice)] + argv
@@ -2435,20 +2627,11 @@ class Driver:
         except (OSError, subprocess.TimeoutExpired) as e:
             rc = 127
             self.say(f"build: {e}")
-        warns = []
-        try:
-            with open(log, "r", encoding="utf-8", errors="replace") as fh:
-                warns = [ln.strip() for ln in fh if "warning:" in ln]
-        except OSError:
-            pass
-        step("make", rc == 0, f"make -C host {' '.join(xrt_flags)} {' '.join(targets)}: rc {rc} in "
-             f"{time.time() - t0:.0f} s, {len(warns)} warning line(s) (the known two: "
-             f"tools/cft_resident.cpp:264 and :265, deprecated read_register); log {os.path.relpath(log, self.out)}")
+        mf = "".join(" " + x for x in self.mpfr_flags())
+        step("make", rc == 0, f"make -C host {' '.join(xrt_flags)}{mf} {' '.join(targets)}: rc {rc} in "
+             f"{time.time() - t0:.0f} s, {self.warnings_said('make', log)}; log {os.path.relpath(log, self.out)}")
         if rc != 0:
             return
-        if len(warns) != 2:
-            self.say("NOTE: CLAUDE.md says the XRT=1 host build carries exactly two known warnings; "
-                     f"this one has {len(warns)}: " + " | ".join(w[:120] for w in warns[:4]))
         if self.chunk:
             # --sweep-chunk N: the sweep's slices run the tools built at pass size N (host/Makefile, `soak-chunk`: divsqrt-soak-cN
             # and clause5-soak-cN against a library of their own). Built with the flags the default build took - the XRT ones and
@@ -2457,6 +2640,7 @@ class Driver:
             cargv = ["make", "-C", host, f"-j{a.build_jobs}"] + xrt_flags
             if c5defs:
                 cargv.append(f"C5DEFS={c5defs}")
+            cargv += self.mpfr_flags()      # the same MPFR words (verifier VHXa: the chunked MPFR=1 tool's verdicts are the default size's)
             cargv += [f"SOAK_CHUNK={self.chunk}", "soak-chunk"]
             if a.nice and shutil.which("nice"):
                 cargv = ["nice", "-n", str(a.nice)] + cargv
@@ -2469,8 +2653,9 @@ class Driver:
             except (OSError, subprocess.TimeoutExpired) as e:
                 crc = 127
                 self.say(f"build (soak-chunk): {e}")
-            step("make soak-chunk", crc == 0, f"make -C host {' '.join(xrt_flags)}{' C5DEFS=' + c5defs if c5defs else ''} "
-                 f"SOAK_CHUNK={self.chunk} soak-chunk: rc {crc} in {time.time() - t1:.0f} s; log {os.path.relpath(clog, self.out)}")
+            step("make soak-chunk", crc == 0, f"make -C host {' '.join(xrt_flags)}{' C5DEFS=' + c5defs if c5defs else ''}{mf} "
+                 f"SOAK_CHUNK={self.chunk} soak-chunk: rc {crc} in {time.time() - t1:.0f} s, {self.warnings_said('make soak-chunk', clog)}; "
+                 f"log {os.path.relpath(clog, self.out)}")
             if crc != 0:
                 return
         exes = ["device-test", "api-test", "remote-test", "cft-segrun", "cft-audit", "divsqrt-soak",
@@ -2505,6 +2690,8 @@ class Driver:
              f"the tree's {tid.strip()!r}, cft-segrun's {bid.strip()!r}")
         if rc == 0 and rc2 == 0 and tid.strip() == bid.strip() and bid.strip():
             self.build_id = bid.strip()          # what a host slice's record says was run
+        if self.mpfr_prefix:
+            self.check_mpfr(step, host)          # the wide modes are there, against the pinned MPFR (parcel HXc)
         for mod in ("mpmath", "pytest"):
             rc, _ = self.run_quiet([self.python, "-c", f"import {mod}"], 60)
             if rc != 0:
@@ -2518,7 +2705,7 @@ class Driver:
         # scaleb32-wide's exponent range, measured on this libm (host only): if it does not hold the wide items
         # do not exist, as run-c5-soak.sh drops their jobs
         wd = sc if self.run_quiet([c5, "probe", "scalebrange"], 120)[0] == 0 else ()
-        self.items = L.sweep_items(sc, cf, wd)
+        self.items = self.catalog(sc, cf, wd)
         step("probes", True, f"scaleb modes {','.join(sc)}; cvtfrom modes {','.join(cf)}; scaleb32-wide modes "
              f"{','.join(wd) if wd else 'none (probe scalebrange: the derived exponent range does not hold on this libm)'}")
         # the card is there, as far as XRT can say (telemetry, and a cheap look)
@@ -2629,7 +2816,7 @@ class Driver:
             except RecordsError as e:
                 print(f"--records: {e}", file=sys.stderr)
                 return 2
-        self.items = L.sweep_items()
+        self.items = self.catalog()
         exit_code = 0
         reason = "finished"
         try:
@@ -2637,7 +2824,7 @@ class Driver:
             self.load_earlier()
             # settings.json is every argument; the coverage wave's four keys are left out while they are unset, so that
             # a run without them writes the file it always wrote (a key's PATH is a setting; its secret is never read into one)
-            unset = {"sweep_chunk", "records", "sign_key", "device_key"}
+            unset = {"sweep_chunk", "records", "sign_key", "device_key", "mpfr_prefix"}
             with open(os.path.join(self.out, "settings.json"), "w", encoding="utf-8") as fh:
                 json.dump({k: v for k, v in vars(a).items() if not (k in unset and v in (None, False))}, fh, indent=1, default=str)
             self.say(f"card-stress: out {self.out}{' (resumed)' if resumed else ''}; "
@@ -2662,6 +2849,8 @@ class Driver:
                         "seed_scheme": L.SEED_SCHEME}
             if self.chunk:
                 settings["sweep_chunk"] = self.chunk       # the pass size of the sweep's tools; absent for the default tools
+            if self.mpfr_prefix:
+                settings["mpfr"] = {"prefix": self.mpfr_prefix, "pin": self.mpfr_pin}     # the wide items' MPFR; absent without them
             if self.sink is not None:
                 settings["records"] = {"file": RECORDS_FILE, "signed": self.sink.signed}
             self.rec({"type": "run_start", "run_id": self.run_id, "out": self.out,
@@ -2686,7 +2875,8 @@ class Driver:
             self.state = "BUILD"
             self.build_and_check()
             if not self.items:
-                self.items = L.sweep_items()
+                self.items = self.catalog()
+            self.refuse_wide()
             self.install_signals()
             if a.telemetry_seconds > 0:
                 self.tel_thread = threading.Thread(target=self.tel_loop, daemon=True)
@@ -2902,6 +3092,13 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
                    "`batch` and `chunk` its tool said (docs/CARDDAY.md, \"The soak at a larger pass size\" and \"The driver at "
                    "a larger pass size\": flags are compared per batch, so a larger one compares them over more operands). "
                    "Default: the default tools, and nothing changes")
+    g.add_argument("--mpfr-prefix", default=None, metavar="DIR",
+                   help="the pinned MPFR (verify/build-mpfr-oracle.sh's prefix: DIR/include/mpfr.h of the version that script pins, and "
+                   "its static DIR/lib/libmpfr.a and libgmp.a; on the box ~/cft-fp256/verify/_mpfr-prefix). The build step then makes "
+                   "divsqrt-soak (and divsqrt-soak-cN under --sweep-chunk) with MPFR=1 MPFR_PREFIX=DIR, checks that the tool has the wide "
+                   "modes and that its oracle line names the pin, and the catalog gains the 102 wide-format items of phase 1 (parcel "
+                   "HXc; docs/CARDDAY.md, \"The wide items in the driver\"). A DIR that is not that MPFR is refused here, by name. "
+                   "Default: no wide item runs, the build is the one it was, and a wide item named by --sweep-items is a named skip")
     g.add_argument("--sweep-items", default="", help="comma-separated campaign items to sweep, e.g. sqrt32-rne,rint32-rne "
                    "(default: all; names are hw/card_stress_lib.py's sweep_items). A wave runs one job a distinct item, so "
                    "name four tile items to use the quad's four tiles; a host item named here is the host pool's, not "
@@ -2956,8 +3153,15 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
             L.parse_when(a.until)
         except ValueError as e:
             ap.error(str(e))
+    if a.mpfr_prefix is not None:
+        a.mpfr_prefix = os.path.abspath(expand(a.mpfr_prefix))      # the make runs in host/: a relative prefix would name another place
+        why = mpfr_prefix_problem(a.mpfr_prefix, mpfr_pin(a.root))
+        if why:
+            ap.error(f"--mpfr-prefix {a.mpfr_prefix}: refused, it is not the pinned MPFR the wide items are checked against: {why}")
     if a.sweep_items:
-        known = {it.name for it in L.sweep_items()}
+        # every item a run can have, the wide ones too: a wide item named without --mpfr-prefix is known, and the run refuses it by name
+        # (Driver.refuse_wide), so that a night's list that names one is not lost to a typo's refusal
+        known = {it.name for it in L.sweep_items(mpfr=True)}
         for n in a.sweep_items.split(","):
             if n and n not in known:
                 ap.error(f"--sweep-items {n!r}: not an item ({', '.join(sorted(known)[:6])}, ...)")

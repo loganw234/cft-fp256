@@ -1,0 +1,48 @@
+# amd-arc-box, the lead's run of parcel HXa's box script (part counts) at 1ff07f6c, 2026-10-26 15:49 box time: `hard-count` over
+# eight slices of div128-hard, each slice's output verbatim (and the box script's `rc` line after it); sums checked against the box's SHA256SUMS
+# host/divsqrt-soak hard-count div128-hard 0 36241462
+F3a 452 1808 0
+F3b 262124 1048496 0
+F2 262144 1048576 0
+F1 4194304 16777216 0
+F0A 8388608 33554428 4
+F0D 8388608 16777216 16777216
+F0K 14745222 40880052 18100836
+total 36241462 110087792 34878056
+maxskip 2
+rc 0
+# host/divsqrt-soak hard-count div128-hard 36241462 72482924
+F0K 36241462 100488764 44477084
+total 36241462 100488764 44477084
+maxskip 2
+rc 0
+# host/divsqrt-soak hard-count div128-hard 72482924 108724386
+F0K 36241462 100478020 44487828
+total 36241462 100478020 44487828
+maxskip 2
+rc 0
+# host/divsqrt-soak hard-count div128-hard 108724386 144965848
+F0K 36241462 100470596 44495252
+total 36241462 100470596 44495252
+maxskip 2
+rc 0
+# host/divsqrt-soak hard-count div128-hard 144965848 181207310
+F0K 36241462 100489244 44476604
+total 36241462 100489244 44476604
+maxskip 2
+rc 0
+# host/divsqrt-soak hard-count div128-hard 181207310 217448772
+F0K 36241462 100491204 44474644
+total 36241462 100491204 44474644
+maxskip 2
+rc 0
+# host/divsqrt-soak hard-count div128-hard 217448772 253690234
+F0K 36241462 100475600 44490248
+total 36241462 100475600 44490248
+maxskip 2
+rc 0
+# host/divsqrt-soak hard-count div128-hard 253690234 289931696
+F0K 36241462 100488968 44476880
+total 36241462 100488968 44476880
+maxskip 2
+rc 0

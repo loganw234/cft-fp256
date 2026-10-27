@@ -89,7 +89,7 @@ RULES = {
                  "legs and the host pool's legs left out. The wall span runs from the first record to the last and includes the "
                  "days between nights.",
 }
-_CAT = {it.name: it for it in sweep_items()}
+_CAT = {it.name: it for it in sweep_items(mpfr=True)}      # with the wide items (parcel HXc), so a night that names one does not call it unknown
 _REASON = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
 _PATHY = re.compile(r"(?:^|[\s\"'(=:,;\[])(?:[A-Za-z]:[\\/]|\\\\|~/|/[A-Za-z0-9._~-]+/[A-Za-z0-9._~-])")
 _IPV4 = re.compile(r"(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?![\w.])")

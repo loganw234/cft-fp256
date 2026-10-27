@@ -1,0 +1,4 @@
+soaking the software backend
+oracle: MPFR 4.1.0 with GMP 6.2.1, mpfr_ieee.h's emulation; the ladder: the CPU's float
+  ladder: 4096 of the 4096 cases rounded to fp32 and checked against the CPU's own, 0 value and 0 flag disagreements
+sqrt256-f32 rmm: 4096 cases, 0 value mismatches, 0 flag mismatches, 4096 encodings, 0 skipped

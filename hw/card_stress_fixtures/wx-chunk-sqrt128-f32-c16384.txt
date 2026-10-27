@@ -1,0 +1,5 @@
+soaking the software backend
+soaking with BATCH 16384 and CFT_CHUNK 16384 (the defaults are 4096)
+oracle: MPFR 4.1.0 with GMP 6.2.1, mpfr_ieee.h's emulation; the ladder: the CPU's float
+  ladder: 16384 of the 16384 cases rounded to fp32 and checked against the CPU's own, 0 value and 0 flag disagreements
+sqrt128-f32 rne: 16384 cases, 0 value mismatches, 0 flag mismatches, 16384 encodings, 0 skipped
