@@ -9,8 +9,9 @@
 # defect is put back into a copy of the code and the scenario written for it must go red
 # (the plants; hw/test-sweep-judge.sh's standard). Nothing here starts anything heavy.
 #
-#   bash hw/test-card-stress.sh                 # everything: about 29 minutes under WSL (2026-10-21, niced, 1,761 s with 130 plants; 1,636 s with 115,
-#                                               # on a desktop other sessions share; process starts are the cost)
+#   bash hw/test-card-stress.sh                 # everything: about 39 minutes under WSL (2026-10-26, niced, at e72cbf08: 626 s without the
+#                                               # plants and 1,699 s for its 193 plants, run apart; 1,761 s with 130 plants on 2026-10-21),
+#                                               # on a desktop other sessions share; process starts are the cost
 #   bash hw/test-card-stress.sh --no-plants --skip-groups stopfile,guard,pool --skip-why "TEXT"
 #                                               # SKIP those groups, by name, with TEXT printed beside each (what verify/run.sh's cardstress stage
 #                                               # does on Windows, where the guard's process listing can stall for minutes on a loaded desktop)

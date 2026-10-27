@@ -24366,8 +24366,10 @@ READ or COMPUTED. **Nothing in this entry touched the card or amd-arc-box.**
   mode words and `hard-count` of every whole space but three (MEASURED, WSL cft2204, a copy of host/ at 7d987bf8 built with
   `MPFR=1` against the system's MPFR 4.1.0: sqrt128-hard 1,745,011 cases and 2,711,437 skipped slots, sqrt256-hard 1,745,800
   and 2,710,648; div128-f64hard, sqrt128-f64hard and sqrt256-f64hard the catalog's figures for div64-hard and sqrt64-hard,
-  whose operands they widen; every slice and window 2^32 cases and none skipped). div256-f64hard's space is div64-hard's
-  too, as the tool names it (its `hard-space` line is div128-f64hard's), and was not counted whole; div128-hard's and
+  whose operands they widen; every slice and window 2^32 cases and none skipped). The tool prints div256-f64hard's
+  `hard-space` under its own name, `div256-f64hard k=4 total=289685696`, followed by the same segment table as
+  div128-f64hard's (hw/card_stress_fixtures/wx-hard-space.txt, lines 46 and 54); its whole space was not counted before
+  send-back 1, below, which counted it: div64-hard's figures, as the catalog has them. div128-hard's and
   div256-hard's are the lead's run of HXa's box script (its part `counts`, eight slices each, every file checked against
   the box's sums, MEASURED, and the slices added, COMPUTED). Each item names its claim, by space and level
   (`Item.claim`: sqrt128-f32-rne's is "every fp32 input, widened exactly to fp128, through the fp128 square root, bits and
@@ -24486,6 +24488,38 @@ yet**: the box is the card's tonight.
 - The NOTE's table holds the four warning lines known today: a known line printed more often than its count is said as
   new, as any line the table does not hold is.
 
-**Which commit each result is from.** e72cbf08 for the code and for every run above but those before the commit; this
-entry's commit changes docs/VALIDATION.md, docs/VERIFICATION.md and docs/README.md alone, which none of the four runs
-reads (READ: no file of hw/ or hw/sched/ opens them; the suites read docs/studies/ and, in the plants, docs/SWEEP-RECORDS.md).
+**Send-back 1 (verifier VHXc, 2026-10-27): a regression in a hand test, fixed.** `python3 hw/test_c5_exhaustive.py`,
+which no stage runs, gave 87 checks and 0 failed at 7d987bf8 and 87 checks with 1 failed at 901d067d (VHXc's
+measurement, WSL): its check "build: the checks an encoding each mode promises here are the driver library's
+PER_ENCODING" held clause5-soak's six exhaustive modes to the whole table, to which this parcel had added the 22 wide
+modes of k = 1 (the slices and the windows). The check now holds them to the table less `WIDE_OPS` (VHXc's correction,
+in hw/test_c5_exhaustive.py; the library is unchanged). In the same commit: this entry's sentence on div256-f64hard,
+which said its `hard-space` line was div128-f64hard's (it is printed under its own name, above); docs/VERIFICATION.md's
+row, which said both "about half an hour" and "about forty minutes" for the suite with its plants and now says 39
+minutes, runs 1 and 2 added (COMPUTED); and hw/test-card-stress.sh's header comment, which said about 29 minutes, the
+same. MEASURED, WSL cft2204, niced, one at a time, from a clean copy (`git archive`) of the tree with the fix, whose hw/
+is this commit's (git tree e43b95ad...), 2026-10-27 07:27:45 to 07:33:26:
+- `hw/test_c5_exhaustive.py`, whole: 87 checks, 0 failed, 0 skipped, 21 s (build 4, special 4, spread 1, refuse 16,
+  sabotage 22, plants 40);
+- VHXc's plant, last, in that copy: the library's `"scaleb32-all": 17` made 18 (its text found once), then
+  `--only build`: 4 checks, 1 failed, exit 1, the check above named;
+- the other hand tests that import the library, whole: `hw/test_sweep_record.py` 269 checks, 0 failed, 1 skipped (`real`,
+  which needs a run's metrics), 4 s; `hw/test_c5_class.py` 145 checks, 0 failed, 0 skipped, 52 s;
+  `hw/test_divsqrt_hard.py` 116 checks, 0 failed, 0 skipped, 195 s (its `unchanged` group runs only with
+  `--baseline-tree`, not given: this parcel changed nothing in host/);
+- div256-f64hard's whole space, from the tool (`make -C host divsqrt-soak MPFR=1`, the system's MPFR 4.1.0, one warning
+  line, the pragma): `hard-count div256-f64hard 0 289685696` gives 812,489,184 cases and 346,253,600 skipped slots, the
+  longest run of skipped indices 2, in 63 s: div64-hard's figures, which the catalog gives it.
+
+The library's other importers ran in runs 1 to 4 (hw/test_card_stress.py and, by its group `testfiles`,
+hw/test_card_stress_report.py and hw/test_card_stress_progress.py; hw/test_sched.py) and before them
+(python/tests/test_figure_extracts.py). Not run, being no tests: docs/studies/swp-a/seed_replay_check.py and
+stress_records.py, study scripts over a real run's metrics.jsonl, and hw/run-c5-soak.sh, a soak campaign. None of runs 1
+to 4 is invalidated: none of them runs hw/test_c5_exhaustive.py, and hw/test-card-stress.sh changed in its header
+comment alone.
+
+**Which commit each result is from.** e72cbf08 for the code and for every run above but those before the commit and
+send-back 1's; 901d067d, this entry's first commit, changed docs/VALIDATION.md, docs/VERIFICATION.md and docs/README.md
+alone, which none of the four runs reads (READ: no file of hw/ or hw/sched/ opens them; the suites read docs/studies/
+and, in the plants, docs/SWEEP-RECORDS.md); send-back 1's commit changes hw/test_c5_exhaustive.py, hw/test-card-stress.sh's
+header comment and the same three documents, and its runs are above.

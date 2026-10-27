@@ -254,8 +254,11 @@ def group_build(tool: Tool) -> None:
           "highest: rne 276, rtz 276, rdn 276, rup 276" in out, out[:300])
     rc, out, err = tool.raw("probe", "scalbn")
     check("build: the older probes still run (scalbn: directed modes honoured on this host)", rc == 0 and "HONOURED" in out, out[:200])
+    # The library's table also holds the divsqrt soak's wide modes (parcel HXc, 2026-10-26: k = 1 for the fp32 slices and the
+    # windows), which this tool does not have: they are left out here, and every clause-5 mode is still held to its entry.
+    c5_per = {j: k for j, k in L.PER_ENCODING.items() if j not in L.WIDE_OPS}
     check("build: the checks an encoding each mode promises here are the driver library's PER_ENCODING (what the driver holds "
-          "a slice to)", {j: k for j, _a, k, _e in MODES} == L.PER_ENCODING, str(L.PER_ENCODING))
+          "a slice to)", {j: k for j, _a, k, _e in MODES} == c5_per, str(c5_per))
 
 
 def group_special(tool: Tool) -> None:
