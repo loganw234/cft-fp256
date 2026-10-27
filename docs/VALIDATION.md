@@ -24347,3 +24347,145 @@ checked against the box's sums: box/hxa/out-3c0adb71/):
   wide modes need only division and square root and build against it.
 - `MPFR` is a make variable, so an environment variable of that name set to anything but 0 or 1 makes every make of
   host/ refuse by name, as the same value on the command line does; nothing in the repository sets one (`git grep`).
+
+## 2026-10-26 - the wide-format items in the stress driver: phase 1's 102 items over HXa's thirty modes, `--mpfr-prefix` with the MPFR build line and a check of the tool it builds, a refusal by name without it, the stand-ins, and the suite's group `wide` with eighteen plants; a box script for the lead, not yet run (parcel HXc, Opus 5.5)
+
+The second build of the wide-format sweeps (docs/studies/HX-wide-sweeps.md, section 7's phase 1; Logan's answers of
+2026-10-26 in docs/ROADMAP.md). docs/CARDDAY.md, "The wide items in the driver", says what each item is, the claim a pass
+over it makes, by space and level, and how to run them. Every figure below says whether it was MEASURED (the run named),
+READ or COMPUTED. **Nothing in this entry touched the card or amd-arc-box.**
+
+**What was built** (e72cbf08, on 7d987bf8).
+- **The catalog** (`hw/card_stress_lib.py`). `sweep_items(mpfr=True)` appends 102 items to the 125 older ones, in the
+  study's rank order (its 5.4, ranks 1, 2, 4, 6 and 7): the wide hard cases (`div128-hard`, `div256-hard`, `sqrt128-hard`,
+  `sqrt256-hard`) and the fp64 hard cases widened (`{div,sqrt}{128,256}-f64hard`) under all five attributes, the fp32 slice
+  at fp128, fp256 and fp64 (`sqrt` and `recip`, six modes) under all five, and the sixteen low-bit windows under rne and rup:
+  4 x 5 + 4 x 5 + 6 x 5 + 16 x 2 = 102 (COMPUTED). Without `mpfr=True` the catalog is the 125 items it was, item for item.
+  Every one is exhaustive and reaches the tile (`OP_REACH`; python/figure_extracts.py's `STRESS_TILE_OPS` gains the thirty
+  mode words, as its test requires). Their indices, k and whole-space figures are the tool's: `hard-space` of all thirty
+  mode words and `hard-count` of every whole space but three (MEASURED, WSL cft2204, a copy of host/ at 7d987bf8 built with
+  `MPFR=1` against the system's MPFR 4.1.0: sqrt128-hard 1,745,011 cases and 2,711,437 skipped slots, sqrt256-hard 1,745,800
+  and 2,710,648; div128-f64hard, sqrt128-f64hard and sqrt256-f64hard the catalog's figures for div64-hard and sqrt64-hard,
+  whose operands they widen; every slice and window 2^32 cases and none skipped). div256-f64hard's space is div64-hard's
+  too, as the tool names it (its `hard-space` line is div128-f64hard's), and was not counted whole; div128-hard's and
+  div256-hard's are the lead's run of HXa's box script (its part `counts`, eight slices each, every file checked against
+  the box's sums, MEASURED, and the slices added, COMPUTED). Each item names its claim, by space and level
+  (`Item.claim`: sqrt128-f32-rne's is "every fp32 input, widened exactly to fp128, through the fp128 square root, bits and
+  flags (L1 over the fp32 slice), under rne"), and the coverage report prints each served wide mode's claim under its sweep
+  table.
+- **The driver** (`hw/card_stress.py`). `--mpfr-prefix DIR`, refused at the command line, by name, unless DIR holds the
+  pinned MPFR: the version `verify/build-mpfr-oracle.sh` pins (its `MPFR_V`, read from the script, 4.2.2) in
+  `include/mpfr.h`, with `lib/libmpfr.a` and `lib/libgmp.a`. With it, the build's make and the `SOAK_CHUNK=N soak-chunk` make
+  take `MPFR=1 MPFR_PREFIX=DIR`, and a step `mpfr divsqrt-soak` (and `mpfr divsqrt-soak-cN` under `--sweep-chunk`) checks the
+  tool it built: `hard-space div128-hard` exits 0 with the catalog's space, and one case of sqrt128-f32 on the software
+  backend passes with an oracle line naming MPFR at the pin, the library the tool linked. A failure stops the run
+  (`build_failed`, exit 3). run_start's settings gain `mpfr: {prefix, pin}`. **Without it nothing changes** - the make
+  lines, the catalog, the rotation, run_start, settings.json and the records - and a wide item named by `--sweep-items` is
+  refused by the run, by name: one skipped sweep leg for it at each run start (image `-`, `sweep.refused: no-mpfr-prefix`),
+  which the report lists and no coverage counts.
+- **The build's NOTE.** It said NOTE whenever the count of warning lines was not two, so it said it every night (READ: the
+  driver.log of the round's box/day-1023 and box/nightly-1024: four lines in a fresh build, the two soaks' `#pragma STDC
+  FENV_ACCESS` beside CLAUDE.md's two, and none in a run that rebuilt nothing, the NOTE said in both), and under `MPFR=1`
+  the soak is rebuilt every time. Each make's warning lines are now sorted against a table of the known ones (the two
+  `read_register` lines, each soak's pragma line once); the step says how many are known and how many new, and **a NOTE
+  is said only for a new line, naming it**.
+- **The stand-in** (`hw/card_stress_standin.py`) runs the thirty modes, prints their oracle line on stderr and the ladder's
+  line before the verdict as the tool does, and answers `hard-space`; `CFT_STANDIN_MPFR` makes it name another MPFR and
+  `CFT_STANDIN_NO_WIDE=1` makes it a tool built without MPFR, for the two refusals' tests.
+- **The report and the page** read the catalog with the wide items, so a run that served them is counted over their own
+  spaces; a run that did not is reported as it was.
+- **The suite** (`hw/test_card_stress.py`): a group `wide` - the catalog against 24 new fixtures (the real tool's outputs:
+  `hard-space` of the thirty, the whole counts, 11 soak logs of the five kinds, 3 sabotage logs, a chunked tool's log, and
+  the box's eight-slice counts); the driver's command line and plans; a dry run serving one item of each kind on the quad
+  image to the end of its own space (every slice held to its indices and to k x E, the whole-space check once each); a run
+  without the prefix refusing them by name; and the build on the driver's real path over test doubles (POSIX only) - and
+  18 plants, 4 of them POSIX only.
+
+**What was run, at e72cbf08: the lead's four runs, in sequence, niced.**
+1. **WSL, the whole suite without its plants** (`bash hw/test-card-stress.sh --no-plants`). First from a `git archive` of
+   the commit, 19:56:47 to 19:59:51, rc 1: the suite stopped in its group `buildreal` on an uncaught RuntimeError, `git
+   ls-files` refusing a tree that is not a repository. Of the groups before it the log kept sweep, 9 checks and 2 failed,
+   and disagree, telemetry and build, 6, 25 and 36 checks, none failed; wsl.exe let the traceback overwrite the lines
+   before them, so the later runs wrote their logs inside WSL. Both failures are the export's, not this parcel's code:
+   `buildreal` lists the checkout's tracked files with git, and without git the driver records no rtl/ tree, and a resume
+   never counts a slice whose tree it did not record (`tree_key`, parcel DR4), so the resumed run redid its first 2^20
+   indices (the failed check's figures: 70,254,592 = 69,206,016 + 1,048,576, COMPUTED). At the lead's word the three WSL
+   runs were made from one fresh clone of the commit's bundle in WSL's own filesystem (the bundle copied in first, sha256
+   99702a87...; HEAD e72cbf08, a clean status and the content asserted apart). From it, 20:05:08 to 20:15:34, rc 0:
+   **1,057 checks, 0 failed, 4 skipped, 626 s**, in 35 groups, `wide` 106 checks; the four skips are the suite's named
+   ones that need the lead's run directories (`CARD_STRESS_METRICS`, `CARD_STRESS_RESUME_RUN` twice,
+   `CARD_STRESS_PROGRESS_RUNS`). sweep's 9 checks and buildreal's 12 passed there.
+2. **WSL, the plants** (`bash hw/test-card-stress.sh --only plants`), 20:15:34 to 20:43:53, rc 0: **196 checks, 0
+   failed, 5 skipped, 1,699 s** - the control's 5 (an unmodified copy passes the normal, fail, nodevice, parsers and resume
+   checks) and 191 of the 193 plants, each red at the check written for it, this parcel's 18 among them, the four POSIX ones
+   too. The other two plants are skipped by name, their scenarios needing the lead's run files (`CARD_STRESS_RESUME_RUN`,
+   `CARD_STRESS_METRICS`); the other three skips are SKIP lines of the same two needs.
+3. **WSL, the scheduler's suite without its plants** (`bash hw/test-sched.sh --no-plants`), 20:43:53 to 20:45:39, rc 0:
+   **375 checks, 0 failed, 3 skipped, 106 s**, in fourteen groups; the skips are named, two of `locks` (the platform has
+   flock) and one of `images` (`SCHED_TEST_MANIFESTS` unset). The clone's status was clean before each run and after the
+   last, and the clone was then removed by its path.
+4. **The desktop, the stage** (`bash verify/run.sh --only cardstress` in the parcel's worktree, the stage's Windows form,
+   after the WSL runs), run 20261026-204631-e72cbf08, 20:46:30 to 20:57:09, rc 0: **"VERDICT: PASS with 13 inner skip(s)"**,
+   the stage 631 s; the suite's own line 972 checks, 0 failed, 13 skipped, 630 s, `wide` 99 checks. The thirteen are the
+   twelve of the 2026-10-23 run (docs/VERIFICATION.md's row) and `wide build`, which needs POSIX.
+
+No code changed after any of the four runs, so none of them is invalidated.
+
+While the parts were written, before the commit unless said (MEASURED, the parcel's scratch logs): the group `wide` in WSL,
+106 checks, 0 failed, 43 s (its first run failed one check of mine, which also read a NOTE with another cause, `xrt-smi`
+not on PATH, and was narrowed); on the desktop, 99 checks, 0 failed and the build scenario skipped by name, 29 s; the 18
+plants in WSL, 17 caught and one crashed in its scenario (the soak-chunk line's, fixed; at e72cbf08 that plant alone was
+caught at the check written for it, in WSL, 37 s), and on the desktop the 14 that are not POSIX only, caught; nine groups
+of the suite in WSL (parsers, commands, standin, items, chunk, records, notes, wide, testfiles), 736 checks, 0 failed,
+108 s; ending two minutes after the commit, the report's test on the lead's run copies, 5,100 checks, and the page's, 387,
+none failed. At e72cbf08, on the desktop: python/tests/test_figure_extracts.py 11 passed and python/project_figures.py
+--check rc 0 in 18 s; and that test's two plants in a scratch copy of the commit, STRESS_TILE_OPS short of one wide mode
+and OP_REACH calling one a host op, each red (10 and 9 of its 11 tests failing).
+
+**The box script** (the round's records, box/hxc/box_hxc.sh, sha256 3b0a80fb...; the bundle box/hxc/hxc-e72cbf08.bundle,
+sha256 99702a87...) is for the lead, by day: it refuses before 08:00 and after 17:00, while any card, runner or scheduler
+process lives, without the pinned MPFR 4.2.2 at `~/cft-fp256/verify/_mpfr-prefix`, or if the quad image is not 4f9921a2;
+it clones the bundle fresh and asserts the SHA and the content apart, then runs the driver - not a dry run - on the quad
+image's four tiles for about nine minutes, `--legs api-test --mpfr-prefix ~/cft-fp256/verify/_mpfr-prefix --sweep-items
+sqrt128-f32-rne,recip256-win-key-rup,div128-f64hard-rtz,div256-hard-rmm`, one item of each kind, and writes a summary (each
+item's slices, tiles and counts, the build's steps and NOTE lines, the report's sweep section) and the sums. **Not run
+yet**: the box is the card's tonight.
+
+**Known limits, recorded rather than fixed.**
+- **The signed records** (`--records`) do not cover the wide items: the exporter's catalog is the default one, so a wide
+  slice is refused by name (`record_refused`, "not an item of this tree's catalog"), because a campaign record names its
+  oracle as the host FPU and glibc (hw/sweep_record.py's `ORACLE`) and theirs is MPFR. Every other slice's record is
+  written as before.
+- **The card scheduler** (`hw/sched/`) does not pass the prefix; the lead accepted this until the switch (S5), the nights
+  being launched by the round's script. What it needs, exactly:
+  1. a spec field and its flag: `driver.options.mpfr_prefix` in `SPEC_FIELDS` and `DRIVER_OPTIONS` (sched_spec.py), mapped
+     to `--mpfr-prefix`, with a type for an absolute path (`TYPES` has none; `str` takes any text). Through `option_args`
+     the long run (`driver-long`, sched_window.py `_long_argv`) then gets it, and `check_window`'s check by the driver's own
+     parser holds it to the pin when the spec is submitted;
+  2. the smoke: `driver-quick`'s fields and `_quick_argv` (sched_steps.py) take it, and `WindowRunner._attempt`
+     (sched_window.py), which copies `driver.sweep_items` into the smoke, copies it too;
+  3. the catalog: `sched_steps.catalog()` is `sweep_items(MODES4, MODES4, MODES4)`, without `mpfr=True`, so today
+     `check_window` refuses a night that names a wide item ("is not in the sweep catalog"): it needs `mpfr=True`. And
+     `driver.sweep_items` holds at most 200 names (its type `strs`), where the whole catalog with the wide items is 227
+     (125 + 102, COMPUTED): a night over all of it needs that limit raised;
+  4. staged soak steps: once the catalog has them, `_check_soak` must refuse a wide item by name (`Item.mpfr`) for as long
+     as `sched_build.build_xrt` makes the soak without `MPFR=1` (its tool refuses a wide mode as an unknown op, exit 2), or
+     `build_xrt` takes the MPFR words and the driver's check of the built tool;
+  5. nothing else: hw/test_sched.py reads `build_tools`' `targets`, `exes` and `optional` from the driver's source, which
+     this parcel left as they were (the MPFR words are appended after them), and run 3 above is that suite at this commit.
+- **The nightly launcher** (the round's records, boxbatch/box_nightly3.sh) passes its extra flags to the long run only, and
+  refuses a night when any word of them begins with `/` and has no metrics.jsonl beside it (READ). So the prefix goes in
+  as `--mpfr-prefix ~/cft-fp256/verify/_mpfr-prefix`, quoted so the shell leaves the `~` (the driver expands it), or as
+  `--mpfr-prefix=/...`; and its smoke, without the prefix, skips each wide item it names by name and still ends
+  `quick_done` with exit 0, which the launcher reads as a pass (READ: the driver's run loop). Its drytests, the suite whole,
+  now run the group `wide` too (106 checks, 43 s alone in WSL).
+- On Windows the group's build scenario is skipped by name (it needs POSIX), one more inner skip of the `cardstress`
+  stage there, which `--require-all` fails.
+- The driver has not run these items on the card. HXa's box runs ran the modes by hand, two to ten seconds each and one
+  segment at length, at about half the bare call's rate, so phase 1's hours are likely more than the study's 133.
+- The NOTE's table holds the four warning lines known today: a known line printed more often than its count is said as
+  new, as any line the table does not hold is.
+
+**Which commit each result is from.** e72cbf08 for the code and for every run above but those before the commit; this
+entry's commit changes docs/VALIDATION.md, docs/VERIFICATION.md and docs/README.md alone, which none of the four runs
+reads (READ: no file of hw/ or hw/sched/ opens them; the suites read docs/studies/ and, in the plants, docs/SWEEP-RECORDS.md).
