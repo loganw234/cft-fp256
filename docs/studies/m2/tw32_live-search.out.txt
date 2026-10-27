@@ -1,0 +1,3 @@
+live-search: the script's PHASE_MAP keeps 23 live at most (sin, cos, tan, rne); 4000 monotone maps of the 23 phases onto the 15 names, seed 1
+most live by map, how many maps: {23: 2418, 25: 1582}; the best 23 (the first map to reach it: {'red-setup': 'setup', 'red-window': 'setup', 'red-products': 'setup', 'red-coarse': 'setup', 'red-mid': 'setup', 'red-products-low': 'reduce', 'red-lower': 'tail', 'red-triple': 'head', 'red-scale': 'head2', 'red-small': 'head3', 'z': 'Z', 'S-tail': 'lookup', 'S-head2': 'recon', 'S-head3': 'recon', 'C-tail': 'scale', 'C-head2': 'scale', 'C-head3': 'fixed-grid', 'sincos': 'fixed-grid', 'select': 'final', 'quotient': 'final', 'final': 'final', 'classify': 'special', 'special': 'special'}); 128s
+-- live-search 4000: 128s

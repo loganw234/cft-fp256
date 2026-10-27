@@ -1,0 +1,8 @@
+PLANT mark-silenced, named mode: rate (cos, rne and rtz, 2,000 arguments, seed 3). Control first.
+fp32 cos rne G'=6 seed 3: 2000 lanes, marked 46 = 2.30%; each lane's own 2^-G' sig(V) sums to 50.8 = 2.54% (-0.7 sigma); guesses right 46 of 46; wrong unmarked 0; mean sig(V) 1.6255; 15s
+fp32 cos rtz G'=6 seed 3: 2000 lanes, marked 56 = 2.80%; each lane's own 2^-G' sig(V) sums to 50.8 = 2.54% (+0.7 sigma); guesses right 56 of 56; wrong unmarked 0; mean sig(V) 1.6255; 30s
+--- the plant ---
+fp32 cos rne G'=6 seed 3: 2000 lanes, marked 0 = 0.00%; each lane's own 2^-G' sig(V) sums to 50.8 = 2.54% (-7.2 sigma); guesses right 0 of 0; wrong unmarked 0; mean sig(V) 1.6255; 14s
+fp32 cos rtz G'=6 seed 3: 2000 lanes, marked 0 = 0.00%; each lane's own 2^-G' sig(V) sums to 50.8 = 2.54% (-7.2 sigma); guesses right 0 of 0; wrong unmarked 0; mean sig(V) 1.6255; 29s
+RESULT: control |z| [0.7, 0.7] (green: True); plant marked [0, 0] against predicted [50.8, 50.8], |z| [7.2, 7.2] -> RED in rate
+-- plant mark-silenced: 59s

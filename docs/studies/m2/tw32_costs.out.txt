@@ -1,0 +1,157 @@
+fp32 sin rne: 939 instructions, 97 words, live 23 (design order); TwoSum 69, Fast2Sum 29, TwoProd 40; invariants (live_cap=None) hold; flag words (C4's walk) ['0x0', '0x1', '0x10', '0x18', '0x90']
+   by phase {'red-setup': 18, 'red-window': 51, 'red-products': 15, 'red-coarse': 18, 'red-mid': 56, 'red-products-low': 18, 'red-lower': 30, 'red-triple': 66, 'red-scale': 41, 'red-small': 6, 'z': 5, 'S-tail': 2, 'S-head2': 26, 'S-head3': 191, 'C-tail': 1, 'C-head2': 26, 'C-head3': 233, 'sincos': 74, 'select': 11, 'final': 31, 'classify': 7, 'special': 13}
+   by opcode {'sub': 388, 'add': 244, 'fma': 104, 'select': 70, 'mul': 66, 'ixor': 14, 'iand': 12, 'neg': 11, 'ior': 5, 'cmpeq': 4, 'icmplt': 4, 'iadd': 3, 'isub': 3, 'ishl': 2, 'abs': 2, 'cmplt': 2, 'max': 2, 'min': 2, 'ishr': 1}
+   plan: b 16 L 9 bottom -56 budget -97 (t known to 2^-97 absolute) bmid -20; words of 2/pi 18 (Z 3 zero); pieces {'upper': 4, 'lower': 6, 'lows': 8}; S K3/K2/D (4, 3, 9), C (5, 3, 9); G 40
+   static proofs held at build time: 28
+      coarse sum exact (P0, rho0, P1 mod m)
+      coarse sum exact (P0, rho0, P1 mod m)
+      f_I = V_I - k U exact
+      split at 2^-20: magic in range
+      split at 2^-20: magic in range
+      upper group not empty
+      e + low word of the upper group exact
+      split at 2^-56: magic in range
+      split at 2^-56: magic in range
+      lower group not empty
+      carry: magic in range
+      e + carry exact
+      overshoot of |r| past pi/4 is small
+      S k=6: |c_k| > |z y| (Fast2Sum ordered)
+      S k=5: |c_k| > |z y| (Fast2Sum ordered)
+      S k=4: |c_k| > |z y| (Fast2Sum ordered)
+      S k=3: |c_k| > |z y| (Fast2Sum ordered)
+      S k=2: |c_k| > |z y| (Fast2Sum ordered)
+      S k=1: |c_k| > |z y| (Fast2Sum ordered)
+      S k=0: |c_k| > |z y| (Fast2Sum ordered)
+      C k=7: |c_k| > |z y| (Fast2Sum ordered)
+      C k=6: |c_k| > |z y| (Fast2Sum ordered)
+      C k=5: |c_k| > |z y| (Fast2Sum ordered)
+      C k=4: |c_k| > |z y| (Fast2Sum ordered)
+      C k=3: |c_k| > |z y| (Fast2Sum ordered)
+      C k=2: |c_k| > |z y| (Fast2Sum ordered)
+      C k=1: |c_k| > |z y| (Fast2Sum ordered)
+      C k=0: |c_k| > |z y| (Fast2Sum ordered)
+fp32 sin rtz: 939 instructions, 98 words, live 23 (design order); TwoSum 69, Fast2Sum 29, TwoProd 40; invariants (live_cap=None) hold; flag words (C4's walk) ['0x0', '0x1', '0x10', '0x18', '0x90']
+fp32 sin rdn: 939 instructions, 98 words, live 23 (design order); TwoSum 69, Fast2Sum 29, TwoProd 40; invariants (live_cap=None) hold; flag words (C4's walk) ['0x0', '0x1', '0x10', '0x18', '0x90']
+fp32 sin rup: 939 instructions, 97 words, live 23 (design order); TwoSum 69, Fast2Sum 29, TwoProd 40; invariants (live_cap=None) hold; flag words (C4's walk) ['0x0', '0x1', '0x10', '0x18', '0x90']
+fp32 sin rmm: 939 instructions, 97 words, live 23 (design order); TwoSum 69, Fast2Sum 29, TwoProd 40; invariants (live_cap=None) hold; flag words (C4's walk) ['0x0', '0x1', '0x10', '0x18', '0x90']
+fp32 cos rne: 936 instructions, 94 words, live 23 (design order); TwoSum 69, Fast2Sum 29, TwoProd 40; invariants (live_cap=None) hold; flag words (C4's walk) ['0x0', '0x1', '0x10', '0x90']
+   by phase {'red-setup': 18, 'red-window': 51, 'red-products': 15, 'red-coarse': 18, 'red-mid': 56, 'red-products-low': 18, 'red-lower': 30, 'red-triple': 66, 'red-scale': 41, 'red-small': 6, 'z': 5, 'S-tail': 2, 'S-head2': 26, 'S-head3': 191, 'C-tail': 1, 'C-head2': 26, 'C-head3': 233, 'sincos': 74, 'select': 12, 'final': 31, 'classify': 7, 'special': 9}
+   by opcode {'sub': 388, 'add': 244, 'fma': 103, 'select': 69, 'mul': 66, 'ixor': 14, 'iand': 11, 'neg': 11, 'ior': 5, 'cmpeq': 4, 'iadd': 3, 'isub': 3, 'ishl': 3, 'icmplt': 3, 'abs': 2, 'cmplt': 2, 'max': 2, 'min': 2, 'ishr': 1}
+   plan: b 16 L 9 bottom -56 budget -97 (t known to 2^-97 absolute) bmid -20; words of 2/pi 18 (Z 3 zero); pieces {'upper': 4, 'lower': 6, 'lows': 8}; S K3/K2/D (4, 3, 9), C (5, 3, 9); G 40
+   static proofs held at build time: 28
+      coarse sum exact (P0, rho0, P1 mod m)
+      coarse sum exact (P0, rho0, P1 mod m)
+      f_I = V_I - k U exact
+      split at 2^-20: magic in range
+      split at 2^-20: magic in range
+      upper group not empty
+      e + low word of the upper group exact
+      split at 2^-56: magic in range
+      split at 2^-56: magic in range
+      lower group not empty
+      carry: magic in range
+      e + carry exact
+      overshoot of |r| past pi/4 is small
+      S k=6: |c_k| > |z y| (Fast2Sum ordered)
+      S k=5: |c_k| > |z y| (Fast2Sum ordered)
+      S k=4: |c_k| > |z y| (Fast2Sum ordered)
+      S k=3: |c_k| > |z y| (Fast2Sum ordered)
+      S k=2: |c_k| > |z y| (Fast2Sum ordered)
+      S k=1: |c_k| > |z y| (Fast2Sum ordered)
+      S k=0: |c_k| > |z y| (Fast2Sum ordered)
+      C k=7: |c_k| > |z y| (Fast2Sum ordered)
+      C k=6: |c_k| > |z y| (Fast2Sum ordered)
+      C k=5: |c_k| > |z y| (Fast2Sum ordered)
+      C k=4: |c_k| > |z y| (Fast2Sum ordered)
+      C k=3: |c_k| > |z y| (Fast2Sum ordered)
+      C k=2: |c_k| > |z y| (Fast2Sum ordered)
+      C k=1: |c_k| > |z y| (Fast2Sum ordered)
+      C k=0: |c_k| > |z y| (Fast2Sum ordered)
+fp32 cos rtz: 936 instructions, 95 words, live 23 (design order); TwoSum 69, Fast2Sum 29, TwoProd 40; invariants (live_cap=None) hold; flag words (C4's walk) ['0x0', '0x1', '0x10', '0x90']
+fp32 cos rdn: 936 instructions, 95 words, live 23 (design order); TwoSum 69, Fast2Sum 29, TwoProd 40; invariants (live_cap=None) hold; flag words (C4's walk) ['0x0', '0x1', '0x10', '0x90']
+fp32 cos rup: 936 instructions, 94 words, live 23 (design order); TwoSum 69, Fast2Sum 29, TwoProd 40; invariants (live_cap=None) hold; flag words (C4's walk) ['0x0', '0x1', '0x10', '0x90']
+fp32 cos rmm: 936 instructions, 94 words, live 23 (design order); TwoSum 69, Fast2Sum 29, TwoProd 40; invariants (live_cap=None) hold; flag words (C4's walk) ['0x0', '0x1', '0x10', '0x90']
+fp32 tan rne: 993 instructions, 96 words, live 23 (design order); TwoSum 73, Fast2Sum 30, TwoProd 42; invariants (live_cap=None) hold; flag words (C4's walk) ['0x0', '0x1', '0x10', '0x18', '0x90']
+   by phase {'red-setup': 18, 'red-window': 51, 'red-products': 15, 'red-coarse': 18, 'red-mid': 56, 'red-products-low': 18, 'red-lower': 30, 'red-triple': 66, 'red-scale': 41, 'red-small': 6, 'z': 5, 'S-tail': 2, 'S-head2': 26, 'S-head3': 191, 'C-tail': 1, 'C-head2': 26, 'C-head3': 233, 'sincos': 74, 'select': 10, 'quotient': 60, 'final': 27, 'classify': 7, 'special': 12}
+   by opcode {'sub': 407, 'add': 259, 'fma': 116, 'select': 73, 'mul': 72, 'ixor': 18, 'neg': 11, 'iand': 10, 'ior': 5, 'cmpeq': 4, 'icmplt': 4, 'iadd': 3, 'isub': 3, 'ishl': 2, 'abs': 2, 'cmplt': 2, 'ishr': 1, 'recip_seed': 1}
+   plan: b 16 L 9 bottom -56 budget -97 (t known to 2^-97 absolute) bmid -20; words of 2/pi 18 (Z 3 zero); pieces {'upper': 4, 'lower': 6, 'lows': 8}; S K3/K2/D (4, 3, 9), C (5, 3, 9); G 40
+   static proofs held at build time: 28
+      coarse sum exact (P0, rho0, P1 mod m)
+      coarse sum exact (P0, rho0, P1 mod m)
+      f_I = V_I - k U exact
+      split at 2^-20: magic in range
+      split at 2^-20: magic in range
+      upper group not empty
+      e + low word of the upper group exact
+      split at 2^-56: magic in range
+      split at 2^-56: magic in range
+      lower group not empty
+      carry: magic in range
+      e + carry exact
+      overshoot of |r| past pi/4 is small
+      S k=6: |c_k| > |z y| (Fast2Sum ordered)
+      S k=5: |c_k| > |z y| (Fast2Sum ordered)
+      S k=4: |c_k| > |z y| (Fast2Sum ordered)
+      S k=3: |c_k| > |z y| (Fast2Sum ordered)
+      S k=2: |c_k| > |z y| (Fast2Sum ordered)
+      S k=1: |c_k| > |z y| (Fast2Sum ordered)
+      S k=0: |c_k| > |z y| (Fast2Sum ordered)
+      C k=7: |c_k| > |z y| (Fast2Sum ordered)
+      C k=6: |c_k| > |z y| (Fast2Sum ordered)
+      C k=5: |c_k| > |z y| (Fast2Sum ordered)
+      C k=4: |c_k| > |z y| (Fast2Sum ordered)
+      C k=3: |c_k| > |z y| (Fast2Sum ordered)
+      C k=2: |c_k| > |z y| (Fast2Sum ordered)
+      C k=1: |c_k| > |z y| (Fast2Sum ordered)
+      C k=0: |c_k| > |z y| (Fast2Sum ordered)
+fp32 tan rtz: 993 instructions, 96 words, live 23 (design order); TwoSum 73, Fast2Sum 30, TwoProd 42; invariants (live_cap=None) hold; flag words (C4's walk) ['0x0', '0x1', '0x10', '0x18', '0x90']
+fp32 tan rdn: 993 instructions, 96 words, live 23 (design order); TwoSum 73, Fast2Sum 30, TwoProd 42; invariants (live_cap=None) hold; flag words (C4's walk) ['0x0', '0x1', '0x10', '0x18', '0x90']
+fp32 tan rup: 993 instructions, 96 words, live 23 (design order); TwoSum 73, Fast2Sum 30, TwoProd 42; invariants (live_cap=None) hold; flag words (C4's walk) ['0x0', '0x1', '0x10', '0x18', '0x90']
+fp32 tan rmm: 993 instructions, 96 words, live 23 (design order); TwoSum 73, Fast2Sum 30, TwoProd 42; invariants (live_cap=None) hold; flag words (C4's walk) ['0x0', '0x1', '0x10', '0x18', '0x90']
+fp32 bank words, union over the five attributes: sin 99, cos 96, tan 96; all three 102
+the 15 fragments' fingerprint (sha256 of their dag digests, sorted, one a line): 090e33b8ae85dcb40323dc4e08c392065a60249d6da5e3b4373cd55f97b79c26
+the polynomials' plan (K3, K2, D) for S and C at rho = pi/4 (1 + e): e = 2^-30 (the study's): {'S': (4, 3, 9), 'C': (5, 3, 9)}; e = 2.029e-06 = 2^-18.91 (this build's, COMPUTED): {'S': (4, 3, 9), 'C': (5, 3, 9)}; e = 2^-11.66 (M2G1's, the double word's): {'S': (4, 3, 9), 'C': (5, 3, 9)}; e = 2^-10: {'S': (4, 3, 9), 'C': (5, 3, 9)}; the same plan at every e: True
+
+fp32 sin rne by part (the study's 2.2 table, this build):
+   setup           18
+   window          51
+   products        33
+   coarse          18
+   mid             56
+   lows            30
+   triple word     66
+   scale           41
+   small            6
+   the reduction 319; z, tails and heads 484 (S: 219, C: 260); sin(r)/cos(r), select, quotient, final, classify, special 136; total 939 = 939
+   against 2.7's ESTIMATE (reduction about 320, heads about 490, the rest about 120, sin about 930): reduction 319 (-1), heads 484 (-6), rest 136 (+16), total 939 (+9 against the sin estimate of 930; 1.010 of the estimate; the decision's cap is 1,395)
+   every phase: {'red-setup': 18, 'red-window': 51, 'red-products': 15, 'red-coarse': 18, 'red-mid': 56, 'red-products-low': 18, 'red-lower': 30, 'red-triple': 66, 'red-scale': 41, 'red-small': 6, 'z': 5, 'S-tail': 2, 'S-head2': 26, 'S-head3': 191, 'C-tail': 1, 'C-head2': 26, 'C-head3': 233, 'sincos': 74, 'select': 11, 'final': 31, 'classify': 7, 'special': 13}
+
+fp32 cos rne by part (the study's 2.2 table, this build):
+   setup           18
+   window          51
+   products        33
+   coarse          18
+   mid             56
+   lows            30
+   triple word     66
+   scale           41
+   small            6
+   the reduction 319; z, tails and heads 484 (S: 219, C: 260); sin(r)/cos(r), select, quotient, final, classify, special 133; total 936 = 936
+   against 2.7's ESTIMATE (reduction about 320, heads about 490, the rest about 120, sin about 930): reduction 319 (-1), heads 484 (-6), rest 133 (+13), total 936 (+6 against the sin estimate of 930; 1.006 of the estimate; the decision's cap is 1,395)
+   every phase: {'red-setup': 18, 'red-window': 51, 'red-products': 15, 'red-coarse': 18, 'red-mid': 56, 'red-products-low': 18, 'red-lower': 30, 'red-triple': 66, 'red-scale': 41, 'red-small': 6, 'z': 5, 'S-tail': 2, 'S-head2': 26, 'S-head3': 191, 'C-tail': 1, 'C-head2': 26, 'C-head3': 233, 'sincos': 74, 'select': 12, 'final': 31, 'classify': 7, 'special': 9}
+
+fp32 tan rne by part (the study's 2.2 table, this build):
+   setup           18
+   window          51
+   products        33
+   coarse          18
+   mid             56
+   lows            30
+   triple word     66
+   scale           41
+   small            6
+   the reduction 319; z, tails and heads 484 (S: 219, C: 260); sin(r)/cos(r), select, quotient, final, classify, special 190; total 993 = 993
+   against 2.7's ESTIMATE (reduction about 320, heads about 490, the rest about 120, sin about 930): reduction 319 (-1), heads 484 (-6), rest 190 (+70), total 993 (+63 against the sin estimate of 930; 1.068 of the estimate; the decision's cap is 1,395)
+   every phase: {'red-setup': 18, 'red-window': 51, 'red-products': 15, 'red-coarse': 18, 'red-mid': 56, 'red-products-low': 18, 'red-lower': 30, 'red-triple': 66, 'red-scale': 41, 'red-small': 6, 'z': 5, 'S-tail': 2, 'S-head2': 26, 'S-head3': 191, 'C-tail': 1, 'C-head2': 26, 'C-head3': 233, 'sincos': 74, 'select': 10, 'quotient': 60, 'final': 27, 'classify': 7, 'special': 12}
+-- costs : 0s

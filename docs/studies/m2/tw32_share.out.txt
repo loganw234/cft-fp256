@@ -1,0 +1,17 @@
+fp32 triple word, what sin, cos and tan of one argument share in a compiled step (share.expand, the study's 2.1)
+  rne sin + cos: 988 instructions together, against 1875 apart; 49 beyond sin's 939
+  rne sin + cos + tan: 1088 instructions together, against 2868 apart; 149 beyond sin's 939
+  rne sin + tan: 1043 instructions together, against 1932 apart; 104 beyond sin's 939
+  rtz sin + cos: 988 instructions together, against 1875 apart; 49 beyond sin's 939
+  rtz sin + cos + tan: 1088 instructions together, against 2868 apart; 149 beyond sin's 939
+  rtz sin + tan: 1043 instructions together, against 1932 apart; 104 beyond sin's 939
+  rdn sin + cos: 988 instructions together, against 1875 apart; 49 beyond sin's 939
+  rdn sin + cos + tan: 1088 instructions together, against 2868 apart; 149 beyond sin's 939
+  rdn sin + tan: 1043 instructions together, against 1932 apart; 104 beyond sin's 939
+  rup sin + cos: 988 instructions together, against 1875 apart; 49 beyond sin's 939
+  rup sin + cos + tan: 1088 instructions together, against 2868 apart; 149 beyond sin's 939
+  rup sin + tan: 1043 instructions together, against 1932 apart; 104 beyond sin's 939
+  rmm sin + cos: 988 instructions together, against 1875 apart; 49 beyond sin's 939
+  rmm sin + cos + tan: 1088 instructions together, against 2868 apart; 149 beyond sin's 939
+  rmm sin + tan: 1043 instructions together, against 1932 apart; 104 beyond sin's 939
+-- share : 0s

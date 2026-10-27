@@ -1,0 +1,52 @@
+fp32 triple word census tiny family (census.tiny_family, E0 = 6, as the double word's run): 144 arguments
+  sin rne: 939 instructions, 97 words, live 23: 144 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x10']; 1s
+  sin rtz: 939 instructions, 98 words, live 23: 144 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x10']; 4s
+  sin rdn: 939 instructions, 98 words, live 23: 144 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x10']; 6s
+  sin rup: 939 instructions, 97 words, live 23: 144 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x10']; 8s
+  sin rmm: 939 instructions, 97 words, live 23: 144 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x10']; 10s
+  cos rne: 936 instructions, 94 words, live 23: 144 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x10']; 12s
+  cos rtz: 936 instructions, 95 words, live 23: 144 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x10']; 14s
+  cos rdn: 936 instructions, 95 words, live 23: 144 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x10']; 16s
+  cos rup: 936 instructions, 94 words, live 23: 144 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x10']; 17s
+  cos rmm: 936 instructions, 94 words, live 23: 144 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x10']; 19s
+  tan rne: 993 instructions, 96 words, live 23: 144 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x10']; 21s
+  tan rtz: 993 instructions, 96 words, live 23: 144 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x10']; 24s
+  tan rdn: 993 instructions, 96 words, live 23: 144 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x10']; 26s
+  tan rup: 993 instructions, 96 words, live 23: 144 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x10']; 28s
+  tan rmm: 993 instructions, 96 words, live 23: 144 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x10']; 31s
+TOTAL census tiny family (census.tiny_family, E0 = 6, as the double word's run): 2160 lanes, marked 0 (guess right 0), wrong unmarked 0
+fp32 triple word census near family (census.near_family): 688 arguments
+  sin rne: 939 instructions, 97 words, live 23: 688 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x10']; 5s
+  sin rtz: 939 instructions, 98 words, live 23: 688 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x10']; 19s
+  sin rdn: 939 instructions, 98 words, live 23: 688 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x10']; 29s
+  sin rup: 939 instructions, 97 words, live 23: 688 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x10']; 42s
+  sin rmm: 939 instructions, 97 words, live 23: 688 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x10']; 55s
+  cos rne: 936 instructions, 94 words, live 23: 688 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x10']; 67s
+  cos rtz: 936 instructions, 95 words, live 23: 688 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x10']; 78s
+  cos rdn: 936 instructions, 95 words, live 23: 688 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x10']; 90s
+  cos rup: 936 instructions, 94 words, live 23: 688 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x10']; 101s
+  cos rmm: 936 instructions, 94 words, live 23: 688 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x10']; 113s
+  tan rne: 993 instructions, 96 words, live 23: 688 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x10']; 125s
+  tan rtz: 993 instructions, 96 words, live 23: 688 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x10']; 135s
+  tan rdn: 993 instructions, 96 words, live 23: 688 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x10']; 145s
+  tan rup: 993 instructions, 96 words, live 23: 688 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x10']; 155s
+  tan rmm: 993 instructions, 96 words, live 23: 688 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x10']; 166s
+TOTAL census near family (census.near_family): 10320 lanes, marked 0 (guess right 0), wrong unmarked 0
+fp32 triple word census tiny family at this design's own start (E0 = (p+G)//4 - 4 = 12): 48 arguments
+  sin rne: 939 instructions, 97 words, live 23: 48 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x10']; 0s
+  sin rtz: 939 instructions, 98 words, live 23: 48 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x10']; 1s
+  sin rdn: 939 instructions, 98 words, live 23: 48 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x10']; 2s
+  sin rup: 939 instructions, 97 words, live 23: 48 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x10']; 2s
+  sin rmm: 939 instructions, 97 words, live 23: 48 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x10']; 3s
+  cos rne: 936 instructions, 94 words, live 23: 48 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x10']; 4s
+  cos rtz: 936 instructions, 95 words, live 23: 48 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x10']; 5s
+  cos rdn: 936 instructions, 95 words, live 23: 48 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x10']; 5s
+  cos rup: 936 instructions, 94 words, live 23: 48 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x10']; 6s
+  cos rmm: 936 instructions, 94 words, live 23: 48 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x10']; 7s
+  tan rne: 993 instructions, 96 words, live 23: 48 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x10']; 7s
+  tan rtz: 993 instructions, 96 words, live 23: 48 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x10']; 8s
+  tan rdn: 993 instructions, 96 words, live 23: 48 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x10']; 9s
+  tan rup: 993 instructions, 96 words, live 23: 48 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x10']; 10s
+  tan rmm: 993 instructions, 96 words, live 23: 48 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x10']; 10s
+TOTAL census tiny family at this design's own start (E0 = (p+G)//4 - 4 = 12): 720 lanes, marked 0 (guess right 0), wrong unmarked 0
+-- pools census: 214s

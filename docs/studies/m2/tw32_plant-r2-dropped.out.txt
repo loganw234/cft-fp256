@@ -1,0 +1,7 @@
+PLANT r2-dropped, named mode: budget (sin, edge, 300 lanes, seed 21) and, beside it, pools (sin rne). Control first.
+  control: 300 lanes; max |E|/Bv 0.08851; max |M|/Bv 0.08616; THE BUDGET'S BOUND 0.2474 Bv
+  plant: 300 lanes; max |E|/Bv 1.147e+05; max |M|/Bv 2.014e+04; THE BUDGET'S BOUND 3.198e+05 Bv
+  pools sin rne, control: 760 lanes, marked 0, wrong unmarked 0
+  pools sin rne, plant: 760 lanes, marked 0, wrong unmarked 0
+RESULT: control bound 0.2474 Bv (green: True); plant bound 3.198e+05 Bv, largest error 1.147e+05 Bv -> RED in budget
+-- plant r2-dropped: 37s

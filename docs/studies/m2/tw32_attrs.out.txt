@@ -1,0 +1,26 @@
+fp32 triple word, where the program's attribute reaches (the budget's capacities are the arithmetic's own roundings before V; the brief's attributes are rne, rtz, rdn, rup, rmm)
+  sin rne: instructions whose attribute is not RNE, by phase: {'red-setup': {'rdn': 1}, 'final': {'rtz': 3, 'rdn': 1, 'rup': 1}}
+  sin rtz: instructions whose attribute is not RNE, by phase: {'red-setup': {'rdn': 1}, 'final': {'rtz': 6, 'rdn': 1, 'rup': 1}, 'special': {'rtz': 1}}
+  sin rdn: instructions whose attribute is not RNE, by phase: {'red-setup': {'rdn': 1}, 'final': {'rtz': 3, 'rdn': 4, 'rup': 1}, 'special': {'rdn': 1}}
+  sin rup: instructions whose attribute is not RNE, by phase: {'red-setup': {'rdn': 1}, 'final': {'rtz': 3, 'rup': 4, 'rdn': 1}, 'special': {'rup': 1}}
+  sin rmm: instructions whose attribute is not RNE, by phase: {'red-setup': {'rdn': 1}, 'final': {'rtz': 3, 'rmm': 3, 'rdn': 1, 'rup': 1}, 'special': {'rmm': 1}}
+  sin: 517 lanes, V0, V1 and V2 not identical across the five attributes: 0
+  cos rne: instructions whose attribute is not RNE, by phase: {'red-setup': {'rdn': 1}, 'final': {'rtz': 3, 'rdn': 1, 'rup': 1}}
+  cos rtz: instructions whose attribute is not RNE, by phase: {'red-setup': {'rdn': 1}, 'final': {'rtz': 6, 'rdn': 1, 'rup': 1}}
+  cos rdn: instructions whose attribute is not RNE, by phase: {'red-setup': {'rdn': 1}, 'final': {'rtz': 3, 'rdn': 4, 'rup': 1}}
+  cos rup: instructions whose attribute is not RNE, by phase: {'red-setup': {'rdn': 1}, 'final': {'rtz': 3, 'rup': 4, 'rdn': 1}}
+  cos rmm: instructions whose attribute is not RNE, by phase: {'red-setup': {'rdn': 1}, 'final': {'rtz': 3, 'rmm': 3, 'rdn': 1, 'rup': 1}}
+  cos: 517 lanes, V0, V1 and V2 not identical across the five attributes: 0
+  tan rne: instructions whose attribute is not RNE, by phase: {'red-setup': {'rdn': 1}, 'final': {'rtz': 3, 'rdn': 1, 'rup': 1}}
+  tan rtz: instructions whose attribute is not RNE, by phase: {'red-setup': {'rdn': 1}, 'final': {'rtz': 6, 'rdn': 1, 'rup': 1}, 'special': {'rtz': 1}}
+  tan rdn: instructions whose attribute is not RNE, by phase: {'red-setup': {'rdn': 1}, 'final': {'rtz': 3, 'rdn': 4, 'rup': 1}, 'special': {'rdn': 1}}
+  tan rup: instructions whose attribute is not RNE, by phase: {'red-setup': {'rdn': 1}, 'final': {'rtz': 3, 'rup': 4, 'rdn': 1}, 'special': {'rup': 1}}
+  tan rmm: instructions whose attribute is not RNE, by phase: {'red-setup': {'rdn': 1}, 'final': {'rtz': 3, 'rmm': 3, 'rdn': 1, 'rup': 1}, 'special': {'rmm': 1}}
+  tan: 517 lanes, V0, V1 and V2 not identical across the five attributes: 0
+  budget tan near (300 lanes, seed 22) under rne: 300 main lanes; THE BUDGET'S BOUND 0.284887 Bv; max |E|/Bv 0.0808848; max |M|/Bv 0.0833595; residual 0.001351 Bv
+  budget tan near (300 lanes, seed 22) under rtz: 300 main lanes; THE BUDGET'S BOUND 0.284887 Bv; max |E|/Bv 0.0808848; max |M|/Bv 0.0833595; residual 0.001351 Bv
+  budget tan near (300 lanes, seed 22) under rdn: 300 main lanes; THE BUDGET'S BOUND 0.284887 Bv; max |E|/Bv 0.0808848; max |M|/Bv 0.0833595; residual 0.001351 Bv
+  budget tan near (300 lanes, seed 22) under rup: 300 main lanes; THE BUDGET'S BOUND 0.284887 Bv; max |E|/Bv 0.0808848; max |M|/Bv 0.0833595; residual 0.001351 Bv
+  budget tan near (300 lanes, seed 22) under rmm: 300 main lanes; THE BUDGET'S BOUND 0.284887 Bv; max |E|/Bv 0.0808848; max |M|/Bv 0.0833595; residual 0.001351 Bv
+  the five budgets identical to every digit printed: True
+-- attrs : 136s

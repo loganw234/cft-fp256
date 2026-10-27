@@ -1,0 +1,31 @@
+fp32 tan near seed 22 G default: 1500 main lanes of 1500; 994 instructions (unpruned), 351 ever round; 74s
+  max |E|/Bv 0.08662 (2^-3.53); max |M|/Bv 0.08336 (2^-3.58); second-order residual at most 0.00197 Bv
+  observed maxima summed 0.2119 (2^-2.24); capacities summed 0.2841 (2^-1.82)
+  THE BUDGET'S BOUND: M_max + capacities = 0.3675 Bv (2^-1.44)
+  by phase (observed, capacity), in Bv:
+     quotient       5.377e-02  7.897e-02
+     red-scale      3.455e-02  4.402e-02
+     sincos         3.193e-02  4.133e-02
+     C-head3        2.082e-02  3.609e-02
+     S-head2        2.962e-02  3.000e-02
+     S-head3        1.667e-02  2.677e-02
+     S-tail         1.743e-02  1.839e-02
+     red-triple     3.862e-03  4.701e-03
+     C-head2        2.466e-03  2.931e-03
+     C-tail         7.258e-04  8.958e-04
+     z              1.048e-05  1.246e-05
+     red-lower      4.845e-06  7.656e-06
+     final          0.000e+00  0.000e+00
+     special        0.000e+00  0.000e+00
+  the 10 largest capacities:
+     # 351 add   S-head2        capacity 1.970e-02  observed 1.970e-02
+     # 325 fma   S-tail         capacity 1.834e-02  observed 1.740e-02
+     # 928 add   quotient       capacity 1.563e-02  observed 1.563e-02
+     # 929 fma   quotient       capacity 1.563e-02  observed 2.955e-03
+     # 927 fma   quotient       capacity 1.004e-02  observed 7.305e-03
+     # 350 sub   S-head2        capacity 9.848e-03  observed 9.541e-03
+     # 296 sub   red-scale      capacity 8.919e-03  observed 8.341e-03
+     # 297 sub   red-scale      capacity 8.919e-03  observed 5.994e-03
+     # 298 fma   red-scale      capacity 8.919e-03  observed 5.906e-03
+     # 299 fma   red-scale      capacity 8.919e-03  observed 7.501e-03
+-- budget tan near 1500 22: 74s

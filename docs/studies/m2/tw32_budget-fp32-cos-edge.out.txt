@@ -1,0 +1,29 @@
+fp32 cos edge seed 21 G default: 1500 main lanes of 1500; 936 instructions (unpruned), 312 ever round; 91s
+  max |E|/Bv 0.09169 (2^-3.45); max |M|/Bv 0.08616 (2^-3.54); second-order residual at most 0.00139 Bv
+  observed maxima summed 0.1469 (2^-2.77); capacities summed 0.1714 (2^-2.54)
+  THE BUDGET'S BOUND: M_max + capacities = 0.2575 Bv (2^-1.96)
+  by phase (observed, capacity), in Bv:
+     sincos         3.170e-02  4.068e-02
+     S-head2        3.044e-02  3.077e-02
+     red-scale      2.351e-02  3.018e-02
+     C-head3        2.164e-02  2.809e-02
+     S-tail         1.867e-02  1.892e-02
+     S-head3        1.416e-02  1.571e-02
+     red-triple     2.831e-03  3.050e-03
+     C-head2        2.975e-03  3.008e-03
+     C-tail         9.236e-04  9.264e-04
+     z              1.845e-05  1.849e-05
+     red-lower      2.424e-10  5.410e-10
+     final          0.000e+00  0.000e+00
+  the 10 largest capacities:
+     # 351 add   S-head2        capacity 2.010e-02  observed 2.010e-02
+     # 325 fma   S-tail         capacity 1.887e-02  observed 1.863e-02
+     # 350 sub   S-head2        capacity 1.005e-02  observed 9.737e-03
+     # 298 fma   red-scale      capacity 9.967e-03  observed 4.785e-03
+     # 841 add   sincos         capacity 6.728e-03  observed 3.364e-03
+     # 792 fma   C-head3        capacity 5.449e-03  observed 2.566e-03
+     # 793 fma   C-head3        capacity 5.449e-03  observed 4.790e-03
+     # 300 fma   red-scale      capacity 5.262e-03  observed 3.837e-03
+     # 296 sub   red-scale      capacity 4.983e-03  observed 4.983e-03
+     # 297 sub   red-scale      capacity 4.983e-03  observed 4.983e-03
+-- budget cos edge 1500 21: 91s
