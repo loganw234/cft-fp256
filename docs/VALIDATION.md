@@ -24489,3 +24489,149 @@ yet**: the box is the card's tonight.
 **Which commit each result is from.** e72cbf08 for the code and for every run above but those before the commit; this
 entry's commit changes docs/VALIDATION.md, docs/VERIFICATION.md and docs/README.md alone, which none of the four runs
 reads (READ: no file of hw/ or hw/sched/ opens them; the suites read docs/studies/ and, in the plants, docs/SWEEP-RECORDS.md).
+
+## 2026-10-27 - a cycle's battery is planned for its image and visit: the selftest's off-visits and the single's revision-8 leg are left out of it and no longer recorded as skipped legs, `cycle_start` says what was left out, and the report states the cadence (parcel BC, Sonnet 5.5, claude-sonnet-5-5); **nothing in this entry touched the card or amd-arc-box**
+
+Logan's word of 2026-10-27, verbatim: "Lets also remove skipping the self tests, they dont take much time and 0 skips looks
+better". The lead measured the selftest leg on the night of 2026-10-26 at about 770 s a run (765 to 774 s), the battery's
+longest leg (the brief's figure, READ), so a run on every visit would add about an hour and a half of card time a night. Asked
+with that figure, Logan chose "Keep every 3rd, no skip rows (Recommended)": the selftest keeps running every third visit of
+an image, the other visits are no longer recorded as skipped legs and the report states the cadence and its count instead,
+and acceptance-rev8, which can never apply to the single image, comes off that image's battery. Night 1026 recorded 9
+skipped legs out of 1,464, 7 by the cadence and 2 by the rule (the brief's count, READ; that night's records are not among
+the copies this parcel read). docs/CARDDAY.md, "Legs left out, and legs skipped", is the operator's page. Every figure below
+says whether it was MEASURED (the run named), READ or COMPUTED.
+
+**What was built** (dd68623f, 58fd847f, 0bde7031 and d7d6a196, on 901d067d): hw/card_stress.py, hw/card_stress_lib.py,
+hw/card_stress_report.py, their tests (hw/test_card_stress.py, hw/test_card_stress_report.py) and docs/CARDDAY.md.
+- **The plan.** `Driver.left_out(leg, img, visit)` says why a leg is not in this visit's battery, or None, and
+  `Driver.plan_battery(img, visit)` returns the legs planned, in the run's order, with a map of each leg left out to its
+  reason. There are two reasons and no other. The leg's cadence (`--every LEG=N`; the default is `selftest=3`, planned on the
+  visits 1, 4, 7 ... of an image) says it is not due: `every N visits of an image; this is visit V`. Or it cannot apply to the
+  image (acceptance-rev8 where `REV8_ENTRIES` has no entry for the target, which is the single): the rule's text, as it was.
+  Both texts are those the skipped legs carried. The cadence's is `card_stress_lib.cadence_reason`, which the report uses to
+  recognise it.
+- **What is recorded.** `cycle_start` keeps `battery` as the legs planned for the cycle and gains `left_out` (each leg left
+  out, with its reason) and `every` (the cadences in force: leg to N, for the legs of the run's battery with N above 1; the
+  report needs the cadence of the cycles a leg WAS due in, and those carry no reason to read it from). The driver's cycle line
+  of driver.log names the legs left out and why. A leg left out makes no `leg` record, so status.txt and every count of legs
+  count legs alone.
+- **What stays a skipped leg**, recorded as before with its reason: a disabled leg (an optional tool not built or not
+  XRT-linked), which stays in the battery and is skipped by name on every visit, the cadence's off-visits included; the
+  deadline's estimate; `--quick`'s uncached compile (the deep's revision-8 leg); and every entry of an image being an uncached
+  long compile. `leg_cmd` still answers a leg its plan left out with a `Skip` carrying the same reason, which `run_cycle` never
+  asks for (the scheduler's registry test passes over it, and `recover` asks only for dt-i at visit 1).
+- **The report** (`hw/card_stress_report.py`). A section LEGS LEFT OUT, built from the cycle_start records that carry
+  `left_out`, between the per-image table and the telemetry: per leg left out by cadence, `selftest: every 3rd visit of an
+  image - ran in 5 cycles, not due in 7`, and per leg that cannot apply, `acceptance-rev8: cannot apply to single - left out of
+  2 cycles: <the rule's text>`. "Ran" is read off the leg records of the cycles that planned the leg, not off the plan: the
+  last cycle of a night is cut by its deadline before the battery's last leg, which is the selftest, or the estimate skips it,
+  and the plan alone would count both as runs; a cycle due and not run is said (`due and not run in 4 cycles (skipped, or the
+  run ended first)`). A cycle_start without `left_out` is counted and said (`N earlier cycles did not say`), its skipped legs
+  grouped as they always were; a run none of whose cycle_start records carries the field has no such section and a report that
+  is the report it was. The summary (`--json`) has `left_out` with the counts per image.
+- **The readers.** The page's reducer (`hw/card_stress_progress.py`) takes its leg counts from `summarize()` and reads neither
+  `battery` nor the new fields: it is unchanged, and the page's Skipped column counts skipped legs, which for the nights before
+  today include the cadence's and the rule's. The scheduler (`hw/sched/`) counts `cycle_start` records and holds its steps'
+  argv to `leg_cmd`'s: unchanged. `python/figure_extracts.py` and the stress figure read a fixed historical run: unchanged,
+  and `project_figures.py --check` rc 0.
+
+**The tests.**
+- `hw/test_card_stress.py`: the cadence check of the group `commands` (visit 1 runs, 2 and 3 skip, 4 runs) is now the plan's
+  (the selftest in the battery of visits 1, 4 and 7 and left out of 2, 3, 5 and 6 with the cadence's text; `--every`; a
+  disabled leg stays planned and skipped by name on every visit; the single's revision-8 leg left out on every visit with the
+  rule's text and a `leg_cmd` asked anyway answering the same; the deep's still a skipped leg; `--quick`'s uncached compile
+  still a skipped leg); the group `normal` (the quick run has 40 legs, one skipped, and the single's cycle_start names
+  acceptance-rev8 in `left_out`); and a new group `cadence`: the driver as a process, default battery, the quad alone, stopped
+  by the STOP file after five cycles (not by the clock), api-test, resident and selftest, resident's estimate made to end past
+  the deadline so that it is a skip that stays one. It holds the cycle_start of every visit to the cadence (planned on 1 and
+  4, left out of 2, 3 and 5 with the text), no selftest leg in a cycle that left it out and none of the cadence's text in any
+  skipped leg, resident skipped in every whole cycle, status.txt's total and skipped equal to the records', the cycle line, and
+  the report's cadence line read from those records (the cross-module check of the text).
+- `hw/test_card_stress_report.py`: a group `left-out`, 24 checks, on a fixture whose plan is written out by arithmetic on the
+  visit and not by the driver's code (15 cycles; the selftest due in 6, ran in 5, not due in 9; the single's rev8 left out of
+  3; 48 legs, 5 skipped, only the genuine ones), the old run (no field: no section, 9 skipped legs grouped as always), a
+  resumed run across the change (3 cycles say, 2 earlier do not, the old skipped leg still grouped), a left-out entry with
+  another text than the cadence's for its visit (not counted as not due), and a cycle_start of junk.
+- **Twenty-one plants** (`CARD_STRESS_PLANT='BC: '`), each a defect put back into a copy of the code and caught at the check
+  written for it. Thirteen of the driver and the library: the whole battery planned again, so an off-cadence selftest is a
+  skipped leg; no rule, so the single's revision-8 leg is planned (caught in the unit checks, and again in the quick run's
+  records); the cadence counted from visit 0; `--every` and the default cadence ignored; a disabled leg left out; the
+  estimate no longer skipping; `--quick`'s uncached compile no longer skipping; an all-uncached leg no longer skipping; a cycle
+  line that says nothing; a cycle_start without `left_out`; a leg left out counted in the status file as a skip; the cadence's
+  text reworded. Eight of the report: "ran" counted from the plan; a skipped leg counted as run; no cadence line; any
+  left-out entry taken for the cadence's; the earlier cycles uncounted; the old skipped legs dropped; a section for a run
+  without the field; no line for a leg that cannot apply. Every plant's anchors, the whole list of 214, apply exactly once to
+  the files as they are (a scratch harness: `plants()` with `make_plant_copy` replaced).
+
+**Runs** (MEASURED unless said; none of them touched the card).
+- **WSL** (cft2204, Python 3.10.12, 12 threads), every run niced, one at a time, from a FRESH clone in /tmp of the commit's bundle,
+  copied there first (no git against /mnt/c), the SHA asserted and then the content (four texts only this tree has, each once).
+  At **d7d6a196**, the final code commit (bundle sha256 96a4be70...): (1) `--only commands,normal,cadence,report,testfiles
+  --no-plants`, 143 checks, 0 failed, 2 skipped (the real-copy checks of the report's test and the page's, by name), 26 s -
+  commands 83, normal 24, cadence 10, testfiles 18 (the report's test 5,116 checks, the page's 372), report 8; (2) the plants,
+  `CARD_STRESS_PLANT='BC: '`, 21 plants, 21 checks, 0 failed, 57 s, each plant caught at the check written for it.
+  At **0bde7031**, the commit before (bundle sha256 7d7ab91b...), which d7d6a196 differs from in hw/test_card_stress.py's list
+  of plants alone - data that no `--no-plants` run evaluates (READ: `plants()` is called only without that flag) - one line of
+  its docstring, and the place of a paragraph of docs/CARDDAY.md:
+  (1) the same 143 checks, 25 s; (2) its 17 plants, 17 checks, 0 failed, 40 s; (3) `bash hw/test-sched.sh --no-plants`, 375
+  checks, 0 failed, 3 skipped, 106 s (HXc's at e72cbf08: the same 375 and 106 s); (4) the whole `bash hw/test-card-stress.sh
+  --no-plants`, **1,075 checks, 0 failed, 4 skipped, 620 s** (HXc's at e72cbf08: 1,057 checks, 626 s), the four skips the
+  real-copy checks, by name. (3) and (4) were not repeated at d7d6a196.
+- **The desktop** (Windows, Miniconda Python 3.12, BelowNormal priority, one process at a time): hw/test_card_stress_report.py
+  5,116 checks, 0 failed, 5 s; hw/test_card_stress_progress.py 372 checks, 0 failed, 1 skipped, 19 s, and with
+  `CARD_STRESS_PROGRESS_RUNS` naming the lead's nightly-1021 and resume-1020 copies 387 checks, 0 failed, 0 skipped, 21 s;
+  `--only commands` from Git Bash 83 checks, 0 failed, 4 s (from PowerShell `bash` is WSL's launcher and the group's job-list
+  block fails there, at the baseline too); `--only normal,cadence,report` 22 + 10 + 8 checks, 0 failed, 49 s; the group
+  `cadence` alone 16 to 18 s; hw/test_sched.py `--only steps:registry` 8 checks, 0 failed; `python/project_figures.py --check` rc
+  0, 17 s; `python/check_docs_index.py` rc 0; `git diff --check` clean. All 21 plants were also run there, one process each,
+  each caught at the check written for it.
+- **Real records** (the lead's run copies, box/resume-1020/run and nightly-1021, -1022b, -1023, -1024/run). The report of
+  901d067d and this tree's give the same text, byte for byte, on all five (`--no-git --no-write`; 340, 453, 498, 542 and
+  325 lines; nightly-1024's has 128 skipped legs in 69 groups, the cadence's and the rule's) and none has a LEGS LEFT OUT
+  section. The page's reducer of 901d067d and this tree's, both run from copies outside any git checkout, give the same data
+  file, byte for byte, on nightly-1021 and nightly-1024 (22,894 and 45,267 bytes).
+- **The same records re-planned** (COMPUTED, not a run: `scratch/bc/replan.py` drops each battery leg skipped with the cadence's
+  or the rule's text and moves it from the cycle's `battery` to its `left_out`). nightly-1021 (44 cycles, three nights): the
+  report says `selftest: every 3rd visit of an image - ran in 14 cycles, due and not run in 4 cycles (skipped, or the run ended
+  first), not due in 26` and `acceptance-rev8: cannot apply to single - left out of 7 cycles`, with 1 skipped leg of 1,238 (the
+  estimate's). The 4 are READ in the file: cycle 28's selftest skipped by the estimate, and cycles 14, 29 and 44, each the last
+  of its night, which ended with no selftest record because the night's deadline cut the battery before its last leg - three
+  cycles the old records said nothing of, and that counting "ran" from the plan would have counted as runs. nightly-1024 (157
+  cycles, six nights): `ran in 49, due and not run in 8, not due in 100`, `left out of 26 cycles`, 2 skipped legs of 3,597.
+  The page's reducer on that file against the real one: 9 fields differ out of the whole data file - the six nights'
+  `legs.skipped` (10, 13, 11, 13, 15 and 66 become 0, 1, 0, 0, 1 and 0), `totals.legs.by_status.skipped` 128 to 2,
+  `totals.legs.total` 3,723 to 3,597 and `source.records` - and no coverage, class, cycle, time or estimate figure moves.
+- **A run resumed across the change** (dry runs over the stand-ins, the desktop; `scratch/bc/crossver.py`). 901d067d's driver started a run
+  (`--legs api-test,selftest,acceptance-rev8`, the three images 1:1:1) and wrote 6 cycles, visits 1 and 2 of each image, with the selftest's
+  three off-visits and the single's two revision-8 legs as skipped legs, as it did; this tree's driver resumed it (`--resume`) for 6 more,
+  visits 3 and 4: the visits continued from the old file's, the selftest was left out of visit 3 of each image and planned at visit 4, the
+  single's revision-8 leg left out of both, and the deep's uncached compile still a skipped leg (two more). The report says `cycles read: 6
+  that say what they left out; 6 earlier cycles did not say, and their skipped legs are listed as they always were`, `selftest: every 3rd
+  visit of an image - ran in 3 cycles, not due in 3`, `acceptance-rev8: cannot apply to single - left out of 2 cycles`, and 31 legs
+  recorded, 9 of them skipped, in 3 groups (the three old selftest skips, the single's two, the deep's four).
+
+**Known limits, recorded rather than fixed.**
+- A disabled leg is a skipped leg on every visit, the cadence's off-visits included, as it was: a night whose cft-selftest is
+  not XRT-linked still shows a skip a visit.
+- The status file has no line for what a cycle left out (its leg counts are legs alone, and cycle_start, driver.log and the
+  report say the rest). The page's data file has no field for it, and its Skipped column for the nights before today holds the
+  cadence's and the rule's skips.
+- The report's cadence line is one line per leg over all images; the counts per image are in `--json` only
+  (`left_out.cadence[].by_image`).
+- `every` is a field the brief did not name. A cycle_start with `left_out` and no `every` yields no cadence line (a cycle that
+  does not record its cadence cannot state it).
+- `leg_cmd` still returns a `Skip` for a left-out leg, for a caller that did not plan: a caller that went round `plan_battery`
+  would record the old skipped legs again, loudly.
+- A real night under the new driver has not run: it is the lead's tonight. What was read of real records after the change is COMPUTED
+  (the re-planned nights, above), and the resumed run is a dry run over stand-ins.
+- "Due and not run" does not say which of its two causes it is (the estimate skipped the leg, which the skipped legs list; or the
+  run ended before the battery got there, which no record says). A leg retried in a cycle counts once for that cycle.
+- The group `cadence` takes about 20 s (five cycles of about 3 s) and waits up to 180 s for the fifth; on a loaded Windows
+  desktop, where the guard's process listing can stall (the known limit in docs/CARDDAY.md), that wait may not be enough.
+
+**Which commit each result is from.** d7d6a196 for the code and the tests. The WSL runs name theirs above. The desktop's runs were made on
+the tree as it stood at the time, between dd68623f and d7d6a196, whose differences are the `--every` help text, `_ordinal` computed outside
+an f-string, the cadence scenario's whole cycles, the plants' list and one CARDDAY paragraph's place, all of which the WSL runs at 0bde7031
+and d7d6a196 cover. This entry's commit changes docs/VALIDATION.md and docs/README.md alone, which none of the runs reads (READ: no file of
+hw/ or hw/sched/ opens them; the suites read docs/studies/ and, in the plants, docs/SWEEP-RECORDS.md).
