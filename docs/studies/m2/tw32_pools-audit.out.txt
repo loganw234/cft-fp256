@@ -1,0 +1,5 @@
+fp32 triple word, the audit of every claimed-exact instruction of the WHOLE routine (rne): 2859 lanes (the pools, 600 random, 300 edge, 300 small, 300 near, 600 quadrant boundaries)
+  sin: 118 instructions claimed exact, 2859 lanes, lanes with a failed claim 0; 26s
+  cos: 118 instructions claimed exact, 2859 lanes, lanes with a failed claim 0; 53s
+  tan: 120 instructions claimed exact, 2859 lanes, lanes with a failed claim 0; 81s
+-- pools audit: 90s

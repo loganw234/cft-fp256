@@ -1,0 +1,5 @@
+fp32 triple word, the budget over 34 anchor lanes (both signs): 0x3f490fd8, 0x3f490fd9, 0x3f490fda, 0x3f490fdb, 0x3f490fdc, 0x3f490fdd, 0x3f490fde, 0x44264edb, 0x44264edc, 0x44264edd, 0x44264ede, 0x44264edf and the five largest overshoots
+  sin: 34 main lanes of 34; max |E|/Bv 0.09461 (2^-3.40); max |M|/Bv 0.08617; second-order residual at most 0.000326 Bv; THE BUDGET'S BOUND 0.1707 Bv (2^-2.55)
+  cos: 34 main lanes of 34; max |E|/Bv 0.08911 (2^-3.49); max |M|/Bv 0.08626; second-order residual at most 0.000462 Bv; THE BUDGET'S BOUND 0.1762 Bv (2^-2.50)
+  tan: 34 main lanes of 34; max |E|/Bv 0.1202 (2^-3.06); max |M|/Bv 0.0871; second-order residual at most 0.000747 Bv; THE BUDGET'S BOUND 0.2306 Bv (2^-2.12)
+-- anchors : 6s

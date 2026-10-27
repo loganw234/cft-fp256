@@ -1,0 +1,18 @@
+fp32 triple word pools on the model (m2harness.pools): 760 arguments
+  sin rne: 939 instructions, 97 words, live 23: 760 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 4s
+  sin rtz: 939 instructions, 98 words, live 23: 760 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 13s
+  sin rdn: 939 instructions, 98 words, live 23: 760 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 22s
+  sin rup: 939 instructions, 97 words, live 23: 760 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 31s
+  sin rmm: 939 instructions, 97 words, live 23: 760 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 41s
+  cos rne: 936 instructions, 94 words, live 23: 760 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10']; 50s
+  cos rtz: 936 instructions, 95 words, live 23: 760 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10']; 60s
+  cos rdn: 936 instructions, 95 words, live 23: 760 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10']; 70s
+  cos rup: 936 instructions, 94 words, live 23: 760 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10']; 79s
+  cos rmm: 936 instructions, 94 words, live 23: 760 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10']; 88s
+  tan rne: 993 instructions, 96 words, live 23: 760 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 98s
+  tan rtz: 993 instructions, 96 words, live 23: 760 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 108s
+  tan rdn: 993 instructions, 96 words, live 23: 760 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 119s
+  tan rup: 993 instructions, 96 words, live 23: 760 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 129s
+  tan rmm: 993 instructions, 96 words, live 23: 760 lanes, marked 0 (guess right 0), wrong 0, flag words ['0x0', '0x1', '0x10', '0x18']; 140s
+TOTAL pools on the model (m2harness.pools): 11400 lanes, marked 0 (guess right 0), wrong unmarked 0
+-- pools model: 145s

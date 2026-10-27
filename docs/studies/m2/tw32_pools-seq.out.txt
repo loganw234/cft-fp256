@@ -1,0 +1,18 @@
+fp32 triple word, the pools as the SCHEDULED fragment on seq.py (routines.run, as onseq.py): 760 arguments
+  sin rne: 760 lanes on seq.py, 939 instructions, scheduled live 23: differ from the model 0, from transcend.py (unmarked) 0, marked 0 (guess right 0); 12s
+  sin rtz: 760 lanes on seq.py, 939 instructions, scheduled live 23: differ from the model 0, from transcend.py (unmarked) 0, marked 0 (guess right 0); 24s
+  sin rdn: 760 lanes on seq.py, 939 instructions, scheduled live 23: differ from the model 0, from transcend.py (unmarked) 0, marked 0 (guess right 0); 34s
+  sin rup: 760 lanes on seq.py, 939 instructions, scheduled live 23: differ from the model 0, from transcend.py (unmarked) 0, marked 0 (guess right 0); 48s
+  sin rmm: 760 lanes on seq.py, 939 instructions, scheduled live 23: differ from the model 0, from transcend.py (unmarked) 0, marked 0 (guess right 0); 58s
+  cos rne: 760 lanes on seq.py, 936 instructions, scheduled live 23: differ from the model 0, from transcend.py (unmarked) 0, marked 0 (guess right 0); 69s
+  cos rtz: 760 lanes on seq.py, 936 instructions, scheduled live 23: differ from the model 0, from transcend.py (unmarked) 0, marked 0 (guess right 0); 80s
+  cos rdn: 760 lanes on seq.py, 936 instructions, scheduled live 23: differ from the model 0, from transcend.py (unmarked) 0, marked 0 (guess right 0); 90s
+  cos rup: 760 lanes on seq.py, 936 instructions, scheduled live 23: differ from the model 0, from transcend.py (unmarked) 0, marked 0 (guess right 0); 100s
+  cos rmm: 760 lanes on seq.py, 936 instructions, scheduled live 23: differ from the model 0, from transcend.py (unmarked) 0, marked 0 (guess right 0); 112s
+  tan rne: 760 lanes on seq.py, 993 instructions, scheduled live 23: differ from the model 0, from transcend.py (unmarked) 0, marked 0 (guess right 0); 123s
+  tan rtz: 760 lanes on seq.py, 993 instructions, scheduled live 23: differ from the model 0, from transcend.py (unmarked) 0, marked 0 (guess right 0); 135s
+  tan rdn: 760 lanes on seq.py, 993 instructions, scheduled live 23: differ from the model 0, from transcend.py (unmarked) 0, marked 0 (guess right 0); 145s
+  tan rup: 760 lanes on seq.py, 993 instructions, scheduled live 23: differ from the model 0, from transcend.py (unmarked) 0, marked 0 (guess right 0); 157s
+  tan rmm: 760 lanes on seq.py, 993 instructions, scheduled live 23: differ from the model 0, from transcend.py (unmarked) 0, marked 0 (guess right 0); 169s
+TOTAL on seq.py: 11400 lanes, differ from the model 0, wrong unmarked 0, marked 0 (guess right 0)
+-- pools seq: 169s

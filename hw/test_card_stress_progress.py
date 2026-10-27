@@ -14,6 +14,14 @@ dry run, a leaked host name, path and user, a number past 2**53, an edited data 
 by name, and --check must name the field; every one is paired with a control that must not trip. The lead's real copies are read
 when CARD_STRESS_PROGRESS_RUNS names their directories (separated as PATH is), and skipped by name without it.
 
+THE WIDE ITEMS (parcel HXd, 2026-10-27). A second synthetic run (BSPEC, four nights, and WSPEC: the same four nights with the wide items served from the third,
+the tile class's second night) serves wide items of the three kinds the driver serves - hard cases, the fp32 slice at fp64, a low-bit window - beside the base items.
+Its truth is the oracle's, from the spec alone (the format and group of every item written in this file's own table, the spaces from the documents), and the
+reducer's data, the report's and the page's are held to it: each row's format and group, each class's totals by group, a night's state by group (written only once a
+class has a wide row, so the nights before it are the nights they were), the base group's figures unmoved by the wide group joining, the page's card, item list and
+chart in node (the older group's line point for point as it was), every format passing the guard against a path-shaped string, and, over a data file WITHOUT the new
+fields, the page drawing the very tree that 3ec0081c's page drew (a digest of the whole stub DOM, from running that page through this harness).
+
 The last line is "progress test: N checks, F failed, K skipped"; the exit status is 0 only if F is 0.
 """
 import sys
@@ -41,6 +49,17 @@ import card_stress_report as R        # noqa: E402
 SCRIPT, REPORT = os.path.join(HW, "card_stress_progress.py"), os.path.join(HW, "card_stress_report.py")
 PAGE, DATA = os.path.join(ROOT, "site", "nightly.html"), os.path.join(ROOT, "site", "nightly.json")
 FIXTURE = os.path.join(HW, "card_stress_fixtures", "progress-synthetic.jsonl")
+FIXTURE_WIDE = os.path.join(HW, "card_stress_fixtures", "progress-synthetic-wide.jsonl")
+# What the page of 3ec0081c drew over a data file of the shape its reducer made (the run without wide items, the new fields taken off), as the digest of
+# the whole tree it builds in the stub DOM, with the clock at LEGACY_CLOCK (the page says how long ago the newest night ended). Made once by running that
+# page (git show 3ec0081c:site/nightly.html) through this very harness; the page now must draw the same tree over such a file.
+LEGACY_CLOCK = 1792650000000
+LEGACY_DOM = "c8aa1396ddcc7be0457d479cb6de09be623ad34752cad269f96c5c570636e2e4"
+# The same, for the file the nightly page was committed with at 3ec0081c (night 7, the data file's sha256 below): the digest of the tree that page drew
+# over it with the clock at NIGHT7_CLOCK, from running that page through this harness.
+NIGHT7_SHA256 = "72960b0c33ce267b0627e7feec3b74483875fff1e7977f1f597e5ca17971d650"
+NIGHT7_CLOCK = 1793200000000
+NIGHT7_DOM = "0884be6ecce7fb52f062a5983a51afa2e1850131790567bb1dada4869fea69b8"
 st = {"n": 0, "f": 0, "skips": 0}
 DERIVED = []
 _SUMMARIZE, _TREE_CLASS = R.summarize, R.tree_class
@@ -84,14 +103,27 @@ def skip(name, why):
 FMT, OFF = "%Y-%m-%d %H:%M:%S", -(3 * 3600 + 1800)
 T0 = calendar.timegm((2026, 10, 20, 2, 0, 0))        # night 1 starts at 22:30 on the 19th by the fixture box's clock
 A, EXH = 1 << 30, 1 << 32
-ITEMS = {                                              # tool, op, mode, reach, space, cases an index
-    "conv32to64-all": ("clause5", "conv32to64-all", None, "host", EXH, 1),
-    "scaleb32-all-rne": ("clause5", "scaleb32-all", "rne", "tile", EXH, 17),
-    "scaleb32-wide-rne": ("clause5", "scaleb32-wide", "rne", "tile", EXH, 568),
-    "rint64-class-rne": ("clause5", "rint64-class", "rne", "tile", 35840, 4),
-    "div32-hard-rne": ("divsqrt", "div32-hard", "rne", "tile", 21235788, 4),
+ITEMS = {                                              # tool, op, mode, reach, space, cases an index, format, group (the format and group written here by hand)
+    "conv32to64-all": ("clause5", "conv32to64-all", None, "host", EXH, 1, "fp32 -> fp64", "base"),
+    "scaleb32-all-rne": ("clause5", "scaleb32-all", "rne", "tile", EXH, 17, "fp32", "base"),
+    "scaleb32-wide-rne": ("clause5", "scaleb32-wide", "rne", "tile", EXH, 568, "fp32", "base"),
+    "rint64-class-rne": ("clause5", "rint64-class", "rne", "tile", 35840, 4, "fp64", "base"),
+    "div32-hard-rne": ("divsqrt", "div32-hard", "rne", "tile", 21235788, 4, "fp32", "base"),
 }
 CAMPAIGN = list(ITEMS)
+# The wide-format items (parcel HXc's), one of each kind the driver serves, their spaces and k from the documents (docs/CARDDAY.md, "The wide items in
+# the driver"; docs/studies/HX-wide-sweeps.md), not from the library, and their formats from the C tools' headers: a hard case (div128-hard: p = 113),
+# the fp64 hard cases widened (sqrt256-f64hard), the fp32 slice at fp64 (sqrt64-f32) and a low-bit window (recip128-win-key: a keyed draw). They are
+# all tile items. sqrt128-hard-rne is named by the wide campaign and never served: a wide row at zero.
+WIDE = {
+    "div128-hard-rne": ("divsqrt", "div128-hard", "rne", "tile", 289_931_696, 4, "fp128", "wide"),
+    "sqrt256-f64hard-rne": ("divsqrt", "sqrt256-f64hard", "rne", "tile", 4_456_448, 1, "fp256", "wide"),
+    "sqrt64-f32-rup": ("divsqrt", "sqrt64-f32", "rup", "tile", EXH, 1, "fp64", "wide"),
+    "recip128-win-key-rne": ("divsqrt", "recip128-win-key", "rne", "tile", EXH, 1, "fp128", "wide"),
+    "sqrt128-hard-rne": ("divsqrt", "sqrt128-hard", "rne", "tile", 4_456_448, 1, "fp128", "wide"),
+}
+ITEMS.update(WIDE)
+WCAMPAIGN = list(ITEMS)
 TREE_A = {"commit": "a1" * 20, "dirty": False, "dirty_files": 0}              # a run that recorded no tree
 TREE_B = {"commit": "b2" * 20, "dirty": False, "dirty_files": 0, "rtl": "c3" * 20, "rtl_dirty": False, "host_src": "d4" * 20,
           "host_src_dirty": False, "cc": "cc (Fixture) 1.0"}
@@ -106,14 +138,28 @@ N2 = {"tree": TREE_B, "battery": [("api-test", "pass"), ("dt-i", "fail"), ("self
 N3 = {"tree": TREE_B, "battery": [("api-test", "pass"), ("selftest", "skipped")], "slices": [
     ("div32-hard-rne", 12_000_000, 21_235_788), ("scaleb32-wide-rne", 3 * A, 4 * A), ("conv32to64-all", 2 * A, 3 * A)]}
 SPEC = [N1, N2, N3]
+# A fourth night, the base items' (BSPEC): the run goes on under the same tree, filling the gap in div32-hard-rne, a quarter of scaleb32-all-rne, and the last
+# quarter of conv32to64-all, so that the base group moves on the night the wide group is first served.
+N4 = {"tree": TREE_B, "battery": [("api-test", "pass"), ("selftest", "skipped")], "slices": [
+    ("div32-hard-rne", 10_000_000, 12_000_000), ("scaleb32-all-rne", 0, A), ("conv32to64-all", 3 * A, 4 * A)]}
+BSPEC = [N1, N2, N3, N4]
+# The same four nights with the wide items served from the third, the class's second night (the tile class of nights 2 to 4 has its first night without them):
+# div128-hard partly on night 3 and to the end of its space on night 4 (4 checks an index), sqrt256-f64hard whole in one slice, sqrt64-f32 a quarter and then
+# three quarters, recip128-win-key two quarters and then the rest. Its campaign (WCAMPAIGN) names sqrt128-hard-rne too, never served.
+WN3 = N3 | {"slices": N3["slices"] + [("div128-hard-rne", 0, 4_000_000), ("sqrt64-f32-rup", 0, A), ("recip128-win-key-rne", 0, 2 * A)]}
+WN4 = N4 | {"slices": N4["slices"] + [("div128-hard-rne", 4_000_000, 289_931_696), ("sqrt256-f64hard-rne", 0, 4_456_448), ("sqrt64-f32-rup", A, 3 * A),
+                                      ("recip128-win-key-rne", 2 * A, EXH)]}
+WSPEC = [N1, N2, WN3, WN4]
 
 
 def local(e):
     return time.strftime(FMT, time.gmtime(e + OFF))
 
 
-def build(spec=SPEC):
-    """The records of the spec's nights, a night a day, in the order and with the fields the driver writes (the ones read)."""
+def build(spec=SPEC, campaign=None):
+    """The records of the spec's nights, a night a day, in the order and with the fields the driver writes (the ones read). `campaign` is the
+    items every run_start's --sweep-items names (CAMPAIGN, the base items, unless given)."""
+    campaign = CAMPAIGN if campaign is None else campaign
     recs, clk, cycle = [], [0.0], 0
 
     def put(typ, e, **kw):
@@ -128,7 +174,7 @@ def build(spec=SPEC):
     for k, nt in enumerate(spec):
         e = T0 + k * 86400
         put("run_start", e, run_id="fixture-run", out="/data/fixture-run", host="fixture-box",
-            argv=(["--resume"] if k else []) + ["--out", "/data/fixture-run", "--rev8-images", "/Users/fixtureuser/images", "--sweep-items", ",".join(CAMPAIGN)],
+            argv=(["--resume"] if k else []) + ["--out", "/data/fixture-run", "--rev8-images", "/Users/fixtureuser/images", "--sweep-items", ",".join(campaign)],
             settings={"until": "2026-10-20 08:00:00", "quick": False, "dry_run": nt.get("dry", False)}, tree=nt["tree"], deadline="2026-10-20 08:00:00",
             images={"quad": {"sha256": "4f" * 32, "bytes": 5, "tiles": 4, "path": "/Users/fixtureuser/images/quad.xclbin", "target": "u50-quad"},
                     "single": {"sha256": "06" * 32, "bytes": 4, "tiles": 1, "path": "/Users/fixtureuser/images/single.xclbin", "target": "u50"}},
@@ -149,7 +195,7 @@ def build(spec=SPEC):
         starts = []
         for host_pass in (False, True):                # the card's slices one after another, then the host pool's beside them
             for j, (item, lo, hi, *s) in enumerate(x for x in nt["slices"] if (ITEMS[x[0]][3] == "host") == host_pass):
-                tool, op, mode, reach, _space, per = ITEMS[item]
+                tool, op, mode, reach, _space, per, *_ = ITEMS[item]
                 status, t0 = (s[0] if s else "pass"), (starts[j % len(starts)] if host_pass else t)
                 if not host_pass:
                     starts.append(t0)
@@ -209,7 +255,7 @@ def first_gap(iv, space):
 def oracle(spec=SPEC):
     classes, nights = {}, []
     for k, nt in enumerate(spec, 1):
-        night = {"legs": Counter(), "slices": 0, "cases": 0, "card": 0, "dis": 0, "ids": {}, "state": {}}
+        night = {"legs": Counter(), "slices": 0, "cases": 0, "card": 0, "dis": 0, "ids": {}, "state": {}, "groups": {}}
         mine = {}
         for kind in ("tile", "host"):
             tr = nt["tree"]
@@ -223,7 +269,7 @@ def oracle(spec=SPEC):
             night["legs"][status] += 1
             night["card"] += 0 if status == "skipped" else 30
         for item, lo, hi, *s in nt["slices"]:
-            status, (_t, _o, _m, reach, _sp, per) = (s[0] if s else "pass"), ITEMS[item]
+            status, (_t, _o, _m, reach, _sp, per, *_) = (s[0] if s else "pass"), ITEMS[item]
             c = mine[reach]
             c["iv"].setdefault(item, []).append((lo, hi))
             c["n"][item] = c["n"].get(item, 0) + 1
@@ -241,6 +287,10 @@ def oracle(spec=SPEC):
                     if v == ITEMS[i][4]:
                         c["done"].setdefault(i, k)
                 night["state"][c["id"]] = {"covered": sum(cov.values()), "complete": sum(v == ITEMS[i][4] for i, v in cov.items())}
+                if any(ITEMS[i][7] == "wide" for i in cov):          # a night's state by group is written only once the class has a wide row served
+                    night["groups"][c["id"]] = {g: {"covered": sum(v for i, v in cov.items() if ITEMS[i][7] == g),
+                                                    "complete": sum(v == ITEMS[i][4] for i, v in cov.items() if ITEMS[i][7] == g)}
+                                                for g in ("base", "wide") if any(ITEMS[i][7] == g for i in cov)}
         nights.append(night)
     return nights, {c["id"]: c for c in classes.values()}
 
@@ -257,7 +307,8 @@ def estimate(c, item, newest, date):
             "date": (datetime.date.fromisoformat(date) + datetime.timedelta(days=left)).isoformat()}
 
 
-def against_oracle(out, spec, recs):
+def against_oracle(out, spec, recs, campaign=None):
+    campaign = CAMPAIGN if campaign is None else campaign
     nights, classes = oracle(spec)
     n = len(spec)
     eq(len(out["nights"]), n, "nights")
@@ -269,6 +320,7 @@ def against_oracle(out, spec, recs):
         check(abs(r["card_s"] - o["card"]) < 1e-6, f"night {k + 1}: time on the card (the host pool's legs beside it are not on it)", (r["card_s"], o["card"]))
         eq(r["classes"], o["ids"], f"night {k + 1}: the classes it counted under")
         eq(r["after"]["classes"], o["state"], f"night {k + 1}: the state after it, per class")
+        eq(r["after"].get("groups", {}), o["groups"], f"night {k + 1}: the state after it by group, written for a class only once it has a wide row served")
     T = out["totals"]
     eq((T["nights"], T["slices"], T["completed_slices"], T["cases"], T["disagreements"]),
        (n, sum(x["slices"] for x in nights), sum(x["slices"] for x in nights), sum(x["cases"] for x in nights), sum(x["dis"] for x in nights)), "totals: nights, slices, cases, disagreements")
@@ -284,7 +336,7 @@ def against_oracle(out, spec, recs):
         o = classes[c["id"]]
         cur = o["nights"][-1] == n
         eq((c["kind"], c["nights"], c["current"], c["served"]), (o["kind"], o["nights"], cur, bool(o["iv"])), f"class {c['id']}: kind, nights, current, served")
-        names = sorted(set(o["iv"]) | (set(i for i in CAMPAIGN if ITEMS[i][3] == o["kind"]) if cur else set()))
+        names = sorted(set(o["iv"]) | (set(i for i in campaign if ITEMS[i][3] == o["kind"]) if cur else set()))
         eq([r["item"] for r in c["items"]], names, f"class {c['id']}: its items (a current class lists the campaign's at zero)")
         for r in c["items"]:
             i, iv = r["item"], o["iv"].get(r["item"], [])
@@ -292,9 +344,18 @@ def against_oracle(out, spec, recs):
             want = {"space": ITEMS[i][4], "covered": cov, "slices": o["n"].get(i, 0), "cases": o["cases"].get(i, 0), "complete": cov == ITEMS[i][4],
                     "complete_night": o["done"].get(i), "first_gap": first_gap(iv, ITEMS[i][4]), "estimate": estimate(o, i, n, date) if cur and cov < ITEMS[i][4] else None}
             eq({k: r[k] for k in want}, want, f"class {c['id']} {i}: space, covered, slices, cases, complete, night, first gap, estimate")
+            eq((r["format"], r["group"]), (ITEMS[i][6], ITEMS[i][7]), f"class {c['id']} {i}: its format and its group (the test's own table, not the catalog's)")
         eq(c["total"], {"items": len(names), "complete": sum(r["complete"] for r in c["items"]), "covered": sum(r["covered"] for r in c["items"]),
                         "space": sum(ITEMS[i][4] for i in names), "pct": 100.0 * sum(r["covered"] for r in c["items"]) / sum(ITEMS[i][4] for i in names)},
            f"class {c['id']}: total")
+        want_groups, cov_of = [], lambda i: sum(h - lo for lo, h in union(o["iv"].get(i, [])))
+        for g in ("base", "wide"):
+            mine = [i for i in names if ITEMS[i][7] == g]
+            if mine:
+                gc, gs = sum(cov_of(i) for i in mine), sum(ITEMS[i][4] for i in mine)
+                want_groups.append({"group": g, "items": len(mine), "complete": sum(cov_of(i) == ITEMS[i][4] for i in mine), "covered": gc, "space": gs,
+                                    "pct": 100.0 * gc / gs})
+        eq(c["groups"], want_groups, f"class {c['id']}: its totals by group, base then wide, only the groups it has rows of, each over its own items")
 
 
 # ---------------------------------------------------------------------------
@@ -345,7 +406,10 @@ def raw_check(out, d, label, plants=True):
     rows, bad = against_raw(out, d)
     check(rows > 0 and not bad, f"{label}: {rows} class-level rows (covered, slices, cases, first uncovered index) recomputed from the raw records agree with the data file", bad[:2])
     if plants:
-        where = next((ci, ri) for ci, c in enumerate(out["now"]["classes"]) for ri, r in enumerate(c["items"]) if r["first_gap"] and r["covered"] > 0)
+        where = next(((ci, ri) for ci, c in enumerate(out["now"]["classes"]) for ri, r in enumerate(c["items"]) if r["first_gap"] and r["covered"] > 0), None)
+        if where is None:        # a copy read with git (the classes it gives) can have every item whole or at zero: nothing to bend (it crashed here, 3ec0081c's test too)
+            skip(f"{label}: raw-record plants", "no item of this copy is partly covered, so there is no first gap, covered figure or slice count to bend")
+            return rows
         item = out["now"]["classes"][where[0]]["items"][where[1]]["item"]
         for what, edit in (("first uncovered index", lambda r: r.__setitem__("first_gap", [r["first_gap"][0] + 1, r["first_gap"][1]])),
                            ("covered figure", lambda r: r.__setitem__("covered", r["covered"] + 1)), ("slice count", lambda r: r.__setitem__("slices", r["slices"] + 1))):
@@ -387,8 +451,13 @@ def shared(out, S, text):
         f.append((f"class {c['id']}: label", c["label"], rc["label"]))
         f.append((f"class {rc['label'][:40]}: covered", c["total"]["covered"], rc["total"]["covered"]))
         rows = {r["item"]: r for r in c["items"]}
+        # the reducer's totals by group hold the campaign's rows at zero, which the report cannot list: what is compared is what both state, covered and
+        # complete, for each group the report has
+        seen_g = {g["group"]: (g["covered"], g["complete_items"]) for g in rc["total"]["by_group"]}
+        f.append((f"class {c['id']}: totals by group (covered, items complete)", {g["group"]: (g["covered"], g["complete"]) for g in c["groups"] if g["group"] in seen_g}, seen_g))
         for e in rc["exhaustive"]:
             r = rows.get(e["item"], {})
+            f.append((f"{e['item']} in {c['id']}: format, group", (r.get("format"), r.get("group")), (e["format"], e["group"])))
             f.append((f"{e['item']} in {c['id']}: space, covered, slices, cases, complete, pct", tuple(r.get(k) for k in ("space", "covered", "slices", "cases", "complete", "pct")),
                       (e["total"], e["covered"], e["slices"], e["cases"], e["complete"], e["pct"])))
             if seen[e["item"]] == 1 and not e["complete"]:
@@ -410,34 +479,48 @@ def against_report(out, d, label, git_free=True):
 # ---------------------------------------------------------------------------
 HARNESS = r'''
 const fs = require("fs"), vm = require("vm");
-const [html, mode, dataPath] = process.argv.slice(2);
+const [html, mode, dataPath, clock] = process.argv.slice(2);
 const m = /<script>([\s\S]*?)<\/script>/.exec(fs.readFileSync(html, "utf8"));
-class T { constructor(t) { this.text = t; } get textContent() { return this.text; } }
+class T { constructor(t) { this.text = t; } get textContent() { return this.text; } dump() { return { t: this.text }; } }
 class N {
   constructor(tag) { this.tag = tag; this.kids = []; this.attrs = {}; this.style = {}; this.hidden = false; this.className = ""; }
   appendChild(c) { if (c.frag) { this.kids.push(...c.kids); c.kids = []; } else this.kids.push(c); return c; }
   setAttribute(k, v) { this.attrs[k] = String(v); }
   get textContent() { return this.kids.map(k => k.textContent).join(" "); }
   set textContent(v) { this.kids = v === "" ? [] : [new T(String(v))]; }
+  dump() { return { tag: this.tag, attrs: this.attrs, style: this.style, hidden: this.hidden, cls: this.className, kids: this.kids.map(k => k.dump()) }; }
 }
+// the chart: each polyline of the figure, with the titles of the circles drawn after it; the clock may be fixed (the page says how long ago a night ended)
+function chart(n, out) {
+  if (n.tag === "svg" && n.attrs.role === "img") {
+    let cur = null;
+    n.kids.forEach(k => { if (k.tag === "polyline") { cur = { points: k.attrs.points, style: k.attrs.style, titles: [] }; out.push(cur); }
+                          else if (k.tag === "circle" && cur) cur.titles.push(k.kids.map(x => x.textContent).join("")); });
+  }
+  (n.kids || []).forEach(k => chart(k, out));
+  return out;
+}
+class FDate extends Date { constructor(...a) { if (a.length) super(...a); else super(Number(clock)); } static now() { return Number(clock); } }
 const els = { status: new N("div"), app: new N("div") };
 const document = { createElement: t => new N(t), createElementNS: (ns, t) => new N(t), createTextNode: s => new T(s),
   createDocumentFragment: () => Object.assign(new N("#frag"), { frag: true }), getElementById: id => els[id], documentElement: { clientWidth: 900 } };
 const resp = (ok, status, text) => ({ ok, status, statusText: ok ? "OK" : "Not Found", text: () => Promise.resolve(text) });
 const fetch = () => mode === "reject" ? Promise.reject(new TypeError("Failed to fetch")) :
   Promise.resolve(mode === "404" ? resp(false, 404, "") : resp(true, 200, fs.readFileSync(dataPath, "utf8")));
-vm.runInNewContext(m[1], { document, window: { addEventListener() {} }, fetch, Date, setTimeout, clearTimeout, console });
+vm.runInNewContext(m[1], { document, window: { addEventListener() {} }, fetch, Date: clock ? FDate : Date, setTimeout, clearTimeout, console });
 setTimeout(() => console.log(JSON.stringify({ status: { hidden: els.status.hidden, text: els.status.textContent },
-  app: { hidden: els.app.hidden, text: els.app.textContent } })), 300);
+  app: { hidden: els.app.hidden, text: els.app.textContent }, chart: chart(els.app, []),
+  dom: require("crypto").createHash("sha256").update(JSON.stringify(els.app.dump())).digest("hex") })), 300);
 '''
 
 
-def page(mode, data=None):
+def page(mode, data=None, html=None, clock=None):
+    """The page `html` (default: site/nightly.html) in node over the data file `data`, with the clock at `clock` milliseconds if given."""
     h = os.path.join(TMP, "harness.js")
     if not os.path.exists(h):
         with open(h, "w", encoding="utf-8", newline="\n") as fh:
             fh.write(HARNESS)
-    p = subprocess.run([NODE, h, PAGE, mode, data or ""], capture_output=True, text=True, encoding="utf-8", timeout=60)
+    p = subprocess.run([NODE, h, html or PAGE, mode, data or ""] + ([str(clock)] if clock else []), capture_output=True, text=True, encoding="utf-8", timeout=60)
     return json.loads(p.stdout) if p.returncode == 0 and p.stdout.strip() else {"error": p.stderr[-300:]}
 
 
@@ -599,6 +682,193 @@ def group_fixture():
     return recs, out, d, text
 
 
+def legacy(out):
+    """The data file as the tools of 3ec0081c made it: a copy of `out` without the fields parcel HXd added (the rule text of the groups, a class's
+    totals by group, a row's format and group, a night's state by group)."""
+    j = json.loads(json.dumps(out))
+    j["rules"].pop("groups", None)
+    for c in j["now"]["classes"]:
+        c.pop("groups", None)
+        for r in c["items"]:
+            r.pop("format", None)
+            r.pop("group", None)
+    for nt in j["nights"]:
+        nt["after"].pop("groups", None)
+    return j
+
+
+def js_pct1(cov, space):
+    """The page's pct1: toFixed(1) rounds the double's exact value half up (Python's %.1f rounds an exact tie to even), and an incomplete
+    figure is never shown as 100.0."""
+    from decimal import Decimal, ROUND_HALF_UP
+    s = str(Decimal(100 * cov / space).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP))
+    return ("99.9" if cov < space and s == "100.0" else s) + "%"
+
+
+def group_base4():
+    """The base run's four nights (BSPEC), reduced: what the wide run's older group is held to. Its truth is the oracle's too."""
+    recs = build(BSPEC)
+    d = write_run(recs, "base4")
+    out = reduce_dir(d, "e5" * 20)
+    against_oracle(out, BSPEC, recs)
+    against_report(out, d, "four nights without wide items")
+    return out, d
+
+
+def group_wide_fixture(base, base_dir):
+    """Parcel HXd. The synthetic run served the wide items too (WSPEC: four nights, the same trees and base slices as BSPEC, and from night 3 slices of
+    the wide items of three kinds: hard cases, the fp32 slice at fp64, a low-bit window). Its truth is the oracle's, from the spec alone; the reducer's
+    data and the report's agree with it, the base group's figures are the base run's (`base`: BSPEC reduced), unmoved, and the nights before any wide
+    row are the nights they were."""
+    recs = build(WSPEC, WCAMPAIGN)
+    check(len(WSPEC) == len(BSPEC) == 4 and WSPEC[:2] == BSPEC[:2], "wide fixture: the wide run is the base run's four nights, the first two as they are")
+    if "--write-fixture" in sys.argv:
+        with open(FIXTURE_WIDE, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write("".join(json.dumps(r, separators=(",", ":")) + "\n" for r in recs))
+    want = "".join(json.dumps(r, separators=(",", ":")) + "\n" for r in recs)
+    check(os.path.exists(FIXTURE_WIDE) and open(FIXTURE_WIDE, encoding="utf-8", newline="").read() == want,
+          "wide fixture: the committed file is what the builder writes (--write-fixture remakes it)")
+    d = write_run(recs, "wide")
+    out = reduce_dir(d, "e5" * 20)
+    against_oracle(out, WSPEC, recs, WCAMPAIGN)
+    against_report(out, d, "wide fixture")
+    raw_check(out, d, "wide fixture")
+    cls = {c["id"]: c for c in out["now"]["classes"]}
+    bcls = {c["id"]: c for c in base["now"]["classes"]}
+    eq(sorted(cls), sorted(bcls), "wide fixture: the same classes as the run without wide items (the wide items are tile items and the trees are the same)")
+    grp = lambda c, g: next((x for x in c["groups"] if x["group"] == g), None)
+    w = grp(cls["t2"], "wide")
+    # counted by hand from the spec: div128-hard whole (289,931,696), sqrt256-f64hard whole (4,456,448), sqrt64-f32 three quarters of 2**32, recip128-win-key
+    # whole (2**32), sqrt128-hard at zero: 5 rows, 3 complete
+    eq((w["items"], w["complete"], w["covered"], w["space"]), (5, 3, 289_931_696 + 4_456_448 + 3 * A + EXH, 289_931_696 + 4_456_448 + EXH + EXH + 4_456_448),
+       "wide fixture: the current tile class's wide group, counted by hand: 5 rows (one at zero), 3 complete, what they cover and the space of the five")
+    check(w["pct"] == 100.0 * w["covered"] / w["space"] and 87.0 < w["pct"] < 88.0, "wide fixture: and its share, about 87.9 per cent", w["pct"])
+    eq([g["group"] for g in cls["t1"]["groups"]] + [g["group"] for g in cls["h1"]["groups"]] + [g["group"] for g in cls["h2"]["groups"]], ["base"] * 3,
+       "wide fixture: a class with no wide row has the base group alone, as do the host classes (every wide item is a tile item)")
+    for cid, c in cls.items():
+        b = grp(c, "base")
+        eq({k: v for k, v in b.items() if k != "group"}, bcls[cid]["total"], f"wide fixture: class {cid}: the base group's figures are the run without wide items' class total, unmoved by the wide group joining")
+    t2 = cls["t2"]
+    eq((t2["total"]["items"], t2["total"]["complete"], t2["total"]["covered"], t2["total"]["space"]),
+       tuple(grp(t2, "base")[k] + w[k] for k in ("items", "complete", "covered", "space")), "wide fixture: and the class's total stays over both groups")
+    eq(out["nights"][:2], base["nights"][:2], "wide fixture: nights 1 and 2, before any wide slice, are the nights they were in the run without wide items (every field, the state by group absent)")
+    eq([("groups" in x["after"], sorted(x["after"].get("groups", {}))) for x in out["nights"]], [(False, []), (False, []), (True, ["t2"]), (True, ["t2"])],
+       "wide fixture: a night's state by group is written from the first night a class has a wide row served, and for that class alone")
+    eq(sorted(out["nights"][3]["after"]["groups"]["t2"]["wide"].items()), [("complete", 3), ("covered", w["covered"])], "wide fixture: night 4's state: the wide group's covered figure and its three complete rows")
+    eq(out["nights"][2]["after"]["groups"]["t2"]["wide"], {"covered": 4_000_000 + A + 2 * A, "complete": 0}, "wide fixture: night 3's, counted by hand: 4,000,000 of div128-hard, a quarter of sqrt64-f32 and two of recip128-win-key's quarters")
+    eq([(x["item"], x["night"]) for x in out["totals"]["fully_covered"] if x["class"] == "t2" and ITEMS[x["item"]][7] == "wide"],
+       [("div128-hard-rne", 4), ("recip128-win-key-rne", 4), ("sqrt256-f64hard-rne", 4)], "wide fixture: the wide items fully covered, each with its night (all on night 4)")
+    # the report's own totals by group for the same class, from the same records: the wide group three ways (the oracle's, counted by hand above; the reducer's;
+    # the report's, over the four wide items it saw: the fifth, at zero, is the reducer's campaign row), and the base group as the report gave it for the run
+    # without wide items
+    Sw, _t, _rc = report_of(d, True)
+    Sb, _t, _rc = report_of(base_dir, True)
+    rw = next(c for c in Sw["sweep"]["trees"]["classes"] if c["kind"] == "tile" and c["label"] == t2["label"])
+    rb = next(c for c in Sb["sweep"]["trees"]["classes"] if c["kind"] == "tile" and c["label"] == t2["label"])
+    gw = {g["group"]: g for g in rw["total"]["by_group"]}
+    eq((gw["wide"]["items"], gw["wide"]["covered"], gw["wide"]["total"], gw["wide"]["complete_items"]), (4, w["covered"], 289_931_696 + 4_456_448 + EXH + EXH, 3),
+       "wide fixture: the wide group three ways - the report's totals by group, over the four wide items it saw, are the oracle's and the reducer's: covered, space, items complete")
+    eq(gw["base"], rb["total"]["by_group"][0], "wide fixture: and the report's base group, with wide items in the run, is the one it gave the run without them (every field, each image's figure too)")
+    eq(sorted(gw), ["base", "wide"], "wide fixture: and the report's class has the two groups")
+    eq(P.dump(reduce_dir(d, "e5" * 20)), P.dump(out), "wide fixture: the same run reduces to the same bytes")
+    return recs, out, d
+
+
+def group_format_guard(wide_dir):
+    """The reducer holds every string it publishes against the shape of a path. Every format of the table passes it, a format that has one is refused
+    by name, and the check is on the strings of the data, not on the table."""
+    bad = sorted(f for f in set(R.OP_FORMAT.values()) if P._PATHY.search(f) or P._IPV4.search(f))
+    eq(bad, [], "format guard: none of the table's formats, nor the groups' rule text, has the shape of a path or an IP address (the reducer's own screen, _PATHY and _IPV4)")
+    check(not P._PATHY.search(P.RULES["groups"]) and not P._IPV4.search(P.RULES["groups"]), "format guard: the rule text of the groups passes it too")
+    for f in ("fp32 /srv/data/x", "fp32 -> /usr/lib", "D:/data/fp64", "fp32 10.0.0.7"):
+        check(bool(P._PATHY.search(f) or P._IPV4.search(f)), f"format guard: the screen sees {f!r} (a control: it can fail)")
+    saved = R.ITEM_FORMAT["div128-hard-rne"]
+    R.ITEM_FORMAT["div128-hard-rne"] = "fp128 /srv/data/x"
+    try:
+        try:
+            reduce_dir(wide_dir)
+            why = None
+        except P.Failed as e:
+            why = str(e)
+    finally:
+        R.ITEM_FORMAT["div128-hard-rne"] = saved
+    check(why is not None and "path" in why and "fp128 /srv" in why, "plant: an item whose format has the shape of a path fails the reduction by name, and nothing is published", why)
+
+
+def group_wide_page(base, wide, golden):
+    """The page over the wide run, in node: the base block of the headline as it reads without wide items, the wide group beside it and listed as its
+    own group, a format on every item row, and the chart with a line a class and group - the older group's lines unmoved. Over a data file without
+    the new fields the page draws exactly what the page of 3ec0081c drew (`golden`: the digest of its tree)."""
+    if not NODE:
+        return skip("the page with wide items in node", "node is not on PATH")
+    bj, wj, lj = (os.path.join(TMP, x) for x in ("pg-base.json", "pg-wide.json", "pg-legacy.json"))
+    for path, j in ((bj, base), (wj, wide), (lj, legacy(base))):
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(j, fh)
+    rb, rw, rl = page("ok", bj), page("ok", wj), page("ok", lj, clock=golden["clock"])
+    check(all(r.get("status", {}).get("hidden") is True and r.get("app", {}).get("hidden") is False for r in (rb, rw, rl)), "wide page: the run without wide items, the run with them and the legacy file are each shown", [r.get("error") for r in (rb, rw, rl)])
+    eq(rl.get("dom"), golden["digest"], "wide page: over a data file without the new fields (the run without wide items as 3ec0081c's reducer made it) the tree the page draws is the page of 3ec0081c's, node for node")
+    tb, tw = rb["app"]["text"], rw["app"]["text"]
+    t2 = next(c for c in wide["now"]["classes"] if c["id"] == "t2")
+    t2b = next(c for c in base["now"]["classes"] if c["id"] == "t2")
+    bg, wg = (next(g for g in t2["groups"] if g["group"] == x) for x in ("base", "wide"))
+    base_says = [f"{bg['complete']} of {bg['items']}", js_pct1(bg["covered"], bg["space"]), f"of the campaign's {n(bg['space'])} encodings or indices ({n(bg['covered'])} covered)"]
+    check(all(s in tb for s in base_says) and all(s in tw for s in base_says) and base_says == [f"{t2b['total']['complete']} of {t2b['total']['items']}", js_pct1(t2b["total"]["covered"], t2b["total"]["space"]), f"of the campaign's {n(t2b['total']['space'])} encodings or indices ({n(t2b['total']['covered'])} covered)"],
+          "wide page: the base group's block of the headline states, with wide items, what the class's card stated without them", base_says)
+    wide_says = [f"{wg['complete']} of {wg['items']}", js_pct1(wg["covered"], wg["space"]), f"of the campaign's {n(wg['space'])} encodings or indices ({n(wg['covered'])} covered)"]
+    check(all(s in tw for s in wide_says) and "wide-format items" in tw and "Wide-format items" not in tb and "wide-format items" not in tb,
+          "wide page: the wide group's block is in the card beside it, with its own count, share and space, and there is none in the run without wide items", wide_says)
+    sec = tw[tw.index("Item by item"):]
+    start = sec.index(f"tile items - {t2['label']}")
+    nxt = [sec.find(k, start + 10) for k in ("tile items - ", "host items - ", "Earlier trees, item by item")]
+    block = sec[start:min([x for x in nxt if x > 0] or [len(sec)])]
+    head = f"Wide-format items: {wg['complete']} of {wg['items']} fully covered"
+    at = block.find(head)
+    names_w = [r["item"] for r in t2["items"] if r["group"] == "wide"]
+    names_b = [r["item"] for r in t2["items"] if r["group"] == "base"]
+    check(at > 0 and f"Base items: {bg['complete']} of {bg['items']} fully covered" in block and all(block.find(x) > at for x in names_w) and all(0 < block.find(x) < at for x in names_b),
+          "wide page: in the class's item list the base items come first and the wide items are listed after their own heading, as a group of their own", (at, names_w))
+    miss = []
+    for c in wide["now"]["classes"]:
+        for r in c["items"]:
+            lvl = {"hard": "hard-case ", "class": "class level "}.get(r["level"], "")
+            if not re.search(re.escape(r["item"]) + r" " + re.escape(lvl) + re.escape(r["format"]) + r"( |$)", sec):
+                miss.append((c["id"], r["item"], r["format"]))
+    check(not miss, "wide page: every item row of every class shows the format it computes in, after its name and level tag (a conversion, both ends)", miss[:3])
+    # the chart: one line a class, and for a class with wide items one a group; the older groups' lines are the run without wide items' lines, point for point
+    cb, cw = rb["chart"], rw["chart"]
+    is_wide = lambda ln: bool(ln["titles"]) and "(wide-format items)" in ln["titles"][0]
+    rest = [ln for ln in cw if not is_wide(ln)]
+    eq((len(cb), len(cw), len(rest)), (4, 5, 4), "wide page: the chart has a line for each of the four classes, and one more, the wide group's, with wide items")
+    eq([len(ln["points"].split()) for ln in rest], [len(ln["points"].split()) for ln in cb], "wide page: and the base lines have the points they had, one a night of their class")
+    eq([ln["points"] for ln in rest], [ln["points"] for ln in cb], "wide page: and every other line - the base group's of t2 among them - is the line of the run without wide items, point for point: an older group's history is not redrawn")
+    wl = [ln for ln in cw if is_wide(ln)][0]
+    cov_at = {k: wide["nights"][k - 1]["after"]["groups"]["t2"]["wide"]["covered"] for k in (3, 4)}
+    want = [f"tile {t2['label']} (wide-format items): night {k}, {js_pct1(cov_at[k], wg['space'])} ({n(cov_at[k])} of {n(wg['space'])})" for k in (3, 4)]
+    eq(wl["titles"], want, "wide page: the wide group's line starts on the first night it had anything covered (night 3, not the class's first, night 2) and each point is that night's covered figure over the group's own space")
+    check(wl["style"] != rest[2]["style"] and "--s3" in wl["style"] and wl["style"].replace("--s3", "--s1") == rest[2]["style"], "wide page: in its own colour, the class's solid line (the current tree's) otherwise", (wl["style"], rest[2]["style"]))
+    for name, edit, say in (("a groups field that is not a list", lambda j: j["now"]["classes"][2].__setitem__("groups", {}), "groups of class t2"),
+                            ("a group without its space", lambda j: j["now"]["classes"][2]["groups"][0].pop("space"), "groups of class t2"),
+                            ("a format that is a number", lambda j: j["now"]["classes"][2]["items"][0].__setitem__("format", 5), "format of an item of class t2")):
+        j = json.loads(json.dumps(wide))
+        edit(j)
+        with open(wj, "w", encoding="utf-8") as fh:
+            json.dump(j, fh)
+        r = page("ok", wj)
+        check(r.get("status", {}).get("hidden") is False and "not the shape" in r["status"]["text"] and say in r["status"]["text"] and r["app"]["text"] == "",
+              f"wide page: {name} is named as not the shape this page reads, and no figure is shown", r.get("status"))
+    # a tree that is no longer current but has wide items (the RTL tree changed after they ran): the list of earlier trees states both groups, not the class's total
+    j = json.loads(json.dumps(wide))
+    for c in j["now"]["classes"]:
+        c["current"] = False
+    with open(wj, "w", encoding="utf-8") as fh:
+        json.dump(j, fh)
+    te = page("ok", wj).get("app", {}).get("text", "")
+    stated = (f"{t2['label']} : {bg['complete']} of {bg['items']} items fully covered, {js_pct1(bg['covered'], bg['space'])} ({n(bg['covered'])} of {n(bg['space'])}); "
+              f"wide-format items: {wg['complete']} of {wg['items']} items fully covered, {js_pct1(wg['covered'], wg['space'])} ({n(wg['covered'])} of {n(wg['space'])}), nights 2, 3, 4")
+    check(stated in te, "wide page: an earlier tree with wide items is listed with both groups' figures, not the class's total", stated)
+
+
 def group_check(d, text, out):
     # the data file is made by the command itself, so that --check re-derives it in the view it was made in: the command's default reads git of the
     # checkout, whose reasons the labels of a class with a made-up commit carry (the in-process fixture groups read the records alone)
@@ -728,6 +998,17 @@ def group_committed():
     if NODE:
         r = page("ok", DATA)
         check(r.get("app", {}).get("hidden") is False and r["status"]["hidden"] is True, "committed data: the page shows it", r.get("error"))
+        # parcel HXd: night 7's file, as 3ec0081c committed it (it has none of the new fields), is drawn as it was drawn. The check stands for as long as the
+        # committed file is that one; the morning routine replaces it with a file made by these tools, and then the check is SKIPPED BY NAME (send-back 1,
+        # N1: it used to vanish without a word), while the legacy check of the page's group covers a data file without the new fields
+        have = hashlib.sha256(open(DATA, "rb").read()).hexdigest()
+        if have == NIGHT7_SHA256:
+            eq(page("ok", DATA, clock=NIGHT7_CLOCK).get("dom"), NIGHT7_DOM, "committed data: while the file is night 7's, as 3ec0081c committed it, the page draws the tree it drew then, node for node")
+        else:
+            skip("committed data: the page's tree over night 7's file",
+                 f"{os.path.relpath(DATA, ROOT).replace(os.sep, '/')} is no longer the night-7 file 3ec0081c committed (its sha256 begins {have[:12]}, night 7's {NIGHT7_SHA256[:12]}), so "
+                 "NIGHT7_DOM, the digest of the tree the old page drew over that file, does not apply to it; expected once the morning routine has replaced it (the check and the "
+                 "three NIGHT7_ constants can then be retired)")
     else:
         skip("committed data in the page", "node is not on PATH")
 
@@ -756,6 +1037,13 @@ def main():
             guarded(group_refusals, recs)
             print("== the page")
             guarded(group_page, out)
+            print("== the wide items: the same four nights, with the wide items served from the third (parcel HXd)")
+            b4 = guarded(group_base4)
+            wgot = guarded(group_wide_fixture, *b4) if b4 else None
+            if wgot:
+                _wrecs, wout, wd = wgot
+                guarded(group_format_guard, wd)
+                guarded(group_wide_page, b4[0], wout, {"clock": LEGACY_CLOCK, "digest": LEGACY_DOM})
         print("== the committed data file")
         guarded(group_committed)
         print("== the lead's real copies")

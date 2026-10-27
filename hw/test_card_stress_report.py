@@ -30,6 +30,13 @@ guards against put in (git ignored, a git that finds every commit, a dirty tree 
 it. The report's coverage in the classes of a resuming run is held to what card_stress_lib.count_slices - the driver's resume - counts
 from the same records with the same git, on the synthetic runs and, when CARD_STRESS_RESUME_RUN names a copy of the lead's run, on it.
 
+THE WIDE ITEMS BESIDE THE OTHERS (group wide, parcel HXd, 2026-10-27). Every item line names the format it computes in, in the last column of its table
+(the main fixture's items hold their formats to ORACLE_FORMAT, a table of this file's own, and an item no catalog names to the table's format of its op). A
+second synthetic run, with its own plain-interval oracle (the main oracle holds every slice to a block of 2**20 of a space of 2**32), serves wide items of the
+three kinds the driver serves beside base items of the kinds that have a space of their own: each item's coverage over ITS space, its format and its group, the
+totals by group in the sweep section and, apart, in each tree class (images included), the text's group lines, the base group the same with and without the wide
+items joining the run, no group line in a run without one, and a summary from before the fields still rendering.
+
 The last line is "report test: N checks, F failed"; the exit status is 0 only if F is 0.
 """
 import sys
@@ -123,6 +130,13 @@ ITEMS = {
 ORACLE_REACH = {"sqrt32": "tile", "sqrt64": "tile", "div64": "tile", "rint32": "tile", "logb32": "host",
                 "nextup32": "host", "rem32": "host", "conv32to64": "host", "conv32to64-all": "host",
                 "cvtfrom32-all": "host", "scaleb32-wide": "tile"}
+# the format the ORACLE knows each op to compute in (parcel HXd), written out here and not read from the library's OP_FORMAT: the operand's format, or both
+# ends of a conversion; an op that is in no table is "unknown". The wide ops are the wide group's run (group_wide).
+ORACLE_FORMAT = {"sqrt32": "fp32", "rint32": "fp32", "logb32": "fp32", "nextup32": "fp32", "rem32": "fp32", "scaleb32-wide": "fp32",
+                 "sqrt64": "fp64", "div64": "fp64", "rint64-class": "fp64",
+                 "conv32to64": "fp32 -> fp64", "conv32to64-all": "fp32 -> fp64", "cvtfrom32-all": "the integer sources -> fp32",
+                 "cvtfrom64-class": "the integer sources -> fp64",
+                 "div128-hard": "fp128", "sqrt64-f32": "fp64", "recip256-win-key": "fp256"}
 # items only the reach group's run uses: the exhaustive conversion and scaleB items of parcel EX (their records say what
 # they covered: `encodings` and `skipped` in counts, `expected_encodings` in the sweep), and records whose `reach` is
 # missing, invalid, or contradicts the table
@@ -613,7 +627,7 @@ def oracle(recs, now=None, gap_s=300):
         if r["kind"] != "sweep" or not sw or r["status"] == "skipped":
             continue
         it = items.setdefault(sw["item"], {"exh": "lo" in sw, "slices": 0, "cases": 0, "blocks": set(),
-                                           "inc": 0, "seed": None,
+                                           "inc": 0, "seed": None, "op": sw.get("op"),
                                            "reach": (sw["reach"] if sw.get("reach") in ("tile", "host")
                                                      else ORACLE_REACH.get(sw.get("op")))})
         if r["status"] in ("pass", "fail"):
@@ -634,6 +648,7 @@ def oracle(recs, now=None, gap_s=300):
         b = sorted(v["blocks"])
         F[p + "slices"], F[p + "cases"], F[p + "incomplete"] = v["slices"], v["cases"], v["inc"]
         F[p + "reach"] = v["reach"] or "unknown"
+        F[p + "format"] = ORACLE_FORMAT.get(v["op"], "unknown")
         F[p + "covered"] = len(b) * A
         F[p + "pct"] = len(b) * A / EXH * 100
         F[p + "intervals"] = sum(1 for j, x in enumerate(b) if j == 0 or x != b[j - 1] + 1)
@@ -663,6 +678,7 @@ def oracle(recs, now=None, gap_s=300):
         v, p = items[k], f"sweep.rand[{k}]."
         F[p + "slices"], F[p + "cases"], F[p + "incomplete"], F[p + "max_seed_n"] = v["slices"], v["cases"], v["inc"], v["seed"]
         F[p + "reach"] = v["reach"] or "unknown"
+        F[p + "format"] = ORACLE_FORMAT.get(v["op"], "unknown")
     F["sweep.rand.reach"] = [(key, sum(1 for k in rnd if (items[k]["reach"] or "unknown") == key))
                              for key in ("tile", "host", "unknown") if any((items[k]["reach"] or "unknown") == key for k in rnd)]
     sl = [r for _, r in legs if r["kind"] == "sweep"]
@@ -837,6 +853,7 @@ def summary_figs(S):
                          ("intervals", "intervals"), ("first_gap", "first_gap"), ("incomplete", "incomplete")):
             F[p + fld] = e[key]
         F[p + "reach"] = e["reach"] or "unknown"
+        F[p + "format"] = e["format"] or "unknown"
     tt = W["total_exhaustive"]
     F["sweep.total.items"], F["sweep.total.covered"], F["sweep.total.total"] = tt["items"], tt["covered"], tt["total"]
     F["sweep.total.pct"], F["sweep.total.complete"] = tt["pct"], tt["complete_items"]
@@ -847,6 +864,7 @@ def summary_figs(S):
         p = f'sweep.rand[{e["item"]}].'
         F[p + "slices"], F[p + "cases"], F[p + "incomplete"], F[p + "max_seed_n"] = e["slices"], e["cases"], e["incomplete"], e["max_seed_n"]
         F[p + "reach"] = e["reach"] or "unknown"
+        F[p + "format"] = e["format"] or "unknown"
     F["sweep.rand.reach"] = [(r["reach"] or "unknown", r["items"]) for r in W["random_by_reach"]]
     F["sweep.completed"], F["sweep.failed"], F["sweep.skipped"] = W["completed"], W["failed"], W["skipped"]
     for s in ("timeout", "no_device", "parse_error"):
@@ -1121,7 +1139,7 @@ def text_figs(T):
                        c["reason"], c["counts"], c["dis"] or None, c["dis_n"], c["notes"], c["log"]) for c in legs_]
     # ---- sweep
     sl = secs["SWEEP COVERAGE"]
-    exh = parse_table(sl, ["item", "slices", "cases", "covered", "pct", "intervals", "first_uncovered", "incomplete", "reach"],
+    exh = parse_table(sl, ["item", "slices", "cases", "covered", "pct", "intervals", "first_uncovered", "incomplete", "reach", "format"],
                       stop=r"^  total:") or []
     F["sweep.exh"] = [r["item"] for r in exh]
     for r in exh:
@@ -1131,10 +1149,11 @@ def text_figs(T):
         F[p + "intervals"], F[p + "incomplete"] = int(r["intervals"]), int(r["incomplete"])
         F[p + "first_gap"] = hex_pair(r["first_uncovered"])
         F[p + "reach"] = r["reach"]
+        F[p + "format"] = r["format"]
     F.update({"sweep.total.items": 0, "sweep.total.covered": 0, "sweep.total.total": 0, "sweep.total.pct": None,
               "sweep.total.complete": 0, "sweep.none_phrase": None})
     F["sweep.total.reach"] = []
-    rnd = parse_table(sl, ["item", "slices", "cases", "highest_seed_n", "incomplete", "reach"],
+    rnd = parse_table(sl, ["item", "slices", "cases", "highest_seed_n", "incomplete", "reach", "format"],
                       stop=r"^  random reach:") or []
     F["sweep.rand"] = [r["item"] for r in rnd]
     for r in rnd:
@@ -1142,6 +1161,7 @@ def text_figs(T):
         F[p + "slices"], F[p + "cases"], F[p + "incomplete"] = int(r["slices"]), int(r["cases"]), int(r["incomplete"])
         F[p + "max_seed_n"] = None if r["highest_seed_n"] == "-" else int(r["highest_seed_n"])
         F[p + "reach"] = r["reach"]
+        F[p + "format"] = r["format"]
     F["sweep.rand.reach"] = []
     dis, cur = [], None
     for ln in sl:
@@ -2733,6 +2753,181 @@ def group_git(tmp):
     real_copy_checks()
 
 
+# ---------------------------------------------------------------------------
+# parcel HXd (2026-10-27): the wide items beside the others - a format on every item, and the totals by group
+# ---------------------------------------------------------------------------
+# The items of this group's run, with the figures the ORACLE holds for them, written out here (the documents' spaces: docs/CARDDAY.md, "The wide items in the
+# driver"; docs/studies/HX-wide-sweeps.md) and not read from the library: item -> (op, space, group, tree kind, the slices written). Three wide items of the three kinds
+# the driver serves (a hard case at p = 113, the fp32 slice at fp64, a low-bit window at fp256), beside base items of the kinds that have a space of their own
+# (a class-level item on the tile and one on the host), an item no catalog names whose op the format table does (counted over 2**32, as ever), and one
+# whose op nothing names.
+ITEMS.update({
+    "rint64-class-rne": dict(tool="clause5", op="rint64-class", mode="rne", reach="tile", per=4),
+    "cvtfrom64-class-rne": dict(tool="clause5", op="cvtfrom64-class", mode="rne", reach="host", per=1),
+    "div128-hard-rne": dict(tool="divsqrt", op="div128-hard", mode="rne", reach="tile", per=4),
+    "sqrt64-f32-rup": dict(tool="divsqrt", op="sqrt64-f32", mode="rup", reach="tile", per=1),
+    "recip256-win-key-rne": dict(tool="divsqrt", op="recip256-win-key", mode="rne", reach="tile", per=1),
+    "sqrt32-old": dict(tool="divsqrt", op="sqrt32", mode="rne", reach="tile"),
+    "futureexh-x": dict(tool="divsqrt", op="futureop2", mode="rne", reach="tile"),
+})
+W_ITEMS = {
+    "sqrt32-rne": ("sqrt32", EXH, "base", "tile", [(0, 3 * A)]),
+    "rint64-class-rne": ("rint64-class", 35_840, "base", "tile", [(0, 35_840)]),
+    "cvtfrom64-class-rne": ("cvtfrom64-class", 50_923, "base", "host", [(0, 50_923)]),
+    "sqrt32-old": ("sqrt32", EXH, "base", "tile", [(0, 2 * A)]),
+    "futureexh-x": ("futureop2", EXH, "base", "tile", [(0, A)]),
+    "div128-hard-rne": ("div128-hard", 289_931_696, "wide", "tile", [(0, 3_000_000), (3_000_000, 289_931_696)]),
+    "sqrt64-f32-rup": ("sqrt64-f32", EXH, "wide", "tile", [(0, 2 * A), (2 * A, 3 * A)]),
+    "recip256-win-key-rne": ("recip256-win-key", EXH, "wide", "tile", [(0, EXH)]),
+}
+W_FORMAT = {"sqrt32": "fp32", "rint64-class": "fp64", "cvtfrom64-class": "the integer sources -> fp64", "futureop2": "unknown",
+            "div128-hard": "fp128", "sqrt64-f32": "fp64", "recip256-win-key": "fp256"}
+
+
+def build_wide_run(with_wide=True):
+    """One cycle, one wave of the base items (and a random one) beside the wide items' first slices, a second wave that completes two of the wide items."""
+    fx = Fx()
+    run_start_rec(fx, T0)
+    t = fx.begin_cycle(T0 + 5, "quad", 1, 3)
+    t = fx.battery(t, "quad", [dict(name="api-test", dur=10, counts={"failed": 0})])
+
+    def ex(item, lo, hi):
+        return dict(item=item, lo=lo, hi=hi, status="pass", vm=0, fm=0, lines=None, reason=None)
+    first = [ex(i, *W_ITEMS[i][4][0]) for i in W_ITEMS if W_ITEMS[i][2] == "base"] + [job_rd("div64-rne", 0, 1_000_000)]
+    second = []
+    if with_wide:
+        first += [ex(i, *W_ITEMS[i][4][0]) for i in W_ITEMS if W_ITEMS[i][2] == "wide"]
+        second = [ex(i, *sl) for i in W_ITEMS if W_ITEMS[i][2] == "wide" for sl in W_ITEMS[i][4][1:]]
+    t = fx.wave(t, "quad", first)
+    if second:
+        t = fx.wave(t, "quad", second)
+    fx.end_cycle(t)
+    fx.add("run_end", t + 10, reason="deadline", exit=0, cycles=1)
+    return fx.records()
+
+
+def w_truth(skip_wide=False):
+    """The oracle's figures for the items of the run (plain interval arithmetic): item -> covered, space, complete, format, group, kind; and a function giving
+    the totals by group over any of those rows - (group, items, covered, space, complete)."""
+    rows = {}
+    for item, (op, space, grp, kind, sl) in W_ITEMS.items():
+        if skip_wide and grp == "wide":
+            continue
+        cov = sum(h - lo for lo, h in sorted(set(sl)))
+        rows[item] = dict(covered=cov, total=space, complete=cov == space, format=W_FORMAT[op], group=grp, kind=kind)
+
+    def totals(only):
+        out = []
+        for g in ("base", "wide"):
+            mine = [r for r in only.values() if r["group"] == g]
+            if mine:
+                out.append((g, len(mine), sum(r["covered"] for r in mine), sum(r["total"] for r in mine), sum(r["complete"] for r in mine)))
+        return out
+    return rows, totals
+
+
+def pct3(c, t):
+    s = "%.3f" % (100.0 * c / t)
+    return "99.999" if c < t and s == "100.000" else s
+
+
+def group_wide():
+    group("wide")
+    recs = build_wide_run()
+    S = R.summarize(recs, rev=None)           # not a Scn: the main oracle holds every exhaustive slice to a block of 2**20 of a space of 2**32
+    T = R.render(S)
+    rows, totals = w_truth()
+    W = S["sweep"]
+    # -- the sweep section: each item's coverage over its own space, its format and its group
+    eq({e["item"]: (e["covered"], e["total"], e["format"] if e["format"] else "unknown", e["group"]) for e in W["exhaustive"]},
+       {i: (r["covered"], r["total"], r["format"], r["group"]) for i, r in rows.items()},
+       "wide: each exhaustive item's coverage, its space, its format and its group are the oracle's: hard, slice and window items beside class items, an item no catalog names "
+       "(its op's format, group base) and an item whose op nothing names (no format)")
+    eq({e["item"]: e["format"] for e in W["random"]}, {"div64-rne": "fp64"}, "wide: a random item has its format too")
+    tt = W["total_exhaustive"]
+    eq((tt["items"], tt["covered"], tt["total"]), (len(rows), sum(r["covered"] for r in rows.values()), sum(r["total"] for r in rows.values())),
+       "wide: the total over every exhaustive item is what it was (JSON fields kept): all eight, both groups")
+    want = [dict(group=g, items=n_, covered=c_, total=t_, complete_items=k_) for g, n_, c_, t_, k_ in totals(rows)]
+    eq([{k: x[k] for k in ("group", "items", "covered", "total", "complete_items")} for x in tt["by_group"]], want,
+       "wide: the totals by group are the oracle's, base then wide, each over its own items and spaces")
+    check(all(x["pct"] == 100.0 * x["covered"] / x["total"] for x in tt["by_group"]), "wide: and each group's share is its covered over its own space")
+    # -- the text: the format is the table's last column, in the sweep section and in each class's table; the group lines follow the totals
+    top, secs = sections(T)
+    sl = secs["SWEEP COVERAGE"]
+    hdr = ["item", "slices", "cases", "covered", "pct", "intervals", "first_uncovered", "incomplete", "reach", "format"]
+    tab = parse_table(sl, hdr, stop=r"^  total:") or []
+    eq({r["item"].split(" [")[0]: r["format"] for r in tab}, {i: r["format"] for i, r in rows.items()}, "wide: the sweep table's last column names each item's format ('unknown' where there is none)")
+    eq([r["item"] for r in tab], [f"{i} [{rows[i]['total']:,} indices]" if rows[i]["total"] != EXH else i for i in sorted(rows)],
+       "wide: and its item cells are what they were ('[N indices]' where the space is not 2**32), the format in a column of its own")
+    eq([ln.split() for ln in sl if ln.startswith("  item ")][0][-2:], ["reach", "format"], "wide: reach is still the column before the last, the format is the last")
+    gl = [ln for ln in sl if ln.startswith("  group ")]
+    wantg = [f"  group {g}: {n_} exhaustive item(s) seen; covered {c_} of {t_} encodings ({pct3(c_, t_)}%); fully covered {k_} of {n_}" for g, n_, c_, t_, k_ in totals(rows)]
+    eq(gl[:2], wantg, "wide: the sweep section has a total line of its own for each group, beside the total and the reach lines")
+    check(len(gl) == 3 and gl[2].startswith("  group wide is the wide-format sweeps' items"), "wide: and one line saying what a group is", gl[2:])
+    check(sl.index("  total: 8 exhaustive item(s) seen; covered %d of %d encodings (%s%%); fully covered %d of 8" % (
+        tt["covered"], tt["total"], pct3(tt["covered"], tt["total"]), sum(r["complete"] for r in rows.values()))) < sl.index(wantg[0]),
+        "wide: the total line over every item is kept, ahead of the group lines")
+    # -- coverage by tree: the groups are counted inside each class, never across them
+    cl = {c["kind"]: c for c in W["trees"]["classes"]}
+    eq(sorted(cl), ["host", "tile"], "wide: two classes, the tile's and the host's")
+    for kind, c in cl.items():
+        mine = {i: r for i, r in rows.items() if r["kind"] == kind}
+        eq({e["item"]: (e["covered"], e["total"], e["format"] or "unknown", e["group"]) for e in c["exhaustive"]}, {i: (r["covered"], r["total"], r["format"], r["group"]) for i, r in mine.items()},
+           f"wide: the {kind} class's items: coverage, space, format and group")
+        by_group = [(x["group"], x["items"], x["covered"], x["total"], x["complete_items"], x["by_image"]) for x in c["total"]["by_group"]]
+        eq(by_group, [(g, n_, c_, t_, k_, {"quad": c_}) for g, n_, c_, t_, k_ in totals(mine)], f"wide: the {kind} class's totals by group are over that class's items alone, with each image's figure")
+    eq([x["group"] for x in cl["host"]["total"]["by_group"]], ["base"], "wide: the host class has no wide item, so its totals have the base group alone")
+    tl = secs["SWEEP COVERAGE BY TREE"]
+    blocks, cur = {}, None
+    for ln in tl:
+        mm = re.match(r"^(tile|host) items - ", ln)
+        if mm:
+            cur = blocks.setdefault(mm.group(1), [])
+        if cur is not None:
+            cur.append(ln)
+    ttab = parse_table(blocks["tile"], ["item", "covered", "pct", "slices", "quad", "format"], stop=r"^  total:") or []
+    eq({r["item"].split(" [")[0]: r["format"] for r in ttab}, {i: r["format"] for i, r in rows.items() if r["kind"] == "tile"}, "wide: the tile class's table names each item's format in its last column, after the images'")
+    htab = parse_table(blocks["host"], ["item", "covered", "pct", "slices", "quad", "format"], stop=r"^  total:") or []
+    eq([r["format"] for r in htab], ["the integer sources -> fp64"], "wide: the host class's table too")
+    rtab = parse_table(blocks["tile"], ["item", "slices", "cases", "highest_seed_n", "cases_quad", "format"]) or []
+    eq([(r["item"], r["format"]) for r in rtab], [("div64-rne", "fp64")], "wide: and its random items' table")
+    tg = [ln for ln in blocks["tile"] if ln.startswith("  group ")]
+    wt = totals({i: r for i, r in rows.items() if r["kind"] == "tile"})
+    eq(tg[:2], [f"  group {g}: {n_} exhaustive item(s) seen; covers {c_} of {t_} encodings ({pct3(c_, t_)}%); fully covered {k_} of {n_}; by image: quad {c_}" for g, n_, c_, t_, k_ in wt],
+       "wide: the tile class has a line for each group, with its images' figures, after its total")
+    check(not any(ln.startswith("  group ") for ln in blocks["host"]), "wide: the host class, with no wide item, has none")
+    # -- a run with no wide item: the base group's figures are the same, and the text has no group line
+    recs0 = build_wide_run(with_wide=False)
+    S0 = R.summarize(recs0, rev=None)
+    T0 = R.render(S0)
+    t0 = S0["sweep"]["total_exhaustive"]
+    eq([x["group"] for x in t0["by_group"]], ["base"], "wide: a run with no wide item has the base group alone in its JSON")
+    eq({k: v for k, v in t0["by_group"][0].items()}, {k: v for k, v in tt["by_group"][0].items()}, "wide: and it is the same group, unmoved by the wide items joining the run (the other group's figures are what they were)")
+    for kind in ("tile", "host"):
+        c0 = next(c for c in S0["sweep"]["trees"]["classes"] if c["kind"] == kind)
+        eq(c0["total"]["by_group"], cl[kind]["total"]["by_group"][:1], f"wide: the {kind} class's base group, without wide items, is the one it is with them")
+    check(not any(ln.startswith("  group ") for ln in T0.split("\n")) and "group wide" not in T0,
+          "wide: and the text of a run with no wide item prints no group line at all")
+    eq(R.render(json.loads(json.dumps(S))), T, "wide: render() of the loaded JSON is the same text")
+    # an older JSON summary (from before the fields) still renders, saying 'unknown' where it has no format and printing no group line
+    old = json.loads(json.dumps(S))
+    for e in old["sweep"]["exhaustive"] + old["sweep"]["random"]:
+        e.pop("format", None)
+        e.pop("group", None)
+    old["sweep"]["total_exhaustive"].pop("by_group")
+    for c in old["sweep"]["trees"]["classes"]:
+        c["total"].pop("by_group")
+        for e in c["exhaustive"] + c["random"]:
+            e.pop("format", None)
+            e.pop("group", None)
+    try:
+        to, err = R.render(old), None
+    except Exception as e:                        # a report that needs the new fields cannot read an old summary: a failed check, not a crash of this file
+        to, err = "", f"{type(e).__name__}: {e}"
+    check(err is None and not any(ln.startswith("  group ") for ln in to.split("\n")) and "unknown" in to,
+          "wide: a summary from before the fields renders, with no group line and 'unknown' for each format", err)
+
+
 def main():
     tmp = tempfile.mkdtemp(prefix="cft-report-test-")
     try:
@@ -2745,6 +2940,7 @@ def main():
         group_telemetry_edges()
         group_json(base)
         group_reach()
+        group_wide()
         group_left_out(base)
         group_controls(base, marks)
         group_sabotage(base)

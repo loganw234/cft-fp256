@@ -742,6 +742,56 @@ def reach_of(op: Optional[str]) -> Optional[str]:
     return OP_REACH.get(op) if isinstance(op, str) else None
 
 
+# THE FORMAT OF EACH OP (parcel HXd, 2026-10-27): what the report and the nightly page name beside each item, so that a reader sees which format a
+# pass is evidence about without reading the op's name, which says it unevenly ("cvtfrom64-all" is 32-bit integers converted to fp64, "cvtto32-all" fp32
+# to the integer targets, "sqrt64-f32" the fp64 square root over the fp32 slice). One string an op, over every op of the full catalog
+# (sweep_items(mpfr=True), the same set as OP_REACH): the format the operation computes in, or both ends of a conversion; a slice, f64hard or window
+# item names the format it computes in (its `claim` names the slice). Read from the C tools' own headers (host/tools/clause5_soak.c, divsqrt_soak.c),
+# never from the names. No string has a slash in it. The nightly page's reducer refuses to publish a string that its own screen matches
+# (card_stress_progress._PATHY and _IPV4): a drive letter, a UNC path, "~/" or a /word/word path, each at the start of a string or after whitespace, a
+# quote, a bracket, "=", ":", "," or ";", and a dotted IPv4 address. It does not match a slash inside a word ("fp32/fp64" passes it), so the screen
+# does not itself keep a slash out of this table; hw/test_card_stress.py holds that none of the strings is matched by it. An op with no entry is
+# refused BY NAME where the catalog is built (Item calls format_of), so a new op cannot enter the catalog without one.
+OP_FORMAT = {
+    # fp32 operations: the operand, and the result
+    "sqrt32": "fp32", "div32": "fp32", "rint32": "fp32", "scaleb32": "fp32", "scaleb32-all": "fp32", "scaleb32-wide": "fp32",
+    "nextup32": "fp32", "nextdown32": "fp32", "logb32": "fp32", "class32": "fp32", "rem32": "fp32", "div32-hard": "fp32",
+    # fp64 operations
+    "sqrt64": "fp64", "div64": "fp64", "rint64": "fp64", "scaleb64": "fp64", "nextup64": "fp64", "nextdown64": "fp64", "logb64": "fp64",
+    "class64": "fp64", "rem64": "fp64", "div64-hard": "fp64", "sqrt64-hard": "fp64", "rint64-class": "fp64", "scaleb64-class": "fp64",
+    # the conversions name both ends: the number in cvtto and cvtfrom is the floating format, the other end the integer targets or sources
+    "conv32to64": "fp32 -> fp64", "conv32to64-all": "fp32 -> fp64", "conv64to32": "fp64 -> fp32", "conv64to32-class": "fp64 -> fp32",
+    "cvtto32": "fp32 -> the integer targets", "cvtto32-all": "fp32 -> the integer targets",
+    "cvtto64": "fp64 -> the integer targets", "cvtto64-class": "fp64 -> the integer targets",
+    "cvtfrom32": "the integer sources -> fp32", "cvtfrom32-all": "the integer sources -> fp32",
+    "cvtfrom64": "the integer sources -> fp64", "cvtfrom64-all": "the integer sources -> fp64", "cvtfrom64-class": "the integer sources -> fp64",
+    # the wide modes (parcel HXa's thirty): the format the mode computes in, the slice and f64hard items included
+    "div128-hard": "fp128", "sqrt128-hard": "fp128", "div128-f64hard": "fp128", "sqrt128-f64hard": "fp128",
+    "div256-hard": "fp256", "sqrt256-hard": "fp256", "div256-f64hard": "fp256", "sqrt256-f64hard": "fp256",
+    "sqrt128-f32": "fp128", "recip128-f32": "fp128", "sqrt256-f32": "fp256", "recip256-f32": "fp256",
+    "sqrt64-f32": "fp64", "recip64-f32": "fp64",
+}
+OP_FORMAT.update({f"{op}{w}-win-{h}": f"fp{w}" for op in ("sqrt", "recip") for w in (128, 256) for h in ("ones", "zeros", "alt", "key")})
+# parcel HXb's twelve wide clause-5 modes, READ from clause5_soak.c's table of them (WJOBS: the wide format, and a conversion's destination); the
+# fp32 slice through the wide rint names the format it computes in, as the divsqrt slices do, and cvtfrom's sources are the 64-bit ones, as
+# cvtfrom64-class's
+OP_FORMAT.update({
+    "rint128-class": "fp128", "rint256-class": "fp256", "scaleb128-class": "fp128", "scaleb256-class": "fp256",
+    "rint128-f32": "fp128", "rint256-f32": "fp256",
+    "conv128to64-class": "fp128 -> fp64", "conv256to128-class": "fp256 -> fp128",
+    "cvtto128-class": "fp128 -> the integer targets", "cvtto256-class": "fp256 -> the integer targets",
+    "cvtfrom128-class": "the integer sources -> fp128", "cvtfrom256-class": "the integer sources -> fp256",
+})
+
+
+def format_of(op: str) -> str:
+    """The format an op computes in, or both ends of a conversion (OP_FORMAT). An op the table does not name is refused BY NAME."""
+    try:
+        return OP_FORMAT[op]
+    except KeyError:
+        raise ValueError(f"op {op!r} has no format: give it one in OP_FORMAT (hw/card_stress_lib.py)") from None
+
+
 # THE SEEDS. Both soak tools set rng_state = seed | 1 and draw from there, so two slices of one state draw the
 # same operands, and the schedule up to 2026-10-19 (seed = base_seed + 7919 n, n restarting at 0 in every new
 # --out) gave neighbouring items one state on half the n and every new run the last run's draws
@@ -804,6 +854,8 @@ class Item:
         self.per_encoding = per_encoding
         # 'tile' or 'host' (OP_REACH): whether the job's work runs on the card's tile at all
         self.reach = OP_REACH[op]
+        # the format the op computes in, or both ends of a conversion (OP_FORMAT; parcel HXd): an op with no format is refused here, by name
+        self.format = format_of(op)
         # an exhaustive item's indices are [0, space): 2^32 encodings for the fp32-operand items, the mode's index count for the
         # hard-case and class-level items (HARD_SPACE, CLASS_SPACE); `level` says which kind of claim a pass is
         # ("exhaustive", "hard", "class" - a class item is a claim at the class level, PLAUSIBLE, not a sweep - or "random");

@@ -1,0 +1,9 @@
+fp32 triple word, VARIANT: the polynomials planned with slack 0 (the build's is 2)
+  sin rne: 898 instructions, 96 words, live 23; S (K3, K2, D) (4, 3, 9), C (4, 4, 9)
+  cos rne: 895 instructions, 93 words, live 23; S (K3, K2, D) (4, 3, 9), C (4, 4, 9)
+  tan rne: 952 instructions, 95 words, live 23; S (K3, K2, D) (4, 3, 9), C (4, 4, 9)
+  pools sin rne: 760 lanes, marked 0, wrong unmarked 0
+  pools tan rne: 760 lanes, marked 0, wrong unmarked 0
+  budget sin edge (500 lanes, seed 21): max |E|/Bv 0.2982; max |M|/Bv 0.1118; THE BUDGET'S BOUND 0.6576 Bv (2^-0.60, margin 0.60 bits)
+  budget tan edge (500 lanes, seed 21): max |E|/Bv 0.3289; max |M|/Bv 0.1126; THE BUDGET'S BOUND 0.7356 Bv (2^-0.44, margin 0.44 bits)
+-- variant 0: 56s
