@@ -1342,7 +1342,8 @@ def scn_cadence(env: Env, src: str = HERE) -> list:
             fh.write("stop")
         r.finish(90)
     cs = [x for x in r.recs if x.get("type") == "cycle_start"]
-    ended = {x["cycle"] for x in r.recs if x.get("type") == "cycle_end"}
+    ended = sorted(x["cycle"] for x in r.recs if x.get("type") == "cycle_end")
+    whole = set(ended[:5])        # these ended before STOP was written, so every leg of them was reached; a sixth cycle may have been cut by the STOP
     due = lambda v: (v - 1) % 3 == 0
     c("cadence: it ran at least five whole cycles and ended at the STOP file, exit 0", r.rc == 0 and len(ended) >= 5, f"rc {r.rc}, {len(ended)} cycles ended")
     c("cadence: the quad's visits are 1, 2, 3 ... in order", [x["visit"] for x in cs] == list(range(1, len(cs) + 1)), str([x["visit"] for x in cs]))
@@ -1357,13 +1358,13 @@ def scn_cadence(env: Env, src: str = HERE) -> list:
     c("cadence: a selftest leg only in a cycle that planned it, a pass in the first, and no skipped leg anywhere carries the cadence's text",
       bool(st) and {x["cycle"] for x in st} <= {x["cycle"] for x in cs if due(x["visit"])} and st[0]["status"] == "pass" and st[0]["cycle"] == cs[0]["cycle"]
       and not any("every 3 visits" in (x["reason"] or "") for x in r.legs(status="skipped")), str([(x["cycle"], x["status"]) for x in st]))
-    done = [x for x in cs if x["cycle"] in ended]
+    done = [x for x in cs if x["cycle"] in whole]
     c("cadence: every whole cycle that planned the selftest has its leg, and no whole cycle that left it out has one",
       all(any(y["cycle"] == x["cycle"] for y in st) == due(x["visit"]) for x in done), str([(x["visit"], due(x["visit"])) for x in done]))
     res = r.legs("resident")
     c("cadence: resident, due every visit and made to end past the deadline, is a SKIPPED leg in every whole cycle, with the estimate's reason: a skip that is "
       "one stays one",
-      bool(res) and {x["cycle"] for x in res} >= ended and all(x["status"] == "skipped" and x["reason"].startswith("its estimate") for x in res),
+      bool(res) and {x["cycle"] for x in res} >= whole and all(x["status"] == "skipped" and x["reason"].startswith("its estimate") for x in res),
       str([(x["cycle"], x["status"], x["reason"]) for x in res[:2]]))
     stx = open(os.path.join(r.out, "status.txt"), encoding="utf-8").read()
     m = re.search(r"^legs\s+(\d+): (.*)$", stx, re.M)
