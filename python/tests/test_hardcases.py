@@ -32,9 +32,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import hardcases as H  # noqa: E402
 from cft_golden import softfloat as sf  # noqa: E402
-from cft_golden.formats import FP32, FP64  # noqa: E402
+from cft_golden.formats import FP32, FP64, FP128, FP256  # noqa: E402
 
-FMT = {"div32-hard": FP32, "div64-hard": FP64, "sqrt64-hard": FP64}
+FMT = {"div32-hard": FP32, "div64-hard": FP64, "sqrt64-hard": FP64, "div128-hard": FP128, "div256-hard": FP256,
+       "sqrt128-hard": FP128, "sqrt256-hard": FP256}
+WIDE = ("div128-hard", "div256-hard", "sqrt128-hard", "sqrt256-hard")
 RND = (sf.RND_RNE, sf.RND_RTZ, sf.RND_RDN, sf.RND_RUP, sf.RND_RMM)
 
 
@@ -163,6 +165,12 @@ def pick(mode, per_seg=24):
 def test_space_tables_and_totals():
     assert [H.SPACES[m].total for m in ("div32-hard", "div64-hard", "sqrt64-hard")] == [21235788, 289685696, 4456448]
     assert [H.SPACES[m].k for m in ("div32-hard", "div64-hard", "sqrt64-hard")] == [4, 4, 1]
+    # the wide spaces (parcel HXa) are docs/studies/HX-wide-sweeps.md 3.4's table: the fp64 modes' segment sizes at
+    # p = 113 and 237, F3a and F3b growing with p and the exponent range
+    assert [H.SPACES[m].total for m in WIDE] == [289931696, 293864352, 4456448, 4456448]
+    assert [(H.SPACES[m].k, H.SPACES[m].p, H.SPACES[m].w) for m in WIDE] == [(4, 113, 128), (4, 237, 256),
+                                                                             (1, 113, 128), (1, 237, 256)]
+    assert [c for n, s, c in H.SPACES["div256-hard"].segs][:2] == [948, 4194284]
     for sp in H.SPACES.values():
         pos = 0
         for name, start, count in sp.segs:
@@ -179,13 +187,102 @@ def test_mix64_equals_the_published_splitmix64_outputs():
     assert got == [0xE220A8397B1DCDAF, 0x6E789E6AA1B965F4, 0x06C45D188009454F]
 
 
-@pytest.mark.parametrize("mode", ["div32-hard", "div64-hard", "sqrt64-hard"])
+@pytest.mark.parametrize("mode", ["div32-hard", "div64-hard", "sqrt64-hard"] + list(WIDE))
 def test_verify_every_small_segment_and_a_sample_of_every_large_one(mode):
     sp = H.SPACES[mode]
     cases = 0
-    for idx in H.sample_indices(sp, 120, 7):
+    for idx in H.sample_indices(sp, 120 if mode not in WIDE else 40, 7):
         cases += H.verify(mode, idx)
     assert cases > 0
+
+
+def test_the_widened_draws_are_the_one_word_draws_where_one_word_held():
+    # Parcel HXa drew F1's odd parts and F0K's keyed low bits from as many 64-bit words as p needs (splitmix64's stream
+    # from the old seed). Where one word held - F1 to p = 132, F0K to p = 77 - the draw is the old one, and F3a's
+    # alternating pattern, carried past 64 bits, is the old mask below 65: so div32-hard, div64-hard and sqrt64-hard are
+    # unchanged operand for operand (hw/test_divsqrt_hard.py's `unchanged` group holds the C tool's dumps to the same).
+    seeds = [0, 1, H.SALT_F1, H.SALT_F0K, (1 << 63) + 5, H.M64] + [H.mix64(i) for i in range(300)]
+    for seed in seeds:
+        word = H.mix64(seed)
+        for nbits in range(0, 65):
+            assert H.draw_top(seed, nbits) == word >> (64 - nbits)
+            assert H.draw_low(seed, nbits) == word & ((1 << nbits) - 1)
+    for length in range(1, 65):
+        assert H.even_bits(length) == 0x5555555555555555 & ((1 << length) - 1)
+    # past one word the stream's next words follow, the first word on top (draw_top) or at the bottom (draw_low)
+    s = 12345
+    w0, w1 = H.mix64(s), H.mix64((s + H.GOLDEN) & H.M64)
+    assert H.draw_top(s, 100) == ((w0 << 64) | w1) >> 28
+    assert H.draw_low(s, 100) == (w0 | (w1 << 64)) & ((1 << 100) - 1)
+
+
+def test_the_wide_draws_reach_every_bit():
+    # F1 at p = 237 builds (one word failed there, on a negative shift: the study's 3.4) and its odd parts take their
+    # whole width, h = 118 bits; F0K's keyed divisors at p = 113 and 237 carry keyed bits above bit 63, where one word
+    # left bits 64 to p - 14 zero in every divisor
+    sp = H.SPACES["div256-hard"]
+    f1 = [s for n, s, c in sp.segs if n == "F1"][0]
+    lens = set()
+    for i in range(f1, f1 + 800, 4):
+        a, b = H.base_case(sp, i)
+        _sb, sig_b, _tb = H.decode(sp, b)
+        lens.add((sig_b >> ((sig_b & -sig_b).bit_length() - 1)).bit_length())      # the divisor's odd part
+    assert max(lens) == (237 - 1) // 2
+    for mode in ("div128-hard", "div256-hard"):
+        sp = H.SPACES[mode]
+        high = 0
+        for jj in range(256):
+            high |= H.f0_divisor(sp, "K", jj) >> 64
+        want = (1 << (sp.p - 1 - 64)) - 1                # every bit from 64 to p - 2 (the cells' too) is reached
+        assert high & ((1 << (sp.p - 13 - 64)) - 1) == (1 << (sp.p - 13 - 64)) - 1, mode
+        assert high >> (sp.p - 1 - 64) == 1 and high & want == want, mode
+
+
+def test_an_unsupported_p_is_refused_by_name():
+    # the family's construction is not defined there: refused by name, never left to fail on a shift
+    with pytest.raises(ValueError, match=r"family F1 is not defined at p = 4, bias = 127 \(it needs p >= 5"):
+        H.Space("tiny", 4, 12, 127, 4, [("F1", 4)])
+    with pytest.raises(ValueError, match=r"family F0K is not defined at p = 13"):
+        H.Space("tiny", 13, 21, 127, 4, [("F0K", 4)])
+    with pytest.raises(ValueError, match=r"family S1 is not defined at p = 53, bias = 127 \(it needs p >= 2 and "
+                                         r"bias >= 510"):
+        H.Space("narrow-range", 53, 61, 127, 1, [("S1", 4)])
+    assert H.Space("ok", 5, 13, 127, 4, [("F1", 4)]).total == 4 and H.Space("ok", 14, 22, 127, 4, [("F0K", 4)]).total == 4
+
+
+def test_the_plain_widening_keeps_every_value():
+    # the fp32 slice's widening (plain_lines, the reference the tool's slice dump is held to): the same value at fp64,
+    # fp128 and fp256 for every class - zeros, subnormals, normals, infinities - and a NaN's quiet bit and payload at the
+    # top of the wider fraction; at fp64 it is the host FPU's own widening (CPython's float of an fp32) for every
+    # non-NaN value
+    fmts = {32: FP32, 64: FP64, 128: FP128, 256: FP256}
+    specials = [0, 1, 2, 0x7FFFFF, 0x800000, 0x3F800000, 0x3F800001, 0x7F7FFFFF, 0x7F800000, 0x7F800001,
+                0x7FBFFFFF, 0x7FC00000, 0x7FFFFFFF]
+    pool = specials + [s | 0x80000000 for s in specials] + [H.mix64(i) & 0xFFFFFFFF for i in range(600)]
+    for bits in pool:
+        e = (bits >> 23) & 0xFF
+        f = bits & 0x7FFFFF
+        for w in (64, 128, 256):
+            fw = fmts[w]
+            wb = H.widen_bits(bits, 32, w)
+            assert wb >> (w - 1) == bits >> 31
+            we = (wb >> fw.man_w) & fw.exp_mask
+            if e == 0xFF:
+                assert we == fw.exp_mask and (wb & ((1 << fw.man_w) - 1)) == f << (fw.man_w - 23), hex(bits)
+            else:
+                assert _val(fw, wb & ~(1 << (w - 1))) == _val(FP32, bits & 0x7FFFFFFF), (hex(bits), w)
+                assert e == 0 and f == 0 or we != 0, (hex(bits), w)       # a nonzero fp32 value is a wide normal
+        if e != 0xFF:
+            want64 = struct.unpack("<Q", struct.pack("<d", struct.unpack("<f", struct.pack("<I", bits))[0]))[0]
+            assert H.widen_bits(bits, 32, 64) == want64, hex(bits)
+    # the windows: x = 1.H L with H's top bit at the first fraction place, L the index
+    for w in (128, 256):
+        hb = fmts[w].man_w - 32
+        assert H.window_x(w, "ones", 0) >> 32 == (fmts[w].bias << hb) | ((1 << hb) - 1)
+        assert H.window_x(w, "zeros", 7) == (fmts[w].bias << fmts[w].man_w) | 7
+        alt = H.window_x(w, "alt", 0) >> 32
+        assert (alt >> (hb - 1)) & 1 == 0 and (alt >> (hb - 2)) & 1 == 1            # 1.0101...
+        assert H.window_x(w, "key", 5) & ((1 << 32) - 1) == 5
 
 
 def test_f0_skip_rate_is_the_number_theory():
@@ -368,6 +465,43 @@ def test_golden_sqrt_equals_the_exact_arbiter_on_every_family():
             assert got == want, (idx, hex(slot[0]), rnd, got, want)
             n += 1
     assert n > 500
+
+
+@pytest.mark.parametrize("mode", ["div128-hard", "div256-hard"])
+def test_golden_wide_division_equals_the_exact_arbiter_on_every_family(mode):
+    # the wide spaces through the golden model at fp128 and fp256 (the arbiter of any disagreement on the card): every
+    # family, every slot, every attribute, against the arbiter written from the definitions
+    fmt = FMT[mode]
+    n = seen_uf = seen_of = seen_exact = 0
+    for idx in pick(mode, 12):
+        for slot in H.gen(mode, idx):
+            if slot is None:
+                continue
+            for rnd in RND:
+                want = arbiter_div(fmt, slot[0], slot[1], rnd)
+                got = sf.div(fmt, slot[0], slot[1], rnd)
+                assert got == want, (mode, idx, hex(slot[0]), hex(slot[1]), rnd, got, want)
+                n += 1
+            seen_uf += bool(want[1] & sf.FLAG_UNDERFLOW)
+            seen_of += bool(want[1] & sf.FLAG_OVERFLOW)
+            seen_exact += not want[1] & sf.FLAG_INEXACT
+    assert n > 1000 and seen_uf > 0 and seen_of > 0 and seen_exact > 0
+
+
+@pytest.mark.parametrize("mode", ["sqrt128-hard", "sqrt256-hard"])
+def test_golden_wide_sqrt_equals_the_exact_arbiter_on_every_family(mode):
+    fmt = FMT[mode]
+    n = 0
+    for idx in pick(mode, 60):
+        slot = H.gen(mode, idx)[0]
+        if slot is None:
+            continue
+        for rnd in RND:
+            want = arbiter_sqrt(fmt, slot[0], rnd)
+            got = sf.sqrt(fmt, slot[0], rnd)
+            assert got == want, (mode, idx, hex(slot[0]), rnd, got, want)
+            n += 1
+    assert n > 200
 
 
 # ----------------------------------------------------------------------------------------------------------

@@ -59,6 +59,12 @@
  *       the space's segment table; the operands of indices [lo, hi); the
  *       cases and skipped slots of [lo, hi) by segment (no device is
  *       opened). python/hardcases.py prints all three line for line
+ *
+ * Built with `make divsqrt-soak MPFR=1` (host/Makefile), thirty more: the
+ * wide modes, fp64, fp128 and fp256 division and square root against MPFR
+ * (mpfr-check's emulation, tools/mpfr_ieee.h) with a second check by the
+ * ladder - the section "The wide formats" below. Built without it, the
+ * tool is exactly what it was before them.
  */
 
 #include <fenv.h>
@@ -973,9 +979,1175 @@ static int hard_count_cmd(const char *mode, const char *slo, const char *shi)
 
 #endif
 
+#ifdef CFT_SOAK_MPFR
+/* ================================================================
+ * The wide formats: fp64, fp128 and fp256 (parcel HXa, 2026-10-26)
+ *
+ * Compiled in only by `make divsqrt-soak MPFR=1` (host/Makefile), which
+ * defines CFT_SOAK_MPFR and links MPFR and GMP. Without it nothing below
+ * exists, the tool is the one it was before, object for object, and a
+ * wide mode word is an "unknown op" (exit 2). docs/studies/HX-wide-
+ * sweeps.md section 6 row 1 is the specification; docs/CARDDAY.md names
+ * the claim each mode's pass makes.
+ *
+ * THE ORACLE. At fp128 and fp256: MPFR, through mpfr_ieee.h, which is
+ * mpfr-check's own IEEE emulation (moved there so both tools take the
+ * one copy): the format's precision, the unbounded result as the
+ * overflow and underflow authority, the flags by the oracle's own
+ * arithmetic, RMM by a truncation to p + 1 bits. At fp64: the CPU's
+ * double, as every fp64 mode here (native_batch); RMM rides its RNE
+ * result, because neither a square root nor a reciprocal 1/x of a
+ * widened fp32 value is ever a tie (a reciprocal is exact when x is a
+ * power of two and otherwise not a dyadic rational at all).
+ *
+ * THE SECOND CHECK, by the ladder (the study's 4.1, rule R1). For the
+ * modes whose inputs are narrow values widened exactly - the fp32
+ * slice, and the fp64 hard operands - the library's wide result is
+ * rounded back to the narrow format under the same attribute (the
+ * rounding of an exact value, mpfr_ieee.h's ieee_round_into) and
+ * compared with the CPU's own narrow operation: the value, and the
+ * flags as the rounding's inexact, underflow and overflow with the
+ * invalid and divideByZero the operand classes decide. p' >= 2p + 2
+ * at every rung here, so the two must agree exactly; what the check
+ * can see is the top 2p bits or so of the wide result (the study's
+ * 4.1 says how little that is at fp128 and fp256), and that it is a
+ * second lineage. Under rmm the narrow CPU result is its RNE one for
+ * the square root and the reciprocal (no ties, as above); division of
+ * the fp64 hard operands has real ties at fp64 (F3a) and no native
+ * rmm, so there the ladder is not run under rmm, and says so.
+ *
+ * THE MODES. Each is `<lo> <hi> <attribute>` over its indices, all five
+ * attributes, with the verdict line's ", E encodings, S skipped".
+ *   sqrt{64,128,256}-f32, recip{64,128,256}-f32
+ *       index = the fp32 encoding, [0, 2^32), widened exactly: every
+ *       fp32 input, both signs, zeros, subnormals, infinities and NaNs
+ *       (an sNaN widens to an sNaN). recip is 1 / x. k = 1, no skips.
+ *   {sqrt,recip}{128,256}-win-{ones,zeros,alt,key}
+ *       the low-bit windows: x = 1.H L in [1, 2), the low 32 fraction
+ *       bits L = the index, the high ones H by name - all ones, all
+ *       zeros, alternating from the top (1.0101...), and a keyed draw.
+ *       k = 1, no skips. MPFR alone (no narrow value to ladder to).
+ *   div{128,256}-f64hard, sqrt{128,256}-f64hard
+ *       div64-hard's and sqrt64-hard's own indices and operands
+ *       (hard_base above, unchanged), widened exactly; k and the skips
+ *       are theirs. The ladder narrows to fp64.
+ *   div{128,256}-hard, sqrt{128,256}-hard
+ *       the hard-case families at p = 113 and 237 (python/hardcases.py
+ *       holds the same spaces): the builders below, in GMP, with F1's
+ *       odd parts and F0K's keyed low bits drawn from as many 64-bit
+ *       words as p needs (the first word is the one the fp32 and fp64
+ *       spaces draw, so those are unchanged), the F3a tie patterns'
+ *       alternation carried past 64 bits likewise, and every F0 and S0
+ *       case checked exactly as it is built. MPFR alone.
+ * `hard-space`, `hard-dump` and `hard-count` take the four new spaces
+ * and the four f64hard names (whose space is div64-hard's or
+ * sqrt64-hard's).
+ *
+ * THE CONTROLS. CFT_SOAK_SABOTAGE=1 flips the low bit of the first
+ * library result of every batch, as in every mode here: the primary
+ * oracle must name it, and the element-by-element re-check of a batch
+ * so flipped flips each element's result again (each is the first of
+ * a call of one), so every case of that batch is named and counted, as
+ * in recheck_batch above. CFT_SOAK_SABOTAGE=2 flips the low bit of the
+ * CPU's first narrow result of every batch instead, and its re-check
+ * each element's the same way: the ladder names them (lines "MISMATCH
+ * <attribute> ladder ...") and no primary MISMATCH line is printed. The
+ * verdict's value mismatches carry both checks, so under it they are
+ * the ladder's: every case of every batch it flipped.
+ * ================================================================ */
+
+#ifndef __SIZEOF_INT128__
+#error "divsqrt-soak's wide modes (MPFR=1) use the hard-case builders, which need a 128-bit integer type (__int128)"
+#endif
+
+#include "mpfr_ieee.h"
+
+#define WMAX 32                               /* fp256's bytes */
+#define W_GOLDEN 0x9E3779B97F4A7C15ull        /* splitmix64's increment */
+#define H_SALT_WIN 0xD1B54A32D192ED03ull      /* the keyed window's salt */
+
+enum { WF32, WF64, WF128, WF256 };
+static const fdesc WF[4] = {
+    { "fp32",  CFT_FP32,   8,  23,  24,    127,    -126,  4 },
+    { "fp64",  CFT_FP64,  11,  52,  53,   1023,   -1022,  8 },
+    { "fp128", CFT_FP128, 15, 112, 113,  16383,  -16382, 16 },
+    { "fp256", CFT_FP256, 19, 236, 237, 262143, -262142, 32 },
+};
+/* the attribute's MPFR rounding, by MODES index; RMM is the oracle's own build */
+static const mpfr_rnd_t WMR[5] = { MPFR_RNDN, MPFR_RNDZ, MPFR_RNDD, MPFR_RNDU, MPFR_RNDN };
+
+/* ---- the wide hard-case spaces (GMP builders) ---------------------- */
+
+typedef struct {
+    const char *mode;
+    int div, wf, p, bias, k, nseg;
+    struct { int fam; const char *name; uint64_t count; } seg[HMAXSEG];
+} whspace;
+
+static const whspace WHSPACES[] = {
+    { "div128-hard", 1, WF128, 113, 16383, 4, 7, {
+        { H_F3A, "F3a", 4u * 113 },
+        { H_F3B, "F3b", 4u * (4 * 16383 - 1) },
+        { H_F2,  "F2",  (uint64_t)4 << 16 },
+        { H_F1,  "F1",  (uint64_t)4 << 20 },
+        { H_F0A, "F0A", (uint64_t)4 << 21 },
+        { H_F0D, "F0D", (uint64_t)4 << 21 },
+        { H_F0K, "F0K", (uint64_t)4 << 26 } } },
+    { "div256-hard", 1, WF256, 237, 262143, 4, 7, {
+        { H_F3A, "F3a", 4u * 237 },
+        { H_F3B, "F3b", 4u * (4 * 262143 - 1) },
+        { H_F2,  "F2",  (uint64_t)4 << 16 },
+        { H_F1,  "F1",  (uint64_t)4 << 20 },
+        { H_F0A, "F0A", (uint64_t)4 << 21 },
+        { H_F0D, "F0D", (uint64_t)4 << 21 },
+        { H_F0K, "F0K", (uint64_t)4 << 26 } } },
+    { "sqrt128-hard", 0, WF128, 113, 16383, 1, 2, {
+        { H_S1,  "S1",  (uint64_t)4 << 16 },
+        { H_S0,  "S0",  (uint64_t)4 << 20 } } },
+    { "sqrt256-hard", 0, WF256, 237, 262143, 1, 2, {
+        { H_S1,  "S1",  (uint64_t)4 << 16 },
+        { H_S0,  "S0",  (uint64_t)4 << 20 } } },
+};
+#define NWHS ((int)(sizeof WHSPACES / sizeof WHSPACES[0]))
+
+static const whspace *whspace_of(const char *mode)
+{
+    int i;
+    for (i = 0; i < NWHS; i++)
+        if (!strcmp(WHSPACES[i].mode, mode))
+            return &WHSPACES[i];
+    return NULL;
+}
+
+static uint64_t whspace_total(const whspace *sp)
+{
+    uint64_t t = 0;
+    int i;
+    for (i = 0; i < sp->nseg; i++)
+        t += sp->seg[i].count;
+    return t;
+}
+
+/* the builders' scratch: initialized once, reused (GMP grows them as needed) */
+static mpz_t wz_p1, wz_pp, wz_a, wz_b, wz_t, wz_u, wz_d, wz_x, wz_my, wz_r;
+static int wz_ready;
+
+static void wz_init(void)
+{
+    if (wz_ready)
+        return;
+    mpz_init(wz_p1); mpz_init(wz_pp); mpz_init(wz_a); mpz_init(wz_b);
+    mpz_init(wz_t); mpz_init(wz_u); mpz_init(wz_d); mpz_init(wz_x);
+    mpz_init(wz_my); mpz_init(wz_r);
+    wz_ready = 1;
+}
+
+/* The positive normal number sig * 2^(e - bias - (p-1)) of the space's
+ * format, sig in [2^(p-1), 2^p), as its little-endian encoding. */
+static void wenc(const whspace *sp, int64_t e, const mpz_t sig, uint8_t *out)
+{
+    mpz_t enc, ex;
+    memset(out, 0, WMAX);
+    if (e < 1 || e > 2 * (int64_t)sp->bias || mpz_sgn(sig) <= 0 ||
+        mpz_sizeinbase(sig, 2) != (size_t)sp->p) {
+        herr = 1;
+        return;
+    }
+    mpz_init_set(enc, sig);
+    mpz_clrbit(enc, (mp_bitcnt_t)(sp->p - 1));     /* the hidden bit: sig - 2^(p-1) */
+    mpz_init_set_si(ex, (long)e);
+    mpz_mul_2exp(ex, ex, (mp_bitcnt_t)(sp->p - 1));
+    mpz_ior(enc, enc, ex);
+    mpz_export(out, NULL, -1, 1, 0, 0, enc);
+    mpz_clear(enc);
+    mpz_clear(ex);
+}
+
+/* The exact value n 2^t, n a positive integer of at most p bits. */
+static void wenc_int(const whspace *sp, const mpz_t n, int64_t t, uint8_t *out)
+{
+    int len = (int)mpz_sizeinbase(n, 2);
+    mpz_t s;
+    mpz_init(s);
+    mpz_mul_2exp(s, n, (mp_bitcnt_t)(sp->p - len));
+    wenc(sp, sp->bias + len - 1 + t, s, out);
+    mpz_clear(s);
+}
+
+/* The top `nbits` bits of the words W0 W1 ... (W0 the most significant),
+ * W_i = mix64(seed + i 2^64 / phi): splitmix64's stream from `seed`. For
+ * nbits <= 64 it is W0 >> (64 - nbits), the one-word draw the fp32 and
+ * fp64 spaces make. */
+static void wdraw_top(mpz_t out, uint64_t seed, int nbits)
+{
+    int nw = (nbits + 63) / 64, i;
+    mpz_set_ui(out, 0);
+    for (i = 0; i < nw; i++) {
+        uint64_t w = mix64(seed + (uint64_t)i * W_GOLDEN);
+        /* in two halves: an unsigned long may be 32 bits */
+        mpz_mul_2exp(out, out, 32);
+        mpz_add_ui(out, out, (unsigned long)(w >> 32));
+        mpz_mul_2exp(out, out, 32);
+        mpz_add_ui(out, out, (unsigned long)(w & 0xffffffffu));
+    }
+    mpz_fdiv_q_2exp(out, out, (mp_bitcnt_t)(64 * nw - nbits));
+}
+
+/* The low `nbits` bits of the words W0 + W1 2^64 + ... (W0 the least
+ * significant), W_i as above. For nbits <= 64 it is W0 masked, the
+ * one-word draw. */
+static void wdraw_low(mpz_t out, uint64_t seed, int nbits)
+{
+    int nw = (nbits + 63) / 64, i;
+    mpz_set_ui(out, 0);
+    for (i = nw - 1; i >= 0; i--) {
+        uint64_t w = mix64(seed + (uint64_t)i * W_GOLDEN);
+        mpz_mul_2exp(out, out, 32);
+        mpz_add_ui(out, out, (unsigned long)(w >> 32));
+        mpz_mul_2exp(out, out, 32);
+        mpz_add_ui(out, out, (unsigned long)(w & 0xffffffffu));
+    }
+    mpz_fdiv_r_2exp(out, out, (mp_bitcnt_t)nbits);
+}
+
+/* The bits of even position below len: 0x...5555 carried as far as len
+ * needs (0x5555555555555555 masked, for len <= 64). */
+static void weven_bits(mpz_t out, int len)
+{
+    int i;
+    mpz_set_ui(out, 0);
+    for (i = 0; i < len; i += 2)
+        mpz_setbit(out, (mp_bitcnt_t)i);
+}
+
+/* tie_pattern, at any length: all ones, 10..01, 1010..1, all ones but bit 1 */
+static void wtie_pattern(mpz_t out, int len, int v)
+{
+    if (v == 0) {
+        mpz_set_ui(out, 0);
+        mpz_setbit(out, (mp_bitcnt_t)len);
+        mpz_sub_ui(out, out, 1);
+        return;
+    }
+    if (v == 2)
+        weven_bits(out, len);
+    else if (v == 3) {
+        mpz_set_ui(out, 0);
+        mpz_setbit(out, (mp_bitcnt_t)len);
+        mpz_sub_ui(out, out, 1);
+        mpz_clrbit(out, 1);
+    } else
+        mpz_set_ui(out, 0);
+    mpz_setbit(out, (mp_bitcnt_t)(len - 1));
+    mpz_setbit(out, 0);
+}
+
+static void wset_pow2(mpz_t out, int e)
+{
+    mpz_set_ui(out, 0);
+    mpz_setbit(out, (mp_bitcnt_t)e);
+}
+
+/* The positive operands of an index of a wide space: 1 for a case, 0 for
+ * a skip; herr set when an exact check fails or an operand would leave
+ * the format. b is unused for the square root. */
+static int whard_base(const whspace *sp, uint64_t idx, uint8_t *a, uint8_t *b)
+{
+    int p = sp->p, bias = sp->bias, s, v, fam = -1;
+    uint64_t i0 = idx, j;
+    wz_init();
+    wset_pow2(wz_p1, p - 1);
+    wset_pow2(wz_pp, p);
+    for (s = 0; s < sp->nseg; s++) {
+        if (i0 < sp->seg[s].count) { fam = sp->seg[s].fam; break; }
+        i0 -= sp->seg[s].count;
+    }
+    j = i0 >> 2;
+    v = (int)(i0 & 3);
+    switch (fam) {
+    case H_F3A: {
+        int sd = (int)j + 1;
+        wtie_pattern(wz_a, p - sd + 1, v);
+        mpz_mul_2exp(wz_a, wz_a, (mp_bitcnt_t)(sd - 1));
+        wenc(sp, 4, wz_a, a);
+        wenc(sp, bias + sd + 3, wz_p1, b);
+        return 1;
+    }
+    case H_F3B: {
+        int64_t eq = (int64_t)j - (2 * (int64_t)bias - 1);
+        int64_t ea = 1 + (eq > 0 ? eq : 0), eb = 1 + (eq < 0 ? -eq : 0);
+        if (v == 0 || v == 2)
+            mpz_sub_ui(wz_t, wz_pp, 1);
+        else {
+            wset_pow2(wz_t, p - 2);
+            mpz_mul_ui(wz_t, wz_t, 3);
+        }
+        if (v < 2) { wenc(sp, ea, wz_t, a); wenc(sp, eb, wz_p1, b); }
+        else       { wenc(sp, ea, wz_p1, a); wenc(sp, eb, wz_t, b); }
+        return 1;
+    }
+    case H_F2: {
+        unsigned long k = (unsigned long)(j + 1);
+        if (v < 2)
+            mpz_set(wz_t, wz_p1);
+        else
+            mpz_sub_ui(wz_t, wz_pp, 1);
+        wenc(sp, bias, wz_t, a);
+        if ((v & 1) == 0) {
+            mpz_add_ui(wz_u, wz_p1, k);
+            wenc(sp, bias, wz_u, b);
+        } else {
+            mpz_sub_ui(wz_u, wz_pp, k);
+            wenc(sp, bias - 1, wz_u, b);
+        }
+        return 1;
+    }
+    case H_F1: {
+        int h = (p - 1) / 2, e = bias / 3, tb3 = bias / 2, sh = p - 2;
+        int64_t ta, tb;
+        wdraw_top(wz_a, (2 * j) ^ H_SALT_F1, h - 1);          /* ob = 2 draw + 1 */
+        mpz_mul_2exp(wz_a, wz_a, 1);
+        mpz_add_ui(wz_a, wz_a, 1);
+        wdraw_top(wz_b, (2 * j + 1) ^ H_SALT_F1, h - 1);      /* oq */
+        mpz_mul_2exp(wz_b, wz_b, 1);
+        mpz_add_ui(wz_b, wz_b, 1);
+        ta = v == 0 ? 0 : v == 1 ? e : v == 2 ? -e : (int64_t)tb3 + (1 - bias) - sh;
+        tb = v == 0 ? 0 : v == 1 ? -e : v == 2 ? e : tb3;
+        mpz_mul(wz_t, wz_a, wz_b);
+        wenc_int(sp, wz_t, ta, a);
+        wenc_int(sp, wz_a, tb, b);
+        return 1;
+    }
+    case H_F0A: case H_F0D: case H_F0K: {
+        int target = v >> 1, plus = !(v & 1), kk = target == 0 ? p : p - 1;
+        if (fam == H_F0A) {
+            mpz_add_ui(wz_my, wz_p1, 1);
+            mpz_set_ui(wz_t, (unsigned long)j);
+            mpz_addmul_ui(wz_my, wz_t, 2);
+        } else if (fam == H_F0D) {
+            mpz_sub_ui(wz_my, wz_pp, 1);
+            mpz_set_ui(wz_t, (unsigned long)j);
+            mpz_submul_ui(wz_my, wz_t, 2);
+        } else {
+            wdraw_low(wz_my, j ^ H_SALT_F0K, p - 13);
+            mpz_set_ui(wz_t, (unsigned long)((j * 2659) & 4095));
+            mpz_mul_2exp(wz_t, wz_t, (mp_bitcnt_t)(p - 13));
+            mpz_ior(wz_my, wz_my, wz_t);
+            mpz_ior(wz_my, wz_my, wz_p1);
+            mpz_setbit(wz_my, 0);
+        }
+        wset_pow2(wz_t, kk);
+        mpz_mod(wz_t, wz_t, wz_my);
+        if (!mpz_invert(wz_r, wz_t, wz_my)) { herr = 1; return 0; }
+        if (!plus)
+            mpz_sub(wz_r, wz_my, wz_r);
+        mpz_add(wz_x, wz_r, wz_my);
+        if (mpz_cmp(wz_x, wz_pp) < 0)
+            mpz_set(wz_u, wz_x);
+        else if (mpz_even_p(wz_x))
+            mpz_fdiv_q_2exp(wz_u, wz_x, 1);
+        else
+            return 0;
+        /* |N| = 1 and its sign, exactly: (x 2^p mod 2 my) = my +- 1 for the
+         * midpoint, x 2^(p-1) = +-1 (mod my) for the representable target */
+        if (target == 0) {
+            mpz_mul_2exp(wz_t, wz_x, (mp_bitcnt_t)p);
+            mpz_mul_2exp(wz_d, wz_my, 1);
+            mpz_mod(wz_t, wz_t, wz_d);
+            mpz_set(wz_d, wz_my);
+            if (plus) mpz_add_ui(wz_d, wz_d, 1); else mpz_sub_ui(wz_d, wz_d, 1);
+        } else {
+            mpz_mul_2exp(wz_t, wz_x, (mp_bitcnt_t)(p - 1));
+            mpz_mod(wz_t, wz_t, wz_my);
+            if (plus) mpz_set_ui(wz_d, 1); else mpz_sub_ui(wz_d, wz_my, 1);
+        }
+        if (mpz_cmp(wz_t, wz_d) != 0) { herr = 1; return 0; }
+        wenc(sp, bias, wz_u, a);
+        wenc(sp, bias, wz_my, b);
+        return 1;
+    }
+    case H_S1: {
+        unsigned long k = (unsigned long)(2 * j + 1);
+        if (v == 0)      { mpz_add_ui(wz_u, wz_p1, k); wenc(sp, bias, wz_u, a); }
+        else if (v == 1) { mpz_sub_ui(wz_u, wz_pp, k); wenc(sp, bias + 1, wz_u, a); }
+        else if (v == 2) { mpz_sub_ui(wz_u, wz_pp, k); wenc(sp, bias - 1, wz_u, a); }
+        else             { mpz_add_ui(wz_u, wz_p1, k); wenc(sp, bias + 510, wz_u, a); }
+        return 1;
+    }
+    case H_S0: {
+        int par = v >> 1, r = v & 1, sh = p + 1 + par, nr = 0, i, c, bb;
+        int64_t m = (j & 1) ? -(int64_t)((j + 1) >> 1) : (int64_t)(j >> 1);
+        mpz_t rho, size, cand[4], root[4];
+        mpz_init_set_si(rho, (long)(8 * m + 1));
+        mpz_init(size);
+        wset_pow2(size, sh);
+        /* hensel(rho, p + 2): an odd u, u = 1 (mod 4), u^2 = rho (mod 2^(p+2)),
+         * lifted one bit at a time; wz_d carries u^2 - rho */
+        mpz_set_ui(wz_u, 1);
+        mpz_ui_sub(wz_d, 1, rho);
+        for (bb = 3; bb < p + 2; bb++)
+            if (mpz_tstbit(wz_d, (mp_bitcnt_t)bb)) {
+                /* (u + 2^(bb-1))^2 - rho = d + u 2^bb + 2^(2bb-2) */
+                mpz_mul_2exp(wz_t, wz_u, (mp_bitcnt_t)bb);
+                mpz_add(wz_d, wz_d, wz_t);
+                wset_pow2(wz_t, 2 * bb - 2);
+                mpz_add(wz_d, wz_d, wz_t);
+                wset_pow2(wz_t, bb - 1);
+                mpz_add(wz_u, wz_u, wz_t);
+            }
+        mpz_fdiv_r_2exp(wz_u, wz_u, (mp_bitcnt_t)(p + 2));
+        for (i = 0; i < 4; i++) { mpz_init(cand[i]); mpz_init(root[i]); }
+        mpz_fdiv_r_2exp(cand[0], wz_u, (mp_bitcnt_t)sh);              /* c0 */
+        mpz_sub(cand[1], size, cand[0]);
+        mpz_fdiv_r_2exp(cand[1], cand[1], (mp_bitcnt_t)sh);
+        mpz_fdiv_q_2exp(wz_t, size, 1);
+        mpz_add(cand[2], cand[0], wz_t);
+        mpz_fdiv_r_2exp(cand[2], cand[2], (mp_bitcnt_t)sh);
+        mpz_add(cand[3], cand[1], wz_t);
+        mpz_fdiv_r_2exp(cand[3], cand[3], (mp_bitcnt_t)sh);
+        wset_pow2(wz_x, 2 * p + 1);                                   /* lim */
+        for (i = 0; i < 4; i++) {
+            mpz_mul(wz_t, cand[i], cand[i]);
+            if (mpz_sizeinbase(cand[i], 2) == (size_t)(p + 1) &&     /* in [2^p, 2^(p+1)) */
+                ((mpz_cmp(wz_t, wz_x) < 0) == (par == 0))) {
+                for (c = nr++; c > 0 && mpz_cmp(root[c - 1], cand[i]) > 0; c--)
+                    mpz_set(root[c], root[c - 1]);
+                mpz_set(root[c], cand[i]);
+            }
+        }
+        if (r < nr) {
+            mpz_mul(wz_t, root[r], root[r]);
+            mpz_fdiv_r_2exp(wz_d, wz_t, (mp_bitcnt_t)sh);
+            mpz_fdiv_r_2exp(wz_x, rho, (mp_bitcnt_t)sh);              /* rho mod 2^sh, nonnegative */
+            if (mpz_cmp(wz_d, wz_x) != 0)
+                herr = 1;
+            else {
+                wset_pow2(wz_x, sh - 1);
+                mpz_add(wz_t, wz_t, wz_x);
+                mpz_fdiv_q_2exp(wz_t, wz_t, (mp_bitcnt_t)sh);
+                if (mpz_cmp(wz_t, wz_p1) >= 0 && mpz_cmp(wz_t, wz_pp) < 0) {
+                    wenc(sp, bias + par, wz_t, a);
+                    nr = -1;                                          /* a case */
+                }
+            }
+        }
+        for (i = 0; i < 4; i++) { mpz_clear(cand[i]); mpz_clear(root[i]); }
+        mpz_clear(rho);
+        mpz_clear(size);
+        return nr == -1;
+    }
+    default:
+        herr = 1;
+        return 0;
+    }
+}
+
+/* ---- the wide modes ------------------------------------------------- */
+
+typedef enum { WK_SLICE, WK_WIN, WK_F64HARD, WK_HARD } wkind;
+
+typedef struct {
+    const char *mode;
+    wkind kind;
+    int div;          /* division (1 / x for the slice and the windows), or square root */
+    int wf;           /* the format the operation runs at */
+    int arg;          /* a window's H (0 ones, 1 zeros, 2 alt, 3 key) */
+} wmode;
+
+static const wmode WMODES[] = {
+    { "sqrt64-f32",  WK_SLICE, 0, WF64, 0 },  { "sqrt128-f32",  WK_SLICE, 0, WF128, 0 },
+    { "sqrt256-f32", WK_SLICE, 0, WF256, 0 }, { "recip64-f32",  WK_SLICE, 1, WF64, 0 },
+    { "recip128-f32", WK_SLICE, 1, WF128, 0 }, { "recip256-f32", WK_SLICE, 1, WF256, 0 },
+    { "sqrt128-win-ones", WK_WIN, 0, WF128, 0 }, { "sqrt128-win-zeros", WK_WIN, 0, WF128, 1 },
+    { "sqrt128-win-alt", WK_WIN, 0, WF128, 2 },  { "sqrt128-win-key", WK_WIN, 0, WF128, 3 },
+    { "sqrt256-win-ones", WK_WIN, 0, WF256, 0 }, { "sqrt256-win-zeros", WK_WIN, 0, WF256, 1 },
+    { "sqrt256-win-alt", WK_WIN, 0, WF256, 2 },  { "sqrt256-win-key", WK_WIN, 0, WF256, 3 },
+    { "recip128-win-ones", WK_WIN, 1, WF128, 0 }, { "recip128-win-zeros", WK_WIN, 1, WF128, 1 },
+    { "recip128-win-alt", WK_WIN, 1, WF128, 2 },  { "recip128-win-key", WK_WIN, 1, WF128, 3 },
+    { "recip256-win-ones", WK_WIN, 1, WF256, 0 }, { "recip256-win-zeros", WK_WIN, 1, WF256, 1 },
+    { "recip256-win-alt", WK_WIN, 1, WF256, 2 },  { "recip256-win-key", WK_WIN, 1, WF256, 3 },
+    { "div128-f64hard", WK_F64HARD, 1, WF128, 0 }, { "div256-f64hard", WK_F64HARD, 1, WF256, 0 },
+    { "sqrt128-f64hard", WK_F64HARD, 0, WF128, 0 }, { "sqrt256-f64hard", WK_F64HARD, 0, WF256, 0 },
+    { "div128-hard", WK_HARD, 1, WF128, 0 },  { "div256-hard", WK_HARD, 1, WF256, 0 },
+    { "sqrt128-hard", WK_HARD, 0, WF128, 0 }, { "sqrt256-hard", WK_HARD, 0, WF256, 0 },
+};
+#define NWM ((int)(sizeof WMODES / sizeof WMODES[0]))
+
+static const wmode *wmode_of(const char *mode)
+{
+    int i;
+    for (i = 0; i < NWM; i++)
+        if (!strcmp(WMODES[i].mode, mode))
+            return &WMODES[i];
+    return NULL;
+}
+
+/* the fp64 space an f64hard mode runs over */
+static const hspace *wm_f64space(const wmode *wm)
+{
+    return hspace_of(wm->div ? "div64-hard" : "sqrt64-hard");
+}
+
+static uint64_t wm_total(const wmode *wm)
+{
+    if (wm->kind == WK_F64HARD)
+        return hspace_total(wm_f64space(wm));
+    if (wm->kind == WK_HARD)
+        return whspace_total(whspace_of(wm->mode));
+    return (uint64_t)1 << 32;
+}
+
+static int wm_k(const wmode *wm)
+{
+    if (wm->kind == WK_F64HARD)
+        return wm_f64space(wm)->k;
+    if (wm->kind == WK_HARD)
+        return whspace_of(wm->mode)->k;
+    return 1;
+}
+
+/* the narrow format the ladder rounds back to, or -1 for none */
+static int wm_narrow(const wmode *wm)
+{
+    return wm->kind == WK_SLICE ? WF32 : wm->kind == WK_F64HARD ? WF64 : -1;
+}
+
+/* n (<= 64) bits of v into the little-endian encoding b at bit lo */
+static void put_bits(uint8_t *b, int lo, int n, uint64_t v)
+{
+    int i;
+    for (i = 0; i < n; i++) {
+        int bit = lo + i;
+        if ((v >> i) & 1) b[bit >> 3] |= (uint8_t)(1u << (bit & 7));
+        else              b[bit >> 3] &= (uint8_t)~(1u << (bit & 7));
+    }
+}
+
+/* The encoding of a narrow value (fp32 or fp64) in a wider format, exactly:
+ * the same sign, a NaN's payload and quiet bit carried at the top of the
+ * fraction (an sNaN stays an sNaN), a subnormal normalised. */
+static void widen(const fdesc *N, const uint8_t *src, const fdesc *W, uint8_t *dst)
+{
+    uint64_t u = 0, frac, ex, emask = ((uint64_t)1 << N->exp_w) - 1;
+    memcpy(&u, src, N->esz);
+    frac = u & (((uint64_t)1 << N->man_w) - 1);
+    ex = (u >> N->man_w) & emask;
+    memset(dst, 0, WMAX);
+    if (ex == emask) {
+        put_bits(dst, W->man_w, W->exp_w, ((uint64_t)1 << W->exp_w) - 1);
+        put_bits(dst, W->man_w - N->man_w, N->man_w, frac);
+    } else if (ex != 0 || frac != 0) {
+        uint64_t m = ex ? frac | ((uint64_t)1 << N->man_w) : frac;
+        long e2 = ex ? (long)ex - N->emax - N->man_w : N->emin - N->man_w;
+        int msb = bitlen(m) - 1;
+        put_bits(dst, W->man_w - msb, msb, m & (((uint64_t)1 << msb) - 1));
+        put_bits(dst, W->man_w, W->exp_w, (uint64_t)(e2 + msb + W->emax));
+    }
+    if ((u >> (8 * N->esz - 1)) & 1)
+        put_bits(dst, 8 * (int)W->esz - 1, 1, 1);
+}
+
+/* x = 1.H L in [1, 2) at format W, L the index's 32 bits, H the window's:
+ * all ones, all zeros, alternating from the top (1.0101...), or keyed */
+static void window_x(const fdesc *W, int h, uint64_t L, uint8_t *dst)
+{
+    int hb = W->man_w - 32, i;
+    memset(dst, 0, WMAX);
+    put_bits(dst, 0, 32, L);
+    for (i = 0; i < hb; i += 64) {
+        int n = hb - i < 64 ? hb - i : 64;
+        uint64_t w = h == 0 ? ~(uint64_t)0 : h == 1 ? 0 : h == 2 ? 0x5555555555555555ull :
+                     mix64(H_SALT_WIN + (uint64_t)(i / 64) * W_GOLDEN);
+        put_bits(dst, 32 + i, n, w);
+    }
+    put_bits(dst, W->man_w, W->exp_w, (uint64_t)W->emax);    /* biased exponent = bias: [1, 2) */
+}
+
+/* the batch: wide operands, library results, the fp64 oracle's results,
+ * the narrow operands and the CPU's narrow results; MPFR's results and flags */
+static uint8_t WA[BATCH * WMAX], WB[BATCH * WMAX], WD[BATCH * WMAX], WO[BATCH * 8];
+static uint8_t NA[BATCH * 8], NB[BATCH * 8], NW[BATCH * 8];
+static mpfr_t WOUT[BATCH];
+static uint32_t WFL[BATCH];
+static int wout_prec;
+static int lsabotage = -1;
+static uint64_t lcases, lmism, lflag;     /* the ladder's own count */
+
+static cft_status wide_lib(const wmode *wm, int mi, const uint8_t *a, const uint8_t *b,
+                           uint8_t *d, size_t n, uint32_t *fl)
+{
+    cft_format fmt = WF[wm->wf].fmt;
+    cft_status st = wm->div ? cft_div(dev, fmt, MODES[mi].cr, a, b, d, n, fl, NULL)
+                            : cft_sqrt(dev, fmt, MODES[mi].cr, a, d, n, fl, NULL);
+    if (sabotage < 0) {
+        const char *e = getenv("CFT_SOAK_SABOTAGE");
+        sabotage = (e && *e == '1') ? 1 : 0;
+    }
+    if (st == CFT_OK && sabotage && n > 0)
+        d[0] ^= 1u;
+    return st;
+}
+
+static void hexw(const uint8_t *b, size_t n, char *out)
+{
+    out[0] = '0';
+    out[1] = 'x';
+    hexdump(b, n, out + 2);
+}
+
+/* one value disagreement, named: the operands, the library's result and the oracle's */
+static void wide_report(const wmode *wm, int mi, const uint8_t *a, const uint8_t *b,
+                        const uint8_t *got, const uint8_t *want64, mpfr_srcptr want)
+{
+    const fdesc *W = &WF[wm->wf];
+    char ha[2 * WMAX + 3], hb[2 * WMAX + 3], hg[2 * WMAX + 3], hw[2 * WMAX + 3];
+    if (shown++ >= 16)
+        return;
+    hexw(a, W->esz, ha);
+    hexw(got, W->esz, hg);
+    hb[0] = 0;
+    if (wm->div)
+        hexw(b, W->esz, hb);
+    if (want64) {
+        hexw(want64, 8, hw);
+        printf("  MISMATCH %s a=%s%s%s lib=%s cpu=%s\n", MODES[mi].name, ha,
+               wm->div ? " b=" : "", hb, hg, hw);
+    } else {
+        mpfr_printf("  MISMATCH %s a=%s%s%s lib=%s mpfr=%Ra\n", MODES[mi].name, ha,
+                    wm->div ? " b=" : "", hb, hg, want);
+    }
+}
+
+/* Element by element, a suspect batch: each element through the library
+ * alone (n = 1), its value and flags against the oracle's for it. */
+static void wide_recheck(const wmode *wm, int mi, size_t n)
+{
+    const fdesc *W = &WF[wm->wf];
+    size_t e = W->esz, i;
+    for (i = 0; i < n; i++) {
+        uint8_t got[WMAX], w8[8];
+        uint32_t lf = 0, of;
+        int ok;
+        const uint8_t *a = WA + i * e, *b = WB + i * e;
+        if (wide_lib(wm, mi, a, b, got, 1, &lf) != CFT_OK)
+            continue;
+        if (wm->wf == WF64) {
+            uint64_t g, w;
+            of = native_batch(wm->div ? OP_DIV64 : OP_SQRT64, MODES[mi].fe, a,
+                              wm->div ? b : NULL, w8, 1);
+            memcpy(&g, got, 8);
+            memcpy(&w, w8, 8);
+            ok = agree64(g, w);
+        } else {
+            of = WFL[i];
+            ok = agree(W, got, WOUT[i]);
+        }
+        if (!ok) {
+            mismatches++;
+            wide_report(wm, mi, a, b, got, wm->wf == WF64 ? w8 : NULL, WOUT[i]);
+        }
+        if (lf != of) {
+            char ha[2 * WMAX + 3];
+            flag_mismatches++;
+            if (shown < 16) {
+                hexw(a, e, ha);
+                printf("  FLAGS %s a=%s%s lib=0x%02x %s=0x%02x\n", MODES[mi].name, ha,
+                       wm->div ? " (div)" : "", (unsigned)lf,
+                       wm->wf == WF64 ? "cpu" : "mpfr", (unsigned)of);
+                shown++;
+            }
+        }
+    }
+}
+
+/* invalid and divideByZero of the narrow operation, from its operands' classes */
+static uint32_t class_flags(const fdesc *N, int div, const uint8_t *a, const uint8_t *b)
+{
+    cls ca, cb;
+    classify(N, a, &ca);
+    if (!div)
+        return (ca.is_snan || (ca.sign && !ca.is_zero && !ca.is_nan)) ? CFT_FLAG_INVALID : 0;
+    classify(N, b, &cb);
+    if (ca.is_snan || cb.is_snan)
+        return CFT_FLAG_INVALID;
+    if (ca.is_nan || cb.is_nan)
+        return 0;
+    if ((ca.is_zero && cb.is_zero) || (ca.is_inf && cb.is_inf))
+        return CFT_FLAG_INVALID;
+    if (cb.is_zero && !ca.is_inf)
+        return CFT_FLAG_DIVBYZERO;
+    return 0;
+}
+
+/* The ladder's view of element i: the library's wide result rounded to the
+ * narrow format under the attribute (R1: that rounding's flags, with the
+ * operand classes' invalid and divideByZero). */
+static uint32_t ladder_one(const wmode *wm, int mi, size_t i, mpfr_t x, mpfr_t out)
+{
+    const fdesc *W = &WF[wm->wf], *N = &WF[wm_narrow(wm)];
+    const uint8_t *d = WD + i * W->esz;
+    uint32_t fl = class_flags(N, wm->div, NA + i * N->esz, NB + i * N->esz), f2 = 0;
+    cls c;
+    classify(W, d, &c);
+    mpfr_set_prec(out, N->p);
+    if (c.is_nan)
+        mpfr_set_nan(out);
+    else if (c.is_inf)
+        mpfr_set_inf(out, c.sign ? -1 : 1);
+    else if (c.is_zero)
+        mpfr_set_zero(out, c.sign ? -1 : 1);
+    else {
+        enc_to_mpfr(W, d, x);
+        ieee_round_into(N, x, WMR[mi], mi == 4, out, &f2);
+    }
+    return fl | f2;
+}
+
+static void ladder_report(const wmode *wm, int mi, size_t i, mpfr_srcptr narrowed, const uint8_t *cpu,
+                          int flags_only, uint32_t lf, uint32_t cf)
+{
+    const fdesc *N = &WF[wm_narrow(wm)];
+    char ha[19], hb[19], hc[19];
+    if (shown++ >= 16)
+        return;
+    hexw(NA + i * N->esz, N->esz, ha);
+    hexw(cpu, N->esz, hc);
+    hb[0] = 0;
+    if (wm->div)
+        hexw(NB + i * N->esz, N->esz, hb);
+    if (flags_only)
+        printf("  FLAGS %s ladder a=%s%s%s narrowed=0x%02x cpu=0x%02x\n", MODES[mi].name, ha,
+               wm->div ? " b=" : "", hb, (unsigned)lf, (unsigned)cf);
+    else
+        mpfr_printf("  MISMATCH %s ladder a=%s%s%s narrowed=%Ra cpu=%s\n", MODES[mi].name, ha,
+                    wm->div ? " b=" : "", hb, narrowed, hc);
+}
+
+/* The second check of a batch: every element's narrowed result against the
+ * CPU's own narrow operation, flags per batch and then per element. */
+static void wide_ladder(const wmode *wm, int mi, size_t n)
+{
+    const fdesc *W = &WF[wm->wf], *N = &WF[wm_narrow(wm)];
+    soak_op nop = N->esz == 4 ? (wm->div ? OP_DIV32 : OP_SQRT32) : (wm->div ? OP_DIV64 : OP_SQRT64);
+    size_t ne = N->esz, i;
+    uint32_t cf, lf = 0;
+    int bad = 0;
+    mpfr_t x, out;
+    if (lsabotage < 0) {
+        const char *e = getenv("CFT_SOAK_SABOTAGE");
+        lsabotage = (e && e[0] == '2' && !e[1]) ? 1 : 0;
+    }
+    mpfr_init2(x, W->p);
+    mpfr_init2(out, N->p);
+    cf = native_batch(nop, MODES[mi].fe, NA, wm->div ? NB : NULL, NW, n);
+    if (lsabotage && n > 0)
+        NW[0] ^= 1u;
+    for (i = 0; i < n; i++) {
+        lf |= ladder_one(wm, mi, i, x, out);
+        if (!agree(N, NW + i * ne, out))
+            bad = 1;
+    }
+    if (lf != cf)
+        bad = 1;
+    if (bad) {
+        for (i = 0; i < n; i++) {
+            uint8_t w[8];
+            uint32_t l1 = ladder_one(wm, mi, i, x, out);
+            uint32_t c1 = native_batch(nop, MODES[mi].fe, NA + i * ne, wm->div ? NB + i * ne : NULL,
+                                       w, 1);
+            if (lsabotage)
+                w[0] ^= 1u;
+            if (!agree(N, w, out)) {
+                mismatches++;
+                lmism++;
+                ladder_report(wm, mi, i, out, w, 0, 0, 0);
+            }
+            if (l1 != c1) {
+                flag_mismatches++;
+                lflag++;
+                ladder_report(wm, mi, i, out, w, 1, l1, c1);
+            }
+        }
+    }
+    lcases += n;
+    mpfr_clear(x);
+    mpfr_clear(out);
+}
+
+static int wide_batch(const wmode *wm, int mi, size_t n)
+{
+    const fdesc *W = &WF[wm->wf];
+    size_t e = W->esz, i;
+    uint32_t of = 0, lf = 0;
+    int bad = 0;
+    mop op = wm->div ? OP_DIV : OP_SQRT;
+    if (wm->wf == WF64)
+        of = native_batch(wm->div ? OP_DIV64 : OP_SQRT64, MODES[mi].fe, WA, wm->div ? WB : NULL, WO, n);
+    else
+        for (i = 0; i < n; i++) {
+            ieee_oracle(W, op, WMR[mi], mi == 4, WA + i * e, wm->div ? WB + i * e : WA + i * e,
+                        WA + i * e, WOUT[i], &WFL[i]);
+            of |= WFL[i];
+        }
+    if (wide_lib(wm, mi, WA, WB, WD, n, &lf) != CFT_OK) {
+        printf("  library call failed\n");
+        return 1;
+    }
+    for (i = 0; i < n && !bad; i++) {
+        if (wm->wf == WF64) {
+            uint64_t g, w;
+            memcpy(&g, WD + i * 8, 8);
+            memcpy(&w, WO + i * 8, 8);
+            bad = !agree64(g, w);
+        } else
+            bad = !agree(W, WD + i * e, WOUT[i]);
+    }
+    if (lf != of)
+        bad = 1;
+    if (bad)
+        wide_recheck(wm, mi, n);
+    cases += n;
+    if (wm_narrow(wm) >= 0 && !(wm->div && wm->kind == WK_F64HARD && mi == 4))
+        wide_ladder(wm, mi, n);
+    return 0;
+}
+
+/* The operands of an index, positive where the slots sign them: wide ones
+ * into wa/wb, the narrow ones the ladder needs into na/nb. 1 for a case, 0
+ * for a skip; herr on a failed exact check. */
+static int wide_base(const wmode *wm, uint64_t idx, uint8_t *wa, uint8_t *wb, uint8_t *na,
+                     uint8_t *nb)
+{
+    const fdesc *W = &WF[wm->wf];
+    static const uint8_t one32[4] = { 0x00, 0x00, 0x80, 0x3f };
+    uint8_t *x = wm->div ? wb : wa;
+    switch (wm->kind) {
+    case WK_SLICE: {
+        uint32_t u = (uint32_t)idx;
+        uint8_t *nx = wm->div ? nb : na;
+        memcpy(nx, &u, 4);
+        widen(&WF[WF32], nx, W, x);
+        if (wm->div) {
+            memcpy(na, one32, 4);
+            widen(&WF[WF32], na, W, wa);
+        }
+        return 1;
+    }
+    case WK_WIN:
+        window_x(W, wm->arg, idx, x);
+        if (wm->div)
+            widen(&WF[WF32], one32, W, wa);
+        return 1;
+    case WK_F64HARD: {
+        uint64_t a = 0, b = 0;
+        if (!hard_base(wm_f64space(wm), idx, &a, &b))
+            return 0;
+        memcpy(na, &a, 8);
+        memcpy(nb, &b, 8);
+        widen(&WF[WF64], na, W, wa);
+        if (wm->div)
+            widen(&WF[WF64], nb, W, wb);
+        return 1;
+    }
+    default:
+        return whard_base(whspace_of(wm->mode), idx, wa, wb);
+    }
+}
+
+static int wide_range(const char *mode, uint64_t total, const char *slo, const char *shi,
+                      uint64_t *lo, uint64_t *hi)
+{
+    char *e1, *e2;
+    *lo = strtoull(slo, &e1, 0);
+    *hi = strtoull(shi, &e2, 0);
+    if (!*slo || !*shi || *e1 || *e2 || *slo == '-' || *shi == '-' || *lo >= *hi || *hi > total) {
+        fprintf(stderr, "need 0 <= lo < hi <= %llu (the indices of %s), got [%s, %s)\n",
+                (unsigned long long)total, mode, slo, shi);
+        return 1;
+    }
+    return 0;
+}
+
+static int wide_soak(const wmode *wm, uint64_t lo, uint64_t hi, int mi)
+{
+    const fdesc *W = &WF[wm->wf];
+    int k = wm_k(wm), nf = wm_narrow(wm), sl, rc = 0, i;
+    size_t n = 0, e = W->esz, ne = nf >= 0 ? WF[nf].esz : 0;
+    uint64_t idx;
+    uint8_t a[WMAX], b[WMAX], na[8], nb[8];
+    if (wout_prec != W->p) {
+        for (i = 0; i < BATCH; i++) {
+            if (wout_prec)
+                mpfr_set_prec(WOUT[i], W->p);
+            else
+                mpfr_init2(WOUT[i], W->p);
+        }
+        wout_prec = W->p;
+    }
+    memset(a, 0, sizeof a);
+    memset(b, 0, sizeof b);
+    memset(na, 0, sizeof na);
+    memset(nb, 0, sizeof nb);
+    for (idx = lo; idx < hi && !rc; idx++) {
+        int ok;
+        if (n + (size_t)k > BATCH) {
+            rc = wide_batch(wm, mi, n);
+            n = 0;
+            if (rc)
+                break;
+        }
+        hencodings += 1;          /* (not "++": hw/test_divsqrt_hard.py plants on soak_hard's line, which must stay unique) */
+        ok = wide_base(wm, idx, a, b, na, nb);
+        if (herr) {
+            fprintf(stderr, "%s: the exact check of index %llu failed, or it built an operand "
+                    "outside the format - the construction is broken, not the library\n",
+                    wm->mode, (unsigned long long)idx);
+            return 2;
+        }
+        if (!ok) {
+            hskipped += (uint64_t)k;
+            continue;
+        }
+        for (sl = 0; sl < k; sl++, n++) {
+            /* the slot's signs, where an index makes four: s = sign(a) + 2 sign(b) */
+            memcpy(WA + n * e, a, e);
+            memcpy(WB + n * e, b, e);
+            if (k == 4 && (sl & 1)) WA[n * e + e - 1] |= 0x80;
+            if (k == 4 && (sl & 2)) WB[n * e + e - 1] |= 0x80;
+            if (nf >= 0) {
+                memcpy(NA + n * ne, na, ne);
+                memcpy(NB + n * ne, nb, ne);
+                if (k == 4 && (sl & 1)) NA[n * ne + ne - 1] |= 0x80;
+                if (k == 4 && (sl & 2)) NB[n * ne + ne - 1] |= 0x80;
+            }
+        }
+    }
+    if (!rc && n)
+        rc = wide_batch(wm, mi, n);
+    if (rc == 0 && cases == 0 && hi - lo >= HMIN_REFUSE) {     /* soak_hard's test, written apart: a plant's anchor */
+        fprintf(stderr, "%s: every one of the %llu indices of [%llu, %llu) skipped - a run of skips "
+                "that long is a broken construction, not an empty region; refused\n", wm->mode,
+                (unsigned long long)(hi - lo), (unsigned long long)lo, (unsigned long long)hi);
+        return 2;
+    }
+    return rc;
+}
+
+/* A wide mode's run: 2 for a refusal (nothing was run), else wide_soak's status. */
+static int wide_run(const wmode *wm, const char *slo, const char *shi, int mi)
+{
+    uint64_t lo, hi;
+    int rc, nf = wm_narrow(wm);
+    if (wide_range(wm->mode, wm_total(wm), slo, shi, &lo, &hi))
+        return 2;
+    if (wm->wf == WF64)
+        fprintf(stderr, "oracle: the CPU's double%s; the ladder: the CPU's float\n",
+                mi == 4 ? " (rmm rides its rne result: no ties)" : "");
+    else
+        fprintf(stderr, "oracle: MPFR %s with GMP %s, mpfr_ieee.h's emulation%s\n",
+                mpfr_get_version(), gmp_version,
+                nf < 0 ? "" : nf == WF32 ? "; the ladder: the CPU's float"
+                : wm->div && mi == 4 ? "; the ladder: not under rmm for division (fp64 has ties, "
+                                       "the CPU no rmm)"
+                : "; the ladder: the CPU's double");
+    rc = wide_soak(wm, lo, hi, mi);
+    if (rc == 2)
+        return 2;
+    if (nf >= 0)
+        printf("  ladder: %llu of the %llu cases rounded to %s and checked against the CPU's own, "
+               "%llu value and %llu flag disagreements\n", (unsigned long long)lcases,
+               (unsigned long long)cases, WF[nf].name, (unsigned long long)lmism,
+               (unsigned long long)lflag);
+    return rc;
+}
+
+/* ---- hard-space, hard-dump and hard-count for the new names ---------
+ * Every new mode word is taken. The slice and window spaces are one
+ * segment of 2^32 indices, k = 1, none skipped: "fp32" (the encoding) and
+ * "L" (the low 32 bits); their dump prints the wide operand (the dividend
+ * 1 and the divisor x for the reciprocal). The f64hard names are their
+ * fp64 space's, operands in fp64 as the fp64 modes dump them. */
+
+static int wide_hard_known(const char *mode)
+{
+    return wmode_of(mode) != NULL;
+}
+
+static const char *wm_segname(const wmode *wm)
+{
+    return wm->kind == WK_SLICE ? "fp32" : "L";
+}
+
+static int whard_space_cmd(const char *mode)
+{
+    const wmode *wm = wmode_of(mode);
+    uint64_t start = 0;
+    int i;
+    if (wm->kind == WK_SLICE || wm->kind == WK_WIN) {
+        printf("%s k=1 total=%llu\n%s 0 %llu\n", mode, (unsigned long long)wm_total(wm),
+               wm_segname(wm), (unsigned long long)wm_total(wm));
+    } else if (wm->kind == WK_F64HARD) {
+        const hspace *sp = wm_f64space(wm);
+        printf("%s k=%d total=%llu\n", mode, sp->k, (unsigned long long)hspace_total(sp));
+        for (i = 0; i < sp->nseg; i++) {
+            printf("%s %llu %llu\n", sp->seg[i].name, (unsigned long long)start,
+                   (unsigned long long)sp->seg[i].count);
+            start += sp->seg[i].count;
+        }
+    } else {
+        const whspace *sp = whspace_of(mode);
+        printf("%s k=%d total=%llu\n", mode, sp->k, (unsigned long long)whspace_total(sp));
+        for (i = 0; i < sp->nseg; i++) {
+            printf("%s %llu %llu\n", sp->seg[i].name, (unsigned long long)start,
+                   (unsigned long long)sp->seg[i].count);
+            start += sp->seg[i].count;
+        }
+    }
+    return 0;
+}
+
+static int whard_dump_cmd(const char *mode, const char *slo, const char *shi)
+{
+    const wmode *wm = wmode_of(mode);
+    const whspace *sp;
+    uint64_t lo, hi, idx;
+    uint8_t a[WMAX], b[WMAX];
+    char ha[2 * WMAX + 3], hb[2 * WMAX + 3];
+    int sl;
+    size_t e;
+    if (wm->kind == WK_F64HARD)
+        return hard_dump_cmd(wm->div ? "div64-hard" : "sqrt64-hard", slo, shi);
+    if (wm->kind == WK_SLICE || wm->kind == WK_WIN) {
+        uint8_t na[8], nb[8];
+        e = WF[wm->wf].esz;
+        if (wide_range(mode, wm_total(wm), slo, shi, &lo, &hi))
+            return 2;
+        for (idx = lo; idx < hi; idx++) {
+            wide_base(wm, idx, a, b, na, nb);
+            hexw(a, e, ha);
+            if (wm->div) {
+                hexw(b, e, hb);
+                printf("%llu 0 %s %s\n", (unsigned long long)idx, ha, hb);
+            } else
+                printf("%llu 0 %s\n", (unsigned long long)idx, ha);
+        }
+        return 0;
+    }
+    sp = whspace_of(mode);
+    e = WF[sp->wf].esz;
+    if (wide_range(mode, whspace_total(sp), slo, shi, &lo, &hi))
+        return 2;
+    for (idx = lo; idx < hi; idx++) {
+        int ok = whard_base(sp, idx, a, b);
+        if (herr) {
+            fprintf(stderr, "%s: the exact check of index %llu failed\n", mode,
+                    (unsigned long long)idx);
+            return 2;
+        }
+        for (sl = 0; sl < sp->k; sl++) {
+            uint8_t sa[WMAX], sb[WMAX];
+            if (!ok) {
+                printf("%llu %d skip\n", (unsigned long long)idx, sl);
+                continue;
+            }
+            memcpy(sa, a, WMAX);
+            memcpy(sb, b, WMAX);
+            if (sl & 1) sa[e - 1] |= 0x80;
+            if (sl & 2) sb[e - 1] |= 0x80;
+            hexw(sa, e, ha);
+            if (sp->k == 1) {
+                printf("%llu %d %s\n", (unsigned long long)idx, sl, ha);
+                continue;
+            }
+            hexw(sb, e, hb);
+            printf("%llu %d %s %s\n", (unsigned long long)idx, sl, ha, hb);
+        }
+    }
+    return 0;
+}
+
+static int whard_count_cmd(const char *mode, const char *slo, const char *shi)
+{
+    const wmode *wm = wmode_of(mode);
+    const whspace *sp;
+    uint64_t lo, hi, start = 0, ti = 0, tc = 0, ts = 0, run = 0, maxrun = 0;
+    uint8_t a[WMAX], b[WMAX];
+    int i;
+    if (wm->kind == WK_F64HARD)
+        return hard_count_cmd(wm->div ? "div64-hard" : "sqrt64-hard", slo, shi);
+    if (wm->kind == WK_SLICE || wm->kind == WK_WIN) {
+        if (wide_range(mode, wm_total(wm), slo, shi, &lo, &hi))
+            return 2;
+        printf("%s %llu %llu 0\ntotal %llu %llu 0\nmaxskip 0\n", wm_segname(wm),
+               (unsigned long long)(hi - lo), (unsigned long long)(hi - lo),
+               (unsigned long long)(hi - lo), (unsigned long long)(hi - lo));
+        return 0;
+    }
+    sp = whspace_of(mode);
+    if (wide_range(mode, whspace_total(sp), slo, shi, &lo, &hi))
+        return 2;
+    for (i = 0; i < sp->nseg; i++) {
+        uint64_t a_lo = lo > start ? lo : start, idx, built = 0;
+        uint64_t a_hi = hi < start + sp->seg[i].count ? hi : start + sp->seg[i].count;
+        if (a_lo < a_hi) {
+            for (idx = a_lo; idx < a_hi; idx++) {
+                int ok = whard_base(sp, idx, a, b);
+                if (herr) {
+                    fprintf(stderr, "%s: the exact check of index %llu failed\n", mode,
+                            (unsigned long long)idx);
+                    return 2;
+                }
+                built += (uint64_t)ok;
+                run = ok ? 0 : run + 1;
+                if (run > maxrun)
+                    maxrun = run;
+            }
+            printf("%s %llu %llu %llu\n", sp->seg[i].name, (unsigned long long)(a_hi - a_lo),
+                   (unsigned long long)(built * (uint64_t)sp->k),
+                   (unsigned long long)((a_hi - a_lo - built) * (uint64_t)sp->k));
+            ti += a_hi - a_lo;
+            tc += built * (uint64_t)sp->k;
+            ts += (a_hi - a_lo - built) * (uint64_t)sp->k;
+        }
+        start += sp->seg[i].count;
+    }
+    printf("total %llu %llu %llu\n", (unsigned long long)ti, (unsigned long long)tc,
+           (unsigned long long)ts);
+    printf("maxskip %llu\n", (unsigned long long)maxrun);
+    return 0;
+}
+
+static void wide_usage(const char *argv0)
+{
+    fprintf(stderr,
+        "       %s sqrt64-f32|sqrt128-f32|sqrt256-f32|recip64-f32|recip128-f32|recip256-f32 "
+        "<lo> <hi> <rne|rtz|rdn|rup|rmm>\n"
+        "       %s {sqrt,recip}{128,256}-win-{ones,zeros,alt,key} <lo> <hi> "
+        "<rne|rtz|rdn|rup|rmm>\n"
+        "       %s {div,sqrt}{128,256}-hard|{div,sqrt}{128,256}-f64hard <lo> <hi> "
+        "<rne|rtz|rdn|rup|rmm>\n"
+        "       %s hard-space|hard-dump|hard-count {div,sqrt}{128,256}-{hard,f64hard} "
+        "[<lo> <hi>]\n"
+        "       (the wide modes, built with MPFR %s)\n",
+        argv0, argv0, argv0, argv0, mpfr_get_version());
+}
+
+#endif /* CFT_SOAK_MPFR */
+
 int main(int argc, char **argv)
 {
     int mi, rc = 1;
+#ifdef CFT_SOAK_MPFR
+    const wmode *wm = argc == 5 ? wmode_of(argv[1]) : NULL;
+    if (argc >= 3 && wide_hard_known(argv[2])) {
+        if (argc == 3 && !strcmp(argv[1], "hard-space"))
+            return whard_space_cmd(argv[2]);
+        if (argc == 5 && !strcmp(argv[1], "hard-dump"))
+            return whard_dump_cmd(argv[2], argv[3], argv[4]);
+        if (argc == 5 && !strcmp(argv[1], "hard-count"))
+            return whard_count_cmd(argv[2], argv[3], argv[4]);
+    }
+#endif
     if (argc == 3 && !strcmp(argv[1], "hard-space"))
         return hard_space_cmd(argv[2]);
     if (argc == 5 && !strcmp(argv[1], "hard-dump"))
@@ -994,6 +2166,9 @@ int main(int argc, char **argv)
             "       %s hard-count <div32-hard|div64-hard|sqrt64-hard> "
             "<lo> <hi>\n",
             argv[0], argv[0], argv[0], argv[0], argv[0], argv[0], argv[0]);
+#ifdef CFT_SOAK_MPFR
+        wide_usage(argv[0]);
+#endif
         return 2;
     }
     mi = mode_index(argv[4]);
@@ -1039,6 +2214,17 @@ int main(int argc, char **argv)
 #endif
     }
 
+#ifdef CFT_SOAK_MPFR
+    if (wm) {
+        /* the wide modes: <lo> <hi> over the mode's indices, all five attributes */
+        hard_mode = 1;
+        rc = wide_run(wm, argv[2], argv[3], mi);
+        if (rc == 2) {
+            cft_close(dev);
+            return 2;
+        }
+    } else
+#endif
     if (!strcmp(argv[1], "sqrt32")) {
         uint64_t lo = strtoull(argv[2], NULL, 0);
         uint64_t hi = strtoull(argv[3], NULL, 0);

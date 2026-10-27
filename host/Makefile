@@ -847,10 +847,45 @@ formatoftest: all
 # both matter for the oracle to BE the hardware. Driven at scale by
 # hw/run-soak.sh; see the tool's header for what it can and cannot
 # validate.
-divsqrt-soak$(EXE): tools/divsqrt_soak.c libcft.a
-	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) -fno-math-errno \
+#
+# MPFR=1 (parcel HXa, 2026-10-26) compiles in the wide modes - fp64,
+# fp128 and fp256 division and square root against MPFR, through
+# tools/mpfr_ieee.h, mpfr-check's own emulation - and links MPFR and GMP:
+#
+#   make divsqrt-soak MPFR=1                       the system's MPFR
+#   make divsqrt-soak MPFR=1 MPFR_PREFIX=DIR       DIR/include, DIR/lib
+#                                                  (verify/_mpfr-prefix,
+#                                                  the pinned 4.2.2)
+#
+# Unset (or 0), the recipe expands to the one it was and the tool is the
+# one it was, object for object: a wide mode word is then an unknown op
+# (exit 2). Anything else is refused. Under MPFR=1 the tool is relinked
+# every time, so that a binary built without MPFR is never taken for one
+# built with it (the XRT=1 trap of CLAUDE.md); `divsqrt-soak hard-space
+# div128-hard` exits 0 only from a build with the wide modes. One recipe
+# serves both, the MPFR words spliced in by variables that are empty
+# without it: host/tests/soak_chunk_check.py's plants anchor on the
+# soak-chunk recipe's text, which must occur once.
+ifneq ($(filter-out 0 1,$(MPFR)),)
+  $(error MPFR=$(MPFR) is refused: MPFR=1 builds divsqrt-soak's wide modes against MPFR and GMP, MPFR=0 or unset builds the tool without them)
+endif
+SOAK_EMPTY :=
+SOAK_SP    := $(SOAK_EMPTY) $(SOAK_EMPTY)
+ifeq ($(MPFR),1)
+SOAK_MPFR_CF   := $(SOAK_SP)-DCFT_SOAK_MPFR$(if $(MPFR_PREFIX), -I$(MPFR_PREFIX)/include)
+SOAK_MPFR_LD   := $(SOAK_SP)$(if $(MPFR_PREFIX),-L$(MPFR_PREFIX)/lib )-lmpfr -lgmp
+SOAK_MPFR_DEPS := tools/mpfr_ieee.h soak-mpfr-always
+else
+SOAK_MPFR_CF   :=
+SOAK_MPFR_LD   :=
+SOAK_MPFR_DEPS :=
+endif
+.PHONY: soak-mpfr-always
+soak-mpfr-always:
+divsqrt-soak$(EXE): tools/divsqrt_soak.c libcft.a $(SOAK_MPFR_DEPS)
+	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC)$(SOAK_MPFR_CF) -fno-math-errno \
 	  -frounding-math tools/divsqrt_soak.c libcft.a -o $@ \
-	  $(XRTLIBS) $(LDLIBS) -lm
+	  $(XRTLIBS) $(LDLIBS)$(SOAK_MPFR_LD) -lm
 
 # The same oracle, aimed at the clause-5 completion set: rint, scaleb,
 # the conversions, logb, next, class and remainder against libm and
@@ -970,11 +1005,11 @@ $(SOAK_LIB): $(SOAK_OBJ)
 	rm -f $@
 	$(AR) rcs $@ $^
 
-$(SOAK_DIV): tools/divsqrt_soak.c $(SOAK_LIB)
-	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) -fno-math-errno \
+$(SOAK_DIV): tools/divsqrt_soak.c $(SOAK_LIB) $(SOAK_MPFR_DEPS)
+	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC)$(SOAK_MPFR_CF) -fno-math-errno \
 	  -frounding-math -DCFT_CHUNK=$(SOAK_CHUNK) -DBATCH=$(SOAK_CHUNK) \
 	  tools/divsqrt_soak.c $(SOAK_LIB) -o $@ \
-	  $(XRTLIBS) $(LDLIBS) -lm
+	  $(XRTLIBS) $(LDLIBS)$(SOAK_MPFR_LD) -lm
 
 $(SOAK_C5): tools/clause5_soak.c $(SOAK_LIB)
 	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) -fno-math-errno \
@@ -1021,7 +1056,7 @@ clean-soak-chunk:
 # reaches fp128/fp256. Needs libmpfr/libgmp (mingw64 carries them as
 # gcc dependencies; Linux wants libmpfr-dev). See the tool's header
 # for the RMM construction and the flag-derivation policy.
-mpfr-check$(EXE): tools/mpfr_check.c libcft.a
+mpfr-check$(EXE): tools/mpfr_check.c tools/mpfr_ieee.h libcft.a
 	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) tools/mpfr_check.c libcft.a \
 	  -o $@ $(XRTLIBS) $(LDLIBS) -lmpfr -lgmp -lm
 

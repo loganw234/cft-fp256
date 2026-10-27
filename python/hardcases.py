@@ -3,10 +3,13 @@
 """hardcases: the hard-to-round divisions and square roots, constructed instead of drawn (parcel HC).
 
 The reference generator for the soak tool's `div32-hard`, `div64-hard` and `sqrt64-hard` modes
-(host/tools/divsqrt_soak.c). A sampler draws a quotient within 2^-p of a rounding boundary with probability
-about 1.5e-16 at fp64; here one modular inverse builds it. docs/studies/SWP-A-coverage.md section 4.2 gives the
-mathematics and docs/studies/swp-a/hardcase_div.py the prototype; this file is the prototype made a
-deterministic index space that the C tool reproduces operand for operand.
+(host/tools/divsqrt_soak.c) and, since parcel HXa (2026-10-26), its wide modes' spaces: `div128-hard`, `div256-hard`,
+`sqrt128-hard` and `sqrt256-hard`, the same families at p = 113 and 237 (the keyed draws taking as many 64-bit words as
+p needs, the first word the one the fp32 and fp64 spaces draw), and the fp32 slice and low-bit windows of its
+`-f32` and `-win-` modes (plain_lines: every index one case). A sampler draws a quotient within 2^-p of a rounding
+boundary with probability about 1.5e-16 at fp64; here one modular inverse builds it. docs/studies/SWP-A-coverage.md
+section 4.2 gives the mathematics and docs/studies/swp-a/hardcase_div.py the prototype; this file is the prototype
+made a deterministic index space that the C tool reproduces operand for operand.
 
 THE INDEX SPACE. A mode is a list of segments; an index [0, E) belongs to one segment, and an index makes `k`
 slots (division: the four sign combinations of one operand pair, slot s = (sign of a) + 2 (sign of b); square
@@ -55,8 +58,10 @@ from fractions import Fraction
 from math import isqrt
 
 M64 = (1 << 64) - 1
+GOLDEN = 0x9E3779B97F4A7C15              # splitmix64's increment
 SALT_F0K = 0x5851F42D4C957F2D            # the keyed streams' salts (the C tool carries the same constants)
 SALT_F1 = 0x14057B7EF767814F
+SALT_WIN = 0xD1B54A32D192ED03            # the keyed low-bit window's (divsqrt_soak.c's wide modes)
 SMALL_SEGMENT = 1 << 14                  # `verify` checks every index of a segment up to this size
 
 
@@ -68,10 +73,47 @@ def mix64(x):
     return x ^ (x >> 31)
 
 
+def draw_top(seed, nbits):
+    """The top nbits of the words W0 W1 ... (W0 the most significant), W_i = mix64(seed + i golden): splitmix64's stream
+    from seed, as many words as nbits needs. For nbits <= 64 it is mix64(seed) >> (64 - nbits), the one-word draw the
+    fp32 and fp64 spaces were built with (parcel HXa widened it: one word stops at p = 132 for F1)."""
+    nw = (nbits + 63) // 64
+    acc = 0
+    for i in range(nw):
+        acc = (acc << 64) | mix64((seed + i * GOLDEN) & M64)
+    return acc >> (64 * nw - nbits)
+
+
+def draw_low(seed, nbits):
+    """The low nbits of W0 + W1 2^64 + ... (W0 the least significant), the words as in draw_top. For nbits <= 64 it is
+    mix64(seed) masked, the one-word draw (which left bits 64 and up zero: F0K's divisors above p = 77)."""
+    acc = 0
+    for i in range((nbits + 63) // 64):
+        acc |= mix64((seed + i * GOLDEN) & M64) << (64 * i)
+    return acc & ((1 << nbits) - 1)
+
+
+def even_bits(length):
+    """The bits of even position below length: 0x5555555555555555 masked for length <= 64, carried on past it."""
+    return ((1 << (2 * ((length + 1) // 2))) - 1) // 3
+
+
+# The least p (and bias) at which each family's construction is defined: F1 draws odd parts of (p - 1) // 2 - 1 bits,
+# at least one; F0K keys twelve cell bits and at least one bit below them; S1's fourth variant is 4^255 (1 + k ulp),
+# which must be a normal number. Any other p is built, at any width (the draws take as many words as p needs).
+FAMILY_DOMAIN = {"F1": (5, 1), "F0K": (14, 1), "S1": (2, 510)}
+
+
 class Space:
-    """One mode: its format, its slots an index and its segments [(name, start, count)]."""
+    """One mode: its format, its slots an index and its segments [(name, start, count)]. A p (or a bias) at which one of
+    its families is not defined is refused by name (ValueError), never built and never left to fail on a shift."""
 
     def __init__(self, mode, p, w, bias, k, segs):
+        for name, _count in segs:
+            pmin, bmin = FAMILY_DOMAIN.get(name, (2, 1))
+            if p < pmin or bias < bmin:
+                raise ValueError("hardcases: %s: family %s is not defined at p = %d, bias = %d (it needs p >= %d and "
+                                 "bias >= %d); refused" % (mode, name, p, bias, pmin, bmin))
         self.mode, self.p, self.w, self.bias, self.k = mode, p, w, bias, k
         self.P1, self.P = 1 << (p - 1), 1 << p
         self.emin = 1 - bias
@@ -98,10 +140,19 @@ def _div_space(mode, p, w, bias, nk):
     return Space(mode, p, w, bias, 4, segs)
 
 
+def _sqrt_space(mode, p, w, bias):
+    return Space(mode, p, w, bias, 1, [("S1", 4 << 16), ("S0", 4 << 20)])
+
+
 SPACES = {
     "div32-hard": _div_space("div32-hard", 24, 32, 127, 0),
     "div64-hard": _div_space("div64-hard", 53, 64, 1023, 1 << 26),
-    "sqrt64-hard": Space("sqrt64-hard", 53, 64, 1023, 1, [("S1", 4 << 16), ("S0", 4 << 20)]),
+    "sqrt64-hard": _sqrt_space("sqrt64-hard", 53, 64, 1023),
+    # the wide spaces (parcel HXa): the same families and the fp64 modes' segment sizes, at p = 113 and 237
+    "div128-hard": _div_space("div128-hard", 113, 128, 16383, 1 << 26),
+    "div256-hard": _div_space("div256-hard", 237, 256, 262143, 1 << 26),
+    "sqrt128-hard": _sqrt_space("sqrt128-hard", 113, 128, 16383),
+    "sqrt256-hard": _sqrt_space("sqrt256-hard", 237, 256, 262143),
 }
 
 
@@ -123,14 +174,15 @@ def _enc_int(sp, n, t):
 
 
 def _tie_pattern(length, v):
-    """An odd integer of exactly `length` bits: all ones, 10..01, 1010..1, and all ones but bit 1."""
+    """An odd integer of exactly `length` bits: all ones, 10..01, 1010..1, and all ones but bit 1. The alternation is
+    carried past 64 bits (even_bits); up to 64 it is 0x5555555555555555 masked, as it always was."""
     full = (1 << length) - 1
     if v == 0:
         return full
     if v == 1:
         return (1 << (length - 1)) | 1
     if v == 2:
-        return (0x5555555555555555 & full) | (1 << (length - 1)) | 1
+        return even_bits(length) | (1 << (length - 1)) | 1
     return (full & ~2) | (1 << (length - 1)) | 1
 
 
@@ -160,8 +212,8 @@ def build_f2(sp, j, v):
 def build_f1(sp, j, v):
     p, bias = sp.p, sp.bias
     h = (p - 1) // 2
-    ob = 2 * (mix64((2 * j) ^ SALT_F1) >> (64 - (h - 1))) + 1
-    oq = 2 * (mix64((2 * j + 1) ^ SALT_F1) >> (64 - (h - 1))) + 1
+    ob = 2 * draw_top((2 * j) ^ SALT_F1, h - 1) + 1       # one word up to p = 132, as many as p needs past it
+    oq = 2 * draw_top((2 * j + 1) ^ SALT_F1, h - 1) + 1
     e, tb3, sh = bias // 3, bias // 2, p - 2
     ta, tb = ((0, 0), (e, -e), (-e, e), (tb3 + sp.emin - sh, tb3))[v]
     return _enc_int(sp, ob * oq, ta), _enc_int(sp, ob, tb)
@@ -173,7 +225,7 @@ def f0_divisor(sp, stream, jj):
         return sp.P1 + 1 + 2 * jj
     if stream == "D":
         return sp.P - 1 - 2 * jj
-    low = mix64(jj ^ SALT_F0K) & ((1 << (p - 13)) - 1)  # K: the top 12 fraction bits take every value once in 4096
+    low = draw_low(jj ^ SALT_F0K, p - 13)               # K: the top 12 fraction bits take every value once in 4096
     return sp.P1 | (((jj * 2659) & 4095) << (p - 13)) | low | 1   # divisors (2659 is odd: a bijection of the cells)
 
 
@@ -471,6 +523,72 @@ def _verify_s0_skip(sp, j, v):
 
 
 # ------------------------------------------------------------------------------------------------------------
+# the plain wide spaces of divsqrt_soak.c's wide modes (parcel HXa): the fp32 slice widened, and the low-bit windows.
+# Not hard cases - every index is one case and none skips - but the tool dumps their operands as it dumps the hard
+# spaces', and this is the reference it is held to: the widening written from the values, the windows from their names.
+# ------------------------------------------------------------------------------------------------------------
+
+WIDE_FMT = {32: (24, 127), 64: (53, 1023), 128: (113, 16383), 256: (237, 262143)}     # width: (p, bias)
+WIN_H = ("ones", "zeros", "alt", "key")
+
+
+def plain_mode(mode):
+    """(division?, width, 'f32' or the window's H) of a slice or window mode word, else None."""
+    for op in ("sqrt", "recip"):
+        for width in (64, 128, 256):
+            stem = "%s%d-" % (op, width)
+            if not mode.startswith(stem):
+                continue
+            rest = mode[len(stem):]
+            if rest == "f32" or (width > 64 and rest[4:] in WIN_H and rest.startswith("win-")):
+                return op == "recip", width, rest if rest == "f32" else rest[4:]
+    return None
+
+
+def widen_bits(bits, nw, ww):
+    """The encoding at width ww of the value the width-nw encoding `bits` holds, exactly: the sign; a NaN's payload and
+    quiet bit at the top of the wider fraction (an sNaN stays an sNaN); an infinity; a zero; a subnormal normalised."""
+    (p, bias), (wp, wbias) = WIDE_FMT[nw], WIDE_FMT[ww]
+    man, wman = p - 1, wp - 1
+    sign = bits >> (nw - 1)
+    e, f = (bits >> man) & ((1 << (nw - p)) - 1), bits & ((1 << man) - 1)
+    out = sign << (ww - 1)
+    if e == (1 << (nw - p)) - 1:
+        return out | (((1 << (ww - wp)) - 1) << wman) | (f << (wman - man))
+    if e == 0 and f == 0:
+        return out
+    sig, t = (f, 1 - bias - man) if e == 0 else (f | (1 << man), e - bias - man)
+    msb = sig.bit_length() - 1
+    return out | ((t + msb + wbias) << wman) | ((sig << (wman - msb)) & ((1 << wman) - 1))
+
+
+def window_x(width, h, low):
+    """x = 1.H L in [1, 2) at the width: L the index's 32 bits, H all ones, all zeros, alternating from the top
+    (1.0101...) or keyed (the low bits of splitmix64's stream from SALT_WIN)."""
+    wp, wbias = WIDE_FMT[width]
+    hb = wp - 1 - 32
+    hv = {"ones": (1 << hb) - 1, "zeros": 0, "alt": even_bits(hb), "key": draw_low(SALT_WIN, hb)}[h]
+    return (wbias << (wp - 1)) | (hv << 32) | low
+
+
+def plain_lines(cmd, mode, lo=0, hi=0):
+    """`space`, `dump` or `count` of a slice or window mode, as the tool prints them."""
+    div, width, which = plain_mode(mode)
+    seg = "fp32" if which == "f32" else "L"
+    if cmd == "space":
+        return ["%s k=1 total=%d" % (mode, 1 << 32), "%s 0 %d" % (seg, 1 << 32)]
+    if cmd == "count":
+        return ["%s %d %d 0" % (seg, hi - lo, hi - lo), "total %d %d 0" % (hi - lo, hi - lo), "maxskip 0"]
+    one = widen_bits(0x3F800000, 32, width)
+    out = []
+    for idx in range(lo, hi):
+        x = widen_bits(idx, 32, width) if which == "f32" else window_x(width, which, idx)
+        a, b = (one, x) if div else (x, None)
+        out.append("%d 0 0x%0*x" % (idx, width // 4, a) + ("" if b is None else " 0x%0*x" % (width // 4, b)))
+    return out
+
+
+# ------------------------------------------------------------------------------------------------------------
 # the command line
 # ------------------------------------------------------------------------------------------------------------
 
@@ -544,6 +662,13 @@ def main(argv):
         sys.stdout.reconfigure(newline="\n")            # the dump is compared byte for byte with the C tool's
     except (AttributeError, ValueError):
         pass
+    if len(argv) >= 3 and argv[1] in ("space", "dump", "count") and plain_mode(argv[2]):
+        if argv[1] == "space":
+            print("\n".join(plain_lines("space", argv[2])))
+            return 0
+        if len(argv) == 5:
+            print("\n".join(plain_lines(argv[1], argv[2], int(argv[3], 0), int(argv[4], 0))))
+            return 0
     if len(argv) >= 3 and argv[1] == "space" and argv[2] in SPACES:
         print("\n".join(space_lines(argv[2])))
         return 0
