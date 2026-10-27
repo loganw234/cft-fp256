@@ -34,6 +34,11 @@ Three kinds of group, then the plants (the groups, by name, are in hw/test-card-
             Since parcel SR2 (2026-10-21) the records group also holds the host pool's slices, which are version-2 records: the sink's totals by
             subject kind equal to the raw legs' and to what `sweep_record.py verify` prints, a host slice of a run with no host/ tree refused by
             name, and the campaign ids of all 125 items unchanged; its plants for the format run hw/test_sweep_record.py from a plant's copy.
+  cadence   (parcel BC, 2026-10-27) a cycle's battery is planned for its image and visit: the driver as a process over the default battery's cadence (the
+            selftest every third visit of an image), stopped by the STOP file after five cycles - the visits it is not due on are LEFT OUT (named in
+            cycle_start's `left_out` and on the cycle line, no leg recorded), a leg that was due and did not run stays a skipped leg, status.txt counts legs
+            alone - and the report's cadence line read from those very records. The unit checks of the plan, the rule for acceptance-rev8 on the single and the
+            skips that stay skips are in `commands` and (--quick's) `commands`' quick checks; `normal` holds the single's cycle_start.
   Two suites of this file in one WSL distro at once collide: the card guard scans every process of the distro, and a stand-in with
             CFT_SOAK_ARTIFACT in its environment makes the other suite's drivers refuse to start (guard_refused, rc 2, no records).
 
@@ -735,6 +740,11 @@ def quick_checks(c, mod, tmp: str, imgs: dict) -> None:
     only = r8.argv[r8.argv.index("--only") + 1].split(",")
     c("quick: the quad's revision-8 leg is phi4_extended_fp64 and one routine entry (no compile), with --lib",
       only == ["phi4_extended_fp64", "lotkavolterra-rk4-tangent-fp64"] and "--lib" in r8.argv, str(only))
+    rd, ls = d0.leg_cmd("acceptance-rev8", dp, 1), d0.plan_battery(s, 1)
+    c("quick: the deep's revision-8 leg, whose one entry compiles for 40 minutes and is not cached, is a SKIPPED leg naming --quick (it is planned: a leg that "
+      "was due and could apply and did not run); the single's is left out of the battery, with its rule's text",
+      isinstance(rd, mod.Skip) and rd.reason.startswith("--quick:") and "acceptance-rev8" in d0.plan_battery(dp, 1)[0]
+      and "acceptance-rev8" not in ls[0] and "no entry for u50-rev8" in ls[1].get("acceptance-rev8", ""), str(getattr(rd, "reason", rd)))
     byname = {it.name: it for it in d0.items}
     c("quick: without --sweep-items the sweep is still its own: four items on the quad, sqrt32-rne then rint32-rne on a single; "
       "all TILE items now (the fourth was nextup32, a host item, which is the pool's)",
@@ -901,10 +911,19 @@ def group_commands(src: str = HERE) -> list:
         c("acceptance-rev8 on the quad: the routine entries make the leg name --lib, this tree's host/libcft.so (the "
           "XRT-linked one the build step checked)",
           "--lib" in r8 and r8[r8.index("--lib") + 1] == os.path.join(os.path.abspath(ROOT), "host", "libcft.so"), str(r8[-4:]))
-        c("acceptance-rev8: the single has no entry, and the leg says so by name",
-          isinstance(argv("acceptance-rev8", s), mod.Skip) and "u50-rev8" in argv("acceptance-rev8", s).reason)
-        c("acceptance-rev8: the deep's one entry is a 40-minute compile with no cache, so it is skipped by name",
-          isinstance(argv("acceptance-rev8", dp), mod.Skip) and "gray_scott_extended" in argv("acceptance-rev8", dp).reason)
+        left = d.left_out("acceptance-rev8", s, 1)
+        c("acceptance-rev8: the single has no entry (programs/acceptance.py, REV8), so the leg cannot apply to it and every visit's battery LEAVES IT OUT, "
+          "naming the target and the rule - it is not planned, so it is no skipped leg - and a leg_cmd asked for it anyway answers a Skip with that text",
+          bool(left) and "no entry for u50-rev8" in left and "(programs/acceptance.py, REV8)" in left
+          and all("acceptance-rev8" not in d.plan_battery(s, v)[0] and d.plan_battery(s, v)[1].get("acceptance-rev8") == left
+                  and d.left_out("acceptance-rev8", s, v) == left and argv("acceptance-rev8", s, v).reason == left for v in (1, 2, 3, 4)),
+          str(left))
+        c("acceptance-rev8: the quad's and the deep's first visit plan it and leave nothing out",
+          all("acceptance-rev8" in d.plan_battery(i, 1)[0] and d.plan_battery(i, 1)[1] == {} for i in (q, dp)))
+        c("acceptance-rev8: the deep's one entry is a 40-minute compile with no cache, so it is SKIPPED by name: planned on every visit, a skipped leg of its own, "
+          "not a leg left out",
+          isinstance(argv("acceptance-rev8", dp), mod.Skip) and "gray_scott_extended" in argv("acceptance-rev8", dp).reason
+          and all("acceptance-rev8" in d.plan_battery(dp, v)[0] for v in (1, 2, 3, 4)))
         t_uncached = d.leg_cmd("acceptance-rev8", q, 1).timeout
         os.makedirs(os.path.join(tmp, "imgs"), exist_ok=True)
         for e in mod.REV8_ENTRIES["u50-rev8-quad"] + mod.REV8_ENTRIES["u50-rev8-deep"]:
@@ -922,8 +941,31 @@ def group_commands(src: str = HERE) -> list:
         r8d = d.leg_cmd("acceptance-rev8", dp, 1)
         c("acceptance-rev8: with the cache the deep runs gray_scott_extended, and names no --lib (no routine entry)",
           not isinstance(r8d, mod.Skip) and "--lib" not in r8d.argv)
-        c("selftest: every third visit of an image (visit 1 runs, 2 and 3 skip, 4 runs)",
-          [isinstance(d.leg_cmd("selftest", q, v), mod.Skip) for v in (1, 2, 3, 4)] == [False, True, True, False])
+        plan = {v: d.plan_battery(q, v) for v in range(1, 8)}
+        c("selftest: every third visit of an image: it is in the battery of visits 1, 4 and 7 and LEFT OUT of 2, 3, 5 and 6, each time with the text "
+          "'every 3 visits of an image; this is visit N' - not planned, so no skip and no leg",
+          [("selftest" in plan[v][0]) for v in plan] == [True, False, False, True, False, False, True]
+          and all(plan[v][1] == {"selftest": f"every 3 visits of an image; this is visit {v}"} for v in (2, 3, 5, 6))
+          and all(plan[v][1] == {} for v in (1, 4, 7)), str({v: plan[v][1] for v in plan}))
+        c("selftest: a visit's battery is the run's battery in its order less what the visit leaves out, and the quad's visits leave out nothing but the selftest",
+          all(plan[v][0] == [x for x in mod.BATTERY if x not in plan[v][1]] for v in plan) and all(set(plan[v][1]) <= {"selftest"} for v in plan))
+        c("selftest: a leg_cmd asked for it on a visit that leaves it out answers a Skip with the same text (run_cycle never asks: its plan has left it out); "
+          "on a visit that plans it, a command",
+          [isinstance(d.leg_cmd("selftest", q, v), mod.Skip) for v in (1, 2, 3, 4)] == [False, True, True, False]
+          and d.leg_cmd("selftest", q, 2).reason == plan[2][1]["selftest"])
+        e2 = mod.Driver(mod.parse_args(["--out", os.path.join(tmp, "o2"), "--until", "2099-01-01 00:00", "--root", ROOT, "--rev8-images",
+                                        os.path.join(tmp, "imgs"), "--every", "acceptance=2,selftest=1"]))
+        c("--every LEG=N sets a leg's cadence: acceptance=2 plans it on visits 1 and 3 and leaves it out of 2, with N in the text; selftest=1 plans it on every visit",
+          [("acceptance" in e2.plan_battery(q, v)[0]) for v in (1, 2, 3)] == [True, False, True]
+          and e2.plan_battery(q, 2)[1] == {"acceptance": "every 2 visits of an image; this is visit 2"}
+          and all("selftest" in e2.plan_battery(q, v)[0] for v in (1, 2, 3)))
+        # the skips that are skips stay skips: a leg that was due and could apply and did not run is a leg of status skipped, on every visit
+        dd = mod.Driver(a)
+        dd.disabled_legs["selftest"] = "cft-selftest does not link XRT (ldd)"
+        c("a disabled leg is never left out: the selftest, disabled, stays in the battery of visit 2 too, and leg_cmd skips it by name with the build's reason on "
+          "every visit, as before",
+          all("selftest" in dd.plan_battery(q, v)[0] and "selftest" not in dd.plan_battery(q, v)[1] for v in (1, 2, 3))
+          and [dd.leg_cmd("selftest", q, v).reason for v in (1, 2, 3)] == ["cft-selftest does not link XRT (ldd)"] * 3)
         c("timeouts: every leg has one, from the card's measured times with a floor",
           all(mod.DEFAULT_TIMEOUTS[leg] >= 300 for leg in mod.BATTERY))
         ok8, why8 = rev8_table_matches(mod)
@@ -1201,14 +1243,23 @@ def scn_normal(env: Env, src: str = HERE) -> list:
     legs = R.legs()
     cpu = [r for r in legs if r["image"] == "cpu"]
     c("normal: exit 0, every leg passed (quick is a check)", R.rc == 0, f"rc {R.rc}: {R.text[-300:]}")
-    c("normal: 41 leg records: 39 passes (36 on the card's images, the 3 host slices on cpu) and the two named skips",
-      len(legs) == 41 and sum(r["status"] == "pass" for r in legs) == 39 and sum(r["status"] == "skipped" for r in legs) == 2
+    c("normal: 40 leg records: 39 passes (36 on the card's images, the 3 host slices on cpu) and the one named skip",
+      len(legs) == 40 and sum(r["status"] == "pass" for r in legs) == 39 and sum(r["status"] == "skipped" for r in legs) == 1
       and len(cpu) == 3, f"{len(legs)} legs, {sorted({r['status'] for r in legs})}")
     skipped = [(r["leg"], r["image"]) for r in legs if r["status"] == "skipped"]
-    c("normal: the skips are acceptance-rev8 on the single (no entry) and on the deep (a 40-minute compile uncached)",
-      sorted(skipped) == [("acceptance-rev8", "deep"), ("acceptance-rev8", "single")] and all(r["reason"] for r in legs if r["status"] == "skipped"))
+    c("normal: the one skip is acceptance-rev8 on the deep (a 40-minute compile uncached, and --quick), a leg of its own with its reason",
+      skipped == [("acceptance-rev8", "deep")] and all(r["reason"] for r in legs if r["status"] == "skipped"))
     cs = [r for r in R.recs if r.get("type") == "cycle_start"]
     c("normal: quick visits quad, single, deep once each, in that order", [r["image"] for r in cs] == ["quad", "single", "deep"])
+    c("normal: acceptance-rev8 cannot apply to the single, so its cycle_start leaves it out of the battery and names why, the quad's and the deep's cycle_start "
+      "leave nothing out and plan quick's whole battery, and no cycle_start has a cadence (quick's battery has no selftest)",
+      len(cs) == 3 and "acceptance-rev8" not in cs[1]["battery"] and list(cs[1].get("left_out", {})) == ["acceptance-rev8"]
+      and "no entry for u50-rev8" in cs[1].get("left_out", {}).get("acceptance-rev8", "") and cs[0].get("left_out") == {} == cs[2].get("left_out")
+      and "acceptance-rev8" in cs[0]["battery"] and cs[0]["battery"] == cs[2]["battery"]
+      and cs[1]["battery"] == [x for x in cs[0]["battery"] if x != "acceptance-rev8"] and all(r.get("every") == {} for r in cs), str(cs[1:2]))
+    c("normal: and no leg of acceptance-rev8 is recorded for the single, nor a skip for it; the driver's cycle line says what it left out",
+      not R.legs("acceptance-rev8", "single") and "left out: acceptance-rev8 (the revision-8 set has no entry for u50-rev8" in R.text
+      and len(re.findall(r"left out:", R.text)) == 1, R.text[-400:])
     c("normal: run_start is the first record and run_end the last", R.recs[0]["type"] == "run_start" and R.recs[-1]["type"] == "run_end"
       and R.recs[-1]["reason"] == "quick_done")
     b = R.last("build")
@@ -1271,13 +1322,77 @@ def scn_normal(env: Env, src: str = HERE) -> list:
     return out
 
 
+def scn_cadence(env: Env, src: str = HERE) -> list:
+    """Parcel BC (2026-10-27): a cycle's battery is planned for its image and visit. The selftest's cadence is the default's (every third visit of an
+    image): the visits it is not due on leave it out of the battery - cycle_start names it in `left_out` and the cycle line of driver.log says so - and
+    record no leg of it (before, a skipped leg each). A leg that was due and did not run - `resident`, due every visit, whose estimate is made to end past
+    the deadline - is still a skipped leg, and status.txt counts legs alone. Then the report states the cadence from these very records. The run is ended
+    by STOP after the fifth cycle, not by the clock, so that the visits counted do not depend on the machine's speed."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    r = start_driver(env, "cadence", ["--until", until(900), "--legs", "api-test,resident,selftest", "--weights", "quad=1,single=0,deep=0", "--no-sweep",
+                                      "--deadline-grace", "0", "--timeout", "selftest=30,resident=3000"], src=src, to_file=True)
+    try:
+        wait_for(lambda: sum(1 for x in r.recs if x.get("type") == "cycle_end") >= 5, 180)
+    finally:
+        with open(os.path.join(r.out, "STOP"), "w") as fh:
+            fh.write("stop")
+        r.finish(90)
+    cs = [x for x in r.recs if x.get("type") == "cycle_start"]
+    ended = {x["cycle"] for x in r.recs if x.get("type") == "cycle_end"}
+    due = lambda v: (v - 1) % 3 == 0
+    c("cadence: it ran at least five whole cycles and ended at the STOP file, exit 0", r.rc == 0 and len(ended) >= 5, f"rc {r.rc}, {len(ended)} cycles ended")
+    c("cadence: the quad's visits are 1, 2, 3 ... in order", [x["visit"] for x in cs] == list(range(1, len(cs) + 1)), str([x["visit"] for x in cs]))
+    c("cadence: each cycle_start plans the selftest on the visits 1, 4, 7 ... and on no other, and names it in left_out, with the cadence's text, on the others",
+      bool(cs) and all(("selftest" in x["battery"]) == due(x["visit"]) and (("selftest" in x.get("left_out", {})) == (not due(x["visit"])))
+                       and (due(x["visit"]) or x.get("left_out", {}).get("selftest") == f"every 3 visits of an image; this is visit {x['visit']}") for x in cs),
+      str([(x["visit"], x["battery"], x.get("left_out")) for x in cs[:3]]))
+    c("cadence: the rest of every battery is planned whole and in order, nothing else is left out, and the cadences in force are recorded: every = selftest 3",
+      bool(cs) and all([b for b in x["battery"] if b != "selftest"] == ["api-test", "resident"] and set(x.get("left_out", {})) <= {"selftest"}
+                       and x.get("every") == {"selftest": 3} for x in cs))
+    st = r.legs("selftest")
+    c("cadence: a selftest leg only in a cycle that planned it, a pass in the first, and no skipped leg anywhere carries the cadence's text",
+      bool(st) and {x["cycle"] for x in st} <= {x["cycle"] for x in cs if due(x["visit"])} and st[0]["status"] == "pass" and st[0]["cycle"] == cs[0]["cycle"]
+      and not any("every 3 visits" in (x["reason"] or "") for x in r.legs(status="skipped")), str([(x["cycle"], x["status"]) for x in st]))
+    done = [x for x in cs if x["cycle"] in ended]
+    c("cadence: every whole cycle that planned the selftest has its leg, and no whole cycle that left it out has one",
+      all(any(y["cycle"] == x["cycle"] for y in st) == due(x["visit"]) for x in done), str([(x["visit"], due(x["visit"])) for x in done]))
+    res = r.legs("resident")
+    c("cadence: resident, due every visit and made to end past the deadline, is a SKIPPED leg in every whole cycle, with the estimate's reason: a skip that is "
+      "one stays one",
+      bool(res) and {x["cycle"] for x in res} >= ended and all(x["status"] == "skipped" and x["reason"].startswith("its estimate") for x in res),
+      str([(x["cycle"], x["status"], x["reason"]) for x in res[:2]]))
+    stx = open(os.path.join(r.out, "status.txt"), encoding="utf-8").read()
+    m = re.search(r"^legs\s+(\d+): (.*)$", stx, re.M)
+    n_skipped = sum(1 for x in r.legs() if x["status"] == "skipped")
+    c("cadence: status.txt counts the legs alone - its total and its skipped are the records' (the visits the selftest was not due on are in neither)",
+      bool(m) and int(m.group(1)) == len(r.legs()) and f"skipped {n_skipped}" in m.group(2), m.group(0) if m else stx[:300])
+    first = next((ln for ln in r.text.splitlines() if re.search(r"\bcycle 1: quad \(visit 1\)", ln)), "")
+    second = next((ln for ln in r.text.splitlines() if re.search(r"\bcycle 2: quad \(visit 2\)", ln)), "")
+    c("cadence: the cycle line of driver.log names the leg a visit left out, with its reason, and says nothing of it when nothing was left out",
+      bool(first) and "left out" not in first and "left out: selftest (every 3 visits of an image; this is visit 2), sweep" in second, f"{first!r} / {second!r}")
+    rp = os.path.join(src, "card_stress_report.py")         # src is HERE, or a plant's copy of the code
+    if os.path.exists(rp):
+        p = subprocess.run([sys.executable, "-B", "-I", rp, r.out, "--no-write"], capture_output=True, text=True, timeout=120)
+        m = re.search(r"^selftest: every 3rd visit of an image - ran in (\d+) cycles?, (?:due and not run in (\d+) cycles? \(skipped, or the run ended first\), )?"
+                      r"not due in (\d+)$", p.stdout, re.M)
+        ran, not_due = len({x["cycle"] for x in st if x["status"] != "skipped"}), sum(1 for x in cs if not due(x["visit"]))
+        c("cadence: the report states the cadence and the counts of these records: ran in as many cycles as have a selftest leg that ran, not due in as many as "
+          "left it out", p.returncode == 0 and bool(m) and (int(m.group(1)), int(m.group(3))) == (ran, not_due),
+          f"rc {p.returncode}; records say ran {ran}, not due {not_due}; report line {m.group(0) if m else None}")
+    return out
+
+
 def scn_fail_and_parse(env: Env, src: str = HERE) -> list:
     out: list = []
 
     def c(n, ok, d=""):
         out.append((n, bool(ok), d))
 
-    sc = [{"leg": "dt-full", "nth": [1], "do": "fail"}, {"leg": "api-test", "nth": [2], "do": "garbage"},
+    sc = [{"leg": "dt-full", "nth": [1], "do": "fail"},{"leg": "api-test", "nth": [2], "do": "garbage"},
           {"leg": "dt-i", "image": "deep", "nth": [1], "do": "wrongsha"}]
     R = run_driver(env, "fail", ["--quick", "--legs", "api-test,dt-i,dt-full", "--no-sweep"], sc, src=src)
     f = R.legs("dt-full", "quad")[0]
@@ -7388,6 +7503,62 @@ def plants(env: Env) -> None:
         ("HXc: the report counts a wide item over 2^32 (its catalog without the wide items)",
          [("card_stress_report.py", "_CATALOG = {it.name: it for it in sweep_items(mpfr=True)}", "_CATALOG = {it.name: it for it in sweep_items()}")],
          lambda env, src: scn_wide_items(env, src), ["wide items: the report counts each over its own space"]),
+        # -- parcel BC (2026-10-27): a cycle's battery is planned for its image and visit; what it leaves out is no skipped leg (CARD_STRESS_PLANT='BC: ' runs just these)
+        ("BC: a cycle plans its whole battery, so an off-cadence selftest is a skipped leg again",
+         [("card_stress.py", "battery, left_out = self.plan_battery(img, visit)", "battery, left_out = list(self.battery), {}")],
+         lambda env, src: scn_cadence(env, src), ["cadence: each cycle_start plans the selftest", "cadence: a selftest leg only in a cycle that planned it"]),
+        ("BC: the plan applies no rule, so acceptance-rev8 is planned for the single",
+         [("card_stress.py", 'if leg == "acceptance-rev8" and not REV8_ENTRIES.get(img.target):', "if False:")],
+         lambda env, src: group_commands(src), ["acceptance-rev8: the single has no entry", "quick: the deep's revision-8 leg"]),
+        ("BC: a disabled leg is left out of the battery, so it is no skipped leg on the visits its cadence skips",
+         [("card_stress.py", "        if leg in self.disabled_legs:\n            return None\n", "")],
+         lambda env, src: group_commands(src), ["a disabled leg is never left out"]),
+        ("BC: the deadline's estimate no longer skips a leg",
+         [("card_stress.py", "if self.deadline is not None and time.time() + self.estimate(leg) > self.deadline + self.a.deadline_grace:", "if False:")],
+         lambda env, src: scn_cadence(env, src), ["cadence: resident, due every visit and made to end past the deadline"]),
+        ("BC: --quick's uncached long compile no longer skips the deep's revision-8 leg",
+         [("card_stress.py", "                if q is None or q not in chosen:\n", "                if False:\n")],
+         lambda env, src: group_commands(src), ["quick: the deep's revision-8 leg"]),
+        ("BC: an all-uncached long-compile leg no longer skips",
+         [("card_stress.py", "            if not chosen:\n                return Skip(", "            if False:\n                return Skip(")],
+         lambda env, src: group_commands(src), ["acceptance-rev8: the deep's one entry is a 40-minute compile"]),
+        ("BC: the cycle line says nothing of the legs left out",
+         [("card_stress.py", '        out_txt = (", left out: " + "; ".join(f"{k} ({v})" for k, v in left_out.items())) if left_out else ""\n',
+           '        out_txt = ""\n')],
+         lambda env, src: scn_cadence(env, src), ["cadence: the cycle line of driver.log names the leg a visit left out"]),
+        ("BC: cycle_start records no left_out",
+         [("card_stress.py", '"battery": battery, "left_out": left_out, "every": every,', '"battery": battery, "every": every,')],
+         lambda env, src: scn_cadence(env, src), ["cadence: each cycle_start plans the selftest"]),
+        ("BC: the cadence's text is reworded",
+         [("card_stress_lib.py", 'return f"every {every} visits of an image; this is visit {visit}"', 'return f"every {every} visits; visit {visit}"')],
+         lambda env, src: group_commands(src), ["selftest: every third visit of an image"]),
+        ("BC: the report counts a leg as run in every cycle that planned it",
+         [("card_stress_report.py", "                if (leg, cyc) in ran:\n", "                if True:\n")],
+         plant_report, ["the selftest: every 3rd visit, due in 6 cycles, ran in 5", "mixed: the cadence is counted"]),
+        ("BC: the report counts a skipped leg as one that ran",
+         [("card_stress_report.py", 'v["status"] not in (None, "skipped", "error")', 'v["status"] is not None')],
+         plant_report, ["the selftest: every 3rd visit, due in 6 cycles, ran in 5"]),
+        ("BC: the report says nothing of a leg left out by cadence",
+         [("card_stress_report.py", '"cadence": [g for _k, g in sorted(cad.items()) if g["not_due"]],', '"cadence": [],')],
+         plant_report, ["the selftest: every 3rd visit, due in 6 cycles, ran in 5", "the cadence line states the cadence and the counts"]),
+        ("BC: the report takes any left-out entry for a cadence's",
+         [("card_stress_report.py", "            elif visit is not None and out.get(leg) == cadence_reason(n, visit):", "            elif leg in out:")],
+         plant_report, ["a left-out entry with another text than the cadence's"]),
+        ("BC: the report does not count the cycles from before the field",
+         [("card_stress_report.py", "        if not isinstance(out, dict):\n            old += 1\n            continue\n",
+           "        if not isinstance(out, dict):\n            continue\n")],
+         plant_report, ["mixed: 3 cycles say what they left out and 2 earlier ones do not", "a run none of whose cycle_start records says what it left out"]),
+        ("BC: the report drops the skipped legs a run recorded before the field",
+         [("card_stress_report.py", '        if st == "skipped":\n            g = groups.setdefault(',
+           '        if st == "skipped" and (reason or "").startswith("every"):\n            continue\n        if st == "skipped":\n            g = groups.setdefault(')],
+         plant_report, ["mixed: the old skipped leg is still grouped and counted"]),
+        ("BC: the report gives a run from before the field a section of its own",
+         [("card_stress_report.py", '    if not X["cycles"]:\n        return []\n', '    if False:\n        return []\n')],
+         plant_report, ["and it has no such section", "the eight sections, in the spec's order"]),
+        ("BC: the report cannot tell what a cycle left out from what it skipped",
+         [("card_stress_report.py", '"cannot_apply": [{"leg": k[0], "image": k[1], "reason": k[2], "cycles": n} for k, n in sorted(cannot.items())],',
+           '"cannot_apply": [],')],
+         plant_report, ["acceptance-rev8 cannot apply to the single: 3 cycles", "the line for a leg that cannot apply names the image and the reason"]),
     ]
     for name, edits, fn, expects in P:
         if pick and pick not in name:
@@ -7565,7 +7736,7 @@ def run_group(name: str, results: list) -> None:
 
 # the groups of main()'s table (the scenarios), which --skip-groups may name; the groups that run in-process first (parsers, commands, standin), the
 # report and the plants are not skippable
-SKIPPABLE_GROUPS = ("normal", "fail", "timeout", "deaf", "nodevice", "cardlost", "stopfile", "deadline", "rotation", "diskfloor", "guard", "sweep",
+SKIPPABLE_GROUPS = ("normal", "cadence", "fail", "timeout", "deaf", "nodevice", "cardlost", "stopfile", "deadline", "rotation", "diskfloor", "guard", "sweep",
                     "disagree", "telemetry", "build", "buildreal", "internal", "signal", "torn", "disable", "sweepall", "pool", "seeds", "trees",
                     "items", "chunk", "records", "notes", "resume", "wide")
 
@@ -7627,7 +7798,7 @@ def main() -> int:
             run_group("commands", group_commands() + skip_groups_checks())
         if want("standin"):
             run_group("standin", standin_alive_checks())
-        for gname, fn, posix_only in (("normal", scn_normal, False), ("fail", scn_fail_and_parse, False),
+        for gname, fn, posix_only in (("normal", scn_normal, False), ("cadence", scn_cadence, False), ("fail", scn_fail_and_parse, False),
                                       ("timeout", scn_timeout, False), ("deaf", scn_deaf, True),
                                       ("nodevice", scn_nodevice, False), ("cardlost", scn_cardlost, False),
                                       ("stopfile", scn_stopfile, False), ("deadline", scn_deadline, False),

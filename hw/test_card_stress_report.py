@@ -274,11 +274,16 @@ class Fx:
             end = max(end, s + dur)
         return end
 
-    def begin_cycle(self, t, image, visit, pause):
+    def begin_cycle(self, t, image, visit, pause, battery=None, left_out=None, every=None):
+        """A cycle_start. Given `left_out` it is the record the driver writes since parcel BC (the battery planned, the legs left out and
+        why, the cadences in force); without it, the record as it was."""
         self.cycle += 1
         start0 = t + pause
-        self.add("cycle_start", start0 - 1, cycle=self.cycle, image=image, image_sha256=SHA[image],
-                 visit=visit, battery=["api-test", "dt-i", "dt-q8"], sweep_minutes=1.0, quick=False)
+        kw = dict(cycle=self.cycle, image=image, image_sha256=SHA[image], visit=visit, battery=battery or ["api-test", "dt-i", "dt-q8"],
+                  sweep_minutes=1.0, quick=False)
+        if left_out is not None:
+            kw.update(left_out=left_out, every=every or {})
+        self.add("cycle_start", start0 - 1, **kw)
         self.cur = (self.cycle, image, start0 - 1)
         return start0 - 2                    # the first leg starts two seconds after this
 
@@ -1885,6 +1890,136 @@ def group_reach():
        "only the one item whose record contradicted the table moves when the records' `reach` is removed")
 
 
+# ---------------------------------------------------------------------------
+# parcel BC (2026-10-27): the legs a cycle leaves out of its battery are not skipped legs
+# ---------------------------------------------------------------------------
+RULE_TEXT = SKIP_A + " (programs/acceptance.py, REV8)"       # what the driver says of acceptance-rev8 on the single
+SKIP_E = "its estimate (1200 s) would end past the deadline by more than the 900 s grace"
+
+
+def cad_text(visit):
+    return f"every 3 visits of an image; this is visit {visit}"       # the driver's text for the selftest's cadence, written out here
+
+
+def lo_cycle(fx, t, image, visit, estimate_skip=False):
+    """One cycle as the driver writes it since parcel BC. The plan is written out here by arithmetic on the visit, not by the driver's code: the
+    selftest is in the battery on visits 1, 4, 7 ... of an image and left out, with its reason, on the others; acceptance-rev8 is left out on
+    the single and, on the deep, is planned and skipped (an uncached compile)."""
+    due = (visit - 1) % 3 == 0
+    battery = ["api-test", "dt-i"] + (["acceptance-rev8"] if image != "single" else []) + (["selftest"] if due else [])
+    left = {} if due else {"selftest": cad_text(visit)}
+    if image == "single":
+        left["acceptance-rev8"] = RULE_TEXT
+    t = fx.begin_cycle(t, image, visit, 3, battery=battery, left_out=left, every={"selftest": 3})
+    specs = [dict(name="api-test", dur=10, counts={"failed": 0}), dict(name="dt-i", dur=20, counts={"checks": 66, "failed": 0})]
+    if image == "quad":
+        specs.append(dict(name="acceptance-rev8", dur=300, counts={"entries": 14, "failed": 0}))
+    if image == "deep":
+        specs.append(dict(name="acceptance-rev8", status="skipped", reason=SKIP_B))
+    if due:
+        specs.append(dict(name="selftest", status="skipped", reason=SKIP_E) if estimate_skip else dict(name="selftest", dur=770, counts={"cases": 1000}))
+    t = fx.battery(t, image, specs)
+    fx.end_cycle(t)
+    return t
+
+
+def build_left_out_run():
+    """ORDER's 15 cycles (the quad 8 times, the single 3, the deep 4), the quad's seventh visit with its selftest skipped by the deadline's estimate."""
+    fx = Fx()
+    run_start_rec(fx, T0)
+    t, visits = T0 + 97, Counter()
+    for image in ORDER:
+        visits[image] += 1
+        t = lo_cycle(fx, t, image, visits[image], estimate_skip=(image == "quad" and visits[image] == 7))
+    fx.add("run_end", t + 10, reason="deadline", exit=0, cycles=len(ORDER))
+    return fx.records()
+
+
+def build_mixed_run():
+    """A run resumed across the change: two quad cycles as the driver wrote them before (the whole battery planned, the selftest's off-visit a skipped
+    leg of its own), then three as it writes them now."""
+    fx = Fx()
+    run_start_rec(fx, T0)
+    t = T0 + 97
+    t = fx.begin_cycle(t, "quad", 1, 3, battery=["api-test", "selftest"])
+    t = fx.battery(t, "quad", [dict(name="api-test", dur=10, counts={"failed": 0}), dict(name="selftest", dur=770, counts={"cases": 1000})])
+    fx.end_cycle(t)
+    t = fx.begin_cycle(t, "quad", 2, 3, battery=["api-test", "selftest"])
+    t = fx.battery(t, "quad", [dict(name="api-test", dur=10, counts={"failed": 0}), dict(name="selftest", status="skipped", reason=SKIP_C)])
+    fx.end_cycle(t)
+    run_start_rec(fx, t + 60, resumed=True)
+    t += 120
+    for image, visit in (("quad", 3), ("quad", 4), ("single", 1)):
+        t = lo_cycle(fx, t, image, visit)
+    fx.add("run_end", t + 10, reason="deadline", exit=0, cycles=5)
+    return fx.records()
+
+
+def group_left_out(base):
+    group("left-out")
+    # the contract between the driver's text and the fixture's, and the old run: no field, no section, the skipped legs as they were
+    eq([cad_text(v) for v in range(1, 12)], [LIB.cadence_reason(3, v) for v in range(1, 12)], "the fixture's cadence text is card_stress_lib.cadence_reason's")
+    eq((base.S["left_out"]["cycles"], base.S["left_out"]["earlier_cycles"]), (0, 15), "a run none of whose cycle_start records says what it left out: 15 earlier cycles")
+    check("LEGS LEFT OUT" not in base.T, "and it has no such section: its report is the report it always was")
+    eq(base.FS["skip.count"], 9, "and its skipped legs, which include the cadence's and the rule's, are grouped as always")
+    # the run the driver now writes. Hand-counted: the selftest is due on the quad's visits 1, 4, 7, the single's 1 and the deep's 1, 4 (6 cycles) and not
+    # due in the other 9 of the 15; the quad's visit 7 was estimate-skipped, so it ran in 5. acceptance-rev8 is left out of the single's 3 cycles
+    recs = build_left_out_run()
+    S = R.summarize(recs, now=T0 + 10 ** 6)
+    T = R.render(S)
+    X = S["left_out"]
+    eq((X["cycles"], X["earlier_cycles"]), (15, 0), "all 15 cycles say what they left out")
+    eq([(g["leg"], g["every"], g["due"], g["ran"], g["not_due"]) for g in X["cadence"]], [("selftest", 3, 6, 5, 9)],
+       "the selftest: every 3rd visit, due in 6 cycles, ran in 5, not due in 9")
+    eq({k: (v["due"], v["ran"], v["not_due"]) for k, v in X["cadence"][0]["by_image"].items()},
+       {"quad": (3, 2, 5), "single": (1, 1, 2), "deep": (2, 2, 2)}, "and per image (due, ran, not due)")
+    eq(X["cannot_apply"], [{"leg": "acceptance-rev8", "image": "single", "reason": RULE_TEXT, "cycles": 3}], "acceptance-rev8 cannot apply to the single: 3 cycles")
+    lines = T.split("\n")
+    check("selftest: every 3rd visit of an image - ran in 5 cycles, due and not run in 1 cycle (skipped, or the run ended first), not due in 9" in lines,
+          "the cadence line states the cadence and the counts", [ln for ln in lines if ln.startswith("selftest")])
+    check(f"acceptance-rev8: cannot apply to single - left out of 3 cycles: {RULE_TEXT}" in lines, "the line for a leg that cannot apply names the image and the reason")
+    check("== LEGS LEFT OUT ==" in lines and "cycles read: 15 that say what they left out" in lines, "the section is there, and says how many cycles it read")
+    # nothing left out is a leg: 15 x (api-test, dt-i) + 8 quad and 4 deep acceptance-rev8 + 6 selftest = 48 legs, 5 of them skipped (the deep's 4 and the estimate's)
+    eq((S["totals"]["legs"]["total"], S["totals"]["legs"]["by_status"]["pass"], S["totals"]["legs"]["by_status"]["skipped"]), (48, 43, 5),
+       "the legs recorded are 48, 5 of them skipped - only the skips that are skips")
+    eq([(g["leg"], g["reason"], g["count"], g["images"]) for g in S["failures"]["skipped"]["groups"]],
+       [("acceptance-rev8", SKIP_B, 4, ["deep"]), ("selftest", SKIP_E, 1, ["quad"])], "the skipped legs are the genuine ones, grouped by leg and reason")
+    check(not any(r["image"] == "single" and r["leg"] == "acceptance-rev8" for r in S["rows"]), "no row for acceptance-rev8 on the single: it has no leg")
+    eq({r["image"]: r["runs"] for r in S["rows"] if r["leg"] == "selftest"}, {"quad": 3, "single": 1, "deep": 2}, "the selftest's rows count the visits it was due in")
+    check(f"{S['totals']['legs']['total']} recorded; pass 43" in T and "skipped legs: 5 in 2 group(s)" in T, "the text says the same")
+    json.dumps(S, allow_nan=False)
+    # a text that is not the cadence's text for the cycle's visit is not a leg that was not due
+    odd = mutate(recs, lambda rr: find_all(rr, type="cycle_start", cycle=2)[0]["left_out"].update(selftest=cad_text(99)))
+    Xo = R.summarize(odd, now=T0 + 10 ** 6)["left_out"]
+    eq(Xo["cadence"][0]["not_due"], 8, "a left-out entry with another text than the cadence's for its visit is not counted as not due")
+    eq([(c["leg"], c["image"], c["reason"]) for c in Xo["cannot_apply"]],
+       [("acceptance-rev8", "single", RULE_TEXT), ("selftest", "quad", cad_text(99))], "... and is listed with its own reason")
+    # nothing left out
+    fx = Fx()
+    run_start_rec(fx, T0)
+    t = fx.begin_cycle(T0 + 5, "quad", 1, 3, battery=["api-test"], left_out={}, every={})
+    fx.end_cycle(fx.battery(t, "quad", [dict(name="api-test", dur=10, counts={"failed": 0})]))
+    Tn = R.render(R.summarize(fx.records(), now=T0 + 10 ** 6))
+    check("no leg was left out of any of them" in Tn.split("\n"), "a run whose cycles left nothing out says so")
+    # a resumed run across the change: the earlier cycles are said, their skipped legs are grouped as before, the new ones counted
+    M = R.summarize(build_mixed_run(), now=T0 + 10 ** 6)
+    Xm = M["left_out"]
+    eq((Xm["cycles"], Xm["earlier_cycles"]), (3, 2), "mixed: 3 cycles say what they left out and 2 earlier ones do not")
+    eq([(g["due"], g["ran"], g["not_due"]) for g in Xm["cadence"]], [(2, 2, 1)], "mixed: the cadence is counted over the 3 (due in the quad's 4th and the single's 1st, not in the quad's 3rd)")
+    eq([(g["leg"], g["reason"], g["count"], g["images"]) for g in M["failures"]["skipped"]["groups"]], [("selftest", SKIP_C, 1, ["quad"])],
+       "mixed: the old skipped leg is still grouped and counted, and nothing else is skipped")
+    check("2 earlier cycles did not say, and their skipped legs are listed as they always were" in R.render(M), "mixed: and the text says so")
+    # odd records never crash the report
+    wild = mutate(recs, lambda rr: find_all(rr, type="cycle_start", cycle=3)[0].update(every="x", battery=None, left_out={"selftest": 5, 7: None}))
+    try:
+        Sw = R.summarize(wild, now=T0 + 10 ** 6)
+        R.render(Sw)
+        json.dumps(Sw, allow_nan=False)
+        check(True, "a cycle_start whose every, battery and left_out are junk does not crash the report")
+    except Exception as e:
+        check(False, "a cycle_start whose every, battery and left_out are junk does not crash the report", repr(e))
+
+
 def group_weird(base):
     group("weird")
     fx = Fx()
@@ -2575,6 +2710,7 @@ def main():
         group_telemetry_edges()
         group_json(base)
         group_reach()
+        group_left_out(base)
         group_controls(base, marks)
         group_sabotage(base)
         group_files(base, marks, tmp)
