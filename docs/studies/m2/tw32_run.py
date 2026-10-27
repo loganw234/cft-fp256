@@ -7,9 +7,9 @@
 #   python tw32_run.py live                     values live, design and scheduled
 #   python tw32_run.py live-search [N]          the phase map, searched
 #   python tw32_run.py reduce [PLANT]           the reduction against exact rationals
-#   python tw32_run.py pools model|seq|census   the pools on the model, on seq.py; census.py's families
+#   python tw32_run.py pools model|seq|census|audit   the pools on the model, on seq.py; census.py's families; the whole routine's audit
 #   python tw32_run.py budget FN MODE [N] [seed] [PLANT]   tw32_budget.py, one region
-#   python tw32_run.py rate [PLANT]             the mark-rate law with the bound inflated
+#   python tw32_run.py rate [N [seed [PLANT|- [FNS]]]]   the mark-rate law, bound inflated
 #   python tw32_run.py plant NAME               a plant, red in its named mode, beside the control
 
 import sys
@@ -115,13 +115,16 @@ def mode_costs():
         unions[fn] = words_fn
     say(f"fp32 bank words, union over the five attributes: sin {len(unions['sin'])}, "
         f"cos {len(unions['cos'])}, tan {len(unions['tan'])}; all three {len(union_all)}")
-    # the polynomials' domain: rho = pi/4 (1 + e) for the study's 2^-30, this build's 2^-16 and
-    # the largest overshoot the reduce mode measured (2^-21.61), and what the plan makes of each
+    # the polynomials' domain: rho = pi/4 (1 + e): the study's 2^-30, this build's COMPUTED
+    # bound (reduce_tw: 2^(1-p) + 4 |lower terms|), M2G1's bound for the double word's reduction
+    # at fp32 (2^-11.66, the lead's message), and 2^-10; and what the plan makes of each
     base = pi_frac() / 4
+    over = tw32.build(FMT, RNE, "sin").meta["overshoot"]
     plans = {}
     for lab, e in (("2^-30 (the study's)", Fraction(1, 2 ** 30)),
-                   ("2^-21.61 (measured, reduce mode)", Fraction(3117, 10 ** 10)),
-                   ("2^-16 (this build's rho)", tw32.CUSHION), ("2^-10", Fraction(1, 2 ** 10))):
+                   (f"{float(over):.3e} = 2^{math.log2(over):.2f} (this build's, COMPUTED)", over),
+                   ("2^-11.66 (M2G1's, the double word's)", Fraction(309, 10 ** 6)),
+                   ("2^-10", Fraction(1, 2 ** 10))):
         plans[lab] = tw32.plan_tw_poly(FMT, G, tw32._upper(base * (1 + e)))
     say("the polynomials' plan (K3, K2, D) for S and C at rho = pi/4 (1 + e): "
         + "; ".join(f"e = {lab}: {pl}" for lab, pl in plans.items())
@@ -229,7 +232,7 @@ def build_red(P, plant=None):
     return f
 
 
-def mode_reduce(plant=None, n=1000, seed=7):
+def mode_reduce(plant=None, n=1000, seed=7, full=True):
     P = tw32.tw_plan(FMT)
     f = build_red(P, plant)
     say(f"fp32 triple word, the reduction alone{' PLANT ' + plant if plant else ''}: "
@@ -240,17 +243,28 @@ def mode_reduce(plant=None, n=1000, seed=7):
         f"{len(f.meta['proofs'])} static proofs held at build time")
     mpmath.mp.prec = 4 * P_BITS + 200
     B = Fraction(1, 2 ** (P_BITS + G))
-    rho = pi_frac() / 4 * (1 + tw32.CUSHION)
+    over = f.meta["overshoot"]
+    rho = pi_frac() / 4 * (1 + over)
+    say(f"  the overshoot bound, COMPUTED from the pieces' static magnitudes (tw32.reduce_tw): "
+        f"|r| <= pi/4 (1 + {float(over):.4e}), 2^{math.log2(over):.2f}; the polynomials' rho")
     magic = enc_exact(FMT, Fraction(3, 2) * 2 ** (P_BITS - 1))
     totals = {"quadrant off": 0, "audit failures": 0, "arguments": 0, "overshoot": 0.0}
-    for label, xs in (("random, bucket edges, powers of two, the pools "
-                       "(redcheck.args)", redcheck.args(FMT, P, n, seed)),
-                      ("the products' binade edges (m2edges.edges)", edges(FMT, P)),
-                      ("x within 3 ulps of (k + 1/2) pi/2, where |r| is next to pi/4 "
-                       "and the cushion acts (m2measure.sample edge, seed 31, 2,000)",
-                       [x for x in sample(FMT, "edge", 2000, 31) if in_main(FMT, "sin", x)]),
-                      ("the quadrant boundaries, every k from 0 (0x3f490fdb) and 128 random k, "
-                       "within 3 ulps, both signs (tw32.quad_family)", tw32.quad_family(FMT))):
+    fams = [("random, bucket edges, powers of two, the pools (redcheck.args)",
+             redcheck.args(FMT, P, n, seed)),
+            ("the products' binade edges (m2edges.edges)", edges(FMT, P))]
+    if full:
+        fams += [("x within 3 ulps of (k + 1/2) pi/2, where |r| is next to pi/4 "
+                  "(m2measure.sample edge, seed 31, 2,000)",
+                  [x for x in sample(FMT, "edge", 2000, 31) if in_main(FMT, "sin", x)]),
+                 ("the quadrant boundaries, every k from 0 (0x3f490fdb) and 128 random k, "
+                  "within 3 ulps, positive (tw32.quad_family)",
+                  [x for x in tw32.quad_family(FMT) if not x & FMT.sign_mask]),
+                 ("the floats next to the odd multiples of pi/4 in EVERY binade: all of them "
+                  "below 2^7, and from there those within 2^-18 of a half-integer in x 2/pi "
+                  "(<= 96 a binade), positive, 0x44264edd among them (tw32.half_family)",
+                  [x for x in tw32.half_family(FMT) if not x & FMT.sign_mask])]
+    top = []
+    for label, xs in fams:
         t0 = time.perf_counter()
         worst, wx, bad_q, bad_audit, cnt, maxex = -1e9, None, 0, 0, 0, -1.0
         firsts = []
@@ -264,7 +278,9 @@ def mode_reduce(plant=None, n=1000, seed=7):
                 if bad_q <= 5:
                     firsts.append(f"QUADRANT off: {hex(xa)} n {nq} |r| {float(abs(rt)):.9f}")
                 continue
-            maxex = max(maxex, float(abs(rt) / (pi_frac() / 4) - 1))
+            exc = float(abs(rt) / (pi_frac() / 4) - 1)
+            maxex = max(maxex, exc)
+            top.append((exc, xa, nq))
             err = abs(rm - rt) / abs(rt) / B
             lg = float(mpmath.log(mpmath.mpf(err.numerator) / err.denominator, 2)) if err else -999
             if lg > worst:
@@ -279,7 +295,7 @@ def mode_reduce(plant=None, n=1000, seed=7):
             say("  " + line)
         say(f"  {label}: {cnt} arguments (of {len(xs)}): r's largest relative error "
             f"2^{worst:.2f} of 2^-(p+G) = 2^-{P_BITS + G} at {hex(wx) if wx else None}; "
-            f"quadrant off (|r| past pi/4 (1 + 2^-16) in the model's own quadrant) {bad_q}; "
+            f"quadrant off (|r| past pi/4 (1 + over) in the model's own quadrant) {bad_q}; "
             f"audit failures {bad_audit}; largest |r|/(pi/4) - 1 seen {maxex:.3e}; "
             f"{time.perf_counter() - t0:.0f}s")
         totals["quadrant off"] += bad_q
@@ -287,21 +303,26 @@ def mode_reduce(plant=None, n=1000, seed=7):
         totals["audit failures"] += bad_audit
         totals["arguments"] += cnt
     # the float just above pi/4 and its neighbours (M2G1's finding at G = 18: the double
-    # word's reduction takes n = 0 at 0x3f490fdb, |r| past pi/4 by 2^-25.10)
+    # word's reduction takes n = 0 at 0x3f490fdb, |r| past pi/4 by 2^-25.10), and the lead's
+    # second finding, 0x44264edd (x 2/pi = 423.4999964; the double word takes n = 424, 2^-17.09 over)
     row = []
-    for j in range(-3, 4):
-        xa = 0x3f490fdb + j
+    for xa in [0x3f490fdb + j for j in range(-3, 4)] + [0x44264edd + j for j in range(-2, 3)]:
         _r, _q, pr = evaluate(f, xa, want=["r0", "r1", "r2", "q"])
         nq = (pr["q"] - magic) % 4
-        rm = dec(FMT, pr["r0"]) + dec(FMT, pr["r1"]) + dec(FMT, pr["r2"])
-        ex = float(abs(rm) / (pi_frac() / 4) - 1)
-        row.append(f"{hex(xa)}: n {nq}, |r|/(pi/4) - 1 = {ex:+.3e} (2^{math.log2(abs(ex)) if ex else -999:.2f})")
-    say("  the float just above pi/4 and its neighbours (positive; n and the overshoot of the "
-        "model's own r): " + "; ".join(row))
+        rt = redcheck.exact_ref(FMT, xa, nq)
+        ex = float(abs(rt) / (pi_frac() / 4) - 1)
+        row.append(f"{hex(xa)}: n {nq}, |r|/(pi/4) - 1 = {ex:+.3e}"
+                   + (f" (2^{math.log2(ex):.2f})" if ex > 0 else ""))
+    say("  the float just above pi/4 and 0x44264edd, with neighbours (positive; n, and the exact "
+        "overshoot of the reduced value in the model's own quadrant): " + "; ".join(row))
+    top.sort(reverse=True)
+    say("  the five largest overshoots over every family: " + "; ".join(
+        f"{hex(xa)} n {nq} {ex:+.3e} (2^{math.log2(ex):.2f})" for ex, xa, nq in top[:5] if ex > 0))
     say(f"TOTAL {totals['arguments']} arguments: quadrant off {totals['quadrant off']}, "
-        f"audit failures {totals['audit failures']}; largest overshoot over every family "
-        f"{totals['overshoot']:.3e} (2^{math.log2(totals['overshoot']) if totals['overshoot'] > 0 else -999:.2f}); "
-        f"rho used 2^-16 = {float(tw32.CUSHION):.3e}")
+        f"audit failures {totals['audit failures']}; largest overshoot MEASURED "
+        f"{totals['overshoot']:.3e} (2^{math.log2(totals['overshoot']) if totals['overshoot'] > 0 else -999:.2f}) "
+        f"against the COMPUTED bound {float(over):.3e} (2^{math.log2(over):.2f}), "
+        f"{float(over) / max(totals['overshoot'], 1e-300):.1f} times it; rho used = pi/4 (1 + the bound)")
     return totals
 
 
@@ -397,8 +418,34 @@ def mode_pools(part):
         e1 = (p + G) // 4 - 4
         run_family(f"census tiny family at this design's own start (E0 = (p+G)//4 - 4 = {e1})",
                    census.tiny_family(FMT, e1))
+    elif part == "audit":
+        # every instruction the routine calls exact (the reduction's, and the Fast2Sums' of the
+        # polynomials, the selection and the quotient) audited on lanes, the whole routine:
+        # m2red.audit against the exact operation on the operands' exact values
+        xs = (pools(FMT) + sample(FMT, "random", 600, 61) + sample(FMT, "edge", 300, 62)
+              + sample(FMT, "small", 300, 63) + sample(FMT, "near", 300, 64)
+              + tw32.quad_sample(FMT, 600, 65))
+        xs = sorted(set(xs))
+        t0 = time.perf_counter()
+        say(f"fp32 triple word, the audit of every claimed-exact instruction of the WHOLE routine "
+            f"(rne): {len(xs)} lanes (the pools, 600 random, 300 edge, 300 small, 300 near, "
+            f"600 quadrant boundaries)")
+        for fn in FNS:
+            f = tw32.build(FMT, RNE, fn)
+            claims = len(f.meta.get("exact", ()))
+            bad, firsts = 0, []
+            for xa in xs:
+                a = audit(f, xa)
+                if a:
+                    bad += 1
+                    if len(firsts) < 5:
+                        firsts.append(f"{hex(xa)} {a[:3]}")
+            say(f"  {fn}: {claims} instructions claimed exact, {len(xs)} lanes, lanes with a "
+                f"failed claim {bad}; {time.perf_counter() - t0:.0f}s")
+            for line in firsts:
+                say("     AUDIT failed: " + line)
     else:
-        raise SystemExit("pools model|seq|census")
+        raise SystemExit("pools model|seq|census|audit")
 
 
 # ---- rate ------------------------------------------------------------------
@@ -440,10 +487,11 @@ def rate_cells(plant=None, N=2000, seed=3, Gp=6, fns=FNS, rnds=(RNE, RTZ), quiet
     return cells
 
 
-def mode_rate(plant=None):
-    say(f"fp32 triple word, the mark-rate law (rate.py's, bound_shift = G - 6 = {G - 6}): 2,000 "
-        f"random arguments, seed 3, rne and rtz{', PLANT ' + plant if plant else ''}")
-    cells = rate_cells(plant)
+def mode_rate(plant=None, N=2000, seed=3, fns=FNS):
+    say(f"fp32 triple word, the mark-rate law (rate.py's, bound_shift = G - 6 = {G - 6}): {N:,} "
+        f"random arguments, seed {seed}, rne and rtz, {', '.join(fns)}"
+        f"{', PLANT ' + plant if plant else ''}")
+    cells = rate_cells(plant, N, seed, fns=fns)
     bad = [c for c in cells if abs(c["z"]) > 4 or c["wrong"] or c["right"] != c["k"]]
     say(f"CELLS: {len(cells)}; red (past 4 sigma of its own prediction, a wrong unmarked lane, "
         f"or a wrong guess): {len(bad)} {[(c['fn'], sf.RND_NAMES[c['rnd']], round(c['z'], 1)) for c in bad]}")
@@ -451,7 +499,7 @@ def mode_rate(plant=None):
         f"{sum(c['k'] for c in cells)}, guesses right {sum(c['right'] for c in cells)}, "
         f"wrong unmarked {sum(c['wrong'] for c in cells)}")
     if not plant:
-        for fn in FNS:
+        for fn in fns:
             cs = [c for c in cells if c["fn"] == fn]
             ms = sum(c["exp"] for c in cs) * 2 ** 6 / sum(c["n"] for c in cs)
             say(f"{fn}: mean sig(V) over its {sum(c['n'] for c in cs)} lanes {ms:.4f}; "
@@ -467,9 +515,9 @@ def mode_plant(name):
     if name == "carry-dropped":
         say("PLANT carry-dropped, named mode: reduce (the audit of every instruction "
             "the reduction calls exact). Control first.")
-        c = mode_reduce(None, n=300)
+        c = mode_reduce(None, n=300, full=False)
         say("--- the plant ---")
-        p = mode_reduce("carry-dropped", n=300)
+        p = mode_reduce("carry-dropped", n=300, full=False)
         red = p["audit failures"] > 0
         say(f"RESULT: control audit failures {c['audit failures']} (green: {c['audit failures'] == 0}); "
             f"plant audit failures {p['audit failures']} -> {'RED' if red else 'NOT RED'}")
@@ -534,7 +582,9 @@ def main():
         plant = arg[4] if len(arg) > 4 else "-"
         tw32_budget.main(["fp32", fn, region, N, seed, "10", "-", plant])
     elif mode == "rate":
-        mode_rate(arg[0] if arg else None)
+        mode_rate(arg[2] if len(arg) > 2 and arg[2] != "-" else None,
+                  int(arg[0]) if arg else 2000, int(arg[1]) if len(arg) > 1 else 3,
+                  tuple(arg[3].split(",")) if len(arg) > 3 else FNS)
     elif mode == "plant":
         mode_plant(arg[0])
     else:

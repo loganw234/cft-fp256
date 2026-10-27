@@ -48,14 +48,14 @@ G_TW = 40                     # the guard: Logan's for M1's fp32 library
 B_TW = 16                     # chunk width: the widest whose coarse sum is exact
 BMID_TW = -20                 # the boundary between the upper and the lower group
 PLANTS = ("r2-dropped", "carry-dropped", "mark-silenced")
-# |r| <= pi/4 (1 + CUSHION). Derived (S-hat units, f = t U, U >= 1/2): the last
-# quadrant step centres xh0, the exact upper part's high word, so |xh| <= U/2;
-# what follows it is xl (|xl| <= ulp(xh0)/2 <= 2^-24 (U + 2^-10)), the lower
-# group (<= 2^-21 once the carry has moved its multiple of 2^-20 up, plus
-# 2^-43 for its low word) and the lows (< 2^-54): in all |f| <= U/2 (1 + 2^-18.9)
-# at U = 1/2, the worst. MEASURED beside it in the driver's reduce mode: the
-# arguments next to (k + 1/2) pi/2 reach pi/4 (1 + 3.1e-7).
-CUSHION = Fraction(1, 2 ** 16)
+# rho, the polynomials' domain |r| <= rho = pi/4 (1 + over), is NOT the study's
+# 2^-30 (which fails at fp32: the float 0x3f490fdb, just above pi/4, takes n = 0
+# by the tie, 2^-25.10 over; and the double word's quadrant count, which leaves
+# out the mid sum's low word, overshoots by 2^-17.09 at 0x44264edd: M2G1's
+# findings, the lead's messages of 2026-10-27). `over` is COMPUTED in
+# reduce_tw from the static magnitudes of what the last quadrant step does not
+# see, in M2G1's form 2^(1-p) + 4 |lower terms| (derivation there), and the
+# plan of the polynomials is made at that rho.
 
 
 def proof(f, cond, name, detail=""):
@@ -94,7 +94,6 @@ def tw_plan(fmt=FMT, G=G_TW, b=B_TW, bmid=BMID_TW):
            f"3 terms of at most 2^{P.b} on P_1's grid 2^{pg1} need "
            f"{math.log2(3) + P.b - min(0, pg1):.2f} bits, past p = {p}")
     P.bmid = bmid
-    P.rho = _upper(pi_frac() / 4 * (1 + CUSHION))
     # the upper group's span and the lower group's, in bits: each must fit
     # a double word with room (the greedy proves its own sums piece by piece)
     P.span_upper = (b - 3) - bmid
@@ -420,6 +419,33 @@ def reduce_tw(f, x, P, magic_ref, plant=None):
         else:
             ll = v.ref if ll is None else f.add(ll, v.ref)
 
+    # ---- the overshoot of |r| past pi/4, from the pieces' static magnitudes ----
+    # The last quadrant step centres xh0, the exact upper part's high word
+    # (f_I + h2 + the upper group's low word + the carry, rounded), so |xh| <= U/2
+    # whatever the lower words are. What it does not see: xl, the rounding of
+    # that sum (|xl| <= ulp(xh0)/2 <= 2^-24 |xh0|, |xh0| <= U + |e|), and the
+    # lower terms L = h_l - carry (<= 2^(bmid-1): the carry took the multiples
+    # of 2^bmid up into the decision), the lower group's low word and the lows.
+    # In t = f V, V = 2^sigma <= 2 (sigma <= 1) and U V = 1:
+    #   2|t| - 1 = 2 V (|f| - U/2) <= 2 V |xl| + 2 V |L|
+    #            <= 2^(1-p) (1 + |e|/U) + 4 |L|
+    # (|e| <= 2^e.mag, U >= 1/2), and 2^-60 for the rounding of r = t pi/2 and
+    # of t's triple word (2^-69.5 relative, MEASURED by the reduce mode). The
+    # double word's reduction at fp32 G = 18 (M2G1) misses the mid sum's low
+    # word here, which is why its bound is 2^-11.66 and this one is not.
+    lowsum = Fraction(2) ** (BM - 1)
+    if lwl is not None:
+        lowsum += Fraction(2) ** math.ceil(lwl.mag)
+    for v in lows:
+        lowsum += Fraction(2) ** math.ceil(v.mag)
+    over = _upper(Fraction(2) ** (1 - p) * (1 + Fraction(2) ** math.ceil(e_sv.mag + 1))
+                  + 4 * lowsum + Fraction(1, 2 ** 60))
+    proof(f, over < Fraction(1, 2 ** 10), "overshoot of |r| past pi/4 is small",
+           f"over = {float(over):.3e}")
+    P.overshoot = over
+    P.rho = _upper(pi_frac() / 4 * (1 + over))
+    f.meta["overshoot"] = over
+
     # ---- the triple word t -------------------------------------------------
     f.phase = "red-triple"
     terms = [t for t in (ll, lh, lwl.ref if lwl is not None else None, hl2, xl, xh)
@@ -496,10 +522,61 @@ def quad_family(fmt=FMT, K=64, J=3, extra=128, seed=41):
     return sorted(x for x in out if sf.unpack(fmt, x).kind not in (sf.INF, sf.NAN))
 
 
+_HALF = {}
+
+
+def half_family(fmt=FMT, thr_bits=18, cap=96, small_v=6, neighbours=2):
+    """The floats next to the odd multiples of pi/4 in every binade, both
+    signs (the lead's second message of 2026-10-27: 0x44264edd, 665.2322,
+    x 2/pi = 423.4999964, is one). Value exponents -1 to 6: every odd
+    multiple (k + 1/2) pi/2 in the binade, its nearest float and `neighbours`
+    on each side. Value exponents 7 and up: the floats whose x 2/pi lies
+    within 2^-thr_bits of a half-integer (about 2^(24 - thr_bits + 1) = 128
+    a binade; the `cap` nearest if more), found with numpy's wrapping uint64
+    product M x (2^e 2/pi mod 1 to 64 bits), whose product's error is under
+    2^-40. The only use of numpy in this model; the Miniconda of the desktop
+    has it. -> sorted list of encodings."""
+    key = (fmt.name, thr_bits, cap, small_v, neighbours)
+    if key in _HALF:
+        return _HALF[key]
+    import numpy as np
+    import pi_worstcase
+    p = fmt.prec
+    pio2 = pi_frac() / 2
+    lo = 1 << (p - 1)
+    Ms = np.arange(lo, 1 << p, dtype=np.uint64)
+    out = set()
+    for v in range(-1, fmt.emax + 1):
+        if v <= small_v:
+            k = 0
+            while True:
+                m = (Fraction(k) + Fraction(1, 2)) * pio2
+                if m >= Fraction(2) ** (v + 1):
+                    break
+                if m >= Fraction(2) ** v:
+                    b = enc(fmt, m)
+                    for j in range(-neighbours, neighbours + 1):
+                        out.add(b + j)
+                k += 1
+            continue
+        a64 = np.uint64(pi_worstcase.alpha_of(v - p + 1, 128) >> 64)
+        d = (Ms * a64 - np.uint64(1 << 63)).view(np.int64)       # frac(M alpha) - 1/2, units 2^-64
+        ad = np.abs(d.astype(np.float64))                        # (-2^63 would overflow an int64 abs)
+        idx = np.nonzero(ad < float(1 << (64 - thr_bits)))[0]
+        if len(idx) > cap:
+            idx = idx[np.argsort(ad[idx])[:cap]]
+        for i in idx:
+            out.add(((v + fmt.bias) << fmt.man_w) | int(Ms[int(i)] - lo))
+    both = set(out) | {x | fmt.sign_mask for x in out}
+    _HALF[key] = sorted(both)
+    return _HALF[key]
+
+
 def quad_sample(fmt, n, seed):
-    """n of quad_family's arguments, drawn by `seed` (all of them if fewer)."""
+    """n of the quadrant-boundary arguments (quad_family and half_family),
+    drawn by `seed` (all of them if fewer)."""
     import random
-    fam = quad_family(fmt)
+    fam = sorted(set(quad_family(fmt)) | set(half_family(fmt)))
     return sorted(random.Random(seed).sample(fam, n)) if n < len(fam) else fam
 
 
