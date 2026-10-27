@@ -1,0 +1,26 @@
+fp32 triple word, how far the plan goes: sin rne built at each (G, b, bmid), or the static proof that fails (tw32.proof / tw32.stated, asserted at build time, before any lane)
+  G 40 b 16 bmid -20: built, 939 instructions, 97 words, live 23; L 9 bottom -56 words of 2/pi 18; S (4, 3, 9) C (5, 3, 9) (K3, K2, D); 28 proofs held
+  G 40 b 15 bmid -20: static proof 'lower group: low word + TwoSum error exact' fails: lw (mag -31.00, grid -48) + e (mag -43.54, grid -56) is not provably one word
+  G 40 b 14 bmid -20: static proof 'split at 2^-56: magic in range' fails: |v| < 2^-32.16 against 2^-34
+  G 40 b 17 bmid -20: static proof 'coarse-sum exact' fails: 3 terms of at most 2^17 on P_1's grid 2^-6 need 24.58 bits, past p = 24
+  G 40 b 18 bmid -20: static proof 'coarse-sum exact' fails: 3 terms of at most 2^18 on P_1's grid 2^-5 need 24.58 bits, past p = 24
+  G 40 b 20 bmid -20: static proof 'coarse-sum exact' fails: 3 terms of at most 2^20 on P_1's grid 2^-3 need 24.58 bits, past p = 24
+  G 40 b 16 bmid -12: static proof 'lower group: low word + TwoSum error exact' fails: lw (mag -17.00, grid -36) + e (mag -35.41, grid -52) is not provably one word
+  G 40 b 16 bmid -16: static proof 'split at 2^-16: magic in range' fails: |v| < 2^7.98 against 2^6
+  G 40 b 16 bmid -24: built, 942 instructions, 97 words, live 23; L 9 bottom -56 words of 2/pi 18; S (4, 3, 9) C (5, 3, 9) (K3, K2, D); 29 proofs held
+  G 40 b 16 bmid -28: built, 942 instructions, 97 words, live 23; L 9 bottom -56 words of 2/pi 18; S (4, 3, 9) C (5, 3, 9) (K3, K2, D); 29 proofs held
+  G 40 b 16 bmid -36: static proof 'groups fit a double word' fails: upper 49 bits, lower 20 bits, double word 48
+  G 34 b 16 bmid -20: static proof 'split at 2^-50: magic in range' fails: |v| < 2^-24.02 against 2^-28
+  G 35 b 16 bmid -20: static proof 'split at 2^-51: magic in range' fails: |v| < 2^-24.02 against 2^-29
+  G 36 b 16 bmid -20: built, 880 instructions, 95 words, live 23; L 9 bottom -52 words of 2/pi 18; S (4, 3, 8) C (4, 3, 9) (K3, K2, D); 27 proofs held
+  G 37 b 16 bmid -20: built, 890 instructions, 96 words, live 23; L 9 bottom -53 words of 2/pi 18; S (4, 3, 9) C (4, 3, 9) (K3, K2, D); 27 proofs held
+  G 38 b 16 bmid -20: built, 898 instructions, 97 words, live 23; L 9 bottom -54 words of 2/pi 18; S (4, 3, 9) C (4, 4, 9) (K3, K2, D); 28 proofs held
+  G 39 b 16 bmid -20: built, 939 instructions, 98 words, live 23; L 9 bottom -55 words of 2/pi 18; S (4, 3, 9) C (5, 3, 9) (K3, K2, D); 28 proofs held
+  G 41 b 16 bmid -20: static proof 'lower group: low word + TwoSum error exact' fails: lw (mag -33.00, grid -52) + e (mag -43.91, grid -57) is not provably one word
+  G 42 b 16 bmid -20: static proof 'lower group: low word + TwoSum error exact' fails: lw (mag -33.00, grid -52) + e (mag -43.91, grid -58) is not provably one word
+  G 43 b 16 bmid -20: static proof 'lower group: low word + TwoSum error exact' fails: lw (mag -33.00, grid -52) + e (mag -43.91, grid -59) is not provably one word
+  G 44 b 16 bmid -20: static proof 'lower group: low word + TwoSum error exact' fails: lw (mag -33.00, grid -52) + e (mag -43.91, grid -60) is not provably one word
+  G 48 b 16 bmid -20: static proof 'split at 2^-64: magic in range' fails: |v| < 2^-40.02 against 2^-42
+  G 52 b 16 bmid -20: static proof 'groups fit a double word' fails: upper 33 bits, lower 48 bits, double word 48
+  G 60 b 16 bmid -20: static proof 'groups fit a double word' fails: upper 33 bits, lower 56 bits, double word 48
+-- guard : 1s

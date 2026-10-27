@@ -1,0 +1,30 @@
+fp32 sin quad seed 26 G default: 1500 main lanes of 1500; 939 instructions (unpruned), 307 ever round; 107s
+  max |E|/Bv 0.09639 (2^-3.37); max |M|/Bv 0.08617 (2^-3.54); second-order residual at most 0.00133 Bv
+  observed maxima summed 0.1402 (2^-2.83); capacities summed 0.1546 (2^-2.69)
+  THE BUDGET'S BOUND: M_max + capacities = 0.2408 Bv (2^-2.05)
+  by phase (observed, capacity), in Bv:
+     sincos         3.054e-02  3.456e-02
+     S-head2        3.076e-02  3.077e-02
+     red-scale      2.325e-02  3.009e-02
+     S-tail         1.891e-02  1.892e-02
+     C-head3        1.741e-02  1.845e-02
+     S-head3        1.298e-02  1.502e-02
+     C-head2        3.018e-03  3.021e-03
+     red-triple     2.435e-03  2.835e-03
+     C-tail         9.236e-04  9.264e-04
+     z              1.848e-05  1.849e-05
+     red-lower      5.156e-12  1.143e-11
+     final          0.000e+00  0.000e+00
+     special        0.000e+00  0.000e+00
+  the 10 largest capacities:
+     # 351 add   S-head2        capacity 2.010e-02  observed 2.010e-02
+     # 325 fma   S-tail         capacity 1.887e-02  observed 1.886e-02
+     # 350 sub   S-head2        capacity 1.005e-02  observed 1.005e-02
+     # 296 sub   red-scale      capacity 6.019e-03  observed 6.019e-03
+     # 297 sub   red-scale      capacity 6.019e-03  observed 3.988e-03
+     # 298 fma   red-scale      capacity 6.019e-03  observed 5.695e-03
+     # 299 fma   red-scale      capacity 6.019e-03  observed 3.693e-03
+     # 300 fma   red-scale      capacity 6.019e-03  observed 3.857e-03
+     # 841 add   sincos         capacity 5.524e-03  observed 5.524e-03
+     # 840 add   sincos         capacity 3.081e-03  observed 2.762e-03
+-- budget sin quad 1500 26: 107s

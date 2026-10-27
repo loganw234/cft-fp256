@@ -3,24 +3,30 @@
 # amd-arc-box (the study's section 8, items 3 and 4, at fp32 G = 40). Not run
 # by M2X. Cut from box_m2s.sh, which did the same for fp64, fp128 and fp256.
 #
-#   bash tw32_box.sh [JOBS]            (from any directory; default 24 jobs)
+#   bash tw32_box.sh [JOBS]            (from any directory; default 21 jobs)
 #
-# 1. The budgets over larger samples: tw32_budget.py fp32, sin, cos and tan,
-#    the study's five regions and the quadrant boundaries (`quad`, the
-#    floats next to (k + 1/2) pi/2 from k = 0, where |r| is next to pi/4),
-#    12,000 lanes a region, seeds the desktop's plus 100 (`quad` draws all
-#    of its 2,632 arguments whatever N). 18 jobs.
+# 1. The budgets over larger samples: tw32_run.py budget, sin, cos and tan,
+#    the study's five regions and the quadrant boundaries (`quad`: the floats
+#    next to the odd multiples of pi/4 from k = 0, in every binade; 12,000 of
+#    its 18,266 arguments), 12,000 lanes a region, seeds the desktop's plus
+#    100. 18 jobs. The six `quad` jobs need numpy (tw32.half_family; the
+#    desktop's Miniconda has it): check `python3 -c "import numpy"` on the box
+#    first, and without it leave those six lines out.
 # 2. The mark-rate law at volume: rne and rtz at G' = 6, 50,000 random
 #    arguments, seed 7 (box_m2s.sh's), a job a function. 3 jobs.
 #
-# Expected (ESTIMATE, from the desktop's times in the batch of M2X's entry,
-# docs/VALIDATION.md; one single-threaded process a job): a budget job
-# EXPECT_BUDGET at 12,000 lanes (the desktop's 1,500-lane run took
-# EXPECT_BUDGET_DESKTOP), about 250 MB each; a rate job EXPECT_RATE at
-# 50,000 lanes (the desktop's 2,000-lane cell took EXPECT_RATE_DESKTOP), about
-# 150 MB each. 21 jobs in all; with 21 at a time (the box has 36 threads) the
-# whole is bounded by the longest budget job, about EXPECT_BUDGET. Outputs go
-# to ./box-out-tw32/, the committed *.out.txt untouched.
+# Expected (ESTIMATE, scaled linearly in lanes from the desktop's runs of
+# M2X's entry, docs/VALIDATION.md, which shared the desktop with parcel M2G1;
+# one single-threaded process a job): a budget job takes about 8 to 15
+# minutes at 12,000 lanes (the desktop's 1,500-lane runs took 59 to 109
+# seconds, median 76) and about 40 MB, the `quad` ones about 360 MB at their
+# start, while the half family is built; a rate job about 15 minutes at
+# 50,000 lanes (the desktop's 2,000-lane cell took about 18 seconds, two
+# cells a job), about 40 MB. 21 jobs in all, about 3.5 hours of one core;
+# with all 21 at a time (the box has 36 threads) the whole is bounded by the
+# longest budget or rate job, about 15 minutes, if the box's cores are the
+# desktop's speed. Outputs go to ./box-out-tw32/, the committed *.out.txt
+# untouched.
 #
 # Run the model on the box in a CLEAN CLONE of the commit under test, its SHA
 # and a grep of its sources for something only that commit has asserted

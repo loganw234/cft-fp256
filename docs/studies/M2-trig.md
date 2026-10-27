@@ -26,6 +26,43 @@ cap; with `live_cap=None`, as costs.py passes it, they hold). Question
 9's recommendation, a cap by function and format, stands; its premise
 that only fp64 is past the cap does not.
 
+**A note of 2026-10-27** (parcel M2X, M2's build, wave 1; the study's text
+stays as written at 1337a13). Section 2.7's triple word at G = 40, the one
+ESTIMATE of this study, is now built and measured in the study's model, in
+new files only (`docs/studies/m2/tw32*`; docs/VALIDATION.md, the entry of
+that date). What the measurement makes of the study's statements:
+- 2.7's "in all about 930 for sin": **939 instructions** (cos 936, tan
+  993), under every attribute, 1.010 of the estimate; by 2.7's three parts
+  the reduction is 319 (about 320), the heads 484 (about 490) and the rest
+  136 (about 120; tan's quotient is 60 where the sketch said about 35). The
+  reduction is not 2.7's four bins of about 19 bits but two exact
+  double-word groups cut at 2^-20, the lower group's carry into the upper,
+  and two VecSum passes. Bank words: 102 for the three functions under five
+  attributes (the double word's 82).
+- 2.7's "the live count is not estimated; M1's triple-word exp keeps 33 to
+  34": **23 values live**, in the design's order and scheduled, all 15
+  fragments accepted by `routines.program`; past the tree's cap of 21 at
+  fp32 for the six, so these three want a cap of 23 (question 9).
+- 3.2's budget, ported once more for a triple word: the bound is **at most
+  0.3675 Bv in all 18 regions** (a margin of 1.44 bits), against 0.33 to
+  0.61 (0.73 at the edge) for the double word at G = 18; the pools are 0
+  wrong on the model and on seq.py (11,400 lanes each). The structured
+  families that marked at G = 18 (cos at 2^-12 and its neighbours) do not
+  mark at G = 40 inside the tiny gates.
+- Question 3: all five of the brief's conditions hold, so by its rule the
+  triple word at G = 40 is recommended, the double word at G = 18 staying
+  the measured fallback; the choice is Logan's. G = 40 is the last G the
+  plan's static proofs hold at (36 to 40 build, 41 to 44 fail by name).
+- **2.2's and 2.4's cushion** |r| <= pi/4 (1 + 2^-30), which m2trig uses at
+  fp32 too, does not hold at fp32 for the double word's reduction (M2G1,
+  READ from the lead's messages of 2026-10-27: 0x3f490fdb, 2^-25.10 over, a
+  tie; 0x44264edd, 2^-17.09 over, the mid sum's low word left out of the
+  quadrant count; its static bound 2^-11.66). The triple word's reduction
+  counts the quadrant from the rounded exact upper part, and its overshoot
+  is bounded from its pieces' static magnitudes at 2^-18.91 (COMPUTED); the
+  largest measured is 2^-19.02 over 14,021 arguments, the floats next to
+  the odd multiples of pi/4 in every binade among them.
+
 M1's study (docs/studies/M1-exp-log.md) is its model of form, section for
 section, and M1's design is its starting point: the in-lane test, the
 double word with TwoSum and no augmented addition, the fragment in C4's

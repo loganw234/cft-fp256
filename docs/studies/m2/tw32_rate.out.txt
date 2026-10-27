@@ -1,0 +1,13 @@
+fp32 triple word, the mark-rate law (rate.py's, bound_shift = G - 6 = 34): 2,000 random arguments, seed 3, rne and rtz, sin, cos, tan
+fp32 sin rne G'=6 seed 3: 1987 lanes, marked 57 = 2.87%; each lane's own 2^-G' sig(V) sums to 49.3 = 2.48% (+1.1 sigma); guesses right 57 of 57; wrong unmarked 0; mean sig(V) 1.5871; 19s
+fp32 sin rtz G'=6 seed 3: 1987 lanes, marked 32 = 1.61%; each lane's own 2^-G' sig(V) sums to 49.3 = 2.48% (-2.5 sigma); guesses right 32 of 32; wrong unmarked 0; mean sig(V) 1.5871; 35s
+fp32 cos rne G'=6 seed 3: 2000 lanes, marked 46 = 2.30%; each lane's own 2^-G' sig(V) sums to 50.8 = 2.54% (-0.7 sigma); guesses right 46 of 46; wrong unmarked 0; mean sig(V) 1.6255; 52s
+fp32 cos rtz G'=6 seed 3: 2000 lanes, marked 56 = 2.80%; each lane's own 2^-G' sig(V) sums to 50.8 = 2.54% (+0.7 sigma); guesses right 56 of 56; wrong unmarked 0; mean sig(V) 1.6255; 69s
+fp32 tan rne G'=6 seed 3: 2000 lanes, marked 50 = 2.50%; each lane's own 2^-G' sig(V) sums to 45.2 = 2.26% (+0.7 sigma); guesses right 50 of 50; wrong unmarked 0; mean sig(V) 1.4479; 88s
+fp32 tan rtz G'=6 seed 3: 2000 lanes, marked 35 = 1.75%; each lane's own 2^-G' sig(V) sums to 45.2 = 2.26% (-1.5 sigma); guesses right 35 of 35; wrong unmarked 0; mean sig(V) 1.4479; 105s
+CELLS: 6; red (past 4 sigma of its own prediction, a wrong unmarked lane, or a wrong guess): 0 []
+the largest |z| 2.49 sigma; marked in all 276, guesses right 276, wrong unmarked 0
+sin: mean sig(V) over its 3974 lanes 1.5871; COMPUTED rate at G = 40: mean sig(V) x 2^-40 = 1.443e-12 a call = 2^-39.33, about one in 6.928e+11
+cos: mean sig(V) over its 4000 lanes 1.6255; COMPUTED rate at G = 40: mean sig(V) x 2^-40 = 1.478e-12 a call = 2^-39.30, about one in 6.764e+11
+tan: mean sig(V) over its 4000 lanes 1.4479; COMPUTED rate at G = 40: mean sig(V) x 2^-40 = 1.317e-12 a call = 2^-39.47, about one in 7.594e+11
+-- rate : 105s
