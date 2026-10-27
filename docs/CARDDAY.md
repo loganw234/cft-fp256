@@ -909,7 +909,7 @@ python3 hw/card_stress_report.py /data/card-stress-1016     # the report, any ti
 - **Pre-flight, optional** (and, since 2026-10-22, a stage of the gate: `bash verify/run.sh --only cardstress`, in
   `--budget gate` and the full census, not in `quick`; it is SKIPPED by name, with the pids, while another process
   on the system uses the card, which is what the guard refuses on): `bash hw/test-card-stress.sh --no-plants` runs the driver's dry-run
-  tests (the verdict parsers on real logs, the scheduler, the failure policy, the guard, the
+  tests (the verdict parsers on real logs, the scheduler, the battery's cadence and the legs it leaves out (since 2026-10-27), the failure policy, the guard, the
   sweep's resume, the host pool, the seeds, the trees, the resume per tree class, the items, the pass size, the records, the report, the report's own test and the nightly page's (`hw/test_card_stress_report.py` and `hw/test_card_stress_progress.py`, the `testfiles` group since 2026-10-23: each file's skips are passed on by name, and their real-copy checks need `CARD_STRESS_RESUME_RUN` and `CARD_STRESS_PROGRESS_RUNS`), and under POSIX the real `make` in
   a scratch copy) on the box, with no card and no XRT: about 10 minutes under WSL and 11 under Git
   Bash (2026-10-21, with the coverage wave's groups: 644 s under Git Bash and about 600 s under WSL, read off the clock; 2026-10-20, before them: 448 s and 553 s, and a busier desktop made a Git
@@ -989,6 +989,11 @@ python3 hw/card_stress_report.py /data/card-stress-1016     # the report, any ti
 | `resident`, `selftest` | `cft-resident IMAGE`; `cft-selftest vectors/out IMAGE` (every 3rd visit of an image; the other visits leave it out of the battery, below) | `every row: status clean ...`; `N cases checked` | 600; 3600 |
 
 The timeouts are several times the card times of 2026-10-06 (docs/VALIDATION.md), with a floor.
+**A count in a record is a captured group of a line a pattern matched, or it is absent**; a log
+no pattern reads is a `parse_error` leg, kept whole, and a log whose exit status contradicts its
+verdict is refused the same way. `hw/card_stress_lib.py` holds every pattern, each citing the
+printf it matches.
+
 - **Legs left out, and legs skipped** (since 2026-10-27, parcel BC; Logan: "0 skips looks better"). A cycle's battery is **planned for its image
   and visit** (`Driver.plan_battery`), and a leg is **left out** of it - not planned, no leg record, no skip - when its **cadence** (`--every
   LEG=N`; the default is `selftest=3`: it is in the battery of visits 1, 4, 7 ... of an image) says it is not due on this visit, or it **cannot
@@ -1008,11 +1013,6 @@ The timeouts are several times the card times of 2026-10-06 (docs/VALIDATION.md)
   reads them as it always did (MEASURED 2026-10-27: the same text, byte for byte, as 901d067d's report gives, on the lead's five run copies,
   resume-1020 to nightly-1024), says how many cycles did not say what they left out when a file has both kinds, and has no such section for a
   file that has only the old.
-**A count in a record is a captured group of a line a pattern matched, or it is absent**; a log
-no pattern reads is a `parse_error` leg, kept whole, and a log whose exit status contradicts its
-verdict is refused the same way. `hw/card_stress_lib.py` holds every pattern, each citing the
-printf it matches.
-
 - **The revision-8 leg** runs the entries the image is (`--target`): programs/acceptance.py's
   rule puts fifteen on the quad - nine workloads and the six routine entries the math library
   added on 2026-10-19 - one on the deep and **none on the single** (where R21 alone keeps a

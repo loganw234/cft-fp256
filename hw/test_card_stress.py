@@ -38,7 +38,7 @@ Three kinds of group, then the plants (the groups, by name, are in hw/test-card-
             selftest every third visit of an image), stopped by the STOP file after five cycles - the visits it is not due on are LEFT OUT (named in
             cycle_start's `left_out` and on the cycle line, no leg recorded), a leg that was due and did not run stays a skipped leg, status.txt counts legs
             alone - and the report's cadence line read from those very records. The unit checks of the plan, the rule for acceptance-rev8 on the single and the
-            skips that stay skips are in `commands` and (--quick's) `commands`' quick checks; `normal` holds the single's cycle_start.
+            skips that stay skips are in `commands` (its quick checks included); `normal` holds the single's cycle_start.
   Two suites of this file in one WSL distro at once collide: the card guard scans every process of the distro, and a stand-in with
             CFT_SOAK_ARTIFACT in its environment makes the other suite's drivers refuse to start (guard_refused, rc 2, no records).
 
@@ -7511,6 +7511,20 @@ def plants(env: Env) -> None:
         ("BC: the plan applies no rule, so acceptance-rev8 is planned for the single",
          [("card_stress.py", 'if leg == "acceptance-rev8" and not REV8_ENTRIES.get(img.target):', "if False:")],
          lambda env, src: group_commands(src), ["acceptance-rev8: the single has no entry", "quick: the deep's revision-8 leg"]),
+        ("BC: the plan applies no rule, so the quick run records a leg of acceptance-rev8 for the single",
+         [("card_stress.py", 'if leg == "acceptance-rev8" and not REV8_ENTRIES.get(img.target):', "if False:")],
+         lambda env, src: scn_normal(env, src), ["normal: acceptance-rev8 cannot apply to the single", "normal: the one skip is acceptance-rev8 on the deep"]),
+        ("BC: the cadence is counted from visit 0, so the selftest runs on the wrong visits",
+         [("card_stress.py", "if every > 1 and (visit - 1) % every != 0:", "if every > 1 and visit % every != 0:")],
+         lambda env, src: group_commands(src), ["selftest: every third visit of an image"]),
+        ("BC: --every and the default cadence are ignored",
+         [("card_stress.py", "        every = int(self.every.get(leg, 1))\n        if every > 1 and (visit - 1) % every != 0:",
+           "        every = 1\n        if every > 1 and (visit - 1) % every != 0:")],
+         lambda env, src: group_commands(src), ["selftest: every third visit of an image", "--every LEG=N sets a leg's cadence"]),
+        ("BC: a leg left out is counted in the status file as a skipped leg",
+         [("card_stress.py", "battery, left_out = self.plan_battery(img, visit)",
+           'battery, left_out = self.plan_battery(img, visit); [self.tally(img.name, "skipped") for _k in left_out]')],
+         lambda env, src: scn_cadence(env, src), ["cadence: status.txt counts the legs alone"]),
         ("BC: a disabled leg is left out of the battery, so it is no skipped leg on the visits its cadence skips",
          [("card_stress.py", "        if leg in self.disabled_legs:\n            return None\n", "")],
          lambda env, src: group_commands(src), ["a disabled leg is never left out"]),
