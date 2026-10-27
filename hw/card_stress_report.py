@@ -128,9 +128,13 @@ from card_stress_lib import (CPU, DEFAULT_BATCH, EXH, GIT_HASH, HOST, TILE, cove
 # What the catalog says of each item: the space its coverage is counted over (2^32 encodings for the fp32-operand items, the
 # indices of a mode's own space for the hard-case and class-level items) and what a pass claims ("exhaustive", "hard", "class",
 # "random"). An item the catalog does not name (a record of another tree's) is counted over 2**32, as every item was before.
-_CATALOG = {it.name: it for it in sweep_items()}
+# The catalog with its wide-format items (parcel HXc: sweep_items(mpfr=True), which a run has only with --mpfr-prefix), so that a run that
+# served them has them counted over their own spaces; a run that did not is reported as it was. ITEM_CLAIM: what a pass over a wide item's
+# whole space claims, named by space and level (Item.claim), said under the sweep table for each wide mode the run served.
+_CATALOG = {it.name: it for it in sweep_items(mpfr=True)}
 ITEM_SPACE = {n: it.space for n, it in _CATALOG.items()}
 ITEM_LEVEL = {n: it.level for n, it in _CATALOG.items()}
+ITEM_CLAIM = {n: it.claim for n, it in _CATALOG.items() if it.claim}
 
 KNOWN = ("pass", "fail", "timeout", "no_device", "parse_error", "skipped", "error")
 SWEEP_ROW = "sweep (all items)"
@@ -1544,6 +1548,16 @@ def _r_sweep(S: Dict[str, Any]) -> List[str]:
         if any(e.get("level") == "hard" for e in W["exhaustive"]):
             L.append("  a hard-case item (an op ending -hard) is a deterministic space of constructed operands, the closest "
                      "approaches to a rounding boundary and the exact and edge quotients a sampler cannot reach, not the operand space")
+        wide: Dict[str, Any] = {}
+        for e in W["exhaustive"]:
+            claim = ITEM_CLAIM.get(e["item"])
+            if claim and ", under " in claim:
+                what, attr = claim.rsplit(", under ", 1)
+                wide.setdefault(_CATALOG[e["item"]].op, (what, []))[1].append(attr)
+        if wide:
+            L.append("  a wide item (parcel HXc: fp64, fp128 and fp256, checked against MPFR at fp128 and fp256 and the CPU's double at "
+                     "fp64) claims, over its whole space and under its attribute:")
+            L += [f"    {op} ({', '.join(attrs)}): {what}" for op, (what, attrs) in wide.items()]
     else:
         L.append("exhaustive items: none seen")
     L.append("")

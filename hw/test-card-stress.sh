@@ -9,8 +9,9 @@
 # defect is put back into a copy of the code and the scenario written for it must go red
 # (the plants; hw/test-sweep-judge.sh's standard). Nothing here starts anything heavy.
 #
-#   bash hw/test-card-stress.sh                 # everything: about 29 minutes under WSL (2026-10-21, niced, 1,761 s with 130 plants; 1,636 s with 115,
-#                                               # on a desktop other sessions share; process starts are the cost)
+#   bash hw/test-card-stress.sh                 # everything: about 39 minutes under WSL (2026-10-26, niced, at e72cbf08: 626 s without the
+#                                               # plants and 1,699 s for its 193 plants, run apart; 1,761 s with 130 plants on 2026-10-21),
+#                                               # on a desktop other sessions share; process starts are the cost
 #   bash hw/test-card-stress.sh --no-plants --skip-groups stopfile,guard,pool --skip-why "TEXT"
 #                                               # SKIP those groups, by name, with TEXT printed beside each (what verify/run.sh's cardstress stage
 #                                               # does on Windows, where the guard's process listing can stall for minutes on a loaded desktop)
@@ -22,9 +23,10 @@
 #
 # Groups for --only: parsers commands standin normal fail timeout deaf nodevice cardlost stopfile deadline
 # rotation diskfloor guard sweep disagree telemetry build buildreal internal signal torn disable sweepall
-# pool seeds trees items chunk records notes resume testfiles report plants. `deaf` (a process that ignores SIGTERM),
-# `signal` and `buildreal` need POSIX, and so does the pool group's niceness check and the records group's
-# real (not dry) run over test doubles: each is skipped by name elsewhere. `trees` skips its
+# pool seeds trees items chunk records notes resume wide testfiles report plants. `deaf` (a process that ignores SIGTERM),
+# `signal` and `buildreal` need POSIX, and so does the pool group's niceness check and the records and wide groups'
+# real (not dry) runs over test doubles: each is skipped by name elsewhere. `wide` (parcel HXc, 2026-10-26): the 102
+# wide-format items, --mpfr-prefix and the build line with MPFR=1. `trees` skips its
 # one check of the recorded tree, by name, where git cannot read this tree (a worktree whose .git file
 # names a Windows path, read from WSL). The four groups of parcel DR3 (2026-10-21): `items` the 35 hard-case
 # and class-level items (real logs, plans, served and refused), `chunk` --sweep-chunk and its streams, `records`

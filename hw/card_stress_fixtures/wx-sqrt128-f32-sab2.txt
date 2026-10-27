@@ -1,0 +1,20 @@
+soaking the software backend
+oracle: MPFR 4.1.0 with GMP 6.2.1, mpfr_ieee.h's emulation; the ladder: the CPU's float
+  MISMATCH rne ladder a=0x3f800000 narrowed=0x1p+0 cpu=0x3f800001
+  MISMATCH rne ladder a=0x3f800001 narrowed=0x1p+0 cpu=0x3f800001
+  MISMATCH rne ladder a=0x3f800002 narrowed=0x1.000002p+0 cpu=0x3f800000
+  MISMATCH rne ladder a=0x3f800003 narrowed=0x1.000002p+0 cpu=0x3f800000
+  MISMATCH rne ladder a=0x3f800004 narrowed=0x1.000004p+0 cpu=0x3f800003
+  MISMATCH rne ladder a=0x3f800005 narrowed=0x1.000004p+0 cpu=0x3f800003
+  MISMATCH rne ladder a=0x3f800006 narrowed=0x1.000006p+0 cpu=0x3f800002
+  MISMATCH rne ladder a=0x3f800007 narrowed=0x1.000006p+0 cpu=0x3f800002
+  MISMATCH rne ladder a=0x3f800008 narrowed=0x1.000008p+0 cpu=0x3f800005
+  MISMATCH rne ladder a=0x3f800009 narrowed=0x1.000008p+0 cpu=0x3f800005
+  MISMATCH rne ladder a=0x3f80000a narrowed=0x1.00000ap+0 cpu=0x3f800004
+  MISMATCH rne ladder a=0x3f80000b narrowed=0x1.00000ap+0 cpu=0x3f800004
+  MISMATCH rne ladder a=0x3f80000c narrowed=0x1.00000cp+0 cpu=0x3f800007
+  MISMATCH rne ladder a=0x3f80000d narrowed=0x1.00000cp+0 cpu=0x3f800007
+  MISMATCH rne ladder a=0x3f80000e narrowed=0x1.00000ep+0 cpu=0x3f800006
+  MISMATCH rne ladder a=0x3f80000f narrowed=0x1.00000ep+0 cpu=0x3f800006
+  ladder: 1024 of the 1024 cases rounded to fp32 and checked against the CPU's own, 1024 value and 0 flag disagreements
+sqrt128-f32 rne: 1024 cases, 1024 value mismatches, 0 flag mismatches, 1024 encodings, 0 skipped

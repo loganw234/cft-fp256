@@ -1829,7 +1829,7 @@ F3b segment under all five, 0 value and 0 flag mismatches in all 39 runs, and th
 failed as they must. With the oracle in line the soak ran F3b, 16,777,136 cases, in 63 to 67 s an
 attribute: 0.26 M cases a second, about half the bare call's 0.542 M at fp256 (the study's 5.1), where
 the study's model gave about 0.7 of it (the fp64 hard modes' 0.78, less 9 to 20 per cent for the
-oracle: ESTIMATE). The stress driver names the items from parcel HXc on.
+oracle: ESTIMATE). The stress driver names the items from parcel HXc on ("The wide items in the driver", below).
 
 Known limits. The ladder sees the top bits of the wide result only, and nothing of the windows or
 the wide hard spaces, whose inputs are not narrow values. Flags are compared per batch, as
@@ -2119,6 +2119,83 @@ run too). A new random op is red in the suite until it is given a figure or name
 signable (above), and the real 2026-10-19 file holds no host-pool slice at all; python/figure_extracts.py's
 `STRESS_TILE_OPS` does not list the five new tile modes, so the stress figures' extractor refuses, loudly, a run that served them,
 until FX's list gains them (its filter for cpu legs, which this parcel added, is the one change made there).
+
+### The wide items in the driver (added 2026-10-26, parcel HXc): phase 1 of the wide-format sweeps
+
+Logan, 2026-10-26, on the study's nine questions: "Approve all as recommended" (docs/ROADMAP.md, "Decided 2026-10-26: the
+wide-format sweeps"). Parcel HXa built the modes (above); this is the driver running them. **The box has not run this code**: the
+lead's box script for it is in the round's records (`box/hxc/`), and docs/VALIDATION.md's entry for HXc says what was run, and where.
+
+**The items, and the claim each makes.** `hw/card_stress_lib.py` has 102 items for HXa's 30 mode words, phase 1 of the study
+(docs/studies/HX-wide-sweeps.md, 5.4's ranks 1, 2, 4, 6 and 7, and section 7), **only when the catalog is asked for them**
+(`sweep_items(mpfr=True)`; the driver asks when it is given `--mpfr-prefix`). They are appended after the 125 older items, so no
+older item's place moves, in the study's rank order, so a run that starts them serves the wide hard cases first (a tie in the rotation
+goes to the catalog's order); the rotation's weights are unchanged, exhaustive 3 to random 1, per item (Logan's answer 5). Each is
+`tile` (every mode calls `cft_div` or `cft_sqrt`, the composed operations), exhaustive over a space of its own, and held to cases + S
+= k x E on every slice and, once wholly covered, to the whole space's figures. A pass over an item's whole space claims, under its
+attribute, the bits and flags of every case of it (`Item.claim`; the report says it under its sweep table):
+
+| items | attributes | indices (k) | whole space (cases, skipped) | the claim, by space and level | oracle |
+|---|---|---|---|---|---|
+| `div128-hard`, `div256-hard` | all five | 289,931,696; 293,864,352 (4) | 813,470,188 and 346,256,596; 829,207,176 and 346,250,232 | "the fp128 (fp256) division's own hard cases (python/hardcases.py's families at p = 113 (237)), bits and flags (hard)" | MPFR |
+| `sqrt128-hard`, `sqrt256-hard` | all five | 4,456,448 each (1) | 1,745,011 and 2,711,437; 1,745,800 and 2,710,648 | "the fp128 (fp256) square root's own hard cases ... (hard)" | MPFR |
+| `div128-f64hard`, `div256-f64hard` | all five | 289,685,696 (4), div64-hard's | 812,489,184 and 346,253,600, div64-hard's | "the fp64 hard cases of the division (div64-hard's 289,685,696 indices), widened exactly to fp128 (fp256), through the fp128 (fp256) division, bits and flags (hard)" | MPFR, and the ladder to fp64 (not under rmm) |
+| `sqrt128-f64hard`, `sqrt256-f64hard` | all five | 4,456,448 (1), sqrt64-hard's | 1,745,752 and 2,710,696, sqrt64-hard's | "the fp64 hard cases of the square root ..., widened exactly to fp128 (fp256) ... (hard)" | MPFR, and the ladder to fp64 |
+| `sqrt128-f32`, `recip128-f32`, `sqrt256-f32`, `recip256-f32` | all five | 4,294,967,296 (1) | every index a case, none skipped | "every fp32 input, widened exactly to fp128 (fp256), through the fp128 (fp256) square root (reciprocal 1/x), bits and flags (L1 over the fp32 slice)" | MPFR, and the ladder to fp32 |
+| `sqrt64-f32`, `recip64-f32` | all five | 4,294,967,296 (1) | the same | "every fp32 input, widened exactly to fp64, through the fp64 square root (reciprocal 1/x), bits and flags (L1 over the fp32 slice)" | the CPU's double, and the ladder to fp32 |
+| `{sqrt,recip}{128,256}-win-{ones,zeros,alt,key}` (16) | rne, rup | 4,294,967,296 (1) | the same | "every pattern of the low 32 fraction bits of x = 1.H L in [1, 2) under H = all ones (all zeros, alternating from the top, a keyed draw), through the fp128 (fp256) square root (reciprocal), bits and flags (L1 over the window)" | MPFR |
+
+That is 4 x 5 + 4 x 5 + 6 x 5 + 16 x 2 = 102 items. Every figure is the tool's own: `divsqrt-soak hard-space MODE` for the
+indices and k, `hard-count MODE 0 N` for the whole spaces (MEASURED in WSL by this parcel; div128-hard's and div256-hard's on
+amd-arc-box by the lead, eight slices each, summed and held to the box's sums), and the suite holds the catalog to those outputs
+(`hw/card_stress_fixtures/wx-*`).
+
+**The MPFR, by name.** `--mpfr-prefix DIR` names the pinned MPFR, the prefix `verify/build-mpfr-oracle.sh` builds. **On the box:
+`--mpfr-prefix ~/cft-fp256/verify/_mpfr-prefix`** (MPFR 4.2.2 with GMP 6.3.0, static: HXa's box runs' oracle line). It is refused at
+the command line, by name, when DIR is not a directory, has no `include/mpfr.h`, its `mpfr.h` is not the version the script pins (read
+from its `MPFR_V`, as the runner's mpfr stage reads it, so the number exists once), or it lacks the static `lib/libmpfr.a` or
+`lib/libgmp.a`. With it:
+- the build step's make takes `MPFR=1 MPFR_PREFIX=DIR` after the XRT flags and C5DEFS (`make -C host XRT=1 XRT_ROOT=...
+  [C5DEFS=...] MPFR=1 MPFR_PREFIX=DIR all device-test api-test remote-test divsqrt-soak clause5-soak`), and under `--sweep-chunk N`
+  the `SOAK_CHUNK=N soak-chunk` make takes the same words (verifier VHXa: the chunked MPFR=1 tool's verdicts are the default size's);
+- then the step `mpfr divsqrt-soak` (and `mpfr divsqrt-soak-cN`): `hard-space div128-hard` must exit 0 and print the catalog's space
+  (only a build with the wide modes has the mode), and one case of `sqrt128-f32` on the software backend - its environment without
+  `CFT_SOAK_ARTIFACT` and `CFT_XRT_TILES`, so it cannot open the card - must pass with an oracle line naming MPFR at the pin's
+  version. That line is `mpfr_get_version()`, the library the tool LINKED, which a header cannot vouch for. A failure fails the
+  step by name and **the run does not start** (`build_failed`, exit 3): a wide item never runs against an MPFR that is not the pin;
+- run_start's settings gain `mpfr: {prefix, pin}` and settings.json `mpfr_prefix`;
+- the older divsqrt items run on the MPFR=1 binary, whose older modes are the same code (HXa's `unchanged` group holds both builds'
+  outputs to the baseline tool byte for byte).
+
+**Without it, nothing changes**: the make lines, the catalog (the 125 items), the rotation, run_start, settings.json and every record
+are what they were. A wide item named by `--sweep-items` is accepted at the command line and **refused by the run, by name**: at each
+run start, one `skipped` sweep leg for it (`sweep-<item>`, image `-`, reason "a wide item, REFUSED: no --mpfr-prefix ...",
+`sweep.refused: no-mpfr-prefix`), which the report lists under its skipped legs and no coverage counts; it is never served, and an
+empty wave says why ("a wide item refused for want of --mpfr-prefix"). So a nightly list that names wide items, launched without the
+prefix, loses them by name and runs the rest.
+
+**The build's warnings.** The step counted every `warning:` line and said NOTE for any count but two (CLAUDE.md's two
+`cft_resident.cpp` lines), so it said it every night: four on a fresh clone (the two soaks' `#pragma STDC FENV_ACCESS`, which gcc
+ignores, printed whenever a soak is compiled; READ in the 2026-10-23 and 24 smokes' driver.log) and none when nothing was rebuilt.
+Under MPFR=1 `divsqrt-soak` is relinked every time, so its pragma line would be printed every night. Now each make's warning lines
+are sorted against the known ones (the two `read_register` lines, each soak's pragma line once): the step says how many, how many
+known and how many new, and **a NOTE is said only for a new line**, naming it. The `soak-chunk` make's log is read the same way.
+
+**What it costs.** The study COMPUTED phase 1 at about 133 tile-hours; HXa measured the soak at about half the bare call's rate
+with the oracle in line (F3b of div256-hard, 0.26 M cases a second), so phase 1's hours are likely more (the study's phase-2 item,
+the oracle beside the call, would recover it).
+
+By hand, on the box (the long run; the smoke takes the same `--mpfr-prefix` when its `--sweep-items` names a wide item):
+
+    bash hw/card-stress.sh --resume --until "YYYY-MM-DD HH:MM" --out /data/card-stress-NNNN \
+         --mpfr-prefix ~/cft-fp256/verify/_mpfr-prefix --sweep-items div128-hard-rne,div128-hard-rtz,...
+
+**Known limits.** The signed records (`--records`) do not cover the wide items yet: a wide slice is refused by the exporter by name
+(`record_refused`, "not an item of this tree's catalog"), because a campaign record names its oracle as the host FPU and glibc
+(hw/sweep_record.py) and the wide items' is MPFR, so no record of one is written until the format names it; every other slice's
+record is written as before. The card scheduler (hw/sched/) does not pass `--mpfr-prefix`: its night spec has no field for it yet
+(docs/VALIDATION.md, HXc's entry, says what it needs). The driver has not run these items on the card; HXa's box runs ran the modes by
+hand. Phase 1's hours, above.
 
 ### Failure policy, processes, and what it guarantees
 
