@@ -14,9 +14,12 @@ name and a colon, empty when it holds (mathlib_harness's convention). Eight:
               (2^-11 at fp32), rh = RN(rh + rl), `small` exactly where
               |x| < RD(pi/4), and q on MAGIC's integer grid. The CLASS
               (n mod 4 = q & 3) rests on the r-leg alone: r is reduced against
-              the class q claims, and a wrong class leaves |r| past the
-              cushion. The grid leg says nothing of the class (for any q on
-              the grid, (q - MAGIC) mod 4 is q & 3)
+              the class q claims, and a wrong class turns that leg red, as
+              "a quadrant off" (|r| past the cushion) or, where both
+              neighbours are within the cushion (t near +-1/2, the halves
+              family), as "r off by more than 2^-(p+G+3) of itself". The grid
+              leg says nothing of the class (for any q on the grid,
+              (q - MAGIC) mod 4 is q & 3)
   cushion     that cushion past pi/4 proven from the build's static bounds
               (the third quadrant count does not see the mid sum's low word),
               pinned, and held to the lanes: none overshoots the bound
@@ -394,7 +397,10 @@ def check_reference(run, stats=None):
     `small` nonzero exactly where |x| < RD(pi/4), and q on MAGIC's integer
     grid (the same sign and exponent as MAGIC: its ulp is 1). n is taken in
     the class q & 3 claims, so the class is checked by the r-leg alone: a
-    wrong class is "a quadrant off". `stats`, a dict, gains
+    wrong class turns it red, as "a quadrant off" or, where both neighbours
+    are within the cushion (t near +-1/2), as "r off by more than
+    2^-(p+G+3) of itself" (0x4084c9dba2f3644f with q + 1). `stats`, a dict,
+    gains
     "worst" (log2 of the largest error in units of 2^-(p+G)), "over" (the
     largest 2|t| - 1, as a rational: how far past pi/4 |r| went) and
     "lanes"."""
@@ -1352,9 +1358,9 @@ def test_each_leg_of_the_reference_can_fail():
 
 def test_q_holds_the_class_of_the_count_and_not_the_count():
     """The contract's q = MAGIC + n' with n' congruent to n (mod 4): n' is
-    the sum of the quadrant counts taken out, and the chunks before the window
-    and the reductions modulo m = 4 U drop multiples of 4, so it is not the
-    full count. The lanes the record gives (fp64: x = 4.0, n = 3, n' = -1;
+    the sum of the quadrant counts taken out and is not the full count
+    (BELIEVED, not shown: the reductions modulo m = 4 U take out multiples of
+    4 that it does not count). The lanes the record gives (fp64: x = 4.0, n = 3, n' = -1;
     x = 8.0, n = 5, n' = 1; x = 1.0 where they agree), and the class right on
     each by the r-leg; and fp32's 0x44264edd, whose class is 424's where 423
     is the nearest integer (n' = 0)."""

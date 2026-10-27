@@ -3353,7 +3353,8 @@ def _tail(R, x, fr):
     rl = b.fma(th, PL, b.fma(tl, PH, b.neg(nre)))
     rh, rl = R.fast(rh, rl)
     # the quadrant: n' = -(sum of the -k), as MAGIC + n'; n' is congruent to
-    # n mod 4 and is not n (the reductions modulo m = 4U drop multiples of 4)
+    # n mod 4 and is not n (BELIEVED: the reductions modulo m = 4U take out
+    # multiples of 4 that n' does not count)
     counts = nqs[:-1] if R.plant == "quadrant_dropped" else nqs
     if R.plant == "quadrant_dropped":
         R.fired.add("quadrant_dropped")
@@ -3405,12 +3406,15 @@ def trig_reduction(b, x, P, *, plant=None):
         lw);
       * q = MAGIC + n' on MAGIC's integer grid (its ulp is 1), with n'
         congruent to n (mod 4): n mod 4 is q's encoding & 3. n' is the sum of
-        the quadrant counts taken out, NOT the full count n: the chunks before
-        the window and the reductions modulo m = 4 U drop multiples of 4, so
-        n' - n is a multiple of 4, and not always 0. MEASURED, fp64's 3,853
-        main-family lanes: n' runs from -4 to 6 and equals n on 121 (x = 4.0:
-        n = 3, n' = -1; x = 8.0: n = 5, n' = 1). A caller uses n mod 4 and
-        nothing more;
+        the quadrant counts taken out (k_1, k_2 and k_3), NOT the full count
+        n. BELIEVED, not shown, to be why n' - n is a multiple of 4 and not
+        always 0: the reductions modulo m = 4 U (m = 4 U in _front) take out
+        multiples of m that n' does not count, and the window leaves out the
+        chunks before c_(g-1), which the study's 2.2 says contribute
+        multiples of 4. MEASURED, fp64's 3,853 main-family lanes: n' is
+        congruent to n on every lane, runs from -4 to 6 and equals n on 121
+        (x = 4.0: n = 3, n' = -1; x = 8.0: n = 5, n' = 1). A caller uses
+        n mod 4 and nothing more;
       * `small` is nonzero where |x| < RD(pi/4); there rh = |x|, rl = +0 and
         q = MAGIC;
       * `inrange` is None where R is None, else nonzero exactly where
