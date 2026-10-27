@@ -1,8 +1,8 @@
 {
  "schema": 1,
- "made": {"by": "hw/card_stress_progress.py", "report_version": 1, "commit": "340301e7879d0ad2dee218cbb2aa812f58d1cf2c"},
- "source": {"run_ids": ["card-stress-1019"], "records": 5796, "metrics_sha256": "138f86d854c65f66f18522872859a88e8fa211855331f740782e193ad1feaa7d", "metrics_bytes": 12138283, "partial_tail": false},
- "newest": {"night": 6, "date": "2026-10-24", "start": "2026-10-24 08:19:42", "end": "2026-10-26 07:46:07", "end_epoch": 1793025967.56, "closed": true},
+ "made": {"by": "hw/card_stress_progress.py", "report_version": 1, "commit": "2031b3e7eec095f3ab661ae35271f71d91c4040b"},
+ "source": {"run_ids": ["card-stress-1019"], "records": 7690, "metrics_sha256": "5dd3977885ea210ededef47c1250bb9764f17bb5a4dd2218334fde30adec34af", "metrics_bytes": 14660638, "partial_tail": false},
+ "newest": {"night": 7, "date": "2026-10-26", "start": "2026-10-26 18:27:44", "end": "2026-10-27 07:45:09", "end_epoch": 1793112309.6, "closed": true},
  "rules": {
   "night": "A night is one run_start and the records after it up to the next one; the run resumes each night. Its date is the date it started, on the clock of the card's host.",
   "classes": "Coverage is evidence about the thing that ran. A slice swept on one RTL tree says nothing about another, so a tile item is counted per RTL tree, and a host item per host tree and compiler, because no tile computes it. A changed tree starts a new class from nothing, and nothing is summed across classes. How a run that did not record its tree is placed is the report's rule, and the class's label says which.",
@@ -159,11 +159,36 @@
    "images": [{"name": "quad", "tiles": 4, "sha256": "4f9921a25af6"}, {"name": "single", "tiles": 1, "sha256": "0639248e9c66"}, {"name": "deep", "tiles": 1, "sha256": "bbf08fb3feb6"}],
    "classes": {"tile": "t1", "host": "h3"},
    "after": {"card_s": 401751.887, "slices": 1870, "cases": 10364624434766, "classes": {"t1": {"covered": 78575849296, "complete": 40}, "h1": {"covered": 60129542144, "complete": 14}, "h2": {"covered": 0, "complete": 0}, "h3": {"covered": 77310363628, "complete": 31}}}
+  },
+  {
+   "n": 7,
+   "date": "2026-10-26",
+   "start": "2026-10-26 18:27:44",
+   "start_epoch": 1793064464.628,
+   "end": "2026-10-27 07:45:09",
+   "end_epoch": 1793112309.6,
+   "closed": true,
+   "reason": "deadline",
+   "reason_withheld": false,
+   "exit": 0,
+   "span_s": 47844.972,
+   "card_s": 47784.457,
+   "cycles": 15,
+   "legs": {"pass": 1657, "fail": 0, "timeout": 0, "no_device": 0, "parse_error": 0, "skipped": 12, "error": 0},
+   "slices": 1497,
+   "cases": 2712541898322,
+   "disagreements": 0,
+   "quick": false,
+   "dry_run": false,
+   "tree": {"commit": "49d7c3b761a1", "dirty": false, "rtl": "44b963dd6ba2", "rtl_dirty": false, "host_src": "a162f59b04b1", "host_src_dirty": false, "cc": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0"},
+   "images": [{"name": "quad", "tiles": 4, "sha256": "4f9921a25af6"}, {"name": "single", "tiles": 1, "sha256": "0639248e9c66"}, {"name": "deep", "tiles": 1, "sha256": "bbf08fb3feb6"}],
+   "classes": {"tile": "t1", "host": "h3"},
+   "after": {"card_s": 449536.344, "slices": 3367, "cases": 13077166333088, "classes": {"t1": {"covered": 78575849296, "complete": 40}, "h1": {"covered": 60129542144, "complete": 14}, "h2": {"covered": 0, "complete": 0}, "h3": {"covered": 77310363628, "complete": 31}}}
   }
  ],
  "now": {
   "campaign": {
-   "items": ["div32-hard-rne", "div64-hard-rne", "sqrt64-hard-rne", "rint64-class-rne", "scaleb64-class-rne", "div32-hard-rtz", "rint64-class-rtz", "sqrt64-hard-rmm", "div32-hard-rdn", "div32-hard-rup", "div64-hard-rtz", "div64-hard-rdn", "div64-hard-rup", "sqrt64-hard-rtz", "sqrt64-hard-rdn", "sqrt64-hard-rup", "rint64-class-rdn", "rint64-class-rup", "rint64-class-rmm", "scaleb64-class-rtz", "scaleb64-class-rdn", "scaleb64-class-rup", "conv32to64-all", "cvtto32-all-rne", "cvtto32-all-rtz", "cvtto32-all-rdn", "cvtto32-all-rup", "cvtto32-all-rmm", "cvtfrom32-all-rne", "cvtfrom32-all-rtz", "cvtfrom32-all-rdn", "cvtfrom32-all-rup", "cvtfrom64-all-rne", "cvtfrom64-all-rtz", "cvtfrom64-all-rdn", "cvtfrom64-all-rup", "scaleb32-all-rne", "scaleb32-all-rtz", "scaleb32-all-rdn", "scaleb32-all-rup", "scaleb32-wide-rne", "scaleb32-wide-rtz", "scaleb32-wide-rdn", "scaleb32-wide-rup", "conv64to32-class-rne", "conv64to32-class-rtz", "conv64to32-class-rdn", "conv64to32-class-rup", "cvtto64-class-rne", "cvtto64-class-rtz", "cvtto64-class-rdn", "cvtto64-class-rup", "cvtto64-class-rmm", "cvtfrom64-class-rne", "cvtfrom64-class-rtz", "cvtfrom64-class-rdn", "cvtfrom64-class-rup", "sqrt32-rne", "sqrt32-rtz", "sqrt32-rdn", "sqrt32-rup", "sqrt32-rmm", "rint32-rne", "rint32-rtz", "rint32-rdn", "rint32-rup", "rint32-rmm", "nextup32", "nextdown32", "logb32", "class32"],
+   "items": ["sqrt32-rne", "sqrt32-rtz", "sqrt32-rdn", "sqrt32-rup", "sqrt32-rmm", "div32-rne", "div32-rtz", "div32-rdn", "div32-rup", "div64-rne", "div64-rtz", "div64-rdn", "div64-rup", "sqrt64-rne", "sqrt64-rtz", "sqrt64-rdn", "sqrt64-rup", "rint32-rne", "rint32-rtz", "rint32-rdn", "rint32-rup", "rint32-rmm", "nextup32", "nextdown32", "logb32", "class32", "conv32to64-all", "cvtto32-all-rne", "cvtto32-all-rtz", "cvtto32-all-rdn", "cvtto32-all-rup", "cvtto32-all-rmm", "cvtfrom32-all-rne", "cvtfrom32-all-rtz", "cvtfrom32-all-rdn", "cvtfrom32-all-rup", "cvtfrom64-all-rne", "cvtfrom64-all-rtz", "cvtfrom64-all-rdn", "cvtfrom64-all-rup", "scaleb32-all-rne", "scaleb32-all-rtz", "scaleb32-all-rdn", "scaleb32-all-rup", "scaleb32-wide-rne", "scaleb32-wide-rtz", "scaleb32-wide-rdn", "scaleb32-wide-rup", "rint64-rne", "cvtto32-rne", "cvtto64-rne", "rint64-rtz", "cvtto32-rtz", "cvtto64-rtz", "rint64-rdn", "cvtto32-rdn", "cvtto64-rdn", "rint64-rup", "cvtto32-rup", "cvtto64-rup", "rint64-rmm", "cvtto32-rmm", "cvtto64-rmm", "scaleb32-rne", "scaleb64-rne", "scaleb32-rtz", "scaleb64-rtz", "scaleb32-rdn", "scaleb64-rdn", "scaleb32-rup", "scaleb64-rup", "conv64to32-rne", "conv64to32-rtz", "conv64to32-rdn", "conv64to32-rup", "cvtfrom32-rne", "cvtfrom64-rne", "cvtfrom32-rtz", "cvtfrom64-rtz", "cvtfrom32-rdn", "cvtfrom64-rdn", "cvtfrom32-rup", "cvtfrom64-rup", "conv32to64", "rem32", "rem64", "nextup64", "nextdown64", "logb64", "class64", "div32-hard-rne", "div32-hard-rtz", "div32-hard-rdn", "div32-hard-rup", "div64-hard-rne", "div64-hard-rtz", "div64-hard-rdn", "div64-hard-rup", "sqrt64-hard-rne", "sqrt64-hard-rtz", "sqrt64-hard-rdn", "sqrt64-hard-rup", "sqrt64-hard-rmm", "conv64to32-class-rne", "conv64to32-class-rtz", "conv64to32-class-rdn", "conv64to32-class-rup", "rint64-class-rne", "rint64-class-rtz", "rint64-class-rdn", "rint64-class-rup", "rint64-class-rmm", "cvtto64-class-rne", "cvtto64-class-rtz", "cvtto64-class-rdn", "cvtto64-class-rup", "cvtto64-class-rmm", "cvtfrom64-class-rne", "cvtfrom64-class-rtz", "cvtfrom64-class-rdn", "cvtfrom64-class-rup", "scaleb64-class-rne", "scaleb64-class-rtz", "scaleb64-class-rdn", "scaleb64-class-rup"],
    "named_by": "the newest run_start's --sweep-items",
    "unknown_to_the_catalog": []
   },
@@ -175,7 +200,7 @@
     "label": "RTL tree 44b963dd6ba2 (read from git at commit 881bbcb676bb)",
     "current": true,
     "served": true,
-    "nights": [1, 2, 3, 4, 5, 6],
+    "nights": [1, 2, 3, 4, 5, 6, 7],
     "total": {"items": 40, "complete": 40, "covered": 78575849296, "space": 78575849296, "pct": 100.0},
     "items": [
      {"item": "div32-hard-rdn", "space": 21235788, "covered": 21235788, "pct": 100.0, "slices": 1, "cases": 64346592, "complete": true, "level": "hard", "in_campaign": true, "complete_night": 4, "first_gap": null, "estimate": null, "estimate_note": null},
@@ -256,7 +281,7 @@
     "label": "host/ tree a162f59b04b1, compiler cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
     "current": true,
     "served": true,
-    "nights": [4, 5, 6],
+    "nights": [4, 5, 6, 7],
     "total": {"items": 31, "complete": 31, "covered": 77310363628, "space": 77310363628, "pct": 100.0},
     "items": [
      {"item": "class32", "space": 4294967296, "covered": 4294967296, "pct": 100.0, "slices": 2, "cases": 4294967296, "complete": true, "level": "exhaustive", "in_campaign": true, "complete_night": 5, "first_gap": null, "estimate": null, "estimate_note": null},
@@ -295,18 +320,18 @@
   ]
  },
  "totals": {
-  "nights": 6,
-  "closed_nights": 6,
-  "wall_s": 562160.053,
-  "card_s": 401751.887,
+  "nights": 7,
+  "closed_nights": 7,
+  "wall_s": 648502.093,
+  "card_s": 449536.344,
   "first": "2026-10-19 19:36:47",
-  "slices": 1870,
-  "cases": 10364624434766,
+  "slices": 3367,
+  "cases": 13077166333088,
   "disagreements": 0,
-  "completed_slices": 1870,
+  "completed_slices": 3367,
   "disagreement_list": [],
-  "legs": {"total": 3723, "by_status": {"pass": 3595, "fail": 0, "timeout": 0, "no_device": 0, "parse_error": 0, "skipped": 128, "error": 0}},
-  "cycles": 157,
+  "legs": {"total": 5392, "by_status": {"pass": 5252, "fail": 0, "timeout": 0, "no_device": 0, "parse_error": 0, "skipped": 140, "error": 0}},
+  "cycles": 172,
   "fully_covered": [
    {"class": "h1", "item": "conv32to64-all", "night": 1, "date": "2026-10-19"},
    {"class": "h1", "item": "cvtfrom32-all-rdn", "night": 1, "date": "2026-10-19"},
