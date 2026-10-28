@@ -139,9 +139,10 @@ sample is a function of --seed, so a run can be repeated.
            states, M's largest value plus the rounding instructions' largest
            capacities in units of Bv, which the true worst cannot pass and which
            must be under 1, at --n lanes of each of the study's five regions
-           (edge, near, zero, small, random; seeds --seed .. --seed + 4, the
-           study's box runs 121 to 125) of each format (12,000 at fp64 and 3,000
-           at fp128 and fp256 by default), rne; no sampled lane's error past
+           (edge, near, zero, small, random; seeds --seed + 0, 1, 4, 2, 3: the
+           study's 21, 22, 25, 23, 24, and its box runs' 121 to 125) of each
+           format (12,000 at fp64 and 3,000 at fp128 and fp256 by default),
+           rne; no sampled lane's error past
            its bound; the residual stated beside it; and V bit-identical across
            the five attributes on every --attrs-step-th lane (1: every one),
            so that the rne budget is every attribute's. --quick: 12 lanes a
@@ -731,6 +732,12 @@ def cmd_trig_bound(a):
     say(f"trig-bound: {_memory_line()}")
 
 
+# trig-budget's seed of each region, from --seed: the study's order and its
+# seeds 21 to 25 (edge, near, small, random, zero; the zero region was added
+# after the first runs), 121 to 125 on its box
+BUDGET_SEED_OFFSET = {"edge": 0, "near": 1, "small": 2, "random": 3, "zero": 4}
+
+
 def cmd_trig_budget(a):
     """The first-order budget at the study's regions and sizes, sin, cos and
     tan (parcel M2G2b): the bound under 1, no lane past it, the residual, V the
@@ -749,14 +756,15 @@ def cmd_trig_budget(a):
         n = a.n if a.n else (12 if a.quick else sizes[fmt.name])
         for fn in _trig_fns(a.fn):
             def build(r, fn=fn, fmt=fmt):
-                return T.build_of(fn, fmt, r) if a.guard is None else                     ml.build(fn, fmt, r, guard=a.guard)
+                return (T.build_of(fn, fmt, r) if a.guard is None
+                        else ml.build(fn, fmt, r, guard=a.guard))
             b = build(T.RNE)
             attrs = None if a.no_attrs else {r: build(r)
                                              for r in sf.RND_MODES}
             G = b.meta["G"]
             worst = 0.0
             for region in regions:
-                seed = a.seed + T.REGIONS.index(region)
+                seed = a.seed + BUDGET_SEED_OFFSET[region]
                 xs = T.sample(fmt, region, n, seed)
                 t = time.perf_counter()
                 out, s = TB.check_budget(
@@ -1052,8 +1060,9 @@ def main(argv=None):
                    help="lanes a region (default 12,000 at fp64, 3,000 at "
                         "fp128 and fp256)")
     p.add_argument("--seed", type=int, default=121,
-                   help="the first region's seed, one more each (the study's "
-                        "box runs: 121 to 125)")
+                   help="edge's seed; near, small, random and zero take one "
+                        "more each, in the study's order (its box runs: 121 "
+                        "to 125; its own runs 21 to 25)")
     p.add_argument("--attrs-step", type=int, default=1,
                    help="V under the five attributes on every this many "
                         "lanes (default 1: every lane)")
