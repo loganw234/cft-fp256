@@ -9123,11 +9123,18 @@ def scn_rate_probe(env: Env, src: str = HERE) -> list:
     except Exception as e:           # a report that cannot read the probe legs the run wrote fails here, by name, and the argument checks below still run
         c("probe: the report reads the run's probe legs, and gives its probe, its table and its card-alone cells, without failing", False, f"{type(e).__name__}: {e}")
     # -- argument checks: a flag that cannot mean what it says is refused before anything starts
-    base_cmd = [sys.executable, "-B", "-I", os.path.join(src, "card_stress.py"), "--root", ROOT, "--out", os.path.join(env.tmp, "probe-args"), "--dry-run"]
+    # --quick (send-back 1): the refusals are in parse_args, before main() does anything (READ: card_stress.py, the --rate-probe-seconds rules after --sweep-chunk's), so they come first with it as without it;
+    # a flag that was NOT refused (a plant of these rules) then starts the quick smoke and not the full dry run, which outlasted the 60 s on amd-arc-box (box run C, plant 114)
+    base_cmd = [sys.executable, "-B", "-I", os.path.join(src, "card_stress.py"), "--root", ROOT, "--out", os.path.join(env.tmp, "probe-args"), "--dry-run", "--quick"]
     for args, say in ((["--rate-probe-seconds", "1.5"], "give --rate-probe too"), (["--rate-probe", "--rate-probe-seconds", "3"], "at most 2.5"),
                       (["--rate-probe", "--rate-probe-seconds", "0"], "above 0"), (["--rate-probe", "--rate-probe-seconds", "-1"], "above 0")):
-        p = subprocess.run(base_cmd + args, capture_output=True, text=True, timeout=60)
-        c(f"probe: {' '.join(args)} is refused before anything starts, by name ({say})", p.returncode == 2 and say in p.stderr and not os.path.exists(os.path.join(env.tmp, "probe-args", "metrics.jsonl")),
+        name = f"probe: {' '.join(args)} is refused before anything starts, by name ({say})"
+        try:
+            p = subprocess.run(base_cmd + args, capture_output=True, text=True, timeout=60)
+        except subprocess.TimeoutExpired:       # the flag was not refused and the run it started did not end in time: this check, red, and on to the next case (not a crash of the scenario)
+            c(name, False, "the flag was not refused, and the run did not end in the 60 s given")
+            continue
+        c(name, p.returncode == 2 and say in p.stderr and not os.path.exists(os.path.join(env.tmp, "probe-args", "metrics.jsonl")),
           f"rc {p.returncode}: {p.stderr[-200:]}")
     return out
 
