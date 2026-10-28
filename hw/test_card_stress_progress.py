@@ -20,7 +20,9 @@ Its truth is the oracle's, from the spec alone (the format and group of every it
 reducer's data, the report's and the page's are held to it: each row's format and group, each class's totals by group, a night's state by group (written only once a
 class has a wide row, so the nights before it are the nights they were), the base group's figures unmoved by the wide group joining, the page's card, item list and
 chart in node (the older group's line point for point as it was), every format passing the guard against a path-shaped string, and, over a data file WITHOUT the new
-fields, the page drawing the very tree that 3ec0081c's page drew (a digest of the whole stub DOM, from running that page through this harness).
+fields, the page drawing the very tree that 3ec0081c's page drew (a digest of the whole tree under the page's #app element in the stub DOM - every node's tag,
+attributes, style, hidden flag, class and text - from running that page through this harness; the #status element, hidden when a file draws, is not in it,
+so a change to it alone is not seen by the digest).
 
 The last line is "progress test: N checks, F failed, K skipped"; the exit status is 0 only if F is 0.
 """
@@ -52,7 +54,8 @@ FIXTURE = os.path.join(HW, "card_stress_fixtures", "progress-synthetic.jsonl")
 FIXTURE_WIDE = os.path.join(HW, "card_stress_fixtures", "progress-synthetic-wide.jsonl")
 NIGHT7 = os.path.join(HW, "card_stress_fixtures", "nightly-night7.json")
 # What the page of 3ec0081c drew over a data file of the shape its reducer made (the run without wide items, the new fields taken off), as the digest of
-# the whole tree it builds in the stub DOM, with the clock at LEGACY_CLOCK (the page says how long ago the newest night ended). Made once by running that
+# the whole tree it builds under #app in the stub DOM (#status, hidden when a file draws, is not in the digest), with the clock at LEGACY_CLOCK (the
+# page says how long ago the newest night ended). Made once by running that
 # page (git show 3ec0081c:site/nightly.html) through this very harness; the page now must draw the same tree over such a file.
 LEGACY_CLOCK = 1792650000000
 LEGACY_DOM = "c8aa1396ddcc7be0457d479cb6de09be623ad34752cad269f96c5c570636e2e4"

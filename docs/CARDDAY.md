@@ -2489,8 +2489,10 @@ the item's format in a tag; the **chart** has a line for each class and group (t
 an older group's line is the line it was. A class with no wide item is drawn as it was. The data file gains, with `SCHEMA` still 1: `format` and `group` on every row; a
 class's `groups` (items, complete, covered, space and share of each group it has rows of), beside `total`, which stays over every row; `rules.groups`; and a night's
 `after.groups`, written only for a class that has a wide row served, so **the earlier nights of the file are the nights they were** (the scheduler's publish step compares
-every field of them). **A data file without the new fields renders exactly as before** (MEASURED: the committed night-7 file, the whole tree the page builds in node, old
-page and new, byte for byte; `hw/test_card_stress_progress.py` keeps the check). Morning step 2 remakes the whole file, so the first file made by these tools has the new
+every field of them). **A data file without the new fields renders exactly as before** (MEASURED: the committed night-7 file, the whole tree the page builds under its
+`#app` element in node, old page and new, byte for byte; the `#status` element, hidden when a file draws, is not in that digest;
+`hw/test_card_stress_progress.py` keeps the check, since 2026-10-28 on a copy of that file, `hw/card_stress_fixtures/nightly-night7.json`, so
+that the morning's data commit does not retire it). Morning step 2 remakes the whole file, so the first file made by these tools has the new
 fields throughout; step 3's `git diff --stat` then shows `now` changed (rows and classes gain fields) and the nights untouched until a wide row is served, and `--check`
 of night 7's committed file against its run with these tools names the new fields as missing from the file, which is the difference between the tools, not a defect of
 either. Known limits: the status file's coverage lines (`hw/card_stress.py`) still sum the groups, so a morning that quotes them mixes the 71 with the wide items; an item
