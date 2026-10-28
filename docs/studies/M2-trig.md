@@ -154,10 +154,11 @@ to 3.5, and what they move:
   builds early (MEASURED). V is bit-identical across the five attributes on
   2,700 lanes (300 a function and format), so the rne budgets are every
   attribute's (MEASURED). 3.6's items 6 and 7 are planted in the tool and red:
-  a RECIP_SEED's source frozen gives tan 2^+46.5 Bv against a largest error
-  found of 0.014 (the model's 2^+46.7 against 0.048), and the error-free phases
-  recomputed a method error of 6 x 10^294 Bv and a bound of 2.8 x 10^297 on 60
-  lanes (the model's 2^+822 on four).
+  a RECIP_SEED's source frozen gives tan 2^+46.5 Bv on the golden stage's 60
+  lanes (12 a region, seed 5) against a clean largest error found of 0.014 (the
+  model's 2^+46.7 against 0.048), and the error-free phases recomputed a method
+  error of 6 x 10^294 Bv and a bound of 2.8 x 10^297 on the same 60 lanes (the
+  model's 2^+822 on four).
 - **3.4's rate cells stand, and one column moves.** At seed 3, 2,000 arguments
   a format (rate.py's lanes), all 18 cells have the study's counts, no unmarked
   lane wrong and every guess right (MEASURED). The "own prediction" column is

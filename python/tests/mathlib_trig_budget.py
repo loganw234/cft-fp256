@@ -43,9 +43,14 @@ THE CHECK `budget` (check_budget) has legs, each a finding that begins with
 "budget:":
 
   bound      the budget's bound M_max + capacities under 1
-  lane       no sampled lane's measured error past its bound (the tool's own
+  lane       no sampled lane's measured error past its bound by more than
+             0.1% (`Emax > bound * 1.001`, the six's check_budget's tolerance,
+             copied so that the two tools judge alike and meant for float
+             noise in the sums, not derived: an error up to 0.0001 Bv at a
+             bound of 0.1 passes; it never acted, the largest Emax / bound of
+             the 45 cells at the model's lanes is 0.983). The tool's own
              soundness check: a fault of the fragment moves M and the
-             capacities with it, a fault of the tool does not)
+             capacities with it, a fault of the tool does not
   residual   what first order leaves out, |V - f - (M + sum delta_i s_i)| / Bv,
              is MEASURED and stated beside the bound and is not bounded; the
              bound with it added is held under 1 as the study holds it (3.2:
@@ -441,7 +446,7 @@ def judge(s, where, expect=None):
         out.append(f"{where}: the budget's bound is {bound:.3g} Bv (M "
                    f"{s['Mmax']:.3g} + capacities {s['S_cap']:.3g}), not "
                    f"under 1")
-    if s["Emax"] > bound * 1.001:
+    if s["Emax"] > bound * 1.001:           # the six's 0.1% (see the docstring)
         out.append(f"{where}: a lane's error {s['Emax']:.3g} Bv is past the "
                    f"budget's bound {bound:.3g}")
     if bound < 1 <= bound + resid:

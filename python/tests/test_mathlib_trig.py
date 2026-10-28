@@ -2198,6 +2198,50 @@ def test_each_leg_of_census_counts_can_fail_alone():
     assert len(out) == 1 and "the theory calls clear" in out[0]
 
 
+def test_each_leg_of_census_counts_can_fail_on_the_minimisers_input():
+    """The same legs on the other census, the minimisers' neighbours (fp128 sin
+    under rtz: the study's 459 arguments, 48 marked), the fragment's results
+    taken once and doctored. Silencing one marked lane gives TWO findings, which
+    fire together: the count (47 against 48) and the lane the theory demands
+    marked. Each leg alone, with the study's count (or the count moved to the
+    doctored lanes') where the doctoring would also move it: the count, the
+    theory's two legs, a lane wrong and a marked guess wrong."""
+    f = ml.fragment("sin", FP128, RTZ)
+    xs = TF.minnbr_arguments(FP128)
+    res = {x: ml.evaluate(f, x) for x in xs}
+
+    def ev(target=None, how=None):
+        def run(g, x):
+            return how(*res[x]) if x == target else res[x]
+        return run
+    out, t = T.check_census_counts(f, "minnbr", evaluator=ev())
+    assert out == [] and t.n == len(xs) == 459 and len(t.marked) == 48
+    marked = t.marked
+    clear = next(x for x in xs if x not in set(marked)
+                 and TF.classify(FP128, RTZ, x, None, "sin") == "clear")
+    unmark = lambda b, w: (b, w & ~ml.MARK)          # noqa: E731
+    out, _t = T.check_census_counts(f, "minnbr",
+                                    evaluator=ev(marked[0], unmark))
+    assert len(out) == 2 and "47 of the census's 459" in out[0] \
+        and "the study's count is 48" in out[0] \
+        and "the theory demands marked" in out[1]
+    for text, kw in (
+            ("are marked, the study's count is 49", dict(want=(0, 49))),
+            ("the theory demands marked", dict(
+                want=(0, 47), evaluator=ev(marked[0], unmark))),
+            ("the theory calls clear", dict(
+                want=(0, 49), evaluator=ev(clear, lambda b, w:
+                                           (b, w | ml.MARK)))),
+            ("census lanes are wrong unmarked", dict(
+                evaluator=ev(clear, lambda b, w: (b ^ 1, w)))),
+            ("marked guesses are wrong", dict(
+                evaluator=ev(marked[0], lambda b, w: (b ^ 1, w))))):
+        kw.setdefault("evaluator", ev())
+        out, _t = T.check_census_counts(f, "minnbr", **kw)
+        assert len(out) == 1 and text in out[0] \
+            and out[0].startswith("census_counts: minnbr "), (text, out)
+
+
 # =====================================================================
 # parcel M2G2b: the plants, the tables, the commands
 # =====================================================================
@@ -2228,6 +2272,7 @@ def test_every_check_of_m2g2b_has_a_plant_red_in_it_and_a_clean_test():
                  "test_each_leg_of_windows_can_fail_alone",
                  "test_each_leg_of_the_scan_can_fail_alone",
                  "test_each_leg_of_census_counts_can_fail_alone",
+                 "test_each_leg_of_census_counts_can_fail_on_the_minimisers_input",
                  "test_each_leg_of_family_list_can_fail_alone",
                  "test_each_tool_plant_of_the_budget_is_red_in_its_own_leg",
                  "test_the_attributes_leg_sees_a_directed_rounding_before_v",
