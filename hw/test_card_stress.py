@@ -63,6 +63,16 @@ Three kinds of group, then the plants (the groups, by name, are in hw/test-card-
             with the flag turned off in a copy). The plants of HXd (CARD_STRESS_PLANT='HXd: ') also run the report's test (`plant_report`) and the page's
             (`plant_progress`, which lays out hw/ and site/ side by side so that a plant of site/nightly.html has its own page) on a plant's copy of the code.
 
+  probe    (parcel TP, 2026-10-28) the card's rates and the probe leg: the driver's dry run with --rate-probe (the quad's tile 1 alone, then its four tiles together, one
+            process a tile; the single's and the deep's one; kind `probe`, no sweep, no rate, no skipped leg), the same run without the flag (nothing recorded, built or
+            written, the other legs and the sweep's coverage one for one the run with the probe's), what the probe does when the card misbehaves (a check red, no device,
+            the software backend, an image without fp256), once an image a process and again after a resume, the deadline's estimate, the flag's arguments, and
+            host/tools/rate_probe.c built against a libcft.a of the software backend and run with "-" (POSIX with cc and make: skipped by name elsewhere): its check passes,
+            goes red under both sabotage modes, refuses by name what the library cannot run, and refuses a bad command line. The parser on three real logs
+            (rp-sw*.txt) and what it refuses is in `parsers`; the real make with --rate-probe is in `buildreal`. Two development aids of the plants: CARD_STRESS_PLANT_EXCEPT=<text>
+            leaves out the plants whose name contains <text> (`TP: ` is parcel TP's), and CARD_STRESS_PLANT_APPLY_ONLY=1 makes no copy and runs no scenario, only checks that
+            every edit of every plant matches exactly once where it is (a way to see that a change moved no plant's anchor text).
+
   testfiles   (parcel TG, 2026-10-23) hw/test_card_stress_report.py and hw/test_card_stress_progress.py, each run as a process and made checks of this suite: a crash,
             a hang, a missing summary line, an exit status or a failed count above 0, each FAIL line; their SKIP lines are passed on as this suite's, by name and with the
             file's reason; eleven controls on stand-in files, run first, show those checks able to fail.
@@ -7342,7 +7352,13 @@ def plants(env: Env) -> None:
                   '            if self.streak >= self.a.max_card_failures:')
     # CARD_STRESS_PLANT=<text>: a development aid - run only the plants whose name contains it, and no control
     pick = os.environ.get("CARD_STRESS_PLANT")
-    if not pick:
+    # two more development aids (parcel TP, 2026-10-28), for a reader who must run the older plants apart from a parcel's, or check that a change left every
+    # plant's anchor text in place without running a scenario: CARD_STRESS_PLANT_EXCEPT=<text> leaves out the plants whose name contains <text> (the control
+    # still runs), and CARD_STRESS_PLANT_APPLY_ONLY=1 makes no copy and runs no scenario: each plant is one check, that every one of its edits matches exactly
+    # once in the file it names (where this tree keeps it), which is what make_plant_copy would refuse
+    leave_out = os.environ.get("CARD_STRESS_PLANT_EXCEPT")
+    apply_only = bool(os.environ.get("CARD_STRESS_PLANT_APPLY_ONLY"))
+    if not pick and not apply_only:
         ctl = make_plant_copy(env, "control", [])
         for nm, fn in (("normal", scn_normal), ("fail", scn_fail_and_parse), ("nodevice", scn_nodevice),
                        ("parsers", plant_parsers),
@@ -8801,8 +8817,24 @@ def plants(env: Env) -> None:
          [("Makefile", 'all: libcft.a $(SHLIB) $(TOOLS) $(EXAMPLES)', 'all: libcft.a $(SHLIB) $(TOOLS) $(EXAMPLES) rate-probe$(EXE)')],
          lambda env, src: group_probe_tool(env, src), ["host/Makefile's own rule makes it, with no warning"]),
     ]
+    where = {"nightly.html": os.path.join(ROOT, "site", "nightly.html"), "rate_probe.c": os.path.join(ROOT, "host", "tools", "rate_probe.c"),
+             "Makefile": os.path.join(ROOT, "host", "Makefile"), "figure_extracts.py": os.path.join(ROOT, "python", "figure_extracts.py")}
     for name, edits, fn, expects in P:
         if pick and pick not in name:
+            continue
+        if leave_out and leave_out in name:
+            continue
+        if apply_only:
+            bad = []
+            for fname, old, _new in edits:
+                try:
+                    with open(where.get(fname, os.path.join(HERE, fname)), "r", encoding="utf-8", newline="") as fh:
+                        n_ = fh.read().count(old)
+                except OSError as e:
+                    n_ = f"unreadable: {e}"
+                if n_ != 1:
+                    bad.append((fname, n_, old[:60]))
+            check(f"plant [{name}]: each of its {len(edits)} edit(s) matches exactly once", not bad, str(bad))
             continue
         try:
             d = make_plant_copy(env, re.sub(r"\W+", "-", name)[:28], edits)

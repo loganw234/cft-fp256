@@ -2372,6 +2372,84 @@ targets"; `cvtfrom128-class` and `cvtfrom256-class` "the integer sources -> fp12
 clause5_soak.c's table of its wide modes (`WJOBS`: each job's wide format, and a conversion's destination), and held to it by the suite
 (`format_table_checks`). The 60 items are in the report's and the page's `wide` group, as HXc's are (the catalog's `mpfr` flag).
 
+### The card's rates (added 2026-10-28, parcel TP): cases a second a tile by op and format, and the probe leg
+
+On 2026-10-27 Logan asked whether the measurement metrics should also measure throughput at different precisions, "as now each of the formats gets
+real work". The answer is two pieces that read the same records two ways: **the night's rates**, taken from the sweep slices the run already makes, and
+**the probe leg**, a short run per image with the oracle off that reads the card alone. The page's redesign (Logan, 2026-10-27) is a later parcel and will
+lead with these figures; this one makes them.
+
+**What a rate is.** A slice's own `rate.value`, the figure the driver records for every sweep leg (`finish_leg`): its cases over its WHOLE duration, the soak
+process's start and the host's oracle in it, in cases a second. So it is the PIPELINE's pace on one tile, never the tile's alone; the probe's figure is that
+(below), and the ratio of the two names what the oracle and the process cost a night. A case is one element through the op. A **hard** item's index holds k cases
+(`HARD_SPACE`: 4 for the divisions, 1 for the square roots) of which the tool compares `counts.cases` and skips the rest (a skipped index skips all its k slots);
+the rate counts the cases the tool compared and not the skipped slots, so over an item's whole space they add to the catalog's `HARD_WHOLE` first figure
+(div32-hard: 64,346,592 cases, with 20,596,560 skipped, 84,943,152 = 4 x 21,235,788 together), never to k times its indices. The report's test holds that.
+
+**The rows** (the report's last section, `RATES BY OP AND FORMAT`; `rates` in its `--json`, the last key, so that the old summary is the new one without it).
+A row is an (image, op, format, level): the sweep slices that ran on a tile of the card (reach tile), at the exhaustive or hard level, with status pass and a
+usable rate, and nothing else. `op` is the operation the tile computes - div, recip (cft_div with the dividend 1, kept apart), sqrt, rint, scaleb - from
+`RATE_OP`, a table of the catalog's op words which the report's test holds to the catalog both ways; a row's `from` names the catalog ops pooled in it
+(scaleb32-all and scaleb32-wide, division's hard cases and its widened fp64 ones, the reciprocal's fp32 slice and its low-bit windows). A row shows, for each tile
+(1 to 4 on the quad; `only` for the single and the deep, whose records name no tile), the slices, the median cases a second, the least and the most; for the quad
+also `all` (the four tiles' slices pooled, "the median a tile") and `sum of N` (the tiles' medians added, and their least and most, which are then bounds and not
+measured quad rates). Every other sweep leg is counted in one of seven buckets, each named in the text with its reason, and the counts add to the legs seen:
+**class** (one case a call: a slice times the soak's launch, not a rate), **host** (reach host or the CPU pool: the CPU computes it), **random** (a count of cases
+from a seed, not an exhaustive slice), **skipped**, **unknown** (an item or op the catalog does not name), **not_pass** and **no_rate** (no rate in cases/s above 0, no
+count of cases, or a tile that is not a tile number). A figure is never zero for want of data: a row with no slice does not exist.
+
+**The data file.** `site/nightly.json` gains ONE top-level field, `rates` (the file's last key): for each night, from that night's own records, `rows` (one line a row:
+`all`, the tiles and the sum as figure lists, named by `columns`), `seen`, `used` and `left_out`, and `probe` (null where no probe ran). It is not a field of `nights[i]`,
+deliberately: the scheduler's publish step compares every field of the nights the published file holds, and its comparison is symmetric on keys, so a field added to an
+earlier night would be refused as `earlier-night-changed`. A top-level field leaves every night the night it was (MEASURED, the base reducer's file and this reducer's, both
+run outside any checkout, on each of the lead's seven copies, resume-1020 to nightly-1027: equal in every key and every night but for `rates`), and it gives the nights before
+these tools their rows as well, derived from the slices their records hold. **Morning step 2 remakes the whole file, so the first file made by these tools has `rates` for
+every night; step 3's `git diff --stat` shows one new block at the end of the file and the nights untouched.** On a file made before the field (MEASURED on night 8's, as
+469df913 has it: 8 nights, made by the tools at 02a5f6aa): `--check` of it against nightly-1027's run with these tools, run where git is readable, exits 1 and its first
+differences are one, `.rates: missing from the file`, which is the difference between the tools and not a defect of either; and the page of 02a5f6aa and this page draw the
+same tree over it, node for node (digest equal at two clocks), with no rates section. A file whose nights have no rows draws as one without the field. The file grows by about
+12 lines a night on nights of the base items (MEASURED on the 1026 copy: 442 lines to 524 over its seven nights) and by a line a row on nights of the whole catalog: at most 54
+rows (COMPUTED from the catalog: 18 (rate op, format, level) combinations among its tile items at the exhaustive and hard levels, on three images; night 1027's real rows
+are 17, MEASURED).
+
+**The page** draws, beside the headline, a section "What a tile does a second": for each image that has rows on the newest night that has any, a small table, the
+formats (fp32 to fp256) down and the ops (hard-case rows in their own column) across, each cell the row's median a tile as the file gives it (millions to two places,
+thousands to one), with the slices, the least, the most and the ops pooled on hover, and the probe's card-alone figure and ratio beside it on a night that had one. It
+computes nothing. No redesign: that is the next parcel's.
+
+**The probe leg** (`--rate-probe`, off by default; `--rate-probe-seconds S`, 2 by default, at most 2.5). `host/tools/rate_probe.c` (parcel HX's probe made a tool, built the
+way the soaks are: `make -C host XRT=1 XRT_ROOT=... rate-probe`, a target of its own, not in `all`) runs div, sqrt, rint, scaleb, fma, mul and add at fp32, fp64, fp128
+and fp256 (28 rows), one call of 4,096 elements at a time on the tiles `CFT_XRT_TILES` names. For each row it first checks one call against the software backend, bytes
+and flags, and only then times the device call back to back for the stated seconds with no reference computed: **the oracle off** is the timed part, and a probe that
+timed wrong answers would be worth nothing, so a row whose check is red is a failing leg. A row the library cannot run on the image (anything but CFT_OK to the
+checking call: CFT_ERR_UNSUPPORTED for a format the image lacks) is **refused by the library's own name and never timed**; a refusal is named and is not a failure. One line
+a row, `rate-probe: row op=... format=... tile=... elements=... seconds=... rate=... check=ok`, then the counts and the verdict; its negative control is
+`CFT_RATE_PROBE_SABOTAGE=1` (a data bit of the device's first result flipped: every row reads one element different, exit 1) and `=2` (a flag bit: every row reads the
+flags different, exit 1). The driver runs it once an image a night, at the image's first visit of the process (a resumed run is a process a night), after the battery
+and before the sweep: the quad's tile 1 alone (phase `alone`), then its four tiles at once, a process a tile as the sweep's waves run (phase `together`); the single and
+the deep once. One leg record a process: kind `probe`, leg `rate-probe`, `tile`, the rows and the phase in `extra`, `counts` {rows, timed, refused, red}, no sweep and no
+rate - it is never coverage, a slice, an interval or a skipped leg (a probe that cannot run, as when its estimate would end past the deadline by more than the grace, says
+so in an event `rate_probe_not_run`) - and an event `rate_probe` an image. **Its time comes out of the visit's sweep minutes**, and counts as card time in the report. The
+report puts the probe's checked rate per tile (the tiles together, else one alone) beside the pipeline's median for the same (image, op, format) and gives their ratio;
+where no probe ran it says so and the cells are `-`.
+**Card time, ESTIMATE** (from the HX study's 2 s a row, 28 rows a process): about 60 s a process, so about 2 minutes on the quad (two phases) and 1 on the others,
+inside the 3 minutes an image that was the budget for it; the driver's estimate is `phases x (28 x (seconds + 0.25) + 10)`, 146 s on the quad at the default. Off,
+nothing is recorded, built or written that was not before (the suite holds it).
+**Turning it on, and what to read** (the lead's, on amd-arc-box; agents never touch it). First the tool alone, with nothing else on the card:
+
+```
+make -C host XRT=1 XRT_ROOT=/opt/xilinx/xrt rate-probe
+ldd host/rate-probe | grep xrt          # one line; none means the build left XRT out
+CFT_XRT_TILES=1 host/rate-probe $HOME/cardday-rev8q/cft_hw_quad.xclbin 2 > probe-tile1.txt
+tail -3 probe-tile1.txt
+```
+
+It should end `28 rows, 28 timed, 0 refused, 0 red` and `every check ok`, exit 0; the fp64, fp128 and fp256 rows of div, sqrt, rint and scaleb should be of the
+order of the HX study's per-tile figures (docs/studies/HX-wide-sweeps.md, 5.1: div 1.586, 0.947 and 0.542 M elements a second; sqrt 1.458, 0.901 and 0.505) -
+BELIEVED the same loop, to be read, not assumed. Then the smoke: add `--rate-probe` to the launcher's driver line (the lead's launcher scripts, outside the tree)
+for one `--quick` run, and read the three `rate_probe` events and the report's last section; then on for the night. The tool's real run on the card is not made by
+this parcel (docs/VALIDATION.md, TP). A night with a probe leg that is not `pass` has a failing leg: a red row is a wrong answer from the card.
+
 ### Failure policy, processes, and what it guarantees
 
 - **A failing leg** keeps its whole log, says so in its record, and the run goes on. So does an

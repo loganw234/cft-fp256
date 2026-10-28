@@ -23,9 +23,12 @@
 #
 # Groups for --only: parsers commands standin normal cadence fail timeout deaf nodevice cardlost stopfile deadline
 # rotation diskfloor guard sweep disagree telemetry build buildreal internal signal torn disable sweepall
-# pool seeds trees items chunk records notes resume wide testfiles report plants. `deaf` (a process that ignores SIGTERM),
+# pool seeds trees items chunk records notes resume wide probe testfiles report plants. `deaf` (a process that ignores SIGTERM),
 # `signal` and `buildreal` need POSIX, and so does the pool group's niceness check and the records and wide groups'
-# real (not dry) runs over test doubles: each is skipped by name elsewhere. `wide` (parcel HXc, 2026-10-26): the 102
+# real (not dry) runs over test doubles: each is skipped by name elsewhere. `probe` (parcel TP, 2026-10-28): the card's rates - the probe leg in the dry run with and
+# without --rate-probe, what it does when the card misbehaves, and host/tools/rate_probe.c on the software backend (POSIX with cc and make; skipped by name
+# elsewhere). The plants of parcel TP are CARD_STRESS_PLANT='TP: '; CARD_STRESS_PLANT_EXCEPT='TP: ' leaves them out, and CARD_STRESS_PLANT_APPLY_ONLY=1 only
+# checks that every plant's edit matches once where it is. `wide` (parcel HXc, 2026-10-26): the 102
 # wide-format items, --mpfr-prefix and the build line with MPFR=1. `trees` skips its
 # one check of the recorded tree, by name, where git cannot read this tree (a worktree whose .git file
 # names a Windows path, read from WSL). The four groups of parcel DR3 (2026-10-21): `items` the 35 hard-case
