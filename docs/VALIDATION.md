@@ -25100,3 +25100,270 @@ commit that carries this paragraph; the entry above is left as written, and what
   (14:06:41); `check_docs_index.py`, `project_figures.py --check` and `git diff --check` after this paragraph. The WSL runs of the entry above stand for the product, which did not change; (6)'s run of the page's test and of the
   twelve `[2]` plants was at 48f0b89f, and this commit changes the comment of hw/card_stress_lib.py, the label and the docstring of one check and seven plants' expectations of hw/test_card_stress.py, and one `else` of the
   page's test.
+
+## 2026-10-27 - the wide class modes: twelve modes of clause5-soak at fp128 and fp256, rint, scaleB and the conversions against mpfr-check's own clause-5 rules (moved into a header both tools include, `mpfr-check 24 7` byte for byte), and the fp32 slice through the wide rint against the CPU's fp32 rint; built only with `MPFR=1`; their 60 items in the stress driver after HXc's 102, the driver's check of the built clause5-soak, the stand-ins and the suite; the lead's box run of seven of them on the quad and the host pool, all passed (parcel HXb, Opus 5.5)
+
+The third build of the wide-format sweeps (docs/studies/HX-wide-sweeps.md, section 6's row 3: the study's 5.4 ranks 3 and 5,
+and 5.5's host items; Logan's answers of 2026-10-26 in docs/ROADMAP.md). docs/CARDDAY.md, "The wide class modes" and "The
+wide clause-5 items in the driver", say what each mode and item is, the claim a pass over it makes, by space and level, and
+how to run them. Every figure below says whether it was MEASURED (the run named), READ or COMPUTED. **This parcel touched
+neither the card nor amd-arc-box**: the lead ran its box script (below).
+
+**What was built** (part one 74be15aa, part two 527f2777, two fixes of part two, 232b512c in the suite and 93034991 in
+the driver, both below; on 3ec0081c).
+- **The oracle, one copy** (`host/tools/mpfr_c5.h`, new). mpfr-check's clause-5 rules moved out of `host/tools/mpfr_check.c`
+  into a header beside mpfr_ieee.h, which it includes: roundToIntegral by attribute (an sNaN's invalid in both variants, the
+  Exact variant's inexact iff the value moved, a zero keeping the operand's sign), scaleB (the exact product, its clamp in
+  the oracle only, one rounding), convertFormat, cvt_from (the integer exactly, through mpz) and cvt_to (a rint at p + 2 bits,
+  the range test in mpz, the contract's RISC-V FCVT table for what a target cannot hold, invalid before inexact). Two changes
+  of form, none of substance: the attribute is a `cft_round` (mpfr-check passes its mode table's), and the bodies are
+  functions. mpfr_check.c calls them; its own results are unchanged (below). Every MPFR function it calls links against
+  WSL's MPFR 4.1.0 (MEASURED: the `MPFR=1` build there) as well as the desktop's 4.2.2. It is not in mpfr_ieee.h, which
+  divsqrt_soak.c includes: there its functions would be unused statics, which warn under `-Wall` (BELIEVED, from the
+  control below, which shows one), and divsqrt_soak.c is untouched.
+- **The build: option (b), as HXa's.** Every new mode is inside `#ifdef CFT_SOAK_MPFR` in `host/tools/clause5_soak.c`; its
+  two recipes in `host/Makefile` take the existing MPFR words (`SOAK_MPFR_CF`, `SOAK_MPFR_LD`, `SOAK_MPFR_DEPS`, one text
+  each). **The default tool is 3ec0081c's**: its object, compiled with the Makefile's flags under one file name, with and
+  without `-DCFT_SOAK_HAVE_ROUNDEVEN=1`, is 3ec0081c's byte for byte (MEASURED, WSL cft2204, gcc 11.4, `cmp`), and a wide word
+  given to it is refused with its usage text, exit 2, as any word it does not know (it is not divsqrt-soak's "unknown op").
+  The `MPFR=1` build prints one warning line, the soak's `#pragma STDC FENV_ACCESS`, already known to the driver: mpfr_ieee.h's
+  `ieee_oracle`, which clause5_soak.c does not call, would warn under `-Wall`, so the include of mpfr_c5.h sits between
+  `#pragma GCC diagnostic push`, `ignored "-Wunused-function"` and `pop`; the test's CONTROL builds the same source without
+  those three lines and sees the warning, so the pragma takes a real warning away (MEASURED, WSL).
+- **The twelve modes**, each `<lo> <hi> <attribute>` with the verdict clause `, E encodings, S skipped`, all five attributes,
+  S = 0 in every one: `rint128-class` (137,344 indices, k = 2), `rint256-class` (537,600, k = 1), `scaleb128-class` (317,448,
+  k = 2), `scaleb256-class` (1,370,952, k = 1) - the tile modes, each case alone and in each lane of its format behind benign
+  operands (1.0, +0), two fp128 lanes and one fp256 unit (docs/ARCHITECTURE.md; `CLS_LANES_128`, `CLS_LANES_256`);
+  `conv128to64-class` (1,979,424), `conv256to128-class` (63,208,320), `cvtto128-class` and `cvtto256-class` (91,872 and
+  205,440, k = 4: every lane-target pair compared, those a target cannot hold against the FCVT table, so none skipped, where
+  cvtto64-class, whose native oracle cannot answer them, skips them), `cvtfrom128-class` and
+  `cvtfrom256-class` (50,923 each; exact at these formats, so the claim says "exact conversion") - the host's; and
+  `rint128-f32`, `rint256-f32` (2^32 each, k = 1: a case is an encoding through both variants, as rint32 counts; the study's
+  5.3 counts its two calls as k = 2) against rint32's own oracle, the CPU's fp32 rint and its flag rule: the wide result must
+  equal the fp32 result widened, an exact identity. The class spaces are python/c5_class_enum.py's, generalized to 16- and
+  32-byte operands, and equal the study's `hx_spaces.out` (MEASURED: `dump <mode> size` of the twelve, and `--sizes`). `dump`
+  prints every operand (32 and 64 hex digits; a cvtfrom source's 16) and is held line for line to the Python reference; each
+  run names its oracle on stderr in `SOAK_ORACLE_MPFR`'s shape (`oracle: MPFR <v> with GMP <v>, mpfr_ieee.h's emulation;
+  mpfr_c5.h's clause-5 rules`); `CFT_SOAK_SABOTAGE=1` fails each, naming the operands.
+- **python/c5_class_enum.py**: the lanes by format (8, 4, 2, 1), the wide job names and dump lines, `--sizes` with the ten wide
+  spaces, its constructive check at p = 113 and 237 where it runs in seconds (seven spaces; conv256to128-class's 63 M indices
+  left out, cvtfrom's drop no bit), a job or format it cannot enumerate refused by name; python/tests/test_c5_class_enum.py
+  11 tests more.
+- **The catalog** (`hw/card_stress_lib.py`). `sweep_items(mpfr=True)` appends 60 items after the 227 (HXc's 102 after the
+  125), so the first 227 are as they were, item for item (the suite's driver check, MEASURED below): the twelve modes under
+  all five attributes, in the study's order (the tile's class modes, the fp32 slice, the host's conversions). `CLASS_SPACE`,
+  `PER_ENCODING` and `OP_REACH` take the tool's figures (rint, scaleB and the -f32 modes tile; the conversions host, run by
+  the pool); level `class` (L2, PLAUSIBLE) or `exhaustive` (L1 over the fp32 slice); each claim by space and level with its
+  oracle named (`Item.claim`). python/figure_extracts.py's `STRESS_TILE_OPS` gains the six tile modes (51).
+- **The driver** (`hw/card_stress.py`). `check_mpfr` gains a step `mpfr clause5-soak` (and `mpfr clause5-soak-cN` under
+  `--sweep-chunk`), after divsqrt-soak's: `dump <mode> size` of each of the twelve exits 0 with the catalog's space, and one
+  index of rint128-class (two cases, one a lane) on the software backend passes parse_soak's cover rule with an oracle line
+  naming MPFR at the pin; a failure is `build_failed`. Nothing new is built: `--mpfr-prefix` already put the MPFR words on the
+  make line that builds clause5-soak. `KNOWN_WARNINGS` is unchanged and still meaningful: the driver's make line with `MPFR=1`
+  and its `soak-chunk` make each printed the two soaks' pragma lines and nothing else (MEASURED, WSL, XRT=0, a copy of the
+  clone at 74be15aa).
+- **The stand-in, the report.** The stand-in answers the twelve modes, their spaces, `dump <mode> size` and oracle lines, and
+  refuses them as a build without MPFR under `CFT_STANDIN_NO_WIDE`; the report's one sentence on the wide items
+  (card_stress_report.py:1650-1653, the only lines of that file changed) names these items' oracles.
+- **The tests.** `hw/test_c5_wide.py` (new): groups build, agree, whole, spread, refuse, sabotage, plants and unchanged (in
+  docs/CARDDAY.md's words). `hw/test_card_stress.py`'s group `wide`: the 60 items' entries against 18 new fixtures (the real
+  tool's outputs at 74be15aa: `dump <mode> size` of the twelve, a whole or sliced log of each mode under an attribute of its
+  own, three sabotage logs, a chunked tool's log, the two make lines' warnings), the stand-in's lines held to those logs, a dry
+  run serving one item of each kind to the end of its space (three on the quad's tiles, three on the pool), a run without the
+  prefix refusing two by name, the build scenario's clause5-soak checks, and 10 plants, 3 of them POSIX only.
+  hw/test_c5_exhaustive.py's PER_ENCODING check leaves the wide clause-5 ops out, as it leaves out HXc's.
+
+**`mpfr-check 24 7`, before and after the move** (the lead's word, 11:40; MEASURED, the desktop, MSYS2 mingw64 gcc 16.1.0 and
+MPFR 4.2.2, two copies made from `git archive` of 3ec0081c's and 74be15aa's host/ in the parcel's scratch, `make
+mpfr-check.exe` as verify/run.sh's HOSTMAKE does, 0 warning lines each; `nice -n 10`, one after the other, each beside this
+parcel's WSL tests and the round's other parcels, M2X's batch, M2G1 and HXd, so both times carry that load): 3ec0081c
+11:40:50 to 11:49:24, 514 s, rc 0; 74be15aa 11:49:24 to 11:58:00, 516 s, rc 0; each 156 lines, "TOTAL 739234 cases, 0 value
+mismatches, 0 flag mismatches", sha256 1df0f741f1419a5899d21dd86d2a1e1df57485a07e4b71f0185b486fb79bf8fd, and `cmp` finds
+them equal.
+
+**What was run** (MEASURED; niced, at most two processes of this parcel's at a time, one on the desktop and one in WSL,
+beside the round's other parcels, whose load every time carries; WSL is cft2204 on the desktop: gcc 11.4, MPFR 4.1.0, GMP
+6.2.1, Python 3.10).
+- **Before part one's commit**, WSL, a copy of host/ (the commit's sources but the header comment of clause5_soak.c and one
+  docstring line of the test): `make clause5-soak MPFR=1` rc 0 and one warning line; `dump <word> size` of the twelve = the
+  study's sizes (2^32 for the -f32 words); hw/test_c5_wide.py's groups build 16, agree 12 (6,527,782 dump lines in 19 s),
+  whole 56 (the nine smaller spaces under five attributes in 97 s, conv256to128-class's 32 slices x 5 in 13 s, the -f32
+  modes' 2^22 x 10 in 129 s), spread 1 (720 slices), refuse 26, sabotage 1 (60 runs), plants 10, each 0 failed - the plants
+  at their second run: the first one's lane plant was red at its CONTROL, its trigger ("the low 64 bits 0x20") also catching
+  the half class at exponent 106, so the trigger now also needs exponent 0, and its comment says so.
+- **At 74be15aa**, from a fresh clone of its bundle in WSL's own filesystem (the bundle copied in first, sha256 f7a1e219...;
+  HEAD 74be15aa, a clean status and the content asserted apart), each with `--baseline-tree` holding `git archive 3ec0081c
+  host` (tar sha256 2cb8f084...): hw/test_c5_class.py 148 checks, 0 failed, 0 skipped, 117 s; hw/test_c5_exhaustive.py 88,
+  0, 0, 60 s; host/tests/soak_chunk_check.py `--only refuse,recipe,tools,unchanged,plants` 41, 0, 0, 115 s; hw/test_c5_wide.py
+  123 checks, 1 failed, 385 s - every group passed but `unchanged`, whose 55 invocations were all identical to the baseline's
+  and whose own guard failed (`n >= 60`, my miscount of the list): a defect of the test, not of the tool; the guard is now
+  the list's length, 55, and the run below passes it. The desktop: python/tests/test_c5_class_enum.py 86 passed in 15.7 s;
+  `mpfr-check 24 7` twice (above).
+- **At 527f2777**, from a fresh clone of its bundle in WSL (sha256 9d984959...; HEAD 527f2777, a clean status and the content
+  apart), the same baseline: hw/test_c5_wide.py **123 checks, 0 failed, 0 skipped, 358 s** (`unchanged`: 55 of 55
+  invocations identical); hw/test_c5_exhaustive.py **88, 0, 0, 54 s** (89 of 89 identical); hw/test_c5_class.py **148, 0,
+  0, 104 s** (259 of 259 identical); the clone's status clean after each. Then **conv256to128-class whole under all five
+  attributes**, by hand, from a copy of the clone's host/ built with `MPFR=1` (one warning line, the pragma): each attribute
+  63,208,320 cases, 0 value mismatches, 0 flag mismatches, 63,208,320 encodings, 0 skipped, exit 0, in 69, 73, 69, 78 and 81 s
+  (rne, rtz, rdn, rup, rmm; started about 12:46, ended by 12:52:41), its oracle line naming MPFR 4.1.0 with GMP 6.2.1; the
+  copy removed by its path.
+- **The suites in WSL, in the lead's slot** (the lead's go at 13:15, after HXd's runs; one at a time, niced), from fresh
+  clones of the branch's bundles in WSL's own filesystem, the SHA, a clean status and the content asserted apart:
+  1. `bash hw/test-card-stress.sh --only wide,items,standin,parsers,chunk` at 232b512c (13:15:17 to 13:16:04): 681 checks,
+     **5 failed** - the defect above, fixed in 93034991; then at 93034991 (13:17:48 to 13:18:53): **681 checks, 0 failed, 0
+     skipped, 64 s** (parsers 271, standin 5, items 166, chunk 44, wide 195).
+  2. The plants of this parcel and of HXc at 93034991 (`CARD_STRESS_PLANT='HXb:'` and `'HXc:'`, `--only plants`): **10
+     checks, 0 failed, 0 skipped, 120 s** (13:19:05 to 13:21:05), each of the ten caught at the check written for it, the
+     three POSIX ones too; **18 checks, 0 failed, 0 skipped, 190 s** (13:21:06 to 13:24:16), HXc's eighteen.
+  3. The whole suite without its plants (`bash hw/test-card-stress.sh --no-plants`) at 93034991 (13:25:21 to 13:36:07):
+     **1,165 checks, 0 failed, 4 skipped, 646 s**, in 36 groups, `wide` 195 checks; the four skips are the suite's named
+     ones that need the lead's run directories (`CARD_STRESS_METRICS`, `CARD_STRESS_RESUME_RUN` twice,
+     `CARD_STRESS_PROGRESS_RUNS`).
+  4. The scheduler's suite without its plants (`bash hw/test-sched.sh --no-plants`) at 93034991 (13:37:24 to 13:39:16):
+     **375 checks, 0 failed, 3 skipped, 111 s**, in fourteen groups; the skips are named, two of `locks` (the platform has
+     flock) and one of `images` (`SCHED_TEST_MANIFESTS` unset).
+  The clone's status was clean before each run and after it.
+- **The desktop** (Git Bash, Python 3.12), on the code of 527f2777 before its commit, which changed no code after them:
+  `hw/test_card_stress.py --only wide` 184 checks, 0 failed, 1 skipped (`wide build`, POSIX), 57 s, after one red run of a
+  check of mine that looked for "(L1 over the fp32 slice)" where my claim says "(an exact identity; L1 over the fp32
+  slice)", a defect of the check (it now itemizes what it did not find); `--only parsers,standin` 276 checks, 0 failed;
+  after the commit, `--only items` 166 checks, 0 failed, 20 s;
+  `CARD_STRESS_PLANT='HXb:' --only plants` 7 checks, 0 failed, 6 skipped (the three POSIX plants and their scenario's lines),
+  each of the seven red at the check written for it; pytest test_figure_extracts.py and test_c5_class_enum.py 97 passed in
+  14.9 s; `pytest --collect-only` 5,521 against 5,510 in an export of 3ec0081c; check_docs_index rc 0; project_figures
+  `--check` rc 0.
+- **A regression of this parcel's, in an HXc plant, found and fixed (232b512c).** HXc's plants on the desktop at 527f2777's
+  code (`CARD_STRESS_PLANT='HXc:'`, 12:56:53 to 12:57:58): 14 checks, 1 failed - "HXc: the windows run under all five
+  attributes" crashed in its scenario on KeyError('recip256-win-key-rup') instead of failing at "wide catalog: the 102 wide
+  items follow". 527f2777 took HXc's items as `full[125:227]`; under that plant they are 150, so the slice cut the windows
+  short and a lookup by name raised, where 3ec0081c took them all and the count failed as the plant intends. 232b512c chooses
+  HXc's items and this parcel's by their tool (divsqrt, clause5), as 3ec0081c did, and still holds this parcel's 60 to their
+  place after the 227. After it, on the desktop: the group `wide` 184 checks, 0 failed, 1 skipped, 57 s; HXc's plants 14
+  checks, 0 failed, 8 skipped (the four POSIX plants and their scenario's lines), 64 s; this parcel's 7, 0 failed, 6 skipped,
+  15 s. The anchor count below could not see this: it was behaviour, not an anchor.
+- **A defect of this parcel's in the driver's new step, found in WSL and fixed (93034991).** The suite's run (1) above from a
+  fresh clone at 232b512c (13:15:17 to 13:16:04): 681 checks, 5 failed, all in the POSIX scenario `wide build` - HXc's A and
+  C and this parcel's A, C and D (clause5). The step `mpfr clause5-soak` compared the whole output of `dump <mode> size` with
+  the space, and the dry run's stand-in prints "standin: env CFT_SOAK_ARTIFACT=... CFT_XRT_TILES=..." on every soak job, so
+  the step failed and the run stopped (exit 3); HXc's two failed because the run did. The desktop skips that scenario, so
+  it had not run on this branch before. 93034991 reads the size as the one line of digits, as the step for divsqrt-soak
+  reads hard-space's line by its pattern; the real tool prints the size alone (hw/card_stress_fixtures/wc-dump-size.txt, and
+  the box run's step).
+- **Plant anchors, counted with no run** (the lead's word): hw/test_card_stress.py's plant list built in the module's
+  namespace, nothing called: 227 plants (217 at 3ec0081c and this parcel's 10), 232 edits, each anchor exactly once in the
+  file its plant copy edits, no plant name twice, and no check name a plant expects that 3ec0081c's source has and this one
+  lacks. Two HXc anchors next to this parcel's code are kept single on purpose (`if seen != self.mpfr_pin:`, written the
+  other way round in the clause-5 test; the report sentence's prefix), and one HXc check name was extended, its prefix,
+  which HXc's plant expects, kept.
+
+**The sabotage and the plants.** `CFT_SOAK_SABOTAGE=1` fails every mode under every attribute, naming operands its slice
+enumerates (or the benign operand in front of one in a tile mode), and the same slice passes without it (60 runs). The seven
+plants of hw/test_c5_wide.py, each red at the check written for it: a class selector wrong in the C builder (the dump
+agreement names the index); the shared rule given the wrong attribute (mpfr_c5.h, rtz as floor: rint128-class rtz goes red);
+a fault in one fp128 lane of cft_rint, at one exponent, caught by the default build and NOT by a build that does not rotate
+(`-DCLS_LANES_128=1 -DCLS_BATCH=4092`, the control); a sticky tree without the lowest dropped bit (softfloat.c: the wide
+conversions and scaleB's strips catch it); the FCVT table's u32 maximum off by one in the oracle (so the lanes a target cannot
+hold ARE compared); a widening that drops a significand's last bit (the dump agreement and rint128-f32 over [0.5, 1)); a mode
+counting one index short (parse_soak's cover rule). The ten of hw/test_card_stress.py: a wide clause-5 space one index off the
+tool's; k at fp128 set to fp64's four lanes; the conversions marked as tile items; a claim that says "swept"; the stand-in's
+scaleb256-class space one off; the stand-in naming no oracle; the driver's warning table without clause5_soak.c's pragma line;
+and, POSIX only, the build step checking no clause5-soak, the clause-5 oracle's MPFR not held to the pin, and a clause5-soak
+without the wide modes not named so.
+
+**Known limits.**
+- The card has run seven of the 60 items, for twelve minutes, in the lead's box run below: six whole and 4.7% of one
+  attribute of rint256-f32; the other 53 have run on the software backend alone (the class modes in WSL against MPFR 4.1.0,
+  the seven on the box against the pin, 4.2.2). rint256-class, rint128-f32 and the five attributes of each have not met a
+  tile.
+- The -f32 modes have run over 2^22 encodings an attribute (around 0.5, 1, 2^23 and their negatives) and their special
+  regions in the dump agreement, not over 2^32; on a CPU a whole attribute is hours (about 3 microseconds an encoding in WSL,
+  COMPUTED from 126 to 129 s for 2^22 encodings x 10 runs), on the tile the study's 5.3 ESTIMATE.
+- conv256to128-class's dump is held to the Python reference over 768 of its 32,921 positions, not all (63 M lines); the
+  test runs it over 32 slices of 65,536 under each attribute (whole with `--thorough`), and it ran whole under all five by
+  hand (above).
+- The class-level claims are PLAUSIBLE (L2) at fp128 and fp256, on the structural assumption docs/CARDDAY.md states for the
+  fp64 class modes; the constructive check runs at p = 113 and 237 over seven spaces.
+- Parcel HXd's table of a format for every op was not merged when this was written: the twelve ops have no entry, and the
+  lead names its shape after HXd merges (the brief's word). hw/test_card_stress.py's plants were run as this parcel's ten and
+  HXc's eighteen, not all of them: the whole set runs on the tree that has HXd's merge.
+- As HXc's wide items: the signed records refuse these by name (the exporter's catalog is `sweep_items()`), and the scheduler
+  does not pass `--mpfr-prefix`.
+
+**The box run: the lead's** (MEASURED by the lead on amd-arc-box; this parcel wrote the script, `box_hxb.sh`, written as
+box/hxc/box_hxc.sh is, and read the copies only). The script at 527f2777, from a fresh clone of its bundle (sha256
+9d984959...; the clone warned that the bundle names no HEAD, and the checkout of the SHA followed): it found MPFR 4.2.2 at
+the pin, HEAD 527f2777, a clean status, 3ec0081c an ancestor and the four content texts once each, then ran `bash
+hw/card-stress.sh` on the quad image with `--legs api-test --weights quad=1,single=0,deep=0 --sweep-minutes
+quad=8,single=5,deep=5 --host-workers 3 --mpfr-prefix ~/cft-fp256/verify/_mpfr-prefix --sweep-items` naming seven items,
+12:59:46 to 13:11:48: driver rc 0, 720 s, "deadline (exit 0)". Its build: `make -C host XRT=1 ... MPFR=1 MPFR_PREFIX=<the pin>
+all device-test api-test remote-test divsqrt-soak clause5-soak` rc 0 in 15 s, 4 warning lines (the two `read_register` lines
+and the two soaks' pragma lines, all known: 0 NOTE lines); `mpfr divsqrt-soak` ok; **`mpfr clause5-soak` ok** ("`clause5-soak
+dump <mode> size` rc 0 for the 12 wide clause-5 modes, each the catalog's space; one index of rint128-class (2 cases) on the
+software backend passed, and its oracle line names MPFR 4.2.2"); run_start's `settings.mpfr` the prefix and the pin 4.2.2.
+The items, every slice passed, 0 value and 0 flag mismatches and 0 skipped in every one:
+
+| item | where | slices | indices | cases | seconds in its slices |
+|---|---|---|---|---|---|
+| rint128-class-rne | quad, tile 1 | 1, the whole space | 137,344 | 274,688 | 280 |
+| scaleb128-class-rtz | quad, tile 2 | 1, the whole space | 317,448 | 634,896 | 63 |
+| scaleb256-class-rmm | quad, tiles 1 and 3 | 2 (the 2^20 probe, then the rest) | 1,370,952 | 1,370,952 | 130 |
+| rint256-f32-rup | quad, tiles 1, 2 and 4 | 3, [0, 201,326,592): 4.688% of the space | 201,326,592 | 201,326,592 | 398 |
+| conv128to64-class-rtz | the pool (cpu) | 2 | 1,979,424 | 1,979,424 | 3 |
+| cvtto256-class-rdn | the pool | 1 | 205,440 | 821,760 | 2 |
+| cvtfrom128-class-rup | the pool | 1 | 50,923 | 50,923 | 0 |
+
+`whole_space_ok` for the six that finished (all but rint256-f32-rup), none `whole_space_mismatch`; the report's sweep
+section counts each over its own space and states the seven claims. **So the first card run of the wide clause-5 modes**:
+rint128-class at about 2.0 ms an index on a tile (two lanes), scaleb128-class 0.20 ms, scaleb256-class 0.095 ms, and
+rint256-f32 0.51 M encodings a second, about 2.4 tile-hours for one attribute's 2^32 (COMPUTED from those seconds; the
+study's 5.3 had 0.08 tile-hours an attribute for rint128-class, which this matches, and 1.32 for rint256-f32's, which this
+is about 1.8 times). The copies (box/hxb/out-527f2777 in the round's records: hxb-summary.txt, hxb-run/ - metrics.jsonl,
+driver.log, report.txt, status.txt, settings.json, logs/build.log - hxb-logs/, SHA256SUMS) agree with the box's sums, 8 of 8
+(this parcel checked them, read only). A first launch at 12:58:15 was refused by the script's own guard ("1 card, runner or
+scheduler process(es) alive"): the lead's ssh line carried the guard's pattern text, so the guard counted the lead's shell -
+not a fault of the script, and a sign that the guard works (kept as hxb-summary-refused-1258.txt).
+
+**Which commit each result is from.** The tool, the enumerator and their tests are 74be15aa's: host/, python/c5_class_enum.py
+and its test did not change after it (`git diff 74be15aa 527f2777` names none of them). The catalog, the driver, the stand-in
+and the report's sentence are 527f2777's; hw/test_card_stress.py is 232b512c's and hw/card_stress.py 93034991's, each
+commit changing that one file (`git diff 527f2777 232b512c`, `git diff 232b512c 93034991`). The box ran 527f2777: its
+driver's step read the real tool, which prints the size alone, so 93034991's change does not touch what it showed. Each run
+above names its commit. This entry's commit changes docs alone
+(this entry, docs/CARDDAY.md's measured times and one sentence, docs/VERIFICATION.md's cardstress row, docs/README.md's
+counts), which none of the runs above reads (READ: the suites quote docs/VALIDATION.md's card lines as literals and open
+docs/studies/ alone); python/check_docs_index.py, run after the commit, reads them.
+
+**Main taken in (e52c48a7), and the twelve formats.** At the lead's word, after HXd's merge on main (5f60318c: M2G1, M2X and HXd
+on 3ec0081c), the branch took main by its SHA (merge commit e52c48a7, parents 67b810fe and 5f60318c). docs/VALIDATION.md is main's
+whole file, then this block (boxbatch/val_merge4.py, `--check` equal); docs/CARDDAY.md and docs/VERIFICATION.md keep both sides
+(HXd's paragraph where main put it, then this parcel's section; the golden row's head this parcel's, 5,581 after the merge,
+MEASURED by `pytest --collect-only`, then M2G1's; the cardstress row HXd's sentence, then this parcel's); docs/README.md is
+recounted from the files; hw/test_card_stress.py keeps both groups' checks and both plants lists (274 plants: main's 264 and
+this parcel's 10); hw/card_stress_lib.py and hw/card_stress_report.py merged without a conflict. The twelve ops have the formats
+HXd proposed, each READ against clause5_soak.c's table of its wide modes (`WJOBS`: the wide format, and a conversion's
+destination), with no difference: rint128-class, scaleb128-class and rint128-f32 "fp128"; rint256-class, scaleb256-class and
+rint256-f32 "fp256"; conv128to64-class "fp128 -> fp64"; conv256to128-class "fp256 -> fp128"; cvtto128-class and cvtto256-class
+"fp128 -> the integer targets" and "fp256 -> the integer targets"; cvtfrom128-class and cvtfrom256-class "the integer sources ->
+fp128" and "the integer sources -> fp256" (64-bit sources, as cvtfrom64-class's). HXd's `format_table_checks` reads them from
+that table as it reads divsqrt_soak.c's: the table is over the catalog's 80 ops (68 before these twelve) and the catalog uses
+sixteen distinct strings (ten before), with a check of the twelve and one of six items' formats; one HXd check name changed with
+its count, "(68 ops)" to "(80 ops)", and HXd's plant that expects it with it. With cvtfrom256-class left out of `OP_FORMAT` in a
+scratch copy, the copy's catalog refuses it by name ("op 'cvtfrom256-class' has no format: give it one in OP_FORMAT
+(hw/card_stress_lib.py)") and `format_table_checks` stops on that refusal (MEASURED; the copy then removed): an op without a
+format stops the group with an exception that names it, rather than reddening one check line - a refusal by name, which the
+lead accepted as it stands. MEASURED on the
+desktop at the merged tree: `hw/test_card_stress.py --only wide,items --no-plants` 363 checks, 0 failed, 1 skipped (`wide
+build`, POSIX), 77 s; hw/test_card_stress_report.py 5,193 checks, 0 failed; hw/test_card_stress_progress.py 659 checks, 0
+failed, 1 skipped (the lead's real copies); HXd's seven plants of the format table, each caught at its check, and this parcel's
+seven, 0 failed, 6 skipped (POSIX); pytest test_figure_extracts.py and test_c5_class_enum.py 97 passed; check_docs_index and
+project_figures `--check` rc 0. Plant anchors at e52c48a7: 274 plants, 280 edits, each exactly once in the file its plant
+edits, and none of main's expected check names gone (counted with no run). From a fresh clone of e52c48a7 in WSL, in the lead's slot (the lead's go after VHXb left WSL at 14:49:31), one at a time,
+niced: the whole suite without its plants **1,178 checks, 0 failed, 4 skipped** (the named four that need the lead's run
+directories), 613 s (14:52:52 to 15:03:05), its 36 groups each 0 failed and the group `wide` 208 checks; **every plant of the
+suite** (`bash hw/test-card-stress.sh --only plants`, the control included) **277 checks, 0 failed, 5 skipped**, 2,070 s (15:06:32
+to 15:41:02): the control's five and 272 of the 274 plants, each caught at the check written for it - HXd's, HXc's, this
+parcel's and the older ones - the other two skipped by name for want of the lead's run files (P5's real-file resume planner,
+`CARD_STRESS_RESUME_RUN`; figure_extracts' host-pool activity, `CARD_STRESS_METRICS`), with three SKIP lines of the same; and
+the scheduler's suite without its plants **375 checks, 0 failed, 3 skipped**, 110 s (15:45:00 to 15:46:50), the same named skips
+as before. The clone's status was clean after each, and it was then removed by its path. This paragraph's commit changes docs
+alone (this paragraph, docs/VERIFICATION.md's cardstress row and docs/README.md's counts), which none of those runs reads.

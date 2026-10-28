@@ -147,6 +147,23 @@
  * conv64to32-class, cvtto64-class and cvtfrom64-class are libcft HOST
  * operations, as their random modes are.
  *
+ * WIDE modes, in a build with MPFR only (`make clause5-soak MPFR=1`, parcel
+ * HXb, 2026-10-27): the class modes of rint, scaleB and the conversions at
+ * fp128 and fp256, against mpfr-check's own clause-5 rules (tools/mpfr_c5.h),
+ * and the fp32 slice through the wide rint. All five attributes; the verdict
+ * clause above, with S = 0. See the section "The wide formats" below.
+ *
+ *   clause5-soak rint128-class|rint256-class|scaleb128-class|scaleb256-class
+ *                <lo> <hi> <rne|rtz|rdn|rup|rmm>
+ *       the tile modes, k = 2 at fp128 and 1 at fp256 (a case a lane)
+ *   clause5-soak conv128to64-class|conv256to128-class|cvtto128-class|
+ *                cvtto256-class|cvtfrom128-class|cvtfrom256-class <lo> <hi>
+ *                <rne|rtz|rdn|rup|rmm>
+ *       the host conversions: k = 1, 4 (every lane-target pair) and 1
+ *   clause5-soak rint128-f32|rint256-f32 <lo> <hi> <rne|rtz|rdn|rup|rmm>
+ *       every fp32 encoding widened, both variants, against the fp32 rint
+ *   clause5-soak dump <any of the twelve> size | <lo> <hi>
+ *
  * CFT_SOAK_SABOTAGE=1 flips the low bit of the first result of every
  * library call, after the library computes it. A harness that cannot
  * fail proves nothing; the runner requires one sabotaged job to fail
@@ -2839,6 +2856,983 @@ static int class_dump(int argc, char **argv)
     return 0;
 }
 
+#ifdef CFT_SOAK_MPFR
+/* ================================================================
+ * The wide formats: rint, scaleB and the conversions at fp128 and fp256
+ * (parcel HXb, 2026-10-27)
+ *
+ * Compiled in only by `make clause5-soak MPFR=1` (host/Makefile), which
+ * defines CFT_SOAK_MPFR and links MPFR and GMP. Without it nothing below
+ * exists and the tool is the one it was, object for object: a wide mode
+ * word is then refused with the usage text, exit 2. docs/studies/HX-wide-
+ * sweeps.md section 6 row 3 is the specification; docs/CARDDAY.md names the
+ * claim each mode's pass makes, by space and level.
+ *
+ * THE ORACLE of the class modes is MPFR, through tools/mpfr_c5.h: mpfr-
+ * check's own clause-5 rules, moved there so that both tools take the one
+ * copy, over mpfr_ieee.h's emulation. rint by attribute (mpfr_rint under
+ * RNDN, trunc, floor, ceil, round), the named variant signalling an sNaN's
+ * invalid alone and the Exact one adding inexact iff the value moved, a
+ * zero keeping the operand's sign; scaleB the exact product rounded once,
+ * the exponent clamped in the oracle only; convert the rounding of the exact
+ * operand at the destination; cvt_from the integer exactly through mpz;
+ * cvt_to a rint at p + 2 bits, the range test in mpz and the contract's
+ * RISC-V FCVT table for the lanes a target cannot hold, compared like the
+ * rest (so nothing is skipped here: S = 0, where cvtto64-class, whose
+ * native oracle cannot answer those lanes, skips them). All five attributes
+ * in every mode: MPFR answers rmm. Values compare as mpfr-check compares
+ * them (NaN as a class, a zero by its sign); flags by the OR over a call
+ * and, where it disagrees, element by element alone.
+ *
+ * rint{128,256}-f32's oracle is NOT MPFR: it is rint32's own (the CPU's
+ * fp32 rint, rint_oracle32, and its flag rule, rint_expect32), and the wide
+ * result must EQUAL the fp32 result widened, bit for bit (a NaN as a
+ * class): an exact identity, since the integer part of an fp32 value has
+ * at most 24 bits (the study's 3.1). Its stderr line says so.
+ *
+ * THE MODES, each `<lo> <hi> <attribute>` over its indices under all five
+ * attributes, with the verdict clause ", E encodings, S skipped" (E counting
+ * indices; cases + S = k x E, S = 0):
+ *   rint128-class, rint256-class, scaleb128-class, scaleb256-class
+ *       the TILE modes: python/c5_class_enum.py's RoundEnum("rint") and
+ *       ScalebEnum at the format, run as the fp64 tile modes are ("How a
+ *       class case is run" above): alone (CLS_BATCH operands a call, 1 by
+ *       default), and once in each lane of the format behind benign operands
+ *       (1.0, +0) - 2 lanes at fp128 and 1 at fp256 (docs/ARCHITECTURE.md:
+ *       "eight fp32 / four fp64 / two fp128 lanes or one fp256 unit"), so
+ *       k = 2 and 1. rint checks both variants in each case.
+ *   conv128to64-class, conv256to128-class
+ *       convertFormat to the next narrower format, RoundEnum("conv"): k = 1.
+ *   cvtto128-class, cvtto256-class
+ *       the four integer targets i32, u32, i64 and u64, RoundEnum("cvtto",
+ *       B = 64): k = 4, a case a lane-target pair, both variants in each.
+ *   cvtfrom128-class, cvtfrom256-class
+ *       the 64-bit sources i64 and u64, CvtfromEnum: k = 1. No bit of a
+ *       64-bit integer is dropped at p = 113 or 237, so the conversion is
+ *       EXACT and the class axis repeats operands: a pass says every bit
+ *       length and pattern of the sources converts exactly, not that every
+ *       class of dropped bits rounds.
+ *   rint128-f32, rint256-f32
+ *       every fp32 encoding [lo, hi) of [0, 2^32), widened exactly (an sNaN
+ *       stays an sNaN), through the wide rint, both variants, in batches of
+ *       BATCH as rint32 runs: k = 1, an operand once, as rint32 counts it.
+ * The three host conversions are libcft HOST operations, as at fp64; rint
+ * and scaleB reach a tile (scaleB's multiplies for exponents at or above
+ * the format's subnormal floor). `dump` takes every new word; its operands
+ * are 32 or 64 hex digits (a cvtfrom source 16), held line for line to
+ * python/c5_class_enum.py --dump, and rint{128,256}-f32's to
+ * python/hardcases.py's widen_bits.
+ *
+ * THE CONTROL. CFT_SOAK_SABOTAGE=1 flips the low bit of the first library
+ * result of every call (sab), as in every mode here; in a tile mode with a
+ * benign operand in front, that first result is the benign one's, and the
+ * line names it.
+ *
+ * WHAT IS SHARED AND WHAT IS NOT. The fp64 class machinery above is left
+ * exactly as it was, so that the default build is the same object; the
+ * wide index maps below are its maps with the format's numbers for fp64's
+ * (cls_sig built bit by bit for a significand of up to 237 bits, the
+ * witnesses of a 15- or 19-bit exponent field), and call cls_sig, cls_mask,
+ * the CLS_ constants, exh_range, cvtto_call, sab, hard_fail, MODES and the
+ * fp32 rint oracle where those apply as they are. divsqrt_soak.c's format
+ * table WF and its widen() are COPIED below (parcel HXa's; sharing them
+ * would have moved them out of that file).
+ * ================================================================ */
+
+/* mpfr_ieee.h's ieee_oracle() recomputes an arithmetic operation, which no
+ * mode here needs (every clause-5 rounding is the rounding of a value held
+ * exactly), and -Wall warns of a static function a translation unit does
+ * not call (-Wunused-function). The warning is off for the two headers
+ * alone, so that an MPFR=1 build prints no warning line the driver's table
+ * of known ones does not hold (hw/card_stress.py KNOWN_WARNINGS). */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-function"
+#include "mpfr_c5.h"
+#pragma GCC diagnostic pop
+
+#define WMAX 32                         /* fp256's bytes */
+
+enum { WF32, WF64, WF128, WF256 };
+static const fdesc WF[4] = {           /* divsqrt_soak.c's, copied */
+    { "fp32",  CFT_FP32,   8,  23,  24,    127,    -126,  4 },
+    { "fp64",  CFT_FP64,  11,  52,  53,   1023,   -1022,  8 },
+    { "fp128", CFT_FP128, 15, 112, 113,  16383,  -16382, 16 },
+    { "fp256", CFT_FP256, 19, 236, 237, 262143, -262142, 32 },
+};
+
+/* The lanes of a tile at fp128 and fp256 (docs/ARCHITECTURE.md), which the
+ * wide tile modes run each case in: their k. -DCLS_LANES_128=1 builds a
+ * tool that does not rotate fp128's operands, as -DCLS_LANES=1 does fp64's. */
+#ifndef CLS_LANES_128
+#define CLS_LANES_128 2
+#endif
+#ifndef CLS_LANES_256
+#define CLS_LANES_256 1
+#endif
+#if CLS_LANES_128 < 1 || CLS_LANES_256 < 1 || CLS_BATCH + CLS_LANES_128 - 1 > BATCH || \
+    CLS_BATCH + CLS_LANES_256 - 1 > BATCH
+#error "CLS_LANES_128 and CLS_LANES_256 must be at least 1 and leave room for CLS_BATCH operands behind them"
+#endif
+
+enum { WJ_RINT, WJ_SCALEB, WJ_CONV, WJ_CVTTO, WJ_CVTFROM, WJ_RINTF32 };
+
+typedef struct {
+    const char *job;
+    int kind;                           /* WJ_ */
+    int wf;                             /* the operand's format; cvtfrom's destination */
+    int df;                             /* conv's destination; -1 for the rest */
+    int lanes;                          /* a tile mode's lanes, its k; 0 for the rest */
+} wjob;
+
+static const wjob WJOBS[] = {
+    { "rint128-class",      WJ_RINT,    WF128, -1,    CLS_LANES_128 },
+    { "rint256-class",      WJ_RINT,    WF256, -1,    CLS_LANES_256 },
+    { "scaleb128-class",    WJ_SCALEB,  WF128, -1,    CLS_LANES_128 },
+    { "scaleb256-class",    WJ_SCALEB,  WF256, -1,    CLS_LANES_256 },
+    { "conv128to64-class",  WJ_CONV,    WF128, WF64,  0 },
+    { "conv256to128-class", WJ_CONV,    WF256, WF128, 0 },
+    { "cvtto128-class",     WJ_CVTTO,   WF128, -1,    0 },
+    { "cvtto256-class",     WJ_CVTTO,   WF256, -1,    0 },
+    { "cvtfrom128-class",   WJ_CVTFROM, WF128, -1,    0 },
+    { "cvtfrom256-class",   WJ_CVTFROM, WF256, -1,    0 },
+    { "rint128-f32",        WJ_RINTF32, WF128, -1,    0 },
+    { "rint256-f32",        WJ_RINTF32, WF256, -1,    0 },
+};
+#define NWJOB ((int)(sizeof WJOBS / sizeof WJOBS[0]))
+
+static const wjob *wjob_of(const char *job)
+{
+    int j;
+    for (j = 0; j < NWJOB; j++)
+        if (!strcmp(job, WJOBS[j].job))
+            return &WJOBS[j];
+    return NULL;
+}
+
+/* ---- bits of a little-endian encoding ----------------------------- */
+
+static int wget(const uint8_t *b, int i) { return (b[i >> 3] >> (i & 7)) & 1; }
+static void wset(uint8_t *b, int i) { b[i >> 3] |= (uint8_t)(1u << (i & 7)); }
+
+/* n (<= 64) bits of v into b at bit lo */
+static void wput(uint8_t *b, int lo, int n, uint64_t v)
+{
+    int i;
+    for (i = 0; i < n; i++) {
+        int bit = lo + i;
+        if ((v >> i) & 1) b[bit >> 3] |= (uint8_t)(1u << (bit & 7));
+        else              b[bit >> 3] &= (uint8_t)~(1u << (bit & 7));
+    }
+}
+
+/* The encoding of format f with this sign, biased exponent field and the
+ * low man_w bits of the significand s (the fraction: its implicit bit,
+ * at man_w, is the exponent field's place and is left out). */
+static void wenc(const fdesc *f, int sign, uint64_t b, const uint8_t *s, uint8_t *a)
+{
+    int i;
+    memset(a, 0, WMAX);
+    for (i = 0; i < f->man_w; i++)
+        if (wget(s, i))
+            wset(a, i);
+    wput(a, f->man_w, f->exp_w, b);
+    if (sign)
+        wset(a, f->man_w + f->exp_w);
+}
+
+/* cls_sig for a significand of up to 256 bits: python/c5_class_enum.py's
+ * sig(P, d, c, t), little-endian into s. The P-bit significand (bit P - 1
+ * set) whose low d bits the rounding drops, of class c and pattern t. */
+static void wcls_sig(uint8_t *s, int P, int d, int c, int t)
+{
+    int k, i;
+
+    memset(s, 0, WMAX);
+    if (d > P + 1)
+        d = P + 1;
+    k = P - d;
+    if (t >= 4) {
+        wset(s, t - 4);                 /* the walking one; K is the top bit alone */
+    } else if (k == 1) {
+        wset(s, d);                     /* K = 1, at bit P - 1 */
+    } else if (k >= 2) {
+        if (t >> 1)                     /* the kept bits above the lsb all ones */
+            for (i = d + 1; i < P; i++)
+                wset(s, i);
+        if (t & 1)                      /* the kept lsb */
+            wset(s, d);
+    }
+    if (d >= 1) {                       /* the class's dropped bits */
+        if (c == 1 || c == 3)
+            wset(s, 0);
+        if ((c == 2 || c == 3) && d - 1 < P)
+            wset(s, d - 1);
+    }
+    wset(s, P - 1);                     /* the implicit bit */
+}
+
+/* ---- the index maps: python/c5_class_enum.py's, at fp128 and fp256 - */
+
+static int wnpat(const fdesc *f) { return 4 + f->man_w; }
+static int wnwit(const fdesc *f) { return 2 * f->exp_w + 1; }
+
+/* The structural exponents of rint ([-3, p]), cvtto ([-3, 64]: the widest
+ * target) and conv (the destination's [emin - p - 2, emax + 1]), one
+ * saturated exponent beyond each end: RoundEnum's lo_e and hi_e. */
+static void wround_range(const wjob *wj, long *lo_e, long *hi_e)
+{
+    const fdesc *f = &WF[wj->wf];
+    if (wj->kind == WJ_RINT) {
+        *lo_e = -3;
+        *hi_e = f->p;
+    } else if (wj->kind == WJ_CVTTO) {
+        *lo_e = -3;
+        *hi_e = 64;
+    } else {
+        const fdesc *d = &WF[wj->df];
+        *lo_e = d->emin - d->p - 2;
+        *hi_e = d->emax + 1;
+    }
+}
+
+static uint64_t wsize(const wjob *wj)
+{
+    const fdesc *f = &WF[wj->wf];
+    long lo_e, hi_e;
+    switch (wj->kind) {
+    case WJ_RINT: case WJ_CONV: case WJ_CVTTO:
+        wround_range(wj, &lo_e, &hi_e);
+        return (uint64_t)(hi_e - lo_e + 1 + wnwit(f)) * 2 * CLS_NCLS * (uint64_t)wnpat(f);
+    case WJ_SCALEB:
+        return (uint64_t)3 * (uint64_t)(f->p + 1) * 2 * CLS_NCLS * (uint64_t)wnpat(f) + 2 * CLS_BLOCK;
+    case WJ_CVTFROM:
+        return (uint64_t)CLS_NCELL_FROM * CLS_NCLS * CLS_NPAT_FROM + CLS_NSPECIAL_FROM;
+    default:
+        return (uint64_t)1 << 32;
+    }
+}
+
+/* The biased exponent field of witness j: 2^j, then the all-ones field with
+ * bit j cleared, then 0 (the subnormals): cls_witness at E bits. */
+static long wwitness(const fdesc *f, int j)
+{
+    if (j < f->exp_w)
+        return 1L << j;
+    if (j < 2 * f->exp_w)
+        return ((1L << f->exp_w) - 1) ^ (1L << (j - f->exp_w));
+    return 0;
+}
+
+/* The operand of index i of a rint, conv or cvtto wide job, into a:
+ * RoundEnum.operand, cls_round_operand's layout at the format. */
+static void wround_operand(const wjob *wj, uint64_t i, uint8_t *a)
+{
+    const fdesc *f = &WF[wj->wf];
+    uint64_t npat = (uint64_t)wnpat(f), pi;
+    int t, c, sign;
+    long lo_e, hi_e, e, b, d;
+    uint8_t s[WMAX];
+
+    wround_range(wj, &lo_e, &hi_e);
+    t = (int)(i % npat);
+    i /= npat;
+    c = (int)(i % CLS_NCLS);
+    i /= CLS_NCLS;
+    sign = (int)(i % 2);
+    pi = i / 2;
+    if (pi < (uint64_t)(hi_e - lo_e + 1)) {
+        e = lo_e + (long)pi;
+        b = e + f->emax;
+    } else {
+        b = wwitness(f, (int)(pi - (uint64_t)(hi_e - lo_e + 1)));
+        e = b - f->emax;
+    }
+    if (b == 0)
+        d = f->p + 1;                   /* the subnormals: P + 1 */
+    else if (wj->kind == WJ_CONV) {
+        const fdesc *df = &WF[wj->df];
+        d = (f->p - df->p) + (e < df->emin ? df->emin - e : 0);
+    } else
+        d = e < f->p - 1 ? f->p - 1 - e : 0;
+    wcls_sig(s, f->p, d > f->p + 1 ? f->p + 1 : (int)d, c, t);
+    wenc(f, sign, (uint64_t)b, s, a);
+}
+
+/* The (operand, exponent) pair of index i of a wide scaleB job: the strips,
+ * then the overflow block, then the block deeper than the last strip:
+ * ScalebEnum.operands, cls_scaleb_operand's layout at the format. */
+static void wscaleb_operand(const wjob *wj, uint64_t i, uint8_t *a, int64_t *nx)
+{
+    const fdesc *f = &WF[wj->wf];
+    uint64_t npat = (uint64_t)wnpat(f);
+    int nstrip = f->p + 1;
+    uint64_t nstripidx = (uint64_t)3 * (uint64_t)nstrip * 2 * CLS_NCLS * npat;
+    int64_t emax = f->emax, emin = f->emin, p = f->p;
+    uint64_t top = ((uint64_t)1 << f->exp_w) - 2;
+    uint8_t s[WMAX];
+
+    if (i < nstripidx) {
+        int t = (int)(i % npat), c, sign, route, st;
+        uint64_t pi;
+        i /= npat;
+        c = (int)(i % CLS_NCLS);
+        i /= CLS_NCLS;
+        sign = (int)(i % 2);
+        pi = i / 2;
+        route = (int)(pi / (uint64_t)nstrip);
+        st = (int)(pi % (uint64_t)nstrip) + 1;
+        if (route == 0) {
+            wcls_sig(s, f->p, st, c, t);
+            wenc(f, sign, (uint64_t)emax, s, a);
+            *nx = emin - st;
+        } else if (route == 1) {
+            wcls_sig(s, f->p, st, c, t);
+            wenc(f, sign, top, s, a);
+            *nx = emin - st - emax;
+        } else {
+            wcls_sig(s, f->man_w, st - 1, c, t);
+            wenc(f, sign, 0, s, a);
+            *nx = 1 - st;
+        }
+    } else {
+        int j = (int)(i - nstripidx), deep = j >= CLS_BLOCK, sign, oi, li, k;
+        int64_t ex;
+        j %= CLS_BLOCK;
+        sign = j / 18;
+        j %= 18;
+        oi = j / 6;
+        li = j % 6;
+        memset(s, 0, WMAX);
+        if (oi == 0) {                  /* 1.0 */
+            wenc(f, sign, (uint64_t)emax, s, a);
+            ex = 0;
+        } else if (oi == 1) {           /* the largest finite */
+            for (k = 0; k < f->man_w; k++)
+                wset(s, k);
+            wenc(f, sign, top, s, a);
+            ex = emax;
+        } else {                        /* the smallest subnormal */
+            wset(s, 0);
+            wenc(f, sign, 0, s, a);
+            ex = emin - f->man_w;
+        }
+        if (!deep) {
+            int64_t nf = emax + 1 - ex;
+            const int64_t l[6] = { nf, nf + 1, 3 * emax, 3 * emax + 1, 100000, INT64_MAX };
+            *nx = l[li];
+        } else {
+            int64_t nl = emin - p - 2 - ex;
+            const int64_t l[6] = { nl, nl - 1, -(4 * emax + 2 * p), -(4 * emax + 2 * p) - 1,
+                                   -100000, INT64_MIN };
+            *nx = l[li];
+        }
+    }
+}
+
+/* The 64-bit source of index i of a wide cvtfrom job and whether it is a
+ * u64: cls_cvtfrom_operand's cells with the format's p for fp64's 53, so no
+ * bit of a source is dropped (L <= 64 < p): CvtfromEnum at the format. */
+static void wcvtfrom_operand(const wjob *wj, uint64_t i, uint64_t *v, int *is_u64)
+{
+    const uint64_t base = (uint64_t)CLS_NCELL_FROM * CLS_NCLS * CLS_NPAT_FROM;
+    int p = WF[wj->wf].p;
+
+    if (i >= base) {
+        *is_u64 = (i - base) == 2;
+        *v = (i - base) == 0 ? 1ull << 63 : 0;
+        return;
+    }
+    {
+        int t = (int)(i % CLS_NPAT_FROM);
+        int c = (int)((i / CLS_NPAT_FROM) % CLS_NCLS);
+        int ci = (int)(i / ((uint64_t)CLS_NPAT_FROM * CLS_NCLS));
+        int sv, L;
+        uint64_t m;
+        if (ci < 63)       { sv = 0; L = ci + 1; }
+        else if (ci < 126) { sv = 1; L = ci - 63 + 1; }
+        else               { sv = 2; L = ci - 126 + 1; }
+        m = cls_sig(L, L > p ? L - p : 0, c, t);
+        *v = sv == 1 ? (uint64_t)0 - m : m;
+        *is_u64 = sv == 2;
+    }
+}
+
+/* The encoding of an fp32 value in a wider format, exactly: divsqrt_soak.c's
+ * widen() (parcel HXa), copied - the same sign, a NaN's payload and quiet bit
+ * at the top of the fraction (an sNaN stays an sNaN), a subnormal normalised. */
+static void widen(const fdesc *N, const uint8_t *src, const fdesc *W, uint8_t *dst)
+{
+    uint64_t u = 0, frac, ex, emask = ((uint64_t)1 << N->exp_w) - 1;
+    memcpy(&u, src, N->esz);
+    frac = u & (((uint64_t)1 << N->man_w) - 1);
+    ex = (u >> N->man_w) & emask;
+    memset(dst, 0, WMAX);
+    if (ex == emask) {
+        wput(dst, W->man_w, W->exp_w, ((uint64_t)1 << W->exp_w) - 1);
+        wput(dst, W->man_w - N->man_w, N->man_w, frac);
+    } else if (ex != 0 || frac != 0) {
+        uint64_t m = ex ? frac | ((uint64_t)1 << N->man_w) : frac;
+        long e2 = ex ? (long)ex - N->emax - N->man_w : N->emin - N->man_w;
+        int msb = 63;
+        while (!((m >> msb) & 1))
+            msb--;
+        wput(dst, W->man_w - msb, msb, m & (((uint64_t)1 << msb) - 1));
+        wput(dst, W->man_w, W->exp_w, (uint64_t)(e2 + msb + W->emax));
+    }
+    if ((u >> (8 * N->esz - 1)) & 1)
+        wput(dst, 8 * (int)W->esz - 1, 1, 1);
+}
+
+/* [lo, hi) must be a non-empty part of the job's index space: class_range's
+ * refusal, word for word, for a wide space; exh_range's for the fp32 slice. */
+static int wrange(const wjob *wj, const char *slo, const char *shi, uint64_t *lo,
+                  uint64_t *hi)
+{
+    char *e1, *e2;
+    if (wj->kind == WJ_RINTF32)
+        return exh_range(slo, shi, lo, hi);
+    *lo = strtoull(slo, &e1, 0);
+    *hi = strtoull(shi, &e2, 0);
+    if (!*slo || !*shi || *e1 || *e2 || *lo >= *hi || *hi > wsize(wj)) {
+        fprintf(stderr, "need 0 <= lo < hi <= %llu (the indices of the %s "
+                "space), got [%s, %s)\n", (unsigned long long)wsize(wj), wj->job,
+                slo, shi);
+        return 1;
+    }
+    return 0;
+}
+
+/* ---- the batch kernels -------------------------------------------- */
+
+/* the call: operands, library results (and a cvt_to's integers); the
+ * oracle's values, flags and integers */
+static uint8_t XA[BATCH * WMAX], XD[BATCH * WMAX], XO[BATCH * 8];
+static mpfr_t XW[BATCH];
+static uint32_t XF[BATCH];
+static uint64_t XV[BATCH];
+
+/* a value disagreement, named: the operand, the library's result and MPFR's */
+static void wmis(const char *what, int mi, const uint8_t *a, size_t ae, const char *extra,
+                 const uint8_t *got, size_t ge, mpfr_srcptr want)
+{
+    char ha[2 * WMAX + 1], hg[2 * WMAX + 1];
+    mismatches++;
+    if (shown++ >= 16)
+        return;
+    hexdump(a, ae, ha);
+    hexdump(got, ge, hg);
+    mpfr_printf("  MISMATCH %s %s a=0x%s%s lib=0x%s mpfr=%Ra\n", what, MODES[mi].name, ha,
+                extra ? extra : "", hg, want);
+}
+
+static void wfmis(const char *what, int mi, const uint8_t *a, size_t ae, const char *extra,
+                  uint32_t lib, uint32_t want)
+{
+    char ha[2 * WMAX + 1];
+    flag_mismatches++;
+    if (shown++ >= 16)
+        return;
+    hexdump(a, ae, ha);
+    printf("  FLAGS %s %s a=0x%s%s lib=0x%02x want=0x%02x\n", what, MODES[mi].name, ha,
+           extra ? extra : "", (unsigned)lib, (unsigned)want);
+}
+
+static void wclear(size_t n)
+{
+    size_t i;
+    for (i = 0; i < n; i++)
+        mpfr_clear(XW[i]);
+}
+
+/* One call of the wide rint over the n operands at A (benign ones in front
+ * included, as rint_batch64 takes them), each variant against mpfr_c5.h's
+ * rule: values per element, flags by the OR over the call and, where the
+ * ORs disagree, element by element alone. Every element adds a case. */
+static int wrint_batch(int wf, int mi, const uint8_t *A, size_t n, const char *nm,
+                       const char *nmx)
+{
+    const fdesc *f = &WF[wf];
+    size_t e = f->esz, i;
+    int ex;
+
+    for (ex = 0; ex <= 1; ex++) {
+        uint32_t lf = 0, of = 0;
+        for (i = 0; i < n; i++) {
+            mpfr_init2(XW[i], f->p);
+            c5_rint_expect(f, A + i * e, MODES[mi].cr, ex, XW[i], &XF[i]);
+            of |= XF[i];
+        }
+        if (cft_rint(dev, f->fmt, MODES[mi].cr, ex, A, XD, n, &lf, NULL) != CFT_OK) {
+            hard_fail(ex ? nmx : nm);
+            wclear(n);
+            return 1;
+        }
+        sab(XD, e, n);
+        for (i = 0; i < n; i++)
+            if (!agree(f, XD + i * e, XW[i]))
+                wmis(ex ? nmx : nm, mi, A + i * e, e, NULL, XD + i * e, e, XW[i]);
+        if (lf != of)
+            for (i = 0; i < n; i++) {
+                uint8_t d1[WMAX];
+                uint32_t f1 = 0;
+                if (cft_rint(dev, f->fmt, MODES[mi].cr, ex, A + i * e, d1, 1, &f1, NULL)
+                    != CFT_OK)
+                    continue;
+                if (f1 != XF[i])
+                    wfmis(ex ? nmx : nm, mi, A + i * e, e, NULL, f1, XF[i]);
+            }
+        wclear(n);
+    }
+    cases += n;
+    return 0;
+}
+
+/* One call of the wide scaleB, the n operands at A against the exponent nx
+ * (the library given the raw nx; mpfr_c5.h's rule clamps it in the oracle). */
+static int wscaleb_batch(int wf, int mi, const uint8_t *A, size_t n, int64_t nx, const char *nm)
+{
+    const fdesc *f = &WF[wf];
+    size_t e = f->esz, i;
+    uint32_t lf = 0, of = 0;
+    char note[40];
+
+    snprintf(note, sizeof note, " n=%lld", (long long)nx);
+    for (i = 0; i < n; i++) {
+        mpfr_init2(XW[i], f->p);
+        c5_scaleb_expect(f, A + i * e, nx, MODES[mi].cr, XW[i], &XF[i]);
+        of |= XF[i];
+    }
+    if (cft_scaleb(dev, f->fmt, MODES[mi].cr, A, nx, XD, n, &lf, NULL) != CFT_OK) {
+        hard_fail(nm);
+        wclear(n);
+        return 1;
+    }
+    sab(XD, e, n);
+    for (i = 0; i < n; i++)
+        if (!agree(f, XD + i * e, XW[i]))
+            wmis(nm, mi, A + i * e, e, note, XD + i * e, e, XW[i]);
+    if (lf != of)
+        for (i = 0; i < n; i++) {
+            uint8_t d1[WMAX];
+            uint32_t f1 = 0;
+            if (cft_scaleb(dev, f->fmt, MODES[mi].cr, A + i * e, nx, d1, 1, &f1, NULL) != CFT_OK)
+                continue;
+            if (f1 != XF[i])
+                wfmis(nm, mi, A + i * e, e, note, f1, XF[i]);
+        }
+    wclear(n);
+    cases += n;
+    return 0;
+}
+
+/* One call of convertFormat from format sf to df, the n operands at A. */
+static int wconv_batch(int sf, int df, int mi, const uint8_t *A, size_t n, const char *nm)
+{
+    const fdesc *fs = &WF[sf], *fd = &WF[df];
+    size_t es = fs->esz, ed = fd->esz, i;
+    uint32_t lf = 0, of = 0;
+
+    for (i = 0; i < n; i++) {
+        mpfr_init2(XW[i], fd->p);
+        c5_convert_expect(fs, fd, A + i * es, MODES[mi].cr, XW[i], &XF[i]);
+        of |= XF[i];
+    }
+    if (cft_convert(dev, fs->fmt, fd->fmt, MODES[mi].cr, A, XD, n, &lf) != CFT_OK) {
+        hard_fail(nm);
+        wclear(n);
+        return 1;
+    }
+    sab(XD, ed, n);
+    for (i = 0; i < n; i++)
+        if (!agree(fd, XD + i * ed, XW[i]))
+            wmis(nm, mi, A + i * es, es, NULL, XD + i * ed, ed, XW[i]);
+    if (lf != of)
+        for (i = 0; i < n; i++) {
+            uint8_t d1[WMAX];
+            uint32_t f1 = 0;
+            if (cft_convert(dev, fs->fmt, fd->fmt, MODES[mi].cr, A + i * es, d1, 1, &f1) != CFT_OK)
+                continue;
+            if (f1 != XF[i])
+                wfmis(nm, mi, A + i * es, es, NULL, f1, XF[i]);
+        }
+    wclear(n);
+    cases += n;
+    return 0;
+}
+
+/* The n operands at A (format wf) against the four integer targets, both
+ * variants each: every lane-target pair compared, the lanes a target cannot
+ * hold against the FCVT table (mpfr_c5.h's C5_TO). A case a pair: 4 n. */
+static int wcvtto_batch(int wf, int mi, const uint8_t *A, size_t n)
+{
+    const fdesc *f = &WF[wf];
+    size_t e = f->esz, i;
+    int ti, ex;
+
+    for (ti = 0; ti < 4; ti++) {
+        size_t osz = (size_t)C5_TO[ti].width / 8;
+        uint64_t mask = osz == 4 ? 0xffffffffull : ~0ull;
+        for (ex = 0; ex <= 1; ex++) {
+            uint32_t lf = 0, of = 0;
+            char note[16];
+            snprintf(note, sizeof note, " exact=%d", ex);
+            for (i = 0; i < n; i++) {
+                c5_cvtto_expect(f, A + i * e, ti, MODES[mi].cr, ex, &XV[i], &XF[i]);
+                of |= XF[i];
+            }
+            if (cvtto_call(ti, f->fmt, mi, ex, A, XO, n, &lf) != CFT_OK) {
+                hard_fail(TGT[ti].nm);
+                return 1;
+            }
+            sab(XO, osz, n);
+            for (i = 0; i < n; i++) {
+                uint64_t got = 0;
+                memcpy(&got, XO + i * osz, osz);
+                if ((got & mask) != (XV[i] & mask)) {
+                    char ha[2 * WMAX + 1];
+                    mismatches++;
+                    if (shown++ < 16) {
+                        hexdump(A + i * e, e, ha);
+                        printf("  MISMATCH %s %s a=0x%s%s lib=0x%016llx want=0x%016llx\n",
+                               TGT[ti].nm, MODES[mi].name, ha, note,
+                               (unsigned long long)(got & mask),
+                               (unsigned long long)(XV[i] & mask));
+                    }
+                }
+            }
+            if (lf != of)
+                for (i = 0; i < n; i++) {
+                    uint8_t o1[8];
+                    uint32_t f1 = 0;
+                    if (cvtto_call(ti, f->fmt, mi, ex, A + i * e, o1, 1, &f1) != CFT_OK)
+                        continue;
+                    if (f1 != XF[i])
+                        wfmis(TGT[ti].nm, mi, A + i * e, e, note, f1, XF[i]);
+                }
+        }
+        cases += n;
+    }
+    return 0;
+}
+
+/* One call converting the n sources at S (si: SRC's index, 2 for i64 and 3
+ * for u64) to format wf. */
+static int wcvtfrom_batch(int wf, int mi, int si, const uint64_t *S, size_t n)
+{
+    const fdesc *f = &WF[wf];
+    size_t e = f->esz, i;
+    uint32_t lf = 0, of = 0;
+    cft_status st;
+
+    for (i = 0; i < n; i++) {
+        mpfr_init2(XW[i], f->p);
+        c5_cvtfrom_expect(f, si, S[i], MODES[mi].cr, XW[i], &XF[i]);
+        of |= XF[i];
+    }
+    st = si == 2 ? cft_cvt_from_i64(dev, f->fmt, MODES[mi].cr, (const int64_t *)(const void *)S,
+                                    XD, n, &lf)
+                 : cft_cvt_from_u64(dev, f->fmt, MODES[mi].cr, S, XD, n, &lf);
+    if (st != CFT_OK) {
+        hard_fail(SRC[si].nm);
+        wclear(n);
+        return 1;
+    }
+    sab(XD, e, n);
+    for (i = 0; i < n; i++)
+        if (!agree(f, XD + i * e, XW[i]))
+            wmis(SRC[si].nm, mi, (const uint8_t *)(S + i), 8, NULL, XD + i * e, e, XW[i]);
+    if (lf != of)
+        for (i = 0; i < n; i++) {
+            uint8_t d1[WMAX];
+            uint32_t f1 = 0;
+            st = si == 2 ? cft_cvt_from_i64(dev, f->fmt, MODES[mi].cr,
+                                            (const int64_t *)(const void *)(S + i), d1, 1, &f1)
+                         : cft_cvt_from_u64(dev, f->fmt, MODES[mi].cr, S + i, d1, 1, &f1);
+            if (st != CFT_OK)
+                continue;
+            if (f1 != XF[i])
+                wfmis(SRC[si].nm, mi, (const uint8_t *)(S + i), 8, NULL, f1, XF[i]);
+        }
+    wclear(n);
+    cases += n;
+    return 0;
+}
+
+/* ---- the drivers -------------------------------------------------- */
+
+/* rint: a tile mode. Each operand runs in each lane behind 1.0s. */
+static int drv_wrint_class(const wjob *wj, uint64_t lo, uint64_t hi, int mi)
+{
+    const fdesc *f = &WF[wj->wf];
+    size_t e = f->esz;
+    uint8_t one[WMAX], t[WMAX];
+    char nm[16], nmx[16];
+    uint64_t v = lo;
+
+    snprintf(nm, sizeof nm, "rint%d", 8 * (int)e);
+    snprintf(nmx, sizeof nmx, "rintx%d", 8 * (int)e);
+    memset(t, 0, WMAX);
+    wenc(f, 0, (uint64_t)f->emax, t, one);          /* 1.0 */
+    while (v < hi) {
+        size_t n = hi - v > CLS_BATCH ? CLS_BATCH : (size_t)(hi - v), i;
+        int ln;
+        for (ln = 0; ln < wj->lanes; ln++) {
+            for (i = 0; i < (size_t)ln; i++)
+                memcpy(XA + i * e, one, e);
+            for (i = 0; i < n; i++) {
+                wround_operand(wj, v + i, t);
+                memcpy(XA + ((size_t)ln + i) * e, t, e);
+            }
+            if (wrint_batch(wj->wf, mi, XA, n + (size_t)ln, nm, nmx))
+                return 1;
+            cases -= (uint64_t)ln;             /* the 1.0s are not cases */
+        }
+        encodings += n;
+        v += n;
+    }
+    return 0;
+}
+
+/* scaleB: a tile mode. The operands of a run of one exponent are one call a
+ * lane, behind +0s. */
+static int drv_wscaleb_class(const wjob *wj, uint64_t lo, uint64_t hi, int mi)
+{
+    static int64_t NX[BATCH];
+    static uint8_t OPS[BATCH * WMAX];
+    const fdesc *f = &WF[wj->wf];
+    size_t e = f->esz;
+    uint8_t t[WMAX];
+    char nm[16];
+    uint64_t v = lo;
+
+    snprintf(nm, sizeof nm, "scaleb%d", 8 * (int)e);
+    while (v < hi) {
+        size_t n = hi - v > CLS_BATCH ? CLS_BATCH : (size_t)(hi - v), i, j;
+        for (i = 0; i < n; i++) {
+            wscaleb_operand(wj, v + i, t, &NX[i]);
+            memcpy(OPS + i * e, t, e);
+        }
+        for (i = 0; i < n; i = j) {
+            int ln;
+            for (j = i + 1; j < n && NX[j] == NX[i]; j++)
+                ;
+            for (ln = 0; ln < wj->lanes; ln++) {
+                memset(XA, 0, (size_t)ln * e);            /* +0 rides the multiply, no flags */
+                memcpy(XA + (size_t)ln * e, OPS + i * e, (j - i) * e);
+                if (wscaleb_batch(wj->wf, mi, XA, (j - i) + (size_t)ln, NX[i], nm))
+                    return 1;
+                cases -= (uint64_t)ln;                    /* the +0s are not cases */
+            }
+        }
+        encodings += n;
+        v += n;
+    }
+    return 0;
+}
+
+/* conv and cvtto: host operations, each case alone (CLS_BATCH a call). */
+static int drv_wconv_cvtto_class(const wjob *wj, uint64_t lo, uint64_t hi, int mi)
+{
+    const fdesc *f = &WF[wj->wf];
+    size_t e = f->esz;
+    uint8_t t[WMAX];
+    char nm[24];
+    uint64_t v = lo;
+
+    if (wj->kind == WJ_CONV)
+        snprintf(nm, sizeof nm, "conv%dto%d", 8 * (int)e, 8 * (int)WF[wj->df].esz);
+    while (v < hi) {
+        size_t n = hi - v > CLS_BATCH ? CLS_BATCH : (size_t)(hi - v), i;
+        for (i = 0; i < n; i++) {
+            wround_operand(wj, v + i, t);
+            memcpy(XA + i * e, t, e);
+        }
+        if (wj->kind == WJ_CONV ? wconv_batch(wj->wf, wj->df, mi, XA, n, nm)
+                                : wcvtto_batch(wj->wf, mi, XA, n))
+            return 1;
+        encodings += n;
+        v += n;
+    }
+    return 0;
+}
+
+/* cvtfrom: the sources run as i64 or u64 by runs of one type, a call cut
+ * where the type changes. */
+static int drv_wcvtfrom_class(const wjob *wj, uint64_t lo, uint64_t hi, int mi)
+{
+    static uint64_t S[BATCH];
+    static int U[BATCH];
+    uint64_t v = lo;
+
+    while (v < hi) {
+        size_t n = hi - v > CLS_BATCH ? CLS_BATCH : (size_t)(hi - v), i, j;
+        for (i = 0; i < n; i++)
+            wcvtfrom_operand(wj, v + i, &S[i], &U[i]);
+        for (i = 0; i < n; i = j) {
+            for (j = i + 1; j < n && U[j] == U[i]; j++)
+                ;
+            if (wcvtfrom_batch(wj->wf, mi, U[i] ? 3 : 2, S + i, j - i))
+                return 1;
+        }
+        encodings += n;
+        v += n;
+    }
+    return 0;
+}
+
+/* rint{128,256}-f32: every fp32 encoding of [lo, hi), widened, through the
+ * wide rint in batches of BATCH, both variants; the oracle rint32's own,
+ * the wide result the fp32 result widened (a NaN as a class), the flags
+ * rint32's rule on the fp32 values (widening is exact, so the wide value
+ * moved iff the fp32 one did). */
+static int drv_wrint_f32(const wjob *wj, uint64_t lo, uint64_t hi, int mi)
+{
+    static uint32_t A[BATCH], W[BATCH];
+    const fdesc *f = &WF[wj->wf], *n32 = &WF[WF32];
+    size_t e = f->esz;
+    char nm[16], nmx[16];
+    uint64_t v = lo;
+
+    snprintf(nm, sizeof nm, "rint%d-f32", 8 * (int)e);
+    snprintf(nmx, sizeof nmx, "rintx%d-f32", 8 * (int)e);
+    while (v < hi) {
+        size_t n = hi - v > BATCH ? BATCH : (size_t)(hi - v), i;
+        uint32_t e0 = 0, e1 = 0;
+        int ex;
+        for (i = 0; i < n; i++) {
+            A[i] = (uint32_t)(v + i);
+            widen(n32, (const uint8_t *)&A[i], f, XA + i * e);
+        }
+        fesetround(MODES[mi].fe);
+        for (i = 0; i < n; i++)
+            W[i] = f2u(rint_oracle32(mi, u2f(A[i])));
+        fesetround(FE_TONEAREST);
+        for (i = 0; i < n; i++) {
+            e0 |= rint_expect32(A[i], W[i], 0);
+            e1 |= rint_expect32(A[i], W[i], 1);
+        }
+        for (ex = 0; ex <= 1; ex++) {
+            uint32_t lf = 0;
+            if (cft_rint(dev, f->fmt, MODES[mi].cr, ex, XA, XD, n, &lf, NULL) != CFT_OK) {
+                hard_fail(ex ? nmx : nm);
+                return 1;
+            }
+            sab(XD, e, n);
+            for (i = 0; i < n; i++) {
+                uint8_t w[WMAX];
+                cls cg, cw;
+                widen(n32, (const uint8_t *)&W[i], f, w);
+                classify(f, XD + i * e, &cg);
+                classify(f, w, &cw);
+                if (memcmp(XD + i * e, w, e) != 0 && !(cg.is_nan && cw.is_nan)) {
+                    char hg[2 * WMAX + 1], hw[2 * WMAX + 1];
+                    mismatches++;
+                    if (shown++ < 16) {
+                        hexdump(XD + i * e, e, hg);
+                        hexdump(w, e, hw);
+                        printf("  MISMATCH %s %s a=0x%08x lib=0x%s cpu=0x%s\n", ex ? nmx : nm,
+                               MODES[mi].name, (unsigned)A[i], hg, hw);
+                    }
+                }
+            }
+            if (lf != (ex ? e1 : e0))
+                for (i = 0; i < n; i++) {
+                    uint8_t d1[WMAX];
+                    uint32_t f1 = 0, want = rint_expect32(A[i], W[i], ex);
+                    if (cft_rint(dev, f->fmt, MODES[mi].cr, ex, XA + i * e, d1, 1, &f1, NULL)
+                        != CFT_OK)
+                        continue;
+                    if (f1 != want)
+                        fmis(ex ? nmx : nm, MODES[mi].name, A[i], f1, want);
+                }
+        }
+        cases += n;
+        encodings += n;
+        v += n;
+    }
+    return 0;
+}
+
+/* A wide mode's run: 2 for a refusal (nothing was run), else the driver's status. */
+static int wide_run(const wjob *wj, const char *slo, const char *shi, int mi)
+{
+    uint64_t lo, hi;
+    if (wrange(wj, slo, shi, &lo, &hi))
+        return 2;
+    if (wj->kind == WJ_RINTF32)
+        fprintf(stderr, "oracle: the CPU's float, rint32's: the wide result must be the fp32 "
+                "result widened (an exact identity)\n");
+    else
+        fprintf(stderr, "oracle: MPFR %s with GMP %s, mpfr_ieee.h's emulation; mpfr_c5.h's "
+                "clause-5 rules\n", mpfr_get_version(), gmp_version);
+    exh_mode = 1;
+    switch (wj->kind) {
+    case WJ_RINT:    return drv_wrint_class(wj, lo, hi, mi);
+    case WJ_SCALEB:  return drv_wscaleb_class(wj, lo, hi, mi);
+    case WJ_CVTFROM: return drv_wcvtfrom_class(wj, lo, hi, mi);
+    case WJ_RINTF32: return drv_wrint_f32(wj, lo, hi, mi);
+    default:         return drv_wconv_cvtto_class(wj, lo, hi, mi);
+    }
+}
+
+/* `dump <job> size` and `dump <job> <lo> <hi>` of a wide job: the space's
+ * size, or one line an index - the index and the operand (32 or 64 hex
+ * digits; a cvtfrom source's 16 and its type; a scaleB case's exponent),
+ * as python/c5_class_enum.py --dump prints them, and for rint{128,256}-f32
+ * the widened fp32 encoding. No device is opened. */
+static int wclass_dump(int argc, char **argv)
+{
+    const wjob *wj = wjob_of(argv[2]);
+    const fdesc *f = &WF[wj->wf];
+    uint64_t lo, hi, i;
+
+    if (argc == 4 && !strcmp(argv[3], "size")) {
+        printf("%llu\n", (unsigned long long)wsize(wj));
+        return 0;
+    }
+    if (argc != 5 || wrange(wj, argv[3], argv[4], &lo, &hi))
+        return 2;
+    for (i = lo; i < hi; i++) {
+        uint8_t a[WMAX];
+        char h[2 * WMAX + 1];
+        if (wj->kind == WJ_CVTFROM) {
+            uint64_t sv;
+            int u;
+            wcvtfrom_operand(wj, i, &sv, &u);
+            printf("%llu 0x%016llx %s\n", (unsigned long long)i, (unsigned long long)sv,
+                   u ? "u64" : "i64");
+        } else if (wj->kind == WJ_SCALEB) {
+            int64_t nx;
+            wscaleb_operand(wj, i, a, &nx);
+            hexdump(a, f->esz, h);
+            printf("%llu 0x%s %lld\n", (unsigned long long)i, h, (long long)nx);
+        } else {
+            if (wj->kind == WJ_RINTF32) {
+                uint32_t x = (uint32_t)i;
+                widen(&WF[WF32], (const uint8_t *)&x, f, a);
+            } else
+                wround_operand(wj, i, a);
+            hexdump(a, f->esz, h);
+            printf("%llu 0x%s\n", (unsigned long long)i, h);
+        }
+    }
+    return 0;
+}
+
+static void wide_usage(const char *argv0)
+{
+    fprintf(stderr,
+        "       %s rint128-class|rint256-class|scaleb128-class|scaleb256-class "
+        "<lo> <hi> <rne|rtz|rdn|rup|rmm>\n"
+        "       %s conv128to64-class|conv256to128-class|cvtto128-class|cvtto256-class|"
+        "cvtfrom128-class|cvtfrom256-class <lo> <hi> <rne|rtz|rdn|rup|rmm>\n"
+        "       %s rint128-f32|rint256-f32 <lo> <hi> <rne|rtz|rdn|rup|rmm>\n"
+        "       %s dump <one of the twelve words above> size | <lo> <hi>\n"
+        "       (the wide modes, built with MPFR %s)\n",
+        argv0, argv0, argv0, argv0, mpfr_get_version());
+}
+#endif /* CFT_SOAK_MPFR */
+
 /* ---- main --------------------------------------------------------- */
 
 static void usage(const char *argv0)
@@ -2862,6 +3856,9 @@ static void usage(const char *argv0)
         "       %s probe scalbn|castflags|cvtfrom|scalebrange\n",
         argv0, argv0, argv0, argv0, argv0, argv0, argv0, argv0, argv0,
         argv0, argv0, argv0);
+#ifdef CFT_SOAK_MPFR
+    wide_usage(argv0);
+#endif
 }
 
 int main(int argc, char **argv)
@@ -2906,6 +3903,14 @@ int main(int argc, char **argv)
         return 2;
     }
 
+#ifdef CFT_SOAK_MPFR
+    if (!strcmp(job, "dump") && wjob_of(argv[2]) != NULL) {
+        int drc = wclass_dump(argc, argv);
+        if (drc == 2)
+            usage(argv[0]);
+        return drc;
+    }
+#endif
     if (!strcmp(job, "dump")) {
         int drc = class_dump(argc, argv);
         if (drc == 2)
@@ -2967,6 +3972,17 @@ int main(int argc, char **argv)
     }
     fesetround(FE_TONEAREST);
 
+#ifdef CFT_SOAK_MPFR
+    if (wjob_of(job) != NULL && argc == 5) {
+        /* the wide modes: <lo> <hi> over the mode's indices, all five
+         * attributes, the verdict clause below */
+        rc = wide_run(wjob_of(job), argv[2], argv[3], mi);
+        if (rc == 2) {
+            cft_close(dev);
+            return 2;
+        }
+    } else
+#endif
     if (!strcmp(job, "rint32") && argc == 5) {
         rc = drv_rint32(p1, p2, mi);
     } else if (!strcmp(job, "nextup32") && argc == 4) {

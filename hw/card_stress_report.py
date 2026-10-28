@@ -1713,8 +1713,10 @@ def _r_sweep(S: Dict[str, Any]) -> List[str]:
                 what, attr = claim.rsplit(", under ", 1)
                 wide.setdefault(_CATALOG[e["item"]].op, (what, []))[1].append(attr)
         if wide:
-            L.append("  a wide item (parcel HXc: fp64, fp128 and fp256, checked against MPFR at fp128 and fp256 and the CPU's double at "
-                     "fp64) claims, over its whole space and under its attribute:")
+            L.append("  a wide item (parcel HXc's division and square root at fp64, fp128 and fp256: MPFR at fp128 and fp256, the CPU's "
+                     "double at fp64; parcel HXb's clause-5 items at fp128 and fp256: MPFR through mpfr-check's clause-5 rules, and the "
+                     "fp32 slice through the wide rint against the CPU's fp32 rint, an exact identity) claims, over its whole space and "
+                     "under its attribute:")
             L += [f"    {op} ({', '.join(attrs)}): {what}" for op, (what, attrs) in wide.items()]
     else:
         L.append("exhaustive items: none seen")

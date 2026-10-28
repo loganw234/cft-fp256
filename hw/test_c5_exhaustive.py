@@ -255,8 +255,10 @@ def group_build(tool: Tool) -> None:
     rc, out, err = tool.raw("probe", "scalbn")
     check("build: the older probes still run (scalbn: directed modes honoured on this host)", rc == 0 and "HONOURED" in out, out[:200])
     # The library's table also holds the divsqrt soak's wide modes (parcel HXc, 2026-10-26: k = 1 for the fp32 slices and the
-    # windows), which this tool does not have: they are left out here, and every clause-5 mode is still held to its entry.
-    c5_per = {j: k for j, k in L.PER_ENCODING.items() if j not in L.WIDE_OPS}
+    # windows), which this tool does not have, and this tool's own wide fp32-slice modes rint128-f32 and rint256-f32 (parcel HXb,
+    # 2026-10-27: k = 1), which only its MPFR=1 build has and hw/test_c5_wide.py tests: both are left out here, and every clause-5
+    # mode of the default build is still held to its entry.
+    c5_per = {j: k for j, k in L.PER_ENCODING.items() if j not in L.WIDE_OPS and j not in L.WIDE_C5_OPS}
     check("build: the checks an encoding each mode promises here are the driver library's PER_ENCODING (what the driver holds "
           "a slice to)", {j: k for j, _a, k, _e in MODES} == c5_per, str(c5_per))
 

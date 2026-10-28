@@ -866,15 +866,23 @@ formatoftest: all
 # serves both, the MPFR words spliced in by variables that are empty
 # without it: host/tests/soak_chunk_check.py's plants anchor on the
 # soak-chunk recipe's text, which must occur once.
+#
+# The same words build clause5-soak's wide modes (parcel HXb, 2026-10-27):
+# the class modes of rint, scaleB and the conversions at fp128 and fp256
+# against mpfr-check's clause-5 rules (tools/mpfr_c5.h, over
+# tools/mpfr_ieee.h), and rint{128,256}-f32. `make clause5-soak MPFR=1`,
+# with MPFR_PREFIX=DIR as above; unset, its recipe and object are the ones
+# they were, and a wide mode word is refused with the usage text, exit 2.
+# `clause5-soak dump rint128-class size` exits 0 only from an MPFR=1 build.
 ifneq ($(filter-out 0 1,$(MPFR)),)
-  $(error MPFR=$(MPFR) is refused: MPFR=1 builds divsqrt-soak's wide modes against MPFR and GMP, MPFR=0 or unset builds the tool without them)
+  $(error MPFR=$(MPFR) is refused: MPFR=1 builds divsqrt-soak's and clause5-soak's wide modes against MPFR and GMP, MPFR=0 or unset builds the tools without them)
 endif
 SOAK_EMPTY :=
 SOAK_SP    := $(SOAK_EMPTY) $(SOAK_EMPTY)
 ifeq ($(MPFR),1)
 SOAK_MPFR_CF   := $(SOAK_SP)-DCFT_SOAK_MPFR$(if $(MPFR_PREFIX), -I$(MPFR_PREFIX)/include)
 SOAK_MPFR_LD   := $(SOAK_SP)$(if $(MPFR_PREFIX),-L$(MPFR_PREFIX)/lib )-lmpfr -lgmp
-SOAK_MPFR_DEPS := tools/mpfr_ieee.h soak-mpfr-always
+SOAK_MPFR_DEPS := tools/mpfr_ieee.h tools/mpfr_c5.h soak-mpfr-always
 else
 SOAK_MPFR_CF   :=
 SOAK_MPFR_LD   :=
@@ -893,10 +901,10 @@ divsqrt-soak$(EXE): tools/divsqrt_soak.c libcft.a $(SOAK_MPFR_DEPS)
 # hw/run-c5-soak.sh feeds in its roundeven probe result. Driven at
 # scale by that script; the tool's header says which oracle each
 # operation gets and why the flags are compared the way they are.
-clause5-soak$(EXE): tools/clause5_soak.c libcft.a
-	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) -fno-math-errno \
+clause5-soak$(EXE): tools/clause5_soak.c libcft.a $(SOAK_MPFR_DEPS)
+	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC)$(SOAK_MPFR_CF) -fno-math-errno \
 	  -frounding-math $(C5DEFS) tools/clause5_soak.c libcft.a -o $@ \
-	  $(XRTLIBS) $(LDLIBS) -lm
+	  $(XRTLIBS) $(LDLIBS)$(SOAK_MPFR_LD) -lm
 
 # Convenience alias for Windows, where the real target carries .exe.
 # Guarded: with EXE empty the alias would be a circular self-edge.
@@ -1011,11 +1019,11 @@ $(SOAK_DIV): tools/divsqrt_soak.c $(SOAK_LIB) $(SOAK_MPFR_DEPS)
 	  tools/divsqrt_soak.c $(SOAK_LIB) -o $@ \
 	  $(XRTLIBS) $(LDLIBS)$(SOAK_MPFR_LD) -lm
 
-$(SOAK_C5): tools/clause5_soak.c $(SOAK_LIB)
-	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) -fno-math-errno \
+$(SOAK_C5): tools/clause5_soak.c $(SOAK_LIB) $(SOAK_MPFR_DEPS)
+	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC)$(SOAK_MPFR_CF) -fno-math-errno \
 	  -frounding-math -DCFT_CHUNK=$(SOAK_CHUNK) -DBATCH=$(SOAK_CHUNK) \
 	  $(C5DEFS) tools/clause5_soak.c $(SOAK_LIB) -o $@ \
-	  $(XRTLIBS) $(LDLIBS) -lm
+	  $(XRTLIBS) $(LDLIBS)$(SOAK_MPFR_LD) -lm
 
 ifneq ($(EXE),)
 divsqrt-soak-c$(SOAK_CHUNK): $(SOAK_DIV)
@@ -1056,7 +1064,7 @@ clean-soak-chunk:
 # reaches fp128/fp256. Needs libmpfr/libgmp (mingw64 carries them as
 # gcc dependencies; Linux wants libmpfr-dev). See the tool's header
 # for the RMM construction and the flag-derivation policy.
-mpfr-check$(EXE): tools/mpfr_check.c tools/mpfr_ieee.h libcft.a
+mpfr-check$(EXE): tools/mpfr_check.c tools/mpfr_ieee.h tools/mpfr_c5.h libcft.a
 	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) tools/mpfr_check.c libcft.a \
 	  -o $@ $(XRTLIBS) $(LDLIBS) -lmpfr -lgmp -lm
 

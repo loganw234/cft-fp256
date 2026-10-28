@@ -42,8 +42,8 @@ failure policy meets each kind of failure:
     CFT_STANDIN_SOAK_RATE=<cases/s>    a soak takes cases / rate seconds (default 0: at once)
     CFT_STANDIN_TILES=<n>              tiles the identity says (default: 4 for a path with "quad")
     CFT_STANDIN_MPFR=<version>         the MPFR the wide modes' oracle line names (default 4.2.2, the pin)
-    CFT_STANDIN_NO_WIDE=1              a divsqrt soak built without MPFR=1: it refuses every wide mode (`unknown op`, and hard-space's
-                                       `unknown hard-case mode`), exit 2
+    CFT_STANDIN_NO_WIDE=1              a soak built without MPFR=1: it refuses every wide mode, exit 2 (the divsqrt soak `unknown op`,
+                                       and hard-space's `unknown hard-case mode`; the clause-5 soak its usage text, run or dump)
   Every soak job also prints "standin: env CFT_SOAK_ARTIFACT=... CFT_XRT_TILES=..." (the two variables as the job was handed
   them, "<unset>" for none): the tests hold a host-pool job to neither, and a card job to its image and tile.
 
@@ -122,6 +122,28 @@ WIDE_FLAT = tuple([f"{op}{w}-f32" for op in ("sqrt", "recip") for w in (64, 128,
 EXH_PER.update({op: 1 for op in WIDE_FLAT})
 WIDE = WIDE_FLAT + ("div128-f64hard", "div256-f64hard", "sqrt128-f64hard", "sqrt256-f64hard",
                     "div128-hard", "div256-hard", "sqrt128-hard", "sqrt256-hard")
+# The wide modes of the clause-5 soak (parcel HXb): its ten class spaces join IDX - k the tile's lanes at the format for rint and scaleB
+# (2 at fp128, 1 at fp256), the four targets for cvtto, 1 for the rest, none skipped - and its two fp32 slices through the wide rint make
+# one case an encoding (EXH_PER's 1). `dump <job> size` answers each space, which the driver's build step asks of an MPFR=1 build; a tool
+# built without MPFR=1 (CFT_STANDIN_NO_WIDE=1) refuses every one with its usage text, exit 2, as the default clause5_soak.c does. The
+# suite holds both tables to the library's.
+IDX.update({"rint128-class": (137344, 2, 0), "rint256-class": (537600, 1, 0), "scaleb128-class": (317448, 2, 0),
+            "scaleb256-class": (1370952, 1, 0), "conv128to64-class": (1979424, 1, 0), "conv256to128-class": (63208320, 1, 0),
+            "cvtto128-class": (91872, 4, 0), "cvtto256-class": (205440, 4, 0), "cvtfrom128-class": (50923, 1, 0),
+            "cvtfrom256-class": (50923, 1, 0)})
+WIDE_C5_FLAT = ("rint128-f32", "rint256-f32")
+EXH_PER.update({op: 1 for op in WIDE_C5_FLAT})
+WIDE_C5 = ("rint128-class", "rint256-class", "scaleb128-class", "scaleb256-class") + WIDE_C5_FLAT + (
+    "conv128to64-class", "conv256to128-class", "cvtto128-class", "cvtto256-class", "cvtfrom128-class", "cvtfrom256-class")
+
+
+def wide_c5_oracle(op: str) -> str:
+    """The clause-5 soak's wide modes' stderr line naming the oracle (clause5_soak.c's wide_run): MPFR through mpfr_c5.h's rules for the
+    class modes - the version CFT_STANDIN_MPFR's, the pin's 4.2.2 by default - and the CPU's fp32 rint for the two fp32 slices."""
+    if op in WIDE_C5_FLAT:
+        return "oracle: the CPU's float, rint32's: the wide result must be the fp32 result widened (an exact identity)"
+    return (f"oracle: MPFR {os.environ.get('CFT_STANDIN_MPFR') or '4.2.2'} with GMP 6.3.0, mpfr_ieee.h's emulation; "
+            f"mpfr_c5.h's clause-5 rules")
 
 
 def wide_oracle(op: str, mode: str) -> str:
@@ -454,13 +476,27 @@ def main() -> int:
                 return 0
             err(f"unknown hard-case mode {m}")
             return 2
+        if op == "dump" and len(real) == 4 and real[3] == "size" and real[2] in WIDE_C5:
+            # the clause-5 soak's `dump <job> size` of a wide mode (clause5_soak.c, wclass_dump), which the driver's build step asks of an
+            # MPFR=1 build; a tool built without MPFR=1 has no such job and prints its usage, exit 2
+            if os.environ.get("CFT_STANDIN_NO_WIDE"):
+                err(f"usage: {real[0]} rint32 <lo> <hi> <rne|rtz|rdn|rup|rmm>")
+                return 2
+            out(str(1 << 32 if real[2] in WIDE_C5_FLAT else IDX[real[2]][0]))
+            return 0
         tail = ""                 # the exhaustive modes' ", E encodings, S skipped" clause
         refuse = None             # a range the tool refuses by name, after its backend line, exit 2
         chunk = chunk_of(real[0])
         if op in WIDE and os.environ.get("CFT_STANDIN_NO_WIDE"):
             refuse, cases, mode = f"unknown op {op}", 0, real[4]    # a tool built without MPFR=1 (divsqrt_soak.c's main): exit 2, no verdict
+        elif op in WIDE_C5 and os.environ.get("CFT_STANDIN_NO_WIDE"):
+            # the clause-5 soak built without MPFR=1 (clause5_soak.c's main): its usage text, exit 2, no verdict
+            refuse, cases, mode = f"usage: {real[0]} rint32 <lo> <hi> <rne|rtz|rdn|rup|rmm>", 0, real[4]
         elif op in WIDE_FLAT and not 0 <= int(real[2], 0) < int(real[3], 0) <= 1 << 32:
             refuse = f"need 0 <= lo < hi <= {1 << 32} (the indices of {op}), got [{real[2]}, {real[3]})"
+            cases, mode = 0, real[4]
+        elif op in WIDE_C5_FLAT and not 0 <= int(real[2], 0) < int(real[3], 0) <= 1 << 32:
+            refuse = f"need 0 <= lo < hi <= 2^32 (the encodings of a 32-bit operand), got [{real[2]}, {real[3]})"
             cases, mode = 0, real[4]
         elif op in IDX:
             lo, hi = int(real[2], 0), int(real[3], 0)
@@ -509,6 +545,8 @@ def main() -> int:
             return 2
         if op in WIDE:
             err(wide_oracle(op, mode))          # the wide modes name their oracle on stderr before they run (wide_run)
+        elif op in WIDE_C5:
+            err(wide_c5_oracle(op))             # so do the clause-5 soak's (its wide_run)
         rate = float(os.environ.get("CFT_STANDIN_SOAK_RATE") or 0)
         if rate > 0:
             time.sleep(cases / rate)

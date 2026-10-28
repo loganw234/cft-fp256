@@ -1,0 +1,7 @@
+# the warning lines of the driver's make line under MPFR=1, then of its soak-chunk make (XRT=0 here: WSL has no XRT)
+# make -C host -j8 XRT=0 C5DEFS=-DCFT_SOAK_HAVE_ROUNDEVEN=1 MPFR=1 all device-test api-test remote-test divsqrt-soak clause5-soak
+tools/divsqrt_soak.c:79: warning: ignoring ‘#pragma STDC FENV_ACCESS’ [-Wunknown-pragmas]
+tools/clause5_soak.c:184: warning: ignoring ‘#pragma STDC FENV_ACCESS’ [-Wunknown-pragmas]
+# make -C host -j8 XRT=0 C5DEFS=-DCFT_SOAK_HAVE_ROUNDEVEN=1 MPFR=1 SOAK_CHUNK=16384 soak-chunk
+tools/divsqrt_soak.c:79: warning: ignoring ‘#pragma STDC FENV_ACCESS’ [-Wunknown-pragmas]
+tools/clause5_soak.c:184: warning: ignoring ‘#pragma STDC FENV_ACCESS’ [-Wunknown-pragmas]

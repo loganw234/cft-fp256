@@ -1265,7 +1265,7 @@ study is per RTL tree, with the three images reported separately beneath it.
   derives by default, so a reducer that calls it gets the classes the command line shows; `tree_class(kind, run_start, rev)` is the class a slice would fall in under a run_start, by the same rule and with the label `--json` gives (the nightly page's reducer names a class nothing was swept under with it). A slice is counted under the **last `run_start`
   before it** in its file, so a run resumed from another checkout counts what follows under that checkout's tree.
 - **A format on every item, and the wide items as a group of their own** (since 2026-10-27, parcel HXd). Logan's "Per tree" stands: the split is
-  *within* a class, and nothing is summed across classes. `card_stress_lib.OP_FORMAT` names, for each of the 68 ops of the full catalog, the format it computes
+  *within* a class, and nothing is summed across classes. `card_stress_lib.OP_FORMAT` names, for each of the 80 ops of the full catalog (68 before parcel HXb's twelve wide clause-5 ops), the format it computes
   in, or both ends of a conversion (`fp32 -> fp64`, `fp32 -> the integer targets`, `the integer sources -> fp64`); a slice, f64hard or window item names the format
   it computes in, and its claim says the slice. Read from the C tools' headers, not from the names (which say it unevenly: `cvtfrom64-all` is 32-bit integers
   converted to fp64), it reaches the report as `Item.format`, an op with no entry is refused by name where the catalog is built, and the report and the page parse no
@@ -1626,6 +1626,77 @@ for each; and plants, each red at the check written for it - a slice counted one
 filter too eager (the independent count), a sticky tree without the lowest dropped bit (the class mode catches it under rne, rdn and rup, and
 the random mode's draws, 100 times as many, do not), a defect only a flag shows and one only a lane shows (both caught by the default build and missed by the builds the knobs make). `--baseline-tree DIR` compares
 the random and the exhaustive modes byte for byte with another tree's.
+
+### The wide class modes (added 2026-10-27, parcel HXb): rint, scaleB and the conversions at fp128 and fp256 against MPFR
+
+The same enumerator at fp128 and fp256 (the study's 3.5 and 6, row 3: docs/studies/HX-wide-sweeps.md), and the fp32 slice through
+the wide rint (its 3.1). Twelve more modes of the clause-5 soak, which exist only in a tool built with **`make -C host clause5-soak
+MPFR=1`** (and `MPFR_PREFIX=DIR` for the pinned MPFR, as for the divsqrt soak's wide modes below). Built without it, the tool is the
+one it was (the object compiled with the Makefile's flags is 3ec0081c's byte for byte, MEASURED) and a wide mode word is refused
+with the usage text, exit 2; `clause5-soak dump rint128-class size` exits 0 only from a build that has them.
+
+**The oracle** of the ten class modes is MPFR, through `host/tools/mpfr_c5.h`: mpfr-check's own clause-5 rules, moved out of
+`host/tools/mpfr_check.c` into a header both tools include (one copy; `mpfr-check 24 7` printed the same 156 lines, byte for byte,
+before and after the move, MEASURED), over mpfr_ieee.h's emulation. rint by attribute, the named variant signalling only an sNaN's
+invalid and the Exact one adding inexact iff the value moved, a zero keeping the operand's sign; scaleB the exact product rounded
+once; convert the rounding of the exact operand at the destination; cvt_from the integer exactly through mpz; cvt_to a rint at
+p + 2 bits, the range test in mpz and the contract's RISC-V FCVT table for the lanes a target cannot hold. All five attributes in
+every mode: MPFR answers rmm. `rint128-f32` and `rint256-f32` are checked against **the CPU's fp32 rint** (rint32's oracle and flag
+rule): the wide result must EQUAL the fp32 result widened, an exact identity, since the integer part of an fp32 value has at most
+24 bits. Each run names its oracle on stderr (`oracle: MPFR <v> with GMP <v>, mpfr_ieee.h's emulation; mpfr_c5.h's clause-5 rules`,
+or `oracle: the CPU's float, rint32's: ...`).
+
+| mode | the space (python/c5_class_enum.py; = docs/studies/hx/hx_spaces.out) | indices | k | reach |
+|---|---|---|---|---|
+| `rint128-class`, `rint256-class` | (structural exponents -3 to p, + the 31 or 39 exponent witnesses) x 2 signs x 4 classes x (4 + W) patterns | 137,344; 537,600 | 2; 1 (a case a lane) | tile |
+| `scaleb128-class`, `scaleb256-class` | 3 routes x (p + 1) subnormal strips x 2 x 4 x (4 + W), + 36 overflow + 36 deeper than the last strip | 317,448; 1,370,952 | 2; 1 | tile |
+| `conv128to64-class`, `conv256to128-class` | the exponents emin - p - 2 to emax + 1 of the destination (below its last subnormal bit to an overflow) + the source's witnesses, x 2 x 4 x (4 + W) | 1,979,424; 63,208,320 | 1 | host |
+| `cvtto128-class`, `cvtto256-class` | exponents -3 to 64 + the witnesses, x 2 x 4 x (4 + W); each operand against i32, u32, i64 and u64 | 91,872; 205,440 | 4 (a case a pair) | host |
+| `cvtfrom128-class`, `cvtfrom256-class` | cvtfrom64-class's 190 cells x 4 x 67 + 3; no bit of a 64-bit source is dropped at p = 113 or 237 | 50,923 each | 1 | host |
+| `rint128-f32`, `rint256-f32` | every fp32 encoding, widened exactly (an sNaN stays an sNaN), both variants, in batches as rint32 runs | 4,294,967,296 | 1 (an encoding, both variants in its case, as rint32 counts) | tile |
+
+Each is `<lo> <hi> <attribute>` with the verdict clause `, E encodings, S skipped`, and **S is 0 in every one**: cases = k x E. The
+tile modes run each case alone and in each lane of its format behind benign operands (1.0, +0), as the fp64 tile modes do: two fp128
+lanes and one fp256 unit (docs/ARCHITECTURE.md), so k = 2 and 1 (`-DCLS_LANES_128=1` builds a tool that does not rotate;
+`CLS_LANES_256` is the other knob). cvtto compares **every** lane-target pair, the ones a target cannot hold against the FCVT
+table, so it skips nothing (cvtto64-class, whose native oracle cannot answer them, skips them). cvtfrom's class axis repeats operands at these formats: its claim is an exact
+conversion of every bit length and pattern of the sources, not every class of dropped bits. `dump <mode> size | <lo> <hi>` prints
+the operands (32 or 64 hex digits; a cvtfrom source's 16), held line for line to `python python/c5_class_enum.py --dump` (and the
+-f32 modes' to python/hardcases.py's widening).
+
+**A pass over a whole space claims** (`Item.claim`, the driver's catalog, under its attribute): for `rint128-class`, "every class of
+dropped bits, with a walking one over the kept and dropped bits, at every rounding position of fp128 and its exponent witnesses
+(rint128-class's 137,344 indices), each case in each of fp128's 2 lanes, through the fp128 roundToIntegral, both variants, bits and
+flags against MPFR (mpfr-check's clause-5 rules), at the class level (L2, PLAUSIBLE)", and likewise by space for the others (scaleB:
+"... landing in every one of fp128's 114 subnormal strips by three routes ..."; the conversions without lanes; cvtfrom "an exact
+conversion"); for `rint128-f32`, "every fp32 input, widened exactly to fp128, through the fp128 roundToIntegral, both variants, bits
+and flags equal to the CPU's fp32 rint widened (an exact identity; L1 over the fp32 slice)". The class-level claims are PLAUSIBLE, on
+the structural assumption above.
+
+**What it costs** (MEASURED, WSL cft2204 on the desktop, the software backend, one process, beside other parcels' work): the nine
+smaller class spaces whole under five attributes in 97 s together; `conv256to128-class` whole, 63,208,320 cases an attribute, in
+69 to 81 s an attribute, 370 s for the five (by hand, at 527f2777; 0 value and 0 flag mismatches, 0 skipped); the two -f32 modes'
+2^22 encodings under five attributes each in 126 to 129 s, about 3 microseconds an encoding (two calls of the composed rint), so
+about 3.7 hours of a CPU for a whole attribute (COMPUTED). On a tile the class modes are call-bound, a call a case and lane as the fp64 class modes are (the nearest record
+is theirs, above: at most 4.1 to 4.25 ms an index of `rint64-class`, four lanes). The study's 5.3 gives 0.40 and 0.78 tile-hours for
+the two rint modes over five attributes, 0.06 and 0.13 for the two scaleB modes over four (so about 0.08 and 0.16 over the five here),
+and 3.29 and 6.60 for the two -f32 modes over five (ESTIMATE: the fp64 class modes' cases a second, and the probe's rint rates).
+**On the card** (the lead's box run of 2026-10-27, the quad, one item a tile; COMPUTED from its slices' seconds): rint128-class
+whole in 280 s (about 2.0 ms an index, as the study had it), scaleb128-class whole in 63 s, scaleb256-class whole in 130 s, and
+rint256-f32 at 0.51 M encodings a second, so about 2.4 tile-hours an attribute, about 1.8 times the study's figure.
+
+By hand (on the card with `CFT_SOAK_ARTIFACT` and `CFT_XRT_TILES`, as above):
+
+    make -C host clause5-soak MPFR=1
+    host/clause5-soak rint128-class 0 137344 rne
+
+The tool's side is tested by `python3 hw/test_c5_wide.py --baseline-tree DIR` (POSIX with MPFR's headers; six to six and a half
+minutes in WSL): the build's one warning line and its control, the dumps against the Python reference (6.5 million lines), every
+class space whole under every attribute but conv256to128-class (32 slices of 65,536 of it under each; whole with `--thorough`, about
+seven minutes more), the refusals, the sabotage control of every mode and attribute, seven plants each red at its check (a class
+selector, the shared rule given the wrong attribute, a fault in one fp128 lane caught only by the rotating build, a sticky tree
+without its lowest bit, the FCVT table's u32 maximum off by one, a widening that drops a bit, a slice one index short), and the
+older modes of the MPFR=1 build byte for byte with another tree's default tool, over 55 invocations.
 
 ### The hard-case division and square-root items: what they are, what a skip is, how to run one
 
@@ -2233,6 +2304,73 @@ hand. Phase 1's hours, above.
 **In the report and on the page (added 2026-10-27, parcel HXd).** Every item line of the report names the item's format (the last column of its tables), and the
 wide items are totalled as a group of their own beside the others, inside each tree class ("Coverage per tree", above); the nightly page shows them the same way
 ("The morning after", below), so that they join a class without moving the figures of the items that were in it.
+
+### The wide clause-5 items in the driver (added 2026-10-27, parcel HXb): the study's ranks 3 and 5, and the host's conversions
+
+Parcel HXb built the twelve wide clause-5 modes ("The wide class modes", above); this is the driver running them. The lead's box run
+of 2026-10-27 (the parcel's script, at 527f2777) served seven of the items for twelve minutes, four on the quad's tiles and three on
+the host pool, and every slice passed; docs/VALIDATION.md's entry for HXb says what was run, and where.
+
+**The items.** With `--mpfr-prefix`, `sweep_items(mpfr=True)` appends **60 more items after HXc's 102** (287 in all, the 227 before
+them in their places): the twelve modes under all five attributes, in the study's order (5.4's rank 3, the class modes of rint and
+scaleB; rank 5, the fp32 slice through the wide rint; then the host's conversions, 5.5). Each is exhaustive over its own space, takes
+no seed, skips nothing (cases = k x E on every slice, and a wholly covered item is held to k x the whole space, 0 skipped), and is a
+`tile` item or a `host` item as its operation is: the rint and scaleB modes call the composed `cft_rint` and `cft_scaleb`, which reach
+a tile, and the conversions are libcft's host code, so they run in the host pool (`--host-workers`, 8 by default) and never on the
+card. A pass over an item's whole space claims, under its attribute (`Item.claim`; the quotation above gives rint128-class's):
+
+| items | indices (k) | whole space (cases, skipped) | level | reach | oracle |
+|---|---|---|---|---|---|
+| `rint128-class`, `rint256-class` | 137,344 (2); 537,600 (1) | 274,688 and 0; 537,600 and 0 | class (L2, PLAUSIBLE) | tile | MPFR |
+| `scaleb128-class`, `scaleb256-class` | 317,448 (2); 1,370,952 (1) | 634,896 and 0; 1,370,952 and 0 | class (L2, PLAUSIBLE) | tile | MPFR |
+| `rint128-f32`, `rint256-f32` | 4,294,967,296 (1) | every index a case, none skipped | exhaustive (L1 over the fp32 slice) | tile | the CPU's fp32 rint, an exact identity |
+| `conv128to64-class`, `conv256to128-class` | 1,979,424 (1); 63,208,320 (1) | the indices, 0 | class (L2, PLAUSIBLE) | host | MPFR |
+| `cvtto128-class`, `cvtto256-class` | 91,872 (4); 205,440 (4) | 367,488 and 0; 821,760 and 0 | class (L2, PLAUSIBLE) | host | MPFR, and the FCVT table |
+| `cvtfrom128-class`, `cvtfrom256-class` | 50,923 (1) | 50,923 and 0 | class (L2, PLAUSIBLE): an exact conversion | host | MPFR |
+
+That is 12 x 5 = 60 items, named `<mode>-<attribute>` (`rint128-class-rne`, ..., `cvtfrom256-class-rmm`). Every figure is the tool's
+own (`clause5-soak dump <mode> size`, = python/c5_class_enum.py's and the study's `hx_spaces.out`), and the suite holds the catalog to
+those outputs (`hw/card_stress_fixtures/wc-*`, made by the real tool in WSL). `python/figure_extracts.py` counts the six tile modes
+among the tile operations (`STRESS_TILE_OPS`, 51), so the extract's reach check agrees with `OP_REACH`.
+
+**The check of the built tool.** `--mpfr-prefix` was already on the make line that builds `clause5-soak` (and on the `soak-chunk`
+one under `--sweep-chunk`), so nothing new is built; after `mpfr divsqrt-soak` the build step runs **`mpfr clause5-soak`** (and
+`mpfr clause5-soak-cN`): `dump <mode> size` of each of the twelve must exit 0 and print the catalog's space (a tool built without
+MPFR=1 does not know the words: its usage, exit 2), and one index of `rint128-class` (`0 1 rne`: two cases, one a lane) on the
+software backend - CFT_SOAK_ARTIFACT and CFT_XRT_TILES taken out of its environment - must pass `parse_soak`'s cover rule with an
+oracle line naming MPFR at the pin's version. A failure fails the step by name and the run does not start (`build_failed`, exit 3),
+as for the divsqrt soak. **The build's warnings** are unchanged: under MPFR=1 `clause5-soak` is relinked every time too, and its
+pragma line was already one of the known ones (MEASURED in WSL with XRT=0: the driver's make line with MPFR=1 and its `soak-chunk`
+make each print the two soaks' pragma lines and nothing else, both known, none new). Without `--mpfr-prefix` nothing changes, and a
+wide clause-5 item named by `--sweep-items` is refused by name like HXc's (a skipped leg, `sweep.refused: no-mpfr-prefix`).
+
+**The stand-ins** (`hw/card_stress_standin.py`) know the twelve modes, their spaces and oracle lines, and refuse them as a build
+without MPFR does under `CFT_STANDIN_NO_WIDE`. The suite's dry runs serve one item of each kind to the end of its space (three on the
+quad's tiles, three on the pool) and refuse two by name without the prefix. The report and the page know the 60 through the catalog
+(`sweep_items(mpfr=True)`), and the report's sentence on the wide items names their oracles.
+
+**What it costs.** The study's 5.3 (ESTIMATE): the four tile class modes about 1.4 tile-hours (rint's for five attributes, scaleB's
+for four), the two -f32 modes 3.29 and 6.60 for five; the host items at most about a core-minute an attribute (5.5; MEASURED here on
+WSL's software backend: conv256to128-class 69 to 81 s an attribute, whole, the others seconds). The box run's slices (COMPUTED from
+their seconds; "The wide class modes", above) agree for the class modes, rint128-class 280 s an attribute, and put rint256-f32 at
+about 2.4 tile-hours an attribute, 12 for its five, nearly twice the study's; the box's pool did conv128to64-class in 3 s.
+
+By hand, on the box (the smoke; the host items need the pool, so `--host-workers` must not be 0):
+
+    bash hw/card-stress.sh --until "YYYY-MM-DD HH:MM" --out /data/card-stress-NNNN \
+         --mpfr-prefix ~/cft-fp256/verify/_mpfr-prefix \
+         --sweep-items rint128-class-rne,scaleb256-class-rmm,rint256-f32-rup,conv128to64-class-rtz,cvtto256-class-rdn,cvtfrom128-class-rup
+
+**Known limits.** As HXc's: the signed records refuse the wide items by name (the exporter's catalog is `sweep_items()`, without
+them), and the scheduler does not pass `--mpfr-prefix` yet. The class-level claims rest on the structural assumption above, at fp128
+and fp256 as at fp64; the -f32 claims are complete statements over their 2^32 inputs.
+
+**Their formats** (parcel HXd's `OP_FORMAT`, given these twelve when HXb took HXd's merge): `rint128-class`, `scaleb128-class` and
+`rint128-f32` "fp128"; `rint256-class`, `scaleb256-class` and `rint256-f32` "fp256"; `conv128to64-class` "fp128 -> fp64" and
+`conv256to128-class` "fp256 -> fp128"; `cvtto128-class` and `cvtto256-class` "fp128 -> the integer targets" and "fp256 -> the integer
+targets"; `cvtfrom128-class` and `cvtfrom256-class` "the integer sources -> fp128" and "the integer sources -> fp256" - read from
+clause5_soak.c's table of its wide modes (`WJOBS`: each job's wide format, and a conversion's destination), and held to it by the suite
+(`format_table_checks`). The 60 items are in the report's and the page's `wide` group, as HXc's are (the catalog's `mpfr` flag).
 
 ### Failure policy, processes, and what it guarantees
 

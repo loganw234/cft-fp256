@@ -355,3 +355,86 @@ def test_a_plant_that_drops_a_class_loses_carries_too():
     uni, reached = C.universe_and_reached(e, drop_class=3)
     lost = C.carry_pairs(uni, e.attrs) - C.carry_pairs(reached, e.attrs)
     assert lost and all(k[2] == 3 for k, a in lost)
+
+
+# ---------------------------------------------------------------------------------------------------
+# the wide spaces (parcel HXb, 2026-10-27): the soak's MPFR=1 class modes at fp128 and fp256
+# ---------------------------------------------------------------------------------------------------
+
+WIDE_SPACES = C.enums_wide()
+# hx_spaces.out's row labels (the study's S1, MEASURED there from these enumerators) for each wide job word
+HX_ROW = {"rint128-class": "rint, fp128", "rint256-class": "rint, fp256", "scaleb128-class": "scaleb, fp128",
+          "scaleb256-class": "scaleb, fp256", "conv128to64-class": "conv, fp128 -> fp64",
+          "conv256to128-class": "conv, fp256 -> fp128", "cvtto128-class": "cvtto, fp128 -> 64-bit integers",
+          "cvtto256-class": "cvtto, fp256 -> 64-bit integers", "cvtfrom128-class": "cvtfrom, 64-bit integers -> fp128",
+          "cvtfrom256-class": "cvtfrom, 64-bit integers -> fp256"}
+
+
+def _hx_rows():
+    """{row label: (indices, k, formula)} of hx_spaces.out's S1 table, read from the study's output."""
+    rows = {}
+    for ln in (ROOT / "docs" / "studies" / "hx" / "hx_spaces.out").read_text(encoding="utf-8").splitlines():
+        for label in HX_ROW.values():
+            if ln.startswith("  " + label + " "):
+                rest = ln[2 + len(label):].split()
+                rows[label] = (int(rest[1]), int(rest[2]), " ".join(rest[4:]))
+    return rows
+
+
+def test_the_wide_spaces_are_the_studys():
+    """Each wide space's indices, k and formula are the ones the study measured (hx_spaces.out's S1 rows, read here, not typed),
+    and k at fp128 (2) is neither fp256's (1) nor fp64's (4): the tile's lanes at the format."""
+    rows = _hx_rows()
+    assert set(rows) == set(HX_ROW.values()), sorted(rows)
+    assert list(WIDE_SPACES) == list(HX_ROW)
+    for job, e in WIDE_SPACES.items():
+        n, k, formula = rows[HX_ROW[job]]
+        assert (e.N, e.k, e.size_formula()) == (n, k, formula), (job, e.N, e.k, e.size_formula())
+        assert e.attrs == ("rne", "rtz", "rdn", "rup", "rmm"), job          # MPFR answers rmm
+    assert WIDE_SPACES["rint128-class"].k == 2 and WIDE_SPACES["rint256-class"].k == 1 and ENUMS64["rint64-class"].k == 4
+    assert WIDE_SPACES["scaleb128-class"].k == 2 and WIDE_SPACES["scaleb256-class"].k == 1
+    assert C.LANES_BY_FORMAT == {"fp32": 8, "fp64": 4, "fp128": 2, "fp256": 1}
+    # the coverage check's small formats are no tile's: their tile modes have no k
+    assert SMALL["rint e5m6"].k is None and SMALL["scaleb e4m3"].k is None
+
+
+def test_the_wide_dump_lines_carry_the_formats_digits():
+    """A dump line is the index and the operand at the format's width (32 and 64 hex digits; a cvtfrom source's 16), and the fp64
+    spaces' lines are as they were (16)."""
+    want = {"rint128-class": 32, "rint256-class": 64, "scaleb128-class": 32, "scaleb256-class": 64, "conv128to64-class": 32,
+            "conv256to128-class": 64, "cvtto128-class": 32, "cvtto256-class": 64, "cvtfrom128-class": 16, "cvtfrom256-class": 16}
+    assert set(want) == set(WIDE_SPACES)
+    for job, e in WIDE_SPACES.items():
+        for i in (0, 1, e.N // 2, e.N - 1):
+            parts = e.dump_line(i).split()
+            assert parts[0] == str(i)
+            assert parts[1].startswith("0x") and len(parts[1]) == 2 + want[job], (job, i, parts)
+    for job, e in ENUMS64.items():
+        assert len(e.dump_line(e.N - 1).split()[1]) == 18, job
+
+
+@pytest.mark.parametrize("label", list(C.wide_format_enums()))
+def test_the_built_key_is_the_named_key_at_p113_and_p237(label):
+    """The constructive check at the wide formats, where it runs in seconds (every wide space but conv256to128-class's 63 million
+    indices, and the cvtfrom spaces, which drop no bit and so have no class to check)."""
+    e = C.wide_format_enums()[label]
+    checked, bad, firsts = C.constructive(e)
+    assert checked > 1000, (label, checked)
+    assert bad == 0, (label, bad, firsts)
+
+
+def test_the_wide_cvtfrom_spaces_drop_no_bit():
+    """At p = 113 and 237 a 64-bit source loses no bit, so every index is degenerate for the class check (the conversion is exact):
+    the claim of cvtfrom128-class and cvtfrom256-class is an exact conversion, not every class of dropped bits."""
+    for job in ("cvtfrom128-class", "cvtfrom256-class"):
+        e = WIDE_SPACES[job]
+        assert C.constructive(e)[0] == 0
+        assert all(max(0, L - e.dst.prec) == 0 for _sv, L in e.cells)
+
+
+def test_a_job_or_format_that_cannot_be_enumerated_is_refused_by_name():
+    with pytest.raises(ValueError, match="'rint512-class' is not a class job of the soak"):
+        C.enum_of("rint512-class")
+    with pytest.raises(ValueError, match="e4m3 cannot be enumerated for cvtto"):
+        C.RoundEnum("cvtto", C.E4M3, B=64)
+    assert C.enum_of("rint128-class").N == 137344 and C.enum_of("rint64-class").N == 35840

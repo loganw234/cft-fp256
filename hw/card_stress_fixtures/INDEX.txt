@@ -119,3 +119,26 @@ wx-div128-hard-sab.txt	1	env CFT_SOAK_SABOTAGE=1 host/divsqrt-soak div128-hard 0
 wx-chunk-sqrt128-f32-c16384.txt	0	host/divsqrt-soak-c16384 sqrt128-f32 0x3F800000 0x3F804000 rne [1 s]
 wx-box-count-div128-hard.txt	0	host/divsqrt-soak hard-count div128-hard <eight slices, each named in the file>
 wx-box-count-div256-hard.txt	0	host/divsqrt-soak hard-count div256-hard <eight slices, each named in the file>
+# wc-*: the wide modes of the clause-5 soak (parcel HXb, 2026-10-27), made in WSL (Ubuntu 22.04, gcc 11.4, the system's MPFR 4.1.0 and GMP
+# 6.2.1, which the oracle lines name) from a fresh clone of 74be15aa, built with the driver's make line under MPFR=1 (XRT=0: make -C host -j8
+# XRT=0 C5DEFS=-DCFT_SOAK_HAVE_ROUNDEVEN=1 MPFR=1 all device-test api-test remote-test divsqrt-soak clause5-soak) and SOAK_CHUNK=16384 MPFR=1
+# soak-chunk; the software backend only, no card. Each log verbatim, stderr and stdout together; *-sab: CFT_SOAK_SABOTAGE=1. wc-dump-size:
+# each mode word and its `dump <mode> size`. wc-build-warnings: the warning lines of those two makes (not a soak log; its row names the first).
+wc-dump-size.txt	0	for m in rint128-class rint256-class scaleb128-class scaleb256-class rint128-f32 rint256-f32 conv128to64-class conv256to128-class cvtto128-class cvtto256-class cvtfrom128-class cvtfrom256-class; do echo "$m $(host/clause5-soak dump $m size)"; done
+wc-rint128-class.txt	0	host/clause5-soak rint128-class 0 137344 rne [4 s]
+wc-rint256-class.txt	0	host/clause5-soak rint256-class 0 537600 rmm [8 s]
+wc-scaleb128-class.txt	0	host/clause5-soak scaleb128-class 0 317448 rup [1 s]
+wc-scaleb256-class.txt	0	host/clause5-soak scaleb256-class 1000000 1370952 rdn [1 s]
+wc-rint128-f32.txt	0	host/clause5-soak rint128-f32 0x3F800000 0x3F801000 rne [0 s]
+wc-rint256-f32.txt	0	host/clause5-soak rint256-f32 0 4096 rmm [0 s]
+wc-conv128to64-class.txt	0	host/clause5-soak conv128to64-class 0 1979424 rtz [2 s]
+wc-conv256to128-class.txt	0	host/clause5-soak conv256to128-class 0 65536 rne [0 s]
+wc-cvtto128-class.txt	0	host/clause5-soak cvtto128-class 0 91872 rmm [0 s]
+wc-cvtto256-class.txt	0	host/clause5-soak cvtto256-class 0 205440 rdn [2 s]
+wc-cvtfrom128-class.txt	0	host/clause5-soak cvtfrom128-class 0 50923 rup [0 s]
+wc-cvtfrom256-class.txt	0	host/clause5-soak cvtfrom256-class 0 50923 rtz [0 s]
+wc-rint128-class-sab.txt	1	env CFT_SOAK_SABOTAGE=1 host/clause5-soak rint128-class 1000 1064 rne [0 s]
+wc-cvtto256-class-sab.txt	1	env CFT_SOAK_SABOTAGE=1 host/clause5-soak cvtto256-class 1000 1064 rmm [0 s]
+wc-rint256-f32-sab.txt	1	env CFT_SOAK_SABOTAGE=1 host/clause5-soak rint256-f32 0x3F800000 0x3F800400 rne [0 s]
+wc-chunk-rint128-class-c16384.txt	0	host/clause5-soak-c16384 rint128-class 0 4096 rne [0 s]
+wc-build-warnings.txt	0	make -C host -j8 XRT=0 C5DEFS=-DCFT_SOAK_HAVE_ROUNDEVEN=1 MPFR=1 all device-test api-test remote-test divsqrt-soak clause5-soak; make -C host -j8 XRT=0 C5DEFS=-DCFT_SOAK_HAVE_ROUNDEVEN=1 MPFR=1 SOAK_CHUNK=16384 soak-chunk

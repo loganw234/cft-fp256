@@ -1,0 +1,4 @@
+soaking the software backend
+soaking with BATCH 16384 and CFT_CHUNK 16384 (the defaults are 4096)
+oracle: MPFR 4.1.0 with GMP 6.2.1, mpfr_ieee.h's emulation; mpfr_c5.h's clause-5 rules
+rint128-class rne: 8192 cases, 0 value mismatches, 0 flag mismatches, 4096 encodings, 0 skipped

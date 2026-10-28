@@ -1047,9 +1047,14 @@ WIDE_TILE_OPS = tuple([f"{op}{w}-f32" for op in ("sqrt", "recip") for w in (64, 
                       + [f"{op}{w}-win-{h}" for op in ("sqrt", "recip") for w in (128, 256) for h in ("ones", "zeros", "alt", "key")]
                       + ["div128-f64hard", "div256-f64hard", "sqrt128-f64hard", "sqrt256-f64hard",
                          "div128-hard", "div256-hard", "sqrt128-hard", "sqrt256-hard"])
+# Fifty-one since 2026-10-27: the six wide clause-5 tile modes of parcel HXb, which the catalog has with --mpfr-prefix, READ at 74be15aa:
+# rint128-class and rint256-class run wrint_batch and rint128-f32 and rint256-f32 drv_wrint_f32, each of which calls cft_rint at fp128
+# or fp256, and scaleb128-class and scaleb256-class run wscaleb_batch, which calls cft_scaleb (host/tools/clause5_soak.c, lines 3365,
+# 3716 and 3405) - the composed operations above. Its other six wide modes, the conversions, are host operations and are not here.
+WIDE_C5_TILE_OPS = ("rint128-class", "rint256-class", "scaleb128-class", "scaleb256-class", "rint128-f32", "rint256-f32")
 STRESS_TILE_OPS = ("sqrt32", "div32", "div64", "sqrt64", "rint32", "rint64", "scaleb32", "scaleb64",
                    "div32-hard", "div64-hard", "sqrt64-hard", "rint64-class", "scaleb64-class",
-                   "scaleb32-all", "scaleb32-wide") + WIDE_TILE_OPS
+                   "scaleb32-all", "scaleb32-wide") + WIDE_TILE_OPS + WIDE_C5_TILE_OPS
 STRESS_TEL = {
     "power_w": "electrical.devices[0].electrical.power_consumption_watts",
     "fpga_c": "thermal.devices[0].thermals.FPGA.temp_C",
