@@ -87,6 +87,51 @@ that date). What the measurement makes of the study's statements:
   largest measured is 2^-19.02 over 14,021 arguments, the floats next to
   the odd multiples of pi/4 in every binade among them.
 
+**A note of 2026-10-27, at parcel M2G2a** (sin, cos and tan built at fp64,
+fp128 and fp256; M2's build, wave 2, first half; the study's text stays as
+written at 1337a13). The three routines of 2.1 to 2.6 are in
+python/cft_golden/mathlib.py on M2G1's reduction: `build` and `fragment` take
+`TRIG_NAMES = ("sin", "cos", "tan")` beside `NAMES` (the six's battery
+iterates NAMES, so they are not in it), at fp64, fp128 and fp256 under the
+five attributes, 45 fragments; at fp32 each is refused by name, the shape
+being Logan's choice from M2X's measurement and parcel M2F's to build.
+`plan_trig` (the polynomials for a given rho) and `trig_after` (everything
+after sin(r) and cos(r), taking V as two words or three) are the sections M2F
+calls unchanged. They are held by python/tests/mathlib_trig_harness.py and
+test_mathlib_trig.py (docs/VALIDATION.md, the entry of that date, whose
+figures these are). They are section 11's model: the dataflow digest of every
+fragment in the design's order is `m2trig.build`'s, so are its instruction
+counts (406, 402 and 419 at fp64, 382, 378 and 397 at fp128, 389, 385 and 406
+at fp256, under every attribute), its bank words (111, 108 and 122 for the
+three under five attributes), its plan ((8, 12) and (8, 13), (8, 18) and
+(8, 19), (8, 28) and (8, 29)), its counts by phase except that M2G1's
+`inrange` compare is in "classify" and not in "range" (confirmed: one
+instruction moves, at fp128 and fp256), and (result, flag word, V_h, V_l, R)
+on every lane of the pools: 84,630 lanes over the 45 fragments, none
+differing (MEASURED, a scratch comparison with this directory's model, in the
+entry). What the build adds to the study:
+- 2.1's sharing (475, 455 and 464 instructions for the three of one argument
+  in a compiled step, at every attribute) and 5.1's live count (26, 17 and 16
+  in the design's order) hold, and one thing about the scheduler does not:
+  mathlib.py's `schedule_order` keeps 30, 21 and 17 values live (its order by
+  phase) and 31, 30 and 30 (depth first) for these, ABOVE the design's order.
+  The design's order is now a third candidate of `schedule_order`, strictly the
+  lowest for all 45 and for none of the six, so `TRIG_LIVE_CAP` (question 9's
+  cap per function and format) is 26, 17 and 16.
+- 3.5's structured centres are exactly the pools' marks that are not past the
+  range, at every format: cos at three values (fp64: four) under the directed
+  three, tan at 3 2^-k under rne and rmm, both signs, 72 lanes over the 45
+  fragments (the committed list `TRIG_POOL_MARKS`); every other lane of the
+  pools that is not past the range is decided and right.
+- 8's table: the plants are reproduced at fp64, all 14 named cases lane for
+  lane (exact-add by its 27 lanes on the binade edges, the first
+  0x46167c4c45c1b200), and the bounds the table gives to its precision, at its
+  64 points of each region (2^98 Bv for quadrant-sign, 2^17.0 for
+  newton-short, the control 2^-4.52, ...: the entry has them all).
+- Not in this note and not built: the budget, the mark-rate law and the
+  structured families (parcel M2G2b's), fp32 (parcel M2F's), program.c and
+  cftc (M2P's and M2C's), the language (M2L's).
+
 M1's study (docs/studies/M1-exp-log.md) is its model of form, section for
 section, and M1's design is its starting point: the in-lane test, the
 double word with TwoSum and no augmented addition, the fragment in C4's

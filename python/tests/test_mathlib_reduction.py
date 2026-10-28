@@ -858,10 +858,16 @@ def test_the_phases_are_in_the_phase_order_after_reduce():
                     "red-mid", "red-lower", "red-scale", "red-small"]
     i = order.index("reduce")
     assert order[i + 1:i + 1 + len(reds)] == tuple(reds)
-    # the six's phases keep their order
+    # the six's phases keep their order. Parcel M2G2a's nine phases of sin, cos
+    # and tan (z, S-tail, S-head, C-tail, C-head, sincos, select, quotient
+    # between "fixed-grid" and "final", and "range" between "classify" and
+    # "special") are in PHASE_ORDER too, the one tuple the scheduler ranks by:
+    # an edit of this test the lead approved (2026-10-27), the six's relative
+    # order unchanged
     six = ("setup", "reduce", "lowword", "tail", "head", "head2", "head3",
-           "Z", "lookup", "recon", "scale", "fixed-grid", "final",
-           "classify", "special")
+           "Z", "lookup", "recon", "scale", "fixed-grid",
+           "z", "S-tail", "S-head", "C-tail", "C-head", "sincos", "select",
+           "quotient", "final", "classify", "range", "special")
     assert tuple(p for p in order if not p.startswith("red-")) == six
     for name in ("fp64", "fp128", "fp256", "fp32"):
         assert set(build_of(name).phase_of) <= set(order)
@@ -1121,7 +1127,13 @@ def test_check_runs_the_routines_line_as_it_is_and_the_reductions_own(
     shown = capsys.readouterr().out.splitlines()
     i = shown.index("mathlib --check: 6 routines, 4 formats, 0 differences")
     assert shown[0] == "six lines" and shown[i + 1].startswith("reduction fp64")
-    assert shown[-1] == "mathlib --check (reduction): 3 formats, 0 differences"
+    # parcel M2G2a's line of trig's own comes after the reduction's, so it is
+    # the last (an edit of this test the lead approved, 2026-10-27)
+    assert "mathlib --check (reduction): 3 formats, 0 differences" in shown
+    assert shown.index("mathlib --check (reduction): 3 formats, 0 "
+                       "differences") > i
+    assert shown[-1] == ("mathlib --check (trig): 3 routines, 3 formats, "
+                         "0 differences")
     monkeypatch.setattr(ml, "check_constants",
                         lambda **kw: (["six lines"], ["a difference"]))
     assert ml.main(["--check"]) == 1                 # the six differ

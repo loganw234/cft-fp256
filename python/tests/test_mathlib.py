@@ -347,7 +347,7 @@ def test_a_fragment_is_a_specialised_c4_fragment_and_is_built_once(fn, fmt, rnd)
 
 
 def test_a_name_that_is_not_built_is_refused_by_name():
-    for name in ("sqrt", "", "EXP", "LOG", "exp10", "log10", "sin", "atan"):
+    for name in ("sqrt", "", "EXP", "LOG", "exp10", "log10", "sinh", "atan"):
         with pytest.raises(ValueError, match=repr(name)):
             ml.fragment(name, FP64, RNE)
         with pytest.raises(ValueError, match=repr(name)):

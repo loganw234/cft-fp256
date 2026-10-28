@@ -163,6 +163,25 @@ trig_reduction, reduction_audit, build_reduction, REDUCTION_PLANTS and
 check_reduction_constants (`--check`, and `--only reduction`). It adds no
 routine to NAMES and moves none of the six: their fragments are the ones they
 were.
+
+sin, cos and tan (parcel M2G2a, M2's build, wave 2, first half) are built on
+that reduction, at fp64, fp128 and fp256, and are BESIDE the six, not among
+them: TRIG_NAMES = ("sin", "cos", "tan") is a second tuple, and NAMES stays
+the six. The six's whole battery (test_mathlib.py's SHAPE, digests, the 90-cell
+mark-rate statistics, the plant table; mathlib_harness.py, mathlib_family.py;
+host/tests/seq_check.py's eighth corpus) iterates NAMES, and LIVE_CAP is the
+largest of the six's caps by format, so a routine that joins NAMES joins all of
+them at once; the three have their own checks (python/tests/
+mathlib_trig_harness.py and test_mathlib_trig.py), their own cap by function
+and format (TRIG_LIVE_CAP, Logan's answer 9), and their own plants
+(TRIG_PLANTS). build() and fragment() accept either tuple; at fp32 a trig name
+is refused by name, fp32's shape being Logan's choice from parcel M2X's
+measurement and parcel M2F's to build. The public names are TRIG_NAMES,
+TRIG_LIVE_CAP, TRIG_PLANTS, plan_trig, trig_rho, trig_after and
+check_trig_constants (`--check`, and `--only trig`); trig_after() and plan_trig()
+are the sections parcel M2F calls unchanged. The design is
+docs/studies/M2-trig.md, 2.1 and 2.4 to 2.6; the construction below IS the
+study's model (docs/studies/m2/m2trig.py), ported, and nothing here imports it.
 """
 
 import argparse
@@ -190,11 +209,19 @@ __all__ = ["fragment", "evaluate", "invariants", "flag_words", "build",
            "TRIG_RANGE", "TRIG_LOST", "trig_gates", "plan_reduction",
            "ReductionValue", "reduction_front", "trig_reduction",
            "reduction_audit", "build_reduction", "REDUCTION_PLANTS",
-           "check_reduction_constants"]
+           "check_reduction_constants",
+           "TRIG_NAMES", "TRIG_LIVE_CAP", "TRIG_PLANTS", "plan_trig",
+           "trig_rho", "trig_after", "check_trig_constants"]
 
 EXP_NAMES = ("exp", "exp2", "expm1")   # the exp family (parcels E1 and MB1)
 LOG_NAMES = ("log", "log2", "log1p")   # the log family (parcel MB2)
-NAMES = EXP_NAMES + LOG_NAMES          # the routines built: all six
+# the routines of the six-routine battery: all six, and ONLY the six. NAMES is
+# what test_mathlib.py's FUNCS, mathlib_harness.py, mathlib_family.py and
+# host/tests/seq_check.py's eighth corpus iterate, and what LIVE_CAP (a cap by
+# format) is the largest of; sin, cos and tan are beside it, in TRIG_NAMES, so
+# that none of that is run over them by accident (the module docstring)
+NAMES = EXP_NAMES + LOG_NAMES
+TRIG_NAMES = ("sin", "cos", "tan")     # the radian routines (parcel M2G2a)
 FORMATS = (FP32, FP64, FP128, FP256)
 RNE, RTZ, RDN, RUP, RMM = (sf.RND_RNE, sf.RND_RTZ, sf.RND_RDN, sf.RND_RUP,
                            sf.RND_RMM)
@@ -690,6 +717,7 @@ class Build:
         self.flags = None
         self._keyed = {}
         self._eft = {"two_sum": 0, "fast_two_sum": 0}
+        self._fired = set()          # the plants whose fault was reached
 
     # ---- words ----
     def word(self, bits, name=None):
@@ -749,6 +777,14 @@ class Build:
 
     def neg(self, a):
         return self.ins(sf.OP_NEG, (a,))
+
+    def fmin(self, a, c):
+        """MIN (parcel M2G2a: sin's and cos's clamp)."""
+        return self.ins(sf.OP_MIN, (a, c))
+
+    def fmax(self, a, c):
+        """MAX (parcel M2G2a: sin's and cos's clamp)."""
+        return self.ins(sf.OP_MAX, (a, c))
 
     def fabs(self, a):
         if self.meta.get("plant") == "abs_by_copysign":
@@ -961,7 +997,14 @@ def _values(fmt, body, words, x, over=None):
 PHASE_ORDER = ("setup", "reduce", "red-setup", "red-window", "red-products",
                "red-coarse", "red-mid", "red-lower", "red-scale", "red-small",
                "lowword", "tail", "head", "head2", "head3", "Z", "lookup",
-               "recon", "scale", "fixed-grid", "final", "classify", "special")
+               "recon", "scale", "fixed-grid",
+               # sin, cos and tan (parcel M2G2a): the squared reduced
+               # argument, S's and C's tails and heads, sin(r) and cos(r), the
+               # quadrant's select, tan's quotient; and, after "classify", the
+               # range's mark. Nothing of the six is built in these.
+               "z", "S-tail", "S-head", "C-tail", "C-head", "sincos",
+               "select", "quotient",
+               "final", "classify", "range", "special")
 
 
 def permuted(f, order):
@@ -1043,10 +1086,28 @@ def _dfs_order(f):
 
 def schedule_order(f, phases):
     """The order of f's body that the fragment is emitted in: of the two
-    candidates above the one keeping fewer values live (by phase on a tie).
-    `phases[i]` is the phase instruction i was built in."""
+    candidates above, and the order f is handed in (the design's own), the one
+    keeping fewest values live (the first of them on a tie, so the design's
+    order only where it is strictly the lowest). `phases[i]` is the phase
+    instruction i was built in.
+
+    The design's order is a candidate for sin, cos and tan (parcel M2G2a),
+    whose study's order was tuned by hand and keeps 26, 17 and 16 values live
+    at fp64, fp128 and fp256 where the phase order keeps 30, 21 and 17 (its
+    red-setup phase holds the setup before the window and the one after it,
+    which the reduction emits after the window so that they are not live across
+    it) and the depth-first order 31, 30 and 30. For the six it is never the
+    lowest, and chooses nothing: their fragments are as they were.
+
+    The reduction's own builds (build_reduction; fp64, fp128, fp256 and fp32
+    at G = 18, under every attribute) take the design's order too: their
+    scheduled fragments keep 26, 17, 16 and 22 values live where they kept 30,
+    21, 17 and 24, the same dataflow in another order (the dag digest is
+    equal). Nothing emits a reduction build's fragment alone (Build.run and
+    reduction_audit read the build's whole body), so no result moves."""
     best = None
-    for order in (_ranked_order(f, phases), _dfs_order(f)):
+    for order in (_ranked_order(f, phases), _dfs_order(f),
+                  list(range(len(f.body)))):
         live = permuted(f, order).live_max()
         if best is None or live < best[0]:
             best = (live, order)
@@ -2574,16 +2635,58 @@ def _build_log_tw(fn, fmt: FpFormat, rnd: int, G, shift, plant):
     return _log_finalize(b, fn, rnd, plant, c, cl, k_, R, mk, red.r)
 
 
+def _trig_fp32_refusal(name):
+    return (f"{name!r} at fp32 is not built: fp32's shape (the triple word "
+            f"at G = 40, or the double word at G = 18) is Logan's choice from "
+            f"parcel M2X's measurement, and parcel M2F's to build")
+
+
 def build(name, fmt: FpFormat, rnd: int, *, guard=None, bound_shift=0,
           plant=None) -> Build:
-    """`name` (one of NAMES) at `fmt` under the program's attribute `rnd`,
-    instrumented (Build.fragment() is the routine). `guard` overrides the
-    guard G (GUARD's, by default); `bound_shift` makes the in-lane bound
-    2^shift times as wide, so that marks are common enough to count (the
-    mark-rate law, the study's 3.4); `plant` builds one fault of PLANTS."""
+    """`name` (one of NAMES, or of TRIG_NAMES at fp64, fp128 and fp256) at
+    `fmt` under the program's attribute `rnd`, instrumented (Build.fragment()
+    is the routine). `guard` overrides the guard G (GUARD's, by default);
+    `bound_shift` makes the in-lane bound 2^shift times as wide, so that marks
+    are common enough to count (the mark-rate law, the study's 3.4); `plant`
+    builds one fault of PLANTS (of the six), or of TRIG_PLANTS and
+    REDUCTION_PLANTS (sin, cos, tan).
+
+    sin, cos and tan (parcel M2G2a). The Build keeps, for parcel M2G2b's
+    budget and rate law:
+      probes   Vh, Vl (V after the quadrant's sign, before its one rounding),
+               Bv, R, R1, R2 (the guess and the test's two ends, BEFORE the
+               clamp), mk (the mark, after it), sh, sl, ch, cl (sin(r_h) and
+               cos(r_h) with r_l's share, before the select), and the
+               reduction's: rh, rl, q, small, inrange and the rest
+      phases   every instruction's, in Build.phase_of: the reduction's red-*
+               (red-setup to red-mid are the ones the model's budget freezes),
+               z, S-tail, S-head, C-tail, C-head, sincos, select, quotient
+               (tan), final, classify, range, special
+      meta     fn, G, R (the range's exponent, None at fp64), rho (the
+               polynomials' bound on |r|, an exact rational), KS, DS, KC, DC,
+               shift, plant, family ("double word"), the Fast2Sum and TwoSum
+               counts, and trig_reduction's: exact, data, two_prod, reduction,
+               reduction_mid
+    A plant that cannot act at that function or format is refused by name
+    ("does not apply")."""
+    if name in TRIG_NAMES:
+        if fmt not in FORMATS:
+            raise ValueError(f"{fmt!r} is not one of the four formats")
+        if rnd not in sf.RND_NAMES:
+            raise ValueError(f"rounding attribute {rnd!r} is not one of the "
+                             f"five")
+        if fmt.name not in TRIG_LIVE_CAP[name]:
+            raise ValueError(_trig_fp32_refusal(name))
+        if plant is not None and plant not in TRIG_PLANTS \
+                and plant not in REDUCTION_PLANTS:
+            raise ValueError(f"unknown plant {plant!r}: "
+                             f"{', '.join(TRIG_PLANTS)}, "
+                             f"{', '.join(REDUCTION_PLANTS)}")
+        G = GUARD[fmt.name] if guard is None else guard
+        return _build_trig(name, fmt, rnd, G, bound_shift, plant)
     if name not in NAMES:
         raise ValueError(f"{name!r} is not a math-library routine built so "
-                         f"far: {', '.join(NAMES)}")
+                         f"far: {', '.join(NAMES + TRIG_NAMES)}")
     if fmt not in FORMATS:
         raise ValueError(f"{fmt!r} is not one of the four formats")
     if rnd not in sf.RND_NAMES:
@@ -3535,6 +3638,466 @@ def build_reduction(fmt, rnd=RNE, *, G=None, R="default", plant=None):
     return b.finish(out.rh, out.q)
 
 
+# ---- sin, cos and tan (parcel M2G2a) ------------------------------------------
+#
+# One fragment of nine parts, all run on every lane, whichever the function
+# (the study's 2.1: parts 1 to 4 are instruction for instruction the same for
+# the three, so cftc's inliner, which hash-conses a routine's instructions
+# across the instances of a step, computes them once):
+#
+#   reduce    trig_reduction(): |x| = n pi/2 + r, r = r_h + r_l,
+#             |r| <= rho = pi/4 (1 + 2^-30), q = MAGIC + n' with n' congruent
+#             to n (mod 4): only q & 3 is used
+#   z         z = r_h^2 as an exact double word (TwoProd)
+#   S, C      S(z) = sin(r)/r = sum (-1)^k z^k/(2k+1)! and C(z) = cos(r) =
+#             sum (-1)^k z^k/(2k)!, Taylor: a single-word Horner tail in z_h
+#             from degree D down to K, then K double-word steps (the
+#             coefficients' low words where they have one)
+#   sincos    sin(r_h) = r_h S and cos(r_h) = C as double words, r_l's share
+#             by the derivative: + cos(r_h) r_l and - sin(r_h) r_l
+#   select    by q & 3 and the sign (s = sin(r), c = cos(r)): sin(|x|) is s,
+#             c, -s, -c for n = 0..3, cos is c, -s, -c, s, tan is s/c or
+#             -c/s, by a double-word quotient of its own; x's sign joins for
+#             sin and tan. The sign goes onto the double word V before its one
+#             rounding, since rdn and rup are not symmetric (the study's 3.6,
+#             item 1)
+#   final     R = rnd(V_h + V_l); the in-lane test with Bv = 2^-(p+G) |V_h|;
+#             for sin and cos the clamp, a MAX and a MIN on each end and on
+#             the guess (|sin x|, |cos x| < 1: Hermite-Lindemann)
+#   classify  NaN, signalling, infinity, zero, the tiny gate, EMITTED LATE
+#             (x is live to the end for the specials, so deriving the
+#             conditions there keeps them out of the reduction's and the
+#             polynomials' live ranges)
+#   special   the range's mark (fp128, fp256), the tiny paths (one FMA under
+#             the attribute; cos a constant word), +-0, +-inf, NaN: a SELECT
+#             chain of constant words, lowest priority first
+#
+# trig_after() is everything from `select` on, written once and taking sin(r)
+# and cos(r) as lists of words (two, or three whose low words round through
+# round-to-odd as M1's fp32 finals do), so that parcel M2F's fp32 calls it, and
+# plan_trig() for its own rho, rather than copying them. The polynomials'
+# construction (_build_trig) is the double word's.
+
+TRIG_PLANTS = {
+    "quadrant_sign": "cos's sign taken from n's low bit alone (the study's "
+                     "plant quadrant-sign): cos(3) has the wrong sign",
+    "clamp_tight": "the clamp's ends one ulp inside rnd(+-1 -+ tiny)",
+    "bound_loose": "the in-lane bound 2^-40 smaller: Bv = 2^-(p+G+40) |V_h|",
+    "mark_silenced": "the mark never in the flag word",
+    "coef": "S's z^1 coefficient without its low word",
+    "newton_short": "tan's reciprocal one Newton step short",
+    "tiny_gate_off": "no tiny path: every lane the main path's",
+    "rl_dropped": "r_l's share (the derivative terms) left out",
+    "zl_dropped": "z_l's share in the head left out",
+    "clamp_off": "no clamp: not a fault, the |T| < 1 rule switched off",
+    "sign_after_rounding": "x's sign applied to R, the rounded guess, and not "
+                           "to V before its rounding (sin, tan): wrong under "
+                           "rdn and rup",
+    "range_unmarked": "past the stated range (fp128, fp256) the lane not "
+                      "marked",
+    "cos_zero_operand": "cos(+-0) answers the operand, as sin's and tan's "
+                        "rows do, not 1",
+    "inf_flag_dropped": "the infinities' invalid flag left out of the flag "
+                        "word",
+}
+
+# The most values a trig fragment may keep live at once, by function and
+# format: the most it keeps under any of the five attributes, SCHEDULED
+# (Logan's answer 9 of 2026-10-14: a cap per function and format). MEASURED by
+# parcel M2G2a; test_mathlib_trig.py pins each fragment's count and holds each
+# entry to the maximum. No fp32 key: fp32's shape is parcel M2F's. The study's
+# fragments keep 26, 17 and 16 live at fp64, fp128 and fp256 in the design's
+# own order (costs.fp64, fp128, fp256.out.txt), past the six's 13, so the
+# six's view LIVE_CAP is not the cap of these; and schedule_order takes that
+# order for them, its other two keeping more live (30, 21, 17 and 31, 30, 30).
+# routines.py's LIVE_CAP and CONTRACT name the eight routines, and adding sin,
+# cos and tan there is parcel M2C's, with cftc.
+TRIG_LIVE_CAP = {
+    "sin": {"fp64": 26, "fp128": 17, "fp256": 16},
+    "cos": {"fp64": 26, "fp128": 17, "fp256": 16},
+    "tan": {"fp64": 26, "fp128": 17, "fp256": 16},
+}
+
+
+def _sin_coefficient(k):
+    """The coefficient of z^k in S(z) = sin(r)/r, z = r^2: (-1)^k/(2k+1)!,
+    exact."""
+    return Fraction((-1) ** k, math.factorial(2 * k + 1))
+
+
+def _cos_coefficient(k):
+    """The coefficient of z^k in C(z) = cos(r), z = r^2: (-1)^k/(2k)!, exact."""
+    return Fraction((-1) ** k, math.factorial(2 * k))
+
+
+def trig_rho(cushion_bits=30):
+    """pi/4 (1 + 2^-cushion_bits) as the exact rational it is: the bound on
+    |r| the double word's polynomials are planned at (the study's 2.4; the
+    reduction's own cushion is proved within it at every build,
+    _check_trig_cushion). fp32's triple word is planned at its own."""
+    return _pi() / 4 * (1 + Fraction(1, 2 ** cushion_bits))
+
+
+def plan_trig(fmt: FpFormat, G, rho):
+    """((KS, DS), (KC, DC)): the plan of S and of C for |r| <= rho (an exact
+    rational) at `fmt` with guard G. The head covers every k whose term
+    |c_k| rho^(2k) exceeds 2^-(G+3), where a single word's rounding would
+    reach the bound: K double-word steps; the tail is single-word Horner steps
+    from degree D down to K, D the first degree whose truncation
+    |c_(D+1)| rho^(2D+2) is under 2^-(p+G+3). Exact rational arithmetic, so
+    the plan is the same on every platform: K = 8 for S and for C at G = 44
+    and 46, D = 12, 18 and 28 for S and 13, 19 and 29 for C at fp64, fp128 and
+    fp256 (the study's 2.4). The one function parcel M2F calls with its own
+    rho."""
+    p = fmt.prec
+    rho = Fraction(rho)
+    z = rho * rho
+    out = []
+    for coef in (_sin_coefficient, _cos_coefficient):
+        K = 0
+        while abs(coef(K)) * z ** K > Fraction(1, 2 ** (G + 3)):
+            K += 1
+        D = K
+        while abs(coef(D + 1)) * z ** (D + 1) > Fraction(1, 2 ** (p + G + 3)):
+            D += 1
+        out.append((K, D))
+    return tuple(out)
+
+
+def _trig_slack(b):
+    """The greatest 2|t| - 1 the build's reduction can leave, from the static
+    bounds it keeps (Build.meta["reduction_mid"]): 2^(1-p) + 4 (|lw| + |lower
+    pieces|), M2G1's cushion (trig_reduction's docstring)."""
+    mid = b.meta["reduction_mid"]
+    lw = 2.0 ** mid["lw"][0] if mid.get("lw") else 0.0
+    return 2.0 ** (1 - b.fmt.prec) + 4 * (lw + 2.0 ** mid["lows"])
+
+
+def _check_trig_cushion(b, rho):
+    """A static proof, by name: the reduction's computed overshoot of |r| past
+    pi/4 (_trig_slack) is within the cushion rho = pi/4 (1 + c) the polynomials
+    are planned at, c = rho/(pi/4) - 1. 2^-33.04, 2^-64.0 and 2^-62.0 at fp64,
+    fp128 and fp256 against the 2^-30 of trig_rho(); fp32's double word at
+    G = 18, 2^-11.66, is refused."""
+    slack = _trig_slack(b)
+    cushion = float(Fraction(rho) / (_pi() / 4) - 1)
+    if not slack <= cushion:
+        have, allowed = math.log2(slack), math.log2(cushion)
+        raise ValueError(
+            f"the reduction's computed cushion past pi/4, 2^{have:.2f} at "
+            f"{b.fmt.name} (G = {b.meta['G']}), is past the polynomials' "
+            f"rho = pi/4 (1 + 2^{allowed:.2f}): the plan's truncation bound "
+            f"does not hold for every |r| the reduction can leave")
+
+
+def _act(b, plant):
+    """True where the build's plant is `plant`, and records that its fault
+    was reached (a plant never reached is refused by name,
+    _check_plant_fired)."""
+    if b.meta.get("plant") != plant:
+        return False
+    b._fired.add(plant)
+    return True
+
+
+def _check_plant_fired(b):
+    plant = b.meta.get("plant")
+    if plant in TRIG_PLANTS and plant not in b._fired:
+        raise ValueError(f"plant {plant!r} does not apply to "
+                         f"{b.meta['fn']} at {b.fmt.name}: the fault is not "
+                         f"reached")
+
+
+def trig_after(b, fn, x, q, sin_words, cos_words, *, G, inrange=None,
+               quotient=None, shift=0):
+    """Everything of sin, cos or tan after sin(r) and cos(r), appended to the
+    Build `b` for the argument ref `x` (the phases select, quotient, final,
+    classify, range and special); finishes the build and returns it. Written
+    once: the double word's builder and parcel M2F's fp32 call it.
+
+      q            the reduction's q (MAGIC + n'): q & 3 is n mod 4 and
+                   nothing more is used
+      sin_words,   sin(r) and cos(r) as lists of words, high word first: two
+      cos_words    (a double word) or three (fp32's triple word; the low words
+                   then round through round-to-odd, as M1's fp32 finals do:
+                   R = rnd(V0 + RO(V1 + V2)), and the test's two ends
+                   RO(V1 + RD(V2 - Bv)) and RO(V1 + RU(V2 + Bv)))
+      G, shift     the guard: Bv = 2^-(p+G) |V_h| 2^shift
+      inrange      the reduction's `inrange` (None where it has no range):
+                   zero marks the lane
+      quotient     tan only: quotient(b, N, D) -> V, the words of N/D (lists,
+                   as sin_words), in the phase "quotient" (set before the
+                   call); the double word's is _trig_quotient
+
+    select by q & 3 (s = sin(r), c = cos(r)): sin(|x|) = s, c, -s, -c, cos =
+    c, -s, -c, s and tan = s/c or -c/s, for n mod 4 = 0..3 (tan: the low bit);
+    x's sign joins sin's and tan's, and the sign word is XORed onto every word
+    of V before the rounding. R = rnd(V_h + V_l); the in-lane test with Bv =
+    2^-(p+G) |V_h| and R1, R2 the roundings of V_h + RD(V_l - Bv) and V_h +
+    RU(V_l + Bv), a lane with R1 != R2 marked; sin and cos clamp R1 (MAX), R2
+    (MIN) and R (both) within [L1, U1], L1 = rnd(-1 + tiny) and U1 = rnd(1 -
+    tiny): U1 is 1 under rne, rmm and rup and 1 - 2^-p under rtz and rdn, L1
+    is -1 under rne, rmm and rdn and -(1 - 2^-p) under rtz and rup. The
+    classification of x is emitted here, late.
+    Then, lowest priority first: the range's mark, the tiny paths (|x| < the
+    gate, 2^g with g from trig_gates(): sin x (1 - 2^-(p+2)), tan
+    x (1 + 2^-(p+2)), each one FMA under the attribute, cos the constant
+    rnd(1 - 2^-(p+3)); inexact, and underflow where the result is below
+    2^emin), +-0 (the operand, cos 1; no flag), +-inf (the quiet NaN,
+    invalid), NaN (the quiet NaN, invalid if signalling). The flag word is a
+    SELECT chain of constant words: {0, invalid, inexact, underflow|inexact,
+    inexact|mark}, without underflow for cos.
+
+    Probes: Vh, Vl (V0, V1, V2 and Vh = V0 for three words), Bv, R, R1, R2
+    (before the clamp), mk (the mark, after it). Roles (for check_trig_
+    constants): ZERO, ONE, SIGN, INF, QNAN, FL_INVALID, FL_INEXACT,
+    FL_INEXACT_MARK, FL_UNDER_INEXACT, INT1, INT2, SHIFT_W1, SHIFT_W2, ABSM,
+    QBIT, BREL, U1, L1 (sin, cos), GATE, TINY_EPS (sin, tan), COSTINY (cos),
+    MINN (sin, tan). A plant of TRIG_PLANTS acts through b.meta["plant"]."""
+    fmt = b.fmt
+    p, W, mw = fmt.prec, fmt.width, fmt.man_w
+    rnd = b.rnd
+    full = (1 << W) - 1
+    if fn not in TRIG_NAMES:
+        raise ValueError(f"{fn!r} is not one of {', '.join(TRIG_NAMES)}")
+    s_w, c_w = list(sin_words), list(cos_words)
+    n = len(s_w)
+    if n not in (2, 3) or len(c_w) != n:
+        raise ValueError(f"sin(r) and cos(r) are lists of two words or of "
+                         f"three, the same number: {n} and {len(c_w)}")
+    if fn == "tan" and quotient is None:
+        raise ValueError("tan's quotient is the caller's: pass quotient=")
+    ZERO = b.const("ZERO", 0)
+    ONE = b.const("ONE", sf.one_bits(fmt))
+    SIGN = b.const("SIGN", fmt.sign_mask)
+    INF = b.const("INF", sf.inf_bits(fmt))
+    QNAN = b.const("QNAN", sf.qnan_bits(fmt))
+    INX = b.const("FL_INEXACT", sf.FLAG_INEXACT)
+    INXM = b.const("FL_INEXACT_MARK", sf.FLAG_INEXACT | MARK)
+    INVALID = b.const("FL_INVALID", sf.FLAG_INVALID)
+    INT1 = b.const("INT1", 1)
+    INT2 = b.const("INT2", 2)
+    gs, gc = trig_gates(fmt)
+
+    # ---- select by the quadrant, and the sign --------------------------------
+    b.phase = "select"
+    sx = b.iand(x, SIGN)                                  # x's sign bit
+    b0 = b.iand(q, INT1)
+    b1 = b.iand(q, INT2)
+    after = _act(b, "sign_after_rounding") if fn in ("sin", "tan") else False
+    if fn == "sin":
+        V = [b.sel(c, s, b0) for s, c in zip(s_w, c_w)]
+        sg = b.ishl(b1, b.const("SHIFT_W2", W - 2))
+        sg = sg if after else b.ixor(sg, sx)
+    elif fn == "cos":
+        V = [b.sel(s, c, b0) for s, c in zip(s_w, c_w)]
+        sg = b.ishl(b.ixor(b.ishl(b0, INT1), b1),
+                    b.const("SHIFT_W2", W - 2))
+        if _act(b, "quadrant_sign"):
+            sg = b.ishl(b0, b.const("SHIFT_W1", W - 1))
+    else:
+        N = [b.sel(c, s, b0) for s, c in zip(s_w, c_w)]
+        D = [b.sel(s, c, b0) for s, c in zip(s_w, c_w)]
+        sg = b.ishl(b0, b.const("SHIFT_W1", W - 1))
+        sg = sg if after else b.ixor(sg, sx)
+        b.phase = "quotient"
+        V = list(quotient(b, N, D))
+        if len(V) != n:
+            raise ValueError(f"tan's quotient gave {len(V)} words, not {n}")
+    V = [b.ixor(v, sg) for v in V]
+
+    # ---- the final rounding and the in-lane test --------------------------------
+    b.phase = "final"
+    brel = -(p + G) + shift - (40 if _act(b, "bound_loose") else 0)
+    BREL = b.const("BREL", _pow2(fmt, brel))
+    if n == 2:
+        Vh, Vl = V
+        Rg = b.add(Vh, Vl, rnd)
+        Bv = b.mul(b.fabs(Vh), BREL)
+        lo_dn = b.sub(Vl, Bv, RDN)
+        lo_up = b.add(Vl, Bv, RUP)
+        b.probes.update(Vh=Vh, Vl=Vl)
+    else:
+        Vh, V1, V2 = V
+        lo = _round_to_odd_add(b, V1, V2, INT1)
+        Rg = b.add(Vh, lo, rnd)
+        Bv = b.mul(b.fabs(Vh), BREL)
+        lo_dn = _round_to_odd_add(b, V1, b.sub(V2, Bv, RDN), INT1)
+        lo_up = _round_to_odd_add(b, V1, b.add(V2, Bv, RUP), INT1)
+        b.probes.update(V0=Vh, V1=V1, V2=V2, Vh=Vh)
+    R1 = b.add(Vh, lo_dn, rnd)
+    R2 = b.add(Vh, lo_up, rnd)
+    b.probes.update(R=Rg, R1=R1, R2=R2, Bv=Bv)
+    if fn in ("sin", "cos") and not _act(b, "clamp_off"):
+        # |sin x|, |cos x| < 1 for every nonzero dyadic x: the rounding of the
+        # true value lies within [rnd(-1+), rnd(1-)]
+        tinyv = Fraction(1, 2 ** (3 * p))
+        u1, l1 = _enc(fmt, 1 - tinyv, rnd), _enc(fmt, -1 + tinyv, rnd)
+        if _act(b, "clamp_tight"):
+            u1, l1 = u1 - 1, l1 - 1          # one ulp toward zero each
+        U1 = b.const("U1", u1)
+        L1 = b.const("L1", l1)
+        R1 = b.fmax(R1, L1)
+        R2 = b.fmin(R2, U1)
+        Rg = b.fmin(b.fmax(Rg, L1), U1)
+    if after:
+        Rg = b.ixor(Rg, sx)                # the fault: x's sign after rounding
+    mk = b.ixor(R1, R2)
+    fl = INX if _act(b, "mark_silenced") else b.sel(INXM, INX, mk)
+    bits = Rg
+
+    # ---- classify x (late: see above) ----------------------------------------------
+    b.phase = "classify"
+    ax = b.iand(x, b.const("ABSM", full ^ fmt.sign_mask))
+    isnan = b.icmplt(INF, ax)
+    issnan = b.sel(ZERO, isnan, b.iand(x, b.const("QBIT", 1 << (mw - 1))))
+    isinf = b.cmpeq(ax, INF)
+    iszero = b.icmplt(ax, INT1)
+    if _act(b, "tiny_gate_off"):
+        tiny = ZERO
+    else:
+        tiny = b.icmplt(ax, b.const("GATE", _pow2(fmt, gs if fn == "sin"
+                                                  else gc)))
+    if inrange is not None:
+        b.phase = "range"
+        if not _act(b, "range_unmarked"):
+            fl = b.sel(fl, INXM, inrange)
+    b.probes.update(mk=mk)
+
+    # ---- the tiny paths and the specials, lowest priority first ----------------------
+    b.phase = "special"
+    if fn == "cos":
+        tb = b.const("COSTINY", _enc(fmt, 1 - Fraction(1, 2 ** (p + 3)), rnd))
+        tfl = INX
+    else:
+        eps = Fraction(1, 2 ** (p + 2))
+        tb = b.fma(x, b.const("TINY_EPS", _enc(fmt, -eps if fn == "sin"
+                                               else eps)), x, rnd)
+        MINN = b.const("MINN", sf.min_normal_bits(fmt))
+        UNFINX = b.const("FL_UNDER_INEXACT",
+                         sf.FLAG_UNDERFLOW | sf.FLAG_INEXACT)
+        if fn == "sin":
+            un = b.icmplt(b.iand(tb, b.const("ABSM", full ^ fmt.sign_mask)),
+                          MINN)
+        else:
+            un = b.icmplt(ax, MINN)
+        tfl = b.sel(UNFINX, INX, un)
+    bits = b.sel(tb, bits, tiny)
+    fl = b.sel(tfl, fl, tiny)
+    if fn == "cos" and not _act(b, "cos_zero_operand"):
+        bits = b.sel(ONE, bits, iszero)
+    else:
+        bits = b.sel(x, bits, iszero)
+    fl = b.sel(ZERO, fl, iszero)
+    bits = b.sel(QNAN, bits, isinf)
+    fl = b.sel(ZERO if _act(b, "inf_flag_dropped") else INVALID, fl, isinf)
+    bits = b.sel(QNAN, bits, isnan)
+    fl = b.sel(b.sel(INVALID, ZERO, issnan), fl, isnan)
+    return b.finish(bits, fl)
+
+
+def _trig_quotient(b, N, D):
+    """tan's quotient N/D of two double words, to 2^-(p+G) (the study's
+    2.5): RECIP_SEED of D_h (8.5 bits), Newton steps y <- y + y (1 - D_h y)
+    doubling 8 bits to at least p + 8, q_h = N_h y, the exact remainder
+    N_h - q_h D_h + N_l - q_h D_l by FMA, q_l = remainder y, and Fast2Sum.
+    Not C4's division, which rounds its two operands to single words first."""
+    fmt = b.fmt
+    ONE = b.const("ONE", sf.one_bits(fmt))
+    SIGN = b.const("SIGN", fmt.sign_mask)
+    (Nh, Nl), (Dh, Dl) = N, D
+    y = b.recip_seed(Dh)
+    nDh = b.ixor(Dh, SIGN)
+    bits = 16 if _act(b, "newton_short") else 8
+    while bits < fmt.prec + 8:
+        e = b.fma(nDh, y, ONE)                           # 1 - D y
+        y = b.fma(y, e, y)
+        bits *= 2
+    qh = b.mul(Nh, y)
+    nqh = b.ixor(qh, SIGN)
+    rem = b.fma(nqh, Dh, Nh)                             # N_h - q_h D_h
+    rem = b.add(rem, Nl)
+    rem = b.fma(nqh, Dl, rem)
+    ql = b.mul(rem, y)
+    return list(b.fast_two_sum(qh, ql))
+
+
+def _build_trig(fn, fmt: FpFormat, rnd: int, G, shift, plant):
+    """sin, cos or tan at fp64, fp128 or fp256 under the program's attribute
+    rnd: V as a double word (the section's comment above; the study's
+    docs/studies/m2/m2trig.py, ported onto trig_reduction)."""
+    P = plan_reduction(fmt, G)
+    rho = trig_rho()
+    (KS, DS), (KC, DC) = plan_trig(fmt, G, rho)
+    b = Build(fmt, rnd, f"{fn}-{fmt.name}-{sf.RND_NAMES[rnd]}")
+    b.meta.update(fn=fn, G=G, R=P.R, rho=rho, KS=KS, DS=DS, KC=KC, DC=DC,
+                  shift=shift, plant=plant, family="double word")
+    x = ("in", "a")
+    SIGN = b.const("SIGN", fmt.sign_mask)
+
+    # ---- reduce --------------------------------------------------------------
+    red = trig_reduction(b, x, P, plant=plant if plant in REDUCTION_PLANTS
+                         else None)
+    if plant not in REDUCTION_PLANTS:
+        # a static proof of the clean build. A plant of the reduction is a
+        # fault injected into it, and its build is made without the proof so
+        # that the checks that find the fault can run: mid_inexact's computed
+        # cushion is 2^10.96 at fp64, which the proof refuses by name
+        _check_trig_cushion(b, rho)
+    rh, rl, q = red.rh, red.rl, red.q
+
+    # ---- z = r_h^2 as an exact double word ---------------------------------------
+    b.phase = "z"
+    zh = b.mul(rh, rh)
+    nrh = b.ixor(rh, SIGN)
+    nzl = b.fma(nrh, rh, zh)                            # zh - rh^2 = -zl
+    nzh = b.ixor(zh, SIGN)
+
+    def poly(coef, name, K, D):
+        b.phase = name + "-tail"
+        y = b.const(f"{name}_Y{D}", _enc(fmt, coef(D)))
+        for k in range(D - 1, K - 1, -1):
+            y = b.fma(y, zh, b.const(f"{name}_Y{k}", _enc(fmt, coef(k))))
+        b.phase = name + "-head"
+        yh, yl = y, None
+        for k in range(K - 1, -1, -1):
+            ch, cl = _words(fmt, coef(k), 2)
+            if name == "S" and k == 1 and _act(b, "coef"):
+                cl = 0
+            CH = b.const(f"{name}_CH{k}", ch)
+            pp = b.mul(yh, zh)
+            ne = b.fma(yh, nzh, pp)                     # pp - yh zh = -err
+            nl = b.fma(yl, nzh, ne) if yl is not None else ne
+            if not _act(b, "zl_dropped"):
+                nl = b.fma(yh, nzl, nl)                 # - yh zl
+            s, e2 = b.fast_two_sum(CH, pp)              # |c| >= |pp|: ordered
+            tt = b.sub(e2, nl)
+            yl = b.add(tt, b.const(f"{name}_CL{k}", cl)) if cl else tt
+            yh = s
+        return yh, yl
+
+    Sh, Sl = poly(_sin_coefficient, "S", KS, DS)
+    Ch, Cl = poly(_cos_coefficient, "C", KC, DC)
+
+    # ---- sin(r_h) = r_h S and cos(r_h) = C, r_l's share by the derivative -------------
+    b.phase = "sincos"
+    sh = b.mul(rh, Sh)
+    ne = b.fma(nrh, Sh, sh)                             # sh - rh Sh = -err
+    nsl = b.fma(nrh, Sl, ne)                            # -(err + rh Sl)
+    nrl = b.ixor(rl, SIGN)
+    dropped = _act(b, "rl_dropped")
+    if not dropped:
+        nsl = b.fma(Ch, nrl, nsl)                       # - cos(r_h) r_l
+    sl = b.ixor(nsl, SIGN)
+    cl = Cl if dropped else b.fma(sh, nrl, Cl)          # - sin(r_h) r_l
+    b.probes.update(sh=sh, sl=sl, ch=Ch, cl=cl)
+
+    trig_after(b, fn, x, q, [sh, sl], [Ch, cl], G=G, inrange=red.inrange,
+               quotient=_trig_quotient if fn == "tan" else None, shift=shift)
+    _check_plant_fired(b)
+    return b
+
+
 # ---- what is proved of every fragment ---------------------------------------
 #
 # C4's routines.invariants() held a division's and a root's fragments; the
@@ -3621,7 +4184,8 @@ def invariants(f, live_cap=_BY_FORMAT):
     only, cap the live count at 16 and allow no mark, which is how the
     study measured them failing these."""
     if live_cap is _BY_FORMAT:
-        live_cap = LIVE_CAP.get(f.fmt.name)
+        live_cap = TRIG_LIVE_CAP.get(f.op, {}).get(
+            f.fmt.name, LIVE_CAP.get(f.fmt.name))
     return routines.invariants(f, live_cap=live_cap,
                                contract=routines.MATH_CONTRACT)
 
@@ -3634,11 +4198,15 @@ _CACHE = {}
 def fragment(name, fmt: FpFormat, rnd: int):
     """The specialised routines.Fragment of `name` at `fmt` under the
     program's attribute `rnd`, held to invariants(): as routines.fragment()
-    returns a division's. `name` is one of NAMES; any other is refused by
-    name. The fragment is built once and shared."""
-    if name not in NAMES:
+    returns a division's. `name` is one of NAMES, or one of TRIG_NAMES at fp64,
+    fp128 and fp256 (held to its own cap, TRIG_LIVE_CAP); any other is refused
+    by name, and so is a trig name at fp32. The fragment is built once and
+    shared."""
+    if name not in NAMES and name not in TRIG_NAMES:
         raise ValueError(f"{name!r} is not a math-library routine built "
-                         f"so far: {', '.join(NAMES)}")
+                         f"so far: {', '.join(NAMES + TRIG_NAMES)}")
+    if name in TRIG_NAMES and fmt in FORMATS             and fmt.name not in TRIG_LIVE_CAP[name]:
+        raise ValueError(_trig_fp32_refusal(name))
     key = (name, fmt, rnd)
     if key not in _CACHE:
         f = build(name, fmt, rnd).fragment()
@@ -4621,29 +5189,259 @@ def check_reduction_constants(builder=None, formats=(FP64, FP128, FP256),
     return lines, findings
 
 
+# ---- the trig routines' constants, checked ------------------------------------
+#
+# sin, cos and tan (parcel M2G2a) hold, beyond the reduction's, the words
+# below, each asked of the BUILT fragments by role (Build.roles) against a
+# derivation that shares nothing with the generator or with mpmath:
+#
+#   the reduction's words   MAGIC, INVB, FLOOROFF, MQ, PIO2H, PIO2L, PIO4D,
+#                 CHUNK<k> and RANGE are the words of the clean reduction,
+#                 which check_reduction_constants() holds to Machin's formula
+#                 in integers and to the header; a trig fragment's are those
+#                 words or a difference by name
+#   the plan      (K, D) of S and of C again, from the enclosure of pi by
+#                 Machin's formula and the coefficients below, at both ends of
+#                 the enclosure (a plan the two ends disagree on is refused as
+#                 undecidable)
+#   S_Y<k> S_CH<k> S_CL<k>, C_Y<k> C_CH<k> C_CL<k>
+#                 the Taylor coefficients (-1)^k/(2k+1)! and (-1)^k/(2k)!,
+#                 exact rationals: the tail's words k = K..D, each the
+#                 nearest; the head's k < K, a high word the nearest and, where
+#                 anything is left, a low word the nearest to what is left
+#                 (and no low word where the coefficient is exact in one)
+#   GATE          2^g, g the first exponent above the largest e with
+#                 2e + p + 2 <= 0 (sin) or 2e + p + 3 <= 0 (cos, tan),
+#                 e = floor(log2 |x|): the definition's neighbour rules
+#   BREL          2^-(p+G) times 2^shift
+#   TINY_EPS      -2^-(p+2) (sin) and +2^-(p+2) (tan), COSTINY (cos) and U1
+#                 and L1 (sin, cos) the roundings of 1 - 2^-(p+3) and
+#                 +-(1 - 2^-3p): 1 under rne, rmm and rup, 1 - 2^-p under rtz
+#                 and rdn, and their mirrors; MINN 2^emin
+#   ZERO ONE SIGN INF QNAN ABSM QBIT INT1 INT2 SHIFT_W1 SHIFT_W2 and the flag
+#                 words (invalid 0x01, inexact 0x10, underflow with inexact
+#                 0x18, inexact with the mark 0x90)
+#                 from the IEEE fields of the formats (11, 52), (15, 112) and
+#                 (19, 236) and the flags' layout, as integers
+#
+# and every word the fragment holds has a role. The words that are not
+# rounded reals act where the pools, the structured centres and the specials
+# run them.
+
+_TRIG_FIELDS = {"fp64": (11, 52), "fp128": (15, 112), "fp256": (19, 236)}
+_TRIG_FLAG_WORDS = {"FL_INVALID": 0x01, "FL_INEXACT": 0x10,
+                    "FL_UNDER_INEXACT": 0x18, "FL_INEXACT_MARK": 0x90}
+
+
+@functools.lru_cache(maxsize=None)
+def _clean_reduction_words(fmt):
+    """({role: bits}, {every bits}) of the clean reduction at `fmt`: the roled
+    words check_reduction_constants() holds to independent derivations, and all
+    of its words, among them the ones with no role (shift counts, masks), which
+    test_mathlib_reduction.py's `setup` holds where they act."""
+    b = build_reduction(fmt)
+    return ({role: b.words[ref[1]] for role, ref in b.roles.items()},
+            frozenset(b.words.values()))
+
+
+def _check_trig_gate(p, sin):
+    """g with |x| < 2^g on the tiny path: the largest e = floor(log2 |x|) the
+    definition's rule admits, 2e + p + 2 <= 0 for sin and 2e + p + 3 <= 0 for
+    cos and tan, plus one."""
+    extra = 2 if sin else 3
+    e = 0
+    while 2 * e + p + extra > 0:
+        e -= 1
+    return e + 1
+
+
+def _check_trig_plan(fmt, G, rho):
+    """((KS, DS), (KC, DC)) again: K the first k whose term |c_k| rho^(2k) is
+    within 2^-(G+3), D the first D >= K whose truncation |c_(D+1)|
+    rho^(2D+2) is within 2^-(p+G+3)."""
+    p = fmt.prec
+    z = rho * rho
+    out = []
+    for coef in (lambda k: Fraction(1, math.factorial(2 * k + 1)),
+                 lambda k: Fraction(1, math.factorial(2 * k))):
+        K = next(k for k in range(400)
+                 if coef(k) * z ** k <= Fraction(1, 2 ** (G + 3)))
+        D = next(d for d in range(K, 800)
+                 if coef(d + 1) * z ** (d + 1)
+                 <= Fraction(1, 2 ** (p + G + 3)))
+        out.append((K, D))
+    return tuple(out)
+
+
+def _check_trig_build(b, findings, clean_words):
+    """Every derived constant of one built sin, cos or tan against its
+    independent derivation. `clean_words` is _clean_reduction_words() of the
+    format. -> constants checked."""
+    clean, clean_bits = clean_words
+    fmt, p, W = b.fmt, b.fmt.prec, b.fmt.width
+    fn, G, rnd = b.meta["fn"], b.meta["G"], b.rnd
+    ew, mw = _TRIG_FIELDS[fmt.name]
+    tag, verify, point, seen, count = _verifier(b, findings)
+
+    def bits_are(role, want):
+        seen.add(role)
+        if role not in b.roles:
+            findings.append(f"{tag}: the fragment has no constant {role}")
+            return
+        count[0] += 1
+        got = b.words[b.roles[role][1]]
+        if got != want:
+            findings.append(f"{tag} {role}: {got:#x} is not {want:#x}")
+
+    for role, want in sorted(clean.items()):
+        seen.add(role)
+        if role not in b.roles:
+            findings.append(f"{tag}: the fragment has no constant {role}")
+            continue
+        count[0] += 1
+        got = b.words[b.roles[role][1]]
+        if got != want:
+            findings.append(f"{tag} {role}: {got:#x} is not the reduction's "
+                            f"{want:#x} (the clean reduction, held by "
+                            f"--only reduction to Machin's formula and the "
+                            f"header)")
+    # the plan, from both ends of the enclosure of pi
+    lo_pi, hi_pi = _check_pi(_PI_CHECK_BITS)
+    cushion = 1 + Fraction(1, 2 ** 30)
+    plans = {_check_trig_plan(fmt, G, lo_pi / 4 * cushion),
+             _check_trig_plan(fmt, G, hi_pi / 4 * cushion)}
+    held = ((b.meta["KS"], b.meta["DS"]), (b.meta["KC"], b.meta["DC"]))
+    if len(plans) != 1:
+        findings.append(f"{tag}: undecidable: the enclosure of pi gives two "
+                        f"plans, {sorted(plans)}")
+        plan = held
+    else:
+        (plan,) = plans
+        if plan != held:
+            findings.append(f"{tag}: the plan {held} is not the re-derived "
+                            f"{plan}")
+    # the coefficients
+    for name, coef, (K, D) in (
+            ("S", lambda k: Fraction((-1) ** k, math.factorial(2 * k + 1)),
+             plan[0]),
+            ("C", lambda k: Fraction((-1) ** k, math.factorial(2 * k)),
+             plan[1])):
+        for k in range(K, D + 1):
+            verify(f"{name}_Y{k}", "rn", coef(k), coef(k))
+        for k in range(K):
+            c = coef(k)
+            w0 = verify(f"{name}_CH{k}", "rn", c, c)
+            rest = c - w0
+            low = f"{name}_CL{k}"
+            if rest == 0:
+                seen.add(low)
+                if low in b.roles:
+                    findings.append(f"{tag}: {low} is held, but the "
+                                    f"coefficient is exact in one word")
+            else:
+                verify(low, "rn", rest, rest)
+    # the after-V section's words
+    point("ZERO", 0)
+    point("ONE", 1)
+    bits_are("SIGN", 1 << (W - 1))
+    bits_are("INF", ((1 << ew) - 1) << mw)
+    bits_are("QNAN", (((1 << ew) - 1) << mw) | (1 << (mw - 1)))
+    bits_are("ABSM", (1 << (W - 1)) - 1)
+    bits_are("QBIT", 1 << (mw - 1))
+    bits_are("INT1", 1)
+    bits_are("INT2", 2)
+    flag_roles = ["FL_INVALID", "FL_INEXACT", "FL_INEXACT_MARK"]
+    if fn != "cos":
+        flag_roles.append("FL_UNDER_INEXACT")
+    for role in flag_roles:
+        bits_are(role, _TRIG_FLAG_WORDS[role])
+    if fn in ("sin", "cos"):
+        bits_are("SHIFT_W2", W - 2)
+    if fn == "tan":
+        bits_are("SHIFT_W1", W - 1)
+    point("GATE", Fraction(2) ** _check_trig_gate(p, fn == "sin"))
+    point("BREL", Fraction(2) ** (-(p + G) + b.meta["shift"]))
+    one_below = 1 - Fraction(1, 2 ** p)
+    up = Fraction(1) if rnd in (RNE, RMM, RUP) else one_below
+    down = Fraction(-1) if rnd in (RNE, RMM, RDN) else -one_below
+    if fn in ("sin", "cos"):
+        point("U1", up)
+        point("L1", down)
+    if fn == "cos":
+        point("COSTINY", up)
+    else:
+        eps = Fraction(1, 2 ** (p + 2))
+        point("TINY_EPS", -eps if fn == "sin" else eps)
+        point("MINN", Fraction(2) ** (2 - 2 ** (ew - 1)))
+    unchecked = sorted(set(b.roles) - seen)
+    if unchecked:
+        findings.append(f"{tag}: derived but not checked: {unchecked}")
+    used = {s[1] for i in b.live_indices() for s in b.body[i][2]
+            if s[0] == "w"}
+    nameless = sorted(n for n in used - {ref[1] for ref in b.roles.values()}
+                      if b.words[n] not in clean_bits)
+    if nameless:
+        findings.append(f"{tag}: words the fragment holds with no role: "
+                        f"{[(n, hex(b.words[n])) for n in nameless]}")
+    return count[0]
+
+
+TRIG_FORMATS = (FP64, FP128, FP256)    # the formats sin, cos and tan are built at
+
+
+def check_trig_constants(builder=None, formats=TRIG_FORMATS,
+                         attrs=sf.RND_MODES, names=TRIG_NAMES):
+    """(lines, findings): re-derive every derived constant of the built sin,
+    cos and tan at each of `formats` and `attrs` (the section's comment above)
+    and compare, by role. `lines` say what was checked; `findings` are the
+    differences, named by fragment and word, empty when none.
+    `builder(name, fmt, rnd)` is build, or a faulted one for a test."""
+    builder = builder or build
+    lines, findings = [], []
+    for name in names:
+        for fmt in formats:
+            n_const = 0
+            for rnd in attrs:
+                b = builder(name, fmt, rnd)
+                n_const += _check_trig_build(b, findings,
+                                             _clean_reduction_words(fmt))
+            m = b.meta
+            lines.append(
+                f"{name} {fmt.name}: G = {m['G']}, plan S "
+                f"{(m['KS'], m['DS'])}, C {(m['KC'], m['DC'])}: {n_const} "
+                f"derived constants in {len(attrs)} fragments, each the "
+                f"rounding its rule gives for the exact coefficient or "
+                f"threshold, the reduction's words the clean reduction's, the "
+                f"integers from the IEEE fields")
+    return lines, findings
+
+
 # ---- the module as a program ------------------------------------------------
 
 def main(argv=None):
     ap = argparse.ArgumentParser(
         prog="python -m cft_golden.mathlib",
         description="The math library's golden generator: the fragments of "
-                    + ", ".join(NAMES) + ", and the trigonometric reduction "
-                    "(reduction).")
+                    + ", ".join(NAMES) + ", the trigonometric reduction "
+                    "(reduction) and sin, cos and tan (trig).")
     ap.add_argument("--check", action="store_true",
                     help="re-derive every constant the built fragments "
                          "hold, in integer arithmetic of its own, and exit "
                          "1 on a difference")
     ap.add_argument("--only", default="",
-                    help="a comma-separated list of routines, and the word "
-                         "reduction, to check or list (default: all, the "
-                         "reduction checked but not listed)")
+                    help="a comma-separated list of routines, and the words "
+                         "reduction and trig, to check or list (default: "
+                         "all, the reduction and trig checked but not "
+                         "listed)")
     args = ap.parse_args(argv)
     only = tuple(n for n in args.only.split(",") if n)
     for n in only:
-        if n not in NAMES and n != "reduction":
-            ap.error(f"--only {n!r}: one of {', '.join(NAMES)}, reduction")
+        if n not in NAMES and n not in ("reduction", "trig"):
+            ap.error(f"--only {n!r}: one of {', '.join(NAMES)}, reduction, "
+                     f"trig")
     names = tuple(n for n in only if n in NAMES) or (() if only else NAMES)
     reduction = not only or "reduction" in only
+    trig = not only or "trig" in only
     if args.check:
         failed = False
         if names:
@@ -4662,6 +5460,16 @@ def main(argv=None):
             for fd in findings:
                 print("DIFFERENCE:", fd)
             print(f"mathlib --check (reduction): {len(lines)} formats, "
+                  f"{len(findings)} differences")
+            failed = failed or bool(findings)
+        if trig:
+            lines, findings = check_trig_constants()
+            for ln in lines:
+                print(ln)
+            for fd in findings:
+                print("DIFFERENCE:", fd)
+            print(f"mathlib --check (trig): {len(TRIG_NAMES)} routines, "
+                  f"{len(TRIG_FORMATS)} formats, "
                   f"{len(findings)} differences")
             failed = failed or bool(findings)
         return 1 if failed else 0
@@ -4684,6 +5492,16 @@ def main(argv=None):
                 by[ph] = by.get(ph, 0) + 1
             print(f"reduction {fmt.name}: G = {P.G}, b = {P.b}, L = {P.L}, "
                   f"{P.K} words, {len(b.body)} instructions by phase {by}")
+    if "trig" in only:
+        print(f"{'routine':8s} {'format':6s} {'rnd':4s} {'insns':>6s} "
+              f"{'words':>6s} {'live':>5s}  cap")
+        for name in TRIG_NAMES:
+            for fmt in (FP64, FP128, FP256):
+                for rnd in sf.RND_MODES:
+                    f = fragment(name, fmt, rnd)
+                    print(f"{name:8s} {fmt.name:6s} {sf.RND_NAMES[rnd]:4s} "
+                          f"{len(f):6d} {len(f.words):6d} {f.live_max():5d}  "
+                          f"{TRIG_LIVE_CAP[name][fmt.name]}")
     return 0
 
 

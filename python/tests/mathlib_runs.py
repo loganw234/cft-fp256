@@ -24,6 +24,12 @@ log2 and log1p.
     python python/tests/mathlib_runs.py live
     python python/tests/mathlib_runs.py reduction [--formats fp64,fp128,fp256]
         [--n 100000] [--seed 1] [--edge-width 8] [--halves-step 1] [--quick]
+    python python/tests/mathlib_runs.py trig-pools [--fn sin,cos,tan]
+        [--formats fp64,fp128,fp256] [--attrs rne,rtz,rdn,rup,rmm] [--seq]
+        [--step N] [--quick] [--out PATH]
+    python python/tests/mathlib_runs.py trig-bound [--fn sin,cos,tan]
+        [--formats fp64,fp128,fp256] [--attrs rne] [--n N] [--seed 121]
+        [--guard G] [--quick] [--out PATH]
     python python/tests/mathlib_runs.py all     [--scale 1]
 
 --fn is a list of exp, exp2, expm1, log, log2 and log1p (all six by default).
@@ -99,6 +105,27 @@ sample is a function of --seed, so a run can be repeated.
            pi/4 against the computed bound, and the audit's tally. --quick
            takes every 16th power of two and leaves out the study's own
            families (the golden stage's smoke run). Not part of `all`
+  trig-pools  sin, cos and tan (parcel M2G2a; mathlib.fragment at fp64, fp128
+           and fp256, python/tests/mathlib_trig_harness.py's checks): the whole
+           radian pools (4,408, 620 and 614 arguments) through every
+           configuration, every unmarked lane equal to transcend.py in bits
+           and flag word, every past-range lane marked, every other mark on
+           the committed list; with --seq each fragment as a stand-alone
+           program on seq.py and as the compiled shape (QUIET, the body,
+           ENDQUIET, RAISE) over the same lanes. --step N: every Nth lane of the
+           pools (1: all). --quick: --step 8, and fp128 under rne and rtz where
+           --formats and --attrs are not given (the golden stage's smoke
+           run). Not part of `all`
+  trig-bound  sin, cos and tan: |V - f(x)| / Bv under 1, mpmath at 4p + 200
+           bits, at --n placed points of each of the study's five regions
+           (edge, near, zero, small, random; a seed each from --seed on) of
+           each format (12,000 at fp64 and 3,000 at fp128 and fp256 by
+           default, the study's box sizes), under --attrs (rne by default,
+           the study's budgets), each lane also against transcend.py. The
+           largest is a sampled lower bound. --quick: 12 points a region and
+           fp128 only. Not part of `all`
+  Both trig commands take --out PATH, which writes the output there and
+  REFUSES a path that exists, and end with their peak memory.
   all      a standard run of each, at modest sizes (--scale multiplies them)
 """
 
@@ -123,14 +150,75 @@ T0 = time.perf_counter()
 FINDINGS = []
 
 
+OUT = None                              # --out's file, where a command opens one
+
+
 def say(msg):
-    print(f"[{time.perf_counter() - T0:7.1f}s] {msg}", flush=True)
+    line = f"[{time.perf_counter() - T0:7.1f}s] {msg}"
+    print(line, flush=True)
+    if OUT is not None:
+        OUT.write(line + "\n")
+        OUT.flush()
 
 
 def note(findings):
     for s in findings:
         FINDINGS.append(s)
         print("   FINDING:", s, flush=True)
+        if OUT is not None:
+            OUT.write(f"   FINDING: {s}\n")
+            OUT.flush()
+
+
+def open_out(path):
+    """--out: the file every line is written to as well, created EXCLUSIVELY:
+    a path that exists is refused, before any work, so that a run never
+    overwrites an earlier one's record."""
+    global OUT
+    if path is None:
+        return
+    try:
+        OUT = open(path, "x", encoding="utf-8", newline="\n")
+    except FileExistsError:
+        raise SystemExit(f"--out {path}: the file exists; refusing to "
+                         f"overwrite it")
+
+
+def peak_memory_mb():
+    """This process's peak resident memory in MB (resource on Linux, the
+    peak working set through ctypes on Windows), or None."""
+    try:
+        import resource
+        kb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        return kb / 1024 if sys.platform != "darwin" else kb / 1048576
+    except ImportError:
+        pass
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class Counters(ctypes.Structure):
+            _fields_ = [("cb", wintypes.DWORD), ("PageFaultCount", wintypes.DWORD),
+                        ("PeakWorkingSetSize", ctypes.c_size_t),
+                        ("WorkingSetSize", ctypes.c_size_t),
+                        ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                        ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                        ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                        ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                        ("PagefileUsage", ctypes.c_size_t),
+                        ("PeakPagefileUsage", ctypes.c_size_t)]
+        c = Counters()
+        c.cb = ctypes.sizeof(c)
+        kernel, psapi = ctypes.windll.kernel32, ctypes.windll.psapi
+        kernel.GetCurrentProcess.restype = wintypes.HANDLE
+        psapi.GetProcessMemoryInfo.argtypes = [
+            wintypes.HANDLE, ctypes.POINTER(Counters), wintypes.DWORD]
+        if not psapi.GetProcessMemoryInfo(kernel.GetCurrentProcess(),
+                                          ctypes.byref(c), c.cb):
+            return None
+        return c.PeakWorkingSetSize / 1048576
+    except (AttributeError, OSError, ImportError):
+        return None
 
 
 def formats_of(arg, default):
@@ -511,6 +599,92 @@ def cmd_reduction(a):
             f"skipped")
 
 
+def _trig_fns(arg):
+    import mathlib_trig_harness as T
+    names = arg.split(",") if arg else list(T.FUNCS)
+    for n in names:
+        if n not in T.FUNCS:
+            raise SystemExit(f"--fn {n!r}: one of {', '.join(T.FUNCS)}")
+    return names
+
+
+def _trig_formats(arg, default):
+    import mathlib_trig_harness as T
+    names = arg.split(",") if arg else default
+    for n in names:
+        if n not in T.BY_NAME:
+            raise SystemExit(f"--formats {n!r}: fp64, fp128 or fp256 (fp32 is "
+                             f"not built: parcel M2F's)")
+    return [T.BY_NAME[n] for n in names]
+
+
+def _memory_line():
+    mb = peak_memory_mb()
+    return ("peak memory not available here" if mb is None
+            else f"peak memory {mb:.0f} MB")
+
+
+def cmd_trig_pools(a):
+    """The whole radian pools through every configuration of sin, cos and tan
+    (parcel M2G2a), with --seq the fragment as a program on seq.py and as the
+    compiled shape over the same lanes."""
+    import mathlib_trig_harness as T
+    open_out(a.out)
+    step = a.step if a.step else (8 if a.quick else 1)
+    fmts = _trig_formats(a.formats, ["fp128"] if a.quick else
+                         [f.name for f in T.FORMATS])
+    rnds = attrs_of(a.attrs) if a.attrs else (
+        [T.RNE, T.RTZ] if a.quick else list(sf.RND_MODES))
+    for fmt in fmts:
+        xs = list(T.radian_pools(fmt))[::step]
+        for fn in _trig_fns(a.fn):
+            for rnd in rnds:
+                f = ml.fragment(fn, fmt, rnd)
+                out, t = T.check_pools(f, xs)
+                note(out)
+                line = (f"trig-pools {fn} {fmt.name} {sf.RND_NAMES[rnd]}: "
+                        f"{t.n} lanes, {len(t.marked)} marked (guess right "
+                        f"{t.marked_right}), {len(t.range_marked)} past the "
+                        f"range marked ({len(t.range_unmarked)} not), "
+                        f"{len(t.off)} marks off the list, {len(t.wrong)} "
+                        f"wrong unmarked; {len(f)} instructions, "
+                        f"{f.live_max()} live")
+                if a.seq:
+                    out, lanes = T.check_seq(f, xs=xs)
+                    note(out)
+                    line += (f"; seq.py and the compiled shape over "
+                             f"{len(lanes)} lanes: {len(out)} findings")
+                say(line)
+    say(f"trig-pools: {_memory_line()}")
+
+
+def cmd_trig_bound(a):
+    """|V - f(x)| / Bv at placed points of the study's five regions, sin, cos
+    and tan (parcel M2G2a), each lane also against transcend.py."""
+    import mathlib_trig_harness as T
+    open_out(a.out)
+    sizes = {"fp64": 12000, "fp128": 3000, "fp256": 3000}
+    fmts = _trig_formats(a.formats, ["fp128"] if a.quick else
+                         [f.name for f in T.FORMATS])
+    rnds = attrs_of(a.attrs) if a.attrs else [T.RNE]
+    for fmt in fmts:
+        n = a.n if a.n else (12 if a.quick else sizes[fmt.name])
+        for fn in _trig_fns(a.fn):
+            for rnd in rnds:
+                b = ml.build(fn, fmt, rnd, guard=a.guard)
+                for k, region in enumerate(T.REGIONS):
+                    xs = T.sample(fmt, region, n, a.seed + k)
+                    out, (worst, main, lanes) = T.check_bound(
+                        b, xs, f"{region} seed {a.seed + k}")
+                    note(out)
+                    say(f"trig-bound {fn} {fmt.name} {sf.RND_NAMES[rnd]} "
+                        f"{region} seed {a.seed + k}: {lanes} lanes, "
+                        f"{main} main-path, largest |V - {fn}| / Bv = "
+                        f"2^{worst:+.2f} (a sampled lower bound), "
+                        f"{len(out)} findings")
+    say(f"trig-bound: {_memory_line()}")
+
+
 def cmd_all(a):
     s = a.scale
     ns = argparse.Namespace
@@ -630,6 +804,35 @@ def main(argv=None):
                    help="every 16th power of two, and not the study's own "
                         "families")
     p.set_defaults(fn_=cmd_reduction)
+    p = sub.add_parser("trig-pools")
+    p.add_argument("--fn", help="sin,cos,tan (all by default)")
+    p.add_argument("--formats", help="fp64,fp128,fp256 (all by default)")
+    p.add_argument("--attrs", help="rne,rtz,rdn,rup,rmm (all by default)")
+    p.add_argument("--seq", action="store_true")
+    p.add_argument("--step", type=int, default=0,
+                   help="every this many lanes of the pools (default 1)")
+    p.add_argument("--quick", action="store_true",
+                   help="--step 8, fp128 under rne and rtz by default")
+    p.add_argument("--out", help="write the output here too; a path that "
+                                 "exists is refused")
+    p.set_defaults(fn_=cmd_trig_pools)
+    p = sub.add_parser("trig-bound")
+    p.add_argument("--fn", help="sin,cos,tan (all by default)")
+    p.add_argument("--formats", help="fp64,fp128,fp256 (all by default)")
+    p.add_argument("--attrs", help="rne (by default; the study's budgets)")
+    p.add_argument("--n", type=int, default=0,
+                   help="points a region (default 12,000 at fp64, 3,000 at "
+                        "fp128 and fp256)")
+    p.add_argument("--seed", type=int, default=121,
+                   help="the first region's seed, one more each (the "
+                        "study's box runs: 121 to 125)")
+    p.add_argument("--guard", type=int,
+                   help="G, instead of the decided one")
+    p.add_argument("--quick", action="store_true",
+                   help="12 points a region, fp128 only by default")
+    p.add_argument("--out", help="write the output here too; a path that "
+                                 "exists is refused")
+    p.set_defaults(fn_=cmd_trig_bound)
     p = sub.add_parser("all")
     p.add_argument("--scale", type=float, default=1.0)
     p.set_defaults(fn_=cmd_all)
