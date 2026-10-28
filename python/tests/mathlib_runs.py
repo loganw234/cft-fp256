@@ -30,6 +30,16 @@ log2 and log1p.
     python python/tests/mathlib_runs.py trig-bound [--fn sin,cos,tan]
         [--formats fp64,fp128,fp256] [--attrs rne] [--n N] [--seed 121]
         [--guard G] [--quick] [--out PATH]
+    python python/tests/mathlib_runs.py trig-budget [--fn sin,cos,tan]
+        [--formats fp64,fp128,fp256] [--regions edge,near,zero,small,random]
+        [--n N] [--seed 121] [--attrs-step K | --no-attrs] [--guard G]
+        [--quick] [--out PATH]
+    python python/tests/mathlib_runs.py trig-rate [--fn sin,cos,tan]
+        [--formats fp64,fp128,fp256] [--attrs rne,rtz] [--n N] [--seed 7]
+        [--statistics K] [--alpha A] [--sigmas S] [--quick] [--out PATH]
+    python python/tests/mathlib_runs.py trig-family [--fn sin,cos,tan]
+        [--formats fp64,fp128,fp256] [--attrs rne,rtz,rdn,rup,rmm]
+        [--centres N] [--jmax J] [--quick] [--out PATH] | --write | --check
     python python/tests/mathlib_runs.py all     [--scale 1]
 
 --fn is a list of exp, exp2, expm1, log, log2 and log1p (all six by default).
@@ -124,7 +134,44 @@ sample is a function of --seed, so a run can be repeated.
            the study's budgets), each lane also against transcend.py. The
            largest is a sampled lower bound. --quick: 12 points a region and
            fp128 only. Not part of `all`
-  Both trig commands take --out PATH, which writes the output there and
+  trig-budget  the first-order budget of sin, cos and tan (parcel M2G2b;
+           python/tests/mathlib_trig_budget.py, the study's 3.2): the bound it
+           states, M's largest value plus the rounding instructions' largest
+           capacities in units of Bv, which the true worst cannot pass and which
+           must be under 1, at --n lanes of each of the study's five regions
+           (edge, near, zero, small, random; seeds --seed + 0, 1, 4, 2, 3: the
+           study's 21, 22, 25, 23, 24, and its box runs' 121 to 125) of each
+           format (12,000 at fp64 and 3,000 at fp128 and fp256 by default),
+           rne; no sampled lane's error past
+           its bound; the residual stated beside it; and V bit-identical across
+           the five attributes on every --attrs-step-th lane (1: every one),
+           so that the rne budget is every attribute's. --quick: 12 lanes a
+           region and fp128 only. Not part of `all`
+  trig-rate  the mark-rate law of sin, cos and tan (parcel M2G2b): the bound
+           inflated to G' = 6, --n lanes of the random region (50,000 at fp64
+           and 20,000 at fp128 and fp256 by default, seed --seed), each cell's
+           count of marks against the sample's own expectation, judged by its
+           exact two-sided tail, the cells of the run as the independent
+           statistics they hold (--statistics K names the run's K when the run
+           is several processes), every unmarked lane right and every marked
+           guess right; under --attrs (rne and rtz by default). These cells are
+           a family of their own, never added to test_mathlib.py's 90. --quick:
+           400 lanes and fp128 only. Not part of `all`
+  trig-family  the structured families of sin, cos and tan (parcel M2G2b;
+           python/tests/mathlib_trig_family.py, the study's 3.5), wider than the
+           golden stage's: for each format, function and attribute (all five
+           by default) the census counts (the tiny family and the minimisers'
+           neighbours equal the study's tables), every committed centre with
+           its neighbours inside and outside its window and the deep arguments
+           beyond the committed sample (--centres N: at most this many centres
+           a cell, spread over the list; 0: all), the windows' exact edges
+           (up to 40 centres a cell) and the study's three measured windows
+           at fp64, and with --jmax J the minimisers' neighbours out to |j| = J
+           (the study's 3.5: "the window beyond |j| = 4 is not measured"),
+           each classified by the theory. --write regenerates the committed list
+           (mathlib_trig_family.TRIG_FAMILY), --check holds it to the theory.
+           --quick: --centres 6, fp128 only. Not part of `all`
+  The trig commands take --out PATH, which writes the output there and
   REFUSES a path that exists, and end with their peak memory.
   all      a standard run of each, at modest sizes (--scale multiplies them)
 """
@@ -685,6 +732,177 @@ def cmd_trig_bound(a):
     say(f"trig-bound: {_memory_line()}")
 
 
+# trig-budget's seed of each region, from --seed: the study's order and its
+# seeds 21 to 25 (edge, near, small, random, zero; the zero region was added
+# after the first runs), 121 to 125 on its box
+BUDGET_SEED_OFFSET = {"edge": 0, "near": 1, "small": 2, "random": 3, "zero": 4}
+
+
+def cmd_trig_budget(a):
+    """The first-order budget at the study's regions and sizes, sin, cos and
+    tan (parcel M2G2b): the bound under 1, no lane past it, the residual, V the
+    same under the five attributes."""
+    import mathlib_trig_budget as TB
+    import mathlib_trig_harness as T
+    open_out(a.out)
+    sizes = {"fp64": 12000, "fp128": 3000, "fp256": 3000}
+    fmts = _trig_formats(a.formats, ["fp128"] if a.quick else
+                         [f.name for f in T.FORMATS])
+    regions = a.regions.split(",") if a.regions else list(T.REGIONS)
+    for r in regions:
+        if r not in T.REGIONS:
+            raise SystemExit(f"--regions {r!r}: one of {', '.join(T.REGIONS)}")
+    for fmt in fmts:
+        n = a.n if a.n else (12 if a.quick else sizes[fmt.name])
+        for fn in _trig_fns(a.fn):
+            def build(r, fn=fn, fmt=fmt):
+                return (T.build_of(fn, fmt, r) if a.guard is None
+                        else ml.build(fn, fmt, r, guard=a.guard))
+            b = build(T.RNE)
+            attrs = None if a.no_attrs else {r: build(r)
+                                             for r in sf.RND_MODES}
+            G = b.meta["G"]
+            worst = 0.0
+            for region in regions:
+                seed = a.seed + BUDGET_SEED_OFFSET[region]
+                xs = T.sample(fmt, region, n, seed)
+                t = time.perf_counter()
+                out, s = TB.check_budget(
+                    b, xs, f"{region} seed {seed}", attrs=attrs,
+                    attr_xs=xs[::max(1, a.attrs_step)])
+                note(out)
+                worst = max(worst, s["bound"])
+                ms = (time.perf_counter() - t) / max(1, s["lanes"]) * 1000
+                margin = -TB.bits_log2(s["bound"])
+                say(f"trig-budget {fn} {fmt.name} G = {G} rne {region} seed "
+                    f"{seed}: {s['lanes']} lanes ({s['skipped']} not on the "
+                    f"main path), {s['rounding']} instructions ever round, "
+                    f"bound {s['bound']:.4f} Bv (2^{margin:+.2f}) = M "
+                    f"{s['Mmax']:.4f} + capacities {s['S_cap']:.4f}"
+                    f"; largest error found {s['Emax']:.4f}; residual "
+                    f"{s['resid']:.3g} (measured, not bounded)"
+                    + (f"; V the same under the five attributes on "
+                       f"{s['attr_lanes']} lanes: {s['attr_differ']} differ"
+                       if attrs is not None else "")
+                    + f"; {ms:.0f} ms a lane, {len(out)} findings")
+            say(f"trig-budget {fn} {fmt.name} G = {G} ALL REGIONS: the bound "
+                f"is at most {worst:.4f} Bv (stated as far as the sample "
+                f"reaches the regions' extremes)")
+    say(f"trig-budget: {_memory_line()}")
+
+
+def cmd_trig_rate(a):
+    """The mark-rate law at the study's box sizes, sin, cos and tan (parcel
+    M2G2b): each cell's count against the sample's own expectation."""
+    import mathlib_trig_harness as T
+    open_out(a.out)
+    sizes = {"fp64": 50000, "fp128": 20000, "fp256": 20000}
+    fns = _trig_fns(a.fn)
+    fmts = _trig_formats(a.formats, ["fp128"] if a.quick else
+                         [f.name for f in T.FORMATS])
+    rnds = attrs_of(a.attrs) if a.attrs else [T.RNE, T.RTZ]
+    k = a.statistics or H.rate_statistics(fns, fmts, rnds)
+    say(f"trig-rate: {len(fns) * len(fmts) * len(rnds)} cells, {k} "
+        f"statistics, alpha {a.alpha:g}: a cell is flagged when its exact "
+        f"two-sided tail is under {H.rate_level(k, a.alpha):.3g}"
+        + (f" (or past {a.sigmas:g} sigma, the plain line)"
+           if a.sigmas is not None else ""))
+    smallest = None
+    for fmt in fmts:
+        n = a.n if a.n else (400 if a.quick else sizes[fmt.name])
+        for fn in fns:
+            for rnd in rnds:
+                out, st = T.check_rate(fmt, rnd, fn, n, a.seed,
+                                       sigmas=a.sigmas, statistics=k,
+                                       alpha=a.alpha)
+                note(out)
+                cell = f"{fn} {fmt.name} {sf.RND_NAMES[rnd]}"
+                say(f"trig-rate {cell}: {st['marked']} of {st['n']} marked, "
+                    f"{st['expected']:.1f} expected (sigma {st['sigma']:.1f}, "
+                    f"{st['z']:+.2f}), two-sided tail {st['p']:.3g}, "
+                    f"{st['wrong']} wrong unmarked, {st['guess_wrong']} wrong "
+                    f"guesses")
+                if smallest is None or st["p"] < smallest[0]:
+                    smallest = (st["p"], cell)
+    say(f"trig-rate: the run's smallest two-sided tail is {smallest[0]:.3g} "
+        f"({smallest[1]}); a tail that small somewhere among {k} statistics "
+        f"has probability at most {min(1.0, k * smallest[0]):.3g}")
+    say(f"trig-rate: {_memory_line()}")
+
+
+def cmd_trig_family(a):
+    """The structured families, wider than the golden stage's (parcel M2G2b):
+    census counts, every centre and its window, the deep arguments, the
+    windows' scans, the minimisers' neighbours out to --jmax."""
+    import mathlib_trig_family as TF
+    import mathlib_trig_harness as T
+    if a.write:
+        TF.write()
+        say("TRIG_FAMILY regenerated into python/tests/mathlib_trig_family.py")
+        return
+    if a.check:
+        found = T.check_family_list(TF.TRIG_FAMILY)
+        note(found)
+        n = sum(len(TF.expand(v)) for per in TF.TRIG_FAMILY.values()
+                for p in per.values() for v in p.values())
+        say(f"trig-family --check: {n} centres in the lists, {len(found)} "
+            f"cells differ from the theory's")
+        return
+    open_out(a.out)
+    fmts = _trig_formats(a.formats, ["fp128"] if a.quick else
+                         [f.name for f in T.FORMATS])
+    rnds = attrs_of(a.attrs) if a.attrs else (
+        [T.RNE, T.RTZ] if a.quick else list(sf.RND_MODES))
+    cap = a.centres if a.centres else (6 if a.quick else 0)
+    for fmt in fmts:
+        for fn in _trig_fns(a.fn):
+            for rnd in rnds:
+                f = ml.fragment(fn, fmt, rnd)
+                cell = f"{fn} {fmt.name} {sf.RND_NAMES[rnd]}"
+                for kind in ("tiny", "minnbr"):
+                    out, t = T.check_census_counts(f, kind)
+                    note(out)
+                    table = T.TINY_COUNTS if kind == "tiny" else T.MINNBR_COUNTS
+                    want = table[fmt.name][fn][0 if rnd in T.NEAREST_ATTRS
+                                               else 1]
+                    say(f"trig-family {cell} census {kind}: {t.n} arguments, "
+                        f"{len(t.marked)} marked (the study's {want}), "
+                        f"{len(t.wrong)} wrong unmarked, {len(t.guess_wrong)} "
+                        f"wrong guesses")
+                every = TF.centres(fmt, rnd, fn)
+                cen = every
+                if cap and len(cen) > cap:
+                    cen = cen[::max(1, len(cen) // cap)][:cap]
+                extra = []
+                if a.jmax and a.jmax > TF.MINNBR_J:
+                    extra = TF.minnbr_arguments(fmt, J=a.jmax)
+                out, st = T.check_family(f, cen, extra=extra, deep=True)
+                note(out)
+                say(f"trig-family {cell} family: {len(cen)} of {len(every)} "
+                    f"centres, {st['lanes']} lanes: theory says mark "
+                    f"{st['mark']} (marked {st['marked_mark']}), clear "
+                    f"{st['clear']} (marked {st['marked_clear']}), either "
+                    f"{st['either']} (marked {st['marked_either']}), gated "
+                    f"{st['gated']}; wrong unmarked {st['wrong']}, wrong "
+                    f"guesses {st['guess_wrong']}")
+                tiny = [c for c in cen if c[0] != "m"]
+                tiny = tiny[::max(1, len(tiny) // 40)][:40]
+                out, n = T.check_windows(f, tiny)
+                note(out)
+                say(f"trig-family {cell} windows: {len(tiny)} centres, {n} "
+                    f"lanes at the windows' exact edges (inner, half way, "
+                    f"outer, twice as far, either side), {len(out)} findings")
+                for (fn_, rn_, c, e, J), want in T.WINDOW_SCANS.items():
+                    if (fn_, rn_) == (fn, sf.RND_NAMES[rnd]) and \
+                            fmt.name == "fp64":
+                        out, (cnt, lo, hi) = T.check_scan(f, c, e, J, want)
+                        note(out)
+                        say(f"trig-family {cell} scan {c} 2^-{e} j = -{J}.."
+                            f"{J}: {cnt} marked, j = {lo} .. {hi} (the "
+                            f"study's {want[0]}, {want[1]} .. {want[2]})")
+    say(f"trig-family: {_memory_line()}")
+
+
 def cmd_all(a):
     s = a.scale
     ns = argparse.Namespace
@@ -833,6 +1051,68 @@ def main(argv=None):
     p.add_argument("--out", help="write the output here too; a path that "
                                  "exists is refused")
     p.set_defaults(fn_=cmd_trig_bound)
+    p = sub.add_parser("trig-budget")
+    p.add_argument("--fn", help="sin,cos,tan (all by default)")
+    p.add_argument("--formats", help="fp64,fp128,fp256 (all by default)")
+    p.add_argument("--regions", help="edge,near,zero,small,random (all by "
+                                     "default)")
+    p.add_argument("--n", type=int, default=0,
+                   help="lanes a region (default 12,000 at fp64, 3,000 at "
+                        "fp128 and fp256)")
+    p.add_argument("--seed", type=int, default=121,
+                   help="edge's seed; near, small, random and zero take one "
+                        "more each, in the study's order (its box runs: 121 "
+                        "to 125; its own runs 21 to 25)")
+    p.add_argument("--attrs-step", type=int, default=1,
+                   help="V under the five attributes on every this many "
+                        "lanes (default 1: every lane)")
+    p.add_argument("--no-attrs", action="store_true",
+                   help="leave the attributes' leg out")
+    p.add_argument("--guard", type=int, help="G, instead of the decided one")
+    p.add_argument("--quick", action="store_true",
+                   help="12 lanes a region, fp128 only by default")
+    p.add_argument("--out", help="write the output here too; a path that "
+                                 "exists is refused")
+    p.set_defaults(fn_=cmd_trig_budget)
+    p = sub.add_parser("trig-rate")
+    p.add_argument("--fn", help="sin,cos,tan (all by default)")
+    p.add_argument("--formats", help="fp64,fp128,fp256 (all by default)")
+    p.add_argument("--attrs", help="rne,rtz (by default)")
+    p.add_argument("--n", type=int, default=0,
+                   help="lanes a cell (default 50,000 at fp64, 20,000 at "
+                        "fp128 and fp256)")
+    p.add_argument("--seed", type=int, default=7,
+                   help="the sample's seed (the study's box run: 7)")
+    p.add_argument("--statistics", type=int, default=None,
+                   help="the independent statistics of the whole run, when "
+                        "the run is several processes (default: this "
+                        "process's own, two a function and format)")
+    p.add_argument("--alpha", type=float, default=H.RATE_ALPHA,
+                   help="the run's false-alarm rate")
+    p.add_argument("--sigmas", type=float, default=None,
+                   help="the plain line at this many sigma, no multiplicity")
+    p.add_argument("--quick", action="store_true",
+                   help="400 lanes a cell, fp128 only by default")
+    p.add_argument("--out", help="write the output here too; a path that "
+                                 "exists is refused")
+    p.set_defaults(fn_=cmd_trig_rate)
+    p = sub.add_parser("trig-family")
+    p.add_argument("--fn", help="sin,cos,tan (all by default)")
+    p.add_argument("--formats", help="fp64,fp128,fp256 (all by default)")
+    p.add_argument("--attrs", help="rne,rtz,rdn,rup,rmm (all by default)")
+    p.add_argument("--centres", type=int, default=0,
+                   help="at most this many centres a cell, spread over the "
+                        "list (0: all)")
+    p.add_argument("--jmax", type=int, default=0,
+                   help="the minimisers' neighbours out to |j| = this "
+                        "(the study's 4), classified by the theory")
+    p.add_argument("--quick", action="store_true",
+                   help="--centres 6, fp128 under rne and rtz by default")
+    p.add_argument("--out", help="write the output here too; a path that "
+                                 "exists is refused")
+    p.add_argument("--write", action="store_true")
+    p.add_argument("--check", action="store_true")
+    p.set_defaults(fn_=cmd_trig_family)
     p = sub.add_parser("all")
     p.add_argument("--scale", type=float, default=1.0)
     p.set_defaults(fn_=cmd_all)
