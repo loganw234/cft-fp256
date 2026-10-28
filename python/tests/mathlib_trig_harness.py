@@ -53,10 +53,37 @@ tan) and its pools are the exp pools, so these are beside them, not in them.
   audit        reduction_audit() on the routines' own builds over the slice and
                the products' binade edges: every claim of exactness holds
   constants    mathlib.check_trig_constants(), in process
+
+Parcel M2G2b adds, at the end of this file, the mark-rate law and the checks of
+the structured families (the budget is mathlib_trig_budget.py's, the theory of
+the families mathlib_trig_family.py's):
+
+  rate         the mark-rate law (the study's 3.4) with the bound inflated to
+               G' = 6 through bound_shift: the count of marks against the
+               sample's own expectation, each lane's 2^-G' times the
+               significand of its true value, judged by its exact two-sided
+               tail under the six's calibration (parcel RC: mathlib_harness's
+               RateSample), every unmarked lane right and every marked guess
+               right
+  family       the structured lanes (the committed centres and their
+               neighbours, the census arguments that are not centres, the deep
+               arguments): every lane the theory puts inside a window (d under
+               0.7 of the bound) marked, none outside (d over 1.3), none wrong
+               unmarked, every marked guess right (MB1's rule)
+  windows      each centre's window against the half-width the study's 3.5
+               computes: the neighbours inside it marked and outside it not, at
+               every format and attribute, and the marked run of the study's
+               measured windows
+  census_counts  the tiny family's and the minimisers' neighbours' marked
+               counts at the decided G equal the study's tables
+  family_list  the committed centres against a fresh generation by the theory
+  pool_marks   every structured mark of TRIG_POOL_MARKS is a centre, or inside
+               a window, of the generated families
 """
 
 import collections
 import functools
+import math
 import random
 import sys
 from fractions import Fraction
@@ -74,6 +101,7 @@ from cft_golden import softfloat as sf  # noqa: E402
 from cft_golden import transcend, vectors  # noqa: E402
 
 import mathlib_harness as H  # noqa: E402
+import mathlib_trig_family as TF  # noqa: E402
 
 FORMATS = (FP64, FP128, FP256)
 FUNCS = ml.TRIG_NAMES                   # sin, cos, tan
@@ -932,3 +960,516 @@ def check_shape(fmt, builds, tables=None, fragments=None):
                    f"functions and five attributes, the model's "
                    f"{t.union[name]}")
     return out
+
+
+# ---- the mark-rate law (parcel M2G2b; the study's 3.4) -----------------------------
+#
+# The law, as the six's (mathlib_harness, the comment above RATE_ALPHA; parcel
+# RC): with the bound inflated to 2^-(p + G') |V_h|, a lane is marked when its
+# true value lies within the bound of a boundary of the attribute (a float under
+# the directed three, a midpoint under rne and rmm), which with its place in the
+# rounding cell uniform has probability 2 Bv / ulp = 2^-G' m_V, m_V in [1, 2)
+# the significand of the true value. The count of marks is a sum of independent
+# Bernoulli(2^-G' m_V) lanes: the SAMPLE'S OWN mean and variance, the cell judged
+# by the exact two-sided tail of that count (H.RateSample.pmf and p_value), a
+# run of cells as the independent statistics it holds (rtz, rdn and rup mark
+# the same lanes, rne and rmm the same). The study's rate.py (3.4) drew the
+# lanes of the "random" region (every bit random, the exponent uniform from the
+# tiny gate to the range's top): sin and cos values crowd toward +-1, where
+# m_V is near 2, so their rate is 2.5% against tan's 2.25% at G' = 6 (the
+# study: sig(V) averages 1.59 and 1.44), not M1's n 2^(0.53 - G') for all.
+# These cells are a family of their own, judged by their own count
+# (rate_statistics of THEIR cells); they are never added to test_mathlib.py's
+# 90 (RATE_STATISTICS there is 36 statistics and is pinned).
+
+RATE_G = 6                              # G', the inflated bound's guard
+
+
+def rate_arguments(fmt, fn, n, seed):
+    """rate.py's sample: `n` arguments of the "random" region of sample() for
+    `seed`, those the main path answers for fn (all of them at fp64, fp128 and
+    fp256, whose gates are one exponent for sin, cos and tan)."""
+    return [x for x in sample(fmt, "random", n, seed) if in_main(fmt, fn, x)]
+
+
+def lane_cell(fmt, fn, x):
+    """(E, m, u) of the true value |f(x)| = m 2^E, m in [1, 2), and u in [0, 1)
+    its place in its p-bit rounding cell: mathlib_harness.lane_cell for sin, cos
+    and tan. mpmath at p + 96 bits (more internally for a large argument), x
+    exact, read from the `_mpf_` tuple."""
+    p = fmt.prec
+    u_ = sf.unpack(fmt, x)
+    with mpmath.workprec(p + 96):
+        xv = mpmath.ldexp(mpmath.mpf(u_.m), u_.e)
+        if u_.sign:
+            xv = -xv
+        _sign, man, ex, bc = {"sin": mpmath.sin, "cos": mpmath.cos,
+                              "tan": mpmath.tan}[fn](xv)._mpf_
+    if not man:
+        raise ValueError(f"{fn}({hex(x)}) is zero: not a main-path lane")
+    man = int(man)
+    m = man / (1 << (bc - 1))
+    u = (man & ((1 << (bc - p)) - 1)) / (1 << (bc - p)) if bc > p else 0.0
+    return ex + bc - 1, m, u
+
+
+class TrigRateSample(H.RateSample):
+    """H.RateSample over rate_arguments(): lane i is marked with probability
+    p_i = 2^-G' m_i (m_i the significand of its true value), independently of
+    the others; `mean`, `sigma`, `tails`, `p_value`, `rejection` and
+    `geometric_marks` are the six's, on this sample."""
+
+    def __init__(self, fmt, fn, n, seed, g_inflated=RATE_G):
+        self.fmt, self.fn, self.n, self.seed = fmt, fn, n, seed
+        self.g = g_inflated
+        self.xs = rate_arguments(fmt, fn, n, seed)
+        self.n = len(self.xs)
+        self.cells = [lane_cell(fmt, fn, x) for x in self.xs]
+        self.p = [m * 2.0 ** -g_inflated for _e, m, _u in self.cells]
+        self.mean = math.fsum(self.p)
+        self.var = math.fsum(q * (1.0 - q) for q in self.p)
+        self.sigma = math.sqrt(self.var)
+        self._pmf = None
+
+
+@functools.lru_cache(maxsize=None)
+def rate_sample(fmt, fn, n, seed, g_inflated=RATE_G):
+    """The TrigRateSample of these arguments, cached: it holds the clean
+    sample, which a planted fault does not touch, and the attributes of a cell
+    share it."""
+    return TrigRateSample(fmt, fn, n, seed, g_inflated)
+
+
+def tally(fmt, rnd, xs, results, fn):
+    """mathlib_harness.tally for sin, cos and tan: the lanes against
+    transcend.py (golden), a marked lane's guess counted, an unmarked lane
+    that differs in bits or flag word listed."""
+    t = H.Tally()
+    for x, (bits, fw) in zip(xs, results):
+        gb, gf = golden(fmt, rnd, x, fn)
+        t.n += 1
+        if fw & ~(MARK | 0x1F):
+            t.stray.append((x, fw))
+        if fw & MARK:
+            t.marked.append(x)
+            if (bits, fw & 0x1F) != (gb, gf):
+                t.guess_wrong.append((x, bits, gb))
+        elif (bits, fw) != (gb, gf):
+            t.wrong.append((x, (bits, fw), (gb, gf)))
+    return t
+
+
+# Faults of the TOOL, for the tests: check_rate(tool_plant=...).
+RATE_TOOL_PLANTS = {
+    "expectation_follows_build": "the law's expectation computed from the "
+                                 "build under test (its own bound word), so "
+                                 "that a faulted bound moves the centre with "
+                                 "the count and the check cannot see it",
+}
+
+
+def check_rate(fmt, rnd, fn, n=720, seed=7, g_inflated=RATE_G, plant=None,
+               statistics=1, alpha=H.RATE_ALPHA, sigmas=None,
+               tool_plant=None, evaluator=None, guard=None):
+    """[finding], stats: rate. The mark-rate law (the study's 3.4) held to the
+    sample's own count: the build of fn at fmt under rnd with the bound
+    inflated to 2^-(p + G') (bound_shift = G - G'), `plant` a fault of the
+    builder (TRIG_PLANTS), n arguments of the random region (rate_arguments),
+    each lane's probability 2^-G' m_V with m_V the significand of its true
+    value, the cell flagged when the exact two-sided tail of its count under
+    that law is under alpha / statistics (a run of cells judged together, as
+    mathlib_harness.check_rate: H.rate_statistics of the run's cells), or with
+    `sigmas` beyond that many sigma; and every unmarked lane right and every
+    marked guess counted, all right as the study found them.
+
+    The expectation is of the UNPLANTED bound: a planted bound or a silenced
+    mark changes the count and not the centre. `tool_plant` is a fault of this
+    tool (RATE_TOOL_PLANTS): the expectation taken from the build under test;
+    `evaluator` stands for ml.evaluate, for the test that doctors a lane;
+    `guard` the build's G (the decided one by default; parcel M2F's fp32 is
+    built at its own)."""
+    if tool_plant is not None and tool_plant not in RATE_TOOL_PLANTS:
+        raise ValueError(f"unknown tool plant {tool_plant!r}: "
+                         f"{', '.join(RATE_TOOL_PLANTS)}")
+    G = ml.GUARD[fmt.name] if guard is None else guard
+    b = ml.build(fn, fmt, rnd, guard=guard, bound_shift=G - g_inflated,
+                 plant=plant)
+    f = b.fragment()
+    smp = rate_sample(fmt, fn, n, seed, g_inflated)
+    if tool_plant == "expectation_follows_build":
+        # the build's own bound word, 2^-(p + G'') with G'' = G' (clean) or
+        # 40 more (bound_loose): the law of what the build is, not of what it
+        # was meant to be
+        brel = ml._dec(fmt, b.words[b.roles["BREL"][1]])
+        g_built = round(-math.log2(brel)) - fmt.prec
+        smp = rate_sample(fmt, fn, n, seed, g_built)
+    ev = evaluator or ml.evaluate
+    t = tally(fmt, rnd, smp.xs, [ev(f, x) for x in smp.xs], fn)
+    c, mean, sd = len(t.marked), smp.mean, smp.sigma
+    lo, hi = smp.tails(c)
+    p = min(1.0, 2.0 * min(lo, hi))
+    level = H.rate_level(statistics, alpha)
+    z = (c - mean) / sd if sd > 0 else 0.0
+    st = {"n": smp.n, "marked": c, "expected": mean, "sigma": sd, "z": z,
+          "p": p, "level": level, "statistics": statistics,
+          "class": H.rate_class(rnd), "wrong": len(t.wrong),
+          "guess_wrong": len(t.guess_wrong)}
+    where = f"rate: {fn} {fmt.name} {sf.RND_NAMES[rnd]} (G' = {g_inflated})"
+    out = []
+    if sigmas is not None:
+        if abs(z) > sigmas:
+            out.append(f"{where}: {c} of {smp.n} lanes marked, {mean:.1f} "
+                       f"expected (sigma {sd:.1f}): {z:+.1f} sigma")
+    elif p < level:
+        out.append(f"{where}: {c} of {smp.n} lanes marked, {mean:.1f} "
+                   f"expected (sigma {sd:.1f}): {z:+.1f} sigma, an exact "
+                   f"two-sided tail of {p:.2g}, under the {level:.2g} of this "
+                   f"run (alpha {alpha:g} over {statistics} statistics)")
+    if t.wrong:
+        out.append(f"{where}: {len(t.wrong)} unmarked lanes are wrong, first "
+                   f"{hex(t.wrong[0][0])}")
+    if t.guess_wrong:
+        out.append(f"{where}: {len(t.guess_wrong)} marked guesses are wrong, "
+                   f"first {hex(t.guess_wrong[0][0])}")
+    return out, st
+
+
+# ---- the structured families (parcel M2G2b; the study's 3.5) ----------------------
+#
+# The theory is mathlib_trig_family's; these are the checks that hold a
+# fragment, and the committed list, to it.
+
+# The study's counts (3.5, MEASURED by census.py at the decided G, every lane
+# against transcend.py: 0 wrong, every guess right): the lanes of the tiny
+# family (TF.census: 144, 384 and 880 arguments) a fragment marks, as
+# (under rne and rmm, under each of the directed three).
+TINY_COUNTS = {
+    "fp64": {"sin": (0, 2), "cos": (0, 14), "tan": (2, 0)},
+    "fp128": {"sin": (0, 84), "cos": (0, 244), "tan": (6, 78)},
+    "fp256": {"sin": (0, 270), "cos": (0, 740), "tan": (6, 264)},
+}
+# and of the minimisers' neighbours (TF.minnbr_arguments: binades 0 to 80, 40 to
+# 90 and 100 to 210, j = -4 .. 4: 729, 459 and 999 arguments): none under rne and
+# rmm, none for tan, none at fp64; the directed three mark sin 48 and cos 36 at
+# fp128, sin 156 and cos 254 at fp256
+MINNBR_COUNTS = {
+    "fp64": {"sin": (0, 0), "cos": (0, 0), "tan": (0, 0)},
+    "fp128": {"sin": (0, 48), "cos": (0, 36), "tan": (0, 0)},
+    "fp256": {"sin": (0, 156), "cos": (0, 254), "tan": (0, 0)},
+}
+CENSUS_SIZES = {("tiny", "fp64"): 144, ("tiny", "fp128"): 384,
+                ("tiny", "fp256"): 880, ("minnbr", "fp64"): 729,
+                ("minnbr", "fp128"): 459, ("minnbr", "fp256"): 999}
+# The study's measured windows (window.py, 3.5; fp64): (function, attribute,
+# centre c 2^-e, J) -> (marked, first j, last j) of the neighbours x0 + j,
+# j = -J .. J, the encoding stepped by j: the finer ulp below a power of two
+WINDOW_SCANS = {
+    ("sin", "rtz", 3, 25, 40): (21, -9, 11),
+    ("tan", "rne", 3, 26, 40): (43, -23, 19),
+    ("cos", "rtz", 1, 26, 400): (384, -255, 128),
+}
+
+
+def _centre_name(cen):
+    if cen[0] == "m":
+        return f"minimiser of 2^{cen[1]}{cen[2]:+d} ulp"
+    return f"{cen[0]} 2^-{cen[1]}"
+
+
+def family_lanes(fmt, rnd, fn, centres, G=None):
+    """[(x, label, what the theory demands)] for the centres, their negatives
+    and their neighbours (TF.neighbours: the first four inside the window, the
+    rest outside), each lane once."""
+    seen, out = set(), []
+    for cen in centres:
+        x0 = TF.argument(fmt, cen)
+        for x, lab in ([(x0, "centre"), (x0 | fmt.sign_mask, "centre (-)")]
+                       + TF.neighbours(fmt, fn, cen, G)):
+            if x not in seen:
+                seen.add(x)
+                out.append((x, f"{_centre_name(cen)} {lab}",
+                            TF.classify(fmt, rnd, x, G, fn)))
+    return out
+
+
+def check_family(f, centres, G=None, extra=(), deep=False, evaluator=None):
+    """[finding], stats: family. On the centres (TF.expand of the committed
+    entries, or a sample of them), their neighbours, `extra` (arguments, such as
+    the census's, that are not centres) and, with `deep`, TF.deep_arguments (the
+    family beyond the committed sample): the routine marks every lane the theory
+    says is inside a window (d under 0.7 of the bound), marks none that is
+    outside (d over 1.3) or gated, is right on every lane it does not mark, and
+    every marked guess is right. MB1's rule (VALIDATION.md). `evaluator` stands
+    for ml.evaluate, for the test that doctors a lane."""
+    fmt, rnd, fn = f.fmt, f.rnd, f.op
+    lanes = family_lanes(fmt, rnd, fn, centres, G)
+    seen = {x for x, _l, _c in lanes}
+    more = [(x, f"argument {hex(x)}") for x in extra]
+    if deep:
+        more += [(x, f"deep {lab}") for x, lab in TF.deep_arguments(fmt, fn, G)]
+    for x, lab in more:
+        if x not in seen:
+            seen.add(x)
+            lanes.append((x, lab, TF.classify(fmt, rnd, x, G, fn)))
+    ev = evaluator or ml.evaluate
+    res = [ev(f, x) for x, _l, _c in lanes]
+    out = []
+    st = {"lanes": len(lanes), "guess_wrong": 0, "wrong": 0}
+    for w in ("mark", "clear", "either", "gated"):
+        st[w] = st["marked_" + w] = 0
+    tag = f"family: {fn} {fmt.name} {sf.RND_NAMES[rnd]}"
+    for (x, lab, want), (bits, fw) in zip(lanes, res):
+        marked = bool(fw & MARK)
+        gb, gf = golden(fmt, rnd, x, fn)
+        st[want] += 1
+        if marked:
+            st["marked_" + want] += 1
+            if (bits, fw & 0x1F) != (gb, gf):
+                st["guess_wrong"] += 1
+        elif (bits, fw) != (gb, gf):
+            st["wrong"] += 1
+            out.append(f"{tag}: {lab} ({hex(x)}) is unmarked and wrong: got "
+                       f"({bits:#x}, {fw:#x}), want ({gb:#x}, {gf:#x})")
+        if want == "mark" and not marked:
+            out.append(f"{tag}: {lab} ({hex(x)}) is inside a window, d = "
+                       f"{TF.distance(fmt, rnd, x, G, fn):.3f}, and not marked")
+        if want in ("clear", "gated") and marked:
+            where = "gated" if want == "gated" else "outside every window"
+            out.append(f"{tag}: {lab} ({hex(x)}) is {where} and marked")
+    if st["guess_wrong"]:
+        out.append(f"{tag}: {st['guess_wrong']} marked guesses are wrong")
+    return out[:8], st
+
+
+def scan_window(f, x0, J, evaluator=None):
+    """window.py (the study's): x0 and its neighbours x0 + j, j = -J .. J (the
+    encoding stepped by j, so below a power of two the steps are the finer ulp):
+    ({j: marked}, wrong unmarked, wrong guesses), every lane against
+    transcend.py."""
+    fmt, rnd, fn = f.fmt, f.rnd, f.op
+    marked, wrong, guess_wrong = [], 0, 0
+    for j in range(-J, J + 1):
+        x = x0 + j
+        bits, fw = (evaluator or ml.evaluate)(f, x)
+        gb, gf = golden(fmt, rnd, x, fn)
+        if fw & MARK:
+            marked.append(j)
+            guess_wrong += (bits, fw & 0x1F) != (gb, gf)
+        elif (bits, fw) != (gb, gf):
+            wrong += 1
+    return marked, wrong, guess_wrong
+
+
+def check_scan(f, c, e, J, expect=None, G=None, evaluator=None):
+    """[finding], (marked, first, last): windows (the scan). The window of the centre
+    c 2^-e scanned lane by lane (scan_window), j = -J .. J: every unmarked lane
+    right and every marked guess right; the marked lanes ONE run around the
+    centre (a window is an interval); the run no wider than the half-width the
+    study's 3.5 computes allows, between (1 - d0) W and (1 + d0) W on a side
+    with the centre's d0 under 0.7, so at most 1.7 W + 1 either side; the run
+    reaching at least 0.3 W - 1 either side where the scan does (the theory's
+    window); and with `expect` (the study's measured window) the run (marked,
+    first j, last j) equal to it. `evaluator` as in check_family."""
+    fmt, rnd, fn = f.fmt, f.rnd, f.op
+    x0 = TF.argument(fmt, (c, e))
+    js, wrong, gw = scan_window(f, x0, J, evaluator)
+    W = float(TF.half_width(fmt, fn, x0, G))
+    where = f"windows: {fn} {fmt.name} {sf.RND_NAMES[rnd]} {c} 2^-{e} scan"
+    out = []
+    if wrong:
+        out.append(f"{where}: {wrong} unmarked lanes are wrong")
+    if gw:
+        out.append(f"{where}: {gw} marked guesses are wrong")
+    first, last = (min(js), max(js)) if js else (0, 0)
+    if js and len(js) != last - first + 1:
+        out.append(f"{where}: the marked lanes are not one run: {len(js)} "
+                   f"marked between j = {first} and {last}")
+    if js and (-first > 2 * W + 2 or last > 2 * W + 2):
+        out.append(f"{where}: the marked run j = {first} .. {last} is wider "
+                   f"than the computed half-width W = {W:.1f} allows (1.7 W)")
+    if J > 2 * W + 2 and js and not (-first >= 0.3 * W - 1
+                                     and last >= 0.3 * W - 1):
+        out.append(f"{where}: the marked run j = {first} .. {last} stops "
+                   f"short of 0.3 W = {0.3 * W:.1f} on one side")
+    if J > 2 * W + 2 and not js:
+        out.append(f"{where}: no lane of the window is marked, W = {W:.1f}")
+    if expect is not None and (len(js), first, last) != tuple(expect):
+        out.append(f"{where}: the marked run is {len(js)} lanes, j = {first} "
+                   f".. {last}; the study's {expect[0]}, j = {expect[1]} .. "
+                   f"{expect[2]}")
+    return out, (len(js), first, last)
+
+
+def check_windows(f, centres, G=None, evaluator=None, edges=None):
+    """[finding], n: windows. For each tiny centre (the minimisers' neighbours
+    are isolated lanes: no window) the window's EDGES on each side, exact by the
+    theory (TF.window_edges: the largest j whose lane the theory demands marked,
+    d under 0.7, and the smallest it calls clear, d over 1.3, by search and
+    bisection, whatever the width: 2^189 arguments at fp256): the lanes at the
+    inner edge and half way to it must be marked and the lanes at the outer
+    edge and twice as far unmarked, every unmarked lane right and every marked
+    guess right; and the half-width the study's 3.5 computes (TF.half_width)
+    must agree with the exact edges: the outer edge between 0.6 W and 2 W, the
+    inner at most 1.4 W (a centre with d0 under 0.7 puts them at (1 -+ d0) W
+    and (0.7 +- d0) W; a power of two has the finer ulp on one side, twice as
+    many steps). `edges` the window_edges to use, `evaluator` stands for
+    ml.evaluate, for the test that doctors a lane."""
+    fmt, rnd, fn = f.fmt, f.rnd, f.op
+    ev = evaluator or ml.evaluate
+    out, n = [], 0
+    for cen in centres:
+        if cen[0] == "m":
+            continue
+        x0 = TF.argument(fmt, cen)
+        W = float(TF.half_width(fmt, fn, x0, G))
+        fine = 2.0 if x0 & fmt.man_mask == 0 else 1.0
+        es = TF.window_edges(fmt, rnd, fn, x0, G) if edges is None else edges
+        for side, (j_in, j_out) in sorted(es.items()):
+            where = (f"windows: {fn} {fmt.name} {sf.RND_NAMES[rnd]} "
+                     f"{cen[0]} 2^-{cen[1]} {'above' if side > 0 else 'below'}")
+            if j_out is None:
+                out.append(f"{where}: no lane of a binade's worth of steps is "
+                           f"clear: the window has no outer edge")
+                continue
+            if not (0.6 * W / fine - 2 <= j_out <= 2.0 * W * fine + 2) or \
+                    j_in > 1.4 * W * fine + 2:
+                out.append(f"{where}: the computed half-width W = {W:.4g} "
+                           f"does not agree with the exact window, inner edge "
+                           f"j = {j_in}, outer edge j = {j_out}")
+            for j, must, label in ((j_in, True, "inner edge"),
+                                   (j_in // 2, True, "half way to it"),
+                                   (j_out, False, "outer edge"),
+                                   (min(2 * j_out, 1 << fmt.man_w), False,
+                                    "twice as far")):
+                x = x0 + side * j
+                bits, fw = ev(f, x)
+                gb, gf = golden(fmt, rnd, x, fn)
+                n += 1
+                marked = bool(fw & MARK)
+                if must and not marked:
+                    out.append(f"{where}: the lane at the {label} (j = {j}, "
+                               f"d = {TF.distance(fmt, rnd, x, G, fn):.3f}) is "
+                               f"inside the window and not marked")
+                if not must and marked:
+                    out.append(f"{where}: the lane at the {label} (j = {j}, "
+                               f"d = {TF.distance(fmt, rnd, x, G, fn):.3f}) is "
+                               f"outside the window and marked")
+                if marked and (bits, fw & 0x1F) != (gb, gf):
+                    out.append(f"{where}: the marked guess at the {label} "
+                               f"(j = {j}) is wrong")
+                if not marked and (bits, fw) != (gb, gf):
+                    out.append(f"{where}: the unmarked lane at the {label} "
+                               f"(j = {j}) is wrong")
+    return out[:8], n
+
+
+def census_arguments(fmt, kind):
+    """The study's census as arguments: "tiny" (TF.census) or "minnbr"
+    (TF.minnbr_arguments)."""
+    return TF.census(fmt) if kind == "tiny" else TF.minnbr_arguments(fmt)
+
+
+def check_census_counts(f, kind, want=None, xs=None, evaluator=None):
+    """[finding], Tally: census_counts. The study's census of the family
+    `kind` ("tiny": c 2^-e, c <= 16; "minnbr": the minimisers' neighbours)
+    through the fragment marks the counted lanes at the decided G (`want` =
+    (under rne and rmm, under the directed three); TINY_COUNTS and
+    MINNBR_COUNTS), every lane the theory demands marked is among them, none
+    the theory calls clear, and no unmarked lane is wrong. `evaluator` as in
+    check_family."""
+    fmt, rnd, fn = f.fmt, f.rnd, f.op
+    xs = census_arguments(fmt, kind) if xs is None else xs
+    if want is None:
+        want = (TINY_COUNTS if kind == "tiny" else MINNBR_COUNTS)[fmt.name][fn]
+    expect = want[0] if rnd in NEAREST_ATTRS else want[1]
+    ev = evaluator or ml.evaluate
+    t = tally(fmt, rnd, xs, [ev(f, x) for x in xs], fn)
+    where = f"census_counts: {kind} {fn} {fmt.name} {sf.RND_NAMES[rnd]}"
+    out = []
+    if len(t.marked) != expect:
+        out.append(f"{where}: {len(t.marked)} of the census's {t.n} arguments "
+                   f"are marked, the study's count is {expect}")
+    if t.wrong:
+        out.append(f"{where}: {len(t.wrong)} census lanes are wrong unmarked, "
+                   f"first {hex(t.wrong[0][0])}")
+    if t.guess_wrong:
+        out.append(f"{where}: {len(t.guess_wrong)} marked guesses are wrong")
+    marked = set(t.marked)
+    must = [x for x in xs if TF.classify(fmt, rnd, x, None, fn) == "mark"]
+    missing = [x for x in must if x not in marked]
+    if missing:
+        out.append(f"{where}: {len(missing)} lanes the theory demands marked "
+                   f"(d under 0.7) are not, first {_hexes(missing)}")
+    clear = [x for x in marked
+             if TF.classify(fmt, rnd, x, None, fn) in ("clear", "gated")]
+    if clear:
+        out.append(f"{where}: {len(clear)} marked lanes the theory calls "
+                   f"clear (d over 1.3), first {_hexes(clear)}")
+    return out, t
+
+
+NEAREST_ATTRS = (RNE, RMM)
+
+
+def check_family_list(committed, generated=None):
+    """[finding]: family_list. The committed entries (mathlib_trig_family.
+    TRIG_FAMILY, or a copy a test has tampered with) are exactly what the
+    theory generates, for every function, format and attribute."""
+    generated = TF.generate() if generated is None else generated
+    out = []
+    for fn in sorted(set(committed) | set(generated)):
+        cfn, gfn = committed.get(fn, {}), generated.get(fn, {})
+        for fmt_name in sorted(set(cfn) | set(gfn)):
+            for rnd_name in sorted(set(cfn.get(fmt_name, {}))
+                                   | set(gfn.get(fmt_name, {}))):
+                have = cfn.get(fmt_name, {}).get(rnd_name)
+                want = gfn.get(fmt_name, {}).get(rnd_name)
+                if have != want:
+                    hc = set(TF.expand(have or ()))
+                    wc = set(TF.expand(want or ()))
+                    miss = sorted(wc - hc, key=str)
+                    extra = sorted(hc - wc, key=str)
+                    out.append(f"family_list: the committed centres of {fn} "
+                               f"{fmt_name} {rnd_name} are not the theory's: "
+                               f"missing {miss[:3]}, extra {extra[:3]}")
+    return out
+
+
+def check_pool_marks(marks=None, committed=None, generated=None):
+    """[finding], explained: pool_marks. Every structured mark of the radian
+    pools (TRIG_POOL_MARKS, parcel M2G2a's committed list of the lanes the
+    pools mark that are not past the range) is a centre of the generated
+    family of its function, format and attribute, or inside a centre's window
+    (within the computed half-width W of a listed centre, in the encoding), or a
+    lane the theory demands marked (d under 0.7). A mark the theory does not
+    explain is a finding. `committed` the entries to look in (the generated
+    ones by default: the list under test is family_list's)."""
+    marks = TRIG_POOL_MARKS if marks is None else marks
+    fam = TF.generate() if committed is None and generated is None else \
+        (committed if generated is None else generated)
+    out, explained = [], 0
+    for fn, fmt_name, rnd_name, lane, _reason in marks:
+        fmt, rnd = BY_NAME[fmt_name], RND_BY_NAME[rnd_name]
+        ax = lane & ~fmt.sign_mask
+        cen = [c for c in TF.expand(fam[fn][fmt_name][rnd_name])
+               if c[0] != "m"]
+        args = {TF.argument(fmt, c): c for c in cen}
+        why = None
+        if ax in args:
+            why = "centre"
+        else:
+            for x0, c in args.items():
+                W = float(TF.half_width(fmt, fn, x0))
+                if abs(ax - x0) <= W:
+                    why = f"inside the window of {c[0]} 2^-{c[1]}"
+                    break
+        if why is None and TF.classify(fmt, rnd, ax, None, fn) == "mark":
+            why = "the theory demands the mark"
+        if why is None:
+            out.append(f"pool_marks: {fn} {fmt_name} {rnd_name} {hex(lane)} "
+                       f"is marked in the pools and is not a centre, or inside "
+                       f"a window, of the generated family (d = "
+                       f"{TF.distance(fmt, rnd, ax, None, fn):.3g})")
+        else:
+            explained += 1
+    return out, explained

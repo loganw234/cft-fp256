@@ -41,6 +41,9 @@ from cft_golden import mathlib as ml  # noqa: E402
 from cft_golden import softfloat as sf  # noqa: E402
 from cft_golden.formats import FpFormat  # noqa: E402
 
+import mathlib_harness as H  # noqa: E402
+import mathlib_trig_budget as TB  # noqa: E402
+import mathlib_trig_family as TF  # noqa: E402
 import mathlib_trig_harness as T  # noqa: E402
 
 PYTHON_DIR = pathlib.Path(__file__).resolve().parents[1]
@@ -74,8 +77,17 @@ TRIG_PLANT_NAMES = {
     "sign_after_rounding", "range_unmarked", "cos_zero_operand",
     "inf_flag_dropped"}
 REDUCTION_PLANT_NAMES = {"chunk", "window", "mid_inexact", "exact_add"}
+# the eight of parcel M2G2a and the five of parcel M2G2b a fragment's fault can
+# turn red (family_list and pool_marks hold data, not a fragment: their plants
+# are the tool's, TOOL_PLANTED below)
 CHECKS = ("pools", "seq", "bound", "structured", "specials", "shape", "audit",
-          "constants")
+          "constants", "budget", "rate", "family", "windows", "census_counts")
+# the trig rate cells: 720 lanes at seed 7 where the expected count is 16 to 19
+# (a silenced mark is then 4 sigma under, an exact two-sided tail of about 1e-7,
+# MB2's rule), judged as the 18 statistics they are (3 functions, 3 formats, 2
+# classes of attribute) and never added to test_mathlib.py's 90
+RATE_N, RATE_SEED = 720, 7
+RATE_STATISTICS = H.rate_statistics(FUNCS, FORMATS, (RNE, RTZ))
 
 
 @functools.lru_cache(maxsize=None)
@@ -156,7 +168,29 @@ def run_check(check, plant, fmt, fn, rnd):
                            else build_of(n, fmt, r))
                   for n in FUNCS for r in RND}
         return T.check_shape(fmt, builds)
+    # parcel M2G2b's five
+    if check == "budget":
+        return TB.check_budget(b, region_lanes(fmt))[0]
+    if check == "rate":
+        return T.check_rate(fmt, rnd, fn, RATE_N, RATE_SEED, plant=plant,
+                            statistics=RATE_STATISTICS)[0]
+    if check == "family":
+        return T.check_family(f, committed_centres(fn, fmt, rnd))[0]
+    if check == "windows":
+        return T.check_windows(f, [first_centre(fn, fmt, rnd)])[0]
+    if check == "census_counts":
+        return T.check_census_counts(f, "tiny")[0]
     raise ValueError(check)
+
+
+def committed_centres(fn, fmt, rnd):
+    """The expanded centres of the committed list for the cell."""
+    return TF.expand(TF.TRIG_FAMILY[fn][fmt.name][rid(rnd)])
+
+
+def first_centre(fn, fmt, rnd):
+    """The cell's first tiny centre (c, e) of the committed list."""
+    return next(c for c in committed_centres(fn, fmt, rnd) if c[0] != "m")
 
 
 # =====================================================================
@@ -689,42 +723,53 @@ PLANTED = [
      {"bound": ("sin", RNE), "audit": ("sin", RNE)}),
     ("bound_loose", FP64,
      {"structured": ("cos", RTZ), "bound": ("sin", RNE),
-      "constants": ("sin", RNE), "shape": ("sin", RNE)},
+      "constants": ("sin", RNE), "shape": ("sin", RNE),
+      "budget": ("sin", RNE), "rate": ("cos", RTZ), "family": ("cos", RTZ),
+      "windows": ("cos", RTZ), "census_counts": ("cos", RTZ)},
      {"pools": ("sin", RNE), "specials": ("sin", RNE),
       "audit": ("sin", RNE)}),
     ("mark_silenced", FP64,
      {"structured": ("cos", RTZ), "seq": ("cos", RTZ),
-      "shape": ("cos", RTZ)},
+      "shape": ("cos", RTZ), "rate": ("cos", RTZ), "family": ("cos", RTZ),
+      "windows": ("cos", RTZ), "census_counts": ("cos", RTZ)},
      {"pools": ("cos", RTZ), "bound": ("cos", RTZ), "specials": ("cos", RTZ),
-      "constants": ("cos", RTZ), "audit": ("cos", RTZ)}),
+      "constants": ("cos", RTZ), "audit": ("cos", RTZ),
+      "budget": ("cos", RTZ)}),
     ("coef", FP64,
      {"pools": ("sin", RNE), "bound": ("sin", RNE),
-      "constants": ("sin", RNE), "shape": ("sin", RNE)},
+      "constants": ("sin", RNE), "shape": ("sin", RNE),
+      "budget": ("sin", RNE)},
      {"structured": ("cos", RTZ), "specials": ("sin", RNE),
-      "audit": ("sin", RNE)}),
+      "audit": ("sin", RNE), "census_counts": ("sin", RTZ)}),
     ("newton_short", FP64,
      {"structured": ("tan", RNE), "bound": ("tan", RNE),
-      "shape": ("tan", RNE)},
+      "shape": ("tan", RNE), "budget": ("tan", RNE), "family": ("tan", RNE),
+      "windows": ("tan", RNE), "census_counts": ("tan", RNE)},
      {"pools": ("tan", RNE), "specials": ("tan", RNE),
-      "constants": ("tan", RNE), "audit": ("tan", RNE)}),
+      "constants": ("tan", RNE), "audit": ("tan", RNE),
+      "rate": ("tan", RNE)}),
     ("tiny_gate_off", FP64,
      {"pools": ("sin", RNE), "specials": ("sin", RNE),
       "constants": ("sin", RNE), "shape": ("sin", RNE)},
      {"structured": ("cos", RTZ), "bound": ("sin", RNE),
-      "audit": ("sin", RNE)}),
+      "audit": ("sin", RNE), "budget": ("sin", RNE), "rate": ("sin", RNE)}),
     ("rl_dropped", FP64,
-     {"pools": ("sin", RNE), "bound": ("sin", RNE), "shape": ("sin", RNE)},
+     {"pools": ("sin", RNE), "bound": ("sin", RNE), "shape": ("sin", RNE),
+      "budget": ("sin", RNE)},
      {"structured": ("cos", RTZ), "constants": ("sin", RNE),
-      "audit": ("sin", RNE)}),
+      "audit": ("sin", RNE), "family": ("sin", RTZ)}),
     ("zl_dropped", FP64,
-     {"pools": ("sin", RNE), "bound": ("sin", RNE), "shape": ("sin", RNE)},
+     {"pools": ("sin", RNE), "bound": ("sin", RNE), "shape": ("sin", RNE),
+      "budget": ("sin", RNE)},
      {"structured": ("cos", RTZ), "specials": ("sin", RNE),
-      "constants": ("sin", RNE), "audit": ("sin", RNE)}),
+      "constants": ("sin", RNE), "audit": ("sin", RNE),
+      "windows": ("sin", RTZ)}),
     ("clamp_off", FP64,
      {"pools": ("sin", RTZ), "constants": ("sin", RTZ),
       "shape": ("sin", RTZ)},
      {"structured": ("cos", RTZ), "bound": ("sin", RTZ),
-      "specials": ("sin", RTZ), "audit": ("sin", RTZ)}),
+      "specials": ("sin", RTZ), "audit": ("sin", RTZ),
+      "family": ("sin", RTZ), "rate": ("sin", RTZ)}),
     ("sign_after_rounding", FP64,
      {"pools": ("sin", RDN), "bound": ("sin", RDN), "specials": ("sin", RDN),
       "shape": ("sin", RDN)},
@@ -1471,3 +1516,792 @@ def test_the_trig_commands_run_at_small_sizes_and_refuse_an_existing_out(
         done.stdout + done.stderr)
     assert _runs("trig-pools", "--formats", "fp32").returncode != 0
     assert _runs("trig-bound", "--fn", "exp").returncode != 0
+
+
+# =====================================================================
+# parcel M2G2b: the budget (python/tests/mathlib_trig_budget.py)
+# =====================================================================
+
+# The model's own figures (docs/studies/m2/budget.*.out.txt, READ), as it
+# printed them: fp64 sin edge at seed 21, 1,500 lanes (the control), fp128 sin
+# edge and fp256 tan edge at seed 21, 400 lanes.
+MODEL = {
+    ("sin", "fp64"): dict(n=1500, rounding=126, Emax=0.03164, Mmax=0.0298,
+                          resid=0.00116, S_obs=0.03382, S_cap=0.0405,
+                          bound=0.07031),
+    ("tan", "fp256"): dict(n=400, rounding=173, Emax=0.1428, Mmax=0.08281,
+                           resid=1.47e-57, S_obs=0.06214, S_cap=0.06251,
+                           bound=0.1453),
+}
+# the control's ten largest capacities: (instruction, opcode, phase, capacity,
+# observed), the model's
+CONTROL_TOP = [
+    (288, "fma", "C-tail", "1.482e-02", "1.418e-02"),
+    (362, "fma", "sincos", "3.631e-03", "3.054e-03"),
+    (194, "fma", "red-scale", "3.380e-03", "2.211e-03"),
+    (357, "sub", "C-head", "2.762e-03", "2.762e-03"),
+    (364, "fma", "sincos", "2.762e-03", "1.341e-03"),
+    (193, "fma", "red-scale", "2.480e-03", "1.974e-03"),
+    (360, "fma", "sincos", "1.924e-03", "1.668e-03"),
+    (353, "fma", "C-head", "1.381e-03", "9.013e-04"),
+    (182, "add", "red-lower", "1.256e-03", "4.207e-04"),
+    (183, "add", "red-lower", "1.256e-03", "8.622e-04")]
+# a lane (fp64 sin, the edge region at seed 21) whose error is 0.0158 Bv against
+# a method error of 0.0030: with the capacities dropped from the bound it
+# passes it
+LANE_PAST_M = 0x4002d97c7f3321cf
+
+
+def _same_digits(s, want):
+    """The summary's figures to the digits the model printed them."""
+    for k, v in want.items():
+        if k == "n":
+            continue
+        got = s[k]
+        assert (got == v) if k == "rounding" else \
+            (f"{got:.3g}" == f"{v:.3g}" if k == "resid"
+             else f"{got:.4g}" == f"{v:.4g}"), (k, got, v)
+
+
+def test_the_budget_control_reproduces_the_models_fp64_sin_edge():
+    """The model's own lanes (m2measure.py's sample, ported by parcel M2G2a:
+    seed 21, 1,500 lanes of the edge region), fp64 sin under rne at G = 44: the
+    bound 0.07031 Bv, with M, the capacities, the rounding instructions, the
+    residual and the ten largest capacities (instruction, opcode and phase) the
+    model's to their digits (budget.fp64-sin-edge.out.txt). MEASURED at M2G2b:
+    the same for all 15 fp64 cells (5 regions, seeds 21 to 25, 1,500 lanes) and
+    all 30 cells at fp128 and fp256 (400 lanes); see the entry."""
+    b = build_of("sin", FP64, RNE)
+    want = MODEL[("sin", "fp64")]
+    s, bud = TB.budget_of(b, T.sample(FP64, "edge", want["n"], 21))
+    _same_digits(s, want)
+    assert [(i, nm, ph, f"{c:.3e}", f"{o:.3e}")
+            for i, nm, ph, c, o in bud.largest(10)] == CONTROL_TOP
+    assert s["lanes"] == 1500 and s["skipped"] == 0
+    assert TB.judge(s, "budget: control", expect={
+        k: want[k] for k in ("rounding", "Mmax", "S_cap", "bound")}) == []
+    assert s["bound"] < 0.1 and s["resid"] < 0.002 < s["bound"]
+
+
+@pytest.mark.parametrize("fn,fmt", (("tan", FP256),), ids=("tan-fp256",))
+def test_the_budget_at_fp256_is_the_models(fn, fmt):
+    """The model's figures at seed 21, 400 lanes of the edge region (the
+    study's table: 0.145 for tan at fp256; the fp128 sin edge, 0.07291, and the
+    other cells are in the entry). The instruction
+    numbers of the largest capacities are one higher than the model's after
+    the reduction's range compare, which M2G1 builds early (the one instruction
+    M2G2a moved to the phase `classify`). The fp256 tan edge is the region
+    whose bound is NEAR its measured error (the study's 3.6, item 7, asks for
+    it): 0.1453 Bv against a largest error found of 0.1428, within 2%."""
+    b = build_of(fn, fmt, RNE)
+    want = MODEL[(fn, fmt.name)]
+    s, bud = TB.budget_of(b, T.sample(fmt, "edge", want["n"], 21))
+    _same_digits(s, want)
+    assert TB.judge(s, "budget: x") == []
+    if fn == "tan":
+        assert s["Emax"] <= s["bound"] <= 1.02 * s["Emax"]
+
+
+@pytest.mark.parametrize("fmt", FORMATS, ids=fid)
+@pytest.mark.parametrize("fn", FUNCS)
+def test_the_budget_check_over_a_small_sample_of_each_region(fn, fmt):
+    """The check `budget` at 5 lanes of each of the five regions (seed 11) of
+    each function and format: the bound under 1 (the study's 3.2: at most 0.1
+    at fp64, 0.073 at fp128 and 0.17 at fp256), no lane past it, the residual
+    stated, the sweep reaching the roundings, and V bit-identical across the
+    five attributes on every lane, so that the rne budget is every attribute's
+    (parcel M2X's finding for the triple word, here for the double)."""
+    b = build_of(fn, fmt, RNE)
+    attrs = {r: build_of(fn, fmt, r) for r in RND}
+    xs = region_lanes(fmt, n=5, seed=11)
+    out, s = TB.check_budget(b, xs, "small", attrs=attrs)
+    assert out == [], out
+    assert s["lanes"] == 25 and s["attr_lanes"] == 25 and s["attr_differ"] == 0
+    assert 0 < s["Emax"] <= s["bound"] < 0.2 and s["resid"] < 0.02
+    assert s["rounding"] > 80 and s["S_obs"] > 0
+
+
+def test_each_leg_of_budget_can_fail_alone():
+    """judge() on a summary with one figure doctored: the bound, the lane, the
+    residual (the bound with it added), the reach of the sweep, the model's
+    figures and an empty sample each fail alone, one finding each."""
+    base = dict(lanes=10, rounding=126, Emax=0.03, Mmax=0.03, S_obs=0.03,
+                S_cap=0.04, bound=0.07, resid=0.001, by_phase={})
+    where = "budget: x"
+    assert TB.judge(base, where) == []
+    for text, change in (
+            ("not under 1", dict(bound=1.2, Mmax=1.16)),
+            ("is past the budget's bound", dict(Emax=0.08)),
+            ("takes the bound 0.07 to 1.02, not under 1", dict(resid=0.95)),
+            ("reached no rounding instruction", dict(S_obs=0.0)),
+            ("reached no rounding instruction", dict(rounding=0)),
+            ("no lane of the sample is on the main path", dict(lanes=0))):
+        out = TB.judge(dict(base, **change), where)
+        assert len(out) == 1 and text in out[0] \
+            and out[0].startswith("budget: "), (text, out)
+    expect = dict(rounding=126, Mmax=0.03, S_cap=0.04, bound=0.07)
+    assert TB.judge(base, where, expect) == []
+    for k, v in (("rounding", 127), ("Mmax", 0.0301), ("S_cap", 0.0401),
+                 ("bound", 0.0701)):
+        out = TB.judge(base, where, dict(expect, **{k: v}))
+        assert len(out) == 1 and "differs from the model's figures" in out[0] \
+            and k in out[0], (k, out)
+
+
+def test_each_tool_plant_of_the_budget_is_red_in_its_own_leg():
+    """The defects of the model's own tool (the study's 3.6, items 6 and 7) and
+    a dropped capacity, each red where it should be and nowhere else, on
+    lanes the golden stage affords; a plant that could not act is refused by
+    name. seed_source_frozen: tan's bound 2^+46.5 Bv at fp64 against a largest
+    error found of 0.014 (the model's 2^+46.7); phases_unfrozen: 2.8e297 here
+    (the model's 2^+822 on its lanes); negation_as_data: the sweep stops at V's
+    sign, no capacity; capacities_dropped: M alone, one lane's error past it."""
+    xs = region_lanes(FP64)
+    tan, sin = build_of("tan", FP64, RNE), build_of("sin", FP64, RNE)
+    out, s = TB.check_budget(tan, xs, plant="seed_source_frozen")
+    assert len(out) == 1 and "not under 1" in out[0] and s["bound"] > 1e13 \
+        and s["Emax"] < 0.1
+    out, s = TB.check_budget(sin, xs, plant="phases_unfrozen")
+    assert len(out) == 1 and "not under 1" in out[0] and s["bound"] > 1e100 \
+        and s["Emax"] < 0.1
+    out, s = TB.check_budget(sin, xs, plant="negation_as_data")
+    assert len(out) == 1 and "reached no rounding instruction" in out[0] \
+        and s["S_obs"] == 0 and s["bound"] < 0.1
+    out, s = TB.check_budget(sin, [LANE_PAST_M], plant="capacities_dropped")
+    assert len(out) == 1 and "is past the budget's bound" in out[0] \
+        and s["S_cap"] == 0 and s["Emax"] > 1.001 * s["bound"]
+    assert TB.check_budget(sin, [LANE_PAST_M])[0] == []
+    # none acts where it cannot
+    with pytest.raises(ValueError, match="does not apply to sin at fp64: it "
+                       "has no RECIP_SEED"):
+        TB.check_budget(sin, xs, plant="seed_source_frozen")
+    with pytest.raises(ValueError, match="unknown tool plant 'capacities'"):
+        TB.TrigBudget(sin, plant="capacities")
+    assert set(TB.TOOL_PLANTS) == {"seed_source_frozen", "phases_unfrozen",
+                                   "negation_as_data", "capacities_dropped"}
+
+
+def test_the_attributes_leg_sees_a_directed_rounding_before_v():
+    """A MUL of the polynomial (the first of `sincos`) rounded under the
+    program's attribute instead of rne: V differs under rtz, rdn and rup on a
+    third of the lanes, and the leg names the lane and the attribute; the clean
+    builds are bit-identical, and under rne the plant is refused by name."""
+    xs = region_lanes(FP64)
+    for rnd in (RTZ, RDN, RUP):
+        clean = {RNE: build_of("sin", FP64, RNE), rnd: build_of("sin", FP64,
+                                                                rnd)}
+        assert TB.check_attributes(clean, xs)[0] == []
+        bad = {RNE: clean[RNE], rnd: TB.with_directed_before_v(clean[rnd])}
+        out, (n, differ) = TB.check_attributes(bad, xs)
+        assert len(out) == 1 and out[0].startswith("budget: sin fp64 random")\
+            and f"({rid(rnd)} against rne)" in out[0] and 0 < differ < n
+    with pytest.raises(ValueError, match="does not apply under rne"):
+        TB.with_directed_before_v(build_of("sin", FP64, RNE))
+
+
+def test_the_analyzer_takes_a_triple_word_and_a_frozen_phase_as_arguments():
+    """Room for parcel M2F: V's words from the probes (V0, V1, V2 for a triple
+    word, as M2X's tw32_budget.py seeds them) and the frozen phases an
+    argument; a build with neither is refused by name."""
+    b = build_of("sin", FP64, RNE)
+    an = TB.TrigAnalyzer(b)
+    assert an.seeds == ("Vh", "Vl") and an.exact_phases == TB.EXACT_PHASES
+    assert TB.TrigAnalyzer(b, exact_phases=("red-setup",)).exact_phases == \
+        ("red-setup",)
+    assert len(TB.TrigAnalyzer(b, exact_phases=()).dfeed) < len(an.dfeed)
+    import copy
+    three = copy.copy(b)
+    three.probes = dict(b.probes, V0=b.probes["Vh"], V1=b.probes["Vl"],
+                        V2=b.probes["Vl"])
+    assert TB.TrigAnalyzer(three).seeds == ("V0", "V1", "V2")
+    none = copy.copy(b)
+    none.probes = {k: v for k, v in b.probes.items() if k != "Bv"}
+    with pytest.raises(ValueError, match=r"has no budget: its Build keeps no "
+                       r"probe \['Bv'\]"):
+        TB.TrigAnalyzer(none)
+
+
+# =====================================================================
+# parcel M2G2b: the mark-rate law (check `rate`)
+# =====================================================================
+
+@pytest.mark.parametrize("rnd", (RNE, RTZ), ids=rid)
+@pytest.mark.parametrize("fmt", FORMATS, ids=fid)
+@pytest.mark.parametrize("fn", FUNCS)
+def test_the_trig_mark_rate_law_in_its_eighteen_cells(fn, fmt, rnd):
+    """The bound inflated to 2^-(p+6) through bound_shift, 720 arguments of the
+    random region (seed 7): the count of marks has an exact two-sided tail,
+    under the sample's own law (each lane 2^-6 times the significand of its
+    true value), of at least alpha / 18 (the 18 cells are 18 statistics: rtz,
+    rdn and rup mark the same lanes, rne and rmm the same), every unmarked lane
+    is right and every marked guess counted, all right as the study found. 720
+    lanes expect 16 to 19 marks, so a silenced mark is 4 sigma under (MB2's
+    rule). These cells are a family of their own, not added to
+    test_mathlib.py's 90."""
+    out, st = T.check_rate(fmt, rnd, fn, RATE_N, RATE_SEED,
+                           statistics=RATE_STATISTICS)
+    assert out == [], st
+    assert st["wrong"] == 0 and st["guess_wrong"] == 0
+    assert st["statistics"] == 18 and st["level"] == H.RATE_ALPHA / 18
+    assert st["p"] >= H.rate_level(RATE_STATISTICS)
+    assert st["expected"] >= 16.0 and st["expected"] / st["sigma"] >= 4.0
+    assert st["n"] == RATE_N
+
+
+def test_the_trig_rate_sample_is_the_studys_and_its_expectation_the_samples_own():
+    """rate.py's sample (seed 3, 2,000 arguments of the random region): the
+    expectation the study printed, 49.8 for sin and 45.1 for tan at fp64, from
+    the lanes' own significands (cos 50.4 here, 50.3 there: the study took the
+    significand of V_h, 1 for a cos within half an ulp of 1, where the cell
+    is the one below 1 and the law's m is 2). Their counts are the study's
+    (MEASURED here, 34 and 46, 68 and 40, 41 and 46 at fp64: the entry)."""
+    for fn, want in (("sin", 49.8), ("cos", 50.4), ("tan", 45.1)):
+        smp = T.rate_sample(FP64, fn, 2000, 3)
+        assert smp.n == 2000 and abs(smp.mean - want) < 0.05, (fn, smp.mean)
+    assert abs(T.rate_sample(FP64, "sin", 2000, 3).sigma - 7.0) < 0.05
+    # every lane's m_V is in [1, 2) and its place in the cell in [0, 1)
+    smp = T.rate_sample(FP64, "tan", 300, 5)
+    assert all(1 <= m < 2 and 0 <= u < 1 for _e, m, u in smp.cells)
+    assert smp.mean == pytest.approx(sum(m for _e, m, _u in smp.cells) / 64)
+
+
+def test_the_trig_rate_expectation_does_not_follow_the_planted_build():
+    """The law is of the unplanted bound (the six's test of the same name): a
+    planted bound or a silenced mark changes the count and not the centre. The
+    tool plant that takes the expectation from the build under test makes the
+    check blind to bound_loose: the centre follows the count to 1e-11 of a
+    mark."""
+    _o, clean = T.check_rate(FP64, RTZ, "cos", 300, 5)
+    for plant in ("bound_loose", "mark_silenced"):
+        _o, st = T.check_rate(FP64, RTZ, "cos", 300, 5, plant=plant)
+        assert st["expected"] == clean["expected"] and \
+            st["sigma"] == clean["sigma"] and st["marked"] != clean["marked"]
+    kw = dict(plant="bound_loose")
+    out, st = T.check_rate(FP64, RTZ, "cos", 400, RATE_SEED, **kw)
+    assert len(out) == 1 and out[0].startswith("rate: ")
+    blind, bst = T.check_rate(FP64, RTZ, "cos", 400, RATE_SEED,
+                              tool_plant="expectation_follows_build", **kw)
+    assert blind == [] and bst["marked"] == 0 and bst["expected"] < 1e-9 \
+        and st["expected"] > 9
+    ok, _ = T.check_rate(FP64, RTZ, "cos", 400, RATE_SEED,
+                         tool_plant="expectation_follows_build")
+    assert ok == []                              # a clean build is no worse
+    with pytest.raises(ValueError, match="unknown tool plant 'follows'"):
+        T.check_rate(FP64, RTZ, "cos", 10, 5, tool_plant="follows")
+
+
+def test_each_leg_of_rate_can_fail_alone():
+    """The count (a silenced mark: one finding, the tail, every lane right), the
+    plain sigma line (the same, and none for a clean build at a wide line),
+    an unmarked lane wrong (its bits changed, its flag word not: the count is
+    the same) and a marked guess wrong (the first marked lane's bits changed)."""
+    kw = dict(fmt=FP64, rnd=RTZ, fn="cos", n=400, seed=RATE_SEED)
+    out, st = T.check_rate(plant="mark_silenced", **kw)
+    assert len(out) == 1 and "an exact two-sided tail" in out[0] \
+        and st["marked"] == 0 and st["wrong"] == st["guess_wrong"] == 0
+    assert st["p"] < H.RATE_ALPHA / 10
+    out, _ = T.check_rate(plant="mark_silenced", sigmas=3.0, **kw)
+    assert len(out) == 1 and "sigma" in out[0] and "tail" not in out[0]
+    assert T.check_rate(sigmas=3.0, **kw)[0] == []
+    seen = {}
+
+    def flip(want_marked):
+        def ev(f, x):
+            bits, fw = ml.evaluate(f, x)
+            if bool(fw & ml.MARK) == want_marked and not seen.get(want_marked):
+                seen[want_marked] = True
+                return bits ^ 1, fw
+            return bits, fw
+        return ev
+    out, st = T.check_rate(evaluator=flip(False), **kw)
+    assert len(out) == 1 and "1 unmarked lanes are wrong" in out[0] \
+        and st["marked"] > 0 and st["p"] >= st["level"]
+    out, st = T.check_rate(evaluator=flip(True), **kw)
+    assert len(out) == 1 and "1 marked guesses are wrong" in out[0] \
+        and st["p"] >= st["level"]
+
+
+# =====================================================================
+# parcel M2G2b: the structured families (mathlib_trig_family.py)
+# =====================================================================
+
+# The committed lists' sizes (the centres, expanded): (under rne and rmm, under
+# the directed three), by function and format: MEASURED by the generation at
+# CBITS = 6 (odd c below 64) and the minimisers' binades of the study.
+LIST_SIZES = {("sin", "fp64"): (0, 1), ("sin", "fp128"): (2, 170),
+              ("sin", "fp256"): (2, 619), ("cos", "fp64"): (0, 6),
+              ("cos", "fp128"): (0, 454), ("cos", "fp256"): (0, 1668),
+              ("tan", "fp64"): (1, 0), ("tan", "fp128"): (9, 113),
+              ("tan", "fp256"): (9, 454)}
+
+
+def test_the_committed_family_is_what_the_theory_generates():
+    """TRIG_FAMILY against a fresh generation by the theory (mpmath at 4p + 200
+    bits, independent of the fragment): every function, format and attribute,
+    the lists' sizes pinned. It runs to c below 2^CBITS = 64: the family runs to
+    c of about 2^12 and 2^33 (sin) and 2^17 and 2^48 (cos) at fp128 and fp256
+    (the study's 3.5, COMPUTED), more centres than can be listed, so the list is
+    a sample, and TF.deep_arguments holds the theory to the fragment beyond it."""
+    assert T.check_family_list(TF.TRIG_FAMILY) == []
+    assert TF.CBITS == 6
+    for (fn, name), (near, direct) in LIST_SIZES.items():
+        for rnd in RND:
+            n = len(TF.expand(TF.TRIG_FAMILY[fn][name][rid(rnd)]))
+            assert n == (near if rnd in (RNE, RMM) else direct), (fn, name,
+                                                                  rid(rnd))
+    # the lists share their classes' entries, and the minimisers' neighbours
+    # are the study's: sin 48 and cos 32 of its 36 at fp128, 156 and 254 at fp256
+    mn = {(fn, name): len([c for c in TF.expand(
+        TF.TRIG_FAMILY[fn][name]["rtz"]) if c[0] == "m"])
+          for fn in FUNCS for name in ("fp64", "fp128", "fp256")}
+    assert mn == {("sin", "fp64"): 0, ("sin", "fp128"): 48,
+                  ("sin", "fp256"): 156, ("cos", "fp64"): 0,
+                  ("cos", "fp128"): 32, ("cos", "fp256"): 254,
+                  ("tan", "fp64"): 0, ("tan", "fp128"): 0, ("tan", "fp256"): 0}
+    for fn in FUNCS:
+        for name in ("fp64", "fp128", "fp256"):
+            per = TF.TRIG_FAMILY[fn][name]
+            assert per["rtz"] == per["rdn"] == per["rup"]
+            assert per["rne"] == per["rmm"]
+
+
+def test_each_leg_of_family_list_can_fail_alone():
+    """A tampered committed list (the tool's plant): a centre dropped, one
+    invented, a cell emptied, a cell added, each one finding naming the cell."""
+    good = {fn: {f: dict(per) for f, per in d.items()}
+            for fn, d in TF.TRIG_FAMILY.items()}
+    gen = good
+    assert T.check_family_list(good, gen) == []
+    import copy
+    for change, text in (
+            (lambda d: d["cos"]["fp64"].__setitem__(
+                "rtz", d["cos"]["fp64"]["rtz"][1:]), "cos fp64 rtz"),
+            (lambda d: d["cos"]["fp64"].__setitem__(
+                "rtz", d["cos"]["fp64"]["rtz"] + [(7, 26, 26)]),
+             "cos fp64 rtz"),
+            (lambda d: d["tan"]["fp128"].__setitem__("rne", []),
+             "tan fp128 rne"),
+            (lambda d: d["sin"]["fp64"].__setitem__("rne", [(3, 25, 25)]),
+             "sin fp64 rne"),
+            (lambda d: d["sin"]["fp256"].__setitem__(
+                "rup", [e for e in d["sin"]["fp256"]["rup"]
+                        if e[0] != "m"]), "sin fp256 rup")):
+        bad = copy.deepcopy(good)
+        change(bad)
+        out = T.check_family_list(bad, gen)
+        assert len(out) == 1 and out[0].startswith("family_list: ") \
+            and text in out[0], (text, out)
+    gone = copy.deepcopy(good)
+    del gone["tan"]
+    out = T.check_family_list(gone, gen)
+    assert len(out) == 15 and all("tan" in s for s in out)
+
+
+def test_the_pools_marks_are_all_explained_by_the_theory():
+    """Every structured mark of M2G2a's TRIG_POOL_MARKS (72 over the 45
+    fragments) is a centre, or inside a window, of the family (or a lane the
+    theory demands marked); a mark the theory does not explain is a finding:
+    here two the pools do not hold, cos(2^-26) under rne (cos has no centre
+    under the nearest attributes at c < 64) and a lane of fp128."""
+    out, explained = T.check_pool_marks(committed=TF.TRIG_FAMILY)
+    assert out == [] and explained == len(T.TRIG_POOL_MARKS) == 72
+    odd = T.TRIG_POOL_MARKS + (
+        ("cos", "fp64", "rne", 0x3e50000000000000, "unexplained"),
+        ("sin", "fp128", "rtz", 0x3fc80000000000000000000000000000,
+         "unexplained"))
+    out, explained = T.check_pool_marks(odd, TF.TRIG_FAMILY)
+    assert len(out) == 2 and all(s.startswith("pool_marks: ") for s in out) \
+        and explained == 72
+    assert "cos fp64 rne 0x3e50000000000000" in out[0]
+
+
+def test_the_theory_takes_p_and_g_so_fp32_is_one_call():
+    """Room for parcel M2F: the study's fp32 tiny family (144 arguments at the
+    G = 18 design: sin 2 under rne and rmm, cos 6 and 6, tan 0 and 0) against
+    the theory at p = 24, G = 18: the lanes it demands marked (d under 0.7) and
+    the lanes it allows (d under 1.3) bracket the study's counts; at M2X's
+    G = 40 the census (48 arguments inside the tiny gates) has none, as M2X
+    measured. Nothing builds an fp32 fragment here."""
+    assert len(TF.census(FP32, 18)) == 144 and len(TF.census(FP32, 40)) == 48
+    study = {("sin", RNE): 2, ("sin", RTZ): 0, ("cos", RNE): 6,
+             ("cos", RTZ): 6, ("tan", RNE): 0, ("tan", RTZ): 0}
+    xs = TF.census(FP32, 18)
+    for (fn, rnd), n in study.items():
+        kinds = [TF.classify(FP32, rnd, x, 18, fn) for x in xs]
+        must, may = kinds.count("mark"), kinds.count("mark") +             kinds.count("either")
+        assert must <= n <= may, (fn, rid(rnd), must, n, may)
+    for fn in FUNCS:
+        for rnd in (RNE, RTZ):
+            assert {TF.classify(FP32, rnd, x, 40, fn)
+                    for x in TF.census(FP32, 40)} <= {"clear", "gated"}
+    assert TF.entries(FP32, RNE, "sin", 18) == [(3, 11, 11)]
+    assert TF.half_width(FP32, "sin", TF.argument(FP32, (3, 11)), 18) > 0
+
+
+def test_the_theory_computes_the_studys_half_widths_and_the_clamp_rule():
+    """The study's 3.5: half-widths 10.8, 21.6 and 128 for the three fp64
+    windows (COMPUTED there, 10.7, 21.3 and 128 here, from the closed forms
+    Bv / (ulp x^2/2), Bv / (ulp x^2) and Bv / (x ulp)); the census sizes (144,
+    384 and 880 arguments; the minimisers' 729, 459 and 999); and the clamp: the
+    grid point 1 is no boundary of sin and cos (|T| < 1), so sin of the float
+    next to pi/2, 1 - 2^-107, is clear under rtz where the plain distance to
+    1 would put it inside the bound."""
+    for fn, c, e, want in (("sin", 3, 25, 10.67), ("tan", 3, 26, 21.33),
+                           ("cos", 1, 26, 128.0)):
+        W = float(TF.half_width(FP64, fn, TF.argument(FP64, (c, e))))
+        assert round(W, 2) == want, (fn, W)
+    assert [len(TF.census(f)) for f in FORMATS] == [144, 384, 880]
+    assert [len(TF.minnbr_arguments(f)) for f in FORMATS] == [729, 459, 999]
+    assert [T.CENSUS_SIZES[("tiny", f.name)] for f in FORMATS] == [144, 384,
+                                                                    880]
+    pio2 = 0x3ff921fb54442d18
+    assert TF.classify(FP64, RTZ, pio2, None, "sin") == "clear"
+    assert ml.evaluate(ml.fragment("sin", FP64, RTZ), pio2)[1] & ml.MARK == 0
+    assert TF.is_gated(FP64, 0x3e00000000000000, "sin") is True      # 2^-127
+    assert TF.is_gated(FP64, 0x3e50000000000000, "cos") is False
+    assert TF.classify(FP64, RNE, 0x7ff0000000000000, None, "sin") == "gated"
+
+
+# the cells of the census the golden stage runs: the tiny family where the study
+# counted marks (sin and cos under rtz, tan under rne and rtz) at every format,
+# with sin under rne at fp256 and cos under rne at fp128 (none), the
+# minimisers' neighbours where they mark (sin and cos under rtz, fp128 and
+# fp256) and once at fp64 (none); the box runs every function, format and
+# attribute of both
+CENSUS_CELLS = (
+    [("tiny", fn, fmt, rnd) for fmt in FORMATS
+     for fn, rnd in (("sin", RTZ), ("cos", RTZ), ("tan", RNE), ("tan", RTZ))]
+    + [("tiny", "sin", FP256, RNE), ("tiny", "cos", FP128, RNE)]
+    + [("minnbr", "sin", FP64, RTZ)]
+    + [("minnbr", fn, fmt, RTZ) for fmt in (FP128, FP256)
+       for fn in ("sin", "cos")])
+
+
+@pytest.mark.parametrize("kind,fn,fmt,rnd", CENSUS_CELLS,
+                         ids=[f"{k}-{n}-{f.name}-{rid(r)}"
+                              for k, n, f, r in CENSUS_CELLS])
+def test_the_census_counts_are_the_studys(kind, fn, fmt, rnd):
+    """The study's tiny family (c 2^-e, c <= 16: 144, 384 and 880 arguments) and
+    its minimisers' neighbours (binades 0 to 80, 40 to 90 and 100 to 210, j =
+    -4 .. 4: 729, 459 and 999) through the fragment mark the lanes the study
+    counted at the decided G (3.5's tables, MEASURED there at G = 44, 46, 46),
+    every lane the theory demands marked is among them, none the theory calls
+    clear, none wrong unmarked, every guess right. The study's fp64 cos
+    directed count (14) is seven centres c 2^-26, one of which (7 2^-26, d =
+    0.75) the theory leaves to either."""
+    out, t = T.check_census_counts(ml.fragment(fn, fmt, rnd), kind)
+    assert out == [], out
+    assert t.n == T.CENSUS_SIZES[(kind, fmt.name)]
+    table = T.TINY_COUNTS if kind == "tiny" else T.MINNBR_COUNTS
+    assert len(t.marked) == table[fmt.name][fn][0 if rnd in (RNE, RMM) else 1]
+    assert not t.wrong and not t.guess_wrong
+
+
+def _cell_centres(fn, fmt, rnd, k=4):
+    """The cell's committed centres: all at fp64, k spread over the list (the
+    minimisers' neighbours among them) at fp128 and fp256."""
+    cen = committed_centres(fn, fmt, rnd)
+    return cen if fmt is FP64 or len(cen) <= k else \
+        cen[::max(1, len(cen) // k)][:k]
+
+
+FAMILY_CELLS = [(fn, fmt, rnd) for fmt in FORMATS for fn in FUNCS
+                for rnd in (RNE, RTZ)]
+
+
+@pytest.mark.parametrize("fn,fmt,rnd", FAMILY_CELLS,
+                         ids=[f"{n}-{f.name}-{rid(r)}"
+                              for n, f, r in FAMILY_CELLS])
+def test_the_windows_the_centres_and_their_neighbours_inside_and_outside(
+        fn, fmt, rnd):
+    """The committed centres of the cell (all at fp64, four spread over the list
+    at fp128 and fp256), each with its negative and its neighbours at 1, W/8,
+    W/4, 0.65 W ulps (inside the window) and 1.35 W, 2 W, 8 W, 1024 W (outside),
+    and the deep arguments beyond the committed sample (the family out to two bit
+    lengths past where the theory's window closes): every lane the theory puts
+    inside a window is marked, none outside, every unmarked lane equals
+    transcend's and every marked guess is right. Where the cell has no centre
+    (cos under rne and rmm at every format: p is odd) only the deep arguments
+    run, and cos rne at fp256 has four of them the theory demands marked, c =
+    2^46 +- 1 and the like at 2^-142, whose x^2/2 sits within 2^-285 of a
+    midpoint (the study's census, c <= 16, found none)."""
+    f = ml.fragment(fn, fmt, rnd)
+    cen = _cell_centres(fn, fmt, rnd)
+    out, st = T.check_family(f, cen, deep=True)
+    assert out == [], (st, out)
+    # the exact edges of up to three windows (TF.window_edges): the lanes at
+    # the inner edge and half way marked, at the outer edge and twice as far not
+    tiny = [c for c in cen if c[0] != "m"][:3]
+    out, n = T.check_windows(f, tiny)
+    assert out == [] and n == 8 * len(tiny), (n, out)
+    assert st["marked_mark"] == st["mark"] and st["marked_clear"] == 0
+    assert st["marked_gated"] == 0 and st["wrong"] == st["guess_wrong"] == 0
+    assert st["mark"] >= len(cen) and st["lanes"] >= 10 * len(cen)
+    if fmt is FP256 and fn == "cos" and rnd == RNE:
+        assert st["mark"] == 4 and not cen
+
+
+def test_the_studys_three_measured_windows_are_reproduced():
+    """window.py's scans at fp64 (the study's 3.5, MEASURED there): sin 3 2^-25
+    under rtz marks 21 neighbours, j = -9 .. 11 (half-width 10.7); tan 3 2^-26
+    under rne 43, j = -23 .. 19 (21.3); cos 2^-26 under rtz 384, j = -255 .. 128
+    (128 above, 256 below, the finer ulp). Every lane against transcend.py, each
+    marked guess right and no unmarked lane wrong, and the run one interval."""
+    for (fn, rname, c, e, J), want in T.WINDOW_SCANS.items():
+        rnd = {v: k for k, v in sf.RND_NAMES.items()}[rname]
+        f = ml.fragment(fn, FP64, rnd)
+        out, run = T.check_scan(f, c, e, J, expect=want)
+        assert out == [] and run == want, (fn, run, want)
+    assert set(T.WINDOW_SCANS) == {("sin", "rtz", 3, 25, 40),
+                                   ("tan", "rne", 3, 26, 40),
+                                   ("cos", "rtz", 1, 26, 400)}
+
+
+def test_each_leg_of_family_can_fail_alone():
+    """A mark forced outside every window, a centre unmarked, an unmarked lane
+    wrong and a marked guess wrong: each one finding (family:), on doctored
+    results of the clean fragment at fp64 cos under rtz."""
+    f = ml.fragment("cos", FP64, RTZ)
+    cen = committed_centres("cos", FP64, RTZ)
+    lanes = T.family_lanes(FP64, RTZ, "cos", cen)
+    assert T.check_family(f, cen)[0] == []
+    clear = next(x for x, _l, w in lanes if w == "clear")
+    centre = TF.argument(FP64, cen[0])
+    inside = next(x for x, _l, w in lanes if w == "mark" and x != centre)
+
+    def ev(target, how):
+        def run(g, x):
+            bits, fw = ml.evaluate(g, x)
+            return how(bits, fw) if x == target else (bits, fw)
+        return run
+    cases = (
+        ("is outside every window and marked", ev(clear, lambda b, w:
+                                                  (b, w | ml.MARK))),
+        ("is inside a window, d = ", ev(centre, lambda b, w:
+                                        (b, w & ~ml.MARK))),
+        ("is unmarked and wrong", ev(clear, lambda b, w: (b ^ 1, w))),
+        ("1 marked guesses are wrong", ev(inside, lambda b, w:
+                                          (b ^ 1, w | ml.MARK))))
+    for text, evaluator in cases:
+        out, st = T.check_family(f, cen, evaluator=evaluator)
+        assert len(out) == 1 and text in out[0] \
+            and out[0].startswith("family: "), (text, out)
+
+
+def test_each_leg_of_the_scan_can_fail_alone():
+    """The study's sin window (3 2^-25 under rtz, W = 10.7), scanned and
+    doctored: a lane wrong unmarked, a marked guess wrong, a hole in the run, a
+    run wider than the half-width allows, a run that stops short, an empty
+    window and a run other than the study's (the expect leg)."""
+    f = ml.fragment("sin", FP64, RTZ)
+    c, e, J = 3, 25, 40
+    x0 = TF.argument(FP64, (c, e))
+    want = T.WINDOW_SCANS[("sin", "rtz", 3, 25, 40)]
+    assert T.check_scan(f, c, e, J, expect=want)[0] == []
+
+    def at(js, how):
+        targets = {x0 + j for j in js}
+
+        def run(g, x):
+            bits, fw = ml.evaluate(g, x)
+            return how(bits, fw) if x in targets else (bits, fw)
+        return run
+    unmark = lambda b, w: (b, w & ~ml.MARK)          # noqa: E731
+    mark = lambda b, w: (b, w | ml.MARK)             # noqa: E731
+    cases = (
+        ("2 unmarked lanes are wrong", at((30, -30), lambda b, w:
+                                          (b ^ 1, w))),
+        ("1 marked guesses are wrong", at((5,), lambda b, w: (b ^ 1, w))),
+        ("not one run", at((3,), unmark)),
+        ("wider than the computed half-width", at(range(12, 30), mark)),
+        ("stops short of 0.3 W", at(range(-40, -1), unmark)),
+        ("no lane of the window is marked", at(range(-40, 41), unmark)))
+    for text, evaluator in cases:
+        out, _run = T.check_scan(f, c, e, J, evaluator=evaluator)
+        assert any(text in s for s in out) and \
+            all(s.startswith("windows: ") for s in out), (text, out)
+    out, _ = T.check_scan(f, c, e, J, expect=(21, -9, 12))
+    assert len(out) == 1 and "the study's 21" in out[0]
+
+
+def test_each_leg_of_windows_can_fail_alone():
+    """The exact edges of the study's sin window (3 2^-25 under rtz), doctored:
+    the lane at the inner edge unmarked, the one at the outer edge marked, an
+    unmarked lane wrong, a marked guess wrong, a computed half-width that
+    disagrees with the exact window and a window with no outer edge: one
+    finding each."""
+    f = ml.fragment("sin", FP64, RTZ)
+    cen = (3, 25)
+    x0 = TF.argument(FP64, cen)
+    edges = TF.window_edges(FP64, RTZ, "sin", x0)
+    (j_in, j_out) = edges[1]
+    assert (j_in, j_out) == (8, 15) and edges[-1] == (6, 13)
+    assert T.check_windows(f, [cen])[0] == []
+
+    def at(j, how):
+        def run(g, x):
+            bits, fw = ml.evaluate(g, x)
+            return how(bits, fw) if x == x0 + j else (bits, fw)
+        return run
+    for text, ev in (
+            ("at the inner edge (j = 8", at(j_in, lambda b, w:
+                                             (b, w & ~ml.MARK))),
+            ("at the outer edge (j = 15", at(j_out, lambda b, w:
+                                              (b, w | ml.MARK))),
+            ("unmarked lane at the outer edge (j = 15) is wrong",
+             at(j_out, lambda b, w: (b ^ 1, w))),
+            ("marked guess at the inner edge (j = 8) is wrong",
+             at(j_in, lambda b, w: (b ^ 1, w)))):
+        out, _n = T.check_windows(f, [cen], evaluator=ev,
+                                  edges={1: edges[1]})
+        assert len(out) == 1 and text in out[0] \
+            and out[0].startswith("windows: "), (text, out)
+    out, _n = T.check_windows(f, [cen], edges={1: (10, 120)})
+    assert len(out) == 1 and "does not agree with the exact window" in out[0]
+    out, _n = T.check_windows(f, [cen], edges={1: (3, None)})
+    assert len(out) == 1 and "has no outer edge" in out[0]
+
+
+def test_each_leg_of_census_counts_can_fail_alone():
+    """The count (one lane of the census silenced), an unmarked lane wrong, a
+    marked guess wrong, a lane the theory demands not marked and a marked lane
+    the theory calls clear, on fp64 tan under rne (the study's 2: 3 2^-26)."""
+    f = ml.fragment("tan", FP64, RNE)
+    marked = [x for x in TF.census(FP64)
+              if ml.evaluate(f, x)[1] & ml.MARK]
+    assert len(marked) == 2 and T.check_census_counts(f, "tiny")[0] == []
+    clear = next(x for x in TF.census(FP64) if x not in marked)
+
+    def ev(target, how):
+        def run(g, x):
+            bits, fw = ml.evaluate(g, x)
+            return how(bits, fw) if x == target else (bits, fw)
+        return run
+    cases = (
+        ("census lanes are wrong unmarked", ev(clear, lambda b, w:
+                                               (b ^ 1, w))),
+        ("marked guesses are wrong", ev(marked[0], lambda b, w: (b ^ 1, w))))
+    for text, evaluator in cases:
+        out, _t = T.check_census_counts(f, "tiny", evaluator=evaluator)
+        assert len(out) == 1 and text in out[0] \
+            and out[0].startswith("census_counts: "), (text, out)
+    # the count alone (the study's count doctored), then the theory's two legs
+    # alone (the count moved to the doctored lanes'): a lane the theory demands
+    # marked that is not, a marked lane the theory calls clear
+    out, _t = T.check_census_counts(f, "tiny", want=(3, 3))
+    assert len(out) == 1 and "are marked, the study's count is 3" in out[0]
+    out, _t = T.check_census_counts(f, "tiny", want=(1, 1), evaluator=ev(
+        marked[0], lambda b, w: (b, w & ~ml.MARK)))
+    assert len(out) == 1 and "the theory demands marked" in out[0]
+    out, _t = T.check_census_counts(f, "tiny", want=(3, 3), evaluator=ev(
+        clear, lambda b, w: (b, w | ml.MARK)))
+    assert len(out) == 1 and "the theory calls clear" in out[0]
+
+
+# =====================================================================
+# parcel M2G2b: the plants, the tables, the commands
+# =====================================================================
+
+def test_every_check_of_m2g2b_has_a_plant_red_in_it_and_a_clean_test():
+    """The five checks a fragment's fault can turn red are in the plant table
+    (CHECKS) with a fault red in each; the two that hold data (family_list,
+    pool_marks) and the legs of budget and rate have the tool's plants, each
+    shown red in its leg alone by the tests named here. The brief's reds:
+    coef, rl_dropped and zl_dropped in budget; newton_short in budget and
+    family; mark_silenced and bound_loose in rate and family."""
+    red = {c: {p for p, _f, r, _g in PLANTED if c in r}
+           for c in ("budget", "rate", "family", "windows", "census_counts")}
+    assert {"coef", "rl_dropped", "zl_dropped", "newton_short",
+            "bound_loose"} <= red["budget"]
+    assert {"mark_silenced", "bound_loose"} <= red["rate"]
+    assert {"newton_short", "mark_silenced", "bound_loose"} <= red["family"]
+    assert all(red.values())
+    for name in ("test_the_trig_mark_rate_law_in_its_eighteen_cells",
+                 "test_the_budget_check_over_a_small_sample_of_each_region",
+                 "test_the_windows_the_centres_and_their_neighbours_inside_"
+                 "and_outside", "test_the_census_counts_are_the_studys",
+                 "test_the_committed_family_is_what_the_theory_generates",
+                 "test_the_pools_marks_are_all_explained_by_the_theory",
+                 "test_each_leg_of_budget_can_fail_alone",
+                 "test_each_leg_of_rate_can_fail_alone",
+                 "test_each_leg_of_family_can_fail_alone",
+                 "test_each_leg_of_windows_can_fail_alone",
+                 "test_each_leg_of_the_scan_can_fail_alone",
+                 "test_each_leg_of_census_counts_can_fail_alone",
+                 "test_each_leg_of_family_list_can_fail_alone",
+                 "test_each_tool_plant_of_the_budget_is_red_in_its_own_leg",
+                 "test_the_attributes_leg_sees_a_directed_rounding_before_v",
+                 "test_the_trig_rate_expectation_does_not_follow_the_planted_"
+                 "build"):
+        assert callable(globals()[name]), name
+    assert set(T.RATE_TOOL_PLANTS) == {"expectation_follows_build"}
+
+
+def test_the_new_plants_that_do_not_apply_are_refused_by_name():
+    """newton_short does not act in sin and cos (no quotient): the family and
+    budget rows name tan; the rows' plants all apply at their cells."""
+    for plant, fmt, red, green in PLANTED:
+        for check in ("budget", "rate", "family", "windows", "census_counts"):
+            for cell in (red, green):
+                if check in cell:
+                    fn, _rnd = cell[check]
+                    assert applies(plant, fn, fmt), (plant, check, fn)
+    with pytest.raises(ValueError, match="plant 'newton_short' does not apply "
+                       "to sin at fp64"):
+        T.check_rate(FP64, RNE, "sin", 10, 5, plant="newton_short")
+
+
+def _inproc(capsys, *args):
+    """mathlib_runs.main(args) in this process (the builds and fragments the
+    other tests made are cached): (exit code, what it printed, the --out file's
+    text); --out's handle is closed after, as a process exit would."""
+    import mathlib_runs as R
+    R.FINDINGS.clear()
+    try:
+        rc = R.main(list(args))
+    finally:
+        if R.OUT is not None:
+            R.OUT.close()
+            R.OUT = None
+    return rc, capsys.readouterr().out
+
+
+def test_the_trig_budget_rate_and_family_commands_run_at_small_sizes(
+        tmp_path, capsys):
+    """mathlib_runs.py trig-budget, trig-rate and trig-family --quick: the
+    smoke runs of the box's commands, each ending RESULT: ok, writing --out and
+    refusing a path that exists, reporting the peak memory; --check of the
+    committed list; the refusals' exit codes as a program."""
+    rc, out = _inproc(capsys, "trig-budget", "--quick", "--fn", "tan",
+                      "--regions", "edge,zero", "--n", "4", "--out",
+                      str(tmp_path / "b.txt"))
+    text = (tmp_path / "b.txt").read_text()
+    assert rc == 0 and "RESULT: ok" in out and text == out
+    assert text.count("trig-budget tan fp128 G = 46 rne") == 2
+    assert "V the same under the five attributes on 4 lanes: 0 differ" in text
+    assert "ALL REGIONS: the bound is at most" in text and "peak memory" in text
+    rc, out = _inproc(capsys, "trig-rate", "--quick", "--fn", "sin",
+                      "--attrs", "rne", "--n", "200", "--out",
+                      str(tmp_path / "r.txt"))
+    text = (tmp_path / "r.txt").read_text()
+    assert rc == 0 and "RESULT: ok" in text and         "trig-rate sin fp128 rne:" in text and "1 statistics" in text
+    rc, out = _inproc(capsys, "trig-family", "--quick", "--fn", "tan",
+                      "--attrs", "rne", "--out", str(tmp_path / "f.txt"))
+    text = (tmp_path / "f.txt").read_text()
+    assert rc == 0 and "RESULT: ok" in text
+    assert "trig-family tan fp128 rne census tiny: 384 arguments, 6 marked "         "(the study's 6)" in text
+    assert "census minnbr: 459 arguments, 0 marked" in text and         "family: 6 of 9 centres" in text and "windows: 6 centres" in text
+    for cmd in ("trig-budget", "trig-rate", "trig-family"):
+        with pytest.raises(SystemExit, match="the file exists"):
+            _inproc(capsys, cmd, "--quick", "--fn", "sin", "--out",
+                    str(tmp_path / "b.txt"))
+    assert (tmp_path / "b.txt").read_text().count("trig-budget tan fp128") == 3
+    rc, out = _inproc(capsys, "trig-family", "--check")
+    assert rc == 0 and "0 cells differ from the theory's" in out
+    for args in (("trig-budget", "--formats", "fp32"),
+                 ("trig-rate", "--fn", "exp"),
+                 ("trig-budget", "--regions", "middle")):
+        with pytest.raises(SystemExit):
+            _inproc(capsys, *args)
+    # and as a program: the exit code of a refusal
+    assert _runs("trig-budget", "--formats", "fp32").returncode != 0
