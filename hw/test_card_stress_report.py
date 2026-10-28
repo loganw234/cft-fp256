@@ -3234,6 +3234,35 @@ def group_rates():
     pr = build_rates_run(with_probe=True)
     Sp = R.summarize(pr, rev=None)
     rt_rows_equal(Sp, want, "rates with probe legs")
+    # -- first the checks that do not read the probe figure: a report that dropped its probe legs, or counted them as sweep legs, fails these where it stands, and not only the
+    #    first two checks below it before one of them reads a probe that is not there
+    # -- a probe leg is never coverage, a slice, an interval or a skipped row: the run with probe legs has the run without them's coverage, to the last field
+    S0 = R.summarize(recs, rev=None)
+    def coverage(S):                 # the sweep section but for the count of records it read, which the probe legs add to
+        c = json.loads(json.dumps(S["sweep"]))
+        for src in c["trees"]["sources"]:
+            src.pop("records")
+        return c
+    eq(coverage(Sp), coverage(S0), "rates with probe legs: the sweep section (coverage, slices, cases, intervals, first gaps, the trees) is the run without them's, field for field "
+       "(but for the number of records read)")
+    eq(Sp["failures"]["skipped"], S0["failures"]["skipped"], "rates with probe legs: and there is no skipped row of a probe")
+    eq(Sp["totals"]["legs"]["total"], S0["totals"]["legs"]["total"] + 8, "rates with probe legs: the 8 probe legs are legs (5 + 1 + 2) and nothing else changed in the count")
+    eq([r for r in Sp["rows"] if r["kind"] != "probe"], S0["rows"], "rates with probe legs: the per-leg table's other rows are what they were")
+    check(sum(1 for r in Sp["rows"] if r["kind"] == "probe") == 3, "rates with probe legs: and the probe has a row of its own for each image")
+    def card_union(records, kinds):
+        ivs = sorted((r["start_epoch"], r["end_epoch"]) for r in records if r["type"] == "leg" and r["kind"] in kinds and r["status"] != "skipped" and r["image"] != "cpu")
+        total, cur = 0.0, None
+        for s_, e_ in ivs:
+            if cur is not None and s_ <= cur[1]:
+                cur[1] = max(cur[1], e_)
+            else:
+                total += (cur[1] - cur[0]) if cur else 0.0
+                cur = [s_, e_]
+        return total + ((cur[1] - cur[0]) if cur else 0.0)
+    u0, u1 = card_union(recs, ("battery", "sweep")), card_union(pr, ("battery", "sweep", "probe"))
+    check(abs(S0["uptime"]["card_union_s"] - u0) < 1e-6 and abs(Sp["uptime"]["card_union_s"] - u1) < 1e-6 and u1 - u0 > 250,
+          "rates with probe legs: the time on the card counts a probe leg (the union of the battery's, the sweep's and the probe's intervals, the oracle's)",
+          (S0["uptime"]["card_union_s"], u0, Sp["uptime"]["card_union_s"], u1))
     P = Sp["rates"]["probe"]
     bad = []
     for r in Sp["rates"]["rows"]:
@@ -3275,33 +3304,6 @@ def group_rates():
     c1 = [r for r in Sp["rates"]["rows"] if (r["image"], r["op"], r["format"], r["level"]) == ("quad", "sqrt", "fp32", "exhaustive")][0]["card"]
     check(match(c1["rate"], num(r1["card_alone"])) and match(c1["ratio"], num(r1["ratio"].rstrip("x"))) and r1["ratio"].endswith("x"),
           "rates with probe legs: the text shows the card-alone rate and the ratio on the `all` row", (r1, c1))
-    # -- a probe leg is never coverage, a slice, an interval or a skipped row: the run with probe legs has the run without them's coverage, to the last field
-    S0 = R.summarize(recs, rev=None)
-    def coverage(S):                 # the sweep section but for the count of records it read, which the probe legs add to
-        c = json.loads(json.dumps(S["sweep"]))
-        for src in c["trees"]["sources"]:
-            src.pop("records")
-        return c
-    eq(coverage(Sp), coverage(S0), "rates with probe legs: the sweep section (coverage, slices, cases, intervals, first gaps, the trees) is the run without them's, field for field "
-       "(but for the number of records read)")
-    eq(Sp["failures"]["skipped"], S0["failures"]["skipped"], "rates with probe legs: and there is no skipped row of a probe")
-    eq(Sp["totals"]["legs"]["total"], S0["totals"]["legs"]["total"] + 8, "rates with probe legs: the 8 probe legs are legs (5 + 1 + 2) and nothing else changed in the count")
-    eq([r for r in Sp["rows"] if r["kind"] != "probe"], S0["rows"], "rates with probe legs: the per-leg table's other rows are what they were")
-    check(sum(1 for r in Sp["rows"] if r["kind"] == "probe") == 3, "rates with probe legs: and the probe has a row of its own for each image")
-    def card_union(records, kinds):
-        ivs = sorted((r["start_epoch"], r["end_epoch"]) for r in records if r["type"] == "leg" and r["kind"] in kinds and r["status"] != "skipped" and r["image"] != "cpu")
-        total, cur = 0.0, None
-        for s_, e_ in ivs:
-            if cur is not None and s_ <= cur[1]:
-                cur[1] = max(cur[1], e_)
-            else:
-                total += (cur[1] - cur[0]) if cur else 0.0
-                cur = [s_, e_]
-        return total + ((cur[1] - cur[0]) if cur else 0.0)
-    u0, u1 = card_union(recs, ("battery", "sweep")), card_union(pr, ("battery", "sweep", "probe"))
-    check(abs(S0["uptime"]["card_union_s"] - u0) < 1e-6 and abs(Sp["uptime"]["card_union_s"] - u1) < 1e-6 and u1 - u0 > 250,
-          "rates with probe legs: the time on the card counts a probe leg (the union of the battery's, the sweep's and the probe's intervals, the oracle's)",
-          (S0["uptime"]["card_union_s"], u0, Sp["uptime"]["card_union_s"], u1))
     # -- a summary from before the field renders, with no section
     old = json.loads(json.dumps(S0))
     old.pop("rates")
