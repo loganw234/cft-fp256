@@ -1,0 +1,32 @@
+rate-probe: backend software
+rate-probe: N 4096, 0.02 s a row, tile none
+rate-probe: row op=div format=fp32 tile=none elements=12288 seconds=0.0604 rate=203587.1 check=ok
+rate-probe: row op=sqrt format=fp32 tile=none elements=12288 seconds=0.0731 rate=168050.4 check=ok
+rate-probe: row op=rint format=fp32 tile=none elements=40960 seconds=0.0203 rate=2015110.6 check=ok
+rate-probe: row op=scaleb format=fp32 tile=none elements=106496 seconds=0.0205 rate=5187719.0 check=ok
+rate-probe: row op=fma format=fp32 tile=none elements=69632 seconds=0.0208 rate=3341626.8 check=ok
+rate-probe: row op=mul format=fp32 tile=none elements=94208 seconds=0.0202 rate=4658759.7 check=ok
+rate-probe: row op=add format=fp32 tile=none elements=73728 seconds=0.0205 rate=3600963.4 check=ok
+rate-probe: row op=div format=fp64 tile=none elements=12288 seconds=0.0661 rate=185789.5 check=ok
+rate-probe: row op=sqrt format=fp64 tile=none elements=12288 seconds=0.0798 rate=154014.7 check=ok
+rate-probe: row op=rint format=fp64 tile=none elements=36864 seconds=0.0207 rate=1778350.6 check=ok
+rate-probe: row op=scaleb format=fp64 tile=none elements=122880 seconds=0.0200 rate=6141809.9 check=ok
+rate-probe: row op=fma format=fp64 tile=none elements=94208 seconds=0.0208 rate=4538783.0 check=ok
+rate-probe: row op=mul format=fp64 tile=none elements=110592 seconds=0.0206 rate=5360512.3 check=ok
+rate-probe: row op=add format=fp64 tile=none elements=86016 seconds=0.0209 rate=4115884.9 check=ok
+rate-probe: row op=div format=fp128 tile=none elements=12288 seconds=0.0801 rate=153390.8 check=ok
+rate-probe: row op=sqrt format=fp128 tile=none elements=12288 seconds=0.0979 rate=125541.4 check=ok
+rate-probe: row op=rint format=fp128 tile=none elements=32768 seconds=0.0217 rate=1507483.5 check=ok
+rate-probe: row op=scaleb format=fp128 tile=none elements=94208 seconds=0.0201 rate=4695662.9 check=ok
+rate-probe: row op=fma format=fp128 tile=none elements=73728 seconds=0.0205 rate=3590572.1 check=ok
+rate-probe: row op=mul format=fp128 tile=none elements=65536 seconds=0.0200 rate=3272246.4 check=ok
+rate-probe: row op=add format=fp128 tile=none elements=61440 seconds=0.0204 rate=3013470.2 check=ok
+rate-probe: row op=div format=fp256 tile=none refused=CFT_ERR_UNSUPPORTED why=operation or format not available on this device
+rate-probe: row op=sqrt format=fp256 tile=none refused=CFT_ERR_UNSUPPORTED why=operation or format not available on this device
+rate-probe: row op=rint format=fp256 tile=none refused=CFT_ERR_UNSUPPORTED why=operation or format not available on this device: this libcft build carries fp32 fp64 fp128; fp256 is above its format ceiling (CFT_MAX_FORMAT is 2 in cft_config.h), so no backend of this build can carry it - cft_get_caps - cft_caps.format_mask - says so before a run
+rate-probe: row op=scaleb format=fp256 tile=none refused=CFT_ERR_UNSUPPORTED why=operation or format not available on this device: this libcft build carries fp32 fp64 fp128; fp256 is above its format ceiling (CFT_MAX_FORMAT is 2 in cft_config.h), so no backend of this build can carry it - cft_get_caps - cft_caps.format_mask - says so before a run
+rate-probe: row op=fma format=fp256 tile=none refused=CFT_ERR_UNSUPPORTED why=operation or format not available on this device: this libcft build carries fp32 fp64 fp128; fp256 is above its format ceiling (CFT_MAX_FORMAT is 2 in cft_config.h), so no backend of this build can carry it - cft_get_caps - cft_caps.format_mask - says so before a run
+rate-probe: row op=mul format=fp256 tile=none refused=CFT_ERR_UNSUPPORTED why=operation or format not available on this device: this libcft build carries fp32 fp64 fp128; fp256 is above its format ceiling (CFT_MAX_FORMAT is 2 in cft_config.h), so no backend of this build can carry it - cft_get_caps - cft_caps.format_mask - says so before a run
+rate-probe: row op=add format=fp256 tile=none refused=CFT_ERR_UNSUPPORTED why=operation or format not available on this device: this libcft build carries fp32 fp64 fp128; fp256 is above its format ceiling (CFT_MAX_FORMAT is 2 in cft_config.h), so no backend of this build can carry it - cft_get_caps - cft_caps.format_mask - says so before a run
+rate-probe: 28 rows, 21 timed, 7 refused, 0 red
+rate-probe: every check ok

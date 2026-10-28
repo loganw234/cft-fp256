@@ -876,6 +876,188 @@ def _sweep(objs: List[Dict[str, Any]], views: List[Dict[str, Any]]) -> Dict[str,
 IMAGE_ORDER = ("quad", "single", "deep", CPU)
 TREE_KINDS = (TILE, HOST, "unknown")
 
+
+# ---------------------------------------------------------------------------
+# RATES BY OP AND FORMAT (since 2026-10-28, parcel TP): what a tile does in a second, from the run's own exhaustive and hard slices, and
+# the probe legs' card-only rate beside it
+# ---------------------------------------------------------------------------
+RATE_UNIT = "cases/s"
+RATE_LEVELS = ("exhaustive", "hard")               # the levels whose slices run large batches; "class" is one case a call and "random" is a count from a seed
+RATE_OPS = ("div", "recip", "sqrt", "rint", "scaleb")          # the ops a rate row is named by, in the order a table lists them
+RATE_FORMATS = ("fp32", "fp64", "fp128", "fp256")
+# The rate op of each catalog op word that has rate rows (reach tile, level exhaustive or hard): the operation the tile computes, whatever the mode word
+# says of its operands ("sqrt128-win-key" is a square root, "scaleb32-wide" a scaleB). A reciprocal is cft_div with the dividend 1 (divsqrt_soak.c), kept
+# apart from division so that the two are not pooled in one row; the probe times division alone, and a recip row is held beside its row (PROBE_OF).
+# hw/test_card_stress_report.py holds this table to the catalog both ways, so a new tile op cannot enter the catalog without a rate op, or leave a dead entry here.
+RATE_OP = {"sqrt32": "sqrt", "rint32": "rint", "scaleb32-all": "scaleb", "scaleb32-wide": "scaleb",
+           "div32-hard": "div", "div64-hard": "div", "sqrt64-hard": "sqrt", "rint128-f32": "rint", "rint256-f32": "rint"}
+RATE_OP.update({op: "div" for op in ("div128-hard", "div256-hard", "div128-f64hard", "div256-f64hard")})
+RATE_OP.update({op: "sqrt" for op in ("sqrt128-hard", "sqrt256-hard", "sqrt128-f64hard", "sqrt256-f64hard", "sqrt64-f32", "sqrt128-f32", "sqrt256-f32")})
+RATE_OP.update({op: "recip" for op in ("recip64-f32", "recip128-f32", "recip256-f32")})
+RATE_OP.update({f"sqrt{w}-win-{h}": "sqrt" for w in (128, 256) for h in ("ones", "zeros", "alt", "key")})
+RATE_OP.update({f"recip{w}-win-{h}": "recip" for w in (128, 256) for h in ("ones", "zeros", "alt", "key")})
+PROBE_OF = {"recip": "div"}                         # the probe op a rate op is held beside, where it is not its own name
+# Each sweep leg of a run lands in exactly one of these (RATE_LEFT_OUT, in this order) or is used: the counts add to the sweep legs seen. The reason
+# is what the report prints beside the count.
+RATE_LEFT_OUT = (
+    ("skipped", "never ran: a skipped leg has no duration"),
+    ("random", "random items: a count of cases from a seed, not an exhaustive slice (the rates are the exhaustive slices' alone)"),
+    ("class", "class level: one case a call (a representative of each class of operand), so a slice times the soak's launch and calls, not a rate"),
+    ("host", "host reach (and every slice of the CPU pool): libcft's host code against the CPU, which no tile computes"),
+    ("unknown", "an item or op the catalog does not name, or that has no rate op: its level, format and reach are not known"),
+    ("not_pass", "a slice that did not pass (fail, timeout, no_device, parse_error or error): the rate of an unfinished or failed run is not a rate"),
+    ("no_rate", "a passing tile slice with no usable rate (none, not in cases/s, or not above 0), no count of cases, or a tile that is not a tile number"),
+)
+
+
+def _rate_class(v: Dict[str, Any]) -> Tuple[str, Optional[Tuple[Any, ...]]]:
+    """(bucket, data): the bucket of RATE_LEFT_OUT a sweep leg falls in, or ("used", (item, rate, cases, tile)) for a slice that gives a row."""
+    r, st = v["r"], v["status"]
+    sw = r.get("sweep") if isinstance(r.get("sweep"), dict) else {}
+    item = sw.get("item") if isinstance(sw.get("item"), str) and sw.get("item") else None
+    it = _CATALOG.get(item) if item else None
+    if st == "skipped":
+        return "skipped", None
+    if (it is not None and it.level == "random") or (it is None and ("seed_n" in sw or "seed" in sw or ("count" in sw and "lo" not in sw))):
+        return "random", None
+    if it is not None and it.level == "class":
+        return "class", None
+    reach = slice_reach(sw) or (it.reach if it is not None else None)          # the record's word, else the catalog's table: as the sweep section takes it
+    if v["image"] == CPU or reach == HOST:
+        return "host", None
+    if reach != TILE or it is None or it.op not in RATE_OP or it.level not in RATE_LEVELS:
+        return "unknown", None
+    if st != "pass":
+        return "not_pass", None
+    rate = r.get("rate") if isinstance(r.get("rate"), dict) else {}
+    val, counts, tile = _num(rate.get("value")), v["counts"] or {}, r.get("tile")
+    cases = _int(counts.get("cases"))
+    if (rate.get("unit") != RATE_UNIT or val is None or val <= 0 or cases is None or cases < 0
+            or not (tile is None or (isinstance(tile, int) and not isinstance(tile, bool) and tile >= 1))):
+        return "no_rate", None
+    return "used", (item, float(val), cases, tile)
+
+
+def _stat(pairs: List[Tuple[float, int]]) -> Dict[str, Any]:
+    xs = [p[0] for p in pairs]
+    return {"slices": len(pairs), "cases": sum(p[1] for p in pairs), "median": round(float(statistics.median(xs)), 3),
+            "min": round(float(min(xs)), 3), "max": round(float(max(xs)), 3)}
+
+
+def _rates(views: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """The run's rates: cases a second a tile, by (image, op, format, level), from its sweep slices that ran on one tile of the card - reach tile, level
+    exhaustive or hard, status pass, with the record's own rate (`rate.value`, cases/s: the slice's cases over its whole duration, the soak process's
+    start and the host's oracle included, so the PIPELINE's pace and not the tile's alone). A case is one element through the op: a hard item's cases are
+    the cases its tool compared (`counts.cases`, the skipped slots left out), which over the item's whole space add to HARD_WHOLE's first figure.
+    Each row has a figure for each tile (n slices, cases, median, least, most), the image's `all` (every tile's slices pooled) and, for an image whose
+    records name tiles, the `sum` of the tiles' medians (and of their least and most: bounds, not measured quad rates). `left_out` counts every other
+    sweep leg by its reason (RATE_LEFT_OUT), `seen` all of them. `probe` is _probe's, and each row's `card` the probe's rate beside it."""
+    left: Counter = Counter()
+    groups: Dict[Tuple[Any, ...], Dict[str, Any]] = {}
+    seen = used = 0
+    for v in views:
+        if v["kind"] != "sweep":
+            continue
+        seen += 1
+        bucket, data = _rate_class(v)
+        if bucket != "used":
+            left[bucket] += 1
+            continue
+        item, rate, cases, tile = data                # type: ignore[misc]
+        it = _CATALOG[item]
+        used += 1
+        g = groups.setdefault((v["image"], RATE_OP[it.op], it.format, it.level), {"from": set(), "tiles": {}})
+        g["from"].add(it.op)
+        g["tiles"].setdefault(tile, []).append((rate, cases))
+
+    def order(key: Tuple[Any, ...]) -> Tuple[int, int, int, int]:
+        image, op, fmt, level = key
+        return (IMAGE_ORDER.index(image) if image in IMAGE_ORDER else len(IMAGE_ORDER), RATE_OPS.index(op), RATE_FORMATS.index(fmt) if fmt in RATE_FORMATS else len(RATE_FORMATS),
+                RATE_LEVELS.index(level))
+    rows = []
+    for key in sorted(groups, key=lambda k: (order(k), str(k[0]))):
+        image, op, fmt, level = key
+        g = groups[key]
+        tiles = [dict(tile=t, **_stat(g["tiles"][t])) for t in sorted((t for t in g["tiles"] if t is not None))]
+        only = g["tiles"].get(None)
+        if only is not None:
+            tiles.insert(0, dict(tile=None, **_stat(only)))
+        every = [p for ps in g["tiles"].values() for p in ps]
+        named = [t for t in tiles if t["tile"] is not None]
+        rows.append({
+            "image": image, "op": op, "format": fmt, "level": level, "from": sorted(g["from"]),
+            "all": _stat(every),
+            "tiles": [] if (len(tiles) == 1 and tiles[0]["tile"] is None) else tiles,
+            "sum": ({"tiles": len(tiles), "median": round(sum(t["median"] for t in tiles), 3), "min": round(sum(t["min"] for t in tiles), 3),
+                     "max": round(sum(t["max"] for t in tiles), 3)} if len(tiles) >= 2 and named else None),         # one tile's sum is that tile
+            "card": None,
+        })
+    probe = _probe(views, rows)
+    return {"unit": RATE_UNIT, "seen": seen, "used": used, "left_out": {k: left.get(k, 0) for k, _ in RATE_LEFT_OUT}, "rows": rows, "probe": probe}
+
+
+def _probe(views: List[Dict[str, Any]], rows: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """The probe legs of the run (kind `probe`: hw/card_stress.py --rate-probe, host/tools/rate_probe.c), or None when it has none - never a zero.
+    A probe leg's rows are in `extra.rows` and its `extra.phase` says whether it was a tile alone or the quad's tiles together. For each (image, op,
+    format): the CHECKED rows' rates, a row whose check was red (a rate of wrong answers) counted apart and left out of every figure. Sets each pipeline
+    row's `card`: the card-alone rate per tile beside its `all` median - the tiles together where the probe ran so (the way the sweep runs them), else
+    one tile alone - and their ratio, the card alone over the pipeline: how many times faster the tile is than the sweep's pace with the oracle in it."""
+    legs = [v for v in views if v["kind"] == "probe"]
+    if not legs:
+        return None
+    images: Dict[str, Dict[str, Any]] = {}
+    cells: Dict[Tuple[str, str, str], Dict[str, List[float]]] = {}
+    refused: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
+    red: List[Dict[str, Any]] = []
+    unplaced = 0
+    for v in legs:
+        r = v["r"]
+        im = images.setdefault(v["image"] or "-", {"legs": 0, "failed": 0, "card_s": 0.0})
+        im["legs"] += 1
+        im["failed"] += v["status"] != "pass"
+        d = _num(r.get("duration_s"))
+        if d is not None and d >= 0 and v["status"] != "skipped":
+            im["card_s"] = round(im["card_s"] + d, 3)
+        ex = r.get("extra") if isinstance(r.get("extra"), dict) else {}
+        prows, phase = ex.get("rows"), ex.get("phase")
+        if not isinstance(prows, list):
+            continue
+        if phase not in ("alone", "together"):
+            unplaced += 1
+            continue
+        for row in prows:
+            if not isinstance(row, dict) or not isinstance(row.get("op"), str) or not isinstance(row.get("format"), str):
+                continue
+            key = (v["image"] or "-", row["op"], row["format"])
+            if isinstance(row.get("refused"), str):
+                refused[key] = {"image": key[0], "op": key[1], "format": key[2], "refused": row["refused"], "why": _str(row.get("why")) or ""}
+            elif row.get("check") == "red":
+                red.append({"image": key[0], "op": key[1], "format": key[2], "phase": phase, "tile": _str(row.get("tile"))})
+            elif row.get("check") == "ok" and (rate := _num(row.get("rate"))) is not None and rate > 0:
+                cells.setdefault(key, {"alone": [], "together": []})[phase].append(float(rate))
+
+    def figure(xs: List[float]) -> Optional[Dict[str, Any]]:
+        return ({"rows": len(xs), "median": round(float(statistics.median(xs)), 3), "min": round(min(xs), 3), "max": round(max(xs), 3)} if xs else None)
+    table = [{"image": k[0], "op": k[1], "format": k[2], "alone": figure(c["alone"]), "together": figure(c["together"])}
+             for k, c in sorted(cells.items(), key=lambda kv: (IMAGE_ORDER.index(kv[0][0]) if kv[0][0] in IMAGE_ORDER else 9,
+                                                              PROBE_ORDER.index(kv[0][1]) if kv[0][1] in PROBE_ORDER else 9,
+                                                              RATE_FORMATS.index(kv[0][2]) if kv[0][2] in RATE_FORMATS else 9))]
+    held = set()
+    for row in rows:
+        key = (row["image"], PROBE_OF.get(row["op"], row["op"]), row["format"])
+        c = cells.get(key)
+        if not c or not (c["together"] or c["alone"]):
+            continue
+        phase = "together" if c["together"] else "alone"
+        rate = round(float(statistics.median(c[phase])), 3)
+        row["card"] = {"phase": phase, "rate": rate, "ratio": round(rate / row["all"]["median"], 4)}
+        held.add(key)
+    return {"images": images, "table": table, "alone_of_the_rows": [t for t in table if (t["image"], t["op"], t["format"]) not in held],
+            "refused": sorted(refused.values(), key=lambda x: (x["image"], x["format"], x["op"])), "red": red, "unplaced_legs": unplaced}
+
+
+PROBE_ORDER = ("div", "sqrt", "rint", "scaleb", "fma", "mul", "add")        # host/tools/rate_probe.c's order of operations
+
 # git, for a run_start that recorded no tree (parcel RG, 2026-10-22). The driver refreshes this report after every cycle with a two-minute
 # limit, so git is bounded: a lookup waits GIT_TIMEOUT_S at most and all of one reader's lookups GIT_BUDGET_S (the driver's own git_tree allows
 # itself 30 s a lookup and no total).
@@ -1171,8 +1353,8 @@ def _uptime(objs: List[Dict[str, Any]], by_type: Dict[str, List[Tuple[int, Dict[
             continue
         it = (se, ee, _when(v["r"].get("start"), se), _when(v["r"].get("end"), ee))
         used.append(it)
-        if v["kind"] in ("battery", "sweep") and v["status"] != "skipped" and v["image"] != CPU:
-            card.append(it)                  # a host pool slice (image cpu) runs beside the card, and is not time on it
+        if v["kind"] in ("battery", "sweep", "probe") and v["status"] != "skipped" and v["image"] != CPU:
+            card.append(it)                  # a host pool slice (image cpu) runs beside the card, and is not time on it; a probe leg (parcel TP) is on it
     pieces = _time_union(used)
     union = math.fsum(p[1] - p[0] for p in pieces)
     cunion = math.fsum(p[1] - p[0] for p in _time_union(card))
@@ -1269,6 +1451,7 @@ def summarize(records: List[Any], now: Optional[float] = None, gap_seconds: floa
         "left_out": _left_out(by_type, views),
         "sweep": sweep,
         "uptime": _uptime(objs, by_type, views, now, not header["running"], gap_seconds),
+        "rates": _rates(views),            # parcel TP: LAST, so that the summary of a run is what it was with one more field at its end
     }
     return _clean(summary)
 
@@ -1882,6 +2065,75 @@ def _r_uptime(S: Dict[str, Any]) -> List[str]:
     return L
 
 
+def _r_rates(S: Dict[str, Any]) -> List[str]:
+    """The section for the run's rates (parcel TP): last, so that the report of a run is what it was with one section after it. A summary from before
+    the field has no section."""
+    X = S.get("rates")
+    if not isinstance(X, dict):
+        return []
+    L = ["== RATES BY OP AND FORMAT =="]
+    L.append(f"{X['unit']} on one tile of the card, from this run's sweep slices that ran on a tile: reach tile, level exhaustive or hard, status pass.")
+    L.append("A rate is the record's own: a slice's cases over its whole duration, the soak process's start and the host's oracle in it, so it is the PIPELINE's")
+    L.append("pace and not the tile's alone (the probe's card_alone column is that). A case is one element through the op; a hard item's cases are the ones its")
+    L.append("tool compared (counts.cases: its skipped slots are not cases and are not here), which over an item's whole space add to the catalog's HARD_WHOLE")
+    L.append("and not to k times its indices. A row is an (image, op, format, level); `from` names the catalog ops pooled in it; tile `all` pools the image's tiles,")
+    L.append("`sum` adds the tiles' medians (and their least and most, which are then bounds and not measured quad rates), `only` is an image with one tile.")
+    lo = X["left_out"]
+    L.append(f"sweep legs seen {X['seen']}, used {X['used']}; left out, each by its reason:")
+    for key, why in RATE_LEFT_OUT:
+        L.append(f"  {key}: {lo.get(key, 0)} - {why}")
+    rows = X["rows"]
+    if not rows:
+        L.append("no rate row: no slice of this run qualifies")
+    else:
+        body = []
+        for e in rows:
+            head = [e["image"] or "-", e["op"], _format_text(e["format"]), e["level"]]
+            card = e.get("card")
+            cc = [_g(card["rate"]), _g(card["ratio"]) + "x"] if card else ["-", "-"]
+            tiles = e["tiles"]
+            shown = []                                  # (label, figures, whether the card-alone cells belong to it)
+            if not tiles:
+                shown.append(("only", e["all"], True))
+            else:
+                shown += [("only" if t["tile"] is None else str(t["tile"]), t, len(tiles) == 1) for t in tiles]
+                if len(tiles) > 1:
+                    shown.append(("all", e["all"], True))
+            for k, (label, f, with_card) in enumerate(shown):
+                body.append(head + [label, str(f["slices"]), _g(f["median"]), _g(f["min"]), _g(f["max"])] + (cc if with_card else ["", ""])
+                            + [", ".join(e["from"]) if k == 0 else ""])
+            if e["sum"]:
+                sm = e["sum"]
+                body.append(head + [f"sum of {sm['tiles']}", str(e["all"]["slices"]), _g(sm["median"]), _g(sm["min"]), _g(sm["max"]), "", "", ""])
+        L += _table(["image", "op", "format", "level", "tile", "slices", "median", "least", "most", "card_alone", "ratio", "from"], body)
+    P = X.get("probe")
+    L.append("")
+    if P is None:
+        L.append("card alone (probe legs, the oracle off): no probe leg in this run, so the card_alone and ratio columns are '-' and nothing is given in their place")
+        L.append("(the driver's --rate-probe was off, or no probe leg ran).")
+        return L
+    imgs = "; ".join(f"{k} {_plural(d['legs'], 'leg')}" + (f", {d['failed']} not passed" if d["failed"] else "") + f", {_g(d['card_s'])} s on the card"
+                     for k, d in P["images"].items())
+    L.append(f"card alone (probe legs, the oracle off): {imgs}.")
+    L.append("card_alone is the probe's checked rate per tile for the same op and format - the tiles together where the probe ran so, as the sweep runs them,")
+    L.append("else one tile alone - and ratio is card_alone over the row's `all` median: how many times faster the tile is, answers checked once a call and nothing")
+    L.append("else, than the sweep's pace with the host's oracle in it. A recip row is held beside the probe's div (cft_div with the dividend 1). A probe row whose")
+    L.append("check was red is a rate of wrong answers: it is in no figure.")
+    if P["alone_of_the_rows"]:
+        L.append("probe rows with no pipeline row beside them (an op the sweeps have no slice of at that format):")
+        L += _table(["image", "op", "format", "alone_median", "alone_rows", "together_median", "together_rows"],
+                    [[t["image"], t["op"], t["format"], _g(t["alone"]["median"]) if t["alone"] else "-", str(t["alone"]["rows"]) if t["alone"] else "-",
+                      _g(t["together"]["median"]) if t["together"] else "-", str(t["together"]["rows"]) if t["together"] else "-"]
+                     for t in P["alone_of_the_rows"]])
+    for r in P["refused"]:
+        L.append(f"  REFUSED, never timed: {r['op']} at {r['format']} on {r['image']}: {_line(r['refused'], 40)} - {_line(r['why'], 200)}")
+    for r in P["red"]:
+        L.append(f"  CHECK RED: {r['op']} at {r['format']} on {r['image']} ({r['phase']}, tile {r['tile'] or '-'}): the device and the software backend differ; the row is in no figure")
+    if P["unplaced_legs"]:
+        L.append(f"  {_plural(P['unplaced_legs'], 'probe leg')} named no phase (alone or together) and are in no figure")
+    return L
+
+
 def render(summary: Dict[str, Any]) -> str:
     """The report's text, built from the summary alone (so from its JSON as well)."""
     summary = _scrub(summary)
@@ -1891,7 +2143,7 @@ def render(summary: Dict[str, Any]) -> str:
     out.append("card stress report: derived from metrics.jsonl, which is the record; this text is "
                "rewritten whole at each run of the report")
     out.append("")
-    for part in (_r_header, _r_totals, _r_rows, _r_left_out, _r_telemetry, _r_failures, _r_sweep, _r_trees, _r_uptime):
+    for part in (_r_header, _r_totals, _r_rows, _r_left_out, _r_telemetry, _r_failures, _r_sweep, _r_trees, _r_uptime, _r_rates):
         lines = part(summary)
         if lines:                                  # _r_left_out has nothing to say of a run from before the field
             out += lines

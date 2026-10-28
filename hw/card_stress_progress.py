@@ -38,6 +38,13 @@ group (only the groups it has rows of) beside `total`, which stays over every ro
 complete) is written only once the class has a wide row served, so that the nights before it are the nights they were. Fields are added, none
 changed: SCHEMA stays 1, and a data file without them is read as the page has always read it.
 
+RATES (parcel TP, 2026-10-28). The file gains ONE top-level field, `rates`: for each night, from that night's own records and the report's `rates`
+(card_stress_report._rates), the card's throughput by op and format - cases a second on one tile, a row for each (image, op, format, level), its tiles,
+their pool and their sum - and, for a night with probe legs, the card-only rates beside them. It is NOT a field of `nights[i]`: the scheduler's
+publish step compares every field of the nights the published file holds (hw/sched/sched_publish.py, first_diff, which is symmetric on keys), so a
+field added to an earlier night would be refused as `earlier-night-changed`; a top-level field leaves every night the night it was, and the nights
+before these tools get their rows too, derived from the slices their records hold. A file made without it is read as it always was.
+
 NOTHING PRIVATE. Only counts, item names, short tree hashes, the compiler's version line, a run_end reason that is a plain
 snake_case word, and the images' names, tile counts and short sha256 are passed through. Every string of the result is then
 held against the private text the records themselves carry (host, directory, image paths, the user names in them) and
@@ -398,9 +405,63 @@ def reduce_records(objs: List[Dict[str, Any]], info: Dict[str, Any], commit: Any
             "legs": {"total": final["totals"]["legs"]["total"], "by_status": final["totals"]["legs"]["by_status"]},
             "cycles": final["totals"]["cycles"]["started"], "fully_covered": complete_list,
         },
+        "rates": rates_of(owns, nights),          # parcel TP: LAST, a field of its own (see RATES in the docstring): no night's entry has changed
     }
     guard(out, objs)
     return out
+
+
+# ---------------------------------------------------------------------------
+# the rates (parcel TP)
+# ---------------------------------------------------------------------------
+
+class OneLine(dict):
+    """A dict the file writes on one line whatever its length (a rate row, which holds a tile's figures for each of four tiles): _inline says so.
+    json.dumps treats it as the dict it is, and --check reads the file back as plain dicts."""
+
+
+RATES_COLUMNS = ["slices", "cases", "median", "min", "max"]
+RATES_SUM_COLUMNS = ["tiles", "median", "min", "max"]
+PROBE_COLUMNS = ["rows", "median", "min", "max"]
+RATES_RULE = ("Per night, from that night's own records: the card's throughput by op and format, in cases a second on one tile. A row is an (image, op, "
+              "format, level); it is made of the night's sweep slices that ran on a tile of the card (reach tile, level exhaustive or hard, status pass) "
+              "and of nothing else: the class level (one case a call), the host reach (the CPU) and the random items are left out, and `left_out` counts "
+              "them and every other leg that is not in a row, by reason. A rate is the slice's own, its cases over its whole duration with the soak "
+              "process's start and the host's oracle in it, so it is the pipeline's pace and not the tile's alone. A case is one element through the op; a "
+              "hard item's cases are the ones its tool compared, its skipped slots left out. `all` is the image's slices pooled and `tiles` each tile's "
+              "([slices, cases, median, least, most], cases a second); `sum` adds the tiles' medians, least and most (bounds, not measured quad rates). "
+              "`card` is the night's probe rate with the oracle off for the same op and format, per tile, and its ratio to `all`'s median; null where "
+              "no probe ran that night, never a zero. `from` names the catalog ops pooled in a row.")
+
+
+def rate_row(e: Dict[str, Any]) -> "OneLine":
+    """The report's rate row as the file keeps it: a figure list for each of `all` and the tiles (RATES_COLUMNS), so that a night of the whole catalog is a
+    line a row and not a hundred."""
+    return OneLine({
+        "image": e["image"], "op": e["op"], "format": e["format"], "level": e["level"], "from": e["from"],
+        "all": [e["all"][c] for c in RATES_COLUMNS],
+        "tiles": {("only" if t["tile"] is None else str(t["tile"])): [t[c] for c in RATES_COLUMNS] for t in e["tiles"]},
+        "sum": ([e["sum"][c] for c in RATES_SUM_COLUMNS] if e["sum"] else None),
+        "card": e["card"]})
+
+
+def rates_of(owns: List[Dict[str, Any]], nights: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """The file's `rates`: one entry a night, from that night's own summary (owns[k]["rates"], the report's _rates over the night's records)."""
+    out = []
+    for k, own in enumerate(owns, 1):
+        X = own["rates"]
+        P = X["probe"]
+        probe = None
+        if P is not None:
+            probe = {"images": P["images"],
+                     "table": [OneLine({"image": t["image"], "op": t["op"], "format": t["format"],
+                                        "alone": [t["alone"][c] for c in PROBE_COLUMNS] if t["alone"] else None,
+                                        "together": [t["together"][c] for c in PROBE_COLUMNS] if t["together"] else None}) for t in P["table"]],
+                     "refused": [OneLine({"image": r["image"], "op": r["op"], "format": r["format"], "refused": r["refused"]}) for r in P["refused"]],
+                     "red": len(P["red"])}
+        out.append({"n": k, "date": nights[k - 1]["date"], "seen": X["seen"], "used": X["used"], "left_out": X["left_out"],
+                    "rows": [rate_row(e) for e in X["rows"]], "probe": probe})
+    return {"unit": R.RATE_UNIT, "columns": RATES_COLUMNS, "sum_columns": RATES_SUM_COLUMNS, "probe_columns": PROBE_COLUMNS, "rule": RATES_RULE, "nights": out}
 
 
 # ---------------------------------------------------------------------------
@@ -464,6 +525,8 @@ def guard(out: Dict[str, Any], objs: List[Dict[str, Any]]) -> None:
 def _inline(x: Any) -> bool:
     """Whether a dict or list goes on one line: it holds only scalars (and no long text), or it is short. A night's item map is
     one line, so a night adds tens of lines to the file, not hundreds."""
+    if isinstance(x, OneLine):
+        return True
     vals = list(x.values()) if isinstance(x, dict) else x
     if all(not isinstance(v, (dict, list)) for v in vals):
         return not any(isinstance(v, str) and len(v) > 100 for v in vals)

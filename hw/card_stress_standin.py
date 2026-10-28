@@ -44,6 +44,10 @@ failure policy meets each kind of failure:
     CFT_STANDIN_MPFR=<version>         the MPFR the wide modes' oracle line names (default 4.2.2, the pin)
     CFT_STANDIN_NO_WIDE=1              a soak built without MPFR=1: it refuses every wide mode, exit 2 (the divsqrt soak `unknown op`,
                                        and hard-space's `unknown hard-case mode`; the clause-5 soak its usage text, run or dump)
+    CFT_STANDIN_PROBE_NOFMT=<fmt>      (rate-probe) an image that lacks a format: every row at <fmt> is refused, by the library's name
+                                       (CFT_ERR_UNSUPPORTED) and never timed, as host/tools/rate_probe.c refuses it
+  The rate-probe leg (parcel TP) prints the lines host/tools/rate_probe.c prints, with rates of its own that differ by op, format and tile
+  (probe_rate below) and no sleep; "fail" is its sabotage: every row's check red, exit 1; "software" a probe that opened the software backend.
   Every soak job also prints "standin: env CFT_SOAK_ARTIFACT=... CFT_XRT_TILES=..." (the two variables as the job was handed
   them, "<unset>" for none): the tests hold a host-pool job to neither, and a card job to its image and tile.
 
@@ -313,6 +317,17 @@ def apply_misbehaviour(do: str, leg: str, xb) -> bool:
     return False
 
 
+PROBE_OPS = ("div", "sqrt", "rint", "scaleb", "fma", "mul", "add")        # host/tools/rate_probe.c's grid; the suite holds this copy to the library's
+PROBE_FORMATS = ("fp32", "fp64", "fp128", "fp256")
+
+
+def probe_rate(op: str, fmt: str, tile: str) -> float:
+    """The elements a second this stand-in says a row ran at: NOT a measurement. It differs by format (the narrower the faster), by op and by tile, so that
+    a table built from it shows a row, a column or a tile read from the wrong place; tile is the CFT_XRT_TILES value ('1', '1,3', 'all' or 'none')."""
+    first = int(tile.split(",")[0]) if tile.split(",")[0].isdigit() else 0
+    return float(8_000_000 // (1 + PROBE_FORMATS.index(fmt)) + 100_000 * PROBE_OPS.index(op) + 1_000 * first)
+
+
 def main() -> int:
     argv = sys.argv[1:]
     if "--" not in argv:
@@ -460,6 +475,35 @@ def main() -> int:
             return 1
         out("1224915 cases checked")
         return 0
+
+    if leg == "rate-probe":
+        # host/tools/rate_probe.c's lines (parcel TP), real argv [tool, artifact, seconds a row]; the rates are probe_rate's
+        art, secs = real[1], float(real[2])
+        tile = os.environ.get("CFT_XRT_TILES") or "all"
+        out(f"standin: env CFT_XRT_TILES={os.environ.get('CFT_XRT_TILES', '<unset>')}")
+        out(f"rate-probe: backend {'software' if do == 'software' else 'DEVICE ' + art}")
+        out(f"rate-probe: N 4096, {secs:g} s a row, tile {tile}")
+        nofmt = os.environ.get("CFT_STANDIN_PROBE_NOFMT") or ""
+        red = refused = timed = 0
+        for fmt in PROBE_FORMATS:
+            for op in PROBE_OPS:
+                if fmt == nofmt:
+                    refused += 1
+                    out(f"rate-probe: row op={op} format={fmt} tile={tile} refused=CFT_ERR_UNSUPPORTED why=operation or format not available on this device")
+                    continue
+                r = probe_rate(op, fmt, tile)
+                calls = max(3, int(secs * r / 4096))
+                elements = calls * 4096
+                line = f"rate-probe: row op={op} format={fmt} tile={tile} elements={elements} seconds={elements / r:.4f} rate={elements / float(f'{elements / r:.4f}'):.1f}"
+                timed += 1
+                if fail:
+                    red += 1
+                    out(line + " check=red mismatched=1 flags_device=0x00 flags_software=0x00")
+                else:
+                    out(line + " check=ok")
+        out(f"rate-probe: {len(PROBE_OPS) * len(PROBE_FORMATS)} rows, {timed} timed, {refused} refused, {red} red")
+        out("rate-probe: A CHECK FAILED" if red else "rate-probe: every check ok")
+        return 1 if red else 0
 
     if leg == "soak":
         op = real[1]

@@ -1,0 +1,32 @@
+rate-probe: backend software
+rate-probe: N 4096, 0.05 s a row, tile none
+rate-probe: row op=div format=fp32 tile=none elements=12288 seconds=0.0503 rate=244258.9 check=ok
+rate-probe: row op=sqrt format=fp32 tile=none elements=12288 seconds=0.0612 rate=200811.4 check=ok
+rate-probe: row op=rint format=fp32 tile=none elements=98304 seconds=0.0513 rate=1916152.4 check=ok
+rate-probe: row op=scaleb format=fp32 tile=none elements=286720 seconds=0.0501 rate=5728408.4 check=ok
+rate-probe: row op=fma format=fp32 tile=none elements=176128 seconds=0.0504 rate=3493346.4 check=ok
+rate-probe: row op=mul format=fp32 tile=none elements=245760 seconds=0.0506 rate=4861081.9 check=ok
+rate-probe: row op=add format=fp32 tile=none elements=196608 seconds=0.0504 rate=3901360.2 check=ok
+rate-probe: row op=div format=fp64 tile=none elements=12288 seconds=0.0610 rate=201606.9 check=ok
+rate-probe: row op=sqrt format=fp64 tile=none elements=12288 seconds=0.0777 rate=158062.8 check=ok
+rate-probe: row op=rint format=fp64 tile=none elements=90112 seconds=0.0534 rate=1688113.5 check=ok
+rate-probe: row op=scaleb format=fp64 tile=none elements=274432 seconds=0.0504 rate=5440308.1 check=ok
+rate-probe: row op=fma format=fp64 tile=none elements=208896 seconds=0.0501 rate=4171789.5 check=ok
+rate-probe: row op=mul format=fp64 tile=none elements=237568 seconds=0.0509 rate=4667137.7 check=ok
+rate-probe: row op=add format=fp64 tile=none elements=196608 seconds=0.0508 rate=3869163.8 check=ok
+rate-probe: row op=div format=fp128 tile=none elements=12288 seconds=0.0790 rate=155642.2 check=ok
+rate-probe: row op=sqrt format=fp128 tile=none elements=12288 seconds=0.0891 rate=137962.2 check=ok
+rate-probe: row op=rint format=fp128 tile=none elements=65536 seconds=0.0518 rate=1264263.4 check=ok
+rate-probe: row op=scaleb format=fp128 tile=none elements=229376 seconds=0.0505 rate=4543643.0 check=ok
+rate-probe: row op=fma format=fp128 tile=none elements=163840 seconds=0.0512 rate=3202616.3 check=ok
+rate-probe: row op=mul format=fp128 tile=none elements=192512 seconds=0.0507 rate=3795601.8 check=ok
+rate-probe: row op=add format=fp128 tile=none elements=135168 seconds=0.0505 rate=2675731.9 check=ok
+rate-probe: row op=div format=fp256 tile=none elements=12288 seconds=0.1310 rate=93820.5 check=ok
+rate-probe: row op=sqrt format=fp256 tile=none elements=12288 seconds=0.1650 rate=74474.3 check=ok
+rate-probe: row op=rint format=fp256 tile=none elements=53248 seconds=0.0508 rate=1047906.7 check=ok
+rate-probe: row op=scaleb format=fp256 tile=none elements=135168 seconds=0.0508 rate=2659114.2 check=ok
+rate-probe: row op=fma format=fp256 tile=none elements=122880 seconds=0.0505 rate=2432411.2 check=ok
+rate-probe: row op=mul format=fp256 tile=none elements=139264 seconds=0.0500 rate=2784768.0 check=ok
+rate-probe: row op=add format=fp256 tile=none elements=114688 seconds=0.0511 rate=2246093.2 check=ok
+rate-probe: 28 rows, 28 timed, 0 refused, 0 red
+rate-probe: every check ok

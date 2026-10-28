@@ -1,0 +1,32 @@
+rate-probe: backend software
+rate-probe: N 4096, 0.02 s a row, tile none, SABOTAGE (one bit flipped)
+rate-probe: row op=div format=fp32 tile=none elements=12288 seconds=0.0646 rate=190242.1 check=red mismatched=1 flags_device=0x10 flags_software=0x10
+rate-probe: row op=sqrt format=fp32 tile=none elements=12288 seconds=0.0595 rate=206377.8 check=red mismatched=1 flags_device=0x10 flags_software=0x10
+rate-probe: row op=rint format=fp32 tile=none elements=40960 seconds=0.0207 rate=1976064.6 check=red mismatched=1 flags_device=0x00 flags_software=0x00
+rate-probe: row op=scaleb format=fp32 tile=none elements=114688 seconds=0.0200 rate=5733188.6 check=red mismatched=1 flags_device=0x00 flags_software=0x00
+rate-probe: row op=fma format=fp32 tile=none elements=77824 seconds=0.0207 rate=3757111.1 check=red mismatched=1 flags_device=0x10 flags_software=0x10
+rate-probe: row op=mul format=fp32 tile=none elements=81920 seconds=0.0202 rate=4057012.9 check=red mismatched=1 flags_device=0x10 flags_software=0x10
+rate-probe: row op=add format=fp32 tile=none elements=61440 seconds=0.0202 rate=3038004.3 check=red mismatched=1 flags_device=0x10 flags_software=0x10
+rate-probe: row op=div format=fp64 tile=none elements=12288 seconds=0.0593 rate=207218.8 check=red mismatched=1 flags_device=0x10 flags_software=0x10
+rate-probe: row op=sqrt format=fp64 tile=none elements=12288 seconds=0.0688 rate=178591.9 check=red mismatched=1 flags_device=0x10 flags_software=0x10
+rate-probe: row op=rint format=fp64 tile=none elements=40960 seconds=0.0212 rate=1931936.9 check=red mismatched=1 flags_device=0x00 flags_software=0x00
+rate-probe: row op=scaleb format=fp64 tile=none elements=106496 seconds=0.0204 rate=5223637.1 check=red mismatched=1 flags_device=0x00 flags_software=0x00
+rate-probe: row op=fma format=fp64 tile=none elements=77824 seconds=0.0201 rate=3865433.8 check=red mismatched=1 flags_device=0x10 flags_software=0x10
+rate-probe: row op=mul format=fp64 tile=none elements=86016 seconds=0.0209 rate=4120098.7 check=red mismatched=1 flags_device=0x10 flags_software=0x10
+rate-probe: row op=add format=fp64 tile=none elements=73728 seconds=0.0209 rate=3527106.5 check=red mismatched=1 flags_device=0x10 flags_software=0x10
+rate-probe: row op=div format=fp128 tile=none elements=12288 seconds=0.0794 rate=154669.3 check=red mismatched=1 flags_device=0x10 flags_software=0x10
+rate-probe: row op=sqrt format=fp128 tile=none elements=12288 seconds=0.0988 rate=124317.2 check=red mismatched=1 flags_device=0x10 flags_software=0x10
+rate-probe: row op=rint format=fp128 tile=none elements=28672 seconds=0.0201 rate=1428119.3 check=red mismatched=1 flags_device=0x00 flags_software=0x00
+rate-probe: row op=scaleb format=fp128 tile=none elements=81920 seconds=0.0209 rate=3920962.6 check=red mismatched=1 flags_device=0x00 flags_software=0x00
+rate-probe: row op=fma format=fp128 tile=none elements=69632 seconds=0.0203 rate=3435706.3 check=red mismatched=1 flags_device=0x10 flags_software=0x10
+rate-probe: row op=mul format=fp128 tile=none elements=86016 seconds=0.0208 rate=4137819.5 check=red mismatched=1 flags_device=0x10 flags_software=0x10
+rate-probe: row op=add format=fp128 tile=none elements=73728 seconds=0.0211 rate=3492307.1 check=red mismatched=1 flags_device=0x10 flags_software=0x10
+rate-probe: row op=div format=fp256 tile=none elements=12288 seconds=0.1329 rate=92487.9 check=red mismatched=1 flags_device=0x10 flags_software=0x10
+rate-probe: row op=sqrt format=fp256 tile=none elements=12288 seconds=0.1507 rate=81530.2 check=red mismatched=1 flags_device=0x10 flags_software=0x10
+rate-probe: row op=rint format=fp256 tile=none elements=20480 seconds=0.0201 rate=1021195.7 check=red mismatched=1 flags_device=0x00 flags_software=0x00
+rate-probe: row op=scaleb format=fp256 tile=none elements=45056 seconds=0.0201 rate=2236978.5 check=red mismatched=1 flags_device=0x00 flags_software=0x00
+rate-probe: row op=fma format=fp256 tile=none elements=36864 seconds=0.0204 rate=1803348.0 check=red mismatched=1 flags_device=0x10 flags_software=0x10
+rate-probe: row op=mul format=fp256 tile=none elements=65536 seconds=0.0207 rate=3169228.8 check=red mismatched=1 flags_device=0x10 flags_software=0x10
+rate-probe: row op=add format=fp256 tile=none elements=49152 seconds=0.0209 rate=2354599.3 check=red mismatched=1 flags_device=0x10 flags_software=0x10
+rate-probe: 28 rows, 28 timed, 0 refused, 28 red
+rate-probe: A CHECK FAILED

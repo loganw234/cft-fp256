@@ -906,15 +906,25 @@ clause5-soak$(EXE): tools/clause5_soak.c libcft.a $(SOAK_MPFR_DEPS)
 	  -frounding-math $(C5DEFS) tools/clause5_soak.c libcft.a -o $@ \
 	  $(XRTLIBS) $(LDLIBS)$(SOAK_MPFR_LD) -lm
 
+# The card's own rate for each operation and format with the oracle off (parcel TP, 2026-10-28): div, sqrt, rint, scaleb, fma, mul and
+# add at fp32 to fp256, one call of 4096 elements at a time, each row first checked against the software backend (bytes and flags)
+# and then timed, on the tiles CFT_XRT_TILES names. Built the way the soaks are - a target of its own, not in `all` - and run by
+# hw/card_stress.py's probe leg (--rate-probe, off by default). `make -C host XRT=1 XRT_ROOT=... rate-probe` on a box that will open an
+# artifact: without XRT=1 it opens none (CLAUDE.md). The tool's header says what a line of its output means.
+rate-probe$(EXE): tools/rate_probe.c libcft.a
+	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) tools/rate_probe.c libcft.a -o $@ \
+	  $(XRTLIBS) $(LDLIBS) -lm
+
 # Convenience alias for Windows, where the real target carries .exe.
 # Guarded: with EXE empty the alias would be a circular self-edge.
 ifneq ($(EXE),)
 divsqrt-soak: divsqrt-soak$(EXE)
 clause5-soak: clause5-soak$(EXE)
+rate-probe: rate-probe$(EXE)
 mpfr-check: mpfr-check$(EXE)
 mp-err-check: mp-err-check$(EXE)
 cft-bench-peers: cft-bench-peers$(EXE)
-.PHONY: divsqrt-soak clause5-soak mpfr-check mp-err-check cft-bench-peers
+.PHONY: divsqrt-soak clause5-soak rate-probe mpfr-check mp-err-check cft-bench-peers
 endif
 
 # ====================================================================
@@ -1590,6 +1600,7 @@ clean:
 	      cft-collatz cft-collatz.exe \
 	      cft-bench-peers cft-bench-peers.exe \
 	      divsqrt-soak divsqrt-soak.exe clause5-soak clause5-soak.exe \
+	      rate-probe rate-probe.exe \
 	      mpfr-check mpfr-check.exe mp-err-check mp-err-check.exe \
 	      reduce-parts reduce-parts.exe \
 	      device-test device-test.exe \
