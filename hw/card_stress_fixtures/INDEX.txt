@@ -142,3 +142,9 @@ wc-cvtto256-class-sab.txt	1	env CFT_SOAK_SABOTAGE=1 host/clause5-soak cvtto256-c
 wc-rint256-f32-sab.txt	1	env CFT_SOAK_SABOTAGE=1 host/clause5-soak rint256-f32 0x3F800000 0x3F800400 rne [0 s]
 wc-chunk-rint128-class-c16384.txt	0	host/clause5-soak-c16384 rint128-class 0 4096 rne [0 s]
 wc-build-warnings.txt	0	make -C host -j8 XRT=0 C5DEFS=-DCFT_SOAK_HAVE_ROUNDEVEN=1 MPFR=1 all device-test api-test remote-test divsqrt-soak clause5-soak; make -C host -j8 XRT=0 C5DEFS=-DCFT_SOAK_HAVE_ROUNDEVEN=1 MPFR=1 SOAK_CHUNK=16384 soak-chunk
+# rp-*: parcel TP (2026-10-28), host/tools/rate_probe.c on the software backend (its artifact is "-"), made in WSL (Ubuntu 22.04, gcc 11.4), make -C host (XRT=0). Each log is
+# verbatim; rp-sw-sab is the tool's own negative control (CFT_RATE_PROBE_SABOTAGE=1), a real failing run; rp-sw-fp128max is the same tool against a libcft built with
+# CFLAGS="-O2 -DCFT_MAX_FORMAT=2 -DCFT_BN_LIMBS=64" (the profile with no fp256), where the seven fp256 rows are refused by name and the other 21 timed. The rates in them are this host's, not the card's.
+rp-sw.txt	0	host/rate-probe - 0.05 [2 s]
+rp-sw-sab.txt	1	env CFT_RATE_PROBE_SABOTAGE=1 host/rate-probe - 0.02 [1 s]
+rp-sw-fp128max.txt	0	host/rate-probe - 0.02 [1 s]

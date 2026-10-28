@@ -66,6 +66,9 @@ th:first-child, td:first-child, th.l, td.l { text-align: left; }
 th { font-weight: 600; color: var(--dim); }
 details { margin: 0.5rem 0; }
 summary { cursor: pointer; font-weight: 600; }
+table.rates { width: auto; max-width: 100%; }
+table.rates td.cell { white-space: nowrap; }
+table.rates td .card { display: block; font-size: 0.75rem; color: var(--dim); }
 dl.totals { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); gap: 0.7rem 1.2rem; margin: 0; }
 dl.totals div { min-width: 0; }
 dl.totals dt { font-size: 0.8rem; color: var(--dim); }
@@ -173,6 +176,49 @@ rebuilt after each night from the run's own record by <code>hw/card_stress_progr
             " (the last " + e.window_nights + " night" + (e.window_nights === 1 ? "" : "s") + "' pace: " + fmt(e.per_night) + " a night)"];
   }
 
+  // ---- the card's rates (parcel TP) ----
+  // The data file's `rates` (hw/card_stress_progress.py): for each night, rows of (image, op, format, level) with the figures of the night's passing slices
+  // that ran on a tile ([slices, cases, median, least, most], cases a second). The page lays out the newest night that has rows, one table an image: the
+  // formats down, the ops across, each cell the median a tile (the row's `all`), as the file gives it; it computes no figure. A file without `rates` draws
+  // as it always did, and so does one whose nights have no rows.
+  var RATE_FORMATS = ["fp32", "fp64", "fp128", "fp256"], RATE_OPS = ["div", "recip", "sqrt", "rint", "scaleb"], RATE_LEVELS = ["exhaustive", "hard"];
+  function rank(list, v) { var i = list.indexOf(v); return i < 0 ? list.length : i; }
+  function rate(x) { return !isnum(x) ? "-" : x >= 1e6 ? (x / 1e6).toFixed(2) + " M" : x >= 1e3 ? (x / 1e3).toFixed(1) + " k" : x.toFixed(0); }
+  function ratesSection(d) {
+    var R = d.rates, night = null, i;
+    if (R === undefined) return null;
+    for (i = R.nights.length - 1; i >= 0 && !night; i--) { if (R.nights[i].rows.length) night = R.nights[i]; }
+    if (!night) return null;
+    var images = [], tables;
+    night.rows.forEach(function (r) { if (images.indexOf(r.image) < 0) images.push(r.image); });
+    images.sort(function (a, b) { return rank(["quad", "single", "deep"], a) - rank(["quad", "single", "deep"], b); });
+    tables = images.map(function (img) {
+      var rows = night.rows.filter(function (r) { return r.image === img; }), cols = [], fmts = [];
+      rows.forEach(function (r) {
+        if (!cols.some(function (c) { return c.op === r.op && c.level === r.level; })) cols.push({ op: r.op, level: r.level });
+        if (fmts.indexOf(r.format) < 0) fmts.push(r.format);
+      });
+      cols.sort(function (a, b) { return rank(RATE_OPS, a.op) - rank(RATE_OPS, b.op) || rank(RATE_LEVELS, a.level) - rank(RATE_LEVELS, b.level) || (a.op < b.op ? -1 : a.op > b.op ? 1 : 0); });
+      fmts.sort(function (a, b) { return rank(RATE_FORMATS, a) - rank(RATE_FORMATS, b) || (a < b ? -1 : a > b ? 1 : 0); });
+      function head(c) { return h("th", { "class": "r" }, c.op, c.level === "hard" ? h("span", { "class": "tag", title: "a deterministic space of constructed operands, not the operand space", text: "hard-case" }) : null); }
+      var body = fmts.map(function (f) {
+        return h("tr", null, h("td", { "class": "l mono", "data-label": "Format", text: f }), cols.map(function (c) {
+          var r = rows.filter(function (x) { return x.format === f && x.op === c.op && x.level === c.level; })[0];
+          if (!r) return h("td", { "class": "cell dim", "data-label": c.op + (c.level === "hard" ? " (hard-case)" : ""), text: "-" });
+          return h("td", { "class": "cell", "data-label": c.op + (c.level === "hard" ? " (hard-case)" : ""),
+                           title: r.all[0] + " slices; least " + rate(r.all[3]) + ", most " + rate(r.all[4]) + "; from " + r.from.join(", ") },
+                   rate(r.all[2]), r.card ? h("span", { "class": "card", title: "the probe's rate with the oracle off, per tile, and its ratio to this median", text: "card alone " + rate(r.card.rate) + " (" + r.card.ratio.toFixed(2) + "x)" }) : null);
+        }));
+      });
+      return h("div", null, h("h3", { text: img }),
+        h("table", { "class": "rates stack" }, h("thead", null, h("tr", null, h("th", { "class": "l", text: "Format" }), cols.map(head))), h("tbody", null, body)));
+    });
+    return h("section", { id: "rates" }, h("h2", { text: "What a tile does a second" }),
+      h("p", null, "Night " + night.n + (night.date ? " (" + night.date + ")" : "") + ": " + (R.unit || "cases/s") + " on one tile, the median of the night's passing slices of each op at each format, from the night's own records. Hover a figure for its slices."),
+      tables,
+      h("p", { "class": "small dim", text: R.rule }));
+  }
+
   // ---- loading, and the three ways it can fail ----
   function say(text, error, detail) {
     var s = document.getElementById("status");
@@ -232,6 +278,13 @@ rebuilt after each night from the run's own record by <code>hw/card_stress_progr
       })), "the groups of class " + c.id + " are not a list of group, items, complete, covered and space");
     });
     need(isnum(d.totals.nights) && isnum(d.totals.slices) && isnum(d.totals.cases) && isnum(d.totals.disagreements), "totals lacks a count");
+    // the rates (parcel TP) are in a data file made by the tools that know them; a file without them is read as it always was
+    need(d.rates === undefined || (d.rates && typeof d.rates === "object" && Array.isArray(d.rates.nights) && d.rates.nights.every(function (n) {
+      return n && isnum(n.n) && Array.isArray(n.rows) && n.rows.every(function (r) {
+        return r && typeof r.image === "string" && typeof r.op === "string" && typeof r.format === "string" && typeof r.level === "string" && Array.isArray(r.from) &&
+          Array.isArray(r.all) && r.all.length === 5 && r.all.every(isnum) && (r.card === undefined || r.card === null || (typeof r.card === "object" && isnum(r.card.rate) && isnum(r.card.ratio)));
+      });
+    })), "rates is not a list of nights, each with rows of image, op, format and level and the five figures of all its slices");
   }
 
   // ---- the page ----
@@ -285,6 +338,9 @@ rebuilt after each night from the run's own record by <code>hw/card_stress_progr
       h("p", { "class": "small" }, h("strong", { text: "Why a changed tree starts again. " }), d.rules.classes),
       (d.rules.groups && d.now.classes.some(function (c) { return group(c, "wide"); })) ? h("p", { "class": "small" }, h("strong", { text: "Groups. " }), d.rules.groups) : null,
       earlier.length ? h("details", { open: "" }, h("summary", { text: "Earlier trees (" + earlier.length + "), kept as history" }), h("ul", null, earlier)) : null));
+
+    var rates = ratesSection(d);                    // parcel TP: beside the headline, and only for a file that has rows of rates
+    if (rates) frag.appendChild(rates);
 
     // the growing list: grouped by the tree each item completed on, the current trees first
     function levelTag(level) {

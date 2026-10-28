@@ -121,6 +121,7 @@ host/cpp-api-test20
 host/device-test
 host/divsqrt-soak
 host/clause5-soak
+host/rate-probe
 # the soak tools at another pass size (host/Makefile, SOAK_CHUNK=n): per n
 # the two binaries (the .exe forms are host/*.exe above), the library
 # archive (host/*.a above, which takes any .a in host/) and its object

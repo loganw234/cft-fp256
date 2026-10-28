@@ -505,6 +505,17 @@ function chart(n, out) {
   (n.kids || []).forEach(k => chart(k, out));
   return out;
 }
+// the rates section (parcel TP): its heading, the image headings, each table's header cells and each row's cells (text, title, data-label), and its text
+function find(n, pred, out) { if (pred(n)) out.push(n); (n.kids || []).forEach(k => find(k, pred, out)); return out; }
+function ratesDump(app) {
+  const sec = find(app, n => n.tag === "section" && n.attrs.id === "rates", [])[0];
+  if (!sec) return null;
+  const cells = r => r.kids.map(c => ({ text: c.textContent, title: c.attrs.title || "", label: c.attrs["data-label"] || "", cls: c.attrs["class"] || "" }));
+  return { h2: find(sec, n => n.tag === "h2", []).map(x => x.textContent), h3: find(sec, n => n.tag === "h3", []).map(x => x.textContent),
+           tables: find(sec, n => n.tag === "table", []).map(t => ({ head: find(t, n => n.tag === "th", []).map(c => c.textContent),
+             rows: find(t, n => n.tag === "tr", []).filter(r => r.kids.some(k => k.tag === "td")).map(cells) })),
+           paras: find(sec, n => n.tag === "p", []).map(x => x.textContent) };
+}
 class FDate extends Date { constructor(...a) { if (a.length) super(...a); else super(Number(clock)); } static now() { return Number(clock); } }
 const els = { status: new N("div"), app: new N("div") };
 const document = { createElement: t => new N(t), createElementNS: (ns, t) => new N(t), createTextNode: s => new T(s),
@@ -514,7 +525,7 @@ const fetch = () => mode === "reject" ? Promise.reject(new TypeError("Failed to 
   Promise.resolve(mode === "404" ? resp(false, 404, "") : resp(true, 200, fs.readFileSync(dataPath, "utf8")));
 vm.runInNewContext(m[1], { document, window: { addEventListener() {} }, fetch, Date: clock ? FDate : Date, setTimeout, clearTimeout, console });
 setTimeout(() => console.log(JSON.stringify({ status: { hidden: els.status.hidden, text: els.status.textContent },
-  app: { hidden: els.app.hidden, text: els.app.textContent }, chart: chart(els.app, []),
+  app: { hidden: els.app.hidden, text: els.app.textContent }, chart: chart(els.app, []), rates: ratesDump(els.app),
   dom: require("crypto").createHash("sha256").update(JSON.stringify(els.app.dump())).digest("hex") })), 300);
 '''
 
@@ -699,6 +710,7 @@ def legacy(out):
             r.pop("group", None)
     for nt in j["nights"]:
         nt["after"].pop("groups", None)
+    j.pop("rates", None)                 # parcel TP's field, which 3ec0081c's files lack
     return j
 
 
@@ -1018,6 +1030,256 @@ def group_night7():
         skip("night 7's file in the page", "node is not on PATH")
 
 
+# ---------------------------------------------------------------------------
+# parcel TP (2026-10-28): the rates in the data file and on the page
+# ---------------------------------------------------------------------------
+# The ORACLE's table of the tile items of WSPEC's four nights that have rate rows: item -> (rate op, format, level). Written here from the catalog's names and
+# the C tools' headers, and not read from the library; the class-level item and the host item of the run have no row (the oracle's reasons: one case a call, the CPU).
+RT_OPS = {"scaleb32-all-rne": ("scaleb", "fp32", "exhaustive"), "scaleb32-wide-rne": ("scaleb", "fp32", "exhaustive"), "div32-hard-rne": ("div", "fp32", "hard"),
+          "div128-hard-rne": ("div", "fp128", "hard"), "sqrt256-f64hard-rne": ("sqrt", "fp256", "hard"), "sqrt64-f32-rup": ("sqrt", "fp64", "exhaustive"),
+          "recip128-win-key-rne": ("recip", "fp128", "exhaustive")}
+RT_DURS = [0.5, 1.25, 2.0, 3.0, 4.0, 7.0, 8.0]
+RT_ORDER = {"image": ["quad", "single", "deep"], "op": ["div", "recip", "sqrt", "rint", "scaleb"], "format": ["fp32", "fp64", "fp128", "fp256"], "level": ["exhaustive", "hard"]}
+
+
+def rt_median(xs):
+    """The middle one, or the mean of the two middle ones; the file keeps three places, so the oracle does."""
+    xs = sorted(xs)
+    n = len(xs)
+    return round(xs[n // 2] if n % 2 else (xs[n // 2 - 1] + xs[n // 2]) / 2, 3)
+
+
+def rt_probe_rate(phase, tile, op, fmt):
+    return float(1_000_000 * (5 - RT_ORDER["format"].index(fmt)) + 10_000 * ["div", "sqrt", "rint", "scaleb", "fma", "mul", "add"].index(op) + 100 * (tile or 0) + (7 if phase == "together" else 0))
+
+
+def rated(recs):
+    """The records of `build(WSPEC, WCAMPAIGN)` with rate-bearing slices, and the plan the oracle reads: for each night in order, each tile item's passing slice on the
+    card (j = 0, 1, ...) gets a tile (1 or 2), a duration and a count of cases by formula, and its rate round(cases / duration, 3); one slice of night 4 is the single's.
+    Night 4 also has the probe legs: the quad's tile 1 alone and its four tiles together, and the single's. The builder is not changed (its fixtures are compared byte
+    for byte), so this works on a copy. Returns (records, plan: [(night, item, image, tile, cases, dur)])."""
+    recs = json.loads(json.dumps(recs))
+    plan, night, j = [], 0, 0
+    for r in recs:
+        if r["type"] == "run_start":
+            night, j = night + 1, 0
+        if r["type"] != "leg" or r["kind"] != "sweep" or r["image"] != "quad" or r["sweep"]["item"] not in RT_OPS:
+            continue
+        item = r["sweep"]["item"]
+        single = night == 4 and item == "sqrt64-f32-rup"
+        tile = None if single else 1 + j % 4
+        cases, dur = 1000 * (30 + 11 * night + 4 * j), RT_DURS[(night + j) % len(RT_DURS)]
+        j += 1
+        r["image"] = "single" if single else "quad"
+        r["tile"] = r["sweep"]["tile"] = tile
+        r["sweep"]["jobs"] = 1 if single else 4
+        r["duration_s"], r["end_epoch"], r["end"] = float(dur), r["start_epoch"] + dur, local(r["start_epoch"] + dur)
+        r["counts"]["cases"] = cases
+        r["rate"] = {"value": round(cases / dur, 3), "unit": "cases/s"}
+        plan.append((night, item, r["image"], tile, cases, dur))
+    # the probe legs, before night 4's cycle_end
+    at = max(i for i, r in enumerate(recs) if r["type"] == "cycle_end")
+    e0 = recs[at - 1]["epoch"]
+    extra = []
+
+    def probe_leg(image, phase, tile, dur):
+        rows = [{"op": op, "format": fmt, "tile": "all" if tile is None else str(tile), "elements": 12288, "seconds": round(12288 / rt_probe_rate(phase, tile, op, fmt), 4),
+                 "rate": rt_probe_rate(phase, tile, op, fmt), "check": "ok"} for fmt in RT_ORDER["format"] for op in ["div", "sqrt", "rint", "scaleb", "fma", "mul", "add"]]
+        s = e0 + 1 + 0.01 * len(extra)
+        extra.append({"type": "leg", "cycle": recs[at]["cycle"], "image": image, "leg": "rate-probe", "kind": "probe", "attempt": 1, "start": local(s), "end": local(s + dur),
+                      "start_epoch": s, "end_epoch": s + dur, "duration_s": float(dur), "rc": 0, "status": "pass", "timed_out": False, "killed": None,
+                      "counts": {"rows": 28, "timed": 28, "refused": 0, "red": 0}, "rate": None, "sweep": None, "disagreements": None, "log": "logs/p.log.gz", "reason": None,
+                      "tile": tile, "extra": {"phase": phase, "rows": rows, "tile": "all" if tile is None else str(tile), "seconds_a_row": 2.0, "backend": "x"},
+                      "v": 1, "ts": local(e0 + 0.5), "epoch": round(e0 + 0.5, 3)})
+    probe_leg("quad", "alone", 1, 60)
+    for t in (1, 2, 3, 4):
+        probe_leg("quad", "together", t, 70)
+    probe_leg("single", "alone", None, 60)
+    recs[at:at] = extra
+    for r in recs[at + len(extra):]:                    # the records after them keep their order in time
+        r["epoch"] = round(r["epoch"] + 400, 3)
+        r["ts"] = local(r["epoch"])
+    return recs, plan
+
+
+def rate_oracle(plan):
+    """night -> {(image, op, format, level): {"from"..., "tiles": {tile: [(rate, cases)]}}}, by plain loops over the plan."""
+    nights = {}
+    for night, item, image, tile, cases, dur in plan:
+        op, fmt, level = RT_OPS[item]
+        g = nights.setdefault(night, {}).setdefault((image, op, fmt, level), {"from": set(), "tiles": {}})
+        g["from"].add(ITEMS[item][1])
+        g["tiles"].setdefault(tile, []).append((round(cases / dur, 3), cases))
+    return nights
+
+
+def rate_rows(groups, probe=None):
+    """The file's rows for one night's groups, in the file's order: [slices, cases, median, least, most] a figure list, tiles by their names, the sum when more than
+    one tile, and the card figure from `probe` ({(image, op): rate}) where the probe ran."""
+    rows = []
+    for key in sorted(groups, key=lambda k: tuple(RT_ORDER[n].index(v) for n, v in zip(("image", "op", "format", "level"), k))):
+        g = groups[key]
+
+        def fig(pairs):
+            rs = [p[0] for p in pairs]
+            return [len(pairs), sum(p[1] for p in pairs), rt_median(rs), min(rs), max(rs)]
+        tiles = {("only" if t is None else str(t)): fig(p) for t, p in sorted(g["tiles"].items(), key=lambda kv: (kv[0] is not None, kv[0] or 0)) if True}
+        allf = fig([p for ps in g["tiles"].values() for p in ps])
+        named = [t for t in g["tiles"] if t is not None]
+        sm = None
+        if len(named) >= 2:
+            sm = [len(g["tiles"]), round(sum(f[2] for f in tiles.values()), 3), round(sum(f[3] for f in tiles.values()), 3), round(sum(f[4] for f in tiles.values()), 3)]
+        card = None
+        if probe is not None:
+            op = "div" if key[1] == "recip" else key[1]
+            rate = probe.get((key[0], op, key[2]))
+            if rate is not None:
+                card = {"phase": "together" if key[0] == "quad" else "alone", "rate": rate, "ratio": round(rate / allf[2], 4)}
+        rows.append({"image": key[0], "op": key[1], "format": key[2], "level": key[3], "from": sorted(g["from"]), "all": allf,
+                     "tiles": {} if list(tiles) == ["only"] else tiles, "sum": sm, "card": card})
+    return rows
+
+
+def js_rate(x):
+    """The page's rate(): millions to two places, thousands to one, else whole - toFixed rounds an exact tie up, Python's % rounds it to even."""
+    from decimal import Decimal, ROUND_HALF_UP
+    q = (lambda v, p: str(Decimal(v).quantize(Decimal(p), rounding=ROUND_HALF_UP)))
+    return q(x / 1e6, "0.01") + " M" if x >= 1e6 else q(x / 1e3, "0.1") + " k" if x >= 1e3 else q(x, "1")
+
+
+def group_rates():
+    """Parcel TP. The wide run's four nights with rate-bearing slices (`rated`) and probe legs on the last: the file's `rates` is the oracle's, night by night, from the
+    plan alone; it is a field of its own, so every night's entry is unchanged and an earlier night's rates are what they were; the file writes a row on a line; --check
+    names an edited figure; and the page lays out the newest night's rows as a table, formats down and ops across, a file without them drawing as it always did."""
+    recs, plan = rated(build(WSPEC, WCAMPAIGN))
+    d = write_run(recs, "rates")
+    out = reduce_dir(d, "e5" * 20)
+    R_ = out["rates"]
+    eq((R_["unit"], R_["columns"], R_["sum_columns"], R_["probe_columns"], len(R_["nights"])), ("cases/s", P.RATES_COLUMNS, P.RATES_SUM_COLUMNS, P.PROBE_COLUMNS, 4),
+       "rates: the file's rates have the unit, the figure lists' columns and a night each")
+    want = rate_oracle(plan)
+    meds = [f[2] for n_ in want.values() for g in rate_rows(n_) for f in (list(g["tiles"].values()) or [g["all"]])]
+    check(len(set(meds)) == len(meds) and len(plan) == 5 + 3 + 5 + 6 and {p_[2] for p_ in plan} == {"quad", "single"},
+          "rates: the fixture's per-tile medians are all different (the nights, the ops, the formats, the levels, the tiles), over 19 slices on the quad and the single", (len(set(meds)), len(meds), len(plan)))
+    bad = []
+    probe = {}
+    for op in ("div", "sqrt", "rint", "scaleb", "fma", "mul", "add"):
+        for fmt in RT_ORDER["format"]:
+            probe[("quad", op, fmt)] = rt_median([rt_probe_rate("together", t, op, fmt) for t in (1, 2, 3, 4)])
+            probe[("single", op, fmt)] = rt_probe_rate("alone", None, op, fmt)
+    for k in (1, 2, 3, 4):
+        nt = R_["nights"][k - 1]
+        rows = rate_rows(want.get(k, {}), probe if k == 4 else None)
+        if (nt["n"], nt["date"]) != (k, out["nights"][k - 1]["date"]) or nt["rows"] != rows:
+            bad.append((k, [(a["image"], a["op"], a["format"]) for a in nt["rows"]], [(a["image"], a["op"], a["format"]) for a in rows]))
+    check(not bad, "rates: each night's rows - tiles, pool, sum, the ops pooled, the card-alone figure and ratio on the night with probe legs - are the oracle's, from the plan alone", bad[:1])
+    eq([(n_["seen"], n_["used"]) for n_ in R_["nights"]], [(9, 5), (6, 3), (6, 5), (7, 6)],
+       "rates: the sweep legs each night saw and the ones that made rows, counted by hand (the class-level slice and the CPU pool's host slices are the others)")
+    eq([n_["left_out"] for n_ in R_["nights"]][1], {"skipped": 0, "random": 0, "class": 1, "host": 2, "unknown": 0, "not_pass": 0, "no_rate": 0}, "rates: night 2's left-out counts: its class-level slice and its two host slices, each by its reason")
+    eq([n_["probe"] is not None for n_ in R_["nights"]], [False, False, False, True], "rates: only night 4 has a probe, and the others say null, not zeros")
+    pr = R_["nights"][3]["probe"]
+    eq((pr["images"].get("quad", {}).get("legs"), pr["images"].get("single", {}).get("legs"), pr["red"], pr["refused"]), (5, 1, 0, []),
+       "rates: night 4's probe: the legs of each image, no red row, no refusal")
+    t_ = [x for x in pr["table"] if (x["image"], x["op"], x["format"]) == ("quad", "fma", "fp64")][0]
+    eq((t_["alone"], t_["together"]), ([1, rt_probe_rate("alone", 1, "fma", "fp64"), rt_probe_rate("alone", 1, "fma", "fp64"), rt_probe_rate("alone", 1, "fma", "fp64")],
+                                      [4, rt_median([rt_probe_rate("together", t, "fma", "fp64") for t in (1, 2, 3, 4)]), rt_probe_rate("together", 1, "fma", "fp64"), rt_probe_rate("together", 4, "fma", "fp64")]),
+       "rates: a probe-only row (fma at fp64) is kept with its alone and together figures [rows, median, least, most]")
+    # -- a field of its own: no night's entry has a rates field, and a night appended leaves the earlier nights' rates as they were
+    check(all("rates" not in nt for nt in out["nights"]) and list(out)[-1] == "rates", "rates: no night's entry carries a rates field (the scheduler's publish step compares every field of the nights), and `rates` is the file's last")
+    starts = [i for i, r in enumerate(recs) if r["type"] == "run_start"]
+    d3 = write_run(recs[:starts[3]], "rates3")
+    out3 = reduce_dir(d3, "e5" * 20)
+    eq((out["rates"]["nights"][:3], len(out3["rates"]["nights"])), (out3["rates"]["nights"], 3), "rates: the three-night file's rates are the four-night file's first three, field for field: the file appends night by night")
+    # -- the file writes each row on a line: the bytes the command writes, not a re-dump of what reduce_dir parsed, which no longer carries the reducer's mark on its rows
+    f = os.path.join(TMP, "rates-data.json")
+    rc, so, se = cli(d, "--out", f, "--commit", "none")
+    eq(rc, 0, "rates: the CLI makes the file")
+    with open(f, encoding="utf-8") as fh:
+        text = fh.read()
+    lines = [ln for ln in text.split("\n") if '"image": ' in ln and '"level": ' in ln]
+    check(len(lines) == sum(len(n_["rows"]) for n_ in R_["nights"]) and all(ln.count('{"image": ') == 1 and ln.count("{") == ln.count("}") for ln in lines),
+          "rates: the file writes each rate row on one line, whole (a night with one row has its list on that line too)", len(lines))
+    longest = max(len(json.dumps(row, separators=(", ", ": "))) for n_ in R_["nights"] for row in n_["rows"])
+    check(longest > 420, "rates: and the fixture has a row longer than the reducer's 420-character line (night 1's, on four tiles), which only the one-line rule keeps on one line", longest)
+    # -- --check names an edited figure, in the run and in the file
+    eq(cli("--check", f, d)[0], 0, "rates: and --check of it against its run is 0")
+    j = json.load(open(f, encoding="utf-8"))
+    j["rates"]["nights"][3]["rows"][0]["all"][2] += 1
+    json.dump(j, open(f, "w", encoding="utf-8"))
+    rc, so, se = cli("--check", f, d)
+    check(rc == 1 and ".rates.nights[3].rows[0].all[2]" in se, "rates: an edited median in the file makes --check fail (1) and name the field", se[-250:])
+    # -- the page
+    if not NODE:
+        return skip("the rates on the page in node", "node is not on PATH")
+    wj = os.path.join(TMP, "rates-page.json")
+    json.dump(out, open(wj, "w", encoding="utf-8"))
+    r = page("ok", wj)
+    rd = r.get("rates") or {}
+    check(r.get("app", {}).get("hidden") is False and rd.get("h2") == ["What a tile does a second"], "rates page: the file is shown, with a section of its own", r.get("error"))
+    def cells_bad(rd_, rows_):
+        """The page's tables against a night's rows: the images that have rows, the layout (formats down, ops across, the hard-case columns after) and each cell's text and hover."""
+        imgs_, bad_ = [i for i in RT_ORDER["image"] if any(x["image"] == i for x in rows_)], []
+        for img, tb in zip(imgs_, rd_.get("tables", [])):
+            mine = [x for x in rows_ if x["image"] == img]
+            cols = sorted({(x["op"], x["level"]) for x in mine}, key=lambda c: (RT_ORDER["op"].index(c[0]), RT_ORDER["level"].index(c[1])))
+            fmts = [f_ for f_ in RT_ORDER["format"] if any(x["format"] == f_ for x in mine)]
+            if tb["head"] != ["Format"] + [c[0] + (" hard-case" if c[1] == "hard" else "") for c in cols]:
+                bad_.append(("head", img, tb["head"]))
+            if [row[0]["text"] for row in tb["rows"]] != fmts:
+                bad_.append(("formats", img, [row[0]["text"] for row in tb["rows"]]))
+            for row in tb["rows"]:
+                for c, cellx in zip(cols, row[1:]):
+                    x = [y for y in mine if y["format"] == row[0]["text"] and (y["op"], y["level"]) == c]
+                    want_t = "-" if not x else js_rate(x[0]["all"][2]) + (f" card alone {js_rate(x[0]['card']['rate'])} ({x[0]['card']['ratio']:.2f}x)" if x[0]["card"] else "")
+                    want_title = "" if not x else f"{x[0]['all'][0]} slices; least {js_rate(x[0]['all'][3])}, most {js_rate(x[0]['all'][4])}; from {', '.join(x[0]['from'])}"
+                    if cellx["text"] != want_t or cellx["title"] != want_title:
+                        bad_.append((img, row[0]["text"], c, cellx, want_t))
+        return bad_, imgs_
+    rows4 = [x for x in R_["nights"][3]["rows"]]
+    bad, imgs = cells_bad(rd, rows4)
+    eq((rd.get("h3"), len(rd.get("tables", []))), (imgs, len(imgs)), "rates page: a table for each image that has rows on the newest night (the quad's and the single's), the quad first")
+    # the newest night's rows are a slice each, where the median, the least and the most are one figure and a cell that showed the least would read the same: night 1's row of five
+    # slices on four tiles, whose three are different, is the newest with rows when the later nights have none
+    j1 = json.loads(json.dumps(out))
+    for n_ in j1["rates"]["nights"][1:]:
+        n_["rows"] = []
+    json.dump(j1, open(wj, "w", encoding="utf-8"))
+    bad1, imgs1 = cells_bad((page("ok", wj).get("rates") or {}), R_["nights"][0]["rows"])
+    f1 = R_["nights"][0]["rows"][0]["all"]
+    check(f1[0] == 5 and len({f1[2], f1[3], f1[4]}) == 3, "rates page: the fixture's night 1 row has five slices and a median, a least and a most that are three figures", f1)
+    check(not bad and len(imgs) == 2 and not bad1 and imgs1 == ["quad"],
+          "rates page: each table has the formats down and the ops across, a cell the row's median a tile as the file gives it (millions, thousands), its slices, "
+          "least, most and ops on hover, and the card-alone figure beside it on the night with a probe (and night 1's row of five slices, when it is the newest with rows)", (bad + bad1)[:2])
+    check(any(R_["rule"] == p_ for p_ in rd.get("paras", [])) and any(p_.startswith("Night 4 (") for p_ in rd.get("paras", [])), "rates page: the section says which night it is and carries the file's rule")
+    # the newest night with rows: night 4 without rows shows night 3's
+    j = json.loads(json.dumps(out))
+    j["rates"]["nights"][3]["rows"] = []
+    json.dump(j, open(wj, "w", encoding="utf-8"))
+    p3 = (page("ok", wj).get("rates") or {}).get("paras", [""])
+    check(p3[0].startswith("Night 3 ("), "rates page: when the newest night has no rows the newest one that has is shown, and named", p3[:1])
+    # a file with rates but no row at all draws as a file without rates: the same tree
+    for n_ in j["rates"]["nights"]:
+        n_["rows"] = []
+    json.dump(j, open(wj, "w", encoding="utf-8"))
+    r_empty = page("ok", wj, clock=NIGHT7_CLOCK)
+    j2 = json.loads(json.dumps(out))
+    j2.pop("rates")
+    json.dump(j2, open(wj, "w", encoding="utf-8"))
+    r_none = page("ok", wj, clock=NIGHT7_CLOCK)
+    check(r_empty.get("rates") is None and r_none.get("rates") is None and r_empty.get("dom") == r_none.get("dom") and r_none.get("dom"),
+          "rates page: a file whose nights have no rows, and a file with no rates, draw the same tree and neither has the section")
+    # the page reads the shape it is given: a rates that is not a list of nights, a row without its five figures, a card without its ratio
+    for name, edit, say in (("rates that is not an object", lambda j_: j_.__setitem__("rates", []), "rates is not a list of nights"),
+                            ("a row with four figures", lambda j_: j_["rates"]["nights"][3]["rows"][0].__setitem__("all", [1, 2, 3, 4]), "five figures"),
+                            ("a card with no ratio", lambda j_: j_["rates"]["nights"][3]["rows"][0].__setitem__("card", {"rate": 1.0}), "five figures")):
+        j3 = json.loads(json.dumps(out))
+        edit(j3)
+        json.dump(j3, open(wj, "w", encoding="utf-8"))
+        r3 = page("ok", wj)
+        check(r3.get("status", {}).get("hidden") is False and "not the shape" in r3["status"]["text"] and say in r3["status"]["text"] and r3["app"]["text"] == "",
+              f"rates page: {name} is named as not the shape this page reads, and no figure is shown", r3.get("status"))
+
+
 def guarded(fn, *args):
     """A group that crashes is a failed check naming it, not the end of the run (the planted defects crash some of them)."""
     try:
@@ -1049,6 +1311,8 @@ def main():
                 _wrecs, wout, wd = wgot
                 guarded(group_format_guard, wd)
                 guarded(group_wide_page, b4[0], wout, {"clock": LEGACY_CLOCK, "digest": LEGACY_DOM})
+        print("== the rates (parcel TP): the file's field, its nights, the page's table")
+        guarded(group_rates)
         print("== the committed data file")
         guarded(group_committed)
         print("== night 7's data file, as 3ec0081c committed it (a copy in card_stress_fixtures)")

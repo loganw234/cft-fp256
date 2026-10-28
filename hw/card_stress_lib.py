@@ -482,6 +482,117 @@ def parse_soak(text: str, rc: Optional[int], op: str, verdict_mode: str,
 
 
 # ---------------------------------------------------------------------------
+# rate-probe   host/tools/rate_probe.c (parcel TP, 2026-10-28): the card's rate for each op and format with the oracle off.
+#   The tool's own header holds the grammar; each pattern below is one of its printf lines:
+#     rate-probe: backend DEVICE <artifact> | backend software
+#     rate-probe: N 4096, <s> s a row, tile <ordinals | all | none>[, SABOTAGE (one bit flipped)]
+#     rate-probe: row op=<op> format=<fmt> tile=<t> elements=<n> seconds=<s> rate=<r> check=ok
+#     rate-probe: row ... check=red mismatched=<k> flags_device=0x<h> flags_software=0x<h>
+#     rate-probe: row ... refused=<CFT_ERR_NAME> why=<sentences>       the device could not run it: never timed
+#     rate-probe: row ... timed_call_failed=<CFT_ERR_NAME> after=<calls> why=<sentences>       counted red
+#     rate-probe: <rows> rows, <timed> timed, <refused> refused, <red> red
+#     rate-probe: every check ok | rate-probe: A CHECK FAILED
+# ---------------------------------------------------------------------------
+PROBE_OPS = ("div", "sqrt", "rint", "scaleb", "fma", "mul", "add")
+PROBE_FORMATS = ("fp32", "fp64", "fp128", "fp256")
+PROBE_BACKEND = re.compile(r"^rate-probe: backend (?:DEVICE (.+)|(software))$", M)
+PROBE_HEAD = re.compile(r"^rate-probe: N (\d+), (\S+) s a row, tile (\S+?)(, SABOTAGE \(one bit flipped\))?$", M)
+PROBE_ROW = re.compile(r"^rate-probe: row op=(\S+) format=(\S+) tile=(\S+) (.+)$", M)
+PROBE_TIMED = re.compile(r"^elements=(\d+) seconds=(\d+\.\d+) rate=(\d+\.\d+) check=(ok|red)"
+                         r"(?: mismatched=(\d+) flags_device=0x([0-9a-f]+) flags_software=0x([0-9a-f]+))?$")
+PROBE_REFUSED = re.compile(r"^refused=(CFT_ERR_[A-Z_]+) why=(.*)$")
+PROBE_TIMED_FAILED = re.compile(r"^timed_call_failed=(CFT_ERR_[A-Z_]+) after=(\d+) why=(.*)$")
+PROBE_SUMMARY = re.compile(r"^rate-probe: (\d+) rows, (\d+) timed, (\d+) refused, (\d+) red$", M)
+PROBE_OK = re.compile(r"^rate-probe: every check ok$", M)
+PROBE_BAD = re.compile(r"^rate-probe: A CHECK FAILED$", M)
+PROBE_RATE_SLACK = 0.01        # the printed rate against elements / seconds: the seconds are printed to 1e-4, the rate to 0.1
+
+
+def parse_rate_probe(text: str, rc: Optional[int], artifact: Optional[str] = None) -> Verdict:
+    """One run of rate-probe. artifact: the xclbin it was told to open (None: the software backend, which only the dry tests use). Refused by
+    name: no backend line, or two; a backend that is not the artifact asked for; a row for an op or format the probe does not have, or twice;
+    the grid not whole (28 rows: every op at every format - a probe that left rows out without saying so proves less than it claims); a
+    timed row whose rate is not its elements over its seconds; rows that do not share the head's tile; a summary line that does not count
+    the rows, or a verdict line that does not agree with them and with the exit status; and a run that timed nothing. ok is `no row red`:
+    a REFUSED row (the device cannot run it) is named and is not a failure, a red check is. counts: rows, timed, refused, red; extra:
+    `rows` (a dict each: op, format, tile, and elements/seconds/rate/check, or refused/why), `tile`, `seconds_a_row`, `backend`."""
+    dev = _maybe_one(PROBE_BACKEND, text, "rate-probe backend line")
+    if dev is None:
+        raise VerdictError("rate-probe: no 'backend' line, so it is not known what it ran on")
+    on_device = dev.group(1) is not None
+    if artifact is not None and (not on_device or dev.group(1) != artifact):
+        raise VerdictError(f"rate-probe: it opened {dev.group(1) if on_device else 'the software backend'!r}, not {artifact!r}: "
+                           f"a rate of another image, or of none, proves nothing about this one")
+    if artifact is None and on_device:
+        raise VerdictError(f"rate-probe: it opened the device {dev.group(1)!r} where the software backend was asked for")
+    head = _one(PROBE_HEAD, text, "rate-probe header")
+    tile, sab = head.group(3), head.group(4) is not None
+    secs_row = float(head.group(2))
+    rows: List[Dict[str, Any]] = []
+    seen = set()
+    n_timed = n_refused = n_red = 0
+    for m in PROBE_ROW.finditer(text):
+        op, fmt, t, rest = m.group(1), m.group(2), m.group(3), m.group(4)
+        if op not in PROBE_OPS or fmt not in PROBE_FORMATS:
+            raise VerdictError(f"rate-probe: a row for {op!r} at {fmt!r}, which the probe does not have (ops {', '.join(PROBE_OPS)}; "
+                               f"formats {', '.join(PROBE_FORMATS)})")
+        if (op, fmt) in seen:
+            raise VerdictError(f"rate-probe: two rows for {op} at {fmt}")
+        seen.add((op, fmt))
+        if t != tile:
+            raise VerdictError(f"rate-probe: the row {op} at {fmt} is for tile {t!r}, the header says {tile!r}")
+        row: Dict[str, Any] = {"op": op, "format": fmt, "tile": t}
+        mt, mr, mf = PROBE_TIMED.match(rest), PROBE_REFUSED.match(rest), PROBE_TIMED_FAILED.match(rest)
+        if mt:
+            elements, seconds, rate = int(mt.group(1)), float(mt.group(2)), float(mt.group(3))
+            if elements <= 0 or seconds <= 0 or rate <= 0:
+                raise VerdictError(f"rate-probe: the row {op} at {fmt} times nothing (elements {elements}, seconds {seconds}, rate {rate})")
+            if abs(rate - elements / seconds) > PROBE_RATE_SLACK * rate:
+                raise VerdictError(f"rate-probe: the row {op} at {fmt} says {rate:g} elements a second where {elements} elements in "
+                                   f"{seconds:g} s make {elements / seconds:g}")
+            if (mt.group(4) == "red") != (mt.group(5) is not None):
+                raise VerdictError(f"rate-probe: the row {op} at {fmt} says check={mt.group(4)} and "
+                                   f"{'has' if mt.group(5) is not None else 'lacks'} the mismatch clause")
+            row.update(elements=elements, seconds=seconds, rate=rate, check=mt.group(4))
+            n_timed += 1
+            if mt.group(4) == "red":
+                n_red += 1
+                row.update(mismatched=int(mt.group(5)), flags_device=int(mt.group(6), 16), flags_software=int(mt.group(7), 16))
+        elif mr:
+            row.update(refused=mr.group(1), why=mr.group(2).strip()[:300])
+            n_refused += 1
+        elif mf:
+            row.update(timed_call_failed=mf.group(1), after=int(mf.group(2)), why=mf.group(3).strip()[:300], check="red")
+            n_red += 1
+        else:
+            raise VerdictError(f"rate-probe: the row {op} at {fmt} is not a timed, refused or failed row: {rest[:100]!r}")
+        rows.append(row)
+    want = len(PROBE_OPS) * len(PROBE_FORMATS)
+    if len(rows) != want:
+        raise VerdictError(f"rate-probe: {len(rows)} rows where the grid has {want} ({len(PROBE_OPS)} ops at {len(PROBE_FORMATS)} formats)")
+    s = _one(PROBE_SUMMARY, text, "rate-probe summary")
+    got = tuple(int(s.group(i)) for i in (1, 2, 3, 4))
+    mine = (len(rows), n_timed, n_refused, n_red)
+    if got != mine:
+        raise VerdictError(f"rate-probe: the summary counts {got[0]} rows, {got[1]} timed, {got[2]} refused, {got[3]} red; the rows are "
+                           f"{mine[0]}, {mine[1]}, {mine[2]}, {mine[3]}")
+    good, bad = PROBE_OK.search(text), PROBE_BAD.search(text)
+    if (good is None) == (bad is None):
+        raise VerdictError("rate-probe: expected one verdict line ('every check ok' or 'A CHECK FAILED')")
+    ok = good is not None
+    if ok != (n_red == 0):
+        raise VerdictError(f"rate-probe: the verdict says {'ok' if ok else 'failed'} with {n_red} red row(s)")
+    if n_timed == 0:
+        raise VerdictError("rate-probe: no row was timed (every one was refused): the tool measured nothing")
+    _rc_agrees(rc, ok, "rate-probe")
+    notes = [f"refused {r['op']} at {r['format']}: {r['refused']}" for r in rows if "refused" in r][:8]
+    if sab:
+        notes.append("SABOTAGE: the tool was told to flip a bit (CFT_RATE_PROBE_SABOTAGE=1)")
+    return Verdict(ok, {"rows": len(rows), "timed": n_timed, "refused": n_refused, "red": n_red}, notes,
+                   {"rows": rows, "tile": tile, "seconds_a_row": secs_row, "backend": dev.group(1) if on_device else "software"})
+
+
+# ---------------------------------------------------------------------------
 # "the card is not answering": what the tools print when they cannot use the device.
 # Used only when no verdict parsed (a parsed verdict is a card that answered).
 # Each line cites where the sentence comes from.

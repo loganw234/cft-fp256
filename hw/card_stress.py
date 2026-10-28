@@ -81,6 +81,15 @@ changes, and a wide item named by --sweep-items is a skipped leg, by name (docs/
 scaleB and the conversions at fp128 and fp256 against MPFR, and the fp32 slice through the wide rint: WIDE_C5_OPS; docs/CARDDAY.md,
 "The wide clause-5 items in the driver").
 
+THE RATE PROBE (parcel TP, 2026-10-28; --rate-probe, off by default). Once an image a night, at its first visit of the process (a resumed run is a
+process a night), after the battery and before the sweep, a leg of kind `probe` times the card ALONE: host/tools/rate_probe.c runs div, sqrt, rint,
+scaleb, fma, mul and add at fp32 to fp256, one call of 4096 elements at a time, each row first checked against the software backend (bytes and flags)
+and then timed with no reference computed - the oracle off. The quad runs it twice, tile 1 alone and then its four tiles together, one process a tile,
+as the sweep's waves run (phase `alone` and `together`); the single and the deep run it once. One leg record a process: kind `probe`, leg `rate-probe`,
+`tile`, the rows in `extra.rows`, `counts` {rows, timed, refused, red}, and no sweep: a probe leg is never coverage, never a slice, never an interval
+and never a skipped leg (a probe that cannot run says so in an event). Its time comes out of the visit's sweep minutes. Off, nothing is recorded or
+built that was not before. docs/CARDDAY.md, "The card's rates", is the operator's page.
+
 RECORDS. $OUT/metrics.jsonl is append-only: one `leg` record a leg, one `telemetry` record a
 sample, with `run_start`, `build`, `cycle_start`, `cycle_end`, `event` and `run_end` between
 (fields: hw/card_stress_lib.py and docs/CARDDAY.md). $OUT/status.txt is rewritten after every
@@ -229,6 +238,11 @@ REV8_FIRST_COMPILE_ALLOWANCE = 4 * 3600   # added when a workload's cached image
 # stays at 3 by Logan's word of 2026-10-27, asked with the lead's figure from the night of 2026-10-26: about 770 s a run, the battery's longest
 # leg, so a run on every visit would add about an hour and a half of card time a night.
 DEFAULT_EVERY = {"selftest": 3}
+# The rate probe leg (parcel TP; --rate-probe): rows a process (every op at every format, host/tools/rate_probe.c's grid), the seconds it times a row, and the most
+# it is allowed: a phase is PROBE_ROWS x seconds, the quad has two phases, and the card time of an image is to stay under three minutes (the brief's bound).
+PROBE_ROWS = len(L.PROBE_OPS) * len(L.PROBE_FORMATS)
+PROBE_SECONDS = 2.0
+PROBE_SECONDS_MAX = 2.5
 # api-test opens no image (it may open device 0 for an instant and passes without a card), so
 # its result neither ends nor extends the run of consecutive card failures.
 NO_CARD_LEGS = ("api-test",)
@@ -483,7 +497,7 @@ DEVICE_FLAG_TOOLS = ("cft-segrun", "acceptance.py", "seq_check.py", "cft-audit")
 # gate's `images` stage runs it.)
 XCLBIN_TOOLS = ("device-test", "run-device-test.sh", "card-segrun.sh", "card-identity.sh",
                 "seq_check.py", "acceptance.py", "run-soak.sh",
-                "run-c5-soak.sh") + SOAK_TOOLS
+                "run-c5-soak.sh", "rate-probe") + SOAK_TOOLS       # rate-probe: parcel TP's probe leg (host/tools/rate_probe.c); with `-` for the software backend it has no xclbin to name
 # The vendor tools' subcommands that touch the card (examine, which this driver itself
 # uses for telemetry, does not).
 XRT_TOOLS = ("xbutil", "xrt-smi", "xbmgmt")
@@ -849,6 +863,10 @@ class Driver:
                 raise SystemExit(f"--legs: {leg!r} is not one of {', '.join(BATTERY)}")
         self.sweep_only = [x for x in a.sweep_items.split(",") if x]
         self.rev8_images = expand(a.rev8_images) if a.rev8_images else os.path.join(self.out, "rev8-images")
+        # --rate-probe (parcel TP): the probe leg, once an image per process; off, none of this is used
+        self.probing = bool(getattr(a, "rate_probe", False))
+        self.probe_seconds = float(getattr(a, "rate_probe_seconds", None) or PROBE_SECONDS)
+        self.probed: set = set()
 
     def catalog(self, *probes: Any) -> List[L.Item]:
         """The sweep's catalog for this run: hw/card_stress_lib.py's sweep_items, with the probes' modes where the build has run them, and
@@ -1461,6 +1479,89 @@ class Driver:
             if rec["status"] in ("timeout", "no_device"):
                 self.recover(img, self.streak)
             return rec
+
+    # -- the rate probe leg (parcel TP) ---------------------------------------
+    def probe_estimate(self, img: Image) -> float:
+        """The card time the probe takes on this image, ESTIMATE: a phase is PROBE_ROWS rows of --rate-probe-seconds each and the check of each (about a
+        quarter of a second, BELIEVED from the software backend's), and the quad has two phases."""
+        return (2 if img.tiles > 1 else 1) * (PROBE_ROWS * (self.probe_seconds + 0.25) + 10.0)
+
+    def rate_probe_visit(self, img: Image) -> float:
+        """The probe leg of this image, if this process has not run it: once an image a night (a resumed run is a process a night), at the image's first
+        visit, after the battery and before the sweep, inside the visit's card time (run_cycle takes the seconds returned off the sweep's minutes).
+        Returns the seconds it took, 0.0 when it did not run. The quad runs it twice - tile 1 alone, then its four tiles together, a process a tile as the
+        sweep's waves run them - and the others once. It is not a battery leg: when the deadline's estimate does not allow it nothing is recorded as a
+        skipped leg, an event says so; and a probe that finds a check red, or does not answer, is a leg record like any other failing leg."""
+        if img.name in self.probed:
+            return 0.0
+        self.probed.add(img.name)
+        est = self.probe_estimate(img)
+        if self.deadline is not None and time.time() + est > self.deadline + self.a.deadline_grace:
+            self.event("rate_probe_not_run", f"{img.name}: its estimate ({est:.0f} s) would end past the deadline by more than the "
+                       f"{self.a.deadline_grace:.0f} s grace", image=img.name)
+            return 0.0
+        t0 = time.time()
+        phases: List[Tuple[str, List[Optional[int]]]] = [("alone", [1] if img.tiles > 1 else [None])]
+        if img.tiles > 1:
+            phases.append(("together", list(range(1, img.tiles + 1))))
+        done: List[Dict[str, Any]] = []
+        for phase, tiles in phases:
+            stop = self.should_stop()
+            if stop:
+                raise stop
+            self.guard(True)
+            recs = self.probe_phase(img, phase, tiles)
+            done += recs
+            if any(r["status"] in ("timeout", "no_device") for r in recs):
+                self.recover(img, self.streak)         # the card did not answer: as a battery leg's timeout is met, and no second phase on it
+                break
+        took = time.time() - t0
+        timed = sum(int((r.get("counts") or {}).get("timed", 0)) for r in done)
+        red = sum(int((r.get("counts") or {}).get("red", 0)) for r in done)
+        self.event("rate_probe", f"{img.name}: {len(done)} probe process(es) in {len(phases)} phase(s), {timed} rows timed, {red} red, {took:.0f} s of the "
+                   f"visit's card time (estimate {est:.0f} s)", image=img.name, seconds=round(took, 1), processes=len(done), timed=timed, red=red)
+        return took
+
+    def probe_phase(self, img: Image, phase: str, tiles: List[Optional[int]]) -> List[Dict[str, Any]]:
+        """One phase: a rate-probe process a tile in `tiles` (None: the image's only tile, CFT_XRT_TILES unset), started together and waited for together,
+        and a leg record each - kind `probe`, the tile, the rows and `phase` in `extra`, no sweep - as run_wave does for a wave of soak jobs."""
+        tool = os.path.join(self.root, "host", "rate-probe")
+        timeout = 90.0 + PROBE_ROWS * (self.probe_seconds + 2.0)
+        procs = []
+        for tile in tiles:
+            base, logpath = self.log_name("rate-probe")
+            real = [tool, img.path, f"{self.probe_seconds:g}"]
+            argv = self.standin("rate-probe", real) if self.dry else real
+            res = ProcResult()
+            res.start = time.time()
+            try:
+                proc, logf, _full = self.spawn(argv, {"CFT_XRT_TILES": str(tile)} if tile else {}, logpath, self.root, timeout)
+            except OSError as e:
+                res.end = time.time()
+                res.error = f"could not start {argv[0]}: {e}"
+                proc = logf = None
+            procs.append((tile, base, logpath, proc, logf, res, real))
+            self.say(f"rate-probe on {img.name}{' tile ' + str(tile) if tile else ''} ({phase}) starts")
+        self.current = f"{len(procs)} rate-probe process(es) on {img.name} ({phase})"
+        threads = []
+        for _tile, _base, _logpath, proc, logf, res, _real in procs:
+            if proc is None:
+                continue
+            t = threading.Thread(target=self._wait_job, args=(proc, timeout, res, logf), daemon=True)
+            t.start()
+            threads.append(t)
+        for t in threads:
+            while t.is_alive():
+                t.join(timeout=5)
+                self.heartbeat()
+        recs = []
+        for tile, base, logpath, _proc, _logf, res, real in procs:
+            cmd = Cmd(real, timeout, (lambda t, rc, img=img: L.parse_rate_probe(t, rc, img.path)),
+                      post=(lambda v, phase=phase: v.extra.update(phase=phase)))
+            rec = self.finish_leg("rate-probe", img, "probe", 1, None, tile, res, None, base, logpath, None, cmd, None)
+            recs.append(rec)
+            self.after_result(rec)
+        return recs
 
     # -- the sweep ----------------------------------------------------------
     def load_state(self) -> None:
@@ -2707,7 +2808,7 @@ class Driver:
             except OSError:
                 pass
         step("roundeven probe", True, "present" if c5defs else "absent: the rne oracle is rint under FE_TONEAREST")
-        targets = ["all", "device-test", "api-test", "remote-test", "divsqrt-soak", "clause5-soak"]
+        targets = ["all", "device-test", "api-test", "remote-test", "divsqrt-soak", "clause5-soak"] + (["rate-probe"] if self.probing else [])
         xrt_flags = a.make_xrt_flags.split() if a.make_xrt_flags else ["XRT=1", f"XRT_ROOT={a.xrt_root}"]
         argv = ["make", "-C", host, f"-j{a.build_jobs}"] + xrt_flags
         if c5defs:
@@ -2760,6 +2861,8 @@ class Driver:
                 "clause5-soak", "cft-resident", "cft-selftest", "libcft.so"]
         if self.chunk:
             exes += [f"divsqrt-soak-c{self.chunk}", f"clause5-soak-c{self.chunk}"]
+        if self.probing:
+            exes.append("rate-probe")          # --rate-probe asked for it: a missing or unlinked one refuses the run, by name, as the soaks do
         if "XRT=1" not in xrt_flags:
             exes.remove("cft-resident")      # only an XRT=1 build makes it (the test's XRT=0 build has none)
         # cft-resident and cft-selftest serve optional legs: a missing or unlinked one disables its leg
@@ -2863,7 +2966,8 @@ class Driver:
             stop = self.should_stop()
             if stop:
                 raise stop
-            self.sweep_phase(img, sweep_min)
+            probe_s = self.rate_probe_visit(img) if self.probing else 0.0     # parcel TP: the image's first visit of this process; its time is taken from the sweep's
+            self.sweep_phase(img, sweep_min - probe_s / 60.0 if probe_s > 0 else sweep_min)
         finally:
             self.rec({"type": "cycle_end", "cycle": self.cycle, "image": img.name, "legs": n_legs,
                       "failed": n_failed, "seconds": round(time.time() - t_cycle, 1)})
@@ -2924,7 +3028,7 @@ class Driver:
             self.load_earlier()
             # settings.json is every argument; the coverage wave's four keys are left out while they are unset, so that
             # a run without them writes the file it always wrote (a key's PATH is a setting; its secret is never read into one)
-            unset = {"sweep_chunk", "records", "sign_key", "device_key", "mpfr_prefix"}
+            unset = {"sweep_chunk", "records", "sign_key", "device_key", "mpfr_prefix", "rate_probe", "rate_probe_seconds"}
             with open(os.path.join(self.out, "settings.json"), "w", encoding="utf-8") as fh:
                 json.dump({k: v for k, v in vars(a).items() if not (k in unset and v in (None, False))}, fh, indent=1, default=str)
             self.say(f"card-stress: out {self.out}{' (resumed)' if resumed else ''}; "
@@ -2951,6 +3055,8 @@ class Driver:
                 settings["sweep_chunk"] = self.chunk       # the pass size of the sweep's tools; absent for the default tools
             if self.mpfr_prefix:
                 settings["mpfr"] = {"prefix": self.mpfr_prefix, "pin": self.mpfr_pin}     # the wide items' MPFR; absent without them
+            if self.probing:
+                settings["rate_probe"] = {"seconds_a_row": self.probe_seconds}             # the probe leg's time a row; absent without --rate-probe
             if self.sink is not None:
                 settings["records"] = {"file": RECORDS_FILE, "signed": self.sink.signed}
             self.rec({"type": "run_start", "run_id": self.run_id, "out": self.out,
@@ -3206,6 +3312,15 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
                    "the card's. With --quick the smoke's waves are these tile items, in the order named, the least "
                    "served first (instead of its own four): the first four on the quad, one a wave on a single image; "
                    "and the pool serves each host item named once")
+    g = ap.add_argument_group("the card's rates (parcel TP; docs/CARDDAY.md, \"The card's rates\")")
+    g.add_argument("--rate-probe", action="store_true",
+                   help="once an image a night, at its first visit of this process, run a probe leg after the battery: host/tools/rate_probe.c times "
+                        "div, sqrt, rint, scaleb, fma, mul and add at fp32 to fp256 on the card ALONE (the oracle off; each row first checked "
+                        "against the software backend), on the quad tile 1 alone and then the four tiles together. The build step also makes "
+                        "rate-probe and holds it to XRT; the probe's time comes out of the visit's sweep minutes (about two minutes on the quad, "
+                        "one on the others at the default). Default: no probe leg, and nothing is recorded or built that was not before")
+    g.add_argument("--rate-probe-seconds", type=float, default=None, metavar="S",
+                   help=f"seconds the probe times a row (default {PROBE_SECONDS:g}; at most {PROBE_SECONDS_MAX:g}, which keeps an image under three minutes)")
     g = ap.add_argument_group("signed records (hw/sweep_record.py; docs/SWEEP-RECORDS.md, \"From the driver\")")
     g.add_argument("--records", action="store_true",
                    help="write the finished sweep slices as canonical records to OUT/sweep-records.jsonl as the legs finish, "
@@ -3273,6 +3388,11 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     if a.sweep_chunk is not None and not (4096 <= a.sweep_chunk <= 65536 and a.sweep_chunk % 4096 == 0):
         ap.error(f"--sweep-chunk {a.sweep_chunk}: refused. The pass size is a positive multiple of 4096 up to 65536 "
                  f"(host/Makefile's SOAK_CHUNK rule: a larger or odd one would build nothing)")
+    if a.rate_probe_seconds is not None and not a.rate_probe:
+        ap.error("--rate-probe-seconds is the seconds the probe times a row: give --rate-probe too")
+    if a.rate_probe_seconds is not None and not (0 < a.rate_probe_seconds <= PROBE_SECONDS_MAX):
+        ap.error(f"--rate-probe-seconds {a.rate_probe_seconds}: refused. It is above 0 and at most {PROBE_SECONDS_MAX:g}: a phase is {PROBE_ROWS} rows of it, "
+                 f"the quad has two phases, and an image's probe is to stay under three minutes of card time")
     if (a.sign_key or a.device_key) and not a.records:
         ap.error("--sign-key and --device-key name the key of the records --records writes: give --records too")
     if a.records:

@@ -1506,8 +1506,8 @@ def group_families(base):
     group("text")
     top, secs = sections(base.T)
     eq(list(secs), ["HEADER", "TOTALS", "PER IMAGE AND LEG", "TELEMETRY", "FAILURES", "SWEEP COVERAGE",
-                    "SWEEP COVERAGE BY TREE", "UPTIME AND GAPS"],
-       "the eight sections, in the spec's order (the coverage by tree, parcel DR2, follows the sweep's)")
+                    "SWEEP COVERAGE BY TREE", "UPTIME AND GAPS", "RATES BY OP AND FORMAT"],
+       "the eight sections, in the spec's order (the coverage by tree, parcel DR2, follows the sweep's), and parcel TP's rates after them, last")
     check(base.T.endswith("\n") and not base.T.endswith("\n\n"), "the text ends with one newline")
     check(all(ord(c) < 128 for c in base.T), "the report's own text is ASCII")
     check("RUNNING" not in base.T, "an ended run does not say RUNNING")
@@ -2928,6 +2928,396 @@ def group_wide():
           "wide: a summary from before the fields renders, with no group line and 'unknown' for each format", err)
 
 
+# ---------------------------------------------------------------------------
+# parcel TP (2026-10-28): the rates by op and format, and the probe legs beside them
+# ---------------------------------------------------------------------------
+# The ORACLE's table of the items this group's runs use: item -> (the soak's op word, the rate op, the format, the level, the reach). Written here from the
+# catalog's names and the C tools' headers, and not read from the library. The slices are made by formulas over a plan (rt_slices): a plain loop gives each slice's
+# cases and duration, and the oracle's rate is cases / duration, so that the figure a row must show comes from arithmetic nothing in the report shares. The
+# durations are halves, quarters and eighths and the cases whole thousands, so a rate is exact in the three decimals the driver records.
+RT_ITEM = {
+    "sqrt32-rne": ("sqrt32", "sqrt", "fp32", "exhaustive", "tile"),
+    "rint32-rne": ("rint32", "rint", "fp32", "exhaustive", "tile"),
+    "scaleb32-all-rne": ("scaleb32-all", "scaleb", "fp32", "exhaustive", "tile"),
+    "scaleb32-wide-rne": ("scaleb32-wide", "scaleb", "fp32", "exhaustive", "tile"),
+    "div32-hard-rne": ("div32-hard", "div", "fp32", "hard", "tile"),
+    "div64-hard-rne": ("div64-hard", "div", "fp64", "hard", "tile"),
+    "sqrt64-hard-rne": ("sqrt64-hard", "sqrt", "fp64", "hard", "tile"),
+    "sqrt64-f32-rup": ("sqrt64-f32", "sqrt", "fp64", "exhaustive", "tile"),
+    "div128-hard-rne": ("div128-hard", "div", "fp128", "hard", "tile"),
+    "div128-f64hard-rne": ("div128-f64hard", "div", "fp128", "hard", "tile"),
+    "sqrt128-f32-rne": ("sqrt128-f32", "sqrt", "fp128", "exhaustive", "tile"),
+    "recip128-f32-rne": ("recip128-f32", "recip", "fp128", "exhaustive", "tile"),
+    "recip128-win-key-rne": ("recip128-win-key", "recip", "fp128", "exhaustive", "tile"),
+    "sqrt256-hard-rne": ("sqrt256-hard", "sqrt", "fp256", "hard", "tile"),
+    "rint256-f32-rne": ("rint256-f32", "rint", "fp256", "exhaustive", "tile"),
+    # the ones that have no row, each for a reason of its own
+    "rint64-class-rne": ("rint64-class", None, "fp64", "class", "tile"),
+    "conv32to64-all": ("conv32to64-all", None, "fp32 -> fp64", "exhaustive", "host"),
+    "logb32": ("logb32", None, "fp32", "exhaustive", "host"),
+    "div64-rne": ("div64", None, "fp64", "random", "tile"),
+    "futureop-x": ("futureop", None, None, None, None),
+}
+RT_DURS = [0.5, 1.25, 2.0, 2.5, 4.0, 5.0, 8.0]
+# (item, image, the tiles that ran it, slices a tile): a tile that is None is an image with one tile; the quad's tiles are 1 to 4. Rows with different numbers of
+# slices (odd and even medians, one slice alone), a tile that never ran an item, two catalog ops pooled in one row (scaleb's -all and -wide, division's hard cases
+# and its widened fp64 ones, the reciprocal's fp32 slice and its window), and the same op at another level and another format in rows of their own.
+RT_PLAN = [
+    ("sqrt32-rne", "quad", (1, 2, 3, 4), 3), ("rint32-rne", "quad", (1, 2, 3, 4), 2), ("scaleb32-all-rne", "quad", (1, 2), 1),
+    ("scaleb32-wide-rne", "quad", (1, 2, 3, 4), 2), ("div32-hard-rne", "quad", (4,), 2), ("div64-hard-rne", "quad", (1, 3), 3),
+    ("sqrt64-hard-rne", "quad", (1, 2, 3, 4), 1), ("sqrt64-f32-rup", "quad", (2, 4), 2), ("div128-hard-rne", "quad", (1, 2, 3, 4), 1),
+    ("div128-f64hard-rne", "quad", (1, 2, 3, 4), 1), ("sqrt128-f32-rne", "quad", (1, 2, 3, 4), 1), ("recip128-f32-rne", "quad", (1, 2, 3, 4), 2),
+    ("recip128-win-key-rne", "quad", (2,), 1), ("sqrt256-hard-rne", "quad", (1, 2, 3, 4), 1), ("rint256-f32-rne", "quad", (3,), 4),
+    ("sqrt32-rne", "single", (None,), 3), ("div32-hard-rne", "single", (None,), 4), ("scaleb32-wide-rne", "deep", (None,), 2),
+    ("sqrt64-hard-rne", "deep", (None,), 1),
+]
+RT_IMAGE_ORDER, RT_OP_ORDER, RT_FMT_ORDER, RT_LEVEL_ORDER = ["quad", "single", "deep"], ["div", "recip", "sqrt", "rint", "scaleb"], ["fp32", "fp64", "fp128", "fp256"], ["exhaustive", "hard"]
+# The slices that are in no row, and the bucket the oracle files each under by hand: (item, image, tile, flaw, status). `flaw` is what is wrong with an otherwise good slice.
+RT_NOISE = [
+    ("sqrt32-rne", "quad", 1, None, "fail"), ("rint32-rne", "quad", 2, None, "timeout"), ("rint32-rne", "quad", 3, None, "skipped"),
+    ("rint64-class-rne", "quad", 2, None, "pass"), ("rint64-class-rne", "quad", 4, None, "pass"),
+    ("conv32to64-all", "cpu", None, None, "pass"), ("logb32", "cpu", None, None, "pass"), ("logb32", "quad", 3, None, "pass"),
+    ("div64-rne", "quad", 1, None, "pass"), ("div64-rne", "quad", 2, None, "pass"), ("futureop-x", "quad", 1, None, "pass"),
+    ("sqrt32-rne", "quad", 3, "norate", "pass"), ("sqrt32-rne", "quad", 3, "unit", "pass"), ("sqrt32-rne", "quad", 3, "tile0", "pass"), ("sqrt32-rne", "quad", 3, "zero", "pass"),
+]
+RT_LEFT = {"skipped": 1, "random": 2, "class": 2, "host": 3, "unknown": 1, "not_pass": 2, "no_rate": 4}      # counted by hand from RT_NOISE
+RT_SEEN_EXTRA = sum(RT_LEFT.values())
+
+
+def rt_slices():
+    """The slices of RT_PLAN: dicts item, image, tile, cases, dur."""
+    out = []
+    for ii, (item, image, tiles, per) in enumerate(RT_PLAN):
+        for t in tiles:
+            for j in range(per):
+                o = t or 0
+                out.append(dict(item=item, image=image, tile=t, cases=1000 * (40 + 9 * ii + 17 * o + 7 * j), dur=RT_DURS[(ii + o + j) % len(RT_DURS)]))
+    return out
+
+
+def rt_leg(fx, t, sp, status="pass", flaw=None):
+    """One sweep leg as the driver writes it: the slice's cases and duration, its rate round(cases / duration, 3) in cases/s."""
+    op, _rop, _fmt, level, reach = RT_ITEM[sp["item"]]
+    sw = {"item": sp["item"], "tool": "divsqrt", "op": op, "mode": "rne"}
+    if reach and flaw != "noreach":
+        sw["reach"] = reach
+    if level == "random":
+        sw.update(count=1_000_000, seed=77, seed_n=0)
+    else:
+        sw.update(lo=0, hi=A)
+    sw.update(tile=sp["tile"], jobs=4 if sp["image"] == "quad" else 1)
+    cases, dur = sp["cases"], sp["dur"]
+    counts = {"cases": cases, "value_mismatches": 0, "flag_mismatches": 0}
+    if level == "hard":
+        counts["skipped"] = 3 * (1 + int(cases) % 5)        # a hard item's skipped slots are not cases
+    rate = {"value": round(cases / dur, 3), "unit": "cases/s"}
+    tile = sp["tile"]
+    if flaw == "norate":
+        rate = None
+    elif flaw == "unit":
+        rate = {"value": rate["value"], "unit": "checks/s"}
+    elif flaw == "tile0":
+        tile = 0
+    elif flaw == "zero":
+        rate = {"value": 0.0, "unit": "cases/s"}
+    if status in ("timeout", "skipped"):
+        counts = rate = None
+    return fx.leg(sp["image"], "sweep-" + sp["item"], t, 0 if status == "skipped" else dur, status=status, kind="sweep", counts=counts, rate=rate, sweep=sw,
+                  tile=tile, reason={"timeout": TMO, "skipped": SKIP_D}.get(status))
+
+
+def rt_probe_rows(image, phase, tile, extra_red=None):
+    """The rows a probe process prints, with rates the oracle knows: by format, op, tile and phase, so every cell differs. The deep lacks fp256 (refused)."""
+    rows = []
+    for fi, fmt in enumerate(RT_FMT_ORDER):
+        for oi, op in enumerate(["div", "sqrt", "rint", "scaleb", "fma", "mul", "add"]):
+            row = {"op": op, "format": fmt, "tile": "all" if tile is None else str(tile)}
+            if image == "deep" and fmt == "fp256":
+                row.update(refused="CFT_ERR_UNSUPPORTED", why="operation or format not available on this device")
+            else:
+                rate = float(1_000_000 * (5 - fi) + 10_000 * oi + 100 * (tile or 0) + (7 if phase == "together" else 0))
+                row.update(elements=12288, seconds=round(12288 / rate, 4), rate=rate, check="red" if (op, fmt, tile, phase, image) == extra_red else "ok")
+            rows.append(row)
+    return rows
+
+
+def rt_probe_rate(image, phase, tile, op, fmt):
+    return float(1_000_000 * (5 - RT_FMT_ORDER.index(fmt)) + 10_000 * ["div", "sqrt", "rint", "scaleb", "fma", "mul", "add"].index(op) + 100 * (tile or 0) + (7 if phase == "together" else 0))
+
+
+def rt_probes(fx, t):
+    """The probe legs of one night: the quad's tile 1 alone and its four tiles together (a sqrt-at-fp64 row red on tile 3), the single's, the deep's (fp256 refused,
+    and a second deep leg that names no phase). Returns the time after them."""
+    red = ("sqrt", "fp64", 3, "together", "quad")
+    for phase, tiles, dur in (("alone", (1,), 61.0), ("together", (1, 2, 3, 4), 71.0)):
+        for tl in tiles:
+            rows = rt_probe_rows("quad", phase, tl, red)
+            nred = sum(r.get("check") == "red" for r in rows)
+            fx.leg("quad", "rate-probe", t, dur, status="fail" if nred else "pass", kind="probe", tile=tl,
+                   counts={"rows": 28, "timed": 28, "refused": 0, "red": nred}, extra={"phase": phase, "rows": rows, "tile": str(tl), "seconds_a_row": 2.0, "backend": "x"})
+        t += dur + 5
+    for image in ("single", "deep"):
+        rows = rt_probe_rows(image, "alone", None)
+        nref = sum("refused" in r for r in rows)
+        fx.leg(image, "rate-probe", t, 62.0, kind="probe", counts={"rows": 28, "timed": 28 - nref, "refused": nref, "red": 0},
+               extra={"phase": "alone", "rows": rows, "tile": "all", "seconds_a_row": 2.0, "backend": "x"})
+        t += 67.0
+    fx.leg("deep", "rate-probe", t, 62.0, kind="probe", counts={"rows": 28, "timed": 28, "refused": 0, "red": 0}, extra={"rows": rt_probe_rows("deep", "alone", None), "tile": "all"})
+    return t + 67.0
+
+
+def build_rates_run(with_probe=False, plan=None, noise=True):
+    """One cycle of the plan's slices and the noise's, one slice after another (a sweep leg is a point in time here, nothing is concurrent but the probe's four)."""
+    SHA.setdefault("cpu", None)
+    fx = Fx()
+    run_start_rec(fx, T0)
+    fx.add("build", T0 + 5, ok=True, steps=[{"name": "tree", "ok": True, "detail": "HEAD, clean"}])
+    t = fx.begin_cycle(T0 + 5, "quad", 1, 3)
+    t = fx.battery(t, "quad", [dict(name="api-test", dur=10, counts={"failed": 0})])
+    for sp in (plan if plan is not None else rt_slices()):
+        rt_leg(fx, t, sp)
+        t += 30
+    if noise:
+        for item, image, tile, flaw, status in RT_NOISE:
+            rt_leg(fx, t, dict(item=item, image=image, tile=tile, cases=90_000, dur=3.0), status=status, flaw=flaw)
+            t += 30
+    if with_probe:
+        t = rt_probes(fx, t + 5)          # after the sweep's legs, so that theirs keep their times and their log names with and without the probe's
+    fx.end_cycle(t)
+    fx.add("run_end", t + 10, reason="deadline", exit=0, cycles=1)
+    return fx.records()
+
+
+def rt_median(xs):
+    xs = sorted(xs)
+    n = len(xs)
+    return xs[n // 2] if n % 2 else (xs[n // 2 - 1] + xs[n // 2]) / 2
+
+
+def rt_oracle(slices):
+    """The rows the report must give, by plain loops: {(image, rate op, format, level): {"from": [...], "tiles": {tile: [(rate, cases)]}}}, then each row's figures."""
+    groups = {}
+    for sp in slices:
+        op, rop, fmt, level, _reach = RT_ITEM[sp["item"]]
+        g = groups.setdefault((sp["image"], rop, fmt, level), {"from": set(), "tiles": {}})
+        g["from"].add(op)
+        g["tiles"].setdefault(sp["tile"], []).append((round(sp["cases"] / sp["dur"], 3), sp["cases"]))
+    rows = {}
+    for key, g in groups.items():
+        def fig(pairs):
+            rs = [p[0] for p in pairs]
+            return dict(slices=len(pairs), cases=sum(p[1] for p in pairs), median=rt_median(rs), min=min(rs), max=max(rs))
+        tiles = {t: fig(p) for t, p in g["tiles"].items()}
+        every = [p for ps in g["tiles"].values() for p in ps]
+        named = [t for t in tiles if t is not None]
+        rows[key] = dict(frm=sorted(g["from"]), tiles=tiles, all=fig(every),
+                         sum=(dict(tiles=len(tiles), median=sum(f["median"] for f in tiles.values()), min=sum(f["min"] for f in tiles.values()),
+                                   max=sum(f["max"] for f in tiles.values())) if len(named) >= 2 else None))
+    return rows
+
+
+def rt_order(keys):
+    return sorted(keys, key=lambda k: (RT_IMAGE_ORDER.index(k[0]), RT_OP_ORDER.index(k[1]), RT_FMT_ORDER.index(k[2]), RT_LEVEL_ORDER.index(k[3])))
+
+
+def rt_rows_equal(S, want, what):
+    got = S["rates"]["rows"]
+    keys = rt_order(want)
+    eq([(r["image"], r["op"], r["format"], r["level"]) for r in got], keys, f"{what}: the rows are the oracle's, in image, op, format and level order")
+    ok = len(got) == len(keys)
+    bad = []
+    for r, k in zip(got, keys):
+        w = want[k]
+        tl = [(t["tile"], t["slices"], t["cases"], t["median"], t["min"], t["max"]) for t in r["tiles"]]
+        wl = [(t, f["slices"], f["cases"], f["median"], f["min"], f["max"]) for t, f in sorted(w["tiles"].items(), key=lambda kv: (kv[0] is not None, kv[0] or 0)) if t is not None]
+        a = r["all"]
+        same = (r["from"] == w["frm"] and tl == wl and (a["slices"], a["cases"], a["median"], a["min"], a["max"]) == (w["all"]["slices"], w["all"]["cases"], w["all"]["median"], w["all"]["min"], w["all"]["max"])
+                and (r["sum"] is None) == (w["sum"] is None)
+                and (w["sum"] is None or (r["sum"]["tiles"], r["sum"]["median"], r["sum"]["min"], r["sum"]["max"]) == (w["sum"]["tiles"], w["sum"]["median"], w["sum"]["min"], w["sum"]["max"])))
+        if not same:
+            bad.append((k, r))
+    check(ok and not bad, f"{what}: every row's tiles (slices, cases, median, least, most), its pool, its sum and the op words that fed it are the oracle's", bad[:1])
+
+
+def rt_cells(T):
+    """The text's table as {(image, op, format, level, tile label): row dict}, and the row dicts in order."""
+    top, secs = sections(T)
+    hdr = ["image", "op", "format", "level", "tile", "slices", "median", "least", "most", "card_alone", "ratio", "from"]
+    tab = parse_table(secs["RATES BY OP AND FORMAT"], hdr, stop=r"^$") or []
+    cells, last = {}, None
+    for r in tab:
+        cells[(r["image"], r["op"], r["format"], r["level"], r["tile"])] = r
+    return cells, tab, secs["RATES BY OP AND FORMAT"]
+
+
+def group_rates():
+    group("rates")
+    slices = rt_slices()
+    want = rt_oracle(slices)
+    # a fixture that could not tell the formats, levels and tiles apart would prove little (VBC sent BC back for a cadence checked at the one value 3)
+    meds = [f["median"] for w in want.values() for f in w["tiles"].values()]
+    check(len(set(meds)) == len(meds) and len(want) == 16 and len({k[2] for k in want}) == 4 and len({k[3] for k in want}) == 2 and len({k[0] for k in want}) == 3,
+          "rates: the fixture's per-tile medians are all different, over 4 formats, 2 levels and 3 images", (len(set(meds)), len(meds), len(want)))
+    recs = build_rates_run()
+    S = R.summarize(recs, rev=None)
+    X = S["rates"]
+    rt_rows_equal(S, want, "rates")
+    # -- the legs the rows leave out, each by its reason, adding to the sweep legs seen
+    eq(X["left_out"], RT_LEFT, "rates: the left-out counts are the ones counted by hand from the noise: skipped 1, random 2, class 2, host 3 (a CPU slice, a host item on a card image), "
+       "unknown 1, not pass 2, no usable rate 4")
+    eq((X["seen"], X["used"]), (len(slices) + RT_SEEN_EXTRA, len(slices)), "rates: the sweep legs seen are the used ones and the left-out ones, and nothing is lost between them")
+    eq(X["unit"], "cases/s", "rates: the unit")
+    # -- the text: the section is last, names the three reasons the brief names with their counts, and its table is the oracle's
+    T = R.render(S)
+    top, secs = sections(T)
+    eq(list(secs)[-1], "RATES BY OP AND FORMAT", "rates: the section is the report's last")
+    cells, tab, lines = rt_cells(T)
+    for key, n, why in (("class", 2, "one case a call"), ("host", 3, "no tile"), ("random", 2, "not an exhaustive slice")):
+        check(any(ln.strip().startswith(f"{key}: {n} - ") and why in ln for ln in lines), f"rates: the text names the {key} level or reach as left out, with its count {n} and its reason ({why})")
+    check(any("HARD_WHOLE" in ln for ln in lines) and any("k times its indices" in ln for ln in lines) and any("one element through the op" in ln for ln in lines),
+          "rates: the text says what a case is and how a hard item's are counted")
+    bad = []
+    for key in rt_order(want):
+        w = want[key]
+        shown = [(str(t), f) for t, f in sorted(w["tiles"].items(), key=lambda kv: kv[0] or 0) if t is not None]
+        if w["sum"] is not None:
+            shown += [("all", w["all"]), (f"sum of {w['sum']['tiles']}", dict(slices=w["all"]["slices"], median=w["sum"]["median"], min=w["sum"]["min"], max=w["sum"]["max"]))]
+        elif None in w["tiles"]:
+            shown = [("only", w["tiles"][None])]
+        elif len(shown) == 1:
+            pass
+        for label, f in shown:
+            r = cells.get((key[0], key[1], key[2], key[3], label))
+            if r is None or not (r["slices"] == str(f["slices"]) and match(f["median"], num(r["median"])) and match(f["min"], num(r["least"])) and match(f["max"], num(r["most"]))):
+                bad.append((key, label, r))
+    check(not bad and len(tab) == sum(len(w["tiles"]) + (2 if w["sum"] else 0) for w in want.values()),
+          "rates: every row of the text's table - a tile, `all`, `sum of N`, `only` - shows the oracle's slices, median, least and most", bad[:1])
+    check(sum(1 for r in tab if r["from"]) == len(want) and {r["from"] for r in tab if r["from"]} >= {"scaleb32-all, scaleb32-wide", "recip128-f32, recip128-win-key", "div128-f64hard, div128-hard"},
+          "rates: the catalog ops pooled in a row are named once, on its first line")
+    # -- a hard item's cases are the tool's cases, held to the catalog's whole-space figures (HARD_WHOLE), not to k x its indices
+    op, nk = "div32-hard", LIB.HARD_SPACE["div32-hard"]
+    space, k = nk
+    whole_cases, whole_skipped = LIB.HARD_WHOLE["div32-hard"]
+    cuts = [0, 7_000_000, 15_000_000, space]
+    def f_(x):
+        return x * whole_skipped // space
+    hard = []
+    for a_, b_ in zip(cuts, cuts[1:]):
+        sk = f_(b_) - f_(a_)
+        hard.append(dict(item="div32-hard-rne", image="quad", tile=1, cases=k * (b_ - a_) - sk, dur=100.0))
+    fxh = Fx()
+    run_start_rec(fxh, T0)
+    fxh.begin_cycle(T0 + 5, "quad", 1, 3)
+    for n_, sp in enumerate(hard):
+        rt_leg(fxh, T0 + 100 + 200 * n_, sp)
+    Sh = R.summarize(fxh.records(), rev=None)
+    row = Sh["rates"]["rows"][0]
+    eq((sum(sp["cases"] for sp in hard), row["all"]["cases"], row["tiles"][0]["cases"]), (whole_cases, whole_cases, whole_cases),
+       "rates: a hard item covered whole by slices of its space has the catalog's HARD_WHOLE cases (div32-hard: 64,346,592), the skipped slots left out")
+    check(row["all"]["cases"] != k * space and k * space == whole_cases + whole_skipped,
+          "rates: ... and not k times its indices, which is the cases and the skipped slots together (84,943,152)")
+    # -- the table of rate ops is held to the catalog both ways: every tile op of the exhaustive and hard levels has one, and none is dead
+    cat = LIB.sweep_items(mpfr=True)
+    need = {it.op for it in cat if it.kind == "exhaustive" and it.reach == "tile" and it.level in ("exhaustive", "hard")}
+    eq(set(R.RATE_OP), need, f"rates: the rate-op table names every op word of the catalog's tile items at the exhaustive and hard levels ({len(need)}) and no other")
+    eq({o: R.RATE_OP[o] for o in need}, {o: re.match(r"[a-z]+", o).group(0) for o in need},
+       "rates: and each op word's rate op is the operation it names: the word's letters before its digits (the oracle's own parse)")
+    eq(sorted(set(R.RATE_OP.values())), sorted(R.RATE_OPS), "rates: and the ops a table lists are exactly the ones the rows can have")
+    # -- the other levels' items are out of the rows by the catalog, not by luck: no class or random or host item has an op in the table
+    check(not any(it.op in R.RATE_OP for it in cat if it.level in ("class", "random") or it.reach != "tile"), "rates: no class-level, random or host item's op has a rate op")
+    # -- no probe: the card-alone cells are '-' and the text says so; nothing is put in their place
+    eq(X["probe"], None, "rates: a run with no probe leg has probe None, not zeros")
+    check(all(r["card"] is None for r in X["rows"]) and all(r["card_alone"] == "-" and r["ratio"] == "-" for r in tab if r["tile"] in ("all", "only")),
+          "rates: and every card_alone and ratio cell is '-'")
+    check(any("no probe leg in this run" in ln for ln in lines), "rates: the text says that no probe leg ran")
+    # -- with probe legs: the card-alone rate beside each row, the ratio, the table of probe-only rows, the refusals and the red check
+    pr = build_rates_run(with_probe=True)
+    Sp = R.summarize(pr, rev=None)
+    rt_rows_equal(Sp, want, "rates with probe legs")
+    # -- first the checks that do not read the probe figure: a report that dropped its probe legs, or counted them as sweep legs, fails these where it stands, and not only the
+    #    first two checks below it before one of them reads a probe that is not there
+    # -- a probe leg is never coverage, a slice, an interval or a skipped row: the run with probe legs has the run without them's coverage, to the last field
+    S0 = R.summarize(recs, rev=None)
+    def coverage(S):                 # the sweep section but for the count of records it read, which the probe legs add to
+        c = json.loads(json.dumps(S["sweep"]))
+        for src in c["trees"]["sources"]:
+            src.pop("records")
+        return c
+    eq(coverage(Sp), coverage(S0), "rates with probe legs: the sweep section (coverage, slices, cases, intervals, first gaps, the trees) is the run without them's, field for field "
+       "(but for the number of records read)")
+    eq(Sp["failures"]["skipped"], S0["failures"]["skipped"], "rates with probe legs: and there is no skipped row of a probe")
+    eq(Sp["totals"]["legs"]["total"], S0["totals"]["legs"]["total"] + 8, "rates with probe legs: the 8 probe legs are legs (5 + 1 + 2) and nothing else changed in the count")
+    eq([r for r in Sp["rows"] if r["kind"] != "probe"], S0["rows"], "rates with probe legs: the per-leg table's other rows are what they were")
+    check(sum(1 for r in Sp["rows"] if r["kind"] == "probe") == 3, "rates with probe legs: and the probe has a row of its own for each image")
+    def card_union(records, kinds):
+        ivs = sorted((r["start_epoch"], r["end_epoch"]) for r in records if r["type"] == "leg" and r["kind"] in kinds and r["status"] != "skipped" and r["image"] != "cpu")
+        total, cur = 0.0, None
+        for s_, e_ in ivs:
+            if cur is not None and s_ <= cur[1]:
+                cur[1] = max(cur[1], e_)
+            else:
+                total += (cur[1] - cur[0]) if cur else 0.0
+                cur = [s_, e_]
+        return total + ((cur[1] - cur[0]) if cur else 0.0)
+    u0, u1 = card_union(recs, ("battery", "sweep")), card_union(pr, ("battery", "sweep", "probe"))
+    check(abs(S0["uptime"]["card_union_s"] - u0) < 1e-6 and abs(Sp["uptime"]["card_union_s"] - u1) < 1e-6 and u1 - u0 > 250,
+          "rates with probe legs: the time on the card counts a probe leg (the union of the battery's, the sweep's and the probe's intervals, the oracle's)",
+          (S0["uptime"]["card_union_s"], u0, Sp["uptime"]["card_union_s"], u1))
+    P = Sp["rates"]["probe"]
+    bad = []
+    for r in Sp["rates"]["rows"]:
+        pop = "div" if r["op"] == "recip" else r["op"]
+        phase = "together" if r["image"] == "quad" else "alone"
+        tiles = (1, 2, 3, 4) if r["image"] == "quad" else (None,)
+        rates = [rt_probe_rate(r["image"], phase, t, pop, r["format"]) for t in tiles
+                 if not (r["image"] == "quad" and (pop, r["format"], t) == ("sqrt", "fp64", 3))]          # tile 3's sqrt at fp64 was red: left out
+        if r["image"] == "deep" and r["format"] == "fp256":
+            rates = []
+        if not rates:
+            if r["card"] is not None:
+                bad.append(("a card figure with no checked probe row", r["image"], r["op"], r["format"]))
+            continue
+        c = r["card"]
+        if c is None or c["phase"] != phase or c["rate"] != rt_median(rates) or abs(c["ratio"] - rt_median(rates) / r["all"]["median"]) > 5e-5:
+            bad.append((r["image"], r["op"], r["format"], r["level"], c, rt_median(rates), r["all"]["median"]))
+    check(not bad and sum(r["card"] is not None for r in Sp["rates"]["rows"]) >= 15,
+          "rates with probe legs: each row's card_alone is the median of the probe's checked rows for its op (a recip row beside the div) and format, the quad's tiles together, "
+          "the others' tile alone, and its ratio is that over the row's median", bad[:2])
+    check(any(r["op"] == "recip" and r["card"] is not None for r in Sp["rates"]["rows"]) and any(r["op"] == "sqrt" and r["format"] == "fp64" and r["image"] == "quad" and r["card"] is not None
+                                                                                                for r in Sp["rates"]["rows"]),
+          "rates with probe legs: a recip row is held beside the probe's div, and the quad's sqrt at fp64, with a red row among its four tiles, still has its figure from the other three")
+    eq([(x["image"], x["op"], x["format"], x["phase"], x["tile"]) for x in P["red"]], [("quad", "sqrt", "fp64", "together", "3")], "rates with probe legs: the red row is named, with its phase and tile")
+    eq(sorted((x["image"], x["op"], x["format"], x["refused"]) for x in P["refused"]),
+       sorted(("deep", o, "fp256", "CFT_ERR_UNSUPPORTED") for o in ["div", "sqrt", "rint", "scaleb", "fma", "mul", "add"]), "rates with probe legs: the deep's seven fp256 rows are refused, by the library's name")
+    eq((P["images"]["quad"]["legs"], P["images"]["quad"]["failed"], P["images"]["single"]["legs"], P["images"]["deep"]["legs"], P["unplaced_legs"]), (5, 1, 1, 2, 1),
+       "rates with probe legs: the legs of each image, the failed one, and the leg that named no phase")
+    cell = [t for t in P["table"] if (t["image"], t["op"], t["format"]) == ("quad", "mul", "fp128")][0]
+    eq((cell["alone"]["rows"], cell["alone"]["median"], cell["together"]["rows"], cell["together"]["median"]),
+       (1, rt_probe_rate("quad", "alone", 1, "mul", "fp128"), 4, rt_median([rt_probe_rate("quad", "together", t, "mul", "fp128") for t in (1, 2, 3, 4)])),
+       "rates with probe legs: a probe-only row (mul at fp128) has its alone and together figures, the oracle's")
+    check(not any(t["image"] == "deep" and t["format"] == "fp256" for t in P["table"]), "rates with probe legs: and a refused row is in no table, never a rate")
+    Tp = R.render(Sp)
+    cellsp, tabp, linesp = rt_cells(Tp)
+    check(any(ln.startswith("  REFUSED, never timed: div at fp256 on deep: CFT_ERR_UNSUPPORTED") for ln in linesp) and any(ln.startswith("  CHECK RED: sqrt at fp64 on quad (together, tile 3)") for ln in linesp)
+          and any("named no phase" in ln for ln in linesp), "rates with probe legs: the text names each refusal, the red check and the unplaced leg")
+    r1 = cellsp[("quad", "sqrt", "fp32", "exhaustive", "all")]
+    c1 = [r for r in Sp["rates"]["rows"] if (r["image"], r["op"], r["format"], r["level"]) == ("quad", "sqrt", "fp32", "exhaustive")][0]["card"]
+    check(match(c1["rate"], num(r1["card_alone"])) and match(c1["ratio"], num(r1["ratio"].rstrip("x"))) and r1["ratio"].endswith("x"),
+          "rates with probe legs: the text shows the card-alone rate and the ratio on the `all` row", (r1, c1))
+    # -- a summary from before the field renders, with no section
+    old = json.loads(json.dumps(S0))
+    old.pop("rates")
+    try:
+        to, err = R.render(old), None
+    except Exception as e:
+        to, err = "", f"{type(e).__name__}: {e}"
+    check(err is None and "RATES BY OP" not in to, "rates: a summary from before the field renders, with no rates section", err)
+    # -- a run with no sweep leg at all has a section that says so, never a row of zeros
+    Sn = R.summarize(build_rates_run(plan=[], noise=False), rev=None)
+    eq((Sn["rates"]["rows"], Sn["rates"]["seen"], Sn["rates"]["used"]), ([], 0, 0), "rates: a run with no sweep leg has no rate row")
+    check("no rate row: no slice of this run qualifies" in R.render(Sn), "rates: and the text says so")
+
+
 def main():
     tmp = tempfile.mkdtemp(prefix="cft-report-test-")
     try:
@@ -2941,6 +3331,7 @@ def main():
         group_json(base)
         group_reach()
         group_wide()
+        group_rates()
         group_left_out(base)
         group_controls(base, marks)
         group_sabotage(base)
