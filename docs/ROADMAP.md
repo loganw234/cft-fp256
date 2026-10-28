@@ -6275,6 +6275,28 @@ settled as recommended. In substance as put to him:
 
 M2's build is a round of its own (his word of 2026-10-12, above).
 
+**Logan's answer on fp32, after the build measured it** (2026-10-27, in
+conversation). Answer 3 asked for the triple word at G = 40 to be built
+and measured first. Parcel M2X did so in the study's model and found all
+five conditions of its brief holding (docs/VALIDATION.md, M2X's entry):
+- every fragment built;
+- all 15 run on seq.py, with 23 values live;
+- sin 939 instructions against a ceiling of 1,395 (cos 936, tan 993;
+  the double word's 348, 344 and 359);
+- 0 wrong lanes, on the model and on seq.py;
+- every budget region under 1 Bv under rne, the largest 0.4296 Bv at
+  12,000 lanes on the box.
+
+Its mark rate is about 2^-39.3 a call, where the double word's is
+2^-17.5. G = 40 is the last G at which that plan's static proofs hold.
+- **His answer, verbatim:** "Go with the triple word for fp32, sorry
+  for not catching that question earlier."
+- **So:** fp32's sin, cos and tan are the triple word at G = 40, and the
+  double word at G = 18 is not built. Parcel M2F builds it in
+  mathlib.py on the shared sections of M2's wave 2, at the rho M2X
+  computed for its reduction (pi/4 (1 + 2^-18.91)). The three get a cap
+  of 23 live values at fp32, as answer 9 allows.
+
 **Logan's answers on M4's study** (2026-10-23, by AskUserQuestion).
 - **The question:** "How do you want to answer M4's thirteen design
   questions? The recommendations are in the study's section 9
