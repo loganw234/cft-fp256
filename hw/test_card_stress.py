@@ -8184,7 +8184,7 @@ def plants(env: Env) -> None:
          [("nightly.html", ': figures(t, c.kind + " items covered"),', ': [h("div", { "class": "kind", text: "base items" }), figures(t, c.kind + " items covered")],')],
          plant_progress, ["wide page: over a data file without the new fields (the run without wide items as 3ec0081c's reducer made it) the tree the page draws is "
                           "the page of 3ec0081c's, node for node",
-                          "committed data: while the file is night 7's, as 3ec0081c committed it, the page draws the tree it drew then, node for node"]),
+                          "night 7's file, as 3ec0081c committed it: the page draws the tree it drew then, node for node"]),
         ("HXd: the page takes a group's figures from the class's total",
          [("nightly.html", 'wide ? [base ? figures(base, c.kind + " items covered") : null,', 'wide ? [base ? figures(t, c.kind + " items covered") : null,')],
          plant_progress, ["the base group's block of the headline states"]),

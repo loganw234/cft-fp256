@@ -50,13 +50,15 @@ SCRIPT, REPORT = os.path.join(HW, "card_stress_progress.py"), os.path.join(HW, "
 PAGE, DATA = os.path.join(ROOT, "site", "nightly.html"), os.path.join(ROOT, "site", "nightly.json")
 FIXTURE = os.path.join(HW, "card_stress_fixtures", "progress-synthetic.jsonl")
 FIXTURE_WIDE = os.path.join(HW, "card_stress_fixtures", "progress-synthetic-wide.jsonl")
+NIGHT7 = os.path.join(HW, "card_stress_fixtures", "nightly-night7.json")
 # What the page of 3ec0081c drew over a data file of the shape its reducer made (the run without wide items, the new fields taken off), as the digest of
 # the whole tree it builds in the stub DOM, with the clock at LEGACY_CLOCK (the page says how long ago the newest night ended). Made once by running that
 # page (git show 3ec0081c:site/nightly.html) through this very harness; the page now must draw the same tree over such a file.
 LEGACY_CLOCK = 1792650000000
 LEGACY_DOM = "c8aa1396ddcc7be0457d479cb6de09be623ad34752cad269f96c5c570636e2e4"
 # The same, for the file the nightly page was committed with at 3ec0081c (night 7, the data file's sha256 below): the digest of the tree that page drew
-# over it with the clock at NIGHT7_CLOCK, from running that page through this harness.
+# over it with the clock at NIGHT7_CLOCK, from running that page through this harness. NIGHT7 is a copy of that file (git show bac43dba:site/nightly.json,
+# night 7's data commit, the blob 3ec0081c still had), so the check does not depend on the committed file, which each morning's data commit replaces.
 NIGHT7_SHA256 = "72960b0c33ce267b0627e7feec3b74483875fff1e7977f1f597e5ca17971d650"
 NIGHT7_CLOCK = 1793200000000
 NIGHT7_DOM = "0884be6ecce7fb52f062a5983a51afa2e1850131790567bb1dada4869fea69b8"
@@ -998,19 +1000,19 @@ def group_committed():
     if NODE:
         r = page("ok", DATA)
         check(r.get("app", {}).get("hidden") is False and r["status"]["hidden"] is True, "committed data: the page shows it", r.get("error"))
-        # parcel HXd: night 7's file, as 3ec0081c committed it (it has none of the new fields), is drawn as it was drawn. The check stands for as long as the
-        # committed file is that one; the morning routine replaces it with a file made by these tools, and then the check is SKIPPED BY NAME (send-back 1,
-        # N1: it used to vanish without a word), while the legacy check of the page's group covers a data file without the new fields
-        have = hashlib.sha256(open(DATA, "rb").read()).hexdigest()
-        if have == NIGHT7_SHA256:
-            eq(page("ok", DATA, clock=NIGHT7_CLOCK).get("dom"), NIGHT7_DOM, "committed data: while the file is night 7's, as 3ec0081c committed it, the page draws the tree it drew then, node for node")
-        else:
-            skip("committed data: the page's tree over night 7's file",
-                 f"{os.path.relpath(DATA, ROOT).replace(os.sep, '/')} is no longer the night-7 file 3ec0081c committed (its sha256 begins {have[:12]}, night 7's {NIGHT7_SHA256[:12]}), so "
-                 "NIGHT7_DOM, the digest of the tree the old page drew over that file, does not apply to it; expected once the morning routine has replaced it (the check and the "
-                 "three NIGHT7_ constants can then be retired)")
     else:
         skip("committed data in the page", "node is not on PATH")
+
+
+def group_night7():
+    # parcel HXd: night 7's file, as 3ec0081c committed it (it has none of the new fields), is drawn as it was drawn. Until 2026-10-28 this read the committed
+    # file, so the morning routine's first replacement of that file would have skipped it by name (send-back 1, N1); it reads the copy NIGHT7 now, so it
+    # neither depends on what is committed nor goes quiet when that changes, and the copy is held to night 7's sha256 first
+    eq(hashlib.sha256(open(NIGHT7, "rb").read()).hexdigest(), NIGHT7_SHA256, "night 7's file: the copy is the data file 3ec0081c committed, byte for byte (its sha256)")
+    if NODE:
+        eq(page("ok", NIGHT7, clock=NIGHT7_CLOCK).get("dom"), NIGHT7_DOM, "night 7's file, as 3ec0081c committed it: the page draws the tree it drew then, node for node")
+    else:
+        skip("night 7's file in the page", "node is not on PATH")
 
 
 def guarded(fn, *args):
@@ -1046,6 +1048,8 @@ def main():
                 guarded(group_wide_page, b4[0], wout, {"clock": LEGACY_CLOCK, "digest": LEGACY_DOM})
         print("== the committed data file")
         guarded(group_committed)
+        print("== night 7's data file, as 3ec0081c committed it (a copy in card_stress_fixtures)")
+        guarded(group_night7)
         print("== the lead's real copies")
         runs = [x for x in os.environ.get("CARD_STRESS_PROGRESS_RUNS", "").split(os.pathsep) if x]
         record_only(False)
