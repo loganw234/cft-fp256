@@ -497,7 +497,7 @@ DEVICE_FLAG_TOOLS = ("cft-segrun", "acceptance.py", "seq_check.py", "cft-audit")
 # gate's `images` stage runs it.)
 XCLBIN_TOOLS = ("device-test", "run-device-test.sh", "card-segrun.sh", "card-identity.sh",
                 "seq_check.py", "acceptance.py", "run-soak.sh",
-                "run-c5-soak.sh") + SOAK_TOOLS
+                "run-c5-soak.sh", "rate-probe") + SOAK_TOOLS       # rate-probe: parcel TP's probe leg (host/tools/rate_probe.c); with `-` for the software backend it has no xclbin to name
 # The vendor tools' subcommands that touch the card (examine, which this driver itself
 # uses for telemetry, does not).
 XRT_TOOLS = ("xbutil", "xrt-smi", "xbmgmt")

@@ -2448,7 +2448,8 @@ It should end `28 rows, 28 timed, 0 refused, 0 red` and `every check ok`, exit 0
 order of the HX study's per-tile figures (docs/studies/HX-wide-sweeps.md, 5.1: div 1.586, 0.947 and 0.542 M elements a second; sqrt 1.458, 0.901 and 0.505) -
 BELIEVED the same loop, to be read, not assumed. Then the smoke: add `--rate-probe` to the launcher's driver line (the lead's launcher scripts, outside the tree)
 for one `--quick` run, and read the three `rate_probe` events and the report's last section; then on for the night. The tool's real run on the card is not made by
-this parcel (docs/VALIDATION.md, TP). A night with a probe leg that is not `pass` has a failing leg: a red row is a wrong answer from the card.
+this parcel (docs/VALIDATION.md, TP). A night with a probe leg that is not `pass` has a failing leg: a red row is a wrong answer from the card. The guard (`XCLBIN_TOOLS` in `hw/card_stress.py`) knows
+`rate-probe`: one started by hand with an image is a card user to the driver's guard and the scheduler's, as `device-test` is; with `-` (the software backend) it is not.
 
 ### Failure policy, processes, and what it guarantees
 

@@ -1117,6 +1117,8 @@ def group_commands(src: str = HERE) -> list:
         c("guard rules: device-test, run-device-test.sh, card-segrun.sh, card-identity.sh with an xclbin ARE card users",
           all(user(*a) for a in (("/x/device-test", "/i/q.xclbin", "-q"), ("bash", "hw/run-device-test.sh", "/i/q.xclbin", "-i"),
                                  ("bash", "hw/card-segrun.sh", "/i/q.xclbin"), ("bash", "hw/card-identity.sh", "/i/q.xclbin"))))
+        c("guard rules: rate-probe (parcel TP, the probe leg's tool) with an xclbin IS a card user, as a tool named with .exe too, and with - (the software backend) it is NOT",
+          bool(user("host/rate-probe", "/i/q.xclbin", "2")) and bool(user("/x/rate-probe.exe", "/i/q.xclbin", "2")) and not user("host/rate-probe", "-", "2"))
         c("guard rules: acceptance.py, seq_check.py and cft-segrun with --device <xclbin> ARE; with sw, sw:N or cft:// they are NOT",
           all(user(*a) for a in (("python3", "programs/acceptance.py", "--device", "/i/q.xclbin"),
                                  ("python3", "host/tests/seq_check.py", "--device", "/i/q.xclbin"),
@@ -8844,6 +8846,9 @@ def plants(env: Env) -> None:
         ("TP: [147] the progress fixture's slices all run alike",
          [("test_card_stress_progress.py", 'cases, dur = 1000 * (30 + 11 * night + 4 * j), RT_DURS[(night + j) % len(RT_DURS)]', 'cases, dur = 1000, 2.0')],
          plant_progress, ["the fixture's night 1 row has five slices and a median, a least and a most that are three figures"]),
+        ("TP: [148] the guard does not know the probe tool",
+         [("card_stress.py", '                "run-c5-soak.sh", "rate-probe") + SOAK_TOOLS', '                "run-c5-soak.sh") + SOAK_TOOLS')],
+         lambda env, src: group_commands(src), ["guard rules: rate-probe"]),
     ]
     where = {"nightly.html": os.path.join(ROOT, "site", "nightly.html"), "rate_probe.c": os.path.join(ROOT, "host", "tools", "rate_probe.c"),
              "Makefile": os.path.join(ROOT, "host", "Makefile"), "figure_extracts.py": os.path.join(ROOT, "python", "figure_extracts.py")}
