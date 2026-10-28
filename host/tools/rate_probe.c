@@ -169,9 +169,9 @@ int main(int argc, char **argv)
     for (fi = 0; fi < NFM; fi++) {
         int W = FM[fi].W, i;
         for (op = 0; op < P_NOPS; op++) {
-            uint32_t fd = 0, fs = 0;
+            uint32_t fd = 0, fs = 0, fchk;
             unsigned long long calls = 0;
-            int eq = 0;
+            int eq = 0, same;
             double t0, t1;
             cft_status st, ss;
             rows++;
@@ -203,6 +203,10 @@ int main(int argc, char **argv)
                 fd ^= 1;
             for (i = 0; i < N; i++)
                 eq += !memcmp(d + (size_t)i * W, r + (size_t)i * W, (size_t)W);
+            /* THE CHECK is made here, on the checking call: the timed calls below write the flags again, and a check made after them would
+             * compare the last timed call's flags and let a flag the checking call got wrong go by (sabotage 2 found that in this file's first draft) */
+            same = eq == N && fd == fs;
+            fchk = fd;
             t0 = now_s();
             do {
                 st = call(dev, op, FM[fi].f, a, b, c, d, &fd);
@@ -220,10 +224,10 @@ int main(int argc, char **argv)
             timed++;
             printf("rate-probe: row op=%s format=%s tile=%s elements=%llu seconds=%.4f rate=%.1f", PNAME[op], FM[fi].name, tile,
                    calls * (unsigned long long)N, t1 - t0, (double)calls * N / (t1 - t0));
-            if (eq == N && fd == fs) {
+            if (same) {
                 printf(" check=ok\n");
             } else {
-                printf(" check=red mismatched=%d flags_device=0x%02x flags_software=0x%02x\n", N - eq, (unsigned)fd, (unsigned)fs);
+                printf(" check=red mismatched=%d flags_device=0x%02x flags_software=0x%02x\n", N - eq, (unsigned)fchk, (unsigned)fs);
                 red++;
             }
             fflush(stdout);

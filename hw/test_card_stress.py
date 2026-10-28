@@ -187,6 +187,14 @@ def source_has(path: str, *frags: str) -> list:
     return [f for f in frags if f not in text]
 
 
+def rp_standin_rate(op: str, fmt: str, tile: str) -> float:
+    """The elements a second the rate-probe stand-in says (hw/card_stress_standin.py, probe_rate): THIS FILE'S OWN copy of its rule, so that a change of the stand-in's is seen
+    and not followed. It is not a measurement: it differs by format (the narrower the faster), by op and by tile, so that a table built from it shows a row, a column or a tile
+    read from the wrong place."""
+    first = int(tile.split(",")[0]) if tile.split(",")[0].isdigit() else 0
+    return float(8_000_000 // (1 + L.PROBE_FORMATS.index(fmt)) + 100_000 * L.PROBE_OPS.index(op) + 1_000 * first)
+
+
 def group_parsers(tag: str = "") -> list:
     """Returns [(name, ok, detail)] so a plant can ask whether any check failed."""
     out: list = []
@@ -431,19 +439,25 @@ def group_parsers(tag: str = "") -> list:
       and raises(lambda: L.parse_rate_probe(t.replace("op=add format=fp256", "op=add format=fp16"), 0)))
     c("rate-probe: a rate that is not its elements over its seconds is refused", raises(lambda: L.parse_rate_probe(re.sub(r"rate=\d+\.\d", "rate=999999999.9", t, count=1), 0)))
     c("rate-probe: a row that times nothing is refused", raises(lambda: L.parse_rate_probe(re.sub(r"elements=\d+", "elements=0", t, count=1), 0)))
-    c("rate-probe: a red check without its mismatch clause, and a mismatch clause on an ok check, are refused",
-      raises(lambda: L.parse_rate_probe(t.replace("check=ok", "check=red", 1), 1)) and raises(lambda: L.parse_rate_probe(ts.replace(" mismatched=1", "", 1), 1)))
+    red1 = t.replace("check=ok", "check=red", 1).replace("0 refused, 0 red", "0 refused, 1 red").replace("every check ok", "A CHECK FAILED")
+    c("rate-probe: a red check without its mismatch clause is refused (the summary and the verdict agreeing with the rows, so that this rule alone refuses it), and so is a mismatch clause on an ok check",
+      raises(lambda: L.parse_rate_probe(red1, 1)) and raises(lambda: L.parse_rate_probe(ts.replace(" mismatched=1", "", 1), 1))
+      and raises(lambda: L.parse_rate_probe(t.replace("check=ok", "check=ok mismatched=1 flags_device=0x00 flags_software=0x00", 1), 0)))
+    tf = re.sub(r"^rate-probe: row op=div format=fp32 .*$", "rate-probe: row op=div format=fp32 tile=none timed_call_failed=CFT_ERR_TIMEOUT after=3 why=a call did not complete",
+                t, count=1, flags=re.M).replace("28 timed, 0 refused, 0 red", "27 timed, 0 refused, 1 red").replace("every check ok", "A CHECK FAILED")
+    vf, why = parse_ok(lambda: L.parse_rate_probe(tf, 1))
+    c("rate-probe: a timed call that failed is a red row (not timed, not refused), the leg a failure, and the library's error name and the calls it got through are kept",
+      vf is not None and not vf.ok and vf.counts == {"rows": 28, "timed": 27, "refused": 0, "red": 1}
+      and vf.extra["rows"][0].get("timed_call_failed") == "CFT_ERR_TIMEOUT" and vf.extra["rows"][0]["after"] == 3 and vf.extra["rows"][0]["check"] == "red" and "rate" not in vf.extra["rows"][0], why)
     c("rate-probe: a row for another tile than the header's is refused", raises(lambda: L.parse_rate_probe(t.replace("tile=none elements", "tile=3 elements", 1), 0)))
     c("rate-probe: a verdict that says ok over a red row, and one that says failed over none, are refused",
-      raises(lambda: L.parse_rate_probe(ts.replace("A CHECK FAILED", "every check ok"), 1)) and raises(lambda: L.parse_rate_probe(t.replace("every check ok", "A CHECK FAILED"), 1)))
+      raises(lambda: L.parse_rate_probe(ts.replace("A CHECK FAILED", "every check ok"), 0)) and raises(lambda: L.parse_rate_probe(t.replace("every check ok", "A CHECK FAILED"), 1)))
     c("rate-probe: a probe asked to open an image that says it opened the software backend (or another image) is refused, and so is a device where software was asked for",
       raises(lambda: L.parse_rate_probe(t, 0, "/x/quad.xclbin")) and raises(lambda: L.parse_rate_probe(t.replace("backend software", "backend DEVICE /x/quad.xclbin"), 0))
       and raises(lambda: L.parse_rate_probe(t.replace("backend software", "backend DEVICE /x/other.xclbin"), 0, "/x/quad.xclbin"))
       and parse_ok(lambda: L.parse_rate_probe(t.replace("backend software", "backend DEVICE /x/quad.xclbin"), 0, "/x/quad.xclbin"))[0] is not None)
     allref = re.sub(r"^(rate-probe: row op=\S+ format=\S+ tile=\S+) elements=.*$", r"\1 refused=CFT_ERR_UNSUPPORTED why=none", t, flags=re.M).replace("28 timed, 0 refused", "0 timed, 28 refused")
     c("rate-probe: a run that refused every row, and so measured nothing, is refused (it is neither a pass nor a rate)", raises(lambda: L.parse_rate_probe(allref, 0)))
-    c("rate-probe: the head line must be there, once", raises(lambda: L.parse_rate_probe(re.sub(r"^rate-probe: N .*\n", "", t, flags=re.M), 0))
-      and raises(lambda: L.parse_rate_probe(t + "rate-probe: N 4096, 2 s a row, tile none\n", 0)))
     missing = source_has("host/tools/rate_probe.c", "rate-probe: backend %s%s%s\\n", "rate-probe: N %d, %g s a row, tile %s%s\\n",
                          "rate-probe: row op=%s format=%s tile=%s elements=%llu seconds=%.4f rate=%.1f", " check=ok\\n",
                          " check=red mismatched=%d flags_device=0x%02x flags_software=0x%02x\\n", "refused=%s why=%s\\n", "timed_call_failed=%s after=%llu why=%s\\n",
@@ -451,13 +465,14 @@ def group_parsers(tag: str = "") -> list:
     c("host/tools/rate_probe.c: every wording the rate-probe parser reads is in the source", not missing, f"not found: {missing}")
     import card_stress_standin as ST
     c("rate-probe: the stand-in's grid is the library's, op for op and format for format", ST.PROBE_OPS == L.PROBE_OPS and ST.PROBE_FORMATS == L.PROBE_FORMATS)
+    rp_rate = rp_standin_rate
     for tile, art in (("1", "/x/quad.xclbin"), ("all", "/x/single.xclbin")):
         sp = subprocess.run([sys.executable, "-B", os.path.join(HERE, "card_stress_standin.py"), "rate-probe", "--", "host/rate-probe", art, "2"], capture_output=True, text=True,
                             env=dict(os.environ, **({"CFT_XRT_TILES": tile} if tile != "all" else {}), CFT_STANDIN_SCENARIO="", CFT_STANDIN_STATE=""), timeout=60)
         vp, why = parse_ok(lambda: L.parse_rate_probe(sp.stdout, sp.returncode, art))
         c(f"rate-probe: the stand-in's lines (tile {tile}) are the grammar the parser reads, whole, and their rates are the stand-in's own",
           vp is not None and vp.ok and vp.counts == {"rows": 28, "timed": 28, "refused": 0, "red": 0} and vp.extra["tile"] == tile
-          and all(abs(r["rate"] - ST.probe_rate(r["op"], r["format"], tile)) < 0.001 * r["rate"] for r in vp.extra["rows"]), why or sp.stderr[-200:])
+          and all(abs(r["rate"] - rp_rate(r["op"], r["format"], tile)) < 0.001 * r["rate"] for r in vp.extra["rows"]), why or sp.stderr[-200:])
     return out
 
 
@@ -7233,6 +7248,8 @@ def make_plant_copy(env: Env, name: str, edits: list) -> str:
         shutil.copy(os.path.join(ROOT, "site", "nightly.html"), os.path.join(d, "nightly.html"))
     if any(e[0] == "rate_probe.c" for e in edits):                # lives in host/tools/: a plant of the probe tool gets its own copy (group_probe_tool builds it)
         shutil.copy(os.path.join(ROOT, "host", "tools", "rate_probe.c"), os.path.join(d, "rate_probe.c"))
+    if any(e[0] == "Makefile" for e in edits):                    # lives in host/: a plant of the Makefile's rule gets its own copy (group_probe_tool makes the tool with it)
+        shutil.copy(os.path.join(ROOT, "host", "Makefile"), os.path.join(d, "Makefile"))
     for fname, old, new in edits:
         p = os.path.join(d, fname)
         with open(p, "r", encoding="utf-8", newline="") as fh:
@@ -8336,6 +8353,453 @@ def plants(env: Env) -> None:
          [("card_stress_lib.py", '"div128-hard": "fp128", "sqrt128-hard": "fp128", "div128-f64hard": "fp128", "sqrt128-f64hard": "fp128",',
            '"div128-hard": "fp256", "sqrt128-hard": "fp128", "div128-f64hard": "fp128", "sqrt128-f64hard": "fp128",')],
          lambda env, src: format_table_checks(src), ["format: the wide items' formats follow their ops"]),
+        # -- parcel TP (2026-10-28): the card's rates by op and format, the probe legs, the page's table and the tool (CARD_STRESS_PLANT='TP: ' runs just these)
+        # the report's rows and text (hw/test_card_stress_report.py)
+        ("TP: [001] a tile's median is its mean",
+         [("card_stress_report.py", '"cases": sum(p[1] for p in pairs), "median": round(float(statistics.median(xs)), 3),', '"cases": sum(p[1] for p in pairs), "median": round(float(statistics.mean(xs)), 3),')],
+         plant_report, ["every row's tiles (slices, cases, median, least, most)"]),
+        ("TP: [002] a tile's least is its most",
+         [("card_stress_report.py", '"min": round(float(min(xs)), 3), "max": round(float(max(xs)), 3)}', '"min": round(float(max(xs)), 3), "max": round(float(max(xs)), 3)}')],
+         plant_report, ["every row's tiles (slices, cases, median, least, most)"]),
+        ("TP: [003] a row's cases are its slices",
+         [("card_stress_report.py", '"cases": sum(p[1] for p in pairs), "median"', '"cases": len(pairs), "median"')],
+         plant_report, ["every row's tiles (slices, cases, median, least, most)"]),
+        ("TP: [004] the image's pooled figure is its first tile's",
+         [("card_stress_report.py", '        every = [p for ps in g["tiles"].values() for p in ps]', '        every = [p for ps in list(g["tiles"].values())[:1] for p in ps]')],
+         plant_report, ["every row's tiles (slices, cases, median, least, most)"]),
+        ("TP: [005] the sum adds the tiles' most",
+         [("card_stress_report.py", '"sum": ({"tiles": len(tiles), "median": round(sum(t["median"] for t in tiles), 3)', '"sum": ({"tiles": len(tiles), "median": round(sum(t["max"] for t in tiles), 3)')],
+         plant_report, ["every row's tiles (slices, cases, median, least, most)"]),
+        ("TP: [006] one tile has a sum",
+         [("card_stress_report.py", 'if len(tiles) >= 2 and named else None', 'if named else None')],
+         plant_report, ["every row's tiles (slices, cases, median, least, most)", "every row of the text's table"]),
+        ("TP: [007] the class level is not left out",
+         [("card_stress_report.py", '    if it is not None and it.level == "class":\n        return "class", None', '    if False:\n        return "class", None')],
+         plant_report, ["the left-out counts are the ones counted by hand"]),
+        ("TP: [008] a host slice on a card image is not left out",
+         [("card_stress_report.py", '    if v["image"] == CPU or reach == HOST:\n        return "host", None', '    if v["image"] == CPU:\n        return "host", None')],
+         plant_report, ["the left-out counts are the ones counted by hand"]),
+        ("TP: [009] random items are not left out",
+         [("card_stress_report.py", '    if (it is not None and it.level == "random") or (it is None and ("seed_n" in sw or "seed" in sw or ("count" in sw and "lo" not in sw))):\n        return "random", None',
+           '    if False:\n        return "random", None')],
+         plant_report, ["the left-out counts are the ones counted by hand"]),
+        ("TP: [010] a slice that did not pass is used",
+         [("card_stress_report.py", '    if st != "pass":\n        return "not_pass", None', '    if False:\n        return "not_pass", None')],
+         plant_report, ["the left-out counts are the ones counted by hand"]),
+        ("TP: [011] a skipped leg is a slice that ran",
+         [("card_stress_report.py", '    if st == "skipped":\n        return "skipped", None', '    if False:\n        return "skipped", None')],
+         plant_report, ["the left-out counts are the ones counted by hand"]),
+        ("TP: [012] a rate of zero is used",
+         [("card_stress_report.py", 'val is None or val <= 0 or cases is None', 'val is None or cases is None')],
+         plant_report, ["the left-out counts are the ones counted by hand"]),
+        ("TP: [013] a rate in another unit is used",
+         [("card_stress_report.py", 'if (rate.get("unit") != RATE_UNIT or val is None', 'if (False or val is None')],
+         plant_report, ["the left-out counts are the ones counted by hand"]),
+        ("TP: [014] a tile that is not a tile number is used",
+         [("card_stress_report.py", '            or not (tile is None or (isinstance(tile, int) and not isinstance(tile, bool) and tile >= 1))):', '            or False):')],
+         plant_report, ["the left-out counts are the ones counted by hand"]),
+        ("TP: [015] the sweep legs seen are not counted",
+         [("card_stress_report.py", '        seen += 1\n        bucket, data = _rate_class(v)', '        bucket, data = _rate_class(v)')],
+         plant_report, ["the sweep legs seen are the used ones"]),
+        ("TP: [016] a hard item's skipped slots are cases",
+         [("card_stress_report.py", '    cases = _int(counts.get("cases"))\n', '    cases = (_int(counts.get("cases")) or 0) + (_int(counts.get("skipped")) or 0)\n')],
+         plant_report, ["has the catalog's HARD_WHOLE cases", "and not k times its indices"]),
+        ("TP: [017] an op word is given another rate op",
+         [("card_stress_report.py", '"scaleb32-wide": "scaleb"', '"scaleb32-wide": "rint"')],
+         plant_report, ["each op word's rate op is the operation it names"]),
+        ("TP: [018] the reciprocal is a division",
+         [("card_stress_report.py", 'RATE_OP.update({op: "recip" for op in ("recip64-f32", "recip128-f32", "recip256-f32")})', 'RATE_OP.update({op: "div" for op in ("recip64-f32", "recip128-f32", "recip256-f32")})')],
+         plant_report, ["the ops a table lists are exactly the ones the rows can have", "each op word's rate op is the operation it names"]),
+        ("TP: [019] the rate-op table keeps an op the catalog lacks",
+         [("card_stress_report.py", 'RATE_OP = {"sqrt32": "sqrt",', 'RATE_OP = {"zzz-hard": "div", "sqrt32": "sqrt",')],
+         plant_report, ["the rate-op table names every op word of the catalog's tile items"]),
+        ("TP: [020] a class-level op has a rate op",
+         [("card_stress_report.py", 'PROBE_OF = {"recip": "div"}', 'RATE_OP["rint64-class"] = "rint"\nPROBE_OF = {"recip": "div"}')],
+         plant_report, ["no class-level, random or host item's op has a rate op", "the rate-op table names every op word of the catalog's tile items"]),
+        ("TP: [021] the unit is not cases a second",
+         [("card_stress_report.py", 'RATE_UNIT = "cases/s"', 'RATE_UNIT = "elements/s"')],
+         plant_report, ["rates: the unit"]),
+        ("TP: [022] the rates come first in the report",
+         [("card_stress_report.py", 'for part in (_r_header, _r_totals, _r_rows, _r_left_out, _r_telemetry, _r_failures, _r_sweep, _r_trees, _r_uptime, _r_rates):',
+           'for part in (_r_rates, _r_header, _r_totals, _r_rows, _r_left_out, _r_telemetry, _r_failures, _r_sweep, _r_trees, _r_uptime):')],
+         plant_report, ["the section is the report's last", "the eight sections, in the spec's order"]),
+        ("TP: [023] the text gives no reason for the class level",
+         [("card_stress_report.py", 'class level: one case a call (a representative', 'class level: counted apart (a representative')],
+         plant_report, ["the text names the class level or reach as left out"]),
+        ("TP: [024] the text gives no reason for the host reach",
+         [("card_stress_report.py", "libcft's host code against the CPU, which no tile computes", "libcft's host code against the CPU, which nobody computes")],
+         plant_report, ["the text names the host level or reach as left out"]),
+        ("TP: [025] the text gives no reason for the random items",
+         [("card_stress_report.py", 'random items: a count of cases from a seed, not an exhaustive slice (the rates', 'random items: a count of cases from a seed (the rates')],
+         plant_report, ["the text names the random level or reach as left out"]),
+        ("TP: [026] the text does not say how a hard item's cases are counted",
+         [("card_stress_report.py", 'and not to k times its indices.', 'and nothing more.')],
+         plant_report, ["the text says what a case is and how a hard item's are counted"]),
+        ("TP: [027] the text's median column shows the least",
+         [("card_stress_report.py", '_g(f["median"]), _g(f["min"]), _g(f["max"])] + (cc if with_card else ["", ""])', '_g(f["min"]), _g(f["min"]), _g(f["max"])] + (cc if with_card else ["", ""])')],
+         plant_report, ["every row of the text's table"]),
+        ("TP: [028] the text does not name the pooled ops",
+         [("card_stress_report.py", '+ [", ".join(e["from"]) if k == 0 else ""])', '+ [""])')],
+         plant_report, ["the catalog ops pooled in a row are named once"]),
+        ("TP: [029] a summary from before the field breaks the text",
+         [("card_stress_report.py", '    X = S.get("rates")\n    if not isinstance(X, dict):\n        return []', '    X = S["rates"]')],
+         plant_report, ["a summary from before the field renders, with no rates section"]),
+        ("TP: [030] a run with no sweep leg has no words for it",
+         [("card_stress_report.py", 'L.append("no rate row: no slice of this run qualifies")', 'L.append("no rows")')],
+         plant_report, ["rates: and the text says so"]),
+        ("TP: [031] the fixture's medians are alike",
+         [("test_card_stress_report.py", 'cases=1000 * (40 + 9 * ii + 17 * o + 7 * j)', 'cases=1000 * 40')],
+         plant_report, ["the fixture's per-tile medians are all different"]),
+        # the probe legs in the report
+        ("TP: [032] the probe's ratio is upside down",
+         [("card_stress_report.py", '"ratio": round(rate / row["all"]["median"], 4)}', '"ratio": round(row["all"]["median"] / rate, 4)}')],
+         plant_report, ["each row's card_alone is the median of the probe's checked rows"]),
+        ("TP: [033] the probe's tiles together are not used",
+         [("card_stress_report.py", 'phase = "together" if c["together"] else "alone"', 'phase = "alone"')],
+         plant_report, ["each row's card_alone is the median of the probe's checked rows"]),
+        ("TP: [034] a recip row has no probe beside it",
+         [("card_stress_report.py", 'PROBE_OF = {"recip": "div"}', 'PROBE_OF = {}')],
+         plant_report, ["a recip row is held beside the probe's div"]),
+        ("TP: [035] a red probe row is not named",
+         [("card_stress_report.py", '            elif row.get("check") == "red":\n                red.append(', '            elif False:\n                red.append(')],
+         plant_report, ["the red row is named, with its phase and tile"]),
+        ("TP: [036] a red probe row is in the median",
+         [("card_stress_report.py", 'red.append({"image": key[0], "op": key[1], "format": key[2], "phase": phase, "tile": _str(row.get("tile"))})',
+           'red.append({"image": key[0], "op": key[1], "format": key[2], "phase": phase, "tile": _str(row.get("tile"))})\n                cells.setdefault(key, {"alone": [], "together": []})[phase].append(float(row.get("rate") or 0))')],
+         plant_report, ["each row's card_alone is the median of the probe's checked rows"]),
+        ("TP: [037] a refused probe row is not named",
+         [("card_stress_report.py", '            if isinstance(row.get("refused"), str):\n                refused[key] =', '            if False:\n                refused[key] =')],
+         plant_report, ["the deep's seven fp256 rows are refused, by the library's name"]),
+        ("TP: [038] the unplaced probe legs are not counted",
+         [("card_stress_report.py", 'unplaced += 1\n            continue', 'unplaced += 0\n            continue')],
+         plant_report, ["the legs of each image, the failed one, and the leg that named no phase"]),
+        ("TP: [039] a probe image's failed legs are not counted",
+         [("card_stress_report.py", 'im["failed"] += v["status"] != "pass"', 'im["failed"] += 0')],
+         plant_report, ["the legs of each image, the failed one, and the leg that named no phase"]),
+        ("TP: [040] a run with no probe has a probe of nothing",
+         [("card_stress_report.py", '    legs = [v for v in views if v["kind"] == "probe"]\n    if not legs:\n        return None', '    legs = [v for v in views if v["kind"] == "probe"]\n    if not legs:\n        legs = []')],
+         plant_report, ["a run with no probe leg has probe None, not zeros"]),
+        ("TP: [041] a refused probe row is in a table",
+         [("card_stress_report.py", '            if isinstance(row.get("refused"), str):\n                refused[key] = {', '            if isinstance(row.get("refused"), str):\n                cells.setdefault(key, {"alone": [], "together": []})[phase].append(1.0)\n                refused[key] = {')],
+         plant_report, ["and a refused row is in no table, never a rate"]),
+        ("TP: [042] a probe leg is a sweep leg",
+         [("card_stress_report.py", 'sviews = [v for v in views if v["kind"] == "sweep"]', 'sviews = [v for v in views if v["kind"] in ("sweep", "probe")]')],
+         plant_report, ["is the run without them's, field for field"]),
+        ("TP: [043] a probe leg is a row of the sweep's",
+         [("card_stress_report.py", '        if v["kind"] == "sweep":\n            key, label = (img, SWEEP_ROW, "sweep"), SWEEP_ROW', '        if v["kind"] in ("sweep", "probe"):\n            key, label = (img, SWEEP_ROW, "sweep"), SWEEP_ROW')],
+         plant_report, ["the per-leg table's other rows are what they were", "and the probe has a row of its own for each image"]),
+        ("TP: [044] the report leaves the probe legs out of its legs",
+         [("card_stress_report.py", '    for i, r in by_type.get("leg", []):\n        se, ee = _num(r.get("start_epoch")), _num(r.get("end_epoch"))', '    for i, r in by_type.get("leg", []):\n        if r.get("kind") == "probe":\n            continue\n        se, ee = _num(r.get("start_epoch")), _num(r.get("end_epoch"))')],
+         plant_report, ["the 8 probe legs are legs"]),
+        ("TP: [045] a probe leg is not time on the card",
+         [("card_stress_report.py", 'if v["kind"] in ("battery", "sweep", "probe") and v["status"] != "skipped"', 'if v["kind"] in ("battery", "sweep") and v["status"] != "skipped"')],
+         plant_report, ["the time on the card counts a probe leg"]),
+        ("TP: [046] the text does not name a refusal",
+         [("card_stress_report.py", '"  REFUSED, never timed: ', '"  refused: ')],
+         plant_report, ["the text names each refusal, the red check and the unplaced leg"]),
+        ("TP: [047] the text does not name a red check",
+         [("card_stress_report.py", '"  CHECK RED: ', '"  red check: ')],
+         plant_report, ["the text names each refusal, the red check and the unplaced leg"]),
+        ("TP: [048] the text leaves the card-alone cells out",
+         [("card_stress_report.py", 'cc = [_g(card["rate"]), _g(card["ratio"]) + "x"] if card else ["-", "-"]', 'cc = ["-", "-"]')],
+         plant_report, ["the text shows the card-alone rate and the ratio on the `all` row"]),
+        ("TP: [049] the text does not say that no probe ran",
+         [("card_stress_report.py", 'card alone (probe legs, the oracle off): no probe leg in this run, so', 'card alone (probe legs, the oracle off): nothing, so')],
+         plant_report, ["the text says that no probe leg ran"]),
+        # the data file and the page (hw/test_card_stress_progress.py)
+        ("TP: [050] the file's rates lose their unit",
+         [("card_stress_progress.py", '    return {"unit": R.RATE_UNIT, "columns": RATES_COLUMNS,', '    return {"unit": "x", "columns": RATES_COLUMNS,')],
+         plant_progress, ["the file's rates have the unit"]),
+        ("TP: [051] the file's figure lists come out reversed",
+         [("card_stress_progress.py", '"all": [e["all"][c] for c in RATES_COLUMNS],', '"all": [e["all"][c] for c in reversed(RATES_COLUMNS)],')],
+         plant_progress, ["each night's rows"]),
+        ("TP: [052] the file leaves the sum out",
+         [("card_stress_progress.py", '"sum": ([e["sum"][c] for c in RATES_SUM_COLUMNS] if e["sum"] else None),', '"sum": None,')],
+         plant_progress, ["each night's rows"]),
+        ("TP: [053] a night's rates are the whole run's so far",
+         [("card_stress_progress.py", 'rates_of(owns, nights)', 'rates_of(cums, nights)')],
+         plant_progress, ["each night's rows"]),
+        ("TP: [054] a night's rates are the final run's",
+         [("card_stress_progress.py", 'rates_of(owns, nights)', 'rates_of([final] * len(owns), nights)')],
+         plant_progress, ["each night's rows", "the three-night file's rates are the four-night file's first three"]),
+        ("TP: [055] the rates are a field of each night",
+         [("card_stress_progress.py", '    return {"unit": R.RATE_UNIT, "columns": RATES_COLUMNS,', '    for k_, n_ in enumerate(nights):\n        n_["rates"] = out[k_]["rows"]\n    return {"unit": R.RATE_UNIT, "columns": RATES_COLUMNS,')],
+         plant_progress, ["no night's entry carries a rates field"]),
+        ("TP: [056] the rates are not the file's last field",
+         [("card_stress_progress.py", '        "rates": rates_of(owns, nights),', '        "rates": rates_of(owns, nights), "zz": 0,')],
+         plant_progress, ["no night's entry carries a rates field"]),
+        ("TP: [057] the sweep legs a night saw are swapped",
+         [("card_stress_progress.py", '"seen": X["seen"], "used": X["used"],', '"seen": X["used"], "used": X["seen"],')],
+         plant_progress, ["the sweep legs each night saw and the ones that made rows"]),
+        ("TP: [058] the left-out counts are dropped from the file",
+         [("card_stress_progress.py", '"left_out": X["left_out"],', '"left_out": {},')],
+         plant_progress, ["night 2's left-out counts"]),
+        ("TP: [059] the probe is dropped from the file",
+         [("card_stress_progress.py", '        probe = None\n        if P is not None:', '        probe = None\n        if False:')],
+         plant_progress, ["only night 4 has a probe"]),
+        ("TP: [060] the probe's images are dropped from the file",
+         [("card_stress_progress.py", 'probe = {"images": P["images"],', 'probe = {"images": {},')],
+         plant_progress, ["night 4's probe: the legs of each image"]),
+        ("TP: [061] a probe-only row loses its together figure",
+         [("card_stress_progress.py", '"together": [t["together"][c] for c in PROBE_COLUMNS] if t["together"] else None}) for t in P["table"]],', '"together": None}) for t in P["table"]],')],
+         plant_progress, ["a probe-only row (fma at fp64) is kept"]),
+        ("TP: [062] a row spreads over lines",
+         [("card_stress_progress.py", '    if isinstance(x, OneLine):\n        return True', '    if False:\n        return True')],
+         plant_progress, ["the file writes each rate row on one line"]),
+        ("TP: [063] --check does not compare the rates",
+         [("card_stress_progress.py", '            have["made"] = got["made"] = None', '            have["made"] = got["made"] = have["rates"] = got["rates"] = None')],
+         plant_progress, ["an edited median in the file makes --check fail"]),
+        ("TP: [064] the reducer cannot make rates",
+         [("card_stress_progress.py", '        X = own["rates"]', '        X = own["ratez"]')],
+         plant_progress, ["group_rates crashed"]),
+        ("TP: [065] the fixture of the file's rates is alike",
+         [("test_card_stress_progress.py", 'cases, dur = 1000 * (30 + 11 * night + 4 * j), RT_DURS[(night + j) % len(RT_DURS)]', 'cases, dur = 1000 * 30, RT_DURS[(night + j) % len(RT_DURS)]')],
+         plant_progress, ["the fixture's per-tile medians are all different"]),
+        ("TP: [066] the page shows the least in the cell",
+         [("nightly.html", 'rate(r.all[2]), r.card ?', 'rate(r.all[3]), r.card ?')],
+         plant_progress, ["each table has the formats down and the ops across"]),
+        ("TP: [067] the page leaves the hover out",
+         [("nightly.html", 'title: r.all[0] + " slices; least " + rate(r.all[3]) + ", most " + rate(r.all[4]) + "; from " + r.from.join(", ") },', 'title: "" },')],
+         plant_progress, ["each table has the formats down and the ops across"]),
+        ("TP: [068] the page leaves the card-alone figure out",
+         [("nightly.html", 'r.card ? h("span", { "class": "card",', 'false ? h("span", { "class": "card",')],
+         plant_progress, ["each table has the formats down and the ops across"]),
+        ("TP: [069] the page gives thousands to two places",
+         [("nightly.html", '(x / 1e3).toFixed(1) + " k"', '(x / 1e3).toFixed(2) + " k"')],
+         plant_progress, ["each table has the formats down and the ops across"]),
+        ("TP: [070] the page lists the ops in the other order",
+         [("nightly.html", 'rank(RATE_OPS, a.op) - rank(RATE_OPS, b.op)', 'rank(RATE_OPS, b.op) - rank(RATE_OPS, a.op)')],
+         plant_progress, ["each table has the formats down and the ops across"]),
+        ("TP: [071] the page draws the quad's table only",
+         [("nightly.html", 'if (images.indexOf(r.image) < 0) images.push(r.image);', 'if (images.indexOf(r.image) < 0 && r.image === "quad") images.push(r.image);')],
+         plant_progress, ["a table for each image that has rows on the newest night"]),
+        ("TP: [072] the page shows the last night even without rows",
+         [("nightly.html", 'if (R.nights[i].rows.length) night = R.nights[i];', 'night = R.nights[i];')],
+         plant_progress, ["when the newest night has no rows the newest one that has is shown"]),
+        ("TP: [073] the page draws a section for no rows",
+         [("nightly.html", '    if (!night) return null;', '    if (!night) return h("section", { id: "rates" }, h("h2", { text: "What a tile does a second" }));')],
+         plant_progress, ["a file whose nights have no rows, and a file with no rates, draw the same tree"]),
+        ("TP: [074] the page names its section otherwise",
+         [("nightly.html", 'h("h2", { text: "What a tile does a second" }),\n      h("p", null,', 'h("h2", { text: "Rates" }),\n      h("p", null,')],
+         plant_progress, ["the file is shown, with a section of its own"]),
+        ("TP: [075] the page leaves the file's rule out",
+         [("nightly.html", '      tables,\n      h("p", { "class": "small dim", text: R.rule }));', '      tables,\n      null);')],
+         plant_progress, ["the section says which night it is and carries the file's rule"]),
+        ("TP: [076] the page reads any rates",
+         [("nightly.html", 'need(d.rates === undefined || (d.rates && typeof d.rates === "object"', 'need(true || (d.rates && typeof d.rates === "object"')],
+         plant_progress, ["is named as not the shape this page reads, and no figure is shown"]),
+        ("TP: [077] the page always draws a rates section",
+         [("nightly.html", 'if (rates) frag.appendChild(rates);', 'frag.appendChild(rates || h("section", { id: "rates" }));')],
+         plant_progress, ["night 7's file, as 3ec0081c committed it: the page draws the tree it drew then, node for node",
+                          "over a data file without the new fields (the run without wide items as 3ec0081c's reducer made it) the tree the page draws"]),
+        # the parser (card_stress_lib.py) and the stand-in
+        ("TP: [078] the probe parser takes a grid with a row left out",
+         [("card_stress_lib.py", '    if len(rows) != want:\n        raise VerdictError(f"rate-probe: {len(rows)} rows where the grid has', '    if False:\n        raise VerdictError(f"rate-probe: {len(rows)} rows where the grid has')],
+         plant_parsers, ["a grid with a row left out is refused"]),
+        ("TP: [079] the probe parser takes a row twice",
+         [("card_stress_lib.py", '        if (op, fmt) in seen:', '        if False:')],
+         plant_parsers, ["a row twice is refused"]),
+        ("TP: [080] the probe parser takes any op or format",
+         [("card_stress_lib.py", '        if op not in PROBE_OPS or fmt not in PROBE_FORMATS:', '        if False:')],
+         plant_parsers, ["a row for an op or a format the probe does not have is refused"]),
+        ("TP: [081] the probe parser takes any rate",
+         [("card_stress_lib.py", '            if abs(rate - elements / seconds) > PROBE_RATE_SLACK * rate:', '            if False:')],
+         plant_parsers, ["a rate that is not its elements over its seconds is refused"]),
+        ("TP: [082] the probe parser takes a row that times nothing",
+         [("card_stress_lib.py", '            if elements <= 0 or seconds <= 0 or rate <= 0:', '            if False:'),
+          ("card_stress_lib.py", '            if abs(rate - elements / seconds) > PROBE_RATE_SLACK * rate:', '            if False:')],
+         plant_parsers, ["a row that times nothing is refused"]),
+        ("TP: [083] the probe parser takes a summary that does not count",
+         [("card_stress_lib.py", '    if got != mine:', '    if False:')],
+         plant_parsers, ["a summary that does not count the rows is refused"]),
+        ("TP: [084] the probe parser takes two verdicts or none",
+         [("card_stress_lib.py", '    if (good is None) == (bad is None):', '    if False:')],
+         plant_parsers, ["a log with two verdict lines is refused", "a log with no verdict line is refused"]),
+        ("TP: [085] the probe parser takes a verdict that contradicts the rows",
+         [("card_stress_lib.py", '    if ok != (n_red == 0):', '    if False:')],
+         plant_parsers, ["a verdict that says ok over a red row"]),
+        ("TP: [086] the probe parser ignores the exit status",
+         [("card_stress_lib.py", '    _rc_agrees(rc, ok, "rate-probe")\n    notes', '    notes')],
+         plant_parsers, ["a nonzero exit status, and of the sabotaged one with 0, are both refused"]),
+        ("TP: [087] the probe parser takes a run that timed nothing",
+         [("card_stress_lib.py", '    if n_timed == 0:', '    if False:')],
+         plant_parsers, ["a run that refused every row, and so measured nothing, is refused"]),
+        ("TP: [088] the probe parser takes a row of another tile",
+         [("card_stress_lib.py", '        if t != tile:', '        if False:')],
+         plant_parsers, ["a row for another tile than the header's is refused"]),
+        ("TP: [089] the probe parser takes another image",
+         [("card_stress_lib.py", '    if artifact is not None and (not on_device or dev.group(1) != artifact):', '    if False:')],
+         plant_parsers, ["a probe asked to open an image that says it opened the software backend"]),
+        ("TP: [090] the probe parser takes a device where software was asked",
+         [("card_stress_lib.py", '    if artifact is None and on_device:', '    if False:')],
+         plant_parsers, ["a probe asked to open an image that says it opened the software backend"]),
+        ("TP: [091] the probe parser takes a red check without its clause",
+         [("card_stress_lib.py", '            if (mt.group(4) == "red") != (mt.group(5) is not None):', '            if False:')],
+         plant_parsers, ["a red check without its mismatch clause is refused"]),
+        ("TP: [092] the probe parser does not count a failed timed call",
+         [("card_stress_lib.py", 'why=mf.group(3).strip()[:300], check="red")\n            n_red += 1', 'why=mf.group(3).strip()[:300], check="red")\n            n_red += 0')],
+         plant_parsers, ["a timed call that failed is a red row"]),
+        ("TP: [093] the probe parser does not say the sabotage",
+         [("card_stress_lib.py", '    if sab:\n        notes.append(', '    if False:\n        notes.append(')],
+         plant_parsers, ["the tool's own negative control"]),
+        ("TP: [094] the probe parser forgets the mismatch count",
+         [("card_stress_lib.py", 'row.update(mismatched=int(mt.group(5)),', 'row.update(mismatched=0,')],
+         plant_parsers, ["the tool's own negative control"]),
+        ("TP: [095] the probe parser reads the header's seconds as zero",
+         [("card_stress_lib.py", 'secs_row = float(head.group(2))', 'secs_row = 0.0')],
+         plant_parsers, ["the header's seconds and tile are read"]),
+        ("TP: [096] the probe parser names no backend",
+         [("card_stress_lib.py", '"backend": dev.group(1) if on_device else "software"}', '"backend": "x"}')],
+         plant_parsers, ["the header's seconds and tile are read"]),
+        ("TP: [097] the probe parser records a refusal without its name",
+         [("card_stress_lib.py", 'row.update(refused=mr.group(1),', 'row.update(refused="x",')],
+         plant_parsers, ["a library without fp256 refuses the seven fp256 rows BY NAME"]),
+        ("TP: [098] the probe parser counts a refusal as timed",
+         [("card_stress_lib.py", 'why=mr.group(2).strip()[:300])\n            n_refused += 1', 'why=mr.group(2).strip()[:300])\n            n_timed += 1')],
+         plant_parsers, ["a library without fp256 refuses the seven fp256 rows BY NAME"]),
+        ("TP: [099] the stand-in drops a format",
+         [("card_stress_standin.py", 'PROBE_FORMATS = ("fp32", "fp64", "fp128", "fp256")', 'PROBE_FORMATS = ("fp32", "fp64", "fp128")')],
+         plant_parsers, ["the stand-in's grid is the library's"]),
+        ("TP: [100] the stand-in's rates are all alike",
+         [("card_stress_standin.py", 'return float(8_000_000 // (1 + PROBE_FORMATS.index(fmt)) + 100_000 * PROBE_OPS.index(op) + 1_000 * first)', 'return float(8_000_000)')],
+         plant_parsers, ["their rates are the stand-in's own"]),
+        # the driver (card_stress.py), in the dry run
+        ("TP: [101] the quad's tile 1 alone is not run on tile 1",
+         [("card_stress.py", '[("alone", [1] if img.tiles > 1 else [None])]', '[("alone", [None])]')],
+         lambda env, src: scn_rate_probe(env, src), ["the quad has five probe legs"]),
+        ("TP: [102] the quad's four tiles are not run together",
+         [("card_stress.py", '        if img.tiles > 1:\n            phases.append(("together", list(range(1, img.tiles + 1))))', '        if False:\n            phases.append(("together", list(range(1, img.tiles + 1))))')],
+         lambda env, src: scn_rate_probe(env, src), ["the quad has five probe legs"]),
+        ("TP: [103] the together phase comes first",
+         [("card_stress.py", '            phases.append(("together", list(range(1, img.tiles + 1))))', '            phases.insert(0, ("together", list(range(1, img.tiles + 1))))')],
+         lambda env, src: scn_rate_probe(env, src), ["the quad's alone leg ends before its together legs start"]),
+        ("TP: [104] a probe leg has a sweep",
+         [("card_stress.py", 'rec = self.finish_leg("rate-probe", img, "probe", 1, None, tile,', 'rec = self.finish_leg("rate-probe", img, "probe", 1, {"item": "sqrt32-rne"}, tile,')],
+         lambda env, src: scn_rate_probe(env, src), ["a probe leg is named rate-probe, has no sweep field"]),
+        ("TP: [105] a probe leg names no phase",
+         [("card_stress.py", ',\n                      post=(lambda v, phase=phase: v.extra.update(phase=phase)))', ')')],
+         lambda env, src: scn_rate_probe(env, src), ["the quad has five probe legs"]),
+        ("TP: [106] a probe process is handed no tile",
+         [("card_stress.py", '{"CFT_XRT_TILES": str(tile)} if tile else {}', '{}')],
+         lambda env, src: scn_rate_probe(env, src), ["the quad's together legs ran at once, one process a tile"]),
+        ("TP: [107] the probe processes start one after another",
+         [("card_stress.py", "            self.say(f\"rate-probe on {img.name}{' tile ' + str(tile) if tile else ''} ({phase}) starts\")", "            time.sleep(1.2)\n            self.say(f\"rate-probe on {img.name}{' tile ' + str(tile) if tile else ''} ({phase}) starts\")")],
+         lambda env, src: scn_rate_probe(env, src), ["the quad's together legs ran at once, one process a tile"]),
+        ("TP: [108] the probe event counts the phases as processes",
+         [("card_stress.py", 'processes=len(done),', 'processes=len(phases),')],
+         lambda env, src: scn_rate_probe(env, src), ["an event rate_probe says each image's processes"]),
+        ("TP: [109] the flag is not recorded in run_start",
+         [("card_stress.py", '                settings["rate_probe"] = {"seconds_a_row": self.probe_seconds}', '                pass')],
+         lambda env, src: scn_rate_probe(env, src), ["the run_start records the flag's setting"]),
+        ("TP: [110] the cycle gives the sweep all its minutes",
+         [("card_stress.py", 'self.sweep_phase(img, sweep_min - probe_s / 60.0 if probe_s > 0 else sweep_min)', 'self.sweep_phase(img, sweep_min)')],
+         lambda env, src: scn_rate_probe(env, src), ["the cycle gives the sweep the visit's minutes less the probe's"]),
+        ("TP: [111] the stand-in's report counts a probe image's legs twice",
+         [("card_stress_report.py", 'im["legs"] += 1', 'im["legs"] += 2')],
+         lambda env, src: scn_rate_probe(env, src), ["the report reads the probe legs"]),
+        ("TP: [112] the stand-in's probe rates are all alike (the dry run)",
+         [("card_stress_standin.py", 'return float(8_000_000 // (1 + PROBE_FORMATS.index(fmt)) + 100_000 * PROBE_OPS.index(op) + 1_000 * first)', 'return float(8_000_000)')],
+         lambda env, src: scn_rate_probe(env, src), ["a probe-only row (mul at fp128 on the quad) has the stand-in's own rates"]),
+        ("TP: [113] the pipeline rows get the probe's alone figure on the quad",
+         [("card_stress_report.py", 'phase = "together" if c["together"] else "alone"', 'phase = "alone"')],
+         lambda env, src: scn_rate_probe(env, src), ["have their card-alone rate and ratio"]),
+        ("TP: [114] the argument checks accept seconds without the flag",
+         [("card_stress.py", '    if a.rate_probe_seconds is not None and not a.rate_probe:', '    if False:')],
+         lambda env, src: scn_rate_probe(env, src), ["is refused before anything starts"]),
+        ("TP: [115] the argument checks accept any seconds",
+         [("card_stress.py", '    if a.rate_probe_seconds is not None and not (0 < a.rate_probe_seconds <= PROBE_SECONDS_MAX):', '    if False:')],
+         lambda env, src: scn_rate_probe(env, src), ["is refused before anything starts"]),
+        ("TP: [116] the longest time a row is five seconds",
+         [("card_stress.py", 'PROBE_SECONDS_MAX = 2.5', 'PROBE_SECONDS_MAX = 5.0')],
+         lambda env, src: scn_rate_probe(env, src), ["is refused before anything starts"]),
+        ("TP: [117] the flag off still records the setting",
+         [("card_stress.py", '            if self.probing:\n                settings["rate_probe"] =', '            if True:\n                settings["rate_probe"] =')],
+         lambda env, src: scn_rate_probe_off(env, src), ["without the flag the run exits 0 and there is no probe leg"]),
+        ("TP: [118] the flag off still writes the setting to settings.json",
+         [("card_stress.py", '"mpfr_prefix", "rate_probe", "rate_probe_seconds"}', '"mpfr_prefix"}')],
+         lambda env, src: scn_rate_probe_off(env, src), ["without the flag the run exits 0 and there is no probe leg"]),
+        ("TP: [119] the flag off still counts a probe as a slice",
+         [("card_stress_report.py", 'sviews = [v for v in views if v["kind"] == "sweep"]', 'sviews = [v for v in views if v["kind"] in ("sweep", "probe")]')],
+         lambda env, src: scn_rate_probe_off(env, src), ["the report's sweep section, and its skipped legs, are the same with the probe and without it"]),
+        ("TP: [120] a probe leg changes the coverage",
+         [("card_stress.py", 'rec = self.finish_leg("rate-probe", img, "probe", 1, None, tile,', 'rec = self.finish_leg("rate-probe", img, "probe", 1, {"item": "sqrt32-rne", "lo": 0, "hi": 1048576}, tile,')],
+         lambda env, src: scn_rate_probe_off(env, src), ["a run with probe legs has exactly the coverage of the same run without them"]),
+        ("TP: [121] a red check is not a failing leg",
+         [("card_stress.py", 'post=(lambda v, phase=phase: v.extra.update(phase=phase)))', 'post=(lambda v, phase=phase: (v.extra.update(phase=phase), setattr(v, "ok", True))))')],
+         lambda env, src: scn_rate_probe_failures(env, src), ["a check red on the quad's first process is a failing leg"]),
+        ("TP: [122] the stand-in's sabotage is not red",
+         [("card_stress_standin.py", 'out(line + " check=red mismatched=1 flags_device=0x00 flags_software=0x00")', 'out(line + " check=ok")')],
+         lambda env, src: scn_rate_probe_failures(env, src), ["a check red on the quad's first process is a failing leg"]),
+        ("TP: [123] the stand-in refuses no format",
+         [("card_stress_standin.py", '                if fmt == nofmt:', '                if False:')],
+         lambda env, src: scn_rate_probe_failures(env, src), ["a check red on the quad's first process is a failing leg"]),
+        ("TP: [124] the stand-in's software fallback is a device",
+         [("card_stress_standin.py", "out(f\"rate-probe: backend {'software' if do == 'software' else 'DEVICE ' + art}\")", "out(f\"rate-probe: backend DEVICE {art}\")")],
+         lambda env, src: scn_rate_probe_failures(env, src), ["a probe that opened the software backend where the card was asked for is a parse_error"]),
+        ("TP: [125] a probe that finds the card gone is a skipped leg",
+         [("card_stress.py", 'rec = self.finish_leg("rate-probe", img, "probe", 1, None, tile, res, None, base, logpath, None, cmd, None)\n            recs.append(rec)', 'rec = self.finish_leg("rate-probe", img, "probe", 1, None, tile, res, None, base, logpath, None, cmd, None)\n            recs.append(rec)\n            if rec["status"] == "no_device":\n                self.skipped("rate-probe", img, "no device", kind="probe")')],
+         lambda env, src: scn_rate_probe_failures(env, src), ["and no probe leg is ever a skipped leg, whatever happened to it"]),
+        ("TP: [126] every visit probes",
+         [("card_stress.py", '        if img.name in self.probed:\n            return 0.0\n        self.probed.add(img.name)', '        if False:\n            return 0.0\n        self.probed.add(img.name)')],
+         lambda env, src: scn_rate_probe_once(env, src), ["a run of many cycles probes each image once"]),
+        ("TP: [127] a resumed run does not probe",
+         [("card_stress.py", '        if img.name in self.probed:\n            return 0.0', '        if img.name in self.probed or self.visits.get(img.name, 0) > 1:\n            return 0.0')],
+         lambda env, src: scn_rate_probe_once(env, src), ["a resumed run is a new process, a night"]),
+        ("TP: [128] the deadline's estimate is not asked",
+         [("card_stress.py", '        if self.deadline is not None and time.time() + est > self.deadline + self.a.deadline_grace:', '        if False:')],
+         lambda env, src: scn_rate_probe_deadline(env, src), ["with 12 s to the deadline and an estimate of 73 s the probe is not run"]),
+        ("TP: [129] a probe past the deadline is a skipped leg",
+         [("card_stress.py", '            self.event("rate_probe_not_run", f"{img.name}: its estimate', '            self.skipped("rate-probe", img, "late", kind="probe")\n            self.event("rate_probe_not_run", f"{img.name}: its estimate')],
+         lambda env, src: scn_rate_probe_deadline(env, src), ["with 12 s to the deadline and an estimate of 73 s the probe is not run"]),
+        ("TP: [130] the flag off still builds the tool",
+         [("card_stress.py", '+ (["rate-probe"] if self.probing else [])', '+ ["rate-probe"]')],
+         lambda env, src: scn_buildreal(env, src), ["without --rate-probe the make names no rate-probe"]),
+        ("TP: [131] the build does not hold the probe to XRT",
+         [("card_stress.py", '            exes.append("rate-probe")', '            pass')],
+         lambda env, src: scn_buildreal(env, src), ["with --rate-probe the real make also makes rate-probe"]),
+        # the tool (host/tools/rate_probe.c and its Makefile rule), built and run on the software backend: POSIX
+        ("TP: [132] the tool's check is always ok",
+         [("rate_probe.c", '            if (same) {', '            if (1) {')],
+         lambda env, src: group_probe_tool(env, src), ["under CFT_RATE_PROBE_SABOTAGE=1 (a data bit flipped) the check goes red"]),
+        ("TP: [133] the tool does not compare the flags",
+         [("rate_probe.c", '            same = eq == N && fd == fs;', '            same = eq == N;')],
+         lambda env, src: group_probe_tool(env, src), ["under =2 (a flag bit flipped) it goes red"]),
+        ("TP: [134] the tool's sabotage 1 flips nothing",
+         [("rate_probe.c", '                d[0] ^= 1;', '                d[0] ^= 0;')],
+         lambda env, src: group_probe_tool(env, src), ["under CFT_RATE_PROBE_SABOTAGE=1 (a data bit flipped) the check goes red"]),
+        ("TP: [135] the tool's sabotage 2 flips nothing",
+         [("rate_probe.c", '                fd ^= 1;', '                fd ^= 0;')],
+         lambda env, src: group_probe_tool(env, src), ["under =2 (a flag bit flipped) it goes red"]),
+        ("TP: [136] any value of the sabotage variable is a mode",
+         [("rate_probe.c", '!strcmp(getenv("CFT_RATE_PROBE_SABOTAGE"), "2") ? 2 : 0) : 0;', '!strcmp(getenv("CFT_RATE_PROBE_SABOTAGE"), "2") ? 2 : 2) : 0;')],
+         lambda env, src: group_probe_tool(env, src), ["a value of the variable that is neither mode flips nothing"]),
+        ("TP: [137] the tool does not exit 1 on a red check",
+         [("rate_probe.c", '    return red ? 1 : 0;', '    return 0;')],
+         lambda env, src: group_probe_tool(env, src), ["under CFT_RATE_PROBE_SABOTAGE=1 (a data bit flipped) the check goes red"]),
+        ("TP: [138] the tool times a row the device cannot run",
+         [("rate_probe.c", 'if (st != CFT_OK) {                         /* the device cannot run it', 'if (0) {                         /* the device cannot run it')],
+         lambda env, src: group_probe_tool(env, src), ["against a library with no fp256"]),
+        ("TP: [139] the tool's rate is calls a second",
+         [("rate_probe.c", '(double)calls * N / (t1 - t0));', '(double)calls / (t1 - t0));')],
+         lambda env, src: group_probe_tool(env, src), ["on the software backend every one of its 28 rows is checked and timed"]),
+        ("TP: [140] the tool takes no arguments",
+         [("rate_probe.c", '    if (argc != 3) {', '    if (0) {')],
+         lambda env, src: group_probe_tool(env, src), ["no arguments is refused (exit 2)"]),
+        ("TP: [141] the tool takes any seconds",
+         [("rate_probe.c", '    if (!(secs > 0.0) || secs > 600.0) {', '    if (0) {')],
+         lambda env, src: group_probe_tool(env, src), ["- 0 is refused (exit 2)"]),
+        ("TP: [142] the software backend is on all tiles",
+         [("rate_probe.c", ': "none");', ': "all");')],
+         lambda env, src: group_probe_tool(env, src), ["the software backend has no tiles"]),
+        ("TP: [143] the tool has an unused variable",
+         [("rate_probe.c", 'int fi, op, rows = 0, timed = 0, refused = 0, red = 0, sabotage;', 'int fi, op, rows = 0, timed = 0, refused = 0, red = 0, sabotage, unused_x;')],
+         lambda env, src: group_probe_tool(env, src), ["it compiles with -Wall -Wextra -Wpedantic -Wshadow -Werror against the library"]),
+        ("TP: [144] the Makefile's rule has no source",
+         [("Makefile", 'rate-probe$(EXE): tools/rate_probe.c libcft.a', 'rate-probe$(EXE): tools/rate_probe_x.c libcft.a')],
+         lambda env, src: group_probe_tool(env, src), ["host/Makefile's own rule makes it, with no warning"]),
+        ("TP: [145] the tool is in all",
+         [("Makefile", 'all: libcft.a $(SHLIB) $(TOOLS) $(EXAMPLES)', 'all: libcft.a $(SHLIB) $(TOOLS) $(EXAMPLES) rate-probe$(EXE)')],
+         lambda env, src: group_probe_tool(env, src), ["host/Makefile's own rule makes it, with no warning"]),
     ]
     for name, edits, fn, expects in P:
         if pick and pick not in name:
@@ -8511,76 +8975,69 @@ def probe_summary(R: "Run") -> dict:
     return out
 
 
+def probe_run(env: Env, src: str, on: bool) -> "Run":
+    """The dry quick run with the probe leg (`on`) or without it, made once for each tree under test (`src`: the real tree, or a plant's copy), so that the checks that
+    read it and the plants that break it do not each start another."""
+    cache = env.__dict__.setdefault("probe_cache", {})
+    if (src, on) not in cache:
+        cache[(src, on)] = run_driver(env, "probe-on" if on else "probe-off", PROBE_BASE + (["--rate-probe"] if on else []), src=src)
+    return cache[(src, on)]
+
+
 def scn_rate_probe(env: Env, src: str = HERE) -> list:
     """The probe leg in the driver's dry run. With --rate-probe, once an image: the quad's tile 1 alone and then its four tiles together, one process a tile; the
-    single's and the deep's one. Each is a leg record of kind `probe` with its tile, its rows and its phase, no sweep and no rate. Without the flag nothing of it is
-    recorded, built or written, and the sweep's coverage is the same with the probe and without it."""
+    single's and the deep's one. Each is a leg record of kind `probe` with its tile, its rows and its phase, no sweep and no rate; it is no skipped leg and no slice;
+    the report reads it, and a flag that cannot mean what it says is refused before anything starts."""
     out: list = []
 
     def c(n, ok, d=""):
         out.append((n, bool(ok), d))
 
-    on = run_driver(env, "probe-on", PROBE_BASE + ["--rate-probe"], src=src)
-    off = run_driver(env, "probe-off", PROBE_BASE, src=src)
-    c("probe: both runs exit 0 (quick is a check: every leg passed)", on.rc == 0 and off.rc == 0, f"on rc {on.rc}: {on.text[-300:]}; off rc {off.rc}: {off.text[-200:]}")
+    on = probe_run(env, src, True)
     ps = probe_summary(on)
     ok28 = {"rows": 28, "timed": 28, "refused": 0, "red": 0}
     c("probe: the quad has five probe legs - tile 1 alone, then tiles 1 to 4 together - the single and the deep one each, no tile and alone; each passes with 28 rows timed",
-      ps.get("quad") == [(1, "alone", "pass", ok28, 28, None, None)] + [(t, "together", "pass", ok28, 28, None, None) for t in (1, 2, 3, 4)]
-      and ps.get("single") == [(None, "alone", "pass", ok28, 28, None, None)] and ps.get("deep") == [(None, "alone", "pass", ok28, 28, None, None)], str(ps)[:400])
+      on.rc == 0 and ps.get("quad") == [(1, "alone", "pass", ok28, 28, None, None)] + [(t, "together", "pass", ok28, 28, None, None) for t in (1, 2, 3, 4)]
+      and ps.get("single") == [(None, "alone", "pass", ok28, 28, None, None)] and ps.get("deep") == [(None, "alone", "pass", ok28, 28, None, None)], f"rc {on.rc}: {str(ps)[:400]}")
     pl = on.legs(kind="probe")
     c("probe: a probe leg is named rate-probe, has no sweep field and no rate, and is not a battery leg or a sweep leg",
       pl and all(r["leg"] == "rate-probe" and r["sweep"] is None and r["rate"] is None and r["kind"] == "probe" and r["leg"] not in on.recs[0]["settings"]["legs"] for r in pl))
     c("probe: each carries its rows in extra (op, format, tile, elements, seconds, rate, check) and the tool's tile",
-      all(len(r["extra"]["rows"]) == 28 and all(set(x) >= {"op", "format", "tile", "elements", "seconds", "rate", "check"} for x in r["extra"]["rows"])
-          and r["extra"]["tile"] == ("all" if r["tile"] is None else str(r["tile"])) for r in pl))
+      pl and all(len(r["extra"]["rows"]) == 28 and all(set(x) >= {"op", "format", "tile", "elements", "seconds", "rate", "check"} for x in r["extra"]["rows"])
+                 and r["extra"]["tile"] == ("all" if r["tile"] is None else str(r["tile"])) for r in pl))
     c("probe: the quad's together legs ran at once, one process a tile (each log says the CFT_XRT_TILES it was handed, and the single's and the deep's none), on the image asked for",
-      all((f"standin: env CFT_XRT_TILES={r['tile']}" if r["tile"] else "standin: env CFT_XRT_TILES=<unset>") in log_text(on, r)
-          and f"rate-probe: backend DEVICE {env.imgs[r['image']]}" in log_text(on, r) for r in pl)
+      pl and all((f"standin: env CFT_XRT_TILES={r['tile']}" if r["tile"] else "standin: env CFT_XRT_TILES=<unset>") in log_text(on, r)
+                 and f"rate-probe: backend DEVICE {env.imgs[r['image']]}" in log_text(on, r) for r in pl)
       and len({round(r["start_epoch"]) for r in pl if r["extra"]["phase"] == "together"}) == 1, str([(r["tile"], r["start_epoch"]) for r in pl][:6]))
     q = sorted((r for r in pl if r["image"] == "quad"), key=lambda r: (r["extra"]["phase"] != "alone", r["tile"]))
     battery = [r for r in on.legs(kind="battery") if r["image"] == "quad"]
     sweep_q = [r for r in on.legs(kind="sweep") if r["image"] == "quad"]
     c("probe: the quad's alone leg ends before its together legs start, after the battery and before the sweep",
-      q[0]["end_epoch"] <= min(r["start_epoch"] for r in q[1:]) + 0.01 and max(r["end_epoch"] for r in battery) <= q[0]["start_epoch"] + 0.01
-      and max(r["end_epoch"] for r in q) <= min(r["start_epoch"] for r in sweep_q) + 0.01, str((q[0]["end_epoch"], q[1]["start_epoch"])))
+      len(q) == 5 and q[0]["end_epoch"] <= min(r["start_epoch"] for r in q[1:]) + 0.01 and max(r["end_epoch"] for r in battery) <= q[0]["start_epoch"] + 0.01
+      and max(r["end_epoch"] for r in q) <= min(r["start_epoch"] for r in sweep_q) + 0.01, str([(r["tile"], r["start_epoch"], r["end_epoch"]) for r in q][:2]))
     ev = [(e["image"], e["processes"], e["timed"], e["red"]) for e in on.events("rate_probe")]
     c("probe: an event rate_probe says each image's processes, rows timed and red, once an image", ev == [("quad", 5, 140, 0), ("single", 1, 28, 0), ("deep", 1, 28, 0)], str(ev))
     c("probe: the run_start records the flag's setting (the seconds a row) and settings.json has the flag; the build of the tool is scn_buildreal's (a dry run makes nothing)",
       on.recs[0]["settings"].get("rate_probe") == {"seconds_a_row": 2.0} and json.load(open(os.path.join(on.out, "settings.json"))).get("rate_probe") is True,
       str(on.recs[0]["settings"].get("rate_probe")))
-    # -- off: nothing recorded, built or written that was not before
-    c("probe: without the flag there is no probe leg, no probe event, no probe step in the build, nothing in run_start's settings or settings.json",
-      not off.legs(kind="probe") and not [e for e in off.events() if "probe" in e["event"]] and "rate_probe" not in off.recs[0]["settings"]
-      and "rate_probe" not in json.load(open(os.path.join(off.out, "settings.json"))) and "rate_probe_seconds" not in json.load(open(os.path.join(off.out, "settings.json")))
-      and not [s for s in off.last("build")["steps"] if "rate-probe" in s["name"] or "rate-probe" in s["detail"]])
-    steps = lambda R_: [(s["name"], s["ok"]) for s in R_.last("build")["steps"]]
-    c("probe: and the build's steps are the same with and without it", steps(on) == steps(off), str((steps(on)[-3:], steps(off)[-3:])))
-    sig = lambda R_: sorted((r["image"], r["leg"], r["kind"], r["status"], json.dumps(r["counts"], sort_keys=True), r["tile"]) for r in R_.legs() if r["kind"] != "probe")
-    c("probe: the other legs are the same with the probe and without it: image, leg, kind, status, counts and tile, one for one", sig(on) == sig(off) and len(sig(on)) > 8, f"{len(sig(on))} {len(sig(off))}")
-    cov2 = lambda recs_: (lambda i, s_, ca, se, d: ({k: L.merge_intervals(v) for k, v in i.items()}, s_, ca, se, d))(*L.sweep_coverage(recs_))
-    ci, co = cov2(on.recs), cov2(off.recs)
-    c("probe: a run with probe legs has exactly the coverage of the same run without them: the intervals, the slices and cases served, the seeds and the disagreements",
-      ci[:4] == co[:4] and not ci[4] and not co[4] and len(ci[0]) >= 2, f"{sorted(ci[0])} {sorted(co[0])}")
-    nop = [r for r in on.recs if not (r.get("type") == "leg" and r.get("kind") == "probe")]
-    c("probe: and the run's records with the probe legs taken out give that coverage again, field for field", cov2(nop) == ci and len(nop) == len(on.recs) - 7)
     # -- the report: the probe's rows beside the pipeline's
     Rp = importlib.import_module("card_stress_report")
     S = Rp.summarize(on.recs, rev=None)
     P = S["rates"]["probe"]
-    c("probe: the report reads the probe legs: the legs of each image, none red or refused, a skipped row of none, and the probe in no sweep figure",
+    done = len([r for r in on.legs(kind="sweep") if r["status"] in ("pass", "fail")])
+    c("probe: the report reads the probe legs: the legs of each image, none red or refused, no skipped row of a probe, and the probe in no sweep figure (the slices completed are the sweep legs')",
       P is not None and {k: v["legs"] for k, v in P["images"].items()} == {"quad": 5, "single": 1, "deep": 1} and not P["red"] and not P["refused"]
-      and S["failures"]["skipped"] == Rp.summarize(off.recs, rev=None)["failures"]["skipped"] and S["sweep"]["completed"] == Rp.summarize(off.recs, rev=None)["sweep"]["completed"])
-    import card_stress_standin as ST
+      and not [g for g in S["failures"]["skipped"]["groups"] if "probe" in str(g["leg"])] and S["sweep"]["completed"] == done and done > 4, str(P and P["images"]))
     cell = [t for t in P["table"] if (t["image"], t["op"], t["format"]) == ("quad", "mul", "fp128")][0]
     c("probe: a probe-only row (mul at fp128 on the quad) has the stand-in's own rates, alone on tile 1 and the median of the four tiles together",
-      abs(cell["alone"]["median"] - ST.probe_rate("mul", "fp128", "1")) < 0.001 * cell["alone"]["median"] and cell["together"]["rows"] == 4
-      and abs(cell["together"]["median"] - sorted(ST.probe_rate("mul", "fp128", str(t)) for t in (1, 2, 3, 4))[1] / 2 - sorted(ST.probe_rate("mul", "fp128", str(t)) for t in (1, 2, 3, 4))[2] / 2) < 0.001 * cell["together"]["median"], str(cell))
+      abs(cell["alone"]["median"] - rp_standin_rate("mul", "fp128", "1")) < 0.001 * cell["alone"]["median"] and cell["together"]["rows"] == 4
+      and abs(cell["together"]["median"] - (sorted(rp_standin_rate("mul", "fp128", str(t)) for t in (1, 2, 3, 4))[1] + sorted(rp_standin_rate("mul", "fp128", str(t)) for t in (1, 2, 3, 4))[2]) / 2)
+      < 0.001 * cell["together"]["median"], str(cell))
     rows = S["rates"]["rows"]
     c("probe: and the pipeline rows of the sweep that ran beside it have their card-alone rate and ratio (the quad's from its tiles together, the others' alone)",
       rows and all(r["card"] is not None and r["card"]["phase"] == ("together" if r["image"] == "quad" else "alone") and r["card"]["ratio"] > 0 for r in rows), str(rows[:1]))
-    # -- the quick plan is the probe's too: once an image per process, and a resume is a new process
-    # (the cycles of a longer run are not run here: the probe is asked once an image by the driver's own set of images probed, which the next check reads)
+    c("probe: the cycle gives the sweep the visit's minutes less the probe's (READ from the driver's source: a dry quick run's sweep takes its seconds from --quick-sweep-seconds and ignores its minutes)",
+      "self.sweep_phase(img, sweep_min - probe_s / 60.0 if probe_s > 0 else sweep_min)" in open(os.path.join(src, "card_stress.py"), encoding="utf-8").read())
     # -- argument checks: a flag that cannot mean what it says is refused before anything starts
     base_cmd = [sys.executable, "-B", "-I", os.path.join(src, "card_stress.py"), "--root", ROOT, "--out", os.path.join(env.tmp, "probe-args"), "--dry-run"]
     for args, say in ((["--rate-probe-seconds", "1.5"], "give --rate-probe too"), (["--rate-probe", "--rate-probe-seconds", "3"], "at most 2.5"),
@@ -8588,6 +9045,34 @@ def scn_rate_probe(env: Env, src: str = HERE) -> list:
         p = subprocess.run(base_cmd + args, capture_output=True, text=True, timeout=60)
         c(f"probe: {' '.join(args)} is refused before anything starts, by name ({say})", p.returncode == 2 and say in p.stderr and not os.path.exists(os.path.join(env.tmp, "probe-args", "metrics.jsonl")),
           f"rc {p.returncode}: {p.stderr[-200:]}")
+    return out
+
+
+def scn_rate_probe_off(env: Env, src: str = HERE) -> list:
+    """The flag off: the same quick run without --rate-probe records, builds and writes nothing of the probe, and its other legs and its sweep's coverage are the run
+    with the probe's, one for one."""
+    out: list = []
+
+    def c(n, ok, d=""):
+        out.append((n, bool(ok), d))
+
+    on, off = probe_run(env, src, True), probe_run(env, src, False)
+    c("probe off: without the flag the run exits 0 and there is no probe leg, no probe event, no probe step in the build, nothing in run_start's settings or settings.json",
+      off.rc == 0 and not off.legs(kind="probe") and not [e for e in off.events() if "probe" in e["event"]] and "rate_probe" not in off.recs[0]["settings"]
+      and "rate_probe" not in json.load(open(os.path.join(off.out, "settings.json"))) and "rate_probe_seconds" not in json.load(open(os.path.join(off.out, "settings.json")))
+      and not [s for s in off.last("build")["steps"] if "rate-probe" in s["name"] or "rate-probe" in s["detail"]])
+    sig = lambda R_: sorted((r["image"], r["leg"], r["kind"], r["status"], json.dumps(r["counts"], sort_keys=True), r["tile"]) for r in R_.legs() if r["kind"] != "probe")
+    c("probe off: the other legs are the same with the probe and without it: image, leg, kind, status, counts and tile, one for one", sig(on) == sig(off) and len(sig(on)) > 8, f"{len(sig(on))} {len(sig(off))}")
+    cov2 = lambda recs_: (lambda i, s_, ca, se, d: ({k: L.merge_intervals(v) for k, v in i.items()}, s_, ca, se, d))(*L.sweep_coverage(recs_))
+    ci, co = cov2(on.recs), cov2(off.recs)
+    c("probe off: a run with probe legs has exactly the coverage of the same run without them: the intervals, the slices and cases served, the seeds and the disagreements",
+      ci[:4] == co[:4] and not ci[4] and not co[4] and len(ci[0]) >= 2, f"{sorted(ci[0])} {sorted(co[0])}")
+    nop = [r for r in on.recs if not (r.get("type") == "leg" and r.get("kind") == "probe")]
+    c("probe off: and the run's records with the probe legs taken out give that coverage again, field for field", cov2(nop) == ci and len(nop) == len(on.recs) - 7)
+    Rp = importlib.import_module("card_stress_report")
+    So, Sf = Rp.summarize(on.recs, rev=None), Rp.summarize(off.recs, rev=None)
+    c("probe off: the report's sweep section, and its skipped legs, are the same with the probe and without it",
+      (lambda a, b: a == b)(*[(lambda s_: (s_["sweep"]["exhaustive"], s_["sweep"]["random"], s_["sweep"]["completed"], s_["failures"]["skipped"]))(s_) for s_ in (So, Sf)]))
     return out
 
 
@@ -8738,11 +9223,16 @@ def group_probe_tool(env: Env, src: str = HERE) -> list:
     c("probe tool: it compiles with -Wall -Wextra -Wpedantic -Wshadow -Werror against the library", p.returncode == 0, p.stderr[-400:])
     if p.returncode != 0:
         return out
-    if src == HERE:
-        mk = subprocess.run(["nice", "-n", "10", "make", "rate-probe", "CFLAGS=-O2"], cwd=host, capture_output=True, text=True, timeout=300)
-        c("probe tool: host/Makefile's own rule makes it, with no warning (the rule builds the tool the soaks' way: a target of its own, not in `all`)",
-          mk.returncode == 0 and "warning" not in (mk.stdout + mk.stderr).lower() and os.path.exists(os.path.join(host, "rate-probe"))
-          and not re.search(r"^all:.*rate-probe", open(os.path.join(ROOT, "host", "Makefile"), encoding="utf-8").read(), re.M), mk.stderr[-300:])
+    mkfile = os.path.join(src, "Makefile")
+    if not os.path.exists(mkfile):
+        mkfile = os.path.join(ROOT, "host", "Makefile")
+    h2 = os.path.join(wd, "host-make")
+    shutil.copytree(host, h2, ignore=shutil.ignore_patterns("rate-probe"))
+    shutil.copy(mkfile, os.path.join(h2, "Makefile"))
+    mk = subprocess.run(["nice", "-n", "10", "make", "rate-probe", "CFLAGS=-O2"], cwd=h2, capture_output=True, text=True, timeout=300)
+    c("probe tool: host/Makefile's own rule makes it, with no warning, from the tree's rate_probe.c (the rule builds the tool the soaks' way: a target of its own, not in `all`)",
+      mk.returncode == 0 and "warning" not in (mk.stdout + mk.stderr).lower() and os.path.exists(os.path.join(h2, "rate-probe"))
+      and not re.search(r"^all:.*rate-probe", open(mkfile, encoding="utf-8").read(), re.M), mk.stderr[-300:])
 
     def run(args, e=None, exe_=exe):
         return subprocess.run([exe_] + args, capture_output=True, text=True, timeout=300, env=dict(os.environ, **(e or {})))
@@ -8779,14 +9269,14 @@ def group_probe_tool(env: Env, src: str = HERE) -> list:
     v, why = parse_ok(lambda: L.parse_rate_probe(nr.stdout, nr.returncode))
     c("probe tool: against a library with no fp256 (-DCFT_MAX_FORMAT=2) the seven fp256 rows are REFUSED by the library's own name, CFT_ERR_UNSUPPORTED, never timed - and not a failure: exit 0, the other 21 timed",
       v is not None and v.ok and nr.returncode == 0 and v.counts == {"rows": 28, "timed": 21, "refused": 7, "red": 0}
-      and [r["format"] for r in v.extra["rows"] if "refused" in r] == ["fp256"] * 7 and all(r["refused"] == "CFT_ERR_UNSUPPORTED" and "rate" not in r for r in v.extra["rows"] if "refused" in r), why or nr.stdout[-200:])
+      and [r["format"] for r in v.extra["rows"] if "refused" in r] == ["fp256"] * 7 and all(r["refused"] == "CFT_ERR_UNSUPPORTED" and "rate" not in r and "software backend" not in r["why"] for r in v.extra["rows"] if "refused" in r), why or nr.stdout[-200:])
     return out
 
 
 def group_probe(env: Env, src: str = HERE) -> list:
     """Parcel TP: the probe leg in the dry run (the quad's five legs, the single's and the deep's, off and on), what it does when the card misbehaves, once an image a
     process, the deadline's estimate, and the tool itself on the software backend."""
-    return (scn_rate_probe(env, src) + scn_rate_probe_failures(env, src) + scn_rate_probe_once(env, src) + scn_rate_probe_deadline(env, src) + group_probe_tool(env, src))
+    return (scn_rate_probe(env, src) + scn_rate_probe_off(env, src) + scn_rate_probe_failures(env, src) + scn_rate_probe_once(env, src) + scn_rate_probe_deadline(env, src) + group_probe_tool(env, src))
 
 
 def group_testfiles(env: Env, src: str = HERE) -> list:

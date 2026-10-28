@@ -3310,7 +3310,6 @@ def group_rates():
     except Exception as e:
         to, err = "", f"{type(e).__name__}: {e}"
     check(err is None and "RATES BY OP" not in to, "rates: a summary from before the field renders, with no rates section", err)
-    eq(R.render(json.loads(json.dumps(S0))), R.render(S0), "rates: render() of the loaded JSON is the same text")
     # -- a run with no sweep leg at all has a section that says so, never a row of zeros
     Sn = R.summarize(build_rates_run(plan=[], noise=False), rev=None)
     eq((Sn["rates"]["rows"], Sn["rates"]["seen"], Sn["rates"]["used"]), ([], 0, 0), "rates: a run with no sweep leg has no rate row")

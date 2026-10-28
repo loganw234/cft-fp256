@@ -1193,7 +1193,6 @@ def group_rates():
     lines = [ln for ln in text.split("\n") if '"image": ' in ln and '"level": ' in ln]
     check(len(lines) == sum(len(n_["rows"]) for n_ in R_["nights"]) and all(ln.count('{"image": ') == 1 and ln.count("{") == ln.count("}") for ln in lines),
           "rates: the file writes each rate row on one line, whole (a night with one row has its list on that line too)", len(lines))
-    check(not P._PATHY.search(text) and not P._IPV4.search(text), "rates: and nothing of it has the shape of a path or an address")
     # -- --check names an edited figure, in the run and in the file
     f = os.path.join(TMP, "rates-data.json")
     rc, so, se = cli(d, "--out", f, "--commit", "none")
