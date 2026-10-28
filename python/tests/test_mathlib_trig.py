@@ -218,20 +218,81 @@ def test_fp32_is_refused_by_name_and_so_is_a_name_that_is_not_built():
         with pytest.raises(ValueError, match="parcel M2F"):
             ml.build(fn, FP32, RNE)
     for name in ("sinh", "asin", "atan", "SIN", "sinpi", ""):
-        with pytest.raises(ValueError, match=repr(name)):
+        with pytest.raises(ValueError, match=repr(name)) as e:
             ml.fragment(name, FP64, RNE)
-        with pytest.raises(ValueError, match=repr(name)):
+        assert "log1p, sin, cos, tan" in str(e.value)       # both tuples
+        with pytest.raises(ValueError, match=repr(name)) as e:
             ml.build(name, FP64, RNE)
+        assert "log1p, sin, cos, tan" in str(e.value)
     with pytest.raises(ValueError, match="attribute"):
         ml.build("sin", FP64, 7)
     with pytest.raises(ValueError, match="formats"):
         ml.build("sin", FpFormat("fp16", 5, 10), RNE)
-    with pytest.raises(ValueError, match="no_such_plant"):
+    with pytest.raises(ValueError, match="no_such_plant") as e:
         ml.build("sin", FP64, RNE, plant="no_such_plant")
+    assert "quadrant_sign" in str(e.value) and "chunk" in str(e.value)  # both
     # the six's plants are not the trig routines' (only the names that are in
     # TRIG_PLANTS or REDUCTION_PLANTS build): head_short is exp's
     with pytest.raises(ValueError, match="head_short"):
         ml.build("sin", FP64, RNE, plant="head_short")
+
+
+def test_the_build_has_min_and_max():
+    """Build.fmin and Build.fmax (the clamp's): the MIN and MAX instructions
+    of the ALU, hash-consed like the others, computing softfloat's."""
+    b = ml.Build(FP64, RNE, "minmax")
+    x = ("in", "a")
+    one = b.word(sf.one_bits(FP64), "ONE")
+    lo, hi = b.fmin(x, one), b.fmax(x, one)
+    assert b.fmin(x, one) == lo and b.fmax(x, one) == hi != lo
+    assert [op for op, _r, _s in b.body] == [sf.OP_MIN, sf.OP_MAX]
+    b.finish(lo, hi)
+    for bits in (ml._enc(FP64, Fraction(-3)), FP64.sign_mask,
+                 ml._enc(FP64, Fraction(1, 2)), sf.one_bits(FP64),
+                 ml._enc(FP64, Fraction(5, 2))):
+        mn, mx, _p = b.run(bits)
+        assert mn == sf.compute(FP64, sf.OP_MIN, bits, sf.one_bits(FP64),
+                                0, RNE)[0]
+        assert mx == sf.compute(FP64, sf.OP_MAX, bits, sf.one_bits(FP64),
+                                0, RNE)[0]
+    assert (mn, mx) == (sf.one_bits(FP64), ml._enc(FP64, Fraction(5, 2)))
+    # and the six use neither
+    for fn in ml.NAMES:
+        assert not {op for op, _r, _s in ml.build(fn, FP64, RNE).body} \
+            & {sf.OP_MIN, sf.OP_MAX}, fn
+
+
+@pytest.mark.parametrize("fmt", (FP64, FP128), ids=fid)
+@pytest.mark.parametrize("fn", FUNCS)
+def test_the_build_keeps_what_the_budget_and_the_rate_law_read(fn, fmt):
+    """The contract M2G2b is briefed against (build's docstring): the probes,
+    the phases and the meta, and their relations on lanes: R is rnd(V_h +
+    V_l) before the clamp, Bv is 2^-(p+G) |V_h| exactly, and the tan's mark is
+    the xor of the test's two ends (sin's and cos's are clamped first)."""
+    b = build_of(fn, fmt, RNE)
+    need = {"Vh", "Vl", "Bv", "R", "R1", "R2", "mk", "sh", "sl", "ch", "cl",
+            "rh", "rl", "q", "small"}
+    assert need <= set(b.probes), need - set(b.probes)
+    assert ("inrange" in b.probes) == (fmt is FP128)
+    assert len(b.phase_of) == len(b.body)
+    assert set(b.phase_of) <= set(ml.PHASE_ORDER)
+    for key in ("fn", "G", "R", "rho", "KS", "DS", "KC", "DC", "exact", "data",
+                "two_prod", "reduction", "reduction_mid"):
+        assert key in b.meta, key
+    p, G = fmt.prec, b.meta["G"]
+    n = 0
+    for x in (T.sample(fmt, "edge", 2, 5) + T.sample(fmt, "random", 2, 5)
+              + T.sample(fmt, "small", 2, 5)):
+        _res, _fl, pr = b.run(x, tuple(need))
+        n += 1
+        # ADD reads its operands a and c (asm.OP_FIELDS)
+        assert pr["R"] == sf.compute(fmt, sf.OP_ADD, pr["Vh"], 0, pr["Vl"],
+                                     RNE)[0]
+        assert ml._dec(fmt, pr["Bv"]) == abs(ml._dec(fmt, pr["Vh"])) \
+            / 2 ** (p + G)
+        if fn == "tan":
+            assert pr["mk"] == pr["R1"] ^ pr["R2"]
+    assert n == 6
 
 
 def test_the_cap_per_function_and_format_is_the_measured_maximum():
@@ -611,7 +672,7 @@ PLANTED = [
     ("coef", FP64,
      {"pools": ("sin", RNE), "bound": ("sin", RNE),
       "constants": ("sin", RNE), "shape": ("sin", RNE)},
-     {"structured": ("sin", RNE), "specials": ("sin", RNE),
+     {"structured": ("cos", RTZ), "specials": ("sin", RNE),
       "audit": ("sin", RNE)}),
     ("newton_short", FP64,
      {"structured": ("tan", RNE), "bound": ("tan", RNE),
@@ -621,57 +682,57 @@ PLANTED = [
     ("tiny_gate_off", FP64,
      {"pools": ("sin", RNE), "specials": ("sin", RNE),
       "constants": ("sin", RNE), "shape": ("sin", RNE)},
-     {"structured": ("sin", RNE), "bound": ("sin", RNE),
+     {"structured": ("cos", RTZ), "bound": ("sin", RNE),
       "audit": ("sin", RNE)}),
     ("rl_dropped", FP64,
      {"pools": ("sin", RNE), "bound": ("sin", RNE), "shape": ("sin", RNE)},
-     {"structured": ("sin", RNE), "constants": ("sin", RNE),
+     {"structured": ("cos", RTZ), "constants": ("sin", RNE),
       "audit": ("sin", RNE)}),
     ("zl_dropped", FP64,
      {"pools": ("sin", RNE), "bound": ("sin", RNE), "shape": ("sin", RNE)},
-     {"structured": ("sin", RNE), "specials": ("sin", RNE),
+     {"structured": ("cos", RTZ), "specials": ("sin", RNE),
       "constants": ("sin", RNE), "audit": ("sin", RNE)}),
     ("clamp_off", FP64,
      {"pools": ("sin", RTZ), "constants": ("sin", RTZ),
       "shape": ("sin", RTZ)},
-     {"structured": ("sin", RTZ), "bound": ("sin", RTZ),
+     {"structured": ("cos", RTZ), "bound": ("sin", RTZ),
       "specials": ("sin", RTZ), "audit": ("sin", RTZ)}),
     ("sign_after_rounding", FP64,
      {"pools": ("sin", RDN), "bound": ("sin", RDN), "specials": ("sin", RDN),
       "shape": ("sin", RDN)},
-     {"structured": ("sin", RDN), "constants": ("sin", RDN),
+     {"structured": ("tan", RNE), "constants": ("sin", RDN),
       "audit": ("sin", RDN)}),
     ("range_unmarked", FP128,
      {"pools": ("sin", RNE), "specials": ("sin", RNE), "shape": ("sin", RNE)},
-     {"bound": ("sin", RNE), "structured": ("sin", RNE),
-      "constants": ("sin", RNE), "audit": ("sin", RNE)}),
+     {"bound": ("sin", RNE), "constants": ("sin", RNE),
+      "audit": ("sin", RNE)}),
     ("cos_zero_operand", FP64,
      {"pools": ("cos", RNE), "specials": ("cos", RNE)},
-     {"structured": ("cos", RNE), "bound": ("cos", RNE),
+     {"structured": ("cos", RTZ), "bound": ("cos", RNE),
       "constants": ("cos", RNE), "audit": ("cos", RNE),
       "shape": ("cos", RNE)}),
     ("inf_flag_dropped", FP64,
      {"specials": ("sin", RNE)},
-     {"pools": ("sin", RNE), "structured": ("sin", RNE),
+     {"pools": ("sin", RNE), "structured": ("cos", RTZ),
       "bound": ("sin", RNE), "constants": ("sin", RNE),
       "audit": ("sin", RNE), "shape": ("sin", RNE)}),
     ("chunk", FP64,
      {"pools": ("sin", RNE), "bound": ("sin", RNE),
       "constants": ("sin", RNE)},
-     {"structured": ("sin", RNE), "specials": ("sin", RNE),
+     {"structured": ("cos", RTZ), "specials": ("sin", RNE),
       "audit": ("sin", RNE), "shape": ("sin", RNE)}),
     ("window", FP64,
      {"pools": ("sin", RNE), "bound": ("sin", RNE),
       "constants": ("sin", RNE), "shape": ("sin", RNE)},
-     {"structured": ("sin", RNE), "audit": ("sin", RNE)}),
+     {"structured": ("cos", RTZ), "audit": ("sin", RNE)}),
     ("mid_inexact", FP64,
      {"pools": ("cos", RNE), "bound": ("cos", RNE), "shape": ("cos", RNE)},
-     {"structured": ("cos", RNE), "constants": ("cos", RNE),
+     {"structured": ("cos", RTZ), "constants": ("cos", RNE),
       "audit": ("cos", RNE)}),
     ("exact_add", FP64,
      {"audit": ("sin", RNE)},
      {"pools": ("sin", RNE), "bound": ("sin", RNE),
-      "structured": ("sin", RNE), "specials": ("sin", RNE),
+      "structured": ("cos", RTZ), "specials": ("sin", RNE),
       "constants": ("sin", RNE), "shape": ("sin", RNE)}),
 ]
 
@@ -814,6 +875,10 @@ def test_every_plant_is_in_the_table_and_every_row_names_a_plant():
         assert red, plant
         for check, (fn, rnd) in {**red, **green}.items():
             assert fn in FUNCS and rnd in RND
+            if check == "structured":
+                # a claim about centres the configuration does not have
+                # would be green whatever the plant did
+                assert T.structured_lanes(fn, fmt, rnd), (plant, fn, rid(rnd))
         # a red is where the plant acts
         for check, (fn, rnd) in red.items():
             assert (plant, fn, fmt.name) not in NOT_APPLICABLE, (plant, check)
