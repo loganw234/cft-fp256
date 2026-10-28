@@ -132,6 +132,62 @@ entry). What the build adds to the study:
   structured families (parcel M2G2b's), fp32 (parcel M2F's), program.c and
   cftc (M2P's and M2C's), the language (M2L's).
 
+**A note of 2026-10-28, at parcel M2G2b** (the budget, the mark-rate law and
+the structured families of sin, cos and tan, ported from this study's model;
+M2's build, wave 2, second half; the study's text stays as written at 1337a13).
+They are python/tests/mathlib_trig_budget.py (3.2), the rate check in
+mathlib_trig_harness.py (3.4), mathlib_trig_family.py with its committed
+`TRIG_FAMILY` and the family checks (3.5), and the commands `trig-budget`,
+`trig-rate` and `trig-family` of mathlib_runs.py, held by test_mathlib_trig.py
+(docs/VALIDATION.md, the entry of that date, whose figures these are).
+python/cft_golden is unchanged: no fragment moved. What they reproduce of 3.2
+to 3.5, and what they move:
+- **3.2's table stands, to its digits.** The port of `m2budget.py`'s method
+  (the three trig extensions of 3.2 and 3.6; `Analyzer` and `Budget` of the six,
+  extended by subclass) gives, at the model's own lanes (`m2measure.py`'s
+  sample, ported by M2G2a: seeds 21 to 25, 1,500 lanes a region at fp64 and
+  400 at fp128 and fp256), the model's printed output line for line in all 15
+  cells at fp64, the control among them (fp64 sin, edge: 0.07031 Bv, M 0.0298,
+  capacities 0.0405, 126 instructions that ever round, the ten largest
+  capacities by instruction, opcode and phase), and in all 30 cells at fp128 and
+  fp256 but for the instruction numbers, one higher after the range compare M2G1
+  builds early (MEASURED). V is bit-identical across the five attributes on
+  2,700 lanes (300 a function and format), so the rne budgets are every
+  attribute's (MEASURED). 3.6's items 6 and 7 are planted in the tool and red:
+  a RECIP_SEED's source frozen gives tan 2^+46.5 Bv against a largest error
+  found of 0.014 (the model's 2^+46.7 against 0.048), and the error-free phases
+  recomputed a method error of 6 x 10^294 Bv and a bound of 2.8 x 10^297 on 60
+  lanes (the model's 2^+822 on four).
+- **3.4's rate cells stand, and one column moves.** At seed 3, 2,000 arguments
+  a format (rate.py's lanes), all 18 cells have the study's counts, no unmarked
+  lane wrong and every guess right (MEASURED). The "own prediction" column is
+  equal for sin and tan and not for cos: 51.0 against 50.1 at fp128 and 51.7
+  against 49.3 at fp256 (50.36 against 50.34 at fp64: one lane). The study took the
+  significand of V_h, 1 where cos x is within half a unit of 1 from below (56
+  lanes at fp128, 150 at fp256) and the cell is the one under 1, twice as wide a
+  window; the law's m_V is the true value's, 2 there (parcel RC's calibration;
+  MEASURED: the sum with V_h's significand is the study's 50.1 and 49.3). The
+  study's pooled sin -2.0 and cos +2.0 sigma are for `trig-rate` at the box's
+  size (50,000 and 20,000) to settle against these expectations.
+- **3.5's tables stand, and its reading of them moves.** The tiny family's
+  and the minimisers' counts are the study's at the decided G in all three
+  formats (MEASURED, every lane against transcend.py), and the three measured
+  windows (fp64 sin 3 2^-25 rtz j = -9 .. 11, tan 3 2^-26 rne -23 .. 19, cos
+  2^-26 rtz -255 .. 128) end between the exact edges the theory computes, the
+  last lane it demands marked and the first it calls clear (above and below the
+  centre: 8 and 15, 6 and 13; 13 and 26, 16 and 30; 89 and 167, 179 and 333). **The census is c <= 16 (five bits), and the family goes
+  beyond it:** the theory finds, and the fragments mark with every guess right
+  (MEASURED), sin under rne and rmm at c = 21 and 27 (2^-54 at fp128, 2^-116 at
+  fp256: a midpoint needs 2e = p - bitlen(c), and the first c divisible by 3 whose
+  bit length has the parity of p has five bits at these formats), cos under rne at c = 2^46 - 1, 2^46 + 1 and
+  3 2^46 - 1 at 2^-142 and 3 2^48 - 1 at 2^-143 at fp256 (x^2/2 within 2^-285 of
+  a midpoint), and nine tan centres under rne at fp128 and fp256 where the
+  study's census has three. 3.5's "none under rne and rmm, p is odd" for sin and
+  cos holds for the census and not for the family. The fp64 cos directed count
+  (14 arguments) is seven centres, one of which (7 2^-26) is at d = 0.78 of
+  the bound, in neither "must" nor "must not". The clamp matters to the theory:
+  the grid point 1 is no boundary of sin and cos.
+
 M1's study (docs/studies/M1-exp-log.md) is its model of form, section for
 section, and M1's design is its starting point: the in-lane test, the
 double word with TwoSum and no augmented addition, the fragment in C4's
