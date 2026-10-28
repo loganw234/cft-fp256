@@ -9087,10 +9087,17 @@ def scn_rate_probe(env: Env, src: str = HERE) -> list:
       pl and all(len(r["extra"]["rows"]) == 28 and all(set(x) >= {"op", "format", "tile", "elements", "seconds", "rate", "check"} for x in r["extra"]["rows"])
                  and r["extra"]["tile"] == ("all" if r["tile"] is None else str(r["tile"])) for r in pl))
     ph = lambda r: (r.get("extra") or {}).get("phase")             # a leg that names no phase is a wrong leg, not a crash of this scenario
+    # "At once" is judged on the unrounded times (send-back 2: round() to the second put four starts 0.03 s apart either side of a .5 about one run in thirty, and the night launcher's
+    # preflight would have refused a night for it). The four together legs start within AT_ONCE_S of each other, and each starts before any of the others ends. Margin: the spread is
+    # ~0.03 s on the desktop (MEASURED, VALIDATION), the limit 1.0 s is 30 times that; plant 107 waits 1.2 s between process starts, so 3.6 s across four, 3.6 times the limit.
+    AT_ONCE_S = 1.0
+    tg = [r for r in pl if ph(r) == "together"]
+    at_once = (len(tg) == 4 and max(r["start_epoch"] for r in tg) - min(r["start_epoch"] for r in tg) <= AT_ONCE_S
+               and max(r["start_epoch"] for r in tg) < min(r["end_epoch"] for r in tg))
     c("probe: the quad's together legs ran at once, one process a tile (each log says the CFT_XRT_TILES it was handed, and the single's and the deep's none), on the image asked for",
       pl and all((f"standin: env CFT_XRT_TILES={r['tile']}" if r["tile"] else "standin: env CFT_XRT_TILES=<unset>") in log_text(on, r)
                  and f"rate-probe: backend DEVICE {env.imgs[r['image']]}" in log_text(on, r) for r in pl)
-      and len({round(r["start_epoch"]) for r in pl if ph(r) == "together"}) == 1, str([(r["tile"], r["start_epoch"]) for r in pl][:6]))
+      and at_once, f"{len(tg)} together legs, starts {[round(r['start_epoch'], 3) for r in tg]}, ends {[round(r['end_epoch'], 3) for r in tg]}; " + str([(r["tile"], r["start_epoch"]) for r in pl][:6]))
     q = sorted((r for r in pl if r["image"] == "quad"), key=lambda r: (ph(r) != "alone", r["tile"] or 0))
     battery = [r for r in on.legs(kind="battery") if r["image"] == "quad"]
     sweep_q = [r for r in on.legs(kind="sweep") if r["image"] == "quad"]
@@ -9208,12 +9215,28 @@ def scn_rate_probe_once(env: Env, src: str = HERE) -> list:
     def c(n, ok, d=""):
         out.append((n, bool(ok), d))
 
-    args = ["--legs", "api-test", "--host-workers", "0", "--no-sweep", "--rate-probe", "--weights", "quad=1,single=1,deep=1", "--until", until(24)]
-    R1 = run_driver(env, "probe-once", args, src=src, cap=120)
+    # The windows come from what the run does and not from a clock (send-back 2): a fixed 24 s and then 14 s held 4 cycles and not 3 images on a slow desktop (6 s a cycle, MEASURED under
+    # load), and a check that fails with no defect present refuses a night at the launcher's preflight. The run goes on until its cycles are counted - 4 for the first (the three images
+    # round robin, then the first again: the revisit "once" is about), 3 for the resumed (each image once) - and then the STOP file ends it at the next boundary. The only clock left is
+    # a CAP of 300 s on each, 12 times the 24 s that 4 cycles took at 6 s a cycle. The probe's 73 s estimate cannot hold a probe back: the deadline grace is 900 s by default, so the
+    # margin against it is (330 s deadline + 900 s) - 73 s = 1,157 s.
+    base = ["--legs", "api-test", "--host-workers", "0", "--no-sweep", "--rate-probe", "--weights", "quad=1,single=1,deep=1"]
+
+    def stop_after(R_, n, k):              # wait (to the cap) for n cycle_end records after R_'s k-th run_start, then ask for the stop
+        def counted():
+            recs = R_.recs
+            at = [i for i, r in enumerate(recs) if r.get("type") == "run_start"]
+            return len(at) > k and sum(1 for r in recs[at[k]:] if r.get("type") == "cycle_end") >= n
+        wait_for(counted, 300)
+        with open(os.path.join(R_.out, "STOP"), "w") as fh:
+            fh.write("stop")
+    R1 = start_driver(env, "probe-once", base + ["--until", until(330)], src=src, to_file=True)
+    stop_after(R1, 4, 0)
+    R1.finish(120)
     cs1 = [r for r in R1.recs if r.get("type") == "cycle_start"]
     ps1 = probe_summary(R1)
     c("probe once: a run of many cycles probes each image once: the quad's five legs, the single's and the deep's one",
-      len(cs1) >= 5 and max(Counter(r["image"] for r in cs1).values()) >= 2 and {k: len(v) for k, v in ps1.items()} == {"quad": 5, "single": 1, "deep": 1} and len(R1.events("rate_probe")) == 3, f"{len(cs1)} cycles, {({k: len(v) for k, v in ps1.items()})}")
+      len(cs1) >= 4 and max(Counter(r["image"] for r in cs1).values()) >= 2 and {k: len(v) for k, v in ps1.items()} == {"quad": 5, "single": 1, "deep": 1} and len(R1.events("rate_probe")) == 3, f"{len(cs1)} cycles, {({k: len(v) for k, v in ps1.items()})}")
     first = {}
     for r in cs1:
         first.setdefault(r["image"], r)
@@ -9222,13 +9245,24 @@ def scn_rate_probe_once(env: Env, src: str = HERE) -> list:
       all(any(cs["cycle"] == r["cycle"] and cs is first[r["image"]] for cs in cs1) for r in pl), str([(r["image"], r["cycle"]) for r in pl][:7]))
     env.n += 1
     cmd = [sys.executable, "-B", "-I", os.path.join(src, "card_stress.py"), "--root", ROOT, "--out", R1.out, "--resume", "--dry-run", "--telemetry-seconds", "0", "--disk-extra", "",
-           "--retry-pause", "1", "--kill-after", "2", "--guard-poll", "1", "--until", until(14)] + args[:-2]
+           "--retry-pause", "1", "--kill-after", "2", "--guard-poll", "1", "--until", until(330)] + base
     for n, pth in env.imgs.items():
         cmd += ["--image", f"{n}={pth}"]
     e = dict(os.environ, CFT_STANDIN_STATE=R1.state)
     e.pop("CFT_STANDIN_SCENARIO", None)
-    q = subprocess.run(cmd, capture_output=True, text=True, env=e, cwd=ROOT, timeout=120)
+    if os.path.exists(os.path.join(R1.out, "STOP")):       # the first run's: a stale STOP file is refused at the start
+        os.remove(os.path.join(R1.out, "STOP"))
+    sink = os.path.join(env.tmp, f"probe-once-resume-{env.n}.txt")
+    with open(sink, "w", encoding="utf-8") as sk:
+        pr = subprocess.Popen(cmd, stdout=sk, stderr=subprocess.STDOUT, text=True, env=e, cwd=ROOT)
     R2 = Run(R1.out)
+    stop_after(R2, 3, 1)
+    try:
+        pr.wait(timeout=120)
+    except subprocess.TimeoutExpired:
+        pr.kill()
+        pr.wait()
+    q = subprocess.CompletedProcess(cmd, pr.returncode, open(sink, encoding="utf-8", errors="replace").read(), "")
     second = [i for i, r in enumerate(R2.recs) if r.get("type") == "run_start"][1:]
     after = [r for r in R2.recs[second[0]:] if r.get("type") == "leg" and r.get("kind") == "probe"] if second else []
     c("probe once: a resumed run is a new process, a night: it probes each image again, once, the same five, one and one",
