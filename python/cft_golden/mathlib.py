@@ -1097,7 +1097,14 @@ def schedule_order(f, phases):
     red-setup phase holds the setup before the window and the one after it,
     which the reduction emits after the window so that they are not live across
     it) and the depth-first order 31, 30 and 30. For the six it is never the
-    lowest, and chooses nothing: their fragments are as they were."""
+    lowest, and chooses nothing: their fragments are as they were.
+
+    The reduction's own builds (build_reduction; fp64, fp128, fp256 and fp32
+    at G = 18, under every attribute) take the design's order too: their
+    scheduled fragments keep 26, 17, 16 and 22 values live where they kept 30,
+    21, 17 and 24, the same dataflow in another order (the dag digest is
+    equal). Nothing emits a reduction build's fragment alone (Build.run and
+    reduction_audit read the build's whole body), so no result moves."""
     best = None
     for order in (_ranked_order(f, phases), _dfs_order(f),
                   list(range(len(f.body)))):
@@ -3665,11 +3672,11 @@ def build_reduction(fmt, rnd=RNE, *, G=None, R="default", plant=None):
 #             the attribute; cos a constant word), +-0, +-inf, NaN: a SELECT
 #             chain of constant words, lowest priority first
 #
-# trig_after() is everything from `select` on, written once and taking V as a
-# list of words (two, or three whose low words round through round-to-odd as
-# M1's fp32 finals do), so that parcel M2F's fp32 calls it, and plan_trig()
-# for its own rho, rather than copying them. The polynomials' construction
-# (_build_trig) is the double word's.
+# trig_after() is everything from `select` on, written once and taking sin(r)
+# and cos(r) as lists of words (two, or three whose low words round through
+# round-to-odd as M1's fp32 finals do), so that parcel M2F's fp32 calls it, and
+# plan_trig() for its own rho, rather than copying them. The polynomials'
+# construction (_build_trig) is the double word's.
 
 TRIG_PLANTS = {
     "quadrant_sign": "cos's sign taken from n's low bit alone (the study's "

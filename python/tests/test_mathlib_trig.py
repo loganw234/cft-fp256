@@ -527,6 +527,34 @@ def test_the_scheduler_takes_the_designs_order_for_trig_and_leaves_the_six():
             assert ml.schedule_order(g, ph) != list(range(len(g.body)))
 
 
+def test_the_reductions_own_builds_take_the_designs_order_too():
+    """The change to schedule_order reaches M2G1's own builds (VM2G2a found
+    it; the entry had first said the reduction's 20 builds were unchanged,
+    having hashed each Build and not its scheduled fragment): the design's
+    order is strictly the lowest of the three for every one of
+    build_reduction's 20 builds, so their scheduled fragments ARE the design's,
+    26, 17, 16 and 22 values live at fp64, fp128, fp256 and fp32 (G = 18)
+    where the order by phase kept 30, 21, 17 and 24 (and the depth-first order
+    32, 28, 25 and 32). Nothing emits one alone; this pins what the change did
+    to them, and fails if a scheduler stops taking the design's order for
+    them."""
+    cases = ((FP64, None, 30, 32, 26), (FP128, None, 21, 28, 17),
+             (FP256, None, 17, 25, 16), (FP32, 18, 24, 32, 22))
+    for fmt, G, ranked, depth, design in cases:
+        for r in RND:
+            b = (ml.build_reduction(fmt, r) if G is None
+                 else ml.build_reduction(fmt, r, G=G))
+            where = (fmt.name, rid(r))
+            f, g = b.fragment(), b.fragment(schedule=False)
+            ph = [b.phase_of[i] for i in b.live_indices()]
+            got = (ml.permuted(g, ml._ranked_order(g, ph)).live_max(),
+                   ml.permuted(g, ml._dfs_order(g)).live_max(), g.live_max())
+            assert got == (ranked, depth, design), where
+            assert ml.schedule_order(g, ph) == list(range(len(g.body))), where
+            assert f.body == g.body, where
+            assert f.live_max() == design, where
+
+
 def test_the_audit_of_the_routines_own_builds_is_empty():
     """reduction_audit() on sin's, cos's and tan's builds over the slice (all
     three formats) and, for sin, fp64's products' binade edges (the three
