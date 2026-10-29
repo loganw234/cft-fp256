@@ -277,6 +277,20 @@ def check_digest(b):
     return []
 
 
+def check_model(b):
+    """The model's outputs (r0, r1, r2, q, small) at the 22 recorded arguments,
+    lane for lane."""
+    bad = []
+    for x, *want in MODEL_LANES:
+        got = b.run(x, ("r0", "r1", "r2", "q", "small"))[2]
+        got = [got[k] for k in ("r0", "r1", "r2", "q", "small")]
+        got[4] = int(bool(got[4] & 0x7fffffff))
+        if got != want:
+            bad.append(x)
+    return [f"model: {len(bad)} of {len(MODEL_LANES)} recorded lanes differ "
+            f"from the model's, the first {bad[0]:#x}"] if bad else []
+
+
 def check_reference(run, stats=None):
     """r = r0 + r1 + r2 and n mod 4 of every lane against |x| 2/pi in exact
     rationals, 2/pi from the header: |r - (|x| - n pi/2)| <= 2^-(p+G+3) |r|,
@@ -409,12 +423,7 @@ def test_the_build_is_the_models_under_every_attribute(rnd):
 
 
 def test_the_ports_lanes_are_the_models():
-    b = build_tw()
-    for x, *want in MODEL_LANES:
-        got = [b.run(x, ("r0", "r1", "r2", "q", "small"))[2][k]
-               for k in ("r0", "r1", "r2", "q", "small")]
-        got[4] = int(bool(got[4] & 0x7fffffff))
-        assert got == want, hex(x)
+    assert check_model(build_tw()) == []
 
 
 # ---- the switches --------------------------------------------------------------
@@ -460,7 +469,8 @@ def test_late_from_leaves_the_late_products_to_the_tail():
 
 def test_the_looser_rho_bound_fails_the_lower_groups_proof_by_name():
     """rho_half off, the tail as the model has it: the lower group's low word
-    plus a TwoSum error is not provably one word (the drafter's E5)."""
+    plus a TwoSum error is not provably one word (MEASURED on a scratch copy
+    of the model with that one change, the lead's brief for parcel M2F1)."""
     P = plan_tw()
     b = ml.Build(FMT, sf.RND_RNE, "loose")
     R = ml._Red(b, P, None, rho_half=False, late_from=4)
@@ -603,28 +613,33 @@ def test_the_proof_of_the_cushion_names_what_it_reads():
 # MEASURED (the plant by check matrix of the parcel's ledger): every check a
 # plant turns red, and the ones it leaves green. The cushion check reads the
 # reference's lanes, so it follows a plant that breaks r; `digest` is the dag
-# digest, red for every plant that changes the dataflow.
-CHECKS = ("shape", "digest", "reference", "audit", "cushion", "constants")
+# digest, red for every plant that changes the dataflow; `model` the 22
+# recorded lanes of the model, red where a value of r or q moves.
+CHECKS = ("shape", "digest", "model", "reference", "audit", "cushion",
+          "constants")
 PLANTED = [
-    ("carry_dropped", ("audit", "reference", "digest"),
+    ("carry_dropped", ("audit", "reference", "digest", "model"),
      ("shape", "cushion", "constants")),
-    ("r2_dropped", ("reference", "shape", "digest"),
+    ("r2_dropped", ("reference", "shape", "digest", "model"),
      ("audit", "cushion", "constants")),
-    ("chunk", ("reference", "constants", "digest"), ("audit", "shape")),
-    ("window", ("reference", "shape", "digest"), ("audit", "constants")),
-    ("exact_add", ("audit", "reference", "digest"),
+    ("chunk", ("reference", "constants", "digest", "model"),
+     ("audit", "shape")),
+    ("window", ("reference", "shape", "digest", "model"),
+     ("audit", "constants")),
+    ("exact_add", ("audit", "reference", "digest", "model"),
      ("shape", "cushion", "constants")),
-    ("quadrant_dropped", ("reference", "audit", "shape", "digest"),
+    ("quadrant_dropped", ("reference", "audit", "shape", "digest", "model"),
      ("constants",)),
-    ("bucket_nearest", ("reference", "digest"), ("audit", "shape", "constants")),
-    ("pio2_low", ("reference", "constants", "shape", "digest"),
+    ("bucket_nearest", ("reference", "digest", "model"),
+     ("audit", "shape", "constants")),
+    ("pio2_low", ("reference", "constants", "shape", "digest", "model"),
      ("audit", "cushion")),
     ("claims_lost", ("audit", "shape"),
-     ("reference", "digest", "cushion", "constants")),
+     ("reference", "digest", "model", "cushion", "constants")),
     ("fast_as_two_sum", ("audit", "shape", "digest"),
-     ("reference", "cushion", "constants")),
+     ("reference", "model", "cushion", "constants")),
     ("lw_understated", ("cushion",),
-     ("reference", "audit", "constants", "shape", "digest")),
+     ("reference", "audit", "constants", "shape", "digest", "model")),
 ]
 # the lanes a plant needs: the least that shows it
 LANES = {"carry_dropped": ("edges",), "exact_add": ("edges", "main"),
@@ -652,6 +667,8 @@ def _found(plant, checks):
         out["shape"] = check_shape(b)
     if "digest" in checks:
         out["digest"] = check_digest(b)
+    if "model" in checks:
+        out["model"] = check_model(b)
     if "constants" in checks:
         out["constants"] = check_constants(
             builder=lambda fmt, **kw: build_tw(plant))

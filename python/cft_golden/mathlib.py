@@ -4224,10 +4224,11 @@ def trig_reduction_tw(b, x, P, *, plant=None):
         exact rational (rounded up to 96 fractional bits; 2^-18.91 is not a
         power of two, so trig_rho()'s argument cannot carry it), MEASURED at
         most 1.878e-06 (2^-19.02) at 0x4bb9109b on parcel M2X's 14,021
-        arguments. The study's 2^-30 does not hold at fp32 (0x3f490fdb takes
-        n = 0 by the tie, 2^-25.10 over), nor does the double word's
-        2^-11.66 explain it (_check_trig_cushion_tw proves rho covers
-        _trig_slack_tw by name);
+        arguments. The study's 2^-30 does not hold at fp32 (0x3f490fdb, the
+        float just above pi/4, takes n = 0 and leaves |r| 2^-25.10 over;
+        165 of the 14,021 are past it, READ from the model's run); M2G1's
+        double word at G = 18 has 2^-11.66. _check_trig_cushion_tw proves by
+        name that a rho covers _trig_slack_tw;
       * q = MAGIC + n' on MAGIC's integer grid, n' congruent to n (mod 4): n
         mod 4 is q's encoding & 3, as trig_reduction()'s;
       * `small` is nonzero where |x| < RD(pi/4); there r0 = |x|, r1 = r2 = +0
@@ -4238,8 +4239,9 @@ def trig_reduction_tw(b, x, P, *, plant=None):
     every bit but the sign): Build.ins HASH-CONSES, so a classification that
     forms |x| as iand(x, ABSM) SHARES this instruction and holds |x| live from
     the reduction to the end, one value more than the model's (24, not 23:
-    MEASURED on the model by the drafter's E9); parcel M2X's classification
-    forms it as ixor(x, iand(x, SIGN)), and so must fp32's routines.
+    MEASURED on the model with that one line changed, 938, 934 and 992
+    instructions); parcel M2X's classification forms it as ixor(x, iand(x,
+    SIGN)), and so must fp32's routines.
     Phases red-setup, red-window, red-products (positions 0 to 3),
     red-coarse, red-mid, red-products-low (positions 4 to 8), red-lower,
     red-triple, red-scale and red-small, in that order of PHASE_ORDER (b.phase
