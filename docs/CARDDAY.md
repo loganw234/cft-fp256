@@ -2376,8 +2376,8 @@ clause5_soak.c's table of its wide modes (`WJOBS`: each job's wide format, and a
 
 On 2026-10-27 Logan asked whether the measurement metrics should also measure throughput at different precisions, "as now each of the formats gets
 real work". The answer is two pieces that read the same records two ways: **the night's rates**, taken from the sweep slices the run already makes, and
-**the probe leg**, a short run per image with the oracle off that reads the card alone. The page's redesign (Logan, 2026-10-27) is a later parcel and will
-lead with these figures; this one makes them.
+**the probe leg**, a short run per image with the oracle off that reads the card alone. The page's redesign (Logan, 2026-10-27; parcel PD, 2026-10-29) shows
+these figures in its glance, as "How fast"; this parcel made them.
 
 **What a rate is.** A slice's own `rate.value`, the figure the driver records for every sweep leg (`finish_leg`): its cases over its WHOLE duration, the soak
 process's start and the host's oracle in it, in cases a second. So it is the PIPELINE's pace on one tile, never the tile's alone; the probe's figure is that

@@ -8896,6 +8896,10 @@ def plants(env: Env) -> None:
         ("PD: [013] the health line never calls the newest night stale",
          [("nightly.html", "stale = age !== null && age > 3 * 86400;", "stale = false;")],
          plant_progress, ["glance, wide items, five days on: it comes first, and its health line"]),
+        # send-back 1 (2026-10-29): the rule c41609a9 shipped, which says the shown night ran no probe whenever a later night ran one
+        ("PD: [014] How fast takes the newest probe for the shown night's",
+         [("nightly.html", ': night.probe ? "Card alone: night "', ': probed === night ? "Card alone: night "')],
+         plant_progress, ["glance, the probe on two nights, rows on the first only: How fast names the newest night with rows"]),
     ]
     where = {"nightly.html": os.path.join(ROOT, "site", "nightly.html"), "rate_probe.c": os.path.join(ROOT, "host", "tools", "rate_probe.c"),
              "Makefile": os.path.join(ROOT, "host", "Makefile"), "figure_extracts.py": os.path.join(ROOT, "python", "figure_extracts.py")}

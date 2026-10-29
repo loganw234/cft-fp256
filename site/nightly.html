@@ -260,7 +260,7 @@ and holds no figure of its own.</p>
         h("div", { "class": "scroll" }, h("table", { "class": "rates" }, h("thead", null, h("tr", null, h("th", { "class": "l", text: "Format" }), cols.map(head))), h("tbody", null, body))));
     });
     var probeSay = !probed ? "No probe leg has run yet, on any night: there is no card-alone figure, and every rate here has the host's oracle in its pace."
-                 : probed === night ? "Card alone: night " + night.n + "'s probe, the oracle off, under each figure it has."
+                 : night.probe ? "Card alone: night " + night.n + "'s probe, the oracle off, under each figure it has."      // the night's own probe, not the newest one
                  : "Night " + night.n + " ran no probe; the newest night that did is night " + probed.n + (probed.date ? " (" + probed.date + ")" : "") + ".";
     return block(
       h("p", { "class": "small" }, "Night " + night.n + (night.date ? " (" + night.date + ")" : "") + ": " + (R.unit || "cases/s") + " on one tile, the median of the night's passing slices of each op at each format, from the night's own records. Hover a figure for its slices."),
@@ -381,6 +381,7 @@ and holds no figure of its own.</p>
       if (!last) return "No estimate: " + (c.served ? "none of its " + plural(open.length, "open item", "open items") + " gained in the window" : "no slice has completed under this tree yet") + ".";
       var e = last.estimate;
       return [h("span", { "class": "est", text: "ESTIMATE" }), " by " + (e.date || "-") + ", about " + plural(e.nights_left, "more night", "more nights") +
+              " (the pace of its class's last " + plural(e.window_nights, "night", "nights") + ")" +       // the window is the estimate's own: fewer for a younger class
               (none ? "; " + plural(none, "open item has", "open items have") + " no estimate" : "")];
     }
     function frow(c, x) {
@@ -389,8 +390,6 @@ and holds no figure of its own.</p>
         h("span", { "class": "fpct", text: pct1(t.covered, t.space) }), h("span", { "class": "fcount", text: t.complete + " of " + t.items + " complete" }),
         h("span", { "class": "ffin" }, t.items ? finish(c, x[2]) : "no items"));
     }
-    var win = 0;
-    cur.forEach(function (c) { c.items.forEach(function (r) { if (r.estimate && r.estimate.window_nights > win) win = r.estimate.window_nights; }); });
     var far = h("div", { "class": "far" }, h("h2", { text: "How far along" }),
       cur.length ? cur.map(function (c) {
         var first = c.nights[0];
@@ -400,7 +399,7 @@ and holds no figure of its own.</p>
                 rowsOf(c).map(function (x) { return x ? frow(c, x) : null; })];
       }) : h("p", { text: "No class is current: the newest night ran under no recorded tree." }),
       h("p", { "class": "small dim" }, "A finish is an ", h("span", { "class": "est", text: "ESTIMATE" }), ", by the file's rule: each open item's own pace over its class's last " +
-        (win ? plural(win, "night", "nights") : "nights") + " (How to read it, Estimates). A group's finish is the latest of its open items', computed by this page from them."));
+        "nights, as many as the finish names (fewer for a younger class; How to read it, Estimates). A group's finish is the latest of its open items', computed by this page from them."));
 
     var commit = typeof d.made.commit === "string" ? d.made.commit : null, hex = commit && /^[0-9a-f]{40}$/.test(commit);
     frag.appendChild(h("section", { id: "glance" }, health,
@@ -591,7 +590,7 @@ and holds no figure of its own.</p>
       h("p", { "class": "small" }, h("strong", { text: "Estimates. " }), d.rules.estimate),
       h("p", { "class": "small" }, h("strong", { text: "Kinds of figure. " }), "Counts, times and the coverage of each item are READ from the run's record by the project's report. Sums, percentages and the differences between nights are COMPUTED from those. The finish dates are ESTIMATES. A tile item is one the card's tile computes; a host item is the library's host code run against the CPU, in which the tile computes nothing."),
       h("p", { "class": "small" }, h("strong", { text: "The page's own. " }), "Two things at a glance are not in the data file; this page computes them from it. The word before the newest night: " + WORD +
-        " A group's finish: the latest of its open items' estimated dates, with the count of its open items that have none. Every other figure on the page is the file's, as it gives it."),
+        " A group's finish: the latest of its open items' estimated dates, with the count of its open items that have none. Every other figure is the file's, or a sum, share, hour or age computed from the file's fields and the clock, by the rules above."),
       h("p", { "class": "small dim" }, "Campaign: " + (d.now.campaign.items ? d.now.campaign.items.length + " items, named by " + d.now.campaign.named_by + "." : d.now.campaign.named_by + ".") +
         (d.now.campaign.unknown_to_the_catalog && d.now.campaign.unknown_to_the_catalog.length ? " Not in the catalog: " + d.now.campaign.unknown_to_the_catalog.join(", ") + "." : "")),
       h("p", { "class": "small dim" }, h("a", { href: "index.html", text: "The conformance page" }), " - ", h("a", { href: "demos.html", text: "the five workloads" }))));

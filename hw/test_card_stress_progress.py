@@ -25,7 +25,7 @@ flag, class and text; the #status element, hidden when a file draws, is not in i
 was the one 3ec0081c's page drew; since the redesign (2026-10-29) it is the redesigned page's, moved on purpose (LEGACY_DOM and NIGHT7_DOM say how).
 
 THE GLANCE (parcel PD, 2026-10-29). The page leads with a glance - the newest night's health, how far each current class has come by group, the card's rates - and
-folds every other section. group_glance holds, over every data file the tests hold and five made from them, what the glance and the folds' summaries SAY to the
+folds every other section. group_glance holds, over every data file the tests hold and six made from them, what the glance and the folds' summaries SAY to the
 file itself: glance_of computes each line, row and count from the file's fields alone, and the page in node must show exactly that.
 
 The last line is "progress test: N checks, F failed, K skipped"; the exit status is 0 only if F is 0.
@@ -70,11 +70,14 @@ NIGHT7 = os.path.join(HW, "card_stress_fixtures", "nightly-night7.json")
 # file without the new fields draws exactly as before. They are now the tree of the redesigned page (PD's commit, the same two files and clocks, made the
 # same way), so they hold that the page draws such a file as it did on 2026-10-29; and beside them `group_glance` holds what such a file's glance SAYS to the
 # file itself, figure by figure, computed here from the file and not from the page.
+# MOVED AGAIN by PD's send-back 1 (2026-10-29): a finish now names its own window ("the pace of its class's last N nights") and the notes' sentence on the page's
+# own figures was corrected, so both trees changed; c41609a9's digests were LEGACY_DOM 1748979136e0d2aecc0a6fe98f99db79af92dc413b0189351281b31aecc312a2 and
+# NIGHT7_DOM 2e791f98df44c000eb2c5bc9954a0634142ae991e8724993f802fad9311a5064.
 LEGACY_CLOCK = 1792650000000
-LEGACY_DOM = "1748979136e0d2aecc0a6fe98f99db79af92dc413b0189351281b31aecc312a2"
+LEGACY_DOM = "d7ec2888e4353d5f0fa2d78c3cc94be4c61ef996ea753c61fa93c76e4719a12c"
 NIGHT7_SHA256 = "72960b0c33ce267b0627e7feec3b74483875fff1e7977f1f597e5ca17971d650"
 NIGHT7_CLOCK = 1793200000000
-NIGHT7_DOM = "2e791f98df44c000eb2c5bc9954a0634142ae991e8724993f802fad9311a5064"
+NIGHT7_DOM = "9fd9e12b4307bd209cdd3faf5dbd7ba5e56ba3785cdaecb3c442dccddc368e49"
 st = {"n": 0, "f": 0, "skips": 0}
 DERIVED = []
 GLANCE = {}                    # parcel PD: the data files the groups make, by name, which group_glance draws and holds to themselves
@@ -1416,7 +1419,8 @@ def glance_of(j, clock_ms):
             return "No estimate: " + (f"none of its {plural(len(open_), 'open item', 'open items')} gained in the window" if c["served"] else
                                       "no slice has completed under this tree yet") + "."
         e, none = max(est, key=lambda r: r["estimate"]["nights_left"])["estimate"], len(open_) - len(est)
-        return (f"ESTIMATE by {e['date'] or '-'}, about {plural(e['nights_left'], 'more night', 'more nights')}" +
+        return (f"ESTIMATE by {e['date'] or '-'}, about {plural(e['nights_left'], 'more night', 'more nights')} "
+                f"(the pace of its class's last {plural(e['window_nights'], 'night', 'nights')})" +
                 (f"; {plural(none, 'open item has', 'open items have')} no estimate" if none else ""))
     far = []
     for c in cur:
@@ -1433,7 +1437,7 @@ def glance_of(j, clock_ms):
         fast_first = "This data file holds no rates: the tools that made it did not write them."
     else:
         night = next((x for x in reversed(R["nights"]) if x["rows"]), None)
-        probed = next((x for x in reversed(R["nights"]) if x.get("probe")), None)
+        ran = [x for x in R["nights"] if x.get("probe")]                  # the nights that ran a probe, in the file's order
         if night is None:
             fast_first = "No night in this data file has a rate row yet: a row needs a passing exhaustive or hard slice on a tile of the card."
         else:
@@ -1443,9 +1447,11 @@ def glance_of(j, clock_ms):
                 if r["image"] not in images:
                     images.append(r["image"])
             images.sort(key=lambda i: RT_ORDER["image"].index(i) if i in RT_ORDER["image"] else 3)
-            probe_say = ("No probe leg has run yet, on any night: there is no card-alone figure, and every rate here has the host's oracle in its pace." if probed is None else
-                         f"Card alone: night {night['n']}'s probe, the oracle off, under each figure it has." if probed is night else
-                         f"Night {night['n']} ran no probe; the newest night that did is night {probed['n']}" + (f" ({probed['date']})" if probed.get("date") else "") + ".")
+            # send-back 1: whether the shown night ran a probe is the night's own `probe` (until then this repeated the page's rule, newest probe is the shown
+            # night, which is false when the shown night ran one and a later night ran one with no rows)
+            probe_say = ("No probe leg has run yet, on any night: there is no card-alone figure, and every rate here has the host's oracle in its pace." if not ran else
+                         f"Card alone: night {night['n']}'s probe, the oracle off, under each figure it has." if night.get("probe") else
+                         f"Night {night['n']} ran no probe; the newest night that did is night {ran[-1]['n']}" + (f" ({ran[-1]['date']})" if ran[-1].get("date") else "") + ".")
     # the folds, each closed, each summary counting what the file holds
     ids = {c["id"]: c for c in classes}
     fc = T["fully_covered"]
@@ -1490,9 +1496,9 @@ def glance_check(label, j, clock):
 def group_glance():
     """Parcel PD: the meaning beside the two pins. Over every data file the tests hold - night 7's (no groups, no rates), the legacy shape, the run of three
     nights, of four without wide items and of four with them, the run with rates and a probe, the committed file, a run with a disagreement and one whose
-    last night has no run_end - and over five made here from them (the estimates of a group spread so that its first open item's is not the latest; rates
-    with no row; no rates; the probe on a night after the newest rows; failed and timed-out legs on the newest night), the glance and the folds say what the
-    file holds, as glance_of computes it from the file."""
+    last night has no run_end - and over six made here from them (the estimates of a group spread so that its first open item's is not the latest; rates
+    with no row; no rates; the probe on a night after the newest rows; failed and timed-out legs on the newest night; and, since send-back 1, the probe on two
+    nights with rows on the first only, made by the reducer), the glance and the folds say what the file holds, as glance_of computes it from the file."""
     if not NODE:
         return skip("the glance in node", "node is not on PATH")
     for label, j, clock in glance_files():
@@ -1501,7 +1507,7 @@ def group_glance():
 
 def glance_files():
     """The data files group_glance holds, as (label, file, clock in ms): the ones the groups made (GLANCE), night 7's, the legacy shape, the committed file,
-    and the five made here from them."""
+    and the six made here from them."""
     after = lambda j, s: int(round((j["nights"][-1]["end_epoch"] + s) * 1000))
     files = [("night 7's file", json.load(open(NIGHT7, encoding="utf-8")), NIGHT7_CLOCK)]
     if "four nights without wide items" in GLANCE:
@@ -1532,6 +1538,29 @@ def glance_files():
         none.pop("rates")
         later["rates"]["nights"][-1]["rows"] = []
         files += [("rates with no row", empty, after(empty, 7200)), ("no rates", none, after(none, 7200)), ("the probe on a night after the newest rows", later, after(later, 7200))]
+    # send-back 1: the probe on two nights and rows on the first only, made by the real reducer from records (not by editing a data file): the rates run's
+    # night 4 probe legs copied a day back into night 3 and night 4's sweep legs taken away, as a night that stops or fails after its probe and before its
+    # first passing slice. The shown night (3) ran a probe; the newest probe (4) has no rows.
+    recs, _plan = rated(build(WSPEC, WCAMPAIGN))
+    k, nights_of = 0, []
+    for r in recs:
+        k += r["type"] == "run_start"
+        nights_of.append(k)
+    end3 = max(i for i, r in enumerate(recs) if r["type"] == "cycle_end" and nights_of[i] == 3)
+    back = []
+    for i, r in enumerate(recs):
+        if r["type"] == "leg" and r["kind"] == "probe" and nights_of[i] == 4:
+            c = json.loads(json.dumps(r))
+            c["start_epoch"], c["end_epoch"] = recs[end3]["epoch"] - 300 + 0.01 * len(back), recs[end3]["epoch"] - 300 + 0.01 * len(back) + r["duration_s"]
+            c["start"], c["end"], c["epoch"], c["cycle"] = local(c["start_epoch"]), local(c["end_epoch"]), round(recs[end3 - 1]["epoch"] + 0.001 * (len(back) + 1), 3), recs[end3]["cycle"]
+            c["ts"] = local(c["epoch"])
+            back.append(c)
+    two = [r for i, r in enumerate(recs[:end3]) if not (r["type"] == "leg" and r["kind"] == "sweep" and nights_of[i] == 4)] + back + \
+          [r for i, r in enumerate(recs) if i >= end3 and not (r["type"] == "leg" and r["kind"] == "sweep" and nights_of[i] == 4)]
+    pt = reduce_dir(write_run(two, "probe-two"), "e5" * 20)
+    shape = [(len(x["rows"]) > 0, x["probe"] is not None) for x in pt["rates"]["nights"]]
+    if check(shape[2:] == [(True, True), (False, True)], "glance: the reducer's file of the probe on two nights has rows and a probe on night 3, a probe and no row on night 4", shape):
+        files.append(("the probe on two nights, rows on the first only", pt, after(pt, 7200)))
     if "three nights" in GLANCE:
         fl = json.loads(json.dumps(GLANCE["three nights"]))
         fl["nights"][-1]["legs"].update(fail=1, timeout=2)
