@@ -189,6 +189,38 @@ to 3.5, and what they move:
   the bound, in neither "must" nor "must not". The clamp matters to the theory:
   the grid point 1 is no boundary of sin and cos.
 
+**A note of 2026-10-29, at parcel M2P** (program.c parity: the 45 fragments
+through libcft's sequencer; M2's build, wave 3; the study's text stays as
+written at 1337a13). The routine corpus of host/tests/seq_check.py, the eighth,
+has a second part beside M1's six: sin, cos and tan at fp64, fp128 and fp256
+under the five attributes, each fragment as a stand-alone program
+(`routines.program`) and as the compiler inlines it (QUIET, the body, ENDQUIET,
+RAISE, the result deposited), 90 programs a round, through libcft and the
+golden model. At the gate's arguments: 5,237 lanes compared, 0 mismatches, the
+six's draws unchanged by digest (docs/VALIDATION.md, the entry of that date,
+whose figures these are). python/cft_golden and the harnesses are unchanged: no
+fragment moved. What the run says of the programs the study designed:
+- **Sizes as libcft's sequencer reads them:** 381 to 424 instructions (a
+  fragment's count of 5.1 plus 3 stand-alone and 5 compiled) and 101 to 119
+  bank words, against the six's 178 to 438 and 62 to 123; no trig program is the
+  largest of the 330 by either measure.
+- **Registers:** the programs write r25 at fp64 and r16 at fp128 and stay in r15
+  at fp256 (5.1's live counts 26, 17 and 16), so the 60 programs of fp64 and fp128
+  need the REGS32 bit (CAPS[5]) of a device, which the six need at fp32 alone.
+- **Forms the six's programs do not have** (the entry lists them by encoding):
+  `min` and `max` against a bank word, sin's and cos's clamp (mathlib.py's
+  `fmin` and `fmax`; the fuzzing corpora draw `min` and not `max`, so no corpus
+  reached `max` before);
+  `cmplt` of two registers; a SELECT whose two arms are both bank words
+  addressed by plain index (below 16), the reduction's choice between two of
+  2/pi's chunks; an ADD at round-down against `MAGIC`, the quadrant count; the
+  program's own attribute on an FMA against a bank word;
+  `iand` against a mask on a register past r15. RECIP_SEED in tan's quotient and
+  an IXOR against a word are forms the six's programs already have.
+- fp32 is not in this note, as it is not built: the corpus names it in its
+  summary line and draws no lane of it. When parcel M2F builds the three at
+  fp32 and adds it to `TRIG_FORMATS` the same loop runs them.
+
 M1's study (docs/studies/M1-exp-log.md) is its model of form, section for
 section, and M1's design is its starting point: the in-lane test, the
 double word with TwoSum and no augmented addition, the fragment in C4's
