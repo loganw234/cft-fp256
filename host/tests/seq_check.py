@@ -3801,9 +3801,17 @@ def main():
     routine_held = sum(MR["capref"].values())
     trig_held = sum(MT["capref"].values())
     routine_ran = routine_modules() is not None
-    for MC, part, what, trig in (
-            (MR, "THE ROUTINE CORPUS", "routine corpus", False),
-            (MT, "THE ROUTINE CORPUS'S TRIG PART",
+    # Each part's verdict phrases are written out whole, not built from a
+    # prefix: other files read this one's SOURCE for them. hw/card_stress.py's
+    # build step (its `markers`) refuses a tree whose seq_check.py lacks the
+    # six's reach phrase (its stale-tree test: every card night is lost), and
+    # hw/test_sched.py's fake tree writes it too. An f-string lost it once.
+    for MC, ran, reach, what, trig in (
+            (MR, "THE ROUTINE CORPUS DID NOT RUN EVERY FRAGMENT",
+             "THE ROUTINE CORPUS DID NOT REACH EVERY FORM",
+             "routine corpus", False),
+            (MT, "THE ROUTINE CORPUS'S TRIG PART DID NOT RUN EVERY FRAGMENT",
+             "THE ROUTINE CORPUS'S TRIG PART DID NOT REACH EVERY FORM",
              "routine corpus, trig", True)):
         said = "routine corpus's trig part" if trig else what
         if not routine_ran or (trig and not MC["formats"]):
@@ -3827,8 +3835,7 @@ def main():
             if have != frags:
                 short.append(f"{k} ran {have} of {frags} fragments")
         if short:
-            print(f"{part} DID NOT RUN EVERY FRAGMENT - "
-                  + "; ".join(short))
+            print(f"{ran} - " + "; ".join(short))
             return 1
         # the remote leg: every one of its servers, and every name the
         # programs here can be refused by, given at least once
@@ -3842,8 +3849,7 @@ def main():
             gaps.append(f"the remote leg never refused by name: "
                         f"{', '.join(unnamed)}")
         if gaps:
-            print(f"{part} DID NOT REACH EVERY FORM - "
-                  + "; ".join(gaps))
+            print(f"{reach} - " + "; ".join(gaps))
             return 1
         if MC["total"] or held_here:
             # sin, cos and tan raise no divideByZero and no overflow
@@ -3869,7 +3875,7 @@ def main():
                       f"({', '.join(zero)} counted nothing); {held} of its "
                       f"programs were refused by name instead (above)")
             elif zero:
-                print(f"{part} DID NOT REACH EVERY FORM - "
+                print(f"{reach} - "
                       f"{', '.join(zero)} counted nothing, so a block "
                       f"boundary, a mask, the lane block, a mark, a class or "
                       f"a source of lane, a flag, the model's identity or a "
