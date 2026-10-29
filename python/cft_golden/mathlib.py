@@ -3246,8 +3246,8 @@ def _front(R, x):
                 # nearest of T_j, so the tighter bound is the truth, and
                 # fp32's triple word needs it (its lower group's proof)
                 res = (ReductionValue(Pj, lmax + 1e-9, pgrid),
-                       ReductionValue(rho, rhomag - (1.0 if R.rho_half
-                                                     else 0.0), rhogrid))
+                       ReductionValue(rho, rhomag - 1.0 if R.rho_half
+                                      else rhomag, rhogrid))
             else:
                 res = (ReductionValue(Pj, lmax + 1e-9, pgrid), None)
         b.phase = keep

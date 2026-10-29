@@ -28,6 +28,8 @@ which red):
 """
 
 import functools
+import hashlib
+import inspect
 import math
 import pathlib
 import random
@@ -434,7 +436,62 @@ def _front(P, fmt=FMT, **kw):
     return b, fr
 
 
-def test_with_the_switches_off_the_front_is_m2g1s():
+# The switches-off pins, RECORDED at 66d0d157 (`git archive` of the base, these
+# helpers run on its mathlib.py): the FP64 front (dag digest of its body, digest
+# of its emitted order and phases, digest of its pieces' static bounds, the mags
+# to 6 places) and the reductions M2G1 built, fp32 at G = 18 and fp64 (dag
+# digest, emitted order and phases). A front with a switch on by default, or any
+# other change of M2G1's, moves them.
+PINS_OFF = {
+    "front fp64": (
+        "5b80e5806a5951d41a6bc52df5be009846efeebf124e32cc82951a6fbc62d73f",
+        "73653452b6d58ea1e4ec3b8ef13452a5f6c54d6d8efdb3a4c95b3ad521b128ba",
+        "c6a43fdb0268c8d9f6555ec56f44474435c18938180687889d7c09ee45fab9e4"),
+    "build fp32 G=18": (
+        "7599b2fa0415b9f1344c1eb9e6110cb2717633969e129f9e74d7d262da31f8f9",
+        "035d3c66bd91ba4741409383fcc715eea862c3bc9137d5d30f843fe59bb57416"),
+    "build fp64": (
+        "db07fa171430e7fcadc0d14d40cd22a9435d50e10e59053d752d24971806bf9b",
+        "f211070caf4a00847028964a9542741106284ba5886c4c24b52a728dcff7a7d8"),
+}
+
+
+def _sha(obj):
+    return hashlib.sha256(repr(obj).encode()).hexdigest()
+
+
+def _fragment(b, result, flags):
+    return routines.Fragment("x", b.fmt, b.rnd, b.inputs, b.body, result,
+                             flags, b.words, "read")
+
+
+def _front_pins(fmt):
+    """(dag digest, emitted order, static bounds) of reduction_front's defaults."""
+    b, fr = _front(ml.plan_reduction(fmt, ml.GUARD[fmt.name]), fmt)
+    bounds = [None if p is None else
+              (round(p[0].mag, 6), p[0].grid, None if p[1] is None else
+               (round(p[1].mag, 6), p[1].grid)) for p in fr.prods]
+    return (ml.dag_digest(_fragment(b, fr.fI, fr.nqs[0])),
+            _sha((b.body, b.phase_of)), _sha(bounds))
+
+
+def _build_pins(fmt, G_):
+    b = ml.build_reduction(fmt, G=G_)
+    return (ml.dag_digest(_fragment(b, b.result, b.flags)),
+            _sha((b.body, b.phase_of)))
+
+
+def test_with_the_switches_off_the_front_and_the_reductions_are_m2g1s_recorded():
+    """The pins above (recorded at 66d0d157), so that a default moved to on, or
+    any change of the front with the switches off, turns this red; and, beside
+    them, the explicit defaults are the defaults and rho_half moves a bound."""
+    assert _front_pins(FP64) == PINS_OFF["front fp64"]
+    assert _build_pins(FP32, 18) == PINS_OFF["build fp32 G=18"]
+    assert _build_pins(FP64, None) == PINS_OFF["build fp64"]
+    for fn in (ml.reduction_front, ml._Red.__init__):   # the defaults themselves
+        d = inspect.signature(fn).parameters
+        assert (d["rho_half"].default, d["late_from"].default) == \
+            (False, None), fn.__qualname__
     P = ml.plan_reduction(FP64, ml.GUARD["fp64"])
     b0, f0 = _front(P, FP64)
     b1, _ = _front(P, FP64, rho_half=False, late_from=None)
@@ -611,8 +668,11 @@ def test_the_proof_of_the_cushion_names_what_it_reads():
 # ---- the plants -----------------------------------------------------------------
 
 # MEASURED (the plant by check matrix of the parcel's ledger): every check a
-# plant turns red, and the ones it leaves green. The cushion check reads the
-# reference's lanes, so it follows a plant that breaks r; `digest` is the dag
+# plant turns red, and the ones it leaves green: every row names all seven
+# checks, once (test_every_row_names_every_check). The cushion check reads the
+# reference's lanes and is red where a plant moves r so far that a lane passes
+# the bound (chunk, window, quadrant_dropped, bucket_nearest: by 2^20 and more);
+# `digest` is the dag
 # digest, red for every plant that changes the dataflow; `model` the 22
 # recorded lanes of the model, red where a value of r or q moves.
 CHECKS = ("shape", "digest", "model", "reference", "audit", "cushion",
@@ -622,15 +682,16 @@ PLANTED = [
      ("shape", "cushion", "constants")),
     ("r2_dropped", ("reference", "shape", "digest", "model"),
      ("audit", "cushion", "constants")),
-    ("chunk", ("reference", "constants", "digest", "model"),
+    ("chunk", ("reference", "constants", "digest", "model", "cushion"),
      ("audit", "shape")),
-    ("window", ("reference", "shape", "digest", "model"),
+    ("window", ("reference", "shape", "digest", "model", "cushion"),
      ("audit", "constants")),
     ("exact_add", ("audit", "reference", "digest", "model"),
      ("shape", "cushion", "constants")),
-    ("quadrant_dropped", ("reference", "audit", "shape", "digest", "model"),
+    ("quadrant_dropped",
+     ("reference", "audit", "shape", "digest", "model", "cushion"),
      ("constants",)),
-    ("bucket_nearest", ("reference", "digest", "model"),
+    ("bucket_nearest", ("reference", "digest", "model", "cushion"),
      ("audit", "shape", "constants")),
     ("pio2_low", ("reference", "constants", "shape", "digest", "model"),
      ("audit", "cushion")),
@@ -684,6 +745,32 @@ def test_each_plant_is_red_in_its_checks_and_green_in_the_others(row):
         assert all(s.startswith(c + ": ") for s in found[c]), found[c][:2]
     for c in green:
         assert found[c] == [], f"{plant}: {c} is red: {found[c][:2]}"
+
+
+def test_every_row_names_every_check():
+    """Red and green together are the seven checks, each once: no check is
+    left unasserted in a row (the first version of this table left the cushion
+    out of four)."""
+    for plant, red, green in PLANTED:
+        assert sorted(red + green) == sorted(CHECKS), plant
+
+
+def test_the_clean_build_is_green_in_every_check_on_the_lanes_the_plants_use():
+    """The control of the table: the same lanes, the build without a plant."""
+    b = build_tw()
+    for fam in {tuple(LANES.get(p, ("worst", "pio4", "quad")))
+                for p, _r, _g in PLANTED}:
+        runs = [clean_run(f) for f in fam]
+        merged = types.SimpleNamespace(
+            b=b, rows=sum((r.rows for r in runs), []),
+            bad=sum((r.bad for r in runs), []),
+            tally={k: sum(r.tally.get(k, 0) for r in runs)
+                   for k in ("claims", "nonfinite", "skipped")})
+        assert check_reference(merged) == [], fam
+        assert check_audit(merged) == [], fam
+        assert check_cushion(merged) == [], fam
+    assert check_shape(b) == check_digest(b) == check_model(b) == []
+    assert check_constants() == []
 
 
 def test_carry_dropped_is_red_in_the_audit_on_the_binade_edges_only():
@@ -831,11 +918,25 @@ def test_build_reduction_at_g_18_is_still_the_double_words():
     assert t.meta["reduction"].b == 16 and t.result == t.probes["r0"]
 
 
-def test_the_runs_command_runs_at_small_sizes():
+@pytest.mark.parametrize("flags", [["--quick"], ["--quick", "--no-halves"]],
+                         ids=" ".join)
+def test_the_runs_command_runs_at_small_sizes(flags):
+    """With the half family (numpy) the sample overshoots pi/4 and the TOTAL
+    line has a ratio; without it (no numpy, or --no-halves) no lane overshoots
+    and the line says so in words. Either way the command exits 0."""
     import mathlib_runs as runs
+    try:
+        import numpy  # noqa: F401
+        halves = "--no-halves" not in flags
+    except ImportError:
+        halves = False
     done = subprocess.run([sys.executable, "-B", str(pathlib.Path(runs.__file__)),
-                           "reduction-tw", "--quick"], cwd=PYTHON_DIR,
+                           "reduction-tw", *flags], cwd=PYTHON_DIR,
                           capture_output=True, text=True)
     assert done.returncode == 0, done.stdout + done.stderr
     assert "reduction fp32 (triple word): G = 40" in done.stdout
     assert "quadrant off 0" in done.stdout and "audit failures 0" in done.stdout
+    total = next(ln for ln in done.stdout.splitlines() if "] TOTAL " in ln)
+    assert ("times it" in total) == halves
+    assert ("no argument is past pi/4, so no overshoot is measured and there "
+            "is no ratio" in total) == (not halves)

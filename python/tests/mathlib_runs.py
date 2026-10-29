@@ -722,13 +722,19 @@ def cmd_reduction_tw(a):
             f"2|t| - 1 (|r| past pi/4) {float(st['over']):.3e}; "
             f"{len(FINDINGS) - before} findings")
     ov = tot["over"]
+    bound = f"{float(over_bound):.3e} (2^{RT._log2(over_bound):.2f})"
+    if ov > 0:
+        over_text = (f"largest overshoot MEASURED {float(ov):.3e} "
+                     f"(2^{RT._log2(ov):.2f}) against the COMPUTED bound "
+                     f"{bound}, {float(over_bound / ov):.2f} times it (the "
+                     f"model's: 1.1)")
+    else:       # a sample without the half family: no lane passes pi/4
+        over_text = (f"no argument is past pi/4, so no overshoot is measured "
+                     f"and there is no ratio to the COMPUTED bound {bound}")
     say(f"TOTAL {total} arguments: r's largest relative error "
         f"2^{tot['worst']:.2f} of 2^-(p+G) at {tot['worst_x']:#x} (the "
         f"model's: 2^-5.51); quadrant off {tot['quadrant off']}; audit "
-        f"failures {tot['bad']}; largest overshoot MEASURED {float(ov):.3e} "
-        f"(2^{RT._log2(ov):.2f}) against the COMPUTED bound "
-        f"{float(over_bound):.3e} (2^{RT._log2(over_bound):.2f}), "
-        f"{float(over_bound / ov):.2f} times it (the model's: 1.1); claims "
+        f"failures {tot['bad']}; {over_text}; claims "
         f"examined {tally['claims']}, non-finite {tally['nonfinite']}, "
         f"skipped {tally['skipped']}")
 
