@@ -135,6 +135,25 @@ revision-7 tile's word, that word with BANK_PTR, WIDE_CONST or REGS32 cleared,
 a revision-8 tile's, and that at max_insns or max_consts lowered, each load
 refused by name where the program needs what the word lacks.
 
+Since parcel M2P (M2's build, wave 3, 2026-10-29) the eighth corpus has a second
+part, run after the six at each format that has it: sin, cos and tan, the 45
+fragments of parcel M2G2a (mathlib.TRIG_NAMES at fp64, fp128 and fp256 under
+each attribute), which had run on seq.py alone. They go through the same two
+shapes, lane counts, masks, comparisons, refusals and remote leg, from a stream
+of their own (a salt beside the six's), so that the six's programs, lanes and
+masks are what they were at every --math-rounds; their lanes are
+python/tests/mathlib_trig_harness.py's and mathlib_trig_family.py's, in the
+same five categories (trig_lanes). The part keeps counters of its own, so that
+a form it never reached is named as the trig part's ("THE ROUTINE CORPUS'S TRIG
+PART DID NOT REACH EVERY FORM"), and a summary, a limits line and a line of the
+bits its programs need (cft_caps.seq_features) of its own. sin, cos and tan are
+not built at fp32 until parcel M2F: the summary line says "fp32: sin, cos and
+tan not built (parcel M2F's)", which is no SKIP - a by-design absence, and a
+SKIP line would fail every --require-all run. The formats come from
+mathlib.TRIG_FORMATS, so when M2F adds fp32 to it the same loop takes the
+format and the clause goes, with no edit here. Their programs write past r15 at
+fp64 and fp128 and so need REGS32 there, where the six need it at fp32 alone.
+
     python3 host/tests/seq_check.py --device <xclbin | cft://host:port | sw>
 
 Since revision 8's round 2 (parcel E, 2026-10-05) the corpora can run
@@ -159,7 +178,8 @@ revision-8 quad without R21 the augmented-addition programs are refused and
 the rest compare. A routine program past a capacity the device publishes -
 its instruction count against max_insns, its highest constant index against
 max_consts, its deposits against max_deposits - is refused the same way,
-naming cft_caps.<field>, and counted on a line of its own.
+naming cft_caps.<field>, and counted on a line of its own (the trig part's on
+its own, "routine corpus, trig").
 On a device that lacks AUGADD or SCRATCH_STEP the flag-control corpus is
 drawn WITHOUT its revision-8 arm, because nearly every program that arm
 touches holds an augadd, and on such a quad R24's regions and R23's block,
@@ -2442,7 +2462,33 @@ ROUTINE_FLAGS = (("invalid", sf.FLAG_INVALID),
                  ("inexact", sf.FLAG_INEXACT))
 ROUTINE_FILL = (0xA5, 0xA5A5A5A5, 0xEE)     # a deposit byte, a count, a lane
                                             # byte: the caller's own pattern
+ROUTINE_SALT = 0x4D4C4942               # "MLIB": the six's stream (parcel MP)
+TRIG_SALT = 0x4D325047                  # "M2PG": the trig part's own (parcel M2P)
+TRIG_EDGE_N = 32                        # arguments of each edge region drawn
+TRIG_EDGE_SEEDS = (("edge", 31), ("near", 32), ("zero", 33))
+# the sources of a trig lane, in the order the summary gives them
+TRIG_SOURCES = ("special", "edge", "pool", "centre", "family", "near",
+                "struct", "random")
+# the two IEEE flags sin, cos and tan are not expected to raise on any
+# argument (no float is a pole of tan, |sin| and |cos| are at most 1, and a
+# float's tan is far under the largest finite number): counted like the
+# others, and not required of the run
+TRIG_NEVER_RAISED = ("divideByZero", "overflow")
 _ROUTINE = {"progs": {}, "cache": {}, "needs": {}, "sizes": set()}
+
+
+def routine_counters():
+    """The eighth corpus's counters - one set for the six, one for the trig
+    part (parcel M2P) - a defaultdict, since it counts lanes by their class
+    and runs by the flags they raised."""
+    C = collections.defaultdict(int)
+    C["by_format"] = {}
+    C["capref"] = collections.Counter()
+    C["remote_names"] = collections.Counter()   # what the remote leg named
+    C["formats"] = []           # the formats the part ran at
+    C["fragments"] = set()      # (format, routine, attribute) it drew
+    C["absent"] = []            # the formats its routines are not built at
+    return C
 
 
 def routine_modules():
@@ -2621,6 +2667,170 @@ def routine_lanes(ml, har, fam, fmt, fn, rnd, n, sub):
     return [x for x, _t in pairs], [t for _x, t in pairs]
 
 
+# ---- the eighth corpus's second part: sin, cos and tan (parcel M2P) ----------
+#
+# Beside the six the routine corpus runs sin, cos and tan (mathlib.TRIG_NAMES):
+# the 45 fragments of parcel M2G2a at fp64, fp128 and fp256 under each
+# attribute, which until this part had run on seq.py alone. They go through
+# the same two shapes, lane counts and masks and the same comparisons
+# (routine_corpus, trig=True), from a stream of their own (TRIG_SALT, where the
+# six's is ROUTINE_SALT) so that the six's programs, lanes and masks are what
+# they were at every round count. fp32 has no sin, cos or tan until parcel M2F:
+# the summary says so by name, and it is not a SKIP (a by-design absence).
+#
+# The lanes are python/tests/mathlib_trig_harness.py's and
+# mathlib_trig_family.py's, the ones the fragments are held to there, in the
+# corpus's five categories:
+#
+#   special  routine_specials and the rows of the study's section 4
+#            (special_rows): NaNs, infinities, zeros, subnormals, the gates
+#            and, past the range, 2^R and the largest finite
+#   edge     sample() at "edge", "near" and "zero" - arguments within three
+#            ulps of the odd multiples of pi/4 and of the multiples of pi/2,
+#            where the reduction cancels deepest - and the range's end: the
+#            arguments at and past 2^R (fp128 and fp256), which the routine marks
+#   pool     radian_pools
+#   struct   "centre": the cell's committed marks (TRIG_POOL_MARKS, the
+#            radian pools' structured marks, and structured_lanes); "family":
+#            centres of TRIG_FAMILY (parcel M2G2b's: c 2^-e and the
+#            minimisers' neighbours), a sign each at random; "near": the
+#            neighbours of four of the family's centres; "struct": the
+#            study's tiny census. All but the census are lanes the routine
+#            marks or that sit at a window's edge
+#   random   sample() at "random" and "small", and raw bit patterns
+
+def trig_modules():
+    """(mathlib_trig_harness, mathlib_trig_family), imported on first use: the
+    lanes of parcel M2G2a and the committed families of parcel M2G2b. None
+    wherever routine_modules() is (mpmath or pytest absent: one SKIP line,
+    printed there)."""
+    if routine_modules() is None:
+        return None
+    if "tmods" not in _ROUTINE:
+        import mathlib_trig_family as tf  # noqa: E402
+        import mathlib_trig_harness as th  # noqa: E402
+        _ROUTINE["tmods"] = (th, tf)
+    return _ROUTINE["tmods"]
+
+
+def trig_specials(th, fmt):
+    """The special encodings of the six (routine_specials) and the rows of the
+    study's section 4 (special_rows), each lane once, in order."""
+    def make():
+        out = list(routine_specials(fmt))
+        for _label, _kind, lanes in th.special_rows(fmt):
+            out += lanes
+        return list(dict.fromkeys(out))
+    return _routine_cached(("tspecial", fmt.name), make)
+
+
+def trig_range_end(ml, th, fmt):
+    """The range's end: at fp128 and fp256 the arguments at and past 2^R (R =
+    TRIG_RANGE), which the routine marks whatever the test says - 2^R and its
+    successor, and two significands in each of a spread of binades up to the
+    largest finite, from a generator of the corpus's own, both signs. Each is
+    past_range(): a lane that is not is a defect of this list, and stops the
+    run. None at fp64, which has no range."""
+    R = ml.TRIG_RANGE[fmt.name]
+    if R is None:
+        return []
+    rng = random.Random(0x52414E47 ^ fmt.width)         # "RANG"
+    p, top = fmt.prec, ml._pow2(fmt, R)
+    out = [top, top + 1]
+    for e in sorted({R, R + 1, R + 9, 2 * R, 4 * R + 3,
+                     (R + fmt.emax) // 2, fmt.emax - 1, fmt.emax}):
+        for _ in range(2):
+            out.append(sf.round_pack(fmt, 0, rng.getrandbits(p - 1)
+                                     | (1 << (p - 1)), e - p + 1,
+                                     sf.RND_RNE)[0])
+    out += [x | fmt.sign_mask for x in out]
+    stray = [x for x in out if not th.past_range(fmt, x)]
+    if stray:
+        raise RuntimeError(f"the trig corpus's range end holds {len(stray)} "
+                           f"arguments that are not past 2^{R} at "
+                           f"{fmt.name}, first {stray[0]:#x}")
+    return out
+
+
+def trig_edge_pool(ml, th, fmt):
+    """The edge pool of sin, cos and tan: sample() at "edge", "near" and
+    "zero" (TRIG_EDGE_N arguments of each, seeds of the corpus's own) and the
+    range's end, each lane once."""
+    def make():
+        out = []
+        for mode, seed in TRIG_EDGE_SEEDS:
+            out += th.sample(fmt, mode, TRIG_EDGE_N, seed)
+        return list(dict.fromkeys(out + trig_range_end(ml, th, fmt)))
+    return _routine_cached(("tedge", fmt.name), make)
+
+
+def trig_struct(th, tf, fn, fmt, rnd):
+    """(marks, centres) of the cell (fn, fmt, rnd): the committed marks - the
+    radian pools' structured marks for the cell (TRIG_POOL_MARKS) and
+    structured_lanes, both signs - and the cell's TRIG_FAMILY centres as
+    expand() gives them, (c, e) and ("m", v, j), whose arguments are made when
+    one is drawn (a minimiser costs a search of its binade, seconds at fp256
+    for all of them)."""
+    def make():
+        marks = (sorted(th.pool_marks(fn, fmt.name, sf.RND_NAMES[rnd]))
+                 + th.structured_lanes(fn, fmt, rnd))
+        return (list(dict.fromkeys(marks)),
+                tf.expand(tf.TRIG_FAMILY[fn][fmt.name][sf.RND_NAMES[rnd]]))
+    return _routine_cached(("tstruct", fmt.name, fn, rnd), make)
+
+
+def trig_lanes(ml, th, tf, fmt, fn, rnd, n, sub):
+    """(xs, tags): n argument encodings for a program of fragment (fn, fmt,
+    rnd), sin, cos or tan, from the stream `sub`, and the source of each -
+    special, edge, pool, centre, family, near, struct (the census) or random
+    (the module's text): routine_quotas' lanes of each category, a category
+    short of lanes handing its remainder to the random one, the whole
+    shuffled. The struct category is up to half centres (the cell's committed
+    marks and its family's, up to half each) and the rest lanes beside them,
+    half from the neighbours of four family centres and half the census."""
+    q = dict(zip((c for c, _s in ROUTINE_SHARES), routine_quotas(n)))
+    pairs, short = [], 0
+    for cat, pool in (("special", trig_specials(th, fmt)),
+                      ("edge", trig_edge_pool(ml, th, fmt)),
+                      ("pool", list(th.radian_pools(fmt)))):
+        take = min(q[cat], len(pool))
+        pairs += [(x, cat) for x in sub.sample(pool, take)]
+        short += q[cat] - take
+    marks, cens = trig_struct(th, tf, fn, fmt, rnd)
+    if q["struct"]:
+        m = min(len(marks) + len(cens), max(1, q["struct"] // 2))
+        m_marks = min(len(marks), (m + 1) // 2)
+        m_fam = min(len(cens), m - m_marks)
+        pairs += [(x, "centre") for x in sub.sample(marks, m_marks)]
+        for c in sub.sample(cens, m_fam):
+            x = tf.argument(fmt, c)
+            pairs.append((x | fmt.sign_mask if sub.random() < 0.5 else x,
+                          "family"))
+        near = []
+        for c in sub.sample(cens, min(4, len(cens))):
+            near += [(x, "near") for x, _lab in tf.neighbours(fmt, fn, c)]
+        census = _routine_cached(("tcensus", fmt.name),
+                                 lambda: [(x, "struct")
+                                          for x in tf.census(fmt)])
+        rest = q["struct"] - m_marks - m_fam
+        k_near = min(len(near), (rest + 1) // 2)
+        others = (sub.sample(near, k_near)
+                  + sub.sample(census, min(len(census), rest - k_near)))
+        pairs += others
+        short += rest - len(others)
+    k = q["random"] + short
+    k_main, k_small = k // 2, k // 4
+    rand = []
+    if k_main:
+        rand += th.sample(fmt, "random", k_main, sub.getrandbits(30))
+    if k_small:
+        rand += th.sample(fmt, "small", k_small, sub.getrandbits(30))
+    rand += [sub.getrandbits(fmt.width) for _ in range(k - k_main - k_small)]
+    pairs += [(x, "random") for x in rand]
+    sub.shuffle(pairs)
+    return [x for x, _t in pairs], [t for _x, t in pairs]
+
+
 def run_in_c_routine(lib, dev, prog, bank, xs, keep=None, lf=False):
     """-> (deposit bytes, counts, flags, status, lane bytes or None), each
     read back RAW, through cft_program_run_ex with a BANK_EXT program's
@@ -2715,7 +2925,7 @@ def routine_needs(prog):
     return _ROUTINE["needs"][key][1]
 
 
-def routine_refuses(lib, dev, prog, mask, lf, MR):
+def routine_refuses(lib, dev, prog, mask, lf, MR, corpus="routine corpus"):
     """Under --device: True when a run of `prog` needs a bit the device does
     not publish (device_refuses holds that, by name, and counts it) or is past
     a capacity it does - the instruction count against max_insns, the highest
@@ -2724,7 +2934,9 @@ def routine_refuses(lib, dev, prog, mask, lf, MR):
     cft_caps.<field> (device.c's cft_seq_cap_refusal), counted in MR; a
     device that takes such a program, or refuses it otherwise, is a mismatch,
     printed. False, and nothing done, without --device, on any other handle,
-    and for a program the device can run."""
+    and for a program the device can run. `corpus` names the part for the
+    count and the mismatch (the trig part's is "routine corpus, trig"), and
+    `MR` is its counters."""
     if DEVICE is None or dev.value != DEVICE.handle:
         return False
     over = []
@@ -2736,8 +2948,7 @@ def routine_refuses(lib, dev, prog, mask, lf, MR):
     if DEVICE.max_deposits and prog.max_deposits > DEVICE.max_deposits:
         over.append(("max_deposits", prog.max_deposits, DEVICE.max_deposits))
     if not over:
-        return device_refuses(lib, dev, prog, "routine corpus", mask=mask,
-                              lf=lf)
+        return device_refuses(lib, dev, prog, corpus, mask=mask, lf=lf)
     absent = DEVICE.absent(_needs(prog, False, mask, lf))
     names = ([f"cft_caps.{f}" for f, _a, _c in over]
              + [T.CAPS_PLACE[f] for f in absent])
@@ -2753,7 +2964,7 @@ def routine_refuses(lib, dev, prog, mask, lf, MR):
         return True
     DEVICE.bad += 1
     if DEVICE.bad <= 5:
-        print(f"  MISMATCH {prog.fmt.name} (routine corpus, --device): a "
+        print(f"  MISMATCH {prog.fmt.name} ({corpus}, --device): a "
               f"program past "
               f"{', '.join(f'{f} ({a} against {c})' for f, a, c in over)} "
               f"gave rc {rc} at load: {msg!r} - wanted CFT_ERR_UNSUPPORTED "
@@ -2768,21 +2979,32 @@ def routine_rounds(args):
             else max(1, args.trials // 250))
 
 
-def routine_corpus(lib, dev, fmt, name, args, MR):
-    """The eighth corpus, for one format. Mutates the counters in MR."""
+def routine_corpus(lib, dev, fmt, name, args, MR, trig=False):
+    """The eighth corpus, for one format. Mutates the counters in MR. With
+    `trig` the corpus's second part (parcel M2P): sin, cos and tan, from a
+    stream of their own and lanes of their own, MR being that part's
+    counters; a format they are not built at (fp32 until parcel M2F) is
+    recorded by name in MR["absent"] and nothing is run."""
     mods = routine_modules()
     if mods is None:
         return
     ml, har, fam = mods
+    if trig:
+        if fmt not in ml.TRIG_FORMATS:
+            MR["absent"].append(name)
+            return
+        th, tf = trig_modules()
+    corpus = "routine corpus, trig" if trig else "routine corpus"
+    names = ml.TRIG_NAMES if trig else ml.NAMES
     MR["formats"].append(name)
     rounds = routine_rounds(args)
     rng = random.Random((args.seed * 2654435761 + fmt.width * 40503)
-                        & 0xFFFFFFFF ^ 0x4D4C4942)
+                        & 0xFFFFFFFF ^ (TRIG_SALT if trig else ROUTINE_SALT))
     esz = fmt.width // 8
     pat = bytes([ROUTINE_FILL[0]]) * esz
     checked = lanes_done = 0
     for _round in range(rounds):
-        for fn in ml.NAMES:
+        for fn in names:
             for rnd in sf.RND_MODES:
                 # a stream of its own per fragment, so that the lanes of one
                 # never depend on how many another drew
@@ -2794,8 +3016,12 @@ def routine_corpus(lib, dev, fmt, name, args, MR):
                     MR["drawn"] += 1
                     tag = f"{fn} {sf.RND_NAMES[rnd]} {shape}"
                     n = sub.choice(ROUTINE_NS)
-                    xs, tags = routine_lanes(ml, har, fam, fmt, fn, rnd, n,
-                                             sub)
+                    if trig:
+                        xs, tags = trig_lanes(ml, th, tf, fmt, fn, rnd, n,
+                                              sub)
+                    else:
+                        xs, tags = routine_lanes(ml, har, fam, fmt, fn, rnd,
+                                                 n, sub)
                     keep = None
                     if sub.random() < 1 / 3:
                         keep = [sub.random() < 0.7 for _ in range(n)]
@@ -2803,7 +3029,7 @@ def routine_corpus(lib, dev, fmt, name, args, MR):
                             keep[sub.randrange(n)] = True
                     lf = shape == "compiled" or sub.random() < 0.5
                     if routine_refuses(lib, dev, prog, keep is not None, lf,
-                                       MR):
+                                       MR, corpus):
                         continue
                     zeros = [0] * n
                     want = mrun(prog, xs, zeros, zeros, bank=bank,
@@ -2812,7 +3038,7 @@ def routine_corpus(lib, dev, fmt, name, args, MR):
                         dep, counts, fl, st, lb = run_in_c_routine(
                             lib, dev, prog, bank, xs, keep, lf)
                     except RuntimeError as exc:
-                        print(f"  MISMATCH {name} (routine corpus) {tag} "
+                        print(f"  MISMATCH {name} ({corpus}) {tag} "
                               f"n={n}: the model runs this fragment and "
                               f"libcft refuses it: {exc}")
                         MR["bad"] += 1
@@ -2905,7 +3131,7 @@ def routine_corpus(lib, dev, fmt, name, args, MR):
                     if diffs:
                         MR["bad"] += 1
                         if MR["bad"] <= 3:
-                            print(f"  MISMATCH {name} (routine corpus) {tag} "
+                            print(f"  MISMATCH {name} ({corpus}) {tag} "
                                   f"n={n} mask="
                                   f"{'no' if keep is None else 'yes'} "
                                   f"lane block={'yes' if lf else 'no'}: "
@@ -2916,6 +3142,14 @@ def routine_corpus(lib, dev, fmt, name, args, MR):
                     for i in owned:
                         MR["kind_" + sf.unpack(fmt, xs[i]).kind] += 1
                         MR["cat_" + tags[i]] += 1
+                        if trig and tags[i] in ("centre", "family", "near"):
+                            # the lanes of the committed marks and families,
+                            # by format and attribute (the entry's table)
+                            MR[f"{tags[i]} {name} {sf.RND_NAMES[rnd]}"] += 1
+                        if trig and tags[i] == "edge":
+                            # the range's end, drawn as an edge (not as a
+                            # special or a raw pattern, which also reach it)
+                            MR["range_end"] += th.past_range(fmt, xs[i])
                     checked += 1
                     lanes_done += compared
                     MR["total"] += 1
@@ -2930,8 +3164,8 @@ def routine_corpus(lib, dev, fmt, name, args, MR):
                     per = MR["by_format"].setdefault(name, [0, 0])
                     per[0] += 1
                     per[1] += compared
-    print(f"{name}: {checked} routine-corpus programs compared, "
-          f"{lanes_done} lanes")
+    print(f"{name}: {checked} routine-corpus{' (trig)' if trig else ''} "
+          f"programs compared, {lanes_done} lanes")
 
 
 def routine_caps(lib, dev):
@@ -2948,11 +3182,19 @@ def routine_caps(lib, dev):
             "the software backend's")
 
 
-def routine_limits(caps):
+def routine_rows(trig):
+    """The sizes of the programs this run built (routine_programs): the six's,
+    or with `trig` sin's, cos's and tan's, each (format, routine, attribute,
+    shape, instructions, bank words, highest register, deposits a lane)."""
+    names = routine_modules()[0].TRIG_NAMES
+    return sorted(r for r in _ROUTINE["sizes"] if (r[1] in names) == trig)
+
+
+def routine_limits(caps, trig=False):
     """One line: the routines' programs against libcft's own limits - the
     sizes read off the programs this run built, the limits off the library
-    through cft_get_caps."""
-    rows = sorted(_ROUTINE["sizes"])
+    through cft_get_caps. `trig` is the line of sin, cos and tan's."""
+    rows = routine_rows(trig)
     if not rows or caps is None:
         return
 
@@ -2964,7 +3206,8 @@ def routine_limits(caps):
     wlo, whi, wat = span(5)
     rlo, rhi, rat = span(6)
     dlo, dhi, _dat = span(7)
-    print(f"the routines' programs against {caps[3]} limits (cft_get_caps; "
+    print(f"the {'trig ' if trig else ''}routines' programs against "
+          f"{caps[3]} limits (cft_get_caps; "
           f"{len(rows)} programs): {ilo} to {ihi} instructions against "
           f"max_insns {caps[0]} (the most: {iat}), {wlo} to {whi} bank words "
           f"against max_consts {caps[1]} (the most: {wat}), registers r{rlo} "
@@ -2973,14 +3216,94 @@ def routine_limits(caps):
           f"of the {seq.MAX_QUIET_DEPTH} that nest")
 
 
-def routine_expected_refusals():
+def routine_summary(MC, what, trig=False):
+    """The summary line of one part of the eighth corpus: the programs run
+    through both, the lanes compared, by class and by source, the flags the
+    compiled runs raised and the lanes where the model is its own identity.
+    `what` names the part; `trig` gives the sources of sin, cos and tan's
+    lanes (trig_lanes) in the place of the six's."""
+    by = ", ".join(f"{k} {v[0]} programs and {v[1]} lanes"
+                   for k, v in MC["by_format"].items())
+    if trig:
+        src = (f"{MC['cat_special']} special, {MC['cat_edge']} edge (the "
+               f"reduction's worst arguments and the range's end), "
+               f"{MC['cat_pool']} radian pools, {MC['cat_centre']} committed "
+               f"marks, {MC['cat_family']} family centres, {MC['cat_near']} "
+               f"beside a family centre, {MC['cat_struct']} tiny census, "
+               f"{MC['cat_random']} random, the edge lanes at or past the "
+               f"range's end 2^R {MC['range_end']}")
+    else:
+        src = (f"{MC['cat_special']} special, {MC['cat_edge']} edge pool, "
+               f"{MC['cat_pool']} transcend pools, {MC['cat_centre']} "
+               f"committed centres or fp32 marks, {MC['cat_struct']} beside "
+               f"them, {MC['cat_random']} random")
+    return (f"{MC['total']} programs from {what} run through "
+            f"both, {MC['stand-alone']} stand-alone and {MC['compiled']} "
+            f"compiled ({by}), {MC['blocked']} across the block boundary: "
+            f"{MC['lanes']} lanes compared, {MC['mask_runs']} runs under a "
+            f"mask of which {MC['masked']} masked a lane "
+            f"({MC['masked_lanes']} lanes masked), {MC['lane_block']} runs "
+            f"with the per-lane block asked for ({MC['lane_bytes']} lane "
+            f"bytes compared), {MC['marked_lanes']} marked lanes in "
+            f"{MC['marked_runs']} compiled runs with STATUS[6] set and "
+            f"{MC['marked_words']} marked flag words in the stand-alone "
+            f"ones; lanes compared by class: {MC['kind_nan']} NaN, "
+            f"{MC['kind_inf']} infinite, {MC['kind_zero']} zero, "
+            f"{MC['kind_sub']} subnormal, {MC['kind_norm']} normal; and "
+            f"by source: {src}; compiled runs raising "
+            + ", ".join(f"{label} {MC['raised_' + label]}"
+                        for label, _b in ROUTINE_FLAGS)
+            + f"; {MC['ident']} lanes where seq.py's deposits are "
+            f"mathlib.evaluate's")
+
+
+def routine_needed(trig=False):
+    """One line: the cft_caps.seq_features bits the programs of one part need,
+    counted over the programs this run built (routine_needs, the loader's own
+    account of an image) - what the remote leg refuses by name where a word
+    lacks the bit. A run asking for the lane block needs LANE_FLAGS besides."""
+    names = routine_modules()[0].TRIG_NAMES
+    progs = [p for key, (_f, stand, comp) in _ROUTINE["progs"].items()
+             if (key[1] in names) == trig for p in (stand[0], comp[0])]
+    if not progs:
+        return
+    need = collections.Counter(x for p in progs for x in routine_needs(p))
+    print(f"the {'trig ' if trig else ''}routines' programs need "
+          f"({len(progs)} programs; cft_caps.seq_features, its CAPS place): "
+          + ", ".join(f"{x} ({T.CAPS_PLACE[x]}) {k}"
+                      for x, k in sorted(need.items()))
+          + f"; and LANE_FLAGS ({T.CAPS_PLACE['LANE_FLAGS']}) of a run that "
+            f"asks for the lane block")
+
+
+def trig_family_line(MT):
+    """One line: the lanes of sin, cos and tan compared that came from the
+    committed marks, TRIG_FAMILY's centres and the neighbours of four of them,
+    by format and attribute, in a round or the rounds run - the arguments the
+    structured families contribute (parcel M2G2b's lists)."""
+    parts = []
+    for name in MT["formats"]:
+        cells = []
+        for rnd in sf.RND_MODES:
+            r = sf.RND_NAMES[rnd]
+            cells.append(f"{r} " + "/".join(
+                str(MT[f"{tag} {name} {r}"])
+                for tag in ("centre", "family", "near")))
+        parts.append(f"{name}: " + ", ".join(cells))
+    return ("trig lanes from the committed marks / TRIG_FAMILY's centres / "
+            "beside four centres, by format and attribute: "
+            + "; ".join(parts))
+
+
+def routine_expected_refusals(trig=False):
     """The names the remote leg's refusals must have given, by the programs
-    this run built: every program needs BANK_PTR and WIDE_CONST (CAPS[6] and
-    CAPS[4]), a compiled one FLAG_CONTROL (CAPS2[14]), and a run asking for
-    the block LANE_FLAGS (CAPS2[13]); REGS32 (CAPS[5]) only where a program
-    writes past r15 (fp32's), and a capacity only where a program is past
-    the one the leg lowers."""
-    rows = _ROUTINE["sizes"]
+    this run built (the six's, or with `trig` sin's, cos's and tan's): every
+    program needs BANK_PTR and WIDE_CONST (CAPS[6] and CAPS[4]), a compiled
+    one FLAG_CONTROL (CAPS2[14]), and a run asking for the block LANE_FLAGS
+    (CAPS2[13]); REGS32 (CAPS[5]) only where a program writes past r15 (the
+    six's at fp32, the trig programs' at fp64 and fp128), and a capacity only
+    where a program is past the one the leg lowers."""
+    rows = routine_rows(trig)
     want = {"CAPS[4]", "CAPS[6]", "CAPS2[13]", "CAPS2[14]"}
     if any(r[6] > 15 for r in rows):
         want.add("CAPS[5]")
@@ -2991,7 +3314,7 @@ def routine_expected_refusals():
     return sorted(want)
 
 
-def routine_remote_refusals(lib, MR):
+def routine_remote_refusals(lib, MR, MT=None):
     """Every program of the corpus, loaded on a remote handle to a fake server
     whose HELLO publishes a revision-7 tile's word (0x7f1f: no R23, no R24),
     and the same word with one bit cleared, and a revision-8 tile's word at a
@@ -2999,11 +3322,16 @@ def routine_remote_refusals(lib, MR):
     the word lacks, and loaded where it does not. The client makes the check
     from the word alone and no load reaches the wire, which the server's record
     holds. A stand-alone program needs BANK_PTR (its bank) and WIDE_CONST (kx),
-    and REGS32 at fp32 alone, the other formats staying in r15; a compiled
-    program needs FLAG_CONTROL besides, and a run asking for the lane block
-    needs LANE_FLAGS: refused on the client, naming it, before any frame."""
+    and REGS32 at fp32 alone, the other formats staying in r15 - but for the
+    trig programs (parcel M2P), which write r25 at fp64 and r16 at fp128; a
+    compiled program needs FLAG_CONTROL besides, and a run asking for the lane
+    block needs LANE_FLAGS: refused on the client, naming it, before any
+    frame. The six's programs count in MR and the trig programs in MT (their
+    own counters, so that a trig program dropped from this leg is told from
+    the six's still being refused), the leg's own failures in MR."""
     if "mods" not in _ROUTINE or _ROUTINE["mods"] is None:
         return
+    trig_names = routine_modules()[0].TRIG_NAMES
     bits = T.FEATURE_BITS
     tile = 0x7F1F
     rev8 = tile | bits["LANE_FLAGS"] | bits["FLAG_CONTROL"]
@@ -3016,7 +3344,7 @@ def routine_remote_refusals(lib, MR):
              rev8, {"max_insns": ROUTINE_LEG_INSNS}),
             (f"a revision-8 tile's word at max_consts {ROUTINE_LEG_CONSTS}",
              rev8, {"max_consts": ROUTINE_LEG_CONSTS})]
-    first = None
+    first = {}              # the first stand-alone program of each part
     for what, word, caps in legs:
         srv = _FakeServer(word, **caps)
         dev = ctypes.c_void_p()
@@ -3029,10 +3357,11 @@ def routine_remote_refusals(lib, MR):
             continue
         try:
             for key, (_f, stand, comp) in _ROUTINE["progs"].items():
+                C = MT if MT is not None and key[1] in trig_names else MR
                 for shape, (prog, pbank) in zip(ROUTINE_SHAPES,
                                                 (stand, comp)):
-                    if first is None and shape == "stand-alone":
-                        first = (prog, pbank)
+                    if shape == "stand-alone":
+                        first.setdefault(C is MT, (prog, pbank))
                     absent = [x for x in routine_needs(prog)
                               if not word & bits[x]]
                     over = []
@@ -3059,43 +3388,47 @@ def routine_remote_refusals(lib, MR):
                                      if "QUIET" in msg
                                      and "CFT_SEQ_FEAT_FLAG_CONTROL" in msg]
                         if rc == CFT_ERR_UNSUPPORTED and named:
-                            MR["remote_refused"] += 1
-                            MR["remote_names"][named[0]] += 1
+                            C["remote_refused"] += 1
+                            C["remote_names"][named[0]] += 1
                         else:
                             print(f"  MISMATCH (routine remote leg): "
                                   f"{where} on {what} (0x{word:x}) gave rc "
                                   f"{rc} and {msg!r} - wanted "
                                   f"CFT_ERR_UNSUPPORTED naming "
                                   f"{' or '.join(names)}")
-                            MR["bad"] += 1
+                            C["bad"] += 1
                     elif rc != CFT_OK:
                         print(f"  MISMATCH (routine remote leg): {where} on "
                               f"{what} (0x{word:x}) was refused: rc {rc}, "
                               f"{msg!r}")
-                        MR["bad"] += 1
+                        C["bad"] += 1
                     else:
-                        MR["remote_loaded"] += 1
+                        C["remote_loaded"] += 1
             # the block, asked of a run on a server whose word lacks it - and
             # only where the program loads there: a word without BANK_PTR,
             # WIDE_CONST or REGS32 refuses it at load, which the loop above
             # holds, before a run could ask for anything
-            if (not word & bits["LANE_FLAGS"] and first is not None
-                    and all(word & bits[x] for x in routine_needs(first[0]))):
-                prog, pbank = first
+            for C, part in ((MR, False), (MT, True)):
+                if (C is None or word & bits["LANE_FLAGS"]
+                        or part not in first
+                        or not all(word & bits[x]
+                                   for x in routine_needs(first[part][0]))):
+                    continue
+                prog, pbank = first[part]
                 try:
                     run_in_c_routine(lib, dev, prog, pbank, [0, 0], None, True)
                     print(f"  MISMATCH (routine remote leg): a run asking "
                           f"for the per-lane flags ran on {what}")
-                    MR["bad"] += 1
+                    C["bad"] += 1
                 except RuntimeError as exc:
                     if "CFT_SEQ_FEAT_LANE_FLAGS" in str(exc):
-                        MR["remote_refused"] += 1
-                        MR["remote_names"][T.CAPS_PLACE["LANE_FLAGS"]] += 1
+                        C["remote_refused"] += 1
+                        C["remote_names"][T.CAPS_PLACE["LANE_FLAGS"]] += 1
                     else:
                         print(f"  MISMATCH (routine remote leg): the block "
                               f"was refused without its name on {what}: "
                               f"{exc}")
-                        MR["bad"] += 1
+                        C["bad"] += 1
         finally:
             lib.cft_close(dev)
             srv.close()
@@ -3105,10 +3438,16 @@ def routine_remote_refusals(lib, MR):
                   f"{[hex(o) for o in srv.other_ops]}")
             MR["bad"] += 1
         MR["legs_run"] += 1
-    by = ", ".join(f"{k} {v}" for k, v in sorted(MR["remote_names"].items()))
-    print(f"routine-corpus remote leg: {MR['remote_refused']} refused by "
-          f"name on servers without a bit or a capacity the program needs "
-          f"({by}), {MR['remote_loaded']} loaded where published")
+        if MT is not None:
+            MT["legs_run"] += 1
+    for C, what in ((MR, "routine-corpus"), (MT, "trig routine-corpus")):
+        if C is None or (C is MT and not C["formats"]):
+            continue
+        by = ", ".join(f"{k} {v}"
+                       for k, v in sorted(C["remote_names"].items()))
+        print(f"{what} remote leg: {C['remote_refused']} refused by "
+              f"name on servers without a bit or a capacity the program needs "
+              f"({by}), {C['remote_loaded']} loaded where published")
 
 
 def main():
@@ -3118,11 +3457,11 @@ def main():
     ap.add_argument("--trials", type=int, default=400)
     ap.add_argument("--seed", type=int, default=17)
     ap.add_argument("--math-rounds", type=int, default=None, metavar="N",
-                    help="rounds of the eighth corpus - M1's routines, every "
-                         "fragment of the formats in both shapes a round, "
-                         "from fresh lanes - where the default is one for "
-                         "each 250 --trials and at least one (the module's "
-                         "text)")
+                    help="rounds of the eighth corpus - M1's routines and "
+                         "sin, cos and tan, every fragment of the formats in "
+                         "both shapes a round, from fresh lanes - where the "
+                         "default is one for each 250 --trials and at least "
+                         "one (the module's text)")
     ap.add_argument("--device", metavar="ARTIFACT",
                     help="run the corpora through this device's handle - "
                          "an xclbin, cft://host:port, sw, or sw:N (the "
@@ -3200,13 +3539,12 @@ def main():
              lanes=0, strict=0, range=0, overflow=0, remote_refused=0,
              remote_loaded=0)
     # ...and the eighth's (M1's routines, parcel MP): a defaultdict, since it
-    # counts lanes by their class and runs by the flags they raised
-    MR = collections.defaultdict(int)
-    MR["by_format"] = {}
-    MR["capref"] = collections.Counter()
-    MR["remote_names"] = collections.Counter()  # what the remote leg named
-    MR["formats"] = []          # the formats the corpus ran at
-    MR["fragments"] = set()     # (format, routine, attribute) it drew
+    # counts lanes by their class and runs by the flags they raised; and its
+    # second part's (sin, cos and tan, parcel M2P), kept apart so that a form
+    # it fails to reach is named as the trig part's and not hidden in the
+    # six's totals
+    MR = routine_counters()
+    MT = routine_counters()
     if args.math_rounds is not None and args.math_rounds < 1:
         ap.error("--math-rounds takes at least 1")
     try:
@@ -3326,12 +3664,13 @@ def main():
             rev8_corpus(lib, dev, fmt, name, args, R)
             flags_corpus(lib, dev, fmt, name, args, F)
             routine_corpus(lib, dev, fmt, name, args, MR)
-        MR["caps"] = routine_caps(lib, dev)     # before the handle closes
+            routine_corpus(lib, dev, fmt, name, args, MT, trig=True)
+        MR["caps"] = MT["caps"] = routine_caps(lib, dev)  # before it closes
     finally:
         lib.cft_close(dev)
     rev8_remote_refusals(lib, R)
     flags_remote_refusals(lib, F)
-    routine_remote_refusals(lib, MR)
+    routine_remote_refusals(lib, MR, MT)
     ceiling_bad = deposit_ceiling_remote(lib)
 
     print(f"\n{total} programs run through both implementations, "
@@ -3382,33 +3721,25 @@ def main():
           f"reported, {F['overflow']} with a deposit overflow; "
           f"{F['directed']} directed refusals refused by both")
     if MR["total"]:
-        by = ", ".join(f"{k} {v[0]} programs and {v[1]} lanes"
-                       for k, v in MR["by_format"].items())
-        print(f"{MR['total']} programs from the routine corpus run through "
-              f"both, {MR['stand-alone']} stand-alone and {MR['compiled']} "
-              f"compiled ({by}), {MR['blocked']} across the block boundary: "
-              f"{MR['lanes']} lanes compared, {MR['mask_runs']} runs under a "
-              f"mask of which {MR['masked']} masked a lane "
-              f"({MR['masked_lanes']} lanes masked), {MR['lane_block']} runs "
-              f"with the per-lane block asked for ({MR['lane_bytes']} lane "
-              f"bytes compared), {MR['marked_lanes']} marked lanes in "
-              f"{MR['marked_runs']} compiled runs with STATUS[6] set and "
-              f"{MR['marked_words']} marked flag words in the stand-alone "
-              f"ones; lanes compared by class: {MR['kind_nan']} NaN, "
-              f"{MR['kind_inf']} infinite, {MR['kind_zero']} zero, "
-              f"{MR['kind_sub']} subnormal, {MR['kind_norm']} normal; and "
-              f"by source: {MR['cat_special']} special, {MR['cat_edge']} "
-              f"edge pool, {MR['cat_pool']} transcend pools, "
-              f"{MR['cat_centre']} committed centres or fp32 marks, "
-              f"{MR['cat_struct']} beside them, {MR['cat_random']} random; "
-              f"compiled runs raising "
-              + ", ".join(f"{label} {MR['raised_' + label]}"
-                          for label, _b in ROUTINE_FLAGS)
-              + f"; {MR['ident']} lanes where seq.py's deposits are "
-              f"mathlib.evaluate's")
+        print(routine_summary(MR, "the routine corpus"))
         routine_limits(MR["caps"])
+        routine_needed()
+    if MT["total"]:
+        # sin, cos and tan (parcel M2P), beside the six; fp32 is named, not
+        # skipped: a by-design absence until parcel M2F builds them
+        print(routine_summary(MT, "the routine corpus's trig part (sin, cos "
+                                  "and tan)", trig=True)
+              + ("" if not MT["absent"] else
+                 f"; {', '.join(MT['absent'])}: sin, cos and tan not built "
+                 f"(parcel M2F's)"))
+        routine_limits(MT["caps"], trig=True)
+        routine_needed(trig=True)
+        print(trig_family_line(MT))
+    elif MT["absent"]:
+        print(f"{', '.join(MT['absent'])}: sin, cos and tan not built "
+              f"(parcel M2F's)")
     bad += (S["bad"] + X["bad"] + M["bad"] + R["bad"] + ceiling_bad
-            + F["bad"] + MR["bad"])
+            + F["bad"] + MR["bad"] + MT["bad"])
     if DEVICE is not None:
         # --device: what the device refused by name, corpus by corpus
         by = collections.defaultdict(list)
@@ -3419,14 +3750,16 @@ def main():
                   f"COMPARED - each needs a bit the device does not "
                   f"publish, and each was refused by name "
                   f"(CFT_ERR_UNSUPPORTED naming {', '.join(parts)})")
-        if MR["capref"]:
-            refs = ", ".join(f"{k} {v}"
-                             for k, v in sorted(MR["capref"].items()))
-            print(f"routine corpus: {sum(MR['capref'].values())} programs "
-                  f"NOT COMPARED - each is past a capacity the device "
-                  f"publishes, and each was refused by name "
-                  f"(CFT_ERR_UNSUPPORTED naming {refs})")
-        if not by and not MR["capref"]:
+        for MC, what in ((MR, "routine corpus"),
+                         (MT, "routine corpus, trig")):
+            if MC["capref"]:
+                refs = ", ".join(f"{k} {v}"
+                                 for k, v in sorted(MC["capref"].items()))
+                print(f"{what}: {sum(MC['capref'].values())} programs "
+                      f"NOT COMPARED - each is past a capacity the device "
+                      f"publishes, and each was refused by name "
+                      f"(CFT_ERR_UNSUPPORTED naming {refs})")
+        if not by and not MR["capref"] and not MT["capref"]:
             print("the device refused no program for a bit it lacks: every "
                   "program was compared")
         bad += DEVICE.bad
@@ -3444,66 +3777,82 @@ def main():
         return n_held > 0
 
     routine_held = sum(MR["capref"].values())
+    trig_held = sum(MT["capref"].values())
     routine_ran = routine_modules() is not None
-    if routine_ran:
+    for MC, part, what, trig in (
+            (MR, "THE ROUTINE CORPUS", "routine corpus", False),
+            (MT, "THE ROUTINE CORPUS'S TRIG PART",
+             "routine corpus, trig", True)):
+        said = "routine corpus's trig part" if trig else what
+        if not routine_ran or (trig and not MC["formats"]):
+            continue
+        held_here = sum(MC["capref"].values())
         # the drawn programs against the corpus's own arithmetic: every
         # routine at every attribute in both shapes, a round at a time, at
         # every format that was run - so a loop that drops a fragment, a
         # shape or a round is counted short here, whatever else it compares
-        frags = len(routine_modules()[0].NAMES) * len(sf.RND_MODES)
+        mlib = routine_modules()[0]
+        frags = len(mlib.TRIG_NAMES if trig else mlib.NAMES)             * len(sf.RND_MODES)
         per_format = frags * len(ROUTINE_SHAPES)
         rounds = routine_rounds(args)
-        want_drawn = rounds * per_format * len(MR["formats"])
-        short = [] if MR["drawn"] == want_drawn else [
-            f"{MR['drawn']} programs were drawn where {rounds} round"
+        want_drawn = rounds * per_format * len(MC["formats"])
+        short = [] if MC["drawn"] == want_drawn else [
+            f"{MC['drawn']} programs were drawn where {rounds} round"
             f"{'s' if rounds != 1 else ''} of {per_format} programs at each "
-            f"of {len(MR['formats'])} formats is {want_drawn}"]
-        for k in MR["formats"]:
-            have = len({f for f in MR["fragments"] if f[0] == k})
+            f"of {len(MC['formats'])} formats is {want_drawn}"]
+        for k in MC["formats"]:
+            have = len({f for f in MC["fragments"] if f[0] == k})
             if have != frags:
                 short.append(f"{k} ran {have} of {frags} fragments")
         if short:
-            print("THE ROUTINE CORPUS DID NOT RUN EVERY FRAGMENT - "
+            print(f"{part} DID NOT RUN EVERY FRAGMENT - "
                   + "; ".join(short))
             return 1
         # the remote leg: every one of its servers, and every name the
         # programs here can be refused by, given at least once
         gaps = []
-        if MR["legs_run"] != ROUTINE_LEGS:
-            gaps.append(f"the remote leg ran {MR['legs_run']} of its "
+        if MC["legs_run"] != ROUTINE_LEGS:
+            gaps.append(f"the remote leg ran {MC['legs_run']} of its "
                         f"{ROUTINE_LEGS} servers")
-        unnamed = [nm for nm in routine_expected_refusals()
-                   if not MR["remote_names"][nm]]
+        unnamed = [nm for nm in routine_expected_refusals(trig)
+                   if not MC["remote_names"][nm]]
         if unnamed:
             gaps.append(f"the remote leg never refused by name: "
                         f"{', '.join(unnamed)}")
         if gaps:
-            print("THE ROUTINE CORPUS DID NOT REACH EVERY FORM - "
+            print(f"{part} DID NOT REACH EVERY FORM - "
                   + "; ".join(gaps))
             return 1
-    if routine_ran and (MR["total"] or routine_held):
-        zero = [k for k in (
-            "blocked", "masked", "lane_bytes", "marked_lanes", "marked_runs",
-            "marked_words", "kind_nan", "kind_inf", "kind_zero", "kind_sub",
-            "kind_norm", "raised_invalid", "raised_divideByZero",
-            "raised_overflow", "raised_underflow", "raised_inexact", "ident",
-            "remote_refused", "remote_loaded",
-            "cat_special", "cat_edge", "cat_pool", "cat_centre", "cat_struct",
-            "cat_random") if not MR[k]]
-        held = (DEVICE.refused_in("routine corpus") if DEVICE is not None
-                else 0) + routine_held
-        if zero and held:
-            print(f"NOTE (--device): the routine corpus did not reach every "
-                  f"form among the programs the device ran ({', '.join(zero)}"
-                  f" counted nothing); {held} of its programs were refused "
-                  f"by name instead (above)")
-        elif zero:
-            print(f"THE ROUTINE CORPUS DID NOT REACH EVERY FORM - "
-                  f"{', '.join(zero)} counted nothing, so a block boundary, "
-                  f"a mask, the lane block, a mark, a class or a source of "
-                  f"lane, a flag, the model's identity or a remote refusal "
-                  f"went uncompared")
-            return 1
+        if MC["total"] or held_here:
+            # sin, cos and tan raise no divideByZero and no overflow
+            # (TRIG_NEVER_RAISED): counted in the summary, not required
+            flags = [f"raised_{label}" for label, _b in ROUTINE_FLAGS
+                     if not (trig and label in TRIG_NEVER_RAISED)]
+            sources = (["cat_" + t for t in TRIG_SOURCES] if trig else
+                       ["cat_special", "cat_edge", "cat_pool", "cat_centre",
+                        "cat_struct", "cat_random"])
+            if trig and any(mlib.TRIG_RANGE[k] for k in MC["formats"]):
+                sources.append("range_end")     # fp128 and fp256 have a range
+            zero = [k for k in (
+                ["blocked", "masked", "lane_bytes", "marked_lanes",
+                 "marked_runs", "marked_words", "kind_nan", "kind_inf",
+                 "kind_zero", "kind_sub", "kind_norm"] + flags
+                + ["ident", "remote_refused", "remote_loaded"] + sources)
+                if not MC[k]]
+            held = (DEVICE.refused_in(what) if DEVICE is not None
+                    else 0) + held_here
+            if zero and held:
+                print(f"NOTE (--device): the {said} did not reach every "
+                      f"form among the programs the device ran "
+                      f"({', '.join(zero)} counted nothing); {held} of its "
+                      f"programs were refused by name instead (above)")
+            elif zero:
+                print(f"{part} DID NOT REACH EVERY FORM - "
+                      f"{', '.join(zero)} counted nothing, so a block "
+                      f"boundary, a mask, the lane block, a mark, a class or "
+                      f"a source of lane, a flag, the model's identity or a "
+                      f"remote refusal went uncompared")
+                return 1
 
     if F["total"] and not all(F[k] for k in (
             "refused", "blocked", "directed", "quiet", "nested",
@@ -3560,6 +3909,9 @@ def main():
                    ("flag-control corpus", F["total"])]
         if routine_ran:
             corpora.append(("routine corpus", MR["total"] + routine_held))
+            if MT["formats"]:
+                corpora.append(("routine corpus, trig",
+                                MT["total"] + trig_held))
         for corpus, compared in corpora:
             if total and not compared and not DEVICE.refused_in(corpus):
                 print(f"THE {corpus.upper()} COMPARED NOTHING AND THE DEVICE "
