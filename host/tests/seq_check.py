@@ -3047,9 +3047,14 @@ def routine_corpus(lib, dev, fmt, name, args, MR, trig=False):
                              if keep is None or keep[i]]
                     md = prog.max_deposits
                     diffs = []
+                    # the run's accounting: every comparison below tallies
+                    # itself in n_cmp, and a run that made fewer than it owes
+                    # (a statement gone, a loop cut short) is a difference
+                    n_cmp = 1
                     if fl != want.flags:
                         diffs.append(f"FLAGS model 0x{want.flags:02x} "
                                      f"libcft 0x{fl:02x}")
+                    n_cmp += 1
                     if st != want.status:
                         diffs.append(f"STATUS model 0x{want.status:02x} "
                                      f"libcft 0x{st:02x}")
@@ -3075,11 +3080,13 @@ def routine_corpus(lib, dev, fmt, name, args, MR, trig=False):
                                              f"the mask cleared")
                             continue
                         compared += 1
+                        n_cmp += 1
                         if counts[i] != want.counts[i]:
                             diffs.append(f"count[lane {i}] model "
                                          f"{want.counts[i]} libcft "
                                          f"{counts[i]}")
                         for s in range(md):
+                            n_cmp += 1
                             j = i * md + s
                             g = int.from_bytes(dep[j * esz:(j + 1) * esz],
                                                "little")
@@ -3091,6 +3098,7 @@ def routine_corpus(lib, dev, fmt, name, args, MR, trig=False):
                                 break
                         if lb is not None:
                             lane_bytes += 1
+                            n_cmp += 1
                             if lb[i] != want.lane_flags[i]:
                                 diffs.append(
                                     f"lane byte[{i}] (x = 0x{xs[i]:x}) "
@@ -3099,6 +3107,18 @@ def routine_corpus(lib, dev, fmt, name, args, MR, trig=False):
                     if compared != len(owned):
                         diffs.append(f"compared {compared} of the "
                                      f"{len(owned)} lanes the run owns")
+                    # FLAGS and STATUS, and for each lane compared its count,
+                    # each deposit and, with the block, its byte (the mark in
+                    # bit 7 among them); a difference already found stops the
+                    # deposits at the first, so the tally is held only then
+                    owed = 2 + compared * (1 + md + (lb is not None))
+                    if not diffs and n_cmp != owed:
+                        diffs.append(f"{n_cmp} comparisons made where the "
+                                     f"run owes {owed}: FLAGS, STATUS and, "
+                                     f"for each of {compared} lanes, the "
+                                     f"count, {md} deposit"
+                                     f"{'s' if md != 1 else ''}"
+                                     f"{' and the lane byte' if lb is not None else ''}")
                     if shape == "stand-alone":
                         # the model's own identity: routines.run's outputs
                         # (the deposits seq.py made) are mathlib.evaluate's,
