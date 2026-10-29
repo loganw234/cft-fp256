@@ -20,9 +20,13 @@ Its truth is the oracle's, from the spec alone (the format and group of every it
 reducer's data, the report's and the page's are held to it: each row's format and group, each class's totals by group, a night's state by group (written only once a
 class has a wide row, so the nights before it are the nights they were), the base group's figures unmoved by the wide group joining, the page's card, item list and
 chart in node (the older group's line point for point as it was), every format passing the guard against a path-shaped string, and, over a data file WITHOUT the new
-fields, the page drawing the very tree that 3ec0081c's page drew (a digest of the whole tree under the page's #app element in the stub DOM - every node's tag,
-attributes, style, hidden flag, class and text - from running that page through this harness; the #status element, hidden when a file draws, is not in it,
-so a change to it alone is not seen by the digest).
+fields, the page drawing a pinned tree (a digest of the whole tree under the page's #app element in the stub DOM - every node's tag, attributes, style, hidden
+flag, class and text; the #status element, hidden when a file draws, is not in it, so a change to it alone is not seen by the digest). Until parcel PD that tree
+was the one 3ec0081c's page drew; since the redesign (2026-10-29) it is the redesigned page's, moved on purpose (LEGACY_DOM and NIGHT7_DOM say how).
+
+THE GLANCE (parcel PD, 2026-10-29). The page leads with a glance - the newest night's health, how far each current class has come by group, the card's rates - and
+folds every other section. group_glance holds, over every data file the tests hold and five made from them, what the glance and the folds' summaries SAY to the
+file itself: glance_of computes each line, row and count from the file's fields alone, and the page in node must show exactly that.
 
 The last line is "progress test: N checks, F failed, K skipped"; the exit status is 0 only if F is 0.
 """
@@ -33,6 +37,7 @@ import calendar
 import datetime
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -53,20 +58,26 @@ PAGE, DATA = os.path.join(ROOT, "site", "nightly.html"), os.path.join(ROOT, "sit
 FIXTURE = os.path.join(HW, "card_stress_fixtures", "progress-synthetic.jsonl")
 FIXTURE_WIDE = os.path.join(HW, "card_stress_fixtures", "progress-synthetic-wide.jsonl")
 NIGHT7 = os.path.join(HW, "card_stress_fixtures", "nightly-night7.json")
-# What the page of 3ec0081c drew over a data file of the shape its reducer made (the run without wide items, the new fields taken off), as the digest of
-# the whole tree it builds under #app in the stub DOM (#status, hidden when a file draws, is not in the digest), with the clock at LEGACY_CLOCK (the
-# page says how long ago the newest night ended). Made once by running that
-# page (git show 3ec0081c:site/nightly.html) through this very harness; the page now must draw the same tree over such a file.
+# The two rendering pins: the digest of the whole tree the page builds under #app in the stub DOM (#status, hidden when a file draws, is not in the digest),
+# over a data file of an older shape, with the clock fixed (the page says how long ago the newest night ended).
+# LEGACY_DOM: over the run without wide items as 3ec0081c's reducer made it (the new fields taken off: `legacy`), with the clock at LEGACY_CLOCK.
+# NIGHT7_DOM: over the file the nightly page was committed with at 3ec0081c (night 7, the data file's sha256 below), with the clock at NIGHT7_CLOCK. NIGHT7 is
+# a copy of that file (git show bac43dba:site/nightly.json, night 7's data commit, the blob 3ec0081c still had), so the check does not depend on the committed
+# file, which each morning's data commit replaces.
+# MOVED ON PURPOSE by parcel PD (2026-10-29), the page's redesign: a glance at the top and every other section folded, so no file draws the tree it drew
+# before. Until then both digests were of the tree the page of 3ec0081c drew (LEGACY_DOM c8aa1396ddcc7be0457d479cb6de09be623ad34752cad269f96c5c570636e2e4,
+# NIGHT7_DOM 0884be6ecce7fb52f062a5983a51afa2e1850131790567bb1dada4869fea69b8, each made by running that page through this harness), and they held that a
+# file without the new fields draws exactly as before. They are now the tree of the redesigned page (PD's commit, the same two files and clocks, made the
+# same way), so they hold that the page draws such a file as it did on 2026-10-29; and beside them `group_glance` holds what such a file's glance SAYS to the
+# file itself, figure by figure, computed here from the file and not from the page.
 LEGACY_CLOCK = 1792650000000
-LEGACY_DOM = "c8aa1396ddcc7be0457d479cb6de09be623ad34752cad269f96c5c570636e2e4"
-# The same, for the file the nightly page was committed with at 3ec0081c (night 7, the data file's sha256 below): the digest of the tree that page drew
-# over it with the clock at NIGHT7_CLOCK, from running that page through this harness. NIGHT7 is a copy of that file (git show bac43dba:site/nightly.json,
-# night 7's data commit, the blob 3ec0081c still had), so the check does not depend on the committed file, which each morning's data commit replaces.
+LEGACY_DOM = "1748979136e0d2aecc0a6fe98f99db79af92dc413b0189351281b31aecc312a2"
 NIGHT7_SHA256 = "72960b0c33ce267b0627e7feec3b74483875fff1e7977f1f597e5ca17971d650"
 NIGHT7_CLOCK = 1793200000000
-NIGHT7_DOM = "0884be6ecce7fb52f062a5983a51afa2e1850131790567bb1dada4869fea69b8"
+NIGHT7_DOM = "2e791f98df44c000eb2c5bc9954a0634142ae991e8724993f802fad9311a5064"
 st = {"n": 0, "f": 0, "skips": 0}
 DERIVED = []
+GLANCE = {}                    # parcel PD: the data files the groups make, by name, which group_glance draws and holds to themselves
 _SUMMARIZE, _TREE_CLASS = R.summarize, R.tree_class
 
 
@@ -505,16 +516,35 @@ function chart(n, out) {
   (n.kids || []).forEach(k => chart(k, out));
   return out;
 }
-// the rates section (parcel TP): its heading, the image headings, each table's header cells and each row's cells (text, title, data-label), and its text
+// the rates (parcel TP; since parcel PD the glance's block "How fast", a div): its heading, the image headings, each table's header cells and each row's
+// cells (text, title, data-label), and its text
 function find(n, pred, out) { if (pred(n)) out.push(n); (n.kids || []).forEach(k => find(k, pred, out)); return out; }
 function ratesDump(app) {
-  const sec = find(app, n => n.tag === "section" && n.attrs.id === "rates", [])[0];
+  const sec = find(app, n => !!n.attrs && n.attrs.id === "rates", [])[0];
   if (!sec) return null;
   const cells = r => r.kids.map(c => ({ text: c.textContent, title: c.attrs.title || "", label: c.attrs["data-label"] || "", cls: c.attrs["class"] || "" }));
   return { h2: find(sec, n => n.tag === "h2", []).map(x => x.textContent), h3: find(sec, n => n.tag === "h3", []).map(x => x.textContent),
            tables: find(sec, n => n.tag === "table", []).map(t => ({ head: find(t, n => n.tag === "th", []).map(c => c.textContent),
              rows: find(t, n => n.tag === "tr", []).filter(r => r.kids.some(k => k.tag === "td")).map(cells) })),
            paras: find(sec, n => n.tag === "p", []).map(x => x.textContent) };
+}
+// the glance (parcel PD): the health line and the disagreement list, each current class's line with its rows (what, share, count, finish), the probe's
+// sentence, the id of #app's first node, and the folds below the glance (#app's <details>: id, open or not, summary), every text with its runs of white
+// space made one (this stub joins a node's children with a space, where a browser joins them with nothing)
+function hasCls(n, c) { return !!n.attrs && (" " + (n.attrs["class"] || "") + " ").indexOf(" " + c + " ") >= 0; }
+function norm(s) { return s.replace(/\s+/g, " ").trim(); }
+function glanceDump(app) {
+  const g = find(app, n => !!n.attrs && n.attrs.id === "glance", [])[0];
+  if (!g) return null;
+  const one = (root, c) => { const x = find(root, n => hasCls(n, c), [])[0]; return x ? norm(x.textContent) : null; };
+  const far = find(g, n => hasCls(n, "far"), [])[0], classes = [];
+  (far ? far.kids : []).forEach(k => {
+    if (hasCls(k, "fclass")) classes.push({ head: norm(k.textContent), rows: [] });
+    else if (hasCls(k, "frow") && classes.length) classes[classes.length - 1].rows.push({ what: one(k, "fwhat"), pct: one(k, "fpct"), count: one(k, "fcount"), fin: one(k, "ffin") });
+  });
+  return { health: one(g, "health"), dislist: one(g, "dislist"), far: classes, probe: one(g, "probe"), first: app.kids.length && app.kids[0].attrs ? app.kids[0].attrs.id || "" : null,
+           folds: app.kids.filter(k => k.tag === "details").map(k => ({ id: k.attrs.id || "", open: "open" in k.attrs,
+             summary: norm((k.kids.filter(x => x.tag === "summary")[0] || { textContent: "" }).textContent) })) };
 }
 class FDate extends Date { constructor(...a) { if (a.length) super(...a); else super(Number(clock)); } static now() { return Number(clock); } }
 const els = { status: new N("div"), app: new N("div") };
@@ -525,7 +555,7 @@ const fetch = () => mode === "reject" ? Promise.reject(new TypeError("Failed to 
   Promise.resolve(mode === "404" ? resp(false, 404, "") : resp(true, 200, fs.readFileSync(dataPath, "utf8")));
 vm.runInNewContext(m[1], { document, window: { addEventListener() {} }, fetch, Date: clock ? FDate : Date, setTimeout, clearTimeout, console });
 setTimeout(() => console.log(JSON.stringify({ status: { hidden: els.status.hidden, text: els.status.textContent },
-  app: { hidden: els.app.hidden, text: els.app.textContent }, chart: chart(els.app, []), rates: ratesDump(els.app),
+  app: { hidden: els.app.hidden, text: els.app.textContent }, chart: chart(els.app, []), rates: ratesDump(els.app), glance: glanceDump(els.app),
   dom: require("crypto").createHash("sha256").update(JSON.stringify(els.app.dump())).digest("hex") })), 300);
 '''
 
@@ -693,6 +723,7 @@ def group_fixture():
     check("taken from the given rev" in next(c["label"] for c in pd["now"]["classes"] if c["id"] == "t1"), "fixture: and its label says where the tree came from")
     eq(sum("derived_from_git" in c for c in out["now"]["classes"]), 0, "fixture: with the record-only view the data file has no such field")
     DERIVED.append(pd)
+    GLANCE["three nights"] = out
     two = reduce_dir(write_run(build(SPEC[:2]), "two"))
     eq(two["nights"], out["nights"][:2], "fixture: the reduction of the first two nights is the first two nights of the reduction (nights only append)")
     return recs, out, d, text
@@ -729,6 +760,7 @@ def group_base4():
     out = reduce_dir(d, "e5" * 20)
     against_oracle(out, BSPEC, recs)
     against_report(out, d, "four nights without wide items")
+    GLANCE["four nights without wide items"] = out
     return out, d
 
 
@@ -788,6 +820,7 @@ def group_wide_fixture(base, base_dir):
     eq(gw["base"], rb["total"]["by_group"][0], "wide fixture: and the report's base group, with wide items in the run, is the one it gave the run without them (every field, each image's figure too)")
     eq(sorted(gw), ["base", "wide"], "wide fixture: and the report's class has the two groups")
     eq(P.dump(reduce_dir(d, "e5" * 20)), P.dump(out), "wide fixture: the same run reduces to the same bytes")
+    GLANCE["wide items"] = out
     return recs, out, d
 
 
@@ -815,7 +848,8 @@ def group_format_guard(wide_dir):
 def group_wide_page(base, wide, golden):
     """The page over the wide run, in node: the base block of the headline as it reads without wide items, the wide group beside it and listed as its
     own group, a format on every item row, and the chart with a line a class and group - the older group's lines unmoved. Over a data file without
-    the new fields the page draws exactly what the page of 3ec0081c drew (`golden`: the digest of its tree)."""
+    the new fields the page draws the pinned tree (`golden`: its digest; 3ec0081c's page's until parcel PD, the redesigned page's since). Since parcel PD
+    the headline's cards are the glance's rows: a row a group for a class with wide-format items, one row for the class otherwise."""
     if not NODE:
         return skip("the page with wide items in node", "node is not on PATH")
     bj, wj, lj = (os.path.join(TMP, x) for x in ("pg-base.json", "pg-wide.json", "pg-legacy.json"))
@@ -824,17 +858,27 @@ def group_wide_page(base, wide, golden):
             json.dump(j, fh)
     rb, rw, rl = page("ok", bj), page("ok", wj), page("ok", lj, clock=golden["clock"])
     check(all(r.get("status", {}).get("hidden") is True and r.get("app", {}).get("hidden") is False for r in (rb, rw, rl)), "wide page: the run without wide items, the run with them and the legacy file are each shown", [r.get("error") for r in (rb, rw, rl)])
-    eq(rl.get("dom"), golden["digest"], "wide page: over a data file without the new fields (the run without wide items as 3ec0081c's reducer made it) the tree the page draws is the page of 3ec0081c's, node for node")
+    eq(rl.get("dom"), golden["digest"], "wide page: over a data file without the new fields (the run without wide items as 3ec0081c's reducer made it) the tree the page draws is the one pinned for this design (parcel PD, 2026-10-29), node for node")
     tb, tw = rb["app"]["text"], rw["app"]["text"]
     t2 = next(c for c in wide["now"]["classes"] if c["id"] == "t2")
     t2b = next(c for c in base["now"]["classes"] if c["id"] == "t2")
     bg, wg = (next(g for g in t2["groups"] if g["group"] == x) for x in ("base", "wide"))
+    # until parcel PD these held the headline's cards; the share and the count are the glance's rows now, and the covered of the space the item list's head
+    def glance_rows(r_, label):
+        return next((c_["rows"] for c_ in ((r_.get("glance") or {}).get("far") or []) if label in c_["head"]), None) or []
+    gb_rows, gw_rows = glance_rows(rb, t2["label"]), glance_rows(rw, t2["label"])
+    base_row, all_row = next((x for x in gw_rows if x["what"] == "base items"), None), (gb_rows or [None])[0]
     base_says = [f"{bg['complete']} of {bg['items']}", js_pct1(bg["covered"], bg["space"]), f"of the campaign's {n(bg['space'])} encodings or indices ({n(bg['covered'])} covered)"]
-    check(all(s in tb for s in base_says) and all(s in tw for s in base_says) and base_says == [f"{t2b['total']['complete']} of {t2b['total']['items']}", js_pct1(t2b["total"]["covered"], t2b["total"]["space"]), f"of the campaign's {n(t2b['total']['space'])} encodings or indices ({n(t2b['total']['covered'])} covered)"],
-          "wide page: the base group's block of the headline states, with wide items, what the class's card stated without them", base_says)
+    check(base_row is not None and all_row is not None and all_row["what"] == "all items" and
+          (base_row["pct"], base_row["count"], base_row["fin"]) == (all_row["pct"], all_row["count"], all_row["fin"]) == (js_pct1(bg["covered"], bg["space"]), f"{bg['complete']} of {bg['items']} complete", all_row["fin"]) and
+          all(s in tb for s in base_says) and all(s in tw for s in base_says) and base_says == [f"{t2b['total']['complete']} of {t2b['total']['items']}", js_pct1(t2b["total"]["covered"], t2b["total"]["space"]), f"of the campaign's {n(t2b['total']['space'])} encodings or indices ({n(t2b['total']['covered'])} covered)"],
+          "wide page: the base group's row at a glance states, with wide items, what the class's one row stated without them (share, items complete, finish), and the item list's head its covered of its space", (base_row, all_row))
     wide_says = [f"{wg['complete']} of {wg['items']}", js_pct1(wg["covered"], wg["space"]), f"of the campaign's {n(wg['space'])} encodings or indices ({n(wg['covered'])} covered)"]
-    check(all(s in tw for s in wide_says) and "wide-format items" in tw and "Wide-format items" not in tb and "wide-format items" not in tb,
-          "wide page: the wide group's block is in the card beside it, with its own count, share and space, and there is none in the run without wide items", wide_says)
+    wide_row = next((x for x in gw_rows if x["what"] == "wide-format items"), None)
+    check(wide_row is not None and (wide_row["pct"], wide_row["count"]) == (js_pct1(wg["covered"], wg["space"]), f"{wg['complete']} of {wg['items']} complete") and
+          [x["what"] for x in gw_rows] == ["base items", "wide-format items"] and [x["what"] for x in gb_rows] == ["all items"] and
+          all(s in tw for s in wide_says) and "wide-format items" in tw and "Wide-format items" not in tb and "wide-format items" not in tb,
+          "wide page: the wide group has a row of its own at a glance, after the base group's, with its own share and count, the item list's head its covered of its own space, and there is none in the run without wide items", (wide_row, gw_rows, gb_rows))
     sec = tw[tw.index("Item by item"):]
     start = sec.index(f"tile items - {t2['label']}")
     nxt = [sec.find(k, start + 10) for k in ("tile items - ", "host items - ", "Earlier trees, item by item")]
@@ -907,6 +951,7 @@ def group_check(d, text, out):
         eq(rc, 1, f"plant, {name}: --check of last night's file against the changed run fails")
         check(all(s in se for s in names), f"plant, {name}: and names the fields {names}", se[-300:])
     po = reduce_dir(write_run(plants["a disagreement"][0], "dis2"))
+    GLANCE["a disagreement"] = po
     eq((po["totals"]["disagreements"], po["totals"]["disagreement_list"][0]["item"], po["nights"][1]["legs"]["fail"]), (1, "rint64-class-rne", 2), "plant, a disagreement: counted once, by item, and a failed leg on its night")
     against_oracle(po, [N1, N2 | {"slices": N2["slices"][:2] + [("rint64-class-rne", 0, 35840, "fail")] + N2["slices"][3:]}, N3], plants["a disagreement"][0])
     p4 = reduce_dir(write_run(plants["a fourth night"][0], "four"))
@@ -917,6 +962,7 @@ def group_check(d, text, out):
     cur = {r["item"]: r["covered"] for c in p3["now"]["classes"] if c["id"] == "t3" for r in c["items"]}
     eq((cur["scaleb32-wide-rne"], cur["rint64-class-rne"]), (A, 0), "plant, a tree change: the new class holds only the night's own slices; what an earlier tree covered is not carried to it")
     p5 = reduce_dir(write_run(plants["a night with no run_end"][0], "open"))
+    GLANCE["a night with no run_end"] = p5
     eq((p5["newest"]["closed"], p5["nights"][2]["reason"], p5["nights"][2]["end"] is not None), (False, None, True), "plant, no run_end: the night is open, has no reason, and ends at its last record")
     # plants in the data file
     for name, edit, names in [("a figure changed", lambda j: j["totals"].__setitem__("slices", j["totals"]["slices"] + 1), "totals.slices"),
@@ -1020,12 +1066,13 @@ def group_committed():
 
 
 def group_night7():
-    # parcel HXd: night 7's file, as 3ec0081c committed it (it has none of the new fields), is drawn as it was drawn. Until 2026-10-28 this read the committed
+    # parcel HXd: night 7's file, as 3ec0081c committed it (it has none of the new fields), is drawn as it was drawn - since parcel PD (2026-10-29) as the
+    # redesigned page draws it, the digest moved on purpose (NIGHT7_DOM), and group_glance holds what its glance says to the file. Until 2026-10-28 this read the committed
     # file, so the morning routine's first replacement of that file would have skipped it by name (send-back 1, N1); it reads the copy NIGHT7 now, so it
     # neither depends on what is committed nor goes quiet when that changes, and the copy is held to night 7's sha256 first
     eq(hashlib.sha256(open(NIGHT7, "rb").read()).hexdigest(), NIGHT7_SHA256, "night 7's file: the copy is the data file 3ec0081c committed, byte for byte (its sha256)")
     if NODE:
-        eq(page("ok", NIGHT7, clock=NIGHT7_CLOCK).get("dom"), NIGHT7_DOM, "night 7's file, as 3ec0081c committed it: the page draws the tree it drew then, node for node")
+        eq(page("ok", NIGHT7, clock=NIGHT7_CLOCK).get("dom"), NIGHT7_DOM, "night 7's file, as 3ec0081c committed it: the page draws the tree pinned for this design (parcel PD, 2026-10-29), node for node")
     else:
         skip("night 7's file in the page", "node is not on PATH")
 
@@ -1150,10 +1197,12 @@ def js_rate(x):
 def group_rates():
     """Parcel TP. The wide run's four nights with rate-bearing slices (`rated`) and probe legs on the last: the file's `rates` is the oracle's, night by night, from the
     plan alone; it is a field of its own, so every night's entry is unchanged and an earlier night's rates are what they were; the file writes a row on a line; --check
-    names an edited figure; and the page lays out the newest night's rows as a table, formats down and ops across, a file without them drawing as it always did."""
+    names an edited figure; and the page lays out the newest night's rows as a table, formats down and ops across (since parcel PD in the glance's block
+    "How fast"), a file without them, or whose nights have none, saying so there in words."""
     recs, plan = rated(build(WSPEC, WCAMPAIGN))
     d = write_run(recs, "rates")
     out = reduce_dir(d, "e5" * 20)
+    GLANCE["rates and a probe"] = out
     R_ = out["rates"]
     eq((R_["unit"], R_["columns"], R_["sum_columns"], R_["probe_columns"], len(R_["nights"])), ("cases/s", P.RATES_COLUMNS, P.RATES_SUM_COLUMNS, P.PROBE_COLUMNS, 4),
        "rates: the file's rates have the unit, the figure lists' columns and a night each")
@@ -1215,26 +1264,9 @@ def group_rates():
     json.dump(out, open(wj, "w", encoding="utf-8"))
     r = page("ok", wj)
     rd = r.get("rates") or {}
-    check(r.get("app", {}).get("hidden") is False and rd.get("h2") == ["What a tile does a second"], "rates page: the file is shown, with a section of its own", r.get("error"))
-    def cells_bad(rd_, rows_):
-        """The page's tables against a night's rows: the images that have rows, the layout (formats down, ops across, the hard-case columns after) and each cell's text and hover."""
-        imgs_, bad_ = [i for i in RT_ORDER["image"] if any(x["image"] == i for x in rows_)], []
-        for img, tb in zip(imgs_, rd_.get("tables", [])):
-            mine = [x for x in rows_ if x["image"] == img]
-            cols = sorted({(x["op"], x["level"]) for x in mine}, key=lambda c: (RT_ORDER["op"].index(c[0]), RT_ORDER["level"].index(c[1])))
-            fmts = [f_ for f_ in RT_ORDER["format"] if any(x["format"] == f_ for x in mine)]
-            if tb["head"] != ["Format"] + [c[0] + (" hard-case" if c[1] == "hard" else "") for c in cols]:
-                bad_.append(("head", img, tb["head"]))
-            if [row[0]["text"] for row in tb["rows"]] != fmts:
-                bad_.append(("formats", img, [row[0]["text"] for row in tb["rows"]]))
-            for row in tb["rows"]:
-                for c, cellx in zip(cols, row[1:]):
-                    x = [y for y in mine if y["format"] == row[0]["text"] and (y["op"], y["level"]) == c]
-                    want_t = "-" if not x else js_rate(x[0]["all"][2]) + (f" card alone {js_rate(x[0]['card']['rate'])} ({x[0]['card']['ratio']:.2f}x)" if x[0]["card"] else "")
-                    want_title = "" if not x else f"{x[0]['all'][0]} slices; least {js_rate(x[0]['all'][3])}, most {js_rate(x[0]['all'][4])}; from {', '.join(x[0]['from'])}"
-                    if cellx["text"] != want_t or cellx["title"] != want_title:
-                        bad_.append((img, row[0]["text"], c, cellx, want_t))
-        return bad_, imgs_
+    # since parcel PD the rates are the glance's block "How fast" (a div#rates), no longer a section of their own named "What a tile does a second"
+    check(r.get("app", {}).get("hidden") is False and rd.get("h2") == ["How fast"], "rates page: the file is shown, with the rates in the glance's block of their own, How fast", r.get("error"))
+    cells_bad = rate_cells_bad
     rows4 = [x for x in R_["nights"][3]["rows"]]
     bad, imgs = cells_bad(rd, rows4)
     eq((rd.get("h3"), len(rd.get("tables", []))), (imgs, len(imgs)), "rates page: a table for each image that has rows on the newest night (the quad's and the single's), the quad first")
@@ -1257,7 +1289,8 @@ def group_rates():
     json.dump(j, open(wj, "w", encoding="utf-8"))
     p3 = (page("ok", wj).get("rates") or {}).get("paras", [""])
     check(p3[0].startswith("Night 3 ("), "rates page: when the newest night has no rows the newest one that has is shown, and named", p3[:1])
-    # a file with rates but no row at all draws as a file without rates: the same tree
+    # a file with rates but no row at all, and a file without rates, each say so in How fast, in words of their own, and draw no table (until parcel PD the
+    # two drew the same tree, with no rates section at all: the glance has its How fast block for every file now, and says why it holds no table)
     for n_ in j["rates"]["nights"]:
         n_["rows"] = []
     json.dump(j, open(wj, "w", encoding="utf-8"))
@@ -1266,8 +1299,11 @@ def group_rates():
     j2.pop("rates")
     json.dump(j2, open(wj, "w", encoding="utf-8"))
     r_none = page("ok", wj, clock=NIGHT7_CLOCK)
-    check(r_empty.get("rates") is None and r_none.get("rates") is None and r_empty.get("dom") == r_none.get("dom") and r_none.get("dom"),
-          "rates page: a file whose nights have no rows, and a file with no rates, draw the same tree and neither has the section")
+    re_, rn_ = r_empty.get("rates") or {}, r_none.get("rates") or {}
+    check(re_.get("paras", [""])[:1] == ["No night in this data file has a rate row yet: a row needs a passing exhaustive or hard slice on a tile of the card."] and
+          rn_.get("paras", [""])[:1] == ["This data file holds no rates: the tools that made it did not write them."] and
+          re_.get("h2") == rn_.get("h2") == ["How fast"] and re_.get("tables") == rn_.get("tables") == [] and r_empty.get("dom") != r_none.get("dom"),
+          "rates page: a file whose nights have no rows and a file with no rates each say so in How fast, in words of their own, and neither draws a table", (re_.get("paras"), rn_.get("paras")))
     # the page reads the shape it is given: a rates that is not a list of nights, a row without its five figures, a card without its ratio
     for name, edit, say in (("rates that is not an object", lambda j_: j_.__setitem__("rates", []), "rates is not a list of nights"),
                             ("a row with four figures", lambda j_: j_["rates"]["nights"][3]["rows"][0].__setitem__("all", [1, 2, 3, 4]), "five figures"),
@@ -1278,6 +1314,229 @@ def group_rates():
         r3 = page("ok", wj)
         check(r3.get("status", {}).get("hidden") is False and "not the shape" in r3["status"]["text"] and say in r3["status"]["text"] and r3["app"]["text"] == "",
               f"rates page: {name} is named as not the shape this page reads, and no figure is shown", r3.get("status"))
+
+
+def rate_cells_bad(rd_, rows_):
+    """The page's tables against a night's rows: the images that have rows, the layout (formats down, ops across, the hard-case columns after) and each cell's
+    text and hover. (Parcel TP's, inside group_rates until parcel PD lifted it here, unchanged, for group_glance to use too.)"""
+    imgs_, bad_ = [i for i in RT_ORDER["image"] if any(x["image"] == i for x in rows_)], []
+    for img, tb in zip(imgs_, rd_.get("tables", [])):
+        mine = [x for x in rows_ if x["image"] == img]
+        cols = sorted({(x["op"], x["level"]) for x in mine}, key=lambda c: (RT_ORDER["op"].index(c[0]), RT_ORDER["level"].index(c[1])))
+        fmts = [f_ for f_ in RT_ORDER["format"] if any(x["format"] == f_ for x in mine)]
+        if tb["head"] != ["Format"] + [c[0] + (" hard-case" if c[1] == "hard" else "") for c in cols]:
+            bad_.append(("head", img, tb["head"]))
+        if [row[0]["text"] for row in tb["rows"]] != fmts:
+            bad_.append(("formats", img, [row[0]["text"] for row in tb["rows"]]))
+        for row in tb["rows"]:
+            for c, cellx in zip(cols, row[1:]):
+                x = [y for y in mine if y["format"] == row[0]["text"] and (y["op"], y["level"]) == c]
+                want_t = "-" if not x else js_rate(x[0]["all"][2]) + (f" card alone {js_rate(x[0]['card']['rate'])} ({x[0]['card']['ratio']:.2f}x)" if x[0]["card"] else "")
+                want_title = "" if not x else f"{x[0]['all'][0]} slices; least {js_rate(x[0]['all'][3])}, most {js_rate(x[0]['all'][4])}; from {', '.join(x[0]['from'])}"
+                if cellx["text"] != want_t or cellx["title"] != want_title:
+                    bad_.append((img, row[0]["text"], c, cellx, want_t))
+    return bad_, imgs_
+
+
+# ---------------------------------------------------------------------------
+# parcel PD (2026-10-29): the glance, held to the data file it draws
+# ---------------------------------------------------------------------------
+LEG_WORDS = {"fail": "failed", "timeout": "timed out", "no_device": "found no device", "parse_error": "could not be read", "error": "ended in an error"}
+FOLD_NOTES = "How to read it: nights, trees and groups, time, estimates, and which figures are the page's own"
+
+
+def js_fixed(x, places):
+    """The page's toFixed: the double's exact value rounded half up (Python's format rounds an exact tie to even)."""
+    from decimal import Decimal, ROUND_HALF_UP
+    return str(Decimal(x).quantize(Decimal(1).scaleb(-places), rounding=ROUND_HALF_UP))
+
+
+def js_round(x):
+    """The page's Math.round, for the figures it rounds, which are not negative: half up."""
+    return math.floor(x + 0.5)
+
+
+def norm(s):
+    return " ".join(s.split())
+
+
+def plural(k, one, many):
+    return f"{k:,} {one if k == 1 else many}"
+
+
+def glance_of(j, clock_ms):
+    """What the glance of data file `j` says with the clock at `clock_ms`, computed here from the file alone - its fields, plain loops, the rules written out
+    again - and not from the page: the health line and the disagreement list, each current class's line and rows (what, share, items complete, finish), How
+    fast's first sentence, its images and its sentence on the probe, the id of the first thing on the page, and each fold below (id, closed, summary). The
+    wording is the page's; every figure in it is the file's, or a rule over the file's fields."""
+    num = lambda x: isinstance(x, (int, float)) and not isinstance(x, bool)
+    N, T, nn = len(j["nights"]), j["totals"], j["nights"][-1]
+    age = clock_ms / 1000 - nn["end_epoch"] if num(nn.get("end_epoch")) else None
+    stale = age is not None and age > 3 * 86400
+
+    def ago(sec):
+        if sec < 0:
+            return "in the future by this clock"
+        m = js_round(sec / 60)
+        return (f"{m} min" if m < 90 else f"{js_round(sec / 3600)} h" if sec < 172800 else f"{js_round(sec / 86400)} d") + " ago"
+    legs = nn["legs"]
+    bad_legs = [k for k in legs if k not in ("pass", "skipped") and legs[k] > 0]
+    if not nn["closed"]:
+        how = (f" has NO run_end in the record: the run was still going when the copy was made, or it died. Its last record is {nn['end']}" +
+               (f", {ago(age)}" if age is not None else "") + ".")
+    else:
+        why = ("at its deadline" if nn.get("reason") == "deadline" else f"({nn['reason']})" if nn.get("reason") else
+               "(its reason is not published)" if nn.get("reason_withheld") else "")
+        how = (f" ended {why}" + (f" with exit status {nn['exit']}" if num(nn.get("exit")) and nn["exit"] != 0 else "") +
+               f", {nn['end']} by the card host's clock" + (f", {ago(age)}" if age is not None else "") + ".")
+    dis, cs = T["disagreements"], T["completed_slices"]
+    dis_say = (f"No disagreement in the run's {cs:,} completed slices, night {nn['n']}'s {nn['slices']:,} among them." if dis == 0 else
+               f"{plural(dis, 'disagreement', 'disagreements')} in the run's {cs:,} completed slices, {nn['disagreements']:,} of them in night {nn['n']}'s {nn['slices']:,}.")
+    leg_say = ("Its legs: " + (", ".join(f"{legs[k]:,} {LEG_WORDS.get(k, k)}" for k in bad_legs) + "; " if bad_legs else "") + f"{legs['pass']:,} passed" +
+               (f", {legs['skipped']:,} skipped" if legs.get("skipped") else "") + ("." if bad_legs else "; none failed, timed out or found no device."))
+    bad = dis > 0 or bool(bad_legs)
+    warn = not nn["closed"] or nn.get("reason") != "deadline" or (num(nn.get("exit")) and nn["exit"] != 0) or stale
+    health = norm(f"{'Not healthy.' if bad else 'Check.' if warn else 'Healthy.'} Night {nn['n']} ({nn.get('date') or '-'}){how} {dis_say} {leg_say}" +
+                  (" The newest night is more than 3 days old: the nightly update has not been made since." if stale else ""))
+    dl = T.get("disagreement_list") or []
+    dislist = norm("Disagreements recorded: " + "; ".join(f"{x['item']} on {x.get('image') or '?'} at {x.get('start') or '?'}" for x in dl)) if dl else None
+    # how far along
+    classes = j["now"]["classes"]
+    cur, old = [c for c in classes if c.get("current")], [c for c in classes if not c.get("current") and c["nights"]]
+
+    def grp(c, g):
+        return next((x for x in (c.get("groups") or []) if x["group"] == g), None)
+
+    def finish(c, g):
+        open_ = [r for r in c["items"] if not r["complete"] and (g is None or r.get("group") == g)]
+        if not open_:
+            return ""
+        est = [r for r in open_ if r.get("estimate")]
+        if not est:
+            return "No estimate: " + (f"none of its {plural(len(open_), 'open item', 'open items')} gained in the window" if c["served"] else
+                                      "no slice has completed under this tree yet") + "."
+        e, none = max(est, key=lambda r: r["estimate"]["nights_left"])["estimate"], len(open_) - len(est)
+        return (f"ESTIMATE by {e['date'] or '-'}, about {plural(e['nights_left'], 'more night', 'more nights')}" +
+                (f"; {plural(none, 'open item has', 'open items have')} no estimate" if none else ""))
+    far = []
+    for c in cur:
+        b, w = grp(c, "base"), grp(c, "wide")
+        spec = ([("base items", b, "base")] if b else []) + [("wide-format items", w, "wide")] if w else [("all items", c["total"], None)]
+        first = c["nights"][0]
+        far.append({"head": norm(f"{c['kind']} items - {c['label']} - since night {first} ({j['nights'][first - 1].get('date') or '-'}), "
+                                 f"{plural(len(c['nights']), 'night', 'nights')}" + ("" if c["served"] else "; no slice has completed under it yet")),
+                    "rows": [{"what": what, "pct": js_pct1(t["covered"], t["space"]) if num(t["space"]) and t["space"] > 0 else "-",
+                              "count": f"{t['complete']} of {t['items']} complete", "fin": finish(c, g) if t["items"] else "no items"} for what, t, g in spec]})
+    # how fast
+    R, images, probe_say = j.get("rates"), [], None
+    if R is None:
+        fast_first = "This data file holds no rates: the tools that made it did not write them."
+    else:
+        night = next((x for x in reversed(R["nights"]) if x["rows"]), None)
+        probed = next((x for x in reversed(R["nights"]) if x.get("probe")), None)
+        if night is None:
+            fast_first = "No night in this data file has a rate row yet: a row needs a passing exhaustive or hard slice on a tile of the card."
+        else:
+            fast_first = (f"Night {night['n']}" + (f" ({night['date']})" if night.get("date") else "") + f": {R.get('unit') or 'cases/s'} on one tile, the median "
+                          "of the night's passing slices of each op at each format, from the night's own records. Hover a figure for its slices.")
+            for r in night["rows"]:
+                if r["image"] not in images:
+                    images.append(r["image"])
+            images.sort(key=lambda i: RT_ORDER["image"].index(i) if i in RT_ORDER["image"] else 3)
+            probe_say = ("No probe leg has run yet, on any night: there is no card-alone figure, and every rate here has the host's oracle in its pace." if probed is None else
+                         f"Card alone: night {night['n']}'s probe, the oracle off, under each figure it has." if probed is night else
+                         f"Night {night['n']} ran no probe; the newest night that did is night {probed['n']}" + (f" ({probed['date']})" if probed.get("date") else "") + ".")
+    # the folds, each closed, each summary counting what the file holds
+    ids = {c["id"]: c for c in classes}
+    fc = T["fully_covered"]
+    folds = [("items", f"Item by item: {plural(sum(len(c['items']) for c in cur), 'item', 'items')} under the current trees, "
+                       f"{sum(1 for c in cur for r in c['items'] if r['complete']):,} complete"),
+             ("covered", f"Fully covered: {plural(len(fc), 'item', 'items')}, {sum(1 for x in fc if x['class'] in ids and ids[x['class']].get('current')):,} under the current trees")]
+    if old:
+        folds.append(("earlier", f"Earlier trees: {len(old)}, kept as history, {plural(sum(len(c['items']) for c in old), 'item', 'items')}, "
+                                 f"{sum(1 for c in old for r in c['items'] if r['complete']):,} complete"))
+    folds += [("nights", f"Night by night: {plural(N, 'night', 'nights')}, {j['nights'][0].get('date') or '-'} to {nn.get('date') or '-'}, {js_fixed(T['card_s'] / 3600, 1)} h on the card"),
+              ("totals", f"Totals: {plural(T['slices'], 'slice', 'slices')}, {plural(T['cases'], 'case', 'cases')}, {plural(dis, 'disagreement', 'disagreements')}, "
+                         f"{plural(T['legs']['total'], 'leg', 'legs')}"),
+              ("notes", FOLD_NOTES)]
+    return {"health": health, "dislist": dislist, "far": far, "fast_first": fast_first, "images": images, "probe": probe_say, "first": "glance",
+            "folds": [{"id": i, "open": False, "summary": s} for i, s in folds]}
+
+
+def glance_check(label, j, clock):
+    """The page in node over data file `j` with the clock at `clock` (ms): its glance and its folds are what glance_of computes from the file, part by part,
+    each part a named check. Returns the page's result."""
+    want = glance_of(j, clock)
+    f = os.path.join(TMP, "glance.json")
+    with open(f, "w", encoding="utf-8") as fh:
+        json.dump(j, fh)
+    r = page("ok", f, clock=clock)
+    g, rd = r.get("glance") or {}, r.get("rates") or {}
+    eq((g.get("first"), g.get("health"), g.get("dislist")), (want["first"], want["health"], want["dislist"]),
+       f"glance, {label}: it comes first, and its health line states the file's newest night, how it ended, the run's disagreements and that night's legs, "
+       "after the word their rule gives")
+    eq(g.get("far"), want["far"], f"glance, {label}: each current class's line and rows - the share covered, the items complete and the finish, an ESTIMATE, "
+                                  "the latest of the open items' - are the file's")
+    eq(((rd.get("paras") or [None])[0], rd.get("h3"), g.get("probe")), (want["fast_first"], want["images"], want["probe"]),
+       f"glance, {label}: How fast names the newest night with rows, or says there is none, has a table an image, and says what the probe did")
+    if want["images"]:
+        rows = next(x for x in reversed(j["rates"]["nights"]) if x["rows"])["rows"]
+        bad, _ = rate_cells_bad(rd, rows)
+        check(not bad and len(rd.get("tables", [])) == len(want["images"]), f"glance, {label}: and each table's cells are that night's rows, as the file gives them", bad[:2])
+    eq(g.get("folds"), want["folds"], f"glance, {label}: every section below the glance is a fold, closed, whose summary counts what the file holds")
+    return r
+
+
+def group_glance():
+    """Parcel PD: the meaning beside the two pins. Over every data file the tests hold - night 7's (no groups, no rates), the legacy shape, the run of three
+    nights, of four without wide items and of four with them, the run with rates and a probe, the committed file, a run with a disagreement and one whose
+    last night has no run_end - and over five made here from them (the estimates of a group spread so that its first open item's is not the latest; rates
+    with no row; no rates; the probe on a night after the newest rows; failed and timed-out legs on the newest night), the glance and the folds say what the
+    file holds, as glance_of computes it from the file."""
+    if not NODE:
+        return skip("the glance in node", "node is not on PATH")
+    for label, j, clock in glance_files():
+        glance_check(label, j, clock)
+
+
+def glance_files():
+    """The data files group_glance holds, as (label, file, clock in ms): the ones the groups made (GLANCE), night 7's, the legacy shape, the committed file,
+    and the five made here from them."""
+    after = lambda j, s: int(round((j["nights"][-1]["end_epoch"] + s) * 1000))
+    files = [("night 7's file", json.load(open(NIGHT7, encoding="utf-8")), NIGHT7_CLOCK)]
+    if "four nights without wide items" in GLANCE:
+        files.append(("the legacy shape", legacy(GLANCE["four nights without wide items"]), LEGACY_CLOCK))
+    for name, s in (("three nights", 7200), ("four nights without wide items", 7200), ("wide items, five days on", 5 * 86400), ("rates and a probe", 7200),
+                    ("a disagreement", 7200), ("a night with no run_end", 600)):
+        key = name.replace(", five days on", "")
+        if key in GLANCE:
+            files.append((name, GLANCE[key], after(GLANCE[key], s)))
+        else:
+            check(False, f"glance: the data file '{key}' was made by its group", "its group did not make it (it crashed, or was skipped)")
+    if os.path.exists(DATA):
+        d = json.load(open(DATA, encoding="utf-8"))
+        files.append(("the committed data file", d, after(d, 3600)))
+    if "wide items" in GLANCE:
+        sp = json.loads(json.dumps(GLANCE["wide items"]))
+        c = next(c for c in sp["now"]["classes"] if c["current"] and c["kind"] == "tile")
+        est = [r for r in c["items"] if not r["complete"] and r.get("estimate") and r.get("group") == "base"]
+        if check(len(est) >= 2, "glance: the wide run's current tile class has two open base items with an estimate, to spread", [r["item"] for r in est]):
+            top = max(r["estimate"]["nights_left"] for r in est) + 11
+            est[-1]["estimate"] = dict(est[-1]["estimate"], nights_left=top, date=(datetime.date.fromisoformat(sp["nights"][-1]["date"]) + datetime.timedelta(days=top)).isoformat())
+            files.append(("the estimates spread, the latest not the first", sp, after(sp, 7200)))
+    if "rates and a probe" in GLANCE:
+        base = GLANCE["rates and a probe"]
+        empty, none, later = (json.loads(json.dumps(base)) for _ in range(3))
+        for nt in empty["rates"]["nights"]:
+            nt["rows"] = []
+        none.pop("rates")
+        later["rates"]["nights"][-1]["rows"] = []
+        files += [("rates with no row", empty, after(empty, 7200)), ("no rates", none, after(none, 7200)), ("the probe on a night after the newest rows", later, after(later, 7200))]
+    if "three nights" in GLANCE:
+        fl = json.loads(json.dumps(GLANCE["three nights"]))
+        fl["nights"][-1]["legs"].update(fail=1, timeout=2)
+        files.append(("failed and timed-out legs on the newest night", fl, after(fl, 7200)))
+    return files
 
 
 def guarded(fn, *args):
@@ -1317,6 +1576,8 @@ def main():
         guarded(group_committed)
         print("== night 7's data file, as 3ec0081c committed it (a copy in card_stress_fixtures)")
         guarded(group_night7)
+        print("== the glance, held to each data file it draws (parcel PD)")
+        guarded(group_glance)
         print("== the lead's real copies")
         runs = [x for x in os.environ.get("CARD_STRESS_PROGRESS_RUNS", "").split(os.pathsep) if x]
         record_only(False)

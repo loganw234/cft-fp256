@@ -2406,16 +2406,18 @@ run outside any checkout, on each of the lead's seven copies, resume-1020 to nig
 these tools their rows as well, derived from the slices their records hold. **Morning step 2 remakes the whole file, so the first file made by these tools has `rates` for
 every night; step 3's `git diff --stat` shows one new block at the end of the file and the nights untouched.** On a file made before the field (MEASURED on night 8's, as
 469df913 has it: 8 nights, made by the tools at 02a5f6aa): `--check` of it against nightly-1027's run with these tools, run where git is readable, exits 1 and its first
-differences are one, `.rates: missing from the file`, which is the difference between the tools and not a defect of either; and the page of 02a5f6aa and this page draw the
-same tree over it, node for node (digest equal at two clocks), with no rates section. A file whose nights have no rows draws as one without the field. The file grows by about
+differences are one, `.rates: missing from the file`, which is the difference between the tools and not a defect of either; and the page of 02a5f6aa and this parcel's page drew
+the same tree over it, node for node (digest equal at two clocks), with no rates section. Since the page's redesign (parcel PD, 2026-10-29) a file whose nights have no rows, and
+a file without the field, each say so in the glance's block "How fast", in words of their own, and draw no table. The file grows by about
 12 lines a night on nights of the base items (MEASURED on the 1026 copy: 442 lines to 524 over its seven nights) and by a line a row on nights of the whole catalog: at most 54
 rows (COMPUTED from the catalog: 18 (rate op, format, level) combinations among its tile items at the exhaustive and hard levels, on three images; night 1027's real rows
 are 17, MEASURED).
 
-**The page** draws, beside the headline, a section "What a tile does a second": for each image that has rows on the newest night that has any, a small table, the
-formats (fp32 to fp256) down and the ops (hard-case rows in their own column) across, each cell the row's median a tile as the file gives it (millions to two places,
-thousands to one), with the slices, the least, the most and the ops pooled on hover, and the probe's card-alone figure and ratio beside it on a night that had one. It
-computes nothing. No redesign: that is the next parcel's.
+**The page** draws, in its glance at the top, a block "How fast" (since the redesign, parcel PD, 2026-10-29; until then a section "What a tile does a second" beside
+the headline): for each image that has rows on the newest night that has any, a small table, the formats (fp32 to fp256) down and the ops (hard-case rows in their own
+column) across, each cell the row's median a tile as the file gives it (millions to two places, thousands to one), with the slices, the least, the most and the ops pooled
+on hover, and the probe's card-alone figure and ratio beside it on a night that had one. It computes nothing, and says in words where no probe has run yet, where no night
+has a row and where the file has no rates; the file's rule is folded under it.
 
 **The probe leg** (`--rate-probe`, off by default; `--rate-probe-seconds S`, 2 by default, at most 2.5). `host/tools/rate_probe.c` (parcel HX's probe made a tool, built the
 way the soaks are: `make -C host XRT=1 XRT_ROOT=... rate-probe`, a target of its own, not in `all`) runs div, sqrt, rint, scaleb, fma, mul and add at fp32, fp64, fp128
@@ -2549,7 +2551,7 @@ that morning is Monday's; `COPY` is the copy's directory, the one holding `metri
 5. **Push.** A push that changes the data file alone starts `pages` and not `gates` (seen on 2026-10-23: 39f98018, the first such push,
    started `pages` alone), so it cancels no gates run and need not wait for one; a push that changes anything else still waits until no CI
    run is in progress (`gh run list --workflow gates --limit 3`), since gates cancels a superseded run of its branch. Then see `pages` go
-   green and the page's "Newest night" show the date.
+   green and the page's health line, the first line of its glance, name the new night and its date.
 
 A changed tree is a new class (a tile item is counted per RTL tree, a host item per host tree and compiler), so the page's current class
 starts from nothing and the earlier one stays as history; a run that recorded no tree is read from git where it can be (the class's label says "read from git at commit X") and else is kept apart by its commit, the label giving the report's reason.
@@ -2562,16 +2564,20 @@ without node), and, when `CARD_STRESS_PROGRESS_RUNS` names the copies' directori
 have made its card read "40 of 142, 22.4%" (COMPUTED from the data file's 40 items and 78,575,849,296 indices and the 102 items' 272,192,938,512) and redrawn every
 earlier night's point at that share, since the chart divides each night's coverage by the class's current space. So **within a class the items are two groups, counted
 apart**: the base items (the 71 of 2026-10-25: 40 tile items and 31 host items, as the data file stands; a group is a flag of the catalog, not a number) and the
-wide-format items. Each class's **card** keeps the base block as it reads (`40 of 40`, `100.0% of the campaign's 78,575,849,296 encodings or indices`) and has a block of
-the wide group beside it; **Item by item** lists the wide items after the base items under a heading of their own, and every item row, and the fully covered list, names
-the item's format in a tag; the **chart** has a line for each class and group (the wide group's purple, over its own space, starting the first night it has anything), so
-an older group's line is the line it was. A class with no wide item is drawn as it was. The data file gains, with `SCHEMA` still 1: `format` and `group` on every row; a
+wide-format items. Each class keeps the base group's figures as they read (`40 of 40`, `100.0% of the campaign's 78,575,849,296 encodings or indices`) and has the wide
+group's beside them: since the page's redesign (parcel PD, 2026-10-29) as a row a group in the glance's "How far along" (the share, the items complete, the finish) and
+in the class's head under **Item by item** (the covered of the space), where until then they were two blocks of the class's card; **Item by item** lists the wide items
+after the base items under a heading of their own, and every item row, and the fully covered list, names the item's format in a tag; the **chart** has a line for each
+class and group (the wide group's purple, over its own space, starting the first night it has anything), so an older group's line is the line it was. A class with no wide
+item shows its total alone, one row, as it showed one card before the groups. The data file gains, with `SCHEMA` still 1: `format` and `group` on every row; a
 class's `groups` (items, complete, covered, space and share of each group it has rows of), beside `total`, which stays over every row; `rules.groups`; and a night's
 `after.groups`, written only for a class that has a wide row served, so **the earlier nights of the file are the nights they were** (the scheduler's publish step compares
-every field of them). **A data file without the new fields renders exactly as before** (MEASURED: the committed night-7 file, the whole tree the page builds under its
-`#app` element in node, old page and new, byte for byte; the `#status` element, hidden when a file draws, is not in that digest;
+every field of them). **A data file without the new fields rendered exactly as before until the page's redesign** (MEASURED then: the committed night-7 file, the whole
+tree the page builds under its `#app` element in node, old page and new, byte for byte; the `#status` element, hidden when a file draws, is not in that digest;
 `hw/test_card_stress_progress.py` keeps the check, since 2026-10-28 on a copy of that file, `hw/card_stress_fixtures/nightly-night7.json`, so
-that the morning's data commit does not retire it). Morning step 2 remakes the whole file, so the first file made by these tools has the new
+that the morning's data commit does not retire it). Since the redesign (parcel PD, 2026-10-29) such a file renders as the redesigned page draws it: the check's digest,
+and the legacy shape's beside it, were moved on purpose to the new page's trees, and a check of meaning beside them holds what each file's glance says to the file
+itself (docs/VALIDATION.md, PD). Morning step 2 remakes the whole file, so the first file made by these tools has the new
 fields throughout; step 3's `git diff --stat` then shows `now` changed (rows and classes gain fields) and the nights untouched until a wide row is served, and `--check`
 of night 7's committed file against its run with these tools names the new fields as missing from the file, which is the difference between the tools, not a defect of
 either. Known limits: the status file's coverage lines (`hw/card_stress.py`) still sum the groups, so a morning that quotes them mixes the 71 with the wide items; an item
