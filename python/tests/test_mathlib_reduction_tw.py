@@ -671,7 +671,8 @@ def test_the_proof_of_the_cushion_names_what_it_reads():
 # plant turns red, and the ones it leaves green: every row names all seven
 # checks, once (test_every_row_names_every_check). The cushion check reads the
 # reference's lanes and is red where a plant moves r so far that a lane passes
-# the bound (chunk, window, quadrant_dropped, bucket_nearest: by 2^20 and more);
+# the bound (chunk, window, quadrant_dropped, bucket_nearest: by 2^18 and more,
+# MEASURED 2^20.20, 2^20.50, 2^18.75 and 2^20.45 times it);
 # `digest` is the dag
 # digest, red for every plant that changes the dataflow; `model` the 22
 # recorded lanes of the model, red where a value of r or q moves.
