@@ -6,7 +6,12 @@
      nightly.json, which sits beside it and which hw/card_stress_progress.py makes from the run's metrics.jsonl
      (docs/CARDDAY.md, "The morning after"). The page holds no figure itself. If the data file is missing, is not
      JSON or is not the shape it reads, the page says which, and shows nothing else: it never shows figures it
-     could not read as current. Every string from the file is put on the page as text, never as markup. -->
+     could not read as current. Every string from the file is put on the page as text, never as markup.
+
+     The layout (parcel PD, 2026-10-29): a glance at the top - is it healthy, how far along, how fast - and every other
+     section below it folded, each fold's summary counting what is inside. The two glance figures the file does not
+     hold, the word for the newest night's health and a group's finish, are computed here from the file's fields, and
+     the page says so where it shows them. -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -29,29 +34,58 @@
 }
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
-body { margin: 0 auto; padding: 1.2rem 1rem 4rem; max-width: 64rem; background: var(--bg); color: var(--fg);
-       font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; overflow-wrap: anywhere; }
-h1 { font-size: 1.5rem; margin: 0.2rem 0 0.4rem; }
-h2 { font-size: 1.15rem; margin: 0 0 0.5rem; }
-h3 { font-size: 0.95rem; margin: 1rem 0 0.3rem; }
-p { margin: 0.4rem 0; }
+body { margin: 0 auto; padding: 1rem 1rem 3rem; max-width: 64rem; background: var(--bg); color: var(--fg);
+       font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; overflow-wrap: anywhere; }
+h1 { font-size: 1.35rem; margin: 0.1rem 0 0.2rem; }
+h2 { font-size: 1rem; margin: 0 0 0.35rem; }
+h3 { font-size: 0.9rem; margin: 0.8rem 0 0.25rem; }
+p { margin: 0.35rem 0; }
 a { color: var(--accent); }
 code, .mono { font-family: ui-monospace, Consolas, "Cascadia Mono", Menlo, monospace; font-size: 0.92em; }
 .dim { color: var(--dim); }
 .small { font-size: 0.85rem; }
-section { border: 1px solid var(--line); border-radius: 6px; margin: 1.2rem 0; padding: 0.9rem 1rem; background: var(--panel); }
+.lede { font-size: 0.88rem; color: var(--dim); margin: 0 0 0.7rem; }
+section { border: 1px solid var(--line); border-radius: 6px; margin: 0.8rem 0; padding: 0.8rem 1rem; background: var(--panel); }
 #status { padding: 0.8rem 1rem; border: 1px solid var(--line); border-radius: 6px; background: var(--code-bg); }
 #status.error { background: var(--fail-bg); color: var(--fail-fg); border-color: var(--fail-fg); }
 .banner { padding: 0.5rem 0.8rem; border-radius: 4px; margin: 0.6rem 0; background: var(--warn-bg); color: var(--warn-fg); }
-.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 19rem), 1fr)); gap: 0.9rem; }
-.card { border: 1px solid var(--line); border-radius: 6px; padding: 0.8rem 0.9rem; background: var(--bg); min-width: 0; }
-.card .kind { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--dim); }
-.card .kind:not(:first-child) { margin-top: 0.9rem; }
-.card .big { font-size: 1.9rem; font-weight: 600; line-height: 1.2; margin: 0.2rem 0; }
+/* the glance */
+.health { margin: 0 0 0.3rem; }
+.dot { display: inline-block; width: 0.72em; height: 0.72em; border-radius: 50%; margin-right: 0.4em; background: var(--dim); }
+.dot.ok { background: var(--pass-fg); }
+.dot.warn { background: var(--warn-fg); }
+.dot.bad { background: var(--fail-fg); }
+.glance { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 25rem), 1fr)); gap: 0.4rem 1.8rem; margin-top: 0.7rem; }
+.glance > div { min-width: 0; }
+.fclass { font-size: 0.85rem; margin: 0.6rem 0 0.15rem; }
+.far h2 + .fclass { margin-top: 0; }
+.frow { display: grid; grid-template-columns: 8rem minmax(3rem, 1fr) 3.6rem 8.4rem; grid-template-areas: "what bar pct count" ". fin fin fin";
+        gap: 0 0.6rem; align-items: center; font-size: 0.86rem; padding: 0.12rem 0; }
+.frow > * { min-width: 0; }
+.frow .fwhat { grid-area: what; }
+.frow .bar { grid-area: bar; margin: 0; }
+.frow .fpct { grid-area: pct; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+.frow .fcount { grid-area: count; font-variant-numeric: tabular-nums; }
+.frow .ffin { grid-area: fin; font-size: 0.8rem; color: var(--dim); }
 .bar { height: 9px; background: var(--code-bg); border: 1px solid var(--line); border-radius: 5px; overflow: hidden; margin: 0.35rem 0; }
 .bar > i { display: block; height: 100%; background: var(--accent); }
 .bar.done > i { background: var(--pass-fg); }
-.item { padding: 0.55rem 0; border-top: 1px solid var(--line); }
+.est { font-variant: small-caps; letter-spacing: 0.03em; font-weight: 600; }
+.ffin .est, p .est { font-variant: normal; color: var(--warn-fg); }
+.scroll { overflow-x: auto; max-width: 100%; }
+.fast h3 { margin: 0.45rem 0 0.1rem; font-size: 0.85rem; }
+table.rates { width: auto; max-width: none; font-size: 0.82rem; }
+table.rates th, table.rates td { padding: 0.12rem 0.5rem; white-space: nowrap; overflow-wrap: normal; }
+table.rates td.cell { white-space: nowrap; font-variant-numeric: tabular-nums; }
+table.rates td .card { display: block; font-size: 0.72rem; color: var(--dim); }
+details.rule { margin: 0.3rem 0 0; font-size: 0.85rem; }
+details.rule > summary { font-weight: 400; color: var(--dim); }
+/* the folds */
+details.fold { border: 1px solid var(--line); border-radius: 6px; margin: 0.5rem 0; background: var(--panel); }
+details.fold > summary { padding: 0.5rem 0.9rem; font-weight: 600; cursor: pointer; }
+details.fold[open] > summary { border-bottom: 1px solid var(--line); }
+details.fold > div { padding: 0.5rem 0.9rem 0.8rem; }
+.item { padding: 0.5rem 0; border-top: 1px solid var(--line); }
 .item:first-of-type { border-top: 0; }
 .item .head { display: flex; flex-wrap: wrap; gap: 0.2rem 0.8rem; justify-content: space-between; align-items: baseline; }
 .item .name { font-weight: 600; min-width: 0; }
@@ -59,29 +93,28 @@ section { border: 1px solid var(--line); border-radius: 6px; margin: 1.2rem 0; p
        margin-left: 0.3rem; vertical-align: 1px; }
 .tag.ok { background: var(--pass-bg); color: var(--pass-fg); border-color: transparent; }
 .grouphead { font-size: 0.85rem; font-weight: 600; margin: 1rem 0 0.2rem; color: var(--dim); text-transform: uppercase; letter-spacing: 0.04em; }
-.est { font-variant: small-caps; letter-spacing: 0.03em; font-weight: 600; }
 table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
 th, td { padding: 0.3rem 0.5rem; border-bottom: 1px solid var(--line); text-align: right; vertical-align: top; }
 th:first-child, td:first-child, th.l, td.l { text-align: left; }
 th { font-weight: 600; color: var(--dim); }
-details { margin: 0.5rem 0; }
+details { margin: 0.4rem 0; }
 summary { cursor: pointer; font-weight: 600; }
-table.rates { width: auto; max-width: 100%; }
-table.rates td.cell { white-space: nowrap; }
-table.rates td .card { display: block; font-size: 0.75rem; color: var(--dim); }
 dl.totals { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); gap: 0.7rem 1.2rem; margin: 0; }
 dl.totals div { min-width: 0; }
 dl.totals dt { font-size: 0.8rem; color: var(--dim); }
-dl.totals dd { margin: 0; font-size: 1.1rem; font-weight: 600; }
+dl.totals dd { margin: 0; font-size: 1.05rem; font-weight: 600; }
 figure { margin: 0.6rem 0; }
-figure svg { width: 100%; max-width: 42rem; height: auto; display: block; }
+figure svg { width: 100%; max-width: 34rem; height: auto; display: block; }
 figcaption { font-size: 0.85rem; color: var(--dim); }
-.legend { display: flex; flex-wrap: wrap; gap: 0.2rem 1rem; font-size: 0.85rem; margin: 0.3rem 0; }
+.legend { display: flex; flex-wrap: wrap; gap: 0.2rem 1rem; font-size: 0.82rem; margin: 0.3rem 0; }
 .legend span { display: inline-flex; align-items: center; gap: 0.35rem; min-width: 0; }
 .legend svg { width: 1.8rem; height: 0.7rem; flex: none; }
 @media (max-width: 40rem) {
-  body { padding: 0.8rem 0.7rem 3rem; }
+  body { padding: 0.8rem 1rem 2.5rem; }
   section { padding: 0.7rem 0.7rem; }
+  details.fold > summary { padding: 0.5rem 0.7rem; }
+  details.fold > div { padding: 0.5rem 0.7rem 0.7rem; }
+  .frow { grid-template-columns: 1fr auto; grid-template-areas: "what count" "bar pct" "fin fin"; gap: 0.1rem 0.6rem; }
   table.stack thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
   table.stack tr { display: block; border-bottom: 1px solid var(--line); padding: 0.3rem 0; }
   table.stack td { display: flex; justify-content: space-between; gap: 1rem; border: 0; padding: 0.1rem 0.2rem; text-align: right; }
@@ -91,9 +124,9 @@ figcaption { font-size: 0.85rem; color: var(--dim); }
 </head>
 <body>
 <h1>The nightly card run</h1>
-<p>Every night the project's FPGA card runs one resumed stress run: a battery of checks, then slices of exhaustive sweeps in which the
-library's answers are compared, bit for bit, with an oracle on the host's CPU. This page shows how far those sweeps have come. It is
-rebuilt after each night from the run's own record by <code>hw/card_stress_progress.py</code>, and holds no figure of its own.</p>
+<p class="lede">Every night the project's FPGA card runs one resumed stress run: a battery of checks, then exhaustive sweeps compared bit for bit
+with an oracle on the host's CPU. This page is rebuilt after each night from the run's own record by <code>hw/card_stress_progress.py</code>
+and holds no figure of its own.</p>
 <div id="status" role="status">Loading <code>nightly.json</code>...</div>
 <div id="app" hidden></div>
 <noscript><p class="banner">This page needs JavaScript to read its data file, <code>nightly.json</code>. Nothing is shown without it.</p></noscript>
@@ -148,6 +181,7 @@ rebuilt after each night from the run's own record by <code>hw/card_stress_progr
     var m = Math.round(sec / 60);
     return (m < 90 ? m + " min" : sec < 172800 ? Math.round(sec / 3600) + " h" : Math.round(sec / 86400) + " d") + " ago";
   }
+  function plural(n, one, many) { return fmt(n) + " " + (n === 1 ? one : many); }
   function bar(cov, space, label) {
     var done = space > 0 && cov >= space, w = space > 0 ? 100 * cov / space : 0, i = h("i");
     i.style.width = (done ? 100 : Math.min(w, 99.9)) + "%";
@@ -163,6 +197,12 @@ rebuilt after each night from the run's own record by <code>hw/card_stress_progr
     var t = Math.round(s);
     return Math.floor(t / 3600) + " h " + Math.floor(t % 3600 / 60) + " m " + t % 60 + " s";
   }
+  // a section below the glance: a <details>, closed, whose summary says in one line what is inside, with its counts from the file
+  function fold(id, summary) {
+    var body = h("div");
+    for (var i = 2; i < arguments.length; i++) add(body, arguments[i]);
+    return h("details", { id: id, "class": "fold" }, h("summary", { text: summary }), body);
+  }
   // Groups (parcel HXd). A class holds the base items and, where the night served them, the wide-format items; the data file's `groups` says which
   // groups a class has, each with its own totals, and an item row says its `group` and its `format`. A file without them is drawn as it always was.
   function group(c, g) { return (c.groups || []).filter(function (x) { return x.group === g; })[0] || null; }
@@ -176,19 +216,25 @@ rebuilt after each night from the run's own record by <code>hw/card_stress_progr
             " (the last " + e.window_nights + " night" + (e.window_nights === 1 ? "" : "s") + "' pace: " + fmt(e.per_night) + " a night)"];
   }
 
-  // ---- the card's rates (parcel TP) ----
+  // ---- the card's rates (parcel TP; the glance's "How fast" since parcel PD) ----
   // The data file's `rates` (hw/card_stress_progress.py): for each night, rows of (image, op, format, level) with the figures of the night's passing slices
   // that ran on a tile ([slices, cases, median, least, most], cases a second). The page lays out the newest night that has rows, one table an image: the
-  // formats down, the ops across, each cell the median a tile (the row's `all`), as the file gives it; it computes no figure. A file without `rates` draws
-  // as it always did, and so does one whose nights have no rows.
+  // formats down, the ops across, each cell the median a tile (the row's `all`), as the file gives it; it computes no figure. A file without `rates`, or
+  // whose nights have no rows, says so in words; so does one in which no night ran the probe (the card alone, the oracle off).
   var RATE_FORMATS = ["fp32", "fp64", "fp128", "fp256"], RATE_OPS = ["div", "recip", "sqrt", "rint", "scaleb"], RATE_LEVELS = ["exhaustive", "hard"];
   function rank(list, v) { var i = list.indexOf(v); return i < 0 ? list.length : i; }
   function rate(x) { return !isnum(x) ? "-" : x >= 1e6 ? (x / 1e6).toFixed(2) + " M" : x >= 1e3 ? (x / 1e3).toFixed(1) + " k" : x.toFixed(0); }
   function ratesSection(d) {
-    var R = d.rates, night = null, i;
-    if (R === undefined) return null;
+    var R = d.rates, night = null, probed = null, i;
+    function block() {
+      var b = h("div", { id: "rates", "class": "fast" }, h("h2", { text: "How fast" }));
+      for (var k = 0; k < arguments.length; k++) add(b, arguments[k]);
+      return b;
+    }
+    if (R === undefined) return block(h("p", { "class": "small dim", text: "This data file holds no rates: the tools that made it did not write them." }));
     for (i = R.nights.length - 1; i >= 0 && !night; i--) { if (R.nights[i].rows.length) night = R.nights[i]; }
-    if (!night) return null;
+    for (i = R.nights.length - 1; i >= 0 && !probed; i--) { if (R.nights[i].probe) probed = R.nights[i]; }
+    if (!night) return block(h("p", { "class": "small dim", text: "No night in this data file has a rate row yet: a row needs a passing exhaustive or hard slice on a tile of the card." }));
     var images = [], tables;
     night.rows.forEach(function (r) { if (images.indexOf(r.image) < 0) images.push(r.image); });
     images.sort(function (a, b) { return rank(["quad", "single", "deep"], a) - rank(["quad", "single", "deep"], b); });
@@ -211,12 +257,16 @@ rebuilt after each night from the run's own record by <code>hw/card_stress_progr
         }));
       });
       return h("div", null, h("h3", { text: img }),
-        h("table", { "class": "rates stack" }, h("thead", null, h("tr", null, h("th", { "class": "l", text: "Format" }), cols.map(head))), h("tbody", null, body)));
+        h("div", { "class": "scroll" }, h("table", { "class": "rates" }, h("thead", null, h("tr", null, h("th", { "class": "l", text: "Format" }), cols.map(head))), h("tbody", null, body))));
     });
-    return h("section", { id: "rates" }, h("h2", { text: "What a tile does a second" }),
-      h("p", null, "Night " + night.n + (night.date ? " (" + night.date + ")" : "") + ": " + (R.unit || "cases/s") + " on one tile, the median of the night's passing slices of each op at each format, from the night's own records. Hover a figure for its slices."),
+    var probeSay = !probed ? "No probe leg has run yet, on any night: there is no card-alone figure, and every rate here has the host's oracle in its pace."
+                 : night.probe ? "Card alone: night " + night.n + "'s probe, the oracle off, under each figure it has."      // the night's own probe, not the newest one
+                 : "Night " + night.n + " ran no probe; the newest night that did is night " + probed.n + (probed.date ? " (" + probed.date + ")" : "") + ".";
+    return block(
+      h("p", { "class": "small" }, "Night " + night.n + (night.date ? " (" + night.date + ")" : "") + ": " + (R.unit || "cases/s") + " on one tile, the median of the night's passing slices of each op at each format, from the night's own records. Hover a figure for its slices."),
       tables,
-      h("p", { "class": "small dim", text: R.rule }));
+      h("p", { "class": "small dim probe", text: probeSay }),
+      h("details", { "class": "rule" }, h("summary", { text: "How these rates are made" }), h("p", { "class": "small dim", text: R.rule })));
   }
 
   // ---- loading, and the three ways it can fail ----
@@ -290,79 +340,79 @@ rebuilt after each night from the run's own record by <code>hw/card_stress_progr
   // ---- the page ----
   function render(d) {
     validate(d);
-    var frag = document.createDocumentFragment(), N = d.nights.length, newest = d.nights[N - 1];
+    var frag = document.createDocumentFragment(), N = d.nights.length, T = d.totals;
     var cur = d.now.classes.filter(function (c) { return c.current; });
     var old = d.now.classes.filter(function (c) { return !c.current && c.nights.length; });
     var byId = {};
     d.now.classes.forEach(function (c) { byId[c.id] = c; });
 
-    // freshness
-    var age = isnum(d.newest.end_epoch) ? Date.now() / 1000 - d.newest.end_epoch : null;
+    // ---- at a glance: is it healthy? The newest night, how it ended, the run's disagreements and the newest night's legs, each from the file;
+    //      the word before them (Healthy, Check, Not healthy) is the page's, computed from those same fields, and its rule is on hover and in the notes
+    var nn = d.nights[N - 1], dis = T.disagreements;
+    var age = isnum(nn.end_epoch) ? Date.now() / 1000 - nn.end_epoch : null, stale = age !== null && age > 3 * 86400;
+    var LEG = { fail: "failed", timeout: "timed out", no_device: "found no device", parse_error: "could not be read", error: "ended in an error" };
+    var badLegs = Object.keys(nn.legs).filter(function (k) { return k !== "pass" && k !== "skipped" && nn.legs[k] > 0; });
+    var how = !nn.closed ? " has NO run_end in the record: the run was still going when the copy was made, or it died. Its last record is " + nn.end + (age !== null ? ", " + ago(age) : "") + "."
+      : " ended " + (nn.reason === "deadline" ? "at its deadline" : nn.reason ? "(" + nn.reason + ")" : nn.reason_withheld ? "(its reason is not published)" : "") +
+        (isnum(nn.exit) && nn.exit !== 0 ? " with exit status " + nn.exit : "") + ", " + nn.end + " by the card host's clock" + (age !== null ? ", " + ago(age) : "") + ".";
+    var disSay = dis === 0 ? "No disagreement in the run's " + fmt(T.completed_slices) + " completed slices, night " + nn.n + "'s " + fmt(nn.slices) + " among them."
+      : plural(dis, "disagreement", "disagreements") + " in the run's " + fmt(T.completed_slices) + " completed slices, " + fmt(nn.disagreements) + " of them in night " + nn.n + "'s " + fmt(nn.slices) + ".";
+    var legSay = "Its legs: " + (badLegs.length ? badLegs.map(function (k) { return fmt(nn.legs[k]) + " " + (LEG[k] || k); }).join(", ") + "; " : "") + fmt(nn.legs.pass) + " passed" +
+      (nn.legs.skipped ? ", " + fmt(nn.legs.skipped) + " skipped" : "") + (badLegs.length ? "." : "; none failed, timed out or found no device.");
+    var bad = dis > 0 || badLegs.length > 0, warn = !nn.closed || nn.reason !== "deadline" || (isnum(nn.exit) && nn.exit !== 0) || stale;
+    var WORD = "Healthy when the newest night ended at its deadline with exit status 0 less than 3 days ago, the run holds no disagreement, and no leg of the newest " +
+               "night failed, timed out, found no device, could not be read or ended in an error; Not healthy for a disagreement or such a leg; Check otherwise.";
+    var health = [h("p", { "class": "health", title: "The word is this page's, computed from the file: " + WORD }, h("span", { "class": "dot " + (bad ? "bad" : warn ? "warn" : "ok"), "aria-hidden": "true" }),
+      h("strong", { text: bad ? "Not healthy." : warn ? "Check." : "Healthy." }), " Night " + nn.n + " (" + (nn.date || "-") + ")" + how + " " + disSay + " " + legSay +
+      (stale ? " The newest night is more than 3 days old: the nightly update has not been made since." : "")),
+      T.disagreement_list && T.disagreement_list.length ? h("p", { "class": "small dislist" }, h("strong", { text: "Disagreements recorded: " }),
+        T.disagreement_list.map(function (x) { return x.item + " on " + (x.image || "?") + " at " + (x.start || "?"); }).join("; ")) : null];
+
+    // ---- at a glance: how far along? Each current class, a row a group (the class's total where it has no wide-format items): the share covered, the
+    //      items complete and the finish. A group's finish is not in the file: it is the latest of its open items' estimates, computed here, and says so.
+    function rowsOf(c) {
+      var b = group(c, "base"), w = group(c, "wide");
+      return w ? [b ? ["base items", b, "base"] : null, ["wide-format items", w, "wide"]] : [["all items", c.total, null]];
+    }
+    function finish(c, g) {
+      var open = c.items.filter(function (r) { return !r.complete && (g === null || r.group === g); }), last = null, none = 0;
+      open.forEach(function (r) { if (!r.estimate) none++; else if (!last || r.estimate.nights_left > last.estimate.nights_left) last = r; });
+      if (!open.length) return null;                 // a complete group: its count says so, and it has no finish to show
+      if (!last) return "No estimate: " + (c.served ? "none of its " + plural(open.length, "open item", "open items") + " gained in the window" : "no slice has completed under this tree yet") + ".";
+      var e = last.estimate;
+      return [h("span", { "class": "est", text: "ESTIMATE" }), " by " + (e.date || "-") + ", about " + plural(e.nights_left, "more night", "more nights") +
+              " (the pace of its class's last " + plural(e.window_nights, "night", "nights") + ")" +       // the window is the estimate's own: fewer for a younger class
+              (none ? "; " + plural(none, "open item has", "open items have") + " no estimate" : "")];
+    }
+    function frow(c, x) {
+      var t = x[1];
+      return h("div", { "class": "frow" }, h("span", { "class": "fwhat", text: x[0] }), bar(t.covered, t.space, c.kind + " " + x[0] + " covered"),
+        h("span", { "class": "fpct", text: pct1(t.covered, t.space) }), h("span", { "class": "fcount", text: t.complete + " of " + t.items + " complete" }),
+        h("span", { "class": "ffin" }, t.items ? finish(c, x[2]) : "no items"));
+    }
+    var far = h("div", { "class": "far" }, h("h2", { text: "How far along" }),
+      cur.length ? cur.map(function (c) {
+        var first = c.nights[0];
+        return [h("div", { "class": "fclass" }, h("strong", { text: c.kind + " items" }), " - ", h("span", { "class": "mono", text: c.label }),
+                  h("span", { "class": "dim", text: " - since night " + first + " (" + (d.nights[first - 1].date || "-") + "), " + plural(c.nights.length, "night", "nights") +
+                    (c.served ? "" : "; no slice has completed under it yet") })),
+                rowsOf(c).map(function (x) { return x ? frow(c, x) : null; })];
+      }) : h("p", { text: "No class is current: the newest night ran under no recorded tree." }),
+      h("p", { "class": "small dim" }, "A finish is an ", h("span", { "class": "est", text: "ESTIMATE" }), ", by the file's rule: each open item's own pace over its class's last " +
+        "nights, as many as the finish names (fewer for a younger class; How to read it, Estimates). A group's finish is the latest of its open items', computed by this page from them."));
+
     var commit = typeof d.made.commit === "string" ? d.made.commit : null, hex = commit && /^[0-9a-f]{40}$/.test(commit);
-    frag.appendChild(h("section", { id: "fresh" },
-      h("p", null, h("strong", { text: "Newest night: " + (d.newest.date || "-") }),
-        d.newest.closed ? " (night " + d.newest.night + " of " + N + "; ended " + d.newest.end + " by the card host's clock" + (age !== null ? ", " + ago(age) : "") + ")"
-                        : " (night " + d.newest.night + " of " + N + "; it has NO run_end in the record: the run was still going when the copy was made, or it died. Its last record is " + d.newest.end + ")"),
+    frag.appendChild(h("section", { id: "glance" }, health,
+      h("div", { "class": "glance" }, far, ratesSection(d)),
       h("p", { "class": "small dim" }, "Made with the tools at commit ",
         hex ? [h("a", { href: REPO + commit }, h("code", { text: commit.slice(0, 12) })), "."] : commit ? [h("code", { text: commit.slice(0, 40) }), " (not a commit hash)."] : "(not recorded).",
-        " The figures come from the run's record of " + fmt(d.source.records) + " lines (metrics sha256 ", h("code", { text: d.source.metrics_sha256.slice(0, 12) }), ")."),
-      (age !== null && age > 3 * 86400) ? h("p", { "class": "banner", text: "The newest night is more than 3 days old: the nightly update has not been made since." }) : null));
+        " The figures come from the run's record of " + fmt(d.source.records) + " lines (metrics sha256 ", h("code", { text: d.source.metrics_sha256.slice(0, 12) }), ").")));
 
-    // headline
-    // a class's headline figures over `t` (the class's total, or one group's): the share of the campaign it covers
-    function figures(t, label) {
-      return [h("div", { "class": "big", text: t.complete + " of " + t.items }),
-              h("div", { text: "items fully covered" }),
-              bar(t.covered, t.space, label),
-              h("div", null, h("strong", { text: pct1(t.covered, t.space) }), " of the campaign's " + fmt(t.space) + " encodings or indices (" + fmt(t.covered) + " covered)")];
-    }
-    var cards = cur.map(function (c) {
-      var t = c.total, first = c.nights[0], base = group(c, "base"), wide = group(c, "wide");
-      return h("div", { "class": "card" },
-        h("div", { "class": "kind", text: c.kind + " items - current " + (c.kind === "tile" ? "RTL tree" : "host tree") }),
-        h("div", { "class": "mono small", text: c.label }),
-        wide ? [base ? figures(base, c.kind + " items covered") : null,
-                h("div", { "class": "kind", text: "wide-format items" }), figures(wide, c.kind + " wide-format items covered")]
-             : figures(t, c.kind + " items covered"),
-        h("div", { "class": "small dim", text: "Under this tree since night " + first + " (" + (d.nights[first - 1].date || "-") + "), " + c.nights.length +
-          " night" + (c.nights.length === 1 ? "" : "s") + (c.served ? "." : ". No slice has completed under it yet.") }));
-    });
-    var earlier = old.map(function (c) {
-      var base = group(c, "base"), wide = group(c, "wide");
-      function line(t) { return t.complete + " of " + t.items + " items fully covered, " + pct1(t.covered, t.space) + " (" + fmt(t.covered) + " of " + fmt(t.space) + ")"; }
-      return h("li", null, h("span", { "class": "mono", text: c.kind + ": " + c.label }), ": " +
-        (wide ? (base ? line(base) + "; " : "") + "wide-format items: " + line(wide) : line(c.total)) + ", night" + (c.nights.length === 1 ? " " : "s ") + c.nights.join(", "));
-    });
-    frag.appendChild(h("section", { id: "headline" }, h("h2", { text: "How far along" }),
-      cards.length ? h("div", { "class": "cards" }, cards) : h("p", { text: "No class is current: the newest night ran under no recorded tree." }),
-      h("p", { "class": "small" }, h("strong", { text: "Why a changed tree starts again. " }), d.rules.classes),
-      (d.rules.groups && d.now.classes.some(function (c) { return group(c, "wide"); })) ? h("p", { "class": "small" }, h("strong", { text: "Groups. " }), d.rules.groups) : null,
-      earlier.length ? h("details", { open: "" }, h("summary", { text: "Earlier trees (" + earlier.length + "), kept as history" }), h("ul", null, earlier)) : null));
-
-    var rates = ratesSection(d);                    // parcel TP: beside the headline, and only for a file that has rows of rates
-    if (rates) frag.appendChild(rates);
-
-    // the growing list: grouped by the tree each item completed on, the current trees first
+    // ---- below the glance, folded ----
     function levelTag(level) {
       return level === "hard" ? h("span", { "class": "tag", title: "a deterministic space of constructed operands, not the operand space", text: "hard-case" }) :
              level === "class" ? h("span", { "class": "tag", title: "a claim at the class level, plausible and not proved", text: "class level" }) : null;
     }
-    var fc = d.totals.fully_covered, inCur = fc.filter(function (x) { return byId[x["class"]] && byId[x["class"]].current; }).length;
-    var groups = cur.concat(old).map(function (c) {
-      var mine = fc.filter(function (x) { return x["class"] === c.id; }).sort(function (a, b) { return b.night - a.night || (a.item < b.item ? -1 : 1); });
-      if (!mine.length && !c.current) return null;
-      var rows = mine.map(function (x) {
-        var it = c.items.filter(function (r) { return r.item === x.item; })[0] || {};
-        return h("tr", null, h("td", { "class": "l mono" }, x.item, levelTag(it.level), formatTag(it.format)), h("td", null, x.night + (x.date ? " (" + x.date + ")" : "")));
-      });
-      return h("div", null, h("h3", { "class": "mono", text: (c.current ? "current " : "earlier ") + c.kind + " tree: " + c.label }),
-        mine.length ? h("table", null, h("thead", null, h("tr", null, h("th", { text: "Item" }), h("th", { text: "Night completed" }))), h("tbody", null, rows))
-                    : h("p", { "class": "dim", text: "None yet under this tree." }));
-    });
-    frag.appendChild(h("section", { id: "covered" }, h("h2", { text: "Fully covered items" }),
-      h("p", { text: fc.length + " in all, " + inCur + " under the current trees. The list only grows: each item is listed with the night it completed, under the tree it completed on." }),
-      groups));
-
     // per item
     function classBlock(c) {
       var open = c.items.filter(function (r) { return !r.complete; }), done = c.items.filter(function (r) { return r.complete; });
@@ -386,16 +436,48 @@ rebuilt after each night from the run's own record by <code>hw/card_stress_progr
       }
       function head(what, g) { return h("div", { "class": "grouphead", text: what + ": " + g.complete + " of " + g.items + " fully covered" }); }
       var items = wide ? [base ? [head("Base items", base), part(false)] : null, head("Wide-format items", wide), part(true)] : open.concat(done).map(row);
+      // a current class's figures, which the glance shows as a bar and a share, in full: its covered indices of its space, a group's over its own
+      function says(t) { return t.complete + " of " + t.items + " fully covered" + (c.current ? ", " + pct1(t.covered, t.space) + " of the campaign's " + fmt(t.space) + " encodings or indices (" + fmt(t.covered) + " covered)" : ""); }
       return h("div", null, h("h3", { "class": "mono", text: c.kind + " items - " + c.label }),
-        h("p", { "class": "small dim", text: (wide ? (base ? "base items: " + base.complete + " of " + base.items + " fully covered; " : "") + "wide-format items: " + wide.complete + " of " + wide.items + " fully covered; night"
-                                                    : c.total.complete + " of " + c.total.items + " fully covered; night") + (c.nights.length === 1 ? " " : "s ") + c.nights.join(", ") }),
+        h("p", { "class": "small dim", text: (wide ? (base ? "base items: " + says(base) + "; " : "") + "wide-format items: " + says(wide) + "; night" : says(c.total) + "; night") + (c.nights.length === 1 ? " " : "s ") + c.nights.join(", ") }),
         c.served ? items : h("details", null, h("summary", { text: "No slice has completed under this tree yet: its " + c.items.length + " items are all at zero" }), items));
     }
-    var perItem = h("section", { id: "items" }, h("h2", { text: "Item by item" }),
-      h("p", { "class": "small dim", text: "Current trees first. An item that nothing has been swept for under a tree is listed there at zero: its coverage under an earlier tree is in the history, and does not count here. For the same reason a range swept only under an earlier tree is still open under this one, so an item's first uncovered index can be low while its percentage is high." }),
-      cur.map(classBlock),
-      old.length ? h("details", null, h("summary", { text: "Earlier trees, item by item" }), old.map(classBlock)) : null);
-    frag.appendChild(perItem);
+    var nCur = 0, nCurDone = 0;
+    cur.forEach(function (c) { nCur += c.total.items; nCurDone += c.total.complete; });
+    frag.appendChild(fold("items", "Item by item: " + plural(nCur, "item", "items") + " under the current trees, " + fmt(nCurDone) + " complete",
+      h("p", { "class": "small dim", text: "An item that nothing has been swept for under a tree is listed there at zero: its coverage under an earlier tree is in the history, and does not count here. For the same reason a range swept only under an earlier tree is still open under this one, so an item's first uncovered index can be low while its percentage is high." }),
+      cur.length ? cur.map(classBlock) : h("p", { "class": "dim", text: "No class is current." })));
+
+    // the growing list: grouped by the tree each item completed on, the current trees first
+    var fc = T.fully_covered, inCur = fc.filter(function (x) { return byId[x["class"]] && byId[x["class"]].current; }).length;
+    var groups = cur.concat(old).map(function (c) {
+      var mine = fc.filter(function (x) { return x["class"] === c.id; }).sort(function (a, b) { return b.night - a.night || (a.item < b.item ? -1 : 1); });
+      if (!mine.length && !c.current) return null;
+      var rows = mine.map(function (x) {
+        var it = c.items.filter(function (r) { return r.item === x.item; })[0] || {};
+        return h("tr", null, h("td", { "class": "l mono" }, x.item, levelTag(it.level), formatTag(it.format)), h("td", null, x.night + (x.date ? " (" + x.date + ")" : "")));
+      });
+      return h("div", null, h("h3", { "class": "mono", text: (c.current ? "current " : "earlier ") + c.kind + " tree: " + c.label }),
+        mine.length ? h("table", null, h("thead", null, h("tr", null, h("th", { text: "Item" }), h("th", { text: "Night completed" }))), h("tbody", null, rows))
+                    : h("p", { "class": "dim", text: "None yet under this tree." }));
+    });
+    frag.appendChild(fold("covered", "Fully covered: " + plural(fc.length, "item", "items") + ", " + fmt(inCur) + " under the current trees",
+      h("p", { text: fc.length + " in all, " + inCur + " under the current trees. The list only grows: each item is listed with the night it completed, under the tree it completed on." }),
+      groups));
+
+    // the earlier trees, kept as history: a line each, then their items
+    if (old.length) {
+      var earlier = old.map(function (c) {
+        var base = group(c, "base"), wide = group(c, "wide");
+        function line(t) { return t.complete + " of " + t.items + " items fully covered, " + pct1(t.covered, t.space) + " (" + fmt(t.covered) + " of " + fmt(t.space) + ")"; }
+        return h("li", null, h("span", { "class": "mono", text: c.kind + ": " + c.label }), ": " +
+          (wide ? (base ? line(base) + "; " : "") + "wide-format items: " + line(wide) : line(c.total)) + ", night" + (c.nights.length === 1 ? " " : "s ") + c.nights.join(", "));
+      });
+      var nOld = 0, nOldDone = 0;
+      old.forEach(function (c) { nOld += c.total.items; nOldDone += c.total.complete; });
+      frag.appendChild(fold("earlier", "Earlier trees: " + old.length + ", kept as history, " + plural(nOld, "item", "items") + ", " + fmt(nOldDone) + " complete",
+        h("ul", null, earlier), h("h3", { text: "Earlier trees, item by item" }), old.map(classBlock)));
+    }
 
     // per night
     var nrows = d.nights.slice().reverse().map(function (n) {
@@ -435,7 +517,7 @@ rebuilt after each night from the run's own record by <code>hw/card_stress_progr
         lines.push(line(wide, c.style.replace(/stroke:var\([^)]*\)/, "stroke:var(--s3)"), "wide-format items"));
       });
       function plot(W) {
-        var H = Math.max(170, Math.min(250, Math.round(W * 0.42))), L = W < 400 ? 36 : 46, R = 14, T = 14, B = 32;
+        var H = Math.max(150, Math.min(210, Math.round(W * 0.36))), L = W < 400 ? 36 : 46, R = 14, T = 12, B = 30;
         var x = function (n) { return N === 1 ? L + (W - L - R) / 2 : L + (n - 1) * (W - L - R) / (N - 1); };
         var y = function (p) { return T + (100 - p) * (H - T - B) / 100; };
         var g = svg("svg", { viewBox: "0 0 " + W + " " + H, role: "img", "aria-label": "Share of each tree's campaign covered after each night" });
@@ -463,7 +545,7 @@ rebuilt after each night from the run's own record by <code>hw/card_stress_progr
         return g;
       }
       function draw() {
-        var W = Math.max(240, Math.min(640, document.documentElement.clientWidth - 72));
+        var W = Math.max(240, Math.min(540, document.documentElement.clientWidth - 72));
         if (drawn && Math.abs(W - drawn) < 24) return;
         drawn = W;
         box.textContent = "";
@@ -478,8 +560,8 @@ rebuilt after each night from the run's own record by <code>hw/card_stress_progr
       draw();
       return h("figure", null, box, h("div", { "class": "legend" }, legend));
     }
-    frag.appendChild(h("section", { id: "nights" }, h("h2", { text: "Night by night" }),
-      h("table", { "class": "stack" }, h("thead", null, h("tr", null, ["Night", "On the card", "Slices", "Cases", "Legs passed", "Failed", "Skipped", "Note"].map(function (t, i) { return h("th", { "class": i === 0 || i === 7 ? "l" : "", text: t }); }))), h("tbody", null, nrows)),
+    frag.appendChild(fold("nights", "Night by night: " + plural(N, "night", "nights") + ", " + (d.nights[0].date || "-") + " to " + (nn.date || "-") + ", " + hours(T.card_s) + " on the card",
+      h("div", { "class": "scroll" }, h("table", { "class": "stack" }, h("thead", null, h("tr", null, ["Night", "On the card", "Slices", "Cases", "Legs passed", "Failed", "Skipped", "Note"].map(function (t, i) { return h("th", { "class": i === 0 || i === 7 ? "l" : "", text: t }); }))), h("tbody", null, nrows))),
       h("p", { "class": "small dim", text: "A slice is one range of an item's space swept and compared; a case is one result compared. Legs are the battery's checks and the sweep's slices. Times are the card host's." }),
       h("h3", { text: "Coverage after each night, by tree" }),
       h("p", { "class": "small dim", text: "Each line is one tree class: the share of that class's campaign covered, cumulatively. Blue is tile items, green host items; a dashed line is an earlier tree, which no longer gains." +
@@ -487,8 +569,10 @@ rebuilt after each night from the run's own record by <code>hw/card_stress_progr
       chart()));
 
     // totals
-    var T = d.totals, by = T.legs.by_status || {};
-    frag.appendChild(h("section", { id: "totals" }, h("h2", { text: "Totals" }), h("dl", { "class": "totals" },
+    var by = T.legs.by_status || {};
+    function kv(k, v) { return h("div", null, h("dt", { text: k }), h("dd", { text: v })); }
+    frag.appendChild(fold("totals", "Totals: " + plural(T.slices, "slice", "slices") + ", " + plural(T.cases, "case", "cases") + ", " + plural(T.disagreements, "disagreement", "disagreements") + ", " + plural(T.legs.total, "leg", "legs"),
+      h("dl", { "class": "totals" },
       kv("Nights", fmt(T.nights) + (T.closed_nights !== T.nights ? " (" + T.closed_nights + " closed)" : "")),
       kv("Time on the card", hours(T.card_s) + " (" + hm(T.card_s) + ", " + fmt(Math.round(T.card_s)) + " s)"),
       kv("Wall span", dur(T.wall_s) + " (from " + (T.first || "-") + "; includes the days between nights)"),
@@ -496,18 +580,17 @@ rebuilt after each night from the run's own record by <code>hw/card_stress_progr
       kv("Disagreements", T.disagreements + " in " + fmt(T.completed_slices) + " completed slices"),
       kv("Legs", fmt(T.legs.total) + " (pass " + fmt(by.pass) + ", fail " + fmt(by.fail) + ", skipped " + fmt(by.skipped) + Object.keys(by).filter(function (k) { return k !== "pass" && k !== "fail" && k !== "skipped" && by[k] > 0; }).map(function (k) { return ", " + k + " " + fmt(by[k]); }).join("") + ")"),
       kv("Cycles", fmt(T.cycles)))));
-    if (T.disagreement_list && T.disagreement_list.length) {
-      frag.lastChild.appendChild(h("div", { "class": "banner" }, h("strong", { text: "Disagreements recorded: " }),
-        T.disagreement_list.map(function (x) { return x.item + " on " + (x.image || "?") + " at " + (x.start || "?"); }).join("; ")));
-    }
-    function kv(k, v) { return h("div", null, h("dt", { text: k }), h("dd", { text: v })); }
 
     // how to read it
-    frag.appendChild(h("section", { id: "notes" }, h("h2", { text: "How to read it" }),
+    frag.appendChild(fold("notes", "How to read it: nights, trees and groups, time, estimates, and which figures are the page's own",
       h("p", { "class": "small" }, h("strong", { text: "Nights. " }), d.rules.night),
+      h("p", { "class": "small" }, h("strong", { text: "Why a changed tree starts again. " }), d.rules.classes),
+      (d.rules.groups && d.now.classes.some(function (c) { return group(c, "wide"); })) ? h("p", { "class": "small" }, h("strong", { text: "Groups. " }), d.rules.groups) : null,
       h("p", { "class": "small" }, h("strong", { text: "Time. " }), d.rules.card_time),
       h("p", { "class": "small" }, h("strong", { text: "Estimates. " }), d.rules.estimate),
       h("p", { "class": "small" }, h("strong", { text: "Kinds of figure. " }), "Counts, times and the coverage of each item are READ from the run's record by the project's report. Sums, percentages and the differences between nights are COMPUTED from those. The finish dates are ESTIMATES. A tile item is one the card's tile computes; a host item is the library's host code run against the CPU, in which the tile computes nothing."),
+      h("p", { "class": "small" }, h("strong", { text: "The page's own. " }), "Two things at a glance are not in the data file; this page computes them from it. The word before the newest night: " + WORD +
+        " A group's finish: the latest of its open items' estimated dates, with the count of its open items that have none. Every other figure is the file's, or a sum, share, hour or age computed from the file's fields and the clock, by the rules above."),
       h("p", { "class": "small dim" }, "Campaign: " + (d.now.campaign.items ? d.now.campaign.items.length + " items, named by " + d.now.campaign.named_by + "." : d.now.campaign.named_by + ".") +
         (d.now.campaign.unknown_to_the_catalog && d.now.campaign.unknown_to_the_catalog.length ? " Not in the catalog: " + d.now.campaign.unknown_to_the_catalog.join(", ") + "." : "")),
       h("p", { "class": "small dim" }, h("a", { href: "index.html", text: "The conformance page" }), " - ", h("a", { href: "demos.html", text: "the five workloads" }))));
