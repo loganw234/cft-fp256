@@ -6131,6 +6131,10 @@ this level?** Logan's instruction, above.
      seq_check.py's eighth corpus runs the 120 fragments, in two
      shapes, through libcft against seq.py, with 0 mismatches. The
      language is next.
+   - **The trig part** (2026-10-29): parcel M2P, merged at 0f9ff76.
+     The eighth corpus also runs sin, cos and tan's 45 fragments at
+     fp64, fp128 and fp256 (fp32's are parcel M2F's), in both shapes:
+     90 programs and 5,237 lanes at the gate's settings, 0 mismatches.
 3. **The language, golden-first:**
    - the six nodes and their interpreter;
    - folds and refusals (question 8), and the renderers;

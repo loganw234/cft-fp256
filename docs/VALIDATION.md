@@ -25859,3 +25859,52 @@ M2G2a built sin, cos and tan and held them on seq.py alone: its `check_seq` runs
 **Send-back 3 (2026-10-29).** Verifier VM2P, re-checking send-back 2, found one wrong answer in its "Looked for now" bullet, which said the source of seq_check.py is read "by the fake trees that copy the real file (MARKER_FILES, for the trees group, and the records and wide groups)". READ in hw/test_card_stress.py at 2090bd69, the line numbers checked: **`MARKER_FILES` (line 2989) is not the trees group's** - `scn_trees` (3485 to 3607) names neither it nor seq_check.py. It is used at 3081, in `scn_pool_tree` (the pool group: `group_pool`, call at 8910; its scratch repo is named `treerepo`), and at 6880, in `manifest_repo` (the build group: `manifest_driver_checks` and `scn_manifests`, called from `scn_build_refusals` at 2341, group table at 9493); the plants re-run those scenarios (for example 7445 and 7605).
 - **Two groups copy the real file through lists of their own,** not through `MARKER_FILES`: the records group's `scn_records_real` (tuple at 4749; `group_records`, call at 5571) and the wide group's `scn_wide_build` (tuple at 6380, copy at 6382; `group_wide`, call at 6501; POSIX only, skipped by name elsewhere, 6378). VM2P read the wide group as naming no seq_check.py; line 6380 does, so for the wide group the clause stood, and its fault is the attribution to `MARKER_FILES` and to the trees group.
 - docs/README.md is recounted (VALIDATION.md 25,799 to 25,803 lines, the two totals 93,378 to 93,382 and 53,326 to 53,330); `python -B python/check_docs_index.py` rc 0, `python -B python/project_figures.py --check` rc 0.
+
+## 2026-10-29 - the lead's: night 9 on the page, the first data file with the card's rates; the probe's first card run; parcels PD and M2P merged with the runs behind them, M2P after a regression the gate found; night 1029 with the probe leg (the lead; verifiers VPD, VM2P)
+
+**Night 9 on the page** (6f7ad1d5, the data file alone, pushed 07:49:38).
+- Night 1028 (run card-stress-1019 resumed at c96d1335, 18:28:39 to 07:45:08, at its deadline, exit 0): 15 cycles, 1,068 legs passed, 0 failed, 0 skipped, 910 slices, 2,555,538,517,110 cases, 0 disagreements. Totals: 9 nights, 18,206,761,027,224 cases, 0 disagreements, 5,227 slices.
+- It is the first data file with `rates`: an entry for each of the 9 nights. Night 9's 15 rows include the quad's div fp128 hard at 363,393 cases a second a tile at the median. `probe` is null: no night had run the leg.
+
+**The probe's first card run** (box_probe_1029.sh at 9ccbe003, 07:47:37 to 07:51:50; the rounds' records, box/probe-1029, 8 of 8 matching the box's sums). The tool ran as the driver's leg runs it, 2 s a row: the quad's tile 1 alone, its four tiles together, then the single and the deep image.
+- Every phase exited 0, and every process printed "28 rows, 28 timed, 0 refused, 0 red; every check ok".
+- The quad's tile 1 alone, in M elements a second: div 2.144, 1.501, 0.938 and 0.626, and sqrt 2.052, 1.487, 0.913 and 0.585, at fp32, fp64, fp128 and fp256. The four tiles together sum div fp64 to 6.187.
+- Beside night 9's pipeline rate for sqrt fp64 (756,926 cases a second a tile, the oracle on), the card alone runs about twice as fast (COMPUTED).
+- Known limits: 2 s rows are short. For the cheap ops, tile 1 alone reads below the together run's per-tile figures at fp128 and fp256, which is not explained here.
+
+**Night 1029** waits for 18:00 on the box at 6f7ad1d5 (launched 07:56:18, launcher v5), with `--rate-probe` in the long run: the leg's first night.
+- v5's guard counts the probe by process name. Its own arguments carry `--rate-probe`, so a pattern would have counted the launcher itself at 18:00 and refused the night (MEASURED on the box: pattern 1, name 0).
+- Its preflight was rehearsed at 6f7ad1d5 (box_pre_1029.sh): 1,250 checks, 0 failed, 9 skipped. The ninth skip is TP's "the rates on the page in node", skipped by name since the launcher has no node.
+- Trees: rtl 44b963dd... is unchanged, so the tile and wide items continue. TP's tool moved host/ to c83b48f6..., so the host items begin a new class.
+- Its close-out (box_morning_1030.sh) waits for its end.
+
+**Merged.** Each parcel's entry above gives its results. The lead's runs behind each merge were MEASURED on amd-arc-box, every copy equal to the box's sums, in the rounds' records.
+- **PD** (merge 02727c5d, pushed 12:38:03), the page redesigned at Logan's ask; he approved the preview ("Page looks good, nice job").
+  - box_pd.sh at c41609a9: the apply-only guard 433/0; the suite 1,250/0/4 at the base and at PD; every plant but TP's 290/0/5; TP's 146/0/0.
+  - box_pd2.sh at 5da0b2dc (send-back 1): 434/0; 1,250/0/4; 291/0/5; 146/0/0.
+  - Verifier VPD read both runs' logs. Each of PD's 14 plants and the 5 re-anchored ones is red at its check; TP [073] and [077] are retired by name; the named skips are the same at the base and at PD.
+- **M2P** (merge 0f9ff761, at 2090bd69), program.c parity for sin, cos and tan. box_m2p3.sh ran at fcaa5e08, with libcft.so built in both fresh clones (send-back 1, d2eb244b, changed docs only; send-back 2 only how the verdict phrases are written, its output byte-identical).
+  - The seq stage through the runner, base, M2P, base, M2P on a quiet box: 42, 72, 42 and 71 s, each PASS with nothing skipped.
+  - The trig part at the gate's settings: 90 programs and 5,237 lanes; the remote leg 481 refused by name.
+  - `seq_check.py --trials 250 --math-rounds 40` at fp64, fp128 and fp256 with seeds 101, 102 and 103: nine processes, 606 s, each rc 0, each with 1,200 trig programs and the agreement line; 0 MISMATCH lines.
+- **The gate found a regression of M2P's**, on the first merge (c156ddd5, never pushed).
+  - box_gate_1029.sh, `verify/run.sh --only docs,libcft,generated,seq,cardstress` with node on PATH: rc 1, 1,322 s. docs ok 44 s, libcft ok 1,155 s, generated ok 45 s, seq ok 72 s; **cardstress FAIL 3 s**, the suite crashing in its normal scenario (`IndexError`, hw/test_card_stress.py:1434).
+  - The lead ran that scenario's driver in the gate's clone: "build step content host/tests/seq_check.py: FAILED - does not contain 'THE ROUTINE CORPUS DID NOT REACH EVERY FORM' (a stale tree?)", build_failed (exit 3). hw/card_stress.py's `markers` require that literal in the source, and M2P's restructure printed it from an f-string. **Every card night at that tree would have refused at its build step.**
+  - Night 1029 runs at 6f7ad1d5 and was never at risk. main was reset to PD's merge, PD was pushed alone, and M2P was sent back (2): the phrases written out whole, the output byte-identical, the driver's normal group 22/0/0 (17 failed with the f-string put back). M2P was then re-merged.
+- **The gate** at 0f9ff761 (box_gate_1029b.sh): `make -C host libcft.so`, then `verify/run.sh --only docs,generated,seq,cardstress` with node on PATH: rc 0, 891 s, VERDICT PASS with cardstress's 4 inner skips, each by name (the real-copy checks, whose variables the gate does not set).
+  - docs ok 44 s; generated ok 44 s; seq ok 71 s (the trig lines 1,785, 1,720 and 1,732 lanes); cardstress ok 729 s (1,250 checks, 0 failed).
+  - The libcft stage itself ran ok at c156ddd5 (1,155 s), and no change since reaches its inputs.
+- **M2P's send-back 3** (dfd06c39, merged at c64ab1ad) is docs only. Verifier VM2P found that one clause of the send-back 2 paragraph named the wrong test groups, and M2P corrected it by an appended paragraph. M2P also corrected VM2P's own reading of the wide group: the lead READ its tuple (scn_wide_build, line 6380 at 2090bd69), which names seq_check.py.
+- **The host tree moves again at 0f9ff761.** M2P's host/tests/seq_check.py moves `HEAD:host` from c83b48f6... to 0a69595e.... The driver keys a host item's coverage by the whole host/ tree, so a night run at this tree begins another host class: box CPU, not card time. rtl is unchanged.
+- **docs/ROADMAP.md:** program.c parity (M1's item 2) gains the trig part, dated, beside the six's "120 fragments".
+
+**The lead's slips, recorded:**
+- box_m2p.sh refused at its own assertion. Its marker for the trig reach check was typed from M2P's report; it is text the check builds at run time and in no source line.
+- box_m2p2.sh had its markers checked against both trees, then failed every run in seconds: host/libcft.so was missing. A fresh clone has none, and `--only seq` builds none; the lead's own notes listed that pitfall.
+- In both cases, nothing of M2P's was at fault. Every box script's markers are now checked against the commit and its base before staging.
+- The lead's runs for M2P ran only the seq stage. The card driver reads seq_check.py's source, so the card-stress suite belonged in them too. The gate caught it before any push.
+- PD's brief miscounted the page plants (24, not 25) and the sections (8, not 7). VM2P's brief worded its example of a regression too broadly, so its (a)1, the six's bits line the gate gained, was judged a note.
+- Leftover redirects in two copy commands aimed outside the repository. One wrote a 130-byte file of two sums, which was read and deleted. The other failed and created nothing.
+- The first merge's message named box_m2p2.sh as the measuring script. It was amended (b6be4c5d to c156ddd5), and that merge was dropped unpushed in any case.
+
+docs/README.md is recounted.
