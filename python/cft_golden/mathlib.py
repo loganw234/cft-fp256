@@ -162,7 +162,10 @@ TRIG_LOST, trig_gates, plan_reduction, ReductionValue, reduction_front,
 trig_reduction, reduction_audit, build_reduction, REDUCTION_PLANTS and
 check_reduction_constants (`--check`, and `--only reduction`). It adds no
 routine to NAMES and moves none of the six: their fragments are the ones they
-were.
+were. fp32's triple-word reduction (parcel M2F1; G = 40, where this one's tail
+refuses) is beside it: plan_reduction_tw, trig_reduction_tw, TRIG_TW_PLANTS and
+check_reduction_tw_constants (`--only reduction-tw`), reduction_front's two
+switches (rho_half, late_from), and build_reduction(FP32) at G = 40.
 
 sin, cos and tan (parcel M2G2a, M2's build, wave 2, first half) are built on
 that reduction, at fp64, fp128 and fp256, and are BESIDE the six, not among
@@ -210,6 +213,8 @@ __all__ = ["fragment", "evaluate", "invariants", "flag_words", "build",
            "ReductionValue", "reduction_front", "trig_reduction",
            "reduction_audit", "build_reduction", "REDUCTION_PLANTS",
            "check_reduction_constants",
+           "plan_reduction_tw", "trig_reduction_tw", "TRIG_TW_PLANTS",
+           "check_reduction_tw_constants",
            "TRIG_NAMES", "TRIG_LIVE_CAP", "TRIG_PLANTS", "plan_trig",
            "trig_rho", "trig_after", "check_trig_constants"]
 
@@ -995,7 +1000,16 @@ def _values(fmt, body, words, x, over=None):
 # pinned per fragment (test_mathlib.py's SHAPE), and LIVE_CAP is its maximum.
 
 PHASE_ORDER = ("setup", "reduce", "red-setup", "red-window", "red-products",
-               "red-coarse", "red-mid", "red-lower", "red-scale", "red-small",
+               "red-coarse", "red-mid",
+               # fp32's triple-word reduction (parcel M2F1): the late products
+               # of positions 4 to 8 after the mid sum's first half, and the
+               # triple word t after the lows, each in the model's place
+               # (docs/studies/m2/tw32.py). Nothing of the six, of M2G1's
+               # reductions or of M2G2a's fragments is built in these, so
+               # their relative order, and what the scheduler takes from it,
+               # is as it was.
+               "red-products-low", "red-lower", "red-triple",
+               "red-scale", "red-small",
                "lowword", "tail", "head", "head2", "head3", "Z", "lookup",
                "recon", "scale", "fixed-grid",
                # sin, cos and tan (parcel M2G2a): the squared reduced
@@ -3036,8 +3050,18 @@ class _Red:
     """The reduction under construction: the Build, the plan, the plant and
     the claims. Not public: reduction_front() and trig_reduction() make one."""
 
-    def __init__(self, b, P, plant):
+    def __init__(self, b, P, plant, rho_half=False, late_from=None):
         self.b, self.P, self.plant = b, P, plant
+        # the front's two switches (parcel M2F1), both off for M2G1's builds:
+        # rho_half takes |rho_j| <= ulp(P_j)/2 and not ulp(P_j); late_from, an
+        # int, leaves the products of the positions from it on to the tail
+        if late_from is not None and (not isinstance(late_from, int)
+                                      or isinstance(late_from, bool)
+                                      or late_from < 2):
+            raise ValueError(f"late_from = {late_from!r}: None, or the first "
+                             f"late position, an int of 2 or more (the "
+                             f"coarse sum reads positions 0 and 1)")
+        self.rho_half, self.late_from = bool(rho_half), late_from
         self.fmt = fmt = b.fmt
         if P.fmt != fmt:
             raise ValueError(f"the plan is for {P.fmt.name}, the build for "
@@ -3193,28 +3217,48 @@ def _front(R, x):
     b.phase = "red-products"
     rows = {r[0]: r for r in P.rows}
     need = P.budget - 3                                 # S-hat accuracy
-    prods = []
-    for j in range(L):
+    built = {}
+
+    def product(j, phase="red-products"):
+        """(P_j, rho_j) of position j, built on the first request (in the
+        phase `phase`) and kept: None where no bucket gives j a chunk, rho_j
+        None where it is below the accuracy needed. The loop below asks for
+        the early positions; the tail of a front built with late_from asks
+        for the rest (fr.product), when it wants them."""
+        if j in built:
+            return built[j]
+        keep, b.phase = b.phase, phase
         # the chunk scaled by 2^-(jb), exactly: one MUL, shared by the
         # product and its error
         Wj = win[j] if j == 0 else R.exact(
             b.mul(win[j], wx(Fraction(1, 2 ** (j * bb)))))
         _j, _lmin, lmax, pgrid, rhomag, rhogrid = rows[j]
         if lmax is None:
-            prods.append(None)
-            continue
-        Pj = b.mul(M, Wj)
-        if rhomag > need:                               # the low word counts
-            R.two_prod()
-            nrho = R.exact(b.fma(nM, Wj, Pj))           # = P - T = -rho
-            rho = b.neg(nrho)
-            prods.append((ReductionValue(Pj, lmax + 1e-9, pgrid),
-                          ReductionValue(rho, rhomag, rhogrid)))
+            res = None
         else:
-            prods.append((ReductionValue(Pj, lmax + 1e-9, pgrid), None))
+            Pj = b.mul(M, Wj)
+            if rhomag > need:                           # the low word counts
+                R.two_prod()
+                nrho = R.exact(b.fma(nM, Wj, Pj))       # = P - T = -rho
+                rho = b.neg(nrho)
+                # |rho_j| <= ulp(P_j) (the study's, and M2G1's) or, with the
+                # switch rho_half, ulp(P_j)/2: P_j is the rounding to
+                # nearest of T_j, so the tighter bound is the truth, and
+                # fp32's triple word needs it (its lower group's proof)
+                res = (ReductionValue(Pj, lmax + 1e-9, pgrid),
+                       ReductionValue(rho, rhomag - (1.0 if R.rho_half
+                                                     else 0.0), rhogrid))
+            else:
+                res = (ReductionValue(Pj, lmax + 1e-9, pgrid), None)
+        b.phase = keep
+        built[j] = res
+        return res
+
+    early = L if R.late_from is None else min(L, R.late_from)
+    prods = [product(j) for j in range(early)]
     if prods[0] is not None:
         b.probes.update(P0=prods[0][0].ref)
-    fr.prods = prods
+    fr.prods, fr.product = prods, product
 
     b.phase = "red-coarse"
     nqs = []                    # -k for every quadrant count taken out
@@ -3252,7 +3296,7 @@ def _front(R, x):
     return fr
 
 
-def reduction_front(b, x, P, *, plant=None):
+def reduction_front(b, x, P, *, plant=None, rho_half=False, late_from=None):
     """The reduction's front, appended to the Build `b` for the argument ref
     `x`: the setup (red-setup), the window (red-window), the products
     (red-products) and the coarse sum (red-coarse). The reduction is of |x|.
@@ -3265,16 +3309,35 @@ def reduction_front(b, x, P, *, plant=None):
                    else (P_j, rho_j), ReductionValues, T_j = M c 2^-(jb) =
                    P_j - rho_j exactly; rho_j None where it is below the
                    accuracy needed
+      product      product(j, phase="red-products"): the same pair for any
+                   position, built (in `phase`) on the first request and kept
       coarse, fI   the pieces mod m and f_I, |f_I| <= U/2, exact, which is
                    (P_0 + rho_0 + P_1) mod U
       nqs          the negated quadrant counts taken out so far, [-k_1]
     What follows (trig_reduction's mid, lower, scale and small parts) is what
     a triple word would replace. A static proof that fails is a ValueError
-    naming it. `plant`: one of REDUCTION_PLANTS (the front's act)."""
+    naming it. `plant`: one of REDUCTION_PLANTS (the front's act).
+
+    Two switches (parcel M2F1), both off by default, so that with them off
+    nothing here differs from M2G1's front, instruction for instruction:
+      rho_half     the bound on the low word of a product is ulp(P_j)/2, not
+                   ulp(P_j): P_j is T_j rounded to nearest, so it is the
+                   truth, and fp32's triple word needs it (with the looser
+                   bound its lower group's proof "lower group: low word +
+                   TwoSum error exact" fails at G = 40, by name). It changes
+                   the static bounds of the rho pieces, and so which pieces
+                   the tail splits and where it routes them, not a value
+      late_from    an int of 2 or more: the products of the positions from it
+                   on are not built here (`prods` then holds the positions
+                   below it only) but when the tail asks, product(j,
+                   "red-products-low"), after the upper group's sum: with the
+                   triple word the 18 instructions of positions 4 to 8, and
+                   the design's order keeps one value less live (23, not 24,
+                   MEASURED on the study's model, all nine products first)."""
     if plant is not None and plant not in REDUCTION_PLANTS:
         raise ValueError(f"unknown plant {plant!r}: "
                          f"{', '.join(REDUCTION_PLANTS)}")
-    return _front(_Red(b, P, plant), x)
+    return _front(_Red(b, P, plant, rho_half, late_from), x)
 
 
 def _tail(R, x, fr):
@@ -3618,24 +3681,593 @@ def build_reduction(fmt, rnd=RNE, *, G=None, R="default", plant=None):
     flags are q (not a flag word: Build.run() reads them, nothing compiles
     it). `fmt` is one of the four, `rnd` the program's attribute (recorded and
     used by nothing here: the reduction is RNE, and RDN for the bucket's
-    floor), `G` the guard (GUARD's, 40 at fp32, which is refused by name: fp32
-    must be given G = 18, the double word's), `R` as plan_reduction()'s,
+    floor), `G` the guard (GUARD's by default), `R` as plan_reduction()'s,
     `plant` one of REDUCTION_PLANTS. The probes are trig_reduction()'s; the
     lane's other values are in the unpruned body; Build.meta is
-    trig_reduction()'s, with fn "reduction", G and R."""
+    trig_reduction()'s, with fn "reduction", G and R.
+
+    fp32 at its GUARD, G = 40 (parcel M2F1), builds the TRIPLE word's
+    reduction instead of refusing: trig_reduction_tw() on plan_reduction_tw(),
+    whose result is r0 and whose flags are q, with r1, r2 and small among the
+    probes; plant may then also be one of TRIG_TW_PLANTS. fp32 at G = 18 stays
+    the double word's, and every other call is as it was."""
     if fmt not in FORMATS:
         raise ValueError(f"{fmt!r} is not one of the four formats")
     if rnd not in sf.RND_NAMES:
         raise ValueError(f"rounding attribute {rnd!r} is not one of the five")
-    if plant is not None and plant not in REDUCTION_PLANTS:
-        raise ValueError(f"unknown plant {plant!r}: "
-                         f"{', '.join(REDUCTION_PLANTS)}")
     G = GUARD[fmt.name] if G is None else G
-    P = plan_reduction(fmt, G, R=R)
+    triple = fmt.name == "fp32" and G == GUARD["fp32"]
+    if plant is not None and plant not in REDUCTION_PLANTS:
+        if plant in TRIG_TW_PLANTS and not triple:
+            raise ValueError(f"plant {plant!r} does not apply at {fmt.name} "
+                             f"(G = {G}): it is a fault of the triple word's "
+                             f"reduction, fp32 at G = {GUARD['fp32']}")
+        if plant not in TRIG_TW_PLANTS:
+            raise ValueError(f"unknown plant {plant!r}: "
+                             f"{', '.join(REDUCTION_PLANTS)}")
+    P = plan_reduction_tw(fmt, G, R=R) if triple else \
+        plan_reduction(fmt, G, R=R)
     b = Build(fmt, rnd, f"reduction-{fmt.name}-{sf.RND_NAMES[rnd]}")
     b.meta.update(fn="reduction", G=G, R=P.R, reduction_plant=plant)
+    if triple:
+        out = trig_reduction_tw(b, ("in", "a"), P, plant=plant)
+        return b.finish(out.r0, out.q)
     out = trig_reduction(b, ("in", "a"), P, plant=plant)
     return b.finish(out.rh, out.q)
+
+
+# ---- fp32's triple-word reduction (parcel M2F1) -------------------------------
+#
+# At fp32, G = 40 the double word's tail cannot serve (its mid sum's low word is
+# not exact: trig_reduction() refuses by name), and Logan's decision of
+# 2026-10-27 is that fp32's sin, cos and tan are the TRIPLE word. This is the
+# reduction they stand on, parcel M2X's model (docs/studies/m2/tw32.py,
+# reduce_tw and its helpers) ported: nothing here imports it, and the port is
+# held to it in the parcel's VALIDATION entry. It shares _front() with the
+# double word, with the two switches reduction_front() documents (the half-ulp
+# bound on a product's low word, the late products of positions 4 to 8), and
+# replaces _tail():
+#
+#   red-mid           the mid pieces routed to an UPPER group (bits from 2^bmid
+#                     up, bmid = -20: reduced modulo U as the double word's mid
+#                     sum was), a LOWER group (2^bottom to 2^bmid, a pure
+#                     fraction) and the LOWS (below the bottom, which may
+#                     round); each group an exact double word by the greedy of
+#                     the study's design A; the lower group's high word hands
+#                     its multiple of 2^bmid to the upper part as an exact
+#                     carry, so no cancellation is left between the two; the
+#                     third quadrant count is taken from the rounded exact
+#                     upper part
+#   red-products-low  the products of positions 4 to 8, built when the groups
+#                     want their pieces (the front's late_from)
+#   red-lower         the lows, a double word that may round
+#   red-triple        the six words (lows, lower group, upper part) turned into
+#                     the triple word t: VecSum twice, then renormalised
+#   red-scale         t V exact, r = t pi/2 in three words (pi/2 in three)
+#   red-small         |x| < RD(pi/4) takes r = |x|, quadrant 0
+#
+# The interface, which parcel M2F2 is briefed against (a change to it is the
+# lead's to approve): plan_reduction_tw, trig_reduction_tw and TRIG_TW_PLANTS
+# below, build_reduction(FP32) and check_reduction_tw_constants.
+
+_TW_B = 16                 # the chunk width: the widest whose coarse sum is exact
+_TW_BMID = -20             # the boundary between the upper and the lower group
+_TW_LATE_FROM = 4          # the first position whose product is built late
+_TW_OVER_MAX = Fraction(1, 2 ** 10)    # the cushion this tail will carry
+
+# Faults of the triple word's tail, for the tests: trig_reduction_tw(...,
+# plant=name) and build_reduction(FP32, plant=name). The REDUCTION_PLANTS apply
+# to it too, where their fault is reached: chunk, window, bucket_nearest,
+# quadrant_dropped, pio2_low (the third word), claims_lost, fast_as_two_sum,
+# exact_add (the lower group's first TwoSum, carry_dropped being the upper's)
+# and lw_understated (the recorded bounds of the lower terms, 2^(bmid-1) and
+# the lower group's low word, 8 bits too small: the cushion falls below a
+# measured overshoot); mid_inexact (design B), range_short (fp32 has no
+# range) and split_unproved (no configuration the proofs refuse) cannot act
+# and are refused by name.
+TRIG_TW_PLANTS = {
+    "carry_dropped": "the upper group's first TwoSum a plain add, its error "
+                     "(a carry into the low word) dropped, still claimed "
+                     "exact: the study's carry-dropped, exact_add's analogue; "
+                     "only the arguments at the binade edges of the products "
+                     "see it",
+    "r2_dropped": "r's third word left out of r = t pi/2: r1 = w, r2 = +0",
+}
+
+
+def plan_reduction_tw(fmt=FP32, G=None, *, R="default"):
+    """The triple word's plan: plan_reduction(fmt, G, b=16) for fp32 at G =
+    GUARD["fp32"] = 40 (the model's tw_plan(): b 16, L 9, Z 3, K 18 words,
+    bottom -56, budget -97, Egate -14, Emax 127, and the same rows; b = 16 is
+    the widest chunk whose coarse sum is exact, b = 17 refuses by name), with
+    the boundary between the two exact groups: bmid = -20, and the groups'
+    spans in bits, span_upper = (b - 3) - bmid and span_lower = bmid -
+    bottom, each of which must fit a double word with room (the greedy proves
+    its sums piece by piece): the static proof "groups fit a double word", a
+    ValueError by name. `R` as plan_reduction()'s; the whole range only (R
+    None), the triple word's reduction having no range compare. G other than
+    40, and fp32 only, are refused by name: G = 41 to 44 fail at the lower
+    group's proof (MEASURED by parcel M2X, tw32_guard.out.txt)."""
+    if fmt.name != "fp32":
+        raise ValueError(f"{fmt.name}: the triple word's reduction is fp32's "
+                         f"(the other formats' is the double word's)")
+    G = GUARD[fmt.name] if G is None else G
+    if G != GUARD[fmt.name]:
+        raise ValueError(f"G = {G}: the triple word's reduction is built at "
+                         f"G = {GUARD[fmt.name]} (GUARD): 41 to 44 fail at "
+                         f"the lower group's proof, and G = 18 is the double "
+                         f"word's")
+    P = plan_reduction(fmt, G, R=R, b=_TW_B)
+    if P.R is not None:
+        raise ValueError(f"R = {P.R}: the triple word's reduction is of the "
+                         f"whole range (R = None)")
+    p = fmt.prec
+    P.bmid = _TW_BMID
+    P.span_upper = (P.b - 3) - P.bmid
+    P.span_lower = P.bmid - P.bottom
+    if not (P.span_upper <= 2 * p - 4 and P.span_lower <= 2 * p - 4):
+        raise ValueError(
+            f"static proof 'groups fit a double word' fails: upper "
+            f"{P.span_upper} bits, lower {P.span_lower} bits, double word "
+            f"{2 * p}")
+    return P
+
+
+def _tw_upper(q, bits=96):
+    """q (a Fraction) rounded UP to a dyadic rational of `bits` fractional
+    bits: an upper bound that keeps the plan's exact rational arithmetic
+    small."""
+    return Fraction(-((-q.numerator * 2 ** bits) // q.denominator), 2 ** bits)
+
+
+def _tw_overshoot(p, lower_mag, e_mag, lwl_mag, low_mags):
+    """The greatest 2|t| - 1 the triple word's reduction can leave, an exact
+    rational (rounded up to 96 bits) from the static magnitudes its tail keeps.
+    The last quadrant step centres xh0, the exact upper part's high word, so
+    |xh| <= U/2 whatever the lower words are. What it does not see: xl, the
+    rounding of that sum (|xl| <= ulp(xh0)/2 <= 2^-24 |xh0|, |xh0| <= U + |e|),
+    and the lower terms (h_l - carry <= 2^lower_mag, lower_mag = bmid - 1:
+    the carry took the multiples of 2^bmid up into the decision; the lower
+    group's low word; the lows). With t = f V, V = 2^sigma <= 2 (sigma <= 1)
+    and U V = 1:
+        2|t| - 1 = 2 V (|f| - U/2) <= 2 V |xl| + 2 V |L|
+                 <= 2^(1-p) (1 + |e|/U) + 4 |L|
+    (|e| <= 2^e_mag, U >= 1/2), and 2^-60 for the rounding of r = t pi/2 and
+    of t's triple word (2^-69.5 relative, MEASURED by parcel M2X). M2G1's
+    double word is 2^(1-p) + 4 |L| (_trig_slack): this one adds the |e| term
+    and the 2^-60, which is why it is a formula of its own."""
+    lowsum = Fraction(2) ** math.ceil(lower_mag)
+    if lwl_mag is not None:
+        lowsum += Fraction(2) ** math.ceil(lwl_mag)
+    for m in low_mags:
+        lowsum += Fraction(2) ** math.ceil(m)
+    return _tw_upper(Fraction(2) ** (1 - p)
+                     * (1 + Fraction(2) ** math.ceil(e_mag + 1))
+                     + 4 * lowsum + Fraction(1, 2 ** 60))
+
+
+def _trig_slack_tw(b):
+    """The greatest 2|t| - 1 the build's triple word can leave, as an exact
+    rational, RECOMPUTED from the static magnitudes the build kept
+    (Build.meta["reduction_tw"]: e, lower, lwl, lows) by _tw_overshoot():
+    pi/4 (1 + it) is the rho the polynomials are planned at, 2^-18.91 at fp32
+    (the model's COMPUTED figure)."""
+    m = b.meta["reduction_tw"]
+    return _tw_overshoot(b.fmt.prec, m["lower"], m["e"], m["lwl"], m["lows"])
+
+
+def _check_trig_cushion_tw(b, rho):
+    """A static proof, by name, the triple word's own (M2G1's
+    _check_trig_cushion is a different formula, 2^(1-p) + 4 (|lw| + |lower|)):
+    the computed overshoot of |r| past pi/4 (_trig_slack_tw) is within the
+    cushion rho = pi/4 (1 + c) the polynomials are planned at, c = rho/(pi/4) -
+    1, rho an exact rational. A ValueError that names it where it is not. The
+    build's own rho (Build.meta["rho"]) passes with no room to spare."""
+    slack = _trig_slack_tw(b)
+    cushion = Fraction(rho) / (_pi() / 4) - 1
+    if not slack <= cushion:
+        raise ValueError(
+            f"the triple word's computed cushion past pi/4, "
+            f"2^{math.log2(slack):.2f} at {b.fmt.name} (G = {b.meta['G']}), "
+            f"is past the polynomials' rho = pi/4 (1 + 2^"
+            f"{math.log2(cushion) if cushion > 0 else -math.inf:.2f}): the "
+            f"plan's truncation bound does not hold for every |r| the "
+            f"reduction can leave")
+
+
+def _tw_proof(R, ok, name, detail=""):
+    """A static proof of the triple word's tail, by name: a ValueError where it
+    fails (the model's AssertionError), recorded in Build.meta["proofs"] where
+    it held."""
+    if not ok:
+        raise ValueError(f"static proof '{name}' fails: {detail}")
+    R.b.meta.setdefault("proofs", []).append(name)
+
+
+def _tw_sum_exact(R, pieces, label, plain=None):
+    """The exact sum of ReductionValues as a double word (h, lw|None), by the
+    study's design A greedy: largest first; a piece goes into the low word
+    where that sum is provably exact (the static magnitudes and grids), else
+    into the high word where that is, else by TwoSum, its error word then
+    added to the low word. A plain add is built only where its proof holds, a
+    proof that fails is a ValueError by name. `plain` names a plant that makes
+    the first TwoSum a plain add, still claimed exact (carry_dropped for the
+    upper group, exact_add for the lower)."""
+    b, p = R.b, R.p
+    pieces = sorted([v for v in pieces if v is not None], key=lambda v: -v.mag)
+    if not pieces:
+        return None, None
+    h, lw = pieces[0], None
+    planted = plain is None or R.plant != plain
+    for v in pieces[1:]:
+        if lw is not None:
+            s = R.add_exact(lw, v)
+            if s is not None:
+                lw = s
+                continue
+        s = R.add_exact(h, v)
+        if s is not None:
+            h = s
+            continue
+        g = min(h.grid, v.grid)
+        mag = _lg(2 ** h.mag + 2 ** v.mag)
+        if not planted:
+            planted = True               # the plant: a plain add, error dropped
+            R.fired.add(plain)
+            h = ReductionValue(R.exact(b.add(h.ref, v.ref)), mag, g)
+            continue
+        ss, ee = b.two_sum(h.ref, v.ref)
+        h = ReductionValue(ss, mag, g)
+        ev = ReductionValue(ee, mag - p, g)
+        if lw is None:
+            lw = ev
+        else:
+            lw2 = R.add_exact(lw, ev)
+            _tw_proof(R, lw2 is not None,
+                      f"{label}: low word + TwoSum error exact",
+                      f"lw (mag {lw.mag:.2f}, grid {lw.grid}) + e (mag "
+                      f"{ev.mag:.2f}, grid {ev.grid}) is not provably one "
+                      f"word")
+            lw = lw2
+    return h, lw
+
+
+def _tw_fast(R, a, c):
+    """Fast2Sum (Build.fast_two_sum: three instructions) with its ordering
+    claim recorded for the audit: z = s - a and e = c - z are exact where |a|
+    >= |c| (or a = 0), so both are listed in Build.meta["exact"] and
+    reduction_audit() checks them lane by lane, which the double word's
+    R.fast() does not. fast_as_two_sum builds a TwoSum (six, no claim)."""
+    b = R.b
+    if R.plant == "fast_as_two_sum":
+        R.fired.add(R.plant)
+        return b.two_sum(a, c)
+    s, e = b.fast_two_sum(a, c)
+    R.exact(b.sub(s, a))             # z: the same instruction fast_two_sum made
+    R.exact(e)
+    return s, e
+
+
+def _tw_to_triple(R, terms):
+    """The exact sum of the float `terms` (smallest first, by their static
+    magnitudes) as a triple word (t0, t1, t2): VecSum from the bottom (every
+    TwoSum exact), VecSum again over the errors, the second pass's errors
+    added (plain: their rounding is below 2^-72 of t), then renormalised:
+    Fast2Sum(s, u) with its claim audited, TwoSum for the rest."""
+    b = R.b
+    s = terms[0]
+    errs = []
+    for a in terms[1:]:
+        s, e = b.two_sum(a, s)
+        errs.append(e)
+    u = errs[0]
+    qs = []
+    for e in errs[1:]:
+        u, q = b.two_sum(e, u)
+        qs.append(q)
+    lv2 = qs[0]
+    for q in qs[1:]:
+        lv2 = b.add(lv2, q)
+    t0, w = _tw_fast(R, s, u)
+    t1, t2 = b.two_sum(w, lv2)
+    return t0, t1, t2
+
+
+def _tw_two_prod(R, a, na, c):
+    """(p, ne): p = a c rounded, ne = p - a c = -(the exact error), by one MUL
+    and one FMA; `na` is -a (counted in Build.meta["two_prod"])."""
+    R.two_prod()
+    pr = R.b.mul(a, c)
+    return pr, R.b.fma(na, c, pr)
+
+
+def _tail_tw(R, x, fr):
+    b, P, fmt = R.b, R.P, R.fmt
+    p, L = R.p, P.L
+    BM, BT = P.bmid, P.bottom
+    wi, ZERO, MAGIC = R.wi, R.ZERO, R.magic
+    U, V = fr.U, fr.V
+    nqs, fI = fr.nqs, fr.fI
+    need = P.budget - 3
+    b.meta.setdefault("proofs", [])
+
+    # the front's proofs again, by name, in the model's order: the coarse sum
+    # and f_I = V_I - k U (|f_I| <= U/2 <= 2^(b-3), on the coarse sum's grid)
+    mag, grid = fr.coarse[0].mag, fr.coarse[0].grid
+    for c in fr.coarse[1:]:
+        mag, grid = _lg(2 ** mag + 2 ** c.mag), min(grid, c.grid)
+        _tw_proof(R, mag - grid < p, "coarse sum exact (P0, rho0, P1 mod m)",
+                  f"mag {mag:.2f}, grid {grid}")
+    fI_sv = ReductionValue(fI, P.b - 3.0, grid)
+    _tw_proof(R, fI_sv.mag - fI_sv.grid < p, "f_I = V_I - k U exact",
+              f"|f_I| <= 2^{fI_sv.mag} on grid 2^{fI_sv.grid}")
+
+    # ---- the mid pieces, routed to the groups ------------------------------
+    b.phase = "red-mid"
+    magic_role = {BM: "MQ_MID", BT: "MQ"}
+
+    def split(v, B):
+        """v cut at 2^B by a magic number: hi (a multiple of 2^B), lo (|lo| <=
+        2^(B-1)); both exact."""
+        ok = v.mag < p - 2 + B
+        if not ok and R.plant == "split_unproved":
+            R.fired.add("split_unproved")
+            ok = True
+        _tw_proof(R, ok, f"split at 2^{B}: magic in range",
+                  f"|v| < 2^{v.mag:.2f} against 2^{p - 2 + B}")
+        MQ = b.const(magic_role[B], _enc_exact(
+            fmt, Fraction(3, 2) * Fraction(2) ** (p - 1 + B)))
+        hi = R.exact(b.sub(R.data(b.add(v.ref, MQ)), MQ))
+        lo = R.exact(b.sub(v.ref, hi))
+        return (ReductionValue(hi, _lg(2 ** v.mag + 2 ** (B - 1)), B),
+                ReductionValue(lo, B - 1.0, v.grid))
+
+    upper, lower, lows = [], [], []
+
+    def route(v):
+        if v is None:
+            return
+        if v.grid >= BM:
+            upper.append(v)
+            return
+        if v.mag <= BM - 1:
+            rest = v
+        else:
+            hi, rest = split(v, BM)
+            upper.append(hi)
+        if rest.grid >= BT:
+            lower.append(rest)
+        elif rest.mag < BT:
+            lows.append(rest)
+        else:
+            hi, lo = split(rest, BT)
+            lower.append(hi)
+            lows.append(lo)
+
+    def route_position(j, phase):
+        pr = fr.product(j, phase)
+        if pr is None:
+            return
+        Pj, rhoj = pr
+        if Pj.mag >= -1:                                # may carry quadrant bits
+            Pj = R.mod_m(fr, Pj)
+            Pj.mag = min(Pj.mag, pr[0].mag)
+        route(Pj)
+        route(rhoj)
+
+    late = R.late_from if R.late_from is not None else _TW_LATE_FROM
+    route(fr.prods[1][1] if fr.prods[1] is not None else None)
+    for j in range(2, min(late, L)):
+        route_position(j, "red-products")
+
+    # ---- the upper group: an exact double word, modulo U, with f_I ---------
+    hu, lwu = _tw_sum_exact(R, upper, "upper group", plain="carry_dropped")
+    _tw_proof(R, hu is not None, "upper group not empty")
+    q2 = R.data(b.fma(hu.ref, V, MAGIC))
+    nk2 = R.exact(b.sub(MAGIC, q2))
+    h2 = ReductionValue(R.exact(b.fma(nk2, U, hu.ref)),
+                        min(hu.mag, P.b - 3.0 + 1e-9), hu.grid)
+    nqs.append(nk2)
+    s, e = b.two_sum(fI, h2.ref)
+    s_sv = ReductionValue(s, _lg(2 ** fI_sv.mag + 2 ** h2.mag),
+                          min(fI_sv.grid, h2.grid))
+    e_sv = ReductionValue(e, s_sv.mag - p, s_sv.grid)
+    if lwu is not None:
+        e_sv = R.add_exact(e_sv, lwu)
+        _tw_proof(R, e_sv is not None,
+                  "e + low word of the upper group exact")
+
+    # ---- the low positions' products, then the lower group -----------------
+    for j in range(late, L):
+        route_position(j, "red-products-low")
+    pieces = {"upper": len(upper), "lower": len(lower), "lows": len(lows)}
+    b.phase = "red-mid"
+    hl, lwl = _tw_sum_exact(R, lower, "lower group", plain="exact_add")
+    _tw_proof(R, hl is not None, "lower group not empty")
+    _tw_proof(R, hl.mag < p - 2 + BM, "carry: magic in range",
+              f"|h_l| < 2^{hl.mag:.2f} against 2^{p - 2 + BM}")
+    MQb = b.const("MQ_MID", _enc_exact(
+        fmt, Fraction(3, 2) * Fraction(2) ** (p - 1 + BM)))
+    c = R.exact(b.sub(R.data(b.add(hl.ref, MQb)), MQb))
+    hl2 = R.exact(b.sub(hl.ref, c))
+    c_sv = ReductionValue(c, _lg(2 ** hl.mag + 2 ** (BM - 1)), BM)
+    e_sv = R.add_exact(e_sv, c_sv)
+    _tw_proof(R, e_sv is not None, "e + carry exact")
+    b.probes.update(carry=c)
+
+    # ---- the exact upper part (f_I + h2 + low word + carry) as a double word,
+    # ---- then the quadrant once more, on its high word ---------------------
+    xh0, xl = b.two_sum(s, e_sv.ref)
+    q3 = R.data(b.fma(xh0, V, MAGIC))
+    nk3 = R.exact(b.sub(MAGIC, q3))
+    xh = R.exact(b.fma(nk3, U, xh0))                    # |xh| <= U/2
+    nqs.append(nk3)
+    b.probes.update(xh=xh, xl=xl, hl=hl2, hu=hu.ref, h2=h2.ref, s=s,
+                    e=e_sv.ref)
+
+    # ---- the lows: a double word that may round (below the bottom) ---------
+    b.phase = "red-lower"
+    lows.sort(key=lambda v: -v.mag)
+    acc_need = need + p                     # below this a plain add is fine
+    lh = ll = None
+    for v in lows:
+        if lh is None:
+            lh = v.ref
+            continue
+        if v.mag > acc_need:
+            lh, er = b.two_sum(lh, v.ref)
+            ll = er if ll is None else b.add(ll, er)
+        else:
+            ll = v.ref if ll is None else b.add(ll, v.ref)
+
+    # ---- the overshoot of |r| past pi/4, from the pieces' static magnitudes
+    shave = 8 if R.plant == "lw_understated" else 0     # the plant
+    if shave:
+        R.fired.add(R.plant)
+    b.meta["reduction_tw"] = rt = {
+        "bmid": BM, "bottom": BT, "pieces": pieces, "e": e_sv.mag,
+        "carry_magic": MQb, "lower": BM - 1 - shave,
+        "lwl": None if lwl is None else lwl.mag - shave,
+        "lows": [v.mag for v in lows]}
+    over = _trig_slack_tw(b)
+    _tw_proof(R, over < _TW_OVER_MAX, "overshoot of |r| past pi/4 is small",
+              f"over = {float(over):.3e}")
+    rt["over"] = b.meta["overshoot"] = over
+    rt["rho"] = b.meta["rho"] = _tw_upper(_pi() / 4 * (1 + over))
+
+    # ---- the triple word t -------------------------------------------------
+    b.phase = "red-triple"
+    terms = [t for t in (ll, lh, lwl.ref if lwl is not None else None, hl2,
+                         xl, xh) if t is not None]
+    t0, t1, t2 = _tw_to_triple(R, terms)
+    b.probes.update(t0=t0, t1=t1, t2=t2)
+
+    # ---- scale by V, then r = t pi/2 in three words ------------------------
+    b.phase = "red-scale"
+    T0 = R.exact(b.mul(t0, V))
+    T1 = R.exact(b.mul(t1, V))
+    T2 = R.exact(b.mul(t2, V))
+    pw = _words(fmt, _pi() / 2, 3)
+    if R.plant == "pio2_low":
+        pw[2] = 0                           # pi/2's last word dropped
+        R.fired.add("pio2_low")
+    PI0 = b.const("PIO2_0", pw[0])
+    PI1 = b.const("PIO2_1", pw[1])
+    PI2 = b.const("PIO2_2", pw[2])
+    nT0 = b.neg(T0)
+    nT1 = b.neg(T1)
+    a, nea = _tw_two_prod(R, T0, nT0, PI0)              # T0 pi0
+    bb, neb = _tw_two_prod(R, T0, nT0, PI1)             # T0 pi1
+    cc, nec = _tw_two_prod(R, T1, nT1, PI0)             # T1 pi0
+    u1, e1 = b.two_sum(bb, cc)
+    u2, e2 = b.two_diff(u1, nea)                        # + the error of T0 pi0
+    lv = b.add(e1, e2)
+    lv = b.sub(lv, neb)
+    lv = b.sub(lv, nec)
+    lv = b.fma(T0, PI2, lv)
+    lv = b.fma(T1, PI1, lv)
+    lv = b.fma(T2, PI0, lv)
+    dropped = R.plant == "r2_dropped"
+    if dropped:
+        R.fired.add(R.plant)
+        lv = ZERO                                       # r's third word left out
+    r0, w = _tw_fast(R, a, u2)
+    r1, r2 = b.two_sum(w, lv)
+    if dropped:
+        r1, r2 = w, ZERO
+    # the quadrant: n' = -(sum of the -k), as MAGIC + n'
+    counts = nqs[:-1] if R.plant == "quadrant_dropped" else nqs
+    if R.plant == "quadrant_dropped":
+        R.fired.add("quadrant_dropped")
+    nsum = counts[0]
+    for v in counts[1:]:
+        nsum = R.exact(b.add(nsum, v))
+    q = R.exact(b.sub(MAGIC, nsum))                     # MAGIC + n'
+
+    # ---- |x| < RD(pi/4): r = |x|, quadrant 0 -------------------------------
+    b.phase = "red-small"
+    # |x| = IAND(x, ABSM): the instruction a classification forming |x| the
+    # same way would SHARE (Build.ins hash-conses), holding it live across the
+    # polynomials. The model's classification forms it otherwise,
+    # ixor(x, iand(x, SIGN)), and so must the routine on this reduction.
+    ax = b.iand(x, wi(fmt.sign_mask ^ R.full))
+    small = b.cmplt(ax, b.const("PIO4D", _enc(fmt, _pi() / 4, RDN)))
+    r0 = b.sel(ax, r0, small)
+    r1 = b.sel(ZERO, r1, small)
+    r2 = b.sel(ZERO, r2, small)
+    q = b.sel(MAGIC, q, small)
+    b.probes.update(r0=r0, r1=r1, r2=r2, q=q, small=small, ax=ax)
+    return types.SimpleNamespace(r0=r0, r1=r1, r2=r2, q=q, small=small,
+                                 inrange=None, ax=ax)
+
+
+def trig_reduction_tw(b, x, P, *, plant=None):
+    """The triple-word trigonometric reduction appended to the Build `b` for
+    the argument ref `x` (straight-line ALU instructions, bank words only, no
+    scratch slot; RNE, and RDN for the bucket's floor), under the plan P of
+    plan_reduction_tw(): fp32 at G = 40 (parcel M2F1; parcel M2X's tw32.py
+    reduce_tw, ported). -> types.SimpleNamespace(r0, r1, r2, q, small,
+    inrange, ax). For every x with 2^Egate <= |x| < 2^128 (P.Egate, the whole
+    range):
+      * r = r0 + r1 + r2 with |r - (|x| - n pi/2)| <= 2^-(p+G+3) |r| by the
+        plan (the budget), MEASURED at most 2^-5.51 of 2^-(p+G) = 2^-69.5 of
+        |r| by parcel M2X over its 14,021 arguments (tw32_reduce.out.txt),
+        and n the integer of q's class (below) that |x| 2/pi is nearest;
+      * r0 is the leading word and r1 + r2 the rest: r0 = RN(a + u2) of the
+        scale step's Fast2Sum, r1 + r2 = w + lv exactly (TwoSum). MEASURED on
+        the model's 14,021 arguments (13,801 not `small`), not proved: |r1| <=
+        ulp(r0)/2 (largest 0.49997) and |r2| <= ulp(r1)/2 (largest 0.49987),
+        r0 = RN(r0 + r1 + r2), |r1|/|r0| <= 2^-24.02; r1 = r2 = +0 on 4;
+      * |r| <= rho = pi/4 (1 + over), over = Build.meta["overshoot"] the
+        COMPUTED bound 2^-18.91 (2.029e-06) from the pieces' static
+        magnitudes (_tw_overshoot), rho = Build.meta["rho"] that bound as an
+        exact rational (rounded up to 96 fractional bits; 2^-18.91 is not a
+        power of two, so trig_rho()'s argument cannot carry it), MEASURED at
+        most 1.878e-06 (2^-19.02) at 0x4bb9109b on parcel M2X's 14,021
+        arguments. The study's 2^-30 does not hold at fp32 (0x3f490fdb takes
+        n = 0 by the tie, 2^-25.10 over), nor does the double word's
+        2^-11.66 explain it (_check_trig_cushion_tw proves rho covers
+        _trig_slack_tw by name);
+      * q = MAGIC + n' on MAGIC's integer grid, n' congruent to n (mod 4): n
+        mod 4 is q's encoding & 3, as trig_reduction()'s;
+      * `small` is nonzero where |x| < RD(pi/4); there r0 = |x|, r1 = r2 = +0
+        and q = MAGIC;
+      * `inrange` is None (the whole range); the reduction is of |x|: the
+        caller applies x's sign.
+    ax, the value red-small leaves, is IAND(x, ABSM) = |x| (ABSM the word with
+    every bit but the sign): Build.ins HASH-CONSES, so a classification that
+    forms |x| as iand(x, ABSM) SHARES this instruction and holds |x| live from
+    the reduction to the end, one value more than the model's (24, not 23:
+    MEASURED on the model by the drafter's E9); parcel M2X's classification
+    forms it as ixor(x, iand(x, SIGN)), and so must fp32's routines.
+    Phases red-setup, red-window, red-products (positions 0 to 3),
+    red-coarse, red-mid, red-products-low (positions 4 to 8), red-lower,
+    red-triple, red-scale and red-small, in that order of PHASE_ORDER (b.phase
+    is restored at the end). Probes: r0, r1, r2, q, small, ax, sig, U, V, fI,
+    xh, xl, t0, t1, t2, carry, and gm1, m, inv_m, M, P0, hl, hu, h2, s, e.
+    Build.meta gains "exact" and "data" (the claims: 64 instructions claimed
+    exact, which reduction_audit() checks), "two_prod", "reduction" (the
+    plan), "proofs" (the names of the static proofs that held, in order: 13),
+    "reduction_tw" (bmid, bottom, the pieces by group and the magnitudes the
+    cushion is recomputed from), "overshoot" (over, an exact rational) and
+    "rho" (pi/4 (1 + over) rounded up to 96 bits, an exact rational, for
+    plan_trig()). A static proof that fails is a ValueError naming it.
+    `plant`: one of TRIG_TW_PLANTS or REDUCTION_PLANTS; one that could not act
+    is refused by name. The front is _front() with its switches rho_half and
+    late_from = 4."""
+    if plant is not None and plant not in REDUCTION_PLANTS \
+            and plant not in TRIG_TW_PLANTS:
+        raise ValueError(f"unknown plant {plant!r}: "
+                         f"{', '.join(list(REDUCTION_PLANTS) + list(TRIG_TW_PLANTS))}")
+    if b.fmt.name != "fp32" or getattr(P, "bmid", None) is None:
+        raise ValueError("the triple word's reduction is fp32's, planned by "
+                         "plan_reduction_tw()")
+    R = _Red(b, P, plant, rho_half=True, late_from=_TW_LATE_FROM)
+    entry = b.phase
+    out = _tail_tw(R, x, _front(R, x))
+    b.phase = entry
+    R.check_fired()
+    return out
 
 
 # ---- sin, cos and tan (parcel M2G2a) ------------------------------------------
@@ -5103,9 +5735,13 @@ def _read_two_opi(path, nbits):
     return v >> (32 * nw - nbits)
 
 
-def _check_reduction_build(b, findings, header):
+def _check_reduction_build(b, findings, header, triple=False):
     """Every derived constant of one built reduction against its independent
-    derivation, and the chunks against the header. -> constants checked."""
+    derivation, and the chunks against the header. -> constants checked.
+    `triple` (parcel M2F1): the triple word's, which holds pi/2 in three words
+    (PIO2_0, PIO2_1, PIO2_2, each the nearest to what is left) and a second
+    split magic, MQ_MID at the boundary between its two groups, the carry's
+    as well."""
     fmt, p = b.fmt, b.fmt.prec
     P = b.meta["reduction"]
     tag, verify, point, seen, count = _verifier(b, findings)
@@ -5116,8 +5752,14 @@ def _check_reduction_build(b, findings, header):
     verify("INVB", "rn", Fraction(1, P.b), Fraction(1, P.b))
     off = Fraction(2 * P.b - 3, 2 * P.b)
     verify("FLOOROFF", "rn", off, off)
-    w0 = verify("PIO2H", "rn", lo_pi / 2, hi_pi / 2)
-    verify("PIO2L", "rn", lo_pi / 2 - w0, hi_pi / 2 - w0)
+    if triple:
+        point("MQ_MID", Fraction(3, 2) * Fraction(2) ** (p - 1 + P.bmid))
+        w0 = verify("PIO2_0", "rn", lo_pi / 2, hi_pi / 2)
+        w1 = verify("PIO2_1", "rn", lo_pi / 2 - w0, hi_pi / 2 - w0)
+        verify("PIO2_2", "rn", lo_pi / 2 - w0 - w1, hi_pi / 2 - w0 - w1)
+    else:
+        w0 = verify("PIO2H", "rn", lo_pi / 2, hi_pi / 2)
+        verify("PIO2L", "rn", lo_pi / 2 - w0, hi_pi / 2 - w0)
     verify("PIO4D", "rd", lo_pi / 4, hi_pi / 4)
     if P.R is not None:
         point("RANGE", Fraction(2) ** P.R)
@@ -5186,6 +5828,43 @@ def check_reduction_constants(builder=None, formats=(FP64, FP128, FP256),
             f"derived constants, each the rounding its rule gives for every "
             f"value of an enclosure of the true number (Machin's formula in "
             f"integers), the chunks also the bits of host/src/mp_2opi.h")
+    return lines, findings
+
+
+def check_reduction_tw_constants(builder=None, header=None):
+    """(lines, findings): re-derive every derived constant of fp32's triple-word
+    reduction (parcel M2F1; build_reduction(FP32), G = 40) as
+    check_reduction_constants() does the others': MAGIC, the split magics at the
+    bottom 2^-56 (MQ) and at the boundary between the two groups 2^-20
+    (MQ_MID, which the carry reads as well: the build keeps the ref the carry
+    uses, and a different one is a difference by name), INVB, FLOOROFF, pi/2 in
+    three words (each the nearest to what is left) and RD(pi/4), each the
+    rounding its rule gives for every value of an enclosure of the true number
+    (Machin's formula in integers); the 18 chunks of 2/pi at b = 16 against
+    that enclosure and against the bits of host/src/mp_2opi.h. `builder(fmt)` is
+    build_reduction, or a faulted one for a test. `--only reduction-tw` prints
+    the line; the default `--check` runs it and prints only its differences,
+    because that output is pinned line for line by two tests."""
+    builder = builder or build_reduction
+    header = header or _TWO_OPI_HEADER
+    findings = []
+    b = builder(FP32)
+    P = b.meta["reduction"]
+    n = _check_reduction_build(b, findings, header, triple=True)
+    rt = b.meta.get("reduction_tw") or {}
+    n += 1
+    if rt.get("carry_magic") != b.roles.get("MQ_MID"):
+        findings.append(f"reduction fp32 (triple word): the carry's magic "
+                        f"{rt.get('carry_magic')} is not the word MQ_MID "
+                        f"{b.roles.get('MQ_MID')}")
+    lines = [
+        f"reduction fp32 (triple word): G = {P.G}, b = {P.b}, L = {P.L}, "
+        f"{P.nchunks} chunks of {P.b} bits ({P.bits} bits of 2/pi): {n} "
+        f"derived constants, each the rounding its rule gives for every "
+        f"value of an enclosure of the true number (Machin's formula in "
+        f"integers), pi/2 in three words, the split and the carry's magic "
+        f"words at 2^{P.bottom} and 2^{P.bmid}, the chunks also the bits of "
+        f"host/src/mp_2opi.h"]
     return lines, findings
 
 
@@ -5430,17 +6109,19 @@ def main(argv=None):
                          "1 on a difference")
     ap.add_argument("--only", default="",
                     help="a comma-separated list of routines, and the words "
-                         "reduction and trig, to check or list (default: "
-                         "all, the reduction and trig checked but not "
-                         "listed)")
+                         "reduction, reduction-tw (fp32's triple-word "
+                         "reduction, which prints its own line only here) "
+                         "and trig, to check or list (default: all, the "
+                         "reduction and trig checked but not listed)")
     args = ap.parse_args(argv)
     only = tuple(n for n in args.only.split(",") if n)
     for n in only:
-        if n not in NAMES and n not in ("reduction", "trig"):
+        if n not in NAMES and n not in ("reduction", "reduction-tw", "trig"):
             ap.error(f"--only {n!r}: one of {', '.join(NAMES)}, reduction, "
-                     f"trig")
+                     f"reduction-tw, trig")
     names = tuple(n for n in only if n in NAMES) or (() if only else NAMES)
     reduction = not only or "reduction" in only
+    reduction_tw = not only or "reduction-tw" in only
     trig = not only or "trig" in only
     if args.check:
         failed = False
@@ -5461,6 +6142,21 @@ def main(argv=None):
                 print("DIFFERENCE:", fd)
             print(f"mathlib --check (reduction): {len(lines)} formats, "
                   f"{len(findings)} differences")
+            failed = failed or bool(findings)
+        if reduction_tw:
+            # parcel M2F1: fp32's triple word. The default run prints only its
+            # differences: the output above and below is pinned line for line
+            # by two tests (test_mathlib_trig.py's and test_mathlib_
+            # reduction.py's), so a line of its own is `--only reduction-tw`
+            lines, findings = check_reduction_tw_constants()
+            if "reduction-tw" in only:
+                for ln in lines:
+                    print(ln)
+            for fd in findings:
+                print("DIFFERENCE:", fd)
+            if "reduction-tw" in only:
+                print(f"mathlib --check (reduction, triple word): "
+                      f"{len(lines)} formats, {len(findings)} differences")
             failed = failed or bool(findings)
         if trig:
             lines, findings = check_trig_constants()
@@ -5492,6 +6188,15 @@ def main(argv=None):
                 by[ph] = by.get(ph, 0) + 1
             print(f"reduction {fmt.name}: G = {P.G}, b = {P.b}, L = {P.L}, "
                   f"{P.K} words, {len(b.body)} instructions by phase {by}")
+    if "reduction-tw" in only:
+        b = build_reduction(FP32)
+        P = b.meta["reduction"]
+        by = {}
+        for ph in b.phase_of:
+            by[ph] = by.get(ph, 0) + 1
+        print(f"reduction fp32 (triple word): G = {P.G}, b = {P.b}, "
+              f"L = {P.L}, {P.K} words, {len(b.body)} instructions by "
+              f"phase {by}")
     if "trig" in only:
         print(f"{'routine':8s} {'format':6s} {'rnd':4s} {'insns':>6s} "
               f"{'words':>6s} {'live':>5s}  cap")

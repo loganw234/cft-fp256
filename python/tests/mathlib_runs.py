@@ -24,6 +24,8 @@ log2 and log1p.
     python python/tests/mathlib_runs.py live
     python python/tests/mathlib_runs.py reduction [--formats fp64,fp128,fp256]
         [--n 100000] [--seed 1] [--edge-width 8] [--halves-step 1] [--quick]
+    python python/tests/mathlib_runs.py reduction-tw [--n 1000] [--seed 7]
+        [--no-halves] [--quick]
     python python/tests/mathlib_runs.py trig-pools [--fn sin,cos,tan]
         [--formats fp64,fp128,fp256] [--attrs rne,rtz,rdn,rup,rmm] [--seq]
         [--step N] [--quick] [--out PATH]
@@ -115,6 +117,20 @@ sample is a function of --seed, so a run can be repeated.
            pi/4 against the computed bound, and the audit's tally. --quick
            takes every 16th power of two and leaves out the study's own
            families (the golden stage's smoke run). Not part of `all`
+  reduction-tw  fp32's triple-word reduction of parcel M2F1
+           (mathlib.build_reduction(FP32), G = 40; python/tests/
+           test_mathlib_reduction_tw.py's checks) over the model's reduce mode's
+           five families (docs/studies/m2/tw32_run.py, 14,021 arguments):
+           --n random, bucket-edge, power-of-two and pool arguments (the
+           study's redcheck, seed --seed), the products' binade edges, 2,000
+           floats within 3 ulps of odd multiples of pi/4 of random size, the
+           quadrant boundaries from k = 0, and the floats next to the odd
+           multiples of pi/4 in every binade, which needs numpy (without it
+           that family is skipped and said so). Per family and in total: r's
+           largest relative error in units of 2^-(p+G), quadrants off, the
+           audit's failures, the largest overshoot past pi/4 against the
+           computed bound. --quick: --n 100 and every 20th lane. Not part of
+           `all`
   trig-pools  sin, cos and tan (parcel M2G2a; mathlib.fragment at fp64, fp128
            and fp256, python/tests/mathlib_trig_harness.py's checks): the whole
            radian pools (4,408, 620 and 614 arguments) through every
@@ -646,6 +662,77 @@ def cmd_reduction(a):
             f"skipped")
 
 
+def cmd_reduction_tw(a):
+    import math
+    from fractions import Fraction
+    import test_mathlib_reduction as RT
+    import test_mathlib_reduction_tw as W
+    b = W.build_tw()
+    P = b.meta["reduction"]
+    fmt = W.FMT
+    pos = lambda xs: [x for x in xs if not x & fmt.sign_mask]
+    step = 20 if a.quick else 1
+    sets = [("random, bucket edges, powers of two, pools (the study's "
+             "redcheck arguments)",
+             [x for fam in RT.redcheck_args(fmt, P, 100 if a.quick else a.n,
+                                            a.seed) for x in fam]),
+            ("the products' binade edges", RT.edge_args(fmt, P)),
+            ("x within 3 ulps of odd multiples of pi/4, random size, both "
+             "signs (2,000)", W.edge_sample()),
+            ("the quadrant boundaries from k = 0 (0x3f490fdb) and 128 random "
+             "k, positive", pos(W.quad_args()))]
+    if a.no_halves:
+        say("the odd multiples of pi/4 in every binade: skipped (--no-halves)")
+    else:
+        try:
+            sets.append(("the floats next to the odd multiples of pi/4 in "
+                         "every binade, positive (numpy)", W.half_family()))
+        except ImportError as e:
+            say(f"the odd multiples of pi/4 in every binade: skipped, numpy "
+                f"is not importable ({e})")
+    tally, total = {}, 0
+    tot = {"worst": -math.inf, "worst_x": None, "over": Fraction(0),
+           "quadrant off": 0, "bad": 0}
+    over_bound = b.meta["overshoot"]
+    say(f"reduction fp32 (triple word): G = {W.G}, b = {P.b}, L = {P.L}, "
+        f"{len(b.body)} instructions; the computed bound on |r| past pi/4 "
+        f"{float(over_bound):.4e} (2^{RT._log2(over_bound):.2f}), "
+        f"{len(b.meta['exact'])} claims audited")
+    for label, xs in sets:
+        xs = xs[::step]
+        before = len(FINDINGS)
+        st, bad = {}, 0
+        for i in range(0, len(xs), 4000):
+            run = W.run_lanes_tw(b, xs[i:i + 4000])
+            note(W.check_reference(run, st))
+            note(W.check_audit(run))
+            note(W.check_cushion(run))
+            bad += len(run.bad)
+            for k, v in run.tally.items():
+                tally[k] = tally.get(k, 0) + v
+        total += len(xs)
+        if st["worst"] > tot["worst"]:
+            tot["worst"], tot["worst_x"] = st["worst"], st["worst_x"]
+        tot["over"] = max(tot["over"], st["over"])
+        tot["quadrant off"] += st["quadrant off"]
+        tot["bad"] += bad
+        say(f"  {label}: {len(xs)} arguments: r's largest relative error "
+            f"2^{st['worst']:.2f} of 2^-(p+G) at {st['worst_x']:#x}; quadrant "
+            f"off {st['quadrant off']}; audit failures {bad}; largest "
+            f"2|t| - 1 (|r| past pi/4) {float(st['over']):.3e}; "
+            f"{len(FINDINGS) - before} findings")
+    ov = tot["over"]
+    say(f"TOTAL {total} arguments: r's largest relative error "
+        f"2^{tot['worst']:.2f} of 2^-(p+G) at {tot['worst_x']:#x} (the "
+        f"model's: 2^-5.51); quadrant off {tot['quadrant off']}; audit "
+        f"failures {tot['bad']}; largest overshoot MEASURED {float(ov):.3e} "
+        f"(2^{RT._log2(ov):.2f}) against the COMPUTED bound "
+        f"{float(over_bound):.3e} (2^{RT._log2(over_bound):.2f}), "
+        f"{float(over_bound / ov):.2f} times it (the model's: 1.1); claims "
+        f"examined {tally['claims']}, non-finite {tally['nonfinite']}, "
+        f"skipped {tally['skipped']}")
+
+
 def _trig_fns(arg):
     import mathlib_trig_harness as T
     names = arg.split(",") if arg else list(T.FUNCS)
@@ -1022,6 +1109,16 @@ def main(argv=None):
                    help="every 16th power of two, and not the study's own "
                         "families")
     p.set_defaults(fn_=cmd_reduction)
+    p = sub.add_parser("reduction-tw")
+    p.add_argument("--n", type=int, default=1000,
+                   help="random arguments (the model's reduce mode: 1000)")
+    p.add_argument("--seed", type=int, default=7)
+    p.add_argument("--no-halves", action="store_true",
+                   help="leave out the odd multiples of pi/4 in every binade "
+                        "(numpy)")
+    p.add_argument("--quick", action="store_true",
+                   help="--n 100 and every 20th argument")
+    p.set_defaults(fn_=cmd_reduction_tw)
     p = sub.add_parser("trig-pools")
     p.add_argument("--fn", help="sin,cos,tan (all by default)")
     p.add_argument("--formats", help="fp64,fp128,fp256 (all by default)")
