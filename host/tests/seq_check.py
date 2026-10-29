@@ -97,10 +97,12 @@ publishing a revision-7 tile's word refuses each code at load and a run
 asking for the block, by name and before any frame.
 
 Since parcel MP (M1's build, item 2, 2026-10-14) an EIGHTH corpus runs after
-the seven, from its own seed per format: M1's routines - exp, exp2, expm1,
-log, log2 and log1p, the 120 fragments of python/cft_golden/mathlib.py at fp32,
-fp64, fp128 and fp256 under each attribute - which until then had run on seq.py
-alone. Each is run in two shapes through libcft and the golden model.
+the seven, from its own seed per format; its first part is M1's routines - exp,
+exp2, expm1, log, log2 and log1p, the 120 fragments of
+python/cft_golden/mathlib.py at fp32, fp64, fp128 and fp256 under each
+attribute - which until then had run on seq.py alone (its second part, sin,
+cos and tan, since parcel M2P, follows below). Each is run in two shapes
+through libcft and the golden model.
 STAND-ALONE is routines.program's: the input in r0, the words in a BANK_EXT
 bank, the result and the flag word deposited, no quiet region and no raise, so
 the body's own flags reach FLAGS. COMPILED is what the compiler inlines
@@ -2403,7 +2405,7 @@ def flags_remote_refusals(lib, F):
           f"published")
 
 
-# ---- the eighth corpus: M1's routines (parcel MP) --------------------------
+# ---- the eighth corpus: M1's routines (parcel MP); sin, cos and tan, below ---
 #
 # exp, exp2, expm1, log, log2 and log1p are tile routines: fragments of
 # existing instructions (python/cft_golden/mathlib.py), at fp32, fp64, fp128
