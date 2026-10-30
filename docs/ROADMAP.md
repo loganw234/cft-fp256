@@ -6135,6 +6135,10 @@ this level?** Logan's instruction, above.
      The eighth corpus also runs sin, cos and tan's 45 fragments at
      fp64, fp128 and fp256 (fp32's are parcel M2F's), in both shapes:
      90 programs and 5,237 lanes at the gate's settings, 0 mismatches.
+   - **fp32's trig part** (2026-10-30): parcel M2F2, merged at d6f5574.
+     The corpus runs fp32's 15 fragments too, the triple word at G = 40,
+     in both shapes: 30 programs and 1,570 lanes at the gate's settings,
+     0 mismatches.
 3. **The language, golden-first:**
    - the six nodes and their interpreter;
    - folds and refusals (question 8), and the renderers;
@@ -6191,6 +6195,14 @@ function gains an L3 rule.
     9), answered on 2026-10-14 (below). Its design picks 2/pi's window
     by a SELECT shifter over bank words, not from the scratch copy read
     by LDX above (its question 1).
+  - **Built in the golden generator** (2026-10-27 to 30): sin, cos and
+    tan at the four formats and the five attributes. fp64, fp128 and
+    fp256 come from parcels M2G1 (the reduction), M2G2a (the routines)
+    and M2G2b (their budget, rate law and families). fp32 is the triple
+    word at G = 40, from parcels M2F1 (the reduction, merged at 77dfc23)
+    and M2F2 (the routines, merged at d6f5574), equal to parcel M2X's
+    model. program.c parity is item 2's trig part (above); cftc and the
+    language are parcels M2C's and M2L's.
 - **M3, the pow family:** its structured cases need 2p to 3p bits.
 - **M4, atan, atan2, asin and acos.**
   - **Its study is done** (2026-10-23, ahead of M2's build, by Logan's

@@ -26078,3 +26078,70 @@ The table the file asserts is a subset (two or three checks red and two green a 
 - **The desktop's load** was not read during these runs (the one sample, 2, 5, 1 and 1%, was taken at 11:56 after the new file's last run, as the last paragraph says): "unniced, one process at a time" is all that is claimed. The one overlap: none in the runs timed here. A scratch batch of 12 budget cells that would have run 13 minutes was stopped by its PID (28856, a python started by this session) after it started, and re-run as two batches of six; its partial output was discarded.
 
 **Which commit.** Code and tests: 85591f2c and 4e48d5c4 (branch m2f2 from 77dfc230, not pushed). The scratch runs above (the lane-for-lane comparison, the budget cells, the rate cells, the pools, the census, the audit, the fingerprints, `--check`, seq_check) were made at 85591f2c's code, which 4e48d5c4 changes in no file but the new test file and two docstrings of the harness; the file's runs and the whole-file runs of the four existing files at 4e48d5c4. The commit after them adds this entry, the dated note at the head of docs/studies/M2-trig.md, the golden, `seq` and corpora rows of docs/VERIFICATION.md and docs/README.md's recount (the lead has its SHA). The desktop's load was read once, at 11:56 just after the new file's last run: 2, 5, 1 and 1%.
+
+## 2026-10-30 - the lead's: night 10 on the page, the probe leg's first night; the weekend window launched; parcel M2F1 merged with the runs behind it, and parcel M2F2 with its gate, so sin, cos and tan are built at all four formats (the lead; verifiers VM2F1 and VM2F2)
+
+**Night 10 on the page** (9dbfa501, the data file alone, pushed 09:11:57).
+- Night 1029 (run card-stress-1019 resumed at 6f7ad1d5, 18:29:54 to 07:45:11, at its deadline, exit 0): 14 cycles, 1,071 legs passed, 0 failed, 908 slices, 2,552,252,429,426 cases, 0 disagreements. Totals: 10 nights, 20,759,013,456,650 cases, 0 disagreements, 6,135 slices.
+- **The probe leg's first night** (`--rate-probe` in the long run): the quad 5 legs, the single image 1, the deep image 1; 0 failed. For example, the quad's div fp32 runs at 2,059,051.5 elements a second on one tile alone, and at 2,092,507.05 a tile at the median with the four together (READ from the data file's `rates`).
+
+**The weekend window** (Logan's rule of 2026-10-24: one window, Friday 18:00 to Monday 07:45).
+- **The preflight rehearsed** at 9dbfa501 (box_pre_1030.sh, 09:13:42 to 09:27:30): make vectors rc 0 (127 s). The dry-run tests: rc 0, 698 s, 1,250 checks, 0 failed, 10 skipped. The skips are night 1029's 9 and PD's "the glance in node", each by name; the launcher has no node. **The launcher would go on.**
+- **Night 1030 launched** at 09:28:39 by launcher v5 at 9dbfa501, with night 1029's 287 items.
+  - The long run carries `--earlier-runs /data/card-stress-1016 --rate-probe`, and both runs carry the MPFR prefix (checked 4.2.2).
+  - It waits for 18:00 and runs until Monday 2026-11-02 07:45. Its close-out waits for its end.
+- **Trees:** rtl 44b963dd... is unchanged, so the tile and wide items continue. host is 0a69595e... (M2P's seq_check, since 0f9ff761), so the host items begin another class: box CPU, not card time.
+
+**Merged: parcel M2F1** (merge 77dfc230 at f2439912, pushed 10:22:59), fp32's triple-word reduction. Its entry above gives its results. The lead's runs behind it were MEASURED on amd-arc-box, every copy equal to the box's sums, in the round's records.
+- **box_m2f1.sh** at 6c8cc100, M2F1's first report (2026-10-29 15:29:44 to 15:44:42).
+  - Fresh clones of M2F1 and its base 66d0d157; python 3.12.3, mpmath 1.4.1, pytest 9.1.1, numpy 2.5.2. Every rc 0.
+  - `mathlib_runs.py reduction-tw`, in full: 14,021 arguments. r's largest relative error is 2^-5.51 of 2^-(p+G), at 0xd3098cea, the model's. 0 quadrants off, 0 audit failures. The largest overshoot is 1.878e-06 (2^-19.02), against the computed bound 2.0294e-06 (2^-18.91). 56 s.
+  - The default `--check` is byte-identical at the base and at M2F1 (39 lines). `--only reduction-tw` gives "1 formats, 0 differences".
+  - Passed: test_mathlib_reduction_tw.py 37 (55 s), test_mathlib_reduction.py 60 (74 s), test_mathlib_trig.py 243 (581 s), test_mathlib.py's subset 166 (53 s).
+- **The two-minute criterion** (box_trigtime.sh, 2026-10-29 16:44:48 to 17:04:03): test_mathlib_trig.py back to back in those clones, load about 2.1 to 2.3. The base: 243 passed in 575.93 s. M2F1: 243 passed in 578.29 s.
+- **After 6c8cc100,** M2F1's send-backs (81ad11d3, f2439912) changed the new test file, comments, the docs and one line of mathlib.py. That line is the front's rho bound with the switch off: the int M2G1's front has, where M2F1 had the float 44.0. No fragment moved: 185 fingerprints, 0 differ.
+- **The gate** at 77dfc230 (box_gate_1030.sh, 09:27:48 to 10:21:52): `verify/run.sh --only docs,golden,generated,seq`, rc 0, 3,241 s, VERDICT PASS with golden's 3 inner skips, each by name (two loopback-binary skips in test_serial_replay.py; math.fma needs Python 3.13).
+  - docs ok 44 s;
+  - golden ok 3,069 s, 5,861 passed and 3 skipped;
+  - generated ok 52 s;
+  - seq ok 74 s, the trig lines 1,785, 1,720 and 1,732 lanes.
+- CI on 77dfc230: gates 41098343022 success, every job green.
+
+**Merged: parcel M2F2** (merge d6f55748 at 922c2ade), fp32's sin, cos and tan as the triple word at G = 40. With it, sin, cos and tan are built in the golden generator at all four formats. Its entry above gives its results. The lead's runs behind it were MEASURED on amd-arc-box (box_m2f2.sh at 922c2ade, 12:41:05 to 14:55:17); every copy in the round's records equals the box's sums.
+- **Clones:** three fresh clones of one bundle, M2F2's and the gate's at 922c2ade and the base's at 77dfc230, each with its SHA, tree and markers asserted. libcft.so was built in the two that run seq_check.
+- **Switches off, against the base:**
+  - the default `--check`: 39 lines and 42. Only the trig count line changed ("4 formats"), and sin, cos and tan fp32 joined;
+  - the gate's seq_check command, rc 0 at both. fp32's line joined ("30 routine-corpus (trig) programs compared, 1570 lanes"), and the trig part's totals now count it: 120 programs, and the remote leg's 646 refused by name and 195 loaded. No line of the six's or of fp64 to fp256's own changed.
+- **The pool:** 30 jobs at once, 2,052 s; each ended "RESULT: ok", with 0 findings.
+  - **The budget** at 12,000 lanes in each of fp32's six regions for each function (seeds 121 to 126), rne. V was compared under the five attributes on every lane, the tool's default; M2F2's handoff named every 24th.
+    - sin 0.2745 to 0.2997 Bv, cos 0.2615 to 0.3036, tan 0.3983 to 0.4296 (random). Every cell is under 1 Bv, and 0 lanes differ across the attributes.
+    - M2X's box run of 2026-10-27 gave the same largest figure, 0.4296 Bv.
+  - **The mark-rate law** at G' = 6, under rne and rtz, at 50,000 random arguments a cell (seed 7; sin's cells count the 49,653 its main path answers).
+    - Marked: sin 1,198 and 1,215, cos 1,302 and 1,261, tan 1,124 and 1,072, each within its expectation. The smallest two-sided tail is 0.0808 (tan, rtz), at most 0.485 among the 6.
+    - 0 wrong unmarked, 0 wrong guesses. The marks equal M2X's box totals.
+  - **The bound** at 12,000 points in each of five regions, rne: the largest |V - f| / Bv is 2^-2.86 (tan, edge), a sampled lower bound.
+  - **The pools** on the model and as programs on seq.py: 15 configurations x 760 lanes, 0 marked, 0 wrong.
+- **The two-minute criterion:** test_mathlib_trig.py back to back in the base's and the parcel's clones. The base: 243 passed in 580.33 s. M2F2: 243 passed in 586.14 s, so +5.8 s with the same tests. The new test file at M2F2: 90 passed in 284.15 s, fp32's share of the golden stage on the box.
+- **The gate,** in the third clone: `verify/run.sh --only docs,golden,generated,seq,cardstress` with node on PATH, rc 0, 4,297 s, VERDICT PASS with 7 inner skips, each by name. cardstress is in it because seq_check.py carries the card driver's build-step literal (the regression of 2026-10-29).
+  - docs ok 46 s;
+  - golden ok 3,385 s, 5,951 passed and 3 skipped. Against M2F1's gate at 77dfc230 above, that is +90 tests (the new file's) and +316 s. The 3 skips are the same;
+  - generated ok 52 s;
+  - seq ok 85 s, the same lines as the seq_check run above: fp32's trig line 1,570 lanes, with 1,785, 1,720 and 1,732 at fp64 to fp256;
+  - cardstress ok 726 s, 0 failed. Its 40 check counts and its 4 skips (the real runs' copies not named) are the same as at 0f9ff761's gate of 2026-10-29. The literal is still a plain string in seq_check.py, and the driver is unchanged.
+- **Verifier VM2F2** (Haiku) found no regression. Its one wrong answer is in the parcel's report to the lead, not in any committed line: the report said the model's own budget on 60 lanes was 0.1363 Bv.
+  - **The 60-lane figures (1.0042 and 0.1363 Bv), in the parcel's entry and in its note of 2026-10-30 in M2-trig.md, are the port's.** The model printed no budget on those lanes. Its budgets are the 18 cells at 1,500 lanes, and the port equals them to the digits.
+  - Its notes are kept as notes. One is mistaken: the card driver's "floor 1000000000.0 GB" line comes from a test that passes that many GB on purpose, so its unit is right.
+- **Known limits, recorded:**
+  - cos's mark-rate expectation in the port is 0.44% above the model's (1,276.1 against 1,270.5 at 50,000 lanes), while the marks are identical; sin's and tan's agree; the cause is not found;
+  - three docstrings of test_mathlib_trig.py still say "Room for parcel M2F", left as test edits nobody approved;
+  - one approved test edit also asserts that trig-budget refuses the quad region at fp64. The lead accepted it.
+- **docs/ROADMAP.md:**
+  - item 2's trig part gains fp32, dated;
+  - M2's bullet says that sin, cos and tan are built in the golden generator at the four formats.
+- **The host tree moves** at this merge. host/tests/seq_check.py changes `HEAD:host`, so a night at this tree begins another host class. Night 1030 runs at 9dbfa501 and is not affected. rtl is unchanged.
+
+**The lead's slips, recorded:**
+- On 2026-10-29, verifier VM2F1 noted that the golden stage's time was not shown. The lead answered that test_mathlib_trig.py's base time on the box was 583.68 s, "the file unchanged since". VM2F1 showed that figure is of the file at d371a2ff: 77 test functions, against 78 at the base. So the criterion had not been measured until box_trigtime.sh measured it (above).
+- In the round's records, the lead typed the time of one of VM2F2's messages (about 13:40, where it came at about 13:30) instead of reading it from `date`. It was corrected before the ledger's next entry: by an appended line in the ledger, and in place in the lead's own note on the parcel's report.
+
+docs/README.md is recounted.
