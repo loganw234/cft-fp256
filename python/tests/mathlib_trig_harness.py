@@ -5,6 +5,9 @@ of sin, cos and tan to (cft_golden/mathlib.py; docs/studies/M2-trig.md, section
 8), gathered in one place so that python/tests/test_mathlib_trig.py (quick, for
 the golden stage) and python/tests/mathlib_runs.py (the larger runs, for the
 lead's box: trig-pools and trig-bound) run the same lanes and the same checks.
+Since parcel M2F2 they hold fp32's triple word as well (ALL_FORMATS; V's words
+are V0, V1 and V2 there, v_names): its tables have fp32 rows and its tests are
+python/tests/test_mathlib_trig_tw.py's.
 
 A CHECK takes a fragment or its instrumented build and returns FINDINGS: a
 list of strings, each beginning with the check's name and a colon, empty when
@@ -152,7 +155,8 @@ def radian_pools(fmt):
     random encodings at fp64 and 16 at fp128 and fp256, and seed 5), the
     vector sets' (vectors.radian_unary_pool as transcend_cases calls it: 24
     extra and seed 14) and test_transcend's brute pool. 4,408, 620 and 614
-    arguments at fp64, fp128 and fp256 (MEASURED by the parcel's entry)."""
+    arguments at fp64, fp128 and fp256 (MEASURED by the parcel's entry), and
+    760 at fp32 (parcel M2F2; the number parcel M2X's pools had)."""
     from test_transcend import _brute_pool
     t = 64 if fmt.width <= 64 else 16
     a = H._transcend_check().radian_pool(fmt, t, 5)

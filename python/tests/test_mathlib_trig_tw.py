@@ -41,7 +41,6 @@ which red):
              none marked, and the zeros pinned
 """
 
-import copy
 import functools
 import hashlib
 import pathlib
@@ -216,7 +215,7 @@ def test_the_cap_has_no_slack_and_the_default_form_of_abs_costs_a_value(
         b = ml.build(fn, FMT, RNE)
         f, g = b.fragment(schedule=False), b.fragment()
         assert len(f) == want and f.live_max() == g.live_max() == 24, fn
-        assert ml.invariants(g) == [f"24 values live at once, past 23"]
+        assert ml.invariants(g) == ["24 values live at once, past 23"]
     assert seen == [True] * 3                   # fp32's builder asks for it
 
 
@@ -268,8 +267,8 @@ def test_each_leg_of_shape_can_fail_alone_at_fp32():
              **ml.TRIG_LIVE_CAP["sin"], "fp32": 24}}), 1)
     out = T.check_shape(FMT, builds, tables=T.Tables(caps={
         **ml.TRIG_LIVE_CAP, "tan": {**ml.TRIG_LIVE_CAP["tan"], "fp32": 22}}))
-    assert any("a cap one under (22)" not in s and "the cap is 22" in s
-               for s in out)
+    assert any("the cap is 22, the most values live under any attribute is 23"
+               in s for s in out)
     assert any("invariants: 23 values live at once, past 22" in s for s in out)
     legs("bank words over the three functions", T.Tables(
         union=dict(T.UNION_WORDS, fp32=101)), 1)
@@ -417,7 +416,7 @@ def test_the_audit_of_the_whole_routine_is_empty():
         assert main > len(xs) // 2 and tally["nonfinite"] == 0
 
 
-def test_constants_in_process_and_as_a_program():
+def test_constants_in_process_and_the_listing():
     findings, lines = T.check_constants(formats=(FMT,))
     assert findings == [] and len(lines) == 3
     for fn in FUNCS:
@@ -472,7 +471,7 @@ def test_each_leg_of_the_fp32_constants_can_fail_alone():
     found = _constants_of(b)
     assert len(found) == 1 and "derived but not checked: ['EXTRA']" in found[0]
     b = ml.build("sin", FMT, RNE)
-    b.roles["S_CT0"] = b.word(0x3c90000000 & 0xffffffff, "S_CT0")
+    b.roles["S_CT0"] = b.word(0x33800000, "S_CT0")
     found = _constants_of(b)
     assert any("S_CT0 is held, but the coefficient is exact in one word" in s
                for s in found), found
@@ -557,9 +556,9 @@ def test_the_budget_reproduces_the_models_at_its_anchor_lanes(fn):
 
 @pytest.mark.parametrize("fn", FUNCS)
 def test_the_budget_check_over_a_small_sample_of_each_region(fn):
-    """The check `budget` at 5 lanes of each of the five regions and of quad
-    (seed 11) of each function: the bound under 1 Bv (the model's 0.43 at
-    most over 12,000 lanes), no lane past it, the residual stated, and V
+    """The check `budget` at 5 lanes of each of the five regions (seed 11) of
+    each function: the bound under 1 Bv (the model's 0.43 at most over 12,000
+    lanes), no lane past it, the residual stated, and V
     bit-identical across the five attributes on every lane, so that the rne
     budget is every attribute's (parcel M2X: 517 lanes a function)."""
     b = build_of(fn, RNE)
@@ -623,12 +622,14 @@ def near_family(fmt=FMT, K=64, J=2):
 
 
 def test_the_theory_finds_no_centre_at_g40_and_the_zeros_are_pinned():
-    """At G = 40 the theory finds no centre for any function and attribute (E6:
-    sin x - x ~ x^3/6 is 2^7 Bv away at the smallest main-path |x|), so the
-    structured, family and window legs run NO LANE at fp32, and pass with none
-    run. That is the finding; what is pinned here is that it stays true (the
-    zero is a claim, and a change of the theory, the format or G moves it) and
-    the legs that replace them are the next tests'."""
+    """At G = 40 the theory finds no centre for any function and attribute (the
+    drafter's E6; parcel M2X's COMPUTED reason: even where x^3/6 or x^2/2 lands
+    on the grid, the true value is 2^7 Bv or more from the rounding boundary at
+    the smallest main-path |x|), so the structured, family and window legs run
+    NO LANE at fp32, and pass with none run. That is the finding; what is
+    pinned here is that it stays true (the zero is a claim, and a change of the
+    theory, the format or G moves it); the legs that replace them are the next
+    tests'."""
     for fn in FUNCS:
         assert set(TF.TRIG_FAMILY[fn]["fp32"]) == {rid(r) for r in RND}
         for r in RND:
@@ -658,9 +659,9 @@ def test_the_theory_finds_no_centre_at_g40_and_the_zeros_are_pinned():
                for x in TF.census(FMT)) == 2
 
 
-# the centres the theory finds at G = 18 (the double word's): sin x 3 2^-11 under
-# rne, cos x 1, 3 and 5 2^-12 under rne and 2^-10 .. 2^-11 under the directed
-# three; none for tan and none for sin under the directed three
+# the centres the theory finds at G = 18 (the double word's): sin x = 3 2^-11
+# under rne, cos x = 1, 3 and 5 2^-12 under rne and 1 2^-10 .. 2^-11 under the
+# directed three; none for tan and none for sin under the directed three
 G18 = {("sin", RNE): [(3, 11, 11)],
        ("cos", RNE): [(1, 12, 12), (3, 12, 12), (5, 12, 12)],
        ("cos", RTZ): [(1, 10, 11)]}
@@ -815,7 +816,6 @@ def run_check(check, plant, fn, rnd):
 
 CHECKS = ("pools", "seq", "bound", "specials", "shape", "audit", "constants",
           "budget", "rate", "family", "census_counts")
-TRIG_PLANT_NAMES = set(ml.TRIG_PLANTS)
 PLANTED = [
     ("quadrant_sign",
      {"pools": ("cos", RNE), "bound": ("cos", RNE), "constants": ("cos", RNE)},
@@ -923,12 +923,12 @@ def test_the_control_is_green_in_every_check_the_table_runs():
     assert _control("seq", "sin", RNE) == []
 
 
-@pytest.mark.parametrize("plant", ["quotient_fma"])
-def test_the_models_first_quotient_is_2_to_the_16_bv_at_its_lane(plant):
+def test_the_models_first_quotient_is_2_to_the_16_bv_at_its_lane():
     """Parcel M2X's own first version lost 2^-48 in tan's first remainder (tan
-    at 0x3a410113, 2^+16 Bv; the plant is that defect): 2^+16.41 here against
-    the control's 2^-7.86, and the placed regions do not reach it."""
-    b = build_of("tan", RNE, plant)
+    at 0x3a410113, 2^+16 Bv; the plant quotient_fma is that defect): 2^+16.41
+    here against the control's 2^-7.86, and the placed regions do not reach
+    it."""
+    b = build_of("tan", RNE, "quotient_fma")
     out, (worst, main, lanes) = T.check_bound(b, [0x3a410113], "named")
     assert out and round(worst, 2) == 16.41 and main == lanes == 1
     out, (worst, _m, _l) = T.check_bound(build_of("tan", RNE), [0x3a410113])
@@ -987,12 +987,11 @@ def test_the_plants_that_do_not_apply_are_the_pinned_ones():
 
 
 def test_every_plant_is_in_the_table_and_acts():
-    """The table names every plant that acts at fp32 (the 14 of TRIG_PLANTS but
-    range_unmarked, the three of TRIG_TW_ROUTINE_PLANTS and the bound's wide
-    one, and parcel M2F1's carry_dropped and r2_dropped), each row has a red
-    check and every check has a plant red in it; and a plant that did nothing
-    would pass every row green, so each is a different build from the clean
-    one."""
+    """The table names every plant that acts at fp32 (the 13 of TRIG_PLANTS
+    that act, all but range_unmarked; the four of TRIG_TW_ROUTINE_PLANTS; and
+    parcel M2F1's carry_dropped and r2_dropped), each row has a red check and
+    every check has a plant red in it; and a plant that did nothing would pass
+    every row green, so each is a different build from the clean one."""
     named = {row[0] for row in PLANTED}
     assert named == (set(ml.TRIG_PLANTS) - {"range_unmarked"}) \
         | set(ml.TRIG_TW_ROUTINE_PLANTS) | set(ml.TRIG_TW_PLANTS)
@@ -1005,7 +1004,6 @@ def test_every_plant_is_in_the_table_and_acts():
         for check, (fn, rnd) in {**red, **green}.items():
             assert fn in FUNCS and rnd in RND
             assert applies(plant, fn), (plant, fn)
-        clean = build_of(next(iter(red.values()))[0], RNE)
         fn = next(iter(red.values()))[0]
         b = build_of(fn, RNE, plant)
         clean = build_of(fn, RNE)
@@ -1029,7 +1027,7 @@ def test_a_reduction_plant_passes_through_to_the_triple_words_tail():
         else:
             assert b.meta["plant"] == plant
             acts.append(plant)
-    # M2F1's: eight act (exact_add the lower group's first TwoSum), three are
+    # M2F1's: nine act (exact_add the lower group's first TwoSum), three are
     # refused by name (mid_inexact, range_short, split_unproved)
     assert sorted(refused) == ["mid_inexact", "range_short", "split_unproved"]
     assert "exact_add" in acts and "pio2_low" in acts and len(acts) == 9
@@ -1053,7 +1051,7 @@ def _inproc(capsys, *args):
     return rc, capsys.readouterr().out
 
 
-def test_the_trig_commands_take_fp32(capsys, tmp_path):
+def test_the_trig_commands_take_fp32(capsys):
     rc, out = _inproc(capsys, "trig-bound", "--formats", "fp32", "--fn", "tan",
                       "--attrs", "rne", "--n", "3")
     assert rc == 0 and "RESULT: ok" in out
