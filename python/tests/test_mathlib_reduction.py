@@ -874,9 +874,14 @@ def test_the_phases_are_in_the_phase_order_after_reduce():
     # "special") are in PHASE_ORDER too, the one tuple the scheduler ranks by:
     # an edit of this test the lead approved (2026-10-27), the six's relative
     # order unchanged
+    # parcel M2F2 (the lead's brief): fp32's triple-word polynomials add
+    # "S-head2" and "S-head3" after "S-head", "C-head2" and "C-head3" after
+    # "C-head", each in the model's place; the double word's names keep their
+    # order
     six = ("setup", "reduce", "lowword", "tail", "head", "head2", "head3",
            "Z", "lookup", "recon", "scale", "fixed-grid",
-           "z", "S-tail", "S-head", "C-tail", "C-head", "sincos", "select",
+           "z", "S-tail", "S-head", "S-head2", "S-head3", "C-tail", "C-head",
+           "C-head2", "C-head3", "sincos", "select",
            "quotient", "final", "classify", "range", "special")
     assert tuple(p for p in order if not p.startswith("red-")) == six
     for name in ("fp64", "fp128", "fp256", "fp32"):
@@ -923,8 +928,10 @@ def test_reference_and_audit_on_the_studys_arguments(name):
 
 
 def test_fp32_at_the_fallback_guard_is_reduced_right():
-    """fp32 at G = 18 once, so that M2F can call the reduction unchanged if
-    the double word is taken."""
+    """fp32 at G = 18 once: the double word's fallback, built so that the
+    reduction could be called unchanged if Logan took the double word. He took
+    the triple word (2026-10-27; parcel M2F1's reduction at G = 40), and this
+    stays true and tested (a comment-only edit, parcel M2F2)."""
     b = build_of("fp32")
     f = families("fp32")
     run = run_lanes(b, list(main_args("fp32")) + list(f["edges"])
@@ -1142,7 +1149,9 @@ def test_check_runs_the_routines_line_as_it_is_and_the_reductions_own(
     assert "mathlib --check (reduction): 3 formats, 0 differences" in shown
     assert shown.index("mathlib --check (reduction): 3 formats, 0 "
                        "differences") > i
-    assert shown[-1] == ("mathlib --check (trig): 3 routines, 3 formats, "
+    # fp32 joined the trig formats with parcel M2F2: "4 formats", the one
+    # change to this line (an edit of this test approved in the lead's brief)
+    assert shown[-1] == ("mathlib --check (trig): 3 routines, 4 formats, "
                          "0 differences")
     monkeypatch.setattr(ml, "check_constants",
                         lambda **kw: (["six lines"], ["a difference"]))

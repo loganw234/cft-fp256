@@ -223,8 +223,9 @@ def _gate_exponent(fmt):
 def census(fmt, G=None):
     """The study's tiny family (census.py tiny_family): +-c 2^-e for c = 1 to
     16 and e from (p + G)/4 - 4 up to the tiny gate, each distinct value once,
-    both signs, sorted: 144, 384 and 880 arguments at fp64, fp128 and fp256 (and
-    144 at fp32, G = 18 or 40: the theory takes p and G)."""
+    both signs, sorted: 144, 384 and 880 arguments at fp64, fp128 and fp256 (the
+    theory takes p and G: fp32 is 144 at G = 18, the double word's, and 48 at
+    G = 40, the triple word's and the decided one, where e = 12 and 13 only)."""
     p = fmt.prec
     G = ml.GUARD[fmt.name] if G is None else G
     out = set()
@@ -562,12 +563,13 @@ _SIN_FP256_6 = [
     ('m', (165,), (-2, -1, 1, 2)), ('m', (166,), (-1, 1)),
     ('m', (179, 182, 184, 185, 187, 188), (-3, 3)),
 ]
-_COS_FP64_7 = []
-_COS_FP64_8 = [
+_SIN_FP32_7 = []
+_COS_FP64_8 = []
+_COS_FP64_9 = [
     (1, 24, 26), (3, 25, 26), (5, 26, 26),
 ]
-_COS_FP128_9 = []
-_COS_FP128_10 = [
+_COS_FP128_10 = []
+_COS_FP128_11 = [
     (1, 39, 56), (3, 41, 56), (5, 42, 56), (7, 42, 56), (9, 42, 56),
     (11, 43, 56), (13, 43, 56), (15, 43, 56), (17, 43, 56), (19, 43, 56),
     (21, 44, 56), (23, 44, 56), (25, 44, 56), (27, 44, 56), (29, 44, 56),
@@ -579,8 +581,8 @@ _COS_FP128_10 = [
     ('m', (58, 62), (-4, -3, -2, -1, 1, 2, 3, 4)),
     ('m', (63,), (-3, -2, -1, 1, 2, 3)), ('m', (65,), (-2, -1, 1, 2)),
 ]
-_COS_FP256_11 = []
-_COS_FP256_12 = [
+_COS_FP256_12 = []
+_COS_FP256_13 = [
     (1, 70, 118), (3, 72, 118), (5, 73, 118), (7, 73, 118), (9, 73, 118),
     (11, 74, 118), (13, 74, 118), (15, 74, 118), (17, 74, 118),
     (19, 74, 118), (21, 75, 118), (23, 75, 118), (25, 75, 118),
@@ -595,29 +597,31 @@ _COS_FP256_12 = [
         159, 160, 162, 164), (-4, -3, -2, -1, 1, 2, 3, 4)),
     ('m', (178, 180, 181, 183, 186), (-3, 3)),
 ]
-_TAN_FP64_13 = [
+_COS_FP32_14 = []
+_TAN_FP64_15 = [
     (3, 26, 26),
 ]
-_TAN_FP64_14 = []
-_TAN_FP128_15 = [
+_TAN_FP64_16 = []
+_TAN_FP128_17 = [
     (3, 56, 56), (9, 55, 55), (15, 55, 55), (33, 54, 54), (39, 54, 54),
     (45, 54, 54), (51, 54, 54), (57, 54, 54), (63, 54, 54),
 ]
-_TAN_FP128_16 = [
+_TAN_FP128_18 = [
     (3, 41, 55), (9, 43, 54), (15, 44, 54), (21, 44, 54), (27, 44, 54),
     (33, 45, 53), (39, 45, 53), (45, 45, 53), (51, 45, 53), (57, 45, 53),
     (63, 46, 53),
 ]
-_TAN_FP256_17 = [
+_TAN_FP256_19 = [
     (3, 118, 118), (9, 117, 117), (15, 117, 117), (33, 116, 116),
     (39, 116, 116), (45, 116, 116), (51, 116, 116), (57, 116, 116),
     (63, 116, 116),
 ]
-_TAN_FP256_18 = [
+_TAN_FP256_20 = [
     (3, 72, 117), (9, 74, 116), (15, 75, 116), (21, 75, 116), (27, 75, 116),
     (33, 76, 115), (39, 76, 115), (45, 76, 115), (51, 76, 115),
     (57, 76, 115), (63, 77, 115),
 ]
+_TAN_FP32_21 = []
 
 TRIG_FAMILY = {
     "sin": {
@@ -642,51 +646,72 @@ TRIG_FAMILY = {
             "rup": _SIN_FP256_6,
             "rmm": _SIN_FP256_5,
         },
+        "fp32": {
+            "rne": _SIN_FP32_7,
+            "rtz": _SIN_FP32_7,
+            "rdn": _SIN_FP32_7,
+            "rup": _SIN_FP32_7,
+            "rmm": _SIN_FP32_7,
+        },
     },
     "cos": {
         "fp64": {
-            "rne": _COS_FP64_7,
-            "rtz": _COS_FP64_8,
-            "rdn": _COS_FP64_8,
-            "rup": _COS_FP64_8,
-            "rmm": _COS_FP64_7,
+            "rne": _COS_FP64_8,
+            "rtz": _COS_FP64_9,
+            "rdn": _COS_FP64_9,
+            "rup": _COS_FP64_9,
+            "rmm": _COS_FP64_8,
         },
         "fp128": {
-            "rne": _COS_FP128_9,
-            "rtz": _COS_FP128_10,
-            "rdn": _COS_FP128_10,
-            "rup": _COS_FP128_10,
-            "rmm": _COS_FP128_9,
+            "rne": _COS_FP128_10,
+            "rtz": _COS_FP128_11,
+            "rdn": _COS_FP128_11,
+            "rup": _COS_FP128_11,
+            "rmm": _COS_FP128_10,
         },
         "fp256": {
-            "rne": _COS_FP256_11,
-            "rtz": _COS_FP256_12,
-            "rdn": _COS_FP256_12,
-            "rup": _COS_FP256_12,
-            "rmm": _COS_FP256_11,
+            "rne": _COS_FP256_12,
+            "rtz": _COS_FP256_13,
+            "rdn": _COS_FP256_13,
+            "rup": _COS_FP256_13,
+            "rmm": _COS_FP256_12,
+        },
+        "fp32": {
+            "rne": _COS_FP32_14,
+            "rtz": _COS_FP32_14,
+            "rdn": _COS_FP32_14,
+            "rup": _COS_FP32_14,
+            "rmm": _COS_FP32_14,
         },
     },
     "tan": {
         "fp64": {
-            "rne": _TAN_FP64_13,
-            "rtz": _TAN_FP64_14,
-            "rdn": _TAN_FP64_14,
-            "rup": _TAN_FP64_14,
-            "rmm": _TAN_FP64_13,
+            "rne": _TAN_FP64_15,
+            "rtz": _TAN_FP64_16,
+            "rdn": _TAN_FP64_16,
+            "rup": _TAN_FP64_16,
+            "rmm": _TAN_FP64_15,
         },
         "fp128": {
-            "rne": _TAN_FP128_15,
-            "rtz": _TAN_FP128_16,
-            "rdn": _TAN_FP128_16,
-            "rup": _TAN_FP128_16,
-            "rmm": _TAN_FP128_15,
+            "rne": _TAN_FP128_17,
+            "rtz": _TAN_FP128_18,
+            "rdn": _TAN_FP128_18,
+            "rup": _TAN_FP128_18,
+            "rmm": _TAN_FP128_17,
         },
         "fp256": {
-            "rne": _TAN_FP256_17,
-            "rtz": _TAN_FP256_18,
-            "rdn": _TAN_FP256_18,
-            "rup": _TAN_FP256_18,
-            "rmm": _TAN_FP256_17,
+            "rne": _TAN_FP256_19,
+            "rtz": _TAN_FP256_20,
+            "rdn": _TAN_FP256_20,
+            "rup": _TAN_FP256_20,
+            "rmm": _TAN_FP256_19,
+        },
+        "fp32": {
+            "rne": _TAN_FP32_21,
+            "rtz": _TAN_FP32_21,
+            "rdn": _TAN_FP32_21,
+            "rup": _TAN_FP32_21,
+            "rmm": _TAN_FP32_21,
         },
     },
 }

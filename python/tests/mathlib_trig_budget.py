@@ -33,11 +33,17 @@ zero, small, random), the lanes m2measure.py's sample() draws for a seed
 46), rne: V is the same under every attribute (check_attributes), so the rne
 budget is every attribute's.
 
-Room for fp32 (parcel M2F). TrigAnalyzer takes V as the words of the build's
-probes: Vh and Vl, or V0, V1 and V2 (a triple word, as parcel M2X's
-tw32_budget.py seeds them), and the frozen phases as an argument
-(`exact_phases`: M2X froze red-products-low too). A build whose probes lack
-the words named is refused by name.
+fp32 (parcel M2F2) is the triple word, and this is its tool. TrigAnalyzer
+takes V as the words of the build's probes: Vh and Vl, or V0, V1 and V2 (a
+triple word, as parcel M2X's tw32_budget.py seeds them), and the frozen phases
+as an argument (`exact_phases`; by default EXACT_PHASES, and for a build with
+the phase red-products-low, the triple word's reduction, EXACT_PHASES_TW: M2X
+froze the late products as it froze the early ones, and without them sin's
+bound over 60 lanes (12 of each of the five regions, seed 5, rne) is 1.0042 Bv
+where with them it is 0.1363, MEASURED by parcel M2F2). A build whose probes
+lack the words named is refused by name. The first run on a real triple-word
+build was parcel M2F2's: until then only a double-word build with doctored
+probes (test_mathlib_trig.py) had run on three words.
 
 THE CHECK `budget` (check_budget) has legs, each a finding that begins with
 "budget:":
@@ -88,6 +94,18 @@ AFTER_V = ("final", "range", "special", "classify")
 # the reduction's error-free phases, frozen whole in the twin (m2budget.py:46)
 EXACT_PHASES = ("red-setup", "red-window", "red-products", "red-coarse",
                 "red-mid")
+# fp32's triple-word reduction (parcel M2F1) emits the products of the low
+# positions late, in their own phase, as error-free as red-products: frozen with
+# them, as parcel M2X's tw32_budget.py froze them
+EXACT_PHASES_TW = EXACT_PHASES + ("red-products-low",)
+
+
+def exact_phases_of(build):
+    """The phases frozen whole for `build`: EXACT_PHASES, and
+    EXACT_PHASES_TW where it has the triple word's red-products-low."""
+    return (EXACT_PHASES_TW if "red-products-low" in build.phase_of
+            else EXACT_PHASES)
+
 
 # Faults of the TOOL, for the tests (never mathlib_budget.PLANTS, which the
 # six's tests hold to their table). A plant that could not act is refused by
@@ -117,8 +135,10 @@ class TrigAnalyzer(B.Analyzer):
     docstring), V's words from the probes and the frozen phases an argument.
     `plant` names a fault of the tool (TOOL_PLANTS)."""
 
-    def __init__(self, build, exact_phases=EXACT_PHASES, plant=None):
+    def __init__(self, build, exact_phases=None, plant=None):
         # not Analyzer.__init__: its check names the double word
+        if exact_phases is None:
+            exact_phases = exact_phases_of(build)
         if plant is not None and plant not in TOOL_PLANTS:
             raise ValueError(f"unknown tool plant {plant!r}: "
                              f"{', '.join(TOOL_PLANTS)}")
@@ -312,7 +332,7 @@ class TrigBudget(B.Budget):
     Only the lanes the main path answers are analysed (harness.in_main).
     `plant` names a fault of the tool (TOOL_PLANTS)."""
 
-    def __init__(self, build, exact_phases=EXACT_PHASES, plant=None):
+    def __init__(self, build, exact_phases=None, plant=None):
         # not Budget.__init__: its plant table is the six's
         self.plant = plant
         self.an = TrigAnalyzer(build, exact_phases, plant)
@@ -360,7 +380,7 @@ class TrigBudget(B.Budget):
         return s
 
 
-def budget_of(build, xs, exact_phases=EXACT_PHASES, plant=None):
+def budget_of(build, xs, exact_phases=None, plant=None):
     """The summary of TrigBudget(build).add(xs), and the budget."""
     bud = TrigBudget(build, exact_phases, plant).add(xs)
     return bud.summary(), bud
@@ -471,7 +491,7 @@ def judge(s, where, expect=None):
 
 
 def check_budget(b, xs, label="random", plant=None, expect=None,
-                 attrs=None, exact_phases=EXACT_PHASES, attr_xs=None):
+                 attrs=None, exact_phases=None, attr_xs=None):
     """[finding], summary: budget. The first-order budget of the build over the
     lanes xs (the main path's), judge()'s legs; with `attrs` ({attribute:
     Build} of the same function and format, the five) the attributes' leg as

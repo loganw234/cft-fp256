@@ -140,7 +140,8 @@ refused by name where the program needs what the word lacks.
 Since parcel M2P (M2's build, wave 3, 2026-10-29) the eighth corpus has a second
 part, run after the six at each format that has it: sin, cos and tan, the 45
 fragments of parcel M2G2a (mathlib.TRIG_NAMES at fp64, fp128 and fp256 under
-each attribute), which had run on seq.py alone. They go through the same two
+each attribute) and, since parcel M2F2, fp32's 15 (the triple word at G = 40),
+which had run on seq.py alone. They go through the same two
 shapes, lane counts, masks, comparisons, refusals and remote leg, from a stream
 of their own (a salt beside the six's), so that the six's programs, lanes and
 masks are what they were at every --math-rounds; their lanes are
@@ -148,13 +149,16 @@ python/tests/mathlib_trig_harness.py's and mathlib_trig_family.py's, in the
 same five categories (trig_lanes). The part keeps counters of its own, so that
 a form it never reached is named as the trig part's ("THE ROUTINE CORPUS'S TRIG
 PART DID NOT REACH EVERY FORM"), and a summary, a limits line and a line of the
-bits its programs need (cft_caps.seq_features) of its own. sin, cos and tan are
-not built at fp32 until parcel M2F: the summary line says "fp32: sin, cos and
-tan not built (parcel M2F's)", which is no SKIP - a by-design absence, and a
-SKIP line would fail every --require-all run. The formats come from
-mathlib.TRIG_FORMATS, so when M2F adds fp32 to it the same loop takes the
-format and the clause goes, with no edit here. Their programs write past r15 at
-fp64 and fp128 and so need REGS32 there, where the six need it at fp32 alone.
+bits its programs need (cft_caps.seq_features) of its own. The formats come from
+mathlib.TRIG_FORMATS, which has fp32 since parcel M2F2 (before it the summary
+line said "fp32: sin, cos and tan not built", a by-design absence and no SKIP);
+the lanes of its "centre", "family" and "near" categories come from
+the committed marks and mathlib_trig_family.TRIG_FAMILY, which has five EMPTY
+lists for fp32 (at G = 40 the theory finds no centre), so those three draw
+nothing there and the fp32 lanes are the special, edge, pool, struct (the
+census's 48 arguments) and random ones. Their programs write past r15
+at fp64, fp128 and fp32 (the triple word keeps 23 values live) and so need
+REGS32 there, where the six need it at fp32 alone.
 
     python3 host/tests/seq_check.py --device <xclbin | cft://host:port | sw>
 
@@ -2489,7 +2493,6 @@ def routine_counters():
     C["remote_names"] = collections.Counter()   # what the remote leg named
     C["formats"] = []           # the formats the part ran at
     C["fragments"] = set()      # (format, routine, attribute) it drew
-    C["absent"] = []            # the formats its routines are not built at
     return C
 
 
@@ -2677,8 +2680,8 @@ def routine_lanes(ml, har, fam, fmt, fn, rnd, n, sub):
 # the same two shapes, lane counts and masks and the same comparisons
 # (routine_corpus, trig=True), from a stream of their own (TRIG_SALT, where the
 # six's is ROUTINE_SALT) so that the six's programs, lanes and masks are what
-# they were at every round count. fp32 has no sin, cos or tan until parcel M2F:
-# the summary says so by name, and it is not a SKIP (a by-design absence).
+# they were at every round count. fp32's are the triple word (parcel M2F2): the
+# loop takes the format from mathlib.TRIG_FORMATS like the others.
 #
 # The lanes are python/tests/mathlib_trig_harness.py's and
 # mathlib_trig_family.py's, the ones the fragments are held to there, in the
@@ -2985,16 +2988,13 @@ def routine_corpus(lib, dev, fmt, name, args, MR, trig=False):
     """The eighth corpus, for one format. Mutates the counters in MR. With
     `trig` the corpus's second part (parcel M2P): sin, cos and tan, from a
     stream of their own and lanes of their own, MR being that part's
-    counters; a format they are not built at (fp32 until parcel M2F) is
-    recorded by name in MR["absent"] and nothing is run."""
+    counters (sin, cos and tan are built at all four formats, fp32's the
+    triple word since parcel M2F2)."""
     mods = routine_modules()
     if mods is None:
         return
     ml, har, fam = mods
     if trig:
-        if fmt not in ml.TRIG_FORMATS:
-            MR["absent"].append(name)
-            return
         th, tf = trig_modules()
     corpus = "routine corpus, trig" if trig else "routine corpus"
     names = ml.TRIG_NAMES if trig else ml.NAMES
@@ -3747,19 +3747,12 @@ def main():
         routine_limits(MR["caps"])
         routine_needed()
     if MT["total"]:
-        # sin, cos and tan (parcel M2P), beside the six; fp32 is named, not
-        # skipped: a by-design absence until parcel M2F builds them
+        # sin, cos and tan (parcel M2P), beside the six
         print(routine_summary(MT, "the routine corpus's trig part (sin, cos "
-                                  "and tan)", trig=True)
-              + ("" if not MT["absent"] else
-                 f"; {', '.join(MT['absent'])}: sin, cos and tan not built "
-                 f"(parcel M2F's)"))
+                                  "and tan)", trig=True))
         routine_limits(MT["caps"], trig=True)
         routine_needed(trig=True)
         print(trig_family_line(MT))
-    elif MT["absent"]:
-        print(f"{', '.join(MT['absent'])}: sin, cos and tan not built "
-              f"(parcel M2F's)")
     bad += (S["bad"] + X["bad"] + M["bad"] + R["bad"] + ceiling_bad
             + F["bad"] + MR["bad"] + MT["bad"])
     if DEVICE is not None:
