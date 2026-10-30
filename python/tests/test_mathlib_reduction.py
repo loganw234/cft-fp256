@@ -685,9 +685,12 @@ def check_proofs(planner=None, builder=None):
     refuses(lambda: planner(FP32, 40, R=None),
             "no plan: the exact combination needs b <= 2p + 1 + bottom = -7",
             "fp32 at G = 40")
-    refuses(lambda: builder(FP32),
-            "no plan: the exact combination needs b <= 2p + 1 + bottom = -7",
-            "build_reduction(FP32), whose G is GUARD's 40")
+    # parcel M2F1 (the brief's item 5): the plan alone is still refused, above;
+    # build_reduction(FP32) at GUARD's 40 builds the triple word instead
+    got = builder(FP32)
+    if (len(got.body), got.meta["reduction"].b) != (319, 16):
+        out.append("proofs: build_reduction(FP32), whose G is GUARD's 40, is "
+                   "not the triple word's 319 instructions at b = 16")
     refuses(lambda: planner(FP128, 46, b=109),
             "b = 109: the coarse sum is not exact", "fp128 at b = 109")
     if planner(FP128, 46, b=108).b != 108:
@@ -854,8 +857,15 @@ def test_shape(name):
 def test_the_phases_are_in_the_phase_order_after_reduce():
     order = ml.PHASE_ORDER
     reds = [p for p in order if p.startswith("red-")]
+    # parcel M2F1 (the lead's brief): fp32's triple-word reduction adds
+    # "red-products-low" (after "red-mid") and "red-triple" (after "red-lower"),
+    # each in the model's place; the double word's eight keep their order
     assert reds == ["red-setup", "red-window", "red-products", "red-coarse",
-                    "red-mid", "red-lower", "red-scale", "red-small"]
+                    "red-mid", "red-products-low", "red-lower", "red-triple",
+                    "red-scale", "red-small"]
+    assert [p for p in reds if p not in ("red-products-low", "red-triple")] \
+        == ["red-setup", "red-window", "red-products", "red-coarse",
+            "red-mid", "red-lower", "red-scale", "red-small"]
     i = order.index("reduce")
     assert order[i + 1:i + 1 + len(reds)] == tuple(reds)
     # the six's phases keep their order. Parcel M2G2a's nine phases of sin, cos

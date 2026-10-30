@@ -221,6 +221,44 @@ fragment moved. What the run says of the programs the study designed:
   summary line and draws no lane of it. When parcel M2F builds the three at
   fp32 and adds it to `TRIG_FORMATS` the same loop runs them.
 
+**A note of 2026-10-29, at parcel M2F1** (fp32's triple-word reduction at G =
+40 in the golden generator; M2's build, wave 3, the first half of fp32; the
+study's text stays as written at 1337a13). 2.7's triple word, which parcel M2X
+built in this directory's model (`tw32.py`), has its reduction in
+python/cft_golden/mathlib.py: `plan_reduction_tw`, `trig_reduction_tw` and
+`build_reduction(FP32)` at G = 40, held by python/tests/
+test_mathlib_reduction_tw.py (docs/VALIDATION.md, the entry of that date, whose
+figures these are). It is `tw32.reduce_tw`: 319 instructions with the model's
+counts by phase, 50 bank words, 64 instructions claimed exact, the same 13
+static proofs by name and in order, the dag digest equal, and (r0, r1, r2, q,
+small) equal on all 14,021 arguments of the model's reduce mode (MEASURED, a
+scratch comparison with this directory's model, in the entry). What it says
+of the study:
+- 2.2's front is M2G1's with two switches, off by default: |rho_j| <= ulp(P_j)/2
+  (the looser ulp bound makes the lower group's proof fail by name at G = 40)
+  and the products of positions 4 to 8 built late, in a phase of their own,
+  "red-products-low" (PHASE_ORDER also gains "red-triple"). One order
+  difference from the model, named: the port builds positions 2 and 3 before
+  the coarse sum (the front's loop) where the model builds them after it. The
+  dag digest and every count are equal; both orders keep 23 values live in
+  sin, cos and tan (MEASURED on the model with that one line changed), and
+  all nine products first keep 24, as does a classification that forms |x| as
+  `iand(x, ABSM)` and so shares red-small's instruction (hash-consing;
+  MEASURED on the model, one line changed each): parcel M2F2's routine must
+  form |x| otherwise, as the model does.
+- 2.4's rho at fp32 is the exact rational pi/4 (1 + over), over = 2.029e-06 =
+  2^-18.91 COMPUTED from the pieces' static magnitudes, in the build's meta
+  (`rho`, `overshoot`) for `plan_trig`; the largest overshoot measured is
+  1.878e-06 (2^-19.02), 1.08 times under it. Its proof (`_check_trig_cushion_tw`)
+  is not M2G1's formula and is the triple word's own.
+- The lower group's proof holds at G = 36 to 40 and fails at 41 to 44 by name on
+  the port as on the model; G = 40 is the last. r = r0 + r1 + r2 is non-
+  overlapping (|r1| <= ulp(r0)/2, |r2| <= ulp(r1)/2) on all 13,801 arguments of
+  the 14,021 that are not `small` (MEASURED, not proved).
+- Not built and not in this note: the polynomials, sin(r) and cos(r), tan's
+  quotient, the live cap of 23 and the routines at fp32 (parcel M2F2's: they are
+  still refused by name), `TRIG_FORMATS`, the harness at fp32.
+
 M1's study (docs/studies/M1-exp-log.md) is its model of form, section for
 section, and M1's design is its starting point: the in-lane test, the
 double word with TwoSum and no augmented addition, the fragment in C4's

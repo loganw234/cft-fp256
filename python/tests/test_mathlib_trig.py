@@ -1377,6 +1377,10 @@ def test_phase_order_has_the_trig_phases_in_place():
     assert order[i + 1:i + 1 + len(new)] == new
     assert order[i + 1 + len(new):i + 3 + len(new)] == ("final", "classify")
     assert order[-2:] == ("range", "special")
+    # parcel M2F1: the two names of fp32's triple-word reduction (red-products-
+    # low, red-triple) sit among the red- phases, before the six's "lowword"
+    assert max(order.index(p) for p in order if p.startswith("red-")) \
+        < order.index("lowword")
     used = {ph for fn in FUNCS for fmt in FORMATS
             for ph in build_of(fn, fmt, RNE).phase_of}
     assert used <= set(order) and "setup" not in used
