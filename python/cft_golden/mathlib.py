@@ -168,8 +168,9 @@ check_reduction_tw_constants (`--only reduction-tw`), reduction_front's two
 switches (rho_half, late_from), and build_reduction(FP32) at G = 40.
 
 sin, cos and tan (parcel M2G2a, M2's build, wave 2, first half) are built on
-that reduction, at fp64, fp128 and fp256, and are BESIDE the six, not among
-them: TRIG_NAMES = ("sin", "cos", "tan") is a second tuple, and NAMES stays
+that reduction, at fp64, fp128 and fp256 (fp32's, parcel M2F2, are the triple
+word on M2F1's reduction, below), and are BESIDE the six, not among them:
+TRIG_NAMES = ("sin", "cos", "tan") is a second tuple, and NAMES stays
 the six. The six's whole battery (test_mathlib.py's SHAPE, digests, the 90-cell
 mark-rate statistics, the plant table; mathlib_harness.py, mathlib_family.py;
 host/tests/seq_check.py's eighth corpus) iterates NAMES, and LIVE_CAP is the
@@ -178,11 +179,13 @@ them at once; the three have their own checks (python/tests/
 mathlib_trig_harness.py and test_mathlib_trig.py), their own cap by function
 and format (TRIG_LIVE_CAP, Logan's answer 9), and their own plants
 (TRIG_PLANTS). build() and fragment() accept either tuple; at fp32 a trig name
-is refused by name, fp32's shape being Logan's choice from parcel M2X's
-measurement and parcel M2F's to build. The public names are TRIG_NAMES,
-TRIG_LIVE_CAP, TRIG_PLANTS, plan_trig, trig_rho, trig_after and
-check_trig_constants (`--check`, and `--only trig`); trig_after() and plan_trig()
-are the sections parcel M2F calls unchanged. The design is
+is the TRIPLE word at G = 40, Logan's choice of 2026-10-27 from parcel M2X's
+measurement, built by parcel M2F2 on M2F1's reduction (V = V0 + V1 + V2, 23
+values live at most; TRIG_TW_ROUTINE_PLANTS, plan_trig_tw). The public names
+are TRIG_NAMES, TRIG_LIVE_CAP, TRIG_PLANTS, TRIG_TW_ROUTINE_PLANTS, plan_trig,
+plan_trig_tw, trig_rho, trig_after and check_trig_constants (`--check`, and
+`--only trig`); trig_after() and plan_trig() are the sections fp32's builder
+calls (trig_after with abs_by_xor, plan_trig for K and D). The design is
 docs/studies/M2-trig.md, 2.1 and 2.4 to 2.6; the construction below IS the
 study's model (docs/studies/m2/m2trig.py), ported, and nothing here imports it.
 """
@@ -216,7 +219,8 @@ __all__ = ["fragment", "evaluate", "invariants", "flag_words", "build",
            "plan_reduction_tw", "trig_reduction_tw", "TRIG_TW_PLANTS",
            "check_reduction_tw_constants",
            "TRIG_NAMES", "TRIG_LIVE_CAP", "TRIG_PLANTS", "plan_trig",
-           "trig_rho", "trig_after", "check_trig_constants"]
+           "trig_rho", "trig_after", "check_trig_constants",
+           "TRIG_FORMATS", "TRIG_TW_ROUTINE_PLANTS", "plan_trig_tw"]
 
 EXP_NAMES = ("exp", "exp2", "expm1")   # the exp family (parcels E1 and MB1)
 LOG_NAMES = ("log", "log2", "log1p")   # the log family (parcel MB2)
@@ -1016,7 +1020,13 @@ PHASE_ORDER = ("setup", "reduce", "red-setup", "red-window", "red-products",
                # argument, S's and C's tails and heads, sin(r) and cos(r), the
                # quadrant's select, tan's quotient; and, after "classify", the
                # range's mark. Nothing of the six is built in these.
-               "z", "S-tail", "S-head", "C-tail", "C-head", "sincos",
+               "z", "S-tail", "S-head",
+               # fp32's triple-word polynomials (parcel M2F2): the double-word
+               # steps (head2) and the triple-word steps (head3) of S and of C,
+               # in the model's places (docs/studies/m2/tw32.py), after the
+               # double word's S-head and C-head, which they do not displace
+               "S-head2", "S-head3",
+               "C-tail", "C-head", "C-head2", "C-head3", "sincos",
                "select", "quotient",
                "final", "classify", "range", "special")
 
@@ -2649,21 +2659,27 @@ def _build_log_tw(fn, fmt: FpFormat, rnd: int, G, shift, plant):
     return _log_finalize(b, fn, rnd, plant, c, cl, k_, R, mk, red.r)
 
 
-def _trig_fp32_refusal(name):
-    return (f"{name!r} at fp32 is not built: fp32's shape (the triple word "
-            f"at G = 40, or the double word at G = 18) is Logan's choice from "
-            f"parcel M2X's measurement, and parcel M2F's to build")
-
-
 def build(name, fmt: FpFormat, rnd: int, *, guard=None, bound_shift=0,
           plant=None) -> Build:
-    """`name` (one of NAMES, or of TRIG_NAMES at fp64, fp128 and fp256) at
-    `fmt` under the program's attribute `rnd`, instrumented (Build.fragment()
-    is the routine). `guard` overrides the guard G (GUARD's, by default);
-    `bound_shift` makes the in-lane bound 2^shift times as wide, so that marks
-    are common enough to count (the mark-rate law, the study's 3.4); `plant`
-    builds one fault of PLANTS (of the six), or of TRIG_PLANTS and
-    REDUCTION_PLANTS (sin, cos, tan).
+    """`name` (one of NAMES, or of TRIG_NAMES) at `fmt` under the program's
+    attribute `rnd`, instrumented (Build.fragment() is the routine). `guard`
+    overrides the guard G (GUARD's, by default); `bound_shift` makes the
+    in-lane bound 2^shift times as wide, so that marks are common enough to
+    count (the mark-rate law, the study's 3.4); `plant` builds one fault of
+    PLANTS (of the six), or of TRIG_PLANTS and REDUCTION_PLANTS (sin, cos,
+    tan; at fp32 also TRIG_TW_PLANTS and TRIG_TW_ROUTINE_PLANTS, which no
+    other format has).
+
+    sin, cos and tan at fp32 (parcel M2F2; Logan, 2026-10-27) are the TRIPLE
+    word at G = 40: V = V0 + V1 + V2, built by _build_trig_tw on parcel M2F1's
+    triple-word reduction (family "triple word"); at fp64, fp128 and fp256 the
+    double word (family "double word"). The probes below are the double
+    word's; the triple word keeps r0, r1, r2, s0, s1, s2, C0, C1, C2, V0, V1,
+    V2 and Vh (= V0) instead of rh, rl, sh, sl, ch, cl, Vh and Vl, and its
+    meta has poly (((K3, K2, D) of S, (K3, K2, D) of C)), KS = K3 + K2, KC,
+    DS, DC and rho, overshoot and proofs (the cushion's computed bound, and
+    the names of the static proofs that held). G is fp32's GUARD alone:
+    plan_reduction_tw refuses any other by name.
 
     sin, cos and tan (parcel M2G2a). The Build keeps, for parcel M2G2b's
     budget and rate law:
@@ -2689,14 +2705,21 @@ def build(name, fmt: FpFormat, rnd: int, *, guard=None, bound_shift=0,
         if rnd not in sf.RND_NAMES:
             raise ValueError(f"rounding attribute {rnd!r} is not one of the "
                              f"five")
-        if fmt.name not in TRIG_LIVE_CAP[name]:
-            raise ValueError(_trig_fp32_refusal(name))
+        triple = fmt.name == "fp32"
         if plant is not None and plant not in TRIG_PLANTS \
                 and plant not in REDUCTION_PLANTS:
-            raise ValueError(f"unknown plant {plant!r}: "
-                             f"{', '.join(TRIG_PLANTS)}, "
-                             f"{', '.join(REDUCTION_PLANTS)}")
+            if plant not in _TW_PLANTS:
+                raise ValueError(f"unknown plant {plant!r}: "
+                                 f"{', '.join(TRIG_PLANTS)}, "
+                                 f"{', '.join(REDUCTION_PLANTS)}, "
+                                 f"{', '.join(_TW_PLANTS)} (fp32)")
+            if not triple:
+                raise ValueError(f"plant {plant!r} does not apply to "
+                                 f"{name} at {fmt.name}: it is a fault of the "
+                                 f"triple word's, fp32's")
         G = GUARD[fmt.name] if guard is None else guard
+        if triple:
+            return _build_trig_tw(name, fmt, rnd, G, bound_shift, plant)
         return _build_trig(name, fmt, rnd, G, bound_shift, plant)
     if name not in NAMES:
         raise ValueError(f"{name!r} is not a math-library routine built so "
@@ -4308,9 +4331,10 @@ def trig_reduction_tw(b, x, P, *, plant=None):
 #
 # trig_after() is everything from `select` on, written once and taking sin(r)
 # and cos(r) as lists of words (two, or three whose low words round through
-# round-to-odd as M1's fp32 finals do), so that parcel M2F's fp32 calls it, and
-# plan_trig() for its own rho, rather than copying them. The polynomials'
-# construction (_build_trig) is the double word's.
+# round-to-odd as M1's fp32 finals do), so that fp32's triple word (parcel M2F2)
+# calls it, and plan_trig() for its own rho, rather than copying them. The
+# polynomials' construction is the double word's (_build_trig) at fp64, fp128
+# and fp256 and the triple word's (_build_trig_tw) at fp32.
 
 TRIG_PLANTS = {
     "quadrant_sign": "cos's sign taken from n's low bit alone (the study's "
@@ -4335,21 +4359,46 @@ TRIG_PLANTS = {
                         "word",
 }
 
+# Faults of fp32's triple-word routines beside the polynomials, for the tests:
+# build(fn, FP32, rnd, plant=name). Each is a fault only a triple word has (a
+# third word, a four-stage quotient); at the other formats they are refused by
+# name ("does not apply"), as the faults of TRIG_TW_PLANTS (the triple word's
+# reduction, parcel M2F1) are.
+TRIG_TW_ROUTINE_PLANTS = {
+    "c2_dropped": "S's z^1 coefficient without its THIRD word: a triple-word "
+                  "step's coefficient has one, a double word's has none",
+    "y2_dropped": "the head's running sum without its third word y2: the "
+                  "term y2 z0 left out of every triple-word step",
+    "quotient_fma": "tan's first remainder N0 - q0 D0 taken as one FMA, "
+                    "rounded, and not as the two exact floats (N0 - m) and "
+                    "(m - q0 D0): the model's first version, which lost 2^-48 "
+                    "there",
+    "bound_wide": "the in-lane bound 2^22 WIDER: Bv = 2^-(p+G-22) |V0|, "
+                  "the double word's G = 18 at fp32, so that the lanes next "
+                  "to the theory's centres of G = 18 mark (they are 2^22 "
+                  "times the bound away at G = 40, and none may)",
+}
+_TW_PLANTS = {**TRIG_TW_PLANTS, **TRIG_TW_ROUTINE_PLANTS}
+
 # The most values a trig fragment may keep live at once, by function and
 # format: the most it keeps under any of the five attributes, SCHEDULED
 # (Logan's answer 9 of 2026-10-14: a cap per function and format). MEASURED by
 # parcel M2G2a; test_mathlib_trig.py pins each fragment's count and holds each
-# entry to the maximum. No fp32 key: fp32's shape is parcel M2F's. The study's
-# fragments keep 26, 17 and 16 live at fp64, fp128 and fp256 in the design's
-# own order (costs.fp64, fp128, fp256.out.txt), past the six's 13, so the
-# six's view LIVE_CAP is not the cap of these; and schedule_order takes that
-# order for them, its other two keeping more live (30, 21, 17 and 31, 30, 30).
+# entry to the maximum. The study's fragments keep 26, 17 and 16 live at fp64,
+# fp128 and fp256 in the design's own order (costs.fp64, fp128,
+# fp256.out.txt), past the six's 13, so the six's view LIVE_CAP is not the cap
+# of these; and schedule_order takes that order for them, its other two
+# keeping more live (30, 21, 17 and 31, 30, 30). fp32's triple word (parcel
+# M2F2) keeps 23, in the design's order and scheduled, in all 15 fragments
+# (parcel M2X's tw32_live.out.txt:17), and the cap of 23 has no slack: Logan's
+# decision of 2026-10-27 (docs/ROADMAP.md, "Logan's answer on fp32") leaves
+# 32 - 23 = 9 of seq.py's registers for a program's own values across a call.
 # routines.py's LIVE_CAP and CONTRACT name the eight routines, and adding sin,
 # cos and tan there is parcel M2C's, with cftc.
 TRIG_LIVE_CAP = {
-    "sin": {"fp64": 26, "fp128": 17, "fp256": 16},
-    "cos": {"fp64": 26, "fp128": 17, "fp256": 16},
-    "tan": {"fp64": 26, "fp128": 17, "fp256": 16},
+    "sin": {"fp64": 26, "fp128": 17, "fp256": 16, "fp32": 23},
+    "cos": {"fp64": 26, "fp128": 17, "fp256": 16, "fp32": 23},
+    "tan": {"fp64": 26, "fp128": 17, "fp256": 16, "fp32": 23},
 }
 
 
@@ -4381,8 +4430,8 @@ def plan_trig(fmt: FpFormat, G, rho):
     |c_(D+1)| rho^(2D+2) is under 2^-(p+G+3). Exact rational arithmetic, so
     the plan is the same on every platform: K = 8 for S and for C at G = 44
     and 46, D = 12, 18 and 28 for S and 13, 19 and 29 for C at fp64, fp128 and
-    fp256 (the study's 2.4). The one function parcel M2F calls with its own
-    rho."""
+    fp256 (the study's 2.4). The one function fp32's builder (parcel M2F2) calls
+    with its own rho, through plan_trig_tw()."""
     p = fmt.prec
     rho = Fraction(rho)
     z = rho * rho
@@ -4396,6 +4445,64 @@ def plan_trig(fmt: FpFormat, G, rho):
             D += 1
         out.append((K, D))
     return tuple(out)
+
+
+def plan_trig_tw(fmt: FpFormat, G, rho, slack=2):
+    """(S, C), each (K3, K2, D): the plan of fp32's triple-word polynomials
+    for |r| <= rho (an exact rational) with guard G (parcel M2F2; parcel M2X's
+    plan_tw_poly, ported). K and D are plan_trig()'s; the split of the K head
+    steps is plan_exp32's rule on S and C in exact rationals: term k enters V
+    at weight w_k = |c_k| rho^(2k), so its partial sum needs  need(k) = (p + G
+    + slack) + log2 w_k  bits, and a triple-word step keeps 3p - 2, a
+    double-word step 2p - 2 and a single-word step p - 2. K3 steps are
+    triple-word (the first k whose need is within 2p - 2 ends them), K2 more
+    are double-word (the first k within p - 2 ends those), then a single-word
+    tail to degree D. `slack` is the rule's 2 bits. Two static proofs, by
+    name, ValueErrors: "K3 + K2 is plan_trig's K" (the rule and the plan agree
+    on where the head ends: MEASURED 4 + 3 = 7 for S and 5 + 3 = 8 for C at
+    fp32, G = 40, at rho = 2^-30, 2^-18.91 and 2^-10 over pi/4 alike), and "a
+    triple-word step is needed" (K3 of 1 or more: the polynomial's last step
+    gives sin(r0) and cos(r0) their third word)."""
+    p = fmt.prec
+    z = Fraction(rho) ** 2
+    plans = plan_trig(fmt, G, rho)
+    out = []
+    for name, coef, (K, D) in (("S", _sin_coefficient, plans[0]),
+                               ("C", _cos_coefficient, plans[1])):
+        def first(bits, coef=coef):
+            k = 0
+            while abs(coef(k)) * z ** k > Fraction(2) ** (bits - (p + G
+                                                                  + slack)):
+                k += 1
+            return k
+        k3, k23 = first(2 * p - 2), first(p - 2)
+        if k23 != K:
+            raise ValueError(
+                f"static proof 'K3 + K2 is plan_trig's K' fails: {name} at "
+                f"{fmt.name}, G = {G}: the head ends at {k23} by the rule "
+                f"(slack {slack}) and at {K} by plan_trig")
+        if k3 < 1:
+            raise ValueError(
+                f"static proof 'a triple-word step is needed' fails: {name} "
+                f"at {fmt.name}, G = {G}: K3 = {k3}")
+        out.append((k3, K - k3, D))
+    return tuple(out)
+
+
+@functools.lru_cache(maxsize=None)
+def _order_ratio(name, k, rho, upto=60):
+    """sup over z <= rho^2 of |z y_(k+1)(z)| / |c_k|, y_(k+1) the Horner
+    partial sum of S (name "S") or C, bounded by the series' absolute values:
+    the head step's Fast2Sum(c_k, z y) is ordered (|c_k| >= |z y|) while this
+    is under 1. The series is summed to term `upto` and the rest bounded by
+    twice the next term (each term is under 1/4000 of the one before from
+    there on), so the figure is a bound and not a truncation. An exact
+    rational."""
+    coef = _sin_coefficient if name == "S" else _cos_coefficient
+    z = Fraction(rho) ** 2
+    s = sum(abs(coef(j)) * z ** (j - k) for j in range(k + 1, upto + 1))
+    s += 2 * abs(coef(upto + 1)) * z ** (upto + 1 - k)
+    return s / abs(coef(k))
 
 
 def _trig_slack(b):
@@ -4436,18 +4543,19 @@ def _act(b, plant):
 
 def _check_plant_fired(b):
     plant = b.meta.get("plant")
-    if plant in TRIG_PLANTS and plant not in b._fired:
+    if (plant in TRIG_PLANTS or plant in TRIG_TW_ROUTINE_PLANTS) \
+            and plant not in b._fired:
         raise ValueError(f"plant {plant!r} does not apply to "
                          f"{b.meta['fn']} at {b.fmt.name}: the fault is not "
                          f"reached")
 
 
 def trig_after(b, fn, x, q, sin_words, cos_words, *, G, inrange=None,
-               quotient=None, shift=0):
+               quotient=None, shift=0, abs_by_xor=False):
     """Everything of sin, cos or tan after sin(r) and cos(r), appended to the
     Build `b` for the argument ref `x` (the phases select, quotient, final,
     classify, range and special); finishes the build and returns it. Written
-    once: the double word's builder and parcel M2F's fp32 call it.
+    once: the double word's builder and parcel M2F2's fp32 call it.
 
       q            the reduction's q (MAGIC + n'): q & 3 is n mod 4 and
                    nothing more is used
@@ -4462,6 +4570,16 @@ def trig_after(b, fn, x, q, sin_words, cos_words, *, G, inrange=None,
       quotient     tan only: quotient(b, N, D) -> V, the words of N/D (lists,
                    as sin_words), in the phase "quotient" (set before the
                    call); the double word's is _trig_quotient
+      abs_by_xor   how the classification forms |x| (parcel M2F2). False
+                   (the default, M2G2a's 45 fragments): iand(x, ABSM).
+                   True: ixor(x, iand(x, SIGN)), the model's (parcel M2X's
+                   tw32.py), whose iand is the select's own. Build.ins
+                   hash-conses, so the first form SHARES the instruction a
+                   reduction forms |x| with (red-small's, in both
+                   trig_reduction and trig_reduction_tw) and holds |x| live
+                   from the reduction to the end; at fp32 that is one value
+                   too many (24, not the cap's 23: MEASURED on the model by
+                   parcel M2F1). fp32's builder passes True
 
     select by q & 3 (s = sin(r), c = cos(r)): sin(|x|) = s, c, -s, -c, cos =
     c, -s, -c, s and tan = s/c or -c/s, for n mod 4 = 0..3 (tan: the low bit);
@@ -4582,7 +4700,8 @@ def trig_after(b, fn, x, q, sin_words, cos_words, *, G, inrange=None,
 
     # ---- classify x (late: see above) ----------------------------------------------
     b.phase = "classify"
-    ax = b.iand(x, b.const("ABSM", full ^ fmt.sign_mask))
+    ABSM = b.const("ABSM", full ^ fmt.sign_mask)
+    ax = b.ixor(x, b.iand(x, SIGN)) if abs_by_xor else b.iand(x, ABSM)
     isnan = b.icmplt(INF, ax)
     issnan = b.sel(ZERO, isnan, b.iand(x, b.const("QBIT", 1 << (mw - 1))))
     isinf = b.cmpeq(ax, INF)
@@ -4732,6 +4851,306 @@ def _build_trig(fn, fmt: FpFormat, rnd: int, G, shift, plant):
     return b
 
 
+# ---- fp32's sin, cos and tan: the triple word (parcel M2F2) ---------------------
+#
+# Logan's decision of 2026-10-27: fp32's three routines are the TRIPLE word at
+# G = 40, with a cap of 23 live values. This is parcel M2X's model
+# (docs/studies/m2/tw32.py, build and its helpers) ported onto parcel M2F1's
+# reduction and M2G2a's trig_after: nothing here imports the model, and the
+# port is held to it (instruction for instruction, bank word for bank word,
+# dag digest for dag digest) in the parcel's VALIDATION entry. The parts, by
+# phase, in the design's order:
+#
+#   reduce     trig_reduction_tw(): |x| = n pi/2 + r, r = r0 + r1 + r2, |r| <=
+#              rho = pi/4 (1 + over), over = 2^-18.91 COMPUTED, rho an exact
+#              rational the plan of the polynomials is made at
+#   z          z = r0^2 as an exact double word (z0, z1), TwoProd
+#   S, C       Taylor in z, S(z) = sin(r)/r and C(z) = cos(r): a tail of
+#              single-word FMAs in z0 (S-tail, C-tail), then K2 steps in
+#              DOUBLE words (S-head2, C-head2: the coefficient in two words,
+#              y = (yh, yl)), then K3 steps in TRIPLE words (S-head3, C-head3:
+#              the coefficient in three words, y = (y0, y1, y2), three TwoProds
+#              a step); plan_trig_tw() gives (K3, K2, D): S (4, 3, 9), C (5, 3, 9)
+#   sincos     sin(r0) = r0 S and cos(r0) = C in three words, then r's lower
+#              words by the derivative to second order, d = r1 + r2: sin gets
+#              cos(r0) d - sin(r0) d^2/2 and cos gets -sin(r0) d - cos(r0)
+#              d^2/2, each added to its three words (_tw_add_level1)
+#   select ... trig_after(): the quadrant's select on three words, the final
+#              rounding R = rnd(V0 + RO(V1 + V2)) and the in-lane test through
+#              round-to-odd, the clamp, the classification (|x| as ixor(x,
+#              iand(x, SIGN)): trig_after's abs_by_xor, see its docstring), the
+#              specials; tan's quotient in three words is _trig_quotient_tw()
+#
+# Every Fast2Sum of the heads, of sin(r0) and of the quotient records its
+# ordering claim in Build.meta["exact"] (_tw_fast_claimed) for reduction_audit(),
+# as parcel M2X's audit has it (118 claims in sin and cos, 120 in tan, 64 of
+# them the reduction's); each head step's ordering |c_k| > |z y| is a static
+# proof, by name, in Build.meta["proofs"], after the reduction's 13.
+
+def _tw_claim(b, ref):
+    """`ref` recorded as an instruction claimed exact (Build.meta["exact"]),
+    where the build records claims (the plant claims_lost has none)."""
+    ex = b.meta.get("exact")
+    if ex is not None:
+        ex.add(ref)
+    return ref
+
+
+def _tw_fast_claimed(b, a, c):
+    """Fast2Sum (three instructions) with its ordering claim recorded for the
+    audit, as _tw_fast() does for the reduction's: z = s - a and e = c - z are
+    exact where |a| >= |c| (or a = 0)."""
+    s, e = b.fast_two_sum(a, c)
+    _tw_claim(b, b.sub(s, a))                # z: the instruction fast_two_sum made
+    _tw_claim(b, e)
+    return s, e
+
+
+def _tw_prod(b, a, na, c):
+    """(p, ne): p = a c rounded, ne = p - a c = -(the exact error), by one MUL
+    and one FMA; `na` is -a. Counted in Build.meta["two_prod"]."""
+    b.meta["two_prod"] += 1
+    pr = b.mul(a, c)
+    return pr, b.fma(na, c, pr)
+
+
+def _tw_poly_proof(b, ok, name, detail=""):
+    """A static proof of the polynomials' steps, by name: a ValueError where it
+    fails, listed in Build.meta["proofs"] where it held."""
+    if not ok:
+        raise ValueError(f"static proof '{name}' fails: {detail}")
+    b.meta.setdefault("proofs", []).append(name)
+
+
+def _tw_add_level1(b, base, m1, lvl2):
+    """(b0, b1, b2) + m1 (a level-1 word) + lvl2 (a level-2 word), the sum
+    renormalised: TwoSum(b1, m1), plain adds into the level-2 word,
+    Fast2Sum(b0, .) with its claim recorded, TwoSum for the last."""
+    b0, b1, b2 = base
+    a1, a2 = b.two_sum(b1, m1)
+    lv = b.add(b.add(b2, a2), lvl2)
+    c0, c1 = _tw_fast_claimed(b, b0, a1)
+    d1, d2 = b.two_sum(c1, lv)
+    return c0, d1, d2
+
+
+def _trig_quotient_tw(b, N, D):
+    """tan's quotient N/D of two triple words (D0 not zero) as a triple word:
+    a reciprocal y of D0 (RECIP_SEED and two Newton steps: one word, good to
+    about 2^-24), then a long division with exact remainders, four stages q0 to
+    q3. q0 = N0 y is one ulp off at most, so N0 - q0 D0 can need 25 bits and
+    is NOT one FMA's exact result (parcel M2X's first version lost 2^-48 there,
+    tan at 0x3a410113, 2^+16 Bv: the plant quotient_fma): it is the two exact
+    floats (N0 - m) and (m - q0 D0), m = rnd(q0 D0). Then R1 = N - q0 D as a
+    (high, low) pair, q1 = R1 y, R2 = R1 - q1 D, q2 = R2 y, R3 = R2 - q2 D,
+    q3 = R3 y; each remainder is computed so that the rounding of q_i is inside
+    the next. 60 instructions (the model's _quotient)."""
+    fmt = b.fmt
+    ONE = b.const("ONE", sf.one_bits(fmt))
+    SIGN = b.const("SIGN", fmt.sign_mask)
+    N0, N1, N2 = N
+    D0, D1, D2 = D
+    y = b.recip_seed(D0)
+    nD0 = b.ixor(D0, SIGN)
+    for _ in range(1 if _act(b, "newton_short") else 2):
+        e = b.fma(nD0, y, ONE)                          # 1 - D0 y
+        y = b.fma(y, e, y)
+    q0 = b.mul(N0, y)
+    nq0 = b.ixor(q0, SIGN)
+    fused = _act(b, "quotient_fma")
+    m_, nem = _tw_prod(b, q0, nq0, D0)                  # q0 D0 = m_ - nem
+    w0 = b.fma(nq0, D0, N0) if fused else b.sub(N0, m_)   # exact: m_ within 2x of N0
+    b_, neb = _tw_prod(b, q0, nq0, D1)                  # q0 D1 = b_ - neb
+    c2 = b.fma(nq0, D2, N2)                             # N2 - q0 D2
+    # R1 = (w0 + nem) + (N1 - b_) + neb + c2: the level-1 floats by TwoSums
+    if fused:
+        acc, lv = w0, None
+    else:
+        acc, e1 = b.two_sum(w0, nem)
+        lv = e1
+    acc, e2 = b.two_sum(acc, N1)
+    R1a, e3 = b.two_diff(acc, b_)
+    lv = b.add(e2 if lv is None else b.add(lv, e2), e3)
+    lv = b.add(lv, neb)
+    lv = b.add(lv, c2)
+    q1 = b.mul(R1a, y)
+    nq1 = b.ixor(q1, SIGN)
+    a1 = b.fma(nq1, D0, R1a)                            # R1a - q1 D0
+    a1b = b.fma(nq1, D1, lv)                            # lv - q1 D1
+    R2 = b.add(a1, a1b)
+    R2 = b.fma(nq1, D2, R2)
+    q2 = b.mul(R2, y)
+    nq2 = b.ixor(q2, SIGN)
+    R3 = b.fma(nq2, D0, R2)
+    R3 = b.fma(nq2, D1, R3)
+    q3 = b.mul(R3, y)
+    # q0 + q1 + q2 + q3 -> a triple word
+    s0, w1 = _tw_fast_claimed(b, q0, q1)
+    s1, w2 = b.two_sum(w1, q2)
+    return [s0, s1, b.add(w2, q3)]
+
+
+def _build_trig_tw(fn, fmt: FpFormat, rnd: int, G, shift, plant):
+    """sin, cos or tan at fp32 under the program's attribute rnd: V as a
+    TRIPLE word (the section's comment above; parcel M2X's tw32.py `build`,
+    ported onto trig_reduction_tw and trig_after). `plant`: one of TRIG_PLANTS,
+    of REDUCTION_PLANTS and TRIG_TW_PLANTS (acting in the reduction) or of
+    TRIG_TW_ROUTINE_PLANTS; one that cannot act is refused by name."""
+    P = plan_reduction_tw(fmt, G)
+    b = Build(fmt, rnd, f"{fn}-{fmt.name}-{sf.RND_NAMES[rnd]}")
+    b.meta.update(fn=fn, G=G, R=None, shift=shift, plant=plant,
+                  family="triple word")
+    x = ("in", "a")
+    SIGN = b.const("SIGN", fmt.sign_mask)
+
+    # ---- reduce ----------------------------------------------------------------
+    in_red = plant in REDUCTION_PLANTS or plant in TRIG_TW_PLANTS
+    red = trig_reduction_tw(b, x, P, plant=plant if in_red else None)
+    rho = b.meta["rho"]
+    if not in_red:
+        # a static proof of the clean build (a plant of the reduction is a
+        # fault injected into it, built without the proof so that the checks
+        # that find it can run, as the double word's)
+        _check_trig_cushion_tw(b, rho)
+    r0, r1, r2, q = red.r0, red.r1, red.r2, red.q
+    pl = plan_trig_tw(fmt, G, rho)
+    (K3S, K2S, DS), (K3C, K2C, DC) = pl
+    b.meta.update(poly=pl, KS=K3S + K2S, DS=DS, KC=K3C + K2C, DC=DC)
+
+    # ---- z = r0^2 exactly, as a double word (z0, z1) -------------------------------
+    b.phase = "z"
+    nr0 = b.ixor(r0, SIGN)
+    z0 = b.mul(r0, r0)
+    nz1 = b.fma(nr0, r0, z0)                            # z0 - r0^2 = -z1
+    z1 = b.ixor(nz1, SIGN)
+    nz0 = b.ixor(z0, SIGN)
+    zl_kept = not _act(b, "zl_dropped")
+
+    def poly(coef, name, K3, K2, D):
+        b.phase = name + "-tail"
+        y = b.const(f"{name}_Y{D}", _enc(fmt, coef(D)))
+        for k in range(D - 1, K3 + K2 - 1, -1):
+            y = b.fma(y, z0, b.const(f"{name}_Y{k}", _enc(fmt, coef(k))))
+        yh, yl = y, None
+
+        def ordered(k):
+            ratio = _order_ratio(name, k, rho)
+            _tw_poly_proof(b, ratio < 1,
+                           f"{name} k={k}: |c_k| > |z y| (Fast2Sum ordered)",
+                           f"ratio {float(ratio):.3f}")
+        b.phase = name + "-head2"
+        for k in range(K3 + K2 - 1, K3 - 1, -1):         # double-word steps
+            ch, cl = _words(fmt, coef(k), 2)
+            CH = b.const(f"{name}_CH{k}", ch)
+            pp = b.mul(yh, z0)
+            ne = b.fma(yh, nz0, pp)                     # pp - yh z0 = -err
+            nl = b.fma(yl, nz0, ne) if yl is not None else ne
+            if zl_kept:
+                nl = b.fma(yh, nz1, nl)                 # - yh z1
+            s_, e2 = _tw_fast_claimed(b, CH, pp)        # Fast2Sum(c, pp): ordered
+            tt = b.sub(e2, nl)
+            yl = b.add(tt, b.const(f"{name}_CL{k}", cl)) if cl else tt
+            yh = s_
+            ordered(k)
+        y0, y1, y2 = yh, yl, None
+        b.phase = name + "-head3"
+        for k in range(K3 - 1, -1, -1):                 # triple-word steps
+            c0, c1, c2 = _words(fmt, coef(k), 3)
+            if name == "S" and k == 1:
+                if _act(b, "coef"):
+                    c1 = c2 = 0                         # no low words
+                if _act(b, "c2_dropped"):
+                    c2 = 0                              # no third word
+            ordered(k)
+            # the terms of y' = c + y z by level, each product's error taken as
+            # soon as the product is, each TwoSum's error added to the level-2
+            # word as soon as it is made (few values live at once)
+            a = b.mul(y0, z0)
+            nea = b.fma(y0, nz0, a)                     # a - y0 z0 = -ea
+            b.meta["two_prod"] += 1
+            s0, t0 = _tw_fast_claimed(b, b.const(f"{name}_CH{k}", c0), a)
+            lv, acc = None, t0
+
+            def lvadd(lv, er):
+                return er if lv is None else b.add(lv, er)
+            if c1:
+                acc, er = b.two_sum(acc, b.const(f"{name}_CL{k}", c1))
+                lv = lvadd(lv, er)
+            acc, er = b.two_diff(acc, nea)              # + ea
+            lv = lvadd(lv, er)
+            if zl_kept:
+                bq = b.mul(y0, z1)
+                neb = b.fma(y0, nz1, bq)                # -eb
+                b.meta["two_prod"] += 1
+                acc, er = b.two_sum(acc, bq)
+                lv = lvadd(lv, er)
+                lv = b.sub(lv, neb)                     # + eb
+            if y1 is not None:
+                cc = b.mul(y1, z0)
+                nec = b.fma(y1, nz0, cc)                # -ec
+                b.meta["two_prod"] += 1
+                acc, er = b.two_sum(acc, cc)
+                lv = lvadd(lv, er)
+                lv = b.sub(lv, nec)                     # + ec
+                if zl_kept:
+                    lv = b.fma(y1, z1, lv)              # + y1 z1
+            if c2:
+                lv = b.add(lv, b.const(f"{name}_CT{k}", c2))
+            if y2 is not None and not _act(b, "y2_dropped"):
+                lv = b.fma(y2, z0, lv)                  # + y2 z0
+            u_, v_ = _tw_fast_claimed(b, s0, acc)
+            v2, w2 = b.two_sum(v_, lv)
+            y0, y1, y2 = u_, v2, w2
+        return y0, y1, y2
+
+    S0, S1, S2 = poly(_sin_coefficient, "S", K3S, K2S, DS)
+    C0, C1, C2 = poly(_cos_coefficient, "C", K3C, K2C, DC)
+
+    # ---- sin(r0) = r0 S, three words; r's lower words to second order -------------
+    b.phase = "sincos"
+    p0, ne0 = _tw_prod(b, r0, nr0, S0)
+    p1, ne1 = _tw_prod(b, r0, nr0, S1)
+    p2 = b.mul(r0, S2)
+    u1, v1 = b.two_diff(p1, ne0)                        # p1 + e0
+    lvl = b.sub(b.add(v1, p2), ne1)                     # + p2 + e1
+    a_, rest = _tw_fast_claimed(b, p0, u1)
+    s0 = a_
+    s1, s2 = b.two_sum(rest, lvl)                       # sin(r0) = (s0, s1, s2)
+    b.probes.update(s0=s0, s1=s1, s2=s2, C0=C0, C1=C1, C2=C2)
+    if _act(b, "rl_dropped"):
+        SIN, COS = (s0, s1, s2), (C0, C1, C2)
+    else:
+        nr1 = b.ixor(r1, SIGN)
+        nhr1 = b.mul(r1, b.const("NHALF", _pow2(fmt, -1) | fmt.sign_mask))
+        # sin(r) = sin r0 + cos r0 d - sin r0 d^2/2, d = r1 + r2
+        mc0 = b.mul(C0, r1)
+        nmce = b.fma(C0, nr1, mc0)                      # mc0 - C0 r1 = -(the error)
+        lc = b.neg(nmce)                                # + the error of C0 r1
+        lc = b.fma(C0, r2, lc)
+        lc = b.fma(C1, r1, lc)
+        hs = b.mul(s0, nhr1)                            # -s0 r1 / 2
+        lc = b.fma(hs, r1, lc)                          # - s0 r1^2 / 2
+        SIN = _tw_add_level1(b, (s0, s1, s2), mc0, lc)
+        # cos(r) = cos r0 - sin r0 d - cos r0 d^2/2: level 1 is -(s0 r1),
+        # level 2 is its error's negation, -s0 r2, -s1 r1 and -C0 r1^2/2
+        ms0 = b.mul(s0, r1)
+        nmse = b.fma(s0, nr1, ms0)                      # ms0 - s0 r1 = -(the error)
+        ns0, ns1 = b.ixor(s0, SIGN), b.ixor(s1, SIGN)
+        hc = b.mul(C0, nhr1)                            # -C0 r1 / 2
+        lc2 = b.fma(ns0, r2, nmse)
+        lc2 = b.fma(ns1, r1, lc2)
+        lc2 = b.fma(hc, r1, lc2)
+        COS = _tw_add_level1(b, (C0, C1, C2), b.ixor(ms0, SIGN), lc2)
+    b.probes.update(sinr=SIN[0], cosr=COS[0])
+
+    trig_after(b, fn, x, q, list(SIN), list(COS), G=G, inrange=red.inrange,
+               quotient=_trig_quotient_tw if fn == "tan" else None,
+               shift=shift + (22 if _act(b, "bound_wide") else 0),
+               abs_by_xor=True)
+    _check_plant_fired(b)
+    return b
+
+
 # ---- what is proved of every fragment ---------------------------------------
 #
 # C4's routines.invariants() held a division's and a root's fragments; the
@@ -4832,15 +5251,12 @@ _CACHE = {}
 def fragment(name, fmt: FpFormat, rnd: int):
     """The specialised routines.Fragment of `name` at `fmt` under the
     program's attribute `rnd`, held to invariants(): as routines.fragment()
-    returns a division's. `name` is one of NAMES, or one of TRIG_NAMES at fp64,
-    fp128 and fp256 (held to its own cap, TRIG_LIVE_CAP); any other is refused
-    by name, and so is a trig name at fp32. The fragment is built once and
-    shared."""
+    returns a division's. `name` is one of NAMES, or one of TRIG_NAMES (held to
+    its own cap, TRIG_LIVE_CAP: fp32's is the triple word's, parcel M2F2);
+    any other is refused by name. The fragment is built once and shared."""
     if name not in NAMES and name not in TRIG_NAMES:
         raise ValueError(f"{name!r} is not a math-library routine built "
                          f"so far: {', '.join(NAMES + TRIG_NAMES)}")
-    if name in TRIG_NAMES and fmt in FORMATS             and fmt.name not in TRIG_LIVE_CAP[name]:
-        raise ValueError(_trig_fp32_refusal(name))
     key = (name, fmt, rnd)
     if key not in _CACHE:
         f = build(name, fmt, rnd).fragment()
@@ -5909,7 +6325,8 @@ def check_reduction_tw_constants(builder=None, header=None):
 # rounded reals act where the pools, the structured centres and the specials
 # run them.
 
-_TRIG_FIELDS = {"fp64": (11, 52), "fp128": (15, 112), "fp256": (19, 236)}
+_TRIG_FIELDS = {"fp64": (11, 52), "fp128": (15, 112), "fp256": (19, 236),
+                "fp32": (8, 23)}
 _TRIG_FLAG_WORDS = {"FL_INVALID": 0x01, "FL_INEXACT": 0x10,
                     "FL_UNDER_INEXACT": 0x18, "FL_INEXACT_MARK": 0x90}
 
@@ -5954,6 +6371,30 @@ def _check_trig_plan(fmt, G, rho):
     return tuple(out)
 
 
+def _check_trig_plan_tw(fmt, G, rho):
+    """((K3, K2, D) of S, (K3, K2, D) of C) again, for fp32's triple word, in
+    integers: a term |c_k| rho^(2k) = w needs  p + G + 2 + log2 w  bits of
+    its partial sum (the rule's 2 bits of slack): K3 is the first k that a
+    double word (2p - 2 bits) holds, K3 + K2 the first that a single word
+    (p - 2 bits) holds, D the first D >= K3 + K2 whose truncation w(D + 1) is
+    within 2^-(p+G+3)."""
+    p = fmt.prec
+    z = rho * rho
+    out = []
+    for coef in (lambda k: Fraction(1, math.factorial(2 * k + 1)),
+                 lambda k: Fraction(1, math.factorial(2 * k))):
+        def first(bits, coef=coef):
+            return next(k for k in range(400)
+                        if coef(k) * z ** k * 2 ** (p + G + 2)
+                        <= Fraction(2) ** bits)
+        k3, k23 = first(2 * p - 2), first(p - 2)
+        D = next(d for d in range(k23, 800)
+                 if coef(d + 1) * z ** (d + 1)
+                 <= Fraction(1, 2 ** (p + G + 3)))
+        out.append((k3, k23 - k3, D))
+    return tuple(out)
+
+
 def _check_trig_build(b, findings, clean_words):
     """Every derived constant of one built sin, cos or tan against its
     independent derivation. `clean_words` is _clean_reduction_words() of the
@@ -5988,10 +6429,24 @@ def _check_trig_build(b, findings, clean_words):
                             f"header)")
     # the plan, from both ends of the enclosure of pi
     lo_pi, hi_pi = _check_pi(_PI_CHECK_BITS)
-    cushion = 1 + Fraction(1, 2 ** 30)
-    plans = {_check_trig_plan(fmt, G, lo_pi / 4 * cushion),
-             _check_trig_plan(fmt, G, hi_pi / 4 * cushion)}
-    held = ((b.meta["KS"], b.meta["DS"]), (b.meta["KC"], b.meta["DC"]))
+    tw = b.meta.get("family") == "triple word"
+    if tw:
+        # fp32's triple word is planned at its own rho = pi/4 (1 + over), over
+        # the reduction's COMPUTED overshoot (an exact rational, not a power of
+        # two): the build's rho is that, rounded UP to 96 fractional bits
+        over, rho = b.meta["overshoot"], b.meta["rho"]
+        lo_rho, hi_rho = lo_pi / 4 * (1 + over), hi_pi / 4 * (1 + over)
+        if not lo_rho <= rho <= hi_rho + Fraction(1, 2 ** 96):
+            findings.append(f"{tag}: rho is not pi/4 (1 + over) rounded up "
+                            f"to 96 bits, over = {float(over):.4e}")
+        plans = {_check_trig_plan_tw(fmt, G, lo_rho),
+                 _check_trig_plan_tw(fmt, G, hi_rho)}
+        held = tuple(b.meta["poly"])
+    else:
+        cushion = 1 + Fraction(1, 2 ** 30)
+        plans = {_check_trig_plan(fmt, G, lo_pi / 4 * cushion),
+                 _check_trig_plan(fmt, G, hi_pi / 4 * cushion)}
+        held = ((b.meta["KS"], b.meta["DS"]), (b.meta["KC"], b.meta["DC"]))
     if len(plans) != 1:
         findings.append(f"{tag}: undecidable: the enclosure of pi gives two "
                         f"plans, {sorted(plans)}")
@@ -6002,25 +6457,30 @@ def _check_trig_build(b, findings, clean_words):
             findings.append(f"{tag}: the plan {held} is not the re-derived "
                             f"{plan}")
     # the coefficients
-    for name, coef, (K, D) in (
+    for name, coef, shape in (
             ("S", lambda k: Fraction((-1) ** k, math.factorial(2 * k + 1)),
              plan[0]),
             ("C", lambda k: Fraction((-1) ** k, math.factorial(2 * k)),
              plan[1])):
+        # the double word's (K, D); the triple word's (K3, K2, D): K = K3 + K2
+        # head steps, the first K3 in three words (H, L, T), the rest in two
+        K3, K, D = (0, shape[0], shape[1]) if not tw else (
+            shape[0], shape[0] + shape[1], shape[2])
         for k in range(K, D + 1):
             verify(f"{name}_Y{k}", "rn", coef(k), coef(k))
         for k in range(K):
-            c = coef(k)
-            w0 = verify(f"{name}_CH{k}", "rn", c, c)
-            rest = c - w0
-            low = f"{name}_CL{k}"
-            if rest == 0:
-                seen.add(low)
-                if low in b.roles:
-                    findings.append(f"{tag}: {low} is held, but the "
-                                    f"coefficient is exact in one word")
-            else:
-                verify(low, "rn", rest, rest)
+            rest, exact_in = coef(k), None
+            for i, letter in enumerate("HLT"[:3 if k < K3 else 2]):
+                role = f"{name}_C{letter}{k}"
+                if i == 0 or rest != 0:
+                    rest -= verify(role, "rn", rest, rest)
+                    if rest == 0:
+                        exact_in = ("", "one word", "two words")[i + 1]
+                else:
+                    seen.add(role)
+                    if role in b.roles:
+                        findings.append(f"{tag}: {role} is held, but the "
+                                        f"coefficient is exact in {exact_in}")
     # the after-V section's words
     point("ZERO", 0)
     point("ONE", 1)
@@ -6040,6 +6500,8 @@ def _check_trig_build(b, findings, clean_words):
         bits_are("SHIFT_W2", W - 2)
     if fn == "tan":
         bits_are("SHIFT_W1", W - 1)
+    if tw:
+        bits_are("NHALF", (1 << (W - 1)) | (((1 << (ew - 1)) - 2) << mw))
     point("GATE", Fraction(2) ** _check_trig_gate(p, fn == "sin"))
     point("BREL", Fraction(2) ** (-(p + G) + b.meta["shift"]))
     one_below = 1 - Fraction(1, 2 ** p)
@@ -6067,7 +6529,10 @@ def _check_trig_build(b, findings, clean_words):
     return count[0]
 
 
-TRIG_FORMATS = (FP64, FP128, FP256)    # the formats sin, cos and tan are built at
+# the formats sin, cos and tan are built at: the double word at fp64, fp128
+# and fp256, the triple word at fp32 (parcel M2F2), last so that the first
+# three keep their places in every listing and every generated list
+TRIG_FORMATS = (FP64, FP128, FP256, FP32)
 
 
 def check_trig_constants(builder=None, formats=TRIG_FORMATS,
@@ -6087,6 +6552,19 @@ def check_trig_constants(builder=None, formats=TRIG_FORMATS,
                 n_const += _check_trig_build(b, findings,
                                              _clean_reduction_words(fmt))
             m = b.meta
+            if m["family"] == "triple word":
+                (s3, s2, ds), (c3, c2, dc) = m["poly"]
+                lines.append(
+                    f"{name} {fmt.name}: G = {m['G']}, plan S "
+                    f"{(m['KS'], m['DS'])} = {s3} triple + {s2} double word "
+                    f"steps, C {(m['KC'], m['DC'])} = {c3} + {c2}: {n_const} "
+                    f"derived constants in {len(attrs)} fragments, each the "
+                    f"rounding its rule gives for the exact coefficient or "
+                    f"threshold (the polynomials planned at rho = pi/4 (1 + "
+                    f"the reduction's computed overshoot), re-derived from "
+                    f"the enclosure of pi), the reduction's words the clean "
+                    f"reduction's, the integers from the IEEE fields")
+                continue
             lines.append(
                 f"{name} {fmt.name}: G = {m['G']}, plan S "
                 f"{(m['KS'], m['DS'])}, C {(m['KC'], m['DC'])}: {n_const} "
@@ -6203,7 +6681,7 @@ def main(argv=None):
         print(f"{'routine':8s} {'format':6s} {'rnd':4s} {'insns':>6s} "
               f"{'words':>6s} {'live':>5s}  cap")
         for name in TRIG_NAMES:
-            for fmt in (FP64, FP128, FP256):
+            for fmt in TRIG_FORMATS:
                 for rnd in sf.RND_MODES:
                     f = fragment(name, fmt, rnd)
                     print(f"{name:8s} {fmt.name:6s} {sf.RND_NAMES[rnd]:4s} "

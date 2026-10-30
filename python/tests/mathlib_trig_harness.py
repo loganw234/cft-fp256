@@ -95,7 +95,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from cft_golden import FP64, FP128, FP256, routines, seq  # noqa: E402
+from cft_golden import FP32, FP64, FP128, FP256, routines, seq  # noqa: E402
 from cft_golden import mathlib as ml  # noqa: E402
 from cft_golden import softfloat as sf  # noqa: E402
 from cft_golden import transcend, vectors  # noqa: E402
@@ -103,13 +103,19 @@ from cft_golden import transcend, vectors  # noqa: E402
 import mathlib_harness as H  # noqa: E402
 import mathlib_trig_family as TF  # noqa: E402
 
+# FORMATS are the double word's, the three the parametrized tests of
+# test_mathlib_trig.py iterate and their pinned lists name; ALL_FORMATS adds
+# fp32, the triple word (parcel M2F2), which has tests of its own
+# (test_mathlib_trig_tw.py) and which the box commands of mathlib_runs.py take
+# beside them
 FORMATS = (FP64, FP128, FP256)
+ALL_FORMATS = FORMATS + (FP32,)
 FUNCS = ml.TRIG_NAMES                   # sin, cos, tan
 RND_MODES = sf.RND_MODES                # rne, rtz, rdn, rup, rmm
 RNE, RTZ, RDN, RUP, RMM = (sf.RND_RNE, sf.RND_RTZ, sf.RND_RDN, sf.RND_RUP,
                            sf.RND_RMM)
 MARK = ml.MARK
-BY_NAME = {f.name: f for f in FORMATS}
+BY_NAME = {f.name: f for f in ALL_FORMATS}
 RND_BY_NAME = {v: k for k, v in sf.RND_NAMES.items()}
 
 
@@ -335,6 +341,31 @@ def fragment_of(fn, fmt, rnd, plant=None):
 # ---- the placed points: the study's five regions ------------------------------
 
 REGIONS = ("edge", "near", "zero", "small", "random")
+# fp32's triple word has a sixth, parcel M2X's `quad` (tw32_box.sh): the floats
+# next to the odd multiples of pi/4 from k = 0, in every binade, where |r| is
+# next to pi/4 and the polynomials' rho acts. The box runs it, and it needs
+# numpy (quad_sample)
+REGIONS_TW = REGIONS + ("quad",)
+_QUAD = {}
+
+
+def quad_sample(fmt, n, seed):
+    """n of the quadrant-boundary arguments of fp32 (parcel M2X's
+    tw32.quad_sample): quad_family (the floats within 3 ulps of (k + 1/2) pi/2,
+    k = 0 to 63 and 128 random k, both signs) and half_family (the odd
+    multiples of pi/4 in every binade, both signs; numpy), 18,266 in all, drawn
+    by `seed` (all of them if fewer). parcel M2F1's test_mathlib_reduction_tw
+    builds both families (its positive half family and both signs of its quad
+    family are the model's)."""
+    if fmt.name != "fp32":
+        raise ValueError(f"the region 'quad' is fp32's, not {fmt.name}'s")
+    if "quad" not in _QUAD:                    # about 9 s, once a process
+        import test_mathlib_reduction_tw as W
+        half = W.half_family()
+        _QUAD["quad"] = sorted(set(W.quad_args()) | set(half)
+                               | {x | fmt.sign_mask for x in half})
+    fam = _QUAD["quad"]
+    return sorted(random.Random(seed).sample(fam, n)) if n < len(fam) else fam
 
 
 def sample(fmt, mode, n, seed):
@@ -345,7 +376,10 @@ def sample(fmt, mode, n, seed):
     near pi/4), near (within 3 ulps of k pi/2, k odd: r small, the
     cancellation deep, where cos is small and tan large), zero (the same at
     even k, where sin and tan are small) and small (|x| from the tiny gate to
-    4). Both signs. A function of (format, mode, seed)."""
+    4). Both signs. A function of (format, mode, seed). fp32 also has `quad`
+    (REGIONS_TW)."""
+    if mode == "quad":
+        return quad_sample(fmt, n, seed)
     rng = random.Random(seed * 1000003 + fmt.width)
     p = fmt.prec
     gs, gc = ml.trig_gates(fmt)
@@ -399,9 +433,9 @@ def deepest_in_range(fmt):
     is not consulted, so the range's own deepest are used with them: the
     study's 1.4, worst_range.py's MEASURED figures (value exponent 909 at
     fp128, 239 at fp256; test_mathlib_reduction.DEEP) and two neighbours
-    either side."""
+    either side. fp32 (parcel M2F2) has no range, as fp64: the pools' own."""
     inside = {x for x in deepest(fmt) if not past_range(fmt, x)}
-    if fmt.name != "fp64":
+    if fmt.name not in ("fp32", "fp64"):
         import test_mathlib_reduction as R
         for x in R.deep_args(fmt):
             inside |= {x, x | fmt.sign_mask}
@@ -566,14 +600,23 @@ def _loud(prog, bank, fmt):
 
 # ---- the bound ----------------------------------------------------------------
 
+def v_names(b):
+    """The probes holding V's words: V0, V1, V2 for a triple word (fp32,
+    parcel M2F2), Vh and Vl for a double word."""
+    return ("V0", "V1", "V2") if "V0" in b.probes else ("Vh", "Vl")
+
+
 def bound_log2(b, x):
-    """log2(|V - f(x)| / Bv) for one main-path lane of the build b: V from
-    its probes Vh and Vl, the true value from mpmath at 4p + 200 bits. None
-    where V is exact; 999.0 where V is not finite."""
+    """log2(|V - f(x)| / Bv) for one main-path lane of the build b: V the sum
+    of its probes' words (V0, V1 and V2 of a triple word, Vh and Vl of a double
+    word: a triple word has no Vl, and a sum of Vh and Vl alone would drop V2,
+    2^-48 of V at fp32, 2^16 Bv), the true value from mpmath at 4p + 200 bits.
+    None where V is exact; 999.0 where V is not finite."""
     fmt = b.fmt
-    _res, _fl, pr = b.run(x, ("Vh", "Vl", "Bv"))
+    names = v_names(b)
+    _res, _fl, pr = b.run(x, names + ("Bv",))
     try:
-        V = value(fmt, pr["Vh"]) + value(fmt, pr["Vl"])
+        V = sum(value(fmt, pr[n]) for n in names)
         Bv = abs(value(fmt, pr["Bv"]))
     except ValueError:
         return 999.0
@@ -711,6 +754,10 @@ def check_audit(b, xs):
 # ---- the constants ----------------------------------------------------------------
 
 def check_constants(**kw):
+    """[finding], lines: constants. mathlib.check_trig_constants() in process,
+    at FORMATS (the double word's three) unless `formats` is given: fp32's,
+    the triple word's, are asked for by name (test_mathlib_trig_tw.py)."""
+    kw.setdefault("formats", FORMATS)
     lines, findings = ml.check_trig_constants(**kw)
     return [f"constants: {s}" for s in findings], lines
 
@@ -739,6 +786,15 @@ SHAPE = {
     ("cos", "fp256"): [(385, 115, 16), (385, 116, 16), (385, 116, 16),
                        (385, 115, 16), (385, 115, 16)],
     ("tan", "fp256"): [(406, 117, 16)] * 5,
+    # fp32, the triple word (parcel M2F2): the model's 939, 936 and 993
+    # (tw32_costs.out.txt) and its bank words, 97 under rne, rup and rmm and
+    # 98 under rtz and rdn for sin, 94 and 95 for cos, 96 for tan; 23 values
+    # live, in the design's order and scheduled, in all 15
+    ("sin", "fp32"): [(939, 97, 23), (939, 98, 23), (939, 98, 23),
+                      (939, 97, 23), (939, 97, 23)],
+    ("cos", "fp32"): [(936, 94, 23), (936, 95, 23), (936, 95, 23),
+                      (936, 94, 23), (936, 94, 23)],
+    ("tan", "fp32"): [(993, 96, 23)] * 5,
 }
 
 # The instructions by phase, the study's (docs/studies/m2/costs.*.out.txt, the
@@ -755,9 +811,14 @@ _RED = {"fp64": {"red-setup": 18, "red-window": 61, "red-products": 21,
                   "red-scale": 14, "red-small": 5},
         "fp256": {"red-setup": 18, "red-window": 22, "red-products": 17,
                   "red-coarse": 18, "red-mid": 28, "red-lower": 33,
-                  "red-scale": 14, "red-small": 5}}
-_TAILS = {"fp64": (4, 5), "fp128": (10, 11), "fp256": (20, 21)}
-_QUOTIENT = {"fp64": 19, "fp128": 21, "fp256": 23}
+                  "red-scale": 14, "red-small": 5},
+        # fp32's triple word: the model's 319 (tw32_costs.out.txt)
+        "fp32": {"red-setup": 18, "red-window": 51, "red-products": 15,
+                 "red-coarse": 18, "red-mid": 56, "red-products-low": 18,
+                 "red-lower": 30, "red-triple": 66, "red-scale": 41,
+                 "red-small": 6}}
+_TAILS = {"fp64": (4, 5), "fp128": (10, 11), "fp256": (20, 21), "fp32": (2, 1)}
+_QUOTIENT = {"fp64": 19, "fp128": 21, "fp256": 23, "fp32": 60}
 _REST = {"sin": {"S-head": 70, "C-head": 69, "sincos": 7, "select": 9,
                  "final": 13, "classify": 6, "special": 13},
          "cos": {"S-head": 70, "C-head": 69, "sincos": 7, "select": 9,
@@ -766,8 +827,28 @@ _REST = {"sin": {"S-head": 70, "C-head": 69, "sincos": 7, "select": 9,
                  "final": 9, "classify": 6, "special": 12}}
 
 
+# fp32's heads are the triple word's: S-head2 and C-head2 (the double-word
+# steps, 26 each), S-head3 (191) and C-head3 (233), z is 5 and sin(r) cos(r)
+# 74 (tw32_costs.out.txt, the "by phase" line of each function under rne)
+_REST32 = {"sin": {"S-head2": 26, "S-head3": 191, "C-head2": 26,
+                   "C-head3": 233, "sincos": 74, "select": 11, "final": 31,
+                   "classify": 7, "special": 13},
+           "cos": {"S-head2": 26, "S-head3": 191, "C-head2": 26,
+                   "C-head3": 233, "sincos": 74, "select": 12, "final": 31,
+                   "classify": 7, "special": 9},
+           "tan": {"S-head2": 26, "S-head3": 191, "C-head2": 26,
+                   "C-head3": 233, "sincos": 74, "select": 10, "final": 27,
+                   "classify": 7, "special": 12}}
+
+
 def model_phases(fn, fmt_name):
     """The study's instructions by phase for fn at the format."""
+    if fmt_name == "fp32":
+        out = dict(_RED[fmt_name], z=5, **_REST32[fn])
+        out["S-tail"], out["C-tail"] = _TAILS[fmt_name]
+        if fn == "tan":
+            out["quotient"] = _QUOTIENT[fmt_name]
+        return out
     out = dict(_RED[fmt_name], z=4, **_REST[fn])
     out["S-tail"], out["C-tail"] = _TAILS[fmt_name]
     if fn == "tan":
@@ -796,11 +877,11 @@ FLAG_WORDS = {"sin": frozenset({0x0, 0x1, 0x10, 0x18, 0x90}),
 MIN_MAX = {"sin": (2, 2), "cos": (2, 2), "tan": (0, 0)}
 # bank words, all three functions under five attributes (the study's
 # costs.*.out.txt last lines)
-UNION_WORDS = {"fp64": 111, "fp128": 108, "fp256": 122}
+UNION_WORDS = {"fp64": 111, "fp128": 108, "fp256": 122, "fp32": 102}
 # the instructions of sin, cos and tan of one argument in one compiled step,
 # once each shared one is counted once (docs/studies/m2/share.py, the study's
 # 2.1 table: 475, 455 and 464, at every attribute)
-SHARED = {"fp64": 475, "fp128": 455, "fp256": 464}
+SHARED = {"fp64": 475, "fp128": 455, "fp256": 464, "fp32": 1088}
 
 
 class Tables:
@@ -1086,8 +1167,8 @@ def check_rate(fmt, rnd, fn, n=720, seed=7, g_inflated=RATE_G, plant=None,
     mark changes the count and not the centre. `tool_plant` is a fault of this
     tool (RATE_TOOL_PLANTS): the expectation taken from the build under test;
     `evaluator` stands for ml.evaluate, for the test that doctors a lane;
-    `guard` the build's G (the decided one by default; parcel M2F's fp32 is
-    built at its own)."""
+    `guard` the build's G (the decided one by default; fp32's triple word,
+    parcel M2F2, is built at GUARD's 40 alone)."""
     if tool_plant is not None and tool_plant not in RATE_TOOL_PLANTS:
         raise ValueError(f"unknown tool plant {tool_plant!r}: "
                          f"{', '.join(RATE_TOOL_PLANTS)}")
@@ -1147,6 +1228,11 @@ TINY_COUNTS = {
     "fp64": {"sin": (0, 2), "cos": (0, 14), "tan": (2, 0)},
     "fp128": {"sin": (0, 84), "cos": (0, 244), "tan": (6, 78)},
     "fp256": {"sin": (0, 270), "cos": (0, 740), "tan": (6, 264)},
+    # fp32 at G = 40 (parcel M2F2): ZERO is a claim. The tiny family is 48
+    # arguments there (e = 12 and 13), the theory demands none marked (no
+    # centre at G = 40), and the model marked none of them (parcel M2X: 0 in
+    # 720 lanes for E0 = 12, tw32_pools-census.out.txt)
+    "fp32": {"sin": (0, 0), "cos": (0, 0), "tan": (0, 0)},
 }
 # and of the minimisers' neighbours (TF.minnbr_arguments: binades 0 to 80, 40 to
 # 90 and 100 to 210, j = -4 .. 4: 729, 459 and 999 arguments): none under rne and
@@ -1159,7 +1245,10 @@ MINNBR_COUNTS = {
 }
 CENSUS_SIZES = {("tiny", "fp64"): 144, ("tiny", "fp128"): 384,
                 ("tiny", "fp256"): 880, ("minnbr", "fp64"): 729,
-                ("minnbr", "fp128"): 459, ("minnbr", "fp256"): 999}
+                ("minnbr", "fp128"): 459, ("minnbr", "fp256"): 999,
+                # fp32 at G = 40: 48 (the theory takes p and G); no
+                # minimisers' neighbours (MINNBR_RANGE has no fp32)
+                ("tiny", "fp32"): 48}
 # The study's measured windows (window.py, 3.5; fp64): (function, attribute,
 # centre c 2^-e, J) -> (marked, first j, last j) of the neighbours x0 + j,
 # j = -J .. J, the encoding stepped by j: the finer ulp below a power of two

@@ -27,20 +27,21 @@ log2 and log1p.
     python python/tests/mathlib_runs.py reduction-tw [--n 1000] [--seed 7]
         [--no-halves] [--quick]
     python python/tests/mathlib_runs.py trig-pools [--fn sin,cos,tan]
-        [--formats fp64,fp128,fp256] [--attrs rne,rtz,rdn,rup,rmm] [--seq]
+        [--formats fp64,fp128,fp256,fp32] [--attrs rne,rtz,rdn,rup,rmm] [--seq]
         [--step N] [--quick] [--out PATH]
     python python/tests/mathlib_runs.py trig-bound [--fn sin,cos,tan]
-        [--formats fp64,fp128,fp256] [--attrs rne] [--n N] [--seed 121]
+        [--formats fp64,fp128,fp256,fp32] [--attrs rne] [--n N] [--seed 121]
         [--guard G] [--quick] [--out PATH]
     python python/tests/mathlib_runs.py trig-budget [--fn sin,cos,tan]
-        [--formats fp64,fp128,fp256] [--regions edge,near,zero,small,random]
+        [--formats fp64,fp128,fp256,fp32]
+        [--regions edge,near,zero,small,random[,quad]]
         [--n N] [--seed 121] [--attrs-step K | --no-attrs] [--guard G]
         [--quick] [--out PATH]
     python python/tests/mathlib_runs.py trig-rate [--fn sin,cos,tan]
-        [--formats fp64,fp128,fp256] [--attrs rne,rtz] [--n N] [--seed 7]
+        [--formats fp64,fp128,fp256,fp32] [--attrs rne,rtz] [--n N] [--seed 7]
         [--statistics K] [--alpha A] [--sigmas S] [--quick] [--out PATH]
     python python/tests/mathlib_runs.py trig-family [--fn sin,cos,tan]
-        [--formats fp64,fp128,fp256] [--attrs rne,rtz,rdn,rup,rmm]
+        [--formats fp64,fp128,fp256,fp32] [--attrs rne,rtz,rdn,rup,rmm]
         [--centres N] [--jmax J] [--quick] [--out PATH] | --write | --check
     python python/tests/mathlib_runs.py all     [--scale 1]
 
@@ -132,8 +133,9 @@ sample is a function of --seed, so a run can be repeated.
            computed bound. --quick: --n 100 and every 20th lane. Not part of
            `all`
   trig-pools  sin, cos and tan (parcel M2G2a; mathlib.fragment at fp64, fp128
-           and fp256, python/tests/mathlib_trig_harness.py's checks): the whole
-           radian pools (4,408, 620 and 614 arguments) through every
+           and fp256, and at fp32, the triple word, parcel M2F2; python/tests/
+           mathlib_trig_harness.py's checks): the whole radian pools (4,408,
+           620 and 614 arguments, and 760 at fp32) through every
            configuration, every unmarked lane equal to transcend.py in bits
            and flag word, every past-range lane marked, every other mark on
            the committed list; with --seq each fragment as a stand-alone
@@ -145,8 +147,8 @@ sample is a function of --seed, so a run can be repeated.
   trig-bound  sin, cos and tan: |V - f(x)| / Bv under 1, mpmath at 4p + 200
            bits, at --n placed points of each of the study's five regions
            (edge, near, zero, small, random; a seed each from --seed on) of
-           each format (12,000 at fp64 and 3,000 at fp128 and fp256 by
-           default, the study's box sizes), under --attrs (rne by default,
+           each format (12,000 at fp64 and fp32 and 3,000 at fp128 and fp256
+           by default, the study's box sizes), under --attrs (rne by default,
            the study's budgets), each lane also against transcend.py. The
            largest is a sampled lower bound. --quick: 12 points a region and
            fp128 only. Not part of `all`
@@ -157,15 +159,19 @@ sample is a function of --seed, so a run can be repeated.
            must be under 1, at --n lanes of each of the study's five regions
            (edge, near, zero, small, random; seeds --seed + 0, 1, 4, 2, 3: the
            study's 21, 22, 25, 23, 24, and its box runs' 121 to 125) of each
-           format (12,000 at fp64 and 3,000 at fp128 and fp256 by default),
-           rne; no sampled lane's error past
+           format (12,000 at fp64 and fp32 and 3,000 at fp128 and fp256 by
+           default) and, at fp32 only, the sixth of parcel M2X's tw32_box.sh,
+           `quad` (seed --seed + 5, 126: the floats next to the odd multiples
+           of pi/4 from k = 0, in every binade, needs numpy; the default regions
+           at fp32 are all six), rne; no sampled lane's error past
            its bound; the residual stated beside it; and V bit-identical across
            the five attributes on every --attrs-step-th lane (1: every one),
            so that the rne budget is every attribute's. --quick: 12 lanes a
            region and fp128 only. Not part of `all`
   trig-rate  the mark-rate law of sin, cos and tan (parcel M2G2b): the bound
            inflated to G' = 6, --n lanes of the random region (50,000 at fp64
-           and 20,000 at fp128 and fp256 by default, seed --seed), each cell's
+           and fp32 and 20,000 at fp128 and fp256 by default, seed --seed),
+           each cell's
            count of marks against the sample's own expectation, judged by its
            exact two-sided tail, the cells of the run as the independent
            statistics they hold (--statistics K names the run's K when the run
@@ -753,8 +759,7 @@ def _trig_formats(arg, default):
     names = arg.split(",") if arg else default
     for n in names:
         if n not in T.BY_NAME:
-            raise SystemExit(f"--formats {n!r}: fp64, fp128 or fp256 (fp32 is "
-                             f"not built: parcel M2F's)")
+            raise SystemExit(f"--formats {n!r}: fp64, fp128, fp256 or fp32")
     return [T.BY_NAME[n] for n in names]
 
 
@@ -772,7 +777,7 @@ def cmd_trig_pools(a):
     open_out(a.out)
     step = a.step if a.step else (8 if a.quick else 1)
     fmts = _trig_formats(a.formats, ["fp128"] if a.quick else
-                         [f.name for f in T.FORMATS])
+                         [f.name for f in T.ALL_FORMATS])
     rnds = attrs_of(a.attrs) if a.attrs else (
         [T.RNE, T.RTZ] if a.quick else list(sf.RND_MODES))
     for fmt in fmts:
@@ -803,9 +808,9 @@ def cmd_trig_bound(a):
     and tan (parcel M2G2a), each lane also against transcend.py."""
     import mathlib_trig_harness as T
     open_out(a.out)
-    sizes = {"fp64": 12000, "fp128": 3000, "fp256": 3000}
+    sizes = {"fp64": 12000, "fp128": 3000, "fp256": 3000, "fp32": 12000}
     fmts = _trig_formats(a.formats, ["fp128"] if a.quick else
-                         [f.name for f in T.FORMATS])
+                         [f.name for f in T.ALL_FORMATS])
     rnds = attrs_of(a.attrs) if a.attrs else [T.RNE]
     for fmt in fmts:
         n = a.n if a.n else (12 if a.quick else sizes[fmt.name])
@@ -828,7 +833,9 @@ def cmd_trig_bound(a):
 # trig-budget's seed of each region, from --seed: the study's order and its
 # seeds 21 to 25 (edge, near, small, random, zero; the zero region was added
 # after the first runs), 121 to 125 on its box
-BUDGET_SEED_OFFSET = {"edge": 0, "near": 1, "small": 2, "random": 3, "zero": 4}
+# (and parcel M2X's tw32_box.sh gave fp32's sixth region, `quad`, 126)
+BUDGET_SEED_OFFSET = {"edge": 0, "near": 1, "small": 2, "random": 3, "zero": 4,
+                      "quad": 5}
 
 
 def cmd_trig_budget(a):
@@ -838,14 +845,19 @@ def cmd_trig_budget(a):
     import mathlib_trig_budget as TB
     import mathlib_trig_harness as T
     open_out(a.out)
-    sizes = {"fp64": 12000, "fp128": 3000, "fp256": 3000}
+    sizes = {"fp64": 12000, "fp128": 3000, "fp256": 3000, "fp32": 12000}
     fmts = _trig_formats(a.formats, ["fp128"] if a.quick else
-                         [f.name for f in T.FORMATS])
-    regions = a.regions.split(",") if a.regions else list(T.REGIONS)
-    for r in regions:
-        if r not in T.REGIONS:
-            raise SystemExit(f"--regions {r!r}: one of {', '.join(T.REGIONS)}")
+                         [f.name for f in T.ALL_FORMATS])
+    for r in (a.regions.split(",") if a.regions else ()):
+        if r not in T.REGIONS_TW:
+            raise SystemExit(f"--regions {r!r}: one of "
+                             f"{', '.join(T.REGIONS_TW)}")
     for fmt in fmts:
+        regions = a.regions.split(",") if a.regions else list(
+            T.REGIONS_TW if fmt.name == "fp32" and not a.quick else T.REGIONS)
+        if fmt.name != "fp32" and "quad" in regions:
+            raise SystemExit("--regions 'quad': fp32's (the floats next to "
+                             "the odd multiples of pi/4, parcel M2X's sixth)")
         n = a.n if a.n else (12 if a.quick else sizes[fmt.name])
         for fn in _trig_fns(a.fn):
             def build(r, fn=fn, fmt=fmt):
@@ -889,10 +901,10 @@ def cmd_trig_rate(a):
     M2G2b): each cell's count against the sample's own expectation."""
     import mathlib_trig_harness as T
     open_out(a.out)
-    sizes = {"fp64": 50000, "fp128": 20000, "fp256": 20000}
+    sizes = {"fp64": 50000, "fp128": 20000, "fp256": 20000, "fp32": 50000}
     fns = _trig_fns(a.fn)
     fmts = _trig_formats(a.formats, ["fp128"] if a.quick else
-                         [f.name for f in T.FORMATS])
+                         [f.name for f in T.ALL_FORMATS])
     rnds = attrs_of(a.attrs) if a.attrs else [T.RNE, T.RTZ]
     k = a.statistics or H.rate_statistics(fns, fmts, rnds)
     say(f"trig-rate: {len(fns) * len(fmts) * len(rnds)} cells, {k} "
@@ -943,7 +955,7 @@ def cmd_trig_family(a):
         return
     open_out(a.out)
     fmts = _trig_formats(a.formats, ["fp128"] if a.quick else
-                         [f.name for f in T.FORMATS])
+                         [f.name for f in T.ALL_FORMATS])
     rnds = attrs_of(a.attrs) if a.attrs else (
         [T.RNE, T.RTZ] if a.quick else list(sf.RND_MODES))
     cap = a.centres if a.centres else (6 if a.quick else 0)
@@ -953,6 +965,10 @@ def cmd_trig_family(a):
                 f = ml.fragment(fn, fmt, rnd)
                 cell = f"{fn} {fmt.name} {sf.RND_NAMES[rnd]}"
                 for kind in ("tiny", "minnbr"):
+                    # the minimisers' neighbours were censused at fp64, fp128
+                    # and fp256 (MINNBR_RANGE); fp32 (parcel M2F2) has none
+                    if kind == "minnbr" and fmt.name not in TF.MINNBR_RANGE:
+                        continue
                     out, t = T.check_census_counts(f, kind)
                     note(out)
                     table = T.TINY_COUNTS if kind == "tiny" else T.MINNBR_COUNTS
@@ -967,7 +983,8 @@ def cmd_trig_family(a):
                 if cap and len(cen) > cap:
                     cen = cen[::max(1, len(cen) // cap)][:cap]
                 extra = []
-                if a.jmax and a.jmax > TF.MINNBR_J:
+                if (a.jmax and a.jmax > TF.MINNBR_J
+                        and fmt.name in TF.MINNBR_RANGE):
                     extra = TF.minnbr_arguments(fmt, J=a.jmax)
                 out, st = T.check_family(f, cen, extra=extra, deep=True)
                 note(out)
@@ -1127,7 +1144,7 @@ def main(argv=None):
     p.set_defaults(fn_=cmd_reduction_tw)
     p = sub.add_parser("trig-pools")
     p.add_argument("--fn", help="sin,cos,tan (all by default)")
-    p.add_argument("--formats", help="fp64,fp128,fp256 (all by default)")
+    p.add_argument("--formats", help="fp64,fp128,fp256,fp32 (all by default)")
     p.add_argument("--attrs", help="rne,rtz,rdn,rup,rmm (all by default)")
     p.add_argument("--seq", action="store_true")
     p.add_argument("--step", type=int, default=0,
@@ -1139,11 +1156,11 @@ def main(argv=None):
     p.set_defaults(fn_=cmd_trig_pools)
     p = sub.add_parser("trig-bound")
     p.add_argument("--fn", help="sin,cos,tan (all by default)")
-    p.add_argument("--formats", help="fp64,fp128,fp256 (all by default)")
+    p.add_argument("--formats", help="fp64,fp128,fp256,fp32 (all by default)")
     p.add_argument("--attrs", help="rne (by default; the study's budgets)")
     p.add_argument("--n", type=int, default=0,
-                   help="points a region (default 12,000 at fp64, 3,000 at "
-                        "fp128 and fp256)")
+                   help="points a region (default 12,000 at fp64 and fp32, "
+                        "3,000 at fp128 and fp256)")
     p.add_argument("--seed", type=int, default=121,
                    help="the first region's seed, one more each (the "
                         "study's box runs: 121 to 125)")
@@ -1156,12 +1173,13 @@ def main(argv=None):
     p.set_defaults(fn_=cmd_trig_bound)
     p = sub.add_parser("trig-budget")
     p.add_argument("--fn", help="sin,cos,tan (all by default)")
-    p.add_argument("--formats", help="fp64,fp128,fp256 (all by default)")
-    p.add_argument("--regions", help="edge,near,zero,small,random (all by "
-                                     "default)")
+    p.add_argument("--formats", help="fp64,fp128,fp256,fp32 (all by default)")
+    p.add_argument("--regions", help="edge,near,zero,small,random, and at "
+                                     "fp32 quad (all by default: five, and "
+                                     "six at fp32)")
     p.add_argument("--n", type=int, default=0,
-                   help="lanes a region (default 12,000 at fp64, 3,000 at "
-                        "fp128 and fp256)")
+                   help="lanes a region (default 12,000 at fp64 and fp32, "
+                        "3,000 at fp128 and fp256)")
     p.add_argument("--seed", type=int, default=121,
                    help="edge's seed; near, small, random and zero take one "
                         "more each, in the study's order (its box runs: 121 "
@@ -1179,11 +1197,11 @@ def main(argv=None):
     p.set_defaults(fn_=cmd_trig_budget)
     p = sub.add_parser("trig-rate")
     p.add_argument("--fn", help="sin,cos,tan (all by default)")
-    p.add_argument("--formats", help="fp64,fp128,fp256 (all by default)")
+    p.add_argument("--formats", help="fp64,fp128,fp256,fp32 (all by default)")
     p.add_argument("--attrs", help="rne,rtz (by default)")
     p.add_argument("--n", type=int, default=0,
-                   help="lanes a cell (default 50,000 at fp64, 20,000 at "
-                        "fp128 and fp256)")
+                   help="lanes a cell (default 50,000 at fp64 and fp32, "
+                        "20,000 at fp128 and fp256)")
     p.add_argument("--seed", type=int, default=7,
                    help="the sample's seed (the study's box run: 7)")
     p.add_argument("--statistics", type=int, default=None,
@@ -1201,7 +1219,7 @@ def main(argv=None):
     p.set_defaults(fn_=cmd_trig_rate)
     p = sub.add_parser("trig-family")
     p.add_argument("--fn", help="sin,cos,tan (all by default)")
-    p.add_argument("--formats", help="fp64,fp128,fp256 (all by default)")
+    p.add_argument("--formats", help="fp64,fp128,fp256,fp32 (all by default)")
     p.add_argument("--attrs", help="rne,rtz,rdn,rup,rmm (all by default)")
     p.add_argument("--centres", type=int, default=0,
                    help="at most this many centres a cell, spread over the "

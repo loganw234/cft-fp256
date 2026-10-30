@@ -244,13 +244,15 @@ def test_a_trig_fragment_is_a_specialised_fragment_built_once(fn, fmt):
         assert ml.dag_digest(f) == ml.dag_digest(b.fragment(schedule=False))
 
 
-def test_fp32_is_refused_by_name_and_so_is_a_name_that_is_not_built():
+def test_fp32_builds_and_a_name_that_is_not_built_is_refused_by_name():
+    # parcel M2F2: fp32's sin, cos and tan are built (the triple word, Logan's
+    # decision of 2026-10-27), where until then both calls were refused by name
+    # ("parcel M2F's to build"): an edit of this test the lead's brief
+    # approved. Their own checks are test_mathlib_trig_tw.py's
     for fn in FUNCS:
-        with pytest.raises(ValueError, match=r"fp32.*Logan's choice.*parcel "
-                           r"M2X.*parcel M2F's to build"):
-            ml.fragment(fn, FP32, RNE)
-        with pytest.raises(ValueError, match="parcel M2F"):
-            ml.build(fn, FP32, RNE)
+        f = ml.fragment(fn, FP32, RNE)
+        assert isinstance(f, routines.Fragment) and (f.op, f.fmt) == (fn, FP32)
+        assert ml.build(fn, FP32, RNE).meta["family"] == "triple word"
     for name in ("sinh", "asin", "atan", "SIN", "sinpi", ""):
         with pytest.raises(ValueError, match=repr(name)) as e:
             ml.fragment(name, FP64, RNE)
@@ -330,9 +332,14 @@ def test_the_build_keeps_what_the_budget_and_the_rate_law_read(fn, fmt):
 
 
 def test_the_cap_per_function_and_format_is_the_measured_maximum():
-    assert ml.TRIG_LIVE_CAP == MEASURED_CAP
+    # parcel M2F2: TRIG_LIVE_CAP gains fp32's 23 for each of the three (the
+    # triple word's measured maximum, asserted in test_mathlib_trig_tw.py); the
+    # double word's three stay MEASURED_CAP. An edit of this test the lead
+    # approved on 2026-10-30, forced by the brief's own TRIG_LIVE_CAP change
+    assert ml.TRIG_LIVE_CAP == {fn: {**MEASURED_CAP[fn], "fp32": 23}
+                                for fn in FUNCS}
     for fn in FUNCS:
-        assert set(ml.TRIG_LIVE_CAP[fn]) == {"fp64", "fp128", "fp256"}
+        assert set(ml.TRIG_LIVE_CAP[fn]) == {"fp64", "fp128", "fp256", "fp32"}
         for fmt in FORMATS:
             lives = {ml.fragment(fn, fmt, r).live_max() for r in RND}
             assert max(lives) == ml.TRIG_LIVE_CAP[fn][fmt.name]
@@ -639,7 +646,7 @@ def test_constants_as_a_program():
     done = _program("--check", "--only", "trig")
     assert done.returncode == 0, done.stdout + done.stderr
     assert done.stdout.splitlines()[-1] == (
-        "mathlib --check (trig): 3 routines, 3 formats, 0 differences")
+        "mathlib --check (trig): 3 routines, 4 formats, 0 differences")
     for fn in FUNCS:
         for fmt in FORMATS:
             assert f"{fn} {fmt.name}: G = {ml.GUARD[fmt.name]}" in done.stdout
@@ -648,7 +655,10 @@ def test_constants_as_a_program():
     assert "reduction fp64: G =" not in done.stdout
     listing = _program("--only", "trig")
     assert listing.returncode == 0
-    assert len(listing.stdout.splitlines()) == 1 + 45
+    # the listing takes TRIG_FORMATS: 4 formats x 3 routines x 5 attributes
+    # (parcel M2F2; it was 1 + 45, an edit of this pin the lead approved on
+    # 2026-10-30, forced by the brief's own change to the listing)
+    assert len(listing.stdout.splitlines()) == 1 + 60
     rows = [ln.split() for ln in listing.stdout.splitlines()]
     assert ["sin", "fp64", "rne", "406", "107", "26", "26"] in rows
     assert ["tan", "fp256", "rmm", "406", "117", "16", "16"] in rows
@@ -672,7 +682,7 @@ def test_check_prints_the_routines_line_then_the_reductions_then_trigs(
         "reduction fp64 a",
         "mathlib --check (reduction): 1 formats, 0 differences",
         "sin fp64 a", "cos fp128 b",
-        "mathlib --check (trig): 3 routines, 3 formats, 0 differences"]
+        "mathlib --check (trig): 3 routines, 4 formats, 0 differences"]
     monkeypatch.setattr(ml, "check_trig_constants",
                         lambda **kw: (["sin fp64 a"], ["sin fp64 rne GATE: x"]))
     assert ml.main(["--check"]) == 1                      # trig differs
@@ -1282,7 +1292,7 @@ def test_check_exits_1_on_a_difference_and_names_it(monkeypatch, capsys):
     assert "DIFFERENCE: cos fp64 rtz COSTINY:" in shown
     n = shown.count("DIFFERENCE:")
     assert shown.splitlines()[-1] == (
-        f"mathlib --check (trig): 3 routines, 3 formats, {n} differences")
+        f"mathlib --check (trig): 3 routines, 4 formats, {n} differences")
 
 
 # ---- the shape's legs ----------------------------------------------------------
@@ -1371,8 +1381,11 @@ def test_the_sharing_leg_of_shape_fails_alone_on_a_doctored_prefix():
 
 def test_phase_order_has_the_trig_phases_in_place():
     order = ml.PHASE_ORDER
-    new = ("z", "S-tail", "S-head", "C-tail", "C-head", "sincos", "select",
-           "quotient")
+    # parcel M2F2: fp32's triple-word polynomials add S-head2 and S-head3 after
+    # "S-head", C-head2 and C-head3 after "C-head", each in the model's place
+    # (an edit of this pin approved in the lead's brief)
+    new = ("z", "S-tail", "S-head", "S-head2", "S-head3", "C-tail", "C-head",
+           "C-head2", "C-head3", "sincos", "select", "quotient")
     i = order.index("fixed-grid")
     assert order[i + 1:i + 1 + len(new)] == new
     assert order[i + 1 + len(new):i + 3 + len(new)] == ("final", "classify")
@@ -1518,7 +1531,12 @@ def test_the_trig_commands_run_at_small_sizes_and_refuse_an_existing_out(
     done = _runs("trig-pools", "--quick", "--out", str(out))
     assert done.returncode != 0 and "the file exists" in (
         done.stdout + done.stderr)
-    assert _runs("trig-pools", "--formats", "fp32").returncode != 0
+    # parcel M2F2: fp32 is a format of the commands (the triple word's), where
+    # it was refused by name; a light run of one fragment, 19 lanes of its pools
+    done = _runs("trig-pools", "--formats", "fp32", "--fn", "cos", "--attrs",
+                 "rne", "--step", "40")
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "trig-pools cos fp32 rne: 19 lanes" in done.stdout
     assert _runs("trig-bound", "--fn", "exp").returncode != 0
 
 
@@ -1898,7 +1916,10 @@ def test_each_leg_of_family_list_can_fail_alone():
     gone = copy.deepcopy(good)
     del gone["tan"]
     out = T.check_family_list(gone, gen)
-    assert len(out) == 15 and all("tan" in s for s in out)
+    # 4 formats x 5 attributes: TRIG_FAMILY has fp32's five (empty) cells since
+    # parcel M2F2, so 20 and not 15 (an edit of this count the lead approved on
+    # 2026-10-30, forced by the brief's regenerated TRIG_FAMILY)
+    assert len(out) == 20 and all("tan" in s for s in out)
 
 
 def test_the_pools_marks_are_all_explained_by_the_theory():
@@ -2347,10 +2368,15 @@ def test_the_trig_budget_rate_and_family_commands_run_at_small_sizes(
     assert (tmp_path / "b.txt").read_text().count("trig-budget tan fp128") == 3
     rc, out = _inproc(capsys, "trig-family", "--check")
     assert rc == 0 and "0 cells differ from the theory's" in out
-    for args in (("trig-budget", "--formats", "fp32"),
-                 ("trig-rate", "--fn", "exp"),
-                 ("trig-budget", "--regions", "middle")):
+    # parcel M2F2: fp32 is a format of trig-budget (it was refused by name), and
+    # `quad` is its region alone
+    rc, out = _inproc(capsys, "trig-budget", "--formats", "fp32", "--fn", "tan",
+                      "--regions", "edge", "--n", "3", "--no-attrs")
+    assert rc == 0 and "trig-budget tan fp32 G = 40 rne edge" in out
+    for args in (("trig-rate", "--fn", "exp"),
+                 ("trig-budget", "--regions", "middle"),
+                 ("trig-budget", "--formats", "fp64", "--regions", "quad")):
         with pytest.raises(SystemExit):
             _inproc(capsys, *args)
     # and as a program: the exit code of a refusal
-    assert _runs("trig-budget", "--formats", "fp32").returncode != 0
+    assert _runs("trig-budget", "--regions", "middle").returncode != 0
