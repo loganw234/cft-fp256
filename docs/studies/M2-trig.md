@@ -259,6 +259,56 @@ of the study:
   quotient, the live cap of 23 and the routines at fp32 (parcel M2F2's: they are
   still refused by name), `TRIG_FORMATS`, the harness at fp32.
 
+**A note of 2026-10-30, at parcel M2F2** (fp32's sin, cos and tan, the triple
+word at G = 40 in the golden generator; M2's build, wave 3, the second half of
+fp32; the study's text stays as written at 1337a13). 2.7's triple word is
+built in python/cft_golden/mathlib.py on parcel M2F1's reduction
+(`ml.build("sin", FP32, rnd)`, `ml.fragment`) and held by python/tests/
+test_mathlib_trig_tw.py (docs/VALIDATION.md, the entry of that date, whose
+figures these are). It is `tw32.build`: 939, 936 and 993 instructions under
+every attribute, the model's counts by phase and its bank words (97 or 98, 94
+or 95 and 96 a fragment, 102 for all fifteen), 23 values live in the design's
+order and scheduled in all 15, 28 static proofs by name (the reduction's 13 and
+the 15 Fast2Sum orderings of the heads), 118, 118 and 120 instructions claimed
+exact, and **the 15 dag digests' fingerprint 090e33b8ae85...b79c26 equal to the
+model's** (tw32_costs.out.txt:113); lane for lane it equals the model on
+8,589 lane-configurations (MEASURED, a scratch comparison with this
+directory's model, in the entry). What it says of the study:
+- 2.7's cap of 23 has no slack, and one of the two traps M2F1 named costs the
+  value: the shared `trig_after` forms |x| in the classification as `iand(x,
+  ABSM)`, the same instruction as red-small's by hash-consing, and so holds |x|
+  live from the reduction to the end (24 live, 938, 934 and 992 instructions,
+  MEASURED on the port as M2F1 had on the model); `trig_after` gains the keyword
+  `abs_by_xor` (the model's `ixor(x, iand(x, SIGN))`), which fp32's builder
+  passes, and whose default leaves M2G2a's 45 fragments as they were (digests
+  equal; so are the six's 120 and M2G1's 20 reduction builds).
+- 2.4's plan at fp32 is (K3, K2, D) = S (4, 3, 9), C (5, 3, 9): `plan_trig`'s
+  (K, D) = ((7, 9), (8, 9)) split by plan_exp32's rule with its two bits of
+  slack, at the build's own rho = pi/4 (1 + 2^-18.91) and at the study's 2^-30
+  alike. The split is `plan_trig_tw`, with two static proofs by name; each
+  head step's Fast2Sum is a proof of its own (|c_k| > |z y|, the bound by the
+  series' absolute values at most 0.325, C at k = 0).
+- 3.5's structured families do not exist at fp32, G = 40: the theory finds no
+  centre for any function and attribute (parcel M2X's COMPUTED reason: at the
+  smallest main-path |x| even a lane whose x^3/6 or x^2/2 lands on the grid is
+  2^7 Bv or more from a rounding boundary), so TRIG_FAMILY has five empty lists
+  for each function and the structured, family and window legs run no lane
+  there. What stands in their place is the
+  other direction: the lanes the theory finds at the double word's G = 18
+  (sin x = 3 2^-11 under rne; cos x = 1, 3 and 5 2^-12 under rne and 1 2^-10
+  to 2^-11 under the directed three; the 144-argument census of which the
+  double word marked 2 and 6) are run through the G = 40 fragment and none
+  marks (0 in 13,200 lanes, M2X's census, reproduced), and a build with the
+  bound 2^22 wider (the plant `bound_wide`) does mark them.
+- 3.2's error budget runs on the real triple word for the first time and gives
+  M2X's figures to the digits at the model's own lanes: the 18 regions at 1,500
+  lanes (0.2196 to 0.3675 Bv), and the 34 anchor lanes. It needs the late
+  products frozen with the early ones (without them sin's bound over 60 lanes
+  is 1.0042 Bv, with them 0.1363). The mark-rate law at G' = 6 gives the
+  model's 276 marks in 6 cells cell for cell.
+- Not built and not in this note: cftc and the language (parcel M2C's and
+  M2L's), `routines.py`'s LIVE_CAP (the eight routines, M2C's), the card.
+
 M1's study (docs/studies/M1-exp-log.md) is its model of form, section for
 section, and M1's design is its starting point: the in-lane test, the
 double word with TwoSum and no augmented addition, the fragment in C4's
