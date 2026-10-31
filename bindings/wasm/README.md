@@ -1457,6 +1457,46 @@ Still **141 `cftw_*` exports**, the same names. Nothing but the page moved:
     bindings/wasm/conformance.html 1,410,023 bytes  sha256 d7038764f11403a0...
     bindings/wasm/demos.html         596,007 bytes  sha256 0ddf39d93ff72a69...  (unchanged)
 
+### Rebuilt at ABI 0.18, 2026-10-30 (profile 3.1) - exp2m1(emax + 1) toward zero, and the host batch of 2026-10-22
+
+No ABI change. `host/src/transcend.c` now gives exp2m1(emax + 1) the
+largest finite with inexact alone under roundTowardZero and
+roundTowardNegative, where it raised overflow too (issue 1, an outside
+report; docs/VALIDATION.md, 2026-10-30). The module is rebuilt with it,
+as every change to its sources requires. It also carries the host batch
+of 2026-10-22 (parcels P2a, P2b and P2c: `cft_last_error()` belongs to
+the call that returned, a refusal names the call that was made), which
+changed code the module compiles and merged without a rebuild. So the
+committed module was stale from 2026-10-22 until this one.
+
+The order was the 0.18 rebuild's, the recording included:
+1. the five native tools `verify_demos.mjs` runs, built from the same
+   tree (13 s, 0 warnings);
+2. `build.sh` (53 s);
+3. `verify_demos.mjs --record` (101 s): every chain of the 13 runs is
+   equal to the committed recording. Only the module stamp, the date
+   (2026-10-31 in UTC), the rates and the seconds moved. Its one FAIL
+   was the page it had not yet been rebuilt for, by name;
+4. `build_demos.sh` (12 s), then `verify_demos.mjs` in check mode (108
+   s): 48 checks, 0 FAIL;
+5. a second clean build of both (64 s), with `bindings/wasm/build/`
+   removed between: all 165 outputs, both negative-control pages among
+   them, came out byte for byte.
+
+The container was the pinned emsdk 6.0.9 image, already on the desktop
+at its digest, through Docker Desktop. A probe through the package's
+own loader (`lib.mjs`'s `exp2m1`, the software handle) gives flags 0x10
+under rtz and rdn and 0x14 under rne, rup and rmm at emax + 1 in all four
+formats. The module before it gives 0x14 in all twenty cells.
+
+Still **141 `cftw_*` exports**, the same names, and 149 exports in all.
+The module is 5,357 bytes longer:
+
+    bindings/node/cft_node.wasm      281,660 bytes  sha256 7c60edda4da15d1e...
+    bindings/node/cft_node.js         74,146 bytes  sha256 dc845833acf075cb...  (unchanged)
+    bindings/wasm/conformance.html 1,415,679 bytes  sha256 bee04db86fcbebf2...
+    bindings/wasm/demos.html         601,676 bytes  sha256 cf083c06ca12037d...
+
 ## A second page: the five workloads, measured (2026-09-04)
 
 `demos.html` is the other deliverable of this directory. Same
