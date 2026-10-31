@@ -26145,3 +26145,88 @@ The table the file asserts is a subset (two or three checks red and two green a 
 - In the round's records, the lead typed the time of one of VM2F2's messages (about 13:40, where it came at about 13:30) instead of reading it from `date`. It was corrected before the ledger's next entry: by an appended line in the ledger, and in place in the lead's own note on the parcel's report.
 
 docs/README.md is recounted.
+
+## 2026-10-30 - issue 1, the first outside report: exp2m1(emax + 1) toward zero raised overflow, in the golden model, the C, the vectors and the WebAssembly module; the MPFR oracle's table-9.1 pool; the module stale since 2026-10-22 (the lead; verifier VX1)
+
+**The report.** GitHub issue 1, opened 2026-10-31T03:06:33Z, from a clean-room audit of loganw234/muse-softfloat (binary16/32/64), cross-tested against this library and an exact arbiter. The four cases it found at binary32 and binary64 were the one disagreement between the two libraries that was a defect.
+- At x = emax + 1, under roundTowardZero and roundTowardNegative, exp2m1 returned the largest finite, which is right, with overflow | inexact (0x14), which is wrong.
+- 754-2019 7.4 signals overflow when the rounding with the exponent unbounded exceeds the largest finite. Toward zero, 2^(emax+1) - 1 rounds to 2^(emax+1) - 2^(emax+1-p), the largest finite itself, so the flags owed are inexact alone (0x10).
+- rne, rup and rmm round it to 2^(emax+1) and overflow to +inf with 0x14, as they did. Logan asked that it be looked at that night rather than on Monday, as the first real test of an outside report.
+
+**Confirmed three ways** (MEASURED on the desktop at f68c6301):
+- the golden model: 8 of 40 cases wrong, rtz and rdn at emax + 1 in all four formats. emax + 2 is right everywhere;
+- GNU MPFR 4.2.2's `mpfr_exp2m1` at each precision with the exponent range unbounded: under RNDZ and RNDD, the largest finite with ternary -1, inexact alone; under RNDN and RNDU, above it;
+- the golden model's own `round_pack` of the exact integer 2^n - 1 gives the same.
+
+**The cause.** exp2m1's integer branch took its overflow shortcut from n > emax, in `transcend.py` and in `transcend.c` alike. That holds from n = emax + 2. At n = emax + 1 the value is just below 2^n, in the top quarter of the gap below it.
+- The other 12 overflow shortcuts in each file compare floor(log2) of an exact value, or a proven bound on it, with emax (or emax + 2 or emax + 3). The lead read each one and VX1 read them again: they are right. exp2's integer branch is right too: 2^n with n > emax overflows under every attribute.
+- exp2m1 is not in the math library's fragments, the RTL or the card's programs, so the card cannot share it.
+
+**Why no gate caught it.**
+- The vectors are the golden model's.
+- `transcend_check.py` compares the C with the golden model, and the two shared the shortcut.
+- **The MPFR oracle never asked.** `host/tools/mpfr_check.c` builds the exponential pool for these families, and `emax + 1` is in it. But `check_transcend` calls its fourth parameter `tpool`, and `main` passes the trigonometric pool in that slot. So from 0929e7ef (2026-09-03), when table 9.1's ten (exp2m1, exp10, exp10m1, log2p1, log10p1, rSqrt, pown, powr, compound, rootn) joined it, the selection `fn >= TF_EXP2M1 ? tpool` gave them the trigonometric pool, and never the exponential one.
+  - Run unmodified on the unfixed library: 739,234 cases, 0 value and 0 flag mismatches.
+  - The 2026-09-03 entry's 92,800 cases "for the ten" were those.
+
+**The fix**, branch fix-exp2m1 from f68c6301, merged as 48e2aa22:
+- **25d5b8d2.**
+  - The shortcut starts at n > emax + 1.
+  - At n = emax + 1 the C's `lane_pow2` lane holds 2^(emax+1) as a dyadic, so `round_neighbour`'s witness below it reaches `round_pack`. The golden model forms the same witness, 2^n - 2^(n-p-2), directly: the call `_round_neighbour` makes below an encoded 2^n, since 2^(emax+1) has no encoding.
+  - The Arduino copy is re-vendored (35 files identical).
+  - `test_exp2m1_at_the_top_of_the_range` pins the five attributes at emax + 1 and emax + 2 in the four formats, and holds each emax + 1 answer to `round_pack` of the exact integer. It fails on the unfixed model (4 failed, flags 20 at rtz) and passes on the fixed.
+  - The fixed golden model and C (through cft.dll) give 0 of 40 wrong.
+- **The vectors.** Regenerated at the profile's counts, 160 of the 168 sets are byte-identical. The 8 that change are the rtz and rdn transcendental sets of each format, each by exactly one record, exp2m1(emax + 1): the same value, flags 20 to 16. The unfixed model's 72 rtz and rdn sets equal the committed record, so those 8 records are the published ones moving.
+- **396e94bf, the oracle.** The ten run on both pools: the trigonometric pass as before, then a second call with the exponential pool in that slot. `mpfr-check 24 7`, the stage's arguments:
+  - on the unfixed library: 859,874 cases, 0 value and 10 flag mismatches, rc 1. All 10 are exp2m1(emax + 1) under rtz and rdn, fp64's twice since its pool holds 1024 twice. Nothing else in the ten moved;
+  - on the fixed library: 0 and 0, rc 0, 565 s;
+  - table91 is 53,360 cases a format: 23,200 trigonometric and 30,160 exponential.
+  - docs/TRANSCENDENTALS.md says this beside the 2026-09-03 table.
+- **b9d60ebc, the module.** The node module, the conformance page and the demos page were rebuilt in the pinned emsdk 6.0.9 image, through Docker Desktop at Logan's word (the image was already on the desktop), and the demos' chains re-recorded.
+  - Without it, CI's node stage would have replayed the new records through a module that still raised overflow.
+  - The module also carries 2026-10-22's host batch (P2a, P2b, P2c), which changed code it compiles and merged without a rebuild: **the committed module was stale from 2026-10-22.**
+  - Measured: 281,660 bytes (+5,357), the same 141 `cftw_*` exports; every chain of the 13 runs equal; verify_demos 48 checks, 0 FAIL; 165 outputs byte for byte over two clean builds.
+  - Through its own loader it gives 0x10 under rtz and rdn at emax + 1, and 0x14 under the rest, in all four formats. The module before it gives 0x14 in all twenty.
+
+**The gate,** on the desktop (Logan's choice for that night; the weekend window holds the box), at b9d60ebc: two runs side by side.
+- **Run 20261030-211024**: docs, generated, ensurevectors, vectors, libcft, transcend, mpfr, bindings, cpp, audit and golden. rc 0 in 2 h 15 min, VERDICT PASS with 4 inner skips, each known. Golden's 3 are the box gates' (the loopback binary twice, math.fma); generated's 1 is the status packager's backslash plant, not run on Windows.
+  - golden 5,955 passed: the 5,951 of 922c2ade's gate and the new test's 4;
+  - mpfr 859,874 cases, 0 value and 0 flag mismatches;
+  - transcend 584,477 comparisons over 39 functions, C == model;
+  - libcft: api-test all contract checks passed, 168 sets and 1,228,415 cases all matching;
+  - cpp 213,691 checks, bindings 834 passed, audit OK.
+- **Run 20261030-211027**: node, wasm and demos. rc 0 in 57 min, VERDICT PASS, nothing skipped.
+  - conformance.mjs: 1,228,415 cases over 168 sets through the rebuilt module, and 836,415 through the package's own methods;
+  - test.mjs 137 passed, program_test.mjs 38;
+  - verify.mjs VERIFY OK (abi 0.18 on both sides, 141 entry points);
+  - verify_demos 48 checks, 0 FAIL.
+- The runner's sets are generated at its own counts, so they hold 1,228,415 cases where the profile's hold 1,072,415.
+
+**Verifier VX1** (Sonnet): found no regression and no wrong answer, and judged the branch fit to merge. It reproduced the checks independently:
+- its own derivation from 7.4, with MPFR (gmpy2) and round_pack, in 40 cells;
+- golden == C == hand in all 40, and 1,520 golden-vs-C comparisons around the boundary;
+- the neighbour counters equal in 60 cells;
+- the seven exact-dyadic shortcuts at their boundary, 320 cells;
+- the new test failing on the unfixed model, and on 8 of 9 planted mutants;
+- all 168 sets regenerated against the record, and the 8 changed sets at one line each;
+- the oracle's account and logs;
+- the module's sizes, digests and chains, and verify_demos's 48 checks.
+
+Its notes are below. It also ran `verify.mjs`, an extra its brief did not ask for, without asking first and past the 10-minute line. It stopped that run at the lead's word, after its first four steps had passed.
+
+**Three phrases in the branch's commit messages are wrong** (VX1's notes 1, 6 and 7). The commits are not rewritten, since their SHAs are in the records; the corrections are here and in the merge's message:
+- 25d5b8d2's "the other 13 overflow shortcuts in transcend.py (and their 13 in transcend.c)" should read 12 and 12. There are 13 call sites in each file, the fixed one among them;
+- 25d5b8d2's "vendor.json's library digest" should read transcend.c's per-file sha256 in vendor.json, which has no library digest;
+- 396e94bf's "no power of ten" in the trigonometric pool should read no 10^k for k >= 1, since it holds 1.
+
+**Known limits, recorded:**
+- the gate ran on the desktop, not on the box;
+- the oracle is only as wide as its pools: the ten now see both, and nothing but this case moved, but no sweep has asked which families any pool lacks;
+- no test pins the neighbour counter at the new branch. Deleting its increment leaves the 48 exp2m1 tests passing (VX1's note 3). The counters agree today, golden and C, in 60 cells;
+- transcend.py's comment says 2^n - 1 is in the "top quarter" of the gap below 2^n, where its own inequality shows the top half; at n = p + 2 the value sits on the quarter point. The C and TRANSCENDENTALS.md say half. Pre-existing; a follow-up (VX1's note 4).
+
+**The lead's slips, recorded:**
+- VX1's brief gave a recipe for regenerating the vectors from the unfixed model that left out host/tools/pi_worstcase.py and host/src/mp_2opi.h, which the generator reads. VX1 added them; the lead's own run had worked only because it ran from the full checkout;
+- earlier the same day, in the round's records, the lead called the seven e1 clones "box clones": they are on the desktop. Logan's "keep" applied either way, and the ledger was corrected that evening.
+
+docs/README.md is recounted.
