@@ -1421,6 +1421,14 @@ in the top HALF of the gap below 2^n - the gap there is 2^(n-p) and
 decides it; and for n <= -(p+2) the value
 -(1 - 2^n) sits in the half gap above -1. Both are `round_neighbour`
 witnesses, and both are exact statements rather than approximations.
+The first holds up to n = emax + 1, where 2^n is past the largest
+finite: overflow is judged on the rounding with the exponent unbounded
+(754-2019 7.4), and toward zero that rounding is the largest finite
+itself, so roundTowardZero and roundTowardNegative deliver it with
+inexact alone. Only from n = emax + 2 does every attribute overflow.
+Until 2026-10-30, n = emax + 1 took the overflow shortcut and raised
+overflow under those two attributes as well (issue 1, found by an
+outside comparison; VALIDATION.md, 2026-10-30).
 
 **exp10 and exp10m1 past their exact tables are the counting argument
 again, with one structured family worth doing by hand.** For an
@@ -1710,6 +1718,16 @@ transcendental elements, 138,825 reached the Ziv loop and it escalated
 fp64 up, which is exactly the count phase 3 recorded. **Not one of the
 ten escalated there.** 32,585 elements were decided exactly and 56,835
 by a neighbour's side.
+
+**The ten's MPFR share was on the wrong pool (found 2026-10-30).** Its
+92,800 cases ran on the trigonometric pool, not on the exponential pool
+that holds their exact cases: the exp2 integers, the powers of two and
+of ten, and the neighbours of one. `check_transcend` calls its fourth
+argument `tpool`, and the caller passes the trigonometric pool there.
+So none of the ten was held against MPFR at an exp2 integer at the top
+of the range. On the exponential pool, MPFR found 10 flag mismatches in
+the library as it stood, all of them exp2m1(emax + 1) under rtz and rdn
+(issue 1), and nothing else. Since then the ten run on both pools.
 
 Over `transcend_check.py`'s whole sweep the model escalated 182 times
 across all thirty-nine functions and every pass the harness makes. A

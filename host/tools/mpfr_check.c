@@ -4689,6 +4689,15 @@ int main(int argc, char **argv)
         before = cases;
         check_transcend(fi, tpool, pn, gpool, gn, hpool, hn, TF_EXP2M1,
                         TF_COUNT);
+        /* And again on the exponential pool, the one these ten were
+         * written for. check_transcend calls its fourth argument tpool,
+         * and here that is the trigonometric pool, so from 2026-09-03 to
+         * 2026-10-30 the ten ran on it alone and never saw an exp2
+         * integer at the top of the range - where exp2m1(emax + 1)
+         * raised overflow toward zero (issue 1). The trigonometric pass
+         * above stays: it is coverage they have had since. */
+        check_transcend(fi, tpool, pn, tpool, pn, hpool, hn, TF_EXP2M1,
+                        TF_COUNT);
         printf("%s table91: %llu cases done (running mismatches: "
                "%llu value, %llu flag)\n", f->name,
                (unsigned long long)(cases - before),
