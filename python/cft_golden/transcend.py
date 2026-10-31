@@ -2222,7 +2222,15 @@ def exp2m1(fmt: FpFormat, xa: int, rnd: int = RND_RNE):
     rather than by a rounding of it - 2^n - 1 sits in the top quarter of
     the gap below 2^n for n >= p+2, and -(1 - 2^n) in the half gap above
     -1 for n <= -(p+2) - because the exact integer 2^n - 1 is up to
-    262,143 bits wide at fp256 and the C's container is 2048."""
+    262,143 bits wide at fp256 and the C's container is 2048.
+
+    The side decides n = emax + 1 too, where 2^n is past the largest
+    finite: overflow is judged on the rounding with the exponent
+    unbounded (754-2019 7.4), and toward zero that rounding is the
+    largest finite itself, so rtz and rdn deliver it with inexact alone.
+    Only from n = emax + 2 does every attribute overflow. Until
+    2026-10-30 n = emax + 1 took the overflow shortcut and raised
+    overflow under rtz and rdn as well (issue 1)."""
     u = unpack(fmt, xa)
     p = fmt.prec
 
@@ -2247,10 +2255,17 @@ def exp2m1(fmt: FpFormat, xa: int, rnd: int = RND_RNE):
                 return _round_exact(fmt, 0, (1 << n) - 1, 0, rnd)
             return _round_exact(fmt, 1, (1 << -n) - 1, n, rnd)
         if n > 0:
-            if n > fmt.emax:
+            if n > fmt.emax + 1:
                 return _round_overflowing(fmt, 0, rnd)
             # 2^n - 1 is inside the top quarter of the gap below 2^n:
             # the gap there is 2^(n-p) and 1 < 2^(n-p-1) for n >= p+2.
+            if n == fmt.emax + 1:
+                # 2^n has no encoding to anchor _round_neighbour on, so
+                # its witness, 2^n - 2^(n-p-2), is formed here: the same
+                # round_pack call it makes below an encoded 2^n, and the
+                # one the C's lane_pow2 makes at this n.
+                STATS["neighbour"] += 1
+                return round_pack(fmt, 0, (1 << (p + 2)) - 1, n - p - 2, rnd)
             return _round_neighbour(fmt, _int_bits(fmt, 1, n), away=0,
                                     rnd=rnd)
         # n <= -(p+2): 2^n - 1 is inside the half gap above -1, whose
