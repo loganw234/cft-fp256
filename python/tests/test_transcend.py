@@ -1892,6 +1892,32 @@ def test_exp2m1_beyond_the_exact_range_takes_a_side(fmt):
 
 
 @pytest.mark.parametrize("fmt", ALL)
+def test_exp2m1_at_the_top_of_the_range(fmt):
+    """754-2019 7.4 judges overflow on the rounding with the exponent
+    unbounded. At n = emax + 1 that rounding is 2^n under rne, rup and
+    rmm, past the largest finite: +inf with overflow and inexact. Toward
+    zero it is 2^n - 2^(n-p), the largest finite itself, which exceeds
+    nothing: inexact alone. Until 2026-10-30 n = emax + 1 took the
+    overflow shortcut and raised overflow under rtz and rdn too (issue
+    1). From n = emax + 2 every attribute overflows. Each answer at
+    emax + 1 is also round_pack's of the exact integer 2^n - 1, which no
+    shortcut touches."""
+    maxf, inf = max_normal_bits(fmt, 0), inf_bits(fmt, 0)
+    ovf = FLAG_OVERFLOW | FLAG_INEXACT
+    n = fmt.emax + 1
+    want = {RND_RNE: (inf, ovf), RND_RUP: (inf, ovf), RND_RMM: (inf, ovf),
+            RND_RTZ: (maxf, FLAG_INEXACT), RND_RDN: (maxf, FLAG_INEXACT)}
+    for rnd in RND_MODES:
+        got = tr.compute(fmt, "exp2m1", V(fmt, 0, n, 0), 0, rnd)
+        assert got == want[rnd], (fmt.name, RND_NAMES[rnd], got)
+        assert got == sf.round_pack(fmt, 0, (1 << n) - 1, 0, rnd)
+    for rnd in RND_MODES:
+        toward = rnd in (RND_RTZ, RND_RDN)
+        assert tr.compute(fmt, "exp2m1", V(fmt, 0, n + 1, 0), 0, rnd) == \
+            (maxf if toward else inf, ovf), (fmt.name, RND_NAMES[rnd])
+
+
+@pytest.mark.parametrize("fmt", ALL)
 @pytest.mark.parametrize("rnd", RND_MODES)
 def test_exp10_and_exp10m1_exact_on_the_powers_of_ten(fmt, rnd):
     """10^n has odd part 5^n, so it is a rounding boundary exactly while

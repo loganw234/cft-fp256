@@ -3909,8 +3909,10 @@ static cft_status do_atanh(const cft_fmt_desc *f, const lane *a, int rnd,
 
 /* ---- table 9.1's remainder: the drivers ---------------------------- */
 
-/* The lane for an exactly representable power of two, so a neighbour
- * witness can be anchored on it. n must be inside the normal range. */
+/* The lane for a power of two, so a neighbour witness can be anchored
+ * on it. n must be inside the normal range, or emax + 1 for exp2m1's
+ * witness below 2^(emax+1): a lane is a dyadic, so it holds that power
+ * though no encoding does. */
 static void lane_pow2(const cft_fmt_desc *f, long n, lane *u)
 {
     memset(u, 0, sizeof *u);
@@ -3989,7 +3991,13 @@ static cft_status do_exp2m1(const cft_fmt_desc *f, const lane *a, int rnd,
         }
         if (n > 0) {
             lane u;
-            if (n > f->emax)
+            /* Every attribute overflows only from n = emax + 2. At
+             * n = emax + 1 the side still decides: round_pack judges
+             * overflow on the unbounded rounding (754-2019 7.4), which
+             * toward zero is the largest finite, so RTZ and RDN deliver
+             * it with inexact alone. This was n > emax, and raised
+             * overflow there too, until 2026-10-30 (issue 1). */
+            if (n > f->emax + 1)
                 return round_overflowing(f, 0, rnd, out, flags)
                     ? CFT_ERR_INTERNAL : CFT_OK;
             lane_pow2(f, n, &u);
