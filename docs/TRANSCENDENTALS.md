@@ -1783,7 +1783,9 @@ run rather than read.
   and is the only other list of them in the repository. `mpfr-check`
   prints what it would ask (`CFT_MPFR_DUMP_CASES=1 ./mpfr-check 24 7`:
   every case of the transcendental phases, once, with the pool it comes
-  from and whether its operands are directed or random; half a second),
+  from and whether its operands are directed or random; half a second;
+  an empty value of the variable means unset, as it does for the other
+  two),
   and a script builds the generator's operands at `extra = 0` with every
   append tagged by the line of the generator that makes it. A family is a
   line. A family the vectors direct at a function that its pool lacks is a
@@ -1839,7 +1841,7 @@ Six findings, in the order they matter. Each is MEASURED.
    9.2.1's rows were not held against MPFR at fp32, fp64 or fp128 for the
    eleven functions of the one pool and the nine of the other. (Table 9.1's
    ten, which also run on the trigonometric pool, have had the real ones from
-   the exponential pool since 2026-10-30.) **Fixed on 2026-11-02, in the last
+   the exponential pool since 2026-10-30.) **Fixed on 2026-11-02, in the fourth
    commit of the audit:** `main` builds each format's own eighteen, without a
    random draw, and hands them to both builders with their own count. The
    pools keep their sizes and their draws (the case counts below did not
@@ -1953,11 +1955,24 @@ numbers in a cell are a count of distinct operands or pairs):
 
 | family | need | held before | held after |
 |---|---|---|---|
-| Pythagorean triples, both signs | 40/40/40/40 | 5/5/5/5 | 40/40/40/40 |
-| triples, one ulp off | 20/20/20/20 | 1/1/1/1 | 20/20/20/20 |
-| triples scaled to the range's ends | 40/40/40/40 | 2/2/2/2 | 40/40/40/40 |
+| the ten pairs, both signs | 40/40/40/40 | 5/5/5/5 | 40/40/40/40 |
+| the ten pairs, one ulp off | 20/20/20/20 | 1/1/1/1 | 20/20/20/20 |
+| the ten pairs scaled to the range's ends | 40/40/40/40 | 2/2/2/2 | 40/40/40/40 |
 | extremes, zeros, infinities and NaNs | 11/11/11/11 | 5/5/5/5 | 11/11/11/11 |
 | a dominant operand | 27/27/27/27 | 1/1/1/1 | 27/27/27/27 |
+
+The first three rows count by the line of the generator that builds each
+pair, and the generator's list has ten pairs: (3, 4), (5, 12), (8, 15),
+(7, 24), (20, 21), (9, 40), (6, 8) and (12, 16), which are Pythagorean
+triples, and (1, 1) and (2, 2), which are not. Ten pairs in four sign
+combinations are 40, in two one-ulp steps 20, at four scales 40: 100 pairs,
+the family `hypot:triples`, of which the pools held 8 (the run's family
+table prints 100 - 8 = 92 added, 460 cases). By what each pair is rather
+than the line that builds it, the 100 are 64 exact triples (8 x (4 + 4)), 16 one ulp from an
+exact triple (8 x 2) and 20 neither (2 x (4 + 2 + 4)); the 8 the pools held
+are of the last kind, so the 92 added are 64, 16 and 12. Both splits are of
+the same pairs. `host/tools/audit-pools/hypot_split.py` counts the second
+in the dump, and MEASURED it is 64 / 16 / 12 at each of the four formats.
 
 **atan2, atan2pi**
 
@@ -2091,12 +2106,37 @@ are no longer added. Earlier runs of the same phase took 212 seconds in
 all at the quietest and 261 at the busiest: the machine is shared, and the
 numbers move with it.
 
-The stage's `mpfr-check 24 7` was 859,874 cases in 565 s on 2026-10-30,
-and the other phases are unchanged, so the whole run should be 859,874 +
-507,090 = **1,366,964 cases in about 763 s** (565 + 198), 35 percent over
-565, or about 826 s (46 percent) with the 261 seconds of the busiest
-earlier run: inside the brief's 50 percent on both. That is INFERRED, not
-measured. The full run is the lead's to make.
+The whole run, MEASURED by the lead at 1f76254a (the audit's fourth
+commit, before the pins below): the `mpfr` stage of `verify/run.sh` took
+**818 s** (828 s in all), from 08:44:33 to 08:58:21 on 2026-11-02, on the
+desktop under the load of three agents, and the tool ended `TOTAL 1366964
+cases, 0 value mismatches, 0 flag mismatches`: 859,874 + 507,090, the figure
+this section first gave as inferred. `mpfr-check` alone was about 800 s of the stage, by
+subtraction (the stage also builds the tool and runs `mp-err-check`):
+INFERRED. The run of 2026-10-30 was 859,874 cases in 565 s; 850 s is the
+limit the brief set. The per-op table the run ends with has 85 rows: the 39
+transcendental rows now include the extras (their differences from the
+2026-10-30 run sum to 102,215, 165,435, 112,720 and 126,720 cases at fp32,
+fp64, fp128 and fp256, the extras of each format), and the other 46 rows are
+those of 2026-10-30.
+
+**The coverage, pinned.** The count lines of the extras were once a check
+that could not fail: with fp256's extras skipped in a scratch copy, a run
+printed `TOTAL 380370` and exited 0, 126,720 cases short, because the
+mismatch counters fail a run and nothing failed one that asked too little.
+`mpfr_check.c` now holds the counts of `mpfr-check 24 7`, the stage's
+arguments: the extras' cases per family and format (69 families), per format
+(102,215 / 165,435 / 112,720 / 126,720) and the whole run's TOTAL
+(1,366,964). After the last phase it compares them, prints for each
+difference `PIN FAILED <phase> <format> [<family>]: <found> cases found,
+<wanted> wanted`, and exits 1. A pin is checked where the run chose what it
+counts: a format's extras when they ran (a subset checks what it ran), the
+total only with no subset; other arguments check nothing, and the run says
+so. **Whoever changes a pool, a family or the extras' dedupe updates the
+pins in the same commit**, and says why the oracle now asks something else:
+`host/tools/audit-pools/pins.py` prints the new table from a run, and
+`pins.py --check` says which pins a run disagrees with. The red and the green
+runs are in the entry of docs/VALIDATION.md for 2026-11-02.
 
 **Controls**, run on the 2026-11-02 tree, both on copies outside the
 repository.
@@ -2133,8 +2173,51 @@ repository.
   families named above.
 - Sin, cos and tan at the wide formats are sampled as the vector generator
   samples them: 192 powers of two, and the deepest three binades of eight.
-- The comparison scripts are not filed; the dump they read is what the tool
-  prints.
+- The pins are those of `24 7` on the desktop, whose `long` is 32 bits. The
+  two places of the extras that read a `long` wider than 32 bits met no such
+  value at any format (MEASURED: counters in a scratch copy, 0 and 0 at fp32,
+  fp64, fp128 and fp256), so the counts are believed not to depend on the
+  host's `long`; they have not been run on a host whose `long` is 64 bits.
+
+**The audit's scripts** are in `host/tools/audit-pools/`. Run them from the
+repository's root with `python -B` (not `-I`, which hides the directory the
+scripts import each other from). Python 3.12 or later, for `sys.monitoring`
+in `audit_branch.py` and `audit_holes.py`; `check_thresholds.py` and
+`proto_worst.py` need `mpmath`; the rest use the standard library and
+`python/cft_golden`. Their inputs are dumps of the cases. AFTER is the dump
+of the tool as it is; BEFORE is the dump of the pools as they were: the dump
+of the tool at commit b2fd894f (the audit's first commit, whose pools are the
+original ones) with its extras lines removed. MEASURED, that is the dump of
+the tool before the audit, line for line.
+
+```
+cd host
+CFT_MPFR_DUMP_CASES=1 ./mpfr-check 24 7 > after.txt
+CFT_MPFR_DUMP_CASES=1 ./mpfr-check-b2fd894f 24 7 | grep -v '^C [^ ]* [^ ]* e ' > before.txt
+```
+
+(`mpfr-check-b2fd894f` is `git show b2fd894f:host/tools/mpfr_check.c`, built
+in a scratch directory with the flags `host/Makefile` uses.)
+
+| script | arguments | writes |
+|---|---|---|
+| `audit_sum.py` | BEFORE AFTER | the summary table of this section |
+| `audit_table.py` | BEFORE AFTER | Table A (needs `vtag.py`, `audit_lib.py`) |
+| `tableB.py`, `merge_fam.py` | PREFIX | Table B; the merged family table (PREFIX_fp32.txt to PREFIX_fp256.txt are the outputs of the extras alone at each format) |
+| `first18.py` | BEFORE AFTER | the first eighteen members of each pool (finding 1) |
+| `audit_vec.py`, `audit_pairs.py` | DUMP [formats [functions]] | the operands and pairs the vectors direct that a pool lacks |
+| `audit_branch.py`, `audit_holes.py` | DUMP FORMAT | the lines of `transcend.py` only one side reaches; those neither does |
+| `check_thresholds.py` | DUMP | the independent rebuild of the threshold families: `checked 15326 operands and pairs; missing 0` |
+| `proto_worst.py` | none | the search for the reduction's worst cases against `host/tools/pi_worstcase.py`: `disagree 0` at fp32 (128 binades), fp64 (1024), and 8 sampled at fp128 and fp256 |
+| `hypot_split.py` | DUMP FORMAT | the split of the hypot pairs by what each is |
+| `pins.py` | RUNS [--check] | the pin table of `mpfr_check.c` |
+
+Rerun from these copies on 2026-11-02 (MEASURED, each in ten seconds or
+less): `audit_sum.py` writes the summary of this section, byte for byte as
+it was first written; `audit_table.py` writes Table A, byte for byte but for
+the three hypot rows relabelled above, and every row of it and of
+`tableB.py`'s is in this document; the other scripts print what the copies
+they were filed from printed.
 
 ## What is NOT here
 

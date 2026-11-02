@@ -107,8 +107,11 @@
  *         (directed specials always run; randoms are exponent-banded)
  *         CFT_MPFR_PHASES and CFT_MPFR_FORMATS (environment, comma
  *         lists) run a subset; CFT_MPFR_DUMP_CASES prints the
- *         transcendental cases instead of checking them. Unset, the run
- *         is the whole of it. See the block above build_tpool.
+ *         transcendental cases instead of checking them. Unset (or
+ *         empty), the run is the whole of it. See the block above
+ *         build_tpool. `mpfr-check 24 7` also compares the cases the
+ *         extras ask with the pinned counts and exits 1 on a
+ *         difference: see the block above main.
  */
 
 #include <stdint.h>
@@ -3149,15 +3152,16 @@ static uint32_t tfn_lib(const fdesc *f, int fn, cft_round rnd,
  *                     transcend, trig, radian, table91, extras, reduce,
  *                     convert, formatof - to run those and no others;
  *   CFT_MPFR_FORMATS  a comma list of fp32, fp64, fp128, fp256;
- *   CFT_MPFR_DUMP_CASES  any value: print every case the transcendental
- *                     phases would ask (under the first attribute only -
- *                     the other four ask the same operands), check
- *                     nothing, and run no other phase.
+ *   CFT_MPFR_DUMP_CASES  any non-empty value: print every case the
+ *                     transcendental phases would ask (under the first
+ *                     attribute only - the other four ask the same
+ *                     operands), check nothing, and run no other phase.
  *
- * Unset, env_lists answers yes to everything and the run is the one it
- * always was. A subset skips the phases before it, so the random
- * operands it draws are not the ones a full run draws; the directed
- * ones are, and are the whole point of a subset.
+ * Unset - or empty, for all three - env_lists answers yes to everything
+ * and the run is the one it always was. A subset skips the phases
+ * before it, so the random operands it draws are not the ones a full
+ * run draws; the directed ones are, and are the whole point of a
+ * subset.
  *
  * The dump is how the pools are audited rather than read: tools of the
  * audit compare it, case by case, with the operands the vector generator
@@ -6379,10 +6383,209 @@ static void report(const fdesc *f, mop op, int mi, const uint8_t *a,
     printf(" flags=0x%02x\n", (unsigned)wf);
 }
 
+/* ---- the coverage, pinned (OPS send-back 1, 2026-11-02) ------------- *
+ *
+ * The mismatch counters fail a run. Nothing failed it when a phase asked
+ * FEWER cases than it should - a family dropped, a format skipped, a pool
+ * shortened - and a count line that cannot fail is a check that cannot
+ * fail: with the extras of fp256 skipped, a run once printed TOTAL
+ * 380,370 and exited 0, 126,720 cases short. That silent not-asking is
+ * what issue 1 was. So the cases the extras ask are pinned:
+ *
+ *   XPIN         per family and format;
+ *   XPIN_FORMAT  per format (the sum of the family column);
+ *   PIN_TOTAL    the whole run's TOTAL, for a run with no subset.
+ *
+ * All three are the counts of `mpfr-check 24 7`, the verification stage's
+ * arguments, because the pools hold the randoms those arguments draw and
+ * the extras skip what the pools hold. With other arguments nothing is
+ * checked and the run says so. A pin is checked wherever the run chose
+ * what it counts: a format's extras when that format's extras ran (a
+ * CFT_MPFR_FORMATS or CFT_MPFR_PHASES subset checks what it ran), the
+ * total only when neither variable is set. A difference prints a line
+ * that names the phase, the format (and the family), the count found and
+ * the count wanted, and the run exits 1.
+ *
+ * WHOEVER CHANGES A POOL, A FAMILY OR THE EXTRAS' DEDUPE UPDATES THESE
+ * PINS IN THE SAME COMMIT. The new numbers are the cases column of the
+ * table this tool prints at the end of a run; host/tools/audit-pools/
+ * pins.py reads them off a run and prints the rows below, and with
+ * --check says which of them a run disagrees with. A pin that has to move
+ * is a change in what the oracle asks: say why in the commit.
+ *
+ * The counts do not depend on the width of the host's long as far as it
+ * has been measured: the two places that read a long wider than 32 bits
+ * (xedge_pair's integer neighbours and the power-edge family) were
+ * counted at fp32, fp64, fp128 and fp256 on the desktop, whose long is
+ * 32 bits, and neither met a value past 2^31 in this run. */
+
+typedef struct {
+    const char *name;
+    uint64_t cases[4];                   /* fp32, fp64, fp128, fp256 */
+} xpin_t;
+
+static const xpin_t XPIN[] = {
+    { "x:io",                    { 455, 455, 455, 455 } },
+    { "x:ints",                  { 1575, 1645, 1645, 1645 } },
+    { "x:int-edge",              { 1750, 1680, 1750, 1750 } },
+    { "x:pow2",                  { 35, 35, 35, 35 } },
+    { "x:pow2-sub",              { 490, 490, 490, 490 } },
+    { "x:pow10",                 { 350, 770, 3290, 8960 } },
+    { "x:ln2-edge",              { 3500, 3500, 3500, 3500 } },
+    { "x:tiny",                  { 490, 490, 490, 490 } },
+    { "x:tiny-edge",             { 1610, 1610, 1610, 1610 } },
+    { "t:io",                    { 540, 540, 540, 540 } },
+    { "t:units",                 { 180, 180, 180, 180 } },
+    { "t:halves",                { 630, 630, 630, 630 } },
+    { "t:quarters",              { 945, 945, 945, 945 } },
+    { "t:ints",                  { 495, 495, 495, 495 } },
+    { "t:eighths",               { 1620, 1620, 1620, 1620 } },
+    { "t:top",                   { 1260, 1260, 1260, 1260 } },
+    { "t:tiny",                  { 405, 405, 405, 405 } },
+    { "t:tiny-edge",             { 1620, 1710, 1710, 1710 } },
+    { "t:beside-half",           { 3240, 3240, 3240, 3240 } },
+    { "r:io",                    { 165, 165, 165, 165 } },
+    { "r:pow2-sweep",            { 7500, 62130, 2880, 2880 } },
+    { "r:pow2-near",             { 330, 330, 360, 360 } },
+    { "r:tiny",                  { 105, 105, 105, 105 } },
+    { "r:tiny-edge",             { 540, 540, 720, 720 } },
+    { "r:worst",                 { 360, 360, 210, 270 } },
+    { "h:io",                    { 330, 330, 330, 330 } },
+    { "h:small",                 { 2460, 2460, 2460, 2460 } },
+    { "h:ln2-edge",              { 1260, 1260, 1260, 1260 } },
+    { "h:tanh-edge",             { 240, 240, 270, 270 } },
+    { "h:tiny",                  { 240, 240, 240, 240 } },
+    { "h:tiny-edge",             { 1380, 1440, 1440, 1440 } },
+    { "m:io",                    { 330, 330, 330, 330 } },
+    { "m:ints",                  { 2760, 2700, 2760, 2760 } },
+    { "m:int-edge",              { 720, 720, 720, 720 } },
+    { "m:pow10",                 { 270, 630, 2790, 7650 } },
+    { "m:10^k-1",                { 480, 1260, 2910, 6270 } },
+    { "m:2^k-1",                 { 7350, 13470, 13470, 13470 } },
+    { "m:pow2",                  { 1770, 1830, 1830, 1830 } },
+    { "m:tiny",                  { 210, 210, 210, 210 } },
+    { "m:tiny-edge",             { 1080, 1140, 1140, 1140 } },
+    { "m:log2p1-edge",           { 420, 450, 450, 450 } },
+    { "m:log10-edge",            { 2700, 2700, 2700, 2700 } },
+    { "pow:specials",            { 1155, 1155, 1175, 1175 } },
+    { "pow:int-exp",             { 780, 780, 780, 780 } },
+    { "pow:dyadic-exp",          { 960, 960, 960, 960 } },
+    { "pow:dyadic-wide",         { 230, 270, 270, 255 } },
+    { "pow:near1",               { 1400, 1390, 1400, 1400 } },
+    { "pow:cancel",              { 530, 530, 530, 530 } },
+    { "pow:edge",                { 1620, 1620, 1620, 1620 } },
+    { "powr:specials",           { 1235, 1235, 1255, 1255 } },
+    { "powr:int-exp",            { 770, 770, 770, 770 } },
+    { "powr:dyadic-wide",        { 230, 270, 270, 255 } },
+    { "powr:edge",               { 1620, 1620, 1620, 1620 } },
+    { "hypot:triples",           { 460, 460, 460, 460 } },
+    { "hypot:dominance",         { 130, 130, 130, 130 } },
+    { "hypot:extremes",          { 30, 30, 30, 30 } },
+    { "hypot:wide-triples",      { 75, 75, 75, 75 } },
+    { "hypot:exact-top",         { 120, 120, 120, 120 } },
+    { "atan2:axes",              { 2050, 2050, 2050, 2050 } },
+    { "atan2:diagonals",         { 1050, 1050, 1050, 1050 } },
+    { "atan2:sub-quotient",      { 10, 10, 10, 10 } },
+    { "atan2:tiny-over-unit",    { 460, 460, 460, 460 } },
+    { "atan2:big-small",         { 220, 220, 220, 220 } },
+    { "int:vector-pairs",        { 29685, 29715, 29640, 29715 } },
+    { "int:specials",            { 975, 975, 975, 975 } },
+    { "int:exact-edge",          { 710, 785, 795, 800 } },
+    { "int:perfect-power",       { 890, 1385, 1385, 1385 } },
+    { "int:subnormal-recip",     { 270, 270, 270, 270 } },
+    { "int:power-edge",          { 360, 360, 360, 360 } },
+};
+static const uint64_t XPIN_FORMAT[4] = { 102215, 165435, 112720, 126720 };
+#define PIN_TOTAL 1366964ull
+
+static int pin_fail;
+static uint64_t pin_seed;               /* rs as main was given it: rs
+                                         itself is the generator's state */
+
+static void pin_say(const char *phase, const char *format,
+                    const char *family, uint64_t found, uint64_t wanted)
+{
+    pin_fail = 1;
+    printf("PIN FAILED %s %s%s%s: %llu cases found, %llu wanted\n", phase,
+           format, family ? " " : "", family ? family : "",
+           (unsigned long long)found, (unsigned long long)wanted);
+}
+
+static int env_set(const char *var)
+{
+    const char *v = getenv(var);
+    return v && *v;
+}
+
+/* Compare the run with the pins. Called once, after the last phase and
+ * before the TOTAL line; sets pin_fail, which main folds into its exit
+ * status. */
+static void pins_check(int randoms)
+{
+    const int nfam = (int)(sizeof XPIN / sizeof XPIN[0]);
+    int fi, k, t, checked = 0, listed;
+
+    if (randoms != 24 || pin_seed != 7) {
+        printf("pins: not checked (the pinned counts are those of "
+               "mpfr-check 24 7)\n");
+        return;
+    }
+    for (fi = 0; fi < 4; fi++) {
+        const fdesc *f = &FMTS[fi];
+        uint64_t found = 0;
+
+        if (!format_on(f) || !phase_on("extras"))
+            continue;
+        checked++;
+        listed = 0;
+        for (t = 0; t < xfam_n; t++)
+            found += xfam_cases[t][fi];
+        if (found != XPIN_FORMAT[fi])
+            pin_say("extras", f->name, NULL, found, XPIN_FORMAT[fi]);
+        for (k = 0; k < nfam; k++) {
+            uint64_t have = 0;
+            for (t = 0; t < xfam_n; t++)
+                if (!strcmp(xfam_name[t], XPIN[k].name))
+                    have = xfam_cases[t][fi];
+            if (have != XPIN[k].cases[fi] && listed++ < 12)
+                pin_say("extras", f->name, XPIN[k].name, have,
+                        XPIN[k].cases[fi]);
+        }
+        for (t = 0; t < xfam_n; t++) {   /* a family the pins do not know */
+            int known = 0;
+            for (k = 0; k < nfam; k++)
+                if (!strcmp(xfam_name[t], XPIN[k].name))
+                    known = 1;
+            if (!known && xfam_cases[t][fi] && listed++ < 12)
+                pin_say("extras", f->name, xfam_name[t],
+                        xfam_cases[t][fi], 0);
+        }
+        if (listed > 12)
+            printf("PIN FAILED extras %s: and %d more families\n", f->name,
+                   listed - 12);
+    }
+    if (!env_set("CFT_MPFR_PHASES") && !env_set("CFT_MPFR_FORMATS")) {
+        if (cases != PIN_TOTAL)
+            pin_say("total", "(all phases and formats)", NULL, cases,
+                    PIN_TOTAL);
+        else if (!pin_fail)
+            printf("pins held: extras at every format (%d families), "
+                   "total %llu\n", nfam, (unsigned long long)PIN_TOTAL);
+    } else if (checked) {
+        if (!pin_fail)
+            printf("pins held: extras at %d format%s (%d families); "
+                   "total not checked, a subset ran\n", checked,
+                   checked == 1 ? "" : "s", nfam);
+    } else {
+        printf("pins: the extras did not run, nothing to check\n");
+    }
+}
+
 int main(int argc, char **argv)
 {
     int randoms = argc > 1 ? atoi(argv[1]) : 24;
     rs = argc > 2 ? strtoull(argv[2], NULL, 0) | 1 : 0x5EEDF00Dull;
+    pin_seed = rs;
     static uint8_t pool[MAXPOOL][32];
     static uint8_t base[MAXPOOL][32];    /* a format's own specials */
     static uint8_t tpool[TPOOL_MAX][32];
@@ -6395,7 +6598,7 @@ int main(int argc, char **argv)
         return 2;
     }
     printf("MPFR %s as oracle\n", mpfr_get_version());
-    dump_cases = getenv("CFT_MPFR_DUMP_CASES") != NULL;
+    dump_cases = env_set("CFT_MPFR_DUMP_CASES");
 
     for (fi = 0; fi < 4; fi++) {
         const fdesc *f = &FMTS[fi];
@@ -6726,11 +6929,12 @@ int main(int argc, char **argv)
            "associate in any order)\n",
            (unsigned long long)reduce_nodes);
 
+    pins_check(randoms);
     printf("TOTAL %llu cases, %llu value mismatches, %llu flag "
            "mismatches\n", (unsigned long long)cases,
            (unsigned long long)mismatches,
            (unsigned long long)flag_mismatches);
     cft_close(dev);
     mpfr_free_cache();
-    return (mismatches || flag_mismatches) ? 1 : 0;
+    return (mismatches || flag_mismatches || pin_fail) ? 1 : 0;
 }
