@@ -1824,20 +1824,29 @@ rootn), fp32 / fp64 / fp128 / fp256. MEASURED on the desktop, 2026-11-02:
 
 Six findings, in the order they matter. Each is MEASURED.
 
-1. **Twenty functions had no specials at three formats.** The trigonometric
-   pool and the third pool (sinPi to atan2Pi, sin to atanh) take their first
-   eighteen entries from an array `main` hands them, and what `main` hands
-   them is the clause-5 loop's last pool, which is fp256's. At fp256 that is
-   right. At fp32, fp64 and fp128 it is eighteen fp256 encodings read through
-   a narrower format: at fp32 they are +0 twelve times, 0x00000001 three times
-   and 0xffffffff three times. No -0, no infinity, no signaling NaN, no 1, no
-   minimum or maximum normal: sin(+-inf), asin(-0), atanh(+-1) and the rest of
+1. **Twenty functions had no specials at three formats, and now have them.**
+   The trigonometric pool and the third pool (sinPi to atan2Pi, sin to
+   atanh) take their first eighteen entries from an array `main` handed them,
+   and what `main` handed them was the clause-5 loop's last pool, which is
+   fp256's, with tpool's count (208) where the array's own is eighteen. At
+   fp256 that was right. At fp32, fp64 and fp128 it was eighteen fp256
+   encodings read through a narrower format: at fp32 +0 twelve times,
+   0x00000001 three times and 0xffffffff three times. The pools held no -0,
+   no infinity, no canonical quiet NaN (the 0xffffffff, a negative NaN with
+   every payload bit set, stood in), no signaling NaN, no largest subnormal
+   and no largest normal; the trigonometric pool also no smallest normal, the
+   third pool no 3 or -3. So sin(+-inf), asin(-0), atanh(+-1) and the rest of
    9.2.1's rows were not held against MPFR at fp32, fp64 or fp128 for the
    eleven functions of the one pool and the nine of the other. (Table 9.1's
    ten, which also run on the trigonometric pool, have had the real ones from
-   the exponential pool since 2026-10-30.)
-   The defect is left in place, so that the default run asks what it always
-   asked; the extras ask the real specials (`t:io`, `r:io`, `h:io`).
+   the exponential pool since 2026-10-30.) **Fixed on 2026-11-02, in the last
+   commit of the audit:** `main` builds each format's own eighteen, without a
+   random draw, and hands them to both builders with their own count. The
+   pools keep their sizes and their draws (the case counts below did not
+   move); the first eighteen entries of those two pools at fp32, fp64 and
+   fp128 are now the format's specials, and the 0xffffffff and the repeated
+   +0 are no longer asked. The extras' `t:io`, `r:io` and `h:io` still add
+   what the base eighteen do not hold: the other signs and the payload NaNs.
 2. **The binary functions were asked 4 to 10 percent of the pairs the
    vectors direct.** `check_transcend` pairs `P[i]` with `P[j]` for
    `j = i mod (n/8), + n/8, ...`, which reaches the diagonal of the specials
@@ -2035,17 +2044,19 @@ to (five attributes each).
 | `hypot:exact-top` | hypot | `hypot:898`, the exact hypot past the largest finite | (3, 4), (5, 12), (8, 15) scaled so that the hypot passes 2^(emax+1) and so that it does not | 24 of 24 / 24 of 24 / 24 of 24 / 24 of 24 | 120 / 120 / 120 / 120 |
 | `hypot:wide-triples` | hypot | `_hypot_dyadic`: an exact hypot wider than p + 1 bits | (2^(j+1) - 1, (2^j - 1) 2^(j+1)) for j round p/2 | 15 of 15 / 15 of 15 / 15 of 15 / 15 of 15 | 75 / 75 / 75 / 75 |
 | `atan2:tiny-over-unit` | atan2, atan2Pi | `2 qv + p + 3 <= 0`, `ey - ex <= -(p+1)` | the vector set's tiny y against +-1, 2, 3, with the thresholds' k added | 46 of 50 / 46 of 50 / 46 of 50 / 46 of 50 | 460 / 460 / 460 / 460 |
-| `int:specials` | pown, compound, rootn | 9.2.1's rows for the zeros, infinities and NaNs | the 18 specials against the 15 n the oracle uses | 58 of 145 / 58 of 145 / 58 of 145 / 65 of 145 | 870 / 870 / 870 / 975 |
+| `int:specials` | pown, compound, rootn | 9.2.1's rows for the zeros, infinities and NaNs | the 18 specials against the 15 n the oracle uses | 65 of 145 / 65 of 145 / 65 of 145 / 65 of 145 | 975 / 975 / 975 / 975 |
 | `int:exact-edge` | pown, compound | `_pown_dyadic`: `n > p + 1`, `M^n` wider than p + 1 bits | M, -M and M - 1 for odd M against the n round where M^n leaves p + 1 bits | 142 of 144 / 157 of 158 / 159 of 159 / 160 of 160 | 710 / 785 / 795 / 800 |
 | `int:perfect-power` | rootn | `_rootn_dyadic`: the odd significand a perfect n-th power in absolute value | r^n, with neighbours, for r = 2 .. 13 and n = 2 .. 12 | 178 of 180 / 277 of 279 / 277 of 279 / 277 of 279 | 890 / 1,385 / 1,385 / 1,385 |
 | `int:subnormal-recip` | rootn | `rootn:2862`, the overflow screen | 3, 5, 7 times a power of two just under the format's range, against n = -1, -2, 1 | 54 of 54 / 54 of 54 / 54 of 54 / 54 of 54 | 270 / 270 / 270 / 270 |
 | `int:power-edge` | pown | the screens | 3, 5, 10 and their negatives against the n that takes them to 2^(emax+1) and 2^(emin-man_w-1) | 72 of 72 / 72 of 72 / 72 of 72 / 72 of 72 | 360 / 360 / 360 / 360 |
 
 What was added, in `host/tools/mpfr_check.c`, as a phase of its own after
-table91 that draws no random number: the three pools are as they were, down
-to the draws, so every case the oracle asked before it asks now. A candidate
-the function's pool already holds is skipped, and so is a pair the strided
-pairing already asks. At the end of a run the tool prints, for each family
+table91 that draws no random number: the three pools keep their sizes and
+their draws, and are as they were but for the first eighteen entries of the
+trigonometric and third pools at fp32, fp64 and fp128 (finding 1), so every
+other case the oracle asked before it asks now. A candidate the function's
+pool already holds is skipped, and so is a pair the strided pairing already
+asks. At the end of a run the tool prints, for each family
 and format, how many members were intended, how many the pools held and how
 many were added, and how many cases that came to; a dump line names the
 family of each added case. Subsets run with `CFT_MPFR_PHASES` (a comma list of
@@ -2054,34 +2065,38 @@ family of each added case. Subsets run with `CFT_MPFR_PHASES` (a comma list of
 runs as it did.
 
 **What it asks now, and what that cost.** MEASURED on the desktop (mingw64
-gcc 16.1, GNU MPFR 4.2.2, 2026-11-02), the transcendental phases of each
-format on their own, `CFT_MPFR_PHASES=transcend,trig,radian,table91,extras
+gcc 16.1, GNU MPFR 4.2.2, 2026-11-02), after the fix of the base pools,
+the transcendental phases of each format on their own,
+`CFT_MPFR_PHASES=transcend,trig,radian,table91,extras
 CFT_MPFR_FORMATS=<format> ./mpfr-check 24 7`; cases per phase:
 
 | format | transcend | trig | radian+hyperbolic | table91 | extras | all five | value / flag mismatches |
 |---|---|---|---|---|---|---|---|
-| fp32 | 23,920 | 20,000 | 9,495 | 53,360 | 102,860 | 209,635 | 0 / 0 |
-| fp64 | 23,920 | 20,000 | 9,495 | 53,360 | 166,070 | 272,845 | 0 / 0 |
-| fp128 | 23,920 | 20,000 | 9,495 | 53,360 | 113,355 | 220,130 | 0 / 0 |
+| fp32 | 23,920 | 20,000 | 9,495 | 53,360 | 102,215 | 208,990 | 0 / 0 |
+| fp64 | 23,920 | 20,000 | 9,495 | 53,360 | 165,435 | 272,210 | 0 / 0 |
+| fp128 | 23,920 | 20,000 | 9,495 | 53,360 | 112,720 | 219,495 | 0 / 0 |
 | fp256 | 23,920 | 20,000 | 9,495 | 53,360 | 126,720 | 233,495 | 0 / 0 |
-| four | 95,680 | 80,000 | 37,980 | 213,440 | 509,005 | 936,105 | 0 / 0 |
+| four | 95,680 | 80,000 | 37,980 | 213,440 | 507,090 | 934,190 | 0 / 0 |
 
-The first four columns are the oracle's own phases and have the numbers
-they had on 2026-10-30 (23,920, 20,000, 9,495 and 53,360 a format): the
-pools and their draws are as they were.
+The first four columns are the oracle's own phases and have the case
+counts they had on 2026-10-30 (23,920, 20,000, 9,495 and 53,360 a format):
+the pools keep their sizes and their draws, and the fix of finding 1
+changed only the first eighteen entries of two of them at three formats.
 
-The extras alone, run apart, were 102,860, 166,070, 113,355 and 126,720
-cases in 10, 27, 45 and 179 seconds at fp32, fp64, fp128 and fp256
-(509,005 cases and 261 seconds in all). The same run earlier that hour, on
-a quieter desktop and before two small families were added, took 6, 20, 35
-and 151 seconds, 212 in all: the machine is shared, and the numbers move
-with it.
+The extras alone, run apart, were 102,215, 165,435, 112,720 and 126,720
+cases in 6, 18, 29 and 145 seconds at fp32, fp64, fp128 and fp256 (507,090
+cases and 198 seconds in all, the desktop quiet). Before the fix of the
+base pools they were 509,005 cases: the real specials the pools now hold
+are no longer added. Earlier runs of the same phase took 212 seconds in
+all at the quietest and 261 at the busiest: the machine is shared, and the
+numbers move with it.
 
 The stage's `mpfr-check 24 7` was 859,874 cases in 565 s on 2026-10-30,
 and the other phases are unchanged, so the whole run should be 859,874 +
-509,005 = **1,368,879 cases in about 826 s** (565 + 261), or 777 s on the
-quieter measure: 38 and 46 percent over 565, inside the brief's 50. That
-is INFERRED, not measured. The full run is the lead's to make.
+507,090 = **1,366,964 cases in about 763 s** (565 + 198), 35 percent over
+565, or about 826 s (46 percent) with the 261 seconds of the busiest
+earlier run: inside the brief's 50 percent on both. That is INFERRED, not
+measured. The full run is the lead's to make.
 
 **Controls**, run on the 2026-11-02 tree, both on copies outside the
 repository.
@@ -2094,11 +2109,12 @@ repository.
   smallest subnormal with flags 0x18: the four records ca43695d moved. The
   old pools hold none of the four operands (the fp32 pool has no -150).
 - A fault planted in a copy of `host/src/transcend.c` (`asin(-0)` returns
-  +0), against the pools as they were and then the extras: the trigonometric
-  phase's 20,000 cases per format find nothing at fp32, fp64 or fp128, and the
-  extras find it at each: 10 mismatches (asin and asinPi at -0, five
-  attributes each; family `t:io`). At fp256 the old pool holds the real -0
-  and finds the same 10.
+  +0). With the base pools as they were before the fix of finding 1, the
+  trigonometric phase's 20,000 cases per format found nothing at fp32, fp64
+  or fp128, and the extras found it at each: 10 mismatches (asin and asinPi
+  at -0, five attributes each; family `t:io`); at fp256 the pool held the
+  real -0 and found the same 10. With the fix the trigonometric phase alone
+  finds the same 10 at all four formats.
 
 **What the audit does not reach.**
 

@@ -3691,8 +3691,10 @@ static void check_transcend(int fj, uint8_t pool[][32], int pn,
  * table and VALIDATION.md the entry. This block is what it found.
  *
  * It ADDS. The three pools above are unchanged, down to the random
- * draws, so every case the oracle asked before it asks now; these are
- * the cases it asks besides, in a phase of their own that draws no
+ * draws and their sizes, but for the first eighteen entries of the
+ * trigonometric and third pools at fp32, fp64 and fp128 (see the loop in
+ * main), so every other case the oracle asked before it asks now; these
+ * are the cases it asks besides, in a phase of their own that draws no
  * random number. A candidate the function's pool already holds is
  * skipped, and so is a pair that the pool's strided pairing already
  * asks, so the counts are of what is new. Every entry belongs to a
@@ -3701,12 +3703,13 @@ static void check_transcend(int fj, uint8_t pool[][32], int pn,
  *
  * Eight things the pools lacked, in the order they matter:
  *
- *   * the specials of the FORMAT. build_trigpool and build_p3pool copy
- *     their first eighteen entries from the array main hands them,
- *     which is fp256's, so at fp32, fp64 and fp128 the twenty functions
- *     of those two pools were never asked +-0, +-infinity, a NaN, 1 or
- *     the extremes - and the exp and log pool lacked the negative
- *     extremes and the payload NaNs;
+ *   * the specials of the FORMAT. build_trigpool and build_p3pool were
+ *     handed fp256's eighteen for every format (main's loop hands them
+ *     the format's own now), so at fp32, fp64 and fp128 the twenty
+ *     functions of those two pools were never asked -0, an infinity, a
+ *     NaN of the usual pattern, the largest subnormal or the largest
+ *     normal - and the exp and log pool lacked the negative extremes
+ *     and the payload NaNs, which the extras still ask;
  *   * the pairs of specials of every binary function, which a strided
  *     pairing reaches only on its diagonal, and 9.2.1's rows live
  *     off it;
@@ -6381,6 +6384,7 @@ int main(int argc, char **argv)
     int randoms = argc > 1 ? atoi(argv[1]) : 24;
     rs = argc > 2 ? strtoull(argv[2], NULL, 0) | 1 : 0x5EEDF00Dull;
     static uint8_t pool[MAXPOOL][32];
+    static uint8_t base[MAXPOOL][32];    /* a format's own specials */
     static uint8_t tpool[TPOOL_MAX][32];
     static uint8_t gpool[TRIGPOOL_MAX][32];
     static uint8_t hpool[P3POOL_MAX][32];
@@ -6476,22 +6480,27 @@ int main(int argc, char **argv)
      * families that matter here - exact cases, thresholds, a base one
      * ulp from 1 - are not the families that matter for an FMA. */
     /* build_trigpool and build_p3pool take the first eighteen entries of
-     * their pools from the array they are handed, and what they are
-     * handed is `pool` as the clause-5 loop left it: fp256's eighteen
-     * specials, for every format. (At fp256 that is right. At the other
-     * three the "specials" are fp256 encodings read through a narrower
-     * format - mostly +0, one signaling-NaN pattern that is the smallest
-     * subnormal, a few all-ones patterns - and the real +-inf, qNaN,
-     * sNaN, -0, 1 and the rest are in neither pool; the audit of
-     * 2026-11-02 found it, and the extras phase below asks them.) The
-     * defect stays as it is, so that the default run covers what it
-     * always covered, and the eighteen are rebuilt here without a random
-     * draw so that a subset run (or the case dump), which skips the
-     * clause-5 loop, gets the same pools a full run does. */
-    build_pool(&FMTS[3], pool, 0);
+     * their pools from the array they are handed: the format's specials.
+     * Until 2026-11-02 what they were handed was `pool` as the clause-5
+     * loop had left it - fp256's eighteen, for every format - and tpool's
+     * count (208) where the array's own is eighteen. At fp256 that was
+     * right. At fp32, fp64 and fp128 the "specials" were fp256 encodings
+     * read through a narrower format - at fp32 +0 twelve times,
+     * 0x00000001 three times and 0xffffffff three times - and the twenty
+     * functions of those two pools never met -0, an infinity, the
+     * canonical quiet NaN or a signaling one, the largest subnormal or
+     * the largest normal (the trigonometric pool also lacked the
+     * smallest normal, the third 3 and -3). The audit of that day found
+     * it (issue 1's kind of defect: the wrong array handed to a check),
+     * and each format now builds its own eighteen, without a random draw
+     * - so every draw of the run is where it was and the pools keep
+     * their sizes - and hands them with their own count. A subset run,
+     * or the case dump, which skips the clause-5 loop, gets the same
+     * pools a full run does. `pool` is not read in this loop any more:
+     * the loops below each rebuild it before they use it. */
     for (fi = 0; fi < 4; fi++) {
         const fdesc *f = &FMTS[fi];
-        int pn, gn, hn;
+        int pn, gn, hn, bn;
         uint64_t before;
 
         if (!format_on(f) ||
@@ -6499,11 +6508,12 @@ int main(int argc, char **argv)
               phase_on("radian") || phase_on("table91") ||
               phase_on("extras")))
             continue;
+        bn = build_pool(f, base, 0);
         pn = build_tpool(f, tpool, randoms);
-        gn = build_trigpool(f, gpool, (const uint8_t (*)[32])pool,
-                            pn, randoms);
-        hn = build_p3pool(f, hpool, (const uint8_t (*)[32])pool,
-                          pn, randoms);
+        gn = build_trigpool(f, gpool, (const uint8_t (*)[32])base,
+                            bn, randoms);
+        hn = build_p3pool(f, hpool, (const uint8_t (*)[32])base,
+                          bn, randoms);
         before = cases;
         if (phase_on("transcend")) {
             check_transcend(fi, tpool, pn, gpool, gn, hpool, hn, 0,
