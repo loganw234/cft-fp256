@@ -26306,6 +26306,7 @@ docs/README.md is recounted.
 | the plant driver, 17 runs | as above | 11.5 min |
 
 - Again at the code of the tip (94362b1c, the commit before the one that adds this paragraph; 08:33 to 08:36, one process at a time, the desktop at 14% when it started): the nine files 794 passed in 65 s; test_cftc.py 110 passed in 61 s; leg M 20 ok, 0 FAIL in 4 s; the corpus check 329 checks, 0 failed, 0 skipped in 40 s with the tool and 257, 0, 19 skipped by name in 33 s without. The earlier runs of the same sets took 74 to 80 s, 108 s, 48 s and 39 s with the load unsampled, and I do not know why they were slower.
+- Without mpmath (`sys.modules['mpmath'] = None`, 08:41 to 08:44, the tree with the marker fix below): test_lang_trig.py 52 passed, 32 skipped by name, 0 failed; test_lang.py, test_lang_tangent.py, test_cert2.py and test_lang_time.py 547 passed, 29 skipped by name, 0 failed (99 s). The first no-mpmath run, at 08:41, failed 4 tests: test_cos_rounded_otherwise_differs_only_under_rdn_and_rup calls transcend.compute and lacked `needs_mpmath`; it has it now, and with mpmath the file is 84 passed (5 s).
 - A make recipe on this desktop gets a stripped environment: `make -C host cft-segrun` failed in gcc ("can't open C:\WINDOWS\cc....s"); the tools build with `OS=Windows_NT` and `TMPDIR`, `TEMP` and `TMP` given on the command line.
 
 **Known limits.**

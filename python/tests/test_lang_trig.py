@@ -824,6 +824,7 @@ def test_each_rule_rounds_as_the_table_says(fmtname):
             assert (n, bits, value) == (6, 0, 0), (fn, rnd)
 
 
+@needs_mpmath
 @pytest.mark.parametrize("fmtname", list(FORMATS))
 def test_cos_rounded_otherwise_differs_only_under_rdn_and_rup(fmtname):
     """cos's rule `(-sin(a)) * da` negates sin(a) exactly and rounds the
