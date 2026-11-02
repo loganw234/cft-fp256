@@ -832,21 +832,17 @@ def test_cos_rounded_otherwise_differs_only_under_rdn_and_rup(fmtname):
     Rounding to nearest (even or away) and toward zero are symmetric about
     zero, so the two are the same bits under rne, rtz and rmm, on every
     finite lane; under rdn and rup the product of the negated factor rounds
-    the other way, and they differ on nearly every finite lane. MEASURED on
-    200 random finite lanes a format (this test's own draw, seeded; my
-    scratch run of 2026-11-02, 09:34): under rdn on 199, 200, 198 and 200
-    lanes (fp32, fp64, fp128, fp256), under rup on 199, 199, 199 and 200,
-    and under rne, rtz and rmm on none. Verifier VM2L's own run, as the
-    lead's send-back quotes it (briefs/M2L-sendback-1.md), gave under rdn
-    200, 199, 200 and 200, under rup 200 at each format and none under the
-    rest. This test draws 40 lanes and asserts none differ under rne, rtz
-    and rmm and more than 5 under rdn and under rup. A plant that is
-    invisible under rne is not one this check would see, which is why the
-    rounding check covers all five. "Only under rdn and rup" is true of
-    finite results: at a NaN, sin(a) = the invalid NaN and the second form
-    is the first's with its sign bit set, under every attribute (measured
-    here at each format), so a NaN lane is red under rne too - the
-    specials test's, not the rounding check's."""
+    the other way, and they differ on nearly every finite lane. On this
+    test's own draw, 40 lanes a format from its seeded generator below,
+    they differ on 40 of 40 under rdn and on 40 of 40 under rup at every
+    format, and on none under rne, rtz and rmm (MEASURED). The assertion is
+    weaker: none under rne, rtz and rmm and more than 5 of 40 under rdn and
+    under rup. A plant that is invisible under rne is not one this check
+    would see, which is why the rounding check covers all five. "Only under
+    rdn and rup" is true of finite results: at a NaN, sin(a) = the invalid
+    NaN and the second form is the first's with its sign bit set, under
+    every attribute (measured here at each format), so a NaN lane is red
+    under rne too - the specials test's, not the rounding check's."""
     fmt = FORMATS[fmtname]
     rng = random.Random(f"m2 cos otherwise {fmtname}")
     pairs = [(TT._bits(fmt, _domain(rng)),
