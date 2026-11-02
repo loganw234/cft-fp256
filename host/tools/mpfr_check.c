@@ -105,6 +105,10 @@
  *
  * Usage:  mpfr-check [randoms-per-format] [seed]
  *         (directed specials always run; randoms are exponent-banded)
+ *         CFT_MPFR_PHASES and CFT_MPFR_FORMATS (environment, comma
+ *         lists) run a subset; CFT_MPFR_DUMP_CASES prints the
+ *         transcendental cases instead of checking them. Unset, the run
+ *         is the whole of it. See the block above build_tpool.
  */
 
 #include <stdint.h>
@@ -3137,6 +3141,71 @@ static uint32_t tfn_lib(const fdesc *f, int fn, cft_round rnd,
     return fl;
 }
 
+/* ---- subsets and the case dump (audit of 2026-11-02) --------------- *
+ *
+ * Three environment variables, none of which touches a default run:
+ *
+ *   CFT_MPFR_PHASES   a comma list of phase names - arith, clause5,
+ *                     transcend, trig, radian, table91, extras, reduce,
+ *                     convert, formatof - to run those and no others;
+ *   CFT_MPFR_FORMATS  a comma list of fp32, fp64, fp128, fp256;
+ *   CFT_MPFR_DUMP_CASES  any value: print every case the transcendental
+ *                     phases would ask (under the first attribute only -
+ *                     the other four ask the same operands), check
+ *                     nothing, and run no other phase.
+ *
+ * Unset, env_lists answers yes to everything and the run is the one it
+ * always was. A subset skips the phases before it, so the random
+ * operands it draws are not the ones a full run draws; the directed
+ * ones are, and are the whole point of a subset.
+ *
+ * The dump is how the pools are audited rather than read: tools of the
+ * audit compare it, case by case, with the operands the vector generator
+ * and the golden model's thresholds direct at each function. A dump line is
+ *
+ *   C <format> <function> <pass> <i> <j> <d> <a> <b> <n> [<family>]
+ *
+ * with the pool pass (x the exponential pool, t the trigonometric, h
+ * the third, e the extras below), the indices of the two operands in it
+ * (in the extras, i is the entry's place in its list and j is 0), d = 1
+ * when both are directed operands rather than random ones (the randoms
+ * of a dump are not a full run's), the operands in hex, and - for the
+ * three that read one - the integer; "-" where an operand is not read.
+ * The extras' lines end with the family the entry belongs to. */
+static int dump_cases;
+
+static int env_lists(const char *var, const char *name)
+{
+    const char *v = getenv(var);
+    size_t n = strlen(name);
+
+    if (!v || !*v)
+        return 1;
+    while (*v) {
+        const char *e = strchr(v, ',');
+        size_t len = e ? (size_t)(e - v) : strlen(v);
+        if (len == n && !strncmp(v, name, n))
+            return 1;
+        if (!e)
+            break;
+        v = e + 1;
+    }
+    return 0;
+}
+
+static int phase_on(const char *name)
+{
+    if (dump_cases)
+        return !strcmp(name, "transcend") || !strcmp(name, "trig") ||
+               !strcmp(name, "radian") || !strcmp(name, "table91") ||
+               !strcmp(name, "extras");
+    return env_lists("CFT_MPFR_PHASES", name);
+}
+
+static int format_on(const fdesc *f)
+{
+    return env_lists("CFT_MPFR_FORMATS", f->name);
+}
 
 /* Operands aimed at the transcendentals specifically, in their own
  * larger pool: the families that matter here - the exact cases, the
@@ -3154,6 +3223,12 @@ static uint32_t tfn_lib(const fdesc *f, int fn, cft_round rnd,
  * whose entries came out at 42 where 192 were asked for. */
 #define TPOOL_MAX 208
 #define TRIGPOOL_MAX 192
+#define P3POOL_MAX 224
+
+/* Which entries of each pool are random draws - the case dump marks the
+ * rest as directed. The builders set them; nothing else reads them. */
+static uint8_t isrand_x[TPOOL_MAX], isrand_t[TRIGPOOL_MAX],
+               isrand_h[P3POOL_MAX];
 
 static int build_tpool(const fdesc *f, uint8_t pool[][32], int randoms)
 {
@@ -3161,6 +3236,9 @@ static int build_tpool(const fdesc *f, uint8_t pool[][32], int randoms)
     long ks[12];
     int nk = 0, k;
 
+    memset(isrand_x, 0, sizeof isrand_x);
+    for (k = 18; k < n; k++)
+        isrand_x[k] = 1;                /* build_pool's own randoms */
     ks[nk++] = 1; ks[nk++] = 2; ks[nk++] = 3; ks[nk++] = 10;
     ks[nk++] = 17; ks[nk++] = f->p; ks[nk++] = f->emax;
     ks[nk++] = f->emax + 1; ks[nk++] = f->emin; ks[nk++] = -1;
@@ -3214,6 +3292,7 @@ static int build_tpool(const fdesc *f, uint8_t pool[][32], int randoms)
      * something the directed families did not think of */
     while (n < TPOOL_MAX) {
         rand_enc(f, pool[n]);
+        isrand_x[n] = 1;
         n++;
     }
     return n;
@@ -3302,8 +3381,10 @@ static int build_trigpool(const fdesc *f, uint8_t pool[][32],
         memcpy(pool[n], pool[n - 1], 32); enc_step(f, pool[n], 1); n++;
         memcpy(pool[n], pool[n - 2], 32); enc_step(f, pool[n], 0); n++;
     }
+    memset(isrand_t, 0, sizeof isrand_t);
     while (n < TRIGPOOL_MAX && randoms-- > 0) {
         rand_enc(f, pool[n]);
+        isrand_t[n] = 1;
         n++;
     }
     return n;
@@ -3348,8 +3429,6 @@ static int mpfr_to_enc(const fdesc *f, const mpfr_t v, uint8_t *b)
     mpz_clear(enc);
     return 1;
 }
-
-#define P3POOL_MAX 224
 
 /* The phase-3 pool: what the reduction against pi and the hyperbolics'
  * domain edges need, which neither pool above has. Nothing in it is a
@@ -3473,8 +3552,10 @@ static int build_p3pool(const fdesc *f, uint8_t pool[][32],
                 n++;
         }
     }
+    memset(isrand_h, 0, sizeof isrand_h);
     while (n < P3POOL_MAX && randoms-- > 0) {
         rand_enc(f, pool[n]);
+        isrand_h[n] = 1;
         n++;
     }
     return n;
@@ -3492,6 +3573,27 @@ static const long TFN_NS[] = {
     2147483647L, -2147483647L
 };
 #define TFN_NS_COUNT ((int)(sizeof TFN_NS / sizeof TFN_NS[0]))
+
+/* One line of the case dump (see the block above build_tpool). */
+static void dump_case(const fdesc *f, int fn, char pass,
+                      const uint8_t *isrand, int i, int j, int nargs,
+                      int hasn, const uint8_t *a, const uint8_t *b, long nn)
+{
+    char ha[70], hb[70];
+    int directed = !isrand[i] && (nargs == 2 ? !isrand[j] : 1);
+
+    hexdump(a, f->esz, ha);
+    if (nargs == 2)
+        hexdump(b, f->esz, hb);
+    else
+        strcpy(hb, "-");
+    printf("C %s %s %c %d %d %d %s %s ", f->name, TFN_NAME[fn], pass, i,
+           nargs == 2 ? j : 0, directed, ha, hb);
+    if (hasn)
+        printf("%ld\n", nn);
+    else
+        printf("-\n");
+}
 
 static void check_transcend(int fj, uint8_t pool[][32], int pn,
                             uint8_t tpool[][32], int tn,
@@ -3539,6 +3641,16 @@ static void check_transcend(int fj, uint8_t pool[][32], int pn,
                         char extra[48];
                         mpfr_t want;
 
+                        if (dump_cases) {
+                            if (mi == 0)
+                                dump_case(f, fn,
+                                          P == pool ? 'x' : P == hpool ? 'h'
+                                                                       : 't',
+                                          P == pool ? isrand_x
+                                          : P == hpool ? isrand_h : isrand_t,
+                                          i, j, nargs, hasn, a, b, nn);
+                            continue;
+                        }
                         mpfr_init2(want, f->p);
                         t_oracle(f, fn, mi, a, b, nn, want, &wf);
                         memset(d, 0, sizeof d);
@@ -3562,6 +3674,1707 @@ static void check_transcend(int fj, uint8_t pool[][32], int pn,
                    (unsigned long long)(cft_tr_escalations - esc_before),
                    (unsigned long long)cft_tr_max_prec);
     }
+}
+
+/* ---- the extras: what the audit of 2026-11-02 found missing -------- *
+ *
+ * Issue 1 found that the ten of table 9.1 had never been asked their own
+ * exact cases, because they ran on the wrong pool. The audit that
+ * followed asked the same question of all thirty-nine functions: for
+ * each, does the pool it runs on hold the operands its hard cases live
+ * in? It compared the pools (the dump above) with the operands
+ * python/cft_golden/vectors.py directs at each function, line by line
+ * of the generator; with the branches of python/cft_golden/transcend.py
+ * that a case reaches (sys.monitoring, first hit per line); with the
+ * thresholds written into those branches, each straddled; and with
+ * IEEE 754-2019 9.2's special rows. docs/TRANSCENDENTALS.md carries the
+ * table and VALIDATION.md the entry. This block is what it found.
+ *
+ * It ADDS. The three pools above are unchanged, down to the random
+ * draws, so every case the oracle asked before it asks now; these are
+ * the cases it asks besides, in a phase of their own that draws no
+ * random number. A candidate the function's pool already holds is
+ * skipped, and so is a pair that the pool's strided pairing already
+ * asks, so the counts are of what is new. Every entry belongs to a
+ * family, named where it is added, and the end of the run counts each
+ * family's members and cases per format.
+ *
+ * Eight things the pools lacked, in the order they matter:
+ *
+ *   * the specials of the FORMAT. build_trigpool and build_p3pool copy
+ *     their first eighteen entries from the array main hands them,
+ *     which is fp256's, so at fp32, fp64 and fp128 the twenty functions
+ *     of those two pools were never asked +-0, +-infinity, a NaN, 1 or
+ *     the extremes - and the exp and log pool lacked the negative
+ *     extremes and the payload NaNs;
+ *   * the pairs of specials of every binary function, which a strided
+ *     pairing reaches only on its diagonal, and 9.2.1's rows live
+ *     off it;
+ *   * the overflow and underflow edges of the exponentials, hyperbolics
+ *     and powers: n ln 2 and n log10 2 walked two ulps either way, the
+ *     integer edges of exp2 (its tie at emin - p included), and for
+ *     pow and its kin the exponent that takes a base to 2^emax;
+ *   * every threshold of the golden model's neighbour rules, straddled:
+ *     the last operand on each side and the first;
+ *   * the exact cases the pools never reached: hypot's Pythagorean
+ *     pairs (and the ones whose exact result overflows), pow's perfect
+ *     powers under a dyadic exponent, log10p1 at 10^k - 1, log10 and
+ *     log10p1 at the powers of ten past 10^25, rootn at its perfect
+ *     powers, and the powers of two and ten where log2p1 and log10p1
+ *     change rule;
+ *   * the integer exponents the model's exact tables end on: p - 1 to
+ *     p + 2, and the n at which M^n leaves p + 1 bits;
+ *   * the families the vector generator directs at a function and its
+ *     pool does not hold: integers, halves, quarters and eighths with
+ *     their neighbours, 2^k - 1, the top of the range, every power of
+ *     two at the narrow formats and a sampled sweep at the wide ones,
+ *     and the reduction's hardest operands for sin, cos and tan (the
+ *     representable numbers nearest a multiple of pi/2, found here from
+ *     MPFR's own pi);
+ *   * the pairs of the vector generator: pow's integer, dyadic,
+ *     near-1 and cancelling exponents, hypot's triples, atan2's axes
+ *     and diagonals and near-axis pairs, and the (operand, n) pairs of
+ *     pown, compound and rootn.
+ *
+ * What it does NOT add is listed in docs/TRANSCENDENTALS.md: an n beyond
+ * the host's long (MPFR's operand type), the arguments hardest to round
+ * for exp, log and pow (in no pool and in no vector), and the pairs that
+ * the strided pairing skips and no family names.
+ */
+
+#define XCAP 8192
+
+typedef struct {
+    uint8_t a[XCAP][32];
+    uint8_t b[XCAP][32];
+    long n[XCAP];
+    uint8_t fam[XCAP];
+    uint8_t ran[XCAP];
+    uint8_t fmask[XCAP];             /* which of pown, compound, rootn: 1, 2, 4 */
+    int cnt;
+} xlist;
+
+static xlist XL;
+static uint8_t xmask = 7;            /* the mask xadd gives the entries it adds */
+static const fdesc *xf;                  /* the format being built for */
+
+#define XFMAX 112
+static const char *xfam_name[XFMAX];
+static int xfam_n;
+static uint64_t xfam_cases[XFMAX][4], xfam_mem[XFMAX][4];
+static uint64_t xfam_intended[XFMAX][4], xfam_held[XFMAX][4];
+static int xcur_fj;                  /* the format being built, as an index */
+
+static int xfam(const char *name)
+{
+    int i;
+    for (i = 0; i < xfam_n; i++)
+        if (!strcmp(xfam_name[i], name))
+            return i;
+    if (xfam_n >= XFMAX) {
+        fprintf(stderr, "extras: too many families\n");
+        exit(3);
+    }
+    xfam_name[xfam_n] = name;
+    return xfam_n++;
+}
+
+/* Add a candidate once. a is read as a floating encoding, b likewise
+ * when given, n as the integer operand. */
+static void xadd(const char *fam, const uint8_t *a, const uint8_t *b,
+                 long n)
+{
+    int i;
+    for (i = 0; i < XL.cnt; i++)
+        if (XL.n[i] == n && !memcmp(XL.a[i], a, xf->esz) &&
+            (!b || !memcmp(XL.b[i], b, xf->esz)))
+            return;
+    if (XL.cnt >= XCAP) {
+        fprintf(stderr, "extras: list full\n");
+        exit(3);
+    }
+    memset(XL.a[XL.cnt], 0, 32);
+    memcpy(XL.a[XL.cnt], a, xf->esz);
+    memset(XL.b[XL.cnt], 0, 32);
+    if (b)
+        memcpy(XL.b[XL.cnt], b, xf->esz);
+    XL.n[XL.cnt] = n;
+    XL.fam[XL.cnt] = (uint8_t)xfam(fam);
+    XL.ran[XL.cnt] = 0;
+    XL.fmask[XL.cnt] = xmask;
+    xfam_intended[XL.fam[XL.cnt]][xcur_fj]++;
+    XL.cnt++;
+}
+
+/* (-1)^sg m 2^e2 - sg 2 for both signs - with nb encoding steps either
+ * side of it. A value the format cannot hold exactly is skipped. */
+static void xval(const char *fam, int sg, uint64_t m, long e2, int nb)
+{
+    uint8_t t[32], u[32];
+    int s, k, q;
+
+    for (s = 0; s < 2; s++) {
+        if (sg != 2 && sg != s)
+            continue;
+        if (!enc_from_val(xf, s, m, e2, t))
+            return;
+        xadd(fam, t, NULL, 0);
+        for (k = 1; k <= nb; k++) {
+            memcpy(u, t, 32);
+            for (q = 0; q < k; q++)
+                enc_step(xf, u, 1);
+            xadd(fam, u, NULL, 0);
+            memcpy(u, t, 32);
+            for (q = 0; q < k; q++)
+                enc_step(xf, u, 0);
+            xadd(fam, u, NULL, 0);
+        }
+    }
+}
+
+/* The same for a significand wider than 64 bits. */
+static int enc_from_mpz(const fdesc *f, int sg, const mpz_t m, long e2,
+                        uint8_t *b)
+{
+    mpfr_t v, r;
+    int ok = 0;
+    size_t bits = mpz_sizeinbase(m, 2);
+
+    mpfr_init2(v, (mpfr_prec_t)(bits > (size_t)f->p ? bits : (size_t)f->p));
+    mpfr_init2(r, f->p);
+    mpfr_set_z_2exp(v, m, e2, MPFR_RNDN);        /* v holds every bit */
+    if (sg)
+        mpfr_neg(v, v, MPFR_RNDN);
+    if (mpfr_set(r, v, MPFR_RNDN) == 0)          /* exactly p bits? */
+        ok = mpfr_to_enc(f, r, b);
+    mpfr_clear(v);
+    mpfr_clear(r);
+    return ok;
+}
+
+static void xvalz(const char *fam, int sg, const mpz_t m, long e2, int nb)
+{
+    uint8_t t[32], u[32];
+    int s, k, q;
+
+    for (s = 0; s < 2; s++) {
+        if (sg != 2 && sg != s)
+            continue;
+        if (!enc_from_mpz(xf, s, m, e2, t))
+            return;
+        xadd(fam, t, NULL, 0);
+        for (k = 1; k <= nb; k++) {
+            memcpy(u, t, 32);
+            for (q = 0; q < k; q++)
+                enc_step(xf, u, 1);
+            xadd(fam, u, NULL, 0);
+            memcpy(u, t, 32);
+            for (q = 0; q < k; q++)
+                enc_step(xf, u, 0);
+            xadd(fam, u, NULL, 0);
+        }
+    }
+}
+
+/* The representable numbers around n * c, c an mpfr constant (ln 2,
+ * log10 2): the value rounded to nearest, nb ulps either way, both signs. */
+static void xedge(const char *fam, const mpfr_t c, long n, int nb)
+{
+    mpfr_t t, v;
+    uint8_t b[32], u[32], w[32];
+    int s, k, q;
+
+    mpfr_init2(t, (mpfr_prec_t)xf->p + 64);
+    mpfr_init2(v, xf->p);
+    mpfr_mul_si(t, c, n, MPFR_RNDN);
+    mpfr_abs(t, t, MPFR_RNDN);
+    mpfr_set(v, t, MPFR_RNDN);
+    if (mpfr_to_enc(xf, v, b)) {
+        for (s = 0; s < 2; s++) {
+            memcpy(u, b, 32);
+            if (s)
+                enc_neg(xf, u);
+            xadd(fam, u, NULL, 0);
+            for (k = 1; k <= nb; k++) {
+                memcpy(w, u, 32);
+                for (q = 0; q < k; q++)
+                    enc_step(xf, w, 1);
+                xadd(fam, w, NULL, 0);
+                memcpy(w, u, 32);
+                for (q = 0; q < k; q++)
+                    enc_step(xf, w, 0);
+                xadd(fam, w, NULL, 0);
+            }
+        }
+    }
+    mpfr_clear(t);
+    mpfr_clear(v);
+}
+
+/* enc +- d, for a count too wide for a long (the near-1 bases). */
+static void enc_addz(const fdesc *f, uint8_t *o, const mpz_t d, int sub)
+{
+    mpz_t v;
+
+    mpz_init(v);
+    mpz_import(v, f->esz, -1, 1, 0, 0, o);
+    if (sub)
+        mpz_sub(v, v, d);
+    else
+        mpz_add(v, v, d);
+    memset(o, 0, 32);
+    mpz_export(o, NULL, -1, 1, 0, 0, v);
+    mpz_clear(v);
+}
+
+static void enc_add_si(const fdesc *f, uint8_t *o, long d)
+{
+    mpz_t z;
+
+    mpz_init_set_ui(z, (unsigned long)(d < 0 ? -d : d));
+    enc_addz(f, o, z, d < 0);
+    mpz_clear(z);
+}
+
+/* The 754 specials and extremes of THIS format, both signs, and the
+ * encodings interesting_operands() of the vector generator lists. */
+static void x_io(const char *fam)
+{
+    static uint8_t sp[MAXPOOL][32];
+    uint8_t t[32];
+    int s;
+
+    build_pool(xf, sp, 0);       /* 0: +0  2: +inf  4: qNaN  5: sNaN
+                                  * 6: minsub  7: maxsub  8: minnormal
+                                  * 9: maxnormal  10: 1  11: 1-ulp
+                                  * 12: 1+ulp  13: 2  14: 3 */
+    for (s = 0; s < 2; s++) {
+        int idx[] = { 0, 6, 7, 8, 10, 11, 12, 13, 14, 9, 2 };
+        size_t i;
+        for (i = 0; i < sizeof idx / sizeof idx[0]; i++) {
+            memcpy(t, sp[idx[i]], 32);
+            if (s)
+                enc_neg(xf, t);
+            xadd(fam, t, NULL, 0);
+        }
+        memcpy(t, sp[8], 32);                    /* minnormal + 1 ulp */
+        if (s) enc_neg(xf, t);
+        enc_step(xf, t, 1);
+        xadd(fam, t, NULL, 0);
+        memcpy(t, sp[13], 32);                   /* 2 - ulp: 1.11..1 */
+        if (s) enc_neg(xf, t);
+        enc_step(xf, t, 0);
+        xadd(fam, t, NULL, 0);
+        memcpy(t, sp[9], 32);                    /* maxnormal - 1 ulp */
+        if (s) enc_neg(xf, t);
+        enc_step(xf, t, 0);
+        xadd(fam, t, NULL, 0);
+    }
+    xadd(fam, sp[4], NULL, 0);                   /* qNaN, sNaN */
+    xadd(fam, sp[5], NULL, 0);
+    memcpy(t, sp[4], 32);                        /* qNaN with a payload */
+    t[0] |= 5;
+    xadd(fam, t, NULL, 0);
+    memcpy(t, sp[4], 32);                        /* the other sign */
+    enc_neg(xf, t);
+    xadd(fam, t, NULL, 0);
+    memcpy(t, sp[5], 32);                        /* sNaN, other sign */
+    enc_neg(xf, t);
+    xadd(fam, t, NULL, 0);
+}
+
+/* The golden model's neighbour thresholds, each straddled: the largest
+ * operand on the rule's side, the smallest off it, and one more. The
+ * forms in transcend.py are ex <= -(p+c), 2ex + p + c <= 0 and
+ * ex >= p + 1 (vexp is floor(log2 |x|)), so each is a binade boundary. */
+static void x_tiny_edges(const char *fam)
+{
+    long p = xf->p, c;
+
+    for (c = 2; c <= 6; c++) {
+        xval(fam, 2, 1, -(p + c) + 1, 1);                /* ex <= -(p+c) */
+        xval(fam, 2, 1, -((p + c + 1) / 2) + 1, 1);      /* 2ex+p+c <= 0 */
+    }
+    xval(fam, 2, 1, p + 1, 1);                           /* ex >= p + 1 */
+}
+
+/* (1, -k) and (3, -k-1) for each k, both signs: the neighbour rules'
+ * operands, one on the first power and one between two. */
+static void x_tiny(const char *fam, const long *ks, int nk)
+{
+    int i;
+
+    for (i = 0; i < nk; i++) {
+        xval(fam, 2, 1, -ks[i], 0);
+        xval(fam, 2, 3, -ks[i] - 1, 0);
+    }
+}
+
+/* ---- the unary classes --------------------------------------------- */
+
+/* exp, expm1, exp2, log, log1p, log2, log10 */
+static void gen_x(void)
+{
+    const long p = xf->p, E = xf->emax, M = xf->emin, W = xf->man_w;
+    long ints[48], k, tk[6];
+    int ni = 0, i;
+    mpfr_t ln2;
+    mpz_t five;
+
+    x_io("x:io");
+    xval("x:units", 2, 1, 0, 1);
+    for (k = 1; k <= 24; k++)
+        ints[ni++] = k;
+    ints[ni++] = p; ints[ni++] = 2 * p; ints[ni++] = E - 1; ints[ni++] = E;
+    ints[ni++] = E + 1; ints[ni++] = -M; ints[ni++] = -(M - 1);
+    ints[ni++] = W - M; ints[ni++] = W - M + 1;
+    for (i = 0; i < ni; i++)
+        xval("x:ints", 2, (uint64_t)ints[i], 0, 0);
+    /* exp2's integer edges, with the operand's own neighbours: the
+     * overflow (n > emax), the tie at emin - man_w - 1 and the quarter
+     * below it, and the subnormal and normal edges */
+    {
+        long ed[] = { E, E + 1, E + 2, -M - 1, -M, -M + 1, W - M - 1,
+                      W - M, W - M + 1, W - M + 2, W - M + 3 };
+        for (i = 0; i < (int)(sizeof ed / sizeof ed[0]); i++)
+            xval("x:int-edge", 2, (uint64_t)ed[i], 0, 1);
+    }
+    {
+        long pw[] = { -3, -1, 1, 2, 10, E, M, M - W + 1 };
+        for (i = 0; i < (int)(sizeof pw / sizeof pw[0]); i++)
+            xval("x:pow2", 0, 1, pw[i], 1);
+    }
+    {
+        /* log2's exact cases at the subnormal powers of two, where the
+         * exponent is read off the significand rather than the field */
+        long ps[] = { M - W, M - W + 2, M - W / 2, M - 2, M - 1, M + 1 };
+        for (i = 0; i < (int)(sizeof ps / sizeof ps[0]); i++)
+            xval("x:pow2-sub", 0, 1, ps[i], 1);
+    }
+    mpz_init_set_ui(five, 1);
+    for (k = 0; mpz_sizeinbase(five, 2) <= (size_t)p; k++) {
+        xvalz("x:pow10", 0, five, k, 1);
+        mpz_mul_ui(five, five, 5);
+    }
+    mpz_clear(five);
+    mpfr_init2(ln2, (mpfr_prec_t)p + 64);
+    mpfr_const_log2(ln2, MPFR_RNDN);
+    {
+        long ns[] = { E, E + 1, E + 2, M, M - W, M - W - 1, M - W - 2,
+                      -(p + 2), -(p + 3), p + 1 };
+        for (i = 0; i < (int)(sizeof ns / sizeof ns[0]); i++)
+            xedge("x:ln2-edge", ln2, ns[i], 2);
+    }
+    mpfr_clear(ln2);
+    tk[0] = p + 2; tk[1] = p + 3; tk[2] = p + 4; tk[3] = p + 5;
+    tk[4] = p + 10; tk[5] = 2 * p;
+    x_tiny("x:tiny", tk, 6);
+    x_tiny_edges("x:tiny-edge");
+}
+
+/* sinPi, cosPi, tanPi, asin, acos, atan and the three Pi-inverses */
+static void gen_trig(void)
+{
+    const long p = xf->p, E = xf->emax;
+    long k, tk[9];
+    int i;
+    static const long HALVES[] = { 1, 3, 5, 7, 9, 17, 33 };
+    static const long QUARTS[] = { 1, 3, 5, 7, 9, 11, 13 };
+    static const long INTS[]   = { 1, 2, 3, 4, 5, 8, 17 };
+    static const long EIGHTHS[] = { 1, 3, 5, 7, 11, 13 };
+
+    x_io("t:io");
+    xval("t:units", 2, 1, 0, 2);
+    for (i = 0; i < 7; i++) xval("t:halves", 2, (uint64_t)HALVES[i], -1, 1);
+    for (i = 0; i < 7; i++) xval("t:quarters", 2, (uint64_t)QUARTS[i], -2, 1);
+    for (i = 0; i < 7; i++) xval("t:ints", 2, (uint64_t)INTS[i], 0, 1);
+    for (i = 0; i < 6; i++) xval("t:eighths", 2, (uint64_t)EIGHTHS[i], -3, 1);
+    {
+        long tops[] = { p - 1, p, p + 1, 2 * p, E - 1, E };
+        for (i = 0; i < 6; i++)
+            xval("t:top", 2, 1, tops[i], 1);
+    }
+    tk[0] = p / 2; tk[1] = p / 2 + 1; tk[2] = p / 2 + 2; tk[3] = p;
+    tk[4] = p + 1; tk[5] = p + 2; tk[6] = p + 3; tk[7] = 2 * p;
+    tk[8] = 4 * p;
+    x_tiny("t:tiny", tk, 9);
+    x_tiny_edges("t:tiny-edge");
+    /* sinPi and cosPi beside a half-integer or an integer: the
+     * reduced distance s from it is what the rule 2 vexp(s) + p + 6 <= 0
+     * reads, so the operands h +- 2^-j around j = (p + 6) / 2 */
+    {
+        long j0 = (p + 6 + 1) / 2;
+        static const long HS[] = { 1, 2, 3, 4, 5, 6 };      /* h = HS / 2 */
+        for (i = 0; i < 6; i++)
+            for (k = j0 - 1; k <= j0 + 1; k++) {
+                uint8_t h[32], s2[32], t[32];
+                int sg;
+                if (!enc_from_val(xf, 0, (uint64_t)HS[i], -1, h) ||
+                    !enc_from_val(xf, 0, 1, -k, s2))
+                    continue;
+                for (sg = 0; sg < 2; sg++) {
+                    mpfr_t a, b2;
+                    mpfr_init2(a, xf->p + 4);
+                    mpfr_init2(b2, xf->p + 4);
+                    enc_to_mpfr(xf, h, a);
+                    enc_to_mpfr(xf, s2, b2);
+                    if (sg)
+                        mpfr_sub(a, a, b2, MPFR_RNDN);
+                    else
+                        mpfr_add(a, a, b2, MPFR_RNDN);
+                    {
+                        mpfr_t r;
+                        mpfr_init2(r, xf->p);
+                        if (mpfr_set(r, a, MPFR_RNDN) == 0 &&
+                            mpfr_to_enc(xf, r, t)) {
+                            xadd("t:beside-half", t, NULL, 0);
+                            enc_neg(xf, t);
+                            xadd("t:beside-half", t, NULL, 0);
+                        }
+                        mpfr_clear(r);
+                    }
+                    mpfr_clear(a);
+                    mpfr_clear(b2);
+                }
+            }
+    }
+}
+
+/* The reduction's worst cases, from MPFR's own pi.
+ *
+ * In the binade [2^v, 2^(v+1)) the arguments x = m 2^(v-p+1) lie at
+ * distances |x - n pi/2| = pi/2 |m a - n| from the multiples of pi/2,
+ * with a = 2^(v-p+2) / pi, and the hardest is the m in [2^(p-1), 2^p)
+ * that minimises the distance of m a to the nearest integer: the one
+ * whose reduced argument has the most leading zeros, which is what
+ * widens the library's window and what an independent reduction has to
+ * get right. The vector generator takes them from host/tools/
+ * pi_worstcase.py, which reads the library's own table of 2/pi; these
+ * are found from MPFR's pi, by the continued fraction of frac(a): the
+ * best m in the window is the multiple of a convergent denominator or an
+ * intermediate fraction between two, and each candidate is judged by an
+ * exact integer residual. Measured against pi_worstcase.py's descent
+ * over every binade of fp32 (128) and fp64 (1024) and the sampled ones
+ * of fp128 and fp256 (8 and 8), on 2026-11-02, the two name the same m
+ * every time. Nothing here depends on it being so: a candidate that was
+ * not the worst would still be an argument near a multiple of pi/2, and
+ * MPFR judges it like any other. */
+static void worst_in_binade(const fdesc *f, long v, mpz_t m_out,
+                            long *lost_out)
+{
+    const long p = f->p, Fb = 2 * p + 128;
+    mpfr_prec_t P = (mpfr_prec_t)((v - p + 2 > 0 ? v - p + 2 : 0) +
+                                  2 * p + 192);
+    mpfr_t pi, al;
+    mpz_t num, den, r0, r1, q0, qm1, q, a, n0, n1, m, s, tmp, best_d, best_m;
+    int have = 0, k;
+
+    mpfr_init2(pi, P);
+    mpfr_init2(al, P);
+    mpz_init(num); mpz_init(den); mpz_init(r0); mpz_init(r1);
+    mpz_init(q0); mpz_init(qm1); mpz_init(q); mpz_init(a); mpz_init(n0);
+    mpz_init(n1); mpz_init(m); mpz_init(s); mpz_init(tmp);
+    mpz_init(best_d); mpz_init(best_m);
+
+    mpfr_const_pi(pi, MPFR_RNDN);
+    mpfr_ui_div(al, 1, pi, MPFR_RNDN);
+    mpfr_mul_2si(al, al, v - p + 2, MPFR_RNDN);        /* 2^(v-p+2) / pi */
+    mpfr_frac(al, al, MPFR_RNDN);
+    mpfr_mul_2ui(al, al, (unsigned long)Fb, MPFR_RNDN);
+    mpfr_get_z(num, al, MPFR_RNDZ);                    /* frac * 2^Fb */
+    mpz_set_ui(den, 1);
+    mpz_mul_2exp(den, den, (mp_bitcnt_t)Fb);
+    mpz_set_ui(n0, 1);
+    mpz_mul_2exp(n0, n0, (mp_bitcnt_t)(p - 1));
+    mpz_mul_2exp(n1, n0, 1);                           /* 2^p */
+    mpz_set(r0, den);
+    mpz_set(r1, num);
+    mpz_set_ui(qm1, 0);
+    mpz_set_ui(q0, 1);
+
+    while (mpz_sgn(r1)) {
+        mpz_t cand[6];
+        mpz_fdiv_q(a, r0, r1);
+        for (k = 0; k < 6; k++)
+            mpz_init(cand[k]);
+        /* the multiple of the last convergent just inside the window */
+        mpz_cdiv_q(tmp, n0, q0);
+        mpz_mul(cand[0], tmp, q0);
+        /* the intermediate fractions qm1 + s q0, s in 1..a: the first
+         * and the last inside the window, and one more beside each */
+        mpz_sub(tmp, n0, qm1);
+        mpz_cdiv_q(s, tmp, q0);
+        if (mpz_cmp_ui(s, 1) < 0)
+            mpz_set_ui(s, 1);
+        mpz_mul(cand[1], s, q0); mpz_add(cand[1], cand[1], qm1);
+        mpz_add_ui(tmp, s, 1);
+        mpz_mul(cand[2], tmp, q0); mpz_add(cand[2], cand[2], qm1);
+        mpz_sub_ui(tmp, n1, 1);
+        mpz_sub(tmp, tmp, qm1);
+        mpz_fdiv_q(s, tmp, q0);
+        if (mpz_cmp(s, a) > 0)
+            mpz_set(s, a);
+        mpz_mul(cand[3], s, q0); mpz_add(cand[3], cand[3], qm1);
+        mpz_sub_ui(tmp, s, 1);
+        mpz_mul(cand[4], tmp, q0); mpz_add(cand[4], cand[4], qm1);
+        mpz_set_ui(cand[5], 0);
+        for (k = 0; k < 5; k++) {
+            if (mpz_cmp(cand[k], n0) < 0 || mpz_cmp(cand[k], n1) >= 0)
+                continue;
+            mpz_mul(tmp, cand[k], num);
+            mpz_fdiv_r(tmp, tmp, den);                 /* m a mod 1 */
+            mpz_sub(s, den, tmp);
+            if (mpz_cmp(s, tmp) < 0)
+                mpz_set(tmp, s);                       /* the distance */
+            if (!have || mpz_cmp(tmp, best_d) < 0) {
+                mpz_set(best_d, tmp);
+                mpz_set(best_m, cand[k]);
+                have = 1;
+            }
+        }
+        for (k = 0; k < 6; k++)
+            mpz_clear(cand[k]);
+        mpz_mul(q, a, q0);
+        mpz_add(q, q, qm1);
+        mpz_mul(tmp, a, r1);
+        mpz_sub(tmp, r0, tmp);
+        mpz_set(r0, r1);
+        mpz_set(r1, tmp);
+        mpz_set(qm1, q0);
+        mpz_set(q0, q);
+        if (mpz_cmp(qm1, n1) >= 0)
+            break;
+    }
+    mpz_set(m_out, best_m);
+    *lost_out = have ? Fb - (long)mpz_sizeinbase(best_d, 2) : 0;
+    mpfr_clear(pi); mpfr_clear(al);
+    mpz_clear(num); mpz_clear(den); mpz_clear(r0); mpz_clear(r1);
+    mpz_clear(q0); mpz_clear(qm1); mpz_clear(q); mpz_clear(a);
+    mpz_clear(n0); mpz_clear(n1); mpz_clear(m); mpz_clear(s);
+    mpz_clear(tmp); mpz_clear(best_d); mpz_clear(best_m);
+}
+
+/* The deepest few of a sweep of binades with |x| >= 1, as the vector
+ * generator takes them (stride and count by format), each with a grid
+ * neighbour either side and both signs. */
+static void gen_rad_worst(void)
+{
+    static const long STRIDE[4] = { 8, 64, 2048, 32768 };
+    static const int TOP[4] = { 4, 4, 3, 3 };
+    const int fi = (int)(xf - FMTS);
+    const long p = xf->p, E = xf->emax;
+    long vs[24], lost[24], v;
+    mpz_t ms[24], t;
+    int nr = 0, i, j, dm;
+
+    mpz_init(t);
+    for (v = 0; v <= E && nr < 24; v += STRIDE[fi]) {
+        mpz_init(ms[nr]);
+        worst_in_binade(xf, v, ms[nr], &lost[nr]);
+        vs[nr] = v;
+        nr++;
+    }
+    for (i = 0; i < nr; i++)                   /* deepest first, then v */
+        for (j = i + 1; j < nr; j++)
+            if (lost[j] > lost[i] || (lost[j] == lost[i] && vs[j] > vs[i])) {
+                long tl = lost[i], tv = vs[i];
+                lost[i] = lost[j]; vs[i] = vs[j];
+                lost[j] = tl; vs[j] = tv;
+                mpz_swap(ms[i], ms[j]);
+            }
+    for (i = 0; i < TOP[fi] && i < nr; i++)
+        for (dm = -1; dm <= 1; dm++) {
+            if (dm < 0)
+                mpz_sub_ui(t, ms[i], 1);
+            else
+                mpz_add_ui(t, ms[i], (unsigned long)dm);
+            if (mpz_sizeinbase(t, 2) == (size_t)p)
+                xvalz("r:worst", 2, t, vs[i] - p + 1, 0);
+        }
+    for (i = 0; i < nr; i++)
+        mpz_clear(ms[i]);
+    mpz_clear(t);
+}
+
+/* sin, cos, tan of a radian argument */
+static void gen_rad(void)
+{
+    const long p = xf->p, E = xf->emax, M = xf->emin, W = xf->man_w;
+    long k, tk[7], step = xf->esz <= 8 ? 1 : (E + 1) / 48;
+    int i;
+
+    if (step < 1)
+        step = 1;
+    x_io("r:io");
+    for (k = M - W; k <= E; k += step)
+        xval("r:pow2-sweep", 2, 1, k, 0);
+    {
+        long pw[] = { E, E - 1, 0, 1, 2, p, 2 * p, M, M - W };
+        for (i = 0; i < 9; i++)
+            xval("r:pow2-near", 2, 1, pw[i], 1);
+    }
+    tk[0] = p / 2 - 1; tk[1] = p / 2; tk[2] = p / 2 + 1; tk[3] = p / 2 + 2;
+    tk[4] = p; tk[5] = p + 2; tk[6] = 2 * p;
+    x_tiny("r:tiny", tk, 7);
+    x_tiny_edges("r:tiny-edge");
+    gen_rad_worst();
+}
+
+/* sinh, cosh, tanh, asinh, acosh, atanh */
+static void gen_hyp(void)
+{
+    const long p = xf->p, E = xf->emax, M = xf->emin, W = xf->man_w;
+    long tk[8], bl = 0, vv = p + 2, k;
+    int i;
+    mpfr_t ln2;
+    static const long K0[] = { 1, 2, 3, 4, 5, 8, 17, 100 };
+    static const long K1[] = { 1, 3, 5, 7, 9 };
+    static const long K2[] = { 1, 3, 5, 7 };
+
+    x_io("h:io");
+    xval("h:units", 2, 1, 0, 1);
+    for (i = 0; i < 8; i++) xval("h:small", 2, (uint64_t)K0[i], 0, 1);
+    for (i = 0; i < 5; i++) xval("h:small", 2, (uint64_t)K1[i], -1, 1);
+    for (i = 0; i < 4; i++) xval("h:small", 2, (uint64_t)K2[i], -2, 1);
+    mpfr_init2(ln2, (mpfr_prec_t)p + 64);
+    mpfr_const_log2(ln2, MPFR_RNDN);
+    {
+        long ns[] = { E, E + 1, E + 2, E + 3, M, M - W };
+        for (i = 0; i < 6; i++)
+            xedge("h:ln2-edge", ln2, ns[i], 2);
+    }
+    mpfr_clear(ln2);
+    while (vv) { bl++; vv >>= 1; }
+    for (k = bl - 1; k <= bl + 1; k++)
+        xval("h:tanh-edge", 2, 1, k, 1);
+    tk[0] = p / 2 - 1; tk[1] = p / 2; tk[2] = p / 2 + 1; tk[3] = p / 2 + 2;
+    tk[4] = p; tk[5] = p + 2; tk[6] = 2 * p; tk[7] = 4 * p;
+    x_tiny("h:tiny", tk, 8);
+    x_tiny_edges("h:tiny-edge");
+}
+
+/* exp2m1, exp10, exp10m1, log2p1, log10p1, rSqrt */
+static void gen_t91(void)
+{
+    const long p = xf->p, E = xf->emax, M = xf->emin, W = xf->man_w;
+    long k, tk[5], ks[48];
+    int i, nk = 0;
+    mpz_t five, ten, t;
+    mpfr_t l10;
+
+    x_io("m:io");
+    xval("m:units", 2, 1, 0, 1);
+    for (k = 1; k <= 11; k++)
+        ks[nk++] = k;
+    ks[nk++] = p - 1; ks[nk++] = p; ks[nk++] = p + 1; ks[nk++] = p + 2;
+    ks[nk++] = p + 3; ks[nk++] = 2 * p; ks[nk++] = E - 1; ks[nk++] = E;
+    ks[nk++] = E + 1; ks[nk++] = -M; ks[nk++] = W - M;
+    for (i = 0; i < nk; i++)
+        xval("m:ints", 2, (uint64_t)ks[i], 0, 1);
+    {
+        long ed[] = { E + 2, -M - 1, -M + 1, W - M - 1, W - M + 1 };
+        for (i = 0; i < 5; i++)
+            xval("m:int-edge", 2, (uint64_t)ed[i], 0, 1);
+    }
+    mpz_init_set_ui(five, 1);
+    mpz_init(ten);
+    mpz_init(t);
+    mpz_set_ui(ten, 1);
+    for (k = 0; mpz_sizeinbase(five, 2) <= (size_t)p; k++) {
+        xvalz("m:pow10", 0, five, k, 1);               /* 5^k 2^k = 10^k */
+        if (k) {
+            mpz_sub_ui(t, ten, 1);                     /* 10^k - 1 */
+            xvalz("m:10^k-1", 0, t, 0, 1);
+        }
+        mpz_mul_ui(five, five, 5);
+        mpz_mul_ui(ten, ten, 10);
+    }
+    mpz_clear(five);
+    mpz_clear(ten);
+    mpz_clear(t);
+    for (k = 1; k <= (p < 40 ? p : 40); k++) {
+        xval("m:2^k-1", 2, (((uint64_t)1) << k) - 1, 0, 1);
+        xval("m:2^k-1", 2, (((uint64_t)1) << k) - 1, -k, 1);
+    }
+    {
+        long pw[40];
+        int np = 0;
+        for (k = -6; k <= 6; k++)
+            pw[np++] = k;
+        pw[np++] = p; pw[np++] = -p; pw[np++] = E; pw[np++] = E - 1;
+        pw[np++] = M; pw[np++] = M - W; pw[np++] = M - W + 1;
+        for (i = 0; i < np; i++)
+            xval("m:pow2", 2, 1, pw[i], 1);
+    }
+    tk[0] = p + 2; tk[1] = p + 3; tk[2] = p + 4; tk[3] = p + 5;
+    tk[4] = 2 * p;
+    x_tiny("m:tiny", tk, 5);
+    x_tiny_edges("m:tiny-edge");
+    /* log2p1 changes rule at x = 2^k once k >= p - floor(log2 k) + 1 */
+    {
+        long g, kmin = 0, t2;
+        for (k = 1; k <= 4 * p && !kmin; k++) {
+            g = 0;
+            for (t2 = k; t2 > 1; t2 >>= 1)
+                g++;
+            if (k >= p - g + 1)
+                kmin = k;
+        }
+        for (k = kmin - 2; k <= kmin + 2; k++)
+            if (k >= 1)
+                xval("m:log2p1-edge", 0, 1, k, 1);
+    }
+    /* exp10's and exp10m1's overflow, underflow and beside -1 edges: the
+     * x with x log2(10) = n, that is x = n log10(2) */
+    mpfr_init2(l10, (mpfr_prec_t)p + 64);
+    {
+        mpfr_t two;
+        mpfr_init2(two, 8);
+        mpfr_set_ui(two, 2, MPFR_RNDN);
+        mpfr_log10(l10, two, MPFR_RNDN);
+        mpfr_clear(two);
+    }
+    {
+        long ns[] = { E, E + 1, E + 2, M, M - W, M - W - 1, M - W - 2,
+                      -(p + 2), -(p + 3) };
+        for (i = 0; i < 9; i++)
+            xedge("m:log10-edge", l10, ns[i], 2);
+    }
+    mpfr_clear(l10);
+}
+
+/* ---- the pair and integer-exponent classes ------------------------- */
+
+static int xz(int sg, uint64_t m, long e2, uint8_t *o)
+{
+    return enc_from_val(xf, sg, m, e2, o);
+}
+
+static int xbits(uint64_t m)
+{
+    int b = 0;
+    while (m) { b++; m >>= 1; }
+    return b;
+}
+
+/* The pow pairs of vectors.py, and for powr the table it adds. */
+static void gen_pow(int powr)
+{
+    const long p = xf->p, E = xf->emax, W = xf->man_w;
+    static uint8_t SP[MAXPOOL][32];
+    uint8_t S[20][32], one[32], a[32], b[32], c[32], d[32];
+    int ns = 0, i, j, k, sg;
+    mpz_t dz;
+
+    build_pool(xf, SP, 0);
+    memcpy(one, SP[10], 32);
+#define SPUSH(src) do { memcpy(S[ns], (src), 32); ns++; } while (0)
+#define SVAL(sgn, m, e2) do { if (xz((sgn), (m), (e2), c)) SPUSH(c); } while (0)
+    SPUSH(SP[0]); SPUSH(SP[1]); SPUSH(SP[2]); SPUSH(SP[3]); SPUSH(SP[4]);
+    SPUSH(SP[5]); SPUSH(SP[10]); SPUSH(SP[16]);
+    SVAL(0, 3, -1); SVAL(1, 3, -1); SVAL(0, 1, 1); SVAL(1, 1, 1);
+    SVAL(0, 3, 0); SVAL(1, 3, 0);
+    SPUSH(SP[9]); SPUSH(SP[6]);
+    for (i = 0; i < ns; i++)
+        for (j = 0; j < ns; j++)
+            xadd(powr ? "powr:specials" : "pow:specials", S[i], S[j], 0);
+    if (powr) {
+        /* powr's own table: negative bases against every kind of
+         * exponent, both zeros against both zeros, an infinite base
+         * against a zero exponent, 1 against an infinity, a NaN in
+         * either operand */
+        ns = 0;
+        SPUSH(SP[0]); SPUSH(SP[1]); SPUSH(SP[2]); SPUSH(SP[3]);
+        SPUSH(SP[4]); SPUSH(SP[5]); SPUSH(SP[10]); SPUSH(SP[16]);
+        SVAL(0, 1, 1); SVAL(1, 1, 1); SVAL(0, 3, -1);
+        SPUSH(SP[9]);
+        memcpy(c, SP[9], 32); enc_neg(xf, c); SPUSH(c);
+        SPUSH(SP[6]);
+        for (i = 0; i < ns; i++)
+            for (j = 0; j < ns; j++)
+                xadd("powr:specials", S[i], S[j], 0);
+    }
+    {
+        static const unsigned BASES[] = { 2, 3, 5, 7, 10, 4097 };
+        long nl[] = { 1, 2, 3, 4, 5, 8, 17, p - 1, p, p + 1, p + 2, -1, -2,
+                      -3, 1000 };
+        for (i = 0; i < 6; i++) {
+            if (xbits(BASES[i]) > p)
+                continue;
+            for (k = 0; k < 15; k++) {
+                if (!xz(nl[k] < 0, (uint64_t)(nl[k] < 0 ? -nl[k] : nl[k]),
+                        0, b))
+                    continue;
+                for (sg = 0; sg < 2; sg++)
+                    if (xz(sg, BASES[i], 0, a))
+                        xadd(powr ? "powr:int-exp" : "pow:int-exp", a, b, 0);
+            }
+        }
+    }
+    {
+        static const unsigned MS[] = { 4, 9, 16, 25, 81, 256, 625, 1024 };
+        for (i = 0; i < 8; i++) {
+            uint8_t mb[32], mp1[32];
+            if (xbits(MS[i]) > p || !xz(0, MS[i], 0, mb))
+                continue;
+            memcpy(mp1, mb, 32);
+            enc_step(xf, mp1, 1);
+            for (k = 1; k <= 3; k++) {
+                long ey = -k;
+                if (xz(0, 1, ey, b)) {
+                    xadd("pow:dyadic-exp", mb, b, 0);
+                    xadd("pow:dyadic-exp", mp1, b, 0);
+                }
+                if (xz(0, 3, ey - 1, b))
+                    xadd("pow:dyadic-exp", mb, b, 0);
+                if (xz(1, 1, ey, b))
+                    xadd("pow:dyadic-exp", mb, b, 0);
+            }
+        }
+    }
+    {
+        /* a perfect square, or fourth power, to a dyadic exponent Y / 2^k
+         * with Y odd: the exact root is found, and its Y-th power is too
+         * wide to be a boundary either because Y > p + 1 or because the
+         * power itself needs more than p + 1 bits (_pow_dyadic, the two
+         * returns of None after the root). Y runs across both edges. */
+        static const unsigned PW[] = { 9, 25, 49, 81, 625 };
+        for (i = 0; i < 5; i++) {
+            uint8_t mb[32];
+            int kk;
+            if (xbits(PW[i]) > p || !xz(0, PW[i], 0, mb))
+                continue;
+            for (kk = 1; kk <= 2; kk++) {
+                unsigned long r = PW[i];
+                long Ystar = 0, Y, Yl[12];
+                int ny = 0, q2;
+                mpz_t v;
+                for (q2 = 0; q2 < kk; q2++) {         /* the exact 2^kk-th root */
+                    unsigned long s2 = 0;
+                    while ((s2 + 1) * (s2 + 1) <= r)
+                        s2++;
+                    r = s2;
+                }
+                {
+                    unsigned long chk = r;
+                    for (q2 = 0; q2 < kk; q2++)
+                        chk *= chk;
+                    if (r < 2 || chk != PW[i])
+                        continue;
+                }
+                mpz_init_set_ui(v, 1);
+                for (Y = 1; Y <= 4 * p; Y++) {         /* r^Y inside p + 1 bits */
+                    mpz_mul_ui(v, v, r);
+                    if (mpz_sizeinbase(v, 2) > (size_t)p + 1)
+                        break;
+                    Ystar = Y;
+                }
+                mpz_clear(v);
+                for (Y = Ystar - 2; Y <= Ystar + 3; Y++)
+                    if (Y >= 1 && ny < 12)
+                        Yl[ny++] = Y;
+                for (k = 0; k < ny; k++) {
+                    long Yo = Yl[k] | 1;               /* odd */
+                    if (xz(0, (uint64_t)Yo, -kk, b))
+                        xadd(powr ? "powr:dyadic-wide" : "pow:dyadic-wide",
+                             mb, b, 0);
+                }
+                {
+                    long Ye[] = { p + 2, p + 3, p + 4, p + 5, 2 * p + 1 };
+                    for (k = 0; k < 5; k++)
+                        if (xz(0, (uint64_t)(Ye[k] | 1), -kk, b))
+                            xadd(powr ? "powr:dyadic-wide" :
+                                        "pow:dyadic-wide", mb, b, 0);
+                }
+            }
+        }
+    }
+    mpz_init(dz);
+    {
+        long eys[] = { 0, 10, p, 2 * p, E / 2, E - 1, E, -(p + 20), -(p + 3) };
+        for (i = 0; i < 4; i++) {
+            if (i == 0) mpz_set_ui(dz, 1);
+            if (i == 1) mpz_set_ui(dz, 3);
+            if (i == 2) { mpz_set_ui(dz, 0); mpz_setbit(dz, (mp_bitcnt_t)(p / 2)); }
+            if (i == 3) { mpz_set_ui(dz, 0); mpz_setbit(dz, (mp_bitcnt_t)W); mpz_sub_ui(dz, dz, 1); }
+            for (k = 0; k < 9; k++) {
+                if (!xz(0, 1, eys[k], b))
+                    continue;
+                for (sg = 0; sg < 2; sg++) {
+                    memcpy(a, one, 32);
+                    enc_addz(xf, a, dz, sg);              /* 1 +- dy ulps */
+                    memcpy(d, b, 32);
+                    xadd("pow:near1", a, d, 0);
+                    enc_neg(xf, d);
+                    xadd("pow:near1", a, d, 0);
+                }
+            }
+        }
+    }
+    mpz_clear(dz);
+    {
+        static const long DU[] = { 1, 2, 3, 5 }, DV[] = { 0, 1, 2, 3, 5 };
+        for (i = 0; i < 4; i++)
+            for (j = 0; j < 5; j++) {
+                uint8_t base[32], base2[32], expo[32], expp[32];
+                memcpy(base, one, 32);  enc_add_si(xf, base, DU[i]);
+                memcpy(base2, one, 32); enc_add_si(xf, base2, -DU[i]);
+                memcpy(expp, one, 32);  enc_add_si(xf, expp, DV[j]);
+                memcpy(expo, expp, 32); enc_neg(xf, expo);
+                xadd("pow:cancel", base, expo, 0);
+                xadd("pow:cancel", base2, expo, 0);
+                xadd("pow:cancel", base, expp, 0);
+            }
+    }
+#undef SPUSH
+#undef SVAL
+}
+
+/* The exponent that takes a base to 2^n: the overflow and underflow
+ * edges of the powers. pairs (x, y), y near n / log2 |x|. */
+static void xedge_pair(const char *fam, const uint8_t *x, long n, int nb)
+{
+    mpfr_t xv, t, v;
+    uint8_t y[32], w[32];
+    int s, k, q;
+
+    mpfr_init2(xv, xf->p);
+    mpfr_init2(t, (mpfr_prec_t)xf->p + 64);
+    mpfr_init2(v, xf->p);
+    enc_to_mpfr(xf, x, xv);
+    mpfr_abs(xv, xv, MPFR_RNDN);
+    mpfr_log2(t, xv, MPFR_RNDN);
+    if (!mpfr_zero_p(t)) {
+        mpfr_si_div(t, n, t, MPFR_RNDN);
+        mpfr_abs(t, t, MPFR_RNDN);
+        if (mpfr_fits_slong_p(t, MPFR_RNDZ)) {      /* the integers either side */
+            long y0 = mpfr_get_si(t, MPFR_RNDZ), d0;
+            for (d0 = -1; d0 <= 2; d0++)
+                for (s = 0; s < 2; s++) {
+                    uint8_t u[32];
+                    if (y0 + d0 >= 1 &&
+                        enc_from_val(xf, s, (uint64_t)(y0 + d0), 0, u))
+                        xadd(fam, x, u, 0);
+                }
+        }
+        mpfr_set(v, t, MPFR_RNDN);
+        if (mpfr_to_enc(xf, v, y)) {
+            for (s = 0; s < 2; s++) {
+                uint8_t u[32];
+                memcpy(u, y, 32);
+                if (s)
+                    enc_neg(xf, u);
+                xadd(fam, x, u, 0);
+                for (k = 1; k <= nb; k++) {
+                    memcpy(w, u, 32);
+                    for (q = 0; q < k; q++)
+                        enc_step(xf, w, 1);
+                    xadd(fam, x, w, 0);
+                    memcpy(w, u, 32);
+                    for (q = 0; q < k; q++)
+                        enc_step(xf, w, 0);
+                    xadd(fam, x, w, 0);
+                }
+            }
+        }
+    }
+    mpfr_clear(xv);
+    mpfr_clear(t);
+    mpfr_clear(v);
+}
+
+static void gen_pow_edges(const char *fam)
+{
+    const long E = xf->emax, M = xf->emin, W = xf->man_w;
+    static const unsigned long NUM[] = { 3, 5, 10, 3, 5 };
+    static const long EXP2[] = { 0, 0, 0, -1, -2 };   /* 3, 5, 10, 3/2, 5/4 */
+    int i, s;
+    uint8_t x[32];
+
+    for (i = 0; i < 5; i++)
+        for (s = 0; s < 2; s++) {
+            if (!xz(s, NUM[i], EXP2[i], x))
+                continue;
+            if (s == 1 && i >= 3)
+                continue;
+            xedge_pair(fam, x, E + 1, 2);
+            xedge_pair(fam, x, M - W - 1, 2);
+        }
+    {
+        uint8_t half[32];                      /* 3/4: below 1 */
+        if (xz(0, 3, -2, half)) {
+            xedge_pair(fam, half, E + 1, 2);
+            xedge_pair(fam, half, M - W - 1, 2);
+        }
+    }
+}
+
+/* hypot */
+static void gen_hypot(void)
+{
+    const long p = xf->p, E = xf->emax, M = xf->emin, W = xf->man_w;
+    static uint8_t SP[MAXPOOL][32];
+    uint8_t a[32], b[32], a1[32], b1[32], one[32];
+    int i, sx, sy, k;
+    static const unsigned TR[][2] = { {3, 4}, {5, 12}, {8, 15}, {7, 24},
+                                      {20, 21}, {9, 40}, {1, 1}, {2, 2},
+                                      {6, 8}, {12, 16} };
+    long es[4];
+    long ks[9];
+
+    build_pool(xf, SP, 0);
+    memcpy(one, SP[10], 32);
+    es[0] = E - 8; es[1] = M + 2; es[2] = -p; es[3] = M - W;
+    for (i = 0; i < 10; i++) {
+        unsigned x = TR[i][0], y = TR[i][1];
+        if (xbits(x > y ? x : y) > p)
+            continue;
+        for (sx = 0; sx < 2; sx++)
+            for (sy = 0; sy < 2; sy++)
+                if (xz(sx, x, 0, a) && xz(sy, y, 0, b))
+                    xadd("hypot:triples", a, b, 0);
+        if (xz(0, x, 0, a) && xz(0, y, 0, b)) {
+            memcpy(b1, b, 32); enc_step(xf, b1, 1);
+            xadd("hypot:triples", a, b1, 0);
+            memcpy(a1, a, 32); enc_step(xf, a1, 0);
+            xadd("hypot:triples", a1, b, 0);
+        }
+        for (k = 0; k < 4; k++)
+            if (xz(0, x, es[k], a) && xz(0, y, es[k], b))
+                xadd("hypot:triples", a, b, 0);
+    }
+    ks[0] = 1; ks[1] = 2; ks[2] = p / 2 - 1; ks[3] = p / 2;
+    ks[4] = p / 2 + 1; ks[5] = p; ks[6] = 2 * p; ks[7] = E / 2; ks[8] = E;
+    for (i = 0; i < 9; i++) {
+        uint8_t sm[32], big[32];
+        if (xz(0, 1, -ks[i], sm)) {
+            xadd("hypot:dominance", one, sm, 0);
+            xadd("hypot:dominance", sm, one, 0);
+        }
+        if (xz(0, 1, E - ks[i], big)) {
+            memcpy(a, SP[9], 32);
+            xadd("hypot:dominance", a, big, 0);
+        }
+    }
+    xadd("hypot:extremes", SP[9], SP[9], 0);
+    xadd("hypot:extremes", SP[9], SP[6], 0);
+    xadd("hypot:extremes", SP[6], SP[6], 0);
+    xadd("hypot:extremes", SP[7], SP[7], 0);
+    xadd("hypot:extremes", SP[8], SP[6], 0);
+    xadd("hypot:extremes", SP[1], SP[1], 0);
+    memcpy(b, SP[9], 32); enc_neg(xf, b);
+    xadd("hypot:extremes", SP[0], b, 0);
+    xadd("hypot:extremes", SP[2], SP[4], 0);
+    xadd("hypot:extremes", SP[4], SP[3], 0);
+    xadd("hypot:extremes", SP[5], SP[2], 0);
+    xadd("hypot:extremes", SP[4], SP[4], 0);
+    /* Pythagorean pairs whose hypot is an exact integer wider than p + 1
+     * bits, so _hypot_dyadic finds the square root and refuses it: the
+     * pair (m^2 - n^2, 2mn) for m = 2^j, n = m - 1 is (2^(j+1) - 1,
+     * (2^j - 1) 2^(j+1)) with the hypot 2^(2j+1) - 2^(j+1) + 1, which
+     * passes the span screen while 2j + 1 <= p + 6 and is wider than the
+     * format while 2j + 2 > p + 1 */
+    for (i = (int)((p - 1) / 2); i <= (int)((p + 5) / 2) + 1; i++) {
+        mpz_t u, w;
+        if (i < 2)
+            continue;
+        mpz_init_set_ui(u, 1);
+        mpz_mul_2exp(u, u, (mp_bitcnt_t)(i + 1));
+        mpz_sub_ui(u, u, 1);                          /* 2^(j+1) - 1 */
+        mpz_init_set_ui(w, 1);
+        mpz_mul_2exp(w, w, (mp_bitcnt_t)i);
+        mpz_sub_ui(w, w, 1);                          /* 2^j - 1 */
+        if (enc_from_mpz(xf, 0, u, 0, a) &&
+            enc_from_mpz(xf, 0, w, i + 1, b)) {
+            xadd("hypot:wide-triples", a, b, 0);
+            xadd("hypot:wide-triples", b, a, 0);
+            memcpy(a1, a, 32); enc_step(xf, a1, 1);
+            xadd("hypot:wide-triples", a1, b, 0);
+        }
+        mpz_clear(u);
+        mpz_clear(w);
+    }
+    /* the exact results the golden model's branch hypot:898 sends to
+     * round_pack with a value past the largest finite: Pythagorean pairs
+     * scaled to the top of the range, hypot(3t, 4t) = 5t >= 2^(emax+1)
+     * with t = 7 * 2^(emax-4), and the same for (5,12) and (8,15) */
+    {
+        static const struct { unsigned x, y; unsigned long t; long te; } OV[] = {
+            { 3, 4, 7, -4 }, { 5, 12, 5, -5 }, { 8, 15, 1, -3 },
+            { 3, 4, 3, -4 }, { 5, 12, 3, -5 }, { 8, 15, 1, -4 } };
+        for (i = 0; i < 6; i++) {
+            long e2 = E + OV[i].te;
+            if (xz(0, OV[i].x * OV[i].t, e2, a) &&
+                xz(0, OV[i].y * OV[i].t, e2, b)) {
+                xadd("hypot:exact-top", a, b, 0);
+                xadd("hypot:exact-top", b, a, 0);
+                memcpy(b1, b, 32); enc_step(xf, b1, 0);
+                xadd("hypot:exact-top", a, b1, 0);
+                memcpy(a1, a, 32); enc_step(xf, a1, 1);
+                xadd("hypot:exact-top", a1, b, 0);
+            }
+        }
+    }
+}
+
+/* atan2 and atan2Pi */
+static void gen_atan2(void)
+{
+    const long p = xf->p, E = xf->emax, M = xf->emin, W = xf->man_w;
+    static uint8_t SP[MAXPOOL][32];
+    uint8_t ax[16][32], y[32], x[32], two[32], one[32], sub[32], t[32];
+    uint8_t c1[32], c2[32];
+    int na = 0, i, j, sy, sx, k;
+    long es[8];
+    long kk[10];
+
+    build_pool(xf, SP, 0);
+    memcpy(one, SP[10], 32);
+    memcpy(sub, SP[6], 32);
+#define APUSH(src) do { memcpy(ax[na], (src), 32); na++; } while (0)
+#define AVAL(sgn, m, e2) do { if (xz((sgn), (m), (e2), t)) APUSH(t); } while (0)
+    APUSH(SP[0]); APUSH(SP[1]); APUSH(SP[10]); APUSH(SP[16]); APUSH(SP[2]);
+    APUSH(SP[3]); APUSH(SP[4]); APUSH(SP[5]);
+    AVAL(0, 1, 1); AVAL(1, 1, 1); AVAL(0, 3, 0); AVAL(1, 3, 0);
+    APUSH(SP[9]); APUSH(sub);
+    memcpy(c1, sub, 32); enc_neg(xf, c1); APUSH(c1);
+    for (i = 0; i < na; i++)
+        for (j = 0; j < na; j++)
+            xadd("atan2:axes", ax[i], ax[j], 0);
+    es[0] = 0; es[1] = 1; es[2] = -1; es[3] = p; es[4] = -p; es[5] = E - 1;
+    es[6] = M; es[7] = M - W;
+    for (k = 0; k < 8; k++) {
+        uint8_t bb[32];
+        if (!xz(0, 1, es[k], bb))
+            continue;
+        for (sy = 0; sy < 2; sy++)
+            for (sx = 0; sx < 2; sx++) {
+                memcpy(y, bb, 32);
+                if (sy) enc_neg(xf, y);
+                memcpy(x, bb, 32);
+                if (sx) enc_neg(xf, x);
+                xadd("atan2:diagonals", y, x, 0);
+                memcpy(c1, y, 32); enc_step(xf, c1, 1);
+                xadd("atan2:diagonals", c1, x, 0);
+                memcpy(c2, x, 32); enc_step(xf, c2, 1);
+                xadd("atan2:diagonals", y, c2, 0);
+                memcpy(c1, y, 32); enc_step(xf, c1, 0);
+                xadd("atan2:diagonals", c1, x, 0);
+            }
+    }
+    xz(0, 1, 1, two);
+    {
+        uint8_t four[32], nsub[32], mtwo[32];
+        xz(0, 1, 2, four);
+        memcpy(nsub, sub, 32); enc_neg(xf, nsub);
+        xz(1, 1, 1, mtwo);
+        xadd("atan2:sub-quotient", sub, two, 0);
+        xadd("atan2:sub-quotient", sub, four, 0);
+        xadd("atan2:sub-quotient", sub, one, 0);
+        xadd("atan2:sub-quotient", nsub, two, 0);
+        xadd("atan2:sub-quotient", sub, mtwo, 0);
+    }
+    kk[0] = p; kk[1] = p + 4; kk[2] = 2 * p; kk[3] = 4 * p;
+    kk[4] = p - 1; kk[5] = p + 1; kk[6] = p + 2;
+    kk[7] = (p + 4) / 2 - 1; kk[8] = (p + 4) / 2; kk[9] = (p + 4) / 2 + 1;
+    for (i = 0; i < 10; i++) {
+        uint8_t yy[32], none[32], three[32], ny[32];
+        if (!xz(0, 1, -kk[i], yy))
+            continue;
+        memcpy(none, SP[16], 32);
+        xz(0, 3, 0, three);
+        memcpy(ny, yy, 32); enc_neg(xf, ny);
+        xadd("atan2:tiny-over-unit", yy, one, 0);
+        xadd("atan2:tiny-over-unit", yy, none, 0);
+        xadd("atan2:tiny-over-unit", yy, two, 0);
+        xadd("atan2:tiny-over-unit", ny, one, 0);
+        xadd("atan2:tiny-over-unit", yy, three, 0);
+    }
+    kk[0] = p; kk[1] = p + 1; kk[2] = p + 2; kk[3] = p + 3; kk[4] = 2 * p;
+    for (i = 0; i < 5; i++) {
+        uint8_t big[32], small[32];
+        if (!xz(0, 1, kk[i], big) || !xz(0, 1, -kk[i], small))
+            continue;
+        xadd("atan2:big-small", big, one, 0);
+        xadd("atan2:big-small", one, big, 0);
+        xadd("atan2:big-small", small, one, 0);
+        xadd("atan2:big-small", one, small, 0);
+        xadd("atan2:big-small", big, SP[16], 0);
+        xadd("atan2:big-small", small, SP[16], 0);
+    }
+#undef APUSH
+#undef AVAL
+}
+
+static int cmp_enc_desc(const void *pa, const void *pb)
+{
+    const uint8_t *a = pa, *b = pb;
+    int i;
+    for (i = 31; i >= 0; i--)
+        if (a[i] != b[i])
+            return a[i] < b[i] ? -1 : 1;
+    return 0;
+}
+
+static int cmp_n(const void *pa, const void *pb)
+{
+    int64_t a = *(const int64_t *)pa, b = *(const int64_t *)pb;
+    uint64_t aa = a < 0 ? 0 - (uint64_t)a : (uint64_t)a;
+    uint64_t ab = b < 0 ? 0 - (uint64_t)b : (uint64_t)b;
+    if (aa != ab)
+        return aa < ab ? -1 : 1;
+    return a < b ? -1 : a > b;
+}
+
+/* pown, compound, rootn */
+static void gen_int(void)
+{
+    const long p = xf->p, E = xf->emax, M = xf->emin, W = xf->man_w;
+    static uint8_t SP[MAXPOOL][32];
+    static uint8_t ops[1024][32];
+    uint8_t t[32], b2[32];
+    int no = 0, i, j, k, sg, q;
+    int64_t ns[40];
+    int nn = 0;
+    static const unsigned MM[] = { 2, 3, 4, 8, 9, 16, 25, 27, 32, 64, 81, 125,
+                                   243, 256, 1024, 15625 };
+    static const long E5[] = { 0, 2, 6, -4, -6 };
+    static const long EE[] = { -3, -2, -1, 1, 2, 3, 6 };
+
+    build_pool(xf, SP, 0);
+#define OPUSH(src) do { memcpy(ops[no], (src), 32); no++; } while (0)
+    OPUSH(SP[0]); OPUSH(SP[1]); OPUSH(SP[2]); OPUSH(SP[3]); OPUSH(SP[4]);
+    OPUSH(SP[5]); OPUSH(SP[10]); OPUSH(SP[16]);
+    memcpy(t, SP[10], 32); enc_step(xf, t, 1); OPUSH(t);
+    memcpy(t, SP[10], 32); enc_step(xf, t, 0); OPUSH(t);
+    memcpy(t, SP[10], 32); enc_neg(xf, t); enc_step(xf, t, 1); OPUSH(t);
+    memcpy(t, SP[10], 32); enc_neg(xf, t); enc_step(xf, t, 0); OPUSH(t);
+    OPUSH(SP[6]);
+    memcpy(t, SP[6], 32); enc_neg(xf, t); OPUSH(t);
+    OPUSH(SP[9]);
+    memcpy(t, SP[9], 32); enc_neg(xf, t); OPUSH(t);
+    OPUSH(SP[8]);
+    for (i = 0; i < 16; i++) {
+        if (xbits(MM[i]) > p)
+            continue;
+        for (sg = 0; sg < 2; sg++)
+            for (k = 0; k < 5; k++)
+                if (xz(sg, MM[i], E5[k], t))
+                    OPUSH(t);
+        if (xz(0, MM[i], 0, t)) {
+            uint8_t u[32];
+            memcpy(u, t, 32); enc_step(xf, u, 1); OPUSH(u);
+            memcpy(u, t, 32); enc_step(xf, u, 0); OPUSH(u);
+        }
+    }
+    for (i = 0; i < 7; i++)
+        for (sg = 0; sg < 2; sg++)
+            if (xz(sg, 1, EE[i], t))
+                OPUSH(t);
+    {
+        long el[] = { p, -p, E, M, M - W };
+        for (i = 0; i < 5; i++)
+            for (sg = 0; sg < 2; sg++)
+                if (xz(sg, 1, el[i], t))
+                    OPUSH(t);
+    }
+    {
+        long kl[] = { 1, 2, p / 2, p, p + 2, 2 * p };
+        for (i = 0; i < 6; i++)
+            for (sg = 0; sg < 2; sg++)
+                if (xz(sg, 1, -kl[i], t))
+                    OPUSH(t);
+    }
+    qsort(ops, (size_t)no, 32, cmp_enc_desc);
+    {
+        int w = 0;
+        for (i = 0; i < no; i++)               /* unique, in value order */
+            if (w == 0 || memcmp(ops[w - 1], ops[i], 32)) {
+                memcpy(ops[w], ops[i], 32);
+                w++;
+            }
+        no = w;
+    }
+    {
+        /* the vector generator's n, all 31 of them, so that the stride
+         * below pairs what it pairs; the five past the host's long (MPFR
+         * takes a long) are dropped when a pair is added, not before */
+        int64_t base[] = { 0, 1, -1, 2, -2, 3, -3, 4, -4, 5, -5, 8, -8, 17,
+                           -17, p - 1, p, p + 1, p + 2, -(p + 1), -(p + 2),
+                           1000, -1000, (int64_t)1 << 20, -((int64_t)1 << 20),
+                           ((int64_t)1 << 31) - 1, -((int64_t)1 << 31),
+                           (int64_t)1 << 62, -((int64_t)1 << 62),
+                           INT64_MAX, INT64_MIN };
+        for (i = 0; i < (int)(sizeof base / sizeof base[0]); i++) {
+            int dup = 0;
+            for (j = 0; j < nn; j++)
+                if (ns[j] == base[i])
+                    dup = 1;
+            if (!dup)
+                ns[nn++] = base[i];
+        }
+    }
+    qsort(ns, (size_t)nn, sizeof ns[0], cmp_n);
+    for (i = 0; i < no; i++) {
+        for (j = i % 3; j < nn; j += 3)
+            if (ns[j] >= -2147483647LL && ns[j] <= 2147483647LL)
+                xadd("int:vector-pairs", ops[i], NULL, (long)ns[j]);
+        for (k = 0; k < 5; k++) {
+            static const long SK[] = { 0, 1, 2, -1, -2 };
+            xadd("int:vector-pairs", ops[i], NULL, SK[k]);
+        }
+    }
+    /* the specials against every n the oracle itself uses */
+    for (i = 0; i < 18; i++)
+        for (j = 0; j < TFN_NS_COUNT; j++)
+            xadd("int:specials", SP[i], NULL, TFN_NS[j]);
+    /* where M^n leaves p + 1 bits - the exact table's edge - for the odd
+     * bases: n* is the largest n with M^n inside p+1 bits, and n* - 1,
+     * n*, n* + 1 and n* + 2 straddle it */
+    {
+        static const unsigned OB[] = { 3, 5, 7, 9, 11, 13, 15, 17, 25, 125 };
+        for (i = 0; i < 10; i++) {
+            mpz_t v;
+            long nstar = 0;
+            if (xbits(OB[i]) > p)
+                continue;
+            mpz_init_set_ui(v, 1);
+            for (;;) {
+                mpz_mul_ui(v, v, OB[i]);
+                if (mpz_sizeinbase(v, 2) > (size_t)p + 1)
+                    break;
+                nstar++;
+                if (nstar > 400)
+                    break;
+            }
+            mpz_clear(v);
+            if (!xz(0, OB[i], 0, t))
+                continue;
+            for (k = -1; k <= 2; k++)
+                if (nstar + k >= 1) {
+                    uint8_t m1[32];
+                    xmask = 1;                           /* pown(M, n) */
+                    xadd("int:exact-edge", t, NULL, nstar + k);
+                    memcpy(b2, t, 32); enc_neg(xf, b2);
+                    xadd("int:exact-edge", b2, NULL, nstar + k);
+                    xadd("int:exact-edge", t, NULL, -(nstar + k));
+                    xmask = 2;                           /* compound: 1 + x = M */
+                    if (xz(0, OB[i] - 1, 0, m1))
+                        xadd("int:exact-edge", m1, NULL, nstar + k);
+                    xmask = 7;
+                }
+        }
+    }
+    /* rootn at its perfect powers: r^n exactly, with a neighbour each
+     * side, for the n whose root fits. Added for rootn alone: what pown
+     * and compound make of these operands is the vector pairs' business. */
+    xmask = 4;
+    {
+        static const unsigned RR[] = { 2, 3, 5, 7, 9, 10, 11, 13 };
+        for (i = 0; i < 8; i++) {
+            mpz_t v;
+            for (k = 2; k <= 12; k++) {
+                uint8_t u[32];
+                mpz_init_set_ui(v, RR[i]);
+                mpz_pow_ui(v, v, (unsigned long)k);
+                if (mpz_sizeinbase(v, 2) <= (size_t)p &&
+                    enc_from_mpz(xf, 0, v, 0, t)) {
+                    xadd("int:perfect-power", t, NULL, k);
+                    memcpy(u, t, 32); enc_step(xf, u, 1);
+                    xadd("int:perfect-power", u, NULL, k);
+                    memcpy(u, t, 32); enc_step(xf, u, 0);
+                    xadd("int:perfect-power", u, NULL, k);
+                    if (k % 2) {
+                        memcpy(u, t, 32); enc_neg(xf, u);
+                        xadd("int:perfect-power", u, NULL, k);
+                    }
+                }
+                mpz_clear(v);
+            }
+        }
+    }
+    /* rootn(x, -1) of a subnormal that is not a power of two: 1/x passes
+     * the format's top, which is the model's screen branch rootn:2862 */
+    {
+        static const unsigned OM[] = { 3, 5, 7 };   /* (still rootn's) */
+        for (i = 0; i < 3; i++)
+            for (k = -2; k <= 3; k++) {
+                long e2 = -(E + 1 + k + xbits(OM[i]));
+                if (xz(0, OM[i], e2, t)) {
+                    xadd("int:subnormal-recip", t, NULL, -1);
+                    xadd("int:subnormal-recip", t, NULL, -2);
+                    xadd("int:subnormal-recip", t, NULL, 1);
+                }
+            }
+    }
+    /* the exponent that takes a base to 2^n, as integers: pown's edge */
+    xmask = 1;
+    {
+        static const unsigned BB[] = { 3, 5, 10 };
+        for (i = 0; i < 3; i++) {
+            mpfr_t bl, ed;
+            long nsides[2];
+            nsides[0] = E + 1;
+            nsides[1] = M - W - 1;
+            if (!xz(0, BB[i], 0, t))
+                continue;
+            mpfr_init2(bl, p + 64);
+            mpfr_init2(ed, p + 64);
+            {
+                mpfr_t bv;
+                mpfr_init2(bv, p);
+                enc_to_mpfr(xf, t, bv);
+                mpfr_log2(bl, bv, MPFR_RNDN);
+                mpfr_clear(bv);
+            }
+            for (q = 0; q < 2; q++) {
+                long y0;
+                mpfr_si_div(ed, nsides[q], bl, MPFR_RNDN);
+                mpfr_abs(ed, ed, MPFR_RNDN);
+                y0 = mpfr_get_si(ed, MPFR_RNDZ);
+                for (k = -1; k <= 2; k++)
+                    if (y0 + k >= 1 && y0 + k <= 2147483647L) {
+                        xadd("int:power-edge", t, NULL, y0 + k);
+                        xadd("int:power-edge", t, NULL, -(y0 + k));
+                        memcpy(b2, t, 32); enc_neg(xf, b2);
+                        xadd("int:power-edge", b2, NULL, y0 + k);
+                    }
+            }
+            mpfr_clear(bl);
+            mpfr_clear(ed);
+        }
+    }
+    xmask = 7;
+#undef OPUSH
+}
+
+/* ---- running the lists --------------------------------------------- */
+
+static const int XC_EXP[] = { TF_EXP, TF_EXPM1, TF_EXP2, TF_LOG, TF_LOG1P,
+                              TF_LOG2, TF_LOG10, -1 };
+static const int XC_TRIG[] = { TF_SINPI, TF_COSPI, TF_TANPI, TF_ASIN,
+                               TF_ACOS, TF_ATAN, TF_ASINPI, TF_ACOSPI,
+                               TF_ATANPI, -1 };
+static const int XC_RAD[] = { TF_SIN, TF_COS, TF_TAN, -1 };
+static const int XC_HYP[] = { TF_SINH, TF_COSH, TF_TANH, TF_ASINH,
+                              TF_ACOSH, TF_ATANH, -1 };
+static const int XC_T91[] = { TF_EXP2M1, TF_EXP10, TF_EXP10M1, TF_LOG2P1,
+                              TF_LOG10P1, TF_RSQRT, -1 };
+
+static int in_pool(const uint8_t (*P)[32], int np, const uint8_t *a,
+                   size_t esz)
+{
+    int i;
+    for (i = 0; i < np; i++)
+        if (!memcmp(P[i], a, esz))
+            return 1;
+    return 0;
+}
+
+/* Is the pair (a, b) one the strided pairing of check_transcend asks of
+ * this pool? It asks (P[i], P[j]) for j = i % jstep, + jstep, ... */
+static int pair_asked(const uint8_t (*P)[32], int np, const uint8_t *a,
+                      const uint8_t *b, size_t esz)
+{
+    int jstep = np / 8 > 0 ? np / 8 : 1, i, j;
+
+    for (i = 0; i < np; i++) {
+        if (memcmp(P[i], a, esz))
+            continue;
+        for (j = i % jstep; j < np; j += jstep)
+            if (!memcmp(P[j], b, esz))
+                return 1;
+    }
+    return 0;
+}
+
+/* Is (a, n) one the integer-exponent loop asks of this pool? */
+static int int_asked(const uint8_t (*P)[32], int np, const uint8_t *a,
+                     long n, size_t esz)
+{
+    int i, k;
+
+    for (i = 0; i < np; i++) {
+        if (memcmp(P[i], a, esz))
+            continue;
+        for (k = i % 3; k < TFN_NS_COUNT; k += 3)
+            if (TFN_NS[k] == n)
+                return 1;
+    }
+    return 0;
+}
+
+/* How many of the list's entries the pools already ask - counted once
+ * per list, for the table at the end: intended - held = added. kind 0 is
+ * unary, 1 a pair, 2 an operand and an n. */
+static void xcount_held(int fj, int kind, const uint8_t (*P1)[32], int n1,
+                        const uint8_t (*P2)[32], int n2)
+{
+    const fdesc *f = &FMTS[fj];
+    int ix;
+
+    for (ix = 0; ix < XL.cnt; ix++) {
+        int held;
+        if (kind == 0)
+            held = in_pool(P1, n1, XL.a[ix], f->esz) ||
+                   (P2 && in_pool(P2, n2, XL.a[ix], f->esz));
+        else if (kind == 1)
+            held = pair_asked(P1, n1, XL.a[ix], XL.b[ix], f->esz) ||
+                   (P2 && pair_asked(P2, n2, XL.a[ix], XL.b[ix], f->esz));
+        else
+            held = int_asked(P1, n1, XL.a[ix], XL.n[ix], f->esz) ||
+                   (P2 && int_asked(P2, n2, XL.a[ix], XL.n[ix], f->esz));
+        if (held)
+            xfam_held[XL.fam[ix]][fj]++;
+    }
+}
+
+static void xrun_case(int fj, int fn, int mi, int idx, const uint8_t *a,
+                      const uint8_t *b, long nn, int fam)
+{
+    static const uint8_t zero_op[32];
+    const fdesc *f = &FMTS[fj];
+    int nargs = TFN_NARGS[fn], hasn = TFN_HASINT[fn];
+    uint8_t d[32];
+    uint32_t gf, wf = 0;
+    cft_status st = CFT_OK;
+    char extra[96];
+    mpfr_t want;
+
+    if (!b)
+        b = zero_op;                  /* t_oracle reads it, unary or not */
+    if (dump_cases) {
+        if (mi == 0) {
+            char ha[70], hb[70];
+            hexdump(a, f->esz, ha);
+            if (nargs == 2)
+                hexdump(b, f->esz, hb);
+            else
+                strcpy(hb, "-");
+            printf("C %s %s e %d 0 1 %s %s ", f->name, TFN_NAME[fn], idx,
+                   ha, hb);
+            if (hasn)
+                printf("%ld %s\n", nn, xfam_name[fam]);
+            else
+                printf("- %s\n", xfam_name[fam]);
+        }
+        return;
+    }
+    mpfr_init2(want, f->p);
+    t_oracle(f, fn, mi, a, b, nn, want, &wf);
+    memset(d, 0, sizeof d);
+    gf = tfn_lib(f, fn, MODES[mi].cr, a, b, nn, d, &st);
+    if (hasn)
+        snprintf(extra, sizeof extra, "n=%ld [%s]", nn, xfam_name[fam]);
+    else
+        snprintf(extra, sizeof extra, "[%s]", xfam_name[fam]);
+    c5_judge(T_EXP + fn, fj, TFN_NAME[fn], MODES[mi].name, f, a,
+             nargs == 2 ? b : NULL, f, d, want, gf, wf, st, extra);
+    mpfr_clear(want);
+    xfam_cases[fam][fj]++;
+}
+
+static void xrun_unary(int fj, const int *fns, const uint8_t (*P1)[32],
+                       int n1, const uint8_t (*P2)[32], int n2)
+{
+    const fdesc *f = &FMTS[fj];
+    int ix, mi;
+
+    for (; *fns >= 0; fns++) {
+        int fn = *fns;
+        for (ix = 0; ix < XL.cnt; ix++) {
+            if (in_pool(P1, n1, XL.a[ix], f->esz) ||
+                (P2 && in_pool(P2, n2, XL.a[ix], f->esz)))
+                continue;
+            if (!XL.ran[ix]) {
+                XL.ran[ix] = 1;
+                xfam_mem[XL.fam[ix]][fj]++;
+            }
+            for (mi = 0; mi < 5; mi++)
+                xrun_case(fj, fn, mi, ix, XL.a[ix], NULL, 0, XL.fam[ix]);
+        }
+    }
+}
+
+/* fn on the entries of XL not already asked of the pools in P (one or two) */
+static void xrun_pairs(int fj, int fn, const uint8_t (*P1)[32], int n1,
+                       const uint8_t (*P2)[32], int n2)
+{
+    const fdesc *f = &FMTS[fj];
+    int ix, mi, hasn = TFN_HASINT[fn];
+
+    for (ix = 0; ix < XL.cnt; ix++) {
+        if (hasn) {
+            int bit = fn == TF_POWN ? 1 : fn == TF_COMPOUND ? 2 : 4;
+            if (!(XL.fmask[ix] & bit))
+                continue;                 /* added for another of the three */
+            if (int_asked(P1, n1, XL.a[ix], XL.n[ix], f->esz) ||
+                (P2 && int_asked(P2, n2, XL.a[ix], XL.n[ix], f->esz)))
+                continue;
+        } else {
+            if (pair_asked(P1, n1, XL.a[ix], XL.b[ix], f->esz) ||
+                (P2 && pair_asked(P2, n2, XL.a[ix], XL.b[ix], f->esz)))
+                continue;
+        }
+        if (!XL.ran[ix]) {
+            XL.ran[ix] = 1;
+            xfam_mem[XL.fam[ix]][fj]++;
+        }
+        for (mi = 0; mi < 5; mi++)
+            xrun_case(fj, fn, mi, ix, XL.a[ix], XL.b[ix], XL.n[ix],
+                      XL.fam[ix]);
+    }
+}
+
+static void check_extras(int fj, uint8_t xpool[][32], int xn,
+                         uint8_t gpool_[][32], int gn,
+                         uint8_t hpool_[][32], int hn)
+{
+    const uint8_t (*XP)[32] = (const uint8_t (*)[32])xpool;
+    const uint8_t (*GP)[32] = (const uint8_t (*)[32])gpool_;
+    const uint8_t (*HP)[32] = (const uint8_t (*)[32])hpool_;
+
+    xf = &FMTS[fj];
+    xcur_fj = fj;
+
+    /* exp, expm1, exp2, log, log1p, log2, log10: the exponential pool */
+    XL.cnt = 0; gen_x();
+    xcount_held(fj, 0, XP, xn, NULL, 0);
+    xrun_unary(fj, XC_EXP, XP, xn, NULL, 0);
+    /* the nine trigonometric: the trigonometric pool */
+    XL.cnt = 0; gen_trig();
+    xcount_held(fj, 0, GP, gn, NULL, 0);
+    xrun_unary(fj, XC_TRIG, GP, gn, NULL, 0);
+    /* sin, cos, tan and the six hyperbolics: the third pool */
+    XL.cnt = 0; gen_rad();
+    xcount_held(fj, 0, HP, hn, NULL, 0);
+    xrun_unary(fj, XC_RAD, HP, hn, NULL, 0);
+    XL.cnt = 0; gen_hyp();
+    xcount_held(fj, 0, HP, hn, NULL, 0);
+    xrun_unary(fj, XC_HYP, HP, hn, NULL, 0);
+    /* table 9.1's six unary: both of their pools */
+    XL.cnt = 0; gen_t91();
+    xcount_held(fj, 0, GP, gn, XP, xn);
+    xrun_unary(fj, XC_T91, GP, gn, XP, xn);
+    /* the binary five and the integer-exponent three */
+    XL.cnt = 0; gen_pow(0); gen_pow_edges("pow:edge");
+    xcount_held(fj, 1, XP, xn, NULL, 0);
+    xrun_pairs(fj, TF_POW, XP, xn, NULL, 0);
+    XL.cnt = 0; gen_pow(1); gen_pow_edges("powr:edge");
+    xcount_held(fj, 1, GP, gn, XP, xn);
+    xrun_pairs(fj, TF_POWR, GP, gn, XP, xn);
+    XL.cnt = 0; gen_hypot();
+    xcount_held(fj, 1, XP, xn, NULL, 0);
+    xrun_pairs(fj, TF_HYPOT, XP, xn, NULL, 0);
+    XL.cnt = 0; gen_atan2();
+    xcount_held(fj, 1, GP, gn, NULL, 0);
+    xrun_pairs(fj, TF_ATAN2, GP, gn, NULL, 0);
+    xrun_pairs(fj, TF_ATAN2PI, GP, gn, NULL, 0);
+    XL.cnt = 0; gen_int();
+    xcount_held(fj, 2, GP, gn, XP, xn);
+    xrun_pairs(fj, TF_POWN, GP, gn, XP, xn);
+    xrun_pairs(fj, TF_COMPOUND, GP, gn, XP, xn);
+    xrun_pairs(fj, TF_ROOTN, GP, gn, XP, xn);
 }
 
 /* ---- the reductions of clause 9.4 ---------------------------------- *
@@ -4578,11 +6391,16 @@ int main(int argc, char **argv)
         return 2;
     }
     printf("MPFR %s as oracle\n", mpfr_get_version());
+    dump_cases = getenv("CFT_MPFR_DUMP_CASES") != NULL;
 
     for (fi = 0; fi < 4; fi++) {
         const fdesc *f = &FMTS[fi];
-        int pn = build_pool(f, pool, randoms);
+        int pn;
         uint64_t fmt_cases = 0;
+
+        if (!phase_on("arith") || !format_on(f))
+            continue;
+        pn = build_pool(f, pool, randoms);
 
         for (oi = 0; oi < NOPS; oi++) {
             int nargs = OP_NARGS[oi];
@@ -4630,9 +6448,12 @@ int main(int argc, char **argv)
      * formats only MPFR can arbitrate. */
     for (fi = 0; fi < 4; fi++) {
         const fdesc *f = &FMTS[fi];
-        int pn = build_pool(f, pool, randoms);
-        int mult = fi >= 2 ? 2 : 1;
+        int pn, mult = fi >= 2 ? 2 : 1;
         uint64_t before = cases;
+
+        if (!phase_on("clause5") || !format_on(f))
+            continue;
+        pn = build_pool(f, pool, randoms);
         check_rint(fi, pool, pn);
         check_scaleb(fi, pool, pn);
         check_cvt_from(fi, 24 * mult);
@@ -4654,56 +6475,107 @@ int main(int argc, char **argv)
     /* The phase-1 transcendentals. Their own pools, because the
      * families that matter here - exact cases, thresholds, a base one
      * ulp from 1 - are not the families that matter for an FMA. */
+    /* build_trigpool and build_p3pool take the first eighteen entries of
+     * their pools from the array they are handed, and what they are
+     * handed is `pool` as the clause-5 loop left it: fp256's eighteen
+     * specials, for every format. (At fp256 that is right. At the other
+     * three the "specials" are fp256 encodings read through a narrower
+     * format - mostly +0, one signaling-NaN pattern that is the smallest
+     * subnormal, a few all-ones patterns - and the real +-inf, qNaN,
+     * sNaN, -0, 1 and the rest are in neither pool; the audit of
+     * 2026-11-02 found it, and the extras phase below asks them.) The
+     * defect stays as it is, so that the default run covers what it
+     * always covered, and the eighteen are rebuilt here without a random
+     * draw so that a subset run (or the case dump), which skips the
+     * clause-5 loop, gets the same pools a full run does. */
+    build_pool(&FMTS[3], pool, 0);
     for (fi = 0; fi < 4; fi++) {
         const fdesc *f = &FMTS[fi];
-        int pn = build_tpool(f, tpool, randoms);
-        int gn = build_trigpool(f, gpool, (const uint8_t (*)[32])pool,
-                                pn, randoms);
-        int hn = build_p3pool(f, hpool, (const uint8_t (*)[32])pool,
-                              pn, randoms);
-        uint64_t before = cases;
-        check_transcend(fi, tpool, pn, gpool, gn, hpool, hn, 0, TF_SINPI);
-        printf("%s transcend: %llu cases done (running mismatches: "
-               "%llu value, %llu flag)\n", f->name,
-               (unsigned long long)(cases - before),
-               (unsigned long long)mismatches,
-               (unsigned long long)flag_mismatches);
+        int pn, gn, hn;
+        uint64_t before;
+
+        if (!format_on(f) ||
+            !(phase_on("transcend") || phase_on("trig") ||
+              phase_on("radian") || phase_on("table91") ||
+              phase_on("extras")))
+            continue;
+        pn = build_tpool(f, tpool, randoms);
+        gn = build_trigpool(f, gpool, (const uint8_t (*)[32])pool,
+                            pn, randoms);
+        hn = build_p3pool(f, hpool, (const uint8_t (*)[32])pool,
+                          pn, randoms);
         before = cases;
-        check_transcend(fi, tpool, pn, gpool, gn, hpool, hn, TF_SINPI,
-                        TF_SIN);
-        printf("%s trig: %llu cases done (running mismatches: "
-               "%llu value, %llu flag)\n", f->name,
-               (unsigned long long)(cases - before),
-               (unsigned long long)mismatches,
-               (unsigned long long)flag_mismatches);
-        fflush(stdout);
+        if (phase_on("transcend")) {
+            check_transcend(fi, tpool, pn, gpool, gn, hpool, hn, 0,
+                            TF_SINPI);
+            if (!dump_cases)
+                printf("%s transcend: %llu cases done (running "
+                       "mismatches: %llu value, %llu flag)\n", f->name,
+                       (unsigned long long)(cases - before),
+                       (unsigned long long)mismatches,
+                       (unsigned long long)flag_mismatches);
+        }
         before = cases;
-        check_transcend(fi, tpool, pn, gpool, gn, hpool, hn, TF_SIN,
-                        TF_EXP2M1);
-        printf("%s radian+hyperbolic: %llu cases done (running "
-               "mismatches: %llu value, %llu flag)\n", f->name,
-               (unsigned long long)(cases - before),
-               (unsigned long long)mismatches,
-               (unsigned long long)flag_mismatches);
-        fflush(stdout);
+        if (phase_on("trig")) {
+            check_transcend(fi, tpool, pn, gpool, gn, hpool, hn,
+                            TF_SINPI, TF_SIN);
+            if (!dump_cases)
+                printf("%s trig: %llu cases done (running mismatches: "
+                       "%llu value, %llu flag)\n", f->name,
+                       (unsigned long long)(cases - before),
+                       (unsigned long long)mismatches,
+                       (unsigned long long)flag_mismatches);
+            fflush(stdout);
+        }
         before = cases;
-        check_transcend(fi, tpool, pn, gpool, gn, hpool, hn, TF_EXP2M1,
-                        TF_COUNT);
-        /* And again on the exponential pool, the one these ten were
-         * written for. check_transcend calls its fourth argument tpool,
-         * and here that is the trigonometric pool, so from 2026-09-03 to
-         * 2026-10-30 the ten ran on it alone and never saw an exp2
-         * integer at the top of the range - where exp2m1(emax + 1)
-         * raised overflow toward zero (issue 1). The trigonometric pass
-         * above stays: it is coverage they have had since. */
-        check_transcend(fi, tpool, pn, tpool, pn, hpool, hn, TF_EXP2M1,
-                        TF_COUNT);
-        printf("%s table91: %llu cases done (running mismatches: "
-               "%llu value, %llu flag)\n", f->name,
-               (unsigned long long)(cases - before),
-               (unsigned long long)mismatches,
-               (unsigned long long)flag_mismatches);
-        fflush(stdout);
+        if (phase_on("radian")) {
+            check_transcend(fi, tpool, pn, gpool, gn, hpool, hn, TF_SIN,
+                            TF_EXP2M1);
+            if (!dump_cases)
+                printf("%s radian+hyperbolic: %llu cases done (running "
+                       "mismatches: %llu value, %llu flag)\n", f->name,
+                       (unsigned long long)(cases - before),
+                       (unsigned long long)mismatches,
+                       (unsigned long long)flag_mismatches);
+            fflush(stdout);
+        }
+        before = cases;
+        if (phase_on("table91")) {
+            check_transcend(fi, tpool, pn, gpool, gn, hpool, hn,
+                            TF_EXP2M1, TF_COUNT);
+            /* And again on the exponential pool, the one these ten were
+             * written for. check_transcend calls its fourth argument
+             * tpool, and here that is the trigonometric pool, so from
+             * 2026-09-03 to 2026-10-30 the ten ran on it alone and never
+             * saw an exp2 integer at the top of the range - where
+             * exp2m1(emax + 1) raised overflow toward zero (issue 1).
+             * The trigonometric pass above stays: it is coverage they
+             * have had since. */
+            check_transcend(fi, tpool, pn, tpool, pn, hpool, hn,
+                            TF_EXP2M1, TF_COUNT);
+            if (!dump_cases)
+                printf("%s table91: %llu cases done (running mismatches: "
+                       "%llu value, %llu flag)\n", f->name,
+                       (unsigned long long)(cases - before),
+                       (unsigned long long)mismatches,
+                       (unsigned long long)flag_mismatches);
+            fflush(stdout);
+        }
+        /* What the audit of 2026-11-02 found the pools above lacked. A
+         * phase of its own, after the four, that draws no random number:
+         * everything above runs exactly as it did, and these are the
+         * cases it runs besides. */
+        before = cases;
+        if (phase_on("extras")) {
+            check_extras(fi, tpool, pn, gpool, gn, hpool, hn);
+            if (!dump_cases)
+                printf("%s extras: %llu cases done (running mismatches: "
+                       "%llu value, %llu flag)\n", f->name,
+                       (unsigned long long)(cases - before),
+                       (unsigned long long)mismatches,
+                       (unsigned long long)flag_mismatches);
+            fflush(stdout);
+        }
     }
 
     /* The seven reductions. Their pools are the arithmetic phase's -
@@ -4711,10 +6583,18 @@ int main(int argc, char **argv)
      * the campaign reports NODES as well as cases, because a case here
      * is a whole vector and the node count is what MPFR actually
      * arbitrated. */
+    if (dump_cases) {                    /* the dump ends with the table */
+        cft_close(dev);
+        return 0;
+    }
     for (fi = 0; fi < 4; fi++) {
         const fdesc *f = &FMTS[fi];
-        int pn = build_pool(f, pool, randoms);
+        int pn;
         uint64_t before = cases, nodes_before = reduce_nodes;
+
+        if (!phase_on("reduce") || !format_on(f))
+            continue;
+        pn = build_pool(f, pool, randoms);
         check_reduce(fi, pool, pn, 4);
         printf("%s reduce: %llu vectors done, %llu nodes arbitrated "
                "(running mismatches: %llu value, %llu flag)\n", f->name,
@@ -4726,9 +6606,12 @@ int main(int argc, char **argv)
     }
 
     for (fi = 0; fi < 4; fi++) {
-        int pn = build_pool(&FMTS[fi], pool, randoms);
-        int dfi;
+        int pn, dfi;
         uint64_t before = cases;
+
+        if (!phase_on("convert") || !format_on(&FMTS[fi]))
+            continue;
+        pn = build_pool(&FMTS[fi], pool, randoms);
         for (dfi = 0; dfi < 4; dfi++)
             check_convert(fi, dfi, pool, pn);
         printf("%s convert: %llu cases done (running mismatches: "
@@ -4747,8 +6630,11 @@ int main(int argc, char **argv)
      * the variables are declared that way - so nothing in this phase is
      * a restatement of a rule or a reproduction of a shape. */
     for (fi = 0; fi < 4; fi++) {
-        int pn = build_pool(&FMTS[fi], pool, randoms);
-        int dfi;
+        int pn, dfi;
+
+        if (!phase_on("formatof") || !format_on(&FMTS[fi]))
+            continue;
+        pn = build_pool(&FMTS[fi], pool, randoms);
         for (dfi = 0; dfi < 4; dfi++) {
             uint64_t before = cases;
             check_formatof(fi, dfi, pool, pn);
@@ -4760,6 +6646,34 @@ int main(int argc, char **argv)
                    (unsigned long long)flag_mismatches);
             fflush(stdout);
         }
+    }
+
+    if (xfam_n) {
+        int t, k;
+        uint64_t tot = 0;
+        printf("\nextras (audit of 2026-11-02), per family and format: "
+               "intended - held by the pools = added / cases:\n");
+        printf("  %-24s %18s %18s %18s %18s\n", "family", "fp32", "fp64",
+               "fp128", "fp256");
+        for (t = 0; t < xfam_n; t++) {
+            int any = 0;
+            for (k = 0; k < 4; k++)
+                if (xfam_cases[t][k])
+                    any = 1;
+            if (!any)
+                continue;
+            printf("  %-24s", xfam_name[t]);
+            for (k = 0; k < 4; k++) {
+                printf(" %3llu-%3llu=%3llu/%-6llu",
+                       (unsigned long long)xfam_intended[t][k],
+                       (unsigned long long)xfam_held[t][k],
+                       (unsigned long long)xfam_mem[t][k],
+                       (unsigned long long)xfam_cases[t][k]);
+                tot += xfam_cases[t][k];
+            }
+            printf("\n");
+        }
+        printf("  extras total: %llu cases\n", (unsigned long long)tot);
     }
 
     {

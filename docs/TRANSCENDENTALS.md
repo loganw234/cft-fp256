@@ -1727,7 +1727,8 @@ argument `tpool`, and the caller passes the trigonometric pool there.
 So none of the ten was held against MPFR at an exp2 integer at the top
 of the range. On the exponential pool, MPFR found 10 flag mismatches in
 the library as it stood, all of them exp2m1(emax + 1) under rtz and rdn
-(issue 1), and nothing else. Since then the ten run on both pools.
+(issue 1), and nothing else. Since then the ten run on both pools. The same
+question for all thirty-nine is answered below (audit of 2026-11-02).
 
 Over `transcend_check.py`'s whole sweep the model escalated 182 times
 across all thirty-nine functions and every pass the harness makes. A
@@ -1767,6 +1768,357 @@ upward it is nextUp(30)"), by `transcend_check.py` (fp32 rtz,
 conformance replay (which stops at 92,033 cases), and by MPFR parity
 (from the first fp32 log2p1 row under roundTowardZero). Four gates, and
 the rule it breaks is one of the two this set added.
+
+### The pools, audited for all thirty-nine (2026-11-02)
+
+Issue 1 was a pool that did not hold a family: the ten of table 9.1 had
+never been asked an exp2 integer at the top of the range. The same
+question, asked of every function at every format: for each family its
+hard cases live in, does the pool it runs on hold members of it, and how
+many? Four sources name the families, and the comparison with each was
+run rather than read.
+
+- **The vector generator.** `python/cft_golden/vectors.py` directs a list
+  of operands at each function; it was written for the same hard cases
+  and is the only other list of them in the repository. `mpfr-check`
+  prints what it would ask (`CFT_MPFR_DUMP_CASES=1 ./mpfr-check 24 7`:
+  every case of the transcendental phases, once, with the pool it comes
+  from and whether its operands are directed or random; half a second),
+  and a script builds the generator's operands at `extra = 0` with every
+  append tagged by the line of the generator that makes it. A family is a
+  line. A family the vectors direct at a function that its pool lacks is a
+  gap by definition.
+- **The golden model's branches.** The same cases, run through
+  `python/cft_golden/transcend.py` under `sys.monitoring`, first hit per
+  line, at each format: a line the vectors' cases reach and the
+  oracle's do not is a branch the oracle never asks, and a line neither
+  reaches is a hole in both. The thresholds no line shows are families
+  too: each tiny rule (`ex <= -(p+c)`, `2 ex + p + c <= 0`, `ex >= p+1`),
+  each screen (emax + 2, emax + 3, emin - man_w - 2), each exact table's
+  bound (`|n| <= p+1`, M^n inside p+1 bits, 10^n - 1 inside p+1 bits, the
+  k at which log2p1 changes rule) is straddled: the last operand on the
+  rule's side, the first off it, and one more.
+- **IEEE 754-2019 9.2.** The special rows: both zeros, both infinities, a
+  quiet and a signaling NaN, 1, the ends of every domain, and for the
+  binary functions every pair of them.
+- **This document**, for the exact tables and the neighbour rules proved
+  above.
+
+What the vector generator directs at each group, and how many of it the
+pools held. Distinct operands (pairs, for the binary functions; the
+(operand, n) pairs with n inside the host's `long` for pown, compound and
+rootn), fp32 / fp64 / fp128 / fp256. MEASURED on the desktop, 2026-11-02:
+
+| functions | what the vectors direct | held before | held after |
+|---|---|---|---|
+| exp family (7) | 221/258/337/499 | 74/97/104/104 | 221/258/337/499 |
+| trig family (9) | 244/244/244/244 | 116/116/116/124 | 244/244/244/244 |
+| sin cos tan (3) | 626/4268/290/290 | 66/66/48/53 | 626/4268/290/290 |
+| hyperbolics (6) | 222/222/222/222 | 73/73/72/81 | 222/222/222/222 |
+| table 9.1 unary (6) | 524/775/871/1071 | 97/123/127/127 | 524/775/871/1071 |
+| pow | 706/706/706/706 | 29/30/25/25 | 706/706/706/706 |
+| hypot | 137/137/137/137 | 13/13/13/13 | 137/137/137/137 |
+| atan2, atan2pi | 384/384/384/384 | 24/24/24/28 | 384/384/384/384 |
+| powr | 733/733/733/733 | 46/49/44/40 | 733/733/733/733 |
+| pown compound rootn | 2160/2160/2160/2160 | 184/182/187/179 | 2160/2160/2160/2160 |
+
+Six findings, in the order they matter. Each is MEASURED.
+
+1. **Twenty functions had no specials at three formats.** The trigonometric
+   pool and the third pool (sinPi to atan2Pi, sin to atanh) take their first
+   eighteen entries from an array `main` hands them, and what `main` hands
+   them is the clause-5 loop's last pool, which is fp256's. At fp256 that is
+   right. At fp32, fp64 and fp128 it is eighteen fp256 encodings read through
+   a narrower format: at fp32 they are +0 twelve times, 0x00000001 three times
+   and 0xffffffff three times. No -0, no infinity, no signaling NaN, no 1, no
+   minimum or maximum normal: sin(+-inf), asin(-0), atanh(+-1) and the rest of
+   9.2.1's rows were not held against MPFR at fp32, fp64 or fp128 for the
+   eleven functions of the one pool and the nine of the other. (Table 9.1's
+   ten, which also run on the trigonometric pool, have had the real ones from
+   the exponential pool since 2026-10-30.)
+   The defect is left in place, so that the default run asks what it always
+   asked; the extras ask the real specials (`t:io`, `r:io`, `h:io`).
+2. **The binary functions were asked 4 to 10 percent of the pairs the
+   vectors direct.** `check_transcend` pairs `P[i]` with `P[j]` for
+   `j = i mod (n/8), + n/8, ...`, which reaches the diagonal of the specials
+   and little else: pow(-1, +inf), atan2(+-0, -0), hypot(inf, NaN) and the
+   other off-diagonal rows of 9.2.1 were not asked. Nor were more than 5 of
+   the 40 Pythagorean-triple pairs of hypot, any perfect power under a dyadic
+   exponent (0 of 96), or most of the (operand, n) pairs at which M^n leaves
+   the exact table: pown, compound and rootn pair each operand with a third of
+   15 values of n.
+3. **exp and expm1 never met their own edges.** The n ln 2 that overflow,
+   underflow and make tiny the result (65 operands in the vector set) were
+   held 0 of 65 at every format; sinh and cosh held 18 of 50 of theirs.
+   exp2's integers stopped at emin - man_w: its tie at emin - man_w - 1
+   (-150, -1075, -16495, -262379) and the quarter beneath it were never
+   asked. The tie is where exp2 rounded wrongly under roundTiesToAway until
+   2026-10-05, a defect this oracle could not have found (see the control
+   below).
+4. **The exact cases past the old pool's limit.** The powers of ten stop at
+   5^25 (the builder multiplies while the odd part is under 2^60), so log10's
+   exact table at fp128 and fp256 was held 53 of 147 and 53 of 309 operands;
+   10^k - 1, where log10p1 is exact, 0 of 7, 15, 34 and 71; 2^k - 1, where
+   log2p1 is exact, 20, 18, 18 and 18 of 278, 480, 480 and 480.
+5. **sin, cos and tan: the reduction's hardest operands.** Every power of two
+   over the exponent range is the window's start; the vector set has 554, 4,196
+   and, sampled, 194 and 194 of them, and the pool held 54, 54, 2 and 2. The
+   worst cases of the reduction (the representable numbers nearest a
+   multiple of pi/2, one per binade of a sweep) were held 0 of 24, 24, 18
+   and 18 at fp32, fp64, fp128 and fp256 (4 at fp128 by chance).
+6. **Five lines of the model that no pool and no vector reaches**, and 65
+   that only the vectors do; the branches are below.
+
+By the vector generator's lines, the families and what each pool held
+(need / held before / held after, fp32 / fp64 / fp128 / fp256; the three
+numbers in a cell are a count of distinct operands or pairs):
+
+**exp, expm1, exp2, log, log1p, log2, log10**
+
+| family | need | held before | held after |
+|---|---|---|---|
+| the specials and extremes of both signs; NaNs with payload | 32/32/32/32 | 20/20/20/20 | 32/32/32/32 |
+| powers of two, with a neighbour each side | 24/24/24/24 | 23/23/23/23 | 24/24/24/24 |
+| 2^-k and 3 2^(-k-1), k = p+2 .. 2p (the neighbour rules) | 24/24/24/24 | 10/10/10/10 | 24/24/24/24 |
+| powers of ten 5^k 2^k, with neighbours | 33/69/147/309 | 23/47/53/53 | 33/69/147/309 |
+| 1 +- ulp, both signs | 4/4/4/4 | 3/3/3/3 | 4/4/4/4 |
+| integers 1..24, p, 2p, emax-1..emax+1, emin-1.., to emin-man_w-1 | 60/62/62/62 | 14/14/14/14 | 60/62/62/62 |
+| n ln 2, rounded and walked two ulps (overflow and underflow edges) | 65/65/65/65 | 0/0/0/0 | 65/65/65/65 |
+
+**sinpi, cospi, tanpi, asin, acos, atan, asinpi, acospi, atanpi**
+
+| family | need | held before | held after |
+|---|---|---|---|
+| the specials and extremes of both signs; NaNs with payload | 32/32/32/32 | 13/13/13/21 | 32/32/32/32 |
+| 2^-k and 3 2^(-k-1), k = p/2 .. 4p | 36/36/36/36 | 27/27/27/27 | 36/36/36/36 |
+| halves, quarters, integers and eighths, with neighbours | 162/162/162/162 | 79/79/79/79 | 162/162/162/162 |
+| 1 - 2^-p and 1 - 2^(1-p) (asin's domain edge) | 4/4/4/4 | 2/2/2/2 | 4/4/4/4 |
+| 1 +- ulp, both signs | 4/4/4/4 | 4/4/4/4 | 4/4/4/4 |
+| the top of the range, 2^k for k = p-1 .. emax | 24/24/24/24 | 8/8/8/8 | 24/24/24/24 |
+
+**sin, cos, tan**
+
+| family | need | held before | held after |
+|---|---|---|---|
+| the specials and extremes of both signs; NaNs with payload | 32/32/32/32 | 13/13/13/22 | 32/32/32/32 |
+| 2^k and 2^k - 1ulp at the ends and p, 2p | 36/36/36/36 | 21/21/21/23 | 36/36/36/36 |
+| every power of two over the exponent range (sampled at the wide two) | 554/4196/194/194 | 54/54/2/2 | 554/4196/194/194 |
+| 2^-k and 3 2^(-k-1), k = p/2-1 .. 2p | 28/28/28/28 | 21/21/21/21 | 28/28/28/28 |
+| the reduction's worst cases (pi_worstcase.py) | 24/24/18/18 | 0/0/4/0 | 24/24/18/18 |
+
+**sinh, cosh, tanh, asinh, acosh, atanh**
+
+| family | need | held before | held after |
+|---|---|---|---|
+| the specials and extremes of both signs; NaNs with payload | 32/32/32/32 | 13/13/13/22 | 32/32/32/32 |
+| 2^-k and 3 2^(-k-1), k = p/2-1 .. 4p | 32/32/32/32 | 24/24/24/24 | 32/32/32/32 |
+| small integers, halves, quarters, with neighbours | 102/102/102/102 | 16/16/16/18 | 102/102/102/102 |
+| 1 +- ulp, both signs | 4/4/4/4 | 4/4/4/4 | 4/4/4/4 |
+| 2^k near 2^bitlen(p+2) (tanh -> 1) | 18/18/18/18 | 10/10/9/9 | 18/18/18/18 |
+| n ln 2 +- 2 ulps (the sinh/cosh overflow edge), both signs | 50/50/50/50 | 18/18/18/18 | 50/50/50/50 |
+
+**exp2m1, exp10, exp10m1, log2p1, log10p1, rsqrt**
+
+| family | need | held before | held after |
+|---|---|---|---|
+| the specials and extremes of both signs; NaNs with payload | 32/32/32/32 | 22/22/22/22 | 32/32/32/32 |
+| powers of two -6..6, +-p, emax, emin, with neighbours | 116/116/116/116 | 43/43/43/43 | 116/116/116/116 |
+| 2^-k and 3 2^(-k-1), k = p+2 .. 2p | 20/20/20/20 | 13/13/13/13 | 20/20/20/20 |
+| 2^k - 1 and 2^-k (2^k - 1), k <= min(p, 40) | 278/480/480/480 | 20/18/18/18 | 278/480/480/480 |
+| 1 +- ulp, both signs | 4/4/4/4 | 4/4/4/4 | 4/4/4/4 |
+| integers 1..11, p-1..p+3, 2p, emax-1..emax+1, emin, emin-man_w | 126/126/126/126 | 33/35/33/33 | 126/126/126/126 |
+| powers of ten 5^k 2^k, with neighbours | 33/69/147/309 | 23/47/53/53 | 33/69/147/309 |
+| 10^k - 1 | 7/15/34/71 | 0/0/0/0 | 7/15/34/71 |
+
+**pow**
+
+| family | need | held before | held after |
+|---|---|---|---|
+| the specials against the specials | 256/256/256/256 | 25/25/21/21 | 256/256/256/256 |
+| integer exponents against 2, 3, 5, 7, 10, 4097 | 180/180/180/180 | 5/5/5/5 | 180/180/180/180 |
+| perfect powers against dyadic exponents | 96/96/96/96 | 0/0/0/0 | 96/96/96/96 |
+| pow(1+u, -(1+u)), the escalating family | 60/60/60/60 | 2/2/3/3 | 60/60/60/60 |
+| a base 1 +- dy ulp against exponents across the range | 144/144/144/144 | 3/4/3/3 | 144/144/144/144 |
+
+**hypot**
+
+| family | need | held before | held after |
+|---|---|---|---|
+| Pythagorean triples, both signs | 40/40/40/40 | 5/5/5/5 | 40/40/40/40 |
+| triples, one ulp off | 20/20/20/20 | 1/1/1/1 | 20/20/20/20 |
+| triples scaled to the range's ends | 40/40/40/40 | 2/2/2/2 | 40/40/40/40 |
+| extremes, zeros, infinities and NaNs | 11/11/11/11 | 5/5/5/5 | 11/11/11/11 |
+| a dominant operand | 27/27/27/27 | 1/1/1/1 | 27/27/27/27 |
+
+**atan2, atan2pi**
+
+| family | need | held before | held after |
+|---|---|---|---|
+| the axes against the axes | 205/205/205/205 | 11/11/11/13 | 205/205/205/205 |
+| the diagonals and one ulp off them | 128/128/128/128 | 12/12/12/14 | 128/128/128/128 |
+| min subnormal over 2, 4, 1 | 5/5/5/5 | 0/0/0/0 | 5/5/5/5 |
+| big and small against 1 and -1 | 30/30/30/30 | 0/0/0/0 | 30/30/30/30 |
+| tiny y against 1, -1, 2, 3 | 20/20/20/20 | 1/1/1/1 | 20/20/20/20 |
+
+**powr**
+
+| family | need | held before | held after |
+|---|---|---|---|
+| powr's own table: negative bases, zeros, infinities, NaNs | 196/196/196/196 | 27/29/25/21 | 196/196/196/196 |
+| the specials against the specials | 256/256/256/256 | 38/40/36/32 | 256/256/256/256 |
+| integer exponents against 2, 3, 5, 7, 10, 4097 | 180/180/180/180 | 8/8/8/11 | 180/180/180/180 |
+| perfect powers against dyadic exponents | 96/96/96/96 | 0/0/0/0 | 96/96/96/96 |
+| pow(1+u, -(1+u)), the escalating family | 60/60/60/60 | 2/2/3/3 | 60/60/60/60 |
+| a base 1 +- dy ulp against exponents across the range | 144/144/144/144 | 5/6/5/5 | 144/144/144/144 |
+
+**pown, compound, rootn**
+
+| family | need | held before | held after |
+|---|---|---|---|
+| the specials and extremes (operand only) | 23/23/23/23 | 20/20/20/20 | 23/23/23/23 |
+| 2^e (operand only) | 24/24/24/24 | 17/17/17/17 | 24/24/24/24 |
+| 2^-k (operand only) | 12/12/12/12 | 12/12/12/12 | 12/12/12/12 |
+| perfect powers m 2^e, both signs (operand only) | 120/120/120/120 | 19/18/19/18 | 120/120/120/120 |
+| perfect powers +- 1 ulp (operand only) | 32/32/32/32 | 10/10/10/10 | 32/32/32/32 |
+| (operand, n) in the generator's stride, n within the host's long | 1560/1560/1560/1560 | 100/99/102/97 | 1560/1560/1560/1560 |
+| (operand, n) for n = 0, 1, 2, -1, -2 | 900/900/900/900 | 125/123/125/120 | 900/900/900/900 |
+
+**The golden model's branches.** At fp32 the vectors' cases reached 65
+(function, line) pairs that the oracle's did not, 60 at fp64, 66 at fp128
+and 33 at fp256: at fp32 pow 10 (6 at fp64), hypot 8, atan2 and atan2Pi 6
+each, powr 4 (3), log10p1 4, atan, atanPi and acosh 3 each, exp2 2, and
+one each for sixteen more functions, nearly all of them the infinity or
+NaN row of finding 1. After the extras: none, at any format. The cases of
+neither set reached five lines, which now the extras do: `hypot:898` (an
+exact Pythagorean hypot past the largest finite, hypot(21 2^(emax-4), 28
+2^(emax-4))), `rootn:2862` (the overflow screen, rootn(3 2^-(emax+3),
+-1)), `_pow_dyadic:450` and `:453` (a perfect power to a dyadic exponent
+whose power outruns p + 1 bits, pow(9, 27/2) at fp32) and
+`_hypot_dyadic:501` (a Pythagorean hypot wider than p + 1 bits, the pair
+(2^(j+1) - 1, (2^j - 1) 2^(j+1)) for j just over p/2). What no argument
+reaches, at any of the four: `_mag_ge`'s zero rows and `_integrality`'s
+zero and infinity rows (callers screen them first), `_pi_reduce`'s
+even-integer and half-integer returns (the exact cases return before it),
+`_signed_parts`'s straddle of zero (only a forced low start precision
+reaches it), `_mag_cmp`'s shift left (the precision schedule keeps the
+exponent negative), `_int_kth_root`'s M = 1 return, `_logp1_family`'s two
+x = 0 returns (zero returns earlier), `pown`'s neighbour rule beside 1
+(the nearest an integer exponent brings n log x to zero is 2^(1-p), above
+2^-(p+3)) and `rootn`'s exact underflow (a root only shrinks the
+exponent): fifteen lines (19 or 20 before the extras, at every format).
+
+**Added beyond what the vector generator directs,** by family: where the
+model or the standard asks for it, what it holds, how many of the intended
+members the pools did not already ask, per format, and the cases they came
+to (five attributes each).
+
+| family | functions | where the model or the standard asks | what it holds | added of intended (fp32 / fp64 / fp128 / fp256) | cases |
+|---|---|---|---|---|---|
+| `x:int-edge` | exp, expm1, exp2, log, log1p, log2, log10 | `_exp_family`'s integer branch: `n > emax`, `n < emin - man_w - 1`, and the tie at `emin - man_w - 1` | the integers at both ends and each side of the tie, with the operand's own neighbours | 50 of 50 / 48 of 50 / 50 of 50 / 50 of 50 | 1,750 / 1,680 / 1,750 / 1,750 |
+| `x:pow2-sub` | the same seven | log2's exact case `M == 1` at the subnormal powers of two | 2^k for k from emin - man_w to emin + 1, with neighbours | 14 of 14 / 14 of 14 / 14 of 14 / 14 of 14 | 490 / 490 / 490 / 490 |
+| `x:ln2-edge` | the same seven | the screens at emax + 2 and emin - man_w - 2, and the true edges at emax + 1 and emin - man_w - 1 | n ln 2 for ten n, walked two ulps, both signs | 100 of 100 / 100 of 100 / 100 of 100 / 100 of 100 | 3,500 / 3,500 / 3,500 / 3,500 |
+| `x:tiny-edge` | the same seven | the tiny rules, `ex <= -(p+c)` and `2 ex + p + c <= 0` for c = 2..6 | the binade boundary of each, straddled | 46 of 46 / 46 of 46 / 46 of 46 / 46 of 46 | 1,610 / 1,610 / 1,610 / 1,610 |
+| `t:tiny-edge` | the nine trigonometric | the same rules, and atanPi's `ex >= p + 1` | the same | 36 of 36 / 38 of 38 / 38 of 38 / 38 of 38 | 1,620 / 1,710 / 1,710 / 1,710 |
+| `t:beside-half` | sinPi, cosPi, tanPi | `2 s_vexp + p + 6 <= 0`, s the distance from a half-integer | h +- 2^-j for h = 1/2 .. 3 and j round (p + 6)/2 | 72 of 72 / 72 of 72 / 72 of 72 / 72 of 72 | 3,240 / 3,240 / 3,240 / 3,240 |
+| `r:tiny-edge` | sin, cos, tan | the same rules | the same | 36 of 36 / 36 of 36 / 48 of 48 / 48 of 48 | 540 / 540 / 720 / 720 |
+| `r:worst` | sin, cos, tan | the reduction's hardest binades (`_reduction_worst_cases`) | the representable numbers nearest a multiple of pi/2, found from MPFR's pi by the continued fraction, with a neighbour each side | 24 of 24 / 24 of 24 / 14 of 18 / 18 of 18 | 360 / 360 / 210 / 270 |
+| `h:ln2-edge` | the six hyperbolics | `_cosh_sinh_overflow` at emax + 3 and the true edge at emax + 2 | n ln 2, walked two ulps | 42 of 60 / 42 of 60 / 42 of 60 / 42 of 60 | 1,260 / 1,260 / 1,260 / 1,260 |
+| `h:tiny-edge` | the six hyperbolics | the same rules | the same | 46 of 46 / 48 of 48 / 48 of 48 / 48 of 48 | 1,380 / 1,440 / 1,440 / 1,440 |
+| `m:int-edge` | exp2m1, exp10, exp10m1, log2p1, log10p1, rSqrt | exp2m1's `n == emax + 1`, `n > emax + 1`, `abs(n) <= p + 1` | the integers round each, with neighbours | 24 of 24 / 24 of 24 / 24 of 24 / 24 of 24 | 720 / 720 / 720 / 720 |
+| `m:tiny-edge` | the same six | the same rules | the same | 36 of 46 / 38 of 46 / 38 of 46 / 38 of 46 | 1,080 / 1,140 / 1,140 / 1,140 |
+| `m:log2p1-edge` | log2p1 | `_logp1_family`: x = 2^k from `k >= p - g + 1` | 2^k for the five k round the first | 14 of 14 / 15 of 15 / 15 of 15 / 15 of 15 | 420 / 450 / 450 / 450 |
+| `m:log10-edge` | exp10, exp10m1 | their screens: `x log2(10)` against emax + 2 and -(p + 3) | n log10(2), walked two ulps | 90 of 90 / 90 of 90 / 90 of 90 / 90 of 90 | 2,700 / 2,700 / 2,700 / 2,700 |
+| `pow:edge` | pow | `_screen_exponent`'s thresholds, and the overflow and underflow edges beneath them | (x, y) with y at n / log2(abs(x)) for x = 3, 5, 10, 3/2, 5/4, 3/4 and n at the top and the bottom of the range, walked two ulps, and the integers round it | 324 of 324 / 324 of 324 / 324 of 324 / 324 of 324 | 1,620 / 1,620 / 1,620 / 1,620 |
+| `powr:edge` | powr | the same | the same | 324 of 324 / 324 of 324 / 324 of 324 / 324 of 324 | 1,620 / 1,620 / 1,620 / 1,620 |
+| `pow:dyadic-wide` | pow | `_pow_dyadic`: `Y > p + 1`, and `root^Y` wider than p + 1 bits | a perfect square or fourth power to Y / 2^k with Y odd, across both edges | 46 of 46 / 54 of 54 / 54 of 54 / 51 of 51 | 230 / 270 / 270 / 255 |
+| `powr:dyadic-wide` | powr | the same | the same | 46 of 46 / 54 of 54 / 54 of 54 / 51 of 51 | 230 / 270 / 270 / 255 |
+| `hypot:exact-top` | hypot | `hypot:898`, the exact hypot past the largest finite | (3, 4), (5, 12), (8, 15) scaled so that the hypot passes 2^(emax+1) and so that it does not | 24 of 24 / 24 of 24 / 24 of 24 / 24 of 24 | 120 / 120 / 120 / 120 |
+| `hypot:wide-triples` | hypot | `_hypot_dyadic`: an exact hypot wider than p + 1 bits | (2^(j+1) - 1, (2^j - 1) 2^(j+1)) for j round p/2 | 15 of 15 / 15 of 15 / 15 of 15 / 15 of 15 | 75 / 75 / 75 / 75 |
+| `atan2:tiny-over-unit` | atan2, atan2Pi | `2 qv + p + 3 <= 0`, `ey - ex <= -(p+1)` | the vector set's tiny y against +-1, 2, 3, with the thresholds' k added | 46 of 50 / 46 of 50 / 46 of 50 / 46 of 50 | 460 / 460 / 460 / 460 |
+| `int:specials` | pown, compound, rootn | 9.2.1's rows for the zeros, infinities and NaNs | the 18 specials against the 15 n the oracle uses | 58 of 145 / 58 of 145 / 58 of 145 / 65 of 145 | 870 / 870 / 870 / 975 |
+| `int:exact-edge` | pown, compound | `_pown_dyadic`: `n > p + 1`, `M^n` wider than p + 1 bits | M, -M and M - 1 for odd M against the n round where M^n leaves p + 1 bits | 142 of 144 / 157 of 158 / 159 of 159 / 160 of 160 | 710 / 785 / 795 / 800 |
+| `int:perfect-power` | rootn | `_rootn_dyadic`: the odd significand a perfect n-th power in absolute value | r^n, with neighbours, for r = 2 .. 13 and n = 2 .. 12 | 178 of 180 / 277 of 279 / 277 of 279 / 277 of 279 | 890 / 1,385 / 1,385 / 1,385 |
+| `int:subnormal-recip` | rootn | `rootn:2862`, the overflow screen | 3, 5, 7 times a power of two just under the format's range, against n = -1, -2, 1 | 54 of 54 / 54 of 54 / 54 of 54 / 54 of 54 | 270 / 270 / 270 / 270 |
+| `int:power-edge` | pown | the screens | 3, 5, 10 and their negatives against the n that takes them to 2^(emax+1) and 2^(emin-man_w-1) | 72 of 72 / 72 of 72 / 72 of 72 / 72 of 72 | 360 / 360 / 360 / 360 |
+
+What was added, in `host/tools/mpfr_check.c`, as a phase of its own after
+table91 that draws no random number: the three pools are as they were, down
+to the draws, so every case the oracle asked before it asks now. A candidate
+the function's pool already holds is skipped, and so is a pair the strided
+pairing already asks. At the end of a run the tool prints, for each family
+and format, how many members were intended, how many the pools held and how
+many were added, and how many cases that came to; a dump line names the
+family of each added case. Subsets run with `CFT_MPFR_PHASES` (a comma list of
+`arith`, `clause5`, `transcend`, `trig`, `radian`, `table91`, `extras`,
+`reduce`, `convert`, `formatof`) and `CFT_MPFR_FORMATS`; unset, everything
+runs as it did.
+
+**What it asks now, and what that cost.** MEASURED on the desktop (mingw64
+gcc 16.1, GNU MPFR 4.2.2, 2026-11-02), the transcendental phases of each
+format on their own, `CFT_MPFR_PHASES=transcend,trig,radian,table91,extras
+CFT_MPFR_FORMATS=<format> ./mpfr-check 24 7`; cases per phase:
+
+| format | transcend | trig | radian+hyperbolic | table91 | extras | all five | value / flag mismatches |
+|---|---|---|---|---|---|---|---|
+| fp32 | 23,920 | 20,000 | 9,495 | 53,360 | 102,860 | 209,635 | 0 / 0 |
+| fp64 | 23,920 | 20,000 | 9,495 | 53,360 | 166,070 | 272,845 | 0 / 0 |
+| fp128 | 23,920 | 20,000 | 9,495 | 53,360 | 113,355 | 220,130 | 0 / 0 |
+| fp256 | 23,920 | 20,000 | 9,495 | 53,360 | 126,720 | 233,495 | 0 / 0 |
+| four | 95,680 | 80,000 | 37,980 | 213,440 | 509,005 | 936,105 | 0 / 0 |
+
+The first four columns are the oracle's own phases and have the numbers
+they had on 2026-10-30 (23,920, 20,000, 9,495 and 53,360 a format): the
+pools and their draws are as they were.
+
+The extras alone, run apart, were 102,860, 166,070, 113,355 and 126,720
+cases in 10, 27, 45 and 179 seconds at fp32, fp64, fp128 and fp256
+(509,005 cases and 261 seconds in all). The same run earlier that hour, on
+a quieter desktop and before two small families were added, took 6, 20, 35
+and 151 seconds, 212 in all: the machine is shared, and the numbers move
+with it.
+
+The stage's `mpfr-check 24 7` was 859,874 cases in 565 s on 2026-10-30,
+and the other phases are unchanged, so the whole run should be 859,874 +
+509,005 = **1,368,879 cases in about 826 s** (565 + 261), or 777 s on the
+quieter measure: 38 and 46 percent over 565, inside the brief's 50. That
+is INFERRED, not measured. The full run is the lead's to make.
+
+**Controls**, run on the 2026-11-02 tree, both on copies outside the
+repository.
+
+- The library as it stood before the exp2 fix (`ca43695d^`), against this
+  oracle's extras alone: four value mismatches, one at each format, and no
+  other case differing. Each is exp2 at emin - man_w - 1 under
+  roundTiesToAway (family `x:ints`), at -150 (0xc3160000), -1075, -16495
+  and -262379, where the library gives +0 with flags 0x18 and MPFR the
+  smallest subnormal with flags 0x18: the four records ca43695d moved. The
+  old pools hold none of the four operands (the fp32 pool has no -150).
+- A fault planted in a copy of `host/src/transcend.c` (`asin(-0)` returns
+  +0), against the pools as they were and then the extras: the trigonometric
+  phase's 20,000 cases per format find nothing at fp32, fp64 or fp128, and the
+  extras find it at each: 10 mismatches (asin and asinPi at -0, five
+  attributes each; family `t:io`). At fp256 the old pool holds the real -0
+  and finds the same 10.
+
+**What the audit does not reach.**
+
+- A family nobody has written down: not in the vector generator, not a
+  threshold of the model, not a row of 9.2, not in this document. In
+  particular the worst cases for rounding of exp, log, pow and the rest (the
+  known hardest-to-round arguments) are in no pool; the reduction's are.
+- The branch audit ran at all four formats, with the directed operands only (a
+  dump's randoms are not a full run's). It shows which lines are reached, not
+  that every value of a reached line's variables is.
+- n beyond the host's `long` (MPFR's operand type): 300 vector pairs a format
+  of pown, compound and rootn (n = +-2^62, INT64_MIN, INT64_MAX and -2^31).
+  Host/tests/transcend_check.py holds them against the model.
+- The pairs the strided pairing and the families skip are most of the cross
+  product, on purpose; the new pairs are the vector generator's and the
+  families named above.
+- Sin, cos and tan at the wide formats are sampled as the vector generator
+  samples them: 192 powers of two, and the deepest three binades of eight.
+- The comparison scripts are not filed; the dump they read is what the tool
+  prints.
 
 ## What is NOT here
 

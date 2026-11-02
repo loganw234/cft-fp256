@@ -26230,3 +26230,153 @@ Its notes are below. It also ran `verify.mjs`, an extra its brief did not ask fo
 - earlier the same day, in the round's records, the lead called the seven e1 clones "box clones": they are on the desktop. Logan's "keep" applied either way, and the ledger was corrected that evening.
 
 docs/README.md is recounted.
+
+## 2026-11-02 - the MPFR oracle's pools, audited family by family: the thirty-nine functions at the four formats against the vector generator's operands, the golden model's branches, IEEE 754-2019 9.2 and docs/TRANSCENDENTALS.md; twenty functions had no specials at three formats and the binary functions were asked 4 to 10 percent of their pairs; 509,005 cases now ask what the pools did not, 0 mismatches, and they find the exp2 tie of 2026-10-05 in the library as it stood (parcel OPS, Sonnet 5.5, claude-sonnet-5-5); **nothing in this entry touched the library, the golden model, the vectors, the card or amd-arc-box**
+
+**Why.** Issue 1 (2026-10-30) was found by an outside comparison because the MPFR oracle's pool for table 9.1's ten did not hold the family their hard cases live in. That day's entry ends its known limits with "no sweep has asked which families any pool lacks". The lead set this parcel up on 2026-11-02, at Logan's word ("Parcel, Sonnet + Haiku"), to ask it: for each of the 39 functions at each of the 4 formats, which families do its hard cases live in, and does the pool it runs on hold them, and how many?
+
+**What was done,** on branch ops from 19de866c:
+- **host/tools/mpfr_check.c.**
+  - Three environment variables, none of which changes a default run. `CFT_MPFR_PHASES` and `CFT_MPFR_FORMATS` (comma lists) run a subset. `CFT_MPFR_DUMP_CASES` prints every case of the transcendental phases in half a second and checks nothing; the audit's comparisons read that dump.
+  - The three pools are unchanged, down to the random draws. A new phase, `extras`, runs after table91 in each format's turn, draws no random number, and asks what the pools did not, family by family. A candidate the function's pool already holds is skipped, and so is a pair the strided pairing already asks. At the end of a run a table counts, for each family and format, the members intended, the members the pools held, the members added and the cases they came to.
+  - The extras' operands are derived from the format's parameters and from MPFR (n ln 2, n log10 2, the reduction's worst cases), as the pools' are; nothing is read from the vector generator or the model.
+- **docs/TRANSCENDENTALS.md.** A subsection after the 2026-10-30 paragraph: the four sources, six findings, the tables (what the vectors direct and what the pools held, by the generator's line; what was added beyond the vectors; the model's branches before and after), the controls and the limits.
+- **docs/README.md** recounted.
+- Nothing changed in host/src, host/include, python/cft_golden, vectors/, bindings/, rtl/ or hw/.
+
+**The audit,** four comparisons. MEASURED on the desktop (mingw64 gcc 16.1, GNU MPFR 4.2.2, CPython 3.12), 2026-11-02:
+- **Against the vector generator.** The dump's cases, and the operands (pairs, for the binary functions; the (operand, n) pairs with n inside the host's `long` for pown, compound and rootn) that `vectors.py` builds at `extra = 0`, each append tagged by its line. Held by the pools before, fp32 / fp64 / fp128 / fp256, of what the generator directs (after, all of it, in every row):
+  - exp, expm1, exp2, log, log1p, log2, log10: 74 / 97 / 104 / 104 of 221 / 258 / 337 / 499;
+  - the nine trigonometric: 116 / 116 / 116 / 124 of 244 each;
+  - sin, cos, tan: 66 / 66 / 48 / 53 of 626 / 4,268 / 290 / 290;
+  - the six hyperbolics: 73 / 73 / 72 / 81 of 222 each;
+  - exp2m1, exp10, exp10m1, log2p1, log10p1, rSqrt: 97 / 123 / 127 / 127 of 524 / 775 / 871 / 1,071;
+  - pow: 29 / 30 / 25 / 25 of 706; hypot: 13 of 137 at each; atan2 and atan2Pi: 24 / 24 / 24 / 28 of 384; powr: 46 / 49 / 44 / 40 of 733; pown, compound, rootn: 184 / 182 / 187 / 179 of 2,160.
+- **Against the golden model's branches.** The same cases under `sys.monitoring`, first hit per line. A (function, line) pair the vectors reach and the oracle does not: 65 at fp32, 60 at fp64, 66 at fp128, 33 at fp256, then 0 at each. Lines neither reaches: 19, 20, 20 and 20, then 15, 15, 15 and 15. The five that closed are `hypot:898`, `rootn:2862`, `_pow_dyadic:450` and `:453` and `_hypot_dyadic:501`; the fifteen that remain are lines no argument reaches (a caller screens them first, or an inequality the formats satisfy keeps them out), each named in TRANSCENDENTALS.md.
+- **Against 754-2019 9.2 and the model's thresholds.** The special rows are the eighteen specials of the format, both signs, NaNs with payload, and for the binary functions every pair of them. The thresholds are every tiny rule, screen and exact-table bound of the model, each straddled.
+- **Against docs/TRANSCENDENTALS.md,** for the exact tables and the neighbour rules.
+
+**The gaps found** (function, format, family; the counts are in TRANSCENDENTALS.md, MEASURED):
+1. sinPi, cosPi, tanPi, asin, acos, atan, atan2, asinPi, acosPi, atanPi, atan2Pi, sin, cos, tan, sinh, cosh, tanh, asinh, acosh and atanh, at fp32, fp64 and fp128: **the specials of the format.** `build_trigpool` and `build_p3pool` take their first eighteen entries from the array `main` hands them, which holds fp256's eighteen. At fp32 they are +0 twelve times, 0x00000001 three times and 0xffffffff three times: no -0, no infinity, no signaling NaN, no 1, no minimum or maximum normal. At fp256 they are right.
+2. pow, hypot, atan2, atan2Pi and powr at all four formats: **the pairs.** 4 to 10 percent of the vector generator's, the specials only on the diagonal; no perfect power under a dyadic exponent (0 of 96), 5 of 40 Pythagorean-triple pairs. pown, compound and rootn: 8 percent of the (operand, n) pairs.
+3. exp and expm1 at all four: the n ln 2 **overflow, underflow and tininess edges,** 0 of 65; sinh and cosh: 18 of 50 of theirs. exp2 at all four: the integers past emin - man_w, **the tie at emin - man_w - 1** (-150, -1075, -16495, -262379) and the quarter beneath it. exp10 and exp10m1: the x with x log2(10) = n, in no pool and no vector.
+4. log10 at fp128 and fp256: **the powers of ten past 10^25** (53 of 147 and 53 of 309). log10p1 at all four: **10^k - 1,** 0 of 7 / 15 / 34 / 71. log2p1: 2^k - 1, 20 / 18 / 18 / 18 of 278 / 480 / 480 / 480, and the two places log2p1 changes rule.
+5. sin, cos, tan at all four: **a power of two at every exponent** (54 / 54 / 2 / 2 of 554 / 4,196 / 194 / 194) and **the reduction's worst cases** (0 / 0 / 4 / 0 of 24 / 24 / 18 / 18).
+6. Four exact or screened branches of the model that no pool and no vector reached: hypot's exact result past the largest finite, rootn's overflow screen on a subnormal's reciprocal, pow's perfect power under a dyadic exponent whose power outruns p + 1 bits, and hypot's Pythagorean result wider than p + 1 bits.
+7. Every unary function's pool also lacked a share of the vector generator's other families (integers, halves, quarters and eighths with neighbours, 2^k - 1, the top of the range, the neighbour thresholds' sides): the tables give each.
+
+**The fix,** in the one file: the families of the audit, as the `extras` phase. 69 families, 509,005 cases, MEASURED (the extras of each format on its own, `CFT_MPFR_PHASES=extras CFT_MPFR_FORMATS=<f> ./mpfr-check 24 7`; the desktop is shared, and an earlier run of the same phase, before two small families were added, took 6 / 20 / 35 / 151 s, 212 in all):
+
+| format | cases | seconds | value mismatches | flag mismatches |
+|---|---|---|---|---|
+| fp32 | 102,860 | 10 | 0 | 0 |
+| fp64 | 166,070 | 27 | 0 | 0 |
+| fp128 | 113,355 | 45 | 0 | 0 |
+| fp256 | 126,720 | 179 | 0 | 0 |
+| four | 509,005 | 261 | 0 | 0 |
+
+- **The full run.** `mpfr-check 24 7` was 859,874 cases and 565 s on 2026-10-30. The earlier phases are unchanged, so the full run should be **1,368,879 cases in about 826 s** (859,874 + 509,005 and 565 + 261), or 777 s on the quieter measure of the extras: 46 and 38 percent over 565. That is INFERRED, not measured: the lead's run is the measurement, and 850 s is the limit the brief set. The mpfr stage's row in docs/VERIFICATION.md says 8 minutes (565 s measured on 2026-10-30); it becomes about 13.
+- **The old phases, with these pools, per format and phase** (MEASURED; the five phases `transcend,trig,radian,table91,extras` at each format in one run): the table is in docs/TRANSCENDENTALS.md. Cases per phase are 23,920 / 20,000 / 9,495 / 53,360 at each format, as on 2026-10-30, and the mismatches are 0 and 0.
+- **Where the extras' time goes at fp256** (MEASURED once, with a timer in a scratch copy of an earlier state of the extras, 160 s then): the library 140 s and MPFR 20 s. `int:vector-pairs` alone is 51 s, a third of it: the vector generator's own pairs for pown, compound and rootn. If the lead's run is over 850 s, that family is the largest single saving; what it holds is the vector generator's pairs, which the record would then have to name as not asked.
+- **The per-family table** a full run prints (intended - held by the pools = added / cases, per family and format; MEASURED in the four runs above):
+
+```
+family                 fp32 intended-held=added/cases fp64 intended-held=added/cases fp128 intended-held=added/cases fp256 intended-held=added/cases
+x:io                     33- 20=  13/455        33- 20=  13/455        33- 20=  13/455        33- 20=  13/455
+x:ints                   54-  9=  45/1575       56-  9=  47/1645       56-  9=  47/1645       56-  9=  47/1645
+x:int-edge               50-  0=  50/1750       50-  2=  48/1680       50-  0=  50/1750       50-  0=  50/1750
+x:pow2                   17- 16=   1/35         14- 13=   1/35         17- 16=   1/35         17- 16=   1/35
+x:pow2-sub               14-  0=  14/490        14-  0=  14/490        14-  0=  14/490        14-  0=  14/490
+x:pow10                  29- 19=  10/350        65- 43=  22/770       143- 49=  94/3290      305- 49= 256/8960
+x:ln2-edge              100-  0= 100/3500      100-  0= 100/3500      100-  0= 100/3500      100-  0= 100/3500
+x:tiny                   24- 10=  14/490        24- 10=  14/490        24- 10=  14/490        24- 10=  14/490
+x:tiny-edge              46-  0=  46/1610       46-  0=  46/1610       46-  0=  46/1610       46-  0=  46/1610
+t:io                     33- 13=  20/900        33- 13=  20/900        33- 13=  20/900        33- 21=  12/540
+t:units                   4-  0=   4/180         4-  0=   4/180         4-  0=   4/180         4-  0=   4/180
+t:halves                 42- 28=  14/630        42- 28=  14/630        42- 28=  14/630        42- 28=  14/630
+t:quarters               42- 21=  21/945        42- 21=  21/945        42- 21=  21/945        42- 21=  21/945
+t:ints                   30- 19=  11/495        30- 19=  11/495        30- 19=  11/495        30- 19=  11/495
+t:eighths                36-  0=  36/1620       36-  0=  36/1620       36-  0=  36/1620       36-  0=  36/1620
+t:top                    36-  8=  28/1260       36-  8=  28/1260       36-  8=  28/1260       36-  8=  28/1260
+t:tiny                   36- 27=   9/405        36- 27=   9/405        36- 27=   9/405        36- 27=   9/405
+t:tiny-edge              36-  0=  36/1620       38-  0=  38/1710       38-  0=  38/1710       38-  0=  38/1710
+t:beside-half            72-  0=  72/3240       72-  0=  72/3240       72-  0=  72/3240       72-  0=  72/3240
+r:io                     33- 13=  20/300        33- 13=  20/300        33- 13=  20/300        33- 22=  11/165
+r:pow2-sweep            546- 46= 500/7500     4188- 46=4142/62130     192-  0= 192/2880      192-  0= 192/2880
+r:pow2-near              22-  0=  22/330        22-  0=  22/330        34- 10=  24/360        34- 10=  24/360
+r:tiny                   14-  7=   7/105        14-  7=   7/105        28- 21=   7/105        28- 21=   7/105
+r:tiny-edge              36-  0=  36/540        36-  0=  36/540        48-  0=  48/720        48-  0=  48/720
+r:worst                  24-  0=  24/360        24-  0=  24/360        18-  4=  14/210        18-  0=  18/270
+h:io                     33- 13=  20/600        33- 13=  20/600        33- 13=  20/600        33- 22=  11/330
+h:small                  90-  8=  82/2460       90-  8=  82/2460       90-  8=  82/2460       90-  8=  82/2460
+h:ln2-edge               60- 18=  42/1260       60- 18=  42/1260       60- 18=  42/1260       60- 18=  42/1260
+h:tanh-edge              18- 10=   8/240        18- 10=   8/240        18-  9=   9/270        18-  9=   9/270
+h:tiny                   32- 24=   8/240        32- 24=   8/240        32- 24=   8/240        32- 24=   8/240
+h:tiny-edge              46-  0=  46/1380       48-  0=  48/1440       48-  0=  48/1440       48-  0=  48/1440
+m:io                     33- 22=  11/330        33- 22=  11/330        33- 22=  11/330        33- 22=  11/330
+m:ints                  114- 22=  92/2760      114- 24=  90/2700      114- 22=  92/2760      114- 22=  92/2760
+m:int-edge               24-  0=  24/720        24-  0=  24/720        24-  0=  24/720        24-  0=  24/720
+m:pow10                  27- 18=   9/270        63- 42=  21/630       141- 48=  93/2790      303- 48= 255/7650
+m:10^k-1                 16-  0=  16/480        42-  0=  42/1260       97-  0=  97/2910      209-  0= 209/6270
+m:2^k-1                 254-  9= 245/7350      456-  7= 449/13470     456-  7= 449/13470     456-  7= 449/13470
+m:pow2                   72- 13=  59/1770       76- 15=  61/1830       76- 15=  61/1830       76- 15=  61/1830
+m:tiny                   20- 13=   7/210        20- 13=   7/210        20- 13=   7/210        20- 13=   7/210
+m:tiny-edge              46- 10=  36/1080       46-  8=  38/1140       46-  8=  38/1140       46-  8=  38/1140
+m:log2p1-edge            14-  0=  14/420        15-  0=  15/450        15-  0=  15/450        15-  0=  15/450
+m:log10-edge             90-  0=  90/2700       90-  0=  90/2700       90-  0=  90/2700       90-  0=  90/2700
+pow:specials            256- 25= 231/1155      256- 25= 231/1155      256- 21= 235/1175      256- 21= 235/1175
+pow:int-exp             156-  0= 156/780       156-  0= 156/780       156-  0= 156/780       156-  0= 156/780
+pow:dyadic-exp          192-  0= 192/960       192-  0= 192/960       192-  0= 192/960       192-  0= 192/960
+pow:dyadic-wide          46-  0=  46/230        54-  0=  54/270        54-  0=  54/270        51-  0=  51/255
+pow:near1               288-  8= 280/1400      288- 10= 278/1390      288-  8= 280/1400      288-  8= 280/1400
+pow:cancel              108-  2= 106/530       108-  2= 106/530       108-  2= 106/530       108-  2= 106/530
+pow:edge                324-  0= 324/1620      324-  0= 324/1620      324-  0= 324/1620      324-  0= 324/1620
+powr:specials           283- 38= 245/1225      283- 40= 243/1215      283- 36= 247/1235      283- 32= 251/1255
+powr:int-exp            156-  2= 154/770       156-  2= 154/770       156-  2= 154/770       156-  2= 154/770
+powr:dyadic-wide         46-  0=  46/230        54-  0=  54/270        54-  0=  54/270        51-  0=  51/255
+powr:edge               324-  0= 324/1620      324-  0= 324/1620      324-  0= 324/1620      324-  0= 324/1620
+hypot:triples           100-  8=  92/460       100-  8=  92/460       100-  8=  92/460       100-  8=  92/460
+hypot:dominance          27-  1=  26/130        27-  1=  26/130        27-  1=  26/130        27-  1=  26/130
+hypot:extremes           10-  4=   6/30         10-  4=   6/30         10-  4=   6/30         10-  4=   6/30
+hypot:wide-triples       15-  0=  15/75         15-  0=  15/75         15-  0=  15/75         15-  0=  15/75
+hypot:exact-top          24-  0=  24/120        24-  0=  24/120        24-  0=  24/120        24-  0=  24/120
+atan2:axes              225- 18= 207/2070      225- 18= 207/2070      225- 18= 207/2070      225- 20= 205/2050
+atan2:diagonals         112-  5= 107/1070      112-  5= 107/1070      112-  5= 107/1070      112-  7= 105/1050
+atan2:sub-quotient        1-  0=   1/10          1-  0=   1/10          1-  0=   1/10          1-  0=   1/10
+atan2:tiny-over-unit     50-  4=  46/460        50-  4=  46/460        50-  4=  46/460        50-  4=  46/460
+atan2:big-small          22-  0=  22/220        22-  0=  22/220        22-  0=  22/220        22-  0=  22/220
+int:vector-pairs       2160-184=1976/29640    2160-182=1978/29670    2160-187=1973/29595    2160-179=1981/29715
+int:specials            145- 87=  58/870       145- 87=  58/870       145- 87=  58/870       145- 80=  65/975
+int:exact-edge          144-  2= 142/710       158-  1= 157/785       159-  0= 159/795       160-  0= 160/800
+int:perfect-power       180-  2= 178/890       279-  2= 277/1385      279-  2= 277/1385      279-  2= 277/1385
+int:subnormal-recip      54-  0=  54/270        54-  0=  54/270        54-  0=  54/270        54-  0=  54/270
+int:power-edge           72-  0=  72/360        72-  0=  72/360        72-  0=  72/360        72-  0=  72/360
+extras, cases per format: fp32 102,860, fp64 166,070, fp128 113,355, fp256 126,720; 509,005 in all
+```
+
+**Controls,** MEASURED, on copies outside the repository:
+- The library as it stood before the exp2 tie's fix (ca43695d^), built in a scratch directory and linked with this tool, extras only: four value mismatches, one at each format and no other case differing: exp2 at emin - man_w - 1 under roundTiesToAway, family `x:ints`, at -150 (0xc3160000), -1075, -16495 and -262379, where the library gives +0 with flags 0x18 and MPFR the smallest subnormal with flags 0x18. They are the four records ca43695d moved. The old pools hold none of the four operands (the dump of the pools as they were has no -150 in exp2's fp32 pool).
+- A fault planted in a copy of host/src/transcend.c: `asin(-0)` returns +0 (line 3385). Against the pools as they were, the trigonometric phase of 20,000 cases a format: 0 mismatches at fp32, fp64 and fp128, and 10 at fp256 (asin and asinPi, five attributes each), whose pool holds the real -0. The extras at fp32, fp64 and fp128: the same 10 at each, family `t:io`.
+
+**The default run, unchanged** (INFERRED, by construction and by the dumps): the builders gained a store into an array nothing else reads; `check_transcend` gained a branch that only the dump takes; `main` gained gates that are all on when the variables are unset, and a call that rebuilds fp256's eighteen specials into `pool` without drawing a random number; the extras phase draws none and runs after the four it follows. MEASURED: a build of the first of these changes alone dumped, member for member, the same pool lines (85,420) as the final tool does. The lead's full run is the confirmation: its transcend, trig, radian+hyperbolic and table91 lines should read 23,920 / 20,000 / 9,495 / 53,360 cases at each format, and the arithmetic, clause-5, reduction, convert and formatOf lines as in the 2026-10-30 evidence.
+
+**The commands,** for the lead:
+- Build: `PATH="/c/msys64/mingw64/bin:$PATH" make -C host CC=gcc OS=Windows_NT TMP="$W" TEMP="$W" mpfr-check.exe` with `W=$(cygpath -m /tmp)`; run: `cd host && ./mpfr-check.exe 24 7`.
+- Or `bash verify/run.sh --only mpfr`.
+- The dump: `CFT_MPFR_DUMP_CASES=1 ./mpfr-check.exe 24 7 > dump.txt`.
+
+**Known limits,** recorded:
+- A hard case nobody has written down is not found by an audit whose sources are lists. The worst cases for rounding of exp, log, pow and the rest (the known hardest-to-round arguments) are in no pool; the reduction's are.
+- The branch audit ran at all four formats with directed operands only; the model's thresholds scale with p, and it was run, not proved, that the lines reached are the lines that matter.
+- n beyond the host's `long`: 300 of the vector generator's (operand, n) pairs a format (n = +-2^62, INT64_MIN, INT64_MAX and -2^31), which host/tests/transcend_check.py holds against the model.
+- The pairs beyond the vector generator's and the families' are not asked: the cross product is not the point.
+- The comparison scripts are not in the repository (the brief kept them out); the dump is what the tool prints, and TRANSCENDENTALS.md gives the method.
+- Sin, cos and tan at the wide formats are sampled as the vector generator samples them: 192 powers of two, and the deepest three binades of eight for the worst cases.
+- The timings are of a desktop with other sessions on it, and the extras' took 212 s in one run and 261 s in another an hour later.
+
+**For the lead,** three things the parcel did not do because they were not its to do:
+- **The defect in `main` is left in place,** so that the default run asks what it always asked. `build_trigpool` and `build_p3pool` are handed `pool`, the clause-5 loop's last, fp256's; the fix is to hand them the format's own eighteen (`build_pool(f, base, 0)`, no random draw), but it changes the first eighteen members of those two pools at fp32, fp64 and fp128, dropping the accidental ones (0xffffffff, 0x00000001, the repeated +0). The extras ask the real ones, so nothing is lost by waiting.
+- **docs/VERIFICATION.md's mpfr row** (8 min) and any timing the runner's budgets quote are the lead's to change.
+- **The comparison scripts** (the vector tagger, the branch monitor, the holes, the family tables) are kept outside the repository, as the brief said; if they are wanted filed, `host/tools/` is where the dump's reader belongs.
+
+docs/README.md is recounted.
