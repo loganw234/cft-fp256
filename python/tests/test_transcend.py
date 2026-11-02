@@ -1861,7 +1861,7 @@ def test_exp2m1_exact_on_every_integer(fmt, rnd):
 
 @pytest.mark.parametrize("fmt", ALL)
 def test_exp2m1_beyond_the_exact_range_takes_a_side(fmt):
-    """For n >= p+2 the value 2^n - 1 sits in the top QUARTER of the gap
+    """For n >= p+2 the value 2^n - 1 sits in the top HALF of the gap
     below 2^n: above the midpoint, so every attribute but the two that
     point toward zero delivers 2^n itself."""
     p = fmt.prec
@@ -1908,7 +1908,12 @@ def test_exp2m1_at_the_top_of_the_range(fmt):
     want = {RND_RNE: (inf, ovf), RND_RUP: (inf, ovf), RND_RMM: (inf, ovf),
             RND_RTZ: (maxf, FLAG_INEXACT), RND_RDN: (maxf, FLAG_INEXACT)}
     for rnd in RND_MODES:
+        before = tr.STATS["neighbour"]
         got = tr.compute(fmt, "exp2m1", V(fmt, 0, n, 0), 0, rnd)
+        # the neighbour rule decides it, and counts it once: the count is
+        # how test_brute_force_enclosure_agrees leaves such answers to
+        # their directed tests
+        assert tr.STATS["neighbour"] == before + 1, (fmt.name, RND_NAMES[rnd])
         assert got == want[rnd], (fmt.name, RND_NAMES[rnd], got)
         assert got == sf.round_pack(fmt, 0, (1 << n) - 1, 0, rnd)
     for rnd in RND_MODES:

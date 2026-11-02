@@ -1722,9 +1722,10 @@ def test_the_attributes_leg_sees_a_directed_rounding_before_v():
 
 
 def test_the_analyzer_takes_a_triple_word_and_a_frozen_phase_as_arguments():
-    """Room for parcel M2F: V's words from the probes (V0, V1, V2 for a triple
-    word, as M2X's tw32_budget.py seeds them) and the frozen phases an
-    argument; a build with neither is refused by name."""
+    """Made for parcel M2F (fp32's triple word, merged 2026-10-30): V's
+    words from the probes (V0, V1, V2 for a triple word, as M2X's
+    tw32_budget.py seeds them) and the frozen phases an argument; a build
+    with neither is refused by name."""
     b = build_of("sin", FP64, RNE)
     an = TB.TrigAnalyzer(b)
     assert an.seeds == ("Vh", "Vl") and an.exact_phases == TB.EXACT_PHASES
@@ -1941,12 +1942,13 @@ def test_the_pools_marks_are_all_explained_by_the_theory():
 
 
 def test_the_theory_takes_p_and_g_so_fp32_is_one_call():
-    """Room for parcel M2F: the study's fp32 tiny family (144 arguments at the
-    G = 18 design: sin 2 under rne and rmm, cos 6 and 6, tan 0 and 0) against
-    the theory at p = 24, G = 18: the lanes it demands marked (d under 0.7) and
-    the lanes it allows (d under 1.3) bracket the study's counts; at M2X's
-    G = 40 the census (48 arguments inside the tiny gates) has none, as M2X
-    measured. Nothing builds an fp32 fragment here."""
+    """Made for parcel M2F (fp32's triple word, merged 2026-10-30): the
+    study's fp32 tiny family (144 arguments at the G = 18 design: sin 2
+    under rne and rmm, cos 6 and 6, tan 0 and 0) against the theory at
+    p = 24, G = 18: the lanes it demands marked (d under 0.7) and the lanes
+    it allows (d under 1.3) bracket the study's counts; at M2X's G = 40 the
+    census (48 arguments inside the tiny gates) has none, as M2X measured.
+    Nothing builds an fp32 fragment here."""
     assert len(TF.census(FP32, 18)) == 144 and len(TF.census(FP32, 40)) == 48
     study = {("sin", RNE): 2, ("sin", RTZ): 0, ("cos", RNE): 6,
              ("cos", RTZ): 6, ("tan", RNE): 0, ("tan", RTZ): 0}

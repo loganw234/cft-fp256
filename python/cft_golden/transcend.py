@@ -2219,7 +2219,7 @@ def exp2m1(fmt: FpFormat, xa: int, rnd: int = RND_RNE):
     is narrow: 2^n - 1 is a dyadic rational for every n, and it is a
     rounding boundary of a p-bit format exactly while |n| <= p+1. Past
     that the value is still exactly known but is decided by a SIDE
-    rather than by a rounding of it - 2^n - 1 sits in the top quarter of
+    rather than by a rounding of it - 2^n - 1 sits in the top half of
     the gap below 2^n for n >= p+2, and -(1 - 2^n) in the half gap above
     -1 for n <= -(p+2) - because the exact integer 2^n - 1 is up to
     262,143 bits wide at fp256 and the C's container is 2048.
@@ -2257,8 +2257,8 @@ def exp2m1(fmt: FpFormat, xa: int, rnd: int = RND_RNE):
         if n > 0:
             if n > fmt.emax + 1:
                 return _round_overflowing(fmt, 0, rnd)
-            # 2^n - 1 is inside the top quarter of the gap below 2^n:
-            # the gap there is 2^(n-p) and 1 < 2^(n-p-1) for n >= p+2.
+            # 2^n - 1 is inside the top half of the gap below 2^n: the
+            # gap there is 2^(n-p) and 1 < 2^(n-p-1) for n >= p+2.
             if n == fmt.emax + 1:
                 # 2^n has no encoding to anchor _round_neighbour on, so
                 # its witness, 2^n - 2^(n-p-2), is formed here: the same
