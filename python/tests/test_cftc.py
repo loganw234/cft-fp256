@@ -1686,7 +1686,7 @@ def test_what_math_library_refused_now_compiles(case):
     # sw and refused on one target; the others show every target
     heavy = len(ops) > 1
     c = cftc.compile_text(text, 3, source="src.cftl")
-    assert c.version == 6
+    assert c.version == cftc.VERSION == 7
     for t in () if heavy else REV8 + ("sw:4096",):
         ct = cftc.compile_text(text, 3, target=t, source="src.cftl")
         assert (ct.image, ct.bank) == (c.image, c.bank), t
@@ -1911,9 +1911,11 @@ def test_the_primal_only_values_are_computed_once_a_call():
     job). With two tangent vectors each is one node of the lowered step and
     one instruction of the image a call, not one a vector; and the routine
     itself runs once a call, its result shared by the primal and both
-    vectors."""
+    vectors. The six, by name: cftc.MATH holds sin, cos and tan too since
+    M2's build, whose rules' values (cos(a), -sin(a), fma(r, r, 1)) are
+    test_cftc_trig.py's."""
     one = Fraction(1)
-    for fn in cftc.MATH:
+    for fn in ("exp", "expm1", "exp2", "log", "log1p", "log2"):
         text = (f"system p\nformat fp64\nstate x, y\ntangent v, w\n"
                 f"next x = {fn}(x * y)\nnext y = y\nstep map\n")
         c = cftc.compile_text(text, 2, source="p.cftl")

@@ -20,15 +20,16 @@ by the runner's `lang` stage (docs/VERIFICATION.md); ROADMAP.md's
 "Step 3: the language and its compiler (plan of record, 2026-10-01)" is
 the plan, and this document is its parcel L1.
 
-**This is the language at 1.1** (`python/cft_golden/lang/version.py`;
+**This is the language at 1.2** (`python/cft_golden/lang/version.py`;
 CONFORMANCE.md, "The language's version"). It was 1 from 2026-10-02,
-when certificate format version 2 first named it, and became 1.1 on
+when certificate format version 2 first named it, became 1.1 on
 2026-10-15, when M1's build, item 3, added the math library's exp, expm1,
-exp2, log, log1p and log2 ("The operations"): functions it had refused
-only for not having them, so a minor step - every source accepted at 1
-is accepted at 1.1 and computes the same. `cft.h`'s `CFT_LANGUAGE_MAJOR`
-and `_MINOR` carry the version to the C tools that write and audit
-certificates.
+exp2, log, log1p and log2 ("The operations"), and became 1.2 on
+2026-11-02, when M2's build added its sin, cos and tan: functions it had
+refused only for not having them, so a minor step each time - every
+source accepted at 1 is accepted at 1.2 and computes the same.
+`cft.h`'s `CFT_LANGUAGE_MAJOR` and `_MINOR` carry the version to the C
+tools that write and audit certificates.
 
 Files are `*.cftl` (a working name). The three references are written in
 it, at fp64 and fp256, in `programs/systems/`, each beside the image
@@ -177,10 +178,11 @@ the gate holds that.
   - the keywords;
   - the built-ins `fma abs min max minnum maxnum copysign select sqrt`,
     and the math library's `exp expm1 exp2 log log1p log2` (M1's build,
-    item 3);
-  - the transcendental names the language does not have yet (`sin`,
+    item 3) and `sin cos tan` (M2's build);
+  - the transcendental names the language does not have yet (`sinh`,
     `pow`, `hypot`, `log10` and the rest of the list in
-    `python/cft_golden/lang/check.py`), which M2 to M4 will take;
+    `python/cft_golden/lang/check.py`, 26 names), which the later
+    rounds will take;
   - `h`, the step's own name;
   - `inf infinity nan snan`.
 - `tangent` became a keyword with the variational equations (part
@@ -366,7 +368,7 @@ OP_NAMES spelling, and its operands are in the golden function's order,
 which is asm.py's OP_FIELDS order - but for `div` and `sqrt`, which no
 tile instruction is: their names are the golden functions' own, and
 their operands in those functions' order; and for the math library's
-six, named as `python/cft_golden/transcend.py` names the functions.
+nine, named as `python/cft_golden/transcend.py` names the functions.
 
 | written | node | golden function | 754-2019 | rounds | flags it can raise |
 |---|---|---|---|---|---|
@@ -382,6 +384,9 @@ six, named as `python/cft_golden/transcend.py` names the functions.
 | `log(a)` | `log(a)`, the same | `transcend.compute(fmt, "log", a)` | 9.2 log | once | invalid (a negative nonzero, -infinity included, or a signaling NaN), divideByZero (a zero), inexact |
 | `log2(a)` | `log2(a)`, the same | `transcend.compute(fmt, "log2", a)` | 9.2 log2 | once | the same |
 | `log1p(a)` | `log1p(a)`, the same | `transcend.compute(fmt, "log1p", a)` | 9.2 logp1 | once | invalid (below -1, -infinity included, or a signaling NaN), divideByZero (-1), underflow, inexact |
+| `sin(a)` | `sin(a)`, of an operand not a constant | `transcend.compute(fmt, "sin", a)` | 9.2 sin | once | invalid (an infinity or a signaling NaN), underflow, inexact |
+| `cos(a)` | `cos(a)`, the same | `transcend.compute(fmt, "cos", a)` | 9.2 cos | once | invalid (an infinity or a signaling NaN), inexact |
+| `tan(a)` | `tan(a)`, the same | `transcend.compute(fmt, "tan", a)` | 9.2 tan | once | the same as sin |
 | `-a` | `neg(a)` | `sf.neg` | 5.5.1 negate | no: exact | none, not even on a signaling NaN |
 | `abs(a)` | `abs(a)` | `sf.fabs` | 5.5.1 abs | no | none |
 | `copysign(a, b)` | `copysign(a, b)` | `sf.copysign` | 5.5.1 copySign | no | none |
@@ -396,7 +401,7 @@ six, named as `python/cft_golden/transcend.py` names the functions.
 | `a == b` | `cmpeq(a, b)` | `sf.cmpeq` | 5.6.1 compareQuietEqual | no | the same |
 | `select(c, a, b)` | `select(a, b, c)` | `sf.select`: a if c's magnitude is not zero, else b | none: the tile's SELECT; quiet like 5.5.1 | no | none |
 
-- The twelve that round take the program's one attribute; the rest
+- The fifteen that round take the program's one attribute; the rest
   ignore it, as `softfloat.compute` does.
 - **The math library's six** (M1's build, item 3, 2026-10-15) are each
   one correctly rounded operation, under the program's attribute, with
@@ -437,6 +442,39 @@ six, named as `python/cft_golden/transcend.py` names the functions.
     naming one, at run time or folded, by an interim name,
     `math-library`; that name went with item 4. The interpreter runs
     both.
+  - **sin, cos and tan in the compiler** (M2's build, 2026-11-02,
+    cftc's output version 7) are carried the same way, nine routines in
+    all, in `routines.py`'s one order, the step graph's `OPS` (div, sqrt,
+    exp, expm1, exp2, log, log1p, log2, sin, cos, tan): the same
+    quiet region and raise of a flag word that may carry the mark, the
+    same refusals - `target-feature` on revision 7's four targets, which
+    publish no flag control, `routine-unavailable` without mpmath - and
+    the same images for `sw` and revision 8's three. Four things differ.
+    Their fragments keep 23, 26, 17 and 16 values live at fp32, fp64,
+    fp128 and fp256, past the six's 21 and 13, so the internal check
+    holds them to caps of their own (`routines.LIVE_CAP`, one row each),
+    and the allocator's 29 registers (r3 to r31) leave less beside a
+    call: the first value spilled comes with 7, 4, 13 and 14 other values
+    live (30 less the cap; exp's are 11 at fp32 and 19 elsewhere),
+    measured at every k from 0 to 20 for each of the three. They are
+    long: sin 939, 406, 382 and 389 instructions at fp32, fp64, fp128 and
+    fp256, cos 936, 402, 378 and 385, tan 993, 419, 397 and 406. sin's
+    and cos's hold MIN and MAX against bank words, a clamp no other
+    routine has, which the emitter, the assembler and the internal check
+    take as any instruction. And the three of one operand share their
+    reduction and their polynomials - the compiler hash-conses a
+    routine's instructions across the instances of a step - so sin(y) and
+    cos(y) together cost 988, 434, 411 and 418 instructions and all three
+    1,088, 475, 455 and 464 at the four formats, where apart they would
+    cost the sums (measured, the study's figures at the double word's
+    three). That is what makes the derivative rules cheap: sin's tangent
+    reads cos(a), cos's reads sin(a) and tan's reads its own result, each
+    one call a call and not one a vector, whatever the tangent vectors
+    ("The rules"); the pendulum and a rigid body's attitude are committed
+    at fp64 and fp256 with their compiled bytes
+    (`programs/systems/compiled-tangent/`). A function of a constant is
+    folded by the language, `sin(0)` and `tan(0)` to 0 and `cos(0)` to 1,
+    and compiles as the constant it is, with no mpmath.
   - **A marked lane** (the structured families; M1's question 4). A
     compiled routine of the six decides its last bit in the lane, and
     where its in-lane test cannot decide it - where the true value lies
@@ -489,6 +527,29 @@ six, named as `python/cft_golden/transcend.py` names the functions.
     image marks the lane too; docs/CERTIFICATES.md, "A marked lane"),
     which no image of the six is. So a segment that marks a lane still
     fails the `tangent` stage's certificate leg by name.
+- **sin, cos and tan** (M2's build, 2026-11-02; the language at 1.2) are
+  three more of the math library's, each one correctly rounded operation
+  of a radian argument, under the program's attribute, with exactly the
+  flags its golden function raises, called as the six are
+  (`transcend.compute(fmt, name, a, 0, rnd)`). Their nodes stand directly
+  after `log2` and before `neg` in `OPS` (lang/graph.py), which is the
+  order the canonical form's operations line counts them in. Their special
+  values are 754-2019's 9.2: sin(+-0) and tan(+-0) are +-0 and cos(+-0) is
+  1, none raising a flag; an infinity gives the canonical NaN with
+  invalid, a quiet NaN in the canonical NaN and no flag, a signaling NaN
+  in invalid; a subnormal argument gives sin and tan underflow and
+  inexact, cos inexact alone, and sin of the least normal gives inexact
+  under some attributes and underflow with inexact under others; the
+  other arguments measured give inexact alone (MEASURED over the golden
+  functions at the four formats under the five attributes, at +-0, the
+  least and greatest subnormals, the least normal, 1, the greatest
+  normal, both infinities and a quiet and a signaling NaN: no other flag
+  appeared, overflow included - this set is not every argument, and
+  the binades just above the least normal are not in it). A graph
+  holding one needs mpmath exactly
+  as the six do, the one `need_mpmath` for all nine. Their derivative
+  rules are in "The variational equations". The mathematical form prints
+  them as `sin(a)`, `cos(a)` and `tan(a)`.
 - **Division and the square root** (L4, 2026-10-02) are each one
   correctly rounded operation, with exactly the flags the golden function
   raises: a quiet NaN in gives the canonical NaN and no flag, as every
@@ -518,13 +579,23 @@ six, named as `python/cft_golden/transcend.py` names the functions.
   size is its calls times its routine's fragment; ties go to the
   shallower, then by the routines' one order, that of the step graph's
   `OPS` (lang/graph.py) - div, sqrt, exp, expm1, exp2, log, log1p, log2,
-  also that of the routines' words in the bank - so a step of division
-  and root alone loops as it did before the six (M1's build, item 4). A
+  sin, cos, tan, also that of the routines' words in the bank - so a
+  step of division and root alone loops as it did before the six (M1's
+  build, item 4), and a step without sin, cos or tan as it did before
+  them (M2's build). A
   batch of the six loops as a root's does, one slot a record (with the
   constant at 32,768, 72 components each calling expm1, exp, exp2 and
   log1p loop the log1p and the exp batches, the records taking 398
   scratch slots, past sw's 256; measured for sw:1024, M1's build, item
-  4). A batch of one call is never looped - its loop would only add the
+  4), and so does a batch of sin, cos or tan: at fp64 a step of n sin
+  calls is 31,237, 31,648, 32,059 and 32,470 instructions inlined at n =
+  76, 77, 78 and 79 and loops all of them in one batch at n = 80 - 736
+  instructions written, 33,363 run a step, in 160 scratch slots, inside
+  sw's 256 (measured at every n from 76 to 80, M2's build). With the
+  constant lowered, a step with three sin, three cos and three tan calls
+  at one depth loops the tan batch first, then sin's, then cos's - the
+  largest first, calls times the fragment's 419, 406 and 402
+  instructions at fp64. A batch of one call is never looped - its loop would only add the
   loop's instructions to its one copy - so a step whose routines sit one
   to a batch, a chain of divisions each reading the last, is compiled
   inlined past the constant: the software targets, whose instruction
@@ -622,7 +693,8 @@ six, named as `python/cft_golden/transcend.py` names the functions.
 |---|---|---|
 | `sqrt(c)` of a constant that is no rational's square, `sqrt(2)` or `sqrt(-4)` | `irrational-constant` | a constant is an exact rational; `sqrt(9/4)` is folded to 3/2 ("Constants"), and the root of a param is taken at run time |
 | one of the six of a constant whose value is irrational or not real, `exp(1)`, `log(2)`, `log(-4)` | `irrational-constant`; at a logarithm's pole, `log(0)`, `log2(0)`, `log1p(-1)`, `constant-division-by-zero` | a constant is an exact rational; `exp(0)`, `exp2(3)` and `log2(1/8)` are folded ("Constants"), and the function of a param is taken at run time |
-| `sin`, `cos`, `pow` and the rest of the reserved transcendentals | `transcendental` at run time, `irrational-constant` on a constant | the rest of the correctly rounded math library is M2 to M4's |
+| `sin`, `cos` or `tan` of a nonzero constant, `sin(1)`, `cos(1/2)`, `tan(-3)` | `irrational-constant`, never `constant-division-by-zero` | the sine, cosine and tangent of a nonzero rational are transcendental; `sin(0)`, `cos(0)` and `tan(0)` are folded ("Constants"), no constant is a pole of `tan` (pi/2 is irrational), and the function of a param is taken at run time |
+| `pow`, `sinh` and the rest of the reserved transcendentals | `transcendental` at run time, `irrational-constant` on a constant | the rest of the correctly rounded math library is the later rounds' |
 | `^` or `**` | `power` | write `x * x`, and a longer product in the order meant |
 | `t`, declared nowhere | `time-dependence` | carry time in the state, `state t` and `d/dt t = 1`, or count steps ("Time") |
 | `h` in a flow's equations | `h-scope` | a step-halving run halves h; the right-hand side must not move with it |
@@ -649,6 +721,17 @@ item 4, carried them (the same day, at cftc's output version 6); every
 source it refused that way compiles now, its run-time six refused
 `target-feature` on revision 7's targets and `routine-unavailable` on a
 host without mpmath.
+
+Until 2026-11-02 sin, cos and tan were refused here too, `transcendental`
+at run time and `irrational-constant` of any constant, `sin(0)` included.
+They are operations now ("The operations"; M2's build), folded of a
+constant exactly 0 and refused of any other, `irrational-constant`, with
+the reason in the sentence. Three kinds of source are refused still, by
+another name: `sin(h)` is `h-nonlinear` (it was `irrational-constant`),
+`sin(0 * h)` is `unused` (the fold leaves h used by nothing; it was
+`irrational-constant`), and `sin(x, x)` or `cos()` is `arity` (it was
+`transcendental`). The others keep their names. test_lang_trig.py's two
+tables hold each source with the name it had at 19de866c.
 
 ## Constants
 
@@ -689,6 +772,21 @@ host without mpmath.
   underflow and inexact - the gate holds both at the four formats. An
   integer n past 2^20, whose power lies beyond every format by far, is
   `constant-range`. The function of a param is taken at run time.
+- **sin, cos and tan of a constant** fold by the same rule (Logan's answer
+  8 to the M2 study, 2026-10-14): `sin(0)` and `tan(0)` are 0 and `cos(0)`
+  is 1, of a constant exactly 0 (`1 - 1` and `0 * h` are), and no other
+  value is rational. A minus written on a zero literal, `sin(-0)`, is
+  refused `constant-negative-zero` where it is read, before any fold ("What
+  a rational cannot carry is refused", below). Every other constant is
+  refused `irrational-constant`, the sentence saying why: the sine, cosine and
+  tangent of a nonzero rational are transcendental (Hermite-Lindemann: for
+  a nonzero algebraic c, e^(ic) is transcendental; were sin(c) or cos(c)
+  algebraic, so would e^(ic) be, and were tan(c) an algebraic a,
+  e^(2ic) = (1 + ia)/(1 - ia) would be). No constant is a pole of `tan`
+  (pi/2 is irrational), so none of the three is ever
+  `constant-division-by-zero`. A constant that changes with h's size is
+  `h-nonlinear`, as for every function: `sin(h)`. The function of a param
+  is taken at run time.
 - The same holds inside the integrators' templates.
 
 **Rounded once.** A constant is rounded ONCE, under the program's
@@ -721,9 +819,9 @@ any of these:
   its pole, `log(0)`, `log2(0)`, `log1p(-1)`: `constant-division-by-zero`;
 - the square root of a constant that is no rational's square - an
   irrational one, `sqrt(2)`, or none at all, `sqrt(-4)` - or one of the
-  math library's six of a constant whose value is irrational, `exp(1)`,
-  or not real, `log(-4)`: `irrational-constant`, its sentence saying
-  which.
+  math library's nine of a constant whose value is irrational, `exp(1)`
+  or `sin(1)`, or not real, `log(-4)`: `irrational-constant`, its
+  sentence saying which.
 
 All of them can still arise at run time. A lane may start at -0, an
 infinity or a NaN, and the operations make them.
@@ -772,12 +870,12 @@ param is a run-time neg of its rounded value. For an exact constant
     use of h that folds away (below).
   - Folding constants, a sum of different powers of h, and a min, max,
     minnum, maxnum, comparison, select, square root or one of the math
-    library's six whose operands are all constants, one of them changing
+    library's nine whose operands are all constants, one of them changing
     with h's size, are refused where they are folded, whatever surrounds
     them: `(h + 1) - 1` at its sum although its value is h, `min(h, 2*h)`
     although at h's sign it is a multiple of h, `sqrt(h)` and `sqrt(h*h)`
     (L4) although the second is |h|, and `exp(h)` and `log2(2*h)` (M1's
-    build, item 3). h's sign enters a constant only through copysign and
+    build, item 3) and `sin(h)` (M2's). h's sign enters a constant only through copysign and
     abs. A run-time operation on an h-scaled constant is an operation like
     any other: `min(x, h)` in a map is a min of the state and the
     constant h, and `x / h` (L4) a division of the state by it, which a
@@ -1161,10 +1259,15 @@ may read h: `let t = fma(k, h, t0)`.
 
 ### Forcing
 
-`sin` and `cos` of t wait for the math library: today `sin(w * t)` is
-refused, `transcendental` ("sin is not computed by a program in v1"),
-and they are step 6's M2 (docs/ROADMAP.md). Until then a rotation
-carried in the state forces a system:
+`sin` and `cos` of t are operations since the language's 1.2 (M2's
+build, 2026-11-02): with t in the state, `sin(w * t)` is one node of the
+step, a correctly rounded sine of the product like any other node.
+Before it `sin(w * t)` was refused, `transcendental` ("sin is not
+computed by a program in v1"), and a rotation carried in the state
+forced a system - which still does, without a routine. A reserved
+function of t that no round has taken yet, `sinh(w * t)`, is refused
+`transcendental` ("sinh is not computed by a program in v1") as `sin`
+was:
 
 ```
 state c, s          ; c = cos(w t), s = sin(w t), started by the host
@@ -1332,7 +1435,7 @@ tangent nodes, which only read them.
 
 **What a run does.** Each step, for each lane, every node of the step
 section, in order, is evaluated by its golden function under the
-program's attribute. A graph holding one of the math library's six needs
+program's attribute. A graph holding one of the math library's nine needs
 mpmath for theirs; without it the run raises transcend.ZivEscalation,
 naming mpmath and the functions, before any lane runs ("The
 operations").
@@ -1426,6 +1529,10 @@ in UTF-8 plain text.
   the rounded ln 2 in exp2's and log2's tangent rules, prints as the
   exact rational it is (6243314768165359/9007199254740992 at fp64 under
   rne), as every constant does.
+- **sin, cos and tan** (M2's build), each one operation, as a call, in
+  conventional notation already: sin(a), cos(a) and tan(a), in radians.
+  A negated call keeps its sign outside the call and inside a product's
+  parentheses, `(−sin(a))·da`, as every negation does.
 - **Parentheses** appear only where exact arithmetic needs them.
 - **Constants.** Each constant is its exact value, and h-multiples print
   as `h/2` with h's value stated.
@@ -1451,7 +1558,8 @@ params, every format and attribute, and each integrator and maps - every
 operation but the math library's six, which have four written systems
 and thirty seeded random systems of their own, a third of them with a
 tangent vector, so that the sixty draws are what they were before M1's
-build, item 3:
+build, item 3 - and sin, cos and tan (M2's build), which have the same,
+four written systems and thirty seeded random ones of their own:
 1. **The canonical form is itself a valid source.** Parsed again it gives
    the same step graph, byte for byte, and written out again it gives
    the same text, byte for byte, comments included. A canonical form
@@ -1475,18 +1583,22 @@ build, item 3:
      negative number - in a select's discarded arm too, which the reader
      never evaluates - decides nothing and is drawn again; the gate holds
      that most points decide.
-   - The math library's six are exact in rationals only where their value
+   - The math library's nine are exact in rationals only where their value
      is rational. Both evaluations take the same convention for them, as
-     for the root (M1's build, item 3; `graph.exact_transcendental`, the
-     reader computing its own): exact there - exp(0) = 1, exp2(n) = 2^n,
-     log(1) = 0, log2(2^k) = k - and otherwise mpmath's value at 1,024
+     for the root (M1's build, item 3, and M2's;
+     `graph.exact_transcendental`, the reader computing its own): exact
+     there - exp(0) = 1, exp2(n) = 2^n, log(1) = 0, log2(2^k) = k,
+     sin(0) = tan(0) = 0, cos(0) = 1 - and otherwise mpmath's value at 1,024
      bits, the argument rounded to nearest at 1,024 bits first; expm1(a)
      is exp(a) - 1 and log1p(a) is log(1 + a) of the same fixed exp and
      log, so that expm1's tangent rule, (1 + r)·da, evaluates to exp's own
      derivative. A logarithm at its pole or below its domain is undefined
-     there, as a division by zero is, and so is a value past 2^±1048576.
-     The gate holds the two evaluations one function, and each within
-     2^-1000 of the function, relatively.
+     there, as a division by zero is, and so is a value past 2^±1048576;
+     sin, cos and tan are defined for every argument, whatever its size
+     (mpmath reduces it itself: 0.12 s at 2^1,000,000 + 1, measured). The
+     gate holds the two evaluations one function, and each within
+     2^-1000 of the function, relatively (of the function of the
+     argument rounded to nearest at 1,024 bits, which is the convention).
 3. **What the intention-out says besides its code is read back and held
    to the graph and to the test's own arithmetic and tables.** Every
    line of both forms is read, in order, and a line the reader does not
@@ -1788,6 +1900,9 @@ not differentiable is given its fixed value in the last column.
 | `log(a)` | `select(r == r, da / a, r)` | zero | at a = ±0, da / ±0: an infinity with divideByZero, or a NaN with invalid where da is ±0 too, the quotient's convention; below zero r is a NaN, and so is the tangent |
 | `log2(a)` | `select(r == r, da / (L * a), r)` | zero | as log |
 | `log1p(a)` | `select(r == r, da / (1 + a), r)` | zero | at a = -1 as log at 0; below -1 as log below 0 |
+| `sin(a)` | `cos(a) * da` | zero | - (at ±infinity cos(a) is a NaN, as the primal is) |
+| `cos(a)` | `(-sin(a)) * da` | zero | - (at ±infinity sin(a) is a NaN, as the primal is) |
+| `tan(a)` | `fma(r, r, 1) * da` | zero | - (no representable argument is a pole) |
 | a constant, h, a param, a lane param | zero | | |
 | a state component x | the tangent input `v.x` | | |
 
@@ -1937,6 +2052,51 @@ it joins the const table only where exp2's or log2's rule reads it.
   division routine a vector a call, as the study counted (section 7:
   about 190 instructions).
 
+**sin, cos and tan** (M2's build, 2026-11-02; the design is
+docs/studies/M2-trig.md, section 7, which Logan approved as recommended on
+2026-10-14, answer 10). Each rule is a factor that reads no tangent, then
+one product with da, so each call costs a vector one product and the
+factor is shared across vectors.
+- **sin:** `cos(a) * da`. cos(a) is its own correctly rounded routine, a
+  node of the tangent that the primal need not hold - written again where
+  a has no name - and then one product: two roundings, the first the
+  routine's.
+- **cos:** `(-sin(a)) * da`. sin(a) is written again, its negation exact
+  and primal-only, shared across vectors as the quotient's -r is, and one
+  product a vector. Unary minus binds tighter than `*` ("Expressions and
+  operations"), so `-sin(a) * da` reads the same; the canonical form
+  writes the brackets. The form matters: `-(sin(a) * da)` rounds the
+  product before it negates. On a finite result the two forms are the
+  same bits under rne, rtz and rmm and differ under rdn and rup, where
+  rounding down of the negated product is rounding up of the product; at
+  a NaN they differ in the NaN's sign bit under every attribute, the
+  first form's being the canonical positive NaN (measured at fp32, fp64,
+  fp128 and fp256: test_lang_trig.py). The study (section 7) said they
+  differ "under rdn and rup", which holds for finite results only.
+- **tan:** `fma(r, r, 1) * da`. 1 + r·r, the textbook's 1 + tan² = sec²,
+  is one fma rounding, primal-only and shared; then one product a vector:
+  two roundings. `da / cos(a)^2` would spend a division routine a vector
+  (the study counted 177 to 191 instructions for C4's), and `fma(r, r *
+  da, da)` rounds twice a vector with nothing shared and reads da twice,
+  which the step graph forbids of an unnamed node (as for expm1 above).
+- **Where a tangent is zero** the term is left out, as for every rule.
+  **Where it is not differentiable:** nowhere - at +-infinity cos(a) and
+  sin(a) are NaNs and so is the tangent, as the primal is, and no
+  representable argument is a pole of tan.
+- **Reading r.** tan's rule reads r twice and sin's and cos's read a, so
+  an unnamed chain writes its operands again: 99 nested calls make 5,049
+  nodes of tangent for sin, 5,148 for cos and 10,098 for tan, against
+  198, 297 and 198 named by lets, and 100 nested cos or tan are refused
+  `too-deep` (MEASURED, python/tests/test_lang_trig.py).
+- **What the gate holds.** The rule table is held to the code, each rule
+  rendered on a one-operation system; the derivative by exact dual
+  numbers (the `tangent` stage's leg D) and by a central difference at
+  2^-256 of 1,024-bit values (its leg M); each rule's rounding bit for
+  bit at every format and attribute, so that a rule rounded otherwise is
+  red there - tan's `fma(r, r * da, da)` under every attribute, cos's
+  `-(sin(a) * da)` at finite lanes under rdn and rup only and at a NaN
+  lane under all five. The compiled forms are not this paragraph's.
+
 **Reading a primal value.** A rule reads a primal value by name where it
 has one - a state component, a param, a lane param, a constant, a let, a
 label of the expanded step - and otherwise **writes it again**:
@@ -1954,7 +2114,9 @@ brackets): `+` and `-` 1 [1]; unary minus none [none]; `*` 2 [1]; fma 2
 division, its doubling exact; abs one exact product by ±1 [none];
 copysign two [none]; the min family and select none, a quiet compare and
 a select [none]; exp 1 [1]; expm1, exp2, log2 and log1p 2 [1], a
-primal-only value and the product or division; log 1 [1], the division.
+primal-only value and the product or division; log 1 [1], the division;
+sin, cos and tan 2 [1], a primal-only factor (the routine's cos(a) or
+sin(a), negated exactly, or fma(r, r, 1)) and the product.
 
 **Nothing is refused for not being differentiable.** Every operation is
 differentiable almost everywhere, and each point where one is not has
@@ -2146,12 +2308,16 @@ is a defect in the sentence that says everything is checked):
    library's six takes its value as the second check takes it, its
    derivative the textbook's with ln 2 as L, the test's own - transcend.log
    of 2, not the checker's - so that the check holds L as well as the
-   rules (M1's build, item 3). A point at which the test's own evaluation
+   rules (M1's build, item 3); sin, cos and tan (M2's build) take theirs
+   so too, their derivatives cos, -sin and 1 + tan², the last with tan as
+   the second check takes it, so that the rule's exact value is the
+   derivative itself - the identity sec² = 1 + tan² is assumed here and
+   tested by the central difference below. A point at which the test's own evaluation
    is undefined - a zero divisor, a negative root's argument, the root's
    derivative at zero, a logarithm at or below its pole - decides nothing.
 
 **Why exact dual numbers, not mpmath.** Every operation but the square
-root and the math library's six is piecewise rational, so the exact
+root and the math library's nine is piecewise rational, so the exact
 derivative exists, and equality needs no tolerance to argue about; a
 central difference in mpmath would carry one, and a dependency besides.
 The plan of record said "an exact derivative in mpmath"; exact rationals
@@ -2160,7 +2326,8 @@ root (L4) is the first exception, and is held twice: exactly, with each
 root the fixed function of its argument that both sides take, which holds
 the rule's form; and by a central difference in exact rationals, which
 holds the derivative itself whatever the convention ("What the fourth
-check cannot see"). The six (M1's build, item 3) are held so too: exactly,
+check cannot see"). The nine (the six, M1's build, item 3, and sin, cos
+and tan, M2's) are held so too: exactly,
 each the fixed function of its argument that both sides take; and by a
 central difference in high precision, eps = 2^-256 of the 1,024-bit
 values, each tangent component within 2^-300·max(1, |t|), with ln 2 to
@@ -2204,7 +2371,14 @@ question 10).
   `programs/systems/*-rk4-tangent-*.cftl`) - and each rule changed,
   rounded otherwise where it rounds twice (and log's `da * (1 / a)`) or
   made wrong where it rounds once, moves both committed graphs of the
-  reference that holds it and no other (test_lang_tangent.py);
+  reference that holds it and no other (test_lang_tangent.py). sin, cos
+  and tan (M2's build) are held by the rule table and the same check of
+  the interpreter's bits, on y = f(a) at every format and attribute (the
+  `tangent` stage's leg M, python/tests/test_lang_trig.py): tan's
+  `fma(r, r * da, da)` is red there under every attribute, and cos's
+  `-(sin(a) * da)` is red at finite lanes under rdn and rup only - the
+  two forms are the same bits under rne, rtz and rmm - so a check made
+  under rne alone cannot see it; at a NaN lane it is red under all five;
 - **special values**: NaNs, infinities and the sign of zero do not exist
   in exact arithmetic. They are held by the interpreter against seq.py
   bit for bit, with tangents holding signalling NaNs, infinities, -0 and
@@ -2270,7 +2444,13 @@ stage certifies one, both auditors accepting.
   about four times as many for a logarithm, whose rule reads r three
   times and a once: 19,998 (log) or 20,097 (log1p, log2), against 297
   or 396 (parcel ML, held by
-  `test_m1_unnamed_chains_of_the_six_grow_with_the_square`). A sum chain stays
+  `test_m1_unnamed_chains_of_the_six_grow_with_the_square`); and for 99
+  calls of sin, cos or tan nested unnamed, 5,049 (sin), 5,148 (cos) or
+  10,098 (tan, whose rule reads r twice), against 198, 297 and 198 with
+  each named by a let (parcel M2L, held by
+  `test_unnamed_chains_of_the_three_grow_with_the_square`; 100 nested cos
+  or tan print one level too deep and are refused `too-deep`, 100 nested
+  sin print 100 deep and compile). A sum chain stays
   linear, and so does a chain through a select's condition, which takes
   no tangent (198 nodes at 100 terms, verifier-VI2). Naming parts of
   the chain with lets keeps it linear, since a let is read by name.
@@ -2344,7 +2524,7 @@ The text and its declarations:
 | `unused` | a const, param, lane param, let or h that nothing uses; h is used only where a constant of the step scales with it, so a map whose every use of h folds away is `unused` |
 | `cycle` | a definition that depends on itself |
 | `not-constant` | a value needed when the program is compiled that reads the state, a param, a lane param or a let |
-| `bank-capacity` | more than 512 params and constants: the bank holds 512 on every device. The compiler raises it too where the words of the routines it inlines for a division or a root take the bank past 512 (C4) |
+| `bank-capacity` | more than 512 params and constants: the bank holds 512 on every device. The compiler raises it too where the words of the routines it inlines for a division, a root (C4) or one of the math library's nine (M1's six, M2's sin, cos and tan) take the bank past 512 |
 
 Equations, indices and the step:
 
@@ -2379,8 +2559,8 @@ Operations v1 does not have:
 
 | name | what it refuses |
 |---|---|
-| `transcendental` | a transcendental function the language does not have (`sin`, `cos`, `pow` and the rest of the reserved list, M2 to M4's), at run time |
-| `irrational-constant` | a square root of a constant that is no rational's square (`sqrt(2)`, `sqrt(-4)`); exp, expm1, exp2, log, log1p or log2 of a constant whose value is irrational or not real (`exp(1)`, `log(2)`, `log(-4)`); or any other transcendental of a constant, which the language does not have yet |
+| `transcendental` | a transcendental function the language does not have (`pow`, `sinh` and the rest of the reserved list, the later rounds'), at run time |
+| `irrational-constant` | a square root of a constant that is no rational's square (`sqrt(2)`, `sqrt(-4)`); exp, expm1, exp2, log, log1p, log2, sin, cos or tan of a constant whose value is irrational or not real (`exp(1)`, `log(2)`, `log(-4)`, `sin(1)`); or any other transcendental of a constant, which the language does not have yet |
 | `power` | `^` or `**` |
 | `not-equal` | `!=` |
 | `chained-comparison` | a comparison of a comparison, unparenthesised |
@@ -2417,20 +2597,22 @@ The compiler's, reserved for it (L2).
   them. The bank's 512 is the same on every device, and the checker
   raises that one itself as `bank-capacity` - for params and constants.
   The words of the routines the compiler inlines for a division or a
-  root (C4), and for the math library's six (M1's build, item 4), live
-  in the bank too, which the checker cannot see, so the compiler raises
-  the same name where they take the bank past 512, its sentence counting
-  the params, the constants and the words and naming the routines in
-  their one order: one limit, one name.
+  root (C4), for the math library's six (M1's build, item 4) and for its
+  sin, cos and tan (M2's build), live in the bank too, which the checker
+  cannot see, so the compiler raises the same name where they take the
+  bank past 512, its sentence counting the params, the constants and the
+  words and naming the routines in their one order: one limit, one
+  name.
 - The next two are the compiled image's own.
 - **The eighth, `routine-unavailable`** (M1's build, item 4,
   2026-10-15), is the one that depends on the HOST. The math library's
   routines are built by the golden model's generator
   (`python/cft_golden/mathlib.py`), which derives every constant through
   mpmath, so on a host where mpmath does not import, a source whose
-  graph holds one of the six at run time is refused by this name -
-  never an ImportError, never an internal error - with no line, the
-  cause being the host. A fold of the six is a constant, built by
+  graph holds one of the nine at run time - the six, and since M2's
+  build (cftc's output version 7) sin, cos and tan - is refused by this
+  name - never an ImportError, never an internal error - with no line,
+  the cause being the host. A fold of the nine is a constant, built by
   nothing, and compiles there. The same source and target on a host
   with mpmath compile, or are refused by another name, such as
   `target-feature` on revision 7's targets. It is raised after the
@@ -2476,7 +2658,7 @@ form; the compiler words each one for the case at hand.
 | `target-feature` | a feature whose CAPS bit the target does not publish | "this image needs a feature the target's CAPS bits do not publish" |
 | `segment-steps` | a step count outside 1 to 2^32-1, the range of the REPEAT immediate a segment's steps are | "a segment is one REPEAT of 1 to 4,294,967,295 steps; this count is not one" |
 | `halving-underflow` | an h-scaled constant whose exact halving underflows, so the step-halving bank cannot hold it exactly | "this h-scaled constant underflows when halved, so the step-halving bank would not be this bank halved exactly" |
-| `routine-unavailable` | a run-time exp, expm1, exp2, log, log1p or log2 on a host without mpmath, through which its routine's fragment is built: it depends on the host (M1's build, item 4) | "this system computes log at run time, and the compiler inlines each as its routine, whose fragment the math library's generator builds ..., deriving every constant through mpmath - which is not installed here" |
+| `routine-unavailable` | a run-time exp, expm1, exp2, log, log1p, log2, sin, cos or tan on a host without mpmath, through which its routine's fragment is built: it depends on the host (M1's build, item 4; M2's for sin, cos and tan) | "this system computes log at run time, and the compiler inlines each as its routine, whose fragment the math library's generator builds ..., deriving every constant through mpmath - which is not installed here" |
 
 ## The gate
 
@@ -2542,8 +2724,8 @@ under `make golden`, with no change to either.
   function in the graph's evaluation and the test's reader;
 - the math library's six (M1's build, item 3): each a node of one
   operand, named as transcend.py names it, listed after sqrt, a
-  built-in held to one argument, and `transcendental` still M2 to M4's
-  for every other reserved name; each lane's result and flags
+  built-in held to one argument, and `transcendental` still the later
+  rounds' for every other reserved name; each lane's result and flags
   transcend.compute's for the node's own name, at every format under
   every attribute, the specials, poles, overflow and underflow among the
   lanes; the six folds exact and rounded once at every format and
@@ -2555,7 +2737,8 @@ under `make golden`, with no change to either.
   written systems and thirty random ones; the exact transcendental one
   function in the graph's evaluation and the test's reader, and within
   2^-1000 of the function; mpmath needed by a run of the six alone, its
-  absence named; the language at 1.1, with cft.h's macros;
+  absence named; the language at 1.2 (1.1 until M2's build, 2026-11-02),
+  with cft.h's macros;
 - this document's refusal tables (the names, and for `scratch-capacity`
   the depth of every built-in target in python/cftc/targets.py, in the
   table's row and in the catalogue's string, with plants), template text
@@ -2616,8 +2799,46 @@ under `make golden`, with no change to either.
   otherwise red on the rounding and the rule table alone, log's select
   form dropped red below the domain alone, L rounded the wrong way red
   on the fourth check, the difference and the rounding;
+- sin, cos and tan are `python/tests/test_lang_trig.py`'s (below);
 - determinism across hash seeds; this document's variational blocks and
   sources against the renderers and the committed files.
+
+**`python/tests/test_lang_trig.py`: sin, cos and tan** (parcel M2L, M2's
+build, 2026-11-02). The three, golden-first, as the six were:
+- the nodes directly after `log2` and before `neg` in `lang.OPS`, each of
+  one operand, in `graph.TRANSCEND`, `ROUNDED` and the interpreter's
+  table; the IR form `[op, [ref], label or null]`; the canonical form's
+  operations line counting them in that place; `transcendental` still
+  refused for the other 26 reserved names, and `irrational-constant` of
+  a constant for them;
+- each lane's result and flags transcend.compute's for the node's own
+  name, at every format under every attribute, the specials among the
+  lanes (+-0, infinities, NaNs, the greatest finite);
+- the folds at exactly 0, in an equation, a const and a default, at every
+  format and attribute, equal to the golden function at +0; every other
+  constant refused `irrational-constant` with its sentence (the function's
+  word and the theorem), never `constant-division-by-zero`; a function
+  of h `h-nonlinear`; every refusal of the three by name and line, each
+  with the name it had at 19de866c, and what was refused and is accepted;
+- the exact evaluation one function in the graph and the test's reader,
+  within 2^-1000 of the function of the argument rounded to 1,024 bits,
+  needing no argument limit; the renderers' notation and the three
+  checks on written systems and thirty random ones;
+- each rule rendered on a one-operation system against the table's text,
+  its node shapes (the contract between parcels M2L and M2C), and the
+  table's three rows held to this document; the fourth check and the
+  central difference in high precision on written and generated systems;
+  each rule's rounding on y = f(a), bit for bit at every format and
+  attribute; the specials; one product a vector a call; the primal
+  unchanged, 1 the only new constant, tan's; the unnamed chains' growth;
+- mpmath needed by a run of the nine alone, its absence named, and
+  cert2's list of the nodes that need it the language's own;
+- the plants, each red where it must be: each rule made wrong (red on the
+  fourth check, the difference and the rounding), tan's rounded otherwise
+  (red on the rounding alone, under every attribute), cos's rounded
+  otherwise (red on the rounding at finite lanes under rdn and rup only,
+  and at a NaN lane under every attribute), sin's golden function swapped
+  for cos's (red on the golden check and on cos's rounding).
 
 **`python/tests/test_lang_readback.py`: every accepted source reads
 back** (parcel D2, 2026-10-01).
@@ -2664,7 +2885,8 @@ that the section and the measurement cannot part:
   evaluator held to lang.run; the exact residual in a map and in a
   flow, under each attribute, and past 10^4: dt's relative error and a
   seeded sample of counts, each a lane;
-- forcing: sin refused; the rotation's table, and its rounding's share
+- forcing: sin(w * t) a node since 1.2 and sinh(w * t) refused; the
+  rotation's table, and its rounding's share
   against the same step evaluated exactly; rk4's and euler's exact
   factors and stormer-verlet's quadratic form; the phase; w = 3/10; the
   forced oscillator against its exact solution and against a twin
@@ -2687,7 +2909,8 @@ command line (exit 3, never 70); its leg L holds the call loop - eight
 bodies under rk4, which the constant itself loops, and Kepler under rk4
 with the constant lowered; the `tangent` stage's leg L compiles the
 quotient's and the root's rules the same way, and its leg M holds the
-math library's six rules in the golden model, with plants (since item 4
+math library's nine rules in the golden model - the six and, since M2's
+build, sin, cos and tan - with plants (since item 4
 its legs G, H and J read the three committed references that hold the
 six, and leg G fails by name a certified segment that marks a lane); and
 the `lang` stage certifies Kepler's routine images and holds the
@@ -2742,22 +2965,23 @@ and their inlining and their loops by `python/tests/test_cftc.py`.
     is refused by name for an image holding a routine; certificate
     version 2's wider-source run compiles the source one format up
     instead;
-  - **size**: a routine is 155 to 191 instructions (division and root)
-    or 175 to 433 (the math library's six, fp32's triple words the
-    longest), so a step with many
-    is long; past 32,768 instructions a step runs batches of them in
+  - **size**: a routine is 155 to 191 instructions (division and root),
+    175 to 433 (the math library's six, fp32's longest) or 378 to 993
+    (sin, cos and tan, fp32's triple word the longest), so a step with
+    many is long; past 32,768 instructions a step runs batches of them in
     call loops, Logan's rule ("The operations"), at a few percent of
     its cycles - and a wide batch, looped, can need more scratch than
     the inlined step did; a step whose routines sit one to a batch
     stays inlined past the constant.
 - **The rest of the math library.** The language has exp, expm1, exp2,
-  log, log1p and log2 (M1's build, item 3); sin, cos, tan, pow, the
-  inverse trigonometric functions and the rest of the reserved list are
-  M2 to M4's, refused `transcendental` until then. The compiler carries
-  the six since item 4, as routines.
+  log, log1p and log2 (M1's build, item 3), and sin, cos and tan (M2's
+  build); pow, the inverse trigonometric functions and the rest of the
+  reserved list are the later rounds', refused `transcendental` until
+  then. The compiler carries the six since item 4, and sin, cos and tan
+  since M2's build, as routines.
 - **A built-in time, adaptive steps and events.** There is no reserved
   `t`: a system carries time in its state or counts its steps, and sin
-  and cos of t wait for the math library ("Time").
+  and cos of t are operations of it ("Time").
 - **Per-operation attributes.** v1 has one attribute a program.
 - **User-defined integrators**, beyond rk4, euler, stormer-verlet and
   map.

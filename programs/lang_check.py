@@ -80,7 +80,11 @@ besides.
      interim `math-library` refused here until item 4 - log1p at run time
      and a fold of exp2 alone - each compiled (the run-time one, and its
      run by lang.run, skipped by name on a host without mpmath, which the
-     six's golden functions and routines need; the fold compiles there)
+     six's golden functions and routines need; the fold compiles there);
+     and since M2's build the same for sin, cos and tan, which the
+     language refused until 1.2: the run-time source `routine-unavailable`
+     the same way, a fold of cos(0) + sin(0) compiled without mpmath, and
+     the run-time source compiled and run by lang.run with it
   H  plants in a copy of the package: each stopped by the internal check,
      and with the check off each red on seq.py, its failing lanes counted;
      with the routines' (C4): a raise dropped, a raise inside its quiet
@@ -2038,6 +2042,13 @@ def leg_refusals():
                "next y = log1p(abs(x))\nstep map\n")
     fold = ("system m\nformat fp64\nstate x\nconst k = exp2(-3)\n"
             "next x = x * k\nstep map\n")
+    # M2's build: sin, cos and tan are the same refusal on the same host
+    # (cftc.MATH holds them), and sin(0) and cos(0) fold to the constants
+    # they are, compiling without mpmath
+    radian = ("system r\nformat fp64\nstate x, y\nnext x = sin(x) * y\n"
+              "next y = cos(x) + tan(y)\nstep map\n")
+    radfold = ("system r\nformat fp64\nstate x\nconst k = cos(0) + sin(0)\n"
+               "next x = x * k\nstep map\n")
     held = sys.modules.get("mpmath", _ABSENT)
     sys.modules["mpmath"] = None
     try:
@@ -2046,12 +2057,24 @@ def leg_refusals():
                                          source="m.cftl"),
                "log1p at run time with mpmath taken away (sys.modules), on "
                "revision 7's single, before target-feature")
+        expect("routine-unavailable",
+               lambda: cftc.compile_text(radian, 2, target="u50-rev7",
+                                         source="r.cftl"),
+               "sin, cos and tan at run time with mpmath taken away "
+               "(sys.modules), on revision 7's single, before "
+               "target-feature (M2's build)")
         try:
             image = cftc.compile_text(fold, 2, source="m.cftl").image
         except lang.Refusal as e:
             image = None
             bad(f"a fold of exp2 alone, in a const, with mpmath taken away: "
                 f"refused {e.name}")
+        try:
+            rimage = cftc.compile_text(radfold, 2, source="r.cftl").image
+        except lang.Refusal as e:
+            rimage = None
+            bad(f"a fold of cos(0) + sin(0), in a const, with mpmath taken "
+                f"away: refused {e.name}")
     finally:
         if held is _ABSENT:
             del sys.modules["mpmath"]
@@ -2062,9 +2085,15 @@ def leg_refusals():
               "a fold of exp2 alone, in a const - math-library's until M1's "
               "build, item 4 - compiles with mpmath taken away, the same "
               "image as with it")
+    if rimage is not None:
+        check(rimage == cftc.compile_text(radfold, 2, source="r.cftl").image,
+              "a fold of cos(0) + sin(0), in a const - refused "
+              "irrational-constant until the language's 1.2 (M2's build) - "
+              "compiles with mpmath taken away, the same image as with it")
     if not have_mpmath():
-        skip("the six at run time: log1p compiled and run by lang.run",
-             "python has no mpmath module, which the six's golden functions "
+        skip("the nine at run time: log1p, and sin, cos and tan, compiled "
+             "and run by lang.run",
+             "python has no mpmath module, which the nine's golden functions "
              "and routines need")
     else:
         c = cftc.compile_text(runtime, 2, source="m.cftl")
@@ -2072,6 +2101,12 @@ def leg_refusals():
               len(lang.run(c.graph, [[1] * c.ir.n_state], 2).states) == 1,
               "log1p at run time - math-library's until M1's build, item 4 - "
               "compiles for sw, its routine inlined, and lang.run runs it")
+        c = cftc.compile_text(radian, 2, source="r.cftl")
+        check(set(c.manifest["routines"]["calls"]) == {"sin", "cos", "tan"}
+              and len(lang.run(c.graph, [[1] * c.ir.n_state], 2).states) == 1,
+              "sin, cos and tan at run time - refused by the language until "
+              "1.2 (M2's build) - compile for sw, each inlined, and lang.run "
+              "runs them")
     want = set(cftc.NAMES) | set(cftc.refusals.SHARED)
     check(made == want, f"every one of the compiler's {len(cftc.NAMES)} "
           f"names was made, and the language's bank-capacity it raises "

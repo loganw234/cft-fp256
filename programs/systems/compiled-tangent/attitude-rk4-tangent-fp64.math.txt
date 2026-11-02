@@ -1,0 +1,40 @@
+attitude - the mathematical form, regenerated from the step graph
+binary64 (fp64), roundTowardNegative
+
+Each operation here is exact. The program performs the same
+operations, each rounded once, in the order the canonical form
+writes them.
+
+parameters, the run's (defaults)
+  p = 0.125
+  q = 0.25
+  r = 0.5
+
+where
+  s = q·sin(φ) + r·cos(φ)
+
+the equations
+  dφ/dt = p + s·tan(θ)
+  dθ/dt = q·cos(φ) − r·sin(φ)
+
+the variational equations of the tangent vector w
+  w.s = q·cos(φ)·w.φ + r·(−sin(φ))·w.φ
+  d(w.φ)/dt = w.s·tan(θ) + s·(tan(θ)·tan(θ) + 1)·w.θ
+  d(w.θ)/dt = q·(−sin(φ))·w.φ − r·cos(φ)·w.φ
+
+one step: the classical Runge-Kutta method (rk4), with f the right-hand sides above
+  h = 0.015625
+  Y = (φ, θ)
+  k1 = f(Y)
+  k2 = f(Y + (h/2)·k1)
+  k3 = f(Y + (h/2)·k2)
+  k4 = f(Y + h·k3)
+  Y ↦ Y + (h/6)·(k1 + 2·k2 + 2·k3 + k4)
+
+the tangent w's step: the same method on δY, with Df·δY the right-hand sides of w above
+  δY = (w.φ, w.θ)
+  δk1 = Df(Y)·δY
+  δk2 = Df(Y + (h/2)·k1)·(δY + (h/2)·δk1)
+  δk3 = Df(Y + (h/2)·k2)·(δY + (h/2)·δk2)
+  δk4 = Df(Y + h·k3)·(δY + h·δk3)
+  δY ↦ δY + (h/6)·(δk1 + 2·δk2 + 2·δk3 + δk4)

@@ -359,8 +359,10 @@ REFUSALS = {
     # runtime-division and runtime-sqrt went with L4 (2026-10-02): x / 3 and
     # sqrt(x) are the operations div and sqrt now (test_l4_* below). The
     # example here was exp(x) until M1's build, item 3 (2026-10-15), which
-    # made exp an operation; sin waits for M2 (M1_REFUSALS, below)
-    "transcendental": (_src("state x", "next x = sin(x)"), 4),
+    # made exp an operation, and sin(x) until M2's build (2026-11-02), which
+    # made sin one; it is sinh(x), a reserved name no round has built yet
+    # (test_lang_trig.py has the three's own refusals)
+    "transcendental": (_src("state x", "next x = sinh(x)"), 4),
     "irrational-constant": (_src("state x", "next x = x * sqrt(2)"), 4),
     "power": (_src("state x", "next x = x^2"), 4),
     "not-equal": (_src("state x", "next x = select(x != 1, 1, 2)"), 4),
@@ -1417,9 +1419,10 @@ def test_intention_out_of_random_systems():
     # the coverage docs/LANGUAGE.md claims of these systems, held: every
     # operation but the math library's six, which have random systems of
     # their own (test_m1_intention_out_of_random_systems), so that these
-    # draws are what they were before M1's build, item 3
+    # draws are what they were before M1's build, item 3 - and sin, cos and
+    # tan (M2's build), whose systems are test_lang_trig.py's
     assert kinds == {"rk4", "euler", "stormer-verlet", "map"}
-    assert ops == set(lang.OPS) - set(SIX)
+    assert ops == set(lang.OPS) - set(SIX) - {"sin", "cos", "tan"}
     assert fmts == set(FORMATS) and rnds == set(C.RND_BY_NAME)
     assert arrays and lanes and lets
 
@@ -2362,7 +2365,11 @@ def test_m1_the_six_are_nodes():
         assert info.value.name == "reserved-name"
         assert "a built-in" in info.value.sentence
     rest = set(lang_check.TRANSCENDENTAL)
-    assert rest | set(SIX) == RESERVED_BEFORE and not rest & set(SIX)
+    # sin, cos and tan left the list in M2's build (2026-11-02): they are
+    # nodes now (test_lang_trig.py), and the 26 others still refused
+    three = {"sin", "cos", "tan"}
+    assert rest | set(SIX) | three == RESERVED_BEFORE
+    assert not rest & (set(SIX) | three) and len(rest) == 26
     for name in sorted(rest):
         with pytest.raises(lang.Refusal) as info:
             compile_(_sys1(f"next x = {name}(x)", state="x"))
@@ -2568,10 +2575,11 @@ M1_REFUSALS = [
     # the rest, unchanged in name
     ("next x = exp(x, x)", "step map", "arity", 5, "transcendental"),
     ("next x = x * exp", "step map", "syntax", 5, "syntax"),
-    ("next x = sin(x)", "step map", "transcendental", 5, "transcendental"),
-    ("next x = x * sin(0)", "step map", "irrational-constant", 5,
-     "irrational-constant"),
 ]
+# (sin(x) and x * sin(0), the last two rows here until M2's build
+# (2026-11-02), moved to test_lang_trig.py's M2_REFUSALS with the three's
+# other rows, and the name each had before: sin(x) is an operation now, and
+# sin(0) folds.)
 
 
 @pytest.mark.parametrize("body,step,name,line,before", M1_REFUSALS,
@@ -2813,18 +2821,20 @@ def test_m1_mpmath_is_needed_only_by_a_run_of_the_six(tmp_path):
     assert lines[4] == "exact_eval ImportError"
 
 
-def test_m1_the_language_is_at_1_1():
-    """The six are a minor step (CONFORMANCE.md, "The language's version"):
-    lang/version.py is 1.1, and cft.h's macros, which cft-segrun and
-    cft-audit compile in, are the same."""
+def test_m2_the_language_is_at_1_2():
+    """The six (M1's build) and sin, cos and tan (M2's build) are minor
+    steps (CONFORMANCE.md, "The language's version"): lang/version.py is
+    1.2, and cft.h's macros, which cft-segrun and cft-audit compile in, are
+    the same. (This was test_m1_the_language_is_at_1_1, at 1.1 and cft.h's
+    1, until M2's build, 2026-11-02.)"""
     from cft_golden import cert2
     from cft_golden.lang import version
-    assert version.VERSION == (1, 1)
-    assert cert2.version_text(version.VERSION) == "1.1"
+    assert version.VERSION == (1, 2)
+    assert cert2.version_text(version.VERSION) == "1.2"
     text = (REPO / "host" / "include" / "cft.h").read_text(encoding="utf-8")
     got = dict(re.findall(r"^#define (CFT_LANGUAGE_(?:MAJOR|MINOR))\s+(\d+)",
                           text, re.M))
-    assert got == {"CFT_LANGUAGE_MAJOR": "1", "CFT_LANGUAGE_MINOR": "1"}
+    assert got == {"CFT_LANGUAGE_MAJOR": "1", "CFT_LANGUAGE_MINOR": "2"}
 
 
 # ---- the documents -------------------------------------------------------------

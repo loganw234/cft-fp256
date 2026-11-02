@@ -3,10 +3,11 @@
 """The call loop (C4): a step too large to inline every routine runs some
 of them in a loop instead - one copy of the routine, called once a record.
 
-The compiler inlines every routine - division and root, and since M1's
-build, item 4, the math library's six (inline.py) - unless the step would
-then pass CALL_LOOP_ABOVE instructions. Logan's rule (2026-10-02,
-"Build it now, last in C4"): the constant is the compiler's own - 32,768,
+The compiler inlines every routine - division and root, since M1's build,
+item 4, the math library's six, and since M2's build its sin, cos and tan
+(inline.py) - unless the step would then pass CALL_LOOP_ABOVE
+instructions. Logan's rule (2026-10-02, "Build it now, last in C4"): the
+constant is the compiler's own - 32,768,
 the instruction memory of the U50's revision-7 tile - and is
 never read from a target, so one image still serves every target that
 accepts it; it is part of the output version. Past it, BATCHES are
@@ -20,10 +21,11 @@ rk4 give four: the first two stages' roots (their positions need no
 acceleration), their divisions, the last two stages' roots, their
 divisions. The largest is the one whose calls, inlined, are the most
 instructions (calls times the fragment's size); ties go to the shallower,
-then by the routines' one order, cft_golden/routines.py's ROUTINES - div,
-sqrt, exp, expm1, exp2, log, log1p, log2, the language's own (M1's
-build, item 4) - so div before sqrt, as C4 had them, and a step without
-the six orders its batches as it did. batches() lists them in the same
+then by the routines' one order, cft_golden/routines.py's ROUTINES, the
+language's own (lang.graph.OPS filtered; div, sqrt, exp, expm1, exp2, log,
+log1p, log2, sin, cos, tan at M2's build) - so div before sqrt, as C4 had
+them, and a step without the six or the three orders its batches as it
+did. batches() lists them in the same
 order, by depth and then by it. A batch is one operation at one depth, so
 the order is total and no tie is left to the order of a list. A batch of
 one call is never looped: its loop would be its inlined copy and the
@@ -31,7 +33,7 @@ loop's own instructions besides.
 
 A looped batch of K calls has its own RECORDS, K of them, contiguous in
 the scratch: a division's record is two slots, a and b, and a root's -
-or any of the six's - one, a. The allocator places them where the loop
+or any of the nine's - one, a. The allocator places them where the loop
 stands, in the lowest
 run of slots free there - the spill pool's, which may be slots dead
 values used before - so a loop costs the scratch only what is live
@@ -111,13 +113,13 @@ def depths(low):
     return out
 
 
-ORDER = {op: k for k, op in enumerate(R.ROUTINES)}   # the eight's one order
+ORDER = {op: k for k, op in enumerate(R.ROUTINES)}   # the eleven's one order
 
 
 def batches(low):
     """[Batch]: every routine node in its batch, the batches by depth,
     then in the routines' one order (ORDER: div before sqrt, then the
-    six)."""
+    six, then sin, cos and tan)."""
     groups = {}
     for j, d in depths(low).items():
         groups.setdefault((d, low.nodes[j].op), []).append(j)
@@ -132,7 +134,7 @@ def by_size(low):
     docstring): a batch of one call is never looped, since its loop would
     be its one inlined copy and the loop's own instructions besides. The
     fragments are those of the routines the step holds - a step without
-    the six never builds one, and so never needs mpmath."""
+    the nine never builds one, and so never needs mpmath."""
     g = low.graph
     found = batches(low)
     size = {op: len(held_fragment(op, g.fmt, g.rnd))

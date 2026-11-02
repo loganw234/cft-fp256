@@ -85,7 +85,8 @@ LODZ = chr(0x141) + chr(0xF3) + "d" + chr(0x17A)
 OWN_PROFILE = cert2.version_text(cert2.PROFILE)
 # And the language's, lang/version.py's: the page's version-2 example is the
 # golden corpus's markstep-fp64 case, made again at the language's 1.1 (M1's
-# build, item 3, 2026-10-15), where it had said `language 1`.
+# build, item 3, 2026-10-15), where it had said `language 1`, and at 1.2
+# (M2's build, 2026-11-02).
 OWN_LANGUAGE = cert2.version_text(cert2._language_version())
 
 
@@ -1692,7 +1693,8 @@ def test_a_failure_under_another_definition(mk, fl):
 
 def test_a_definition_holding_the_math_library_needs_mpmath(monkeypatch):
     """The language's math library's six reach transcend.py (M1's build,
-    item 3), and they are TRANSCEND_OPS: a definition holding exp - in its
+    item 3), and so do sin, cos and tan (M2's build, 2026-11-02), and they
+    are TRANSCEND_OPS: a definition holding exp - in its
     step, and written again in its tangent - needs mpmath, and one without
     them does not. Without mpmath `_evaluate` refuses it `_Undecided`,
     which the audit names `definition-unavailable` (the next test, through
@@ -1704,7 +1706,8 @@ def test_a_definition_holding_the_math_library_needs_mpmath(monkeypatch):
     from cft_golden.lang import constants as K
     F = Fraction
     assert cert2.TRANSCEND_OPS == {"exp", "expm1", "exp2", "log", "log1p",
-                                   "log2"}
+                                   "log2", "sin", "cos", "tan"}
+    assert cert2.TRANSCEND_OPS == set(lang.graph.TRANSCEND)
     text = ("system s\nformat fp64\nstate x, y\ntangent v\nnext x = x\n"
             "next y = y + exp(x)\nstep map\n")
     g = lang.compile_text(text, "s").graph

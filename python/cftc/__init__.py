@@ -54,13 +54,34 @@ writes the same images, banks and text files as 4; only manifests moved.
 that names exp, expm1, exp2, log, log1p or log2 - at run time, or folded
 where its operand is a constant - which 5 refused `math-library`,
 compiles, each run-time call an inlined routine, mathlib.py's fragment.
-6 writes the same images and banks as 5 for every source 5 compiled,
-and the same text files but for the .cfta's note on a bank word with
-three or more owners: 5 joined them with "and" throughout, and 6 writes
-a list ("a word of div, sqrt and the call loop"), which only a looped
-image holding both division and root meets - no committed file is one.
-Its manifests say version 6 and, for such an image, the .cfta's new
-hash; nothing else in them moved.
+For a source 5 compiled, 6 writes the same images and banks as 5, and
+the same text files but for the .cfta's note on a bank word with three
+or more owners: 5 joined them with "and" throughout, and 6 writes a list
+("a word of div, sqrt and the call loop"), which only a looped image
+holding both division and root meets - no committed file is one. Its
+manifests say version 6 and, for such an image, the .cfta's new hash;
+nothing else in them moved. That is what parcel MC measured, by its
+verifiers and the lead (docs/VALIDATION.md, 2026-10-16, "M1's build,
+fifth wave, closed: cftc compiles the six"): the 31 committed sources
+and the hard-workload pack's 21 at both trees, only each manifest's
+version line moving, and two generated sets, 110 sources (272 compiles)
+and 182 cases a tree, which differ by exactly that note; beyond those
+sets it is believed, not shown. 7 is the math library's sin, cos and
+tan (M2's build, 2026-11-02; the language at 1.2): a source that names sin,
+cos or tan - at run time, or folded where its operand is the constant 0 -
+which 6 refused, compiles, each run-time call an inlined routine,
+mathlib.py's fragment. For a source 6 compiled, 7 writes the same
+images, banks and text files as 6, and its manifests say version 7;
+nothing else in them moved (a manifest's routines block carries the
+three's own sentence only where its step holds one of the three). That
+is what parcel M2C measured (docs/VALIDATION.md, 2026-11-02, "cftc
+carries sin, cos and tan"), at both trees: the 43 committed sources
+outside the hard-workload pack (42 images, only each manifest's version
+line moving, and one refusal, identical) and 330 compiles of 110
+generated sources without sin, cos or tan (256 images, 41 of them
+looped, only that line moving, and 74 refusals, identical). The pack's
+21 sources were not compiled at both trees, and for them, as for any
+other source outside those sets, it is believed, not shown (2026-11-02).
 
 A format override: compile_text and compile_file take `fmt`, a format's
 name, which replaces the value of the source's `format` statement
@@ -95,23 +116,30 @@ take past 512 is `bank-capacity`. Until C4 such a system was refused
 `runtime-routine`, a name that went with it.
 
 The math library's exp, expm1, exp2, log, log1p and log2 (M1's build,
-items 3 and 4, 2026-10-15) are routines too: each run-time node is
-inlined as its fragment, which the golden model's generator builds
-(cft_golden/mathlib.py; routines.fragment hands it out by name), quiet,
-then a RAISE of its flag word - its operation's IEEE flags in [4:0] and,
-where its in-lane test cannot decide the last bit, the MARK in [7], which
-marks the lane (R23's [7], STATUS[6]): the lane's value is then the
-routine's best guess, which the definition replays (docs/LANGUAGE.md,
-"A marked lane"). The six's words are bank slots of the routine kind as
-division's are, after them in the eight's one order; the internal check
-holds each instance to its fragment and each fragment to its routine's
-statement (routines.invariants), division's and root's C4's and the
-six's widened. A function of a constant folds in the language, exactly,
-or is refused there by name, and so compiles as the constant it is.
-The generator derives its constants through mpmath, so on a host without
-it a source whose graph holds a run-time node of the six is refused
-`routine-unavailable` - by name, never an ImportError or an internal
-error - after the refusals that depend on the arguments alone
+items 3 and 4, 2026-10-15) and its sin, cos and tan (M2's build) are
+routines too: each run-time node is inlined as its fragment, which the
+golden model's generator builds (cft_golden/mathlib.py; routines.fragment
+hands it out by name), quiet, then a RAISE of its flag word - its
+operation's IEEE flags in [4:0] and, where its in-lane test cannot decide
+the last bit, the MARK in [7], which marks the lane (R23's [7],
+STATUS[6]): the lane's value is then the routine's best guess, which the
+definition replays (docs/LANGUAGE.md, "A marked lane"). The nine's words
+are bank slots of the routine kind as division's are, after them in the
+eleven's one order (routines.ROUTINES, the language's: div, sqrt, the
+six, sin, cos, tan); the internal check holds each instance to its
+fragment and each fragment to its routine's statement
+(routines.invariants), division's and root's C4's, the six's widened, and
+the three's the six's under live caps of their own (routines.LIVE_CAP: 23,
+26, 17 and 16 at fp32, fp64, fp128 and fp256). sin's and cos's fragments
+hold MIN and MAX (their clamp) against bank words, which no other routine
+does: the emitter writes them, the assembler takes them and the internal
+check holds them as any instruction (python/tests/test_cftc_trig.py). A
+function of a constant folds in the language, exactly, or is refused there
+by name, and so compiles as the constant it is. The generator derives its
+constants through mpmath, so on a host without it a source whose graph
+holds a run-time node of the nine is refused `routine-unavailable` - by
+name, never an ImportError or an internal error - after the refusals that
+depend on the arguments alone
 (segment-steps, target-format, a run value's) and before anything builds
 a fragment, so before `target-feature`, which reads the built image: on
 a revision-7 target without mpmath that source is `routine-unavailable`,
@@ -120,6 +148,19 @@ the host (refuse_unavailable, below). From M1's build, item 3, until
 item 4 this compiler refused every source naming one of the six, at run
 time or folded, by an interim name, `math-library`; it went with item 4,
 as `runtime-routine` went with C4.
+
+Known limit: a call keeps its fragment's values in registers, so the
+values the step keeps live beside it compete for the allocator's 29
+(r3 to r31, regalloc.REGS) with them. The first value spilled beside a
+call comes at 30 less the routine's live cap, counted in other values
+live: with 7, 4, 13 and 14 at fp32, fp64, fp128 and fp256 for each of
+sin, cos and tan (live 23, 26, 17 and 16), where exp's come with 11 at
+fp32 and 19 at the other formats (live 19 and 11, scheduled). MEASURED at
+every k from 0 to 20 with the construction `next x = f(x) + y0 + ... +
+y(k-1); next y(i) = y(i) * x` (program.spill_slots), 2026-11-02; at fp64
+from k = 19 the allocator's chosen candidate pins no component and
+spill_slots reads 0 again, the loads and stores of the homes being the
+cost (python/tests/test_cftc_trig.py holds the thresholds).
 
 A step whose routines, inlined, would pass 32,768 instructions - a
 revision-7 tile's instruction memory, a constant of the compiler's that
@@ -215,7 +256,7 @@ from .regalloc import best_program
 from .schedule import cycles
 from .targets import BUILTIN, Target
 
-VERSION = 6               # the output version: the module docstring, outputs.py
+VERSION = 7               # the output version: the module docstring, outputs.py
 MAX_STEPS = (1 << 32) - 1
 MAX_WORST = 1 << 40
 
@@ -450,14 +491,18 @@ def _call_loops(g, pb, src, low0, prog0):
     return low, prog, looped
 
 
-# The math library's six (M1's build, item 4, 2026-10-15), in the language's
-# order: each run-time node a routine whose fragment mathlib.py builds,
-# through mpmath (the module docstring).
-MATH = ("exp", "expm1", "exp2", "log", "log1p", "log2")
+# The math library's nine (the six, M1's build, item 4, 2026-10-15; and sin,
+# cos and tan, M2's build), in the language's order: each run-time node a
+# routine whose fragment mathlib.py builds, through mpmath (the module
+# docstring). It is cft_golden/routines.py's BUILT, which
+# python/tests/test_cftc_trig.py pins it to: a routine left out of this
+# tuple would be an ImportError on a host without mpmath, where the rule is
+# `routine-unavailable`.
+MATH = ("exp", "expm1", "exp2", "log", "log1p", "log2", "sin", "cos", "tan")
 
 
 def math_nodes(graph):
-    """The six a step graph holds as run-time nodes, in MATH's order - what
+    """The nine a step graph holds as run-time nodes, in MATH's order - what
     a compilation of it needs mpmath for. A fold is a constant, and needs
     none."""
     found = set()
@@ -470,7 +515,7 @@ def math_nodes(graph):
 
 def refuse_unavailable(graph, source=None):
     """`routine-unavailable` where the graph holds a run-time node of the
-    six and mpmath does not import here: the routine's fragment cannot be
+    nine and mpmath does not import here: the routine's fragment cannot be
     built on this host (the module docstring). Otherwise nothing. Line
     None: the cause is the host, not a line of the source."""
     ops = math_nodes(graph)

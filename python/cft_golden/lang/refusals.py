@@ -64,8 +64,8 @@ CATALOGUE = {
     "bank-capacity": "more than 512 params and constants - and, the "
                      "compiler's count, with the words of the routines it "
                      "inlines for a division, a root (C4) or one of the "
-                     "math library's six (M1): the bank holds 512 on "
-                     "every device",
+                     "math library's nine (M1's six, M2's sin, cos and "
+                     "tan): the bank holds 512 on every device",
     # -- equations, indices, the step ---------------------------------
     "missing-equation": "a state component with no equation",
     "duplicate-equation": "a state component with two equations",
@@ -105,17 +105,18 @@ CATALOGUE = {
     # the compiler refused them `runtime-routine` until parcel C4 carried
     # them as inlined routines, and that name went too. exp, expm1, exp2,
     # log, log1p and log2 are operations since M1's build, item 3,
-    # 2026-10-15: `transcendental` refuses the rest of the reserved list)
+    # 2026-10-15, and sin, cos and tan since M2's build, 2026-11-02:
+    # `transcendental` refuses the rest of the reserved list)
     "transcendental": "a transcendental function the language does not "
-                      "have (sin, cos, pow and the rest of the reserved "
+                      "have (pow, sinh and the rest of the reserved "
                       "list), at run time",
     "irrational-constant": "a square root of a constant that is no "
                            "rational's square (2, or a negative one); exp, "
-                           "expm1, exp2, log, log1p or log2 of a constant "
-                           "whose value is irrational or not real (exp(1), "
-                           "log(2), log(-1)); or any other transcendental "
-                           "of a constant, which the language does not "
-                           "have yet",
+                           "expm1, exp2, log, log1p, log2, sin, cos or tan "
+                           "of a constant whose value is irrational or not "
+                           "real (exp(1), log(2), log(-1), sin(1)); or any "
+                           "other transcendental of a constant, which the "
+                           "language does not have yet",
     "power": "^ or **",
     "not-equal": "!=",
     "chained-comparison": "a comparison of a comparison, unparenthesised",
@@ -162,7 +163,7 @@ CATALOGUE = {
 # build, item 3, until item 4 an interim eighth, math-library, refused a
 # source naming one of the math library's six; item 4 compiles them, and
 # the eighth is now routine-unavailable, the one that depends on the host
-# (2026-10-15).
+# (2026-10-15), for sin, cos and tan too since M2's build (2026-11-02).
 #
 # scratch-capacity's depths are the built-in targets' (python/cftc/
 # targets.py); this string said "2,048 slots on the U50's revision 7, 256
@@ -187,13 +188,14 @@ COMPILER_REFUSALS = {
     "halving-underflow": "an h-scaled constant whose exact halving "
                          "underflows, so the step-halving bank cannot "
                          "hold it exactly",
-    # M1's build, item 4 (cftc's output version 6): the one that depends on
-    # the host
-    "routine-unavailable": "a run-time exp, expm1, exp2, log, log1p or "
-                           "log2 on a host without mpmath, through which "
-                           "the routine's fragment is built: it depends on "
-                           "the host, and with mpmath the same source and "
-                           "target compile or are refused by another name",
+    # M1's build, item 4 (cftc's output version 6), and M2's for sin, cos
+    # and tan (version 7): the one that depends on the host
+    "routine-unavailable": "a run-time exp, expm1, exp2, log, log1p, log2, "
+                           "sin, cos or tan on a host without mpmath, "
+                           "through which the routine's fragment is built: "
+                           "it depends on the host, and with mpmath the "
+                           "same source and target compile or are refused "
+                           "by another name",
 }
 
 # Every name a Refusal may carry: the checker's and the interpreter's,

@@ -3302,16 +3302,20 @@ written again the same way, version 1's cases kept, by each step that
 moved them since: cftc's output version 4 (e45a2f7, 2026-10-02), profile
 3 (ca43695, 2026-10-05), cftc's output version 5 (2026-10-06, when
 revision 8's three targets joined cftc's built-in table), profile 3.1
-(2026-10-13), the language at 1.1 (2026-10-15, M1's build, item 3) and
+(2026-10-13), the language at 1.1 (2026-10-15, M1's build, item 3),
 cftc's output version 6 (2026-10-15, item 4, when the compiler took the
-math library's six). Each of cftc's three steps moved the same eight
-certificates - the sourced and rebuilt Lorenz-63 cases and six controls,
-the ones that name a compile - by their `compiler` lines and hash lines
-alone, and the manifest by their eight digests; profiles 3 and 3.1 each
-moved all 37 by their profile and hash lines, with seven supersedes
-lines and four signatures; the language's step moved the 24 that name a
-source by their `language` and hash lines, and the manifest by their
-digests. Every measured
+math library's six), the language at 1.2 (2026-11-02, M2's build, when
+the language took sin, cos and tan) and cftc's output version 7 (the same
+day, when the compiler took them). Each of cftc's four steps moved the
+same eight certificates - the sourced and rebuilt Lorenz-63 cases and six
+controls, the ones that name a compile - by their `compiler` lines and
+hash lines alone, and the manifest by their eight digests (36 lines at 7:
+20 `compiler`, 8 `hash` and 8 manifest `certificate` lines); profiles 3 and
+3.1 each moved all 37 by their profile and hash lines, with seven
+supersedes lines and four signatures; each of the language's two steps
+moved the 24 that name a source by their `language` and hash lines, and
+the manifest by their digests (72 lines at 1.2: 24 `language`, 24 `hash`
+and 24 manifest `certificate` lines). Every measured
 header line is `unknown`, as the example's `build-id` is, but in
 `signed-fp64`, which spells each out.
 
@@ -3374,8 +3378,10 @@ Logan's permission.
   giving the golden auditor's verdict for the same ("The audit tool").
 - A replay decided through mpmath, in a committed case. The language's
   math library's six reach mpmath since M1's build, item 3, and since
-  item 4 (2026-10-15) the compiler carries them, so an image of a source
-  holding one exists, and it can mark a lane (R23's [7], STATUS[6])
+  item 4 (2026-10-15) the compiler carries them, as it carries sin, cos
+  and tan since M2's build (2026-11-02, the language at 1.2, cftc's
+  output version 7), so an image of a source holding one exists, and it
+  can mark a lane (R23's [7], STATUS[6])
   where its routine cannot decide the last bit - the structured
   families near an exact case. What a writer does with such a run:
   - **the golden writer** (cert2.py) replays each marked lane by the
@@ -3396,8 +3402,8 @@ Logan's permission.
     segment, the guess and not the definition. A limit, recorded: a
     replay image would take a more accurate build of the six's routines
     (a wider guard), which nothing makes yet.
-  No committed case holds the six, so `definition-unavailable` and
-  `replay-undecided` have none in the corpus; test_cert2.py reaches the
+  No committed case holds the six or sin, cos or tan, so
+  `definition-unavailable` and `replay-undecided` have none in the corpus; test_cert2.py reaches the
   first through a real certificate (above, "An auditor that cannot
   evaluate the definition").
 
@@ -3891,9 +3897,10 @@ audit was handed, in this order:
    the auditor's own limit. A target the auditor's compiler does not have,
    and a source it refuses for that target, are judged the same way - but
    one refusal: a source the auditor's compiler refuses
-   `routine-unavailable` (a run-time call of the math library's six on an
-   auditor's host without mpmath, through which its compiler builds their
-   routines; M1's build, item 4) is the auditor's own limit and the cause
+   `routine-unavailable` (a run-time call of the math library's nine - the
+   six, and sin, cos and tan since M2's build - on an auditor's host
+   without mpmath, through which its compiler builds their routines; M1's
+   build, item 4) is the auditor's own limit and the cause
    a replay would meet there too, `definition-unavailable`, raised at this
    check - never `source-image`.
 
@@ -4001,11 +4008,13 @@ re-derivation passed under the auditor's.
 `definition-unavailable` (exit 78) where it first needs to: no mpmath for
 a node whose golden function is decided through mpmath's enclosures, or
 an enclosure that reached its precision cap (`transcend.py`'s
-`ZivEscalation`). The math library's six - exp, expm1, exp2, log, log1p
-and log2, the language's since M1's build, item 3 (2026-10-15) - are the
-nodes that reach `transcend.py` (`cert2.TRANSCEND_OPS`); its division and
-root are softfloat's. Since item 4 the compiler carries the six, building
-their routines through mpmath too, so where a run is compiled from a
+`ZivEscalation`). The math library's nine - exp, expm1, exp2, log, log1p
+and log2, the language's since M1's build, item 3 (2026-10-15), and sin,
+cos and tan, since M2's build (2026-11-02) - are the nodes that reach
+`transcend.py` (`cert2.TRANSCEND_OPS`); its division and root are
+softfloat's. Since item 4 (and M2's build, for the three) the compiler
+carries them, building their routines through mpmath too, so where a run
+is compiled from a
 source holding one the auditor first needs mpmath at step 4a's recompile:
 its compiler refuses the source `routine-unavailable` there, and the audit
 refuses `definition-unavailable` at that check - the same cause, one name,
@@ -4385,7 +4394,7 @@ device-version none
 device-caps none
 device-tiles 1
 profile 3.1
-language 1.1
+language 1.2
 device-platform none
 device-xrt none
 device-clock none
@@ -4439,7 +4448,7 @@ quantity counter terms 1
 term 1/1 s0
 value exact c/1
 end
-hash e04b6be1ddeb3a59d7988721d4bafb4b5f65bdeb11bd3fe92900b14a16530c25
+hash 16516df8ff9014c9a7f610ae3fd2cc1c7d3abe0cb86eda59f64e3428c9df2931
 ```
 
 Reading it: the image marks lanes 0 and 1 in segment 1, where k is 7 and

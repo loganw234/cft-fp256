@@ -36,7 +36,18 @@ The steps:
        answer, 2026-10-12). A source that was refused one way and is
        refused another now - log(0), `irrational-constant` at 1 and
        `constant-division-by-zero` at 1.1 - changes no accepted source.
+  1.2  2026-11-02, M2's build: sin, cos and tan, each an operation with
+       transcend.py's golden function, their folds (sin(0) and tan(0) are 0
+       and cos(0) is 1, of a constant exactly 0 only), and their tangent
+       rules. Functions the language refused before only because it did not
+       have them, as at 1.1 (Logan's answer 12 to the M2 study, 2026-10-14:
+       "the language to 1.2"): every source accepted at 1.1 is accepted at
+       1.2 and computes the same, and a source refused at 1.1 is refused
+       still, or, using one of the three, accepted. A source that was
+       refused one way and is refused another now - sin(h), which was
+       `irrational-constant` at 1.1 and is `h-nonlinear` at 1.2 - changes no
+       accepted source.
 """
 
-# (major, minor): spelt "1", or "1.1" once a minor step is taken
-VERSION = (1, 1)
+# (major, minor): spelt "1", or "1.2" once a minor step is taken
+VERSION = (1, 2)

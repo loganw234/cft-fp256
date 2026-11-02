@@ -309,6 +309,129 @@ directory's model, in the entry). What it says of the study:
 - Not built and not in this note: cftc and the language (parcel M2C's and
   M2L's), `routines.py`'s LIVE_CAP (the eight routines, M2C's), the card.
 
+**A note of 2026-11-02, at parcel M2L** (sin, cos and tan in the language,
+golden-first; M2's build, wave 3; the study's text stays as written at
+1337a13). Sections 6 and 7 are built in python/cft_golden/lang/ and held
+by python/tests/test_lang_trig.py and the `tangent` stage's leg M
+(docs/VALIDATION.md, the entry of that date, whose figures these are);
+the language is at 1.2. cftc, the pendulum and the corpus's compiler lines
+are parcel M2C's. What the build says of the study:
+- **A correction of section 7's "Rounding order"** (the sentence that
+  reads "`-(sin(a) * da)` rounds the product before negating, which
+  differs under rdn and rup", :1569-1570 at 19de866c). It holds for finite
+  results only. At a NaN the two forms differ under EVERY attribute: sin(a)
+  is the canonical quiet NaN (at an infinity, and for a NaN argument); the
+  first form negates it and multiplies, and a product with a NaN is the
+  canonical positive NaN whatever the NaN's sign; the second form
+  multiplies and then negates that NaN, setting its sign bit. MEASURED at
+  fp32, fp64, fp128 and fp256 under rne, rtz, rdn, rup and rmm (20 cells,
+  a scratch script and the test below): the first form is the canonical
+  positive NaN and the two differ in the sign bit alone;
+  python/tests/test_lang_trig.py's `test_cos_rounded_otherwise_differs_
+  only_under_rdn_and_rup[fmt]` holds it, beside 40 random finite lanes a
+  format, on which the two forms are the same bits under rne, rtz and rmm
+  and differ under rdn and rup. So a plant of cos's second form is red at
+  a NaN lane under rne too, and the leg M plant says both (finite lanes
+  under rdn and rup only; a NaN lane under all five).
+- **Section 7's "How it is held"** says "the tangent stage's fourth check
+  by a central difference in high precision" (:1589-1590 at 19de866c). The
+  exact dual numbers are the intention-out's fourth check and the `tangent`
+  stage's leg D; the central difference at 2^-256 of 1,024-bit values is
+  leg M's own, which M1's question 10 accepted (the wording repeats parcel
+  ML's brief). Both are made on the three, beside the rounding check on
+  y = f(a).
+- **Section 7's alternative `fma(r, r * da, da)`** for tan reads da twice,
+  which the step graph forbids of an unnamed node (as the lead's decision
+  of 2026-10-15 forbade expm1's `fma(r, da, da)`): it cannot be written
+  where da has no name. The plant of tan's rule rounded otherwise uses it
+  where da is a leaf or named. `(r * r + 1) * da`, which needs no second
+  read, differs from the rule so rarely that the rounding check did not see
+  it in 120 lanes (MEASURED), so it is no plant.
+- **Section 6's folds and refusals** are built as written: sin(0) and
+  tan(0) are 0 and cos(0) is 1 of a constant exactly 0, every other constant
+  is `irrational-constant` with its reason (Hermite-Lindemann; tan's by
+  e^(2ic) = (1 + ia)/(1 - ia)), a function of h is `h-nonlinear`, and no
+  constant is `constant-division-by-zero`. Two further names change that
+  the section did not say: `sin(x, x)` is `arity` now that the name is a
+  built-in (it was `transcendental`), and `sin(0 * h)` is `unused` (h folds
+  away; it was `irrational-constant`).
+- **The exact evaluation needs no argument limit** for the three: mpmath
+  reduces the argument itself (MEASURED, 0.12 s for sin(2^1,000,000 + 1)
+  on this desktop, which has gmpy2). The argument is rounded to nearest at
+  1,024 bits first, as the six's is, so the value of a nonzero rational q
+  is a function of that rounded argument, and differs from sin(q) by
+  about |q| 2^-1024 (2^-984 at 2^40).
+- **Section 7's cost** (cos(a) beside sin(a) at 28 to 29 instructions,
+  not 378 to 402, by the shared prefix) is the compiler's to hold, not the
+  language's: the rules here write cos(a) and sin(a) as nodes of the
+  tangent, and the sharing is parcel M2C's.
+
+**A note of 2026-11-02, at parcel M2C** (cftc carries sin, cos and tan; M2's
+build, wave 3, with parcel M2L's language at 1.2; the study's text stays as
+written at 1337a13). Section 6's cftc part and section 7's committed reference
+are built: `routines.ROUTINES` is the eleven (the three after log2, the
+language's order), `ir.ROUTINES` and `ir.ARITY` and `cftc.MATH` follow it,
+cftc's output VERSION is 7, and two systems are committed at fp64 and fp256 in
+programs/systems/compiled-tangent/ (docs/VALIDATION.md, the entry of that date,
+whose figures these are; python/tests/test_cftc_trig.py holds them). What it
+says of the study:
+- **6's "the words are routine bank slots by bit pattern: 111, 108 and 122"**
+  are the union over the five attributes; an image holds one attribute's: all
+  three together 100, 109, 106 and 120 at fp32, fp64, fp128 and fp256 under rne
+  (109 to 110, 106 to 107 and 120 to 121 over the five at the double word's
+  three). The design uses no scratch slot, as 6 says: a one-routine image
+  has the state and no spill.
+- **6's "which these fragments meet with no live cap" is the cap now:**
+  routines.LIVE_CAP has a row for each of the three, 23, 26, 17 and 16 at fp32,
+  fp64, fp128 and fp256 (mathlib.TRIG_LIVE_CAP is a view of those rows), and the
+  six's view LIVE_CAP stays 21, 13, 13 and 13. The allocator has 29 registers
+  (r3 to r31): the first value spilled beside a call comes with 7, 4, 13 and 14
+  other values live, 30 less the cap, for each of the three (MEASURED at every k
+  from 0 to 20 on `next x = f(x) + y0 + ... ; next y_i = y_i * x`; exp's, by the
+  same construction, 11 at fp32 and 19 elsewhere, as M1's build measured). At fp64
+  from k = 19 the allocator's chosen candidate pins nothing and spill_slots reads
+  0 again, the loads and stores of the homes being the cost.
+- **6's "MIN and MAX inside a fragment ... which the build checks cftc's emitter
+  and internal check accept" is shown:** sin's and cos's images hold two MIN and
+  two MAX each, `max rk kx` (a register and a bank word by the indexed form) at
+  every format, inside the quiet region, and the internal check reads them from
+  the assembled words and refuses a MAX emitted as a MIN. `select kkr` by plain
+  index is in the images at fp32, fp128 and fp256 (not fp64's one-routine image,
+  whose words sit at index 16 or more). The nine's marks are SELECT arms of the
+  word 0x90, in no IOR.
+- **2.1's sharing holds in a compiled step**, to the instruction at the double
+  word's three: sin and cos of one operand 434, 411 and 418 instructions at
+  fp64, fp128 and fp256, sin and tan 449, 428 and 437, all three 475, 455 and
+  464, where apart they are 808, 760 and 774 (sin and cos); fp32's triple word,
+  new: 988, 1,043 and 1,088 against 939, 936 and 993 alone. The tangent's
+  routines are shared the same way: sin's cos(a) and cos's sin(a) are one call
+  a call, not one a vector, with one tangent vector or two (the pendulum's
+  instructions_quiet is 1,736, four stages of 434).
+- **The call loop takes a unary radian routine as it takes sqrt:** one slot a
+  record; at the real constant, 32,768, a step of n sin calls at fp64 is
+  inlined at n = 79 (32,470 instructions, 411 a call, measured at every n from
+  76) and loops all of them at n = 80 (736 written, 33,363 run a step, in 160
+  scratch slots).
+- **7's committed reference is two systems, not one** (the lead's decisions 3
+  and 4): the pendulum, d/dt theta = omega and d/dt omega = -(k sin(theta))
+  under rk4 with one tangent vector, h = 1/64, round rne (sin 4 and cos 4 calls
+  a step; the cos is the tangent's); and a rigid body's attitude, the 3-2-1
+  Euler angles' kinematics, d/dt phi = p + (q sin(phi) + r cos(phi))
+  tan(theta) and d/dt theta = q cos(phi) - r sin(phi), round rdn, with all
+  three in the step and all three rules in the tangent (sin, cos and tan 4 calls
+  each a step, 3,609 instructions a step at fp64). "A rule rounded otherwise
+  must move its bytes" is held for each of the three rules by six plants, each
+  moving exactly the references that hold the rule. **A finding:** cos's rule
+  rounded otherwise, -(sin(a) * da), moves the attitude's bytes under rne as
+  well as rdn; its values differ from the rule's only under rdn and rup (the
+  two are the same bits under rne, rtz and rmm), and in the attitude the product
+  is one term among sums, so the step's output rarely shows it (0 of 40 lanes at
+  one step, 1 of 12 at four, under rdn). On a one-operation image
+  (`next y = cos(x)`) it differs on a fair share of lanes under rdn and rup and
+  on none under the other three.
+- Not in this note: the stages' legs with marked lanes replayed (parcel M2S's),
+  the acceptance set's radian case (M2A's), the card.
+
 M1's study (docs/studies/M1-exp-log.md) is its model of form, section for
 section, and M1's design is its starting point: the in-lane test, the
 double word with TwoSum and no augmented addition, the fragment in C4's
