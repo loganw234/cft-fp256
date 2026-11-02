@@ -104,18 +104,19 @@ sin, cos and tan (M2's build, 2026-11-02; docs/studies/M2-trig.md, section
 product a vector on da after a primal-only factor the compiler shares
 across vectors: cos(a), -sin(a) or 1 + r * r (one fma, one rounding). The
 first two are routines of their own, written in the tangent where the
-primal need not hold them - cos(a) beside sin(a) costs the step 28 to 29
-instructions, not a second routine, because the compiler's sharing makes
-the two fragments one prefix - and a routine may mark a lane like any
-other (docs/LANGUAGE.md, "A marked lane"). The negation of cos's factor is
+primal need not hold them - the study measured cos(a) beside sin(a) at 28
+to 29 instructions of the primal, not a second routine's, because the
+compiler's sharing makes the two fragments one prefix, which is the
+compiler's to do - and a routine may mark a lane like any other
+(docs/LANGUAGE.md, "A marked lane"). The negation of cos's factor is
 exact, so it sits inside the factor: `(-sin(a)) * da`, which the canonical
 form writes with its brackets. `-(sin(a) * da)` is the same value exactly,
 and a different rounding under rdn and rup, where the product rounds
 before it is negated; under rne, rtz and rmm the two agree on every finite
 result (at a NaN the second form's sign bit is the negation's, under every
-attribute: measured at fp32 and fp64). tan's reads r twice, written again
-each time it has no name, as log's three reads are.
-None has a point where it is not differentiable: at +-inf cos(a) is a NaN,
+attribute: measured at fp32, fp64, fp128 and fp256). tan's reads r twice,
+written again each time it has no name, as log's three reads are. None has
+a point where it is not differentiable: at +-inf cos(a) is a NaN,
 as the primal is, and no representable argument is a pole of tan.
 
 The walk is iterative, from the outputs, and makes the tangent of a node

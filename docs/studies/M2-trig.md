@@ -309,6 +309,63 @@ directory's model, in the entry). What it says of the study:
 - Not built and not in this note: cftc and the language (parcel M2C's and
   M2L's), `routines.py`'s LIVE_CAP (the eight routines, M2C's), the card.
 
+**A note of 2026-11-02, at parcel M2L** (sin, cos and tan in the language,
+golden-first; M2's build, wave 3; the study's text stays as written at
+1337a13). Sections 6 and 7 are built in python/cft_golden/lang/ and held
+by python/tests/test_lang_trig.py and the `tangent` stage's leg M
+(docs/VALIDATION.md, the entry of that date, whose figures these are);
+the language is at 1.2. cftc, the pendulum and the corpus's compiler lines
+are parcel M2C's. What the build says of the study:
+- **A correction of section 7's "Rounding order"** (the sentence that
+  reads "`-(sin(a) * da)` rounds the product before negating, which
+  differs under rdn and rup", :1569-1570 at 19de866c). It holds for finite
+  results only. At a NaN the two forms differ under EVERY attribute: sin(a)
+  is the canonical quiet NaN (at an infinity, and for a NaN argument); the
+  first form negates it and multiplies, and a product with a NaN is the
+  canonical positive NaN whatever the NaN's sign; the second form
+  multiplies and then negates that NaN, setting its sign bit. MEASURED at
+  fp32, fp64, fp128 and fp256 under rne, rtz, rdn, rup and rmm (20 cells,
+  a scratch script and the test below): the first form is the canonical
+  positive NaN and the two differ in the sign bit alone;
+  python/tests/test_lang_trig.py's `test_cos_rounded_otherwise_differs_
+  only_under_rdn_and_rup[fmt]` holds it, beside 40 random finite lanes a
+  format, on which the two forms are the same bits under rne, rtz and rmm
+  and differ under rdn and rup. So a plant of cos's second form is red at
+  a NaN lane under rne too, and the leg M plant says both (finite lanes
+  under rdn and rup only; a NaN lane under all five).
+- **Section 7's "How it is held"** says "the tangent stage's fourth check
+  by a central difference in high precision" (:1589-1590 at 19de866c). The
+  exact dual numbers are the intention-out's fourth check and the `tangent`
+  stage's leg D; the central difference at 2^-256 of 1,024-bit values is
+  leg M's own, which M1's question 10 accepted (the wording repeats parcel
+  ML's brief). Both are made on the three, beside the rounding check on
+  y = f(a).
+- **Section 7's alternative `fma(r, r * da, da)`** for tan reads da twice,
+  which the step graph forbids of an unnamed node (as the lead's decision
+  of 2026-10-15 forbade expm1's `fma(r, da, da)`): it cannot be written
+  where da has no name. The plant of tan's rule rounded otherwise uses it
+  where da is a leaf or named. `(r * r + 1) * da`, which needs no second
+  read, differs from the rule so rarely that the rounding check did not see
+  it in 120 lanes (MEASURED), so it is no plant.
+- **Section 6's folds and refusals** are built as written: sin(0) and
+  tan(0) are 0 and cos(0) is 1 of a constant exactly 0, every other constant
+  is `irrational-constant` with its reason (Hermite-Lindemann; tan's by
+  e^(2ic) = (1 + ia)/(1 - ia)), a function of h is `h-nonlinear`, and no
+  constant is `constant-division-by-zero`. Two further names change that
+  the section did not say: `sin(x, x)` is `arity` now that the name is a
+  built-in (it was `transcendental`), and `sin(0 * h)` is `unused` (h folds
+  away; it was `irrational-constant`).
+- **The exact evaluation needs no argument limit** for the three: mpmath
+  reduces the argument itself (MEASURED, 0.12 s for sin(2^1,000,000 + 1)
+  on this desktop, which has gmpy2). The argument is rounded to nearest at
+  1,024 bits first, as the six's is, so the value of a nonzero rational q
+  is a function of that rounded argument, and differs from sin(q) by
+  about |q| 2^-1024 (2^-984 at 2^40).
+- **Section 7's cost** (cos(a) beside sin(a) at 28 to 29 instructions,
+  not 378 to 402, by the shared prefix) is the compiler's to hold, not the
+  language's: the rules here write cos(a) and sin(a) as nodes of the
+  tangent, and the sharing is parcel M2C's.
+
 M1's study (docs/studies/M1-exp-log.md) is its model of form, section for
 section, and M1's design is its starting point: the in-lane test, the
 double word with TwoSum and no augmented addition, the fragment in C4's

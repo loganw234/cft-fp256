@@ -85,7 +85,8 @@ LODZ = chr(0x141) + chr(0xF3) + "d" + chr(0x17A)
 OWN_PROFILE = cert2.version_text(cert2.PROFILE)
 # And the language's, lang/version.py's: the page's version-2 example is the
 # golden corpus's markstep-fp64 case, made again at the language's 1.1 (M1's
-# build, item 3, 2026-10-15), where it had said `language 1`.
+# build, item 3, 2026-10-15), where it had said `language 1`, and at 1.2
+# (M2's build, 2026-11-02).
 OWN_LANGUAGE = cert2.version_text(cert2._language_version())
 
 
