@@ -24,6 +24,11 @@ FLAG_WORDS = ((sf.FLAG_INVALID, "invalid"), (sf.FLAG_DIVZERO, "divideByZero"),
               (sf.FLAG_OVERFLOW, "overflow"),
               (sf.FLAG_UNDERFLOW, "underflow"), (sf.FLAG_INEXACT, "inexact"))
 
+# The math library's radian routines (M2's build), whose own sentence a
+# manifest carries only where its step holds one of them: a step with the
+# six alone, or with division and root, says what it said before M2's build.
+RADIAN = ("sin", "cos", "tan")
+
 # What each template's step advances the independent variable by, over
 # RN(h): k times the h-scaled constant of factor f. rk4's update is
 # RN(h/6) (k1 + 2 k2 + 2 k3 + k4), six times RN(h/6); stormer-verlet's
@@ -244,25 +249,37 @@ def build(c):
         # where the fragments come from, and what their raises do: C4's two
         # sentences exactly where the step holds only division and root, so
         # that such a manifest is what it was; the math library's six
-        # (M1's build, item 4) add theirs
-        six = [op for op in calls if op not in ("div", "sqrt")]
+        # (M1's build, item 4) add theirs, a step with none of the six
+        # omitting it; sin, cos and tan (M2's build) add a sentence of their
+        # own only where the step holds one of them, so that a manifest
+        # without them is what it was
+        math = [op for op in calls if op not in ("div", "sqrt")]
+        six = [op for op in math if op not in RADIAN]
+        radian = [op for op in math if op in RADIAN]
         source, flags = [], ("each runs in a quiet region and raises exactly "
                              "its operation's flags: revision 8's flag "
                              "control, QUIET, ENDQUIET and RAISE "
                              "(docs/SEQUENCER.md R24)")
-        if len(six) < len(calls):
+        if len(math) < len(calls):
             source.append("divfull's and sqrtfull's instructions, relocated "
                           "and specialised at the program's attribute")
-        if six:
+        if math:
             source.append("the math library's fragments, cft_golden/"
                           "mathlib.py's, built at the program's format and "
                           "attribute")
+        if six:
             flags += ("; the math library's six also set the raised word's "
                       "bit 7 where their in-lane test cannot decide the last "
                       "bit, which marks the lane (R23's byte [7], "
                       "STATUS[6]): its value is then the routine's best "
                       "guess, which the definition replays "
                       "(docs/LANGUAGE.md, \"A marked lane\")")
+        if radian:
+            flags += ("; the math library's sin, cos and tan likewise set "
+                      "the raised word's bit 7 where their in-lane test "
+                      "cannot decide the last bit, and mark the lane as the "
+                      "six do (R23's byte [7], STATUS[6]; docs/LANGUAGE.md, "
+                      "\"A marked lane\")")
         m["routines"] = {
             "calls": calls,
             "per_call": {op: len(held_fragment(op, fmt, g.rnd))

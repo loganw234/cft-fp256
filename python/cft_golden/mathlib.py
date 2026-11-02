@@ -4393,13 +4393,12 @@ _TW_PLANTS = {**TRIG_TW_PLANTS, **TRIG_TW_ROUTINE_PLANTS}
 # (parcel M2X's tw32_live.out.txt:17), and the cap of 23 has no slack: Logan's
 # decision of 2026-10-27 (docs/ROADMAP.md, "Logan's answer on fp32") leaves
 # 32 - 23 = 9 of seq.py's registers for a program's own values across a call.
-# routines.py's LIVE_CAP and CONTRACT name the eight routines, and adding sin,
-# cos and tan there is parcel M2C's, with cftc.
-TRIG_LIVE_CAP = {
-    "sin": {"fp64": 26, "fp128": 17, "fp256": 16, "fp32": 23},
-    "cos": {"fp64": 26, "fp128": 17, "fp256": 16, "fp32": 23},
-    "tan": {"fp64": 26, "fp128": 17, "fp256": 16, "fp32": 23},
-}
+# The table is routines.LIVE_CAP's three rows since M2's build, item 5
+# (parcel M2C): routines.py names sin, cos and tan among its eleven routines,
+# one statement per routine, and this is a VIEW of those rows - the same
+# dicts, under the name this module's tests have always read - so a cap is
+# stated once and the two cannot part.
+TRIG_LIVE_CAP = {name: routines.LIVE_CAP[name] for name in TRIG_NAMES}
 
 
 def _sin_coefficient(k):
@@ -5158,12 +5157,14 @@ def _build_trig_tw(fn, fmt: FpFormat, rnd: int, G, shift, plant):
 # answer widens them. From parcel E1 this module held ITS fragments to the
 # widened form, here, while routines.py kept C4's for division and root. M1's
 # build, item 4, moved the widened form into routines.py: one statement for
-# the eight routines, per routine (routines.CONTRACT, routines.LIVE_CAP), the
-# six's this module's form and division's and root's C4's, not loosened -
-# and cftc's internal check holds every routine of an image to it. What
+# the routines, per routine (routines.CONTRACT, routines.LIVE_CAP), the
+# math library's this module's form and division's and root's C4's, not
+# loosened - and cftc's internal check holds every routine of an image to it.
+# M2's build, item 5, added sin, cos and tan to those tables, eleven routines
+# in all, the three under the same contract and caps of their own. What
 # follows are VIEWS of it, under the names this module's tests and callers
 # have always read: FLAG_WORDS, LIVE_CAP (by format), flag_words() and
-# invariants().
+# invariants(); TRIG_LIVE_CAP, above, is the three's rows.
 
 # The values a flag word can take: C4's six, and inexact, overflow with
 # inexact and underflow with inexact each with the mark. Never bits [6:5].
@@ -5199,7 +5200,9 @@ FLAG_WORDS = routines.MARKED_FLAG_WORDS
 # table's, the reduction's and the sum's terms) is itself most of fp32's 17
 # to 21. Since M1's build, item 4, the caps are stated in routines.LIVE_CAP,
 # by routine and format, each of the six at these values; this is its view
-# by format, the largest of the six's at each.
+# by format, the largest of the six's at each - the six's rows only (NAMES),
+# so that the three's larger caps, TRIG_LIVE_CAP's, do not move it: it is
+# {fp32: 21, fp64: 13, fp128: 13, fp256: 13}, as it was.
 LIVE_CAP = {fmt.name: max(routines.LIVE_CAP[name][fmt.name] for name in NAMES)
             for fmt in FORMATS}
 _BY_FORMAT = object()            # invariants()'s default cap: LIVE_CAP's
@@ -5220,7 +5223,8 @@ def invariants(f, live_cap=_BY_FORMAT):
         operands, the result and the flag word are values;
       * the flag word's values, by flag_words(), within FLAG_WORDS: never
         bits [6:5], the mark only with inexact (an IOR rule in the walk);
-      * at most `live_cap` values live at once (LIVE_CAP's, by default;
+      * at most `live_cap` values live at once (by default the function's
+        TRIG_LIVE_CAP at its format for sin, cos and tan, else LIVE_CAP's;
         None for no cap);
       * every instruction reading a word or an internal value, so none can
         be a language node's (cftc/inline.py's argument);
@@ -5228,14 +5232,15 @@ def invariants(f, live_cap=_BY_FORMAT):
       * the attributes the routine's own: RNE, RTZ, RDN, RUP and the
         PROGRAM's (f.rnd), and none where an opcode does not round.
 
-    It holds the fragment to the six's statement whatever routine it names,
-    so that a study's fragment is held to it too (docs/studies/m2/
-    costs.py's sin, cos and tan); for one of the six that is exactly
-    routines.invariants(f), its routine's own, since routines.CONTRACT
-    names MATH_CONTRACT for each and their caps are LIVE_CAP's at every
-    format. C4's invariants, division's and root's still, admit RNE and RTZ
-    only, cap the live count at 16 and allow no mark, which is how the
-    study measured them failing these."""
+    It holds the fragment to the math library's statement whatever routine
+    it names, so that a study's fragment is held to it too (docs/studies/m2/
+    costs.py's sin, cos and tan, before M2's build); for one of the nine
+    that is exactly routines.invariants(f), its routine's own, since
+    routines.CONTRACT names MATH_CONTRACT for each and their caps are
+    routines.LIVE_CAP's at every format: LIVE_CAP's for the six, the three's
+    TRIG_LIVE_CAP rows for sin, cos and tan. C4's invariants, division's and
+    root's still, admit RNE and RTZ only, cap the live count at 16 and allow
+    no mark, which is how the study measured them failing these."""
     if live_cap is _BY_FORMAT:
         live_cap = TRIG_LIVE_CAP.get(f.op, {}).get(
             f.fmt.name, LIVE_CAP.get(f.fmt.name))

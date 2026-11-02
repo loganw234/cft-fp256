@@ -22,18 +22,19 @@ so a writer meets one form of refusal from the parser to the image:
                      immediate a segment's steps are
   halving-underflow  an h-scaled constant whose exact halving
                      underflows, so no step-halving bank holds it
-  routine-unavailable  a run-time node of the math library's six (exp,
-                     expm1, exp2, log, log1p, log2) on a host without
-                     mpmath, through which the golden generator
-                     (cft_golden/mathlib.py) derives the routine's
-                     constants (M1's build, item 4): the one name that
-                     depends on the HOST - with mpmath the same source and
-                     target compile, or are refused by another name such
-                     as target-feature. Raised after the refusals of the
-                     arguments alone (segment-steps, target-format, a run
-                     value's) and before anything builds a fragment, so
-                     before target-feature, which reads the built image;
-                     no line, the cause being the host
+  routine-unavailable  a run-time node of the math library's nine (exp,
+                     expm1, exp2, log, log1p, log2, sin, cos, tan) on a
+                     host without mpmath, through which the golden
+                     generator (cft_golden/mathlib.py) derives the
+                     routine's constants (M1's build, item 4, and M2's):
+                     the one name that depends on the HOST - with mpmath
+                     the same source and target compile, or are refused by
+                     another name such as target-feature. Raised after the
+                     refusals of the arguments alone (segment-steps,
+                     target-format, a run value's) and before anything
+                     builds a fragment, so before target-feature, which
+                     reads the built image; no line, the cause being the
+                     host
 
 and one of the language's own: `bank-capacity`, the bank's 512 on every
 device, which the checker raises for params and constants and the

@@ -35,18 +35,23 @@ from cft_golden.lang import constants as K
 
 from .refusals import InternalError
 
+# In the language's order, lang.graph.OPS: the manifest's graph_by_op reads
+# its keys in this order, and python/tests/test_routines.py pins
+# list(ARITY.items()) == list(lang.OPS.items()).
 ARITY = {"fma": 3, "add": 2, "sub": 2, "mul": 2, "div": 2, "sqrt": 1,
          "exp": 1, "expm1": 1, "exp2": 1, "log": 1, "log1p": 1, "log2": 1,
+         "sin": 1, "cos": 1, "tan": 1,
          "neg": 1, "abs": 1, "copysign": 2, "min": 2, "max": 2, "minnum": 2,
          "maxnum": 2, "cmplt": 2, "cmple": 2, "cmpeq": 2, "select": 3}
 # The four the image computes as one instruction under the program's one
 # attribute. A division and a square root round once under it too, and so
-# do the math library's six, but no instruction is any of them: each is a
-# ROUTINE, inlined (inline.py; C4, and M1's build, item 4).
+# do the math library's nine (the six, and sin, cos and tan), but no
+# instruction is any of them: each is a ROUTINE, inlined (inline.py; C4, and
+# M1's and M2's builds).
 ROUNDED = frozenset({"fma", "add", "sub", "mul"})
-# the eight (cft_golden/routines.py's ROUTINES, whose order is theirs)
+# the eleven (cft_golden/routines.py's ROUTINES, whose order is theirs)
 ROUTINES = frozenset({"div", "sqrt", "exp", "expm1", "exp2", "log", "log1p",
-                      "log2"})
+                      "log2", "sin", "cos", "tan"})
 RND_BY_NAME = {name: code for code, name in sf.RND_NAMES.items()}
 
 
