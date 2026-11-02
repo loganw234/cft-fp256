@@ -439,6 +439,39 @@ six, named as `python/cft_golden/transcend.py` names the functions.
     naming one, at run time or folded, by an interim name,
     `math-library`; that name went with item 4. The interpreter runs
     both.
+  - **sin, cos and tan in the compiler** (M2's build, 2026-11-02,
+    cftc's output version 7) are carried the same way, nine routines in
+    all, in `routines.py`'s one order, the step graph's `OPS` (div, sqrt,
+    exp, expm1, exp2, log, log1p, log2, sin, cos, tan): the same
+    quiet region and raise of a flag word that may carry the mark, the
+    same refusals - `target-feature` on revision 7's four targets, which
+    publish no flag control, `routine-unavailable` without mpmath - and
+    the same images for `sw` and revision 8's three. Four things differ.
+    Their fragments keep 23, 26, 17 and 16 values live at fp32, fp64,
+    fp128 and fp256, past the six's 21 and 13, so the internal check
+    holds them to caps of their own (`routines.LIVE_CAP`, one row each),
+    and the allocator's 29 registers (r3 to r31) leave less beside a
+    call: the first value spilled comes with 7, 4, 13 and 14 other values
+    live (30 less the cap; exp's are 11 at fp32 and 19 elsewhere),
+    measured at every k from 0 to 20 for each of the three. They are
+    long: sin 939, 406, 382 and 389 instructions at fp32, fp64, fp128 and
+    fp256, cos 936, 402, 378 and 385, tan 993, 419, 397 and 406. sin's
+    and cos's hold MIN and MAX against bank words, a clamp no other
+    routine has, which the emitter, the assembler and the internal check
+    take as any instruction. And the three of one operand share their
+    reduction and their polynomials - the compiler hash-conses a
+    routine's instructions across the instances of a step - so sin(y) and
+    cos(y) together cost 988, 434, 411 and 418 instructions and all three
+    1,088, 475, 455 and 464 at the four formats, where apart they would
+    cost the sums (measured, the study's figures at the double word's
+    three). That is what makes the derivative rules cheap: sin's tangent
+    reads cos(a), cos's reads sin(a) and tan's reads its own result, each
+    one call a call and not one a vector, whatever the tangent vectors
+    ("The rules"); the pendulum and a rigid body's attitude are committed
+    at fp64 and fp256 with their compiled bytes
+    (`programs/systems/compiled-tangent/`). A function of a constant is
+    folded by the language, `sin(0)` and `tan(0)` to 0 and `cos(0)` to 1,
+    and compiles as the constant it is, with no mpmath.
   - **A marked lane** (the structured families; M1's question 4). A
     compiled routine of the six decides its last bit in the lane, and
     where its in-lane test cannot decide it - where the true value lies
@@ -520,13 +553,23 @@ six, named as `python/cft_golden/transcend.py` names the functions.
   size is its calls times its routine's fragment; ties go to the
   shallower, then by the routines' one order, that of the step graph's
   `OPS` (lang/graph.py) - div, sqrt, exp, expm1, exp2, log, log1p, log2,
-  also that of the routines' words in the bank - so a step of division
-  and root alone loops as it did before the six (M1's build, item 4). A
+  sin, cos, tan, also that of the routines' words in the bank - so a
+  step of division and root alone loops as it did before the six (M1's
+  build, item 4), and a step without sin, cos or tan as it did before
+  them (M2's build). A
   batch of the six loops as a root's does, one slot a record (with the
   constant at 32,768, 72 components each calling expm1, exp, exp2 and
   log1p loop the log1p and the exp batches, the records taking 398
   scratch slots, past sw's 256; measured for sw:1024, M1's build, item
-  4). A batch of one call is never looped - its loop would only add the
+  4), and so does a batch of sin, cos or tan: at fp64 a step of n sin
+  calls is 31,237, 31,648, 32,059 and 32,470 instructions inlined at n =
+  76, 77, 78 and 79 and loops all of them in one batch at n = 80 - 736
+  instructions written, 33,363 run a step, in 160 scratch slots, inside
+  sw's 256 (measured at every n from 76 to 80, M2's build). With the
+  constant lowered, a step with three sin, three cos and three tan calls
+  at one depth loops the tan batch first, then sin's, then cos's - the
+  largest first, calls times the fragment's 419, 406 and 402
+  instructions at fp64. A batch of one call is never looped - its loop would only add the
   loop's instructions to its one copy - so a step whose routines sit one
   to a batch, a chain of divisions each reading the last, is compiled
   inlined past the constant: the software targets, whose instruction
@@ -2354,7 +2397,7 @@ The text and its declarations:
 | `unused` | a const, param, lane param, let or h that nothing uses; h is used only where a constant of the step scales with it, so a map whose every use of h folds away is `unused` |
 | `cycle` | a definition that depends on itself |
 | `not-constant` | a value needed when the program is compiled that reads the state, a param, a lane param or a let |
-| `bank-capacity` | more than 512 params and constants: the bank holds 512 on every device. The compiler raises it too where the words of the routines it inlines for a division or a root take the bank past 512 (C4) |
+| `bank-capacity` | more than 512 params and constants: the bank holds 512 on every device. The compiler raises it too where the words of the routines it inlines for a division, a root (C4) or one of the math library's nine (M1's six, M2's sin, cos and tan) take the bank past 512 |
 
 Equations, indices and the step:
 
@@ -2427,20 +2470,22 @@ The compiler's, reserved for it (L2).
   them. The bank's 512 is the same on every device, and the checker
   raises that one itself as `bank-capacity` - for params and constants.
   The words of the routines the compiler inlines for a division or a
-  root (C4), and for the math library's six (M1's build, item 4), live
-  in the bank too, which the checker cannot see, so the compiler raises
-  the same name where they take the bank past 512, its sentence counting
-  the params, the constants and the words and naming the routines in
-  their one order: one limit, one name.
+  root (C4), for the math library's six (M1's build, item 4) and for its
+  sin, cos and tan (M2's build), live in the bank too, which the checker
+  cannot see, so the compiler raises the same name where they take the
+  bank past 512, its sentence counting the params, the constants and the
+  words and naming the routines in their one order: one limit, one
+  name.
 - The next two are the compiled image's own.
 - **The eighth, `routine-unavailable`** (M1's build, item 4,
   2026-10-15), is the one that depends on the HOST. The math library's
   routines are built by the golden model's generator
   (`python/cft_golden/mathlib.py`), which derives every constant through
   mpmath, so on a host where mpmath does not import, a source whose
-  graph holds one of the six at run time is refused by this name -
-  never an ImportError, never an internal error - with no line, the
-  cause being the host. A fold of the six is a constant, built by
+  graph holds one of the nine at run time - the six, and since M2's
+  build (cftc's output version 7) sin, cos and tan - is refused by this
+  name - never an ImportError, never an internal error - with no line,
+  the cause being the host. A fold of the nine is a constant, built by
   nothing, and compiles there. The same source and target on a host
   with mpmath compile, or are refused by another name, such as
   `target-feature` on revision 7's targets. It is raised after the
@@ -2486,7 +2531,7 @@ form; the compiler words each one for the case at hand.
 | `target-feature` | a feature whose CAPS bit the target does not publish | "this image needs a feature the target's CAPS bits do not publish" |
 | `segment-steps` | a step count outside 1 to 2^32-1, the range of the REPEAT immediate a segment's steps are | "a segment is one REPEAT of 1 to 4,294,967,295 steps; this count is not one" |
 | `halving-underflow` | an h-scaled constant whose exact halving underflows, so the step-halving bank cannot hold it exactly | "this h-scaled constant underflows when halved, so the step-halving bank would not be this bank halved exactly" |
-| `routine-unavailable` | a run-time exp, expm1, exp2, log, log1p or log2 on a host without mpmath, through which its routine's fragment is built: it depends on the host (M1's build, item 4) | "this system computes log at run time, and the compiler inlines each as its routine, whose fragment the math library's generator builds ..., deriving every constant through mpmath - which is not installed here" |
+| `routine-unavailable` | a run-time exp, expm1, exp2, log, log1p, log2, sin, cos or tan on a host without mpmath, through which its routine's fragment is built: it depends on the host (M1's build, item 4; M2's for sin, cos and tan) | "this system computes log at run time, and the compiler inlines each as its routine, whose fragment the math library's generator builds ..., deriving every constant through mpmath - which is not installed here" |
 
 ## The gate
 
@@ -2752,10 +2797,10 @@ and their inlining and their loops by `python/tests/test_cftc.py`.
     is refused by name for an image holding a routine; certificate
     version 2's wider-source run compiles the source one format up
     instead;
-  - **size**: a routine is 155 to 191 instructions (division and root)
-    or 175 to 433 (the math library's six, fp32's triple words the
-    longest), so a step with many
-    is long; past 32,768 instructions a step runs batches of them in
+  - **size**: a routine is 155 to 191 instructions (division and root),
+    175 to 433 (the math library's six, fp32's longest) or 378 to 993
+    (sin, cos and tan, fp32's triple word the longest), so a step with
+    many is long; past 32,768 instructions a step runs batches of them in
     call loops, Logan's rule ("The operations"), at a few percent of
     its cycles - and a wide batch, looped, can need more scratch than
     the inlined step did; a step whose routines sit one to a batch
@@ -2764,7 +2809,8 @@ and their inlining and their loops by `python/tests/test_cftc.py`.
   log, log1p and log2 (M1's build, item 3); sin, cos, tan, pow, the
   inverse trigonometric functions and the rest of the reserved list are
   M2 to M4's, refused `transcendental` until then. The compiler carries
-  the six since item 4, as routines.
+  the six since item 4, and sin, cos and tan since M2's build, as
+  routines.
 - **A built-in time, adaptive steps and events.** There is no reserved
   `t`: a system carries time in its state or counts its steps, and sin
   and cos of t wait for the math library ("Time").
