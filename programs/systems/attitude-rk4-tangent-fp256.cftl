@@ -12,9 +12,9 @@
 ; negative infinity: cos's rule negates sin(a) before its product rounds,
 ; and -(sin(a) * da), negating after, is the same value under rne, rtz and
 ; rmm, whose roundings are symmetric about zero, and another under rdn and
-; rup, so that a rule changed to it changes this image's values as well as
-; its bytes. tan has a pole at theta = +-pi/2, the gimbal lock, which no
-; representable theta is.
+; rup, so that the reference holds the rule at an attribute where its
+; rounding order is a different value. tan has a pole at theta = +-pi/2, the
+; gimbal lock, which no representable theta is.
 system attitude
 format fp256
 round  rdn

@@ -34,6 +34,7 @@ seq.py against routines.GOLDEN, which is transcend.py's:
 * the spills: the first k at which a value is spilled, measured at every k.
 """
 
+import hashlib
 import json
 import random
 import subprocess
@@ -56,7 +57,10 @@ from cftc.regalloc import best_program           # noqa: E402
 from cft_golden import FORMATS, asm, lang, seq   # noqa: E402
 from cft_golden import routines as R             # noqa: E402
 from cft_golden import softfloat as sf           # noqa: E402
+from cft_golden.lang import check as lang_check_mod  # noqa: E402
 from cft_golden.lang import constants as K       # noqa: E402
+from cft_golden.lang import tangent as lang_tangent  # noqa: E402
+from cft_golden.lang.graph import Node           # noqa: E402
 from lang_mathform import NO_MPMATH, have_mpmath  # noqa: E402
 
 SIX = ("exp", "expm1", "exp2", "log", "log1p", "log2")
@@ -542,3 +546,694 @@ def test_the_spill_construction_reproduces_the_sixs_published_thresholds():
     build measured it at 97076f3 and VMC re-measured it."""
     got = [spill_slots("fp32", k, "exp") for k in range(13)]
     assert got == [0] * 11 + [1, 2]
+
+
+# ---- compiled through the language (needs M2L's nodes: language 1.2) ------------
+# From here a source names sin, cos or tan and goes through the language's
+# checker, cftc.compile_text and lang.run - the definition the image is held to.
+
+REV8 = ("u50-rev8", "u50-rev8-quad", "u50-rev8-deep")
+# the targets without flag control (CAPS2[14]): revision 7's and the round-2
+# and open-core builds
+NO_FLAG_CONTROL = ("u50-rev7", "u50-rev7-quad", "u50-round2", "open-core")
+
+
+def _one(fn, fmt, rnd="rne"):
+    return (f"system t\nformat {fmt}\nround {rnd}\nstate x\n"
+            f"next x = {fn}(x)\nstep map\n")
+
+
+def held_by_lang_run(c, xs, steps):
+    """The image on seq.py against lang.run, lane by lane, each lane alone
+    through the interpreter (docs/LANGUAGE.md, "A marked lane"): an
+    unmarked lane's state and its lane byte's five flags equal the
+    interpreter's, bit for bit; a marked lane's value is a guess, compared
+    only as one (within an encoding of the definition's) and counted.
+    -> (the seq.py Result, the marked lanes)."""
+    r = c.run([[x] for x in xs])
+    m = c.ir.m
+    marked = []
+    for k, x in enumerate(xs):
+        byte = r.lane_flags[k]
+        ref = lang.run(c.graph, [[x]], steps)
+        out = r.scratch_out[k * m]
+        if byte & seq.LANE_MARKED:
+            marked.append(k)
+            assert abs(out - ref.states[0][0]) <= 1, (k, hex(x), "the guess")
+            continue
+        assert out == ref.states[0][0], (k, hex(x), hex(out),
+                                         hex(ref.states[0][0]))
+        assert byte & seq.LANE_FLAGS_IEEE == ref.flags, (k, hex(x), "flags")
+        assert not byte & (seq.LANE_DEPOSIT_OVERFLOW | seq.LANE_SCRATCH_RANGE)
+    assert bool(r.status & seq.STATUS_MARKED) == bool(marked)
+    if not marked:
+        ref = lang.run(c.graph, [[x] for x in xs], steps)
+        assert r.flags == ref.flags
+    return r, marked
+
+
+def test_the_hand_built_bytes_are_the_languages_bytes():
+    """Below the language the step graph was the bytes of an exp system with
+    the node swapped (build(), swapped()). The language writes the same
+    bytes for the system with sin, cos or tan in exp's place - at every
+    format and attribute - so the tests above read the graph the compiler
+    is really given."""
+    for fmt in FMT_NAMES:
+        for rnd in RND_NAMES.values():
+            for fn in THREE:
+                mine = swapped(_exp_text(fmt, rnd), fn)
+                theirs = lang.compile_text(_one(fn, fmt, rnd),
+                                           "src.cftl").graph.to_bytes()
+                assert mine == theirs, (fn, fmt, rnd)
+
+
+@needs_mpmath
+@pytest.mark.parametrize("fn", THREE)
+@pytest.mark.parametrize("fmt_name", FMT_NAMES)
+def test_each_of_the_three_compiles_and_runs_as_lang_run_at_every_attribute(
+        fn, fmt_name):
+    """sin(x), cos(x) and tan(x) at the format under all five attributes,
+    two steps: cftc.compile_text, the image on seq.py against lang.run lane
+    by lane under the marked-lane rule (held_by_lang_run). The routine is
+    one call, the image says version 7 and needs FLAG_CONTROL; under rne,
+    the other targets that publish it compile the same image and bank
+    (revision 8's three, and sw:4096), and the four that do not refuse it
+    `target-feature`, naming the bit and the routine. The marked lanes of
+    the first step are the structured families' (docs/studies/M2-trig.md,
+    3.5): at fp64, cos at 2^-26 and 3 2^-26 under rtz, rdn and rup and tan
+    at 3 2^-26 under rne and rmm."""
+    fmt = FORMATS[fmt_name]
+    first = {}
+    if fmt_name == "fp64":
+        first = {("cos", sf.RND_RTZ): [18, 19], ("cos", sf.RND_RDN): [18, 19],
+                 ("cos", sf.RND_RUP): [18, 19], ("tan", sf.RND_RNE): [19],
+                 ("tan", sf.RND_RMM): [19]}
+    for rnd in sf.RND_MODES:
+        text = _one(fn, fmt_name, RND_NAMES[rnd])
+        c = cftc.compile_text(text, 2, source="t.cftl")
+        assert c.version == cftc.VERSION == 7
+        assert c.manifest["compiler"] == {"name": "cftc", "version": 7}
+        assert c.manifest["routines"]["calls"] == {fn: 1}
+        assert "FLAG_CONTROL" in c.features
+        assert c.accepted_by == ["sw", *REV8]
+        xs = lanes(fmt, rnd, f"{fn}{rnd}")
+        r, marked = held_by_lang_run(c, xs, 2)
+        assert set(first.get((fn, rnd), [])) <= set(marked), \
+            (fn, fmt_name, RND_NAMES[rnd], marked)
+        if rnd != sf.RND_RNE:
+            continue
+        for t in REV8 + ("sw:4096",):
+            ct = cftc.compile_text(text, 2, target=t, source="t.cftl")
+            assert (ct.image, ct.bank) == (c.image, c.bank), t
+        for t in NO_FLAG_CONTROL:
+            with pytest.raises(lang.Refusal) as e:
+                cftc.compile_text(text, 2, target=t, source="t.cftl")
+            assert e.value.name == "target-feature", (t, str(e.value))
+            assert "FLAG_CONTROL (CAPS2[14])" in e.value.sentence
+            assert fn in e.value.sentence
+
+
+@needs_mpmath
+def test_a_marked_lane_through_a_compiled_image_cos_at_2_to_the_minus_26():
+    """cos at fp64 under rtz on a lane at 2^-26, the first structured centre
+    (docs/studies/M2-trig.md, 3.5): cos x = 1 - x^2/2 + ..., and x^2/2 =
+    2^-53 is a whole step of the grid below 1, so the true value sits
+    x^4/24 above a rounding boundary - closer than the in-lane test's
+    bound, which cannot decide the last bit. Through the image's RAISE the
+    lane is MARKED - R23's byte [7] - and STATUS[6] is set; its value is
+    the routine's best guess, compared only as one; an ordinary lane is
+    unmarked, the interpreter's bit for bit with its flags; and the same
+    lane under rne is not marked (the centre is a directed one)."""
+    fmt = FORMATS["fp64"]
+    x = K.round_once(fmt, sf.RND_RTZ, Fraction(1, 2 ** 26))[0]
+    plain = K.round_once(fmt, sf.RND_RTZ, Fraction(1, 3))[0]
+    c = cftc.compile_text(_one("cos", "fp64", "rtz"), 1, source="t.cftl")
+    r, marked = held_by_lang_run(c, [plain, x], 1)
+    assert marked == [1]
+    assert r.lane_flags[1] & seq.LANE_MARKED and r.status & seq.STATUS_MARKED
+    assert not r.lane_flags[0] & seq.LANE_MARKED
+    # the definition's value is correctly rounded (toward zero): below 1
+    ref = lang.run(c.graph, [[x]], 1).states[0][0]
+    assert ref == sf.one_bits(fmt) - 1
+    assert abs(r.scratch_out[c.ir.m] - ref) <= 1
+    c2 = cftc.compile_text(_one("cos", "fp64", "rne"), 1, source="t.cftl")
+    x2 = K.round_once(fmt, sf.RND_RNE, Fraction(1, 2 ** 26))[0]
+    r2, marked2 = held_by_lang_run(c2, [x2], 1)
+    assert marked2 == [] and not r2.status & seq.STATUS_MARKED
+
+
+def _calls(c):
+    return c.manifest["routines"]["calls"]
+
+
+def _node_counts(c, routine, op, pred=lambda low, j, nd: True):
+    """How many nodes of the lowered step are `op` reading the result of the
+    routine node `routine` (a refs' ("n", index)) in some operand."""
+    low = c.lowered
+    js = [j for j, nd in enumerate(low.nodes) if nd.op == routine]
+    assert len(js) == 1, (routine, js)
+    return sum(1 for j, nd in enumerate(low.nodes)
+               if nd.op == op and ("n", js[0]) in nd.args
+               and pred(low, j, nd))
+
+
+@needs_mpmath
+@pytest.mark.parametrize("vectors", ["v", "v, w"])
+def test_the_tangents_routines_are_one_call_a_call_and_share_the_primals(
+        vectors):
+    """The three rules write routines the primal need not hold: sin's reads
+    cos(a), cos's reads sin(a). With one tangent vector and with two, each
+    is ONE call of its routine, not one a vector - and sharing the primal
+    routine's reduction and polynomials, so that the pair costs 434
+    instructions at fp64 (sin 406, cos 402 apart: 808), not a second routine
+    - and its negation (cos) and tan's fma(r, r, 1) are one node, read by
+    each vector's product."""
+    one = Fraction(1)
+    for fn, other in (("sin", "cos"), ("cos", "sin"), ("tan", None)):
+        text = (f"system p\nformat fp64\nstate x, y\ntangent {vectors}\n"
+                f"next x = {fn}(x * y)\nnext y = y\nstep map\n")
+        c = cftc.compile_text(text, 2, source="p.cftl")
+        T = len(vectors.split(","))
+        assert c.ir.T == T
+        want = {fn: 1} if other is None else {fn: 1, other: 1}
+        assert _calls(c) == want, (fn, vectors, _calls(c))
+        quiet = c.manifest["routines"]["instructions_quiet"]
+        assert quiet == {"sin": 434, "cos": 434, "tan": 419}[fn], (fn, quiet)
+        assert c.manifest["routines"]["raises"] == len(want)
+        if fn == "tan":
+            # r twice and a constant 1: one fma, whatever the vectors
+            assert _node_counts(c, "tan", "fma") == 1
+        if fn == "cos":
+            # sin(a) negated exactly: one neg, whatever the vectors
+            assert _node_counts(c, "sin", "neg") == 1
+        # a vector adds its products, never a routine's instruction
+        ref = cftc.compile_text(
+            text.replace(f"tangent {vectors}", "tangent v"), 2,
+            source="p.cftl")
+        assert ref.manifest["routines"]["instructions_quiet"] == quiet
+        states, tans = _lanes_with_tangents(c.ir, f"{fn}{vectors}")
+        r = c.run(states, tangents=tans)
+        m, n, N = c.ir.m, c.ir.n_primal, c.ir.n_state
+        for k, st in enumerate(states):
+            if r.lane_flags[k] & seq.LANE_MARKED:
+                continue
+            want_run = lang.run(c.graph, [st], 2, tangents=[tans[k]])
+            out = r.scratch_out[k * m:(k + 1) * m]
+            assert out[:n] == want_run.states[0], (fn, k, "states")
+            assert out[n:N] == [v for vec in want_run.tangents[0]
+                                for v in vec], (fn, k, "tangents")
+            assert r.lane_flags[k] & seq.LANE_FLAGS_IEEE == want_run.flags
+
+
+def _lanes_with_tangents(g, seed):
+    fmt = g.fmt
+    rng = random.Random(seed)
+
+    def val():
+        return K.round_once(fmt, sf.RND_RNE,
+                            Fraction(rng.randint(-900, 900), 397))[0]
+    n = g.n_primal
+    states = [[val() for _ in range(n)] for _ in range(5)]
+    states += [[0] * n, [sf.snan_bits(fmt)] * n]
+    tans = [[[val() for _ in range(n)] for _ in g.tangent] for _ in states]
+    return states, tans
+
+
+# the instructions the routines of one operand cost in one image, MEASURED
+# here by compiling `next x = f(y)` (the manifest's instructions_quiet): the
+# double word's three are the study's share.py figures (M2-trig.md, 2.1),
+# fp32's triple word is new
+SHARING = {   # format: alone (sin, cos, tan), then sin+cos, sin+tan,
+    #           cos+tan, all three
+    "fp32": ((939, 936, 993), 988, 1043, 1039, 1088),
+    "fp64": ((406, 402, 419), 434, 449, 446, 475),
+    "fp128": ((382, 378, 397), 411, 428, 425, 455),
+    "fp256": ((389, 385, 406), 418, 437, 434, 464),
+}
+
+
+@needs_mpmath
+@pytest.mark.parametrize("fmt_name", FMT_NAMES)
+def test_the_routines_of_one_operand_share_their_prefix(fmt_name):
+    """sin(y), cos(y) and tan(y) in one step compute the reduction and both
+    polynomials once (inline.py's hash-consing of a routine's instructions
+    by opcode, attribute and operands): sin and cos together cost 28 to 49
+    instructions more than sin alone, all three 69 to 149 more than sin
+    alone - where apart they would cost the sum. The figures are the manifest's instructions_quiet,
+    the study's (fp64, fp128, fp256) and fp32's new."""
+    alone, sc, st, ct, allthree = SHARING[fmt_name]
+
+    def quiet(expr):
+        text = (f"system s\nformat {fmt_name}\nstate x, y\nnext x = {expr}\n"
+                f"next y = y\nstep map\n")
+        return cftc.compile_text(text, 1, source="s.cftl").manifest[
+            "routines"]["instructions_quiet"]
+    got = tuple(quiet(f"{fn}(y)") for fn in THREE)
+    assert got == alone
+    assert quiet("sin(y) + cos(y)") == sc
+    assert quiet("sin(y) + tan(y)") == st
+    assert quiet("cos(y) + tan(y)") == ct
+    assert quiet("sin(y) + cos(y) + tan(y)") == allthree
+    assert sc < alone[0] + alone[1] and allthree < sum(alone)
+    # a different operand shares nothing
+    assert quiet("sin(y) + cos(x)") == alone[0] + alone[1]
+
+
+# ---- the call loop over unary radian batches -----------------------------------
+
+def _looped(monkeypatch, text, above, steps=2, **kw):
+    monkeypatch.setattr(callloop, "CALL_LOOP_ABOVE", above)
+    return cftc.compile_text(text, steps, source="loop.cftl", **kw)
+
+
+def _batches(c):
+    return [(b.op, b.depth, len(b.calls)) for b in c.looped]
+
+
+@needs_mpmath
+def test_a_call_loop_of_the_three_in_the_stated_order(monkeypatch):
+    """With the constant lowered to 0, a step with three sin, three cos and
+    three tan calls at one depth loops all three batches - one copy of each
+    routine in a REPEAT over records of one slot (a unary routine's, as
+    sqrt's) - held by the internal check and run on seq.py as lang.run runs
+    it. The ORDER the batches are looped in is the callloop's: largest first
+    (calls times the fragment's instructions: tan's 419, sin's 406 and cos's
+    402 at fp64), and the order batches() lists them in - by depth, then
+    callloop.ORDER, which is routines.ROUTINES, the language's - sin, cos,
+    tan. The same step inlined has no loop."""
+    text = ("system loop\nformat fp64\nstate x[3], y[3]\n"
+            "next x[i] = sin(x[i]) * 0.5 + cos(y[i])\n"
+            "next y[i] = tan(y[i]) - x[i]\nstep map\n")
+    inl = cftc.compile_text(text, 2, source="loop.cftl")
+    assert inl.looped == [] and _calls(inl) == {"sin": 3, "cos": 3, "tan": 3}
+    c = _looped(monkeypatch, text, 0)
+    assert _batches(c) == [("tan", 1, 3), ("sin", 1, 3), ("cos", 1, 3)]
+    sizes = {op: len(R.fragment(op, FORMATS["fp64"], sf.RND_RNE))
+             for op in THREE}
+    assert sorted(sizes, key=lambda op: -3 * sizes[op]) == \
+        [b[0] for b in _batches(c)]
+    assert [b.op for b in callloop.batches(c.lowered)] == list(THREE)
+    assert callloop.ORDER == {op: k for k, op in enumerate(R.ROUTINES)}
+    loops = c.manifest["routines"]["call_loops"]["loops"]
+    assert {e["op"] for e in loops} == set(THREE)
+    assert all(e["calls"] == 3 and e["records"][1] - e["records"][0] == 2
+               for e in loops)
+    states, _t = _lanes_with_tangents(c.ir, "loop three")
+    r = c.run(states)
+    m, n = c.ir.m, c.ir.n_primal
+    for k, st in enumerate(states):
+        if r.lane_flags[k] & seq.LANE_MARKED:
+            continue
+        want = lang.run(c.graph, [st], 2)
+        assert r.scratch_out[k * m:k * m + n] == want.states[0], k
+        assert r.lane_flags[k] & seq.LANE_FLAGS_IEEE == want.flags, k
+
+
+@needs_mpmath
+def test_the_real_constant_loops_sin_at_80_calls_and_not_at_79():
+    """The constant is 32,768 instructions (callloop.CALL_LOOP_ABOVE), no
+    target's. MEASURED at every n from 76 to 80 sin calls at fp64: the
+    inlined step is 31,237, 31,648, 32,059, 32,470 and - at 80 - 32,881
+    instructions, 411 a call, so the first n past it is 80: n = 79 compiles
+    inlined and n = 80 loops all 80 calls in one batch (736 instructions
+    written, 33,363 run a step). Here the two sides of the threshold,
+    80 run against lang.run."""
+    def text(n):
+        return (f"system big\nformat fp64\nstate x[{n}]\n"
+                f"next x[i] = sin(x[i])\nstep map\n")
+    c79 = cftc.compile_text(text(79), 1, source="big.cftl")
+    assert c79.looped == [] and len(c79.program.body) + 1 == 32470
+    assert 32470 + 411 > callloop.CALL_LOOP_ABOVE >= 32470
+    c80 = cftc.compile_text(text(80), 1, source="big.cftl")
+    assert _batches(c80) == [("sin", 1, 80)]
+    assert (len(c80.program.body) + 1, c80.program.executed()) == (736, 33363)
+    states, _t = _lanes_with_tangents(c80.ir, "sin 80")
+    r = c80.run(states[:3])
+    m, n = c80.ir.m, c80.ir.n_primal
+    for k, st in enumerate(states[:3]):
+        if r.lane_flags[k] & seq.LANE_MARKED:
+            continue
+        want = lang.run(c80.graph, [st], 1)
+        assert r.scratch_out[k * m:k * m + n] == want.states[0], k
+
+
+# ---- the manifest's wording ------------------------------------------------------
+
+def _routines_block(text, steps=1):
+    return cftc.compile_text(text, steps, source="w.cftl").manifest["routines"]
+
+
+@needs_mpmath
+def test_the_manifest_words_the_three_only_where_a_step_holds_one():
+    """The routines block says where the fragments come from and what their
+    raises do. A step with the six alone, or with division and root, has the
+    sentences it had at 19de866c - the committed Lotka-Volterra's and
+    Kepler's manifests are those words - and a step with sin, cos or tan
+    adds a sentence of the three's own; a step with none of the six omits
+    the six's."""
+    lv = json.loads((ROOT / "programs" / "systems" / "compiled-tangent" /
+                     "lotkavolterra-rk4-tangent-fp64.manifest.json"
+                     ).read_text(encoding="ascii"))["routines"]
+    kp = json.loads((ROOT / "programs" / "systems" / "compiled-tangent" /
+                     "kepler-sv-tangent-fp64.manifest.json"
+                     ).read_text(encoding="ascii"))["routines"]
+    six_only = _routines_block("system a\nformat fp64\nstate x\n"
+                               "next x = exp(x)\nstep map\n")
+    assert (six_only["source"], six_only["flags"]) == (lv["source"],
+                                                       lv["flags"])
+    assert "the math library's six also set" in six_only["flags"]
+    c4_only = _routines_block("system a\nformat fp64\nstate x, y\n"
+                              "next x = x / (y * y + 1) + sqrt(abs(x))\n"
+                              "next y = y\nstep map\n")
+    assert c4_only["source"].startswith("cft_golden/routines.py: divfull's")
+    assert "math library" not in c4_only["source"] + c4_only["flags"]
+    assert (kp["source"], kp["flags"]) == (c4_only["source"],
+                                           c4_only["flags"])
+    three = " likewise set the raised word's bit 7"
+    for fn in THREE:
+        b = _routines_block(f"system a\nformat fp64\nstate x\n"
+                            f"next x = {fn}(x)\nstep map\n")
+        assert "the math library's sin, cos and tan" + three in b["flags"]
+        assert "the math library's six" not in b["flags"]
+        assert b["source"] == ("cft_golden/routines.py: the math library's "
+                               "fragments, cft_golden/mathlib.py's, built at "
+                               "the program's format and attribute")
+        assert b["flags"].startswith(six_only["flags"].split("; the math "
+                                                              "library's")[0])
+    both = _routines_block("system a\nformat fp64\nstate x, y\n"
+                           "next x = exp(x) + sin(y)\nnext y = y\n"
+                           "step map\n")
+    assert six_only["flags"] in both["flags"]
+    assert both["flags"].index("the math library's six") < \
+        both["flags"].index("the math library's sin, cos and tan")
+    mixed = _routines_block("system a\nformat fp64\nstate x, y\n"
+                            "next x = x / (y * y + 1) + tan(y)\nnext y = y\n"
+                            "step map\n")
+    assert mixed["source"].count("; ") == 1 and \
+        mixed["source"].startswith("cft_golden/routines.py: divfull's")
+    assert "the math library's sin, cos and tan" in mixed["flags"] and \
+        "the math library's six" not in mixed["flags"]
+
+
+# ---- no mpmath -----------------------------------------------------------------
+
+_NO_MPMATH_COMPILE = r"""
+import hashlib, json, sys
+if sys.argv[2] == "modules":
+    sys.modules["mpmath"] = None            # import mpmath raises ImportError
+sys.path.insert(0, sys.argv[1] + "/python")
+import cftc
+from cft_golden import lang
+out = {}
+for name, (text, kind) in json.loads(sys.argv[3]).items():
+    for target in ("sw", "u50-rev8", "u50-rev7"):
+        for steps in (3, 0):
+            try:
+                c = cftc.compile_text(text, steps, target=target,
+                                      source="src.cftl")
+                out[f"{name} {target} {steps}"] = {
+                    k: hashlib.sha256(v).hexdigest()
+                    for k, v in c.files().items()}
+            except lang.Refusal as e:
+                out[f"{name} {target} {steps}"] = [e.name, e.line, e.sentence]
+assert "mpmath" not in sys.modules or sys.modules["mpmath"] is None
+if sys.argv[2] == "isolated":
+    try:
+        import mpmath
+        out["MPMATH"] = "importable"
+    except ImportError:
+        pass
+print(json.dumps(out, sort_keys=True))
+"""
+
+
+@pytest.mark.parametrize("how", ["modules", "isolated"])
+def test_routine_unavailable_for_the_three_without_mpmath(how):
+    """Without mpmath - taken out of sys.modules in a child process
+    (`modules`: simulated), and in a child under `python -B -I -S` (`isolated`:
+    no site directory, so it is not importable at all, which is a host
+    without it) - a source with a run-time sin, cos or tan is refused
+    `routine-unavailable` on every target, revision 7's included where with
+    mpmath it is `target-feature`, with no line, its sentence naming the
+    functions, mathlib.py and mpmath; at 0 steps `segment-steps` first. A
+    fold (sin(0) and cos(0)) and a quotient compile there to the very bytes
+    they compile to here."""
+    cases = {
+        "sin": ("system a\nformat fp64\nstate x\nnext x = sin(x)\n"
+                "step map\n", "routine"),
+        "all three": ("system a\nformat fp32\nstate x, y\n"
+                      "next x = sin(x) * y\nnext y = cos(x) + tan(y)\n"
+                      "step map\n", "routine"),
+        "a fold": ("system a\nformat fp64\nstate x\nconst k = cos(0) + "
+                   "sin(0)\nnext x = x * k + tan(0)\nstep map\n", "fold"),
+        "a quotient": ("system a\nformat fp64\nstate x, y\n"
+                       "next x = x / (y * y + 1)\nnext y = y\nstep map\n",
+                       "quotient"),
+    }
+    flags = ["-B", "-I", "-S"] if how == "isolated" else ["-B"]
+    r = subprocess.run([sys.executable, *flags, "-c", _NO_MPMATH_COMPILE,
+                        str(ROOT), how, json.dumps(cases)],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    got = json.loads(r.stdout)
+    assert "MPMATH" not in got
+    for name, (text, kind) in cases.items():
+        for target in ("sw", "u50-rev8", "u50-rev7"):
+            assert got[f"{name} {target} 0"][0] == "segment-steps", name
+            res = got[f"{name} {target} 3"]
+            if kind == "routine":
+                assert res[:2] == ["routine-unavailable", None], res
+                ops = {"sin": "sin", "all three": "sin, cos, tan"}[name]
+                assert res[2].startswith(f"this system computes {ops} at run "
+                                         f"time"), res
+                assert "mathlib.py" in res[2] and "mpmath" in res[2]
+                continue
+            if kind == "quotient" and target == "u50-rev7":
+                assert res[0] == "target-feature", res
+                continue
+            here = cftc.compile_text(text, 3, target=target,
+                                     source="src.cftl")
+            assert res == {k: hashlib.sha256(v).hexdigest()
+                           for k, v in here.files().items()}, (name, target)
+
+
+# ---- the committed references ------------------------------------------------
+# programs/systems/compiled-tangent/ holds two systems that carry sin, cos and
+# tan, each at fp64 and fp256 (parcel M2C, decisions 3 and 4 of the contract):
+# the pendulum (sin in the step, cos(a) * da in the tangent; round rne) and a
+# rigid body's attitude (all three in the step and in the tangent; round rdn,
+# where cos's rule rounded otherwise is another value as well as other
+# bytes). The study's section 7: "A rule rounded otherwise must move its
+# bytes", and the committed bytes hold the three rules between them.
+
+SYSTEMS = ROOT / "programs" / "systems"
+# the ones the primal holds, and the routines the image calls (the pendulum's
+# tangent reads a cos its primal does not hold)
+M2_PRIMAL = {"pendulum-rk4": ("sin",), "attitude-rk4": THREE}
+M2_CALLS = {"pendulum-rk4": {"sin", "cos"}, "attitude-rk4": set(THREE)}
+M2_NAMES = [f"{b}-tangent-{f}" for b in M2_PRIMAL for f in ("fp64", "fp256")]
+
+
+def _tref(name):
+    """A reference's step graph, from its committed source."""
+    return lang.load(SYSTEMS / f"{name}.cftl").graph
+
+
+def test_the_two_sources_are_one_system_at_two_formats():
+    """Each reference's fp256 source is its fp64 source with the format
+    line changed, comments too: nothing else differs."""
+    for base in M2_PRIMAL:
+        a = (SYSTEMS / f"{base}-tangent-fp64.cftl").read_text(
+            encoding="ascii").splitlines()
+        b = (SYSTEMS / f"{base}-tangent-fp256.cftl").read_text(
+            encoding="ascii").splitlines()
+        assert len(a) == len(b)
+        assert [(x, y) for x, y in zip(a, b) if x != y] == \
+            [("format fp64", "format fp256")]
+        code = [ln for ln in a if ln and not ln.startswith(";")]
+        assert code.count("tangent w") == 1
+        assert ("round  rne" if base == "pendulum-rk4" else "round  rdn") \
+            in code
+
+
+@needs_mpmath
+@pytest.mark.parametrize("name", M2_NAMES)
+def test_the_committed_references_are_what_the_compiler_writes(name):
+    """Eight files each, byte for byte what cftc writes for the committed
+    source at 10 steps (tangent_check.py --write made them), the manifest
+    saying version 7."""
+    c = cftc.compile_file(SYSTEMS / f"{name}.cftl", 10,
+                          source=f"programs/systems/{name}.cftl")
+    files = c.files()
+    assert len(files) == 8
+    for fname, data in files.items():
+        assert (SYSTEMS / "compiled-tangent" / fname).read_bytes() == data, \
+            fname
+    assert c.manifest["compiler"] == {"name": "cftc", "version": 7}
+    assert c.accepted_by == ["sw", *REV8]
+    base, fmt = name.rsplit("-", 1)
+    assert set(_calls(c)) == M2_CALLS[base.replace("-tangent", "")], \
+        (name, _calls(c))
+
+
+def test_between_them_the_references_hold_the_three_rules():
+    """The committed graphs carry each rule in their tangent step: sin's
+    cos(a) * da (the pendulum's tangent holds a cos the primal does not,
+    four stages' worth), cos's (-sin(a)) * da and tan's fma(r, r, 1) * da
+    (the attitude's), each routine one the step reads again - at fp64 and
+    fp256."""
+    for name in M2_NAMES:
+        g = _tref(name)
+        base = name.split("-tangent")[0]
+        prim = g.op_counts("field")
+        tang = g.op_counts("tangent_field")
+        step_p, step_t = g.op_counts("step"), g.op_counts("tangent_step")
+        for op in THREE:
+            assert bool(prim.get(op)) == (op in M2_PRIMAL[base]), \
+                (name, op, prim)
+        if base == "pendulum-rk4":
+            assert tang.get("cos") and not tang.get("sin")
+            assert not tang.get("tan") and step_t.get("cos") == 4
+        else:
+            assert tang.get("sin") and tang.get("cos") and tang.get("tan")
+            assert tang.get("neg") and tang.get("fma")
+            assert (step_p["sin"], step_p["cos"], step_p["tan"]) == (8, 8, 4)
+        graph = (SYSTEMS / "compiled-tangent" / f"{name}.graph.json"
+                 ).read_bytes()
+        assert g.to_bytes() == graph
+
+
+class _RulePlant(lang_tangent.Derivation):
+    """The derivation with one of the three's rules changed (kind)."""
+    kind = None
+
+    def rule(self, node):
+        op, a, line = node.op, node.args, node.line
+        if op != self.kind[0]:
+            return super().rule(node)
+        da = self.of(a[0])
+        if da is None:
+            return None
+        R = self.read
+
+        def N(o, *args):
+            return Node(o, args, line)
+        how = self.kind[1]
+        if how.startswith("sin(a) for cos(a)"):
+            return N("mul", N("sin", R(a[0])), da)
+        if how.startswith("da * cos(a)"):
+            return N("mul", da, N("cos", R(a[0])))
+        if how.startswith("-(sin(a) * da)"):
+            return N("neg", N("mul", N("sin", R(a[0])), da))
+        if how.startswith("sin(a) * da"):
+            return N("mul", N("sin", R(a[0])), da)
+        if how.startswith("(1 + r * r)"):
+            return N("mul", N("add", self.one, N("mul", R(node), R(node))),
+                     da)
+        return N("mul", R(node), da)                  # r * da
+
+
+M2_RULE_PLANTS = [("sin", "sin(a) for cos(a), made wrong"),
+                  ("sin", "da * cos(a), the other order"),
+                  ("cos", "-(sin(a) * da), rounded otherwise"),
+                  ("cos", "sin(a) * da, the sign dropped"),
+                  ("tan", "(1 + r * r) * da, three roundings"),
+                  ("tan", "r * da, made wrong")]
+
+
+@pytest.mark.parametrize("kind", M2_RULE_PLANTS, ids=lambda k: k[1])
+def test_each_rule_changed_moves_the_committed_references_holding_it(
+        kind, monkeypatch):
+    """Each of the three rules changed - rounded otherwise where it rounds
+    twice or more, made wrong or written in the other order where it rounds
+    once - moves the committed graphs of the references that hold it, at
+    fp64 and fp256, and no other committed graph: the six's references among
+    them stay (checking a source needs no mpmath, so neither does this)."""
+    names = M2_NAMES + [f"{b}-tangent-{f}" for b in (
+        "lotkavolterra-rk4", "diode-rk4", "culture-rk4", "lorenz63-rk4",
+        "lorenz96-rk4", "kepler-sv") for f in ("fp64", "fp256")]
+    committed = {n: (SYSTEMS / "compiled-tangent" / f"{n}.graph.json"
+                     ).read_bytes() for n in names}
+
+    class P(_RulePlant):
+        pass
+    P.kind = kind
+    monkeypatch.setattr(lang_check_mod, "Derivation", P)
+    moved = sorted(n for n in names if _tref(n).to_bytes() != committed[n])
+    want = sorted(f"{b}-tangent-{f}" for b, ops in M2_PRIMAL.items()
+                  if kind[0] in ops for f in ("fp64", "fp256"))
+    assert want and moved == want, (kind, moved)
+
+
+
+
+@needs_mpmath
+def test_cos_rounded_otherwise_is_another_value_under_rdn_and_rup_only(
+        monkeypatch):
+    """Why the attitude is compiled round rdn. cos's rule is `(-sin(a)) *
+    da`, one product of an exact negation; `-(sin(a) * da)` rounds the
+    product and then negates. A one-operation image shows what the rule
+    gives (`next y = cos(x)`, whose tangent IS the rule's product): the
+    planted derivation's image and the right one run on seq.py agree on every
+    finite lane under rne, rtz and rmm - roundings symmetric about zero - and
+    differ on a fair share of lanes under rdn and rup, the study's section 7
+    (M2L measured the same of the rule alone). The bytes move under every
+    attribute: that is the committed references' plant, red on the bytes
+    whichever attribute they use. And in the attitude itself the rule's
+    product is one term among sums, so the step's output rarely shows it
+    (MEASURED when this was written: 0 of 40 lanes at one step and 1 of 12
+    at four, under rdn): the rule is held at the attribute where its
+    rounding order is a value, not where the output is sensitive to it."""
+    class P(_RulePlant):
+        pass
+    P.kind = ("cos", "-(sin(a) * da), rounded otherwise")
+    fmt = FORMATS["fp64"]
+    rng = random.Random("cos rounded otherwise")
+
+    def val():
+        return K.round_once(fmt, sf.RND_RNE,
+                            Fraction(rng.randint(-900, 900), 397))[0]
+    states = [[val(), val()] for _ in range(40)]
+    tans = [[[val(), val()]] for _ in states]
+    differ, moved = {}, {}
+    for rnd in RND_NAMES.values():
+        text = (f"system c\nformat fp64\nround {rnd}\nstate x, y\n"
+                f"tangent v\nnext x = x\nnext y = cos(x)\nstep map\n")
+        good = cftc.compile_text(text, 1, source="c.cftl")
+        monkeypatch.setattr(lang_check_mod, "Derivation", P)
+        planted = cftc.compile_text(text, 1, source="c.cftl")
+        monkeypatch.undo()
+        moved[rnd] = (planted.graph_bytes != good.graph_bytes,
+                      planted.image != good.image)
+        rg = good.run(states, tangents=tans)
+        rp = planted.run(states, tangents=tans)
+        assert not any(b & seq.LANE_MARKED for b in rg.lane_flags +
+                       rp.lane_flags)
+        m = good.ir.m
+        differ[rnd] = sum(
+            rg.scratch_out[k * m:(k + 1) * m] !=
+            rp.scratch_out[k * m:(k + 1) * m] for k in range(len(states)))
+    assert set(moved.values()) == {(True, True)}, moved
+    assert differ["rne"] == differ["rtz"] == differ["rmm"] == 0, differ
+    assert differ["rdn"] > 5 and differ["rup"] > 5, differ
+
+
+@needs_mpmath
+def test_the_attitudes_bytes_move_under_rdn_and_rne_alike(monkeypatch):
+    """The rounded-otherwise plant moves the attitude's bytes whichever
+    attribute it is compiled under - rdn as committed, rne as a variant."""
+    src = (SYSTEMS / "attitude-rk4-tangent-fp64.cftl").read_text(
+        encoding="ascii")
+
+    class P(_RulePlant):
+        pass
+    P.kind = ("cos", "-(sin(a) * da), rounded otherwise")
+    for rnd in ("rdn", "rne"):
+        text = src.replace("round  rdn", f"round  {rnd}")
+        assert f"round  {rnd}" in text
+        good = cftc.compile_text(text, 4, source="a.cftl")
+        monkeypatch.setattr(lang_check_mod, "Derivation", P)
+        planted = cftc.compile_text(text, 4, source="a.cftl")
+        monkeypatch.undo()
+        assert planted.graph_bytes != good.graph_bytes, rnd
+        assert planted.image != good.image, rnd
