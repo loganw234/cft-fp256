@@ -26240,6 +26240,7 @@ docs/README.md is recounted.
 - The IR form is `["sin",["s0"],null]`. The tangent section of each, nodes in order: sin `[cos(s0), mul(d0, t0)]`; cos `[sin(s0), neg(d0), mul(d1, t0)]`; tan `[tan(s0), tan(s0), fma(d0, d1, c0), mul(d2, t0)]`, c0 the constant 1 (the only constant any of the three adds).
 - Notation: the generic call in the canonical form, `cos(a) * v.a`, `(-sin(a)) * v.a` (the brackets are written) and `fma(tan(a), tan(a), 1) * v.a`; `sin(x)`, `cos(x)`, `tan(x)` in the mathematical form.
 - `lang.run` calls `transcend.compute(fmt, fn, a, 0, rnd)`; without mpmath it raises ZivEscalation naming `sin, cos, tan` before any lane runs.
+- The rules' renderings are the same text at all 20 (format, attribute) pairs, in both forms (MEASURED, a scratch script, 60 compilations): canonical `cos(a) * v.a`, `(-sin(a)) * v.a`, `fma(tan(a), tan(a), 1) * v.a`; mathematical `cos(a)·v.a`, `(−sin(a))·v.a`, `(tan(a)·tan(a) + 1)·v.a`; and the canonical form reads back to the same graph bytes in each of the 60.
 
 **Folds and refusals** (Logan's answer 8 to the M2 study).
 - sin(0) and tan(0) fold to 0 and cos(0) to 1, of a constant exactly 0 (`1 - 1` and `0 * h` are), at every format and attribute, equal to the golden function at +0 with no flag. Every other constant is `irrational-constant`, the sentence naming the function's word and the theorem (Hermite-Lindemann; tan's by e^(2ic) = (1 + ia)/(1 - ia)); a function of h is `h-nonlinear`; no constant is ever `constant-division-by-zero`. `transcendental` is still raised for the other 26 reserved names.
