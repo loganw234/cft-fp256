@@ -26671,3 +26671,58 @@ Plants 1 to 10 (13 edits) were run on the phase-1 tree, before the checkpoint's 
 **Slips:** (a) a background value-measurement ran past ten minutes (200 lanes, up to 10 steps, 5 attributes on the attitude's 3.6k-instruction image, about 100k seq.py instructions a second): stopped by its task id at 08:44 before any result, the lead told; the re-measure was bounded. (b) I wrote "changes this image's values" in a source header before measuring it (above). (c) The Write tool left CRLF in a test file I assembled from scratch parts; `.gitattributes` made the committed blobs LF, and the working copy was normalised. (d) The entry's item 9, as first committed (0cc69a90), named M2L's tip 4c04bf87 as BASE and KEEP, true when written; M2L then amended its own block in place in two send-backs, so that command refuses (rc 2, above). I ran the check with fc2428da at the first of the two merges and left the entry's text alone; it is corrected in the commit after 53a9a3cd.
 
 **Send-back 1** (the lead, 2026-11-02, `Data/runs/2026-10-26-m2-round/briefs/M2C-sendback-1.md`; verifier VM2C checked 842e6cec and found no regression, eleven of its twelve checks clean, and one wrong answer (b)): `python/cftc/__init__.py`'s history paragraph for 7 said that 7 writes the same images, banks and text files as 6 "for every source 6 compiled", a universal over a set no run covers. The measured sets are the 43 committed sources outside the pack (42 images and one refusal) and the 330-compile differential; the pack's 21 are BELIEVED, as this entry already said. **The fix** is one commit, its subject beginning "M2C send-back 1:", and it changes the module docstring of `python/cftc/__init__.py` alone (the file's syntax tree with its docstrings blanked is the same as at 842e6cec; scratch `astcmp.py`) and this block. (1) The paragraph for 7 now names the sets it was measured on, at both trees - the 43 committed sources outside the pack and the 330 compiles of the generated 110 - and says the pack's 21 were not compiled at both trees and are believed, not shown (2026-11-02). (2) The sentence for 6 is parcel MC's of 2026-10-15 and has the same form; it now names what MC's entry measured (docs/VALIDATION.md, 2026-10-16, "M1's build, fifth wave, closed: cftc compiles the six": the 31 committed sources and the hard-workload pack's 21 at both trees, only each manifest's version line moving, and the generated 110 sources (272 compiles) and 182 cases a tree, which differ by exactly the `.cfta`'s note on a bank word of three or more owners) and says that beyond those sets it is believed, not shown; both sentences keep the scope of the sources the earlier version compiled ("For a source 5 compiled", "For a source 6 compiled"), the clause that, by VMC-2's note in that entry, scopes the first's "only a looped image holding both division and root", so neither claims a source the earlier version refused. The sentence for 5 ("5 writes the same images, banks and text files as 4; only manifests moved") is older and of a like flavour; the send-back does not name it and it stands. **That the docstring feeds no committed byte** (MEASURED after the edit, on the docstring's final wording, 12:05 to 12:13, the desktop at 100 per cent by Win32_Processor when it started (a first pass on the earlier wording, 11:58 to 12:00, gave the same writes and leg F, and its corpus check and tests were stopped at 12:03 by task id when the wording of the two scopes changed)): `tangent_check.py --write` (128 files) and `lang_check.py --write` (64 files) leave `git status --short` showing the edited docstring alone; leg F (`lang_check.py --only determinism`) 7 ok, 0 FAIL, 1 SKIP (the core tally, by `--only`) in 54 s; `corpus.py check --tool host/cft-segrun.exe` 329 checks, 0 failed, 0 skipped in 132 s; test_routines.py and test_cftc_trig.py 195 passed in 148 s (-n 4); and nothing under python/ or programs/ reads cftc's module docstring (a grep for `__doc__` names no cftc module). The docs index check, `project_figures.py --check`, `git diff --check` and `val_merge4.py 43c8c925 43c8c925 HEAD --check` are run after the commit that carries this paragraph and their results are in the parcel's reply, an entry being unable to record the result of a check on itself.
+
+## 2026-11-02 - the lead's: M2's wave 3 merged, sin, cos and tan in the language (parcel M2L, version 1.2) and in cftc (parcel M2C, VERSION 7), built in parallel to one contract and merged together after their gates (the lead; drafter D-M2LC; verifiers VM2L and VM2C)
+
+**Logan's word** (2026-11-02, verbatim): "Both today, parallel (Recommended)". As plan.md had it, the two parcels had Sonnet authors and Haiku verifiers, built to one interface the lead sets, and were trial-merged before either merged. Their own entries are above: M2L's, then M2C's.
+
+**The contract.** A drafter (D-M2LC, the default model) read the study, M1's parcels ML and MC with their send-backs, and the code at 19de866c. Its notes found three things:
+- cftc cannot compile a node the language lacks, and reads every compile back through the language's checker. So M2C worked in two phases around a checkpoint of M2L's;
+- M2L alone on main would leave `sin(x)` exiting 70 in cftc;
+- the pendulum alone holds only sin's derivative rule.
+
+The lead's eleven decisions, among them:
+- the pair merges together, with no interim refusal;
+- M2L's checkpoint is taken about 1 h 30 in;
+- the committed references hold all three rules (MC's decision of 2026-10-15): the pendulum, plus an attitude system holding sin, cos and tan, compiled under rdn, at fp64 and fp256;
+- the gate's stage list.
+
+The contract fixed the node names, their place in lang.OPS (after log2, before neg), the IR form, the three rules' node shapes, the notation, the folds, the routines' tuples and caps, and the version strings.
+
+**The run:**
+- **M2L's checkpoint, ea159a39 (07:36),** was checked by the lead from git and a `git archive` copy (lang.OPS's order, TRANSCEND, ROUNDED), then passed to M2C.
+- **M2C's trial merges** of each M2L SHA ran the contract's nine-item list. The final merge, M2L's 43c8c925 into M2C, gave:
+  - 264 lanes against lang.run, 1 marked;
+  - 981 tests passed;
+  - the references byte for byte under two hash seeds;
+  - the corpus 329/0/0;
+  - only the version line moving over 43 committed sources and 330 generated compiles.
+- **VM2L** (Haiku) found 0 regressions in its ten checks, and three comment edits outside the brief's list, which the lead approved after the fact. It found 2 wrong answers, both in one test docstring, and M2L was sent back for each:
+  - "about half the lanes (the study, section 7)", a figure the study does not have;
+  - then a false provenance for the 200-lane counts that replaced it.
+
+  At the NaN, cos's two forms differ in the sign bit under every attribute, as M2L measured and VM2L confirmed. That corrects the study's "only under rdn and rup" for non-finite results. The WebAssembly module needs no rebuild: its 17 sources preprocess identically at both trees, a non-vacuous comparison by VM2L's control.
+- **VM2C** (Haiku) found 0 regressions in its twelve checks:
+  - 5,520 compiled lanes against lang.run;
+  - the 220 fragments unchanged;
+  - its own differential;
+  - the cos rule plant moving 12 attitude files;
+  - the spill thresholds at every k.
+
+  It found 1 wrong answer: cftc's VERSION 7 history paragraph claimed the same bytes "for every source 6 compiled", a set no run covers. M2C was sent back; the paragraph now names its measured sets and calls the pack's 21 believed.
+
+**The gates** (the contract's decision 9 stages, on amd-arc-box): MEASURED on amd-arc-box, each with VERDICT PASS and golden's 3 known inner skips, and golden 6,157 passed and 3 skipped (6,160 collected):
+- the first, on the trial merge 8b1cd8dc (M2C before its send-back): rc 0 in 6,545 s;
+- the second, on 01289e1a, the final tree: rc 0 in 6,542 s.
+
+In each, the vectors regenerated once (419 and 422 s); the tangent stage took 487 and 491 s, its Lyapunov legs E and F included; acceptance took 595 and 606 s; the other stages were under 5 minutes each. Each ran in a fresh clone, with libcft.so built first and the SHA and the content asserted apart.
+
+**The merge on main:** d0c6bed4, with parents fc959139 and 035f8d0a.
+- **Resolutions:** VALIDATION by val_merge4 (main's file followed by M2L's and M2C's blocks); README recounted.
+- **The tree:** the staged tree was asserted equal to the second gate's (f028a95f) before the commit.
+
+**Known limits:**
+- the hard-workload pack's 21 sources were not compiled at both trees: "no byte moves" for them is believed until Tuesday;
+- the tangent stage's Lyapunov legs E and F ran only in the gate;
+- the no-mpmath path was shown by sys.modules and by a `-I -S` child, not on a host that never had it;
+- the 09:34 scratch run's four 200-lane counts in M2L's block have a true provenance and no saved output.
