@@ -198,7 +198,8 @@ TREFS = {"lorenz63-rk4-tangent": 100, "lorenz96-rk4-tangent": 20,
          # (sin in the step, cos in the tangent) at round rne, and a rigid
          # body's attitude, the 3-2-1 Euler angles' kinematics (all three,
          # in the step and in the tangent), at round rdn, where cos's rule
-         # rounded otherwise is another value as well as other bytes
+         # rounded otherwise rounds to another value (its bytes move under
+         # any attribute; its output rarely shows the value)
          "pendulum-rk4-tangent": 10, "attitude-rk4-tangent": 10}
 # The references holding the math library's routines, the six and sin, cos
 # and tan: compiled only where mpmath imports, since the routines' generator
