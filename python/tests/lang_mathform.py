@@ -51,10 +51,15 @@ mpmath's value at 1,024 bits of the argument rounded to nearest at 1,024
 bits; expm1(a) is exp(a) - 1 and log1p(a) is ln(1 + a). A logarithm at or
 below its pole, or a value past 2^+-1048576, raises an ArithmeticError.
 
-Only the six need mpmath, here as in the language: have_mpmath() says,
+sin, cos and tan (M2's build) print as sin(a), cos(a) and tan(a), and are
+taken the same way: exact at 0 - sin(0) = tan(0) = 0 and cos(0) = 1, the
+only rational values - and otherwise mpmath's at 1,024 bits of the argument
+rounded to nearest at 1,024 bits.
+
+Only the nine need mpmath, here as in the language: have_mpmath() says,
 without importing it, whether this host has it, so that the tests that
-run or evaluate the six skip by name on a host without it while the rest -
-the checker, the renderers and cftc's refusal of the six among them - run.
+run or evaluate the nine skip by name on a host without it while the rest -
+the checker, the renderers and cftc's refusal of the nine among them - run.
 """
 
 import importlib.util
@@ -68,7 +73,7 @@ ROOT_BITS = 256
 TRANS_BITS = 1024
 LIMIT = 1 << 20                 # a constant's bound, 2^+-1048576
 _MP = []
-NO_MPMATH = ("mpmath is not installed: the math library's six - their golden "
+NO_MPMATH = ("mpmath is not installed: the math library's nine - their golden "
              "functions, python/cft_golden/transcend.py, and their exact "
              "values - need it")
 
@@ -94,8 +99,9 @@ def root(q):
 
 
 def _mpvalue(fn, q):
-    """mpmath's exp, 2^x, ln or log2 of a rational at TRANS_BITS, the
-    argument rounded to nearest at TRANS_BITS first, as an exact rational."""
+    """mpmath's exp, 2^x, ln, log2, sin, cos or tan of a rational at
+    TRANS_BITS, the argument rounded to nearest at TRANS_BITS first, as an
+    exact rational."""
     if not _MP:
         import mpmath
         ctx = mpmath.MPContext()
@@ -105,7 +111,8 @@ def _mpvalue(fn, q):
     x = ctx.make_mpf(lib.from_rational(q.numerator, q.denominator,
                                        TRANS_BITS, lib.round_nearest))
     y = {"exp": ctx.exp, "exp2": lambda v: ctx.power(2, v), "ln": ctx.log,
-         "log2": lambda v: ctx.log(v) / ctx.ln2}[fn](x)
+         "log2": lambda v: ctx.log(v) / ctx.ln2, "sin": ctx.sin,
+         "cos": ctx.cos, "tan": ctx.tan}[fn](x)
     sign, man, exp, bc = y._mpf_
     man = int(man)
     if man == 0 or abs(exp + bc) > LIMIT:
@@ -115,10 +122,14 @@ def _mpvalue(fn, q):
 
 
 def transcendental(name, q):
-    """One of the six as the exact checks take it (the module docstring),
+    """One of the nine as the exact checks take it (the module docstring),
     by the mathematical form's name for it: exp, expm1, 2^ (exp2), ln,
-    log1p or log₂ - or the language's, log and log2."""
+    log1p, log₂, sin, cos or tan - or the language's, log and log2."""
     q = Fraction(q)
+    if name in ("sin", "cos", "tan"):
+        if q == 0:
+            return Fraction(1 if name == "cos" else 0)
+        return _mpvalue(name, q)
     if name == "exp":
         if q == 0:
             return Fraction(1)
@@ -147,7 +158,8 @@ def transcendental(name, q):
     raise MathFormError(f"unknown function {name}")
 
 
-_TRANSCENDENTAL = ("exp", "expm1", "ln", "log1p", "log₂")
+_TRANSCENDENTAL = ("exp", "expm1", "ln", "log1p", "log₂", "sin", "cos",
+                   "tan")
 
 
 class MathFormError(ValueError):

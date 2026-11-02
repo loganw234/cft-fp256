@@ -46,18 +46,25 @@ from .templates import (FLOW_INTEGRATORS, INTEGRATORS, LABEL_PREFIXES,
 # value is rational - exp(0), expm1(0), exp2 of an integer, log(1),
 # log1p(0), log2 of a power of two - is `constant-division-by-zero` at a
 # logarithm's pole and `irrational-constant` elsewhere (Logan's answer to
-# M1's question 8).
-MATH = ("exp", "expm1", "exp2", "log", "log1p", "log2")
+# M1's question 8). sin, cos and tan joined them in M2's build
+# (2026-11-02), by Logan's answer 8 to the M2 study's questions
+# (docs/studies/M2-trig.md, section 9): of a constant exactly 0 they fold -
+# sin(0) = tan(0) = 0 and cos(0) = 1 - and of any other they are
+# `irrational-constant`; no constant is a pole of tan (pi/2 is irrational),
+# so none is `constant-division-by-zero`; and of a constant that changes
+# with h's size they are `h-nonlinear`, as every function of one is.
+MATH = ("exp", "expm1", "exp2", "log", "log1p", "log2", "sin", "cos", "tan")
 BUILTINS = {"fma": 3, "abs": 1, "copysign": 2, "min": 2, "max": 2,
             "minnum": 2, "maxnum": 2, "select": 3, "sqrt": 1,
             **{fn: 1 for fn in MATH}}
 
 # Refused by name in v1 (`transcendental`, `irrational-constant`), and so
 # reserved: a value cannot be named after one. The six built-ins above
-# left this list in M1's build, item 3; M2 to M4 take the rest.
+# left this list in M1's build, item 3, and sin, cos and tan in M2's;
+# the later rounds take the rest (M3's pow family, M4's inverse functions).
 TRANSCENDENTAL = frozenset({
     "exp10", "log10",
-    "pow", "pown", "powr", "rootn", "hypot", "sin", "cos", "tan", "sinpi",
+    "pow", "pown", "powr", "rootn", "hypot", "sinpi",
     "cospi", "tanpi", "asin", "acos", "atan", "atan2", "asinpi", "acospi",
     "atanpi", "atan2pi", "sinh", "cosh", "tanh", "asinh", "acosh",
     "atanh", "cbrt", "rsqrt",
@@ -167,14 +174,33 @@ _REWRITE = ("and a constant is an exact rational: write its value as a "
 
 
 def _fold_math(op, c, line):
-    """One of the six of the constant c, folded exactly where its value is
+    """One of the nine of the constant c, folded exactly where its value is
     rational - exp(0) = 1, expm1(0) = 0, exp2(n) = 2^n for an integer n,
-    log(1) = 0, log1p(0) = 0, log2(2^k) = k - and refused by name
-    elsewhere, the sentence saying why (Logan's answer to M1's question 8,
-    2026-10-12): `constant-division-by-zero` at a logarithm's pole, as 754
-    calls log(0) divideByZero, and `irrational-constant` for a value no
-    rational carries, irrational or not real."""
+    log(1) = 0, log1p(0) = 0, log2(2^k) = k, sin(0) = 0, cos(0) = 1 and
+    tan(0) = 0 - and refused by name elsewhere, the sentence saying why
+    (Logan's answer to M1's question 8, 2026-10-12, and his answer 8 to the
+    M2 study's questions, 2026-10-14): `constant-division-by-zero` at a
+    logarithm's pole, as 754 calls log(0) divideByZero, and
+    `irrational-constant` for a value no rational carries, irrational or not
+    real. sin, cos and tan have no pole at a rational, so they have no
+    `constant-division-by-zero` at all."""
     shown = C.brief(c)
+    if op in ("sin", "cos", "tan"):
+        if c == 0:
+            return Fraction(1 if op == "cos" else 0)
+        # Hermite-Lindemann, as transcend.py's comment block argues: for a
+        # nonzero algebraic c, e^(ic) is transcendental
+        word = {"sin": "sine", "cos": "cosine", "tan": "tangent"}[op]
+        if op == "tan":
+            how = ("were it an algebraic a, e^(2ic) = (1 + ia)/(1 - ia) "
+                   "would be algebraic, c the argument, and e^(2ic) is "
+                   "transcendental")
+        else:
+            how = ("were it algebraic, e^(ic) would be algebraic, c the "
+                   "argument, and e^(ic) is transcendental")
+        raise Refusal("irrational-constant", f"{op}({shown}) is irrational: "
+                      f"the {word} of a nonzero rational is transcendental "
+                      f"(Hermite-Lindemann: {how}), {_REWRITE}", line)
     if op in ("exp", "expm1"):
         if c == 0:
             return Fraction(1) if op == "exp" else Fraction(0)
@@ -1079,7 +1105,8 @@ class Checker:
                 v = v.read_h(e, ctx.env)
             return v
         if name in TRANSCENDENTAL:
-            # M2 to M4's names; the six left this list in M1's build, item 3
+            # the names no round has built yet; the six left this list in
+            # M1's build, item 3, and sin, cos and tan in M2's
             vals = [self.eval(a, ctx) for a in e.args]
             if vals and all(isinstance(v, K) for v in vals):
                 raise Refusal(
@@ -1095,8 +1122,8 @@ class Checker:
                           f"function", e.line)
         raise Refusal("unknown-function", f"{name} is not a built-in: fma, "
                       f"abs, copysign, min, max, minnum, maxnum, select, "
-                      f"sqrt, exp, expm1, exp2, log, log1p and log2 are",
-                      e.line)
+                      f"sqrt, exp, expm1, exp2, log, log1p, log2, sin, cos "
+                      f"and tan are", e.line)
 
     def name_value(self, name, index, ctx, line):
         if index is None and name in ctx.env:
@@ -1544,8 +1571,9 @@ class Checker:
                 r = K(root)
             elif op in MATH:
                 # folded exactly where the value is rational, and nowhere
-                # else (M1's question 8): a node would round twice, and
-                # spend a routine on a value fixed when compiled
+                # else (M1's question 8, and the M2 study's answer 8): a node
+                # would round twice, and spend a routine on a value fixed
+                # when compiled
                 r = K(_fold_math(op, v[0], line))
             else:
                 raise AssertionError(op)

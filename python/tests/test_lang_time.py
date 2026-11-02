@@ -24,7 +24,7 @@ section fails here by name (parcel T1, 2026-10-02).
                        stage's count and time inside rk4, the midpoint under
                        stormer-verlet; the exact residual, under each
                        attribute, and past 10^4 with Markstein's hypotheses
-  forcing              sin refused today; the rotation's table, its
+  forcing              sin(w * t) a node since 1.2; the rotation's table, its
                        rounding's share and its exact factor, the phase,
                        w = 3/10; the forced oscillator against its exact
                        solution and against a twin; every source the
@@ -853,13 +853,28 @@ def test_the_correctly_rounded_time_past_ten_thousand(fmt):
 
 # ---- forcing -----------------------------------------------------------------
 
-def test_sin_of_t_waits_for_the_math_library():
-    with pytest.raises(lang.Refusal) as info:
-        compile_("system s\nformat fp64\nstate t, x\nparam w = 1\nd/dt t = 1\n"
+def test_sin_of_t_is_a_node_since_the_language_1_2():
+    """It waited for the math library until M2's build (the language's 1.2,
+    2026-11-02): with t in the state, `sin(w * t)` is one node of the
+    field, a sine of the product (this was test_sin_of_t_waits_for_the_
+    math_library, which held it refused `transcendental`). The test's
+    point stands for the names still reserved: `sinh(w * t)`, the example
+    of decision 6, is refused `transcendental`, and the section says so."""
+    g = compile_("system s\nformat fp64\nstate t, x\nparam w = 1\nd/dt t = 1\n"
                  "d/dt x = sin(w * t)\nstep rk4, h = 1/100\n")
+    assert [op for op, _a, _l in g.field.nodes] == ["mul", "sin"]
+    assert said("`sin` and `cos` of t are operations since the language's "
+                "1.2 (M2's build, 2026-11-02)")
+    assert said('Before it `sin(w * t)` was refused, `transcendental` ("sin '
+                'is not computed by a program in v1")')
+    with pytest.raises(lang.Refusal) as info:
+        compile_("system s\nformat fp64\nstate t, x\nparam w = 1\n"
+                 "d/dt t = 1\nd/dt x = sinh(w * t)\nstep rk4, h = 1/100\n")
     assert (info.value.name, info.value.sentence) == (
-        "transcendental", "sin is not computed by a program in v1")
-    assert said('`transcendental` ("sin is not computed by a program in v1")')
+        "transcendental", "sinh is not computed by a program in v1")
+    assert said("A reserved function of t that no round has taken yet, "
+                "`sinh(w * t)`, is refused `transcendental` (\"sinh is not "
+                "computed by a program in v1\") as `sin` was")
 
 
 ROTATION = """\

@@ -20,15 +20,16 @@ by the runner's `lang` stage (docs/VERIFICATION.md); ROADMAP.md's
 "Step 3: the language and its compiler (plan of record, 2026-10-01)" is
 the plan, and this document is its parcel L1.
 
-**This is the language at 1.1** (`python/cft_golden/lang/version.py`;
+**This is the language at 1.2** (`python/cft_golden/lang/version.py`;
 CONFORMANCE.md, "The language's version"). It was 1 from 2026-10-02,
-when certificate format version 2 first named it, and became 1.1 on
+when certificate format version 2 first named it, became 1.1 on
 2026-10-15, when M1's build, item 3, added the math library's exp, expm1,
-exp2, log, log1p and log2 ("The operations"): functions it had refused
-only for not having them, so a minor step - every source accepted at 1
-is accepted at 1.1 and computes the same. `cft.h`'s `CFT_LANGUAGE_MAJOR`
-and `_MINOR` carry the version to the C tools that write and audit
-certificates.
+exp2, log, log1p and log2 ("The operations"), and became 1.2 on
+2026-11-02, when M2's build added its sin, cos and tan: functions it had
+refused only for not having them, so a minor step each time - every
+source accepted at 1 is accepted at 1.2 and computes the same.
+`cft.h`'s `CFT_LANGUAGE_MAJOR` and `_MINOR` carry the version to the C
+tools that write and audit certificates.
 
 Files are `*.cftl` (a working name). The three references are written in
 it, at fp64 and fp256, in `programs/systems/`, each beside the image
@@ -177,10 +178,11 @@ the gate holds that.
   - the keywords;
   - the built-ins `fma abs min max minnum maxnum copysign select sqrt`,
     and the math library's `exp expm1 exp2 log log1p log2` (M1's build,
-    item 3);
-  - the transcendental names the language does not have yet (`sin`,
+    item 3) and `sin cos tan` (M2's build);
+  - the transcendental names the language does not have yet (`sinh`,
     `pow`, `hypot`, `log10` and the rest of the list in
-    `python/cft_golden/lang/check.py`), which M2 to M4 will take;
+    `python/cft_golden/lang/check.py`, 26 names), which the later
+    rounds will take;
   - `h`, the step's own name;
   - `inf infinity nan snan`.
 - `tangent` became a keyword with the variational equations (part
@@ -1161,10 +1163,15 @@ may read h: `let t = fma(k, h, t0)`.
 
 ### Forcing
 
-`sin` and `cos` of t wait for the math library: today `sin(w * t)` is
-refused, `transcendental` ("sin is not computed by a program in v1"),
-and they are step 6's M2 (docs/ROADMAP.md). Until then a rotation
-carried in the state forces a system:
+`sin` and `cos` of t are operations since the language's 1.2 (M2's
+build, 2026-11-02): with t in the state, `sin(w * t)` is one node of the
+step, a correctly rounded sine of the product like any other node.
+Before it `sin(w * t)` was refused, `transcendental` ("sin is not
+computed by a program in v1"), and a rotation carried in the state
+forced a system - which still does, without a routine. A reserved
+function of t that no round has taken yet, `sinh(w * t)`, is refused
+`transcendental` ("sinh is not computed by a program in v1") as `sin`
+was:
 
 ```
 state c, s          ; c = cos(w t), s = sin(w t), started by the host
@@ -1788,6 +1795,9 @@ not differentiable is given its fixed value in the last column.
 | `log(a)` | `select(r == r, da / a, r)` | zero | at a = ±0, da / ±0: an infinity with divideByZero, or a NaN with invalid where da is ±0 too, the quotient's convention; below zero r is a NaN, and so is the tangent |
 | `log2(a)` | `select(r == r, da / (L * a), r)` | zero | as log |
 | `log1p(a)` | `select(r == r, da / (1 + a), r)` | zero | at a = -1 as log at 0; below -1 as log below 0 |
+| `sin(a)` | `cos(a) * da` | zero | - (at ±infinity cos(a) is a NaN, as the primal is) |
+| `cos(a)` | `(-sin(a)) * da` | zero | - (at ±infinity sin(a) is a NaN, as the primal is) |
+| `tan(a)` | `fma(r, r, 1) * da` | zero | - (no representable argument is a pole) |
 | a constant, h, a param, a lane param | zero | | |
 | a state component x | the tangent input `v.x` | | |
 

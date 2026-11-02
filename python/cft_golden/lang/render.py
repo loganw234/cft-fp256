@@ -15,12 +15,13 @@
                     text): each fma as the a*b + c it computes, a
                     division as a/b and a square root as √(a), the math
                     library's six as exp(a), expm1(a), 2^(a), ln(a),
-                    log1p(a) and log₂(a), each constant as its exact
-                    value, the step as the template's own scheme.
+                    log1p(a) and log₂(a), its sin, cos and tan (M2's
+                    build) as sin(a), cos(a) and tan(a), each constant as
+                    its exact value, the step as the template's own scheme.
                     Evaluated exactly at random rational points it gives
                     what the step graph gives evaluated exactly
                     (python/tests/lang_mathform.py) - each square root
-                    and each of the six a fixed function of its exact
+                    and each of the nine a fixed function of its exact
                     argument on both sides (graph.exact_root,
                     graph.exact_transcendental).
 
@@ -533,9 +534,11 @@ def m_sqrt(a):
 # and otherwise by the name numerical libraries give it, expm1(x) and
 # log1p(x) (C99's, transcend.py's; IEEE 754-2019 calls the second logp1):
 # e^x − 1 and ln(1 + x) would print two operations where the program
-# performs one, rounded once.
+# performs one, rounded once. sin, cos and tan (M2's build) are conventional
+# notation already, sin(x), cos(x) and tan(x), in radians.
 _MATH_CALL = {"exp": "exp({})", "expm1": "expm1({})", "exp2": "2^({})",
-              "log": "ln({})", "log1p": "log1p({})", "log2": "log₂({})"}
+              "log": "ln({})", "log1p": "log1p({})", "log2": "log₂({})",
+              "sin": "sin({})", "cos": "cos({})", "tan": "tan({})"}
 
 
 def m_math(op, a):
