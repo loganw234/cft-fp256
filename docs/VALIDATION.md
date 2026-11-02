@@ -26392,3 +26392,68 @@ extras, cases per format: fp32 102,215, fp64 165,435, fp128 112,720, fp256 126,7
 - **docs/VERIFICATION.md's mpfr row** (8 min; the stage took 818 s when measured) and any timing the runner's budgets quote are the lead's to change.
 
 docs/README.md is recounted.
+
+## 2026-11-02 - the lead's: night 11 on the page (the weekend window); night 1031 at main; the lead's very small fixes (exp2m1's comments say the top half of the gap below 2^n, the neighbour count at emax + 1 pinned, three docstrings); parcel OPS merged, with its stage on the desktop and on the box (the lead; verifiers VLF and VOPS)
+
+**Night 11** (READ from site/nightly.json, reduced from the night's copy; its metrics sha256, e58c3806, equals the box's line):
+- 2026-10-30 18:31:14 to 2026-11-02 07:45:08: the weekend window, to its deadline, exit 0, 63 cycles;
+- 3,941 slices and 11,730,780,950,586 cases, **0 disagreements**; legs 4,646 passed, 0 failed;
+- the probe leg: quad 5 legs, single 1, deep 1, none failed;
+- the totals over 11 nights: 32,489,794,407,236 cases, 0 disagreements, 10,076 slices.
+
+The data commit is be01bafb.
+
+**Night 1031** runs at be01bafb, from Monday 18:00 to Tuesday 07:45, on night 1030's 287 items with the probe leg.
+- Its preflight was rehearsed first on the box at that commit: 1,250 checks, 0 failed, 10 skipped by name, so the launcher would go on.
+- The host tree moved (issue 1's fix and M2F2's seq_check), so the host items begin a new class. The rtl tree did not move.
+
+**The lead's very small fixes, and what they close:**
+- two known limits from issue 1's entry (2026-10-30, above), VX1's notes 4 and 3:
+  - transcend.py said that for n >= p+2, 2^n - 1 is in the "top quarter" of the gap below 2^n;
+  - no test pinned the neighbour counter at the new n = emax + 1 branch;
+- one known limit from M2F2's entry: two docstrings of test_mathlib_trig.py began "Room for parcel M2F".
+
+**4ec03439:**
+- **python/cft_golden/transcend.py,** exp2m1's docstring and its integer branch's comment, now say the top HALF.
+  - For n >= p+2, 2^n - 1 is strictly above the gap's midpoint (1 < 2^(n-p-1)).
+  - It is strictly inside the top quarter only from n = p+3, and on the quarter point at n = p+2.
+  - The C (transcend.c:3944) and docs/TRANSCENDENTALS.md said half already.
+  - Comments only: VLF found the module's AST, docstrings removed, equal at both commits.
+- **python/tests/test_transcend.py,** test_exp2m1_at_the_top_of_the_range: each answer at emax + 1 must raise `STATS["neighbour"]` by exactly one.
+  - test_brute_force_enclosure_agrees reads that count to leave the neighbour rule's answers to their directed tests.
+  - The negative control: with the new branch's increment deleted, in a scratch copy, the test fails at the new assertion in all four formats. The lead and VLF each ran it.
+  - VLF also logged every write to the counter on that path: 40 calls (4 formats, 5 attributes, twice each), each a delta of exactly 1, all from that one line. `compute` caches nothing, so the count cannot depend on test order.
+- **python/tests/test_mathlib_trig.py:** the two docstrings that began "Room for parcel M2F:" now say they were made for it (merged 2026-10-30, which VLF checked against the two merges).
+  - The section header, "what parcel M2F calls", stays: it is true as it stands.
+  - Docstrings only: VLF found the AST equal.
+
+**0f9d7a45:** VLF's note 1, the same word in the docstring of test_exp2m1_beyond_the_exact_range_takes_a_side. No "top quarter" is left in transcend.py or test_transcend.py. Issue 1's entry above says "top quarter" for n = emax + 1 (this file's line 26161). That is right where it stands, since emax + 1 >= p + 3 in every format.
+
+**Verifier VLF** (Haiku) found 0 regressions and 0 wrong answers in either commit: 4ec03439, then 0f9d7a45, which answered its note 1. It:
+- re-derived the arithmetic with exact fractions;
+- found each changed .py file's AST, docstrings removed, equal to the base's;
+- reran the pin (4 passed) and its negative control (4 failed, at the new assertion);
+- logged the counter's 40 deltas;
+- checked the docstrings' date against the merges of M2F1 (77dfc230) and M2F2 (d6f55748).
+
+**The fixes' gate** (box_gate_1102a.sh on amd-arc-box), at their merge 68e6f12d on night 11's data commit. MEASURED:
+- `verify/run.sh --only docs,golden,generated`: rc 0 in 3,729 s, VERDICT PASS with golden's 3 known inner skips (the loopback binary twice, and math.fma, which needs Python 3.13);
+- golden: 5,955 passed and 3 skipped in 3,621 s. That is the same 5,955 as issue 1's gate, since the pin is an assertion inside an existing test;
+- docs ok in 51 s, generated ok in 54 s.
+
+**Parcel OPS** (Sonnet; its own entry is above, and its tables are in docs/TRANSCENDENTALS.md), merged at 54134e68. Logan asked for it on 11-02 ("Parcel, Sonnet + Haiku"), after issue 1.
+- **OPS found a second wrong-pool defect, in main,** and fixed it in the parcel at the lead's word (1f76254a).
+  - The trigonometric and third pools took fp256's base pool at every format. So at fp32 their eighteen specials were twelve +0s, three 0x00000001s and three 0xffffffffs, with no -0, no infinity and no 1. fp64 and fp128 were alike.
+  - Verifier VOPS planted asin(-0), and showed the old trig phase missing it at 19de866c and finding it at 1f76254a.
+- **Send-back 1, VOPS's (b):** the extras' count lines could not fail. With fp256's extras skipped, the run exited 0. The counts per family and format, and the total, are now pinned under 24 and 7, and a difference exits 1 by name.
+- **The lead's full mpfr stage at 3efe0123, MEASURED:**
+  - on the desktop: rc 0 in 1,059 s (and 818 s at 1f76254a, both with agents running beside it);
+  - on amd-arc-box, with a 64-bit long, built against the pinned MPFR 4.2.2: rc 0 in 1,085 s.
+  - Both print "pins held: extras at every format (69 families), total 1366964", and TOTAL 1,366,964 cases, 0 value and 0 flag mismatches. So the pins, made on the desktop's 32-bit long, hold on Linux too. The risk OPS named did not arise.
+- **The cost.** The stage was 515 s at issue 1's gate. It is now about 14 to 18 minutes on the desktop under load, and 18 on the box. CI's host job does not run it (gates.yml's stage list); the box's full gate does. docs/VERIFICATION.md's row says so.
+- **Verifier VOPS** (Haiku) found 0 regressions and 1 wrong answer (above), and on its re-check 0 and 0.
+
+**Known limits:**
+- the lead's very small fixes were checked by one Haiku verifier;
+- VX1's measurement that deleting the increment left the 48 exp2m1 tests passing (2026-10-30) is cited, not re-measured. The new pin is what fails now;
+- OPS: a family nobody has written down is not found; an empty or misspelt selection exits 0, saying so; whoever changes a pool updates the pins in the same commit.
