@@ -35,7 +35,7 @@ program-digest a9823f5d36c32ccf232a9a2db588a0decd6ea90df37acaabdbeef132d4ba52f9
 source dd309ffbd8cdd04f62643e38e2270e1850804f81de26118941e518cbeda161fa
 source-name lorenz63-rk4-fp64.cftl
 graph e3153e4d526117574089681d5539012b16fc7d493015315656ceda6c5e93e80c
-compiler cftc 6 sw
+compiler cftc 7 sw
 source-params 0
 lanes 2
 steps 100
@@ -51,4 +51,4 @@ replays 0
 output c8b04c863e4900ff20c39c199ad14b8cbdd705486e66db8244b68bc3b1b1ba8b
 accuracy 0
 end
-hash 9b3fbc7b0dabb82f5379b5c35ae31e7bff59065586cb6fce84e0926b5807eff6
+hash 06b49ebf7ea2c9e83c96dadc1c5215e832be3eef78205feddcf0933e4f375388
