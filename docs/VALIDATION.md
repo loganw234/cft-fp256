@@ -26372,7 +26372,7 @@ extras, cases per format: fp32 102,860, fp64 166,070, fp128 113,355, fp256 126,7
 - The pairs beyond the vector generator's and the families' are not asked: the cross product is not the point.
 - The comparison scripts are not in the repository (the brief kept them out); the dump is what the tool prints, and TRANSCENDENTALS.md gives the method.
 - Sin, cos and tan at the wide formats are sampled as the vector generator samples them: 192 powers of two, and the deepest three binades of eight for the worst cases.
-- The timings are of a desktop with other sessions on it, and the extras' took 212 s in one run and 261 s in another an hour later.
+- The timings are of a desktop with other sessions on it, and the extras' took 212 s in one run and 261 s in another half an hour later.
 
 **For the lead,** three things the parcel did not do because they were not its to do:
 - **The defect in `main` is left in place,** so that the default run asks what it always asked. `build_trigpool` and `build_p3pool` are handed `pool`, the clause-5 loop's last, fp256's; the fix is to hand them the format's own eighteen (`build_pool(f, base, 0)`, no random draw), but it changes the first eighteen members of those two pools at fp32, fp64 and fp128, dropping the accidental ones (0xffffffff, 0x00000001, the repeated +0). The extras ask the real ones, so nothing is lost by waiting.
