@@ -999,7 +999,8 @@ PROFILE_TEXT = cert2.version_text(cert2.PROFILE)
 # And the language they state where a run names a source: lang/version.py's,
 # which cft-segrun writes from cft.h's CFT_LANGUAGE_* and the corpus holds it
 # to. It was the literal "1" until the language's 1.1 (M1's build, item 3,
-# 2026-10-15), when the corpus was made again at 1.1.
+# 2026-10-15), when the corpus was made again at 1.1, and again at 1.2 (M2's
+# build, 2026-11-02).
 LANGUAGE_TEXT = cert2.version_text(cert2._language_version())
 # every measured header line unknown, as version 1's example's build-id
 UNKNOWN = cert2.Provenance(profile=PROFILE_TEXT, language=LANGUAGE_TEXT,

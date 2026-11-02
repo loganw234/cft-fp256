@@ -92,27 +92,44 @@ lang_check.py, whose helpers this reuses), with tangents:
      and plants - a root without its 2 and a quotient's wrong sign red on
      both, a right root derivative written through r * r = a green on the
      difference and red on the exact check
-  M  the math library's six rules (M1's build, item 3), golden: written
-     shapes and generated systems holding exp, expm1, exp2, log, log1p
-     and log2, with tangent vectors - the tangent exactly against this
-     stage's own dual numbers (each value as the exact evaluation takes
-     it, L the stage's own: transcend.log of 2) and against a central
-     difference in high precision (eps = 2^-256 of 1,024-bit values,
-     within 2^-300, ln 2 exact in L's place); the primal unchanged; each
-     rule's rounding on y = f(a), every format and attribute, bit for
-     bit, its exact value before its last rounding the derivative within
-     its operands' roundings; the specials below each domain and at the
-     poles; and plants - log's rule rounded otherwise (green on both
-     exact checks, red on the rounding), L rounded the wrong way (red on
-     all three), log's select form dropped (red below the domain), a
-     golden function swapped for a sibling's (red on the rounding's
-     derivative). The compiler carries the six since M1's build, item 4,
+  M  the math library's rules, golden - the six (M1's build, item 3)
+     and sin, cos and tan (M2's build): written shapes and generated
+     systems holding exp, expm1, exp2, log, log1p and log2, and then sin,
+     cos and tan, with tangent vectors. Two derivative checks, named for
+     what they are: the tangent exactly against this stage's own dual
+     numbers (leg D's discipline made on these systems; each value as the
+     exact evaluation takes it, L the stage's own: transcend.log of 2;
+     tan's derivative 1 + tan^2 of tan's value) and, leg M's own, against
+     a central difference in high precision (eps = 2^-256 of 1,024-bit
+     values, within 2^-300, ln 2 exact in L's place), which assumes none
+     of the identities; the primal unchanged; each rule's rounding on y =
+     f(a), every format and attribute, bit for bit, its exact value
+     before its last rounding the derivative within its operands'
+     roundings (for the three, cos(a) and -sin(a) the routines' correctly
+     rounded results under the attribute, then fma(r, r, 1); and the
+     node's own result the golden function's); the specials below each
+     logarithm's domain and at the poles, and the three's at +-0, at
+     +-infinity and at a NaN under every attribute; and plants - log's
+     rule rounded otherwise (green on both exact checks, red on the
+     rounding), L rounded the wrong way (red on all three), log's select
+     form dropped (red below the domain), a golden function swapped for a
+     sibling's (red on the rounding's derivative); for the three, each
+     rule made wrong (red on the exact check, the difference and the
+     rounding under every attribute), tan's rule rounded otherwise
+     (fma(r, r * da, da): green on both exact checks, red on the rounding
+     under every attribute), cos's rounded otherwise (-(sin(a) * da):
+     green on both exact checks, red on the rounding at finite lanes
+     under rdn and rup only, where its two forms differ, and green under
+     rne, rtz and rmm there - but red at a NaN lane under every attribute,
+     the second form's sign bit being the negation's), and sin's golden
+     function swapped for cos's (red on the golden check and on cos's
+     rounding). The compiler carries the six since M1's build, item 4,
      and its committed references holding them are legs G, H and J's;
      compiled images of generated sources holding them, a marked lane
-     replayed, are leg N's. The six's golden functions need mpmath, so on
-     a host without it this leg is skipped by name, as are legs G and H's
-     references holding the six and leg N; legs A to L never need it
-     otherwise
+     replayed, are leg N's; the three's compiled forms are not this
+     leg's. The nine golden functions need mpmath, so on a host without it
+     this leg is skipped by name, as are legs G and H's references holding
+     the six and leg N; legs A to L never need it otherwise
   N  the math library's six compiled, with tangent vectors (M1's build,
      item 5): generated systems that call them beside division, the root
      and the other operations, all with one tangent vector or two, under
@@ -158,6 +175,7 @@ import cftc                                               # noqa: E402
 from cftc import targets as TG                            # noqa: E402
 from cft_golden import FORMATS, cert, lang, seq           # noqa: E402
 from cft_golden import softfloat as sf                    # noqa: E402
+from cft_golden import transcend                          # noqa: E402
 from cft_golden.lang import check as lang_check_mod       # noqa: E402
 from cft_golden.lang import constants as K                # noqa: E402
 from cft_golden.lang import tangent as lang_tangent       # noqa: E402
@@ -354,14 +372,16 @@ _MP = []
 
 
 def _trans(op, q):
-    """One of the math library's six as the exact evaluations take it
+    """One of the math library's nine as the exact evaluations take it
     (cft_golden/lang/graph.py's exact_transcendental, computed again here):
     exact where the value is rational - exp(0), exp2(n), log(1),
-    log2(2^k) - otherwise mpmath's value at 1,024 bits of the argument
-    rounded to nearest at 1,024 bits; expm1 is exp - 1 and log1p log(1 +
-    a); an ArithmeticError at a logarithm's pole or below its domain, or
-    past 2^+-1048576."""
+    log2(2^k), and sin(0) = tan(0) = 0 and cos(0) = 1 - otherwise mpmath's
+    value at 1,024 bits of the argument rounded to nearest at 1,024 bits;
+    expm1 is exp - 1 and log1p log(1 + a); an ArithmeticError at a
+    logarithm's pole or below its domain, or past 2^+-1048576."""
     q = Fraction(q)
+    if op in THREE and q == 0:
+        return Fraction(1 if op == "cos" else 0)
     if op == "expm1":
         return _trans("exp", q) - 1
     if op == "log1p":
@@ -391,7 +411,8 @@ def _trans(op, q):
     lib, ctx = _MP[0]
     x = ctx.make_mpf(lib.from_rational(n, d, TRANS_BITS, lib.round_nearest))
     y = {"exp": ctx.exp, "exp2": lambda v: ctx.power(2, v), "log": ctx.log,
-         "log2": lambda v: ctx.log(v) / ctx.ln2}[op](x)
+         "log2": lambda v: ctx.log(v) / ctx.ln2, "sin": ctx.sin,
+         "cos": ctx.cos, "tan": ctx.tan}[op](x)
     sign, man, exp, bc = y._mpf_
     man = int(man)
     if man == 0 or abs(exp + bc) > 1 << 20:
@@ -417,6 +438,7 @@ def _ln2(fmt, rnd):
 
 
 SIX = ("exp", "expm1", "exp2", "log", "log1p", "log2")
+THREE = ("sin", "cos", "tan")           # M2's build
 
 
 def _dual(op, a, tie=0, zero=1, L=None):
@@ -426,9 +448,21 @@ def _dual(op, a, tie=0, zero=1, L=None):
     read from the derivation. tie=1 and zero=-1 are the other choices,
     which a placed point must tell apart from the table's; a value is
     the same under any of them. The six (M1) take each value as the exact
-    evaluations take it (_trans), and ln 2 as `L`, the stage's own."""
+    evaluations take it (_trans), and ln 2 as `L`, the stage's own; so do
+    sin, cos and tan (M2), whose derivatives are cos, -sin and sec^2 =
+    1 + tan^2, the last with tan the exact evaluation's value so that the
+    rule's exact value is the derivative itself - the central difference of
+    leg M, which does not use the identity, is the evidence for it."""
     v = [p[0] for p in a]
     d = [p[1] for p in a]
+    if op in THREE:
+        x, dx = v[0], d[0]
+        if op == "sin":
+            return _trans("sin", x), _trans("cos", x) * dx
+        if op == "cos":
+            return _trans("cos", x), -_trans("sin", x) * dx
+        t = _trans("tan", x)
+        return t, (1 + t * t) * dx
     if op in SIX:
         x, dx = v[0], d[0]
         if op in ("exp", "expm1"):
@@ -1931,11 +1965,55 @@ def _m1_expr(rng, names, depth):
     return f"({sub()} {k} {sub()})"
 
 
-def m1_texts(count, seed):
+M2_SHAPES = {       # sin, cos and tan (M2's build) under each integrator
+    "one of each, a map": (
+        "system three\nformat fp64\nstate x, y, z\ntangent v\n"
+        "next x = sin(y) - cos(z * x)\nnext y = tan(x * y) + sin(z)\n"
+        "next z = cos(x * x + 1) * tan(y)\nstep map\n"),
+    "the pendulum, rk4": (
+        "system pendulum\nformat fp64\nstate theta, omega\ntangent v\n"
+        "param g = 9.81\nparam len = 1.5\n"
+        "d/dt theta = omega\nd/dt omega = -(g / len) * sin(theta)\n"
+        "step rk4, h = 1/64\n"),
+    "a let, rdn": (
+        "system rotor\nformat fp128\nround rdn\nstate phi, w\ntangent v\n"
+        "param kappa = 1/3\nlet s = sin(phi)\n"
+        "d/dt phi = w + cos(phi) * kappa\n"
+        "d/dt w = -(kappa * s) - tan(w) / 4\nstep rk4, h = 1/64\n"),
+    "stormer-verlet": (
+        "system pot\nformat fp32\nround rup\nstate q, p\ntangent v\n"
+        "d/dt q = p + tan(p / 8)\nd/dt p = -sin(q) * cos(q)\n"
+        "step stormer-verlet, h = 1/32, q = (q), p = (p)\n"),
+    "euler, two vectors": (
+        "system e\nformat fp256\nround rmm\nstate x\ntangent v, w\n"
+        "d/dt x = cos(-x) + sin(x * x)\nstep euler, h = 1/8\n"),
+}
+
+
+def _m2_expr(rng, names, depth):
+    """A random expression with sin, cos and tan, each of an operand that
+    reads one of `names`."""
+    if depth <= 0 or rng.random() < 0.3:
+        return rng.choice(names + ["2", "(1/3)", "0.5"])
+    k = rng.choice(["+", "-", "*", "/", "fma", "three", "three", "three"])
+
+    def sub():
+        return _m2_expr(rng, names, depth - 1)
+    if k == "three":
+        return f"{rng.choice(THREE)}({sub()} * {rng.choice(names)})"
+    if k == "fma":
+        return f"fma({sub()}, {sub()}, {sub()})"
+    return f"({sub()} {k} {sub()})"
+
+
+def m1_texts(count, seed, shapes=None, expr=None):
     """The written shapes, then generated systems with the six, one or two
-    tangent vectors, every integrator, format and attribute: (text,
-    what)."""
-    out = [(t, f"shape {s}") for s, t in M1_SHAPES.items()]
+    tangent vectors, every integrator, format and attribute: (text, what).
+    `shapes` and `expr` make them for sin, cos and tan (M2_SHAPES,
+    _m2_expr) instead."""
+    shapes = M1_SHAPES if shapes is None else shapes
+    make = _m1_expr if expr is None else expr
+    out = [(t, f"shape {s}") for s, t in shapes.items()]
     rng = random.Random(seed)
     for k in range(count):
         fmt = ("fp32", "fp64", "fp128", "fp256")[k % 4]
@@ -1945,16 +2023,16 @@ def m1_texts(count, seed):
         head = f"system m{k}\nformat {fmt}\nround {rnd}\n"
         if integ == "stormer-verlet":
             text = (head + f"state q, p\ntangent {vecs}\nparam c = 3/4\n"
-                    f"d/dt q = {_m1_expr(rng, ['p', 'c'], 2)} + c * p\n"
-                    f"d/dt p = {_m1_expr(rng, ['q', 'c'], 2)} - q\n"
+                    f"d/dt q = {make(rng, ['p', 'c'], 2)} + c * p\n"
+                    f"d/dt p = {make(rng, ['q', 'c'], 2)} - q\n"
                     f"step stormer-verlet, h = 1/16, q = (q), p = (p)\n")
         else:
             word = "next" if integ == "map" else "d/dt"
             names = ["x", "y", "c"]
             step = "step map" if integ == "map" else f"step {integ}, h = 1/32"
             text = (head + f"state x, y\ntangent {vecs}\nparam c = 2/3\n"
-                    f"{word} x = {_m1_expr(rng, names, 2)} + c\n"
-                    f"{word} y = {_m1_expr(rng, names, 2)} - y\n{step}\n")
+                    f"{word} x = {make(rng, names, 2)} + c\n"
+                    f"{word} y = {make(rng, names, 2)} - y\n{step}\n")
         out.append((text, f"generated {k}"))
     return out
 
@@ -2023,6 +2101,8 @@ def _one(fn, fmt="fp64", rnd="rne"):
 
 
 def _domain(fn, rng):
+    if fn in THREE:                 # radians, away from tan's poles by grid
+        return Fraction(rng.randint(-64000, 64000), 1000)
     if fn.startswith("exp"):
         return Fraction(rng.randint(-8000, 8000), 1000)
     return Fraction(rng.randint(-999 if fn == "log1p" else 1, 64000), 1000)
@@ -2033,7 +2113,9 @@ def rounding_misses(fn, fmtname, rnd, rng, lanes=6):
     once, lanes whose last operation's exact value is not the derivative
     within its operands' roundings) on y = f(a): the operands the primal's
     own r or a, and the primal-only value the table rounds once first,
-    1 + r, L * r, L * a or 1 + a, L the stage's own; the derivative by a
+    1 + r, L * r, L * a or 1 + a, L the stage's own - for sin, cos and tan
+    (M2's build) cos(a) and -sin(a), the routines' correctly rounded
+    results under the attribute, and fma(r, r, 1); the derivative by a
     central difference at 2^-256 of the 1,024-bit values."""
     g = _one(fn, fmtname, rnd)
     fmt, code = g.fmt, K.RND_BY_NAME[rnd]
@@ -2050,7 +2132,16 @@ def rounding_misses(fn, fmtname, rnd, rng, lanes=6):
     for (a, da), st, tv in zip(pairs, run.states, run.tangents):
         r, t = st[1], tv[0][1]
         val = lambda b: K.value_of(fmt, b)          # noqa: E731
-        if fn == "exp":
+        if fn in THREE:
+            if fn == "sin":
+                q = transcend.compute(fmt, "cos", a, 0, code)[0]
+            elif fn == "cos":
+                q = sf.neg(fmt, transcend.compute(fmt, "sin", a, 0,
+                                                  code)[0])[0]
+            else:
+                q = sf.fma(fmt, r, r, one, code)[0]
+            want, exact = sf.mul(fmt, q, da, code)[0], val(q) * val(da)
+        elif fn == "exp":
             want, exact = sf.mul(fmt, r, da, code)[0], val(r) * val(da)
         elif fn in ("expm1", "exp2"):
             q = sf.add(fmt, one, r, code)[0] if fn == "expm1" else \
@@ -2065,7 +2156,7 @@ def rounding_misses(fn, fmtname, rnd, rng, lanes=6):
         d = (_trans(fn, x + HP_EPS * dx) - _trans(fn, x - HP_EPS * dx)) \
             / (2 * HP_EPS)
         k = {"exp": 1, "expm1": 0, "exp2": 3, "log": 0, "log2": 2,
-             "log1p": 1}[fn]
+             "log1p": 1, "sin": 1, "cos": 1, "tan": 3}[fn]
         bound = k * u * Fraction(101, 100)
         if fn == "expm1":
             vr = val(r)
@@ -2102,6 +2193,93 @@ def specials_misses():
     return miss
 
 
+def trig_golden_misses(fn, fmtname, rnd, rng):
+    """(lanes, lanes where the interpreter's y = fn(a) is not transcend.
+    compute's bits) on y = fn(a): random radians and the specials, at one
+    format and attribute - the node's golden function, which sin's rule
+    never reads (it reads cos(a), a node of its own)."""
+    g = _one(fn, fmtname, rnd)
+    fmt, code = g.fmt, K.RND_BY_NAME[rnd]
+    lanes = [K.round_once(fmt, sf.RND_RNE, _domain(fn, rng))[0]
+             for _ in range(6)]
+    lanes += [0, fmt.sign_mask, sf.inf_bits(fmt), sf.qnan_bits(fmt)]
+    run = lang.run(g, [[a, 0] for a in lanes], 1,
+                   tangents=[[[0, 0]] for _ in lanes])
+    bad_n = sum(st[1] != transcend.compute(fmt, fn, a, 0, code)[0]
+                for a, st in zip(lanes, run.states))
+    return len(lanes), bad_n
+
+
+def trig_specials_misses():
+    """At fp64 under every attribute, bit for bit: at +-0 sin's and tan's
+    tangent is da and cos's is (-sin(+-0)) * da, a zero of the sign the
+    product has; at an infinity either way and at a NaN each tangent is the
+    positive NaN, the primal's own. -> a list of what missed, each naming
+    the attribute: cos's second form, -(sin(a) * da), gives the NaN the
+    negation's sign bit under every one of them."""
+    fmt = FORMATS["fp64"]
+
+    def b(v):
+        return K.round_once(fmt, sf.RND_RNE, Fraction(v))[0]
+    sign, inf, qnan = fmt.sign_mask, sf.inf_bits(fmt), sf.qnan_bits(fmt)
+    miss = []
+
+    def one(fn, rnd, a, da):
+        r = lang.run(_one(fn, "fp64", rnd), [[a, 0]], 1,
+                     tangents=[[[da, 0]]])
+        return r.states[0][1], r.tangents[0][0][1], r.flags
+    for rnd in ("rne", "rtz", "rdn", "rup", "rmm"):
+        for fn in THREE:
+            for a, name in ((inf, "+inf"), (inf ^ sign, "-inf"),
+                            (qnan, "a NaN")):
+                if one(fn, rnd, a, b(3))[:2] != (qnan, qnan):
+                    miss.append(f"{fn} at {name} under {rnd}")
+            for zero in (0, sign):
+                for da in (b(3), b(-3)):
+                    r, t, f = one(fn, rnd, zero, da)
+                    if fn == "cos":
+                        # -(+-0) * da: the sign of -(zero's sign) xor da's
+                        want = ((zero ^ sign) ^ da) & sign
+                        ok = (r, t) == (b(1), want)
+                    else:
+                        ok = (r, t) == (zero, da)
+                    if not ok or f:
+                        miss.append(f"{fn} at {hex(zero)} under {rnd}")
+    return miss
+
+
+class _M2Plant(lang_tangent.Derivation):
+    """The derivation with one of sin's, cos's or tan's rules changed
+    (kind)."""
+    kind = None
+
+    def rule(self, node):
+        a, R = node.args, self.read
+
+        def N(o, *args):
+            return Node(o, args, node.line)
+        if node.op in THREE and self.of(a[0]) is not None:
+            da, k = self.of(a[0]), self.kind
+            if node.op == "sin" and k == "sin's rule: sin(a) * da":
+                return N("mul", R(node), da)
+            if node.op == "cos" and k == "cos's rule without its minus":
+                return N("mul", N("sin", R(a[0])), da)
+            if node.op == "tan" and k == "tan's rule: r * da":
+                return N("mul", R(node), da)
+            if node.op == "cos" and k == "cos's rule rounded otherwise":
+                return N("neg", N("mul", N("sin", R(a[0])), da))
+            if node.op == "tan" and k == "tan's rule rounded otherwise":
+                # the study's alternative, fma(r, r * da, da): the same
+                # value, two roundings a vector with nothing shared. It reads
+                # da twice, which only a leaf or a named node may bear, so
+                # where da is an unnamed expression the rule is the table's;
+                # the rounding check's one-operation system has a leaf
+                if isinstance(da, Node) and da.label is None:
+                    return super().rule(node)
+                return N("fma", R(node), N("mul", R(node), da), da)
+        return super().rule(node)
+
+
 class _M1Plant(lang_tangent.Derivation):
     """The derivation with log's rule wrong (kind)."""
     kind = None
@@ -2127,15 +2305,154 @@ def _wrong_ln2(fmt, rnd):
     return K.value_of(fmt, hi if right == lo else lo)
 
 
+RNDS5 = ("rne", "rtz", "rdn", "rup", "rmm")
+
+
+def math_three(count, rng):
+    """Leg M's checks for sin, cos and tan (M2's build), after the six's:
+    the same five, then six plants. The exact dual numbers are leg D's
+    discipline, made on these systems; the central difference at 2^-256 of
+    1,024-bit values is this leg's own, and does not assume the identity
+    sec^2 = 1 + tan^2 that tan's dual numbers use."""
+    t0 = time.perf_counter()
+    texts = m1_texts(count, "tangent math three", M2_SHAPES, _m2_expr)
+    graphs = m1_graphs(texts)
+    tot = bad_n = htot = hbad = 0
+    changed, ops = [], set()
+    for g, text, what in graphs:
+        a, b, _t, _z = derivative_misses(g, rng, 3)
+        tot, bad_n = tot + a, bad_n + b
+        a, b = hp_misses(g, rng, 2)
+        htot, hbad = htot + a, hbad + b
+        ops |= set(g.op_counts("step"))
+        states = LC.lanes_for(g.fmt, g.n_state, rng, 3)
+        states += LC.special_lanes(g.fmt, g.n_state, states[0], rng)
+        if not primal_unchanged(g, without_tangent(text), states, 2):
+            changed.append(what)
+    check(bad_n == 0 and tot >= 2 * len(graphs) and set(THREE) <= ops,
+          f"{len(graphs)} systems holding sin, cos and tan, {tot} points: "
+          f"the tangent sections evaluated exactly equal this stage's own "
+          f"derivative (leg D's check, made on the three), each value as the "
+          f"exact evaluation takes it and tan's derivative 1 + tan^2 of "
+          f"that value", f"{bad_n} differ")
+    check(hbad == 0 and htot >= len(graphs), f"{htot} points: every tangent "
+          f"component within 2^-300 of the central difference at eps = "
+          f"2^-256 of 1,024-bit values - leg M's own check, which does not "
+          f"assume sec^2 = 1 + tan^2", f"{hbad} differ")
+    check(not changed, "the primal unchanged in each: its states and flags "
+          "without the tangent, on lanes that overflow, hold a signalling "
+          "NaN and hold subnormals, its graph's lines (1 the only constant "
+          "the three's rules add, tan's)", f"changed: {changed[:4]}")
+    lanes = bits = value = glanes = gbad = 0
+    for fn in THREE:
+        for fmtname in ("fp32", "fp64", "fp128", "fp256"):
+            for rnd in RNDS5:
+                n, b, v = rounding_misses(fn, fmtname, rnd, rng)
+                lanes, bits, value = lanes + n, bits + b, value + v
+                n, b = trig_golden_misses(fn, fmtname, rnd, rng)
+                glanes, gbad = glanes + n, gbad + b
+    check(bits == 0 and value == 0 and gbad == 0 and lanes == 3 * 4 * 5 * 6,
+          f"{lanes} lanes of y = f(a), sin, cos and tan at every format and "
+          f"attribute: each tangent the table's product rounded once, on the "
+          f"factor the table rounds once first (cos(a), -sin(a) the "
+          f"routines' correctly rounded results under the attribute, or "
+          f"fma(r, r, 1)), and that product's exact value the derivative "
+          f"within its factor's roundings; and {glanes} lanes in which the "
+          f"node's own result is the golden function's, bit for bit",
+          f"{bits} in bits, {value} in value, {gbad} golden")
+    miss = trig_specials_misses()
+    check(not miss, "the specials, bit for bit under every attribute: at "
+          "+-0 sin's and tan's tangent da and cos's (-sin(+-0)) * da, a "
+          "zero of the product's sign; at an infinity either way and at a "
+          "NaN the positive NaN, the primal's own, with no flag at the "
+          "zeros", "; ".join(miss[:6]))
+    plant_texts = m1_texts(6, "tangent math plants three", M2_SHAPES,
+                           _m2_expr)
+    original = lang_check_mod.Derivation
+    from cft_golden.lang import interp as lang_interp
+    orig_t = lang_interp._transcend
+    plants = ("sin's rule: sin(a) * da", "cos's rule without its minus",
+              "tan's rule: r * da", "cos's rule rounded otherwise",
+              "tan's rule rounded otherwise",
+              "sin's golden function swapped for cos's")
+    try:
+        for kind in plants:
+            # each plant alone: the last one's classes restored first
+            lang_check_mod.Derivation = original
+            lang_interp._transcend = orig_t
+            swap = kind.startswith("sin's golden")
+            if swap:
+                lang_interp._transcend = (
+                    lambda fmt, fn, rnd: orig_t(fmt, "cos" if fn == "sin"
+                                                else fn, rnd))
+            else:
+                class P(_M2Plant):
+                    pass
+                P.kind = kind
+                lang_check_mod.Derivation = P
+            ex = hp = 0
+            for g, _text, _w in m1_graphs(plant_texts):
+                ex += derivative_misses(g, rng, 2)[1]
+                hp += hp_misses(g, rng, 2)[1]
+            # the rule under test; sin's golden function is read by cos's
+            # rule (sin(a)), not by sin's own, whose cos(a) is a node of its
+            # own: the swap is red on cos's rounding and on the golden check
+            fn = "cos" if swap else kind[:3]
+            per = dict.fromkeys(RNDS5, 0)
+            for fmtname in ("fp32", "fp64", "fp256"):
+                for rnd in RNDS5:
+                    per[rnd] += rounding_misses(fn, fmtname, rnd, rng, 8)[1]
+            gold = sum(trig_golden_misses("sin", "fp64", rnd, rng)[1]
+                       for rnd in RNDS5)
+            sp = trig_specials_misses()
+            said = (f"plant {kind!r}: the exact check {ex}, the central "
+                    f"difference {hp}, the rounding in bits at finite lanes "
+                    f"under rne, rtz, rdn, rup, rmm "
+                    f"{', '.join(str(per[r]) for r in RNDS5)}, the golden "
+                    f"check {gold}, the specials {len(sp)}")
+            if swap:
+                check(ex == 0 and hp == 0 and gold > 0 and
+                      all(v > 0 for v in per.values()), said + " - red on "
+                      "the golden check and on cos's rounding, which reads "
+                      "sin(a); green on the exact checks, which never run "
+                      "the interpreter's table")
+            elif kind in plants[:3]:
+                check(ex > 0 and hp > 0 and all(v > 0 for v in per.values()),
+                      said + " - red on the exact check, the difference and "
+                      "the rounding, under every attribute")
+            elif kind.startswith("tan"):
+                check(ex == 0 and hp == 0 and all(v > 0 for v in per.values()),
+                      said + " - exact in rationals: green on both exact "
+                      "checks, red on the rounding under every attribute")
+            else:
+                finite_ok = (per["rne"] == per["rtz"] == per["rmm"] == 0
+                             and per["rdn"] > 0 and per["rup"] > 0)
+                nan_rne = "cos at a NaN under rne" in sp
+                nan_all = all(f"cos at a NaN under {r}" in sp for r in RNDS5)
+                check(ex == 0 and hp == 0 and finite_ok and nan_rne and
+                      nan_all, said + " - exact in rationals: green on both "
+                      "exact checks; red on the rounding at finite lanes "
+                      "under rdn and rup only, where the two forms differ, "
+                      "green under rne, rtz and rmm; and red at a NaN lane "
+                      "under every attribute, rne among them, where the "
+                      "second form's sign bit is the negation's")
+    finally:
+        lang_check_mod.Derivation = original
+        lang_interp._transcend = orig_t
+    print(f"  (sin, cos and tan: {time.perf_counter() - t0:.1f} s)")
+
+
 def leg_math(count, rng):
-    section(f"M. the math library's six rules (M1's build, item 3), golden: "
-            f"{len(M1_SHAPES)} written shapes and {count} generated systems "
-            f"with tangent vectors - the derivative exactly and by a central "
-            f"difference in high precision, the primal unchanged, each rule's "
-            f"rounding bit for bit at every format and attribute, the "
-            f"specials, plants")
+    section(f"M. the math library's rules, golden - the six (M1's build, "
+            f"item 3) and sin, cos and tan (M2's build): "
+            f"{len(M1_SHAPES) + len(M2_SHAPES)} written shapes and "
+            f"{2 * count} generated systems with tangent vectors - the "
+            f"derivative exactly (leg D's check) and by a central "
+            f"difference in high precision (this leg's own), the primal "
+            f"unchanged, each rule's rounding bit for bit at every format "
+            f"and attribute, the specials, plants")
     if not LC.have_mpmath():
-        skip("M: the math library's six rules", "python has no mpmath "
+        skip("M: the math library's nine rules", "python has no mpmath "
              "module, which their golden functions (python/cft_golden/"
              "transcend.py) and this leg's values in high precision need "
              "(pip install mpmath)")
@@ -2242,7 +2559,8 @@ def leg_math(count, rng):
         lang_check_mod.Derivation = original
         lang_check_mod.C.ln2_value = orig_ln2
         lang_interp._transcend = orig_t
-    print(f"  ({time.perf_counter() - t0:.1f} s)")
+    print(f"  (the six: {time.perf_counter() - t0:.1f} s)")
+    math_three(count, rng)
 
 
 # ---- N: the math library's six, compiled with tangent vectors (item 5) -----

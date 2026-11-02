@@ -1126,6 +1126,14 @@ class _Plant(lang_tangent.Derivation):
             if node.op == "cos" and k == "cos's rule rounded otherwise":
                 return N("neg", N("mul", N("sin", R(a[0])), da))
             if node.op == "tan" and k == "tan's rule rounded otherwise":
+                # the study's alternative, fma(r, r * da, da): the same
+                # value, two roundings a vector with nothing shared. It
+                # reads da twice, which only a leaf or a named node may
+                # bear: where da is an unnamed expression the rule is the
+                # table's (the rounding check's one-operation system has a
+                # leaf)
+                if isinstance(da, Node) and da.label is None:
+                    return super().rule(node)
                 return N("fma", R(node), N("mul", R(node), da), da)
         return super().rule(node)
 
@@ -1143,8 +1151,9 @@ def test_the_plants(kind, monkeypatch):
     A rule rounded otherwise is exact in rationals - green on the exact
     check and the central difference - and red on the rounding check: tan's
     `fma(r, r * da, da)` under every attribute, cos's `-(sin(a) * da)` under
-    rdn and rup only, where its two forms differ, and green under rne, rtz
-    and rmm. Each also changes the rule table's line."""
+    rdn and rup only at finite lanes, where its two forms differ, and green
+    under rne, rtz and rmm there; at a NaN lane cos's second form is red
+    under every attribute. Each also changes the rule table's line."""
     class P(_Plant):
         pass
     P.kind = kind
