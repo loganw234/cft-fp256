@@ -3302,16 +3302,18 @@ written again the same way, version 1's cases kept, by each step that
 moved them since: cftc's output version 4 (e45a2f7, 2026-10-02), profile
 3 (ca43695, 2026-10-05), cftc's output version 5 (2026-10-06, when
 revision 8's three targets joined cftc's built-in table), profile 3.1
-(2026-10-13), the language at 1.1 (2026-10-15, M1's build, item 3) and
+(2026-10-13), the language at 1.1 (2026-10-15, M1's build, item 3),
 cftc's output version 6 (2026-10-15, item 4, when the compiler took the
-math library's six). Each of cftc's three steps moved the same eight
-certificates - the sourced and rebuilt Lorenz-63 cases and six controls,
-the ones that name a compile - by their `compiler` lines and hash lines
-alone, and the manifest by their eight digests; profiles 3 and 3.1 each
-moved all 37 by their profile and hash lines, with seven supersedes
-lines and four signatures; the language's step moved the 24 that name a
-source by their `language` and hash lines, and the manifest by their
-digests. Every measured
+math library's six) and the language at 1.2 (2026-11-02, M2's build, when
+the language took sin, cos and tan). Each of cftc's three steps moved the
+same eight certificates - the sourced and rebuilt Lorenz-63 cases and six
+controls, the ones that name a compile - by their `compiler` lines and
+hash lines alone, and the manifest by their eight digests; profiles 3 and
+3.1 each moved all 37 by their profile and hash lines, with seven
+supersedes lines and four signatures; each of the language's two steps
+moved the 24 that name a source by their `language` and hash lines, and
+the manifest by their digests (72 lines at 1.2: 24 `language`, 24 `hash`
+and 24 manifest `certificate` lines). Every measured
 header line is `unknown`, as the example's `build-id` is, but in
 `signed-fp64`, which spells each out.
 

@@ -7,7 +7,7 @@ device-version none
 device-caps none
 device-tiles 1
 profile 3.1
-language 1.1
+language 1.2
 device-platform none
 device-xrt none
 device-clock none
@@ -61,4 +61,4 @@ quantity counter terms 1
 term 1/1 s0
 value exact c/1
 end
-hash a9d2495e38d3deb0fd40d6be02f89ab46873c8fe08a626942adaec7a9be06b19
+hash 4dcac2523d150ebdaf5770529940e935d28c3c8439d3b9def0019f081594ecdb

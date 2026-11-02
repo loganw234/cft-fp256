@@ -7,7 +7,7 @@ device-version none
 device-caps none
 device-tiles 1
 profile 3.1
-language 1.1
+language 1.2
 device-platform none
 device-xrt none
 device-clock none
@@ -52,4 +52,4 @@ replays 0
 output 96c9cd7aabcaea7298092338dcdef5d17d6263b71c7cfc4f43563f53e29212f7
 accuracy 0
 end
-hash 3ff4c0ffd3a6f80bde06aeb28bc2b5a6756ee1896a6559290a94a1152fd440bc
+hash bc4279a40011a6edb1cd182e9f029348d839017c407c0ec6bd098ba292f08a79

@@ -475,7 +475,7 @@ a source states it on its `language` line.
   about four from L1 by verifier-VCV2's count (the step-size-sign
   refusal, D2's `unused` and `too-deep`, and `tangent` reserved), are
   before its count.
-- **It is 1.1 since 2026-10-15** (M1's build, item 3): the math library's
+- **It was 1.1 from 2026-10-15** (M1's build, item 3): the math library's
   exp, expm1, exp2, log, log1p and log2, each an operation with
   transcend.py's golden function, their folds where a constant's value
   is rational, and their tangent rules - functions the language refused
@@ -484,6 +484,15 @@ a source states it on its `language` line.
   the golden certificates' 24 sourced cases were made again at `language
   1.1`, only their `language` and `hash` lines and their manifest digests
   moving.
+- **It is 1.2 since 2026-11-02** (M2's build): sin, cos and tan, each an
+  operation with transcend.py's golden function, their folds at 0
+  (sin(0) and tan(0) are 0 and cos(0) is 1), and their tangent rules -
+  functions the language refused before only for not having them, so a
+  minor step again (Logan's answer 12 to the M2 study, 2026-10-14).
+  `cft.h`'s `CFT_LANGUAGE_MINOR` stepped with it, and the golden
+  certificates' 24 sourced cases were made again at `language 1.2`, only
+  their `language` and `hash` lines and their manifest digests moving (72
+  lines: 24 of each).
 - **Its rule is the profile's.** A major step whenever an accepted source
   is refused, or computes another thing: a new keyword an old source used
   as a name, a refusal added, a node's golden function changed. A minor

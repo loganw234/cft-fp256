@@ -7,7 +7,7 @@ device-version none
 device-caps none
 device-tiles 1
 profile 3.1
-language 1.1
+language 1.2
 device-platform none
 device-xrt none
 device-clock none
@@ -110,4 +110,4 @@ uses 1
 scope max-lanes
 value exact 81e790cdd/1000000000000
 end
-hash 7c23af6d80f0b9b707bf9aa371d4a27fc92a4e84f67707dfe3ac59ffe0548ba2
+hash 69deb674e69fd356d4fb6bd8c06d628f8630bbd5d5e6d535ca4bb3395bb7230f

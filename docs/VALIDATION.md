@@ -26230,3 +26230,95 @@ Its notes are below. It also ran `verify.mjs`, an extra its brief did not ask fo
 - earlier the same day, in the round's records, the lead called the seven e1 clones "box clones": they are on the desktop. Logan's "keep" applied either way, and the ledger was corrected that evening.
 
 docs/README.md is recounted.
+
+## 2026-11-02 - sin, cos and tan in the language, golden-first: the three nodes after log2 and before neg, their folds and refusals, their exact evaluation, both renderers, the three L3 rules with leg M's central difference, the language at 1.2 and the corpus remade; a correction of the study at a NaN (parcel M2L; M2's build, wave 3)
+
+**What it is.** Branch m2l from 19de866c, in its own worktree, golden-first and to the lead's contract with parcel M2C (briefs/contract-M2LC.md): cftc is untouched here, so on this branch alone `sin(x)` reaches cftc and stops with an InternalError ("step node 0: sin with 1 operands"), and `x * sin(0)` compiles at output version 6 (MEASURED, both as decision 1 expects). The checkpoint, items 1 to 7 of the contract, was commit ea159a39 at 07:36 and was passed to M2C at 07:38; items 1 to 7 have been frozen since. The commits: ea159a39 (the checkpoint), 219a6527 (leg M, the corpus, CONFORMANCE.md, CERTIFICATES.md), 017faf8d (LANGUAGE.md, the study's note, VERIFICATION's rows, README's LANGUAGE.md row), 94362b1c (this entry) and the later commits that amend the entry, one test's mpmath marker and LANGUAGE.md's flags sentence, the last of them the tip (`git log 19de866c..m2l`). The branch at fbb19285 is 53 files, +2,322 -290, of which certificates/ is 26 files, +74 -73 (COMPUTED by `git diff --numstat 19de866c fbb19285`): python/tests +1,302 -36, python/cft_golden +169 -60, programs +363 -45, docs and CONFORMANCE.md +407 -71, host and bindings +7 -5; without certificates/, +2,248 -217. This fix to the entry adds a few lines.
+
+**The contract's items 1 to 7, as built** (READ from the code, MEASURED on `y = f(a)` with `tangent v`):
+- The nodes are `sin`, `cos`, `tan`, each of arity 1, directly after `log2` and before `neg` in `lang.OPS`, in that order: `graph.TRANSCEND` is the nine, which puts them in `ROUNDED` and the interpreter's table. The canonical form's operations line counts them there: `(1 add, 1 mul, 1 sin, 1 cos, 1 tan, 1 neg)`.
+- The IR form is `["sin",["s0"],null]`. The tangent section of each, nodes in order: sin `[cos(s0), mul(d0, t0)]`; cos `[sin(s0), neg(d0), mul(d1, t0)]`; tan `[tan(s0), tan(s0), fma(d0, d1, c0), mul(d2, t0)]`, c0 the constant 1 (the only constant any of the three adds).
+- Notation: the generic call in the canonical form, `cos(a) * v.a`, `(-sin(a)) * v.a` (the brackets are written) and `fma(tan(a), tan(a), 1) * v.a`; `sin(x)`, `cos(x)`, `tan(x)` in the mathematical form.
+- `lang.run` calls `transcend.compute(fmt, fn, a, 0, rnd)`; without mpmath it raises ZivEscalation naming `sin, cos, tan` before any lane runs.
+- The rules' renderings are the same text at all 20 (format, attribute) pairs, in both forms (MEASURED, a scratch script, 60 compilations): canonical `cos(a) * v.a`, `(-sin(a)) * v.a`, `fma(tan(a), tan(a), 1) * v.a`; mathematical `cos(a)·v.a`, `(−sin(a))·v.a`, `(tan(a)·tan(a) + 1)·v.a`; and the canonical form reads back to the same graph bytes in each of the 60.
+
+**Folds and refusals** (Logan's answer 8 to the M2 study).
+- sin(0) and tan(0) fold to 0 and cos(0) to 1, of a constant exactly 0 (`1 - 1` and `0 * h` are), at every format and attribute, equal to the golden function at +0 with no flag. Every other constant is `irrational-constant`, the sentence naming the function's word and the theorem (Hermite-Lindemann; tan's by e^(2ic) = (1 + ia)/(1 - ia)); a function of h is `h-nonlinear`; no constant is ever `constant-division-by-zero`. `transcendental` is still raised for the other 26 reserved names.
+- test_lang_trig.py holds 21 refusals and 9 acceptances (M2_REFUSALS, M2_ACCEPTED) with **the name each had at 19de866c, measured by compiling it under a copy of that commit's python/** (the scratchpad). The names that moved: `sin(h)`, `cos(2 * h)`, `tan(h * h)` from `irrational-constant` to `h-nonlinear`; `sin(0 * h)` from `irrational-constant` to `unused` (h folds away); `sin(x, x)` and `cos()` from `transcendental` to `arity`. The two sin rows of M1_REFUSALS moved to those tables. The `unknown-function` sentence now lists the nine math functions, and the catalogue's `transcendental` and `irrational-constant` sentences are restated.
+
+**The exact evaluation.** Exact at 0 (0, 1, 0), mpmath's at 1,024 bits elsewhere, the argument rounded to nearest at 1,024 bits first as the six's is. The test's reader (lang_mathform.py) takes the same value: 48 arguments, three functions, equal as Fractions and each within 2^-1000 relatively of the function of the rounded argument (mpmath at 1,200 bits); sin^2 + cos^2 = 1 and tan cos = sin to 2^-1000. No argument limit is needed: sin(2^1,000,000 + 1) took 0.12 s on this desktop, which has gmpy2 (MEASURED). The convention moves a value at 2^40 by about 2^-984.
+
+**The rules and their rounding.**
+- cos(a) in sin's rule and sin(a) in cos's are routines of the tangent that the primal need not hold; the product is the rule's last rounding. Counting the factor, each rule rounds twice [the primal's once], tan's with the fma.
+- **A correction of the study** (section 7, M2-trig.md:1569-1570 at 19de866c, and the notes' trap 14). cos's `-(sin(a) * da)` differs from `(-sin(a)) * da` under rdn and rup *for finite results*. Under rne, rtz and rmm the two are the same bits on 40 random finite lanes at each of four formats; under rdn and rup they differ (the test asserts more than 5 of 40 at every format). **At a NaN they differ under every attribute**: sin(a) is the canonical quiet NaN, a product with a NaN is the canonical positive NaN whatever its sign, and the second form negates it, setting the sign bit. MEASURED at fp32, fp64, fp128 and fp256 under all five attributes (20 cells): the first form is the canonical NaN and the two differ in the sign bit alone (a scratch script, and test_cos_rounded_otherwise_differs_only_under_rdn_and_rup). The study's note says so.
+- The study's alternative for tan, `fma(r, r * da, da)`, reads da twice, which the step graph forbids of an unnamed node: it is a plant only where da is a leaf or named. The factor in two roundings, `(r * r + 1) * da`, differs so rarely that 120 lanes of the rounding check did not see it: it is no plant (MEASURED).
+- Unnamed chains: 99 nested calls make 5,049 tangent nodes for sin, 5,148 for cos and 10,098 for tan, against 198, 297 and 198 named by lets; 100 nested cos or tan are refused `too-deep`, 100 nested sin compile (5,150).
+
+**Leg M of the tangent stage, extended** (programs/tangent_check.py: the docstring and the leg's functions; M2C's regions untouched). The exact dual numbers are leg D's discipline, made on these systems (tan's derivative is 1 + tan^2 of the exact evaluation's tan); the central difference at 2^-256 of 1,024-bit values, within 2^-300, is the leg's own and assumes no identity. 20 checks with `--only math`, 9 the six's and 11 the three's, 4 s: 21 systems and 111 exact points, 74 difference points; the primal unchanged; 360 lanes of the rule's rounding at four formats and five attributes and 600 lanes of the golden function; the specials at +-0, +-inf and a NaN under every attribute; six plants. A graph holding a square root is left out of the central difference: the exact evaluation rounds a root down to 2^-256 (graph.exact_root), so a difference at that eps measures the rounding (4 of 76 points missed before I left such graphs out).
+
+**The plants** (scratch copies of python/, programs/, docs/, certificates/ and host/include; each runs test_lang_trig.py, test_lang.py, test_lang_tangent.py and test_cert2.py at -n 4, 609 tests in the copy, and `tangent_check.py --only math`; 08:02 to 08:14, one process at a time; the real tree is green on the same set, 794 passed with the other five files). The control is green (609 passed, leg M 20 ok).
+
+| plant | pytest failed | leg M |
+|---|---|---|
+| a fold not exact: cos(0) folds to 999999/1000000 | 5 | green (no fold check there) |
+| a fold not exact: a constant under 10^-100 folds (sin, tan to c; cos to 1) | 1 | green |
+| the exact evaluation: sin(0) = 1 | 7 | 4 FAIL |
+| the exact evaluation: mpmath's tan is sin | 7 | 5 FAIL |
+| a refusal's name swapped: nonzero constants `transcendental` | 9 | green |
+| a refusal's name swapped: nonzero constants `constant-division-by-zero` | 8 | green |
+| sin's golden function swapped for cos's | 12 | 4 FAIL |
+| sin's rule `sin(a) * da` | 10 | 7 FAIL |
+| cos's rule without its minus | 10 | 6 FAIL |
+| tan's rule `r * da` | 11 | 7 FAIL |
+| cos's rule rounded otherwise, `-(sin(a) * da)` | 9 | 2 FAIL (rounding, specials) |
+| tan's rule rounded otherwise, `fma(r, r * da, da)` | 8 | 1 FAIL (rounding) |
+| `transcendental` still raised for tan | 39 | named FAILs, then an uncaught Refusal |
+| OPS place: cos before sin | 3 | green |
+| the mathematical form writes tg | 4 | green |
+| cert2's list lacks tan | 2 | green |
+
+- **cos's rounded-otherwise plant is red on the rounding check under rdn and rup only**: in its scratch copy, red lanes of 48 (12 at each of four formats) under rne, rtz, rdn, rup, rmm: 0, 0, 47, 48, 0. At a NaN lane it is red under all five (leg M's specials: 15 lines, 3 lanes by 5 attributes). tan's, same measure: 15, 19, 23, 27, 16, so red under every attribute.
+- Inside leg M's own plants (in-process, no copy) the same two read: cos's 0, 0, 24, 24, 0 of 24, the golden-swap plant red on cos's rounding (24 under each attribute) and on 40 of its 50 golden lanes, and invisible to the exact checks, which never run the interpreter's table.
+- sin's golden function swapped for cos's is blind on sin's own rule, which reads cos(a) and never its own y: only the golden check and cos's rule (which reads sin(a)) see it.
+
+**Version 1.2 and the corpus** (Logan's answer 12 to the M2 study; the lead's answer A of 2026-10-15). version.py (1, 2); host/include/cft.h `CFT_LANGUAGE_MINOR` 2, the Arduino copy by sync.py (35 files vendored; `--check`: all identical), vendor.json's one digest; docs/HOSTAPI.md's table; CONFORMANCE.md's bullet.
+- `corpus.py make --keep-version-1`: 5.6 s, 49 cases. **72 lines moved, 24 of each kind and no other**: the `language` line (1.1 to 1.2) and the `hash` line of the 24 certificates that name a source, and the 24 `certificate` digest lines of certificates/MANIFEST. corpus.py itself changed in a comment.
+- `corpus.py check` with cft-segrun built from this tree: 329 checks, 0 failed, 0 skipped, 48 s. Without it: 257 checks, 0 failed, 19 skipped by name ("no --tool given"), 39 s.
+- docs/CERTIFICATES.md's version-2 example certificate is held by `corpus make` and test_cert2: its `language` and `hash` lines changed (two lines, shown by a diff of the page against the writer's bytes), as ML's did; the lead approved it and asked that they not be touched again without telling him (M2C's cftc-7 remake may move them once more). The corpus history sentence names the step.
+
+**The WebAssembly module** (decision 8). `gcc -E -P -std=c99 -Ihost/include` of the module's 17 sources, the 16 of host/src and wasm_api.c, at 19de866c (git archive) and at the tip: **17 of 17 identical** (3,008,119 bytes preprocessed in all; MEASURED at 017faf8d, 08:27, 9 s, with no preprocessor message on either side and every output non-empty). The only module source that changed is host/include/cft.h, in one macro (`CFT_LANGUAGE_MINOR`) and a comment, and no source reads that macro. wasm_api.c needs `<emscripten/emscripten.h>`, which this host does not have: I preprocessed it with a one-line stub (`#define EMSCRIPTEN_KEEPALIVE`) on both sides. My first comparison, without the stub, reported 17 of 17 with wasm_api.c failing on both sides, which compares nothing; it is redone. The rebuild is not needed on this evidence and is the lead's.
+
+**In-place edits of existing tests, each because an assertion had to change.**
+- test_lang.py: the refusal table's example is `sinh`; M1_REFUSALS loses its last two rows; the version test is renamed test_m2_the_language_is_at_1_2; `test_intention_out_of_random_systems` (the coverage set, :1424) and `test_m1_the_six_are_nodes` (the reserved-list accounting, 26 + six + three), both outside the notes' section 5 and approved by the lead after the fact.
+- test_lang_tangent.py :494 (the three out of the set it asserts, saying so); test_cert2.py (the pin is the nine and equal to `lang.graph.TRANSCEND`).
+- test_lang_time.py: `test_sin_of_t_waits_for_the_math_library` is renamed `test_sin_of_t_is_a_node_since_the_language_1_2`, **approved by the lead** (it is outside the contract's files): the system compiles and the field holds `mul, sin`; `sinh(w * t)` is refused `transcendental` as the old test held of sin, and the Forcing section says so.
+
+**Runs** (the desktop, one process at a time, python -B). Load: 6% at 07:01 and 07:09 (Win32_Processor), 65 to 14% while the plant driver ran, not sampled otherwise.
+
+| run | result | time |
+|---|---|---|
+| base, test_lang + test_lang_tangent + test_cert2, -n 4 | 528 passed | 25 s |
+| the nine language files, -n 4 | 794 passed | 74 to 80 s |
+| test_cftc.py alone, -n 4 (cftc on this branch) | 110 passed | 108 s |
+| `tangent_check.py --only math` | 20 ok | 4 to 5 s |
+| `tangent_check.py --only refs,corpus,derivative,libcft,determinism,refusals,plants,routines,math`, cft-segrun and cft-audit built here (not niced; the desktop at 54% when it started) | 202 ok, 0 FAIL, 0 SKIP: the 191 of that selection at d3fef4b (VERIFICATION's row) and leg M's 11 (COMPUTED) | 388 s by the stage's timer (6 min 29 s wall) |
+| corpus make; check with the tool; check without | as above | 5.6; 48; 39 s |
+| `make -C host OS=Windows_NT TMPDIR=... cft-segrun.exe` | built | 31 s |
+| the plant driver, 17 runs | as above | 11.5 min |
+
+- Again at 94362b1c (the tip's code, less the one test marker fixed below; 08:33 to 08:36, one process at a time, the desktop at 14% when it started): the nine files 794 passed in 65 s; test_cftc.py 110 passed in 61 s; leg M 20 ok, 0 FAIL in 4 s; the corpus check 329 checks, 0 failed, 0 skipped in 40 s with the tool and 257, 0, 19 skipped by name in 33 s without. The earlier runs of the same sets took 74 to 80 s, 108 s, 48 s and 39 s with the load unsampled, and I do not know why they were slower.
+- Without mpmath (`sys.modules['mpmath'] = None`, 08:41 to 08:44, the tree with the marker fix below): test_lang_trig.py 52 passed, 32 skipped by name, 0 failed; test_lang.py, test_lang_tangent.py, test_cert2.py and test_lang_time.py 547 passed, 29 skipped by name, 0 failed (99 s). The first no-mpmath run, at 08:41, failed 4 tests: test_cos_rounded_otherwise_differs_only_under_rdn_and_rup calls transcend.compute and lacked `needs_mpmath`; it has it now, and with mpmath the file is 84 passed (5 s).
+- A make recipe on this desktop gets a stripped environment: `make -C host cft-segrun` failed in gcc ("can't open C:\WINDOWS\cc....s"); the tools build with `OS=Windows_NT` and `TMPDIR`, `TEMP` and `TMP` given on the command line.
+
+**Known limits.**
+- The compiled forms of the three are M2C's. On this branch no committed graph holds the three, so cos's and tan's rules reach no committed byte; the golden checks (leg M, test_lang_trig.py) hold them.
+- The exact evaluation, the test's reader and the central difference all go through mpmath at 1,024 bits, so a fault common to them is not seen; the rule's rounding check and the golden check go through transcend.py instead (the same split as ML's).
+- Leg M's generated corpus is 16 systems and five written shapes for the three.
+- The gate (the lead's, on the box) has not run. cert2.py is in python/cft_golden/, whose top-level files gen_vectors.py's model_digest hashes (READ, not run), so the gate's `vectors` stage regenerates once.
+- lang/refusals.py's `bank-capacity` sentence still says "the math library's six (M1)"; the lead left it to M2C.
+
+**What the brief and the notes got wrong.** Section 5 of the notes missed test_lang_time.py and two assertions of test_lang.py; the contract's file list for M2L has no docs/CERTIFICATES.md, which the version step forces (the example certificate); "cos's rounded-otherwise form differs only under rdn and rup" holds for finite results only; the study's tan alternative cannot be written where da is unnamed; and a central difference at 2^-256 cannot hold a graph with a square root.
+
+**Slips, mine.** The checkpoint's commit command carried `git -c core.safecrlf=false`, a command-line override that was not needed; no configuration file or setting was changed, and I did not repeat it. My plant driver's first control failed one test because its copy lacked host/tools (the test reads the C sources); the driver now deselects that test by name and says so.
+
+docs/README.md is recounted.
