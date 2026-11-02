@@ -1,0 +1,92 @@
+; attitude - the canonical form, regenerated from the step graph
+; sha256 63478deb30ec951ea42f08ecb2494a2a4212e6575d6f96bb1ab2b5a51b654243
+;
+; Read back, this text gives the same step graph, byte for byte. Every
+; operation is written once, in the order it is performed; each one
+; that rounds rounds once, under rdn (roundTowardNegative), in binary64.
+;
+; operations: the equations 13 (2 add, 1 sub, 5 mul, 2 sin, 2 cos, 1 tan);
+;             a step 66 (12 fma, 10 add, 4 sub, 20 mul, 8 sin, 8 cos, 4 tan);
+;             each tangent vector's equations 23 (2 fma, 1 add, 1 sub, 10 mul, 2 sin, 2 cos, 3 tan, 2 neg)
+;             and its step 106 (20 fma, 6 add, 4 sub, 40 mul, 8 sin, 8 cos, 12 tan, 8 neg)
+;
+; constants, exact value -> binary64 under rdn:
+;   h    0.015625   0x3f90000000000000  0x1p-6                exact
+;   h/2  0.0078125  0x3f80000000000000  0x1p-7                exact
+;   h/6  1/384      0x3f65555555555555  0x1.5555555555555p-9  inexact, relative error -5.5511e-17
+;   1    1          0x3ff0000000000000  0x1p+0                exact
+;   2    2          0x4000000000000000  0x1p+1                exact
+; h-scaled, halved by a step-halving bank: h, h/2, h/6
+
+system attitude
+format fp64
+round  rdn
+state  phi, theta
+tangent w
+param  p = 0.125   ; 0x3fc0000000000000  0x1p-3  exact
+param  q = 0.25    ; 0x3fd0000000000000  0x1p-2  exact
+param  r = 0.5     ; 0x3fe0000000000000  0x1p-1  exact
+
+let s = (q * sin(phi)) + (r * cos(phi))
+d/dt phi = p + (s * tan(theta))
+d/dt theta = (q * cos(phi)) - (r * sin(phi))
+
+let w.s = (q * (cos(phi) * w.phi)) + (r * ((-sin(phi)) * w.phi))
+d/dt w.phi = fma(w.s, tan(theta), s * (fma(tan(theta), tan(theta), 1) * w.theta))
+d/dt w.theta = (q * ((-sin(phi)) * w.phi)) - (r * (cos(phi) * w.phi))
+
+step rk4, h = 0.015625
+expansion
+  let k1.s = (q * sin(phi)) + (r * cos(phi))
+  let k1.phi = p + (k1.s * tan(theta))
+  let k1.theta = (q * cos(phi)) - (r * sin(phi))
+  let Y2.phi = fma(h/2, k1.phi, phi)
+  let Y2.theta = fma(h/2, k1.theta, theta)
+  let k2.s = (q * sin(Y2.phi)) + (r * cos(Y2.phi))
+  let k2.phi = p + (k2.s * tan(Y2.theta))
+  let k2.theta = (q * cos(Y2.phi)) - (r * sin(Y2.phi))
+  let Y3.phi = fma(h/2, k2.phi, phi)
+  let Y3.theta = fma(h/2, k2.theta, theta)
+  let k3.s = (q * sin(Y3.phi)) + (r * cos(Y3.phi))
+  let k3.phi = p + (k3.s * tan(Y3.theta))
+  let k3.theta = (q * cos(Y3.phi)) - (r * sin(Y3.phi))
+  let Y4.phi = fma(h, k3.phi, phi)
+  let Y4.theta = fma(h, k3.theta, theta)
+  let k4.s = (q * sin(Y4.phi)) + (r * cos(Y4.phi))
+  let k4.phi = p + (k4.s * tan(Y4.theta))
+  let k4.theta = (q * cos(Y4.phi)) - (r * sin(Y4.phi))
+  let S2.phi = fma(2, k2.phi, k1.phi)
+  let S2.theta = fma(2, k2.theta, k1.theta)
+  let S3.phi = fma(2, k3.phi, S2.phi)
+  let S3.theta = fma(2, k3.theta, S2.theta)
+  let S4.phi = S3.phi + k4.phi
+  let S4.theta = S3.theta + k4.theta
+  next phi = fma(h/6, S4.phi, phi)
+  next theta = fma(h/6, S4.theta, theta)
+  let w.k1.s = (q * (cos(phi) * w.phi)) + (r * ((-sin(phi)) * w.phi))
+  let w.k1.phi = fma(w.k1.s, tan(theta), k1.s * (fma(tan(theta), tan(theta), 1) * w.theta))
+  let w.k1.theta = (q * ((-sin(phi)) * w.phi)) - (r * (cos(phi) * w.phi))
+  let w.Y2.phi = fma(h/2, w.k1.phi, w.phi)
+  let w.Y2.theta = fma(h/2, w.k1.theta, w.theta)
+  let w.k2.s = (q * (cos(Y2.phi) * w.Y2.phi)) + (r * ((-sin(Y2.phi)) * w.Y2.phi))
+  let w.k2.phi = fma(w.k2.s, tan(Y2.theta), k2.s * (fma(tan(Y2.theta), tan(Y2.theta), 1) * w.Y2.theta))
+  let w.k2.theta = (q * ((-sin(Y2.phi)) * w.Y2.phi)) - (r * (cos(Y2.phi) * w.Y2.phi))
+  let w.Y3.phi = fma(h/2, w.k2.phi, w.phi)
+  let w.Y3.theta = fma(h/2, w.k2.theta, w.theta)
+  let w.k3.s = (q * (cos(Y3.phi) * w.Y3.phi)) + (r * ((-sin(Y3.phi)) * w.Y3.phi))
+  let w.k3.phi = fma(w.k3.s, tan(Y3.theta), k3.s * (fma(tan(Y3.theta), tan(Y3.theta), 1) * w.Y3.theta))
+  let w.k3.theta = (q * ((-sin(Y3.phi)) * w.Y3.phi)) - (r * (cos(Y3.phi) * w.Y3.phi))
+  let w.Y4.phi = fma(h, w.k3.phi, w.phi)
+  let w.Y4.theta = fma(h, w.k3.theta, w.theta)
+  let w.k4.s = (q * (cos(Y4.phi) * w.Y4.phi)) + (r * ((-sin(Y4.phi)) * w.Y4.phi))
+  let w.k4.phi = fma(w.k4.s, tan(Y4.theta), k4.s * (fma(tan(Y4.theta), tan(Y4.theta), 1) * w.Y4.theta))
+  let w.k4.theta = (q * ((-sin(Y4.phi)) * w.Y4.phi)) - (r * (cos(Y4.phi) * w.Y4.phi))
+  let w.S2.phi = fma(2, w.k2.phi, w.k1.phi)
+  let w.S2.theta = fma(2, w.k2.theta, w.k1.theta)
+  let w.S3.phi = fma(2, w.k3.phi, w.S2.phi)
+  let w.S3.theta = fma(2, w.k3.theta, w.S2.theta)
+  let w.S4.phi = w.S3.phi + w.k4.phi
+  let w.S4.theta = w.S3.theta + w.k4.theta
+  next w.phi = fma(h/6, w.S4.phi, w.phi)
+  next w.theta = fma(h/6, w.S4.theta, w.theta)
+end

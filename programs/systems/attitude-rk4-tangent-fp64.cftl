@@ -1,0 +1,27 @@
+; A body's attitude, with its variational equations: the roll phi and the
+; pitch theta of a rigid body turning at the constant body rates p, q and r,
+; by the kinematic equations of the 3-2-1 Euler angles,
+; d/dt phi = p + (q sin(phi) + r cos(phi)) tan(theta) and
+; d/dt theta = q cos(phi) - r sin(phi), with one tangent vector stepped
+; beside the state by the same program. All three of the math library's
+; radian routines are in its step - sin and cos of phi, tan of theta - and
+; their rules in the tangent (M2's build; the study's section 7,
+; docs/studies/M2-trig.md): cos(a) * da, (-sin(a)) * da and
+; fma(r, r, 1) * da, the routine each reads one the step already computes,
+; so one call. It is compiled round rdn, every rounded operation toward
+; negative infinity: cos's rule negates sin(a) before its product rounds,
+; and -(sin(a) * da), negating after, is the same value under rne, rtz and
+; rmm, whose roundings are symmetric about zero, and another under rdn and
+; rup, so that a rule changed to it changes this image's values as well as
+; its bytes. tan has a pole at theta = +-pi/2, the gimbal lock, which no
+; representable theta is.
+system attitude
+format fp64
+round  rdn
+state  phi, theta
+tangent w
+param  p = 1/8, q = 1/4, r = 1/2
+let    s = q * sin(phi) + r * cos(phi)
+d/dt phi = p + s * tan(theta)
+d/dt theta = q * cos(phi) - r * sin(phi)
+step   rk4, h = 1/64

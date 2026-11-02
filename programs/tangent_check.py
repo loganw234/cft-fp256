@@ -52,22 +52,25 @@ lang_check.py, whose helpers this reuses), with tangents:
      sampled, line for line
   G  cft-segrun certifies each compiled variational reference (a main
      run, a half-step run on the halved bank, a step-halving estimate) -
-     Kepler's, whose image holds routines, among them (C4), and since M1's
-     build, item 4, the three holding the math library's six
-     (Lotka-Volterra, the diodes, the culture); the golden reader and
-     audit and cft-audit accept each. A segment that marks a lane
-     (STATUS[6]) fails here by name: version 1 holds the machine's guess,
-     STATUS[6] on the segment; cft-segrun's version-2 writer, which this
-     leg does not use, refuses a marked lane `replay-missing` without a
-     replay image and `replay-undecided` with one that marks it too - so
-     a certificate stays what the machine ran, and the replay of M1's
-     build, item 5 is the stages' own comparisons' (leg N below), never
-     this leg's. The six's references are skipped by name on
+     Kepler's, whose image holds routines, among them (C4), the three
+     holding the math library's six since M1's build, item 4
+     (Lotka-Volterra, the diodes, the culture), and the two holding sin,
+     cos and tan since M2's build (the pendulum at round rne, the attitude
+     of a rigid body at round rdn); the golden reader and audit and
+     cft-audit accept each. A segment that marks a lane (STATUS[6]) fails
+     here by name: version 1 holds the machine's guess, STATUS[6] on the
+     segment; cft-segrun's version-2 writer, which this leg does not use,
+     refuses a marked lane `replay-missing` without a replay image and
+     `replay-undecided` with one that marks it too - so a certificate stays
+     what the machine ran, and the replay of M1's build, item 5 is the
+     stages' own comparisons' (leg N below), never this leg's. The five
+     references holding the math library's routines are skipped by name on
      a host without mpmath, which builds them
   H  determinism: two processes under two PYTHONHASHSEEDs; the committed
      programs/systems/compiled-tangent/ is what the compiler writes, and
-     the `lang` stage's 64 committed files still are (the six's
-     references held only where mpmath imports, skipped by name elsewhere)
+     the `lang` stage's 64 committed files still are (the references
+     holding the math library's routines held only where mpmath imports,
+     skipped by name elsewhere)
   I  refusals by name, the language's and the compiler's, with tangents;
      a quotient and a root with two tangent vectors compiled for the
      software targets and run as the interpreter runs them, and refused
@@ -75,10 +78,10 @@ lang_check.py, whose helpers this reuses), with tangents:
   J  plants: three wrong derivations, red on D and on the exponent; the
      same rule rounded otherwise, green on D and red on the committed
      bytes - every committed graph holding a product of two tangent-
-     carrying operands, and only those (Lotka-Volterra's and the diodes'
-     multiply a state value only by a param); three in a copy of the
-     compiler, each stopped by its internal check and, with that off, red
-     on seq.py
+     carrying operands, and only those (Lotka-Volterra's, the diodes' and
+     the pendulum's multiply a state value only by a param); three in a
+     copy of the compiler, each stopped by its internal check and, with
+     that off, red on seq.py
   K  coverage: every operation the rules write, every activity pattern
      of fma, every format, attribute and integrator, one and two vectors
   L  the quotient's and the root's rules (L4): written shapes and
@@ -172,17 +175,27 @@ TREFS = {"lorenz63-rk4-tangent": 100, "lorenz96-rk4-tangent": 20,
          # Lotka-Volterra in logarithmic variables (exp), two diodes
          # (expm1, log1p) and a self-heating culture (exp2, log, log2)
          "lotkavolterra-rk4-tangent": 10, "diode-rk4-tangent": 10,
-         "culture-rk4-tangent": 10}
-# The references holding the six: compiled only where mpmath imports, since
-# the routines' generator derives their constants through it (a leg that
-# compiles them skips them by name elsewhere), and run on lanes whose boxes
-# keep the logarithms in their domains; leg G's lanes mark none, and the leg
-# fails by name a segment that marks one
+         "culture-rk4-tangent": 10,
+         # sin, cos and tan and their rules (M2's build): the pendulum
+         # (sin in the step, cos in the tangent) at round rne, and a rigid
+         # body's attitude, the 3-2-1 Euler angles' kinematics (all three,
+         # in the step and in the tangent), at round rdn, where cos's rule
+         # rounded otherwise is another value as well as other bytes
+         "pendulum-rk4-tangent": 10, "attitude-rk4-tangent": 10}
+# The references holding the math library's routines, the six and sin, cos
+# and tan: compiled only where mpmath imports, since the routines' generator
+# derives their constants through it (a leg that compiles them skips them by
+# name elsewhere), and run on lanes whose boxes keep the logarithms in their
+# domains and the angles away from tan's poles; leg G's lanes mark none, and
+# the leg fails by name a segment that marks one
 MATH_TREFS = ("lotkavolterra-rk4-tangent", "diode-rk4-tangent",
-              "culture-rk4-tangent")
+              "culture-rk4-tangent", "pendulum-rk4-tangent",
+              "attitude-rk4-tangent")
 MATH_BOX = {"lotkavolterra-rk4": [(-1, 1), (-2, Fraction(1, 2))],
             "diode-rk4": [(0, 4), (0, 4)],
-            "culture-rk4": [(Fraction(1, 20), Fraction(19, 20)), (0, 2)]}
+            "culture-rk4": [(Fraction(1, 20), Fraction(19, 20)), (0, 2)],
+            "pendulum-rk4": [(-1, 1), (-1, 1)],
+            "attitude-rk4": [(-1, 1), (-1, 1)]}
 # Lorenz-63's largest Lyapunov exponent at sigma 10, rho 28, beta 8/3, as
 # the round's brief gives it (the figure commonly quoted, to four places)
 LITERATURE = Fraction(9056, 10000)
@@ -1282,8 +1295,8 @@ def leg_determinism(work):
         if COMPILED.is_dir() else []
     check(have == sorted(files), f"programs/systems/compiled-tangent/ holds "
           f"exactly the {nrefs} variational references' "
-          f"{len(files)} files, Kepler's and the six's references' with "
-          f"routines among them",
+          f"{len(files)} files, Kepler's and the math library's references' "
+          f"with routines among them",
           f"it holds {len(have)}: run programs/tangent_check.py --write")
     wrong = [n for n, d in files.items()
              if (COMPILED / n).is_file() and (COMPILED / n).read_bytes() != d]
@@ -1513,7 +1526,7 @@ def leg_plants(rng, segrun_path, work):
     committed = {n: (COMPILED / f"{n}.graph.json") for n in
                  (f"{b}-{f}" for b in TREFS for f in ("fp64", "fp256"))}
     # each committed source's graph without a plant (checking a source needs
-    # no mpmath, the six's included)
+    # no mpmath, the math library's routines included)
     original_graphs = {n: lang.compile_text(tref_text(
         n.rsplit("-tangent-", 1)[0], n.rsplit("-", 1)[1])).graph
         for n in committed}
@@ -1557,7 +1570,7 @@ def leg_plants(rng, segrun_path, work):
                 # tangent, so it moves exactly the committed graphs holding
                 # such a product: every one until M1's build, item 4, whose
                 # Lotka-Volterra and diode multiply a state value only by a
-                # param
+                # param, as the pendulum (M2's build) does
                 reach = sorted(n for n in committed if products_of_two_tangents(
                     original_graphs[n]))
                 check(bad_n == 0 and reach and sorted(moved) == reach,

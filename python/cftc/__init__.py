@@ -60,7 +60,14 @@ three or more owners: 5 joined them with "and" throughout, and 6 writes
 a list ("a word of div, sqrt and the call loop"), which only a looped
 image holding both division and root meets - no committed file is one.
 Its manifests say version 6 and, for such an image, the .cfta's new
-hash; nothing else in them moved.
+hash; nothing else in them moved. 7 is the math library's sin, cos and
+tan (M2's build, 2026-11-02; the language at 1.2): a source that names sin,
+cos or tan - at run time, or folded where its operand is the constant 0 -
+which 6 refused, compiles, each run-time call an inlined routine,
+mathlib.py's fragment. 7 writes the same images, banks and text files as 6
+for every source 6 compiled, and its manifests say version 7; nothing else
+in them moved (a manifest's routines block carries the three's own
+sentence only where its step holds one of the three).
 
 A format override: compile_text and compile_file take `fmt`, a format's
 name, which replaces the value of the source's `format` statement
@@ -235,7 +242,7 @@ from .regalloc import best_program
 from .schedule import cycles
 from .targets import BUILTIN, Target
 
-VERSION = 6               # the output version: the module docstring, outputs.py
+VERSION = 7               # the output version: the module docstring, outputs.py
 MAX_STEPS = (1 << 32) - 1
 MAX_WORST = 1 << 40
 

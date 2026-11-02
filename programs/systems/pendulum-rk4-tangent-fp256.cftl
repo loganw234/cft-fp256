@@ -1,0 +1,21 @@
+; The pendulum, with its variational equations: theta, the angle from the
+; hanging position, and omega, its angular velocity, for d/dt theta = omega
+; and d/dt omega = -k sin(theta), k = g / L, with one tangent vector stepped
+; beside the state by the same program. Its energy, omega^2/2 - k cos(theta),
+; is constant along the flow, a quantity a run can watch. The math library's
+; sin in the step and its rule in the tangent, cos(a) * da (M2's build; the
+; study's section 7, docs/studies/M2-trig.md): sin(theta) a routine inlined
+; (one a stage, four a step), and the cos(theta) that its tangent reads
+; another - the primal does not hold it - which shares sin(theta)'s
+; reduction and polynomials, so that the pair costs a few dozen
+; instructions more than the one routine, not a second; then one product a
+; vector.
+system pendulum
+format fp256
+round  rne
+state  theta, omega
+tangent w
+param  k = 3/2
+d/dt theta = omega
+d/dt omega = -(k * sin(theta))
+step   rk4, h = 1/64
