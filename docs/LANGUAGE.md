@@ -505,11 +505,14 @@ nine, named as `python/cft_golden/transcend.py` names the functions.
   1, none raising a flag; an infinity gives the canonical NaN with
   invalid, a quiet NaN in the canonical NaN and no flag, a signaling NaN
   in invalid; a subnormal argument gives sin and tan underflow and
-  inexact, cos inexact alone; every other finite argument is inexact
-  alone (MEASURED over the golden functions at the four formats under the
-  five attributes, at +-0, the least and greatest subnormals, the least
-  normal, 1, the greatest normal, both infinities and a quiet and a
-  signaling NaN: no other flag appeared, overflow included). A graph
+  inexact, cos inexact alone, and sin of the least normal gives inexact
+  under some attributes and underflow with inexact under others; the
+  other arguments measured give inexact alone (MEASURED over the golden
+  functions at the four formats under the five attributes, at +-0, the
+  least and greatest subnormals, the least normal, 1, the greatest
+  normal, both infinities and a quiet and a signaling NaN: no other flag
+  appeared, overflow included - this set is not every argument, and
+  the binades just above the least normal are not in it). A graph
   holding one needs mpmath exactly
   as the six do, the one `need_mpmath` for all nine. Their derivative
   rules are in "The variational equations". The mathematical form prints
