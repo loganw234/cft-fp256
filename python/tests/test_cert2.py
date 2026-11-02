@@ -1692,7 +1692,8 @@ def test_a_failure_under_another_definition(mk, fl):
 
 def test_a_definition_holding_the_math_library_needs_mpmath(monkeypatch):
     """The language's math library's six reach transcend.py (M1's build,
-    item 3), and they are TRANSCEND_OPS: a definition holding exp - in its
+    item 3), and so do sin, cos and tan (M2's build, 2026-11-02), and they
+    are TRANSCEND_OPS: a definition holding exp - in its
     step, and written again in its tangent - needs mpmath, and one without
     them does not. Without mpmath `_evaluate` refuses it `_Undecided`,
     which the audit names `definition-unavailable` (the next test, through
@@ -1704,7 +1705,8 @@ def test_a_definition_holding_the_math_library_needs_mpmath(monkeypatch):
     from cft_golden.lang import constants as K
     F = Fraction
     assert cert2.TRANSCEND_OPS == {"exp", "expm1", "exp2", "log", "log1p",
-                                   "log2"}
+                                   "log2", "sin", "cos", "tan"}
+    assert cert2.TRANSCEND_OPS == set(lang.graph.TRANSCEND)
     text = ("system s\nformat fp64\nstate x, y\ntangent v\nnext x = x\n"
             "next y = y + exp(x)\nstep map\n")
     g = lang.compile_text(text, "s").graph

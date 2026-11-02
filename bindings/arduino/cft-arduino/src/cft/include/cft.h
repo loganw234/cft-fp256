@@ -151,11 +151,12 @@ CFT_API uint32_t cft_abi_version(void);
  * profile 3.1 (2026-10-13, 3,500 cases added to the transcendental
  * vector sets and no library code changed), and so did the language's
  * 1.1 (2026-10-15, M1's build, item 3: exp, expm1, exp2, log, log1p and
- * log2 in the language, which this library does not evaluate). */
+ * log2 in the language, which this library does not evaluate), and so did
+ * 1.2 (2026-11-02, M2's build: sin, cos and tan in the language, likewise). */
 #define CFT_PROFILE_MAJOR  3
 #define CFT_PROFILE_MINOR  1
 #define CFT_LANGUAGE_MAJOR 1
-#define CFT_LANGUAGE_MINOR 1
+#define CFT_LANGUAGE_MINOR 2
 
 /* Which source tree this library was built from   (ABI 0.15, 2026-09-28)
  *

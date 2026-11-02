@@ -27,6 +27,9 @@ Each operation's tangent is a rule written in the language
   log(a)          select(r == r, da / a, r)     format under its
   log2(a)         select(r == r, da / (L * a), r)   attribute (M1's
   log1p(a)        select(r == r, da / (1 + a), r)   build, item 3)
+  sin(a)          cos(a) * da                   M2's build, 2026-11-02;
+  cos(a)          (-sin(a)) * da                the routine of the first
+  tan(a)          fma(r, r, 1) * da             factor a node of its own
   abs(a)          copysign(1, a) * da
   copysign(a, b)  copysign(1, b) * (copysign(1, a) * da)
   min, max, minnum, maxnum (a, b) with result r
@@ -95,6 +98,25 @@ expm1's is (1 + r) * da, two roundings: the study's fma(r, da, da) reads
 da twice, and an unlabelled node has one use (graph.canonical), so where
 da is an unnamed expression it would be written again, doubling the
 tangent at each nested expm1 (the lead's decision, 2026-10-15).
+
+sin, cos and tan (M2's build, 2026-11-02; docs/studies/M2-trig.md, section
+7, which Logan approved as recommended on 2026-10-14, answer 10) spend one
+product a vector on da after a primal-only factor the compiler shares
+across vectors: cos(a), -sin(a) or 1 + r * r (one fma, one rounding). The
+first two are routines of their own, written in the tangent where the
+primal need not hold them - cos(a) beside sin(a) costs the step 28 to 29
+instructions, not a second routine, because the compiler's sharing makes
+the two fragments one prefix - and a routine may mark a lane like any
+other (docs/LANGUAGE.md, "A marked lane"). The negation of cos's factor is
+exact, so it sits inside the factor: `(-sin(a)) * da`, which the canonical
+form writes with its brackets. `-(sin(a) * da)` is the same value exactly,
+and a different rounding under rdn and rup, where the product rounds
+before it is negated; under rne, rtz and rmm the two agree on every finite
+result (at a NaN the second form's sign bit is the negation's, under every
+attribute: measured at fp32 and fp64). tan's reads r twice, written again
+each time it has no name, as log's three reads are.
+None has a point where it is not differentiable: at +-inf cos(a) is a NaN,
+as the primal is, and no representable argument is a pole of tan.
 
 The walk is iterative, from the outputs, and makes the tangent of a node
 only when some output's tangent reads it, so a comparison's operands, a
@@ -309,6 +331,25 @@ class Derivation:
                 den = N("add", self.one, R(a[0]))
             return N("select", N("div", t[0], den), R(node),
                      N("cmpeq", R(node), R(node)))
+        if op in ("sin", "cos", "tan"):
+            # sin: cos(a) * da; cos: (-sin(a)) * da; tan: fma(r, r, 1) * da,
+            # r the tan itself. The first factor is primal-only, so the
+            # compiler shares it across vectors; the product is the rule's
+            # last rounding. cos(a) and sin(a) are routines the primal need
+            # not hold, written here as nodes of the tangent (a rule that
+            # makes a NEW routine node, which M1's six never did); the
+            # negation is exact and inside the first factor, so that
+            # -(sin(a) * da), which rounds the product before negating and
+            # differs under rdn and rup, is another rule
+            if t[0] is None:
+                return None
+            if op == "sin":
+                k = N("cos", R(a[0]))
+            elif op == "cos":
+                k = N("neg", N("sin", R(a[0])))
+            else:
+                k = N("fma", R(node), R(node), self.one)
+            return N("mul", k, t[0])
         if op == "abs":
             if t[0] is None:
                 return None

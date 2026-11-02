@@ -39,9 +39,10 @@ they were before tangents existed):
                  interpreter runs once a vector, after the step
 
 A node is [op, [ref], label or null]; an op is one of OPS below - div
-and sqrt, the run-time division and square root (L4, 2026-10-02), and
-the math library's exp, expm1, exp2, log, log1p and log2 (M1's build,
-item 3, 2026-10-15), among them; a ref is sN (a state input), lN (a lane param), pN (a param), cN
+and sqrt, the run-time division and square root (L4, 2026-10-02), the
+math library's exp, expm1, exp2, log, log1p and log2 (M1's build,
+item 3, 2026-10-15), and its sin, cos and tan (M2's build, 2026-11-02),
+among them; a ref is sN (a state input), lN (a lane param), pN (a param), cN
 (a const) or nN (a node of the same section, always an earlier one). In
 a tangent section nN is a LABELLED node of the section it differentiates
 (a tangent reads an unlabelled primal value by writing it again), dN a
@@ -70,16 +71,20 @@ from .refusals import Refusal
 
 VERSION = 1
 
-# The math library's six (M1's build, item 3): each a node of one operand,
-# named as transcend.py names the function, its golden function
-# transcend.compute(fmt, name, a, 0, rnd) under the program's attribute.
-TRANSCEND = ("exp", "expm1", "exp2", "log", "log1p", "log2")
+# The math library's six (M1's build, item 3) and its sin, cos and tan (M2's
+# build, 2026-11-02): each a node of one operand, named as transcend.py names
+# the function, its golden function transcend.compute(fmt, name, a, 0, rnd)
+# under the program's attribute. The order is the one the nodes are counted
+# in (OPS, below): sin, cos and tan directly after log2 and before neg, which
+# the canonical form's "; operations:" line shows and cftc's ir.ARITY mirrors.
+TRANSCEND = ("exp", "expm1", "exp2", "log", "log1p", "log2",
+             "sin", "cos", "tan")
 
 # The operations a node may be, in the order counts are written, with
 # each one's operand count. The names are softfloat.OP_NAMES' spellings
 # and the operand order is the golden function's (asm.py's OP_FIELDS) -
 # but for div and sqrt, which no tile instruction is: their names are the
-# golden functions' own, sf.div and sf.sqrt (L4); and the six, whose names
+# golden functions' own, sf.div and sf.sqrt (L4); and the nine, whose names
 # are transcend.py's. Count lines write only the operations a section
 # has, so a graph without these writes what it wrote before them.
 OPS = {"fma": 3, "add": 2, "sub": 2, "mul": 2, "div": 2, "sqrt": 1,
@@ -99,11 +104,15 @@ ROOT_BITS = 256
 # fixed function of its exact argument, as the root is, which the tests'
 # own readers compute alike (M1's build, item 3). Exact where the value is
 # rational, which is where the language folds a constant: exp(0) = 1,
-# exp2(n) = 2^n, log(1) = 0, log2(2^k) = k. expm1(a) is exp(a) - 1 and
+# exp2(n) = 2^n, log(1) = 0, log2(2^k) = k, and sin(0) = tan(0) = 0 and
+# cos(0) = 1 (M2's build). expm1(a) is exp(a) - 1 and
 # log1p(a) is log(1 + a), each of the same fixed exp and log, so that the
 # exact evaluation of expm1's tangent rule, (1 + r) * da, is exp's own
 # derivative. TRANS_BITS is wide enough that a central difference at
 # 2^-256 of these values keeps 2^-700 and more (programs/tangent_check.py).
+# sin, cos and tan of any other rational are mpmath's at TRANS_BITS of the
+# argument rounded to nearest at TRANS_BITS - for an argument of 2^k, a
+# reduction by pi to about k + TRANS_BITS bits, which mpmath does itself.
 TRANS_BITS = 1024
 _TRANS = []
 
@@ -132,10 +141,11 @@ def exact_root(value):
 
 
 def _mp(fn, value):
-    """exp, exp2, log or log2 of a rational, by mpmath at TRANS_BITS, as
-    the exact rational the result is (its _mpf_ tuple, read)."""
+    """exp, exp2, log, log2, sin, cos or tan of a rational, by mpmath at
+    TRANS_BITS, as the exact rational the result is (its _mpf_ tuple,
+    read)."""
     if not _TRANS:
-        import mpmath            # only a graph holding one of the six needs it
+        import mpmath            # only a graph holding one of the nine needs it
         ctx = mpmath.MPContext()
         ctx.prec = TRANS_BITS
         _TRANS.append((mpmath.libmp, ctx))
@@ -148,6 +158,8 @@ def _mp(fn, value):
         y = ctx.power(2, x)
     elif fn == "log":
         y = ctx.log(x)
+    elif fn in ("sin", "cos", "tan"):
+        y = getattr(ctx, fn)(x)
     else:
         y = ctx.log(x) / ctx.ln2
     sign, man, exp, bc = y._mpf_
@@ -165,6 +177,12 @@ def exact_transcendental(op, value):
     function of its exact argument. Undefined at a logarithm's pole or
     below its domain, and for a value beyond 2^+-1048576."""
     v = K_.exact(value)
+    if op in ("sin", "cos", "tan"):
+        # rational only at zero (Hermite-Lindemann: a nonzero rational's sin,
+        # cos or tan is transcendental), where it is 0, 1 and 0 exactly
+        if v == 0:
+            return Fraction(1 if op == "cos" else 0)
+        return _mp(op, v)
     if op == "exp":
         if v == 0:
             return Fraction(1)
@@ -699,11 +717,11 @@ class StepGraph:
         root is exact_root's: the exact root where its argument is a
         rational's square, and otherwise a fixed function of its exact
         argument - the root rounded down to 2^-ROOT_BITS - so that two
-        evaluations of the same root agree exactly (L4). The six
+        evaluations of the same root agree exactly (L4). The nine
         transcendentals are exact_transcendental's, alike: exact where the
         value is rational, otherwise mpmath's at TRANS_BITS, a fixed
-        function of the exact argument (M1's build, item 3), so a graph
-        holding one needs mpmath here. A division by zero, a negative
+        function of the exact argument (M1's build, item 3, and M2's), so a
+        graph holding one needs mpmath here. A division by zero, a negative
         root's argument, a logarithm at or below its pole and a value
         beyond 2^+-1048576 raise Undefined. `params` and
         `lanes` default to the declared defaults. A tangent section

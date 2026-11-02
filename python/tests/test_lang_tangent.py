@@ -490,8 +490,10 @@ def test_the_tangent_is_the_derivative():
         ops.update(g.op_counts("step"))
     assert tot > 300 and bad == 0, (tot, bad)
     # every operation but the math library's six, which have systems of
-    # their own (test_m1_the_fourth_check_on_the_six, below)
-    assert ops == set(lang.OPS) - set(TL.SIX)
+    # their own (test_m1_the_fourth_check_on_the_six, below), and sin, cos
+    # and tan (M2's build), taken out of this set: their systems, and the
+    # same check on them, are test_lang_trig.py's
+    assert ops == set(lang.OPS) - set(TL.SIX) - {"sin", "cos", "tan"}
 
 
 def test_ties_and_zeros_are_placed_where_they_decide():
