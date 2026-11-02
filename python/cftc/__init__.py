@@ -54,20 +54,34 @@ writes the same images, banks and text files as 4; only manifests moved.
 that names exp, expm1, exp2, log, log1p or log2 - at run time, or folded
 where its operand is a constant - which 5 refused `math-library`,
 compiles, each run-time call an inlined routine, mathlib.py's fragment.
-6 writes the same images and banks as 5 for every source 5 compiled,
-and the same text files but for the .cfta's note on a bank word with
-three or more owners: 5 joined them with "and" throughout, and 6 writes
-a list ("a word of div, sqrt and the call loop"), which only a looped
-image holding both division and root meets - no committed file is one.
-Its manifests say version 6 and, for such an image, the .cfta's new
-hash; nothing else in them moved. 7 is the math library's sin, cos and
+For a source 5 compiled, 6 writes the same images and banks as 5, and
+the same text files but for the .cfta's note on a bank word with three
+or more owners: 5 joined them with "and" throughout, and 6 writes a list
+("a word of div, sqrt and the call loop"), which only a looped image
+holding both division and root meets - no committed file is one. Its
+manifests say version 6 and, for such an image, the .cfta's new hash;
+nothing else in them moved. That is what parcel MC measured, by its
+verifiers and the lead (docs/VALIDATION.md, 2026-10-16, "M1's build,
+fifth wave, closed: cftc compiles the six"): the 31 committed sources
+and the hard-workload pack's 21 at both trees, only each manifest's
+version line moving, and two generated sets, 110 sources (272 compiles)
+and 182 cases a tree, which differ by exactly that note; beyond those
+sets it is believed, not shown. 7 is the math library's sin, cos and
 tan (M2's build, 2026-11-02; the language at 1.2): a source that names sin,
 cos or tan - at run time, or folded where its operand is the constant 0 -
 which 6 refused, compiles, each run-time call an inlined routine,
-mathlib.py's fragment. 7 writes the same images, banks and text files as 6
-for every source 6 compiled, and its manifests say version 7; nothing else
-in them moved (a manifest's routines block carries the three's own
-sentence only where its step holds one of the three).
+mathlib.py's fragment. For a source 6 compiled, 7 writes the same
+images, banks and text files as 6, and its manifests say version 7;
+nothing else in them moved (a manifest's routines block carries the
+three's own sentence only where its step holds one of the three). That
+is what parcel M2C measured (docs/VALIDATION.md, 2026-11-02, "cftc
+carries sin, cos and tan"), at both trees: the 43 committed sources
+outside the hard-workload pack (42 images, only each manifest's version
+line moving, and one refusal, identical) and 330 compiles of 110
+generated sources without sin, cos or tan (256 images, 41 of them
+looped, only that line moving, and 74 refusals, identical). The pack's
+21 sources were not compiled at both trees, and for them, as for any
+other source outside those sets, it is believed, not shown (2026-11-02).
 
 A format override: compile_text and compile_file take `fmt`, a format's
 name, which replaces the value of the source's `format` statement
