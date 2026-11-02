@@ -1861,7 +1861,7 @@ def test_exp2m1_exact_on_every_integer(fmt, rnd):
 
 @pytest.mark.parametrize("fmt", ALL)
 def test_exp2m1_beyond_the_exact_range_takes_a_side(fmt):
-    """For n >= p+2 the value 2^n - 1 sits in the top QUARTER of the gap
+    """For n >= p+2 the value 2^n - 1 sits in the top HALF of the gap
     below 2^n: above the midpoint, so every attribute but the two that
     point toward zero delivers 2^n itself."""
     p = fmt.prec
