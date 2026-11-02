@@ -732,8 +732,10 @@ tables hold each source with the name it had at 19de866c.
 - **sin, cos and tan of a constant** fold by the same rule (Logan's answer
   8 to the M2 study, 2026-10-14): `sin(0)` and `tan(0)` are 0 and `cos(0)`
   is 1, of a constant exactly 0 (`1 - 1` and `0 * h` are), and no other
-  value is rational. Every other constant is refused
-  `irrational-constant`, the sentence saying why: the sine, cosine and
+  value is rational. A minus written on a zero literal, `sin(-0)`, is
+  refused `constant-negative-zero` where it is read, before any fold ("What
+  a rational cannot carry is refused", below). Every other constant is
+  refused `irrational-constant`, the sentence saying why: the sine, cosine and
   tangent of a nonzero rational are transcendental (Hermite-Lindemann: for
   a nonzero algebraic c, e^(ic) is transcendental; were sin(c) or cos(c)
   algebraic, so would e^(ic) be, and were tan(c) an algebraic a,
