@@ -1046,7 +1046,8 @@ printf it matches.
   the four's set leg took 64 s on the software backend (MEASURED, 110 checks, unniced, one process;
   the desktop read 4 per cent by Win32_Processor after the next run), against 113 s for the six there (parcel MA); on the card the four are
   ESTIMATED at 40 to 70 s (the six's 57 s, scaled by the software times), so the nineteen at 505 to 540 s
-  (ESTIMATE) and the 2400 s 4.4 to 4.8 times that. The first nightly after the merge has the figure. The smoke (`--quick`) runs one of them,
+  (ESTIMATE) and the 2400 s 4.4 to 4.8 times that. The four took 64 s on the card (MEASURED, the lead's
+  card leg, rev8q, 2026-11-04, below). The first nightly after the merge has the nineteen's figure. The smoke (`--quick`) runs one of them,
   `lotkavolterra-rk4-tangent-fp64`, beside `phi4_extended_fp64`: about 10 s more (COMPUTED, 57 s
   over six), the routine path on the card in the smoke instead of in the long run's first cycle.
 - **The sweep** is hw/run-soak.sh's and hw/run-c5-soak.sh's campaigns - fp32 `sqrt32` under five
@@ -2711,7 +2712,7 @@ a segment (256 lanes, ten steps) is BELIEVED well under a second.
   must print nothing. All sixteen entries; the desktop took 558 s, the box BELIEVED 10 to 15 minutes.
 - **Not run, and not runnable:** rev8d (the command above selects no entry there).
 
-## The radian routine entries in the revision-8 set (added 2026-11-04; the card leg has not run)
+## The radian routine entries in the revision-8 set (added 2026-11-04; the card leg ran on rev8q on 2026-11-04)
 
 M2's build, the study's section 10 item 7 (docs/studies/M2-trig.md): STATUS[6] and the lane byte on a
 structured argument of sin, cos and tan, and the acceptance set with a radian routine case. Parcel M2A
@@ -2720,8 +2721,14 @@ built the software side (docs/VALIDATION.md, 2026-11-04): `programs/acceptance.p
 (`pendulum-rk4-tangent-fp64`, `-fp256`: sin in the step, cos in its tangent, round rne) and attitude
 (`attitude-rk4-tangent-fp64`, `-fp256`: sin and cos of phi, tan of theta, round rdn) references of
 `programs/systems/compiled-tangent/`. The driver's docstring ("The routine entries") is the definition.
-**The card leg is the lead's, and has not run: every figure of the card below is an ESTIMATE or the
-software backend's, and the card's results are to be added under "What to record" after the run.**
+**The card leg has run: on rev8q on amd-arc-box, 2026-11-04** (the lead's, at 23c2805d; docs/VALIDATION.md,
+"the lead's: M2's wave 4 card leg on rev8q"). Its three runs printed, MEASURED:
+- the set leg: `acceptance rev8: 4 of 4 PASS ... 111 checks ok, 0 failed, 64 s`, with each entry's flags and
+  STATUS as below and the probe on the card (`xrt, 4 tiles, 4096 slots a lane`);
+- with `--golden all`: `4 of 4 PASS ... 115 checks ok, 0 failed, 468 s`;
+- the six again, the regression: `6 of 6 PASS ... 128 checks ok, 0 failed, 54 s`.
+
+The ESTIMATEs below were written before the run, and the card's own figures are given beside them.
 
 What is different from the six's section above:
 - **Quad only, again.** The rule puts all four on `u50-rev8-quad` (MEASURED 2026-11-04: `rule_target`
@@ -2768,7 +2775,8 @@ differences are marked):
 - exit 0, and last, `acceptance rev8: 4 of 4 PASS on $X as u50-rev8-quad (set); N checks ok, 0 failed, S s`.
   The software backend counts 110 checks for `--legs set` (one run, 64 s); N on a card is BELIEVED 111,
   as the six's was the software count plus one (the probe-on-another-image control, which needs an
-  image: COMPUTED from the code, not run on a card).
+  image: COMPUTED from the code, not run on a card). On the card it was 111 (MEASURED, the lead's,
+  rev8q, 2026-11-04), and the four PASS lines were the software backend's but for `xrt`.
 - four `PASS` lines. The software backend's, which the card's must equal but for `xrt`:
   - `pendulum-rk4-tangent-fp64 ... flags [29, 24, 24, 24], status [0, 0, 0, 0]; every digest the set's,
     cft-audit accepts in full, ... the spot check holds, no lane marks (no structured lane, by name)`
@@ -2804,7 +2812,11 @@ golden audit over an entry's four segments took 95.3 s (the pendulum at fp64), 2
 (the attitude at fp64) and 52.9 s (fp256) on the software backend (MEASURED, runs of one to three entries, the
 desktop's load not read); the card's run is ESTIMATED at 400 to 650 s for the four
 (the six's 530 s on the card against 550 s of audit on the desktop; the host-side work is the same).
-The six again: about 60 s. In all, about 15 to 20 minutes of card time (ESTIMATE).
+The six again: about 60 s. In all, about 15 to 20 minutes of card time (ESTIMATE). **On the card**
+(MEASURED, the lead's, rev8q, 2026-11-04):
+- the build took 29 s, with 0 warnings;
+- the set leg took 64 s, the golden leg 468 s and the six 54 s;
+- the whole run took 10 minutes 19 s, from the guards to the sums.
 
 **What it proves, if it passes:** the device reproduces the software backend's guess, mark and lane byte
 for sin, cos and tan, entry by entry, including the wrong guess past 2^1024 and marks in segments 1 to 3,

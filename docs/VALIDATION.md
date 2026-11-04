@@ -26927,3 +26927,46 @@ Each merge's staged tree was asserted equal to the gated trial merge's before it
 - **The second gate re-ran only five stages.** The other three ran in the first gate, on the tree before the text-only send-backs.
 - **Two checks are weaker than they look.** Leg T demands no mark of its range lanes, and the demand of the range lanes by `past_range` is caught by the group's tally, not by T1 alone (VM2SL's notes).
 - **No reference is rtz, and the attitude's tan does not mark at fp64.** The nightly seq-check's trig part is the fragment-level evidence for rtz.
+
+## 2026-11-04 - the lead's: M2's wave 4 card leg on rev8q - the four radian routine entries PASS on the card, with the golden audit over every segment, and M1's six again; the study's section 10 item 7 holds on the card
+
+**What ran** (box_m2a_card.sh on amd-arc-box, 15:34:19 to 15:44:38; MEASURED, READ in its summary and logs):
+- **The tree:** a fresh clone of main at 23c2805d, the wave's merge with the lead's record, its SHA and content asserted apart: the attitude fp256 entry, and the record's 20 entries with 2 declaring the range lane.
+- **The image:** $HOME/cardday-rev8q/cft_hw_quad.xclbin, its sha256 equal to the one the clone's hw/card_stress.py names for the quad (4f9921a2...).
+- **The build:** `make -C host XRT=1 XRT_ROOT=/opt/xilinx/xrt cft-segrun cft-audit libcft.so`, exit 0 in 29 s, 0 warnings. xrt_coreutil was linked into all three.
+- **The card:** `[0000:02:00.1] xilinx_u50_gen3x16_xdma_base_5 ... Yes`.
+- **The commands** were docs/CARDDAY.md's, "The radian routine entries in the revision-8 set": `acceptance.py --set rev8 --legs set --device $X --target u50-rev8-quad --segrun --audit --lib`, run three times:
+  - on the four;
+  - on the four with `--golden all`;
+  - on M1's six.
+
+**The results:**
+- **The four:** "acceptance rev8: 4 of 4 PASS on .../cft_hw_quad.xclbin as u50-rev8-quad (set); 111 checks ok, 0 failed, 64 s". That is the software backend's 110 checks and the card's one more, as parcel M2A predicted (BELIEVED 111).
+  - Each entry's flag words were [29, 24, 24, 24]. The STATUS words were:
+
+    | entry | STATUS |
+    |---|---|
+    | the pendulum at fp64 | [0, 0, 0, 0], "no lane marks (no structured lane, by name)" |
+    | the pendulum at fp256 | [64, 64, 64, 64] |
+    | the attitude at fp64 | [64, 0, 0, 0] |
+    | the attitude at fp256 | [64, 64, 64, 64] |
+
+  - **The marks at fp256:** "the structured lanes mark: lanes [3, 19, 35, 51] carry bit 7 of their byte (0x90) in segment 0 and its STATUS 0x40 carries STATUS[6]; so does the declared range lane 31 (past 2^1024: 0x90) in segments 0, 1, 2, 3; bit 7 is set on no other lane of any segment".
+  - **The marks at the attitude at fp64:** lanes [3, 67, 131, 195] in segment 0 only. Its tile 0 lane is cos at 2^-26 under rdn, the study's card case's argument at a directed attribute.
+  - Every entry printed "the mark probe opened the certificate's device: xrt, 4 tiles, 4096 slots a lane, image 4f9921a25af65444".
+- **With the golden audit:** "4 of 4 PASS ... 115 checks ok, 0 failed, 468 s", and "the golden audit re-ran every segment" on each entry. M2A had estimated 400 to 650 s.
+- **M1's six again, as the regression:** "6 of 6 PASS ... 128 checks ok, 0 failed, 54 s", each with STATUS [64, 0, 0, 0] and 4 structured lanes, as on 2026-10-19. The 10-19 run had 118 checks. The difference is INFERRED to be 4 more marks' controls (17 to 21 since KL-345) and M2A's new check that the golden mark check re-ran every marked segment, one an entry.
+- **After the run:** the clone's status 0, no leg failed, and sums of the 4 logs kept. The card was free at 15:44:38, before the night's 18:00.
+
+**What it proves:** the device reproduces the software backend's guesses, marks and lane bytes for sin, cos and tan, entry by entry, on the quad. This includes the wrong guess past 2^1024 on lane 31 and its marks in segments 1 to 3, which M1's leg could not show (its marks were in segment 0 only). So the study's section 10 item 7 holds on the card: "STATUS[6] and the lane byte on a structured argument ... and the acceptance set with a radian routine case".
+
+**A guard of the lead's, wrong at first:** the first launch, at 15:32:28, refused with "the card's render node is held by PID(s) 1865234 1865969".
+- Those were desktop programs on the box (a file manager and a text editor, open since 2026-10-16). They hold /dev/dri/renderD129, which is the display GPU (nouveau, 0000:03:00.0), not the card. The U50's node is renderD128 (xocl, 0000:02:00.1).
+- The guard had matched every render node. It now finds the card's node by its xocl driver in sysfs and checks that node alone. The programs were not touched.
+
+**Known limits:**
+- **One image, the quad.** The rule gives the four no other target; rev8a and rev8d hold no routine entry.
+- **No rtz image.** No reference is rtz, so the study's own card case, cos(2^-26) under rtz, ran at rdn. The nightly seq-check's trig part is the fragment-level evidence for rtz.
+- **No tan mark at fp64,** because TRIG_FAMILY has no tan centre there under rdn.
+- **One argument on the range lane.** Its marks in segments 1 to 3 are for that one argument (2^131081) over these 40 steps.
+- **The nightly runs the four from the first night launched at a tree with this merge.** Night 1104 runs at 0bb2a92c, before it.
