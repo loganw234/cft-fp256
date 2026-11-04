@@ -26858,3 +26858,72 @@ MA's own plants (a structured lane's byte without bit 7, STATUS[6] cleared in th
 **What the brief and the notes got wrong or left open.** The notes' INFERRED claim that the attitude's lane might stop marking is not what happened (above). The brief's `len(only) == 14` and `== 15` are 18 and 19 after the four (14 and 15 counted eight and nine workloads plus six; the brief did not give the new numbers). The notes' "mark_controls takes st[0]" was not the only place: `leg_set` chose the entry by the probe alone, so the empty recipe needed that selection changed too.
 
 **Closing checks at the commit:** `check_docs_index.py` rc 0, `project_figures.py --check` rc 0 (15 figures, every statement agrees), `git diff --check` rc 0; docs/README.md recounted (VALIDATION.md and the sections that hold it, this entry included).
+
+## 2026-11-04 - the lead's: M2's wave 4 merged, sin, cos and tan in the stages' legs (parcel M2SL) and the revision-8 set's radian case (parcel M2A), gated together; the hard-workload pack's 21 compiled at both cftc versions (the lead; drafter D-M2SA; verifiers VM2SL and VM2A)
+
+**Logan's word:** on 2026-11-02 he set wave 4 for "Tuesday morning". The pause of 11-03 moved it to Wednesday, and on 11-04 he wrote "Clear to resume typical work". The two parcels had Sonnet authors and Haiku verifiers, as every M2 parcel has. Their own entries are above: M2SL's, then M2A's.
+
+**The drafter's notes and the lead's answers.** A drafter (D-M2SA, the default model) read the study, M1's parcels MS and MA with their records, and the code at 7c981e6e. Its notes found four things, and the lead answered each:
+- **The fp256 overflow lane marks.** At fp256 the revision-8 recipe's overflow lane holds 2^131081, past 2^1024, so the trig fragments mark it whatever their test says. The lead declared it an expected mark, held by name: Logan's answer 2, on the card.
+- **The values half could not fail.** A marked lane's replayed values reached no check, and every in-range trig guess measured is right. So a plant on that half of the replay could not go red. The lead had M2SL put lanes far past the range into T1 and the tangent leg, and assert the rule's wrong count against the golden function there.
+- **The driver must move.** Four routine entries mean editing the stress driver's table and its test's pins, so the gate added cardstress.
+- **The pendulum at fp64 cannot mark:** TRIG_FAMILY has no sin or cos centre at fp64 under rne. It entered the set without a structured lane, by name.
+
+plan.md's "M2S" is the name of the 2026-10-13 study parcel, so the stages' parcel was named M2SL. The ten workloads' images for M2A's remade record were copied from amd-arc-box's image store. All 20 files equal the record's digests.
+
+**The run:**
+- **M2A,** 1 commit (fd2bdd2f), about 1 h 05.
+  - Its verifier, **VM2A (Haiku), found 0 regressions and 0 wrong answers.** It checked:
+    - the prefix proof, byte 28,906 of the old 29,152;
+    - 4 of 4 and 10 of 10 on the software backend;
+    - the four entries without mpmath;
+    - the three checks M2A corrected.
+  - It rebuilt four plants red:
+    - the range lane undeclared;
+    - a trig entry out of the driver's table;
+    - a centre swapped;
+    - the golden mark check skipping the range segments.
+- **M2SL,** 3 commits (c23c6b78, then send-backs 1 and 2, to acdbe93c).
+  - Its verifier, **VM2SL (Haiku), found 0 regressions and 4 wrong answers over three passes.** M2SL was sent back for each.
+  - The three of pass 1 were all text:
+    - the loop order called "not the code's" (`callloop.by_size` emits the largest batch first, tan's, and ORDER only lists and breaks ties);
+    - "two of the six", which is three;
+    - a `--three-all` help's figures.
+  - **The fourth was the lead's.** Send-back 1 also carried the verifier's pass-1 note that the 67 and 60 of the study's note "are not lanes", which the lead did not check against the code. `Verdict.wrong` is the union over the checkpoints, so they were lanes all along. VM2SL withdrew the note in pass 2, and send-back 2 restored the wording.
+  - Pass 3 was clean. No send-back moved a code line: the two programs' syntax trees, with every string emptied, equal c23c6b78's (the parcel's check, the verifier's and the lead's).
+
+**The gates,** MEASURED on amd-arc-box, each in a fresh clone with the SHA and the content asserted apart:
+- **The first, on the trial merge f1f8f4e7** (M2SL before its send-backs). It ran docs, generated, golden, lang, lang-routines, tangent, acceptance and cardstress: rc 0 in 6,044 s, VERDICT PASS with 7 inner skips. Those are golden's known 3 and cardstress's 4, the same four as the 2026-10-29 gate's (each wants a real run's metrics named in an environment variable).
+  - golden 3,674 s, 6,175 passed and 3 skipped;
+  - lang-routines 372 s (wave 3's 279 and 281; M2SL's limit 560);
+  - tangent 495 s (487 and 491; its limit 980);
+  - acceptance 528 s, cardstress 724 s.
+  - Then directly, since acceptance-rev8 is in no budget: `acceptance.py --set rev8 --legs set,oracle` on the ten routine entries gave "10 of 10 PASS on sw (oracle, set); 200 checks ok, 0 failed, 163 s".
+- **The second, on 2b8d8bfa,** the trial merge remade on M2SL's final tip. It ran the stages the text-only send-backs could reach: docs, generated, lang, lang-routines and tangent.
+  - It refused to run unless every file differing from f1f8f4e7 was one of the two stage programs or under docs/. Seven files differed, all of those.
+  - Result: rc 0 in 1,110 s, VERDICT PASS, nothing skipped. lang-routines took 372 s and tangent 493 s.
+
+**The merge on main:** f957c613 (M2SL) and 900a6431 (M2A), on 0bb2a92c, with the trial merge's resolutions:
+- VALIDATION by val_merge4: main's file, then M2SL's block, then M2A's;
+- the study's two dated notes, M2SL's first;
+- README recounted.
+
+Each merge's staged tree was asserted equal to the gated trial merge's before its commit: 0b9ce89e for the first and 6c0f67a2, the second gate's, for the second.
+
+**The hard-workload pack's 21 at both cftc versions** (MEASURED, the lead's box_pack21_1104.sh on amd-arc-box). M2C's VERSION 7 paragraph and its entry (2026-11-02, above) left "the same bytes but the version line" BELIEVED for the pack's 21 sources.
+- **The run:**
+  - fresh clones at 19de866c (VERSION 6) and 0bb2a92c (VERSION 7), the pack's tree 52e041dd at both;
+  - each source compiled `--steps 2 --target sw:32768`, niced, 6 at a time a tree, in 142 minutes.
+- **Checked per source:**
+  - the exit code (0 at both);
+  - stdout and stderr equal;
+  - every file equal but the manifest;
+  - the manifests differing in exactly the version line.
+- **The result: 21 of 21 the same, 0 different.** The slowest compiles were lorenz_tangent_extended_fp64 (8,466 and 8,273 s) and riccati_extended_fp64 (6,557 and 6,545 s). So on the pack's 21 too, VERSION 7 writes the images, banks and text files VERSION 6 wrote, and only the manifests' version line moves.
+
+**Known limits:**
+- **The card leg has not run.** It is STATUS[6] and the lane byte on sin, cos and tan, on rev8q, by docs/CARDDAY.md's new section, and it is the lead's next step. Until it runs, every card figure in that section is an ESTIMATE, and M2's item 7 is open on the card side.
+- **The tangent stage's Lyapunov legs E and F** ran only in the gates.
+- **The second gate re-ran only five stages.** The other three ran in the first gate, on the tree before the text-only send-backs.
+- **Two checks are weaker than they look.** Leg T demands no mark of its range lanes, and the demand of the range lanes by `past_range` is caught by the group's tally, not by T1 alone (VM2SL's notes).
+- **No reference is rtz, and the attitude's tan does not mark at fp64.** The nightly seq-check's trig part is the fragment-level evidence for rtz.
