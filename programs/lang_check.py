@@ -4493,9 +4493,10 @@ def g_three(rng, k, tangent=None):
 def three_source_lanes(g, rng, direct, comps, k, everything=False,
                        far_wrong=False):
     """The lanes a generated source of the three runs on: ordinary ones, the
-    primal's three special lanes, a zero lane, and for each direct call of
-    one of the three lanes with the family's centres put in its component
-    (two, twelve with `everything`), a minimiser's neighbour where the list
+    primal's three special lanes, a zero lane, and for each distinct
+    (component, function) pair of the direct calls of the three, lanes with
+    the family's centres put in the component (two, twelve with
+    `everything`), a minimiser's neighbour where the list
     has one, and two lanes past the range at fp128 and fp256 (the others
     ordinary); with `far_wrong` those are 2^2048 and past, the lanes whose
     guesses are wrong as far as measured (T). -> (lanes, roles); a role is
@@ -5084,7 +5085,8 @@ def main(argv=None):
                          "configuration, the first eight with their "
                          "windows' neighbours, twelve ordinary lanes and up "
                          "to 60 minimisers' neighbours. T2: up to twelve "
-                         "centres for each direct call of a source. T3: six centres a call's component. "
+                         "centres for each distinct (component, function) pair "
+                         "of a source's direct calls. T3: six centres a call's component. "
                          "(Minutes more; the default is gate-sized)")
     ap.add_argument("--group", default="",
                     help="a comma list of groups, each its legs and its tally: "

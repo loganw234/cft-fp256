@@ -3097,8 +3097,9 @@ def main(argv=None):
                          "shapes and generated systems)")
     ap.add_argument("--three-all", action="store_true",
                     help="the larger draw of leg T: up to twelve centres of "
-                         "each family a direct call reads, in the lanes of "
-                         "each of lang_check's sources (minutes more; the "
+                         "each family for each distinct (component, function) "
+                         "pair of a source's direct calls, in the lanes of "
+                         "lang_check's sources (minutes more; the "
                          "default is gate-sized)")
     ap.add_argument("--only", default="",
                     help="a comma list of legs: refs,corpus,derivative,"

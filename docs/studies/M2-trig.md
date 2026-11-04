@@ -439,10 +439,10 @@ past 2^1024 at fp128 and fp256 put in on purpose (Logan's answer 2) and a count
 of the one-call images' wrong guesses asserted against the golden function
 (`routines.GOLDEN`). Measured on T1's lanes (a probe over its 60 configurations, the
 gate-sized draw): every wrong guess is past 2^1024, none in range (the probe
-counted wrong guesses at either checkpoint, 67 at fp128 and 60 at fp256 summed
-over configurations, T1's own "guesses wrong in value" counts - not lanes; by
-lane at the first checkpoint VM2SL measured 64 and 60. The probe ran in
-scratch, not in the tree: each T1 configuration's `three_lanes`, `rule_compare`,
+counted 67 lanes at fp128 and 60 at fp256 wrong at either checkpoint, summed
+over configurations - T1's own "guesses wrong in value" counts, `Verdict.wrong`
+being the union over the checkpoints - and 64 and 60 at the first checkpoint
+alone. The probe ran in scratch, not in the tree: each T1 configuration's `three_lanes`, `rule_compare`,
 then `past_range` of every lane in the verdict's `wrong`); which lanes past it are
 wrong is not asserted, being mathlib's.
 The wave's record is in docs/VALIDATION.md, "M2's build, wave 4: the stages'
